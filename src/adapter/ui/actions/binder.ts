@@ -1060,6 +1060,12 @@ export function generateLid(): string {
 const visibleFilerRows = (st: AppState): EntryMeta[] =>
   filerRows(st.scopeLid, st.entryMetas, st.relations, filerRowOptions(st));
 
+/**
+ * 🔴 **左の列で消した直後の「消した位置」**(#1087)。表は消した後に焦点を表そのものへ置く(押していない行に枠を出さない)
+ * ので、行送り(`rowAt`)は焦点の行から数えられない。root ごとに 1 件だけ覚え、次の行送りで使い切る。
+ */
+const deletedGap = new WeakMap<HTMLElement, { scope: string | null; count: number; index: number }>();
+
 /** その entry が**既にそこに居る**か(動かす必要が無い)。 */
 const alreadyThere = (st: AppState, lid: string, parentLid: string | null): boolean => {
   const parents = st.relations.filter((r) => r.kind === STRUCTURAL && r.toLid === lid);
@@ -8309,7 +8315,18 @@ const ACTIONS: Record<string, ActionHandler> = {
     const st = dispatcher.getState();
     // ⚠ 押した場所は**左の列**なので、相手も左の列の集合(2 ペインの印を巻き込まない)
     // ⚠ 左の列は**カーソルを持たない**(印だけの面)── だから `null`
-    deleteFrom(dispatcher, services, root, visibleFilerRows(st), st.selection, null, () => {});
+    const rowsBefore = visibleFilerRows(st);
+    const first = operationTargets(rowsBefore, st.selection, null)
+      .map((l) => rowsBefore.findIndex((m) => m.lid === l))
+      .filter((i) => i >= 0)
+      .reduce((a, b) => Math.min(a, b), Number.POSITIVE_INFINITY);
+    deleteFrom(dispatcher, services, root, rowsBefore, st.selection, null, () => {
+      // 🔴 消した位置を覚える(#1087)── 続けての ↓ / ↑ が隣の行から入る(`rowAt`)。行が 0 件なら残さない
+      const after = dispatcher.getState();
+      const now = visibleFilerRows(after);
+      if (Number.isFinite(first) && now.length > 0)
+        deletedGap.set(root, { scope: after.scopeLid, count: now.length, index: first });
+    });
   },
   /** 印を全部外す(#240 段②)。 */
   'clear-selection': (dispatcher) => dispatcher.dispatch({ type: 'CLEAR_SELECTION' }),
@@ -17647,6 +17664,12 @@ export function bindActions(
      *   ── 掴んでフォルダへ移す道(と、パンくずへ落として出す道)は今までどおり効く。
      */
     if (filerFlattenNow(dispatcher.getState())) return null;
+    /**
+     * 🔴 **並べ替えは「自分で並べた順」のときだけ**(#1087)。題名順などでは落とした後に断られる
+     *   (`reorderDropped`)のに、線が光って受けていた ── 光る所と効く所を揃える。
+     * 🔑 `null` なら、フォルダの行は行全体が「中へ入れる」のまま効く(移す道は残る)。
+     */
+    if (dispatcher.getState().entrySort !== 'manual') return null;
     const r = row.getBoundingClientRect();
     if (!(r.height > 0)) return null;
     const y = (de.clientY - r.top) / r.height;
@@ -19362,7 +19385,22 @@ export function bindActions(
     if (rows.length === 0) return null;
     const cur = focusedRowLid();
     const i = cur === null ? -1 : rows.findIndex((m) => m.lid === cur);
-    if (i === -1) return (delta > 0 ? rows[0] : rows[rows.length - 1])?.lid ?? null;
+    if (i === -1) {
+      /**
+       * 🔴 **消した直後は、消した位置の隣から入る**(#1087。2 ペインの D1 と同じ向き)。
+       * ⚠ 表は焦点を「表そのもの」へ置く(押していない行に枠を出さない)ので、行の焦点が無い。
+       *   先頭 / 末尾から入ると、続けて ↓ / ↑ が一覧の端へ飛んでいた。
+       *   行が前後で数え直せる(同じ現在地・消した分だけ減った数)ときだけ使う ── 他の操作を挟んだ古い印は読まない。
+       */
+      const gap = cur === null ? deletedGap.get(root) : undefined;
+      deletedGap.delete(root);
+      if (gap !== undefined && gap.scope === st.scopeLid && gap.count === rows.length) {
+        const at = delta > 0 ? gap.index : gap.index - 1;
+        return rows[Math.min(rows.length - 1, Math.max(0, at))]?.lid ?? null;
+      }
+      return (delta > 0 ? rows[0] : rows[rows.length - 1])?.lid ?? null;
+    }
+    deletedGap.delete(root);
     return rows[Math.min(rows.length - 1, Math.max(0, i + delta))]?.lid ?? null;
   };
 
@@ -19720,7 +19758,11 @@ export function bindActions(
     if (cmd === 'filer-parent') {
       if (st.scopeLid === null) return false; // ルートで押しても何も起きない
       const up = getAncestorFolders(st.scopeLid, st.entryMetas, st.relations)[0] ?? null;
+      const cameFrom = st.scopeLid;
       dispatcher.dispatch({ type: 'SET_SCOPE', lid: up?.lid ?? null });
+      // 🔴 出てきたフォルダに焦点を立てる(#1087。2 ペインの D4 と同じ)── 立てないと先頭の行に立ち、Enter が先頭のノートを開く。
+      //    見えていなければ(絞り込み等)従来どおり。
+      if (dispatcher.getState().scopeLid === (up?.lid ?? null)) focusRow(cameFrom);
       return true;
     }
     if (cmd === 'filer-row-down' || cmd === 'filer-row-up') {

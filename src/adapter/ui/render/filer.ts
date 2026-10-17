@@ -705,7 +705,13 @@ export class FilerRenderer {
      * 作る(時刻は入れない)ので、`stampChanges` が `null` でなければ全件を回さなくても同じ文字列になる。
      * ⚠ `lastMetas` と `lastSignature` は対で進む(下の控えの更新を見よ)── 控えが無い最初の回は全件で作る。
      */
-    if (this.lastMetas !== null && this.lastSignature !== null && stampChanges(this.lastMetas, state.entryMetas) !== null)
+    // 🔴 「更新」順のときは**生の更新日時が並びを決める**ので、時刻だけの違いでも前の指紋を使い回さない(#1087)
+    if (
+      state.entrySort !== 'updated' &&
+      this.lastMetas !== null &&
+      this.lastSignature !== null &&
+      stampChanges(this.lastMetas, state.entryMetas) !== null
+    )
       return this.lastSignature;
     return this.metaSignature(state);
   }
@@ -720,7 +726,12 @@ export class FilerRenderer {
       // ⚠ **並び順も材料**(2026-08-22)── 直す前は指紋に無く、「並べ替えると
       //    日付も変わる」ことに**間接的に頼って**建て直していた。日付を外した
       //    瞬間に上へ/下へが 1 バイトも描き直さなくなる(回帰 test が捕まえた)
-      parts.push([m.lid, m.title, m.archetype, String(m.entryOrder)].join(SEP));
+      const row = [m.lid, m.title, m.archetype, String(m.entryOrder)];
+      // 🔴 並び順の鍵になる列は、その順で並べているときだけ指紋に入れる(#1087)。
+      //    「更新」は生の日時(日付の字は MM/DD に丸まるので同じ日の更新を見落とす)/「大きさ」は文字数
+      if (state.entrySort === 'updated') row.push(m.updatedAt ?? '');
+      else if (state.entrySort === 'size') row.push(String(m.bodyChars));
+      parts.push(row.join(SEP));
     }
     return parts.join(SEP);
   }
