@@ -356,6 +356,8 @@ export class SplitView {
     // ⚠ 居なくなった枠を先に片づける(器を使い回さない ── 別のノートの図が残る)
     for (const [lid, frame] of [...this.frames]) {
       if (lids.includes(lid)) continue;
+      // 🔴 器を外すだけでは document の購読・ResizeObserver・借りた URL が残る(#1087)
+      frame.renderer.dispose();
       frame.host.remove();
       this.frames.delete(lid);
     }
