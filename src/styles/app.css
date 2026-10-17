@@ -4697,19 +4697,53 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   color: inherit;
   font: inherit;
 }
+/* 🔴 **打っている升の名前(`B2`)**(#1662 4)── 式の `=B2*C2` が指す升を数えなくて済むように、
+ *    欄を開いている間だけ升の右上に小さく出す。升の幅は取らない(重ね物)・押しも奪わない。 */
+.pkc-md-rendered .pkc-csv-cell-name {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+  pointer-events: none;
+}
 /* ⚠ **行と列の口は、触るまで出さない** ── 常に出ていると升が字で埋まる。
  *    🔑 ただし**焦点でも出す**(`:focus-within`)── 出さないと
  *    キーボードだけの user から**永久に見えない**(#425 と同じ向き) */
+/* 🔴 **升の端に重ねて置く(流れに入れない)** ── 字の直後に置くと、字の短い見出しや 1 列目の升の
+ *    **中心がボタンに乗り**、見出しを押して並べ替えるつもりが「この列を消す」になった(実測 #1662)。
+ *    列の口は升の上端、行の口は下端、どちらも左から並べる。升の高さの半分より下 / 上へは出さないので中心は空く。
+ *    csv の表と `|` の表で同じ 1 組(`shapeButtonHtml`)を使う。 */
+.pkc-md-rendered :is(td, th):has(> .pkc-csv-shape) {
+  position: relative;
+  /* 表のセルの `height` は下限として働く ── 空の升(実測 9px)でも、上端の列の口と下端の行の口(各 11px)が
+   * 重ならず、中心(14px)が空くだけの高さを取る */
+  height: 28px;
+  /* ボタンを流れから外したので、空の升の幅が 0 まで縮み、焦点が動くたびに列幅が配り直されて
+   * 押した升がずれた(csv-cell の実測)。流れに居た頃の幅(ボタン 2 つぶん)を下限として持つ */
+  min-width: 56px;
+}
 .pkc-md-rendered .pkc-csv-shape {
+  position: absolute;
+  left: 0;
+  margin: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  /* ⚠ ボタンの既定の最小の高さ(押しやすさ)を打ち消す ── 残すと升の高さいっぱい(26px)になり、中心を覆う */
+  min-height: 0;
+  height: 11px;
+  font-size: 9px;
+  line-height: 9px;
   visibility: hidden;
-  margin-left: 2px;
   padding: 0 3px;
   border: 1px solid var(--border);
   border-radius: 3px;
   background: var(--surface);
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.4;
   cursor: pointer;
 }
 /* 🔴 **見出しの升の ✎**(#1240)── 見出しは 1 回押すと並べ替えなので、編集の入口を
@@ -4776,6 +4810,10 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 .pkc-md-rendered .pkc-md-rendered-csv tr:hover .pkc-csv-shape,
 .pkc-md-rendered .pkc-md-rendered-csv td:focus-within .pkc-csv-shape,
 .pkc-md-rendered .pkc-md-rendered-csv th:focus-within .pkc-csv-shape,
+/* `|` で書いた表の ＋ ×(#1662 6)も同じ出方 ── 触る / 焦点が入るまで隠す */
+.pkc-md-rendered .pkc-md-block[data-pkc-md-block-kind='table'] tr:hover .pkc-csv-shape,
+.pkc-md-rendered .pkc-md-block[data-pkc-md-block-kind='table'] td:focus-within .pkc-csv-shape,
+.pkc-md-rendered .pkc-md-block[data-pkc-md-block-kind='table'] th:focus-within .pkc-csv-shape,
 .pkc-md-rendered .pkc-csv-shape:focus {
   visibility: visible;
 }
@@ -4787,6 +4825,15 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  *    字を入れると `textContent` に混ざり、コピーした TSV に `＋×` が入る
  *    (実際に入っていた)。⚠ 意味は `aria-label` / `title` が持つ。
  *    🔑 見出しの畳みの印(この file の下のほう)と同じ作法である。 */
+.pkc-md-rendered .pkc-csv-shape[data-pkc-cell-what='col'] {
+  top: 0;
+}
+.pkc-md-rendered .pkc-csv-shape[data-pkc-cell-what='row'] {
+  bottom: 0;
+}
+.pkc-md-rendered .pkc-csv-shape[data-pkc-cell-mode='remove'] {
+  left: 22px;
+}
 .pkc-md-rendered .pkc-csv-shape[data-pkc-cell-mode='add']::before {
   content: '＋';
 }

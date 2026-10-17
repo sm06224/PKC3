@@ -715,6 +715,131 @@ export function tableFormatDropsInfo(body: string, line: number, to: TableFormat
   return /^\s*(?:`{3,}|~{3,})\s*(?:tsv|psv)\b/i.test(open);
 }
 
+/**
+ * 🔴 **`|` で書いた表の行・列を足す / 消す**(#1662 6。Gemini 裁定 = #1163 依頼 48 の 6 = A)。
+ *
+ * > user の物語: `|` で書いた表はセルは打てるのに、行や列を足すには「CSV の表にする」で書き方ごと変えるか、
+ * > 原文を開くしか無かった(変えると右寄せ・中央寄せは戻らない)。
+ *
+ * 🔑 **触る所だけを触る** ── 行は 1 行の挿入 / 削除、列は各行の**そのセルの 1 区画**の surgery。
+ *   組み直さないので、触っていない升の字・余白・桁揃えの印(`:---:`)は 1 バイトも動かない。
+ * ⚠ 範囲と升の割り方は `tableAt`(= 升を打つ側と同じ 1 本 ── §7)。引用の前置きは行ごとに剥がして読み、そのまま残す。
+ * ⚠ 断る条件:
+ *   - `null` … その行が markdown の表の行でない / 見出しの行の削除 / 区切りの行 / 組み直した結果が同じ表として読めない
+ *   - `refused` … 最後の 1 行 / 1 列は消さない(消すと表の足し直しが出来なくなる ── 片道の操作を作らない)
+ * 🔴 **最後に、組み直した本文を読み手の規則で読み直す** ── 表の範囲・列数が想定どおりでなければ書かない
+ *   (縦棒の省略形などで区画の読み違えがあっても、壊れた表を書き込まない)。
+ */
+export function mdTableShape(
+  body: string,
+  rewrite: { line: number; col: number; what: 'row' | 'col'; mode: 'add' | 'remove' },
+): { lines: string[] } | { refused: 'last-row' | 'last-col' } | null {
+  const at = mdTableAt(body, rewrite.line);
+  if (at === null || at.format !== 'markdown') return null;
+  const lines = splitLines(body);
+  const delimAt = at.start + 1;
+  if (rewrite.line < at.start || rewrite.line > at.end || rewrite.line === delimAt) return null;
+  const cols = alignCount(lines[delimAt]!);
+  if (cols === null) return null;
+  const out = [...lines];
+
+  if (rewrite.what === 'row') {
+    if (rewrite.mode === 'remove') {
+      // 見出しの行は消さない(消すと区切りの行が見出しになる)。最後の 1 行は消さない
+      if (rewrite.line === at.start) return null;
+      if (at.end - delimAt <= 1) return { refused: 'last-row' };
+      out.splice(rewrite.line, 1);
+    } else {
+      const spaced = (lines[rewrite.line] ?? '').slice(at.quoteLead.length).trim().includes(' ');
+      const row = at.quoteLead + '|' + Array.from({ length: cols }, () => (spaced ? '  ' : '')).join('|') + '|';
+      out.splice(rewrite.line === at.start ? delimAt + 1 : rewrite.line + 1, 0, row);
+    }
+  } else {
+    if (!Number.isInteger(rewrite.col) || rewrite.col < 0 || rewrite.col >= cols) return null;
+    if (rewrite.mode === 'remove' && cols <= 1) return { refused: 'last-col' };
+    for (let i = at.start; i <= at.end; i += 1) {
+      const next = shapeMdRowCol(lines[i]!, rewrite.col, rewrite.mode, i === delimAt);
+      if (next === null) {
+        // その列を持たない行は飛ばす(埋めない ── 触っていない字は 1 バイトも動かさない)
+        continue;
+      }
+      out[i] = next;
+    }
+  }
+
+  // 🔴 組み直した本文を読み手の規則で読み直す
+  const again = mdTableAt(out.join('\n'), at.start);
+  if (again === null || again.start !== at.start) return null;
+  const wantCols = rewrite.what === 'col' ? cols + (rewrite.mode === 'add' ? 1 : -1) : cols;
+  const wantEnd = at.end + (rewrite.what === 'row' ? (rewrite.mode === 'add' ? 1 : -1) : 0);
+  if (again.end !== wantEnd) return null;
+  const delimAgain = alignCount(out[at.start + 1] ?? '');
+  if (delimAgain !== wantCols) return null;
+  return { lines: out };
+}
+
+/**
+ * 表の 1 行から、`col` 番目の升の区画を足す(`add` は**その右に空の升**)/ 消す。その行にその升が無ければ `null`。
+ * ⚠ 区切りの `|` の見つけ方は `splitRowSpans` と同じ(`\|` は升の中の字)。前後の `|` の省略形も読む。
+ */
+function shapeMdRowCol(
+  line: string,
+  col: number,
+  mode: 'add' | 'remove',
+  isDelim: boolean,
+): string | null {
+  const q = quotePrefix(line).length;
+  const rest = line.slice(q);
+  const lead = rest.length - rest.trimStart().length;
+  // 区切りの `|` の位置(行全体の添字)
+  const pipes: number[] = [];
+  let escaped = false;
+  for (let i = q + lead; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '|' && !escaped) pipes.push(i);
+    escaped = ch === '\\';
+  }
+  const contentStart = q + lead;
+  const contentEnd = q + rest.trimEnd().length;
+  const hasLeadPipe = pipes[0] === contentStart;
+  // 区画 = 区切りの間(前後の飾りの縦棒の外側は除く)。`end` の次が区切りの `|`(最後の区画で飾りが無ければ無い)
+  const bounds = [hasLeadPipe ? pipes[0]! : contentStart - 1, ...pipes.slice(hasLeadPipe ? 1 : 0)];
+  const segs: Array<{ s: number; e: number; pipe: boolean }> = [];
+  for (let k = 0; k < bounds.length; k += 1) {
+    const s = bounds[k]! + 1;
+    const next = bounds[k + 1];
+    if (next === undefined) {
+      if (s < contentEnd) segs.push({ s, e: contentEnd, pipe: false });
+    } else segs.push({ s, e: next, pipe: true });
+  }
+  if (col >= segs.length) return null;
+  const seg = segs[col]!;
+  // ⚠ 余白の有無は**前置きを除いた中身**で見る(`> ` の空白を数えない)
+  const spaced = rest.trim().includes(' ');
+  if (mode === 'remove') {
+    const cut = seg.pipe
+      ? line.slice(0, seg.s) + line.slice(seg.e + 1)
+      : // 飾りの無い最後の区画 ── 手前の `|` ごと落とす
+        line.slice(0, seg.s - 1) + line.slice(seg.e);
+    /**
+     * 🔴 **縦棒が 1 本も残らない行は、飾りの縦棒で囲む**(1 列だけの表は `|` が無いと表と読まれない)。
+     * 区切りの `|` の見つけ方は上と同じ(`\|` は字)。
+     */
+    const tail = cut.slice(q);
+    let hasPipe = false;
+    let esc = false;
+    for (const ch of tail) {
+      if (ch === '|' && !esc) hasPipe = true;
+      esc = ch === '\\';
+    }
+    return hasPipe ? cut : `${cut.slice(0, q)}| ${tail.trim()} |`;
+  }
+  const cell = isDelim ? (spaced ? ' --- ' : '---') : spaced ? '  ' : '';
+  if (seg.pipe) return line.slice(0, seg.e + 1) + cell + '|' + line.slice(seg.e + 1);
+  // 飾りの無い最後の区画の右 ── 区切りと新しい升と(飾りの)閉じを足す
+  return line.slice(0, seg.e) + '|' + cell + '|' + line.slice(seg.e);
+}
+
 /** 柵の長さ。⚠ 升の字が ``` で始まると囲みが**そこで閉じる**ので、必ず 1 本長くする。 */
 export function fenceMarkerFor(content: string): string {
   let longest = 0;

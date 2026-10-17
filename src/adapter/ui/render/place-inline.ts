@@ -24,7 +24,12 @@ export const PLACE_INLINE_FIELD = 'place-inline';
 export const PLACE_INLINE_INPUT_FIELD = 'place-inline-input';
 export const PLACE_INLINE_NOTE_FIELD = 'place-inline-note';
 
-export type PlaceInlineMode = 'append' | 'rename';
+/**
+ * - `append` … 付箋のノートの末尾へ足す
+ * - `rename` … 付箋のノートの題名を直す
+ * - `text` … 🔴 ふつうの付箋の中の字を直す(#1662 1。置いたノートは無いので `data-pkc-entry` は板のノートの lid)
+ */
+export type PlaceInlineMode = 'append' | 'rename' | 'text';
 
 /** 欄の字(画面の字。正本は用語集 `ui-terms.ts`)。 */
 export const PLACE_APPEND_LABEL = '追記';
@@ -32,6 +37,7 @@ export const PLACE_APPEND_HINT = '押すと、開かずにこのノートの末�
 export const PLACE_INLINE_SEND_LABEL = '追記する';
 export const PLACE_INLINE_RENAME_LABEL = '題名を直す';
 export const PLACE_INLINE_CANCEL_LABEL = 'やめる';
+export const PLACE_INLINE_TEXT_LABEL = '付箋の字を直す';
 
 /**
  * 付箋の下端に「追記」を置く / 外す(冪等)。`appendable` が偽なら外す
@@ -92,6 +98,8 @@ export function openPlaceInline(
   mode: PlaceInlineMode,
   lid: string,
   initial: string,
+  /** `text` のときだけ ── 付箋の開き行の行番号(`data-pkc-place-line`。書く先を欄が持つ)。 */
+  placeLine?: string,
 ): HTMLElement {
   const doc = host.ownerDocument;
   const cur = placeInlineOf(host);
@@ -105,16 +113,22 @@ export function openPlaceInline(
   el.setAttribute(OVERLAY_ATTR, '');
   el.setAttribute('data-pkc-mode', mode);
   el.setAttribute('data-pkc-entry', lid);
+  if (placeLine !== undefined) el.setAttribute('data-pkc-place-line', placeLine);
   // 🔑 付箋の中の押し・ドラッグ・ダブルクリックを奪わない ── 欄は付箋の外(host の子)に居る
   const input = doc.createElement('textarea');
   input.setAttribute('data-pkc-field', PLACE_INLINE_INPUT_FIELD);
-  input.rows = mode === 'append' ? 2 : 1;
+  input.rows = mode === 'append' ? 2 : mode === 'text' ? 3 : 1;
   input.value = initial;
   input.setAttribute(
     'aria-label',
-    mode === 'append' ? 'このノートの末尾へ足す字' : '新しい題名',
+    mode === 'append' ? 'このノートの末尾へ足す字' : mode === 'text' ? '付箋の字' : '新しい題名',
   );
-  input.placeholder = mode === 'append' ? '足す字(Enter で追記・Shift+Enter で改行・Esc でやめる)' : '新しい題名(Enter で直す・Esc でやめる)';
+  input.placeholder =
+    mode === 'append'
+      ? '足す字(Enter で追記・Shift+Enter で改行・Esc でやめる)'
+      : mode === 'text'
+        ? '付箋の字(Enter で確定・Shift+Enter で改行・Esc でやめる)'
+        : '新しい題名(Enter で直す・Esc でやめる)';
   const note = doc.createElement('div');
   note.setAttribute('data-pkc-field', PLACE_INLINE_NOTE_FIELD);
   note.hidden = true;
@@ -122,7 +136,12 @@ export function openPlaceInline(
   const send = doc.createElement('button');
   send.type = 'button';
   send.setAttribute('data-pkc-action', 'place-inline-commit');
-  send.textContent = mode === 'append' ? PLACE_INLINE_SEND_LABEL : PLACE_INLINE_RENAME_LABEL;
+  send.textContent =
+    mode === 'append'
+      ? PLACE_INLINE_SEND_LABEL
+      : mode === 'text'
+        ? PLACE_INLINE_TEXT_LABEL
+        : PLACE_INLINE_RENAME_LABEL;
   const cancel = doc.createElement('button');
   cancel.type = 'button';
   cancel.setAttribute('data-pkc-action', 'place-inline-cancel');
@@ -169,7 +188,14 @@ export function positionPlaceInline(host: Element): void {
   const lid = el.getAttribute('data-pkc-entry') ?? '';
   let block = anchors.get(el);
   if (block === undefined || !block.isConnected) {
-    block = blocksOf(host, lid)[0];
+    // 🔴 ふつうの付箋(`text`)は置いたノートが無いので、開き行の行番号で引き直す(#1662 1)
+    const placeLine = el.getAttribute('data-pkc-place-line');
+    block =
+      placeLine === null
+        ? blocksOf(host, lid)[0]
+        : [...host.querySelectorAll<HTMLElement>('.pkc-place:not([data-pkc-place-entry])')].find(
+            (b) => b.getAttribute('data-pkc-place-line') === placeLine,
+          );
     if (block === undefined) {
       closePlaceInline(host);
       return;

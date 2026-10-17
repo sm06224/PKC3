@@ -26,6 +26,7 @@ import { removeInsertedLines } from './append-target';
 import { replaceColorSpan } from './color-code';
 import {
   addPlace,
+  addPlaceEntry,
   addPlaceTemplate,
   setPlaceRect,
   connectPlaces,
@@ -40,6 +41,7 @@ import {
   resizePlace,
   setPlaceShape,
   setPlaceStyle,
+  setPlaceText,
   ungroupPlace,
 } from './place-notation';
 import type { PlaceStyle } from './place-color';
@@ -63,6 +65,7 @@ import {
   mdCellSpan,
   mdCellSpanAt,
   mdTableAt,
+  mdTableShape,
   tableAt,
   tableConvertRefusal,
   type TableFormat,
@@ -305,6 +308,23 @@ export type BodyRewrite =
        * 置くのは既存の記法の枠(と線)で、(x, y) が左上になる。
        */
       template?: PlaceTemplateId;
+      /**
+       * 🔴 **ほかのノートを置く**(#1662 2)── 置くノートの lid。付箋 1 枚(`entry=`)を (x, y) に書く。
+       * `template` と一緒には渡さない(どちらか)。
+       */
+      entry?: string;
+    }
+  | {
+      /**
+       * 🔴 **ふつうの付箋の中の字を書き換える**(#1662 1)── 開き行と閉じの間だけを書く。
+       * `line` / `openLine` の意味と門は `place-move` と同じ。**`before`** = 欄を開いた時点の付箋の中身
+       * (disk 側が違えば書かない ── 別の窓が先に直した字を黙って上書きしない)。
+       */
+      kind: 'place-text';
+      line: number;
+      openLine: string;
+      before: string;
+      text: string;
     }
   | {
       /**
@@ -553,6 +573,11 @@ export type BodyRewrite =
        */
       kind: 'table-format';
       line: number;
+      /**
+       * 🔴 **csv の表の 1 行目を見出しにする(`true`)/ やめる(`false`)**(#1662 3)。
+       * 指定があれば形は変えず(`to` は無視)、囲みの旗 `noheader` だけを書く。省略 = 形を変える(従来)。
+       */
+      header?: boolean;
       /** 🔴 **押した時点のその行の中身**(#1087)。同じノートに表が 2 つ在るとき、行がずれて別の表を変えない。 */
       openLine: string;
       to: TableFormat;
@@ -967,11 +992,13 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'place-shape') return setPlaceShape(body, rewrite, rewrite.shape);
   if (rewrite.kind === 'place-style') return setPlaceStyle(body, rewrite, rewrite.style);
   if (rewrite.kind === 'place-add') {
+    if (rewrite.entry !== undefined) return addPlaceEntry(body, rewrite.x, rewrite.y, rewrite.entry);
     return rewrite.template === undefined
       ? addPlace(body, rewrite.x, rewrite.y)
       : addPlaceTemplate(body, rewrite.x, rewrite.y, rewrite.template);
   }
   if (rewrite.kind === 'place-rect') return setPlaceRect(body, rewrite, rewrite.rect);
+  if (rewrite.kind === 'place-text') return setPlaceText(body, rewrite, rewrite.before, rewrite.text);
   if (rewrite.kind === 'place-connect') {
     return connectPlaces(body, {
       from: rewrite.from,
@@ -1528,10 +1555,12 @@ function csvTableWidth(
  */
 function rewriteTableFormat(
   body: string,
-  rewrite: { line: number; openLine: string; to: TableFormat },
+  rewrite: { line: number; openLine: string; to: TableFormat; header?: boolean },
 ): string | null {
   // 🔴 押した時点の中身と違う行は書かない(別の窓が行を足して、同じ番号が別の表を指す形。`task` と同じ。#1087)
   if (splitLines(body)[rewrite.line] !== rewrite.openLine) return null;
+  // 🔴 1 行目を見出しにする / やめる(#1662 3)── 形は変えず、囲みの旗だけを書く
+  if (rewrite.header !== undefined) return rewriteTableHeader(body, rewrite.line, rewrite.header);
   const at = tableAt(body, rewrite.line);
   if (at === null) return null;
   if (tableConvertRefusal(at, rewrite.to) !== null) return null;
@@ -1554,6 +1583,30 @@ function rewriteTableFormat(
     at.end - at.start + 1,
     ...splitLines(text).map((l) => at.quoteLead + l),
   );
+  return rejoinLines(body, lines);
+}
+
+/**
+ * 🔴 **csv の囲みの 1 行目を、見出しにする / 見出しをやめる**(#1662 3。Gemini 裁定 = #1163 依頼 48 の 3 = A)。
+ *
+ * > user の物語: 新しく作った表は見出し無し。1 行目に「品名,単価」と打っても見出しにならず、並べ替えも出ない。
+ * > 見出しにするには編集で ` noheader` を消すしか無かった。
+ *
+ * 🔑 **書き換えるのは囲みの開き行の旗(`noheader`)1 語だけ** ── 升の中身・ほかの旗(`csv-render` など)は 1 バイトも動かない。
+ * ⚠ 旗の読み方は `isHeaderDisabled` と同じ(1 語目は種類、2 語目から旗、大小文字は問わない)。
+ * ⚠ 返す `null` は「当てずっぽうで書かない」: csv の囲みでない / もうその状態 / 開き行が読めない。
+ */
+function rewriteTableHeader(body: string, line: number, header: boolean): string | null {
+  const at = tableAt(body, line);
+  if (at === null || at.format !== 'csv') return null;
+  if ((at.rows[0]?.head === true) === header) return null;
+  const lines = splitLines(body);
+  const open = (lines[at.start] ?? '').slice(at.quoteLead.length);
+  const m = /^(\s*(?:`{3,}|~{3,})\s*)(\S+)(.*)$/.exec(open);
+  if (m === null) return null;
+  const rest = (m[3] ?? '').split(/\s+/).filter((t) => t !== '');
+  const flags = header ? rest.filter((t) => t.toLowerCase() !== 'noheader') : [...rest, 'noheader'];
+  lines[at.start] = at.quoteLead + (m[1] ?? '') + (m[2] ?? '') + flags.map((t) => ` ${t}`).join('');
   return rejoinLines(body, lines);
 }
 
@@ -1644,7 +1697,16 @@ function csvShapeResult(
   rewrite: { line: number; openLine: string; col: number; what: 'row' | 'col'; mode: 'add' | 'remove' },
 ): string | CsvShapeRefused | null {
   const table = csvTableAt(body, rewrite.line);
-  if (table === null) return null;
+  if (table === null) {
+    /**
+     * 🔴 **`|` で書いた表の行・列**(#1662 6)── csv の囲みでなければ markdown の表として当てる。
+     * 押した時点の中身と違う行は書かない(下の csv と同じ門)。
+     */
+    if (splitLines(body)[rewrite.line] !== rewrite.openLine) return null;
+    const md = mdTableShape(body, rewrite);
+    if (md === null) return null;
+    return 'refused' in md ? md : rejoinLines(body, md.lines);
+  }
   const lines = splitLines(body);
   // 🔴 押した時点の中身と違う行は書かない(別の窓が行を足して、同じ番号が別の行を指す形。`csv-cell` と同じ。#1087)
   if (lines[rewrite.line] !== rewrite.openLine) return null;

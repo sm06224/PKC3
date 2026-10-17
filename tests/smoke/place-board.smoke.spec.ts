@@ -1783,6 +1783,48 @@ test('🔴 本文を右クリックして「ここに付箋を置く」と、押
   expect(savedBody.split('\n').filter((l) => l.startsWith('```')).length % 2, '柵の片割れが本文に残った').toBe(0);
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
 
+  /**
+   * ⑥ ふつうの付箋の字をその場で直す / ほかのノートを付箋として置く(#1662 1・2)。新しい起動は増やさない。
+   * ⚠ 観測点は**保存された本文**(開いて読む)。対照群:同じ板の別の付箋 `#zy` は書き換わらない。
+   */
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '字を直す板');
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    ':::format{#zz .pkc-place x=40 y=40 w=240 h=100}\nもとの字\n:::\n\n:::format{#zy .pkc-place x=320 y=40 w=240 h=100}\nそのまま\n:::\n',
+  );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"][data-pkc-painted]').first()).toBeVisible();
+  const zz = page.locator('[data-pkc-region="detail"] #zz');
+  await expect(zz, '台の前提:ふつうの付箋が描かれていない').toHaveCount(1, { timeout: 15_000 });
+  const inline = page.locator('[data-pkc-field="place-inline-input"]');
+  await zz.dblclick();
+  await expect(inline, '付箋を 2 回押しても字の欄が開かない').toHaveCount(1, { timeout: 5000 });
+  await page.keyboard.press('Control+a');
+  await page.keyboard.type('なおした字');
+  await page.keyboard.press('Enter');
+  await expect(zz, '確定した字が付箋に映っていない').toContainText('なおした字', { timeout: 5000 });
+  await expect(inline, 'Enter で欄が閉じていない').toHaveCount(0);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  const textSaved = await page.inputValue('[data-pkc-field="editor-body"]');
+  expect(textSaved, '打った字が本文に書かれていない').toContain('なおした字');
+  expect(textSaved, '古い字が本文に残っている').not.toContain('もとの字');
+  expect(textSaved, '隣の付箋まで書き換わった').toContain('そのまま');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
+
+  // ほかのノートを置く(右クリック → 「ノートを置く…」→ 題名で選ぶ)
+  const hostBox2 = (await page.locator('[data-pkc-field="detail-body"]').boundingBox())!;
+  await page.mouse.click(Math.floor(hostBox2.x) + 640, Math.floor(hostBox2.y) + 20, { button: 'right' });
+  await menu.locator('[data-pkc-action="add-place-note"]').click();
+  await page.locator('[data-pkc-field="entry-pick-filter"]').fill('柵の中のコロン');
+  await page.locator('[data-pkc-field="entry-pick-row"]').first().click();
+  await expect(
+    page.locator('[data-pkc-region="detail"] .pkc-place[data-pkc-place-entry]'),
+    '選んだノートの付箋が置かれていない',
+  ).toHaveCount(1, { timeout: 5000 });
+  await expect(page.locator('[data-pkc-region="detail"] .pkc-place[data-pkc-place-entry]')).toContainText('柵の中のコロンの付箋');
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

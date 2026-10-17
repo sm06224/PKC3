@@ -17,6 +17,7 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import { bindWaveDrag } from './wave-drag';
 import { renameAttachmentAndFile, renameEntryFromRow, restoreRenamedTitle } from './attachment-rename';
 import { lidOfNode } from './lid-of-node';
+import { cellName } from '@features/markdown/csv-formula';
 import { isEditableColor } from '@features/markdown/color-code';
 import type { DroppedAt } from './asset-into-note';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
@@ -52,6 +53,8 @@ import {
   placeShapeAt,
   placeIsFrontmost,
   placeStyleAt,
+  placeTextOf,
+  setPlaceText,
 } from '@features/markdown/place-notation';
 import { parsePlaceRotate } from '@features/markdown/place-rotate';
 import {
@@ -344,6 +347,7 @@ import {
   blockMenuActions,
   ADD_PLACE_ACTION,
   PLACE_RENAME_ACTION,
+  ADD_PLACE_NOTE_ACTION,
   ADD_PLACE_TEMPLATE_ACTION,
   placeLineMenuActions,
   PLACE_STYLE_KEYS_ATTR,
@@ -361,6 +365,7 @@ import {
   tableMenuActions,
   taskRunMenuActions,
   tableConvertPickLabel,
+  tableHeaderPickLabel,
   appGroupMenuActions,
   tileMenuActions,
   tileOpenTargetMenuActions,
@@ -4335,7 +4340,30 @@ function menuStillFits(dispatcher: Dispatcher, target: Element): boolean {
   return was === null || was === (dispatcher.getState().openBody?.lid ?? '');
 }
 
-/** 付箋の上の欄を確定する(追記 / 題名)。⚠ 断られたら**欄を閉じず、字を残して理由を言う**。 */
+/**
+ * 🔴 **ふつうの付箋の字を直す欄を開く**(#1662 1)。相手は押した付箋(開き行の行番号は描画が焼いた
+ * `data-pkc-place-line`)で、どの枠の板かは `lidOfNode` の 1 本で引く(横に留めた枠の付箋でも別のノートを書かない)。
+ * ⚠ 編集中などで書けないときは、欄を開く前に理由を言う(開いても書けない欄を出さない)。
+ */
+function openPlaceTextEditor(dispatcher: Dispatcher, sticky: HTMLElement): void {
+  const host = sticky.closest<HTMLElement>('[data-pkc-field="detail-body"]');
+  const lineRaw = sticky.getAttribute('data-pkc-place-line');
+  const st = dispatcher.getState();
+  const lid = lidOfNode(sticky, st.openBody?.lid ?? null);
+  if (host === null || lineRaw === null || lid === null) return;
+  const line = Number(lineRaw);
+  const blocked = bodyWriteBlockReason(st, lid);
+  if (blocked !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `付箋の字を直してください`) });
+    return;
+  }
+  const shown = screenBodyOf(st, lid);
+  const text = shown === null || !Number.isInteger(line) ? null : placeTextOf(shown, line);
+  if (text === null) return; // 付箋の字を持たない塊(閉じていない / 板でない)── 押しても何も起きない口を出さない
+  openPlaceInline(host, sticky, 'text', lid, text.replace(/^\n+/, '').replace(/\s+$/, ''), String(line));
+}
+
+/** 付箋の上の欄を確定する(追記 / 題名 / 付箋の字)。⚠ 断られたら**欄を閉じず、字を残して理由を言う**。 */
 async function commitPlaceInline(
   dispatcher: Dispatcher,
   services: BinderServices,
@@ -4359,6 +4387,50 @@ async function commitPlaceInline(
     dispatcher.dispatch({ type: 'OP_FAILED', error: why });
     if (el.isConnected) showPlaceInlineNote(el, why);
   };
+  if (mode === 'text') {
+    /**
+     * 🔴 **ふつうの付箋の字を書く**(#1662 1)。⚠ 書き先は板のノート(`lid`)の本文で、置いたノートは無い。
+     * 欄を開いた後に本文が動いていたら、押した付箋を見失う ── 理由を言って字は欄に残す。
+     * 🔑 **構造を壊す字は、頼む前に断る**(行頭の `:::` や ``` は付箋の枠を閉じる / 伸ばす)── 書込側でも同じ関数で断るが、
+     *   そちらの断りは「本文が変わっているため」としか言えない。
+     */
+    const line = Number(el.getAttribute('data-pkc-place-line'));
+    const st = dispatcher.getState();
+    const shown = screenBodyOf(st, lid);
+    const before = shown === null ? null : placeTextOf(shown, line);
+    if (shown === null || before === null) {
+      refuse('この付箋が見つかりません(本文が変わったかもしれません。付箋をもう一度ダブルクリックしてください)');
+      return;
+    }
+    const norm = (t: string): string => t.replace(/^\n+/, '').replace(/\s+$/, '');
+    if (norm(text) === norm(before)) {
+      closePlaceInline(host);
+      return;
+    }
+    const openLine = shown.split('\n')[line] ?? '';
+    if (setPlaceText(shown, { line, openLine }, before, text) === null) {
+      refuse('この字は付箋に入れられません(行の先頭に ::: や ``` を書くと、付箋の枠が途中で閉じてしまいます)');
+      return;
+    }
+    el.setAttribute('data-pkc-busy', '');
+    try {
+      const elsewhere = await editedElsewhereReason(dispatcher, services, lid);
+      if (elsewhere !== null) {
+        refuse(elsewhere);
+        return;
+      }
+      dispatcher.dispatch({ type: 'SET_PLACE_TEXT', lid, line, text });
+      // 断りは reducer が理由つきで出す(編集中など)── 出ていなければ閉じる
+      if (dispatcher.getState().error !== null && dispatcher.getState().error !== st.error) {
+        if (el.isConnected) showPlaceInlineNote(el, dispatcher.getState().error ?? '');
+        return;
+      }
+      if (el.isConnected) closePlaceInline(host);
+    } finally {
+      el.removeAttribute('data-pkc-busy');
+    }
+    return;
+  }
   if (mode === 'rename') {
     if (title === '') {
       showPlaceInlineNote(el, '題名を入れてください');
@@ -4540,6 +4612,7 @@ function applyTableFormat(
   services: BinderServices,
   line: number,
   to: TableFormat,
+  header?: boolean,
 ): void {
   const st = dispatcher.getState();
   /**
@@ -4587,7 +4660,8 @@ function applyTableFormat(
     });
     return;
   }
-  const why = tableConvertRefusal(at, to);
+  // ⚠ 見出しの切り替え(#1662 3)は形を変えない ── 式や改行で断る理由は無い
+  const why = header === undefined ? tableConvertRefusal(at, to) : null;
   if (why !== null) {
     dispatcher.dispatch({ type: 'OP_FAILED', error: why });
     return;
@@ -4611,7 +4685,15 @@ function applyTableFormat(
     services,
     [lid],
     '表の形を変えられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
-    () => dispatcher.dispatch({ type: 'SET_TABLE_FORMAT', lid, line, openLine, to }),
+    () =>
+      dispatcher.dispatch({
+        type: 'SET_TABLE_FORMAT',
+        lid,
+        line,
+        openLine,
+        to,
+        ...(header === undefined ? {} : { header }),
+      }),
   );
 }
 
@@ -9099,6 +9181,22 @@ const ACTIONS: Record<string, ActionHandler> = {
           run: () => applyTableFormat(dispatcher, services, line, to),
         };
       },
+      /**
+       * 🔴 **csv の表の 1 行目を、見出しにする / やめる**(#1662 3)。⚠ 出す条件は `convert` と同じ門
+       *   (主の枠の表だけ)+ **csv の囲みだけ**(markdown の表の見出しは形の一部で、切り替えられない)。
+       */
+      header: () => {
+        const ob = dispatcher.getState().openBody;
+        if (ob === null || lidOfNode(target, ob.lid) !== ob.lid) return null;
+        const line = tableLineAt(target, ob.body);
+        const at = line === null ? null : tableAt(ob.body, line);
+        if (at === null || line === null || at.format !== 'csv') return null;
+        const on = at.rows[0]?.head !== true;
+        return {
+          label: tableHeaderPickLabel(on),
+          run: () => applyTableFormat(dispatcher, services, line, 'csv', on),
+        };
+      },
       download: downloadBlob,
       noteTitle: () => {
         const st = dispatcher.getState();
@@ -10089,7 +10187,21 @@ const ACTIONS: Record<string, ActionHandler> = {
       }
     });
     input.addEventListener('blur', commit);
-    target.replaceChildren(input);
+    /**
+     * 🔴 **打っている間だけ、その升の名前(`B2`)を小さく出す**(#1662 4。Gemini 裁定 = #1163 依頼 48 の 4 = A)。
+     * 式は `=B2*C2` と書くが、どの列が B でどの行が 2 かは数えるしか無かった。常に出すと表が詰まるので、
+     * 欄を開いている間だけ。⚠ 出すのは csv の表だけ(行の番号を焼くのは csv の描画だけ ── markdown の表に式は無い)。
+     * ⚠ 欄を閉じると `restore` が升の中身を描いたものに戻すので、名前も一緒に消える。
+     */
+    const rowAttr = target.getAttribute('data-pkc-cell-row');
+    const rowIndex = rowAttr === null ? NaN : Number(rowAttr);
+    if (Number.isInteger(rowIndex) && rowIndex >= 0) {
+      const tag = target.ownerDocument.createElement('span');
+      tag.className = 'pkc-csv-cell-name';
+      tag.setAttribute('data-pkc-field', 'cell-name');
+      tag.textContent = cellName(rowIndex, col);
+      target.replaceChildren(input, tag);
+    } else target.replaceChildren(input);
     input.focus();
     input.select();
   },
@@ -11260,6 +11372,47 @@ const ACTIONS: Record<string, ActionHandler> = {
     placeEditedElsewhereGate(dispatcher, services, lid, '板を置けませんでした', () =>
       dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y }),
     );
+  },
+  /**
+   * 🔴 **ほかのノートを板に置く**(#1662 2。Gemini 裁定 = #1163 依頼 48 の 2 = A)── 題名で探して選ぶ小窓で 1 つ選ぶと、
+   * `add-place` と同じ座標・同じ門(`ADD_PLACE`)で、そのノートの付箋(`entry=`)を本文の末尾に書く。
+   * ⚠ 器は `pickEntryInApp`(「ノートリンクを入れる」と同じ探し方)── user に 2 通りの探し方を覚えさせない。
+   *   自分自身は候補から外す(板に自分を置いても何も映らない)。
+   * ⚠ 窓が開いている間に別のノートへ移ったら置かない / 選んだノートが消えていたら理由を言う。
+   */
+  'add-place-note': (dispatcher, target, services, root) => {
+    if (refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    const x = menuCarriedAt(target, MENU_X_ATTR);
+    const y = menuCarriedAt(target, MENU_Y_ATTR);
+    if (ob === null || x === null || y === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '置く位置を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const lid = ob.lid;
+    void pickEntryInApp(
+      root,
+      (query) => {
+        const st = dispatcher.getState();
+        const items = entryPickRows(st.entryMetas, st.order, query, lid);
+        return { items, note: entryPickNote(items.length, entryPickTotal(st.entryMetas, st.order, query, lid)) };
+      },
+      { title: 'ノートを板に置く' },
+    ).then((picked) => {
+      if (picked === null) return;
+      const st = dispatcher.getState();
+      if (st.openBody?.lid !== lid) {
+        dispatcher.dispatch({ type: 'OP_NOTICE', message: '別のノートに切り替わったので、付箋は置いていません' });
+        return;
+      }
+      if (!st.entryMetas.has(picked)) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートが見つかりません(消されたかもしれません)' });
+        return;
+      }
+      placeEditedElsewhereGate(dispatcher, services, lid, '付箋を置けませんでした', () =>
+        dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y, entry: picked }),
+      );
+    });
   },
   /**
    * 🔴 **テンプレートから板を置く**(#529 W4)── 窓で 1 つ選ぶと、`add-place` と同じ座標・同じ門
@@ -18559,6 +18712,7 @@ export function bindActions(
         ...placeRenameItem(dispatcher, target),
         // 🔴 板を置く口は**いつも**出す(#676)── 押した座標は下の carry が運ぶ
         ADD_PLACE_ACTION,
+        ADD_PLACE_NOTE_ACTION,
         ADD_PLACE_TEMPLATE_ACTION,
         ...body,
       ];
@@ -19135,7 +19289,26 @@ export function bindActions(
     const t = ev.target as HTMLElement | null;
     if (t === null || t.closest('[data-pkc-field="cell-input"]') !== null) return;
     const el = t.closest<HTMLElement>('[data-pkc-action="edit-cell"]');
-    if (el === null || !root.contains(el)) return;
+    /**
+     * 🔴 **ふつうの付箋をダブルクリックすると、その場で字を直す欄が開く**(#1662 1。Gemini 裁定 = #1163 依頼 48 の 1 = A)。
+     * ⚠ 付箋の中の押せる物(升・リンク・ボタン・チェック・掴む口・欄)の上では開かない ── それぞれの受け手を奪わない。
+     * ⚠ 置いたノートの付箋(`data-pkc-place-entry`)は対象外(あちらは「追記」「題名を直す」)。
+     */
+    if (el === null) {
+      const sticky = t.closest<HTMLElement>('.pkc-place:not([data-pkc-place-entry])');
+      if (sticky !== null && root.contains(sticky)) {
+        const hot = t.closest(
+          'a[href], button, input, textarea, select, [data-pkc-action], [data-pkc-field="place-inline"], [data-pkc-field="place-grip"]',
+        );
+        if (hot === null || !sticky.contains(hot)) {
+          ev.preventDefault();
+          sticky.ownerDocument.getSelection()?.removeAllRanges();
+          openPlaceTextEditor(dispatcher, sticky);
+        }
+      }
+      return;
+    }
+    if (!root.contains(el)) return;
     const link = t.closest<HTMLElement>('a[href]');
     if (link !== null && el.contains(link)) return;
     el.ownerDocument.getSelection()?.removeAllRanges();

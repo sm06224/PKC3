@@ -133,7 +133,8 @@ test('🔴 表の ▾ から形を選んでコピーでき、⧉ の 1 押しは
    *   ⚠ ここでは CSV を選ぶ ── 同じ一覧から別の形が選べることも同時に見る。
    */
   await page.locator(menu).nth(1).click();
-  await expect(rows, '2 つ目の表で一覧が出ない').toHaveCount(6);
+  // 🔑 csv の表には「見出しをやめる」の行が 1 つ増える(#1662 3)
+  await expect(rows, '2 つ目の表で一覧が出ない').toHaveCount(7);
   await page.locator('[data-pkc-field="pick-copy-format"][data-pkc-copy-format-index="3"]').click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()), {
@@ -195,6 +196,49 @@ test('🔴 表の ▾ から形を選んでコピーでき、⧉ の 1 押しは
     '保存したのに何も言っていない / ノートの題名から名前を作っていない',
   ).toContainText(/「買い物メモ-\d{4}-\d{2}-\d{2}\.csv」を保存しました/);
 
+  /**
+   * ⑦ 🔴 **csv の表の ▾ から見出しを切り替えられる**(#1662 3)── 新しい起動は増やさない。
+   *   観測点は**表の見出しのセル(`th`)の数**と、**開き直した一覧の字が反対側になること**。
+   */
+  const csvTable = page.locator('[data-pkc-field="detail-body"] table.pkc-md-rendered-csv');
+  await expect(csvTable.locator('th'), '前提:csv の表に見出しの行が無い').not.toHaveCount(0);
+
+  // 🔴 ＋ × は升の中心に乗らない(乗ると、見出しを押した並べ替えが「列を消す」になる ── #1662)。hover して(出した状態で)測る
+  for (const sel of ['th', 'td:first-child']) {
+    const c = csvTable.locator(sel).first();
+    await c.hover({ position: { x: 4, y: 4 } });
+    const hit = await c.evaluate((n) => {
+      const b = n.getBoundingClientRect();
+      const e = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+      return e?.closest('[data-pkc-action="shape-cell"]') !== null && e !== null;
+    });
+    expect(hit, `${sel} の中心に ＋ × が乗っている`).toBe(false);
+  }
+  await page.locator(menu).nth(1).click();
+  await page.locator('[data-pkc-field="pick-copy-format"]', { hasText: '見出しをやめる' }).click();
+  await expect(csvTable.locator('th'), '「見出しをやめる」で見出しの行が残っている').toHaveCount(0, { timeout: 10_000 });
+  await page.locator(menu).nth(1).click();
+  await expect(
+    page.locator('[data-pkc-field="pick-copy-format"]', { hasText: '1 行目を見出しにする' }),
+    '見出しをやめた後、一覧の字が「1 行目を見出しにする」に変わっていない',
+  ).toHaveCount(1);
+  await page.locator('[data-pkc-field="pick-copy-format"]', { hasText: '1 行目を見出しにする' }).click();
+  await expect(csvTable.locator('th'), '「1 行目を見出しにする」で見出しが戻っていない').not.toHaveCount(0, { timeout: 10_000 });
+
+  /**
+   * ⑧ 🔴 **`|` で書いた表にも行・列の ＋ × が出て、行を足せる**(#1662 6)。
+   *   観測点は**行の数**(本文へ書かれて描き直された結果)。
+   */
+  const mdTable = page.locator('[data-pkc-field="detail-body"] table:not(.pkc-md-rendered-csv)').first();
+  await expect(mdTable.locator('[data-pkc-action="shape-cell"]'), '`|` の表に ＋ × が出ていない').not.toHaveCount(0);
+  const rowsBefore = await mdTable.locator('tbody tr').count();
+  await mdTable.locator('tbody tr').first().hover();
+  await mdTable
+    .locator('[data-pkc-action="shape-cell"][data-pkc-cell-what="row"][data-pkc-cell-mode="add"]')
+    .first()
+    .click();
+  await expect(mdTable.locator('tbody tr'), '＋ を押しても行が増えていない').toHaveCount(rowsBefore + 1, { timeout: 10_000 });
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
@@ -222,10 +266,10 @@ test('🔴 ▾ の小窓から、本文の表を作り変えられる (#708 裁�
 
   const menu = '[data-pkc-field="detail-body"] [data-pkc-copy-menu]';
   await expect(page.locator(menu), '▾ が出ていない').toHaveCount(1, { timeout: 15_000 });
-  // 🔑 前提 ── いまは markdown の表なので、行や列を足す ＋ × は出ていない
+  // 🔑 前提 ── いまは markdown の表なので、csv の表ではない(⚠ 行・列の ＋ × は #1662 6 から markdown の表にも出る)
   await expect(
-    page.locator('[data-pkc-field="detail-body"] [data-pkc-action="shape-cell"]'),
-    '前提が崩れた(markdown の表なのに ＋ × が出ている)',
+    page.locator('[data-pkc-field="detail-body"] table.pkc-md-rendered-csv'),
+    '前提が崩れた(markdown の表なのに csv の表として描かれている)',
   ).toHaveCount(0);
 
   await clickReal(page, menu);
@@ -247,17 +291,17 @@ test('🔴 ▾ の小窓から、本文の表を作り変えられる (#708 裁�
     '区切りより下に在るのが、書き換える 1 行だけになっていない',
   ).toHaveCount(1);
   await expect(rows.nth(5), '書き換える行の字が違う').toHaveText(
-    '本文を CSV の表に書き換える(行と列を足せて、式も使えます)',
+    '本文を CSV の表に書き換える(式が使えます)',
   );
 
   await clickReal(page, '[data-pkc-field="pick-copy-format"][data-pkc-copy-format-index="5"]');
 
   /**
    * 🔴 **本文が本当に書き換わる** ── 観測点は「行が出た」ではなく、
-   *   **csv の表にしかない ＋ × が出たこと**である(形が変わった証拠)。
+   *   **csv の表として描かれたこと**である(形が変わった証拠)。
    */
   await expect(
-    page.locator('[data-pkc-field="detail-body"] [data-pkc-action="shape-cell"]'),
+    page.locator('[data-pkc-field="detail-body"] table.pkc-md-rendered-csv'),
     '本文が書き換わっていない(csv の表になっていない)',
   ).not.toHaveCount(0, { timeout: 15_000 });
   // 🔑 升は今までどおり押して打てる(作り変えた目的が果たせている)
@@ -268,9 +312,10 @@ test('🔴 ▾ の小窓から、本文の表を作り変えられる (#708 裁�
 
   /** 🔴 **戻せる**(片道の操作を作らない ── user 指示 2026-08-23)。 */
   await clickReal(page, menu);
-  await expect(rows, '作り変えた後に一覧が出ない').toHaveCount(6);
+  // 🔑 csv の表には「1 行目を見出しにする / やめる」の行が 1 つ増える(#1662 3)── 戻す行(5 番目)は同じ位置
+  await expect(rows, '作り変えた後に一覧が出ない').toHaveCount(7);
   await expect(rows.nth(5), '戻す字が出ていない').toHaveText(
-    '本文を Markdown の表に書き換える(よそへ貼りやすい形。行・列の ＋ × と式は使えなくなります)',
+    '本文を Markdown の表に書き換える(よそへ貼りやすい形。式は使えなくなります)',
   );
 
   expect(errors, `ページで例外が出た: ${errors.join(' / ')}`).toEqual([]);

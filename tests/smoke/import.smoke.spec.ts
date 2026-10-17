@@ -916,6 +916,8 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   const download = await dl;
   // 🔴 コレクション全体のバックアップの末尾は `.pkc3-full.zip`(#1017 段④b)
   expect(download.suggestedFilename()).toMatch(/\.pkc3-full\.zip$/);
+  // 🔴 #1643: 書き出した結果の知らせに、保存したファイルの名前が入る(ダウンロード欄から探す手掛かり)
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText(/書き出しました: 「.+\.pkc3-full\.zip」/);
   const path = await download.path();
   expect(path).not.toBeNull();
 
@@ -927,7 +929,11 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   });
   // 🔴 #1017 段④b 追補: PKC3 のバックアップは取込前に中身を確認する ──
   // ノート・添付・つながり・履歴の表が出て、「取り込む」を押すまで進まない
-  expect(await answerAppDialog(page, 'ok')).toMatch(/ノート \d+ 件/);
+  const confirmText = await answerAppDialog(page, 'ok');
+  expect(confirmText).toMatch(/ノート \d+ 件/);
+  // 🔴 #1643: 窓の頭に「ファイル名(いつ取ったか)」、末尾に「残る・追加・取り消せる」の安心の 1 行
+  expect(confirmText.split('\n')[0]).toMatch(/^restored\.pkc3\.zip\(.+ に取りました\)$/);
+  expect(confirmText.trimEnd().endsWith('いまのノートはそのまま残り、これが追加されます。取り込んだ後でも取り消せます。')).toBe(true);
 
   // 同じ内容がもう 1 組入る(取込は常に追加 ── 上書きしない)
   await expect(rows).toHaveCount(4);

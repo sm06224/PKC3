@@ -1485,8 +1485,67 @@ describe('importPkc2File (P6b 実行部)', () => {
       await importPkc2File(d, deps, file);
 
       expect(seen).toEqual([
-        { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false },
+        { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false, exportedAt: expect.any(String) },
       ]);
+    });
+
+    /** n 件のノートを持つバックアップ(題名は `ノート k`)。 */
+    async function pkc3ArchiveFileOf(name: string, n: number): Promise<File> {
+      const { writeArchive } = await import('../../src/features/export/pkc3-archive');
+      const ids = Array.from({ length: n }, (_, i) => `n${String(i + 1)}`);
+      const src = {
+        cid: 'c1',
+        title: 'テスト',
+        listEntryMetas: async () =>
+          ids.map((lid, i) => ({
+            lid,
+            title: `ノート ${String(i + 1)}`,
+            archetype: 'text',
+            created_at: null,
+            updated_at: null,
+            entry_order: i + 1,
+            status: null,
+            date: null,
+            archived: 0,
+          })),
+        listBodies: async () => ({ rows: ids.map((lid) => ({ lid, body: '本文' })), done: true }),
+        listRelations: async () => [],
+        listAssetMetas: async () => [],
+        getAssetBlob: async () => null,
+        listRevisionLids: async () => [],
+        getRevisionChain: async () => [],
+      };
+      const blob = (await writeArchive(src, '2026-09-21T00:00:00.000Z')).blob;
+      return new File([blob], name);
+    }
+
+    it('🔴 1 件のノートのバックアップは、取り込んだノートを開く(#1643 依頼 38-1)', async () => {
+      const { d, deps, written } = harness();
+      const focused: string[] = [];
+      deps.focus = (lid) => void focused.push(lid);
+      await importPkc2File(d, deps, await pkc3ArchiveFileOf('a.pkc3-full.zip', 1));
+      expect(written, '前提: 1 件書いている').toHaveLength(1);
+      expect(focused, '開いたのは取り込んだノート(書き込み後の ID)').toEqual([written[0]!.lid]);
+    });
+
+    it('対照群: 2 件以上のバックアップは開かない(どれを開くのが正しいか決められない)', async () => {
+      const { d, deps, written } = harness();
+      const focused: string[] = [];
+      deps.focus = (lid) => void focused.push(lid);
+      await importPkc2File(d, deps, await pkc3ArchiveFileOf('a.pkc3-full.zip', 2));
+      expect(written, '前提: 2 件書いている').toHaveLength(2);
+      expect(focused).toEqual([]);
+    });
+
+    it('🔑 確認の窓にファイル名が渡る(#1643 依頼 38-3)', async () => {
+      const { d, deps } = harness();
+      const names: Array<string | undefined> = [];
+      deps.confirmArchiveImport = async (_p, fileName) => {
+        names.push(fileName);
+        return true;
+      };
+      await importPkc2File(d, deps, await pkc3ArchiveFileOf('メモ-20261010.pkc3-full.zip', 1));
+      expect(names).toEqual(['メモ-20261010.pkc3-full.zip']);
     });
 
     it('`true` を返すと、これまでどおり取り込む(旧 `.pkc3.zip` でも同じ)', async () => {

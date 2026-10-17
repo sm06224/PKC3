@@ -177,11 +177,12 @@ describe('convertPkc2Container (P6a)', () => {
     expect(note.body).not.toContain('entry:a-todo'); // 参照は残らない…そもそも無いが
     expect(r2.relations[0]).toMatchObject({ fromLid: 'b-note', toLid: 'new-1' });
     // 🔴 ノート 1 件ごとに「旧 → 新」を並べず、件数の 1 行に畳む
-    expect(r2.warnings.filter((w) => w.includes('ID が重なっていた'))).toEqual(['1 件のノートは ID が重なっていたので付け直しました']);
+    // 🔴 題名で言う(#1643)── 件数だけだとどのノートか分からなかった
+    expect(r2.warnings.filter((w) => w.includes('同じ ID でした'))).toEqual(['「やること」は、いまのノートと同じ ID でした。別のノートとして追加しました(いまのノートは変わっていません)']);
     expect(r2.warnings.join('\n'), '内部の ID を画面に出している').not.toContain('a-todo');
-    // 対照群: 重なりが 2 件なら 1 行のまま件数だけ増える
+    // 対照群: 重なりが 2 件なら 1 行のまま題名が増える
     const r3 = convertPkc2Container(FIXTURE, opts(['a-todo', 'b-note']));
-    expect(r3.warnings.filter((w) => w.includes('ID が重なっていた'))).toEqual(['2 件のノートは ID が重なっていたので付け直しました']);
+    expect(r3.warnings.filter((w) => w.includes('同じ ID でした'))).toEqual(['「やること」「ノート」は、いまのノートと同じ ID でした。別のノートとして追加しました(いまのノートは変わっていません)']);
   });
 
   it('🔴 古い形式の内蔵データの注意は、ID ではなく題名で言い、多いときは 1 行に畳む', () => {

@@ -61,6 +61,7 @@ function deps(
               sink.converted = (sink.converted ?? 0) + 1;
             },
           },
+    header: () => null,
     download: (name, blob) => {
       sink.name = name;
       sink.blob = blob;
@@ -309,7 +310,7 @@ describe('形を選ぶ口(▾)', () => {
       asked?: readonly { id: string; label: string; separatorBefore?: boolean }[];
       converted?: number;
     } = {};
-    handleCopyMdBlock(menuBtn(block), deps(null, sink, '本文を CSV の表に書き換える(行と列を足せて、式も使えます)'));
+    handleCopyMdBlock(menuBtn(block), deps(null, sink, '本文を CSV の表に書き換える(式が使えます)'));
     await flush();
     expect(sink.asked?.map((c) => c.label), '一覧が食い違っている').toEqual([
       '表計算に貼る(TSV)',
@@ -317,7 +318,7 @@ describe('形を選ぶ口(▾)', () => {
       'HTML でコピー',
       'CSV でコピー',
       '.csv で保存',
-      '本文を CSV の表に書き換える(行と列を足せて、式も使えます)',
+      '本文を CSV の表に書き換える(式が使えます)',
     ]);
     // 🔑 **区切りは最後の 1 行にだけ**(コピーの 5 つの間には引かない)
     expect(
@@ -340,7 +341,7 @@ describe('形を選ぶ口(▾)', () => {
     const sink: { said?: string[]; name?: string; converted?: number } = {};
     handleCopyMdBlock(
       menuBtn(block),
-      deps('convert-format', sink, '本文を CSV の表に書き換える(行と列を足せて、式も使えます)'),
+      deps('convert-format', sink, '本文を CSV の表に書き換える(式が使えます)'),
     );
     await flush();
     expect(sink.converted, '書き換えが走っていない').toBe(1);

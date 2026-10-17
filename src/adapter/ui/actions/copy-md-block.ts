@@ -215,6 +215,11 @@ export interface CopyMdBlockDeps {
    *   `tsc` が黙ると、戻ってくる症状は「指の端末で形を変えられない」に戻ることである。
    */
   convert(): { readonly label: string; readonly run: () => void } | null;
+  /**
+   * 🔴 **csv の表の 1 行目を、見出しにする / やめる行**(#1662 3)。出せないとき(markdown の表 / 留めた枠 …)は `null`。
+   * ⚠ optional にしない(`convert` と同じ理由)。
+   */
+  header(): { readonly label: string; readonly run: () => void } | null;
   /** file を渡す(`platform/download.ts` の `downloadBlob`)。 */
   download(name: string, blob: Blob): void;
   /** 落とす file の名前の素 ── **その表が載っているノート**の題名(空でもよい)。 */
@@ -260,6 +265,8 @@ const COPY_FAILED = 'コピーできませんでした';
  *   (`putTable`)が**知らない形**を受け取ることになる(`csv-file` と同じ罠)。
  */
 const TABLE_CONVERT_ID = 'convert-format';
+/** 「1 行目を見出しにする / やめる」行の id(#1662 3)。⚠ コピーの形と混ぜない(`TABLE_CONVERT_ID` と同じ理由)。 */
+const TABLE_HEADER_ID = 'toggle-header';
 
 /** 落とす file の名前。⚠ 名前の規則は `safeName` 1 本(`features/export/file-name.ts`)。 */
 function csvFileName(title: string): string {
@@ -324,19 +331,26 @@ export function handleCopyMdBlock(target: HTMLElement, deps: CopyMdBlockDeps): v
      *   やることが違う(取り違えると、コピーのつもりで本文が変わる)。
      */
     const convert = deps.convert();
-    const choices =
-      convert === null
-        ? TABLE_COPY_CHOICES
-        : [
-            ...TABLE_COPY_CHOICES,
-            { id: TABLE_CONVERT_ID, label: convert.label, separatorBefore: true },
-          ];
+    const header = deps.header();
+    const choices = [
+      ...TABLE_COPY_CHOICES,
+      ...(convert === null
+        ? []
+        : [{ id: TABLE_CONVERT_ID, label: convert.label, separatorBefore: true }]),
+      ...(header === null
+        ? []
+        : [{ id: TABLE_HEADER_ID, label: header.label, separatorBefore: convert === null }]),
+    ];
     void deps.pick(choices).then(async (id) => {
       // ⚠ 「やめた」は断り文を出さない ── user が自分で閉じたので、伝えることは無い
       if (id === null) return;
       if (id === TABLE_CONVERT_ID) {
         // ⚠ 断る理由は `run` の側が言う(右クリックと同じ 1 本を通る)
         convert?.run();
+        return;
+      }
+      if (id === TABLE_HEADER_ID) {
+        header?.run();
         return;
       }
       // ⚠ 一覧から消えた id は黙って落とす(無い形で書き出すより何もしない方がよい)

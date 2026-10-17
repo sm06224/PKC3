@@ -4111,6 +4111,21 @@ export function connectStoreEffects(
             }
             const ext = extractMeta(ev.archetype, newBody);
             /**
+             * 🔴 **表の行・列を消す回は、消す前の版を控える**(#1662 5)── 書いた後の「元に戻す」の行き先。
+             * ⚠ 書く前後で「いちばん新しい版」が変わったときだけ渡す(`checkpoint` が積んだ 1 件 = 消す前の本文)。
+             */
+            const shapeRemove = ev.rewrite.kind === 'csv-shape' && ev.rewrite.mode === 'remove';
+            const newestRevId = async (): Promise<string | undefined> => {
+              try {
+                let best: { id: string; rev_order: number } | undefined;
+                for (const r of await store.listRevisionMetas(ev.lid)) if (best === undefined || r.rev_order > best.rev_order) best = r;
+                return best?.id;
+              } catch {
+                return undefined;
+              }
+            };
+            const revBefore = shapeRemove ? await newestRevId() : undefined;
+            /**
              * 🔴 **読んでから書くまでの間に別の窓が書いていたら、1 バイトも書かない**
              * (#178 残り、2026-08-23)。
              *
@@ -4168,6 +4183,8 @@ export function connectStoreEffects(
                  */
                 ev.rewrite.kind === 'place-remove' ||
                 ev.rewrite.kind === 'place-line-remove' ||
+                // 🔴 付箋の字を書き換える回も積む(#1662 1)── 書き換えた字は元へ戻す道が版しか無い
+                ev.rewrite.kind === 'place-text' ||
                 (ev.rewrite.kind === 'place-add' && ev.rewrite.template !== undefined)
                   ? { checkpoint: true }
                   : {}),
@@ -4234,6 +4251,20 @@ export function connectStoreEffects(
               });
             if (run !== null && runTo !== null && run.skipped.repeat > 0 && !disposed)
               dispatcher.dispatch({ type: 'OP_NOTICE', message: taskRunNotice(run, runTo) });
+            /**
+             * 🔴 **表の行・列を消した直後に「元に戻す」を出す**(#1662 5。Gemini 裁定 = #1163 依頼 48 の 5 = A)。
+             * 追記・移動・ゴミ箱と同じ置き場(画面の下の知らせの隣)。押すと消す前の本文の版へ戻す。
+             */
+            if (ev.rewrite.kind === 'csv-shape' && shapeRemove && !disposed) {
+              const revAfter = await newestRevId();
+              dispatcher.dispatch({
+                type: 'OP_NOTICE',
+                message: ev.rewrite.what === 'row' ? '表の行を消しました' : '表の列を消しました',
+                ...(revAfter !== undefined && revAfter !== revBefore
+                  ? { restoreUndo: { lid: ev.lid, revId: revAfter } }
+                  : {}),
+              });
+            }
           } catch (e) {
             // toggle の失敗は非致命(local state は動いておらず、再クリックが
             // retry)── phase を落として app を止めない(P3-6b review #1)

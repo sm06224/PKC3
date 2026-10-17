@@ -78,10 +78,12 @@ describe('注意の畳み方', () => {
 
     // 前提: 実際に全件が付け替わっている(この次元が非ゼロ)
     expect(seq, '衝突が起きていない(測れていない)').toBe(N);
-    // #1087: 付け替えは「N 件のノートは ID が重なっていたので付け直しました」の 1 行にまとめる
-    // (旧 → 新 の対を並べて上限で「ほか N 件」にする形をやめた ── 内部の ID は user に読めない)
-    const clash = res.warnings.filter((w) => w.includes('付け直しました'));
-    expect(clash, '注意が件数ぶん並んでいる').toEqual([`${N} 件のノートは ID が重なっていたので付け直しました`]);
+    // #1087: 付け替えは 1 行にまとめる(旧 → 新 の対を並べない ── 内部の ID は user に読めない)。
+    // #1643: 題名で言い、先頭 3 件 + 「ほか N 件」(題名なら user に読める)
+    const clash = res.warnings.filter((w) => w.includes('同じ ID でした'));
+    expect(clash, '注意が件数ぶん並んでいる').toEqual([
+      `「ノート 0」「ノート 1」「ノート 2」ほか ${N - 3} 件は、いまのノートと同じ ID でした。別のノートとして追加しました(いまのノートは変わっていません)`,
+    ]);
     expect(res.warnings.length).toBeLessThanOrEqual(WARN_CAP);
   });
 });

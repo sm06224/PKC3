@@ -104,6 +104,21 @@ export function parseCellRef(ref: string): { row: number; col: number } | null {
   return { row: row - 1, col: col - 1 };
 }
 
+/**
+ * 🔴 **0 始まりの (行, 列) を `B2` の形の名前にする**(#1662 4。{@link parseCellRef} の逆)。
+ * 升を打っている間だけ、画面に小さく出す(式の `=B2*C2` が指す升を数えなくて済むように)。
+ * ⚠ 番号の数え方は式と同じ ── 表の中身の 1 行目が 1 行目(見出しの有無で動かない)。
+ */
+export function cellName(row: number, col: number): string {
+  let n = col + 1;
+  let letters = '';
+  while (n > 0) {
+    letters = String.fromCharCode(65 + ((n - 1) % 26)) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return `${letters}${String(row + 1)}`;
+}
+
 function tokenize(src: string): Token[] {
   const out: Token[] = [];
   let i = 0;

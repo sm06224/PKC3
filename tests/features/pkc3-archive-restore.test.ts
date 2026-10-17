@@ -282,10 +282,39 @@ describe('注意のまとめ(#1087)', () => {
       archive({ entries: [entry('s1'), entry('s2'), entry('s3')] }),
       opts({ existingLids: new Set(['s1', 's2']) }),
     );
-    expect(got.warnings.filter((w) => w.includes('付け直し'))).toEqual([
-      '2 件のノートは ID が重なっていたので付け直しました',
+    // 🔴 題名で言う(#1643)。この fixture は題名 = 旧 ID なので、題名として出ているのは「s1」「s2」
+    expect(got.warnings.filter((w) => w.includes('同じ ID でした'))).toEqual([
+      '「s1」「s2」は、いまのノートと同じ ID でした。別のノートとして追加しました(いまのノートは変わっていません)',
     ]);
-    expect(got.warnings.join('\n')).not.toMatch(/s1|s2|new-/);
+    expect(got.warnings.join('\n'), '付け替え先の ID を出している').not.toMatch(/new-/);
+  });
+
+  it('🔴 題名で言い、内部の ID は出さない。多いときは先頭 3 件と「ほか N 件」(#1643 依頼 38-5)', () => {
+    const named = (lid: string, title: string) => ({ ...entry(lid), title });
+    const lids = ['k1', 'k2', 'k3', 'k4', 'k5'];
+    const got = restoreArchive(
+      archive({ entries: lids.map((l, i) => named(l, `メモ${String(i + 1)}`)) }),
+      opts({ existingLids: new Set(lids) }),
+    );
+    expect(got.warnings).toEqual([
+      '「メモ1」「メモ2」「メモ3」ほか 2 件は、いまのノートと同じ ID でした。別のノートとして追加しました(いまのノートは変わっていません)',
+    ]);
+    expect(got.warnings.join('\n')).not.toMatch(/k\d|new-/);
+    // 対照群: 題名の無いノートは「(無題)」と言う
+    const blank = restoreArchive(archive({ entries: [named('b1', '')] }), opts({ existingLids: new Set(['b1']) }));
+    expect(blank.warnings[0]).toMatch(/^「\(無題\)」は、いまのノートと同じ ID でした/);
+  });
+
+  it('いまのノートと重なった分と、ファイルの中で重なった分は別の行で言う(「いまのノートと同じ」と偽らない)', () => {
+    const named = (lid: string, title: string) => ({ ...entry(lid), title });
+    const got = restoreArchive(
+      archive({ entries: [named('e1', '既存と重なる'), named('d', 'ファイル内 1'), named('d', 'ファイル内 2')] }),
+      opts({ existingLids: new Set(['e1']) }),
+    );
+    expect(got.warnings).toEqual([
+      '「既存と重なる」は、いまのノートと同じ ID でした。別のノートとして追加しました(いまのノートは変わっていません)',
+      '1 件のノートは ID が重なっていたので付け直しました',
+    ]);
   });
 
   it('バックアップの中で ID が重なったノートも、同じ 1 行に数える。重ならなければ行は出ない', () => {

@@ -33,6 +33,8 @@ export interface ArchivePreview {
   readonly assetCount: number;
   readonly hasRelations: boolean;
   readonly hasRevisions: boolean;
+  /** 🔴 バックアップを取った日時(manifest の `exported_at`。ISO 文字列)。無い・読めないときは `null`(#1643)。 */
+  readonly exportedAt: string | null;
 }
 
 /**
@@ -46,6 +48,7 @@ export async function peekArchivePreview(zip: Blob): Promise<ArchivePreview | nu
   if (hits.length !== 1) return null;
   let manifest: {
     format?: unknown;
+    exported_at?: unknown;
     counts?: { entries?: unknown; relations?: unknown; revisions?: unknown };
   };
   try {
@@ -65,6 +68,7 @@ export async function peekArchivePreview(zip: Blob): Promise<ArchivePreview | nu
     assetCount,
     hasRelations: typeof counts.relations === 'number' && counts.relations > 0,
     hasRevisions: typeof counts.revisions === 'number' && counts.revisions > 0,
+    exportedAt: typeof manifest.exported_at === 'string' ? manifest.exported_at : null,
   };
 }
 
@@ -79,18 +83,44 @@ export function archivePreviewOf(archive: Pkc3Archive): ArchivePreview {
     assetCount: archive.assetSources.size,
     hasRelations: archive.relations.length > 0,
     hasRevisions: archive.revisions.length > 0,
+    exportedAt: typeof archive.manifest.exported_at === 'string' ? archive.manifest.exported_at : null,
   };
 }
 
+/**
+ * 🔴 **窓の頭に出す「どのファイルか・いつ取ったか」**(依頼 38-3 の裁定 A。#1643)── 週ごとにバックアップを
+ * 溜めていると、どれが今週の物か分からなかった。例:「メモ-20261010.pkc3-full.zip(10月10日 18:20 に取りました)」。
+ * ⚠ 時刻は**この端末の時刻**で出す(書き出しは UTC の ISO で書いている)。読めない日時は黙って省く(壊すより通す)。
+ * @returns 名前も日時も無ければ `null`(行を作らない)
+ */
+export function archiveSourceLine(fileName: string | undefined, exportedAt: string | null): string | null {
+  const t = exportedAt === null ? Number.NaN : Date.parse(exportedAt);
+  const when = Number.isNaN(t)
+    ? null
+    : (() => {
+        const d = new Date(t);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        return `${String(d.getMonth() + 1)}月${String(d.getDate())}日 ${hh}:${mm} に取りました`;
+      })();
+  const name = fileName !== undefined && fileName !== '' ? fileName : null;
+  if (name !== null && when !== null) return `${name}(${when})`;
+  if (name !== null) return name;
+  return when;
+}
+
 /** 確認の窓に出す本文(`\n` 区切り ── `dialog-body` は `white-space: pre-wrap`)。 */
-export function formatArchivePreviewMessage(preview: ArchivePreview): string {
+export function formatArchivePreviewMessage(preview: ArchivePreview, fileName?: string): string {
+  const source = archiveSourceLine(fileName, preview.exportedAt);
   return [
+    ...(source !== null ? [source] : []),
     `このバックアップには、次が入っています。`,
     `ノート ${String(preview.noteCount)} 件`,
     `添付 ${String(preview.assetCount)} 件`,
     `つながり ${preview.hasRelations ? '有' : '無'}`,
     `履歴 ${preview.hasRevisions ? '有' : '無'}`,
-    // 🔑 「バックアップ」は「元に戻る(置き換わる)」と読まれやすい ── 足すだけであることを押す前に言う(#1087)
-    '取り込むと、いまのノートに足します(いまのノートは消えず、置き換わりません)。',
+    // 🔑 「バックアップ」は「元に戻る(置き換わる)」と読まれやすい ── 足すだけであることを押す前に言う(#1087)。
+    //   依頼 38-2 の裁定 A(#1643):取り込んだ後でも取り消せることまで言う(「取り込みを取り消す」は取り込み直後に出る)
+    'いまのノートはそのまま残り、これが追加されます。取り込んだ後でも取り消せます。',
   ].join('\n');
 }

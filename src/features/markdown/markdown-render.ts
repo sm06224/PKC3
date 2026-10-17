@@ -40,7 +40,7 @@ import { makeSlugCounter } from './markdown-toc';
 import { VAR_NAME_SOURCE } from './frontmatter';
 import { expandVarsInText, fenceTransition, VAR_OPEN, VAR_SEP, type FenceState } from './var-expand';
 import { highlightCode, isHighlightable } from './code-highlight';
-import { cellEditButtonHtml, detectCsvLang, renderCsvFence } from './csv-table';
+import { cellEditButtonHtml, detectCsvLang, renderCsvFence, shapeButtonHtml } from './csv-table';
 import { isSqlEmbedInfo, sqlEmbedHostHtml } from './sql-embed';
 import { buildHtmlSandboxIframe } from './html-sandbox';
 import {
@@ -1057,7 +1057,37 @@ const defaultTdOpen =
 md.renderer.rules.td_open = function (tokens, idx, options, env, self) {
   const base = defaultTdOpen(tokens, idx, options, env, self);
   const attrs = cellEditAttrs(tokens, idx, env);
+  // 🔑 閉じるときに行の ＋ × を足すための座標(#1662 6)── 開きで印を焼いた升だけ
+  tokens[idx]!.meta = { ...(tokens[idx]!.meta as object | null), cellAt: cellAtOf(attrs) };
   return attrs === '' ? base : base.replace(/>$/, `${attrs}>`);
+};
+
+/**
+ * 🔴 **`|` で書いた表の行・列の ＋ ×**(#1662 6。Gemini 裁定 = #1163 依頼 48 の 6 = A)。
+ *
+ * ⚠ 出る条件は「升が押せること」と同じ 1 つ(開きで編集の印を焼いたか)── 書き出し・印刷・書けない面には焼かない。
+ * ⚠ 並べ方は csv の表と同じ ── **列の口は見出しの升**に、**行の口は本文の行の 1 列目**に(見出しの行は消せない)。
+ *   受け手(`shape-cell`)・見え方・コピーで落とす対象は csv の表と**同じ 1 つ**(`shapeButtonHtml`)。
+ */
+function cellAtOf(attrs: string): { line: number; col: number } | null {
+  const m = /data-pkc-cell-line="(\d+)" data-pkc-cell-col="(\d+)"/.exec(attrs);
+  return m === null ? null : { line: Number(m[1]), col: Number(m[2]) };
+}
+
+const defaultTdClose =
+  md.renderer.rules.td_close ??
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+md.renderer.rules.td_close = function (tokens, idx, options, env, self) {
+  const base = defaultTdClose(tokens, idx, options, env, self);
+  const open = tokens[idx - 2];
+  const at =
+    open?.type === 'td_open' ? ((open.meta as { cellAt?: { line: number; col: number } | null } | null)?.cellAt ?? null) : null;
+  if (at === null || at.col !== 0) return base;
+  return (
+    shapeButtonHtml(at.line, at.col, 'row', 'add', 'この行の下に行を足す') +
+    shapeButtonHtml(at.line, at.col, 'row', 'remove', 'この行を消す') +
+    base
+  );
 };
 
 const defaultThOpen =
@@ -1067,7 +1097,11 @@ md.renderer.rules.th_open = function (tokens, idx, options, env, self) {
   const base = defaultThOpen(tokens, idx, options, env, self);
   const attrs = cellEditAttrs(tokens, idx, env);
   // 🔑 閉じるときに ✎ を足すか(#1240)── 開きで印を焼いた升だけ。判定を 2 回書かない
-  tokens[idx]!.meta = { ...(tokens[idx]!.meta as object | null), cellEditable: attrs !== '' };
+  tokens[idx]!.meta = {
+    ...(tokens[idx]!.meta as object | null),
+    cellEditable: attrs !== '',
+    cellAt: cellAtOf(attrs),
+  };
   return attrs === '' ? base : base.replace(/>$/, `${attrs}>`);
 };
 
@@ -1084,7 +1118,16 @@ md.renderer.rules.th_close = function (tokens, idx, options, env, self) {
   const open = tokens[idx - 2];
   const editable =
     open?.type === 'th_open' && (open.meta as { cellEditable?: boolean } | null)?.cellEditable === true;
-  return editable ? cellEditButtonHtml() + base : base;
+  if (!editable) return base;
+  const at = (open.meta as { cellAt?: { line: number; col: number } | null } | null)?.cellAt ?? null;
+  return (
+    cellEditButtonHtml() +
+    (at === null
+      ? ''
+      : shapeButtonHtml(at.line, at.col, 'col', 'add', 'この列の右に列を足す') +
+        shapeButtonHtml(at.line, at.col, 'col', 'remove', 'この列を消す')) +
+    base
+  );
 };
 
 /**

@@ -21,6 +21,7 @@ import { RELATION_KINDS } from '@features/relation/kinds';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { MAX_TAGS, MAX_TAG_CHARS, normalizeTag, readTags, sameTag } from '@features/flavor/tags';
 import { replacePrefixed, remapEntryLids } from './body-remap';
+import { relabeledInFileWarning, relabeledWarning } from './relabel-warning';
 import {
   buildTextlogAnchorMap,
   buildFirstLogOfDay,
@@ -190,6 +191,8 @@ export function convertPkc2Container(
   const warnings: string[] = [];
   // 🔴 ノート 1 件ごとに 1 行ずつ並べない ── 集めておいて最後に 1 行へ畳む(F3)
   let relabeledLids = 0;
+  /** 🔴 いまのノートと ID が重なって付け替えた分の題名(#1643。ファイルの中の重なりは `relabeledLids` だけが数える) */
+  const clashTitles: string[] = [];
   const legacyInlined: string[] = [];
   const convertFailed = new Map<string, string[]>();
   const rawEntries = Array.isArray(c.entries) ? c.entries : [];
@@ -247,13 +250,14 @@ export function convertPkc2Container(
       if (opts.existingLids.has(u.lid) && !lidMap.has(u.lid)) lidMap.set(u.lid, next);
       taken.add(next);
       finalLidAt.push(next);
-      relabeledLids++;
+      if (opts.existingLids.has(u.lid)) clashTitles.push(u.title);
+      else relabeledLids++;
     } else {
       taken.add(u.lid);
       finalLidAt.push(u.lid);
     }
   }
-  if (relabeledLids > 0) warnings.push(`${relabeledLids} 件のノートは ID が重なっていたので付け直しました`);
+  for (const w of [relabeledWarning(clashTitles), relabeledInFileWarning(relabeledLids)]) if (w !== null) warnings.push(w);
   const finalLid = (lid: string): string => lidMap.get(lid) ?? lid;
 
   // ── asset keyMap(旧 3 系統 + 派生をすべて新 1 規則へ)

@@ -2,9 +2,9 @@
 /**
  * PKC3: PR 向け高速 unit テスト実行スクリプト(#1390)。
  *
- * 1. 変更差分に関係するテストを vitest --changed で実行 (import グラフ追跡)
- * 2. 静的 import に出ない全体走査・規律系のテスト (ui-terms, repo-hygiene 等) を常時監視ガードとして実行
- * 3. vitest --changed が全量にフォールバックした場合、理由をログ出力
+ * 1. 変更差分に関係するテスト(vitest list --changed。import グラフ追跡)と、静的 import に出ない全体走査・規律系のガードを合わせる
+ * 2. 合わせた集合を 1 回の vitest で実行する(集合が全体の大半なら全量を 1 回で。#1845)
+ * 3. 全量にフォールバックした場合、理由をログ出力
  *
  * 使い方:
  *   node scripts/test-pr.mjs [base-ref]
@@ -123,42 +123,78 @@ export function runGuards(rootDir = process.cwd()) {
   return guardsRes.status ?? 0;
 }
 
+/** 全部の unit テストの数(tests/smoke は除く)── 選んだ範囲が大半なら全量を 1 回で回すための分母 */
+export function countAllTests(rootDir = process.cwd()) {
+  const testsDir = join(rootDir, 'tests');
+  if (!existsSync(testsDir)) return 0;
+  let n = 0;
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      const rel = relative(rootDir, full).replace(/\\/g, '/');
+      if (entry.isDirectory()) {
+        if (rel === 'tests/smoke' || rel.startsWith('tests/smoke/')) continue;
+        walk(full);
+      } else if (entry.isFile() && entry.name.endsWith('.test.ts')) n += 1;
+    }
+  };
+  walk(testsDir);
+  return n;
+}
+
+/**
+ * 🔴 **1 回の vitest で回す**(#1845)。⚠ 直す前は「差分に関係するテスト」と「ガード」を**別々の 2 回**で回していた ──
+ *   起動が 2 回かかり、両方に入る 158 本は 2 度走った。共有 file(binder.ts など)を触る PR では選ぶ範囲がほぼ全量になり、
+ *   全量を 1 回で回すより遅くなって、10 分の上限で打ち切られた(#1844 で 2 回)。
+ * 🔑 差分とガードを合わせた集合を 1 回で回す。⚠ 集合が全体の `FULL_RATIO` 以上なら、選ばずに全量を 1 回で回す
+ *   (選ぶ手間と取りこぼしの危険だけ残って、速さは変わらないため)。
+ * @returns { mode: 'full' } か { mode: 'list', files }
+ */
+export const FULL_RATIO = 0.6;
+export function planPrRun(changed, guards, total) {
+  if (changed === null) return { mode: 'full' };
+  const files = [...new Set([...changed, ...guards])].sort();
+  if (total > 0 && files.length >= total * FULL_RATIO) return { mode: 'full' };
+  return { mode: 'list', files };
+}
+
+/** `vitest list --changed` で、差分に関係するテストの file を引く(引けなければ null = 全量へ倒す) */
+export function listChangedTests(baseRef, rootDir = process.cwd()) {
+  const res = spawnSync('npx', ['vitest', 'list', '--changed', baseRef, '--filesOnly'], {
+    cwd: rootDir,
+    encoding: 'utf-8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (res.status !== 0) return null;
+  return res.stdout
+    .split('\n')
+    .map((s) => s.trim())
+    .filter((s) => s.endsWith('.test.ts'))
+    .map((s) => relative(rootDir, s.startsWith('/') ? s : join(rootDir, s)).replace(/\\/g, '/'));
+}
+
 export function runPrTests(baseRef, rootDir = process.cwd()) {
   const fallbackReason = detectFallbackReason(baseRef, rootDir);
+  let plan;
   if (fallbackReason) {
     console.log(`全量にフォールバックしました(理由: ${fallbackReason})`);
+    plan = { mode: 'full' };
+  } else {
+    const changed = listChangedTests(baseRef, rootDir);
+    if (changed === null) console.log('全量にフォールバックしました(理由: 差分に関係するテストを引けなかった)');
+    plan = planPrRun(changed, collectGuardTests(rootDir), countAllTests(rootDir));
   }
-
-  console.log(`[test:pr] 1/2: 変更差分に関連するテストを実行中 (base: ${baseRef})...`);
-  const changedRes = spawnSync('npx', ['vitest', 'run', '--changed', baseRef, '--passWithNoTests'], {
+  if (plan.mode === 'full') {
+    console.log('[test:pr] 全量の unit テストを 1 回で実行中...');
+    const res = spawnSync('npx', ['vitest', 'run'], { cwd: rootDir, stdio: 'inherit' });
+    return res.status ?? 1;
+  }
+  console.log(`[test:pr] 差分に関係するテスト + ガード: ${plan.files.length} 件を 1 回で実行中 (base: ${baseRef})...`);
+  const res = spawnSync('npx', ['vitest', 'run', '--passWithNoTests', ...plan.files], {
     cwd: rootDir,
     stdio: 'inherit',
   });
-
-  if (changedRes.status !== 0) {
-    return changedRes.status ?? 1;
-  }
-
-  if (fallbackReason) {
-    console.log('[test:pr] 2/2: 全量テストが実行されたため、ガードテストの重複実行を省略します。');
-    console.log('[test:pr] 完了: 全量テストに合格しました。');
-    return 0;
-  }
-
-  console.log('[test:pr] 2/2: 全体走査・規律系の常時監視ガードテストを実行中...');
-  const guardTests = collectGuardTests(rootDir);
-  console.log(`[test:pr] ガードテスト対象: ${guardTests.length} 件`);
-  const guardsRes = spawnSync('npx', ['vitest', 'run', ...guardTests], {
-    cwd: rootDir,
-    stdio: 'inherit',
-  });
-
-  if (guardsRes.status !== 0) {
-    return guardsRes.status ?? 1;
-  }
-
-  console.log('[test:pr] 完了: 差分テストおよび常時監視ガードテストに合格しました。');
-  return 0;
+  return res.status ?? 1;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

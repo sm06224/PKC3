@@ -13,7 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 // @ts-expect-error -- CI scripts are .mjs
-import { resolveBase, collectGuardTests, ANCHOR_GUARD_TESTS, detectFallbackReasonFromFiles } from '../scripts/test-pr.mjs';
+import { resolveBase, collectGuardTests, ANCHOR_GUARD_TESTS, detectFallbackReasonFromFiles, planPrRun, countAllTests, FULL_RATIO } from '../scripts/test-pr.mjs';
 
 describe('PR 高速 unit テスト (#1390)', () => {
   it('ci.yml で PR 時は test-pr.mjs、push 時は npm test を呼ぶ', () => {
@@ -61,5 +61,31 @@ describe('PR 高速 unit テスト (#1390)', () => {
     expect(resolveBase(undefined, undefined, (ref: string) => ref === 'origin/main')).toBe('origin/main');
     // 4. フォールバック
     expect(resolveBase(undefined, undefined, () => false)).toBe('main');
+  });
+
+  /**
+   * 🔴 #1845: 差分とガードを**1 回の vitest** で回す。⚠ 2 回に分けると、両方に入る file が 2 度走り、起動も 2 回かかる
+   *   ── 共有 file を触る PR で 10 分の上限に当たった。
+   */
+  it('planPrRun は差分とガードの和を重複なしの 1 つの一覧にし、大半なら全量 1 回に倒す', () => {
+    const plan = planPrRun(['tests/a.test.ts', 'tests/b.test.ts'], ['tests/b.test.ts', 'tests/c.test.ts'], 100);
+    expect(plan).toEqual({ mode: 'list', files: ['tests/a.test.ts', 'tests/b.test.ts', 'tests/c.test.ts'] });
+    // 和が全体の FULL_RATIO 以上 ── 選ばずに全量を 1 回
+    const many = Array.from({ length: Math.ceil(100 * FULL_RATIO) }, (_, i) => `tests/t${i}.test.ts`);
+    expect(planPrRun(many, [], 100)).toEqual({ mode: 'full' });
+    // 差分を引けなかった ── 全量へ倒す(取りこぼさない側)
+    expect(planPrRun(null, ['tests/c.test.ts'], 100)).toEqual({ mode: 'full' });
+  });
+
+  it('countAllTests は smoke を除いた unit テストを数える(分母が 0 だと倒す判定が空振りする)', () => {
+    expect(countAllTests()).toBeGreaterThan(500);
+  });
+
+  it('runPrTests は vitest を 2 回に分けて呼ばない(差分とガードを別々に回す形へ戻さない)', () => {
+    const src = readFileSync('scripts/test-pr.mjs', 'utf-8');
+    const body = src.slice(src.indexOf('export function runPrTests('), src.indexOf('if (process.argv[1]'));
+    expect(body, 'runPrTests を取り出せていない(前提が崩れている)').toContain('planPrRun(');
+    expect(body.match(/'vitest', 'run'/g)?.length, '全量と一覧の 2 つの枝だけ').toBe(2);
+    expect(body).not.toContain('--changed');
   });
 });

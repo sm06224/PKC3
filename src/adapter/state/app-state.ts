@@ -124,6 +124,7 @@ import {
   endsInsideOpenBlock,
   isLineOpen,
   isPlaceOpen,
+  placeTextOf,
   placeBlockUnclosed,
   placeEntryLids,
 } from '@features/markdown/place-notation';
@@ -2826,7 +2827,11 @@ export type UserAction =
    *   (板の行を渡しても消えない)。
    */
   | { type: 'REMOVE_PLACE_LINE'; lid: string; line: number }
-  | { type: 'ADD_PLACE'; lid: string; x: number; y: number; template?: PlaceTemplateId }
+  /**
+   * `template` = テンプレートから置く(#529 W4)/ `entry` = ほかのノートを置く(#1662 2。置くノートの lid)。
+   * 渡すのはどちらか一方まで。
+   */
+  | { type: 'ADD_PLACE'; lid: string; x: number; y: number; template?: PlaceTemplateId; entry?: string }
   /**
    * 🔴 **位置と大きさを数で入れる**(#529 W2)── 開き行の x= y= w= h= のうち渡した札だけを一度に書く。
    * 同じ門。値は reducer でも検める(窓の検めと同じ規則 ── 型は境界で効かない)。
@@ -2834,6 +2839,11 @@ export type UserAction =
   | { type: 'SET_PLACE_RECT'; lid: string; line: number; rect: PlaceRectValue }
   /** 板を前へ出す(#676 段②)── 他の板の z= の最大 + 1 を書く。同じ門。 */
   | { type: 'RAISE_PLACE'; lid: string; line: number }
+  /**
+   * 🔴 **ふつうの付箋の中の字を、その場で書く**(#1662 1)── 開き行と閉じの間だけを書く。同じ門。
+   * `before` = 欄を開いた時点の中身(別の窓が先に直していれば書かない)。
+   */
+  | { type: 'SET_PLACE_TEXT'; lid: string; line: number; text: string }
   /**
    * 板の形を変える(#530 案 A。user 裁定 2026-09-14)── 開き行の `shape=` を書く。同じ門。
    * ⚠ 綴りは `PlaceShape` に閉じる ── 知らない字は reducer で断る(下の case)。
@@ -3005,7 +3015,7 @@ export type UserAction =
    * ⚠ `line` は**原文の行番号**(押した表のどの行でもよい)── 書き換える範囲は
    *   `table-convert.ts` が原文から引く(呼び手に範囲を決めさせない)。
    */
-  | { type: 'SET_TABLE_FORMAT'; lid: string; line: number; openLine: string; to: TableFormat }
+  | { type: 'SET_TABLE_FORMAT'; lid: string; line: number; openLine: string; to: TableFormat; header?: boolean }
   /**
    * 🔴 **繰り返しの「その回」を済ませる**(#344 段②)。
    * ⚠ `TOGGLE_TASK` と**単位が違う** ── 規則の行の印は動かさず、
@@ -3297,6 +3307,11 @@ export type UserAction =
        * ⚠ 出す字は `dateNoteMissingNotice` と対(出し入れは `status-open.ts`)。
        */
       createDate?: string;
+      /**
+       * 🔴 **隣に「元に戻す」で出す、戻す先の版**(#1662 5)。表の行・列を消した直後に、消す前の本文の版へ戻す。
+       * 押し先は履歴の「この版に戻す」と同じ `restore-revision`(`restoreUndo` を共有する)。省略 = 出さない。
+       */
+      restoreUndo?: { lid: string; revId: string };
     }
   /**
    * 🔴 **画面下の知らせの時間が切れた**(#1017 C5 Q1)。⚠ `message` が**いま載っている知らせと同じとき
@@ -8140,7 +8155,13 @@ function reduceCore(
             title: meta.title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
-            rewrite: { kind: 'table-format', line: action.line, openLine: action.openLine, to: action.to },
+            rewrite: {
+              kind: 'table-format',
+              line: action.line,
+              openLine: action.openLine,
+              to: action.to,
+              ...(action.header === undefined ? {} : { header: action.header }),
+            },
           },
         ],
       };
@@ -8426,10 +8447,14 @@ function reduceCore(
         shown !== null &&
         isPlaceCoord(action.x) &&
         isPlaceCoord(action.y) &&
-        (action.template === undefined || isPlaceTemplateId(action.template))
-          ? action.template === undefined
-            ? { kind: 'place-add', x: action.x, y: action.y }
-            : { kind: 'place-add', x: action.x, y: action.y, template: action.template }
+        (action.template === undefined || isPlaceTemplateId(action.template)) &&
+        // 🔴 ほかのノートを置く回(#1662 2)── 置く先が台帳に在るノートのときだけ(居ないノートの付箋は「(見つかりません)」になる)
+        (action.entry === undefined || (action.template === undefined && state.entryMetas.has(action.entry)))
+          ? action.entry !== undefined
+            ? { kind: 'place-add', x: action.x, y: action.y, entry: action.entry }
+            : action.template === undefined
+              ? { kind: 'place-add', x: action.x, y: action.y }
+              : { kind: 'place-add', x: action.x, y: action.y, template: action.template }
           : null,
       );
       /**
@@ -8455,6 +8480,14 @@ function reduceCore(
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-rect', line: action.line, openLine, rect: action.rect };
+      });
+    case 'SET_PLACE_TEXT':
+      return bodyRewriteGate(state, action.lid, '、付箋の字を直してください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
+        const openLine = placeOpenLineOf(shown, action.line);
+        const before = placeTextOf(shown, action.line);
+        if (openLine === null || before === null) return null;
+        return { kind: 'place-text', line: action.line, openLine, before, text: action.text };
       });
     case 'RAISE_PLACE':
       return bodyRewriteGate(state, action.lid, '、板を前へ出してください', (shown) => {
@@ -8829,11 +8862,17 @@ function reduceCore(
        *   ⚠ マニュアルには書いてあるが、**右クリックの節の中だけ**だった
        *   (指の端末の user はその節を読まない)。
        */
-      if (action.rewrite.kind === 'table-format') {
+      if (action.rewrite.kind === 'table-format' && action.rewrite.header !== undefined) {
+        // 🔴 見出しの切り替え(#1662 3)── 戻し方も言う(同じ ▾ の小窓)
+        notice = action.rewrite.header
+          ? '表の 1 行目を見出しにしました(戻すには表の右上の ▾ から)'
+          : '表の見出しをやめました(戻すには表の右上の ▾ から)';
+        noticeOpen = null;
+      } else if (action.rewrite.kind === 'table-format') {
         notice =
           action.rewrite.to === 'csv'
-            ? '表を CSV の表にしました。行と列を足せて、式も使えます(戻すには表の右上の ▾ から。桁揃えは戻りません)'
-            : '表を Markdown の表にしました。よそへ貼りやすい字になります(戻すには表の右上の ▾ から。行と列の ＋ × と式は使えなくなります)';
+            ? '表を CSV の表にしました。式が使えます(戻すには表の右上の ▾ から。桁揃えは戻りません)'
+            : '表を Markdown の表にしました。よそへ貼りやすい字になります(戻すには表の右上の ▾ から。式は使えなくなります)';
         noticeOpen = null;
       }
       /**
@@ -10667,6 +10706,9 @@ function reduceCore(
           notice: action.message,
           noticeOpen: action.open ?? null,
           noticeCreate: action.createDate ?? null,
+          ...(action.restoreUndo === undefined
+            ? {}
+            : { restoreUndo: { ...action.restoreUndo, notice: action.message } }),
         },
         events: [],
       };
