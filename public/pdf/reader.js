@@ -56,6 +56,7 @@ const listBtn = $('toggle-list');
 const saveBtn = $('edit-save');
 const resetBtn = $('edit-reset');
 const extractBtn = $('extract');
+const flattenBtn = $('edit-flatten');
 const unpickBtn = $('edit-unpick');
 const hlBtn = $('hl-apply');
 const hlPop = $('hl-pop');
@@ -975,12 +976,14 @@ let keyPickedAt = 0;
 
 const PREPARING = 'ページの編集を準備しています…';
 const SAVED_NOTE = '保存しました。PKC3 のウィンドウの下の知らせで「そのノートを開く」を押すと新しい PDF が開きます';
-const EXTRACTED_NOTE = '選んだページを新しい PDF にしました。PKC3 のウィンドウの下の知らせで「そのノートを開く」を押すと開きます';
+const FLATTENED_NOTE = '注釈をページに書き込んで保存しました。PKC3 のウィンドウの下の知らせで「そのノートを開く」を押すと新しい PDF が開きます';
+const EXTRACTED_NOTE ='選んだページを新しい PDF にしました。PKC3 のウィンドウの下の知らせで「そのノートを開く」を押すと開きます';
 const EDIT_MESSAGES = {
   encrypted: 'パスワードで守られた PDF は、編集できません(読むことはできます)',
   unreadable: 'この PDF はページを編集できない形です',
   worker: 'ページの編集を始められませんでした。もう一度試してください',
   leaked: '外したページ・選ばなかったページの内容を含めずには作れませんでした。保存していません',
+  font: pageEdit.FLATTEN_FONT_REFUSAL,
   'bad-highlight': '外そうとしたハイライトが PDF の中に見つかりませんでした。保存していません',
 };
 
@@ -1263,6 +1266,8 @@ function updateEditUi() {
   saveBtn.disabled = !dirty || !pageEdit.canSave(items) || saving;
   // 🔴 選んだページが 0 件では押せない(0 ページの PDF は作らない)
   extractBtn.disabled = !ready || saving || !pageEdit.canExtract(items, selected);
+  // 注釈をページに書き込んで保存は、変更が無くても押せる(元の PDF にある注釈を書き込めるように)。残すページが 1 枚も無ければ押せない
+  flattenBtn.disabled = !ready || saving || !pageEdit.canSave(items);
   appendBtn.disabled = !ready || saving;
   noteBtn.disabled = !ready || saving;
   penBtn.disabled = !ready || saving;
@@ -1818,6 +1823,19 @@ saveBtn.addEventListener('click', () => {
 extractBtn.addEventListener('click', () => {
   void extractSelected();
 });
+flattenBtn.addEventListener('click', () => {
+  void flattenSaved();
+});
+
+/**
+ * 「注釈をページに書き込んで保存」(#1163 依頼 31)── いまの並び全部を、ハイライト・ペン・付箋を注釈ではなくページの描画にした
+ * 新しい PDF にする。作り方は保存と同じ 1 本(`edit-core.js` の `flatten`)。
+ * ⚠ 並びの基準(`baseline`)は動かさない ── 注釈のまま保存する「別の PDF として保存」の代わりにはならない(抜き出しと同じ扱い)。
+ */
+async function flattenSaved() {
+  if (!ready || saving || !pageEdit.canSave(items)) return;
+  await submitBuild(items.slice(), pageEdit.flattenName(docName), 'flatten');
+}
 
 /** 「別の PDF として保存」── いまの並び全部を新しい PDF にする。 */
 async function saveEdited() {
@@ -1871,7 +1889,7 @@ async function submitBuild(list, name, kind) {
     const mine = pageEdit.sourcesFor(list, added);
     const res = await callEdit(
       'build',
-      { ...pageEdit.toJob(list), ...hlJob, ...annJob, sources: mine.sources },
+      { ...pageEdit.toJob(list), ...hlJob, ...annJob, sources: mine.sources, flatten: kind === 'flatten' },
       { extras: mine.used.map((k) => added[k].blob) },
     );
     const dir = await editStage.openDir();
@@ -1927,6 +1945,11 @@ async function submitBuild(list, name, kind) {
  * 🔴 時間切れの後に**遅れて**届いた返事は、今の状態の字を上書きしない(基準だけ直す ── 添付はできているので)。
  */
 let lateOk = false;
+/** できた知らせの字(保存・抜き出し・注釈の書き込み)。 */
+function noteOf(kind) {
+  if (kind === 'extract') return EXTRACTED_NOTE;
+  return kind === 'flatten' ? FLATTENED_NOTE : SAVED_NOTE;
+}
 function onEditResult(payload) {
   // 🔴 鍵が合わない返事(前の依頼の遅い返事 / 控えが無い)は捨てる
   if (!pageEdit.replyMatches(pending, payload)) return;
@@ -1941,7 +1964,7 @@ function onEditResult(payload) {
       pending = null;
       lateOk = false;
       if (kind === 'extract') clearPaintedSelection();
-      if (statusEl.textContent === wire.EDIT_NO_REPLY) setStatus(kind === 'extract' ? EXTRACTED_NOTE : SAVED_NOTE);
+      if (statusEl.textContent === wire.EDIT_NO_REPLY) setStatus(noteOf(kind));
       updateEditUi();
     }
     return;
@@ -1959,6 +1982,9 @@ function onEditResult(payload) {
     selected = new Set();
     clearPaintedSelection();
     setStatus(EXTRACTED_NOTE);
+  } else if (ok && pending.kind === 'flatten') {
+    // 🔴 並びの基準・選びは動かさない(注釈のまま保存する「別の PDF として保存」の代わりにならない)
+    setStatus(FLATTENED_NOTE);
   } else {
     setStatus(typeof payload.message === 'string' && payload.message !== '' ? payload.message : '保存できませんでした。もう一度押してください');
   }

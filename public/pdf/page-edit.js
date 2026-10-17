@@ -271,6 +271,27 @@
   /** 外したページへ付箋・ペン・ハイライトを付けようとしたときの断り(窓の下に出す一行)。 */
   var REMOVED_PAGE_REFUSAL = '外したページには付箋・ペン・ハイライトを付けられません(一覧の「戻す」で戻せます)';
 
+  /**
+   * 「注釈をページに書き込んで保存」の名前(#1163 依頼 31)。`元の名前.pdf` → `元の名前 (書き込み).pdf`。`outputName` と同じ流儀で、
+   * 既に ` (書き込み)` で終わっていれば重ねず番号を付ける: `(書き込み)` → `(書き込み 2)` → `(書き込み 3)`…
+   */
+  function flattenName(name) {
+    var base = String(name || '').replace(/\.pdf$/i, '');
+    if (base === '') base = 'document';
+    var m = / \(書き込み(?: ([0-9]+))?\)$/.exec(base);
+    if (m === null) {
+      base += ' (書き込み)';
+    } else {
+      var next = m[1] === undefined ? 2 : Number(m[1]) + 1;
+      base = base.slice(0, m.index) + ' (書き込み ' + String(next) + ')';
+    }
+    return base + '.pdf';
+  }
+
+  /** 断り `font`(この窓では付箋の字を描けない ── 字を描く canvas が使えない)の一行。 */
+  var FLATTEN_FONT_REFUSAL =
+    'この環境では付箋の字をページに書き込めないため、注釈をページに書き込めません。何も変えていません';
+
   /** 2 つの並びが同じか(同じページが同じ順で、同じ向き)。保存した並びを基準にして「まだ保存していない変更」を見る。 */
   function sameArrangement(a, b) {
     if (a.length !== b.length) return false;
@@ -401,6 +422,8 @@
     isKept: isKept,
     onKeptPages: onKeptPages,
     REMOVED_PAGE_REFUSAL: REMOVED_PAGE_REFUSAL,
+    flattenName: flattenName,
+    FLATTEN_FONT_REFUSAL: FLATTEN_FONT_REFUSAL,
     sameArrangement: sameArrangement,
     noteLine: noteLine,
     warnLine: warnLine,
