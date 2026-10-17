@@ -878,7 +878,7 @@ export class InspectorRenderer {
      * ⚠ 消すボタンを対で置く ── **作れて消せない導線は dead click の一種**。
      */
     const relBox = this.rows.get('inspector-relations');
-    const relDeps = [state.relations, state.entryMetas, meta.lid, editing, blockedNote];
+    const relDeps = [state.relations, state.entryMetas, meta.lid, editing, blockedNote, state.trashPanel];
     if (relBox && !this.rowSame('relations', relDeps)) {
       this.rowDeps.set('relations', relDeps);
       relBox.textContent = '';
@@ -907,8 +907,21 @@ export class InspectorRenderer {
             go.setAttribute('data-pkc-entry', otherLid);
           }
           go.setAttribute('data-pkc-field', 'relation-target-link');
-          // ⚠ 相手が消えていても**黙って空にしない**(何が壊れているか分かる形)
-          go.textContent = other?.title ?? '(見つかりません)';
+          /**
+           * 🔴 **相手がゴミ箱の中に居るつながりは、そう言う**(台帳 #1852 G2 / 依頼 299 B)。⚠ 直す前は読み込み直すと
+           *   「→ (見つかりません)」と出て、壊れたつながりに見えた。つながり自体は、相手を戻せるように残してある。
+           *   題名はゴミ箱の一覧を開いていれば分かる(開いていなければ字だけ)。押しても開かない(上のとおり押せる顔にしない)。
+           */
+          const trashedTitle = state.trashPanel?.items.find((t) => t.entryLid === otherLid)?.title ?? null;
+          // ⚠ 見つからない理由はゴミ箱だけではない(取り込んだつながりの相手が無い等)── ゴミ箱の一覧で見つけたときだけ言い切る。
+          //   一覧をまだ読んでいなければ断定しない。読んで居なければ、これまでどおり「見つかりません」
+          go.textContent =
+            other?.title ??
+            (trashedTitle !== null
+              ? `${trashedTitle}(ゴミ箱の中)`
+              : state.trashPanel === null
+                ? '(見つかりません。ゴミ箱の中かもしれません)'
+                : '(見つかりません)');
           const del = iconButton('remove-relation', 'つながりを消す', null);
           del.setAttribute('data-pkc-relation', r.id);
           // 🔴 編集中は押せなくする(#513)── reducer は黙って捨てるので、口の側で断る

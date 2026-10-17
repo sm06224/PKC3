@@ -138,22 +138,26 @@ describe('履歴から戻した直後の「元に戻す」(依頼 68-1)', () => 
   it('🔴 「元に戻す」で戻した後は、知らせを言い換え、「元に戻す」を重ねて出さない(行ったり来たりしない)', async () => {
     const h = await restored(true);
     const first = h.d.getState().notice;
-    expect(first, '前提:最初は「前の版に戻しました」').toBe('「旧題」を前の版に戻しました');
+    expect(first, '前提:最初は「前の版に戻しました」(題名が変わったので、題名も戻したことを添える)').toBe(
+      '「t-e1」を前の版に戻しました(題名も「旧題」に戻しました)',
+    );
     const btn = paint(h.root, h.d);
     expect(btn.getAttribute('data-pkc-undo'), '押し先が「元に戻す」だと伝わっていない').toBe('1');
     btn.click();
     await tick();
     expect(h.d.getState().openBody?.body, '前提:戻す前の本文に戻った').toBe('# 戻す前');
-    expect(h.d.getState().notice, '同じ字を出し続けている').toBe('「戻す前」を、戻す前の本文に戻しました');
+    expect(h.d.getState().notice, '同じ字を出し続けている').toBe(
+      '「戻す前」を、戻す前の本文に戻しました(題名も「戻す前」に戻しました)',
+    );
     expect(h.d.getState().restoreUndo ?? null, '元に戻すを重ねて出している').toBeNull();
     expect(paint(h.root, h.d).hidden).toBe(true);
   });
 
   it('対照群: 履歴の「この版に戻す」(印なし)は、従来の知らせのまま', async () => {
     const h = await restored(true);
-    expect(h.d.getState().notice).toBe('「旧題」を前の版に戻しました');
+    expect(h.d.getState().notice).toBe('「t-e1」を前の版に戻しました(題名も「旧題」に戻しました)');
     h.d.dispatch({ type: 'RESTORE_REVISION', revId: 'r-10' });
     await tick();
-    expect(h.d.getState().notice).toBe('「戻す前」を前の版に戻しました');
+    expect(h.d.getState().notice).toBe('「旧題」を前の版に戻しました(題名も「戻す前」に戻しました)');
   });
 });

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, answerAppDialog } from './helpers';
 
 /**
  * 整理の面(#240 段①〜⑤。user 指示 2026-08-17
@@ -305,6 +305,91 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
   // ⑤ 🔴 **戻せる**(ゴミ箱へ入っただけ)
   await clickReal(page, '[data-pkc-action="show-trash"]');
   await expect(page.locator('[data-pkc-region="filer-trash"]')).toContainText('件');
+
+  /**
+   * 🔴 束 G2(台帳 #1852 / 依頼 301・106・300・140): ゴミ箱の画面。**新しく起動せず、この道中に足す**。
+   * ① 行ごとの「完全に消す」── 確認 → その行だけ消え、もう片方は「ゴミ箱から戻す」で元の並びに戻る
+   * ② 「自分で並べた順」の 2 番目をゴミ箱の一覧から戻すと 2 番目へ戻り、更新日時は移す前のまま
+   * ③ 「ゴミ箱を空にする」の後は件数と、添付の容量の空け方を言う
+   * ④ 束 G1(依頼 109): まとめてタグを付けた直後の「元に戻す」は、今回付けた分だけ外す
+   */
+  const trashLis = page.locator('[data-pkc-region="filer-trash"] li');
+  await expect(trashLis, '前提: ゴミ箱に 2 件').toHaveCount(2);
+  await clickReal(page, trashLis.filter({ hasText: 'ノート1' }).locator('[data-pkc-action="purge-trash"]'));
+  const purgeAsk = await answerAppDialog(page, 'ok');
+  expect(purgeAsk, '確認が題名を言っていない').toContain('ノート1');
+  expect(purgeAsk, '確認が不可逆だと言っていない').toContain('元に戻せません');
+  await expect(trashLis, '押した行だけが消えていない').toHaveCount(1);
+  await expect(trashLis.first(), '消えたのが別の行').toContainText('ノート2');
+  const statusG2 = page.locator('[data-pkc-region="status"]');
+  await expect(statusG2, '1 件消した知らせが無い').toContainText('「ノート1」を完全に消しました');
+  await expect(statusG2, '添付の容量の空け方を言っていない').toContainText('使われていない添付を消す');
+  await clickReal(page, trashLis.first().locator('[data-pkc-action="restore-trash"]'));
+  await expect(rows, '戻していない').toHaveCount(2);
+  await expect(rows.nth(0), '戻したノートが元の並び(先頭)に戻っていない').toContainText('ノート2');
+  // 並びの検査用に 2 件足す(ノート4 は「確認済」を最初から持つ = 束 G1 の「同じタグが付いている 1 件」)
+  for (const [t, b] of [
+    ['ノート4', '---\ntags: [確認済]\n---\n本文4\n'],
+    ['ノート5', '本文5\n'],
+  ] as const) {
+    await createEntry(page, 'text');
+    await page.locator('[data-pkc-field="editor-title"]').fill(t);
+    await page.locator('[data-pkc-field="editor-body"]').fill(b);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  await expect(rows).toHaveCount(4); // ノート2・3・4・5
+  // ② 2 番目(ノート3)をゴミ箱へ → 一覧から戻す
+  await rows.nth(1).click();
+  await expect(rows.nth(1)).toContainText('ノート3');
+  const updatedBefore = await page.locator('[data-pkc-field="inspector-updated"]').textContent();
+  expect(updatedBefore, '前提: 更新日時が読めない').toBeTruthy();
+  // ⚠ 右の列は選んだ直後に「参照元」などで後から伸びる ── 押せる位置が落ち着くまで撃ち直す(届かない回は押す前に落ちるので二重には消えない)
+  await expect(async () => {
+    await clickReal(page, '[data-pkc-action="delete-entry"]');
+  }).toPass({ timeout: 10_000 });
+  await expect(rows, '2 番目が消えていない').toHaveCount(3);
+  if (await page.locator('[data-pkc-action="show-trash"]:not([hidden])').count())
+    await clickReal(page, '[data-pkc-action="show-trash"]');
+  await clickReal(page, trashLis.filter({ hasText: 'ノート3' }).locator('[data-pkc-action="restore-trash"]'));
+  await expect(rows, 'ゴミ箱の一覧から戻していない').toHaveCount(4);
+  await expect(rows.nth(1), '戻したノートが 2 番目に戻っていない(末尾へ行った)').toContainText('ノート3');
+  await expect(rows.nth(3), '末尾が入れ替わった').toContainText('ノート5');
+  await expect(
+    page.locator('[data-pkc-field="inspector-updated"]'),
+    '戻したら「更新」が移す前のままでない(いまの時刻になった)',
+  ).toHaveText(updatedBefore!);
+  // ④ ノート3・4・5 を選んで「確認済」を付ける → 元に戻す → 今回付けた 2 件(3 と 5)だけ外れる
+  const chip = page.locator('[data-pkc-region="inspector"] [data-pkc-field="inspector-tag-off"][data-pkc-tag="確認済"]');
+  await rows.nth(2).click();
+  await expect(chip, '前提: ノート4 に最初から付いているタグが情報ペインに出ていない(観測点が空振り)').toHaveCount(1);
+  await rows.nth(1).click();
+  await expect(chip, '前提: ノート3 にまだ付いていない').toHaveCount(0);
+  await rows.nth(2).click({ modifiers: ['ControlOrMeta'] });
+  await rows.nth(3).click({ modifiers: ['ControlOrMeta'] });
+  await expect(bulk).toContainText('3 件');
+  await page.locator('[data-pkc-field="bulk-tag"]').fill('確認済');
+  await clickReal(page, '[data-pkc-action="bulk-tag-add"]');
+  await expect(statusG2, 'タグを付けた知らせが出ない(2 件に付き、1 件は既に付いていた)').toContainText('2 件に付けました / 1 件は既に付いていました');
+  const tagUndo = page.locator('[data-pkc-field="status-undo"]');
+  await expect(tagUndo, 'まとめてタグを付けた直後に「元に戻す」が出ない').toBeVisible();
+  await expect(tagUndo).toHaveText('元に戻す');
+  await clickReal(page, tagUndo);
+  await rows.nth(1).click();
+  await expect(chip, '元に戻したのに ノート3 のタグが残っている').toHaveCount(0);
+  await rows.nth(3).click();
+  await expect(chip, '元に戻したのに ノート5 のタグが残っている').toHaveCount(0);
+  await rows.nth(2).click();
+  await expect(chip, 'もとから付いていた ノート4 のタグまで外れた').toHaveCount(1);
+  // ③ ゴミ箱を空にする → 件数と容量の空け方
+  await rows.nth(3).click();
+  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await expect(rows).toHaveCount(3);
+  if (await page.locator('[data-pkc-action="show-trash"]:not([hidden])').count())
+    await clickReal(page, '[data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="purge-trash"]:not([data-pkc-trash-lid])');
+  expect(await answerAppDialog(page, 'ok'), '空にする確認が不可逆だと言っていない').toContain('元に戻せません');
+  await expect(statusG2, '空にした後に件数を言っていない').toContainText('1 件を消しました');
+  await expect(statusG2, '空にした後に添付の容量の空け方を言っていない').toContainText('使われていない添付を消す');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

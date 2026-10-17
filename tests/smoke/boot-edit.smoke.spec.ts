@@ -108,6 +108,19 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toContainText('二稿');
 
+  // 🔴 束 G1(台帳 #1852 / 依頼 229): 二稿を保存した後に題名だけ変える(F2)── 履歴の版は初稿の題名を持つ。
+  //   履歴から戻すと「題名も戻した」と言い、「元に戻す」で題名も本文も戻す前へ帰る
+  const titleRow = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first();
+  const firstTitle = (await page.locator('[data-pkc-field="detail-title"]').textContent())?.trim() ?? '';
+  expect(firstTitle, '前提: 初稿の題名が空').not.toBe('');
+  await clickReal(page, titleRow);
+  await page.keyboard.press('F2');
+  const renameBox = page.locator('[data-pkc-field="row-rename"]');
+  await expect(renameBox, '名前を変える欄が出ない').toBeVisible();
+  await renameBox.fill('改名した二稿');
+  await renameBox.press('Enter');
+  await expect(titleRow, '改名できていない').toContainText('改名した二稿');
+
   await clickReal(page, '[data-pkc-action="show-history"]');
   const panel = page.locator('[data-pkc-field="history-panel"]');
   await expect(panel).toBeVisible();
@@ -118,9 +131,15 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
   // 🔴 戻した直後の「元に戻す」(依頼 68-1)を実ブラウザで押す(#1087)── 戻す前の本文(二稿)へ帰る。
   //   ⚠ この口は #1727 で「別のタブが編集中か」を問う形(非同期)になった ── 押して効くことをここで見る
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('前の版に戻しました');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '題名も戻したと言っていない',
+  ).toContainText(`題名も「${firstTitle}」に戻しました`);
+  await expect(titleRow, '一覧の題名が初稿に戻っていない').toContainText(firstTitle);
   await clickReal(page, '[data-pkc-field="status-undo"]');
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toContainText('二稿');
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('戻す前の本文に戻しました');
+  await expect(titleRow, '元に戻したのに題名が二稿のまま戻らない').toContainText('改名した二稿');
 
   // ── P5b: 削除 → ゴミ箱 → 復元(sidebar に戻る)──
   // 確認は出さない(#1087 流れ 29)── 押したらそのまま移る

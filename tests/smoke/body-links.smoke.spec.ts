@@ -372,17 +372,24 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   await clickReal(page, '[data-pkc-browse="filer"]');
   await clickReal(page, '[data-pkc-action="show-trash"]');
   await expect(page.locator('[data-pkc-region="filer-trash"] li'), '前提: ゴミ箱に 1 件').toHaveCount(1);
-  const raced = await page.evaluate(() => {
+  /**
+   * ⚠ 押す相手は「いま開いているノート**以外**」にする(台帳 #1852 G2 / 依頼 106 A)。戻したノートが元の並びに戻るようになり、
+   *   捨てた直後に開くノートが変わった ── 直す前は 2026-10-16、いまは「リンク元」。開いているノートを押しても選択は
+   *   動かないので、競合の窓にならない。観測は「押したノートの題名のまま」。
+   */
+  const openedNow = (await page.locator('[data-pkc-split-main] [data-pkc-field="detail-title"]').textContent()) ?? '';
+  const raceTitle = openedNow.includes('リンク元') ? '2026-10-16' : 'リンク元';
+  const raced = await page.evaluate((want) => {
     const restore = document.querySelector<HTMLElement>('[data-pkc-action="restore-trash"]');
     const row =
       Array.from(
         document.querySelectorAll<HTMLElement>('[data-pkc-region="filer-table"] [data-pkc-entry]'),
-      ).find((r) => (r.textContent ?? '').includes('リンク元')) ?? null;
+      ).find((r) => (r.textContent ?? '').includes(want)) ?? null;
     if (restore === null || row === null) return null;
     restore.click();
     row.click();
     return row.textContent;
-  });
+  }, raceTitle);
   expect(raced, '前提: 戻すボタンか別のノートの行が見つからない').not.toBeNull();
   await expect(
     page.locator('[data-pkc-region="status"]'),
@@ -391,7 +398,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   await expect(
     page.locator('[data-pkc-split-main] [data-pkc-field="detail-title"]'),
     '戻し終わった後、押す前に選び直したノートの選択が戻したノートに奪われた',
-  ).toContainText('リンク元');
+  ).toContainText(raceTitle);
 
   expect(errors).toEqual([]);
 });

@@ -357,6 +357,31 @@ test('🔴 Shift + F4 で、いまの場所にノートを作る(面から出な
   await expect(page.locator(ROWS('left'))).toHaveCount(before + 2);
   await expect(page.locator(ROWS('left'))).toContainText(['新しいフォルダ']);
 
+  /**
+   * 🔴 束 G1(台帳 #1852 / 依頼 228): 右のペインが開いているフォルダを、左から「ゴミ箱へ」入れると、
+   * 右はいちばん上ではなく**親のフォルダ**を見せ、そう言う。起動は増やさない(上で作った「はこ」の中の「新しいフォルダ」を使う)。
+   */
+  await page.locator(ROWS('right')).first().dblclick(); // 右も「はこ」の中へ
+  await expect(page.locator(`${PANE('right')} [data-pkc-region="dual-crumbs"]`)).toContainText('はこ');
+  await page.locator(ROWS('right')).filter({ hasText: '新しいフォルダ' }).dblclick(); // 右は「新しいフォルダ」の中
+  await expect(
+    page.locator(`${PANE('right')} [data-pkc-region="dual-crumbs"]`),
+    '前提: 右が「新しいフォルダ」の中に入っていない',
+  ).toContainText('新しいフォルダ');
+  await page.locator(ROWS('left')).filter({ hasText: '新しいフォルダ' }).click();
+  await clickReal(page, '[data-pkc-field="dual-delete"]');
+  await expect(
+    page.locator(ROWS('left')).filter({ hasText: '新しいフォルダ' }),
+    '前提: 左の「新しいフォルダ」がゴミ箱へ移っていない',
+  ).toHaveCount(0);
+  const rightCrumbs = page.locator(`${PANE('right')} [data-pkc-region="dual-crumbs"]`);
+  await expect(rightCrumbs, '右が親のフォルダ「はこ」へ移っていない').toContainText('はこ');
+  await expect(rightCrumbs, '右がまだ消えたフォルダを指している').not.toContainText('新しいフォルダ');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '移ったことを親の名前つきで言っていない',
+  ).toContainText('開いていたフォルダがゴミ箱へ移ったので、親のフォルダ「はこ」を見せています');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

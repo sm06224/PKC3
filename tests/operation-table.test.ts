@@ -399,7 +399,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 どれも押し口は画面のボタン 1 か所にしか無く、鍵も持たない(`open-storage-check` と同じ置き場)。
    */
   'back-to-help', 'open-system-office', 'sql-copy',
-  'toggle-todo', 'undo-append', 'undo-dual-move', 'undo-import', 'undo-move', 'undo-rename', 'use-copied',
+  'toggle-todo', 'undo-append', 'undo-bulk-tag', 'undo-dual-move', 'undo-import', 'undo-move', 'undo-rename', 'use-copied',
   /**
    * ⚠ **2026-09-21(設計 doc §7、段②a)で 3 件増やした** ── メッセージを開く /
    *   保管件数を選ぶ / 書き出す。🔑 押し所は状態の行の 1 個所と「システム」の
@@ -884,8 +884,10 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `total` +1 / `receivers` +1 / `registered` +1 / `both` +1(`unregistered` は動かない)。
       // ⚠ 2026-10-17(依頼 337): 一覧の Home / End / PageUp / PageDown(`filer-row-first` / `-last` / `-page-up` / `-page-down`)で登記 +4 ── 鍵の既定を持つ命令で、受け手は `runFilerKey` / `runDualKey`(押しボタンは持たない)。`registered` +4 / `total` +4 / `outsideActionsTable` +4(`receivers` と `unregistered` は動かない)。
       // ⚠ 2026-10-17(台帳 #1852 束 E2、#1163 依頼 191): 予定表の「週の始まり」(`set-schedule-week-start`)で受け手 +1 ── 登記は増えない(鍵を持たない画面の選択。`set-schedule-lead` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 455,
-      receivers: 382,
+      // ⚠ 2026-10-17(台帳 #1852 G1 / 依頼 109 A): まとめてタグを付けた直後の「元に戻す」(`undo-bulk-tag`)で受け手 +1 ── 登記は増えない
+      //   (押し口は画面の下の知らせの隣の 1 か所にしか無く、鍵も持たない。`undo-dual-move` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 456,
+      receivers: 383,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       // ⚠ 2026-10-17(#1163 依頼 153): 左のペインの「上へ動かす」「下へ動かす」(`move-order-up` / `move-order-down`)の 2 件を登記 ──
@@ -893,7 +895,7 @@ describe('操作の全数台帳(#582 段①)', () => {
       registered: 179,
       both: 106,
       outsideActionsTable: 73,
-      unregistered: 276,
+      unregistered: 277,
     });
   });
 

@@ -1639,7 +1639,17 @@ export class FilerRenderer {
         restore.setAttribute('data-pkc-rev-id', t.revId);
         restore.setAttribute('data-pkc-trash-lid', t.entryLid);
         restore.textContent = 'ゴミ箱から戻す';
-        li.append(text, restore);
+        /**
+         * 🔴 **1 件だけ完全に消す**(台帳 #1852 G2 / 依頼 301 A)。⚠ 直す前は「ゴミ箱を空にする」(全部)しか無く、
+         *   人に見せたくないノート 1 件を消すには、戻したいノートまで道連れだった。押し口は上の「空にする」と同じ
+         *   `purge-trash`(行の `data-pkc-trash-lid` を持つ回だけ 1 件)── 確認は同じく先に出る。
+         */
+        const purgeOne = document.createElement('button');
+        purgeOne.type = 'button';
+        purgeOne.setAttribute('data-pkc-action', 'purge-trash');
+        purgeOne.setAttribute('data-pkc-trash-lid', t.entryLid);
+        purgeOne.textContent = '完全に消す';
+        li.append(text, restore, purgeOne);
         ul.append(li);
       }
       trashBar.append(ul);

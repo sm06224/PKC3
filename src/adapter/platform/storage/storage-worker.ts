@@ -1738,6 +1738,11 @@ function pruneChain(database: Database, cid: string, lid: string, keepLatest: nu
 
 /**
  * body 変更に伴う鎖の維持(同 tx で呼ぶこと)。
+ *
+ * 🔴 **版の日時 = その本文を書いた時刻**(台帳 #1852 G1 / 依頼 139 ②)。直す前は「その版が次の保存で置き換わった時刻」で、
+ * 月曜に書いて金曜に直すと月曜の本文の行に「金曜」と出ていた。`oldWrittenAt` = 置き換える前の行の更新日時
+ * (その本文が最後に書かれた時刻)。渡されなければ(行が時刻を持たない古い器)従来どおり置き換えた時刻。
+ * ⚠ 既に積まれている版の日時は書き換えない(古い版は従来の意味のまま ── 直せるのはこれから積む分)。
  * @returns 積んだかどうか(checkpoint で新しい行を作ったら true)
  */
 function maintainChain(
@@ -1750,6 +1755,7 @@ function maintainChain(
   oldArchetype: string,
   checkpoint: boolean,
   keepLatest: number,
+  oldWrittenAt: string | null = null,
 ): { added: boolean; pruned: number } {
   const head = headRevision(database, cid, lid);
   const oldHash = contentHash64Hex(oldBody);
@@ -1763,11 +1769,12 @@ function maintainChain(
       sql: `INSERT INTO revisions
               (cid, id, entry_lid, created_at, rev_order, snapshot,
                title, archetype, content_hash, kind)
-            VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?)`,
+            VALUES (?, ?, ?, COALESCE(?, datetime('now')), ?, ?, ?, ?, ?, ?)`,
       bind: [
         cid,
         `rev-${crypto.randomUUID()}`,
         lid,
+        oldWrittenAt,
         nextOrder,
         enc.snapshot,
         oldTitle,
@@ -2043,12 +2050,29 @@ function writeParent(
   lid: string,
   parentLid: string | null,
   relationId: string,
+  /**
+   * 🔴 **同じ tx で、親をもう何本か足す**(台帳 #1852 G1 / 依頼 227 A)。2 つ以上のフォルダに入っていたノートを移したあとの
+   * 「元に戻す」が、**入っていたフォルダ全部**へ戻すための口。⚠ 1 本目(`parentLid`)と同じ門(輪・id のぶつかり)を通す。
+   */
+  alsoIn: ReadonlyArray<{ parentLid: string; relationId: string }> = [],
 ): void {
   database.exec({
     sql: `DELETE FROM relations WHERE cid = ? AND to_lid = ? AND kind = 'structural'`,
     bind: [cid, lid],
   });
   if (parentLid === null) return;
+  addParentEdge(database, cid, lid, parentLid, relationId);
+  for (const extra of alsoIn) addParentEdge(database, cid, lid, extra.parentLid, extra.relationId);
+}
+
+/** 居場所の辺を 1 本足す(`writeParent` の後半。輪になる辺・ぶつかる id は断る)。 */
+function addParentEdge(
+  database: Database,
+  cid: string,
+  lid: string,
+  parentLid: string,
+  relationId: string,
+): void {
   /**
    * 🔴 **輪になる移動は断る ── 同じ tx の中で、新しい親から祖先を辿る**(#1087)。
    *
@@ -2168,9 +2192,11 @@ function writeEntryRow(
   },
 ): { stamps: EntryStamps; conflict: boolean } {
   const old = database.selectObjects(
-    'SELECT title, archetype, entry_order, body FROM entries WHERE cid = ? AND lid = ?',
+    'SELECT title, archetype, entry_order, body, updated_at FROM entries WHERE cid = ? AND lid = ?',
     [cid, entry.lid],
-  )[0] as { title: string; archetype: string; entry_order: number; body: string } | undefined;
+  )[0] as
+    | { title: string; archetype: string; entry_order: number; body: string; updated_at: string | null }
+    | undefined;
   /**
    * 🔴 **本文だけを書く**(#1087、複数タブの見直し。`keepMeta`)── 既に在る行の題名・種類・並びは disk の値を保つ。
    * ⚠ 同じ tx の中で読んだ値なので、別のタブの改名・並べ替えとの間に隙間が無い。
@@ -2210,6 +2236,7 @@ function writeEntryRow(
         old.archetype,
         opts.checkpoint === true,
         opts.keepLatest ?? DEFAULT_REVISION_KEEP,
+        old.updated_at,
       );
     } catch {
       /* 履歴の維持失敗は本文の保存を巻き添えにしない */
@@ -2239,6 +2266,8 @@ function writeEntryRow(
       bodyChars: entry.body.length,
       // ⚠ **書いたときだけ名乗る**(旧 worker は名乗らない = 呼び側が 2 手へ落ちる)
       ...(opts.parent ? { parentWritten: true } : {}),
+      // 🔴 編集の保存なのに行が無かった = 別のタブが先に消していた(依頼 108 A)── 書いたうえで、呼び側が言う
+      ...(opts.keepMeta === true && !old ? { recreated: true } : {}),
     },
     conflict: false,
   };
@@ -4008,9 +4037,18 @@ const handlers: Handlers = {
     database.exec('BEGIN IMMEDIATE');
     try {
       const row = database.selectObjects(
-        'SELECT title, archetype, body, created_at FROM entries WHERE cid = ? AND lid = ?',
+        'SELECT title, archetype, body, created_at, updated_at, entry_order FROM entries WHERE cid = ? AND lid = ?',
         [req.cid, req.lid],
-      )[0] as { title: string; archetype: string; body: string; created_at: string | null } | undefined;
+      )[0] as
+        | {
+            title: string;
+            archetype: string;
+            body: string;
+            created_at: string | null;
+            updated_at: string | null;
+            entry_order: number | null;
+          }
+        | undefined;
       if (row && req.untouched === true) {
         /**
          * 🔴 **何も書かれていない作りたてのノートは、ゴミ箱を経由せず行ごと消す**(#1087)。
@@ -4036,15 +4074,25 @@ const handlers: Handlers = {
           //   頭の版は**改名前の題名**のままで、ゴミ箱の一覧にも、戻したノートにもその題名が出ていた
           //   (戻すときの題名はこの行から読む)。改名は本文に触らない口(`renameEntry`)なので、ここで拾う
           database.exec({
-            sql: `UPDATE revisions SET snapshot = ?, kind = 'full', title = ?, archetype = ?, entry_created_at = ? WHERE cid = ? AND id = ?`,
-            bind: [row.body, row.title, row.archetype, row.created_at, req.cid, head.id],
+            sql: `UPDATE revisions SET snapshot = ?, kind = 'full', title = ?, archetype = ?, entry_created_at = ?,
+                         entry_order = ?, entry_updated_at = ? WHERE cid = ? AND id = ?`,
+            bind: [
+              row.body,
+              row.title,
+              row.archetype,
+              row.created_at,
+              row.entry_order === null ? null : String(row.entry_order),
+              row.updated_at,
+              req.cid,
+              head.id,
+            ],
           });
         } else {
           database.exec({
             sql: `INSERT INTO revisions
                     (cid, id, entry_lid, created_at, rev_order, snapshot,
-                     title, archetype, content_hash, kind, entry_created_at)
-                  VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, 'full', ?)`,
+                     title, archetype, content_hash, kind, entry_created_at, entry_order, entry_updated_at)
+                  VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, 'full', ?, ?, ?)`,
             bind: [
               req.cid,
               `rev-${crypto.randomUUID()}`,
@@ -4055,6 +4103,8 @@ const handlers: Handlers = {
               row.archetype,
               hash,
               row.created_at,
+              row.entry_order === null ? null : String(row.entry_order),
+              row.updated_at,
             ],
           });
           // 🔴 ゴミ箱へ移すときに足す行の後も刈る(#1087)── 刈らないと「移す → 戻す → 保存」の
@@ -4146,7 +4196,7 @@ const handlers: Handlers = {
     const database = need();
     database.exec('BEGIN IMMEDIATE');
     try {
-      writeParent(database, req.cid, req.lid, req.parentLid, req.relationId);
+      writeParent(database, req.cid, req.lid, req.parentLid, req.relationId, req.alsoIn ?? []);
       database.exec('COMMIT');
     } catch (err) {
       try {
@@ -4358,6 +4408,26 @@ const handlers: Handlers = {
     ) as unknown as ResultMap['listTrash'],
   purgeTrash: (req) => {
     const database = need();
+    /**
+     * 🔴 **1 件だけ完全に消す**(台帳 #1852 G2 / 依頼 301 A)。下の「空にする」の注記が予告していた部分 purge ──
+     * 消すのは**この lid の履歴と、この lid に触るつながり**だけ(ほかのゴミ箱のノートの居場所を壊さない)。
+     * ⚠ 生きているノート(entries に居る lid)は消さない ── 画面が古くて、戻した後に押されても履歴を落とさない。
+     */
+    if (req.lid !== undefined) {
+      database.exec({
+        sql: `DELETE FROM revisions
+               WHERE cid = ?1 AND entry_lid = ?2
+                 AND entry_lid NOT IN (SELECT lid FROM entries WHERE cid = ?1)`,
+        bind: [req.cid, req.lid],
+      });
+      const purgedOne = database.changes();
+      if (purgedOne > 0)
+        database.exec({
+          sql: `DELETE FROM relations WHERE cid = ?1 AND (from_lid = ?2 OR to_lid = ?2)`,
+          bind: [req.cid, req.lid],
+        });
+      return { purged: purgedOne };
+    }
     database.exec({
       sql: `DELETE FROM revisions
              WHERE cid = ?1
@@ -4400,7 +4470,7 @@ const handlers: Handlers = {
     // 「その entry の、目標以降の行」だけ(他 entry も古い側も触らない)
     const database = need();
     const target = database.selectObjects(
-      `SELECT entry_lid, rev_order, title, archetype, content_hash, entry_created_at
+      `SELECT entry_lid, rev_order, title, archetype, content_hash, entry_created_at, entry_order, entry_updated_at
          FROM revisions WHERE cid = ? AND id = ?`,
       [req.cid, req.id],
     )[0] as
@@ -4411,6 +4481,8 @@ const handlers: Handlers = {
           archetype: string | null;
           content_hash: string | null;
           entry_created_at: string | null;
+          entry_order: string | number | null;
+          entry_updated_at: string | null;
         }
       | undefined;
     if (!target) return null;
@@ -4494,6 +4566,12 @@ const handlers: Handlers = {
       title: target.title,
       archetype: target.archetype,
       entryCreatedAt: target.entry_created_at,
+      // 🔴 TEXT で控えた並びを数へ読み戻す(数にならなければ控え無し ── 従来どおり)
+      entryOrder:
+        target.entry_order === null || !Number.isFinite(Number(target.entry_order))
+          ? null
+          : Number(target.entry_order),
+      entryUpdatedAt: target.entry_updated_at,
     };
   },
   putAssetMeta: (req) => {

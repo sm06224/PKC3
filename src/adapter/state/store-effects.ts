@@ -111,7 +111,7 @@ import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { SearchDetailRow } from '@features/filter/search-snippet';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
-import type { TagInputField } from './app-state';
+import type { TagInputField, TagUndoGroup } from './app-state';
 import {
   sectionSaveFailureNote,
   codeSaveFailureNote,
@@ -134,6 +134,10 @@ import { replaceCodeFenceContent } from '@features/markdown/code-fence-edit';
  * 届く(review K の解消)。effect 層は実行時に state を参照しない
  * (時間差窓 C-1 の解消 ── 発火時に確定した行をそのまま書く)。
  */
+/** 編集の保存で、別のタブが先に消していたノートを作り直したとき(依頼 108 A)。 */
+export const RECREATED_BY_SAVE_TEXT =
+  'このノートは別のタブでゴミ箱へ移されたか、消されていました。保存したので、ノートとして戻っています';
+
 /** ゴミ箱から戻そうとしたノートが、もう戻っていたとき(別のタブで先に戻した。#1087)。 */
 export const TRASH_ALREADY_RESTORED_TEXT = 'このノートはもうゴミ箱から戻っています(別のタブで戻したかもしれません)。上書きしていません';
 
@@ -336,7 +340,13 @@ export interface StorePort {
    * 居場所を張り替える(フォルダ整理)。`parentLid: null` = ルートへ。
    * ⚠ 1 op = 1 tx ── 「落として張る」を割らない。
    */
-  setEntryParent(lid: string, parentLid: string | null, relationId: string): Promise<void>;
+  setEntryParent(
+    lid: string,
+    parentLid: string | null,
+    relationId: string,
+    /** 🔴 2 本目以降の親(依頼 227 A)。省略 = 1 本だけ。 */
+    alsoIn?: ReadonlyArray<{ parentLid: string; relationId: string }>,
+  ): Promise<void>;
   /**
    * 🔴 **関係を作る・書き換える**(#185)。⚠ **省略可** ── 持たない配線
    * (古い test の fake)では関係の追加が効かないだけで、他は動く。
@@ -379,6 +389,9 @@ export interface StorePort {
     archetype: string | null;
     /** 🔴 ゴミ箱へ移した版が控えた作成日時(#1087)。無ければ `null` / 省略(従来どおり「いま」)。 */
     entryCreatedAt?: string | null;
+    /** 🔴 ゴミ箱へ移す前の並びの位置・更新日時の控え(依頼 106 A・300 A)。無ければ `null` / 省略。 */
+    entryOrder?: number | null;
+    entryUpdatedAt?: string | null;
   } | null>;
   listTrash(): Promise<
     Array<{
@@ -389,7 +402,8 @@ export interface StorePort {
       archetype: string | null;
     }>
   >;
-  purgeTrash(): Promise<{ purged: number }>;
+  /** 🔴 `lid` を渡すと、その 1 件だけ完全に消す(依頼 301 A)。省略 = ゴミ箱を空にする。 */
+  purgeTrash(lid?: string): Promise<{ purged: number }>;
 }
 
 /**
@@ -2186,6 +2200,13 @@ export function connectStoreEffects(
                 body: ev.entry.body,
               });
             stamp(ev.entry.lid, stamps);
+            /**
+             * 🔴 **別のタブで消されていたノートを保存したら、そう言う**(台帳 #1852 G1 / 依頼 108 A)。
+             * ⚠ 直す前は何も言わず、消したはずのノートが元のフォルダに黙って戻ってきた。打った字は失わない(保存する)のが
+             *   第一で、そのうえで消した側の人が気づけるようにする。
+             */
+            if (stamps.recreated === true && !disposed)
+              dispatcher.dispatch({ type: 'OP_NOTICE', message: RECREATED_BY_SAVE_TEXT });
           } catch (e) {
             if (!disposed) dispatcher.dispatch({ type: 'SYS_ERROR', error: bodySaveErrorText(e) });
           }
@@ -2212,7 +2233,7 @@ export function connectStoreEffects(
         enqueue(async () => {
           if (disposed) return;
           try {
-            await store.setEntryParent(ev.lid, ev.parentLid, ev.relationId);
+            await store.setEntryParent(ev.lid, ev.parentLid, ev.relationId, ev.alsoIn);
           } catch (e) {
             // ⚠ 画面は既に動かしている(楽観)── 失敗は**必ず言う**。
             //    黙ると「移したつもりで disk は元のまま」になり、次の再読込で戻る
@@ -2962,6 +2983,8 @@ export function connectStoreEffects(
            * 🔑 だから**名前ごとに数えて、1 通で全部言う**。
            */
           const wroteBy = new Map<string, number>();
+          /** 🔴 タグごとに、今回**書いた**ノート(依頼 109 A「元に戻す」で外す相手。もとから付いていた分は入らない)。 */
+          const wroteLids = new Map<string, string[]>();
           const skippedBy = new Map<string, number>();
           /** 🔴 **上限で入らなかった数**(#640)── `skippedBy` と混ぜると嘘になる。 */
           const limitBy = new Map<string, number>();
@@ -3061,7 +3084,12 @@ export function connectStoreEffects(
                */
               const tally = (): void => {
                 for (const [tag, why] of applied.outcomes) {
-                  if (why === 'wrote') bump(wroteBy, tag);
+                  if (why === 'wrote') {
+                    bump(wroteBy, tag);
+                    const l = wroteLids.get(tag);
+                    if (l) l.push(t.lid);
+                    else wroteLids.set(tag, [t.lid]);
+                  }
                   else if (why === 'limit') bump(limitBy, tag);
                   else bump(skippedBy, tag);
                 }
@@ -3171,7 +3199,27 @@ export function connectStoreEffects(
           // 🔴 名前の変更の 2 回目は、1 回目(外す)の知らせに続けて言う ── 上書きすると外せなかった件数が消える(#1087)
           const previous = ev.afterPrevious === true ? dispatcher.getState().notice : null;
           const said = parts.join(' / ');
-          dispatcher.dispatch({ type: 'OP_NOTICE', message: previous ? `${previous} / ${said}` : said });
+          /**
+           * 🔴 **付けた直後に「元に戻す」を出す**(台帳 #1852 G1 / 依頼 109 A)。⚠ まとめて付ける操作は履歴に版を残さないので、
+           *   間違えても履歴から戻せなかった。逆の「外す」で戻そうとすると、もとから付いていたノートからも外れる ──
+           *   だから**今回書いたノートだけ**を覚えておき、押すとそこから外す。付ける回(1 回目の名前変更の「外す」は除く)だけ。
+           */
+          const undoGroups: TagUndoGroup[] = [];
+          if (ev.mode === 'add' && ev.afterPrevious !== true) {
+            for (const tag of ev.tags) {
+              const lids = wroteLids.get(tag) ?? [];
+              if (lids.length === 0) continue;
+              const key = lids.join('\u0000');
+              const g = undoGroups.find((x) => x.lids.join('\u0000') === key);
+              if (g) (g.tags as string[]).push(tag);
+              else undoGroups.push({ tags: [tag], lids });
+            }
+          }
+          dispatcher.dispatch({
+            type: 'OP_NOTICE',
+            message: previous ? `${previous} / ${said}` : said,
+            ...(undoGroups.length > 0 ? { tagUndo: { groups: undoGroups } } : {}),
+          });
           /**
            * 🔴 **上限で入らなかった名前を欄へ戻す**(#640 案 A)── 知らせの字だけでは
            *   打ち直しになる。⚠ 「既に付いていた」は戻さない(入っている)。
@@ -3438,11 +3486,18 @@ export function connectStoreEffects(
                 // 読めなければ口を出さない(従来どおり)
               }
             }
+            /**
+             * 🔴 **題名だけが変わった復元**(台帳 #1852 G1 / 依頼 229 B)。本文が同じだと版は積まれない(または積まれた版が
+             * 別の題名を指す)── 「元に戻す」は戻す前の題名を持たせ、題名だけを戻す。⚠ 版が積まれた回(本文も変わった)は従来どおり。
+             */
+            const titleOnly = title !== ev.title && rev.body === current;
+            if (titleOnly) undoRevId = undefined;
             if (!disposed)
               dispatcher.dispatch({
                 type: 'ENTRY_RESTORED',
                 mode: 'revision',
                 ...(undoRevId === undefined ? {} : { undoRevId }),
+                ...(titleOnly ? { undoTitle: ev.title } : {}),
                 ...(ev.fromUndo === true ? { fromUndo: true as const } : {}),
                 meta: {
                   lid: ev.lid,
@@ -3573,9 +3628,16 @@ export function connectStoreEffects(
               title,
               archetype,
               body: rev.body,
-              entryOrder: ev.entryOrder,
+              /**
+               * 🔴 **並びの位置はゴミ箱へ移す前の物へ戻す**(台帳 #1852 G2 / 依頼 106 A)。「元に戻す」は移す前の並びを
+               *   `ev.entryOrder` に持って来る(`explicitOrder`)── 持たない呼び口(ゴミ箱の一覧の「戻す」)は控えを使う。
+               *   控えが無い版(旧ビルドが積んだ行)は従来どおり末尾。
+               */
+              entryOrder: ev.explicitOrder === true ? ev.entryOrder : (rev.entryOrder ?? ev.entryOrder),
               // 🔴 作成日はゴミ箱へ移すときの控えを戻す(#1087)── 無い版(旧ビルドが積んだ行)は従来どおり「いま」
               ...(rev.entryCreatedAt ? { createdAt: rev.entryCreatedAt } : {}),
+              // 🔴 更新日時も控えを戻す(依頼 300 A)── 中身は何も変わっていないのに「更新」順で先頭へ飛ばない
+              ...(rev.entryUpdatedAt ? { updatedAt: rev.entryUpdatedAt } : {}),
               status: ext.status,
               date: ext.date,
               archived: ext.archived,
@@ -3630,7 +3692,7 @@ export function connectStoreEffects(
                   archetype,
                   createdAt: null,
                   updatedAt: null,
-                  entryOrder: ev.entryOrder,
+                  entryOrder: ev.explicitOrder === true ? ev.entryOrder : (rev.entryOrder ?? ev.entryOrder),
                   status: ext.status,
                   date: ext.date,
                   archived: ext.archived,
@@ -3663,9 +3725,13 @@ export function connectStoreEffects(
         enqueue(async () => {
           if (disposed) return;
           try {
-            const r = await store.purgeTrash();
+            const r = await store.purgeTrash(ev.lid);
             if (!disposed)
-              dispatcher.dispatch({ type: 'TRASH_PURGED', purged: r.purged });
+              dispatcher.dispatch({
+                type: 'TRASH_PURGED',
+                purged: r.purged,
+                ...(ev.lid === undefined ? {} : { lid: ev.lid }),
+              });
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({

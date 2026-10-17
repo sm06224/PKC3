@@ -14,7 +14,7 @@
  * | 実キーボードの Enter(IME を通らない素の確定) | 合成 event ではない |
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, writesLanded } from './helpers';
 
 const INPUT = '[data-pkc-field="tag-add-input"]';
 const CHIPS = '[data-pkc-region="inspector"] [data-pkc-field="inspector-tag"]';
@@ -156,6 +156,31 @@ test('🔴 札の × で外れ、本文からも消える (#494)', async ({ page
     '反対向きの「関連」が断られない',
   ).toContainText('向きを区別しません');
   await expect(relRows, '断られたのに関連が増えた').toHaveCount(1);
+
+  /**
+   * 🔴 束 G2(台帳 #1852 / 依頼 299): つながりの相手がゴミ箱の中に居ると、右のペインはゴミ箱の一覧を読む前は「ゴミ箱の中かもしれません」、読んだ後は「題名(ゴミ箱の中)」と言い、押しても開かない。
+   * ⚠ 直す前は「(見つかりません)」で、壊れたつながりに見えた。起動は増やさない(上で作った 2 件の関連を使う)。
+   */
+  await pick('長いタグ');
+  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await writesLanded(page);
+  // つながり自体は disk に残る(相手を戻せるように)── 読み込み直すと、相手の居ないつながりとして読まれる
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await pick('読み違える');
+  await expect(relRows, '相手をゴミ箱へ移して読み込み直したら、つながりが消えた(戻せる形で残るはず)').toHaveCount(1);
+  const relTarget = relRows.locator('[data-pkc-field="relation-target-link"]');
+  await expect(relTarget, 'ゴミ箱の中かもしれないと言っていない').toContainText('(見つかりません。ゴミ箱の中かもしれません)');
+  expect(await relTarget.evaluate((el) => el.tagName), '押せる顔(button)になっている').toBe('SPAN');
+  const titleBefore = await page.locator('[data-pkc-field="detail-title"]').allTextContents();
+  await relTarget.click({ force: true });
+  expect(
+    await page.locator('[data-pkc-field="detail-title"]').allTextContents(),
+    '押したら別のノートが開いた(ゴミ箱の中の相手は開かないはず)',
+  ).toEqual(titleBefore);
+  // ゴミ箱の一覧を開いていれば題名も言う
+  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await expect(relTarget, 'ゴミ箱の一覧を開いても題名が出ない').toContainText('長いタグ(ゴミ箱の中)');
 
   /** 🔴 束 H1: フォルダを開くと「中身 N 件」が出る(同じ道中。起動は増やさない)。 */
   await createEntry(page, 'folder');

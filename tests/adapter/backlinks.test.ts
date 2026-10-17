@@ -275,7 +275,8 @@ describe('バックリンクの表示 (#348)', () => {
     const r = paint(s);
     const go = r.querySelector<HTMLElement>('[data-pkc-field="relation-target-link"]');
     expect(go, '前提:つながりの行が出ていない').not.toBeNull();
-    expect(go!.textContent).toBe('(見つかりません)');
+    // ⚠ 2026-10-17(台帳 #1852 G2 / 依頼 299): ゴミ箱の一覧を読む前は断定しない
+    expect(go!.textContent).toBe('(見つかりません。ゴミ箱の中かもしれません)');
     expect(go!.hasAttribute('data-pkc-action')).toBe(false);
     expect(r.querySelector('[data-pkc-action="remove-relation"]'), '消す口が無くなった').not.toBeNull();
   });

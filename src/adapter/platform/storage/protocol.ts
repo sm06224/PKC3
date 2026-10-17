@@ -541,6 +541,11 @@ export type StorageRequest =
       parentLid: string | null;
       /** 張る辺の id(呼び側が採番 ── worker で乱数を作ると test が読めない)。 */
       relationId: string;
+      /**
+       * 🔴 同じ tx で足す、2 本目以降の親(依頼 227 A)。省略 = 1 本だけ(従来どおり)。
+       * ⚠ 旧い holder は知らずに無視する(1 本目だけ張られる = 従来の動き)。
+       */
+      alsoIn?: Array<{ parentLid: string; relationId: string }>;
     }
   | {
       /**
@@ -597,7 +602,11 @@ export type StorageRequest =
   /** revisions が存在する entry_lid の集合(= 生存 + ゴミ箱)。取込の lid 衝突判定用。 */
   | { op: 'listRevisionLids'; cid: string }
   | { op: 'listTrash'; cid: string }
-  | { op: 'purgeTrash'; cid: string }
+  /**
+   * ゴミ箱を空にする。🔴 `lid` を渡すと**その 1 件だけ**を完全に消す(台帳 #1852 G2 / 依頼 301 A)── 履歴と、その lid に触る
+   * つながりだけを落とし、ほかのゴミ箱のノートの居場所には触らない。⚠ 生きているノート(ゴミ箱に居ない lid)は消さない。
+   */
+  | { op: 'purgeTrash'; cid: string; lid?: string }
   | { op: 'putAssetMeta'; cid: string; meta: AssetMetaPut }
   | { op: 'listAssetMetas'; cid: string }
   | { op: 'deleteAssetMeta'; cid: string; key: string }
@@ -857,6 +866,10 @@ export interface RevisionBody {
    * 作成日を「いま」へ作り直さないため。⚠ 控えが無い版(旧ビルドが積んだ・通常の履歴)は `null` / 省略。
    */
   entryCreatedAt?: string | null;
+  /** 🔴 ゴミ箱へ移す前の並びの位置(依頼 106 A)。控えが無ければ `null` / 省略。 */
+  entryOrder?: number | null;
+  /** 🔴 ゴミ箱へ移す前の更新日時(依頼 300 A)。控えが無ければ `null` / 省略。 */
+  entryUpdatedAt?: string | null;
 }
 
 /** entry ごとの revision 件数(snapshot は読まない ── 常駐ゼロの根拠)。 */

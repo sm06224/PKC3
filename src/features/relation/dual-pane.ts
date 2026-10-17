@@ -338,6 +338,12 @@ export function withCursor(pane: DualPaneState, lid: string | null): DualPaneSta
 export function pruneDual(
   state: DualState,
   alive: (lid: string) => boolean,
+  /**
+   * 🔴 **見ていたフォルダが消えたとき、行き先にする「まだ残っている親」**(台帳 #1852 G1 / 依頼 228)。
+   * ⚠ 直す前は消えたら一律ルート(いちばん上の階層)へ飛び、飛んだことも言わなかった。省略 = 従来どおりルート。
+   * 返すのは**生きている**祖先だけ(死んだ lid や `null` = ルート)。履歴 / 裏のタブの行き先は従来どおり落とす。
+   */
+  fallbackOf?: (lid: string) => string | null,
 ): DualState {
   /**
    * 🔴 **履歴からも消えた場所を落とす**(#273 残件)。⚠ 残すと「戻る」が
@@ -385,7 +391,13 @@ export function pruneDual(
       return p;
     const tabs = dead
       ? p.tabs.map((t) => ({
-          scopeLid: t.scopeLid !== null && !alive(t.scopeLid) ? null : t.scopeLid,
+          scopeLid:
+            t.scopeLid !== null && !alive(t.scopeLid)
+              ? (() => {
+                  const up = fallbackOf?.(t.scopeLid) ?? null;
+                  return up !== null && alive(up) ? up : null;
+                })()
+              : t.scopeLid,
           past: pruneList(t.past),
           future: pruneList(t.future),
         }))
@@ -402,4 +414,33 @@ export function pruneDual(
     state.renaming !== null && !alive(state.renaming.lid) ? null : state.renaming;
   if (left === state.left && right === state.right && renaming === state.renaming) return state;
   return { ...state, left, right, renaming };
+}
+
+/**
+ * 🔴 **見ていたフォルダが消えたときの知らせの字**(台帳 #1852 G1 / 依頼 228)。親が残っていれば親を、無ければいちばん上の階層を言う。
+ * ⚠ 字はここ 1 本 ── 別のタブで消えた回(reducer)と、自分で消した回(ゴミ箱へ移した直後の知らせ)が同じ字を出す。
+ */
+export function scopeFallbackNote(parentTitle: string | null): string {
+  return parentTitle === null
+    ? '開いていたフォルダがゴミ箱へ移ったので、いちばん上の階層を見せています'
+    : `開いていたフォルダがゴミ箱へ移ったので、親のフォルダ「${parentTitle}」を見せています`;
+}
+
+/**
+ * 見ていたフォルダが死んだ側があるか(あれば最初の側の行き先 = 親の題名 / `null` = ルート)。無ければ `undefined`。
+ * `before` は消える前の状態、`after` は消えた後の 2 ペイン。判定は「前は在って、いまの現在地が前と違い、前の現在地は死んでいる」。
+ */
+export function scopeFellBack(
+  before: DualState,
+  after: DualState,
+  alive: (lid: string) => boolean,
+  titleOf: (lid: string) => string | undefined,
+): { readonly parentTitle: string | null } | undefined {
+  for (const side of ['left', 'right'] as const) {
+    const was = paneScope(before[side]);
+    if (was === null || alive(was)) continue;
+    const now = paneScope(after[side]);
+    return { parentTitle: now === null ? null : (titleOf(now) ?? null) };
+  }
+  return undefined;
 }
