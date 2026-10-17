@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   alertInApp,
   confirmInApp,
+  isAppDialogOpen,
   DIALOG_REGION,
   pickArchiveInApp,
   pickDateInApp,
@@ -711,8 +712,66 @@ describe('Office の編集の控えの確認(#1228 段 2)', () => {
     cancelBtn().click();
     expect(await a).toBeNull();
     const b = pickOfficeShadowInApp(document.body, NOW - 60_000, NOW);
-    // 暗い地を押す = `target` が <dialog> 自身
-    dialog().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    // 暗い地を押す = `target` が <dialog> 自身(座標は枠の外)
+    dialog().dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: -1, clientY: -1 }));
     expect(await b).toBeNull();
+  });
+});
+
+describe('器の置き場と外の判定(F1 / F3)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    resetAppDialogForTest();
+  });
+
+  it('🔴 F1: 窓(pane)の中の host で開いても、器は最上位の root に置かれる', async () => {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    const pane = document.createElement('div');
+    root.append(pane);
+    document.body.append(root);
+    const p = confirmInApp(pane, '捨てますか');
+    expect(pane.contains(dialog()), '窓の中に置かれている').toBe(false);
+    expect(dialog().parentElement).toBe(root);
+    cancelBtn().click();
+    await p;
+  });
+
+  it('🔴 F1: 開いたまま節点が外されても、取り消しとして解決され、列が進む', async () => {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    const pane = document.createElement('div');
+    root.append(pane);
+    document.body.append(root);
+    const p = confirmInApp(pane, '1 枚目');
+    // 器を直接外す(窓の組み直しが器ごと消す形)
+    dialog().remove();
+    expect(isAppDialogOpen(), '外された器が開いていると数えられている').toBe(false);
+    expect(await p).toBe('cancel');
+    // 次の確認が開ける(列が詰まらない)
+    const next = confirmInApp(pane, '2 枚目');
+    await tick();
+    expect(bodyText()).toBe('2 枚目');
+    expect(isAppDialogOpen()).toBe(true);
+    okBtn().click();
+    expect(await next).toBe('ok');
+  });
+
+  it('🔴 F3: 枠の内側(余白・行間)を押しても取り消さない。枠の外の座標だけ外', async () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const p = pickOfficeShadowInApp(root, Date.now() - 60_000, Date.now());
+    const d = dialog();
+    d.getBoundingClientRect = () =>
+      ({ left: 100, right: 300, top: 100, bottom: 300, width: 200, height: 200 }) as DOMRect;
+    let settled = false;
+    void p.then(() => {
+      settled = true;
+    });
+    d.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 150, clientY: 150 }));
+    await tick();
+    expect(settled, '枠の内側の押下で取り消された').toBe(false);
+    d.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
+    expect(await p).toBeNull();
   });
 });

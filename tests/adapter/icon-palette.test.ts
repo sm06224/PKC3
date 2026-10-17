@@ -179,7 +179,7 @@ describe('置き換えで落とした性質を戻す(§10)', () => {
   it('🔴 外(暗い地)を押すとやめる', async () => {
     const { dialog, picks } = await openPalette();
     // 🔑 暗い地を押すと `target` は `<dialog>` 自身になる(中身を押せば中身が target)
-    dialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    dialog.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: -1, clientY: -1 }));
     for (let i = 0; i < 4; i += 1) await Promise.resolve();
     expect(openDialog(), '外を押しても閉じていない').toBeNull();
     // ⚠ 対照群 ── **中身**を押したときは閉じ方が違う(選んだ値が返る道)。

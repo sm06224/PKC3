@@ -9,6 +9,7 @@ import { initialState } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { openContextMenu, closeContextMenu } from '../../src/adapter/ui/render/context-menu';
+import { confirmInApp, resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { openLightbox, closeLightbox } from '../../src/adapter/ui/render/lightbox';
 
 const MENU = '[data-pkc-region="context-menu"]';
@@ -33,6 +34,7 @@ const key = (target: Element, k: string, extra: KeyboardEventInit = {}): Keyboar
 };
 
 afterEach(() => {
+  resetAppDialogForTest();
   document.body.innerHTML = '';
 });
 
@@ -67,6 +69,21 @@ describe('右クリックのメニュー: 閉じたら焦点が戻る(A1)', () =
     expect(document.activeElement?.closest(MENU)).not.toBeNull();
     closeContextMenu(root);
     expect(document.activeElement).toBe(root.querySelector('#other'));
+  });
+});
+
+describe('右クリックのメニュー: 項目からダイアログを開いて閉じたら行へ焦点が戻る', () => {
+  it('項目 → 確認 → 閉じる で、メニューを開く前に居た行が焦点を持つ', async () => {
+    const { root, opener } = mk();
+    openContextMenu(root, { x: 1, y: 1 }, [{ action: 'a1', label: 'A' }], opener);
+    const item = root.querySelector<HTMLElement>(`${MENU} button`)!;
+    expect(document.activeElement).toBe(item);
+    // binder と同じ順番: 項目の処理が確認を開き、そのあとでメニューを畳む
+    const p = confirmInApp(root, '消しますか');
+    closeContextMenu(root);
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-cancel"]')!.click();
+    await p;
+    expect(document.activeElement, '焦点が行へ戻っていない').toBe(opener);
   });
 });
 

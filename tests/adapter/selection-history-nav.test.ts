@@ -122,7 +122,7 @@ describe('最近開いたノートのピッカー(NAV-4)', () => {
     document.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'h', code: 'KeyH', altKey: true, bubbles: true, cancelable: true }),
     );
-    const rows = root.querySelectorAll<HTMLButtonElement>('[data-pkc-field="entry-pick-row"]');
+    const rows = document.querySelectorAll<HTMLButtonElement>('[data-pkc-field="entry-pick-row"]');
     expect(rows.length).toBeGreaterThanOrEqual(1);
     rows[0]!.click();
     await new Promise((r) => setTimeout(r, 10));
