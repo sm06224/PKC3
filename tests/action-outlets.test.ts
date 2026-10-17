@@ -130,6 +130,11 @@ const UNRESOLVED: readonly string[] = [
    * 🔑 `undo-dual-move` と同じ器(`paintStatusUndo` が `data-pkc-action` を実行時に書き換える)ので、静的な字が source に無い。
    */
   'undo-rename',
+  /**
+   * ⚠ **2026-10-17(台帳 #1852 G1 / 依頼 109 A)で 1 件増えた** ── まとめてタグを付けた直後の「元に戻す」(`undo-bulk-tag`)。
+   * 🔑 `undo-dual-move` と同じ器(`paintStatusUndo` が `data-pkc-action` を実行時に書き換える)ので、静的な字が source に無い。
+   */
+  'undo-bulk-tag',
   'view-big',
 ];
 

@@ -326,12 +326,14 @@ import {
   paneFilterOptions,
   paneOf,
   paneScope,
+  scopeFallbackNote,
+  scopeFellBack,
   type DualSide,
 } from '@features/relation/dual-pane';
 import { appPanes, applyPaneVisibility, refoldPeeked } from '@adapter/ui/render/pane-visibility';
 import { requestAppendFocus, requestBodyFocus, takeAppendFocus } from '@adapter/ui/render/focus-request';
 import { isTouchOnly } from '@adapter/ui/render/touch-device';
-import { currentTrashOffer, LINKED_FROM_SOME, offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
+import { currentTrashOffer, LINKED_FROM_MAYBE, LINKED_FROM_SOME, offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
 import { offerDualMoveUndo, takeDualMoveUndo } from '@adapter/ui/render/dual-move-undo';
 import { resolveRelationTarget } from '@features/relation/target-label';
 import { renameOfferingUndo, takeRenameUndo } from '@adapter/ui/render/rename-undo';
@@ -1350,12 +1352,22 @@ const leftAtRoot = (before: AppState, after: AppState): number => {
 };
 
 /**
+ * 🔴 **移したフォルダを 2 ペインのどちらかが見ていたとき、その行き先を言う字**(台帳 #1852 G1 / 依頼 228)。見ていなければ空。
+ * ⚠ 行き先は reducer が決めて既に載せている(`pruneDual`)── ここは**同じ一文**を、ゴミ箱の知らせへ載せ直すだけ。
+ */
+const dualFellBackText = (before: AppState, after: AppState): string => {
+  const fell = scopeFellBack(before.dual, after.dual, (l) => after.entryMetas.has(l), (l) => after.entryMetas.get(l)?.title);
+  return fell === undefined ? '' : scopeFallbackNote(fell.parentTitle);
+};
+
+/**
  * ゴミ箱へ移したノートへリンクを張っていた、ほかのノートの数(字)。⚠ 参照元は選んでいるノートの分しか引いていない
  * (`state.backlinks`)── 引けていなければ空(言わない)。打ち切られていたら「N 件以上」。
  */
 const linkedFromText = (before: AppState, after: AppState, lid: string): string => {
   const back = before.backlinks;
-  if (!back || back.lid !== lid) return '';
+  // 🔴 まだ調べ終えていない(選んだ直後)なら、待たせずに「かもしれません」と言う(台帳 #1852 G1 / 依頼 231 A)
+  if (!back || back.lid !== lid) return LINKED_FROM_MAYBE;
   const n = back.lids.filter((l) => l !== lid && after.entryMetas.has(l)).length;
   if (n === 0) return '';
   return back.truncated ? `${String(n)} 件以上` : `${String(n)} 件`;
@@ -1492,6 +1504,15 @@ const moveEntriesOfferingUndo = (
   const st = dispatcher.getState();
   const before = st.relations;
   const parentsBefore = resolveCanonicalParents(st.entryMetas, st.relations);
+  // 🔴 入っていたフォルダ全部(依頼 227 A)── 正準親 1 つだけを控えると、戻したとき片方のフォルダにしか戻らない
+  const allBefore = new Map<string, string[]>();
+  for (const r of st.relations) {
+    if (r.kind !== STRUCTURAL || r.fromLid === r.toLid) continue;
+    if (st.entryMetas.get(r.fromLid)?.archetype !== 'folder') continue;
+    const l = allBefore.get(r.toLid);
+    if (l) l.push(r.fromLid);
+    else allBefore.set(r.toLid, [r.fromLid]);
+  }
   let said = '';
   moveEntries(dispatcher, lids, parentLid, (text) => {
     said = text;
@@ -1510,6 +1531,7 @@ const moveEntriesOfferingUndo = (
       lid,
       from: parentsBefore.get(lid) ?? null,
       to: parentsAfter.get(lid) ?? null,
+      ...((allBefore.get(lid)?.length ?? 0) > 1 ? { fromAll: allBefore.get(lid)! } : {}),
     }));
   if (moves.length > 0 && said !== '') offerDualMoveUndo(dispatcher, moves, said);
   else if (said !== '') report?.(said);
@@ -3103,6 +3125,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'undo-trash',
   // 🔴 2 ペインで移した直後の「元に戻す」── 居場所を書き戻すので `move-to-folder` と同じ門
   'undo-dual-move',
+  // 🔴 まとめてタグを付けた直後の「元に戻す」(台帳 #1852 G1 / 依頼 109 A)── タグを書き戻すので同じ門
+  'undo-bulk-tag',
   // 🔴 題名を変えた直後の「元に戻す」(#1657)── 題名を書き戻すので `rename-attachment` と同じ門
   'undo-rename',
   // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── 種類を disk へ書くので、同じ門
@@ -5551,6 +5575,7 @@ function deleteFrom(
         // 🔴 2 件以上のときは一般形を言う(参照元は選んでいる 1 件の分しか引けていないので、件数では言えない。#1087)
         // 🔴 1 件のときは `delete-entry` と同じ字(引けていれば件数)── 直す前は 1 件だと何も言わなかった(#1087)
         moved.length > 1 ? LINKED_FROM_SOME : moved.length === 1 ? linkedFromText(st, after, moved[0]!.lid) : '',
+        dualFellBackText(st, after),
       );
       afterMoved();
     });
@@ -9326,9 +9351,22 @@ const ACTIONS: Record<string, ActionHandler> = {
       if (!st.entryMetas.has(m.lid)) continue;
       if ((parents.get(m.lid) ?? null) !== m.to) continue;
       // 元のフォルダがもう無ければルートへ戻す(居ない親へは入れられない)
-      const parentLid = m.from !== null && st.entryMetas.has(m.from) ? m.from : null;
+      /**
+       * 🔴 **入っていたフォルダ全部へ戻す**(台帳 #1852 G1 / 依頼 227 A)── 2 つ以上に入っていたノートは、まだ居るフォルダ全部へ。
+       *   1 本目(正準の親)が居なければ、居る中の先頭を 1 本目にする(全部居なければルート)。
+       */
+      const homes = (m.fromAll ?? (m.from !== null ? [m.from] : [])).filter((f) => st.entryMetas.has(f));
+      const first = m.from !== null && homes.includes(m.from) ? m.from : (homes[0] ?? null);
+      const parentLid = first;
+      const also = homes.filter((f) => f !== first).map((f) => ({ parentLid: f, relationId: generateLid() }));
       const before = dispatcher.getState().relations;
-      dispatcher.dispatch({ type: 'SET_ENTRY_PARENT', lid: m.lid, parentLid, relationId: generateLid() });
+      dispatcher.dispatch({
+        type: 'SET_ENTRY_PARENT',
+        lid: m.lid,
+        parentLid,
+        relationId: generateLid(),
+        ...(also.length > 0 ? { alsoIn: also } : {}),
+      });
       // 🔴 実際に動いた分だけ数える(#1087)── 元の場所がその後このノートの中へ入っていると、輪になるので断られる
       if (dispatcher.getState().relations !== before) back += 1;
     }
@@ -9339,6 +9377,35 @@ const ACTIONS: Record<string, ActionHandler> = {
           ? `${String(back)} 件を元の場所に戻しました`
           : '戻せるものがありません(移した後に、別の場所へ動かしています)',
     });
+  },
+  /**
+   * 🔴 **まとめてタグを付けた直後の「元に戻す」**(台帳 #1852 G1 / 依頼 109 A)。口は `status-undo`(出し入れは `status-open.ts`)。
+   * ⚠ 新しい書込経路は作らない ── `BULK_TAG`(外す)を、**今回付けたノートだけ**に撃つ(もとから付いていたノートは触らない)。
+   *   別のタブが編集中のノートがあれば、タグ付けと同じ門で止める。編集中などで戻せないときは**黙らない**(`undo-trash` と同じ断り)。
+   */
+  'undo-bulk-tag': (dispatcher, _target, services) => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}戻してください` });
+      return;
+    }
+    const groups = (st.tagUndo?.groups ?? [])
+      .map((g) => ({ tags: g.tags, lids: g.lids.filter((l) => st.entryMetas.has(l)) }))
+      .filter((g) => g.lids.length > 0);
+    if (groups.length === 0) {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: '戻せるものがありません(付けたノートがもうありません)' });
+      return;
+    }
+    const all = [...new Set(groups.flatMap((g) => g.lids))];
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      all,
+      'タグを外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => {
+        for (const g of groups) dispatcher.dispatch({ type: 'BULK_TAG', lids: g.lids, tags: g.tags, mode: 'remove' });
+      },
+    );
   },
   /**
    * 🔴 **題名を変えた直後の「元に戻す」**(Gemini 裁定 = #1163 への依頼 45 の 2、#1657)。口は `status-undo`(出し入れは `status-open.ts`)。
@@ -9459,6 +9526,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           [{ lid, title, order: before.entryMetas.get(lid)?.entryOrder }],
           leftAtRoot(before, after),
           linkedFromText(before, after, lid),
+          dualFellBackText(before, after),
         );
       if (dualSideOfRow !== null) {
         const next = keepDualCursorUnlessMoved(dispatcher, dualSideOfRow, dualRowsBefore, dualCursorBefore);
@@ -15278,6 +15346,23 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 前進変異(復元前に現状が履歴に積まれる)なので confirm は要らない ──
     // 「復元の取り消し」も履歴から戻れる
     const revId = target.getAttribute('data-pkc-rev-id');
+    /**
+     * 🔴 **題名だけが変わった復元の「元に戻す」**(台帳 #1852 G1 / 依頼 229 B)。本文は同じで版が積まれていないので、
+     * 版は戻さず、戻す前の題名へ向けた `RENAME_ENTRY_TITLE` を 1 手撃つ(`undo-rename` と同じ書込経路)。
+     */
+    const undoTitle = target.getAttribute('data-pkc-undo-title');
+    if (undoTitle !== null) {
+      const stU = dispatcher.getState();
+      if (stU.phase !== 'ready') {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(stU.phase)}戻してください` });
+        return;
+      }
+      const lidU = stU.restoreUndo?.lid ?? stU.selectedLid;
+      if (lidU === null || lidU === undefined || !stU.entryMetas.has(lidU)) return;
+      restoreRenamedTitle(dispatcher, lidU, undoTitle, false);
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: `題名を「${undoTitle}」に戻しました` });
+      return;
+    }
     if (!revId) return;
     /**
      * 🔴 **編集中は声に出して断る**(#319)。⚠ 直す前は reducer の
@@ -15417,7 +15502,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     dispatcher.dispatch({ type: 'RESTORE_TRASH', entryLid, revId });
   },
-  'purge-trash': (dispatcher, _target, _services, root) => {
+  'purge-trash': (dispatcher, target, _services, root) => {
     /**
      * ⚠ **一括・不可逆**(revision の物理削除)── 受けボタンの字も**何が起きるか**に
      *   する。⚠ 直す前は `whenAbsent: false` で「確認が無い環境では通さない」と
@@ -15427,6 +15512,23 @@ const ACTIONS: Record<string, ActionHandler> = {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}空にしてください` });
+      return;
+    }
+    /**
+     * 🔴 **行の「完全に消す」から来た回は、その 1 件だけ**(台帳 #1852 G2 / 依頼 301 A)。行は `data-pkc-trash-lid` を持つ ──
+     * 持たない見出しの「ゴミ箱を空にする」は全部。確認は先に出す(戻せない)。
+     */
+    const onlyLid = target.getAttribute('data-pkc-trash-lid');
+    if (onlyLid !== null) {
+      const item = st.trashPanel?.items.find((t) => t.entryLid === onlyLid);
+      confirmThen(
+        root,
+        `「${item?.title ?? '(無題)'}」を完全に消します(履歴も消え、元に戻せません)。よろしいですか?`,
+        { okLabel: '完全に消す', danger: true },
+        dispatcher,
+        notWhileEditing(dispatcher, '消してください'),
+        () => dispatcher.dispatch({ type: 'PURGE_TRASH', lid: onlyLid }),
+      );
       return;
     }
     const n = st.trashPanel?.items.length ?? null;

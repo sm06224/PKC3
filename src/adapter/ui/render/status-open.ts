@@ -133,7 +133,15 @@ export interface StatusUndoState {
   /** その知らせが指している行き先(`OP_NOTICE` の `open`)。 */
   readonly noticeOpen: string | null;
   /** 履歴から戻した直後の「元に戻す」の材料(依頼 68-1)。省略 = 無い。 */
-  readonly restoreUndo?: { readonly lid: string; readonly revId: string; readonly notice: string } | null;
+  readonly restoreUndo?: {
+    readonly lid: string;
+    readonly revId: string;
+    readonly notice: string;
+    /** 題名だけが変わった復元の戻し先(戻す前の題名)。あると押し先は題名だけを戻す(依頼 229 B)。 */
+    readonly title?: string;
+  } | null;
+  /** 🔴 まとめてタグを付けた直後の「元に戻す」の材料(依頼 109 A)。`notice` が出ている字と同じときだけ出す。 */
+  readonly tagUndo?: { readonly notice: string } | null;
   /** いま開いているノート(`restoreUndo` が別のノートの版なら出さない)。 */
   readonly selectedLid?: string | null;
 }
@@ -224,7 +232,14 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
    */
   const rename =
     !move && !append && !schedule && !trash && !restore && !dualMove && renameUndoShown(shownLine);
-  const show = move || append || schedule || trash || restore || dualMove || rename;
+  /**
+   * 🔴 **まとめてタグを付けた直後の「元に戻す」**(台帳 #1852 G1 / 依頼 109 A)。出す条件は 1 つ ── いま出ている 1 行が、
+   * その知らせの字そのもの(別の知らせが上書きしたら畳む。ほかの「元に戻す」と同じ作法)。
+   */
+  const tagU = state.tagUndo ?? null;
+  const bulkTag =
+    !move && !append && !schedule && !trash && !restore && !dualMove && !rename && tagU !== null && shownLine === tagU.notice;
+  const show = move || append || schedule || trash || restore || dualMove || rename || bulkTag;
   // ⚠ **押し先も切り替える** ── 同じ器で 2 つの取り消しを出すので、
   //    字だけ出して受け手を替え忘れると「押すと別の物が戻る」になる
   // 🔴 **字も対象に合わせて切り替える**(#1046)── 器を 1 つで済ませているので、
@@ -235,6 +250,8 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
       'data-pkc-action',
       restore
         ? 'restore-revision'
+        : bulkTag
+          ? 'undo-bulk-tag'
         : rename
           ? 'undo-rename'
         : dualMove
@@ -250,13 +267,17 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
     // ⚠ 版 id は復元の口だけが持つ(他の取り消しへ切り替えたら外す ── 古い id が残らない)
     if (restore && ru !== null) {
       btn.setAttribute('data-pkc-rev-id', ru.revId);
+      // 🔴 題名だけが変わった復元は、版ではなく題名を戻す(依頼 229 B)── 押し先 `restore-revision` が見分ける
+      if (ru.title !== undefined) btn.setAttribute('data-pkc-undo-title', ru.title);
+      else btn.removeAttribute('data-pkc-undo-title');
       // 🔴 「元に戻す」から来た復元と、履歴の「この版に戻す」を区別する(知らせの字が変わる)
       btn.setAttribute('data-pkc-undo', '1');
     } else {
       btn.removeAttribute('data-pkc-rev-id');
+      btn.removeAttribute('data-pkc-undo-title');
       btn.removeAttribute('data-pkc-undo');
     }
-    btn.textContent = trash || schedule || restore || dualMove || rename ? '元に戻す' : move ? '移動を元に戻す' : '追記を元に戻す';
+    btn.textContent = trash || schedule || restore || dualMove || rename || bulkTag ? '元に戻す' : move ? '移動を元に戻す' : '追記を元に戻す';
   }
   if (btn.hidden !== !show) btn.hidden = !show;
   return show;

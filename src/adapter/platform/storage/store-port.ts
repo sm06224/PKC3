@@ -227,8 +227,15 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
         ...(opts?.untouched === true ? { untouched: true } : {}),
       });
     },
-    setEntryParent: async (lid, parentLid, relationId) => {
-      await client.request({ op: 'setEntryParent', cid, lid, parentLid, relationId });
+    setEntryParent: async (lid, parentLid, relationId, alsoIn) => {
+      await client.request({
+        op: 'setEntryParent',
+        cid,
+        lid,
+        parentLid,
+        relationId,
+        ...(alsoIn !== undefined && alsoIn.length > 0 ? { alsoIn: [...alsoIn] } : {}),
+      });
     },
     listRelations: () => client.request({ op: 'listRelations', cid }),
     // 🔴 #185: 1 件の作成・書き換えは既存の bulk を 1 件で使う(op を 2 つにしない)
@@ -250,10 +257,12 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      * 後始末もここに揃える(削除の可逆性と同じ意味論になる)。
      * ⚠ **消す前に lid を取る** ── 消した後では誰のデータだったか分からない。
      */
-    purgeTrash: async () => {
+    purgeTrash: async (only) => {
       const trash = await client.request({ op: 'listTrash', cid });
-      const res = await client.request({ op: 'purgeTrash', cid });
-      for (const lid of new Set(trash.map((r) => r.entry_lid))) clearAppStorage(lid);
+      const res = await client.request({ op: 'purgeTrash', cid, ...(only === undefined ? {} : { lid: only }) });
+      // 🔴 1 件だけ消した回は、その lid の保存領域だけ畳む(ほかのゴミ箱のノートは戻せるまま)
+      for (const lid of new Set(trash.map((r) => r.entry_lid)))
+        if (only === undefined || lid === only) clearAppStorage(lid);
       return res;
     },
   };

@@ -28,6 +28,12 @@ export interface DualMove {
   readonly lid: string;
   readonly from: string | null;
   readonly to: string | null;
+  /**
+   * 🔴 **移す前に入っていたフォルダ全部**(台帳 #1852 G1 / 依頼 227 A)。1 つのノートは 2 つ以上のフォルダに同時に入れられ、
+   * 移すと元のフォルダからは全部外れる ── 戻すときも全部へ戻す(`from` だけだと片方にしか戻らず、もう片方は黙って消えていた)。
+   * 省略 / 空 = `from` だけ(従来どおり)。
+   */
+  readonly fromAll?: readonly string[];
 }
 
 interface Pending {

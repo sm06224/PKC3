@@ -558,12 +558,14 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
     const d = bootWithFolder();
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     expect(d.getState().selectedLid, '前提: a を選んでいない').toBe('a');
+    const titleBefore = d.getState().entryMetas.get('z')!.title;
     d.dispatch({ type: 'ENTRY_RESTORED', mode: 'revision', meta: meta('z', { entryOrder: 3, title: '戻したノート' }), body: '古い版' });
     const st = d.getState();
     expect(st.selectedLid, '押したノートから、戻したノートへ引き戻された').toBe('a');
     expect(st.openBody?.lid ?? 'a', '開いている本文を差し替えた').toBe('a');
     expect(st.entryMetas.get('z')?.title, '戻したノートの題名が更新されていない').toBe('戻したノート');
-    expect(st.notice, '戻したことを言っていない').toBe('「戻したノート」を前の版に戻しました');
+    // 🔴 題名が変わる復元は、題名も戻したことを言う(依頼 141・229 B)── 戻す前の題名(押したノートの名前)から言い始める
+    expect(st.notice, '戻したことを言っていない').toBe(`「${titleBefore}」を前の版に戻しました(題名も「戻したノート」に戻しました)`);
     // 対照群: 戻したノートを選んだままなら、そのノートを開く
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'z' });
     d.dispatch({ type: 'ENTRY_RESTORED', mode: 'revision', meta: meta('z', { entryOrder: 3, title: '戻したノート' }), body: 'さらに古い版' });
@@ -679,10 +681,15 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
   it('🔴 履歴から戻したら、戻したことと取り消し方を言う / ゴミ箱から戻したときは履歴の文を出さない(ゴミ箱の文を出す)', () => {
     const d = bootWithFolder();
     expect(d.getState().notice ?? null, '前提:知らせは出ていない').toBeNull();
+    const childTitle = d.getState().entryMetas.get('child')!.title;
     d.dispatch({ type: 'ENTRY_RESTORED', mode: 'revision', meta: meta('child', { entryOrder: 2, title: '買い物' }), body: '戻した本文' });
     expect(d.getState().notice).toBe(
-      '「買い物」を前の版に戻しました',
+      `「${childTitle}」を前の版に戻しました(題名も「買い物」に戻しました)`,
     );
+    // 対照群: 題名が変わらない復元は従来の字のまま(余計な一文を足さない)
+    const same = bootWithFolder();
+    same.dispatch({ type: 'ENTRY_RESTORED', mode: 'revision', meta: meta('child', { entryOrder: 2, title: childTitle }), body: '戻した本文' });
+    expect(same.getState().notice).toBe(`「${childTitle}」を前の版に戻しました`);
     expect(d.getState().error).toBeNull();
     const t = bootWithFolder();
     t.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });

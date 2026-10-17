@@ -51,10 +51,17 @@ let pending: Pending | null = null;
  */
 export const LINKED_FROM_SOME = 'ほかのノートから張られたリンクは、戻すまで開けない場合があります';
 
+/**
+ * 🔴 **参照元をまだ調べ終えていないとき**(台帳 #1852 G1 / 依頼 231 A)。ノートを選んだ直後に移すと、参照元の読み込みが
+ *   間に合わず一文が出なかった ── 待たせずに「かもしれません」と言う(戻すまで開けないリンクに後から気づく事故を防ぐ)。
+ *   `trashMessage` の `linkedFrom` にこの字を渡すと、件数の形ではなくそのまま出す。
+ */
+export const LINKED_FROM_MAYBE = 'ほかのノートからリンクされているかもしれません';
+
 /** ゴミ箱の場所(#1646)。⚠ 画面の字は「フォルダ」タブ・「ゴミ箱を開く」(`filer.ts` の口と同じ)。 */
 export const TRASH_PLACE = 'ゴミ箱はフォルダの一覧のいちばん下にあります';
 
-export function trashMessage(titles: readonly string[], toRoot = 0, linkedFrom = ''): string {
+export function trashMessage(titles: readonly string[], toRoot = 0, linkedFrom = '', fellBack = ''): string {
   const head = titles.length === 1 ? `「${titles[0]}」をゴミ箱へ移しました` : `${String(titles.length)} 件をゴミ箱へ移しました`;
   /**
    * 🔴 **ほかのノートから張られたリンクが開けなくなることも言う**(#1087 の見直し 2026-10-13)── 確認を出さないので、
@@ -62,11 +69,13 @@ export function trashMessage(titles: readonly string[], toRoot = 0, linkedFrom =
    */
   const notes = [
     ...(toRoot > 0 ? [`中のノート ${String(toRoot)} 件は消えずにルートに出ています`] : []),
-    ...(linkedFrom === LINKED_FROM_SOME
-      ? [LINKED_FROM_SOME]
+    ...(linkedFrom === LINKED_FROM_SOME || linkedFrom === LINKED_FROM_MAYBE
+      ? [linkedFrom]
       : linkedFrom !== ''
         ? [`${linkedFrom}のノートからのリンクは、戻すまで開けません`]
         : []),
+    // 🔴 2 ペインのもう片方が見ていたフォルダを移したとき、行き先を言う(台帳 #1852 G1 / 依頼 228)── 知らせを上書きするので同じ一文をここへ載せる
+    ...(fellBack !== '' ? [fellBack] : []),
     // 🔴 戻す場所(#1646 の 1 = A。Gemini 裁定 = #1163 の依頼 40 の推薦どおり)── 7 秒の「元に戻す」を過ぎたあと探せるように、毎回言う
     TRASH_PLACE,
   ];
@@ -108,6 +117,7 @@ export function offerTrashUndo(
   moved: readonly { readonly lid: string; readonly title: string; readonly order?: number }[],
   toRoot = 0,
   linkedFrom = '',
+  fellBack = '',
 ): void {
   if (moved.length === 0) return;
   clearTrashOffer();
@@ -116,7 +126,7 @@ export function offerTrashUndo(
     orders: Object.fromEntries(
       moved.flatMap((m) => (m.order === undefined ? [] : [[m.lid, m.order] as const])),
     ),
-    message: trashMessage(moved.map((m) => m.title), toRoot, linkedFrom),
+    message: trashMessage(moved.map((m) => m.title), toRoot, linkedFrom, fellBack),
     dispatcher,
     timer: null,
   };

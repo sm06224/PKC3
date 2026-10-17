@@ -226,6 +226,8 @@ import {
   paneOf,
   paneScope,
   pruneDual,
+  scopeFallbackNote,
+  scopeFellBack,
   withPane,
   withScope as withPaneScope,
   withSelection as withPaneSelection,
@@ -2105,7 +2107,12 @@ export interface AppState {
    * ⚠ `lid` を持つ: 別のノートを選んだら出さない(他のノートの版を、いま開いているノートへ書かない)。
    * ⚠ 1 手だけ持つ。次の復元・ノートの切り替えで出番が無くなる(出し入れは `status-open.ts`)。
    */
-  restoreUndo?: { lid: string; revId: string; notice: string } | null;
+  restoreUndo?: { lid: string; revId: string; notice: string; title?: string } | null;
+  /**
+   * 🔴 **まとめてタグを付けた直後の「元に戻す」の材料**(依頼 109 A)。今回付けたノートだけを組ごと(同じ顔ぶれのタグを 1 組)に持ち、
+   * `notice` は出した知らせの字そのもの ── 画面の下に出ている字がこの知らせのときだけ「元に戻す」を出す。1 手だけ持つ。
+   */
+  tagUndo?: { groups: readonly TagUndoGroup[]; notice: string } | null;
   /**
    * 🔴 **直前の塊の移動を、逆向きに撃つ指示**(#684 段①)── 「元に戻す」の材料。
    *
@@ -3304,7 +3311,17 @@ export type UserAction =
    * `parentLid: null` = ルートへ出す。⚠ 「外す」と「入れる」を 2 つに割らない ──
    * 割ると途中で落ちたときに親無しが残る(PKC2 がその形だった)。
    */
-  | { type: 'SET_ENTRY_PARENT'; lid: string; parentLid: string | null; relationId: string }
+  | {
+      type: 'SET_ENTRY_PARENT';
+      lid: string;
+      parentLid: string | null;
+      relationId: string;
+      /**
+       * 🔴 **2 本目以降の親**(台帳 #1852 G1 / 依頼 227 A)。2 つ以上のフォルダに入っていたノートを移したあとの「元に戻す」が、
+       * 入っていたフォルダ全部へ戻すために使う。⚠ 1 本目と同じ検め(実在するフォルダ・輪にならない)を通った分だけ張る。
+       */
+      alsoIn?: readonly { parentLid: string; relationId: string }[];
+    }
   /** 同じ親の下で隣と入れ替える(2026-08-06。user 報告 2-10)。 */
   | { type: 'MOVE_ENTRY_ORDER'; lid: string; direction: 'up' | 'down' }
   /**
@@ -3367,6 +3384,11 @@ export type UserAction =
        * 押し先は履歴の「この版に戻す」と同じ `restore-revision`(`restoreUndo` を共有する)。省略 = 出さない。
        */
       restoreUndo?: { lid: string; revId: string };
+      /**
+       * 🔴 **まとめてタグを付けた直後の「元に戻す」の材料**(台帳 #1852 G1 / 依頼 109 A)。今回**付けた**ノートだけを組ごとに持つ
+       * (もとから付いていたノートは含まない ── 戻すときに触らない)。押し先は `undo-bulk-tag`。省略 = 出さない。
+       */
+      tagUndo?: { groups: readonly TagUndoGroup[] };
     }
   /**
    * 🔴 **画面下の知らせの時間が切れた**(#1017 C5 Q1)。⚠ `message` が**いま載っている知らせと同じとき
@@ -3443,7 +3465,8 @@ export type UserAction =
    * (履歴の id は効果層がゴミ箱の一覧から引く)。⚠ ゴミ箱に居ない分は黙って落とす。
    */
   | { type: 'UNDO_TRASH'; lids: readonly string[]; orders?: Readonly<Record<string, number>> }
-  | { type: 'PURGE_TRASH' }
+  /** 🔴 `lid` を渡すと、ゴミ箱のその 1 件だけを完全に消す(依頼 301 A)。省略 = ゴミ箱を空にする。 */
+  | { type: 'PURGE_TRASH'; lid?: string }
   /**
    * 🔴 **2 ペインタブファイラの操作**(#241 段⑥。user 指示 2026-08-17)。
    *
@@ -3694,6 +3717,11 @@ export type SystemCommand =
        * その版を指す。あると、画面の下の知らせの隣に「元に戻す」が出る(押すと同じ `RESTORE_REVISION`)。
        */
       undoRevId?: string;
+      /**
+       * 🔴 **題名だけが変わった復元の「元に戻す」の行き先**(台帳 #1852 G1 / 依頼 229 B)。本文が同じで題名だけ違う版を戻すと、
+       * 履歴に版が積まれず `undoRevId` が無い ── 戻す前の題名を持たせ、押すと題名だけを戻す(`restore-revision` の口が受ける)。
+       */
+      undoTitle?: string;
       /** 🔴 「元に戻す」から来た復元(#1087)。知らせを「戻す前の本文に戻しました」にし、「元に戻す」は重ねて出さない。 */
       fromUndo?: true;
       /**
@@ -3702,7 +3730,7 @@ export type SystemCommand =
        */
       selectedAtIssue?: string | null;
     }
-  | { type: 'TRASH_PURGED'; purged: number }
+  | { type: 'TRASH_PURGED'; purged: number; lid?: string }
   | {
       /**
        * 追記が disk に着いた(P8 段⑧)。⚠ **`gen` を必ず見る** ── 強制解放を
@@ -4142,6 +4170,8 @@ export type DomainEvent =
       lid: string;
       parentLid: string | null;
       relationId: string;
+      /** 🔴 2 本目以降の親(依頼 227 A)。reduce が輪・実在を検めて通った分だけ載せる。 */
+      alsoIn?: readonly { parentLid: string; relationId: string }[];
     }
   | {
       type: 'PERSIST_ENTRY';
@@ -4405,10 +4435,21 @@ export type DomainEvent =
       entryLid: string;
       revId: string;
       entryOrder: number;
+      /**
+       * 🔴 `entryOrder` が呼び手の指定か(「元に戻す」が移す前の並びを運んだ)。偽 = 末尾の仮の値で、
+       * 効果層はゴミ箱へ移す前に控えた並びがあればそれで戻す(台帳 #1852 G2 / 依頼 106 A)。
+       */
+      explicitOrder?: boolean;
       /** 頼んだ時点の `selectedLid`(#1087)。効果層が `ENTRY_RESTORED` へそのまま渡す。 */
       selectedAtIssue: string | null;
     }
-  | { type: 'REQUEST_TRASH_PURGE' };
+  | { type: 'REQUEST_TRASH_PURGE'; lid?: string };
+
+/** まとめてタグを付けた「元に戻す」の 1 組: この `lids` から、この `tags` を外す(付けた分だけ)。 */
+export interface TagUndoGroup {
+  readonly tags: readonly string[];
+  readonly lids: readonly string[];
+}
 
 export interface ReduceResult {
   state: AppState;
@@ -4747,6 +4788,16 @@ function followSelectionScope(prev: AppState, result: ReduceResult): ReduceResul
   };
 }
 
+/**
+ * 🔴 **履歴から戻したときの知らせの字**(台帳 #1852 G1 / 依頼 141・229 B)。戻すと本文と一緒に題名も当時の物に戻る ──
+ * 題名が変わったときは、それを知らせに書く(書かないと、一覧の題名が黙って変わったように見える)。
+ * ⚠ 字はここ 1 本 ── 知らせ本体と「元に戻す」の照合用の字(`restoreUndo.notice`)が食い違うと、「元に戻す」が出なくなる。
+ */
+export function revisionRestoredNotice(prevTitle: string, newTitle: string, fromUndo: boolean): string {
+  const head = fromUndo ? `「${newTitle}」を、戻す前の本文に戻しました` : `「${prevTitle}」を前の版に戻しました`;
+  return prevTitle === newTitle ? head : `${head}(題名も「${newTitle}」に戻しました)`;
+}
+
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
   reduceDepth++;
   try {
@@ -4815,9 +4866,22 @@ function reduceWithHistory(state: AppState, action: Dispatchable): ReduceResult 
    * ⚠ 掃除は entryMetas が**変わった回だけ**(毎回やると 50 件の走査が無駄に回る)
    */
   let dual = result.state.dual;
+  let fellBackNotice: string | null = null;
   if (result.state.entryMetas !== state.entryMetas) {
-    history = pruneHistory(history, (lid) => result.state.entryMetas.has(lid));
-    dual = pruneDual(dual, (lid) => result.state.entryMetas.has(lid));
+    const aliveNow = (lid: string): boolean => result.state.entryMetas.has(lid);
+    history = pruneHistory(history, aliveNow);
+    /**
+     * 🔴 **見ていたフォルダが消えたら、まだ残っている親を見せて、そう言う**(台帳 #1852 G1 / 依頼 228)。
+     * ⚠ 直す前は、2 ペインのもう片方が消えたフォルダの中を開いていると、黙っていちばん上の階層へ飛んでいた。
+     *   親は**消える前の木**で辿る(消えた後の木にはもう居ない)。別のタブで消した回(`SYS_BOOTED`)も同じ口を通る。
+     */
+    const dualBefore = result.state.dual;
+    dual = pruneDual(dual, aliveNow, (lid) => {
+      for (const up of getAncestorFolders(lid, state.entryMetas, state.relations)) if (aliveNow(up.lid)) return up.lid;
+      return null;
+    });
+    const fell = scopeFellBack(dualBefore, dual, aliveNow, (lid) => result.state.entryMetas.get(lid)?.title);
+    if (fell !== undefined) fellBackNotice = scopeFallbackNote(fell.parentTitle);
   }
   // 🔴 システムのメッセージ / 処理の記録は履歴に積まない(戻る・進むは `SELECT_ENTRY` で選ぶが、
   //    この 2 件は `entryMetas` に居ないので断られ、押しても何も起きない dead click になっていた)
@@ -4863,11 +4927,21 @@ function reduceWithHistory(state: AppState, action: Dispatchable): ReduceResult 
   if (
     history === result.state.selectionHistory &&
     dual === result.state.dual &&
-    backlinks === result.state.backlinks
+    backlinks === result.state.backlinks &&
+    fellBackNotice === null
   )
     return { state: result.state, events };
   return {
-    state: { ...result.state, selectionHistory: history, dual, backlinks },
+    state: {
+      ...result.state,
+      selectionHistory: history,
+      dual,
+      backlinks,
+      // ⚠ 別の知らせがこの回に出ていたら上書きしない(ゴミ箱へ移した直後の知らせは、自分で同じ一文を載せる)
+      ...(fellBackNotice !== null && result.state.notice === state.notice
+        ? { notice: fellBackNotice, noticeOpen: null, noticeCreate: null }
+        : {}),
+    },
     events,
   };
 }
@@ -4999,6 +5073,15 @@ function reduceCore(
        * 🔑 同じ container のときの掃除は `reduce` の 1 か所がやる(上の注記)。
        */
       const keepDual = sameCid ? state.dual : initialDual;
+      /**
+       * 🔴 **読んでいたノートが、別のタブの操作で一覧から無くなったら、そう言う**(台帳 #1852 G2 / 依頼 298 A)。
+       * ⚠ 直す前は何の知らせもなく「何も選んでいない」画面になり、データが消えたように見えた。
+       *   取り込みの総入れ替えでもここを通るので、断定せず「ゴミ箱へ移されたかもしれません」と言う。
+       */
+      const lostReading =
+        sameCid && state.selectedLid !== null && !keepsLid(state.selectedLid)
+          ? state.entryMetas.get(state.selectedLid)?.title
+          : undefined;
       const keepAnchor =
         sameCid && state.selectionAnchor !== null && keepsLid(state.selectionAnchor)
           ? state.selectionAnchor
@@ -5015,6 +5098,13 @@ function reduceCore(
           selectedLid: keepLid,
           scopeLid: keepScope,
           dual: keepDual,
+          ...(lostReading === undefined
+            ? {}
+            : {
+                notice: `読んでいたノート「${lostReading}」が一覧から無くなりました(別のタブでゴミ箱へ移されたかもしれません。ゴミ箱から戻せます)`,
+                noticeOpen: null,
+                noticeCreate: null,
+              }),
           selection: keepMarks,
           selectionAnchor: keepAnchor,
           openBody: null,
@@ -9683,6 +9773,22 @@ function reduceCore(
       const kept = state.relations.filter(
         (r) => !(r.kind === STRUCTURAL && r.toLid === action.lid),
       );
+      /**
+       * 🔴 **2 本目以降の親**(台帳 #1852 G1 / 依頼 227 A)── 「元に戻す」が、入っていたフォルダ全部へ戻すための口。
+       * 1 本目と同じ検め(実在するフォルダ・自分でない・輪にならない)を通った分だけ張る。重複は 1 本に畳む。
+       */
+      const extraParents: { parentLid: string; relationId: string }[] = [];
+      if (parentLid !== null) {
+        const lookup = structuralParentsLookup(state.relations);
+        for (const extra of action.alsoIn ?? []) {
+          const ep = state.entryMetas.get(extra.parentLid);
+          if (!ep || ep.archetype !== 'folder') continue;
+          if (extra.parentLid === action.lid || extra.parentLid === parentLid) continue;
+          if (extraParents.some((x) => x.parentLid === extra.parentLid)) continue;
+          if (wouldMakeCycle(action.lid, extra.parentLid, lookup)) continue;
+          extraParents.push(extra);
+        }
+      }
       const relations =
         parentLid === null
           ? kept
@@ -9698,6 +9804,14 @@ function reduceCore(
                 createdAt: null,
                 updatedAt: null,
               },
+              ...extraParents.map((x) => ({
+                id: x.relationId,
+                fromLid: x.parentLid,
+                toLid: action.lid,
+                kind: STRUCTURAL,
+                createdAt: null,
+                updatedAt: null,
+              })),
             ];
       // ⚠ 何も変わらないなら書かない(同じ親へ落としても永続化が走らない)
       if (
@@ -9714,6 +9828,7 @@ function reduceCore(
             lid: action.lid,
             parentLid,
             relationId: action.relationId,
+            ...(extraParents.length > 0 ? { alsoIn: extraParents } : {}),
           },
         ],
       };
@@ -10106,6 +10221,7 @@ function reduceCore(
             entryLid: action.entryLid,
             revId: action.revId,
             entryOrder,
+            ...(action.entryOrder !== undefined ? { explicitOrder: true } : {}),
             selectedAtIssue: state.selectedLid,
           },
         ],
@@ -10128,7 +10244,10 @@ function reduceCore(
     }
     case 'PURGE_TRASH': {
       if (state.phase !== 'ready') return { state, events: [] };
-      return { state, events: [{ type: 'REQUEST_TRASH_PURGE' }] };
+      return {
+        state,
+        events: [{ type: 'REQUEST_TRASH_PURGE', ...(action.lid === undefined ? {} : { lid: action.lid }) }],
+      };
     }
     /* ── 2 ペインタブファイラ(#241 段⑥)───────────────────────────
      * 🔴 **どれも `phase` を見ない**(= 編集中でも通る)。
@@ -10747,10 +10866,11 @@ function reduceCore(
             ...syncShownBodies(state, action.meta.lid, action.body),
             taskScan: refreshTaskCards(state.taskScan, action.meta.lid, action.body),
             smartHits: refreshSmartHits(state.smartHits, action.meta.lid, action.body, state.entryMetas),
-            notice:
-              action.fromUndo === true
-                ? `「${action.meta.title}」を、戻す前の本文に戻しました`
-                : `「${action.meta.title}」を前の版に戻しました`,
+            notice: revisionRestoredNotice(
+              state.entryMetas.get(action.meta.lid)?.title ?? action.meta.title,
+              action.meta.title,
+              action.fromUndo === true,
+            ),
           },
           events: [],
         };
@@ -10840,18 +10960,24 @@ function reduceCore(
                 // 🔴 「元に戻す」から来たときは、同じ字を出し続けない(#1087)。
                 //   さらに「元に戻す」を出すと、押すたびに同じ字のまま 2 つの本文を行き来する ──
                 //   もとの版は履歴に残っているので、続けて戻すのは履歴から選ぶ。
-                notice:
-                  action.fromUndo === true
-                    ? `「${action.meta.title}」を、戻す前の本文に戻しました`
-                    : `「${action.meta.title}」を前の版に戻しました`,
+                notice: revisionRestoredNotice(
+                  state.entryMetas.get(action.meta.lid)?.title ?? action.meta.title,
+                  action.meta.title,
+                  action.fromUndo === true,
+                ),
                 // ⚠ 知らせの字そのものも持つ ── 画面の下に出ている字がこの知らせのときだけ「元に戻す」を出す
                 restoreUndo:
-                  action.undoRevId === undefined || action.fromUndo === true
+                  (action.undoRevId === undefined && action.undoTitle === undefined) || action.fromUndo === true
                     ? null
                     : {
                         lid: action.meta.lid,
-                        revId: action.undoRevId,
-                        notice: `「${action.meta.title}」を前の版に戻しました`,
+                        revId: action.undoRevId ?? '',
+                        notice: revisionRestoredNotice(
+                          state.entryMetas.get(action.meta.lid)?.title ?? action.meta.title,
+                          action.meta.title,
+                          false,
+                        ),
+                        ...(action.undoTitle === undefined ? {} : { title: action.undoTitle }),
                       },
                 noticeOpen: null,
                 noticeCreate: null,
@@ -10861,14 +10987,33 @@ function reduceCore(
         events: [],
       };
     }
-    case 'TRASH_PURGED':
+    case 'TRASH_PURGED': {
+      /**
+       * 🔴 **消したあとに、何が起きたかと、残る物を言う**(台帳 #1852 G1 / 依頼 140 ③、G2 / 依頼 301 A)。
+       * ⚠ 直す前は一覧が「空です」になるだけで知らせが無かった。消したノートの添付ファイルの中身は端末に残ったままで、
+       *   容量を空けるのは別の「使われていない添付を消す」だけ ── 押した人はそれを知らないと容量が減らず戸惑う。
+       * ⚠ 件数は**ノートの数**(一覧の行)で数える ── `purged` は履歴の版の数で、ノート数ではない。
+       */
+      const items = state.trashPanel?.items ?? null;
+      const only = action.lid;
+      const tail = '添付ファイルの分の容量は、システムの「使われていない添付を消す」で空きます';
+      const notice =
+        only !== undefined
+          ? `「${items?.find((t) => t.entryLid === only)?.title ?? '(無題)'}」を完全に消しました(${tail})`
+          : items === null || items.length === 0
+            ? null
+            : `ゴミ箱を空にしました(${String(items.length)} 件を消しました。${tail})`;
       return {
         state: {
           ...state,
-          trashPanel: state.trashPanel ? { items: [] } : null,
+          trashPanel: state.trashPanel
+            ? { items: only === undefined ? [] : state.trashPanel.items.filter((t) => t.entryLid !== only) }
+            : null,
+          ...(notice === null ? {} : { notice, noticeOpen: null, noticeCreate: null }),
         },
         events: [],
       };
+    }
     case 'SEARCH_JUMP_START': {
       const query = normalizeFindQuery(action.query);
       // ⚠ 断るときは何も動かさない(上の `UserAction` の注記)。`sectionDraft` は手組み fixture で
@@ -10940,6 +11085,7 @@ function reduceCore(
           ...(action.restoreUndo === undefined
             ? {}
             : { restoreUndo: { ...action.restoreUndo, notice: action.message } }),
+          ...(action.tagUndo === undefined ? {} : { tagUndo: { ...action.tagUndo, notice: action.message } }),
         },
         events: [],
       };
