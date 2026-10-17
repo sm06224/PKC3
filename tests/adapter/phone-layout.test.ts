@@ -809,7 +809,8 @@ describe('⋯ と左の列の等値(次に足した人が気づく)', () => {
    */
   it('🔴 左の列の 4 つのボタンの説明が、⋯ の説明と対で管理されている', () => {
     const KNOWN: ReadonlyArray<readonly [string, string]> = [
-      ['attach-file', 'a6636dfe'],
+      // ⚠ 2026-10-17(#1163 依頼 102-3): 説明を「ファイルを選んで、添付として開いているノートの本文に入れます」に(右クリックの説明と対で直した)
+      ['attach-file', '9fd1275e'],
       ['start-audio-capture', 'f73763bc'],
       ['start-screen-capture', '6dc722b5'],
       ['start-timer', 'ef2332cc'],
