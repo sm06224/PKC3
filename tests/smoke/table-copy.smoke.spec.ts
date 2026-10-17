@@ -133,7 +133,8 @@ test('🔴 表の ▾ から形を選んでコピーでき、⧉ の 1 押しは
    *   ⚠ ここでは CSV を選ぶ ── 同じ一覧から別の形が選べることも同時に見る。
    */
   await page.locator(menu).nth(1).click();
-  await expect(rows, '2 つ目の表で一覧が出ない').toHaveCount(6);
+  // 🔑 csv の表には「見出しをやめる」の行が 1 つ増える(#1662 3)
+  await expect(rows, '2 つ目の表で一覧が出ない').toHaveCount(7);
   await page.locator('[data-pkc-field="pick-copy-format"][data-pkc-copy-format-index="3"]').click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()), {
@@ -222,10 +223,10 @@ test('🔴 ▾ の小窓から、本文の表を作り変えられる (#708 裁�
 
   const menu = '[data-pkc-field="detail-body"] [data-pkc-copy-menu]';
   await expect(page.locator(menu), '▾ が出ていない').toHaveCount(1, { timeout: 15_000 });
-  // 🔑 前提 ── いまは markdown の表なので、行や列を足す ＋ × は出ていない
+  // 🔑 前提 ── いまは markdown の表なので、csv の表ではない(⚠ 行・列の ＋ × は #1662 6 から markdown の表にも出る)
   await expect(
-    page.locator('[data-pkc-field="detail-body"] [data-pkc-action="shape-cell"]'),
-    '前提が崩れた(markdown の表なのに ＋ × が出ている)',
+    page.locator('[data-pkc-field="detail-body"] table.pkc-md-rendered-csv'),
+    '前提が崩れた(markdown の表なのに csv の表として描かれている)',
   ).toHaveCount(0);
 
   await clickReal(page, menu);
@@ -247,17 +248,17 @@ test('🔴 ▾ の小窓から、本文の表を作り変えられる (#708 裁�
     '区切りより下に在るのが、書き換える 1 行だけになっていない',
   ).toHaveCount(1);
   await expect(rows.nth(5), '書き換える行の字が違う').toHaveText(
-    '本文を CSV の表に書き換える(行と列を足せて、式も使えます)',
+    '本文を CSV の表に書き換える(式が使えます)',
   );
 
   await clickReal(page, '[data-pkc-field="pick-copy-format"][data-pkc-copy-format-index="5"]');
 
   /**
    * 🔴 **本文が本当に書き換わる** ── 観測点は「行が出た」ではなく、
-   *   **csv の表にしかない ＋ × が出たこと**である(形が変わった証拠)。
+   *   **csv の表として描かれたこと**である(形が変わった証拠)。
    */
   await expect(
-    page.locator('[data-pkc-field="detail-body"] [data-pkc-action="shape-cell"]'),
+    page.locator('[data-pkc-field="detail-body"] table.pkc-md-rendered-csv'),
     '本文が書き換わっていない(csv の表になっていない)',
   ).not.toHaveCount(0, { timeout: 15_000 });
   // 🔑 升は今までどおり押して打てる(作り変えた目的が果たせている)
@@ -268,9 +269,10 @@ test('🔴 ▾ の小窓から、本文の表を作り変えられる (#708 裁�
 
   /** 🔴 **戻せる**(片道の操作を作らない ── user 指示 2026-08-23)。 */
   await clickReal(page, menu);
-  await expect(rows, '作り変えた後に一覧が出ない').toHaveCount(6);
+  // 🔑 csv の表には「1 行目を見出しにする / やめる」の行が 1 つ増える(#1662 3)── 戻す行(5 番目)は同じ位置
+  await expect(rows, '作り変えた後に一覧が出ない').toHaveCount(7);
   await expect(rows.nth(5), '戻す字が出ていない').toHaveText(
-    '本文を Markdown の表に書き換える(よそへ貼りやすい形。行・列の ＋ × と式は使えなくなります)',
+    '本文を Markdown の表に書き換える(よそへ貼りやすい形。式は使えなくなります)',
   );
 
   expect(errors, `ページで例外が出た: ${errors.join(' / ')}`).toEqual([]);

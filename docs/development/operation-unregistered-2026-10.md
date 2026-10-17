@@ -196,6 +196,7 @@
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
 | `add-place` | 低 | ここに板を置く | `src/features/entry-actions.ts:1049` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
+| `add-place-note` | 低 | ノートを置く… | `src/features/entry-actions.ts:1165` | 右クリックした位置を、押した項目が運ぶ(`add-place` と同じ置き場)。置くノートは小窓で選ぶ |
 | `add-place-template` | 低 | テンプレートから板を置く… | `src/features/entry-actions.ts:1057` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `place-append-open` | 低 | 追記 | `src/adapter/ui/render/place-inline.ts:50` | 押した付箋のノートがボタン自身に載る。どの付箋かが決まらないと呼べない |
 | `place-color` | 低 | 色… | `src/features/entry-actions.ts:974`<br>`src/features/entry-actions.ts:975` | 色を選ぶ入力が要る |

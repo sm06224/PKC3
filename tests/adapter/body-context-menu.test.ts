@@ -149,7 +149,7 @@ describe('本文の右クリック(#426 段② / #522)', () => {
       b.getAttribute('data-pkc-action'),
     );
     // ⚠ 「ここに付箋を置く」(#676)は本文を書き換える物なので `BODY_MENU_ACTIONS` の外 ── 塊の並びの位置
-    expect(acts).toEqual(['add-place', 'add-place-template', ...BODY_MENU_ACTIONS.map((a) => a.action)]);
+    expect(acts).toEqual(['add-place', 'add-place-note', 'add-place-template', ...BODY_MENU_ACTIONS.map((a) => a.action)]);
     /**
      * 🔴 **「削除」を出さない。**
      * ⚠ 本文を押したのに削除が出ると、消えるのは**選んでいるノート**である ──
@@ -514,6 +514,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
      */
     expect(acts.slice(8), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
       'add-place',
+      'add-place-note',
       'add-place-template',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
@@ -556,6 +557,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     rightClick(r.para);
     expect(r.acts(), '段落の上でも見出しの物が出た').toEqual([
       'add-place',
+      'add-place-note',
       'add-place-template',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
@@ -1770,6 +1772,37 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     await settle();
     expect(asks).toHaveLength(1);
     expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-add', x: 37, y: 61, template: 'matrix2' } });
+  });
+
+  /**
+   * 🔴 **ほかのノートを板に置く**(#1662 2。Gemini 裁定 = #1163 依頼 48 の 2 = A)。
+   * 直す前は画面からノートを板に置く口が無く、「参照をコピー」→ 編集 → `entry=…` を手で書くしか無かった。
+   * ⚠ 見るのは「やめる」で依頼が 1 本も出ないこと / 選んだ lid が押した座標へ届くこと / 自分自身は候補に出ないこと。
+   */
+  it('🔴 「ノートを置く…」→ 一覧から選ぶと、押した座標で entry つきの place-add になる。やめるなら何も書かない', async () => {
+    resetAppDialogForTest();
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClickAt(r.q('p[data-pkc-source-line="2"]'), 37, 61);
+    expect(r.label('add-place-note')).toBe('ノートを置く…');
+    r.press('add-place-note');
+    expect(asks, '小窓の前に書いた').toHaveLength(0);
+    const rows = [...document.querySelectorAll<HTMLButtonElement>('[data-pkc-field="entry-pick-row"]')];
+    expect(
+      rows.map((b) => b.getAttribute('data-pkc-lid')),
+      '候補に自分自身が出ている / 他のノートが出ていない',
+    ).toEqual(['n2']);
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-cancel"]')!.click();
+    await settle();
+    expect(asks, 'やめたのに書いた').toHaveLength(0);
+
+    resetAppDialogForTest();
+    rightClickAt(r.q('p[data-pkc-source-line="2"]'), 37, 61);
+    r.press('add-place-note');
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="entry-pick-row"]')!.click();
+    await settle();
+    expect(asks).toHaveLength(1);
+    expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-add', x: 37, y: 61, entry: 'n2' } });
   });
 
   it('🔴 板の上の「位置と大きさ…」→ いまの値で開き、全角で決めると place-rect の依頼。やめるなら 1 本も出ない', async () => {

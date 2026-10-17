@@ -40,9 +40,10 @@ const CELL = '[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]';
  *
  * ⚠ 直す前は「升が押せるか」で形を見分けていたが、段④ で **markdown の表の升も
  *   押せるようになった**ので、その印は**両方で真**になった ── 形を見分けられない。
- * 🔑 いま形を分けるのは **行・列を足す ＋ ×**(`shape-cell`)である ── csv の表にしか出ない。
+ * 🔑 いま形を分けるのは **csv の表の印(`pkc-md-rendered-csv`)**である。
+ *   ⚠ 2026-10-17(#1662 6)から **行・列の ＋ ×(`shape-cell`)は markdown の表にも出る**ので、形の証拠ではなくなった。
  */
-const CSV_ONLY = '[data-pkc-field="detail-body"] [data-pkc-action="shape-cell"]';
+const CSV_ONLY = '[data-pkc-field="detail-body"] table.pkc-md-rendered-csv';
 
 test('🔴 表を右クリックして形を変えると、保存された本文も変わる (#708 段②)', async ({
   page,
@@ -256,7 +257,7 @@ test('🔴 引用と ::: の中の表も、右クリックで形を変えられ�
 
   await toCsv(CALLOUT_TABLE, '板の中');
   await expect(
-    page.locator(`${CALLOUT_TABLE} [data-pkc-action="shape-cell"]`),
+    page.locator(`${CALLOUT_TABLE}.pkc-md-rendered-csv`),
     '板の中の表が csv になっていない(行・列の ＋ × が焼かれていない)',
   ).not.toHaveCount(0, { timeout: 15_000 });
   // 🔴 **器から落ちていない** ── 板の外に表が増えていないことも見る
@@ -264,7 +265,7 @@ test('🔴 引用と ::: の中の表も、右クリックで形を変えられ�
 
   await toCsv(QUOTE_TABLE, '引用の中');
   await expect(
-    page.locator(`${QUOTE_TABLE} [data-pkc-action="shape-cell"]`),
+    page.locator(`${QUOTE_TABLE}.pkc-md-rendered-csv`),
     '引用の中の表が csv になっていない',
   ).not.toHaveCount(0, { timeout: 15_000 });
   // 🔴 **前置き(`> `)を付け直していないと、ここで落ちる**(升の字は同じまま)
@@ -278,7 +279,7 @@ test('🔴 引用と ::: の中の表も、右クリックで形を変えられ�
   // ── 🔴 **読み込み直しても残る**(本文へ書かれた証拠)
   await page.reload();
   await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
-  await expect(page.locator(`${QUOTE_TABLE} [data-pkc-action="shape-cell"]`), '読み直したら戻った')
+  await expect(page.locator(`${QUOTE_TABLE}.pkc-md-rendered-csv`), '読み直したら戻った')
     .not.toHaveCount(0, { timeout: 15_000 });
   await expect(page.locator(CALLOUT_TABLE), '読み直したら板から落ちた').toHaveCount(1);
   await expect(page.locator(QUOTE_TABLE), '読み直したら引用から落ちた').toHaveCount(1);
@@ -294,7 +295,7 @@ test('🔴 引用と ::: の中の表も、右クリックで形を変えられ�
   );
   await clickReal(page, toMd);
   await expect(
-    page.locator(`${QUOTE_TABLE} [data-pkc-action="shape-cell"]`),
+    page.locator(`${QUOTE_TABLE}.pkc-md-rendered-csv`),
     '引用の中で markdown へ戻っていない',
   ).toHaveCount(0, { timeout: 15_000 });
   await expect(page.locator(QUOTE_TABLE), '戻したら引用から落ちた').toHaveCount(1);

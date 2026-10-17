@@ -306,6 +306,27 @@ export interface CsvCellEditing {
 }
 
 /**
+ * 🔴 **行・列の ＋ × のボタン 1 つ**(#1662 6 で csv の描画から取り出した)。
+ * ⚠ csv の表と `|` で書いた表が**同じ 1 つ**を使う ── 受け手(`shape-cell`)・見え方(`.pkc-csv-shape`)・
+ *   コピー / 書き出しで落とす対象(クラス名)を、表の書き方ごとに 2 組持たない(§7)。
+ * ⚠ 字は入れない(印は CSS が出す)── 升の字に `＋×` が混ざる(コピーした TSV に入る)。
+ */
+export function shapeButtonHtml(
+  line: number,
+  col: number,
+  what: 'row' | 'col',
+  mode: 'add' | 'remove',
+  title: string,
+): string {
+  return (
+    `<button type="button" class="pkc-csv-shape" data-pkc-action="shape-cell"` +
+    ` data-pkc-cell-line="${line}" data-pkc-cell-col="${col}"` +
+    ` data-pkc-cell-what="${what}" data-pkc-cell-mode="${mode}"` +
+    ` aria-label="${title}" title="${title}"></button>`
+  );
+}
+
+/**
  * 🔴 **見出しの升の ✎ ── 見出しを編集する入口**(#1240)。
  *
  * > 見出しの升は**1 回押すと並べ替え**(#1150)なので、同じ 1 回で編集欄も開くと、
@@ -396,6 +417,8 @@ export function rowsToHtml(
      */
     return (
       ` data-pkc-action="edit-cell" data-pkc-cell-line="${line}" data-pkc-cell-col="${col}"` +
+      // 🔑 表の中の行の番号(0 始まり)── 打っている間に出す升の名前(`B2`)はここから組む(#1662 4)
+      ` data-pkc-cell-row="${row}"` +
       ` data-pkc-cell-raw="${escapeHtml(raw)}"`
     );
   };
@@ -424,12 +447,7 @@ export function rowsToHtml(
     if (editing === undefined) return '';
     const line = editing.lineOf(row);
     if (line === null) return '';
-    return (
-      `<button type="button" class="pkc-csv-shape" data-pkc-action="shape-cell"` +
-      ` data-pkc-cell-line="${line}" data-pkc-cell-col="${col}"` +
-      ` data-pkc-cell-what="${what}" data-pkc-cell-mode="${mode}"` +
-      ` aria-label="${title}" title="${title}"></button>`
-    );
+    return shapeButtonHtml(line, col, what, mode, title);
   };
 
   const parts: string[] = [];

@@ -121,6 +121,42 @@ export function placeRectOf(line: string): PlaceRectInput | null {
   return { x: s(attrs.kvs.x), y: s(attrs.kvs.y), w: s(attrs.kvs.w), h: s(attrs.kvs.h) };
 }
 
+// ⚠ ここ(`FENCE` の正規表現より上)に置く理由: `tests/features/ui-terms.test.ts` の文字列走査は、
+//   `FENCE` の正規表現の中のバッククォートを「テンプレート文字列の開き」と読む(走査の粗さ)。
+//   そのため `FENCE` より下に `entry` の語を書くと、画面の字でもないのに「英語の素通し」に数えられる。
+/**
+ * 🔴 **付箋の中の字**(#1662 1)── 開き行と閉じの `:::` の間の行を、そのまま返す。
+ * 返すのは**ふつうの付箋**だけ(`entry=` で別のノートを置いた付箋は字を持たない / 閉じていない塊 /
+ * 開き行でない行は `null`)。⚠ 判定は {@link placeLinesAt} の門と同じ(frontmatter の外・fence の外・開き行)。
+ * 🔑 読む側(欄に入れる字)と書く側({@link setPlaceText})が**同じ範囲**を指す ── 範囲の取り方はここ 1 本。
+ */
+export function placeTextOf(body: string, line: number): string | null {
+  const span = plainPlaceSpan(body, line);
+  return span === null ? null : span.inner.join('\n');
+}
+
+/** ふつうの付箋の中身の範囲(開きの次の行 〜 閉じの手前)。 */
+function plainPlaceSpan(
+  body: string,
+  line: number,
+): { lines: string[]; fm: number; end: number; inner: string[] } | null {
+  const fm = frontmatterLineCount(body);
+  if (!Number.isInteger(line) || line < fm) return null;
+  const lines = body.split('\n');
+  const open = lines[line];
+  if (open === undefined) return null;
+  const attrs = placeOpenAttrs(open);
+  if (attrs === null) return null;
+  // ⚠ 別のノートを置いた付箋は字を持たない(題名の帯と置いたノートの写し)── ここでは触らない
+  const entry = attrs.kvs.entry;
+  if (typeof entry === 'string' && entry !== '') return null;
+  if (insideFence(lines, fm, line)) return null;
+  const span = placeBlockSpan(lines, fm, line);
+  if (span === null || span.open) return null;
+  const end = span.end + fm; // 閉じの `:::` の行
+  return { lines, fm, end, inner: lines.slice(line + 1, end) };
+}
+
 /** 開き行が線の塊(`.pkc-line` のクラス札)か(#530 段③d。消す口が使う)。 */
 export function isLineOpen(line: string): boolean {
   return formatOpenAttrs(line, 'pkc-line') !== null;
@@ -335,6 +371,53 @@ function removeBlockAt(
   else if (start > at.fm && lines[start - 1] === '') lines.splice(start - 1, end - start + 2);
   else lines.splice(start, end - start + 1);
   return lines.join('\n');
+}
+
+/**
+ * 🔴 **付箋の中の字を書き換える**(#1662 1。Gemini 裁定 = #1163 依頼 48 の 1 = A)。
+ *
+ * > user の物語: 板の上の付箋に字を入れたい。いまは「編集」へ入り、付箋が座標に置かれず上から並ぶ原文の中に打つしか無い。
+ *
+ * 🔑 **書き換えるのは開き行と閉じの間だけ** ── 開き行(位置・大きさ・色)は 1 バイトも動かない。
+ * ⚠ 断る条件(`null` ── 当てずっぽうで別の所を書かない):
+ *   - 開き行が掴んだ時点と byte 一致しない(別の窓が動かした)
+ *   - **中身が `before` と違う**(別の窓が先にこの付箋の字を直した ── その字を黙って上書きしない)
+ *   - ふつうの付箋でない / 閉じていない
+ *   - 🔴 **新しい字が塊の構造を変える**(行頭の `:::` や ``` で塊が早く閉じる / 伸びる)── 書いた後に
+ *     同じ塊が同じ位置で閉じていなければ断る(字が付箋の外へ漏れて、その下の本文が壊れる)
+ * 🔑 字が前と同じなら body をそのまま返す(書く物が無い ≠ 競合)。空の字は空行 1 本(「ここに付箋を置く」が作る形)。
+ */
+export function setPlaceText(
+  body: string,
+  target: PlaceTarget,
+  before: string,
+  text: string,
+): string | null {
+  const at = placeLinesAt(body, target);
+  if (at === null) return null;
+  const span = plainPlaceSpan(body, target.line);
+  if (span === null) return null;
+  if (span.inner.join('\n') !== before) return null;
+  const trimmed = text.replace(/\s+$/, '').replace(/^\n+/, '');
+  const innerNext = trimmed === '' ? [''] : trimmed.split('\n');
+  if (innerNext.join('\n') === span.inner.join('\n')) return body;
+  const lines = [...span.lines];
+  lines.splice(target.line + 1, span.inner.length, ...innerNext);
+  const next = lines.join('\n');
+  // 🔴 構造の検め ── 同じ塊が、同じ位置で閉じていること
+  const again = plainPlaceSpan(next, target.line);
+  if (again === null || again.end !== target.line + 1 + innerNext.length) return null;
+  /**
+   * 🔴 **閉じていない ``` が、下の付箋を「コードの中」にしない**(同じ検め)── 塊の閉じ(`:::`)は同じ位置に在っても、
+   *   fence の開きが残ると、以降の行は `fenceMask` で「fence の中」と読まれ、下の付箋が動かせなくなる。
+   *   閉じより下の行について、fence の中か外かが書く前と同じであること。
+   */
+  const same = (a: readonly boolean[], b: readonly boolean[]): boolean =>
+    a.length === b.length && a.every((v, i) => v === b[i]);
+  const maskBefore = fenceMask(span.lines, span.fm).slice(span.end + 1);
+  const maskAfter = fenceMask(lines, span.fm).slice(again.end + 1);
+  if (!same(maskBefore, maskAfter)) return null;
+  return next;
 }
 
 /**
@@ -810,6 +893,21 @@ export function addPlace(body: string, x: number, y: number): string | null {
   if (!isCoord(x) || !isCoord(y)) return null;
   if (endsInsideOpenBlock(body)) return null;
   const block = `:::format{.pkc-place x=${x} y=${y} w=${NEW_PLACE_W} h=${NEW_PLACE_H}}\n\n:::\n`;
+  if (body === '') return block;
+  return body + (body.endsWith('\n') ? '\n' : '\n\n') + block;
+}
+
+/**
+ * 🔴 **ほかのノートを置いた付箋を (x, y) に足す**(#1662 2)── 本文の末尾に `entry=` の塊を書く。
+ * 門・末尾の書き方は `addPlace` と同じ(閉じていない囲いの中へは書かない)。
+ * ⚠ `lid` は開き行に書く字なので、綴りを**閉じた形**(英数・`_`・`-`)に限る ── 空白や `}` を含む字が
+ *   開き行の札の並びを壊さない(`place-shape.ts` の「値を素通しにしない」と同じ)。
+ */
+export function addPlaceEntry(body: string, x: number, y: number, lid: string): string | null {
+  if (!isCoord(x) || !isCoord(y)) return null;
+  if (!/^[A-Za-z0-9_-]+$/.test(lid)) return null;
+  if (endsInsideOpenBlock(body)) return null;
+  const block = `:::format{.pkc-place entry=${lid} x=${x} y=${y}}\n:::\n`;
   if (body === '') return block;
   return body + (body.endsWith('\n') ? '\n' : '\n\n') + block;
 }

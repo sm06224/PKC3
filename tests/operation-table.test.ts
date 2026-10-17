@@ -205,7 +205,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   パレットから 1 語で呼べる所に置かない(どの部品かは押したボタン自身が運ぶ)。
    */
   'cancel-asr-install', 'install-asr-part', 'remove-asr-part',
-  'add-place', 'add-place-template', 'adopt-external-images',
+  'add-place', 'add-place-note', 'add-place-template', 'adopt-external-images',
   'adopt-link-icon', 'allow-external-images', 'apply-plan', 'apply-settings',
   'apply-update', 'bulk-tag-add', 'bulk-tag-remove',
   /**
@@ -852,14 +852,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `total` +1 / `receivers` +1 / `registered` +1 / `both` +1(`unregistered` は動かない)。
       // ⚠ 2026-10-17(#1645 項目 4): 受け手 +1(`create-from-template`。左上の作成の ▼ の「テンプレートから作る…」── 押した所から何も要らない。
       //   `open-today` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 437,
-      receivers: 370,
+      // ⚠ 2026-10-17(#1662 2): 右クリックの「ノートを置く…」(`add-place-note`)で受け手 +1 ── 登記は増えない
+      //   (押し口は本文の右クリックにしか無く、座標はメニューが運ぶ。`add-place` / `add-place-template` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 438,
+      receivers: 371,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       registered: 170,
       both: 103,
       outsideActionsTable: 67,
-      unregistered: 267,
+      unregistered: 268,
     });
   });
 

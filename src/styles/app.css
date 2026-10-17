@@ -4697,6 +4697,20 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   color: inherit;
   font: inherit;
 }
+/* 🔴 **打っている升の名前(`B2`)**(#1662 4)── 式の `=B2*C2` が指す升を数えなくて済むように、
+ *    欄を開いている間だけ升の右上に小さく出す。升の幅は取らない(重ね物)・押しも奪わない。 */
+.pkc-md-rendered .pkc-csv-cell-name {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+  pointer-events: none;
+}
 /* ⚠ **行と列の口は、触るまで出さない** ── 常に出ていると升が字で埋まる。
  *    🔑 ただし**焦点でも出す**(`:focus-within`)── 出さないと
  *    キーボードだけの user から**永久に見えない**(#425 と同じ向き) */
@@ -4776,6 +4790,10 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 .pkc-md-rendered .pkc-md-rendered-csv tr:hover .pkc-csv-shape,
 .pkc-md-rendered .pkc-md-rendered-csv td:focus-within .pkc-csv-shape,
 .pkc-md-rendered .pkc-md-rendered-csv th:focus-within .pkc-csv-shape,
+/* `|` で書いた表の ＋ ×(#1662 6)も同じ出方 ── 触る / 焦点が入るまで隠す */
+.pkc-md-rendered .pkc-md-block[data-pkc-md-block-kind='table'] tr:hover .pkc-csv-shape,
+.pkc-md-rendered .pkc-md-block[data-pkc-md-block-kind='table'] td:focus-within .pkc-csv-shape,
+.pkc-md-rendered .pkc-md-block[data-pkc-md-block-kind='table'] th:focus-within .pkc-csv-shape,
 .pkc-md-rendered .pkc-csv-shape:focus {
   visibility: visible;
 }
