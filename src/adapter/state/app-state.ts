@@ -10964,6 +10964,19 @@ function removeEntryFromState(
     state.snippetScan === null || snippetItems === state.snippetScan.items
       ? state.snippetScan
       : { ...state.snippetScan, items: snippetItems! };
+  // 🔴 探す面の行・左の列の本文の当たりからも落とす(消したノートが「探す」に残り、押すと無いノートの窓が開いた)。
+  //    変化が無ければ元の参照のまま
+  const pageRows = state.searchPage.rows.some((r) => r.lid === lid)
+    ? state.searchPage.rows.filter((r) => r.lid !== lid)
+    : state.searchPage.rows;
+  const searchPage =
+    pageRows === state.searchPage.rows ? state.searchPage : { ...state.searchPage, rows: pageRows };
+  let searchHits = state.searchHits;
+  if (searchHits !== null && searchHits.has(lid)) {
+    const h = new Set(searchHits);
+    h.delete(lid);
+    searchHits = h;
+  }
   const smart = withoutSmartHit(state.smartHits, lid);
   events.push(...smart.rescans.map((l): DomainEvent => ({ type: 'REQUEST_SMART_SCAN', lid: l })));
 
@@ -11015,6 +11028,8 @@ function removeEntryFromState(
       snippetScan: scanSnippet,
       // 🔴 開いているスマートフォルダの当たり・件数からも落とす(#1087。下の `withoutSmartHit`)
       smartHits: smart.hits,
+      searchPage,
+      searchHits,
       /**
        * 🔴 **録ったものの一覧からも落とす**(#1087 の見直し 2026-10-13)── 上の 3 つと同じ形の穴だった。
        *   「音/動画」タブを開いたまま録音のノートを消すと、行が残り、名前を押しても何も起きなかった。

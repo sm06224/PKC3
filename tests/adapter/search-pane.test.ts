@@ -86,7 +86,7 @@ function setup(
   });
   const openNoteWindow = vi.fn<(lid: string) => void>();
   bindActions(root, d, { openNoteWindow });
-  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', '会議メモ')], relations: [] });
+  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', '会議メモ'), meta('n2', '買い物')], relations: [] });
   d.dispatch({ type: 'SET_VIEW_MODE', mode: 'search' });
   const pane = root.querySelector<HTMLElement>('[data-pkc-view-pane="search"]')!;
   const input = pane.querySelector<HTMLInputElement>('[data-pkc-field="search-page-input"]')!;
