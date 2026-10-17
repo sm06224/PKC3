@@ -80,6 +80,19 @@ test('🔴 札の × で外れ、本文からも消える (#494)', async ({ page
   await makeNote(page, 'メモ', '---\ntags: [買い物, 家事]\n---\n本文\n');
 
   await expect(page.locator(CHIPS)).toHaveCount(2);
+  // 🔴 束 H1: 絵文字を含む本文の「全体の字数」は見た目の字の数 / フォルダの「中身 N 件」(道中に足す。起動は増やさない)
+  const insp = page.locator('[data-pkc-region="inspector"]');
+  await expect(insp.locator('[data-pkc-field="inspector-stats"]'), '前提: 字数が出ない').toBeVisible();
+  const before = await insp.locator('[data-pkc-field="inspector-stats"]').innerText();
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await page.fill('[data-pkc-field="editor-body"]', '---\ntags: [買い物, 家事]\n---\n👨‍👩‍👧‍👦👍🏽🇯🇵ab\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  const total = (s: string): number => Number(/(\d[\d,]*)\s*文字/.exec(s)?.[1]?.replace(/,/g, '') ?? NaN);
+  const afterTxt = await insp.locator('[data-pkc-field="inspector-stats"]').innerText();
+  // 前書き(--- 〜 ---)の 31 字 + 家族 1 + 👍🏽 1 + 国旗 1 + ab 2 + 改行 = 見た目の字。絵文字を UTF-16 で数えると大きく超える
+  const expectedChars = Array.from(new Intl.Segmenter('ja', { granularity: 'grapheme' }).segment('---\ntags: [買い物, 家事]\n---\n👨‍👩‍👧‍👦👍🏽🇯🇵ab\n')).length;
+  expect(total(afterTxt), `全体の字数が見た目の字の数でない(前:${before} / 後:${afterTxt})`).toBe(expectedChars);
   await clickReal(
     page,
     '[data-pkc-region="inspector"] [data-pkc-field="inspector-tag-off"][data-pkc-tag="買い物"]',
@@ -107,6 +120,50 @@ test('🔴 札の × で外れ、本文からも消える (#494)', async ({ page
   const body2 = await page.inputValue('[data-pkc-field="editor-body"]');
   expect(body2, '長いタグが本文から消えた').toContain(LONG);
   expect(body2, '足したタグが本文に無い').toContain('追加');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+
+  /**
+   * 🔴 束 H1: タグの前書きが読み違える形(複数行の `[ ]`)のとき、その場で言い、足し外しの欄を出さない。
+   * ⚠ 対照群は上の普通のノート(欄が出ている)。
+   */
+  await expect(page.locator(INPUT), '前提: 普通のノートでは足す欄が出る').toBeVisible();
+  await makeNote(page, '読み違える', '---\ntags: [a,\n b]\n---\n本文\n');
+  await expect(
+    insp.locator('[data-pkc-field="inspector-tags-problem"]'),
+    '読み違える書き方なのに知らせが出ない',
+  ).toContainText('文書の情報に読めない書き方があります');
+  await expect(page.locator(INPUT), 'タグの足し外しの欄が止まっていない').toBeHidden();
+
+  /** 🔴 束 H1: 「関連」は向きを区別しない ── A→B を作ったあと B→A を作ろうとすると断られる。 */
+  const rel = page.locator('[data-pkc-field="relation-add"]');
+  const relRows = insp.locator('[data-pkc-field="inspector-relation"]');
+  const pick = (title: string) =>
+    clickReal(page, `[data-pkc-region="filer-table"] [data-pkc-entry]:has-text("${title}")`);
+  await pick('長いタグ');
+  await expect(relRows, '前提: 関連がまだ無い').toHaveCount(0);
+  await rel.locator('[data-pkc-field="relation-kind"]').selectOption('semantic');
+  await rel.locator('[data-pkc-field="relation-target"]').fill('読み違える');
+  await clickReal(page, '[data-pkc-action="add-relation"]');
+  await expect(relRows, '前提: A→B の関連が付かない').toHaveCount(1);
+  await pick('読み違える');
+  await expect(relRows, '前提: 相手側にも出ている').toHaveCount(1);
+  await rel.locator('[data-pkc-field="relation-kind"]').selectOption('semantic');
+  await rel.locator('[data-pkc-field="relation-target"]').fill('長いタグ');
+  await clickReal(page, '[data-pkc-action="add-relation"]');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '反対向きの「関連」が断られない',
+  ).toContainText('向きを区別しません');
+  await expect(relRows, '断られたのに関連が増えた').toHaveCount(1);
+
+  /** 🔴 束 H1: フォルダを開くと「中身 N 件」が出る(同じ道中。起動は増やさない)。 */
+  await createEntry(page, 'folder');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(
+    insp.locator('[data-pkc-field="inspector-children"]'),
+    'フォルダの「中身 N 件」が出ない',
+  ).toHaveText(/^\d+ 件$/);
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });
