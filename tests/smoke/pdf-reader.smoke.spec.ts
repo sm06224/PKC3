@@ -196,6 +196,9 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   ]);
   const winErrors: string[] = [];
   win.on('pageerror', (e) => winErrors.push(e.message));
+  // 🔑 窓の大きさを決める ── 既定(1000x860)だと、上のバーに「注釈をページに書き込んで保存」が加わって折り返し、一覧が低くなって
+  //    末尾の絵が「見える範囲の前後」の外に出る(一覧の絵は見える所の前後だけを描くので、10 枚が同時には揃わない)
+  await win.setViewportSize({ width: 1400, height: 1000 });
   const img = win.locator('[data-pkc-field="pdf-page-image"]');
   await expect(img.first(), '頁の絵が出ない(PKC3 の PDF ビューアで開いていない / 読めていない)').toBeAttached({
     timeout: 20_000,
@@ -361,13 +364,15 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await native.close();
   expect(win.isClosed(), '「ブラウザの表示で開く」で PDF のウィンドウが閉じた').toBe(false);
   await win.focus('#hit-next');
-  // 上のバーで押せるのは「PDF を足す」(#275 結合)と「付箋」「ペン」(#275。字を選ばなくても押せる)だけ ── 次の Tab で一覧へ入る
+  // 上のバーで押せるのは「PDF を足す」(#275 結合)と「注釈をページに書き込んで保存」(#1163 依頼 31。何も変えていなくても押せる)と「付箋」「ペン」(#275。字を選ばなくても押せる)だけ ── 次の Tab で一覧へ入る
   await win.keyboard.press('Tab');
   expect(await win.evaluate(() => document.activeElement?.id), '上のバーの次の止まり先が「ブラウザの表示で開く」でない').toBe('open-native');
   await win.keyboard.press('Tab');
   expect(await win.evaluate(() => document.activeElement?.id), '上のバーの次の止まり先が「PDF を足す」でない').toBe('append-pdf');
   await win.keyboard.press('Tab');
-  expect(await win.evaluate(() => document.activeElement?.id), '「PDF を足す」の次の止まり先が「付箋」でない').toBe('note-tool');
+  expect(await win.evaluate(() => document.activeElement?.id), '「PDF を足す」の次の止まり先が「注釈をページに書き込んで保存」でない').toBe('edit-flatten');
+  await win.keyboard.press('Tab');
+  expect(await win.evaluate(() => document.activeElement?.id), '「注釈をページに書き込んで保存」の次の止まり先が「付箋」でない').toBe('note-tool');
   await win.keyboard.press('Tab');
   expect(await win.evaluate(() => document.activeElement?.id), '「付箋」の次の止まり先が「ペン」でない').toBe('pen-tool');
   await win.keyboard.press('Tab');
@@ -1330,7 +1335,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   for (const id of ['yellow', 'green', 'blue', 'pink']) await expect(swatch(id)).toBeDisabled();
   await expect(hw.locator('#edit-save')).toBeHidden();
   // 帯に収まらないときは 2 行に折り返し、右端の「ノートへ引用する」も「ハイライト」も窓の外へ切れず、読む面に重ならない
-  //   (既定の窓の幅 1000 でも、広い窓 1800 でも。1800 では 1 行のまま ── 折り返しは要るときだけ)
+  //   (既定の窓の幅 1000 でも、広い窓 2200 でも。2200 では 1 行のまま ── 折り返しは要るときだけ)
   const barGeometry = async (): Promise<{ right: number; barBottom: number; scrollerTop: number; barH: number; width: number }> =>
     hw.evaluate(() => {
       const r = (id: string): DOMRect => (document.getElementById(id) as HTMLElement).getBoundingClientRect();
@@ -1345,14 +1350,20 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   for (const [w, wraps] of [
     [1000, true],
     [1100, true],
-    [1800, false], // 「PDF を足す」(#275 結合)で 1 行に収まる幅が 1500 から 1550 前後へ、「付箋」「ペン」(#275)でさらに広がった(1600 で 2 行になるのを実測)
+    [2200, false], // 「PDF を足す」(#275 結合)で 1 行に収まる幅が 1500 から 1550 前後へ、「付箋」「ペン」(#275)でさらに広がった(1600 で 2 行になるのを実測)。「注釈をページに書き込んで保存」(#1163 依頼 31)でさらに広がり、1800 で 2 行になった(帯の高さ 64 を実測)
   ] as const) {
     await hw.setViewportSize({ width: w, height: 900 });
     await expect
       .poll(async () => (await barGeometry()).right <= w, { message: `幅 ${String(w)} で「ノートへ引用する」が窓の外へ切れている` })
       .toBe(true);
+    // 帯の高さは ResizeObserver で読む面の位置へ写される(次の描画で追いつく)── 追いついた後に、重なっていないことを見る
+    await expect
+      .poll(async () => {
+        const q = await barGeometry();
+        return q.scrollerTop >= q.barBottom - 1;
+      }, { message: `幅 ${String(w)} で、帯が読む面に重なっている` })
+      .toBe(true);
     const g = await barGeometry();
-    expect(g.scrollerTop, `幅 ${String(w)} で、帯が読む面に重なっている`).toBeGreaterThanOrEqual(g.barBottom - 1);
     expect(g.barH > 45, `幅 ${String(w)}: 折り返しの有無が想定と違う(帯の高さ ${String(g.barH)})`).toBe(wraps);
   }
   await hw.setViewportSize({ width: 1100, height: 900 });
@@ -1869,7 +1880,117 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(noteNew(sv, 2), '変更を元に戻したのに、直した付箋が残っている').toHaveCount(0);
   await expect(noteOld(sv, 2).first()).not.toHaveAttribute('data-pkc-removed', 'true');
   await expect(sv.locator('#edit-save')).toBeHidden();
+
+  // (l) 「注釈をページに書き込んで保存」(#1163 依頼 31)── 付箋(日本語は NOTE_B が既に在る / 英数字は新しく付ける)とハイライトと線を、
+  //     注釈ではなくページの描画にした新しい PDF が添付に増える。何も変えていなくても押せる(元の注釈を書き込める)
+  const FL_OUT = '付箋とペン (編集) (書き込み).pdf';
+  const flatten = sv.locator('#edit-flatten');
+  await expect(flatten, '「注釈をページに書き込んで保存」が出ていない / 押せない').toBeEnabled();
+  await expect(flatten).toHaveText('注釈をページに書き込んで保存');
+  await expect(entryNamed(FL_OUT), '書き込みの前に出力の添付がある(観測が空振り)').toHaveCount(0);
+  // 英数字だけの付箋(1 ページ目)と、1 ページ目の字へのハイライトを新しく付ける
+  await sv.locator('.page[data-page="1"]').scrollIntoViewIfNeeded();
+  await clickReal(sv, '#note-tool');
+  const q1 = await pageBox(sv, 1);
+  await sv.mouse.click(q1.x + q1.width * 0.55, q1.y + q1.height * 0.7);
+  await expect(sv.locator('#note-input')).toBeVisible();
+  await sv.keyboard.insertText('memo ok');
+  await sv.keyboard.press('Enter');
+  await expect(noteNew(sv, 1)).toHaveCount(1);
+  await sv.keyboard.press('Escape'); // 道具をやめる
+  await sv.locator('.page[data-page="1"] .textLayer span').first().waitFor({ state: 'attached', timeout: 15_000 });
+  await sv.evaluate(() => {
+    const el = document.querySelector('.page[data-page="1"] .textLayer span');
+    if (el === null) throw new Error('字の層が無い');
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    sel?.addRange(r);
+  });
+  await clickReal(sv, '#hl-apply');
+  await expect(sv.locator('.page[data-page="1"] [data-pkc-field="pdf-highlight-new"]'), 'ハイライトが付かない').not.toHaveCount(0);
+  await clickReal(sv, '#edit-flatten');
+  await expect(sv.locator('#status'), '書き込みの結果が窓に出ない').toContainText('注釈をページに書き込んで保存しました', { timeout: 30_000 });
+  await expect(sv.locator('#status'), '断りの文が出ている(実ブラウザでは字を描く canvas が使える前提)').not.toContainText('書き込めません');
+  await expect(entryNamed(FL_OUT), '「(書き込み)」の添付が増えていない').toHaveCount(1, { timeout: 10_000 });
+  await expect(entryNamed(NT_OUT).filter({ hasNotText: '(書き込み)' }), '元の添付が消えた').toHaveCount(1);
   await sv.close();
+  // できた PDF を開く ── 付箋もハイライトも注釈ではなくページの中(注釈の数が 0)/ 英数字は字で、日本語は画像で書かれている
+  await clickReal(page, entryNamed(FL_OUT));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', FL_OUT);
+  const fw = await openNt();
+  await expect(fw.locator('.page[data-page="2"] [data-pkc-field="pdf-tool-layer"]')).toBeAttached({ timeout: 20_000 });
+  for (const n of [1, 2]) {
+    await expect(noteOld(fw, n), `${String(n)} ページ目に付箋の注釈が残っている`).toHaveCount(0);
+    await expect(
+      fw.locator(`.page[data-page="${String(n)}"] [data-pkc-field="pdf-highlight-existing"]`),
+      `${String(n)} ページ目にハイライトの注釈が残っている`,
+    ).toHaveCount(0);
+  }
+  await expect(fw.locator('#edit-save')).toBeHidden();
+  // 日本語の付箋は字ではなく画像(文字の層に無い)。⚠ 日本語が 1 つでも混じる文書は、英数字の付箋も同じ画像で貼る(下で、英数字だけの文書を別に作る)
+  expect((await fw.locator('.textLayer').allInnerTexts()).join('\n'), '日本語の付箋が字として書かれている(画像のはず)').not.toContain('保存する付箋');
+  // ページの絵: 1 ページ目に黄色いハイライト、2 ページ目の下の方に日本語の付箋の絵(暗い画素)がある
+  const scanPage = async (n: number): Promise<{ yellow: number; darkBottom: number }> => {
+    await fw.locator(`.page[data-page="${String(n)}"]`).scrollIntoViewIfNeeded();
+    await expect
+      .poll(() => fw.locator(`.page[data-page="${String(n)}"] img`).evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0), { timeout: 15_000 })
+      .toBe(true);
+    return fw.locator(`.page[data-page="${String(n)}"]`).evaluate((box) => {
+      const img = box.querySelector('img') as HTMLImageElement;
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      if (ctx === null) throw new Error('canvas が無い');
+      ctx.drawImage(img, 0, 0);
+      const d = ctx.getImageData(0, 0, c.width, c.height).data;
+      let yellow = 0;
+      let darkBottom = 0;
+      for (let y = 0; y < c.height; y += 1) {
+        for (let x = 0; x < c.width; x += 1) {
+          const i = (y * c.width + x) * 4;
+          const r = d[i] ?? 0;
+          const g = d[i + 1] ?? 0;
+          const b = d[i + 2] ?? 0;
+          if (r > 200 && g > 200 && b < 140) yellow += 1;
+          if (y > c.height * 0.75 && r + g + b < 300) darkBottom += 1;
+        }
+      }
+      return { yellow, darkBottom };
+    });
+  };
+  const s1 = await scanPage(1);
+  expect(s1.yellow, '1 ページ目にハイライトの黄色が描かれていない').toBeGreaterThan(50);
+  const s2 = await scanPage(2);
+  expect(s2.darkBottom, '日本語の付箋がページの下に画像として描かれていない').toBeGreaterThan(20);
+
+  // (m) 英数字だけの付箋のときは、画像ではなく字でページに書かれる ── 書き込み済みの PDF(注釈は無い)に英数字の付箋だけ付けて、もう一度書き込む
+  //     (名前は「(書き込み)」の次の「(書き込み 2)」)
+  const FL2_OUT = '付箋とペン (編集) (書き込み 2).pdf';
+  await expect(entryNamed(FL2_OUT), '2 回目の書き込みの前に出力の添付がある(観測が空振り)').toHaveCount(0);
+  await fw.locator('.page[data-page="1"]').scrollIntoViewIfNeeded();
+  await clickReal(fw, '#note-tool');
+  const r1 = await pageBox(fw, 1);
+  await fw.mouse.click(r1.x + r1.width * 0.55, r1.y + r1.height * 0.7);
+  await expect(fw.locator('#note-input')).toBeVisible();
+  await fw.keyboard.insertText('memo ok');
+  await fw.keyboard.press('Enter');
+  await expect(noteNew(fw, 1)).toHaveCount(1);
+  await fw.keyboard.press('Escape');
+  await clickReal(fw, '#edit-flatten');
+  await expect(fw.locator('#status')).toContainText('注釈をページに書き込んで保存しました', { timeout: 30_000 });
+  await expect(fw.locator('#status'), '断りの文が出ている(英数字だけなら canvas も要らない)').not.toContainText('書き込めません');
+  await expect(entryNamed(FL2_OUT), '「(書き込み 2)」の添付が増えていない').toHaveCount(1, { timeout: 10_000 });
+  await fw.close();
+  await clickReal(page, entryNamed(FL2_OUT));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', FL2_OUT);
+  const f2 = await openNt();
+  await expect(f2.locator('.page[data-page="1"] [data-pkc-field="pdf-tool-layer"]')).toBeAttached({ timeout: 20_000 });
+  await expect(noteOld(f2, 1), '英数字の付箋が注釈のまま残っている').toHaveCount(0);
+  await expect(f2.locator('.page[data-page="1"] .textLayer'), '英数字の付箋の字がページに(画像でなく字で)書かれていない').toContainText('1. memo ok', { timeout: 15_000 });
+  await f2.close();
 
   // ── ⑥ 読めない PDF ── 断り文を出さず、ブラウザ内蔵の表示へ退避する ──
   await page.setInputFiles('[data-pkc-field="attach-input"]', {

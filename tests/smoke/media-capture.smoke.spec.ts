@@ -612,6 +612,76 @@ ${(e as Error).message}`,
   expect(await counts(), '切に戻したときに器を作り直している').toEqual({ ...on, src: on.src });
 
   /**
+   * ## 段⑥-b ── **音量をそろえる / 頭の中で鳴る感じを和らげる**(#952 B2・B3)
+   * 「聞きやすくする」が切のまま、**この 2 つのどれか 1 つだけ**入れても鎖を通ること、
+   * 外すと元に戻ること、再読み込みしても入ったままであること、設定の書き出しに載ること。
+   * ⚠ 新しい起動は作らない ── 段⑥ の続き(同じ窓)で押し、最後に 1 度だけ読み直す。
+   */
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const levelBox = page.locator('[data-pkc-field="voice-level"]');
+  const crossBox = page.locator('[data-pkc-field="voice-crossfeed"]');
+  await expect(levelBox, '「音量をそろえる」の行が設定に無い').toBeVisible();
+  await expect(crossBox, '「頭の中で鳴る感じを和らげる」の行が設定に無い').toBeVisible();
+  await expect(levelBox).not.toBeChecked();
+  await expect(crossBox).not.toBeChecked();
+  // 🔑 並びは「音を聞きやすくする」の下(boost → level → crossfeed の順)
+  const order = await page.evaluate(() =>
+    ['voice-boost', 'voice-level', 'voice-crossfeed'].map((f) => {
+      const el = document.querySelector(`[data-pkc-field="${f}"]`);
+      return el === null ? -1 : Array.from(document.querySelectorAll('input[data-pkc-field]')).indexOf(el);
+    }),
+  );
+  expect(order[0], '3 つの行が揃っていない').toBeGreaterThanOrEqual(0);
+  expect(order[1], '「音量をそろえる」が「音を聞きやすくする」の直後に無い').toBe((order[0] ?? -1) + 1);
+  expect(order[2], '「頭の中で鳴る感じを和らげる」が「音量をそろえる」の直後に無い').toBe((order[0] ?? -1) + 2);
+
+  // 入れる → 外す で元に戻る(印と保存の値)
+  for (const [box, field, label] of [
+    [levelBox, 'voice-level', '音量をそろえる'],
+    [crossBox, 'voice-crossfeed', '頭の中で鳴る感じを和らげる'],
+  ] as const) {
+    await clickReal(page, `[data-pkc-field="${field}"]`);
+    await expect(box, `${label}:押したのに印が付かない`).toBeChecked();
+    await clickReal(page, `[data-pkc-field="${field}"]`);
+    await expect(box, `${label}:外したのに印が残る`).not.toBeChecked();
+  }
+  expect(
+    await page.evaluate(() => [
+      localStorage.getItem('pkc3.voice-level'),
+      localStorage.getItem('pkc3.voice-crossfeed'),
+    ]),
+    '外したのに保存の値が入のまま',
+  ).toEqual([expect.not.stringMatching(/^1$/), expect.not.stringMatching(/^1$/)]);
+
+  /**
+   * 1 つずつ入れて読み直す(2 回)── 読み直した窓は器も再生機も新しいので、
+   * 「聞きやすくする は切のまま、その 1 つだけで鎖を通る」を数で言える(同じ再生機は繋ぎ直せない)。
+   */
+  for (const [field, other, label] of [
+    ['voice-level', 'voice-crossfeed', '音量をそろえる'],
+    ['voice-crossfeed', 'voice-level', '頭の中で鳴る感じを和らげる'],
+  ] as const) {
+    await clickReal(page, `[data-pkc-field="${field}"]`);
+    await page.reload();
+    await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+    await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+    await expect(page.locator(`[data-pkc-field="${field}"]`), `読み直したら ${label} が戻った`).toBeChecked();
+    await expect(page.locator(`[data-pkc-field="${other}"]`)).not.toBeChecked();
+    await expect(page.locator('[data-pkc-field="voice-boost"]')).not.toBeChecked();
+    expect(await page.evaluate((k) => localStorage.getItem(k), `pkc3.${field}`), `${label}:保存の値が入ではない`).toBe('1');
+    await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+    await playsOn(`🔴 ${label} だけ入れて読み直したら音が止まった`);
+    const c = await counts();
+    expect(c.src, `${label} だけ入れても、音の通り道を通していない(「聞きやすくする」は切のまま)`).toBeGreaterThan(0);
+    expect(c.ctx, `${label}:器を作っていない / 再生機ごとに作り直している`).toBe(1);
+    await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+    await clickReal(page, `[data-pkc-field="${field}"]`);
+    await expect(page.locator(`[data-pkc-field="${field}"]`), `${label}:外したのに印が残る`).not.toBeChecked();
+  }
+  // 段⑦ は「設定は閉じている」所から始まる ── 元の面へ戻す
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+
+  /**
    * ## 段⑦ ── **音声認識(文字にする)**(#772 段②)
    *
    * 🔴 **unit では原理的に届かない層**:

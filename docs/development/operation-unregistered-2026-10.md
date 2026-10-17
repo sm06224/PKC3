@@ -389,6 +389,8 @@
 | `set-theme` | 低 | 配色 | `src/adapter/ui/render/settings/theme.ts:18` | 選んだ値を読む(配色の切り替えは値ごとの命令にできるが別設計) |
 | `set-too-narrow-enabled` | 低 | 狭い画面のときに断り書きを出す | `src/adapter/ui/render/settings/too-narrow.ts:30` | チェック欄の値を読む |
 | `set-voice-boost` | 低 | 再生するとき声を聞き取りやすく整える | `src/adapter/ui/render/settings/voice-boost.ts:22` | チェック欄の値を読む |
+| `set-voice-crossfeed` | 低 | ヘッドホンで聞くとき左右を少し混ぜる | `src/adapter/ui/render/settings/voice-boost.ts:48` | チェック欄の値を読む |
+| `set-voice-level` | 低 | 再生するとき小さい声と大きい声の差を縮める | `src/adapter/ui/render/settings/voice-boost.ts:39` | チェック欄の値を読む |
 | `toggle-container-repair` | 低 | 作り直す・初期化するボタンを表示 | `src/adapter/ui/render/commands.ts:300` | 保守の画面の中の表示切り替え |
 
 ## 履歴・版

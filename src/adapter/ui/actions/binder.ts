@@ -1751,6 +1751,10 @@ export interface BinderServices {
    *   保存しただけでは、開いているノートの音は変わらない(設定が嘘になる)。
    */
   setVoiceBoost?(on: boolean): void;
+  /** 🔴 「音量をそろえる」(#952 B2)。⚠ 切り替えたら、いまの再生機もその場で繋ぎ替える。 */
+  setVoiceLevel?(on: boolean): void;
+  /** 🔴 「頭の中で鳴る感じを和らげる」(#952 B3)。⚠ 同じく、その場で繋ぎ替える。 */
+  setVoiceCrossfeed?(on: boolean): void;
   /**
    * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。⚠ **省略可**。
    * ⚠ 切り替えたら**その場で本文を描き直す** ── 保存しただけでは、
@@ -14630,6 +14634,14 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-voice-boost': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setVoiceBoost?.(target.checked);
+  },
+  'set-voice-level': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setVoiceLevel?.(target.checked);
+  },
+  'set-voice-crossfeed': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setVoiceCrossfeed?.(target.checked);
   },
   'set-phone-links': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

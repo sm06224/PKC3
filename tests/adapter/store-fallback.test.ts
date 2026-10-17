@@ -117,6 +117,24 @@ const CASES: readonly {
     b: false,
   },
   {
+    name: 'VoiceBoostStore(音量をそろえる)',
+    make: (st: StorageLike | null = null) => {
+      const s = new VoiceBoostStore(st);
+      return { write: (v) => s.setLevelEnabled(v as boolean), read: () => s.levelEnabled() };
+    },
+    a: true,
+    b: false,
+  },
+  {
+    name: 'VoiceBoostStore(頭の中で鳴る感じを和らげる)',
+    make: (st: StorageLike | null = null) => {
+      const s = new VoiceBoostStore(st);
+      return { write: (v) => s.setCrossfeedEnabled(v as boolean), read: () => s.crossfeedEnabled() };
+    },
+    a: true,
+    b: false,
+  },
+  {
     name: 'PhoneLinksStore',
     make: (st: StorageLike | null = null) => {
       const s = new PhoneLinksStore(st);

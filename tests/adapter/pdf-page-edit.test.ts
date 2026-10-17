@@ -25,6 +25,7 @@ interface Api {
   isKept(items: Item[], page: number): boolean;
   onKeptPages<T extends { page: number }>(list: T[], items: Item[]): T[];
   REMOVED_PAGE_REFUSAL: string;
+  flattenName(name: string): string;
   sameArrangement(a: Item[], b: Item[]): boolean;
   noteLine(kept: number, total: number): string;
   warnLine(info: { outlines: boolean; form: boolean; signature: boolean }): string;
@@ -195,6 +196,14 @@ describe('保存する PDF の名前', () => {
     expect(api.outputName('(編集) 資料.pdf')).toBe('(編集) 資料 (編集).pdf');
     expect(api.outputName('')).toBe('document (編集).pdf');
     expect(api.outputName('.pdf')).toBe('document (編集).pdf');
+  });
+
+  it('注釈の書き込み: 1 回目は (書き込み)、2 回目から (書き込み N)。重ねない・保存や抜き出しとは別の名前', () => {
+    expect(api.flattenName('報告書.pdf')).toBe('報告書 (書き込み).pdf');
+    expect(api.flattenName('報告書 (書き込み).pdf')).toBe('報告書 (書き込み 2).pdf');
+    expect(api.flattenName('報告書 (書き込み 9).pdf')).toBe('報告書 (書き込み 10).pdf');
+    expect(api.flattenName('')).toBe('document (書き込み).pdf');
+    expect(api.flattenName('x.pdf')).not.toBe(api.outputName('x.pdf'));
   });
 });
 

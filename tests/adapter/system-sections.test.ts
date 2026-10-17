@@ -69,6 +69,8 @@ const PORTABLE_FIELD_OF: Record<string, string> = {
   'pkc3.paste-source': 'paste-source-select',
   'pkc3.alarm': 'alarm-enabled',
   'pkc3.voice-boost': 'voice-boost',
+  'pkc3.voice-level': 'voice-level',
+  'pkc3.voice-crossfeed': 'voice-crossfeed',
   'pkc3.open-place': 'open-place-select',
   'pkc3.app-open-target': 'app-open-target-select',
   'pkc3.phone-links': 'phone-links',

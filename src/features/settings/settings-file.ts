@@ -129,6 +129,9 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
    *   だけで、鳴らなくなることはない。
    */
   { key: 'pkc3.voice-boost', label: '音を聞きやすくするか', valid: isOnOff },
+  // ⚠ 同じ節の切り替え 2 つ(#952 B2・B3)。聞く人の耳に付く好みなので、`pkc3.voice-boost` と同じく運ぶ
+  { key: 'pkc3.voice-level', label: '音量をそろえるか', valid: isOnOff },
+  { key: 'pkc3.voice-crossfeed', label: '頭の中で鳴る感じを和らげるか', valid: isOnOff },
   /**
    * ⚠ 別の端末でも**同じ意味**になる(#826)── 「本文を見ながら選びたい」かどうかは
    *   **人に付く**好みである。⚠ 端末側の事情(ポップアップを止めている)で効かない回は

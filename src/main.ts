@@ -3779,6 +3779,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appVoiceBoost.setEnabled(on);
       appVoiceBoostRouter.refresh();
     },
+    setVoiceLevel: (on) => {
+      appVoiceBoost.setLevelEnabled(on);
+      appVoiceBoostRouter.refresh();
+    },
+    setVoiceCrossfeed: (on) => {
+      appVoiceBoost.setCrossfeedEnabled(on);
+      appVoiceBoostRouter.refresh();
+    },
     setAlarmEnabled: (on) => {
       appAlarmEnabled.setEnabled(on);
       // 🔴 切入の直後に 1 度見る(#1087)── 入にした時刻から見る / 切にしたら見た位置を忘れる。次の刻み(最大 30 秒)を待たない
