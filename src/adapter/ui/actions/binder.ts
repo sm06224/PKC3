@@ -15,7 +15,7 @@
 import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { bindWaveDrag } from './wave-drag';
-import { renameAttachmentAndFile, renameEntryFromRow } from './attachment-rename';
+import { renameAttachmentAndFile, renameEntryFromRow, restoreRenamedTitle } from './attachment-rename';
 import { lidOfNode } from './lid-of-node';
 import { isEditableColor } from '@features/markdown/color-code';
 import type { DroppedAt } from './asset-into-note';
@@ -8897,8 +8897,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: r.lid, title: r.from });
-    if (r.withFile) dispatcher.dispatch({ type: 'SET_ATTACHMENT_NAME', lid: r.lid, name: r.from });
+    restoreRenamedTitle(dispatcher, r.lid, r.from, r.withFile);
     dispatcher.dispatch({ type: 'OP_NOTICE', message: `題名を「${r.from}」に戻しました` });
   },
   'delete-entry': (dispatcher, target, services, root) => {

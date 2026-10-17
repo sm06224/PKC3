@@ -45,3 +45,17 @@ export function renameEntryFromRow(dispatcher: Dispatcher, lid: string, title: s
     dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
   });
 }
+
+/**
+ * 「元に戻す」で題名を戻す(#1657)。添付ならファイル名も同じ字へ戻す ── 撃つ口はここ 1 本に寄せる
+ * (binder が `SET_ATTACHMENT_NAME` を直に撃たない)。⚠ 戻す操作では「元に戻す」をもう一度出さない。
+ */
+export function restoreRenamedTitle(
+  dispatcher: Dispatcher,
+  lid: string,
+  title: string,
+  withFile: boolean,
+): void {
+  dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
+  if (withFile) dispatcher.dispatch({ type: 'SET_ATTACHMENT_NAME', lid, name: title });
+}
