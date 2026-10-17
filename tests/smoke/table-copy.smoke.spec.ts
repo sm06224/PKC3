@@ -196,6 +196,37 @@ test('🔴 表の ▾ から形を選んでコピーでき、⧉ の 1 押しは
     '保存したのに何も言っていない / ノートの題名から名前を作っていない',
   ).toContainText(/「買い物メモ-\d{4}-\d{2}-\d{2}\.csv」を保存しました/);
 
+  /**
+   * ⑦ 🔴 **csv の表の ▾ から見出しを切り替えられる**(#1662 3)── 新しい起動は増やさない。
+   *   観測点は**表の見出しのセル(`th`)の数**と、**開き直した一覧の字が反対側になること**。
+   */
+  const csvTable = page.locator('[data-pkc-field="detail-body"] table.pkc-md-rendered-csv');
+  await expect(csvTable.locator('th'), '前提:csv の表に見出しの行が無い').not.toHaveCount(0);
+  await page.locator(menu).nth(1).click();
+  await page.locator('[data-pkc-field="pick-copy-format"]', { hasText: '見出しをやめる' }).click();
+  await expect(csvTable.locator('th'), '「見出しをやめる」で見出しの行が残っている').toHaveCount(0, { timeout: 10_000 });
+  await page.locator(menu).nth(1).click();
+  await expect(
+    page.locator('[data-pkc-field="pick-copy-format"]', { hasText: '1 行目を見出しにする' }),
+    '見出しをやめた後、一覧の字が「1 行目を見出しにする」に変わっていない',
+  ).toHaveCount(1);
+  await page.locator('[data-pkc-field="pick-copy-format"]', { hasText: '1 行目を見出しにする' }).click();
+  await expect(csvTable.locator('th'), '「1 行目を見出しにする」で見出しが戻っていない').not.toHaveCount(0, { timeout: 10_000 });
+
+  /**
+   * ⑧ 🔴 **`|` で書いた表にも行・列の ＋ × が出て、行を足せる**(#1662 6)。
+   *   観測点は**行の数**(本文へ書かれて描き直された結果)。
+   */
+  const mdTable = page.locator('[data-pkc-field="detail-body"] table:not(.pkc-md-rendered-csv)').first();
+  await expect(mdTable.locator('[data-pkc-action="shape-cell"]'), '`|` の表に ＋ × が出ていない').not.toHaveCount(0);
+  const rowsBefore = await mdTable.locator('tbody tr').count();
+  await mdTable.locator('tbody tr').first().hover();
+  await mdTable
+    .locator('[data-pkc-action="shape-cell"][data-pkc-cell-what="row"][data-pkc-cell-mode="add"]')
+    .first()
+    .click();
+  await expect(mdTable.locator('tbody tr'), '＋ を押しても行が増えていない').toHaveCount(rowsBefore + 1, { timeout: 10_000 });
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
