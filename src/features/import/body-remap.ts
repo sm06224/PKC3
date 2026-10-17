@@ -59,6 +59,11 @@ export interface ImportRemap {
   assetKeys: ReadonlyArray<readonly [string, string]>;
   /** ノートの lid(旧 → 新)。本文の `entry:<lid>`(リンク・カード)を写す。 */
   lids: ReadonlyArray<readonly [string, string]>;
+  /**
+   * 書き出し元の容れ物の id(あれば)。本文の `pkc://<この id>/entry/<lid>` も `entry:<lid>` と同じに写す
+   * (#1087 N14。読む側 `body-links.ts` が「自分あて」と読む形)。無ければ `entry:` だけ。
+   */
+  cid?: string;
 }
 
 /** 写す組が 1 つも無いか(無いなら本文も履歴も触らない)。 */
@@ -74,6 +79,18 @@ export function changedPairs(map: ReadonlyMap<string, string>): Array<readonly [
 }
 
 /**
+ * ノートの lid を 1 パスで写す。⚠ 文法は `entry-ref/body-links.ts` の読み方に揃える:
+ * 綴りの大小は問わず(`Entry:n1` も)、**左は lid の文字で留める**(`myentry:n1` は `entry:` ではない)、
+ * `cid` が在れば `pkc://<cid>/entry/<lid>` も写す。写すのは lid の部分だけで、前の字はそのまま残す。
+ */
+function remapEntryLids(body: string, map: ReadonlyMap<string, string>, cid?: string): string {
+  const tok = 'A-Za-z0-9_\\-';
+  const portable = cid !== undefined && /^[A-Za-z0-9_-]+$/.test(cid) ? `|pkc://${cid}/entry/` : '';
+  const re = new RegExp(`(?<![${tok}])((?:entry:)${portable})([${tok}]+)`, 'gi');
+  return body.replace(re, (_m, head: string, lid: string) => head + (map.get(lid) ?? lid));
+}
+
+/**
  * 🔑 本文を写す**唯一の口**。tip(取り込む本文)と、履歴から戻した各版の両方がここを通る。
  * ⚠ lid は `entry:` の直後だけを狭く当てる。添付の key は token を全部見る(取り込み前からの規則)ので、
  *   lid と添付の旧 key が偶然同じ字なら、どちらの順でも化けうる ── 起きる確率は採番の形から極小。
@@ -81,7 +98,7 @@ export function changedPairs(map: ReadonlyMap<string, string>): Array<readonly [
  */
 export function remapImportedBody(body: string, remap: ImportRemap): string {
   let out = body;
-  if (remap.lids.length > 0) out = replacePrefixed(out, 'entry:', new Map(remap.lids));
+  if (remap.lids.length > 0) out = remapEntryLids(out, new Map(remap.lids), remap.cid);
   if (remap.assetKeys.length > 0) out = remapAssetKeys(out, new Map(remap.assetKeys));
   return out;
 }

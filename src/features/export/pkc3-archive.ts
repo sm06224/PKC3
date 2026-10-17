@@ -606,6 +606,8 @@ export function restoreArchive(
    * ⚠ 当てないと、取り込んだノートのリンクが**複製ではなく既存の原本**を指す(つながりは複製を指すのに)。
    */
   lidRemap: Array<readonly [string, string]>;
+  /** 書き出し元の容れ物の id(manifest。無ければ空)。本文の `pkc://<cid>/entry/<lid>` を写すのに使う(#1087 N14)。 */
+  sourceCid: string;
   warnings: string[];
 } {
   const warnings = [...archive.warnings];
@@ -713,5 +715,5 @@ export function restoreArchive(
   }
   const lidRemap: Array<readonly [string, string]> = [];
   for (const [from, to] of lidMap) if (from !== to) lidRemap.push([from, to]);
-  return { entries, relations, assets, revisionChains, tagColors: archive.tagColors, lidRemap, warnings };
+  return { entries, relations, assets, revisionChains, tagColors: archive.tagColors, lidRemap, sourceCid: archive.manifest.cid ?? '', warnings };
 }

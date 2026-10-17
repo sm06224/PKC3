@@ -46,6 +46,7 @@ describe('注意の畳み方', () => {
     const N = 60;
     const archive = {
       version: 2,
+      manifest: { format: 'pkc3', version: 2 }, // restoreArchive は書き出し元の cid を manifest から読む(#1087 N14)
       entries: Array.from({ length: N }, (_, i) => ({
         lid: `n${i}`,
         title: `ノート ${i}`,
