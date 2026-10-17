@@ -317,7 +317,8 @@ export function windowTitleFor(base: string, label: string | null): string {
  */
 export function noteOpenElsewhereMessage(base: string, title: string | null): string {
   // 🔑 台帳が古いこともある(閉じた窓が残っている)── 探しても見つからないときの出口を添える。
-  //    押し直すと点呼が打たれ、答えが無ければ台帳から捨てて新しく開く(`note-window-registry.ts`)
+  //    1 回目の押しは「前に出て」と頼む(点呼もこのとき一緒に打つ)。**頼んだ直後にもう一度押すと、
+  //    点呼の答えを待たず新しく開く**(時間だけで決める ── `note-window-registry.ts` の `decideNoteOpen`)
   return `このノートは、すでに別のウィンドウで開いています(『${windowTitleFor(base, title)}』)。見つからないときは、もう一度押すと開きます`;
 }
 

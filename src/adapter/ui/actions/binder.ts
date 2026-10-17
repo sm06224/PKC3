@@ -1057,6 +1057,20 @@ export function generateLid(): string {
  * 範囲選択(reducer)・ここが別々に並びを組むと、**目で見たものと動くものが
  * 食い違う**(CLAUDE.md §7)。
  */
+/**
+ * 🔴 **付箋の窓を Escape で閉じてはいけない打ちかけが、画面に在るか**(#1087)。
+ * 追記欄に打った字(どの欄でも。焦点が外れていても)か、章・コード枠の欄(`sectionDraft`)。
+ * ⚠ 追記欄の字は欄そのものにしか無い(state に写らない)ので欄から読む。
+ * 🔑 **窓を閉じる 2 つの口(追記欄の中の Escape / 欄の外の Escape)が同じ答えを引く** ── 片方にだけ
+ *   門が在ると、焦点の置き場所で打ちかけが消える。
+ */
+export function noteWindowHasTyping(root: ParentNode, st: AppState): boolean {
+  if (st.sectionDraft != null) return true;
+  for (const el of root.querySelectorAll<HTMLTextAreaElement>('[data-pkc-field="append-input"]'))
+    if (el.value !== '') return true;
+  return false;
+}
+
 const visibleFilerRows = (st: AppState): EntryMeta[] =>
   filerRows(st.scopeLid, st.entryMetas, st.relations, filerRowOptions(st));
 
@@ -1915,6 +1929,12 @@ export interface BinderServices {
    *   (今までどおり `deselect-entry` へ進む)
    */
   closeNoteWindow?(): CloseViewWindowResult;
+  /**
+   * 🔴 **この窓は、自分で開いた付箋か**(#1087)。⚠ `closeNoteWindow` は呼ぶと**閉じてしまう**ので、
+   * 「閉じずに付箋かだけ知りたい」場面(打ちかけがあって閉じないとき、本体の `deselect-entry` へ
+   * 流してはいけない)にはこちらを使う。省略 = 付箋ではない。
+   */
+  isNoteWindow?(): boolean;
   /**
    * ランチャーのタイルを起動する(P7b 段⑩)。
    * ⚠ blob の貸し出し・`window.open` は実体側 ── binder は DOM を触らない。
@@ -16231,7 +16251,13 @@ export function bindActions(
        * ⚠ **`'refused'`(ブラウザが閉じなかった)も黙らない**(#1042 段④)──
        *   `close-pane` と同じ理由を出す(`CLOSE_VIEW_WINDOW_REFUSED`)。
        */
-      if (ke.key === 'Escape' && ke.target instanceof HTMLTextAreaElement && ke.target.value === '') {
+      if (
+        ke.key === 'Escape' &&
+        ke.target instanceof HTMLTextAreaElement &&
+        ke.target.value === '' &&
+        // 🔴 欄は空でも、章の欄が開いていれば閉じない(#1087)
+        !noteWindowHasTyping(root, dispatcher.getState())
+      ) {
         const closed = services.closeNoteWindow?.() ?? 'not-a-window';
         if (closed !== 'not-a-window') {
           ke.preventDefault();
@@ -19382,6 +19408,20 @@ export function bindActions(
          *   効く(`runGlobalCommand`)。付箋の窓だけこの門を通らず、**書いている最中に `Esc` で
          *   確認も無く窓ごと閉じて**打ちかけが消えていた。
          */
+        /**
+         * 🔴 **追記欄に字が在る / 章の欄が開いている間も閉じない**(#1087)。⚠ 欄の中の Escape は
+         *   「空のときだけ」閉じる門を持つが、欄の外へ焦点を外すとこちらへ来て、打った字ごと窓が閉じた。
+         *   付箋の窓では `deselect-entry` へも流さない(`selectedLid` を空にすると窓が空の画面で残る)。
+         */
+        if (
+          rcmd === 'deselect-entry' &&
+          dispatcher.getState().phase === 'ready' &&
+          noteWindowHasTyping(root, dispatcher.getState()) &&
+          services.isNoteWindow?.() === true
+        ) {
+          ke.preventDefault();
+          return true;
+        }
         const closed =
           dispatcher.getState().phase === 'ready'
             ? (services.closeNoteWindow?.() ?? 'not-a-window')

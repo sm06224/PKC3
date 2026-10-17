@@ -4315,6 +4315,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         close: () => window.close(),
         isClosed: () => window.closed,
       }),
+    // 🔴 閉じずに「付箋か」だけ答える(打ちかけがあって閉じない場面で、本体の操作へ流さないため。#1087)
+    isNoteWindow: () => heldNoteWindow,
     /**
      * 添付の参照をコピーする(P8 段⑱)。
      * ⚠ **結果を出す** ── コピーは押しても画面が変わらない操作なので、
