@@ -355,3 +355,62 @@ describe('本文の csv を構造へ混ぜる(#918 段⑤d-2)', () => {
     expect(m.tables.some((t) => t.name === '棚卸' && t.kind === 'csv'), '衝突しない csv まで落ちた').toBe(true);
   });
 });
+
+describe('🔴 列を書かない外部キーは、相手の主キーで埋める(#1087)', () => {
+  const PK_COLS = grid(
+    ['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'],
+    [
+      ['table', 'users', 0, 'id', 'INTEGER', 0, 1],
+      ['table', 'users', 1, 'name', 'TEXT', 0, 0],
+      ['table', 'orders', 0, 'id', 'INTEGER', 0, 1],
+      ['table', 'orders', 1, 'user_id', 'INTEGER', 0, 0],
+      // 複合キー: pk の番号は並びの順(列の並びと逆でもよい)
+      ['table', 'pair', 0, 'b', 'TEXT', 0, 2],
+      ['table', 'pair', 1, 'a', 'TEXT', 0, 1],
+      ['table', 'child', 0, 'x', 'TEXT', 0, 0],
+      ['table', 'child', 1, 'y', 'TEXT', 0, 0],
+      ['table', 'nopk', 0, 'v', 'TEXT', 0, 0],
+      ['table', 'loose', 0, 'n', 'TEXT', 0, 0],
+    ],
+  );
+  const FK_COLS = ['tbl', 'ref', 'col', 'refcol'];
+  const links = (rows: (string | number | null)[][]) =>
+    schemaModel({ source: 'x', columns: PK_COLS, fks: grid(FK_COLS, rows) }).links;
+
+  it('`REFERENCES users`(to が NULL)は users の主キー id になり、構造の矢印にも出る', () => {
+    expect(links([['orders', 'users', 'user_id', null]])[0]!.toColumn).toBe('id');
+    const md = renderSchemaDigest({
+      source: 'x',
+      columns: PK_COLS,
+      fks: grid(FK_COLS, [['orders', 'users', 'user_id', null]]),
+    });
+    expect(md).toContain('- orders.user_id → users.id');
+  });
+
+  it('相手の名前が大文字違いでも主キーを引く', () => {
+    expect(links([['orders', 'Users', 'user_id', null]])[0]!.toColumn).toBe('id');
+  });
+
+  it('複合キーは、続く空行の順に pk の番号と対応させる', () => {
+    const l = links([
+      ['child', 'pair', 'x', null],
+      ['child', 'pair', 'y', null],
+    ]);
+    expect(l.map((x) => x.toColumn)).toEqual(['a', 'b']);
+  });
+
+  it('⚠ 別々の外部キーが隣り合っても、主キーが 1 列ならそれぞれ主キーを指す。長さが合わない複合キーは空のまま', () => {
+    const two = links([
+      ['orders', 'users', 'user_id', null],
+      ['orders', 'users', 'id', null],
+    ]);
+    expect(two.map((x) => x.toColumn)).toEqual(['id', 'id']);
+    const lone = links([['child', 'pair', 'x', null]]);
+    expect(lone[0]!.toColumn, '複合キーの片方だけを指す線を引いた').toBe('');
+  });
+
+  it('⚠ 対照群: 列を書いた外部キーはそのまま / 主キーの無い相手は空のまま', () => {
+    expect(links([['orders', 'users', 'user_id', 'name']])[0]!.toColumn).toBe('name');
+    expect(links([['loose', 'nopk', 'n', null]])[0]!.toColumn).toBe('');
+  });
+});

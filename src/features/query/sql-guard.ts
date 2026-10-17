@@ -323,22 +323,24 @@ export function checkReadOnlySql(input: string): SqlCheck {
  *   ために 1 か所へ寄せた(CLAUDE.md §7 ── 2 か所に書くと、片方だけ直る日が来る)。
  */
 export function sqlRunFailureText(raw: string): string {
-  if (/readonly/i.test(raw)) return '書き込みはできません(ここは読むだけです)';
-  if (/interrupt/i.test(raw)) return '時間がかかりすぎたので止めました(条件を絞ってください)';
   /**
-   * 🔴 **よく出る 3 つは日本語で言い、次の手を添える**(#1087 の見直し 2026-10-13)── 直す前は sqlite の英語
-   *   (`near "FORM": syntax error` / `no such table: 売上`)がそのまま出て、何を直せばよいかが書いていなかった。
-   * ⚠ 元の英語は括弧で残す(上の 2 つと同じく「消しもしない」── 何が起きたかの手がかり)。
+   * 🔴 **名前の中に `readonly` / `interrupt` が入っただけの失敗を、書込拒否や中断と読まない**(#1087)。
+   * ⚠ 直す前は語の部分一致で、`no such column: is_readonly` が「書き込みはできません」、
+   *   `no such table: interrupts` が「時間がかかりすぎた」と出た。
+   * 🔑 sqlite の失敗は、名前を引用して言う種類(no such … / syntax error / duplicate column)を
+   *   **先に**拾い、書込拒否と中断は sqlite 自身の言い方(結果コード名か決まり文句)にだけ当てる。
    */
   const table = /no such table:\s*(\S+)/i.exec(raw);
   if (table) return `「${table[1]}」という表はありません。表の名前は、SQL で調べる画面の「構造を見る」で分かります(${raw})`;
   const column = /no such column:\s*(\S+)/i.exec(raw);
   if (column) return `「${column[1]}」という列はありません。列の名前は、SQL で調べる画面の「構造を見る」で分かります(${raw})`;
   if (/syntax error/i.test(raw)) return `SQL の書き方に誤りがあります。綴りや区切りの記号を確かめてください(${raw})`;
-  // 大文字小文字だけが違う列(`ID` と `id`)も sqlite では同じ名前 ── 4 つ目によく出る
-  if (/string or blob too big/i.test(raw)) return `1 つの値が大きすぎます(16 MB まで)。取り出す長さを SUBSTR などで絞ってください(${raw})`;
   const dup = /duplicate column name:\s*(\S+)/i.exec(raw);
   if (dup) return `「${dup[1]}」という列の名前が重なっています。AS で別の名前を付けてください(${raw})`;
+  if (/SQLITE_READONLY|attempt to write a readonly database/i.test(raw)) return '書き込みはできません(ここは読むだけです)';
+  if (/SQLITE_INTERRUPT|(^|[:\s])interrupted\s*$/i.test(raw)) return '時間がかかりすぎたので止めました(条件を絞ってください)';
+  // 大文字小文字だけが違う列(`ID` と `id`)も sqlite では同じ名前 ── 4 つ目によく出る
+  if (/string or blob too big/i.test(raw)) return `1 つの値が大きすぎます(16 MB まで)。取り出す長さを SUBSTR などで絞ってください(${raw})`;
   return raw;
 }
 

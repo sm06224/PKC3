@@ -237,3 +237,23 @@ describe('自分で引いた繋がりを混ぜる(#918 段⑤d-1)', () => {
     expect(d.dropped[0]!.why).toContain('客');
   });
 });
+
+describe('🔴 表の名前は大文字小文字を区別しない(#1087)', () => {
+  it('`REFERENCES Users` は表 `users` へ線を引く(図に無いとは言わない)。箱の綴りは表のまま', () => {
+    const d = erLayout(
+      model(
+        [tbl('orders', [col('id'), col('user_id')], 3), tbl('users', [col('id')], 2)],
+        [link('orders', 'user_id', 'Users', 'id')],
+      ),
+    );
+    expect(d.dropped, '大文字違いで落ちた').toEqual([]);
+    expect(d.lines.length).toBe(1);
+    expect(d.boxes.map((b) => b.table.name).sort()).toEqual(['orders', 'users']);
+  });
+
+  it('⚠ 対照群: 本当に無い表は今までどおり断る', () => {
+    const d = erLayout(model([tbl('orders', [col('id')])], [link('orders', 'id', 'Nobody', 'id')]));
+    expect(d.lines).toEqual([]);
+    expect(d.dropped[0]!.why).toContain('「Nobody」という表が図にありません');
+  });
+});

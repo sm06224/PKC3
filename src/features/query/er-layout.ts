@@ -178,7 +178,9 @@ export function erLayout(model: SchemaModel, mine: readonly SchemaLink[] = []): 
   // ── ③ 線を引く(引けない物は理由つきで残す)
   // 🔑 **宣言された外部キー + 自分で引いた繋がりを、同じ扱いで通す**(#918 段⑤d-1)。
   //   判定(相手が図に居るか / 自分自身を指していないか)は出どころで変えない。
-  const byName = new Map(boxes.map((b) => [b.table.name, b] as const));
+  // 🔴 **名前は大文字小文字を区別しない**(#1087)── sqlite の表の名前はそうで、`REFERENCES Users` は
+  //   表 `users` を指す。⚠ 引くときだけ小文字へ寄せる(箱に出す綴りは表のまま)。
+  const byName = new Map(boxes.map((b) => [b.table.name.toLowerCase(), b] as const));
   const lines: ErLine[] = [];
   const dropped: ErDropped[] = [];
   const tagged: readonly { readonly link: SchemaLink; readonly mine: boolean }[] = [
@@ -186,8 +188,8 @@ export function erLayout(model: SchemaModel, mine: readonly SchemaLink[] = []): 
     ...mine.map((link) => ({ link, mine: true })),
   ];
   for (const { link, mine: isMine } of tagged) {
-    const from = byName.get(link.from);
-    const to = byName.get(link.to);
+    const from = byName.get(link.from.toLowerCase());
+    const to = byName.get(link.to.toLowerCase());
     if (from === undefined || to === undefined) {
       // ⚠ 相手が図に居ない(名前の取り違え / ビューを指している)
       const missing = from === undefined ? link.from : link.to;

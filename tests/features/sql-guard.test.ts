@@ -258,6 +258,24 @@ describe('よく出る失敗を日本語で言う(#1087 の見直し 2026-10-13)
   it('⚠ 知らない失敗はそのまま出す(手がかりを消さない)', () => {
     expect(sqlRunFailureText('disk I/O error')).toBe('disk I/O error');
   });
+
+  it('🔴 名前の中に readonly / interrupt が入っているだけの失敗を、書込拒否・中断と読まない(#1087)', () => {
+    const col = sqlRunFailureText('no such column: is_readonly');
+    expect(col.startsWith('「is_readonly」という列はありません'), col).toBe(true);
+    const tbl = sqlRunFailureText('no such table: interrupts');
+    expect(tbl.startsWith('「interrupts」という表はありません'), tbl).toBe(true);
+    expect(sqlRunFailureText('near "readonly": syntax error').startsWith('SQL の書き方に誤りがあります')).toBe(true);
+    expect(sqlRunFailureText('duplicate column name: interrupt').startsWith('「interrupt」という列の名前が重なっています')).toBe(true);
+  });
+
+  it('⚠ 対照群: sqlite 自身の書込拒否・中断は今までどおり言う', () => {
+    const w = '書き込みはできません(ここは読むだけです)';
+    expect(sqlRunFailureText('attempt to write a readonly database')).toBe(w);
+    expect(sqlRunFailureText('SQLITE_READONLY: sqlite3 result code 8: attempt to write a readonly database')).toBe(w);
+    const i = '時間がかかりすぎたので止めました(条件を絞ってください)';
+    expect(sqlRunFailureText('SQLITE_INTERRUPT: sqlite3 result code 9: interrupted')).toBe(i);
+    expect(sqlRunFailureText('interrupted')).toBe(i);
+  });
 });
 
 describe('DuckDB の失敗も日本語で言う(#1087)', () => {

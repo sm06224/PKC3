@@ -4331,6 +4331,10 @@ export interface ReduceResult {
  * 🔴 **履歴の上限**(#918 段②a)。⚠ 打つほど重くなる形にしない。
  * 🔑 20 は「1 回の作業で遡りたい範囲」── これを超えたら、ふつうは思い出せない。
  */
+/** 選んだファイルを開いている最中に「実行」が押されたときの断り(#1087) */
+export const SQL_GUEST_OPENING_TEXT = '選んだファイルをまだ開いています。開き終わってから実行してください';
+/** 開けなかったファイルを選んだまま「実行」が押されたとき(断りは打ち直しで消えている回)の断り(#1087) */
+export const SQL_GUEST_NOT_OPEN_TEXT = '選んだファイルが開けていません。選び直してから実行してください';
 export const SQL_HISTORY_MAX = 20;
 
 /**
@@ -5436,6 +5440,19 @@ function reduceCore(
     case 'RUN_SQL': {
       if (state.sqlPage.running) return { state, events: [] };
       /**
+       * 🔴 **選んだファイルがまだ開けていないときは、走らせない**(#1087)。
+       * ⚠ 欄にはファイルの名前が出ているのに、この PKC 自身の DB へ走らせると、
+       *   **ファイルの中身を引いたつもりの答え**が返る(いちばん気づけない外し方)。
+       * 🔑 開けなかった回は `guestError` が既にいちばん上で理由を言っているので、
+       *   そのまま残す(上書きしない)。開いている最中だけ、`error` で待つよう言う。
+       */
+      if (state.sqlPage.guestChosen !== '' && state.sqlPage.guest === null) {
+        if (state.sqlPage.guestError !== '') return { state, events: [] };
+        // 開いている最中 = `guestPending` が居る。居ないのは「開けなかった後、打ち直して断りが消えた」回
+        const why = state.sqlPage.guestPending !== '' ? SQL_GUEST_OPENING_TEXT : SQL_GUEST_NOT_OPEN_TEXT;
+        return { state: { ...state, sqlPage: { ...state.sqlPage, error: why } }, events: [] };
+      }
+      /**
        * 🔴 **engine ごとに門が違う**(#682 段②)。
        * ⚠ DuckDB には sqlite に無い書き方(`FROM t SELECT x` / `PIVOT`)と、
        *   sqlite に無い危ない語(`INSTALL` / `LOAD` / `SET`)が在るので、
@@ -6009,6 +6026,8 @@ function reduceCore(
      */
     case 'SQL_GUEST_OPENED': {
       if (state.sqlPage.guestPending !== action.lid) return { state, events: [] };
+      // 開き終わる前に押された断り(RUN_SQL)は、開けた時点で嘘になるので降ろす
+      const waitNote = state.sqlPage.error === SQL_GUEST_OPENING_TEXT;
       /**
        * 🔴 開けた相手の構造を採り直す(図を開いているときだけ ── §7 の 1 か所)。
        * ⚠ **`.parquet` / `.json` も採る**(#918)── 頼み先は `schemaRouteOf`(DuckDB の器)。
@@ -6036,6 +6055,7 @@ function reduceCore(
             },
             guestError: '',
             guestPending: '',
+            ...(waitNote ? { error: '' } : {}),
             er: er.er,
           },
         },
