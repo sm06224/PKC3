@@ -572,6 +572,7 @@ export async function importPkc2File(
           tagColors: restored.tagColors,
           /** 🔴 アーカイブ経路だけが持つ**付け替えた lid**(本文の `entry:` を写す。下の `remap`)。 */
           lidRemap: restored.lidRemap,
+          sourceCid: restored.sourceCid,
           warnings: [] as string[],
         }
       : convertPkc2Container(container as never, {
@@ -730,6 +731,7 @@ export async function importPkc2File(
     const remap: ImportRemap = {
       assetKeys: changedPairs(keyMap),
       lids: 'lidRemap' in result ? result.lidRemap : [],
+      ...('sourceCid' in result && result.sourceCid !== '' ? { cid: result.sourceCid } : {}),
     };
     /**
      * 書き出したときの本文(履歴の起点)。⚠ 付け替えが 1 組でも在れば**全ノート**ぶん持つ ──

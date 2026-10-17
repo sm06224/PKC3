@@ -276,6 +276,20 @@ describe('元のノートを直すと追随する', () => {
     expect(after.textContent).not.toContain('計画 1');
   });
 
+  it('🔴 元のノートの改名・ごみ箱行きに追随する(entryMetas だけが動いた回も節を当て直す。#1087 N5)', async () => {
+    const r = await rig();
+    const titleOf = (): string | undefined =>
+      embedOf(r, 'entry:src#h/plan').querySelector<HTMLElement>('[data-pkc-field="section-embed-source"]')?.textContent ?? undefined;
+    expect(titleOf()).toBe('資料');
+    await r.apply({ type: 'RENAME_ENTRY_TITLE', lid: 'src', title: '改名後' });
+    await settle();
+    expect(titleOf(), '改名しても題名のボタンが古いまま').toBe('改名後');
+    await r.apply({ type: 'DELETE_ENTRY', lid: 'src' });
+    await settle();
+    await settle();
+    expect(embedOf(r, 'entry:src#h/plan').textContent, 'ごみ箱へ移したのに中身が出続けている').not.toContain('計画 1');
+  });
+
   it('🔴 見出しを消すと「見つかりません」になり、戻すと中身が戻る', async () => {
     const r = await rig();
     await r.apply({ type: 'BODY_PERSISTED', lid: 'src', body: '## Other\n別の節' });

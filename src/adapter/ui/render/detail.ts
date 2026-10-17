@@ -250,6 +250,16 @@ export function fenceAssetUnreadableText(why: string): string {
 }
 
 /**
+ * 🔴 **編集中のプレビューにも、全文から取った `{{vars.x}}` を渡す**(#1087 N1)。
+ * ⚠ 読む面は `readingRenderOptions` が `extractVars(body)` を入れる。編集のプレビューは
+ *   設定の行を外した本文を描くので、**外す前の全文**から取らないと「未定義の変数」に見える。
+ *   打つたびに取り直す(呼び側が現在の全文を渡す)。
+ */
+function withVars<T extends object>(opts: T, fullBody: string): T & { vars: Record<string, string> } {
+  return { ...opts, vars: extractVars(fullBody) };
+}
+
+/**
  * 🔴 **読む面の描画の設定を、押せる形の旗を除いて 1 か所で組む**(#1044 段4)。
  *
  * 本文の面(`DetailRenderer`)と章の別ウィンドウ(`chapter-windows.ts`)が**同じ値**で描く
@@ -1366,6 +1376,8 @@ export class DetailRenderer {
       this.cidRef = selfContainerId(state);
       this.syncMissingLinks();
       this.syncPlaceTitles();
+      // 🔴 節の埋め込みの題・中身(改名 / ごみ箱)も当て直す(#1087 N5)。冪等 ── 器の中だけを触る
+      this.syncPlaceEmbeds();
     }
     /**
      * 🔴 **板のための抜粋が動いたら、本文は描き直さず中身の器だけ当て直す**(#529 W3-①)。
@@ -2698,7 +2710,7 @@ export class DetailRenderer {
      *   (直す理由が出たら、そのときに 1 本の切り方へ寄せる)。
      */
     // 編集に入った直後は待たせない(**その場で 1 回**)
-    follow.push(parseFrontmatter(fullText()).body, previewOpts);
+    follow.push(parseFrontmatter(fullText()).body, withVars(previewOpts, fullText()));
     follow.flush();
     /**
      * 🔴 **外から来た本文を欄へ映す**(#1579)。畳んだ設定の行は**畳み直す**
@@ -2717,13 +2729,13 @@ export class DetailRenderer {
       else ta.setAttribute(HIDDEN_HEAD_ATTR, foldedNow.head);
       ta.focus();
       replaceChanged(ta, foldedNow === null ? text : foldedNow.rest);
-      follow.push(parseFrontmatter(text).body, previewOpts);
+      follow.push(parseFrontmatter(text).body, withVars(previewOpts, text));
       follow.flush();
     };
     ta.addEventListener('input', () => {
       // ⚠ rAF で畳まない ── 畳み込みは follower(静穏 + 上限)が持つ。
       //    2 か所で畳むと、どちらが効いているか分からなくなる
-      follow.push(parseFrontmatter(fullText()).body, previewOpts);
+      follow.push(parseFrontmatter(fullText()).body, withVars(previewOpts, fullText()));
     });
     // ⚠ 編集を抜けるときに予約と図を畳む(detached なノードへ描かない)
     this.cancelPreview = () => {
@@ -3045,7 +3057,7 @@ export class DetailRenderer {
       fmLines = frontmatterLineCount(body);
       renderFmCard();
       this.onBodyChange?.(next);
-      follow.push(docOf(body, fmLines), previewOpts);
+      follow.push(docOf(body, fmLines), withVars(previewOpts, body));
       follow.flush(); // 🔑 確定は**待たせない**(打鍵では 1 回も描かない代わり)
     };
 
@@ -3272,7 +3284,7 @@ export class DetailRenderer {
     );
 
     renderFmCard();
-    follow.push(docOf(body, fmLines), previewOpts);
+    follow.push(docOf(body, fmLines), withVars(previewOpts, body));
     follow.flush();
 
     /**
@@ -3295,7 +3307,7 @@ export class DetailRenderer {
       body = text;
       fmLines = frontmatterLineCount(body);
       renderFmCard();
-      follow.push(docOf(body, fmLines), previewOpts);
+      follow.push(docOf(body, fmLines), withVars(previewOpts, body));
       follow.flush();
     };
 
