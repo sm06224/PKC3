@@ -40,6 +40,18 @@ test('🔴 markdown の表の升を押して打つと、本文に残る (#708 �
   // 🔑 前提 ── 見出し 2 + 中身 2 の **4 つだけ**(区切りの行には焼かれていない)
   await expect(cells, '押せる升の数が違う(区切りの行にも焼いた?)').toHaveCount(4);
 
+  // 🔴 ＋ × は升の中心に乗らない(乗ると、見出しを押した並べ替えが「列を消す」になる ── #1662)。hover して(出した状態で)測る
+  for (const sel of ['th', 'td:first-child']) {
+    const c = page.locator('[data-pkc-field="detail-body"] table').first().locator(sel).first();
+    await c.hover({ position: { x: 4, y: 4 } });
+    const hit = await c.evaluate((n) => {
+      const b = n.getBoundingClientRect();
+      const e = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+      return e?.closest('[data-pkc-action="shape-cell"]') !== null && e !== null;
+    });
+    expect(hit, `${sel} の中心に ＋ × が乗っている`).toBe(false);
+  }
+
   // ── 押すと、その升だけが入力欄になる(原文の欄は出ない = user の不満そのもの)
   await cells.nth(2).click();
   const input = page.locator('[data-pkc-field="cell-input"]');

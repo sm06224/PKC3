@@ -202,6 +202,18 @@ test('🔴 表の ▾ から形を選んでコピーでき、⧉ の 1 押しは
    */
   const csvTable = page.locator('[data-pkc-field="detail-body"] table.pkc-md-rendered-csv');
   await expect(csvTable.locator('th'), '前提:csv の表に見出しの行が無い').not.toHaveCount(0);
+
+  // 🔴 ＋ × は升の中心に乗らない(乗ると、見出しを押した並べ替えが「列を消す」になる ── #1662)。hover して(出した状態で)測る
+  for (const sel of ['th', 'td:first-child']) {
+    const c = csvTable.locator(sel).first();
+    await c.hover({ position: { x: 4, y: 4 } });
+    const hit = await c.evaluate((n) => {
+      const b = n.getBoundingClientRect();
+      const e = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+      return e?.closest('[data-pkc-action="shape-cell"]') !== null && e !== null;
+    });
+    expect(hit, `${sel} の中心に ＋ × が乗っている`).toBe(false);
+  }
   await page.locator(menu).nth(1).click();
   await page.locator('[data-pkc-field="pick-copy-format"]', { hasText: '見出しをやめる' }).click();
   await expect(csvTable.locator('th'), '「見出しをやめる」で見出しの行が残っている').toHaveCount(0, { timeout: 10_000 });
