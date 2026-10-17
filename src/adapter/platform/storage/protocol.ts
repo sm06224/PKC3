@@ -491,6 +491,22 @@ export type StorageRequest =
        */
     }
   | {
+      /**
+       * 🔴 **改名のとき、ほかのノートのリンクの字を新しい題名へ**(#1163 依頼 177、#1648)。
+       * ⚠ 走査も書込も **worker の 1 tx**(`replaceAssetRefs` と同じ理由 ── 読んでから書くまでの間に
+       * 別の窓が書くと、それを消す)。字が旧い題名と同じリンクだけを書き換える。
+       * `skipLids` = 書き換えない(編集中の)ノート。履歴には 1 版積む(書き換え前の本文から戻せる)。
+       */
+      op: 'renameLinkTexts';
+      cid: string;
+      /** 改名したノート。 */
+      lid: string;
+      oldTitle: string;
+      newTitle: string;
+      skipLids: string[];
+      keepLatest?: number;
+    }
+  | {
       op: 'deleteEntry';
       cid: string;
       lid: string;
@@ -1206,6 +1222,11 @@ export interface ResultMap {
     /** 旧 key を指したまま残った lid(⚠ 0 でなければ呼び側が件数を出す)。 */
     stale: string[];
     overBudget: boolean;
+  };
+  /** 書き換えたノート(本文と刻印)と、字を直したリンクの総数。 */
+  renameLinkTexts: {
+    wrote: Array<{ lid: string; body: string; stamps: EntryStamps }>;
+    links: number;
   };
   /** ⚠ 行が無ければ `null`(消えたノートの改名 ack を握り潰さない)。 */
   renameEntry: EntryStamps | null;

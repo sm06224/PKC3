@@ -42,7 +42,10 @@ describe('M6 お知らせの題名', () => {
   it('🔴 登記表の全題名が、メッセージの字として原文のまま残る', () => {
     const spy = vi.spyOn(appMessagePost, 'post').mockImplementation(() => {});
     let withBrackets = 0;
-    for (const n of NOTICES) {
+    // ⚠ 登記表は古い順に落ちるので、括弧入りの題名がたまたま 0 件の日がある ── 括弧の潰しを必ず 1 度通すため、
+    //   括弧入りの題名を 1 件足して回す(登記表そのものの全件も今までどおり回す)
+    const withSample = [...NOTICES, { id: '2026-01-01-bracket-sample', title: '「括弧」と『二重括弧』の題名', items: ['見本'] }];
+    for (const n of withSample) {
       localStorage.clear();
       const region = document.createElement('section');
       document.body.append(region);

@@ -1930,6 +1930,7 @@ export class InspectorRenderer {
     entryBtn('rename-entry-begin');
     entryBtn('move-to-folder');
     entryBtn('create-in-folder');
+    entryBtn('open-trash');
     entryBtn('delete-entry');
     /**
      * 🔴 **編集中だけ出る 1 行**(#715)── 操作の帯の**直上**に置く(帯と離すと

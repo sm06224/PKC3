@@ -74,6 +74,12 @@ s = s.replace(head, head + entry, 1)
 # drop oldest: find "  {\n    id: 'DROP_ID'" ... up to the matching "  },\n"
 dtitle = None
 if DROP_ID:
+    # 🔴 落とすのは「いちばん古い 1 件」だけ(2026-10-17 に 1 つ前の新しいお知らせの id を渡し続け、
+    #   新しいお知らせが 1 つ前を落とす形で 10-16〜17 の分が登記表から消えた)── 末尾の id でなければ止める
+    last_id = re.findall(r"^    id: '([^']+)',", s, re.M)[-1]
+    if DROP_ID != last_id:
+        print('✗ 落とす id「%s」は、いちばん古い 1 件(%s)ではない(1 file も書いていない)。' % (DROP_ID, last_id))
+        sys.exit(1)
     m = re.search(r"\n  \{\n    id: '%s',.*?\n  \},\n" % re.escape(DROP_ID), s, re.S)
     assert m, 'drop target not found'
     dropped = m.group(0)

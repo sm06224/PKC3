@@ -75,6 +75,7 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   'putAssetMeta',
   'deleteAssetMeta',
   'replaceAssetRefs',
+  'renameLinkTexts',
   'importRevisionChains',
   'restoreRevisionChains',
   // 🔴 起動の検めの印(#1007 段①)── 壊れた DB に「検めた」印を残すと、次の起動で黙る

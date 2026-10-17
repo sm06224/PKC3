@@ -78,6 +78,8 @@ export const QUOTA_BLOCKED_OPS: readonly string[] = [
   'setEntryParent',
   'putAssetMeta',
   'replaceAssetRefs',
+  // 本文を書き換え、履歴に 1 版積む(増える側)。断られたら字が旧いまま残る(壊れない)
+  'renameLinkTexts',
   'importRevisionChains',
   'restoreRevisionChains',
   // 🔴 メッセージの追記(設計 doc §7、段②a)── 本文を伸ばす書き込みなので増える側。

@@ -148,6 +148,7 @@ export class CenterRouter {
    *   ⚠ 面ごとに実装しない ── 8 面ぶん書くと、また 1 面だけ抜ける。
    */
   private readonly bar: HTMLElement;
+  private readonly noteBar: HTMLElement;
 
   constructor(
     region: HTMLElement,
@@ -199,6 +200,22 @@ export class CenterRouter {
       flags: pane('flags'),
       help: pane('help'),
     };
+    /**
+     * 🔴 **ノートの小窓の「× 閉じる」**(#1659 ③、Gemini 裁定 = 案 A)。⚠ 小窓には閉じるボタンが無く、閉じ方は
+     *   Esc かウィンドウの枠の × だけだった(アプリの窓には「× 画面を閉じる」が在る)。
+     * ⚠ 出すのは**ノートの小窓のときだけ**(`setNoteWindowBar`)── ふつうのタブには出さない(閉じる物が無い)。
+     */
+    this.noteBar = document.createElement('div');
+    this.noteBar.setAttribute('data-pkc-region', 'note-window-bar');
+    this.noteBar.hidden = true;
+    const closeNote = document.createElement('button');
+    closeNote.type = 'button';
+    closeNote.setAttribute('data-pkc-action', 'close-note-window');
+    closeNote.setAttribute('aria-label', 'このウィンドウを閉じる');
+    closeNote.textContent = '× 閉じる';
+    closeNote.title = 'このウィンドウを閉じます(Esc でも閉じます)';
+    this.noteBar.append(closeNote);
+    region.prepend(this.noteBar);
     this.bar = document.createElement('div');
     this.bar.setAttribute('data-pkc-region', 'pane-bar');
     this.bar.hidden = true;
@@ -295,6 +312,11 @@ export class CenterRouter {
     );
     this.detail = this.split.main;
     this.scroll.use('detail');
+  }
+
+  /** ノートの小窓のときだけ「× 閉じる」の帯を出す(#1659 ③)。 */
+  setNoteWindowBar(shown: boolean): void {
+    this.noteBar.hidden = !shown;
   }
 
   render(state: AppState): void {

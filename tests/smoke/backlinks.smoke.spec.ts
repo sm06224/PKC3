@@ -119,6 +119,62 @@ test('🔴 本文のリンクが「参照元」に出て、押すと移れる', 
   ).toHaveCount(0);
 
   /**
+   * 🔴 **改名すると、ほかのノートの「題名と同じ字のリンク」も新しい題名になる**(#1648)/
+   *    **消えたノートへのリンクの知らせに「ゴミ箱を開く」が付く**(#1648)/ 押すとゴミ箱が開く。
+   * ⚠ 上の道中の続きに載せる(新しく起動しない)。直前の「ゴミ箱へ移す」で的は捨てられているので、
+   *   新しい的(T)を作って「旧題」→「新題」と改名する。
+   */
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('改名される的\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const lidT = await page
+    .locator('[data-pkc-region="filer-table"] [data-pkc-entry]')
+    .first()
+    .getAttribute('data-pkc-entry');
+  expect(lidT, '前提: 新しい的の lid が取れない').toBeTruthy();
+  const rowB = page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${lidT}"]`);
+  const renameB = async (name: string): Promise<void> => {
+    await modClickReal(page, rowB);
+    await page.keyboard.press('F2');
+    const inp = page.locator('[data-pkc-field="row-rename"]');
+    await expect(inp, '的の名前を変える欄が出ない').toBeVisible();
+    await inp.fill(name);
+    await inp.press('Enter');
+    await expect(inp).toBeHidden();
+  };
+  await renameB('旧題');
+  await createEntry(page, 'text');
+  const taD = page.locator('[data-pkc-field="editor-body"]');
+  await taD.click();
+  await taD.fill(`[旧題](entry:${lidT})\n\n[消えた](entry:${lidA})\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-action="navigate-entry-ref"]').first(),
+    '前提: 題名と同じ字のリンクが本文に出ていない',
+  ).toHaveText('旧題');
+  await renameB('新題');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '改名したのに「リンクの字も更新しました」の知らせが出ない',
+  ).toContainText('1 件のノートのリンクの字も更新しました');
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-action="navigate-entry-ref"]').first(),
+    '開いている本文のリンクの字が新しい題名にならない',
+  ).toHaveText('新題');
+  // 消えたノート(A はゴミ箱)へのリンク ── 知らせの隣に「ゴミ箱を開く」が出て、押すとゴミ箱が開く
+  await clickReal(
+    page,
+    '[data-pkc-field="detail-body"] [data-pkc-action="navigate-entry-ref"] >> nth=1',
+  );
+  const trashBtn = page.locator('[data-pkc-field="status-trash"]');
+  await expect(trashBtn, '見つからないノートの知らせに「ゴミ箱を開く」が出ない').toBeVisible();
+  await clickReal(page, trashBtn);
+  await expect(
+    page.locator('[data-pkc-action="hide-trash"]'),
+    '「ゴミ箱を開く」を押してもゴミ箱が開かない',
+  ).toBeVisible();
+
+  /**
    * ⚠ ここまでの 2 つ(改名・ゴミ箱)は、`reduceWithHistory` の `REQUEST_BACKLINKS`(#1087)を外しても緑のまま
    *   (変異 SURVIVED を実測)── 題名は一覧(`entryMetas`)から読み、消えた分は `removeEntryFromState` が
    *   楽観で外すので、取り直しに頼らない。「元に戻す」は復元が選択を A へ動かすので、取り直しの分岐を通らない。

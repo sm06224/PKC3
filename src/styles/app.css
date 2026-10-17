@@ -5159,7 +5159,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  * ⚠ `sticky` にする ── 面の中身は縦に流れるので、下まで送ったところで
  *   閉じたくなったときに帯が画面外に居ると**また閉じ方が無い**。
  */
-[data-pkc-region='pane-bar'] {
+[data-pkc-region='pane-bar'],
+[data-pkc-region='note-window-bar'] {
   position: sticky;
   top: 0;
   z-index: 2;
@@ -8244,7 +8245,8 @@ mark[data-pkc-diff-char='del'] {
  *   変えたいなら `height` を書く ── ただしそれは**見え方の変更**なので user の裁定が要る。
  */
 [data-pkc-field='status-open'],
-[data-pkc-field='status-rescue'] {
+[data-pkc-field='status-rescue'],
+[data-pkc-field='status-trash'] {
   flex: 0 0 auto;
   padding: 0 var(--s2);
   font-size: 11px;
@@ -11689,4 +11691,24 @@ h6:hover > .pkc-heading-anchor,
     animation-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* 設定の「色を付けたタグ」の一覧(#1645)── 色の見本・名前・「色を外す」を 1 行に。見本の色は JS が当てる */
+[data-pkc-field='tag-color-list-row'] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+[data-pkc-field='tag-color-list-swatch'] {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--pkc-border, rgba(128, 128, 128, 0.5));
+}
+[data-pkc-field='tag-color-list-name'] {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

@@ -47,6 +47,51 @@ export function applyTagColors(doc: Document, list: readonly TagColorEntry[]): v
     if (style.textContent !== css) style.textContent = css;
   }
   syncTagColorControls(doc);
+  syncTagColorList(doc);
+}
+
+/** 設定の「色を付けたタグ」の一覧を入れる器の目印(`settings/tag-color-list.ts` が置く)。 */
+export const TAG_COLOR_LIST_FIELD = 'tag-color-list';
+
+/**
+ * 設定の「色を付けたタグ」の一覧を、いまの色の一覧から組み直す(#1645 項目 1)。
+ *
+ * 🔑 **色を付ける / 外す経路は全部 `applyTagColors` を通る**ので、そこから呼べば
+ *   別のノートの右のペインで付けた色・取り込みで戻った色も、開きっぱなしの設定画面に映る。
+ * ⚠ 並びは**付けた順**(`current` の順 ── 器の保存順)。⚠ 外す押し所は情報ペインと同じ
+ *   `tag-color-clear` を使う(外す処理を 2 か所に書かない)。
+ * ⚠ 器が無い画面(設定を開いていない)では何もしない。
+ */
+export function syncTagColorList(root: ParentNode): void {
+  const box = root.querySelector<HTMLElement>(`[data-pkc-field="${TAG_COLOR_LIST_FIELD}"]`);
+  if (box === null) return;
+  box.textContent = '';
+  if (current.length === 0) {
+    const none = document.createElement('p');
+    none.setAttribute('data-pkc-field', 'tag-color-list-empty');
+    none.textContent = '色を付けたタグはありません';
+    box.append(none);
+    return;
+  }
+  for (const { tag, color } of current) {
+    const row = document.createElement('div');
+    row.setAttribute('data-pkc-field', 'tag-color-list-row');
+    const swatch = document.createElement('span');
+    swatch.setAttribute('data-pkc-field', 'tag-color-list-swatch');
+    swatch.setAttribute('aria-hidden', 'true');
+    swatch.style.background = color;
+    const name = document.createElement('span');
+    name.setAttribute('data-pkc-field', 'tag-color-list-name');
+    name.textContent = tag;
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.setAttribute('data-pkc-action', 'tag-color-clear');
+    clear.setAttribute('data-pkc-tag', tag);
+    clear.textContent = '色を外す';
+    clear.title = `「${tag}」のバッジの色を外します(灰色のバッジに戻ります)`;
+    row.append(swatch, name, clear);
+    box.append(row);
+  }
 }
 
 /**

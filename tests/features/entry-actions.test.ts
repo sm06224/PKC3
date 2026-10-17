@@ -416,6 +416,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 「このノート」のまとまりの先頭「編集」(#1038 台帳③ C1、2026-09-25)
       ['start-edit', 'e988cbf3'],
       ['show-history', '2511b05b'],
+      // 🔴 ゴミ箱を開く(#1646 の 1)── 右の列 / 右クリック。押すと左の列が「フォルダ」になる
+      ['open-trash', 'ccd9cd4b'],
       ['delete-entry', '4492f764'],
       // 🔴 **左の列の道具 4 つ**(#632 段①)── 本文ページの ⋯ から押せるようにした
       [// ⚠ 2026-09-02: 一度「独立した添付のノートになります」へ下げたが、user 裁定
@@ -665,10 +667,12 @@ describe('行の右クリックからの整理(#215)', () => {
       expect(a.indexOf(x), `${x} が削除より下に居る`).toBeLessThan(a.indexOf('delete-entry'));
     }
     // ⚠ 3 つの中の並びも固定(改名 → 移す → 作る)── 面ごとに順が違うと探し直しになる
+    // ⚠ 2026-10-17(#1646 の 1): 削除の隣に「ゴミ箱を開く」が入った(開く → 移す の並び)
     expect(a.slice(a.indexOf('rename-entry-begin'), a.indexOf('delete-entry'))).toEqual([
       'rename-entry-begin',
       'move-to-folder',
       'create-in-folder',
+      'open-trash',
     ]);
   });
 

@@ -348,7 +348,7 @@ describe('知らせの隣の「元に戻す」── ゴミ箱へ移した直後
     const d = dispatcherWith();
     offerTrashUndo(d, [{ lid: 'a', title: '猫' }]);
     const line = d.getState().notice ?? '';
-    expect(line).toBe('「猫」をゴミ箱へ移しました');
+    expect(line).toBe('「猫」をゴミ箱へ移しました(ゴミ箱はフォルダの一覧のいちばん下にあります)');
     const b = undoBtn();
     paintStatusUndo(b, { ...none, notice: line }, line);
     expect(b.hidden, '戻す口が出ない(片道になっている)').toBe(false);
@@ -368,7 +368,7 @@ describe('知らせの隣の「元に戻す」── ゴミ箱へ移した直後
         { lid: 'a', title: '猫' },
         { lid: 'b', title: '犬' },
       ]);
-      expect(d.getState().notice, '複数は件数で言う').toBe('2 件をゴミ箱へ移しました');
+      expect(d.getState().notice, '複数は件数で言う').toBe('2 件をゴミ箱へ移しました(ゴミ箱はフォルダの一覧のいちばん下にあります)');
       vi.advanceTimersByTime(TRASH_OFFER_MS - 1);
       expect(d.getState().notice, '早すぎる').not.toBeNull();
       vi.advanceTimersByTime(2);

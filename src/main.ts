@@ -71,6 +71,7 @@ import {
   paintStatusMessages,
   paintStatusOpen,
   paintStatusRescue,
+  paintStatusTrash,
   paintStatusUndo,
 } from '@adapter/ui/render/status-open';
 import { composeStatusLine, paintStatusText, shouldHideStatusBar } from '@adapter/ui/render/status-line';
@@ -208,6 +209,7 @@ import {
 } from '@adapter/platform/storage/resolve-container-compat';
 import { buildShell, paintAlarmBar, paintMissedLine, paintCaptureBar, paintTimerBar, showRootText } from '@adapter/ui/render/shell';
 import { appPhone } from '@adapter/ui/render/phone-layout';
+import { installPhoneBack } from '@adapter/ui/actions/phone-back';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createImportUndo, importFailurePanel, importPanel } from '@adapter/ui/actions/import-undo';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
@@ -372,6 +374,8 @@ import {
   storeAsset,
   attachOne,
   resolveMime,
+  maybeShrink,
+  newShrinkRun,
   type AttachDeps,
 } from '@adapter/ui/actions/attach';
 import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
@@ -456,6 +460,7 @@ import {
 } from '@adapter/platform/view-window';
 import {
   alertInApp,
+  confirmCheckInApp,
   confirmInApp,
   pickOfficeShadowInApp,
   pickAgentGrantInApp,
@@ -521,6 +526,8 @@ export interface AppHandle {
    * ⚠ 判断は 2 つとも向こうに在る ── この file はどの test からも実行されない(§2)。
    */
   enterNoteWindow(): void;
+  /** ノートの小窓の「× 閉じる」の帯を出し入れする(#1659 ③)。 */
+  setNoteWindowBar(shown: boolean): void;
   /**
    * 🔴 **探し方(左の列のタブ)を切り替える**(#292 段⑤)。
    * ⚠ 引っ越したディープリンク(`view=calendar` / `view=kanban`)を
@@ -1768,6 +1775,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     repaintCommandList(root, dispatcher, appKeymap);
   });
+  /**
+   * 🔴 **スマホで端末の「戻る」= 一覧へ**(#1659 ①)。⚠ 状態の購読の後ろに置く ──
+   *   ページの変わりは `appPhone.render` が知らせる。PC・タブレットでは何もしない。
+   */
+  installPhoneBack({
+    onPageChange: (cb) => appPhone.onPageChange(cb),
+    blockReason: () => phaseBlockReason(dispatcher.getState().phase),
+    notifyBlocked: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+    showNote: () => appPhone.showNote(),
+    showList: () => appPhone.showList(),
+  });
   // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
   // 🔑 常時見えるのは**版だけ**(P8)。`opfs-sahpool` のような開発者語は
   // 出さない ── 出すと user は「何かのエラーか」と読む。
@@ -1899,6 +1917,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     statusShown = text;
     // 🔴 保存が止まった断り書きの隣の入口(#1010 B)── 判断は `status-open.ts`
     paintStatusRescue(regions.statusRescue, text);
+    // 🔴 見つからないノートの知らせの隣の「ゴミ箱を開く」(#1648)── 判断は `status-open.ts`
+    paintStatusTrash(regions.statusTrash, text);
     // ⚠ 状態の 1 語だけを別の器に入れる(`status-line.ts` の `paintStatusText`)── 字は同じ
     paintStatusText(regions.statusText, parts);
     regions.status.hidden = hide;
@@ -2837,8 +2857,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔴 **聞く口**(#412)。⚠ 写真は user のもので、縮めるのは**不可逆**である ──
      *   だから**必ず聞く**。⚠ この口を渡さなければ縮まらない(黙って縮める道が無い)。
      */
-    askShrink: async (question) =>
-      (await confirmInApp(root, question, { okLabel: '画像を縮める', cancelLabel: 'そのまま' })) === 'ok',
+    askShrink: async (question, opts) => {
+      const labels = { okLabel: '画像を縮める', cancelLabel: 'そのまま' };
+      if (opts?.rememberLabel === undefined) return (await confirmInApp(root, question, labels)) === 'ok';
+      // 🔑 残りの写真が在るときだけ「残りも同じにする」を付ける(#1652 3)
+      const r = await confirmCheckInApp(root, question, { ...labels, checkLabel: opts.rememberLabel });
+      return { ok: r.answer === 'ok', remember: r.checked };
+    },
   };
 
   /**
@@ -3962,14 +3987,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         const known = new Set(await attachDeps.listStoredBlobKeys().catch(() => []));
         // 同じ秒に貼った複数枚が同じ名前にならないようにする
         const uniqueName = createNameDeduper();
-        for (const file of files) {
-          const name = uniqueName(pastedFileName(file, new Date()));
+        // 🔴 **貼った大きな写真も、添付と同じ条件で「縮めますか」と聞く**(#1652 5。Gemini 裁定 A)。
+        //   ⚠ 直す前は、携帯の写真をそのまま貼ると原寸で入り、保存領域が急に減った。
+        //   名前は先に決める(窓に出す名前と、入る名前を同じにする)。
+        const items = files.map((file) => ({
+          name: uniqueName(pastedFileName(file, new Date())),
+          type: file.type,
+          size: file.size,
+          blob: file as Blob,
+        }));
+        const shrinkRun = newShrinkRun(items);
+        for (const original of items) {
+          const name = original.name;
           try {
-            const stored = await storeAsset(
-              attachDeps,
-              { name, type: file.type, size: file.size, blob: file },
-              known,
-            );
+            const item = await maybeShrink(attachDeps, original, shrinkRun);
+            const stored = await storeAsset(attachDeps, item, known);
             refs.push(formatAssetRef(name, `asset:${stored.assetKey}`, true));
           } catch (e) {
             // 🔴 英語の理由をそのまま出さない。どの画像か分かる形で(#1087)
@@ -6036,6 +6068,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       paintTitle();
       announceNote();
     },
+    setNoteWindowBar: (shown) => center.setNoteWindowBar(shown),
     enterNoteWindow: () => {
       // ⚠ 追記欄を出してから焦点の約束をする ── 畳んだままの欄には焦点が乗らない
       applyPaneVisibility(root, appPanes.sessionOnly('append'));
@@ -6171,6 +6204,7 @@ function bootstrap(): void {
           app.repaintStatus();
           app.repaintWindowTitle();
           // 🔴 付箋なら追記欄を出し、本文が届いたら打つ欄へ焦点を入れる(#690 ② A′ / I4)
+          app.setNoteWindowBar(heldNoteWindow);
           if (heldNoteWindow) app.enterNoteWindow();
         },
         fail: (error) => app.dispatcher.dispatch({ type: 'OP_FAILED', error }),

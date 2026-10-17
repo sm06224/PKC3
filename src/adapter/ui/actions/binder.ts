@@ -136,7 +136,8 @@ import {
   visibleSelection,
 } from '@features/relation/filer-list';
 import { archetypeLabel } from '@features/flavor/archetype-label';
-import { HIDDEN_HEAD_ATTR, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
+import { HIDDEN_HEAD_ATTR, foldAttachmentHead, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
+import { countMatches } from '@features/markdown/body-replace';
 import { SMART_ARCHETYPE, SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
 import {
   buildSettingsFile as buildSettingsFileData,
@@ -743,6 +744,7 @@ import {
   pickCommandInApp,
   pickEntryInApp,
   pickSnippetInApp,
+  pickTemplateNoteInApp,
   pickDiagramInApp,
   pickBodyIconInApp,
   pickArchiveInApp,
@@ -1498,6 +1500,8 @@ const createAndEdit = (
   services: BinderServices,
   archetype: string,
   parentLid: string | null,
+  /** 🔴 テンプレートから作るときの本文(#1645)。省略 = 種類の既定の本文。 */
+  body?: string,
 ): void => {
   if (dispatcher.getState().viewMode !== 'detail')
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
@@ -1513,6 +1517,7 @@ const createAndEdit = (
     title: defaultTitle(dispatcher, archetype),
     parentLid,
     relationId: generateLid(),
+    ...(body !== undefined ? { body } : {}),
     ...(OPENS_READABLE.includes(archetype) ? { edit: false } : {}),
   });
   if (intoSmart && dispatcher.getState().entryMetas.has(lid))
@@ -2920,6 +2925,10 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    */
   'open-today',
   /**
+   * 🔴 **テンプレートから作るのも、ノートを 1 件作る**(#1645)── `open-today` と同じ理由で載せる。
+   */
+  'create-from-template',
+  /**
    * 🔴 **画面の下の「○○のノートを作る」は、ノートを 1 件作る**(#1169)── `CREATE_ENTRY` は
    *   即永続なので、取り込みが entry を総入れ替えしている裏で足させない
    *   (`contacts-quick-add` と同じ)。⚠ 日付を押すほう(`open-date-note`)は**作らない**
@@ -4177,6 +4186,9 @@ function phoneShowList(dispatcher: Dispatcher): boolean {
   return true;
 }
 
+/** スマホで「別のウィンドウで開く」を押したときの 1 行(#1659 ②)。 */
+export const PHONE_NOTE_WINDOW_NOTICE = 'この端末では、新しいタブで PKC3 がもう 1 つ開きます';
+
 const MENU_LID_ATTR = 'data-pkc-menu-lid';
 /**
  * 🔴 **右クリックした `:::` の塊の開き行**(#677)。`MENU_LINE_ATTR` とは**別の名前**で運ぶ
@@ -5305,6 +5317,31 @@ function refuseTrashEditedElsewhere(
 }
 
 /** 何もしない口。⚠ 打鍵ではないので「既定を止める」相手がいない。 */
+/**
+ * 🔴 **置換の帯に、当たる件数を出す**(#1646 の 2。Gemini 裁定 = #1163 の依頼 40 の推薦どおり A)。
+ *
+ * ⚠ 数えるのは「すべて置換」と**同じ本文・同じ規則**(`countMatches` ── 置換と同じ `findHits` を通る。添付ノートは
+ *   畳んだ設定の行を外した見える本文だけ)。食い違うと「3 件」と出て 2 件しか置き換わらない嘘になる。
+ * ⚠ 出さない場面は空にする ── 編集中でない / 探す語が空(「0 件」ではなく、まだ何も探していない)。
+ */
+function paintReplaceCount(root: HTMLElement, dispatcher: Dispatcher): void {
+  const out = root.querySelector<HTMLElement>('[data-pkc-field="replace-count"]');
+  if (out === null) return;
+  const st = dispatcher.getState();
+  const find = root.querySelector<HTMLInputElement>('[data-pkc-field="replace-find"]')?.value ?? '';
+  let text = '';
+  if (st.phase === 'editing' && st.openBody !== null && find !== '') {
+    // ⚠ 切り方は reducer の `REPLACE_IN_BODY` と同じ(畳めない本文は全部)
+    const fold =
+      st.entryMetas.get(st.openBody.lid)?.archetype === 'attachment' ? foldAttachmentHead(st.openBody.body) : null;
+    const body = fold === null ? st.openBody.body : fold.rest;
+    const caseSensitive =
+      root.querySelector<HTMLInputElement>('[data-pkc-field="replace-case"]')?.checked === true;
+    text = `${String(countMatches(body, find, { caseSensitive }))} 件`;
+  }
+  if (out.textContent !== text) out.textContent = text;
+}
+
 /**
  * 🔴 **整理案の下見を描く**(#429 段③)。
  *
@@ -8139,6 +8176,39 @@ const ACTIONS: Record<string, ActionHandler> = {
     const parent = st.scopeLid === null ? null : (st.entryMetas.get(st.scopeLid) ?? null);
     // 🔑 面の切替・作成・編集権は `createAndEdit` 1 本(行の右クリックと同じ経路 ── #215)
     createAndEdit(dispatcher, services, archetype, parent?.lid ?? null);
+  },
+  /**
+   * 🔴 **テンプレートから作る**(#1645 項目 4。Gemini 裁定 = #1163 の依頼 39-4=A「推薦どおり」)。
+   *
+   * ⚠ 一覧は `insert-snippet` と**同じ走査結果**(`snippetScan`)── 自分のテンプレートだけ並べる
+   *   (組み込みの表・図は本文に挿す物で、ノートの中身にならない)。
+   * ⚠ 本文は `insertSnippet` で空の本文へ挿した結果を使う(日付などの変数の埋め方を 2 か所に書かない)。
+   * ⚠ 入れ先・編集に入る・編集権は `create-entry` と同じ `createAndEdit` 1 本。
+   * ⚠ 一覧を開いている間に編集へ入った / 取り込みが始まったなら、作らずに理由を言う。
+   * ⚠ 無いときは黙らない ── 作り方を書いた 1 行(`snippetMenuNote`)を出す。
+   */
+  'create-from-template': (dispatcher, _target, services, root) => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') return;
+    const scan = st.snippetScan;
+    const items = scan?.items ?? [];
+    if (items.length === 0) {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: snippetMenuNote(scan) });
+      return;
+    }
+    void pickTemplateNoteInApp(root, items, snippetMenuNote(scan)).then((lid) => {
+      if (lid === null) return;
+      const item = items.find((s) => s.lid === lid);
+      if (item === undefined) return;
+      const now = dispatcher.getState();
+      if (now.phase !== 'ready') {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(now.phase)}ノートを作ってください` });
+        return;
+      }
+      const parent = now.scopeLid === null ? null : (now.entryMetas.get(now.scopeLid) ?? null);
+      const body = insertSnippet({ text: '', start: 0, end: 0 }, item.body, new Date()).text;
+      createAndEdit(dispatcher, services, 'text', parent?.lid ?? null, body);
+    });
   },
   /**
    * 🔴 **このフォルダの中に新しいノートを作る**(#215。行の右クリック / 情報ペイン / 鍵)。
@@ -14377,6 +14447,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔴 **「探す」の行は、探した語を運ぶ**(#1102 段①)── 受け側が当たった所へ送って塗る。
     //   ⚠ 語を持たない口(一覧の ⋯ など)は今までどおり `undefined`
     const find = target.getAttribute(FIND_ATTR);
+    /**
+     * 🔴 **スマホでは何が起きるかを 1 行で言う**(#1659 ②、Gemini 裁定 = 案 C)。⚠ スマホには小さな窓が無く、
+     *   押すと PKC3 全体が別のタブで開く ── 言わないと「ノートが開く」と読まれる。
+     * ⚠ **開く前に撃つ** ── `window.open` は gesture の中でしか通らず、その前に挟めるのは同期の dispatch だけ。
+     *   塞がれたときの案内は開く側が後から出すので、この 1 行はそれに上書きされる(正しい向き)。
+     */
+    if (appPhone.isPhone()) dispatcher.dispatch({ type: 'OP_NOTICE', message: PHONE_NOTE_WINDOW_NOTICE });
     // 🔑 語を持たない口は、左の列の欄の語を運ぶ(依頼 70-C2)── 「探す」の行の語が先
     services.openNoteWindow?.(
       lid,
@@ -14635,7 +14712,24 @@ const ACTIONS: Record<string, ActionHandler> = {
     const index = raw === null ? NaN : Number(raw);
     if (Number.isInteger(index)) void services.localFolder?.open(index);
   },
-  'show-trash': (dispatcher) => dispatcher.dispatch({ type: 'SHOW_TRASH' }),
+  /**
+   * 🔴 **ゴミ箱を開くときは、左の列を「フォルダ」にしておく**(#1648)。ゴミ箱の一覧はフォルダの面の下に
+   *   出るので、別のタブに居るまま `SHOW_TRASH` だけ撃つと開いても見えない。見つからないノートの知らせの隣の
+   *   「ゴミ箱を開く」(`status-trash`)は別のタブから押される。⚠ 同じタブなら `setBrowse` は何も変えない。
+   */
+  'show-trash': (dispatcher, _target, services) => {
+      services.setBrowse?.('filer');
+      dispatcher.dispatch({ type: 'SHOW_TRASH' });
+    },
+  /**
+   * 🔴 **右の列 / 右クリックの「ゴミ箱を開く」**(#1646 の 1)。⚠ ゴミ箱の口はフォルダの一覧にしか無いので、
+   *   先に左の列を「フォルダ」へ移してから開く(`show-trash` は一覧に居るときの口 ── 別の受け手)。
+   *   `SHOW_TRASH` は読むだけで編集中でも通る(下書きに触れない)。
+   */
+  'open-trash': (dispatcher, _target, services) => {
+    services.setBrowse?.('filer');
+    dispatcher.dispatch({ type: 'SHOW_TRASH' });
+  },
   'hide-trash': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_TRASH' }),
   /**
    * 🔴 **開いている面を閉じて本文へ戻る**(user 目線レビュー U-3)。
@@ -14658,6 +14752,24 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     if (closed === 'refused')
       dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_VIEW_WINDOW_REFUSED });
+  },
+  /**
+   * 🔴 **ノートの小窓の「× 閉じる」**(#1659 ③)。門は Esc と**同じ**(`noteWindowHasTyping` / 編集中は閉じない)
+   * ── 片方にだけ門が在ると、押し方で打ちかけが消える。閉じ方は `close-pane` と同じ `services.closeNoteWindow`。
+   */
+  'close-note-window': (dispatcher, _target, services, root) => {
+    const st = dispatcher.getState();
+    if (services.isNoteWindow?.() !== true) return;
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}閉じてください` });
+      return;
+    }
+    if (noteWindowHasTyping(root, st)) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '打ちかけの字が残っています。足すか消してから閉じてください' });
+      return;
+    }
+    const closed = services.closeNoteWindow?.() ?? 'not-a-window';
+    if (closed === 'refused') dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_NOTE_WINDOW_REFUSED });
   },
   'restore-trash': (dispatcher, target) => {
     const revId = target.getAttribute('data-pkc-rev-id');
@@ -15827,6 +15939,11 @@ export function bindActions(
       return;
     }
     const el = ev.target;
+    // 🔴 置換の帯の「探す語」を打つたびに件数を出し直す(#1646 の 2)
+    if (el instanceof HTMLInputElement && el.getAttribute('data-pkc-field') === 'replace-find') {
+      paintReplaceCount(root, dispatcher);
+      return;
+    }
     /**
      * 🔴 **整理案は、貼るたびに下見を描き直す**(#429 段③)。
      *
@@ -15901,6 +16018,11 @@ export function bindActions(
       return;
     }
     if (!(el instanceof HTMLInputElement)) return;
+    // 🔴 「大文字と小文字を区別」を切り替えたら件数を出し直す(#1646 の 2)
+    if (el.getAttribute('data-pkc-field') === 'replace-case') {
+      paintReplaceCount(root, dispatcher);
+      return;
+    }
     // 🔑 チェックボックス / テキスト欄も **change で確定**する(P8 段⑭)。
     //    ⚠ `input` ごとに撃たない ── グループ名を 1 文字打つたびに disk へ
     //    書き戻すことになる(欄を離れた時・Enter を押した時が確定)
@@ -16948,7 +17070,9 @@ export function bindActions(
    */
   const onPaste = (e: Event): void => {
     const ce = e as ClipboardEvent;
-    const files = filesOf(ce.clipboardData).filter(isImageFile);
+    // 🔴 **ファイル(PDF など)をコピーして貼ったときも、ドロップと同じ行き先へ**(#1652 6。Gemini 裁定 A)。
+    //   ⚠ 直す前は画像しか拾わず、エクスプローラーでコピーした PDF を貼っても何も起きず何も出なかった。
+    const files = filesOf(ce.clipboardData);
     /**
      * 🔴 **文字も一緒に来ていたら、画像にしない**(Excel の範囲は表の HTML・文字・表の絵が同時に来る)。
      *   画像だけを拾うと表が消える。画像だけのクリップボード(スクショ)は今までどおり画像へ。
@@ -16959,7 +17083,17 @@ export function bindActions(
     const htmlHasText =
       /<table[\s>]/i.test(html) ||
       html.replace(/<[^>]*>/g, '').replace(/&nbsp;|\s/g, '').trim() !== '';
-    const hasText = htmlHasText || (ce.clipboardData?.getData('text/plain') ?? '').trim() !== '';
+    const plain = ce.clipboardData?.getData('text/plain') ?? '';
+    // 🔑 Mac のファイルのコピーは、ファイル名の字も一緒に来る ── 字がファイル名だけなら「字」と数えない
+    const namesOnly =
+      files.length > 0 &&
+      !htmlHasText &&
+      plain
+        .split(/\r?\n/)
+        .filter((l) => l.trim() !== '')
+        .every((l) => files.some((f) => f.name === l.trim()));
+    const hasText = htmlHasText || (plain.trim() !== '' && !namesOnly);
+    // ⚠ 字も来ているなら、これまでどおり字の貼付に委ねる(表の絵 + 表の HTML のような組を壊さない)
     if (!hasText && routeFiles(files, ce.target)) {
       ce.preventDefault();
       return;
@@ -19085,6 +19219,10 @@ export function bindActions(
   listen(root, 'mousedown', onMousedown);
   listen(root, 'input', onInput);
   listen(root, 'change', onChange);
+  // 🔴 本文を打ったり、置換を撃ったりして本文が動いたときも、件数を出し直す(#1646 の 2。同じ字なら DOM に触れない)
+  //   ⚠ 配線を組む時点で購読するのはここだけ ── 一部しか持たない仮の dispatcher(test)でも組めるよう、口が在るときだけ繋ぐ
+  const onState = (dispatcher as Partial<Dispatcher>).onState;
+  if (onState !== undefined) undo.push(onState.call(dispatcher, () => { paintReplaceCount(root, dispatcher); }));
   /**
    * 🔴 **添付の改名欄は、欄を離れたときも確定する**(#1264 §1)。⚠ `change` は字が変わらないと
    *   撃たれないので、**題名だけ別の所で変えた後**にファイル名を揃える道が無かった。

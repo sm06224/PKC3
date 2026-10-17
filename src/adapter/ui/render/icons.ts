@@ -153,6 +153,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
    *   門は `tests/adapter/icons.test.ts`「第 3 引数の鍵は登記に在る」。
    */
   'open-today': 'calendar',
+  'create-from-template': 'snippet',
   'start-timer': 'timer',
   'start-audio-capture': 'mic',
   'start-screen-capture': 'monitor',
@@ -182,6 +183,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'export-entry-markdown': 'page',
   'show-history': 'clock',
   'delete-entry': 'trash',
+  'open-trash': 'trash',
   // まとめてゴミ箱へ(#240 段③)── 1 件の削除と**同じ図案**(同じ意味だから)
   'delete-selected': 'trash',
   /** 図を保存(`mermaid-hydrate` が手組みしていた ⬇ をここへ寄せた)。 */

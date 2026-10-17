@@ -35,9 +35,10 @@ async function sendFiles(
   selector: string,
   kind: 'paste' | 'drop',
   files: { name: string; type: string; b64: string }[],
+  text?: string,
 ): Promise<void> {
   await page.evaluate(
-    ({ selector, kind, files }) => {
+    ({ selector, kind, files, text }) => {
       const el = document.querySelector(selector);
       if (!el) throw new Error(`要素が無い: ${selector}`);
       const dt = new DataTransfer();
@@ -49,13 +50,14 @@ async function sendFiles(
       }
       // ⚠ 貼付は**焦点のある欄**へ入る ── 実際の user と同じく先に焦点を置く
       if (el instanceof HTMLElement) el.focus();
+      if (text !== undefined) dt.setData('text/plain', text);
       const ev =
         kind === 'paste'
           ? new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt })
           : new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
       el.dispatchEvent(ev);
     },
-    { selector, kind, files },
+    { selector, kind, files, text },
   );
 }
 
@@ -322,6 +324,36 @@ test('🔴 編集していないときに貼ると、添付のノートになる
   await expect(rows, '添付のノートが出来ていない').toHaveCount(1, { timeout: 15_000 });
   await expect(rows.first()).toHaveAttribute('data-pkc-archetype', 'attachment');
   await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
+
+  // 🔴 #1652: 画像でないファイル(PDF)のコピーを貼っても、ドロップと同じく添付のノートになる
+  const PDF_B64 = Buffer.from('%PDF-1.4\n%%EOF\n').toString('base64');
+  await sendFiles(page, '[data-pkc-region="filer-table"]', 'paste', [
+    { name: 'copied.pdf', type: 'application/pdf', b64: PDF_B64 },
+  ]);
+  await expect(rows, 'PDF のコピーを貼っても添付にならない').toHaveCount(2, { timeout: 15_000 });
+  await expect(rows.filter({ hasText: 'copied.pdf' })).toHaveCount(1);
+
+  // 🔴 #1652: Mac 式(字がファイル名だけ)でも添付になる
+  await sendFiles(
+    page,
+    '[data-pkc-region="filer-table"]',
+    'paste',
+    [{ name: 'mac.pdf', type: 'application/pdf', b64: PDF_B64 }],
+    'mac.pdf',
+  );
+  await expect(rows, 'ファイル名だけの字が付いたコピーが添付にならない').toHaveCount(3, { timeout: 15_000 });
+  await expect(rows.filter({ hasText: 'mac.pdf' })).toHaveCount(1);
+
+  // 🔴 #1652: 本物の字が付いているものは添付にしない(字の貼付に委ねる)
+  await sendFiles(
+    page,
+    '[data-pkc-region="filer-table"]',
+    'paste',
+    [{ name: 'text.pdf', type: 'application/pdf', b64: PDF_B64 }],
+    '見出し\n本当の文章です',
+  );
+  await page.waitForTimeout(1500);
+  await expect(rows, '字つきのコピーが添付にされた').toHaveCount(3);
 
   expect(errors).toEqual([]);
 });

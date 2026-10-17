@@ -32,6 +32,7 @@
 import BODY_CSS from 'virtual:pkc-body-css';
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
 import { renderMarkdown, type RenderMarkdownOptions } from '../markdown/markdown-render';
+import { bakeFigures, type FigureBakers } from './figure-bake';
 import { bakeSqlEmbeds, type SqlEmbedAnswer } from '../markdown/sql-embed';
 import { extractVars } from '../markdown/frontmatter';
 import { createWarnCollector } from './warn-cap';
@@ -119,6 +120,14 @@ export function mathSourceNotice(n: number): string | null {
   return n > 0 ? `数式 ${n} 件は、開いた先では打った字のまま出ます` : null;
 }
 
+/**
+ * 別のノートの内容の埋め込み(`![説明](entry:…#h/…)`)が説明の字だけで出ることの注意(0 件なら `null`)。
+ * 🔑 閲覧用 HTML と Word / PowerPoint が**同じ文面**を使うよう 1 か所に置く(#1648)。
+ */
+export function embedSourceNotice(n: number): string | null {
+  return n > 0 ? `別のノートの内容の埋め込み ${n} 件は、開いた先では説明の字だけで出ます` : null;
+}
+
 /** 注意の文面(0 件の種類は出さない)。 */
 function openedAsSourceNotices(n: Record<CountKind, number>): string[] {
   const w: string[] = [];
@@ -126,7 +135,8 @@ function openedAsSourceNotices(n: Record<CountKind, number>): string[] {
   if (n.chart > 0) w.push(`グラフ ${n.chart} 件は、開いた先では原文の字で出ます`);
   const math = mathSourceNotice(n.math);
   if (math !== null) w.push(math);
-  if (n.embed > 0) w.push(`別のノートの内容の埋め込み ${n.embed} 件は、開いた先では説明の字だけで出ます`);
+  const embed = embedSourceNotice(n.embed);
+  if (embed !== null) w.push(embed);
   if (n.externalImage > 0) {
     w.push(
       `外部の画像 ${n.externalImage} 件は、開いた先では空の枠になります` +
@@ -287,6 +297,8 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
 /* 図の原文(閲覧側に mermaid を積まないので、原文のまま出す)。
    ⚠ pre.d は**閲覧側だけが作る要素** ── アプリに対応物が無い。 */
 .b pre.d{font-size:.9em;opacity:.85}
+/* 絵にして埋め込んだ図とグラフ(#1648)。⚠ 閲覧側にだけ在る規則。幅は器に収める。 */
+.b [data-pkc-figure-baked] img{max-width:100%;height:auto}
 /* ⚠ 焼いた側は outline / color / min-height だけ ── 薄さはこちらの持ち物。 */
 .b [data-pkc-asset-missing]{opacity:.75}
 /* 一覧の行(表)は器から溢れさせない。⚠ 焼いた側に対応物なし。 */
@@ -938,6 +950,11 @@ export async function writePortableHtml(
    * ⚠ アプリからは必ず渡す(`ExportDeps.askSql` は optional にしていない)。
    */
   askSql?: (sql: string) => Promise<SqlEmbedAnswer>,
+  /**
+   * 🔴 **図とグラフを絵にして埋め込む産出器**(#1648)。渡すと、図(mermaid)は SVG、グラフは PNG の
+   *   `<img>` として焼く。⚠ 渡さない(test 等)と原文の字のまま出る(従来どおり)。アプリからは必ず渡す。
+   */
+  figures?: FigureBakers,
 ): Promise<HtmlResult> {
   const warnings: string[] = [];
   /**
@@ -1064,7 +1081,13 @@ export async function writePortableHtml(
        * ⚠ 閲覧側には引く相手(sqlite)が居ない ── 焼かないと「持ち出したら答えが消える」。
        *   原文の SQL はコード枠として残る。⚠ 器が 0 個なら 1 度も引かない(1 バイトも変わらない)。
        */
-      const html = askSql ? await bakeSqlEmbeds(rendered, askSql) : rendered;
+      const sqlBaked = askSql ? await bakeSqlEmbeds(rendered, askSql) : rendered;
+      /**
+       * 🔴 **図とグラフを絵にして焼く**(#1648)。⚠ 同じ原文を 1 回しか描く表は**ノートごとに捨てる**
+       *   (全ノートぶんの絵を heap に残さない ── 不可侵指示 2026-07-27 の「速やかな破棄」)。
+       *   描けなかった物は器のまま残り、下の `countContainers` が原文の字で出る件数に数える。
+       */
+      const html = figures ? await bakeFigures(sqlBaked, figures, new Map()) : sqlBaked;
       /**
        * 🔴 **書字方向などの文書属性も一緒に配る**(同 2-7)。画面では
        * `applyDocumentGlobals` が DOM 属性として当てているので、配る側でも

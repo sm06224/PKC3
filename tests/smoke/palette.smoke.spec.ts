@@ -369,7 +369,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await ask('ゴミ箱を閉じる');
   await page.keyboard.press('Enter');
   await expect(dialog).toBeHidden();
-  await expect(page.locator('[data-pkc-action="show-trash"]'), 'ゴミ箱が閉じていない').toBeVisible();
+  await expect(page.locator('[data-pkc-action="show-trash"]:not([hidden])'), 'ゴミ箱が閉じていない').toBeVisible();
 
   await ask('時間を計る');
   await page.keyboard.press('Enter');

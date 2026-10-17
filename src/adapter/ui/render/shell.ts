@@ -75,6 +75,11 @@ export interface ShellRegions {
    */
   statusRescue: HTMLElement;
   /**
+   * 🔴 **見つからないノートの知らせの隣の「ゴミ箱を開く」**(#1648)。押した先は `show-trash`
+   *   の受け手(`binder.ts`)。出し入れは `status-open.ts` の `paintStatusTrash`。
+   */
+  statusTrash: HTMLElement;
+  /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。⚠ 常設で置き、
    *   未読が 1 件以上あるときだけ `hidden` を外す(`main.ts` が state を見て書く)。
    */
@@ -628,6 +633,21 @@ export function buildShell(root: HTMLElement): ShellRegions {
     menu.append(item);
   }
 
+  /**
+   * 🔴 **テンプレートから作る**(#1645 項目 4。Gemini 裁定 = #1163 の依頼 39-4=A「推薦どおり」)。
+   *
+   * ⚠ 直す前は「新しいノートを作る → 編集に入る → `Ctrl`+`/` で挿す」の 2 手だった。
+   *   押すと自分のテンプレートの一覧が出て、選ぶと中身の入ったノートが編集の状態で開く。
+   * ⚠ 種類の項目(`pick-create-kind`)ではない ── 押しても種類は変わらず、一覧で選ぶまで作らない。
+   */
+  const fromTemplate = iconButton('create-from-template', 'テンプレートから作る…');
+  fromTemplate.setAttribute('role', 'menuitem');
+  const fromTemplateHint = '自分のテンプレートを一覧から選んで、中身の入った新しいノートを作ります';
+  fromTemplate.setAttribute(HINT_BASE, fromTemplateHint);
+  fromTemplate.setAttribute(HINT_COMMAND, '');
+  fromTemplate.title = hintTitle(fromTemplateHint, '');
+  menu.append(fromTemplate);
+
   const menuSeparator = (): HTMLElement => {
     const hr = document.createElement('div');
     hr.setAttribute('data-pkc-field', 'create-menu-separator');
@@ -897,6 +917,11 @@ export function buildShell(root: HTMLElement): ShellRegions {
   caseBox.title = 'チェックを入れると、大文字と小文字が違う語は置き換えません';
   caseLabel.append(caseBox, document.createTextNode('大文字と小文字を区別'));
   replaceBar.append(caseLabel);
+  // 🔴 当たる件数(#1646 の 2)。字は binder の `paintReplaceCount` が入れる ── 空の間は何も出ない
+  const replaceCount = document.createElement('span');
+  replaceCount.setAttribute('data-pkc-field', 'replace-count');
+  replaceCount.setAttribute('aria-live', 'polite');
+  replaceBar.append(replaceCount);
   const runReplace = iconButton('replace-all', 'すべて置換');
   runReplace.title = '編集中のこのノートの本文で、探す語を全部置き換えます(ほかのノートには効きません)';
   replaceBar.append(runReplace);
@@ -1087,6 +1112,17 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusRescue.textContent = 'ノートの保存データの確認を開く';
   statusRescue.hidden = true;
   /**
+   * 🔴 **見つからないノートの知らせの隣の「ゴミ箱を開く」**(#1648)。ゴミ箱は左のペインの「フォルダ」の
+   *   いちばん下で、知らせの字だけでは辿りにくかった。⚠ 「開く」「元に戻す」と同じ作法 ── 常設で置いて、
+   *   要るときだけ出す(`status-open.ts` が `hidden` を書く)。実行の口は `show-trash` の受け手 1 つ。
+   */
+  const statusTrash = document.createElement('button');
+  statusTrash.type = 'button';
+  statusTrash.setAttribute('data-pkc-field', 'status-trash');
+  statusTrash.setAttribute('data-pkc-action', 'show-trash');
+  statusTrash.textContent = 'ゴミ箱を開く';
+  statusTrash.hidden = true;
+  /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。
    *
    * ⚠ 「開く」「元に戻す」と同じ作法 ── **常設で置いて、未読が 1 件以上あるときだけ
@@ -1129,7 +1165,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   tooNarrowOk.type = 'button';
   tooNarrowOk.setAttribute('data-pkc-field', 'too-narrow-ok');
   tooNarrow.append(tooNarrowText, tooNarrowOk);
-  status.append(statusText, statusOpen, statusUndo, statusCreate, statusRescue, statusMessages, tooNarrow);
+  status.append(statusText, statusOpen, statusUndo, statusCreate, statusRescue, statusTrash, statusMessages, tooNarrow);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -1299,6 +1335,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     statusUndo,
     statusCreate,
     statusRescue,
+    statusTrash,
     statusMessages,
     tooNarrow,
     tooNarrowText,

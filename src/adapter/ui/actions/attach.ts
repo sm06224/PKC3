@@ -23,7 +23,7 @@ import { editedElsewhereReason, type EditLockPort } from '@adapter/state/edited-
 import { createWritableQueue } from './writable-queue';
 import { attachmentBody } from '@features/flavor/attachment-flavor';
 import { identifyAsset, assetKeyFromHash } from '@adapter/platform/storage/asset-key';
-import { shrinkPlan, shrinkQuestion } from '@features/asset/image-shrink';
+import { SHRINK_REMEMBER_LABEL, shrinkPlan, shrinkQuestion } from '@features/asset/image-shrink';
 import { generateLid } from './binder';
 import { isAppendable } from '@features/flavor/append-spec';
 
@@ -97,7 +97,10 @@ export interface AttachDeps {
    * 🔴 写真は user のものであり、縮めるのは**不可逆**である ──
    *   だから**黙って縮める道を作らない**。口が無ければ、聞けないので縮めない。
    */
-  askShrink?(question: string): Promise<boolean>;
+  askShrink?(
+    question: string,
+    opts?: { readonly rememberLabel?: string },
+  ): Promise<boolean | { readonly ok: boolean; readonly remember: boolean }>;
 }
 
 
@@ -353,6 +356,33 @@ export async function attachOne(
 }
 
 /**
+ * 縮める候補か(形式と大きさだけで決まる。画素数は読まないと分からないので見ない)。
+ * ⚠ `maybeShrink` の入口と、`newShrinkRun` の数え方が**同じ判定**を通る(2 か所に書かない)。
+ */
+function isShrinkCandidate(item: AttachItem): boolean {
+  const mime = resolveMime(item.name, item.type);
+  return shrinkPlan(mime, item.size, Number.MAX_SAFE_INTEGER, 1) !== null;
+}
+
+/**
+ * 🔴 **まとめて入れる 1 回のあいだ持ち回る、縮めるかの記憶**(#1652 3)。
+ *
+ * - `total`: 縮める候補の写真の数(「5 枚中 2 枚目」の分母)
+ * - `seen`: 何枚目まで来たか
+ * - `remembered`: 窓で「残りも同じにする」を選んだとき、その答え(`null` = まだ決めていない)
+ * ⚠ 呼び側が 1 回の取り込みごとに 1 つ作る(次の取り込みへ持ち越さない)。
+ */
+export interface ShrinkRun {
+  readonly total: number;
+  seen: number;
+  remembered: boolean | null;
+}
+
+export function newShrinkRun(items: readonly AttachItem[]): ShrinkRun {
+  return { total: items.filter(isShrinkCandidate).length, seen: 0, remembered: null };
+}
+
+/**
  * 🔴 **大きな画像なら、縮めるか聞く**(#412)。
  *
  * ⚠ **縮めてから、本当の数字で聞く** ── 見積もりを見せない
@@ -360,14 +390,24 @@ export async function attachOne(
  * ⚠ 断られたら縮めたほうを**その場で捨てる**(参照を持たないので、
  *   関数を抜けた時点で回収される ── 2026-07-27 の不可侵指示と同じ向き)。
  * 🔴 **口が 1 つでも無ければ、何もしない** ── 黙って縮める道を作らない。
+ * 🔑 `run` を渡すと(#1652 3)窓にファイル名と「5 枚中 2 枚目」を出し、残りの写真が在るあいだは
+ *   「残りも同じにする」を選べる。選んだ答えは**窓で user が言ったこと**だけを残りへ当てる
+ *   (選ばなければ、これまでどおり 1 枚ずつ聞く)。
  *
  * @returns 取り込む item(縮めたなら差し替わっている)
  */
-export async function maybeShrink(deps: AttachDeps, item: AttachItem): Promise<AttachItem> {
+export async function maybeShrink(
+  deps: AttachDeps,
+  item: AttachItem,
+  run?: ShrinkRun,
+): Promise<AttachItem> {
   if (!deps.shrinkImage || !deps.askShrink) return item;
   const mime = resolveMime(item.name, item.type);
   // ⚠ 触る形式かどうかは**純関数が決める** ── ここで綴りを書き直さない
-  if (shrinkPlan(mime, item.size, Number.MAX_SAFE_INTEGER, 1) === null) return item;
+  if (!isShrinkCandidate(item)) return item;
+  if (run !== undefined) run.seen += 1;
+  // 🔑 「残りはそのまま」と答えた回は、縮める支度(ワーカー)も起こさない
+  if (run?.remembered === false) return item;
   let out;
   try {
     out = await deps.shrinkImage(item.blob, mime);
@@ -376,15 +416,25 @@ export async function maybeShrink(deps: AttachDeps, item: AttachItem): Promise<A
     return item;
   }
   if (out.shrunk === null) return item;
-  const ok = await deps.askShrink(
+  const take = { ...item, size: out.shrunk.blob.size, blob: out.shrunk.blob };
+  if (run?.remembered === true) return take;
+  const more = run !== undefined && run.seen < run.total;
+  const raw = await deps.askShrink(
     shrinkQuestion(
       { width: out.width, height: out.height, bytes: item.size },
       { width: out.shrunk.width, height: out.shrunk.height, bytes: out.shrunk.blob.size },
+      run === undefined ? undefined : { name: item.name, index: run.seen, total: run.total },
     ),
+    more ? { rememberLabel: SHRINK_REMEMBER_LABEL } : undefined,
   );
+  const ok = typeof raw === 'boolean' ? raw : raw.ok;
+  if (more && typeof raw !== 'boolean' && raw.remember) run!.remembered = ok;
   if (!ok) return item;
-  return { ...item, size: out.shrunk.blob.size, blob: out.shrunk.blob };
+  return take;
 }
+
+/** 1 枚目にこれだけかかったら、進み具合を出す(#1652 4)。 */
+export const SLOW_FIRST_MS = 1000;
 
 /** 取込本体。file ごとに独立に成否を扱う(1 個の失敗が batch を殺さない)。 */
 export async function attachFiles(
@@ -559,15 +609,62 @@ export async function attachFiles(
     let heldCount = 0;
     let heldLast = '';
 
+    /**
+     * 🔴 **入れている間の進み具合**(#1652 4。Gemini 裁定 B)。
+     *
+     * ⚠ 速いときは出さない ── **1 枚目に 1 秒かかったときだけ**出す(`…` で終わる字は
+     *   画面下の進行中の欄へ出る。取り込むほうの「取り込み中…」と同じ欄)。
+     * ⚠ 1 枚目の途中で 1 秒たったら、その場で出す(1 枚だけの大きなファイルも対象)。
+     * 🔑 縮めるかの窓が開いている間は数えない(user が考えている時間は「遅い」ではない)。
+     */
+    const total = files.length;
+    let showProgress = false;
+    let slowTimer: ReturnType<typeof setTimeout> | null = null;
+    const stopSlowTimer = (): void => {
+      if (slowTimer !== null) clearTimeout(slowTimer);
+      slowTimer = null;
+    };
+    const progress = (name: string, n: number): void =>
+      notify(`『${name}』を入れています…(${n}/${total})`);
+    // ⚠ 最後の 1 枚が終わったら進行中の字を空にする(結果の知らせの前に。結果が「開く」を持つので後ろでは消さない)
+    const endProgress = (n: number): void => {
+      stopSlowTimer();
+      if (showProgress && n === total) notify('');
+    };
+    const shrinkRun = newShrinkRun(
+      files.map((f) => ({ name: f.name, type: f.type, size: f.size, blob: f })),
+    );
+    const askingDeps: AttachDeps =
+      deps.askShrink === undefined
+        ? deps
+        : {
+            ...deps,
+            askShrink: async (q, o) => {
+              stopSlowTimer();
+              return deps.askShrink!(q, o);
+            },
+          };
+
+    let n = 0;
     for (const file of files) {
+      n += 1;
+      const at = n;
+      if (showProgress) progress(file.name, at);
+      else if (at === 1) {
+        slowTimer = setTimeout(() => {
+          slowTimer = null;
+          showProgress = true;
+          progress(file.name, 1);
+        }, SLOW_FIRST_MS);
+      }
       try {
-        const item = await maybeShrink(deps, {
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          blob: file,
-        });
+        const item = await maybeShrink(
+          askingDeps,
+          { name: file.name, type: file.type, size: file.size, blob: file },
+          shrinkRun,
+        );
         const attached = await attachOne(dispatcher, deps, item, known);
+        endProgress(at);
         // ⚠ `null` は `attachOne` が既に理由を出している(二重に言わない)
         if (attached === null) continue;
         putAssetIntoNote({
@@ -603,12 +700,14 @@ export async function attachFiles(
           tally.expected += 1;
         }
       } catch (e) {
+        endProgress(at);
         dispatcher.dispatch({
           type: 'OP_FAILED',
           error: `添付の取り込みに失敗しました(「${file.name}」): ${errorText(e)}`,
         });
       }
     }
+    stopSlowTimer();
     intakeDone = true;
     summarize();
     if (heldCount > 0) notify(attachedNotInBodyElsewhereText(why, heldCount), heldLast);

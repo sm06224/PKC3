@@ -218,6 +218,7 @@ describe('▼ の合成メニュー(#1054 段②)', () => {
       'button:pick-create-kind',
       'button:pick-create-kind',
       'button:pick-create-kind',
+      'button:create-from-template', // #1645: 種類ではなく、一覧で選んでから作る
       'field:create-menu-separator',
       'button:open-today',
       'field:create-menu-separator',

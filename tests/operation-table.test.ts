@@ -232,6 +232,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'clear-opened-history', 'clear-search-history', 
   // ⚠ 2026-09-28(#1099): 'close-lightbox' はライトボックスが開いている間だけ意味を持つので未登記。
   'close-lightbox',
+  // ⚠ 2026-10-17(#1659 ③): ノートの小窓の「× 閉じる」。押し口は小窓の帯の 1 か所のみ(Esc は別の口が持つ)。
+  'close-note-window',
   /**
    * ⚠ **2026-10-11(#1376)で 2 件増やした** ── 起動したときの 1 行の「戻す」「消す」。
    * 🔑 **名前で呼べないままにする理由**:1 行が出ている間だけ意味を持ち(出ていなければ何も起きない)、
@@ -250,7 +252,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'container-rebuild',
   'container-reset',
   'copy-block-md', 'copy-chapter-md', 
-  'copy-section-link', 'copy-section-ref', 'create-date-note', 
+  'copy-section-link', 'copy-section-ref', 'create-date-note', 'create-from-template', 
   'delete-selected', 'deny-external-images',
   'discard-capture', 'dismiss-announce', 'dismiss-notices', 'dismiss-update', 'dual-back',
   'dual-bookmark', 'dual-copy', 'dual-delete', 'dual-focus', 'dual-forward', 'dual-mkdir',
@@ -844,14 +846,20 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-17(#1163 依頼 45 の 2、#1657): 題名を変えた直後の「元に戻す」(`undo-rename`)で受け手 +1 ── 登記は増えない
       //   (押し口は画面の下の知らせの隣の 1 か所にしか無く、鍵も持たない。`undo-dual-move` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1660 依頼 47-1): 「操作を探す」の `export-note-pdf` で登記 +1 / `outsideActionsTable` +1(受け手を持たない特例 ── `export-note-markdown` と同じ置き場)。
-      total: 434,
-      receivers: 367,
+      // ⚠ 2026-10-17(#1659 ③): ノートの小窓の「× 閉じる」(`close-note-window`)で受け手 +1 ── 登記は増えない
+      //   (押し口は小窓の帯の 1 か所にしか無く、鍵は Esc が別に持つ)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      // ⚠ 2026-10-17(#1646 の 1): 右の列 / 右クリックの「ゴミ箱を開く」(`open-trash`)1 件を登記 ── 受け手も同時に足したので
+      //   `total` +1 / `receivers` +1 / `registered` +1 / `both` +1(`unregistered` は動かない)。
+      // ⚠ 2026-10-17(#1645 項目 4): 受け手 +1(`create-from-template`。左上の作成の ▼ の「テンプレートから作る…」── 押した所から何も要らない。
+      //   `open-today` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 437,
+      receivers: 370,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
-      registered: 169,
-      both: 102,
+      registered: 170,
+      both: 103,
       outsideActionsTable: 67,
-      unregistered: 265,
+      unregistered: 267,
     });
   });
 
@@ -911,8 +919,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)を登記で `key` 138 → 139(鍵の既定は持たない)
     // ⚠ 2026-10-17(#1660): 「このノートを PDF で書き出す」(`export-note-pdf`)を登記で `key` 139 → 140(鍵の既定は持たない)
     expect(s().perBook).toEqual({
+      // ⚠ 2026-10-17(#1646 の 1): 行のメニューが 22 → 23(`open-trash`)
       key: 140,
-      entry: 22,
+      entry: 23,
       body: 3,
       collection: 2,
       collectionPane: 5,

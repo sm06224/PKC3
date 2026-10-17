@@ -297,6 +297,20 @@ export interface StorePort {
     stale: string[];
     overBudget: boolean;
   }>;
+  /**
+   * 🔴 **改名のとき、ほかのノートのリンクの字を新しい題名へ**(#1163 依頼 177、#1648)。
+   * ⚠ **省略可** ── 持たない配線(古い fake)では**何もしない**(改名そのものは通る。機能が減るだけ)。
+   * 🔑 走査も書込も worker の同じ tx。`skipLids` は書き換えない(編集中の)ノート。
+   */
+  renameLinkTexts?(input: {
+    lid: string;
+    oldTitle: string;
+    newTitle: string;
+    skipLids: readonly string[];
+  }): Promise<{
+    wrote: Array<{ lid: string; body: string; stamps: EntryStamps }>;
+    links: number;
+  }>;
   persistEntry(
     entry: EntryUpsert,
     opts?: {
@@ -2230,6 +2244,38 @@ export function connectStoreEffects(
               return;
             }
             stamp(ev.lid, stamps);
+            /**
+             * 🔴 **ほかのノートのリンクの字を新しい題名へ**(#1163 依頼 177、#1648。Gemini の裁定:確認なし・終わってから 1 行)。
+             * ⚠ **別の try** ── ここが落ちても「名前を保存できませんでした」と言わない(改名は済んでいる)。
+             * ⚠ 改名と同じ列に並べる(改名の書込の後に走る)。走査も書込も worker の 1 tx なので、読んでから書くまでの隙間は無い。
+             */
+            if (store.renameLinkTexts !== undefined && ev.oldTitle !== ev.title) {
+              try {
+                const r = await store.renameLinkTexts({
+                  lid: ev.lid,
+                  oldTitle: ev.oldTitle,
+                  newTitle: ev.title,
+                  skipLids: ev.skipLids,
+                });
+                if (disposed) return;
+                for (const w of r.wrote) {
+                  stamp(w.lid, w.stamps);
+                  // 開いている本文ならその場で差し替える(次に開き直すまで古い字が出る、を作らない)
+                  dispatcher.dispatch({ type: 'ENTRY_BODY_REFRESHED', lid: w.lid, body: w.body });
+                }
+                if (r.wrote.length > 0)
+                  dispatcher.dispatch({
+                    type: 'OP_NOTICE',
+                    message: `${r.wrote.length} 件のノートのリンクの字も更新しました`,
+                  });
+              } catch (e) {
+                if (!disposed)
+                  dispatcher.dispatch({
+                    type: 'OP_FAILED',
+                    error: `名前は変えましたが、ほかのノートのリンクの字は更新できませんでした: ${errorText(e)}`,
+                  });
+              }
+            }
           } catch (e) {
             // 🔴 何が書けなかったかを言う(#1087)── 画面の題名は新しいままなので、元の字だけでは改名できたと読まれる
             if (!disposed)
