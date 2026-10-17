@@ -165,7 +165,7 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   await expect(
     jobsPane,
     '添付の展開がメインスレッドで走っている(ワーカーへ出ていない ── 処理の記録に asset の完了が無い)',
-  ).toContainText(/asset: 完了/, { timeout: 10_000 });
+  ).toContainText(/添付: 完了/, { timeout: 10_000 });
   // ⚠ ここは detail(処理の記録)の面に居る ── 下の「先に開く」がシステムを開く
 
   // ── 取り込んだ asset は「参照されている」と実 sqlite 走査で判定される ──
