@@ -156,7 +156,7 @@ import {
   relationFromRow,
   REVISION_KEEP_LATEST,
 } from '@adapter/platform/storage/store-port';
-import { acquireWriterLease, promoteOrReleaseLease } from '@adapter/platform/storage/writer-lease';
+import { acquireWriterLease, isPromotionMemoryFallback, promoteOrReleaseLease } from '@adapter/platform/storage/writer-lease';
 import { AutoOptimizer } from '@adapter/platform/storage/auto-optimize';
 // 🔴 SQL の面で「手持ちのファイル」を開く(#854 段②)
 import {
@@ -166,7 +166,7 @@ import {
   sqlLocalFileSize,
 } from '@adapter/state/sql-local-file';
 import { bundleChannelName, bundleLockName } from '@features/portable/bundle';
-import { readBundle, resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
+import { latestPortableImage, readBundle, resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
 import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
 import { exportPortable, fetchPortableTemplate } from '@adapter/ui/actions/export-portable';
 import {
@@ -581,6 +581,14 @@ async function initStorage(
     },
   });
   return { client, init };
+}
+
+/**
+ * 昇格・待ち明けで storage を開き直すときの入力(多重タブ T1)。⚠ 判断は `latestPortableImage` が持つ。
+ * 素の PKC3(`null`)はそのまま。
+ */
+async function latestPortable(portable: PortableStart | null): Promise<PortableStart | null> {
+  return portable === null ? null : { ...portable, image: await latestPortableImage(portable) };
 }
 
 /**
@@ -1048,7 +1056,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       } else {
         followerConn = null;
         await heldP;
-        const real = await initStorage(portable);
+        // 🔴 待った間に先のタブが書いた分を落とさない ── 起動の画像ではなく器の最新から開く(T1)
+        const real = await initStorage(await latestPortable(portable));
         armPersist(real.client);
         const host = new StoreProxyHost({ client: real.client, init: real.init, ...proxyDeps, ...persistHook });
         client = host.localClient();
@@ -1061,6 +1070,53 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       }
     }
   }
+  /**
+   * 🔴 **昇格の購読は 2 枚目の接続ができた直後に張る**(T4)。⚠ 以前は boot の最後に張っていたので、
+   *   `resolveContainer` / `loadSnapshot` の途中で本体が閉じると**誰も昇格させず、要求が 10 秒で時間切れ**になった。
+   * ⚠ ここでやるのは**接続の乗り換えだけ**(後ろで組まれる `paint` / `onRemoteChanged` などには触れない ──
+   *   まだ TDZ)。画面・購読の付け替えは、後ろの `promotion.then(...)` が受ける。
+   * ⚠ `whenHeld` は 1 度しか解決しないので、昇格は 1 回しか走らない。
+   */
+  let promotedHost: StoreProxyHost | null = null;
+  let promotedInit: InitResult | null = null;
+  const promotion: Promise<{ error: unknown } | null> | null = followerConn
+    ? (() => {
+        const conn = followerConn;
+        return lease.whenHeld.then(async () => {
+          try {
+            // 🔴 失敗したら握った lock を手放す(#1087)── 動かないタブが握り続けると、
+            //    読み込み直したタブが書き手になれない
+            await promoteOrReleaseLease(lease, () => conn.promote(async () => {
+              const r = await initStorage(await latestPortable(portable));
+              // 🔴 保存先が開けず空のメモリへ落ちたら、昇格を失敗にする(T2)── 空のまま書き手を名乗らない
+              if (isPromotionMemoryFallback({ portable: portable !== null, vfs: r.init.vfs })) {
+                r.client.terminate();
+                throw new Error('保存先を開けませんでした');
+              }
+              liveVfs = r.init.vfs;
+              // ⚠ 昇格でも arm する(忘れると、続きを書いたぶんが丸ごと保存されない)
+              armPersist(r.client);
+              const host = new StoreProxyHost({
+                client: r.client,
+                init: r.init,
+                heldLocks: conn.heldEditLocks(),
+                ...proxyDeps,
+                ...persistHook,
+              });
+              promotedHost = host;
+              promotedInit = r.init;
+              // 🔑 promote はここが返した client を**以後の全要求 + バッファ吐き出し**に
+              //    使う ── localClient()(mutation を放送する包み)を返すことで、
+              //    乗り換え直後の書込も残りの follower へ届く
+              return { client: host.localClient(), init: r.init };
+            }));
+            return null;
+          } catch (e) {
+            return { error: e };
+          }
+        });
+      })()
+    : null;
   /**
    * 🔴 **この端末のコンテナ id は、DB に聞いて決める**(#260)。
    *
@@ -2429,6 +2485,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   `changed` を放送する(`store-proxy.ts` の `MUTATING_OPS`)── 受け手が無いと、他タブの色は
      *   次の読み直しまで古いまま。1 件の小さな読みなので、どの `changed` でも読み直す。
      */
+    queueSnapshotReload();
+  };
+  /** 一覧と色の取り直しを 300ms で束ねて 1 回積む(他タブの書込 / 昇格の直後)。 */
+  const queueSnapshotReload = (): void => {
     if (syncReloadQueued) return;
     syncReloadQueued = true;
     setTimeout(() => {
@@ -2469,32 +2529,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         error: editRevokedNote(st),
       });
     });
-    let promotedHost: StoreProxyHost | null = null;
-    void lease.whenHeld.then(async () => {
+    // 🔴 接続の乗り換え本体は boot の前半で張った `promotion`(T4)。ここは画面・購読の付け替えだけ
+    void promotion?.then(async (failed) => {
       try {
-        // 🔴 失敗したら握った lock を手放す(#1087)── 動かないタブが握り続けると、
-        //    読み込み直したタブが書き手になれない
-        await promoteOrReleaseLease(lease, () => conn.promote(async () => {
-          const r = await initStorage(portable);
-          liveVfs = r.init.vfs;
-          // ⚠ 昇格でも arm する(忘れると、続きを書いたぶんが丸ごと保存されない)
-          armPersist(r.client);
-          // 🔴 昇格したタブは自分の worker を開いた当事者 ── 起動のときの注意は通っていないのでここで 1 回
-          announceReservedLock(r.init);
-          const host = new StoreProxyHost({
-            client: r.client,
-            init: r.init,
-            heldLocks: conn.heldEditLocks(),
-            ...proxyDeps,
-            ...persistHook,
-          });
-          promotedHost = host;
-          // 🔑 promote はここが返した client を**以後の全要求 + バッファ吐き出し**に
-          //    使う ── localClient()(mutation を放送する包み)を返すことで、
-          //    乗り換え直後の書込も残りの follower へ届く
-          return { client: host.localClient(), init: r.init };
-        }));
+        if (failed !== null) throw failed.error;
         if (promotedHost) {
+          // 🔴 昇格したタブは自分の worker を開いた当事者 ── 起動のときの注意は通っていないのでここで 1 回
+          if (promotedInit) announceReservedLock(promotedInit);
+          // 🔴 死んだ本体が最後に書いた分(適用済みだが放送されなかった)を読み直す(T6)
+          queueSnapshotReload();
           unbindChanged();
           sync = promotedHost;
           unbindChanged = sync.onChanged(onRemoteChanged);

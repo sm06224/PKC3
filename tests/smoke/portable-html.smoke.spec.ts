@@ -98,7 +98,7 @@ test('🔴 畳んだ 1 個の HTML が `file://` で起動する (#400 段①②
  * (「段③ が入ったらここが落ちて、書き換えろと言ってくる」と書いてあった)──
  * その通りに落ちたので、向きを裏返した。
  */
-test('🔴 `file://` で作ったノートが再読込で残る (#400 段③)', async ({ page }) => {
+test('🔴 `file://` で作ったノートが再読込で残る (#400 段③)', async ({ page, context }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(pathToFileURL(HTML).href);
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
@@ -138,6 +138,52 @@ test('🔴 `file://` で作ったノートが再読込で残る (#400 段③)', 
     timeout: 15_000,
   });
   await expect(page.locator('[data-pkc-region="filer-table"]')).toContainText('可搬に残るノート');
+
+  /**
+   * 🔴 **2 枚のタブ ── 本体を閉じて昇格した側の書込が、両方のノートを残す**(#1087)。
+   * 直す前は、昇格したタブが**古い画像**(起動時に読んだ版)で開き直すため、
+   * 本体が書いた分を失った上に書いた(データ消失)。既存の再読込の道中に足す(起動は 1 つだけ増える)。
+   */
+  const flush = (p: typeof page) =>
+    p.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+  const pageB = await context.newPage();
+  await pageB.setViewportSize({ width: 1440, height: 900 });
+  await pageB.goto(pathToFileURL(HTML).href);
+  await expect(pageB.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText(
+    '保存はメインのタブ経由',
+    { timeout: 15_000 },
+  );
+  // A(本体)が B の起動後に書く ── B が起動時に読んだ画像には無い分
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('Aが書いたノート');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(rows).toHaveCount(2, { timeout: 10_000 });
+  await flush(page);
+  await page.waitForTimeout(1_500);
+  await page.close();
+  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText(
+    'このタブがメインのタブになりました',
+    { timeout: 15_000 },
+  );
+  const rowsB = pageB.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
+  await createEntry(pageB, 'text');
+  await pageB.locator('[data-pkc-field="editor-title"]').fill('昇格後のBのノート');
+  await clickReal(pageB, '[data-pkc-action="commit-edit"]');
+  await expect(rowsB).toHaveCount(3, { timeout: 15_000 });
+  await flush(pageB);
+  await pageB.waitForTimeout(1_500);
+  await pageB.reload();
+  await expect(pageB.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await expect(rowsB, '🔴 昇格したタブが古い画像で書いて、A のノートが消えた').toHaveCount(3, {
+    timeout: 15_000,
+  });
+  const tableB = pageB.locator('[data-pkc-region="filer-table"]');
+  await expect(tableB).toContainText('Aが書いたノート');
+  await expect(tableB).toContainText('昇格後のBのノート');
 });
 
 /**

@@ -7,6 +7,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  latestPortableImage,
   readBundle,
   resolvePortableStart,
   takeEmbeddedImage,
@@ -308,5 +309,64 @@ describe('どの中身で起動するか', () => {
     const start = (await resolvePortableStart(document, () => fakeStore(null)))!;
     expect(start.choice.use).toBe('fresh');
     expect(start.image).toBeNull();
+  });
+});
+
+describe('🔴 昇格・待ち明けは器の最新から開く(多重タブ T1)', () => {
+  const rec = (savedAt: number, bytes: number[], bundleId = ID) => ({
+    bundleId,
+    exportedAt: 5,
+    savedAt,
+    image: new Uint8Array(bytes),
+  });
+  /** 起動したあとで器の中身を差し替えられる代役。 */
+  function swappable(first: ReturnType<typeof rec> | null) {
+    let cur: ReturnType<typeof rec> | null | 'throw' = first;
+    const store = {
+      read: async () => {
+        if (cur === 'throw') throw new Error('読めない');
+        return cur === null ? null : { ...cur, bytes: cur.image.byteLength };
+      },
+    } as unknown as DbImageStore;
+    return { store, set: (v: typeof cur) => (cur = v) };
+  }
+
+  it('起動のあとに先のタブが器へ新しい画像を書いた → 昇格はそちらを開く(起動の画像ではない)', async () => {
+    document.head.innerHTML = tag({ id: ID, exportedAt: 5 });
+    const sw = swappable(rec(10, [1, 1]));
+    const start = (await resolvePortableStart(document, () => sw.store))!;
+    expect(Array.from(start.image!)).toEqual([1, 1]);
+    sw.set(rec(50, [2, 2, 2]));
+    expect(Array.from((await latestPortableImage(start))!)).toEqual([2, 2, 2]);
+  });
+
+  it('器が読めない → 起動の画像へ戻る(投げない)', async () => {
+    document.head.innerHTML = tag({ id: ID, exportedAt: 5 });
+    const sw = swappable(rec(10, [1, 1]));
+    const start = (await resolvePortableStart(document, () => sw.store))!;
+    sw.set('throw');
+    expect(Array.from((await latestPortableImage(start))!)).toEqual([1, 1]);
+  });
+
+  it('別の PKC3 の記録・空の記録は採らない', async () => {
+    document.head.innerHTML = tag({ id: ID, exportedAt: 5 });
+    const sw = swappable(rec(10, [1, 1]));
+    const start = (await resolvePortableStart(document, () => sw.store))!;
+    sw.set(rec(50, [9, 9], 'pkcb-other'));
+    expect(Array.from((await latestPortableImage(start))!)).toEqual([1, 1]);
+    sw.set(rec(50, []));
+    expect(Array.from((await latestPortableImage(start))!)).toEqual([1, 1]);
+  });
+
+  it('起動で埋め込みを選んだ回: 器が埋め込みより古いままなら埋め込みのまま / 新しく書かれたら器', async () => {
+    document.head.innerHTML = tag({ id: ID, exportedAt: 5 });
+    document.body.innerHTML = imageTag([4, 4]);
+    const sw = swappable(null);
+    const start = (await resolvePortableStart(document, () => sw.store))!;
+    expect(start.choice.use).toBe('embedded');
+    sw.set(rec(1, [8, 8]));
+    expect(Array.from((await latestPortableImage(start))!)).toEqual([4, 4]);
+    sw.set(rec(99, [7, 7, 7]));
+    expect(Array.from((await latestPortableImage(start))!)).toEqual([7, 7, 7]);
   });
 });

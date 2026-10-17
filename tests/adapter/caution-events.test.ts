@@ -307,7 +307,8 @@ describe('配線の原文 pin(main.ts / binder.ts)', () => {
       /const announceReservedLock = \(i: InitResult\): void => \{\s*const lockCaution = reservedLockCaution\(i\);\s*if \(lockCaution === null\) return;\s*appMessagePost\.post\(lockCaution\);\s*showStatus\(lockCaution\.text, \{ post: false \}\);/,
     );
     // 🔴 昇格したタブも、自分の worker を開いた直後に 1 回言う(2 枚目のまま = followerConn は言わない)
-    expect(main).toMatch(/armPersist\(r\.client\);\s*announceReservedLock\(r\.init\);\s*const host = new StoreProxyHost/);
+    //    (T4 で昇格の本体が boot の前半へ移り、言うのは画面の付け替えの側 ── `promotedInit` を受けて 1 回)
+    expect(main).toMatch(/if \(promotedInit\) announceReservedLock\(promotedInit\);/);
     expect((main.match(/announceReservedLock\(/g) ?? []).length, '呼び口は 起動 / 昇格 の 2 つだけ').toBe(2);
   });
 
