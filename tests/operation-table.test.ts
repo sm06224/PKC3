@@ -876,7 +876,7 @@ describe('操作の全数台帳(#582 段①)', () => {
       registered: 172,
       both: 103,
       outsideActionsTable: 69,
-      unregistered: 345,
+      unregistered: 276,
     });
   });
 
