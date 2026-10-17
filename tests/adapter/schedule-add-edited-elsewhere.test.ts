@@ -195,6 +195,40 @@ describe('② 目盛りの作成(ダブルクリック / ドラッグ)', () => {
     s.detach();
   });
 
+  /**
+   * 🔴 **断られた回は、枠は畳み、打った名前は預かる**(台帳 #1852 束 E2、依頼 113 案 B)。
+   * ⚠ 直す前は枠も字も消え、別のタブの編集が終わってから打ち直しだった(書き込みの途中などで断られた回は枠も字も残る)。
+   */
+  it('🔴 別のタブに断られても、打った名前は預かり、その日を開き直すと字ごと戻る', async () => {
+    const acquire = vi.fn(async () => 'denied' as const);
+    const s = setup({ acquireEditLock: acquire, releaseEditLock: vi.fn() });
+    createViaGrid(s, '打ち合わせ');
+    await tick();
+    expect(s.root.querySelectorAll(BOX), '仮の枠が居座っている').toHaveLength(0);
+    expect(s.store['t1'], '断られたのに書かれた').toBe(BODY);
+    // 別の見せ方へ移って、日の目盛りを開き直す(その日の列が一度見えなくなってから戻る)
+    (s.root.querySelector('[data-pkc-action="schedule-mode"][data-pkc-mode="list"]') as HTMLElement).click();
+    expect(s.root.querySelectorAll(BOX)).toHaveLength(0);
+    (s.root.querySelector('[data-pkc-action="schedule-mode"][data-pkc-mode="day"]') as HTMLElement).click();
+    const back = s.q<HTMLInputElement>(INPUT);
+    expect(back, '開き直しても預かった枠が戻らない').not.toBeNull();
+    expect(back!.value, '預かった名前が戻らない').toBe('打ち合わせ');
+    s.detach();
+  });
+
+  it('⚠ 対照群:Esc で畳んだ枠は預からない(やめた字を戻さない)', async () => {
+    const s = setup({ acquireEditLock: async () => 'granted', releaseEditLock: vi.fn() });
+    const lane = s.root.querySelector<HTMLElement>(LANE)!;
+    lane.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientY: 400 }));
+    const input = s.q<HTMLInputElement>(INPUT)!;
+    input.value = 'やめる字';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    (s.root.querySelector('[data-pkc-action="schedule-mode"][data-pkc-mode="list"]') as HTMLElement).click();
+    (s.root.querySelector('[data-pkc-action="schedule-mode"][data-pkc-mode="day"]') as HTMLElement).click();
+    expect(s.q(INPUT), 'Esc でやめた字が戻った').toBeNull();
+    s.detach();
+  });
+
   it('対照群:取れたら書かれ、枠は畳まれ、錠は返す', async () => {
     const release = vi.fn();
     const s = setup({ acquireEditLock: async () => 'granted', releaseEditLock: release });

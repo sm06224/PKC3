@@ -26,6 +26,9 @@ import { clipTaskText } from '@features/schedule/task-cards';
 import { plainTaskTitle } from '@features/schedule/task-title';
 import { currentTagColors } from './tag-color';
 
+/** 題名の無い予定の札に出す字(.ics の書き出しの `SUMMARY` と同じ)。 */
+export const NO_TASK_TITLE = '(題名なし)';
+
 /**
  * 札の器を作る(中身は `patchTaskCard` が入れる)。
  *
@@ -284,13 +287,14 @@ export function patchTaskCard(
     if (off.title !== why) off.title = why;
   }
   const text = card.querySelector('[data-pkc-field="text"]');
-  // ⚠ 中身が空の項目もある(`- [ ]` だけの行)── 札は出すが、字は出ない
+  // ⚠ 中身が空の項目もある(`- [ ]` だけの行)── 札は出し、字は「(題名なし)」と言う(#1163 の依頼 289。.ics の書き出しと同じ字)
   /**
    * 🔴 **見せる字は素の字にして、長ければここで丸める**(#1087)。⚠ 直す前は行の字をそのまま出していた
    *   (`**重要** [資料](entry:abc)` の記号が札に見えた)。丸めも走査の側(`taskCardsOf`)から
    *   ここへ移した ── 札の字は `.ics` の `SUMMARY` も運ぶので、書き出しを切らないため。
    */
-  const shown = clipTaskText(plainTaskTitle(data.text));
+  const clipped = clipTaskText(plainTaskTitle(data.text));
+  const shown = clipped.trim() === '' ? NO_TASK_TITLE : clipped;
   if (text && text.textContent !== shown) text.textContent = shown;
   const note = card.querySelector('[data-pkc-field="note"]');
   if (note && note.textContent !== title) note.textContent = title;

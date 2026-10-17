@@ -17,6 +17,7 @@ test('2 枚目のタブが本体経由で開き、別ノートは編集でき、
 }) => {
   const errorsA = collectPageErrors(page);
   await useSplitEditor(page);
+  await page.clock.install(); // 本体のタブの時計だけ進められるように(下の「知らせ」の道中)。時は普通に流れる
   await gotoApp(page);
 
   // タブ A(本体): ノートを 1 件作って保存
@@ -77,6 +78,31 @@ test('2 枚目のタブが本体経由で開き、別ノートは編集でき、
   await expect(
     page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]'),
   ).toHaveCount(2, { timeout: 10_000 });
+
+  /**
+   * 🔴 **時刻つきの予定の知らせは、メインでないタブにも帯が出て、どちらで閉じても両方で消える**
+   * (台帳 #1852 束 E2、#1163 の依頼 347。起動は増やさない ── この道中の続きで、もう開いている 2 枚を使う)。
+   * ⚠ 直す前は帯が本体のタブにしか出ず、いま見ているタブ(B)には何も出なかった。
+   * 🔑 次の分の予定を書き、「予定の知らせ」を入にする(鳴るのは入にした後の時刻から)。観測点は B の帯と、閉じた後の両方の帯。
+   */
+  const soon = new Date(Date.now() + 60_000); // 次の分。⚠ 実時間で待たない(30s の timeout は緩めない)── 本体のタブの時計だけ進める
+  const p2 = (n: number): string => String(n).padStart(2, '0');
+  const soonDate = `${soon.getFullYear()}-${p2(soon.getMonth() + 1)}-${p2(soon.getDate())}`;
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`- [ ] 打ち合わせ @${soonDate} ${p2(soon.getHours())}:${p2(soon.getMinutes())}`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await clickReal(page, '[data-pkc-field="alarm-enabled"]');
+  await page.clock.runFor("01:30"); // 知らせの刻み(30 秒)を回す;
+  const barA = page.locator('[data-pkc-region="alarm-bar"] [data-pkc-field="alarm-list"] > li');
+  const barB = pageB.locator('[data-pkc-region="alarm-bar"] [data-pkc-field="alarm-list"] > li');
+  await expect(barA, '本体のタブに知らせの帯が出ない(前提)').toHaveCount(1, { timeout: 10_000 });
+  await expect(barB, 'メインでないタブに知らせの帯が出ない').toHaveCount(1, { timeout: 10_000 });
+  await expect(barB).toContainText('打ち合わせ');
+  // B で閉じると、本体(A)でも消える
+  await clickReal(pageB, '[data-pkc-region="alarm-bar"] [data-pkc-action="dismiss-alarm"]');
+  await expect(barB, 'B で閉じたのに B の帯が残る').toHaveCount(0);
+  await expect(barA, 'B で閉じたのに本体の帯が残る').toHaveCount(0, { timeout: 10_000 });
 
   expect(errorsA).toEqual([]);
   expect(errorsB).toEqual([]);

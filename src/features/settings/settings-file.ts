@@ -122,6 +122,8 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
   // ⚠ 予定の知らせの好み 2 つ(#855 20-C)。別の端末でも同じ意味になる(何分前に知らせたいかは人に付く)
   { key: 'pkc3.schedule-lead', label: '予定表を書き出すときの知らせる時間', valid: (v) => v.trim() !== '' && SCHEDULE_LEAD_OPTIONS.includes(Number(v)) },
   { key: 'pkc3.schedule-missed', label: '次に開いたとき見逃した予定を知らせるか', valid: isOnOff },
+  // ⚠ 週の始まり(#1163 の依頼 191)。別の端末でも同じ意味になる(月曜から数えたいかは人に付く)
+  { key: 'pkc3.schedule-week-start', label: '予定表の週の始まり', valid: (v) => v === '0' || v === '1' },
   /**
    * ⚠ **人に付く好み**である(#772 段① B)── 「声を聞き取りやすくしたい」かどうかは
    *   端末の事情ではなく、**聞く人の耳**に付く(`pkc3.alarm` と同じ考え方)。

@@ -41,6 +41,7 @@ import { PdfReaderStore } from '@adapter/ui/render/pdf-reader-setting';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
 import { DateLinksStore } from '@adapter/ui/render/date-links';
 import { RelativeDaysStore } from '@adapter/ui/render/relative-days';
+import { ScheduleWeekStartStore } from '@adapter/ui/render/schedule-week-start';
 import { ColorSwatchStore } from '@adapter/ui/render/color-swatch';
 import { TooNarrowOkStore } from '@adapter/ui/render/too-narrow';
 import { EditorModeStore } from '@adapter/ui/render/editor-mode';
@@ -165,6 +166,16 @@ const CASES: readonly {
     // ⚠ **既定が入**なので、最初に書くのは**切**にする(`DateLinksStore` と同じ理由)
     a: false,
     b: true,
+  },
+  {
+    // ⚠ 既定は日曜始まり(0)── 最初に書くのは月曜始まり(1)にする(控えが死んで既定へ戻る実装を 1 回目の読みで捕まえる)
+    name: 'ScheduleWeekStartStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new ScheduleWeekStartStore(st);
+      return { write: (v) => s.set(v as 0 | 1), read: () => s.get() };
+    },
+    a: 1,
+    b: 0,
   },
   {
     name: 'ColorSwatchStore',

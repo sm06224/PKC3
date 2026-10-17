@@ -8,12 +8,18 @@
  *   束ねるので、ノートだけを見る関数は答えが半分になる)。
  */
 import { pad2 } from '../datetime/datetime-format';
+import { columnOf, WEEK_START_DEFAULT, type WeekStart } from './week-start';
 
 /**
  * 年月の月間グリッド(週 × 曜日)。null = 月外セル。month は 1 始まり。
+ * 🔴 `weekStart` は週の始まり(既定は日曜 ── #1163 の依頼 191)。
  */
-export function getMonthGrid(year: number, month: number): (number | null)[][] {
-  const firstDay = new Date(year, month - 1, 1).getDay(); // 0=Sun
+export function getMonthGrid(
+  year: number,
+  month: number,
+  weekStart: WeekStart = WEEK_START_DEFAULT,
+): (number | null)[][] {
+  const firstDay = columnOf(new Date(year, month - 1, 1).getDay(), weekStart); // 週の何列目か
   const daysInMonth = new Date(year, month, 0).getDate();
 
   const weeks: (number | null)[][] = [];

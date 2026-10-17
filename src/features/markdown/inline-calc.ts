@@ -799,6 +799,13 @@ export function resolveInlineCalc(
     };
   }
 
+  /**
+   * 🔴 **決めた名前に数を付け足した打ち間違い(`基本単価2*8=`)は、計算しない**(#1163 の依頼 100-3)。
+   * ⚠ 直す前は、`基本単価` を地の文と読んで `2*8` だけを計算し、**打ち間違いに気づけない数(16)が黙って入った**。
+   *   計算しない代わりに、理由を `explainCalcMiss` が言う(「『基本単価2』は上の行で決めていません」)。
+   */
+  if (nearMissName(fullText, ls, fullText.slice(ls, caretPos - 1)) !== null) return null;
+
   // ② 名前を使った式
   const withVars = resolveWithVariables(fullText, caretPos);
   if (withVars !== null) return withVars;
@@ -819,6 +826,49 @@ export function resolveInlineCalc(
 function shiftResult(r: InlineCalcResult | null, by: number): InlineCalcResult | null {
   if (r === null || r.halfWidth === null) return r;
   return { ...r, halfWidth: { ...r.halfWidth, from: r.halfWidth.from - by, to: r.halfWidth.to - by } };
+}
+
+/**
+ * 上の行で決めた名前に、数だけが付いた語(`基本単価` を決めたときの `基本単価2`)を式の中に持つか。持つならその語。
+ * ⚠ 出す条件は `unknownNameNote` と同じく**空白のない 1 つの式**に絞る(`りんご 2*3=` のような文には口を出さない)。
+ * @param line 行頭から `=` の手前まで(箇条書きの印を含んでよい)
+ */
+function nearMissName(fullText: string, ls: number, line: string): string | null {
+  const body = toHalfWidth(line).replace(LIST_MARKER, '').trim();
+  if (body === '' || /\s/u.test(body) || !/[+\-*/%]/u.test(body)) return null;
+  const defs = collectDefinitions(fullText, ls);
+  if (defs.size === 0) return null;
+  for (const t of body.match(/[^+\-*/%().,]+/gu) ?? []) {
+    if (defs.has(t) || !/\D/u.test(t)) continue;
+    for (const name of defs.keys()) {
+      if (t.length > name.length && t.startsWith(name) && /^\d+$/u.test(t.slice(name.length))) return t;
+    }
+  }
+  return null;
+}
+
+/** セルの番地の形(`A1` / `B12`)。名前の打ち間違いとは読まない。 */
+const CELL_REF = /^[A-Za-z]{1,3}\d{1,4}$/u;
+
+/**
+ * 🔴 **上の行で決めた名前を打ち間違えたとき**(#1163 の依頼 100-3。Gemini の裁定:推薦どおり)。
+ *
+ * 上の行に `基本単価 = 3200` と書き、`基本単価2*8=` と打ち間違えて Enter を押すと、何も出ずに改行だけになっていた
+ * (言葉の入った行には口を出さない決まりのため)。名前を決めた行が上に在る人に限り、「その名前は決めていません」と言う。
+ *
+ * ⚠ 出す条件は絞る ── 普通の文には出さない:
+ *   ① 上の行に `名前 = 数` が 1 つ以上ある(名前を使う習慣のある人)
+ *   ② 行が**空白のない 1 つの式**(`名前*数`)で、演算子を含む。`結果は 基本単価*8=` のような文は黙る
+ *   ③ 式の中に、決めていない名前がある(数だけ・決めた名前だけの式は対象外)。セルの番地の形(`A1`)は名前と読まない
+ * @returns 出す 1 行 / `null`
+ */
+function unknownNameNote(fullText: string, ls: number, body: string): string | null {
+  if (/\s/u.test(body) || !/[+\-*/%]/u.test(body)) return null;
+  const defs = collectDefinitions(fullText, ls);
+  if (defs.size === 0) return null;
+  const tokens = body.match(/[^+\-*/%().,]+/gu) ?? [];
+  const unknown = tokens.find((t) => /\D/u.test(t) && !defs.has(t) && !CELL_REF.test(t));
+  return unknown === undefined ? null : `『${unknown}』は上の行で決めていません`;
 }
 
 /**
@@ -858,8 +908,8 @@ export function explainCalcMiss(fullText: string, caretPos: number, above: strin
   if (body === '') return null;
   // ⚠ **数が 1 つも無い行**は普通の文(`(=` のような打ち間違いに口を出さない)
   if (!/\d/u.test(body)) return null;
-  // ⚠ **言葉が混ざる行**は普通の文(`締切=` / `md5=` / `A1+B1=`)
-  if (WORD_CHARS.test(body)) return null;
+  // ⚠ **言葉が混ざる行**は普通の文(`締切=` / `md5=` / `A1+B1=`)── ただし 1 つだけ言う場面がある(下の `unknownNameNote`)
+  if (WORD_CHARS.test(body)) return unknownNameNote(fullText, lineStart(fullText, caretPos), body);
 
   // ① 計算に使えない字が入っている(`2^3=` の `^` / `50=` の後ろの記号)
   const bad = [...body].find((ch) => !CALC_CHARS.test(ch));

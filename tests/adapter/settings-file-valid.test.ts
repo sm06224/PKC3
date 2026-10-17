@@ -24,6 +24,7 @@ import { DualPrefsStore } from '../../src/adapter/ui/render/dual-prefs';
 import { QueryKeyStore, QUERY_KEY_STORAGE_KEY } from '../../src/adapter/ui/render/query-key-store';
 import { AlarmEnabledStore } from '../../src/adapter/ui/render/alarm-enabled';
 import { ScheduleNotifyStore } from '../../src/adapter/ui/render/schedule-notify';
+import { ScheduleWeekStartStore } from '../../src/adapter/ui/render/schedule-week-start';
 import { VoiceBoostStore } from '../../src/adapter/ui/render/voice-boost';
 import { PhoneLinksStore } from '../../src/adapter/ui/render/phone-links';
 import { DateLinksStore } from '../../src/adapter/ui/render/date-links';
@@ -142,6 +143,12 @@ function validSamples(): Record<string, string[]> {
     new ScheduleNotifyStore(off).setMissedOn(false);
     out['pkc3.schedule-lead'] = [lead.dump()['pkc3.schedule-lead']!];
     out['pkc3.schedule-missed'] = [on.dump()['pkc3.schedule-missed']!, off.dump()['pkc3.schedule-missed']!];
+    // 週の始まり(台帳 #1852 束 E2、依頼 191)── 書き手が実際に書いた値を見本にする
+    const mon = fakeStorage();
+    new ScheduleWeekStartStore(mon).set(1);
+    const sun = fakeStorage();
+    new ScheduleWeekStartStore(sun).set(0);
+    out['pkc3.schedule-week-start'] = [mon.dump()['pkc3.schedule-week-start']!, sun.dump()['pkc3.schedule-week-start']!];
   }
   {
     const s = fakeStorage();
@@ -223,6 +230,8 @@ describe('設定ファイル: 値の検査(#1087)', () => {
     expect(validOf('pkc3.pane-sizes')!(`${SIZED_PANES[0]}:-5`)).toBe(false);
     expect(validOf('pkc3.pane-sizes')!(`${SIZED_PANES[0]}:300 junk`)).toBe(false);
     expect(validOf('pkc3.schedule-lead')!('7')).toBe(false);
+    expect(validOf('pkc3.schedule-week-start')!('2')).toBe(false);
+    expect(validOf('pkc3.schedule-week-start')!('月曜')).toBe(false);
     expect(validOf('pkc3.alarm')!('2')).toBe(false);
     expect(validOf('pkc3.date-links')!('yes')).toBe(false);
   });

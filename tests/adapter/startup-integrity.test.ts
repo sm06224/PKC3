@@ -293,7 +293,7 @@ describe('main.ts の配線(原文 pin ── あの file はどの test から�
     // ⚠ 昇格の印(`promotedHost = host` … `writerHolder = true`)の**後**、本体になった
     //    知らせの**前**に呼ぶ ── 前だと follower として即終わる
     const from = src.indexOf('promotedHost = host;');
-    const to = src.indexOf("showStatus('このタブがメインのタブになりました')");
+    const to = src.indexOf('showStatus(promotedLine(');
     expect(from, '昇格の経路が読めない(空振り)').toBeGreaterThanOrEqual(0);
     expect(to, '昇格の知らせが読めない(空振り)').toBeGreaterThan(from);
     const promote = src.slice(from, to);

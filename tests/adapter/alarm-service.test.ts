@@ -556,7 +556,8 @@ describe('アラート(#280)', () => {
   /** ⚠ main.ts はどの test からも走らない ── 配線は原文で pin する(弱いと自覚して使う)。 */
   it('🔴 ⑧ main.ts は、予定の知らせと見逃しの知らせの両方に「本体のタブだけ」を渡し、入にした直後に見る', () => {
     const main = readFileSync('src/main.ts', 'utf-8');
-    expect(main.split('isRinger: () => writerHolder,').length - 1, '渡す先が 2 つ(鳴らす / 見逃し)').toBe(2);
+    // ⚠ 2026-10-17(台帳 #1852 束 E2 / 依頼 347): 知らせのバーを全部のウィンドウへ配る口(`alarm-bar-sync`)が 3 つ目
+    expect(main.split('isRinger: () => writerHolder,').length - 1, '渡す先が 3 つ(鳴らす / 見逃し / バーを配る)').toBe(3);
     const at = main.indexOf('setAlarmEnabled: (on) => {');
     expect(at, '前提が崩れている ── setAlarmEnabled が無い').toBeGreaterThan(0);
     expect(main.slice(at, at + 400), '入にした直後に見ていない').toContain('alarmService.check();');

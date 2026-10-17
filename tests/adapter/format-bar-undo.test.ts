@@ -139,10 +139,12 @@ describe('「完了項目を末尾へ」「番号を振り直す」', () => {
   it('🔴 整理のあと、カーソルは本文の末尾へ飛ばない(#1087)', () => {
     const a = setup();
     a.ta.value = '- [x] 済\n- [ ] 未\n後ろの文';
+    // ⚠ 2026-10-17(#1163 依頼 100-2): カーソルは押す前にいた行・桁に残る ── 2 行目の頭で押す
+    a.ta.setSelectionRange('- [x] 済\n'.length, '- [x] 済\n'.length);
     a.action('sort-tasks');
     expect(a.ta.value).toBe('- [ ] 未\n- [x] 済\n後ろの文');
     expect(a.ta.selectionStart).toBeLessThan(a.ta.value.length);
-    expect(a.ta.selectionStart).toBe('- [ ] 未\n- [x] 済'.length);
+    expect(a.ta.selectionStart).toBe('- [ ] 未\n'.length);
     const b = setup();
     b.ta.value = '1. あ\n5. い\n後ろの文';
     b.action('renumber-lists');

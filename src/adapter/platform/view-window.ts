@@ -453,6 +453,17 @@ export const CLOSE_NOTE_WINDOW_REFUSED =
  * を読む)。⚠ 判断は CSS の 1 規則(印を見るだけ)── ここは印を付け外しするだけ。
  * `view === null`(アプリの窓ではない)なら印を外す。
  */
+/**
+ * 🔴 **メインが入れ替わったときの 1 行**(#1163 の依頼 76 案 A)。
+ * ⚠ 予定表などの別のウィンドウは「タブ」ではない ── 開いているのが別のウィンドウなら、そのウィンドウの言葉で言う。
+ * 判断はここ(`main.ts` は渡すだけ)。
+ */
+export function promotedLine(inOwnWindow: boolean): string {
+  return inOwnWindow
+    ? 'このウィンドウがメインになりました(保存はここから行います)'
+    : 'このタブがメインのタブになりました';
+}
+
 export const HELD_VIEW_ATTR = 'data-pkc-held-view';
 export function markHeldView(el: Element, view: string | null): void {
   if (view === null) el.removeAttribute(HELD_VIEW_ATTR);

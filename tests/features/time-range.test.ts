@@ -3,7 +3,7 @@
  * 🔴 **時刻の幅**(`@2026-08-25 14:00..15:00`)── #855 段 C′(設計 doc `schedule-direct-2026-09.md` §5)。
  *
  * 守る主張:
- * 1. 幅は「時刻が読めて・終わりも読めて・逆順でない」ときだけ読む。読めない形は
+ * 1. 幅は「時刻が読めて・終わりも読めて」ときだけ読む(終わりが始まりより前なら夜をまたぐ幅 ── 台帳 #1852 束 E2、依頼 190)。読めない形は
  *    **いまと同じ時刻 1 点**として読み、`..…` は札の字に残る(書いた字を黙って消さない)
  * 2. 日付の期間(`@a..b`)・時刻 1 点・刻み・振替・チェックの読みは**1 つも変わらない**
  *    (外の形 × 尻の総当たりで、取り違える形が出ないことを見る)
@@ -11,7 +11,7 @@
  *    **幅は 1 byte も変わらない**
  *
  * 🔑 決めた方針(下の表が test そのものである):
- *   - 逆順 / 片方だけ / 壊れた時刻 → 幅としては読まず、時刻 1 点(= いまと同じ)
+ *   - 片方だけ / 壊れた時刻 → 幅としては読まず、時刻 1 点(= いまと同じ)。逆順は**夜をまたぐ幅**として読む(依頼 190)
  *   - 全角の数字・コロンは**受ける**(台帳 #1852 束 E1、依頼 188。以前は受けなかった)── 位置は原文の長さで数える
  *   - 区切りは日付の期間と同じ 3 綴り(`..` / `〜` / `～`)+ 時刻の直後の `-`(#855 Q2 = A)。書くのは `..` だけ
  */
@@ -22,7 +22,12 @@ import {
   stripLineDate,
   insertionForLineDate,
 } from '../../src/features/schedule/line-date';
-import { formatTimeSpan, isScheduleTimeRange } from '../../src/features/schedule/schedule-date';
+import {
+  formatTimeSpan,
+  isOvernightSpan,
+  isScheduleTimeRange,
+  isScheduleTimeSpan,
+} from '../../src/features/schedule/schedule-date';
 import { replaceTaskCards, taskCardsOf } from '../../src/features/schedule/task-cards';
 import { buildAgenda, itemOfCard, type AgendaItem } from '../../src/features/schedule/agenda';
 import { materializedDates } from '../../src/features/schedule/repeat';
@@ -82,10 +87,15 @@ const OUTERS: readonly Outer[] = [
   // 🔴 期間に時刻は付けない ── 幅も付かない。後ろの字は食べずに残る(いまと同じ)
   o('日付の期間 + 幅', `${D}..${U} 14:00..15:00`, { until: U, leftover: ' 14:00..15:00', tails: 'none' }),
   // ⚠ 読めない幅 ── 時刻 1 点として読み、`..…` は残る
-  o('逆順', `${D} 15:00..14:00`, { time: '15:00', leftover: '..14:00', tails: 'none' }),
+  // 🔴 終わりが始まりより前 = 夜をまたぐ幅(翌日の終わり。依頼 190)
+  o('夜をまたぐ', `${D} 22:00..02:00`, { time: '22:00', timeEnd: '02:00' }),
+  o('夜をまたぐ(逆順の例)', `${D} 15:00..14:00`, { time: '15:00', timeEnd: '14:00' }),
   o('終わりが無い', `${D} 14:00..`, { time: '14:00', leftover: '..', tails: 'none' }),
   // ⚠ `-` の読めない形も同じ向き(1 点として読み、`-…` は札の字に残る)── `-15:00` だけは始まりが無い
-  o('逆順(-)', `${D} 15:00-14:00`, { time: '15:00', leftover: '-14:00', tails: 'none' }),
+  o('夜をまたぐ(-)', `${D} 22:00-02:00`, { time: '22:00', timeEnd: '02:00' }),
+  o('夜をまたぐ(1 桁の終わり)', `${D} 22:00..2:00`, { time: '22:00', timeEnd: '02:00' }),
+  // ⚠ 終わりが形として読めない逆順は、いままでどおり読まず字に残す(対照群)
+  o('終わりが読めない(25:99 の始まり)', `${D} 14:00..99`, { time: '14:00', leftover: '..99', tails: 'none' }),
   o('終わりが無い(-)', `${D} 14:00-`, { time: '14:00', leftover: '-', tails: 'none' }),
   o('始まりが無い(-)', `${D} -15:00`, { leftover: ' -15:00', tails: 'none' }),
   o('終わりが 1 桁(-)', `${D} 14:00-15`, { time: '14:00', leftover: '-15', tails: 'none' }),
@@ -179,14 +189,34 @@ describe('書いて、読み返す(往復)', () => {
   });
 
   /** ⚠ 往復しない字は出力しない(この file の作法) */
-  it('読まれない形は書かない(逆順 / 始まりが無い / 期間)', () => {
-    expect(formatLineDate(D, '15:00', null, null, null, '14:00')).toBe(`@${D} 15:00`);
+  it('読まれない形は書かない(始まりが無い / 期間)。夜をまたぐ幅は書く(読み返せる)', () => {
+    // 🔴 夜をまたぐ幅は読めるようになったので、往復する(書いた字が消えない ── 依頼 190)
+    expect(formatLineDate(D, '22:00', null, null, null, '02:00')).toBe(`@${D} 22:00..02:00`);
+    expect(readLineDate(formatLineDate(D, '22:00', null, null, null, '02:00'))).toMatchObject({
+      time: '22:00',
+      timeEnd: '02:00',
+    });
+    // 対照群: 形が読めない終わりは書かない
+    expect(formatLineDate(D, '15:00', null, null, null, '14')).toBe(`@${D} 15:00`);
     expect(formatLineDate(D, null, null, null, null, '15:00')).toBe(`@${D}`);
     expect(formatLineDate(D, '14:00', U, null, null, '15:00')).toBe(`@${D}..${U}`);
   });
 
   it('挿す形(道具から入れる)は、幅を渡さなければ 1 点のまま ── 既存の形は変わらない', () => {
     expect(insertionForLineDate('見積', D, '14:00')).toBe(` @${D} 14:00`);
+  });
+
+  it('夜をまたぐ幅の述語 ── 終わりが始まりより前のときだけ(同じ時刻・形が違うものは別)', () => {
+    expect(isOvernightSpan('22:00', '02:00')).toBe(true);
+    expect(isOvernightSpan('14:00', '14:00')).toBe(false);
+    expect(isOvernightSpan('14:00', '15:00')).toBe(false);
+    expect(isOvernightSpan('22:00', '2')).toBe(false);
+    expect(isScheduleTimeSpan('22:00', '02:00')).toBe(true);
+    expect(isScheduleTimeSpan('14:00', '15:00')).toBe(true);
+    expect(isScheduleTimeSpan('14:00', '')).toBe(false);
+    // 札の字は「翌」を添える(添えないと終わりが始まりより前に見える)
+    expect(formatTimeSpan('22:00', '02:00')).toBe('22:00〜翌02:00');
+    expect(formatTimeSpan('14:00', '15:00')).toBe('14:00〜15:00');
   });
 
   it('時刻の幅の述語 ── 逆順は通さず、同じ時刻は通し、形だけを見る', () => {
@@ -243,10 +273,14 @@ describe('札・束・描画', () => {
     expect(label(w, true)).toMatch(/ 14:00〜15:00$/);
     // 対照群: 1 点は今までどおり
     expect(label(item('- [ ] 会議 @2026-08-25 14:00'), false)).toBe('14:00');
-    // 読めない幅は 1 点の字(`..14:00` は題の字に残る)
-    const bad = item('- [ ] 会議 @2026-08-25 15:00..14:00');
+    // 🔴 夜をまたぐ幅は「翌」を添えて出る(依頼 190)。字は題に残らない
+    const night = item('- [ ] 夜勤 @2026-08-25 22:00..02:00');
+    expect(label(night, false)).toBe('22:00〜翌02:00');
+    expect(night.text).toBe('夜勤');
+    // 読めない幅は 1 点の字(`..14` は題の字に残る)
+    const bad = item('- [ ] 会議 @2026-08-25 15:00..14');
     expect(label(bad, false)).toBe('15:00');
-    expect(bad.text).toBe('会議 ..14:00');
+    expect(bad.text).toBe('会議 ..14');
   });
 
   it('⚠ 繰り返しの回の札も `〜` で出る(刻みの語は後ろに付く)', () => {
@@ -435,8 +469,11 @@ describe('本文を書き換えても、幅は 1 byte も変わらない', () =>
     });
 
     it('🔴 終わりを渡さない動かし方では、古い終わりの字は 1 バイトも触らない', () => {
-      expect(edit('- [ ] 夜勤 @2026-08-23 20:00..02:00', undefined, '21:00')).toBe('- [ ] 夜勤 @2026-08-23 21:00..02:00');
-      expect(edit('- [ ] 夜勤 @2026-08-23 20:00..02:00', null, '21:00')).toBe('- [ ] 夜勤 @2026-08-23 21:00..02:00');
+      // 🔴 夜をまたぐ幅(依頼 190)は幅として読まれるので、始まりを動かして終わりを渡さなければ他の幅と同じく幅は持ち越さない
+      expect(edit('- [ ] 夜勤 @2026-08-23 20:00..02:00', undefined, '21:00')).toBe('- [ ] 夜勤 @2026-08-23 21:00');
+      expect(edit('- [ ] 夜勤 @2026-08-23 20:00..02:00', null, '21:00')).toBe('- [ ] 夜勤 @2026-08-23 21:00');
+      // 対照群: 幅として読まれない終わり(形が違う)は 1 バイトも触らない
+      expect(edit('- [ ] 夜勤 @2026-08-23 20:00..99', undefined, '21:00')).toBe('- [ ] 夜勤 @2026-08-23 21:00..99');
     });
 
     it('幅 0(14:00..14:00)は幅として読まれるので、普通に差し替わる', () => {
