@@ -34,15 +34,16 @@ import { SettingsRenderer } from '@adapter/ui/render/settings';
 import { initialState } from '@adapter/state/app-state';
 import { choiceRowValues } from '../helpers/choice-row';
 import { PROSE_ALIGNS } from '@features/prose-align';
-import { TEXT_SCALES } from '@features/text-scale';
+import { markDefault } from '../../src/adapter/ui/render/settings/default-mark';
+import { DEFAULT_TEXT_SCALE, TEXT_SCALES } from '@features/text-scale';
 import { READ_COLUMN_CHOICES } from '@features/read-columns';
 import { COLUMN_RULES } from '@features/column-rule';
 import { TAG_BADGES } from '@features/tag-badge';
-import { EDITOR_MODES } from '@features/editor-mode';
+import { DEFAULT_EDITOR_MODE, EDITOR_MODES } from '@features/editor-mode';
 import { OPEN_PLACES } from '@features/open-place';
 import { APP_OPEN_TARGETS } from '@features/launcher/open-target';
-import { MESSAGE_CAP_OPTIONS } from '@features/message/message-log';
-import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
+import { MESSAGE_CAP_DEFAULT, MESSAGE_CAP_OPTIONS } from '@features/message/message-log';
+import { DEFAULT_EXTERNAL_IMAGE_MODE, EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 
 function render(): HTMLElement {
   const host = document.createElement('div');
@@ -59,16 +60,19 @@ function render(): HTMLElement {
  */
 const CHOICE_ROWS: { field: string; attr: string; source: readonly { id: string; label: string }[] }[] = [
   { field: 'prose-align-select', attr: 'data-pkc-prose-align-value', source: PROSE_ALIGNS },
-  { field: 'text-scale-select', attr: 'data-pkc-text-scale-value', source: TEXT_SCALES },
+  { field: 'text-scale-select', attr: 'data-pkc-text-scale-value', source: markDefault(TEXT_SCALES, DEFAULT_TEXT_SCALE) },
   { field: 'read-columns-select', attr: 'data-pkc-read-columns-value', source: READ_COLUMN_CHOICES },
   { field: 'column-rule-select', attr: 'data-pkc-column-rule-value', source: COLUMN_RULES },
   { field: 'open-place-select', attr: 'data-pkc-open-place-value', source: OPEN_PLACES },
   {
     field: 'messages-cap-select',
     attr: 'data-pkc-message-cap-value',
-    source: MESSAGE_CAP_OPTIONS.map((n) => ({ id: String(n), label: `${n} 件` })),
+    source: markDefault(
+      MESSAGE_CAP_OPTIONS.map((n) => ({ id: String(n), label: `${n} 件` })),
+      String(MESSAGE_CAP_DEFAULT),
+    ),
   },
-  { field: 'external-images-select', attr: 'data-pkc-external-images-value', source: EXTERNAL_IMAGE_MODES },
+  { field: 'external-images-select', attr: 'data-pkc-external-images-value', source: markDefault(EXTERNAL_IMAGE_MODES, DEFAULT_EXTERNAL_IMAGE_MODE) },
 ];
 
 /** > 4 のまま残るプルダウン 3 つ(配色 / ページ設定 / 貼り付け元)。 */
@@ -80,7 +84,8 @@ const REMAINING_SELECT_FIELDS = ['theme-select', 'page-format-select', 'paste-so
  */
 const WRAPPED_TO_SELECT: { field: string; source: readonly { id: string; label: string }[] }[] = [
   { field: 'tag-badge-select', source: TAG_BADGES },
-  { field: 'editor-mode-select', source: EDITOR_MODES },
+  // 🔴 最初の値には「(既定)」が付く(#1650 項目 4)
+  { field: 'editor-mode-select', source: markDefault(EDITOR_MODES, DEFAULT_EDITOR_MODE) },
   { field: 'app-open-target-select', source: APP_OPEN_TARGETS },
 ];
 

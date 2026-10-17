@@ -191,7 +191,10 @@ import { typedCellNote } from '@adapter/state/store-effects';
 import { openCodeFenceAt, locateCodeFence } from '@features/markdown/code-fence-edit';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
-import { isReadColumns } from '@features/read-columns';
+import { isReadColumns, readColumnsSpec } from '@features/read-columns';
+import { isPageFormat, pageFormatSpec } from '@features/page-format';
+import { isProseAlign, proseAlignSpec } from '@features/prose-align';
+import { plainChoiceLabel } from '../render/settings/default-mark';
 import { isColumnRule } from '@features/column-rule';
 import { isTagBadge } from '@features/tag-badge';
 import { chooseColumnRule } from '@adapter/ui/render/column-rule';
@@ -13431,7 +13434,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       target instanceof HTMLSelectElement
         ? target.value
         : target.getAttribute('data-pkc-page-format-value');
-    if (format) services.setPageFormat?.(format);
+    if (format) {
+      services.setPageFormat?.(format);
+      // 🔴 効いたことを言う(#1650 項目 3。Gemini 裁定 = #1163 の依頼 42-3 B)。設定の画面が中央を占めていて本文は隠れたまま
+      if (isPageFormat(format))
+        services.showStatus?.(`読み幅を「${plainChoiceLabel(pageFormatSpec(format).label)}」にしました`);
+    }
   },
   /**
    * 🔴 **本文の置き場所**(#722)。⚠ `set-page-format` と**同じ受け方**
@@ -13442,7 +13450,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       target instanceof HTMLSelectElement
         ? target.value
         : target.getAttribute('data-pkc-prose-align-value');
-    if (align) services.setProseAlign?.(align);
+    if (align) {
+      services.setProseAlign?.(align);
+      // 🔴 効いたことを言う(#1650 項目 3)── `set-page-format` と同じ
+      if (isProseAlign(align))
+        services.showStatus?.(`本文の置き場所を「${plainChoiceLabel(proseAlignSpec(align).label)}」にしました`);
+    }
   },
   /**
    * 🔴 **SQL の欄に打った**(#681 段②)。⚠ **走らせない** ── 重い問い合わせを
@@ -13980,12 +13993,16 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **本文の段組み**(#505 段①)。⚠ 当てる先は `text-scale` と同じ
    *   `document.documentElement` ── CSS が `:root[...]` で読む。
    */
-  'set-read-columns': (_dispatcher, target) => {
+  'set-read-columns': (_dispatcher, target, services) => {
     const v =
       target instanceof HTMLSelectElement
         ? target.value
         : target.getAttribute('data-pkc-read-columns-value');
-    if (v !== null && isReadColumns(v)) chooseReadColumns(document.documentElement, v);
+    if (v !== null && isReadColumns(v)) {
+      chooseReadColumns(document.documentElement, v);
+      // 🔴 効いたことを言う(#1650 項目 3)── 設定の画面が中央を占めていて本文は隠れたまま
+      services.showStatus?.(`本文の段組みを「${plainChoiceLabel(readColumnsSpec(v).label)}」にしました`);
+    }
   },
   /**
    * 🔴 **段の境界線の濃さ**(#525)。⚠ 既定は現行そのままなので、
@@ -19217,10 +19234,24 @@ export function bindActions(
      * 🔴 **一覧の絞り込みの欄から、そのまま行へ降りられる**(#1042 C2)。
      * ⚠ 2 ペインの絞り込み(下の `dual-filter`)と**同じ形**── これが無いと
      *   「打って絞る → マウスで行を押す」になり、キーボードだけで完結しない。
-     * ⚠ `Escape` はここでは**何もしない**(C3 の「入力欄では効かせない」規約 ──
-     *   欄を空にする「絞りを外す」ボタンは別に在る)。それ以外の鍵は入力へ通す。
+     * ⚠ `Escape` は**打った字を消す**だけ(下。#1650)── 本文を閉じる側へは落とさない(C3 の
+     *   「入力欄では効かせない」規約)。それ以外の鍵は入力へ通す。
      */
     if (el instanceof HTMLInputElement && el.matches('[data-pkc-field="entry-filter"]')) {
+      /**
+       * 🔴 **`Esc` は、打った字を消す**(#1650 項目 2。Gemini 裁定 = #1163 の依頼 42-2 A)。
+       * ⚠ 吹き出しは「Esc で、打った字を消します」と言うが、直す前は**ブラウザの検索欄の標準の動き**に
+       *   頼っていた(`type="search"`)── 標準で消えないブラウザでは吹き出しが偽になる。
+       * 🔑 標準の動きと**二重に走らせない**(`preventDefault`)。⚠ 欄も空にする(state だけ空にすると、
+       *   打った字が残って見える ── 下の 2 ペインの絞り込みと同じ)。⚠ 変換中の Esc は変換の取り消しなので握らない。
+       * ⚠ 字が無いときは何もしない(空の欄の Esc は、これまでどおり他へ流さない)。
+       */
+      if (ke.key === 'Escape' && !ke.isComposing && el.value !== '') {
+        ke.preventDefault();
+        el.value = '';
+        dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
+        return;
+      }
       /**
        * 🔴 **`>` を打っている間は、鍵が操作の一覧に効く**(#274 段①)。
        * ⚠ `Enter` = **押せる先頭の行を実行**(操作のパレットと同じ ── 一覧へ焦点を移して

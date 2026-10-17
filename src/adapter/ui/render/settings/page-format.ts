@@ -7,8 +7,9 @@
  *   判断(外部の画像)とは別の節である。
  * (#1382 で `settings.ts` から移した。中身は変えていない。)
  */
-import { PAGE_FORMATS } from '@features/page-format';
+import { DEFAULT_PAGE_FORMAT, PAGE_FORMATS } from '@features/page-format';
 import { currentPageFormat } from '../page-format';
+import { markDefault } from './default-mark';
 import { buildSettingsNote } from './note';
 import type { SettingsSection } from './section';
 
@@ -30,7 +31,7 @@ export function createPageFormatSection(region: HTMLElement): SettingsSection {
         '表・図・コードには読み幅の上限が掛かりませんが、段落と同じ左端に揃います。' +
         '書き出した HTML は、書き出したときのページ設定のまま表示されます。' +
         '既定は A4 縦です。';
-      for (const f of PAGE_FORMATS) {
+      for (const f of markDefault(PAGE_FORMATS, DEFAULT_PAGE_FORMAT)) {
         const opt = document.createElement('option');
         opt.value = f.id;
         opt.textContent = f.label;

@@ -5,12 +5,14 @@
 import { currentMessageCap } from '@adapter/platform/message-post';
 import {
   JOB_CAP,
+  MESSAGE_CAP_DEFAULT,
   MESSAGE_CAP_OPTIONS,
   SYSTEM_JOB_LID,
   SYSTEM_MESSAGE_LID,
 } from '@features/message/message-log';
 import type { AppState } from '@adapter/state/app-state';
 import { buildChoiceRow, syncChoiceRow } from '../choice-buttons';
+import { markDefault } from './default-mark';
 import { buildSettingsNote } from './note';
 import type { SettingsSection } from './section';
 
@@ -66,7 +68,10 @@ export function createMessagesSection(region: HTMLElement): SettingsSection {
         ariaLabel: 'メッセージの保管件数',
         action: 'set-message-cap',
         dataAttr: 'data-pkc-message-cap-value',
-        choices: MESSAGE_CAP_OPTIONS.map((n) => ({ id: String(n), label: `${n} 件` })),
+        choices: markDefault(
+          MESSAGE_CAP_OPTIONS.map((n) => ({ id: String(n), label: `${n} 件` })),
+          String(MESSAGE_CAP_DEFAULT),
+        ),
         currentId: '', // render 末尾の syncMessages が必ず映す
       });
       dd.append(capRow);

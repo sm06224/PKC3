@@ -12,6 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { initialState } from '../../src/adapter/state/app-state';
+import { markDefault } from '../../src/adapter/ui/render/settings/default-mark';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { JobMonitor } from '../../src/adapter/platform/job-monitor';
@@ -147,7 +148,8 @@ describe('文字の大きさ(設定画面と配線)', () => {
     settings.render(initialState);
     const opts = choiceRowValues(region, FIELD, VALUE_ATTR);
     expect(opts.map((o) => o.value)).toEqual(TEXT_SCALES.map((t) => t.id));
-    expect(opts.map((o) => o.label)).toEqual(TEXT_SCALES.map((t) => t.label));
+    // 🔴 最初の値には「(既定)」が付く(#1650 項目 4)
+    expect(opts.map((o) => o.label)).toEqual(markDefault(TEXT_SCALES, DEFAULT_TEXT_SCALE).map((t) => t.label));
   });
 
   /**
