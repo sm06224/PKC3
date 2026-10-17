@@ -86,6 +86,11 @@ const UNRESOLVED: readonly string[] = [
   'move-order-down',
   'move-order-up',
   /**
+   * ⚠ 2026-10-17(#1621)で 1 件増えた ── 左のペインの「⋯」。押し口は `bar-overflow.ts` が
+   *   `BAR_MORE_ACTION` という**定数**で組むので、静的な `data-pkc-action="open-bar-more"` が source のどこにも無い。
+   */
+  'open-bar-more',
+  /**
    * ⚠ **2026-10-02(#215 段①②)で 4 件増えた** ── パソコンのフォルダの押し口(選ぶ / 切る /
    *   さらに表示 / 行を押して取り込む)。⚠ 2026-10-02(#1264 §2)で「更新」(`pc-refresh-folder`)が 1 件増えた。🔑 押し所は `pc-folder.ts` が `button(action, …)` という
    *   **変数の引数**で組むので、静的な `data-pkc-action="pc-…"` が source のどこにも無い

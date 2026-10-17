@@ -234,7 +234,11 @@ describe('音・動画の添付の説明(#1232 段 b)', () => {
     try {
       const { root, d } = await open('audio/webm', 'rec.webm');
       const live = (field: string) => watches.filter((w) => !w.gone && w.target?.getAttribute('data-pkc-field') === field);
-      const total = () => watches.filter((w) => !w.gone).length;
+      // ⚠ 2026-10-17(#1621): 左の列の 3 本の帯(タブ / 作る / コレクション)は、入りきらないボタンを「⋯」へ
+      //   まとめるために画面の寿命のあいだ見張る ── ノートを移っても作り直さないので、ここで数える見張りから外す。
+      const SIDEBAR_BARS = new Set(['browse-tabs', 'create-bar', 'collection-bar']);
+      const total = () =>
+        watches.filter((w) => !w.gone && !SIDEBAR_BARS.has(w.target?.getAttribute('data-pkc-region') ?? '')).length;
       // ① 開いた直後:帯 1 本 + 再生機の器 1 本(今の器を見ている)
       const bar0 = root.querySelector('[data-pkc-field="detail-bar-slot"]');
       expect(live('detail-bar-slot').map((w) => w.target), '前提: 帯を今の器で見張っていない').toEqual([bar0]);
