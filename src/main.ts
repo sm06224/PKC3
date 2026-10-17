@@ -461,6 +461,7 @@ import {
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
 import { printNote } from '@adapter/platform/print-note';
+import { SECTION_LOADING_SELECTOR } from '@adapter/ui/render/section-embed';
 
 const DB_NAME = 'pkc3';
 /** container の題名(書出しのファイル名にも使う ── 1 箇所で決める)。 */
@@ -5174,6 +5175,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           // 🔴 画面の外の図は見えるまで描かれない ── 刷る前に本文の図を描き切る(#1087)
           //    ⚠ 本文が state に届いた直後は、図の器がまだ DOM に無いことがある(実測: 押してすぐだと器 0 個で刷った)
           //    ── 1 コマずつ 3 回、器を引き直して描く
+          // 🔴 章の埋め込みが読み込み中のあいだは刷らない(#1087)。印は `SectionEmbeds` が器に立てる
+          //    `data-pkc-section-key`(`w` で始まる = 読み込み中。抜粋が届いた後の描き待ちも含む)
+          embedsLoading: () => document.querySelector(`[data-pkc-field="detail-body"] ${SECTION_LOADING_SELECTOR}`) !== null,
           prepare: async () => {
             for (let i = 0; i < 3; i++) {
               await new Promise<void>((r) =>

@@ -40,6 +40,13 @@ export const SECTION_NO_NOTE = 'ノートが見つかりません';
 export const SECTION_LOADING_NOTE = '読み込んでいます';
 
 const KEY_ATTR = 'data-pkc-section-key';
+/** 読み込み中の器の鍵の頭(`w\0<lid>`)。⚠ 他の状態(n/l/g/m/o)と頭が被らない。 */
+const LOADING_KEY_HEAD = 'w';
+/**
+ * 読み込み中の器(抜粋が届く前 + 届いてから描き終えるまで)。印刷が「章の中身が出るまで待つ」ために引く(#1087)。
+ * ⚠ 器の鍵を作る `one()` の `w` と対 ── 頭の字は `LOADING_KEY_HEAD` の 1 か所。
+ */
+export const SECTION_LOADING_SELECTOR = `[${KEY_ATTR}^="${LOADING_KEY_HEAD}"]`;
 const PENDING_ATTR = 'data-pkc-section-pending';
 const NS_ATTR = 'data-pkc-section-ns';
 const SELECTOR = 'div.pkc-transclusion-placeholder[data-pkc-embed-ref], div.pkc-section-embed[data-pkc-embed-ref]';
@@ -154,7 +161,7 @@ export class SectionEmbeds {
         need.push(key);
       }
       // 読み込み中。出ている物が在れば、そのまま残す(読み直しの間に空へ戻さない)
-      if (el.getAttribute(KEY_ATTR) === null) this.shell(el, `w\u0000${lid}`, () => [noteLine(doc, SECTION_LOADING_NOTE)]);
+      if (el.getAttribute(KEY_ATTR) === null) this.shell(el, `${LOADING_KEY_HEAD}\u0000${lid}`, () => [noteLine(doc, SECTION_LOADING_NOTE)]);
       return;
     }
     this.asked.delete(key);

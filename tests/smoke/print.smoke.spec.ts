@@ -223,12 +223,50 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
 
+  /**
+   * 🔴 **章を埋め込んだノートを開いた直後に押しても、`print()` の瞬間に「読み込んでいます」が残らない**(#1087)。
+   * ⚠ 新しい起動は足さない(同じ道中)。1 件目の「見出し」の章を 2 件目に埋め込み、刷るのは 2 件目。
+   * ⚠ 刷りは 1 回だけ ── `chrome` の `window.print()` は印刷画面が閉じるまで返らず、2 回目は受けない(`busy`)。
+   */
+  const srcLid = await page
+    .locator('[data-pkc-region="sidebar"] [data-pkc-action="select-entry"][data-pkc-entry]')
+    .first()
+    .getAttribute('data-pkc-entry');
+  expect(srcLid, '前提:1 件目の lid が引けている').toBeTruthy();
+  await createEntry(page, 'text');
+  const ta2 = page.locator('[data-pkc-field="editor-body"]');
+  await ta2.click();
+  await ta2.fill(`![章](entry:${srcLid}#h/見出し)`);
+  // 🔑 本文の読み出しを 800ms 遅らせる ── 章の中身が「押した瞬間にまだ届いていない」場面を、決定的に作る
+  //    (遅らせないと 8 回に 1 回しか出ない競合で、直す前の実装も緑になる)
+  await page.evaluate(() => {
+    const orig = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (this: Worker, msg: unknown, ...rest: unknown[]) {
+      const op = (msg as { req?: { op?: string } } | null)?.req?.op;
+      if (op === 'getBody') {
+        setTimeout(() => (orig as (...a: unknown[]) => unknown).call(this, msg, ...rest), 800);
+        return;
+      }
+      return (orig as (...a: unknown[]) => unknown).call(this, msg, ...(rest as []));
+    } as typeof Worker.prototype.postMessage;
+  });
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+
   // 押した瞬間ではなく、**印刷が始まった**ことを採る
   await page.evaluate(() => {
-    (globalThis as unknown as Record<string, unknown>).__printed = 0;
+    const g = globalThis as unknown as Record<string, unknown>;
+    g.__printed = 0;
+    g.__atPrint = null;
     window.addEventListener('beforeprint', () => {
-      (globalThis as unknown as Record<string, unknown>).__printed =
-        ((globalThis as unknown as Record<string, number>).__printed ?? 0) + 1;
+      g.__printed = ((g.__printed as number | undefined) ?? 0) + 1;
+      // 🔑 紙に出る瞬間の本文(押した直後ではない)
+      const body = document.querySelector('[data-pkc-field="detail-body"]');
+      g.__atPrint = {
+        notes: body?.querySelectorAll('[data-pkc-field="section-embed-note"]').length ?? -1,
+        embeds: body?.querySelectorAll('.pkc-section-embed').length ?? -1,
+        text: body?.querySelector('.pkc-section-embed')?.textContent ?? '',
+      };
     });
   });
 
@@ -241,6 +279,15 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
   await expect
     .poll(async () => page.evaluate(() => (globalThis as unknown as Record<string, number>).__printed))
     .toBeGreaterThan(0);
+
+  const atPrint = (await page.evaluate(() => (globalThis as unknown as Record<string, unknown>).__atPrint)) as {
+    notes: number;
+    embeds: number;
+    text: string;
+  };
+  expect(atPrint.embeds, '前提:章の埋め込みが本文に在る').toBeGreaterThan(0);
+  expect(atPrint.notes, '🔴 刷る瞬間に「読み込んでいます」などの 1 行が残っている').toBe(0);
+  expect(atPrint.text, '章の中身が紙に出ていない').toContain('本文が 1 行');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
