@@ -91,11 +91,50 @@ async function loadExtensions(
   }
 }
 
+/** `rowsOfTable` が読む Arrow の列(チャンク)の形。 */
+export interface ArrowChunkLike {
+  readonly length: number;
+  readonly offset: number;
+  readonly values?: ArrayLike<number>;
+}
+
+/** `rowsOfTable` が読む Arrow の列の形(`getChildAt(i)`)。 */
+export interface ArrowColumnLike {
+  get(index: number): unknown;
+  readonly data?: readonly ArrowChunkLike[];
+}
+
 /** `rowsOfTable` が読む Arrow の表の形(上流の型を呼び側へ漏らさず、偽物でも試せるように最小に絞る)。 */
 export interface ArrowTableLike {
   readonly numRows: number;
-  slice(begin?: number, end?: number): { toArray(): Iterable<unknown> | ArrayLike<unknown> };
+  slice(begin?: number, end?: number): ArrowTableLike;
   toArray(): ArrayLike<unknown>;
+  /** 🔴 列は**位置**で読む ── 同じ名前の列(`SELECT 1 AS x, 2 AS x` / `a.id, b.id`)は名前では区別できない。 */
+  getChildAt(index: number): ArrowColumnLike | null;
+}
+
+/** 列の型が INTERVAL(`Interval<MONTH_DAY_NANO>`)か。 */
+const isIntervalType = (t: string | undefined): boolean => (t ?? '').startsWith('Interval');
+
+/**
+ * 🔴 **INTERVAL の 1 行を `[月, 日, ns 下位, ns 上位]` で読む**(2026-10-17、実エンジンで測定)。
+ *
+ * ⚠ Arrow の読み手は `Interval<MONTH_DAY_NANO>` を 1 行 **2 要素(月だけ)**で読むため、
+ *   日と時間が落ちる(`3 days 2 hours` が 0)。エンジンが実際に書くのは **1 行 16 byte = int32 × 4** なので、
+ *   列の素の buffer から行 `row` の 4 つを直に読む。読めない形なら `null`(呼び側が安全な字にする)。
+ */
+function intervalAt(col: ArrowColumnLike, row: number): Int32Array | null {
+  let base = 0;
+  for (const chunk of col.data ?? []) {
+    if (row < base + chunk.length) {
+      const v = chunk.values;
+      const at = (chunk.offset + (row - base)) * 4;
+      if (!v || v.length < at + 4) return null;
+      return Int32Array.from([v[at] ?? 0, v[at + 1] ?? 0, v[at + 2] ?? 0, v[at + 3] ?? 0]);
+    }
+    base += chunk.length;
+  }
+  return null;
 }
 
 /**
@@ -110,12 +149,30 @@ export function rowsOfTable(
   table: ArrowTableLike,
   columns: readonly string[],
   maxRows?: number,
+  types: readonly string[] = [],
 ): unknown[][] {
   const part = maxRows !== undefined && table.numRows > maxRows ? table.slice(0, maxRows) : table;
-  return Array.from(part.toArray() as ArrayLike<unknown>, (r) => {
-    const o = r as Record<string, unknown>;
-    return columns.map((c) => o[c]);
-  });
+  /**
+   * 🔴 **列は位置で読む**(直す前は名前で読んでいた ── 同名の列は 2 つ目以降が 1 つ目の値になった)。
+   * ⚠ 切った後の表の列を取る(行を作る前に切る規律は変えない)。
+   */
+  const cols = columns.map((_c, i) => part.getChildAt(i));
+  const n = part.numRows;
+  const out: unknown[][] = [];
+  for (let r = 0; r < n; r += 1) {
+    out.push(
+      cols.map((col, i) => {
+        if (col === null) return null;
+        // ⚠ INTERVAL だけは Arrow の読み手が値を落とすので素の buffer から読む(読めなければ空の配列 = 呼び側が安全な字にする)
+        if (isIntervalType(types[i])) {
+          const cell = col.get(r);
+          return cell === null || cell === undefined ? null : (intervalAt(col, r) ?? new Int32Array(0));
+        }
+        return col.get(r);
+      }),
+    );
+  }
+  return out;
 }
 
 /**
@@ -197,7 +254,7 @@ export async function openDuckDb(input: OpenDuckDbInput): Promise<DuckDbHandle> 
       const columns = table.schema.fields.map((f) => f.name);
       const types = table.schema.fields.map((f) => String(f.type));
       // ⚠ Arrow の表をそのまま返さない ── 上流の型が呼び側へ漏れる
-      return { columns, types, rows: rowsOfTable(table, columns, maxRows) };
+      return { columns, types, rows: rowsOfTable(table, columns, maxRows, types) };
     },
     terminate: async () => {
       /**
