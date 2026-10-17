@@ -1022,13 +1022,6 @@ select:focus-visible {
   min-width: 44px;
   height: 44px;
 }
-/* 🔑 タブは細い列では**字を詰める**(6 枚の語は 13px で約 240px 要る。裁定 A「タブは字を詰め」)。
- *   1079px 以下 = 左の列が 238px 未満になる幅。それ以上は 13px のまま 1 段に収まる(実測)。 */
-@media (max-width: 1079px) {
-  [data-pkc-region='browse-tabs'] button {
-    font-size: 11px;
-  }
-}
 /* 左の列の下端: **コレクション**に対する操作 */
 [data-pkc-region='collection-bar'] {
   display: flex;
@@ -8756,6 +8749,14 @@ mark[data-pkc-diff-char='del'] {
  * **その 3 つに到達する導線が画面から消える**(キーボードでも届かない)。
  * 幅が足りないなら**場所を変える**のであって、操作を無くしてよい理由にはならない。 */
 /* 時間の目盛りの札の下の縁(#855 段 B-1)── 指で引くので太くする(細かい指し示しは 8px のまま) */
+/* 🔑 タブは細い列では**字を詰める**(6 枚の語は 13px で約 240px 要る。裁定 A「タブは字を詰め」)。
+ *   1079px 以下 = 左の列が 238px 未満になる幅。それ以上は 13px のまま 1 段に収まる(実測)。
+ *   ⚠ `@media` は最後に置く規約(announce.test の CSS 検査が最初の `@media` で切る)。 */
+@media (max-width: 1079px) {
+  [data-pkc-region='browse-tabs'] button {
+    font-size: 11px;
+  }
+}
 @media (pointer: coarse) {
   [data-pkc-field='schedule-day-lane'] > [data-pkc-entry] > [data-pkc-field='task-resize'],
   [data-pkc-field='schedule-weekview-lane'] > [data-pkc-entry] > [data-pkc-field='task-resize'] {
