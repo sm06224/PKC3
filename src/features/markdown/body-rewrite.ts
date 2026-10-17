@@ -618,6 +618,8 @@ export type BodyRewrite =
       line: number;
       openLine: string;
       key: string;
+      /** その行の中で、同じ鍵の画像の何番目か(0 始まり。省略 = 最初)。押した 1 つだけを書く。無ければ書かない。 */
+      nth?: number;
       w?: number | null;
       align?: ImageAlign | null;
     };
@@ -1041,7 +1043,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     const patch: { w?: number | null; align?: ImageAlign | null } = {};
     if (rewrite.w !== undefined) patch.w = rewrite.w;
     if (rewrite.align !== undefined) patch.align = rewrite.align;
-    const next = writeImageAttrs(line, rewrite.key, patch);
+    const next = writeImageAttrs(line, rewrite.key, patch, rewrite.nth ?? 0);
     // 画像が無い / 変わらないときは書かない(同じ本文を書き直して更新日時だけ動かさない)
     if (next === null || next === line) return null;
     parts[rewrite.line * 2] = next;

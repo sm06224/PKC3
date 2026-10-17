@@ -105,20 +105,28 @@ export interface ImageRefAt {
  * 1 行の中から、鍵が `key` の画像(`![…](asset:key)`)を探す。最初の 1 つ。
  * ⚠ 見つからなければ `null`(呼び側は書かない)。
  */
-export function findImageRef(line: string, key: string): ImageRefAt | null {
+export function findImageRef(line: string, key: string, nth = 0): ImageRefAt | null {
+  return findImageRefs(line, key)[nth] ?? null;
+}
+
+/** 1 行の中の、鍵が `key` の画像を左から全部。同じ画像が 2 回あっても別々に返す(押した 1 つを書くため)。 */
+export function findImageRefs(line: string, key: string): ImageRefAt[] {
   const re = new RegExp(
     `!\\[(?:[^\\]\\\\]|\\\\.)*\\]\\(<?asset:${escapeRe(key)}>?(?:\\s+"(?:[^"\\\\]|\\\\.)*")?\\)`,
+    'g',
   );
-  const m = re.exec(line);
-  if (m === null) return null;
-  const end = m.index + m[0].length;
-  const parsed = parseImageAttrs(line.slice(end));
-  return {
-    start: m.index,
-    end,
-    attrEnd: parsed === null ? end : end + parsed.length,
-    attrs: parsed === null ? NO_IMAGE_ATTRS : parsed.attrs,
-  };
+  const out: ImageRefAt[] = [];
+  for (const m of line.matchAll(re)) {
+    const end = m.index! + m[0].length;
+    const parsed = parseImageAttrs(line.slice(end));
+    out.push({
+      start: m.index!,
+      end,
+      attrEnd: parsed === null ? end : end + parsed.length,
+      attrs: parsed === null ? NO_IMAGE_ATTRS : parsed.attrs,
+    });
+  }
+  return out;
 }
 
 /**
@@ -129,8 +137,9 @@ export function writeImageAttrs(
   line: string,
   key: string,
   patch: { w?: number | null; align?: ImageAlign | null },
+  nth = 0,
 ): string | null {
-  const at = findImageRef(line, key);
+  const at = findImageRef(line, key, nth);
   if (at === null) return null;
   const next: ImageAttrs = {
     w: patch.w === undefined ? at.attrs.w : patch.w,

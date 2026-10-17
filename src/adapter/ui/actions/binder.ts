@@ -242,7 +242,7 @@ import {
 } from '@features/schedule/today-note';
 import { formatLineDate, readLineDate } from '@features/schedule/line-date';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
-import { findImageRef, type ImageAlign, type ImageAttrs } from '@features/markdown/image-attrs';
+import { findImageRefs, type ImageAlign, type ImageAttrs } from '@features/markdown/image-attrs';
 import {
   adoptableUrls,
   externalImageUrls,
@@ -4235,6 +4235,7 @@ const MENU_TABLE_ATTR = 'data-pkc-menu-table';
  */
 const MENU_IMAGE_LINE_ATTR = 'data-pkc-menu-image-line';
 const MENU_IMAGE_KEY_ATTR = 'data-pkc-menu-image-key';
+const MENU_IMAGE_NTH_ATTR = 'data-pkc-menu-image-nth';
 
 /**
  * 🔴 **右クリックした本文の画像を、原文の行と突き合わせる**(#1640 ③)。
@@ -4246,7 +4247,7 @@ const MENU_IMAGE_KEY_ATTR = 'data-pkc-menu-image-key';
 function imageAt(
   img: Element,
   body: string | null,
-): { key: string; line: number; attrs: ImageAttrs } | null {
+): { key: string; line: number; nth: number; attrs: ImageAttrs } | null {
   if (body === null) return null;
   const key = img.getAttribute('data-pkc-asset-key');
   if (key === null || key === '') return null;
@@ -4256,12 +4257,20 @@ function imageAt(
   const start = Number(block.getAttribute('data-pkc-source-line'));
   if (!Number.isInteger(start) || start < 0) return null;
   const endRaw = Number(block.getAttribute('data-pkc-source-end'));
-  const end = Number.isInteger(endRaw) && endRaw > start ? endRaw : start + 1;
+  // ⚠ `data-pkc-source-end` は**最後の行を含む**(1 行の段落は line と同じ値)
+  const end = Number.isInteger(endRaw) && endRaw >= start ? endRaw : start;
   const offset = frontmatterLineCount(body);
   const lines = body.split(/\r?\n/);
-  for (let n = start + offset; n < Math.min(end + offset, lines.length); n++) {
-    const hit = findImageRef(lines[n] ?? '', key);
-    if (hit !== null) return { key, line: n, attrs: hit.attrs };
+  // 🔴 同じ画像が何度も出るとき、押した 1 つを選ぶ: 塊の中の同じ鍵の画像を描画順に数えた番号を、行ごとの出現に割り当てる
+  const same = [...block.querySelectorAll('img.pkc-asset-ref')].filter(
+    (el) => el.getAttribute('data-pkc-asset-key') === key,
+  );
+  let rest = same.indexOf(img);
+  if (rest < 0) return null;
+  for (let n = start + offset; n <= Math.min(end + offset, lines.length - 1); n++) {
+    const hits = findImageRefs(lines[n] ?? '', key);
+    if (rest < hits.length) return { key, line: n, nth: rest, attrs: hits[rest]!.attrs };
+    rest -= hits.length;
   }
   return null;
 }
@@ -4279,8 +4288,9 @@ function setImageAttr(
 ): void {
   const line = menuCarriedAt(target, MENU_IMAGE_LINE_ATTR);
   const key = target.getAttribute(MENU_IMAGE_KEY_ATTR);
+  const nth = menuCarriedAt(target, MENU_IMAGE_NTH_ATTR);
   const raw = target.getAttribute(which === 'w' ? IMAGE_WIDTH_ATTR : IMAGE_ALIGN_ATTR);
-  if (line === null || key === null || key === '' || raw === null || refuseStaleMenu(dispatcher, target)) return;
+  if (nth === null || line === null || key === null || key === '' || raw === null || refuseStaleMenu(dispatcher, target)) return;
   // ⚠ 読めない値は書かない(属性を書き換えられた形)。空は「もとに戻す」
   let patch: { w: number | null } | { align: ImageAlign | null };
   if (which === 'w') {
@@ -4315,7 +4325,7 @@ function setImageAttr(
     services,
     [lid],
     '画像の大きさを変えられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
-    () => dispatcher.dispatch({ type: 'SET_IMAGE_ATTRS', lid, line, openLine, key, ...patch }),
+    () => dispatcher.dispatch({ type: 'SET_IMAGE_ATTRS', lid, line, openLine, key, nth, ...patch }),
   );
 }
 /**
@@ -18916,6 +18926,7 @@ export function bindActions(
                 ...(a.attrs ?? {}),
                 [MENU_IMAGE_LINE_ATTR]: String(imageHit.line),
                 [MENU_IMAGE_KEY_ATTR]: imageHit.key,
+                [MENU_IMAGE_NTH_ATTR]: String(imageHit.nth),
               },
             }))),
         /**

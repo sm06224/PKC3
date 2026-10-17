@@ -89,6 +89,28 @@ describe('画像の右クリック(大きさ・寄せ)', () => {
     expect(after).toBe('# 覚書\n\nまえ\n\n![図](asset:k1){w=50%}\n\n![別](asset:k2){align=right} と ![図](asset:k1)\n');
   });
 
+  it('🔴 同じ画像が 1 行に 2 つあるとき、押した 2 つ目だけを書き換える', () => {
+    const body = '![図](asset:k1) と ![図](asset:k1)\n';
+    const t = setup(body);
+    const imgs = [...document.querySelectorAll('img[data-pkc-asset-key="k1"]')];
+    expect(imgs, '前提: 同じ画像が 2 つ描かれている').toHaveLength(2);
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 });
+    imgs[1]!.dispatchEvent(ev);
+    t.press('画像の大きさ: 25%');
+    const r = t.rewrites();
+    expect(r[0]).toMatchObject({ kind: 'image-attrs', nth: 1 });
+    expect(applyBodyRewrite(body, r[0]!)).toBe('![図](asset:k1) と ![図](asset:k1){w=25%}\n');
+  });
+
+  it('🔴 別の行に同じ画像があっても、押した方だけを書く', () => {
+    const body = '![図](asset:k1)\n![図](asset:k1)\n';
+    const t = setup(body);
+    const imgs = [...document.querySelectorAll('img[data-pkc-asset-key="k1"]')];
+    imgs[1]!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+    t.press('画像を中央に寄せる');
+    expect(applyBodyRewrite(body, t.rewrites()[0]!)).toBe('![図](asset:k1)\n![図](asset:k1){align=center}\n');
+  });
+
   it('🔴 もとに戻すは札を外す(w だけ外し、align は保つ)', () => {
     const body = '![図](asset:k1){w=50% align=center}\n';
     const t = setup(body);
@@ -126,6 +148,12 @@ describe('body-rewrite image-attrs(書く側の門)', () => {
     expect(applyBodyRewrite(body, { kind: 'image-attrs', line: 1, openLine: '別の行', key: 'k1', w: 50 }), '行が変わった').toBeNull();
     expect(applyBodyRewrite(body, { kind: 'image-attrs', line: 1, openLine: '![図](asset:k1)', key: 'zz', w: 50 }), '鍵が無い').toBeNull();
     expect(applyBodyRewrite(body, { kind: 'image-attrs', line: 1, openLine: '![図](asset:k1)', key: 'k1', w: null }), '変わらない').toBeNull();
+  });
+  it('その行に押した番号の画像がもう無ければ書かない(行が変わった扱い)', () => {
+    const body = '![図](asset:k1) と ![図](asset:k1)\n';
+    const line = '![図](asset:k1) と ![図](asset:k1)';
+    expect(applyBodyRewrite(body, { kind: 'image-attrs', line: 0, openLine: line, key: 'k1', nth: 1, w: 50 })).toBe('![図](asset:k1) と ![図](asset:k1){w=50%}\n');
+    expect(applyBodyRewrite(body, { kind: 'image-attrs', line: 0, openLine: line, key: 'k1', nth: 2, w: 50 })).toBeNull();
   });
   it('行ごとの改行コードを保つ', () => {
     const body = 'a\r\n![図](asset:k1)\nb\r\n';

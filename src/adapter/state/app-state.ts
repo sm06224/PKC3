@@ -3026,6 +3026,7 @@ export type UserAction =
       line: number;
       openLine: string;
       key: string;
+      nth?: number;
       w?: number | null;
       align?: 'left' | 'center' | 'right' | null;
     }
@@ -8201,6 +8202,7 @@ function reduceCore(
               line: action.line,
               openLine: action.openLine,
               key: action.key,
+              ...(action.nth !== undefined ? { nth: action.nth } : {}),
               ...(action.w !== undefined ? { w: action.w } : {}),
               ...(action.align !== undefined ? { align: action.align } : {}),
             },
