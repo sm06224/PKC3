@@ -134,7 +134,7 @@ test('🔴 引用の行で計算しても、取り消しで打った字へ戻れ
 
   // 🔴 #1852 束 I1(依頼 199)── 入れ子の空の項目は 1 段だけ戻る(空行は入らない)
   await ta.fill('- a\n  - b\n  - ');
-  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(el.value.length, el.value.length));
+  await ta.evaluate((el) => { const t = el as HTMLTextAreaElement; t.setSelectionRange(t.value.length, t.value.length); });
   await page.keyboard.press('Enter');
   await expect(ta, '入れ子の空の項目で 1 段戻らない').toHaveValue('- a\n  - b\n- ');
   await page.keyboard.press('Enter');

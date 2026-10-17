@@ -1081,13 +1081,13 @@ test('🔴 40 行を超える章を開いても、scrollTop は 0(見出しが�
    * ⚠ 上の scroll の前提を見終わった後に、同じ箱の続きで見る(新しい起動は足さない)。
    */
   await box.fill('- 牛乳');
-  await box.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(el.value.length, el.value.length));
+  await box.evaluate((el) => { const t = el as HTMLTextAreaElement; t.setSelectionRange(t.value.length, t.value.length); });
   await box.press('Enter');
   await expect(box, '章の欄で箇条書きが続かない').toHaveValue('- 牛乳\n- ');
   await box.press('Enter');
   await expect(box, '章の欄で空の項目から抜けて空行が入らない').toHaveValue('- 牛乳\n\n');
   await box.fill('2+3=');
-  await box.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(el.value.length, el.value.length));
+  await box.evaluate((el) => { const t = el as HTMLTextAreaElement; t.setSelectionRange(t.value.length, t.value.length); });
   await box.press('Enter');
   await expect(box, '章の欄で行末の `=` が計算されない').toHaveValue('2+3=5\n');
 
