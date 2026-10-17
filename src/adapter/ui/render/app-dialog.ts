@@ -303,6 +303,39 @@ export function confirmInApp(
 }
 
 /**
+ * 確認を出して、答えと**チェック欄の入れ具合**を返す(#1652 3 ── 「残りも同じにする」)。
+ *
+ * ⚠ 器・列・取り消しの扱いは `confirmInApp` と**同じ**(`Escape` / 「やめる」= `cancel`)。
+ *   違うのは本文の下にチェック欄が 1 つ付くことだけ。
+ */
+export function confirmCheckInApp(
+  host: HTMLElement,
+  message: string,
+  opts: ConfirmOptions & { readonly checkLabel: string },
+): Promise<{ readonly answer: DialogAnswer; readonly checked: boolean }> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = '確認';
+    f.body.textContent = '';
+    f.body.append(document.createTextNode(message));
+    const label = document.createElement('label');
+    label.setAttribute('data-pkc-field', 'dialog-check-label');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.setAttribute('data-pkc-field', 'dialog-check');
+    label.append(box, document.createTextNode(opts.checkLabel));
+    f.body.append(document.createElement('br'), label);
+    f.ok.textContent = opts.okLabel ?? 'はい';
+    f.cancel.textContent = opts.cancelLabel ?? 'やめる';
+    if (opts.danger === true) f.ok.setAttribute('data-pkc-danger', '');
+    else f.ok.removeAttribute('data-pkc-danger');
+    f.cancel.hidden = false;
+    const answer = await open(f, 'cancel');
+    return { answer, checked: box.checked };
+  });
+}
+
+/**
  * 🔴 **1 行の字を聞く**(`window.prompt` の置き換え。#633 段③ ── スタックの題名)。
  *
  * ⚠ `confirmInApp` と同じ器・同じ列(重なったら順番に出す)。

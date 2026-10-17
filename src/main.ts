@@ -372,6 +372,8 @@ import {
   storeAsset,
   attachOne,
   resolveMime,
+  maybeShrink,
+  newShrinkRun,
   type AttachDeps,
 } from '@adapter/ui/actions/attach';
 import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
@@ -456,6 +458,7 @@ import {
 } from '@adapter/platform/view-window';
 import {
   alertInApp,
+  confirmCheckInApp,
   confirmInApp,
   pickOfficeShadowInApp,
   pickAgentGrantInApp,
@@ -2837,8 +2840,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔴 **聞く口**(#412)。⚠ 写真は user のもので、縮めるのは**不可逆**である ──
      *   だから**必ず聞く**。⚠ この口を渡さなければ縮まらない(黙って縮める道が無い)。
      */
-    askShrink: async (question) =>
-      (await confirmInApp(root, question, { okLabel: '画像を縮める', cancelLabel: 'そのまま' })) === 'ok',
+    askShrink: async (question, opts) => {
+      const labels = { okLabel: '画像を縮める', cancelLabel: 'そのまま' };
+      if (opts?.rememberLabel === undefined) return (await confirmInApp(root, question, labels)) === 'ok';
+      // 🔑 残りの写真が在るときだけ「残りも同じにする」を付ける(#1652 3)
+      const r = await confirmCheckInApp(root, question, { ...labels, checkLabel: opts.rememberLabel });
+      return { ok: r.answer === 'ok', remember: r.checked };
+    },
   };
 
   /**
@@ -3962,14 +3970,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         const known = new Set(await attachDeps.listStoredBlobKeys().catch(() => []));
         // 同じ秒に貼った複数枚が同じ名前にならないようにする
         const uniqueName = createNameDeduper();
-        for (const file of files) {
-          const name = uniqueName(pastedFileName(file, new Date()));
+        // 🔴 **貼った大きな写真も、添付と同じ条件で「縮めますか」と聞く**(#1652 5。Gemini 裁定 A)。
+        //   ⚠ 直す前は、携帯の写真をそのまま貼ると原寸で入り、保存領域が急に減った。
+        //   名前は先に決める(窓に出す名前と、入る名前を同じにする)。
+        const items = files.map((file) => ({
+          name: uniqueName(pastedFileName(file, new Date())),
+          type: file.type,
+          size: file.size,
+          blob: file as Blob,
+        }));
+        const shrinkRun = newShrinkRun(items);
+        for (const original of items) {
+          const name = original.name;
           try {
-            const stored = await storeAsset(
-              attachDeps,
-              { name, type: file.type, size: file.size, blob: file },
-              known,
-            );
+            const item = await maybeShrink(attachDeps, original, shrinkRun);
+            const stored = await storeAsset(attachDeps, item, known);
             refs.push(formatAssetRef(name, `asset:${stored.assetKey}`, true));
           } catch (e) {
             // 🔴 英語の理由をそのまま出さない。どの画像か分かる形で(#1087)

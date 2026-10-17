@@ -6,7 +6,7 @@
  *   ここが見るのは **口が無ければ縮まらない / 断れば元のまま / 受ければ差し替わる**。
  */
 import { describe, expect, it } from 'vitest';
-import { maybeShrink, type AttachDeps, type AttachItem } from '../../src/adapter/ui/actions/attach';
+import { maybeShrink, newShrinkRun, type AttachDeps, type AttachItem } from '../../src/adapter/ui/actions/attach';
 import { SHRINK_MIN_BYTES } from '../../src/features/asset/image-shrink';
 
 const BIG = SHRINK_MIN_BYTES * 4;
@@ -184,5 +184,106 @@ describe('添付を縮める(#412)', () => {
     );
     expect(asked, '縮んでいないのに聞いた').toBe(0);
     expect(out.size).toBe(BIG);
+  });
+});
+
+describe('何枚も入れるとき ── どの写真か分かる / 残りも同じにする(#1652 3)', () => {
+  const photos = (n: number): AttachItem[] =>
+    Array.from({ length: n }, (_, i) => item({ name: `写真${i + 1}.jpg` }));
+
+  it('🔴 窓の字に、ファイル名と「5 枚中 2 枚目」が出る', async () => {
+    const all = [...photos(4), item({ name: '地図.pdf', type: 'application/pdf' }), item({ name: '写真5.jpg' })];
+    const run = newShrinkRun(all);
+    // ⚠ PDF は候補に数えない(「6 枚中」にならない)
+    expect(run.total).toBe(5);
+    const asked: string[] = [];
+    const d = deps({
+      shrinkImage: shrunkOk,
+      askShrink: async (q) => {
+        asked.push(q);
+        return false;
+      },
+    });
+    for (const it of all) await maybeShrink(d, it, run);
+    expect(asked, '写真 5 枚ぶん聞くはず').toHaveLength(5);
+    expect(asked[1]).toContain('「写真2.jpg」(5 枚中 2 枚目)');
+    expect(asked[4], 'PDF を挟んでも、最後は 5 枚中 5 枚目').toContain('「写真5.jpg」(5 枚中 5 枚目)');
+  });
+
+  it('🔴 「残りも同じにする」は、残りの写真が在るときだけ出す(最後の 1 枚には出さない)', async () => {
+    const run = newShrinkRun(photos(2));
+    const offers: Array<string | undefined> = [];
+    const d = deps({
+      shrinkImage: shrunkOk,
+      askShrink: async (_q, o) => {
+        offers.push(o?.rememberLabel);
+        return false;
+      },
+    });
+    for (const it of photos(2)) await maybeShrink(d, it, run);
+    expect(offers[0], '残りが在るのに出ていない').toBe('残りも同じにする');
+    expect(offers[1], '最後の 1 枚に出している').toBeUndefined();
+  });
+
+  it('🔴 「縮める + 残りも」を選ぶと、残りは聞かずに縮む', async () => {
+    const run = newShrinkRun(photos(3));
+    let asked = 0;
+    const d = deps({
+      shrinkImage: shrunkOk,
+      askShrink: async () => {
+        asked += 1;
+        return { ok: true, remember: true };
+      },
+    });
+    const outs = [];
+    for (const it of photos(3)) outs.push(await maybeShrink(d, it, run));
+    expect(asked, '残りも聞いている').toBe(1);
+    expect(outs.map((o) => o.blob === small)).toEqual([true, true, true]);
+  });
+
+  it('🔴 「そのまま + 残りも」を選ぶと、残りは聞かず、縮める支度(ワーカー)も起こさない', async () => {
+    const run = newShrinkRun(photos(3));
+    let asked = 0;
+    let shrinkCalls = 0;
+    const d = deps({
+      shrinkImage: async () => {
+        shrinkCalls += 1;
+        return shrunkOk();
+      },
+      askShrink: async () => {
+        asked += 1;
+        return { ok: false, remember: true };
+      },
+    });
+    const outs = [];
+    for (const it of photos(3)) outs.push(await maybeShrink(d, it, run));
+    expect(asked).toBe(1);
+    expect(shrinkCalls, '残りのためにワーカーを起こした').toBe(1);
+    expect(outs.every((o) => o.size === BIG)).toBe(true);
+  });
+
+  it('🔑 対照群 ── 「残りも」を選ばなければ、1 枚ずつ聞く(黙って全部に当てない)', async () => {
+    const run = newShrinkRun(photos(3));
+    let asked = 0;
+    const d = deps({
+      shrinkImage: shrunkOk,
+      askShrink: async () => {
+        asked += 1;
+        return { ok: true, remember: false };
+      },
+    });
+    for (const it of photos(3)) await maybeShrink(d, it, run);
+    expect(asked).toBe(3);
+  });
+
+  it('🔑 次の取り込みには持ち越さない(記憶は 1 回の取り込みの run に閉じる)', async () => {
+    const d = deps({
+      shrinkImage: shrunkOk,
+      askShrink: async () => ({ ok: false, remember: true }),
+    });
+    const first = newShrinkRun(photos(2));
+    await maybeShrink(d, photos(2)[0]!, first);
+    expect(first.remembered).toBe(false);
+    expect(newShrinkRun(photos(2)).remembered, '新しい取り込みが前の答えを引き継いだ').toBeNull();
   });
 });

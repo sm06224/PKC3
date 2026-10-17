@@ -16948,7 +16948,9 @@ export function bindActions(
    */
   const onPaste = (e: Event): void => {
     const ce = e as ClipboardEvent;
-    const files = filesOf(ce.clipboardData).filter(isImageFile);
+    // 🔴 **ファイル(PDF など)をコピーして貼ったときも、ドロップと同じ行き先へ**(#1652 6。Gemini 裁定 A)。
+    //   ⚠ 直す前は画像しか拾わず、エクスプローラーでコピーした PDF を貼っても何も起きず何も出なかった。
+    const files = filesOf(ce.clipboardData);
     /**
      * 🔴 **文字も一緒に来ていたら、画像にしない**(Excel の範囲は表の HTML・文字・表の絵が同時に来る)。
      *   画像だけを拾うと表が消える。画像だけのクリップボード(スクショ)は今までどおり画像へ。
@@ -16959,7 +16961,17 @@ export function bindActions(
     const htmlHasText =
       /<table[\s>]/i.test(html) ||
       html.replace(/<[^>]*>/g, '').replace(/&nbsp;|\s/g, '').trim() !== '';
-    const hasText = htmlHasText || (ce.clipboardData?.getData('text/plain') ?? '').trim() !== '';
+    const plain = ce.clipboardData?.getData('text/plain') ?? '';
+    // 🔑 Mac のファイルのコピーは、ファイル名の字も一緒に来る ── 字がファイル名だけなら「字」と数えない
+    const namesOnly =
+      files.length > 0 &&
+      !htmlHasText &&
+      plain
+        .split(/\r?\n/)
+        .filter((l) => l.trim() !== '')
+        .every((l) => files.some((f) => f.name === l.trim()));
+    const hasText = htmlHasText || (plain.trim() !== '' && !namesOnly);
+    // ⚠ 字も来ているなら、これまでどおり字の貼付に委ねる(表の絵 + 表の HTML のような組を壊さない)
     if (!hasText && routeFiles(files, ce.target)) {
       ce.preventDefault();
       return;

@@ -111,16 +111,40 @@ export function worthShrinking(before: number, after: number): boolean {
 }
 
 /**
+ * どの写真の話かを窓に出すための情報(#1652 3)。
+ *
+ * ⚠ 何枚もまとめて入れると、1 枚ごとに聞かれる。窓にファイル名が無いと、どの写真の話か分からない。
+ * 🔑 `index` / `total` は**縮める候補の写真だけ**で数える(PDF などを混ぜて入れても「5 枚中」が嘘にならない)。
+ */
+export interface ShrinkWhere {
+  readonly name: string;
+  readonly index: number;
+  readonly total: number;
+}
+
+/** 「残りも同じにする」の字(窓のチェック欄)。⚠ 残りの写真が 1 枚も無いときは出さない。 */
+export const SHRINK_REMEMBER_LABEL = '残りも同じにする';
+
+/**
  * 聞く文言。⚠ **本当の数字で書く**(見積もりを見せない)。
  *
  * 🔑 user が見るのは「どれだけ小さくなるか」と「どれだけ粗くなるか」の 2 つなので、
  *   **画素数と大きさを両方**出す。
+ * 🔑 `where` を渡すと先頭にファイル名を出す。2 枚以上なら「5 枚中 2 枚目」も添える(#1652 3)。
  */
 export function shrinkQuestion(
   before: { width: number; height: number; bytes: number },
   after: { width: number; height: number; bytes: number },
+  where?: ShrinkWhere,
 ): string {
+  const head =
+    where === undefined
+      ? ''
+      : where.total >= 2
+        ? `「${where.name}」(${where.total} 枚中 ${where.index} 枚目)\n`
+        : `「${where.name}」\n`;
   return (
+    head +
     `大きな画像です(${before.width}×${before.height} / ${humanBytes(before.bytes)})。\n` +
     `${after.width}×${after.height} / ${humanBytes(after.bytes)} に縮めて取り込みますか?\n` +
     '⚠ 縮めると元の細かさは戻りません。そのままでよければ「そのまま」を選んでください。'

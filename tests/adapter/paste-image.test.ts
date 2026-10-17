@@ -137,19 +137,41 @@ describe('スクショの貼付(#250)', () => {
     expect(calls.attach).toHaveLength(0);
   });
 
-  it('🔴 画像**でない file** を貼っても何もしない(既定を止めない)', () => {
-    // ⚠ 1 巡目の「画像が無ければ何もしない」は `kind: 'string'` を渡していたので、
-    //   `filesOf` が先に捨てて**画像の filter が 1 度も評価されなかった**(空振り)。
-    //   ここは **file なのに画像でない**ものを渡す ── filter の側を通す。
-    // 🔑 貼付と drop は**わざと非対称**である: 落とした file は添付にするが、
-    //   貼付は画像だけ受ける(文字と file が同居する貼付で、文字を落とさないため)。
+  it('🔴 画像**でない file**(PDF など)を貼ると、ドロップと同じく**添付になる**(#1652 6)', () => {
+    // ⚠ 直す前は画像しか拾わず、エクスプローラーでコピーした PDF を貼っても何も起きず何も出なかった。
+    //   本文の中でも外でも、画像でない file は添付へ行く(本文には差さない = 画像だけが差し込み)。
+    const { ta, outside, calls } = setup();
+    const pdf = new File([new Uint8Array([1])], 'a.pdf', { type: 'application/pdf' });
+    for (const where of [ta, outside]) {
+      const e = pasteEvent([{ kind: 'file', type: 'application/pdf', file: pdf }]);
+      where.dispatchEvent(e);
+      expect(e.defaultPrevented, '貼付を止めていない').toBe(true);
+    }
+    expect(calls.attach, '貼付で添付を作っていない').toHaveLength(2);
+    expect(calls.attach[0]![0]!.name).toBe('a.pdf');
+    expect(calls.paste, 'PDF を本文に差し込もうとした').toHaveLength(0);
+  });
+
+  it('🔴 file と一緒に**字**が来ているときは、これまでどおり字の貼付に委ねる(文字を落とさない)', () => {
     const { ta, calls } = setup();
     const pdf = new File([new Uint8Array([1])], 'a.pdf', { type: 'application/pdf' });
-    const e = pasteEvent([{ kind: 'file', type: 'application/pdf', file: pdf }]);
+    const e = pasteEvent([{ kind: 'file', type: 'application/pdf', file: pdf }], {
+      'text/plain': 'ほんとうの字',
+    });
     ta.dispatchEvent(e);
-    expect(e.defaultPrevented, '画像でないのに既定を止めている').toBe(false);
-    expect(calls.paste).toHaveLength(0);
-    expect(calls.attach, '貼付で添付を作っている(drop との非対称が崩れた)').toHaveLength(0);
+    expect(e.defaultPrevented, '字を打ち消して添付にした').toBe(false);
+    expect(calls.attach).toHaveLength(0);
+  });
+
+  it('🔑 Mac のように、字が**ファイル名だけ**なら字と数えず、添付にする', () => {
+    const { ta, calls } = setup();
+    const pdf = new File([new Uint8Array([1])], 'a.pdf', { type: 'application/pdf' });
+    const e = pasteEvent([{ kind: 'file', type: 'application/pdf', file: pdf }], {
+      'text/plain': 'a.pdf',
+    });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    expect(calls.attach, 'ファイル名の字に負けて添付にならない').toHaveLength(1);
   });
 
   it('🔴 MIME が空でも、**拡張子が画像なら**本文へ入る', () => {

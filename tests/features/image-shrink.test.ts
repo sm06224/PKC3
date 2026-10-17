@@ -91,6 +91,25 @@ describe('縮める判断(#412)', () => {
     });
   });
 
+  describe('聞く文言(どの写真か。#1652 3)', () => {
+    const b = { width: 4000, height: 3000, bytes: 12 * 1024 * 1024 };
+    const a = { width: 2048, height: 1536, bytes: 1.4 * 1024 * 1024 };
+
+    it('🔴 ファイル名と「5 枚中 2 枚目」が先頭に出る', () => {
+      const q = shrinkQuestion(b, a, { name: '旅行.jpg', index: 2, total: 5 });
+      expect(q.split('\n')[0]).toBe('「旅行.jpg」(5 枚中 2 枚目)');
+    });
+
+    it('🔑 1 枚だけならファイル名だけ(「1 枚中 1 枚目」とは言わない)', () => {
+      const q = shrinkQuestion(b, a, { name: '旅行.jpg', index: 1, total: 1 });
+      expect(q.split('\n')[0]).toBe('「旅行.jpg」');
+    });
+
+    it('⚠ 対照群 ── 場所を渡さなければ、これまでの文のまま', () => {
+      expect(shrinkQuestion(b, a).startsWith('大きな画像です')).toBe(true);
+    });
+  });
+
   describe('聞く文言', () => {
     it('🔴 本当の数字が両方出る(画素数と大きさ)', () => {
       const q = shrinkQuestion(
