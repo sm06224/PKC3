@@ -425,6 +425,54 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
     '「この回だけ動かす」のあと落とした日に札が出ない',
   ).toHaveCount(1);
 
+  /**
+   * ⑫ 🔴 **曜日の列(`毎週 月水金`)は「全部」で開始日と一緒に回る**(#1087。起動は増やさない ── この道中の続き)。
+   *   水曜の回を木曜へ落として「全部」= +1 日 → 開始日は月曜から火曜へ、列は 月水金 から 火木土 へ。
+   *   ⚠ 直す前は日付だけ動いて列が `月水金` のまま残る(本文の字で見分ける)。
+   * ⑬ 🔴 **区切りが全角空白(U+3000)でも、時刻と繰り返しが読まれる**(同じ本文の 2 行目)。
+   *   ⚠ 直す前は `@日付　14:00　毎週` の時刻も「毎週」も読まれず、札に出ない。
+   */
+  const dayKey = (offset: number): string => {
+    const d = new Date(TARGET_MONTH.getFullYear(), TARGET_MONTH.getMonth(), BASE_DAY + offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  // 基準の日以降で最初の月曜(= 今日より前の回は札に出ないので、先の日で組む)
+  const toMon = (8 - new Date(TARGET_MONTH.getFullYear(), TARGET_MONTH.getMonth(), BASE_DAY).getDay()) % 7;
+  const MON = dayKey(toMon);
+  const TUE = dayKey(toMon + 1);
+  const WED = dayKey(toMon + 2);
+  const THU = dayKey(toMon + 3);
+  const SP3 = '\u3000';
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await ta.fill(`- [ ] 定例 @${MON} 毎週 月水金\n- [ ] 全角 @${TUE}${SP3}14:00${SP3}毎週`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const cardsOfDay = (date: string, text: string) =>
+    pane
+      .locator(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${date}"] [data-pkc-entry]`)
+      .filter({ hasText: text });
+  // ⑬ 全角空白の行: 時刻つき・繰り返しつきで札に出る(日付の直後の全角空白も、時刻の後の全角空白も読まれる)
+  await expect(cardsOfDay(TUE, '全角'), '全角空白で区切った予定が札に出ない').toHaveCount(1);
+  // 🔴 読まれていれば札の印(時刻・刻み)になり、繰り返しとして来週の同じ曜日にも出る
+  //    (読まれないと「14:00」「毎週」は題名の字に残るだけ ── 字だけ見ると読まれなくても満たされる)
+  await expect(cardsOfDay(TUE, '全角'), '全角空白の後の時刻が札の印になっていない').toHaveAttribute('data-pkc-task-time', '14:00');
+  await expect(cardsOfDay(TUE, '全角'), '全角空白の後の「毎週」が札の印になっていない').toHaveAttribute('data-pkc-task-repeat', 'week');
+  await expect(cardsOfDay(dayKey(toMon + 8), '全角'), '全角空白の後の「毎週」が繰り返しとして読まれていない(来週に出ない)').toHaveCount(1);
+  // ⑫ 水曜の回を木曜へ、「全部」
+  const wedCard = cardsOfDay(WED, '定例');
+  await expect(wedCard, '水曜の回が出ていない(曜日の列が展開されていない)').toHaveCount(1);
+  await mouseDragTo(page, wedCard, gridCell(THU));
+  await page.mouse.up();
+  await expect(dlg, '曜日の列の札を落としても小窓が出ない').toBeVisible();
+  await clickReal(page, '[data-pkc-field="pick-repeat-move"][data-pkc-repeat-move-index="1"]');
+  await expect(dlg, '「全部動かす」を選んでも小窓が閉じない').toHaveCount(0);
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '「全部動かす」で開始日と曜日の列が一緒に回っていない').toHaveValue(
+    `- [ ] 定例 @${TUE} 毎週 火木土\n- [ ] 全角 @${TUE}${SP3}14:00${SP3}毎週`,
+  );
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+  await expect(cardsOfDay(THU, '定例'), '「全部動かす」のあと木曜に回が出ない').toHaveCount(1);
+  await expect(cardsOfDay(WED, '定例'), '「全部動かす」のあと水曜に回が残っている').toHaveCount(0);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
@@ -1667,6 +1715,31 @@ test('🔴 予定の「月」: 左の列から別ウィンドウで開き、題�
   const w = await paper('[data-pkc-view-pane="schedule"] [data-pkc-region="schedule-weekview"]');
   expect(w.rangeShown, `紙に週の範囲が出ていない: ${JSON.stringify(w)}`).toBe(true);
   expect(w.pageHeight as number, `週が A4 縦(約 1120px)に収まらない: ${JSON.stringify(w)}`).toBeLessThanOrEqual(1120);
+
+  /**
+   * 🔴 **本体で別のノートを保存しても、別ウィンドウの予定表は空表(「予定を集めています…」)へ戻らない**(#1087。起動は増やさない)。
+   *   ⚠ 直す前は本体の保存のたびに窓の予定が一度捨てられる ── 最後に集め直されて元へ戻るので、
+   *   終わりの姿では見分けられない。**途中の姿**を見張りで拾う(窓の中の MutationObserver)。
+   */
+  await win.evaluate(() => {
+    const g = globalThis as unknown as Record<string, unknown>;
+    g.__blank = 0;
+    new MutationObserver(() => {
+      if ((document.body.textContent ?? '').includes('予定を集めています')) g.__blank = (g.__blank as number) + 1;
+    }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+  });
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`- [ ] 別のノートの予定 @${today}`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // 窓へ届いたことを正の信号で待つ(届いていないと「戻らなかった」が空振りで通る)
+  await expect(
+    centre.locator('[data-pkc-entry]').filter({ hasText: '別のノートの予定' }),
+    '本体で保存した別のノートの予定が、別ウィンドウに届いていない',
+  ).toHaveCount(1, { timeout: 20_000 });
+  expect(
+    await win.evaluate(() => (globalThis as unknown as Record<string, number>).__blank),
+    '本体で保存したら、別ウィンドウの予定表が「予定を集めています…」へ戻った',
+  ).toBe(0);
 
   expect(winErrors, `page error: ${winErrors.join(' / ')}`).toEqual([]);
   await win.close();
