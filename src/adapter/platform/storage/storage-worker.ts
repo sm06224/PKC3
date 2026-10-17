@@ -60,6 +60,7 @@ import { readVersions, totalHistoryBytes } from '@features/flavor/attachment-ver
 import { planSaveBack } from '@features/asset/asset-replace-plan';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { bodyLinkNeedles, bodyLinksTo } from '@features/entry-ref/body-links';
+import { renameLinkTexts } from '@features/entry-ref/link-text-rename';
 import {
   SNIPPET_ARCHETYPE,
   SNIPPET_LIMITS,
@@ -3912,6 +3913,63 @@ const handlers: Handlers = {
         stale: [...plan.stale],
         overBudget: plan.overBudget,
       };
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+  },
+  /**
+   * 🔴 **改名のとき、ほかのノートのリンクの字を新しい題名へ**(#1163 依頼 177、#1648)。
+   *
+   * ⚠ 走査も書込も**同じ `BEGIN IMMEDIATE`**(`replaceAssetRefs` と同じ理由 ── 主スレッドで読んでから
+   *   書くと、その間に別の窓が書いた本文を消す)。候補は LIKE で削り、合否は `renameLinkTexts`(文法 1 本)。
+   * ⚠ system 領域のノートには触れない(`USER_REALM_SQL`)。自分自身と `skipLids`(編集中)も触れない。
+   * ⚠ 履歴に 1 版積む(`checkpoint`)── 書き換え前の字へ戻せる。題名・並びは disk の値を保つ。
+   */
+  renameLinkTexts: (req) => {
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      const needles = bodyLinkNeedles(req.lid, req.cid);
+      const where = needles.map((_, i) => `body LIKE ?${i + 3} ESCAPE '\\'`).join(' OR ');
+      const rows = database.selectObjects(
+        `SELECT lid, title, archetype, body, entry_order FROM entries
+          WHERE cid = ?1 AND lid <> ?2 AND ${USER_REALM_SQL} AND (${where})
+          ORDER BY entry_order, lid`,
+        [req.cid, req.lid, ...needles.map((n) => toLikePattern(n))],
+      ) as Array<{ lid: string; title: string; archetype: string; body: string; entry_order: number }>;
+      const skip = new Set(req.skipLids);
+      const wrote: Array<{ lid: string; body: string; stamps: EntryStamps }> = [];
+      let links = 0;
+      for (const r of rows) {
+        if (skip.has(r.lid)) continue;
+        const res = renameLinkTexts(r.body, req.lid, req.cid, req.oldTitle, req.newTitle);
+        if (res.count === 0) continue;
+        const ext = extractMeta(r.archetype, res.body);
+        const w = writeEntryRow(
+          database,
+          req.cid,
+          {
+            lid: r.lid,
+            title: r.title,
+            archetype: r.archetype,
+            body: res.body,
+            entryOrder: r.entry_order,
+            status: ext.status,
+            date: ext.date,
+            archived: ext.archived,
+          },
+          { checkpoint: true, ...(req.keepLatest === undefined ? {} : { keepLatest: req.keepLatest }) },
+        );
+        wrote.push({ lid: r.lid, body: res.body, stamps: w.stamps });
+        links += res.count;
+      }
+      database.exec('COMMIT');
+      return { wrote, links };
     } catch (err) {
       try {
         database.exec('ROLLBACK');

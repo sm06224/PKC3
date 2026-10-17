@@ -632,7 +632,15 @@ describe('reducer edges (P3-7a)', () => {
     const r = reduce(s, { type: 'RENAME_ENTRY_TITLE', lid: 'a', title: '  改名  ' });
     expect(r.state.entryMetas.get('a')?.title).toBe('改名');
     expect(r.events).toEqual([
-      { type: 'REQUEST_RENAME', lid: 'a', title: '改名', archetype: 'text', entryOrder: 1 },
+      {
+        type: 'REQUEST_RENAME',
+        lid: 'a',
+        title: '改名',
+        oldTitle: 't-a',
+        skipLids: [],
+        archetype: 'text',
+        entryOrder: 1,
+      },
     ]);
   });
 });

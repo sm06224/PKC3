@@ -4229,6 +4229,10 @@ export type DomainEvent =
       type: 'REQUEST_RENAME';
       lid: string;
       title: string;
+      /** 🔴 改名前の題名(ほかのノートのリンクの字が旧い題名と同じものを書き換えるため。#1163 依頼 177) */
+      oldTitle: string;
+      /** 🔴 発火時に編集中のノート(リンクの字を書き換えない。本文は draft が正) */
+      skipLids: string[];
       archetype: string;
       entryOrder: number;
     }
@@ -9388,6 +9392,8 @@ function reduceCore(
             type: 'REQUEST_RENAME',
             lid: action.lid,
             title,
+            oldTitle: meta.title,
+            skipLids: state.phase === 'editing' && state.openBody ? [state.openBody.lid] : [],
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
           },

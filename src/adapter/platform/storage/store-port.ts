@@ -183,6 +183,17 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
         newMime: input.newMime,
         savedAt: input.savedAt,
       }),
+    /** 🔴 改名のとき、ほかのノートのリンクの字を新しい題名へ(#1163 依頼 177)。走査も書込も worker の 1 tx。 */
+    renameLinkTexts: (input) =>
+      client.request({
+        op: 'renameLinkTexts',
+        cid,
+        lid: input.lid,
+        oldTitle: input.oldTitle,
+        newTitle: input.newTitle,
+        skipLids: [...input.skipLids],
+        keepLatest: REVISION_KEEP_LATEST,
+      }),
     persistEntry: (entry, opts) =>
       client.request({
         op: 'upsertEntry',

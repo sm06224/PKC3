@@ -100,6 +100,8 @@ export const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   // ⚠ **足し忘れると、他タブの本文が古いまま残る**(#1087)── 添付を参照するノートを何件も書き換える。
   //   当たり先は書く前に分からないので `changedLids` は null(全面の読み直し。保存のたびではなく稀)
   'replaceAssetRefs',
+  // ⚠ **足し忘れると、他タブの本文が古いリンクの字のまま残る**(#1163 依頼 177)── 書き換えた先は書く前に分からない
+  'renameLinkTexts',
 ]);
 
 /**

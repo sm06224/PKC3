@@ -54,6 +54,11 @@ export interface LinkSite {
   /** `[start, end)` のうち宛先そのものの範囲。書換はここだけ差し替えれば足りる。 */
   destStart: number;
   destEnd: number;
+  /**
+   * `inline` のとき、対応する `[` の位置(ラベルは `labelStart + 1` から `start` の手前まで)。
+   * 対応する `[` が無い、または `inline` でないときは `-1`(改名でリンクの字を書き換える側が読む。#1163 依頼 177)。
+   */
+  labelStart: number;
 }
 
 export interface LinkScan {
@@ -238,6 +243,7 @@ export function scanLinks(text: string): LinkScan {
           dest,
           destStart,
           destEnd: destStart + dest.length,
+          labelStart: -1,
         });
         i += m[0].length;
         continue;
@@ -281,6 +287,7 @@ export function scanLinks(text: string): LinkScan {
             dest,
             destStart: i + lead,
             destEnd: i + lead + dest.length,
+            labelStart: open,
           });
           i += m[0].length;
           continue;
@@ -314,6 +321,7 @@ export function scanLinks(text: string): LinkScan {
             dest,
             destStart,
             destEnd: destStart + dest.length,
+            labelStart: -1,
           });
         }
         i = close + 1;
