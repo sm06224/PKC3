@@ -102,6 +102,35 @@ describe('引用の継続が編集欄に繋がっている #396', () => {
     expect(ta.value, '変換確定の Enter を奪っている').toBe('> 引用');
   });
 
+  /**
+   * 🔴 **範囲を選んで Enter を押したときは、引用もリストも触らず普通の Enter に任せる**(#1087 調査 7)。
+   * 直す前は `selectionStart` の行だけを見て、空の `> ` / `- ` なら**記号だけを消して選んだ範囲はそのまま**にしていた
+   * (Enter を押したのに選んだ字が置き換わらない)。
+   */
+  it('🔴 範囲を選んでいるときは奪わない(空の記号の行から下へ選んだ Enter)', () => {
+    for (const mark of ['> ', '- ']) {
+      const { root } = setup();
+      const value = `${mark}\nあいう`;
+      const ta = editor(root, value, 0);
+      ta.setSelectionRange(0, value.length - 1);
+      const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      ta.dispatchEvent(ev);
+      expect(ev.defaultPrevented, `${JSON.stringify(mark)}: 範囲選択中の Enter を奪っている`).toBe(false);
+      expect(ta.value, `${JSON.stringify(mark)}: 記号だけが消えた`).toBe(value);
+    }
+  });
+
+  it('対照群: 範囲が無ければ空の記号で抜ける / 続きを足す(上と同じ本文)', () => {
+    const { root } = setup();
+    const ta = editor(root, '> \nあいう', 2);
+    ta.setSelectionRange(2, 2);
+    enter(ta);
+    expect(ta.value).toBe('\nあいう');
+    const t2 = editor(root, '> あ', 3);
+    enter(t2);
+    expect(t2.value).toBe('> あ\n> ');
+  });
+
   /** ⚠ 引用でない行では普通の改行のまま(奪わない)。 */
   it('引用でない行では何もしない', () => {
     const { root } = setup();

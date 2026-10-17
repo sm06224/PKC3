@@ -563,13 +563,25 @@ describe('🔴 caret が表の行に在るとき「Tab で次のセル」(#1451)
     un();
   });
 
-  it('行頭の空白つきの表・row-source でも出る / 全角｜と追記欄では出ない', () => {
-    for (const field of ['row-source', 'editor-body'] as const) {
+  it('行頭の空白つきの表は出る / 🔴 ライブの行の欄(row-source)・全角｜・追記欄では出ない(#1087 B-1)', () => {
+    {
       document.body.textContent = '';
-      const { region, slot, ta } = surface(field, '  | x | y |');
+      const { region, slot, ta } = surface('editor-body', '  | x | y |');
       const un = watchSelectionStats(region);
       select(ta, 5, 5);
-      expect(slot.textContent, field).toBe(TABLE_TAB_HINT);
+      expect(slot.textContent, '2 列の欄では出る').toBe(TABLE_TAB_HINT);
+      un();
+    }
+    {
+      // 行の欄の Tab は行の確定で、セルは動かない ── 案内を出すと嘘になる。同じ本文・同じ位置の対照が上
+      document.body.textContent = '';
+      const { region, slot, ta } = surface('row-source', '  | x | y |');
+      const un = watchSelectionStats(region);
+      select(ta, 5, 5);
+      expect(slot.textContent, '行の欄では Tab はセルを移さない').toBe('');
+      // 選んだときの数は行の欄でも出る(案内だけを外している)
+      select(ta, 4, 7);
+      expect(slot.textContent).toBe('選択: 3 文字(1 行)');
       un();
     }
     document.body.textContent = '';
