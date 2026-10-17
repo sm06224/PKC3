@@ -158,7 +158,7 @@ test('🔴 札の × で外れ、本文からも消える (#494)', async ({ page
   await expect(relRows, '断られたのに関連が増えた').toHaveCount(1);
 
   /**
-   * 🔴 束 G2(台帳 #1852 / 依頼 299): つながりの相手がゴミ箱の中に居ると、右のペインは「(ゴミ箱の中)」と言い、押しても開かない。
+   * 🔴 束 G2(台帳 #1852 / 依頼 299): つながりの相手がゴミ箱の中に居ると、右のペインはゴミ箱の一覧を読む前は「ゴミ箱の中かもしれません」、読んだ後は「題名(ゴミ箱の中)」と言い、押しても開かない。
    * ⚠ 直す前は「(見つかりません)」で、壊れたつながりに見えた。起動は増やさない(上で作った 2 件の関連を使う)。
    */
   await pick('長いタグ');
@@ -170,8 +170,7 @@ test('🔴 札の × で外れ、本文からも消える (#494)', async ({ page
   await pick('読み違える');
   await expect(relRows, '相手をゴミ箱へ移して読み込み直したら、つながりが消えた(戻せる形で残るはず)').toHaveCount(1);
   const relTarget = relRows.locator('[data-pkc-field="relation-target-link"]');
-  await expect(relTarget, '相手がゴミ箱の中だと言っていない').toContainText('(ゴミ箱の中)');
-  await expect(relTarget, '「見つかりません」と出ている(壊れたつながりに見える)').not.toContainText('見つかりません');
+  await expect(relTarget, 'ゴミ箱の中かもしれないと言っていない').toContainText('(見つかりません。ゴミ箱の中かもしれません)');
   expect(await relTarget.evaluate((el) => el.tagName), '押せる顔(button)になっている').toBe('SPAN');
   const titleBefore = await page.locator('[data-pkc-field="detail-title"]').allTextContents();
   await relTarget.click({ force: true });
