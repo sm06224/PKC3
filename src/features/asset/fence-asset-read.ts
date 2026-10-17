@@ -10,6 +10,8 @@
  *   ので adapter にも置かない ── 入口は「鍵 → Blob」の口 1 つだけである。
  */
 
+import { decodeImportTextInfo } from '../import/text-decode';
+
 /** 添付 1 件の読み。⚠ 失敗は**理由つき**で返す(黙って空にしない)。 */
 export type FenceAssetRead =
   | { readonly ok: true; readonly text: string }
@@ -37,7 +39,9 @@ export async function readFenceAssetText(
   }
   if (!blob) return { ok: false, why: 'その添付が見つかりません' };
   try {
-    const text = await blob.text();
+    // 🔴 UTF-8 固定で読まない(#1087 A2)── Shift_JIS / UTF-16 の CSV が文字化けのまま ok で描かれ、書き出しにも焼き込まれていた。
+    //   取り込み・下見と同じ判定(`decodeImportTextInfo`)を通す(判定を増やさない)
+    const text = decodeImportTextInfo(new Uint8Array(await blob.arrayBuffer())).text;
     // 🔴 `Blob.text()` は binary でも投げない(壊れた字に化けるだけ)── 画像・zip を
     //   字として並べないよう、字の種類でない物が NUL / 置換文字を含むときは断る
     if (!isTextualMime(blob.type ?? '') && (text.includes('\u0000') || text.includes('\uFFFD'))) {

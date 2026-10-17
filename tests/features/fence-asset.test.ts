@@ -424,3 +424,30 @@ describe('添付を字として読む(#1087)', () => {
     }
   });
 });
+
+describe('囲みの添付の文字コード(#1087 A2)', () => {
+  const text = '名前,値\n日本語,1\n';
+  const u16 = (le: boolean, bom: boolean): Uint8Array => {
+    const out: number[] = bom ? (le ? [0xff, 0xfe] : [0xfe, 0xff]) : [];
+    for (const ch of text) {
+      const c = ch.charCodeAt(0);
+      out.push(...(le ? [c & 255, c >> 8] : [c >> 8, c & 255]));
+    }
+    return new Uint8Array(out);
+  };
+  // 「名前,値\n日本語,1\n」の Shift_JIS(手で組んだ bytes)
+  const sjis = new Uint8Array([
+    0x96, 0xbc, 0x91, 0x4f, 0x2c, 0x92, 0x6c, 0x0a, 0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea, 0x2c, 0x31, 0x0a,
+  ]);
+  const read = (b: Uint8Array) =>
+    readFenceAssetText(async () => new Blob([b as BlobPart], { type: 'text/csv' }), 'k');
+
+  it('Shift_JIS / UTF-16LE(BOM)/ UTF-16BE(BOM)/ UTF-8(BOM)/ 素の UTF-8 を読み分ける', async () => {
+    expect(await read(sjis)).toEqual({ ok: true, text });
+    expect(await read(u16(true, true))).toEqual({ ok: true, text });
+    expect(await read(u16(false, true))).toEqual({ ok: true, text });
+    expect(await read(new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(text)]))).toEqual({ ok: true, text });
+    expect(await read(new TextEncoder().encode(text))).toEqual({ ok: true, text });
+  });
+});
+

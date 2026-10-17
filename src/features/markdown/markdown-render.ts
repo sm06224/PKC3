@@ -1295,12 +1295,11 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
     const hIdx = token.attrIndex('href');
     if (hIdx >= 0) token.attrs!.splice(hIdx, 1);
     // DL ファイル名はラベル文字列(挿入時の既定はファイル名)。空なら key
-    let label = '';
-    for (let j = idx + 1; j < tokens.length; j++) {
-      const t = tokens[j]!;
-      if (t.type === 'link_close') break;
-      if (t.type === 'text' || t.type === 'code_inline') label += t.content;
-    }
+    // 🔴 保存名は**置換前の原文**(#1087 A1)── ここ(描画時)の text は typographer が `'` → `’` / `...` → `…` /
+    //   `--` → `–` / `(c)` → `©` に置換した後で、そのまま `a.download` に入れると保存名が化ける。
+    //   原文は置換の前(`pkc_asset_link_raw`)に `meta` へ控えてある。画面に見えるリンクの字は変えない
+    const rawMeta = token.meta as { rawLabel?: unknown } | null;
+    const label = typeof rawMeta?.rawLabel === 'string' ? rawMeta.rawLabel : '';
     const cls = token.attrGet('class');
     token.attrSet('class', cls ? `${cls} pkc-asset-link` : 'pkc-asset-link');
     token.attrSet('data-pkc-action', 'download-asset');
@@ -1472,6 +1471,38 @@ const defaultImage =
     return self.renderToken(tokens, idx, options);
   };
 
+/**
+ * 🔴 `[名前](asset:K)` の**名前の原文**を、typographer が置換する前に控える(#1087 A1)。
+ * 置換(`replacements` / `smartquotes`)は `linkify` の後なので、`inline` の直後で読めば原文である。
+ * escape(`\[`)は外した平文(`text_special` の content)、入れ子の autolink も字だけを拾う。
+ * ⚠ 控える先は `link_open.meta`(`text_join` が隣の text を結合しても残る)。
+ */
+md.core.ruler.after('inline', 'pkc_asset_link_raw', (state) => {
+  for (const tok of state.tokens) {
+    if (tok.type !== 'inline' || !tok.children) continue;
+    const kids = tok.children;
+    for (let i = 0; i < kids.length; i++) {
+      const open = kids[i]!;
+      if (open.type !== 'link_open') continue;
+      const href = open.attrGet('href');
+      if (typeof href !== 'string' || !href.startsWith('asset:')) continue;
+      let label = '';
+      let depth = 0;
+      for (let j = i + 1; j < kids.length; j++) {
+        const t = kids[j]!;
+        if (t.type === 'link_open') depth++;
+        else if (t.type === 'link_close') {
+          if (depth === 0) break;
+          depth--;
+        } else if (t.type === 'text' || t.type === 'text_special' || t.type === 'code_inline') {
+          label += t.content;
+        }
+      }
+      open.meta = { ...(open.meta as object | null), rawLabel: label };
+    }
+  }
+});
+
 md.renderer.rules.image = function (tokens, idx, options, env, self) {
   const token = tokens[idx]!;
   const src = attrString(token, 'src') ?? '';
@@ -1481,7 +1512,13 @@ md.renderer.rules.image = function (tokens, idx, options, env, self) {
     // ブラウザが即 fetch を試みて console を汚す(entry: transclusion と
     // 同じ理由)。alt はそのまま保持 ── missing 時の可視 fallback を兼ねる
     const key = src.slice('asset:'.length);
-    const alt = token.content ?? '';
+    // 🔴 alt から escape の逆斜線を外す(#1087 A6)── `\[1\].png` を書いたのに alt に `\` が残っていた。
+    //   ⚠ 外すのは escape だけ(`` `b` `` などの記号は今までどおり残す ── 既存の pin:markdown-linkify.test.ts)。
+    //   code span の中の `\` は字なので触らない
+    const alt = (token.content ?? '').replace(
+      /(`+)[\s\S]*?\1|\\([!-/:-@[-`{-~])/g,
+      (m: string, _run: string | undefined, ch: string | undefined) => ch ?? m,
+    );
     const title = attrString(token, 'title');
     return (
       `<img class="pkc-asset-ref"` +
