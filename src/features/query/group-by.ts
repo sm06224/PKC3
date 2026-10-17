@@ -131,16 +131,40 @@ function valuesOf(v: FrontmatterValue | undefined): string[] {
     for (const item of v) {
       if (item === null) continue;
       const s = String(item).trim();
-      if (s !== '') out.push(clip(s));
+      if (s !== '') out.push(s);
     }
     return out;
   }
   const s = String(v).trim();
-  return s === '' ? [] : [clip(s)];
+  return s === '' ? [] : [s];
 }
 
 function clip(s: string): string {
   return s.length <= QUERY_LIMITS.valueChars ? s : `${s.slice(0, QUERY_LIMITS.valueChars)}…`;
+}
+
+/** 見分けるために添える、値の末尾の字数。 */
+const TAIL_CHARS = 10;
+
+/**
+ * 🔴 **組の鍵は丸める前の値、丸めるのは表示名だけ**(#1087)。
+ * 先頭 80 字が同じ長い値 2 つを 1 つの組に併合していた(件数も lid も合算され、片方が消えて見えた)。
+ * ⚠ 丸めた名前が他の組と同じになるときは、**末尾の字を添えて**見分ける(それでも同じなら ` (2)`)。
+ *   `value` は画面の `data-pkc-group` と畳み状態の鍵でもあるので、組どうしで**必ず別**にする。
+ */
+function uniqueDisplayNames(raws: readonly string[]): string[] {
+  const used = new Set<string>();
+  return raws.map((raw) => {
+    let name = clip(raw);
+    if (raw.length > QUERY_LIMITS.valueChars && used.has(name)) {
+      name = `${raw.slice(0, QUERY_LIMITS.valueChars)}…${raw.slice(-TAIL_CHARS)}`;
+      for (let n = 2; used.has(name); n += 1) {
+        name = `${raw.slice(0, QUERY_LIMITS.valueChars)}…${raw.slice(-TAIL_CHARS)} (${n})`;
+      }
+    }
+    used.add(name);
+    return name;
+  });
 }
 
 /**
@@ -238,8 +262,11 @@ export function createQueryScan(key: string | null): QueryScan {
         // 並びは **件数の多い順 → key の字順**。⚠ 件数だけで並べると、同数の key の順が
         // 走査順(= entry_order)で揺れて、開くたびに目録の並びが変わる
         .sort((a, b) => b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-      const groups = [...buckets.values()]
-        .map((b) => ({ value: b.value, total: b.total, lids: b.lids }))
+      const raw = [...buckets.values()];
+      // ⚠ 丸めるのは**タグ以外**だけ(タグは従来どおり綴りのまま ── 改名の鍵になる)
+      const shown = key === TAGS_KEY ? raw.map((b) => b.value) : uniqueDisplayNames(raw.map((b) => b.value));
+      const groups = raw
+        .map((b, i) => ({ value: shown[i]!, total: b.total, lids: b.lids }))
         // 並びは **件数の多い順 → 値の字順**、ただし**未設定は必ず最後**
         // (「持っていないもの」が先頭に来ると表が読めない)
         .sort((a, b) => {

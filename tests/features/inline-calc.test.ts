@@ -679,3 +679,106 @@ describe('🔴 今までの答えは 1 バイトも変わらない(#1230 の回�
     expect(explainCalcMiss(t, t.length)).toBeNull();
   });
 });
+
+describe('#1087 答えの字に浮動小数の端数が出ない', () => {
+  // seed 固定の乱数(xorshift)── 2 桁の金額 × 約 8000 以上の答えで端数が出ていた
+  const rng = (seed: number) => () => {
+    seed ^= seed << 13;
+    seed >>>= 0;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    seed >>>= 0;
+    return seed / 0x100000000;
+  };
+  const money = (r: () => number): string => (Math.floor(r() * 5_000_000) / 100).toFixed(2);
+
+  it('実例:3958.01+9647.86= と 37807.96*1=', () => {
+    expect(formatCalcResult(3958.01 + 9647.86)).toBe('13605.87');
+    expect(formatCalcResult(37807.96 * 1)).toBe('37807.96');
+    const t = '3958.01+9647.86=';
+    expect(formatCalcResult(resolveInlineCalc(t, t.length)!.value)).toBe('13605.87');
+  });
+
+  it('2 桁の金額の足し算・掛け算 2000 組:字は 12 桁を超えず、12 桁で丸めた値と等しい', () => {
+    const r = rng(20261017);
+    let checked = 0;
+    let large = 0;
+    for (let i = 0; i < 2000; i += 1) {
+      const a = money(r);
+      const b = money(r);
+      for (const text of [`${a}+${b}`, `${a}*1`]) {
+        const v = evaluateCalcExpression(text)!;
+        const got = formatCalcResult(v);
+        expect(got, text).not.toBeNull();
+        const digits = got!.replace(/^-/, '').replace('.', '').replace(/^0+/, '');
+        expect(digits.length, `${text} → ${got}`).toBeLessThanOrEqual(12);
+        expect(Number(got), text).toBe(Number(v.toPrecision(12)));
+        if (Math.abs(v) >= 8000) large += 1;
+        checked += 1;
+      }
+    }
+    expect(checked).toBe(4000);
+    // 前提:端数の出やすい「約 8000 以上」の答えが十分に含まれる
+    expect(large).toBeGreaterThan(1500);
+  });
+
+  it('極小は従来どおり普通の数字(指数にしない)・0 に丸まる物は null', () => {
+    expect(formatCalcResult(0.0000001234)).toBe('0.0000001234');
+    expect(formatCalcResult(1e-13)).toBeNull();
+  });
+});
+
+describe('#1087 日付と時刻は計算しない', () => {
+  const at = (t: string): string | null => {
+    const r = resolveInlineCalc(t, t.length);
+    return r === null ? null : formatCalcResult(r.value);
+  };
+
+  it.each([
+    '2026-10-17-2026-10-01=',
+    '2026-10-17=',
+    '2026/10/17-2026/10/01=',
+    '2026/10/17=',
+    '会議2026-10-17=',
+    '10/17/2026=',
+    '２０２６－１０－１７＝',
+    '12:30+45=',
+    '会議12:30+45=',
+    '12：30+45=',
+  ])('%s は計算しない(Enter はそのまま通る)', (t) => {
+    expect(at(t)).toBeNull();
+    expect(detectInlineCalcRequest(t, t.length)).toBeNull();
+  });
+
+  it('変数を使う行でも日付は計算しない', () => {
+    expect(at('単価 = 100\n2026-10-17+単価=')).toBeNull();
+  });
+
+  it('対照群:日付ではない引き算・割り算は今までどおり計算する(線の引き方)', () => {
+    expect(at('10-3=')).toBe('7');
+    expect(at('8/2=')).toBe('4');
+    expect(at('1-2-3=')).toBe('-4'); // 年が 4 桁でない
+    expect(at('2026-13-45=')).toBe('1968'); // 月が範囲外 → 日付ではない
+    expect(at('2026-13-05=')).toBe('2008'); // 月だけが範囲外
+    expect(at('2026-10-32=')).toBe('1984'); // 日だけが範囲外
+    expect(at('2026-10=')).toBe('2016'); // 区切りが 1 つ
+    expect(at('100-20-30=')).toBe('50');
+    expect(at('12345-1-2=')).toBe('12342'); // 5 桁の数は年ではない
+  });
+
+  it('計算しない理由を言う(日付)', () => {
+    for (const d of ['2026-10-17=', '2026-10-17-2026-10-01=']) {
+      expect(explainCalcMiss(d, d.length)).toBe('計算できませんでした(日付や時刻は計算できません)');
+    }
+    // 計算できる行には口を出さない
+    expect(explainCalcMiss('10-3=', 5)).toBeNull();
+  });
+
+  it('「この行を計算する」でも日付は挿さない', () => {
+    const t = '2026-10-17-2026-10-01';
+    expect(calcLineAction(t, t.length)).toEqual({
+      kind: 'why',
+      text: '計算できませんでした(日付や時刻は計算できません)',
+    });
+  });
+});
