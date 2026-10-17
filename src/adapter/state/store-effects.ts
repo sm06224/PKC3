@@ -3400,6 +3400,7 @@ export function connectStoreEffects(
                 },
                 body: rev.body,
                 relations: restored,
+                selectedAtIssue: ev.selectedAtIssue,
               });
             // ⚠ `ENTRY_RESTORED` の後(meta を置き換えるため)
             stamp(ev.entryLid, stamps);

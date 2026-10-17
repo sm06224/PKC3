@@ -241,6 +241,30 @@ describe('revision flow (P5b)', () => {
     expect(d.getState().error, '内部の ID が出ている').not.toMatch(/\(e1\)/);
   });
 
+  it('🔴 ゴミ箱から戻す途中で別のノートを選び直したら、効果層を通しても選択を奪い返さない(#1087)', async () => {
+    let release: (v: { body: string; title: string | null; archetype: string | null }) => void =
+      () => {};
+    const { d } = setup(
+      { e1: '# 一', e2: '# 二' },
+      {
+        getRevision: () =>
+          new Promise((r) => {
+            release = r;
+          }),
+      },
+    );
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1'), meta('e2', { entryOrder: 2 })], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    d.dispatch({ type: 'RESTORE_TRASH', entryLid: 'gone1', revId: 'r-t' });
+    await tick();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e2' }); // 戻る間に選び直す
+    expect(d.getState().selectedLid, '前提: 選び直せている').toBe('e2');
+    release({ body: '戻した本文', title: '消した子', archetype: 'text' });
+    await tick();
+    expect(d.getState().entryMetas.has('gone1'), '前提: 戻っている').toBe(true);
+    expect(d.getState().selectedLid, '選び直したノートが奪われた').toBe('e2');
+  });
+
   it('編集中の着弾・同一 lid: draft 無傷 + diskAhead(無変更 cancel で復元内容が勝つ)', async () => {
     let release: (v: { body: string; title: string | null; archetype: string | null }) => void =
       () => {};
@@ -544,6 +568,48 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'z' });
     d.dispatch({ type: 'ENTRY_RESTORED', mode: 'revision', meta: meta('z', { entryOrder: 3, title: '戻したノート' }), body: 'さらに古い版' });
     expect(d.getState().openBody?.body).toBe('さらに古い版');
+  });
+
+  it('🔴 ゴミ箱から戻す着弾も、頼んだ後に別のノートを選び直していたら選択を奪い返さない(#1087)', () => {
+    const d = bootWithFolder();
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
+    // 頼んだ時点は 'folder' を選んでいた → その後 'a' を選び直した
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    expect(d.getState().selectedLid, '前提: a を選んでいない').toBe('a');
+    d.dispatch({
+      type: 'ENTRY_RESTORED',
+      mode: 'trash',
+      meta: meta('child', { entryOrder: 2, title: '戻したノート' }),
+      body: '戻した本文',
+      relations: [{ id: 'r1', kind: 'structural', fromLid: 'folder', toLid: 'child', createdAt: null, updatedAt: null }],
+      selectedAtIssue: 'folder',
+    });
+    const st = d.getState();
+    expect(st.selectedLid, '選び直したノートから、戻したノートへ引き戻された').toBe('a');
+    expect(st.openBody?.lid, '開いている本文を差し替えた').not.toBe('child');
+    expect(st.order, '一覧に元の位置で戻っていない').toEqual(['folder', 'a', 'child', 'z']);
+    expect(st.relations.find((r) => r.toLid === 'child')?.fromLid, '居場所が戻っていない').toBe('folder');
+    expect(st.notice, '戻したことを言っていない').toContain('ゴミ箱から元に戻しました');
+    // 対照群: 頼んだ時点と同じノートを選んだままなら、戻したノートを選ぶ
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
+    d.dispatch({
+      type: 'ENTRY_RESTORED',
+      mode: 'trash',
+      meta: meta('child', { entryOrder: 2, title: '戻したノート' }),
+      body: '戻した本文',
+      selectedAtIssue: 'a',
+    });
+    expect(d.getState().selectedLid).toBe('child');
+    expect(d.getState().openBody?.body).toBe('戻した本文');
+  });
+
+  it('🔴 RESTORE_TRASH は頼んだ時点の選択を効果層へ渡す(#1087)', () => {
+    const d = bootWithFolder();
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    const r = reduce(d.getState(), { type: 'RESTORE_TRASH', entryLid: 'child', revId: 'rv' });
+    const ev = r.events.find((e) => e.type === 'REQUEST_TRASH_RESTORE');
+    expect(ev && 'selectedAtIssue' in ev ? ev.selectedAtIssue : 'なし').toBe('a');
   });
 
   it('🔴 並びの位置が戻る(末尾に飛ばない)', () => {

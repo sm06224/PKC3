@@ -4264,6 +4264,65 @@ describe('ゴミ箱の見直し(#1087)── 作成日の控えと、手付か�
   });
 });
 
+describe('ゴミ箱の繰り返しで履歴が上限を超えない / 並べ替えは更新日時を進めない(#1087)', () => {
+  const KEEP = 5;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const trashHead = async (lid: string) => {
+    const row = (await request({ op: 'listTrash', cid: 'c1' })).find((t) => t.entry_lid === lid)!;
+    return (await request({ op: 'getRevision', cid: 'c1', id: row.id }))!;
+  };
+
+  it('🔴 移す → 戻す → 保存 を 30 周しても、1 ノートの履歴は上限を超えず、戻すと本文が正しく戻る', async () => {
+    const lid = 'tr-cap';
+    await write(lid, 'v0\n', { keepLatest: KEEP });
+    let tip = 'v0\n';
+    let worst = 0;
+    for (let i = 1; i <= 30; i++) {
+      // 戻した直後の最初の保存(張り替えの枝)→ 編集して保存(履歴を積まない保存)→ ゴミ箱へ
+      await write(lid, tip, { checkpoint: true, keepLatest: KEEP });
+      tip = `v${i}\n${'x'.repeat(i)}\n`;
+      await write(lid, tip, { checkpoint: false, keepLatest: KEEP });
+      await request({ op: 'deleteEntry', cid: 'c1', lid, keepLatest: KEEP });
+      worst = Math.max(worst, (await metasOf(lid)).length);
+      // 戻す(ゴミ箱の先頭の版 = 全文で、削除直前の本文)
+      const head = await trashHead(lid);
+      expect(head.body, `${i} 周目: ゴミ箱の先頭の版が消えている / 本文が違う`).toBe(tip);
+      await write(lid, head.body, { checkpoint: false, keepLatest: KEEP });
+    }
+    expect(worst, '履歴が上限を超えて育った').toBeLessThanOrEqual(KEEP);
+    expect(worst, '前提: 上限まで積んでいる(空振り防止)').toBe(KEEP);
+    expect(await request({ op: 'getBody', cid: 'c1', lid })).toBe(tip);
+  });
+
+  it('🔴 張り替えだけの経路も、上限を超えていれば刈る(戻した直後の最初の保存)', async () => {
+    const lid = 'tr-amend';
+    await write(lid, 'a0\n');
+    for (let v = 1; v <= 8; v++) await write(lid, `a${v}\n`, { checkpoint: true, keepLatest: 100 });
+    expect((await metasOf(lid)).length, '前提: 上限より多く積んでいる').toBe(8);
+    // 積まずに張り替える保存(checkpoint なし)── 上限 3 で刈る。頭は今の本文を遡れる形のまま残る
+    await write(lid, 'a8!\n', { checkpoint: false, keepLatest: 3 });
+    const metas = await metasOf(lid);
+    expect(metas.length).toBe(3);
+    expect(await bodyOf(metas[0]!.id), '頭の版が壊れた').toBe('a7\n');
+  });
+
+  it('🔴 並べ替えは updated_at を進めず、改名は進める', async () => {
+    const lid = 'tr-order';
+    await write(lid, 'o\n');
+    const t0 = (await request({ op: 'listEntryMetas', cid: 'c1' })).find((m) => m.lid === lid)!.updated_at;
+    expect(t0, '前提: 更新日時が入っている').toBeTruthy();
+    await sleep(1100); // datetime('now') は秒の粒度
+    const moved = await request({ op: 'reorderEntry', cid: 'c1', lid, entryOrder: 77 });
+    expect(moved?.updatedAt, '並べ替えで更新日時が進んだ').toBe(t0);
+    const m = (await request({ op: 'listEntryMetas', cid: 'c1' })).find((x) => x.lid === lid)!;
+    expect(m.entry_order, '前提: 並びは実際に動いた').toBe(77);
+    expect(m.updated_at).toBe(t0);
+    // 対照群: 改名は従来どおり進める(日時の比較が効いている証拠)
+    const renamed = await request({ op: 'renameEntry', cid: 'c1', lid, title: '改名' });
+    expect(renamed?.updatedAt, '改名で更新日時が進んでいない').not.toBe(t0);
+  });
+});
+
 describe('SQL で調べる画面の直し(#1087)── 運ぶ量の天井と文字コード', () => {
   const W = 'w-1087';
   const runMain = (sql: string, maxRows = 200_000) =>

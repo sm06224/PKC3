@@ -3611,6 +3611,11 @@ export type SystemCommand =
       undoRevId?: string;
       /** 🔴 「元に戻す」から来た復元(#1087)。知らせを「戻す前の本文に戻しました」にし、「元に戻す」は重ねて出さない。 */
       fromUndo?: true;
+      /**
+       * 🔴 **ゴミ箱から戻すと頼んだ時点の選択**(#1087)。着いたときの選択がこれと違えば、その間に別のノートを
+       * 選び直している ── 選択を奪い返さない(`restoreStealsSelection`)。省略 = 判定しない(従来どおり戻したノートを選ぶ)。
+       */
+      selectedAtIssue?: string | null;
     }
   | { type: 'TRASH_PURGED'; purged: number }
   | {
@@ -4288,6 +4293,8 @@ export type DomainEvent =
       entryLid: string;
       revId: string;
       entryOrder: number;
+      /** 頼んだ時点の `selectedLid`(#1087)。効果層が `ENTRY_RESTORED` へそのまま渡す。 */
+      selectedAtIssue: string | null;
     }
   | { type: 'REQUEST_TRASH_PURGE' };
 
@@ -9666,6 +9673,7 @@ function reduceCore(
             entryLid: action.entryLid,
             revId: action.revId,
             entryOrder,
+            selectedAtIssue: state.selectedLid,
           },
         ],
       };
@@ -10263,6 +10271,33 @@ function reduceCore(
        *   押したノートが開かず、戻したノートへ引き戻されていた(押したのに何も起きないように見える)。
        * 🔑 戻したこと自体は言う(書込は済んでいる)。並び・本文の画面は選んでいるノートのまま。
        */
+      if (action.mode === 'trash' && restoreKeepsSelection(state, action)) {
+        /**
+         * 🔴 **ゴミ箱から戻した着弾も同じ**(#1087)── 頼んでから着くまでの間に別のノートを選び直していたら、
+         *   選択と開いている本文は動かさず、戻したことは一覧と知らせで言う(居場所も戻す)。
+         */
+        const metasK = new Map(state.entryMetas).set(action.meta.lid, action.meta);
+        const orderK = state.order.includes(action.meta.lid)
+          ? state.order
+          : insertByOrder(state.order, action.meta.lid, metasK);
+        const relationsK = mergeRelations(state.relations, action.relations ?? []);
+        return {
+          state: {
+            ...state,
+            entryMetas: metasK,
+            order: orderK,
+            relations: relationsK,
+            trashPanel: state.trashPanel
+              ? { items: state.trashPanel.items.filter((t) => t.entryLid !== action.meta.lid) }
+              : null,
+            notice: trashRestoredNotice(action.meta.lid, relationsK, metasK),
+            restoreUndo: null,
+            noticeOpen: null,
+            noticeCreate: null,
+          },
+          events: [],
+        };
+      }
       if (action.mode === 'revision' && state.selectedLid !== action.meta.lid) {
         return {
           state: {
@@ -10676,6 +10711,20 @@ function insertByOrder(
   });
   out.splice(at < 0 ? out.length : at, 0, lid);
   return out;
+}
+
+
+/**
+ * 🔴 **ゴミ箱から戻した着弾が、選び直した選択を奪い返すか**(#1087)── 履歴の復元の「別のノートを選んでいたら
+ * 奪わない」(`selectedLid !== meta.lid`)と同じ問いに答える**唯一の口**。
+ * ゴミ箱の復元はノートがまだ居ないので `selectedLid === meta.lid` では比べられない ── 頼んだ時点の選択
+ * (`selectedAtIssue`)と、着いたいまの選択が違えば「その間に選び直した」。省略時は判定しない。
+ */
+function restoreKeepsSelection(
+  state: AppState,
+  action: { selectedAtIssue?: string | null },
+): boolean {
+  return action.selectedAtIssue !== undefined && state.selectedLid !== action.selectedAtIssue;
 }
 
 /**
