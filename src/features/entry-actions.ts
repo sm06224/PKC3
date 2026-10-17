@@ -1429,7 +1429,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
     'このノートだけを別のウィンドウで開きます(何枚でも開けます。閉じれば消えます)',
   // 🔴 **左の列の道具 4 つ**(#632 段①)。⚠ 字は `shell.ts` のボタンの `title` と
   //    **同じ意味**にする ── 同じ操作に 2 通りの説明を作らない
-  'attach-file': 'ファイルを取り込んで、開いているノートの本文に入れます',
+  'attach-file': 'ファイルを選んで、添付として開いているノートの本文に入れます',
   'start-audio-capture': 'マイクで録音して、このノートに入れます',
   'start-screen-capture': '画面を録画して、このノートに入れます',
   'start-timer': 'このノートの作業時間を計ります(止めると本文に書きます)',

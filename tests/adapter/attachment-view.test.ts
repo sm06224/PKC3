@@ -109,6 +109,14 @@ describe('attachment view (P4a)', () => {
     expect(img?.getAttribute('src')).toBe('blob:fake-1');
     // メタ表示 + ダウンロード導線
     expect(q('[data-pkc-field="attachment-info"]')?.textContent).toContain('p.png');
+    // 🔴 種類は日本語の短い名前で出し、元の英字は出さない(マウスを載せたときだけ title に出る。#1163 依頼 85-1 / 102-2)
+    const infoText = q('[data-pkc-field="attachment-info"]')?.textContent ?? '';
+    expect(infoText, '種類が短い名前になっていない').toContain('p.png — PNG — ');
+    expect(infoText, '内部の種類名がそのまま出ている').not.toContain('image/png');
+    expect(
+      q('[data-pkc-field="attachment-info"] span')?.getAttribute('title'),
+      'マウスを載せても元の種類が読めない',
+    ).toBe('ファイルの種類: image/png');
     expect(
       q('[data-pkc-action="download-asset"]')?.getAttribute('data-pkc-asset-key'),
     ).toBe('ast-1');
@@ -154,6 +162,65 @@ describe('attachment view (P4a)', () => {
         expect(q('[data-pkc-action="download-asset"]')?.textContent ?? '').toContain('添付をダウンロード');
       });
     }
+  });
+
+  /**
+   * 🔴 **画像は、読み込めたら縦横の大きさが先頭の行に出る**(#1163 依頼 85-2。推薦 A)。
+   * ⚠ 対照群:読み込む前は出ない / SVG は出さない / 選択が移った後の load は別の添付の行を書き換えない。
+   */
+  describe('画像の縦横の大きさ(#1163 依頼 85-2)', () => {
+    const lenderOf = (): AssetLender => ({
+      lend: async () => ({ url: 'blob:x', dispose: () => {} }),
+      getBlob: async () => null,
+    });
+    const loaded = (img: HTMLElement, w: number, h: number): void => {
+      Object.defineProperty(img, 'naturalWidth', { value: w, configurable: true });
+      Object.defineProperty(img, 'naturalHeight', { value: h, configurable: true });
+      img.dispatchEvent(new Event('load'));
+    };
+
+    it('🔴 読み込む前は出ず、読み込めたら「4000×3000」が足される(2 回 load が来ても 1 回だけ)', async () => {
+      const body = attachmentBody({ name: '写真.jpg', mime: 'image/jpeg', size: 3, assetKey: 'ast-d' });
+      const { d, q } = setup({ a1: body, a2: '# text' }, lenderOf());
+      d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+      await tick(20);
+      const info = q('[data-pkc-field="attachment-info"] span')!;
+      expect(info.textContent, '読み込む前に出ている').not.toContain('×');
+      const img = q<HTMLElement>('[data-pkc-field="attachment-media"]')!;
+      loaded(img, 4000, 3000);
+      expect(info.textContent).toContain('写真.jpg — JPEG — ');
+      expect(info.textContent?.endsWith(' — 4000×3000'), info.textContent ?? '').toBe(true);
+      loaded(img, 4000, 3000);
+      expect(info.textContent?.split('×').length, '二重に足している').toBe(2);
+    });
+
+    it('🔴 SVG は出さない(大きさを持たない)/ 大きさが 0 のときも出さない', async () => {
+      const svg = attachmentBody({ name: 'a.svg', mime: 'image/svg+xml', size: 3, assetKey: 'ast-s' });
+      const s1 = setup({ a1: svg, a2: '# text' }, lenderOf());
+      s1.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+      await tick(20);
+      loaded(s1.q<HTMLElement>('[data-pkc-field="attachment-media"]')!, 300, 150);
+      expect(s1.q('[data-pkc-field="attachment-info"] span')!.textContent).not.toContain('×');
+
+      const png = attachmentBody({ name: 'b.png', mime: 'image/png', size: 3, assetKey: 'ast-z' });
+      const s2 = setup({ a1: png, a2: '# text' }, lenderOf());
+      s2.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+      await tick(20);
+      loaded(s2.q<HTMLElement>('[data-pkc-field="attachment-media"]')!, 0, 0);
+      expect(s2.q('[data-pkc-field="attachment-info"] span')!.textContent).not.toContain('×');
+    });
+
+    it('🔴 選択が移った後に来た load は、いま開いている別のノートの行を書き換えない', async () => {
+      const body = attachmentBody({ name: '前.jpg', mime: 'image/jpeg', size: 3, assetKey: 'ast-1' });
+      const { d, q } = setup({ a1: body, a2: '# text' }, lenderOf());
+      d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+      await tick(20);
+      const img = q<HTMLElement>('[data-pkc-field="attachment-media"]')!;
+      d.dispatch({ type: 'SELECT_ENTRY', lid: 'a2' });
+      await tick(20);
+      loaded(img, 10, 20);
+      expect(q('[data-pkc-field="attachment-info"]'), '前提: 添付を離れた').toBeNull();
+    });
   });
 
   /**

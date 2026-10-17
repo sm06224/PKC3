@@ -102,6 +102,36 @@ export function attachmentFileName(typed: string, original: string): string {
   return cleaned + ext;
 }
 
+/** 保存するファイル名の長さの上限(字数)。#1163 依頼 214 の裁定:「200 文字程度で切る」。 */
+export const DOWNLOAD_NAME_MAX = 200;
+
+/**
+ * 🔴 **とても長い名前の添付を保存するとき、名前を切る**(#1163 依頼 214。Gemini の裁定:
+ * 「OS の制限に引っかからないよう、拡張子を残して 200 文字程度で切る」)。
+ *
+ * > 画面の物語:400 字の名前を付けた添付を「添付をダウンロード」で保存する ── 直す前は 400 字のまま OS に渡し、
+ * > 保存できるかはブラウザ次第だった。いまは**拡張子(`.pdf` / `.tar.gz`)を残して**名前の前半を切る。
+ *
+ * ⚠ 切るのは**保存するときの名前だけ** ── ノートの題名と本文の名前(`attachment.name`)は変えない。
+ * ⚠ 数えるのは字(コードポイント)。`slice` はサロゲートペアを割る(絵文字や一部の漢字)ので使わない。
+ * ⚠ 拡張子の取り方は `attachmentFileName` と同じ(最後の `.` から後ろ / `.tar.gz` などはひとまとまり / 空白を含む後ろは拡張子ではない)。
+ *   拡張子そのものが上限に近いとき(`.` 以降だけで 100 字を超える)は拡張子ではなく名前の一部と見て、全体を切る。
+ */
+export function downloadFileName(name: string, max: number = DOWNLOAD_NAME_MAX): string {
+  const chars = [...name];
+  if (chars.length <= max) return name;
+  const compound = /\.tar\.(?:gz|bz2|xz|zst)$/i.exec(name);
+  const dotUtf16 = compound !== null && compound.index > 0 ? compound.index : name.lastIndexOf('.');
+  let ext = '';
+  if (dotUtf16 > 0 && dotUtf16 < name.length - 1) {
+    const tail = name.slice(dotUtf16);
+    if (!/\s/.test(tail) && [...tail].length <= Math.floor(max / 2)) ext = tail;
+  }
+  const extLen = [...ext].length;
+  const stem = ext === '' ? chars : [...name.slice(0, name.length - ext.length)];
+  return stem.slice(0, max - extLen).join('') + ext;
+}
+
 /**
  * PKC2 attachment-presenter.ts の AttachmentBody と同じ field 集合・同じ寛容 parse。
  * launcher / extension 系のメタ(#790 / #796 / #926 / #928)も欠損なく写す。

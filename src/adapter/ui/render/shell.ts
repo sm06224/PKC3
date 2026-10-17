@@ -715,7 +715,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   markBarTile(attach);
   // ⚠ **`ENTRY_ACTION_HINTS['attach-file']` と同じ意味にする**(#666)── 同じ操作に
   //    2 通りの説明を作らない(スマホの `⋯` から選んだときに出る字と揃える)
-  attach.title = 'ファイルを取り込んで、開いているノートの本文に入れます';
+  attach.title = 'ファイルを選んで、添付として開いているノートの本文に入れます';
   const menuAttach = iconButton('attach-file', '添付する');
   menuAttach.setAttribute('role', 'menuitem');
   menu.append(menuAttach);

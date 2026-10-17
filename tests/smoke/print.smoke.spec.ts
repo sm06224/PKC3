@@ -470,4 +470,81 @@ test('🔴 暗い配色で刷ると、地は白・字は濃く、リンクは白
       `${id}: 紙のリンクが白地で読めない: ${paper.link}`,
     ).toBeGreaterThanOrEqual(4.5);
   }
+
+  /**
+   * 🔴 **同じ起動で、図の色と折りたたみを見る**(束 K1 / #1163 依頼 232・234・349)。
+   * 暗い配色で、図と「閉じた折りたたみの中の図」を持つノートを刷る。**印刷が始まった瞬間**に
+   * 図が明るい地で描かれ、折りたたみが開いており、**刷り終えたら**画面の配色(暗い地)と閉じた状態に戻る。
+   * ⚠ 新しい起動は足さない。対照群:押す前の画面では図の地が暗く、折りたたみが閉じている。
+   */
+  await page.emulateMedia({ media: 'screen' });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await createEntry(page, 'text');
+  const ta2 = page.locator('[data-pkc-field="editor-body"]');
+  await ta2.click();
+  const fig = '```mermaid\ngraph TD\n  A["始め"]-->B["終わり"]\n```\n';
+  await ta2.fill(`${fig}\n:::details{summary="畳み"}\n${fig}:::\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+  const figs = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
+  await expect(figs.first()).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30_000 });
+  // 折りたたみの中の図は、閉じている間は焼かれない(見えない器は描かない)
+  const folded = page.locator('[data-pkc-field="detail-body"] details:not([open])');
+  expect(await folded.count(), '前提:閉じた折りたたみが在る').toBe(1);
+
+  // 図の地の明るさ(画像の左上の 1 画素。0 = 黒 / 255 = 白、透明は -1)
+  const shot = (): Promise<number[]> =>
+    page.evaluate(() => {
+      return [...document.querySelectorAll<HTMLImageElement>('[data-pkc-field="mermaid-image"]')].map((img) => {
+        const c = document.createElement('canvas');
+        c.width = 4;
+        c.height = 4;
+        const g = c.getContext('2d')!;
+        g.drawImage(img, 0, 0, 4, 4);
+        const d = g.getImageData(0, 0, 1, 1).data;
+        return d[3]! < 8 ? -1 : Math.round((d[0]! + d[1]! + d[2]!) / 3);
+      });
+    });
+  const before = await shot();
+  expect(before.length, '前提:画面に図が在る').toBeGreaterThanOrEqual(1);
+  expect(before[0]!, `前提:画面の図の地が暗くない(この検査は空振り): ${before[0]}`).toBeGreaterThanOrEqual(0);
+  expect(before[0]!, `前提:画面の図の地が暗くない(この検査は空振り): ${before[0]}`).toBeLessThan(100);
+
+  await page.evaluate(() => {
+    const g = globalThis as unknown as Record<string, unknown>;
+    g.__printedK1 = 0;
+    g.__figAtPrint = null;
+    window.addEventListener('beforeprint', () => {
+      g.__printedK1 = ((g.__printedK1 as number | undefined) ?? 0) + 1;
+      const imgs = [...document.querySelectorAll<HTMLImageElement>('[data-pkc-field="mermaid-image"]')];
+      g.__figAtPrint = {
+        open: document.querySelectorAll('[data-pkc-field="detail-body"] details:not([open])').length,
+        shades: imgs.map((img) => {
+          const c = document.createElement('canvas');
+          c.width = 4;
+          c.height = 4;
+          const x = c.getContext('2d')!;
+          x.drawImage(img, 0, 0, 4, 4);
+          const d = x.getImageData(0, 0, 1, 1).data;
+          return d[3]! < 8 ? -1 : Math.round((d[0]! + d[1]! + d[2]!) / 3);
+        }),
+      };
+    });
+  });
+  await clickReal(page, '[data-pkc-action="export-entry-pdf"]');
+  await expect
+    .poll(() => page.evaluate(() => (globalThis as unknown as Record<string, number>).__printedK1))
+    .toBeGreaterThan(0);
+  const atPrint = (await page.evaluate(
+    () => (globalThis as unknown as Record<string, unknown>).__figAtPrint,
+  )) as { open: number; shades: number[] };
+  expect(atPrint.open, '🔴 刷る瞬間に、閉じた折りたたみが残っている').toBe(0);
+  expect(atPrint.shades.length, '🔴 刷る瞬間、折りたたみの中の図が描かれていない').toBe(2);
+  for (const v of atPrint.shades) expect(v, `🔴 刷る瞬間の図が暗い地のまま: ${v}`).toBeGreaterThan(200);
+
+  // 刷り終えたら、画面の配色と閉じた状態へ戻る
+  await expect(folded, '🔴 刷り終えたのに折りたたみが開いたまま').toHaveCount(1);
+  await expect
+    .poll(async () => (await shot())[0], { message: '🔴 刷り終えたのに図が明るいまま' })
+    .toBeLessThan(100);
 });

@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest';
 import { EXT_MIME, resolveMime } from '@adapter/ui/actions/attach';
 import { CAPTURE_MIME_EXT } from '@features/asset/capture-text';
 import { extForMime } from '@features/export/pkc3-markdown-zip';
+import { assetPreviewKind } from '@features/asset/asset-preview-kind';
 import { officeEntry } from '@features/office/office-entry';
 
 const OK = {
@@ -49,7 +50,9 @@ describe('拡張子 ↔ MIME の往復', () => {
       const back = extForMime(mime);
       // ⚠ `jpg` / `jpeg` のように**複数の拡張子が同じ MIME**を指すものが在る。
       //    要求するのは「戻った拡張子も同じ MIME を指すこと」── 綴りの一致ではない
-      if (EXT_MIME[back] !== mime) broken.push(`${ext} → ${mime} → ${back}`);
+      //    例外は `weba` だけ(`audio/webm` → `.webm` → 入れ直すと `video/webm`)。音と動画で容器が同じ `webm` と
+      //    同じ事情で、`<video>` でも音は鳴る。例外を増やすときは理由をここに足す(#1163 依頼 296)
+      if (EXT_MIME[back] !== mime && ext !== 'weba') broken.push(`${ext} → ${mime} → ${back}`);
     }
     expect(broken, '書き出し側の表に無い ── 書き出すと `.bin` になり外で開けない').toEqual([]);
   });
@@ -82,6 +85,32 @@ describe('拡張子 ↔ MIME の往復', () => {
     expect(resolveMime('集計.xlsx', '')).toContain('spreadsheetml');
     // 宣言があればそちらが勝つ(既存の規約 ── 変えていない)
     expect(resolveMime('x.odt', 'text/plain')).toBe('text/plain');
+  });
+
+  /**
+   * 🔴 **拡張子は分かるのに「画面に出せません」になっていた物**(#1163 依頼 296)。
+   * 期待値は手で書いた MIME と、画面での見せ方(音 / 動画 / 画像 / 字)。表ごと消せば全部落ちる。
+   */
+  it('🔴 音・動画・画像・字の拡張子が、種類のある物として読める(大文字の拡張子も)', () => {
+    const want: Array<[string, string, string]> = [
+      ['a.opus', 'audio/opus', 'audio'], ['a.flac', 'audio/flac', 'audio'], ['a.aac', 'audio/aac', 'audio'],
+      ['a.weba', 'audio/webm', 'audio'], ['a.oga', 'audio/ogg', 'audio'], ['a.AIFF', 'audio/aiff', 'audio'],
+      ['a.amr', 'audio/amr', 'audio'],
+      ['a.mov', 'video/quicktime', 'video'], ['a.m4v', 'video/x-m4v', 'video'], ['a.ogv', 'video/ogg', 'video'],
+      ['a.3gp', 'video/3gpp', 'video'],
+      ['a.tif', 'image/tiff', 'image'], ['a.TIFF', 'image/tiff', 'image'], ['a.ico', 'image/x-icon', 'image'],
+      ['a.jfif', 'image/jpeg', 'image'], ['a.apng', 'image/apng', 'image'], ['a.jxl', 'image/jxl', 'image'],
+      ['写真.mov', 'video/quicktime', 'video'],
+      ['a.tsv', 'text/plain', 'text'], ['a.markdown', 'text/markdown', 'text'], ['a.jsonl', 'text/plain', 'text'],
+      ['a.sql', 'text/plain', 'text'], ['a.css', 'text/plain', 'text'], ['a.htm', 'text/html', 'text'],
+    ];
+    for (const [name, mime, kind] of want) {
+      expect(resolveMime(name, ''), `${name}: 種類が付かない`).toBe(mime);
+      expect(assetPreviewKind(mime), `${name}: 画面での見せ方`).toBe(kind);
+    }
+    // 対照群: 宣言があればそちらが勝つ / 知らない拡張子は今までどおり不明のまま
+    expect(resolveMime('a.mov', 'video/mp4')).toBe('video/mp4');
+    expect(resolveMime('a.xyzzy', '')).toBe('application/octet-stream');
   });
 
   /**

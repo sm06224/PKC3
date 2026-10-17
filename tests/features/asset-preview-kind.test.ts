@@ -88,8 +88,9 @@ describe('canOpenAssetWindow', () => {
     expect(CORPUS.length, '母集団が小さすぎる').toBeGreaterThan(20);
     const opened = CORPUS.filter((m) => canOpenAssetWindow(m));
     expect(opened.map((m) => assetPreviewKind(m)).sort(), '別窓の集合が image/pdf からずれた')
-      // 動いた事実: EXT_MIME に image/heic・heif・avif・bmp が増え、image が 5 → 9(#1087)
-      .toEqual([...Array<string>(9).fill('image'), 'pdf']);
+      // 動いた事実: EXT_MIME に image/heic・heif・avif・bmp が増え、image が 5 → 9(#1087)。
+      //   image/tiff・image/x-icon・image/apng・image/jxl が増え、9 → 13(#1163 依頼 296。jfif は image/jpeg の別の綴りで数は増えない)
+      .toEqual([...Array<string>(13).fill('image'), 'pdf']);
     // 🔑 `assetWindowKind` は「出せない ⇔ null」で `canOpenAssetWindow` と一致する
     for (const m of CORPUS) {
       expect(assetWindowKind(m) !== null, `${m}: 2 つの口の答えが食い違う`).toBe(

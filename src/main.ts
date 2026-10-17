@@ -302,8 +302,8 @@ import {
   resetOfficeProfile,
 } from '@adapter/platform/office/office-profile';
 import { readAppStorage } from '@adapter/platform/app-storage';
-import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
-import { formatAssetRef } from '@features/asset/asset-ref-format';
+import { downloadFileName, readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import { createNameDeduper, pastedFileName } from '@features/asset/pasted-image-name';
 import { adoptUrls, fetchImageBlob, HttpStatusError } from '@adapter/ui/actions/adopt-urls';
 import { adoptLinkIcon } from '@adapter/ui/actions/adopt-favicon';
@@ -421,8 +421,10 @@ import { downloadSelfhostBundle } from '@adapter/ui/actions/selfhost';
 import { dayStamp } from '@features/datetime/date-math';
 import { APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta';
 import { diagramFileName } from '@features/export/file-name';
-import { renderToSvg, readPalette, svgWithIntrinsicSize } from '@adapter/ui/render/mermaid-raster';
+import { renderToSvg, readPalette, svgWithIntrinsicSize, rasterize } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND, hydrateAllNow } from '@adapter/ui/render/mermaid-hydrate';
+import { preparePrintBody } from '@adapter/ui/render/print-prepare';
+import { PRINT_PALETTE, PRINT_THEME } from '@adapter/ui/render/diagram-print';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { askSqlEmbed, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
@@ -2771,15 +2773,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
          * ⚠ **グラフは `null`** ── chart.js は canvas に描くのでベクタ源が無い
          *   (`chart-raster.ts` が「chart.js はベクタを吐かない」と明記している)。
          */
-        renderFigureVector: async (kind, source) =>
-          kind === 'chart' ? null : renderToSvg(source, readPalette()),
-        renderFigure: async (kind, source) => {
+        // 🔴 `paper` = Word・PowerPoint 用(#1163 依頼 233)── 画面の配色によらず紙の(明るい)配色で描く。閲覧用 HTML は渡さない
+        renderFigureVector: async (kind, source, paper) =>
+          kind === 'chart' ? null : renderToSvg(source, paper === true ? PRINT_PALETTE : readPalette()),
+        renderFigure: async (kind, source, paper) => {
+          // 🔴 ` ```svg ` の囲み(#1163 依頼 235)── 原文が SVG そのもの。EMF にできなかった回の PNG(描く器は図と同じ `rasterize`)
+          if (kind === 'svg') {
+            const drawn = await rasterize(source, 720, 2);
+            return { blob: drawn.png, cssWidth: drawn.cssWidth };
+          }
           const diagram = kind === 'chart' ? CHART_KIND : MERMAID_KIND;
           const raster = await diagram.render({
             source,
             kind,
-            theme: document.documentElement.getAttribute('data-pkc-theme') ?? 'light',
-            palette: readPalette(),
+            theme:
+              paper === true ? PRINT_THEME : (document.documentElement.getAttribute('data-pkc-theme') ?? 'light'),
+            palette: paper === true ? PRINT_PALETTE : readPalette(),
             width: 720,
             // ⚠ 紙に載るので **2 倍**で焼く(画面の dpr に合わせない ── 同じ文書が
             //    端末ごとに違う解像度になる)
@@ -3774,6 +3783,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const draftStore = new IdbDraftStore();
 
+  /** 🔴 紙に出す用意の控え(#1163 依頼 232 / 234)。`printRun` は刷りの回(用意が遅れて終わったかの見分け)。 */
+  let printRun = 0;
+  let printRestore: (() => void) | null = null;
   const services: BinderServices = {
     // 🔴 パソコンのフォルダ(#215)── 描画に渡したものと**同じ 1 つ**
     localFolder,
@@ -4092,7 +4104,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           try {
             const item = await maybeShrink(attachDeps, original, shrinkRun);
             const stored = await storeAsset(attachDeps, item, known);
-            refs.push(formatAssetRef(name, `asset:${stored.assetKey}`, true));
+            // 🔴 画像だけとは限らない(#1163 依頼 55 の 3 ── 編集中に「添付」で選んだ PDF などもここを通る)。画像は `![…]`、ほかは `[…]`
+            refs.push(formatAssetRef(name, `asset:${stored.assetKey}`, isImageAssetMime(stored.mime)));
           } catch (e) {
             // 🔴 英語の理由をそのまま出さない。どの画像か分かる形で(#1087)
             dispatcher.dispatch({
@@ -4186,6 +4199,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     drawOnImage: (assetKey, name, mime, lid) => {
       void imageDrawer.run(assetKey, name, mime, lid);
+    },
+    /**
+     * 🔴 **本文に入れた添付のリンクを押したとき**(#1163 依頼 55 の 1・2)。
+     * PDF は別のウィンドウで開く(`viewAsset`)、ほかは保存(`downloadAsset`)。保存名・窓の題は添付のいまの名前
+     * (持ち主の逆引き = `findAssetOwner`。引けなければリンクの字)。
+     * ⚠ 種類は登録の mime で決める(リンクの字の拡張子では決めない ── 字は書いた人が自由に付けられる)。
+     */
+    openAssetLink: (assetKey, label, lid) => {
+      void (async () => {
+        let name = label;
+        let mime = '';
+        try {
+          const [owner, mimes] = await Promise.all([
+            client.request({ op: 'findAssetOwner', cid, assetKey }) as Promise<{ name: string | null }>,
+            assetLender.listMimes(),
+          ]);
+          name = owner.name ?? label;
+          mime = mimes.get(assetKey) ?? '';
+        } catch {
+          // 引けなかった回は今までどおり(リンクの字で保存)── 押して無反応にしない
+        }
+        if (mime === 'application/pdf') services.viewAsset?.(assetKey, name, mime, lid);
+        else services.downloadAsset?.(assetKey, name);
+      })();
     },
     viewAsset: (assetKey, name, mime, lid) => {
       void (async () => {
@@ -4373,7 +4410,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           });
           return;
         }
-        downloadUrl(name, lent.url, lent.dispose);
+        // 🔴 とても長い名前は、拡張子を残して切る(#1163 依頼 214)。ノートの題名は変えない
+        downloadUrl(downloadFileName(name), lent.url, lent.dispose);
       } catch (e) {
         // IDB 障害等を unhandled rejection にしない(可視で終える)
         dispatcher.dispatch({
@@ -5363,7 +5401,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           getState: () => dispatcher.getState(),
           dispatch: (a) => dispatcher.dispatch(a),
           onState: (cb) => dispatcher.onState(cb),
-          print: () => window.print(),
+          // 🔴 刷り終えたら(印刷の画面が閉じたら)、刷るために開けた折りたたみと明るくした図を戻す(#1163 依頼 232 / 234)
+          print: () => {
+            printRun += 1;
+            try {
+              window.print();
+            } finally {
+              printRestore?.();
+              printRestore = null;
+            }
+          },
           // 🔴 画面の外の図は見えるまで描かれない ── 刷る前に本文の図を描き切る(#1087)
           //    ⚠ 本文が state に届いた直後は、図の器がまだ DOM に無いことがある(実測: 押してすぐだと器 0 個で刷った)
           //    ── 1 コマずつ 3 回、器を引き直して描く
@@ -5377,7 +5424,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                 typeof requestAnimationFrame === 'function' ? requestAnimationFrame(() => r()) : setTimeout(r, 16),
               );
               const body = document.querySelector('[data-pkc-field="detail-body"]');
-              if (body) await hydrateAllNow(body);
+              if (body === null) continue;
+              if (printRestore === null) {
+                // 🔴 刷る間だけ、折りたたみを開き(#1163 依頼 234)、図を明るい配色で描く(依頼 232 / 349)。
+                //    ⚠ 上限時間を超えて終わった回は、終わった瞬間に自分で戻す(`printRun` が進んでいる)
+                const run = printRun;
+                const restore = await preparePrintBody(body, () => run === printRun);
+                // ⚠ 終わるのが遅れて刷りが済んだ後なら、もう戻してある(`restore` を持ち越さない ── 次の刷りの用意が飛ぶ)
+                printRestore = run === printRun ? restore : null;
+              } else {
+                await hydrateAllNow(body);
+              }
             }
           },
         },
@@ -5536,7 +5593,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             },
             // ⚠ **知らせるほうは捨てない** ── 走査は worker で数秒かかるので、
             //    その間に別の確認が開いていることがある(器が順番に出す)
-            ask: (msg) => ask(msg, { okLabel: '添付を整理する', danger: true }),
+            ask: (msg) => ask(msg, { okLabel: '使われていない添付を消す', danger: true }),
             tell,
           });
         } catch (e) {

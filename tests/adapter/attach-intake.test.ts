@@ -1542,3 +1542,48 @@ describe('添付し直したとき、bytes が無ければ書く(#1087)', () => 
     expect(h.putBlobs, '同じ bytes を 2 度書いた').toHaveLength(1);
   });
 });
+
+/**
+ * 🔴 **同じファイルをもう一度添付したら、1 行知らせる**(#1163 依頼 213。Gemini の裁定:作業は止めない)。
+ *
+ * 直す前は、2 回目も何も言わずに添付のノートがもう 1 つできた。⚠ 止めない ── 添付のノートは今までどおり 2 つできる。
+ * 対照群:別のファイルなら言わない / 初回は言わない。
+ */
+describe('同じファイルをもう一度添付したとき(#1163 依頼 213)', () => {
+  const dupLine = '同じファイルがすでにあります。';
+  const attachCount = (d: Dispatcher): number =>
+    [...d.getState().entryMetas.values()].filter((m) => m.archetype === 'attachment').length;
+
+  it('🔴 初回は言わず、2 回目は文頭で言う(添付のノートは 2 つできる)', async () => {
+    const h = harness();
+    await attachFiles(h.d, h.deps, [new File(['same bytes'], '請求書.pdf', { type: 'application/pdf' })]);
+    await tick();
+    expect(h.d.getState().notice ?? '', '初回に言っている').not.toContain(dupLine);
+    await attachFiles(h.d, h.deps, [new File(['same bytes'], '請求書のコピー.pdf', { type: 'application/pdf' })]);
+    await tick();
+    expect(h.d.getState().notice ?? '', '同じ中身なのに言っていない').toContain(dupLine);
+    expect(attachCount(h.d), '止めてはいけない(添付のノートは作る)').toBe(2);
+  });
+
+  it('🔴 別のファイルなら言わない(中身で見る。名前では見ない)', async () => {
+    const h = harness();
+    await attachFiles(h.d, h.deps, [new File(['one'], '同じ名前.pdf', { type: 'application/pdf' })]);
+    await attachFiles(h.d, h.deps, [new File(['two'], '同じ名前.pdf', { type: 'application/pdf' })]);
+    await tick();
+    expect(h.d.getState().notice ?? '').not.toContain(dupLine);
+  });
+
+  it('🔴 まとめて 2 枚入れて、2 枚目が 1 枚目と同じ中身なら、締めの 1 行にも残る', async () => {
+    const h = harness();
+    h.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'n1', title: 'メモ', body: '# メモ', edit: false });
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    h.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '# メモ' });
+    appendsSeen.length = 0;
+    await attachFiles(h.d, h.deps, [
+      new File(['x'], 'a.png', { type: 'image/png' }),
+      new File(['x'], 'b.png', { type: 'image/png' }),
+    ]);
+    await until(() => (h.d.getState().notice ?? '').includes('2 件'));
+    expect(h.d.getState().notice ?? '').toContain(`${dupLine}2 件を`);
+  });
+});
