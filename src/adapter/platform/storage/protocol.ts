@@ -499,6 +499,8 @@ export type StorageRequest =
        * 行ごと消す(「新規 → 何も打たず Esc」でゴミ箱に空のノートが溜まるのを防ぐ)。省略 = ゴミ箱へ移す。
        */
       untouched?: boolean;
+      /** 履歴の保持上限(#1087)。ゴミ箱へ移すときに足す版の後も、`upsertEntry` と同じ上限で刈る。省略 = worker の既定 */
+      keepLatest?: number;
     }
   | { op: 'listRelations'; cid: string }
   | { op: 'bulkUpsertRelations'; cid: string; relations: RelationUpsert[] }

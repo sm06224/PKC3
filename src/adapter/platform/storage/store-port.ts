@@ -211,6 +211,7 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
         op: 'deleteEntry',
         cid,
         lid,
+        keepLatest: REVISION_KEEP_LATEST,
         // 🔴 何も書かれていない作りたてのノートはゴミ箱へ移さず消す(#1087)── 省略時はゴミ箱へ
         ...(opts?.untouched === true ? { untouched: true } : {}),
       });

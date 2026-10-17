@@ -1718,6 +1718,23 @@ function encodeReverse(base: string, target: string): { kind: string; snapshot: 
 }
 
 /**
+ * 保持上限を超えた古い側の版を捨てる(#1087)。⚠ **刈り込みはここ 1 か所**にする ──
+ * 版を足す口(checkpoint / ゴミ箱へ移す)と、足さずに張り替える口の全部が通る。
+ * 依存は「古い → 新しい」の一方向なので、鎖の頭(最も新しい行 = ゴミ箱から戻すときに使う全文)は
+ * `keepLatest >= 1` である限り消えない。
+ * @returns 捨てた行数
+ */
+function pruneChain(database: Database, cid: string, lid: string, keepLatest: number): number {
+  const head = headRevision(database, cid, lid);
+  if (!head) return 0;
+  database.exec({
+    sql: `DELETE FROM revisions WHERE cid = ? AND entry_lid = ? AND rev_order <= ?`,
+    bind: [cid, lid, head.rev_order - Math.max(1, keepLatest)],
+  });
+  return database.changes();
+}
+
+/**
  * body 変更に伴う鎖の維持(同 tx で呼ぶこと)。
  * @returns 積んだかどうか(checkpoint で新しい行を作ったら true)
  */
@@ -1757,11 +1774,7 @@ function maintainChain(
         enc.kind,
       ],
     });
-    database.exec({
-      sql: `DELETE FROM revisions WHERE cid = ? AND entry_lid = ? AND rev_order <= ?`,
-      bind: [cid, lid, nextOrder - Math.max(1, keepLatest)],
-    });
-    return { added: true, pruned: database.changes() };
+    return { added: true, pruned: pruneChain(database, cid, lid, keepLatest) };
   }
   // amend: 頭が復元する状態は変えず、**新しい tip からの符号化**へ張り替える。
   // 行の id / content_hash は保つ(change ID の安定 ── UI の「この版」が生き続ける)
@@ -1772,6 +1785,8 @@ function maintainChain(
       sql: `UPDATE revisions SET snapshot = ?, kind = ? WHERE cid = ? AND id = ?`,
       bind: [enc.snapshot, enc.kind, cid, head.id],
     });
+    // 🔴 張り替えも刈る(#1087)── ゴミ箱から戻した直後の最初の保存はここを通る
+    return { added: false, pruned: pruneChain(database, cid, lid, keepLatest) };
   }
   return { added: false, pruned: 0 };
 }
@@ -2235,7 +2250,8 @@ function updateEntryColumn(
 ): EntryStamps | null {
   const database = need();
   database.exec({
-    sql: `UPDATE entries SET ${column} = ?, updated_at = datetime('now')
+    // 🔴 並べ替えは更新日時を進めない(#1087)── 居場所の移動(`setEntryParent`)と同じ。改名だけ進める
+    sql: `UPDATE entries SET ${column} = ?${column === 'title' ? ", updated_at = datetime('now')" : ''}
             WHERE cid = ? AND lid = ?`,
     bind: [value, cid, lid],
   });
@@ -3982,6 +3998,9 @@ const handlers: Handlers = {
               row.created_at,
             ],
           });
+          // 🔴 ゴミ箱へ移すときに足す行の後も刈る(#1087)── 刈らないと「移す → 戻す → 保存」の
+          //   繰り返しで 1 ノートの履歴が上限を超えて育つ。頭(今足した全文)は消えない
+          pruneChain(database, req.cid, req.lid, req.keepLatest ?? DEFAULT_REVISION_KEEP);
         }
       }
       // 🔴 **relations は消さない**(2026-08-05、user 報告の調査で判明)。

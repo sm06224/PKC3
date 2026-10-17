@@ -362,6 +362,37 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
     '捨て直したのに、留めた枠の点線が付かない',
   ).toHaveCount(1);
 
+  /**
+   * 🔴 **「戻す」を押した直後(結果が着く前)に別のノートを選ぶと、着いた後もその選択のまま**(#1087)。
+   *
+   * ⚠ 既存の道中の続きに載せる(新しく起動しない)。窓は 1 回の同期処理の中で「戻す」→「別のノートの行」を
+   *   続けて押して作る(結果は保存の worker から非同期に着くので、その前に選択が動く)。
+   * 🔑 直す前は、着いた時点で戻したノートへ選択が引き戻された(押したノートが開かない)。
+   */
+  await clickReal(page, '[data-pkc-browse="filer"]');
+  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await expect(page.locator('[data-pkc-region="filer-trash"] li'), '前提: ゴミ箱に 1 件').toHaveCount(1);
+  const raced = await page.evaluate(() => {
+    const restore = document.querySelector<HTMLElement>('[data-pkc-action="restore-trash"]');
+    const row =
+      Array.from(
+        document.querySelectorAll<HTMLElement>('[data-pkc-region="filer-table"] [data-pkc-entry]'),
+      ).find((r) => (r.textContent ?? '').includes('リンク元')) ?? null;
+    if (restore === null || row === null) return null;
+    restore.click();
+    row.click();
+    return row.textContent;
+  });
+  expect(raced, '前提: 戻すボタンか別のノートの行が見つからない').not.toBeNull();
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '戻した知らせが出ない(結果が着いていない)',
+  ).toContainText('戻しました');
+  await expect(
+    page.locator('[data-pkc-split-main] [data-pkc-field="detail-title"]'),
+    '戻し終わった後、押す前に選び直したノートの選択が戻したノートに奪われた',
+  ).toContainText('リンク元');
+
   expect(errors).toEqual([]);
 });
 
