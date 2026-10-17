@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **録音・画面収録の段取り**(#413)。
+ * 🔴 **録音・画面録画の段取り**(#413)。
  *
  * ## user の物語
  *
@@ -117,6 +117,7 @@ interface Bench {
   readonly d: Dispatcher;
   readonly events: DomainEvent[];
   readonly notices: string[];
+  readonly opens: Array<string | null>;
   readonly lines: Array<string | null>;
   /** `onActive` に来た値(変わったときだけ呼ばれる約束)。 */
   readonly actives: boolean[];
@@ -150,6 +151,10 @@ function bench(
     clock?: { at: Date };
     /** 🔴 別のタブ・窓が編集中かを聞く口(#1087)。省略 = 問い合わせない。 */
     lock?: EditLockPort;
+    /** 最初から在る、もう 1 件以上のノート(録っている間に移る先)。 */
+    extra?: string[];
+    /** 破棄の確認の答え。省略 = 確認の口を渡さない。 */
+    confirm?: (message: string, o: { okLabel: string; cancelLabel: string; danger: boolean }) => Promise<boolean>;
   } = {},
 ): Bench {
   const d = new Dispatcher();
@@ -170,7 +175,7 @@ function bench(
   d.dispatch({
     type: 'SYS_BOOTED',
     cid: 'c1',
-    metas: [meta('a', opts.archetype ?? 'text')],
+    metas: [meta('a', opts.archetype ?? 'text'), ...(opts.extra ?? []).map((l) => meta(l, 'text'))],
     relations: [],
   });
   if (opts.select !== false) d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
@@ -199,6 +204,7 @@ function bench(
     );
   });
   const notices: string[] = [];
+  const opens: Array<string | null> = [];
   const lines: Array<string | null> = [];
   const actives: boolean[] = [];
   const attached: Array<{ name: string; type: string; size: number }> = [];
@@ -237,9 +243,17 @@ function bench(
       return { lid, assetKey: 'ast-k' + String(attached.length), mime: item.type, hash: null };
     },
     onChange: (line) => lines.push(line),
-    notify: (t) => notices.push(t),
+    notify: (t) => {
+      notices.push(t);
+      opens.push(null);
+    },
+    notifyOpen: (t, lid) => {
+      notices.push(t);
+      opens.push(lid);
+    },
     onActive: (a) => actives.push(a),
     ...(opts.lock === undefined ? {} : { lock: opts.lock }),
+    ...(opts.confirm === undefined ? {} : { confirm: opts.confirm }),
     now: () => opts.clock?.at ?? new Date(2026, 7, 27, 3, 1, 2),
     tick: (fn) => {
       beats.push(fn);
@@ -262,6 +276,7 @@ function bench(
     d,
     events,
     notices,
+    opens,
     lines,
     actives,
     attached,
@@ -561,7 +576,7 @@ describe('🔴 ④⑤ 断る / 捨てる(#413)', () => {
     const b = bench();
     await b.service.start('audio');
     await b.service.start('screen');
-    expect(b.d.getState().error, '2 本目を黙って捨てた').toMatch(/すでに収録しています/);
+    expect(b.d.getState().error, '2 本目を黙って捨てた').toMatch(/すでに録っています/);
     expect(b.service.line(), '2 本目が 1 本目を置き換えた').toMatch(/^録音中/);
   });
 
@@ -583,6 +598,124 @@ describe('🔴 ④⑤ 断る / 捨てる(#413)', () => {
     expect(appends(b.events), '捨てたのに本文を書いた').toEqual([]);
     expect(b.service.line(), '捨てたのに帯が残っている').toBeNull();
     expect(b.notices.join(''), 'やめたことを言っていない').toMatch(/残さずにやめました/);
+  });
+});
+
+describe('🔴 録音は「録り始めたノート」に入る(#1163 依頼 90-1 / 148 ② / 353 A)', () => {
+  it('録っている間に別のノートへ移っても、入るのは録り始めたノートで、画面は移った先のまま', async () => {
+    const b = bench({ extra: ['b'] });
+    await b.service.start('audio');
+    b.d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
+    b.service.stop();
+    await tick();
+    expect(appends(b.events), '止めた時点のノートへ入っている').toEqual([
+      { lid: 'a', text: '[録音-2026-08-27-030102.webm](asset:ast-k1)' },
+    ]);
+    expect(b.d.getState().selectedLid, '入れ先へ画面を動かした').toBe('b');
+    expect(b.notices.at(-1), 'どのノートへ入れたかを言っていない').toMatch(/『t-a』の本文のいちばん下に入れました$/);
+    // 🔴 知らせの隣に入れ先を開く道が要る(片道の操作を作らない)── 実ブラウザで「開く」が出ていなかった
+    expect(b.opens.at(-1), '入れ先を開く道(「開く」)を添えていない').toBe('a');
+  });
+
+  it('始めたノートがいまも開いていれば、これまでどおり(名前は添えない)', async () => {
+    const b = bench({ extra: ['b'] });
+    await b.service.start('audio');
+    b.service.stop();
+    await tick();
+    expect(appends(b.events).map((e) => e.lid)).toEqual(['a']);
+    expect(b.notices.at(-1)).toMatch(/^「録音-.*」を本文のいちばん下に入れました$/);
+    expect(b.opens.at(-1), '開いているノートへ入れた回に「開く」を添えた').toBeNull();
+  });
+
+  it('始めたノートが消えていたら、いま開いているノートへ倒れて、そのことを言う', async () => {
+    const b = bench({ extra: ['b'] });
+    await b.service.start('audio');
+    b.d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
+    b.d.dispatch({ type: 'DELETE_ENTRY', lid: 'a' });
+    expect(b.d.getState().entryMetas.has('a'), '前提: 始めたノートが消えていない').toBe(false);
+    b.service.stop();
+    await tick();
+    expect(appends(b.events).map((e) => e.lid), '消えたノートへ入れようとした').toEqual(['b']);
+    expect(b.notices.at(-1), '倒れたことを言っていない').toMatch(/^録音を始めたノートが見つからないので、/);
+    expect(b.notices.at(-1)).toMatch(/本文のいちばん下に入れました$/);
+  });
+
+  it('編集中に止めたら預かり、編集を終えたあと録り始めたノートへ入る(預かりの仕組みは壊れていない)', async () => {
+    const b = bench({ extra: ['b'] });
+    await b.service.start('audio');
+    b.d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
+    b.d.dispatch({ type: 'BODY_LOADED', lid: 'b', body: '本文' });
+    b.d.dispatch({ type: 'START_EDIT' });
+    expect(b.d.getState().phase, '前提: 編集に入っていない').toBe('editing');
+    b.service.stop();
+    await tick();
+    expect(b.notices.join(''), '預かったと言っていない').toMatch(/録音を始めたノートに入れます/);
+    expect(appends(b.events), '編集中なのに書いた').toEqual([]);
+    b.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    expect(appends(b.events).map((e) => e.lid), '預かった物が録り始めたノートへ入っていない').toEqual(['a']);
+  });
+});
+
+describe('🔴 1 分を超えた録音は、残さずにやめる前に確認する(#1163 依頼 50-3 / 90-3)', () => {
+  const asks = (answer: boolean) => {
+    const messages: string[] = [];
+    return {
+      messages,
+      confirm: (m: string): Promise<boolean> => {
+        messages.push(m);
+        return Promise.resolve(answer);
+      },
+    };
+  };
+
+  it('60 秒ちょうどまでは聞かずにやめる / 60.001 秒からは聞く(境目)', async () => {
+    const at60 = asks(true);
+    const a = bench({ confirm: at60.confirm });
+    await a.service.start('audio');
+    a.live()!.advance(60_000);
+    await a.service.discard();
+    expect(at60.messages, '60 秒ちょうどで聞いた').toEqual([]);
+    expect(a.live()!.discards(), '60 秒ちょうどで捨てていない').toBe(1);
+
+    const over = asks(true);
+    const b = bench({ confirm: over.confirm });
+    await b.service.start('audio');
+    b.live()!.advance(60_001);
+    await b.service.discard();
+    expect(over.messages, '60 秒を超えたのに聞いていない').toEqual(['1 分の録音を残さずにやめますか。やめると取り消せません。']);
+    expect(b.live()!.discards()).toBe(1);
+  });
+
+  it('「続ける」と答えたら捨てない(録り続けられる)', async () => {
+    const no = asks(false);
+    const b = bench({ confirm: no.confirm });
+    await b.service.start('screen');
+    b.live()!.advance(125_000);
+    await b.service.discard();
+    expect(no.messages).toEqual(['2 分 5 秒の画面録画を残さずにやめますか。やめると取り消せません。']);
+    expect(b.live()!.discards(), '続けると答えたのに捨てた').toBe(0);
+    expect(b.service.line(), '続けると答えたのに帯が消えた').toMatch(/^画面録画中/);
+    b.service.stop();
+    await tick();
+    expect(b.attached.length, '続けた録画が残らなかった').toBe(1);
+  });
+
+  it('答えを待つ間に上限などで終わっていたら、あとから捨てない', async () => {
+    let answer: (v: boolean) => void = () => {};
+    const b = bench({
+      confirm: () => new Promise<boolean>((r) => { answer = r; }),
+    });
+    await b.service.start('audio');
+    b.live()!.advance(90_000);
+    const p = b.service.discard();
+    b.live()!.end('too-long');
+    await tick();
+    answer(true);
+    await p;
+    await tick();
+    expect(b.live()!.discards(), '終わった録音を捨てた').toBe(0);
+    expect(b.attached.length, '終わった録音が残らなかった').toBe(1);
   });
 });
 
@@ -610,7 +743,7 @@ describe('🔴 黙って終わらない(#413)', () => {
     await tick();
     // 🔴 直す前は**受け口が 0 件**で、帯だけ伸び続けて誰も何も言わなかった
     expect(b.notices.at(-1), '死んだ理由が出ていない').toMatch(
-      /^画面収録を続けられなくなったので止めました\(ブラウザが収録を止めました\)。/,
+      /^画面録画を続けられなくなったので止めました\(ブラウザが止めました\)。/,
     );
     expect(b.attached.length, 'そこまでの分が消えた').toBe(1);
   });

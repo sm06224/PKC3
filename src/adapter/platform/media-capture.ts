@@ -1,5 +1,5 @@
 /**
- * 🔴 **録音・画面収録**(#413)。
+ * 🔴 **録音・画面録画**(#413)。
  *
  * > user 要望 2026-07-16(PKC2 #922):
  * > 「**録音と画面収録をマルチメディアで埋め込めるようにする / これで、
@@ -32,7 +32,7 @@
  *   容器に書き足すのは `features/audio/webm-opus.ts` の
  *   `insertMissingDuration`(先頭の数百バイトだけ読む ── 中身は 1 バイトも
  *   読まない・動かさない)。
- * 🟢 **画面収録(`kind: 'screen'`)にも効く**(2026-10-10 に実ブラウザで確かめた)。
+ * 🟢 **画面録画(`kind: 'screen'`)にも効く**(2026-10-10 に実ブラウザで確かめた)。
  *   機構は track の中身を見ないので、VP8 + opus の容器でも同じ答えになる ──
  *   フル chromium / headless_shell の両方で、録ったままは `duration` が `Infinity`、
  *   書き足すと 4.008 秒(壁時計の 4008ms)になり、終わりの 0.5 秒前へ飛べた。
@@ -122,7 +122,7 @@ export class CaptureRefused extends Error {}
 
 /** 器を作れない / 始められない(権限は通っている)ときの文言。 */
 export const CAPTURE_START_UNSUPPORTED =
-  '収録を始められませんでした(このブラウザは録音の形式に対応していません)';
+  '録音・録画を始められませんでした(このブラウザは録音の形式に対応していません)';
 
 /**
  * 🔴 **`Duration` を探すための先頭の読み量**(#952 A3)。
@@ -187,7 +187,7 @@ function pick(deps: CaptureDeps, kind: CaptureKind): (c: MediaStreamConstraints)
     throw new CaptureRefused(
       kind === 'audio'
         ? 'この環境では録音できません(ブラウザが対応していません)'
-        : 'この環境では画面収録できません(ブラウザが対応していません)',
+        : 'この環境では画面録画できません(ブラウザが対応していません)',
     );
   }
   return fn;
@@ -195,7 +195,7 @@ function pick(deps: CaptureDeps, kind: CaptureKind): (c: MediaStreamConstraints)
 
 
 /**
- * 🔴 **画面収録は、キーフレームを約 2 秒ごとに置く**(#683 段②b-3。設計 doc §6)。
+ * 🔴 **画面録画は、キーフレームを約 2 秒ごとに置く**(#683 段②b-3。設計 doc §6)。
  *
  * 既定は約 4.4 秒間隔(Chrome 141 で実測)── あとから前後を削るとき、切り出しの
  * 起点が最大でそのぶん手前へずれる。`videoKeyFrameIntervalDuration` で 2.0 秒に
@@ -245,15 +245,15 @@ export function captureStartFailedText(kind: CaptureKind, name: string, message:
         ? 'マイクをほかのアプリが使っています。そのアプリを閉じてから、もう一度押してください'
         : '画面を読み取れません。ほかのアプリが使っていないかを確かめて、もう一度押してください';
     case 'AbortError':
-      return '収録を始める途中で中断されました。もう一度押してください';
+      return '録音・録画を始める途中で中断されました。もう一度押してください';
     case 'OverconstrainedError':
       return audio
-        ? 'このマイクでは収録できません。ほかのマイクに切り替えて、もう一度押してください'
-        : 'この画面は収録できません。ほかの画面やウィンドウを選んで、もう一度押してください';
+        ? 'このマイクでは録音できません。ほかのマイクに切り替えて、もう一度押してください'
+        : 'この画面は録画できません。ほかの画面やウィンドウを選んで、もう一度押してください';
     case 'SecurityError':
-      return 'ブラウザの設定で、このページでの収録が許されていません';
+      return 'ブラウザの設定で、このページでの録音・録画が許されていません';
     default:
-      return `収録を始められませんでした(${name || message})`;
+      return `録音・録画を始められませんでした(${name || message})`;
   }
 }
 
@@ -272,7 +272,7 @@ export async function startCapture(
   const now = deps.now ?? pickClock(globalThis);
   const found = deps.Recorder ?? (globalThis as { MediaRecorder?: typeof MediaRecorder }).MediaRecorder;
   if (found === undefined) {
-    throw new CaptureRefused('この環境では収録できません(ブラウザが対応していません)');
+    throw new CaptureRefused('この環境では録音・録画できません(ブラウザが対応していません)');
   }
   /**
    * ⚠ **束ね直す** ── 下の `onSegmentStop` は関数宣言(巻き上げ)なので、
@@ -282,7 +282,7 @@ export async function startCapture(
   const ask = pick(deps, kind);
   let stream: MediaStream;
   try {
-    // ⚠ 画面収録でも**音を一緒に**頼む(会議メモは音が要る)
+    // ⚠ 画面録画でも**音を一緒に**頼む(会議メモは音が要る)
     stream = await ask(kind === 'audio' ? { audio: true } : { video: true, audio: true });
   } catch (e) {
     const name = (e as { name?: string } | null)?.name ?? '';
@@ -347,7 +347,7 @@ export async function startCapture(
   };
 
   /**
-   * 🔴 **長さを容器へ書く**(#952 A3)。録音も画面収録も同じ道を通る
+   * 🔴 **長さを容器へ書く**(#952 A3)。録音も画面録画も同じ道を通る
    *   (`media-capture.ts` 冒頭の docstring を見よ)。
    */
   const finalizeSegment = (seg: { blob: Blob; durationMs: number }): Promise<Blob> =>

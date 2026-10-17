@@ -142,7 +142,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'purge-orphan-assets': 'broom',
   'create-entry': 'plus',
   'attach-file': 'clip',
-  /** 録音・画面収録(#413)。⚠ 止めるのは**四角**(世界共通の停止)。 */
+  /** 録音・画面録画(#413)。⚠ 止めるのは**四角**(世界共通の停止)。 */
   /**
    * 🔴 **「今日」と「時間を計る」は、2026-09-21 まで無地だった**(#1029 段 A)。
    * ⚠ 「今日」は `iconButton('open-today', '今日', 'calendar')` と**図案の名前**を

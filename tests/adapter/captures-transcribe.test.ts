@@ -33,7 +33,7 @@ function body(name: string, mime: string, key: string | null = 'k-1'): string {
 const ITEMS = (): CaptureItem[] =>
   captureItemsFrom([
     { lid: 'a', title: 'a', body: body('録音-2026-09-09-030102.webm', 'audio/webm') },
-    { lid: 'b', title: 'b', body: body('画面収録-2026-09-09-030102.webm', 'video/webm', 'k-2') },
+    { lid: 'b', title: 'b', body: body('画面録画-2026-09-09-030102.webm', 'video/webm', 'k-2') },
     { lid: 'c', title: 'c', body: body('鍵なし.webm', 'audio/webm', null) },
   ]);
 
@@ -66,7 +66,7 @@ describe('「文字にする」の出し分け', () => {
   it('🔴 中身の鍵がある行(音も動画も)に出て、鍵が無い行には出ない', () => {
     const { host } = pane({ captureItems: ITEMS() });
     expect(btn(host, 'a'), '録音に出ていない').not.toBeNull();
-    expect(btn(host, 'b'), '画面収録(声が入る)に出ていない').not.toBeNull();
+    expect(btn(host, 'b'), '画面録画(声が入る)に出ていない').not.toBeNull();
     expect(btn(host, 'c'), '鍵の無い行に出ている(dead click)').toBeNull();
   });
 

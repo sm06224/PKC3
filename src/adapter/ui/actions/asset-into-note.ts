@@ -108,7 +108,7 @@ export interface PutAssetArgs {
   readonly name: string;
   readonly mime: string;
   /**
-   * 文頭に付ける事情(「共有が終わったので画面収録を止めました。」等)。
+   * 文頭に付ける事情(「共有が終わったので画面録画を止めました。」等)。
    * ⚠ 添付のように事情が無いときは空文字。
    */
   readonly why: string;

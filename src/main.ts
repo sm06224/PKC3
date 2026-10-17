@@ -3368,7 +3368,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const sameOriginGate = new SameOriginGate();
 
   /**
-   * 🔴 **録音・画面収録**(#413)。段取りは `capture.ts` が持ち、ここは口を渡すだけ。
+   * 🔴 **録音・画面録画**(#413)。段取りは `capture.ts` が持ち、ここは口を渡すだけ。
    *
    * ⚠ 取り込みは **`queued`**(断る側ではない)── 収録は**取り直せない**ので、
    *   整理(未参照 GC)と重なったら**待たせる**(Office の保存と同じ判断)。
@@ -3385,6 +3385,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     onChange: (line) => paintCaptureBar(root, line),
     notify: showStatus,
+    notifyOpen: (text, lid) => dispatcher.dispatch({ type: 'OP_NOTICE', message: text, open: lid }),
     /**
      * 🔴 **録っている間・預かっている間にタブを閉じる・読み直すと「離れますか」**(#1087)。
      *   収録の bytes はメモリ上にだけ在り、閉じると 250MB ごとの区切り以後が消える。
@@ -3394,6 +3395,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     onActive: (active) => unloadGuard.setWriting(active, 'capture'),
     // 🔴 別のタブ・窓が編集中のノートへは入れない(#1087。追記・PDF の引用と同じ 1 本)
     lock: editLockPort,
+    // 🔴 1 分を超えた録音・録画を残さずにやめるときの確認(自前の確認の器 = 他の確認と同じ 1 本)
+    confirm: (message, o) => ask(message, o),
   });
 
   /**
@@ -3730,10 +3733,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     openChapterWindow: (lid, line) => void chapterWindows.open(lid, line),
     attachFiles: (files, why, at, intoLid) =>
       void withAssetGate(() => attachFiles(dispatcher, attachDeps, files, why, at, intoLid)),
-    // 🔴 録音・画面収録(#413)── 押す口は左の列の「添付」の隣に在る
+    // 🔴 録音・画面録画(#413)── 押す口は左の列の「添付」の隣に在る
     startCapture: (kind) => void captureService.start(kind),
     stopCapture: () => captureService.stop(),
-    discardCapture: () => captureService.discard(),
+    discardCapture: () => void captureService.discard(),
     trimCapture: (lid, startMs, endMs) => void captureTrimmer.run(lid, startMs, endMs),
     // 🔴 録った音を文字にする(#772 段②)── 押す口は「音/動画」の行に在る
     transcribeCapture: (lid) => void captureTranscriber.run(lid),

@@ -97,17 +97,22 @@ export function captureItemsFrom(sources: readonly CaptureSource[]): CaptureItem
   return out;
 }
 
+/** 呼び名を変える前の画面録画の名前の頭(既に添付になっている物の見分け用。新しくは付けない)。 */
+const LEGACY_SCREEN_PREFIX = '画面収録-';
+
 /**
  * 🔴 **画面に出す呼び名**。
  * ⚠ **録ったものとは限らない** ── 外から取り込んだ音や動画もここへ来る
  *   (`attachment.mime` で拾うので、出所は区別できない)。だから
- *   「録音」「画面収録」と言い切らず、**音 / 動画**と呼ぶ。
+ *   「録音」「画面録画」と言い切らず、**音 / 動画**と呼ぶ。
  * 🔑 ただし**名前が収録の形なら**、収録の呼び名を使う ── `captureFileName` が
- *   `録音-…` / `画面収録-…` と付けているので、その字で見分けられる。
+ *   `録音-…` / `画面録画-…`(旧い `画面収録-…` も拾う) と付けているので、その字で見分けられる。
  */
 export function captureItemLabel(item: CaptureItem): string {
   for (const label of Object.values(CAPTURE_LABEL))
     if (item.name.startsWith(`${label}-`)) return label;
+  // 呼び名を「画面録画」へそろえる前に録った物は、名前が `画面収録-…` のまま残っている
+  if (item.name.startsWith(LEGACY_SCREEN_PREFIX)) return CAPTURE_LABEL.screen;
   return item.kind === 'audio' ? '音' : '動画';
 }
 

@@ -10,6 +10,7 @@ import {
   CAPTURE_LABEL,
   captureBarLine,
   captureFileName,
+  capturedLengthText,
 } from '../../src/features/asset/capture-text';
 import { pastedImageName } from '../../src/features/asset/pasted-image-name';
 
@@ -18,7 +19,7 @@ const at = new Date(2026, 7, 27, 3, 1, 2);
 describe('収録の名前(#413)', () => {
   it('🔴 何を録ったかが名前で分かる', () => {
     expect(captureFileName('audio', at, 'audio/webm', null)).toBe('録音-2026-08-27-030102.webm');
-    expect(captureFileName('screen', at, 'video/webm', null)).toBe('画面収録-2026-08-27-030102.webm');
+    expect(captureFileName('screen', at, 'video/webm', null)).toBe('画面録画-2026-08-27-030102.webm');
   });
 
   it('🔴 `;codecs=…` が付いていても拡張子を引ける', () => {
@@ -26,7 +27,7 @@ describe('収録の名前(#413)', () => {
       '録音-2026-08-27-030102.webm',
     );
     expect(captureFileName('screen', at, 'video/mp4; codecs="avc1"', null)).toBe(
-      '画面収録-2026-08-27-030102.mp4',
+      '画面録画-2026-08-27-030102.mp4',
     );
   });
 
@@ -55,13 +56,13 @@ describe('帯の 1 行(#413)', () => {
       '録音中 1:05(約 2KB・残り 11:58:55)',
     );
     expect(captureBarLine('screen', 3_723_000, '45.2MB', 39_477_000, 1)).toBe(
-      '画面収録中 1:02:03(約 45.2MB・残り 10:57:57)',
+      '画面録画中 1:02:03(約 45.2MB・残り 10:57:57)',
     );
   });
 
   it('🔴 2 本目からは「何本目か」が出る(#771)', () => {
     expect(captureBarLine('screen', 3_723_000, '45.2MB', 39_477_000, 3)).toBe(
-      '画面収録中 1:02:03(約 45.2MB・3 本目・残り 10:57:57)',
+      '画面録画中 1:02:03(約 45.2MB・3 本目・残り 10:57:57)',
     );
   });
 
@@ -95,5 +96,20 @@ describe('🔴 分かれた収録の名前(#771)', () => {
 
   it('⚠ 連番は拡張子の**前**に付く(種類を失わない)', () => {
     expect(captureFileName('screen', at, 'video/mp4', 12).endsWith('.mp4')).toBe(true);
+  });
+});
+
+describe('録った長さの言い方(#1163 依頼 50-3。破棄の確認に使う)', () => {
+  it('分と秒で言う / 0 の位は出さない / 時間を超えたら時間も出す / 秒は切り捨て', () => {
+    expect(capturedLengthText(61_000)).toBe('1 分 1 秒');
+    expect(capturedLengthText(61_999)).toBe('1 分 1 秒');
+    expect(capturedLengthText(120_000)).toBe('2 分');
+    expect(capturedLengthText(3_723_000)).toBe('1 時間 2 分 3 秒');
+    expect(capturedLengthText(7_200_000)).toBe('2 時間');
+    expect(capturedLengthText(-5)).toBe('0 秒');
+  });
+
+  it('呼び名に「収録」が残っていない(画面録画 / 録音)', () => {
+    expect(Object.values(CAPTURE_LABEL)).toEqual(['録音', '画面録画']);
   });
 });

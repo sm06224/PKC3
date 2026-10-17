@@ -3209,7 +3209,7 @@ function refuseWhileBusy(
 function refuseNoCapture(dispatcher: Dispatcher): void {
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: 'このタブの PKC3 が古いままのため、録音・画面収録ができません。再読み込みしてください',
+    error: 'このタブの PKC3 が古いままのため、録音・画面録画ができません。再読み込みしてください',
   });
 }
 
@@ -7820,7 +7820,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *
    * ⚠ **受け手を 1 つも増やさない** ── 出すのは既存の登記
    *   (`entryMenuActions` = 行の右クリックと同じ字)と `open-palette` だけである。
-   *   ⚠ 添付 / 録音 / 画面収録 / 計測(左の列の create-bar に在る 4 つ)は**段③**で足す
+   *   ⚠ 添付 / 録音 / 画面録画 / 計測(左の列の create-bar に在る 4 つ)は**段③**で足す
    *   ── create-bar との等値 pin を先に書かないと、片方に足した日に静かにずれる。
    */
   'phone-menu': (dispatcher, target, _services, root) => {
@@ -11115,7 +11115,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     root.querySelector<HTMLInputElement>('[data-pkc-field="attach-input"]')?.click();
   },
   /**
-   * 🔴 **録音・画面収録**(#413)。⚠ 段取り(帯 / 添付 / 本文への参照)は
+   * 🔴 **録音・画面録画**(#413)。⚠ 段取り(帯 / 添付 / 本文への参照)は
    *   `capture.ts` が持つ ── ここは撃つだけ。
    *
    * ⚠ **`BODY_WRITE_ACTIONS` には載せない。** 止めると本文へ参照が入るので
