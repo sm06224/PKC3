@@ -386,6 +386,8 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
   const tree = kid(kid(root, 'cSld'), 'spTree');
   if (tree === undefined) throw new Error('スライドの中身(spTree)が見つかりません');
   let dropped = 0;
+  // 🔴 板に置かない副題(扉)の数。⚠ `dropped` には足さない ── `pure`(位置の逆算の可否)を変えてしまう。最後に件数だけ足す
+  let subtitles = 0;
   // 形を変えて(四角で)置いた数。⚠ 位置の逆算の可否(`pure`)には数えない
   let reshaped = 0;
   const conns: XmlNode[] = [];
@@ -405,7 +407,11 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
           if (title === null) title = s.plain;
           continue;
         }
-        if (s.isSub) continue;
+        // 副題は付箋にしない(板に戻せない)。字があるものは黙って消えないよう数える(空の置き場は数えない)
+        if (s.isSub) {
+          if (s.plain !== '') subtitles += 1;
+          continue;
+        }
         if (s.reshaped) reshaped += 1;
         if (s.name === '本文') hasBodyText = true;
         got.push(s);
@@ -557,7 +563,7 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
     body: [...blocks, ...wires].join('\n'),
     placed: shapes.length,
     lines: wires.length,
-    dropped: dropped + reshaped,
+    dropped: dropped + reshaped + subtitles,
     rounded: shapes.filter((s) => s.size?.rounded === true).length,
     simplified: shapes.filter((s) => s.flipped || s.lostOuter).length,
   };

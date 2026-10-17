@@ -132,3 +132,20 @@ describe('sniffedPreview ── 言い当てた種類を本来の見せ方へ回
     expect(sniffedPreview(null)).toBeNull();
   });
 });
+
+describe('🔴 #1087 B7: BOM つき UTF-16 は字', () => {
+  const u16 = (s: string, be: boolean): Uint8Array => {
+    const out = [be ? 0xfe : 0xff, be ? 0xff : 0xfe];
+    for (const ch of s) {
+      const c = ch.charCodeAt(0);
+      out.push(...(be ? [c >> 8, c & 255] : [c & 255, c >> 8]));
+    }
+    return Uint8Array.from(out);
+  };
+  it.each([[false], [true]])('BOM あり(BE=%s)は text として読む', (be) => {
+    expect(sniffText(u16('こんにちは hello', be), false)).toEqual({ kind: 'text', text: 'こんにちは hello' });
+  });
+  it('対照群: BOM の無い NUL 入りは従来どおり binary', () => {
+    expect(sniffText(Uint8Array.from([0x61, 0, 0x62, 0, 0]), false)).toEqual({ kind: 'binary', guess: null });
+  });
+});

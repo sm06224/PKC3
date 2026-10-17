@@ -59,6 +59,11 @@ export function sniffText(head: Uint8Array, truncated: boolean): TextSniff {
       return { kind: 'binary', guess: s.kind };
     }
   }
+  // 🔴 BOM つきの UTF-16 は字の列(1 字ごとに NUL を持つ)── NUL の検査より先に見る。BOM が無い UTF-16 は従来どおり字でない側
+  if (head.length >= 2 && ((head[0] === 0xff && head[1] === 0xfe) || (head[0] === 0xfe && head[1] === 0xff))) {
+    const got = decodeImportTextInfo(truncated && head.length % 2 === 1 ? head.subarray(0, head.length - 1) : head);
+    if (got.used === 'utf16') return { kind: 'text', text: got.text };
+  }
   if (head.includes(0)) return { kind: 'binary', guess: null };
   // ⚠ `stream: true` = 末尾の**途切れた多 byte 列を保留する**(U+FFFD にしない)。
   //   全体が入っているときは保留せず、末尾の欠けも壊れとして数える
