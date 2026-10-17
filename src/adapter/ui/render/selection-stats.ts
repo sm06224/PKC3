@@ -121,7 +121,8 @@ export function syncSelectionStats(region: HTMLElement, cache?: CacheRef): boole
         c = { ta, from: r.from, to: r.to, table: r.table };
         if (cache !== undefined) cache.current = c;
       }
-      if (c.table) text = TABLE_TAB_HINT;
+      // 🔴 行の欄(`row-source`)の `Tab` は行を確定するだけでセルは動かない ── 案内は 2 列の欄だけ(#1087 B-1)
+      if (c.table && ta.getAttribute('data-pkc-field') !== 'row-source') text = TABLE_TAB_HINT;
     }
   }
   if (slot.textContent === text) return false;

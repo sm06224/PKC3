@@ -215,7 +215,7 @@ function wrapSpan(
     return {
       text: text.slice(0, start - len) + inner + text.slice(end + len),
       start: start - len,
-      end: end - len + inner.length,
+      end: end - len,
     };
   }
   // ③ 付ける

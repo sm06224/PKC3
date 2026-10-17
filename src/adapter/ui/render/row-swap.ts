@@ -293,8 +293,14 @@ interface Active {
   blockCount: number;
   startLine: number;
   endLine: number;
-  /** 開いた時の原文。⚠ **変わったかの判定はここ 1 か所**(呼び側で二重に見ない)。 */
+  /**
+   * 開いた時の原文。⚠ **変わったかの判定はここ 1 か所**(呼び側で二重に見ない)。
+   * 🔴 **改行は LF にそろえてある**(#1087 A-2)── 欄の `value` はブラウザが CRLF / CR を LF にするので、
+   *   行末に `\r` が残った原文と比べると、何も打たなくても「変わった」になっていた。
+   */
   source: string;
+  /** 開いた時の各行が `\r` で終わっていたか(CRLF の本文)。確定のとき、元の改行コードで戻す。 */
+  crs: readonly boolean[];
   /** 差し替える前の塊の HTML。**閉じるときに必ず戻す**(穴を残さない)。
    *  末尾に足した行では `''`(戻すときは消す)。 */
   originalHtml: string;
@@ -888,7 +894,7 @@ export class RowSwap {
      * 開放終端の持ち主判定がそこに乗っている)。
      */
     const endLine = shrinkTrailingBlank(this.body, startLine, sub?.end ?? blockEnd);
-    const source = this.body.split('\n').slice(startLine, endLine + 1).join('\n');
+    const { source, crs } = lineSlice(this.body, startLine, endLine);
     /**
      * 🔑 **列は差し替える前に測る**(2026-08-05 に外した)── `applyBlocks` を
      * 通した後の要素は DOM から外れていて、座標から caret が引けない。
@@ -914,6 +920,7 @@ export class RowSwap {
       startLine,
       endLine,
       source,
+      crs,
       originalHtml: this.view.blocks[blockIndex] ?? '',
       withSlot,
       caret,
@@ -948,6 +955,7 @@ export class RowSwap {
       startLine,
       endLine,
       source: '',
+      crs: [],
       originalHtml: '',
       withSlot: [...this.view.blocks, SLOT_HTML],
       caret: 0,
@@ -1009,7 +1017,7 @@ export class RowSwap {
   extendTo(blockIndex: number): boolean {
     const a = this.active;
     if (a === null) return false;
-    if (a.textarea.value !== a.source) {
+    if (normalizeEol(a.textarea.value) !== a.source) {
       this.commitActive();
       this.cb.notify?.('確定しました。もう一度 Shift+クリックで範囲を選べます');
       return false;
@@ -1042,7 +1050,7 @@ export class RowSwap {
     }
     if (!Number.isFinite(startLine) || endLine < startLine) return false;
     const end = shrinkTrailingBlank(this.body, startLine, endLine);
-    const source = this.body.split('\n').slice(startLine, end + 1).join('\n');
+    const { source, crs } = lineSlice(this.body, startLine, end);
     const withSlot = [...this.view.blocks];
     const replaced = withSlot.splice(from, to - from + 1, SLOT_HTML);
     return this.open({
@@ -1051,6 +1059,7 @@ export class RowSwap {
       startLine,
       endLine: end,
       source,
+      crs,
       // ⚠ 戻すときは**まとめて 1 つの文字列**で置く(`applyBlocks` が再分割する)
       originalHtml: replaced.join(''),
       withSlot,
@@ -1106,6 +1115,7 @@ export class RowSwap {
     startLine: number;
     endLine: number;
     source: string;
+    crs: readonly boolean[];
     originalHtml: string;
     withSlot: readonly string[];
     caret: number;
@@ -1139,6 +1149,7 @@ export class RowSwap {
       startLine: o.startLine,
       endLine: o.endLine,
       source: o.source,
+      crs: o.crs,
       originalHtml: o.originalHtml,
       slot,
       prose: o.prose,
@@ -1441,7 +1452,7 @@ export class RowSwap {
     // 先頭より上には行けない ── 既定(その行の先頭へ動くだけ)に任せる
     if (!down && next === null) return;
     // 何も打っていない書き足し行(範囲が空)で ↓ ── 開き直しても同じ行なので何もしない
-    if (down && next === null && a.endLine < a.startLine && ta.value === a.source) return;
+    if (down && next === null && a.endLine < a.startLine && normalizeEol(ta.value) === a.source) return;
     // ⚠ `preventDefault` は要らない ── 既定はもう走り終わっている(そして
     //    端に居たので何も動かしていない)
     if (next === null) this.appendRow();
@@ -1526,7 +1537,7 @@ export class RowSwap {
      * ⚠ **変換中(`composing`)の扱いは上のまま** ── そちらが先に効く。
      */
     if (!force && isAppDialogOpen()) return false;
-    const text = a.textarea.value;
+    const typed = normalizeEol(a.textarea.value);
     const start = a.startLine;
     const end = a.endLine;
     /**
@@ -1534,12 +1545,12 @@ export class RowSwap {
      * ⚠ 呼び側(`detail.ts`)にも同じ判定を置かない ── 同じ規則が 2 か所に
      * 生えると、片方を壊しても誰も気づかない(2026-08-05 の変異試験の教訓)。
      */
-    const changed = text !== a.source;
+    const changed = typed !== a.source;
     /**
      * 🔴 **閉じていないまま戻ったら、理由を出す**(S5b の残り)。確定は止めない
      * ── 止めると移動できない罠になる。
      */
-    const stillOpen = findOpenEnds(text).find((o) => o.kind !== 'inline');
+    const stillOpen = findOpenEnds(typed).find((o) => o.kind !== 'inline');
     this.restoreActive();
     if (stillOpen !== undefined) {
       this.cb.notify?.(
@@ -1584,6 +1595,11 @@ export class RowSwap {
      *   原文を書き換えるより、着弾の組み直しに任せるほうが安全である。
      * 🔑 実際の編集はほとんど行数が変わらない(1 行の言い直し・語句の直し)。
      */
+    /**
+     * 🔴 **本文へ戻すときは元の改行コードで**(#1087 A-2)。開いた時に行末が `\r` だった行は `\r` を付け直し、
+     *   増えた行は塊の改行コード(1 行でも `\r` があれば CRLF)に合わせる。本文の最後の行は元から `\r` が無い。
+     */
+    const text = restoreEol(typed, a.crs, this.body.split('\n').length - 1 === end);
     if (text.split('\n').length === end - start + 1) {
       this.body = spliceLines(this.body, start, end, text);
     } else {
@@ -1609,7 +1625,7 @@ export class RowSwap {
      * 🔴 **打った字があるときは、捨てる前に聞く**(2 列の編集の Esc と同じ問い・同じ字)。
      *   変えていなければ今までどおり聞かずに閉じる。聞いている間の Esc 連打は 1 回にまとめる。
      */
-    if (a.textarea.value !== a.source) {
+    if (normalizeEol(a.textarea.value) !== a.source) {
       if (this.cancelAsking) return;
       this.cancelAsking = true;
       void confirmInApp(this.host, '打った内容を捨てますか', {
@@ -1660,6 +1676,38 @@ export class RowSwap {
     if (r.inserted.length > 0) this.cb.onInserted(r.inserted);
     this.markOpenEnds();
   }
+}
+
+/** 改行を LF にそろえる(ブラウザが `textarea.value` にするのと同じ)。 */
+function normalizeEol(text: string): string {
+  return text.replace(/\r\n?/g, '\n');
+}
+
+/**
+ * 行 `[start, end]` を LF の原文として切り出す。各行が `\r` で終わっていたかも返す(CRLF の本文)。
+ * 🔴 欄の `value` は改行を LF にして返すので、`\r` を残した原文とは比べられない(#1087 A-2)。
+ */
+function lineSlice(body: string, start: number, end: number): { source: string; crs: boolean[] } {
+  const lines = body.split('\n').slice(start, end + 1);
+  const crs = lines.map((l) => l.endsWith('\r'));
+  return { source: lines.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l)).join('\n'), crs };
+}
+
+/**
+ * `lineSlice` の逆。打った後の行に、元の改行コードを付け直す。
+ * 元の行(添字が収まる間)は元のとおり、増えた行は塊が CRLF なら CRLF。
+ * `atEnd` = 本文の最後の行まで含むとき、その行に `\r` は付けない(本文の末尾に改行が無い)。
+ */
+function restoreEol(typed: string, crs: readonly boolean[], atEnd: boolean): string {
+  if (!crs.includes(true)) return typed;
+  const lines = typed.split('\n');
+  return lines
+    .map((l, i) => {
+      if (atEnd && i === lines.length - 1) return l;
+      // 元の最後の行(本文の末尾)に `\r` は無いが、後ろへ行が増えたら行末になるので付ける
+      return i < crs.length && !(atEnd && i === crs.length - 1) && !crs[i] ? l : `${l}\r`;
+    })
+    .join('\n');
 }
 
 /**

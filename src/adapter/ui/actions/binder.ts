@@ -16074,7 +16074,10 @@ export function bindActions(
       !ke.altKey &&
       !ke.metaKey &&
       (field === 'editor-body' || field === 'row-source') &&
-      ke.target instanceof HTMLTextAreaElement
+      ke.target instanceof HTMLTextAreaElement &&
+      // 🔴 範囲を選んでいるときは普通の Enter(選んだ字を改行に置き換える)に任せる ── 規則は caret の行しか見ないので、
+      //   空の `> ` / `- ` の行から下へ選んで押すと、選んだ範囲を置き換えずに記号だけ消していた(#1087 調査 7)
+      ke.target.selectionStart === ke.target.selectionEnd
     ) {
       const ta = ke.target;
       const r = quoteOnEnter(ta.value, ta.selectionStart);
@@ -16289,9 +16292,11 @@ export function bindActions(
      * 🔴 表の編集アシスト (Tab / Shift+Tab)(#1093)。
      * 表のセル内ならセル移動や行追加を行う。
      * ⚠ 表の外なら通常の短縮語・印移動・通常の焦点移動へ通す。
+     * ⚠ **ライブの行の欄(`row-source`)はここへ来ない**(上の `field === 'row-source'` の門が必ず `return` する)。
+     *   行の欄の `Tab` は「行を確定する」で、セルは動かない(`row-swap.ts`)── 届かない枝は置かない(#1087 B-1)。
      */
     if (
-      (field === 'editor-body' || field === 'row-source') &&
+      field === 'editor-body' &&
       ke.key === 'Tab' &&
       !ke.ctrlKey &&
       !ke.altKey &&

@@ -2224,3 +2224,123 @@ describe('補った開きの直後の Backspace ── 閉じも一緒に消え�
     expect(backspace(ta).defaultPrevented).toBe(false);
   });
 });
+
+describe('CRLF の本文の行(#1087 A-2)', () => {
+  const CRLF_DOC = DOC.replace(/\n/g, '\r\n');
+  const eolOf = (s: string): string[] => s.split('\n').map((l) => (l.endsWith('\r') ? 'CRLF' : 'LF'));
+
+  /**
+   * 🔴 **ブラウザの `textarea.value` は CRLF / CR を LF にする**(HTML 仕様の API value)。happy-dom は
+   * しないので、同じ意味論をここで足す ── 足さないと、直す前の実装でも「何も打たなければ変わらない」が成り立ってしまう。
+   */
+  const proto = HTMLTextAreaElement.prototype;
+  const desc = Object.getOwnPropertyDescriptor(proto, 'value')!;
+  afterEach(() => {
+    Object.defineProperty(proto, 'value', desc);
+  });
+  const browserValue = (): void => {
+    Object.defineProperty(proto, 'value', {
+      configurable: true,
+      get(this: HTMLTextAreaElement): string {
+        return (desc.get!.call(this) as string).replace(/\r\n?/g, '\n');
+      },
+      set(this: HTMLTextAreaElement, v: string) {
+        desc.set!.call(this, v.replace(/\r\n?/g, '\n'));
+      },
+    });
+  };
+  const press = (ta: HTMLTextAreaElement, key: string): void => {
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  };
+
+  it('前提: 本文は CRLF で、欄の value は LF になる(ブラウザと同じ)', () => {
+    browserValue();
+    const r = rig(CRLF_DOC);
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    expect(r.body().includes('\r\n'), '本文が CRLF でない').toBe(true);
+    expect(box(r.host)!.value).toBe('最初の段落。');
+  });
+
+  it('🔴 何も打たずに Tab で離れても、確定は 0 件', () => {
+    browserValue();
+    const r = rig(CRLF_DOC);
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    press(box(r.host)!, 'Tab');
+    expect(r.commits, '何も打っていないのに確定した').toEqual([]);
+    expect(r.body()).toBe(CRLF_DOC);
+  });
+
+  it('🔴 何も打たずに blur で離れても、確定は 0 件(複数行の塊でも)', () => {
+    browserValue();
+    const r = rig(CRLF_DOC);
+    expect(r.swap.activateAll()).toBe(true);
+    expect(box(r.host)!.value).toBe(DOC);
+    box(r.host)!.dispatchEvent(new FocusEvent('blur'));
+    expect(r.commits).toEqual([]);
+    expect(r.body()).toBe(CRLF_DOC);
+  });
+
+  it('🔴 何も打たずに Esc しても、確認を出さずに閉じる', () => {
+    browserValue();
+    const r = rig(CRLF_DOC);
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    press(box(r.host)!, 'Escape');
+    expect(dialogEl(), '何も打っていないのに聞いた').toBeNull();
+    expect(box(r.host)).toBeNull();
+    // 複数行の塊(行の区切りも LF にそろう)
+    expect(r.swap.activateAll()).toBe(true);
+    press(box(r.host)!, 'Escape');
+    expect(dialogEl(), '複数行で、何も打っていないのに聞いた').toBeNull();
+    expect(box(r.host), '複数行で閉じない').toBeNull();
+  });
+
+  it('🔴 1 字打つと、その行だけ変わり、他の行の CRLF は保たれ、行数は増えない', () => {
+    browserValue();
+    const r = rig(CRLF_DOC);
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '最初の段落。X';
+    ta.dispatchEvent(new FocusEvent('blur'));
+    expect(r.commits).toHaveLength(1);
+    expect(r.body()).toBe(CRLF_DOC.replace('最初の段落。', '最初の段落。X'));
+    expect(r.body().split('\n').length, '行数が増えた').toBe(CRLF_DOC.split('\n').length);
+    const e = eolOf(r.body());
+    expect(e.slice(0, -1).every((x) => x === 'CRLF'), `CRLF でない行が在る: ${e.join(',')}`).toBe(true);
+    expect(e.at(-1)).toBe('LF');
+  });
+
+  it('🔴 複数行の塊で 1 字打っても、塊の中の行が CRLF のまま', () => {
+    browserValue();
+    const r = rig(CRLF_DOC);
+    expect(r.swap.activateAll()).toBe(true);
+    const ta = box(r.host)!;
+    ta.value = DOC.replace('- 二つめ', '- 二つめX');
+    ta.dispatchEvent(new FocusEvent('blur'));
+    expect(r.body()).toBe(CRLF_DOC.replace('- 二つめ', '- 二つめX'));
+  });
+
+  it('🔴 打って行が増えても、増えた行は CRLF', () => {
+    browserValue();
+    const r = rig(CRLF_DOC);
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '最初の段落。\nもう一行';
+    ta.dispatchEvent(new FocusEvent('blur'));
+    expect(r.commits).toHaveLength(1);
+    expect(r.commits[0]!.text).toBe('最初の段落。\r\nもう一行\r');
+  });
+
+  it('対照群(LF の本文): 何も打たなければ 0 件・1 字打てば LF のまま', () => {
+    browserValue();
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    press(box(r.host)!, 'Tab');
+    expect(r.commits).toEqual([]);
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '最初の段落。X';
+    ta.dispatchEvent(new FocusEvent('blur'));
+    expect(r.body()).toBe(DOC.replace('最初の段落。', '最初の段落。X'));
+    expect(r.body().includes('\r')).toBe(false);
+  });
+});
