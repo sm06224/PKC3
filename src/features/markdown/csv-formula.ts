@@ -49,10 +49,11 @@ export function isFormula(cell: string): boolean {
 export function displayCell(
   cell: string,
   rows: readonly (readonly string[])[],
+  ctx?: FormulaContext,
 ): FormulaResult {
   if (cell.startsWith("'")) return { text: cell.slice(1) };
   if (!isFormula(cell)) return { text: cell };
-  return evaluateFormula(cell, rows);
+  return evaluateFormula(cell, rows, ctx);
 }
 
 /**
@@ -185,6 +186,43 @@ interface Ctx {
    * 🔑 循環は「いま辿っている升」の集合で見分け、深さでは打ち切らない。
    */
   readonly memo: Map<string, Memo>;
+  /** 表の実際の大きさ(行数 / いちばん広い行の幅)。範囲をこの中へ切るのに使う。 */
+  readonly height: number;
+  readonly width: number;
+}
+
+/**
+ * 🔴 **表 1 枚ぶんの評価の入れ物**(#1087 F-4)。升ごとに作り直すと、累計の列
+ * (各行が前の行を指す)が**行数の 2 乗**で遅くなる(2000 行で 2.9 秒)。
+ * 表を描く側が 1 回だけ作り、全部の升へ渡す。⚠ 中身は `rows` の原文だけに依る
+ * (`rows` を書き換えたら作り直す)。
+ */
+export type FormulaContext = Ctx;
+
+export function createFormulaContext(rows: readonly (readonly string[])[]): FormulaContext {
+  let width = 0;
+  for (const r of rows) if (r.length > width) width = r.length;
+  return { rows, memo: new Map(), height: rows.length, width };
+}
+
+/**
+ * 🔴 **範囲を表の大きさの中へ切る**(#1087 F-3)。`SUM(A1:A10000000)` が 2.6 秒 / 500MB、
+ * `A1:ZZ100000` が約 30 秒かかっていた(描くたびに)。⚠ 表の外の升は `''` で、
+ * SUM / AVERAGE / MIN / MAX / COUNT は範囲の中の数でない字を飛ばすので答えは変わらない。
+ * 範囲を広げる場所(参照の収集 / 値の取り出し)は**ここだけ**を通る。
+ * 表の外だけの範囲は空(`r0 > r1`)で返る。
+ */
+function clampRange(
+  ctx: Ctx,
+  a: { row: number; col: number },
+  b: { row: number; col: number },
+): { r0: number; r1: number; c0: number; c1: number } {
+  return {
+    r0: Math.min(a.row, b.row),
+    r1: Math.min(Math.max(a.row, b.row), ctx.height - 1),
+    c0: Math.min(a.col, b.col),
+    c1: Math.min(Math.max(a.col, b.col), ctx.width - 1),
+  };
 }
 
 function memoKey(row: number, col: number): string {
@@ -192,7 +230,7 @@ function memoKey(row: number, col: number): string {
 }
 
 /** 式の字が参照している升(範囲は全部ばらす)。 */
-function refsOf(toks: readonly Token[]): Array<[number, number]> {
+function refsOf(ctx: Ctx, toks: readonly Token[]): Array<[number, number]> {
   const out: Array<[number, number]> = [];
   for (let i = 0; i < toks.length; i += 1) {
     const t = toks[i]!;
@@ -200,8 +238,9 @@ function refsOf(toks: readonly Token[]): Array<[number, number]> {
     const colon = toks[i + 1];
     const end = toks[i + 2];
     if (colon?.t === 'colon' && end?.t === 'ref') {
-      for (let r = Math.min(t.row, end.row); r <= Math.max(t.row, end.row); r += 1) {
-        for (let c = Math.min(t.col, end.col); c <= Math.max(t.col, end.col); c += 1) out.push([r, c]);
+      const g = clampRange(ctx, t, end);
+      for (let r = g.r0; r <= g.r1; r += 1) {
+        for (let c = g.c0; c <= g.c1; c += 1) out.push([r, c]);
       }
       i += 2;
     } else {
@@ -225,8 +264,8 @@ interface Frame {
   cyclic: boolean;
 }
 
-function frameFor(key: string | null, raw: string, toks: readonly Token[]): Frame {
-  return { key, raw, toks, deps: refsOf(toks), i: 0, cyclic: false };
+function frameFor(ctx: Ctx, key: string | null, raw: string, toks: readonly Token[]): Frame {
+  return { key, raw, toks, deps: refsOf(ctx, toks), i: 0, cyclic: false };
 }
 
 /**
@@ -256,7 +295,7 @@ function warm(ctx: Ctx, root: Frame): void {
         throw e;
       }
       inProgress.add(key);
-      stack.push(frameFor(key, raw, toks));
+      stack.push(frameFor(ctx, key, raw, toks));
       continue;
     }
     stack.pop();
@@ -363,8 +402,9 @@ class Parser {
       if (end === undefined || end.t !== 'ref') throw new Fail('#REF!', '範囲の終わりがセルの名前ではありません');
       this.take();
       const out: Value[] = [];
-      for (let r = Math.min(t.row, end.row); r <= Math.max(t.row, end.row); r += 1) {
-        for (let c = Math.min(t.col, end.col); c <= Math.max(t.col, end.col); c += 1) {
+      const g = clampRange(this.ctx, t, end);
+      for (let r = g.r0; r <= g.r1; r += 1) {
+        for (let c = g.c0; c <= g.c1; c += 1) {
           out.push(cellValue(this.ctx, r, c));
         }
       }
@@ -414,7 +454,9 @@ function toNum(v: Value): number {
 
 function compare(op: string, a: Value, b: Value): boolean {
   // ⚠ 字どうしは字として、数が混ざれば数として比べる(表計算の作法)
-  const both = typeof a === 'string' && typeof b === 'string';
+  // 🔴 字どうしでも**両方が数として読める**なら数で比べる(#1087 F-1)── csv の升は全部字なので、
+  //   `10 > 9` が字の比べ(`"10" < "9"`)で偽、`1.0 = 1` が不一致になっていた。
+  const both = typeof a === 'string' && typeof b === 'string' && !(isNumeric(a) && isNumeric(b));
   const x: Value = both ? a : toNum(a);
   const y: Value = both ? b : toNum(b);
   switch (op) {
@@ -501,6 +543,8 @@ function truthy(v: Value | undefined): boolean {
   if (v === undefined) return false;
   if (typeof v === 'boolean') return v;
   if (typeof v === 'number') return v !== 0;
+  // 🔴 数として読める字は数で(#1087 F-2)── 升の `0` / `0.0` が真になっていた
+  if (isNumeric(v)) return Number(v) !== 0;
   return v.trim() !== '' && v.toUpperCase() !== 'FALSE';
 }
 
@@ -533,7 +577,7 @@ function cellValue(ctx: Ctx, row: number, col: number): Value {
   const key = memoKey(row, col);
   if (!ctx.memo.has(key)) {
     // 通常は `warm` が先に覚えてある。ここへ来るのは、覚える前に直接呼ばれたときだけ。
-    warm(ctx, frameFor(null, '', [{ t: 'ref', row, col }]));
+    warm(ctx, frameFor(ctx, null, '', [{ t: 'ref', row, col }]));
   }
   const m = ctx.memo.get(key)!;
   if ('fail' in m) throw m.fail;
@@ -557,11 +601,12 @@ export interface FormulaResult {
 export function evaluateFormula(
   formula: string,
   rows: readonly (readonly string[])[],
+  shared?: FormulaContext,
 ): FormulaResult {
   try {
     const toks = tokenize(formula.slice(1));
-    const ctx: Ctx = { rows, memo: new Map() };
-    warm(ctx, frameFor(null, formula, toks));
+    const ctx: Ctx = shared ?? createFormulaContext(rows);
+    warm(ctx, frameFor(ctx, null, formula, toks));
     return { text: fmt(new Parser(toks, ctx).parse()) };
   } catch (e) {
     if (e instanceof Fail) return { text: e.code, why: e.why };

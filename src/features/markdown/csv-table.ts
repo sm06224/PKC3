@@ -42,7 +42,7 @@
  *     rendering (preserves the user's source visually).
  */
 
-import { displayCell } from './csv-formula';
+import { createFormulaContext, displayCell } from './csv-formula';
 
 const HEADER_OFF_FLAG = 'noheader';
 
@@ -346,8 +346,10 @@ export function rowsToHtml(
    *   打ち直しは式から始まる。
    * ⚠ 評価の入力は**升の原文**(`rows`)であって、描いた字ではない。
    */
+  // 🔴 升ごとに評価し直さない(#1087 F-4)── 表 1 枚で 1 つの入れ物を共有する(累計の列が 2 乗で遅かった)
+  const formulaCtx = createFormulaContext(rows);
   const renderCell = (cell: string): { html: string; why?: string } => {
-    const shown = displayCell(cell, rows);
+    const shown = displayCell(cell, rows, formulaCtx);
     return {
       html: inlineRender ? inlineRender(shown.text) : escapeHtml(shown.text),
       ...(shown.why !== undefined ? { why: shown.why } : {}),
