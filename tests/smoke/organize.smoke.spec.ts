@@ -161,7 +161,7 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
   for (let i = 0; i < 3; i += 1) {
     await createEntry(page, 'text');
     await page.locator('[data-pkc-field="editor-title"]').fill(`ノート${i + 1}`);
-    await page.locator('[data-pkc-field="editor-body"]').fill(bodies[i]);
+    await page.locator('[data-pkc-field="editor-body"]').fill(bodies[i]!);
     await clickReal(page, '[data-pkc-action="commit-edit"]');
   }
   const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
