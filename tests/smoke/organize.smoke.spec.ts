@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 
 /**
  * 整理の面(#240 段①〜⑤。user 指示 2026-08-17
@@ -153,9 +153,15 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
 test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
+  // ⚠ 2 列の編集にして本文を入れる(2 件目は閉じの `---` が無い前書き = 読めないノート。#1087)
+  await useSplitEditor(page);
   await gotoApp(page);
+  const BROKEN = '---\ntags: [買い物, 家事]\n本文';
+  const bodies = ['普通の本文\n', BROKEN, '別の本文\n'];
   for (let i = 0; i < 3; i += 1) {
     await createEntry(page, 'text');
+    await page.locator('[data-pkc-field="editor-title"]').fill(`ノート${i + 1}`);
+    await page.locator('[data-pkc-field="editor-body"]').fill(bodies[i]);
     await clickReal(page, '[data-pkc-action="commit-edit"]');
   }
   const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
@@ -184,6 +190,32 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
   await expect(moveDialog.locator('[data-pkc-field="dialog-title"]')).toHaveText('2 件を移す');
   await page.keyboard.press('Escape');
   await expect(moveDialog, '閉じない').toHaveCount(0);
+
+  /**
+   * 🔴 **前書きが読めないノートには、まとめてタグを付けない**(#1087)。3 件を選んで「タグを付ける」→
+   * 閉じの `---` が無いノートは**本文が 1 字も変わらず**(買い物・家事が残る)、
+   * 知らせに「前書きが読めない」と出る。⚠ 新しく起動せず、この道中に足す。
+   */
+  await rows.nth(0).click();
+  await rows.nth(1).click({ modifiers: ['ControlOrMeta'] });
+  await rows.nth(2).click({ modifiers: ['ControlOrMeta'] });
+  await expect(bulk).toContainText('3 件');
+  await page.locator('[data-pkc-field="bulk-tag"]').fill('急ぎ');
+  await clickReal(page, '[data-pkc-action="bulk-tag-add"]');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '前書きが読めないノートを断った知らせが出ない',
+  ).toContainText('前書きが読めない');
+  await page.locator('[data-pkc-region="filer-table"] tbody tr', { hasText: 'ノート2' }).click();
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(
+    page.locator('[data-pkc-field="editor-body"]'),
+    '前書きの読めないノートの本文が書き換わった',
+  ).toHaveValue(BROKEN);
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+  // 後続(範囲選択)の前提 = 1 行目を押してから 3 行目を Ctrl で足した状態へ戻す
+  await rows.nth(0).click();
+  await rows.nth(2).click({ modifiers: ['ControlOrMeta'] });
 
   /**
    * ③ 範囲選択(Shift)は**見えている並び**で採る ── 起点は最後に押した行。
