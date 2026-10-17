@@ -667,7 +667,6 @@ import {
   type RebuildReport,
 } from '@features/storage/container-rebuild';
 import { OFFICE_PACK_APPROX } from '@features/office/office-pack-size';
-import { DUCKDB_PACK_APPROX } from '@features/query/duckdb-pack';
 import { readZipDirectory, readZipEntry, type ZipEntry } from '@features/import/zip-reader';
 import { humanBytes } from '@features/human-bytes';
 import {
@@ -12495,10 +12494,11 @@ const ACTIONS: Record<string, ActionHandler> = {
             /**
              * 🔴 **大きさは定数から引く**(#996 の教訓 ── 画面に出す字を手で書かない)。
              * ⚠ ここで「約 93MB」と綴ると、一式を焼き直した日に**両方そのまま**で緑になる。
+             * ⚠ **DuckDB の一式は書かない**(#1087)── 端末へ入れる口が画面に無く、残るものとして
+             *   見せると、入れた覚えのない 35MB が残ると読める。
              */
             keeps: [
               `Office の一式(${OFFICE_PACK_APPROX})`,
-              `DuckDB の一式(${DUCKDB_PACK_APPROX})`,
               '設定・見た目・ショートカットキーの割り当て・読んだお知らせの記録',
             ],
             rescued: rescued === null ? null : rescued.stats,

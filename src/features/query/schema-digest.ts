@@ -292,6 +292,8 @@ export function schemaModel(input: SchemaDigestInput): SchemaModel {
   const order: string[] = [];
   const byTable = new Map<string, SchemaColumn[]>();
   const kindOf = new Map<string, 'table' | 'view'>();
+  // 主キーの列(名前は大文字小文字を区別しない ── sqlite の表の名前と同じ)。順は `pk` の番号(複合キーの並び)
+  const pkOf = new Map<string, { no: number; name: string }[]>();
   for (const c of asMaps(input.columns)) {
     const t = text(c['tbl']);
     if (!byTable.has(t)) {
@@ -299,6 +301,12 @@ export function schemaModel(input: SchemaDigestInput): SchemaModel {
       order.push(t);
       // ⚠ `view` 以外は全部「表」へ寄せる(綴りの正規化はここ 1 か所でやる)
       kindOf.set(t, text(c['kind']) === 'view' ? 'view' : 'table');
+    }
+    const pkNo = Number(c['pk']);
+    if (Number.isInteger(pkNo) && pkNo > 0) {
+      const at = pkOf.get(t.toLowerCase()) ?? [];
+      at.push({ no: pkNo, name: text(c['col']) });
+      pkOf.set(t.toLowerCase(), at);
     }
     byTable.get(t)!.push({
       name: text(c['col']),
@@ -347,12 +355,32 @@ export function schemaModel(input: SchemaDigestInput): SchemaModel {
     // ⚠ 相手の名前が空の行は落とす(繋がりとして読めない)
     links: asMaps(input.fks)
       .filter((f) => text(f['tbl']) !== '')
-      .map((f) => ({
-        from: text(f['tbl']),
-        fromColumn: text(f['col']),
-        to: text(f['ref']),
-        toColumn: text(f['refcol']),
-      })),
+      .map((f, i, all) => {
+        const to = text(f['ref']);
+        let toColumn = text(f['refcol']);
+        /**
+         * 🔴 **`REFERENCES users`(列を書かない形)は、相手の主キーを指す**(#1087)。
+         * ⚠ 空のままだと、線の部品が「どの列でつなぐかが分かりません」と断り、構造にも
+         *   `orders.user_id → users` としか出ない。sqlite は `to` を NULL で返すので、ここで埋める。
+         * 🔑 並びは `order by m.name, f.id, f.seq` なので、同じ表→同じ相手で `to` が空の行が続く間が
+         *   1 本の外部キー。その何本目かを、主キーの `pk` 番号の順に対応させる(複合キー)。
+         * ⚠ `seq` は返さない ── DuckDB の道と列名をそろえる門(`duckdb-schema.test.ts`)があり、
+         *   連続する空行の数えで足りる。⚠ 続きの長さが主キーの列数と違うとき(別々の外部キーが
+         *   隣り合った回)は、主キーが 1 列のときだけ全部がその列を指す。それ以外は空のまま(いまの挙動)。
+         */
+        if (toColumn === '') {
+          const same = (q: Record<string, Cell>): boolean =>
+            text(q['tbl']) === text(f['tbl']) && text(q['ref']) === to && text(q['refcol']) === '';
+          let start = i;
+          while (start > 0 && same(all[start - 1]!)) start -= 1;
+          let end = i;
+          while (end < all.length - 1 && same(all[end + 1]!)) end += 1;
+          const keys = [...(pkOf.get(to.toLowerCase()) ?? [])].sort((a, b) => a.no - b.no);
+          if (keys.length === end - start + 1) toColumn = keys[i - start]!.name;
+          else if (keys.length === 1) toColumn = keys[0]!.name;
+        }
+        return { from: text(f['tbl']), fromColumn: text(f['col']), to, toColumn };
+      }),
   };
 }
 

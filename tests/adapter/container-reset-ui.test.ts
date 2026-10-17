@@ -29,7 +29,6 @@ import {
   noteRescueWritten,
 } from '../../src/features/storage/rescue-archive';
 import { OFFICE_PACK_APPROX } from '../../src/features/office/office-pack-size';
-import { DUCKDB_PACK_APPROX } from '../../src/features/query/duckdb-pack';
 import { DIALOG_REGION } from '../../src/adapter/ui/render/app-dialog';
 
 const meta = (lid: string, title: string): EntryMeta =>
@@ -193,7 +192,8 @@ describe('押しても、まだ消えない(#986 段③)', () => {
     m.run.click();
     await settle();
     expect(m.body(), 'Office の大きさが定数と違う').toContain(OFFICE_PACK_APPROX);
-    expect(m.body(), 'DuckDB の大きさが定数と違う').toContain(DUCKDB_PACK_APPROX);
+    // 🔴 DuckDB の一式は端末へ入れる口が無いので、残るものとして出さない(#1087)
+    expect(m.body(), 'DuckDB の一式が残るものに出ている').not.toContain('DuckDB');
   });
 
   it('🔴 まだ拾っていなければ、そう言う(先に拾わせる)', async () => {

@@ -32,12 +32,26 @@
  * ⚠ ところが同じ実測で **HUGEINT が `"1.2345678901234568e+29"` になった** ──
  *   30 桁が**静かに 17 桁へ落ちる**。🔑 だから**倒さずに、こちらで揃える**。
  *
- * ## 🔑 多倍長は「自分で組み直す」より「器に聞く」ほうが正しい
+ * ## 🔑 多倍長の「整数部分」は器に聞き、小数点は型の字から入れる
  *
  * ⚠ 初稿は 32bit を 4 つ並べて自分で組んでいたが、それだと **`DECIMAL(n, s)` の
  *   小数点(scale)を落とす**(器は scale を知っていて、こちらは知らない)。
- * 🔑 実測どおり器の `toString()` が正しい 10 進を返すので、**まずそれを使う** ──
+ * 🔴 **ところが器の `toString()` も scale を入れない**(2026-10-17 に実エンジンで再測定)──
+ *   返るのは **スケール前の整数**(`SELECT 12.50` → 型 `Decimal[4e+2]`、`toString()` = `"1250"`)。
+ *   「器が小数点を知っている」と信じて流すと **10^scale 倍の値が画面に出る**(`0.1+0.2` が `3`)。
+ * 🔑 だから **scale は列の型の字(`Decimal[<精度>e<+scale>]`)から読み**、
+ *   整数の字の右から scale 桁目に小数点を入れる(`Number` を経由しない ── 浮動小数点の誤差を作らない)。
  *   組み直すのは、器が素の並び(`"1,0,0,0"`)しか返さなかったときだけ。
+ *
+ * ## 🔴 日付・時刻の「時差」と TIME / INTERVAL(2026-10-17、実エンジンで再測定)
+ *
+ * - `TIMESTAMP`(型 `Timestamp<MICROSECOND>`)と `DATE` は **壁時計の時刻をそのまま UTC の ms にした値**で返る
+ *   ── 端末の時差を足して読むと **JST で 10:00 が 19:00 になる**。だから **UTC の getter で読む**。
+ *   `TIMESTAMPTZ`(型 `Timestamp<MICROSECOND, UTC>`)は本物の時刻なので、端末の時刻で見せる。
+ * - `TIME`(型 `Time64<MICROSECOND>`)は **µs の整数**で返る(`36000000000` = 10:00:00)。
+ * - `INTERVAL`(型 `Interval<MONTH_DAY_NANO>`)は Arrow の読み手が **月しか読めない**(日と時間が落ちる)。
+ *   だから呼び側(`duckdb-open.ts`)が列の素の 16 byte から `[月, 日, ns 下位, ns 上位]` の
+ *   `Int32Array` を組み、ここで読める字にする。
  */
 import { capCellText } from './sql-cell';
 
@@ -93,33 +107,109 @@ function fromBigInt(v: bigint): string | number {
 const p2 = (n: number): string => String(n).padStart(2, '0');
 
 /**
+ * 🔴 **スケール前の整数に、小数点を入れる**(`DECIMAL(n, s)`)。
+ *
+ * ⚠ `Number` を経由しない ── `0.1 + 0.2` 型の誤差と、17 桁を超える桁落ちを作らない。
+ * ⚠ 先頭の 0 を補う(`5` / scale 2 → `0.05`)。符号は数の頭に 1 つだけ。
+ */
+function withScale(v: bigint, scale: number): string {
+  const neg = v < 0n;
+  const digits = (neg ? -v : v).toString().padStart(scale + 1, '0');
+  const cut = digits.length - scale;
+  return `${neg ? '-' : ''}${digits.slice(0, cut)}.${digits.slice(cut)}`;
+}
+
+/** 型の字 `Decimal[<精度>e<+scale>]` から scale を読む(実測:`Decimal[4e+2]` / `Decimal[38e0]`)。 */
+function decimalScale(type: string): number {
+  const m = /^Decimal\[\d+e([+-]?\d+)\]$/.exec(type);
+  const n = m?.[1] === undefined ? 0 : Number(m[1]);
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+/**
  * 🔴 **器が組んだ 10 進の字を受け取る**(多倍長 / 小数)。
  *
  * ⚠ 素の型付き配列の `toString()` は **`"1,0,0,0"`** のように `,` で繋ぐ ──
  *   それが来たら「器は組んでいない」ので、こちらで組み直す。
- * 🔑 実測(2026-09-15)では `sum()` も `HUGEINT` も **`,` を含まない正しい 10 進**を返した。
+ * 🔑 実測では `sum()` も `HUGEINT` も **`,` を含まない正しい 10 進**を返した。
+ * 🔴 `DECIMAL` は **スケール前の整数**が返る(小数点は無い)── 型の字の scale で入れる(`withScale`)。
  */
-function fromLimbedNumber(v: ArrayLike<number> & { toString(): string }): string | number {
+function fromLimbedNumber(v: ArrayLike<number> & { toString(): string }, type: string): string | number {
   const s = v.toString();
-  if (/^-?\d+$/.test(s)) return fromBigInt(BigInt(s));
-  // ⚠ 小数(`DECIMAL(n, s)`)は BigInt にできない ── 数として読めるならそのまま数にする
-  if (/^-?\d+\.\d+$/.test(s)) return Number(s);
-  return fromBigInt(limbsToBigInt(v));
+  const n = /^-?\d+$/.test(s) ? BigInt(s) : limbsToBigInt(v);
+  const scale = decimalScale(type);
+  return scale > 0 ? withScale(n, scale) : fromBigInt(n);
 }
 
 /**
  * 🔴 **日付・時刻の列を読める字にする**。
  *
  * ⚠ 値は**ただの数(ミリ秒)**で返る(実測)ので、**列の型を見ないと見分けられない**。
- * ⚠ `Date32` は日だけなので、時刻を足さない ── 足すと、その端末の時差ぶん
- *   **前の日に見える**ことがある。
+ * ⚠ `Date32` は日だけなので、時刻を足さない。
+ * 🔴 **時差の扱いは型で決まる**:タイムゾーンを持たない `Timestamp` / `Date` は
+ *   **壁時計の時刻が UTC の ms として返る**ので UTC の getter で読む(端末の getter で読むと、
+ *   JST で 10:00 が 19:00、西側の時差では DATE が前の日になる)。
+ *   型の字に `, <tz>` が付く `Timestamp<MICROSECOND, UTC>`(`TIMESTAMPTZ`)は本物の時刻なので端末の時刻で見せる。
  */
 function fromEpochMs(ms: number, type: string): string | number {
   if (!Number.isFinite(ms)) return ms;
   const d = new Date(ms);
   if (Number.isNaN(d.getTime())) return ms;
-  const day = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
-  return type.startsWith('Date') ? day : `${day} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+  const isDate = type.startsWith('Date');
+  const utc = isDate || !/^Timestamp<[A-Z]+,/.test(type);
+  const Y = utc ? d.getUTCFullYear() : d.getFullYear();
+  const M = (utc ? d.getUTCMonth() : d.getMonth()) + 1;
+  const D = utc ? d.getUTCDate() : d.getDate();
+  const day = `${String(Y).padStart(4, '0')}-${p2(M)}-${p2(D)}`;
+  if (isDate) return day;
+  const h = utc ? d.getUTCHours() : d.getHours();
+  const mi = utc ? d.getUTCMinutes() : d.getMinutes();
+  const se = utc ? d.getUTCSeconds() : d.getSeconds();
+  return `${day} ${p2(h)}:${p2(mi)}:${p2(se)}`;
+}
+
+/** `HH:MM:SS`(端数があれば `.ffffff`)。`ns` は負でない整数ナノ秒。 */
+function clockOfNs(ns: bigint): string {
+  const sec = ns / 1_000_000_000n;
+  const frac = ns % 1_000_000_000n;
+  const h = sec / 3600n;
+  const hh = h < 100n ? p2(Number(h)) : h.toString();
+  const base = `${hh}:${p2(Number((sec / 60n) % 60n))}:${p2(Number(sec % 60n))}`;
+  if (frac === 0n) return base;
+  // µs 精度(6 桁)で足りるなら 6 桁、ns まで要るなら 9 桁
+  const f9 = frac.toString().padStart(9, '0');
+  return `${base}.${f9.endsWith('000') ? f9.slice(0, 6) : f9}`;
+}
+
+const TIME_UNIT_NS: Readonly<Record<string, bigint>> = {
+  SECOND: 1_000_000_000n,
+  MILLISECOND: 1_000_000n,
+  MICROSECOND: 1_000n,
+  NANOSECOND: 1n,
+};
+
+/** 型の字 `Time64<MICROSECOND>`(`Time32<…>`)の単位。DuckDB の `TIME` は `Time64<MICROSECOND>`(実測)。 */
+function timeUnitNs(type: string): bigint | null {
+  const m = /^Time(?:32|64)<([A-Z]+)>$/.exec(type);
+  return m?.[1] === undefined ? null : (TIME_UNIT_NS[m[1]] ?? null);
+}
+
+/**
+ * 🔴 **`INTERVAL` を読める字にする**(`5 months` / `3 days 02:00:00`)。
+ * `m` は `[月, 日, ns 下位, ns 上位]`(`duckdb-open.ts` が列の素の 16 byte から組む)。
+ */
+function fromIntervalLimbs(m: ArrayLike<number>): string {
+  const months = m[0] ?? 0;
+  const days = m[1] ?? 0;
+  const ns = (BigInt(m[3] ?? 0) << 32n) | BigInt((m[2] ?? 0) >>> 0);
+  const parts: string[] = [];
+  const years = Math.trunc(months / 12);
+  const restMonths = months % 12;
+  if (years !== 0) parts.push(`${String(years)} ${Math.abs(years) === 1 ? 'year' : 'years'}`);
+  if (restMonths !== 0) parts.push(`${String(restMonths)} ${Math.abs(restMonths) === 1 ? 'month' : 'months'}`);
+  if (days !== 0) parts.push(`${String(days)} ${Math.abs(days) === 1 ? 'day' : 'days'}`);
+  if (ns !== 0n) parts.push(`${ns < 0n ? '-' : ''}${clockOfNs(ns < 0n ? -ns : ns)}`);
+  return parts.length === 0 ? '00:00:00' : parts.join(' ');
 }
 
 /** その列は日付・時刻か。⚠ 実測した型の字(`Date32<DAY>` / `Timestamp<MICROSECOND>`)に当てる。 */
@@ -138,6 +228,12 @@ function isTimeType(type: string): boolean {
  */
 export function normalizeDuckDbValue(v: unknown, type = ''): string | number | null {
   if (v === null || v === undefined) return null;
+  const unitNs = timeUnitNs(type);
+  if (unitNs !== null && (typeof v === 'number' || typeof v === 'bigint')) {
+    // 🔴 TIME は µs の整数で返る ── そのまま出すと `36000000000`
+    const ns = BigInt(v) * unitNs;
+    return ns < 0n ? `-${clockOfNs(-ns)}` : clockOfNs(ns);
+  }
   if (typeof v === 'bigint') return fromBigInt(v);
   if (typeof v === 'number') {
     if (!Number.isFinite(v)) return String(v);
@@ -160,7 +256,11 @@ export function normalizeDuckDbValue(v: unknown, type = ''): string | number | n
   if (v instanceof Uint8Array || v instanceof Int8Array || v instanceof Uint8ClampedArray) {
     return `(バイナリ ${v.byteLength} byte)`;
   }
-  if (v instanceof Uint32Array || v instanceof Int32Array) return fromLimbedNumber(v);
+  // 🔴 INTERVAL は 4 つの 32bit(月 / 日 / ns 下位 / ns 上位)── 多倍長と取り違えない
+  if (type.startsWith('Interval')) {
+    return v instanceof Int32Array && v.length === 4 ? fromIntervalLimbs(v) : '(読み取れない間隔)';
+  }
+  if (v instanceof Uint32Array || v instanceof Int32Array) return fromLimbedNumber(v, type);
   if (Array.isArray(v)) return safeJson(v);
   if (typeof v === 'object') {
     /**

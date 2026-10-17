@@ -33,6 +33,7 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import {
   blockedActionNote,
   isAsidePane,
+  SQL_GUEST_NOT_OPEN_TEXT,
   SQL_HISTORY_MAX,
   viewModeLabel,
 } from '../../src/adapter/state/app-state';
@@ -1308,7 +1309,13 @@ describe('着地前レビューの直し(#681)', () => {
     expect(note(), '打ち直しても断りが居座っている').not.toContain('開けませんでした');
   });
 
-  it('🔴 F4 走らせても消える(打ち直さずに走らせた回)', async () => {
+  /**
+   * 🔴 **#1087 で向きが変わった**: 直す前は、開き損ねた相手を選んだまま「実行」を押すと、
+   *   欄にはファイルの名前が出たまま**この PKC 自身の DB へ走り**、断りだけが消えていた
+   *   (ファイルの中身を引いたつもりの答えが返る)。いまは**走らせず、断りを残す**。
+   * 🔑 F4 の本意(断りが以後の知らせを食い続けない)は、打ち直す / 選び直すで消える側が守る。
+   */
+  it('🔴 開き損ねた相手を選んだままの「実行」は、この PKC へ走らせず、断りを残す(#1087)', async () => {
     const { pick, type, runBtn, note } = setup(async () => answer(['a'], [[1]]));
     type('SELECT 1 AS a');
     pick('db2');
@@ -1316,7 +1323,18 @@ describe('着地前レビューの直し(#681)', () => {
     expect(note()).toContain('開けませんでした');
     runBtn.click();
     await settle();
-    expect(note(), '走らせても断りが居座っている').not.toContain('開けませんでした');
+    expect(note(), '断りが消えた').toContain('開けませんでした');
+    expect(note(), 'この PKC へ走って答えが出ている').not.toContain('1 行');
+    // 打ち直して断りが消えた後に押しても、走らせずに理由を言う
+    type('SELECT 1 AS a ');
+    runBtn.click();
+    await settle();
+    expect(note()).toContain(SQL_GUEST_NOT_OPEN_TEXT);
+    expect(note()).not.toContain('1 行');
+    // 選び直せば走る(対照群)
+    pick('');
+    runBtn.click();
+    await settle();
     expect(note(), '答えの行が出ていない').toContain('1 行');
   });
 

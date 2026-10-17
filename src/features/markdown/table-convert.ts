@@ -28,7 +28,7 @@
  *
  * 🔑 **pure module**。browser API を使わない。
  */
-import { csvLiteralCell, displayCell, isFormula } from './csv-formula';
+import { createFormulaContext, csvLiteralCell, displayCell, isFormula } from './csv-formula';
 import { csvEscapeField, DELIMITER, isHeaderDisabled, parseCsv } from './csv-table';
 import { frontmatterLineCount } from './frontmatter';
 import { parseRenderableFence } from './markdown-render';
@@ -738,8 +738,9 @@ export function convertTable(at: TableAt, to: TableFormat): string | null {
   if (at.format === to || at.rows.length === 0) return null;
   if (to === 'markdown') {
     const raw = at.rows.map((r) => r.cells);
+    const ctx = createFormulaContext(raw);
     return tableToMarkdown(
-      at.rows.map((r) => ({ ...r, cells: r.cells.map((c) => displayCell(c, raw).text) })),
+      at.rows.map((r) => ({ ...r, cells: r.cells.map((c) => displayCell(c, raw, ctx).text) })),
     );
   }
   const csvRows = at.rows.map((r) => ({ ...r, cells: r.cells.map(csvLiteralCell) }));
