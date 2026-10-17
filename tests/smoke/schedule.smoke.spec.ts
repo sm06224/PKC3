@@ -1046,6 +1046,30 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   ).toHaveCount(1);
 
   /**
+   * 🔴 **☐ で済みにした札は「元に戻す」で戻る**(#1654。起動を増やさず、この道中の続き)。
+   * 済みにした札は一覧から消えるので、間違えても戻す口が無かった。
+   */
+  const todayCards = pane.locator(
+    `[data-pkc-region="schedule-group"][data-pkc-drop-date="${value}"] [data-pkc-entry]`,
+  );
+  await todayCards.first().locator('[data-pkc-action="toggle-task"]').click();
+  await expect(todayCards, '☐ を押しても札が一覧から消えない(前提)').toHaveCount(0);
+  const doneUndo = page.locator('[data-pkc-field="status-undo"]');
+  await expect(doneUndo, '☐ で済みにしたのに「元に戻す」が出ない').toBeVisible();
+  await expect(doneUndo).toHaveText('元に戻す');
+  await clickReal(page, doneUndo);
+  await expect(todayCards, '「元に戻す」を押しても札が戻らない').toHaveCount(1);
+
+  /** 🔴 **絞りで 0 件になったら「絞りを外す」が出て、押すと戻る**(#1650)。 */
+  const clearFilter = pane.locator('[data-pkc-field="schedule-clear-filter"]');
+  await expect(clearFilter, '絞りが無いのに「絞りを外す」が出ている').toBeHidden();
+  await page.locator('[data-pkc-field="entry-filter"]').fill('該当しない語ばかり');
+  await expect(clearFilter, '0 件なのに「絞りを外す」が出ない').toBeVisible();
+  await clickReal(page, clearFilter);
+  await expect(page.locator('[data-pkc-field="entry-filter"]'), '「絞りを外す」で欄が空にならない').toHaveValue('');
+  await expect(todayCards, '絞りを外しても札が戻らない').toHaveCount(1);
+
+  /**
    * 🔴 **「日」の目盛りで、14:00..15:00 の札が 14:00 の高さに 1 時間ぶん**(#855 段 A-1)。
    *
    * ⚠ 起動を増やさない ── 既に予定の面に居るこの道中の続きで見る(`scripts/smoke-budget.mjs`)。
