@@ -33,8 +33,13 @@ export const PDF_HOST_PATH = 'pdf/host.html';
 
 /** `hello` がこれより遅れたら「窓が開かなかった」と読む。 */
 export const HELLO_TIMEOUT_MS = 5000;
-/** 窓が生きていると見なす猶予。⚠ 窓の heartbeat(3 秒)より長い。 */
-export const ALIVE_TTL_MS = 8000;
+/**
+ * 窓が生きていると見なす猶予。⚠ 窓の heartbeat(3 秒)より長い。
+ * 🔴 裏のタブでは timer が間引かれ、約 1 分に 1 回まで遅れうる(ブラウザの省電力の仕様)── 8 秒だと、
+ *   裏へ回った閲覧窓を「死んだ」と読んで **2 枚目を開いていた**。間引きの間隔より長く取る。
+ *   ⚠ 閉じた窓は `closed` の放送で**すぐ**外れる(`lives.delete`)── 猶予が長くても閉じた直後の開き直しは待たされない。
+ */
+export const ALIVE_TTL_MS = 75_000;
 
 /** 窓へ開き方を渡す大きさ。⚠ 頁を読むので大きく開く(添付の窓と同じ)。 */
 const WINDOW_FEATURES = 'popup,noopener,width=1000,height=860';

@@ -149,6 +149,13 @@ export interface HelpMarkdownPort {
  */
 export const HELP_MANUAL_IDLE_MS = 5 * 60_000;
 
+/**
+ * マニュアルの本文を描き終えたとき、`help-manual` の器から上がる合図(bubbles)。
+ * 🔑 手放してあったマニュアルは開き直すと**非同期で**入れ直される ── 読んでいた位置を戻す側
+ *   (`binder.ts` の `back-to-help`)は、これを待ってから書く(先に書くと、高さが無い間に 0 へ丸められる)。
+ */
+export const HELP_MANUAL_DRAWN_EVENT = 'pkc-help-manual-drawn';
+
 export class HelpRenderer {
   private built = false;
   private manualHost: HTMLElement | null = null;
@@ -829,6 +836,8 @@ export class HelpRenderer {
       host.textContent = MANUAL_TEXT;
       return;
     }
+    // 🔑 描き終えるまでの印(戻る側が「まだ待つか」を DOM から読む)。例外でも必ず外す
+    host.setAttribute('data-pkc-manual-loading', '');
     try {
       host.innerHTML = await this.markdown.render(MANUAL_TEXT, { currentContainerId });
     } catch {
@@ -836,6 +845,8 @@ export class HelpRenderer {
     }
     this.syncToc();
     this.linkRefs();
+    host.removeAttribute('data-pkc-manual-loading');
+    host.dispatchEvent(new Event(HELP_MANUAL_DRAWN_EVENT, { bubbles: true }));
   }
 
   /**

@@ -14,6 +14,7 @@ type Ranges = Map<number, Array<[number, number]>>;
 interface Api {
   rangesBySpan(strs: string[], query: string, eols?: boolean[]): Ranges;
   countHits(strs: string[], query: string, eols: boolean[] | undefined, limit: number): number;
+  markIndexOfHits(strs: string[], query: string, eols?: boolean[]): number[];
 }
 
 function load(): Api {
@@ -117,5 +118,31 @@ describe('行末(hasEOL)── 欧文では空白・日本語どうしの間で�
     const src = readFileSync('public/pdf/reader.js', 'utf-8');
     expect(src).toContain("hitsCapped ? '以上' : ''");
     expect(src).toContain('const HIT_CAP = 5000;');
+  });
+});
+
+describe('markIndexOfHits ── 「n / m 件」の一致と光っている印(mark.hit)の番号を揃える', () => {
+  const { rangesBySpan, markIndexOfHits } = load();
+  const marks = (strs: string[], q: string): number =>
+    [...rangesBySpan(strs, q).values()].reduce((n, l) => n + l.length, 0);
+
+  it.each([
+    { name: 'span をまたぐ一致(一致 3 件・印 4 つ)', strs: ['あ', 'い', 'xあいx', 'あい'], q: 'あい', want: [0, 2, 3], nMarks: 4 },
+    { name: '隣り合う一致(一致 4 件・印 1 つ)', strs: ['aaaa'], q: 'a', want: [0, 0, 0, 0], nMarks: 1 },
+    { name: '離れた一致(一致 = 印)', strs: ['a b a'], q: 'a', want: [0, 1], nMarks: 2 },
+  ])('🔴 $name', ({ strs, q, want, nMarks }) => {
+    expect(marks(strs, q)).toBe(nMarks);
+    expect(markIndexOfHits(strs, q)).toEqual(want);
+  });
+
+  it('一致が無い / 検索語が空なら空', () => {
+    expect(markIndexOfHits(['あ'], 'い')).toEqual([]);
+    expect(markIndexOfHits(['あ'], '')).toEqual([]);
+  });
+
+  it('reader.js は一致の番号ではなくこの対応表で印へ送る', () => {
+    const src = readFileSync('public/pdf/reader.js', 'utf-8');
+    expect(src).toContain('textHits.markIndexOfHits(L.strs, hitQuery, L.eols)');
+    expect(src).not.toContain('marks[Math.min(nth, marks.length - 1)]');
   });
 });

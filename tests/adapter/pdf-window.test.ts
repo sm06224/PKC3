@@ -718,6 +718,15 @@ describe('同じ添付の窓が生きているか(2 枚目を開かない)', () 
     expect(g.host.openTokenFor('k1')).toBe(s.token);
   });
 
+  it('🔴 裏のタブで合図が 1 分近く遅れても、生きている扱い(2 枚目を開かない)/ 閉じたと言われたら即座に外れる', () => {
+    const g = rig();
+    const s = openAndHello(g, 'k1');
+    g.clock.t += 60_000; // ブラウザが裏のタブの timer を約 1 分に 1 回へ間引いた
+    expect(g.host.openTokenFor('k1'), '間引かれた窓を死んだ扱いにしている').toBe(s.token);
+    g.win.send('closed');
+    expect(g.host.openTokenFor('k1'), '閉じたのに猶予のあいだ生きている扱いが残る').toBeNull();
+  });
+
   it('閉じたと言われたら、もう開いていない', () => {
     const g = rig();
     openAndHello(g, 'k1');

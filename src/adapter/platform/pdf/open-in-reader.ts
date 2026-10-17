@@ -48,7 +48,8 @@ export async function openInPdfReader(
   if (open !== null) {
     // ⚠ 同じ添付の窓が生きていれば、2 枚目を開かず前へ出すよう頼む
     host.focus(open);
-    deps.note(`「${args.name}」はもう開いています`);
+    // 🔑 前へ出せたか分からない(放送は片道)ので、マニュアルのウィンドウ(`main.ts`)と同じ逃げ道の字を添える
+    deps.note(`「${args.name}」はもう開いています(見えないときは、ウィンドウを切り替えてください)`);
     return true;
   }
   /**
