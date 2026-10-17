@@ -212,6 +212,25 @@ test('🔴 2 ペインをキーボードだけで動かす (#273)', async ({ pag
   await page.keyboard.press('Backspace');
   await expect(page.locator(ROWS('right')), 'Backspace で親へ戻れない').toHaveCount(2);
 
+  /**
+   * 🔴 **F5 を押しっぱなしにしても、写しは 1 件だけ**(keydown の repeat は無視する)。
+   * 右(焦点は右)から Tab で左へ戻り、印の付いた行を右へ写す。押しっぱなし = down を 4 回
+   * (2 回目以降は repeat:true の keydown になる)。
+   */
+  await page.keyboard.press('Tab');
+  await expect(page.locator(PANE('left')), 'Tab で左へ戻れていない').toHaveAttribute(
+    'data-pkc-focused',
+    '',
+  );
+  for (let i = 0; i < 4; i++) await page.keyboard.down('F5');
+  await page.keyboard.up('F5');
+  await expect(
+    page.locator(ROWS('right')),
+    'F5 の押しっぱなしで写しが 1 件でない(repeat を無視していない)',
+  ).toHaveCount(3);
+  await page.waitForTimeout(300);
+  await expect(page.locator(ROWS('right')), '押しっぱなしの後から写しが増えた').toHaveCount(3);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
@@ -893,6 +912,18 @@ test('🔴 ペインごとに絞れて、絞った欄から行へ降りられる
   await box.press('Escape');
   await expect(box).toHaveValue('');
   await expect(page.locator(ROWS('left'))).toHaveCount(2);
+
+  /**
+   * 🔴 **絞りを入れたまま「新しいフォルダ」を作ると、作ったフォルダがそのペインに出る**
+   * (絞りが「新しいフォルダ」を隠していないこと)。
+   */
+  await box.fill('あいう');
+  await expect(page.locator(ROWS('left'))).toHaveCount(1);
+  await clickReal(page, '[data-pkc-field="dual-mkdir"]');
+  await expect(
+    page.locator(ROWS('left')),
+    '絞りを入れたまま作ったフォルダが、そのペインに出ない',
+  ).toContainText(['新しいフォルダ']);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
