@@ -323,7 +323,7 @@ describe('履歴の配線(画面)', () => {
   });
 
   it('🔴 Alt+H または open-recent クリックでピッカーが開き、選択してジャンプできる(#1107)', async () => {
-    const { root, d } = mounted();
+    const { d } = mounted();
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
 
@@ -333,7 +333,7 @@ describe('履歴の配線(画面)', () => {
     );
 
     // ダイアログが開く
-    const dialog = root.querySelector<HTMLDialogElement>('[data-pkc-region="app-dialog"]');
+    const dialog = document.querySelector<HTMLDialogElement>('[data-pkc-region="app-dialog"]');
     expect(dialog, 'ピッカーのダイアログが開いていない').not.toBeNull();
     const rows = dialog!.querySelectorAll<HTMLButtonElement>('[data-pkc-field="entry-pick-row"]');
     expect(rows.length).toBeGreaterThanOrEqual(1);

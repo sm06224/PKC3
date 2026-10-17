@@ -32,7 +32,7 @@ import {
   blockWithSubSlot,
   type RowReopenDetail,
 } from '../../src/adapter/ui/render/row-swap';
-import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
+import { confirmInApp, isAppDialogOpen, resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { renderMarkdownWithRanges } from '../../src/features/markdown/source-ranges';
 import { KEY_COMMANDS } from '../../src/features/keymap';
 
@@ -2175,6 +2175,34 @@ describe('ライブの行で Esc ── 打った字があれば聞く(E5)', () 
     expect(box(r.host)).toBeNull();
     expect(r.commits).toEqual([]);
     expect(findByText(r.host, 'p', '最初の段落。')).toBeTruthy();
+  });
+});
+
+describe('捨てる確認の最中に窓が組み直されても、確認は宙に浮かない(F1)', () => {
+  it('🔴 確認は窓の外(root)に置かれ、窓を空にしても開いたまま。答えれば列も Esc の連打止めも元に戻る', async () => {
+    const r = rig();
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    root.append(r.host);
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '打った字';
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await new Promise((res) => setTimeout(res, 0));
+    expect(dialogEl(), '聞いていない').not.toBeNull();
+    expect(r.host.contains(dialogEl()), '確認が窓の中に置かれている').toBe(false);
+    // 窓の組み直し(中身を丸ごと差し替える)
+    r.host.innerHTML = '';
+    expect(dialogEl(), '窓を組み直したら確認が消えた').not.toBeNull();
+    await answerDialog('dialog-cancel');
+    expect(isAppDialogOpen(), '答えたのに開いたままと数えられている').toBe(false);
+    // 次の確認が出せる(列が詰まっていない)
+    const next = confirmInApp(root, '次');
+    await new Promise((res) => setTimeout(res, 0));
+    expect(dialogEl()).not.toBeNull();
+    await answerDialog('dialog-ok');
+    expect(await next).toBe('ok');
   });
 });
 

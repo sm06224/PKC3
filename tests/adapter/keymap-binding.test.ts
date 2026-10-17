@@ -20,6 +20,7 @@ import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import { buildKeymapPanel, CONTEXT_LABELS as LABEL_OF } from '../../src/adapter/ui/render/keymap-panel';
 import { HelpRenderer } from '../../src/adapter/ui/render/help';
 import { KEY_COMMANDS, chordLabel } from '../../src/features/keymap';
+import { openLightbox, closeLightbox } from '../../src/adapter/ui/render/lightbox';
 import { RowSwap } from '../../src/adapter/ui/render/row-swap';
 import { appPanes, applyPaneVisibility } from '../../src/adapter/ui/render/pane-visibility';
 import {
@@ -258,6 +259,17 @@ describe('画面への配線', () => {
     const { d } = mounted();
     press('n', { code: 'KeyN', ctrlKey: true });
     expect(d.getState().selectedLid, 'Ctrl+N が効いていない').toBeTruthy();
+  });
+
+  it('🔴 画像の拡大を開いている間は Ctrl+N が効かない(背後でノートができない)', () => {
+    const { root, d } = mounted();
+    openLightbox(root, { src: 'x.png', alt: 'a' });
+    press('n', { code: 'KeyN', ctrlKey: true });
+    expect(d.getState().selectedLid, '拡大の背後でノートができた').toBeNull();
+    // 対照群: 閉じれば同じ鍵で作れる(門が鍵ごと殺していない)
+    closeLightbox(root);
+    press('n', { code: 'KeyN', ctrlKey: true });
+    expect(d.getState().selectedLid, '閉じても Ctrl+N が効かない').toBeTruthy();
   });
 
   /**

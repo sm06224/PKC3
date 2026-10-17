@@ -438,7 +438,7 @@ describe('「図」を押すと 5 種から選ぶ(#528 案 B)', () => {
   it('🔴 外を押すと閉じて、何も入らない', async () => {
     const { ta } = await openPicker('もと');
     const dialog = openDialog()!;
-    dialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    dialog.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: -1, clientY: -1 }));
     await tick();
     expect(openDialog(), '外を押しても閉じない').toBeNull();
     expect(ta.value).toBe('もと');

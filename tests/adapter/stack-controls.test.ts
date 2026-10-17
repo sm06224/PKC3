@@ -67,6 +67,18 @@ describe('押し所を当てる(applyStackControls)', () => {
     expect(downs.map((b) => b.disabled)).toEqual([false, false, true]);
   });
 
+  it('🔴 ↑↓ の押し所は、矢印の字ではなく動作で読み上げられる(名前は「1 つ上へ」「1 つ下へ」)', () => {
+    const host = paint(BODY);
+    applyStackControls(host, 0);
+    const up = host.querySelector<HTMLButtonElement>('[data-pkc-action="stack-link-up"]')!;
+    const down = host.querySelector<HTMLButtonElement>('[data-pkc-action="stack-link-down"]')!;
+    expect(up.getAttribute('aria-label')).toBe('1 つ上へ');
+    expect(down.getAttribute('aria-label')).toBe('1 つ下へ');
+    // 見た目の字は変えていない
+    expect(up.textContent).toBe('↑');
+    expect(down.textContent).toBe('↓');
+  });
+
   it('⚠ 冪等 ── 2 度当てても押し所は増えない(描き直しのたびに呼ぶため)', () => {
     const host = paint(BODY);
     applyStackControls(host, 0);

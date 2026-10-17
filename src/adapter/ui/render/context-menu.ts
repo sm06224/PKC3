@@ -364,6 +364,19 @@ export function openContextMenu(
 }
 
 /**
+ * `el` がメニューの中なら、そのメニューを閉じたときに焦点を返す先(開く前に居た所)を返す。
+ * 🔑 項目から確認ダイアログを開くと、ダイアログが借りる「元の焦点」は消えるメニュー項目になる。
+ *   器(`app-dialog.ts`)は閉じたときこの先へ返す ── 返さないと閉じた後に矢印キーが死ぬ。
+ */
+export function contextMenuReturnTarget(el: Element): HTMLElement | null {
+  const menu = el.closest(`[data-pkc-region="${REGION}"]`);
+  const root = menu?.parentElement;
+  if (menu === null || menu === undefined || root === null || root === undefined) return null;
+  const back = restoreBase.get(root) ?? null;
+  return back instanceof HTMLElement ? back : null;
+}
+
+/**
  * 出ているメニュー。
  * 🔴 **root の直下だけを見る**(#1467)── メニューは `root.append(el)` で置く(`openContextMenu`)。
  * ⚠ `root.querySelector` だと、押すたび・スクロールのたびに文書全体(長いノートで約 3 万要素)を探していた。

@@ -35,6 +35,7 @@
 
 /** 押した結果。⚠ `Escape` と「やめる」は**同じ**(取り消し)。 */
 import type { PaletteRow } from '@features/palette/palette-rows';
+import { contextMenuReturnTarget } from './context-menu';
 import { RECENT_COMMANDS_HEADING, splitRecentRows } from '@features/palette/recent-commands';
 import type { EntryPickRow } from '@features/entry-ref/entry-pick';
 import type { SnippetChoice } from '@features/snippet/snippet-menu';
@@ -167,7 +168,7 @@ function enqueue<T>(run: () => Promise<T>): Promise<T> {
  *   書くと、片方だけ直した日に片方だけ死ぬ(CLAUDE.md §7)。
  */
 export function isAppDialogOpen(): boolean {
-  return frame !== null && frame.dialog.open;
+  return frame !== null && frame.dialog.open && frame.dialog.isConnected;
 }
 
 /**
@@ -186,8 +187,30 @@ export function whenAppDialogClosed(run: () => void): void {
   frame.dialog.addEventListener('close', run, { once: true });
 }
 
+/**
+ * 🔴 **ダイアログの外(暗い地)を押したか**。
+ * ⚠ `target === dialog` だけでは、ダイアログ自身の余白・行間を押しても「外」と読んで取り消していた。
+ *   暗い地を押すと target は `<dialog>` になるが、座標は枠の外である ──
+ *   target が `<dialog>` で、かつ座標が枠の外のときだけ外と読む。
+ */
+export function clickedOutsideDialog(ev: MouseEvent, dialog: HTMLElement): boolean {
+  if (ev.target !== dialog) return false;
+  const r = dialog.getBoundingClientRect();
+  return ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom;
+}
+
+/**
+ * 🔴 **器の置き場は最上位の root**(host が編集中の窓などの中にあっても、その中へ置かない)。
+ * ⚠ 窓の中に置くと、窓が組み直されたとき開いたままの `<dialog>` が `close` されずに消え、
+ *   待つ側が永久に解決されず、以後のダイアログ・近道キーが全部死ぬ。
+ */
+function mountOf(host: HTMLElement): HTMLElement {
+  return host.closest<HTMLElement>('[data-pkc-slot="root"]') ?? host.ownerDocument.body;
+}
+
 function ensureFrame(host: HTMLElement): Frame {
-  if (frame !== null && host.contains(frame.dialog)) return frame;
+  const mount = mountOf(host);
+  if (frame !== null && mount.contains(frame.dialog)) return frame;
   const dialog = document.createElement('dialog');
   dialog.setAttribute('data-pkc-region', DIALOG_REGION);
   const title = document.createElement('h2');
@@ -222,7 +245,7 @@ function ensureFrame(host: HTMLElement): Frame {
   ok.setAttribute('data-pkc-field', 'dialog-ok');
   row.append(cancel, ok);
   dialog.append(title, body, row);
-  host.append(dialog);
+  mount.append(dialog);
   frame = { dialog, title, body, ok, cancel };
   return frame;
 }
@@ -416,6 +439,9 @@ function open(f: Frame, onDismiss: DialogAnswer): Promise<DialogAnswer> {
      */
     const regionBefore =
       focusedBefore instanceof HTMLElement ? focusedBefore.closest('[data-pkc-region]') : null;
+    // 🔴 元の焦点が右クリックメニューの項目なら、メニューが畳む先(行など)を控える
+    const menuBack =
+      focusedBefore instanceof Element ? contextMenuReturnTarget(focusedBefore) : null;
     const done = (): void => {
       f.ok.removeEventListener('click', onOk);
       f.cancel.removeEventListener('click', onCancel);
@@ -423,6 +449,7 @@ function open(f: Frame, onDismiss: DialogAnswer): Promise<DialogAnswer> {
       // ⚠ 消えていたら**面へ**返す(消えた行そのものへ焦点を当てにはいかない)
       if (focusedBefore instanceof HTMLElement && focusedBefore.isConnected)
         focusedBefore.focus();
+      else if (menuBack !== null && menuBack.isConnected) menuBack.focus();
       else if (regionBefore instanceof HTMLElement && regionBefore.isConnected)
         // ⚠ `tabindex="-1"` も**焦点は当てられる**(タブで辿れないだけ)── 除くと
         //    2 ペイン(器も行も -1)で 1 つも見つからず、`body` へ落ちたままになる
@@ -454,6 +481,19 @@ function open(f: Frame, onDismiss: DialogAnswer): Promise<DialogAnswer> {
     f.cancel.addEventListener('click', onCancel);
     f.dialog.addEventListener('close', onClose);
     f.dialog.showModal();
+    /**
+     * 🔴 **開いたまま節点が外されたら、取り消しとして閉じる**。外された `<dialog>` には `close` が
+     *   飛ばないので、待つ側が永久に解決されず列が詰まる。置き場を最上位にしても、root ごとの
+     *   組み直しなど外される道が残るため、ここでも受ける。
+     */
+    const watch = new MutationObserver(() => {
+      if (f.dialog.isConnected) return;
+      watch.disconnect();
+      if (f.dialog.open) f.dialog.close();
+      else onClose();
+    });
+    watch.observe(f.dialog.ownerDocument, { childList: true, subtree: true });
+    f.dialog.addEventListener('close', () => watch.disconnect(), { once: true });
     // 🔑 焦点は**取り消す側**へ ── 戻しにくい操作で Enter が事故にならない
     (f.cancel.hidden ? f.ok : f.cancel).focus();
   });
@@ -739,7 +779,7 @@ function pickIconFrom(host: HTMLElement, spec: IconPickSpec): Promise<string | n
     };
     const onOutside = (ev: MouseEvent): void => {
       // 🔑 暗い地を押すと `target` は `<dialog>` 自身になる(中身を押せば中身が target)
-      if (ev.target === f.dialog) f.cancel.click();
+      if (clickedOutsideDialog(ev, f.dialog)) f.cancel.click();
     };
     f.dialog.addEventListener('keydown', onArrow);
     f.dialog.addEventListener('click', onOutside);
@@ -1343,7 +1383,7 @@ function pickRowInApp<T>(host: HTMLElement, spec: PickRowsSpec<T>): Promise<T | 
     };
     const onOutside = (ev: MouseEvent): void => {
       // 🔑 暗い地を押すと `target` は `<dialog>` 自身になる(中身を押せば中身が target)
-      if (ev.target === f.dialog) f.cancel.click();
+      if (clickedOutsideDialog(ev, f.dialog)) f.cancel.click();
     };
     f.dialog.addEventListener('keydown', onArrow);
     f.dialog.addEventListener('click', onOutside);
@@ -1747,7 +1787,7 @@ export function pickScrapInApp(
     paint();
 
     const onOutside = (ev: MouseEvent): void => {
-      if (ev.target === f.dialog) f.cancel.click();
+      if (clickedOutsideDialog(ev, f.dialog)) f.cancel.click();
     };
     f.dialog.addEventListener('click', onOutside);
 
@@ -1860,7 +1900,7 @@ export function pickArchiveInApp(
     paint();
 
     const onOutside = (ev: MouseEvent): void => {
-      if (ev.target === f.dialog) f.cancel.click();
+      if (clickedOutsideDialog(ev, f.dialog)) f.cancel.click();
     };
     f.dialog.addEventListener('click', onOutside);
 

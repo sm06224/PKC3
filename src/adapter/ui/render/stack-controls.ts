@@ -54,11 +54,13 @@ export function applyStackControls(host: HTMLElement, lineOffset: number): numbe
       up.setAttribute('data-pkc-action', 'stack-link-up');
       up.textContent = '↑';
       up.title = '1 つ上へ動かす(本文の行を入れ替えます)';
+      up.setAttribute('aria-label', '1 つ上へ');
       const down = doc.createElement('button');
       down.type = 'button';
       down.setAttribute('data-pkc-action', 'stack-link-down');
       down.textContent = '↓';
       down.title = '1 つ下へ動かす(本文の行を入れ替えます)';
+      down.setAttribute('aria-label', '1 つ下へ');
       box.append(up, down);
       li.append(box);
     }

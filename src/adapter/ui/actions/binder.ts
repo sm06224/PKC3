@@ -374,7 +374,7 @@ import {
   openContextMenu,
 } from '../render/context-menu';
 import { setupLinkPreview, closeLinkPreview } from '../render/link-preview';
-import { setupLightbox, openLightbox, closeLightbox } from '../render/lightbox';
+import { setupLightbox, openLightbox, closeLightbox, lightboxOpen } from '../render/lightbox';
 import { chordHint, HINT_BASE, HINT_BLOCKED, setBlocked } from '../render/shortcut-hint';
 import { TARGET_LID_ATTR } from '../render/target-lid';
 import { sectionBoxText, SECTION_BOX_INPUT_FIELD, SECTION_BOX_REGION } from '../render/section-box';
@@ -19097,7 +19097,8 @@ export function bindActions(
      * 🔑 判定は器の側の 1 つ(`isAppDialogOpen`)を読む ── 門をここに書き写すと、
      *   器の作りを変えた日にここだけ古くなる(CLAUDE.md §7)。
      */
-    if (isAppDialogOpen()) return;
+    // 🔴 画像の拡大も同じ(背後でノートが作られる ── Ctrl+N)。判定は拡大の側の 1 つを読む
+    if (isAppDialogOpen() || lightboxOpen(root)) return;
     const el = ke.target instanceof HTMLElement ? ke.target : null;
     /**
      * 🔴 **打っている欄は「名前」ではなく「構造」で見る**(着地前レビュー 4)。

@@ -111,7 +111,7 @@ describe('pickAgentGrantInApp', () => {
     cancelBtn().click();
     expect(await a).toBe('deny');
     const b = pickAgentGrantInApp(host, SEARCH);
-    dialog().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    dialog().dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: -1, clientY: -1 }));
     expect(await b).toBe('deny');
     const c = pickAgentGrantInApp(host, SEARCH);
     dialog().close(); // Escape と同じ(押さずに閉じる)
