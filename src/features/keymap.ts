@@ -2016,6 +2016,15 @@ const NON_TEXT_KEYS = new Set([
 const BARE_ALLOWED = new Set(['Escape', 'Tab']);
 
 /**
+ * 🔴 **素の `Tab` / `Shift+Tab` は、その命令の既定に持つ命令だけ**(#1087)。
+ * 画面の「キーを割り当てる」は素の `Tab` を断っている(焦点の移動に使うため)のに、手書きの設定ファイルや保存値では
+ * どの命令にも付けられた。`ownDefault`(自分の既定は断らない)と同じ形で、既定に持つ命令だけ通す。
+ */
+function isTabKey(chord: Chord): boolean {
+  return chord.key === 'Tab' && !chord.mod && !chord.alt;
+}
+
+/**
  * 🔴 **文字を打たない面**(2026-08-18、整理の面の鍵)。ここでの素の鍵は**安全**である ──
  * 焦点が行(`<tr>`)に在るときは、そもそも字を打つ相手が居ない。
  * ⚠ 逆に `global` は「打っている最中でも飛んでくる」ので、素の鍵を許してはいけない。
@@ -2086,6 +2095,20 @@ export function validateBinding(
       message: 'Ctrl(⌘)か Alt と組み合わせてください。そのままだと文字が打てなくなります',
     };
   }
+  // 🔴 素の Tab / Shift+Tab は、既定に Tab を持つ命令だけ(`BARE_ALLOWED` は鍵の種類だけを見るので、ここで命令を見る。#1087)
+  if (isTabKey(c)) {
+    const hasTabDefault =
+      findCommand(commandId)?.defaults.some((d) => {
+        const dc = chordFromString(d);
+        return dc !== null && isTabKey(dc);
+      }) === true;
+    if (!hasTabDefault) {
+      return {
+        kind: 'bare',
+        message: 'Tab は入力欄の外での移動に使うため、この操作には割り当てられません。Ctrl(⌘)か Alt と組み合わせてください',
+      };
+    }
+  }
   // ⚠ そのコマンド自身の既定は断らない ── 2 ペインの「反対側へコピー」の既定は `F5`(コマンダー式)で、
   //   「自分の既定を自分の検査が落とす」を作らない(消した既定を戻す口が無くなる)。他のコマンドへの割当は断る
   const ownDefault = findCommand(commandId)?.defaults.some((d) => sameChord(d, norm)) === true;
@@ -2125,7 +2148,24 @@ export function contextsOverlap(
   a: readonly KeyContext[],
   b: readonly KeyContext[],
 ): boolean {
-  return a.some((x) => x === 'global' || b.some((y) => y === 'global' || x === y));
+  return a.some(
+    (x) => x === 'global' || b.some((y) => y === 'global' || x === y || tableMeetsReading(x, y)),
+  );
+}
+
+/**
+ * 🔴 **フォルダの表(`filer` / `dual`)は、本文を読む面(`reading` / `window`)の上で同時に効く**(#1087)。
+ * 表に焦点が在るときは表の割り当てが先に走るので、`Escape` を表の操作(名前の変更など)へ割り当てると、
+ * 読む面の「ノートを閉じる」「ペインを閉じる」の `Escape` が**効かなくなる**。重ならない扱いにすると、
+ * これを断れなかった。
+ * ⚠ 範囲は文脈の組で決めた(`Escape` に限らない)── 既定の全組(139 命令)でこの組の重なりを数え、
+ *   同じ鍵を持つ組が **0 件**のまま(`tests/features/keymap.test.ts`)。既定が変わって 1 件でも出たら、
+ *   ここを `Escape` だけに絞る。
+ */
+function tableMeetsReading(x: KeyContext, y: KeyContext): boolean {
+  const table = (c: KeyContext): boolean => c === 'filer' || c === 'dual';
+  const reading = (c: KeyContext): boolean => c === 'reading' || c === 'window';
+  return (table(x) && reading(y)) || (reading(x) && table(y));
 }
 
 /** コマンド id → 割当(複数可)。⚠ **無い id は既定**、空配列は「割当なし」。 */

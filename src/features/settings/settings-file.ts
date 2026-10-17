@@ -413,6 +413,11 @@ export interface SettingsPlan {
    * 再読込などブラウザの鍵・同じ場所で効く操作との重なり)を通らなかった物。入ることは入るが、使われない。
    */
   readonly unusableBindings: number;
+  /**
+   * 🔴 **ショートカットキーの割り当ては、全体が置き換わる**(1 つずつ足されない)ので、その件数(#1087)。
+   * `from` = いま変えてある割り当ての件数、`to` = ファイルの件数。割り当てが変わらない回は `null`。
+   */
+  readonly keymapReplace: { readonly from: number; readonly to: number } | null;
   /** 読めなかった理由。`null` なら読めた。 */
   readonly error: string | null;
 }
@@ -425,10 +430,23 @@ const EMPTY_PLAN: SettingsPlan = {
   tooLong: [],
   unreadable: [],
   unusableBindings: 0,
+  keymapReplace: null,
   error: null,
 };
 
 const KEYMAP_KEY = 'pkc3.keymap';
+
+/** キー割り当ての保存の値(JSON)の、変えてある割り当ての件数(コマンド単位)。無い・読めない値は 0 件。 */
+function countOverriddenBindings(value: string | null): number {
+  if (value === null) return 0;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return 0;
+    return Object.values(parsed as Record<string, unknown>).filter((v) => Array.isArray(v)).length;
+  } catch {
+    return 0;
+  }
+}
 
 /** キー割り当ての保存の値(JSON)のうち、使えない割り当ての件数。読めない値は 0 件。 */
 function countUnusableBindings(value: string): number {
@@ -468,7 +486,10 @@ export function planSettingsImport(
       ...EMPTY_PLAN,
       error: 'これは PKC3 の設定ファイルではありません(バックアップの取り込みは左下です)',
     };
-  const list = Array.isArray(o['entries']) ? o['entries'] : [];
+  // 🔴 kind は合っているのに中身の形が違う file(entries が配列でない)を「変わるものはありません」と読ませない(#1087)
+  if (!Array.isArray(o['entries']))
+    return { ...EMPTY_PLAN, error: '設定ファイルとして読めませんでした(中身が読めない形です)' };
+  const list: unknown[] = o['entries'];
   const labelOf = new Map(PORTABLE_KEYS.map((p) => [p.key, p.label]));
   const portable = new Map(PORTABLE_KEYS.map((p) => [p.key, p]));
   const skipped = new Set(SKIPPED_KEYS.map((s) => s.key));
@@ -479,6 +500,7 @@ export function planSettingsImport(
   const unreadable: string[] = [];
   let same = 0;
   let unusableBindings = 0;
+  let keymapReplace: { from: number; to: number } | null = null;
   const seen = new Set<string>();
   for (const item of list) {
     if (typeof item !== 'object' || item === null) continue;
@@ -517,9 +539,12 @@ export function planSettingsImport(
       continue;
     }
     changes.push({ key, label, from, to: value });
-    if (key === KEYMAP_KEY) unusableBindings += countUnusableBindings(value);
+    if (key === KEYMAP_KEY) {
+      unusableBindings += countUnusableBindings(value);
+      keymapReplace = { from: countOverriddenBindings(from), to: countOverriddenBindings(value) };
+    }
   }
-  return { changes, same, refused, unknown, tooLong, unreadable, unusableBindings, error: null };
+  return { changes, same, refused, unknown, tooLong, unreadable, unusableBindings, keymapReplace, error: null };
 }
 
 /**
@@ -550,10 +575,17 @@ export function settingsPlanNote(plan: SettingsPlan): string {
     parts.push(`${plan.unreadable.length} 件は中身が空か読めない形なので入れません`);
   if (plan.tooLong.length > 0)
     parts.push(`${plan.tooLong.length} 件は長すぎるので入れません(1 件 ${MAX_SETTING_CHARS.toLocaleString('en-US')} 字まで)`);
+  // 🔴 割り当ては**全体が置き換わる**(ファイルに無い割り当ては、いまのものも消える)── 件数で言う(#1087)
+  if (plan.keymapReplace !== null)
+    parts.push(
+      `ショートカットキーの割り当ては、いま変えてある割り当て ${plan.keymapReplace.from} 件が、ファイルの ${plan.keymapReplace.to} 件に置き換わります`,
+    );
   if (plan.unusableBindings > 0)
     parts.push(
       `ショートカットキーの割り当てのうち ${plan.unusableBindings} 件は、ブラウザが使うキーや他の操作とぶつかるため、入れても使われません`,
     );
+  // 🔴 書き出しは標準のままの項目(空・未設定)を入れない ── 読み込んでも、その項目は変わらない(#1087)
+  parts.push('書き出した側で標準のままだった項目は、こちらの設定がそのまま残ります');
   return `${parts.join('。')}。`;
 }
 

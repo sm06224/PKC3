@@ -188,6 +188,27 @@ describe('設定の持ち出しの配線(#414)', () => {
     expect(summary(root).textContent, '理由が出ていない').toContain('設定ファイルではありません');
   });
 
+  /**
+   * 🔴 #1087 A1 ── 読んだ直後に入力を空へ戻す。戻さないと、「読めない」と出た後に直した file を
+   * 同じ名前で選び直しても `change` が発火しない。観測点は `value` への書込そのもの
+   * (happy-dom の file 入力は値を持たないので、書込を記録する)。
+   */
+  it('🔴 読めない file を選んだ直後にも、入力の value が空へ戻される', async () => {
+    const { root } = setup();
+    const input = root.querySelector<HTMLInputElement>('[data-pkc-field="settings-file-input"]')!;
+    const writes: string[] = [];
+    Object.defineProperty(input, 'value', {
+      configurable: true,
+      get: () => '',
+      set: (v: string) => {
+        writes.push(v);
+      },
+    });
+    await choose(root, '{ これは JSON ではない');
+    expect(summary(root).textContent, '前提: 読めない回になっていない').toContain('読めませんでした');
+    expect(writes, '読んだ後に value を空へ戻していない(同じ名前で選び直せない)').toContain('');
+  });
+
   /** 🔴 **持ち出す物が無いのに空の file を落とさない**(押した user は「入った」と読む)。 */
   it('🔴 設定が 1 つも無ければ、落とさずに理由を出す', async () => {
     const { root, sent } = setup();

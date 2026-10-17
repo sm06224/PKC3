@@ -335,6 +335,45 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
     );
   });
 
+  /** 🔴 #1087 A3 ── kind は合っていて、中身の形が違う file を「変わるものはありません」と言わない。 */
+  it('🔴 entries が配列でない file は、読めない形だと言って押せないままにする', () => {
+    for (const entries of [undefined, null, 'x', 3, { key: 'pkc3.theme', value: 'dark' }]) {
+      const text = JSON.stringify({ kind: SETTINGS_FILE_KIND, version: 1, entries });
+      const plan = planSettingsImport(text, () => null);
+      expect(plan.error, `entries=${JSON.stringify(entries)} が読めたことになっている`).toContain('中身が読めない形です');
+      expect(canApplySettings(plan)).toBe(false);
+      expect(settingsPlanNote(plan)).not.toContain('変わるものはありません');
+    }
+    // 対照: 空の配列は「読めた、変わるものが無い」
+    const empty = planSettingsImport(file([]), () => null);
+    expect(empty.error).toBeNull();
+    expect(settingsPlanNote(empty)).toContain('変わるものはありません');
+  });
+
+  /** 🔴 #1087 A2 ── 書き出しは標準のままの項目を入れない。読み込んでも変わらないことを下見が言う。 */
+  it('🔴 下見は、書き出した側で標準のままだった項目はこちらの設定が残ると言う', () => {
+    const note = settingsPlanNote(planSettingsImport(file([{ key: 'pkc3.theme', value: 'dark' }]), () => 'light'));
+    expect(note).toContain('書き出した側で標準のままだった項目は、こちらの設定がそのまま残ります');
+    // 読めなかった回(error)には添えない
+    expect(settingsPlanNote(planSettingsImport('{', () => null))).not.toContain('そのまま残ります');
+  });
+
+  /** 🔴 #1087 B3 ── 割り当ては全体が置き換わる。件数で言う(動きは変えない)。 */
+  it('🔴 ショートカットキーの割り当てを含む file は、いまの件数とファイルの件数を言う', () => {
+    const mine = JSON.stringify({ 'create-entry': ['Alt+M'], 'row-commit': ['Mod+Enter'], 'filer-rename': ['F2'] });
+    const theirs = JSON.stringify({ 'create-entry': ['Alt+N'] });
+    const plan = planSettingsImport(file([{ key: 'pkc3.keymap', value: theirs }]), (k) => (k === 'pkc3.keymap' ? mine : null));
+    expect(plan.keymapReplace).toEqual({ from: 3, to: 1 });
+    expect(settingsPlanNote(plan)).toContain('いま変えてある割り当て 3 件が、ファイルの 1 件に置き換わります');
+    // 対照: いま何も変えていなければ 0 件から
+    const fresh = planSettingsImport(file([{ key: 'pkc3.keymap', value: theirs }]), () => null);
+    expect(fresh.keymapReplace).toEqual({ from: 0, to: 1 });
+    // 対照: 割り当てを含まない file は言わない
+    const other = planSettingsImport(file([{ key: 'pkc3.theme', value: 'dark' }]), () => null);
+    expect(other.keymapReplace).toBeNull();
+    expect(settingsPlanNote(other)).not.toContain('置き換わります');
+  });
+
   it('🔴 変わるものが無ければ押せない(空押しを作らない)', () => {
     const plan = planSettingsImport(file([{ key: 'pkc3.theme', value: 'light' }]), () => 'light');
     expect(canApplySettings(plan)).toBe(false);

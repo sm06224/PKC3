@@ -286,6 +286,22 @@ describe('5. 保存や設定ファイルの割り当ても、割り当てると�
     expect(clean.unusableBindings).toBe(0);
     expect(settingsPlanNote(clean)).not.toContain('使われません');
   });
+
+  it('🔴 素の Tab / Shift+Tab を既定に持たない操作へ付けた割り当ては、使われない物として数える(#1087)', () => {
+    const file = (value: unknown): string =>
+      JSON.stringify({
+        kind: 'pkc3-settings',
+        version: 1,
+        entries: [{ key: KEY, value: JSON.stringify(value) }],
+      });
+    const plan = planSettingsImport(file({ 'create-entry': ['Mod+N', 'Tab', 'Shift+Tab'] }), () => null);
+    expect(plan.unusableBindings).toBe(2);
+    expect(settingsPlanNote(plan)).toContain('使われません');
+    const usable = resolveUsableBindings({ 'create-entry': ['Mod+N', 'Tab'] });
+    expect(usable.bindings['create-entry']).toEqual(['Mod+N']);
+    // 対照: 既定に Tab を持つ操作は、Tab を持ったまま
+    expect(resolveUsableBindings({ 'row-commit': ['Tab', 'Mod+Enter'] }).unusable).toEqual([]);
+  });
 });
 
 describe('6. 既に付いているキーをもう一度割り当てる', () => {

@@ -445,3 +445,70 @@ describe('🔴 割り当ての断り文に、相手の効く場所を添える(#
     expect(contextsOverlap(['global'], ['row'])).toBe(true);
   });
 });
+
+describe('#1087 素の Tab は、既定に Tab を持つ操作だけ', () => {
+  const bindings = defaultBindings();
+
+  it('🔴 既定に Tab を持たない操作へは、Tab も Shift+Tab も付けられない(画面の「キーを割り当てる」と同じ)', () => {
+    for (const chord of ['Tab', 'Shift+Tab']) {
+      const p = validateBinding('create-entry', chord, bindings);
+      expect(p?.kind, `${chord} が受理された`).toBe('bare');
+    }
+  });
+
+  it('対照: 既定に Tab を持つ操作(行の確定 / 反対のペインへ移る)は Tab も Shift+Tab も通る', () => {
+    expect(validateBinding('row-commit', 'Tab', bindings)).toBeNull();
+    expect(validateBinding('row-commit', 'Shift+Tab', bindings)).toBeNull();
+    // 前提: 反対のペインへ移る の既定は Tab(これが変わったらこの対照は意味を失う)
+    expect(findCommand('dual-other-pane')?.defaults).toEqual(['Tab']);
+    expect(validateBinding('dual-other-pane', 'Tab', bindings)).toBeNull();
+  });
+
+  it('対照: Tab に修飾が付けば、他の操作にも付けられる(Mod+Tab は別の話)', () => {
+    expect(validateBinding('create-entry', 'Alt+Tab', bindings)?.kind).not.toBe('bare');
+  });
+});
+
+describe('#1087 フォルダの表と、本文を読む面の Escape', () => {
+  it('🔴 表の操作へ Escape は付けられない(読む面の「閉じる」の Escape と重なる)', () => {
+    expect(contextsOverlap(['filer'], ['reading'])).toBe(true);
+    expect(contextsOverlap(['dual'], ['window'])).toBe(true);
+    // 向きを入れ替えても同じ(読む面の操作へ、表の操作が持つ鍵を付けるほうも断る)
+    expect(contextsOverlap(['reading'], ['filer'])).toBe(true);
+    expect(contextsOverlap(['window'], ['dual'])).toBe(true);
+    expect(validateBinding('deselect-entry', 'F2', defaultBindings())?.withCommandId, '表の「名前を変える」の F2').toBe('filer-rename');
+    const bindings = defaultBindings();
+    const filerOnly = KEY_COMMANDS.find((c) => c.id === 'filer-rename')!;
+    const p = validateBinding(filerOnly.id, 'Escape', bindings);
+    expect(p?.kind, '表の操作に Escape が付いた').toBe('conflict');
+    expect(['deselect-entry', 'close-pane']).toContain(p?.withCommandId);
+    const dualOnly = KEY_COMMANDS.find((c) => c.contexts.length === 1 && c.contexts[0] === 'dual')!;
+    expect(validateBinding(dualOnly.id, 'Escape', bindings)?.kind, '2 ペインの操作に Escape が付いた').toBe('conflict');
+  });
+
+  /**
+   * 🔴 重なり扱いを広げた日の全数検査:既定の全組で、同じ鍵を持つ組は 0 件のまま。
+   * 空振り防止に、広げた結果として「新しく重なり扱いになった組」が実在することも見る。
+   */
+  it('既定の全組で、重なりは 0 件のまま(新しく重なり扱いになった組が実在する前提つき)', () => {
+    let newlyOverlapping = 0;
+    const clashes: string[] = [];
+    for (const a of KEY_COMMANDS) {
+      for (const b of KEY_COMMANDS) {
+        if (a.id >= b.id || !contextsOverlap(a.contexts, b.contexts)) continue;
+        const isTable = (cs: readonly KeyContext[]): boolean => cs.some((c) => c === 'filer' || c === 'dual');
+        const isReading = (cs: readonly KeyContext[]): boolean => cs.some((c) => c === 'reading' || c === 'window');
+        const viaTable = (isTable(a.contexts) && isReading(b.contexts)) || (isReading(a.contexts) && isTable(b.contexts));
+        if (viaTable) newlyOverlapping += 1;
+        // 全域どうし・同じ文脈の組は、広げる前から重なり扱い ── 既定が通っていることは 3 番の test が見ている
+        for (const x of a.defaults) {
+          for (const y of b.defaults) {
+            if (viaTable && sameChord(x, y)) clashes.push(`${a.id} / ${b.id} ${x}`);
+          }
+        }
+      }
+    }
+    expect(newlyOverlapping, '前提: 新しく重なり扱いになった組が無い').toBeGreaterThan(0);
+    expect(clashes, '既定の割り当てが、新しい重なり扱いでぶつかる').toEqual([]);
+  });
+});
