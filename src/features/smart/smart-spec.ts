@@ -373,6 +373,25 @@ export function withSmartTag(
 }
 
 /**
+ * 🔴 **条件のタグの名前を変える**(#1087。タグの集計の「名前を変える」から)。
+ *
+ * ⚠ 条件に `from` が無ければ `null`(書かない)。新しい名前が既に条件に在れば、`from` を外すだけ
+ *   (同じ名前を 2 つ並べない)。⚠ 条件の数は増えないので上限には当たらない。
+ * ⚠ 新しい名前が条件にできない綴り(空 / 長すぎる)でも `null` ── 呼び側が先に弾くが、ここでも書かない。
+ */
+export function withSmartTagRenamed(spec: SmartSpec, from: string, to: string): SmartSpec | null {
+  const t = normalizeTag(to);
+  if (t === '' || [...t].length > MAX_TAG_CHARS) return null;
+  if (!spec.tags.some((x) => sameTag(x, from))) return null;
+  const out: string[] = [];
+  for (const x of spec.tags) {
+    const name = sameTag(x, from) ? t : x;
+    if (!out.some((y) => sameTag(y, name))) out.push(name);
+  }
+  return { ...spec, tags: out };
+}
+
+/**
  * 🔴 **列で引く条件の名前**(#421 段②)。⚠ **綴りを直書きしない**
  * (画面・reducer・effect の 3 か所に散ると、1 つ直し忘れが静かに効く)。
  */

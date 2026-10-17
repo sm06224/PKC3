@@ -14,6 +14,7 @@
  */
 import {
   frontmatterLineCount,
+  frontmatterProblem,
   parseFrontmatter,
   spliceFrontmatterKeys,
   type FrontmatterValue,
@@ -812,6 +813,16 @@ export function attachmentNameRewriteNotice(from: string, to: string): string {
   return `ファイル名を「${from}」→「${to}」にしました`;
 }
 
+/** 前書きの中の `tags:` の行数(字下げした行も数える ── 読む側は子行も読む)。 */
+function tagKeyLines(body: string): number {
+  const n = frontmatterLineCount(body);
+  if (n === 0) return 0;
+  return body
+    .split('\n')
+    .slice(1, n - 1)
+    .filter((l) => /^\s*tags\s*:/.test(l)).length;
+}
+
 /** タグ 1 つに何が起きたか(#640)。⚠ `wrote` 以外は**本文が変わっていない**。 */
 export type TagOutcome = 'wrote' | 'unchanged' | 'limit' | 'invalid';
 
@@ -820,6 +831,15 @@ export interface TagsApplied {
   readonly body: string | null;
   /** 打った字ごとの結果。⚠ 鍵は**打った字そのもの**(正規化前 ── 画面に出すため)。 */
   readonly outcomes: ReadonlyMap<string, TagOutcome>;
+  /**
+   * 🔴 **書かなかった理由が「このノートには書けない」のとき**(#1087)。⚠ `body` は `null` で、
+   *   `outcomes` は空 ── 「既に付いていた」「上限」と混ぜない(呼び側は別の字で言う)。
+   * - `unreadable` = 前書きが読めない(閉じの `---` が無い / 大きすぎる)。⚠ 読めた分は空なので、
+   *   そのまま書くと既存のタグが**黙って消える**。
+   * - `unwritable` = 読めているが、書く行が無い(字下げした入れ子の中の `tags:`)。
+   *   ⚠ 読む側は子行も読むが、書く側は最上位の行しか書かない。
+   */
+  readonly refused?: 'unreadable' | 'unwritable';
 }
 
 /**
@@ -840,6 +860,13 @@ export function applyTagsToBody(
   tags: readonly string[],
   mode: 'add' | 'remove',
 ): TagsApplied {
+  /**
+   * 🔴 **前書きが読めないノートには書かない**(#1087)。⚠ 直す前は `readTagSlots` が空を返すので、
+   *   `tags: [買い物, 家事]` のあるノートに `請求` を付けると `tags: [請求]` になり、既存のタグが消えた。
+   *   判定は `frontmatterProblem` 1 本(右のペインが書かせないのと同じ規則)。
+   */
+  if (frontmatterProblem(body)?.kind === 'unreadable')
+    return { body: null, outcomes: new Map(), refused: 'unreadable' };
   const slots = readTagSlots(body);
   let cur = slots.flatMap((x) => ('tag' in x ? [x.tag] : []));
   let moved = false;
@@ -872,10 +899,18 @@ export function applyTagsToBody(
   for (const c of cur) if (!placed.some((p) => sameTag(p, c))) written.push(c);
   // ⚠ 空になったら **鍵ごと消す**(`tags: []` を残さない ── 読み手が
   //    「空のタグが 1 つ在る」と読む形を作らない)
-  return {
-    body: spliceFrontmatterKeys(body, { tags: written.length === 0 ? undefined : written }),
-    outcomes,
-  };
+  const next = spliceFrontmatterKeys(body, { tags: written.length === 0 ? undefined : written });
+  /**
+   * 🔴 **書く行が無いなら書かない**(#1087)。
+   * ⚠ 読む側は字下げした入れ子の子行(`meta:` の下の `tags:`)も読むが、書く側は最上位の行しか
+   *   書かない。入れ子のタグを外すと本文は 1 バイトも変わらないのに「外しました」と言い、
+   *   他のタグが残っていると最上位に `tags:` が増えて**同じ鍵が 2 本**になる(片方を消すと隠れた行が戻る ── #641)。
+   * 🔑 見るのは書いた**結果**だけ ── 本文が動かない / `tags:` の行が増えた、のどちらかなら断る。
+   *   (読み戻した件数では見ない: 上限を越えた分は読まれないので、件数が合わない形が正しい書換にも在る)
+   */
+  if (next === body || tagKeyLines(next) > Math.max(1, tagKeyLines(body)))
+    return { body: null, outcomes: new Map(), refused: 'unwritable' };
+  return { body: next, outcomes };
 }
 
 /**

@@ -579,3 +579,64 @@ describe('入らなかったタグは欄に残る(#640 案 A)', () => {
     expect(field(s).value, '欄の無い経路の断りを欄へ戻した').toBe('');
   });
 });
+
+describe('#1087 書けないノートには書かない(前書きが読めない / 字下げした入れ子のタグ)', () => {
+  /** 前書きが読めない 3 形。⚠ どれも `tags:` を持つ ── 書くと既存のタグが消える形である。 */
+  const UNREADABLE: Record<string, string> = {
+    '閉じの --- が無い': '---\ntags: [買い物, 家事]\n本文です\n',
+    '閉じの --- が無い(CRLF)': '---\r\ntags: [買い物, 家事]\r\n本文です\r\n',
+    '前書きが 16KB を超える': `---\ntags: [買い物, 家事]\nmemo: ${'あ'.repeat(17000)}\n---\n本文です\n`,
+  };
+
+  for (const [label, body] of Object.entries(UNREADABLE)) {
+    it(`🔴 ${label}ノートに付けても、既存のタグを消さず・書かず・知らせで言う`, async () => {
+      const s = setup({ e1: body, e2: 'い\n' });
+      mark(s, ['e1', 'e2']);
+      await tick();
+      press(s, '請求', 'add');
+      await tick();
+      expect(s.disk['e1'], '読めないノートの本文が書き換わった').toBe(body);
+      // 対照群: 読めるノートには付く(門が全部を止めていない)
+      expect(readTags(s.disk['e2']!)).toEqual(['請求']);
+      const said = s.d.getState().notice ?? '';
+      expect(said).toContain('1 件に付けました');
+      expect(said).toContain('前書きが読めないノート 1 件には付けませんでした');
+    });
+  }
+
+  it('🔴 外す側も同じ(読めないノートから外せたと言わない)', async () => {
+    const body = UNREADABLE['閉じの --- が無い']!;
+    const s = setup({ e1: body });
+    mark(s, ['e1']);
+    await tick();
+    press(s, '買い物', 'remove');
+    await tick();
+    expect(s.disk['e1']).toBe(body);
+    const said = s.d.getState().notice ?? '';
+    expect(said).toContain('前書きが読めないノート 1 件には外しませんでした');
+    expect(said, '外していないのに「付いていませんでした」と言っている').not.toContain('付いていませんでした');
+  });
+
+  it('🔴 字下げした入れ子の `tags:` は、外せたと言わず・本文も動かさない(A5)', async () => {
+    const nested = '---\nmeta:\n  tags: [zz]\n---\n本文\n';
+    const s = setup({ e1: nested });
+    mark(s, ['e1']);
+    await tick();
+    press(s, 'zz', 'remove');
+    await tick();
+    expect(s.disk['e1']).toBe(nested);
+    const said = s.d.getState().notice ?? '';
+    expect(said, '本文が 1 バイトも変わらないのに外したと言っている').not.toContain('1 件から外しました');
+    expect(said).toContain('1 件は字下げした行のタグなので、ここからは外せませんでした');
+  });
+
+  it('🔴 入れ子のタグに他のタグが残っていても、最上位に同じ鍵を増やさない', async () => {
+    const nested = '---\nmeta:\n  tags: [zz, y]\n---\n本文\n';
+    const s = setup({ e1: nested });
+    mark(s, ['e1']);
+    await tick();
+    press(s, 'zz', 'remove');
+    await tick();
+    expect(s.disk['e1']).toBe(nested);
+  });
+});

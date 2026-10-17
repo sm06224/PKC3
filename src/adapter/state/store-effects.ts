@@ -59,13 +59,14 @@ import {
   smartQueryOf,
   withSmartField,
   withSmartTag,
+  withSmartTagRenamed,
   writeSmartSpec,
   type SmartCondResult,
   type SmartField,
   type SmartQuery,
   type SmartSpec,
 } from '@features/smart/smart-spec';
-import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
+import { frontmatterProblem, spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
 import {
   appGroupIconsOf,
@@ -1011,6 +1012,17 @@ export function connectStoreEffects(
       try {
         const body = await store.getBody(t.lid);
         if (disposed || body === null) return;
+        /**
+         * 🔴 **前書きが読めないスマートフォルダには書かない**(#1087)。⚠ 読めないと条件は空で返るので、
+         *   書くと既存の `smart-tags:` の行が新しい 1 つで**差し替わる**(タグ付けと同じ穴)。
+         */
+        if (frontmatterProblem(body)?.kind === 'unreadable') {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: '前書きが読めないので、条件を書き換えられません(ノートを開いて前書きを直してください)',
+          });
+          return;
+        }
         const res = apply(readSmartSpec(body));
         if (!res.ok) {
           const why = smartCondError(res.reason, tag, refusedField);
@@ -2848,6 +2860,13 @@ export function connectStoreEffects(
            *   別のタブのせいに見えた。
            */
           let unread = 0; // 本文を読めなかった
+          /**
+           * 🔴 **このノートには書けない**(#1087)。前書きが読めない(閉じの `---` が無い / 大きすぎる)と、
+           *   書くと既存のタグが消える。字下げした入れ子の中のタグは、読めても書く行が無い。
+           *   ⚠ どちらも本文は 1 バイトも動かさない ── 「付けました」「付いていました」に混ぜない。
+           */
+          let fmUnreadable = 0;
+          let fmUnwritable = 0;
           let conflicted = 0; // 読んでから書くまでに別のタブ・ウィンドウが書いた
           let threw = 0; // 書込が例外で落ちた(空き不足など)
           let firstThrown: string | null = null;
@@ -2894,6 +2913,14 @@ export function connectStoreEffects(
                *   「**既に付いていました**」という**事実と違う字**が出ていた。
                */
               const applied = applyTagsToBody(body, ev.tags, ev.mode);
+              if (applied.refused === 'unreadable') {
+                fmUnreadable++;
+                continue;
+              }
+              if (applied.refused === 'unwritable') {
+                fmUnwritable++;
+                continue;
+              }
               /**
                * 🔴 **数えるのは書けた後**(#1087、本文の書換の見直し)。直す前は書く前に数えていたので、
                *   別のタブと重なって書けなかったノートも「N 件に付けました」に入っていた
@@ -2991,6 +3018,12 @@ export function connectStoreEffects(
           }
           // ⚠ 理由ごとに言う(#1087)── 例外の側は最初の 1 件の理由を添える(空き不足を別のタブのせいにしない)
           if (unread > 0) parts.push(`${unread} 件は書けませんでした(本文を読めませんでした)`);
+          if (fmUnreadable > 0)
+            parts.push(`前書きが読めないノート ${fmUnreadable} 件には${ev.mode === 'add' ? '付けません' : '外しません'}でした`);
+          if (fmUnwritable > 0)
+            parts.push(
+              `${fmUnwritable} 件は字下げした行のタグなので、ここからは${ev.mode === 'add' ? '付けられません' : '外せません'}でした`,
+            );
           if (conflicted > 0)
             parts.push(`${conflicted} 件は書けませんでした(別のタブまたはウィンドウが書き換えたためです)`);
           if (threw > 0) parts.push(`${threw} 件は書けませんでした(${firstThrown ?? '理由は分かりません'})`);
@@ -3015,6 +3048,68 @@ export function connectStoreEffects(
             if (left.length > 0)
               dispatcher.dispatch({ type: 'TAGS_REFUSED', field: ev.field, tags: left });
           }
+        });
+        break;
+      /**
+       * 🔴 **タグの名前を変えたとき、スマートフォルダの条件も変える**(#1087)。
+       * ⚠ 規則は `withSmartTagRenamed` 1 本、書くのは `writeSmartSpec`(条件を書く既存の口)。
+       * ⚠ 前書きが読めないものは書かない(タグ付けと同じ門)。1 件ずつ `expectHash` で守る。
+       * 🔑 知らせは**前の知らせ(外す・付ける)に続けて**言う ── 上書きすると外せなかった件数が消える。
+       */
+      case 'REQUEST_SMART_TAG_RENAME':
+        enqueue(async () => {
+          if (disposed) return;
+          let changed = 0;
+          let failed = 0;
+          try {
+            const rows = await store.getBodies(ev.targets.map((t) => t.lid));
+            const bodyOf = new Map(rows.map((r) => [r.lid, r.body]));
+            for (const t of ev.targets) {
+              if (disposed) return;
+              try {
+                const body = bodyOf.get(t.lid);
+                // ⚠ 前書きが読めないものは条件が空で返る(`withSmartTagRenamed` が `null`)ので、ここで門を足さなくても書かない
+                if (body === undefined) continue;
+                const spec = withSmartTagRenamed(readSmartSpec(body), ev.from, ev.to);
+                if (spec === null) continue;
+                const newBody = writeSmartSpec(body, spec);
+                if (newBody === body) continue;
+                const ext = extractMeta(t.archetype, newBody);
+                const stamps = await store.persistEntry(
+                  {
+                    lid: t.lid,
+                    title: t.title,
+                    archetype: t.archetype,
+                    body: newBody,
+                    entryOrder: t.entryOrder,
+                    status: ext.status,
+                    date: ext.date,
+                    archived: ext.archived,
+                  },
+                  { keepMeta: true, expectHash: contentHash64Hex(body) },
+                );
+                if (stamps.conflict === true) {
+                  failed++;
+                  continue;
+                }
+                stamp(t.lid, stamps);
+                changed++;
+                if (!disposed) dispatcher.dispatch({ type: 'SMART_RESCAN', lid: t.lid });
+              } catch {
+                failed++;
+              }
+            }
+          } catch {
+            failed++;
+          }
+          if (disposed) return;
+          const said: string[] = [];
+          if (changed > 0) said.push(`スマートフォルダ ${changed} 件の条件も変えました`);
+          if (failed > 0) said.push(`スマートフォルダ ${failed} 件の条件は書き換えられませんでした`);
+          if (said.length === 0) return;
+          const previous = dispatcher.getState().notice;
+          const text = said.join(' / ');
+          dispatcher.dispatch({ type: 'OP_NOTICE', message: previous ? `${previous} / ${text}` : text });
         });
         break;
       case 'REQUEST_REVISION_LIST':
