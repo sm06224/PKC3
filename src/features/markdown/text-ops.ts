@@ -79,6 +79,15 @@ function stripListHead(rest: string): string {
   return rest.replace(/^(?:#{1,6}[ \t]+|(?:[-*+]|\d+[.)])\s+\[[ xX]\](?:\s|$)|[-*+][ \t]+|\d+[.)][ \t]+)/, '');
 }
 
+/**
+ * 🔴 **全角の記号で始まる行頭**(`・牛乳` / `－ a` / `＊ a` / `１. a`。日本語入力のまま打つとこうなる。#1163 依頼 205)。
+ * ⚠ 本文の表示では箇条書きにならない字だが、「箇条書き」「番号」のボタンを押したとき
+ *   `- ・牛乳` のように記号が重ならないよう、**ボタンで付ける側だけ**この記号を半角の印に置き換える
+ *   (描き手の読み方は変えない ── 全角の記号で始まる普通の文は、そのまま普通の文である)。
+ * ⚠ `・` 以外は記号の後ろに空白が要る(`＊強調＊` のような字は落とさない)。
+ */
+const FULLWIDTH_HEAD = /^(?:・[ \t\u3000]*|(?:[－＊＋]|[０-９]+[.．)）])[ \t\u3000]+)/;
+
 /** 行頭の引用の連なり(`> ` / `> > `。字下げ付きも)と、その残り。 */
 function splitQuote(line: string): [string, string] {
   const q = /^(?:[ \t]*>[ \t]?)*/.exec(line)![0];
@@ -140,7 +149,8 @@ export function toggleLinePrefix(sel: TextSelection, kind: LinePrefix): TextSele
       const [q, rest] = splitQuote(l);
       if (keep) {
         const indent = /^\s*/.exec(rest)![0];
-        const bare = stripListHead(rest.slice(indent.length));
+        // 🔴 半角の印 → 全角の記号の順に落とす(`- ・牛乳` のように重なった行も 1 回で直る)
+        const bare = stripListHead(rest.slice(indent.length)).replace(FULLWIDTH_HEAD, '');
         return kind === 'ol' ? `${q}${indent}${n}. ${bare}` : `${q}${indent}${mark}${bare}`;
       }
       // 字下げした `# ` は見出しではない(従来どおり)。字下げした**リスト**の印は、字下げごと落として見出しにする
@@ -1133,6 +1143,23 @@ const CLOSERS: ReadonlySet<string> = new Set(Object.values(INLINE_PAIRS));
 
 
 /**
+ * 🔴 **括弧を補わない場所**(#1163 依頼 202。Gemini 回答:「コードの中では付け、数式や表の中では付けない」)。
+ *
+ * - 数式の塊(`$$` で囲んだ中)── 数式の `(` `{` は対にならないことが多く、`{` `}` は TeX の記号でもある
+ * - 表の行 ── セルの中の `(` は 1 つだけ書く字が多く、`|` の並びに閉じが紛れ込むと列がずれる
+ * ⚠ コード(囲み・文中)の中は補う(今までどおり)。表の行でも、囲みの中に書いた `| a |` は表ではなくコードである。
+ * 🔑 補う側(`autoPairFor`)と消す側(`pairedBackspaceRange`)が**同じ判定**を通る ── 片方だけだと、
+ *   補っていない所で Backspace が閉じまで消す。
+ */
+function pairSuppressed(text: string, pos: number): boolean {
+  const ctx = codeContextAt(text, pos);
+  if (ctx === 'math') return true;
+  if (ctx !== null) return false;
+  // 表の行 = 行頭(字下げの後ろ)が `|` の行。⚠ 末尾の `|` を待たない ── セルを書き足している途中の行も表の行である
+  return /^[ \t]*\|/.test(text.slice(lineStart(text, pos), pos));
+}
+
+/**
  * 🔴 **補った開きの直後の Backspace** ── 開きと、すぐ右の対の閉じを一緒に消す範囲を返す。
  * カーソルの前が開き・後ろがその閉じ(`(|)` など)のときだけ。それ以外は `null`(普通の Backspace)。
  * 規則の正本は `INLINE_PAIRS` 1 つ(補う側と同じ表)。
@@ -1142,6 +1169,8 @@ export function pairedBackspaceRange(
   caret: number,
 ): { from: number; to: number } | null {
   if (caret < 1 || caret > text.length) return null;
+  // 補わない場所では、補っていないので両方消さない(普通の Backspace)
+  if (pairSuppressed(text, caret)) return null;
   const close = INLINE_PAIRS[text[caret - 1]!];
   if (close === undefined || text[caret] !== close) return null;
   return { from: caret - 1, to: caret + 1 };
@@ -1156,6 +1185,7 @@ export function pairedBackspaceRange(
  */
 export function autoPairFor(sel: TextSelection, key: string): AutoPair | null {
   const { text, start, end } = sel;
+  if (pairSuppressed(text, start)) return null;
   const lineHead = lineStart(text, start);
   const prefix = text.slice(lineHead, start);
   const nl = text.indexOf('\n', end);

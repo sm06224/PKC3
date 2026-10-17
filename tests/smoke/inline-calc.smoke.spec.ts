@@ -115,7 +115,7 @@ test('🔴 引用の行で計算しても、取り消しで打った字へ戻れ
   await page.keyboard.press('Enter');
   await expect(ta).toHaveValue('- 2+3=5\n- ');
   await page.keyboard.press('Enter');
-  await expect(ta, '記号だけの行で Enter を押しても抜けない').toHaveValue('- 2+3=5\n');
+  await expect(ta, '記号だけの行で Enter を押しても抜けない').toHaveValue('- 2+3=5\n\n');
 
   expect(errors, errors.join('\n')).toHaveLength(0);
 });

@@ -585,6 +585,59 @@ describe('RowSwap — 確定と取り消し', () => {
     expect(findByText(r.host, 'p', '書き換えた段落。')).toBeTruthy();
   });
 
+  /**
+   * 🔴 **ウィンドウを離れても行を閉じない**(#1163 依頼 305)。実機の順序は、別のアプリやタブへ移ると欄に `blur` が飛び、
+   *   `document.activeElement` は欄のまま `document.hasFocus()` が偽になる。ページの中で別の所を押したときは
+   *   `activeElement` が欄でなくなる ── 対照群を同じ表に置く(ページ内のクリックは今までどおり確定して閉じる)。
+   *   ⚠ happy-dom は `blur` の中の `hasFocus` を実機のようには動かさないので、`hasFocus` だけ差し替える
+   *   (`activeElement` は本物の `focus()` で欄に置く)。
+   */
+  describe('ウィンドウを離れたとき', () => {
+    function typeAndLeave(windowFocused: boolean): { r: Rig; ta: HTMLTextAreaElement } {
+      const r = rig();
+      openClick(findByText(r.host, 'p', '最初の段落。'));
+      const ta = box(r.host)!;
+      ta.focus();
+      ta.value = '打ちかけ。日本語の字・全角のＡＢＣ';
+      vi.spyOn(document, 'hasFocus').mockReturnValue(windowFocused);
+      ta.dispatchEvent(new Event('blur'));
+      return { r, ta };
+    }
+    afterEach(() => vi.restoreAllMocks());
+
+    it('🔴 ウィンドウごと焦点を失ったときは確定せず、行は開いたまま(打った字も残る)', () => {
+      const { r, ta } = typeAndLeave(false);
+      expect(r.commits, 'ウィンドウを離れただけで確定した').toEqual([]);
+      expect(box(r.host), '行が閉じた').toBe(ta);
+      expect(ta.value).toBe('打ちかけ。日本語の字・全角のＡＢＣ');
+    });
+
+    it('戻ってから別の所を押したときは、今までどおり確定して閉じる', () => {
+      const { r, ta } = typeAndLeave(false);
+      vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+      ta.blur();
+      expect(r.commits).toEqual([{ start: 2, end: 2, text: '打ちかけ。日本語の字・全角のＡＢＣ' }]);
+      expect(box(r.host)).toBeNull();
+    });
+
+    it('⚠ 対照群 ── ページの中で別の所を押した(ウィンドウは焦点を持っている)ときは確定する', () => {
+      const { r } = typeAndLeave(true);
+      expect(r.commits).toHaveLength(1);
+      expect(box(r.host)).toBeNull();
+    });
+
+    it('⚠ 対照群 ── 欄が `activeElement` でない blur は、ウィンドウの焦点が偽でも確定する', () => {
+      const r = rig();
+      openClick(findByText(r.host, 'p', '最初の段落。'));
+      const ta = box(r.host)!;
+      ta.value = 'かえた';
+      ta.blur();
+      vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+      ta.dispatchEvent(new Event('blur'));
+      expect(r.commits.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
   it('② Escape は確定せず、**描画が戻る**(穴が残らない。打っていたら聞いて、捨てる答えのとき)', async () => {
     const r = rig();
     openClick(findByText(r.host, 'p', '最初の段落。'));

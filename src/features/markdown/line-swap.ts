@@ -24,6 +24,7 @@
  * ⚠ `line-move.ts` の `moveLines` は**読む面のブロック移動**で別物(名前を分けてある)。
  */
 import { lineStart } from './line-start';
+import { LIST_LEAD, THEMATIC_BREAK } from './list-renumber';
 import type { TextSelection } from './text-ops';
 
 /** 入れ替えの結果。⚠ `TextSelection`(新しい本文と選択)に、置き換える範囲を足したもの。 */
@@ -33,6 +34,37 @@ export interface SwapEdit extends TextSelection {
   readonly to: number;
   /** その範囲へ入れる字(改行を含む)。 */
   readonly insert: string;
+}
+
+/** 字下げの幅(`list-renumber.ts` の `indentOf` と同じ数え方)。 */
+function indentLen(line: string): number {
+  return /^\s*/.exec(line)![0].length;
+}
+
+/** 箇条書き・番号付きの項目の行か(水平線 `---` は除く。読み方は Enter・字下げと同じ `LIST_LEAD`)。 */
+function isItemLine(line: string): boolean {
+  return LIST_LEAD.test(line) && !THEMATIC_BREAK.test(line);
+}
+
+/**
+ * 🔴 **項目の子(より深く字下げした続きの行)の終わりまで広げる**(#1163 依頼 204)。
+ * `lineFrom`〜`lineTo` は項目の行。子が無い・項目でないなら `lineTo` のまま。
+ * ⚠ 空行で切る(空行の先は別の塊)。
+ */
+function withChildren(text: string, lineFrom: number, lineTo: number): number {
+  const head = text.slice(lineFrom, lineTo);
+  if (!isItemLine(head)) return lineTo;
+  const depth = indentLen(head);
+  let end = lineTo;
+  while (end < text.length) {
+    const from = end + 1;
+    const nl = text.indexOf('\n', from);
+    const to = nl === -1 ? text.length : nl;
+    const l = text.slice(from, to);
+    if (l.trim() === '' || indentLen(l) <= depth) break;
+    end = to;
+  }
+  return end;
 }
 
 /**
@@ -47,13 +79,33 @@ export function swapLines(sel: TextSelection, dir: 1 | -1): SwapEdit | null {
   // ⚠ 下の行の頭まで選んでいるときは、その行を巻き込まない
   const lastPos = !collapsed && text[sel.end - 1] === '\n' ? sel.end - 1 : sel.end;
   const nl = text.indexOf('\n', lastPos);
-  const blockTo = nl === -1 ? text.length : nl;
+  // 🔴 動かす側の最後の行が子を持つ項目なら、子も一緒に動かす(入れ子が崩れない)
+  const lastLineFrom = lineStart(text, nl === -1 ? text.length : nl);
+  const blockTo = withChildren(text, lastLineFrom, nl === -1 ? text.length : nl);
   const block = text.slice(blockFrom, blockTo);
 
   if (dir === -1) {
     if (blockFrom === 0) return null;
     // blockFrom - 1 は直前の行の終わりの `\n`。その手前から行頭を探す
-    const prevFrom = lineStart(text, blockFrom - 1);
+    let prevFrom = lineStart(text, blockFrom - 1);
+    /**
+     * 🔴 動かすのが項目なら、上の兄弟の項目は**子ごと**で 1 つの塊である。
+     *   直前の行が深い子なら、字下げが同じ兄弟の頭まで上がる。⚠ 上がった先が兄弟でない
+     *   (親・空行・先頭)ときは、これまでどおり直前の 1 行と入れ替える(親を飛び越えない)。
+     */
+    const firstNl = text.indexOf('\n', blockFrom);
+    const firstLine = text.slice(blockFrom, firstNl === -1 ? text.length : firstNl);
+    if (isItemLine(firstLine)) {
+      const depth = indentLen(firstLine);
+      let climb = prevFrom;
+      while (climb > 0) {
+        const l = text.slice(climb, text.indexOf('\n', climb));
+        if (l.trim() === '' || indentLen(l) <= depth) break;
+        climb = lineStart(text, climb - 1);
+      }
+      const head = text.slice(climb, text.indexOf('\n', climb));
+      if (climb !== prevFrom && isItemLine(head) && indentLen(head) === depth) prevFrom = climb;
+    }
     const prev = text.slice(prevFrom, blockFrom - 1);
     const shift = prev.length + 1;
     const insert = `${block}\n${prev}`;
@@ -69,7 +121,8 @@ export function swapLines(sel: TextSelection, dir: 1 | -1): SwapEdit | null {
   if (blockTo === text.length) return null;
   const nextFrom = blockTo + 1;
   const nn = text.indexOf('\n', nextFrom);
-  const nextTo = nn === -1 ? text.length : nn;
+  // 🔴 下の行が子を持つ項目なら、その子ごと 1 つの塊として入れ替える
+  const nextTo = withChildren(text, nextFrom, nn === -1 ? text.length : nn);
   const next = text.slice(nextFrom, nextTo);
   const shift = next.length + 1;
   const insert = `${next}\n${block}`;

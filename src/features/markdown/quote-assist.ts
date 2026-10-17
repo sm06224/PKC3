@@ -78,6 +78,12 @@ function readQuote(line: string): { readonly marks: string; readonly rest: strin
 interface ListMarker {
   /** 続きの行の頭(`'  - [ ] '` / `'10. '` など)。 */
   readonly next: string;
+  /** `next` から未完了の印(`[ ] `)を除いたもの。⚠ 1 段外へ戻すとき、親の記号 + 自分の印で組むのに使う。 */
+  readonly head: string;
+  /** 未完了の印(`[ ] ` / 無ければ空)。 */
+  readonly box: string;
+  /** 行頭の字下げ(入れ子の深さ)。 */
+  readonly indent: string;
   /** 元の行で、記号(と印の後ろの空白)までの長さ。caret がこれより手前なら続けない。 */
   readonly width: number;
   /** 記号の後ろに中身が無い(= 抜ける合図)。 */
@@ -110,7 +116,14 @@ function readListMarker(rest: string): ListMarker | null {
   }
   const num = /^(\d+)([.)])$/.exec(mark);
   const next = num === null ? mark : `${Number(num[1]) + 1}${num[2]!}`;
-  return { next: `${indent}${next}${gap}${box}`, width, empty: body.trim() === '' };
+  return {
+    next: `${indent}${next}${gap}${box}`,
+    head: `${indent}${next}${gap}`,
+    box,
+    indent,
+    width,
+    empty: body.trim() === '',
+  };
 }
 
 /**
@@ -131,7 +144,15 @@ export function quoteOnEnter(value: string, caret: number): QuoteAssist {
   const list = readListMarker(q === null ? line : q.rest);
   if (list !== null && !insideBlockCode(value, start)) {
     // ⚠ 空の記号で Enter ── **抜ける**(記号を消す。引用の中なら `> ` は残す)
-    if (list.empty) return { kind: 'exit', from: start + marks.length, to: end, text: '' };
+    if (list.empty) {
+      // 🔴 入れ子の空の項目は、いちばん外まで抜けず**1 段だけ外へ戻す**(親の項目の隣になる。#1163 依頼 199)
+      const parent = list.indent === '' ? null : parentItem(value, start, list.indent.length);
+      if (parent !== null) {
+        return { kind: 'exit', from: start + marks.length, to: end, text: parent.head + list.box };
+      }
+      // 🔴 最後の段から抜けるときは**空行を 1 つ入れる**(入れないと、次に打つ字が前の項目の続きとして表示される)
+      return { kind: 'exit', from: start + marks.length, to: end, text: blankBefore(value, start) ? `\n${marks}` : '' };
+    }
     // ⚠ 記号より手前で押したら続けない(`- - 牛乳` になる)。引用なら引用の規則へ
     if (caret >= start + marks.length + list.width) {
       return { kind: 'continue', insert: `\n${marks}${list.next}` };
@@ -147,13 +168,48 @@ export function quoteOnEnter(value: string, caret: number): QuoteAssist {
     return { kind: 'none' };
   }
 
-  // ⚠ 空の `> ` で Enter ── **抜ける**(記号を消して、普通の改行にする)
-  if (q.rest.trim() === '') return { kind: 'exit', from: start, to: end, text: '' };
+  // ⚠ 空の `> ` で Enter ── **抜ける**(記号を消す)。🔴 空行を 1 つ入れる ── 入れないと、次に打つ字が引用の続きになる(#1163 依頼 199)
+  if (q.rest.trim() === '') return { kind: 'exit', from: start, to: end, text: blankBefore(value, start) ? '\n' : '' };
 
   // 🔴 引用の記号より手前(`> x` の行頭や `>` と空白の間)で Enter ── 続けると `> > x` になる(#1087)
   if (caret < start + q.marks.length) return { kind: 'none' };
 
   return { kind: 'continue', insert: `\n${q.marks}` };
+}
+
+/**
+ * 🔴 **抜けるとき、空行を足す必要があるか**(#1163 依頼 199)── 直前の行が実のある行なら足す。
+ * ⚠ 直前が空行(または先頭)なら足さない(空行が 2 つ重ならない)。引用の記号だけの行(`>`)も空行と数える。
+ */
+function blankBefore(value: string, lineHead: number): boolean {
+  if (lineHead === 0) return false;
+  const prevEnd = lineHead - 1;
+  const prevStart = lineStart(value, prevEnd);
+  const prev = value.slice(prevStart, prevEnd);
+  const q = readQuote(prev);
+  return (q === null ? prev : q.rest).trim() !== '';
+}
+
+/**
+ * 🔴 入れ子の空の項目を戻す先 ── 上へたどって、**字下げが浅い最初の項目**(= 親)。
+ * 空行は越える。字下げの無い普通の行に当たったら親は無い(`null`)。
+ * 引用の中のリストは、引用の記号を除いた残りで読む。
+ */
+function parentItem(value: string, lineHead: number, depth: number): ListMarker | null {
+  let end = lineHead - 1;
+  for (let n = 0; end >= 0 && n < 500; n += 1) {
+    const from = lineStart(value, end);
+    const line = value.slice(from, end);
+    const q = readQuote(line);
+    const rest = q === null ? line : q.rest;
+    if (rest.trim() !== '') {
+      const it = readListMarker(rest);
+      if (it !== null && it.indent.length < depth) return it;
+      if (it === null && !/^\s/.test(rest)) return null;
+    }
+    end = from - 1;
+  }
+  return null;
 }
 
 /** `start` より前の、`>` で始まる行を空行にした写し(長さは変えない ── 位置をそのまま使える)。 */

@@ -76,7 +76,7 @@ describe('引用の継続が編集欄に繋がっている #396', () => {
     const { root } = setup();
     const ta = editor(root, '> あ\n> ', 6);
     enter(ta);
-    expect(ta.value).toBe('> あ\n');
+    expect(ta.value).toBe('> あ\n\n');
   });
 
   /**
@@ -165,7 +165,7 @@ describe('リストの継続が編集欄に繋がっている #1167', () => {
     const v = '- あ\n- [ ] ';
     const ta = editor(root, v, v.length);
     enter(ta);
-    expect(ta.value, '記号が残っている').toBe('- あ\n');
+    expect(ta.value, '記号が残っている').toBe('- あ\n\n');
   });
 
   /** ⚠ 追記の欄は引用と同じく入れない(Enter は計算にだけ使い、送るのは Ctrl+Enter)。 */

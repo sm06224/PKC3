@@ -530,6 +530,45 @@ describe('貼付の切替(設定)と診断(フラグ)', () => {
   });
 
   /**
+   * 🔴 **表・見出し・箇条書きも、行の途中に貼ったら次の行から**(#1163 依頼 304。Gemini 回答は案どおり)。
+   * ⚠ 囲みだけが次の行から始まり、`メモ: ## 見出し` / `メモ: | a | b |` は行の途中に入って表にも見出しにもならなかった。
+   */
+  it.each([
+    ['見出し', '<h2>題</h2>', '題', '## 題'],
+    ['箇条書き', '<ul><li>あ</li><li>い</li></ul>', 'あ い', '- あ\n- い'],
+    ['表', '<table><tr><th>名</th><th>数</th></tr><tr><td>り</td><td>3</td></tr></table>', '名 数 り 3', '| 名 | 数 |\n| --- | --- |\n| り | 3 |'],
+  ])('🔴 %s を行の途中に貼っても、次の行から始まる', (_name, html, plain, want) => {
+    const { ta } = setup();
+    ta.value = 'メモ: ';
+    ta.selectionStart = ta.value.length;
+    ta.selectionEnd = ta.value.length;
+    ta.dispatchEvent(pasteEvent({ 'text/html': html, 'text/plain': plain }));
+    expect(ta.value, '行の途中に露出している').toBe(`メモ: \n${want}`);
+  });
+
+  it('⚠ 行頭に貼るときは改行を足さない / 字で始まる変換結果(段落)は行の途中のまま', () => {
+    const a = setup();
+    a.ta.dispatchEvent(pasteEvent({ 'text/html': '<h2>題</h2>', 'text/plain': '題' }));
+    expect(a.ta.value, '行頭なのに改行を足した').toBe('## 題');
+    // 対照群: 段落(`<b>` だけ)は行の途中に入る ── 改行を足さない
+    const b = setup();
+    b.ta.value = '値は ';
+    b.ta.selectionStart = b.ta.value.length;
+    b.ta.selectionEnd = b.ta.value.length;
+    b.ta.dispatchEvent(pasteEvent({ 'text/html': '<b>太字</b>', 'text/plain': '太字' }));
+    expect(b.ta.value).toBe('値は **太字**');
+  });
+
+  it('日本語の行(全角の字・全角の空白)の途中でも同じ', () => {
+    const { ta } = setup();
+    ta.value = '参考　資料：';
+    ta.selectionStart = ta.value.length;
+    ta.selectionEnd = ta.value.length;
+    ta.dispatchEvent(pasteEvent({ 'text/html': '<h3>題目</h3>', 'text/plain': '題目' }));
+    expect(ta.value).toBe('参考　資料：\n### 題目');
+  });
+
+  /**
    * ⚠ **対照群を同じ場面に置く** ── 置かないと「別の理由で差さった」を次に
    *   見抜けない。タブの無い平文は**いままでどおり素通り**する。
    */
