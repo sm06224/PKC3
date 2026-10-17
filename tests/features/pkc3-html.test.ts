@@ -782,6 +782,14 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     expect(document.querySelector('#pkc-body a[data-pkc-entry-ref="entry:zz"]'), '入っていないノートへのリンクが押せる顔で残った').toBeNull();
     const outside = document.querySelector('#pkc-body [data-pkc-outside-note]');
     expect(outside?.textContent).toBe('外');
+    // 依頼 77-3: 押せないことが見て分かる(薄い字 + 点線の下線)── 印だけ付けて見た目の規則が無い、を防ぐ
+    const css = Array.from(document.querySelectorAll('style'))
+      .map((x) => x.textContent ?? '')
+      .join('\n')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(css, '入っていないノートの印に見た目の規則が無い').toMatch(
+      /\.b \[data-pkc-outside-note\]\{[^}]*opacity:\.6[^}]*underline dotted/,
+    );
   });
 
   it('🔴 @[card](entry:…) の札も、書き出すときの注意に数え、入っているノートなら押して開く / 入っていなければ字だけ(#1087)', async () => {

@@ -12,7 +12,8 @@
  * タグが効かない(§7 の型)。
  */
 import { parseFrontmatter } from '@features/markdown/frontmatter';
-import { hashRunWords, strandedHashWords } from './tag-words';
+import { foldText } from '@features/filter/fold-text';
+import { hashRunWords, strandedHashWords, tagsMetaKey } from './tag-words';
 
 /** 1 ノートのタグ数の上限。⚠ 上限が無いと、事故った本文が一覧を埋め尽くす。 */
 export const MAX_TAGS = 32;
@@ -22,7 +23,7 @@ export const MAX_TAG_CHARS = 40;
 /**
  * タグを正規化する。⚠ **前後の空白を落とし、小文字化しない** ──
  * 日本語に大小は無く、英語のタグは user が書いたとおりに見せたい。
- * 突き合わせだけ `toLowerCase()` する(`sameTag`)。
+ * 突き合わせだけ揃える(`sameTag` → `tagFoldKey`)。
  */
 function normalize(raw: string): string {
   /**
@@ -38,7 +39,19 @@ function normalize(raw: string): string {
    */
   // ⚠ 井桁が空白を挟んで続く形(`# #買い物`)も落とす ── `/^#+/` だけだと
   //    **`#買い物` という井桁つきの名前**が残る(2026-08-29 に直したはずの形が戻る)
-  return raw.trim().replace(/^[#\s]+/u, '').trim().replace(/\s+/g, ' ');
+  /**
+   * 🔴 **末尾の読点・句点・カンマ・ピリオドは外す**(台帳 #1852 の束 B1、依頼 174)。
+   * user の物語: 文章の流れで `#請求書、` `#家事。` と打つと、読点つきの別のタグ「請求書、」ができる。
+   * ⚠ 末尾だけ(`v1.2` の途中の `.` は名前の一部)。全角の `，` `．` も同じ。外した結果が空なら、読めない名前として落ちる。
+   * ⚠ 保存されている字は変えない ── 読むとき(と、タグを書き直すとき)にだけ効く。
+   */
+  return raw
+    .trim()
+    .replace(/^[#\s]+/u, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[、。,.，．]+$/u, '')
+    .trim();
 }
 
 /** 前後の空白はそのまま、中身(`trim` した部分)にだけ `fn` を掛ける。 */
@@ -268,9 +281,17 @@ export function withTag(
   return r.ok ? r.tags : null;
 }
 
-/** 同じタグか(表示は原文、突き合わせは大小無視)。 */
+/**
+ * タグの突き合わせの鍵。🔴 大小に加えて、**全角半角・半角カナ・濁点の持ち方**も揃える(`foldText` ── 題名の絞り込みと同じ 1 本。
+ * 台帳 #1852 の束 B1、依頼 173)。⚠ ひらがなとカタカナは別のタグのまま。表示は原文で、鍵は比べるときだけ。
+ */
+export function tagFoldKey(tag: string): string {
+  return foldText(tag);
+}
+
+/** 同じタグか(表示は原文、突き合わせは `tagFoldKey`)。 */
 export function sameTag(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase();
+  return tagFoldKey(a) === tagFoldKey(b);
 }
 
 /**
@@ -290,7 +311,9 @@ export function readTags(body: string): string[] {
 /** `readTags` と同じ規則で読み、**読めなかった項も位置つきで返す**(#1087)。読む規則はこの 1 本。 */
 export function readTagSlots(body: string): TagSlot[] {
   const { meta } = parseFrontmatter(body);
-  const raw = meta.tags;
+  // 🔴 `Tags:` / `tag:` / `keywords:` も読む(依頼 175)。選び方は `tagsMetaKey` 1 本
+  const key = tagsMetaKey(meta);
+  const raw = key === null ? undefined : meta[key];
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) {
     // ⚠ 文字列の形は **`splitTags` 1 か所**で読む(§7)── 打つ欄と規則を分けない。

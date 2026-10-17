@@ -71,6 +71,18 @@ test('🔴 掴んだままタブの上で止めると面が変わり、drag は�
   await page.mouse.move(from!.x + 20, from!.y + 20, { steps: 4 });
 
   // ① 🔴 予定タブの上で止める → 面が変わる
+  // 🔴 切り替わる前に、待っているタブへ破線の枠が付く(依頼 79-4)── 0.6 秒の待ちの間だけ
+  const schedTab = page.locator('[data-pkc-browse="schedule"]');
+  const tabBox = await schedTab.boundingBox();
+  await page.mouse.move(tabBox!.x + tabBox!.width / 2, tabBox!.y + tabBox!.height / 2, { steps: 6 });
+  await page.mouse.move(tabBox!.x + tabBox!.width / 2 + 1, tabBox!.y + tabBox!.height / 2);
+  await expect(schedTab, '掴んだまま止めているタブに枠の印が付かない').toHaveAttribute('data-pkc-tab-hover', '', {
+    timeout: 500,
+  });
+  expect(
+    await schedTab.evaluate((el) => getComputedStyle(el).outlineStyle),
+    '枠の印が見た目(破線)になっていない',
+  ).toBe('dashed');
   await hoverTab(page, 'schedule');
   await expect(
     page.locator('[data-pkc-browse-pane="schedule"]'),

@@ -210,6 +210,7 @@ import {
 } from '@adapter/platform/storage/resolve-container-compat';
 import { fitSidebarBars } from '@adapter/ui/render/bar-overflow';
 import { buildShell, paintAlarmBar, paintMissedLine, paintCaptureBar, paintTimerBar, showRootText } from '@adapter/ui/render/shell';
+import { showBootFailure, showBootProgress } from '@adapter/ui/render/boot-screen';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { installPhoneBack } from '@adapter/ui/actions/phone-back';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
@@ -435,6 +436,7 @@ import {
   noteOpenedByUs,
   windowDeepLinkTarget,
   windowTitleFor,
+  ringingTitle,
 } from '@adapter/platform/deep-link';
 import {
   SCHEDULE_REGISTRY_CHANNEL,
@@ -1941,6 +1943,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 形(`题名 — PKC3`)は `deep-link.ts` の `windowTitleFor` が正本である。
    */
   let titleShown = document.title;
+  /** 🔔 アラームが鳴ってから、このタブを開くまでの間だけ真(依頼 75-2)。 */
+  let alarmBell = false;
   const paintTitle = (): void => {
     const st = dispatcher.getState();
     const label =
@@ -1949,7 +1953,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         : !heldNoteWindow || st.selectedLid === null
           ? null
           : (st.entryMetas.get(st.selectedLid)?.title ?? null);
-    const next = windowTitleFor(CONTAINER_TITLE, label);
+    const next = ringingTitle(windowTitleFor(CONTAINER_TITLE, label), alarmBell);
     // ⚠ 同じ字を書かない(`document.title` の代入はタスクバーを触る)
     if (next === titleShown) return;
     titleShown = next;
@@ -3542,7 +3546,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const alarmChime = createChime();
   const alarmService = createAlarmService({
     dispatcher,
-    onChange: (due) => paintAlarmBar(root, due),
+    onChange: (due) => {
+      paintAlarmBar(root, due);
+      // 🔔 見えていないタブでは、題名でも知らせる(開いたら外す ── 下の visibilitychange)
+      alarmBell = due.length > 0 && document.visibilityState === 'hidden';
+      paintTitle();
+    },
     chime: alarmChime,
     enabled: () => appAlarmEnabled.enabled(),
     /**
@@ -3558,6 +3567,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
   });
   alarmService.start();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && alarmBell) {
+      alarmBell = false;
+      paintTitle();
+    }
+  });
   if (appAlarmEnabled.enabled()) dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
   /**
    * 🔴 **次に開いたとき、見逃した予定を 1 行で言う**(#855 20-C)。段取りは `missed-schedule.ts`。
@@ -6173,6 +6188,8 @@ function bootstrap(): void {
         )
       : null;
 
+  // 🔴 起動の間は真っ白にしない(依頼 73-1)── 2 秒を超えたら理由も出る
+  showBootProgress(root);
   void startApp(root)
     .then((app) => {
       // 🔴 受け口は**アプリが受け取れるようになってから**張る(P7 段③)。
@@ -6356,7 +6373,7 @@ function bootstrap(): void {
           ? '\n(ファイルから開いた場合、そのファイルはまだ渡されていません。原因を直して再読み込みすると開きます)'
           : '';
       // 🔑 原因が分かる物は日本語で言う(判断は main.ts に置かない ── test から実行されないため)
-      showRootText(root, `${bootFailureText(message)}${handoff}`);
+      showBootFailure(root, bootFailureText(message), handoff);
       // ⚠ boot が失敗しても登録はする ── 次回この人がオフラインで開けるかは
       // 登録が済んでいるかで決まる(段⑤ の意図。競合を避けて失敗側にも置いた)
       /**

@@ -13,7 +13,7 @@ import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { phaseBlockReason, hasUnsavedTyping, SECTION_DRAFT_NOTE } from '@adapter/state/app-state';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
-import { readPlainMarkdown } from '@features/import/plain-markdown';
+import { readPlainMarkdown, stampOfFileTime } from '@features/import/plain-markdown';
 import { extractMeta } from '@features/flavor';
 import { IMPORT_TEXT_MAX_BYTES, readImportTextInfo, SJIS_GUESS_NOTE } from '@features/import/text-decode';
 import { humanBytes } from '@features/human-bytes';
@@ -125,6 +125,8 @@ export async function importMarkdownFiles(
         status: ext.status,
         date: ext.date,
         archived: ext.archived,
+        // 🔴 file の更新日時を、ノートの更新日として引き継ぐ(依頼 176)。作成日は「いま」のまま(file に作成日は無い)
+        updatedAt: stampOfFileTime(file.lastModified, Date.now()),
       });
     }
   } catch (e) {

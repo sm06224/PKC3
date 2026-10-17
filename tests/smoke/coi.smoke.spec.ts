@@ -170,6 +170,15 @@ test('🔴 起動を壊す SW が active でも、次の版で自動回復する
     await page.goto(`${base}/index.html`);
     // ⚠ ここは **error になるのが正**。`booted()` は使えない
     await page.waitForSelector('[data-pkc-boot="error"]', { timeout: 40_000 });
+    // 🔴 失敗の画面に「読み込み直す」が出ている(依頼 73-2。ボタンの無い行き止まりにしない)
+    await expect(
+      page.locator('[data-pkc-boot-failure] [data-pkc-boot-reload]'),
+      '起動に失敗した画面に「読み込み直す」が無い',
+    ).toHaveText('読み込み直す');
+    // 詳細の欄は「(詳細: …)」が付く失敗にだけ出る ── 出ているなら「詳細を表示」の見出しを持つ
+    if ((await page.locator('[data-pkc-boot-failure-detail]').count()) > 0) {
+      await expect(page.locator('[data-pkc-boot-failure] summary')).toHaveText('詳細を表示');
+    }
     expect(
       await page.evaluate(() => window.crossOriginIsolated),
       '分離していない = この fixture が穴を再現できていない',

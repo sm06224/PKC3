@@ -948,6 +948,13 @@ select:focus-visible {
   box-shadow: inset 0 -2px 0 var(--fg);
   font-weight: 600;
 }
+/* 🔴 掴んだまま止めているタブ(依頼 79-4)── 0.6 秒後に切り替わることを先に見せる薄い枠。 */
+/* ⚠ 輪の規則(下の `button:not(:focus-visible)`、(0,2,1))より強くしないと、実ブラウザでは実線の輪のまま
+   破線にならない(smoke で観測)── 同じ強さにして `:not(:focus-visible)` を足す。 */
+[data-pkc-region='browse-tabs'] button[data-pkc-tab-hover]:not(:focus-visible) {
+  outline: 2px dashed var(--accent);
+  outline-offset: -3px;
+}
 /**
  * 🔴 **均一な正方形タイル(#1054 段②)**── 作る帯 / ノート全体の帯 / 2 ペインの
  * 操作行の 3 つを、図案だけの同じ大きさの正方形へ統一する。

@@ -463,7 +463,7 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   const overview = page.locator('[data-pkc-region="folder-overview"]');
   await expect(overview, 'フォルダを押しても概要が出ない').toBeVisible();
   const summary = overview.locator('[data-pkc-field="overview-summary"]');
-  await expect(summary).toHaveText('直下 ノート 1 件 / フォルダ 0 件');
+  await expect(summary).toHaveText('この中: ノート 1 件 / フォルダ 0 件');
   // 🔴 1 件でも入っていれば「この中に新しいノートを作る」は出ない(空のフォルダだけ。#1254 §3 改善 A)
   await expect(
     overview.locator('[data-pkc-field="overview-create"]'),
@@ -507,7 +507,7 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
     '[data-pkc-region="filer-breadcrumb"] [data-pkc-action="enter-folder"][data-pkc-entry]',
   );
   await expect(overview, 'パンくずの現在地を押しても、フォルダが選ばれない').toBeVisible();
-  await expect(summary).toHaveText('直下 ノート 1 件 / フォルダ 0 件');
+  await expect(summary).toHaveText('この中: ノート 1 件 / フォルダ 0 件');
   await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
   // 戻す(次の手は「ルートでフォルダの行を 2 回押す」)
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
@@ -532,7 +532,7 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
    */
   await clickReal(page, folderRow);
   await expect(overview, '空のフォルダを押しても概要が出ない').toBeVisible();
-  await expect(summary).toHaveText('直下 ノート 0 件 / フォルダ 0 件');
+  await expect(summary).toHaveText('この中: ノート 0 件 / フォルダ 0 件');
   const createIn = overview.locator('[data-pkc-field="overview-create"]');
   await expect(createIn, '空のフォルダに作る入口が出ない').toBeVisible();
   await expect(createIn).toHaveText('この中に新しいノートを作る');

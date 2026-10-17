@@ -70,6 +70,18 @@ export interface PlainMarkdownEntry {
   warnings: string[];
 }
 
+/**
+ * 🔴 **取り込む file の更新日時を、ノートの更新日の刻み(`YYYY-MM-DD HH:MM:SS`、UTC)にする**(台帳 #1852 の束 B1、依頼 176)。
+ *
+ * user の物語: 3 年前に書いた `.md` を取り込むと、更新日が「いま」になり、更新日順の一覧の先頭に並んでしまう。
+ * ⚠ 読めない時刻(0 以下 / 数でない)と**未来の時刻**は `null` ── 「いま」に倒す(捏造しない・順序を壊さない)。
+ * ⚠ 形は `pkc2-convert.ts` の `toStoredStamp` と同じ(画面の日付が `Z` 無しを UTC と読む規則に乗る)。
+ */
+export function stampOfFileTime(lastModifiedMs: number, nowMs: number): string | null {
+  if (!Number.isFinite(lastModifiedMs) || lastModifiedMs <= 0 || lastModifiedMs > nowMs) return null;
+  return new Date(lastModifiedMs).toISOString().slice(0, 19).replace('T', ' ');
+}
+
 /** 拡張子で md か判定する。⚠ 中身では判定しない ── **どんなテキストも md として妥当**。 */
 export function isMarkdownFileName(fileName: string): boolean {
   const lower = fileName.toLowerCase();

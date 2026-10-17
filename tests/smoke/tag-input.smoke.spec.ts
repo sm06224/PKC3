@@ -139,5 +139,45 @@ test('🔴 既に使っているタグが候補に出る (#494 段②)', async (
   // ⚠ 「未設定」の組(空文字)が混ざっていない ── 押すと空の字がタグになる
   expect(values.includes(''), '空の候補が出ている').toBe(false);
 
+  /**
+   * 🔴 #1852 束 B1: 全角半角・末尾の読点が違うだけのタグは 1 つにまとまる(候補は集計と同じ口)。
+   * ⚠ 起動を足さず、この道中へ載せた。新しく作った 3 件のうち、見た目が違う 3 通りが 1 つの候補になる。
+   */
+  await makeNote(page, '全角のタグ', '---\ntags: [ｔａｇ]\n---\n本文\n');
+  await makeNote(page, '半角のタグ', '---\ntags: [tag]\n---\n本文\n');
+  await makeNote(page, '読点つきのタグ', '---\ntags: [tag、]\n---\n本文\n');
+  // ⚠ 開いているノートが「tag」を持っていると、その候補は自分のタグとして外れて数が合わなくなる(空振り)。
+  //   タグを持たないノートを開いてから候補を見る
+  await makeNote(page, 'ＡＢＣ会議', '本文\n');
+  await page.locator(INPUT).focus();
+  await expect
+    .poll(async () => page.locator('#pkc-tag-candidates option').count(), { timeout: 5000 })
+    .toBeGreaterThan(1);
+  const values2 = await page
+    .locator('#pkc-tag-candidates option')
+    .evaluateAll((els) => els.map((e) => (e as HTMLOptionElement).value));
+  expect(
+    values2.filter((v) => /^(ｔａｇ|tag)/u.test(v)),
+    `全角 / 半角 / 読点つきの「tag」が 1 つにまとまっていない(${JSON.stringify(values2)})`,
+  ).toHaveLength(1);
+  expect(values2.some((v) => /[、。]$/u.test(v)), '末尾の読点つきの候補が残っている').toBe(false);
+  expect(values2, '対照群:別のタグ「請求済」が消えた').toContain('請求済');
+
+  /**
+   * 🔴 #1852 束 B1: 題名の絞り込みは全角半角・半角カナを揃えて比べる(ひらがなとカタカナは別のまま)。
+   * ⚠ 題名の字そのものは変わらない(行の題名は打った原文のまま)。
+   */
+  await makeNote(page, 'ｶﾞｲﾄﾞ', '本文\n');
+  const filterBox = page.locator('[data-pkc-field="entry-filter"]');
+  const sideTitles = page.locator('[data-pkc-region="sidebar"] [data-pkc-entry] [data-pkc-field="title"]');
+  await expect(filterBox, '台の前提:探す欄が画面に無い').toBeVisible();
+  await filterBox.fill('abc');
+  await expect(sideTitles, '「abc」で全角の「ＡＢＣ会議」が出ない').toHaveText(['ＡＢＣ会議'], { timeout: 5000 });
+  await filterBox.fill('ガイド');
+  await expect(sideTitles, '「ガイド」で半角カナの「ｶﾞｲﾄﾞ」が出ない').toHaveText(['ｶﾞｲﾄﾞ'], { timeout: 5000 });
+  await filterBox.fill('がいど');
+  await expect(sideTitles, 'ひらがなでカタカナの題名が出ている(区別が消えた)').toHaveCount(0, { timeout: 5000 });
+  await filterBox.fill('');
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });

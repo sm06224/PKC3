@@ -76,7 +76,7 @@ export function folderOverview(
 
 /** 件数の 1 行。⚠ 種類の名前は `archetype-label.ts` から引く(ここで綴らない)。 */
 export const overviewSummary = (o: Pick<FolderOverview, 'notes' | 'folders'>): string =>
-  `直下 ${archetypeLabel('text')} ${o.notes} 件 / ${archetypeLabel('folder')} ${o.folders} 件`;
+  `この中: ${archetypeLabel('text')} ${o.notes} 件 / ${archetypeLabel('folder')} ${o.folders} 件`;
 
 /** 上限で切れたときの 1 行。 */
 export const overviewMore = (more: number): string => `ほか ${more} 件は左のペインで`;

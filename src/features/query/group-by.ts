@@ -27,6 +27,7 @@
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
 import { resolveCap } from '../notation/caps';
 import { tagsForMatch } from '../flavor/entry-tags';
+import { tagFoldKey } from '../flavor/tags';
 
 /**
  * 🔴 **タグの key の綴りは 1 か所**(#550 段④、2026-08-29)。
@@ -189,10 +190,10 @@ export function createQueryScan(key: string | null): QueryScan {
   const count = new Map<string, number>();
   const buckets = new Map<string, { value: string; total: number; lids: string[] }>();
   let scanned = 0;
-  // 🔴 タグは大小無視で同じ組にする(`sameTag` / 検索 / スマートフォルダと同じ。#1087)。
+  // 🔴 タグは大小・全角半角・濁点の持ち方を無視して同じ組にする(`sameTag` / 検索 / スマートフォルダと同じ。#1087)。
   //   表示は最初に見えた綴り。⚠ 他の key の値は綴りどおりに分ける。
   const bucketKey = (value: string): string =>
-    key === TAGS_KEY && value !== UNSET ? value.toLowerCase() : value;
+    key === TAGS_KEY && value !== UNSET ? tagFoldKey(value) : value;
 
   const take = (value: string, lid: string): void => {
     const bk = bucketKey(value);

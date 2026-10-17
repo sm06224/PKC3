@@ -335,6 +335,11 @@ test('🔴 狭い窓では枠が畳まれ、押しても入れ替わらない (#
     page.locator('[data-pkc-region="status"]'),
     '枠を畳んだのに理由が出ていない',
   ).toContainText('幅が足りないので');
+  // 🔴 溢れた枠は「折りたたんだ」ではなく「横に出していない」と言い、出し方まで添える
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '溢れた枠の知らせが、横に出していないことと出し方を言っていない',
+  ).toContainText(/スタックのノート \d+ 件は横に出していません\(上のバーのボタンから出せます\)/);
 
   // ② 🔴 **押しても入れ替わらない**(直す前は 0 / 3 / 0 / 3)
   const seen: number[] = [];

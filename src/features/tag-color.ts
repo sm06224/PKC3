@@ -30,7 +30,7 @@
  *
  * 🔑 **pure module**。browser API を使わない(保存と DOM は adapter 側)。
  */
-import { normalizeTag } from '@features/flavor/tags';
+import { normalizeTag, tagFoldKey } from '@features/flavor/tags';
 
 /** 色を持てるタグの数の上限。⚠ 上限が無いと、取り込んだ壊れたバックアップが表を埋める。 */
 export const MAX_TAG_COLORS = 500;
@@ -52,10 +52,10 @@ export function normalizeTagColor(raw: unknown): string | null {
   return typeof raw === 'string' && HEX6.test(raw) ? raw.toLowerCase() : null;
 }
 
-/** 突き合わせの鍵(`sameTag` と同じ ── 大小は無視する)。空になるタグは `null`。 */
+/** 突き合わせの鍵(`sameTag` と同じ ── 大小・全角半角・濁点の持ち方は無視する)。空になるタグは `null`。 */
 export function tagColorKey(tag: string): string | null {
   const t = normalizeTag(tag);
-  return t === '' ? null : t.toLowerCase();
+  return t === '' ? null : tagFoldKey(t);
 }
 
 function channel(v: number): number {

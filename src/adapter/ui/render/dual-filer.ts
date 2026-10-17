@@ -250,7 +250,7 @@ const COMMAND_ITEMS: readonly {
     action: 'dual-delete',
     directed: false,
     command: 'filer-trash',
-    label: 'ゴミ箱',
+    label: 'ゴミ箱へ',
     hint: (from) => `${from}で選んだものを、ゴミ箱へ入れます(あとで戻せます)`,
     empty: 'ゴミ箱へ入れるものを選んでから押してください',
   },

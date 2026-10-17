@@ -70,6 +70,9 @@ describe('無い能力の shim(実行)', () => {
     void (window as { indexedDB?: unknown }).indexedDB;
     expect(line()?.textContent).toContain('IndexedDB');
     expect(line()?.textContent).toContain('枠の中では使えません');
+    // 依頼 83-4: 使うための手と、許可の重さ(軽く見せない)も言う
+    expect(line()?.textContent).toContain('「ノートを渡して開く」を押すと使えます');
+    expect(line()?.textContent).toContain('知らない人からもらった HTML には使わないでください');
   });
 
   it('🔴 2 つ触っても行は 1 枚(画面が埋まらない)', () => {

@@ -2,7 +2,7 @@
 /**
  * 🔴 **フォルダを選ぶと、中央に「概要」が出る**(#1222。🟣 Gemini 裁定 2026-10-01 = A)。
  *
- * > user の物語:フォルダを 1 回押した。説明の下に「直下 ノート n 件 / フォルダ m 件」と
+ * > user の物語:フォルダを 1 回押した。説明の下に「この中: ノート n 件 / フォルダ m 件」と
  * > 題名・更新日の一覧が出る。行を押すとそのノートが中央に開き、**左の列もそのフォルダの中へ移る**。
  *
  * ⚠ 守る主張:
@@ -108,7 +108,7 @@ describe('フォルダの概要(#1222)', () => {
     const ov = overviewOf(root);
     expect(ov, '空のフォルダで概要の器が出ていない').not.toBeNull();
     expect(ov!.querySelector('[data-pkc-field="overview-summary"]')!.textContent).toBe(
-      '直下 ノート 0 件 / フォルダ 0 件',
+      'この中: ノート 0 件 / フォルダ 0 件',
     );
     expect(ov!.querySelector('[data-pkc-field="overview-list"]')).toBeNull();
   });
@@ -129,7 +129,7 @@ describe('フォルダの概要(#1222)', () => {
     expect(ov.contains(host), '概要が本文の器の中に入っている(本文の差分に消される)').toBe(false);
     // 直下 = ノート 2(a, b) / フォルダ 1(g)。⚠ 入れ子の孫・どこにも入っていない x は数えない
     expect(ov.querySelector('[data-pkc-field="overview-summary"]')!.textContent).toBe(
-      '直下 ノート 2 件 / フォルダ 1 件',
+      'この中: ノート 2 件 / フォルダ 1 件',
     );
     const rowA = ov.querySelector<HTMLElement>('[data-pkc-entry="a"]')!;
     expect(rowA.textContent).toContain('zz');
@@ -180,7 +180,7 @@ describe('フォルダの概要(#1222)', () => {
       'ほか 7 件は左のペインで',
     );
     expect(overviewOf(root)!.querySelector('[data-pkc-field="overview-summary"]')!.textContent).toBe(
-      `直下 ノート ${FOLDER_OVERVIEW_LIMIT + 7} 件 / フォルダ 0 件`,
+      `この中: ノート ${FOLDER_OVERVIEW_LIMIT + 7} 件 / フォルダ 0 件`,
     );
     // 対照群:ちょうど上限なら「ほか」は出ない
     const exact = kids.slice(0, FOLDER_OVERVIEW_LIMIT);
@@ -269,7 +269,7 @@ describe('フォルダの概要(#1222)', () => {
     detail.render(s1);
     expect(rowLids(root).sort(), '足したのに一覧に出ない').toEqual(['a', 'b', 'g', 'n']);
     expect(overviewOf(root)!.querySelector('[data-pkc-field="overview-summary"]')!.textContent).toBe(
-      '直下 ノート 3 件 / フォルダ 1 件',
+      'この中: ノート 3 件 / フォルダ 1 件',
     );
     expect(root.querySelector('[data-pkc-field="detail-body"]'), '概要のために本文が作り直された').toBe(host);
 

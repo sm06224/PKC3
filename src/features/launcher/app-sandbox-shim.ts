@@ -99,7 +99,9 @@ const SOURCE = `
     for (var i = 0; i < touched.length; i++) names.push(labels[touched[i]] || touched[i]);
     // ⚠ **1 枚を書き換える**(足すたびに行を増やさない ── 画面が埋まる)
     line.textContent =
-      'このアプリは ' + names.join(' / ') + ' を使おうとしましたが、枠の中では使えません' +
+      'このアプリは ' + names.join(' / ') + ' を使おうとしましたが、枠の中では使えません。' +
+      'そのアプリのノートの画面で「ノートを渡して開く」を押すと使えます' +
+      '(PKC3 のノートを全部読み書きできる許可になります。知らない人からもらった HTML には使わないでください)' +
       '(押すと閉じます)';
   }
   function hide(host, name) {

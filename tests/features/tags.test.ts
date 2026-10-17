@@ -195,8 +195,8 @@ describe('井桁が付いていれば、空白で区切る(#637)', () => {
     expect(splitTags('b, a[1]')).toEqual(['b', 'a[1]']);
     // frontmatter の文字列形も同じ口(`splitTags`)を通る
     expect(readTags(fm('tags: a[1], b'))).toEqual(['a[1]', 'b']);
-    // 括弧に触れない入力は main と同じ(区切りの後ろに空白が続く `b、 ` の `、` は落ちない)
-    expect(splitTags('b、 , c')).toEqual(['b、', 'c']);
+    // 括弧に触れない入力は括弧の処理を通らない。⚠ 末尾の読点は、#1852 B1(依頼 174)から名前の末尾で外す(以前は `b、` が残っていた)
+    expect(splitTags('b、 , c')).toEqual(['b', 'c']);
     // 負の対照群(同じ it): 閉じていない / 開いていない端だけ落ちる。
     // ⚠ 括弧を位置を問わず全部消す実装は、上の正の側で落ちる ── 両側を同じ it に置く
     expect(splitTags('[tag1], [tag2]')).toEqual(['tag1', 'tag2']);

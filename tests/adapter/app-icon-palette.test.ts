@@ -107,6 +107,29 @@ function setup(icon: string) {
 }
 
 describe('目印を絵から選ぶ(#770 段②)', () => {
+  /**
+   * 依頼 83-5: グループ・アイコンの欄に見出しが付く(字を入れると案内が消えて、何の欄か分からなかった)。
+   * 見出しは欄と同じ <label> の中に在る ── 離れた字では、押しても欄に焦点が来ない。
+   */
+  it('🔴 グループとアイコンの欄に見出しが在り、案内は「名前順」と言わない', async () => {
+    const h = setup('🧮');
+    await tick(20);
+    for (const [name, heading] of [
+      ['app-group', 'グループ'],
+      ['app-icon', 'アイコン'],
+    ] as const) {
+      const input = h.q<HTMLInputElement>(`[data-pkc-field="${name}"]`);
+      expect(input, `${name} の欄が無い`).not.toBeNull();
+      const label = input!.closest('label');
+      expect(label, `${name} に見出し(label)が無い`).not.toBeNull();
+      expect(label!.textContent, `${name} の見出し`).toContain(heading);
+    }
+    expect(h.q<HTMLInputElement>('[data-pkc-field="app-group"]')!.placeholder).toBe('例: 資料');
+    expect(h.q<HTMLInputElement>('[data-pkc-field="app-icon"]')!.placeholder).toBe(
+      '絵文字、または下の一覧から選ぶ',
+    );
+  });
+
   it('🔴 選ぶ口が画面に在る ── そして**欄は消えていない**', async () => {
     const h = setup('🧮');
     await tick(20);

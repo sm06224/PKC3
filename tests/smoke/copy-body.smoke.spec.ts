@@ -58,7 +58,8 @@ async function copyAndWait(page: Page, action: string): Promise<void> {
    *   この待ちで飲み込まないためである。
    */
   await expect(
-    page.locator(sel),
+    // ⚠ 隠れた状態の行にも同じ action の「参照をコピー」が在る(#1846)── 画面に出ている側を見る
+    page.locator(sel).first(),
     `${action}: 押し所が画面に無い(面が開いていないか、出し分けが壊れている)`,
   ).toBeAttached({ timeout: 2_000 });
   // 押す前に仕掛ける ── 700ms で消える属性を後から探すと落ちる
@@ -202,6 +203,11 @@ test('🔴 参照をコピーして別のノートに貼ると、押してその
   const permalink = await page.evaluate(() => navigator.clipboard.readText());
   expect(permalink, 'ブラウザに貼れるリンクになっていない').toMatch(/#pkc\?container=[^&]+&entry=[^&]+$/);
   expect(permalink, '参照(entry:)がコピーされている').not.toContain('](entry:');
+  // 🔴 一言が「どこで開けるか / 別の人には渡せないこと」まで言う(依頼 の字の更新)
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    'リンクをコピーした一言が、開ける範囲を言っていない',
+  ).toContainText('この PKC を使っている自分のブラウザで開けます', { timeout: 5000 });
 
   // ③ 別のノートに貼る
   await createEntry(page, 'text');

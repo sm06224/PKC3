@@ -50,6 +50,7 @@ import type { PlaceRectValue } from './place-rect';
 import type { PlaceShape } from './place-shape';
 import type { PlaceTemplateId } from './place-template';
 import { readTagSlots, sameTag, withTagResult } from '../flavor/tags';
+import { tagsMetaKey } from '../flavor/tag-words';
 import { attachmentFileName } from '../flavor/attachment-flavor';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
@@ -945,7 +946,16 @@ export function applyTagsToBody(
   for (const c of cur) if (!placed.some((p) => sameTag(p, c))) written.push(c);
   // ⚠ 空になったら **鍵ごと消す**(`tags: []` を残さない ── 読み手が
   //    「空のタグが 1 つ在る」と読む形を作らない)
-  const next = spliceFrontmatterKeys(body, { tags: written.length === 0 ? undefined : written });
+  /**
+   * 🔴 **読んでいた key が別名(`Tags` / `tag` / `keywords`)なら、その行は消して `tags:` に寄せる**(依頼 175)。
+   * ⚠ 残すと、`tags:` を書いたあと「タグを全部外した」(= `tags:` を消した)ときに別名の行が読み直されて、外したタグが戻る。
+   *   user が書き換えようとしたタグの行だけを動かす ── 他の key には触らない。
+   */
+  const readKey = tagsMetaKey(parseFrontmatter(body).meta);
+  const next = spliceFrontmatterKeys(body, {
+    tags: written.length === 0 ? undefined : written,
+    ...(readKey !== null && readKey !== 'tags' ? { [readKey]: undefined } : {}),
+  });
   /**
    * 🔴 **書く行が無いなら書かない**(#1087)。
    * ⚠ 読む側は字下げした入れ子の子行(`meta:` の下の `tags:`)も読むが、書く側は最上位の行しか

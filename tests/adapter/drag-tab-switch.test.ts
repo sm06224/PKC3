@@ -126,6 +126,36 @@ describe('#402 ③ 掴んだまま面を変える', () => {
     expect(r.tabs, 'ファイルを運んでいるのに面が変わった').toEqual([]);
   });
 
+  /**
+   * 依頼 79-4: 待っているタブに薄い枠(印)を出して、切り替わることを先に見せる。
+   * 印は「止めている間だけ」── 通り過ぎたら / 離したら / 切り替わったら消える。
+   */
+  it('🔴 待っている間だけ、そのタブに印が付く(切り替わる前に見せる)', () => {
+    const r = rig();
+    const tab = r.mk('schedule');
+    const other = r.mk('filer');
+    r.drag(tab, PKC_DRAG);
+    expect(tab.hasAttribute('data-pkc-tab-hover'), '待っているのに印が無い').toBe(true);
+    expect(other.hasAttribute('data-pkc-tab-hover'), '別のタブに付いた').toBe(false);
+    vi.advanceTimersByTime(600);
+    expect(r.tabs).toEqual(['schedule']);
+    expect(tab.hasAttribute('data-pkc-tab-hover'), '切り替わったのに印が残った').toBe(false);
+  });
+  it('🔴 通り過ぎる・離す・別のタブへ移ると、前の印は消える', () => {
+    const r = rig();
+    const a = r.mk('schedule');
+    const b = r.mk('filer');
+    r.drag(a, PKC_DRAG);
+    r.drag(b, PKC_DRAG);
+    expect(a.hasAttribute('data-pkc-tab-hover'), '前のタブに印が残った').toBe(false);
+    expect(b.hasAttribute('data-pkc-tab-hover')).toBe(true);
+    r.drag(r.root, PKC_DRAG);
+    expect(b.hasAttribute('data-pkc-tab-hover'), '通り過ぎたのに印が残った').toBe(false);
+    r.drag(a, PKC_DRAG);
+    r.end();
+    expect(a.hasAttribute('data-pkc-tab-hover'), '離したのに印が残った').toBe(false);
+  });
+
   it('⚠ タブは落とし先にならない(「タブに入れた」に見せない)', () => {
     const r = rig();
     const tab = r.mk('schedule');

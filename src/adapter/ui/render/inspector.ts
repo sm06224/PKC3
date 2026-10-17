@@ -52,6 +52,7 @@ import { windowFolderWritePicker } from '@adapter/platform/md-folder-export';
 import { formatStoredDate, storedInstantIso } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
 import { sameTag } from '@features/flavor/tags';
+import { foldText } from '@features/filter/fold-text';
 import { collectEntryTags } from '@features/flavor/entry-tags';
 import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
 import { stripComments, preprocessHeadingNumbers } from '@features/markdown/markdown-render';
@@ -1462,14 +1463,14 @@ export class InspectorRenderer {
     if (this.candidateIndex === null || this.candidateIndex.metas !== src.metas) {
       this.candidateIndex = {
         metas: src.metas,
-        items: [...src.metas.values()].map((m) => ({ lid: m.lid, title: m.title, lower: m.title.toLowerCase() })),
+        items: [...src.metas.values()].map((m) => ({ lid: m.lid, title: m.title, lower: foldText(m.title) })),
       };
     }
     /**
      * 🔴 **打った字に合うノートを、全部の中から詰める**(#1087)。⚠ 直す前は先頭の 200 件に固定で、
      * 201 件目以降の題名は打っても候補に出なかった。上限(200)は今と同じ。
      */
-    const q = (this.relAdd?.target.value ?? '').trim().toLowerCase();
+    const q = foldText(this.relAdd?.target.value ?? '').trim();
     const others = this.candidateIndex.items.filter((m) => m.lid !== src.lid && (q === '' || m.lower.includes(q)));
     /**
      * 🔴 **同じ題名のノートは、フォルダの名前・更新日を添えて見分ける**(#1657、依頼 45 の 3)。

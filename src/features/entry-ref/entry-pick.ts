@@ -27,6 +27,7 @@
  * ⚠ **pure module**。browser API を持たない。
  */
 import type { EntryMeta } from '@core/model/entry-meta';
+import { foldText } from '@features/filter/fold-text';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { archetypeLabel } from '@features/flavor/archetype-label';
 
@@ -79,7 +80,7 @@ export function entryPickRows(
     if (!matchesTitle(meta.title, q)) continue;
     const row = { lid, title: meta.title, kind: archetypeLabel(meta.archetype) };
     // ⚠ `q === ''` のときは全部が「頭から一致」なので、並びは `order` のまま
-    (q !== '' && meta.title.toLowerCase().startsWith(q) ? head : rest).push(row);
+    (q !== '' && foldText(meta.title).startsWith(q) ? head : rest).push(row);
   }
   return [...head, ...rest].slice(0, limit);
 }
