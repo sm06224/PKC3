@@ -11,7 +11,7 @@
  *    実行は root の委譲がやる。**その配線が繋がっているか**は実物でしか見えない
  *    (CLAUDE.md §7「A と B が合意していることは、A の test にも B の test にも書けない」)
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import {
   gotoApp,
   clickReal,
@@ -308,8 +308,41 @@ test('🔴 メニューの項目を押すと、その操作が実際に走る', 
   ).toBeVisible();
   await expect(page.locator(MENU), '押した後もメニューが残っている').toHaveCount(0);
 
+  /**
+   * 🔴 束 I2(台帳 #1852 / 依頼 157)── 右クリック →「種類を変える…」→ 確認で「ログに変える」→ 種類がログ。
+   *   もう一度「ノートに変える」で戻る。本文は変わらない。⚠ 新しい起動は足さない(この道中の続き)
+   */
+  const kindRow = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first();
+  await expect(kindRow).toHaveAttribute('data-pkc-archetype', 'text');
+  await kindRow.click({ button: 'right' });
+  const kindItem = page.locator(`${MENU} button[data-pkc-action="change-entry-kind"]`);
+  await expect(kindItem, '右クリックに「種類を変える…」が出ていない').toHaveText('種類を変える…');
+  await kindItem.click();
+  const ask = await answerAppDialogWith(page, '「ログ」に変える');
+  expect(ask, '確認に「本文はそのまま残ります」が出ていない').toContain('本文はそのまま残ります');
+  await expect(kindRow, '「ログに変える」を押しても種類がログにならない').toHaveAttribute('data-pkc-archetype', 'textlog');
+  await expect(page.getByText('種類を「ログ」に変えました'), '変えた知らせが出ていない').toBeVisible();
+  await kindRow.click({ button: 'right' });
+  await page.locator(`${MENU} button[data-pkc-action="change-entry-kind"]`).click();
+  await answerAppDialogWith(page, '「ノート」に変える');
+  await expect(kindRow, '「ノートに変える」で戻らない').toHaveAttribute('data-pkc-archetype', 'text');
+  await kindRow.click();
+  await expect(page.locator('[data-pkc-view-pane="detail"]'), '種類を変えたら本文が変わった').toContainText('履歴を見る的');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/** 確認の「OK」の字(`okLabel`)を確かめてから押す。@returns 確認の文言 */
+async function answerAppDialogWith(page: Page, okLabel: string): Promise<string> {
+  const body = page.locator('[data-pkc-field="dialog-body"]');
+  await expect(body, '確認のダイアログが出ていない').toBeVisible();
+  const message = (await body.textContent()) ?? '';
+  const ok = page.locator('[data-pkc-field="dialog-ok"]');
+  await expect(ok, '確認のボタンの字が違う').toHaveText(okLabel);
+  await clickReal(page, ok);
+  await expect(body, 'ダイアログが閉じていない').toBeHidden();
+  return message;
+}
 
 /**
  * 🔴 **ブラウザ既定を奪う場面を最小にする**(CLAUDE.md §10)。

@@ -86,7 +86,7 @@ import { installSectionBox, syncSectionBoxSaving } from './section-box';
 import { installCodeBox, syncCodeBoxSaving } from './code-box';
 import { locateCodeFence } from '@features/markdown/code-fence-edit';
 import { listAppendTargets, sectionRange } from '@features/markdown/append-target';
-import { RowSwap, replaceChanged } from './row-swap';
+import { RowSwap, ROW_WHOLE_ATTR, replaceChanged } from './row-swap';
 import { takeBodyFocus } from './focus-request';
 import { isTouchOnly } from './touch-device';
 import { DIFF_FILE_TOO_LARGE_NOTE, diffSummary, shortStamp } from '@features/revision/diff-view';
@@ -3193,6 +3193,17 @@ export class DetailRenderer {
     editAll.addEventListener('click', () => {
       if (!swap.activateAll()) note.textContent = 'この本文は「全文を編集」に切り替えられません';
     });
+    /**
+     * 🔴 **本文の全部を 1 つの欄で開いている間は、書式の帯の灰色を外す**(台帳 #1852 I2 / 依頼 78-4)。
+     * 「全文を編集」を押すと欄は本文の全部になり、「番号を振り直す」「完了項目を末尾へ」が効く(印は `ROW_WHOLE_ATTR`。
+     * 効くかの判定は binder の `isLiveBlockField` が同じ印を読む)。閉じる / 別の塊を開くと灰色に戻る。
+     */
+    const wholeWatch = new MutationObserver(() => {
+      if (fellBack) return;
+      const bar = this.region?.querySelector<HTMLElement>('[data-pkc-region="format-bar"]');
+      if (bar) syncWholeNoteTools(bar, pane.querySelector(`[data-pkc-field="row-source"][${ROW_WHOLE_ATTR}]`) === null);
+    });
+    wholeWatch.observe(pane, { childList: true, subtree: true });
     /**
      * 🔴 **編集中の本文のチェックを押すと、下書きの `[ ]` が `[x]` に変わる**(台帳 #1852 I2 / 依頼 78-1。推薦 B)。
      * ⚠ 捕まえるのは**捕捉段**(`RowSwap` の「押した行を開く」より先)── 押したチェックの行が入力欄に化けない。

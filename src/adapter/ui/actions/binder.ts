@@ -15857,7 +15857,8 @@ const RENUMBER_LIVE_NOTE = '番号を振り直すには、「全文を編集」�
 const SORT_TASKS_LIVE_NOTE = '完了項目を末尾へ移すには、「全文を編集」に切り替えてください';
 /** 1 面のライブ編集の行の欄(押した 1 ブロックだけが入っている)か。 */
 function isLiveBlockField(ta: HTMLTextAreaElement | null): boolean {
-  return ta !== null && ta.getAttribute('data-pkc-field') === 'row-source';
+  // 🔴 本文の全部を開いている欄(「全文を編集」)は全文の欄 ── 本文全体の道具を当ててよい(台帳 #1852 I2)
+  return ta !== null && ta.getAttribute('data-pkc-field') === 'row-source' && !ta.hasAttribute('data-pkc-row-whole');
 }
 
 /** 🔑 「この命令は本文の欄へ当てるか」に答える口は**ここ 1 つ**(§7)。 */

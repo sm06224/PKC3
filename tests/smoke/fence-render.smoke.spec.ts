@@ -26,13 +26,19 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
   await ta.fill(
     '```csv-render\n列A,列B\n1,2\n3,4\n```\n\n```html\n<p style="height:120px">sandbox</p>\n```\n\n```javascript\n' +
       longCode +
-      '\n```\n\n> [!NOTE]\n> これはアラート注意書きです。\n\nインラインコード `sample-inline-code` です。\n\n[公式リンク](https://example.com) です。',
+      '\n```\n\n| 項目 | 値 | 備考 |\n|---|---|---|\n| a | 1 | x |\n||b|2|y\n\n> [!NOTE]\n> これはアラート注意書きです。\n\nインラインコード `sample-inline-code` です。\n\n[公式リンク](https://example.com) です。',
   );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // csv: レンダリング面の table が可視
   const table = page.locator('[data-pkc-field="detail-body"] table').first();
   await expect(table).toBeVisible();
+
+  // 🔴 束 I2(台帳 #1852 / 依頼 309)── 表の中の `||b|2|y`(最初の升を空にして詰めた行)は表の行のまま描かれる
+  //    (直す前は中央寄せの印と読まれ、表の外へ落ちていた)。⚠ 新しい起動は足さない
+  const pipeTable = page.locator('[data-pkc-field="detail-body"] table', { has: page.locator('th', { hasText: '備考' }) });
+  await expect(pipeTable.locator('tbody tr'), '`||b|2|y` の行が表の行として描かれていない').toHaveCount(2);
+  await expect(pipeTable.locator('tbody tr').nth(1), '`||b|2|y` の行に b が入っていない').toContainText('b');
   expect((await table.boundingBox())!.height).toBeGreaterThan(0);
 
   // 🔴 表のゼブラストライプ（偶数行背景）と行ホバーハイライト(#1142)
