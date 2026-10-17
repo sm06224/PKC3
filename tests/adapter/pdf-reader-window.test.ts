@@ -172,10 +172,12 @@ describe('🔴 ノートへ引く返事が来ないとき ── 「ノートへ
     $('quote').click();
     fromHost('quote-result', { ok: true, message: '「メモ」の末尾へ引用しました(3 頁)' });
     expect($('status').textContent).toBe('「メモ」の末尾へ引用しました(3 頁)');
-    vi.advanceTimersByTime(wire.QUOTE_TIMEOUT_MS * 3);
+    vi.advanceTimersByTime(4999);
     expect($('status').textContent, '返事が来たのに時間切れの字で上書きしている').toBe(
       '「メモ」の末尾へ引用しました(3 頁)',
     );
+    vi.advanceTimersByTime(wire.QUOTE_TIMEOUT_MS * 3);
+    expect($('status').textContent, '返事が来たのに時間切れの字で上書きしている').not.toBe(wire.QUOTE_NO_REPLY);
   });
 
   it('押し直したら時計は 1 本(古い押しの時計が、新しい押しの返事待ちを早く切らない)', () => {
@@ -189,6 +191,53 @@ describe('🔴 ノートへ引く返事が来ないとき ── 「ノートへ
     expect($('status').textContent).toBe('ノートへ引用しています…');
     vi.advanceTimersByTime(wire.QUOTE_TIMEOUT_MS);
     expect($('status').textContent).toBe(wire.QUOTE_NO_REPLY);
+  });
+});
+
+describe('窓の下の一言は、終わった知らせなら 5 秒ほどで消える(#1663 依頼 49-2)', () => {
+  it('終わった知らせは 4999 ms まで出て、5000 ms で消える', () => {
+    boot();
+    fromHost('quote-result', { ok: true, message: '「メモ」の末尾へ引用しました(3 頁)' });
+    vi.advanceTimersByTime(4999);
+    expect($('status').textContent).toBe('「メモ」の末尾へ引用しました(3 頁)');
+    vi.advanceTimersByTime(1);
+    expect($('status').textContent).toBe('');
+  });
+  it('次の知らせが出たら数え直す(古い時計が新しい知らせを早く消さない)', () => {
+    boot();
+    fromHost('quote-result', { ok: true, message: '一つ目' });
+    vi.advanceTimersByTime(3000);
+    fromHost('quote-result', { ok: true, message: '二つ目' });
+    vi.advanceTimersByTime(3000);
+    expect($('status').textContent).toBe('二つ目');
+    vi.advanceTimersByTime(2000);
+    expect($('status').textContent).toBe('');
+  });
+  it('対照群: 途中の一言(…で終わる)は、終わりの知らせに替わるまで消えない', () => {
+    boot();
+    selectText('結論', 3);
+    $('quote').click();
+    vi.advanceTimersByTime(9000);
+    expect($('status').textContent).toBe('ノートへ引用しています…');
+  });
+  it('一言の下の字も選べる・押せる(一言は pointer-events を受けない)', () => {
+    const rule = /#status \{[^}]*\}/.exec(hostHtml);
+    expect(rule, '#status の規則が無い').not.toBeNull();
+    expect((rule as RegExpExecArray)[0]).toContain('pointer-events: none');
+  });
+});
+
+describe('検索で、いま見ている一致だけ濃い橙(#1663 依頼 49-4)', () => {
+  it('mark.hit.cur は mark.hit の黄色と別の色で塗り、reader.js が cur を付け外しする', () => {
+    const plain = /mark\.hit \{[^}]*background: ([^;}]+)/.exec(hostHtml);
+    const cur = /mark\.hit\.cur \{[^}]*background: ([^;}]+)/.exec(hostHtml);
+    expect(plain && cur, '規則が無い').toBeTruthy();
+    expect((cur as RegExpExecArray)[1]).not.toBe((plain as RegExpExecArray)[1]);
+    expect((cur as RegExpExecArray)[1]).toContain('255, 120, 0');
+    const src = readFileSync('public/pdf/reader.js', 'utf-8');
+    expect(src).toContain("m.classList.add('cur')");
+    expect(src).toContain("classList.remove('cur')");
+    expect(src).toContain('paintCurrentHit();');
   });
 });
 

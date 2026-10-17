@@ -74,5 +74,20 @@
     return { off: prev >= 1 && prev <= total ? prev : null, on: next };
   }
 
-  root.PkcPdfPageList = { thumbWanted: thumbWanted, pickNext: pickNext, currentChange: currentChange };
+  /**
+   * 読んでいる位置を「そのページの何割まで読み進んだか」で控える(#1663)。拡大縮小や窓の大きさ・一覧の出し入れで
+   * ページの大きさが変わっても、同じ所を出し直すため。`viewTop` = 読む面の上端 / `boxTop`・`boxH` = ページの上端と高さ(同じ座標)。
+   * ページの上より前(隙間)は 0、下より後は 1。高さが 0 以下(測れない)なら `null`。
+   */
+  function readFraction(viewTop, boxTop, boxH) {
+    if (!(boxH > 0)) return null;
+    return Math.max(0, Math.min(1, (viewTop - boxTop) / boxH));
+  }
+
+  /** 控えた割合 `frac` の所を読む面の上端に出すために、読む面を動かす量(px。`scrollTop` に足す)。 */
+  function scrollDelta(viewTop, boxTop, boxH, frac) {
+    return boxTop - viewTop + frac * boxH;
+  }
+
+  root.PkcPdfPageList = { readFraction: readFraction, scrollDelta: scrollDelta, thumbWanted: thumbWanted, pickNext: pickNext, currentChange: currentChange };
 })(typeof self !== 'undefined' ? self : this);

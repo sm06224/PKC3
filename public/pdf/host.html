@@ -51,7 +51,8 @@
   #query { width: 11em; min-width: 5em }
   /* 結果の一言は窓の下に出す(帯に置くと字が切れて「何頁へ引いたか」が読めない) */
   #status { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 12;
-    max-width: 80%; padding: 6px 14px; border-radius: 4px; background: #000d; color: #eee }
+    max-width: 80%; padding: 6px 14px; border-radius: 4px; background: #000d; color: #eee;
+    pointer-events: none }
   #status:empty { display: none }
   #bar button[aria-pressed="true"] { background: #3d5a80; border-color: #8ab4ff }
   /* ハイライトの色のボタン(#275 段②-2b)。背景の色は窓の JS が色の表から付ける。押された色は白い枠で見分ける
@@ -139,6 +140,17 @@
   /* 1 行 = 項目のボタン + ↻ と ×(ページの編集。#275 段②-1b)。↻ × は触れる間だけ出す */
   .thumb-cell { position: relative; flex: none; width: 104px; border-radius: 4px }
   .thumb-cell[hidden] { display: none }
+  /* 外したページ(#1663)。一覧の最後に薄い枠で残し、1 ページずつ戻せる */
+  .removed-list { flex: none; width: 104px; display: flex; flex-direction: column; gap: 6px; margin-top: 4px;
+    padding-top: 8px; border-top: 1px dashed #444 }
+  .removed-list[hidden] { display: none }
+  .removed-head { font-size: 11px; color: #8a8a8a }
+  .thumb-ghost { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center;
+    justify-content: space-between; gap: 4px; width: 104px; padding: 6px 8px; border: 1px dashed #555;
+    border-radius: 4px; color: #8a8a8a; font-size: 11px; opacity: .8 }
+  .thumb-ghost:hover { opacity: 1; border-color: #8ab4ff; color: #cfe0ff }
+  .thumb-ghost:focus-visible { outline: 2px solid #8ab4ff; opacity: 1 }
+  .thumb-ghost-act { color: #8ab4ff }
   .thumb-act { all: unset; box-sizing: border-box; cursor: pointer; position: absolute; top: 6px; width: 22px;
     height: 22px; line-height: 22px; text-align: center; border-radius: 3px; background: #000b; color: #eee;
     font-size: 14px; opacity: .55; z-index: 2 }
@@ -200,6 +212,8 @@
   /* 検索の一致。span の中の一致した範囲だけ(またがる一致は span ごとに 1 つずつ。`text-hits.js`)。
      ⚠ `<mark>` にするのは、`.textLayer :is(span, br)` の規則(絶対配置)に巻き込まれないため */
   .textLayer mark.hit { color: transparent; background: rgba(255, 210, 0, .45) }
+  /* いま見ている一致(#1663)。ほかの一致の黄色より濃い橙 */
+  .textLayer mark.hit.cur { background: rgba(255, 120, 0, .75) }
 </style>
 </head>
 <body>

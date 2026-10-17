@@ -10,6 +10,7 @@ import { DEFAULT_EDITOR_MODE, EDITOR_MODES, isEditorMode } from '../../src/featu
 import { EditorModeStore } from '../../src/adapter/ui/render/editor-mode';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { initialState } from '../../src/adapter/state/app-state';
+import { markDefault } from '../../src/adapter/ui/render/settings/default-mark';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { JobMonitor } from '../../src/adapter/platform/job-monitor';
 
@@ -94,7 +95,10 @@ describe('設定 UI(本物の SettingsRenderer)', () => {
       ...region.querySelectorAll<HTMLOptionElement>('[data-pkc-field="editor-mode-select"] option'),
     ];
     expect(opts.map((o) => o.value)).toEqual(EDITOR_MODES.map((m) => m.id));
-    expect(opts.map((o) => o.textContent)).toEqual(EDITOR_MODES.map((m) => m.label));
+    // 🔴 最初の値には「(既定)」が付く(#1650 項目 4)
+    expect(opts.map((o) => o.textContent)).toEqual(
+      markDefault(EDITOR_MODES, DEFAULT_EDITOR_MODE).map((m) => m.label),
+    );
   });
 
   it('🔴 組み立て直後の選択欄が、いまの設定を映す', () => {

@@ -10,8 +10,9 @@
  *   読み取る形の dt はその中に在る。
  * (#1382 で `settings.ts` から移した。中身は変えていない。)
  */
-import { PASTE_SOURCES } from '@features/markdown/paste-source';
+import { DEFAULT_PASTE_SOURCE, PASTE_SOURCES } from '@features/markdown/paste-source';
 import type { PasteSourceStore } from '../paste-source';
+import { markDefault } from './default-mark';
 import { buildSettingsNote } from './note';
 import type { SettingsSection } from './section';
 
@@ -37,10 +38,11 @@ export function createPasteSourceSection(
       select.setAttribute('data-pkc-action', 'set-paste-source');
       select.setAttribute('data-pkc-field', 'paste-source-select');
       select.setAttribute('aria-label', '貼り付けで読み取る形');
-      for (const m of PASTE_SOURCES) {
+      const marked = markDefault(PASTE_SOURCES, DEFAULT_PASTE_SOURCE);
+      for (const [i, m] of PASTE_SOURCES.entries()) {
         const opt = document.createElement('option');
         opt.value = m.id;
-        opt.textContent = m.label;
+        opt.textContent = marked[i]!.label;
         opt.title = m.hint;
         select.append(opt);
       }

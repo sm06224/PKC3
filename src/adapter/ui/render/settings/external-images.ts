@@ -7,9 +7,10 @@
  * ⚠ 何が起きるのかを書く ── 「外部画像を許可」だけでは判断できない。
  * (#1382 で `settings.ts` から移した。中身は変えていない。)
  */
-import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
+import { DEFAULT_EXTERNAL_IMAGE_MODE, EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 import { buildChoiceRow, syncChoiceRow } from '../choice-buttons';
 import type { ExternalImagePolicy } from '../external-images';
+import { markDefault } from './default-mark';
 import { buildSettingsNote } from './note';
 import type { SettingsSection } from './section';
 
@@ -37,7 +38,7 @@ export function createExternalImagesSection(
         ariaLabel: '外部の画像を読み込む',
         action: 'set-external-images',
         dataAttr: 'data-pkc-external-images-value',
-        choices: EXTERNAL_IMAGE_MODES,
+        choices: markDefault(EXTERNAL_IMAGE_MODES, DEFAULT_EXTERNAL_IMAGE_MODE),
         currentId: '', // render 末尾の sync が必ず映す
       });
       eiRow.title =

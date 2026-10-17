@@ -123,6 +123,12 @@ export class ScheduleRenderer {
     month: HTMLElement;
     grid: HTMLElement;
     note: HTMLElement;
+    /**
+     * 🔴 **絞りで 0 件になったときの「絞りを外す」**(#1650 項目 1。Gemini 裁定 = #1163 の依頼 42-1 A)。
+     * ⚠ 出すのは「予定が 1 件も出ていない」かつ「語か種類の札が在る」ときだけ(外す物が無いのに出すと dead click)。
+     *   受け手は一覧・アプリ・連絡先と同じ `clear-entry-filter`(受け口を増やさない)。
+     */
+    clearFilter: HTMLButtonElement;
     undated: HTMLInputElement;
     /**
      * 🔴 **済んだ予定を戻す口**(2026-08-23、変異試験 S7 が教えた)。
@@ -318,6 +324,9 @@ export class ScheduleRenderer {
       groups.length,
       hiddenByNote,
     );
+    const filterOn = state.filterQuery.trim() !== '' || state.kindFilter.size > 0;
+    const showClear = groups.length === 0 && filterOn;
+    if (frame.clearFilter.hidden === showClear) frame.clearFilter.hidden = !showClear;
     const undatedCount = this.paintUndatedToggle(frame.undated, state, visible.length - dated.length);
     const doneCount = this.paintDoneToggle(frame.done, state, all, filter, doneNotes);
     const archivedCount = this.paintArchivedToggle(frame.archived, state, all);
@@ -928,6 +937,13 @@ export class ScheduleRenderer {
     grid.setAttribute('data-pkc-field', 'schedule-grid');
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'schedule-note');
+    const clearFilter = document.createElement('button');
+    clearFilter.type = 'button';
+    clearFilter.hidden = true;
+    clearFilter.setAttribute('data-pkc-action', 'clear-entry-filter');
+    clearFilter.setAttribute('data-pkc-field', 'schedule-clear-filter');
+    clearFilter.textContent = '絞りを外す';
+    clearFilter.title = '一覧の絞り込みを空にして、予定を全部出します。';
     /**
      * 🔴 **3 つの切替は 1 つのボタン「出すもの」に畳む**(#855。Gemini 裁定 = #1163 の依頼 10)。
      * ⚠ 押すとチェックが 3 つ開く(中央を奪わない小さな枠。モーダルにしない)。**口(`data-pkc-action`)は
@@ -1049,8 +1065,8 @@ export class ScheduleRenderer {
     this.day.el.hidden = true;
     this.week.el.hidden = true;
     this.monthView.el.hidden = true;
-    this.region.append(bar, modeRow, quick, grid, note, toggles, exportIcs, notify, this.day.el, this.week.el, this.monthView.el, groups);
-    this.frame = { month, grid, note, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', lead, missed, toggles, groups, modes, quickDate: qDate };
+    this.region.append(bar, modeRow, quick, grid, note, clearFilter, toggles, exportIcs, notify, this.day.el, this.week.el, this.monthView.el, groups);
+    this.frame = { month, grid, note, clearFilter, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', lead, missed, toggles, groups, modes, quickDate: qDate };
     return this.frame;
   }
 }

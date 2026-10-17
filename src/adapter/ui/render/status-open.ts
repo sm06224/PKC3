@@ -101,6 +101,7 @@ import { BLOCK_MOVED_NOTICE } from '@features/markdown/line-move';
 import { scheduleUndoShown } from './schedule-undo';
 import { trashUndoShown } from './trash-undo';
 import { dualMoveUndoShown } from './dual-move-undo';
+import { renameUndoShown } from './rename-undo';
 import { dateNoteCreateLabel, dateNoteMissingNotice } from '@features/schedule/today-note';
 
 /**
@@ -176,7 +177,13 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
    * その 1 手の知らせそのもの(`dualMoveUndoShown`)。別の知らせが上書きしたら畳む(ゴミ箱と同じ作法)。
    */
   const dualMove = !move && !append && !schedule && !trash && !restore && dualMoveUndoShown(shownLine);
-  const show = move || append || schedule || trash || restore || dualMove;
+  /**
+   * 🔴 **題名を変えた直後の「元に戻す」**(依頼 45 の 2、#1657)。出す条件は 1 つ ── いま出ている 1 行が、
+   * その 1 手の知らせそのもの(`renameUndoShown`)。別の知らせが上書きしたら畳む(ゴミ箱と同じ作法)。
+   */
+  const rename =
+    !move && !append && !schedule && !trash && !restore && !dualMove && renameUndoShown(shownLine);
+  const show = move || append || schedule || trash || restore || dualMove || rename;
   // ⚠ **押し先も切り替える** ── 同じ器で 2 つの取り消しを出すので、
   //    字だけ出して受け手を替え忘れると「押すと別の物が戻る」になる
   // 🔴 **字も対象に合わせて切り替える**(#1046)── 器を 1 つで済ませているので、
@@ -187,6 +194,8 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
       'data-pkc-action',
       restore
         ? 'restore-revision'
+        : rename
+          ? 'undo-rename'
         : dualMove
           ? 'undo-dual-move'
         : trash
@@ -206,7 +215,7 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
       btn.removeAttribute('data-pkc-rev-id');
       btn.removeAttribute('data-pkc-undo');
     }
-    btn.textContent = trash || schedule || restore || dualMove ? '元に戻す' : move ? '移動を元に戻す' : '追記を元に戻す';
+    btn.textContent = trash || schedule || restore || dualMove || rename ? '元に戻す' : move ? '移動を元に戻す' : '追記を元に戻す';
   }
   if (btn.hidden !== !show) btn.hidden = !show;
   return show;

@@ -41,6 +41,7 @@ import { blockedActionNote, type AppState } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { ScrollMemory } from './scroll-memory';
 import { archetypeLabel } from '@features/flavor/archetype-label';
+import { candidateText, countTitles } from '@features/relation/target-label';
 import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { iconButton } from './icons';
 import { setTagKey, tagColorControls } from './tag-color';
@@ -77,7 +78,7 @@ export const RELATION_CANDIDATE_MAX = 200;
  * ⚠ ここの再輸出は**呼び側の import を変えないため**だけに在る。
  */
 export { EDITING_NOTE } from '@adapter/state/app-state';
-import { getAncestorFolders } from '@features/relation/tree';
+import { getAncestorFolders, resolveCanonicalParents } from '@features/relation/tree';
 import { BODY_LINK_KIND, RELATION_MAP_DEPTH, renderRelationMap } from './relation-map';
 import { bodyLinkTargets } from '@features/entry-ref/body-links';
 import {
@@ -166,12 +167,21 @@ export class InspectorRenderer {
   /** 相手の候補(#185)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
   private candidates: HTMLDataListElement | null = null;
   /** 相手の候補の元(#1087)。欄に焦点が当たったとき `fillCandidates` が読む。 */
-  private candidateSource: { metas: ReadonlyMap<string, EntryMeta>; lid: string } | null = null;
+  private candidateSource: { metas: ReadonlyMap<string, EntryMeta>; relations: AppState['relations']; lid: string } | null = null;
   /**
    * 🔴 打った字で詰め直すための題名の一覧(#1087)。⚠ 打つたびに全ノートの題名を小文字へ直さない ──
    * 作り直すのは `metas` の Map が替わったときだけ(題名の一覧を持つ側の作法と同じ)。
    */
-  private candidateIndex: { metas: ReadonlyMap<string, EntryMeta>; items: { lid: string; title: string; lower: string }[] } | null = null;
+  private candidateIndex: {
+    metas: ReadonlyMap<string, EntryMeta>;
+    items: { lid: string; title: string; lower: string }[];
+    /** 題名ごとの件数(自分を除く)。選んでいるノートが替わったら数え直す。 */
+    counts?: Map<string, number>;
+    countsFor?: string;
+    /** 同じ題名が在るときだけ解く、ノート → 入っているフォルダ。 */
+    parents?: Map<string, string>;
+    parentsFor?: AppState['relations'];
+  } | null = null;
   /** タグの候補(#494 段②)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
   private tagCandidates: HTMLDataListElement | null = null;
 
@@ -1119,7 +1129,7 @@ export class InspectorRenderer {
      * 触ったときだけ**なので、触る前に詰める理由が無い。
      * ⚠ 焦点が既に欄に在るなら、その場で詰め直す(打っている最中に候補が古くならない)。
      */
-    this.candidateSource = { metas: state.entryMetas, lid: meta.lid };
+    this.candidateSource = { metas: state.entryMetas, relations: state.relations, lid: meta.lid };
     if (this.relAdd && this.relAdd.target.ownerDocument.activeElement === this.relAdd.target) {
       this.fillCandidates();
     }
@@ -1461,10 +1471,30 @@ export class InspectorRenderer {
      */
     const q = (this.relAdd?.target.value ?? '').trim().toLowerCase();
     const others = this.candidateIndex.items.filter((m) => m.lid !== src.lid && (q === '' || m.lower.includes(q)));
+    /**
+     * 🔴 **同じ題名のノートは、フォルダの名前・更新日を添えて見分ける**(#1657、依頼 45 の 3)。
+     *   題名が 1 件しかないノートは今までどおり題名だけ。足すときに字から 1 件に戻す口は
+     *   `resolveRelationTarget`(`relation/target-label.ts`)── 綴りはその file の 1 組。
+     *   ⚠ 件数と親は metas / relations が替わったときだけ数え直す(打つたびに全件を走査しない)。
+     */
+    const idx = this.candidateIndex;
+    if (idx.counts === undefined || idx.countsFor !== src.lid) {
+      idx.counts = countTitles(src.metas, src.lid);
+      idx.countsFor = src.lid;
+      idx.parents = undefined;
+    }
+    if (idx.parentsFor !== src.relations) {
+      idx.parents = undefined;
+      idx.parentsFor = src.relations;
+    }
+    const counts = idx.counts;
     this.candidates.textContent = '';
     for (const m of others.slice(0, RELATION_CANDIDATE_MAX)) {
       const opt = document.createElement('option');
-      opt.value = m.title;
+      const dup = (counts.get(m.title) ?? 0) > 1;
+      if (dup && idx.parents === undefined) idx.parents = resolveCanonicalParents(src.metas, src.relations);
+      const meta = src.metas.get(m.lid);
+      opt.value = dup && meta !== undefined ? candidateText(meta, counts.get(m.title) ?? 0, idx.parents!, src.metas) : m.title;
       this.candidates.append(opt);
     }
     if (others.length > RELATION_CANDIDATE_MAX) {

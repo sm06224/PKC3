@@ -32,6 +32,7 @@ import {
   primaryContext,
   type KeyContext,
 } from '@features/keymap';
+import { confirmInApp } from './app-dialog';
 import { appKeymap, type KeymapStore } from './keymap';
 import { SETTINGS_NOT_PERSISTED_TEXT } from './settings-persist-probe';
 
@@ -94,8 +95,22 @@ export function buildKeymapPanel(
   // 🔴 保存できなかったことを言う 1 行(#1087)── 戻した割当はこの session では効いているので、「戻せなかった」とは言わない
   const resetAllNote = doc.createElement('span');
   resetAllNote.setAttribute('data-pkc-field', 'keymap-reset-all-note');
+  // 🔴 消える数を見せてから聞く(#1660 依頼 47-2 = A)── 押した瞬間に全部消え、確認も元に戻す道も無かった
+  let resetAsking = false;
   resetAll.addEventListener('click', () => {
-    resetAllNote.textContent = store.resetAll() ? '' : `既定に戻しました。${SETTINGS_NOT_PERSISTED_TEXT}`;
+    if (resetAsking) return;
+    const n = Object.keys(store.getOverrides()).length;
+    if (n === 0) return;
+    resetAsking = true;
+    void confirmInApp(resetAll, `自分で変えた割り当て ${n} 件を、全部はじめに戻します`, {
+      okLabel: '戻す',
+      cancelLabel: 'やめる',
+      danger: true,
+    }).then((answer) => {
+      resetAsking = false;
+      if (answer !== 'ok') return;
+      resetAllNote.textContent = store.resetAll() ? '' : `既定に戻しました。${SETTINGS_NOT_PERSISTED_TEXT}`;
+    });
   });
   root.append(resetAll, resetAllNote);
 

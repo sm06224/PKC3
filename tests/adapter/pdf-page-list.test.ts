@@ -11,6 +11,8 @@ interface Api {
   thumbWanted(visible: Iterable<number>, total: number, radius: number, limit: number, center: number): Set<number>;
   pickNext(wanted: Set<number>, skip: (p: number) => boolean, center: number): number | null;
   currentChange(prev: number, next: number, total: number): { off: number | null; on: number } | null;
+  readFraction(viewTop: number, boxTop: number, boxH: number): number | null;
+  scrollDelta(viewTop: number, boxTop: number, boxH: number, frac: number): number;
 }
 
 function load(): Api {
@@ -79,5 +81,33 @@ describe('currentChange ── いまの頁の光らせ方', () => {
     expect(api.currentChange(4, 4, 10)).toBeNull();
     expect(api.currentChange(4, 0, 10)).toBeNull();
     expect(api.currentChange(4, 11, 10)).toBeNull();
+  });
+});
+
+describe('読んでいた位置を保つ(#1663 依頼 49-1)', () => {
+  it('ページの途中(上から 3 割)を読んでいれば、3 割と控える', () => {
+    expect(api.readFraction(100, -50, 500)).toBeCloseTo(0.3);
+  });
+  it('ページの上より前(隙間)は 0、下より後は 1、高さが測れなければ null', () => {
+    expect(api.readFraction(100, 130, 500)).toBe(0);
+    expect(api.readFraction(1000, 0, 500)).toBe(1);
+    expect(api.readFraction(100, 0, 0)).toBeNull();
+  });
+  it('拡大して高さが 2 倍になっても、同じ 3 割の所が読む面の上端に来る(先頭へ戻らない)', () => {
+    // 拡大後、ページの上端が -100(読む面の上端 = 100 より 200 上)・高さ 1000 → 3 割は 300 下 = 100 だけ動かす
+    const frac = api.readFraction(100, -50, 500) as number;
+    const delta = api.scrollDelta(100, -100, 1000, frac);
+    expect(delta).toBeCloseTo(100);
+    // 対照群: 先頭へ戻す古い動きは、動かす量が ページの上端 - 読む面の上端 = -200
+    expect(delta).not.toBeCloseTo(-200);
+  });
+  it('割合 0 なら、ページの先頭を上端に出す(これまでの動きと同じ)', () => {
+    expect(api.scrollDelta(100, 130, 500, 0)).toBe(30);
+  });
+  it('画面: 拡大縮小は控えた割合で戻す(古い「ページの先頭へ」だけの動きに戻っていない)', () => {
+    const src = readFileSync('public/pdf/reader.js', 'utf-8');
+    const body = src.slice(src.indexOf('function applyScale('), src.indexOf('function fitWidth('));
+    expect(body).toContain('readFraction(');
+    expect(body).toContain('scrollDelta(');
   });
 });

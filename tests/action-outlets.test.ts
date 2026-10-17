@@ -120,6 +120,11 @@ const UNRESOLVED: readonly string[] = [
    * ⚠ 2026-10-15(#1087): 以前ここに居た `undo-trash` は、命令として登記して `runGlobalCommand` が字で受けるようになったので外した(静的に追えるようになった)。
    */
   'undo-dual-move',
+  /**
+   * ⚠ **2026-10-17(#1163 依頼 45 の 2、#1657)で 1 件増えた** ── 題名を変えた直後の「元に戻す」(`undo-rename`)。
+   * 🔑 `undo-dual-move` と同じ器(`paintStatusUndo` が `data-pkc-action` を実行時に書き換える)ので、静的な字が source に無い。
+   */
+  'undo-rename',
   'view-big',
 ];
 

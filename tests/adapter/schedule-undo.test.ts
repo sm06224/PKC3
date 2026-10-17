@@ -24,7 +24,10 @@ import { dropTaskCard } from '../../src/adapter/ui/render/schedule-drag';
 import {
   MOVE_ACK_WAIT_MS,
   clearMoveOffer,
+  currentDoneOffer,
   currentMoveOffer,
+  doneMessage,
+  offerDoneUndo,
   offerMoveUndo,
   scheduleUndoShown,
   undoScheduleMove,
@@ -459,5 +462,98 @@ describe('押し口(binder の `schedule-undo-move`)', () => {
     expect(w.events, '忙しい間に書いた').not.toContain('REQUEST_BODY_REWRITE');
     expect(w.d.getState().error ?? '').toContain('実行中');
     expect(currentMoveOffer(), '断ったのに持っている物が消えた').not.toBeNull();
+  });
+});
+
+describe('☐ を押して済みにした直後の「元に戻す」(#1654 の 2。依頼 44 の 2 = 推薦 A)', () => {
+  const OPEN = '- [ ] 歯医者 @2026-08-27 10:00';
+  /** 札の ☐ を押したのと同じ 1 手(binder の `toggle-task`)。 */
+  const check = (r: Rig, line: number, openLine: string, title = '歯医者'): void => {
+    offerDoneUndo(r.root, r.dispatcher, { lid: 'a', line, openLine, title });
+    r.dispatcher.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line, openLine });
+  };
+
+  it('🔴 書込が届いて札が一覧から消えたら、「『歯医者』を済みにしました」と「元に戻す」が出る', () => {
+    const r = rig(OPEN, null, true);
+    check(r, 0, OPEN);
+    expect(noticeOf(r), '書込が届く前に出した').toBeNull();
+    r.flush();
+    expect(noticeOf(r)).toBe('「歯医者」を済みにしました');
+    expect(scheduleUndoShown(noticeOf(r)!), '知らせが出たのに「元に戻す」を出せない').toBe(true);
+    expect(currentDoneOffer()).not.toBeNull();
+  });
+
+  it('🔴 押すと、印だけが元に戻る(本文が済む前の字に戻る)', () => {
+    const r = rig(`${OPEN}\n- [ ] ほか`);
+    check(r, 0, OPEN);
+    expect(r.body()).toBe(`- [x] 歯医者 @2026-08-27 10:00\n- [ ] ほか`);
+    const res = press(r);
+    expect(res !== null && 'action' in res ? res.action.type : null).toBe('TOGGLE_TASK');
+    r.dispatcher.dispatch((res as { action: UserAction }).action);
+    expect(r.body(), '押しても元の字に戻らない').toBe(`${OPEN}\n- [ ] ほか`);
+  });
+
+  it('🔴 済みにした後に別の窓が行を直していたら、戻さない(別の行を書き換えない)', () => {
+    const r = rig(OPEN);
+    check(r, 0, OPEN);
+    r.edit('- [x] 歯医者 @2026-08-28 10:00 変更');
+    const res = press(r) as { action: UserAction };
+    r.dispatcher.dispatch(res.action);
+    expect(r.body(), '直されていた行を書き換えた').toBe('- [x] 歯医者 @2026-08-28 10:00 変更');
+  });
+
+  it('書込が失敗したなら出さず、持っている物も捨てる / いつまでも届かないなら諦める', () => {
+    const r = rig(OPEN, null, true);
+    check(r, 0, OPEN);
+    r.patch({ error: '保存できませんでした' });
+    expect(currentDoneOffer()).toBeNull();
+    expect(noticeOf(r)).toBeNull();
+    const q = rig(OPEN, null, true);
+    check(q, 0, OPEN);
+    vi.advanceTimersByTime(MOVE_ACK_WAIT_MS + 1);
+    q.flush();
+    expect(currentDoneOffer(), '届かないまま持ち続けた').toBeNull();
+    expect(noticeOf(q)).toBeNull();
+  });
+
+  it('数秒で知らせごと降ろす / 長い名前は丸める / 名前が無い予定にも言える', () => {
+    const r = rig(OPEN);
+    check(r, 0, OPEN);
+    expect(currentDoneOffer()).not.toBeNull();
+    vi.advanceTimersByTime(MOVE_OFFER_MS + 1);
+    expect(currentDoneOffer()).toBeNull();
+    expect(doneMessage('あ'.repeat(40))).toBe(`「${'あ'.repeat(30)}…」を済みにしました`);
+    expect(doneMessage('  ')).toBe('予定を済みにしました');
+  });
+
+  it('押し口(binder): 札の ☐ を押すと待ち受けが立つ。本文の面(札の外)の ☐ では立たない', async () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new RealDispatcher();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta()], relations: [] });
+    d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: { cards: taskCardsOf('a', OPEN), totalNotes: 1, scannedNotes: 1, truncated: false },
+    });
+    bindActions(root, d, { busy: () => false });
+    const card = document.createElement('article');
+    card.setAttribute('data-pkc-entry', 'a');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.setAttribute('data-pkc-action', 'toggle-task');
+    box.setAttribute('data-pkc-task-line', '0');
+    card.append(box);
+    root.append(card);
+    box.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(currentDoneOffer(), '札の ☐ を押したのに待ち受けていない').not.toBeNull();
+    clearMoveOffer();
+    const body = document.createElement('div');
+    const box2 = box.cloneNode(true) as HTMLInputElement;
+    body.append(box2);
+    root.append(body);
+    box2.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(currentDoneOffer(), '本文の面の ☐ にまで出した').toBeNull();
   });
 });

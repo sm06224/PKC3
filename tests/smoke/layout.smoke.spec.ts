@@ -1055,6 +1055,11 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
   // 行の node に目印を付けて、足した後も同じ node かを見る(作り直されると目印が消える)
   await rows.nth(10).evaluate((el) => el.setAttribute('data-probe-kept', '1'));
   await createEntry(page, 'text');
+  // 🔴 既定の題名は「日付 ノート 番号」(#1657)── 直す前は今日 1 件目でも大きな数が付いた
+  await expect(
+    page.locator('[data-pkc-field="editor-title"]'),
+    '既定の題名が「YYYY-MM-DD ノート N」の形でない',
+  ).toHaveValue(/^\d{4}-\d{2}-\d{2} ノート \d+$/);
   await page.locator('[data-pkc-field="editor-title"]').fill('足した 1 件');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await expect(rows).toHaveCount(33);
@@ -1069,6 +1074,32 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
     Math.abs((await host.evaluate((el) => el.scrollTop)) - parked2),
     '1 件足したら、見ていた位置が動いた',
   ).toBeLessThan(30);
+
+  // ⑤ 🔴 題名を変えた直後の「元に戻す」(#1657)と、検索欄の Esc(#1650)── 起動を増やさず同じ道中で
+  const added = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '足した 1 件' });
+  await clickReal(page, added);
+  await page.keyboard.press('F2');
+  const renameInput = page.locator('[data-pkc-field="row-rename"]');
+  await expect(renameInput, '名前を変える欄が出ない').toBeVisible();
+  await renameInput.fill('改名した 1 件');
+  await renameInput.press('Enter');
+  const undo = page.locator('[data-pkc-field="status-undo"]');
+  await expect(undo, '題名を変えたのに「元に戻す」が出ない').toBeVisible();
+  await expect(undo).toHaveText('元に戻す');
+  await clickReal(page, undo);
+  await expect(
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '足した 1 件' }),
+    '「元に戻す」を押しても元の題名に戻らない',
+  ).toHaveCount(1);
+  await expect(
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '改名した 1 件' }),
+  ).toHaveCount(0);
+
+  const filter = page.locator('[data-pkc-field="entry-filter"]');
+  await filter.fill('足した');
+  await filter.press('Escape');
+  await expect(filter, '検索欄で Esc を押しても打った字が消えない').toHaveValue('');
+  await expect(rows, 'Esc で字を消したのに一覧が絞られたまま').toHaveCount(33);
 
   expect(errors).toEqual([]);
 });

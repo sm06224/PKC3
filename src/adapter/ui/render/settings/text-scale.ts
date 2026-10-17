@@ -7,9 +7,10 @@
  * ⚠ **既定は「標準」= 現行そのまま** ── 選ばなければ見え方は変わらない。
  * (#1382 で `settings.ts` から移した。中身は変えていない。)
  */
-import { TEXT_SCALES } from '@features/text-scale';
+import { DEFAULT_TEXT_SCALE, TEXT_SCALES } from '@features/text-scale';
 import { buildChoiceRow, syncChoiceRow } from '../choice-buttons';
 import { currentTextScale } from '../text-scale';
+import { markDefault } from './default-mark';
 import { buildSettingsNote } from './note';
 import type { SettingsSection } from './section';
 
@@ -27,7 +28,7 @@ export function createTextScaleSection(region: HTMLElement): SettingsSection {
         ariaLabel: '文字の大きさ',
         action: 'set-text-scale',
         dataAttr: 'data-pkc-text-scale-value',
-        choices: TEXT_SCALES,
+        choices: markDefault(TEXT_SCALES, DEFAULT_TEXT_SCALE),
         currentId: '', // render 末尾の sync が必ず映す
       });
       td.append(tRow);

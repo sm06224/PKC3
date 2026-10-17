@@ -15,7 +15,7 @@
 import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { bindWaveDrag } from './wave-drag';
-import { renameAttachmentAndFile, renameEntryFromRow } from './attachment-rename';
+import { renameAttachmentAndFile, renameEntryFromRow, restoreRenamedTitle } from './attachment-rename';
 import { lidOfNode } from './lid-of-node';
 import { isEditableColor } from '@features/markdown/color-code';
 import type { DroppedAt } from './asset-into-note';
@@ -191,7 +191,10 @@ import { typedCellNote } from '@adapter/state/store-effects';
 import { openCodeFenceAt, locateCodeFence } from '@features/markdown/code-fence-edit';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
-import { isReadColumns } from '@features/read-columns';
+import { isReadColumns, readColumnsSpec } from '@features/read-columns';
+import { isPageFormat, pageFormatSpec } from '@features/page-format';
+import { isProseAlign, proseAlignSpec } from '@features/prose-align';
+import { plainChoiceLabel } from '../render/settings/default-mark';
 import { isColumnRule } from '@features/column-rule';
 import { isTagBadge } from '@features/tag-badge';
 import { chooseColumnRule } from '@adapter/ui/render/column-rule';
@@ -218,7 +221,8 @@ import { safeName } from '@features/export/file-name';
 import { hasTranscriptCues, srtFromTranscript, transcriptCues } from '@features/asr/srt';
 import { decodeTaskDrag, dropTaskCard, encodeTaskDrag } from '@adapter/ui/render/schedule-drag';
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
-import { undoScheduleMove } from '@adapter/ui/render/schedule-undo';
+import { offerDoneUndo, undoScheduleMove } from '@adapter/ui/render/schedule-undo';
+import { plainTaskTitle } from '@features/schedule/task-title';
 import {
   DATE_SHORTCUTS,
   isDateShortcut,
@@ -315,6 +319,8 @@ import { requestAppendFocus, requestBodyFocus, takeAppendFocus } from '@adapter/
 import { isTouchOnly } from '@adapter/ui/render/touch-device';
 import { currentTrashOffer, LINKED_FROM_SOME, offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
 import { offerDualMoveUndo, takeDualMoveUndo } from '@adapter/ui/render/dual-move-undo';
+import { resolveRelationTarget } from '@features/relation/target-label';
+import { renameOfferingUndo, takeRenameUndo } from '@adapter/ui/render/rename-undo';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
@@ -2325,20 +2331,17 @@ export interface BinderServices {
 
 function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
   const label = archetypeLabel(archetype);
-  let n = 0;
   const titles = new Set<string>();
-  for (const m of dispatcher.getState().entryMetas.values()) {
-    if (m.archetype === archetype) n += 1;
-    titles.add(m.title);
-  }
+  for (const m of dispatcher.getState().entryMetas.values()) titles.add(m.title);
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   /**
-   * 🔴 **既に在る題名を作らない**(#1087 の見直し 2026-10-13)。⚠ 番号は「同じ種類の件数 + 1」なので、
-   *   古いノートを 1 件消すと件数が減り、**今日作った既存の題名と同じ題名**が出た(つながりを足すときに
-   *   「題名を分けてください」で止まる)。形(`日付 種類 n`)は変えず、空いている番号まで進める。
+   * 🔴 **番号は「その日の通し番号」**(Gemini 裁定 = #1163 への依頼 45 の 4、#1657。推薦 A)。
+   *   直す前は「同じ種類のノートの件数 + 1」で、今日 1 件目でも「2026-10-13 ノート 347」のように大きな数が付いた
+   *   (何の番号か読めない)。いまは 1 から数え、**今日その種類で既に使われている番号は飛ばす**
+   *   (#1087 の「既に在る題名を作らない」── 古いノートを消したあとも、今日の既存の題名と重ならない)。
    */
-  let k = n + 1;
+  let k = 1;
   while (titles.has(`${date} ${label} ${k}`)) k += 1;
   return `${date} ${label} ${k}`;
 }
@@ -2997,6 +3000,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'undo-trash',
   // 🔴 2 ペインで移した直後の「元に戻す」── 居場所を書き戻すので `move-to-folder` と同じ門
   'undo-dual-move',
+  // 🔴 題名を変えた直後の「元に戻す」(#1657)── 題名を書き戻すので `rename-attachment` と同じ門
+  'undo-rename',
   // 🔴 取り込みの「取り消す」── ゴミ箱へ入れる `delete-entry` と同じ書込なので同じ門(#1087)
   'undo-import',
   'purge-trash',
@@ -4369,7 +4374,9 @@ async function commitPlaceInline(
       return;
     }
     if (mode === 'rename') {
-      dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
+      renameOfferingUndo(dispatcher, lid, () => {
+        dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
+      });
       if (dispatcher.getState().entryMetas.get(lid)?.title !== title) {
         refuse('いまは題名を直せません(取り込み中などです。終わってからもう一度お試しください)');
         return;
@@ -5742,7 +5749,7 @@ export function runGlobalCommand(
    * ⚠ 断りは 3 段で、どれも `dry` では偽(= 一覧は「いまは押せません ── <理由>」で押せるふりをしない):
    *   ①編集中 / 保護中(理由は `blockedActionNote` の 1 か所)②ノートを開いていない ③配線が無い版。
    */
-  if (cmd === 'export-note-markdown') {
+  if (cmd === 'export-note-markdown' || cmd === 'export-note-pdf') {
     const st = dispatcher.getState();
     const why = blockedActionNote(st.phase);
     if (why !== null) {
@@ -5758,7 +5765,9 @@ export function runGlobalCommand(
       notify('書き出すノートがありません(先にノートを開いてください)', CAUTION);
       return true;
     }
-    const run = ROOT_SERVICES.get(root)?.exportEntryMarkdown;
+    // 🔴 PDF(#1660)は右の列の「PDF で書き出す」(`export-entry-pdf`)と同じ `services.printNote`
+    const svc = ROOT_SERVICES.get(root);
+    const run = cmd === 'export-note-pdf' ? svc?.printNote : svc?.exportEntryMarkdown;
     if (run === undefined) {
       if (dry) return false;
       prevent();
@@ -6115,7 +6124,7 @@ export function commandRowsFor(
     // ⚠ 「メッセージを開く」は押しボタンを持たない(左の列の同名は別の口)── 理由は
     //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
     //   「字幕ファイル(.srt)で書き出す」(#1447)も同じ(押しボタンを持たない)── 時刻つきの行が無い理由は `note` が言う
-    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown') return blockedActionNote(dispatcher.getState().phase);
+    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown' || id === 'export-note-pdf') return blockedActionNote(dispatcher.getState().phase);
     // 「選択範囲をコピー」── 控えが無いときの理由(押しボタンを持たない)。左の `>` の一覧では選択が残らないので、呼べる道を言う
     if (id === 'copy-selection-md')
       return inPalette ? SELECTION_FIRST : `${SELECTION_FIRST}(選択してから「操作を探す」を開いてください)`;
@@ -7405,33 +7414,35 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'つなぐ先の題名を入れてください' });
       return;
     }
-    const hits = [...state.entryMetas.values()].filter(
-      (m) => m.title === name && m.lid !== fromLid,
-    );
-    if (hits.length === 0) {
+    /**
+     * 🔴 **相手は欄の字から 1 件に決める**(#1657、依頼 45 の 3)。同じ題名が複数でも、候補の一覧で選んだ
+     *   「題名(フォルダの名前・更新日)」ならそのノートの 1 件に決まる(`resolveRelationTarget`)。
+     *   ⚠ どれかを勝手に選ばない ── 題名だけで 2 件以上に合うときは止まる。
+     */
+    const resolved = resolveRelationTarget(name, state.entryMetas, state.relations, fromLid);
+    if (resolved.kind === 'self') {
       // 🔴 いま開いているノート自身の題名は「見つかりません」ではなく、つなげない理由を言う(#1087)
-      if (state.entryMetas.get(fromLid)?.title === name) {
-        dispatcher.dispatch({ type: 'OP_FAILED', error: '自分自身にはつなげません' });
-        return;
-      }
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '自分自身にはつなげません' });
+      return;
+    }
+    if (resolved.kind === 'none') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error: `「${name}」というノートが見つかりません`,
       });
       return;
     }
-    if (hits.length > 1) {
-      // ⚠ 同じ題名が複数 ── **どれかを勝手に選ばない**(user の意図が決まらない)
+    if (resolved.kind === 'ambiguous') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `「${name}」が ${hits.length} 件あります。題名を分けてから足してください`,
+        error: `「${name}」が ${resolved.count} 件あります。候補の一覧からフォルダの名前つきの題名を選ぶか、題名を分けてから足してください`,
       });
       return;
     }
     const kind = kindEl?.value ?? '';
     if (!isRelationKind(kind) || kind === STRUCTURAL) return;
     // 🔴 同じ相手・同じ種類が既に在るときは、言う(欄は残す)。⚠ 判定は reducer と同じ 1 本(`hasSameRelation`)
-    if (hasSameRelation(state.relations, fromLid, hits[0]!.lid, kind)) {
+    if (hasSameRelation(state.relations, fromLid, resolved.lid, kind)) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '既に同じつながりがあります' });
       return;
     }
@@ -7439,7 +7450,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       type: 'ADD_RELATION',
       id: generateLid(),
       fromLid,
-      toLid: hits[0]!.lid,
+      toLid: resolved.lid,
       kind,
     });
     if (nameEl) nameEl.value = '';
@@ -8866,6 +8877,29 @@ const ACTIONS: Record<string, ActionHandler> = {
           : '戻せるものがありません(移した後に、別の場所へ動かしています)',
     });
   },
+  /**
+   * 🔴 **題名を変えた直後の「元に戻す」**(Gemini 裁定 = #1163 への依頼 45 の 2、#1657)。口は `status-undo`(出し入れは `status-open.ts`)。
+   * ⚠ 新しい書込経路は作らない ── 変える前の題名へ向けた `RENAME_ENTRY_TITLE` を 1 手撃つ(添付はファイル名も揃える)。
+   *   変えた後にさらに題名を変えていたら戻さず、理由を言う。編集中などで戻せないときは**黙らない**(`undo-trash` と同じ断り)。
+   */
+  'undo-rename': (dispatcher) => {
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}戻してください` });
+      return;
+    }
+    const r = takeRenameUndo();
+    if (r === null) return;
+    if (dispatcher.getState().entryMetas.get(r.lid)?.title !== r.to) {
+      dispatcher.dispatch({
+        type: 'OP_NOTICE',
+        message: '戻せるものがありません(変えた後に、題名をもう一度変えています)',
+      });
+      return;
+    }
+    restoreRenamedTitle(dispatcher, r.lid, r.from, r.withFile);
+    dispatcher.dispatch({ type: 'OP_NOTICE', message: `題名を「${r.from}」に戻しました` });
+  },
   'delete-entry': (dispatcher, target, services, root) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
     // 🔴 **無言で断らない**(P8 段⑲)。`DELETE_ENTRY` は `phase !== 'ready'` で
@@ -10093,7 +10127,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       );
     });
   },
-  'toggle-task': (dispatcher, target, services) => {
+  'toggle-task': (dispatcher, target, services, root) => {
     const raw = target.getAttribute('data-pkc-task-line');
     const line = Number(raw);
     if (raw === null || !Number.isInteger(line) || line < 0) return;
@@ -10187,7 +10221,18 @@ const ACTIONS: Record<string, ActionHandler> = {
       guarded(() => dispatcher.dispatch({ type: 'MATERIALIZE_REPEAT', lid, line, openLine, date: on }), lid);
       return;
     }
-    guarded(() => dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line, openLine }), lid);
+    /**
+     * 🔴 **札(予定の一覧・表・かんばん)の ☐ で未完を済みにしたときは、動かしたときと同じ「元に戻す」を出す**
+     * (#1654 の 2。Gemini 裁定 = #1163 の依頼 44 の 2)。済みにした札は一覧から消えるので、間違えても戻す口が無かった。
+     * ⚠ 本文の面の ☐ には出さない(その場に残るので押し直せる)。済みから戻す押し方にも出さない。
+     */
+    const isCard = target.closest('article[data-pkc-entry]') !== null;
+    const task = isCard ? st.taskScan?.cards.find((c) => c.lid === lid && c.line === line) : undefined;
+    guarded(() => {
+      if (task !== undefined && !task.done && /^\s*(?:[-*+]|\d+[.)])\s+\[ \]/.test(openLine))
+        offerDoneUndo(root, dispatcher, { lid, line, openLine, title: plainTaskTitle(task.text) });
+      dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line, openLine });
+    }, lid);
   },
   'toggle-show-archived': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' }),
@@ -13402,7 +13447,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       target instanceof HTMLSelectElement
         ? target.value
         : target.getAttribute('data-pkc-page-format-value');
-    if (format) services.setPageFormat?.(format);
+    if (format) {
+      services.setPageFormat?.(format);
+      // 🔴 効いたことを言う(#1650 項目 3。Gemini 裁定 = #1163 の依頼 42-3 B)。設定の画面が中央を占めていて本文は隠れたまま
+      if (isPageFormat(format))
+        services.showStatus?.(`読み幅を「${plainChoiceLabel(pageFormatSpec(format).label)}」にしました`);
+    }
   },
   /**
    * 🔴 **本文の置き場所**(#722)。⚠ `set-page-format` と**同じ受け方**
@@ -13413,7 +13463,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       target instanceof HTMLSelectElement
         ? target.value
         : target.getAttribute('data-pkc-prose-align-value');
-    if (align) services.setProseAlign?.(align);
+    if (align) {
+      services.setProseAlign?.(align);
+      // 🔴 効いたことを言う(#1650 項目 3)── `set-page-format` と同じ
+      if (isProseAlign(align))
+        services.showStatus?.(`本文の置き場所を「${plainChoiceLabel(proseAlignSpec(align).label)}」にしました`);
+    }
   },
   /**
    * 🔴 **SQL の欄に打った**(#681 段②)。⚠ **走らせない** ── 重い問い合わせを
@@ -13951,12 +14006,16 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **本文の段組み**(#505 段①)。⚠ 当てる先は `text-scale` と同じ
    *   `document.documentElement` ── CSS が `:root[...]` で読む。
    */
-  'set-read-columns': (_dispatcher, target) => {
+  'set-read-columns': (_dispatcher, target, services) => {
     const v =
       target instanceof HTMLSelectElement
         ? target.value
         : target.getAttribute('data-pkc-read-columns-value');
-    if (v !== null && isReadColumns(v)) chooseReadColumns(document.documentElement, v);
+    if (v !== null && isReadColumns(v)) {
+      chooseReadColumns(document.documentElement, v);
+      // 🔴 効いたことを言う(#1650 項目 3)── 設定の画面が中央を占めていて本文は隠れたまま
+      services.showStatus?.(`本文の段組みを「${plainChoiceLabel(readColumnsSpec(v).label)}」にしました`);
+    }
   },
   /**
    * 🔴 **段の境界線の濃さ**(#525)。⚠ 既定は現行そのままなので、
@@ -19188,10 +19247,24 @@ export function bindActions(
      * 🔴 **一覧の絞り込みの欄から、そのまま行へ降りられる**(#1042 C2)。
      * ⚠ 2 ペインの絞り込み(下の `dual-filter`)と**同じ形**── これが無いと
      *   「打って絞る → マウスで行を押す」になり、キーボードだけで完結しない。
-     * ⚠ `Escape` はここでは**何もしない**(C3 の「入力欄では効かせない」規約 ──
-     *   欄を空にする「絞りを外す」ボタンは別に在る)。それ以外の鍵は入力へ通す。
+     * ⚠ `Escape` は**打った字を消す**だけ(下。#1650)── 本文を閉じる側へは落とさない(C3 の
+     *   「入力欄では効かせない」規約)。それ以外の鍵は入力へ通す。
      */
     if (el instanceof HTMLInputElement && el.matches('[data-pkc-field="entry-filter"]')) {
+      /**
+       * 🔴 **`Esc` は、打った字を消す**(#1650 項目 2。Gemini 裁定 = #1163 の依頼 42-2 A)。
+       * ⚠ 吹き出しは「Esc で、打った字を消します」と言うが、直す前は**ブラウザの検索欄の標準の動き**に
+       *   頼っていた(`type="search"`)── 標準で消えないブラウザでは吹き出しが偽になる。
+       * 🔑 標準の動きと**二重に走らせない**(`preventDefault`)。⚠ 欄も空にする(state だけ空にすると、
+       *   打った字が残って見える ── 下の 2 ペインの絞り込みと同じ)。⚠ 変換中の Esc は変換の取り消しなので握らない。
+       * ⚠ 字が無いときは何もしない(空の欄の Esc は、これまでどおり他へ流さない)。
+       */
+      if (ke.key === 'Escape' && !ke.isComposing && el.value !== '') {
+        ke.preventDefault();
+        el.value = '';
+        dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
+        return;
+      }
       /**
        * 🔴 **`>` を打っている間は、鍵が操作の一覧に効く**(#274 段①)。
        * ⚠ `Enter` = **押せる先頭の行を実行**(操作のパレットと同じ ── 一覧へ焦点を移して

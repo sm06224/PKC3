@@ -17,9 +17,10 @@ import {
   currentPageFormat,
   initialPageFormat,
 } from '../../src/adapter/ui/render/page-format';
-import { PAGE_FORMATS } from '../../src/features/page-format';
+import { DEFAULT_PAGE_FORMAT, PAGE_FORMATS } from '../../src/features/page-format';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { initialState } from '../../src/adapter/state/app-state';
+import { markDefault } from '../../src/adapter/ui/render/settings/default-mark';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { JobMonitor } from '../../src/adapter/platform/job-monitor';
 
@@ -124,7 +125,10 @@ describe('紙面フォーマット(設定画面と配線)', () => {
       ),
     ];
     expect(opts.map((o) => o.value)).toEqual(PAGE_FORMATS.map((f) => f.id));
-    expect(opts.map((o) => o.textContent)).toEqual(PAGE_FORMATS.map((f) => f.label));
+    // 🔴 最初の値には「(既定)」が付く(#1650 項目 4)
+    expect(opts.map((o) => o.textContent)).toEqual(
+      markDefault(PAGE_FORMATS, DEFAULT_PAGE_FORMAT).map((f) => f.label),
+    );
   });
 
   /**

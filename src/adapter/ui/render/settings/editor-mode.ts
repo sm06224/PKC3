@@ -14,8 +14,9 @@
  *   (本文のタグの見せ方と同じ扱い)。
  * (#1382 で `settings.ts` から移した。中身は変えていない。)
  */
-import { EDITOR_MODES } from '@features/editor-mode';
+import { DEFAULT_EDITOR_MODE, EDITOR_MODES } from '@features/editor-mode';
 import type { EditorModeStore } from '../editor-mode';
+import { markDefault } from './default-mark';
 import { buildSettingsNote } from './note';
 import type { SettingsSection } from './section';
 
@@ -38,7 +39,7 @@ export function createEditorModeSection(
       eselect.title =
         '既定は「1 画面で編集(ライブ)」で、押した行だけが Markdown の元の文になり、' +
         'その場で書き換えられます。2 ペインは左に原文、右にプレビューが並びます。';
-      for (const c of EDITOR_MODES) {
+      for (const c of markDefault(EDITOR_MODES, DEFAULT_EDITOR_MODE)) {
         const opt = document.createElement('option');
         opt.value = c.id;
         opt.textContent = c.label;

@@ -306,6 +306,7 @@ describe('🔴 押せない理由の文(#1087 の見直し 2026-10-14)', () => {
       'copy-entry-link': 'ノートを選んでいるときだけ効きます',
       'view-detail': 'いま本文を開いています',
       'export-note-markdown': 'ノートを開いているときだけ効きます',
+      'export-note-pdf': 'ノートを開いているときだけ効きます',
       'export-transcript-srt': 'ノートを開いていて、行頭に時刻のある行があるときだけ効きます',
     };
     for (const [id, text] of Object.entries(EXPECTED)) {
@@ -326,6 +327,7 @@ describe('🔴 押せない理由の文(#1087 の見直し 2026-10-14)', () => {
       [
         'copy-entry-link',
         'export-note-markdown',
+        'export-note-pdf',
         'export-transcript-srt',
         'nav-back',
         'nav-forward',

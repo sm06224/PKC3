@@ -3,6 +3,7 @@
  * (#1382 で `settings.ts` から移した。中身は変えていない。)
  */
 import { readThemeChoice, THEME_AUTO, THEME_AUTO_LABEL, THEMES } from '../theme';
+import { DEFAULT_MARK } from './default-mark';
 import { buildSettingsNote } from './note';
 import type { SettingsSection } from './section';
 
@@ -22,7 +23,7 @@ export function createThemeSection(region: HTMLElement): SettingsSection {
       select.title = '「OS に合わせる」を選ぶと、OS の明るい・暗いの切り替えに付いていきます。選んだ配色はこの端末で覚えます。';
       const auto = document.createElement('option');
       auto.value = THEME_AUTO;
-      auto.textContent = THEME_AUTO_LABEL;
+      auto.textContent = `${THEME_AUTO_LABEL}${DEFAULT_MARK}`;
       select.append(auto);
       for (const t of THEMES) {
         const opt = document.createElement('option');

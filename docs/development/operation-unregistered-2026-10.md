@@ -266,6 +266,7 @@
 |---|---|---|---|---|
 | `delete-selected` | 低 | まとめてゴミ箱へ移す | `src/adapter/ui/render/filer.ts:482` | 選択が前提。確認を伴う |
 | `undo-dual-move` | 低 | 元に戻す | `src/adapter/ui/render/shell.ts:1019` | 2 ペインで移した直後の知らせに付く一時ボタン(`undo-trash` と同じ器) |
+| `undo-rename` | 低 | 元に戻す | `src/adapter/ui/render/shell.ts:1019` | 題名を変えた直後の知らせに付く一時ボタン(`undo-dual-move` と同じ器) |
 | `purge-trash` | 低 | ゴミ箱を空にする | `src/adapter/ui/render/filer.ts:1210` | 取り消せない。確認を伴う |
 
 ## 検索・置換

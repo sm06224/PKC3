@@ -18,7 +18,7 @@ const wire = self.PkcPdfWire;
 const { PageCache, windowOf } = self.PkcPdfPageCache;
 const { DocLease } = self.PkcPdfDocLease;
 const textHits = self.PkcPdfTextHits;
-const { thumbWanted, pickNext, currentChange } = self.PkcPdfPageList;
+const { thumbWanted, pickNext, currentChange, readFraction, scrollDelta } = self.PkcPdfPageList;
 const pageEdit = self.PkcPdfPageEdit;
 const editStage = self.PkcPdfEditStage;
 const hl = self.PkcPdfHighlight;
@@ -81,9 +81,20 @@ const appendPick = $('append-pick');
 const ch = new BroadcastChannel(wire.CHANNEL);
 const send = (kind, payload) => ch.postMessage(wire.envelope(kind, token, payload));
 
+/** 窓の下の一言を消すまでの時間(ms)。終わった知らせは、次の操作を待たずに消える(#1663)。 */
+const STATUS_HIDE_MS = 5000;
+let statusTimer = null;
 const setStatus = (text) => {
   statusEl.textContent = text;
   statusEl.title = text;
+  if (statusTimer !== null) clearTimeout(statusTimer);
+  statusTimer = null;
+  // 「…しています…」のような途中の一言は、終わりの一言に替わるまで出し続ける(消すのは終わった知らせだけ)
+  if (text === '' || text.endsWith('…')) return;
+  statusTimer = setTimeout(() => {
+    statusTimer = null;
+    if (statusEl.textContent === text) setStatus('');
+  }, STATUS_HIDE_MS);
 };
 const state = (s) => {
   document.body.setAttribute('data-pkc-pdf-state', s);
@@ -888,6 +899,11 @@ listEl.addEventListener('click', (ev) => {
     removeSourceOf(addedByFirst(Number(rm.getAttribute('data-source-first'))));
     return;
   }
+  const gh = t.closest('[data-pkc-field="pdf-page-restore"]');
+  if (gh !== null) {
+    void editRestore(Number(gh.getAttribute('data-thumb-restore')));
+    return;
+  }
   const act = t.closest('.thumb-act');
   if (act !== null) {
     const which = Number(act.getAttribute('data-thumb-page'));
@@ -1128,7 +1144,7 @@ function applyItems(focusPage) {
     const head = headAt.get(p);
     if (head !== undefined) frag.append(headingOf(added[head]));
     frag.append(thumbCells[p]);
-    thumbNos[p].textContent = String(k + 1);
+    thumbNos[p].textContent = pageEdit.thumbNoText(p, k + 1, total);
     paintSelected(p);
     paintThumbLabel(p);
     if (thumbRot[p] !== it.rot) {
@@ -1149,6 +1165,7 @@ function applyItems(focusPage) {
   }
   // 並べ替えで要素を動かすと焦点が外れる ── 動かしたページへ戻す
   listEl.append(frag);
+  renderRemoved();
   if (items.length > 0) {
     if (focusPage !== undefined && posByPage[focusPage] > 0) {
       setTabStop(focusPage);
@@ -1159,6 +1176,51 @@ function applyItems(focusPage) {
   }
   updateEditUi();
   scheduleThumbs();
+}
+
+/** 外したページの置き場(一覧の最後。薄い枠のページごとに「戻す」)。`applyItems` が毎回作り直す。 */
+let removedEl = null;
+function renderRemoved() {
+  if (removedEl === null) {
+    removedEl = document.createElement('div');
+    removedEl.className = 'removed-list';
+    removedEl.setAttribute('data-pkc-field', 'pdf-removed-list');
+  }
+  // 足したのを取り消した PDF のページは、もう無いので戻せない(数えない)
+  const gone = pageEdit.removedPages(items, grand, (p) => p <= total || addedOf(p) !== null);
+  removedEl.textContent = '';
+  removedEl.hidden = gone.length === 0;
+  if (gone.length > 0) {
+    const head = document.createElement('div');
+    head.className = 'removed-head';
+    head.textContent = '外したページ';
+    removedEl.append(head);
+    for (const p of gone) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'thumb-ghost';
+      b.setAttribute('data-pkc-field', 'pdf-page-restore');
+      b.setAttribute('data-thumb-restore', String(p));
+      b.setAttribute('aria-label', `${pageName(p)}を戻す`);
+      b.title = 'このページを元の並びに戻す';
+      const no = document.createElement('span');
+      no.textContent = String(p);
+      const act = document.createElement('span');
+      act.className = 'thumb-ghost-act';
+      act.textContent = '戻す';
+      b.append(no, act);
+      removedEl.append(b);
+    }
+  }
+  listEl.append(removedEl);
+}
+
+/** 外したページを 1 ページだけ戻す(「変更を元に戻す」と違い、注釈やほかの編集は残る)。 */
+async function editRestore(page) {
+  if (!(await canEdit())) return;
+  if (posByPage[page] > 0 || !thumbCells[page]) return;
+  items = pageEdit.restorePage(items, page);
+  applyItems(page);
 }
 
 /** まだ保存していない変更があるか(基準 = 最後に保存した並びと、最後に保存したハイライト)。 */
@@ -1873,12 +1935,25 @@ window.addEventListener('beforeunload', (ev) => {
 
 function applyScale(next) {
   const anchor = current;
+  // 🔴 読んでいた位置(そのページの何割の所か)を控え、大きさが変わった後も同じ所を出す(#1663)
+  let frac = null;
+  if (boxes[anchor] && !boxes[anchor].hidden) {
+    const r = boxes[anchor].getBoundingClientRect();
+    frac = readFraction(scroller.getBoundingClientRect().top, r.top, r.height);
+  }
   scale = Math.max(SCALE_MIN, Math.min(SCALE_MAX, next));
   gen += 1;
   cache.clear();
   for (let i = 1; i <= grand; i += 1) clearBox(i);
   resizeAll();
-  if (!boxes[anchor].hidden) boxes[anchor].scrollIntoView({ block: 'start' });
+  if (!boxes[anchor].hidden) {
+    if (frac === null) {
+      boxes[anchor].scrollIntoView({ block: 'start' });
+    } else {
+      const r = boxes[anchor].getBoundingClientRect();
+      scroller.scrollTop += scrollDelta(scroller.getBoundingClientRect().top, r.top, r.height, frac);
+    }
+  }
   refresh();
 }
 
@@ -1996,6 +2071,31 @@ function markHits(i) {
     if (pos < str.length) div.append(str.slice(pos));
     L.marked.add(k);
   }
+  // 作り直した頁が、いま見ている一致の頁なら、その一致を濃くし直す
+  if (hitIndex >= 0 && hitList[hitIndex] === i) paintCurrentHit();
+}
+
+/** いま見ている一致の印(`mark.hit`)。その頁にまだ印が無い(描けていない)ときは `null`。 */
+function currentHitMark() {
+  if (hitIndex < 0 || hitIndex >= hitList.length) return null;
+  const page = hitList[hitIndex];
+  let nth = 0;
+  for (let j = 0; j < hitIndex; j += 1) if (hitList[j] === page) nth += 1;
+  const box = boxes[page];
+  const marks = box ? box.querySelectorAll('mark.hit') : [];
+  const L = layers[page];
+  if (marks.length === 0 || !L) return null;
+  // 一致の番号と印の番号は同じではない(`text-hits.js` の `markIndexOfHits`)
+  const at = textHits.markIndexOfHits(L.strs, hitQuery, L.eols);
+  const k = at.length > 0 ? at[Math.min(nth, at.length - 1)] : nth;
+  return marks[Math.min(k, marks.length - 1)];
+}
+
+/** いま見ている一致だけ濃く塗る(`mark.hit.cur`。ほかの一致は元の黄色のまま)。 */
+function paintCurrentHit() {
+  for (const m of pagesEl.querySelectorAll('mark.hit.cur')) m.classList.remove('cur');
+  const m = currentHitMark();
+  if (m !== null) m.classList.add('cur');
 }
 
 /** 強調で作り替えた span を、元の字 1 つに戻す。 */
@@ -2069,16 +2169,9 @@ function stepHit(delta) {
    *   同じではない(一致が span をまたげば印は複数、隣り合う一致は 1 つの印になる ── `text-hits.js` の
    *   `markIndexOfHits`)。まだ描けていないページ(印が無い)は今までどおりページの先頭のまま。
    */
-  let nth = 0;
-  for (let j = 0; j < hitIndex; j += 1) if (hitList[j] === page) nth += 1;
-  const box = boxes[page];
-  const marks = box ? box.querySelectorAll('mark.hit') : [];
-  const L = layers[page];
-  if (marks.length > 0 && L) {
-    const at = textHits.markIndexOfHits(L.strs, hitQuery, L.eols);
-    const k = at.length > 0 ? at[Math.min(nth, at.length - 1)] : nth;
-    marks[Math.min(k, marks.length - 1)].scrollIntoView({ block: 'center' });
-  }
+  const m = currentHitMark();
+  if (m !== null) m.scrollIntoView({ block: 'center' });
+  paintCurrentHit();
 }
 
 $('query').addEventListener('keydown', (ev) => {

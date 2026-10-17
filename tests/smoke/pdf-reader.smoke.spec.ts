@@ -489,6 +489,26 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(win.locator('#hits'), '空白の無い綴りが行をまたいで一致した').toContainText('見つかりません', { timeout: 15_000 });
   await expect(win.locator('.page[data-page="2"] .textLayer mark.hit')).toHaveCount(0);
 
+  // ── ④⁗ いま見ている一致だけが濃く塗られ(mark.hit.cur は常に 1 つ)、「次の一致」で別の一致へ移る
+  await win.fill('#query', 'marker');
+  await win.press('#query', 'Enter');
+  await expect(win.locator('#hits')).toContainText(`1 / ${String(PAGES)} 件`, { timeout: 15_000 });
+  const curMark = win.locator('mark.hit.cur');
+  await expect(curMark, '現在の一致が 1 つだけ濃く塗られていない').toHaveCount(1, { timeout: 15_000 });
+  const curText1 = await curMark.evaluate((el) => `${el.closest('.page')?.getAttribute('data-page') ?? ''}:${el.textContent ?? ''}`);
+  expect(curText1, '現在の一致が 1 頁目でない').toMatch(/^1:/);
+  await clickReal(win, '#hit-next');
+  await expect(win.locator('#hits')).toContainText(`2 / ${String(PAGES)} 件`, { timeout: 15_000 });
+  await expect
+    .poll(() => curMark.evaluateAll((els) => els.map((el) => `${el.closest('.page')?.getAttribute('data-page') ?? ''}:${el.textContent ?? ''}`)), {
+      message: '「次の一致」で、濃く塗られた一致が別の物へ移らない(1 つだけ・前と違う)',
+      timeout: 15_000,
+    })
+    .toHaveLength(1);
+  const curText2 = await curMark.evaluate((el) => `${el.closest('.page')?.getAttribute('data-page') ?? ''}:${el.textContent ?? ''}`);
+  expect(curText2, '次の一致でも同じ印が濃いまま').not.toBe(curText1);
+  expect(curText2).toMatch(/^2:/);
+
   // ── ⑤ 3 頁目の字を選ぶ → 「ノートへ引く」──
   const quote = win.locator('#quote');
   await win.evaluate(() => window.getSelection()?.removeAllRanges());
@@ -708,7 +728,24 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await clickReal(ed, '[data-pkc-field="pdf-page-remove"][data-thumb-page="2"]');
   await expect(shown).toHaveCount(4);
   expect(await order()).toEqual(['1', '3', '4', '5']);
-  expect(await labels(), '位置の番号が詰まっていない').toEqual(['1', '2', '3', '4']);
+  expect(await labels(), '位置の番号が詰まっていない(並びが変わった所は元の番号を添える)').toEqual(['1', '2(元の 3)', '3(元の 4)', '4(元の 5)']);
+  // 🔴 外したページは「外したページ」欄に残り、「戻す」で 1 ページだけ元の並びへ戻る(片道にしない)
+  const removedList = ed.locator('[data-pkc-field="pdf-removed-list"]');
+  await expect(removedList, '外したページの欄が出ない').toBeVisible();
+  await expect(removedList.locator('.removed-head')).toHaveText('外したページ');
+  const restoreBtn = removedList.locator('[data-pkc-field="pdf-page-restore"]');
+  await expect(restoreBtn, '外した 1 ページぶんの「戻す」が 1 つだけ出ていない').toHaveCount(1);
+  await expect(restoreBtn).toHaveAttribute('data-thumb-restore', '2');
+  await expect(restoreBtn.locator('.thumb-ghost-act')).toHaveText('戻す');
+  await clickReal(ed, '[data-pkc-field="pdf-page-restore"][data-thumb-restore="2"]');
+  await expect(shown, '「戻す」でページが戻らない').toHaveCount(5);
+  expect(await order()).toEqual(['1', '2', '3', '4', '5']);
+  expect(await labels(), '戻した後に元の番号の添え書きが残っている').toEqual(['1', '2', '3', '4', '5']);
+  await expect(removedList, '戻した後も外したページの欄が残っている').toBeHidden();
+  // 次の流れのために、もう一度 2 ページ目を外す
+  await clickReal(ed, '[data-pkc-field="pdf-page-remove"][data-thumb-page="2"]');
+  await expect(shown).toHaveCount(4);
+  expect(await order()).toEqual(['1', '3', '4', '5']);
   await expect(save).toBeVisible();
   await expect(save).toBeEnabled();
   await expect(save).toHaveText('別の PDF として保存');
@@ -780,7 +817,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   };
   await drag(5, 1);
   await expect.poll(order, { message: 'ドラッグで並びが替わらない', timeout: 10_000 }).toEqual(['5', '1', '3', '4']);
-  expect(await labels()).toEqual(['1', '2', '3', '4']);
+  expect(await labels()).toEqual(['1(元の 5)', '2(元の 1)', '3', '4']);
   await expect(ed.locator('[data-pkc-drop]'), '離した後も線が残っている').toHaveCount(0);
   // 離した直後のクリックは「押した」にならない(読む側が動かない)
   expect(await ed.locator('#pageno').inputValue()).not.toBe('5');
@@ -843,6 +880,14 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
     '保存しました。PKC3 のウィンドウの下の知らせで「そのノートを開く」を押すと新しい PDF が開きます',
     { timeout: 20_000 },
   );
+  // 🔴 窓の下の一言は下の操作を邪魔せず(押しを通す)、終わった知らせは 5 秒ほどで自然に消える
+  expect(await cssOf(ed.locator('#status'), 'pointer-events'), '窓の下の知らせが押しを受けてしまう').toBe('none');
+  await expect
+    .poll(() => ed.locator('#status').evaluate((el) => (el.textContent ?? '') === '' && getComputedStyle(el).display === 'none'), {
+      message: '保存の知らせが自動で消えない',
+      timeout: 12_000,
+    })
+    .toBe(true);
   await expect(entryNamed(ED_OUT), '新しい添付が増えていない').toHaveCount(1, { timeout: 10_000 });
   await expect(entryNamed(ED_NAME).filter({ hasNotText: '(編集)' }), '元の添付が消えた').toHaveCount(1);
   await expect(

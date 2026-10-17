@@ -200,8 +200,9 @@ test('🔴 ファイルを本文の塊の上へ落とすと、その所に添付
    *   dragover が受けた物と drop で来た物が食い違う)。
    */
   await page.evaluate((p) => {
+    // ⚠ 本物の 1x1 PNG ── 偽の数バイトは、読めない画像として理由の 1 行に差し替わる(#1702)
     const dt = new DataTransfer();
-    dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], '猫.png', { type: 'image/png' }));
+    dt.items.add(new File([Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0))], '猫.png', { type: 'image/png' }));
     (window as unknown as { __dropDt: DataTransfer }).__dropDt = dt;
     const el = document.elementFromPoint(p.x, p.y)!;
     el.dispatchEvent(
@@ -380,7 +381,7 @@ test('🔴 横に留めた枠へファイルを落とすと、その枠のノー
     const at = { x: t.x + t.width / 2, y: t.y + t.height * 0.8, name };
     await page.evaluate((p) => {
       const dt = new DataTransfer();
-      dt.items.add(new File([new Uint8Array([9, 8, 7, 6])], p.name, { type: 'image/png' }));
+      dt.items.add(new File([Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0))], p.name, { type: 'image/png' }));
       (window as unknown as { __dropDt: DataTransfer }).__dropDt = dt;
       const el = document.elementFromPoint(p.x, p.y)!;
       el.dispatchEvent(
