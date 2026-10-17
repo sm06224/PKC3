@@ -334,6 +334,7 @@ import {
 import { ChapterWindows } from '@adapter/ui/chapter-windows';
 import { createCaptureService } from '@adapter/ui/actions/capture';
 import { createCaptureTrimmer } from '@adapter/ui/actions/capture-trim';
+import { createCaptureExtractor } from '@adapter/ui/actions/capture-extract';
 import { createImageDrawer } from '@adapter/ui/actions/image-draw';
 import { openImageDrawWindow } from '@adapter/platform/image-draw-window';
 import { AudioClient } from '@adapter/platform/audio/audio-client';
@@ -3427,6 +3428,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
 
   /**
+   * 🔴 **動画から音だけ / 絵だけを取り出す**(#952 A1)。段取りは `capture-extract.ts` が持ち、ここは口を渡すだけ
+   * (CLAUDE.md §2:この file はどの test からも実行されない)。⚠ 重い所は上の 2 つのワーカー(切り出しと同じ)。
+   * 🔴 置き場は元の添付と同じフォルダ(`imageDrawer` と同じ引き方)。
+   */
+  const captureExtractor = createCaptureExtractor({
+    dispatcher,
+    readBlob: (assetKey) => blobs.get(cid, assetKey),
+    extractAudio: (blob) => audioClient.extract(blob),
+    extractPicture: (blob) => videoClient.pictureOnly(blob),
+    parentOf: (lid) => {
+      const st = dispatcher.getState();
+      return resolveCanonicalParents(st.entryMetas, st.relations).get(lid) ?? null;
+    },
+    attach: async (item, place) => {
+      let out: Awaited<ReturnType<typeof attachOne>> = null;
+      await withAssetGate.queued(async () => {
+        out = await attachOne(dispatcher, attachDeps, item, undefined, place);
+      });
+      return out;
+    },
+    notify: showStatus,
+  });
+
+  /**
    * 🔴 **画像に描き込む**(#683 段③。裁定は #1163)。段取りは `image-draw.ts`、窓は
    * `image-draw-window.ts`。ここは口を渡すだけ(CLAUDE.md §2:この file はどの test からも
    * 実行されない)。⚠ 取り込みは録音の切り出しと同じ `attachOne` の 1 本(門の中で待つ側)。
@@ -3712,6 +3737,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     trimCapture: (lid, startMs, endMs) => void captureTrimmer.run(lid, startMs, endMs),
     // 🔴 録った音を文字にする(#772 段②)── 押す口は「音/動画」の行に在る
     transcribeCapture: (lid) => void captureTranscriber.run(lid),
+    // 🔴 動画から音だけ / 絵だけを取り出す(#952 A1)── 押す口は動画の行に在る
+    extractCapture: (lid, part) => void captureExtractor.run(lid, part),
     // 🔴 音声認識の部品を入れる / やめる / 消す(#772 段②)── 判断も文言も実体が持つ
     installAsrPart: (id) => {
       const part = asrPartOf(id);
@@ -4123,6 +4150,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             await openInPdfReader(
               {
                 enabled: () => appPdfReader.enabled(),
+                // ⚠ 昇格で変わるので呼ぶたびに読む
+                isHolder: () => writerHolder,
                 host: pdfReaderHost,
                 lend: (key) => blobs.lendObjectUrl(cid, key),
                 fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),

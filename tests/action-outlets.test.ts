@@ -189,6 +189,9 @@ const OBJECT_LONE: readonly string[] = [
   // ⚠ 2026-10-02(#772 段②): 「音/動画」の行の「文字にする」。出口は行の中の 1 か所だけ
   //   (`capture-play` と同じ ── 押した行の lid が要る)。名前で呼べない理由も同じ。
   'capture-transcribe',
+  // ⚠ 2026-10-17(#952 A1): 動画の行の「音だけ取り出す」「絵だけ取り出す」。出口は行の中の 1 か所だけ
+  //   (`capture-transcribe` と同じ ── 押した行の lid が要る。取り出す物は押したボタンが運ぶ)。名前で呼べない理由も同じ。
+  'capture-extract',
   'clear-entry-date',
   'deliver-to-extension',
   'dual-bookmark-open',

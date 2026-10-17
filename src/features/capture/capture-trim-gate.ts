@@ -55,3 +55,23 @@ export function trimUnavailableText(item: CaptureItem): string | null {
     ? 'この形の動画はまだ切り出せません。'
     : 'この形の録音はまだ切り出せません。';
 }
+
+/** 動画から取り出す物。`audio` = 音だけ / `picture` = 絵だけ。 */
+export type ExtractPart = 'audio' | 'picture';
+
+/**
+ * 🔴 **動画から音だけ / 絵だけを取り出せる形か**(#952 A1)。
+ *
+ * ⚠ 押し所を出す前に呼ぶ(`canTrimCapture` と同じ ── 切れない形にボタンを出さない)。
+ * 🔑 mime だけで決める粗い門。中を開いてから断られうる(音が入っていない・読めない)── そのときは
+ *   `webm-opus.ts` / `webm-vp8.ts` の断り文が出る。
+ * - 音だけ: `video/webm` で、`codecs=` が書かれていれば opus を含むもの(音が無い録画を除く)
+ * - 絵だけ: 切り出せる動画(映像が VP8 の webm)
+ */
+export function canExtractFromVideo(item: CaptureItem, part: ExtractPart): boolean {
+  if (item.kind !== 'video' || item.assetKey === null) return false;
+  if (part === 'picture') return canTrimCapture(item);
+  if (item.mime.split(';')[0]!.trim().toLowerCase() !== 'video/webm') return false;
+  const codecs = codecsOf(item.mime);
+  return codecs.length === 0 || codecs.includes('opus');
+}

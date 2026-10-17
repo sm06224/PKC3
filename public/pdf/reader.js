@@ -66,6 +66,7 @@ const editBar = $('edit-bar');
 const appendBtn = $('append-pdf');
 const noteBtn = $('note-tool');
 const penBtn = $('pen-tool');
+const nativeBtn = $('open-native');
 const notePop = $('note-pop');
 const noteEditBtn = $('note-edit');
 const noteRemoveBtn = $('note-remove');
@@ -120,6 +121,8 @@ let blob = null;
 /** 本体が教えてくれた添付の名前(保存する PDF の名前の元)。 */
 let docName = '';
 let ownUrl = null;
+/** 「ブラウザの表示で開く」に貸した ObjectURL(1 つ。窓を閉じるときに返す)。 */
+let nativeUrl = null;
 let started = false;
 let scale = 1;
 let fitMode = true;
@@ -231,6 +234,7 @@ async function openPdf() {
     state('ready');
     // 一覧は既定で出す(読む幅を取られたくない人は、帯のボタンで隠せる)── 幅合わせの前に出す(幅が変わるので)
     listBtn.disabled = false;
+    nativeBtn.disabled = false;
     setList(true, false);
     $('pagecount').textContent = `/ ${String(grand)}`;
     fitWidth();
@@ -1454,8 +1458,24 @@ function showAppendMenu() {
   appendMenu.style.top = `${String(Math.floor(r.bottom + 4))}px`;
   appendPick.hidden = true;
   appendPick.textContent = '';
+  appendMenu.style.left = '';
   appendMenu.hidden = false;
+  keepAppendMenuOnScreen();
   appendBtn.setAttribute('aria-expanded', 'true');
+}
+
+/**
+ * 🔴 一覧が窓の左外へはみ出さないようにする。上のバーが狭い窓で折り返すと「PDF を足す」が 2 段目の
+ *   左端へ移り、右端そろえのままだと一覧が左へはみ出して押せなくなる(1100px の窓で実測、x=-16.8)。
+ *   ⚠ 一覧の中身(添付の候補)が後から増えて幅が変わったときも、ここを呼び直す。
+ */
+function keepAppendMenuOnScreen() {
+  if (appendMenu.hidden) return;
+  const m = appendMenu.getBoundingClientRect();
+  if (m.left < 4) {
+    appendMenu.style.right = 'auto';
+    appendMenu.style.left = '4px';
+  }
 }
 
 appendBtn.addEventListener('click', () => {
@@ -1501,6 +1521,7 @@ appendFromNote.addEventListener('click', () => {
   wait.className = 'append-note';
   wait.textContent = '添付の PDF を探しています…';
   appendPick.append(wait);
+  keepAppendMenuOnScreen();
   clearTimer(attachTimer);
   attachTimer = setTimeout(() => {
     attachTimer = null;
@@ -1525,6 +1546,7 @@ function onAttachList(payload) {
     msg.className = 'append-note';
     msg.textContent = pageEdit.attachRefusal(payload.ok === true ? 'empty' : 'failed');
     appendPick.append(msg);
+    keepAppendMenuOnScreen();
     return;
   }
   for (const it of list) {
@@ -1551,6 +1573,7 @@ function onAttachList(payload) {
     });
     appendPick.append(b);
   }
+  keepAppendMenuOnScreen();
 }
 
 /** 選んだ添付の bytes を借りられた(貸された URL から取る)── あとは「パソコンのファイル」と同じ道で足す。 */
@@ -2285,6 +2308,8 @@ let removals = new Map();
 let hlBase = { marks: [], removals: new Map(), notes: [], strokes: [], noteRemovals: new Map() };
 /** 選んだ色(窓を閉じるまで覚える)。 */
 let hlColor = hl.DEFAULT_COLOR;
+/** ペンの色(窓を閉じるまで覚える)。既定は濃い色 ── ハイライトの黄(薄い)では線が読みにくい。丸いボタンで選べば替わる。 */
+let penColor = hl.PEN_DEFAULT_COLOR;
 let uidSeq = 0;
 /** 「ハイライトを外す」を出している対象(`null` = 出していない)と、そのときの読む面の位置。 */
 let hlTarget = null;
@@ -2309,20 +2334,28 @@ function isHlDirty() {
 
 /** 案内に出す数(付箋: 付けた / 外した、ペンの線: 書いた / 外した)。 */
 function annCounts() {
-  const n = nt.diffCount(notes, hlBase.notes);
+  // 🔴 外したページに付いた物は、保存した PDF に入らない ── 案内の数から除く(保存前の案内が実際より多く言わない)
+  const kept = (list) => pageEdit.onKeptPages(list, items);
+  const n = nt.diffCount(kept(notes), kept(hlBase.notes));
   let goneExisting = 0;
-  for (const k of noteRemovals.keys()) if (!hlBase.noteRemovals.has(k)) goneExisting += 1;
-  return { notes: { added: n.added, removed: n.removed + goneExisting }, strokes: nt.diffCount(strokes, hlBase.strokes) };
+  for (const [k, v] of noteRemovals) if (!hlBase.noteRemovals.has(k) && pageEdit.isKept(items, v.page)) goneExisting += 1;
+  return {
+    notes: { added: n.added, removed: n.removed + goneExisting },
+    strokes: nt.diffCount(kept(strokes), kept(hlBase.strokes)),
+  };
 }
 
 /** 案内に出す数: 保存した状態に無い付けた数 / 保存した状態から外した数。 */
 function hlCounts() {
-  const has = new Set(marks.map((m) => `${String(m.uid)}:${m.color}`));
-  const baseHas = new Set(hlBase.marks.map((m) => `${String(m.uid)}:${m.color}`));
-  const uids = new Set(marks.map((m) => m.uid));
+  // 🔴 外したページに付いた物は数えない(上の `annCounts` と同じ)
+  const live = pageEdit.onKeptPages(marks, items);
+  const baseLive = pageEdit.onKeptPages(hlBase.marks, items);
+  const has = new Set(live.map((m) => `${String(m.uid)}:${m.color}`));
+  const baseHas = new Set(baseLive.map((m) => `${String(m.uid)}:${m.color}`));
+  const uids = new Set(live.map((m) => m.uid));
   let removed = 0;
-  for (const b of hlBase.marks) if (!uids.has(b.uid)) removed += 1;
-  for (const k of removals.keys()) if (!hlBase.removals.has(k)) removed += 1;
+  for (const b of baseLive) if (!uids.has(b.uid)) removed += 1;
+  for (const [k, v] of removals) if (!hlBase.removals.has(k) && pageEdit.isKept(items, v.page)) removed += 1;
   return { added: [...has].filter((k) => !baseHas.has(k)).length, removed };
 }
 
@@ -2453,6 +2486,10 @@ async function addHighlight() {
     setStatus(HL_NOT_READ);
     return;
   }
+  if (made.some((m) => isRemovedPage(m.page))) {
+    setStatus(REMOVED_PAGE_NO_TOOL);
+    return;
+  }
   if (!(await canEdit())) return;
   if (saving) return;
   for (const m of made) {
@@ -2470,9 +2507,17 @@ async function addHighlight() {
   setStatus('ハイライトを付けました。「別の PDF として保存」で新しい PDF になります');
 }
 
+/** 丸いボタンの「押されている」を、いま選んでいる道具の色に合わせる(ペンの間はペンの色、それ以外はハイライトの色)。 */
+function syncSwatches() {
+  const cur = tool === 'pen' ? penColor : hlColor;
+  for (const b of swatches) b.setAttribute('aria-pressed', b.getAttribute('data-hl-color') === cur ? 'true' : 'false');
+}
+
 function setHlColor(id) {
-  hlColor = hl.colorOf(id).id;
-  for (const b of swatches) b.setAttribute('aria-pressed', b.getAttribute('data-hl-color') === hlColor ? 'true' : 'false');
+  // 🔑 ペンを選んでいる間の色は、ハイライトの色とは別に覚える(ペンの既定の濃い色を、ハイライトの選びで動かさない)
+  if (tool === 'pen') penColor = hl.colorOf(id).id;
+  else hlColor = hl.colorOf(id).id;
+  syncSwatches();
 }
 
 /** 色のボタンを作って、「ノートへ引用する」の手前に並べる(色の正本は `highlight.js` の `COLORS` ── 窓の色もここから引く)。 */
@@ -2491,7 +2536,8 @@ function buildSwatches() {
     quoteBtn.before(b);
     swatches.push(b);
   }
-  setHlColor(hlColor);
+  // ⚠ `tool` はこの下で宣言する(まだ触れない)── 最初はハイライトの色を押されている印にする
+  for (const b of swatches) b.setAttribute('aria-pressed', b.getAttribute('data-hl-color') === hlColor ? 'true' : 'false');
 }
 buildSwatches();
 hlBtn.addEventListener('click', () => {
@@ -2616,6 +2662,16 @@ async function removeTarget() {
   updateEditUi();
 }
 
+// ───────── ブラウザの表示で開く(同じ PDF をブラウザ標準の表示で別のタブに)
+
+nativeBtn.addEventListener('click', () => {
+  if (blob === null) return;
+  // 🔑 URL は 1 つだけ作って使い回す。⚠ 返すのは窓を閉じるとき(`pagehide`)── 開いた先のタブが読み終えるまで要る
+  if (nativeUrl === null) nativeUrl = URL.createObjectURL(blob);
+  const w = window.open(nativeUrl, '_blank');
+  if (w === null) setStatus('ブラウザの表示を開けませんでした。ブラウザのポップアップを許可してから、もう一度押してください');
+});
+
 // ───────── 付箋とペン(#275)── ページのどこかを押して付箋を付ける・なぞって線を書く
 //
 // 🔴 ハイライトと**同じ作り**: 画面で触るのは計画(`notes` / `strokes` / 外す元の付箋 `noteRemovals`)だけで、PDF は保存を押すまで
@@ -2724,6 +2780,7 @@ function setTool(next) {
   noteBtn.setAttribute('aria-pressed', to === 'note' ? 'true' : 'false');
   penBtn.setAttribute('aria-pressed', to === 'pen' ? 'true' : 'false');
   setSelButtons(lastSel !== null);
+  syncSwatches();
   if (to === 'note') setStatus('付箋を付けたい場所を押してください');
   else if (to === 'pen') setStatus('ページの上をなぞって線を書けます。色は右の丸いボタンで選びます');
   else setStatus('');
@@ -2743,12 +2800,25 @@ penBtn.addEventListener('click', () => {
  *   ここでは捉えられないので、字は道具を選んでいる間の押しにだけ出す。
  */
 const ADDED_PAGE_NO_TOOL = '足したページには付箋・ペン・ハイライトを付けられません(保存した PDF なら付けられます)';
+/** 外したページへ付けようとした断り(保存した PDF に入らないページへ付けても、消えるだけ)。 */
+const REMOVED_PAGE_NO_TOOL = pageEdit.REMOVED_PAGE_REFUSAL;
+/** 元の PDF のページで、いまの並びから外してあるか(一覧が出来る前は偽)。 */
+function isRemovedPage(page) {
+  return page >= 1 && page <= total && posByPage[page] === 0;
+}
 pagesEl.addEventListener('pointerdown', (ev) => {
   if (!ready || saving || tool === null || ev.button !== 0) return;
   const t = ev.target instanceof Element ? ev.target : null;
-  if (t === null || t.classList.contains('tool-layer')) return;
+  if (t === null) return;
   const box = t.closest('.page');
-  if (box === null || Number(box.getAttribute('data-page')) <= total) return;
+  if (box === null) return;
+  const no = Number(box.getAttribute('data-page'));
+  if (isRemovedPage(no)) {
+    // 🔴 外したページ: 押さえの層の上でも断る(ペンの線・付箋の欄を出さない ── 下の道具の処理は `isRemovedPage` で手を引く)
+    setStatus(REMOVED_PAGE_NO_TOOL);
+    return;
+  }
+  if (t.classList.contains('tool-layer') || no <= total) return;
   setStatus(ADDED_PAGE_NO_TOOL);
 });
 
@@ -2789,7 +2859,7 @@ pagesEl.addEventListener('click', (ev) => {
   if (box === null) return;
   const page = Number(box.getAttribute('data-page'));
   const vp = pageVp[page];
-  if (!vp) return;
+  if (!vp || isRemovedPage(page)) return;
   const b = box.getBoundingClientRect();
   const at = nt.clientToViewport(ev.clientX, ev.clientY, b, { width: vp.width, height: vp.height });
   // 🔑 場所は押した瞬間に PDF の座標へ直す(字を入れている間に拡大縮小しても、押した場所のまま)
@@ -2961,7 +3031,7 @@ pagesEl.addEventListener('pointerdown', (ev) => {
   const page = box === null ? 0 : Number(box.getAttribute('data-page'));
   const vp = pageVp[page];
   const svg = box === null ? null : box.querySelector(':scope > .ink-layer');
-  if (!vp || svg === null) return;
+  if (!vp || svg === null || isRemovedPage(page)) return;
   try {
     t.setPointerCapture(ev.pointerId);
   } catch {
@@ -2969,7 +3039,7 @@ pagesEl.addEventListener('pointerdown', (ev) => {
   }
   const line = document.createElementNS(SVG_NS, 'polyline');
   line.setAttribute('fill', 'none');
-  line.setAttribute('stroke', cssRgb(hl.colorOf(hlColor).rgb));
+  line.setAttribute('stroke', cssRgb(hl.colorOf(penColor).rgb));
   line.setAttribute('stroke-width', String(nt.PEN_WIDTH * (vp.scale ?? scale)));
   line.setAttribute('stroke-linecap', 'round');
   line.setAttribute('stroke-linejoin', 'round');
@@ -3001,7 +3071,7 @@ async function penEnd(ev, cancelled) {
   if (!(await canEdit())) return;
   if (saving) return;
   uidSeq += 1;
-  strokes = strokes.concat([{ uid: uidSeq, page: p.page, color: hlColor, pts }]);
+  strokes = strokes.concat([{ uid: uidSeq, page: p.page, color: penColor, pts }]);
   repaintMarks();
   updateEditUi();
   setStatus('線を書きました。「別の PDF として保存」で新しい PDF になります');
@@ -3029,6 +3099,7 @@ window.addEventListener('pagehide', () => {
   cache.clear();
   releaseThumbs();
   if (ownUrl !== null) URL.revokeObjectURL(ownUrl);
+  if (nativeUrl !== null) URL.revokeObjectURL(nativeUrl);
   if (lease !== null) lease.dispose();
   disposeAdded();
   disposeEdit();

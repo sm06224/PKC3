@@ -7,10 +7,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import { isProgressNotice } from '../../src/adapter/ui/render/status-notice';
-import { OPENING_NOTE, openInPdfReader } from '../../src/adapter/platform/pdf/open-in-reader';
+import { OPENING_NOTE, OPEN_NOT_HOLDER, openInPdfReader } from '../../src/adapter/platform/pdf/open-in-reader';
 import { PdfReaderHost, type PdfLent } from '../../src/adapter/platform/pdf/pdf-window';
 
-function rig(enabled: boolean, lendable = true, delayed = false) {
+function rig(enabled: boolean, lendable = true, delayed = false, holder = true) {
   const opened: string[] = [];
   const lends: string[] = [];
   const disposed: string[] = [];
@@ -45,6 +45,7 @@ function rig(enabled: boolean, lendable = true, delayed = false) {
   });
   const deps = {
     enabled: () => enabled,
+    isHolder: () => holder,
     host: () => host,
     lend: (key: string): Promise<PdfLent | null> => {
       lends.push(key);
@@ -64,6 +65,32 @@ function rig(enabled: boolean, lendable = true, delayed = false) {
 const pdf = { kind: 'pdf', assetKey: 'k1', name: 'a.pdf', lid: 'att1' };
 
 describe('openInPdfReader', () => {
+  it('🔴 保存できないタブ(2 つ目以降)からは、窓を開く前に断る: 何も借りず・何も開かず、メインのタブへ案内する', async () => {
+    const g = rig(true, true, false, false);
+    expect(await openInPdfReader(g.deps, pdf)).toBe(true);
+    expect(g.fails).toEqual([OPEN_NOT_HOLDER]);
+    expect(OPEN_NOT_HOLDER).toContain('メインのタブから開いてください');
+    expect(g.lends, '借りない').toEqual([]);
+    expect(g.opened, '窓を開かない').toEqual([]);
+    // 対照群: 同じ操作でも、保存できるタブなら開く
+    const ok = rig(true, true, false, true);
+    expect(await openInPdfReader(ok.deps, pdf)).toBe(true);
+    expect(ok.fails).toEqual([]);
+    expect(ok.opened).toHaveLength(1);
+  });
+
+  it('設定が切(既定)のときは、保存できないタブでも今までの窓へ(false)── 断りは出ない', async () => {
+    const g = rig(false, true, false, false);
+    expect(await openInPdfReader(g.deps, pdf)).toBe(false);
+    expect(g.fails).toEqual([]);
+  });
+
+  it('PDF 以外(画像)は、保存できないタブでも断らない(振り分けの外)', async () => {
+    const g = rig(true, true, false, false);
+    expect(await openInPdfReader(g.deps, { ...pdf, kind: 'image' })).toBe(false);
+    expect(g.fails).toEqual([]);
+  });
+
   it('🔴 切(既定): false を返し、何も借りず・何も開かない(今までの窓へ)', async () => {
     const g = rig(false);
     expect(await openInPdfReader(g.deps, pdf)).toBe(false);

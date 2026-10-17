@@ -24,6 +24,7 @@ interface R {
 interface Hl {
   COLORS: { id: string; label: string; rgb: number[] }[];
   DEFAULT_COLOR: string;
+  PEN_DEFAULT_COLOR: string;
   colorOf(id: string): { id: string; rgb: number[] };
   dedupeRects(rects: R[], min?: number): R[];
   quadsFromViewportRects(rects: R[], toPdf: (x: number, y: number) => number[]): { quads: number[][]; rect: number[] };
@@ -66,6 +67,16 @@ describe('色', () => {
     }
     expect(hl.colorOf('blue').id).toBe('blue');
     expect(hl.colorOf('zzz').id).toBe('yellow');
+  });
+
+  it('ペンの既定色は濃い色(ハイライトの黄ではない)。丸いボタンの 4 色には載らないが、色の表は引ける', () => {
+    expect(hl.PEN_DEFAULT_COLOR).not.toBe(hl.DEFAULT_COLOR);
+    expect(hl.COLORS.map((c) => c.id)).not.toContain(hl.PEN_DEFAULT_COLOR);
+    const pen = hl.colorOf(hl.PEN_DEFAULT_COLOR);
+    expect(pen.id, '知らない色として黄に化けていない').toBe(hl.PEN_DEFAULT_COLOR);
+    // 濃い = 白い紙の上で読める。どの成分も 0.5 未満で、黄(明るい)とは別物
+    for (const v of pen.rgb) expect(v).toBeLessThan(0.5);
+    expect(pen.rgb).not.toEqual(hl.colorOf(hl.DEFAULT_COLOR).rgb);
   });
 });
 

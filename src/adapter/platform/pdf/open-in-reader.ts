@@ -14,6 +14,11 @@ export interface OpenInPdfReaderDeps {
   readonly host: () => PdfReaderHost;
   /** 添付を貸す(`blobs.lendObjectUrl`)。 */
   readonly lend: (assetKey: string) => Promise<PdfLent | null>;
+  /**
+   * 🔴 このタブが保存できるタブ(writer リースを持つ)か。⚠ 昇格で変わるので呼ぶたびに読む。
+   * 2 つ目以降のタブは編集の結果を保存できない(`save-edited.ts` の `SAVE_NOT_HOLDER`)── 窓を開く前に断る。
+   */
+  readonly isHolder: () => boolean;
   /** 失敗を user へ言う。 */
   readonly fail: (message: string) => void;
   /** 状態の行へ 1 行。 */
@@ -28,12 +33,21 @@ export interface OpenInPdfReaderDeps {
 export const OPENING_NOTE = (name: string): string =>
   `「${name}」のウィンドウを開いています。数秒たっても出ないときは、ブラウザのポップアップを許可してください`;
 
+/** 保存できないタブから開こうとしたときの断り(保存時の `SAVE_NOT_HOLDER` と同じ向き)。 */
+export const OPEN_NOT_HOLDER =
+  'このタブからは PDF を開けません(開いても編集の結果を保存できません)。メインのタブから開いてください';
+
 /** @returns 引き受けたら `true`(呼び側はもう何もしない)/ 選んでいなければ `false`。 */
 export async function openInPdfReader(
   deps: OpenInPdfReaderDeps,
   args: { kind: string; assetKey: string; name: string; lid: string | null },
 ): Promise<boolean> {
   if (args.kind !== 'pdf' || !deps.enabled()) return false;
+  // 🔴 窓を開く前に断る: 何も借りない・窓も作らない(開いてから保存で断られる手戻りをさせない)
+  if (!deps.isHolder()) {
+    deps.fail(OPEN_NOT_HOLDER);
+    return true;
+  }
   const host = deps.host();
   /**
    * 🔴 **窓が名乗る前の 2 回目の押し**は、「もう開いています」と言わない。ポップアップを止めている人は

@@ -351,8 +351,19 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   expect(await thumbs.evaluateAll((els) => els.filter((e) => e.getAttribute('tabindex') === '0').length)).toBe(1);
   await expect(item(3), 'Tab の止まり先がいまの頁でない').toHaveAttribute('tabindex', '0');
   await expect(item(2)).toHaveAttribute('tabindex', '-1');
+  // 🔴 「ブラウザの表示で開く」── 押すと新しいタブが blob: の URL で開く(窓は開いたまま)
+  await expect(win.locator('#open-native'), '読めたのに「ブラウザの表示で開く」が押せない').toBeEnabled();
+  const [native] = await Promise.all([
+    context.waitForEvent('page', { timeout: 15_000 }),
+    clickReal(win, '#open-native'),
+  ]);
+  await expect.poll(() => native.url(), { message: '「ブラウザの表示で開く」の新しいタブが blob: の URL でない', timeout: 15_000 }).toMatch(/^blob:/);
+  await native.close();
+  expect(win.isClosed(), '「ブラウザの表示で開く」で PDF のウィンドウが閉じた').toBe(false);
   await win.focus('#hit-next');
   // 上のバーで押せるのは「PDF を足す」(#275 結合)と「付箋」「ペン」(#275。字を選ばなくても押せる)だけ ── 次の Tab で一覧へ入る
+  await win.keyboard.press('Tab');
+  expect(await win.evaluate(() => document.activeElement?.id), '上のバーの次の止まり先が「ブラウザの表示で開く」でない').toBe('open-native');
   await win.keyboard.press('Tab');
   expect(await win.evaluate(() => document.activeElement?.id), '上のバーの次の止まり先が「PDF を足す」でない').toBe('append-pdf');
   await win.keyboard.press('Tab');
@@ -417,7 +428,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   expect(
     held.created - held.revoked,
     `作った ObjectURL(${String(held.created)})のうち返していない数が、窓の中の絵の数(${String(held.imgs)})を超えている ── 描画中に外れた頁の絵を返し忘れている`,
-  ).toBeLessThanOrEqual(held.imgs);
+  ).toBeLessThanOrEqual(held.imgs + 1); // +1 = 「ブラウザの表示で開く」が貸した URL(1 つだけ。窓を閉じるときに返す ── 開いた先のタブが読み終えるまで要る)
 
   // ── ④′ 使われない間は、解析の worker を畳む(常駐メモリを返す)。描いた頁の絵は残り、使い直すとき黙って開き直す ──
   //    観測点は窓の中の worker の実在(`page.workers()`)── 窓の中の変数ではなく、ブラウザが持つ worker そのもの
@@ -743,6 +754,26 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   expect(await labels(), '戻した後に元の番号の添え書きが残っている').toEqual(['1', '2', '3', '4', '5']);
   await expect(removedList, '戻した後も外したページの欄が残っている').toBeHidden();
   // 次の流れのために、もう一度 2 ページ目を外す
+  await clickReal(ed, '[data-pkc-field="pdf-page-remove"][data-thumb-page="2"]');
+  await expect(shown).toHaveCount(4);
+  expect(await order()).toEqual(['1', '3', '4', '5']);
+  // 🔴 外した 2 ページ目へ付箋を付けようとする → 断りが出て、付箋の欄も印も出ない。「戻す」と付けられる
+  await clickReal(ed, '#note-tool');
+  await ed.locator('.page[data-page="2"]').scrollIntoViewIfNeeded();
+  await ed.locator('.page[data-page="2"]').click({ position: { x: 60, y: 60 } });
+  await expect(ed.locator('#status'), '外したページへ付けようとしても断りが出ない').toContainText(
+    '外したページには付箋・ペン・ハイライトを付けられません',
+  );
+  await expect(ed.locator('#note-input-wrap'), '外したページに付箋の欄が出た').toBeHidden();
+  await expect(ed.locator('.page[data-page="2"] [data-pkc-field="pdf-note-new"]'), '外したページに付箋が付いた').toHaveCount(0);
+  await clickReal(ed, '[data-pkc-field="pdf-page-restore"][data-thumb-restore="2"]');
+  await expect(shown).toHaveCount(5);
+  await ed.locator('.page[data-page="2"]').click({ position: { x: 60, y: 60 } });
+  await expect(ed.locator('#note-input-wrap'), '戻したページには付箋を付けられない').toBeVisible();
+  await ed.keyboard.press('Escape');
+  await expect(ed.locator('#note-input-wrap')).toBeHidden();
+  if ((await ed.locator('body').getAttribute('data-pkc-pdf-tool')) !== null) await clickReal(ed, '#note-tool'); // 道具をやめる(同じボタンをもう一度)
+  await expect(ed.locator('body')).not.toHaveAttribute('data-pkc-pdf-tool', /.+/);
   await clickReal(ed, '[data-pkc-field="pdf-page-remove"][data-thumb-page="2"]');
   await expect(shown).toHaveCount(4);
   expect(await order()).toEqual(['1', '3', '4', '5']);
@@ -1263,6 +1294,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   //    fixture は自作の 3 ページ。1 頁目の 1 行目に**他のアプリが付けた形**のハイライト(`/P` つき)が 1 つ付いている。
   const HL_NAME = 'ハイライト.pdf';
   const HL_OUT = 'ハイライト (編集).pdf';
+  const HL_OUT2 = 'ハイライト (編集 2).pdf';
   await page.setInputFiles('[data-pkc-field="attach-input"]', {
     name: HL_NAME,
     mimeType: 'application/pdf',
@@ -1520,13 +1552,15 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(saved.locator('#edit-note')).toContainText('ハイライトを 1 件外しています');
   await clickReal(saved, '#edit-save');
   await expect(saved.locator('#status')).toContainText('保存しました', { timeout: 20_000 });
-  await expect(entryNamed(HL_OUT), '外して保存した PDF が増えていない').toHaveCount(2, { timeout: 10_000 });
+  // 🔴 編集した PDF をさらに編集して保存すると、名前は「(編集 2)」(前の物と同じ名前にならない)
+  await expect(entryNamed(HL_OUT2), '「(編集)」の PDF を保存し直した名前が「(編集 2)」でない').toHaveCount(1, { timeout: 10_000 });
+  await expect(entryNamed(HL_OUT), '(編集)の PDF が増減した').toHaveCount(1);
   await saved.close();
   // 2 つのうち、片方は 2 頁目にハイライトが 1 つ(最初の保存)、もう片方は 0(外して保存)── 順には依らない
   const counts: number[] = [];
-  for (const i of [0, 1]) {
-    await clickReal(page, entryNamed(HL_OUT).nth(i));
-    await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', HL_OUT);
+  for (const name of [HL_OUT, HL_OUT2]) {
+    await clickReal(page, entryNamed(name));
+    await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', name);
     const w = await openHl();
     await expect(pageLayer(w, 2)).toBeAttached({ timeout: 20_000 });
     counts.push(await existingOn(w, 2).count());
@@ -1684,12 +1718,43 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(noteTool, 'ペンを選んだのに付箋が選ばれたまま').toHaveAttribute('aria-pressed', 'false');
   await expect(nw.locator('body')).toHaveAttribute('data-pkc-pdf-tool', 'pen');
   await expect(nw.locator('#bar button.swatch[data-hl-color="blue"]'), 'ペンを選んでも色が押せない').toBeEnabled();
-  await clickReal(nw, '#bar button.swatch[data-hl-color="blue"]');
+  // 🔴 色を選ぶ前の最初の線は濃い青(ハイライトの黄ではない)── 描いて色を見たら外す(あとの数は変えない)
   await nw.locator('.page[data-page="2"]').scrollIntoViewIfNeeded();
   const q2 = await pageBox(nw, 2);
   const from = { x: q2.x + q2.width * 0.15, y: q2.y + q2.height * 0.2 };
   const to = { x: q2.x + q2.width * 0.7, y: q2.y + q2.height * 0.3 };
   await expect(inkOn(nw, 2)).toHaveCount(0);
+  await nw.mouse.move(from.x, from.y);
+  await nw.mouse.down();
+  await nw.mouse.move(to.x, to.y, { steps: 8 });
+  await nw.mouse.up();
+  await expect(inkOn(nw, 2), '既定の色でなぞったのに線が出ない').toHaveCount(1);
+  expect(await inkOn(nw, 2).first().getAttribute('stroke'), 'ペンの既定が濃い青でない(黄のまま?)').toBe('rgb(13,38,115)');
+  await nw.keyboard.press('Escape');
+  await expect(penTool).toHaveAttribute('aria-pressed', 'false');
+  expect(
+    await nw.locator('#bar button.swatch[aria-pressed="true"]').getAttribute('data-hl-color'),
+    'ペンの色がハイライトの色(黄)を動かした',
+  ).toBe('yellow');
+  const dl = await inkOn(nw, 2).first().evaluate((el: SVGPolylineElement) => {
+    const pts = el.getAttribute('points')?.split(' ').map((p) => p.split(',').map(Number)) ?? [];
+    const k = pts[Math.floor(pts.length / 2)];
+    const svg = el.ownerSVGElement as SVGSVGElement;
+    const r = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    return k === undefined ? null : { x: r.left + (k[0] as number) * (r.width / vb.width), y: r.top + (k[1] as number) * (r.height / vb.height) };
+  });
+  expect(dl, '既定色の線の点が読めない').not.toBeNull();
+  await nw.mouse.click((dl as { x: number }).x, (dl as { y: number }).y);
+  await clickReal(nw, '#note-remove');
+  await expect(inkOn(nw, 2), '既定色の線が外れない').toHaveCount(0);
+  await clickReal(nw, '#pen-tool');
+  await expect(
+    nw.locator('#bar button.swatch[aria-pressed="true"]'),
+    'ペンを選んでいる間は、ペンの色(既定は丸いボタンに無い濃い青)を押されている印にする',
+  ).toHaveCount(0);
+  await clickReal(nw, '#bar button.swatch[data-hl-color="blue"]');
+  await expect(nw.locator('#bar button.swatch[data-hl-color="blue"]'), '丸い色ボタンを押してもペンの色が替わらない').toHaveAttribute('aria-pressed', 'true');
   await nw.mouse.move(from.x, from.y);
   await nw.mouse.down();
   await nw.mouse.move((from.x + to.x) / 2, from.y - 20, { steps: 6 });
@@ -1882,6 +1947,25 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(cold.locator('#msg'), '退避なのに断り文が出ている').toBeHidden();
   await cold.close();
   await context.unroute('**/*');
+
+  // ── ⑧ 保存できないタブ(2 つ目のタブ)から開こうとする ── 窓は開かず、理由が出る
+  const tabB = await context.newPage();
+  await tabB.setViewportSize({ width: 1280, height: 900 });
+  await gotoApp(tabB);
+  await clickReal(tabB, tabB.locator('[data-pkc-action="select-entry"][data-pkc-entry]', { hasText: '見積.pdf' }));
+  await expect(tabB.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', '見積.pdf');
+  let tabBOpened = 0;
+  context.on('page', () => {
+    tabBOpened += 1;
+  });
+  await clickReal(tabB, '[data-pkc-action="view-asset"]');
+  await expect(
+    tabB.locator('body'),
+    '保存できないタブから開こうとしても断りが出ない',
+  ).toContainText('このタブからは PDF を開けません', { timeout: 10_000 });
+  await tabB.waitForTimeout(1500);
+  expect(tabBOpened, '保存できないタブなのに PDF のウィンドウが開いた').toBe(0);
+  await tabB.close();
 
   expect(winErrors, '窓の中で例外が出ている').toEqual([]);
   expect(errors).toEqual([]);

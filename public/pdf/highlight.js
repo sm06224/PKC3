@@ -22,10 +22,17 @@
     { id: 'pink', label: 'ピンク', rgb: [1, 0.55, 0.78] },
   ];
   var DEFAULT_COLOR = 'yellow';
+  /**
+   * ペンの既定の色(濃い青)。丸いボタンの 4 色には載せない(薄い色はハイライト向き)── ペンの既定だけ濃くする。
+   * `colorOf` は知っている(線の色を引くため)。
+   */
+  var PEN_DEFAULT_COLOR = 'ink';
+  var INK_COLOR = { id: PEN_DEFAULT_COLOR, label: '濃い青', rgb: [0.05, 0.15, 0.45] };
 
   /** 色の id から色(知らない id は黄)。 */
   function colorOf(id) {
     for (var i = 0; i < COLORS.length; i += 1) if (COLORS[i].id === id) return COLORS[i];
+    if (id === INK_COLOR.id) return INK_COLOR;
     return COLORS[0];
   }
 
@@ -221,6 +228,7 @@
     COLORS: COLORS,
     DEFAULT_COLOR: DEFAULT_COLOR,
     colorOf: colorOf,
+    PEN_DEFAULT_COLOR: PEN_DEFAULT_COLOR,
     dedupeRects: dedupeRects,
     quadsFromViewportRects: quadsFromViewportRects,
     quadsOnPage: quadsOnPage,

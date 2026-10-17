@@ -1089,6 +1089,24 @@ ${(e as Error).message}`,
   expect(screenDur.seekedTo, '画面録画の終わりの手前へ飛べない').not.toBeNull();
   expect(screenDur.seekedTo!, '画面録画の終わりの手前へ飛べない').toBeGreaterThan(durNum - 1.5);
 
+  /**
+   * 🔴 **動画から音だけ・絵だけを取り出す**(#952 A1)── 新しい起動は足さず、録った画面収録の行で押す。
+   * 押し口は動画の行にだけ出る(音の行には出ない)/ 押すと「取り出しています…」→「取り出しました」/
+   * 元の動画の行は残る。⚠ 画面収録に音が入っているかは環境次第なので、絵だけを押して完了まで見る。
+   */
+  await expect(screenRow.locator('[data-pkc-field="capture-extract-audio"]'), '動画の行に「音だけ取り出す」が出ない').toHaveText('音だけ取り出す');
+  await expect(screenRow.locator('[data-pkc-field="capture-extract-picture"]'), '動画の行に「絵だけ取り出す」が出ない').toHaveText('絵だけ取り出す');
+  await expect(
+    page.locator('[data-pkc-capture]:has([data-pkc-field="capture-extract-audio"]):has-text("(0:01〜0:03)")'),
+    '切り出した音の行に取り出しの押し口が出ている',
+  ).toHaveCount(0);
+  await clickReal(page, screenRow.locator('[data-pkc-field="capture-extract-picture"]'));
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '絵だけ取り出しても「取り出しました」が出ない',
+  ).toContainText(/取り出しました:「.*\(絵だけ\)\.webm」/, { timeout: 30_000 });
+  await expect(screenRow, '取り出したら元の動画の行が消えた').toBeVisible();
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

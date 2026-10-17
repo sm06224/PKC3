@@ -23,6 +23,7 @@ import {
   type VideoCutResult,
   type VideoJob,
   type VideoJobResult,
+  type VideoPictureResult,
   type VideoScanResult,
 } from './video-codec';
 import { precisePlanSpec, type VideoScan } from '@features/video/webm-vp8';
@@ -128,6 +129,11 @@ export class VideoClient {
     const r = (await this.run({ op: 'cut', blob, scan, startMs, endMs, mode })) as VideoCutResult;
     if (!r.ok && 'preciseFailed' in r && r.environmentBroken) this.broken = true;
     return r;
+  }
+
+  /** 🔴 音のトラックを落として映像だけにする(#952 A1)。⚠ 断る理由は**値で返る**。 */
+  async pictureOnly(blob: Blob): Promise<VideoPictureResult> {
+    return (await this.run({ op: 'picture-only', blob })) as VideoPictureResult;
   }
 
   dispose(): void {

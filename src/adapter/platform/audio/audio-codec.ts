@@ -9,7 +9,7 @@
  * `Blob` のまま持ち回り、**ワーカーの中で初めて開く**(不可侵指示 2026-07-27
  * 「ゼロコピー・生成とライフサイクル後の速やかな破棄」)。
  */
-import { trimWebmOpus, type TrimRefusal } from '@features/audio/webm-opus';
+import { extractWebmOpusAudio, trimWebmOpus, type TrimOutcome, type TrimRefusal } from '@features/audio/webm-opus';
 
 /** 依頼。⚠ **`Blob` で渡す**(構造化複製で参照として渡り、bytes は写されない)。 */
 export interface AudioTrimJob {
@@ -17,6 +17,17 @@ export interface AudioTrimJob {
   readonly startMs: number;
   readonly endMs: number;
 }
+
+/**
+ * 🔴 **音のトラックを丸ごと取り出す依頼**(#952 A1)。⚠ 範囲を持たない ── 区別は `whole` の有無で付ける
+ * (ワーカーの口は 1 本のまま、`trimAudio` と同じ結果の形で返る)。
+ */
+export interface AudioExtractJob {
+  readonly blob: Blob;
+  readonly whole: true;
+}
+
+export type AudioJob = AudioTrimJob | AudioExtractJob;
 
 export type AudioTrimResult =
   | {
@@ -39,8 +50,25 @@ export type AudioTrimResult =
  * (呼び側が「この 1 件だけ切り出せない」と user へ言える形)。
  */
 export async function trimAudio(job: AudioTrimJob): Promise<AudioTrimResult> {
-  const source = new Uint8Array(await job.blob.arrayBuffer());
-  const out = trimWebmOpus(source, job.startMs, job.endMs);
+  return run(job.blob, (source) => trimWebmOpus(source, job.startMs, job.endMs));
+}
+
+/**
+ * 音のトラックを丸ごと取り出して、音だけの WebM にする(動画から音だけ取り出す)。
+ * ⚠ 動画の映像のトラックは読み飛ばす(出力に入らない)。例外は投げない(`trimAudio` と同じ)。
+ */
+export async function extractAudio(job: AudioExtractJob): Promise<AudioTrimResult> {
+  return run(job.blob, (source) => extractWebmOpusAudio(source));
+}
+
+/** ワーカー / その場の両方が通る 1 本の入口。 */
+export function runAudioJob(job: AudioJob): Promise<AudioTrimResult> {
+  return 'whole' in job ? extractAudio(job) : trimAudio(job);
+}
+
+async function run(blob: Blob, make: (source: Uint8Array) => TrimOutcome): Promise<AudioTrimResult> {
+  const source = new Uint8Array(await blob.arrayBuffer());
+  const out = make(source);
   if (!out.ok) return { ok: false, reason: out.reason };
   const r = out.result;
   // ⚠ `bytes` は自前で組んだ `Uint8Array` なので、buffer 全体がそのまま使える

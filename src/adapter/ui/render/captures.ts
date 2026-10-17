@@ -31,7 +31,7 @@ import {
   visibleCaptures,
   type CaptureItem,
 } from '@features/capture/capture-item';
-import { canTrimCapture, trimUnavailableText } from '@features/capture/capture-trim-gate';
+import { canExtractFromVideo, canTrimCapture, trimUnavailableText } from '@features/capture/capture-trim-gate';
 import { trimMarkText, trimNoteFirst } from '@features/audio/trim-text';
 import { humanBytes } from '@features/human-bytes';
 import type { AssetLender } from './detail';
@@ -763,6 +763,26 @@ export class CapturesRenderer {
           li.append(gone);
         }
       }
+    }
+    /**
+     * 🔴 **動画から音だけ / 絵だけを取り出す**(#952 A1)。結果は新しい添付として元の隣に増える(元は残る)。
+     * ⚠ 取り出せる形の動画にだけ出す(`canExtractFromVideo`)── 切れない形に押し所を出さない。
+     *   音の添付には出さない(音だけの物から音だけを取り出しても同じ物ができる)。
+     */
+    for (const part of ['audio', 'picture'] as const) {
+      if (!canExtractFromVideo(item, part)) continue;
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.setAttribute('data-pkc-action', 'capture-extract');
+      x.setAttribute('data-pkc-entry', item.lid);
+      x.setAttribute('data-pkc-part', part);
+      x.setAttribute('data-pkc-field', `capture-extract-${part}`);
+      x.textContent = part === 'audio' ? '音だけ取り出す' : '絵だけ取り出す';
+      x.title =
+        part === 'audio'
+          ? 'この動画の音だけを新しい音として保存します(元の動画はそのまま残ります)。'
+          : 'この動画の絵だけを新しい動画として保存します(音は入りません。元の動画はそのまま残ります)。';
+      li.append(x);
     }
     /**
      * 🔴 **文字にする**(#772 段②。裁定 2026-10-01 ② = 「聞く」「切り出す」と同じ並び)。
