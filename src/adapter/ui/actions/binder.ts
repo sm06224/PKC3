@@ -19220,7 +19220,9 @@ export function bindActions(
   listen(root, 'input', onInput);
   listen(root, 'change', onChange);
   // 🔴 本文を打ったり、置換を撃ったりして本文が動いたときも、件数を出し直す(#1646 の 2。同じ字なら DOM に触れない)
-  undo.push(dispatcher.onState(() => { paintReplaceCount(root, dispatcher); }));
+  //   ⚠ 配線を組む時点で購読するのはここだけ ── 一部しか持たない仮の dispatcher(test)でも組めるよう、口が在るときだけ繋ぐ
+  const onState = (dispatcher as Partial<Dispatcher>).onState;
+  if (onState !== undefined) undo.push(onState.call(dispatcher, () => { paintReplaceCount(root, dispatcher); }));
   /**
    * 🔴 **添付の改名欄は、欄を離れたときも確定する**(#1264 §1)。⚠ `change` は字が変わらないと
    *   撃たれないので、**題名だけ別の所で変えた後**にファイル名を揃える道が無かった。
