@@ -246,7 +246,7 @@ export function readPlainMarkdown(text: string, fileName: string): PlainMarkdown
   const obsidian = countObsidianLinks(text);
   if (obsidian > 0) {
     warnings.push(
-      `Obsidian 形式のリンク(\`[[…]]\` / \`![[…]]\`)${obsidian} 件は解決していません(記号のまま残ります)`,
+      `Obsidian 形式のリンク(「[[…]]」「![[…]]」)${obsidian} 件は解決していません(記号のまま残ります)`,
     );
   }
 
