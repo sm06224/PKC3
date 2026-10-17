@@ -385,6 +385,34 @@ function assertIntegrity(actualCrc: number, actualSize: number, entry: ZipEntry)
   }
 }
 
+/** OS が勝手に足す ZIP の付属物(Mac の `__MACOSX/` と `.DS_Store`)。 */
+function isZipJunk(name: string): boolean {
+  return name.startsWith('__MACOSX/') || name === '.DS_Store' || name.endsWith('/.DS_Store');
+}
+
+/**
+ * 🔑 **フォルダごと zip にし直したバックアップ**を読めるようにする(中身が 1 つのフォルダ `X/` の下に
+ * 全部入った形)。OS が足す付属物(`__MACOSX/` / `.DS_Store`)は無いものとして扱う。
+ *
+ * - 全ての entry が同じ 1 つのフォルダの下にあるときだけ、そのフォルダ名を取り除く。
+ *   1 つでも外に出ている entry があれば何も剥がさない(入れ物が 2 つ以上ある zip を勝手に読み替えない)。
+ * - 返す entry は名前だけが違う(bytes の在り処はそのまま)。peek と read が**同じこの 1 つ**を通る。
+ * - `prefix` は剥がしたフォルダ名(`X/`)。何も剥がさなければ空文字。
+ */
+export function unwrapSingleTopDir(dir: ZipEntry[]): { entries: ZipEntry[]; prefix: string } {
+  const kept = dir.filter((e) => !isZipJunk(e.name));
+  if (kept.length === 0) return { entries: kept, prefix: '' };
+  const first = kept[0]!.name;
+  const slash = first.indexOf('/');
+  if (slash <= 0) return { entries: kept, prefix: '' };
+  const prefix = first.slice(0, slash + 1);
+  if (!kept.every((e) => e.name.startsWith(prefix))) return { entries: kept, prefix: '' };
+  const entries = kept
+    .filter((e) => e.name !== prefix) // フォルダ自身の行は要らない
+    .map((e) => ({ ...e, name: e.name.slice(prefix.length) }));
+  return { entries, prefix };
+}
+
 /**
  * entry 1 件の中身を Blob で取り出す。**CRC とサイズは必ず検証する**。
  *

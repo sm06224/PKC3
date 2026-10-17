@@ -68,6 +68,7 @@ import {
 import { extractMeta } from '@features/flavor';
 import { PORTABLE_SNIFF_BYTES } from '@features/import/portable-html';
 import { portableHtmlToArchive, type ReadImageArchive } from './import-portable';
+import { createProgressThrottle } from './progress-throttle';
 import { NOT_PKC_ZIP_REFUSAL, isImportRefusal, unreadableZipMessage } from '@features/import/refusal-text';
 import { TOO_LARGE_TO_READ_REFUSAL, isTooLargeToRead } from '@features/import/too-large';
 
@@ -610,7 +611,15 @@ export async function importPkc2File(
       const owner = result.entries.find((e) => e.body.includes(key));
       return owner ? `「${owner.title || '(無題)'}」の添付` : '題名の分からないノートの添付';
     };
+    // 🔑 添付が数百件あると「取り込み中…」が止まって見える ── 間引いて (N / M) を出す
+    //   ⚠ 字に「…」を付けない ── これは新しく始まる知らせではなく、上の「取り込み中…」の途中経過
+    //   (「…」は始まりの印として status-lifetime の門が数え、終わりの知らせとの対を見ている)
+    const assetProgress = createProgressThrottle((n, m) =>
+      deps.notify?.(`取り込み中(添付を書き込んでいます ${n} / ${m})`),
+    );
+    let assetsDone = 0;
     for (const a of result.assets) {
+      assetProgress(assetsDone++, result.assets.length);
       try {
         // ⚠ gzip は **export 単位**の符号化なので、body 内蔵だった legacy data
         // (oldKey === null)には掛かっていない(review M-9 ── 一律に展開すると

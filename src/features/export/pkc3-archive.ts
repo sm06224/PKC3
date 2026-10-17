@@ -24,6 +24,7 @@ import { ZipWriter, type ZipPart } from './zip-writer';
 import {
   readZipDirectory,
   readZipText,
+  unwrapSingleTopDir,
   ZipReadError,
   type ReadableAssetSource,
 } from '../import/zip-reader';
@@ -398,15 +399,18 @@ export interface Pkc3Archive {
 
 /** アーカイブ ZIP を読む。**形が違えば必ず throw**(部分的に読めた気にさせない)。 */
 export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
-  const dir = await readZipDirectory(zip);
+  // 🔑 フォルダごと zip にし直したバックアップも読む(peek と同じ `unwrapSingleTopDir` を通る)
+  const dir = unwrapSingleTopDir(await readZipDirectory(zip)).entries;
   const warnings: string[] = [];
   // 🔑 同種の注意は上限まで(規則は `warn-cap.ts` の 1 本 ── P8 段㉒)
   const warn = createWarnCollector(warnings);
 
   const only = (name: string): import('../import/zip-reader').ZipEntry => {
     const hits = dir.filter((e) => e.name === name);
-    if (hits.length === 0) throw new ZipReadError(`${name} が入っていません(この zip は読み取れません)`);
-    if (hits.length > 1) throw new ZipReadError(`${name} が ${hits.length} 個あります`);
+    // ⚠ 内部の部品名(manifest.json / container.json)を出さない ── user には何が足りないか分からない
+    const what = name === CONTAINER ? 'バックアップの本体' : 'バックアップの概要';
+    if (hits.length === 0) throw new ZipReadError(`${what}が入っていません(この zip は読み取れません)`);
+    if (hits.length > 1) throw new ZipReadError(`${what}が ${hits.length} 個あります(この zip は読み取れません)`);
     return hits[0]!;
   };
 
@@ -502,16 +506,22 @@ export function assembleArchive(
     relations: c.relations?.length ?? 0,
     revisions: c.revisions?.length ?? 0,
   };
+  const COUNT_LABEL: Record<string, string> = { entries: 'ノート', relations: 'つながり', revisions: '履歴' };
   for (const [k, v] of Object.entries(actual)) {
     if (typeof counts[k] === 'number' && counts[k] !== v) {
-      warnings.push(`manifest の ${k} 件数が中身と違います(${counts[k]} ≠ ${v})`);
+      warnings.push(
+        `バックアップに記録された${COUNT_LABEL[k] ?? k}の数と、実際に入っている数が合いません(記録 ${counts[k]} 件 / 実際 ${v} 件)`,
+      );
     }
   }
   // ⚠ assets は「meta はあるが bytes が無い」が正当にありうる(書出し時の欠損)ので
   // meta 数ではなく **bytes の数**で照合する
   for (const a of c.assets ?? []) {
     if (!assetSources.has(a.key)) {
-      warn.add('absent-asset', 'バックアップに入っていない添付', `添付の中身がバックアップに入っていません: ${a.key}`);
+      // 添付の ID(ast-…)は user に読めない ── その添付を持つノートの題名で言う(取り込み側の `assetName` と同じ引き方)
+      const owner = c.entries.find((e) => typeof e.body === 'string' && e.body.includes(a.key));
+      const name = owner ? `「${owner.title || '(無題)'}」の添付` : '題名の分からないノートの添付';
+      warn.add('absent-asset', 'バックアップに入っていない添付', `バックアップに入っていない添付があります: ${name}`);
     }
   }
 

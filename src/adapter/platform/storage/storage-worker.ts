@@ -3696,33 +3696,39 @@ const handlers: Handlers = {
      * ノートを含めない**(設計 doc §1.1、段①)── system のノートは user の
      * ディレクトリと明確に分かれているのが裁定の条件である。
      */
-    const rows = database.selectObjects(
-      a === undefined
-        ? `SELECT lid, body, entry_order FROM entries WHERE cid = ? AND ${USER_REALM_SQL}
-             ORDER BY entry_order, lid`
-        : `SELECT lid, body, entry_order FROM entries
-             WHERE cid = ? AND ${USER_REALM_SQL} AND (entry_order > ? OR (entry_order = ? AND lid > ?))
-             ORDER BY entry_order, lid`,
-      a === undefined ? [req.cid] : [req.cid, a.entryOrder, a.entryOrder, a.lid],
-    ) as unknown as Array<{ lid: string; body: string; entry_order: number }>;
-
-    // 1 メッセージの合計で切る。⚠ **1 件目は必ず返す** ── maxBytes より大きい
-    // body が 1 件あるだけで、そこから先が永遠に進まなくなる(無限ループ)
+    // 🔴 **行ごとの callback で読み、予算に達したら走査を止める**(findAssetOwner と同じ作法)。
+    // ⚠ `selectObjects` は after より後ろの**全行の本文**を一度に heap へ載せ、
+    // しかも 1 ページごとに先頭から読み直すので、ページ数の 2 乗に時間が伸びた
     const out: Array<{ lid: string; body: string }> = [];
     let total = 0;
-    for (const r of rows) {
-      const size = r.body.length;
-      if (out.length > 0 && total + size > req.maxBytes) {
-        const last = rows[out.length - 1]!;
-        return {
-          rows: out,
-          done: false,
-          next: { entryOrder: last.entry_order, lid: last.lid },
-        };
-      }
-      out.push({ lid: r.lid, body: r.body });
-      total += size;
-    }
+    let next: { entryOrder: number; lid: string } | undefined;
+    let last: { entry_order: number; lid: string } | undefined;
+    database.exec({
+      sql:
+        a === undefined
+          ? `SELECT lid, body, entry_order FROM entries WHERE cid = ? AND ${USER_REALM_SQL}
+             ORDER BY entry_order, lid`
+          : `SELECT lid, body, entry_order FROM entries
+             WHERE cid = ? AND ${USER_REALM_SQL} AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+             ORDER BY entry_order, lid`,
+      bind: a === undefined ? [req.cid] : [req.cid, a.entryOrder, a.entryOrder, a.lid],
+      rowMode: 'object',
+      callback: (row) => {
+        // ⚠ 型は SqlValue のまま来る ── rowMode 'object' の実行時形へ狭める
+        const r = row as unknown as { lid: string; body: string; entry_order: number };
+        const size = r.body.length;
+        // 1 メッセージの合計で切る。⚠ **1 件目は必ず返す** ── maxBytes より大きい
+        // body が 1 件あるだけで、そこから先が永遠に進まなくなる(無限ループ)
+        if (out.length > 0 && total + size > req.maxBytes) {
+          next = { entryOrder: last!.entry_order, lid: last!.lid };
+          return false; // 走査を止める(残りの本文は読まない)
+        }
+        out.push({ lid: r.lid, body: r.body });
+        total += size;
+        last = r;
+      },
+    });
+    if (next !== undefined) return { rows: out, done: false, next };
     return { rows: out, done: true };
   },
   upsertEntry: (req) => {
