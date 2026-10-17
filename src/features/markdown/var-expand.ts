@@ -65,9 +65,12 @@ export function expandVarsInText(source: string, vars: Record<string, string>): 
     // escape(`\{{vars.x}}`)優先。先に escape を sentinel(U+E142)で隠して
     // 通常の置換を行い、最後に元に戻す。
     let out = line.replace(VAR_ESCAPED_RE, '\u{E142}$1\u{E143}');
+    // 🔴 表の行(`|` で始まる行)に入れる値は、`|` を `\|` にし改行を空白にする ── 値の `|` や改行で列・行が割れない
+    const inTableRow = /^\s*\|/.test(line);
     out = out.replace(VAR_REF_RE, (_match, key: string) => {
       if (Object.prototype.hasOwnProperty.call(vars, key)) {
-        const v = vars[key]!;
+        let v = vars[key]!;
+        if (inTableRow) v = v.replace(/\|/g, '\\|').replace(/\r\n|\r|\n/g, ' ');
         // escape sentinel char が値内にあれば剥がす(衝突対策)
         return v.replace(new RegExp(`[${VAR_OPEN}${VAR_SEP}]`, 'g'), '');
       }

@@ -112,5 +112,8 @@ export function snippetMenuNote(scan: SnippetScan | null): string {
    */
   if (scan.total > scan.items.length)
     return `${String(scan.total - scan.items.length)} 件のテンプレートは、中身が空か長すぎるので、この一覧に出していません。`;
+  // 🔴 短縮語が注釈(`#`)と区別できず読めなかったテンプレート ── 黙って「短縮語なし」にしない
+  if (scan.abbrUnread !== undefined && scan.abbrUnread > 0)
+    return `短縮語を読めなかったテンプレートが ${String(scan.abbrUnread)} 件あります(# で始まる短縮語は "" で囲んでください)。`;
   return '';
 }

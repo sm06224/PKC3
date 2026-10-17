@@ -49,6 +49,18 @@ function indentCols(s: string): number {
  * 閉じの無い `:::comment` は描く側が戻すので `false` に戻す。
  */
 function commentMask(lines: readonly string[]): boolean[] {
+  return commentScan(lines).hidden;
+}
+
+/**
+ * 本文の終わりが、閉じていない `%%%` の隠しメモの中か(描く側は閉じ忘れを末尾まで隠す)。
+ * ⚠ 判定は `commentMask` と同じ走査 1 本(§7)。
+ */
+export function endsInOpenBlockComment(body: string): boolean {
+  return commentScan(body.split('\n').map((l) => l.replace(/\r$/, ''))).openBlock;
+}
+
+function commentScan(lines: readonly string[]): { hidden: boolean[]; openBlock: boolean } {
   const hidden: boolean[] = new Array<boolean>(lines.length).fill(false);
   let fence = '';
   let inBlock = false;
@@ -95,7 +107,7 @@ function commentMask(lines: readonly string[]): boolean[] {
   }
   // 閉じの無い `:::comment` は本文として戻る(描く側の挽回処理)。⚠ 中の fence の行は戻らない
   if (inDirective) for (const i of buffer) hidden[i] = false;
-  return hidden;
+  return { hidden, openBlock: inBlock };
 }
 
 /**

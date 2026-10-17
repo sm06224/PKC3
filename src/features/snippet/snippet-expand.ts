@@ -45,7 +45,7 @@
  */
 import { pad2 } from '@features/datetime/datetime-format';
 import { dateKey } from '@features/schedule/month-grid';
-import type { TextSelection } from '@features/markdown/text-ops';
+import { lineBreaksAround, type TextSelection } from '@features/markdown/text-ops';
 import { fenceStep } from '@features/markdown/list-renumber';
 
 /**
@@ -104,7 +104,7 @@ export function fillSnippetVars(body: string, now: Date): { text: string; caret:
    */
   let regions: Array<[number, number]> | null = null;
   const inCode = (i: number): boolean => {
-    regions ??= [...fenceRegions(body), ...inlineCodeRegions(body)];
+    regions ??= [...codeRegions(body), ...blockCodeRegions(body)];
     return regions.some(([a, b]) => i >= a && i <= b);
   };
   SLOT_RE.lastIndex = 0;
@@ -175,6 +175,54 @@ function fenceRegions(text: string): Array<[number, number]> {
   return out;
 }
 
+/** 柵と文中コードの範囲(印を「コードの中」として扱う範囲の正本。`Tab`・挿入後の選択・値の埋めが同じ答えを返す)。 */
+function codeRegions(text: string): Array<[number, number]> {
+  return [...fenceRegions(text), ...inlineCodeRegions(text)];
+}
+
+/**
+ * 値を埋めない範囲の足し分(柵・文中コードの外にある、コードや数式の塊)。
+ *
+ * - 字下げ 4 つ以上のコード(前が空行 / 本文の頭 / 続きの字下げ行。リストの続きの字下げは除く)
+ * - `$$` だけの行で開閉する数式(閉じなければ本文の終わりまで)
+ * - `<pre>` 〜 `</pre>`(閉じなければ本文の終わりまで)
+ */
+function blockCodeRegions(text: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let at = 0;
+  let prevBlank = true;
+  let inIndented = false;
+  let inList = false;
+  let math = -1;
+  for (const line of text.split('\n')) {
+    const end = at + line.length;
+    const blank = line.trim() === '';
+    if (math >= 0) {
+      if (line.trim() === '$$') {
+        out.push([math, end]);
+        math = -1;
+      }
+    } else if (/^ {0,3}\$\$\s*$/.test(line)) {
+      math = at;
+    } else if (/^( {4}|\t)/.test(line) && !blank && (prevBlank || inIndented) && !inList) {
+      out.push([at, end]);
+      inIndented = true;
+    } else {
+      if (!blank) {
+        inIndented = false;
+        inList = /^\s{0,3}(?:[-*+]|\d+[.)])\s/.test(line) || (inList && /^\s/.test(line));
+      }
+    }
+    prevBlank = blank;
+    at = end + 1;
+  }
+  if (math >= 0) out.push([math, text.length]);
+  for (const m of text.matchAll(/<pre[\s>][\s\S]*?(?:<\/pre>|$)/gi)) {
+    out.push([m.index!, m.index! + m[0].length]);
+  }
+  return out;
+}
+
 /**
  * 文中のコード(`` `…` ``)の範囲(開く ` の位置 〜 閉じる ` の終わり)。
  *
@@ -225,7 +273,7 @@ export function nextSnippetSlot(text: string, from: number): SnippetSlot | null 
   for (const s of slots) {
     if (s.start < from) continue;
     if (regions === null) {
-      regions = [...fenceRegions(text), ...inlineCodeRegions(text)];
+      regions = codeRegions(text);
     }
     const r = regions.find(([a, b]) => s.start >= a && s.start <= b);
     if (r === undefined) return s;
@@ -246,14 +294,30 @@ export function nextSnippetSlot(text: string, from: number): SnippetSlot | null 
  * 2. 印は無いが `${cursor}` が在った → そこに**カーソルを置く**
  * 3. どちらも無い → 挿した**後ろ**にカーソルを置く
  */
-export function insertSnippet(sel: TextSelection, body: string, now: Date): TextSelection {
+export function insertSnippet(
+  sel: TextSelection,
+  body: string,
+  now: Date,
+  opts: { breakLines?: boolean } = {},
+): TextSelection {
   const { text: filled, caret } = fillSnippetVars(body, now);
+  let lead = '';
+  let tailBreak = '';
+  // 🔴 複数行のテンプレートを一覧から選んだときだけ、行の途中なら改行して挿す(表・見出しは行頭でないと描かれない)。
+  //   ⚠ 短縮語 + Tab の経路は呼び側が渡さない(打っている字の続きに挿す)
+  if (opts.breakLines === true && filled.replace(/\n+$/, '').includes('\n')) {
+    const b = lineBreaksAround(sel.text, sel.start, sel.end);
+    lead = filled.startsWith('\n') ? '' : b.lead;
+    tailBreak = filled.endsWith('\n') ? '' : b.tail;
+  }
   const head = sel.text.slice(0, sel.start);
   const tail = sel.text.slice(sel.end);
-  const text = head + filled + tail;
-  const slot = snippetSlots(filled)[0];
-  if (slot !== undefined)
-    return { text, start: sel.start + slot.start, end: sel.start + slot.end };
-  const at = sel.start + (caret ?? filled.length);
+  const text = head + lead + filled + tailBreak + tail;
+  const base = sel.start + lead.length;
+  // ⚠ コードの中の印は選ばない(`nextSnippetSlot` と同じ範囲)── `${HOME}` より `${cursor}` を優先する
+  const regions = codeRegions(filled);
+  const slot = snippetSlots(filled).find((s) => !regions.some(([a, b]) => s.start >= a && s.start <= b));
+  if (slot !== undefined) return { text, start: base + slot.start, end: base + slot.end };
+  const at = base + (caret ?? filled.length);
   return { text, start: at, end: at };
 }
