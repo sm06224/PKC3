@@ -1458,8 +1458,24 @@ function showAppendMenu() {
   appendMenu.style.top = `${String(Math.floor(r.bottom + 4))}px`;
   appendPick.hidden = true;
   appendPick.textContent = '';
+  appendMenu.style.left = '';
   appendMenu.hidden = false;
+  keepAppendMenuOnScreen();
   appendBtn.setAttribute('aria-expanded', 'true');
+}
+
+/**
+ * 🔴 一覧が窓の左外へはみ出さないようにする。上のバーが狭い窓で折り返すと「PDF を足す」が 2 段目の
+ *   左端へ移り、右端そろえのままだと一覧が左へはみ出して押せなくなる(1100px の窓で実測、x=-16.8)。
+ *   ⚠ 一覧の中身(添付の候補)が後から増えて幅が変わったときも、ここを呼び直す。
+ */
+function keepAppendMenuOnScreen() {
+  if (appendMenu.hidden) return;
+  const m = appendMenu.getBoundingClientRect();
+  if (m.left < 4) {
+    appendMenu.style.right = 'auto';
+    appendMenu.style.left = '4px';
+  }
 }
 
 appendBtn.addEventListener('click', () => {
@@ -1505,6 +1521,7 @@ appendFromNote.addEventListener('click', () => {
   wait.className = 'append-note';
   wait.textContent = '添付の PDF を探しています…';
   appendPick.append(wait);
+  keepAppendMenuOnScreen();
   clearTimer(attachTimer);
   attachTimer = setTimeout(() => {
     attachTimer = null;
@@ -1529,6 +1546,7 @@ function onAttachList(payload) {
     msg.className = 'append-note';
     msg.textContent = pageEdit.attachRefusal(payload.ok === true ? 'empty' : 'failed');
     appendPick.append(msg);
+    keepAppendMenuOnScreen();
     return;
   }
   for (const it of list) {
@@ -1555,6 +1573,7 @@ function onAttachList(payload) {
     });
     appendPick.append(b);
   }
+  keepAppendMenuOnScreen();
 }
 
 /** 選んだ添付の bytes を借りられた(貸された URL から取る)── あとは「パソコンのファイル」と同じ道で足す。 */
