@@ -20,7 +20,7 @@ import { getFlavor } from '../flavor';
 import { RELATION_KINDS } from '@features/relation/kinds';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { MAX_TAGS, MAX_TAG_CHARS, normalizeTag, readTags, sameTag } from '@features/flavor/tags';
-import { replacePrefixed } from './body-remap';
+import { replacePrefixed, remapEntryLids } from './body-remap';
 import {
   buildTextlogAnchorMap,
   buildFirstLogOfDay,
@@ -29,7 +29,7 @@ import {
 
 /** PKC2 container JSON の受理形(必要 field のみ・寛容)。 */
 export interface Pkc2Container {
-  meta?: { entry_order?: unknown };
+  meta?: { entry_order?: unknown; container_id?: unknown };
   entries?: unknown[];
   relations?: unknown[];
   assets?: Record<string, string>;
@@ -193,6 +193,7 @@ export function convertPkc2Container(
   const legacyInlined: string[] = [];
   const convertFailed = new Map<string, string[]>();
   const rawEntries = Array.isArray(c.entries) ? c.entries : [];
+  const srcCid = typeof c.meta?.container_id === 'string' ? c.meta.container_id : undefined;
   const assetsIn = c.assets && typeof c.assets === 'object' ? c.assets : {};
 
   // ── ⑥ user entry の選別(system entries は変換しない)
@@ -393,7 +394,8 @@ export function convertPkc2Container(
     // ⑤ 参照書換: lid → textlog permalink → asset key の順。
     // ⚠ map 全件を回して 1 件ずつ replace すると O(map 件数 × 本文量) になる
     // (review M-7: asset key 10 → 100 で 6.07 倍)。**1 パスで引く**
-    body = replacePrefixed(body, 'entry:', lidMap);
+    // 文法は読む側(body-links.ts)に揃える:`Entry:` も / `myentry:` は触らない / PKC2 の `pkc://<container_id>/entry/<lid>` も(#1087)
+    body = remapEntryLids(body, lidMap, srcCid);
     body = rewriteTextlogRefs(body, selfLid, anchorsByLid, firstLogOfDay);
     body = replacePrefixed(body, 'asset:', keyMap);
     return body;

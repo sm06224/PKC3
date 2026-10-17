@@ -83,7 +83,7 @@ export function changedPairs(map: ReadonlyMap<string, string>): Array<readonly [
  * 綴りの大小は問わず(`Entry:n1` も)、**左は lid の文字で留める**(`myentry:n1` は `entry:` ではない)、
  * `cid` が在れば `pkc://<cid>/entry/<lid>` も写す。写すのは lid の部分だけで、前の字はそのまま残す。
  */
-function remapEntryLids(body: string, map: ReadonlyMap<string, string>, cid?: string): string {
+export function remapEntryLids(body: string, map: ReadonlyMap<string, string>, cid?: string): string {
   const tok = 'A-Za-z0-9_\\-';
   const portable = cid !== undefined && /^[A-Za-z0-9_-]+$/.test(cid) ? `|pkc://${cid}/entry/` : '';
   const re = new RegExp(`(?<![${tok}])((?:entry:)${portable})([${tok}]+)`, 'gi');
