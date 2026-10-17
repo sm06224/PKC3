@@ -755,3 +755,61 @@ describe('条件の壊れた名前を読み直す(#637)', () => {
     expect(readSmartSpec(`---\n${SMART_TAGS_KEY}: ["請求 済"]\n---\n`).tags).toEqual(['請求 済']);
   });
 });
+
+/**
+ * 🔴 #1087 B10: 条件タグを手で 9 個以上書いたノートで別の条件を直しても、読めなかった(上限を超えた)タグは消えない。
+ * 直す前は読めた 8 個で `smart-tags` を上書きし、9 個目以降が消えていた。
+ */
+describe('上限を超えたタグを書き戻しで消さない', () => {
+  const names = Array.from({ length: MAX_SMART_TAGS + 3 }, (_, i) => `t${String(i + 1)}`);
+  const bodyOf = (list: readonly string[]): string =>
+    `---\n${SMART_TAGS_KEY}: [${list.join(', ')}]\n---\n説明\n`;
+  /** 書き戻した本文から、読み手の上限を迂回して key の値を直に見る */
+  const writtenTags = (body: string): string[] => {
+    const m = /smart-tags:\s*\[([^\]]*)\]/u.exec(body);
+    return m === null ? [] : m[1]!.split(',').map((x) => x.trim());
+  };
+
+  it('🔴 別の条件(種類)を直しても、9 個目以降のタグが残る', () => {
+    const body = bodyOf(names);
+    const spec = readSmartSpec(body);
+    expect(spec.tags, '前提が崩れている(8 個で切れていない)').toHaveLength(MAX_SMART_TAGS);
+    const r = withSmartField(spec, 'kind', 'text');
+    expect(r.ok, '前提が崩れている(種類を足せない)').toBe(true);
+    const out = writeSmartSpec(body, r.ok ? r.spec : EMPTY_SMART);
+    expect(writtenTags(out), '9 個目以降が消えた').toEqual(names);
+    // 読むほうは今までどおり 8 個で集める
+    expect(readSmartSpec(out).tags).toEqual(names.slice(0, MAX_SMART_TAGS));
+    expect(readSmartSpec(out).kind).toBe('text');
+  });
+
+  it('読めたタグを 1 つ外したら、外したものは消え、読めなかったものは残る', () => {
+    const body = bodyOf(names);
+    const spec = readSmartSpec(body);
+    const out = writeSmartSpec(body, { ...spec, tags: spec.tags.filter((t) => t !== 't2') });
+    expect(writtenTags(out)).toEqual(names.filter((t) => t !== 't2'));
+  });
+
+  it('対照群: 8 個以下の入れ物は今までどおり(余計なタグを足さない / 空にしたら key ごと消える)', () => {
+    const few = bodyOf(names.slice(0, 3));
+    expect(writtenTags(writeSmartSpec(few, { ...EMPTY_SMART, tags: ['t1'] }))).toEqual(['t1']);
+    expect(writeSmartSpec(few, EMPTY_SMART)).not.toContain(SMART_TAGS_KEY);
+  });
+
+  it('読めなかったタグと同じ名前を、画面から足したら重ねて書かない', () => {
+    const body = bodyOf(names);
+    const spec = readSmartSpec(body);
+    const dropped = withSmartTag(spec, 't2', 'remove');
+    expect(dropped.ok, '前提が崩れている').toBe(true);
+    const added = withSmartTag(dropped.ok ? dropped.spec : spec, 't9', 'add'); // t9 は 9 個目(読めなかった側)に居る
+    expect(added.ok, '前提が崩れている(t9 を足せない)').toBe(true);
+    const out = writtenTags(writeSmartSpec(body, added.ok ? added.spec : spec));
+    expect(out.filter((t) => t === 't9'), 't9 が 2 回書かれた').toHaveLength(1);
+    expect(out, '残りの読めなかったタグが消えた').toEqual(expect.arrayContaining(['t10', 't11']));
+  });
+
+  it('同じタグが読めた側にも在れば重ねて書かない', () => {
+    const body = bodyOf([...names.slice(0, MAX_SMART_TAGS), 't1']); // 9 個目は重複(読むとき落ちる)
+    expect(writtenTags(writeSmartSpec(body, readSmartSpec(body)))).toEqual(names.slice(0, MAX_SMART_TAGS));
+  });
+});
