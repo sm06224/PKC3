@@ -12,6 +12,7 @@
  * 生成した出力に限る(PKC2 と同じ安全前提)。
  */
 import { renderMarkdown } from '@features/markdown/markdown-render';
+import { flipTaskInDraft } from '@features/markdown/body-rewrite';
 import {
   frontmatterLineCount,
   bodyBelowFrontmatter,
@@ -85,7 +86,7 @@ import { installSectionBox, syncSectionBoxSaving } from './section-box';
 import { installCodeBox, syncCodeBoxSaving } from './code-box';
 import { locateCodeFence } from '@features/markdown/code-fence-edit';
 import { listAppendTargets, sectionRange } from '@features/markdown/append-target';
-import { RowSwap, replaceChanged } from './row-swap';
+import { RowSwap, ROW_WHOLE_ATTR, replaceChanged } from './row-swap';
 import { takeBodyFocus } from './focus-request';
 import { isTouchOnly } from './touch-device';
 import { DIFF_FILE_TOO_LARGE_NOTE, diffSummary, shortStamp } from '@features/revision/diff-view';
@@ -110,7 +111,7 @@ import { canDrawOnImage } from '@features/asset/image-draw';
 //    数だけを受け取る(門は `tests/adapter/icon-palette.test.ts`)
 import { buildIconPalette, ICON_CHOICE_COUNT } from './icon-palette';
 import { markTargetLid } from './target-lid';
-import { buildFormatBar } from './format-bar';
+import { buildFormatBar, syncWholeNoteTools } from './format-bar';
 import { watchWrapHint } from './format-wrap-hint';
 import { SELECTION_STATS_FIELD, watchSelectionStats } from './selection-stats';
 import { hasSourceSelection } from '../actions/copy-source';
@@ -251,6 +252,19 @@ export function replaceBodyImageError(img: HTMLImageElement): void {
 
 /** 添付から中身を取るコード枠の断り文(本体は `fence-asset-hydrate.ts`。ここからも引ける)。 */
 export { fenceAssetUnreadableText };
+
+/**
+ * 🔴 **編集中の下見で押されたチェックの、下見の本文での行番号**(台帳 #1852 I2 / 依頼 78-1)。
+ * ⚠ 押したのがチェックの印でなければ `null`(ほかの押しはそのまま通す)。
+ */
+export function clickedDraftTaskLine(ev: Event, host: HTMLElement): number | null {
+  const t = ev.target;
+  if (!(t instanceof Element)) return null;
+  const box = t.closest('input.pkc-task-checkbox[data-pkc-task-line]');
+  if (box === null || !host.contains(box)) return null;
+  const n = Number(box.getAttribute('data-pkc-task-line'));
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
 
 /**
  * 🔴 **編集中のプレビューにも、全文から取った `{{vars.x}}` を渡す**(#1087 N1)。
@@ -2569,7 +2583,10 @@ export class DetailRenderer {
     bar.append(stats);
     this.region.append(bar);
     // 🔑 **書式パネル**(P8 段⑥)。編集欄のすぐ上 ── 押す物と効く先を離さない
-    this.region.append(buildFormatBar());
+    const formatBar = buildFormatBar();
+    this.region.append(formatBar);
+    // 🔴 1 行ずつ打つ編集のあいだ、本文全体に効く 2 つは灰色(台帳 #1852 I2 / 依頼 78-4)。⚠ 退避(`fallBack`)で全文の欄になったら戻す
+    syncWholeNoteTools(formatBar, liveEditorEnabled());
     // 🔴 選んでいるあいだだけ、帯の 4 つの説明を「選んだ範囲を囲みます」にする(#950 ①)。
     //    ⚠ 外すのは `disposeLends`(編集を抜ける / 別のノートへ移るとき)
     this.unwatchWrapHint = watchWrapHint(this.region);
@@ -2610,6 +2627,12 @@ export class DetailRenderer {
        * 保存した瞬間にリンクへ化ける(面ごとに違う見え方にしない)。
        */
       currentContainerId: selfContainerId(state),
+      /**
+       * 🔴 **編集中も、本文のチェックを押せる**(台帳 #1852 I2 / 依頼 78-1。推薦 B)。
+       * ⚠ 受け手は binder ではなく**この下の 2 面**(`flipDraftTask`)── 押すと**画面の下書き**の `[ ]` が
+       *   `[x]` に変わる(保存はいつもどおり「保存」)。押しても何も出ない灰色にしない。
+       */
+      interactiveTasks: true,
     };
     /**
      * 🔴 **添付ノートは、設定の行を畳んで説明だけ編集させる**(#1220 穴②)。
@@ -2769,6 +2792,28 @@ export class DetailRenderer {
       follow.push(parseFrontmatter(text).body, withVars(previewOpts, text));
       follow.flush();
     };
+    /**
+     * 🔴 **2 列の編集でも、下見のチェックを押すと、左の欄の `[ ]` が `[x]` に変わる**(台帳 #1852 I2 / 依頼 78-1)。
+     * ⚠ 書くのは `replaceChanged`(= `insertText`)── 欄の Ctrl+Z で戻せる。保存はいつもどおり「保存」。
+     * ⚠ 下見は frontmatter を外した側の行番号。欄(`ta.value`)との差は**行数の差**で戻す
+     *   (添付ノートの畳んだ設定の行は欄に出ていないので、その分は差に入らない)。
+     */
+    preview.addEventListener(
+      'click',
+      (ev) => {
+        const line = clickedDraftTaskLine(ev, preview);
+        if (line === null) return;
+        ev.stopPropagation();
+        ev.preventDefault();
+        const full = fullText();
+        const shift = ta.value.split('\n').length - parseFrontmatter(full).body.split('\n').length;
+        const next = flipTaskInDraft(ta.value, line + shift);
+        if (next === null) return;
+        ta.focus();
+        replaceChanged(ta, next);
+      },
+      true,
+    );
     ta.addEventListener('input', () => {
       // ⚠ rAF で畳まない ── 畳み込みは follower(静穏 + 上限)が持つ。
       //    2 か所で畳むと、どちらが効いているか分からなくなる
@@ -2835,6 +2880,7 @@ export class DetailRenderer {
       sourceLineAnchors: boolean;
       allowExternalImages: boolean;
       currentContainerId: string;
+      interactiveTasks: boolean;
     },
     /**
      * 🔴 **入った瞬間に開く行**(#395 段③)。`null` = どこも開かない(既定)。
@@ -3147,6 +3193,40 @@ export class DetailRenderer {
     editAll.addEventListener('click', () => {
       if (!swap.activateAll()) note.textContent = 'この本文は「全文を編集」に切り替えられません';
     });
+    /**
+     * 🔴 **本文の全部を 1 つの欄で開いている間は、書式の帯の灰色を外す**(台帳 #1852 I2 / 依頼 78-4)。
+     * 「全文を編集」を押すと欄は本文の全部になり、「番号を振り直す」「完了項目を末尾へ」が効く(印は `ROW_WHOLE_ATTR`。
+     * 効くかの判定は binder の `isLiveBlockField` が同じ印を読む)。閉じる / 別の塊を開くと灰色に戻る。
+     */
+    const wholeWatch = new MutationObserver(() => {
+      if (fellBack) return;
+      const bar = this.region?.querySelector<HTMLElement>('[data-pkc-region="format-bar"]');
+      if (bar) syncWholeNoteTools(bar, pane.querySelector(`[data-pkc-field="row-source"][${ROW_WHOLE_ATTR}]`) === null);
+    });
+    wholeWatch.observe(pane, { childList: true, subtree: true });
+    /**
+     * 🔴 **編集中の本文のチェックを押すと、下書きの `[ ]` が `[x]` に変わる**(台帳 #1852 I2 / 依頼 78-1。推薦 B)。
+     * ⚠ 捕まえるのは**捕捉段**(`RowSwap` の「押した行を開く」より先)── 押したチェックの行が入力欄に化けない。
+     * ⚠ 書くのは下書き(`setBody`)だけ。保存はいつもどおり「保存」。取り消しの履歴にも 1 手で載る。
+     */
+    pane.addEventListener(
+      'click',
+      (ev) => {
+        const line = clickedDraftTaskLine(ev, pane);
+        if (line === null || fellBack) return;
+        ev.stopPropagation();
+        ev.preventDefault();
+        const at = line + fmLines;
+        const next = flipTaskInDraft(body, at);
+        if (next === null) {
+          note.textContent = 'このチェックは切り替えられませんでした。項目の行を押して書き換えてください';
+          return;
+        }
+        journal = record(journal, stepFor(body, at, at, next.split('\n')[at] ?? ''));
+        setBody(next);
+      },
+      true,
+    );
 
     /**
      * 🔴 **塊を跨ぐ Ctrl+Z / Ctrl+Shift+Z(Ctrl+Y)**(S8。設計 §9 論点 C の
@@ -3289,6 +3369,9 @@ export class DetailRenderer {
         fmCard.removeAttribute('data-pkc-has-frontmatter');
       }
       pane.append(ta);
+      // 退避先は**すでに原文全体**の編集 ── 本文全体に効く道具は使えるようになる
+      const bar = this.region?.querySelector<HTMLElement>('[data-pkc-region="format-bar"]');
+      if (bar) syncWholeNoteTools(bar, false);
       // 退避先は**すでに原文全体**の編集 ── 押せない理由ごと可視にする
       editAll.disabled = true;
       editAll.title = ALREADY_WHOLE_NOTE;

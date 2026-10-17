@@ -75,6 +75,7 @@ import {
   grippedBlock,
 } from '../render/block-grip';
 import {
+  CALC_TOO_MANY_DIGITS,
   calcLineAction,
   explainCalcMiss,
   formatCalcResult,
@@ -87,7 +88,7 @@ import { swapLines } from '@features/markdown/line-swap';
 import { TIDY_NOTES, tidySelection, type TidyOp } from '@features/markdown/text-tidy';
 import { tableOnTab } from '@features/markdown/table-assist';
 import { hasNumberedItems, renumberLists } from '@features/markdown/list-renumber';
-import { hasQuotedTaskItems, hasTaskItems, sortTasksByStatus } from '@features/markdown/task-sort';
+import { caretLineOf, hasTaskItems, sortTasksAtCaret } from '@features/markdown/task-sort';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
   blockedActionNote,
@@ -140,6 +141,7 @@ import {
   visibleSelection,
 } from '@features/relation/filer-list';
 import { archetypeLabel } from '@features/flavor/archetype-label';
+import { kindChangeQuestion, kindChangeTarget } from '@features/flavor/kind-change';
 import { HIDDEN_HEAD_ATTR, foldAttachmentHead, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
 import { countMatches } from '@features/markdown/body-replace';
 import { SMART_ARCHETYPE, SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
@@ -170,6 +172,7 @@ import {
   insertBlockText,
   insertText,
   replaceChanged,
+  rowTextAbove,
   OWN_MEANING,
   ROW_REOPEN_EVENT,
   type RowReopenDetail,
@@ -3061,6 +3064,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'undo-dual-move',
   // 🔴 題名を変えた直後の「元に戻す」(#1657)── 題名を書き戻すので `rename-attachment` と同じ門
   'undo-rename',
+  // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── 種類を disk へ書くので、同じ門
+  'change-entry-kind',
   // 🔴 取り込みの「取り消す」── ゴミ箱へ入れる `delete-entry` と同じ書込なので同じ門(#1087)
   'undo-import',
   'purge-trash',
@@ -9314,6 +9319,41 @@ const ACTIONS: Record<string, ActionHandler> = {
     restoreRenamedTitle(dispatcher, r.lid, r.from, r.withFile);
     dispatcher.dispatch({ type: 'OP_NOTICE', message: `題名を「${r.from}」に戻しました` });
   },
+  /**
+   * 🔴 **ノートの種類を変える**(台帳 #1852 I2 / 依頼 157。Gemini 回答 = 推薦 ②)。ノート ⇄ ログだけ。
+   *
+   * 押すと**確認が先に出る**(画面で何が変わるかを言う ── 本文はそのまま・追記の足し方が変わる・もう一度押せば戻る)。
+   * ⚠ 書込は `SET_ENTRY_ARCHETYPE` 1 本(reducer が組を検める)── ここは押した行を引いて聞くだけ。
+   * ⚠ 編集中などで変えられないときは**黙らない**(`undo-trash` と同じ断り)。
+   */
+  'change-entry-kind': (dispatcher, target, _services, root) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    const meta = lid === null ? undefined : st.entryMetas.get(lid);
+    if (lid === null || meta === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '種類を変えるノートを選んでください(行を押すと選べます)' });
+      return;
+    }
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}種類を変えてください` });
+      return;
+    }
+    const to = kindChangeTarget(meta.archetype);
+    if (to === null) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `「${archetypeLabel(meta.archetype)}」の種類は変えられません(変えられるのはノートとログです)`,
+      });
+      return;
+    }
+    void confirmInApp(root, kindChangeQuestion(meta.title, meta.archetype, to), {
+      okLabel: `「${archetypeLabel(to)}」に変える`,
+      cancelLabel: 'やめる',
+    }).then((answer) => {
+      if (answer !== 'ok') return;
+      dispatcher.dispatch({ type: 'SET_ENTRY_ARCHETYPE', lid, archetype: to });
+    });
+  },
   'delete-entry': (dispatcher, target, services, root) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
     // 🔴 **無言で断らない**(P8 段⑲)。`DELETE_ENTRY` は `phase !== 'ready'` で
@@ -11365,14 +11405,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集中に押してください' });
       return;
     }
-    const next = sortTasksByStatus(ta.value);
+    // 🔴 カーソルのあるリストだけ(台帳 #1852 I2 / 依頼 87-2)。リストの外にカーソルがあれば、これまでどおりすべてのリスト
+    const sorted = sortTasksAtCaret(ta.value, caretLineOf(ta.value, ta.selectionStart));
+    const next = sorted.text;
+    const here = sorted.scope === 'caret';
     if (next === ta.value) {
       services.showStatus?.(
         hasTaskItems(ta.value)
-          ? '完了項目は既に末尾に揃っています'
-          : hasQuotedTaskItems(ta.value)
-            ? '引用の中のチェック項目は並べ替えません'
-            : 'このノートにチェック項目はありません',
+          ? here
+            ? 'このリストの完了項目は既に末尾に揃っています'
+            : '完了項目は既に末尾に揃っています'
+          : 'このノートにチェック項目はありません',
       );
       return;
     }
@@ -11380,7 +11423,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     ta.focus();
     // 🔴 カーソルは `replaceChanged` が置いた所(変えた範囲の終わり)のまま ── 末尾へ飛ばさない(#1087)
     replaceChanged(ta, next);
-    services.showStatus?.('完了したチェック項目を末尾へ移動しました');
+    services.showStatus?.(here ? 'このリストの完了したチェック項目を末尾へ移動しました' : '完了したチェック項目を末尾へ移動しました');
   },
   /**
    * 🔴 **素の Markdown で写す**(#396)。
@@ -15628,7 +15671,7 @@ const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: 
    *   **取り消しの履歴が切れる**(#765 で実測した)。
    */
   'inline-calc': (ta, notify) => {
-    const action = calcLineAction(ta.value, ta.selectionStart);
+    const action = calcLineAction(ta.value, ta.selectionStart, rowTextAbove(ta));
     /**
      * 🔴 **頼まれて押したときは黙らない**(#1087)── 打っているとき(Enter)に式でない行で黙るのは正しいが、
      *   ここは user が「計算して」と明示した。何も起きないと、押したのに効かないボタンになる。
@@ -15814,7 +15857,8 @@ const RENUMBER_LIVE_NOTE = '番号を振り直すには、「全文を編集」�
 const SORT_TASKS_LIVE_NOTE = '完了項目を末尾へ移すには、「全文を編集」に切り替えてください';
 /** 1 面のライブ編集の行の欄(押した 1 ブロックだけが入っている)か。 */
 function isLiveBlockField(ta: HTMLTextAreaElement | null): boolean {
-  return ta !== null && ta.getAttribute('data-pkc-field') === 'row-source';
+  // 🔴 本文の全部を開いている欄(「全文を編集」)は全文の欄 ── 本文全体の道具を当ててよい(台帳 #1852 I2)
+  return ta !== null && ta.getAttribute('data-pkc-field') === 'row-source' && !ta.hasAttribute('data-pkc-row-whole');
 }
 
 /** 🔑 「この命令は本文の欄へ当てるか」に答える口は**ここ 1 つ**(§7)。 */
@@ -16824,8 +16868,13 @@ export function bindActions(
        * `Enter` で計算できる行とパレットで計算できる行が食い違う ── §7)。
        */
       // ⚠ コード・数式の中の `2+3=` は user の字そのもの ── 貼付(`pasteText`)と同じく計算しない
-      const res = insideCodeOrMath(ta.value, ta.selectionStart) ? null : resolveInlineCalc(ta.value, ta.selectionStart);
-      if (res !== null) {
+      // 🔴 1 面の編集の行は、その行より上の本文も読む(`基本単価 = 3200` や `合計=` が別の段落に在っても動く。#1852 I2 / 依頼 78-2)
+      const above = rowTextAbove(ta);
+      const res = insideCodeOrMath(ta.value, ta.selectionStart) ? null : resolveInlineCalc(ta.value, ta.selectionStart, above);
+      if (res !== null && res.tooManyDigits) {
+        // 🔴 桁が多すぎて正しく出せない答えは挿さない(直す前は末尾の違う値・丸めた値・指数の字が黙って入った。依頼 114-5)
+        services.showStatus?.(CALC_TOO_MANY_DIGITS);
+      } else if (res !== null) {
         /**
          * 🔴 **`insertText` で挿す**(= `execCommand('insertText')`)。
          *
@@ -16866,7 +16915,7 @@ export function bindActions(
          * ⚠ **`Enter` は止めない** ── 理由を出すだけで、改行はそのまま通す
          *   (打っている手を止めない)。
          */
-        const why = explainCalcMiss(ta.value, ta.selectionStart);
+        const why = explainCalcMiss(ta.value, ta.selectionStart, above);
         if (why !== null) services.showStatus?.(why);
       }
     }

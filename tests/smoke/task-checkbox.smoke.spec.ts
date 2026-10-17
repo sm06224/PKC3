@@ -121,6 +121,24 @@ test('🔴 チェックを押すと本文に残り、開き直しても消えな
   }
   await expect(progress, '戻したのに右の数が動かない').toHaveText('0 / 4 完了 (0%)');
 
+  /**
+   * ⑤-b 🔴 束 I2(台帳 #1852 / 依頼 114-2)── 「すべて未完了に戻す」の直後、画面下に「元に戻す」が出て、押すと完了が戻る。
+   *   知らせの字は「戻しました」(「未完了にしました」ではない)。⚠ 新しい起動は足さない(この道中の続き)。
+   */
+  await expect(
+    page.getByText('3 件を未完了に戻しました'),
+    '未完了に戻した知らせの字が違う / 出ていない',
+  ).toBeVisible();
+  const undo = page.locator('[data-pkc-action="restore-revision"][data-pkc-undo="1"]');
+  await expect(undo, '未完了に戻した直後に「元に戻す」が出ない').toBeVisible();
+  await expect(undo).toHaveText('元に戻す');
+  await clickReal(page, undo);
+  for (const n of [0, 1, 2]) {
+    await expect(back.nth(n), `元に戻したのに ${n} 番目の完了が戻らない`).toBeChecked();
+  }
+  await expect(back.nth(3), '繰り返しの行まで動いた').not.toBeChecked();
+  await expect(progress, '元に戻したのに右の数が戻らない').toHaveText('3 / 4 完了 (75%)');
+
   // ⑥ 箱の上の右クリックは、ブラウザ既定のメニューを残す(こちらのメニューを出さない)
   await back.nth(0).click({ button: 'right' });
   await expect(page.locator(MENU), '箱の上でこちらのメニューが出た').toHaveCount(0);

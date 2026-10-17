@@ -95,6 +95,7 @@ import {
   entryActionWidthTier,
 } from '@features/entry-actions';
 import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
+import { canChangeKind } from '@features/flavor/kind-change';
 
 /** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
 type Rows = Map<string, HTMLElement>;
@@ -1342,6 +1343,9 @@ export class InspectorRenderer {
     // 🔴 「この中に新しいノートを作る」も同じ門(#215)── 入れ物でなければ畳む
     const inFolderBtn = this.buttons.get('create-in-folder');
     if (inFolderBtn) inFolderBtn.hidden = meta.archetype !== 'folder';
+    // 🔴 種類を変える口はノートとログにだけ(台帳 #1852 I2 / 依頼 157)── 判定は `canChangeKind` 1 本
+    const kindBtn = this.buttons.get('change-entry-kind');
+    if (kindBtn) kindBtn.hidden = !canChangeKind(meta.archetype);
     // 🔴 保存したスタックにだけ出す(#633 段③)── `export-folder` と同じ作法(消さずに畳む)
     const stackBtn = this.buttons.get('stack-load');
     if (stackBtn) stackBtn.hidden = meta.archetype !== STACK_ARCHETYPE;
@@ -2008,6 +2012,8 @@ export class InspectorRenderer {
      */
     entryBtn('rename-entry-begin');
     entryBtn('move-to-folder');
+    // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── ノートとログだけ(`render` で畳む。`create-in-folder` と同じ作法)
+    entryBtn('change-entry-kind');
     entryBtn('create-in-folder');
     entryBtn('open-trash');
     entryBtn('delete-entry');

@@ -111,6 +111,8 @@ export function blockWithSubSlot(html: string, selector: string, k: number): str
  * (`proseSpan`)。定数側に入れると表・コードの編集欄まで散文の幅になる。
  */
 const PROSE_ROW_ATTR = 'data-pkc-row-prose';
+/** 本文の全部を 1 つの欄で開いているとき欄に付く印(台帳 #1852 I2)。binder と detail が読む。 */
+export const ROW_WHOLE_ATTR = 'data-pkc-row-whole';
 
 /**
  * 入力欄の高さの上限(行)。⚠ 全文差し替え(`Ctrl+A`)で 5000 行の箱を作らない。
@@ -131,6 +133,18 @@ const AUTOSIZE_ATTR = 'data-pkc-autosize';
  *   (実測で打鍵ごとの上位)── 同じ窓の答えは変わらない。object ごとなので、差し替えた `CSS`
  *   (別の窓・test の差し替え)には新しく聞く。
  */
+/**
+ * 🔴 **開いている行より上の本文を返す口**(台帳 #1852 I2 / 依頼 78-2・114-6)。
+ *
+ * ⚠ 1 面の編集の行の欄(`row-source`)は**押した 1 ブロックだけ**を持つので、上の行に書いた `基本単価 = 3200` や
+ *   `合計=` の塊が見えず、Enter で何も起きなかった(全文を編集なら動く)。計算が上の行を読めるよう、
+ *   欄ごとに「その行より上の本文(frontmatter を外した側。最後は改行)」を返す。無い欄は空。
+ */
+const ROW_ABOVE = new WeakMap<HTMLTextAreaElement, () => string>();
+export function rowTextAbove(ta: HTMLTextAreaElement): string {
+  return ROW_ABOVE.get(ta)?.() ?? '';
+}
+
 const fieldSizingAnswers = new WeakMap<object, boolean>();
 
 function fieldSizingSupported(ta: HTMLTextAreaElement): boolean {
@@ -1128,6 +1142,9 @@ export class RowSwap {
   }): boolean {
     // 実際に開けたなら予約は用済み(古い予約が後から焦点を奪わないように)。⚠ 待たせている依頼が在れば断りを返す
     this.setPending(null);
+    // 🔴 開く範囲が本文の全部か(「全文を編集」/ 1 塊だけの本文)。書式の帯の「番号を振り直す」などが効くかの判定に使う
+    //   (台帳 #1852 I2)。⚠ applyBlocks が view を差し替える前に数える
+    const wholeNote = o.sub == null && o.blockIndex === 0 && o.blockCount === this.view.blocks.length;
     const r = applyBlocks(this.host, o.withSlot.join(''), this.view, [o.blockIndex]);
     this.view = r.view;
     if (r.inserted.length > 0) this.cb.onInserted(r.inserted);
@@ -1139,11 +1156,16 @@ export class RowSwap {
     ta.setAttribute('data-pkc-field', 'row-source');
     // 🔑 開き直す先の行(#582)。⚠ 描き直しで塊の添字は変わるので、行番号を欄が運ぶ
     ta.setAttribute('data-pkc-row-line', String(o.startLine));
+    if (wholeNote) ta.setAttribute(ROW_WHOLE_ATTR, '1');
     // ⚠ 読み上げから見て無名にしない(2026-08-19 の全数監査)── 1 面編集は
     //    「いま開いている行」を編むので、本文全体と**別の名前**にする
     ta.setAttribute('aria-label', 'この行の原文');
     ta.value = o.source;
     slot.append(ta);
+    ROW_ABOVE.set(ta, () => {
+      const above = this.body.split('\n').slice(0, o.startLine);
+      return above.length === 0 ? '' : `${above.join('\n')}\n`;
+    });
 
     this.active = {
       blockIndex: o.blockIndex,

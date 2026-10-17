@@ -206,30 +206,44 @@ function sortListBlockLines(lines: readonly string[]): string[] {
 }
 
 /**
- * 本文（Markdown）内のチェックリストを走査し、
- * 各リストブロックごとに完了したタスク項目（`- [x]`）を末尾に寄せて返す。
- *
- * @param body 対象の Markdown 本文
- * @returns 整理後の Markdown 本文。変更がなければ元の文字列をそのまま返す
+ * 引用の頭(行頭の `>` の並び)。⚠ **行頭(字下げ 0)の `>` だけ**を引用の塊として扱う ──
+ * 字下げした `>` はリスト項目の続きの行であることが多く、塊として切り出すと項目の構造を壊す。
+ * 行頭の `>` はリストを必ず閉じる(markdown-it も同じ)ので、切り出しても意味が変わらない。
  */
-export function sortTasksByStatus(body: string): string {
-  if (body === '' || !body.includes('[')) {
-    return body;
-  }
+const QUOTE_HEAD = /^(>(?:[ \t]*>)*)([ \t]?)(.*)$/s;
 
-  const lines = body.split('\n');
+/** 1 つの区間(引用ではない行の連なり)を並べ替える。`only` が数なら、その行を含むリストだけ。 */
+function sortSegment(lines: readonly string[], only: number | null): { lines: string[]; hit: boolean } {
   const out: string[] = [];
-
   const opaque = opaqueRegions(lines);
   /** 触らない塊が、いま開いているリスト項目の配下(字下げ付き)に在るか。在れば塊ごと項目に付いて動く。 */
   let opaqueInBlock = false;
   let currentListBlock: string[] = [];
+  /** いま開いているリストの、区間の中での最初と最後の行。 */
+  let blockFirst = 0;
+  let blockLast = 0;
+  let hit = false;
+
+  const add = (idx: number): void => {
+    if (currentListBlock.length === 0) blockFirst = idx;
+    currentListBlock.push(lines[idx]!);
+    blockLast = idx;
+  };
 
   const flushListBlock = (): void => {
     if (currentListBlock.length === 0) return;
-    const sorted = sortListBlockLines(currentListBlock);
-    out.push(...sorted);
+    const block = currentListBlock;
     currentListBlock = [];
+    // 🔴 カーソルのあるリストだけ(依頼 87-2)── それ以外のリストは 1 バイトも動かさない
+    const inScope = only === null || (only >= blockFirst && only <= blockLast);
+    if (!inScope) {
+      out.push(...block);
+      return;
+    }
+    const sorted = sortListBlockLines(block);
+    // 並べ替える相手に、チェック項目が 1 つも無ければ「当たった」に数えない(カーソルがただの箇条書きに在るとき)
+    if (only !== null && block.some((l) => TASK_MARKER.test(l))) hit = true;
+    out.push(...sorted);
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -241,7 +255,7 @@ export function sortTasksByStatus(body: string): string {
         opaqueInBlock = currentListBlock.length > 0 && /^\s+/.test(line);
         if (!opaqueInBlock) flushListBlock();
       }
-      if (opaqueInBlock) currentListBlock.push(line);
+      if (opaqueInBlock) add(i);
       else out.push(line);
       continue;
     }
@@ -258,7 +272,7 @@ export function sortTasksByStatus(body: string): string {
         while (j < lines.length && lines[j]!.trim() === '') j += 1;
         const nextLine = lines[j];
         if (nextLine !== undefined && opaque[j] === 0 && LIST_MARKER.test(nextLine)) {
-          for (; i < j; i++) currentListBlock.push(lines[i]!);
+          for (; i < j; i++) add(i);
           i = j - 1;
           continue;
         }
@@ -271,12 +285,12 @@ export function sortTasksByStatus(body: string): string {
     // 3. リスト行の判定
     const isListItem = LIST_MARKER.test(line);
     if (isListItem) {
-      currentListBlock.push(line);
+      add(i);
     } else {
       // リスト項目ではない行
       // 直前がリストブロックで、かつインデントされた継続行であればリストブロックに含める
       if (currentListBlock.length > 0 && /^\s+/.test(line)) {
-        currentListBlock.push(line);
+        add(i);
       } else {
         flushListBlock();
         out.push(line);
@@ -285,33 +299,114 @@ export function sortTasksByStatus(body: string): string {
   }
 
   flushListBlock();
-
-  const nextBody = out.join('\n');
-  return nextBody === body ? body : nextBody;
+  return { lines: out, hit };
 }
 
 /**
- * 本文にチェック項目(`- [ ]` / `- [x]`)が 1 つでも在るか。⚠ 読み方は `sortTasksByStatus` と同じ
+ * 全体の走査。引用(`> - [ ] …`)の塊は **`>` を外して**同じ規則で並べ替え、同じ `>` を付け直す(依頼 159。推薦 ②)。
+ * @param only カーソルの行(0 始まり)。`null` なら全部のリスト
+ */
+function sortAll(body: string, only: number | null): { text: string; hit: boolean } {
+  const lines = body.split('\n');
+  const opaque = opaqueRegions(lines);
+  const out: string[] = [];
+  let hit = false;
+  let seg: string[] = [];
+  let segFirst = 0;
+
+  const flushSeg = (): void => {
+    if (seg.length === 0) return;
+    const local = only === null ? null : only >= segFirst && only < segFirst + seg.length ? only - segFirst : -1;
+    const r = sortSegment(seg, local);
+    out.push(...r.lines);
+    if (r.hit) hit = true;
+    seg = [];
+  };
+
+  for (let i = 0; i < lines.length; ) {
+    const line = lines[i]!;
+    if (opaque[i] === 0 && line.startsWith('>')) {
+      // 引用の塊 = 行頭が `>` の行の連なり。⚠ 頭の `>` の並びが全部同じ行だけを 1 つの塊にする(深さの違う行は塊を分ける)
+      const head = QUOTE_HEAD.exec(line)!;
+      const key = head[1]!.replace(/[ \t]/g, '');
+      let j = i;
+      const inner: string[] = [];
+      let space = '';
+      while (j < lines.length && opaque[j] === 0) {
+        const m = QUOTE_HEAD.exec(lines[j]!);
+        if (m === null || m[1]!.replace(/[ \t]/g, '') !== key) break;
+        if (space === '' && m[3] !== '') space = m[2]!;
+        inner.push(m[3]!);
+        j += 1;
+      }
+      flushSeg();
+      const local = only === null ? null : only >= i && only < j ? only - i : -1;
+      const r = sortSegment(inner, local);
+      if (r.hit) hit = true;
+      const same = r.lines.length === inner.length && r.lines.every((l, k) => l === inner[k]);
+      if (same) {
+        for (let k = i; k < j; k++) out.push(lines[k]!);
+      } else {
+        for (const l of r.lines) out.push(l === '' ? head[1]! : `${head[1]!}${space === '' ? ' ' : space}${l}`);
+      }
+      i = j;
+      continue;
+    }
+    if (seg.length === 0) segFirst = i;
+    seg.push(line);
+    i += 1;
+  }
+  flushSeg();
+  return { text: out.join('\n'), hit };
+}
+
+/**
+ * 本文（Markdown）内のチェックリストを走査し、
+ * 各リストブロックごとに完了したタスク項目（`- [x]`）を末尾に寄せて返す。
+ * 引用の中のリスト(`> - [x] …`)も同じ規則で並べ替える(台帳 #1852 I2 / 依頼 159。Gemini 回答 = 推薦 ②)。
+ *
+ * @param body 対象の Markdown 本文
+ * @returns 整理後の Markdown 本文。変更がなければ元の文字列をそのまま返す
+ */
+export function sortTasksByStatus(body: string): string {
+  if (body === '' || !body.includes('[')) {
+    return body;
+  }
+  const next = sortAll(body, null).text;
+  return next === body ? body : next;
+}
+
+/**
+ * 🔴 **カーソルのあるリストだけ**を並べ替える(台帳 #1852 I2 / 依頼 87-2。Gemini 回答 = 推薦 A)。
+ *
+ * 押した場所と効く範囲をそろえる ── 3 つリストが在るノートで、カーソルのある 1 つだけが動く。
+ * ⚠ **カーソルがチェックリストの外**(段落の上・ノートの末尾など)にあるときは、これまでどおり
+ *   すべてのリストを並べ替える(`scope: 'all'`)。何も起きない行き止まりにしない。
+ * @param caretLine カーソルのある行(0 始まり)
+ */
+export function sortTasksAtCaret(body: string, caretLine: number): { text: string; scope: 'caret' | 'all' } {
+  if (body === '' || !body.includes('[')) return { text: body, scope: 'all' };
+  const here = sortAll(body, caretLine);
+  if (here.hit) return { text: here.text === body ? body : here.text, scope: 'caret' };
+  const all = sortAll(body, null).text;
+  return { text: all === body ? body : all, scope: 'all' };
+}
+
+/** カーソルの行(0 始まり)。 */
+export function caretLineOf(text: string, caret: number): number {
+  let n = 0;
+  for (let i = text.indexOf('\n'); i !== -1 && i < caret; i = text.indexOf('\n', i + 1)) n += 1;
+  return n;
+}
+
+/**
+ * 本文にチェック項目(`- [ ]` / `- [x]`。引用の中の `> - [ ]` も)が 1 つでも在るか。⚠ 読み方は `sortTasksByStatus` と同じ
  * (fence の中は数えない)── 「無いから変わらなかった」と「揃っているから変わらなかった」を言い分ける。
+ * 🔴 引用の中も数える(依頼 159 で並べ替えの対象にしたので、揃っているのに「ありません」と偽を言わない)。
  */
 export function hasTaskItems(body: string): boolean {
   if (body === '' || !body.includes('[')) return false;
   const lines = body.split('\n');
   const opaque = opaqueRegions(lines);
-  return lines.some((line, i) => opaque[i] === 0 && TASK_MARKER.test(line));
-}
-
-/**
- * 本文に**引用の中の**チェック項目(`> - [ ] a`)が在るか。⚠ 画面ではチェックを押せる(`TASK_LINE` と同じ読み)が、
- * `sortTasksByStatus` は引用の中を並べ替えない ── 「チェック項目はありません」と偽を言わず、断りを言い分けるために持つ。
- */
-export function hasQuotedTaskItems(body: string): boolean {
-  if (body === '' || !body.includes('[')) return false;
-  const lines = body.split('\n');
-  const opaque = opaqueRegions(lines);
-  return lines.some((line, i) => {
-    if (opaque[i] !== 0) return false;
-    const m = TASK_LINE.exec(line);
-    return m !== null && m[1]!.includes('>');
-  });
+  return lines.some((line, i) => opaque[i] === 0 && TASK_LINE.test(line));
 }

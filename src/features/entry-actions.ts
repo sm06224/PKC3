@@ -40,6 +40,7 @@ import {
   type PlaceShape,
 } from './markdown/place-shape';
 import { STACK_ARCHETYPE } from './flavor/stack-flavor';
+import { canChangeKind } from './flavor/kind-change';
 import { REPEAT_UNITS, REPEAT_WORDS, type RepeatUnit } from './schedule/repeat';
 import { APP_OPEN_TARGETS, type AppOpenTarget } from './launcher/open-target';
 
@@ -58,7 +59,14 @@ export interface EntryAction {
    *   本文を読まないと決まらない条件をここへ入れると、右クリックした瞬間に
    *   worker を叩く経路がもう 1 本増える(§7)。
    */
-  readonly when?: 'folder' | 'linked' | 'stack' | 'bookmarkable' | 'bookmarked' | 'attachment';
+  readonly when?:
+    | 'folder'
+    | 'linked'
+    | 'stack'
+    | 'bookmarkable'
+    | 'bookmarked'
+    | 'attachment'
+    | 'kind-changeable';
   /**
    * 🔴 **塊(見出し)の綴り**(#1029 段 C)。⚠ 書いていないものは**塊を持たない**
    *   (見出しの前後に置かれない ── `TASK_REPEAT_MENU_ACTION` のような単発の項目)。
@@ -169,6 +177,8 @@ const WHEN: Readonly<
   // 🔴 入れる / 外すは**対**(#1377)── どちらか一方だけが出る。`undefined` はどちらも出さない
   bookmarkable: (ctx) => ctx.bookmarked === false,
   bookmarked: (ctx) => ctx.bookmarked === true,
+  // 🔴 種類を変えられるのはノートとログだけ(台帳 #1852 I2 / 依頼 157)── 判定は `canChangeKind` 1 本
+  'kind-changeable': (ctx) => canChangeKind(ctx.archetype),
 };
 
 /**
@@ -425,6 +435,12 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'rename-entry-begin', label: '名前を変える', group: 'this-one' },
   { action: 'move-to-folder', label: 'フォルダへ移す…', group: 'this-one' },
+  /**
+   * 🔴 **種類を変える**(台帳 #1852 I2 / 依頼 157。Gemini 回答 = 推薦 ②)。ノート ⇄ ログだけ(`when: 'kind-changeable'`)。
+   * 本文は変わらず、見せ方と追記のしかただけが変わる ── 戻すにはもう一度押す。
+   * ⚠ 置き場は「フォルダへ移す…」の下・削除の上(既存の並びを動かさない)。
+   */
+  { action: 'change-entry-kind', label: '種類を変える…', group: 'this-one', when: 'kind-changeable' },
   { action: 'create-in-folder', label: 'この中に新しいノートを作る', group: 'this-one', when: 'folder' },
   /**
    * 🔴 **ノートをブックマークに入れる / 外す**(#1377。Gemini 裁定を user 委任で採用 =
@@ -1500,6 +1516,9 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   'rename-entry-begin': '行の題名の所に入力欄が出ます。Enter で確定、Esc でやめます',
   'move-to-folder': 'フォルダの一覧から移動先を選びます。選択が複数あれば、その全部を移します',
   'create-in-folder': 'このフォルダの中に新しいノートを作って、そのまま編集に入ります',
+  // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)。⚠ 本文が変わらないことと、戻し方を先に言う
+  'change-entry-kind':
+    'ノートとログを入れ替えます。本文は変わらず、追記の足し方が変わります',
 };
 
 /**

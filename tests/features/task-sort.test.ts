@@ -1,6 +1,6 @@
 /** @vitest-environment node */
 import { describe, expect, it } from 'vitest';
-import { hasQuotedTaskItems, hasTaskItems, sortTasksByStatus } from '../../src/features/markdown/task-sort';
+import { caretLineOf, hasTaskItems, sortTasksAtCaret, sortTasksByStatus } from '../../src/features/markdown/task-sort';
 
 describe('sortTasksByStatus #1108', () => {
   it('未完了項目と完了項目が混在するリストで、完了項目が末尾へ移動する', () => {
@@ -210,14 +210,77 @@ describe('触らない塊 / 引用 (#1087 sweep)', () => {
     const body = '- [x] a\n  $$\n  - [x] m\n  - [ ] n\n  $$\n- [ ] b\n';
     expect(sortTasksByStatus(body)).toBe('- [ ] b\n- [x] a\n  $$\n  - [x] m\n  - [ ] n\n  $$\n');
   });
-  it('hasTaskItems は fence の中を数えず、引用の中は hasQuotedTaskItems が言い分ける', () => {
+  it('hasTaskItems は fence の中を数えず、引用の中は数える(引用の中も並べ替える。台帳 #1852 I2 / 依頼 159)', () => {
     expect(hasTaskItems('```\n- [ ] a\n```')).toBe(false);
     // 文書の頭の 4 SP の ``` は字下げのコードであって fence ではない(markdown-it は後ろの項目を生きた task として描く)。
     //   事実が動いた: 以前は fence とみなして後ろを飲んでいた(#1087 M9b)
     expect(hasTaskItems('    ```\n- [ ] a\n```')).toBe(true);
-    expect(hasTaskItems('> - [ ] a')).toBe(false);
-    expect(hasQuotedTaskItems('> - [ ] a')).toBe(true);
-    expect(hasQuotedTaskItems('- [ ] a')).toBe(false);
-    expect(sortTasksByStatus('> - [x] a\n> - [ ] b')).toBe('> - [x] a\n> - [ ] b');
+    expect(hasTaskItems('> - [ ] a')).toBe(true);
+    expect(hasTaskItems('- [ ] a')).toBe(true);
+    expect(hasTaskItems('普通の文')).toBe(false);
+  });
+});
+
+describe('引用の中のチェックも並べ替える(台帳 #1852 I2 / 依頼 159。推薦 ②)', () => {
+  it('完了が末尾へ。頭の > はそのまま付き直る', () => {
+    expect(sortTasksByStatus('> - [x] 済\n> - [ ] 未')).toBe('> - [ ] 未\n> - [x] 済');
+    expect(sortTasksByStatus('>- [x] 済\n>- [ ] 未')).toBe('> - [ ] 未\n> - [x] 済'.replace('> - ', '> - '));
+  });
+  it('引用の前後の段落・外のリストは 1 バイトも動かさない', () => {
+    const body = '前\n\n> - [x] a\n> - [ ] b\n\n- [x] c\n- [ ] d\n後';
+    expect(sortTasksByStatus(body)).toBe('前\n\n> - [ ] b\n> - [x] a\n\n- [ ] d\n- [x] c\n後');
+  });
+  it('入れ子の引用(> >)も、深さの同じ連なりごとに並べる', () => {
+    expect(sortTasksByStatus('> > - [x] a\n> > - [ ] b')).toBe('> > - [ ] b\n> > - [x] a');
+  });
+  it('既に揃っている引用は同一の文字列を返す(書き換えない)', () => {
+    const body = '> - [ ] a\n> - [x] b';
+    expect(sortTasksByStatus(body)).toBe(body);
+  });
+  it('字下げした > (リスト項目の続きの行)は引用の塊として切り出さない', () => {
+    const body = '- [x] a\n  > メモ\n- [ ] b';
+    expect(sortTasksByStatus(body)).toBe('- [ ] b\n- [x] a\n  > メモ');
+  });
+  it('引用の中の fence は触らない', () => {
+    const body = '> ```\n> - [x] a\n> - [ ] b\n> ```';
+    expect(sortTasksByStatus(body)).toBe(body);
+  });
+});
+
+describe('カーソルのあるリストだけ並べ替える(台帳 #1852 I2 / 依頼 87-2。推薦 A)', () => {
+  const body = ['# 一', '- [x] a1', '- [ ] a2', '', '# 二', '- [x] b1', '- [ ] b2', '', '# 三', '- [x] c1', '- [ ] c2'].join('\n');
+  it('2 つ目のリストにカーソルがあれば、2 つ目だけが動く(1 つ目・3 つ目は 1 バイトも動かない)', () => {
+    const r = sortTasksAtCaret(body, 5);
+    expect(r.scope).toBe('caret');
+    expect(r.text).toBe(['# 一', '- [x] a1', '- [ ] a2', '', '# 二', '- [ ] b2', '- [x] b1', '', '# 三', '- [x] c1', '- [ ] c2'].join('\n'));
+  });
+  it('カーソルが引用の中のリストにあれば、その引用だけ', () => {
+    const q = '- [x] a\n- [ ] b\n\n> - [x] c\n> - [ ] d';
+    const r = sortTasksAtCaret(q, 3);
+    expect(r.scope).toBe('caret');
+    expect(r.text).toBe('- [x] a\n- [ ] b\n\n> - [ ] d\n> - [x] c');
+  });
+  it('🔑 カーソルがリストの外(見出し・末尾)なら、これまでどおりすべてのリスト', () => {
+    const r = sortTasksAtCaret(body, 4);
+    expect(r.scope).toBe('all');
+    expect(r.text).toBe(sortTasksByStatus(body));
+  });
+  it('カーソルのあるリストが既に揃っていれば、他のリストが崩れていても動かさず scope は caret', () => {
+    const b = '- [x] a\n- [ ] b\n\n間の段落\n\n- [ ] c\n- [x] d';
+    const r = sortTasksAtCaret(b, 5);
+    expect(r.scope).toBe('caret');
+    expect(r.text).toBe(b);
+  });
+  it('チェックの無いただの箇条書きにカーソルがあるときは「すべて」へ倒れる', () => {
+    const b = '- 牛乳\n- 卵\n\n間の段落\n\n- [x] a\n- [ ] b';
+    const r = sortTasksAtCaret(b, 0);
+    expect(r.scope).toBe('all');
+    expect(r.text).toBe('- 牛乳\n- 卵\n\n間の段落\n\n- [ ] b\n- [x] a');
+  });
+  it('caretLineOf:カーソルの行(0 始まり)', () => {
+    expect(caretLineOf('a\nbb\nccc', 0)).toBe(0);
+    expect(caretLineOf('a\nbb\nccc', 2)).toBe(1);
+    expect(caretLineOf('a\nbb\nccc', 5)).toBe(2);
+    expect(caretLineOf('a\nbb\nccc', 9)).toBe(2);
   });
 });

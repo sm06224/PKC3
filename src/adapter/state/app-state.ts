@@ -118,6 +118,7 @@ import { filerRowOptions, listViewOptions } from './list-view-options';
 import { getAncestorFolders, reorderSibling, structuralParentsLookup, wouldMakeCycle } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { isAppendable } from '@features/flavor/append-spec';
+import { kindChangeTarget } from '@features/flavor/kind-change';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import type { TableFormat } from '@features/markdown/table-convert';
 import {
@@ -3294,6 +3295,11 @@ export type UserAction =
   | { type: 'DELETE_ENTRY'; lid: string }
   | { type: 'RENAME_ENTRY_TITLE'; lid: string; title: string }
   /**
+   * 🔴 **ノートの種類を変える**(台帳 #1852 I2 / 依頼 157。Gemini 回答 = 推薦 ②)。本文は変わらない。
+   * ⚠ 変えられる組はノート ⇄ ログだけ(`kind-change.ts`)。編集中・取り込み中は変えない(理由を言う)。
+   */
+  | { type: 'SET_ENTRY_ARCHETYPE'; lid: string; archetype: string }
+  /**
    * 🔴 **居場所を変える**(2026-08-05。フォルダ整理)。
    * `parentLid: null` = ルートへ出す。⚠ 「外す」と「入れる」を 2 つに割らない ──
    * 割ると途中で落ちたときに親無しが残る(PKC2 がその形だった)。
@@ -3533,6 +3539,11 @@ export type SystemCommand =
   /** 関係の保存に失敗したとき、画面を disk に合わせる(足した物を外す / 消した物を戻す) */
   | { type: 'ROLLBACK_RELATION'; change: 'added'; id: string }
   | { type: 'ROLLBACK_RELATION'; change: 'removed'; relation: Relation }
+  /**
+   * 種類の保存に失敗したとき、画面の種類を元へ戻す(台帳 #1852 I2 / 依頼 157)。
+   * ⚠ `to`(変える前)へ戻すのは、画面がまだ `from`(変えた後)のときだけ ── 間に別の変更が入っていたら触らない。
+   */
+  | { type: 'SET_ENTRY_ARCHETYPE_ROLLBACK'; lid: string; from: string; to: string }
   /**
    * 🔴 **未読のメッセージの数が変わった**(設計 doc §7、段②a)。
    *
@@ -4293,6 +4304,19 @@ export type DomainEvent =
       untouched?: boolean;
     }
   | {
+      /**
+       * 種類の書換の永続化要求(台帳 #1852 I2 / 依頼 157)。⚠ 本文は載せない ── effect が disk から読んで、
+       * 抽出列(日付など)を新しい種類の規則で引き直して行を書く(`REQUEST_RENAME` と同じく画面の古い本文を基底にしない)。
+       */
+      type: 'REQUEST_SET_ARCHETYPE';
+      lid: string;
+      title: string;
+      archetype: string;
+      /** 戻すとき・失敗の知らせに使う、変える前の種類 */
+      oldArchetype: string;
+      entryOrder: number;
+    }
+  | {
       /** title 書換の永続化要求(body は effect が disk から読む)。snapshot は
        *  発火時捕獲(C-1 規律)。title は新値。 */
       type: 'REQUEST_RENAME';
@@ -4502,6 +4526,7 @@ const SYSTEM_COMMAND_TYPES: Record<SystemCommand['type'], true> = {
   CODE_SAVED: true,
   CODE_SAVE_FAILED: true,
   ROLLBACK_RELATION: true,
+  SET_ENTRY_ARCHETYPE_ROLLBACK: true,
 };
 
 function isSystemCommand(action: Dispatchable): boolean {
@@ -9598,6 +9623,36 @@ function reduceCore(
         ],
       };
     }
+    case 'SET_ENTRY_ARCHETYPE': {
+      // 編集中は変えない ── 開いている下書きの種類(追記・見出しの扱い)が途中で変わる。理由を言う(黙って断らない)
+      if (state.phase !== 'ready') {
+        return {
+          state: { ...state, error: `${phaseBlockReason(state.phase) ?? ''}種類を変えてください` },
+          events: [],
+        };
+      }
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta || meta.archetype === action.archetype) return { state, events: [] };
+      // ⚠ 変えられるのはノート ⇄ ログだけ(`kindChangeTarget`)。それ以外は手を付けない
+      if (kindChangeTarget(meta.archetype) !== action.archetype) return { state, events: [] };
+      // 種類は画面が先に変わる(題名の改名と同じ楽観更新)。永続化は effect が disk の本文を読んで行を書く
+      return {
+        state: {
+          ...state,
+          entryMetas: new Map(state.entryMetas).set(action.lid, { ...meta, archetype: action.archetype }),
+        },
+        events: [
+          {
+            type: 'REQUEST_SET_ARCHETYPE',
+            lid: action.lid,
+            title: meta.title,
+            archetype: action.archetype,
+            oldArchetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+          },
+        ],
+      };
+    }
     case 'SET_ENTRY_PARENT': {
       // 🔴 **フォルダ整理の唯一の入口**(2026-08-05、user 報告
       // 「フォルダ整理のための導線がない」)。直す前は UI どころか
@@ -9736,6 +9791,14 @@ function reduceCore(
      * 🔴 **保存に失敗した関係を画面から巻き戻す**。⚠ 画面が先に動くので、disk が断ったら
      * 画面だけに残る(再読み込みで逆に見える)。足した物は外し、消した物は戻す。冪等。
      */
+    case 'SET_ENTRY_ARCHETYPE_ROLLBACK': {
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta || meta.archetype !== action.from) return { state, events: [] };
+      return {
+        state: { ...state, entryMetas: new Map(state.entryMetas).set(action.lid, { ...meta, archetype: action.to }) },
+        events: [],
+      };
+    }
     case 'ROLLBACK_RELATION': {
       if (action.change === 'added') {
         if (!state.relations.some((r) => r.id === action.id)) return { state, events: [] };

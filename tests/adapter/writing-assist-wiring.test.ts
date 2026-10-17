@@ -253,6 +253,21 @@ describe('1 面のライブ編集の行では、全文の道具は触らず「�
   });
 });
 
+describe('「全文を編集」で本文の全部を開いた欄では、全文の道具が効く(台帳 #1852 I2)', () => {
+  it('🔴 data-pkc-row-whole の付いた row-source には、番号の振り直し / 完了項目の移動が効く(案内だけで終わらせない)', () => {
+    const status: string[] = [];
+    const { root } = setup({ showStatus: (t: string) => status.push(t) });
+    const ta = editor(root, '1. あ\n5. い', 0, 'row-source');
+    ta.setAttribute('data-pkc-row-whole', '1');
+    root.querySelector<HTMLElement>('[data-pkc-action="renumber-lists"]')!.click();
+    expect(ta.value, '全文の欄なのに振り直されない').toBe('1. あ\n2. い');
+    expect(status.join('')).not.toContain('全文を編集');
+    ta.value = '- [x] 済\n- [ ] 未';
+    root.querySelector<HTMLElement>('[data-pkc-action="sort-tasks"]')!.click();
+    expect(ta.value, '全文の欄なのに完了項目が動かない').toBe('- [ ] 未\n- [x] 済');
+  });
+});
+
 describe('素の Markdown で写せる #396', () => {
   it('🔴 押すと方言が落ちた本文が写る', () => {
     const copied: string[] = [];

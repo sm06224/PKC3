@@ -190,6 +190,27 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   await clickReal(page, '[data-pkc-format="table"]');
   await expect(preview.locator('table th')).toHaveCount(2);
 
+  /**
+   * ⑥ 🔴 束 I2(台帳 #1852)── 2 ペインの全文編集。⚠ 新しい起動は足さない(この道中の続き)。
+   *   a. 下見のチェックを実マウスで押す → 左の欄の `[ ]` が `[x]`(ブラウザの click が下見の捕捉段に届くか)
+   *   b. 全文の欄では「番号を振り直す」「完了項目を末尾へ」が灰色でない(対照群。灰色になるのは 1 面編集だけ)
+   *   c. 完了の項目を選んで「箇条書き」を押しても `[x]` が消えない
+   */
+  await ta.fill('- [ ] 牛乳\n- [x] 卵\n');
+  const boxes = preview.locator('input.pkc-task-checkbox');
+  await expect(boxes, '下見にチェックが描かれていない').toHaveCount(2);
+  await boxes.nth(0).click();
+  await expect(ta, '下見のチェックを押しても左の欄の [ ] が [x] にならない').toHaveValue('- [x] 牛乳\n- [x] 卵\n');
+  for (const a of ['renumber-lists', 'sort-tasks']) {
+    const b = bar.locator(`[data-pkc-action="${a}"]`);
+    await expect(b, `全文の欄で ${a} が灰色になっている`).not.toHaveAttribute('aria-disabled', 'true');
+    expect(await b.evaluate((el) => Number(getComputedStyle(el).opacity)), `全文の欄で ${a} の opacity が下がっている`).toBe(1);
+  }
+  await ta.fill('- [x] 済');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 8));
+  await clickReal(page, '[data-pkc-format="ul"]');
+  await expect(ta, '箇条書きのボタンで完了の印が消えた').toHaveValue('- [x] 済');
+
   expect(errors).toEqual([]);
 });
 

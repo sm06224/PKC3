@@ -1958,7 +1958,8 @@ describe('行の右クリックの「編集」(#1038 台帳③ C1)', () => {
     expect(
       [...group!.querySelectorAll('button')].map((b) => b.getAttribute('data-pkc-action')),
       '塊の並びが崩れている',
-    ).toEqual(['start-edit', 'show-history', 'rename-entry-begin', 'move-to-folder']);
+    // 台帳 #1852 I2 / 依頼 157: ノートとログには「種類を変える…」が「フォルダへ移す…」の下に並ぶ
+    ).toEqual(['start-edit', 'show-history', 'rename-entry-begin', 'move-to-folder', 'change-entry-kind']);
     // ⚠ 塊どうしの間が空く印(CSS は app.css 側の test が見る)
     expect(menu.hasAttribute('data-pkc-with-groups'), '塊の間を空ける印が付いていない').toBe(true);
   });

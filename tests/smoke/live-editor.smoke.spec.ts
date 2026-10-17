@@ -205,6 +205,82 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   expect(errors, 'Ctrl+S で pageerror').toEqual([]);
 
   /**
+   * ④-4 🔴 **束 I2(台帳 #1852)── 1 画面編集の道中で、編集中のチェック押下 / 灰色の 2 つ / その場の計算(上の段落の語)**。
+   *   ⚠ 新しい起動は足さない(この道中の続き)。見るのは **実マウスで押した結果** と **computed の opacity**(happy-dom に CSS が無い)。
+   *   ① 編集中の本文のチェックを押す → 下書きの `[ ]` が `[x]`(行を開いて原文で読む)→ 保存 → 読む面でも済み
+   *   ② 書式バーの「番号を振り直す」「完了項目を末尾へ」が灰色(aria-disabled + opacity ≈ 0.45)→ 「全文を編集」で外れる
+   *   ③ 上の段落の `基本単価 = 3200` を読んで `基本単価*8=` → 25600 / `300×3=` → 900
+   */
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(live).toBeVisible();
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await expect(row).toBeFocused();
+  await row.fill('基本単価 = 3200\n\n- [ ] 牛乳\n- [ ] 卵');
+  await page.keyboard.press('Tab');
+  await expect(live.locator('[data-pkc-field="row-source"]')).toHaveCount(0);
+  const liveBoxes = live.locator('input.pkc-task-checkbox');
+  await expect(liveBoxes, '編集中の本文にチェックが描かれていない').toHaveCount(2);
+
+  // ② 灰色の 2 つ(1 行ずつ打つ編集)
+  const greyed = ['renumber-lists', 'sort-tasks'].map((a) => bar.locator(`[data-pkc-action="${a}"]`));
+  for (const b of greyed) {
+    await expect(b, '1 画面編集で aria-disabled が付いていない').toHaveAttribute('aria-disabled', 'true');
+    const op = await b.evaluate((el) => Number(getComputedStyle(el).opacity));
+    expect(op, `灰色に見えない(opacity=${op})`).toBeGreaterThan(0.4);
+    expect(op, `灰色に見えない(opacity=${op})`).toBeLessThan(0.5);
+  }
+  expect(
+    await bar.locator('[data-pkc-format="bold"]').first().evaluate((el) => Number(getComputedStyle(el).opacity)),
+    '対照群: ほかのボタンまで灰色',
+  ).toBe(1);
+
+  // ① 編集中のチェックを実マウスで押す → 押した 1 件だけ済み。行を開くと原文が `[x]`
+  await liveBoxes.nth(0).click();
+  await expect(liveBoxes.nth(0), '編集中にチェックを押しても済みにならない(クリックがハンドラに届いていない)').toBeChecked();
+  await expect(liveBoxes.nth(1), '押していない方まで変わった').not.toBeChecked();
+  await expect(live.locator('[data-pkc-field="row-source"]'), 'チェックを押したら行が入力欄に化けた').toHaveCount(0);
+  await modClickReal(page, '[data-pkc-region="editor-live"] li:nth-of-type(1)');
+  await expect(row, '下書きの原文が [x] になっていない').toHaveValue('- [x] 牛乳');
+  await row.press('Escape');
+  await expect(live.locator('[data-pkc-field="row-source"]')).toHaveCount(0);
+
+  // ③ 上の段落の語を読む計算
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(2)');
+  await expect(row).toHaveValue('次の段落です。');
+  await row.fill('');
+  await page.keyboard.type('基本単価*8=');
+  await page.keyboard.press('Enter');
+  await expect(row, '上の段落の「基本単価 = 3200」を読んで 25600 が入っていない').toHaveValue(/基本単価\*8=25600/);
+  await row.fill('');
+  await page.keyboard.insertText('300×3=');
+  await page.keyboard.press('Enter');
+  await expect(row, '`300×3=` が 900 にならない').toHaveValue(/300×3=900/);
+  await row.fill('次の段落です。');
+  await page.keyboard.press('Tab');
+  await expect(live.locator('[data-pkc-field="row-source"]')).toHaveCount(0);
+
+  // ② 続き: 「全文を編集」に切り替えると灰色が外れ、下書きの [x] がそのまま全文に出る
+  await clickReal(page, '[data-pkc-field="edit-all"]');
+  const whole = page.locator('[data-pkc-region="editor-live"] textarea').first();
+  await expect(whole, '全文を編集に切り替わらない').toBeVisible();
+  for (const b of greyed) {
+    await expect(b, '全文を編集に切り替えても灰色が外れない').not.toHaveAttribute('aria-disabled', 'true');
+    expect(await b.evaluate((el) => Number(getComputedStyle(el).opacity)), '全文編集で opacity が戻らない').toBe(1);
+  }
+  await expect(whole).toHaveValue(/- \[x\] 牛乳\n- \[ \] 卵/);
+  // 🔴 灰色が外れるだけでなく、**押すと本当に効く**(直す前は外れず、押すと「全文を編集に切り替えて」と案内するだけだった)
+  await clickReal(page, '[data-pkc-action="sort-tasks"]');
+  await expect(whole, '全文を編集のまま「完了項目を末尾へ」を押しても効かない').toHaveValue(/- \[ \] 卵\n- \[x\] 牛乳/);
+
+  // ① 続き: 保存 → 読む面でも済み
+  await pressBare('commit-edit');
+  await expect.poll(leftOvers, '保存で編集の道具が残った').toEqual(GONE);
+  const readBoxes = page.locator('[data-pkc-view-pane="detail"] [data-pkc-action="toggle-task"]');
+  await expect(readBoxes.nth(0), '末尾へ移した後の 1 件目(卵)は未完了').not.toBeChecked();
+  await expect(readBoxes.nth(1), '保存したのに読む面で済みになっていない').toBeChecked();
+  expect(errors, 'I2 の道中で pageerror').toEqual([]);
+
+  /**
    * ⑤ 🔴 #1087 ── **CRLF の本文**の段落を行の欄で開き、何も打たずに閉じても「変えた」にならない。
    *   欄の `value` は改行を LF にして返すので、直す前は原文(CRLF)と比べて必ず食い違い、
    *   何も打たなくても確定(→ 本文が LF 化)・Esc で「捨てますか」の確認が出ていた。

@@ -439,6 +439,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['rename-entry-begin', 'c951ee45'],
       ['move-to-folder', '26f9aeac'],
       ['create-in-folder', '80e07ad8'],
+      // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── ノートとログだけ
+      ['change-entry-kind', '99eca686'],
       // 🔴 ノートのブックマーク(#1377)── 2 ペインの行のメニューだけ。入れる / 外すは対
       ['bookmark-note-add', '42a11e66'],
       ['bookmark-note-remove', '42b727a8'],
@@ -480,6 +482,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       ...entryMenuActions({ ...ALL, bookmarked: true }),
       // 🔴 添付のリンクは添付のノートでだけ出る(2026-10-11)
       ...entryMenuActions({ archetype: 'attachment', linkedFile: null }),
+      // 🔴 種類を変える口はノートとログでだけ出る(台帳 #1852 I2 / 依頼 157)
+      ...entryMenuActions({ archetype: 'text', linkedFile: null }),
     ];
     const seen = new Set(rows.map((a) => a.action));
     // ⚠ 空振り防止 ── 条件つきの行を含めて全部出ている

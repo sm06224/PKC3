@@ -34,12 +34,21 @@ function calls(): string[] {
 }
 
 describe('#1087 persistEntry の keepMeta', () => {
-  it('🔴 keepMeta を渡さない書込は、版へ戻す・ゴミ箱から戻す(題名・種類を変えるのが目的)の 2 つだけ', () => {
+  it('🔴 keepMeta を渡さない書込は、版へ戻す・ゴミ箱から戻す・種類を変える(題名・種類を変えるのが目的)の 3 つだけ', () => {
     const all = calls();
     expect(all.length, '走査が空振り(呼び出しが見つからない)').toBeGreaterThanOrEqual(14);
     const without = all.filter((c) => !/keepMeta/.test(c));
-    expect(without.length, '新しい書込が keepMeta を渡していない(本文だけの書込なら付ける)').toBe(2);
-    // 目印は「渡している本文が版の本文」であること ── 件数の等値だけにしない
-    for (const c of without) expect(c, '版・ゴミ箱の復元以外が keepMeta を落とした').toContain('body: rev.body');
+    // 🔴 3 つ目は種類を変える書込(台帳 #1852 I2 / 依頼 157。種類を書くのが目的で、本文は読んだまま書く)
+    expect(without.length, '新しい書込が keepMeta を渡していない(本文だけの書込なら付ける)').toBe(3);
+    // 目印は「渡している本文が版の本文」であること、または種類を変える書込であること ── 件数の等値だけにしない
+    for (const c of without)
+      expect(
+        c.includes('body: rev.body') || c.includes('archetype: ev.archetype'),
+        '版・ゴミ箱の復元・種類の変更以外が keepMeta を落とした',
+      ).toBe(true);
+    // 版の本文を渡さない 1 つが、種類を変える書込(読んだ本文を、そのまま書く)
+    const kind = without.filter((c) => !c.includes('body: rev.body'));
+    expect(kind.length, '種類を変える書込が 1 つではない').toBe(1);
+    expect(kind[0], '種類を変える書込が archetype を渡していない').toContain('archetype: ev.archetype');
   });
 });
