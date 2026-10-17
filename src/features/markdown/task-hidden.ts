@@ -26,7 +26,7 @@
  *
  * 🔑 **pure module**。markdown-it を持ち込まない(storage worker の束に入る)。
  */
-import { advanceFence } from './list-renumber';
+import { fenceStep } from './list-renumber';
 
 /** 行頭の引用記号(`>` の連なり)。 */
 const QUOTE = /^(\s*>)+\s?/;
@@ -56,10 +56,10 @@ function commentMask(lines: readonly string[]): boolean[] {
   const buffer: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    const was = fence !== '';
-    fence = advanceFence(fence, line);
+    const st = fenceStep(fence, line);
+    fence = st.next;
     // 開き・閉じの行と中身は全部 fence の一部(描く側の `isFenceContent` と同じ)
-    const isFenceContent = was || fence !== '';
+    const isFenceContent = st.inside;
     if (isFenceContent) {
       if (inBlock || inDirective) hidden[i] = true;
       continue;

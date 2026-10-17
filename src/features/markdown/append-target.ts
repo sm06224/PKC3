@@ -27,7 +27,7 @@
  */
 import { makeSlugCounter } from './markdown-toc';
 import { frontmatterLineCount, parseFrontmatter } from './frontmatter';
-import { advanceFence } from './list-renumber';
+import { fenceStep } from './list-renumber';
 import { stripComments } from './markdown-render';
 
 /** 追記の入り先 1 つ。 */
@@ -78,8 +78,9 @@ function scanHeadings(body: string): HeadingAt[] {
   for (let i = skip; i < lines.length; i++) {
     const line = lines[i]!;
     const wasIn = fence !== '';
-    fence = advanceFence(fence, line);
-    if (wasIn || fence !== '') {
+    const st = fenceStep(fence, line);
+    fence = st.next;
+    if (st.inside) {
       if (wasIn !== (fence !== '')) para = [];
       continue;
     }

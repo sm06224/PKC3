@@ -22,7 +22,7 @@
  *   - Language class hint on fenced code blocks
  */
 
-import { advanceFence } from './list-renumber';
+import { fenceStep, advanceIndent, INDENT_START, LIST_LEAD, type IndentState } from './list-renumber';
 import MarkdownIt from 'markdown-it';
 import { parseTagLine } from '../flavor/body-tags';
 import { MAX_TAGS, sameTag } from '../flavor/tags';
@@ -3592,18 +3592,30 @@ const FIG_REF_CLOSE = '';
 
 interface FenceState {
   inFence: boolean;
-  marker: string;  // '```' or '~~~'(空 = 閉)
+  marker: string;  // '```' or '~~~'(空 = 閉。`inFence` かつ空 = 字下げのコード)
+  ind?: IndentState;  // 字下げのコードの追跡(無ければ文書の頭)
 }
 
 function fenceTransition(line: string, state: FenceState): { state: FenceState; isBoundary: boolean } {
   // 🔑 開閉の規則の正本は `advanceFence`(記号の種類 + 長さ。#1087)。
   //   かつては種類しか見ず、4 つの ``` の中の ``` で閉じたことになり、中の `%%%` / `:::` が生きた。
-  const cur = state.inFence ? state.marker : '';
-  const next = advanceFence(cur, line);
-  if (next === cur) return { state, isBoundary: false };
-  return next === ''
-    ? { state: { inFence: false, marker: '' }, isBoundary: true }
-    : { state: { inFence: true, marker: next }, isBoundary: true };
+  //   ⚠ 引用・リストの項目の中の fence(`> ````  / `- ````)も同じ正本が見る(M9)。
+  const inRealFence = state.inFence && state.marker !== '';
+  const cur = inRealFence ? state.marker : '';
+  const st = fenceStep(cur, line);
+  const next = st.next;
+  const ind = state.ind ?? INDENT_START;
+  // 🔴 入れ物(引用・リストの項目)が終わって fence が打ち切られた行は `inside` が偽 ── 外の行として読む
+  if (inRealFence && st.inside && next === cur) return { state, isBoundary: false };
+  if (st.inside) {
+    const after: IndentState = { blank: false, list: ind.list || LIST_LEAD.test(line), code: false };
+    return next === ''
+      ? { state: { inFence: false, marker: '', ind: after }, isBoundary: true }
+      : { state: { inFence: true, marker: next, ind: after }, isBoundary: true };
+  }
+  // fence の外 ── 字下げのコード(4 SP。空行の後で、リストの中ではないもの)も素通しの対象(M9)
+  const r = advanceIndent(ind, line);
+  return { state: { inFence: r.code, marker: '', ind: r.state }, isBoundary: false };
 }
 
 function processFigureBlocks(source: string, lineMapIn: number[]): {
@@ -5147,9 +5159,10 @@ export function stripComments(source: string, lineMapIn?: number[]): {
     const line = lines[i]!;
     const srcIdx = inMap[i] ?? i;
     const t = fenceTransition(line, fence);
-    const wasIn = fence.inFence;
     fence = t.state;
-    const isFenceContent = wasIn || t.isBoundary;
+    // 🔑 他の段と同じ読み(遷移後の状態 + 境界)。字下げのコードは「その行が」中かを遷移後に決めるので、
+    //   遷移前の状態では 1 行目を取りこぼす(M9)
+    const isFenceContent = fence.inFence || t.isBoundary;
     if (isFenceContent) {
       // Fenced code:passthrough(block comment 状態は維持しない、fence は優先)
       if (!inBlockComment && !inCommentDirective) {
@@ -6176,9 +6189,9 @@ function preprocessHeadingNumbers(text: string, start: number): string {
   let fence = '';
   for (const line of lines) {
     // 開閉は `advanceFence`(種類 + 長さ。#1087)
-    const wasIn = fence !== '';
-    fence = advanceFence(fence, line);
-    if (wasIn || fence !== '') {
+    const st = fenceStep(fence, line);
+    fence = st.next;
+    if (st.inside) {
       out.push(line);
       continue;
     }

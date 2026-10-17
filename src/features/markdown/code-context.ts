@@ -1,5 +1,5 @@
 import { lineStart } from './line-start';
-import { advanceFence } from './list-renumber';
+import { advanceFence, fenceStep } from './list-renumber';
 
 /**
  * 🔴 **その位置は、コード・数式の中か**(#1087)。
@@ -29,12 +29,23 @@ function blockContextBefore(value: string, end: number): 'fence' | 'math' | null
   let fence = '';
   let fenceDepth = 0;
   let math = false;
-  for (const l of value.slice(0, end).split('\n')) {
+  // ⚠ `end` は行頭なので、切り出した末尾の空の 1 片は「いまの行」の頭であって、前の行ではない
+  //   (数えると、引用の fence が「引用の外の空行」で終わったことになる)
+  const before = value.slice(0, end).split('\n');
+  if (end > 0) before.pop();
+  for (const l of before) {
     const { depth, rest } = unquote(l);
     if (fence !== '') {
-      // ⚠ 引用の深さが違う行は、この fence の閉じとして読まない
-      if (depth === fenceDepth) fence = advanceFence(fence, rest);
-      continue;
+      // ⚠ 引用が深い行は fence の中身。浅い行は引用が終わったので fence も終わり、その行を読み直す。
+      //   リストの項目が終わって打ち切られた行も同じ(`fenceStep` の `inside` が偽)
+      if (depth > fenceDepth) continue;
+      if (depth === fenceDepth) {
+        const st = fenceStep(fence, rest);
+        fence = st.next;
+        if (st.inside) continue;
+      } else {
+        fence = '';
+      }
     }
     if (math) {
       if (rest.trim() === '$$') math = false;

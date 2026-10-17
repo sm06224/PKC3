@@ -39,7 +39,7 @@ const TASK_MARKER = /^(\s*)(?:[-*+]|\d+[.)])\s+\[([ xX])\](?:\s+.*|$)/;
 /** 番号付き項目の頭(字下げ / 数 / 区切りと空白)。位置の番号を保つために使う。 */
 const NUMBERED = /^(\s*)(\d+)([.)]\s+)/;
 
-import { advanceFence } from './list-renumber';
+import { fenceStep } from './list-renumber';
 import { TASK_LINE } from './task-line';
 
 /**
@@ -54,13 +54,15 @@ function opaqueRegions(lines: readonly string[]): number[] {
   let id = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    const next = advanceFence(fence, line);
-    if (fence !== '' || next !== '') {
+    const st = fenceStep(fence, line);
+    const next = st.next;
+    if (st.inside) {
       if (fence === '') id += 1;
       ids[i] = id;
       fence = next;
       continue;
     }
+    fence = next;
     if (line.trim() === '$$') {
       let j = i + 1;
       while (j < lines.length && lines[j]!.trim() !== '$$') j++;

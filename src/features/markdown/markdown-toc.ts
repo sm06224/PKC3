@@ -33,7 +33,7 @@ export interface TocEntryLike {
 type Entry = TocEntryLike;
 import { buildTextlogDoc, type TextlogOrder } from '../textlog/textlog-doc';
 import { parseFrontmatter, extractVars, VAR_NAME_SOURCE } from './frontmatter';
-import { advanceFence } from './list-renumber';
+import { fenceStep } from './list-renumber';
 
 export type TocLevel = 1 | 2 | 3;
 
@@ -188,8 +188,9 @@ export function extractHeadingsFromMarkdown(
   for (const line of lines) {
     // 閉じは開きと同じ記号で同じ長さ以上(#1087、`advanceFence` が正本)
     const wasIn = fence !== '';
-    fence = advanceFence(fence, line);
-    if (wasIn || fence !== '') {
+    const st = fenceStep(fence, line);
+    fence = st.next;
+    if (st.inside) {
       if (wasIn !== (fence !== '')) para = [];
       continue;
     }
@@ -240,9 +241,9 @@ export function stripMismatchedIfBlocks(
   while (i < lines.length) {
     const line = lines[i]!;
     // 開閉の判定は `advanceFence`(記号の種類と長さ。#1087)
-    const outerWasIn = fence !== '';
-    fence = advanceFence(fence, line);
-    if (outerWasIn || fence !== '') {
+    const outerStep = fenceStep(fence, line);
+    fence = outerStep.next;
+    if (outerStep.inside) {
       out.push(line);
       i++;
       continue;
@@ -263,9 +264,9 @@ export function stripMismatchedIfBlocks(
     let innerFence = '';
     while (i < lines.length && depth > 0) {
       const inner = lines[i]!;
-      const innerWasIn = innerFence !== '';
-      innerFence = advanceFence(innerFence, inner);
-      if (innerWasIn || innerFence !== '') {
+      const innerStep = fenceStep(innerFence, inner);
+      innerFence = innerStep.next;
+      if (innerStep.inside) {
         if (match) out.push(inner);
         else out.push('');
         i++;
