@@ -25,6 +25,11 @@ test('🔴 メッセージ: 一覧に出ない / 開くと中央に出る / 編�
   await gotoApp(page);
   const hashAtBoot = await page.evaluate(() => location.hash);
   await dismissAnnounce(page);
+  // 🔴 タブの題名(台帳 #1852 束 L2): 開発版の build は「PKC3(開発版)」、公開版・検証版は「PKC3」のまま
+  //    ⚠ どちらの build で回しているかは spec から分からないので両方を受ける(記録に残す)。
+  const tabTitle = await page.title();
+  test.info().annotations.push({ type: 'tab-title', description: tabTitle });
+  expect(tabTitle, 'タブの題名が「PKC3」「PKC3(開発版)」のどちらでもない').toMatch(/^PKC3(\(開発版\))?$/);
 
   // ① 🔴 左の一覧に「メッセージ」という行は無い(system 領域は user の一覧に混ざらない)
   const sidebarRows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
@@ -39,10 +44,27 @@ test('🔴 メッセージ: 一覧に出ない / 開くと中央に出る / 編�
   const pane = page.locator('[data-pkc-view-pane="settings"]');
   await expect(pane, 'システムの面が開かない').toBeVisible();
 
-  // ② 🔴 メッセージの節の「開く」を押す
+  // ② 🔴 メッセージの節の「開く」が出ている
   const openBtn = pane.locator('[data-pkc-action="open-messages"]').first();
   await expect(openBtn, '「メッセージ」を開くボタンが無い').toBeVisible();
-  await clickReal(page, openBtn);
+
+  /**
+   * 🔴 **ノートを選ばないまま、画面下の「未読のメッセージ N 件」を押して開く**(台帳 #1852 束 L1)。
+   * 未読は、読めない Office 一式のファイルを入れて「問題」を 1 件起こして作る(起動直後は未読 0 件で、入口が出ていない)。
+   * ⚠ 入口が出ない場合は assert で落とす(押せる場面を作れていない = 確かめていない)。
+   */
+  const unread = page.locator('[data-pkc-region="status"] [data-pkc-field="status-messages"]');
+  await expect(unread, '前提が崩れている(起動直後から未読が出ている)').toBeHidden();
+  const chooser = page.waitForEvent('filechooser');
+  await clickReal(page, pane.locator('[data-pkc-field="office-pack-file"]'));
+  await (await chooser).setFiles({
+    name: 'broken-pack.zip',
+    mimeType: 'application/zip',
+    buffer: Buffer.from('not a pack'),
+  });
+  await expect(unread, '問題を起こしても「未読のメッセージ」の入口が出ない').toBeVisible({ timeout: 15_000 });
+  await expect(unread).toContainText('未読のメッセージ');
+  await clickReal(page, unread);
 
   // 中央に題名「メッセージ」が出る(detail 面)
   const detailPane = page.locator('[data-pkc-view-pane="detail"]');

@@ -110,7 +110,7 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
    */
   await expect
     .poll(() => win.title(), { timeout: 15_000 })
-    .toBe('ふたつめ — PKC3');
+    .toMatch(/^ふたつめ — PKC3(\(開発版\))?$/);
 
   /**
    * ④ 🔴 **付箋に follower の帯を出さない**(着地前レビュー 🔴1 / 動線レビュー 欠陥 4)。
@@ -674,7 +674,7 @@ test('🔴 付箋で目次を押しても、題名と住所が残る (#693)', as
   const win = await popup;
   const winErrors = collectPageErrors(win);
   await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
-  await expect.poll(() => win.title(), { timeout: 15_000 }).toBe('めじるし — PKC3');
+  await expect.poll(() => win.title(), { timeout: 15_000 }).toMatch(/^めじるし — PKC3(\(開発版\))?$/);
   const before = win.url();
   expect(before, '前提が崩れた(付箋の住所がノートを名指していない)').toContain('entry=');
 
@@ -696,7 +696,7 @@ test('🔴 付箋で目次を押しても、題名と住所が残る (#693)', as
   await expect.poll(() => win.url(), { timeout: 5_000 }).toBe(before);
 
   // ③ 🔴 **身元は残っている** ── 題名は「PKC3」に戻らず、follower の帯も出ない
-  await expect.poll(() => win.title(), { timeout: 5_000 }).toBe('めじるし — PKC3');
+  await expect.poll(() => win.title(), { timeout: 5_000 }).toMatch(/^めじるし — PKC3(\(開発版\))?$/);
   await expect(
     win.locator('[data-pkc-region="status"]'),
     '目次を押しただけで「複数タブ」の帯が復活した(付箋の旗が降りた)',
