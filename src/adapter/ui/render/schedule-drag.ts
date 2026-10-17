@@ -99,6 +99,7 @@ import { SCHEDULE_DROP_FAILED, gatedScheduleWrite } from './schedule-write-gate'
 import { addDays, daysBetween } from '@features/datetime/date-math';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '@adapter/ui/actions/long-press';
 import { pickRepeatMoveInApp } from './app-dialog';
+import { isRepeatUnit, shiftWeekdaysUnit } from '@features/schedule/repeat';
 import { slotOfCard } from '@features/schedule/move-undo';
 import { offerMoveUndo } from './schedule-undo';
 
@@ -325,6 +326,11 @@ export function repeatMoveAction(
     ...(slot === undefined ? {} : { timeEnd: slot.timeEnd }),
     // ⚠ `until` は**繰り返しの終わり**である ── 同じ差だけ動かす(期間と同じ作法)
     until: card?.until == null ? null : (addDays(card.until, days) ?? card.until),
+    // 🔴 曜日の列(`毎週 月水金`)は開始日と一緒に回す(#1087)。⚠ 開始日だけ動かすと列が据え置きで、
+    //    「以後ずっと同じだけずれる」にならない。他の刻み(毎週・隔週・毎月 …)は開始日だけで決まるので渡さない
+    ...(isRepeatUnit(grabbed.repeat) && shiftWeekdaysUnit(grabbed.repeat, days) !== grabbed.repeat
+      ? { repeat: shiftWeekdaysUnit(grabbed.repeat, days) }
+      : {}),
   };
 }
 

@@ -83,6 +83,20 @@ export function repeatWord(unit: RepeatUnit): string {
 }
 
 /**
+ * 🔴 **曜日の列を、日数ぶん回す**(#1087。「全部動かす」で開始日と一緒に曜日の列も動かす)。
+ *
+ * `days:135`(月水金)を +1 日 → `days:246`(火木土)、+2 日 → `days:357`。
+ * 負の差・7 日を超える差も受ける(7 で割った余り)。⚠ 曜日の列でない刻み(`week` / `biweek` …)は
+ * **そのまま返す** ── 隔週や毎週は開始日だけで曜日が決まるので、列は無い。
+ */
+export function shiftWeekdaysUnit(unit: RepeatUnit, days: number): RepeatUnit {
+  const set = weekdaysOf(unit);
+  if (set === null || !Number.isInteger(days)) return unit;
+  const shifted = new Set(set.map((d) => ((((d - 1 + days) % 7) + 7) % 7) + 1));
+  return `${WEEKDAYS_PREFIX}${[...shifted].sort((a, b) => a - b).join('')}` as WeekdaysUnit;
+}
+
+/**
  * 語から刻みを読む。知らない語なら `null`。
  * 🔑 **表は 1 つ**(`REPEAT_WORDS`)から引く ── 2 つ持つと、片方に足し忘れる。
  */
@@ -117,7 +131,7 @@ export function repeatUnitOf(word: string): BaseRepeatUnit | null {
  *
  * @param rest 日付(期間・時刻を含む)の**直後**から行末まで
  */
-const REPEAT_TAIL = /^[ \t]*(毎[日週月年]|隔週)/;
+const REPEAT_TAIL = /^[ \t\u3000]*(毎[日週月年]|隔週)/;
 
 /**
  * 🔴 **`毎週` の直後の曜日の列**(`毎週 月水金` / `毎週 月、水、金`)。
@@ -136,7 +150,7 @@ const REPEAT_TAIL = /^[ \t]*(毎[日週月年]|隔週)/;
  *   `隔週の定例` のように「隔週」で始まる字も、今回から隔週の繰り返しとして読む。
  */
 const WEEKDAY_TAIL =
-  /^[ \t]*([月火水木金土日](?:[ \t]*[,、，・､･][ \t]*[月火水木金土日]|[ \t]*[月火水木金土日])+)(?![ \t]*[,、，・､･]?[ \t]*[月火水木金土日])(?=$|[\s。、，,.．:：;；!！?？)）\]」』】］(（[［「『【])/;
+  /^[ \t\u3000]*([月火水木金土日](?:[ \t\u3000]*[,、，・､･][ \t\u3000]*[月火水木金土日]|[ \t\u3000]*[月火水木金土日])+)(?![ \t\u3000]*[,、，・､･]?[ \t\u3000]*[月火水木金土日])(?=$|[\s。、，,.．:：;；!！?？)）\]」』】］(（[［「『【])/;
 
 /**
  * 🔴 **振替の記法**(#855 決4。user 裁定 2026-09-13「1 回か全部か選択する」)。
@@ -160,7 +174,7 @@ const WEEKDAY_TAIL =
  * ⚠ **繰り返しの行には付けない** ── 規則の行が同時に「誰かの代わり」であることは
  *   意味を成さない(`line-date.ts` が `repeat === null` のときだけ読む)。
  */
-const SUBSTITUTE_TAIL = /^[ \t]*振替(\d{4}-\d{2}-\d{2})/;
+const SUBSTITUTE_TAIL = /^[ \t\u3000]*振替(\d{4}-\d{2}-\d{2})/;
 
 /** 画面と本文に出る語。⚠ 表は 1 つ(綴りを 2 か所に書かない ── CLAUDE.md §7)。 */
 export const SUBSTITUTE_WORD = '振替';

@@ -2929,6 +2929,11 @@ export type UserAction =
        * ⚠ 渡さなければ**書かれている終わりを保つ**(始まりが同じとき)── 渡して `null` なら終わりを外す。
        */
       timeEnd?: string | null;
+      /**
+       * 🔴 **刻みも書き直すとき**(#1087。繰り返しの「全部」で曜日の列を回す)。
+       * ⚠ 渡さなければ元の刻みを保つ(日だけ動かして `毎週` が消えない)。
+       */
+      repeat?: RepeatUnit;
     }
   /**
    * 🔴 **その行の繰り返しを付け替える**(#855 段 0 の 3 つ目。user 裁定 2026-09-13
@@ -4760,12 +4765,16 @@ function reduceCore(
           queryGroups: null,
           queryFailed: false,
           /**
-           * 🔴 **予定の札も再読込で捨てる**(集計と同じ理由 ── #277 段②-b)。
+           * 🔴 **予定の札は、同じ container なら保って集め直す / 別なら捨てる**(#1087。連絡先と同じ作法)。
+           * ⚠ 丸ごと `null` にすると、本体で保存するたびに**同じ中身を見ている別ウィンドウの予定表が
+           *   「集めています…」の空表へ戻る**。消えた lid の札だけ落とす(`keepTasks`)。
+           *
+           * (以下は捨てていた頃の理由。別 container では今も当てはまる ── #277 段②-b)
            * ⚠ 取込はここを通るので、残すと**消えたノートの札**が盤面に残り、
            *   押すと「見つからない」になる。⚠ 捨てるだけでは「集めています…」で
            *   止まるので、**一度でも集めていれば集め直しも頼む**(対で要る)。
            */
-          taskScan: null,
+          taskScan: keepTasks(state, sameCid, metas),
           taskScanFailed: false,
           // 🔴 **雛形も捨てる**(同じ理由)── 残すと**消えたノートの雛形**が
           //    `/` に並び、押すと本文が入らない(押しても何も起きない導線)
@@ -7804,6 +7813,7 @@ function reduceCore(
               ...(action.until === undefined ? {} : { until: action.until }),
               // ⚠ 同じ向き ── 渡されたときだけ(渡していないのに `null` を載せると終わりを外してしまう)
               ...(action.timeEnd === undefined ? {} : { timeEnd: action.timeEnd }),
+              ...(action.repeat === undefined ? {} : { repeat: action.repeat }),
             },
           },
         ],
@@ -10953,6 +10963,23 @@ function keepContacts(
   metas: ReadonlyMap<string, EntryMeta>,
 ): ContactScan | null {
   const scan = state.contactScan;
+  if (scan === null) return null;
+  if (!sameCid) return null;
+  const cards = scan.cards.filter((c) => metas.has(c.lid));
+  return cards.length === scan.cards.length ? scan : { ...scan, cards };
+}
+
+/**
+ * 🔴 **消えたノートの予定の札を落とす**(#1087。`keepContacts` と同じ作法)。
+ * ⚠ 別 container なら全部捨てる ── lid の偶然衝突を持ち越さない。
+ * ⚠ 変化が無いなら**同じ参照**を返す(描画の指紋を無駄に壊さない)。
+ */
+function keepTasks(
+  state: AppState,
+  sameCid: boolean,
+  metas: ReadonlyMap<string, EntryMeta>,
+): TaskScan | null {
+  const scan = state.taskScan;
   if (scan === null) return null;
   if (!sameCid) return null;
   const cards = scan.cards.filter((c) => metas.has(c.lid));
