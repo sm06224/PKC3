@@ -111,11 +111,14 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
 test('🔴 mermaid の図が Word にベクタで入る(原文が出ない)(#187 段② / #238)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
+  // 🔴 暗い配色のまま書き出す(束 K1)── 図は明るい配色で紙(Word)に入る。同じ道中に ```svg の囲みも置く
+  await page.evaluate(() => document.documentElement.setAttribute('data-pkc-theme', 'dark'));
   await createEntry(page, 'text');
   await page.fill('[data-pkc-field="editor-title"]', '図の試験');
   await page.fill(
     '[data-pkc-field="editor-body"]',
-    '```mermaid\ngraph TD\n  A["始め"]-->B["終わり"]\n```\n',
+    '```mermaid\ngraph TD\n  A["始め"]-->B["終わり"]\n```\n\n' +
+      '```svg\n<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#c00"/></svg>\n```\n',
   );
   // ⚠ **焼けたことを先に見る**(器が ready になるまで待つ)── 待たずに書き出すと
   //    「まだ焼けていないから入らなかった」のか「配線が死んでいる」のか割れない
@@ -141,5 +144,9 @@ test('🔴 mermaid の図が Word にベクタで入る(原文が出ない)(#187
   // 🔴 **原文が等幅で出ていない**(PKC2 の失敗の顔)
   expect(text, '図の原文が本文に出ている').not.toContain('graph TD');
   expect(text, '図が「描けませんでした」になっている').not.toContain('描けませんでした');
+  // 🔴 svg の囲みが「埋め込み枠」の 1 行にならず、2 枚目の図として入る(束 K1)
+  expect(text, '🔴 svg の囲みが図として入っていない(2 枚目の図が無い)').toMatch(/word\/media\/figure2\.(emf|png)/);
+  expect(text, '🔴 svg の囲みが埋め込み枠の案内になっている').not.toContain('埋め込み枠');
+  expect(text, '🔴 svg の原文が本文に出ている').not.toContain('<svg');
   expect(errors, 'pageerror が出た').toEqual([]);
 });

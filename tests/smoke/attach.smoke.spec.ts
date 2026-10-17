@@ -387,6 +387,15 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
   // preview の img が blob: URL で実際に描画される(lend 経路)
   await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
 
+  // 🔴 先頭の行(束 J1): 「名前 — PNG — 大きさ — 幅×高さ」。元の英字の種類はマウスを載せると title に出る
+  const infoLine = page.locator('[data-pkc-field="attachment-info"] > span').first();
+  await expect(infoLine, '先頭の行が「名前 — PNG — 大きさ — 幅×高さ」でない').toHaveText(
+    /^dot\.png — PNG — .*\d.*B — 1×1$/,
+    { timeout: 10_000 },
+  );
+  await expect(infoLine, '元の英字の種類が title に出ていない').toHaveAttribute('title', /image\/png/);
+  expect(await infoLine.innerText(), '英字の種類が表に出ている').not.toContain('image/png');
+
   // 🔴 右のペイン(束 H1): 添付ノートは「大きさ」と、種類に添えたファイルの種類を出す / 作成に時刻が出る
   const insp = page.locator('[data-pkc-region="inspector"]');
   await expect(insp.locator('[data-pkc-field="inspector-kind"]'), '種類に「添付 (PNG)」が出ない').toHaveText('添付 (PNG)');
@@ -462,7 +471,14 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
 
   await expectImageRendered(page, 'img[data-pkc-asset-key]'); // hydrator が実際に差した
   // DL link も実クリック可能(href 無し ── ナビゲーションを起こさない)
-  await clickReal(page, 'a[data-pkc-action="download-asset"]');
+  // 🔴 本文の PNG リンクは「ダウンロード」になる(束 J1。ページ遷移も別窓も起きない)
+  const urlBefore = page.url();
+  const [pngDl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 10_000 }),
+    clickReal(page, 'a[data-pkc-action="download-asset"]'),
+  ]);
+  expect(pngDl.suggestedFilename(), 'PNG リンクがダウンロードにならない').toBeTruthy();
+  expect(page.url(), 'PNG リンクでページが移った').toBe(urlBefore);
   expect(page.url()).not.toContain('asset:'); // asset: へ遷移していない
 
   /**
@@ -794,6 +810,65 @@ test('🔴 PDF の添付は器いっぱいに出て、別の窓でも開ける',
   expect(shown.data).toBe('blob:');
   expect(shown.h, '別窓の PDF が窓いっぱいでない').toBeGreaterThan(shown.innerH * 0.9);
   await popup.close();
+
+  /**
+   * 🔴 **本文の PDF リンクを押すと、保存せずに別のウィンドウで開く**(束 J1)。
+   * 添付のノートの「添付をダウンロード」は PDF でも保存になる(対照群)。
+   * ⚠ 同じ道中(`gotoApp` を足さない)。
+   */
+  const pdfKey = await page
+    .locator('[data-pkc-action="download-asset"]')
+    .first()
+    .getAttribute('data-pkc-asset-key');
+  expect(pdfKey, '前提:PDF の鍵が取れている').toBeTruthy();
+  const [saved] = await Promise.all([
+    page.waitForEvent('download', { timeout: 10_000 }),
+    clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="download-asset"]'),
+  ]);
+  expect(saved.suggestedFilename(), '添付のノートの「添付をダウンロード」が PDF で保存にならない').toBeTruthy();
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`[見積のリンク](asset:${pdfKey})`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const downloadsBefore = downloads.length;
+  const [linkPopup] = await Promise.all([
+    page.waitForEvent('popup', { timeout: 10_000 }),
+    clickReal(page, '[data-pkc-field="detail-body"] a.pkc-asset-link'),
+  ]);
+  await linkPopup.waitForSelector('[data-pkc-field="asset-window-pdf"]', { timeout: 5000 });
+  expect(downloads.length, '🔴 PDF リンクがダウンロードになった(別のウィンドウで開くはず)').toBe(downloadsBefore);
+  await linkPopup.close();
+
+  /**
+   * 🔴 **`.mov` / `.flac` は動画 / 音声として出る**(束 J1)。「この種類は画面に出せません」にならない。
+   * ⚠ 種類の名乗りは `application/octet-stream`(拡張子から引く道を通す)。
+   */
+  for (const [name, tag] of [
+    ['撮影.mov', 'video'],
+    ['録音.flac', 'audio'],
+  ] as const) {
+    await page.setInputFiles('[data-pkc-field="attach-input"]', {
+      name,
+      mimeType: 'application/octet-stream',
+      buffer: Buffer.from('not-really-media'),
+    });
+    await page
+      .locator('[data-pkc-action="select-entry"][data-pkc-entry]', { hasText: name })
+      .first()
+      .click();
+    await expect(page.locator('[data-pkc-field="attachment-info"]')).toContainText(name);
+    // ⚠ 中身は本物の動画 / 音声ではない ── ブラウザが読めないと分かった瞬間に、再生機は
+    //   「再生できません」の行(`attachment-undecodable`)へ差し替わる。どちらも「動画 / 音声として出そうとした」証拠
+    //   (出せない種類の扱いなら、どちらも出ない)。差し替わる時機は読み込みの速さ次第なので、どちらかを待つ
+    await expect(
+      page.locator(
+        `[data-pkc-region="detail"] ${tag}, [data-pkc-region="detail"] [data-pkc-field="attachment-undecodable"]`,
+      ),
+      `${name} が ${tag} として出ていない`,
+    ).toHaveCount(1);
+    expect(await page.locator('[data-pkc-region="detail"]').innerText(), `${name} が出せない扱いになっている`).not.toContain(
+      'この種類は画面に出せません',
+    );
+  }
 
   /**
    * 🔴 **種類を `text/plain` と名乗らせた PDF / 画像は、字として出ない**(#1220)。
