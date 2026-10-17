@@ -107,7 +107,7 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
   // 🔴 GFM Alerts のコールアウト描画(#1144)
   const alert = page.locator('[data-pkc-field="detail-body"] .pkc-md-alert[data-pkc-role="note"]');
   await expect(alert).toBeVisible();
-  await expect(alert.locator('.pkc-alert-title')).toContainText('Note');
+  await expect(alert.locator('.pkc-alert-title')).toContainText('メモ');
   await expect(alert).toContainText('これはアラート注意書きです。');
 
   // 🔴 インラインコードのワンクリックコピー(#1148)

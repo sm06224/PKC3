@@ -131,6 +131,18 @@ const AUTOSIZE_ATTR = 'data-pkc-autosize';
  *   (実測で打鍵ごとの上位)── 同じ窓の答えは変わらない。object ごとなので、差し替えた `CSS`
  *   (別の窓・test の差し替え)には新しく聞く。
  */
+/**
+ * 🔴 **開いている行より上の本文を返す口**(台帳 #1852 I2 / 依頼 78-2・114-6)。
+ *
+ * ⚠ 1 面の編集の行の欄(`row-source`)は**押した 1 ブロックだけ**を持つので、上の行に書いた `基本単価 = 3200` や
+ *   `合計=` の塊が見えず、Enter で何も起きなかった(全文を編集なら動く)。計算が上の行を読めるよう、
+ *   欄ごとに「その行より上の本文(frontmatter を外した側。最後は改行)」を返す。無い欄は空。
+ */
+const ROW_ABOVE = new WeakMap<HTMLTextAreaElement, () => string>();
+export function rowTextAbove(ta: HTMLTextAreaElement): string {
+  return ROW_ABOVE.get(ta)?.() ?? '';
+}
+
 const fieldSizingAnswers = new WeakMap<object, boolean>();
 
 function fieldSizingSupported(ta: HTMLTextAreaElement): boolean {
@@ -1144,6 +1156,10 @@ export class RowSwap {
     ta.setAttribute('aria-label', 'この行の原文');
     ta.value = o.source;
     slot.append(ta);
+    ROW_ABOVE.set(ta, () => {
+      const above = this.body.split('\n').slice(0, o.startLine);
+      return above.length === 0 ? '' : `${above.join('\n')}\n`;
+    });
 
     this.active = {
       blockIndex: o.blockIndex,

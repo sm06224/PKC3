@@ -665,6 +665,12 @@ button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
+/* 🔴 **押しても案内しか出ないボタンは、灰色にする**(台帳 #1852 I2 / 依頼 78-4)。
+ * ⚠ `disabled` にしない(押したときの案内を残す)── 見た目だけ `:disabled` と同じにそろえる。 */
+button[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 button:active {
   background: var(--accent-dim);
 }

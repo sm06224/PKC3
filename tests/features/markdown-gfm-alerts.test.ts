@@ -11,11 +11,11 @@ import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 describe('GitHub Flavored Markdown (GFM) Alerts (#1144)', () => {
   it('🔴 5 種のアラートが正しくクラスとロールを持つ', () => {
     const cases = [
-      { tag: 'NOTE', role: 'note', title: 'Note', icon: 'ℹ' },
-      { tag: 'TIP', role: 'tip', title: 'Tip', icon: '💡' },
-      { tag: 'IMPORTANT', role: 'important', title: 'Important', icon: '🛈' },
-      { tag: 'WARNING', role: 'warning', title: 'Warning', icon: '⚠' },
-      { tag: 'CAUTION', role: 'caution', title: 'Caution', icon: '🛑' },
+      { tag: 'NOTE', role: 'note', title: 'メモ', icon: 'ℹ' },
+      { tag: 'TIP', role: 'tip', title: 'ヒント', icon: '💡' },
+      { tag: 'IMPORTANT', role: 'important', title: '重要', icon: '🛈' },
+      { tag: 'WARNING', role: 'warning', title: '警告', icon: '⚠' },
+      { tag: 'CAUTION', role: 'caution', title: '注意', icon: '🛑' },
     ];
 
     for (const c of cases) {
@@ -38,7 +38,7 @@ describe('GitHub Flavored Markdown (GFM) Alerts (#1144)', () => {
 
     expect(html).toContain('pkc-section-callout');
     expect(html).toContain('pkc-section-note');
-    expect(html).toContain('Note</p>');
+    expect(html).toContain('メモ</p>');
     expect(html).toContain('1行目に書かれたメモです。');
   });
 
@@ -67,7 +67,7 @@ describe('GitHub Flavored Markdown (GFM) Alerts (#1144)', () => {
     const html = renderMarkdown(md);
 
     expect(html).toContain('pkc-section-callout pkc-section-warning pkc-md-alert');
-    expect(html).toContain('Warning');
+    expect(html).toContain('警告</p>');
     expect(html).toContain('段落1');
     expect(html).toContain('段落2');
   });

@@ -80,23 +80,94 @@ const FULLWIDTH_TO_HALF: Readonly<Record<string, string>> = {
   '（': '(', '）': ')', '．': '.', '，': ',', '＝': '=',
 };
 
-/** 1 字を半角に読み替える(表に無ければそのまま)。 */
+/**
+ * 🔴 **日本語入力でそのまま出る記号は「読むときだけ」演算子にする**(台帳 #1852 I2 / 依頼 78-3・308。推薦 A / B)。
+ *
+ * > `300×3=` と打つと答えだけが足される(`300×3=900`)。**打った `×` は `*` に書き換えない**。
+ *
+ * - `×` → `*`、`÷` → `/`。⚠ 直す表(`FULLWIDTH_TO_HALF`)には**入れない** ── 入れると、全角を半角へ直す
+ *   (#773)で打った `×` が `*` に書き換わる。読み替えだけの表を別に持つ。
+ * - 長音の `ー`(U+30FC)は**数の間**にあるときだけ `-`(`5ー3` は 5−3)。⚠ 語の中の `ー`(`コーヒー`)や
+ *   数のないところの `ー` は、これまでどおり言葉である ── 位置で決めるので {@link isCalcCharAt} が文脈を見る。
+ * 🔑 どれも 1 字 → 1 字なので、位置は動かない。
+ */
+const READ_ONLY_OPS: Readonly<Record<string, string>> = { '×': '*', '÷': '/' };
+const LONG_VOWEL = 'ー';
+
+/** 数字(半角・全角)か。 */
+function isDigitCh(ch: string | undefined): boolean {
+  return ch !== undefined && /[0-9０-９]/u.test(ch);
+}
+
+/**
+ * `text[i]` の長音が、数と数の間の引き算か(空白は読み飛ばす。前は数か閉じ括弧、後ろは数か開き括弧)。
+ * ⚠ 前後が数でなければ言葉のまま(`コーヒー 5ー` の `ー` は引き算にしない)。
+ */
+function longVowelIsMinus(text: string, i: number): boolean {
+  let p = i - 1;
+  while (p >= 0 && /[\s\u3000]/u.test(text[p]!)) p -= 1;
+  let n = i + 1;
+  while (n < text.length && /[\s\u3000]/u.test(text[n]!)) n += 1;
+  const prev = p >= 0 ? text[p] : undefined;
+  const next = n < text.length ? text[n] : undefined;
+  const prevOk = isDigitCh(prev) || prev === ')' || prev === '）';
+  const nextOk = isDigitCh(next) || next === '(' || next === '（';
+  return prevOk && nextOk;
+}
+
+/** 1 字を半角に読み替える(表に無ければそのまま)。⚠ 直す(書き換える)ほうの表で、`×` `÷` は含まない。 */
 function toHalf(ch: string): string {
   return FULLWIDTH_TO_HALF[ch] ?? ch;
+}
+
+/** 読むときの読み替え(直す表 + `×` `÷`)。長音は文脈が要るのでここでは扱わない。 */
+function toRead(ch: string): string {
+  return READ_ONLY_OPS[ch] ?? FULLWIDTH_TO_HALF[ch] ?? ch;
 }
 
 /**
  * 字の並びを半角に読み替える。
  * ⚠ 表は**すべて 1 字 → 1 字**なので、**位置が動かない**
  *   (添字で切っている呼び側が壊れない)。
+ * 🔴 **読むための読み替え**(`×` `÷` と、数の間の長音 `ー` を含む)。打った字を**書き換える**ときは
+ *   {@link toHalfRewrite} を使う ── こちらで直すと `×` が `*` に化ける。
  */
 function toHalfWidth(s: string): string {
+  const chars = [...s];
+  // 長音の文脈は元の字の並びで見る(読み替えた後ではなく)
+  return chars
+    .map((ch, i) => {
+      if (ch === LONG_VOWEL) return longVowelIsMinus(s, indexOfChar(chars, i)) ? '-' : ch;
+      return toRead(ch);
+    })
+    .join('');
+}
+
+/** `chars`(コードポイントの配列)の i 番目が、元の文字列の何番目(UTF-16)か。 */
+function indexOfChar(chars: readonly string[], i: number): number {
+  let n = 0;
+  for (let k = 0; k < i; k += 1) n += chars[k]!.length;
+  return n;
+}
+
+/**
+ * 字の並びを**書き換えるための**半角化(#773)。⚠ `×` `÷` `ー` は触らない ── user が打った字のまま残し、
+ * 答えだけを足す(台帳 #1852 I2 / 依頼 78-3 の推薦 B)。
+ */
+function toHalfRewrite(s: string): string {
   return [...s].map(toHalf).join('');
 }
 
-/** 走査に使う 1 字の判定(上の whitelist と**同じ集合**を 1 か所で持つ)。 */
+/** 走査に使う 1 字の判定(上の whitelist と**同じ集合**を 1 か所で持つ)。⚠ 長音は文脈が要る({@link isCalcCharAt})。 */
 function isCalcChar(ch: string): boolean {
-  return CALC_CHARS.test(toHalf(ch));
+  return CALC_CHARS.test(toRead(ch));
+}
+
+/** `text[i]` が計算に使える字か(長音だけ前後の字を見る)。 */
+function isCalcCharAt(text: string, i: number): boolean {
+  const ch = text[i]!;
+  if (ch === LONG_VOWEL) return longVowelIsMinus(text, i);
+  return isCalcChar(ch);
 }
 
 /**
@@ -374,7 +445,7 @@ export function detectInlineCalcRequest(
   let start = caretPos - 1;
   while (start > 0) {
     const ch = fullText[start - 1]!;
-    if (ch === '\n' || !isCalcChar(ch)) break;
+    if (ch === '\n' || !isCalcCharAt(fullText, start - 1)) break;
     start -= 1;
   }
 
@@ -408,7 +479,7 @@ export function detectInlineCalcRequest(
    */
   const from = start + lead;
   const typed = fullText.slice(from, caretPos);
-  const half = toHalfWidth(typed);
+  const half = toHalfRewrite(typed);
   return {
     expression,
     halfWidth: half === typed ? null : { from, to: caretPos, text: half },
@@ -440,6 +511,41 @@ export function detectInlineCalcRequest(
 export interface InlineCalcResult {
   value: number;
   halfWidth: InlineCalcRequest['halfWidth'];
+  /**
+   * 🔴 **答えが長すぎて、正しく出せない**(台帳 #1852 I2 / 依頼 114-5。推薦 A)。真のとき**呼び側は答えを挿さず**、
+   * {@link CALC_TOO_MANY_DIGITS} を言う。直す前は末尾の数字が違う値・丸めた値・指数の字が、断りなく本文に入っていた。
+   */
+  tooManyDigits: boolean;
+}
+
+/** 答えを挿さないときに言う 1 行(画面の下)。 */
+export const CALC_TOO_MANY_DIGITS = '桁が多すぎて正しく計算できません';
+
+/** 数の字(桁区切り・小数点を含む 1 かたまり)の桁数が 15 を超えるか。 */
+const NUMBER_RUN = /\d[\d,]*(?:\.\d+)?/gu;
+const SAFE_DIGITS = 15;
+
+/**
+ * 🔴 **答えが正しく出せる桁を超えるか**(依頼 114-5)。次のどれかで真:
+ * ① 式の中に 15 桁を超える数が在る(読んだ時点で末尾が違う値になる)
+ * ② 答えが 1e15 以上(整数でも 2 進の誤差が入る)
+ * ③ 答えが小数で、**15 桁の短い小数として正確に言える**のに、画面に出す丸め(12 桁)で桁が落ちる
+ *    (`100000000.123456*2=` の `200000000.246912`)。
+ * ⚠ `1/3` や `0.1+0.2` は短い小数ではない(割り切れない / 2 進の端数)ので、これまでどおり丸めて挿す。
+ * ⚠ 整数(1e15 未満)は `String()` でそのまま正確に出るので対象外。
+ * @param expression 半角に読み替えた式(無ければ空)
+ */
+export function calcAnswerTooLong(value: number, expression: string): boolean {
+  if (!Number.isFinite(value)) return false;
+  for (const run of expression.match(NUMBER_RUN) ?? []) {
+    if (run.replace(/\D/gu, '').replace(/^0+/u, '').length > SAFE_DIGITS) return true;
+  }
+  if (Math.abs(value) >= 1e15) return true;
+  if (Number.isInteger(value)) return false;
+  const p15 = value.toPrecision(SAFE_DIGITS);
+  if (Number(p15) !== value) return false;
+  const digits = p15.replace(/^-/u, '').replace('.', '').replace(/^0+/u, '').replace(/0+$/u, '');
+  return digits.length > 12;
 }
 
 /** 数 1 つ(桁区切りと小数を含む)。⚠ 符号は別に見る。 */
@@ -651,8 +757,12 @@ function resolveWithVariables(fullText: string, caretPos: number): InlineCalcRes
 
   const from = ls + start + lead;
   const typed = fullText.slice(from, caretPos);
-  const half = toHalfWidth(typed);
-  return { value, halfWidth: half === typed ? null : { from, to: caretPos, text: half } };
+  const half = toHalfRewrite(typed);
+  return {
+    value,
+    halfWidth: half === typed ? null : { from, to: caretPos, text: half },
+    tooManyDigits: calcAnswerTooLong(value, substituted),
+  };
 }
 
 /**
@@ -664,9 +774,15 @@ function resolveWithVariables(fullText: string, caretPos: number): InlineCalcRes
  *
  * @returns 答えと半角への直し / `null`(何もしない)
  */
-export function resolveInlineCalc(fullText: string, caretPos: number): InlineCalcResult | null {
+export function resolveInlineCalc(
+  fullText: string,
+  caretPos: number,
+  /** 🔴 欄の上にある本文(1 行ずつ打つ編集の、開いている行より上。#1852 I2 / 依頼 78-2)。無ければ空。 */
+  above: string = '',
+): InlineCalcResult | null {
   if (typeof fullText !== 'string') return null;
   if (caretPos < 0 || caretPos > fullText.length) return null;
+  if (above !== '') return shiftResult(resolveInlineCalc(above + fullText, caretPos + above.length), above.length);
   if (!atCalcSignal(fullText, caretPos)) return null;
 
   const ls = lineStart(fullText, caretPos);
@@ -679,6 +795,7 @@ export function resolveInlineCalc(fullText: string, caretPos: number): InlineCal
     return {
       value: total,
       halfWidth: sign === '=' ? null : { from: caretPos - 1, to: caretPos, text: '=' },
+      tooManyDigits: calcAnswerTooLong(total, ''),
     };
   }
 
@@ -690,7 +807,18 @@ export function resolveInlineCalc(fullText: string, caretPos: number): InlineCal
   const req = detectInlineCalcRequest(fullText, caretPos);
   if (req === null) return null;
   const value = evaluateCalcExpression(req.expression);
-  return value === null ? null : { value, halfWidth: req.halfWidth };
+  return value === null
+    ? null
+    : { value, halfWidth: req.halfWidth, tooManyDigits: calcAnswerTooLong(value, req.expression) };
+}
+
+/**
+ * 🔴 **欄の上にある本文を前に付けて読んだ結果の位置を、欄の座標へ戻す**(依頼 78-2)。
+ * ⚠ 直す範囲(`halfWidth`)は式のある行(= 欄の中)なので、必ず `above` より後ろ。
+ */
+function shiftResult(r: InlineCalcResult | null, by: number): InlineCalcResult | null {
+  if (r === null || r.halfWidth === null) return r;
+  return { ...r, halfWidth: { ...r.halfWidth, from: r.halfWidth.from - by, to: r.halfWidth.to - by } };
 }
 
 /**
@@ -712,16 +840,18 @@ export function resolveInlineCalc(fullText: string, caretPos: number): InlineCal
  *
  * @returns 出す 1 行。出さないなら `null`
  */
-export function explainCalcMiss(fullText: string, caretPos: number): string | null {
+export function explainCalcMiss(fullText: string, caretPos: number, above: string = ''): string | null {
   if (typeof fullText !== 'string') return null;
   if (caretPos < 0 || caretPos > fullText.length) return null;
+  if (above !== '') return explainCalcMiss(above + fullText, caretPos + above.length);
   // 合図(`=` / `＝`)が直前に無ければ、そもそも計算を頼んでいない
   if (toHalf(fullText[caretPos - 1] ?? '') !== '=') return null;
   // 行の終わりでなければ発火しない(製品と同じ門 ── ここだけ緩めない)
   const after = fullText[caretPos];
   if (after !== undefined && after !== '\n') return null;
-  // 🔴 計算できたなら黙る(成功に口を出さない)
-  if (resolveInlineCalc(fullText, caretPos) !== null) return null;
+  // 🔴 計算できたなら黙る(成功に口を出さない)。⚠ 桁が多すぎて挿さない回は、その理由を言う(依頼 114-5)
+  const solved = resolveInlineCalc(fullText, caretPos);
+  if (solved !== null) return solved.tooManyDigits ? CALC_TOO_MANY_DIGITS : null;
 
   const head = toHalfWidth(fullText.slice(lineStart(fullText, caretPos), caretPos - 1));
   const body = head.replace(LIST_MARKER, '').trim();
@@ -772,9 +902,13 @@ export type CalcLineAction =
   | { readonly kind: 'insert'; readonly at: number; readonly text: string }
   | { readonly kind: 'why'; readonly text: string };
 
-export function calcLineAction(fullText: string, caretPos: number): CalcLineAction | null {
+export function calcLineAction(fullText: string, caretPos: number, above: string = ''): CalcLineAction | null {
   if (typeof fullText !== 'string') return null;
   if (caretPos < 0 || caretPos > fullText.length) return null;
+  if (above !== '') {
+    const r = calcLineAction(above + fullText, caretPos + above.length);
+    return r !== null && r.kind === 'insert' ? { ...r, at: r.at - above.length } : r;
+  }
   const start = lineStart(fullText, caretPos);
   const nl = fullText.indexOf('\n', caretPos);
   const end = nl === -1 ? fullText.length : nl;
@@ -789,7 +923,10 @@ export function calcLineAction(fullText: string, caretPos: number): CalcLineActi
   const hasEq = toHalf(line.at(-1) ?? '') === '=';
   const probe = hasEq ? fullText : `${fullText.slice(0, end)}=${fullText.slice(end)}`;
   const at = hasEq ? end : end + 1;
-  const v = resolveInlineCalc(probe, at)?.value ?? null;
+  const solved = resolveInlineCalc(probe, at);
+  // 🔴 桁が多すぎるときは挿さずに理由を言う(Enter と同じ。依頼 114-5)
+  if (solved !== null && solved.tooManyDigits) return { kind: 'why', text: CALC_TOO_MANY_DIGITS };
+  const v = solved?.value ?? null;
   if (v !== null) {
     // ⚠ `=` を足す回は、答えの前に `=` も入れる(1 回の挿入にまとめる)
     // ⚠ 普通の数字にならない答え(`1e21` 以上など)は何も挿さない(他の「計算にならなかった」と同じ)

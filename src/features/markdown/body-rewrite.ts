@@ -1394,6 +1394,20 @@ export function isTaskLine(body: string, line: number): boolean {
   return hiddenTaskMask(splitLines(body))[line] !== true;
 }
 
+/**
+ * 🔴 **書きかけの本文のチェック項目を 1 つ切り替える**(台帳 #1852 I2 / 依頼 78-1。推薦 B)。
+ *
+ * ⚠ 保存済みのノートへ書く `kind: 'task'` と**同じ 1 本**(読む側が読まない行・印の 1 文字だけ・字下げを触らない)。
+ *   違うのは行き先だけで、書くのは**画面の下書き**(`openLine` は下書き自身の同じ行なので、一致の検査は常に通る)。
+ * @param line 本文の行番号(0 始まり。frontmatter を含む側)
+ * @returns 切り替えた本文。その行がチェック項目でなければ `null`(当てずっぽうで別の行を書き換えない)
+ */
+export function flipTaskInDraft(body: string, line: number): string | null {
+  const openLine = bodyLineAt(body, line);
+  if (openLine === null) return null;
+  return applyBodyRewrite(body, { kind: 'task', line, openLine });
+}
+
 
 /**
  * 🔴 **表のセルを 1 つ書き換える**(#418 段①)。

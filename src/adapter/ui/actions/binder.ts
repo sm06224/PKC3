@@ -75,6 +75,7 @@ import {
   grippedBlock,
 } from '../render/block-grip';
 import {
+  CALC_TOO_MANY_DIGITS,
   calcLineAction,
   explainCalcMiss,
   formatCalcResult,
@@ -87,7 +88,7 @@ import { swapLines } from '@features/markdown/line-swap';
 import { TIDY_NOTES, tidySelection, type TidyOp } from '@features/markdown/text-tidy';
 import { tableOnTab } from '@features/markdown/table-assist';
 import { hasNumberedItems, renumberLists } from '@features/markdown/list-renumber';
-import { hasQuotedTaskItems, hasTaskItems, sortTasksByStatus } from '@features/markdown/task-sort';
+import { caretLineOf, hasTaskItems, sortTasksAtCaret } from '@features/markdown/task-sort';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
   blockedActionNote,
@@ -170,6 +171,7 @@ import {
   insertBlockText,
   insertText,
   replaceChanged,
+  rowTextAbove,
   OWN_MEANING,
   ROW_REOPEN_EVENT,
   type RowReopenDetail,
@@ -11365,14 +11367,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集中に押してください' });
       return;
     }
-    const next = sortTasksByStatus(ta.value);
+    // 🔴 カーソルのあるリストだけ(台帳 #1852 I2 / 依頼 87-2)。リストの外にカーソルがあれば、これまでどおりすべてのリスト
+    const sorted = sortTasksAtCaret(ta.value, caretLineOf(ta.value, ta.selectionStart));
+    const next = sorted.text;
+    const here = sorted.scope === 'caret';
     if (next === ta.value) {
       services.showStatus?.(
         hasTaskItems(ta.value)
-          ? '完了項目は既に末尾に揃っています'
-          : hasQuotedTaskItems(ta.value)
-            ? '引用の中のチェック項目は並べ替えません'
-            : 'このノートにチェック項目はありません',
+          ? here
+            ? 'このリストの完了項目は既に末尾に揃っています'
+            : '完了項目は既に末尾に揃っています'
+          : 'このノートにチェック項目はありません',
       );
       return;
     }
@@ -11380,7 +11385,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     ta.focus();
     // 🔴 カーソルは `replaceChanged` が置いた所(変えた範囲の終わり)のまま ── 末尾へ飛ばさない(#1087)
     replaceChanged(ta, next);
-    services.showStatus?.('完了したチェック項目を末尾へ移動しました');
+    services.showStatus?.(here ? 'このリストの完了したチェック項目を末尾へ移動しました' : '完了したチェック項目を末尾へ移動しました');
   },
   /**
    * 🔴 **素の Markdown で写す**(#396)。
@@ -15628,7 +15633,7 @@ const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: 
    *   **取り消しの履歴が切れる**(#765 で実測した)。
    */
   'inline-calc': (ta, notify) => {
-    const action = calcLineAction(ta.value, ta.selectionStart);
+    const action = calcLineAction(ta.value, ta.selectionStart, rowTextAbove(ta));
     /**
      * 🔴 **頼まれて押したときは黙らない**(#1087)── 打っているとき(Enter)に式でない行で黙るのは正しいが、
      *   ここは user が「計算して」と明示した。何も起きないと、押したのに効かないボタンになる。
@@ -16824,8 +16829,13 @@ export function bindActions(
        * `Enter` で計算できる行とパレットで計算できる行が食い違う ── §7)。
        */
       // ⚠ コード・数式の中の `2+3=` は user の字そのもの ── 貼付(`pasteText`)と同じく計算しない
-      const res = insideCodeOrMath(ta.value, ta.selectionStart) ? null : resolveInlineCalc(ta.value, ta.selectionStart);
-      if (res !== null) {
+      // 🔴 1 面の編集の行は、その行より上の本文も読む(`基本単価 = 3200` や `合計=` が別の段落に在っても動く。#1852 I2 / 依頼 78-2)
+      const above = rowTextAbove(ta);
+      const res = insideCodeOrMath(ta.value, ta.selectionStart) ? null : resolveInlineCalc(ta.value, ta.selectionStart, above);
+      if (res !== null && res.tooManyDigits) {
+        // 🔴 桁が多すぎて正しく出せない答えは挿さない(直す前は末尾の違う値・丸めた値・指数の字が黙って入った。依頼 114-5)
+        services.showStatus?.(CALC_TOO_MANY_DIGITS);
+      } else if (res !== null) {
         /**
          * 🔴 **`insertText` で挿す**(= `execCommand('insertText')`)。
          *
@@ -16866,7 +16876,7 @@ export function bindActions(
          * ⚠ **`Enter` は止めない** ── 理由を出すだけで、改行はそのまま通す
          *   (打っている手を止めない)。
          */
-        const why = explainCalcMiss(ta.value, ta.selectionStart);
+        const why = explainCalcMiss(ta.value, ta.selectionStart, above);
         if (why !== null) services.showStatus?.(why);
       }
     }

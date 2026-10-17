@@ -3400,12 +3400,16 @@ md.core.ruler.after('inline', 'pkc-task-list', function (state) {
  * `> [!NOTE]` / `> [!TIP]` / `> [!IMPORTANT]` / `> [!WARNING]` / `> [!CAUTION]`
  * の記法を認識し、コールアウト（.pkc-section-callout）としてレンダリングする。
  */
+/**
+ * 🔴 **見出しの字は日本語で出す**(台帳 #1852 I2 / 依頼 78-5。Gemini 回答 = 推薦 B)。
+ * ⚠ 書く記法(`[!NOTE]` など)は変えない ── 変えるのは画面に出る見出しの字だけ。
+ */
 const GFM_ALERT_TYPES: Record<string, { role: string; title: string; icon: string }> = {
-  note: { role: 'note', title: 'Note', icon: 'ℹ' },
-  tip: { role: 'tip', title: 'Tip', icon: '💡' },
-  important: { role: 'important', title: 'Important', icon: '🛈' },
-  warning: { role: 'warning', title: 'Warning', icon: '⚠' },
-  caution: { role: 'caution', title: 'Caution', icon: '🛑' },
+  note: { role: 'note', title: 'メモ', icon: 'ℹ' },
+  tip: { role: 'tip', title: 'ヒント', icon: '💡' },
+  important: { role: 'important', title: '重要', icon: '🛈' },
+  warning: { role: 'warning', title: '警告', icon: '⚠' },
+  caution: { role: 'caution', title: '注意', icon: '🛑' },
 };
 
 const GFM_ALERT_RE = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:\r?\n|\s+|$)/i;

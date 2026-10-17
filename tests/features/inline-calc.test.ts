@@ -300,9 +300,10 @@ describe('答えの字にする', () => {
     expect(formatCalcResult(1234567.5)).toBe('1234567.5');
   });
 
-  it('🔴 1e21 以上になる行は何も挿さない(calcLineAction。#1087)', () => {
+  it('🔴 1e21 以上になる行は何も挿さず、理由を言う(calcLineAction。#1087 → 台帳 #1852 I2 依頼 114-5 で「理由を言う」へ)', () => {
     const big = '10000000000*10000000000*100=';
-    expect(calcLineAction(big, big.length)).toBeNull();
+    // 何も挿さない(kind: 'insert' ではない)のは同じ。変わったのは、黙らずに理由を言うこと
+    expect(calcLineAction(big, big.length)).toEqual({ kind: 'why', text: '桁が多すぎて正しく計算できません' });
     expect(calcLineAction('10*100=', 7)).toEqual({ kind: 'insert', at: 7, text: '1000' });
   });
 

@@ -209,7 +209,7 @@ export function buildFormatBar(): HTMLElement {
   renumber.type = 'button';
   renumber.setAttribute('data-pkc-action', 'renumber-lists');
   // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-  renumber.title = '番号付きリストの番号を、上から順に振り直します';
+  renumber.title = RENUMBER_TITLE;
   const renumberLabel = document.createElement('span');
   renumberLabel.setAttribute('data-pkc-field', 'label');
   /**
@@ -231,7 +231,7 @@ export function buildFormatBar(): HTMLElement {
   sortTasks.type = 'button';
   sortTasks.setAttribute('data-pkc-action', 'sort-tasks');
   // ⚠ 文言は起きることで書く(user 指示 2026-08-21)
-  sortTasks.title = '完了したチェック項目を、リストの末尾へ移動して整理します';
+  sortTasks.title = SORT_TASKS_TITLE;
   const sortTasksLabel = document.createElement('span');
   sortTasksLabel.setAttribute('data-pkc-field', 'label');
   sortTasksLabel.textContent = '完了項目を末尾へ';
@@ -277,3 +277,41 @@ function diagramButton(): HTMLButtonElement {
   btn.append(text);
   return btn;
 }
+
+/**
+ * 🔴 **1 行ずつ打つ編集のあいだ、本文全体に効く 2 つのボタンを灰色にする**(台帳 #1852 I2 / 依頼 78-4。Gemini 回答 = 推薦 B)。
+ *
+ * - 対象は「番号を振り直す」と「完了項目を末尾へ」。1 行ずつ打つ編集の欄は**押した 1 ブロックだけ**を持つので、
+ *   本文全体には効かない(押すと「「全文を編集」に切り替えてください」と案内が出るだけだった)。
+ * - 押す前に分かるよう、灰色にして、マウスを載せると理由を出す。**ボタンの場所は変えない**。
+ * - ⚠ `disabled` にはしない ── 押したときの案内(binder の `RENUMBER_LIVE_NOTE` など)は残す。
+ *   灰色は `aria-disabled` + CSS(`button[aria-disabled='true']`)で出す。
+ * @param bar 書式の帯
+ * @param live 1 行ずつ打つ編集のとき真。偽にすると元の説明と見た目に戻る
+ */
+export function syncWholeNoteTools(bar: ParentNode, live: boolean): void {
+  for (const [action, rest] of WHOLE_NOTE_TOOLS) {
+    const btn = bar.querySelector<HTMLElement>(`[data-pkc-action="${action}"]`);
+    if (btn === null) continue;
+    if (live) {
+      btn.setAttribute('aria-disabled', 'true');
+      btn.title = WHOLE_NOTE_REASON;
+    } else {
+      btn.removeAttribute('aria-disabled');
+      btn.title = rest;
+    }
+  }
+}
+
+/** 灰色のときに出す理由。⚠ 「全文を編集」は画面のボタンの字(`detail.ts`)と同じ。 */
+export const WHOLE_NOTE_REASON = '1 行ずつ打つ編集では使えません。「全文を編集」に切り替えると使えます';
+
+const RENUMBER_TITLE = '番号付きリストの番号を、上から順に振り直します';
+const SORT_TASKS_TITLE =
+  'カーソルのあるチェックリストで、完了した項目をリストの末尾へ移動して整理します。リストの外にカーソルがあるときは、すべてのリストを整理します';
+
+/** 灰色にするボタンと、元の説明。 */
+const WHOLE_NOTE_TOOLS: ReadonlyArray<readonly [string, string]> = [
+  ['renumber-lists', RENUMBER_TITLE],
+  ['sort-tasks', SORT_TASKS_TITLE],
+];
