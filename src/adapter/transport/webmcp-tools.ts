@@ -82,6 +82,11 @@ export interface AgentToolDeps {
    * ⚠ ID は `meta` を通った物だけが来る(system 領域へは書かせない)。
    */
   append: (id: string, text: string, heading: string | null) => Promise<AppendOutcome>;
+  /**
+   * 🔴 書き足す前の確認(画面の state を読むだけ)。`'gone'` = ノートが無い / `'busy'` = ユーザーの編集中・書込中。
+   * ⚠ AI への断りをここで言うための物 ── dispatch して reducer に断らせると、理由が user 向けの `state.error` に出る。
+   */
+  appendCheck: (id: string) => 'ok' | 'gone' | 'busy';
   /** 許可の門(`createAgentGate`)。`signal` は AI が依頼を取り消したとき abort される。 */
   gate: AgentGate;
   /** 時計(回数の窓を測る)。省略 = `Date.now`。 */
@@ -110,6 +115,10 @@ export const AGENT_APPEND_TIMEOUT_TEXT =
 
 /** 書き足せなかったときの断り(reducer / 保存が理由を言わなかった回)。 */
 export const AGENT_APPEND_FAILED_TEXT = 'いま書き足せませんでした。PKC3 で編集中の可能性があります';
+
+/** ユーザーがそのノートを編集中などで、いまは書き足せないときの断り(AI 向け。しばらくしてからなら通る)。 */
+export const AGENT_APPEND_BUSY_TEXT =
+  'ユーザーがこのノートを編集中などで、いまは書き足せません。しばらくしてからもう一度試してください';
 
 /** 作れなかったときの断り(`pkc_create_note`)。 */
 export const AGENT_CREATE_FAILED_TEXT = 'いま作れませんでした。PKC3 で編集中の可能性があります';
@@ -329,6 +338,11 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
       if (!(await gate({ action: 'append', title: meta.title }, options.signal))) {
         return fail(AGENT_DENIED_TEXT);
       }
+      // 🔴 AI へ返す断りは**ここで言う**。dispatch して reducer に断らせると、AI 宛ての失敗が user の画面の
+      //   エラー(`state.error`)に出てしまい、user が頼んでいない操作の失敗を見せられる
+      const writable = deps.appendCheck(id);
+      if (writable === 'gone') return fail('そのノートは見つかりません(削除された可能性があります)');
+      if (writable === 'busy') return fail(AGENT_APPEND_BUSY_TEXT);
       // ⚠ 改行は LF にそろえ、NUL は落とす(追記欄は入力欄が \r\n を直すが、AI の字はそのまま来る)
       const text = input.text.replace(/\r\n?/g, '\n').split('\u0000').join('');
       // 🔑 ログは日時の節を付ける(追記欄と同じ `appendHeadingFor`)── 付けないと前の節に溶け込む

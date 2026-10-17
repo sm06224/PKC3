@@ -11270,6 +11270,13 @@ export const PLACE_CONNECT_OPEN_REFUSAL =
 export const APPEND_OPEN_BLOCK_REFUSAL =
   'ノートの末尾が閉じていないコードブロックやブロック(:::)の中なので、末尾に足せませんでした。ブロックを閉じてから足してください';
 
+/**
+ * 足す文そのものが、閉じていないブロックで終わっている ── 足すと、以後このノートの末尾へ足せなくなる。
+ * ⚠ 本文は閉じているのに、足した後で開いたままになる回の断り(上の `APPEND_OPEN_BLOCK_REFUSAL` は本文が先に開いている回)。
+ */
+export const APPEND_TEXT_OPEN_BLOCK_REFUSAL =
+  '足す文の中に閉じていないコードブロックやブロック(:::)があります。閉じてから足してください';
+
 /** 末尾が閉じていないブロックの中へは板を置けない ── 押した時点で言う断り(#529)。 */
 export const PLACE_OPEN_BLOCK_REFUSAL =
   '本文の最後のブロックが閉じていないため、板を置けません(ブロックを閉じてから置いてください)';

@@ -134,6 +134,13 @@ export class AgentOriginGrants {
     this.write(state);
   }
 
+  /** origin の許可を全部消す(許すページの一覧から外れたとき ── 入れ直しても聞き直す)。 */
+  revokeOrigin(origin: string): void {
+    const state = this.read();
+    if (!state.delete(origin)) return;
+    this.write(state);
+  }
+
   /** 「常に許す」を 1 つでも選んである origin。 */
   origins(): string[] {
     const out: string[] = [];

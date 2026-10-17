@@ -334,3 +334,68 @@ describe('断りの字', () => {
     );
   });
 });
+
+describe('🔴 A4: 許可済みの依頼は、別のダイアログの待ち行列に塞がれない', () => {
+  function originGrants(granted: Array<[string | undefined, AgentScope]>) {
+    const set = new Set(granted.map(([f, sc]) => `${f ?? ''}|${sc}`));
+    const grants: AgentGrantsLike = {
+      isAlways: (sc, from) => set.has(`${from ?? ''}|${sc}`),
+      setAlways: (sc, from) => void set.add(`${from ?? ''}|${sc}`),
+      touch: () => {},
+    };
+    return grants;
+  }
+
+  it('A のダイアログが開いている間も、許可済みの B・ブラウザの AI の呼び出しはすぐ通る。A は答えが出るまで待つ', async () => {
+    let release: (a: AgentAnswer) => void = () => {};
+    let asks = 0;
+    const gate = createAgentGate({
+      grants: originGrants([['https://b.test', 'read'], [undefined, 'read']]),
+      ask: () => {
+        asks += 1;
+        return new Promise<AgentAnswer>((r) => (release = r));
+      },
+      now: () => 1,
+    });
+    let aDone: boolean | null = null;
+    void gate({ action: 'tags', from: 'https://a.test' }).then((v) => (aDone = v));
+    const b = await Promise.race([
+      gate({ action: 'tags', from: 'https://b.test' }),
+      new Promise<'blocked'>((r) => setTimeout(() => r('blocked'), 50)),
+    ]);
+    expect(b, 'B が A のダイアログに塞がれた').toBe(true);
+    const own = await Promise.race([
+      gate({ action: 'tags' }),
+      new Promise<'blocked'>((r) => setTimeout(() => r('blocked'), 50)),
+    ]);
+    expect(own, 'ブラウザの AI が塞がれた').toBe(true);
+    expect(aDone, '対照群: A はまだ答え待ち').toBeNull();
+    expect(asks).toBe(1);
+    release('once');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(aDone).toBe(true);
+  });
+
+  it('⚠ 対照群: 未許可の依頼どうしは今までどおり 1 枚ずつ(2 枚目は 1 枚目の「常に許す」を読み直す)', async () => {
+    const answers: Array<(a: AgentAnswer) => void> = [];
+    const grants = originGrants([]);
+    let asks = 0;
+    const gate = createAgentGate({
+      grants,
+      ask: () => {
+        asks += 1;
+        return new Promise<AgentAnswer>((r) => answers.push(r));
+      },
+      now: () => 1,
+    });
+    const p1 = gate({ action: 'tags', from: 'https://a.test' });
+    const p2 = gate({ action: 'tags', from: 'https://a.test' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(asks).toBe(1);
+    answers[0]!('always');
+    expect(await p1).toBe(true);
+    expect(await p2).toBe(true);
+    expect(asks, '2 枚目も聞いた').toBe(1);
+  });
+});
+

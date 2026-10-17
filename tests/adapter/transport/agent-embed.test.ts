@@ -37,6 +37,7 @@ function setup(over: Partial<AgentEmbedDeps> = {}, mc: boolean = true) {
     tags: async () => ({ groups: [], omitted: 0 }),
     createEntry: () => 'new1',
     append: async () => ({ ok: true }),
+    appendCheck: () => 'ok',
     gate: async (t) => {
       gateCalls.push(t);
       return true;
@@ -201,6 +202,7 @@ describe('list / call(JSON-RPC の道)', () => {
           tags: async () => ({ groups: [], omitted: 0 }),
           createEntry: () => 'id',
           append: async () => ({ ok: true }),
+          appendCheck: () => 'ok',
           gate: async () => false,
           from,
         }),
@@ -229,6 +231,7 @@ describe('list / call(JSON-RPC の道)', () => {
           tags: async () => ({ groups: [], omitted: 0 }),
           createEntry: () => null,
           append: async () => ({ ok: true }),
+          appendCheck: () => 'ok',
           gate: (_t, signal) => {
             seen = signal;
             return new Promise<boolean>(() => undefined);

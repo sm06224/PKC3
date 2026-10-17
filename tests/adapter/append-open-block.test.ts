@@ -13,9 +13,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
-import { APPEND_OPEN_BLOCK_REFUSAL, type DomainEvent } from '../../src/adapter/state/app-state';
+import { APPEND_OPEN_BLOCK_REFUSAL, APPEND_TEXT_OPEN_BLOCK_REFUSAL, type DomainEvent } from '../../src/adapter/state/app-state';
 import { connectStoreEffects, type StorePort } from '../../src/adapter/state/store-effects';
-import { appendAndSettle } from '../../src/adapter/state/append-settle';
+import { appendAndSettle, appendAvailability } from '../../src/adapter/state/append-settle';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { stubStamps } from '../helpers/store-stamps';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -96,5 +96,49 @@ describe('末尾が閉じていないブロックの中へは足さない', () =
     const b = bench(OPEN_FENCE);
     const r = await appendAndSettle(b.d, 'a', '- 作業', null, 500);
     expect(r).toEqual({ ok: false, reason: 'failed', error: APPEND_OPEN_BLOCK_REFUSAL });
+  });
+});
+
+describe('🔴 足す文そのものが閉じていないブロックで終わるなら足さない(以後の追記が全部断られるのを防ぐ)', () => {
+  it('本文は閉じているのに、足す文が ``` / ~~~ / ::: を開いたまま終わる回は断り、本文は変わらない', async () => {
+    for (const text of ['説明\n```js\nlet a = 1;', '~~~\nx', ':::format{.pkc-place x=1 y=1}\nhello']) {
+      const b = bench('手順\n');
+      b.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text, heading: null, target: null });
+      await tick(30);
+      expect(b.disk['a'], text).toBe('手順\n');
+      expect(b.writes()).toBe(0);
+      expect(b.d.getState().error).toBe(APPEND_TEXT_OPEN_BLOCK_REFUSAL);
+      expect(b.d.getState().writeLock, '錠を握ったまま').toBeNull();
+    }
+  });
+
+  it('⚠ 対照群: 自分で閉じている文は足せ、その後の追記も通る(詰まない)', async () => {
+    const b = bench('手順\n');
+    b.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: '```js\nlet a = 1;\n```', heading: null, target: null });
+    await tick(30);
+    expect(b.disk['a']).toContain('let a = 1;');
+    b.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: '次の行', heading: null, target: null });
+    await tick(30);
+    expect(b.disk['a']).toContain('次の行');
+  });
+
+  it('appendAndSettle(AI の書き足しの口)が理由を返す', async () => {
+    const b = bench('手順\n');
+    const r = await appendAndSettle(b.d, 'a', '```\nx', null, 500);
+    expect(r).toEqual({ ok: false, reason: 'failed', error: APPEND_TEXT_OPEN_BLOCK_REFUSAL });
+  });
+});
+
+describe('🔴 A5: appendAvailability ── 投げる前に断りを見る(user の画面のエラーを汚さない)', () => {
+  it('在る=ok / 無い=gone / 編集中の自分のノート=busy(別のノートは ok)/ 書込中=busy。見るだけで state.error を立てない', () => {
+    const b = bench('x');
+    expect(appendAvailability(b.d.getState(), 'a')).toBe('ok');
+    expect(appendAvailability(b.d.getState(), 'zzz')).toBe('gone');
+    b.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    b.d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: 'x' });
+    b.d.dispatch({ type: 'START_EDIT' });
+    expect(b.d.getState().phase, '前提: 編集に入った').toBe('editing');
+    expect(appendAvailability(b.d.getState(), 'a')).toBe('busy');
+    expect(b.d.getState().error, '見ただけで画面にエラーが出た').toBeNull();
   });
 });

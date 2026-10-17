@@ -97,6 +97,16 @@ function harness(createEntry?: (i: { title: string; body: string }, o: string) =
   return { sent, post, detach: () => detach?.() };
 }
 
+describe('🔴 A6: NUL は題名にも本文にも残さない(書き足しと同じ扱い)', () => {
+  it('title / body の NUL を落とす。題名が NUL だけなら本文の先頭行から作る。対照群: NUL の無い字は変わらない', () => {
+    const r = parseCreateEntryParams({ title: 'あ\u0000い', body: '本\u0000文\u0000' });
+    expect(r).toEqual({ ok: true, input: { title: 'あい', body: '本文' } });
+    const onlyNul = parseCreateEntryParams({ title: '\u0000\u0000', body: '# 見出し\n中身' });
+    expect(onlyNul).toEqual({ ok: true, input: { title: '見出し', body: '# 見出し\n中身' } });
+    expect(parseCreateEntryParams({ title: 't', body: 'b' })).toEqual({ ok: true, input: { title: 't', body: 'b' } });
+  });
+});
+
 describe('外から 1 件作らせる', () => {
   it('作れたら lid と題名を返す(対照群)', async () => {
     const made: { title: string; body: string; origin: string }[] = [];
