@@ -421,9 +421,10 @@ import { downloadSelfhostBundle } from '@adapter/ui/actions/selfhost';
 import { dayStamp } from '@features/datetime/date-math';
 import { APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta';
 import { diagramFileName } from '@features/export/file-name';
-import { renderToSvg, readPalette, svgWithIntrinsicSize } from '@adapter/ui/render/mermaid-raster';
+import { renderToSvg, readPalette, svgWithIntrinsicSize, rasterize } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND, hydrateAllNow } from '@adapter/ui/render/mermaid-hydrate';
 import { preparePrintBody } from '@adapter/ui/render/print-prepare';
+import { PRINT_PALETTE, PRINT_THEME } from '@adapter/ui/render/diagram-print';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { askSqlEmbed, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
@@ -2772,15 +2773,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
          * ⚠ **グラフは `null`** ── chart.js は canvas に描くのでベクタ源が無い
          *   (`chart-raster.ts` が「chart.js はベクタを吐かない」と明記している)。
          */
-        renderFigureVector: async (kind, source) =>
-          kind === 'chart' ? null : renderToSvg(source, readPalette()),
-        renderFigure: async (kind, source) => {
+        // 🔴 `paper` = Word・PowerPoint 用(#1163 依頼 233)── 画面の配色によらず紙の(明るい)配色で描く。閲覧用 HTML は渡さない
+        renderFigureVector: async (kind, source, paper) =>
+          kind === 'chart' ? null : renderToSvg(source, paper === true ? PRINT_PALETTE : readPalette()),
+        renderFigure: async (kind, source, paper) => {
+          // 🔴 ` ```svg ` の囲み(#1163 依頼 235)── 原文が SVG そのもの。EMF にできなかった回の PNG(描く器は図と同じ `rasterize`)
+          if (kind === 'svg') {
+            const drawn = await rasterize(source, 720, 2);
+            return { blob: drawn.png, cssWidth: drawn.cssWidth };
+          }
           const diagram = kind === 'chart' ? CHART_KIND : MERMAID_KIND;
           const raster = await diagram.render({
             source,
             kind,
-            theme: document.documentElement.getAttribute('data-pkc-theme') ?? 'light',
-            palette: readPalette(),
+            theme:
+              paper === true ? PRINT_THEME : (document.documentElement.getAttribute('data-pkc-theme') ?? 'light'),
+            palette: paper === true ? PRINT_PALETTE : readPalette(),
             width: 720,
             // ⚠ 紙に載るので **2 倍**で焼く(画面の dpr に合わせない ── 同じ文書が
             //    端末ごとに違う解像度になる)

@@ -112,7 +112,16 @@ export interface ExportDeps {
    * ここで別に描くと、この機能の失敗の根である「レンダラが 2 本」に戻る。
    * @returns `cssWidth` は**画面に置くときの幅**(CSS px)。PNG の画素は dpr 倍ある。
    */
-  renderFigure(kind: string, source: string): Promise<{ blob: Blob; cssWidth: number } | null>;
+  renderFigure(
+    kind: string,
+    source: string,
+    /**
+     * 🔴 **紙の配色で焼くか**(#1163 依頼 233。Gemini の裁定:Word・PowerPoint に書き出すときは、配色によらず明るい配色で図を描く)。
+     * ⚠ 省略 = 画面と同じ配色(閲覧用 HTML は今までどおり)。Word・PowerPoint は白いページに載るので、ダークのままだと
+     *   明るい線と字の図が白地に載って読みにくい。
+     */
+    paper?: boolean,
+  ): Promise<{ blob: Blob; cssWidth: number } | null>;
   /**
    * 🔴 **図をベクタ(SVG)で起こす**(#238。user 指示 2026-08-17
    * 「**フローチャートのようないじれそうなものは emf とか wmf にして欲しい**」)。
@@ -121,7 +130,12 @@ export interface ExportDeps {
    * 「図だけ画像に戻っている」という**気づけない形**になる。
    * ⚠ グラフ(chart.js)は **canvas に描くのでベクタ源が無い** ── `null` を返す。
    */
-  renderFigureVector(kind: string, source: string): Promise<string | null>;
+  renderFigureVector(
+    kind: string,
+    source: string,
+    /** 🔴 紙の配色で起こすか(`renderFigure` と同じ ── #1163 依頼 233)。 */
+    paper?: boolean,
+  ): Promise<string | null>;
   now?(): Date;
   /**
    * 本文 1 件を HTML にする(閲覧用 HTML だけが使う。P8 段⑲)。
@@ -852,7 +866,10 @@ async function collectOfficeBlocks(
      * ⚠ **落ちたらラスタへ落とす**(下)。ベクタで書けない図のために
      * 「図が消える」を作らない。
      */
-    const svg = await deps.renderFigureVector(fig.kind, fig.source).catch(() => null);
+    // 🔴 Word・PowerPoint は白いページ ── 画面の配色によらず明るい配色で描く(#1163 依頼 233。`true` = 紙の配色)
+    // 🔴 ` ```svg ` の囲み(`kind: 'svg'`)は原文がそのまま SVG ── 描かずに、その字を EMF にする(#1163 依頼 235)
+    const svg =
+      fig.kind === 'svg' ? fig.source : await deps.renderFigureVector(fig.kind, fig.source, true).catch(() => null);
     if (svg !== null) {
       try {
         const emf = svgToEmf(svg);
@@ -870,7 +887,7 @@ async function collectOfficeBlocks(
         // ⚠ 黙って消さない ── ラスタで入れ直す
       }
     }
-    const drawn = await deps.renderFigure(fig.kind, fig.source).catch(() => null);
+    const drawn = await deps.renderFigure(fig.kind, fig.source, true).catch(() => null);
     const size = drawn === null ? null : await imageSizeOf(drawn.blob);
     if (drawn === null || size === null) {
       blocks[fig.at] = { kind: 'skipped', what, why: '描けませんでした' };

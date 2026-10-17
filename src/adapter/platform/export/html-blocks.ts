@@ -31,6 +31,7 @@ import {
   placeLineTargetId,
 } from '@features/markdown/place-line';
 import { DOCX_LIST_DEPTH_MAX, type DocxBlock, type DocxCell, type DocxRun } from '@features/export/docx';
+import { svgFenceSource } from '@features/export/svg-fence';
 
 /** 走りに掛かる装飾(親から受け継ぐ)。 */
 interface RunStyle {
@@ -139,12 +140,23 @@ function mathText(el: Element, src: string): string {
 }
 
 /** user に見せる呼び名(内部語を出さない)。 */
-const FIGURE_NAME: Record<string, string> = { mermaid: '図', chart: 'グラフ' };
+const FIGURE_NAME: Record<string, string> = { mermaid: '図', chart: 'グラフ', svg: '図' };
 
 function figureOf(el: Element): { kind: string; source: string } | null {
   for (const [attr, kind] of FIGURE_ATTR) {
     const source = el.getAttribute(attr);
     if (source !== null && source !== '') return { kind, source };
+  }
+  /**
+   * 🔴 **` ```svg ` の囲みは絵として預ける**(#1163 依頼 235)。⚠ 印は囲みの外側(`data-pkc-render-lang="svg"`)、
+   * 原文は中の `pre.pkc-render-source`(描画の面は iframe で、そこからは取れない)。根が `<svg>` でない中身
+   * (文や script が混ざる)は預けない ── 今までどおり案内の 1 行(`skippedName`)になる。
+   * ⚠ ` ```html ` の囲みは預けない(Gemini の裁定:今の 1 行の案内のまま)。
+   */
+  if (el.getAttribute('data-pkc-render-lang') === 'svg') {
+    const raw = el.querySelector(':scope > pre.pkc-render-source')?.textContent ?? '';
+    const source = svgFenceSource(raw);
+    if (source !== null) return { kind: 'svg', source };
   }
   return null;
 }
