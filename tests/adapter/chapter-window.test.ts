@@ -8,7 +8,7 @@
  * 3. 章の外を指すページ内リンクは押せない字になる / 外のリンクは別のタブで開く
  * 4. Esc で窓が閉じる / 組んだ印が刻まれる(F5 で白くなったかをこれで見分ける)
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CHAPTER_BODY_FIELD,
   CHAPTER_BUILT_ATTR,
@@ -18,12 +18,14 @@ import {
   CHAPTER_READONLY_FIELD,
   CHAPTER_WINDOW_ACTIONS,
   CHAPTER_WINDOW_TEXT,
+  chapterTokenSignature,
   chapterWindowBuilt,
   chapterWindowName,
   chapterWindowTouchable,
   grabChapterWindow,
   markChapterWindowOrphaned,
   paintChapterWindow,
+  syncChapterWindowTokens,
   wireChapterWindow,
 } from '../../src/adapter/platform/chapter-window';
 
@@ -298,5 +300,47 @@ describe('窓の名前と掴み方', () => {
     const open = vi.fn(() => null);
     expect(grabChapterWindow('pkc3-chapter-x', open)).toBeNull();
     expect(open).toHaveBeenCalledWith('', 'pkc3-chapter-x', expect.stringContaining('popup'));
+  });
+});
+
+describe('タグの色を窓へ写す(#1457)', () => {
+  const COLORS = "style[data-pkc-field='tag-colors']";
+  const mainStyle = (css: string): void => {
+    const st = document.createElement('style');
+    st.setAttribute('data-pkc-field', 'tag-colors');
+    st.textContent = css;
+    document.head.append(st);
+  };
+  afterEach(() => {
+    document.head.querySelector(COLORS)?.remove();
+    document.documentElement.removeAttribute('data-pkc-tag-badge');
+  });
+
+  it('🔴 組んだ窓の head に色の規則と見せ方の印が入る(色が無ければ入れない)', () => {
+    const none = fakeWindow();
+    paint(none, '<p>a</p>');
+    expect(none.document.head.querySelector(COLORS), '色が無いのに style がある').toBeNull();
+
+    mainStyle('.x{color:red}');
+    document.documentElement.setAttribute('data-pkc-tag-badge', 'outline');
+    const win = fakeWindow();
+    paint(win, '<p>a</p>');
+    expect(win.document.head.querySelector(COLORS)?.textContent).toBe('.x{color:red}');
+    expect(win.document.documentElement.getAttribute('data-pkc-tag-badge')).toBe('outline');
+  });
+
+  it('🔴 本体で色を替えると指紋が変わり、写し直しで窓に届く(外すと消える)', () => {
+    mainStyle('.x{color:red}');
+    const win = fakeWindow();
+    paint(win, '<p>a</p>');
+    const before = chapterTokenSignature();
+    document.head.querySelector(COLORS)!.textContent = '.x{color:blue}';
+    expect(chapterTokenSignature(), '色を替えても指紋が同じ').not.toBe(before);
+    syncChapterWindowTokens(win);
+    expect(win.document.head.querySelector(COLORS)?.textContent).toBe('.x{color:blue}');
+
+    document.head.querySelector(COLORS)!.remove();
+    syncChapterWindowTokens(win);
+    expect(win.document.head.querySelector(COLORS), '色を外したのに窓に残る').toBeNull();
   });
 });
