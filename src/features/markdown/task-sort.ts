@@ -41,6 +41,7 @@ const NUMBERED = /^(\s*)(\d+)([.)]\s+)/;
 
 import { fenceStep } from './list-renumber';
 import { TASK_LINE } from './task-line';
+import { lineStart } from './line-start';
 
 /**
  * 🔴 **「触らない行」の地図**(#1087)。fence(字下げ付きも含む。判定の正本は `advanceFence`)と、
@@ -422,7 +423,7 @@ export function hasTaskItems(body: string): boolean {
 export function caretAfterReplace(before: string, after: string, pos: number): number {
   const at = Math.min(Math.max(pos, 0), before.length);
   const lineNo = before.slice(0, at).split('\n').length - 1;
-  const col = at - ((at === 0 ? -1 : before.lastIndexOf('\n', at - 1)) + 1);
+  const col = at - lineStart(before, at);
   const afterLines = after.split('\n');
   if (afterLines.length !== before.split('\n').length) return Math.min(at, after.length);
   let start = 0;
