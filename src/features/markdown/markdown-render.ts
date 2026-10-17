@@ -1681,6 +1681,10 @@ md.block.ruler.before(
     state.line = line + 1;
     return true;
   },
+  // 🔴 段落・引用・リストの直後(空行なし)でも `$$` の塊を始められる(#1087)。
+  //   `alt` が無いと、段落の途中の `$$` を block の始まりと見ず、数式が素の字で出た。
+  //   silent のときは「閉じまで見つかったか」だけ答える(token を積まない)。
+  { alt: ['paragraph', 'reference', 'blockquote', 'list'] },
 );
 
 md.renderer.rules.pkc_math_block = function (tokens, idx) {
@@ -4072,6 +4076,13 @@ function processTocDirective(
     const closesImmediately = closer !== undefined && /^[ \t]*:::[ \t]*$/.test(closer);
     const recordIdx = records.length;
     records.push({ depth });
+    // 🔴 目印の行は**前後を空行で囲む**(#1087)。隣の行と同じ段落になると、
+    //   `<p>` の中に他の字と一緒に入り、置換の相手(単独の `<p>` 1 つ)に当たらず
+    //   目印の字がそのまま画面に出た。挿入した空行は同じ原文の行を指す。
+    if (out.length > 0 && out[out.length - 1]!.trim() !== '') {
+      out.push('');
+      lineMapOut.push(inputIdx);
+    }
     out.push(`${TOC_OPEN}${recordIdx}${TOC_SEP}${depth}${TOC_OPEN}`);
     lineMapOut.push(inputIdx);
     if (closesImmediately) {
@@ -4081,6 +4092,11 @@ function processTocDirective(
       i += 2;
     } else {
       i += 1;
+      const after = lines[i];
+      if (after !== undefined && after.trim() !== '') {
+        out.push('');
+        lineMapOut.push(inputIdx);
+      }
     }
   }
   return { transformed: out.join('\n'), lineMap: lineMapOut, records };
@@ -4893,6 +4909,10 @@ export function preprocessAlignPrefix(source: string, lineMapIn: number[], useGu
   // また content 末尾が `__` で終わる場合は markdown bold 行と解釈して
   // skip(`__bold__` を indent 化しない)。
   const indentRe = /^\s*(?:__|＿)(?!_)\s?(.*)$/;
+  // 🔴 `__bold__ 続き` / `__init__.py は…` は字下げではなく**閉じた強調で始まる行**(#1087)。
+  //   閉じの `__` が中身の後ろにあり(中身は空白で始まり終わらない)、その直後が字・数字・`_` でない。
+  //   閉じの無い `__段落` は従来どおり字下げ。
+  const closedStrongStartRe = /^\s*__(?!_)(?=\S).*?\S__(?![\p{L}\p{N}_])/u;
   // alignMap は **OUTPUT line index** に対する map(2026-05-07 hotfix で
   // input → output index へ移行)。prefix 行は前後で paragraph 分離されるため、
   // `breaks: true` で連続行が 1 paragraph に merge される問題を回避する。
@@ -4930,7 +4950,9 @@ export function preprocessAlignPrefix(source: string, lineMapIn: number[], useGu
       || /^---+\s*$/.test(line)
       || /^\|/.test(line);  // table row(also catches `||` but prefix matches first)
     // Detect L-5 align prefix
-    const m = prefixRe.exec(line);
+    // 🔴 `|` で終わる行は表の行(#1087)。`|| A | B |`(先頭のセルが空)や
+    //   `|>=18|…`(先頭のセルが `<` `>` で始まる)を、寄せの印として食わない。
+    const m = /\|\s*$/.test(line) ? null : prefixRe.exec(line);
     if (m) {
       const sym = m[1]!;
       const rest = m[2] ?? '';
@@ -4977,7 +4999,7 @@ export function preprocessAlignPrefix(source: string, lineMapIn: number[], useGu
       alignMap.set(outIdx, align);
       // L-9 indent も一緒に判定(align prefix 後の content が `__段落` の場合)
       const im0 = indentRe.exec(rest);
-      if (im0 && !rest.endsWith('__')) {
+      if (im0 && !rest.endsWith('__') && !closedStrongStartRe.test(rest)) {
         indentMap.set(outIdx, true);
         out.push(im0[1] ?? '');
       } else {
@@ -4988,7 +5010,7 @@ export function preprocessAlignPrefix(source: string, lineMapIn: number[], useGu
     }
     // Detect L-9 indent prefix(align なしの行)
     const im = indentRe.exec(line);
-    if (im && !line.endsWith('__')) {
+    if (im && !line.endsWith('__') && !closedStrongStartRe.test(line)) {
       const rest = im[1] ?? '';
       // 同じく前段落と paragraph merge されないよう前後を空行で囲む。
       const prevOut = out.length > 0 ? out[out.length - 1]! : '';

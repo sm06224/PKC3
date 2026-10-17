@@ -34,6 +34,8 @@
  * - `PKC2: docs/development/notation-redesign-2026-05/11-canonicalization-spec.md`
  */
 
+import { advanceFence } from './list-renumber';
+
 /**
  * `:::` block directive 前後 blank line 正規化(LineMap thread 版)。
  *
@@ -75,13 +77,21 @@ export function ensureBlankAroundColonBlocksWithLineMap(
   const inLines = source.split('\n');
   const stage1Lines: string[] = [];
   const stage1Map: number[] = [];
+  // 🔴 fence(``` / ~~~)の中と、その開閉の行は**一切触らない**(#1087)。コードの中の
+  //   `:::` 行へ空行を挿すと、表示もコピーも空行が増える。判定の正本は `advanceFence`。
+  const stage1Skip: boolean[] = [];
+  let fenceMarker = '';
   const malformedOpenerRe = /^([ \t\u3000]*:::[a-zA-Z0-9_-]+)\{[^}\n]*$/;
   const colonStartRe = /^[ \t\u3000]*:::/;
   const openerRe = /^[ \t\u3000]*:::[a-zA-Z0-9_-]+(?:\{[^}\n]{0,200}\})?[ \t]*$/;
   for (let i = 0; i < inLines.length; i++) {
     const line = inLines[i]!;
     const inputIdx = lineMapIn[i] ?? i;
-    const m = malformedOpenerRe.exec(line);
+    const nextMarker = advanceFence(fenceMarker, line);
+    const skip = fenceMarker !== '' || nextMarker !== '';
+    fenceMarker = nextMarker;
+    stage1Skip.push(skip);
+    const m = skip ? null : malformedOpenerRe.exec(line);
     if (m) {
       stage1Lines.push(m[1]!);
     } else {
@@ -92,18 +102,21 @@ export function ensureBlankAroundColonBlocksWithLineMap(
   // Step 2: `:::` 行の前に blank line 挿入(直前 line が blank でないとき)
   const stage2Lines: string[] = [];
   const stage2Map: number[] = [];
+  const stage2Skip: boolean[] = [];
   for (let i = 0; i < stage1Lines.length; i++) {
     const line = stage1Lines[i]!;
     const inputIdx = stage1Map[i]!;
-    if (colonStartRe.test(line)) {
+    if (!stage1Skip[i]! && colonStartRe.test(line)) {
       const prev = stage2Lines[stage2Lines.length - 1];
       if (prev !== undefined && prev.trim() !== '') {
         stage2Lines.push('');
         stage2Map.push(inputIdx); // 挿入 blank は次 `:::` 行の input idx を持つ
+        stage2Skip.push(false);
       }
     }
     stage2Lines.push(line);
     stage2Map.push(inputIdx);
+    stage2Skip.push(stage1Skip[i]!);
   }
   // Step 3: `:::role{...}` opener の後に blank line 挿入(次行が非 blank のとき)
   const stage3Lines: string[] = [];
@@ -113,7 +126,7 @@ export function ensureBlankAroundColonBlocksWithLineMap(
     const inputIdx = stage2Map[i]!;
     stage3Lines.push(line);
     stage3Map.push(inputIdx);
-    if (openerRe.test(line)) {
+    if (!stage2Skip[i]! && openerRe.test(line)) {
       const next = stage2Lines[i + 1];
       if (next !== undefined && next.trim() !== '') {
         stage3Lines.push('');
