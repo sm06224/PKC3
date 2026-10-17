@@ -31,7 +31,7 @@ import { SqlEmbedHydrator } from './sql-embed-hydrate';
 import { readFenceAssetText } from '@features/asset/fence-asset-read';
 import { applyHeadingFold, revealBlock } from './heading-fold';
 import { LOG_DAYS_HOST_ATTR } from './log-days';
-import { applyHeadingAnchors } from './heading-anchor';
+import { applyHeadingAnchors, ID_PREFIX_ATTR } from './heading-anchor';
 import { applyCodeLangBadges } from './code-lang';
 import { appCodeCollapse, applyCodeCollapse, clearCodeCollapse } from './code-collapse';
 import { appInlineCodeCopy, applyInlineCodeCopy, clearInlineCodeCopy } from './inline-code-copy';
@@ -391,8 +391,13 @@ const REFOCUS_ACTIONS: readonly string[] = ['pick-app-icon', 'adopt-link-icon'];
 /** 添付の改名欄の id の連番(描くたびに進める。同じ document に同じ id を並べない)。 */
 let attachmentRenameSeq = 0;
 
+/** 主でない面の `id` の接頭辞の連番。🔴 module に 1 つ(面ごとに数えると 2 枚の枠が同じ接頭辞になる)。 */
+let detailFrameSeq = 0;
+
 export class DetailRenderer {
   private readonly region: HTMLElement;
+  /** 主でない面(`pinnedLid !== null`)だけが持つ、本文の `id` の接頭辞(`RenderMarkdownOptions.idPrefix`)。 */
+  private readonly idPrefix: string | undefined;
   private readonly assets: AssetLender | null;
   private _mode: Mode = 'empty';
   /**
@@ -742,6 +747,7 @@ export class DetailRenderer {
     this.region = region;
     this.assets = assets;
     this.markdown = markdown;
+    this.idPrefix = pinnedLid === null ? undefined : `frame-${String(++detailFrameSeq)}-`;
     /**
      * 選択範囲コピーの活性は selection で決まる(state に無い)。
      * ⚠ renderer はアプリと同寿命なので外さない ── handler は器が外れていれば
@@ -1866,6 +1872,11 @@ export class DetailRenderer {
          * 🔑 ずらす値は live editor(`startLine + fmLines`)と**同じ 1 つ**。
          */
         taskLineOffset: frontmatterLineCount(body),
+        /**
+         * 🔴 **主でない面(横に留めた枠)は `id` に接頭辞を付ける**(#1087 A7)。⚠ 主の面は付けない
+         *   (パーマリンク・目次の飛び先は今の `id` に頼る)。同じ本文を並べても document 内で `id` が重ならない。
+         */
+        ...(this.idPrefix === undefined ? {} : { idPrefix: this.idPrefix }),
       };
       /**
        * 🔴 **読む面もワーカーで描く**(2026-08-06。user 報告 2-8)。
@@ -1993,6 +2004,7 @@ export class DetailRenderer {
          * 🔴 **見出しのアンカーリンク（章・見出し参照リンク）ワンクリックコピー**(#1124)。
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わるとボタンが消えるため。
          */
+        if (this.idPrefix !== undefined) host.setAttribute(ID_PREFIX_ATTR, this.idPrefix);
         applyHeadingAnchors(host, lid);
         /**
          * 🔴 **コードブロックの言語名ラベルバッジ**(#1128)。

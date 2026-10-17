@@ -3350,6 +3350,18 @@ md.core.ruler.after('inline', 'pkc-gfm-alerts', function (state) {
 export interface RenderMarkdownOptions {
   readonly currentContainerId?: string;
   /**
+   * 🔴 **同じ document に本文が 2 つ以上描かれるとき、主でない面に付ける `id` の接頭辞**(#1087 A7)。
+   *
+   * ⚠ 見出し・脚注(`fn1` / `fnref1`)・図の見出し・「原文 / 表示」の切替(`pkc-rv-…`)の `id` は
+   *   **中身から決まる**ので、同じ(または似た)本文を 2 面に並べると document の中で重なる。
+   *   すると `#fn1` が先に出てくる相手へ飛び、切替の `<label for>` が**別の面のチェック**を倒す。
+   * 🔑 `id` を持つ要素と、それを指す `href="#…"` / `for` / `aria-labelledby` / `aria-describedby` を
+   *   **同じ接頭辞で全部**書き直す(`place-embed.ts` の枠と同じ作法)。主の面は渡さない = 今までの `id` のまま
+   *   (パーマリンク・目次の飛び先はそれに頼っている)。
+   * ⚠ 決定的な文字列にすること(描画ごとに変わると、差分反映が毎回塊を作り直す)。
+   */
+  readonly idPrefix?: string;
+  /**
    * 🔴 **囲みの中身を添付から取ったもの**(#444 段②。鍵 → 字)。
    *
    * 🔑 **書き出しのためにある** ── 配った HTML / Word には hydrator が居ないので、
@@ -6326,7 +6338,33 @@ export function renderMarkdownWithoutPostGuard(
   return renderMarkdownImpl(text, opts, false);
 }
 
+/**
+ * 出力 HTML の `id` と、それを指す参照を同じ接頭辞で書き直す(`RenderMarkdownOptions.idPrefix`)。
+ * ⚠ 本文の字は `&quot;` に逃がされて出るので、`id="` の形は**属性としてのもの**しか当たらない。
+ */
+export function prefixHtmlIds(html: string, prefix: string): string {
+  if (prefix === '') return html;
+  return html
+    .replace(/(\sid=")([^"]*)(")/g, (_m, a: string, v: string, c: string) => `${a}${prefix}${v}${c}`)
+    .replace(/(\shref="#)([^"]*)(")/g, (_m, a: string, v: string, c: string) => `${a}${prefix}${v}${c}`)
+    .replace(/(\sfor=")([^"]*)(")/g, (_m, a: string, v: string, c: string) => `${a}${prefix}${v}${c}`)
+    .replace(
+      /(\saria-(?:labelledby|describedby)=")([^"]*)(")/g,
+      (_m, a: string, v: string, c: string) =>
+        `${a}${v.split(/\s+/).filter((t) => t !== '').map((t) => prefix + t).join(' ')}${c}`,
+    );
+}
+
 function renderMarkdownImpl(
+  text: string,
+  opts: RenderMarkdownOptions,
+  usePostGuard: boolean,
+): string {
+  const html = renderMarkdownCore(text, opts, usePostGuard);
+  return opts.idPrefix === undefined ? html : prefixHtmlIds(html, opts.idPrefix);
+}
+
+function renderMarkdownCore(
   text: string,
   opts: RenderMarkdownOptions,
   usePostGuard: boolean,

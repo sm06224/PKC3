@@ -41,6 +41,13 @@ export function buildHeadingLink(lid: string, id: string, text: string): string 
 }
 
 /**
+ * 🔴 **主でない面(横に留めた枠)の本文の器に焼く、`id` の接頭辞**(#1087 A7)。
+ * ⚠ 見出しの `id` には接頭辞が付いている(同じ document で重ならないように)が、**コピーするリンクには
+ *   付けない**(リンクの受け手は接頭辞を持たない `id` で探す)。付ける / 外すを 1 か所で揃える。
+ */
+export const ID_PREFIX_ATTR = 'data-pkc-id-prefix';
+
+/**
  * 本文内の見出し（h1〜h6）にアンカーコピーボタンを付与する。
  */
 export function applyHeadingAnchors(root: Element, lid: string | null): void {
@@ -53,8 +60,10 @@ export function applyHeadingAnchors(root: Element, lid: string | null): void {
 
     const text = extractHeadingText(heading);
     // 描画が刻んだ id をそのまま使う(計算し直さない。同名見出しの連番がずれる)。無ければ付けない
-    const slug = heading.getAttribute('id');
-    if (!slug) continue;
+    const rawSlug = heading.getAttribute('id');
+    if (!rawSlug) continue;
+    const prefix = root.getAttribute(ID_PREFIX_ATTR) ?? '';
+    const slug = prefix !== '' && rawSlug.startsWith(prefix) ? rawSlug.slice(prefix.length) : rawSlug;
 
     const btn = heading.ownerDocument.createElement('button');
     btn.type = 'button';
