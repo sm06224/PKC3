@@ -1974,7 +1974,8 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(0);
   await clickReal(page, '[data-pkc-browse="filer"]');
   await clickReal(page, '[data-pkc-action="show-trash"]');
-  await clickReal(page, '[data-pkc-action="purge-trash"]');
+  // ⚠ 「ゴミ箱を空にする」は見出しの 1 つ(行ごとの「完全に消す」は `data-pkc-trash-lid` を持つ ── 束 G2、依頼 301)
+  await clickReal(page, '[data-pkc-action="purge-trash"]:not([data-pkc-trash-lid])');
   // ⚠ 一括・不可逆なので、確認の文言も見る(#299 段②)
   expect(await answerAppDialog(page, 'ok'), '確認が不可逆だと言っていない').toContain(
     '元に戻せません',
