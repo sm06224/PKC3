@@ -69,6 +69,12 @@ export interface CaptureServiceDeps {
   readonly onChange: (line: string | null) => void;
   /** 一時の知らせ(エラーの行とは別)。 */
   readonly notify: (text: string, opts?: StatusOptions) => void;
+  /**
+   * 🔴 **入れ先を開く道を添えた知らせ**(#1163 依頼 353)── 録り始めたノートが開いているノートと違うとき、
+   *   知らせの隣に「開く」を出す(片道の操作を作らない)。⚠ 必須にしてある ── 任意だと配線を落としても
+   *   型が黙り、「開く」が出ないまま気づけない。
+   */
+  readonly notifyOpen: (text: string, lid: string) => void;
   /** ブラウザの口(test は fake を入れる)。 */
   readonly capture?: CaptureDeps;
   /** 収録を始める口。⚠ test はここを差し替える。 */
@@ -293,7 +299,8 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     putAssetIntoNote({
       dispatcher: deps.dispatcher,
       queue,
-      notify: (text) => deps.notify(text), // ⚠ そのまま渡さない(`putAssetIntoNote` の第 2 引数は「開く」の身元で、種類ではない)
+      // ⚠ そのまま渡さない(`putAssetIntoNote` の第 2 引数は「開く」の身元で、種類ではない)
+      notify: (text, open) => (open === undefined ? deps.notify(text) : deps.notifyOpen(text, open)),
       into,
       attachedLid: attached.lid,
       assetKey: attached.assetKey,

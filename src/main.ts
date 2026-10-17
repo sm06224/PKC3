@@ -3385,6 +3385,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     onChange: (line) => paintCaptureBar(root, line),
     notify: showStatus,
+    notifyOpen: (text, lid) => dispatcher.dispatch({ type: 'OP_NOTICE', message: text, open: lid }),
     /**
      * 🔴 **録っている間・預かっている間にタブを閉じる・読み直すと「離れますか」**(#1087)。
      *   収録の bytes はメモリ上にだけ在り、閉じると 250MB ごとの区切り以後が消える。

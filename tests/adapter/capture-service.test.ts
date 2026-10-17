@@ -117,6 +117,7 @@ interface Bench {
   readonly d: Dispatcher;
   readonly events: DomainEvent[];
   readonly notices: string[];
+  readonly opens: Array<string | null>;
   readonly lines: Array<string | null>;
   /** `onActive` に来た値(変わったときだけ呼ばれる約束)。 */
   readonly actives: boolean[];
@@ -203,6 +204,7 @@ function bench(
     );
   });
   const notices: string[] = [];
+  const opens: Array<string | null> = [];
   const lines: Array<string | null> = [];
   const actives: boolean[] = [];
   const attached: Array<{ name: string; type: string; size: number }> = [];
@@ -241,7 +243,14 @@ function bench(
       return { lid, assetKey: 'ast-k' + String(attached.length), mime: item.type, hash: null };
     },
     onChange: (line) => lines.push(line),
-    notify: (t) => notices.push(t),
+    notify: (t) => {
+      notices.push(t);
+      opens.push(null);
+    },
+    notifyOpen: (t, lid) => {
+      notices.push(t);
+      opens.push(lid);
+    },
     onActive: (a) => actives.push(a),
     ...(opts.lock === undefined ? {} : { lock: opts.lock }),
     ...(opts.confirm === undefined ? {} : { confirm: opts.confirm }),
@@ -267,6 +276,7 @@ function bench(
     d,
     events,
     notices,
+    opens,
     lines,
     actives,
     attached,
@@ -603,6 +613,8 @@ describe('🔴 録音は「録り始めたノート」に入る(#1163 依頼 90-
     ]);
     expect(b.d.getState().selectedLid, '入れ先へ画面を動かした').toBe('b');
     expect(b.notices.at(-1), 'どのノートへ入れたかを言っていない').toMatch(/『t-a』の本文のいちばん下に入れました$/);
+    // 🔴 知らせの隣に入れ先を開く道が要る(片道の操作を作らない)── 実ブラウザで「開く」が出ていなかった
+    expect(b.opens.at(-1), '入れ先を開く道(「開く」)を添えていない').toBe('a');
   });
 
   it('始めたノートがいまも開いていれば、これまでどおり(名前は添えない)', async () => {
@@ -612,6 +624,7 @@ describe('🔴 録音は「録り始めたノート」に入る(#1163 依頼 90-
     await tick();
     expect(appends(b.events).map((e) => e.lid)).toEqual(['a']);
     expect(b.notices.at(-1)).toMatch(/^「録音-.*」を本文のいちばん下に入れました$/);
+    expect(b.opens.at(-1), '開いているノートへ入れた回に「開く」を添えた').toBeNull();
   });
 
   it('始めたノートが消えていたら、いま開いているノートへ倒れて、そのことを言う', async () => {
