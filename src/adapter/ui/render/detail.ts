@@ -750,10 +750,18 @@ export class DetailRenderer {
     this.idPrefix = pinnedLid === null ? undefined : `frame-${String(++detailFrameSeq)}-`;
     /**
      * 選択範囲コピーの活性は selection で決まる(state に無い)。
-     * ⚠ renderer はアプリと同寿命なので外さない ── handler は器が外れていれば
-     * 何もしない(test が renderer を作り捨てても積み害は無い)。
+     * ⚠ 主の面はアプリと同寿命なので外さない。留めた枠は外れるとき `dispose()` が外す。
      */
-    region.ownerDocument.addEventListener('selectionchange', () => {
+    region.ownerDocument.addEventListener('selectionchange', this.onSelectionChange);
+  }
+
+  /**
+   * `selectionchange` の受け手。⚠ 名前のある field にしてあるのは `dispose()` が外すため
+   * (留めた枠は外されるたびに作り捨てられる ── 匿名だと document に積み残す)。
+   */
+  private readonly onSelectionChange = (): void => {
+    const region = this.region;
+    {
       /**
        * 🔴 **選択の判定はここでだけ読む**(#1467 段 3-e)── `getSelection()` の `isCollapsed` /
        *   `getRangeAt` は見える選択を決めるために**スタイルと配置を強制する**。描き直しの帯
@@ -774,7 +782,18 @@ export class DetailRenderer {
        */
       this.selectionAnchor = usable ? (region.ownerDocument.getSelection()?.anchorNode ?? null) : null;
       this.syncCopySelection();
-    });
+    }
+  };
+
+  /**
+   * この面を捨てる(留めた枠が外れるとき ── `SplitView.sync`)。
+   * ⚠ 主の面には呼ばない。⚠ 二度呼んでも安全。借りた ObjectURL・document の購読・
+   * ResizeObserver を返し、飛んでいる hydrate は着地させない(`hydrateToken`)。
+   */
+  dispose(): void {
+    this.region.ownerDocument.removeEventListener('selectionchange', this.onSelectionChange);
+    this.disposeLends();
+    this.dropSkeleton();
   }
 
   /** 直近の `selectionchange` で読んだ「選択範囲をコピーできる選択があるか」(描き直しはこれを読む)。 */
