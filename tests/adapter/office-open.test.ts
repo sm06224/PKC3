@@ -33,6 +33,8 @@ function fakeWindow(): OfficeWindow & {
   opens: { name?: string; expectDocument?: boolean; bytes?: Uint8Array }[];
   provided: { name: string; bytes: Uint8Array; token: string; fromShadow: boolean }[];
   alreadyOpen: boolean;
+  /** 窓がいま出している文書の合言葉(`alreadyOpen` のときだけ意味を持つ)。 */
+  showing: string;
 } {
   const opens: { name?: string; expectDocument?: boolean; bytes?: Uint8Array }[] = [];
   const provided: { name: string; bytes: Uint8Array; token: string; fromShadow: boolean }[] = [];
@@ -40,6 +42,7 @@ function fakeWindow(): OfficeWindow & {
     opens,
     provided,
     alreadyOpen: false,
+    showing: '',
     open(opts: { name?: string; expectDocument?: boolean; bytes?: Uint8Array } = {}) {
       opens.push(opts);
       return { kind: w.alreadyOpen ? 'already-open' : 'opened' } as const;
@@ -60,6 +63,8 @@ function fakeWindow(): OfficeWindow & {
     requestClose() {},
     dispose() {},
     isProbablyOpen() { return w.alreadyOpen; },
+    // ⚠ 本物と同じく「生きている」かつ「その合言葉を出している」(空は誰のでもない)
+    showsToken(t: string) { return w.alreadyOpen && t !== '' && w.showing === t; },
     onEvent() { return () => {}; },
   };
   return w as unknown as ReturnType<typeof fakeWindow>;
@@ -414,9 +419,10 @@ describe('編集の控え(影)の確認(#1228 段 2)', () => {
     expect(m.port.readBytes).not.toHaveBeenCalled();
   });
 
-  it('🔴 ③ 開いている窓へ頼むときは訊かない(窓が自分の未保存を訊く)/ lid の無い添付も訊かない', async () => {
+  it('🔴 ③ 窓がそのノートをいま出しているときは訊かない(窓が自分の未保存を訊く)/ lid の無い添付も訊かない', async () => {
     const a = makeShadow();
     a.officeWindow.alreadyOpen = true;
+    a.officeWindow.showing = 'L1';
     const r = a.opener.open(NOTE);
     expect(r).toEqual({ ok: true, reused: true });
     expect(a.port.mayHave).not.toHaveBeenCalled();
@@ -425,6 +431,19 @@ describe('編集の控え(影)の確認(#1228 段 2)', () => {
     expect(b.opener.open(DOCX)).toEqual({ ok: true, reused: false });
     expect(b.port.mayHave).not.toHaveBeenCalled();
     expect(b.officeWindow.opens, '同期で開いていない').toHaveLength(1);
+  });
+
+  it('🔴 ③ 窓が生きていても別のノートを出しているなら、頼まれたノートの控えは訊く(O-2)', async () => {
+    // 前の session が落ちて、ノート L1 の控えだけが棚に残っている。窓は別のノート(L2)を出している
+    const m = makeShadow();
+    m.officeWindow.alreadyOpen = true;
+    m.officeWindow.showing = 'L2';
+    const res = await settle(m.opener.open(NOTE));
+    expect(m.port.mayHave, '別のノートの窓が生きているだけで控えの確認を飛ばした').toHaveBeenCalledWith('L1');
+    expect(m.port.ask).toHaveBeenCalledTimes(1);
+    expect(res).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(m.officeWindow.provided).toHaveLength(1));
+    expect(m.officeWindow.provided[0]).toMatchObject({ bytes: SHADOW, token: 'L1', fromShadow: true });
   });
 
   it('③ 開けない添付(Office でない / 使えない環境)は訊く前に理由を返す', () => {
@@ -566,5 +585,77 @@ describe('main.ts の配線(#1228 段 2 の原文 pin)', () => {
     expect(main).toContain('void officeShadows.sweep();');
     // 結果の受け方: settled を待って、もう一度同じ報告に通す(失敗の理由・開いている窓への一言を落とさない)
     expect(main).toContain('else if (r.settled !== undefined) void r.settled.then(report);');
+  });
+});
+
+/**
+ * 🔴 **預かってある保存を、窓を開く / 読み直す前に取り込む**(O-7)。
+ *
+ * ⚠ 編集中に届いた保存は棚に預かってあり、ノートの添付は古い版のまま。窓を開く / 読み直すときにノートの添付を読むと
+ *   **預かった版が出ず**、打ち足して保存すると預かった編集が消える。
+ * 🔑 観測点は「呼んだか」でなく、**窓へ渡った bytes** ── 取り込みで添付の key が替わる(`currentAssetKey` が変わる)ので、
+ *   取り込みを**先に**呼ばないと古い key の bytes が渡る。
+ */
+describe('預かってある保存を先に取り込んでから開く(O-7)', () => {
+  const OLD = new Uint8Array([1]);
+  const HELD = new Uint8Array([2]);
+
+  function setup(adoptResult: boolean | 'throw' = true) {
+    const key = { cur: 'k-old' };
+    const log: string[] = [];
+    const officeWindow = fakeWindow();
+    const opener = createOfficeOpener({
+      officeWindow,
+      isPackInstalled: () => true,
+      capability: () => OK,
+      readAsset: async (k) => { log.push(`read:${k}`); return k === 'k-held' ? HELD : OLD; },
+      currentAssetKey: async () => { log.push('key'); return key.cur; },
+      adoptHeld: async (lid) => {
+        log.push(`adopt:${lid}`);
+        if (adoptResult === 'throw') throw new Error('boom');
+        if (adoptResult) key.cur = 'k-held';
+        return adoptResult;
+      },
+    });
+    return { opener, officeWindow, log, key };
+  }
+
+  it('🔴 開くとき: 取り込んでから、替わった key で読む(クリック時の古い key で読まない)', async () => {
+    const m = setup(true);
+    m.opener.open({ ...DOCX, lid: 'L1', assetKey: 'k-old' });
+    await vi.waitFor(() => expect(m.officeWindow.provided).toHaveLength(1));
+    expect(m.officeWindow.provided[0]!.bytes, '預かった版が窓に出ていない').toEqual(HELD);
+    expect(m.log.indexOf('adopt:L1')).toBeLessThan(m.log.indexOf('read:k-held'));
+  });
+
+  it('🔴 読み直すとき: 取り込みが、添付の key を引くより先', async () => {
+    const m = setup(true);
+    let refresh: (() => Promise<{ bytes: Uint8Array } | null>) | null = null;
+    m.officeWindow.provideDocument = ((_n: string, _b: Uint8Array, _t?: string, _i?: unknown, r?: typeof refresh) => {
+      refresh = r ?? null;
+    }) as never;
+    m.opener.open({ ...DOCX, lid: 'L1', assetKey: 'k-old' });
+    await vi.waitFor(() => expect(refresh).not.toBeNull());
+    m.log.length = 0;
+    m.key.cur = 'k-old'; // 読み直しの時点では、まだ取り込めていない
+    const src = await refresh!();
+    expect(src!.bytes, '読み直しで預かった版が出ていない').toEqual(HELD);
+    expect(m.log.indexOf('adopt:L1')).toBeLessThan(m.log.indexOf('key'));
+  });
+
+  it('取り込めない(まだ編集中)/ 取り込みが落ちる ── それでも開く(開けなくしない)', async () => {
+    for (const r of [false, 'throw'] as const) {
+      const m = setup(r);
+      m.opener.open({ ...DOCX, lid: 'L1', assetKey: 'k-old' });
+      await vi.waitFor(() => expect(m.officeWindow.provided).toHaveLength(1));
+      expect(m.officeWindow.provided[0]!.bytes).toEqual(OLD);
+    }
+  });
+
+  it('lid の無い添付は取り込みを呼ばない(合言葉が無い保存は束ねる先が無い)', async () => {
+    const m = setup(true);
+    m.opener.open(DOCX);
+    await vi.waitFor(() => expect(m.officeWindow.provided).toHaveLength(1));
+    expect(m.log.some((l) => l.startsWith('adopt'))).toBe(false);
   });
 });

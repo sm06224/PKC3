@@ -183,7 +183,48 @@ export type OfficeWindowEvent =
   | { readonly type: 'save-failed'; readonly reason: string }
   | { readonly type: 'not-installed' }
   | { readonly type: 'unsupported'; readonly missing: readonly string[] }
-  | { readonly type: 'closed' };
+  | { readonly type: 'closed' }
+  /**
+   * 🔴 **別のタブが窓へ「この文書を読み直して」と頼んだ**(O-4)。⚠ 内部用 ── 受けた `OfficeWindow` が自分の送り直しの控えを
+   * 見直すだけで、listener へは流さない。
+   */
+  | { readonly type: 'reload-request'; readonly name: string }
+  /** 🔴 **別のタブが窓へ文書を渡した**(O-4)。⚠ 内部用(上と同じ)。 */
+  | { readonly type: 'document'; readonly name: string; readonly token: string }
+  /**
+   * 🔴 **別のタブ(保存を引き取ったタブ)が出した、取り込みの結果**(O-8)。窓を開いた(= `token` の文書を窓へ渡した)タブにだけ
+   * 流れる ── 引き取るのは writer のタブ 1 つなので、頼んだタブが follower だと結果を見られなかった。
+   */
+  | {
+      readonly type: 'save-result';
+      readonly token: string;
+      readonly kind: 'notice' | 'fail';
+      readonly text: string;
+      readonly openLid?: string;
+    };
+
+/** 取り込み結果を別のタブへ運ぶ封筒の中身(O-8)。 */
+export interface OfficeSaveResult {
+  readonly token: string;
+  readonly kind: 'notice' | 'fail';
+  readonly text: string;
+  readonly openLid?: string;
+}
+
+/**
+ * 🔴 **別のタブの読み込み依頼は、自分の送り直しの控えを古くするか**(O-4)。
+ *
+ * 窓の「文書をちょうだい」は全タブに届く ── 控えを持つタブが**別の文書が頼まれた後も**古い文書を送り直すと、窓は
+ * 先に着いたほうを取るので、頼んだ文書でなく古い文書が出る。⚠ 合言葉が分かるとき(`document`)は合言葉で、
+ * 分からないとき(`reload-request` は名前しか運ばない)は名前で比べる。同じ文書なら控えは要る(捨てない)。
+ */
+export function supersedesSent(
+  sent: { readonly name: string; readonly token: string },
+  incoming: { readonly name: string; readonly token?: string },
+): boolean {
+  if (incoming.token !== undefined && incoming.token !== '') return incoming.token !== sent.token;
+  return incoming.name !== sent.name;
+}
 
 /**
  * 「挿入 → 画像」に並べる添付 1 件(#146)。⚠ 文書と**同じ封筒**に載せる ── 経路を増やさない。
@@ -323,6 +364,12 @@ export class OfficeWindow {
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
   /** 窓が先に「ちょうだい」と言ってきたが、まだ bytes が無い状態。 */
   private askedForDoc = false;
+  /**
+   * 🔴 **窓が起動の途中のうちに頼んだ「読み直して」(窓にはまだ聞こえていない)が在るか**(O-5)。
+   * 起動中に 2 つ目の文書を頼むと、窓はまだ放送を聞いておらず、頼みが落ちる。⚠ 1 つ目の文書だけ渡って
+   * 2 つ目が届かない ── 窓が生きたら頼み直す。
+   */
+  private missedReload: { readonly name: string } | null = null;
   private readonly listeners = new Set<(ev: OfficeWindowEvent) => void>();
 
   constructor(deps: OfficeWindowDeps = {}) {
@@ -370,6 +417,7 @@ export class OfficeWindow {
       : null;
     // ⚠ 新しく開く / 読み直させるので、前の「ちょうだい」は無効にする
     this.askedForDoc = false;
+    this.missedReload = null;
     const wantsDoc = opts.bytes !== undefined || opts.expectDocument === true;
     // 🔴 「やめた」が来る前の文書は受け取らない、の印は新しい依頼ごとに引き直す(#1228 穴②)
     this.discardNextProvide = 0;
@@ -396,6 +444,8 @@ export class OfficeWindow {
           pkc3Office: 'reload-request',
           payload: { name: opts.name ?? '', awaitDoc: true },
         });
+        // 🔴 窓がまだ生きていない(起動の途中)なら、この頼みは聞こえていない ── 生きたら頼み直す(O-5)
+        if (!this.isProbablyOpen()) this.missedReload = { name: opts.name ?? '' };
       }
       return { kind: 'already-open' };
     }
@@ -453,6 +503,52 @@ export class OfficeWindow {
     }
     this.pendingDoc = { name, bytes, token, images, refresh, fromShadow };
     if (this.askedForDoc) this.sendDocument();
+    else this.repostMissedReload();
+  }
+
+  /**
+   * 🔴 **聞こえていなかった「読み直して」を、窓が生きてから頼み直す**(O-5)。⚠ 渡す文書が手元に在るときだけ ──
+   * 無いのに頼むと、窓は作り直されて待ちぼうけになる。
+   */
+  private repostMissedReload(): void {
+    const missed = this.missedReload;
+    if (missed === null || this.pendingDoc === null || !this.isProbablyOpen()) return;
+    this.missedReload = null;
+    this.ch.postMessage({
+      pkc3Office: 'reload-request',
+      payload: { name: this.pendingDoc.name, awaitDoc: true },
+    });
+  }
+
+  /**
+   * 🔴 **文書を窓へ渡した合言葉を、このタブが覚えているか**(O-2 / O-8)。窓が生きていて、いま出している(or 頼んである)文書の
+   * 合言葉が `token` と同じ。⚠ 空の合言葉は「覚えていない」。
+   */
+  showsToken(token: string): boolean {
+    return this.isProbablyOpen() && this.holdsToken(token);
+  }
+
+  private holdsToken(token: string): boolean {
+    if (token === '') return false;
+    return (this.lastSent ?? this.heldSent)?.token === token;
+  }
+
+  /** 🔴 取り込みの結果を、窓を開いたタブへ運ぶ(O-8)。⚠ 投げない(取り込みの成否に関わらない)。 */
+  relaySaveResult(r: OfficeSaveResult): void {
+    if (r.token === '') return;
+    try {
+      this.ch.postMessage({
+        pkc3Office: 'save-result',
+        payload: {
+          token: r.token,
+          kind: r.kind,
+          text: r.text,
+          ...(r.openLid !== undefined ? { openLid: r.openLid } : {}),
+        },
+      });
+    } catch {
+      // 閉じている ── 運べないだけで、取り込みは終わっている
+    }
   }
 
   /**
@@ -523,9 +619,24 @@ export class OfficeWindow {
   private receive(data: unknown): void {
     const ev = parseEvent(data);
     if (!ev) return;
+    if (ev.type === 'reload-request' || ev.type === 'document') {
+      // 🔴 別のタブが別の文書を頼んだ ── 自分の古い控えを送り直さない(O-4)。内部用なので listener へは流さない
+      const mine = this.lastSent ?? this.heldSent;
+      if (mine !== null && supersedesSent(mine, ev)) {
+        this.dropLastSent();
+        this.heldSent = null;
+      }
+      return;
+    }
+    if (ev.type === 'save-result') {
+      // 🔴 窓を開いたタブにだけ見せる(O-8)── 全タブが言うと同じ一言が重なる
+      if (this.holdsToken(ev.token)) for (const fn of this.listeners) fn(ev);
+      return;
+    }
     if (ev.type === 'alive') {
       this.lastAliveAt = this.now();
       this.clearUnreached();
+      this.repostMissedReload();
     }
     if (ev.type === 'shadow-written') this.lastShadowAt = ev.at;
     if (ev.type === 'closed') {
@@ -664,6 +775,7 @@ function parseEvent(data: unknown): OfficeWindowEvent | null {
   const p = (d.payload ?? {}) as {
     ms?: unknown; missing?: unknown; name?: unknown; key?: unknown; size?: unknown;
     visible?: unknown; reason?: unknown; at?: unknown;
+    token?: unknown; kind?: unknown; text?: unknown; openLid?: unknown;
   };
   switch (d.pkc3Office) {
     case 'alive':
@@ -706,6 +818,26 @@ function parseEvent(data: unknown): OfficeWindowEvent | null {
       };
     case 'save-failed':
       return { type: 'save-failed', reason: typeof p.reason === 'string' ? p.reason : '' };
+    case 'reload-request':
+      return { type: 'reload-request', name: typeof p.name === 'string' ? p.name : '' };
+    case 'document':
+      return {
+        type: 'document',
+        name: typeof p.name === 'string' ? p.name : '',
+        token: typeof p.token === 'string' ? p.token : '',
+      };
+    case 'save-result':
+      // ⚠ 字も合言葉も無い通知は捨てる(空の知らせを user へ出さない)
+      if (typeof p.text !== 'string' || p.text === '') return null;
+      if (typeof p.token !== 'string' || p.token === '') return null;
+      if (p.kind !== 'notice' && p.kind !== 'fail') return null;
+      return {
+        type: 'save-result',
+        token: p.token,
+        kind: p.kind,
+        text: p.text,
+        ...(typeof p.openLid === 'string' && p.openLid !== '' ? { openLid: p.openLid } : {}),
+      };
     default:
       return null;
   }

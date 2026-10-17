@@ -29,6 +29,7 @@
  */
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { errorText } from '@features/error-text';
+import type { AppPhase } from '../../state/app-state';
 import { isLocalFileToken, localSaveFailedNotice, type LocalWriteFailure } from '@features/office/office-launch';
 import {
   discardStaged,
@@ -121,6 +122,22 @@ export interface SaveBackDeps {
   readonly notify: (message: string, openLid?: string) => void;
   /** 異常の報告(取り込めなかった)。 */
   readonly fail: (message: string) => void;
+  /**
+   * 🔴 **いまの画面の状態**(O-10)。預かった理由の言い分けに使う ── `canWrite` が偽なのは編集中だけではない。
+   * ⚠ 呼ぶたびに読む(値を固めない)。
+   */
+  readonly phase: () => AppPhase;
+  /**
+   * 🔴 **取り込みの結果を、窓を開いたタブへも運ぶ**(O-8)。引き取るのは writer のタブ 1 つで、窓を開いたのが別の(follower の)タブだと
+   * 「取り込みました / まだ入れていません / 失敗」をそのタブは見られない。⚠ 放送は自分には返らない ── 引き取ったタブが
+   * 頼んだタブでもあるときに 2 度出ない。**optional にしない**(配線を落とすと follower が黙る形に戻る)。
+   */
+  readonly relay: (result: {
+    readonly token: string;
+    readonly kind: 'notice' | 'fail';
+    readonly text: string;
+    readonly openLid?: string;
+  }) => void;
 }
 
 /**
@@ -140,11 +157,25 @@ export function originGoneImportedNotice(name: string): string {
 }
 
 /**
- * 🔴 **編集中なので、保存を預かっているときの一言**(#1087)。預かっている間は何も言わないと、
+ * 🔴 **いま入れられないので、保存を預かっているときの一言**(#1087)。預かっている間は何も言わないと、
  *   user は「保存したのにノートが変わらない」と読む。書き言葉は他の「編集中なのでまだ入れていません」に揃える。
+ * 🔴 **理由は画面の状態で言い分ける**(O-10)。入れられないのは編集中だけではない ── 保存に失敗して止まっているとき
+ *   「編集中なので」と言うと、編集を終えようとしても入らず、出口(保存し直す)も案内されない。
+ *   ⚠ 出口の字は `app-state.ts` の `SAVE_FAILED_EXIT` と同じボタン名(「ノートを保存し直す」)。
  */
-export function savedHeldNotice(name: string): string {
-  return `Office で保存した「${name}」は、編集中なのでまだ入れていません。編集を終えると入れます`;
+export function savedHeldNotice(name: string, phase: AppPhase = 'editing'): string {
+  const head = `Office で保存した「${name}」は、`;
+  if (phase === 'error') return `${head}ノートの保存に失敗しているのでまだ入れていません。「ノートを保存し直す」を押すと入れます`;
+  if (phase === 'initializing') return `${head}読み込み中なのでまだ入れていません。読み込みが終わると入れます`;
+  return `${head}編集中なのでまだ入れていません。編集を終えると入れます`;
+}
+
+/**
+ * 🔴 **取り込み中に例外が出た保存の、失敗の一言**(O-9)。例外で落ちた保存は棚に残してあり、あとで取り込み直す ──
+ *   そう言わないと、user は「失敗したので無くなった」と読む。
+ */
+export function intakeFailedNotice(name: string, reason: string): string {
+  return `Office で保存した内容を取り込めませんでした(「${name}」): ${reason}。内容は PKC3 の中に残してあり、あとで取り込み直します`;
 }
 
 /**
@@ -170,6 +201,11 @@ export interface OfficeSaveBack {
   drainAll(): Promise<number>;
   /** 編集が終わった等で、**保留したものだけ**撃ち直す。⚠ 保留が無ければ何もしない。 */
   retryDeferred(): Promise<number>;
+  /**
+   * 🔴 **その合言葉(ノート)の保存を、先に取り込む**(O-7)。窓を開く / 読み直す前に呼び、預かってある保存をノートへ入れる。
+   * @returns 取り込めた(ノートの添付が替わった)なら `true`。編集中などで入れられなければ `false`(預かったまま)
+   */
+  adoptFor(token: string): Promise<boolean>;
   /** 窓が「渡せなかった」と言ってきた。 */
   reportWindowFailure(reason: string): void;
 }
@@ -187,11 +223,34 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
   const toldLocalFail = new Set<string>();
   /** 🔴 編集中なので預かっていると、もう言った保存(#1087)── 撃ち直しのたびに同じ字を出さない。取り込めたら外す。 */
   const toldHeld = new Set<string>();
+  /**
+   * 🔴 **例外で落ちたと、もう言った保存**(O-9)── 撃ち直しのたびに同じ赤い字を出さない。取り込めたら外す。
+   */
+  const toldThrown = new Set<string>();
+  /**
+   * 🔴 **一言と、窓を開いたタブへの運び**(O-8)。⚠ 一言を出す口はここ 1 本 ── 口ごとに運ぶと、運び忘れた口だけ follower が黙る。
+   */
+  function tell(save: StagedSave, message: string, openLid?: string): void {
+    deps.notify(message, openLid);
+    relay(save, 'notice', message, openLid);
+  }
+  function complain(save: StagedSave, message: string): void {
+    deps.fail(message);
+    relay(save, 'fail', message);
+  }
+  function relay(save: StagedSave, kind: 'notice' | 'fail', text: string, openLid?: string): void {
+    if (save.token === undefined || save.token === '') return;
+    try {
+      deps.relay({ token: save.token, kind, text, ...(openLid !== undefined ? { openLid } : {}) });
+    } catch {
+      // 運べなくても、このタブの一言は出ている
+    }
+  }
   function hold(save: StagedSave): IntakeResult {
     deferred = true;
     if (!toldHeld.has(save.key)) {
       toldHeld.add(save.key);
-      deps.notify(savedHeldNotice(save.name));
+      tell(save, savedHeldNotice(save.name, deps.phase()));
     }
     return 'deferred';
   }
@@ -279,6 +338,16 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
    * 🔴 **同じ文書の保存か**(#1087)。合言葉(`token`)が同じ、または `sameDoc` の鍵が同じ。
    * ⚠ どちらも無い(古い meta)は**別扱い** ── 束ねて古い版を捨てる側へは倒さない。
    */
+  /**
+   * 🔴 **古い側が、新しい側の「前の版」と言えるか**(O-7)。同じ窓の session(`win`)の保存なら、新しい側は古い側の編集を
+   * 含んでいる(続きを打って保存した)。⚠ 窓が替わっている(読み込み直した / 開き直した)と、**新しい側は古い側を含まないことがある** ──
+   * 預かった保存を取り込まないまま窓を開き直すと、窓はノートの古い版から始まる。捨てると預かった編集が誰にも残らない。
+   * 窓の id が分からない古い meta も、捨てる側へは倒さない。
+   */
+  function sameSession(a: StagedSave, b: StagedSave): boolean {
+    return a.win !== undefined && a.win === b.win;
+  }
+
   function sameDocument(a: StagedSave, b: StagedSave): boolean {
     // 合言葉を両方が持つなら**それだけ**で決める(別のノートが同じ窓・path を持ちうる)
     if (a.token !== undefined && b.token !== undefined) return a.token === b.token;
@@ -292,6 +361,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
    *   窓を閉じる掃除(`drainAll`)や撃ち直しが**古い bytes で新しい版を上書きする**
    *   (手元のファイルでは履歴にも無く、戻せない)。
    * ⚠ 「古い」は `listStaged` が返す順(`at` の昇順。同時刻は読み出し順)で、`save` より前にある物。
+   * 🔴 捨てるのは**同じ窓の session の古い保存だけ**(O-7)── 別の session の古い保存は、取り込めていないなら**残す**
+   *   (新しい側が含んでいない編集かもしれない。`run` が先に取り込む)。
    * @returns 捨てなかった物(`save` を含む)
    */
   async function dropOlder(dir: StageDir, all: StagedSave[], save: StagedSave): Promise<StagedSave[]> {
@@ -300,7 +371,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     const keep: StagedSave[] = [];
     for (let i = 0; i < all.length; i += 1) {
       const s = all[i]!;
-      if (i < idx && s.key !== save.key && sameDocument(s, save) && !inFlight.has(s.key)) {
+      if (i < idx && s.key !== save.key && sameDocument(s, save) && sameSession(s, save) && !inFlight.has(s.key)) {
         await discardStaged(dir, s.key);
       } else {
         keep.push(s);
@@ -320,7 +391,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       // 大きさが meta と食い違う = 書きかけのまま `.json` が置かれた(壊れている)。
       // ⚠ 残しても永久に直らないので捨てる ── ただし**黙らない**
       await discardStaged(dir, save.key);
-      deps.fail(`Office で保存した内容を取り込めませんでした(「${save.name}」: 中身が読めません)`);
+      complain(save, `Office で保存した内容を取り込めませんでした(「${save.name}」: 中身が読めません)`);
       return 'failed';
     }
     // ⚠ **`ready` を先に見る。** 見ないと reducer に黙って捨てられ、
@@ -359,7 +430,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       if (local !== true) {
         if (!toldLocalFail.has(save.key)) {
           toldLocalFail.add(save.key);
-          deps.fail(localSaveFailedNotice(save.name, local === false ? null : local));
+          complain(save, localSaveFailedNotice(save.name, local === false ? null : local));
         }
         deferred = true;
         return 'deferred';
@@ -369,7 +440,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       await discardStaged(dir, save.key);
       toldLocalFail.delete(save.key);
       toldHeld.delete(save.key);
-      deps.notify(`元のファイルへ保存しました: 「${save.name}」`);
+      toldThrown.delete(save.key);
+      tell(save, `元のファイルへ保存しました: 「${save.name}」`);
       return 'replaced';
     }
 
@@ -405,7 +477,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       await supersedeOlder(dir, save);
       await discardStaged(dir, save.key);
       toldHeld.delete(save.key);
-      deps.notify(`Office で保存した内容を取り込みました: 「${save.name}」`);
+      toldThrown.delete(save.key);
+      tell(save, `Office で保存した内容を取り込みました: 「${save.name}」`);
       return 'replaced';
     }
     // 🔴 元の添付が無い回(合言葉も、先に作ったノートも死んでいる)は、そう言う(#1087)
@@ -426,7 +499,9 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     await supersedeOlder(dir, save);
     await discardStaged(dir, save.key);
     toldHeld.delete(save.key);
-    deps.notify(
+    toldThrown.delete(save.key);
+    tell(
+      save,
       orphan
         ? localOrphanImportedNotice(save.name)
         : originGone
@@ -456,17 +531,48 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       let live = all;
       for (const s of all) live = await dropOlder(dir, live, s);
       const out: IntakeResult[] = [];
-      for (const save of pick(live)) {
-        if (inFlight.has(save.key)) continue;
+      const done = new Set<string>();
+      /**
+       * 1 件取り込む。@returns まだ棚に残っている(あとで撃ち直す)なら `true`。
+       * 🔴 例外で落ちた保存も**あとで撃ち直す**(O-9)── 立てないと、容量の拒否などで落ちた保存は次の起動まで眠る。
+       */
+      const attempt = async (save: StagedSave): Promise<boolean> => {
         inFlight.add(save.key);
+        done.add(save.key);
         try {
-          out.push(await takeOne(dir, save));
+          const r = await takeOne(dir, save);
+          out.push(r);
+          return r === 'deferred';
         } catch (e) {
-          deps.fail(`Office で保存した内容を取り込めませんでした(「${save.name}」): ${errorText(e)}`);
+          deferred = true;
+          // 同じ赤い字を撃ち直しのたびに出さない(この起動で 1 度だけ)
+          if (!toldThrown.has(save.key)) {
+            toldThrown.add(save.key);
+            complain(save, intakeFailedNotice(save.name, errorText(e)));
+          }
           out.push('failed');
+          return true;
         } finally {
           inFlight.delete(save.key);
         }
+      };
+      for (const save of pick(live)) {
+        if (done.has(save.key) || inFlight.has(save.key)) continue;
+        // 🔴 **別の窓の session の古い保存が残っていれば、先に取り込む**(O-7)。後から書くと新しい版を古い版で上書きし、
+        //   捨てると預かった編集が消える。⚠ 古い側が取り込めない間は、新しい側も預かる(順番を守る)
+        const idx = live.findIndex((s) => s.key === save.key);
+        let blocked = false;
+        for (let i = 0; i < idx; i += 1) {
+          const older = live[i]!;
+          if (done.has(older.key) || inFlight.has(older.key) || !sameDocument(older, save)) continue;
+          if (await attempt(older)) blocked = true;
+        }
+        if (blocked) {
+          deferred = true;
+          out.push('deferred');
+          continue;
+        }
+        await attempt(save);
       }
       return out;
     });
@@ -496,6 +602,12 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       deferred = false;
       const got = await run((all) => all);
       return got.filter((r) => r === 'created' || r === 'replaced').length;
+    },
+
+    async adoptFor(token) {
+      if (token === '') return false;
+      const got = await run((all) => all.filter((s) => s.token === token));
+      return got.some((r) => r === 'created' || r === 'replaced');
     },
 
     reportWindowFailure(reason) {

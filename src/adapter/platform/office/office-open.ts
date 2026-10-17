@@ -107,6 +107,13 @@ export interface OfficeOpenerDeps {
    * 先の保存が消える)。⚠ 省くか `null` なら開いた時の key で読む。⚠ 投げない。
    */
   readonly currentAssetKey?: (lid: string) => Promise<string | null>;
+  /**
+   * 🔴 **そのノートの、預かってある保存を先に取り込む**(O-7)。編集中に届いた保存は棚に預かってあり(ノートは古い版のまま)、
+   * 窓を開く / 読み直すとき**ノートの添付を読むと、預かった版が出ない** ── 打ち足して保存すると、預かった版が消える。
+   * 取り込めたら `true`(添付の key が替わっているので引き直す)。⚠ 取り込めない(まだ編集中など)なら `false`で、開くのは止めない。
+   * ⚠ 投げない。
+   */
+  readonly adoptHeld?: (lid: string) => Promise<boolean>;
   /** 並べなかった件数を user へ言う 1 行の出口(`showStatus`)。 */
   readonly notify?: (text: string) => void;
 }
@@ -147,6 +154,8 @@ export function createOfficeOpener(deps: OfficeOpenerDeps): OfficeOpener {
       const s = await loadShadow(target);
       if (s !== null) return s;
     }
+    // 🔴 預かってある保存を先に取り込む(O-7)。⚠ 添付の key を引くのは**その後**(取り込むと key が替わる)
+    if (target.lid) await deps.adoptHeld?.(target.lid).catch(() => false);
     const key = target.lid ? await deps.currentAssetKey?.(target.lid).catch(() => null) : null;
     return load(key ? { ...target, assetKey: key } : target);
   };
@@ -160,7 +169,11 @@ export function createOfficeOpener(deps: OfficeOpenerDeps): OfficeOpener {
     void (async () => {
       // 🔴 控えの版を頼まれたら先に読む。読めなければ保存済みの版へ戻る(開けなくしない)
       const shadowSrc = wantShadow ? await loadShadow(target) : null;
-      const loaded = shadowSrc ?? (await load(target));
+      // 🔴 控えの版でないときは、預かってある保存を先に取り込む(O-7)。取り込めたら、クリックの時の key は古い
+      const adopted =
+        shadowSrc === null && target.lid ? await deps.adoptHeld?.(target.lid).catch(() => false) : false;
+      const freshKey = adopted === true ? await deps.currentAssetKey?.(target.lid!).catch(() => null) : null;
+      const loaded = shadowSrc ?? (await load(freshKey ? { ...target, assetKey: freshKey } : target));
       if (loaded === null) {
         // 🔴 **読み出せなかったことを言う**(#1087 の見直し 2026-10-13)── 窓は開いても文書が来ず、PKC3 の側は黙っていた
         deps.notify?.(`「${target.name}」の中身を読み出せませんでした(添付が消えているか、読めない形です)`);
@@ -238,13 +251,15 @@ export function createOfficeOpener(deps: OfficeOpenerDeps): OfficeOpener {
       }
 
       // 🔴 **保存していない編集の控えが在るかもしれないときだけ**、訊いてから開く(#1228 段 2)。
-      //    ⚠ 開いている窓へ頼むとき(`isProbablyOpen`)は訊かない ── 控えはその窓が書いた物で、窓は
-      //    自分の保存していない変更を自分で確かめて訊く(穴②)。ここでも訊くと**同じ文書を 2 度訊く**
+      //    ⚠ **窓がいまその文書を出している**ときは訊かない ── 控えはその窓が書いた物で、窓は
+      //    自分の保存していない変更を自分で確かめて訊く(穴②)。ここでも訊くと**同じ文書を 2 度訊く**。
+      //    🔴 窓が生きていても**別の文書**を出しているなら訊く(O-2)── 前の session が落ちて残した別の文書の控えは、
+      //    窓は確かめない(窓が確かめるのは自分の中の未保存だけ)ので、訊かないと誰にも提案されない
       const lid = target.lid ?? '';
       if (
         deps.shadow !== undefined &&
         lid !== '' &&
-        !deps.officeWindow.isProbablyOpen() &&
+        !deps.officeWindow.showsToken(lid) &&
         deps.shadow.mayHave(lid)
       ) {
         // 同じノートの確認が出ている間の 2 回目の押しは、重ねずに畳む(1 つ目の答えが開く)
