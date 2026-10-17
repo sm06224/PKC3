@@ -10,12 +10,21 @@
  *   1 本にまとめると、題名の改名が本文の書込の衝突に巻き込まれる。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { renameOfferingUndo } from '@adapter/ui/render/rename-undo';
 
 /** 題名を変え、同じ字からファイル名も揃える(拡張子は効果層が元のまま足す)。 */
 export function renameAttachmentAndFile(dispatcher: Dispatcher, lid: string, title: string): void {
-  dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
-  // ⚠ 題名を先に撃つ ── 後ろの書換は更新済みの題名を持って本文を書く(古い題名で戻さない)
-  dispatcher.dispatch({ type: 'SET_ATTACHMENT_NAME', lid, name: title });
+  // 🔴 変わった回だけ画面の下に「元に戻す」を出す(#1657、依頼 45 の 2)
+  renameOfferingUndo(
+    dispatcher,
+    lid,
+    () => {
+      dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
+      // ⚠ 題名を先に撃つ ── 後ろの書換は更新済みの題名を持って本文を書く(古い題名で戻さない)
+      dispatcher.dispatch({ type: 'SET_ATTACHMENT_NAME', lid, name: title });
+    },
+    true,
+  );
 }
 
 /**
@@ -32,5 +41,7 @@ export function renameEntryFromRow(dispatcher: Dispatcher, lid: string, title: s
     renameAttachmentAndFile(dispatcher, lid, title);
     return;
   }
-  dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
+  renameOfferingUndo(dispatcher, lid, () => {
+    dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
+  });
 }

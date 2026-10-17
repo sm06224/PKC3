@@ -315,6 +315,8 @@ import { requestAppendFocus, requestBodyFocus, takeAppendFocus } from '@adapter/
 import { isTouchOnly } from '@adapter/ui/render/touch-device';
 import { currentTrashOffer, LINKED_FROM_SOME, offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
 import { offerDualMoveUndo, takeDualMoveUndo } from '@adapter/ui/render/dual-move-undo';
+import { resolveRelationTarget } from '@features/relation/target-label';
+import { renameOfferingUndo, takeRenameUndo } from '@adapter/ui/render/rename-undo';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
@@ -2325,20 +2327,17 @@ export interface BinderServices {
 
 function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
   const label = archetypeLabel(archetype);
-  let n = 0;
   const titles = new Set<string>();
-  for (const m of dispatcher.getState().entryMetas.values()) {
-    if (m.archetype === archetype) n += 1;
-    titles.add(m.title);
-  }
+  for (const m of dispatcher.getState().entryMetas.values()) titles.add(m.title);
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   /**
-   * 🔴 **既に在る題名を作らない**(#1087 の見直し 2026-10-13)。⚠ 番号は「同じ種類の件数 + 1」なので、
-   *   古いノートを 1 件消すと件数が減り、**今日作った既存の題名と同じ題名**が出た(つながりを足すときに
-   *   「題名を分けてください」で止まる)。形(`日付 種類 n`)は変えず、空いている番号まで進める。
+   * 🔴 **番号は「その日の通し番号」**(Gemini 裁定 = #1163 への依頼 45 の 4、#1657。推薦 A)。
+   *   直す前は「同じ種類のノートの件数 + 1」で、今日 1 件目でも「2026-10-13 ノート 347」のように大きな数が付いた
+   *   (何の番号か読めない)。いまは 1 から数え、**今日その種類で既に使われている番号は飛ばす**
+   *   (#1087 の「既に在る題名を作らない」── 古いノートを消したあとも、今日の既存の題名と重ならない)。
    */
-  let k = n + 1;
+  let k = 1;
   while (titles.has(`${date} ${label} ${k}`)) k += 1;
   return `${date} ${label} ${k}`;
 }
@@ -2997,6 +2996,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'undo-trash',
   // 🔴 2 ペインで移した直後の「元に戻す」── 居場所を書き戻すので `move-to-folder` と同じ門
   'undo-dual-move',
+  // 🔴 題名を変えた直後の「元に戻す」(#1657)── 題名を書き戻すので `rename-attachment` と同じ門
+  'undo-rename',
   // 🔴 取り込みの「取り消す」── ゴミ箱へ入れる `delete-entry` と同じ書込なので同じ門(#1087)
   'undo-import',
   'purge-trash',
@@ -4369,7 +4370,9 @@ async function commitPlaceInline(
       return;
     }
     if (mode === 'rename') {
-      dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
+      renameOfferingUndo(dispatcher, lid, () => {
+        dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
+      });
       if (dispatcher.getState().entryMetas.get(lid)?.title !== title) {
         refuse('いまは題名を直せません(取り込み中などです。終わってからもう一度お試しください)');
         return;
@@ -7405,33 +7408,35 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'つなぐ先の題名を入れてください' });
       return;
     }
-    const hits = [...state.entryMetas.values()].filter(
-      (m) => m.title === name && m.lid !== fromLid,
-    );
-    if (hits.length === 0) {
+    /**
+     * 🔴 **相手は欄の字から 1 件に決める**(#1657、依頼 45 の 3)。同じ題名が複数でも、候補の一覧で選んだ
+     *   「題名(フォルダの名前・更新日)」ならそのノートの 1 件に決まる(`resolveRelationTarget`)。
+     *   ⚠ どれかを勝手に選ばない ── 題名だけで 2 件以上に合うときは止まる。
+     */
+    const resolved = resolveRelationTarget(name, state.entryMetas, state.relations, fromLid);
+    if (resolved.kind === 'self') {
       // 🔴 いま開いているノート自身の題名は「見つかりません」ではなく、つなげない理由を言う(#1087)
-      if (state.entryMetas.get(fromLid)?.title === name) {
-        dispatcher.dispatch({ type: 'OP_FAILED', error: '自分自身にはつなげません' });
-        return;
-      }
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '自分自身にはつなげません' });
+      return;
+    }
+    if (resolved.kind === 'none') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error: `「${name}」というノートが見つかりません`,
       });
       return;
     }
-    if (hits.length > 1) {
-      // ⚠ 同じ題名が複数 ── **どれかを勝手に選ばない**(user の意図が決まらない)
+    if (resolved.kind === 'ambiguous') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `「${name}」が ${hits.length} 件あります。題名を分けてから足してください`,
+        error: `「${name}」が ${resolved.count} 件あります。候補の一覧からフォルダの名前つきの題名を選ぶか、題名を分けてから足してください`,
       });
       return;
     }
     const kind = kindEl?.value ?? '';
     if (!isRelationKind(kind) || kind === STRUCTURAL) return;
     // 🔴 同じ相手・同じ種類が既に在るときは、言う(欄は残す)。⚠ 判定は reducer と同じ 1 本(`hasSameRelation`)
-    if (hasSameRelation(state.relations, fromLid, hits[0]!.lid, kind)) {
+    if (hasSameRelation(state.relations, fromLid, resolved.lid, kind)) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '既に同じつながりがあります' });
       return;
     }
@@ -7439,7 +7444,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       type: 'ADD_RELATION',
       id: generateLid(),
       fromLid,
-      toLid: hits[0]!.lid,
+      toLid: resolved.lid,
       kind,
     });
     if (nameEl) nameEl.value = '';
@@ -8865,6 +8870,30 @@ const ACTIONS: Record<string, ActionHandler> = {
           ? `${String(back)} 件を元の場所に戻しました`
           : '戻せるものがありません(移した後に、別の場所へ動かしています)',
     });
+  },
+  /**
+   * 🔴 **題名を変えた直後の「元に戻す」**(Gemini 裁定 = #1163 への依頼 45 の 2、#1657)。口は `status-undo`(出し入れは `status-open.ts`)。
+   * ⚠ 新しい書込経路は作らない ── 変える前の題名へ向けた `RENAME_ENTRY_TITLE` を 1 手撃つ(添付はファイル名も揃える)。
+   *   変えた後にさらに題名を変えていたら戻さず、理由を言う。編集中などで戻せないときは**黙らない**(`undo-trash` と同じ断り)。
+   */
+  'undo-rename': (dispatcher) => {
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}戻してください` });
+      return;
+    }
+    const r = takeRenameUndo();
+    if (r === null) return;
+    if (dispatcher.getState().entryMetas.get(r.lid)?.title !== r.to) {
+      dispatcher.dispatch({
+        type: 'OP_NOTICE',
+        message: '戻せるものがありません(変えた後に、題名をもう一度変えています)',
+      });
+      return;
+    }
+    dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: r.lid, title: r.from });
+    if (r.withFile) dispatcher.dispatch({ type: 'SET_ATTACHMENT_NAME', lid: r.lid, name: r.from });
+    dispatcher.dispatch({ type: 'OP_NOTICE', message: `題名を「${r.from}」に戻しました` });
   },
   'delete-entry': (dispatcher, target, services, root) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
