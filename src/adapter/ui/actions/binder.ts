@@ -13343,9 +13343,10 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔴 **書き出したこと・書き出せなかったことを言う**(#1087 の見直し 2026-10-13)── 直す前は成功しても何も言わず、
      *   読めなかったときも黙って終わっていた。
      */
-    void read([lid])
-      .then((bodies) => {
-        const body = bodies.get(lid) ?? '';
+    // 🔴 書けずに控えへ回った節も含める(#1087 M1)
+    void appMessagePost
+      .withSpool(lid, async () => (await read([lid])).get(lid) ?? '')
+      .then((body) => {
         const today = dayStamp(new Date());
         const name = `${titleForMessageLid(lid)}-${today}.md`;
         downloadBlob(name, new Blob([body], { type: 'text/markdown' }));

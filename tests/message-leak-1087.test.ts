@@ -48,6 +48,20 @@ describe('2. 名前に 」 が入っている', () => {
     // 対照群:2 つの名前の間の字は残す
     expect(sanitizeMessageText('「A」から「B」へ移動しました')).toBe('「…」から「…」へ移動しました');
   });
+  it('🔴 名前の中に 」…「 が在る形でも、間の字を残さない(#1087 M6。釣り合って 2 つの名前に見える形)', () => {
+    for (const t of ['a」秘密「b', 'x」秘密「', '」秘密「']) {
+      expect(sanitizeMessageText(`「${t}」を作りました`), t).not.toContain('秘密');
+      const dq = t.replace(/」/g, '』').replace(/「/g, '『');
+      expect(sanitizeMessageText(`『${dq}』を作りました`), dq).not.toContain('秘密');
+      expect(sanitizeMessageText(`添付の取り込みに失敗しました(「${t}」): err`), t).not.toContain('秘密');
+    }
+    expect(sanitizeMessageText('「a」秘密「b」を作りました')).toBe('「…」を作りました');
+    // 対照群:前後の固定の字は残る / 間がつなぎの語だけの 2 つの名前は別々に潰れる(読める形を保つ)
+    expect(sanitizeMessageText('添付(「a」秘密「b」): 失敗')).toBe('添付(「…」): 失敗');
+    expect(sanitizeMessageText('「a」→「b」にしました')).toBe('「…」→「…」にしました');
+    // つなぎの語でない間は 1 つに潰れる(語の長さに依らない)
+    expect(sanitizeMessageText('「a」ひみつのたいとる「b」を作りました')).toBe('「…」を作りました');
+  });
   it('名前の中に目印の字が在っても、終わりが早まらない', () => {
     const out = sanitizeMessageText(`「${markName('前\u2061後ろ」の秘密')}」を開けませんでした`);
     expect(out).toBe('「…」を開けませんでした');
