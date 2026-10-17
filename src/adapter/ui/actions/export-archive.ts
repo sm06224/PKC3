@@ -496,10 +496,12 @@ export async function exportArchive(
     const notes = [...extraWarnings, ...out.warnings];
     deps.report(notes);
     progressShown = false; // ⚠ 次の「書き出しました」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)
+    // 🔴 **ファイル名を言う**(依頼 38-4 の裁定 B。#1643)── SQL の書き出しは名前を言っているのに、バックアップは
+    //   言わず、保存したファイルをブラウザのダウンロード欄から探すとき手掛かりが無かった
     deps.notify?.(
       notes.length > 0
-        ? `書き出しました: ${detail}(注意 ${notes.length} 件)`
-        : `書き出しました: ${detail}`,
+        ? `書き出しました: 「${name}」 ${detail}(注意 ${notes.length} 件)`
+        : `書き出しました: 「${name}」 ${detail}`,
     );
     return out.counts.entries;
   } catch (e) {

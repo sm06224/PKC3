@@ -91,7 +91,7 @@ export const COLLECTION_COMMANDS: readonly CollectionCommand[] = [
      * ⚠ 保存領域に問題があるときは、この操作が自動で読める分だけを集めて
      *   `.pkc3-part.zip` に切り替える(下の `db-corruption.ts` の断り文と同じ経路)。
      */
-    title: 'ノート・添付・つながり・履歴 を全部、元に戻せる形で保存します(.pkc3-full.zip)',
+    title: 'ノート・添付・つながり・履歴 を全部、あとで取り込み直せる形で保存します(.pkc3-full.zip)',
   },
 ] as const;
 

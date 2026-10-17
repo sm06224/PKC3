@@ -30,6 +30,7 @@ import {
 } from '../import/zip-reader';
 import { createWarnCollector, type WarnCollector } from './warn-cap';
 import { isTooLargeToRead } from '../import/too-large';
+import { relabeledInFileWarning, relabeledWarning } from '../import/relabel-warning';
 import { MAX_EMBED_TEXT_CHARS, notImportableArchiveMessage } from '../storage/image-export-limit';
 import { parseTagColorList, type TagColorEntry } from '../tag-color';
 
@@ -629,6 +630,8 @@ export function restoreArchive(
   //   ⚠ 旧 ID → 新 ID の対は出さない(内部の ID は user には直しようが無い)。
   //   文は PKC2 の取込(`pkc2-convert.ts`)と同じ。
   let relabeled = 0;
+  /** 🔴 いまのノートと ID が重なって付け替えた分の題名(#1643。ファイルの中の重なりは `relabeled` だけが数える) */
+  const clashTitles: string[] = [];
   const danglingTitles: string[] = [];
   const lidMap = new Map<string, string>();
   // ⚠ アーカイブ内の lid 重複(review H-3)は writer 側では起きない(H-1/H-2 を直した)が、手で組んだ /
@@ -637,7 +640,8 @@ export function restoreArchive(
     let lid = e.lid;
     if (lid === '' || taken.has(lid)) {
       const fresh = opts.genLid();
-      relabeled++;
+      if (e.lid !== '' && opts.existingLids.has(e.lid)) clashTitles.push(e.title);
+      else relabeled++;
       lid = fresh;
     }
     taken.add(lid);
@@ -717,7 +721,7 @@ export function restoreArchive(
     mime: mimeOf.get(key) ?? 'application/octet-stream',
   }));
 
-  if (relabeled > 0) warnings.push(`${relabeled} 件のノートは ID が重なっていたので付け直しました`);
+  for (const w of [relabeledWarning(clashTitles), relabeledInFileWarning(relabeled)]) if (w !== null) warnings.push(w);
   if (danglingTitles.length > 0) {
     const only = danglingTitles[0]!;
     warnings.push(

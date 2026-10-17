@@ -3213,8 +3213,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        * 順番に出る(CLAUDE.md §7「同じ判定が複数の場所にある」と同じ向き ──
        * 確認の器を 2 本目作らない)。
        */
-      confirmArchiveImport: (preview) =>
-        ask(formatArchivePreviewMessage(preview), { okLabel: '取り込む', cancelLabel: 'やめる' }),
+      confirmArchiveImport: (preview, fileName) =>
+        ask(formatArchivePreviewMessage(preview, fileName), { okLabel: '取り込む', cancelLabel: 'やめる' }),
       /**
        * 🔴 **PKC3 入り HTML の中身を読む口**(#1416)。⚠ 渡すだけ ── 一時の DB で読むのも、
        * いまのコレクションに触れないのも worker が持つ(判断を `main.ts` に置かない)。

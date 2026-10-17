@@ -468,6 +468,9 @@ describe('exportArchive ── 添付が多いときは進み具合(添付 N / M
     for (const m of progress) expect(Number(PROGRESS.exec(m)![1])).toBeLessThan(45);
     // 結果の知らせが最後(進み具合で上書きされたまま残らない)
     expect(notices.at(-1)).toMatch(/^書き出しました: /);
+    // 🔴 保存したファイルの名前を言う(#1643 依頼 38-4)── ダウンロード欄から探す手掛かり
+    expect(downloaded[0]!.name, '前提: 名前がある').toMatch(/\.pkc3-full\.zip$/);
+    expect(notices.at(-1)).toContain(`「${downloaded[0]!.name}」`);
     expect(downloaded).toHaveLength(1);
   });
 

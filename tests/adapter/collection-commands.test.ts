@@ -179,3 +179,12 @@ describe('何も選んでいないときの閲覧用 HTML(#1087 の見直し 202
     expect(html?.title).toContain('全部のノート');
   });
 });
+
+describe('バックアップのボタンの説明(#1643 依頼 38-2)', () => {
+  it('🔴 「元に戻せる形」と言わない ── 取り込みは足すので、置き換わると読まれる。「あとで取り込み直せる形」と言う', () => {
+    const backup = COLLECTION_COMMANDS.find((c) => c.action === 'export-archive');
+    expect(backup, '前提: バックアップの口が在る').toBeTruthy();
+    expect(backup!.title).not.toContain('元に戻せる');
+    expect(backup!.title).toContain('あとで取り込み直せる形で保存します');
+  });
+});

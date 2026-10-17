@@ -12,6 +12,7 @@ import {
 import {
   peekArchivePreview,
   formatArchivePreviewMessage,
+  archiveSourceLine,
 } from '../../src/features/import/archive-preview';
 
 const enc = new TextEncoder();
@@ -87,6 +88,7 @@ describe('peekArchivePreview ── 3 つの file 型 + 旧形式', () => {
       assetCount: 1,
       hasRelations: true,
       hasRevisions: true,
+      exportedAt: NOW,
     });
   });
 
@@ -103,6 +105,7 @@ describe('peekArchivePreview ── 3 つの file 型 + 旧形式', () => {
       assetCount: 1,
       hasRelations: false,
       hasRevisions: false,
+      exportedAt: NOW,
     });
   });
 
@@ -115,6 +118,7 @@ describe('peekArchivePreview ── 3 つの file 型 + 旧形式', () => {
       assetCount: 0,
       hasRelations: false,
       hasRevisions: false,
+      exportedAt: NOW,
     });
   });
 
@@ -135,6 +139,7 @@ describe('peekArchivePreview ── 3 つの file 型 + 旧形式', () => {
       assetCount: 0,
       hasRelations: true,
       hasRevisions: false,
+      exportedAt: NOW,
     });
   });
 
@@ -155,12 +160,38 @@ describe('formatArchivePreviewMessage', () => {
       assetCount: 2,
       hasRelations: true,
       hasRevisions: false,
+      exportedAt: NOW,
     });
     expect(msg).toContain('ノート 3 件');
     expect(msg).toContain('添付 2 件');
     expect(msg).toContain('つながり 有');
     expect(msg).toContain('履歴 無');
     // 🔑 置き換えではなく足すことを、押す前に言う(#1087)
-    expect(msg).toContain('いまのノートに足します');
+    expect(msg).toContain('いまのノートはそのまま残り、これが追加されます。取り込んだ後でも取り消せます');
+  });
+
+  it('🔴 窓の頭に、ファイル名と取った日時を出す(#1643 依頼 38-3)', () => {
+    const msg = formatArchivePreviewMessage(
+      { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false, exportedAt: '2026-10-10T09:20:00.000Z' },
+      'メモ-20261010.pkc3-full.zip',
+    );
+    const head = msg.split('\n')[0]!;
+    // 時刻は端末の時刻 ── 期待値も同じ端末の Date で組む(環境の時差に依らない)
+    const d = new Date('2026-10-10T09:20:00.000Z');
+    const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    expect(head).toBe(`メモ-20261010.pkc3-full.zip(${d.getMonth() + 1}月${d.getDate()}日 ${hm} に取りました)`);
+    expect(msg.split('\n')[1]).toBe('このバックアップには、次が入っています。');
+  });
+
+  it('名前だけ・日時だけ・どちらも無い、を壊さずに言う(読めない日時は黙って省く)', () => {
+    const base = { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false };
+    expect(archiveSourceLine('a.zip', null)).toBe('a.zip');
+    expect(archiveSourceLine(undefined, null)).toBeNull();
+    expect(archiveSourceLine('', 'でたらめ')).toBeNull();
+    expect(archiveSourceLine('a.zip', 'でたらめ')).toBe('a.zip');
+    expect(archiveSourceLine(undefined, '2026-10-10T09:20:00.000Z')).toMatch(/月.*日 \d\d:\d\d に取りました$/);
+    expect(formatArchivePreviewMessage({ ...base, exportedAt: null }).split('\n')[0]).toBe(
+      'このバックアップには、次が入っています。',
+    );
   });
 });

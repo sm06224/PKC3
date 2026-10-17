@@ -172,7 +172,8 @@ export interface ImportDeps {
    * 🔴 **取り込んだノートを画面に出す**(2026-08-05、user 報告
    * 「開いたら何も起きずに終わる」)。md 経路(`import-markdown.ts`)が使う。
    * ⚠ PKC2 の container 取込では**呼ばない** ── 何十件も入るので、
-   *    どれを開くのが正しいか決められない。1 ファイル = 1 entry の md だけ。
+   *    どれを開くのが正しいか決められない。1 ファイル = 1 entry の md と、
+   *    **ノートが 1 件だけの PKC3 のバックアップ**(#1643)。
    */
   focus?(lid: string): void;
   /**
@@ -200,7 +201,7 @@ export interface ImportDeps {
    * @returns `false` なら**取込を始めずに終える**(OP_FAILED は出さない ──
    *   やめるのは失敗ではない)
    */
-  confirmArchiveImport?(preview: ArchivePreview): Promise<boolean>;
+  confirmArchiveImport?(preview: ArchivePreview, fileName?: string): Promise<boolean>;
   /**
    * 🔴 **PKC3 入り HTML(`.pkc3.html`)の中身を読む口**(#1416)。⚠ **省略可** ── 渡さない配線では
    * PKC3 入り HTML を断る(理由を言う)。渡すと、バックアップ(`.pkc3-full.zip`)の形に直して
@@ -507,7 +508,7 @@ async function runImport(
         // ごく古い manifest)のときは**確認せず素通し**する(壊すより通す)。
         const preview = portable !== null ? archivePreviewOf(portable) : await peekArchivePreview(file);
         if (preview && deps.confirmArchiveImport) {
-          const proceed = await deps.confirmArchiveImport(preview);
+          const proceed = await deps.confirmArchiveImport(preview, file.name);
           if (!proceed) {
             // やめるのは失敗ではない ── OP_FAILED は出さない。⚠ 進行中の字は消す(もう進まない)
             clearProgress();
@@ -942,6 +943,10 @@ async function runImport(
      *   面の操作は `report` の中で `pending()` から組む。
      */
     deps.imported?.(rows.map((r) => r.lid), { tagColors: colorsAdded });
+    // 🔴 **1 件のノートのバックアップは、そのノートを開く**(依頼 38-1 の裁定 B。#1643)── 1 件だけ渡したメモが
+    //   どこに入ったか、画面から分からなかった。⚠ 2 件以上は開かない(どれを開くのが正しいか決められない)。
+    //   PKC2 の書き出しは対象外(何十件も入る)── 開くのは PKC3 のバックアップ(`restored`)だけ
+    if (restored !== null && rows.length === 1) deps.focus?.(rows[0]!.lid);
     // ⚠ **全件を出す**(review H-2)。1 行の status には件数だけを載せ、中身は
     // 閉じるまで残る面へ ── notes[0] だけ出して残りを捨てるのは「可視化」ではない
     deps.report?.(notes);
