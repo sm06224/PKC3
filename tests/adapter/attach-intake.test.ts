@@ -765,7 +765,7 @@ describe('attachFiles (P4a intake)', () => {
     const cap = mk();
     expect(await attachOne(cap.d, cap.deps, item, undefined, undefined, true)).toBeNull();
     expect(cap.d.getState().error, '収録なのに押し直しを促している').not.toContain('もう一度お試しください');
-    expect(cap.d.getState().error, '残っていない事実を言っていない').toContain('この収録は残っていません');
+    expect(cap.d.getState().error, '残っていない事実を言っていない').toContain('この録音・録画は残っていません');
     expect(cap.d.getState().error, '空きの作り方を言っていない').toContain('「使われていない添付を消す」');
 
     const att = mk();

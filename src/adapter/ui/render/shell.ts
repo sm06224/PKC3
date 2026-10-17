@@ -704,7 +704,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   menuAttach.setAttribute('role', 'menuitem');
   menu.append(menuAttach);
   /**
-   * 🔴 **録音・画面収録**(#413。user 要望 2026-07-16
+   * 🔴 **録音・画面録画**(#413。user 要望 2026-07-16
    * 「録音と画面収録を…これで、会議メモをうまく残せるはず」)。
    *
    * ⚠ **「添付」の隣に置く** ── 押す動機が同じ(いま何かを残したい)なので、
@@ -716,14 +716,14 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const rec = iconButton('start-audio-capture', '録音');
   markBarTile(rec);
   rec.setAttribute('data-pkc-field', 'start-audio-capture');
-  rec.title = 'マイクで録音して、いま開いているノートに入れます';
+  rec.title = 'マイクで録音して、録り始めたノートに入れます';
   const menuRec = iconButton('start-audio-capture', '録音する');
   menuRec.setAttribute('role', 'menuitem');
   menu.append(menuRec);
   const screen = iconButton('start-screen-capture', '画面録画');
   markBarTile(screen);
   screen.setAttribute('data-pkc-field', 'start-screen-capture');
-  screen.title = '画面を録画して、いま開いているノートに入れます';
+  screen.title = '画面を録画して、録り始めたノートに入れます';
   const menuScreen = iconButton('start-screen-capture', '画面を録画する');
   menuScreen.setAttribute('role', 'menuitem');
   menu.append(menuScreen);
@@ -1203,12 +1203,12 @@ export function buildShell(root: HTMLElement): ShellRegions {
   capture.hidden = true;
   const captureText = document.createElement('span');
   captureText.setAttribute('data-pkc-field', 'capture-status');
-  const stopBtn = iconButton('stop-capture', '収録を止める');
+  const stopBtn = iconButton('stop-capture', '録音・録画を止める');
   stopBtn.setAttribute('data-pkc-field', 'stop-capture');
-  stopBtn.title = '録音・画面録画を止めて、いま開いているノートに入れます';
-  const dropBtn = iconButton('discard-capture', '収録を残さずにやめる');
+  stopBtn.title = '録音・画面録画を止めて、録り始めたノートに入れます';
+  const dropBtn = iconButton('discard-capture', '録音・録画を残さずにやめる');
   dropBtn.setAttribute('data-pkc-field', 'discard-capture');
-  dropBtn.title = '収録を残さずにやめます';
+  dropBtn.title = '録音・録画を残さずにやめます';
   capture.append(captureText, stopBtn, dropBtn);
 
   /**

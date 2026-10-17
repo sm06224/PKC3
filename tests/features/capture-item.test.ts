@@ -105,11 +105,13 @@ describe('録ったものの見分け(#683 段①)', () => {
     it('🔴 収録の名前なら収録の呼び名、そうでなければ 音 / 動画', () => {
       const items = captureItemsFrom([
         src('a', 'x', attach('録音-2026-09-09-030102.webm', 'audio/webm')),
-        src('b', 'y', attach('画面収録-2026-09-09-030102.webm', 'video/webm')),
+        src('b', 'y', attach('画面録画-2026-09-09-030102.webm', 'video/webm')),
         src('c', 'z', attach('会議.m4a', 'audio/mp4')),
         src('d', 'w', attach('旅行.mp4', 'video/mp4')),
+        // 呼び名を変える前に録った物(名前が旧いまま)も、同じ呼び名で出る
+        src('e', 'v', attach('画面収録-2026-09-09-030102.webm', 'video/webm')),
       ]);
-      expect(items.map(captureItemLabel)).toEqual(['録音', '画面収録', '音', '動画']);
+      expect(items.map(captureItemLabel)).toEqual(['録音', '画面録画', '音', '動画', '画面録画']);
     });
   });
 

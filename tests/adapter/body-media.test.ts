@@ -3,7 +3,7 @@
  * 🔴 **本文に書いた音・動画が、その場で聞ける / 見られる**(#413 段②)。
  *
  * > user 要望 2026-07-16(PKC2 #922):
- * > 「録音と画面収録を**マルチメディアで埋め込め**るようにする」
+ * > 「録音と画面録画を**マルチメディアで埋め込め**るようにする」
  *
  * ## この test が守る主張
  *
@@ -154,7 +154,7 @@ describe('本文の音・動画は、その場で聞ける(#413 段②)', () => 
 
   it('🔴 動画は動画の器になる', async () => {
     const { lender } = lenderOf({ k1: 'video/webm' });
-    const { d, qa } = setup({ e1: '[画面収録.webm](asset:k1)', e2: 'plain' }, lender);
+    const { d, qa } = setup({ e1: '[画面録画.webm](asset:k1)', e2: 'plain' }, lender);
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
     await tick();
     expect(qa(MEDIA)[0]?.tagName, '動画なのに動画の器ではない').toBe('VIDEO');

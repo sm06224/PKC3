@@ -1,5 +1,5 @@
 /**
- * 🔴 **録音・画面収録の段取り**(#413)。
+ * 🔴 **録音・画面録画の段取り**(#413)。
  *
  * > user 要望 2026-07-16(PKC2 #922):
  * > 「**録音と画面収録をマルチメディアで埋め込めるようにする / これで、
@@ -24,7 +24,7 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { StatusOptions } from '@adapter/ui/render/status-notice';
 import { humanBytes } from '@features/human-bytes';
-import { captureBarLine, captureFileName, CAPTURE_LABEL } from '@features/asset/capture-text';
+import { captureBarLine, captureFileName, capturedLengthText, CAPTURE_LABEL } from '@features/asset/capture-text';
 import { elapsedText } from '@features/elapsed-text';
 import { noteToPutInto, putAssetIntoNote } from './asset-into-note';
 import type { EditLockPort } from '@adapter/state/edited-elsewhere';
@@ -94,15 +94,29 @@ export interface CaptureServiceDeps {
   readonly onActive?: (active: boolean) => void;
   /** 🔴 別のタブ・窓が編集中のノートへ入れないための問い合わせ口(#1087)。省略 = 問い合わせない。 */
   readonly lock?: EditLockPort;
+  /**
+   * 🔴 **1 分を超えた録音・録画を残さずにやめるとき、確認する口**(#1163 依頼 50-3 / 90-3)。
+   * ⚠ 省略 = 聞かずにやめる(これまでどおり)。`true` = やめてよい。
+   */
+  readonly confirm?: (
+    message: string,
+    opts: { okLabel: string; cancelLabel: string; danger: boolean },
+  ) => Promise<boolean>;
 }
+
+/** これを超えて録った物を捨てるときは確認する(60 秒ちょうどは聞かない)。 */
+export const DISCARD_CONFIRM_OVER_MS = 60_000;
 
 export interface CaptureService {
   /** 始める。⚠ 断るときは**理由を出す**(黙って no-op にしない)。 */
   start(kind: CaptureKind): Promise<void>;
   /** 止めて、添付にして、本文へ参照を入れる。 */
   stop(): void;
-  /** 捨てる(添付にしない / 本文も触らない)。 */
-  discard(): void;
+  /**
+   * 捨てる(添付にしない / 本文も触らない)。
+   * ⚠ 1 分を超えていたら確認を挟む ── 答えを待つので `Promise`(聞かない回は即終わる)。
+   */
+  discard(): Promise<void>;
   /** 帯に出す 1 行(収録していなければ `null`)。 */
   line(): string | null;
 }
@@ -127,6 +141,10 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
    *   取り込んだ時刻で名乗らせると、3 本が一覧の**別々の場所**に並ぶ。
    */
   let startedAt: Date | null = null;
+  /** 確認の答えを待っている最中(2 回押されても 1 つしか出さない)。 */
+  let confirmingDiscard = false;
+  /** 🔴 **録り始めたときに開いていたノート**(`null` = 何も開いていなかった)。入れ先になる。 */
+  let startedLid: string | null = null;
   /**
    * 🔴 **この収録の印**(#668 C)。⚠ 分かれた回は本文に N 行入るので、
    *   「元に戻す」1 回で**まとめて**消えないと、user が N 回押すことになる。
@@ -190,6 +208,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     closing = false;
     // ⚠ **次の収録へ持ち越さない**(名前の時刻・印は 1 回ぶんの物である)
     startedAt = null;
+    startedLid = null;
     batch = null;
     paint();
     syncActive();
@@ -213,7 +232,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
      *   「短くなった理由」を必ず字で出す。
      */
     if (reason === 'failed')
-      return `${CAPTURE_LABEL[kind]}を続けられなくなったので止めました(ブラウザが収録を止めました)。`;
+      return `${CAPTURE_LABEL[kind]}を続けられなくなったので止めました(ブラウザが止めました)。`;
     if (reason === 'shared-ended')
       /**
        * ⚠ **音でも来る** ── マイクが抜かれた / 許可が取り消されたときも
@@ -221,7 +240,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
        *   録音していた user は**別の話をされている**と読む。
        */
       return kind === 'screen'
-        ? '共有が終わったので画面収録を止めました。'
+        ? '共有が終わったので画面録画を止めました。'
         : 'マイクが使えなくなったので録音を止めました。';
     return '';
   };
@@ -241,8 +260,22 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     part: number | null,
     at: Date,
     tag: string | null,
+    home: string | null,
   ): Promise<boolean> => {
-    const into = noteToPutInto(deps.dispatcher);
+    /**
+     * 🔴 **入れ先は「録り始めたノート」**(#1163 依頼 90-1 / 148 ② / 353 A)。
+     * ⚠ 直す前は「止めた時点で開いているノート」で、録っている間に別のノートへ移ると
+     *   **録音がそちらへ入っていた**。始めたノートが消えている / ゴミ箱なら(`entryMetas` に無い)
+     *   これまでの入れ先(いま開いているノート)へ倒し、**どこに入ったかを一言いう**。
+     * ⚠ 始めたノートがいま開いているノートと違うなら、画面は動かさない(`selectBack`)ので、
+     *   行き先は名前で言う(`intoTitle`)。
+     */
+    const st = deps.dispatcher.getState();
+    const homeMeta = home === null ? undefined : st.entryMetas.get(home);
+    const goHome = home !== null && homeMeta !== undefined;
+    const into = noteToPutInto(deps.dispatcher, goHome ? home : undefined);
+    const away = goHome && home !== st.selectedLid;
+    if (home !== null && !goHome) why = `${why}${CAPTURE_LABEL[kind]}を始めたノートが見つからないので、`;
     /**
      * ⚠ **`;codecs=opus` を落とす** ── 引数付きのまま持ち回ると、拡張子の逆引き
      *   (`EXT_MIME`)に当たらず書き出しの名前が `.bin` になる(#205 と同じ形)。
@@ -271,6 +304,8 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       ...(tag === null ? {} : { batch: tag }),
       // 🔴 別のタブ・窓が編集中のノートへは入れない(#1087)
       ...(deps.lock === undefined ? {} : { lock: deps.lock }),
+      // 🔴 始めたノートへ入れた回は、いま見ているノートへ画面を返す(開き直さない)
+      ...(away ? { selectBack: st.selectedLid, intoTitle: homeMeta.title } : {}),
     });
     /**
      * 🔑 **録ったものの一覧を集め直す**(2026-10-13 の見直し)── 一覧はタブを開いたときに 1 度集めるだけなので、
@@ -293,6 +328,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     part: number | null,
     at: Date,
     tag: string | null,
+    home: string | null,
   ): void => {
     // 🔴 預かっている間は閉じると消える(#1087)── 取り込みが終わるまで数える
     unsettled++;
@@ -300,13 +336,13 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     queue.push(async () => {
       try {
         // 🔴 預かった 1 本も、入らなければ録るのをやめる(下の `stopNoRoom` と同じ理由)
-        if (!(await ingest(blob, kind, why, part, at, tag)) && part !== null) stopNoRoom(kind);
+        if (!(await ingest(blob, kind, why, part, at, tag, home)) && part !== null) stopNoRoom(kind);
       } finally {
         unsettled--;
         syncActive();
       }
     });
-    deps.notify(`${why}${CAPTURE_LABEL[kind]}ファイルは、編集中なのでまだ入れていません。編集を終えると、開いているノートに入れます`);
+    deps.notify(`${why}${CAPTURE_LABEL[kind]}ファイルは、編集中なのでまだ入れていません。編集を終えると、${home === null ? '開いているノート' : `${CAPTURE_LABEL[kind]}を始めたノート`}に入れます`);
   };
 
   /**
@@ -321,17 +357,18 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     part: number | null,
     at: Date,
     tag: string | null,
+    home: string | null,
   ): Promise<'in' | 'held' | 'failed'> => {
     // 🔴 **編集中は添付が作れない** ── 捨てずに預かる
     if (deps.dispatcher.getState().phase !== 'ready') {
-      hold(blob, kind, why, part, at, tag);
+      hold(blob, kind, why, part, at, tag, home);
       return 'held';
     }
     // 🔴 取り込みの最中も、着くまでは閉じると消える(#1087)
     unsettled++;
     syncActive();
     try {
-      return (await ingest(blob, kind, why, part, at, tag)) ? 'in' : 'failed';
+      return (await ingest(blob, kind, why, part, at, tag, home)) ? 'in' : 'failed';
     } finally {
       unsettled--;
       syncActive();
@@ -387,6 +424,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
      */
     const before = h.parts();
     const at = startedAt ?? now();
+    const home = startedLid;
     // 🔑 印は**分かれた回だけ** ── 1 本なら「元に戻す」は元から 1 回である
     const tag = before === 0 ? null : batch;
     /**
@@ -395,7 +433,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
      */
     unsettled++;
     try {
-      await finishIn(h, why, kind, before, at, tag);
+      await finishIn(h, why, kind, before, at, tag, home);
     } finally {
       unsettled--;
       syncActive();
@@ -409,6 +447,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     before: number,
     at: Date,
     tag: string | null,
+    home: string | null,
   ): Promise<void> => {
     const blob = await h.stop();
     close();
@@ -426,7 +465,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       fail(`${why}${CAPTURE_LABEL[kind]}できませんでした(1 バイトも録れていません)`);
       return;
     }
-    await deliver(blob, kind, why, before === 0 ? null : before + 1, at, tag);
+    await deliver(blob, kind, why, before === 0 ? null : before + 1, at, tag, home);
   };
 
   return {
@@ -434,11 +473,16 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     start: async (kind) => {
       // ⚠ **同時に 1 本だけ**(2 本目は理由を出して断る)
       if (handle !== null || starting) {
-        fail('すでに収録しています(先に止めてください)');
+        fail('すでに録っています(先に止めてください)');
         return;
       }
       starting = true;
       const at = now();
+      /**
+       * 🔴 **録り始めたときに開いていたノート**(#1163 依頼 90-1)。⚠ 許可を待つ間(`await`)に
+       *   選び直されても、押した時点のものを覚える。
+       */
+      const home = deps.dispatcher.getState().selectedLid;
       /**
        * 🔑 印は**始めるときに 1 つ**作る ── 切れた本ごとに作ると、
        *   「元に戻す」がまとまらない(#668 C の印は 1 回ぶんの取り込みを指す)。
@@ -453,7 +497,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
            *   まだ終わっていないので、言うことは「入れた」だけである。
            */
           onPart: (blob, part) => {
-            void deliver(blob, kind, '', part, at, tag).then((r) => {
+            void deliver(blob, kind, '', part, at, tag, home).then((r) => {
               // 🔴 入らなかったら録り続けない(次の 1 本も入らない)
               if (r === 'failed') stopNoRoom(kind);
             });
@@ -471,6 +515,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
         starting = false;
       }
       startedAt = at;
+      startedLid = home;
       batch = tag;
       untick = tick(paint);
       paint();
@@ -486,9 +531,28 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
        */
       void finish('stopped');
     },
-    discard: () => {
+    discard: async () => {
       const h = handle;
-      if (h === null) return;
+      if (h === null || confirmingDiscard) return;
+      /**
+       * 🔴 **1 分を超えて録った物は、捨てる前に確認する**(#1163 依頼 50-3 / 90-3)。
+       * ⚠ 捨てると取り消せない。60 秒ちょうどまでは今までどおり聞かない(短い録り直しを重くしない)。
+       * ⚠ 答えを待つ間に自動停止などで終わっていたら(別の録音に替わっていても)捨てない。
+       */
+      const ms = h.elapsedMs();
+      if (deps.confirm !== undefined && ms > DISCARD_CONFIRM_OVER_MS) {
+        confirmingDiscard = true;
+        let yes: boolean;
+        try {
+          yes = await deps.confirm(
+            `${capturedLengthText(ms)}の${CAPTURE_LABEL[h.kind]}を残さずにやめますか。やめると取り消せません。`,
+            { okLabel: '残さずにやめる', cancelLabel: '続ける', danger: true },
+          );
+        } finally {
+          confirmingDiscard = false;
+        }
+        if (!yes || handle !== h || closing) return;
+      }
       /**
        * ⚠ **門は 1 つだけ** ── 捨てた回に片付け(添付 / 本文)へ進まないのは
        *   `onEnd` の `reason !== 'discarded'` である。ここで `closing` も立てると

@@ -1071,7 +1071,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '録音する',
     contexts: ['global'],
     defaults: [],
-    note: 'マイクで録音して、いま開いているノートに入れます(ノートを開いていないときは、呼ぶとその理由が出ます)',
+    note: 'マイクで録音して、録り始めたノートに入れます(ノートを開いていないときは、呼ぶとその理由が出ます)',
     alias: '録音 マイク 音声 収録',
   },
   {
@@ -1079,7 +1079,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '画面を録画する',
     contexts: ['global'],
     defaults: [],
-    note: '画面を録画して、いま開いているノートに入れます(ノートを開いていないときは、呼ぶとその理由が出ます)',
+    note: '画面を録画して、録り始めたノートに入れます(ノートを開いていないときは、呼ぶとその理由が出ます)',
     alias: '録画 画面 収録 キャプチャ 動画',
   },
   {
@@ -1092,10 +1092,10 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'stop-capture',
-    label: '収録を止める',
+    label: '録音・録画を止める',
     contexts: ['global'],
     defaults: [],
-    note: '録音・録画を止めて、いま開いているノートに入れます(録音・録画の最中だけ効きます)',
+    note: '録音・録画を止めて、録り始めたノートに入れます(録音・録画の最中だけ効きます)',
     alias: '録音 録画 収録 止める 停止 ストップ',
   },
   {

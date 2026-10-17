@@ -77,7 +77,7 @@ export type IconName = keyof typeof PKC_SYMBOLS;
  */
 export type IconTone =
   | 'create' // 作る(足す・書く・確定する)
-  | 'capture' // 録る(録音・画面収録・計る)
+  | 'capture' // 録る(録音・画面録画・計る)
   | 'io' // 取り込む・保存(入出力・書き出し・添付)
   | 'find' // 探す・集計(検索・履歴・グラフ)
   | 'system' // システム(設定・鍵・翻訳)

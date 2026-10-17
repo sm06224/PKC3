@@ -30,7 +30,7 @@ export const CAPTURE_MIME_EXT: Readonly<Record<string, string>> = {
 /** 画面に出す呼び名。⚠ **1 か所**(名前・帯・断り文で綴りを分けない)。 */
 export const CAPTURE_LABEL: Readonly<Record<CaptureTextKind, string>> = {
   audio: '録音',
-  screen: '画面収録',
+  screen: '画面録画',
 };
 
 /**
@@ -82,4 +82,21 @@ export function captureBarLine(
 ): string {
   const nth = partNo > 1 ? `・${partNo} 本目` : '';
   return `${CAPTURE_LABEL[kind]}中 ${elapsedText(elapsedMs)}(約 ${bytes}${nth}・残り ${elapsedText(remainingMs)})`;
+}
+
+/**
+ * 録った長さを文で言う形(`1 分 5 秒` / `1 時間 2 分 3 秒`)。破棄の確認に使う。
+ * ⚠ 帯の `1:02:03` とは別の形 ── 帯は時計の見た目、こちらは文の中の長さ(タイマーの帯と同じ言い方)。
+ * ⚠ 秒は切り捨て(61.9 秒は `1 分 1 秒`)。0 の位は出さない(ちょうど 2 分は `2 分`)。
+ */
+export function capturedLengthText(ms: number): string {
+  const all = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(all / 3600);
+  const m = Math.floor((all % 3600) / 60);
+  const s = all % 60;
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h} 時間`);
+  if (m > 0) parts.push(`${m} 分`);
+  if (s > 0 || parts.length === 0) parts.push(`${s} 秒`);
+  return parts.join(' ');
 }

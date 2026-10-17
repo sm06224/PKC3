@@ -810,8 +810,8 @@ describe('⋯ と左の列の等値(次に足した人が気づく)', () => {
   it('🔴 左の列の 4 つのボタンの説明が、⋯ の説明と対で管理されている', () => {
     const KNOWN: ReadonlyArray<readonly [string, string]> = [
       ['attach-file', 'a6636dfe'],
-      ['start-audio-capture', '482a19bc'],
-      ['start-screen-capture', '166e461a'],
+      ['start-audio-capture', 'f73763bc'],
+      ['start-screen-capture', '6dc722b5'],
       ['start-timer', 'ef2332cc'],
     ];
     // ⚠ 空振り防止 ── 道具が増減したまま「全部一致した」と言わない

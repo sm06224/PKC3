@@ -31,7 +31,7 @@ function body(name: string, mime: string, key: string | null = 'k-1'): string {
 const ITEMS = (): CaptureItem[] =>
   captureItemsFrom([
     { lid: 'a', title: 'a', body: body('録音-2026-09-09-030102.webm', 'audio/webm') },
-    { lid: 'b', title: 'b', body: body('画面収録-2026-09-09-030102.webm', 'video/webm', 'k-2') },
+    { lid: 'b', title: 'b', body: body('画面録画-2026-09-09-030102.webm', 'video/webm', 'k-2') },
   ]);
 
 /** 借りる口の偽物。⚠ **返した回数を数える**(返し忘れを見るのがここの仕事)。 */
@@ -242,7 +242,7 @@ describe('その場で聞く ── 借りと返し(#683 段①)', () => {
     p.paint({ capturePlayingLid: 'a' });
     await Promise.resolve();
     await Promise.resolve();
-    p.paint({ filterQuery: '画面収録' });
+    p.paint({ filterQuery: '画面録画' });
     expect(a.disposed, '画面から消えたのに鳴ったままである').toEqual(['k-1']);
   });
 
@@ -636,7 +636,7 @@ describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => 
     expect(mark()?.disabled, '走っている間に印を打ち直せる').toBe(true);
   });
 
-  it('🔴 画面収録(VP8 の webm)にも、音と同じ押し所が出る ── 字は「動画」', async () => {
+  it('🔴 画面録画(VP8 の webm)にも、音と同じ押し所が出る ── 字は「動画」', async () => {
     const host = await paneReady(playing('b'));
     expect(field(host, 'b', 'capture-trim-start'), '切れる動画に押し所が出ていない').not.toBeNull();
     expect(field(host, 'b', 'capture-trim-end')).not.toBeNull();
@@ -652,7 +652,7 @@ describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => 
 
   it('🔴 切れない形の動画(VP9 / mp4)は、押し所を出さず理由を 1 行(動画の字)', async () => {
     for (const mime of ['video/webm;codecs=vp9,opus', 'video/mp4']) {
-      const items = captureItemsFrom([{ lid: 'v', title: 'v', body: body('画面収録.webm', mime) }]);
+      const items = captureItemsFrom([{ lid: 'v', title: 'v', body: body('画面録画.webm', mime) }]);
       const host = await paneReady({ captureItems: items, capturePlayingLid: 'v' });
       expect(field(host, 'v', 'capture-trim-start'), `${mime}: 切れないのに押し所が出ている`).toBeNull();
       expect(field(host, 'v', 'capture-trim-note')?.textContent).toBe('この形の動画はまだ切り出せません。');

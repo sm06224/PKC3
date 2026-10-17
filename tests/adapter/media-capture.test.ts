@@ -1,5 +1,5 @@
 /**
- * 🔴 **録音・画面収録**(#413)。
+ * 🔴 **録音・画面録画**(#413)。
  *
  * 守る主張:
  * 1. 🔴 **bytes を base64 にしない / heap に貯めない** ── PKC2 が 100MB 級で
@@ -446,7 +446,7 @@ describe('🔴 黙って no-op にしない(#413)', () => {
         const e = await startCapture(kind, d, { partBytes: 1, maxMs: HOURS12 }).catch((x: Error) => x);
         const text = (e as Error).message;
         expect(text, `${kind}/${name}: 例外名が画面に出ている`).not.toContain('Error');
-        expect(text, `${kind}/${name}: 汎用の字のまま`).not.toContain('収録を始められませんでした');
+        expect(text, `${kind}/${name}: 汎用の字のまま`).not.toContain('録音・録画を始められませんでした');
         seen.add(text);
       }
       expect(seen.size, `${kind}: 理由が使い回されている`).toBe(names.length);
@@ -462,12 +462,12 @@ describe('🔴 黙って no-op にしない(#413)', () => {
     expect(captureStartFailedText('screen', 'NotAllowedError', '')).toContain('アドレスバーの右端で画面の共有を許可してください');
   });
 
-  it('⚠ 知らない名前は「収録を始められませんでした」+ 名前を括弧で残す', async () => {
+  it('⚠ 知らない名前は「録音・録画を始められませんでした」+ 名前を括弧で残す', async () => {
     const err = Object.assign(new Error('x'), { name: 'WeirdError' });
     const { d } = deps({ getUserMedia: () => Promise.reject(err) });
-    await expect(startCapture('audio', d, { partBytes: 1, maxMs: HOURS12 })).rejects.toThrow('収録を始められませんでした(WeirdError)');
+    await expect(startCapture('audio', d, { partBytes: 1, maxMs: HOURS12 })).rejects.toThrow('録音・録画を始められませんでした(WeirdError)');
     // 名前も無ければ message
-    expect(captureStartFailedText('audio', '', 'boom')).toBe('収録を始められませんでした(boom)');
+    expect(captureStartFailedText('audio', '', 'boom')).toBe('録音・録画を始められませんでした(boom)');
   });
 
   it('🔴 対応していない環境では、そう言う', async () => {
@@ -652,11 +652,11 @@ describe('🔴 長さを容器へ書く(#952 A3)', () => {
   });
 
   /**
-   * 🔴 **画面収録にも書く**(#952 A3 の残り。2026-10-10 に実ブラウザの録画 ──
+   * 🔴 **画面録画にも書く**(#952 A3 の残り。2026-10-10 に実ブラウザの録画 ──
    *   VP8 + opus ── で `Infinity` → 4.008 秒と終わりへの飛び先を確かめた)。
    * ⚠ 門が `kind === 'audio'` に戻ったら、録画だけシークバーが伸びなくなる。
    */
-  it('🔴 画面収録にも Duration が書き足されている', async () => {
+  it('🔴 画面録画にも Duration が書き足されている', async () => {
     const track = fakeTrack();
     const rec = fakeRecorder();
     const h = await startCapture(
@@ -668,7 +668,7 @@ describe('🔴 長さを容器へ書く(#952 A3)', () => {
     const blob = await h.stop();
     if (blob === null) throw new Error('止めたのに何も返らない');
     const bytes = new Uint8Array(await blob.arrayBuffer());
-    expect(durationOf(bytes), '画面収録に長さが書かれていない').not.toBeNull();
+    expect(durationOf(bytes), '画面録画に長さが書かれていない').not.toBeNull();
   });
 
   /**
@@ -721,7 +721,7 @@ describe('🔴 長さを容器へ書く(#952 A3)', () => {
 });
 
 /**
- * 🔴 **画面収録は、キーフレームを約 2 秒ごとに置く**(#683 段②b-3)。
+ * 🔴 **画面録画は、キーフレームを約 2 秒ごとに置く**(#683 段②b-3)。
  *
  * ⚠ 器を作る口は 2 つ(最初 / 切って次を起こすとき)── 両方で見る。
  *   `new` に渡された**第 2 引数そのもの**を記録する fake で見る。
@@ -759,8 +759,8 @@ function optionRecorder(rejectOptions = false): {
   return { Recorder: R as unknown as typeof MediaRecorder, calls, last: () => inst! };
 }
 
-describe('🔴 画面収録のキーフレーム間隔(#683 段②b-3)', () => {
-  it('画面収録は最初の器にも、切って起こす次の器にも 2000ms を渡す', async () => {
+describe('🔴 画面録画のキーフレーム間隔(#683 段②b-3)', () => {
+  it('画面録画は最初の器にも、切って起こす次の器にも 2000ms を渡す', async () => {
     const o = optionRecorder();
     const { d } = deps({ Recorder: o.Recorder });
     await startCapture('screen', d, { partBytes: 25, maxMs: HOURS12 });
@@ -841,7 +841,7 @@ describe('🔴 器を作れない・始められないとき(#1087)', () => {
       );
       expect(err, '断られていない').toBeInstanceOf(CaptureRefused);
       expect((err as Error).message, '英語の生の例外が user に見える').toBe(CAPTURE_START_UNSUPPORTED);
-      expect((err as Error).message).toMatch(/収録を始められませんでした/);
+      expect((err as Error).message).toMatch(/録音・録画を始められませんでした/);
       expect(track.stopped(), 'マイクを掴んだままになる').toBe(true);
     });
   }

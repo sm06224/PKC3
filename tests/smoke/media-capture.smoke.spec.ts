@@ -20,7 +20,7 @@ import { createHash } from 'node:crypto';
 
 /**
  * 🔴 **録音して止めると、開いていたノートに入る**(#413。user 要望 2026-07-16
- * 「録音と画面収録を…これで、会議メモをうまく残せるはず」)。
+ * 「録音と画面録画を…これで、会議メモをうまく残せるはず」)。
  *
  * 🔴 **unit では原理的に届かない層**:
  * ① **本物の `MediaRecorder`** ── unit の stub は `stop()` で同期に撃つが、実物は
@@ -33,7 +33,7 @@ import { createHash } from 'node:crypto';
  *    「器が出た」までしか言えない。実ブラウザで `readyState` を見て初めて
  *    「**その場で聞ける**」が言える
  *
- * 🔑 画面収録(`getDisplayMedia`)は**最後に 1 本だけ**通す(#952 A3 の残り:
+ * 🔑 画面録画(`getDisplayMedia`)は**最後に 1 本だけ**通す(#952 A3 の残り:
  *   長さが出て終わりまで飛べるか)── `--use-fake-ui-for-media-stream` で
  *   共有元の窓を出さずに偽の画面が来る(2026-10-10 に両方のブラウザで実測)。
  *
@@ -162,7 +162,7 @@ test('🔴 録音を止めると本文に入り、その場で聞ける (#413 �
   });
 
   // 🔴 一覧から止める(#582 段③ 第 4 群)── 画面のボタンと同じく、帯が消えて本文に入る(下の assert が同じ)
-  await viaPalette(page, 'stop-capture', '収録を止める');
+  await viaPalette(page, 'stop-capture', '録音・録画を止める');
   await expect(bar, '止めたのに帯が残っている').toBeHidden();
 
   // ③ 🔴 **開いていたノートのまま**(添付が奪った選択が戻っている)
@@ -1126,10 +1126,10 @@ ${(e as Error).message}`,
    */
   await expect(
     page.locator('[data-pkc-region="status"]'),
-    '録った画面収録の保存が済んでいない(状態の行に「添付にしました」が出ない)',
-  ).toContainText(/画面収録.*添付にしました/, { timeout: 15_000 });
+    '録った画面録画の保存が済んでいない(状態の行に「添付にしました」が出ない)',
+  ).toContainText(/画面録画.*添付にしました/, { timeout: 15_000 });
   await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
-  const screenRow = page.locator('[data-pkc-capture]', { hasText: '画面収録' }).first();
+  const screenRow = page.locator('[data-pkc-capture]', { hasText: '画面録画' }).first();
   await expect(screenRow, '画面録画が一覧に出ない').toBeVisible({ timeout: 15_000 });
   await clickReal(page, screenRow.locator('[data-pkc-field="capture-play"]'));
   const screenMedia = screenRow.locator('video[data-pkc-field="capture-media"]');
@@ -1160,9 +1160,9 @@ ${(e as Error).message}`,
   expect(screenDur.seekedTo!, '画面録画の終わりの手前へ飛べない').toBeGreaterThan(durNum - 1.5);
 
   /**
-   * 🔴 **動画から音だけ・絵だけを取り出す**(#952 A1)── 新しい起動は足さず、録った画面収録の行で押す。
+   * 🔴 **動画から音だけ・絵だけを取り出す**(#952 A1)── 新しい起動は足さず、録った画面録画の行で押す。
    * 押し口は動画の行にだけ出る(音の行には出ない)/ 押すと「取り出しています…」→「取り出しました」/
-   * 元の動画の行は残る。⚠ 画面収録に音が入っているかは環境次第なので、絵だけを押して完了まで見る。
+   * 元の動画の行は残る。⚠ 画面録画に音が入っているかは環境次第なので、絵だけを押して完了まで見る。
    */
   await expect(screenRow.locator('[data-pkc-field="capture-extract-audio"]'), '動画の行に「音だけ取り出す」が出ない').toHaveText('音だけ取り出す');
   await expect(screenRow.locator('[data-pkc-field="capture-extract-picture"]'), '動画の行に「絵だけ取り出す」が出ない').toHaveText('絵だけ取り出す');
@@ -1182,7 +1182,7 @@ ${(e as Error).message}`,
 
 
 /**
- * 🔴 **画面収録の前後を削る**(#683 段②b-1 → ②b-2。設計 doc §10.2)。
+ * 🔴 **画面録画の前後を削る**(#683 段②b-1 → ②b-2。設計 doc §10.2)。
  *
  * 🔴 **unit では原理的に届かない層**:本物の `MediaRecorder` が吐いた VP8 の webm を、**ワーカーで窓読みして**
  *   元の部品で繋ぎ直した物を、**ブラウザが本当に再生できる**こと(`<video>.duration` が有限・映像が出る・進む)。
@@ -1231,7 +1231,7 @@ async function recordScreenForTrim(page: Page) {
   // ⚠ 録画は「開いているノート」へ入る ── 開いていないと押しても帯が出ない。編集を確定してから録る
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-region="editor-live"]');
-  await page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]').fill('# 画面収録の切り出し');
+  await page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]').fill('# 画面録画の切り出し');
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
@@ -1245,12 +1245,12 @@ async function recordScreenForTrim(page: Page) {
   // 🔴 **保存が済んでから一覧を開く** ── この面の一覧はタブを開いた瞬間に 1 度集めるだけなので、
   //   止めた直後に開くと、まだ入っていない添付を取りこぼす(上の 1 本目でも間欠で出た形)
   await expect(
-    page.locator('[data-pkc-view-pane="detail"] a[data-pkc-asset-key]', { hasText: '画面収録' }),
+    page.locator('[data-pkc-view-pane="detail"] a[data-pkc-asset-key]', { hasText: '画面録画' }),
     '録った動画が本文に入っていない(保存が済んでいない)',
   ).toHaveCount(1, { timeout: 15_000 });
 
   await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
-  const screenRow = page.locator('[data-pkc-capture]', { hasText: '画面収録' }).first();
+  const screenRow = page.locator('[data-pkc-capture]', { hasText: '画面録画' }).first();
   await expect(screenRow, '画面録画が一覧に出ない').toBeVisible({ timeout: 15_000 });
   await clickReal(page, screenRow.locator('[data-pkc-field="capture-play"]'));
   const screenMedia = screenRow.locator('video[data-pkc-field="capture-media"]');
@@ -1423,7 +1423,7 @@ async function probeCutFile(cutMedia: Locator) {
   });
 }
 
-test('🔴 画面収録を押した所ぴったりに切り出せる:確認が出ない → 最初のフレームが押した所 → 再生できる (#683 段②b-2)', async ({ page }) => {
+test('🔴 画面録画を押した所ぴったりに切り出せる:確認が出ない → 最初のフレームが押した所 → 再生できる (#683 段②b-2)', async ({ page }) => {
   const errors = collectPageErrors(page);
   const { screenRow, screenMedia, seekVideo, startSec, endSec } = await recordScreenForTrim(page);
   const rowsNow = await page.locator('[data-pkc-capture]').count();
@@ -1458,9 +1458,9 @@ test('🔴 画面収録を押した所ぴったりに切り出せる:確認が�
   // 🔑 名前は**押した所**(M:SS)── 手前の区切りへ戻っていない
   const cutVideoRow = page
     .locator('[data-pkc-capture]', { hasText: new RegExp(`\\(0:${String(Math.floor(vStart)).padStart(2, '0')}〜`) })
-    .filter({ hasText: '画面収録' });
+    .filter({ hasText: '画面録画' });
   await expect(cutVideoRow, '名前に範囲(押した所の始まり)が入っていない').toHaveCount(1);
-  await expect(page.locator('[data-pkc-capture]', { hasText: '画面収録' }).first()).toBeVisible();
+  await expect(page.locator('[data-pkc-capture]', { hasText: '画面録画' }).first()).toBeVisible();
 
   /**
    * 🔴 **出力を実ブラウザで検める**。
@@ -1593,7 +1593,7 @@ test('🔴 細かく切れない環境(WebCodecs 無し)は裁定の文言で確
     timeout: 20_000,
   });
   // 🔑 始まりは押した所ではなく、その手前の区切り(約 2 秒ごと)── 名前の始まりから読む
-  const cutVideoRow = page.locator('[data-pkc-capture]', { hasText: /\(0:\d\d〜/ }).filter({ hasText: '画面収録' });
+  const cutVideoRow = page.locator('[data-pkc-capture]', { hasText: /\(0:\d\d〜/ }).filter({ hasText: '画面録画' });
   await expect(cutVideoRow, '名前に範囲(区切りへ戻った始まり)が入っていない').toHaveCount(1);
   const snappedSec = Number(((await cutVideoRow.textContent()) ?? '').match(/\(0:(\d\d)〜/)![1]);
   expect(snappedSec, '手前へ戻っていない').toBeLessThanOrEqual(Math.floor(vStart));
