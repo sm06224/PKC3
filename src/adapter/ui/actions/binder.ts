@@ -8177,6 +8177,43 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 面は切り替えない ── user は予定を眺めたまま足したいのであって、
    *   本文へ飛ばされたいわけではない(#300「補助が主の作業領域を奪わない」)。
    */
+  /**
+   * 🔴 **予定の欄の日付を押すと、本文に日付を差すときと同じ選び方が開く**(#1635 項 2。
+   * Gemini 裁定 = #1163 の依頼 36「2-B」)。
+   *
+   * > 「明日」の予定を入れたい。本文の「日付を入れる」には 今日 / 明日 / 今週末 / 来週 が
+   * > 出るのに、予定の欄の日付にはブラウザ標準の入力しか出ない。
+   *
+   * 🔑 選び方は `pickDateInApp` 1 本(本文の `insert-date` と同じ。近道の表も `DATE_SHORTCUTS`)。
+   * ⚠ 欄の値の読み手は `schedule-quick-add` のまま(欄の `.value` に書き戻すだけ)。
+   * ⚠ **時刻の欄は出さない**(`withTime: false` ── 予定の欄は日付だけ。打っても捨てる形にしない)。
+   * ⚠ **開いた時点の日付は欄の値**(今日とは限らない)。**空のまま「入れる」を押せば欄も空になる**
+   *   (`allowEmpty` ── 日付なしで足す道を、マウスだけでも残す)。
+   * ⚠ キーボードは変えない: 欄へ Tab で入って数字を打つ / Space で標準のピッカーを開く、は従来どおり
+   *   (押下 = `click` だけを受ける。Enter / Space の `click` は日付欄では起きない)。
+   */
+  'schedule-pick-date': (_dispatcher, target, _services, root) => {
+    const face = scheduleFaceOf(target);
+    const dateEl = face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]');
+    if (!dateEl) return;
+    void pickDateInApp(
+      root,
+      new Date(),
+      DATE_SHORTCUTS,
+      (id, now) => (isDateShortcut(id) ? shortcutDate(id, now) : ''),
+      { withTime: false, initialDate: dateEl.value, allowEmpty: true },
+    ).then((picked) => {
+      // ⚠ 面が組み直されても、いま画面に在る欄へ書く(最初に掴んだ欄は外れているかもしれない)
+      const now = dateEl.isConnected
+        ? dateEl
+        : root.querySelector<HTMLInputElement>(
+            '[data-pkc-region="schedule"] [data-pkc-field="schedule-quick-date"]',
+          );
+      if (picked === null || !now) return;
+      now.value = picked.date;
+      now.focus();
+    });
+  },
   'schedule-quick-add': (dispatcher, target, services) => {
     // 🔴 **押した面の欄**を読む(#673 段②)── `root` から引くと別の面の空欄を読む
     const face = scheduleFaceOf(target);
@@ -16116,6 +16153,8 @@ export function bindActions(
      *   DOM 自身が値なので、止めると**巻き戻って見える**。
      */
     if (el.getAttribute('data-pkc-action') === 'toggle-task') ev.preventDefault();
+    // 🔴 予定の日付の欄: ブラウザ標準のピッカーは開かせず、近道つきの選び方だけを出す(#1635 項 2)
+    if (el.getAttribute('data-pkc-action') === 'schedule-pick-date') ev.preventDefault();
     /**
      * 🔴 **修飾つきのクリックは「印を付ける」**(#240 段②。user 指示 2026-08-17
      * 「複数選択・範囲選択」)。

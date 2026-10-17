@@ -306,7 +306,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'remove-sql-source',
   'rename-attachment', 'reset-app-group-order', 'reset-flags',
   'reset-office-profile', 'retry-persist', 'schedule-day-go', 'schedule-mode',
-  'schedule-nav', 'schedule-print',
+  'schedule-nav', 'schedule-pick-date', 'schedule-print',
   'schedule-undo-move', 'schedule-week-pick',
   // ⚠ 2026-10-12(#855 20-C): 予定の知らせ ── 見逃した予定の 1 行の「予定表を開く」「閉じる」と、予定表の「知らせ」の 2 つの設定
   //   (知らせる時間 / 次に開いたとき知らせるか)。押し口は予定の面・鳴っている予定の帯の中にしか無く、鍵も持たない。`dismiss-alarm` / `set-alarm-enabled` と同じ置き場
@@ -516,6 +516,7 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は付箋の右クリックにしか無く、対象の行はメニューが運ぶ。`place-line-arrow` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-12(#855 20-C): 予定の知らせ 4 つ(`dismiss-missed` / `open-missed-schedule` / `set-schedule-lead` / `set-schedule-missed`)で受け手 +4 ── 登記は増えない
       //   (押し口は予定の面と鳴っている予定の帯の中にしか無く、鍵も持たない。`dismiss-alarm` / `set-alarm-enabled` と同じ置き場)。`receivers` +4 / `total` +4 / `unregistered` +4。
+      // ⚠ 2026-10-17(#1635 項 2): 予定の欄の日付(`schedule-pick-date`)で受け手 +1 ── 登記は増えない(押し口は予定の面の欄にしか無い)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11(#530 段⑤d): 付箋の右クリックの「右に回す / 左に回す / 回転を解く」(`place-rotate`)で受け手 +1 ── 登記は増えない
       //   (押し口は付箋の右クリックにしか無く、対象の行はメニューが運ぶ。`place-size` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11: 「リンクをコピー」(`copy-entry-link`。登記 +1 / 受け手 +1 / 両方 +1)と「添付のリンクをコピー」
@@ -860,14 +861,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `open-today` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1662 2): 右クリックの「ノートを置く…」(`add-place-note`)で受け手 +1 ── 登記は増えない
       //   (押し口は本文の右クリックにしか無く、座標はメニューが運ぶ。`add-place` / `add-place-template` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 443,
-      receivers: 374,
+      total: 444,
+      receivers: 375,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       registered: 172,
       both: 103,
       outsideActionsTable: 69,
-      unregistered: 271,
+      unregistered: 272,
     });
   });
 

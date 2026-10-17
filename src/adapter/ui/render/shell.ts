@@ -473,6 +473,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   for (const [value, label] of [
     ['manual', '自分で並べた順'],
     ['updated', '更新が新しい順'],
+    // 🔴 作った日の順(#1635 項 4。Gemini 裁定 = #1163 の依頼 36「4-A」)。更新と違い、書き直しても動かない
+    ['created', '作成が新しい順'],
     /**
      * 🔴 **最近開いた順**(#215 残り①)。⚠ **「更新が新しい順」とは別物である** ──
      *   更新は**書いた**ときに動くので、読み返しただけのノートは上がってこない。

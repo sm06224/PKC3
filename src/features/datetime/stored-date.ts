@@ -115,3 +115,29 @@ export function formatListDate(
   if (!p) return value ? value : fallback;
   return Number(p.year) === thisYear ? `${p.month}/${p.day}` : `${p.year}/${p.month}/${p.day}`;
 }
+
+/**
+ * 🔴 **一覧が「今日」を知るための 1 つの数**(#1635 項 3)。今日の暦日を `20261017` の形にする。
+ * ⚠ 年だけ渡していた頃は、日付が変わっても控えが古いまま残った ── この数が変われば控えも捨てる。
+ */
+export function listDayStamp(now: Date): number {
+  return now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+}
+
+/**
+ * 🔴 **左の一覧の「更新」の字**(#1635 項 3。Gemini 裁定 = #1163 の依頼 36 の「3-A」)。
+ * 今日の更新だけ「今日」と出し、昨日より前は `formatListDate` のまま(`月/日`)。
+ *
+ * ⚠ 「今日」は**端末の暦日**で決める(`storedDateParts` ── 日付だけの値はずらさない)。
+ * ⚠ 一覧の更新の列だけで使う。作業の日付(`task-card` / 予定)は `formatListDate` のまま ──
+ *   そこに「今日」を出すと、日付そのものの表示が変わる(別の裁定)。
+ */
+export function formatListUpdated(
+  value: string | null | undefined,
+  dayStamp: number,
+  fallback = '',
+): string {
+  const p = storedDateParts(value);
+  if (p && Number(p.year) * 10000 + Number(p.month) * 100 + Number(p.day) === dayStamp) return '今日';
+  return formatListDate(value, Math.floor(dayStamp / 10000), fallback);
+}

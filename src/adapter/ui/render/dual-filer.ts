@@ -45,7 +45,7 @@ import { filerRows, smartLidsOf } from '@features/relation/filer-list';
 import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 import { normalizeQuery } from '@features/filter/title-filter';
 import { getAncestorFolders } from '@features/relation/tree';
-import { formatListDate } from '@features/datetime/stored-date';
+import { formatListUpdated, listDayStamp, formatStoredDate } from '@features/datetime/stored-date';
 import { chordLabel, findCommand } from '@features/keymap';
 import { appKeymap, type KeymapStore } from './keymap';
 import { paintRowMark } from './selection-mark';
@@ -57,6 +57,12 @@ import { ACTION_ICONS, ARCHETYPE_ICONS, iconSpan, markBarTile, setActionIcon } f
 import { markTab, markTablist } from './tabs-a11y';
 // 🔴 表を送って見てから離れ、戻ると同じ所(C10 / #1045)。左右で**別々に**覚える
 import { ScrollMemory } from './scroll-memory';
+
+function setDateTitle(cell: HTMLElement, updatedAt: string | null): void {
+  const full = formatStoredDate(updatedAt, '');
+  if (full) cell.title = `更新 ${full}`;
+  else cell.removeAttribute('title');
+}
 
 /**
  * 指紋の区切り。⚠ **題名に現れない字**でなければ、別々の行が同じ指紋になり
@@ -391,7 +397,7 @@ export class DualFilerRenderer {
   /** `metaSignature` の控え(同じ `entryMetas`・年・並びの向きなら前の答えを返す)。 */
   private metaMemo: {
     metas: AppState['entryMetas'];
-    year: number;
+    dayStamp: number;
     byUpdated: boolean;
     sig: string;
   } | null = null;
@@ -448,25 +454,25 @@ export class DualFilerRenderer {
    * ⚠ 区切りは NUL(`SEP`)。同じ参照・年・向きなら前の答え(選ぶだけの描画で全件を回さない)。
    */
   private metaSignature(state: AppState): string {
-    const year = new Date().getFullYear();
+    const dayStamp = listDayStamp(new Date());
     const byUpdated = state.entrySort === 'updated';
     const memo = this.metaMemo;
     if (
       memo !== null &&
       memo.metas === state.entryMetas &&
-      memo.year === year &&
+      memo.dayStamp === dayStamp &&
       memo.byUpdated === byUpdated
     )
       return memo.sig;
-    if (this.dateTextYear !== year || this.dateText.size > state.entryMetas.size * 2 + 64) {
+    if (this.dateTextYear !== dayStamp || this.dateText.size > state.entryMetas.size * 2 + 64) {
       this.dateText.clear();
-      this.dateTextYear = year;
+      this.dateTextYear = dayStamp;
     }
     const dateOf = (raw: string | null): string => {
       if (raw === null) return '';
       let text = this.dateText.get(raw);
       if (text === undefined) {
-        text = formatListDate(raw, year);
+        text = formatListUpdated(raw, dayStamp);
         this.dateText.set(raw, text);
       }
       return text;
@@ -482,7 +488,7 @@ export class DualFilerRenderer {
         byUpdated ? (m.updatedAt ?? '') : dateOf(m.updatedAt),
       );
     const sig = parts.join(SEP);
-    this.metaMemo = { metas: state.entryMetas, year, byUpdated, sig };
+    this.metaMemo = { metas: state.entryMetas, dayStamp, byUpdated, sig };
     return sig;
   }
 
@@ -1050,7 +1056,7 @@ export class DualFilerRenderer {
      * `updatedAt` を入れると、同じ日の保存(秒だけ違う)で指紋が変わり、
      * 「見た目は同じなのに作り直す」が復活する(`render/filer.ts` の教訓)。
      */
-    const year = new Date().getFullYear();
+    const dayStamp = listDayStamp(new Date());
     /**
      * ⚠ **絞り込みの有無も指紋に入れる**(2026-08-19)。⚠ 入れないと、
      * **0 件 → 0 件**(空のフォルダで語を打った / 語を消した)で指紋が動かず、
@@ -1090,7 +1096,7 @@ export class DualFilerRenderer {
      *   そのときは本体の指紋に含めて建て直す。
      */
     const byDate = state.entrySort === 'updated';
-    const dates = rows.map((m) => `${m.lid}${SEP}${formatListDate(m.updatedAt, year)}`).join(SEP);
+    const dates = rows.map((m) => `${m.lid}${SEP}${formatListUpdated(m.updatedAt, dayStamp)}`).join(SEP);
     if (signature !== frame.signature || (byDate && dates !== frame.dates)) {
       frame.dates = dates;
       frame.signature = signature;
@@ -1146,7 +1152,10 @@ export class DualFilerRenderer {
         const cell = frame.rows
           .get(m.lid)
           ?.querySelector<HTMLElement>('[data-pkc-field="dual-updated"]');
-        if (cell) cell.textContent = formatListDate(m.updatedAt, year);
+        if (cell) {
+          cell.textContent = formatListUpdated(m.updatedAt, dayStamp);
+          setDateTitle(cell, m.updatedAt);
+        }
       }
     }
     const marks = pane.selection.join(' ');
@@ -1384,7 +1393,7 @@ export class DualFilerRenderer {
     /** いまの向き ── ▲▼ の向きに出す。 */
     sortDesc: boolean,
   ): void {
-    const year = new Date().getFullYear();
+    const dayStamp = listDayStamp(new Date());
     frame.rows.clear();
     frame.selectAll = null;
     frame.table.textContent = '';
@@ -1522,7 +1531,9 @@ export class DualFilerRenderer {
       const date = document.createElement('td');
       // ⚠ 目印を付ける ── 日付だけの変化はここを差し替えて済ませる(#270)
       date.setAttribute('data-pkc-field', 'dual-updated');
-      date.textContent = formatListDate(m.updatedAt, year);
+      date.textContent = formatListUpdated(m.updatedAt, dayStamp);
+      // 🔑 「今日」と出した行でも日付が読める(#1635 項 3)
+      setDateTitle(date, m.updatedAt);
       tr.append(name, size, date);
       tbody.append(tr);
       frame.rows.set(m.lid, tr);

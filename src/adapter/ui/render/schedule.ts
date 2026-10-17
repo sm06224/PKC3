@@ -903,6 +903,8 @@ export class ScheduleRenderer {
     const qDate = document.createElement('input');
     qDate.type = 'date';
     qDate.setAttribute('data-pkc-field', 'schedule-quick-date');
+    // 🔴 押すと、本文に日付を差すときと同じ近道つきの選び方が開く(#1635 項 2)
+    qDate.setAttribute('data-pkc-action', 'schedule-pick-date');
     qDate.setAttribute('aria-label', 'いつのやること');
     /**
      * 🔴 **最初から今日を入れておく**(#499。user 指摘 2026-08-28
