@@ -10,7 +10,7 @@
  * 復号**前**の base64 も、使い終わったら参照を切って GC に返す(review M-9 ──
  * 「溜めない」だけでは不十分で、実測で asset 実体の 3.2 倍が常駐していた)。
  */
-import { errorText } from '@features/error-text';
+import { errorText, isQuotaFailure } from '@features/error-text';
 import { failImport } from './import-failure';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { hasUnsavedTyping, phaseBlockReason, SECTION_DRAFT_NOTE } from '@adapter/state/app-state';
@@ -207,6 +207,13 @@ export interface ImportDeps {
    * **同じ取り込みの道**へ流す(`import-portable.ts`)。
    */
   readImageArchive?: ReadImageArchive;
+  /**
+   * 🔴 **取り込みの間だけ true**(「離れますか」の確認を出すため。`unload-guard.ts` の `setWriting`)。
+   *   ⚠ 取り込みの書込(添付・本文・つながり・履歴)は保存の係へ直接送るので、保存の効果層の
+   *   「書いている」には乗らない ── 取り込みの最中にタブを閉じても確認が出なかった。
+   *   始まりで true、終わり(成功・失敗・やめた、どれでも)で false。⚠ **省略可** ── 渡さない配線は従来どおり。
+   */
+  onWriting?(writing: boolean): void;
 }
 
 /** base64 → bytes。`fromBase64` があれば中間のバイナリ文字列を作らない。 */
@@ -374,6 +381,21 @@ function* batchChains(
  * @returns 取り込んだ entry 数(失敗時は null)
  */
 export async function importPkc2File(
+  dispatcher: Dispatcher,
+  deps: ImportDeps,
+  inputFile: File,
+): Promise<number | null> {
+  // 🔴 出口は 1 本ではない(断り・失敗・成功・例外)── `finally` で必ず戻す。戻し忘れると、
+  //   終わった後もずっと「離れますか」が出続ける
+  deps.onWriting?.(true);
+  try {
+    return await runImport(dispatcher, deps, inputFile);
+  } finally {
+    deps.onWriting?.(false);
+  }
+}
+
+async function runImport(
   dispatcher: Dispatcher,
   deps: ImportDeps,
   inputFile: File,
@@ -589,6 +611,12 @@ export async function importPkc2File(
       genRelationId: deps.genRelationId,
         });
     result.warnings.unshift(...preWarnings);
+    // 🔴 **取り込めるノートが 0 件なら、成功にしない**(I-5)── 「取り込み完了: 0 件」と言った上で、
+    //   憶えている「前の取り込みを取り消す」の対象を空の一覧で上書きしていた(前の取り込みを取り消せなくなる)。
+    //   添付を書く前に断る(書いた添付が使われないまま残らない)。`imported` も `report` も呼ばない
+    if (result.entries.length === 0) {
+      return fail('取り込めるノートが 1 件も入っていませんでした');
+    }
     // ── assets: 1 件ずつ復号 → **中身のハッシュで key を決める** → 未所持なら書く
     // (content addressing / user 指示 2026-08-01「ZFS と同じ発想」)。同じ bytes は
     // 必ず同じ key に落ちるので、再取込も、取込と添付の混在も、1 回の取込の中の
@@ -608,9 +636,24 @@ export async function importPkc2File(
      *   そのまま出しており、user にはどの添付のことか分からなかった。本文は暫定 key で
      *   書き換え済みなので、それを含むノートの題名を引く(見つからなければ「添付」とだけ言う)。
      */
+    // 🔴 添付ごとに全ノートの本文を舐めない(失敗が続くと N × M になっていた)── 最初に 1 回だけ、
+    //   本文の中の語を拾って「添付 key → 最初に含むノートの題名」を作る。語として拾えなかった key
+    //   (`.` を含む素の key など)だけ、従来どおり本文を探す
+    let ownerTitleOf: Map<string, string> | null = null;
     const assetName = (key: string): string => {
-      const owner = result.entries.find((e) => e.body.includes(key));
-      return owner ? `「${owner.title || '(無題)'}」の添付` : '題名の分からないノートの添付';
+      if (ownerTitleOf === null) {
+        const wanted = new Set(result.assets.map((x) => x.key));
+        const m = new Map<string, string>();
+        for (const e of result.entries) {
+          if (m.size === wanted.size) break;
+          for (const t of e.body.match(/[A-Za-z0-9_-]+/g) ?? []) {
+            if (wanted.has(t) && !m.has(t)) m.set(t, e.title);
+          }
+        }
+        ownerTitleOf = m;
+      }
+      const title = ownerTitleOf.get(key) ?? result.entries.find((e) => e.body.includes(key))?.title;
+      return title !== undefined ? `「${title || '(無題)'}」の添付` : '題名の分からないノートの添付';
     };
     // 🔑 添付が数百件あると「取り込み中…」が止まって見える ── 間引いて (N / M) を出す
     //   ⚠ 字に「…」を付けない ── これは新しく始まる知らせではなく、上の「取り込み中…」の途中経過
@@ -619,6 +662,9 @@ export async function importPkc2File(
       deps.notify?.(`取り込み中(添付を書き込んでいます ${n} / ${m})`),
     );
     let assetsDone = 0;
+    // 🔴 空き容量で書けなかったら、そこで取り込み全体を止める(I-3)── 続けると、添付が 1 つも入らないまま
+    //   ノートだけが N 件入り(画像が全部壊れた参照になる)、同じ注意が N 行並んでいた
+    let quotaHit = false;
     for (const a of result.assets) {
       assetProgress(assetsDone++, result.assets.length);
       try {
@@ -718,8 +764,20 @@ export async function importPkc2File(
       } catch (e) {
         // 1 件の添付が壊れていても取込全体は止めない(欠損は可視化する)
         a.base64 = '';
+        if (isQuotaFailure(e)) {
+          quotaHit = true;
+          break;
+        }
         result.warnings.push(`${assetName(a.key)}を復元できませんでした: ${reason(e)}`);
       }
+    }
+    if (quotaHit) {
+      // ⚠ ノートはまだ 1 件も書いていない(bytes が先、参照が後)── 書けた添付はどのノートからも
+      //   指されないまま残るが、「使われていない添付を消す」で回収できる
+      return fail(
+        '空きが足りないため取り込めませんでした(ノートは 1 件も追加されていません)。' +
+          'このタブの外で空きを作ってから、もう一度取り込んでください',
+      );
     }
 
     /**
@@ -856,8 +914,15 @@ export async function importPkc2File(
     await deps.reload();
     // 具体的な注意(どのファイルが欠けたか)を先に出す ── 総論の light 表示を
     // 先頭に置くと、50 件欠けていても user は何が欠けたか分からない
+    // 🔴 同じ文が並ぶときは 1 行にして件数を添える(同じ理由で添付が何本も落ちたとき、同じ行が N 本並んでいた)
+    const foldedWarnings: string[] = [];
+    {
+      const seen = new Map<string, number>();
+      for (const w of result.warnings) seen.set(w, (seen.get(w) ?? 0) + 1);
+      for (const [w, n] of seen) foldedWarnings.push(n > 1 ? `${w}(${n} 件)` : w);
+    }
     const notes = [
-      ...result.warnings,
+      ...foldedWarnings,
       ...(revStats.dropped > 0
         ? [`保持上限を超えた古い版 ${revStats.dropped} 件は取り込みませんでした`]
         : []),

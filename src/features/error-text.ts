@@ -46,6 +46,16 @@ export function errorMessageJa(raw: string): string {
   return raw;
 }
 
+/**
+ * 🔴 **「空きが足りない」で落ちたか**(取り込みが、書く前に止まるために使う)。
+ * ブラウザ(`QuotaExceededError`)/ SQLite(`SQLITE_FULL`)/ 保存の係の断り(`WRITE_QUOTA_REFUSAL`)の 3 つを同じに扱う。
+ */
+export function isQuotaFailure(e: unknown): boolean {
+  if (e instanceof Error && e.name === 'QuotaExceededError') return true;
+  const raw = e instanceof Error ? e.message : String(e);
+  return QUOTA_MESSAGE.test(raw) || raw.includes(WRITE_QUOTA_REFUSAL);
+}
+
 export function errorText(e: unknown): string {
   // ⚠ ブラウザの DOMException は種類が name にだけ載る(message は「The quota has been exceeded.」など)
   if (e instanceof Error && e.name === 'QuotaExceededError') return errorMessageJa(`QuotaExceededError: ${e.message}`);

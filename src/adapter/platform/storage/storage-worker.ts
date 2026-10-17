@@ -4439,11 +4439,16 @@ const handlers: Handlers = {
   },
   putAssetMeta: (req) => {
     const m = req.meta;
+    // 🔴 同じ中身(= 同じ key)を、種類の分からない取り込み(`application/octet-stream`)で入れ直しても、
+    //   すでに分かっている種類(image/png など)を一般の種類へ**格下げしない**(画像として開けなくなる)。
+    //   逆向き(一般 → 具体)と、同じ key の別の具体的な種類への更新は今までどおり書く(meta の自己修復)。
     need().exec({
       sql: `INSERT INTO assets (cid, key, mime, size, hash)
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(cid, key) DO UPDATE SET
-              mime = excluded.mime, size = excluded.size, hash = excluded.hash`,
+              mime = CASE WHEN excluded.mime = 'application/octet-stream' AND assets.mime <> ''
+                          THEN assets.mime ELSE excluded.mime END,
+              size = excluded.size, hash = excluded.hash`,
       bind: [req.cid, m.key, m.mime, m.size, m.hash ?? null],
     });
     return null;

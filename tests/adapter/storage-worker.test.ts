@@ -4448,3 +4448,31 @@ describe('SQL で調べる画面の直し(#1087)── 運ぶ量の天井と文�
     await request({ op: 'closeSqlGuest', guest: W });
   });
 });
+
+describe('🔴 添付の種類を一般の種類へ格下げしない(I-7)', () => {
+  const metaOf = async (key: string) =>
+    (await request({ op: 'listAssetMetas', cid: 'c1' })).find((m) => m.key === key);
+  const put = (key: string, mime: string, size = 3) =>
+    request({ op: 'putAssetMeta', cid: 'c1', meta: { key, mime, size, hash: null } });
+
+  it('image/png の添付を、種類の分からない取り込み(octet-stream)で入れ直しても image/png のまま', async () => {
+    await put('i7-a', 'image/png', 3);
+    await put('i7-a', 'application/octet-stream', 5);
+    const m = await metaOf('i7-a');
+    expect(m?.mime).toBe('image/png');
+    expect(m?.size).toBe(5); // 種類以外(大きさ)は今までどおり書き直す
+  });
+
+  it('逆向き(octet-stream → 具体)と、具体どうしの更新は書き込む(meta の自己修復を残す)', async () => {
+    await put('i7-b', 'application/octet-stream');
+    await put('i7-b', 'image/png');
+    expect((await metaOf('i7-b'))?.mime).toBe('image/png');
+    await put('i7-b', 'image/jpeg');
+    expect((await metaOf('i7-b'))?.mime).toBe('image/jpeg');
+  });
+
+  it('最初から octet-stream で入る添付は、そのまま octet-stream(対照群)', async () => {
+    await put('i7-c', 'application/octet-stream');
+    expect((await metaOf('i7-c'))?.mime).toBe('application/octet-stream');
+  });
+});

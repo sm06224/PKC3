@@ -297,6 +297,36 @@ describe('convertPkc2Container (P6a)', () => {
     expect(body).toBe('![a](asset:ast-new-1) ![b](asset:ast-new-2)\n');
   });
 
+  it('[I-8] `.` を含む key(ast-1.v2)は ast-1 と別の key として写す。無い key は手前の一致へ戻す', () => {
+    const both = convertPkc2Container(
+      {
+        entries: [
+          { lid: 'n', title: 'n', archetype: 'text', body: '![a](asset:ast-1) ![b](asset:ast-1.v2)\n' },
+        ],
+        assets: { 'ast-1': 'QQ==', 'ast-1.v2': 'Qg==' },
+      },
+      opts(),
+    );
+    const [a, b] = both.assets;
+    expect(a!.key).not.toBe(b!.key); // 前提: 2 つは別の添付として採番されている
+    const keyOf = (oldKey: string): string => both.assets.find((x) => x.oldKey === oldKey)!.key;
+    // 直す前は `asset:ast-1.v2` が `asset:<ast-1 の写し先>.v2` に化けた
+    expect(both.entries[0]!.body).toBe(
+      `![a](asset:${keyOf('ast-1')}) ![b](asset:${keyOf('ast-1.v2')})\n`,
+    );
+    // ast-1.v2 が無いときは、`.` の手前(ast-1)までの一致へ戻す ── 文末の句点が付いた参照
+    // (`asset:ast-1.`)を写せなくならないため、直す前と同じ挙動を残す
+    const only = convertPkc2Container(
+      {
+        entries: [{ lid: 'n', title: 'n', archetype: 'text', body: '![a](asset:ast-1) と asset:ast-1. と asset:zzz.v2\n' }],
+        assets: { 'ast-1': 'QQ==' },
+      },
+      opts(),
+    );
+    const k = only.assets[0]!.key;
+    expect(only.entries[0]!.body).toBe(`![a](asset:${k}) と asset:${k}. と asset:zzz.v2\n`);
+  });
+
   it('[M-20] remapAssetKeys も prefix 関係で取り違えない', () => {
     const map = new Map([
       ['ast-a1', 'ast-CONTENT-1'],

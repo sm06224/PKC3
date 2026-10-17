@@ -397,7 +397,7 @@ export function convertPkc2Container(
     // 文法は読む側(body-links.ts)に揃える:`Entry:` も / `myentry:` は触らない / PKC2 の `pkc://<container_id>/entry/<lid>` も(#1087)
     body = remapEntryLids(body, lidMap, srcCid);
     body = rewriteTextlogRefs(body, selfLid, anchorsByLid, firstLogOfDay);
-    body = replacePrefixed(body, 'asset:', keyMap);
+    body = replacePrefixed(body, 'asset:', keyMap, true);
     return body;
   };
 
