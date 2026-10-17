@@ -808,6 +808,8 @@ export class ScheduleRenderer {
       b.setAttribute('data-pkc-action', 'schedule-nav');
       b.setAttribute('data-pkc-nav-step', String(step));
       b.textContent = label;
+      // 見えている字は ‹ › だけ。この送りは月単位(`schedule-month.ts` の大きな月の送りと同じ字)
+      b.setAttribute('aria-label', step === -1 ? '前の月' : '次の月');
       return b;
     };
     const month = document.createElement('span');

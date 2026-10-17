@@ -274,6 +274,8 @@ export function buildKeymapPanel(
         drop.setAttribute('data-pkc-chord', chord);
         drop.textContent = '×';
         drop.title = `${chordLabel(chord)} の割当を外します`;
+        // 見えている字は「×」だけ ── 読み上げが「×」と言うので、title と同じ説明を名前にする
+        drop.setAttribute('aria-label', `${chordLabel(chord)} の割当を外します`);
         drop.addEventListener('click', () => {
           if (!store.removeBinding(cmd.id, chord))
             row.note.textContent = `${chordLabel(chord)} を外しました。${SETTINGS_NOT_PERSISTED_TEXT}`;

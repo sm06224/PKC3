@@ -587,6 +587,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   pick.title = '種類を選んで作ります(押した種類で、その場で 1 件作ります)。今日を開く・添付・録音なども並びます';
   pick.setAttribute('aria-label', '種類を選んで作る');
   pick.setAttribute('aria-expanded', 'false');
+  pick.setAttribute('aria-haspopup', 'menu');
 
   /**
    * 🔴 **▼ を「作る」の合成メニューにする**(#1054 段②。裁定 #1054 コメント
@@ -599,6 +600,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const menu = document.createElement('div');
   menu.setAttribute('data-pkc-region', 'create-menu');
   menu.setAttribute('role', 'menu');
+  // 名前は開く側のボタンと同じ字(読み上げが「メニュー」だけにならない)
+  menu.setAttribute('aria-label', '種類を選んで作る');
   menu.hidden = true;
 
   const menuHeading = document.createElement('div');

@@ -3172,6 +3172,17 @@ md.core.ruler.after('inline', 'pkc-color-swatch', function (state) {
   return true;
 });
 
+/** 項目の子 token から、記法を除いた字だけを集める(強調・リンクの中の字は残し、html_inline / 脚注の印は捨てる)。 */
+function taskPlainText(tokens: readonly Token[]): string {
+  let out = '';
+  for (const t of tokens) {
+    if (t.type === 'text' || t.type === 'code_inline') out += t.content;
+    else if (t.type === 'softbreak' || t.type === 'hardbreak') out += ' ';
+    else if (t.type === 'image') out += t.children ? taskPlainText(t.children) : '';
+  }
+  return out;
+}
+
 md.core.ruler.after('inline', 'pkc-task-list', function (state) {
   const tokens = state.tokens;
   let taskIndex = 0;
@@ -3230,7 +3241,17 @@ md.core.ruler.after('inline', 'pkc-task-list', function (state) {
     const attrs = wired
       ? ` data-pkc-action="toggle-task" data-pkc-task-line="${srcLine}"`
       : ' disabled';
-    checkbox.content = `<input type="checkbox" class="pkc-task-checkbox" data-pkc-task-index="${taskIndex}"${attrs}${checked ? ' checked' : ''}> `;
+    /**
+     * 🔴 **項目の字を名前にする**(#1087)── 印だけでは読み上げが「チェックボックス」としか言わない。
+     * 名前は項目の字(印を剥がした後の子 token から、記法を除いた字だけ)。長さは 80 字まで。
+     * ⚠ 行番号・索引の計算には触れない(属性を 1 つ足すだけ)。
+     */
+    const plain = taskPlainText(children).replace(/\s+/g, ' ').trim();
+    const labelAttr =
+      plain === ''
+        ? ''
+        : ` aria-label="${md.utils.escapeHtml(plain.length > 80 ? plain.slice(0, 79) + '…' : plain)}"`;
+    checkbox.content = `<input type="checkbox" class="pkc-task-checkbox" data-pkc-task-index="${taskIndex}"${labelAttr}${attrs}${checked ? ' checked' : ''}> `;
     taskIndex++;
     children.unshift(checkbox);
     token.children = children as Token[];

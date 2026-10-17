@@ -35,6 +35,9 @@ export interface QuickTocHandle {
   update: () => void;
 }
 
+/** 一覧の id を作る通し番号(同じ document に複数の目次が居ても id が重ならない)。 */
+let popoverSeq = 0;
+
 /**
  * @param scroller 実際にスクロールする器(#1168)。渡すと、**目次を開いている間だけ**
  *   その送りを見て、いま読んでいる見出しの行へ `data-pkc-active` を付ける。
@@ -57,6 +60,7 @@ export function installQuickToc(
   button.setAttribute('aria-label', '目次を開く');
   button.setAttribute('title', '目次を開く');
   button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('aria-controls', `pkc-quick-toc-popover-${++popoverSeq}`);
 
   const icon = doc.createElement('span');
   icon.className = 'pkc-quick-toc-icon';
@@ -72,6 +76,7 @@ export function installQuickToc(
   const popover = doc.createElement('div');
   popover.className = 'pkc-quick-toc-popover';
   popover.hidden = true;
+  popover.id = button.getAttribute('aria-controls') ?? '';
 
   const header = doc.createElement('div');
   header.className = 'pkc-quick-toc-header';
@@ -229,8 +234,12 @@ export function installQuickToc(
 
   const closePopover = (): void => {
     if (!popover.hidden) {
+      // 🔴 焦点が一覧の中に居たまま隠すと、焦点は <body> へ落ちる(Esc・行の押しの後に Tab が頭からになる)。
+      //   一覧の外から閉じた回(外の押し)は焦点に触らない。⚠ `preventScroll` ── 行を押した直後の送りと争わない。
+      const hadFocus = popover.contains(doc.activeElement);
       popover.hidden = true;
       button.setAttribute('aria-expanded', 'false');
+      if (hadFocus) button.focus({ preventScroll: true });
     }
     stopTracking();
   };
