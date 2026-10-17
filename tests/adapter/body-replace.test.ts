@@ -485,3 +485,107 @@ describe('大小無視の置換と、長さが変わる字', () => {
     expect(replaceAll('Ankara ankara', 'ANKARA', 'X')).toEqual({ body: 'X X', count: 2 });
   });
 });
+
+/**
+ * 🔴 **見えていない所は置換の外**(#1087 A2)。直す前は本文の生の文字列全体に当てていたので、
+ * `docs` → `manual` でリンクの URL・`entry:` の lid・`asset:` の鍵・前書きの項目名まで書き換わり、リンクや画像が切れた。
+ */
+describe('置換の外に置く範囲(リンクの宛先 / 参照の語 / 前書きの項目名)', () => {
+  it('🔴 URL・ノートの参照・添付の鍵を変えず、見える字だけ変わる', () => {
+    const body = [
+      '[docs](https://example.com/docs/api)',
+      '[n](entry:n1docs-abc)',
+      '![i](asset:ab12docs34)',
+      'docs の説明',
+    ].join('\n');
+    const r = replaceAll(body, 'docs', 'manual');
+    expect(r.body).toBe(
+      [
+        '[manual](https://example.com/docs/api)',
+        '[n](entry:n1docs-abc)',
+        '![i](asset:ab12docs34)',
+        'manual の説明',
+      ].join('\n'),
+    );
+    expect(r.count, '画面の「N 件」と実際の置換数がずれた').toBe(2);
+    expect(countMatches(body, 'docs')).toBe(2);
+  });
+
+  it('🔴 前書きの項目名は変えず、値は置換する(`date` → `day` で日付が外れない)', () => {
+    const body = '---\ndate: date 2026\ntags: [a]\n---\n本文 date\n';
+    const r = replaceAll(body, 'date', 'day');
+    expect(r.body).toBe('---\ndate: day 2026\ntags: [a]\n---\n本文 day\n');
+    expect(r.count).toBe(2);
+    // 囲みの行そのものも対象外
+    expect(replaceAll(body, '---', '+++')).toEqual({ body, count: 0 });
+  });
+
+  it('🔴 長さが変わる字(`İ`)を含む本文でも、範囲の外に置く(原文の位置で比べる経路)', () => {
+    const body = 'İ [docs](https://x.example/docs) docs';
+    const r = replaceAll(body, 'docs', 'manual');
+    expect(r).toEqual({ body: 'İ [manual](https://x.example/docs) manual', count: 2 });
+    expect(countMatches(body, 'docs')).toBe(2);
+  });
+
+  it('コードの中は今どおり置換する(見え方の判断になるので変えない)', () => {
+    const body = '`[a](https://docs.example/x)` と\n```\n[b](entry:docs1)\n```\n';
+    const r = replaceAll(body, 'docs', 'manual');
+    expect(r.body).toBe('`[a](https://manual.example/x)` と\n```\n[b](entry:manual1)\n```\n');
+    expect(r.count).toBe(2);
+  });
+
+  it('検索語が保護の範囲にかかる当たりは、半端に書き換えない(対照群: 範囲の外は置換する)', () => {
+    const body = '[x](entry:abc) と entry: の語';
+    // 「y:ab」は参照の語の途中にかかる
+    expect(replaceAll(body, 'y:ab', 'Z')).toEqual({ body, count: 0 });
+    // 「(entry」は範囲の外で始まり、中で終わる ── 当たりの長さ全体で見る
+    expect(replaceAll(body, '(entry', 'Z')).toEqual({ body, count: 0 });
+    // 「entry: 」(後ろに何も続かない)は参照ではないので置換する
+    expect(replaceAll(body, 'entry: ', 'E ').body).toBe('[x](entry:abc) と E の語');
+  });
+
+  /**
+   * 大量の組み合わせ(検索語 × 本文の部品 × 大小)── 期待値は実装を参照しない:
+   * 守る部分を目印の字へ置き換えた本文で、検索語の出現を数える(数えるのは見える字だけ)。
+   */
+  const PARTS: Array<{ text: string; guard: string[] }> = [
+    { text: '[docs](https://example.com/docs/api)', guard: ['https://example.com/docs/api'] },
+    { text: '[n](entry:n1docs-abc)', guard: ['entry:n1docs-abc'] },
+    { text: '![i](asset:ab12docs34)', guard: ['asset:ab12docs34'] },
+    { text: '<https://example.com/docs>', guard: ['<https://example.com/docs>'] },
+    { text: '[ref]: https://x.example/docs/z', guard: ['https://x.example/docs/z'] },
+    { text: '<img src="a/docs.png" alt="docs">', guard: ['a/docs.png'] },
+    { text: 'see entry:docs1 and pkc://docs/x', guard: ['entry:docs1', 'pkc://docs/x'] },
+    { text: '見える docs と DOCS', guard: [] },
+  ];
+  const TERMS = ['docs', 'DOCS', 'a', 'e', 'https', 'entry', 'asset', 'x', 'api'];
+
+  it('🔴 検索語 × 部品 × 大小: 守る部分は置換前と同じ・件数は見える字だけ', () => {
+    let checked = 0;
+    let guarded = 0;
+    for (const part of PARTS) {
+      for (const term of TERMS) {
+        for (const cs of [false, true]) {
+          const body = `前\n${part.text}\n\n後ろ\n${part.text}\n末`;
+          const r = replaceAll(body, term, '@@', { caseSensitive: cs });
+          for (const g of part.guard) {
+            guarded += 1;
+            expect(r.body.split(g).length - 1, `${term}/${cs}: 守る部分 ${g} が変わった`).toBe(2);
+          }
+          // 期待値は別の観測から:守る部分を目印に替えた本文での出現数
+          let masked = body;
+          for (const g of part.guard) masked = masked.split(g).join('¶');
+          const hay = cs ? masked : masked.toLowerCase();
+          const needle = cs ? term : term.toLowerCase();
+          const want = hay.split(needle).length - 1;
+          expect(r.count, `${part.text} × ${term} × cs=${cs}`).toBe(want);
+          expect(countMatches(body, term, { caseSensitive: cs }), '件数と置換が食い違う').toBe(r.count);
+          checked += 1;
+        }
+      }
+    }
+    // 空振り防止: 部品 × 語 × 大小を全部回し、守る部分を実際に検めた回数が非ゼロ
+    expect(checked).toBe(PARTS.length * TERMS.length * 2);
+    expect(guarded).toBeGreaterThan(100);
+  });
+});

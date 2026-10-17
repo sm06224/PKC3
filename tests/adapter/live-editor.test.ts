@@ -225,6 +225,33 @@ describe('ライブエディタ(1 面)の配線', () => {
     expect(note.textContent).toContain('行ごとに編集できません');
   });
 
+  it('🔴 退避先でも「すべて置換」は insertText で書く(Ctrl+Z で戻れる。#1087 A4)', async () => {
+    setLive(true);
+    const FALLBACK = [':::figure{id="あ い"}', '', '本文 ほん', '', ':::', '', 'あと', ''].join('\n');
+    const r = rig(FALLBACK);
+    await settle();
+    const ta = r.root.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    expect(ta.value).toBe(FALLBACK);
+    const calls: string[] = [];
+    const doc = document as unknown as { execCommand?: unknown };
+    doc.execCommand = (cmd: string, _ui: boolean, text: string): boolean => {
+      calls.push(`${cmd}:${text}`);
+      ta.setRangeText(text, ta.selectionStart, ta.selectionEnd, 'end');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    };
+    try {
+      // 「すべて置換」が state の本文を書き換えた結果を当てる
+      const next = reduce(editing(FALLBACK), { type: 'REPLACE_IN_BODY', find: 'ほん', replace: 'ホン' }).state;
+      r.detail.render(next);
+    } finally {
+      delete doc.execCommand;
+    }
+    expect(ta.value).toBe(FALLBACK.replace('ほん', 'ホン'));
+    // 全文を選んで差し替えていない ── 変わった範囲だけ(`ta.value =` に戻すと 0 件になる)
+    expect(calls).toEqual(['insertText:ホン']);
+  });
+
   it('④ 退避した原文欄の打鍵も外へ出る(退避先で保存が死んでいない)', async () => {
     setLive(true);
     const r = rig([':::figure{id="あ い"}', '', '本文', '', ':::', '', 'あと', ''].join('\n'));
