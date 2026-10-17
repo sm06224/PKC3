@@ -236,6 +236,7 @@ import {
   canGoBack as paneCanGoBack,
   canGoForward as paneCanGoForward,
   paneFilterOptions,
+  clipPreview,
   isTabIndex,
   withTabActive,
   withTabAdded,
@@ -4578,13 +4579,50 @@ function startSearchJumpFromField(action: Dispatchable, result: ReduceResult): R
   return { ...result, state: { ...st, searchJump: started.state.searchJump } };
 }
 
+/** `reduce` の入れ子の深さ。⚠ 内側の `reduce`(グループ作成の中のノート作成など)と外側を見分けるための物。 */
+let reduceDepth = 0;
+
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
-  return dropStaleSearchJump(
-    startSearchJumpFromField(
-      action,
-      guardSectionDraftTransition(state, action, reduceWithHistory(state, action)),
-    ),
+  reduceDepth++;
+  try {
+    const r = dropStaleSearchJump(
+      startSearchJumpFromField(
+        action,
+        guardSectionDraftTransition(state, action, reduceWithHistory(state, action)),
+      ),
+    );
+    // 🔑 追随は**一番外側の 1 回だけ**(内側の `reduce` ごとに撃つと、同じ読みが何本も積まれる)
+    return reduceDepth === 1 ? followLauncherTiles(state, r) : r;
+  } finally {
+    reduceDepth--;
+  }
+}
+
+/**
+ * 🔴 **アプリ一覧を開いたことがあるなら、ノートの増減・題名の変化でタイルも読み直す**(#1087)。
+ *
+ * ⚠ 改名・ごみ箱へ移す / 戻す の後に何も頼まないと、旧名や消した物のタイルが残って、押すと
+ *   ごみ箱の物を開く。⚠ `SYS_BOOTED` は自分の枝で頼む(下の重ね止めで二重にならない)。
+ *   保存のたびの打鍵では撃たない(`entryListChanged` が増減と題名だけ見る)。
+ * ⚠ 同じ読みを既に積んでいる case(グループの作成・改名・並べ替えは自分で `readAppGroupNotes` を積む)
+ *   とは**重ねない** ── 世代つきの読み直しを 2 本積むと、1 本目が古い世代として扱われうる。
+ */
+function followLauncherTiles(
+  before: AppState,
+  result: ReduceResult,
+): ReduceResult {
+  const after = result.state;
+  if (
+    after.launcherTiles === null ||
+    after.entryMetas === before.entryMetas ||
+    !entryListChanged(before.entryMetas, after.entryMetas)
+  )
+    return result;
+  const have = new Set(result.events.map((e) => e.type));
+  const add = launcherReloadEvents(after.order, after.entryMetas, after.appGroupGen).filter(
+    (e) => !have.has(e.type),
   );
+  return add.length === 0 ? result : { ...result, events: [...result.events, ...add] };
 }
 
 /** ノートの増減か、題名が変わったか(並び順・日付・保存の印だけの変化は含めない)。 */
@@ -4869,6 +4907,15 @@ function reduceCore(
             : []),
           // 🔴 取込・別タブの変更で本文が変わっている ── 絞っている語で撃ち直す(#1087)
           ...searchRefreshEvents(state),
+          // 🔴 2 ペインの下見も撃ち直す(#1087)── 別タブが書くと古い本文のままだった。
+          //    消えた行・畳んだ下見には撃たない。前の本文は届くまで保つ(ちらつかせない)
+          ...(sameCid &&
+          state.dual.previewOn &&
+          state.dual.preview !== null &&
+          metas.has(state.dual.preview.lid) &&
+          dualPreviewTarget(state, state.dual) === state.dual.preview.lid
+            ? [{ type: 'REQUEST_DUAL_PREVIEW' as const, lid: state.dual.preview.lid }]
+            : []),
           ...(state.viewMode === 'query'
             ? [{ type: 'REQUEST_QUERY_SCAN' as const, key: state.queryKey }]
             : []),
@@ -4910,6 +4957,14 @@ function reduceCore(
            *   連絡先を使わない user に負わせない ── 予定・集計と同じ流儀)。
            */
           ...(state.contactScan === null ? [] : [{ type: 'REQUEST_CONTACT_SCAN' as const }]),
+          /**
+           * 🔴 **アプリ一覧のタイルとグループも頼み直す**(#1087。上の連絡先と対)。
+           * ⚠ 落とさずに素通りしていたので、別タブの書込・取り込みの再読込・改名・ごみ箱で
+           *   **旧名や消した物のタイルが残り、押すとごみ箱の物を開いた**。
+           * ⚠ 一度も開いていない user には撃たない(`launcherTiles === null`)。
+           * ⚠ **新しい `order` / `metas` で数える**(取り込んだ添付を載せるため)。
+           */
+          ...(state.launcherTiles === null ? [] : launcherReloadEvents(order, metas, state.appGroupGen)),
           /**
            * 🔴 **録ったものも頼み直す**(#683 段①。上の連絡先と対)。
            * ⚠ 落とすだけでは、**取り込んだ録音が 1 件も現れない** ── 集め直しの
@@ -10717,6 +10772,21 @@ function readAppGroupNotes(s: AppState): DomainEvent {
   };
 }
 
+/**
+ * 🔴 **アプリ一覧のタイルとグループの読み直し 2 本**(#1087)。封筒を組む口は `readAppGroupNotes` と
+ * ここの 2 つに寄せる ── 並びと世代は**変更を当てた後**のものを渡す。
+ */
+function launcherReloadEvents(
+  order: readonly string[],
+  metas: ReadonlyMap<string, EntryMeta>,
+  gen: number,
+): DomainEvent[] {
+  return [
+    { type: 'REQUEST_LAUNCHER_TILES', entries: attachmentEntriesOf(order, metas) },
+    { type: 'REQUEST_APP_GROUP_NOTES', entries: appGroupEntriesOf(order, metas), gen },
+  ];
+}
+
 function attachmentEntriesOf(
   order: readonly string[],
   metas: ReadonlyMap<string, EntryMeta>,
@@ -11383,8 +11453,20 @@ function syncShownBodies(
   state: AppState,
   lid: string,
   body: string,
-): { splitBodies: ReadonlyMap<string, string>; placeBodies: ReadonlyMap<string, PlaceExcerpt> } {
+): {
+  splitBodies: ReadonlyMap<string, string>;
+  placeBodies: ReadonlyMap<string, PlaceExcerpt>;
+  /** 🔴 2 ペインの下見(#1087)。⚠ **変わるときだけ**入れる ── 無いキーは spread で他の枝の `dual` を踏まない。 */
+  dual?: DualState;
+} {
   const splitBodies = syncSplitBody(state, lid, body);
+  // 🔴 **2 ペインの下見も同じ書込で追随させる**(#1087)。⚠ 下見は読み込み時に切る(`clipPreview`)ので
+  //    ここでも同じ切り方にする ── 長い本文を常駐させない。いま指している行のときだけ。
+  const pv = state.dual.preview;
+  const dualNext: DualState | undefined =
+    state.dual.previewOn && pv !== null && pv.lid === lid && pv.body !== clipPreview(body)
+      ? { ...state.dual, preview: { lid, body: clipPreview(body) } }
+      : undefined;
   const have = placeBodiesOf(state);
   let bodies: Map<string, PlaceExcerpt> | null = null;
   const prev = have.get(lid);
@@ -11405,15 +11487,23 @@ function syncShownBodies(
     bodies ??= new Map(have);
     bodies.set(key, next);
   }
-  return { splitBodies, placeBodies: bodies ?? state.placeBodies };
+  return {
+    splitBodies,
+    placeBodies: bodies ?? state.placeBodies,
+    ...(dualNext === undefined ? {} : { dual: dualNext }),
+  };
 }
 
 /** `syncShownBodies` の答えが、いまの state と同じか(同じなら state を差し替えない)。 */
 function sameShownBodies(
   state: AppState,
-  shown: { splitBodies: ReadonlyMap<string, string>; placeBodies: ReadonlyMap<string, PlaceExcerpt> },
+  shown: ReturnType<typeof syncShownBodies>,
 ): boolean {
-  return shown.splitBodies === state.splitBodies && shown.placeBodies === state.placeBodies;
+  return (
+    shown.splitBodies === state.splitBodies &&
+    shown.placeBodies === state.placeBodies &&
+    shown.dual === undefined
+  );
 }
 
 function withoutLid<T extends { readonly lid: string }>(

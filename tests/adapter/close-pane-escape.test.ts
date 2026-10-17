@@ -62,6 +62,7 @@ function mount(
   closeViewWindow: () => CloseViewWindowResult = () => 'not-a-window',
   keymap: KeymapStore = new KeymapStore(null),
   closeNoteWindow?: () => CloseViewWindowResult,
+  isNoteWindow?: () => boolean,
 ) {
   const root = document.createElement('div');
   document.body.append(root);
@@ -69,7 +70,7 @@ function mount(
   const regions = buildShell(root);
   const center = new CenterRouter(regions.detail);
   d.onState((st) => center.render(st));
-  const services: BinderServices = { closeViewWindow, closeNoteWindow };
+  const services: BinderServices = { closeViewWindow, closeNoteWindow, isNoteWindow };
   unbinds.push(bindActions(root, d, services, keymap));
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
   const filterInput = () => root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]')!;
@@ -270,6 +271,73 @@ describe('🔴 別のウィンドウ・面を Escape で閉じる(#1042 C3)', ()
     expect(m.d.getState().phase, 'Escape で編集が終わった').toBe('editing');
   });
 
+  /**
+   * 🔴 **付箋の窓で、追記欄の打ちかけ / 章の欄が在る間は、焦点がどこでも Escape で閉じない**(#1087 A-3 / A-3b)。
+   * ⚠ 欄の中の Escape は「空のときだけ」閉じる門を持つが、焦点を欄の外へ外すと別の口
+   *   (`deselect-entry` の枝)へ来て、打った字ごと窓が閉じていた。2 つの口は同じ答え
+   *   (`noteWindowHasTyping`)を引く。対照群は「空なら閉じる」(両方の口)。
+   */
+  function noteWindow() {
+    let closed = 0;
+    const m = mount(
+      () => 'not-a-window',
+      new KeymapStore(null),
+      () => {
+        closed++;
+        return 'closed';
+      },
+      () => true,
+    );
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    m.d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '# 見出し\n本文' });
+    const box = document.createElement('textarea');
+    box.setAttribute('data-pkc-field', 'append-input');
+    m.root.append(box);
+    return { m, box, closedCount: () => closed };
+  }
+
+  it('🔴 追記欄に字が在って焦点が欄の外のとき、Escape で窓が閉じず、ノートも閉じない', () => {
+    const { m, box, closedCount } = noteWindow();
+    box.value = '打ちかけ';
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    pressEscape();
+    expect(closedCount(), '打ちかけがあるのに窓が閉じた').toBe(0);
+    expect(m.d.getState().selectedLid, '付箋なのに deselect-entry へ流れた').toBe('a');
+    expect(box.value, '打った字が消えた').toBe('打ちかけ');
+  });
+
+  it('対照群: 追記欄が空なら、焦点が外でも欄の中でも Escape で窓が閉じる', () => {
+    const { box, closedCount } = noteWindow();
+    pressEscape();
+    expect(closedCount(), '空なのに外の Escape で閉じない').toBe(1);
+    box.focus();
+    pressEscape(box);
+    expect(closedCount(), '空なのに欄の中の Escape で閉じない').toBe(2);
+  });
+
+  it('🔴 章の欄が開いているとき、欄の外 / 空の追記欄の中のどちらの Escape でも窓が閉じない', () => {
+    const { m, box, closedCount } = noteWindow();
+    m.d.dispatch({ type: 'OPEN_SECTION_DRAFT', lid: 'a', line: 0 });
+    expect(m.d.getState().sectionDraft, '前提: 章の欄が開いている').not.toBeNull();
+    pressEscape();
+    expect(closedCount(), '章の欄が開いているのに外の Escape で窓が閉じた').toBe(0);
+    box.focus();
+    pressEscape(box);
+    expect(closedCount(), '章の欄が開いているのに、空の追記欄の中の Escape で窓が閉じた').toBe(0);
+    expect(m.d.getState().selectedLid).toBe('a');
+  });
+
+  it('対照群: 本体タブ(付箋でない)では、打ちかけがあっても今までどおり Escape でノートを閉じる', () => {
+    const m = mount();
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    const box = document.createElement('textarea');
+    box.setAttribute('data-pkc-field', 'append-input');
+    box.value = '打ちかけ';
+    m.root.append(box);
+    pressEscape();
+    expect(m.d.getState().selectedLid, '本体タブの Escape が効かなくなった').toBeNull();
+  });
+
   it('⚠ 打っている欄では、Escape で面が閉じない', () => {
     const m = mount();
     m.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'query' });
@@ -330,5 +398,8 @@ describe('🔴 別のウィンドウ・面を Escape で閉じる(#1042 C3)', ()
       code,
       'closeNoteWindow が closeViewWindow(view-window.ts)と別の道で閉じている',
     ).toMatch(/closeNoteWindow:\s*\(\)\s*=>\s*closeViewWindow\(\{\s*holding:\s*\(\)\s*=>\s*heldNoteWindow/);
+    expect(code, 'isNoteWindow の配線が落ちている(打ちかけのある付箋が本体の Escape へ流れる)').toMatch(
+      /isNoteWindow:\s*\(\)\s*=>\s*heldNoteWindow/,
+    );
   });
 });
