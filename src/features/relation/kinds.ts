@@ -56,6 +56,13 @@ export const CREATABLE_KINDS: readonly RelationKind[] = RELATION_KINDS.filter(
   (k) => k !== STRUCTURAL,
 );
 
+/**
+ * 🔴 **向きに意味が無い種類**(#1163 依頼 319。Gemini の裁定 A)。A から B へ「関連」があるとき、
+ * B から A への「関連」は同じつながりなので足させない(右のペインに 2 行並び、どちらを消すか迷う)。
+ * ⚠ 向きに意味がある種類(出典・時系列・分類)は、逆向きを今までどおり許す。
+ */
+export const DIRECTIONLESS_KINDS: readonly string[] = ['semantic'];
+
 /** 画面に出す名前(知らない種類はそのまま出す ── 黙って消さない)。 */
 export function relationLabel(kind: string): string {
   return isRelationKind(kind) ? RELATION_LABELS[kind] : kind;

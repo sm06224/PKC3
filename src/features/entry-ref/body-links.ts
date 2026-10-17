@@ -56,7 +56,7 @@ const LID_CHARS = 'A-Za-z0-9_\\-';
  */
 // ⚠ `i` ── 描画は `Entry:n1` も内部リンクとして焼く(綴りの大小は問わない)ので、読む側も同じにする。
 //    lid の文字(大小の別)は `[A-Za-z]` で既に区別して取る。
-const LINK_RE = new RegExp(`(?<![${LID_CHARS}])entry:([${LID_CHARS}]+)`, 'gi');
+const DEST_RE = new RegExp(`^entry:([${LID_CHARS}]+)`, 'i');
 
 /**
  * 🔴 **コードの中に書いてあるだけの字は、リンクではない**(#1087)。
@@ -70,7 +70,10 @@ function withoutCode(body: string): string {
   if (body.includes('`') || body.includes('~~~')) {
     // 🔴 csv / tsv / psv の囲みは**コードではなく表**として描かれ、セルの `entry:` は押せる ──
     //   参照元・つながり・ごみ箱の警告から外すと「押せるのに数えない」になる(囲みの 1 語目で見分ける)
-    for (const r of scanLinks(body).code) if (!isTableFence(body, r[0])) ranges.push(r);
+    for (const r of scanLinks(body).code) {
+      if (!isTableFence(body, r[0])) ranges.push(r);
+      else ranges.push(...fenceMarkerLines(body, r));
+    }
   }
   // 字下げのコード(4 スペース / タブ)── markdown-it もコードとして描く(リンクにならない)。範囲は `link-scan.ts`
   if (body.includes('    ') || body.includes('\t')) ranges.push(...indentedCodeRanges(body));
@@ -87,6 +90,22 @@ function withoutCode(body: string): string {
   return out + body.slice(cursor);
 }
 
+/**
+ * 表の囲みの**開きと閉じの行**だけを空白にする範囲(中身は表のセルなので残す)。
+ * 🔑 残さないと、後ろで `scanLinks` に通したとき囲みの中がコード扱いで読み飛ばされ、押せるセルのリンクが消える。
+ */
+function fenceMarkerLines(body: string, r: [number, number]): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  const open = body.indexOf('\n', r[0]);
+  out.push([r[0], open === -1 || open > r[1] ? r[1] : open]);
+  let end = r[1];
+  while (end > r[0] && (body[end - 1] === '\n' || body[end - 1] === '\r')) end--;
+  let start = end;
+  while (start > r[0] && body[start - 1] !== '\n' && body[start - 1] !== '\r') start--;
+  if (open !== -1 && start > open && /^ {0,3}(?:`{3,}|~{3,})[ \t]*$/.test(body.slice(start, end))) out.push([start, end]);
+  return out;
+}
+
 /** 範囲の先頭が csv / tsv / psv の囲みの開きか(info string の 1 語目。`-norender` は表にならないので当てない。行内コードは当たらない)。 */
 const TABLE_FENCE_OPEN = /^(?:`{3,}|~{3,})[ \t]*(?:csv|tsv|psv)(?:-render|-both)?(?![^\s`])/i;
 function isTableFence(body: string, start: number): boolean {
@@ -101,7 +120,62 @@ function isTableFence(body: string, start: number): boolean {
 const TOKEN_ONLY = new RegExp(`^[${LID_CHARS}]+$`);
 
 /**
+ * 🔴 **画面に出ない囲みの中は、リンクではない**(#1163 依頼 178 / 230 / 271。Gemini の裁定)。
+ *
+ * 隠したメモ(`%%…%%` / `%%%` / `:::comment`)と、画面(html)以外を指した `:::if{format=…}` は
+ * 描かれない ── 中に `entry:` と書いてあっても、押せるリンクは出ない。範囲は空白に置き換えて返す
+ * (長さが変わらない)。🔑 囲みの読み方は `body-tags.ts` の `scanBodyTags` と同じ(判定を揃える)。
+ * ⚠ 数式の中は除いていない(数式の読みは重いので、worker に持ち込まない)。
+ */
+const COMMENT_FENCE = /^ {0,3}%%%\s*$/;
+const CONTAINER_OPEN = /^ {0,3}:::+\s*([A-Za-z][\w-]*)?(\{[^}]*\})?\s*$/;
+const CONTAINER_CLOSE = /^ {0,3}:::+\s*$/;
+const IF_FORMAT = /format\s*=\s*([A-Za-z0-9_-]+)/;
+function withoutHidden(text: string): string {
+  if (!text.includes('%%') && !text.includes(':::')) return text;
+  const lines = text.split(/(\r\n|[\r\n])/); // 区切りも残す(長さを変えない)
+  let hidden = 0;
+  const containers: boolean[] = [];
+  const blank = (s: string): string => s.replace(/[^\r\n]/g, ' ');
+  for (let i = 0; i < lines.length; i += 2) {
+    const raw = lines[i]!;
+    if (COMMENT_FENCE.test(raw)) {
+      hidden = hidden > 0 ? hidden - 1 : hidden + 1;
+      lines[i] = blank(raw);
+      continue;
+    }
+    const co = CONTAINER_OPEN.exec(raw);
+    if (co !== null && co[1] !== undefined) {
+      const fmt = IF_FORMAT.exec(co[2] ?? '')?.[1];
+      const hide = co[1] === 'comment' || (co[1] === 'if' && fmt !== undefined && fmt !== 'html');
+      containers.push(hide);
+      if (hide) hidden += 1;
+      lines[i] = hidden > 0 ? blank(raw) : raw;
+      continue;
+    }
+    if (CONTAINER_CLOSE.test(raw)) {
+      const was = containers.pop();
+      if (was === true) hidden -= 1;
+      lines[i] = hidden > 0 || was === true ? blank(raw) : raw;
+      continue;
+    }
+    if (hidden > 0) lines[i] = blank(raw);
+    else if (raw.includes('%%')) lines[i] = raw.replace(/%%[^\n]*?%%/g, blank);
+  }
+  return lines.join('');
+}
+
+/** `<entry:…>` / `<pkc://…/entry/…>`(山括弧で囲んだ宛先は、画面ではリンクになる)。 */
+const AUTOLINK_RE = /<((?:entry:|pkc:\/\/)[^<>\s]*)>/gi;
+
+/**
  * 本文が指しているノートの lid(重複を畳み、**出てきた順**)。
+ *
+ * 🔴 **数えるのは「画面でリンクとして出るもの」だけ**(#1163 依頼 178 / 230 / 271)。
+ * `[字](entry:lid)` / `![字](entry:lid)` / 参照形式の定義行 / `<entry:lid>` の宛先 ── 本文に
+ * `entry:lid` と字で書いただけのもの(リンクの形になっていない)や、隠したメモの中は数えない。
+ * ⚠ 直す前は本文の字面を全部拾っていた(「見落とすより、多めに」)。参照元を押して開いたのに
+ *   リンクが見当たらない、をなくす向きに替えた。
  *
  * ⚠ `#fragment` は落とす ── 章へのリンクでも、繋がっている先はノートである。
  * ⚠ 自分自身は**落とさない**(判断は呼び側 ── 図は落とすが、数えたい向きもある)。
@@ -111,19 +185,37 @@ const TOKEN_ONLY = new RegExp(`^[${LID_CHARS}]+$`);
  *   (あちらはこの容れ物に居ないので、辺を引く相手が居ない)。
  */
 export function bodyLinkTargets(body: string, cid?: string | null): string[] {
+  const found: Array<[number, string]> = [];
+  const portable =
+    cid !== undefined && cid !== null && TOKEN_ONLY.test(cid)
+      ? new RegExp(`^pkc://${cid}/entry/([${LID_CHARS}]+)`)
+      : null;
+  const lidOf = (dest: string): string | null => {
+    const d = dest.trim();
+    const m = DEST_RE.exec(d);
+    if (m) return m[1]!;
+    const p = portable?.exec(d);
+    return p ? p[1]! : null;
+  };
+  const text = withoutHidden(withoutCode(body));
+  for (const site of scanLinks(text).sites) {
+    const lid = lidOf(site.dest);
+    if (lid !== null) found.push([site.destStart, lid]);
+  }
+  if (text.includes('<')) {
+    AUTOLINK_RE.lastIndex = 0;
+    for (let m = AUTOLINK_RE.exec(text); m !== null; m = AUTOLINK_RE.exec(text)) {
+      const lid = lidOf(m[1]!);
+      if (lid !== null) found.push([m.index, lid]);
+    }
+  }
+  found.sort((a, b) => a[0] - b[0]);
   const out: string[] = [];
   const seen = new Set<string>();
-  const take = (lid: string): void => {
-    if (seen.has(lid)) return;
+  for (const [, lid] of found) {
+    if (seen.has(lid)) continue;
     seen.add(lid);
     out.push(lid);
-  };
-  const text = withoutCode(body);
-  LINK_RE.lastIndex = 0;
-  for (let m = LINK_RE.exec(text); m !== null; m = LINK_RE.exec(text)) take(m[1]!);
-  if (cid !== undefined && cid !== null && TOKEN_ONLY.test(cid)) {
-    const portable = new RegExp(`pkc://${cid}/entry/([${LID_CHARS}]+)`, 'g');
-    for (let m = portable.exec(text); m !== null; m = portable.exec(text)) take(m[1]!);
   }
   return out;
 }

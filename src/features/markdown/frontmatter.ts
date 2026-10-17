@@ -28,7 +28,7 @@
  */
 
 import { resolveCap } from '../notation/caps';
-import { isTagKey, looksHashTagged } from '../flavor/tag-words';
+import { hasMisreadableTagShape, isTagKey, looksHashTagged } from '../flavor/tag-words';
 
 export type FrontmatterValue =
   | string
@@ -449,7 +449,7 @@ export interface FrontmatterProblem {
    *   **`kind === 'unreadable'` で判定する**(`!== 'trailing'` と書くと、
    *   種別を足したときに読めている物まで「読めなくなりました」と言う)。
    */
-  kind: 'unreadable' | 'trailing' | 'overridden';
+  kind: 'unreadable' | 'trailing' | 'overridden' | 'tags';
   /** 画面にそのまま出す 1 行。⚠ **user の言葉**で書く(内部語を出さない)。 */
   detail: string;
 }
@@ -480,6 +480,16 @@ export function frontmatterProblem(body: string): FrontmatterProblem | null {
     return {
       kind: 'unreadable',
       detail: 'この文書の情報が大きすぎて読み取れませんでした(減らすと読めるようになります)',
+    };
+  }
+  /**
+   * 🔴 **タグの書き方が読み違えられる形**(#1163 依頼 318)。⚠ `meta` は(一部)読めているので `unreadable` ではない ──
+   *   出すのは「**読み違えているかもしれない**」という事実で、タグの足し引きだけを止める(本文の他の操作は止めない)。
+   */
+  if (r.found && hasMisreadableTagShape(body.split(/\r?\n/).slice(1, Math.max(1, frontmatterLineCount(body) - 1)))) {
+    return {
+      kind: 'tags',
+      detail: 'この文書の情報に、タグを読み違えるかもしれない書き方があります(タグを足す・外す操作は、このノートでは止めています)',
     };
   }
   /**

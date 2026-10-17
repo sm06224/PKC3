@@ -20,6 +20,67 @@
 import { estimateReadingTime, type ReadingTimeEstimate } from '@features/markdown/reading-time';
 
 /**
+ * 🔴 **見た目の字数(書記素)で数える**(#1163 依頼 165 / 315。Gemini の裁定)。
+ *
+ * 直す前は UTF-16 の長さ(`length`)だったので、😀 や 𠮷 が 2 字、Windows の改行が 2 字、家族の絵文字のような
+ * 合字が 7 字に数えられた。見える 1 字を 1 と数える。
+ * 🔑 **ほとんどの本文は分割を要さない**(結合や絵文字の仕組みが 1 字も無い)── そのときは `length` を返す
+ *   (40 万字を毎回 `Intl.Segmenter` で歩かない)。判定は 1 本の正規表現で、仕組みが 1 字でもあれば全文を歩く。
+ * ⚠ `Intl.Segmenter` が無い環境ではコードポイントで数える(絵文字 1 つを 1 と数えるところまでは同じ)。
+ */
+const SEGMENTING_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x0300, 0x036f], // 結合用の記号
+  [0x0483, 0x0489],
+  [0x0591, 0x05bd],
+  [0x0600, 0x06ff], // アラビア文字
+  [0x0900, 0x0dff], // インド系の文字
+  [0x1100, 0x11ff], // ハングルの字母
+  [0x1ab0, 0x1aff],
+  [0x200b, 0x200f], // 幅ゼロの接合子・方向
+  [0x2028, 0x2029],
+  [0x20d0, 0x20ff],
+  [0x3099, 0x309a], // 濁点・半濁点(単独の結合文字)
+  [0xa960, 0xa97f],
+  [0xd7b0, 0xd7ff],
+  [0xd800, 0xdfff], // サロゲート(絵文字・𠮷)
+  [0xfe00, 0xfe0f], // 異体字セレクタ
+  [0x000d, 0x000d], // CR(CRLF は 1 字)
+];
+const hex4 = (n: number): string => `\\u${n.toString(16).padStart(4, '0')}`;
+// ⚠ 範囲は数で持って、実行時に字の集まりへ組む(結合文字をソースに直書きしない)
+const NEEDS_SEGMENTING = new RegExp(`[${SEGMENTING_RANGES.map(([a, z]) => `${hex4(a)}-${hex4(z)}`).join('')}]`);
+let segmenter: Intl.Segmenter | null | undefined;
+/**
+ * 分割を要さない本文だけ、その字数(`length`)を返す。要するなら `null`。
+ * 🔑 打っている最中に毎回全文を歩かないための入口 ── 返せたときは常に最新、`null` のときは呼び手が前回の数を持ち越す。
+ */
+export function cheapGraphemeCount(text: string): number | null {
+  return NEEDS_SEGMENTING.test(text) ? null : text.length;
+}
+export function countGraphemes(text: string): number {
+  if (!NEEDS_SEGMENTING.test(text)) return text.length;
+  if (segmenter === undefined) {
+    segmenter =
+      typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+        ? new Intl.Segmenter('ja', { granularity: 'grapheme' })
+        : null;
+  }
+  let n = 0;
+  if (segmenter === null) {
+    // コードポイントで数える(サロゲート対は 1 字)
+    for (let i = 0; i < text.length; i += 1) {
+      const c = text.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length) i += 1;
+      n += 1;
+    }
+    return n;
+  }
+  const it = segmenter.segment(text)[Symbol.iterator]();
+  while (!it.next().done) n += 1;
+  return n;
+}
+
+/**
  * 情報ペイン等に表示する文字数と読了目安の文字列を組み立てる。
  *
  * @param chars 本文の長さ(生。空白・改行・先頭の設定行を含む)。`null` は「分からない」

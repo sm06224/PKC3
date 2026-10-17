@@ -61,7 +61,7 @@ describe('本文の組み立てと読み戻し', () => {
   });
 
   it('🔑 読み手は `bodyLinkTargets` そのもの(2 本目の規則を持たない)', () => {
-    const body = '- [A](entry:a)\n- [A again](entry:a)\n手で書いた entry:zz も拾う\n';
+    const body = '- [A](entry:a)\n- [A again](entry:a)\n手で書いた [z](entry:zz) も拾う\n';
     expect(stackLids(body)).toEqual(bodyLinkTargets(body));
     // 重複は畳まれ、出てきた順
     expect(stackLids(body)).toEqual(['a', 'zz']);

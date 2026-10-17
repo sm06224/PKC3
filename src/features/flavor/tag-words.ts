@@ -131,3 +131,44 @@ export function tagsMetaKey(meta: Readonly<Record<string, unknown>>): string | n
   }
   return null;
 }
+
+/**
+ * 🔴 **タグの書き方が、読み違えられる形か**(#1163 依頼 318。Gemini の裁定 A:読み違えていることを知らせ、そのノートではタグの足し引きを止める)。
+ *
+ * 読み違える形(`tags:` の行から先):
+ * - `tags: [a,` の次の行に `b]` と続く(複数行の `[ ]`)── 「a」だけに読まれる
+ * - `tags: >-` / `tags: |`(長い文の書き方)── 「>-」というタグに読まれる
+ * - `tags:` の次の `- a` の並びが、空行をはさむ ── 空行より後ろが取り残される
+ * - `- a # メモ` のように行末にメモが付く ── 「a # メモ」というタグに読まれる
+ *
+ * ⚠ 読み違えたまま足し引きすると、書き直した行の外に残りの行が取り残される。だから**止める**。
+ * ⚠ 読める書き方を増やすのはその後(同じ裁定の B は取らない)。
+ * @param lines 前書きの**中の**行(開きと閉じの `---` は含めない)
+ */
+export function hasMisreadableTagShape(lines: readonly string[]): boolean {
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^([A-Za-z_][\w.-]*)[ \t]*:(.*)$/.exec(lines[i]!);
+    if (m === null || !isTagKey(m[1]!)) continue;
+    const v = m[2]!.trim();
+    if (v.startsWith('[')) {
+      if (!v.includes(']')) return true;
+      continue;
+    }
+    if (/^[>|][+-]?\d*(?:[ \t]+#.*)?$/.test(v)) return true;
+    if (v !== '') continue;
+    let blank = false;
+    for (let j = i + 1; j < lines.length; j++) {
+      const l = lines[j]!;
+      if (/^[ \t]*$/.test(l)) {
+        blank = true;
+        continue;
+      }
+      const item = /^[ \t]*-[ \t]+(.*)$/.exec(l);
+      if (item === null) break;
+      if (blank) return true;
+      const text = item[1]!.trim();
+      if (!/^["']/.test(text) && /[ \t]#/.test(text)) return true;
+    }
+  }
+  return false;
+}

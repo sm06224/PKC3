@@ -89,6 +89,18 @@ export function formatStoredStamp(value: string | null | undefined, fallback = '
 }
 
 /**
+ * 🔴 **日付と時刻を分まで**(`YYYY-MM-DD HH:MM`。#1163 依頼 166)── 右のペインの作成・更新。
+ * 同じ日に何度書いても、いつ書いたかを見分けられるようにする(日付にマウスを載せなくても読める)。
+ * ⚠ 時刻を持たない値(日付だけ)は `formatStoredDate` と同じ(`YYYY/MM/DD`)。読めない値はそのまま。
+ */
+export function formatStoredMinute(value: string | null | undefined, fallback = '—'): string {
+  if (!value) return fallback;
+  const at = storedInstant(value);
+  if (at === null) return formatStoredDate(value, fallback);
+  return `${String(at.getFullYear())}-${pad2(at.getMonth() + 1)}-${pad2(at.getDate())} ${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
+}
+
+/**
  * 情報列などの**そのまま読む**場所向け(`YYYY/MM/DD`)。
  * 読めない値は `fallback`(既定 `—`)。⚠ 形が違う値は捨てずにそのまま出す ──
  * 「読めなかった」ことが見えるほうが、無かったことにするより良い。

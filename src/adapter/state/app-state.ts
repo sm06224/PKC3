@@ -185,7 +185,7 @@ import { NO_KINDS, entryFilterOf, normalizeQuery, visibleOrder } from '@features
 import { commandQueryOf } from '@features/palette/command-query';
 import { toggleKind } from '@features/filter/kind-filter';
 import { normalizeFindQuery } from '@features/filter/search-hits';
-import { STRUCTURAL, type RelationKind } from '@features/relation/kinds';
+import { DIRECTIONLESS_KINDS, STRUCTURAL, type RelationKind } from '@features/relation/kinds';
 import { replaceAll } from '@features/markdown/body-replace';
 import { foldAttachmentHead, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
 import {
@@ -3321,13 +3321,27 @@ export type UserAction =
        *   2 回目の知らせが 1 回目を上書きしていた(外せなかった件数が消えていた)。
        */
       afterPrevious?: boolean;
+      /**
+       * 🔴 **名前の変更の 1 回目(外す)**(#1163 依頼 314。Gemini の裁定)。本文の行にしか書いていないノートは
+       *   名前を変える相手から外す(2 回目の「付ける」にも入れない)── 本文は user が書いた文章で、
+       *   機械が書き換えないため。外した件数は知らせで言う。
+       */
+      renameFirst?: boolean;
     }
   /**
    * 🔴 **タグの名前を変えたとき、スマートフォルダの条件の同じ名前も変える**(#1087)。
    * ⚠ 直す前は条件が旧い名前のまま残り、変えた後に集まるノートが変わった(旧い名前を持つノートが
    *   もう無いので、スマートフォルダが空になる)。相手は**スマートフォルダ全部**(いま画面に出ている物とは限らない)。
    */
-  | { type: 'RENAME_SMART_TAG'; from: string; to: string }
+  | {
+      type: 'RENAME_SMART_TAG';
+      from: string;
+      /**
+       * 🔴 `null` = **タグを全部外した**(#1163 依頼 321。Gemini の裁定 A)。条件は変えず、そのタグを条件にした
+       *   スマートフォルダの件数を**知らせるだけ**にする(外したタグを後でまた付ける使い方があるため)。
+       */
+      to: string | null;
+    }
   /**
    * 🔴 **一時の知らせ**(#402 ①)。⚠ `OP_FAILED` と混ぜない ── あちらは赤い帯で、
    *   こちらは成功の内訳である(「3 件は既に付いていました」を失敗にしない)。
@@ -4305,7 +4319,8 @@ export type DomainEvent =
       /** 🔴 タグの名前の変更に、スマートフォルダの条件を合わせる(`RENAME_SMART_TAG`)。 */
       type: 'REQUEST_SMART_TAG_RENAME';
       from: string;
-      to: string;
+      /** `null` = 外しただけ(件数を知らせる。条件は書き換えない)。 */
+      to: string | null;
       targets: readonly { lid: string; title: string; archetype: string; entryOrder: number }[];
     }
   | { type: 'REQUEST_RELATION_UPSERT'; id: string; fromLid: string; toLid: string; kind: string }
@@ -4328,6 +4343,8 @@ export type DomainEvent =
       field?: TagInputField;
       /** 🔴 前の知らせに続けて言う(`BULK_TAG.afterPrevious`)。 */
       afterPrevious?: boolean;
+      /** 🔴 名前の変更の 1 回目(`BULK_TAG.renameFirst`)。 */
+      renameFirst?: boolean;
       targets: readonly {
         lid: string;
         title: string;
@@ -9737,6 +9754,7 @@ function reduceCore(
             targets,
             ...(action.field === undefined ? {} : { field: action.field }),
             ...(action.afterPrevious === true ? { afterPrevious: true } : {}),
+            ...(action.renameFirst === true ? { renameFirst: true } : {}),
           },
         ],
       };
@@ -9744,7 +9762,7 @@ function reduceCore(
     case 'RENAME_SMART_TAG': {
       if (state.phase !== 'ready') return { state, events: [] };
       const from = action.from.trim();
-      const to = action.to.trim();
+      const to = action.to === null ? null : action.to.trim();
       if (from === '' || to === '') return { state, events: [] };
       const targets = [...state.entryMetas.values()]
         .filter((m) => m.archetype === SMART_ARCHETYPE)
@@ -11092,7 +11110,27 @@ export function hasSameRelation(
   toLid: string,
   kind: string,
 ): boolean {
-  return relations.some((r) => r.fromLid === fromLid && r.toLid === toLid && r.kind === kind);
+  // 🔴 向きに意味が無い種類(関連)は、逆向きも同じつながり(#1163 依頼 319)
+  const flip = DIRECTIONLESS_KINDS.includes(kind);
+  return relations.some(
+    (r) =>
+      r.kind === kind &&
+      ((r.fromLid === fromLid && r.toLid === toLid) || (flip && r.fromLid === toLid && r.toLid === fromLid)),
+  );
+}
+
+/** 向きだけが逆の同じ種類が在るか(向きに意味が無い種類で、断りの字を分けるのに使う。#1163 依頼 319)。 */
+export function hasReverseOnlyRelation(
+  relations: readonly Relation[],
+  fromLid: string,
+  toLid: string,
+  kind: string,
+): boolean {
+  return (
+    DIRECTIONLESS_KINDS.includes(kind) &&
+    !relations.some((r) => r.kind === kind && r.fromLid === fromLid && r.toLid === toLid) &&
+    relations.some((r) => r.kind === kind && r.fromLid === toLid && r.toLid === fromLid)
+  );
 }
 
 /** 同じ id は後着で上書きして合流(二重復元で関係が 2 本にならない)。 */
