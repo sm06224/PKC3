@@ -60,7 +60,10 @@ const browserStorage: NoticeStorage = {
  */
 export class NoticeStore {
   private seen: string[];
+  /** 控え(この session で選んだ値)。保存に書けなかったときだけ読みに使う。 */
   private off: boolean;
+  /** 🔴 直近の書き込みが保存に届かなかったか。真の間は読みも控えを返す。 */
+  private saveFailed = false;
 
   constructor(private readonly storage: NoticeStorage = browserStorage) {
     this.seen = this.readSeen();
@@ -84,7 +87,9 @@ export class NoticeStore {
 
   /** お知らせを出してよいか(恒久オフでない)。 */
   enabled(): boolean {
-    return !this.off;
+    // ⚠ 読むたびに保存を見る ── 別のタブで切り替えた値が再読込なしで届く
+    if (this.saveFailed) return !this.off;
+    return this.storage.get(OFF_KEY) !== '1';
   }
 
   /**
@@ -94,6 +99,8 @@ export class NoticeStore {
     this.off = !on;
     if (this.off) this.storage.set(OFF_KEY, '1');
     else this.storage.remove(OFF_KEY);
+    // 書込の口は失敗を投げない ── 読み戻して、届いたかを見る(届いていなければ控えが正)
+    this.saveFailed = (this.storage.get(OFF_KEY) === '1') !== this.off;
   }
 
   /**

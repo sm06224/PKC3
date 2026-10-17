@@ -35,7 +35,10 @@ const KEY = 'pkc3.external-images';
 type Answer = 'allow' | 'deny';
 
 export class ExternalImagePolicy {
-  private mode: ExternalImageMode;
+  /** 保存が使えない / 書けなかったときの控え(この session では効いている)。 */
+  private fallback: ExternalImageMode;
+  /** 🔴 直近の書き込みが失敗したか。真の間は読みも控えを返す。 */
+  private saveFailed = false;
   private readonly answers = new Map<string, Answer>();
   /**
    * 箱が「CSP で画像を止めた」と申告してきたノート。
@@ -44,22 +47,24 @@ export class ExternalImagePolicy {
   private readonly blockedBoxes = new Map<string, number>();
 
   constructor(private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage()) {
-    this.mode = this.read();
+    this.fallback = this.read();
   }
 
   private read(): ExternalImageMode {
+    if (this.storage === null || this.saveFailed) return this.fallback ?? DEFAULT_EXTERNAL_IMAGE_MODE;
     try {
-      const v = this.storage?.getItem(KEY);
+      const v = this.storage.getItem(KEY);
       return v !== null && v !== undefined && isExternalImageMode(v)
         ? v
         : DEFAULT_EXTERNAL_IMAGE_MODE;
     } catch {
-      return DEFAULT_EXTERNAL_IMAGE_MODE;
+      return this.fallback ?? DEFAULT_EXTERNAL_IMAGE_MODE;
     }
   }
 
+  /** ⚠ **読むたびに保存を見る** ── 別のタブで変えた設定が再読込なしで届く(`editor-mode.ts` と同じ)。 */
   getMode(): ExternalImageMode {
-    return this.mode;
+    return this.read();
   }
 
   /**
@@ -69,21 +74,26 @@ export class ExternalImagePolicy {
    * @returns 実際に変わったか(呼び側が描き直しの要否に使う)
    */
   setMode(mode: string): boolean {
-    if (!isExternalImageMode(mode) || mode === this.mode) return false;
-    this.mode = mode;
-    this.answers.clear();
+    if (!isExternalImageMode(mode)) return false;
+    const changed = mode !== this.read();
+    // ⚠ 同じ値でも**書く**(他のタブの値を上書きして、再読込後も自分の選びを正にする)
+    this.fallback = mode;
+    this.saveFailed = false;
     try {
       this.storage?.setItem(KEY, mode);
     } catch {
-      // 保存できないだけ ── この session では効いている
+      // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
+      this.saveFailed = true;
     }
-    return true;
+    if (changed) this.answers.clear();
+    return changed;
   }
 
   /** このノートで外部画像を読み込むか。⚠ **判定はここ 1 か所**。 */
   allows(lid: string): boolean {
-    if (this.mode === 'always') return true;
-    if (this.mode === 'never') return false;
+    const mode = this.read();
+    if (mode === 'always') return true;
+    if (mode === 'never') return false;
     return this.answers.get(lid) === 'allow';
   }
 
@@ -99,7 +109,7 @@ export class ExternalImagePolicy {
 
   /** まだ聞いていないか(帯を出すかの判断に使う)。 */
   unanswered(lid: string): boolean {
-    return this.mode === 'ask' && !this.answers.has(lid);
+    return this.read() === 'ask' && !this.answers.has(lid);
   }
 
   /**

@@ -97,6 +97,8 @@ export class CopyHistoryStore {
 
   /** いま持っている物(新しい順)。 */
   items(): readonly CopiedItem[] {
+    // ⚠ 読むたびに保存を見る ── 別のタブが積んだ・消した物が再読込なしで届く
+    this.list = this.readNow();
     return this.list;
   }
 

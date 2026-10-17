@@ -27,23 +27,37 @@ function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   }
 }
 
+/** 保存が使えない環境の控え(この session では効いている)。選ぶまでは null。 */
+let fallback: AppOpenTarget | null = null;
+/** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控えを返す。 */
+let saveFailed = false;
+
 /** いまの出し先 ── **保存されていれば それ、無ければブラウザのタブ**。 */
 export function currentAppOpenTarget(): AppOpenTarget {
   try {
     const s = readStorage();
-    if (s === null) return DEFAULT_APP_OPEN_TARGET;
+    if (s === null || saveFailed) return fallback ?? DEFAULT_APP_OPEN_TARGET;
     const v = s.getItem(APP_OPEN_TARGET_KEY);
     return v !== null && isAppOpenTarget(v) ? v : DEFAULT_APP_OPEN_TARGET;
   } catch {
-    return DEFAULT_APP_OPEN_TARGET;
+    return fallback ?? DEFAULT_APP_OPEN_TARGET;
   }
 }
 
 /** user が選んだ ── **保存する**。⚠ 起動時には呼ばない(選んでいないのに固定しない)。 */
 export function chooseAppOpenTarget(target: AppOpenTarget): void {
+  fallback = target;
+  saveFailed = false;
   try {
     readStorage()?.setItem(APP_OPEN_TARGET_KEY, target);
   } catch {
-    // 保存できないだけ ── この session では効いている
+    // 🔴 書けなかった ── 次に書けるまで、読みは控え(選んだ値)を返す(戻らない)
+    saveFailed = true;
   }
+}
+
+/** test 用 ── 控えを捨てる。 */
+export function resetAppOpenTargetFallbackForTest(): void {
+  fallback = null;
+  saveFailed = false;
 }
