@@ -66,15 +66,15 @@ describe('情報ペインの作成 / 更新(#709)', () => {
     expect(withTZ('UTC', () => new Date('2026-08-04T23:30:00Z').getDate())).toBe(4);
   });
 
-  it('🔴 字は端末の暦日(JST では翌日、UTC ではその日)', () => {
+  it('🔴 字は端末の日付と時刻(JST では翌日 08:30、UTC ではその日 23:30)', () => {
     withTZ('Asia/Tokyo', () => {
       const r = paint(META());
-      expect(cell(r, 'inspector-created').textContent).toBe('2026/08/05');
-      expect(cell(r, 'inspector-updated').textContent).toBe('2026/08/05');
+      expect(cell(r, 'inspector-created').textContent).toBe('2026-08-05 08:30');
+      expect(cell(r, 'inspector-updated').textContent).toBe('2026-08-05 08:30');
     });
     withTZ('UTC', () => {
       const r = paint(META());
-      expect(cell(r, 'inspector-created').textContent).toBe('2026/08/04');
+      expect(cell(r, 'inspector-created').textContent).toBe('2026-08-04 23:30');
     });
   });
 

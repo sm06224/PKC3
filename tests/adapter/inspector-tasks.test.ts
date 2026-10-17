@@ -14,7 +14,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import * as taskCount from '../../src/features/markdown/task-count';
+import * as taskCount from '../../src/features/markdown/task-drawn';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
@@ -146,7 +146,7 @@ describe('右の列の「チェック項目」(#1216)', () => {
   });
 
   it('🔴 同じ本文を何度描き直しても、行の走査は 1 回だけ(本文を鍵に憶える)', () => {
-    const spy = vi.spyOn(taskCount, 'listTaskItems');
+    const spy = vi.spyOn(taskCount, 'countDrawnTasks');
     try {
       const { region, r } = mount();
       const st = stateOf(META(), TEN);

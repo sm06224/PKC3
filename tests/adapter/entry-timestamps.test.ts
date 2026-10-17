@@ -446,7 +446,7 @@ describe('③ 情報列に日付が出る', () => {
     expect(created, '情報列に作成の行が無い').not.toBeNull();
     // ⚠ 「— ではない」で満足しない ── **日付として読める形**まで見る
     //    (空文字も「— ではない」を満たしてしまう)
-    expect(created!.textContent).toMatch(/^\d{4}\/\d{2}\/\d{2}$/);
-    expect(updated!.textContent).toMatch(/^\d{4}\/\d{2}\/\d{2}$/);
+    expect(created!.textContent).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    expect(updated!.textContent).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
   });
 });

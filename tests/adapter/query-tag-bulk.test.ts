@@ -200,7 +200,9 @@ describe('名前を変える', () => {
     await tick();
     dialogOk().click();
     await tick();
-    expect(s.sent.some((a) => a.type === 'RENAME_SMART_TAG')).toBe(false);
+    // 🔴 条件は書き換えない(`to` が null = 件数を知らせるだけ。#1163 依頼 321)
+    const smart = s.sent.filter((a) => a.type === 'RENAME_SMART_TAG');
+    expect(smart).toEqual([{ type: 'RENAME_SMART_TAG', from: '請求', to: null }]);
   });
 
   it('🔴 大小だけ違う名前への付け替えは断らない(Work → work。外す → 付ける で綴りが変わる。#1087)', async () => {

@@ -49,7 +49,10 @@ import { COLLECTION_PANE_COMMANDS } from './commands';
 import { windowFolderWritePicker } from '@adapter/platform/md-folder-export';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(一覧の行と共有)。
 //    ここで独自に parse していた頃は、一覧に日付を出すときに規則が 2 つに増えた
-import { formatStoredDate, storedInstantIso } from '@features/datetime/stored-date';
+import { formatStoredDate, formatStoredMinute, storedInstantIso } from '@features/datetime/stored-date';
+import { humanBytes } from '@features/human-bytes';
+import { mimeLabel } from '@features/asset/mime-label';
+import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
 import { sameTag } from '@features/flavor/tags';
 import { foldText } from '@features/filter/fold-text';
@@ -57,11 +60,11 @@ import { collectEntryTags } from '@features/flavor/entry-tags';
 import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
 import { stripComments, preprocessHeadingNumbers } from '@features/markdown/markdown-render';
 import { extractHeadingNumberConfig } from '@features/markdown/document-globals';
-import { listTaskItems } from '@features/markdown/task-count';
+import { countDrawnTasks } from '@features/markdown/task-drawn';
 import { listAssetUses, type AssetUse } from '@features/asset/asset-refs-in-body';
 import { frontmatterProblem } from '@features/markdown/frontmatter';
 import { externalImageUrls } from '@features/asset/inline-url-adopt';
-import { formatBodyStatsFor, formatTaskProgress } from '@features/stats/body-stats';
+import { cheapGraphemeCount, countGraphemes, formatBodyStatsFor, formatTaskProgress } from '@features/stats/body-stats';
 import { estimateReadingTime, type ReadingTimeEstimate } from '@features/markdown/reading-time';
 import {
   CREATABLE_KINDS,
@@ -79,7 +82,7 @@ export const RELATION_CANDIDATE_MAX = 200;
  * ⚠ ここの再輸出は**呼び側の import を変えないため**だけに在る。
  */
 export { EDITING_NOTE } from '@adapter/state/app-state';
-import { getAncestorFolders, resolveCanonicalParents } from '@features/relation/tree';
+import { buildStructuralChildrenIndex, getAncestorFolders, resolveCanonicalParents } from '@features/relation/tree';
 import { BODY_LINK_KIND, RELATION_MAP_DEPTH, renderRelationMap } from './relation-map';
 import { bodyLinkTargets } from '@features/entry-ref/body-links';
 import {
@@ -157,7 +160,14 @@ export class InspectorRenderer {
     return prev !== undefined && prev.length === deps.length && prev.every((d, i) => d === deps[i]);
   }
   /** 本文の分数の見積り(`imgCount` と同じ作り。字を鍵に 1 つ憶える)。 */
-  private statsEstimate: { body: string; estimate: ReadingTimeEstimate } | null = null;
+  private statsEstimate: { body: string; estimate: ReadingTimeEstimate; chars: number } | null = null;
+  /** フォルダの「中身 N 件」(#1163 依頼 168)。親子の解決は全 relation を歩くので、同じ入力なら憶えておく。 */
+  private childrenMemo: {
+    lid: string;
+    metas: AppState['entryMetas'];
+    relations: AppState['relations'];
+    n: number;
+  } | null = null;
   /** 本文のリンク先(つながりの図の入力)。同じ作り。 */
   private linkTargets: { body: string; cid: string | null | undefined; to: string[] } | null = null;
   /** 組み終わった器の先頭(`region` に繋がっているかで生存を判定する)。 */
@@ -466,7 +476,18 @@ export class InspectorRenderer {
     const blockedNote = blockedActionNote(state.phase) ?? '';
 
     this.setRow('inspector-title', meta.title);
-    this.setRow('inspector-kind', archetypeLabel(meta.archetype));
+    /**
+     * 🔴 **添付ノートは、種類にファイルの種類を添える**(#1163 依頼 164。Gemini の裁定:「PDF」などの短い名前)。
+     * ⚠ 読むのは開いている本文の先頭の設定(`readAttachmentMeta` ── 添付を読む口は 1 本)。閉じている間は添えない。
+     */
+    const attach =
+      meta.archetype === 'attachment' && state.openBody?.lid === meta.lid
+        ? readAttachmentMeta(state.openBody.body)
+        : null;
+    this.setRow(
+      'inspector-kind',
+      attach === null ? archetypeLabel(meta.archetype) : `${archetypeLabel(meta.archetype)} (${mimeLabel(attach.mime)})`,
+    );
     /**
      * 🔑 **貼れる 1 行を、押される前に載せておく**(#427 段①)── 押した時に
      *   組み立てると、押してから選択が移った場合に**別のノートの参照**が入る
@@ -656,7 +677,8 @@ export class InspectorRenderer {
     const canWriteTags =
       tagBody !== null &&
       state.phase === 'ready' &&
-      tagScan?.problem?.kind !== 'unreadable';
+      tagScan?.problem?.kind !== 'unreadable' &&
+      tagScan?.problem?.kind !== 'tags';
     /**
      * 🔴 **理由(`title`)は行そのものに置く**(#494 で器を割ったときに 1 度落とした)。
      *
@@ -770,6 +792,17 @@ export class InspectorRenderer {
           chip.append(...tagColorControls(tag));
           tagBox.append(chip);
         }
+      }
+      /**
+       * 🔴 **読み違えているかもしれないときは、その場で言う**(#1163 依頼 318)。⚠ 黙ると、画面は普通に読めているように見えて、
+       *   足し引きだけが効かない(止めている理由が見えない)。足す欄・外す × は `canWriteTags` が畳む。
+       */
+      if (problem !== null && problem.kind === 'tags') {
+        const note = document.createElement('span');
+        note.setAttribute('data-pkc-field', 'inspector-tags-problem');
+        note.textContent = '文書の情報に読めない書き方があります(タグの足し引きは止めています)';
+        note.title = problem.detail;
+        tagBox.append(note);
       }
     }
     /**
@@ -1168,38 +1201,83 @@ export class InspectorRenderer {
     if (statsDd) {
       const dt = statsDd.previousElementSibling;
       const isFolder = meta.archetype === 'folder';
+      // 🔴 添付ノートの本文は「設定の行」だけ ── その長さを文字数として出さない(依頼 164)。大きさ・種類は下の行
+      const isAttachment = meta.archetype === 'attachment';
       // ⚠ 分数の元は**開いている本文**(題名の下と同じ字)。閉じている間は字数だけ(#1087)
       const openedBody = state.openBody?.lid === meta.lid ? state.openBody.body : null;
-      const bodyChars = openedBody !== null ? openedBody.length : meta.bodyChars;
-      const hide = isFolder || bodyChars === null;
+      const hide = isFolder || isAttachment || (openedBody === null && meta.bodyChars === null);
       statsDd.hidden = hide;
       if (dt instanceof HTMLElement) dt.hidden = hide;
       if (hide) this.statsEstimate = null;
       if (!hide) {
         /**
-         * 🔴 **字数は毎回、分数は打鍵が止まってから**(#1087)。分数の元(`estimateReadingTime`)は
-         * 本文の全文を読む(400KB で毎打鍵 5〜8ms)。目次・チェック項目と同じく、編集中で前回の見積りが
-         * 在るときは**前回の分数を出したまま**、止まってから 1 回だけ読み直す。字数は `length` なので常に最新。
+         * 🔴 **字数は見た目の字数(書記素)**(依頼 165 / 315)。閉じていて本文が手元に無い間だけ、
+         *   保存済みの長さ(UTF-16)をそのまま出す ── 開いたら数え直す。
+         * 🔴 **字数も分数も、打鍵が止まってから**(#1087)。分数の元(`estimateReadingTime`)も書記素の数え直しも
+         *   本文の全文を読む(400KB で毎打鍵 5〜8ms)。目次・チェック項目と同じく、編集中で前回の見積りが
+         *   在るときは**前回の数を出したまま**、止まってから 1 回だけ読み直す。
          */
         let estimate: ReadingTimeEstimate | null = null;
+        let chars = meta.bodyChars;
         if (openedBody === null) {
           this.statsEstimate = null;
         } else {
           if (stale && this.statsEstimate !== null && this.statsEstimate.body !== openedBody) {
             this.scanDeferred = true;
+            // 分割を要さない本文は常に最新(`length`)。絵文字などを含むときだけ前回の数を出したままにする
+            const live = cheapGraphemeCount(openedBody);
+            if (live !== null) this.statsEstimate = { ...this.statsEstimate, chars: live };
           } else if (this.statsEstimate?.body !== openedBody) {
-            this.statsEstimate = { body: openedBody, estimate: estimateReadingTime(openedBody) };
+            this.statsEstimate = {
+              body: openedBody,
+              estimate: estimateReadingTime(openedBody),
+              chars: countGraphemes(openedBody),
+            };
           }
           estimate = this.statsEstimate!.estimate;
+          chars = this.statsEstimate!.chars;
         }
-        setText(statsDd, formatBodyStatsFor(bodyChars, estimate));
+        setText(statsDd, formatBodyStatsFor(chars, estimate));
       }
+    }
+    /**
+     * 🔴 **添付ノートの大きさ**(依頼 164)と、**フォルダの中身の件数**(依頼 168)。
+     * ⚠ どちらも持たないノートでは**行ごと畳む**(`<dt>` も一緒に ── 目次・添付と同じ作法)。
+     * ⚠ 大きさは設定の行に書かれた値(`attachment.size`)。書いていないとき(旧い取り込み)は出さない ── 嘘の「0 B」を出さない。
+     */
+    const sizeDd = this.rows.get('inspector-file-size');
+    if (sizeDd) {
+      const text = attach !== null && attach.size !== null ? humanBytes(attach.size) : null;
+      sizeDd.hidden = text === null;
+      const dt = sizeDd.previousElementSibling;
+      if (dt instanceof HTMLElement) dt.hidden = text === null;
+      if (text !== null) setText(sizeDd, text);
+    }
+    const kidsDd = this.rows.get('inspector-children');
+    if (kidsDd) {
+      let text: string | null = null;
+      if (meta.archetype === 'folder') {
+        const m = this.childrenMemo;
+        if (m === null || m.lid !== meta.lid || m.metas !== state.entryMetas || m.relations !== state.relations) {
+          this.childrenMemo = {
+            lid: meta.lid,
+            metas: state.entryMetas,
+            relations: state.relations,
+            n: buildStructuralChildrenIndex(state.entryMetas, state.relations)(meta.lid).length,
+          };
+        }
+        text = `${this.childrenMemo!.n.toLocaleString('ja-JP')} 件`;
+      }
+      kidsDd.hidden = text === null;
+      const dt = kidsDd.previousElementSibling;
+      if (dt instanceof HTMLElement) dt.hidden = text === null;
+      if (text !== null) setText(kidsDd, text);
     }
     /**
      * 🔴 **チェック項目の進み具合**(#1216)。「文字数」の直下に 1 行。
      * ⚠ **0 件なら行ごと畳む**(`<dt>` も一緒に ── 目次・添付と同じ作法)。本文が読めていない
      *   (一覧を眺めているだけ / フォルダ)ときも畳む ── 嘘の「0 件」を出さない。
-     * ⚠ 数えるのは `listTaskItems`(かんばんの札と同じ。押せる物だけ)。
+     * ⚠ 数えるのは `countDrawnTasks`(画面に描かれるチェック欄。かんばんの多めの数え方ではない。依頼 316)。
      * 🔑 押すと本文が書き換わり、この面は状態が動くたびに描き直すので、新しい配線は無い。
      *   ⚠ 編集中は**保存後に**数が動く(文字数と同じ限界)。
      */
@@ -1214,12 +1292,9 @@ export class InspectorRenderer {
         if (stale && this.taskCount !== null && this.taskCount.body !== taskBody) {
           this.scanDeferred = true;
         } else if (this.taskCount?.body !== taskBody) {
-          const items = listTaskItems(taskBody);
-          this.taskCount = {
-            body: taskBody,
-            total: items.length,
-            done: items.filter((i) => i.done).length,
-          };
+          // 🔴 数えるのは画面に描かれるチェック欄(#1163 依頼 316)── かんばんの多めの数え方ではない
+          const drawn = countDrawnTasks(taskBody);
+          this.taskCount = { body: taskBody, total: drawn.total, done: drawn.done };
         }
         text = formatTaskProgress(this.taskCount!.total, this.taskCount!.done);
       }
@@ -1376,7 +1451,7 @@ export class InspectorRenderer {
   }
 
   /**
-   * 時刻の行(作成 / 更新)。字は `formatStoredDate`(端末の暦日)、
+   * 時刻の行(作成 / 更新)。字は `formatStoredMinute`(端末の日付と時刻。日付だけの値は日付のみ。#1163 依頼 166)、
    * `<time datetime>` に UTC の瞬間を置く(#709。cowork 推薦 ── 読み上げにも効く)。
    * ⚠ `<time>` は 1 度作って使い回す(`setRow` の textContent 差し替えは子を消す)。
    * ⚠ 瞬間として読めない値(`—` / 形の違う字)は属性を**外す** ── 古い値を残さない。
@@ -1389,7 +1464,7 @@ export class InspectorRenderer {
       t = document.createElement('time');
       dd.append(t);
     }
-    setText(t, formatStoredDate(value));
+    setText(t, formatStoredMinute(value));
     const iso = storedInstantIso(value);
     if (iso === null) t.removeAttribute('datetime');
     else setAttr(t, 'datetime', iso);
@@ -1595,7 +1670,10 @@ export class InspectorRenderer {
     row('フォルダ', 'inspector-folder');
     row('作成', 'inspector-created');
     row('更新', 'inspector-updated');
-    row('文字数', 'inspector-stats');
+    // 🔴 名前を分ける(依頼 315):右のペインは「全体の字数」(前書きも含む)、題名の下は「本文の字数」
+    row('大きさ', 'inspector-file-size');
+    row('中身', 'inspector-children');
+    row('全体の字数', 'inspector-stats');
     row('チェック項目', 'inspector-tasks');
     /**
      * 🔴 **ノート 1 件の日付**(#292 段④。frontmatter の `date:`)。

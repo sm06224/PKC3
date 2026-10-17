@@ -38,11 +38,13 @@ describe('本文が指しているノート', () => {
   });
 
   it('本文の末尾で終わっていても拾う(境界の片側だけ見ていない)', () => {
-    expect(bodyLinksTo('末尾は entry:n7', 'n7')).toBe(true);
+    expect(bodyLinksTo('末尾は [七](entry:n7)', 'n7')).toBe(true);
+    // 🔴 リンクの形になっていない字は数えない(#1163 依頼 230)
+    expect(bodyLinksTo('末尾は entry:n7', 'n7')).toBe(false);
   });
 
   it('lid の文字(A-Za-z0-9_-)は途中で切らない', () => {
-    expect(bodyLinkTargets('entry:ab_cd-12')).toEqual(['ab_cd-12']);
+    expect(bodyLinkTargets('[x](entry:ab_cd-12)')).toEqual(['ab_cd-12']);
   });
 
   /**
@@ -55,10 +57,10 @@ describe('本文が指しているノート', () => {
     const lids = ['n1', 'n12', 'n1_2', 'n2', 'ab-1', 'ab-12'];
     const bodies = [
       '',
-      'entry:n1',
+      '[x](entry:n1)',
       '[a](entry:n12) [b](entry:n1)',
-      'entry:n1#sec と entry:ab-12',
-      'entry:n1_2 だけ',
+      '[s](entry:n1#sec) と [t](entry:ab-12)',
+      '[u](entry:n1_2) だけ',
       'entry と : は別々',
       '[x](entry:ab-1)[y](entry:n2)',
     ];
@@ -109,7 +111,7 @@ describe('pkc:// の自分あても同じリンクとして読む (#379)', () =>
   });
 
   it('両方の形で同じ相手を指していても、1 件に畳む', () => {
-    expect(bodyLinkTargets('entry:n2 と pkc://c1/entry/n2', CID)).toEqual(['n2']);
+    expect(bodyLinkTargets('[a](entry:n2) と [b](pkc://c1/entry/n2)', CID)).toEqual(['n2']);
   });
 
   it('🔴 前置きが重なる lid は、pkc:// 側でも取り違えない', () => {
@@ -122,10 +124,10 @@ describe('pkc:// の自分あても同じリンクとして読む (#379)', () =>
    * 🔑 保証(`permalink.ts` の TOKEN_RE)を当てにせず、ここで弾く。
    */
   it('⚠ 形の違う cid を渡されても壊れない(pkc:// は拾わないだけ)', () => {
-    expect(() => bodyLinkTargets('entry:n2', 'a.*b')).not.toThrow();
+    expect(() => bodyLinkTargets('[x](entry:n2)', 'a.*b')).not.toThrow();
     expect(bodyLinkTargets('[x](pkc://a.*b/entry/n2)', 'a.*b')).toEqual([]);
     // 対照群 ── entry: のほうは変わらず拾う(cid が変でも本文は読める)
-    expect(bodyLinkTargets('entry:n2', 'a.*b')).toEqual(['n2']);
+    expect(bodyLinkTargets('[x](entry:n2)', 'a.*b')).toEqual(['n2']);
   });
 
   /**
@@ -137,7 +139,7 @@ describe('pkc:// の自分あても同じリンクとして読む (#379)', () =>
     const needles = bodyLinkNeedles('n2', CID);
     expect(needles).toEqual(['entry:n2', 'pkc://c1/entry/n2']);
     for (const n of needles) {
-      const body = `前 ${n} 後`;
+      const body = `前 [x](${n}) 後`;
       expect(bodyLinksTo(body, 'n2', CID), `${n} が拾えていない`).toBe(true);
     }
     // ⚠ cid が無ければ字面も 1 つ(絞り込みが広がりすぎない)
@@ -154,24 +156,24 @@ describe('🔴 コードの中・左の境界は参照元ではない(#1087)', (
     expect(bodyLinksTo(body, 'n3')).toBe(true);
   });
   it('閉じていないフェンスは末尾まで全部コード', () => {
-    expect(bodyLinkTargets('本文\n```\nentry:n2')).toEqual([]);
+    expect(bodyLinkTargets('本文\n```\n[a](entry:n2)')).toEqual([]);
   });
   it('行内コードの中は拾わない / 同じ行の外は拾う', () => {
-    expect(bodyLinkTargets('`entry:n2` と entry:n3')).toEqual(['n3']);
+    expect(bodyLinkTargets('`[a](entry:n2)` と [b](entry:n3)')).toEqual(['n3']);
   });
   it('コードの中の pkc:// の形も拾わない', () => {
     expect(bodyLinkTargets('`pkc://c1/entry/n2` と [a](pkc://c1/entry/n3)', CID)).toEqual(['n3']);
   });
   it('`xentry:n2` は `entry:` ではない / 区切りの後ろなら拾う', () => {
-    expect(bodyLinkTargets('xentry:n2 a-entry:n4')).toEqual([]);
-    expect(bodyLinkTargets('(entry:n2) <entry:n3>')).toEqual(['n2', 'n3']);
+    expect(bodyLinkTargets('[a](xentry:n2) <a-entry:n4>')).toEqual([]);
+    expect(bodyLinkTargets('[a](entry:n2) <entry:n3>')).toEqual(['n2', 'n3']);
   });
   it('表・引用・箇条書きの中のリンクは参照元である', () => {
     const body = '| a | b |\n|---|---|\n| [x](entry:n2) | y |\n\n> [q](entry:n3)\n\n- [l](entry:n4)';
     expect(bodyLinkTargets(body)).toEqual(['n2', 'n3', 'n4']);
   });
   it('~~~ のフェンスも同じ', () => {
-    expect(bodyLinkTargets('~~~\nentry:n2\n~~~')).toEqual([]);
+    expect(bodyLinkTargets('~~~\n[a](entry:n2)\n~~~')).toEqual([]);
   });
 });
 
@@ -205,10 +207,10 @@ describe('字下げのコードブロック', () => {
     [...renderMarkdown(body).matchAll(/data-pkc-entry-ref="entry:([^"#]+)/g)].map((m) => m[1]!);
 
   const CASES: Array<[string, string]> = [
-    ['空行のあとの 4 スペースのコード', '段落\n\n    entry:n2\n\n[a](entry:n3)'],
+    ['空行のあとの 4 スペースのコード', '段落\n\n    [a](entry:n2)\n\n[a](entry:n3)'],
     ['空行のあとのタブのコード', '段落\n\n\t[a](entry:n2)\n\n[a](entry:n3)'],
-    ['文書の先頭からのコード', '    entry:n2\n\n[a](entry:n3)'],
-    ['空行をはさんで続くコード', '段落\n\n    one\n\n    entry:n2\n\n[a](entry:n3)'],
+    ['文書の先頭からのコード', '    [a](entry:n2)\n\n[a](entry:n3)'],
+    ['空行をはさんで続くコード', '段落\n\n    one\n\n    [a](entry:n2)\n\n[a](entry:n3)'],
   ];
 
   it.each(CASES)('🔴 %s は拾わない(描画もリンクにしない)', (_name, body) => {
@@ -229,7 +231,7 @@ describe('字下げのコードブロック', () => {
   });
 
   it('箇条書きが終わったあとの字下げはコードに戻る', () => {
-    const body = '- 項目\n\n本文\n\n    entry:n2\n';
+    const body = '- 項目\n\n本文\n\n    [a](entry:n2)\n';
     expect(rendered(body)).toEqual([]);
     expect(bodyLinkTargets(body)).toEqual([]);
   });
@@ -241,5 +243,44 @@ describe('綴りの大小(#1087)', () => {
     const rendered = [...renderMarkdown(body).matchAll(/data-pkc-entry-ref="entry:([^"#]+)/g)].map((m) => m[1]);
     expect(rendered, '前提:描画が内部リンクにしていない').toEqual(['n2', 'n3']);
     expect(bodyLinkTargets(body)).toEqual(['n2', 'n3']);
+  });
+});
+
+/**
+ * 🔴 **数えるのは「画面でリンクとして出るもの」だけ**(#1163 依頼 178 / 230 / 271。Gemini の裁定)。
+ * ⚠ 期待値は描画が実際にリンクにした lid から引く(本文の字面から組まない)。
+ */
+describe('🔴 リンクの形になっていない字・隠した囲みの中は数えない(依頼 178 / 230 / 271)', () => {
+  const rendered = (body: string): string[] =>
+    [...renderMarkdown(body).matchAll(/data-pkc-entry-ref="entry:([^"#]+)/g)].map((m) => m[1]!);
+
+  const CASES: Array<[string, string, string[]]> = [
+    ['字で書いただけの entry:n2(リンクの形ではない)', 'entry:n2 と [a](entry:n3)', ['n3']],
+    ['行内の隠しメモ %% … %%', '%% [x](entry:n2) %% [a](entry:n3)', ['n3']],
+    ['%%% の隠しメモ', '%%%\n[x](entry:n2)\n%%%\n[a](entry:n3)', ['n3']],
+    [':::comment の中', ':::comment\n[x](entry:n2)\n:::\n[a](entry:n3)', ['n3']],
+    ['Word だけの囲み(:::if{format=docx})の中', ':::if{format=docx}\n[x](entry:n2)\n:::\n[a](entry:n3)', ['n3']],
+  ];
+  it.each(CASES)('🔴 %s は数えない(描画もリンクにしない)', (_name, body, want) => {
+    expect(rendered(body), '前提:描画がリンクにしたのは対照群だけ').toEqual(want);
+    expect(bodyLinkTargets(body)).toEqual(want);
+  });
+
+  it('🔑 対照群: 画面に出る囲み(:::if{format=html} / :::note)の中のリンクは数える', () => {
+    const body = ':::if{format=html}\n[x](entry:n2)\n:::\n:::note\n[y](entry:n3)\n:::';
+    expect(rendered(body), '前提:描画はリンクにする').toEqual(['n2', 'n3']);
+    expect(bodyLinkTargets(body)).toEqual(['n2', 'n3']);
+  });
+
+  it('🔑 対照群: 参照形式の定義行・画像形・山括弧の宛先は、画面でリンク(か埋め込み)になるので数える', () => {
+    expect(bodyLinkTargets('[x][r]\n\n[r]: entry:n2')).toEqual(['n2']);
+    expect(bodyLinkTargets('![図](entry:n3)')).toEqual(['n3']);
+    expect(bodyLinkTargets('<entry:n4>')).toEqual(['n4']);
+    expect(rendered('<entry:n4>'), '前提:山括弧の宛先は描画でリンクになる').toEqual(['n4']);
+  });
+
+  it('隠しメモが閉じていないとき、閉じのある対照群と区別できる(閉じた後ろは数える)', () => {
+    expect(bodyLinkTargets('%%%\n[x](entry:n2)\n%%%\n[a](entry:n3)')).toEqual(['n3']);
+    expect(bodyLinkTargets('[a](entry:n3)\n[b](entry:n2) %% 後ろだけ隠す %%')).toEqual(['n3', 'n2']);
   });
 });

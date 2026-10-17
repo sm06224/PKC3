@@ -12,7 +12,7 @@
  * `while (s.includes(find))` 型で書くと `a` → `aa` で永久に回る)。
  *
  * 🔴 **見えていない所は置換の外に置く**(#1087 A2)。リンク・画像の宛先(`](…)` の中 / `<…>` の自動リンク /
- *   参照定義 `[x]: …` / HTML の `src`・`href`)、`entry:` / `asset:` / `pkc://` で始まる参照の語、先頭の設定行(前書き)の
+ *   参照定義 `[x]: …` / HTML の `src`・`href` / 括弧なしでそのまま書いた URL)、`entry:` / `asset:` / `pkc://` で始まる参照の語、先頭の設定行(前書き)の
  *   項目名は書き換えない ── 当てると URL・ノートの参照・添付の鍵が変わってリンクや画像が切れ、`date` → `day` で日付が外れる。
  *   ⚠ コードブロック・行内コードの中は今どおり置換する(コードは見える字であり、見え方の判断になるので変えない)。
  *   ⚠ 範囲取りは `scanLinks`(リンクの規則 1 本)から引く。新しい文法は書かない。
@@ -37,6 +37,13 @@ const AUTOLINK = /<(?:[A-Za-z][A-Za-z0-9+.-]*:[^\s<>]*|[^\s<>@]+@[^\s<>]+)>/g;
 const REF_WORD = /(?<![A-Za-z0-9_])(?:(?:entry|asset):|pkc:\/\/)[^\s)\]>"'<]+/g;
 
 /**
+ * 括弧なしでそのまま書いた URL(画面ではリンクになる)。🔴 #1163 依頼 320(Gemini の裁定 A):
+ * 画面でリンクとして押す物は、リンクの形で書いた物と同じ扱いにそろえて置換の外に置く。
+ * ⚠ 末尾の `)` `]` は URL に含めない(括弧で囲んだ書き方の閉じ)。広めに守る向き ── 守りすぎても URL の一部が置換されないだけ。
+ */
+const BARE_URL = /(?<![A-Za-z0-9_])https?:\/\/[^\s<>"')\]]+/gi;
+
+/**
  * 置換の外に置く範囲 `[start, end)`(昇順・重ならない)。⚠ 本文に検索語が当たったときだけ作る。
  */
 function protectedRanges(body: string): Array<[number, number]> {
@@ -44,7 +51,7 @@ function protectedRanges(body: string): Array<[number, number]> {
   const scan = scanLinks(body);
   const inCode = (p: number): boolean => scan.code.some(([a, b]) => p >= a && p < b);
   for (const site of scan.sites) raw.push([site.destStart, site.destEnd]);
-  for (const re of [AUTOLINK, REF_WORD]) {
+  for (const re of [AUTOLINK, REF_WORD, BARE_URL]) {
     re.lastIndex = 0;
     for (let m = re.exec(body); m; m = re.exec(body)) {
       if (!inCode(m.index)) raw.push([m.index, m.index + m[0].length]);

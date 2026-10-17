@@ -95,6 +95,7 @@ import {
   blockedWithSuffix,
   hasAppGroupNote,
   hasUnsavedTyping,
+  hasReverseOnlyRelation,
   hasSameRelation,
   appGroupIconName,
   appGroupOrderCount,
@@ -302,7 +303,7 @@ import { MAX_TAG_CHARS, overlongTagNames, splitTags } from '@features/flavor/tag
 import { TAGS_KEY } from '@features/query/group-by';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { COLUMN_PANES, isPaneId, type PaneId } from '@features/pane-visibility';
-import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
+import { STRUCTURAL, isRelationKind, relationLabel } from '@features/relation/kinds';
 import {
   canEnterScope,
   collectSubtreeLids,
@@ -2707,7 +2708,13 @@ async function queryTagBulk(
       ? 'タグを付け替えられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください'
       : 'タグを外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
     () => {
-      dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [tag], mode: 'remove' });
+      dispatcher.dispatch({
+        type: 'BULK_TAG',
+        lids,
+        tags: [tag],
+        mode: 'remove',
+        ...(mode === 'rename' ? { renameFirst: true } : {}),
+      });
       if (mode === 'rename') {
         dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [next], mode: 'add', afterPrevious: true });
         // 🔴 スマートフォルダの条件の同じ名前も変える(#1087)── 変えないと、旧い名前の条件は何も集めなくなる
@@ -2726,6 +2733,8 @@ async function queryTagBulk(
           services.setTagColor?.(next, oldColor);
         }
       }
+      // 🔴 全部外したときは、そのタグを条件にしたスマートフォルダの件数を知らせる(#1163 依頼 321)── 条件は変えない
+      if (mode === 'remove') dispatcher.dispatch({ type: 'RENAME_SMART_TAG', from: tag, to: null });
       // 🔑 集計は書いた結果を映す ── 書込が着いてから数え直す
       void Promise.resolve(services.settle?.() ?? null).then(() => {
         dispatcher.dispatch({ type: 'REFRESH_QUERY' });
@@ -7740,7 +7749,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (!isRelationKind(kind) || kind === STRUCTURAL) return;
     // 🔴 同じ相手・同じ種類が既に在るときは、言う(欄は残す)。⚠ 判定は reducer と同じ 1 本(`hasSameRelation`)
     if (hasSameRelation(state.relations, fromLid, resolved.lid, kind)) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '既に同じつながりがあります' });
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        // 🔴 向きだけが逆のときは、その旨を言う(#1163 依頼 319)── 「関連」は向きを区別しない
+        error: hasReverseOnlyRelation(state.relations, fromLid, resolved.lid, kind)
+          ? `${relationLabel(kind)}は向きを区別しません。反対向きの同じつながりが既にあります`
+          : '既に同じつながりがあります',
+      });
       return;
     }
     dispatcher.dispatch({

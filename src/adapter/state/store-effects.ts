@@ -706,6 +706,11 @@ export function connectStoreEffects(
 ): StoreEffects {
   let queue: Promise<void> = Promise.resolve();
   let disposed = false;
+  /**
+   * 🔴 **タグの名前の変更で、本文にしか書いていなかったノート**(#1163 依頼 314)。1 回目(外す)が決めて、
+   * 2 回目(付ける)が読む ── 順に走る(`enqueue`)ので、間に別の頼みは入らない。
+   */
+  let renameBodyOnly = new Set<string>();
   // 本文の全文検索の合流(REQUEST_SEARCH)── 飛んでいる 1 本と、その間に来た最新の語
   let searchInFlight = false;
   let searchPending: string | null = null;
@@ -2942,13 +2947,32 @@ export function connectStoreEffects(
             /* 空のまま ── 下で 1 件ずつ「読めなかった」に数える */
           }
           if (disposed) return;
+          /**
+           * 🔴 **名前の変更では、本文の行にしか書いていないノートを相手から外す**(#1163 依頼 314。Gemini の裁定 A)。
+           * ⚠ 直す前は「外す」が空振り(付いていませんでした)で、「付ける」だけが効いて、旧い名前と新しい名前の
+           *   両方が付いた。本文は user が書いた文章なので、機械が書き換えない ── 外した件数を言う。
+           */
+          let bodyOnly = 0;
+          const isFirstRename = ev.renameFirst === true && ev.mode === 'remove' && ev.tags.length === 1;
+          const isSecondRename = ev.afterPrevious === true && ev.mode === 'add';
+          if (isFirstRename) renameBodyOnly = new Set<string>();
           for (const t of ev.targets) {
             if (disposed) return;
+            if (isSecondRename && renameBodyOnly.has(t.lid)) continue;
             try {
               const body = bodyOf.get(t.lid) ?? null;
               if (body === null) {
                 unread++;
                 continue;
+              }
+              if (isFirstRename) {
+                const view = collectEntryTags(body);
+                const tag0 = ev.tags[0]!;
+                if (!view.doc.some((x) => sameTag(x, tag0)) && view.inBody.some((x) => sameTag(x, tag0))) {
+                  renameBodyOnly.add(t.lid);
+                  bodyOnly++;
+                  continue;
+                }
               }
               /**
                * ⚠ **1 件につき 1 往復**(#637)── 並びを順に当ててから、まとめて
@@ -3084,6 +3108,8 @@ export function connectStoreEffects(
            */
           if (stillInBody > 0)
             parts.push(`${stillInBody} 件は本文の中にも書いてあるので、まだそのタグが付いています`);
+          if (bodyOnly > 0)
+            parts.push(`${bodyOnly} 件は本文の中にだけ書いてあるので、名前を変えませんでした(本文は書き換えません)`);
           // 🔴 名前の変更の 2 回目は、1 回目(外す)の知らせに続けて言う ── 上書きすると外せなかった件数が消える(#1087)
           const previous = ev.afterPrevious === true ? dispatcher.getState().notice : null;
           const said = parts.join(' / ');
@@ -3112,6 +3138,8 @@ export function connectStoreEffects(
           if (disposed) return;
           let changed = 0;
           let failed = 0;
+          /** 🔴 外しただけ(`to === null`)のとき、そのタグを条件にしたスマートフォルダの数(#1163 依頼 321)。 */
+          let using = 0;
           try {
             const rows = await store.getBodies(ev.targets.map((t) => t.lid));
             const bodyOf = new Map(rows.map((r) => [r.lid, r.body]));
@@ -3121,6 +3149,11 @@ export function connectStoreEffects(
                 const body = bodyOf.get(t.lid);
                 // ⚠ 前書きが読めないものは条件が空で返る(`withSmartTagRenamed` が `null`)ので、ここで門を足さなくても書かない
                 if (body === undefined) continue;
+                if (ev.to === null) {
+                  // 外しただけ ── 条件は書き換えない。数えて、あとで言う
+                  if (readSmartSpec(body).tags.some((x) => sameTag(x, ev.from))) using++;
+                  continue;
+                }
                 const spec = withSmartTagRenamed(readSmartSpec(body), ev.from, ev.to);
                 if (spec === null) continue;
                 const newBody = writeSmartSpec(body, spec);
@@ -3155,6 +3188,8 @@ export function connectStoreEffects(
           }
           if (disposed) return;
           const said: string[] = [];
+          if (using > 0)
+            said.push(`このタグを条件にしたスマートフォルダが ${using} 件あります(条件はそのままです。タグを付け直すと、また集まります)`);
           if (changed > 0) said.push(`スマートフォルダ ${changed} 件の条件も変えました`);
           if (failed > 0) said.push(`スマートフォルダ ${failed} 件の条件は書き換えられませんでした`);
           if (said.length === 0) return;

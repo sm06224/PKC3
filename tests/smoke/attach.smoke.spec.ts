@@ -386,6 +386,15 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
   // preview の img が blob: URL で実際に描画される(lend 経路)
   await expectImageRendered(page, '[data-pkc-field="attachment-media"]');
 
+  // 🔴 右のペイン(束 H1): 添付ノートは「大きさ」と、種類に添えたファイルの種類を出す / 作成に時刻が出る
+  const insp = page.locator('[data-pkc-region="inspector"]');
+  await expect(insp.locator('[data-pkc-field="inspector-kind"]'), '種類に「添付 (PNG)」が出ない').toHaveText('添付 (PNG)');
+  await expect(insp.locator('[data-pkc-field="inspector-file-size"]'), '添付の大きさが出ない').toBeVisible();
+  await expect(insp.locator('[data-pkc-field="inspector-file-size"]')).toHaveText(/\d.*B/);
+  await expect(insp.locator('[data-pkc-field="inspector-created"]'), '作成に時刻が出ない').toHaveText(
+    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/,
+  );
+
   // ダウンロード導線の可視 + クリック可能(占有チェック込み)
   await clickReal(page, '[data-pkc-action="download-asset"]');
 

@@ -22,9 +22,9 @@ function section(): string {
 }
 
 describe('マニュアル 右のペイン(情報)の行の名前 (#1087)', () => {
-  it('🔴 画面の行の名前(作成 / 更新 / 文字数 / 日付)で書いている', () => {
+  it('🔴 画面の行の名前(作成 / 更新 / 全体の字数 / 日付)で書いている', () => {
     const body = section();
-    for (const name of ['作成', '更新', '文字数', '日付']) {
+    for (const name of ['作成', '更新', '全体の字数', '日付']) {
       expect(inspector, `前提:画面に「${name}」の行が無い`).toContain(`row('${name}'`);
       expect(body, `マニュアルに「${name}」が無い`).toContain(name);
     }

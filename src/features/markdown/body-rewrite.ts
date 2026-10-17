@@ -912,7 +912,9 @@ export function applyTagsToBody(
    *   `tags: [買い物, 家事]` のあるノートに `請求` を付けると `tags: [請求]` になり、既存のタグが消えた。
    *   判定は `frontmatterProblem` 1 本(右のペインが書かせないのと同じ規則)。
    */
-  if (frontmatterProblem(body)?.kind === 'unreadable')
+  const problem = frontmatterProblem(body)?.kind;
+  // 🔴 タグの書き方が読み違えられる形のノートにも書かない(#1163 依頼 318)── 書き直した行の外に残りの行が取り残される
+  if (problem === 'unreadable' || problem === 'tags')
     return { body: null, outcomes: new Map(), refused: 'unreadable' };
   const slots = readTagSlots(body);
   let cur = slots.flatMap((x) => ('tag' in x ? [x.tag] : []));
