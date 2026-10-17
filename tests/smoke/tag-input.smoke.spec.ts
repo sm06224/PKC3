@@ -85,13 +85,13 @@ test('🔴 札の × で外れ、本文からも消える (#494)', async ({ page
   await expect(insp.locator('[data-pkc-field="inspector-stats"]'), '前提: 字数が出ない').toBeVisible();
   const before = await insp.locator('[data-pkc-field="inspector-stats"]').innerText();
   await clickReal(page, '[data-pkc-action="start-edit"]');
-  await page.fill('[data-pkc-field="editor-body"]', '---\ntags: [買い物, 家事]\n---\n👨‍👩‍👧‍👦👍🏽🇯🇵ab\n');
+  await page.fill('[data-pkc-field="editor-body"]', '---\ntags: [買い物, 家事]\n---\n👨\u200D👩\u200D👧\u200D👦👍🏽🇯🇵ab\n');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
   const total = (s: string): number => Number(/(\d[\d,]*)\s*文字/.exec(s)?.[1]?.replace(/,/g, '') ?? NaN);
   const afterTxt = await insp.locator('[data-pkc-field="inspector-stats"]').innerText();
   // 前書き(--- 〜 ---)の 31 字 + 家族 1 + 👍🏽 1 + 国旗 1 + ab 2 + 改行 = 見た目の字。絵文字を UTF-16 で数えると大きく超える
-  const expectedChars = Array.from(new Intl.Segmenter('ja', { granularity: 'grapheme' }).segment('---\ntags: [買い物, 家事]\n---\n👨‍👩‍👧‍👦👍🏽🇯🇵ab\n')).length;
+  const expectedChars = Array.from(new Intl.Segmenter('ja', { granularity: 'grapheme' }).segment('---\ntags: [買い物, 家事]\n---\n👨\u200D👩\u200D👧\u200D👦👍🏽🇯🇵ab\n')).length;
   expect(total(afterTxt), `全体の字数が見た目の字の数でない(前:${before} / 後:${afterTxt})`).toBe(expectedChars);
   await clickReal(
     page,
