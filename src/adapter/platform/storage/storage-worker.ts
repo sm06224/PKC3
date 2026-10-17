@@ -2744,54 +2744,35 @@ async function exportOneTable(
 }
 
 /**
- * 🔴 **メッセージ(・処理の記録)の行を除いて `make` を走らせ、終わったら同じ行を元へ戻す**(台帳 #1852 束 L1。依頼 216 / 344)。
+ * 🔴 **メッセージ(・処理の記録)の行を除いた状態で `make` を走らせる**(台帳 #1852 束 L1。依頼 216 / 344)。
  *
- * ⚠ 人に渡す PKC3 入り HTML に、送り主の知らせ(使った機能と時刻)を入れない。この worker は 1 つの op を
- *   最後まで続けて走らせる(間に別の op は入らない)ので、「除いた状態」は他から見えない。
+ * ⚠ 人に渡す PKC3 入り HTML に、送り主の知らせ(使った機能と時刻)を入れない。
+ * 🔑 **除く操作は確定させない** ── 書き込みの transaction の中で行を消し、その状態の画像を作ってから **ROLLBACK** する。
+ *   消した事実が disk に確定する瞬間が無いので、途中でタブやワーカーが落ちても**メッセージは 1 件も減らない**
+ *   (直す前は、消して確定 → 書き出し → 入れ直す の形で、間で落ちると消えたままになった)。
+ * ⚠ `sqlite3_serialize` は pager を通してページを読むので、transaction の中の(まだ確定していない)状態が画像に入る。
  * ⚠ 除いた行の名残が空きページに残らないよう、除く間だけ `secure_delete` を入れる(元の値へ戻す)。
- * ⚠ 戻せなかったら**黙らず落とす**(メッセージが減ったまま終わらせない)。1 回やり直してから。
  */
 function withMessagesRemoved<T>(make: () => T): T {
   const database = need();
   const lids = [SYSTEM_MESSAGE_LID, SYSTEM_JOB_LID];
-  const rows = database.selectObjects(
-    `SELECT * FROM entries WHERE realm = 'system' AND lid IN (?, ?)`,
+  const has = database.selectValue(
+    `SELECT count(*) FROM entries WHERE realm = 'system' AND lid IN (?, ?)`,
     lids,
-  ) as Array<Record<string, unknown>>;
-  if (rows.length === 0) return make();
+  ) as number | undefined;
+  if (has === undefined || has === 0) return make();
   const secure = database.selectValue('PRAGMA secure_delete') as number | undefined;
   database.exec('PRAGMA secure_delete = ON');
-  database.exec({ sql: `DELETE FROM entries WHERE realm = 'system' AND lid IN (?, ?)`, bind: lids });
   try {
-    return make();
-  } finally {
-    const restore = (): void => {
-      database.exec('BEGIN IMMEDIATE');
-      try {
-        for (const r of rows) {
-          const cols = Object.keys(r);
-          database.exec({
-            sql: `INSERT INTO entries (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
-            bind: cols.map((c) => r[c] as never),
-          });
-        }
-        database.exec('COMMIT');
-      } catch (err) {
-        try {
-          database.exec('ROLLBACK');
-        } catch {
-          /* rollback 失敗は元エラーを優先 */
-        }
-        throw err;
-      }
-    };
+    database.exec('BEGIN IMMEDIATE');
     try {
-      restore();
-    } catch {
-      restore();
+      database.exec({ sql: `DELETE FROM entries WHERE realm = 'system' AND lid IN (?, ?)`, bind: lids });
+      return make();
     } finally {
-      database.exec(`PRAGMA secure_delete = ${secure === 1 ? 'ON' : 'OFF'}`);
+      database.exec('ROLLBACK');
     }
+  } finally {
+    database.exec(`PRAGMA secure_delete = ${secure === 1 ? 'ON' : 'OFF'}`);
   }
 }
 
