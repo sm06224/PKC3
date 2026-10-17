@@ -48,6 +48,7 @@ export function scheduleItemsOf(state: AppState): ScheduleItems {
   const notes: AgendaItem[] = [];
   const noteItems: AgendaItem[] = [];
   let doneNotes = 0;
+  let hiddenDoneByNote = 0;
   for (const lid of state.order) {
     const m = state.entryMetas.get(lid);
     if (m === undefined || m.date === null) continue;
@@ -56,7 +57,9 @@ export function scheduleItemsOf(state: AppState): ScheduleItems {
     const item = itemOfNote(m);
     // ⚠ 済んだノートは行の札と同じ旗で畳む(`showDoneTasks`)。畳んだ分は数だけ持つ
     if (item.done && !state.showDoneTasks) {
-      if (!hiddenNotes.has(m.lid)) doneNotes++;
+      // 🔴 隠したノートの済んだ予定は「済み(N)」ではなく「隠したノートの分」に数える(#1163 の依頼 247 案 C)
+      if (hiddenNotes.has(m.lid)) hiddenDoneByNote++;
+      else doneNotes++;
       continue;
     }
     if (item.done && !hiddenNotes.has(m.lid)) doneNotes++;
@@ -65,7 +68,20 @@ export function scheduleItemsOf(state: AppState): ScheduleItems {
   for (const n of noteItems) if (!hiddenNotes.has(n.lid)) notes.push(n);
   // 🔑 日付の無い札は「日付のないもの」を出しているときだけ数える(出ていない物を「隠した」とは言わない)
   const counts = new Map<string, number>();
-  let hiddenByNote = 0;
+  let hiddenByNote = hiddenDoneByNote;
+  /**
+   * 🔴 **隠したノートの済んだ札は、「済み」を畳んでいるとき「隠したノートの分」に数える**(#1163 の依頼 247 案 C)。
+   * ⚠ 「済み(N)」からは外す(`schedule.ts` の `paintDoneToggle`)── 押して出る数と合計の数を両方合わせる。
+   *   「済み」を出しているときは下の `unhidden` の走査が数える(二重に足さない)。
+   */
+  if (!state.showDoneTasks)
+    for (const c of all) {
+      if (!c.done || !hiddenNotes.has(c.lid)) continue;
+      const m = state.entryMetas.get(c.lid);
+      if (m === undefined || (m.archived && !state.showArchived)) continue;
+      if (c.date === null && !state.showUndatedTasks) continue;
+      if (matchesEntry(m, filter)) hiddenByNote++;
+    }
   for (const c of unhidden) {
     if (c.date === null && !state.showUndatedTasks) continue;
     counts.set(c.lid, (counts.get(c.lid) ?? 0) + 1);

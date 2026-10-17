@@ -99,7 +99,17 @@ export function installScheduleGridCreate(
   let box: { el: HTMLElement; input: HTMLInputElement; lane: HTMLElement; date: string; startMin: number; endMin: number } | null =
     null;
   /** 日を切り替えて畳んだ枠のうち、字を打ちかけていたもの(1 件だけ)。 */
-  let parked: { date: string; startMin: number; endMin: number; text: string } | null = null;
+  let parked: {
+    date: string;
+    startMin: number;
+    endMin: number;
+    text: string;
+    /**
+     * 🔴 その日の列が**一度見えなくなった**か(#1163 の依頼 113 案 B)。別のタブの編集で断られた回は、列が見えたまま
+     *   預かるので `false`(すぐ戻すと、枠が居座る)。日を替えて戻ってきたとき / 次に枠を作り始めたときに字ごと戻す。
+     */
+    away: boolean;
+  } | null = null;
   let swallowClick = false;
   let swallowTimer: ReturnType<typeof setTimeout> | null = null;
   let escapedUntilUp = false;
@@ -159,10 +169,20 @@ export function installScheduleGridCreate(
     }
     b.input.setAttribute('data-pkc-busy', '');
     b.input.readOnly = true;
-    void result.then(() => {
+    void result.then((ok) => {
       b.input.removeAttribute('data-pkc-busy');
       b.input.readOnly = false;
-      if (box === b) closeBox(); // 待つ間に畳まれていたら(Esc / ×)何もしない ── 書かれてもいない
+      if (box !== b) return; // 待つ間に畳まれていたら(Esc / ×)何もしない ── 書かれてもいない
+      const typed = b.input.value;
+      closeBox();
+      /**
+       * 🔴 **断られた回は、枠は畳み、打った名前は預かる**(#1163 の依頼 113 案 B。Gemini の裁定:推薦どおり)。
+       * ⚠ 直す前は枠も字も消え、別のタブの編集が終わってから打ち直しだった(書き込みの途中などで断られた回は枠も字も残る ──
+       *   同じ「断られた」で扱いが分かれていた)。枠を畳むのは「別のタブの編集が終わるまで仮の枠を居座らせない」ためで残す。
+       * 🔑 預かり(`parked`)は日を替えて戻したときの仕組みと同じ 1 本 ── 新しい置き場を作らない。
+       */
+      if (!ok && typed.trim() !== '')
+        parked = { date: b.date, startMin: b.startMin, endMin: b.endMin, text: typed, away: false };
     });
   };
   /** 預かりがあるとき、新しい枠を作り始めるのを断る(理由を出す)。断ったら true。 */
@@ -256,11 +276,13 @@ export function installScheduleGridCreate(
       if (b.lane.isConnected && dateOf(b.lane) === b.date && b.lane.closest('[hidden]') === null) return;
       const text = b.input.value;
       closeBox();
-      if (text.trim() !== '') parked = { date: b.date, startMin: b.startMin, endMin: b.endMin, text };
+      if (text.trim() !== '')
+        parked = { date: b.date, startMin: b.startMin, endMin: b.endMin, text, away: true };
     }
     if (parked !== null) {
       const lane = shownLaneOf(parked.date);
-      if (lane !== null) openBox(lane, parked.date, parked.startMin, parked.endMin, parked.text);
+      if (lane === null) parked.away = true;
+      else if (parked.away) openBox(lane, parked.date, parked.startMin, parked.endMin, parked.text);
     }
   });
 
@@ -341,6 +363,15 @@ export function installScheduleGridCreate(
     }
     const date = dateOf(lane);
     if (date === '' || !(laneHeightOf(lane) > 0)) return;
+    // 🔴 預かった名前の日が見えたままなら、新しい枠を作らず、預かった枠を字ごと戻す(#1163 の依頼 113)
+    if (parked !== null && !parked.away) {
+      const back = shownLaneOf(parked.date);
+      if (back !== null) {
+        e.preventDefault();
+        openBox(back, parked.date, parked.startMin, parked.endMin, parked.text);
+        return;
+      }
+    }
     if (refuseWhileParked()) return;
     const p: Press = {
       lane,

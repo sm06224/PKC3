@@ -88,7 +88,7 @@ import { swapLines } from '@features/markdown/line-swap';
 import { TIDY_NOTES, tidySelection, type TidyOp } from '@features/markdown/text-tidy';
 import { tableOnTab } from '@features/markdown/table-assist';
 import { hasNumberedItems, renumberLists } from '@features/markdown/list-renumber';
-import { caretLineOf, hasTaskItems, sortTasksAtCaret } from '@features/markdown/task-sort';
+import { caretAfterReplace, caretLineOf, hasTaskItems, sortTasksAtCaret } from '@features/markdown/task-sort';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
   blockedActionNote,
@@ -448,6 +448,8 @@ import { isRepeatUnit, materializedDates } from '@features/schedule/repeat';
 import { buildIcs, resolveIcsZone } from '@features/schedule/ics';
 import { scheduleItemsOf } from '@adapter/ui/render/schedule-items';
 import { appScheduleNotify } from '@adapter/ui/render/schedule-notify';
+import { appScheduleWeekStart } from '@adapter/ui/render/schedule-week-start';
+import { normalizeWeekStart } from '@features/schedule/week-start';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口・字は 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
@@ -989,7 +991,7 @@ export function addScheduleItem(
   const text = item.text.trim();
   if (text === '') {
     // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
-    dispatcher.dispatch({ type: 'OP_FAILED', error: 'やることを入力してください' });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: '予定を入力してください' });
     return false;
   }
   /**
@@ -1007,7 +1009,7 @@ export function addScheduleItem(
   if (item.date !== '' && readLineDate(text) !== null) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: 'やることの字に日付(@…)が入っています。日付は欄か字のどちらか一方にしてください',
+      error: '予定の字に日付(@…)が入っています。日付は欄か字のどちらか一方にしてください',
     });
     return false;
   }
@@ -1057,8 +1059,25 @@ export function addScheduleItem(
    *   だから「分からない」は残す側へ倒し、理由を出す。
    */
   const r = appendAndSettle(dispatcher, lid, line, null, SCHEDULE_ADD_SETTLE_MS);
+  const target = lid;
   return r.then((o) => {
-    if (o.ok) return true;
+    if (o.ok) {
+      /**
+       * 🔴 **足したことを言い、「元に戻す」を出す**(#1163 の依頼 57-5 / 100-4。Gemini の裁定:推薦どおり)。
+       * ⚠ 直す前は足した直後に何も出ず、どのノートに入ったかも分からず、間違えて足すとノートを開いて行を消すしかなかった
+       *   (カードの × は日付を外すだけで、行は残る)。
+       * 🔑 戻す口は本文への追記と同じ 1 本(`open` を添えた知らせの隣の「元に戻す」= `UNDO_APPEND`)。新しい書込経路を作らない。
+       * ⚠ 日付なしで足した回は、見えない理由も同じ 1 行で言う(別の知らせで上書きすると「元に戻す」が消える)。
+       */
+      const undated = item.date === '';
+      const hidden = undated && !dispatcher.getState().showUndatedTasks;
+      dispatcher.dispatch({
+        type: 'OP_NOTICE',
+        message: scheduleAddedNotice(text, title, undated, hidden),
+        open: target,
+      });
+      return true;
+    }
     if (o.reason === 'timeout') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
@@ -1071,6 +1090,19 @@ export function addScheduleItem(
     return false;
   });
 }
+/**
+ * 予定を足した直後の 1 行(#1163 の依頼 57-5 / 100-4)。どの字を、どのノートへ足したかを言う。
+ * @param undated 日付なしで足した
+ * @param hidden 日付なしで足し、かつ「日付のないもの」を出していない(= 足した予定が予定表に見えない)
+ */
+export function scheduleAddedNotice(text: string, noteTitle: string, undated: boolean, hidden: boolean): string {
+  const shown = text.length > 24 ? `${text.slice(0, 23)}…` : text;
+  return (
+    `『${shown}』を今日のノート(${noteTitle})に${undated ? '日付なしで' : ''}足しました` +
+    (hidden ? '(「出すもの」で「日付のないもの」を選ぶと見られます)' : '')
+  );
+}
+
 /** 予定を足した書込の結末を待つ上限。他の呼び手(引用・AI の書き足し・章の欄)と同じ 10 秒。 */
 const SCHEDULE_ADD_SETTLE_MS = 10000;
 
@@ -8291,25 +8323,27 @@ const ACTIONS: Record<string, ActionHandler> = {
     const textEl = face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
     const date =
       face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')?.value ?? '';
+    const timeEl = face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-time"]');
+    const time = timeEl?.value ?? '';
+    // 🔴 日付の無い予定には時刻を付けられない(付ける日が無い)── 黙って捨てず、理由を言って欄を残す(#1163 の依頼 57-4)
+    if (time !== '' && date === '') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '時刻を付けるときは、日付も選んでください' });
+      return;
+    }
     // 🔑 書く口は目盛りのドラッグ作成(`schedule-grid-create`)と**同じ 1 本**(`addScheduleItemChecked`)
     // ⚠ 問い合わせの間に 2 回押されても 1 回しか撃たない(#529 W5-d)。欄は読み取り専用にして、
     //   先打ちした字が成功の「欄を空にする」で黙って消えるのを防ぐ
     if (textEl?.hasAttribute('data-pkc-busy')) return;
-    const result = addScheduleItemChecked(dispatcher, services, { text: textEl?.value ?? '', date });
-    /**
-     * 🔴 **日付なしで足した回は、見えない理由を 1 行言う**(欄を空にして足すと、「出すもの」で
-     *   日付のないものを出していない限り、足した予定がどこにも出ない)。出しているときは言わない。
-     */
-    const noteUndated = (): void => {
-      if (date === '' && !dispatcher.getState().showUndatedTasks)
-        services.showStatus?.(
-          '日付なしで足しました(「出すもの」で「日付のないもの」を選ぶと見られます)',
-        );
-    };
+    const result = addScheduleItemChecked(dispatcher, services, {
+      text: textEl?.value ?? '',
+      date,
+      ...(time === '' ? {} : { time }),
+    });
     // 通ったときだけ欄を空にする(#1051。理由は `addScheduleItem` の中)
+    // ⚠ 足した知らせ(日付なしで見えない理由も含む)は `addScheduleItem` が出す ── 別の知らせで上書きすると「元に戻す」が消える
     if (typeof result === 'boolean') {
       if (textEl && result) textEl.value = '';
-      if (result) noteUndated();
+      if (timeEl && result) timeEl.value = '';
       return;
     }
     if (textEl) {
@@ -8322,7 +8356,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       textEl.readOnly = false;
       if (ok) {
         textEl.value = '';
-        noteUndated();
+        // 時刻は一回ごと(残すと次の予定にも時刻が付く)
+        if (timeEl) timeEl.value = '';
       }
     });
   },
@@ -11421,8 +11456,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     // ⚠ 書くのは `insertText`(取り消しに載る)── 変わった範囲だけを置き換える
     ta.focus();
-    // 🔴 カーソルは `replaceChanged` が置いた所(変えた範囲の終わり)のまま ── 末尾へ飛ばさない(#1087)
+    const before = ta.value;
+    const caret = ta.selectionStart ?? before.length;
     replaceChanged(ta, next);
+    // 🔴 カーソルは押す前にいた行へ戻す(#1163 の依頼 100-2)── 置き換えた範囲の終わりのままだと、長いノートでいた場所を見失う
+    const back = caretAfterReplace(before, ta.value, caret);
+    ta.setSelectionRange(back, back);
     services.showStatus?.(here ? 'このリストの完了したチェック項目を末尾へ移動しました' : '完了したチェック項目を末尾へ移動しました');
   },
   /**
@@ -14689,6 +14728,14 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'set-schedule-lead': (_dispatcher, target) => {
     if (target instanceof HTMLSelectElement) appScheduleNotify.setLead(Number(target.value));
+  },
+  /**
+   * 🔴 **予定表の週の始まり**(#1163 の依頼 191)。⚠ 選べる値以外は `normalizeWeekStart` が既定(日曜)へ倒す。
+   * 保存は端末の好み(`schedule-week-start.ts`)。描き直しは店が知らせる(状態は動かさない)。
+   */
+  'set-schedule-week-start': (_dispatcher, target) => {
+    if (target instanceof HTMLSelectElement)
+      appScheduleWeekStart.set(normalizeWeekStart(target.value));
   },
   /** 🔴 **次に開いたとき、見逃した予定を知らせるか**(#855 20-C)。⚠ 押した後の値を保存する。 */
   'set-schedule-missed': (_dispatcher, target) => {

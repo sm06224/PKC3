@@ -7,6 +7,7 @@
  *   左の列の見せ方(`scheduleNarrowMode`)は動かさない。
  */
 import { weekOf } from '@features/schedule/day-layout';
+import { WEEK_START_DEFAULT, type WeekStart } from '@features/schedule/week-start';
 import { REPEAT_PRESS_MS, createRepeatPressGate } from './repeat-press';
 
 export interface ScheduleDispatch {
@@ -44,8 +45,13 @@ export function applyScheduleDeepLink(
 export const SCHEDULE_REGISTRY_CHANNEL = 'pkc3-schedule-window';
 
 /** 週の窓の台帳の鍵。⚠ 読めない日は `null`(台帳に載せない / 引かない)。 */
-export function weekWindowKey(day: string | null, today: string): string | null {
-  const first = weekOf(day ?? today)?.[0];
+export function weekWindowKey(
+  day: string | null,
+  today: string,
+  weekStart: WeekStart = WEEK_START_DEFAULT,
+): string | null {
+  // 🔴 週の最初の日は「週の始まり」の設定で変わる(#1163 の依頼 191)── 押す側と名乗る側で同じ値を渡す
+  const first = weekOf(day ?? today, weekStart)?.[0];
   return first === undefined ? null : `week ${first}`;
 }
 
@@ -83,12 +89,13 @@ export function weekAnnounceKey(
   scheduleDay: string | null,
   today: string,
   calendarMonth: { readonly year: number; readonly month: number } | null = null,
+  weekStart: WeekStart = WEEK_START_DEFAULT,
 ): string | null {
   if (heldView !== 'schedule') return null;
   // 🔴 「月」の窓も名乗る ── 左の列の「月」を 2 度押して 2 枚にしない(#855)
   if (scheduleMode === 'month') return monthWindowKey(calendarMonth, today);
   if (scheduleMode !== 'week') return null;
-  return weekWindowKey(scheduleDay, today);
+  return weekWindowKey(scheduleDay, today, weekStart);
 }
 
 export interface WeekWindowDeps {

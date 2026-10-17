@@ -460,6 +460,32 @@ export function repeatMateKey(lid: string, text: string): string {
   return `${lid}\n${text}`;
 }
 
+/**
+ * 🔴 **この規則から「1 回だけ動かした回」の数**(#1163 の依頼 286 案 B)。
+ *
+ * 「全部動かす」は規則の行の日付だけを動かすので、以前に 1 回だけ動かした回(`振替<元の日>` つきの行)は
+ * そのまま残る。残ることを確認の画面で先に言うための数 ── 同じノートで同じ字の、繰り返しでない行のうち
+ * 振替の印が付いたものを数える(`materializedDates` と同じ見分け方)。
+ */
+export function movedOccurrenceCount(
+  cards: readonly {
+    readonly lid: string;
+    readonly text: string;
+    readonly repeat: RepeatUnit | null;
+    readonly substitutes?: string | null;
+  }[],
+  lid: string,
+  text: string,
+): number {
+  const key = repeatMateKey(lid, text);
+  let n = 0;
+  for (const c of cards) {
+    if (c.repeat !== null || (c.substitutes ?? null) === null) continue;
+    if (repeatMateKey(c.lid, c.text) === key) n++;
+  }
+  return n;
+}
+
 /** `repeatMateKey` → その字で**実体になっている日**の集合。 */
 export function materializedDates(
   cards: readonly {

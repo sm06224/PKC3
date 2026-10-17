@@ -410,3 +410,22 @@ export function hasTaskItems(body: string): boolean {
   const opaque = opaqueRegions(lines);
   return lines.some((line, i) => opaque[i] === 0 && TASK_LINE.test(line));
 }
+
+/**
+ * 🔴 **並べ替えた後のカーソルを、押す前にいた行へ戻す**(#1163 の依頼 100-2。Gemini の裁定:推薦どおり = A)。
+ *
+ * ⚠ 直す前は、置き換えた範囲の終わり(長いノートでは下のほう)へ飛び、押した場所を見失った。
+ * 🔑 並べ替えは行の数を変えない ── 「同じ行番号・同じ桁」へ置く(行が短くなっていたら行末)。
+ *   行の数が変わっていたら(想定外)、元の位置を字数の範囲に収めるだけにする。
+ * @param pos 押す前のカーソル位置(字数)
+ */
+export function caretAfterReplace(before: string, after: string, pos: number): number {
+  const at = Math.min(Math.max(pos, 0), before.length);
+  const lineNo = before.slice(0, at).split('\n').length - 1;
+  const col = at - ((at === 0 ? -1 : before.lastIndexOf('\n', at - 1)) + 1);
+  const afterLines = after.split('\n');
+  if (afterLines.length !== before.split('\n').length) return Math.min(at, after.length);
+  let start = 0;
+  for (let i = 0; i < lineNo; i++) start += afterLines[i]!.length + 1;
+  return start + Math.min(col, afterLines[lineNo]!.length);
+}

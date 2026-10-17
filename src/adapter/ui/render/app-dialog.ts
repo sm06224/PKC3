@@ -1235,6 +1235,10 @@ export function pickRepeatMoveInApp(
    * ⚠ 日が同じ(`days === 0`)なら時刻だけを言う ── 「0 日あとへ」とは書かない。
    */
   clock: string | null = null,
+  /**
+   * 🔴 **以前に 1 回だけ動かした回の数**(#1163 の依頼 286 案 B)。1 件以上なら「全部動かす」でもそのまま残ることを先に言う。
+   */
+  movedBefore = 0,
 ): Promise<'one' | 'all' | null> {
   /**
    * ⚠ **向きを字にする**(「3 日後ろへ」)── 「3 日ずらす」だけだと
@@ -1246,7 +1250,11 @@ export function pickRepeatMoveInApp(
     title: '繰り返しの予定を動かします',
     field: 'pick-repeat-move',
     indexAttr: 'data-pkc-repeat-move-index',
-    note: `${move}へ動かします。次の回からはどうしますか。`,
+    note:
+      `${move}へ動かします。次の回からはどうしますか。` +
+      (movedBefore > 0
+        ? ` 以前に 1 回だけ動かした回(${movedBefore} 件)は、「全部動かす」でもそのまま残ります。`
+        : ''),
     rows: [
       { label: `この回だけ動かす(次の回からは元のまま)`, value: 'one' },
       { label: `全部動かす(以後ずっと ${move}へ)`, value: 'all' },

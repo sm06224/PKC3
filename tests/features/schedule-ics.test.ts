@@ -292,7 +292,7 @@ describe('何を書くか', () => {
       [
         item({ date: '2026-02-30' }),
         item({ line: 5, time: '25:99' }),
-        item({ line: 6, time: '10:00', timeEnd: '09:00' }),
+        item({ line: 6, time: '10:00', timeEnd: '25:99' }),
       ],
       { stamp: STAMP, zone: TOKYO },
     );
@@ -303,9 +303,14 @@ describe('何を書くか', () => {
     expect(l.some((x) => x === 'DTSTART;VALUE=DATE:20260825')).toBe(false);
     expect(l).toContain('DTSTART;TZID=Asia/Tokyo:20260825T100000');
   });
-  it('時刻の幅: 開始と同じ時刻(14:00..14:00)は DTEND を書き、終わりが前なら書かない', () => {
+  it('時刻の幅: 開始と同じ時刻(14:00..14:00)は DTEND を書き、終わりが前なら翌日の終わりにする', () => {
     expect(lines([item({ time: '14:00', timeEnd: '14:00' })])).toContain('DTEND;TZID=Asia/Tokyo:20260825T140000');
-    expect(lines([item({ time: '14:00', timeEnd: '13:59' })]).some((x) => x.startsWith('DTEND'))).toBe(false);
+    // 🔴 終わりが前なら夜をまたぐ幅 ── 終わりは翌日の時刻(台帳 #1852 束 E2、依頼 190)
+    expect(lines([item({ time: '22:00', timeEnd: '02:00' })])).toContain('DTEND;TZID=Asia/Tokyo:20260826T020000');
+    expect(lines([item({ time: '14:00', timeEnd: '13:59' })])).toContain('DTEND;TZID=Asia/Tokyo:20260826T135900');
+    // 対照群: 同じ日の幅は同じ日の終わり / 読めない終わりは書かない
+    expect(lines([item({ time: '14:00', timeEnd: '15:00' })])).toContain('DTEND;TZID=Asia/Tokyo:20260825T150000');
+    expect(lines([item({ time: '14:00', timeEnd: '25:99' })]).some((x) => x.startsWith('DTEND'))).toBe(false);
   });
   it('複数の予定: VEVENT は BEGIN / END が揃う', () => {
     const r = buildIcs([item(), item({ line: 4 }), item({ line: null, lid: 'n2', text: 'ノート丸ごと' })], {

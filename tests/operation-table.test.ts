@@ -319,6 +319,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   // ⚠ 2026-10-12(#855 20-C): 予定の知らせ ── 見逃した予定の 1 行の「予定表を開く」「閉じる」と、予定表の「知らせ」の 2 つの設定
   //   (知らせる時間 / 次に開いたとき知らせるか)。押し口は予定の面・鳴っている予定の帯の中にしか無く、鍵も持たない。`dismiss-alarm` / `set-alarm-enabled` と同じ置き場
   'dismiss-missed', 'open-missed-schedule', 'set-schedule-lead', 'set-schedule-missed',
+  // ⚠ 2026-10-17(台帳 #1852 束 E2、#1163 依頼 191): 予定表の「週の始まり」(日曜 / 月曜)。押し口は予定の面の選択にしか無く、鍵も持たない。`set-schedule-lead` と同じ置き場
+  'set-schedule-week-start',
   /**
    * ⚠ **2026-10-01(#1102 段①)で 3 件増やした** ── 「探す」から送った本文の、前 / 次の当たりへ・
    *   塗りを消す。🔑 **名前で呼べないままにする理由**:`close-lightbox` と同じ ── 「探す」から
@@ -881,8 +883,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-17(台帳 #1852 I2 / 依頼 157): 右の列 / 右クリックの「種類を変える…」(`change-entry-kind`)1 件を登記 ── 受け手も同時に足したので
       //   `total` +1 / `receivers` +1 / `registered` +1 / `both` +1(`unregistered` は動かない)。
       // ⚠ 2026-10-17(依頼 337): 一覧の Home / End / PageUp / PageDown(`filer-row-first` / `-last` / `-page-up` / `-page-down`)で登記 +4 ── 鍵の既定を持つ命令で、受け手は `runFilerKey` / `runDualKey`(押しボタンは持たない)。`registered` +4 / `total` +4 / `outsideActionsTable` +4(`receivers` と `unregistered` は動かない)。
-      total: 454,
-      receivers: 381,
+      // ⚠ 2026-10-17(台帳 #1852 束 E2、#1163 依頼 191): 予定表の「週の始まり」(`set-schedule-week-start`)で受け手 +1 ── 登記は増えない(鍵を持たない画面の選択。`set-schedule-lead` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 455,
+      receivers: 382,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       // ⚠ 2026-10-17(#1163 依頼 153): 左のペインの「上へ動かす」「下へ動かす」(`move-order-up` / `move-order-down`)の 2 件を登記 ──
@@ -890,7 +893,7 @@ describe('操作の全数台帳(#582 段①)', () => {
       registered: 179,
       both: 106,
       outsideActionsTable: 73,
-      unregistered: 275,
+      unregistered: 276,
     });
   });
 

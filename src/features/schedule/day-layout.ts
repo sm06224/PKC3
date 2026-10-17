@@ -22,6 +22,7 @@ import type { AgendaItem } from './agenda';
 import { formatTimeSpan, isRealCalendarDate } from './schedule-date';
 import { storedDateParts } from '@features/datetime/stored-date';
 import { addDays } from '@features/datetime/date-math';
+import { columnOf, WEEK_START_DEFAULT, type WeekStart } from './week-start';
 
 /** 1 日の分。 */
 export const DAY_MINUTES = 24 * 60;
@@ -78,8 +79,14 @@ export function pieceOf(
   if (rawStart === null) return null;
   const start = Math.min(rawStart, DAY_MINUTES - DEFAULT_SPAN_MINUTES);
   const rawEnd = timeEnd === null ? null : minutesOf(timeEnd);
-  const end =
-    rawEnd !== null && rawEnd > start
+  /**
+   * 🔴 **夜をまたぐ幅(`22:00..02:00`)はその日の下端まで**(#1163 の依頼 190)── 翌日の 02:00 までは、この日の目盛りには描けない。
+   * ⚠ 翌日の側には描かない(次の日の束に札を増やすと、同じ予定が 2 枚に見える)。
+   */
+  const overnight = rawEnd !== null && rawStart !== null && rawEnd < rawStart;
+  const end = overnight
+    ? DAY_MINUTES
+    : rawEnd !== null && rawEnd > start
       ? Math.min(rawEnd, DAY_MINUTES)
       : Math.min(start + DEFAULT_SPAN_MINUTES, DAY_MINUTES);
   return { key, startMin: start, endMin: end };
@@ -288,13 +295,17 @@ export function dayHeading(date: string, today: string, tomorrow: string): strin
 }
 
 /**
- * 🔴 **「週」で見せる 7 日**(#855 段 A-2)。**日曜始まり**(小さな月の升目 `WEEKDAYS` と同じ並び)。
+ * 🔴 **「週」で見せる 7 日**(#855 段 A-2)。既定は**日曜始まり**(小さな月の升目と同じ並び)。月曜始まりも選べる(`week-start.ts`)。
  * 実在しない日 / 読めない字は `null`(別の週へ寄せない)。
  */
-export function weekOf(day: string): string[] | null {
+export function weekOf(day: string, weekStart: WeekStart = WEEK_START_DEFAULT): string[] | null {
   const parts = isRealCalendarDate(day) ? storedDateParts(day) : null;
   if (parts === null) return null;
-  const dow = new Date(Number(parts.year), Number(parts.month) - 1, Number(parts.day)).getDay();
+  // 🔴 月曜始まりなら、日曜は前の週の最後(#1163 の依頼 191)
+  const dow = columnOf(
+    new Date(Number(parts.year), Number(parts.month) - 1, Number(parts.day)).getDay(),
+    weekStart,
+  );
   const out: string[] = [];
   for (let i = 0; i < 7; i += 1) {
     const d = addDays(day, i - dow);

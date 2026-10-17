@@ -40,7 +40,9 @@ import { bodyWriteBlockReason } from '@adapter/state/app-state';
 import { SHOWN_LINE_LOST } from '@adapter/state/shown-line';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '@adapter/ui/actions/long-press';
 import { daysBetween } from '@features/datetime/date-math';
+import { isOvernightSpan } from '@features/schedule/schedule-date';
 import {
+  DEFAULT_SPAN_MINUTES,
   SNAP_MINUTES,
   formatMinutes,
   formatTimeRange,
@@ -60,6 +62,7 @@ import {
   rawLineOf,
   repeatMoveAction,
   dispatchRepeatMove,
+  movedBeforeOf,
   type GrabbedTask,
 } from './schedule-drag';
 
@@ -289,7 +292,9 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
     if (piece === null || rawStart === null) return;
     const laneHeight = lane.getBoundingClientRect().height;
     const from = dateTargetOf(lane)?.date ?? '';
-    const dur = piece.endMin - piece.startMin;
+    // 🔴 夜をまたぐ幅は目盛りでは下端までだが、動かす幅は既定の長さで数える(下端まで掴んだ幅で数えると、下へ動かせなくなる ── 依頼 190)
+    const dur =
+      timeEnd !== null && isOvernightSpan(time, timeEnd) ? DEFAULT_SPAN_MINUTES : piece.endMin - piece.startMin;
     const rawEnd = timeEnd === null ? null : minutesOf(timeEnd);
     const g: Grab = {
       mode: target?.closest(RESIZE_SELECTOR) != null ? 'resize' : 'move',
@@ -487,6 +492,17 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
      *   (目盛りの 30 分を書き込んで、書いた終わりを上書きしない)
      * - 動かした + 終わりなし → 点のまま
      */
+    /**
+     * 🔴 夜をまたぐ幅(`22:00..02:00`)を動かすときは、終わりも同じ分だけ動かす(#1163 の依頼 190)。
+     * ⚠ 目盛りが使っていない終わり(`endAdopted` が偽)として「始まりと同じ」に潰すと、夜をまたぐ幅が消える。
+     */
+    const overnightEnd = (): string | null => {
+      if (g.timeEnd === null || !isOvernightSpan(g.time, g.timeEnd)) return null;
+      const s0 = minutesOf(g.time);
+      const e0 = minutesOf(g.timeEnd);
+      if (s0 === null || e0 === null) return null;
+      return formatMinutes((((e0 + (startMin - s0)) % 1440) + 1440) % 1440);
+    };
     const timeEnd =
       r.kind === 'resize'
         ? formatMinutes(endMin)
@@ -494,7 +510,7 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
           ? null
           : g.endAdopted
             ? formatMinutes(endMin)
-            : formatMinutes(startMin);
+            : (overnightEnd() ?? formatMinutes(startMin));
     if (g.task.repeat === '') {
       const st = dispatcher.getState();
       const refused = bodyWriteBlockReason(st, g.task.lid) !== null;
@@ -533,7 +549,7 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
     const days = daysBetween(g.from, date);
     if (days === null) return;
     const label = timeEnd === null ? time : `${time}〜${timeEnd}`;
-    void pickRepeatMoveInApp(root, days, label).then((pick) => {
+    void pickRepeatMoveInApp(root, days, label, movedBeforeOf(dispatcher.getState(), g.task.lid, line)).then((pick) => {
       const action = repeatMoveAction(dispatcher.getState(), g.task, line, g.from, date, days, pick, {
         time,
         timeEnd,

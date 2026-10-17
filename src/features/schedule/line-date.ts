@@ -57,7 +57,7 @@ import {
   isScheduleDate,
   isScheduleRange,
   isScheduleTime,
-  isScheduleTimeRange,
+  isScheduleTimeSpan,
   padClockHour,
 } from './schedule-date';
 import {
@@ -304,7 +304,7 @@ export function readLineDate(line: string): LineDate | null {
     const rawTimeEnd = m[5];
     const paddedEnd = rawTimeEnd === undefined ? undefined : padClockHour(rawTimeEnd);
     const adjacentEnd =
-      time !== null && paddedEnd !== undefined && isScheduleTimeRange(time, paddedEnd)
+      time !== null && paddedEnd !== undefined && isScheduleTimeSpan(time, paddedEnd)
         ? paddedEnd
         : null;
     const afterDate = start + 1 + date.length;
@@ -325,7 +325,7 @@ export function readLineDate(line: string): LineDate | null {
         : null;
     const spacedEndText = spacedEnd === null ? null : padClockHour(spacedEnd[1]!);
     const spaced =
-      spacedEnd !== null && spacedEndText !== null && isScheduleTimeRange(time!, spacedEndText) ? spacedEnd : null;
+      spacedEnd !== null && spacedEndText !== null && isScheduleTimeSpan(time!, spacedEndText) ? spacedEnd : null;
     const timeEnd = spaced !== null ? spacedEndText : adjacentEnd;
     /**
      * ⚠ 区切りは 1 文字(`〜` / `～` / `-`)か 2 文字(`..`)── 日付の期間と同じく**原文で数える**
@@ -505,7 +505,7 @@ export function formatLineDate(
 ): string {
   const hasTime = time !== undefined && time !== null && time !== '';
   const span =
-    hasTime && timeEnd !== undefined && timeEnd !== null && isScheduleTimeRange(time, timeEnd)
+    hasTime && timeEnd !== undefined && timeEnd !== null && isScheduleTimeSpan(time, timeEnd)
       ? `..${timeEnd}`
       : '';
   const head =
