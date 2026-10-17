@@ -191,6 +191,40 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('打ちかけのまま保存。');
   await expect(page.locator('[data-pkc-field="detail-body"]')).not.toContainText('打ちかけのままやめる。');
   expect(errors, 'やめるで pageerror').toEqual([]);
+
+  /**
+   * ⑤ 🔴 #1087 ── **CRLF の本文**の段落を行の欄で開き、何も打たずに閉じても「変えた」にならない。
+   *   欄の `value` は改行を LF にして返すので、直す前は原文(CRLF)と比べて必ず食い違い、
+   *   何も打たなくても確定(→ 本文が LF 化)・Esc で「捨てますか」の確認が出ていた。
+   * ⚠ 新しい起動は足さない(この道中の続き)。CRLF の本文は **取り込み**(`.md` の file)で作る
+   *   ── `textarea.fill` は改行を LF にするので打って作れない。
+   */
+  const CRLF_MD = '# 題\r\n\r\nCRLFの段落です。\r\n\r\n次の段落。\r\n';
+  await page.locator('[data-pkc-field="import-input"]').setInputFiles([
+    { name: 'crlf.md', mimeType: '', buffer: Buffer.from(CRLF_MD, 'utf-8') },
+  ]);
+  await expect(page.locator('[data-pkc-field="detail-body"]'), '取り込んだ本文が出ない').toContainText(
+    'CRLFの段落です。',
+  );
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(live).toBeVisible();
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await expect(row).toHaveValue('CRLFの段落です。');
+  // 何も打たずに Esc ── 確認が出ず、欄だけが閉じる
+  await row.press('Escape');
+  await expect(live.locator('[data-pkc-field="row-source"]'), 'Esc で欄が閉じない').toHaveCount(0);
+  await expect(
+    page.locator('[data-pkc-field="dialog-body"]'),
+    '何も打っていないのに「捨てますか」の確認が出た(CRLF を変更扱いにしている)',
+  ).toBeHidden();
+  // 何も打たずに別の段落を押して離れても、確認なしで開き直せる(確定=変更扱いにしていない)
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await expect(row).toHaveValue('CRLFの段落です。');
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await expect(row).toHaveValue('次の段落。');
+  await pressBare('cancel-edit');
+  await expect.poll(leftOvers, 'CRLF のノートでやめるで編集の道具が残った').toEqual(GONE);
+  expect(errors, 'CRLF の行で pageerror').toEqual([]);
 });
 
 test('🔴 ① 行の途中をクリックすると、原文の**その位置**に caret が入る', async ({ page }) => {

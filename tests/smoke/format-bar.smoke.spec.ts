@@ -55,6 +55,20 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   await clickReal(page, '[data-pkc-format="bold"]');
   await expect(ta).toHaveValue('強調したい');
 
+  // ④-a 🔴 #1087 ── 太字の中の字を選んで太字を外すと、選びは外した字(「太字」)のまま
+  //     (直す前は終わりが `**` ぶん後ろへずれ、字の外の空白まで選ばれていた)
+  await ta.fill('**太字** あいうえお');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(2, 4));
+  await clickReal(page, '[data-pkc-format="bold"]');
+  await expect(ta, '太字が外れていない').toHaveValue('太字 あいうえお');
+  expect(
+    await ta.evaluate((el) => {
+      const t = el as HTMLTextAreaElement;
+      return t.value.slice(t.selectionStart, t.selectionEnd);
+    }),
+    '太字を外したあと、選びが外した字からずれた',
+  ).toBe('太字');
+
   // ④-b 🔴 #1087 ── 行を選んで(終わりが次の行の頭)箇条書きを押しても、選んでいない次の行には付かない
   await ta.fill('一\n二\n三');
   await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 4)); // 「一\n二\n」= 3 行目の頭まで
