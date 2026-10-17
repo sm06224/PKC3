@@ -155,7 +155,7 @@ export type AgentGate = (target: AgentTarget, signal?: AbortSignal) => Promise<b
 /**
  * 通してよいかを答える門。
  *
- * 🔑 **1 本の列に並べる** ── AI は同時に何本も呼べる。並べないと、同じ範囲のダイアログが
+ * 🔑 **ダイアログを出しうる依頼は 1 本の列に並べる**(許可済みの依頼は並べず、すぐ通す)── AI は同時に何本も呼べる。並べないと、同じ範囲のダイアログが
  * 2 枚重なり、1 枚目で「常に許す」を選んでも 2 枚目が聞き直してしまう
  * (列に並べて、順番が来たら許可を**もう一度読む**)。
  *
@@ -187,6 +187,13 @@ export function createAgentGate(deps: AgentGateDeps): AgentGate {
     return allowed;
   };
   return (target, signal) => {
+    // 🔴 既に許してある依頼は列に並べない ── 別の origin のダイアログが開いている間、
+    //   許可済みの呼び出し(別のページの AI・ブラウザの AI)まで待たされるのを防ぐ。
+    //   並べるのは**ダイアログを出しうる依頼だけ**(同じ範囲の 2 枚重なりを防ぐ列の目的はそのまま)
+    if (signal?.aborted !== true && deps.grants.isAlways(scopeOf(target), target.from)) {
+      deps.grants.touch(scopeOf(target), deps.now(), target.from);
+      return Promise.resolve(true);
+    }
     const run = chain.then(() => decide(target, signal));
     // ⚠ 前が転んでも列は進める
     chain = run.catch(() => undefined);

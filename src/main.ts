@@ -29,6 +29,7 @@ import {
   viewModeLabel,
   type ViewMode,
 } from '@adapter/state/app-state';
+import { appendAvailability } from '@adapter/state/append-settle';
 import { bindEditLockRelease } from '@adapter/state/edit-lock-release';
 import { connectStoreEffects, type StoreEffects } from '@adapter/state/store-effects';
 import { DuckDbRunner } from '@adapter/platform/duckdb/duckdb-runner';
@@ -2283,6 +2284,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 書き足しは既存の追記の 1 本(PDF の「ノートへ引く」と同じ `appendAndSettle`)
     append: (id: string, text: string, heading: string | null) =>
       appendUnlessEditedElsewhere(dispatcher, editLockPort, id, text, heading, AGENT_APPEND_SETTLE_TIMEOUT_MS),
+    appendCheck: (id: string) => appendAvailability(dispatcher.getState(), id),
     gate: agentGate,
   };
   /**
@@ -2298,7 +2300,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
   appAgentOriginGrants.onChange(() => agentEmbed.sync());
   // 🔴 設定の「許すページ」の一覧を変えたら(画面でも別のタブでも)今すぐ効かせる(#1407)。判断は `embed-origins-wiring.ts`
-  wireEmbedOrigins(appEmbedOrigins, agentEmbed, window);
+  wireEmbedOrigins(appEmbedOrigins, agentEmbed, appAgentOriginGrants, window);
   agentEmbed.sync();
   window.addEventListener('pagehide', () => agentEmbed.stop());
   // ⚠ 戻るで復元されたとき(bfcache)は登録し直す ── しないと、次に台帳が変わるまで組み込み先から見えない

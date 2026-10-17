@@ -78,6 +78,7 @@ function setup() {
     ...store,
     createEntry: () => null,
     append: async () => ({ ok: true }),
+    appendCheck: () => 'ok',
     gate: async () => true,
   });
   const tool = (name: string) => tools.find((t) => t.name === name)!;

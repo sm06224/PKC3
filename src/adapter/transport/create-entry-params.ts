@@ -69,11 +69,13 @@ export function parseCreateEntryParams(params: unknown): ParamsResult {
   if (p.title !== undefined && typeof p.title !== 'string') {
     return { ok: false, message: 'title は文字列である必要があります' };
   }
-  const body = typeof p.body === 'string' ? p.body : '';
+  // ⚠ NUL は落とす(SQLite の text に NUL が入ると以後その行が壊れる。AI の書き足し(`pkc_append_note`)と同じ扱い)
+  const noNul = (v: string): string => v.split('\u0000').join('');
+  const body = typeof p.body === 'string' ? noNul(p.body) : '';
   if (body.length > MAX_BODY) {
     return { ok: false, message: `body が長すぎます(上限 ${MAX_BODY} 文字)` };
   }
-  const given = typeof p.title === 'string' ? oneLine(p.title).slice(0, MAX_TITLE) : '';
+  const given = typeof p.title === 'string' ? oneLine(noNul(p.title)).slice(0, MAX_TITLE) : '';
   const title = given !== '' ? given : titleFromBody(body);
   return { ok: true, input: { title, body } };
 }

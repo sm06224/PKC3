@@ -120,6 +120,7 @@ import {
   CODE_SAVE_NOT_FOUND_NOTE,
   blockedActionNote,
   APPEND_OPEN_BLOCK_REFUSAL,
+  APPEND_TEXT_OPEN_BLOCK_REFUSAL,
 } from './app-state';
 import { baseLidOfKey } from '@features/markdown/section-embed';
 import { replaceSectionByHeading } from '@features/markdown/append-target';
@@ -3578,6 +3579,7 @@ export function connectStoreEffects(
               | 'empty'
               | 'missing'
               | 'open'
+              | 'textOpen'
             > => {
               /**
                * 🔴 **追記先は、そのつど本文から解く**(#395 段①)。
@@ -3598,6 +3600,8 @@ export function connectStoreEffects(
                     : appendIntoSection(base, ev.target, ev.heading, ev.text);
               if (newBody === null) return 'missing';
               if (newBody === base) return 'empty';
+              // 🔴 足した結果が閉じていないブロックで終わるなら足さない(以後、末尾へ足す回が全部断られる)
+              if (ev.target === null && endsInsideOpenBlock(newBody)) return 'textOpen';
               const ext = extractMeta(ev.archetype, newBody);
               const stamps = await store.persistEntry(
                 {
@@ -3616,23 +3620,25 @@ export function connectStoreEffects(
             };
 
             // ⚠ **理由を分けて言う**(「入りませんでした」だけでは押し直すしかない)
-            const refuse = (r: 'empty' | 'missing' | 'open'): void =>
+            const refuse = (r: 'empty' | 'missing' | 'open' | 'textOpen'): void =>
               fail(
                 r === 'empty'
                   ? '追記する内容がありません'
                   : r === 'open'
                     ? APPEND_OPEN_BLOCK_REFUSAL
-                    : '選んだ追記先の見出しが本文に見つかりません(見出しが変わった可能性があります)。追記先を選び直してください',
+                    : r === 'textOpen'
+                      ? APPEND_TEXT_OPEN_BLOCK_REFUSAL
+                      : '選んだ追記先の見出しが本文に見つかりません(見出しが変わった可能性があります)。追記先を選び直してください',
               );
             let attempt = await tryAppend(body);
-            if (attempt === 'empty' || attempt === 'missing' || attempt === 'open') return refuse(attempt);
+            if (typeof attempt === 'string') return refuse(attempt);
             if (attempt.stamps.conflict === true) {
               // ⚠ **読み直してから**足し直す(古い基底で再送しない)
               const fresh = await store.getBody(ev.lid);
               if (disposed) return;
               if (fresh === null) return fail('追記できません(ノートが見つかりません。ゴミ箱へ移されたかもしれません)');
               attempt = await tryAppend(fresh);
-              if (attempt === 'empty' || attempt === 'missing' || attempt === 'open') return refuse(attempt);
+              if (typeof attempt === 'string') return refuse(attempt);
               if (attempt.stamps.conflict === true)
                 return fail(
                   '別のタブまたはウィンドウがこのノートを書き換えたため、追記できませんでした(もう一度押してください)',

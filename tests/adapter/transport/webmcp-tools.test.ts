@@ -11,6 +11,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
+  AGENT_APPEND_BUSY_TEXT,
   AGENT_APPEND_FAILED_TEXT,
   AGENT_APPEND_TIMEOUT_TEXT,
   AGENT_CREATE_FAILED_TEXT,
@@ -94,6 +95,7 @@ function setup(over: Partial<AgentToolDeps> = {}, allow: boolean | ((s: AgentSco
       calls.create.push([input, origin, via]);
       return 'lid-new' as string | null;
     },
+    appendCheck: () => 'ok',
     append: async (id, text, heading) => {
       calls.append.push([id, text, heading]);
       return { ok: true } as AppendOutcome;
@@ -564,4 +566,27 @@ describe('pkc_append_note ── 追記欄と同じ門(#1407 段④ レビュー
       expect(calls.create).toEqual([]);
     },
   );
+});
+
+
+describe('🔴 A5: 書き足しの断りは AI に言い、user の画面のエラーには出さない', () => {
+  it('ノートが無い(削除済み)/ user が編集中、は dispatch せず、AI へ別々の字で返す', async () => {
+    const gone = setup({ appendCheck: () => 'gone' });
+    const r1 = await gone.tool('pkc_append_note').execute({ id: 'a1', text: 'x' }, SIGNAL);
+    expect(r1.isError).toBe(true);
+    expect(r1.content[0]!.text).toContain('見つかりません');
+    expect(r1.content[0]!.text, '消えたノートに「編集中」と言った').not.toContain('編集中');
+    expect(gone.calls.append, '断る回なのに dispatch した(user の画面にエラーが出る)').toEqual([]);
+
+    const busy = setup({ appendCheck: () => 'busy' });
+    const r2 = await busy.tool('pkc_append_note').execute({ id: 'a1', text: 'x' }, SIGNAL);
+    expect(r2.isError).toBe(true);
+    expect(r2.content[0]!.text).toBe(AGENT_APPEND_BUSY_TEXT);
+    expect(busy.calls.append).toEqual([]);
+
+    // 対照群: 'ok' なら書く
+    const ok = setup({ appendCheck: () => 'ok' });
+    expect((await ok.tool('pkc_append_note').execute({ id: 'a1', text: 'x' }, SIGNAL)).isError).toBeUndefined();
+    expect(ok.calls.append.length).toBe(1);
+  });
 });

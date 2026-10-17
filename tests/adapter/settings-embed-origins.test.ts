@@ -13,6 +13,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsRenderer } from '@adapter/ui/render/settings';
 import { EmbedOriginsStore } from '@adapter/transport/embed-origins';
+import { AgentOriginGrants } from '@adapter/platform/agent-origin-grants';
 import { createAgentEmbed } from '@adapter/transport/agent-embed';
 import { buildAgentTools } from '@adapter/transport/webmcp-tools';
 import { RPC } from '@adapter/transport/protocol';
@@ -169,6 +170,7 @@ describe('🔴 門は画面から足した origin を受け、外した後は受
           tags: async () => ({ groups: [], omitted: 0 }),
           createEntry: () => 'x',
           append: async () => ({ ok: true }),
+          appendCheck: () => 'ok',
           gate: async () => true,
           from,
         }),
@@ -200,7 +202,7 @@ describe('🔴 門は画面から足した origin を受け、外した後は受
   it('🔴 配線(wireEmbedOrigins): 外すと登録の signal が畳まれ registered() が空になる。足すと登録される', () => {
     const store = new EmbedOriginsStore(fakeStorage() as unknown as Storage);
     const { embed, registered } = gate(store);
-    wireEmbedOrigins(store, embed, window);
+    wireEmbedOrigins(store, embed, new AgentOriginGrants(fakeStorage()), window);
     store.add('https://a.test');
     expect(registered.length).toBeGreaterThan(0);
     expect(registered[0]!.exposedTo).toEqual(['https://a.test']);
@@ -212,11 +214,28 @@ describe('🔴 門は画面から足した origin を受け、外した後は受
     expect(embed.registered()).toEqual([]);
   });
 
+  it('🔴 A3: 一覧から外すと「常に許す」も台帳から消える(入れ直しても聞き直す)。別の origin の許可は残る', () => {
+    const store = new EmbedOriginsStore(fakeStorage() as unknown as Storage);
+    const grants = new AgentOriginGrants(fakeStorage());
+    const { embed } = gate(store);
+    wireEmbedOrigins(store, embed, grants, window);
+    store.add('https://a.test');
+    store.add('https://b.test');
+    grants.setAlways('https://a.test', 'read');
+    grants.setAlways('https://a.test', 'write');
+    grants.setAlways('https://b.test', 'read');
+    store.remove('https://a.test');
+    expect(grants.list().filter((r) => r.origin === 'https://a.test'), '外した origin の許可が残っている').toEqual([]);
+    expect(grants.isAlways('https://b.test', 'read'), '外していない origin の許可まで消えた').toBe(true);
+    store.add('https://a.test');
+    expect(grants.isAlways('https://a.test', 'read'), '入れ直したら許可が復活した').toBe(false);
+  });
+
   it('🔴 別のタブで外された(storage event。画面の onChange は鳴らない)ときも畳む。無関係な key では動かない', () => {
     const ls = fakeStorage();
     const store = new EmbedOriginsStore(ls as unknown as Storage);
     const { embed, registered } = gate(store);
-    wireEmbedOrigins(store, embed, window);
+    wireEmbedOrigins(store, embed, new AgentOriginGrants(fakeStorage()), window);
     store.add('https://a.test');
     expect(embed.registered()).toEqual(['https://a.test']);
     const signal = registered[0]!.signal!;
@@ -254,6 +273,7 @@ describe('🔴 門は画面から足した origin を受け、外した後は受
           tags: async () => ({ groups: [], omitted: 0 }),
           createEntry: () => 'x',
           append: async () => ({ ok: true }),
+          appendCheck: () => 'ok',
           gate: async (t) => {
             gateCalls.push(t);
             return true;
@@ -346,7 +366,7 @@ describe('🔴 保存できないとき・フラグがオフのとき・store �
         },
       ],
     });
-    wireEmbedOrigins(store, embed, window);
+    wireEmbedOrigins(store, embed, new AgentOriginGrants(fakeStorage()), window);
     store.add('https://a.test');
     await embed.call('https://a.test', 't', {});
     expect(sig?.aborted).toBe(false);

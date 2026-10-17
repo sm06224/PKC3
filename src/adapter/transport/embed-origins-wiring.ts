@@ -5,21 +5,27 @@
  *
  * - 一覧から**外れた** origin は `revoke`(WebMCP の登録・飛んでいる依頼・ダイアログを今すぐ畳む)。
  *   何が外れたかは**前回の一覧との差**で採る ── 画面から外したときも、別のタブが書き換えたとき(`storage` event)も同じ道。
- * - そのあと `sync`(足された origin で「常に許す」済みのものを登録する)。
+ * - 🔴 外れた origin の「常に許す」も**台帳から消す**(消さないと、入れ直した瞬間に聞かれずに道具が出る)。
+- そのあと `sync`(足された origin で「常に許す」済みのものを登録する)。
  * - 別のタブの書込は `storage` event で来る(自分のタブの書込では来ない)── key が一覧の物か、全消去(`null`)のときだけ受ける。
  */
 import { EMBED_ORIGINS_KEY, type EmbedOriginsStore } from './embed-origins';
 import type { AgentEmbed } from './agent-embed';
+import type { AgentOriginGrants } from '@adapter/platform/agent-origin-grants';
 
 export function wireEmbedOrigins(
   store: EmbedOriginsStore,
   embed: Pick<AgentEmbed, 'revoke' | 'sync'>,
+  grants: Pick<AgentOriginGrants, 'revokeOrigin'>,
   win: Pick<Window, 'addEventListener'>,
 ): void {
   let last = store.list();
   store.onChange(() => {
     const now = store.list();
-    for (const o of last) if (!now.includes(o)) embed.revoke(o);
+    for (const o of last) if (!now.includes(o)) {
+        embed.revoke(o);
+        grants.revokeOrigin(o);
+      }
     last = now;
     embed.sync();
   });

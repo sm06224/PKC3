@@ -11,7 +11,7 @@
  * ⚠ 字(断り文)は呼び手が持つ ── ここは結末の**種類**と reducer の理由だけを返す。
  */
 import type { Dispatcher } from './dispatcher';
-import type { DomainEvent } from './app-state';
+import { bodyWriteBlockReason, type AppState, type DomainEvent } from './app-state';
 
 export interface AppendTimers {
   readonly setTimer: (fn: () => void, ms: number) => unknown;
@@ -48,6 +48,17 @@ export function dispatchAppend(
   const after = dispatcher.getState();
   if (after.writeLock !== lockBefore) return 'accepted';
   return after.entryMetas.has(action.lid) ? 'refused' : 'gone';
+}
+
+/**
+ * 🔴 **書き足しを投げる前に、断られるかを見る**(ブラウザの AI の `pkc_append_note` 用)。
+ * ⚠ 投げて reducer に断らせると、理由が **user の画面のエラー**(`state.error`)に立つ ── user が頼んでいない
+ *   AI の書き足しの失敗を user に見せない。`'gone'` = ノートが無い / `'busy'` = 編集中・書込中・章の欄が開いている。
+ * 🔑 断る条件は reducer(`APPEND_TO_ENTRY`)と同じ関数(`bodyWriteBlockReason` と `writeLock`)。
+ */
+export function appendAvailability(state: AppState, lid: string): 'ok' | 'gone' | 'busy' {
+  if (!state.entryMetas.has(lid)) return 'gone';
+  return state.writeLock || bodyWriteBlockReason(state, lid) !== null ? 'busy' : 'ok';
 }
 
 export function appendAndSettle(
