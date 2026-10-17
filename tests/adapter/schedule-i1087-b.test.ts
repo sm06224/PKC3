@@ -13,7 +13,7 @@ import { readLineDate } from '../../src/features/schedule/line-date';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { applyOpened } from '../helpers/open-line';
 
-const SP = '　';
+const SP = '\u3000';
 
 describe('A-1: 「全部」で曜日の列も回る', () => {
   const RULE = '- [ ] 定例 @2026-10-05 毎週 月水金';
