@@ -404,7 +404,7 @@ export class LauncherRenderer {
             btn.setAttribute('aria-expanded', off ? 'false' : 'true');
             btn.title = off
               ? `${group} を開きます(いまは折りたたんであります)`
-              : `${group} を折りたたみます(中のアプリが隠れます)`;
+              : `${group} を折りたたみます(中のアプリが隠れます。右クリック(長押し)でアイコン・並べ替え)`;
             btn.textContent = off ? `${group}(${countOf(group)})` : group;
             // ⚠ `textContent` を入れた**後**に足す(先に足すと代入で消える)
             if (mark !== undefined) btn.prepend(groupMark(mark));

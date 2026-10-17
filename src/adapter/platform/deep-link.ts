@@ -302,6 +302,17 @@ export function windowTitleFor(base: string, label: string | null): string {
 }
 
 /**
+ * 🔴 **アラームが鳴ったのに、見えていないタブの題名**(依頼 75-2。Gemini の回答「推薦どおり」= A)。
+ *
+ * ⚠ 音を消している端末や聞き逃したときは、別のタブからは気づく手段が無かった。
+ * 🔑 通知の許可は求めない決まりなので、**タブの題名の頭に「🔔」を付ける**(「🔔 打ち合わせ — PKC3」)。
+ *   付けるのは鳴ってから**そのタブを開くまで**の間だけ(呼び元が決める)。
+ */
+export function ringingTitle(title: string, ringing: boolean): string {
+  return ringing ? `🔔 ${title}` : title;
+}
+
+/**
  * 🔴 **2 枚目を止めたときの字**(#685 段② / #690 I3、2026-09-04)。
  *
  * ⚠ 直す前は「すでに別のウィンドウで開いています」だけで、**どの窓か**が無かった

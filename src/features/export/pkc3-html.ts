@@ -301,6 +301,9 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
 .b [data-pkc-figure-baked] img{max-width:100%;height:auto}
 /* ⚠ 焼いた側は outline / color / min-height だけ ── 薄さはこちらの持ち物。 */
 .b [data-pkc-asset-missing]{opacity:.75}
+/* 入っていないノートへのリンク(依頼 77-3)。字を薄くし、点線の下線で「押せない」ことを見せる
+   (理由は title だけで、指で触る端末では読めない)。⚠ 閲覧側だけが作る要素 ── アプリに対応物が無い。 */
+.b [data-pkc-outside-note]{opacity:.6;text-decoration:underline dotted}
 /* 一覧の行(表)は器から溢れさせない。⚠ 焼いた側に対応物なし。 */
 .b>*{max-width:100%}
 a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;border-radius:6px;

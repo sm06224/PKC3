@@ -13280,7 +13280,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'このノートのリンクを作れませんでした(この PKC のアドレスが読めません)' });
       return;
     }
-    services.copyText?.(url, 'ノートのリンクをコピーしました(ブラウザやメールに貼れます)');
+    services.copyText?.(url, 'ノートのリンクをコピーしました(この PKC を使っている自分のブラウザで開けます。別の人には、ノートを書き出して渡してください。ブックマークするときは、このリンクを開き直してから登録します)');
     flashCopied(target);
   },
   /**
@@ -17626,10 +17626,19 @@ export function bindActions(
    * ⚠ この実測が無ければ「持ち物を state に載せる」別機構が要るところだった。
    */
   let hoverTab: { mode: string; timer: ReturnType<typeof setTimeout> } | null = null;
+  /**
+   * 🔴 **待っているタブに薄い枠を出す**(依頼 79-4。Gemini の回答「推薦どおり」= B)── 切り替わることを先に見せる
+   *   (勝手に画面が動いたように見えない)。待つ時間は変えない。枠の見た目は `app.css` の `data-pkc-tab-hover`。
+   */
+  const TAB_HOVER_ATTR = 'data-pkc-tab-hover';
+  const clearTabHoverMark = (): void => {
+    root.querySelectorAll(`[${TAB_HOVER_ATTR}]`).forEach((el) => el.removeAttribute(TAB_HOVER_ATTR));
+  };
   const cancelTabHover = (): void => {
     if (hoverTab === null) return;
     clearTimeout(hoverTab.timer);
     hoverTab = null;
+    clearTabHoverMark();
   };
   /** ⚠ **止めた時間**で決める(通り過ぎただけで面が変わると、落とす先を見失う)。 */
   const TAB_HOVER_MS = 600;
@@ -17650,10 +17659,12 @@ export function bindActions(
       const mode = tab.getAttribute('data-pkc-browse') ?? '';
       if (hoverTab?.mode !== mode) {
         cancelTabHover();
+        tab.setAttribute(TAB_HOVER_ATTR, '');
         hoverTab = {
           mode,
           timer: setTimeout(() => {
             hoverTab = null;
+            clearTabHoverMark();
             services.setBrowse?.(mode);
           }, TAB_HOVER_MS),
         };

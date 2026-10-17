@@ -32,6 +32,7 @@ import {
   unusableViewMessage,
   type DeepLinkTarget,
   windowTitleFor,
+  ringingTitle,
   isPurposeWindow,
   noteOpenedByUs,
 } from '../../src/adapter/platform/deep-link';
@@ -777,6 +778,12 @@ describe('2 枚目を止めたときの字(#690 I3)', () => {
 });
 
 describe('窓の題名(#685 着地前レビュー ⚠3)', () => {
+  /** 依頼 75-2: 鳴ってから開くまでの間、頭に 🔔。鳴っていなければ字は変わらない(対照群)。 */
+  it('🔔 アラームが鳴っているときだけ頭に付く', () => {
+    const t = windowTitleFor('PKC3', '打ち合わせ');
+    expect(ringingTitle(t, true)).toBe('🔔 打ち合わせ — PKC3');
+    expect(ringingTitle(t, false)).toBe(t);
+  });
   it('🔴 名前があれば「名前 — PKC3」', () => {
     expect(windowTitleFor('PKC3', '買い物メモ')).toBe('買い物メモ — PKC3');
   });

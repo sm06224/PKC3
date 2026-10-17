@@ -4527,10 +4527,15 @@ function appTileControls(rawBody: string, mime: string, lid: string): HTMLElemen
   const field = (
     name: string,
     action: string,
+    heading: string,
     placeholder: string,
     value: unknown,
     size: number,
   ): void => {
+    // 🔴 見出しを付ける(依頼 83-5)── 字を入れると案内(placeholder)は消えるので、何の欄か分からなくなっていた
+    const label = document.createElement('label');
+    const head = document.createElement('span');
+    head.textContent = heading;
     const input = document.createElement('input');
     input.type = 'text';
     input.setAttribute('data-pkc-action', action);
@@ -4540,11 +4545,13 @@ function appTileControls(rawBody: string, mime: string, lid: string): HTMLElemen
     input.size = size;
     input.value = typeof value === 'string' ? value : '';
     input.defaultValue = input.value; // 断られたときの戻し先(binder の revertIfRefused)
-    box.append(input);
+    label.append(head, input);
+    box.append(label);
   };
-  // ⚠ グループ名は**並び順そのもの**(名前順に並ぶ)── placeholder でそう言う
-  field('app-group', 'set-app-group', 'グループ(名前順に並びます)', fm['attachment.app_group'], 16);
-  field('app-icon', 'set-app-icon', 'アイコン', fm['attachment.app_icon'], 8);
+  // 🔴 見出し + 案内(依頼 83-5。Gemini の回答「推薦どおり」= A)。⚠ 「名前順に並びます」は、並べ替えたグループが
+  //    名前順にならないことと食い違っていたので外した
+  field('app-group', 'set-app-group', 'グループ', '例: 資料', fm['attachment.app_group'], 16);
+  field('app-icon', 'set-app-icon', 'アイコン', '絵文字、または下の一覧から選ぶ', fm['attachment.app_icon'], 8);
   /**
    * 🔴 **リンク先の印を取り込む**(#856 段②。user 裁定 2026-09-12)。
    *
