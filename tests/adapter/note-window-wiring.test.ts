@@ -88,7 +88,7 @@ describe('別の窓で開く ── 対象の解決', () => {
    *   ── 揃えないと「A を書き出して B を開く」が成立する。
    */
   it('🔴 押した行のノートを開く(選ばれている物ではない)', () => {
-    const s = setup(withSelected('selected'));
+    const s = setup(withSelected('selected', ['pressed']));
     s.press('pressed');
     expect(s.opened, '押した行ではなく、選ばれている物を開いた').toEqual(['pressed']);
   });

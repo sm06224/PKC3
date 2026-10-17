@@ -14289,6 +14289,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
+    // 🔴 消えたノートの行(探す面に残った行など)は開かない ── 無い lid の窓を開かない
+    if (!dispatcher.getState().entryMetas.has(lid)) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'そのノートは見つかりません' });
+      return;
+    }
     // 🔴 **「探す」の行は、探した語を運ぶ**(#1102 段①)── 受け側が当たった所へ送って塗る。
     //   ⚠ 語を持たない口(一覧の ⋯ など)は今までどおり `undefined`
     const find = target.getAttribute(FIND_ATTR);
@@ -15677,6 +15682,15 @@ export function bindActions(
       const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
       if (lid !== null) {
         ev.preventDefault();
+        // 🔴 編集中は reducer が黙って落とす(素のクリックは `selectEntryOrExplain` が理由を出す)── 同じく理由を出す
+        const phaseNow = dispatcher.getState().phase;
+        if (phaseNow !== 'ready') {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `${phaseBlockReason(phaseNow)}フォルダの操作をしてください`,
+          });
+          return;
+        }
         dispatcher.dispatch(
           me.shiftKey
             ? { type: 'SELECT_RANGE', lid }
