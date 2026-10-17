@@ -4123,6 +4123,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             await openInPdfReader(
               {
                 enabled: () => appPdfReader.enabled(),
+                // ⚠ 昇格で変わるので呼ぶたびに読む
+                isHolder: () => writerHolder,
                 host: pdfReaderHost,
                 lend: (key) => blobs.lendObjectUrl(cid, key),
                 fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),

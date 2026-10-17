@@ -22,6 +22,9 @@ interface Api {
   toJob(items: Item[]): { order: number[]; rotate: Record<string, number> };
   canSave(items: Item[]): boolean;
   outputName(name: string): string;
+  isKept(items: Item[], page: number): boolean;
+  onKeptPages<T extends { page: number }>(list: T[], items: Item[]): T[];
+  REMOVED_PAGE_REFUSAL: string;
   sameArrangement(a: Item[], b: Item[]): boolean;
   noteLine(kept: number, total: number): string;
   warnLine(info: { outlines: boolean; form: boolean; signature: boolean }): string;
@@ -175,10 +178,43 @@ describe('保存する PDF の名前', () => {
     expect(api.outputName('メモ')).toBe('メモ (編集).pdf');
   });
 
-  it('編集したものを編集しても (編集) を重ねない / 空なら既定の名前', () => {
-    expect(api.outputName('報告書 (編集).pdf')).toBe('報告書 (編集).pdf');
+  it('編集したものを編集したら、(編集) を重ねず番号を付ける: (編集) → (編集 2) → (編集 3) … / 空なら既定の名前', () => {
+    expect(api.outputName('報告書 (編集).pdf')).toBe('報告書 (編集 2).pdf');
+    expect(api.outputName('報告書 (編集 2).pdf')).toBe('報告書 (編集 3).pdf');
+    expect(api.outputName('報告書 (編集 9).pdf')).toBe('報告書 (編集 10).pdf');
+    // 3 回続けても、名前は毎回変わる(前の物と同じ名前にならない)
+    let n = '報告書.pdf';
+    const seen = new Set<string>([n]);
+    for (let i = 0; i < 3; i += 1) {
+      n = api.outputName(n);
+      expect(seen.has(n), n).toBe(false);
+      seen.add(n);
+    }
+    expect([...seen]).toEqual(['報告書.pdf', '報告書 (編集).pdf', '報告書 (編集 2).pdf', '報告書 (編集 3).pdf']);
+    // 末尾でない (編集) は番号の対象ではない
+    expect(api.outputName('(編集) 資料.pdf')).toBe('(編集) 資料 (編集).pdf');
     expect(api.outputName('')).toBe('document (編集).pdf');
     expect(api.outputName('.pdf')).toBe('document (編集).pdf');
+  });
+});
+
+describe('外したページに付けた物は、保存前の案内の数に入れない(#1163 依頼 99-5)', () => {
+  it('isKept / onKeptPages: いまの並びに残っているページの物だけ残す(外したページの物は除く)', () => {
+    const items = api.removeAt(api.fresh(4), 1); // 2 ページ目を外した → 1, 3, 4
+    expect(api.isKept(items, 1)).toBe(true);
+    expect(api.isKept(items, 2)).toBe(false);
+    const list = [{ page: 1, id: 'a' }, { page: 2, id: 'b' }, { page: 3, id: 'c' }, { page: 2, id: 'd' }];
+    expect(api.onKeptPages(list, items).map((o) => o.id)).toEqual(['a', 'c']);
+    // 対照群: 外していなければ全部残る(除く側が常に除いているのではない)
+    expect(api.onKeptPages(list, api.fresh(4))).toHaveLength(4);
+    // 戻せば、また数える
+    expect(api.onKeptPages(list, api.restorePage(items, 2))).toHaveLength(4);
+  });
+
+  it('外したページへの断りの字: 何を付けられないかと、戻し方を言う(画面に在る「戻す」を指す)', () => {
+    expect(api.REMOVED_PAGE_REFUSAL).toContain('外したページ');
+    expect(api.REMOVED_PAGE_REFUSAL).toContain('付箋・ペン・ハイライト');
+    expect(api.REMOVED_PAGE_REFUSAL).toContain('戻す');
   });
 });
 

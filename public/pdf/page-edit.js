@@ -238,14 +238,38 @@
 
   /**
    * 保存した PDF の名前。`元の名前.pdf` → `元の名前 (編集).pdf`(拡張子は大文字小文字を問わず取り、
-   * 無ければ付け足す)。既に ` (編集)` で終わっていれば重ねない。
+   * 無ければ付け足す)。既に ` (編集)` で終わっていれば重ねず番号を付ける: `(編集)` → `(編集 2)` → `(編集 3)`…
+   * (編集した PDF をさらに編集して保存しても、名前が前の物と同じにならない)。
    */
   function outputName(name) {
     var base = String(name || '').replace(/\.pdf$/i, '');
     if (base === '') base = 'document';
-    if (!/ \(編集\)$/.test(base)) base += ' (編集)';
+    var m = / \(編集(?: ([0-9]+))?\)$/.exec(base);
+    if (m === null) {
+      base += ' (編集)';
+    } else {
+      var next = m[1] === undefined ? 2 : Number(m[1]) + 1;
+      base = base.slice(0, m.index) + ' (編集 ' + String(next) + ')';
+    }
     return base + '.pdf';
   }
+
+  /** `page`(元のページ番号)が、いまの並びに残っているか。 */
+  function isKept(items, page) {
+    return items.some(function (it) {
+      return it.page === page;
+    });
+  }
+
+  /** 付けた物(`page` を持つ)のうち、いまの並びに残っているページの物だけ。外したページの物は保存した PDF に入らない。 */
+  function onKeptPages(list, items) {
+    return list.filter(function (o) {
+      return isKept(items, o.page);
+    });
+  }
+
+  /** 外したページへ付箋・ペン・ハイライトを付けようとしたときの断り(窓の下に出す一行)。 */
+  var REMOVED_PAGE_REFUSAL = '外したページには付箋・ペン・ハイライトを付けられません(一覧の「戻す」で戻せます)';
 
   /** 2 つの並びが同じか(同じページが同じ順で、同じ向き)。保存した並びを基準にして「まだ保存していない変更」を見る。 */
   function sameArrangement(a, b) {
@@ -374,6 +398,9 @@
     appendedNote: appendedNote,
     canSave: canSave,
     outputName: outputName,
+    isKept: isKept,
+    onKeptPages: onKeptPages,
+    REMOVED_PAGE_REFUSAL: REMOVED_PAGE_REFUSAL,
     sameArrangement: sameArrangement,
     noteLine: noteLine,
     warnLine: warnLine,

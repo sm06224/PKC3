@@ -307,6 +307,66 @@ describe('ハイライトのボタン(#275 段②-2b)── 上のバーの「�
   });
 });
 
+describe('ブラウザの表示で開くボタン(#1163 依頼 331)── 上のバーに在り、文書が読めるまでは押せない', () => {
+  it('上のバーに在り、読めるまでは押せず、押しても何も開かない(ObjectURL も作らない)', () => {
+    boot();
+    const btn = $('open-native') as HTMLButtonElement;
+    expect(btn.closest('#bar'), '上のバーの中').not.toBeNull();
+    expect(btn.textContent).toBe('ブラウザの表示で開く');
+    expect(btn.disabled).toBe(true);
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const create = vi.spyOn(URL, 'createObjectURL');
+    btn.click();
+    expect(open).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('寿命: 押して作った ObjectURL は、窓を閉じる(pagehide)ときに返す。reader.js の原文で、作る所と返す所が対で在る', () => {
+    const src = readFileSync('public/pdf/reader.js', 'utf-8');
+    expect(src).toContain('nativeUrl = URL.createObjectURL(blob)');
+    expect(src).toContain('if (nativeUrl !== null) URL.revokeObjectURL(nativeUrl)');
+    // 返す所は pagehide の中(窓の寿命の終わり)
+    const hide = src.slice(src.indexOf("window.addEventListener('pagehide'"));
+    expect(hide).toContain('URL.revokeObjectURL(nativeUrl)');
+  });
+});
+
+describe('ペンの色(#1163 依頼 99-3)── 既定は濃い色で、ハイライトの色の選びとは別に覚える', () => {
+  it('reader.js の原文: 線を描く所も保存する所も penColor を使い、ハイライトの色(hlColor)は使わない', () => {
+    const src = readFileSync('public/pdf/reader.js', 'utf-8');
+    expect(src).toContain('let penColor = hl.PEN_DEFAULT_COLOR;');
+    expect(src).toContain("cssRgb(hl.colorOf(penColor).rgb)");
+    expect(src).toContain('color: penColor, pts');
+    // ペンの処理(なぞる〜確定)の中に hlColor は出てこない
+    const penPart = src.slice(src.indexOf('// ── ペン: ページの上をなぞる'), src.indexOf('// ───────── 生死'));
+    expect(penPart.length).toBeGreaterThan(500);
+    expect(penPart).not.toContain('hlColor');
+  });
+
+  it('文書が読めるまで押せないので、丸いボタンは最初は黄が押されている(ハイライトの既定は黄のまま)', () => {
+    boot();
+    const pressed = [...document.querySelectorAll<HTMLButtonElement>('#bar button.swatch')]
+      .filter((b) => b.getAttribute('aria-pressed') === 'true')
+      .map((b) => b.getAttribute('data-hl-color'));
+    expect(pressed).toEqual(['yellow']);
+  });
+});
+
+describe('外したページへ付ける断り(#1163 依頼 99-5)', () => {
+  it('reader.js の原文: 付箋・ペン・ハイライトの 3 つの入口が isRemovedPage で断る', () => {
+    const src = readFileSync('public/pdf/reader.js', 'utf-8');
+    expect(src).toContain('posByPage[page] === 0');
+    const at = (a: string, b: string): string => src.slice(src.indexOf(a), src.indexOf(b));
+    // 付箋(押した場所に欄を出す前)/ ペン(なぞり始める前)/ ハイライト(付ける前)
+    expect(at("pagesEl.addEventListener('click', (ev) => {\n  if (!ready || saving || tool !== 'note'", "openNoteInput({ kind: 'new'")).toContain('isRemovedPage(page)');
+    expect(at("tool !== 'pen' || ev.button", 'pen = { id: ev.pointerId')).toContain('isRemovedPage(page)');
+    expect(at('async function addHighlight', 'for (const m of made)')).toContain('REMOVED_PAGE_NO_TOOL');
+    // 案内の数は、残っているページの物だけ
+    expect(at('function annCounts', 'function hlCounts')).toContain('onKeptPages');
+    expect(at('function hlCounts', 'async function loadHighlights')).toContain('onKeptPages');
+  });
+});
+
 describe('付箋とペンのボタン(#275)── 「ハイライト」の手前に並ぶ', () => {
   it('「付箋」「ペン」が「ハイライト」の手前に並び、文書が読めるまでは押せず、押しても道具は選ばれない', () => {
     boot();
