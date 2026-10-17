@@ -94,9 +94,10 @@ describe('M1: 控えを読む(withSpool)', () => {
     expect(at).toBeGreaterThan(0);
     expect(fx.slice(at, at + 900)).toContain('appMessagePost.withSpool(ev.lid');
     const bd = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
-    const from = bd.indexOf("'export-messages': (dispatcher");
+    // 押しボタンの受け手と「操作を探す」の両方が通る実体(`exportMessagesNote`)の中
+    const from = bd.indexOf('function exportMessagesNote(');
     expect(from).toBeGreaterThan(0);
-    const exp = bd.slice(from, bd.indexOf("'set-paste-source'", from));
+    const exp = bd.slice(from, bd.indexOf('function openMessagesFromButton(', from));
     expect(exp).toContain('appMessagePost');
     expect(exp).toContain('.withSpool(lid');
   });

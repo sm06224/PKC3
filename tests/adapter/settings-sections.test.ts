@@ -189,8 +189,9 @@ const DT_ORDER: Record<string, string[]> = {
   'settings-notify': ['予定の知らせ', '音を聞きやすくする', '音量をそろえる', '頭の中で鳴る感じを和らげる'],
   'settings-open-ways': ['zip ファイルを開く場所', 'アプリの開き方'],
   'settings-too-narrow': ['狭い画面の断り書き'],
-  'settings-persist': ['PKC3 のデータ'],
-  'settings-notices': ['お知らせ'],
+  'settings-persist': ['ブラウザの扱い'],
+  // 先頭の「新しいバージョン」は、待っている版が無い間は隠れている(台帳 #1852 束 L2、依頼 84-1 / 120-2)
+  'settings-notices': ['新しいバージョン', 'お知らせ'],
 };
 
 describe('設定画面の節の登録表(#1382)', () => {

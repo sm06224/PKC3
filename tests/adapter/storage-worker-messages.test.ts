@@ -212,9 +212,9 @@ describe('appendMessage の書込量と頭打ち(#1017 C5)', () => {
     expect(text.length, '前提が崩れた(平均の字数ではない)').toBe(22);
     const r = await fill(text, 700);
     // ⚠ 700 回積んでも 500 件で止まる(古い節から落ちる)── 青天井でない
-    // #1087 M8:上限を超えると余裕(100 件)まで多めに落とすので、頭打ちは 400〜500 件の間
-    expect(r.sections, '上限で頭打ちになっていない').toBeLessThanOrEqual(500);
-    expect(r.sections, '余裕より多く落としている').toBeGreaterThanOrEqual(400);
+    // 台帳 #1852 束 L1(依頼 267):メッセージは画面に出す保管件数どおり(超えた分だけ消す)── 500 件ちょうどで止まる
+    //   (以前は #1087 M8 の余裕で 400〜500 件の間に減っていた。余裕は処理の記録だけに残してある ── 下の test)
+    expect(r.sections, '保管件数どおりに残っていない').toBe(500);
     // 1 回の操作で本文全体を書き戻す量(= この大きさ)。64 KB は「1 回あたり、これを超えたら止めて
     // 報告する」と決めた線 ── 節の形を太らせる変更(出どころの長い語・見出しの足し)が来たら鳴る
     expect(r.bytes, '1 回に書く量が 64 KB を超えた').toBeLessThanOrEqual(64 * 1024);
@@ -222,13 +222,13 @@ describe('appendMessage の書込量と頭打ち(#1017 C5)', () => {
     expect(r.bytes, '本文が空に近い(測れていない)').toBeGreaterThan(40 * 1024);
   }, 60_000);
 
-  it('🔴 上限に着いた後の整理は、追記のたびではなく余裕の件数に 1 回(#1087 M8)', async () => {
+  it('🔴 処理の記録は、上限に着いた後の整理を追記のたびではなく余裕の件数に 1 回(#1087 M8。メッセージは余裕を持たない ── 依頼 267)', async () => {
     const C3 = 'c-messages-slack';
     await request({ op: 'openContainer', cid: C3, title: 'slack' });
     const cap = 100;
     const slack = 20; // messageTrimSlack(100) = floor(100 / 5)
     const count = async (): Promise<number> =>
-      ((await request({ op: 'getBody', cid: C3, lid: SYSTEM_MESSAGE_LID })) ?? '').split(/(?=^## )/m).filter((x) => x !== '').length;
+      ((await request({ op: 'getBody', cid: C3, lid: SYSTEM_JOB_LID })) ?? '').split(/(?=^## )/m).filter((x) => x !== '').length;
     let prev = 0;
     let trims = 0;
     const N = 200;
@@ -236,8 +236,8 @@ describe('appendMessage の書込量と頭打ち(#1017 C5)', () => {
       await request({
         op: 'appendMessage',
         cid: C3,
-        lid: SYSTEM_MESSAGE_LID,
-        title: 'メッセージ',
+        lid: SYSTEM_JOB_LID,
+        title: '処理の記録',
         section: section(`件${i}`, i),
         cap,
       });
@@ -250,9 +250,54 @@ describe('appendMessage の書込量と頭打ち(#1017 C5)', () => {
     expect(trims, '追記のたびに整理している').toBeLessThanOrEqual(Math.ceil((N - cap) / slack));
     expect(trims, '整理が 1 度も走っていない(測れていない)').toBeGreaterThan(0);
     // 古い順に落ちている:最新は残り、最古は無い
-    const body = (await request({ op: 'getBody', cid: C3, lid: SYSTEM_MESSAGE_LID })) ?? '';
+    const body = (await request({ op: 'getBody', cid: C3, lid: SYSTEM_JOB_LID })) ?? '';
     expect(body).toContain(`件${N - 1}`);
     expect(body).not.toContain('件0\n');
     expect(await count(), '余裕の分まで落としていない').toBeGreaterThanOrEqual(cap - slack);
+  }, 60_000);
+
+  /**
+   * 🔴 **保管件数を超えても、画面の数どおりに残る**(台帳 #1852 束 L1、依頼 267)。
+   * 直す前は 101 件目で 80 件まで減った(2 割余分に消していた)。
+   */
+  it('🔴 メッセージは超えた分だけ消える(100 件に選んだら 101 件目で 100 件のまま)', async () => {
+    const C4 = 'c-messages-exact';
+    await request({ op: 'openContainer', cid: C4, title: 'exact' });
+    const count = async (): Promise<number> =>
+      ((await request({ op: 'getBody', cid: C4, lid: SYSTEM_MESSAGE_LID })) ?? '').split(/(?=^## )/m).filter((x) => x !== '').length;
+    for (let i = 0; i < 101; i += 1) {
+      await request({ op: 'appendMessage', cid: C4, lid: SYSTEM_MESSAGE_LID, title: 'メッセージ', section: section(`件${i}`, i), cap: 100 });
+    }
+    expect(await count(), '101 件目で減った(2 割余分に消している)').toBe(100);
+    const body = (await request({ op: 'getBody', cid: C4, lid: SYSTEM_MESSAGE_LID })) ?? '';
+    expect(body).toContain('件100');
+    expect(body, '消えたのが古いほうの 1 件ではない').not.toContain('件0\n');
+    expect(body).toContain('件1\n');
+  }, 60_000);
+
+  /**
+   * 🔴 **注意・問題は、結果から先に消えるあいだ残る**(台帳 #1852 束 L1、依頼 343 / 117-1 / 92-2)。
+   * 直す前は、保管件数 100 件のとき「コピーしました」100 件で、それより前の「問題」が押し出された。
+   */
+  it('🔴 結果が積み重なっても、古い「問題」「注意」は結果が尽きるまで消えない', async () => {
+    const C5 = 'c-messages-priority';
+    await request({ op: 'openContainer', cid: C5, title: 'priority' });
+    const mk = (kind: 'result' | 'problem' | 'caution', text: string, i: number): string =>
+      formatMessageSection({
+        at: new Date(Date.UTC(2026, 9, 2, 12, 0, i % 60)).toISOString(),
+        kind,
+        source: 'status',
+        text,
+      });
+    const put = (sec: string): Promise<unknown> =>
+      request({ op: 'appendMessage', cid: C5, lid: SYSTEM_MESSAGE_LID, title: 'メッセージ', section: sec, cap: 5 });
+    await put(mk('problem', '最初の問題', 0));
+    await put(mk('caution', '最初の注意', 1));
+    for (let i = 0; i < 20; i += 1) await put(mk('result', `結果${i}`, 2 + i));
+    const body = (await request({ op: 'getBody', cid: C5, lid: SYSTEM_MESSAGE_LID })) ?? '';
+    expect(body, '先頭の問題が結果に押し出された').toContain('最初の問題');
+    expect(body, '先頭の注意が結果に押し出された').toContain('最初の注意');
+    expect(body, '最新の結果が無い').toContain('結果19');
+    expect(body.split(/(?=^## )/m).filter((x) => x !== '').length, '保管件数を超えている').toBe(5);
   }, 60_000);
 });

@@ -65,9 +65,31 @@ export class NoticeStore {
   /** 🔴 直近の書き込みが保存に届かなかったか。真の間は読みも控えを返す。 */
   private saveFailed = false;
 
+  /**
+   * 🔴 **この端末で初めて開いたか**(台帳 #1852 束 L2。依頼 96-1)。既読の記録も「出さない」の設定も、まだ 1 つも無い。
+   * ⚠ 別の端末・シークレットウィンドウで初めて開くと、使ったことのない機能の変更点が全部未読になる。
+   */
+  private firstRun: boolean;
+
   constructor(private readonly storage: NoticeStorage = browserStorage) {
     this.seen = this.readSeen();
     this.off = this.storage.get(OFF_KEY) === '1';
+    this.firstRun = this.storage.get(SEEN_KEY) === null && this.storage.get(OFF_KEY) === null;
+  }
+
+  /**
+   * 🔴 **初めて開いたなら、いまのお知らせを全部読んだことにする**(台帳 #1852 束 L2。依頼 96-1 A)。1 回だけ効く。
+   * ⚠ 初めての人に 50 件の更新の知らせを出さない。消すのではなく**既読にする**だけなので、システムの「お知らせ」には残る。
+   * @returns 読んだことにしたなら真
+   */
+  settleFirstRun(registry: readonly Notice[] = NOTICES): boolean {
+    if (!this.firstRun) return false;
+    this.firstRun = false;
+    this.markSeen(
+      recentNotices(registry).map((n) => n.id),
+      registry,
+    );
+    return true;
   }
 
   private readSeen(): string[] {

@@ -441,11 +441,11 @@ describe('「未読 N 件」の押し口', () => {
     expect(regions.statusMessages.textContent, '畳んだ口に字が残っている').toBe('');
   });
 
-  it('🔴 未読 2 では「未読 2 件」が出て、0 に戻れば畳む(対照:出るのは未読があるときだけ)', () => {
+  it('🔴 未読 2 では「未読のメッセージ 2 件」が出て、0 に戻れば畳む(対照:出るのは未読があるときだけ)', () => {
     const { regions } = setup();
     paintStatusMessages(regions.statusMessages, 2);
     expect(regions.statusMessages.hidden).toBe(false);
-    expect(regions.statusMessages.textContent).toBe('未読 2 件');
+    expect(regions.statusMessages.textContent).toBe('未読のメッセージ 2 件');
     paintStatusMessages(regions.statusMessages, 0);
     expect(regions.statusMessages.hidden).toBe(true);
   });
@@ -536,5 +536,37 @@ describe('画面下の帯は読み上げに届く(知らせとエラーだけ)',
     paintStatusText(regions.statusText, parts({ errorLine: '⚠ エラー: 失敗' }));
     expect(live.textContent).toBe('⚠ エラー: 失敗');
     mo.disconnect();
+  });
+});
+
+/**
+ * 🔴 **「いまは○○できません」の断りは、不具合ではなく「結果」に溜める**(台帳 #1852 束 L1。依頼 80-4 B)。
+ * 直す前は、編集中に押せないボタンを押した断りまで「問題」に数えられて「未読」が付き、開いて読むまで消えなかった。
+ */
+describe('🔴 押せないときの断りは未読に数えない(依頼 80-4)', () => {
+  it('「いまは○○できません: 理由」は、注意や問題を渡されても「結果」で積む', () => {
+    const { posted, poster } = collect();
+    poster('いまはメッセージを開けません: 編集中です', { kind: 'caution' });
+    poster('いまは書き出せません: 取り込み中です', { kind: 'problem' });
+    expect(posted.map((p) => p.kind)).toEqual(['result', 'result']);
+  });
+
+  it('対照群:別の断り・失敗は、渡した種類のまま(広げすぎない)', () => {
+    const { posted, poster } = collect();
+    poster('保存先の空きが少なくなっています', { kind: 'caution' });
+    poster('書き出せませんでした(いまは通信できません)', { kind: 'problem' });
+    expect(posted.map((p) => p.kind)).toEqual(['caution', 'problem']);
+  });
+
+  it('未読に数えない:本物の MessagePost につなぐと未読が増えない(対照:別の注意は増える)', async () => {
+    const post = new MessagePost(new FakeSpool());
+    post.attach({ cid: 'c1', appendMessage: vi.fn().mockResolvedValue(undefined) });
+    const unread: number[] = [];
+    post.onUnreadChanged((n) => unread.push(n));
+    const poster = createStatusPoster((m) => post.post(m));
+    poster('いまはメッセージを開けません: 編集中です', { kind: 'caution' });
+    expect(unread, '断りで未読が増えた').toEqual([]);
+    poster('保存先の空きが少なくなっています', { kind: 'caution' });
+    expect(unread, '対照:ふつうの注意は未読が増える').toEqual([1]);
   });
 });

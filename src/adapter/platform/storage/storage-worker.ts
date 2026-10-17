@@ -28,7 +28,7 @@ import { fixReservedLock, type ReservedLockOutcome, type ReservedLockSqlite } fr
 // 🔑 メッセージの本文の形は features 層が持つ(判断を 1 か所に。設計 doc §7、段②a)
 import { errorText } from '@features/error-text';
 import { wouldMakeCycle } from '@features/relation/tree';
-import { messageTrimSlack, trimToCap } from '@features/message/message-log';
+import { SYSTEM_JOB_LID, SYSTEM_MESSAGE_LID, trimSlackForLid, trimToCap } from '@features/message/message-log';
 // 🔑 数だけをここから取る ── 読み解き(日本語)は features 層に置く(#971 段③)
 import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescue';
 import { INTEGRITY_STAMP_KEY, INTEGRITY_STAMP_SCOPE } from '@features/storage/integrity-schedule';
@@ -2744,6 +2744,58 @@ async function exportOneTable(
 }
 
 /**
+ * 🔴 **メッセージ(・処理の記録)の行を除いて `make` を走らせ、終わったら同じ行を元へ戻す**(台帳 #1852 束 L1。依頼 216 / 344)。
+ *
+ * ⚠ 人に渡す PKC3 入り HTML に、送り主の知らせ(使った機能と時刻)を入れない。この worker は 1 つの op を
+ *   最後まで続けて走らせる(間に別の op は入らない)ので、「除いた状態」は他から見えない。
+ * ⚠ 除いた行の名残が空きページに残らないよう、除く間だけ `secure_delete` を入れる(元の値へ戻す)。
+ * ⚠ 戻せなかったら**黙らず落とす**(メッセージが減ったまま終わらせない)。1 回やり直してから。
+ */
+function withMessagesRemoved<T>(make: () => T): T {
+  const database = need();
+  const lids = [SYSTEM_MESSAGE_LID, SYSTEM_JOB_LID];
+  const rows = database.selectObjects(
+    `SELECT * FROM entries WHERE realm = 'system' AND lid IN (?, ?)`,
+    lids,
+  ) as Array<Record<string, unknown>>;
+  if (rows.length === 0) return make();
+  const secure = database.selectValue('PRAGMA secure_delete') as number | undefined;
+  database.exec('PRAGMA secure_delete = ON');
+  database.exec({ sql: `DELETE FROM entries WHERE realm = 'system' AND lid IN (?, ?)`, bind: lids });
+  try {
+    return make();
+  } finally {
+    const restore = (): void => {
+      database.exec('BEGIN IMMEDIATE');
+      try {
+        for (const r of rows) {
+          const cols = Object.keys(r);
+          database.exec({
+            sql: `INSERT INTO entries (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
+            bind: cols.map((c) => r[c] as never),
+          });
+        }
+        database.exec('COMMIT');
+      } catch (err) {
+        try {
+          database.exec('ROLLBACK');
+        } catch {
+          /* rollback 失敗は元エラーを優先 */
+        }
+        throw err;
+      }
+    };
+    try {
+      restore();
+    } catch {
+      restore();
+    } finally {
+      database.exec(`PRAGMA secure_delete = ${secure === 1 ? 'ON' : 'OFF'}`);
+    }
+  }
+}
+
+/**
  * 🔴 **DB 画像を作る処理の外側**(#971 段④の残り / #1416)── `exportImage` が通る **1 か所**(確保の失敗を言い直す作法)。
  *
  * ⚠ ここは **DB を丸ごと**配列にするので、wasm(32bit)では数 GB を確保できない ──
@@ -2890,12 +2942,15 @@ const handlers: Handlers = {
     await pool.wipeFiles();
     return { wiped: true, note: null };
   },
-  exportImage: () => ({
+  exportImage: (req) => ({
     /**
      * 🔴 **複製を 1 枚減らす**(#1416)── 判断は `db-image-export.ts`。memdb なら sqlite に
      *   画像の複製を作らせず、wasm heap から直に写す(wasm heap は一度広がると縮まない)。
      */
-    image: runImageExport((api, ptr) => exportDbImage(api, ptr)),
+    image:
+      req.withoutMessages === true
+        ? withMessagesRemoved(() => runImageExport((api, ptr) => exportDbImage(api, ptr)))
+        : runImageExport((api, ptr) => exportDbImage(api, ptr)),
   }),
   /**
    * 🔴 **user が打った SQL を、読むだけで走らせる**(#681 段②)。
@@ -3441,7 +3496,7 @@ const handlers: Handlers = {
         [req.cid, req.lid],
       ) as Array<{ body: string }>;
       const existing = rows[0]?.body ?? '';
-      const next = trimToCap(`${existing}${req.section}`, req.cap, messageTrimSlack(req.cap));
+      const next = trimToCap(`${existing}${req.section}`, req.cap, trimSlackForLid(req.lid, req.cap));
       if (rows.length === 0) {
         database.exec({
           sql: `INSERT INTO entries

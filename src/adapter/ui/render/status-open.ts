@@ -335,10 +335,10 @@ export function paintStatusCreate(
  * 🔑 押した先は `open-messages` の受け手(`binder.ts`)── 実行の口を新しく作らない(§7)。
  *   ここが書くのは `hidden` と字だけである。
  * ⚠ 取り出した理由:`main.ts` は**どの test からも実行されない**ので、字の組み方を
- *   `main.ts` に置くと「未読 2 件」と出ているかを誰も見られない(CLAUDE.md §2)。
+ *   `main.ts` に置くと「未読のメッセージ 2 件」と出ているかを誰も見られない(CLAUDE.md §2)。
  */
 export function paintStatusMessages(btn: HTMLElement, unread: number): void {
-  const label = unread > 0 ? `未読 ${String(unread)} 件` : '';
+  const label = unread > 0 ? `未読のメッセージ ${String(unread)} 件` : '';
   const hide = unread <= 0;
   if (btn.hidden !== hide) btn.hidden = hide;
   if (btn.textContent !== label) btn.textContent = label;

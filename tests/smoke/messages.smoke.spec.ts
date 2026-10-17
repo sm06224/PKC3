@@ -63,6 +63,38 @@ test('🔴 メッセージ: 一覧に出ない / 開くと中央に出る / 編�
   const editBtn = detailPane.locator('[data-pkc-action="start-edit"]');
   await expect(editBtn, '「編集」が system のノートにも出てしまった').toHaveCount(0);
 
+  /**
+   * ③b 🔴 **本文の上の帯**(台帳 #1852 束 L1。依頼 80-3 / 266)── 種類で絞るボタンと「メッセージを書き出す」。
+   * ⚠ 「押されている」の印(`aria-pressed`)に**見た目の規則が在るか**を、実ブラウザの計算後の色で見る
+   *   (属性だけ見ると、CSS に受け皿が無くても緑になる)。
+   * 起動の要約は「結果」。「注意」に絞ると消え、「すべて」で戻る。
+   */
+  const bar = detailPane.locator('[data-pkc-field="detail-toolbar"]');
+  const chips = bar.locator('[data-pkc-action="set-message-filter"]');
+  await expect(chips, '種類のボタンが 5 つ(すべて / 問題 / 注意 / 結果 / 配信)出ていない').toHaveText([
+    'すべて',
+    '問題',
+    '注意',
+    '結果',
+    '配信',
+  ]);
+  await expect(bar.locator('[data-pkc-action="export-messages"]'), '帯に「メッセージを書き出す」が無い').toHaveText(
+    'メッセージを書き出す',
+  );
+  const chip = (label: string) => bar.locator('[data-pkc-action="set-message-filter"]', { hasText: new RegExp(`^${label}$`) });
+  const bg = (label: string) => chip(label).evaluate((e) => getComputedStyle(e).backgroundColor);
+  await expect(chip('すべて')).toHaveAttribute('aria-pressed', 'true');
+  const pressedBg = await bg('すべて');
+  const idleBg = await bg('注意');
+  expect(pressedBg, '押されているボタンが、そうでないボタンと見分けられない(CSS に受け皿が無い)').not.toBe(idleBg);
+
+  await clickReal(page, chip('注意'));
+  await expect(chip('注意')).toHaveAttribute('aria-pressed', 'true');
+  expect(await bg('注意'), '「注意」を押したのに見た目が変わらない').toBe(pressedBg);
+  await expect(detailPane, '「注意」に絞ったのに、結果(起動の要約)が残っている').not.toContainText('起動しました');
+  await clickReal(page, chip('すべて'));
+  await expect(detailPane, '「すべて」に戻っても本文が戻らない').toContainText('起動しました');
+
   // ④ 🔴 一連の操作で hash は 1 度も変わっていない(ディープリンク専用)
   const hashAfter = await page.evaluate(() => location.hash);
   expect(hashAfter, `メッセージを開く操作で hash が動いた(${hashAtBoot} → ${hashAfter})`).toBe(

@@ -495,7 +495,7 @@ test('🔴 お知らせは画面いっぱいに出て、「今後は出さない
   await dismissAnnounce(page);
   await createEntry(page, 'text');
   await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
-  await page.evaluate(() => localStorage.removeItem('pkc3.notices.seen'));
+  await page.evaluate(() => localStorage.setItem('pkc3.notices.seen', '[]'));
   await page.reload();
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
 

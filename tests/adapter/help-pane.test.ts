@@ -286,6 +286,8 @@ describe('ヘルプの面', () => {
     expect(labels, 'ヘルプの面の並びが変わった(#719 の裁定と食い違う)').toEqual([
       'H3:マニュアル',
       'help-version',
+      // 🔴 「あとで切り替える」を押した後の切り替える場所(待っている版が無い間は隠れている。台帳 #1852 束 L2)
+      'update-available',
       // 🔴 #948:開発者名・ソース・使っている OSS は版のすぐ下(沈めない)
       'help-developer',
       'help-source',

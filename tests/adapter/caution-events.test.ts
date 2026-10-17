@@ -34,6 +34,7 @@ import {
   EDIT_ELSEWHERE_ERROR,
   RESERVED_LOCK_CAUTION_TEXT,
   fixedHeadOfOpError,
+  isBlockedRefusal,
   messageKindForOpError,
   quotaCaution,
   reservedLockCaution,
@@ -315,5 +316,28 @@ describe('配線の原文 pin(main.ts / binder.ts)', () => {
   it('binder.ts: 断り文は正本の定数から出し、字を 2 か所に書かない', () => {
     expect(binder).toContain('? EDIT_ELSEWHERE_ERROR');
     expect(binder).not.toContain('別のタブまたはウィンドウで編集中です');
+  });
+});
+
+/** 🔴 「いまは○○できません」の断りは「結果」(未読に数えない)。台帳 #1852 束 L1、依頼 80-4 B。 */
+describe('🔴 押せないときの断りの種類(依頼 80-4)', () => {
+  it.each([
+    'いまはメッセージを開けません: 編集中です',
+    'いまは移れません: 取り込み中です',
+    'いまは題名を直せません(取り込み中などです。終わってからもう一度お試しください)',
+  ])('「%s」は結果', (text) => {
+    expect(isBlockedRefusal(text)).toBe(true);
+    expect(messageKindForOpError(text)).toBe('result');
+  });
+
+  it.each([
+    '保存に失敗しました',
+    '書き出せませんでした(いまは通信できません)',
+    '今はできません',
+    'いまは',
+    '',
+  ])('対照群:「%s」は断りに数えない(問題のまま)', (text) => {
+    expect(isBlockedRefusal(text)).toBe(false);
+    expect(messageKindForOpError(text)).toBe('problem');
   });
 });

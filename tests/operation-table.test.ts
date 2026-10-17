@@ -406,8 +406,12 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   節の中にしか無く、鍵も持たない(`system-jump` / `set-prose-align` と同じ仕分け)。
    * ⚠ **2026-10-03(#1017 C5)で `open-messages` を外した** ── 「メッセージを開く」を
    *   KEY_COMMANDS へ登記したので、未登記ではなくなった(登記の側の `both` に数える)。
+   * ⚠ **2026-10-17(台帳 #1852 束 L1、依頼 266)で `set-message-filter` を足した** ── メッセージのノートの上の
+   *   種類のボタン(すべて / 問題 / 注意 / 結果 / 配信)。押した種類を読む画面のボタンで、鍵も持たない
+   *   (`set-message-cap` と同じ置き場)。
    */
   'set-message-cap',
+  'set-message-filter',
 ];
 
 /**
@@ -886,8 +890,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-17(台帳 #1852 束 E2、#1163 依頼 191): 予定表の「週の始まり」(`set-schedule-week-start`)で受け手 +1 ── 登記は増えない(鍵を持たない画面の選択。`set-schedule-lead` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(台帳 #1852 G1 / 依頼 109 A): まとめてタグを付けた直後の「元に戻す」(`undo-bulk-tag`)で受け手 +1 ── 登記は増えない
       //   (押し口は画面の下の知らせの隣の 1 か所にしか無く、鍵も持たない。`undo-dual-move` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 456,
-      receivers: 383,
+      // ⚠ 2026-10-17(台帳 #1852 束 L1、依頼 266): メッセージのノートの上の種類のボタン(`set-message-filter`)で受け手 +1 ── 登記は増えない(鍵を持たない画面のボタン。`set-message-cap` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 457,
+      receivers: 384,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       // ⚠ 2026-10-17(#1163 依頼 153): 左のペインの「上へ動かす」「下へ動かす」(`move-order-up` / `move-order-down`)の 2 件を登記 ──
@@ -895,7 +900,7 @@ describe('操作の全数台帳(#582 段①)', () => {
       registered: 179,
       both: 106,
       outsideActionsTable: 73,
-      unregistered: 277,
+      unregistered: 278,
     });
   });
 

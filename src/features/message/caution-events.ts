@@ -35,7 +35,19 @@ export const EDIT_ELSEWHERE_ERROR =
  *   (user が別のタブで保存すれば済む ── 操作が壊れたのではない)。
  */
 export function messageKindForOpError(error: string): MessageKind {
-  return error === EDIT_ELSEWHERE_ERROR ? 'caution' : 'problem';
+  if (error === EDIT_ELSEWHERE_ERROR) return 'caution';
+  // 🔴 「いまは○○できません」の断りは、不具合ではなく次の手を言う字 ── 「結果」に溜める(未読に数えない。台帳 #1852 束 L1、依頼 80-4)
+  if (isBlockedRefusal(error)) return 'result';
+  return 'problem';
+}
+
+/**
+ * 🔴 **「いまは○○できません: 理由」の断りか**(台帳 #1852 束 L1、依頼 80-4)。
+ * 編集中・取り込み中などで押せないボタンを押したときの文(`blockedActionNote` の理由つき)。
+ * ⚠ 字の頭で見分ける ── 「いまは」で始まり、先頭の 40 字の内に「ません」が在るものだけ。
+ */
+export function isBlockedRefusal(text: string): boolean {
+  return /^いまは.{1,30}?ません/.test(text.slice(0, 48));
 }
 
 /**

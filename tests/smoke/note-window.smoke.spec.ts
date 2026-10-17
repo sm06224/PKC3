@@ -268,7 +268,7 @@ test('🔴 お知らせを閉じずに押しても、別の窓にはノートが
    */
   await page.evaluate(() => {
     try {
-      localStorage.removeItem('pkc3.notices.seen');
+      localStorage.setItem('pkc3.notices.seen', '[]');
     } catch {
       /* 使えない箱では次の前提で落ちる */
     }

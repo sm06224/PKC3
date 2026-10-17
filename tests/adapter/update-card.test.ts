@@ -6,8 +6,19 @@
  * 消える」は消えていなくても次のページには無い ── 変異試験で実際に生き残った。
  * `main.ts` に直書きせず取り出したのはそのため。
  */
-import { describe, expect, it, vi } from 'vitest';
-import { createUpdatePrompt, showUpdateCard, clearUpdateCard } from '../../src/adapter/ui/render/update-card';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  UPDATE_ELSEWHERE_TEXT,
+  UPDATE_HINT,
+  UPDATE_TEXT,
+  buildUpdateAvailableRow,
+  clearUpdateCard,
+  createUpdatePrompt,
+  showUpdateCard,
+  updatePending,
+} from '../../src/adapter/ui/render/update-card';
+import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
+import { initialState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -181,5 +192,106 @@ describe('🔴 配線 — click が services へ届く', () => {
       .click();
     expect(dismissUpdate).toHaveBeenCalledTimes(1);
     root.remove();
+  });
+});
+
+/**
+ * 🔴 **台帳 #1852 束 L2(依頼 84-1 C / 84-2 B / 120-2 A / 131 A)**。
+ *
+ * - カードに「切り替えると、変更点がお知らせに出ます。」が付く(切り替える前の手がかり)
+ * - 「あとで切り替える」を押した後も、システムの「お知らせ」とヘルプの版の行に切り替える場所が残る
+ * - 別のタブが切り替えたときは、勝手に読み込み直さず、押されたときだけ読み込み直す
+ */
+describe('「あとで切り替える」の後の切り替える場所(依頼 84-1 / 120-2)', () => {
+  // 「待っている版」の印は module 持ち ── 前の test の置き土産を消してから始める
+  beforeEach(() => {
+    const p = createUpdatePrompt(region());
+    p.present(vi.fn());
+    void p.apply();
+  });
+
+  it('🔴 カードの字に、切り替えた後に何が起きるかが書いてある(UPDATE_TEXT は変えない)', () => {
+    const el = region();
+    showUpdateCard(el);
+    const t = el.querySelector('[data-pkc-field="update-text"]')?.textContent ?? '';
+    expect(t.startsWith(UPDATE_TEXT), 'はじめに.txt が引く字を変えた').toBe(true);
+    expect(t).toContain(UPDATE_HINT);
+    expect(UPDATE_HINT).toContain('お知らせに出ます');
+  });
+
+  it('🔴 待っている版が無い間は隠れ、出した後は「あとで」を押しても残り、切り替えを頼んだら隠れる', () => {
+    const row = buildUpdateAvailableRow();
+    document.body.append(row);
+    expect(row.hidden, '待っている版が無いのに出ている').toBe(true);
+    expect(updatePending()).toBe(false);
+
+    const el = region();
+    const prompt = createUpdatePrompt(el);
+    prompt.present(vi.fn());
+    expect(updatePending()).toBe(true);
+    expect(row.hidden, '新しい版が来たのに行が出ない').toBe(false);
+
+    prompt.dismiss(); // 「あとで切り替える」
+    expect(el.hidden, 'カードは消える').toBe(true);
+    expect(row.hidden, '「あとで」を押したら切り替える場所が無くなった').toBe(false);
+    expect(row.querySelector('[data-pkc-action="apply-update"]')?.textContent).toBe('新しいバージョンに切り替える');
+
+    const run = vi.fn();
+    prompt.present(run);
+    prompt.apply(); // 行のボタンも同じ受け手(apply-update)で届く
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(row.hidden, '切り替えを頼んだのに行が残る').toBe(true);
+    row.remove();
+  });
+
+  it('🔴 システムの「お知らせ」の節に「新しいバージョン」の行が付き、待っている間だけ見える', () => {
+    const host = document.createElement('div');
+    new SettingsRenderer(host).render(initialState);
+    document.body.append(host);
+    const dt = [...host.querySelectorAll<HTMLElement>('dt')].find((d) => d.textContent === '新しいバージョン');
+    expect(dt, '節に行が無い').toBeDefined();
+    expect(dt!.hidden, '待っていないのに出ている').toBe(true);
+
+    const prompt = createUpdatePrompt(region());
+    prompt.present(vi.fn());
+    expect(dt!.hidden, '待っているのに出ない').toBe(false);
+    const dd = dt!.nextElementSibling as HTMLElement;
+    expect(dd.hidden).toBe(false);
+    expect(dd.querySelector('[data-pkc-action="apply-update"]'), '切り替えるボタンが無い').not.toBeNull();
+    prompt.apply();
+    expect(dt!.hidden).toBe(true);
+    host.remove();
+  });
+});
+
+describe('別のタブが切り替えたとき(依頼 131)', () => {
+  it('🔴 案内の字と「読み込み直す」が出て、押すまで読み込み直さない', () => {
+    const el = region();
+    const prompt = createUpdatePrompt(el);
+    const reload = vi.fn();
+    prompt.elsewhere(reload);
+    expect(el.hidden).toBe(false);
+    expect(el.querySelector('[data-pkc-field="update-text"]')?.textContent).toBe(UPDATE_ELSEWHERE_TEXT);
+    expect(el.querySelector('[data-pkc-action="apply-update"]')?.textContent).toBe('読み込み直す');
+    expect(reload, '案内を出しただけで読み込み直した').not.toHaveBeenCalled();
+    prompt.apply();
+    expect(reload).toHaveBeenCalledTimes(1);
+    // 押した後は「切り替えています」ではなく「読み込み直しています」
+    expect(el.querySelector('[data-pkc-field="update-text"]')?.textContent).toBe('読み込み直しています…');
+  });
+
+  it('🔴 別のタブの切り替えでは「待っている版」の印を立てない(システムの行を出さない)', () => {
+    const prompt = createUpdatePrompt(region());
+    prompt.elsewhere(vi.fn());
+    expect(updatePending()).toBe(false);
+  });
+
+  it('編集中なら、読み込み直す前に確かめる(断られたら読み込み直さない)', async () => {
+    const el = region();
+    const reload = vi.fn();
+    const prompt = createUpdatePrompt(el, { isEditing: () => true, confirmDiscard: async () => false });
+    prompt.elsewhere(reload);
+    await prompt.apply();
+    expect(reload).not.toHaveBeenCalled();
   });
 });

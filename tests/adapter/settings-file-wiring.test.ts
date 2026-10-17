@@ -115,8 +115,8 @@ describe('設定の持ち出しの配線(#414)', () => {
     ).toBe(false);
   });
 
-  /** 🔴 書き出せた回に「長すぎて入らなかった」を添えるのも結果である(問題の未読に数えない)。 */
-  it('🔴 一部だけ書き出せた回は、結果として言う', async () => {
+  /** 🔴 一部だけ書き出せた回は、赤い帯で言う(取りこぼしを見逃させない。台帳 #1852 束 L2、依頼 120-1 A)。 */
+  it('🔴 一部だけ書き出せた回は、赤い帯で言う', async () => {
     const { root, sent } = setup();
     localStorage.setItem('pkc3.theme', 'dark');
     localStorage.setItem('pkc3.messages.cap', 'x'.repeat(MAX_SETTING_CHARS + 1));
@@ -125,9 +125,10 @@ describe('設定の持ち出しの配線(#414)', () => {
     root.querySelector<HTMLElement>('[data-pkc-action="export-settings"]')!.click();
     await tick();
     vi.restoreAllMocks();
-    const said = sent.find((a) => a.type === 'OP_NOTICE');
-    expect(said?.type === 'OP_NOTICE' ? said.message : '').toContain('長すぎるので入っていません');
-    expect(sent.some((a) => a.type === 'OP_FAILED')).toBe(false);
+    const said = sent.find((a) => a.type === 'OP_FAILED');
+    expect(said?.type === 'OP_FAILED' ? said.error : '').toContain('長すぎるので入っていません');
+    // 対照:赤くなるのは一部入らなかった回だけ(全部入った回は上の test が OP_NOTICE を見る)
+    expect(sent.some((a) => a.type === 'OP_NOTICE')).toBe(false);
   });
 
   /** 🔴 **書けなかった件数を言う**(#1087)── 全部書けなくても成功と同じ字にしない。 */

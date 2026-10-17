@@ -131,6 +131,10 @@ export function sharedNote(lines: readonly ProfileLine[]): string {
     : '';
 }
 
-/** 1 行の見せ方。⚠ 画面が字を組み直さないよう、ここで完成させる。 */
+/**
+ * 1 行の見せ方。⚠ 画面が字を組み直さないよう、ここで完成させる。
+ * 🔴 **本文の文字数も添える**(台帳 #1852 束 L2。依頼 80-6 B)── 添付が無くて本文だけのノートは「0 B」と出て、
+ *   添付の少ない人には上位 20 件のほとんどが「0 B」= 間違いに見えた。本文も容量を使うことを残したまま、読めるようにする。
+ */
 export const profileLineText = (l: ProfileLine): string =>
-  `${humanBytes(l.assetBytes)}  ${l.title}${l.shared ? '(共有)' : ''}`;
+  `${humanBytes(l.assetBytes)}・本文 ${l.bodyChars.toLocaleString('ja-JP')} 文字  ${l.title}${l.shared ? '(共有)' : ''}`;

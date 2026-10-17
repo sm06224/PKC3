@@ -107,7 +107,12 @@ describe('大きさの見せ方', () => {
 
   it('行は「大きさ → 題名」の順(目で追うのは大きさ)', () => {
     const [l] = profileLines(result([row('a', 5_000_000)]), metas);
-    expect(profileLineText(l!)).toMatch(/^4\.8 MB\s+写真たくさん$/);
+    expect(profileLineText(l!)).toMatch(/^4\.8 MB・本文 [\d,]+ 文字\s+写真たくさん$/);
+  });
+
+  it('🔴 添付が 0 の行も、本文の文字数を添えて「0 B」が間違いに見えない(依頼 80-6)', () => {
+    const [l] = profileLines(result([row('a', 0, 1234)]), metas);
+    expect(profileLineText(l!)).toMatch(/^0 B・本文 1,234 文字\s+写真たくさん$/);
   });
 
   it('共有している行は、その旨が字に出る', () => {

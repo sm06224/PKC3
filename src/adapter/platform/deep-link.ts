@@ -297,6 +297,16 @@ export function isPurposeWindow(held: {
  *   ⚠ 2 か所に書くと、片方だけ体裁が変わっても誰も気づかない(CLAUDE.md §7)。
  * ⚠ 空の題名は `null` と同じに扱う ── `` — PKC3`` という頭の欠けた字を出さない。
  */
+/**
+ * 🔴 **開発版のときだけ、ブラウザのタブ・ウィンドウの題名に「(開発版)」を添える**(台帳 #1852 束 L2。依頼 84-3 C)。
+ * ⚠ 公開版・検証版は何も足さない(公開版の人の見え方は変えない)。直す前は、どの版を使っているかが
+ *   ヘルプの版の行まで開かないと分からなかった。
+ * 🔑 窓の題名の「根」を作る口は 1 つ ── タブの題名と「別のウィンドウで開いています」の案内の両方が、これを通す。
+ */
+export function windowTitleBase(base: string, kind: string): string {
+  return kind === 'dev' ? `${base}(開発版)` : base;
+}
+
 export function windowTitleFor(base: string, label: string | null): string {
   return label === null || label.trim() === '' ? base : `${label} — ${base}`;
 }

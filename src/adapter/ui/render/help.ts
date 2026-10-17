@@ -40,6 +40,7 @@ import { APP_ID, APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta
 import { formatBuildStamp } from '@features/datetime/datetime-format';
 import { NOTICES, type Notice } from '@features/notice/notice-log';
 import { preferredScrollBehavior } from './scroll-behavior';
+import { buildUpdateAvailableRow } from './update-card';
 import {
   OSS_SCOPE_NOTE,
   OSS_SOURCE_URL,
@@ -357,6 +358,8 @@ export class HelpRenderer {
     // ⚠ 見せる字だけ「PKC3」と書く(`APP_ID` は識別子なので小文字のまま ── 他の読み手がいる)
     ver.textContent = `このバージョン: PKC3${versionLine().slice(APP_ID.length)}。不具合を報告するときは、この行を添えてください`;
     body.append(ver);
+    // 🔴 「あとで切り替える」を押した後の切り替える場所(待っている間だけ出る。台帳 #1852 束 L2、依頼 84-1 / 120-2)
+    body.append(buildUpdateAvailableRow());
 
     /**
      * 🔴 **保存先も、版の隣に字で出す**(#811 の 2 番目)。
@@ -403,10 +406,14 @@ export class HelpRenderer {
      * ⚠ **全文は畳んでおく**(`<details>`)── 一覧だけで面が埋まらないように。
      *   このやり方は同じ file の「これまでのお知らせ」と同じ前例。
      */
-    const ossRegion = document.createElement('div');
+    /**
+     * 🔴 **一覧全体も、初めは閉じた 1 つの欄にする**(台帳 #1852 束 L2。依頼 103 B / 358 B)。
+     * ⚠ 直す前は一覧(1 件ずつ全文の欄つき)が開いたまま版のすぐ下に並び、スマホ幅では目次まで 2 画面ほど送らないと届かなかった。
+     *   場所は動かさない(版・保存先・開発者・ソースの下)── 畳むだけなので、困ったときに見る上の事実は変わらない。
+     */
+    const ossRegion = document.createElement('details');
     ossRegion.setAttribute('data-pkc-region', 'help-oss');
-    const ossHead = document.createElement('p');
-    ossHead.setAttribute('data-pkc-field', 'settings-note');
+    const ossHead = document.createElement('summary');
     ossHead.textContent = ossNoticesLabel(OSS_NOTICES);
     ossRegion.append(ossHead);
     const ossList = document.createElement('ul');

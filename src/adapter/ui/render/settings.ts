@@ -629,7 +629,8 @@ export class SettingsRenderer {
     const wrap = document.createElement('section');
     wrap.setAttribute('data-pkc-region', 'settings-notices');
     const h = document.createElement('h4');
-    h.textContent = 'お知らせ';
+    // 🔴 見出しの下の項目名も「お知らせ」で同じ字が続いていた → マニュアルの見出しと同じ「お知らせを出すか」(台帳 #1852 束 L2、依頼 80-7)
+    h.textContent = 'お知らせを出すか';
     wrap.append(h, dl);
     wrap.append(...this.buildGroup('notice-list'));
     return wrap;

@@ -296,6 +296,19 @@ test('🔴 お知らせの帯が出て、閉じると次から出ない', async 
   await expect(band.locator('[data-pkc-field="announce-where"]')).toContainText('システム');
 
   /**
+   * 🔴 **カードの「お知らせの一覧を開く」**(台帳 #1852 束 L2。依頼 80-2 B)。
+   * 直す前は「過去のお知らせは「システム」から読めます」と字で書いてあるだけで、押せる物が無かった。
+   * 押すとカードがしまわれ、システムの「お知らせ」の一覧が見える。**読んだことにはしない**ので、読み込み直すとカードが戻る。
+   * (既存の道中へ足した ── 起動を増やさない。スマホ幅の見え方はこの spec では見ていない)
+   */
+  await clickReal(page, '[data-pkc-region="announce"] [data-pkc-action="open-system-notices"]');
+  await expect(band, 'カードがしまわれていない(一覧が下に隠れたまま)').toBeHidden();
+  await expect(page.locator('[data-pkc-region="settings-notices-section"]'), '過去のお知らせの一覧が見えない').toBeVisible();
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await expect(band, '押しただけで読んだことになった').toBeVisible({ timeout: 10_000 });
+
+  /**
    * ⚠ **帯が出たまま作業できる**(かぶせる窓にしていない)。
    * `clickReal` はその座標で実際に最前面に居ることを確かめてから押すので、
    * 帯が本文を覆っていればここで落ちる。
@@ -932,4 +945,37 @@ test('🔴 本文の参照を押すと節へ送られ、「戻る」で読んで
   await expect(back, '帰ったのに帰り道が残っている').toBeHidden();
 
   expect(errors, `裏で例外が出ている: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **この端末で初めて開いたときは、お知らせを出さない**(台帳 #1852 束 L2。依頼 96-1 A)。
+ *
+ * 直す前は「お知らせ(残り 50 件)」が出て、使ったことのない機能の更新の知らせを送るか閉じるかだった。
+ * ⚠ 他の spec は playwright の設定が「既読の記録を空の配列で始める」ので初めてにならない ──
+ *   ここだけ、その印を外した本物の初回で見る。出さずに**読んだことにする**だけで、一覧には残る。
+ */
+test.describe('この端末で初めて開いたとき', () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test('🔴 お知らせは出ず、システムの一覧には残り、読み込み直しても出ない', async ({ page }) => {
+    const errors = collectPageErrors(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await gotoApp(page);
+    // 読んだことにする処理が済むまで待つ(済めば既読の記録が書かれる ── 空振り防止)
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem('pkc3.notices.seen')), { timeout: 10_000 })
+      .not.toBeNull();
+    await expect(page.locator('[data-pkc-region="announce"]'), '初めてなのにお知らせが出た').toBeHidden();
+
+    await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+    await expect(
+      page.locator('[data-pkc-region="settings-notices-section"] [data-pkc-help-notice]').first(),
+      '一覧からも消えた(読んだことにするだけで、消さない)',
+    ).toBeAttached();
+
+    await page.reload();
+    await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+    await expect(page.locator('[data-pkc-region="announce"]'), '読み込み直したら出た').toBeHidden();
+    expect(errors).toEqual([]);
+  });
 });

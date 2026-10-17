@@ -69,6 +69,22 @@ const executablePath = existsSync(bundled) ? bundled : undefined;
  */
 export const chromiumLaunch = executablePath ? { executablePath } : {};
 
+/**
+ * 🔴 **お知らせの既読を「空の記録」で始める**(台帳 #1852 束 L2、依頼 96-1)。
+ *
+ * ⚠ アプリは「この端末で初めて開いた」(既読の記録が 1 つも無い)ときだけ、お知らせを出さずに全部読んだことにする。
+ *   spec ごとの新しい profile は全部それに当たるので、何もしないと**お知らせの帯に触る spec が全部**「出ていない」で落ちる。
+ *   `pkc3.notices.seen` を `[]`(= 初めてではない。未読は全部残る)で始めて、これまでの検査を変えない。
+ * 🔑 初めて開いたときの動きは `help-announce.smoke.spec.ts` の専用 test が、この印を外して見る。
+ */
+export const NOTICES_SEEDED_STORAGE_STATE = {
+  cookies: [],
+  origins: [PORT, PLAIN_PORT, SUB_PORT].map((p) => ({
+    origin: `http://localhost:${p}`,
+    localStorage: [{ name: 'pkc3.notices.seen', value: '[]' }],
+  })),
+};
+
 export default defineConfig({
   testDir: '.',
   testMatch: '**/*.smoke.spec.ts',
@@ -120,6 +136,7 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     baseURL: `http://localhost:${PORT}`,
+    storageState: NOTICES_SEEDED_STORAGE_STATE,
     ...(executablePath ? { launchOptions: { executablePath } } : {}),
   },
   // 🔑 spec から使う口(`coi.smoke.spec.ts` だけが plain を見る /

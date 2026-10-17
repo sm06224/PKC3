@@ -69,6 +69,7 @@ describe('指の端末の押し所は 24px 以上(#706)', () => {
       "[data-pkc-action='dual-bookmark']",
       "[data-pkc-field='keymap-drop']",
       "[data-pkc-region='help-toc'] [data-pkc-field='help-toc-row']",
+      "[data-pkc-region='help-oss'] > summary",
       '[data-pkc-oss] summary',
     ];
     for (const sel of sels) {

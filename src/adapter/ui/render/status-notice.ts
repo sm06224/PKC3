@@ -17,6 +17,7 @@
  * `main.ts` は**どの test からも実行されない**(CLAUDE.md §2)。「積むか / 積まないか」の判断は
  * ここに置き、`main.ts` は渡すだけにする(`status-line.ts` / `status-open.ts` と同じ作法)。
  */
+import { isBlockedRefusal } from '@features/message/caution-events';
 import type { MessageKind } from '@features/message/message-log';
 
 /** `showStatus` が積める種類(配信 / 処理は別の口が持つ)。 */
@@ -85,7 +86,8 @@ export function createStatusPoster(
   return (text, opts) => {
     if (opts?.post === false) return;
     if (!shouldPostNotice(text)) return;
-    const kind: StatusKind = opts?.kind ?? 'result';
+    // 🔴 「いまは○○できません」の断りは結果として溜める(未読に数えない。台帳 #1852 束 L1、依頼 80-4)
+    const kind: StatusKind = isBlockedRefusal(text) ? 'result' : (opts?.kind ?? 'result');
     if (kind !== 'result') {
       if (remembered.has(text)) return;
       remembered.add(text);

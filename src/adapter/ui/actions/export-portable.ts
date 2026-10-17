@@ -25,6 +25,14 @@ import { dayStamp } from '@features/datetime/date-math';
 import { writePortableBundle } from '@features/export/portable-bundle';
 import type { PortableBundle } from '@features/portable/bundle';
 
+/**
+ * 🔴 **PKC3 入り HTML の中からは書き出せない理由**(台帳 #1852 束 L2。依頼 84-4 B)。
+ * ⚠ ボタンを押したときの断りと、押せない見た目の隣に**いつも出す理由**(右の列)が、同じ字を引く(2 か所に書かない)。
+ */
+export const INSIDE_BUNDLE_REFUSAL =
+  'いま開いているのは PKC3 入り HTML で、元になるファイルを取得できないため、' +
+  'ここからは PKC3 入り HTML を作れません。ブラウザで開いた PKC3 から書き出してください';
+
 export interface PortableExportDeps {
   /** 器の題名(ファイル名になる)。 */
   title: string;
@@ -108,11 +116,7 @@ export async function exportPortable(
    * ⚠ **押せてしまうより、押した理由に答える。** ここを黙って失敗させると
    *   「押しても何も起きない」になる(#180 の dead click と同じ形)。
    */
-  if (deps.insideBundle())
-    return fail(
-      'いま開いているのは PKC3 入り HTML で、元になるファイルを取得できないため、' +
-        'ここからは PKC3 入り HTML を作れません。ブラウザで開いた PKC3 から書き出してください',
-    );
+  if (deps.insideBundle()) return fail(INSIDE_BUNDLE_REFUSAL);
 
   deps.notify('PKC3 入り HTML を書き出しています…');
   progressShown = true;

@@ -117,6 +117,8 @@ export function createAnnounce(
    */
   const paint = (): void => {
     if (!store.enabled()) return clear();
+    // 🔴 この端末で初めて開いたときは、出さずに読んだことにする(依頼 96-1 A)── 過去の分はシステムの「お知らせ」で読める
+    store.settleFirstRun(all);
     const unread = unreadNotices(all, store.seenIds());
     if (unread.length === 0) return clear();
     /** ⚠ **既読にする対象は「出した時点の未読の集合」のまま** ── 「閉じる」と
@@ -239,7 +241,18 @@ export function createAnnounce(
     mute.title =
       '押すと、残りのお知らせも読んだことになります。システムの「お知らせ」で「起動したときに新しいお知らせを出す」にチェックを入れると、次の新しいお知らせから出ます(過去の分はそこで読めます)';
 
-    foot.append(where, mute);
+    /**
+     * 🔴 **カードから、過去のお知らせの一覧へ行ける**(台帳 #1852 束 L2。依頼 80-2 B)。
+     * ⚠ 直す前は「過去のお知らせは「システム」から読めます」と字で書いてあるだけで、押せる物が無かった。
+     *   ヘルプの「お知らせを開く」と同じ受け手(`open-system-notices`)── 新しい操作を作らない。
+     *   押すとカードはしまう(読んだことにはしない ── 次に開いたとき、また出る)。
+     */
+    const list = document.createElement('button');
+    list.type = 'button';
+    list.setAttribute('data-pkc-action', 'open-system-notices');
+    list.textContent = 'お知らせの一覧を開く';
+
+    foot.append(where, list, mute);
     region.append(foot);
   };
 
@@ -314,6 +327,8 @@ export interface AnnounceServices {
   nextAnnounce(): void;
   muteAnnounce(): void;
   setNoticesEnabled(on: boolean): void;
+  /** 🔴 帯をしまうだけ(読んだことにしない)。一覧を開いたとき用(依頼 80-2)。 */
+  hideAnnounce(): void;
 }
 
 export function announceServices(
@@ -331,6 +346,7 @@ export function announceServices(
       announce.mute();
       onChanged();
     },
+    hideAnnounce: () => announce.hide(),
     setNoticesEnabled: (on) => {
       store.setEnabled(on);
       /**
