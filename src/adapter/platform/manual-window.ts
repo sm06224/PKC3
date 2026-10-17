@@ -44,6 +44,7 @@ import {
   MANUAL_WINDOW_TITLE,
   manualBuildTag,
 } from '@features/help/manual-page';
+import { blockWindowDrop } from './window-drop-guard';
 
 // ⚠ 正本は `features/help/manual-page.ts`。既存の import 先を壊さないために再 export する
 export { MANUAL_BUILT_ATTR, MANUAL_WINDOW_TITLE };
@@ -331,6 +332,8 @@ export function fillManualWindow(
   // ⚠ **組み直せる形にする**(版が上がったら入れ替える)── 足すだけだと style が積む。
   //    ⚠ **題名はこの後で入れる** ── `head` を空にすると `<title>` ごと消える
   //    (先に入れると、組み直した窓の題名が空になる ── unit が落ちて気づいた)
+  // 🔴 落とされた file / link で窓ごと移らない(#1087)
+  blockWindowDrop(doc);
   doc.head.textContent = '';
   doc.title = parts.title;
   const style = doc.createElement('style');

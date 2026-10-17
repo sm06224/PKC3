@@ -36,6 +36,7 @@
  */
 import BODY_CSS from 'virtual:pkc-body-css';
 import type { HeadingRef } from '@features/markdown/append-target';
+import { blockWindowDrop } from './window-drop-guard';
 
 /** 開いた直後の大きさ。⚠ `popup` と寸法を渡さないと**別タブ**になるブラウザが在る。 */
 export const CHAPTER_WINDOW_SIZE = { width: 560, height: 720 } as const;
@@ -498,9 +499,7 @@ export function wireChapterWindow(
    *   **この窓ごと移る**(ブラウザの既定)。移った先のページは、この窓を開いた
    *   元のウィンドウを `opener` として持つ。
    */
-  for (const type of ['dragover', 'drop'] as const) {
-    doc.addEventListener(type, (ev) => ev.preventDefault());
-  }
+  blockWindowDrop(doc);
   doc.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || ev.defaultPrevented) return;
     try {

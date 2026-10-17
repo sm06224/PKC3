@@ -30,6 +30,7 @@
  * ⚠ **PDF に sandbox を付けない**(`<object>` は script を実行しない)。
  */
 import { waitForWindowClose } from './window-close';
+import { blockWindowDrop } from './window-drop-guard';
 
 /** 別窓に見えている 1 つ。⚠ `close()` は**呼ばれなくても**寿命は守られる。 */
 export interface AssetWindowHandle {
@@ -249,6 +250,8 @@ function fill(
   kind: AssetWindowKind,
   fit: 'contain' | 'natural' = 'contain',
 ): void {
+  // 🔴 落とされた file / link で窓ごと移らない(#1087)
+  blockWindowDrop(doc);
   doc.title = title;
   const natural = kind === 'image' && fit === 'natural';
   const style = doc.createElement('style');
