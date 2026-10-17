@@ -31,25 +31,47 @@ import {
 } from '@features/message/message-log';
 
 const CAP_KEY = 'pkc3.messages.cap';
-const READ_AT_KEY = 'pkc3.messages.read-at';
+/** 既読の時刻の key。⚠ 他のタブの既読を聞く側(`message-sync.ts`)が同じ key を見る。 */
+export const READ_AT_KEY = 'pkc3.messages.read-at';
+
+/**
+ * 保存が読めない / 書けない端末の控え(この session では効いている)。
+ * ⚠ 設定の store 群(`alarm-enabled.ts` ほか)と同じ作法 ── 控えが無いと、
+ *   localStorage が使えない端末では件数を選んでも何も起きない(#1087)。
+ */
+let capFallback: number | null = null;
+/** 🔴 直近の書き込みが失敗したか。真の間は読みも控えを返す(戻らない)。 */
+let capSaveFailed = false;
 
 /** 好みの上限。⚠ 壊れた値・古い版が書いた値は既定へ丸める(黙って落とさない)。 */
 export function currentMessageCap(): number {
+  if (capSaveFailed && capFallback !== null) return capFallback;
   try {
-    return parseMessageCap(localStorage.getItem(CAP_KEY)) ?? MESSAGE_CAP_DEFAULT;
+    // 🔴 `localStorage` が無い環境は `getItem` を呼ぶ前に例外になる ── その枝は下の控えへ
+    const stored = parseMessageCap(localStorage.getItem(CAP_KEY));
+    return stored ?? MESSAGE_CAP_DEFAULT;
   } catch {
-    return MESSAGE_CAP_DEFAULT;
+    return capFallback ?? MESSAGE_CAP_DEFAULT;
   }
 }
 
 /** ⚠ 選べる値以外は黙って無視する(壊れた値を書かせない)。 */
 export function setMessageCap(n: number): void {
   if (!MESSAGE_CAP_OPTIONS.includes(n)) return;
+  capFallback = n;
+  capSaveFailed = false;
   try {
     localStorage.setItem(CAP_KEY, String(n));
   } catch {
-    /* この端末では効かない(次回起動まで既定のまま)。押した印だけは付く */
+    // 🔴 書けなかった ── 次に書けるまで、読みは控え(選んだ値)を返す
+    capSaveFailed = true;
   }
+}
+
+/** test 用: 控えを空に戻す。 */
+export function resetMessageCapFallbackForTest(): void {
+  capFallback = null;
+  capSaveFailed = false;
 }
 
 /** 最後にメッセージのノートを開いた時刻(ISO)。まだ 1 度も開いていなければ `null`。 */

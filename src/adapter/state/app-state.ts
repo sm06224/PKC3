@@ -4689,8 +4689,15 @@ function reduceCore(
       //    かつ **その lid が新しい一覧に在る**(消えたノートを選んだままにしない)。
       // ⚠ `openBody` は必ず捨てる ── 再読込で本文が変わっている可能性がある。
       //    代わりに `REQUEST_BODY` を出して**取り直す**(選択の意味論は SELECT_ENTRY と同じ)
+      /**
+       * 🔴 **システムのメッセージ / 処理の記録を開いているときも保つ**(#1087)。
+       * ⚠ この 2 件は `entryMetas` に居ない(§1.1)ので、`metas.has` だけで検めると
+       *   別タブが保存・改名・削除するたびに(300ms 後の再読込で)閉じて「何も選んでいない」へ戻っていた。
+       *   居る場所が違うだけで消えてはいないので、保って**メッセージ用の口**で取り直す(`REQUEST_BODY` ではない)。
+       */
+      const keepsLid = (l: string): boolean => metas.has(l) || isSystemMessageLid(l);
       const keepLid =
-        state.cid === action.cid && state.selectedLid !== null && metas.has(state.selectedLid)
+        state.cid === action.cid && state.selectedLid !== null && keepsLid(state.selectedLid)
           ? state.selectedLid
           : null;
       /**
@@ -4708,7 +4715,7 @@ function reduceCore(
       const sameCid = state.cid === action.cid;
       const keepScope =
         sameCid && state.scopeLid !== null && metas.has(state.scopeLid) ? state.scopeLid : null;
-      const keepMarks = sameCid ? state.selection.filter((l) => metas.has(l)) : [];
+      const keepMarks = sameCid ? state.selection.filter(keepsLid) : [];
       /**
        * ⚠ **別 container なら 2 ペインも畳む**(印の持ち越しと同じ判断)──
        * lid の偶然衝突で「他人のフォルダを開いた 2 枚のタブ」を残さない。
@@ -4716,7 +4723,7 @@ function reduceCore(
        */
       const keepDual = sameCid ? state.dual : initialDual;
       const keepAnchor =
-        sameCid && state.selectionAnchor !== null && metas.has(state.selectionAnchor)
+        sameCid && state.selectionAnchor !== null && keepsLid(state.selectionAnchor)
           ? state.selectionAnchor
           : null;
       return {
@@ -4805,10 +4812,14 @@ function reduceCore(
         events: [
           ...(keepLid === null
             ? []
-            : [{ type: 'REQUEST_BODY' as const, lid: keepLid }]),
+            : [
+                isSystemMessageLid(keepLid)
+                  ? { type: 'REQUEST_MESSAGES_BODY' as const, lid: keepLid }
+                  : { type: 'REQUEST_BODY' as const, lid: keepLid },
+              ]),
           // 🔴 参照元・履歴・ごみ箱・横に留めた枠・板の抜粋も、別タブの書込で古くなる(#1087)。
           //    題名 / 件数が同じだと `entryListChanged` では取り直されないので、ここで頼む。
-          ...(keepLid !== null && state.backlinks !== null
+          ...(keepLid !== null && !isSystemMessageLid(keepLid) && state.backlinks !== null
             ? [{ type: 'REQUEST_BACKLINKS' as const, lid: keepLid }]
             : []),
           ...(sameCid && state.revisionPanel !== null && metas.has(state.revisionPanel.lid)

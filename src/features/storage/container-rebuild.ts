@@ -263,8 +263,21 @@ export function rebuiltEntries(rows: readonly RescuedRow[]): RebuiltEntry[] {
   });
 }
 
+/**
+ * 担当でないタブで押されたときの断り文(縮める操作の断り文と同じ言い方)。
+ * ⚠ 呼び側の `catch` が「作り直せませんでした(何も消えていません): 」を前置きする ── ここは 1 文だけ。
+ */
+export const REBUILD_NOT_WRITER =
+  'このタブは保存を担当していないので作り直せません(保存を担当しているタブで押してください)';
+
 /** 建て直しに要る口。⚠ **順番はこの file が持つ**(呼び側に判断を置かない)。 */
 export interface RebuildPorts {
+  /**
+   * 🔴 **このタブが保存を担当しているか**(#1087)。⚠ 必須 ── 渡し忘れたら tsc が落とす。
+   * 担当でないタブは DB の手を握っていない: 捨てる命令だけが担当のタブへ届いて**そちらの DB が空になり**、
+   * 開き直しは手を取れずメモリ上へ落ちる。だから**何も拾わない前に**断る。
+   */
+  holdsWriterLease(): boolean;
   /** 壊れた DB から拾う(1 周)。 */
   readonly pick: RescuePick;
   /** 🔑 つながりと履歴を拾う(#1087)。⚠ 必須 ── 渡し忘れると、静かに戻らなくなる。 */
@@ -384,6 +397,8 @@ export async function rebuildContainer(
   title: string,
   ports: RebuildPorts,
 ): Promise<RebuildReport> {
+  // 🔴 ① より前に断る(まだ何も読んでも消してもいない)
+  if (!ports.holdsWriterLease()) throw new Error(REBUILD_NOT_WRITER);
   // ① 拾う → zip を落とす。⚠ ここで落ちたら例外で抜ける(**まだ何も消していない**)
   const got = await collectRescued(ports.pick, ports.onProgress);
   // 🔑 つながりと履歴も、ノートと同じ ① の段で拾う(捨てた後の DB からはもう読めない)

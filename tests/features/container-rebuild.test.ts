@@ -23,6 +23,7 @@ import {
   rebuildExplainMessage,
   rebuiltEntries,
   REBUILD_LOST,
+  REBUILD_NOT_WRITER,
   type RebuildPorts,
   type RescuedRow,
 } from '../../src/features/storage/container-rebuild';
@@ -88,6 +89,8 @@ function harness(
     failWipe?: string;
     /** 🔴 捨てた後、開き直しが落ちる(`applySchema` の失敗など)。 */
     failReopen?: string;
+    /** 🔴 このタブが保存を担当していない(既定は担当)。 */
+    notWriter?: boolean;
     assets?: Map<string, Blob>;
     skippedPerPage?: number;
     /** 🔑 壊れた DB から拾えるつながり・履歴・色（#1087）。 */
@@ -131,6 +134,7 @@ function harness(
   let writtenFull: readonly import('../../src/features/storage/container-rebuild').RebuiltEntry[] = [];
   const idb = over.assets;
   const ports: RebuildPorts = {
+    holdsWriterLease: () => over.notWriter !== true,
     pickRelations: onePage(over.relations ?? []),
     pickRevisions: onePage(over.revisions ?? []),
     readTagColors: async () => {
@@ -214,6 +218,21 @@ function harness(
 }
 
 describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
+  /**
+   * 🔴 #1087: 2 枚目のタブ(DB の担当でない側)で押すと、捨てる命令だけが担当のタブへ届いて
+   * そちらの DB が空になり、開き直しは手を取れずメモリ上へ落ちていた。
+   * 直す前(門なし)はこの test が「捨てた」で落ちる。
+   */
+  it('🔴 担当でないタブでは、拾うことも捨てることもせずに断る', async () => {
+    const h = harness({ notWriter: true });
+    await expect(rebuildContainer('c-old', 'わたしの PKC', h.ports)).rejects.toThrow(REBUILD_NOT_WRITER);
+    expect(h.calls, '断ったのに何かを呼んだ').toEqual([]);
+    // 対照群: 担当なら同じ台で最後まで走る
+    const ok = harness();
+    expect((await rebuildContainer('c-old', 'わたしの PKC', ok.ports)).outcome).toBe('rebuilt');
+    expect(ok.calls).toContain('wipeStorage');
+  });
+
   it('🟢 3 件を拾って、同じ器の id へ書き戻す', async () => {
     const h = harness();
     const r = await rebuildContainer('c-old', 'わたしの PKC', h.ports);

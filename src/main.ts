@@ -188,7 +188,8 @@ import { runStartupIntegrity } from '@adapter/platform/storage/startup-integrity
 import type { StartupIntegrityOutcome } from '@features/storage/integrity-schedule';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口は 1 個(設計 doc §7、段②a。CLAUDE.md §7)
-import { appMessagePost } from '@adapter/platform/message-post';
+import { appMessagePost, READ_AT_KEY } from '@adapter/platform/message-post';
+import { connectMessageSync, MESSAGES_CHANNEL } from '@adapter/platform/message-sync';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
 import { markName, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import {
@@ -1166,6 +1167,38 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         for (const l of lids) dispatcher.dispatch({ type: 'MESSAGES_BODY_REFRESH', lid: l });
       }, 300);
     });
+  }
+  /**
+   * 🔴 **別のタブの書込 / 既読を受ける**(#1087)。書込の放送路(`NOT_BROADCAST`)は変えず、
+   * 軽い合図を別に流す(`message-sync.ts` ── 1 秒に 1 回までにまとめる)。
+   * ⚠ 読み直すかはここで決める:**開いている lid が含まれるときだけ**本文を読み直し、
+   *   未読は「メッセージ」が含まれるときだけ数え直す(処理の記録の書込では何も読まない)。
+   * ⚠ 判断は reducer(`MESSAGES_BODY_REFRESH` は選択中の lid だけ)と `seedUnreadFromDisk` が持つ ──
+   *   この file はどの test からも実行されない(CLAUDE.md §2)ので、ここは繋ぐだけ。
+   */
+  {
+    const recountUnread = (): void => {
+      void appMessagePost
+        .seedUnreadFromDisk(() => client.request({ op: 'getBody', cid, lid: SYSTEM_MESSAGE_LID }))
+        .catch(() => {
+          /* 読めなかった ── 今の数のまま */
+        });
+    };
+    const sync = connectMessageSync({
+      channel:
+        typeof BroadcastChannel === 'function'
+          ? new BroadcastChannel(portable ? `${MESSAGES_CHANNEL}:${portable.bundle.id}` : MESSAGES_CHANNEL)
+          : null,
+      id: makeViewWindowToken(),
+      win: window,
+      readAtKey: READ_AT_KEY,
+      onRemoteWritten: (lids) => {
+        for (const l of lids) dispatcher.dispatch({ type: 'MESSAGES_BODY_REFRESH', lid: l });
+        if (lids.includes(SYSTEM_MESSAGE_LID)) recountUnread();
+      },
+      onReadElsewhere: recountUnread,
+    });
+    appMessagePost.onWritten((lid) => sync.changed(lid));
   }
   /**
    * 🔴 **確認はアプリ自身のダイアログ**(#299 段③、2026-08-21。user 裁定
@@ -3739,6 +3772,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         return fresh;
       };
       return rebuildContainer(target, CONTAINER_TITLE, {
+        // 🔴 担当でないタブでは断る(捨てる命令だけが担当のタブへ届いて、こちらは開き直せない)
+        holdsWriterLease: () => writerHolder,
         pick: async (afterRowid, chunks) =>
           client.request({ op: 'rescueEntries', afterRowid, chunks }),
         // 🔑 つながりと履歴も拾う（#1087。索引だけ壊れた DB は表走査で読める）
