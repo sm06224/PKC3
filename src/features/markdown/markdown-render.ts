@@ -1769,7 +1769,8 @@ md.renderer.rules.pkc_math_block = function (tokens, idx) {
 // Inner content への inline markup は Phase 1 では非対応(plain text)、
 // 必要に応じて Phase 2 で再帰 tokenize 検討。
 
-const HIGHLIGHT_COLOR_RE = /^\[([a-zA-Z][a-zA-Z0-9-]*|#[0-9a-fA-F]{3,8}|rgb\([\d.,\s]+\)|rgba\([\d.,\s]+\))\]([\s\S]+)$/;
+// `[…]` の直後が `(` `[` `:` なら色ではなくリンクの書き出し(`==[docs](entry:n1)==`)なので、色として読まない
+const HIGHLIGHT_COLOR_RE = /^\[([a-zA-Z][a-zA-Z0-9-]*|#[0-9a-fA-F]{3,8}|rgb\([\d.,\s]+\)|rgba\([\d.,\s]+\))\](?![([:])([\s\S]+)$/;
 
 md.inline.ruler.after('emphasis', 'pkc_highlight', function highlightRule(state, silent) {
   if (silent) return false;
@@ -6296,7 +6297,7 @@ function postProcessBlankLineMarkers(html: string): string {
  * - fenced code(``` / ~~~)内の `#` 行は見出し扱いしない。
  * - 行の挿入 / 削除はせず content を前置するのみ(lineMap 不変)。
  */
-function preprocessHeadingNumbers(text: string, start: number): string {
+export function preprocessHeadingNumbers(text: string, start: number): string {
   const lines = splitLines(text);
   const out: string[] = [];
   const counters = [0, 0, 0];

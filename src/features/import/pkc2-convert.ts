@@ -395,7 +395,7 @@ export function convertPkc2Container(
     // ⚠ map 全件を回して 1 件ずつ replace すると O(map 件数 × 本文量) になる
     // (review M-7: asset key 10 → 100 で 6.07 倍)。**1 パスで引く**
     // 文法は読む側(body-links.ts)に揃える:`Entry:` も / `myentry:` は触らない / PKC2 の `pkc://<container_id>/entry/<lid>` も(#1087)
-    body = remapEntryLids(body, lidMap, srcCid);
+    body = remapEntryLids(body, lidMap, srcCid, true);
     body = rewriteTextlogRefs(body, selfLid, anchorsByLid, firstLogOfDay);
     body = replacePrefixed(body, 'asset:', keyMap, true);
     return body;

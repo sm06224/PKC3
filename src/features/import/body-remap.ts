@@ -104,11 +104,24 @@ export function changedPairs(map: ReadonlyMap<string, string>): Array<readonly [
  * 綴りの大小は問わず(`Entry:n1` も)、**左は lid の文字で留める**(`myentry:n1` は `entry:` ではない)、
  * `cid` が在れば `pkc://<cid>/entry/<lid>` も写す。写すのは lid の部分だけで、前の字はそのまま残す。
  */
-export function remapEntryLids(body: string, map: ReadonlyMap<string, string>, cid?: string): string {
+export function remapEntryLids(
+  body: string,
+  map: ReadonlyMap<string, string>,
+  cid?: string,
+  /**
+   * 🔴 PKC2 の取り込みだけが true にする ── `pkc://<PKC2 の容れ物 id>/entry/<lid>` を `entry:<新 lid>` に書き直す
+   *   (`#断片` はそのまま残る)。cid を残すと、取り込んだ後の PKC3 の id とは違うので「別の PKC3 を指す」
+   *   プレースホルダーになる。既定(false)は cid を残して lid だけ写す(バックアップの往復)。
+   */
+  toEntryForm = false,
+): string {
   const tok = 'A-Za-z0-9_\\-';
   const portable = cid !== undefined && /^[A-Za-z0-9_-]+$/.test(cid) ? `|pkc://${cid}/entry/` : '';
   const re = new RegExp(`(?<![${tok}])((?:entry:)${portable})([${tok}]+)`, 'gi');
-  return body.replace(re, (_m, head: string, lid: string) => head + (map.get(lid) ?? lid));
+  return body.replace(re, (_m, head: string, lid: string) => {
+    const h = toEntryForm && head.toLowerCase().startsWith('pkc://') ? 'entry:' : head;
+    return h + (map.get(lid) ?? lid);
+  });
 }
 
 /**

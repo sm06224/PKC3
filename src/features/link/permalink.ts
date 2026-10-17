@@ -32,6 +32,7 @@
  */
 
 import { isRealCalendarDate } from '@features/schedule/schedule-date';
+import { escapeLinkLabel } from '@features/markdown/link-format';
 
 export const PKC_SCHEME = 'pkc://';
 
@@ -736,16 +737,7 @@ export function convertPastedPermalink(
   if (target.containerId !== ctx.containerId) return null;
   const title = ctx.titleOf(target.targetId);
   if (title === null || title === '') return null;
-  return `[${escapeLinkText(title)}](entry:${target.targetId}${target.fragment})`;
-}
-
-/**
- * リンクの見出しに入れてよい形へ逃がす。
- * ⚠ `[` `]` を逃がさないと、題名に括弧が在るノートで**リンクが途中で切れる**
- * (`[買い物 [済]](entry:x)` は `買い物 [済` までしかリンクにならない)。
- */
-function escapeLinkText(text: string): string {
-  return text.replace(/([\\[\]])/g, '\\$1');
+  return `[${escapeLinkLabel(title)}](entry:${target.targetId}${target.fragment})`;
 }
 
 /**

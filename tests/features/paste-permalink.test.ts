@@ -37,6 +37,16 @@ describe('素で貼ったパーマリンク', () => {
       '[買い物 \\[済\\]](entry:n2)',
     );
   });
+
+  it('🔴 題名の記法の字(`*` `` ` `` `_` `|` `==`)も逃がす ── 見出しが強調やコードとして読まれない', () => {
+    const ctx = {
+      containerId: 'c1',
+      titleOf: (lid: string) => (lid === 'n9' ? '*太* `コード` a|b ==強== 前_後 _x_' : null),
+    };
+    expect(convertPastedPermalink('pkc://c1/entry/n9', ctx)).toBe(
+      '[\\*太\\* \\`コード\\` a\\|b \\=\\=強\\=\\= 前_後 \\_x\\_](entry:n9)',
+    );
+  });
 });
 
 describe('触らない形(⚠ 迷ったら触らない)', () => {

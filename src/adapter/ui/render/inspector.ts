@@ -53,7 +53,8 @@ import { formatStoredDate, storedInstantIso } from '@features/datetime/stored-da
 import { sameTag } from '@features/flavor/tags';
 import { collectEntryTags } from '@features/flavor/entry-tags';
 import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
-import { stripComments } from '@features/markdown/markdown-render';
+import { stripComments, preprocessHeadingNumbers } from '@features/markdown/markdown-render';
+import { extractHeadingNumberConfig } from '@features/markdown/document-globals';
 import { listTaskItems } from '@features/markdown/task-count';
 import { listAssetUses, type AssetUse } from '@features/asset/asset-refs-in-body';
 import { frontmatterProblem } from '@features/markdown/frontmatter';
@@ -542,6 +543,11 @@ export class InspectorRenderer {
             : extractHeadingsFromMarkdown(body, {
                 stripHidden: (s) => stripComments(s).transformed,
                 blockForms: true,
+                // 見出し番号が on のとき、本文の見出し id は番号つきの字から作られる
+                numberHeadings: (() => {
+                  const cfg = extractHeadingNumberConfig(body);
+                  return cfg ? (s: string) => preprocessHeadingNumbers(s, cfg.start) : undefined;
+                })(),
               });
         this.toc = { body, headings };
         // ⚠ `<dt>` は `<dd>` の直前 ── 値だけ畳むと**見出しだけ残る**(関係の図と同じ)

@@ -112,7 +112,7 @@ describe('convertPkc2Container (P6a)', () => {
 
   it('textlog permalink が変換後見出し slug へ書き換わる(legacy log id)', () => {
     const note = r.entries.find((e) => e.lid === 'b-note')!;
-    expect(note.body).toContain('entry:c-log#2026-07-01-090000');
+    expect(note.body).toContain('entry:c-log#h/2026-07-01-090000');
     expect(note.body).not.toContain('#log/');
   });
 

@@ -145,6 +145,12 @@ export interface ExtractHeadingsOptions {
   stripHidden?: (source: string) => string;
   /** setext(`===` / `---` の下線)と、引用・リストの中の `#` 見出しも拾う(描画は拾っている) */
   blockForms?: boolean;
+  /**
+   * 見出し番号(frontmatter `heading-number`)を本文と同じに振る関数(注入。実体は markdown-render で、循環を避ける)。
+   * 🔑 本文の見出し id は番号つきの字から作られる(`1-概要`)ので、目次の slug も同じ字から作らないと
+   *   押しても「まだ表示されていません」になる。⚠ 目次に出す字(`text`)は番号なしのまま。
+   */
+  numberHeadings?: (source: string) => string;
 }
 
 /**
@@ -158,8 +164,6 @@ export function extractHeadingsFromMarkdown(
 ): TocHeading[] {
   if (!markdown) return [];
   if (opts?.stripHidden) markdown = opts.stripHidden(markdown);
-  const headings: TocHeading[] = [];
-  const slugOf = makeSlugCounter();
   // 2026-05-09 hotfix(user バグレポ):TOC は **render と同じ前処理** を経たうえで
   // heading を抽出する必要がある。具体的には:
   //   1. frontmatter strip(YAML lines を heading として誤検出しない)
@@ -174,6 +178,17 @@ export function extractHeadingsFromMarkdown(
   body = expandVarsInText(body, extractVars(markdown));
   body = stripMismatchedIfBlocks(body, 'html');
 
+  const plain = scanHeadings(body, opts);
+  if (!opts?.numberHeadings) return plain;
+  // 行の挿入・削除はしない番号の前置だけなので、同じ順で同じ数の見出しが出る。slug だけ番号つきの側から取る
+  const numbered = scanHeadings(opts.numberHeadings(body), opts);
+  if (numbered.length !== plain.length) return plain;
+  return plain.map((h, i) => ({ ...h, slug: numbered[i]!.slug }));
+}
+
+function scanHeadings(body: string, opts: ExtractHeadingsOptions | undefined): TocHeading[] {
+  const headings: TocHeading[] = [];
+  const slugOf = makeSlugCounter();
   const lines = body.split(/\r?\n/);
   let fence = '';
   const blockForms = opts?.blockForms === true;

@@ -3339,8 +3339,23 @@ function navigateToLink(
       t.section,
       '見出しが見つかりません(見出しの字が変わったのかもしれません)',
     );
+  } else if (/^#[^/#]+$/.test(t.fragment)) {
+    /**
+     * 🔑 **古い取り込みが残した `entry:X#<見出しの id>`(`h/` なし)**は、節リンクではないが
+     *   その id の見出しが在れば飛ぶ。無ければ**何も出さない**(ノートは開けている。
+     *   節リンクではない綴りの断り文は、user に別の物を探させる)。
+     */
+    void tocJump(dispatcher, root, decodeURIComponentSafe(t.fragment.slice(1)), undefined, false, true);
   }
   void target;
+}
+
+function decodeURIComponentSafe(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 }
 
 /**
@@ -6538,6 +6553,7 @@ async function tocJump(
   slug: string,
   notFound?: string,
   flash = false,
+  quiet = false,
 ): Promise<void> {
     if (dispatcher.getState().viewMode !== 'detail') {
       dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
@@ -6563,6 +6579,8 @@ async function tocJump(
         )
       : undefined;
     if (!hit) {
+      // 🔑 推測で飛ぶ呼び方(古い取り込みの `entry:X#<slug>`)は、無ければ何も出さない
+      if (quiet) return;
       // ⚠ 文言は phase で分ける ── 編集していないのに「編集中は…」と出すと、
       //   user は別のものを探す(選択を変えた直後の描き直し中はこちらに来る)
       dispatcher.dispatch({
@@ -18940,6 +18958,21 @@ export function bindActions(
     run('edit-cell', el);
   };
   listen(root, 'dblclick', onDblClick);
+  /**
+   * 🔴 **アプリ内リンクの中ボタン(ホイール押し)は、空のタブを開かせない**。
+   *
+   * ⚠ 中ボタンは `click` ではなく `auxclick` で届く ── `onClick` の `preventDefault` が効かず、
+   *   ブラウザが `entry:…` / `pkc://…` を新しいタブで開こうとして**空白のタブ**ができていた。
+   * 🔑 止めるだけにする(ノートへ移る動作は通常のクリックに任せる ── 中ボタンで本体の画面を
+   *   動かすと、新しいタブを期待した user の手元が変わる)。他の `<a>`(外部 URL)は触らない。
+   */
+  const onAuxClick = (ev: Event): void => {
+    if ((ev as MouseEvent).button !== 1) return;
+    const a = (ev.target as HTMLElement | null)?.closest?.<HTMLAnchorElement>('a[href]');
+    if (a == null || !root.contains(a)) return;
+    if (/^(?:entry:|pkc:\/\/)/i.test(a.getAttribute('href') ?? '')) ev.preventDefault();
+  };
+  listen(root, 'auxclick', onAuxClick);
   // 🔴 **`onClick` より後に登録する**(上の docstring)── 先に登録すると
   //    メニューが消えてから委譲が走り、押しても無言になる。
   listen(root, 'click', onCloseMenu);

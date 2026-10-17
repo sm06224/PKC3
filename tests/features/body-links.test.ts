@@ -179,6 +179,27 @@ describe('🔴 コードの中・左の境界は参照元ではない(#1087)', (
  * 🔴 **字下げ(4 スペース / タブ)のコードブロックの中は、リンクではない**(#1087)。
  * ⚠ 期待値は**描画が実際に何をリンクにしたか**から引く(本文の字面から組まない ── 実装と同じ盲点を共有する)。
  */
+describe('🔴 csv / tsv / psv の囲みの中のリンクは表のセルなので、参照元に数える', () => {
+  it('csv のセルの [x](entry:n1) は押せる ── 参照元にも数える', () => {
+    const el = document.createElement('div');
+    el.innerHTML = renderMarkdown('```csv\na,b\n[x](entry:n1),2\n```', { currentContainerId: 'c1' } as never);
+    expect(el.querySelector('[data-pkc-entry-ref="entry:n1"]'), '前提: 描画ではリンクになる').not.toBeNull();
+    expect(bodyLinkTargets('```csv\na,b\n[x](entry:n1),2\n```')).toEqual(['n1']);
+    expect(bodyLinksTo('~~~tsv\n[x](entry:n1)\t2\n~~~', 'n1')).toBe(true);
+    expect(bodyLinksTo('```psv noheader\n[x](entry:n1)|2\n```', 'n1')).toBe(true);
+    expect(bodyLinksTo('```CSV\n[x](entry:n1),2\n```', 'n1')).toBe(true);
+  });
+  it('対照群: 表にならない囲み(js / csvx / -norender)と行内コードは従来どおり数えない', () => {
+    expect(bodyLinksTo('```js\n[x](entry:n1)\n```', 'n1')).toBe(false);
+    expect(bodyLinksTo('```csvx\n[x](entry:n1)\n```', 'n1')).toBe(false);
+    expect(bodyLinksTo('```csv-norender\n[x](entry:n1)\n```', 'n1')).toBe(false);
+    expect(bodyLinksTo('`[x](entry:n1)`', 'n1')).toBe(false);
+  });
+  it('csv の囲みが閉じた後ろのコードは、数えないまま', () => {
+    expect(bodyLinkTargets('```csv\na,b\n```\n\n```\n[x](entry:n2)\n```')).toEqual([]);
+  });
+});
+
 describe('字下げのコードブロック', () => {
   const rendered = (body: string): string[] =>
     [...renderMarkdown(body).matchAll(/data-pkc-entry-ref="entry:([^"#]+)/g)].map((m) => m[1]!);
