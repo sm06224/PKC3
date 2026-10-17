@@ -99,7 +99,7 @@ import { SCHEDULE_DROP_FAILED, gatedScheduleWrite } from './schedule-write-gate'
 import { addDays, daysBetween } from '@features/datetime/date-math';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '@adapter/ui/actions/long-press';
 import { pickRepeatMoveInApp } from './app-dialog';
-import { isRepeatUnit, shiftWeekdaysUnit } from '@features/schedule/repeat';
+import { isRepeatUnit, movedOccurrenceCount, shiftWeekdaysUnit } from '@features/schedule/repeat';
 import { slotOfCard } from '@features/schedule/move-undo';
 import { offerMoveUndo } from './schedule-undo';
 
@@ -236,13 +236,23 @@ function moveRepeat(
   const days = daysBetween(from, dropDate);
   // ⚠ 同じ日・読めない日は**何も起きない**(断り文も出さない ── 動いていないので)
   if (days === null || days === 0) return;
-  void pickRepeatMoveInApp(host, days).then((pick) => {
+  void pickRepeatMoveInApp(host, days, null, movedBeforeOf(dispatcher.getState(), grabbed.lid, line)).then((pick) => {
     const action = repeatMoveAction(dispatcher.getState(), grabbed, line, from, dropDate, days, pick);
     // 🔴 小窓で答えを待った後に撃つので、門は答えの後に掛ける(#1087)
     gatedScheduleWrite(dispatcher, [grabbed.lid], SCHEDULE_DROP_FAILED, () =>
       dispatchRepeatMove(dispatcher, action, pick),
     );
   });
+}
+
+/**
+ * 🔴 **この規則の、以前に 1 回だけ動かした回の数**(#1163 の依頼 286 案 B。確認の画面に出す)。
+ * ⚠ 札が走査に居なければ 0(言わない ── 当てずっぽうの数を出さない)。
+ */
+export function movedBeforeOf(state: AppState, lid: string, line: number): number {
+  const cards = state.taskScan?.cards ?? [];
+  const card = cards.find((c) => c.lid === lid && c.line === line);
+  return card === undefined ? 0 : movedOccurrenceCount(cards, lid, card.text);
 }
 
 /** 「全部動かす」で動かす先の規則が読めなかったときの断り文(「やめた」とは別 ── 黙らない)。 */

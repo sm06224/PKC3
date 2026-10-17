@@ -279,7 +279,7 @@ describe('main.ts の配線(どの unit からも実行されない ── 原�
     );
     const announce = main.indexOf('const announceWeek = (): void => {');
     expect(announce, 'announceWeek が見つからない').toBeGreaterThan(-1);
-    expect(main.slice(announce, announce + 400)).toContain('weekAnnounceKey(heldViewWindow, st.scheduleMode');
+    expect(main.slice(announce, announce + 500)).toMatch(/weekAnnounceKey\(\s*heldViewWindow,\s*st\.scheduleMode/);
     // 🔴 月の窓は出している月(calendarMonth)で名乗る / 押す側は今月で引く(#855)
     expect(main.slice(announce, announce + 400)).toContain('st.calendarMonth ?? null');
     expect(main).toContain(": monthWindowKey(null, todayKey()),");

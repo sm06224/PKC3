@@ -106,6 +106,23 @@ export function isScheduleTimeRange(start: string, end: string): boolean {
 }
 
 /**
+ * 🔴 **夜をまたぐ幅か**(`22:00..02:00`。#1163 の依頼 190。Gemini の裁定:書けるようにする)。
+ *
+ * 両方が時刻の形で、**終わりが始まりより前**のもの。終わりは**翌日**の時刻として読む。
+ * ⚠ 直す前は逆順を幅として読まず、`..02:00` が札の字に残った(夜勤・夜行の予定が書けなかった)。
+ * ⚠ 日付の期間(`isScheduleRange`)の逆順は、今までどおり通さない(0 日になって予定が消えるため ── 時刻の幅と事情が違う)。
+ * ⚠ 同じ時刻(`14:00..14:00`)は夜をまたぐとは読まない(`isScheduleTimeRange` が通す)。
+ */
+export function isOvernightSpan(start: string, end: string): boolean {
+  return isScheduleTime(start) && isScheduleTime(end) && end < start;
+}
+
+/** 幅として読める形か(同じ日の幅 または 夜をまたぐ幅)。⚠ 読む側と書く側の**同じ 1 本**(往復しない字を出力しない)。 */
+export function isScheduleTimeSpan(start: string, end: string): boolean {
+  return isScheduleTimeRange(start, end) || isOvernightSpan(start, end);
+}
+
+/**
  * 🔴 **札に出す時刻の字**(`14:00` / `14:00〜15:00`)。
  *
  * 🔑 札の字の組み立てはここ 1 本(CLAUDE.md §7)── 面ごとに `〜` を足すと、
@@ -113,7 +130,8 @@ export function isScheduleTimeRange(start: string, end: string): boolean {
  *   これは**画面に出す字**である(日付の期間の札の「〜08/28」と同じ向き)。
  */
 export function formatTimeSpan(time: string, timeEnd: string | null): string {
-  return timeEnd === null ? time : `${time}〜${timeEnd}`;
+  // 🔴 夜をまたぐ幅は「翌」を添える(`22:00〜翌02:00`)── 添えないと終わりが始まりより前に見える(#1163 の依頼 190)
+  return timeEnd === null ? time : isOvernightSpan(time, timeEnd) ? `${time}〜翌${timeEnd}` : `${time}〜${timeEnd}`;
 }
 
 /**

@@ -306,7 +306,9 @@ export function buildIcs(items: readonly AgendaItem[], opts: IcsOptions): IcsRes
      *   「2 時間の予定」が長さ 0 として渡っていた。書くときは翌日の 00:00 にする(下の DTEND)。
      */
     const endOk = it.timeEnd === '24:00' || validTime(it.timeEnd);
-    const timeEnd = timed && endOk && it.timeEnd !== null && it.timeEnd >= it.time! ? it.timeEnd : null;
+    // 🔴 夜をまたぐ幅(`22:00..02:00`)は終わりを翌日の時刻として渡す(#1163 の依頼 190)
+    const overnight = timed && endOk && it.timeEnd !== null && it.timeEnd < it.time!;
+    const timeEnd = timed && endOk && it.timeEnd !== null && (it.timeEnd >= it.time! || overnight) ? it.timeEnd : null;
     let until: string | null = null;
     if (it.until !== null) {
       until = clampUntil(it.until);
@@ -362,7 +364,11 @@ export function buildIcs(items: readonly AgendaItem[], opts: IcsOptions): IcsRes
       const time = it.time!;
       ev.push(dt('DTSTART', start, time));
       if (timeEnd !== null)
-        ev.push(timeEnd === '24:00' ? dt('DTEND', addDays(start, 1)!, '00:00') : dt('DTEND', start, timeEnd));
+        ev.push(
+          timeEnd === '24:00'
+            ? dt('DTEND', addDays(start, 1)!, '00:00')
+            : dt('DTEND', overnight ? addDays(start, 1)! : start, timeEnd),
+        );
       if (zone.kind === 'tokyo') usesTokyo = true;
       if (it.repeat !== null) {
         // 🔴 終わりは UTC(開始の時刻で数える ── 最終日の回を含める)

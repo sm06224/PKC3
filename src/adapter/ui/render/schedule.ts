@@ -53,9 +53,14 @@ import { currentTagColors } from './tag-color';
 import { noteColorVar } from '@features/schedule/item-color';
 import { leadLabel, SCHEDULE_LEAD_OPTIONS } from '@features/schedule/schedule-notify';
 import { appScheduleNotify } from './schedule-notify';
+import { appScheduleWeekStart } from './schedule-week-start';
+import {
+  weekdayHeads,
+  weekStartLabel,
+  WEEK_START_OPTIONS,
+  type WeekStart,
+} from '@features/schedule/week-start';
 import { compareTitles } from '@features/filter/title-compare';
-
-const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
 /**
  * 🔴 **「日」に出す 1 日ぶん**(#855 段 A-1)── **その日を「起点の日」にして** `buildAgenda` に束ねさせる。
@@ -174,6 +179,8 @@ export class ScheduleRenderer {
     modes: HTMLButtonElement[];
     /** 「予定を足す」の日付の欄(「日」では見ている日に合わせる)。 */
     quickDate: HTMLInputElement;
+    /** 🔴 週の始まり(日曜 / 月曜。#1163 の依頼 191)。 */
+    weekStart: HTMLSelectElement;
   } | null = null;
   /** 「予定を足す」の日付を最後に合わせた日(`null` = 合わせていない)。 */
   private quickDay: string | null = null;
@@ -204,6 +211,7 @@ export class ScheduleRenderer {
     selected: string | null;
     error: string | null;
     today: string;
+    weekStart: WeekStart;
   } | null = null;
 
   /** `metaSignature` の控え(同じ `entryMetas` の参照なら前の答えを返す)。 */
@@ -237,9 +245,54 @@ export class ScheduleRenderer {
     this.now = now ?? ((): Date => new Date());
   }
 
+  /**
+   * 🔴 **次の 0 時に 1 回だけ描き直す予約**(#1163 の依頼 288 案 A)。
+   * ⚠ 直す前は、日が変わったときの描き直しが「隠れていた窓がまた見えたとき」(`watchRelativeDays`)にしか無く、
+   *   別のウィンドウに予定表を出しっぱなしにすると、0 時を過ぎても「今日」の印と期限切れの赤が前の日のままだった。
+   * 🔑 常駐のタイマーではない ── 予定表が出ているあいだだけ、次の 0 時の 1 回ぶんを置く(描くたびに置き直し、
+   *   隠れたら消す)。1 日 1 回なので重くならない。
+   */
+  private midnightTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastState: AppState | null = null;
+
+  private shownNow(): boolean {
+    return this.region.isConnected && this.region.closest('[hidden]') === null;
+  }
+
+  private armMidnight(at: Date): void {
+    if (this.midnightTimer !== null) {
+      clearTimeout(this.midnightTimer);
+      this.midnightTimer = null;
+    }
+    if (!this.shownNow()) return;
+    const next = new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1, 0, 0, 1);
+    const wait = Math.max(1000, next.getTime() - at.getTime());
+    this.midnightTimer = setTimeout(() => {
+      this.midnightTimer = null;
+      // 指紋の「今日」が変わるので、同じ状態でも描き直される。出ていないなら、次に見えたときに描く
+      this.last = null;
+      if (this.lastState !== null && this.shownNow()) this.render(this.lastState);
+    }, wait);
+  }
+
+  private weekStartWatched = false;
+
+  /** 🔴 週の始まりを変えたら、いま出ている面を描き直す(状態は動かないので、自分で受ける)。 */
+  private watchWeekStart(): void {
+    if (this.weekStartWatched) return;
+    this.weekStartWatched = true;
+    appScheduleWeekStart.subscribe(() => {
+      this.last = null;
+      if (this.lastState !== null && this.shownNow()) this.render(this.lastState);
+    });
+  }
+
   render(state: AppState): void {
     const at = this.now();
+    this.lastState = state;
+    this.armMidnight(at);
     const today = dateKey(at.getFullYear(), at.getMonth() + 1, at.getDate());
+    const weekStart = appScheduleWeekStart.get();
     // 🔴 見せ方は**この面の器**で選ぶ(狭い面 = 左の列は `scheduleNarrowMode` / 広い面は `scheduleMode`)
     const narrow = this.region.hasAttribute('data-pkc-browse-pane');
     const next = {
@@ -266,6 +319,8 @@ export class ScheduleRenderer {
       selected: state.selectedLid,
       error: state.error,
       today,
+      // 🔴 週の始まりも指紋(変えたのに描き直さない、を作らない ── #1163 の依頼 191)
+      weekStart,
     };
     // ⚠ 指紋が全部同じなら DOM に触らない(掴んでいる最中に組み直さない)
     const prev = this.last;
@@ -277,6 +332,7 @@ export class ScheduleRenderer {
     this.last = next;
 
     const frame = this.ensureFrame();
+    this.watchWeekStart();
     // 🔴 知らせの好みを映す(押された値は binder が保存する ── ここは読み戻すだけ)
     const leadValue = String(appScheduleNotify.lead());
     if (frame.lead.value !== leadValue) frame.lead.value = leadValue;
@@ -317,7 +373,15 @@ export class ScheduleRenderer {
     const groups = buildAgenda(items, today, state.showUndatedTasks, { skip });
 
     // 🔑 点は**束から**引く(下の docstring)── 期間の展開を 2 か所で決めない
-    this.paintMonth(frame, state, today, groups, viewedMarks(mode, shown, weekOf(shown) ?? weekOf(today) ?? []));
+    this.paintMonth(
+      frame,
+      state,
+      today,
+      groups,
+      viewedMarks(mode, shown, weekOf(shown, weekStart) ?? weekOf(today, weekStart) ?? []),
+      weekStart,
+    );
+    if (frame.weekStart.value !== String(weekStart)) frame.weekStart.value = String(weekStart);
     frame.note.textContent = this.noteText(
       state,
       all.length + notes.length,
@@ -378,7 +442,7 @@ export class ScheduleRenderer {
      *   見ているところに出る」を「日」でも保つ。動線レビューの指摘)。⚠ 合わせるのは**日が変わったときだけ** ──
      *   描き直しのたびに入れ直すと、user が欄を直した字(空にする = 日付なしで足す、も含む)を奪う。
      */
-    const weekDays = weekMode ? (weekOf(shown) ?? weekOf(today) ?? []) : [];
+    const weekDays = weekMode ? (weekOf(shown, weekStart) ?? weekOf(today, weekStart) ?? []) : [];
     if (dayMode && this.quickDay !== shown) {
       frame.quickDate.value = shown;
       this.quickDay = shown;
@@ -388,12 +452,12 @@ export class ScheduleRenderer {
       this.quickDay = `week ${weekDays[0] ?? ''}`;
     } else if (!dayMode && !weekMode) this.quickDay = null;
     if (weekMode) {
-      const thisWeek = weekOf(today) ?? [];
+      const thisWeek = weekOf(today, weekStart) ?? [];
       // 🔑 行き先が今日を含む週なら空(= 今日に追従する状態へ戻る)── 「日」と同じ
       const goTo = (n: number): string => {
         const d = addDays(shown, n);
         if (d === null) return '';
-        return (weekOf(d) ?? []).includes(today) ? '' : d;
+        return (weekOf(d, weekStart) ?? []).includes(today) ? '' : d;
       };
       this.week.paint({
         days: weekDays,
@@ -417,6 +481,7 @@ export class ScheduleRenderer {
         titleOf: (lid) => state.entryMetas.get(lid)?.title ?? '',
         selectedLid: state.selectedLid,
         thisYear: at.getFullYear(),
+        weekStart,
       });
     } else this.monthView.leave();
     if (dayMode) {
@@ -464,6 +529,7 @@ export class ScheduleRenderer {
     groups: readonly AgendaGroup[],
     /** 🔴 いま見ている日 / 週(#855。`viewedMarks`)── 升目と行に印を付ける。 */
     marks: ReturnType<typeof viewedMarks>,
+    weekStart: WeekStart,
   ): void {
     const at = this.now();
     const year = state.calendarMonth?.year ?? at.getFullYear();
@@ -482,15 +548,15 @@ export class ScheduleRenderer {
     frame.grid.textContent = '';
     const head = document.createElement('div');
     head.setAttribute('data-pkc-field', 'schedule-week');
-    WEEKDAYS.forEach((w, i) => {
+    for (const w of weekdayHeads(weekStart)) {
       const cell = document.createElement('span');
-      cell.textContent = w;
-      // 🔴 土日の見出しは薄く沈める(#855。地は無彩色のまま ── 色は情報にだけ使う)
-      if (i === 0 || i === 6) cell.setAttribute('data-pkc-weekend', '');
+      cell.textContent = w.label;
+      // 🔴 土日の見出しは薄く沈める(#855。地は無彩色のまま ── 色は情報にだけ使う)。⚠ 並びの位置ではなく曜日で決める(月曜始まりでも土日)
+      if (w.dow === 0 || w.dow === 6) cell.setAttribute('data-pkc-weekend', '');
       head.append(cell);
-    });
+    }
     frame.grid.append(head);
-    for (const week of getMonthGrid(year, month)) {
+    for (const week of getMonthGrid(year, month, weekStart)) {
       const row = document.createElement('div');
       row.setAttribute('data-pkc-field', 'schedule-week');
       // 🔴 見ている週は行ごと色を付ける(月外の空き枠も含めて 1 行 ── 週の途中で月が替わっても帯が切れない)
@@ -656,9 +722,11 @@ export class ScheduleRenderer {
     doneNotes: number,
   ): number {
     // ⚠ 数えるのは**この面に出る条件を満たしたうえで済んでいる**もの
-    // (隠したノートの済んだ札もここで 1 回数える ── 依頼 12-C「隠れている分の合計」。数え方の見直しは #1163 の依頼 247)
+    // (隠したノートの済んだ札は、ここではなく「隠したノートの分」に数える ── 依頼 247 案 C。`schedule-items.ts`)
     const hidden = doneNotes + all.filter((c) => {
       if (!c.done) return false;
+      // 🔴 隠したノートの分は「済み(N)」に入れない(押して出る数に合わせる。隠したノートの分に数える ── 依頼 247 案 C)
+      if (state.scheduleHiddenNotes.includes(c.lid)) return false;
       const m = state.entryMetas.get(c.lid);
       if (m === undefined) return false;
       if (m.archived && !state.showArchived) return false;
@@ -773,8 +841,8 @@ export class ScheduleRenderer {
        *   `今日(1)+` になった)。
        * 🔑 印は **CSS の `::before`**、名前は `aria-label` に置く。
        */
-      plus.setAttribute('aria-label', 'この日のやることを足す');
-      plus.title = 'この日のやることを足します(上の欄に日付が入ります)';
+      plus.setAttribute('aria-label', 'この日の予定を足す');
+      plus.title = 'この日の予定を足します(上の欄に日付が入ります)';
       head.append(plus);
     }
     const host = document.createElement('div');
@@ -883,7 +951,22 @@ export class ScheduleRenderer {
         title,
       }),
     );
-    modeRow.append(...modes);
+    /**
+     * 🔴 **週の始まり**(#1163 の依頼 191)。「週」と「月」と小さな月の並びが変わる(日付・予定は変わらない)。
+     * ⚠ 口は字で書く(`tests/action-outlets.test.ts` が静的に追う)。保存は端末の好み ── `schedule-week-start.ts`。
+     */
+    const weekStartSel = document.createElement('select');
+    weekStartSel.setAttribute('data-pkc-field', 'schedule-week-start');
+    weekStartSel.setAttribute('data-pkc-action', 'set-schedule-week-start');
+    weekStartSel.setAttribute('aria-label', '週の始まり');
+    weekStartSel.title = '週と月の並びを、日曜から始めるか月曜から始めるかを選びます(日付や予定は変わりません)';
+    for (const n of WEEK_START_OPTIONS) {
+      const o = document.createElement('option');
+      o.value = String(n);
+      o.textContent = weekStartLabel(n);
+      weekStartSel.append(o);
+    }
+    modeRow.append(...modes, weekStartSel);
     /**
      * 🔴 **予定の面から、その場でやることを足す**(#402 ②)。
      *
@@ -902,14 +985,15 @@ export class ScheduleRenderer {
     const qText = document.createElement('input');
     qText.type = 'text';
     qText.setAttribute('data-pkc-field', 'schedule-quick-text');
-    qText.placeholder = 'やること';
-    qText.setAttribute('aria-label', '足すやること');
+    // 🔴 欄・ボタン・断り文の呼び名を「予定」にそろえた(#1163 の依頼 57-3。以前は「やること」「予定を足す」「予定の字」の 3 通り)
+    qText.placeholder = '予定(例: 打ち合わせ)';
+    qText.setAttribute('aria-label', '足す予定');
     const qDate = document.createElement('input');
     qDate.type = 'date';
     qDate.setAttribute('data-pkc-field', 'schedule-quick-date');
     // 🔴 押すと、本文に日付を差すときと同じ近道つきの選び方が開く(#1635 項 2)
     qDate.setAttribute('data-pkc-action', 'schedule-pick-date');
-    qDate.setAttribute('aria-label', 'いつのやること');
+    qDate.setAttribute('aria-label', 'いつの予定');
     /**
      * 🔴 **最初から今日を入れておく**(#499。user 指摘 2026-08-28
      * 「**カレンダー表示してるのに、「足す」のところにもカレンダーインプットが
@@ -930,6 +1014,16 @@ export class ScheduleRenderer {
       this.now().getMonth() + 1,
       this.now().getDate(),
     );
+    /**
+     * 🔴 **時刻の欄**(#1163 の依頼 57-4。Gemini の裁定:推薦どおり = 空けておける時刻の欄を足す)。
+     * ⚠ 直す前は「打ち合わせ 14:00」と打っても 14:00 は題名の一部になり、時刻として読まれなかった(音も鳴らない)。
+     *   字の中の時刻を推し量らず、欄で選ぶ。空のままなら終日(これまでどおり)。
+     */
+    const qTime = document.createElement('input');
+    qTime.type = 'time';
+    qTime.setAttribute('data-pkc-field', 'schedule-quick-time');
+    qTime.setAttribute('aria-label', '予定の時刻(空なら終日)');
+    qTime.title = '時刻を選ぶと、その時刻の予定になります(空のままなら終日です。日付も選んでください)';
     const qAdd = document.createElement('button');
     qAdd.type = 'button';
     qAdd.setAttribute('data-pkc-action', 'schedule-quick-add');
@@ -938,7 +1032,7 @@ export class ScheduleRenderer {
     //    何を決めているのかが読めないと、「足したのに出てこない」になる
     qAdd.title =
       '今日のノートの末尾に、チェック項目として書きます。左の日付の日に出ます(空にすると日付なしで足します)';
-    quick.append(qText, qDate, qAdd);
+    quick.append(qText, qDate, qTime, qAdd);
     const grid = document.createElement('div');
     grid.setAttribute('data-pkc-field', 'schedule-grid');
     const note = document.createElement('p');
@@ -1072,7 +1166,7 @@ export class ScheduleRenderer {
     this.week.el.hidden = true;
     this.monthView.el.hidden = true;
     this.region.append(bar, modeRow, quick, grid, note, clearFilter, toggles, exportIcs, notify, this.day.el, this.week.el, this.monthView.el, groups);
-    this.frame = { month, grid, note, clearFilter, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', lead, missed, toggles, groups, modes, quickDate: qDate };
+    this.frame = { month, grid, note, clearFilter, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', lead, missed, toggles, groups, modes, quickDate: qDate, weekStart: weekStartSel };
     return this.frame;
   }
 }

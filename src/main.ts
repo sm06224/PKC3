@@ -352,9 +352,12 @@ import { asrReadyFrom, createCaptureTranscriber } from '@adapter/ui/actions/capt
 import { writeBackEntry } from '@adapter/ui/actions/write-back';
 import { createTimerService } from '@adapter/ui/actions/timer';
 import { ALARM_SCAN_FAILED_TEXT, createAlarmService } from '@adapter/ui/actions/alarm';
+import { ALARM_BAR_CHANNEL, createAlarmBarSync, type AlarmBarSync } from '@adapter/platform/alarm-bar-sync';
+import type { AlarmDue } from '@features/alarm/alarm-due';
 import { onHeldChange } from '@adapter/ui/actions/writable-queue';
 import { startMissedWatch } from '@adapter/ui/actions/missed-schedule';
 import { appScheduleNotify } from '@adapter/ui/render/schedule-notify';
+import { appScheduleWeekStart } from '@adapter/ui/render/schedule-week-start';
 import { createChime } from '@adapter/platform/chime';
 import { appAlarmEnabled } from '@adapter/ui/render/alarm-enabled';
 import { appVoiceBoost, appVoiceBoostRouter } from '@adapter/ui/render/voice-boost';
@@ -462,6 +465,7 @@ import {
   openNoteWindowUrl,
   openViewInWindow,
   openViewWindowUrl,
+  promotedLine,
   VIEW_WINDOW_OPENING,
   waitForViewWindow,
 } from '@adapter/platform/view-window';
@@ -1975,7 +1979,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const announceWeek = (): void => {
     const st = dispatcher.getState();
     scheduleRegistry.announce(
-      weekAnnounceKey(heldViewWindow, st.scheduleMode, st.scheduleDay, todayKey(), st.calendarMonth ?? null),
+      weekAnnounceKey(
+        heldViewWindow,
+        st.scheduleMode,
+        st.scheduleDay,
+        todayKey(),
+        st.calendarMonth ?? null,
+        appScheduleWeekStart.get(),
+      ),
     );
   };
   dispatcher.onState(() => {
@@ -2601,7 +2612,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           });
         }
         syncLine = '';
-        showStatus('このタブがメインのタブになりました');
+        showStatus(promotedLine(heldViewWindow !== null || heldNoteWindow));
         paint();
       } catch (e) {
         // 🔴 帯の常設も嘘のまま残さない(レビュー H-2)── 「本体経由」はもう成立していない
@@ -3546,13 +3557,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   その場から効かせるため。数えるのは `REFRESH_TASK_SCAN` の側である。
    */
   const alarmChime = createChime();
+  /** 帯を描く(本体の鳴った一覧も、ほかのウィンドウから届いた一覧も同じ口 ── 帯の描き方を 2 つ持たない)。 */
+  const showAlarmBar = (due: readonly AlarmDue[]): void => {
+    paintAlarmBar(root, due);
+    // 🔔 見えていないタブでは、題名でも知らせる(開いたら外す ── 下の visibilitychange)
+    alarmBell = due.length > 0 && document.visibilityState === 'hidden';
+    paintTitle();
+  };
+  // ⚠ 下の `alarmService` が先に建つので箱だけ先に置く(建った後で埋める。`start()` より前に埋まる)
+  let alarmBarSync: AlarmBarSync | null = null;
   const alarmService = createAlarmService({
     dispatcher,
     onChange: (due) => {
-      paintAlarmBar(root, due);
-      // 🔔 見えていないタブでは、題名でも知らせる(開いたら外す ── 下の visibilitychange)
-      alarmBell = due.length > 0 && document.visibilityState === 'hidden';
-      paintTitle();
+      showAlarmBar(due);
+      // 🔴 帯は全部のウィンドウに出す(音は本体だけ ── #1163 の依頼 347)
+      alarmBarSync?.publish(due);
     },
     chime: alarmChime,
     enabled: () => appAlarmEnabled.enabled(),
@@ -3567,6 +3586,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         appMessagePost.post({ kind: 'result', source: 'schedule', text });
       }
     },
+  });
+  alarmBarSync = createAlarmBarSync({
+    channel:
+      typeof BroadcastChannel === 'function'
+        ? new BroadcastChannel(portable ? `${ALARM_BAR_CHANNEL}:${portable.bundle.id}` : ALARM_BAR_CHANNEL)
+        : null,
+    id: makeViewWindowToken(),
+    isRinger: () => writerHolder,
+    ringing: () => alarmService.ringing(),
+    dismiss: (key) => alarmService.dismiss(key),
+    dismissAll: () => alarmService.dismissAll(),
+    paint: showAlarmBar,
   });
   alarmService.start();
   document.addEventListener('visibilitychange', () => {
@@ -3778,7 +3809,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     stopTimer: (lid) => timerService.stop(lid),
     discardTimer: (lid) => timerService.discard(lid),
     // 🔴 アラート(#280)── 鳴った知らせを片付ける
-    dismissAlarm: (key) => alarmService.dismiss(key),
+    dismissAlarm: (key) => alarmBarSync?.dismiss(key),
     /**
      * 🔴 **狭い画面の断り書きを出すか**(#687 E-1)── 帯の OK で切れた user の戻し道。
      * ⚠ 塗り直しは `installTooNarrow` が store を購読して受ける(ここで帯を触らない)。
@@ -3812,7 +3843,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔴 切入の直後に 1 度見る(#1087)── 入にした時刻から見る / 切にしたら見た位置を忘れる。次の刻み(最大 30 秒)を待たない
       alarmService.check();
       if (!on) {
-        alarmService.dismissAll();
+        alarmBarSync?.dismissAll();
         return;
       }
       dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
@@ -5226,7 +5257,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔴 同じ週の窓が開いているなら、開かずに前に出す(#855)── 判断は `openOrRaiseWeekWindow`
       void openOrRaiseWeekWindow({
         // 🔑 週は週の最初の日、月は今月で台帳を引く(新しく開く月の窓は今月から始まる)
-        key: mode === 'week' ? weekWindowKey(day, todayKey()) : monthWindowKey(null, todayKey()),
+        key:
+          mode === 'week'
+            ? weekWindowKey(day, todayKey(), appScheduleWeekStart.get())
+            : monthWindowKey(null, todayKey()),
         whereIs: (k) => scheduleRegistry.whereIs(k),
         raise: (k) => scheduleRegistry.raise(k),
         reserve: (k) => scheduleRegistry.reserve(k),

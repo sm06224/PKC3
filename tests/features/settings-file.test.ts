@@ -230,6 +230,7 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
       'pkc3.alarm': '1',
       'pkc3.schedule-lead': '30',
       'pkc3.schedule-missed': '0',
+      'pkc3.schedule-week-start': '1',
       'pkc3.voice-boost': '1',
       'pkc3.voice-level': '1',
       'pkc3.voice-crossfeed': '0',

@@ -114,9 +114,10 @@ describe('S4:空白・ASCII ~ を挟んだ幅', () => {
       expect(r.timeEnd).toBeNull();
       expect(stripLineDate('@2026-10-20 14:00 - 会議')).toBe('- 会議');
     });
-    it('逆順の幅は幅にしない', () => {
+    // ⚠ 2026-10-17(#1163 依頼 190): 終わりが始まりより前なら、日をまたぐ幅として読む(`22:00..02:00`)
+    it('逆順の幅は、日をまたぐ幅として読む', () => {
       const r = readLineDate('@2026-10-20 15:00 - 14:00')!;
-      expect(r.timeEnd).toBeNull();
+      expect(r.timeEnd).toBe('14:00');
       expect(r.time).toBe('15:00');
     });
     it('日付のあとの 〜 の後ろが日付でなければ、日付だけを読む(落とさない)', () => {

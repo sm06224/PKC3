@@ -20,7 +20,7 @@ import { APPEND_BUSY_NOTE } from '../../src/adapter/state/app-state';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { ScheduleRenderer } from '../../src/adapter/ui/render/schedule';
-import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
+import { bindActions, scheduleAddedNotice, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { todayNoteTitle } from '../../src/features/schedule/today-note';
 import { taskCardsOf } from '../../src/features/schedule/task-cards';
@@ -172,7 +172,7 @@ describe('#402 ② 予定の面から足す', () => {
     type(s, '   ', '2026-08-28');
     s.q('[data-pkc-action="schedule-quick-add"]')!.click();
     await tick();
-    expect(s.d.getState().error ?? '', '無言で終わった').toContain('やることを入力');
+    expect(s.d.getState().error ?? '', '無言で終わった').toContain('予定を入力');
     expect(s.disk['t1'], '断ったのに書いた').toBe('メモ\n');
   });
 
@@ -419,53 +419,122 @@ describe('#1087 予定の足す欄の Enter', () => {
   });
 });
 
-describe('日付なしで足したときの知らせ', () => {
-  const NOTE = '日付なしで足しました(「出すもの」で「日付のないもの」を選ぶと見られます)';
+describe('足したときの知らせ(台帳 #1852 束 E2、依頼 57-5 / 100-4)', () => {
   const add = async (s: ReturnType<typeof setup>): Promise<void> => {
     s.q('[data-pkc-action="schedule-quick-add"]')!.click();
     await tick();
   };
 
-  it('🔴 日付を空にして足すと、見えない理由を 1 行言う', async () => {
-    const said: string[] = [];
-    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' }, undefined, {
-      showStatus: (t) => void said.push(t),
-    });
+  it('🔴 日付つきで足すと、どの字をどのノートへ足したかを言い、「元に戻す」の材料(open)が付く', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
+    await tick();
+    type(s, 'きょうやる', '2026-08-28');
+    await add(s);
+    expect(s.disk['t1']).toContain('- [ ] きょうやる @2026-08-28');
+    const st = s.d.getState();
+    expect(st.notice).toBe(`『きょうやる』を今日のノート(${TODAY})に足しました`);
+    // 戻す口は本文への追記と同じ 1 本(知らせの身元 = 足したノート / 戻す材料 = lastAppend)
+    expect(st.noticeOpen, '知らせに足したノートの身元が無い(「元に戻す」が出ない)').toBe('t1');
+    expect(st.lastAppend?.lid).toBe('t1');
+  });
+
+  it('🔴 「元に戻す」(UNDO_APPEND)で、足した行が本文から消える(片道にしない)', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
+    await tick();
+    type(s, '間違えた', '2026-08-28');
+    await add(s);
+    expect(s.disk['t1']).toContain('- [ ] 間違えた @2026-08-28');
+    s.d.dispatch({ type: 'UNDO_APPEND' });
+    await tick(50);
+    expect(s.disk['t1'], '足した行が残っている').not.toContain('間違えた');
+    expect(s.disk['t1']).toContain('メモ');
+  });
+
+  it('🔴 日付を空にして足すと、見えない理由も同じ 1 行で言う(別の知らせで上書きして「元に戻す」を消さない)', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
     await tick();
     type(s, 'あとでやる'); // 日付を空にする
     await add(s);
     expect(s.disk['t1']).toContain('- [ ] あとでやる');
-    expect(said).toEqual([NOTE]);
+    expect(s.d.getState().notice).toBe(
+      `『あとでやる』を今日のノート(${TODAY})に日付なしで足しました(「出すもの」で「日付のないもの」を選ぶと見られます)`,
+    );
+    expect(s.d.getState().noticeOpen).toBe('t1');
   });
 
-  it('⚠ 対照群:日付つきで足したときは言わない', async () => {
-    const said: string[] = [];
-    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' }, undefined, {
-      showStatus: (t) => void said.push(t),
-    });
-    await tick();
-    type(s, 'きょうやる', '2026-08-28');
-    await add(s);
-    expect(s.disk['t1']).toContain(`- [ ] きょうやる @2026-08-28`);
-    expect(said).toEqual([]);
-  });
-
-  it('⚠ 対照群:「日付のないもの」を出しているなら言わない / 足せなかった回も言わない', async () => {
-    const said: string[] = [];
-    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' }, undefined, {
-      showStatus: (t) => void said.push(t),
-    });
+  it('⚠ 対照群:「日付のないもの」を出しているなら、見えない理由は言わない(足したことは言う)', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
     await tick();
     s.d.dispatch({ type: 'TOGGLE_SHOW_UNDATED_TASKS' });
-    expect(s.d.getState().showUndatedTasks, '前提:日付のないものが出ていない').toBe(true);
+    expect(s.d.getState().showUndatedTasks, '前提:日付のないものが出ている').toBe(true);
     type(s, 'みえている');
     await add(s);
-    expect(s.disk['t1']).toContain('- [ ] みえている');
-    expect(said).toEqual([]);
+    expect(s.d.getState().notice).toBe(`『みえている』を今日のノート(${TODAY})に日付なしで足しました`);
     s.d.dispatch({ type: 'TOGGLE_SHOW_UNDATED_TASKS' });
     type(s, ''); // 字が空 = 足せない
+    const before = s.d.getState().notice;
     await add(s);
-    expect(said, '足せなかったのに「足しました」と言った').toEqual([]);
+    expect(s.d.getState().notice, '足せなかったのに「足しました」と言った').toBe(before);
+  });
+
+  it('長い字は丸めて言う(知らせが 1 行を超えない)', () => {
+    expect(scheduleAddedNotice('あ'.repeat(30), '2026-10-17', false, false)).toBe(
+      `『${'あ'.repeat(23)}…』を今日のノート(2026-10-17)に足しました`,
+    );
+    expect(scheduleAddedNotice('短い', '2026-10-17', false, false)).toBe('『短い』を今日のノート(2026-10-17)に足しました');
+  });
+});
+
+describe('時刻の欄(台帳 #1852 束 E2、依頼 57-4)', () => {
+  const add = async (s: ReturnType<typeof setup>): Promise<void> => {
+    s.q('[data-pkc-action="schedule-quick-add"]')!.click();
+    await tick();
+  };
+  const typeTime = (s: ReturnType<typeof setup>, time: string): void => {
+    s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-time"]')!.value = time;
+  };
+
+  it('🔴 時刻を選ぶと、その時刻の予定として書かれ、欄は空に戻る(次の予定に時刻を持ち越さない)', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
+    await tick();
+    type(s, '打ち合わせ', '2026-08-28');
+    typeTime(s, '14:00');
+    await add(s);
+    expect(s.disk['t1']).toContain('- [ ] 打ち合わせ @2026-08-28 14:00');
+    expect(s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-time"]')!.value).toBe('');
+  });
+
+  it('⚠ 対照群:時刻が空なら終日(これまでどおり)', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
+    await tick();
+    type(s, '終日のやつ', '2026-08-28');
+    await add(s);
+    expect(s.disk['t1']).toContain('- [ ] 終日のやつ @2026-08-28\n');
+  });
+
+  it('🔴 日付が空で時刻だけあるときは、黙って捨てず断る(字も時刻も残す)', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
+    await tick();
+    type(s, '日付なし時刻あり');
+    typeTime(s, '09:30');
+    await add(s);
+    expect(s.disk['t1'], '書いてしまった').toBe('メモ\n');
+    expect(s.d.getState().error ?? '').toContain('日付も選んでください');
+    expect(s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!.value).toBe('日付なし時刻あり');
+    expect(s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-time"]')!.value).toBe('09:30');
+  });
+
+  it('欄の名前は「予定」にそろっている(入力欄の見本・読み上げの名前・断り文 ── 依頼 57-3)', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
+    await tick();
+    const text = s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!;
+    expect(text.placeholder).toBe('予定(例: 打ち合わせ)');
+    expect(text.getAttribute('aria-label')).toBe('足す予定');
+    expect(s.q('[data-pkc-field="schedule-quick-date"]')!.getAttribute('aria-label')).toBe('いつの予定');
+    expect(s.q('[data-pkc-field="schedule-quick-time"]')!.getAttribute('aria-label')).toContain('時刻');
+    type(s, '');
+    await add(s);
+    expect(s.d.getState().error ?? '').toContain('予定を入力してください');
   });
 });
 

@@ -7912,11 +7912,13 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='schedule-quick'] {
   display: flex;
   align-items: center;
+  /* 時刻の欄を足したので、狭い左の列では折り返す(#1163 の依頼 57-4) */
+  flex-wrap: wrap;
   gap: var(--s1);
   margin-top: var(--s1);
 }
 [data-pkc-field='schedule-quick-text'] {
-  flex: 1 1 auto;
+  flex: 1 1 10em;
   min-width: 0;
 }
 

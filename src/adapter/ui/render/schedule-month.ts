@@ -23,11 +23,10 @@
  */
 import type { AgendaItem } from '@features/schedule/agenda';
 import { getMonthGrid, dateKey } from '@features/schedule/month-grid';
+import { weekdayHeads, type WeekStart } from '@features/schedule/week-start';
 import { holidayName } from '@features/schedule/jp-holidays';
 import { moreLabel, pickCellItems } from '@features/schedule/month-cells';
 import { createTaskCard, patchItemColor, patchTaskCard, placeCardInGrid } from './task-card';
-
-const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
 export interface MonthPaint {
   readonly year: number;
@@ -39,6 +38,8 @@ export interface MonthPaint {
   readonly titleOf: (lid: string) => string;
   readonly selectedLid: string | null;
   readonly thisYear: number;
+  /** 🔴 週の始まり(#1163 の依頼 191)。 */
+  readonly weekStart: WeekStart;
 }
 
 interface Cell {
@@ -57,6 +58,9 @@ export class ScheduleMonth {
   private readonly cells = new Map<string, Cell>();
   private readonly cards = new Map<string, { card: HTMLElement; data: AgendaItem }>();
   private shownMonth: string | null = null;
+  private readonly weekdays: HTMLElement;
+  /** 曜日の見出しを組んだときの週の始まり(`null` = まだ組んでいない)。 */
+  private headWeekStart: WeekStart | null = null;
 
   constructor(dropAttr: string) {
     this.dropAttr = dropAttr;
@@ -88,12 +92,7 @@ export class ScheduleMonth {
 
     const weekdays = document.createElement('div');
     weekdays.setAttribute('data-pkc-field', 'schedule-monthview-weekdays');
-    WEEKDAYS.forEach((w, i) => {
-      const s = document.createElement('span');
-      s.textContent = w;
-      if (i === 0 || i === 6) s.setAttribute('data-pkc-weekend', '');
-      weekdays.append(s);
-    });
+    this.weekdays = weekdays;
     this.body = document.createElement('div');
     this.body.setAttribute('data-pkc-field', 'schedule-monthview-body');
     el.append(head, weekdays, this.body);
@@ -141,11 +140,23 @@ export class ScheduleMonth {
     const { year, month } = p;
     const label = `${year}年${month}月`;
     if (this.label.textContent !== label) this.label.textContent = label;
-    const monthKey = `${year}-${month}`;
+    // 🔴 週の始まりが変わったら、曜日の見出しと升の並びを組み直す(#1163 の依頼 191)
+    const monthKey = `${year}-${month}-${p.weekStart}`;
     const rebuild = this.shownMonth !== monthKey;
     this.shownMonth = monthKey;
+    if (this.headWeekStart !== p.weekStart) {
+      this.headWeekStart = p.weekStart;
+      this.weekdays.textContent = '';
+      for (const w of weekdayHeads(p.weekStart)) {
+        const s = document.createElement('span');
+        s.textContent = w.label;
+        // ⚠ 土日は並びの位置ではなく曜日で決める(月曜始まりでも土日が沈む)
+        if (w.dow === 0 || w.dow === 6) s.setAttribute('data-pkc-weekend', '');
+        this.weekdays.append(s);
+      }
+    }
 
-    const weeks = getMonthGrid(year, month);
+    const weeks = getMonthGrid(year, month, p.weekStart);
     const days: string[] = [];
     for (const w of weeks) for (const d of w) if (d !== null) days.push(dateKey(year, month, d));
     // 別の月へ移ったら、使わない升を捨てる
