@@ -501,6 +501,22 @@ export function buildShell(root: HTMLElement): ShellRegions {
   findBar.append(sort);
 
   /**
+   * 🔴 **並びの向きを逆にするボタン**(依頼 198。Gemini 回答 = 左のペインにも足す)。
+   * 2 ペインは列見出しを押すと逆になる ── 左の列には見出しが無いので、並び順の欄の隣に置く。
+   * ⚠ 「自分で並べた順」には向きが無い ── そのときは押せない(`browse.ts` が state に合わせる)。
+   */
+  const reverse = document.createElement('button');
+  reverse.type = 'button';
+  reverse.setAttribute('data-pkc-action', 'toggle-entry-sort-desc');
+  reverse.setAttribute('data-pkc-glyph', '');
+  reverse.setAttribute('data-pkc-field', 'entry-sort-reverse');
+  reverse.setAttribute('aria-label', '並びの向きを逆にする');
+  reverse.title = '並びの向きを逆にします(新しい順と古い順など)。「自分で並べた順」では使えません';
+  reverse.textContent = '⇅';
+  reverse.disabled = true;
+  findBar.append(reverse);
+
+  /**
    * 🔴 **種類で絞る札**(#411 / 台帳 #180)。中身は state から描く
    * (`SidebarPresenter`)── ここは**器だけ**置く。
    *

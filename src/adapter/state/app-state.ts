@@ -1841,6 +1841,18 @@ export interface AppState {
    */
   openedAt: ReadonlyMap<string, number>;
   /**
+   * 🔴 **一覧が「最近開いた順」を並べるときに読む記録**(依頼 274 / 334。Gemini 裁定 = B)。
+   *
+   * ⚠ `openedAt` は**開いた瞬間に動く**。それをそのまま一覧の並びに使うと、
+   *   ①画面の行は動かないのに(押した行が跳ぶのを防ぐため描き直さない)
+   *   ②↑↓ と Shift+クリックだけが「開いた後の並び」で数える、という食い違いが出る。
+   * 🔑 だから**並びの材料は 1 本に寄せる**:この写しを一覧の描画・範囲選択・↑↓ の
+   *   全員が読み、写しを更新するのは「一覧の見え方が変わるとき」(絞り込み・種類の札・
+   *   並び順・フォルダの移動・平らにする・本文の当たり)と、記録を消したとき・起動時だけ。
+   *   ノートを開いただけでは更新しない(`reduce` の `settleOpenedOrder`)。
+   */
+  openedAtShown: ReadonlyMap<string, number>;
+  /**
    * `searchHits` が**どの問い合わせの結果か**。⚠ これが無いと、遅れて返った
    * 古い結果を新しい問い合わせの答えとして表示してしまう(打鍵は結果より速い)。
    */
@@ -2281,6 +2293,7 @@ export const initialState: AppState = {
   entrySortDesc: NATURAL_DESC[DEFAULT_ENTRY_SORT],
   // ⚠ 空の Map を**使い回さない**(凍らせていないので、誰かが書くと全部に効く)
   openedAt: new Map<string, number>(),
+  openedAtShown: new Map<string, number>(),
   searchHitsQuery: '',
   searchHitsTruncated: false,
   searchHitsFailed: false,
@@ -2612,7 +2625,15 @@ export type UserAction =
    * 最近開いた記録が入れ替わった(#215 残り①)。
    * ⚠ **時刻は呼び側(effect)が読む** ── reducer は純粋なので `Date.now()` を持たない。
    */
-  | { type: 'SET_OPENED_AT'; openedAt: ReadonlyMap<string, number> }
+  | {
+      type: 'SET_OPENED_AT';
+      openedAt: ReadonlyMap<string, number>;
+      /**
+       * 真 = 「ノートを開いたので足した」。一覧の並びは**動かさない**(依頼 274)。
+       * 省略 = 起動時・記録を消したとき ── 一覧の並びにも反映する。
+       */
+      keepListOrder?: boolean;
+    }
   /** 一覧の並び順を変える(#183)。⚠ 選択は消さない(絞り込みと同じ規約)。 */
   | {
       type: 'SET_ENTRY_SORT';
@@ -4622,15 +4643,39 @@ function startSearchJumpFromField(action: Dispatchable, result: ReduceResult): R
 /** `reduce` の入れ子の深さ。⚠ 内側の `reduce`(グループ作成の中のノート作成など)と外側を見分けるための物。 */
 let reduceDepth = 0;
 
+/**
+ * 🔴 **一覧の見え方が変わったときだけ、「最近開いた順」の材料を最新にする**(依頼 274 / 334)。
+ *
+ * ⚠ ノートを開くたびに写しを更新すると、押した行がその場で先頭へ跳ぶ(続けて隣を押そうと
+ *   して押し間違える)。逆に写しを一度も更新しないと、並びが永久に古い。
+ * 🔑 読み手(一覧の描画・範囲選択・↑↓)は全員 `openedAtShown` を読むので、更新の時機を
+ *   ここ 1 か所に置けば、見えている並びと動く並びが食い違わない。
+ */
+function settleOpenedOrder(prev: AppState, result: ReduceResult): ReduceResult {
+  const s = result.state;
+  if (s.openedAtShown === s.openedAt) return result;
+  const listChanged =
+    s.scopeLid !== prev.scopeLid ||
+    s.filterQuery !== prev.filterQuery ||
+    s.kindFilter !== prev.kindFilter ||
+    s.entrySort !== prev.entrySort ||
+    s.entrySortDesc !== prev.entrySortDesc ||
+    s.filerFlatten !== prev.filerFlatten ||
+    s.searchHits !== prev.searchHits ||
+    s.smartHits !== prev.smartHits;
+  if (!listChanged) return result;
+  return { ...result, state: { ...s, openedAtShown: s.openedAt } };
+}
+
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
   reduceDepth++;
   try {
-    const r = dropStaleSearchJump(
+    const r = settleOpenedOrder(state, dropStaleSearchJump(
       startSearchJumpFromField(
         action,
         guardSectionDraftTransition(state, action, reduceWithHistory(state, action)),
       ),
-    );
+    ));
     // 🔑 追随は**一番外側の 1 回だけ**(内側の `reduce` ごとに撃つと、同じ読みが何本も積まれる)
     return reduceDepth === 1 ? followLauncherTiles(state, r) : r;
   } finally {
@@ -5284,9 +5329,19 @@ function reduceCore(
             break;
           }
         }
-        if (same) return { state, events: [] };
+        if (same && (action.keepListOrder === true || state.openedAtShown === now))
+          return { state, events: [] };
+        if (same) return { state: { ...state, openedAtShown: now }, events: [] };
       }
-      return { state: { ...state, openedAt: action.openedAt }, events: [] };
+      return {
+        state: {
+          ...state,
+          openedAt: action.openedAt,
+          // ⚠ 開いただけでは一覧の並びを動かさない(`openedAtShown` の注記)
+          openedAtShown: action.keepListOrder === true ? state.openedAtShown : action.openedAt,
+        },
+        events: [],
+      };
     }
     case 'SET_ENTRY_SORT': {
       // ⚠ 選択は消さない ── 並び替えただけで開いているノートが変わると驚く

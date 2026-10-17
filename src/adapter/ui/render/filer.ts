@@ -129,6 +129,8 @@ export class FilerRenderer {
   private lastKinds: ReadonlySet<string> | null = null;
   /** ⚠ 並び順と本文検索の当たりも指紋(着地前レビュー 3 ── 入れないと死んだ操作子になる)。 */
   private lastSort: AppState['entrySort'] | null = null;
+  /** 「最近開いた順」の材料の写し(依頼 274 / 334)。変わったときだけ並べ直す。 */
+  private lastOpenedShown: AppState['openedAtShown'] | null = null;
   /** ⚠ 向きも指紋(2 ペイン側で実際に踏んだ ── 同型なのでこちらも入れる)。 */
   private lastSortDesc: boolean | null = null;
   /**
@@ -1078,6 +1080,8 @@ export class FilerRenderer {
       state.kindFilter !== this.lastKinds ||
       state.entrySort !== this.lastSort ||
       state.entrySortDesc !== this.lastSortDesc ||
+      // 🔴 並べ直しの時機は reducer が決める(`settleOpenedOrder`)── 開いただけでは変わらない
+      (state.entrySort === 'opened' && state.openedAtShown !== this.lastOpenedShown) ||
       state.filerFlatten !== this.lastFlatten ||
       state.searchHits !== this.lastHits ||
       /**
@@ -1186,6 +1190,7 @@ export class FilerRenderer {
     this.lastKinds = state.kindFilter;
     this.lastSort = state.entrySort;
     this.lastSortDesc = state.entrySortDesc;
+    this.lastOpenedShown = state.openedAtShown;
     this.lastFlatten = state.filerFlatten;
     this.lastHits = state.searchHits;
     this.lastSmartHits = state.smartHits;

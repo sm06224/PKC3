@@ -274,7 +274,8 @@ describe('絞りが全部の面に届いている', () => {
     const src = readFileSync('src/adapter/state/list-view-options.ts', 'utf8');
     for (const [field, from] of [
       ['kinds', 'state.kindFilter'],
-      ['openedAt', 'state.openedAt'],
+      // 🔴 依頼 274 / 334: 開いた直後の記録(`openedAt`)ではなく、一覧が並べ直した時点の写し
+      ['openedAt', 'state.openedAtShown'],
       ['sort', 'state.entrySort'],
       ['sortDesc', 'state.entrySortDesc'],
     ])

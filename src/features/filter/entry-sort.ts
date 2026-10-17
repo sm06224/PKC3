@@ -9,7 +9,11 @@
  * 既定は手動の順(`entry_order`)で、これはその上に載る「見え方」である。
  */
 import type { EntryMeta } from '@core/model/entry-meta';
+import { ARCHETYPE_LABELS } from '@features/flavor/archetype-label';
 import { compareTitles } from './title-compare';
+
+/** 種類の札の並び(= `ARCHETYPE_LABELS`)。知らない綴りは末尾。 */
+const KIND_RANK: ReadonlyMap<string, number> = new Map(ARCHETYPE_LABELS.map(([name], i) => [name, i]));
 
 /**
  * ⚠ **`opened`(最近開いた順)だけは `EntryMeta` から引けない**(#215 残り①)──
@@ -68,6 +72,27 @@ export function sortOrder(
 ): string[] {
   if (sort === 'manual') return [...order];
   /**
+   * 🔴 **種類順**(依頼 193 / 275。Gemini 裁定 = 275 の A)。
+   * 種類の**札の並び**(ノート → ログ → 表 → フォルダ …)で並べ、**同じ種類の中は
+   * 「自分で並べた順」**(= 渡された `order` の順)のまま。知らない綴りは末尾で綴り順。
+   * ⚠ 同点を lid で割らない ── 割ると手で並べた順が壊れる。向き(`desc`)は種類の並びだけを
+   *   逆にし、種類の中は手で並べた順のまま(行が lid 順に化けない)。
+   */
+  if (sort === 'archetype') {
+    const rank = (lid: string): readonly [number, string] => {
+      const a = metaOf(lid)?.archetype;
+      return a === undefined ? [KIND_RANK.size + 1, ''] : [KIND_RANK.get(a) ?? KIND_RANK.size, a];
+    };
+    const pos = new Map(order.map((lid, i) => [lid, i]));
+    return [...order].sort((a, b) => {
+      const [ra, sa] = rank(a);
+      const [rb, sb] = rank(b);
+      if (ra !== rb) return desc ? rb - ra : ra - rb;
+      if (sa !== sb) return desc ? sb.localeCompare(sa) : sa.localeCompare(sb);
+      return (pos.get(a) ?? 0) - (pos.get(b) ?? 0);
+    });
+  }
+  /**
    * ⚠ **鍵の型は並びごとに 1 つ**(文字か数のどちらか)── 混ぜると比較が
    *   実行のたびに違う答えを返す。`size` だけが数で、他は全部文字である。
    */
@@ -85,7 +110,6 @@ export function sortOrder(
     }
     if (!m) return '￿'; // 未知は末尾
     if (sort === 'title') return m.title;
-    if (sort === 'archetype') return m.archetype;
     // created: 作った時刻(ISO / sqlite の字 ── どちらも辞書順 = 時刻順)。無いノートは最後へ回す
     if (sort === 'created') return m.createdAt ?? '';
     return m.updatedAt ?? ''; // updated: 時刻文字列(ISO なので辞書順 = 時刻順)

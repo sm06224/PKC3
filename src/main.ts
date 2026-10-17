@@ -36,6 +36,7 @@ import { DuckDbRunner } from '@adapter/platform/duckdb/duckdb-runner';
 import { openDuckDb } from '@adapter/platform/duckdb/duckdb-open';
 import { DuckDbPackStore } from '@adapter/platform/duckdb/duckdb-pack-store';
 import { connectOpenedEffects } from '@adapter/platform/opened-effects';
+import { connectEntrySortMemory } from '@adapter/platform/entry-sort-effects';
 import { appOpenedStore } from '@adapter/platform/opened-store';
 import { isRegisteredApp, tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
@@ -5819,6 +5820,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   if (appFilerFlatten.enabled()) {
     dispatcher.dispatch({ type: 'SET_FILER_FLATTEN', on: true });
   }
+  // 🔴 一覧の並び順も同じ作法(依頼 82-3)。憶えた並びを写し、以後は変わるたびに憶える
+  connectEntrySortMemory(dispatcher);
   /**
    * 🔴 **編集中の字を端末に控え、次に開いたとき戻せるようにする**(#1376)。
    *
