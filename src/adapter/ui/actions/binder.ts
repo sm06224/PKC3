@@ -136,7 +136,8 @@ import {
   visibleSelection,
 } from '@features/relation/filer-list';
 import { archetypeLabel } from '@features/flavor/archetype-label';
-import { HIDDEN_HEAD_ATTR, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
+import { HIDDEN_HEAD_ATTR, foldAttachmentHead, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
+import { countMatches } from '@features/markdown/body-replace';
 import { SMART_ARCHETYPE, SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
 import {
   buildSettingsFile as buildSettingsFileData,
@@ -5308,6 +5309,31 @@ function refuseTrashEditedElsewhere(
 }
 
 /** 何もしない口。⚠ 打鍵ではないので「既定を止める」相手がいない。 */
+/**
+ * 🔴 **置換の帯に、当たる件数を出す**(#1646 の 2。Gemini 裁定 = #1163 の依頼 40 の推薦どおり A)。
+ *
+ * ⚠ 数えるのは「すべて置換」と**同じ本文・同じ規則**(`countMatches` ── 置換と同じ `findHits` を通る。添付ノートは
+ *   畳んだ設定の行を外した見える本文だけ)。食い違うと「3 件」と出て 2 件しか置き換わらない嘘になる。
+ * ⚠ 出さない場面は空にする ── 編集中でない / 探す語が空(「0 件」ではなく、まだ何も探していない)。
+ */
+function paintReplaceCount(root: HTMLElement, dispatcher: Dispatcher): void {
+  const out = root.querySelector<HTMLElement>('[data-pkc-field="replace-count"]');
+  if (out === null) return;
+  const st = dispatcher.getState();
+  const find = root.querySelector<HTMLInputElement>('[data-pkc-field="replace-find"]')?.value ?? '';
+  let text = '';
+  if (st.phase === 'editing' && st.openBody !== null && find !== '') {
+    // ⚠ 切り方は reducer の `REPLACE_IN_BODY` と同じ(畳めない本文は全部)
+    const fold =
+      st.entryMetas.get(st.openBody.lid)?.archetype === 'attachment' ? foldAttachmentHead(st.openBody.body) : null;
+    const body = fold === null ? st.openBody.body : fold.rest;
+    const caseSensitive =
+      root.querySelector<HTMLInputElement>('[data-pkc-field="replace-case"]')?.checked === true;
+    text = `${String(countMatches(body, find, { caseSensitive }))} 件`;
+  }
+  if (out.textContent !== text) out.textContent = text;
+}
+
 /**
  * 🔴 **整理案の下見を描く**(#429 段③)。
  *
@@ -14651,6 +14677,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   「ゴミ箱を開く」(`status-trash`)は別のタブから押される。⚠ 同じタブなら `setBrowse` は何も変えない。
    */
   'show-trash': (dispatcher, _target, services) => {
+      services.setBrowse?.('filer');
+      dispatcher.dispatch({ type: 'SHOW_TRASH' });
+    },
+  /**
+   * 🔴 **右の列 / 右クリックの「ゴミ箱を開く」**(#1646 の 1)。⚠ ゴミ箱の口はフォルダの一覧にしか無いので、
+   *   先に左の列を「フォルダ」へ移してから開く(`show-trash` は一覧に居るときの口 ── 別の受け手)。
+   *   `SHOW_TRASH` は読むだけで編集中でも通る(下書きに触れない)。
+   */
+  'open-trash': (dispatcher, _target, services) => {
     services.setBrowse?.('filer');
     dispatcher.dispatch({ type: 'SHOW_TRASH' });
   },
@@ -15863,6 +15898,11 @@ export function bindActions(
       return;
     }
     const el = ev.target;
+    // 🔴 置換の帯の「探す語」を打つたびに件数を出し直す(#1646 の 2)
+    if (el instanceof HTMLInputElement && el.getAttribute('data-pkc-field') === 'replace-find') {
+      paintReplaceCount(root, dispatcher);
+      return;
+    }
     /**
      * 🔴 **整理案は、貼るたびに下見を描き直す**(#429 段③)。
      *
@@ -15937,6 +15977,11 @@ export function bindActions(
       return;
     }
     if (!(el instanceof HTMLInputElement)) return;
+    // 🔴 「大文字と小文字を区別」を切り替えたら件数を出し直す(#1646 の 2)
+    if (el.getAttribute('data-pkc-field') === 'replace-case') {
+      paintReplaceCount(root, dispatcher);
+      return;
+    }
     // 🔑 チェックボックス / テキスト欄も **change で確定**する(P8 段⑭)。
     //    ⚠ `input` ごとに撃たない ── グループ名を 1 文字打つたびに disk へ
     //    書き戻すことになる(欄を離れた時・Enter を押した時が確定)
@@ -19133,6 +19178,8 @@ export function bindActions(
   listen(root, 'mousedown', onMousedown);
   listen(root, 'input', onInput);
   listen(root, 'change', onChange);
+  // 🔴 本文を打ったり、置換を撃ったりして本文が動いたときも、件数を出し直す(#1646 の 2。同じ字なら DOM に触れない)
+  undo.push(dispatcher.onState(() => { paintReplaceCount(root, dispatcher); }));
   /**
    * 🔴 **添付の改名欄は、欄を離れたときも確定する**(#1264 §1)。⚠ `change` は字が変わらないと
    *   撃たれないので、**題名だけ別の所で変えた後**にファイル名を揃える道が無かった。

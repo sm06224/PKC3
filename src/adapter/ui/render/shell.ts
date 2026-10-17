@@ -902,6 +902,11 @@ export function buildShell(root: HTMLElement): ShellRegions {
   caseBox.title = 'チェックを入れると、大文字と小文字が違う語は置き換えません';
   caseLabel.append(caseBox, document.createTextNode('大文字と小文字を区別'));
   replaceBar.append(caseLabel);
+  // 🔴 当たる件数(#1646 の 2)。字は binder の `paintReplaceCount` が入れる ── 空の間は何も出ない
+  const replaceCount = document.createElement('span');
+  replaceCount.setAttribute('data-pkc-field', 'replace-count');
+  replaceCount.setAttribute('aria-live', 'polite');
+  replaceBar.append(replaceCount);
   const runReplace = iconButton('replace-all', 'すべて置換');
   runReplace.title = '編集中のこのノートの本文で、探す語を全部置き換えます(ほかのノートには効きません)';
   replaceBar.append(runReplace);

@@ -848,12 +848,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-17(#1660 依頼 47-1): 「操作を探す」の `export-note-pdf` で登記 +1 / `outsideActionsTable` +1(受け手を持たない特例 ── `export-note-markdown` と同じ置き場)。
       // ⚠ 2026-10-17(#1659 ③): ノートの小窓の「× 閉じる」(`close-note-window`)で受け手 +1 ── 登記は増えない
       //   (押し口は小窓の帯の 1 か所にしか無く、鍵は Esc が別に持つ)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 435,
-      receivers: 368,
+      // ⚠ 2026-10-17(#1646 の 1): 右の列 / 右クリックの「ゴミ箱を開く」(`open-trash`)1 件を登記 ── 受け手も同時に足したので
+      //   `total` +1 / `receivers` +1 / `registered` +1 / `both` +1(`unregistered` は動かない)。
+      total: 436,
+      receivers: 369,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
-      registered: 169,
-      both: 102,
+      registered: 170,
+      both: 103,
       outsideActionsTable: 67,
       unregistered: 266,
     });
@@ -915,8 +917,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)を登記で `key` 138 → 139(鍵の既定は持たない)
     // ⚠ 2026-10-17(#1660): 「このノートを PDF で書き出す」(`export-note-pdf`)を登記で `key` 139 → 140(鍵の既定は持たない)
     expect(s().perBook).toEqual({
+      // ⚠ 2026-10-17(#1646 の 1): 行のメニューが 22 → 23(`open-trash`)
       key: 140,
-      entry: 22,
+      entry: 23,
       body: 3,
       collection: 2,
       collectionPane: 5,

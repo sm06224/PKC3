@@ -335,7 +335,7 @@ describe('delete (P3-7a)', () => {
     expect(deleted).toEqual(['b']);
     expect(d.getState().selectedLid).toBe('c');
     expect(d.getState().openBody?.body).toBe('C');
-    expect(d.getState().notice, '移したことを言っていない').toBe('「t-b」をゴミ箱へ移しました');
+    expect(d.getState().notice, '移したことを言っていない').toBe('「t-b」をゴミ箱へ移しました(ゴミ箱はフォルダの一覧のいちばん下にあります)');
     expect((await undoOffer())?.lids, '戻す材料を持っていない').toEqual(['b']);
   });
 
@@ -352,7 +352,7 @@ describe('delete (P3-7a)', () => {
     q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
     await tick(20);
     expect(d.getState().entryMetas.has('n1'), '中のノートまで消えた').toBe(true);
-    expect(d.getState().notice).toBe('「t-f」をゴミ箱へ移しました(中のノート 2 件は消えずにルートに出ています)');
+    expect(d.getState().notice).toBe('「t-f」をゴミ箱へ移しました(中のノート 2 件は消えずにルートに出ています / ゴミ箱はフォルダの一覧のいちばん下にあります)');
   });
 
   it('🔴 ほかのノートからリンクされているノートを移したら、そのリンクが開けなくなることも言う', async () => {
@@ -363,7 +363,7 @@ describe('delete (P3-7a)', () => {
     expect(d.getState().backlinks?.lids, '前提: 参照元を持っていない').toEqual(['a', 'c']);
     q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
     await tick(20);
-    expect(d.getState().notice).toBe('「t-b」をゴミ箱へ移しました(2 件のノートからのリンクは、戻すまで開けません)');
+    expect(d.getState().notice).toBe('「t-b」をゴミ箱へ移しました(2 件のノートからのリンクは、戻すまで開けません / ゴミ箱はフォルダの一覧のいちばん下にあります)');
   });
 
   it('🔴 編集中は消さずに理由を出す(確認より前に断る ── 無言にしない)', async () => {

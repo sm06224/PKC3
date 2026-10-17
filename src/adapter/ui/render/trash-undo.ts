@@ -51,6 +51,9 @@ let pending: Pending | null = null;
  */
 export const LINKED_FROM_SOME = 'ほかのノートから張られたリンクは、戻すまで開けない場合があります';
 
+/** ゴミ箱の場所(#1646)。⚠ 画面の字は「フォルダ」タブ・「ゴミ箱を開く」(`filer.ts` の口と同じ)。 */
+export const TRASH_PLACE = 'ゴミ箱はフォルダの一覧のいちばん下にあります';
+
 export function trashMessage(titles: readonly string[], toRoot = 0, linkedFrom = ''): string {
   const head = titles.length === 1 ? `「${titles[0]}」をゴミ箱へ移しました` : `${String(titles.length)} 件をゴミ箱へ移しました`;
   /**
@@ -64,8 +67,10 @@ export function trashMessage(titles: readonly string[], toRoot = 0, linkedFrom =
       : linkedFrom !== ''
         ? [`${linkedFrom}のノートからのリンクは、戻すまで開けません`]
         : []),
+    // 🔴 戻す場所(#1646 の 1 = A。Gemini 裁定 = #1163 の依頼 40 の推薦どおり)── 7 秒の「元に戻す」を過ぎたあと探せるように、毎回言う
+    TRASH_PLACE,
   ];
-  return notes.length > 0 ? `${head}(${notes.join(' / ')})` : head;
+  return `${head}(${notes.join(' / ')})`;
 }
 
 /** 持っている物を捨て、知らせがまだ載っていれば降ろす。 */

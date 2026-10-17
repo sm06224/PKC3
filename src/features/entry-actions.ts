@@ -437,6 +437,15 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'bookmark-note-add', label: 'ブックマークに入れる', group: 'this-one', when: 'bookmarkable', menuOnly: true },
   { action: 'bookmark-note-remove', label: 'ブックマークから外す', group: 'this-one', when: 'bookmarked', menuOnly: true },
+  /**
+   * 🔴 **ゴミ箱を開く**(#1646 の 1 = B。Gemini 裁定 = #1163 の依頼 40 の推薦どおり C = A + B)。
+   *
+   * ⚠ ゴミ箱の口は、左の列の「フォルダ」の一覧のいちばん下にしか無かった(ノートが多いとスクロールが要る)。
+   *   消した直後の知らせ(`trashMessage`)が場所を言い、何日か後に探すときはここから開く。
+   * 🔑 押すと左の列が「フォルダ」へ移り、ゴミ箱が開く(受け手は `open-trash`)。⚠ 削除の**上**に置く
+   *   (`TRAILING_ACTIONS` が削除を常に末尾へ回す ── 隣り合う 2 つが「移す」と「開く」で並ぶ)。
+   */
+  { action: 'open-trash', label: 'ゴミ箱を開く', group: 'remove' },
   { action: 'delete-entry', label: 'ゴミ箱へ移す', group: 'remove' },
 ];
 
@@ -1413,6 +1422,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   //    焦っている場面で、案内された先に戻す物が無い ── しかも 2 ペインには
   //    **同じ名前で逆の操作**(選んだ物をゴミ箱へ入れる)が在る。
   //    🔑 字はマニュアル「フォルダに入れる・出す・並べ替える」に揃える。
+  'open-trash': '左のペインを「フォルダ」にして、ゴミ箱の中身を出します',
   'delete-entry': 'ゴミ箱へ移します(左のペインの「フォルダ」タブの中のゴミ箱から戻せます)',
   /**
    * 🔴 **表の形を変える 2 つ**(#708 段②)。⚠ **何が変わるか**を書く ──

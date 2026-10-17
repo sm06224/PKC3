@@ -91,6 +91,8 @@ const EXPECTED_ACTIONS: readonly string[] = [
   'rename-entry-begin',
   'move-to-folder',
   'create-in-folder',
+  // 🔴 ゴミ箱を開く(#1646 の 1)── 削除の隣(開く → 移す)
+  'open-trash',
   'delete-entry',
 ];
 
