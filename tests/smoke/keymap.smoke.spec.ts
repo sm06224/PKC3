@@ -35,6 +35,23 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
   await expect(rows, '2 回目が作られない ── 以降の否定の検査が無意味になる').toHaveCount(2);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
+  // 🔴 D1(依頼 153): 「操作を探す」で「ノートを上へ動かす」── 自分で並べた順で、選んでいる 2 件目が 1 つ上へ
+  const lidsNow = () => rows.evaluateAll((trs) => trs.map((t) => t.getAttribute('data-pkc-entry')));
+  const order0 = await lidsNow();
+  expect(order0.length, '前提が崩れている(2 件)').toBe(2);
+  await page.keyboard.press('Control+Shift+P');
+  await expect(page.locator('[data-pkc-field="palette-filter"]'), '操作を探すが開かない').toBeFocused();
+  await page.keyboard.type('ノートを上へ動かす');
+  await expect(
+    page.locator('[data-pkc-field="palette-row"][data-pkc-command="move-order-up"]').first(),
+    '「ノートを上へ動かす」が操作を探すに出ない',
+  ).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
+  await expect
+    .poll(lidsNow, { message: '選んだノートが 1 つ上へ動いていない' })
+    .toEqual([order0[1], order0[0]]);
+
   // ② 面の切替(Alt+3 = 設定)。⚠ **数字キーの `code`(Digit3)**が実機で来るかの検査でもある
   await page.keyboard.press('Alt+3');
   await expect(page.locator('[data-pkc-region="settings-body"]')).toBeVisible();
@@ -53,6 +70,19 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
   await expect(
     page.locator('[data-pkc-field="keymap-row"][data-pkc-command="edit-entry"]'),
   ).toContainText('ノートを作る');
+
+  // 🔴 D1(依頼 117-3): 本文の計算に Ctrl+Backspace(単語ごとに消す)は割り当てられない
+  await clickReal(page, '[data-pkc-field="keymap-assign"][data-pkc-command="inline-calc"]');
+  await page.keyboard.press('Control+Backspace');
+  await expect(
+    page.locator('[data-pkc-field="keymap-row"][data-pkc-command="inline-calc"]'),
+    'Ctrl+Backspace の断りの字が出ない',
+  ).toContainText('文字を打つ欄の編集に使うキーです');
+  await expect(
+    page
+      .locator('[data-pkc-field="keymap-row"][data-pkc-command="inline-calc"] [data-pkc-field="keymap-chord"]'),
+    'Ctrl+Backspace が割り当てられてしまった',
+  ).not.toContainText('Backspace');
 
   // ⑤ 既定を 2 つとも外して、別の鍵を割り当てる
   //    ⚠ 観測点はペインの畳み具合(属性)── **何度でも押せて、状態を持ち越さない**
@@ -96,6 +126,16 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
   await expect(
     page.locator('[data-pkc-field="help-key-chords"][data-pkc-command="toggle-sidebar"]'),
   ).toHaveText('Alt + G');
+  // 🔴 D1(依頼 96-2): キーのある操作だけ並び、「割り当てなし」の行は無く、案内の 1 行が出る
+  const chordCells = page.locator('[data-pkc-field="help-key-chords"]');
+  expect(await chordCells.count(), '前提が崩れている(一覧が空)').toBeGreaterThan(5);
+  expect(
+    (await chordCells.allTextContents()).filter((t) => t.trim() === '' || t.includes('割り当てなし')),
+    '割り当てなしの行がヘルプに残っている',
+  ).toEqual([]);
+  await expect(page.locator('[data-pkc-field="help-key-guide"]'), '案内の 1 行が出ない').toContainText(
+    'システム → 設定 → ショートカットキー',
+  );
   // 🔴 #1145: ヘルプのショートカット一覧が文脈ごとにグループ化され、ジャンプボタンが機能する
   await expect(page.locator('[data-pkc-field="help-key-group"]').first()).toBeVisible();
   await expect(page.locator('[data-pkc-field="help-jump-keys"]')).toBeVisible();
@@ -214,6 +254,14 @@ test('🔴 一覧を畳んでいても Ctrl+F で絞り込みの欄へ入る (#5
   // 🔑 **見えるようになっている**(見えない欄に焦点だけ入れて終わりにしない)
   await expect(filter, '一覧が畳まれたまま焦点だけ入れている').toBeVisible();
 
+  // 🔴 D1(依頼 185): 字があるとき Esc で字が消え(欄に居る)、字が無いとき Esc で欄から出る
+  await filter.fill('あいう');
+  await page.keyboard.press('Escape');
+  await expect(filter, '字があるときの Esc で字が消えない').toHaveValue('');
+  expect(await focused(), '字を消しただけで欄から出た(1 回目の Esc)').toBe('entry-filter');
+  await page.keyboard.press('Escape');
+  expect(await focused(), '字が無いときの Esc で欄から出ない').not.toBe('entry-filter');
+
   expect(errors, '例外が出た').toEqual([]);
 });
 
@@ -229,10 +277,27 @@ test('🔴 帯に無い記法が、鍵で本文に入る (#425)', async ({ page 
   await useSplitEditor(page);
   await gotoApp(page);
 
-  await page.keyboard.press('Control+n');
+  // 🔴 D1(依頼 180): 戻る先(前のノート)を先に用意する ── 作った 2 件を 1 → 2 と選んで戻れる履歴を作り、
+  //    2 件目の本文欄で Alt+← を押す(欄の中では戻らない / 欄の外では戻る、の両方を見る)
+  const noteRows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
+  for (const t of ['一', '二']) {
+    await page.keyboard.press('Control+n');
+    const f = page.locator('[data-pkc-field="editor-body"]');
+    await expect(f).toBeVisible({ timeout: 15_000 });
+    await f.fill(`ノート${t}`);
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+  }
+  await expect(noteRows, '前提が崩れている(2 件)').toHaveCount(2);
+  await clickReal(page, noteRows.nth(0));
+  await clickReal(page, noteRows.nth(1));
+  await clickReal(page, '[data-pkc-action="start-edit"]');
   const body = page.locator('[data-pkc-field="editor-body"]');
   await expect(body, '編集に入っていない').toBeVisible({ timeout: 15_000 });
   await body.fill('あいう');
+  await body.focus();
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect(body, '本文欄の Alt+← で前のノートへ戻ってしまった(編集が閉じた)').toBeVisible();
+  await expect(body).toHaveValue('あいう');
   // 全部選んでから押す(選んだ範囲に効く)
   await body.selectText();
   await page.keyboard.press('Alt+Shift+H');
@@ -258,6 +323,17 @@ test('🔴 帯に無い記法が、鍵で本文に入る (#425)', async ({ page 
     page.locator('[data-pkc-action="format-text"][data-pkc-format="highlight"]'),
     'ハイライトが帯に出てしまっている',
   ).toHaveCount(0);
+
+  // 🔴 D1(依頼 180)の対照群: 欄の外(確定した後)の Alt+← は、前のノートへ戻る
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const selectedRow = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry][data-pkc-selected]');
+  await expect(selectedRow, '前提が崩れている(確定後に選択が 1 件でない)').toHaveCount(1);
+  const selBefore = await selectedRow.getAttribute('data-pkc-entry');
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect
+    .poll(() => selectedRow.getAttribute('data-pkc-entry'), { message: '欄の外の Alt+← で前のノートへ戻らない' })
+    .not.toBe(selBefore);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

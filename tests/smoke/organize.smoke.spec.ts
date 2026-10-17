@@ -691,6 +691,17 @@ test('🔴 Enter で入り、Backspace で戻り、Delete でゴミ箱へ', asyn
   await clickReal(page, '[data-pkc-field="status-undo"]');
   await expect(rows, '元に戻しても行が戻らない').toHaveCount(2);
 
+  // ⑦ 🔴 D1(依頼 132): ゴミ箱へ移した直後、行に焦点がある状態の Ctrl+Z でも戻る
+  await clickReal(page, '[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="text"]');
+  await page.keyboard.press('Delete');
+  await expect(rows, '前提が崩れている(2 回目の Delete で移っていない)').toHaveCount(1);
+  expect(
+    await page.evaluate(() => document.activeElement?.closest('[data-pkc-region="filer-table"]') !== null),
+    '前提が崩れている(移した後に焦点が表の外)',
+  ).toBe(true);
+  await page.keyboard.press('Control+z');
+  await expect(rows, '行の上の Ctrl+Z で元に戻らない').toHaveCount(2);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
