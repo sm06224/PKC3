@@ -370,6 +370,17 @@ test('🔴 日付の道具が実機で開き、選んだ日付が本文に入る
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
+  // 前提(後ろの「添付を入れる」用): 添付を 1 件足しておく ── 起動を増やさず、同じ道中の頭に置く
+  await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
+  await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
+    name: 'insert-me.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    ),
+  });
+  await expect(page.locator('[data-pkc-action="download-asset"]')).toBeVisible({ timeout: 15000 });
   await createEntry(page, 'text');
 
   const ta = page.locator('[data-pkc-field="editor-body"]');
@@ -412,6 +423,31 @@ test('🔴 日付の道具が実機で開き、選んだ日付が本文に入る
    */
   await ta.press('ControlOrMeta+z');
   await expect(ta, '入れた日付が Ctrl+Z で戻らない').toHaveValue('- [ ] 見積を送る');
+
+  /**
+   * 🔴 「添付を入れる」: 題名で探して選ぶと、打っている場所(caret)に画像の行が入る(#1640 ④)。
+   * ⚠ 既存の道中の続き(新しく起動しない)。対照群: Esc で閉じても何も入らない。
+   */
+  await ta.evaluate((el) => {
+    const t = el as HTMLTextAreaElement;
+    t.setSelectionRange(t.value.length, t.value.length);
+  });
+  await clickReal(page, '[data-pkc-action="insert-attachment"]');
+  const pickDlg = page.locator('[data-pkc-region="app-dialog"]');
+  await expect(pickDlg, '「添付を入れる」を押しても選ぶ窓が出ない').toBeVisible();
+  await pickDlg.locator('[data-pkc-field="entry-pick-filter"]').fill('insert-me');
+  const pickRow = pickDlg.locator('[data-pkc-field="entry-pick-row"]');
+  await expect(pickRow, '添付が候補に出ない(添付だけが並ぶはず)').toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(pickDlg).toBeHidden();
+  await expect(ta, 'Esc で閉じたのに本文が変わった').toHaveValue('- [ ] 見積を送る');
+  await clickReal(page, '[data-pkc-action="insert-attachment"]');
+  await pickDlg.locator('[data-pkc-field="entry-pick-filter"]').fill('insert-me');
+  await clickReal(page, '[data-pkc-field="entry-pick-row"]');
+  await expect(
+    ta,
+    '選んだ添付が画像の行として入っていない',
+  ).toHaveValue(/^- \[ \] 見積を送る!\[insert-me\.png\]\(asset:[^)]+\)$/);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

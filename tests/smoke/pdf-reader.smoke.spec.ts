@@ -873,6 +873,17 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await clickReal(ed, '[data-pkc-field="pdf-page-down"][data-thumb-page="3"]');
   await expect.poll(order, { message: '↓ ボタンで 1 つ下がらない', timeout: 10_000 }).toEqual(['5', '1', '3', '4']);
 
+  // (e') 🔴 一覧の各ページの ☐ を押すと ☑ になり、もう一度押すと ☐ に戻る(Ctrl+クリックと同じ選びの切り替え。#1626)
+  const pickBtn = ed.locator('[data-pkc-field="pdf-page-pick"][data-thumb-page="1"]');
+  await expect(pickBtn, '各ページに選ぶ ☐ が無い').toHaveText('☐');
+  await expect(pickBtn).toHaveAttribute('aria-pressed', 'false');
+  await clickReal(ed, '[data-pkc-field="pdf-page-pick"][data-thumb-page="1"]');
+  await expect(pickBtn, '☐ を押しても ☑ にならない').toHaveText('☑');
+  await expect(pickBtn).toHaveAttribute('aria-pressed', 'true');
+  await clickReal(ed, '[data-pkc-field="pdf-page-pick"][data-thumb-page="1"]');
+  await expect(pickBtn, '☑ をもう一度押しても ☐ に戻らない').toHaveText('☐');
+  await expect(pickBtn).toHaveAttribute('aria-pressed', 'false');
+
   // (f) 保存 ── 新しい添付が 1 つ増える。元の添付と、いま読んでいる画面は動かない
   const originalDetail = await page.locator('[data-pkc-region="detail"]').innerText();
   await clickReal(ed, '#edit-save');
@@ -898,6 +909,12 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(page.locator('[data-pkc-region="status"]')).toContainText(
     `「${ED_OUT}」を元の PDF と同じフォルダの添付に加えました`,
   );
+  // 🔴 保存の知らせの隣に「参照をコピー」が出る(貼りたいノートで貼るだけにする。#1626)
+  await expect(
+    page.locator('[data-pkc-region="status"] [data-pkc-field="status-copy-ref"]'),
+    '保存の知らせに「参照をコピー」が出ない',
+  ).toBeVisible();
+  await expect(page.locator('[data-pkc-field="status-copy-ref"]')).toContainText('参照をコピー');
   // 🔴 保存した並びが新しい基準になる: 保存ボタンは消え、閉じる確認も出ない(押し直して同じ添付を増やさせない)
   await expect(save, '保存した後も保存ボタンが残っている(押し直すと同じ PDF の添付が増える)').toBeHidden();
   await expect(ed.locator('#edit-bar')).toBeHidden();

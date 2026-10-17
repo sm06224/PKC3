@@ -557,3 +557,136 @@ describe('☐ を押して済みにした直後の「元に戻す」(#1654 の 2
     expect(currentDoneOffer(), '本文の面の ☐ にまで出した').toBeNull();
   });
 });
+
+describe('札の ×(予定から外す)にも「元に戻す」が出る(#1632。依頼 35 Q2-A)', () => {
+  /** 本物の dispatcher + 本物の binder + 本文の書換と走査し直し(効果層の代わり)。 */
+  function wiredReal(initialBody: string, entryDate: string | null = null) {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new RealDispatcher();
+    let body = initialBody;
+    const boot = (date: string | null): void => {
+      d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta({ date })], relations: [] });
+      d.dispatch({
+        type: 'SET_TASK_SCAN',
+        scan: { cards: taskCardsOf('a', body), totalNotes: 1, scannedNotes: 1, truncated: false },
+      });
+    };
+    boot(entryDate);
+    d.onEvent((e) => {
+      if (e.type !== 'REQUEST_BODY_REWRITE') return;
+      body = applyBodyRewrite(body, e.rewrite) ?? body;
+      boot(/^date:\s*(\S+)/m.exec(body)?.[1] ?? null);
+    });
+    bindActions(root, d, { busy: () => false });
+    const card = document.createElement('article');
+    card.setAttribute('data-pkc-entry', 'a');
+    const off = document.createElement('button');
+    off.setAttribute('data-pkc-action', 'unschedule-task');
+    card.append(off);
+    root.append(card);
+    return { d, root, card, off, body: () => body, setBody: (b: string) => void (body = b) };
+  }
+  const withLine = (w: ReturnType<typeof wiredReal>, whole = false): void => {
+    if (whole) {
+      w.card.setAttribute('data-pkc-whole-note', '');
+      return;
+    }
+    const mark = document.createElement('input');
+    mark.setAttribute('data-pkc-task-line', '0');
+    w.card.prepend(mark);
+  };
+  const undoBtn = (w: ReturnType<typeof wiredReal>): HTMLElement => {
+    const b = document.createElement('button');
+    b.setAttribute('data-pkc-action', 'schedule-undo-move');
+    w.root.append(b);
+    return b;
+  };
+
+  it.each([
+    ['日付だけ', '- [ ] 見積を送る @2026-08-25'],
+    ['時刻と幅', '- [ ] 会議 @2026-08-25 14:00..15:00'],
+    ['期間', '- [ ] 出張 @2026-08-25..2026-08-28'],
+  ])('🔴 行の予定 %s: × で外すと「予定から外しました」が出て、「元に戻す」で元の字', async (_n, original) => {
+    const w = wiredReal(original);
+    withLine(w);
+    w.off.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w.body(), '前提: 外れている').not.toBe(original);
+    expect(w.d.getState().notice).toBe('予定から外しました');
+    expect(scheduleUndoShown('予定から外しました'), '「元に戻す」が出せない').toBe(true);
+    undoBtn(w).click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w.body()).toBe(original);
+  });
+
+  it('🔴 繰り返しの予定: × で規則ごと外れても、「元に戻す」で毎週のまま戻る(開始日は規則の行のもの)', async () => {
+    const original = '- [ ] 定例 @2026-08-25 10:00 毎週';
+    const w = wiredReal(original);
+    withLine(w);
+    w.card.setAttribute('data-pkc-task-repeat', 'week');
+    w.off.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w.body(), '前提: 規則ごと外れている').toBe('- [ ] 定例');
+    expect(w.d.getState().notice).toBe('予定から外しました');
+    undoBtn(w).click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w.body()).toBe(original);
+  });
+
+  it('🔴 ノート 1 件が丸ごと予定(frontmatter の date:)も戻る', async () => {
+    const original = '---\ndate: 2026-08-25\n---\n本文';
+    const w = wiredReal(original, '2026-08-25');
+    withLine(w, true);
+    w.off.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w.body(), '前提: 外れている').not.toContain('date:');
+    expect(w.d.getState().notice).toBe('予定から外しました');
+    undoBtn(w).click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w.body()).toContain('date: 2026-08-25');
+  });
+
+  it('対照群: 外した後に別の窓が同じ行の日付を直していたら、戻さない', async () => {
+    const original = '- [ ] 見積を送る @2026-08-25';
+    const w = wiredReal(original);
+    withLine(w);
+    w.off.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(currentMoveOffer(), '前提: 持っている').not.toBeNull();
+    w.setBody('- [ ] 見積を送る @2026-09-09');
+    w.d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: { cards: taskCardsOf('a', w.body()), totalNotes: 1, scannedNotes: 1, truncated: false },
+    });
+    undoBtn(w).click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w.body()).toBe('- [ ] 見積を送る @2026-09-09');
+    expect(w.d.getState().error ?? '').toContain('元に戻せませんでした');
+  });
+
+  it('🔴 繰り返しの札が「後の回」でも、戻すのは規則の開始日と刻み(札の日ではない)', async () => {
+    const original = '- [ ] 定例 @2026-08-25 毎週';
+    const w = wiredReal(original);
+    withLine(w);
+    w.card.setAttribute('data-pkc-task-repeat', 'week');
+    // 札は 2 週後の回を映している(札の日 ≠ 規則の開始日)
+    const scan = taskCardsOf('a', original);
+    const first = scan[0]!;
+    w.d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: {
+        cards: [{ ...first, date: '2026-09-08' }],
+        totalNotes: 1,
+        scannedNotes: 1,
+        truncated: false,
+      },
+    });
+    w.off.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w.body(), '前提: 規則ごと外れている').toBe('- [ ] 定例');
+    undoBtn(w).click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w.body()).toBe(original);
+  });
+});

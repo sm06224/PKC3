@@ -677,13 +677,31 @@ test('🔴 pkc:// の asset あては押すと所有ノート(添付)へ飛ぶ',
   await page.locator('[data-pkc-field="editor-title"]').fill('参照の元');
   await page
     .locator('[data-pkc-field="editor-body"]')
-    .fill(`[図へ](pkc://${selfCid ?? ''}/asset/${key})\n`);
+    .fill(`[図へ](pkc://${selfCid ?? ''}/asset/${key})\n\n![図](asset:${key})\n`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // ③ 焼けていること(action + 受け手が読む key 属性)
   const link = page.locator('[data-pkc-field="detail-body"] [data-pkc-action="navigate-asset-ref"]');
   await expect(link, '自分あての asset 参照が焼かれていない').toHaveCount(1);
   expect(await link.getAttribute('data-pkc-asset-ref')).toBe(key);
+
+  // ③' 🔴 画像を右クリック →「画像の大きさ: 50%」で、本文の画像の直後に {w=50%} が書かれ、画像が半分の幅で描かれる(#1640 ③)
+  //     ⚠ 既存の道中の続き(新しく起動しない)。対照群: 書く前は data-pkc-img-w が無い
+  const bodyImg = page.locator('[data-pkc-field="detail-body"] img[src^="blob:"]').first();
+  await expect(bodyImg, '本文の画像が描かれていない(前提)').toBeVisible({ timeout: 15000 });
+  expect(await bodyImg.getAttribute('data-pkc-img-w'), '前提: 書く前は大きさの印が無い').toBeNull();
+  await bodyImg.click({ button: 'right' });
+  const imgMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(imgMenu.locator('button[data-pkc-action="image-width"]').first(), '画像の右クリックに大きさの項目が出ない').toBeVisible();
+  await imgMenu.locator('button[data-pkc-action="image-width"]', { hasText: '画像の大きさ: 50%' }).click();
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] img[data-pkc-img-w="50"]'),
+    '「画像の大きさ: 50%」を押しても画像が半分の幅にならない',
+  ).toHaveCount(1);
+  expect(
+    await page.locator('[data-pkc-field="detail-body"] img[data-pkc-img-w="50"]').getAttribute('style'),
+    '画像の style に width:50% が無い',
+  ).toMatch(/width:\s*50%/);
 
   // ④ 押すと所有ノート(添付)へ飛ぶ ── 添付の面が出る
   const urlBefore = page.url();

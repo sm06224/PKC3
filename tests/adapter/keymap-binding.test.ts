@@ -1093,6 +1093,9 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        */
       'export-note-markdown',
       'export-note-pdf',
+      // ⚠ #1640 ②: 前の日・次の日のノートを開く ── 押しボタンを持たない特例(`runGlobalCommand`)
+      'open-prev-day-note',
+      'open-next-day-note',
       /**
        * ⚠ 2026-10-08 に足した(#1452 案 1)── マニュアルを別のウィンドウで開く。押しボタンはヘルプの面の
        *   中にしか無く、面は開くまで組まれないので、root に結んだ services から直に呼ぶ特例。

@@ -490,6 +490,8 @@ const thumbItems = [];
 const thumbHolders = [];
 const thumbCells = [];
 const thumbNos = [];
+/** 各ページの「選ぶ」チェック(#1626。Ctrl / Shift を押せない端末でも選べる)。 */
+const thumbPicks = [];
 /** 頁 → 回した角度(0 / 90 / 180 / 270)。一覧の絵はこの角度で描く(読む頁は元のまま)。 */
 const thumbRot = [];
 /** 頁 → 元の向きでの縦横比(高さ / 幅)。まだ描いていない頁は 1 頁目を借りる。 */
@@ -622,7 +624,19 @@ function makeThumbCell(i) {
   down.title = '1 つ下へ';
   down.tabIndex = -1;
   down.textContent = '↓';
-  cell.append(item, turn, drop, up, down);
+  // 選ぶチェック(#1626)。Ctrl / ⌘ / Shift +クリックと同じ「選びを切り替える」を、押すだけの 1 つにする(キーを押せない端末向け)
+  const pick = document.createElement('button');
+  pick.type = 'button';
+  pick.className = 'thumb-act thumb-pick';
+  pick.setAttribute('data-pkc-field', 'pdf-page-pick');
+  pick.setAttribute('data-thumb-page', String(i));
+  pick.setAttribute('aria-label', `${name}を選ぶ`);
+  pick.setAttribute('aria-pressed', 'false');
+  pick.title = '抜き出すページに選ぶ / 選びを外す';
+  pick.tabIndex = -1;
+  pick.textContent = '☐';
+  cell.append(item, turn, drop, up, down, pick);
+  thumbPicks[i] = pick;
   thumbItems[i] = item;
   thumbHolders[i] = holder;
   thumbCells[i] = cell;
@@ -911,6 +925,7 @@ listEl.addEventListener('click', (ev) => {
     if (field === 'pdf-page-rotate') void editRotate(which, true);
     else if (field === 'pdf-page-up') void editMove(which, posByPage[which] - 2, true);
     else if (field === 'pdf-page-down') void editMove(which, posByPage[which], true);
+    else if (field === 'pdf-page-pick') void pickToggle(which);
     else void editRemove(which, true);
     return;
   }
@@ -1160,6 +1175,10 @@ function applyItems(focusPage) {
     if (posByPage[p] > 0) continue;
     thumbCells[p].hidden = true;
     thumbCells[p].removeAttribute('data-pkc-selected');
+    if (thumbPicks[p]) {
+      thumbPicks[p].textContent = '☐';
+      thumbPicks[p].setAttribute('aria-pressed', 'false');
+    }
     thumbVisible.delete(p);
     frag.append(thumbCells[p]);
   }
@@ -1388,7 +1407,7 @@ function dropAddedView(a) {
     boxes[i].remove();
     thumbCells[i].remove();
   }
-  for (const arr of [thumbItems, thumbHolders, thumbCells, thumbNos, thumbRot, pageRatio, boxes, posByPage, layers, pageVp, existing, sizes]) {
+  for (const arr of [thumbItems, thumbHolders, thumbCells, thumbNos, thumbPicks, thumbRot, pageRatio, boxes, posByPage, layers, pageVp, existing, sizes]) {
     if (arr.length > a.first) arr.length = a.first;
   }
   grand = a.first - 1;
@@ -1603,6 +1622,11 @@ async function appendPdf(file) {
 function paintSelected(p) {
   if (selected.has(p)) thumbCells[p].setAttribute('data-pkc-selected', 'true');
   else thumbCells[p].removeAttribute('data-pkc-selected');
+  const pick = thumbPicks[p];
+  if (pick) {
+    pick.textContent = selected.has(p) ? '☑' : '☐';
+    pick.setAttribute('aria-pressed', selected.has(p) ? 'true' : 'false');
+  }
   paintThumbLabel(p);
 }
 

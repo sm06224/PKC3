@@ -48,7 +48,6 @@ import {
 } from '@features/boundary-step';
 // ⚠ 継ぎ足しの規則は **1 本**(`detail.ts` の commit と同じ関数を使う)
 import { spliceLines } from '@features/markdown/edit-journal';
-import { COMMIT_EDIT_LABEL } from './icons';
 import { appKeymap, type KeymapStore } from './keymap';
 
 /**
@@ -217,9 +216,6 @@ const SUB_UNITS: readonly { selector: string; type: string }[] = [
   { selector: 'li', type: 'list_item_open' },
 ];
 
-/** Ctrl+S / Ctrl+Enter で行を確定したときの案内(保存のボタンの字は `COMMIT_EDIT_LABEL`)。 */
-export const ROW_COMMITTED_NOT_SAVED_TEXT = `行を確定しました。ノートを保存するには『${COMMIT_EDIT_LABEL}』を押してください`;
-
 export interface RowSwapCallbacks {
   /**
    * 確定。原文の `[startLine, endLine]`(両端含む)を `text` で置き換える。
@@ -228,6 +224,12 @@ export interface RowSwapCallbacks {
   commit(startLine: number, endLine: number, text: string): void;
   /** 可視のお知らせ(無言で断らない)。 */
   notify?(message: string): void;
+  /**
+   * 🔴 **ノートを保存して編集を終える**(#1632)── 行の中の `Ctrl+S` / `Ctrl+Enter` は、
+   * 行を確定したうえでこれを呼ぶ(題名の欄・2 列の欄で押したときと同じ結果)。
+   * ⚠ 受け口は「編集を保存する」ボタンを押すのと同じ 1 本(保存の規則を 2 か所に置かない)。
+   */
+  saveNote?(): void;
   /**
    * 🔴 **`update()` を経ずに DOM へ入った要素**(#250)。
    *
@@ -1284,11 +1286,11 @@ export class RowSwap {
         ev.preventDefault();
         this.commitActive();
         /**
-         * 🔴 **Ctrl+S / Ctrl+Enter は行を確定するだけで、ノートは保存しない**(挙動は変えない)。
-         * 保存したつもりの人に黙っていると、閉じるときに初めて気づく ── だから一言だけ言う。
-         * ⚠ Tab は言わない(行を渡り歩く普通の操作)。
+         * 🔴 **Ctrl+S / Ctrl+Enter は、行を確定したうえでノートも保存する**(#1632。Gemini 裁定 依頼 35 Q1 A)。
+         * 題名の欄で押したときと同じ結果にする(同じキーが場所で意味を変えない)。
+         * ⚠ Tab / Shift+Tab は行を渡り歩く普通の操作なので、保存しない。
          */
-        if (ke.ctrlKey || ke.metaKey) this.cb.notify?.(ROW_COMMITTED_NOT_SAVED_TEXT);
+        if (ke.ctrlKey || ke.metaKey) this.cb.saveNote?.();
         return;
       }
       /**

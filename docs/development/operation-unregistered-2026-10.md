@@ -17,7 +17,7 @@
 |---|---|---|---|---|
 | ノートの整理 | 20 | 0 | 20 | (第 1 群で登記した ── 下の「登記した 18 件」) ／ 低: この整理案を適用 / タグを付ける |
 | コピー・書き出し | 7 | 0 | 7 | (第 1 群で 4 件を登記した) ／ 低: 選択範囲をコピー / このブロックをコピー / この章をコピー |
-| 予定 | 10 | 0 | 10 | (第 1 群で登記した) ／ 低: (前の日/次の日) / やること ほか |
+| 予定 | 11 | 0 | 11 | (第 1 群で登記した) ／ 低: (前の日/次の日) / やること ほか |
 | SQL | 8 | 0 | 8 | (第 2 群で 4 件を登記した) ／ 低: ○○ を外す / どのエンジンで実行するか |
 | 本文の整形 | 3 | 0 | 3 | (第 2 群で 2 件を登記した) ／ 低: 図を入れる / アイコンを入れる / (整形バーの書式ボタン) |
 | 録音・録画・時間 | 1 | 0 | 1 | (第 2 群で 3 件、第 4 群で 6 件を登記した) ／ 低: 収録を残さずにやめる |
@@ -227,6 +227,7 @@
 | `schedule-day-go` | 低 | (前の日/次の日) | `src/adapter/ui/render/schedule-day.ts:58`<br>`src/adapter/ui/render/schedule-week.ts:65` | 日表示の前後。押したボタンが向きを運ぶ |
 | `schedule-mode` | 低 | やること ほか | `src/adapter/ui/render/schedule.ts:687` | 予定面の表示の切り替え(押した見出しが運ぶ) |
 | `schedule-nav` | 低 | (前へ/次へ/今月) | `src/adapter/ui/render/schedule.ts:653`<br>`src/adapter/ui/render/schedule.ts:396` | 押したボタンが向きを運ぶ |
+| `schedule-pick-date` | 低 | (予定の欄の日付) | `src/adapter/ui/render/schedule.ts:907` | 日付を押すと、本文に日付を入れるときと同じ近道つきの選び方が開く。押した欄の面から引く |
 | `toggle-schedule-note` | 低 | (ノートごとのチェック) | `src/adapter/ui/render/schedule.ts:512` | 「出すもの」の中の 1 行ずつのチェック。押した行が lid を運ぶ |
 | `dismiss-missed` | 低 | 知らせを閉じる | `src/adapter/ui/render/shell.ts:1181` | 見逃した予定の 1 行を畳む。鳴っている予定の帯の中にしか無い |
 | `open-missed-schedule` | 低 | 予定表を開く | `src/adapter/ui/render/shell.ts:1178` | 見逃した予定の 1 行から左の予定のタブへ移る。同じ行にしか無い |
@@ -241,6 +242,9 @@
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
 | `format-text` | 低 | (整形バーの書式ボタン) | `src/adapter/ui/render/format-bar.ts:40` | 書式の種類を押したボタンから読む。書式ごとの命令が既に別に在る |
+| `insert-attachment` | 高 | 添付を入れる | `src/adapter/ui/render/format-bar.ts:145` | 書式の帯の「添付を入れる」(#1640 ④)。挿す先は打っている欄。登記は別の段で(`insert-entry-link` と同じ仕分け) |
+| `image-width` | 低 | 画像の大きさ | `src/features/entry-actions.ts:1232` | 本文の画像の右クリックの項目(押した画像の行と値は項目が運ぶ)。#1640 ③ |
+| `image-align` | 低 | 画像の寄せ | `src/features/entry-actions.ts:1235` | 同上 |
 
 ## SQL
 

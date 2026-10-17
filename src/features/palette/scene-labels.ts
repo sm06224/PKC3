@@ -69,6 +69,8 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'attach-file': NOTE,
   'clear-entry-date': NOTE,
   'open-today': NOTE,
+  'open-prev-day-note': NOTE,
+  'open-next-day-note': NOTE,
   'open-recent': NOTE,
   'open-copy-history': NOTE,
   'open-note-window': NOTE,

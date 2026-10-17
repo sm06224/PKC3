@@ -38,7 +38,7 @@ import { normalizeQuery } from '@features/filter/title-filter';
 //    同じノートがフォルダ画面では「シート」、他の全画面では「表」と出ていた
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(情報列・一覧の行と共有)。
 //    ここに 3 つ目の parse を置いていたので寄せた(規則は 1 つ ── CLAUDE.md)
-import { formatListDate, formatStoredDate, formatStoredStamp } from '@features/datetime/stored-date';
+import { formatListUpdated, listDayStamp, formatStoredDate, formatStoredStamp } from '@features/datetime/stored-date';
 import { ARCHETYPE_ICONS, iconButton, iconSpan } from './icons';
 // 🔑 空のときの「次の一手」の部品(#722 P2-13。かつては一覧タブと 2 か所で組まない形で共有していた)
 import { emptyStartActions } from './empty-start';
@@ -100,21 +100,21 @@ export class FilerRenderer {
   /** 控えの上限の目安(`render` の入口で件数を入れる)。 */
   private metaCount = 0;
 
-  private listDate(raw: string | null | undefined, year: number): string {
-    if (raw === null || raw === undefined || raw === '') return formatListDate(raw, year);
-    if (this.dateTextYear !== year || this.dateText.size > this.metaCount * 2 + 64) {
+  private listDate(raw: string | null | undefined, dayStamp: number): string {
+    if (raw === null || raw === undefined || raw === '') return formatListUpdated(raw, dayStamp);
+    if (this.dateTextYear !== dayStamp || this.dateText.size > this.metaCount * 2 + 64) {
       this.dateText.clear();
-      this.dateTextYear = year;
+      this.dateTextYear = dayStamp;
     }
     let text = this.dateText.get(raw);
     if (text === undefined) {
-      text = formatListDate(raw, year);
+      text = formatListUpdated(raw, dayStamp);
       this.dateText.set(raw, text);
     }
     return text;
   }
 
-  private dateMemo: { metas: ReadonlyMap<string, EntryMeta>; year: number; sig: string } | null = null;
+  private dateMemo: { metas: ReadonlyMap<string, EntryMeta>; dayStamp: number; sig: string } | null = null;
   private lastRelations: readonly Relation[] | null = null;
   private lastSelected: string | null = null;
   private lastScopeLid: string | null = null;
@@ -741,14 +741,14 @@ export class FilerRenderer {
    * (秒だけ違う)でも変わってしまい、**字が 1 文字も変わらないのに塗り直す**。
    */
   private dateSignature(state: AppState): string {
-    const year = new Date().getFullYear();
+    const dayStamp = listDayStamp(new Date());
     /**
      * 🔑 **同じ `entryMetas` と同じ年なら、前の答えを返す**(#1087 性能調査 §5)。
      * ⚠ 選ぶだけの描画でも毎回全件(3,000 件で約 12 ms)を回していた。`entryMetas` は
      *   reducer が**必ず新しい Map** で差し替える(その場で書き換えない)ので、参照が同じなら
      *   中身も同じ。年は日付の字を変えうる(年をまたぐと `MM/DD` ⇔ `YYYY/MM/DD`)ので鍵に入れる。
      */
-    if (this.dateMemo !== null && this.dateMemo.metas === state.entryMetas && this.dateMemo.year === year)
+    if (this.dateMemo !== null && this.dateMemo.metas === state.entryMetas && this.dateMemo.dayStamp === dayStamp)
       return this.dateMemo.sig;
     /**
      * 🔑 **違うのが時刻だけで、画面の字(丸めた日付)も変わらないなら、前の答えを返す**(#1087)。
@@ -756,19 +756,19 @@ export class FilerRenderer {
      *   「1 件の更新日時が同日に動いた」だけの回(いちばん多い回)である。丸めた字が 1 件でも
      *   変わる回(日をまたいだ / 初めて日付が付いた)は、ここを通らず従来どおり全件で作る。
      */
-    if (this.dateMemo !== null && this.dateMemo.year === year) {
+    if (this.dateMemo !== null && this.dateMemo.dayStamp === dayStamp) {
       const pairs = stampChanges(this.dateMemo.metas, state.entryMetas);
-      if (pairs !== null && pairs.every(([a, b]) => this.listDate(a.updatedAt, year) === this.listDate(b.updatedAt, year))) {
-        this.dateMemo = { metas: state.entryMetas, year, sig: this.dateMemo.sig };
+      if (pairs !== null && pairs.every(([a, b]) => this.listDate(a.updatedAt, dayStamp) === this.listDate(b.updatedAt, dayStamp))) {
+        this.dateMemo = { metas: state.entryMetas, dayStamp, sig: this.dateMemo.sig };
         return this.dateMemo.sig;
       }
     }
     const parts: string[] = [];
     for (const m of state.entryMetas.values()) {
-      parts.push(m.lid, this.listDate(m.updatedAt, year));
+      parts.push(m.lid, this.listDate(m.updatedAt, dayStamp));
     }
     const sig = parts.join(String.fromCharCode(0));
-    this.dateMemo = { metas: state.entryMetas, year, sig };
+    this.dateMemo = { metas: state.entryMetas, dayStamp, sig };
     return sig;
   }
 
@@ -778,12 +778,12 @@ export class FilerRenderer {
    *   その場合を除いている(`render` の門)。
    */
   private patchDates(state: AppState): void {
-    const year = new Date().getFullYear();
+    const dayStamp = listDayStamp(new Date());
     for (const [lid, tr] of this.rows) {
       const m = state.entryMetas.get(lid);
       const cell = tr.querySelector<HTMLElement>('[data-pkc-field="updated"]');
       if (!m || !cell) continue;
-      cell.textContent = this.listDate(m.updatedAt, year);
+      cell.textContent = this.listDate(m.updatedAt, dayStamp);
       const full = formatStoredDate(m.updatedAt, '');
       if (full) cell.title = `更新 ${full}`;
       else cell.removeAttribute('title');
@@ -825,7 +825,7 @@ export class FilerRenderer {
    * 行が出している材料の指紋(#1087)。⚠ `buildRow` が読む物と**同じ**でなければならない ──
    * 足りないと古い字の行が残り、多いと持ち越せない。
    * ⚠ 更新日の `title`(`formatStoredDate`)は入れない ── 日付(年月日)だけの関数で、
-   *   `formatListDate` と同じ `updatedAt` から決まる(年は両方 `year` が決める)。入れても
+   *   `formatListDate` と同じ `updatedAt` から決まる(年は両方 `dayStamp` が決める)。入れても
    *   外しても結果が同じ(変異試験で等価と確かめた)。時刻は両方とも出さない。選択と印は**含めない**(`reconcileRows` が
    * 属性だけを合わせる ── 行の node を作り直さずに済ませる)。
    */
@@ -833,12 +833,12 @@ export class FilerRenderer {
     m: EntryMeta,
     renaming: boolean,
     parentName: string | undefined,
-    year: number,
+    dayStamp: number,
   ): string {
     return [
       m.title,
       m.archetype,
-      this.listDate(m.updatedAt, year),
+      this.listDate(m.updatedAt, dayStamp),
       renaming ? 'r' : '',
       parentName ?? '',
     ].join('\u0000');
@@ -929,7 +929,7 @@ export class FilerRenderer {
     // 🔑 **一覧の行と同じ形**(今年は MM/DD)にする(P9 段③)── `YYYY/MM/DD` だと
     //    狭い列に収まらず `2026/08/` で切れていた(実測)。年まで見たいときは
     //    hover の `title` に出す(一覧の行と同じ作法)
-    updated.textContent = this.listDate(m.updatedAt, new Date().getFullYear());
+    updated.textContent = this.listDate(m.updatedAt, listDayStamp(new Date()));
     const full = formatStoredDate(m.updatedAt, '');
     if (full) updated.title = `更新 ${full}`;
     tr.append(name, updated);
@@ -951,14 +951,14 @@ export class FilerRenderer {
     state: AppState,
     parentNames: ReadonlyMap<string, string>,
   ): void {
-    const year = new Date().getFullYear();
+    const dayStamp = listDayStamp(new Date());
     const marked = new Set(state.selection);
     const nextRows = new Map<string, HTMLTableRowElement>();
     const nextSigs = new Map<string, string>();
     const ordered: HTMLTableRowElement[] = [];
     for (const m of list) {
       const parentName = parentNames.get(m.lid);
-      const sig = this.rowSignature(m, m.lid === state.renamingLid, parentName, year);
+      const sig = this.rowSignature(m, m.lid === state.renamingLid, parentName, dayStamp);
       let tr = this.rows.get(m.lid);
       if (tr !== undefined && this.rowSigs.get(m.lid) === sig) {
         const sel = m.lid === state.selectedLid;

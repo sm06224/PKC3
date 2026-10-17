@@ -3017,6 +3017,20 @@ export type UserAction =
    */
   | { type: 'SET_TABLE_FORMAT'; lid: string; line: number; openLine: string; to: TableFormat; header?: boolean }
   /**
+   * 🔴 **本文の画像の大きさ・寄せを書く**(#1640 ③)。`SET_TABLE_FORMAT` と同じ形 ── 書換は 1 本
+   * (`REQUEST_BODY_REWRITE`)を通る。渡さなかった札は保つ、`null` は外す。
+   */
+  | {
+      type: 'SET_IMAGE_ATTRS';
+      lid: string;
+      line: number;
+      openLine: string;
+      key: string;
+      nth?: number;
+      w?: number | null;
+      align?: 'left' | 'center' | 'right' | null;
+    }
+  /**
    * 🔴 **繰り返しの「その回」を済ませる**(#344 段②)。
    * ⚠ `TOGGLE_TASK` と**単位が違う** ── 規則の行の印は動かさず、
    *   **その日ぶんの行を 1 本増やす**(理由は `body-rewrite.ts` の `repeat-done`)。
@@ -3410,6 +3424,11 @@ export type UserAction =
    * 触ると `↑↓` が「見て回る」と「選ぶ」を兼ねてしまい、分けた意味が消える。
    * ⚠ `lid` が実在しなければ**何もしない**(消えた行を指さない)。
    */
+  /**
+   * 🔴 **印をまとめて置く**(#1626。移した先で、動いてきた行を選んだままにする)。⚠ 1 件ずつ `DUAL_SELECT` を撃つと
+   *   件数ぶん描き直しが走る ── 数百件を移すと画面が固まるので、**1 回で置く**。実在する lid だけを置き、焦点は動かさない。
+   */
+  | { type: 'DUAL_SELECT_MANY'; side: DualSide; lids: readonly string[] }
   | { type: 'DUAL_SET_CURSOR'; side: DualSide; lid: string }
   | { type: 'DUAL_TAB_ADD'; side: DualSide }
   | { type: 'DUAL_TAB_CLOSE'; side: DualSide; index: number }
@@ -8166,6 +8185,36 @@ function reduceCore(
         ],
       };
     }
+    /** 🔴 **画像の大きさ・寄せ**(#1640 ③)。⚠ `SET_TABLE_FORMAT` と同じ形 ── 書換は 1 本を通る。 */
+    case 'SET_IMAGE_ATTRS': {
+      // ⚠ 断りは lid で判定する(C6 / #1043)
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null)
+        return { state: { ...state, error: blockedWithSuffix(blocked, `画像の大きさを変えてください`) }, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: {
+              kind: 'image-attrs',
+              line: action.line,
+              openLine: action.openLine,
+              key: action.key,
+              ...(action.nth !== undefined ? { nth: action.nth } : {}),
+              ...(action.w !== undefined ? { w: action.w } : {}),
+              ...(action.align !== undefined ? { align: action.align } : {}),
+            },
+          },
+        ],
+      };
+    }
     /**
      * ⚠ 断りは lid で判定する(C6 / #1043)── 編集中のノート自身だけ断る。
      *   他ノートのチェックは binder(`toggle-task`)が先に同じ判定を通す。
@@ -9967,6 +10016,14 @@ function reduceCore(
         ...withPane(state.dual, action.side, next),
         focus: action.side,
       });
+    }
+    case 'DUAL_SELECT_MANY': {
+      const lids = action.lids.filter((l) => state.entryMetas.has(l));
+      if (lids.length === 0) return { state, events: [] };
+      const last = lids[lids.length - 1]!;
+      const pane = paneOf(state.dual, action.side);
+      // ⚠ 焦点は動かさない(`DUAL_SELECT` は押した側を焦点にするが、これは操作の結果として置くだけ)
+      return withDual(state, withPane(state.dual, action.side, withPaneSelection(pane, lids, last, last)));
     }
     case 'DUAL_SET_CURSOR': {
       if (!state.entryMetas.has(action.lid)) return { state, events: [] };

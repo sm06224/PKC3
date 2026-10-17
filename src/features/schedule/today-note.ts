@@ -23,6 +23,7 @@
  * 板と日別の一覧が日記で埋まる。⚠ user が自分で書けば、もちろん並んでよい。
  */
 import { shortcutDate } from './date-shortcuts';
+import { isRealCalendarDate } from './schedule-date';
 import type { EntryMeta } from '@core/model/entry-meta';
 
 /** 今日の入れ物の題名(`YYYY-MM-DD`)。 */
@@ -45,6 +46,40 @@ export function findTodayNote(metas: Iterable<EntryMeta>, title: string): EntryM
   for (const m of metas) {
     if (m.title !== title || m.archived) continue;
     if (best === null || m.entryOrder < best.entryOrder) best = m;
+  }
+  return best;
+}
+
+/** 題名が `YYYY-MM-DD` の実在する日付か(`2026-13-45` は日付ではない)。 */
+export function isDateTitle(title: string): boolean {
+  // 🔑 形と月日の範囲は `isRealCalendarDate` 1 本(日付を切る規則を 2 本目にしない ── CLAUDE.md §7)
+  return isRealCalendarDate(title);
+}
+
+/**
+ * 🔴 **前の日・次の日のノートを探す**(#1640 ②。依頼 58 の答え = 「操作を探す」に名前で呼べる口を足す)。
+ *
+ * 🔑 **ノートがある日だけ飛ぶ**(無い日は飛ばす ── 開くだけでノートが勝手に増えない)。
+ * ⚠ ゴミ箱の中は拾わない(`findTodayNote` と同じ)。同じ題名が複数在れば先に作られたほう。
+ * ⚠ 題名の並びは文字列順 ── `YYYY-MM-DD` は桁が揃っているので日付順と一致する。
+ * @returns 無ければ `null`(いちばん古い日の「前」/ いちばん新しい日の「次」)
+ */
+export function adjacentDateNote(
+  metas: Iterable<EntryMeta>,
+  currentTitle: string,
+  dir: 'prev' | 'next',
+): EntryMeta | null {
+  let best: EntryMeta | null = null;
+  for (const m of metas) {
+    if (m.archived || !isDateTitle(m.title)) continue;
+    const ok = dir === 'prev' ? m.title < currentTitle : m.title > currentTitle;
+    if (!ok) continue;
+    if (best === null) {
+      best = m;
+      continue;
+    }
+    const nearer = dir === 'prev' ? m.title > best.title : m.title < best.title;
+    if (nearer || (m.title === best.title && m.entryOrder < best.entryOrder)) best = m;
   }
   return best;
 }

@@ -26,8 +26,8 @@ import {
   REPEAT_MOVE_LOST_TEXT,
   type GrabbedTask,
 } from '../../src/adapter/ui/render/schedule-drag';
-import { COMMIT_EDIT_LABEL } from '../../src/adapter/ui/render/icons';
-import { ROW_COMMITTED_NOT_SAVED_TEXT, RowSwap } from '../../src/adapter/ui/render/row-swap';
+import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
+import { RowSwap } from '../../src/adapter/ui/render/row-swap';
 import { renderMarkdownWithRanges } from '../../src/features/markdown/source-ranges';
 import { phaseBlockReason, type AppState } from '../../src/adapter/state/app-state';
 
@@ -223,15 +223,20 @@ describe('E: 繰り返しの予定を「全部動かす」で手が作れない�
   });
 });
 
-describe('F: Ctrl+S / Ctrl+Enter は行を確定するだけ ── 保存のボタンを案内する', () => {
+describe('F: 行の中の Ctrl+S / Ctrl+Enter は、行を確定したうえでノートを保存する(#1632)', () => {
+  const key = (init: KeyboardEventInit) =>
+    new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
   function rig() {
     const host = document.createElement('div');
     document.body.append(host);
-    const notes: string[] = [];
     const commits: string[] = [];
+    const order: string[] = [];
     const swap = new RowSwap(host, {
-      commit: (_s, _e, text) => void commits.push(text),
-      notify: (m) => void notes.push(m),
+      commit: (_s, _e, text) => {
+        commits.push(text);
+        order.push('commit');
+      },
+      saveNote: () => void order.push('save'),
       onInserted: () => {},
     });
     const { html, ranges } = renderMarkdownWithRanges('最初の段落。');
@@ -239,43 +244,67 @@ describe('F: Ctrl+S / Ctrl+Enter は行を確定するだけ ── 保存のボ
     const p = [...host.querySelectorAll('p')].find((e) => e.textContent === '最初の段落。')!;
     p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
     const ta = host.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
-    return { ta, notes, commits };
+    return { ta, commits, order };
   }
-  const key = (init: KeyboardEventInit) =>
-    new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
 
-  it('案内の字は、実際に描かれた保存ボタンの字を含む', async () => {
-    localStorage.setItem('pkc3.editor-mode', 'split');
-    const { d, q } = setup(['a']);
-    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
-    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: 'x-a' });
-    await tick();
-    q('[data-pkc-action="start-edit"]')!.click();
-    const btn = q('[data-pkc-action="commit-edit"]')!;
-    expect(btn.textContent).toContain(COMMIT_EDIT_LABEL);
-    expect(ROW_COMMITTED_NOT_SAVED_TEXT).toContain(`『${COMMIT_EDIT_LABEL}』`);
-  });
-
-  it('Ctrl+S / Cmd+S / Ctrl+Enter: 確定して、案内を出す', () => {
+  it('Ctrl+S / Cmd+S / Ctrl+Enter: 確定してから、保存を呼ぶ(この順)', () => {
     for (const init of [
       { key: 's', ctrlKey: true },
       { key: 's', metaKey: true },
       { key: 'Enter', ctrlKey: true },
     ]) {
-      const { ta, notes, commits } = rig();
+      const { ta, commits, order } = rig();
       ta.value = 'かえた';
       ta.dispatchEvent(key(init));
       expect(commits, JSON.stringify(init)).toEqual(['かえた']);
-      expect(notes).toEqual([ROW_COMMITTED_NOT_SAVED_TEXT]);
+      expect(order, JSON.stringify(init)).toEqual(['commit', 'save']);
     }
   });
 
-  it('対照群: Tab で確定しても案内は出ない', () => {
-    const { ta, notes, commits } = rig();
-    ta.value = 'かえた';
-    ta.dispatchEvent(key({ key: 'Tab' }));
-    expect(commits).toEqual(['かえた']);
-    expect(notes).toEqual([]);
+  it('対照群: Tab / Shift+Tab で確定しても保存はしない', () => {
+    for (const init of [{ key: 'Tab' }, { key: 'Tab', shiftKey: true }]) {
+      const { ta, commits, order } = rig();
+      ta.value = 'かえた';
+      ta.dispatchEvent(key(init));
+      expect(commits).toEqual(['かえた']);
+      expect(order).toEqual(['commit']);
+    }
+  });
+
+  it('🔴 本物の配線: 1 画面の編集で行の中の Ctrl+S を押すと、編集が終わる', async () => {
+    localStorage.setItem('pkc3.editor-mode', 'live');
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    const detail = new DetailRenderer(
+      regions.detail,
+      null,
+      new MarkdownClient(),
+      (body) => d.dispatch({ type: 'UPDATE_OPEN_BODY', body }),
+    );
+    d.onState((s) => detail.render(s));
+    bindActions(root, d, {});
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '最初の段落。' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提: 編集中').toBe('editing');
+    const find = (): HTMLElement | undefined =>
+      [...root.querySelectorAll<HTMLElement>('[data-pkc-region="editor-live"] p')].find(
+        (e) => e.textContent === '最初の段落。',
+      );
+    for (let i = 0; i < 300 && find() === undefined; i++) await tick(10);
+    const p = find();
+    expect(p, '前提: 編集の面に段落が描かれている').toBeDefined();
+    p!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]');
+    expect(ta, '前提: 行が開いている').not.toBeNull();
+    ta!.focus();
+    ta!.value = 'かえた段落。';
+    ta!.dispatchEvent(key({ key: 's', ctrlKey: true }));
+    await tick();
+    expect(d.getState().phase, '保存して編集が終わっている').not.toBe('editing');
   });
 });
 

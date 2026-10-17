@@ -16,7 +16,7 @@ import { humanBytes } from '@features/human-bytes';
 import { assetRefsIn } from '@features/asset/asset-ref-scan';
 export interface AssetGcPorts {
   /** sqlite assets 表(meta)。 */
-  listMetas(): Promise<Array<{ key: string; size: number | null }>>;
+  listMetas(): Promise<Array<{ key: string; size: number | null; mime?: string | null }>>;
   /** IDB blob store の key 一覧(**いま開いている器の分だけ**)。 */
   listBlobKeys(): Promise<string[]>;
   /**
@@ -121,6 +121,11 @@ export interface OrphanScan {
   strays: string[];
   /** meta に size がある分だけの合計(bytes だけの dangling は数えない)。 */
   knownBytes: number;
+  /**
+   * 🔑 **確認に並べる控え**(#1640 ⑤-B)。⚠ 使われていない添付は**どのノートにも属さない**ので、ファイル名は
+   *   どこにも残っていない ── 残っているのは meta の種類(mime)と大きさだけ。
+   */
+  details: Array<{ key: string; mime: string | null; size: number | null }>;
 }
 
 /** 走査のみ(削除しない)。UI はこの結果を見せて確認を取ってから purge する。 */
@@ -130,12 +135,37 @@ export async function findOrphanAssets(ports: AssetGcPorts): Promise<OrphanScan>
   // ⚠ 器の無い bytes は**走査に掛けない**(掛ける相手の body が存在しない)
   const strays = await ports.listStrayBlobs();
   const candidates = [...new Set([...metas.map((m) => m.key), ...blobKeys])];
-  if (candidates.length === 0) return { keys: [], strays, knownBytes: 0 };
+  if (candidates.length === 0) return { keys: [], strays, knownBytes: 0, details: [] };
   const referenced = new Set(await ports.scanReferenced(candidates));
   const sizeByKey = new Map(metas.map((m) => [m.key, m.size ?? 0]));
   const keys = candidates.filter((k) => !referenced.has(k));
   const knownBytes = keys.reduce((sum, k) => sum + (sizeByKey.get(k) ?? 0), 0);
-  return { keys, strays, knownBytes };
+  const metaByKey = new Map(metas.map((m) => [m.key, m]));
+  const details = keys.map((k) => ({
+    key: k,
+    mime: metaByKey.get(k)?.mime ?? null,
+    size: metaByKey.get(k)?.size ?? null,
+  }));
+  return { keys, strays, knownBytes, details };
+}
+
+/** 確認に並べる添付の最大件数(#1640 ⑤-B)。 */
+export const ORPHAN_LIST_MAX = 10;
+
+/**
+ * 🔑 **確認に、消す添付を最大 10 件並べる**(#1640 ⑤-B。Gemini 依頼 37 の答え「C」)。
+ * ⚠ 名前ではなく**種類と大きさ**で並べる ── 使われていない添付はノートを持たず、ファイル名がどこにも残っていない。
+ * 並べた分を超えた件数は「ほか N 件」に畳む。
+ */
+export function orphanListLines(scan: OrphanScan): string[] {
+  const total = scan.keys.length + scan.strays.length;
+  const shown = scan.details.slice(0, ORPHAN_LIST_MAX);
+  const lines = shown.map(
+    (d) => `・${d.mime ?? '種類不明'}  ${d.size === null ? '大きさ不明' : humanBytes(d.size)}`,
+  );
+  const rest = total - shown.length;
+  if (rest > 0) lines.push(`・ほか ${rest} 件`);
+  return lines;
 }
 
 /**
@@ -243,7 +273,7 @@ export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
   }
   const ok = await deps.ask(
     `どのノートからも使われていない添付 ${first.keys.length + first.strays.length} 件` +
-      `(${humanBytes(first.knownBytes)})を消します。消した添付は元に戻せません。よろしいですか?`,
+      `(${humanBytes(first.knownBytes)})を消します。\n${orphanListLines(first).join('\n')}\n消した添付は元に戻せません。よろしいですか?`,
   );
   if (!ok) return;
   const ready = await deps.isReady();

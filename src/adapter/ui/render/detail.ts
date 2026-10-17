@@ -3116,6 +3116,11 @@ export class DetailRenderer {
       notify: (message) => {
         note.textContent = message;
       },
+      // 🔴 行の中の Ctrl+S / Ctrl+Enter(#1632)── 帯の「編集を保存する」を押すのと同じ 1 本
+      saveNote: () => {
+        const save = this.region?.querySelector<HTMLElement>('[data-pkc-action="commit-edit"]');
+        if (save !== null && save !== undefined && save.isConnected) save.click();
+      },
       // 🔴 行の開閉で作り直された塊の面倒をみる(#250)── ここを渡さないと、
       //    画像の塊を押して閉じたときに `<img>` が空の枠になる(実測)
       onInserted: (els) => {

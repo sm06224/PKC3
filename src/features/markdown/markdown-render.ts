@@ -22,6 +22,7 @@
  *   - Language class hint on fenced code blocks
  */
 
+import { imageAttrsStyle, parseImageAttrs, type ImageAttrs } from './image-attrs';
 import { fenceStep } from './list-renumber';
 import MarkdownIt from 'markdown-it';
 import { parseTagLine } from '../flavor/body-tags';
@@ -1546,6 +1547,32 @@ md.core.ruler.after('inline', 'pkc_asset_link_raw', (state) => {
   }
 });
 
+/**
+ * 🔴 **画像の直後の `{w=50% align=center}` を、画像の大きさ・寄せとして読む**(#1640 ③)。
+ * 読んだ `{...}` は字から外し、画像の token に控える(`renderer.rules.image` が描く)。
+ * ⚠ 対象は添付の画像(`asset:`)だけ。読めない `{...}` は**字のまま残す**(`parseImageAttrs` が null)。
+ * ⚠ 規則の実体は `image-attrs.ts` 1 本(書く側 `body-rewrite.ts` と共用)。
+ */
+md.core.ruler.after('inline', 'pkc_image_attrs', (state) => {
+  for (const tok of state.tokens) {
+    if (tok.type !== 'inline' || !tok.children) continue;
+    const kids = tok.children;
+    for (let i = 0; i < kids.length - 1; i++) {
+      const img = kids[i]!;
+      if (img.type !== 'image') continue;
+      const src = img.attrGet('src');
+      if (typeof src !== 'string' || !src.startsWith('asset:')) continue;
+      const next = kids[i + 1]!;
+      if (next.type !== 'text') continue;
+      const parsed = parseImageAttrs(next.content);
+      if (parsed === null) continue;
+      img.meta = { ...(img.meta as object | null), imageAttrs: parsed.attrs };
+      next.content = next.content.slice(parsed.length);
+      if (next.content === '') kids.splice(i + 1, 1);
+    }
+  }
+});
+
 md.renderer.rules.image = function (tokens, idx, options, env, self) {
   const token = tokens[idx]!;
   const src = attrString(token, 'src') ?? '';
@@ -1563,9 +1590,15 @@ md.renderer.rules.image = function (tokens, idx, options, env, self) {
       (m: string, _run: string | undefined, ch: string | undefined) => ch ?? m,
     );
     const title = attrString(token, 'title');
+    // 🔴 大きさ・寄せ(#1640 ③)── 画面でも書き出し(HTML / Word / PDF)でも同じ属性から読めるよう、データ属性と style の両方を出す
+    const imageAttrs = (token.meta as { imageAttrs?: ImageAttrs } | null)?.imageAttrs ?? null;
+    const imageStyle = imageAttrs === null ? '' : imageAttrsStyle(imageAttrs);
     return (
       `<img class="pkc-asset-ref"` +
       ` data-pkc-asset-key="${escapeHtmlAttr(key)}"` +
+      (imageAttrs?.w != null ? ` data-pkc-img-w="${imageAttrs.w}"` : '') +
+      (imageAttrs?.align != null ? ` data-pkc-img-align="${imageAttrs.align}"` : '') +
+      (imageStyle !== '' ? ` style="${imageStyle}"` : '') +
       ` alt="${escapeHtmlAttr(alt)}"` +
       (title !== null ? ` title="${escapeHtmlAttr(title)}"` : '') +
       ` loading="lazy" decoding="async"` +

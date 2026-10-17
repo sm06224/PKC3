@@ -1228,6 +1228,38 @@ export function taskRunMenuActions(): readonly (EntryAction & { readonly hint: s
   return items.map((a) => ({ ...a, hint: ENTRY_ACTION_HINTS[a.action] ?? '' }));
 }
 
+/** 画像の寄せの項目の値の属性(受け手 `image-align` が読む)。 */
+export const IMAGE_ALIGN_ATTR = 'data-pkc-image-align';
+/** 画像の大きさの項目の値の属性(受け手 `image-width` が読む。空 = もとの大きさへ戻す)。 */
+export const IMAGE_WIDTH_ATTR = 'data-pkc-image-width';
+
+/**
+ * 🔴 **右クリックした本文の画像の、大きさと寄せ**(#1640 ③。🟣 Gemini 依頼 37 の答え「A」)。
+ *
+ * > user の物語: 貼った画像が画面の幅いっぱいで大きすぎる。半分の幅にして、中央に置きたい。
+ *
+ * ⚠ **いま付いている値は出さない**(押しても何も変わらない口を作らない)。
+ * ⚠ **置けるなら外せる**(片道にしない): 大きさ・寄せのどちらかが書かれているときだけ、それぞれの「もとに戻す」を出す。
+ * ⚠ 2 つの受け手(`image-width` / `image-align`)に、値は項目の属性で運ぶ。
+ * 🔑 字は画面で起きることで書く ── 「大きさ」「寄せ」は本文の `{w=50% align=center}` を書き換える。
+ */
+export function imageMenuActions(
+  cur: { readonly w: number | null; readonly align: 'left' | 'center' | 'right' | null },
+): readonly (EntryAction & { readonly hint: string })[] {
+  const out: EntryAction[] = [];
+  for (const n of [25, 50, 75]) {
+    if (cur.w !== n) out.push({ action: 'image-width', label: `画像の大きさ: ${n}%`, attrs: { [IMAGE_WIDTH_ATTR]: String(n) } });
+  }
+  if (cur.w !== null)
+    out.push({ action: 'image-width', label: '画像の大きさ: もとに戻す', attrs: { [IMAGE_WIDTH_ATTR]: '' } });
+  if (cur.align !== 'left') out.push({ action: 'image-align', label: '画像を左に寄せる', attrs: { [IMAGE_ALIGN_ATTR]: 'left' } });
+  if (cur.align !== 'center') out.push({ action: 'image-align', label: '画像を中央に寄せる', attrs: { [IMAGE_ALIGN_ATTR]: 'center' } });
+  if (cur.align !== 'right') out.push({ action: 'image-align', label: '画像を右に寄せる', attrs: { [IMAGE_ALIGN_ATTR]: 'right' } });
+  if (cur.align !== null)
+    out.push({ action: 'image-align', label: '画像の寄せ: もとに戻す', attrs: { [IMAGE_ALIGN_ATTR]: '' } });
+  return out.map((a) => ({ ...a, hint: ENTRY_ACTION_HINTS[a.action] ?? '' }));
+}
+
 /**
  * 🔴 **「▾」の小窓に出す、同じ操作の字**(#708 裁定②。user 2026-09-06)。
  *
@@ -1455,6 +1487,9 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
    */
   'table-to-csv': 'この表をセルごと押して打てる形にします。⚠ 桁揃え(:---)は CSV に書けないので落ちます',
   'table-to-markdown': 'この表を Markdown の表(| … |)にします。式は入れられません',
+  // 🔴 **画像の大きさ・寄せ**(#1640 ③)。⚠ 本文の何が変わるかを言う(画像の直後に {w=50% align=center} を書く)
+  'image-width': '本文の幅に対する割合で、この画像の幅を決めます。画像の直後に {w=50%} のように書き込まれます',
+  'image-align': 'この画像を本文の左・中央・右に置きます。画像の直後に {align=center} のように書き込まれます',
   // 🔴 **リストを丸ごとそろえる 2 つ**(#1173)。⚠ 入れ子の項目も動くことと、動かない物・戻し方を先に言う
   'task-run-open':
     'このリストのチェック(入れ子の分も)をすべて外します。繰り返しの項目は触りません。履歴から元へ戻せます',

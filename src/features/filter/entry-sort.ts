@@ -16,7 +16,7 @@ import { compareTitles } from './title-compare';
  *   開いた時刻は**端末ごとの記録**であって、ノートのデータではない
  *   (`features/history/opened-log.ts`)。だから `sortOrder` は引数でもう 1 本受ける。
  */
-export const ENTRY_SORTS = ['manual', 'updated', 'opened', 'title', 'archetype', 'size'] as const;
+export const ENTRY_SORTS = ['manual', 'updated', 'created', 'opened', 'title', 'archetype', 'size'] as const;
 export type EntrySort = (typeof ENTRY_SORTS)[number];
 export const DEFAULT_ENTRY_SORT: EntrySort = 'manual';
 
@@ -36,6 +36,7 @@ export function isEntrySort(v: string): v is EntrySort {
 export const NATURAL_DESC: Readonly<Record<EntrySort, boolean>> = {
   manual: false,
   updated: true, // 更新は**新しい順**から見たい
+  created: true, // 作成も**新しい順**から見たい(「今日作ったノート」が先頭に集まる。#1635 項 4)
   opened: true, // 最近開いた順 ── 「さっき見ていたあれ」が先頭に来る
   title: false,
   archetype: false,
@@ -85,6 +86,8 @@ export function sortOrder(
     if (!m) return '￿'; // 未知は末尾
     if (sort === 'title') return m.title;
     if (sort === 'archetype') return m.archetype;
+    // created: 作った時刻(ISO / sqlite の字 ── どちらも辞書順 = 時刻順)。無いノートは最後へ回す
+    if (sort === 'created') return m.createdAt ?? '';
     return m.updatedAt ?? ''; // updated: 時刻文字列(ISO なので辞書順 = 時刻順)
   };
   return [...order].sort((a, b) => {

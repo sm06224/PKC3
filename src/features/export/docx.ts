@@ -179,6 +179,9 @@ export type DocxBlock =
       readonly heightPx: number;
       /** 読み上げと、写せなかったときの手掛かり。 */
       readonly alt: string;
+      /** 🔴 本文の画像の大きさ・寄せ(#1640 ③)。省略 = 今までどおり(実寸、本文幅に収める、左)。 */
+      readonly widthPct?: number;
+      readonly align?: 'left' | 'center' | 'right';
     }
   /**
    * 🔴 **写せなかったもの**。⚠ 黙って落とさず、**その場に理由を段落として出す**。
@@ -436,6 +439,15 @@ function blockXml(block: DocxBlock, rels: Map<string, string>, orderedNumId = NU
         cy = Math.max(1, Math.round((cy * BODY_WIDTH_EMU) / cx));
         cx = BODY_WIDTH_EMU;
       }
+      /**
+       * 🔴 **本文の幅に対する割合を指した画像は、画面と同じく本文幅の割合で入れる**(#1640 ③)。
+       * ⚠ 画面の `width:50%` は元の大きさに関わらず本文幅の半分になる(小さい画像は引き伸ばされる)── 書き出しも同じにする。
+       */
+      if (block.widthPct !== undefined) {
+        const nx = Math.max(1, Math.round((BODY_WIDTH_EMU * block.widthPct) / 100));
+        cy = Math.max(1, Math.round((block.heightPx * EMU_PER_PX * nx) / Math.max(1, block.widthPx * EMU_PER_PX)));
+        cx = nx;
+      }
       let id = rels.get(block.media);
       if (id === undefined) {
         id = `rIdM${rels.size + 1}`;
@@ -469,7 +481,8 @@ function blockXml(block: DocxBlock, rels: Map<string, string>, orderedNumId = NU
         `<w:pict><v:shape id="_x0000_i${1024 + n}" type="#_x0000_t75"` +
         ` style="width:${wPt}pt;height:${hPt}pt" stroked="f" filled="f" alt="${alt}">` +
         `<v:imagedata r:id="${xmlEscape(id)}" o:title="${alt}"/></v:shape></w:pict>`;
-      return paragraph(`<w:r>${pict}</w:r>`);
+      const jc = block.align === 'center' ? 'center' : block.align === 'right' ? 'right' : null;
+      return paragraph(`<w:r>${pict}</w:r>`, undefined, jc === null ? '' : `<w:jc w:val="${jc}"/>`);
     }
     case 'skipped':
       /**

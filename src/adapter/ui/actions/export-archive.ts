@@ -828,6 +828,9 @@ async function collectOfficeBlocks(
       widthPx: size.w,
       heightPx: size.h,
       alt: img.alt,
+      // 🔴 本文で指した大きさ・寄せ(#1640 ③)
+      ...(img.look?.widthPct !== undefined ? { widthPct: img.look.widthPct } : {}),
+      ...(img.look?.align !== undefined ? { align: img.look.align } : {}),
     };
     media.push({ name, blob });
   }

@@ -225,7 +225,8 @@ import { safeName } from '@features/export/file-name';
 import { hasTranscriptCues, srtFromTranscript, transcriptCues } from '@features/asr/srt';
 import { decodeTaskDrag, dropTaskCard, encodeTaskDrag } from '@adapter/ui/render/schedule-drag';
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
-import { offerDoneUndo, undoScheduleMove } from '@adapter/ui/render/schedule-undo';
+import { offerDoneUndo, offerMoveUndo, undoScheduleMove } from '@adapter/ui/render/schedule-undo';
+import { slotOfCard } from '@features/schedule/move-undo';
 import { plainTaskTitle } from '@features/schedule/task-title';
 import {
   DATE_SHORTCUTS,
@@ -234,12 +235,16 @@ import {
 } from '@features/schedule/date-shortcuts';
 import { isRealCalendarDate } from '@features/schedule/schedule-date';
 import {
+  adjacentDateNote,
   dateNoteMissingNotice,
   findTodayNote,
+  isDateTitle,
   todayNoteTitle,
 } from '@features/schedule/today-note';
 import { formatLineDate, readLineDate } from '@features/schedule/line-date';
-import { isImageAssetMime } from '@features/asset/asset-ref-format';
+import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
+import { findImageRefs, type ImageAlign, type ImageAttrs } from '@features/markdown/image-attrs';
+import { isBackupFileName } from '@features/export/archive-kind';
 import {
   adoptableUrls,
   externalImageUrls,
@@ -363,6 +368,9 @@ import {
   NOTE_TOOL_ACTIONS,
   noteToolActions,
   tableMenuActions,
+  imageMenuActions,
+  IMAGE_ALIGN_ATTR,
+  IMAGE_WIDTH_ATTR,
   taskRunMenuActions,
   tableConvertPickLabel,
   tableHeaderPickLabel,
@@ -2912,6 +2920,12 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'task-run-open',
   'task-run-done',
   /**
+   * 🔴 **画像の大きさ・寄せも本文を書く**(#1640 ③)── 画像の直後の `{w=50% align=center}` を書き換える
+   *   (`SET_IMAGE_ATTRS` → `REQUEST_BODY_REWRITE`)。`toggle-task` と同じ門をくぐらせる。
+   */
+  'image-width',
+  'image-align',
+  /**
    * 🔴 **表のセルを打つのも本文を書く**(#418 段①)── `toggle-task` と同じ
    *   `REQUEST_BODY_REWRITE` を撃つので、同じ門をくぐらせる。
    * ⚠ 押した時点では欄を開くだけだが、**確定で書く** ── 門は入口に置く。
@@ -4216,6 +4230,106 @@ const MENU_Y_ATTR = 'data-pkc-menu-y';
  * ⚠ 座標系は**生の body**(frontmatter 込み)── `csv-cell` / `task` と同じ。
  */
 const MENU_TABLE_ATTR = 'data-pkc-menu-table';
+
+/**
+ * 🔴 **右クリックした画像の行と鍵**(#1640 ③)── メニューが運ぶ。行は生の body の行番号(frontmatter を足した座標)。
+ * ⚠ 押した瞬間にしか読めない(メニューの器は root の直下で、画像の中に居ない ── `context-menu.ts` の戒め)。
+ */
+const MENU_IMAGE_LINE_ATTR = 'data-pkc-menu-image-line';
+const MENU_IMAGE_KEY_ATTR = 'data-pkc-menu-image-key';
+const MENU_IMAGE_NTH_ATTR = 'data-pkc-menu-image-nth';
+
+/**
+ * 🔴 **右クリックした本文の画像を、原文の行と突き合わせる**(#1640 ③)。
+ *
+ * 🔑 画像は段落の中に居るので、行は**囲む塊の範囲**(`data-pkc-source-line` 〜 `-end`)の中から、
+ *   鍵が合う画像を持つ**最初の行**を探す(一致する書き方の判定は `findImageRef` 1 本 ── 書く側と共用)。
+ * ⚠ 見つからなければ `null` = メニューを奪わない(ブラウザ既定の「画像を保存」を残す)。
+ */
+function imageAt(
+  img: Element,
+  body: string | null,
+): { key: string; line: number; nth: number; attrs: ImageAttrs } | null {
+  if (body === null) return null;
+  const key = img.getAttribute('data-pkc-asset-key');
+  if (key === null || key === '') return null;
+  // ⚠ 段落・箇条書きの項目は `.pkc-md-block` ではない ── 刻印(`data-pkc-source-line`)を持ついちばん近い祖先を取る
+  const block = img.closest<HTMLElement>('[data-pkc-source-line]');
+  if (block === null) return null;
+  const start = Number(block.getAttribute('data-pkc-source-line'));
+  if (!Number.isInteger(start) || start < 0) return null;
+  const endRaw = Number(block.getAttribute('data-pkc-source-end'));
+  // ⚠ `data-pkc-source-end` は**最後の行を含む**(1 行の段落は line と同じ値)
+  const end = Number.isInteger(endRaw) && endRaw >= start ? endRaw : start;
+  const offset = frontmatterLineCount(body);
+  const lines = body.split(/\r?\n/);
+  // 🔴 同じ画像が何度も出るとき、押した 1 つを選ぶ: 塊の中の同じ鍵の画像を描画順に数えた番号を、行ごとの出現に割り当てる
+  const same = [...block.querySelectorAll('img.pkc-asset-ref')].filter(
+    (el) => el.getAttribute('data-pkc-asset-key') === key,
+  );
+  let rest = same.indexOf(img);
+  if (rest < 0) return null;
+  for (let n = start + offset; n <= Math.min(end + offset, lines.length - 1); n++) {
+    const hits = findImageRefs(lines[n] ?? '', key);
+    if (rest < hits.length) return { key, line: n, nth: rest, attrs: hits[rest]!.attrs };
+    rest -= hits.length;
+  }
+  return null;
+}
+
+/**
+ * 🔴 **画像の大きさ・寄せを書く受け手の実体**(#1640 ③)── 向きだけが違う 2 つを 1 本にする。
+ * ⚠ 何を書くかの判断は `body-rewrite.ts`(`image-attrs`)── ここは**運ばれた行・鍵・値を渡し、断る理由を画面に出す**だけ。
+ * 🔴 断りは黙らない:①メニューを出した後にノートが替わった ②忙しい(取り込み・書き出し) ③押した行が変わった。
+ */
+function setImageAttr(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  services: BinderServices,
+  which: 'w' | 'align',
+): void {
+  const line = menuCarriedAt(target, MENU_IMAGE_LINE_ATTR);
+  const key = target.getAttribute(MENU_IMAGE_KEY_ATTR);
+  const nth = menuCarriedAt(target, MENU_IMAGE_NTH_ATTR);
+  const raw = target.getAttribute(which === 'w' ? IMAGE_WIDTH_ATTR : IMAGE_ALIGN_ATTR);
+  if (nth === null || line === null || key === null || key === '' || raw === null || refuseStaleMenu(dispatcher, target)) return;
+  // ⚠ 読めない値は書かない(属性を書き換えられた形)。空は「もとに戻す」
+  let patch: { w: number | null } | { align: ImageAlign | null };
+  if (which === 'w') {
+    const n = raw === '' ? null : Number(raw);
+    if (n !== null && (!Number.isInteger(n) || n < 1 || n > 100)) return;
+    patch = { w: n };
+  } else {
+    if (raw !== '' && raw !== 'left' && raw !== 'center' && raw !== 'right') return;
+    patch = { align: raw === '' ? null : raw };
+  }
+  const st = dispatcher.getState();
+  const ob = st.openBody;
+  if (ob === null) return;
+  const lid = ob.lid;
+  const blocked = bodyWriteBlockReason(st, lid);
+  if (blocked !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, '画像の大きさを変えてください') });
+    return;
+  }
+  if (services.busy?.() === true) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: '取り込みが終わってから、画像の大きさを変えてください' });
+    return;
+  }
+  // 🔴 押した時点のその行の中身(#1087)── 別の窓が上へ行を足しても、別の画像を変えない
+  const openLine = shownBodyLine(st, lid, line);
+  if (openLine === null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+    return;
+  }
+  actUnlessEditedElsewhere(
+    dispatcher,
+    services,
+    [lid],
+    '画像の大きさを変えられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+    () => dispatcher.dispatch({ type: 'SET_IMAGE_ATTRS', lid, line, openLine, key, nth, ...patch }),
+  );
+}
 /**
  * 🔴 **右クリックしたチェックリストの、項目の行番号**(#1173)。`,` で区切った**原文の行番号**
  * (`data-pkc-task-line` と同じ座標系)。⚠ 押した瞬間の DOM から数える ── メニューの器は
@@ -5863,6 +5977,42 @@ export function runGlobalCommand(
     return true;
   }
   /**
+   * 🔴 **前の日・次の日のノートを開く**(#1640 ②。依頼 58 = C)── 押しボタンを持たないので特例で直に呼ぶ。
+   * 🔑 行き先は `adjacentDateNote`(題名が日付のノートのうち、ノートがある日だけ飛ぶ)。作らない。
+   * ⚠ 断りは `dry` では偽(= 一覧は理由を言って押せるふりをしない):①編集中 / 保護中 ②開いているノートの題名が日付でない
+   *   ③その向きに日付のノートが無い。
+   */
+  if (cmd === 'open-prev-day-note' || cmd === 'open-next-day-note') {
+    const st = dispatcher.getState();
+    const why = blockedActionNote(st.phase);
+    if (why !== null) {
+      if (dry) return false;
+      prevent();
+      notify(`いまは移れません: ${why}`, CAUTION);
+      return true;
+    }
+    const cur = st.selectedLid === null ? undefined : st.entryMetas.get(st.selectedLid);
+    if (cur === undefined || !isDateTitle(cur.title)) {
+      if (dry) return false;
+      prevent();
+      notify('題名が日付(2026-10-15 の形)のノートを開いてから呼んでください', CAUTION);
+      return true;
+    }
+    const dir = cmd === 'open-prev-day-note' ? 'prev' : 'next';
+    const to = adjacentDateNote(st.entryMetas.values(), cur.title, dir);
+    if (to === null) {
+      if (dry) return false;
+      prevent();
+      notify(dir === 'prev' ? 'これより前の日付のノートはありません' : 'これより後の日付のノートはありません', CAUTION);
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    if (st.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: to.lid });
+    return true;
+  }
+  /**
    * 🔴 **このノートを Markdown で書き出す**(#1440)── 押しボタンを持たないので特例で直に呼ぶ。
    * 実体は右クリックの `export-entry-markdown` と同じ `services.exportEntryMarkdown`(`ROOT_SERVICES` から引く)。
    * ⚠ 断りは 3 段で、どれも `dry` では偽(= 一覧は「いまは押せません ── <理由>」で押せるふりをしない):
@@ -6243,7 +6393,7 @@ export function commandRowsFor(
     // ⚠ 「メッセージを開く」は押しボタンを持たない(左の列の同名は別の口)── 理由は
     //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
     //   「字幕ファイル(.srt)で書き出す」(#1447)も同じ(押しボタンを持たない)── 時刻つきの行が無い理由は `note` が言う
-    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown' || id === 'export-note-pdf') return blockedActionNote(dispatcher.getState().phase);
+    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown' || id === 'export-note-pdf' || id === 'open-prev-day-note' || id === 'open-next-day-note') return blockedActionNote(dispatcher.getState().phase);
     // 「選択範囲をコピー」── 控えが無いときの理由(押しボタンを持たない)。左の `>` の一覧では選択が残らないので、呼べる道を言う
     if (id === 'copy-selection-md')
       return inPalette ? SELECTION_FIRST : `${SELECTION_FIRST}(選択してから「操作を探す」を開いてください)`;
@@ -8029,6 +8179,43 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 面は切り替えない ── user は予定を眺めたまま足したいのであって、
    *   本文へ飛ばされたいわけではない(#300「補助が主の作業領域を奪わない」)。
    */
+  /**
+   * 🔴 **予定の欄の日付を押すと、本文に日付を差すときと同じ選び方が開く**(#1635 項 2。
+   * Gemini 裁定 = #1163 の依頼 36「2-B」)。
+   *
+   * > 「明日」の予定を入れたい。本文の「日付を入れる」には 今日 / 明日 / 今週末 / 来週 が
+   * > 出るのに、予定の欄の日付にはブラウザ標準の入力しか出ない。
+   *
+   * 🔑 選び方は `pickDateInApp` 1 本(本文の `insert-date` と同じ。近道の表も `DATE_SHORTCUTS`)。
+   * ⚠ 欄の値の読み手は `schedule-quick-add` のまま(欄の `.value` に書き戻すだけ)。
+   * ⚠ **時刻の欄は出さない**(`withTime: false` ── 予定の欄は日付だけ。打っても捨てる形にしない)。
+   * ⚠ **開いた時点の日付は欄の値**(今日とは限らない)。**空のまま「入れる」を押せば欄も空になる**
+   *   (`allowEmpty` ── 日付なしで足す道を、マウスだけでも残す)。
+   * ⚠ キーボードは変えない: 欄へ Tab で入って数字を打つ / Space で標準のピッカーを開く、は従来どおり
+   *   (押下 = `click` だけを受ける。Enter / Space の `click` は日付欄では起きない)。
+   */
+  'schedule-pick-date': (_dispatcher, target, _services, root) => {
+    const face = scheduleFaceOf(target);
+    const dateEl = face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]');
+    if (!dateEl) return;
+    void pickDateInApp(
+      root,
+      new Date(),
+      DATE_SHORTCUTS,
+      (id, now) => (isDateShortcut(id) ? shortcutDate(id, now) : ''),
+      { withTime: false, initialDate: dateEl.value, allowEmpty: true },
+    ).then((picked) => {
+      // ⚠ 面が組み直されても、いま画面に在る欄へ書く(最初に掴んだ欄は外れているかもしれない)
+      const now = dateEl.isConnected
+        ? dateEl
+        : root.querySelector<HTMLInputElement>(
+            '[data-pkc-region="schedule"] [data-pkc-field="schedule-quick-date"]',
+          );
+      if (picked === null || !now) return;
+      now.value = picked.date;
+      now.focus();
+    });
+  },
   'schedule-quick-add': (dispatcher, target, services) => {
     // 🔴 **押した面の欄**を読む(#673 段②)── `root` から引くと別の面の空欄を読む
     const face = scheduleFaceOf(target);
@@ -8990,6 +9177,17 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔴 「元に戻す」の出し入れは `moveEntriesOfferingUndo`(移す口 4 つで 1 本)。
      */
     if (moveEntriesOfferingUndo(dispatcher, lids, to, services.showStatus)) {
+      /**
+       * 🔴 **移した先で、動いてきた行を選んだままにする**(Gemini 裁定 = #1163 の依頼 34 の Q5、#1626)。
+       * ⚠ 直す前は元の側の印を外すだけで、移した先には何も選ばれておらず、どの行が動いてきたか分からなかった。
+       * 🔑 選ぶのは**いま行き先の親になった物だけ**(断られた・付いていっただけの行は選ばない)。
+       *   焦点は動かさない(`DUAL_SELECT_MANY`)。
+       */
+      const after = dispatcher.getState();
+      const parentsNow = resolveCanonicalParents(after.entryMetas, after.relations);
+      const arrived = lids.filter((lid) => (parentsNow.get(lid) ?? null) === to);
+      // 🔴 1 回の dispatch で置く(数百件を 1 件ずつ撃つと、件数ぶん描き直しが走って画面が固まる)
+      if (arrived.length > 0) dispatcher.dispatch({ type: 'DUAL_SELECT_MANY', side: otherSide(from), lids: arrived });
       dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
       // 移した行は元のペインから消える ── カーソルは入れ替わりに来た行へ(消した後と同じ規則)
       keepDualCursorAfter(dispatcher, from, rows, pane.cursor);
@@ -9387,6 +9585,47 @@ const ACTIONS: Record<string, ActionHandler> = {
       // ⚠ 範囲外は `setSelectionRange` が丸める(短くなっていても落ちない)
       ta.setSelectionRange(at.start, at.end);
       insertText(ta, formatEntryLink(title, lid));
+    });
+  },
+  /**
+   * 🔴 **添付を本文に入れる**(#1640 ④。依頼 37 = A)。
+   *
+   * 🔑 作りは `insert-entry-link` と同じ(caret を先に控える / 選ぶ間は引き直す / 挿すのは `insertText` で `Ctrl+Z` で戻せる)。
+   *   違いは 2 つ:①候補は**添付のノートだけ** ②挿すのは `[題名](entry:…)` ではなく**添付そのものの 1 行**
+   *   (画像は `![名前](asset:…)`、ほかはリンク。組み立ては「参照をコピー」と同じ `formatAssetRef` 1 本)。
+   * ⚠ 添付の key とファイル名・種類は**本文の frontmatter** にしか無い ── 選んだ後に `readBodies` で読む。
+   *   読めなかった / key が無いときは黙らず理由を出す。
+   */
+  'insert-attachment': (dispatcher, _target, services, root) => {
+    const opened = formatTarget(root);
+    if (opened === null) {
+      sayNoFormatTarget(services);
+      return;
+    }
+    const at = { start: opened.selectionStart, end: opened.selectionEnd };
+    void pickEntryInApp(root, (query) => {
+      const st = dispatcher.getState();
+      const only = new Map([...st.entryMetas].filter(([, m]) => m.archetype === 'attachment'));
+      const items = entryPickRows(only, st.order, query, null);
+      const total = entryPickTotal(only, st.order, query, null);
+      return {
+        items,
+        note: total === 0 ? '該当する添付がありません(題名で探しています)' : entryPickNote(items.length, total),
+      };
+    }).then(async (lid) => {
+      if (lid === null) return;
+      const body = (await services.readBodies?.([lid]))?.get(lid);
+      const meta = body === undefined ? null : readAttachmentMeta(body);
+      if (meta === null || meta.assetKey === null || meta.assetKey === '') {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: '添付を読めませんでした(もう一度お試しください)' });
+        return;
+      }
+      // ⚠ 欄は引き直す(待つ間に面が組み直されると、最初の節点は繋がっていない)
+      const ta = formatTarget(root);
+      if (ta === null) return;
+      ta.focus();
+      ta.setSelectionRange(at.start, at.end);
+      insertText(ta, formatAssetRef(meta.name || '', `asset:${meta.assetKey}`, isImageAssetMime(meta.mime)));
     });
   },
   /**
@@ -11537,6 +11776,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'task-run-open': (dispatcher, target, services) => setTaskRun(dispatcher, target, 'open', services),
   'task-run-done': (dispatcher, target, services) => setTaskRun(dispatcher, target, 'done', services),
+  /**
+   * 🔴 **右クリックした画像の大きさ・寄せを書く**(#1640 ③。依頼 37 = A)。
+   * 🔑 向きだけが違う 2 つを 1 本にする(`task-run-*` と同じ作法 ── §7)。値は押した項目の属性が運ぶ
+   *   (空 = もとに戻す = 札を外す)。
+   */
+  'image-width': (dispatcher, target, services) => setImageAttr(dispatcher, target, services, 'w'),
+  'image-align': (dispatcher, target, services) => setImageAttr(dispatcher, target, services, 'align'),
   /**
    * 🔴 **付箋・線の色を選ぶ**(#530 段④。Gemini 裁定 A)── 右クリックの「塗りの色…」「枠の色…」(線は「色…」)。
    *
@@ -14464,7 +14710,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   (`patchTaskCard` が焼いている)。⚠ 行番号は**札ではなく中の印**に在る
    *   (札にも置くと `[data-pkc-task-line]` を押す既存の経路に当たる、2026-08-23 の罠)。
    */
-  'unschedule-task': (dispatcher, target, services) => {
+  'unschedule-task': (dispatcher, target, services, root) => {
     const st = dispatcher.getState();
     const card = target.closest<HTMLElement>('[data-pkc-entry]');
     const lid = card?.getAttribute('data-pkc-entry') ?? '';
@@ -14473,9 +14719,21 @@ const ACTIONS: Record<string, ActionHandler> = {
     const failed =
       '予定を外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください';
     if (card.hasAttribute('data-pkc-whole-note')) {
-      actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () =>
-        dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null }),
-      );
+      actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () => {
+        const now = dispatcher.getState();
+        const was = now.entryMetas.get(lid)?.date ?? null;
+        const refused = bodyWriteBlockReason(now, lid) !== null;
+        dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
+        // 🔴 × にも「元に戻す」(#1632。Gemini 裁定 = #1163 の依頼 35 Q2-A)── 日付なしへ落としたときと同じ口。
+        //    ⚠ 断られた回(編集中など)・元から日付が無い回は出さない(`offerMoveUndo` が同じ姿は出さない)
+        if (!refused && now.entryMetas.has(lid))
+          offerMoveUndo(root, dispatcher, {
+            target: { kind: 'entry', lid },
+            before: { date: was, time: null, timeEnd: null, until: null, text: '' },
+            after: { date: null, time: null, timeEnd: null, until: null, text: '' },
+            verb: 'moved',
+          });
+      });
       return;
     }
     const raw = card
@@ -14494,9 +14752,38 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ **`until` も外す** ── 記法まるごと消えるので、期間だけ残すと
      *   「頼んでいない指示」になる(落とす経路と同じ渡し方)。
      */
-    actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () =>
-      dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, openLine, date: null, until: null }),
-    );
+    actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () => {
+      const now = dispatcher.getState();
+      const refused = bodyWriteBlockReason(now, lid) !== null;
+      const scanned = now.taskScan?.cards.find((c) => c.lid === lid && c.line === line);
+      dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, openLine, date: null, until: null });
+      /**
+       * 🔴 × にも「元に戻す」(#1632。Gemini 裁定 = #1163 の依頼 35 Q2-A)。毎週の予定を間違えて外すと
+       * 規則ごと消えるので、戻す口が無いのは片道だった。日付なしへ落としたときと同じ口を使う。
+       * ⚠ 断られた回(編集中など)・札が走査に居ない回は出さない。
+       * ⚠ 繰り返しの札の日は「その回の日」なので、戻し先は**規則の行を読んだ姿**(開始日・刻み)にする。
+       */
+      if (refused || scanned === undefined) return;
+      const before = slotOfCard(scanned);
+      const rule = scanned.repeat === null ? null : readLineDate(openLine);
+      offerMoveUndo(root, dispatcher, {
+        target: { kind: 'task', lid, line },
+        before,
+        after: { date: null, time: null, timeEnd: null, until: null, text: before.text },
+        verb: 'moved',
+        ...(rule === null || scanned.repeat === null
+          ? {}
+          : {
+              restore: {
+                date: rule.date,
+                time: rule.time,
+                timeEnd: rule.timeEnd,
+                until: rule.until,
+                repeat: scanned.repeat,
+              },
+            }),
+      });
+    });
   },
   /**
    * 🔴 **札の「繰り返す…」を押した ── 刻みの一覧を出す**(#855 段 0 の 3 つ目。
@@ -15526,6 +15813,8 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   'format-text',
   'insert-date',
   'insert-entry-link',
+  // ⚠ 2026-10-17(#1640 ④): 添付を入れる ── 同じく編集中の本文へ挿す
+  'insert-attachment',
   'insert-snippet',
   // ⚠ 2026-09-04(#528 案 B): 図の一覧 ── 同じく編集中の本文へ挿す
   'insert-diagram',
@@ -15918,6 +16207,8 @@ export function bindActions(
      *   DOM 自身が値なので、止めると**巻き戻って見える**。
      */
     if (el.getAttribute('data-pkc-action') === 'toggle-task') ev.preventDefault();
+    // 🔴 予定の日付の欄: ブラウザ標準のピッカーは開かせず、近道つきの選び方だけを出す(#1635 項 2)
+    if (el.getAttribute('data-pkc-action') === 'schedule-pick-date') ev.preventDefault();
     /**
      * 🔴 **修飾つきのクリックは「印を付ける」**(#240 段②。user 指示 2026-08-17
      * 「複数選択・範囲選択」)。
@@ -17018,7 +17309,13 @@ export function bindActions(
       routeSt.phase === 'ready' &&
       !hasUnsavedTyping(routeSt) &&
       files.every(
-        (f) => isMarkdownFileName(f.name) || isVcfFileName(f.name) || isIcsFileName(f.name),
+        (f) =>
+          isMarkdownFileName(f.name) ||
+          isVcfFileName(f.name) ||
+          isIcsFileName(f.name) ||
+          // 🔴 バックアップ(`.pkc3-full.zip` など)も(#1632)── 添付にすると「元に戻したつもりが zip が増えただけ」
+          //    になり、成功したように見える。取り込みには確認(取り込む / やめる)が出るので、落としただけでは入れ替わらない
+          isBackupFileName(f.name),
       )
     ) {
       services.importFiles([...files]);
@@ -18376,7 +18673,19 @@ export function bindActions(
      *   ⚠ 消すと、段② を書く人が**同じ穴を作り直す**(「コピー」「画像を保存」が
      *   代わりも無いまま消える)。
      */
-    if (target.closest('a[href], img, input, textarea, [contenteditable="true"]') !== null) return;
+    /**
+     * 🔴 **本文の添付の画像だけは、大きさ・寄せのために受ける**(#1640 ③)。
+     * ⚠ リンクの中の画像・原文の行が引けない画像・編集中の欄は今までどおりブラウザ既定のまま(「画像を保存」を奪わない)。
+     */
+    const imageEl = target.closest('img.pkc-asset-ref[data-pkc-asset-key]');
+    const imageOb = dispatcher.getState().openBody;
+    const imageHit =
+      imageEl !== null &&
+      imageEl.closest('a[href]') === null &&
+      imageEl.closest('[data-pkc-field="detail-body"]') !== null
+        ? imageAt(imageEl, imageOb?.body ?? null)
+        : null;
+    if (target.closest('a[href], img, input, textarea, [contenteditable="true"]') !== null && imageHit === null) return;
     const sel = root.ownerDocument.getSelection();
     if (sel !== null && !sel.isCollapsed && sel.rangeCount > 0) {
       // ⚠ **選択範囲の中で押したときだけ**残す(別の場所の選択は関係ない)
@@ -18703,6 +19012,21 @@ export function bindActions(
           : taskRunMenuActions().map((a) => ({
               ...a,
               attrs: { [MENU_TASK_LINES_ATTR]: taskLines.join(',') },
+            }))),
+        /**
+         * 🔴 **画像の上なら、大きさ・寄せを頭に足す**(#1640 ③)。⚠ 行と鍵は**この項目にだけ**載せる
+         *   (`attrs`。表・チェックリストと同じ作法)── 画像と関係の無い項目に持たせると、受け手が取り違える。
+         */
+        ...(imageHit === null
+          ? []
+          : imageMenuActions(imageHit.attrs).map((a) => ({
+              ...a,
+              attrs: {
+                ...(a.attrs ?? {}),
+                [MENU_IMAGE_LINE_ATTR]: String(imageHit.line),
+                [MENU_IMAGE_KEY_ATTR]: imageHit.key,
+                [MENU_IMAGE_NTH_ATTR]: String(imageHit.nth),
+              },
             }))),
         /**
          * 🔴 **付箋の上なら「題名を直す」を頭に足す**(#529 W5-b)。⚠ 置いたノートが居る付箋だけ

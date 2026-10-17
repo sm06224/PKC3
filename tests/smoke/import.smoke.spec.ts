@@ -921,6 +921,26 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   const path = await download.path();
   expect(path).not.toBeNull();
 
+  /**
+   * 🔴 バックアップを画面へ**落とす**と、添付にならず取り込みの確認が出る(#1632)。
+   * ⚠ 直す前は落とすと添付に倒れ、「元に戻したつもりが zip が増えただけ」になった。既存の道中の続き。
+   * 対照群: 確認で「やめる」と、ノートも添付も増えない(落としただけでは入れ替わらない)。
+   */
+  const zipBytes = readFileSync(path!).toString('base64');
+  await page.evaluate((b64) => {
+    const bin = atob(b64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const dt = new DataTransfer();
+    dt.items.add(new File([u8], 'dropped.pkc3-full.zip', { type: 'application/zip' }));
+    const target = document.querySelector('[data-pkc-region="detail"]') ?? document.body;
+    target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+  }, zipBytes);
+  const droppedConfirm = await answerAppDialog(page, 'cancel');
+  expect(droppedConfirm, '落としたバックアップに取り込みの確認が出ない').toMatch(/ノート \d+ 件/);
+  await expect(rows, '「やめる」を押したのに件数が増えた').toHaveCount(2);
+
   // 🔴 取り込み直す ── **自分の書出しを自分で読み戻せる**ことがバックアップの条件
   await page.setInputFiles('[data-pkc-field="import-input"]', {
     name: 'restored.pkc3.zip',

@@ -72,3 +72,17 @@ export const ARCHIVE_SUFFIXES: readonly string[] = [
   SPEC.part.suffix,
   LEGACY_ARCHIVE_SUFFIX,
 ];
+
+/** 🔴 PKC3 入り HTML(`.pkc3.html`)の末尾。⚠ 書き出す側は `export-portable.ts`(同じ字)。 */
+export const PORTABLE_HTML_SUFFIX = '.pkc3.html';
+
+/**
+ * 🔴 **名前で PKC3 のバックアップと分かる file か**(#1632。Gemini 裁定 = #1163 の依頼 35 Q3-A / 依頼 339 A)。
+ * 窓へ落とした file を「取り込む」と同じ道へ倒すかの判定 ── 落とした `.md` / `.vcf` / `.ics` と同じ作法で
+ * **名前だけ**で決める(中身は読まない)。ふつうの zip / HTML は含めない(添付したい人の動きを変えない)。
+ * ⚠ 取込の判定そのもの(`peekZipFormat`)ではない ── ここは「落としたとき取り込みの道へ送るか」だけ。
+ */
+export function isBackupFileName(name: string): boolean {
+  const n = name.toLowerCase();
+  return ARCHIVE_SUFFIXES.some((x) => n.endsWith(x)) || n.endsWith(PORTABLE_HTML_SUFFIX);
+}

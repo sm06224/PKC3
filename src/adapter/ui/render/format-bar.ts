@@ -133,6 +133,25 @@ export function buildFormatBar(): HTMLElement {
   bar.append(insertEntryLink);
 
   /**
+   * 🔴 **添付を本文に入れる**(#1640 ④。🟣 Gemini 依頼 37 の答え「A」)。
+   *
+   * ⚠ 直す前は、別のノートで使い直すのに「添付の画面を開く → 参照をコピー → 戻って貼る」が要り、
+   *   「ノートリンクを入れる」で添付を選ぶと入るのは**リンク**で画像にならなかった。
+   * 🔑 題名で探して選ぶと、画像は画像の行・ほかはリンクの行が打っている場所に入る(組み立ては「参照をコピー」と同じ 1 本)。
+   * ⚠ `FORMAT_OPS` には入れない ── こちらは**先に聞く**(日付・ノートリンクと同じ理由)。鍵は付けない。
+   */
+  const insertAttachment = document.createElement('button');
+  insertAttachment.type = 'button';
+  insertAttachment.setAttribute('data-pkc-action', 'insert-attachment');
+  insertAttachment.title =
+    '添付を題名で探して、打っている場所に入れます。画像は画像として、ほかのファイルはリンクとして入ります';
+  const insertAttachmentLabel = document.createElement('span');
+  insertAttachmentLabel.setAttribute('data-pkc-field', 'label');
+  insertAttachmentLabel.textContent = '添付を入れる';
+  insertAttachment.append(insertAttachmentLabel);
+  bar.append(insertAttachment);
+
+  /**
    * 🔴 **雛形を一覧から入れる**(#196 / B-2 段②-b)。
    *
    * ⚠ 短縮語 + `Tab` は**覚えている人の近道**であって、入口ではない ── 覚えて

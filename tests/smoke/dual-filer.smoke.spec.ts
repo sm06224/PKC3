@@ -102,6 +102,13 @@ test('🔴 2 ペインを開いて、左で選んだものを右の場所へ移�
   await clickReal(page, '[data-pkc-field="dual-move"]');
   await expect(page.locator(ROWS('right')), '右へ移っていない').toHaveCount(1);
   await expect(page.locator(ROWS('left')), '左から消えていない').toHaveCount(1);
+  // 🔴 移した先で、動いてきた行が選ばれたまま(印が付いている)── どの行が来たか分かる(#1626)。
+  //    ⚠ 焦点は動かさない(元の側のまま)。既存の道中の続き(新しく起動しない)
+  await expect(
+    page.locator(`${PANE('right')} [data-pkc-entry][data-pkc-marked]`),
+    '移した先で、動いてきた行が選ばれていない',
+  ).toHaveCount(1);
+  await expect(page.locator(PANE('left')), '移したら焦点が先の側へ動いた').toHaveAttribute('data-pkc-focused', '');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

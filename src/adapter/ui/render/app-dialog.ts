@@ -587,7 +587,19 @@ export function pickDateInApp(
    * 時刻の欄を出すか(#865)。⚠ **受け取る相手のときだけ `true`** ──
    * 出したのに捨てる形にしない(上の docstring)。
    */
-  opts: { readonly withTime?: boolean } = {},
+  opts: {
+    readonly withTime?: boolean;
+    /**
+     * 開いた時点で日付欄に入れておく値(#1635 項 2)。⚠ 省略 = 今日。**空文字は「空のまま開く」**
+     *   (予定の欄が空のとき、開いただけで今日が入ると「日付なし」が選べなくなる)。
+     */
+    readonly initialDate?: string;
+    /**
+     * 日付を空にして「日付を入れる」を押したとき、`null`(やめた)ではなく**空の日付**を返すか。
+     * ⚠ 予定の「日付なしで足す」道を、この小窓を通っても残すため(片道にしない)。既定 `false`。
+     */
+    readonly allowEmpty?: boolean;
+  } = {},
 ): Promise<PickedDate | null> {
   const withTime = opts.withTime !== false;
   return enqueue(async () => {
@@ -600,7 +612,7 @@ export function pickDateInApp(
     date.type = 'date';
     date.setAttribute('data-pkc-field', 'pick-date');
     // 🔑 開いた時点で**今日**が入っている ── いちばん多い答えを既に選んである
-    date.value = toDate('today', now);
+    date.value = opts.initialDate ?? toDate('today', now);
     const time = document.createElement('input');
     time.type = 'time';
     time.setAttribute('data-pkc-field', 'pick-time');
@@ -652,7 +664,8 @@ export function pickDateInApp(
     // ⚠ 日付が空なら**入れない**(空の記法を本文へ挿すと、読めない字が残る)
     // ⚠ 欄を出していないときは **`null` で返す**(器に残った値を拾わない)
     const picked = withTime && time.value !== '' ? time.value : null;
-    return date.value === '' ? null : { date: date.value, time: picked };
+    if (date.value === '') return opts.allowEmpty === true ? { date: '', time: null } : null;
+    return { date: date.value, time: picked };
   });
 }
 

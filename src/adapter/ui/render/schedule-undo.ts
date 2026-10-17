@@ -32,6 +32,7 @@ import {
   undoVerdict,
   type Slot,
 } from '@features/schedule/move-undo';
+import type { RepeatUnit } from '@features/schedule/repeat';
 import type { AppState, UserAction } from '@adapter/state/app-state';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { SHOWN_LINE_LOST, shownCardLine } from '@adapter/state/shown-line';
@@ -45,6 +46,18 @@ export interface MoveOffer {
   readonly before: Slot;
   readonly after: Slot;
   readonly verb: 'moved' | 'changed';
+  /**
+   * 🔴 **戻し先が札の姿と違うとき**(#1632。繰り返しの予定の × ── 規則ごと外れる)。
+   * 繰り返しの札の日は「その回の日」で、戻すのは**規則の行の書き方**(開始日・刻み)である。
+   * ⚠ 渡さなければ `before` へ戻す(従来どおり)。
+   */
+  readonly restore?: {
+    readonly date: string;
+    readonly time: string | null;
+    readonly timeEnd: string | null;
+    readonly until: string | null;
+    readonly repeat: RepeatUnit;
+  };
 }
 
 /** 書込が届くのを待つ長さ(ms)。⚠ これを過ぎたら出さずに諦める(古い「動かしました」を後から出さない)。 */
@@ -266,7 +279,7 @@ export function undoScheduleMove(
   clearMoveOffer();
   if (undoVerdict(current, scanned, offer.before, offer.after) === 'changed')
     return { refusal: '動かした後に予定が変わったので、元に戻せませんでした' };
-  const b = offer.before;
+  const b = offer.restore ?? offer.before;
   if (offer.target.kind === 'entry')
     return { action: { type: 'SET_ENTRY_DATE', lid: offer.target.lid, date: b.date } };
   // 🔴 戻す相手の行は「いま走査に見えている姿」── その原文を `openLine` に添える(#1087)。
@@ -283,6 +296,8 @@ export function undoScheduleMove(
       time: b.time,
       timeEnd: b.timeEnd,
       until: b.until,
+      // 🔴 繰り返しの規則ごと外した予定は、刻みも書き戻す(#1632)
+      ...(offer.restore === undefined ? {} : { repeat: offer.restore.repeat }),
     },
   };
 }

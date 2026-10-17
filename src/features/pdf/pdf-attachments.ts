@@ -7,6 +7,13 @@
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { assetPreviewKind } from '@features/asset/asset-preview-kind';
 
+/**
+ * 🔴 **窓で編集した PDF を新しい添付にしたときの知らせの終わり**(`save-edited.ts` が組む字の後半)。
+ * ⚠ 知らせの隣の「参照をコピー」(#1626)は、この字で終わる知らせの間だけ出る ── 出し入れ(`status-open.ts`)と
+ *   知らせを組む側(`save-edited.ts`)が**同じ定数**を読む(字を 2 か所に書かない)。
+ */
+export const PDF_SAVED_NOTICE_TAIL = 'を元の PDF と同じフォルダの添付に加えました';
+
 export interface PdfAttachmentRow {
   readonly key: string;
   readonly name: string;

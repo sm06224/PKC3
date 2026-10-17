@@ -33,6 +33,7 @@ import {
   buildAgenda,
   type AgendaGroup,
   type AgendaItem,
+  withTodayGroup,
 } from '@features/schedule/agenda';
 import { getMonthGrid, dateKey, viewedMarks } from '@features/schedule/month-grid';
 import type { TaskCard } from '@features/schedule/task-cards';
@@ -439,7 +440,10 @@ export class ScheduleRenderer {
       frame.groups,
       dayMode || weekMode || monthMode
         ? groups.filter((g) => g.date === null || !isRealCalendarDate(g.date))
-        : groups,
+        : // 🔴 一覧だけ「今日」の見出しを 0 件でも出す(#1626)── 点・件数の文・空の判定は上の `groups` のまま
+          state.taskScan !== null
+          ? withTodayGroup(groups, today)
+          : groups,
       state,
     );
   }
@@ -903,6 +907,8 @@ export class ScheduleRenderer {
     const qDate = document.createElement('input');
     qDate.type = 'date';
     qDate.setAttribute('data-pkc-field', 'schedule-quick-date');
+    // 🔴 押すと、本文に日付を差すときと同じ近道つきの選び方が開く(#1635 項 2)
+    qDate.setAttribute('data-pkc-action', 'schedule-pick-date');
     qDate.setAttribute('aria-label', 'いつのやること');
     /**
      * 🔴 **最初から今日を入れておく**(#499。user 指摘 2026-08-28

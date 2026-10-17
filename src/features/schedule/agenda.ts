@@ -297,6 +297,21 @@ export function buildAgenda(
 }
 
 /**
+ * 🔴 **「今日」の見出しを、予定が 0 件でも出す**(Gemini 裁定 = #1163 の依頼 34 の Q2、#1626)。
+ *
+ * ⚠ 直す前は今日の項目が 1 件以上ある日にしか見出しが出ず、まっさらな朝は、昨日の項目を掴んでも**落とす先が無かった**。
+ * 🔑 一覧に出す束だけに使う。⚠ 小さな月の点・「予定がありません」の判定・束の数は、**この関数を通す前**の束で数える
+ *   (今日に予定が無いのに点が付いたり、空の一覧に見えなくなったりしない)。
+ */
+export function withTodayGroup(groups: readonly AgendaGroup[], today: string): AgendaGroup[] {
+  if (groups.some((g) => g.date === today)) return [...groups];
+  const empty: AgendaGroup = { date: today, label: '今日', overdue: false, cards: [] };
+  const at = groups.findIndex((g) => g.date === null || g.date > today);
+  if (at < 0) return [...groups, empty];
+  return [...groups.slice(0, at), empty, ...groups.slice(at)];
+}
+
+/**
  * 時刻の昇順。⚠ **時刻なしは後ろ** ── 「いつか今日やる」は「10:00 の予定」より後。
  * ⚠ **安定** に並べる(同じ時刻は渡された順)── `sort` は安定なので、
  *   同値で `0` を返せばよい。

@@ -32,6 +32,7 @@
  */
 
 import { isCorruptRefusalLine } from '@features/storage/db-corruption';
+import { PDF_SAVED_NOTICE_TAIL } from '@features/pdf/pdf-attachments';
 
 export interface StatusOpenState {
   /** 「開く」で出す物の lid(`OP_NOTICE` の `open`)。 */
@@ -57,6 +58,30 @@ export function paintStatusOpen(
   if (show) btn.setAttribute('data-pkc-entry', lid);
   else btn.removeAttribute('data-pkc-entry');
   // ⚠ 同じ値を書き直さない(状態の行は打鍵ごとに描き直される)
+  if (btn.hidden !== !show) btn.hidden = !show;
+  return show;
+}
+
+/**
+ * 🔴 **PDF を新しい添付にした知らせの隣の「参照をコピー」を出し入れする**(Gemini 裁定 = #1163 の依頼 34 の Q4、#1626)。
+ *
+ * 窓で抜き出した・並べ替えた PDF を保存すると、知らせには「そのノートを開く」しか無く、本文に貼るには
+ * 「開く → 参照をコピー → 貼る先へ移る」と手順が多かった。知らせに「参照をコピー」を並べ、貼りたいノートで貼るだけにする。
+ * 🔑 出す条件は 2 つ ── ①「開く」の身元(`noticeOpen`)がある ②いま画面に出ている 1 行が、その保存の知らせそのもの
+ *   (`PDF_SAVED_NOTICE_TAIL` で終わる)。別の知らせが上書きしたら畳む(「開く」と同じ作法)。
+ * 🔑 押した先は `copy-entry-ref` の受け手(`binder.ts`。右の列・右クリックの「参照をコピー」と同じ 1 本)── 書くのは
+ *   `data-pkc-entry`(受け手が読む lid)と `hidden` だけ。押し先のノートが開いていても出す(貼るのは別のノートだから)。
+ * @returns 出したか(⚠ 自動で消える時計の判定は「開く」が持つ ── 同じ条件で出るので重ねて数えない)
+ */
+export function paintStatusCopyRef(
+  btn: HTMLElement,
+  state: StatusOpenState,
+  shownLine: string,
+): boolean {
+  const lid = state.noticeOpen;
+  const show = lid !== null && state.notice === shownLine && shownLine.endsWith(PDF_SAVED_NOTICE_TAIL);
+  if (show) btn.setAttribute('data-pkc-entry', lid);
+  else btn.removeAttribute('data-pkc-entry');
   if (btn.hidden !== !show) btn.hidden = !show;
   return show;
 }
