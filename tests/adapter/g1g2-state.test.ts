@@ -148,10 +148,10 @@ describe('299 ゴミ箱の中に居る相手へのつながり', () => {
   const item = (root: HTMLElement): HTMLElement =>
     root.querySelector<HTMLElement>('[data-pkc-field="inspector-relations"] [data-pkc-field="relation-target-link"]')!;
 
-  it('🔴 相手が一覧に居ないつながりは「(ゴミ箱の中)」と出て、押せる顔にしない', () => {
+  it('🔴 相手が一覧に居ないつながりは、ゴミ箱を読む前は断定せず、押せる顔にしない', () => {
     const { root, d } = boot([meta('a')], [relation()]);
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
-    expect(item(root).textContent).toBe('(ゴミ箱の中)');
+    expect(item(root).textContent).toBe('(見つかりません。ゴミ箱の中かもしれません)');
     expect(item(root).tagName, '押しても開かないのにボタンの顔').toBe('SPAN');
     expect(item(root).getAttribute('data-pkc-action')).toBeNull();
   });
@@ -164,6 +164,13 @@ describe('299 ゴミ箱の中に居る相手へのつながり', () => {
       items: [{ revId: 'rv', entryLid: 'gone', createdAt: null, title: '相手の題名', archetype: 'text' }],
     });
     expect(item(root).textContent).toBe('相手の題名(ゴミ箱の中)');
+  });
+
+  it('🔴 ゴミ箱の一覧に居なければ「(見つかりません)」── ゴミ箱の中だと言い切らない', () => {
+    const { root, d } = boot([meta('a')], [relation()]);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'TRASH_LIST_LOADED', items: [] });
+    expect(item(root).textContent).toBe('(見つかりません)');
   });
 
   it('対照群: 相手が居るつながりは、従来どおり押せる題名', () => {
