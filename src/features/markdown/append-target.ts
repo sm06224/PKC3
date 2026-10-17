@@ -26,7 +26,8 @@
  * 🔑 **pure module**。DOM も窓も知らない。
  */
 import { makeSlugCounter } from './markdown-toc';
-import { frontmatterLineCount, parseFrontmatter } from './frontmatter';
+import { extractVars, frontmatterLineCount, parseFrontmatter } from './frontmatter';
+import { expandVarsInText } from './var-expand';
 import { fenceStep } from './list-renumber';
 import { stripComments } from './markdown-render';
 
@@ -69,7 +70,11 @@ function scanHeadings(body: string): HeadingAt[] {
   // 🔑 frontmatter の**行数**だけ借りて、その先から見る(剥がした本文は使わない)
   const fm = parseFrontmatter(stripped.transformed);
   const skip = fm.found ? lines.length - fm.body.split(/\r?\n/).length : 0;
-  const slugOf = makeSlugCounter();
+  const slugCounter = makeSlugCounter();
+  // 🔴 id は描画と同じく**変数を展開した字**から作る(#1087 N2)── 生の `{{vars.x}}` で作ると
+  //   描画の id と食い違い、埋め込みが「見出しが見つかりません」になる。展開は描画と同じ関数・その本文自身の vars。
+  const vars = extractVars(body);
+  const slugOf = (t: string): string => slugCounter(expandVarsInText(t, vars));
   const out: HeadingAt[] = [];
   let fence = '';
   // 下線の見出しの本文候補(記法を持たない素の行の並び)と、その最初の行(原文)

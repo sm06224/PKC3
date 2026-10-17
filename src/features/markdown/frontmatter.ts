@@ -950,6 +950,11 @@ export function extractVars(body: string): Record<string, string> {
         j++;
         continue;
       }
+      // コメント行(`  # …`)も飛ばす(YAML)── ここで終わると後ろの変数が未定義になる(#1087 N9)
+      if (/^\s+#/u.test(child)) {
+        j++;
+        continue;
+      }
       const m = new RegExp(`^(\\s+)(${VAR_NAME_SOURCE})\\s*:\\s*(.*)$`, 'u').exec(child);
       if (!m) break;  // 非インデント or 不正形式 = nested 終了
       const key = m[2]!;
@@ -975,6 +980,16 @@ export function extractVars(body: string): Record<string, string> {
 /** quoted string / scalar を string 化して返す。null は空文字。 */
 function parseVarValue(raw: string): string {
   if (raw === '' || raw === '~' || /^null$/i.test(raw)) return '';
+  const dq = /^"((?:[^"\\]|\\.)*)"(?:\s+#.*)?$/u.exec(raw);
+  // 🔑 閉じた引用の**後ろ**の ` # …` はコメント(YAML)── 引用ごと値に残さない(#1087 N9)
+  if (dq) {
+    return dq[1]!.replace(/\\(["\\nt])/gu, (_m, ch: string) =>
+      ch === 'n' ? '\n' : ch === 't' ? '\t' : ch,
+    );
+  }
+  const sq = /^'((?:[^']|'')*)'(?:\s+#.*)?$/u.exec(raw);
+  if (sq) return sq[1]!.replace(/''/gu, "'");
+  // 従来の取り方(閉じの後ろにコメントが無く、中に同じ引用符がある `"a"b"` など)は変えない
   if (raw.length >= 2) {
     const f = raw[0];
     const l = raw[raw.length - 1];

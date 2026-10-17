@@ -22,7 +22,7 @@
  *   - Language class hint on fenced code blocks
  */
 
-import { fenceStep, advanceIndent, INDENT_START, LIST_LEAD, type IndentState } from './list-renumber';
+import { fenceStep } from './list-renumber';
 import MarkdownIt from 'markdown-it';
 import { parseTagLine } from '../flavor/body-tags';
 import { MAX_TAGS, sameTag } from '../flavor/tags';
@@ -38,6 +38,7 @@ import footnotePlugin from 'markdown-it-footnote';
 import cjkFriendlyPlugin from 'markdown-it-cjk-friendly';
 import { makeSlugCounter } from './markdown-toc';
 import { VAR_NAME_SOURCE } from './frontmatter';
+import { expandVarsInText, fenceTransition, VAR_OPEN, VAR_SEP, type FenceState } from './var-expand';
 import { highlightCode, isHighlightable } from './code-highlight';
 import { cellEditButtonHtml, detectCsvLang, renderCsvFence } from './csv-table';
 import { isSqlEmbedInfo, sqlEmbedHostHtml } from './sql-embed';
@@ -1491,11 +1492,25 @@ md.renderer.rules.image = function (tokens, idx, options, env, self) {
       `${collectSourceLineAttrs(token)}>`
     );
   }
-  if (src.startsWith('entry:')) {
+  // 🔴 リンク側と同じ綴りを受ける(#1087 N13)── `Entry:` は大小を問わず、`pkc://<この入れ物>/entry/<lid>[#…]` は
+  //    `entry:<lid>[#…]` と同じ。他の入れ物の `pkc://` は今までどおり埋め込みにしない。
+  //    ⚠ 受け手(`parseEntryRef` / 展開)は小文字の `entry:` だけを受けるので、器へ焼く値は**小文字の綴りへ揃える**。
+  let embedSrc: string | null = null;
+  if (/^entry:/i.test(src)) {
+    embedSrc = `entry:${src.slice('entry:'.length)}`;
+  } else if (src.startsWith('pkc:')) {
+    const rawEnv = (env ?? {}) as { currentContainerId?: unknown };
+    const cid = typeof rawEnv.currentContainerId === 'string' ? rawEnv.currentContainerId : '';
+    const parsed = parsePortablePkcReference(src);
+    if (parsed !== null && cid !== '' && parsed.containerId === cid && parsed.kind === 'entry') {
+      embedSrc = `entry:${parsed.targetId}${parsed.fragment ?? ''}`;
+    }
+  }
+  if (embedSrc !== null) {
     // markdown-it stashes the alt text on token.content by the time
     // the renderer runs (inline children were already linearized).
     const alt = token.content ?? '';
-    const srcEsc = escapeHtmlAttr(src);
+    const srcEsc = escapeHtmlAttr(embedSrc);
     const altEsc = escapeHtmlAttr(alt);
     // 🔴 器の中に**字を入れる**(#1459 ①)── 展開しない面(書き出し HTML / Word / PDF / 下見)で
     //    空の枠にならないように。説明が無ければ「別のノートの内容」。展開する面は子を差し替えるので画面は変わらない
@@ -2513,43 +2528,6 @@ md.inline.ruler.before('html_inline', 'pkc_html_br', function htmlBrRule(state, 
 //
 // 未定義変数は post-process まで sentinel(U+E140 / U+E141)で残し、最終
 // 段で `<span class="pkc-variable-undefined">` に置換。
-
-const VAR_OPEN = '\u{E140}';
-const VAR_SEP = '\u{E141}';
-// 名前の字の範囲は frontmatter の `VAR_NAME_SOURCE` 1 本(定義 `vars:` と展開で食い違わせない。日本語の名前も通る)
-const VAR_ESCAPED_RE = new RegExp(`\\\\\\{\\{(vars\\.${VAR_NAME_SOURCE})\\}\\}`, 'gu');
-const VAR_REF_RE = new RegExp(`\\{\\{\\s*vars\\.(${VAR_NAME_SOURCE})\\s*\\}\\}`, 'gu');
-const VAR_ESCAPE_BACK_RE = new RegExp(`\\u{E142}(vars\\.${VAR_NAME_SOURCE})\\u{E143}`, 'gu');
-
-function expandVarsInText(source: string, vars: Record<string, string>): string {
-  if (!source) return source;
-  /**
-   * 🔴 **本文に目印が無いなら段ごと素通りする**(2026-08-07)。出力は 1 バイトも
-   * 変わらない ── この段は目印が 1 つも無ければ全行をそのまま流すだけである。
-   * ⚠ 目印は**広い側**に取る(狭すぎるとその記法が黙って効かなくなる)。
-   */
-  if (!source.includes('{{')) return source;
-  const lines = splitLines(source);
-  let fence: FenceState = { inFence: false, marker: '' };
-  return lines.map((line) => {
-    const t = fenceTransition(line, fence);
-    fence = t.state;
-    if (fence.inFence || t.isBoundary) return line;
-    // escape(`\{{vars.x}}`)優先。先に escape を sentinel(U+E142)で隠して
-    // 通常の置換を行い、最後に元に戻す。
-    let out = line.replace(VAR_ESCAPED_RE, '\u{E142}$1\u{E143}');
-    out = out.replace(VAR_REF_RE, (_match, key: string) => {
-      if (Object.prototype.hasOwnProperty.call(vars, key)) {
-        const v = vars[key]!;
-        // escape sentinel char が値内にあれば剥がす(衝突対策)
-        return v.replace(new RegExp(`[${VAR_OPEN}${VAR_SEP}]`, 'g'), '');
-      }
-      return `${VAR_OPEN}${key}${VAR_SEP}`;
-    });
-    out = out.replace(VAR_ESCAPE_BACK_RE, (_m, ref: string) => `{{${ref}}}`);
-    return out;
-  }).join('\n');
-}
 
 function postProcessVariableUndefined(html: string): string {
   // sentinel `U+E140 key U+E141` を `<span class="pkc-variable-undefined">` に変換。
@@ -3683,34 +3661,6 @@ const FIG_REF_CLOSE = '';
 //   - inFence === true かつ line が fence 閉じ(同 marker)→ 閉じとして state 遷移、line は素通し
 //   - inFence === true (中身)→ line は素通し
 //   - inFence === false (通常)→ marker 検出ロジック適用
-
-interface FenceState {
-  inFence: boolean;
-  marker: string;  // '```' or '~~~'(空 = 閉。`inFence` かつ空 = 字下げのコード)
-  ind?: IndentState;  // 字下げのコードの追跡(無ければ文書の頭)
-}
-
-function fenceTransition(line: string, state: FenceState): { state: FenceState; isBoundary: boolean } {
-  // 🔑 開閉の規則の正本は `advanceFence`(記号の種類 + 長さ。#1087)。
-  //   かつては種類しか見ず、4 つの ``` の中の ``` で閉じたことになり、中の `%%%` / `:::` が生きた。
-  //   ⚠ 引用・リストの項目の中の fence(`> ````  / `- ````)も同じ正本が見る(M9)。
-  const inRealFence = state.inFence && state.marker !== '';
-  const cur = inRealFence ? state.marker : '';
-  const st = fenceStep(cur, line);
-  const next = st.next;
-  const ind = state.ind ?? INDENT_START;
-  // 🔴 入れ物(引用・リストの項目)が終わって fence が打ち切られた行は `inside` が偽 ── 外の行として読む
-  if (inRealFence && st.inside && next === cur) return { state, isBoundary: false };
-  if (st.inside) {
-    const after: IndentState = { blank: false, list: ind.list || LIST_LEAD.test(line), code: false };
-    return next === ''
-      ? { state: { inFence: false, marker: '', ind: after }, isBoundary: true }
-      : { state: { inFence: true, marker: next, ind: after }, isBoundary: true };
-  }
-  // fence の外 ── 字下げのコード(4 SP。空行の後で、リストの中ではないもの)も素通しの対象(M9)
-  const r = advanceIndent(ind, line);
-  return { state: { inFence: r.code, marker: '', ind: r.state }, isBoundary: false };
-}
 
 function processFigureBlocks(source: string, lineMapIn: number[]): {
   transformed: string;

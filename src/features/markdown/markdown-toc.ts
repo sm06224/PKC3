@@ -32,7 +32,8 @@ export interface TocEntryLike {
 }
 type Entry = TocEntryLike;
 import { buildTextlogDoc, type TextlogOrder } from '../textlog/textlog-doc';
-import { parseFrontmatter, extractVars, VAR_NAME_SOURCE } from './frontmatter';
+import { parseFrontmatter, extractVars } from './frontmatter';
+import { expandVarsInText, restoreUndefinedVars } from './var-expand';
 import { fenceStep } from './list-renumber';
 
 export type TocLevel = 1 | 2 | 3;
@@ -169,12 +170,8 @@ export function extractHeadingsFromMarkdown(
   // 用途では line index 不変)。
   const fm = parseFrontmatter(markdown);
   let body = fm.body;
-  const vars = extractVars(markdown);
-  if (vars) {
-    body = body.replace(new RegExp(`\\{\\{\\s*vars\\.(${VAR_NAME_SOURCE})\\s*\\}\\}`, 'gu'), (_m, key: string) =>
-      Object.prototype.hasOwnProperty.call(vars, key) ? vars[key]! : `{{vars.${key}}}`,
-    );
-  }
+  // 🔑 展開は描画と**同じ関数**(escape `\{{…}}` ・未定義の扱いまで同じ。#1087)
+  body = expandVarsInText(body, extractVars(markdown));
   body = stripMismatchedIfBlocks(body, 'html');
 
   const lines = body.split(/\r?\n/);
@@ -200,7 +197,7 @@ export function extractHeadingsFromMarkdown(
         const text = para.join(' ').trim();
         para = [];
         if (text) {
-          headings.push({ level: (u[1]![0] === '=' ? 1 : 2) as TocDepth, text, slug: slugOf(text) });
+          headings.push({ level: (u[1]![0] === '=' ? 1 : 2) as TocDepth, text: restoreUndefinedVars(text), slug: slugOf(text) });
         }
         continue;
       }
@@ -213,7 +210,7 @@ export function extractHeadingsFromMarkdown(
     const level = m[1]!.length as TocLevel;
     const text = m[2]!.trim();
     if (!text) continue;
-    headings.push({ level: level as TocDepth, text, slug: slugOf(text) });
+    headings.push({ level: level as TocDepth, text: restoreUndefinedVars(text), slug: slugOf(text) });
   }
   return headings;
 }
