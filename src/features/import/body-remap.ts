@@ -24,12 +24,33 @@ export function replacePrefixed(
   body: string,
   prefix: string,
   map: ReadonlyMap<string, string>,
+  /**
+   * 🔴 PKC2 の asset key は `.` を含みうる(`ast-1.v2` ── `pkc2-package.ts` の `VALID_KEY`)。
+   *   true のときだけ token に `.` を含め、**知っている key との最長一致**で写す
+   *   (`ast-1` と `ast-1.v2` が両方在れば、それぞれ自分の写し先へ)。
+   *   ⚠ 一致が無いときは `.` の手前までの最長一致へ戻す(`asset:ast-1.` のように文末の句点が
+   *   付いても、`ast-1` は写る ── 直す前の挙動を保つ)。どれも map に無い token はそのまま。
+   *   ⚠ 取り込みの PKC2 経路だけが true にする(既定の字種は他の呼び側と揃えてある)。
+   */
+  dotted = false,
 ): string {
   if (map.size === 0) return body;
-  return body.replace(
-    new RegExp(`${prefix}[A-Za-z0-9_-]+`, 'g'),
-    (m) => prefix + (map.get(m.slice(prefix.length)) ?? m.slice(prefix.length)),
-  );
+  if (!dotted) {
+    return body.replace(
+      new RegExp(`${prefix}[A-Za-z0-9_-]+`, 'g'),
+      (m) => prefix + (map.get(m.slice(prefix.length)) ?? m.slice(prefix.length)),
+    );
+  }
+  return body.replace(new RegExp(`${prefix}[A-Za-z0-9_.-]+`, 'g'), (m) => {
+    const token = m.slice(prefix.length);
+    // 長い側(全体)から `.` を 1 つずつ手前へ縮めて、最初に map に在った物を採る
+    for (let end = token.length; end > 0; end = token.lastIndexOf('.', end - 1)) {
+      const hit = map.get(token.slice(0, end));
+      if (hit !== undefined) return prefix + hit + token.slice(end);
+    }
+    // どの手前までも map に無い token はそのまま(壊れた参照は壊れたまま残す)
+    return m;
+  });
 }
 
 /**

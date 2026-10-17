@@ -2994,6 +2994,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
 
   const importDeps: ImportDeps = {
+      // 🔴 取り込みの最中にタブを閉じる・読み直すときに「離れますか」を出す(書込は保存の効果層を通らない)
+      onWriting: (writing) => unloadGuard.setWriting(writing, 'import'),
       // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
       // revisions を持つ)と衝突すると、その item がゴミ箱から消え、
       // 取り込んだ entry が他人の履歴を背負う(review H-1、実 sqlite で実証)

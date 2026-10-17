@@ -113,6 +113,65 @@ function source(f: Fake): ArchiveSource {
 
 const NOW = '2026-08-02T00:00:00.000Z';
 
+describe('🔴 ゴミ箱のノートがあるコレクションのバックアップは、戻しても注意が出ない(I-4)', () => {
+  // ゴミ箱のノート `trash` は entries に居ない(listEntryMetas に出ない)が、
+  // つながり・履歴は残っている ── 実物の worker と同じ形
+  const trashed = () =>
+    source({
+      entries: [
+        { lid: 'parent', body: '親' },
+        { lid: 'child', body: '子' },
+      ],
+      relations: [
+        { id: 'r-ok', from_lid: 'parent', to_lid: 'child', kind: 'structural' },
+        { id: 'r-trash', from_lid: 'parent', to_lid: 'trash', kind: 'structural' },
+        { id: 'r-trash2', from_lid: 'trash', to_lid: 'child', kind: 'semantic' },
+      ],
+      revisions: {
+        child: [{ id: 'a', rev_order: 1, kind: 'full', snapshot: '子の前' }],
+        trash: [{ id: 'b', rev_order: 1, kind: 'full', snapshot: 'ゴミ箱の前' }],
+      },
+    });
+  const restoreOpts = () => {
+    let n = 0;
+    return {
+      existingLids: new Set<string>(),
+      existingRelationIds: new Set<string>(),
+      orderBase: 0,
+      genLid: () => `new-${++n}`,
+      genRelationId: () => `rel-${++n}`,
+    };
+  };
+
+  it('書くのは書いたノートのつながり・履歴だけ(ゴミ箱の分は書かない)', async () => {
+    const out = await writeArchive(trashed(), NOW);
+    expect(out.counts.relations).toBe(1);
+    expect(out.counts.revisions).toBe(1);
+    const got = await readArchive(out.blob);
+    expect(got.relations.map((r) => r.id)).toEqual(['r-ok']);
+    expect(got.revisions.map((r) => r.entryLid)).toEqual(['child']);
+  });
+
+  it('戻したとき、つながりも履歴も落とさず、注意も出ない(直す前は 2 件の注意が必ず出た)', async () => {
+    const got = restoreArchive(await readArchive((await writeArchive(trashed(), NOW)).blob), restoreOpts());
+    expect(got.warnings).toEqual([]);
+    expect(got.relations).toHaveLength(1);
+    expect(got.revisionChains.map((c) => c.rows.length)).toEqual([1]);
+  });
+
+  it('対照群: ゴミ箱の物が無いコレクションは今までどおり全部書く', async () => {
+    const out = await writeArchive(
+      source({
+        entries: [{ lid: 'a', body: 'a' }, { lid: 'b', body: 'b' }],
+        relations: [{ id: 'r', from_lid: 'a', to_lid: 'b', kind: 'semantic' }],
+        revisions: { a: [{ id: 'x', rev_order: 1, kind: 'full', snapshot: 's' }] },
+      }),
+      NOW,
+    );
+    expect(out.counts).toMatchObject({ relations: 1, revisions: 1 });
+  });
+});
+
 describe('アーカイブ ZIP — round-trip', () => {
   it('🔑 entry の**中身**が往復する(件数だけ見ない)', async () => {
     const src = source({

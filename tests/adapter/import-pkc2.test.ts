@@ -71,6 +71,10 @@ interface HarnessOptions {
    *   口が無い配線でも取込が壊れないことを、既存 41 件がそのまま見ている。
    */
   existingBodies?: ReadonlyMap<string, string>;
+  /** 添付の bytes の書込を、この例外で失敗させる(空き容量が無い端末の再現。I-3)。 */
+  failBlob?: Error;
+  /** 添付の bytes を書く直前に走る(I-2: 取り込みが飛んでいる間の「書いている」を見る)。 */
+  onBlob?(): void | Promise<void>;
 }
 
 function harness(opts: HarnessOptions = {}) {
@@ -96,6 +100,9 @@ function harness(opts: HarnessOptions = {}) {
   const importedCalls: string[][] = [];
   const importedOpts: Array<{ readonly tagColors?: boolean } | undefined> = [];
   const failures: Array<{ message: string; undoable: boolean | undefined }> = [];
+  /** `onWriting` に来た値の記録(I-2)と、`report` が呼ばれた回数(I-5)。 */
+  const writingLog: boolean[] = [];
+  let reportCalls = 0;
 
   const d = new Dispatcher();
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
@@ -148,6 +155,8 @@ function harness(opts: HarnessOptions = {}) {
       };
     },
     putBlob: async (key, blob) => {
+      await opts.onBlob?.();
+      if (opts.failBlob) throw opts.failBlob;
       opLog.push(`blob:${key}`);
       blobs.set(key, blob);
     },
@@ -193,7 +202,8 @@ function harness(opts: HarnessOptions = {}) {
       });
     },
     notify: (m) => notices.push(m),
-    report: (n) => { reported = n; },
+    report: (n) => { reported = n; reportCalls++; },
+    onWriting: (w) => { writingLog.push(w); },
     imported: (lids, o) => { importedCalls.push([...lids]); importedOpts.push(o); },
     ...(opts.captureFailure
       ? { reportFailure: (message: string, undoable?: boolean) => void failures.push({ message, undoable }) }
@@ -215,6 +225,8 @@ function harness(opts: HarnessOptions = {}) {
     importedCalls,
     importedOpts,
     failures,
+    writingLog,
+    reportCalls: () => reportCalls,
   };
 }
 
@@ -2053,5 +2065,153 @@ describe('[B6] 添付が多いバックアップの取り込みは、進み具�
     expect(progress).toContain('取り込み中(添付を書き込んでいます 40 / 45)');
     expect(progress.some((m) => m.includes('45 / 45'))).toBe(false);
     expect(notices.at(-1)).toMatch(/^取り込み完了: 1 件/);
+  });
+});
+
+describe('取り込みの取りこぼし(I-2 / I-3 / I-5)', () => {
+  const oneNote = (assets?: Record<string, string>) =>
+    htmlFile({
+      container: {
+        meta: {},
+        entries: [{ lid: 'a', title: 'ノート', archetype: 'text', body: 'x\n' }],
+        ...(assets ? { assets } : {}),
+      },
+      export_meta: { asset_encoding: 'base64' },
+    });
+
+  it('[I-2] 取り込みが飛んでいる間は「書いている」で、成功しても終われば戻す', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const seen: boolean[][] = [];
+    const h = harness({
+      onBlob: async () => {
+        seen.push([...h.writingLog]); // 添付を書いている最中の記録
+        await gate;
+      },
+    });
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [
+          { lid: 'att', title: 'a', archetype: 'attachment', body: JSON.stringify({ name: 'a.txt', mime: 'text/plain', asset_key: 'k' }) },
+        ],
+        assets: { k: base64('bytes') },
+      },
+      export_meta: { asset_encoding: 'base64' },
+    });
+    const running = importPkc2File(h.d, h.deps, file);
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    expect(seen[0], '書込が飛んでいる間に「書いている」になっていない').toEqual([true]);
+    release();
+    expect(await running).toBe(1);
+    expect(h.writingLog, '終わっても戻していない').toEqual([true, false]);
+  });
+
+  it('[I-2] 断った取り込み・書込が失敗した取り込みでも戻す(戻し忘れで確認が出続けない)', async () => {
+    const refused = harness();
+    expect(await importPkc2File(refused.d, refused.deps, new File(['<html>PKC2 ではない</html>'], 'x.html'))).toBeNull();
+    expect(refused.writingLog).toEqual([true, false]);
+
+    const failed = harness({ failRelations: true });
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [
+          { lid: 'a', title: 'a', archetype: 'text', body: 'a\n' },
+          { lid: 'b', title: 'b', archetype: 'text', body: 'b\n' },
+        ],
+        relations: [{ id: 'r1', from: 'a', to: 'b', kind: 'structural' }],
+      },
+      export_meta: {},
+    });
+    expect(await importPkc2File(failed.d, failed.deps, file)).toBeNull();
+    expect(failed.writingLog).toEqual([true, false]);
+  });
+
+  it('[I-3] 空き容量が無くて添付が書けないときは、ノートを 1 件も書かずに 1 つの断りで終える', async () => {
+    const h = harness({ failBlob: Object.assign(new Error('The quota has been exceeded.'), { name: 'QuotaExceededError' }), captureFailure: true });
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: ['a', 'b', 'c'].map((k) => ({
+          lid: `att-${k}`,
+          title: `添付${k}`,
+          archetype: 'attachment',
+          body: JSON.stringify({ name: `${k}.txt`, mime: 'text/plain', asset_key: `k-${k}` }),
+        })),
+        assets: { 'k-a': base64('A'), 'k-b': base64('B'), 'k-c': base64('C') },
+      },
+      export_meta: { asset_encoding: 'base64' },
+    });
+    expect(await importPkc2File(h.d, h.deps, file)).toBeNull();
+    expect(h.written, '空きが無いのにノートだけ書いた').toEqual([]);
+    expect(h.importedCalls).toEqual([]);
+    expect(h.reportCalls()).toBe(0);
+    expect(h.failures).toHaveLength(1);
+    expect(h.failures[0]!.message).toContain('空きが足りないため取り込めませんでした');
+    expect(h.failures[0]!.message).toContain('ノートは 1 件も追加されていません');
+    expect(h.notices.at(-1), '進行中の字が残る').toBe('');
+  });
+
+  it('[I-3] 対照群: 空き容量以外の理由で添付が落ちたときは、従来どおりノートは入って注意が出る', async () => {
+    const h = harness({ failBlob: new Error('別の理由') });
+    expect(
+      await importPkc2File(
+        h.d,
+        h.deps,
+        htmlFile({
+          container: {
+            meta: {},
+            entries: [{ lid: 'att', title: 'a', archetype: 'attachment', body: JSON.stringify({ name: 'a.txt', mime: 'text/plain', asset_key: 'k' }) }],
+            assets: { k: base64('A') },
+          },
+          export_meta: { asset_encoding: 'base64' },
+        }),
+      ),
+    ).toBe(1);
+    expect(h.reportedNotes().join('\n')).toContain('「a」の添付を復元できませんでした');
+  });
+
+  it('[I-3] 同じ文の注意は 1 行にして件数を添える', async () => {
+    // 同じ題名のノートに付いた添付 3 本が、同じ理由で落ちる → 同じ文が 3 本できる
+    const h = harness({ failBlob: new Error('別の理由') });
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: ['a', 'b', 'c'].map((k) => ({
+          lid: `att-${k}`,
+          title: '同じ題名',
+          archetype: 'attachment',
+          body: JSON.stringify({ name: `${k}.txt`, mime: 'text/plain', asset_key: `k-${k}` }),
+        })),
+        assets: { 'k-a': base64('A'), 'k-b': base64('B'), 'k-c': base64('C') },
+      },
+      export_meta: { asset_encoding: 'base64' },
+    });
+    expect(await importPkc2File(h.d, h.deps, file)).toBe(3);
+    const lines = h.reportedNotes().filter((n) => n.includes('の添付を復元できませんでした'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('(3 件)');
+  });
+
+  it('[I-5] ノートが 1 件も入っていない書き出しは成功にしない ── 前の取り込みの取り消しを空で上書きしない', async () => {
+    const h = harness({ captureFailure: true });
+    const empty = htmlFile({
+      container: {
+        meta: {},
+        // システム用のノートしか無い(取り込む物が 0 件)
+        entries: [{ lid: '__settings__', title: 'x', archetype: 'system-settings', body: '{}' }],
+      },
+      export_meta: {},
+    });
+    expect(await importPkc2File(h.d, h.deps, empty)).toBeNull();
+    expect(h.failures.map((f) => f.message)).toEqual(['取り込めるノートが 1 件も入っていませんでした']);
+    expect(h.importedCalls, '空の一覧で「取り消し」の記憶を上書きした').toEqual([]);
+    expect(h.reportCalls()).toBe(0);
+    expect(h.notices.some((n) => n.includes('取り込み完了')), '0 件を成功と言った').toBe(false);
+    // 対照群: 1 件でも入っていれば今までどおり憶える
+    const ok = harness();
+    expect(await importPkc2File(ok.d, ok.deps, oneNote())).toBe(1);
+    expect(ok.importedCalls).toEqual([['a']]);
   });
 });

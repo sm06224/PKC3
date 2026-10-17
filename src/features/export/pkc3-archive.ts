@@ -261,6 +261,8 @@ export async function writeArchive(
   // ── container.json を**部品として**積む(丸ごと文字列にしない)
   const parts: ZipPart[] = [`{"meta":${j({ cid: src.cid, title: src.title })},"entries":[`];
   let entryCount = 0;
+  /** 実際に書いたノートの lid(下の relations / revisions を、書いたノートに絞るために持つ)。 */
+  const exportedLids = new Set<string>();
   let blobChars = 0;
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
@@ -281,6 +283,7 @@ export async function writeArchive(
       const e = toArchiveEntry(m, r.body);
       chunk += entryCount === 0 ? j(e) : `,${j(e)}`;
       entryCount++;
+      exportedLids.add(e.lid);
     }
     // 🔴 取り込み直す側は container.json を `Blob.text()` で 1 本の文字列にする ── 上限は**字数**で効く。
     //   Blob にすると字数が見えなくなる(bytes は日本語で約 3 倍)ので、手放す前に数える
@@ -297,15 +300,25 @@ export async function writeArchive(
   // ── relations
   const relations = await src.listRelations();
   parts.push('],"relations":[');
-  relations.forEach((r, i) => {
+  // 🔴 **書いたノートのつながりだけ**を書く(I-4)。ゴミ箱のノートは `entries` に書かないので、
+  //   そこへ向かうつながりを書くと、取り込み直したとき「つなぐ先のノートが無い」注意が必ず出る
+  //   (バックアップは壊れていないのに)。アーカイブにはゴミ箱の印が無く、取り込み側では
+  //   「ゴミ箱の物」と「壊れた物」を見分けられないので、書く側で絞る。取り込み側の注意は壊れた物のために残す。
+  let relCount = 0;
+  for (const r of relations) {
+    if (!exportedLids.has(r.from_lid) || !exportedLids.has(r.to_lid)) continue;
     const rel = toArchiveRelation(r);
-    parts.push(i === 0 ? j(rel) : `,${j(rel)}`);
-  });
+    parts.push(relCount === 0 ? j(rel) : `,${j(rel)}`);
+    relCount++;
+  }
 
   // ── revisions(**鎖のまま**。全文に展開しない)
   parts.push('],"revisions":[');
   let revCount = 0;
   for (const lid of await src.listRevisionLids()) {
+    // 🔴 書いていないノート(ゴミ箱)の履歴は書かない ── 取り込み側は鎖の起点(ノート)が無いと復元できず、
+    //   「ノートの無い履歴」の注意が必ず出ていた(I-4。上のつながりと同じ理由)
+    if (!exportedLids.has(lid)) continue;
     // 🔴 **保存形のまま**出す(P6e)。以前は版ごとに `getRevision` で全文へ
     // 復元しており、`kind: 'patch'` の行に全文が入る = **中身と食い違う**
     // アーカイブを書いていた(復元を実装した瞬間に壊れる)
@@ -339,7 +352,7 @@ export async function writeArchive(
         title: src.title,
         counts: {
           entries: entryCount,
-          relations: relations.length,
+          relations: relCount,
           revisions: revCount,
           assets: assetMetas.length,
         },
@@ -377,7 +390,7 @@ export async function writeArchive(
     warnings,
     counts: {
       entries: entryCount,
-      relations: relations.length,
+      relations: relCount,
       revisions: revCount,
       assets: assetCount,
     },
