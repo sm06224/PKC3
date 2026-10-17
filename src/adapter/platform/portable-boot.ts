@@ -197,3 +197,26 @@ export async function resolvePortableStart(
 
   return { bundle, dbName: bundleSqliteName(bundle.id), image, choice, embeddedFailure, store };
 }
+
+/**
+ * 🔴 **昇格・待ち明けのタブが開く画像を、器から読み直す**(多重タブ T1)。
+ *
+ * ⚠ `PortableStart.image` は**起動の 1 回だけ**読んだ物。先に書いていたタブが閉じて別のタブが書き手に
+ *   なるとき、それを開き直すと**先のタブの編集を持たない古い画像**で始まり、次の保存が器を上書きして
+ *   先のタブの編集が消える(`DbImageStore.write` は put)。
+ * 🔑 器を読み直し、**起動の判定(`chooseImage`)と同じ向き**で採る ── 別の PKC3 の記録・空の記録は採らない /
+ *   起動で「埋め込みのほうが新しい」と選んだ回は、器が埋め込みより新しい(`savedAt >= exportedAt`)ときだけ採る。
+ * ⚠ 読めなかったら**起動の画像へ戻す**(投げない ── 昇格を止めると、いまのノートが保存できなくなる)。
+ */
+export async function latestPortableImage(
+  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store'>,
+): Promise<Uint8Array | null> {
+  try {
+    const stored = await portable.store.read();
+    if (stored === null || stored.bundleId !== portable.bundle.id || stored.bytes <= 0) return portable.image;
+    if (portable.choice.use === 'embedded' && stored.savedAt < portable.bundle.exportedAt) return portable.image;
+    return stored.image;
+  } catch {
+    return portable.image;
+  }
+}

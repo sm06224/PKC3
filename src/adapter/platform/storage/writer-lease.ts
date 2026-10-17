@@ -39,6 +39,18 @@ export async function promoteOrReleaseLease<T>(
   }
 }
 
+/**
+ * 🔴 **昇格で開いた保存先が、空のメモリへ落ちていたら失敗にする**(多重タブ T2)。
+ *
+ * ⚠ OPFS が開けないと `memory`(空)に落ちるが、昇格のタブはそのまま書き手を名乗り、**空のノートを
+ *   見せたまま保存先が無い**。注意の通知も `memory` では出ない。
+ * 🔑 失敗にすれば `promoteOrReleaseLease` が lock を手放し、**別のタブが書き手になれる**。
+ * ⚠ 持ち歩ける 1 枚の HTML(`portable`)は**選んで** `memory` なので対象外。起動の経路は変えない。
+ */
+export function isPromotionMemoryFallback(args: { portable: boolean; vfs: string }): boolean {
+  return !args.portable && args.vfs === 'memory';
+}
+
 export function acquireWriterLease(name: string = WRITER_LOCK_NAME): WriterLease {
   let state: LeaseState = 'waiting';
   let releaseFn: (() => void) | null = null;

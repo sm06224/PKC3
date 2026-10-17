@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acquireWriterLease, promoteOrReleaseLease } from '../../src/adapter/platform/storage/writer-lease';
+import { acquireWriterLease, isPromotionMemoryFallback, promoteOrReleaseLease } from '../../src/adapter/platform/storage/writer-lease';
 
 /** Web Locks の最小の模型(ifAvailable / 待ち行列 / 返却で次へ)。判定は本物と同じ向き。 */
 function installFakeLocks(): void {
@@ -54,5 +54,35 @@ describe('promoteOrReleaseLease (#1087)', () => {
     await a.immediate;
     await expect(promoteOrReleaseLease(a, async () => 7)).resolves.toBe(7);
     expect(a.state()).toBe('held');
+  });
+});
+
+describe('isPromotionMemoryFallback(多重タブ T2)', () => {
+  it('素の PKC3 で昇格先が memory → 失敗にする / OPFS は通す', () => {
+    expect(isPromotionMemoryFallback({ portable: false, vfs: 'memory' })).toBe(true);
+    expect(isPromotionMemoryFallback({ portable: false, vfs: 'opfs-sahpool' })).toBe(false);
+  });
+
+  it('可搬単一 HTML は選んで memory なので失敗にしない', () => {
+    expect(isPromotionMemoryFallback({ portable: true, vfs: 'memory' })).toBe(false);
+  });
+
+  it('失敗にすれば lock が手放され、待っていた別のタブが書き手になれる', async () => {
+    installFakeLocks();
+    const a = acquireWriterLease('t2');
+    expect(await a.immediate).toBe(true);
+    const b = acquireWriterLease('t2');
+    expect(await b.immediate).toBe(false);
+    a.release();
+    await b.whenHeld;
+    const c = acquireWriterLease('t2');
+    expect(await c.immediate).toBe(false);
+    await expect(
+      promoteOrReleaseLease(b, async () => {
+        if (isPromotionMemoryFallback({ portable: false, vfs: 'memory' })) throw new Error('memory');
+      }),
+    ).rejects.toThrow('memory');
+    await c.whenHeld;
+    expect(c.state()).toBe('held');
   });
 });
