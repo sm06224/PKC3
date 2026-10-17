@@ -1241,6 +1241,11 @@ test('🔴 1 分を超えた録音は、残さずにやめる前に確かめる(
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await createEntry(page, 'text');
+  // ⚠ 編集中のままだと録音は本文に入らず預かりになる ── 1 行書いて保存してから録る(上の 1 本と同じ段取り)
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]').fill('# 長い録音');
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
   const bar = page.locator('[data-pkc-region="capture-bar"]');
   const statusLine = page.locator('[data-pkc-region="status"]');
   /**
@@ -1280,6 +1285,8 @@ test('🔴 1 分を超えた録音は、残さずにやめる前に確かめる(
   await expect(bar, '「続ける」を押したのに録音が止まった').toBeVisible();
   await skew(0);
   await expect(capStatus, '続けたあとも録音が進んでいない').toContainText('録音中');
+  // ⚠ 1 バイトも積まないうちに止めると「録れていません」になる ── 断片が届いてから止める(上の 1 本と同じ門)
+  await expect(capStatus, '1 バイトも積んでいない(断片が届いていない)').toContainText(/約 [1-9]/, { timeout: 15_000 });
   await clickReal(page, '[data-pkc-field="stop-capture"]');
   await expect(bar, '止めたのに帯が残っている').toBeHidden();
   await expect(assetRows, '続けて止めた録音が添付にならなかった').toHaveCount(rowsBefore + 1, {
