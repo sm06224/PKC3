@@ -423,6 +423,7 @@ import { APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta';
 import { diagramFileName } from '@features/export/file-name';
 import { renderToSvg, readPalette, svgWithIntrinsicSize } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND, hydrateAllNow } from '@adapter/ui/render/mermaid-hydrate';
+import { preparePrintBody } from '@adapter/ui/render/print-prepare';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { askSqlEmbed, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
@@ -3774,6 +3775,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const draftStore = new IdbDraftStore();
 
+  /** 🔴 紙に出す用意の控え(#1163 依頼 232 / 234)。`printRun` は刷りの回(用意が遅れて終わったかの見分け)。 */
+  let printRun = 0;
+  let printRestore: (() => void) | null = null;
   const services: BinderServices = {
     // 🔴 パソコンのフォルダ(#215)── 描画に渡したものと**同じ 1 つ**
     localFolder,
@@ -5389,7 +5393,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           getState: () => dispatcher.getState(),
           dispatch: (a) => dispatcher.dispatch(a),
           onState: (cb) => dispatcher.onState(cb),
-          print: () => window.print(),
+          // 🔴 刷り終えたら(印刷の画面が閉じたら)、刷るために開けた折りたたみと明るくした図を戻す(#1163 依頼 232 / 234)
+          print: () => {
+            printRun += 1;
+            try {
+              window.print();
+            } finally {
+              printRestore?.();
+              printRestore = null;
+            }
+          },
           // 🔴 画面の外の図は見えるまで描かれない ── 刷る前に本文の図を描き切る(#1087)
           //    ⚠ 本文が state に届いた直後は、図の器がまだ DOM に無いことがある(実測: 押してすぐだと器 0 個で刷った)
           //    ── 1 コマずつ 3 回、器を引き直して描く
@@ -5403,7 +5416,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                 typeof requestAnimationFrame === 'function' ? requestAnimationFrame(() => r()) : setTimeout(r, 16),
               );
               const body = document.querySelector('[data-pkc-field="detail-body"]');
-              if (body) await hydrateAllNow(body);
+              if (body === null) continue;
+              if (printRestore === null) {
+                // 🔴 刷る間だけ、折りたたみを開き(#1163 依頼 234)、図を明るい配色で描く(依頼 232 / 349)。
+                //    ⚠ 上限時間を超えて終わった回は、終わった瞬間に自分で戻す(`printRun` が進んでいる)
+                const run = printRun;
+                const restore = await preparePrintBody(body, () => run === printRun);
+                // ⚠ 終わるのが遅れて刷りが済んだ後なら、もう戻してある(`restore` を持ち越さない ── 次の刷りの用意が飛ぶ)
+                printRestore = run === printRun ? restore : null;
+              } else {
+                await hydrateAllNow(body);
+              }
             }
           },
         },

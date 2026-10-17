@@ -27,6 +27,7 @@ import { markViewBig } from './view-big';
 import { watchDevicePixelRatio } from './dpr-watch';
 import { watchVisible } from './visible-watch';
 import { typingQuietIn } from './typing-gate';
+import { PRINT_PALETTE, PRINT_THEME, printLightActive, setPrintLight } from './diagram-print';
 
 /** 1 つの器を埋めるのに要る情報。 */
 interface Pending {
@@ -101,6 +102,45 @@ function saveButton(): HTMLButtonElement {
 
 function themeOf(): string {
   return document.documentElement.getAttribute('data-pkc-theme') ?? 'light';
+}
+
+/**
+ * 🔴 **いま描くときの配色**(鍵に入る名前と色)。⚠ 読み口はここ 1 か所 ── 描くとき(`paintOnce`)と焼き直しの要否
+ * (`recheck`)が別々に読むと、刷っている間だけ片方がずれて**焼き直しが終わらない**(#1163 依頼 232)。
+ * 刷るために明るい配色へ差し替えている間(`diagram-print.ts`)は、画面の配色ではなく紙の配色を返す。
+ */
+function lookOf(): { theme: string; palette: ReturnType<typeof readPalette> } {
+  return printLightActive()
+    ? { theme: PRINT_THEME, palette: PRINT_PALETTE }
+    : { theme: themeOf(), palette: readPalette() };
+}
+
+/**
+ * 🔴 **刷る間だけ、図を明るい配色で描き直す**(#1163 依頼 232 / 349)。
+ *
+ * 描き直しが終わるまで待つ。返り値を呼ぶと画面の配色へ戻す(戻した絵は鍵が同じなので IDB のキャッシュから出る)。
+ * ⚠ 画面全体のテーマは変えない(`<html data-pkc-theme>` に触らない ── 刷っている間、画面が明るく点滅する)。
+ * ⚠ 見えていない器も描く(`hydrateAllNow` と同じ。紙は画面の外も刷る)。
+ */
+export async function renderDiagramsLightForPrint(root: ParentNode): Promise<() => void> {
+  setPrintLight(true);
+  // ⚠ 焼いた器の焼き直しは、配色の変化を聞く口(`recheck`)に任せる ── 条件の判定は鍵の 1 本のまま
+  for (const w of [...themeWatchers]) w();
+  let restored = false;
+  const restore = (): void => {
+    if (restored) return;
+    restored = true;
+    setPrintLight(false);
+    for (const w of [...themeWatchers]) w();
+  };
+  try {
+    await hydrateAllNow(root);
+  } catch (e) {
+    // ⚠ 投げたまま抜けると、明るい配色が立ったまま残る(以後の図が全部明るく焼かれる)
+    restore();
+    throw e;
+  }
+  return restore;
 }
 
 /**
@@ -339,10 +379,11 @@ export function hydrateDiagrams(
     const at = genAt(p.host);
     let currentKey = '';
     try {
+      const look = lookOf();
       const key = {
         source: p.source,
-        theme: themeOf(),
-        palette: readPalette(),
+        theme: look.theme,
+        palette: look.palette,
         width: widthOf(p.host),
         dpr: window.devicePixelRatio || 1,
         ...(opts.volatile === true ? { volatile: true } : {}),
@@ -466,8 +507,7 @@ export function hydrateDiagrams(
     if (disposed) return;
     // ⚠ テーマと配色と dpr は**器によらない**ので 1 度だけ読む
     //    (`readPalette` は `getComputedStyle` なので、器ごとに呼ぶと高い)
-    const theme = themeOf();
-    const palette = readPalette();
+    const { theme, palette } = lookOf();
     const dpr = window.devicePixelRatio || 1;
     // ⚠ **焼き始めた器**を対象にする ── 焼き終わったもの(`urlOf`)だけだと、
     //    ちょうど焼いている最中の 1 枚が古い条件のまま残る
