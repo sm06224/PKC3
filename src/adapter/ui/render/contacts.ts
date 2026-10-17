@@ -214,7 +214,11 @@ export class ContactsRenderer {
     const scan = state.contactScan;
     if (scan === null) return '連絡先を集めています…';
     if (scan.cards.length === 0)
-      return '連絡先はまだありません。ノートの先頭に tel: か email: を書くと、ここに並びます。';
+      return (
+        '連絡先はまだありません。ノートの先頭に tel: か email: を書くと、ここに並びます。' +
+        // 🔴 取り込みの口は左のペインの下だけ(#1654 の 3。Gemini 裁定 = #1163 の依頼 44 の 3)。場所を言う 1 文だけを足す
+        'スマホの .vcf は、左のペインの下の「取り込む」から入れられます。'
+      );
     if (shown === 0) return '絞り込みに一致する連絡先がありません';
     const cut = scan.truncated ? '(多いので途中まで集めました)' : '';
     return `${shown} 件${cut}`;

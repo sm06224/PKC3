@@ -130,6 +130,14 @@ describe('連絡先の面(#278)', () => {
     expect(rows(host)).toHaveLength(0);
   });
 
+  it('🔴 1 件も無いときは、スマホの .vcf を入れる場所(左のペインの下の「取り込む」)も言う(#1654 の 3)', () => {
+    const none = note(paint({ contactScan: scanOf([]) }));
+    expect(none).toContain('.vcf');
+    expect(none).toContain('左のペインの下の「取り込む」');
+    // 対照群: 1 件でも在るときは案内を出さない
+    expect(note(paint({ contactScan: scanOf([card('a', '山田', ['09012345678'], [])]) }))).not.toContain('.vcf');
+  });
+
   it('🔴 名前を押すとそのノートが開く(開く口を増やさない)', () => {
     const host = paint({ contactScan: scanOf([card('a', '山田', ['090-1234-5678'])]) });
     const open = rows(host)[0]!.querySelector('[data-pkc-field="contact-name"]')!;

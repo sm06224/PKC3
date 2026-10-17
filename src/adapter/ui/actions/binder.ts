@@ -221,7 +221,8 @@ import { safeName } from '@features/export/file-name';
 import { hasTranscriptCues, srtFromTranscript, transcriptCues } from '@features/asr/srt';
 import { decodeTaskDrag, dropTaskCard, encodeTaskDrag } from '@adapter/ui/render/schedule-drag';
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
-import { undoScheduleMove } from '@adapter/ui/render/schedule-undo';
+import { offerDoneUndo, undoScheduleMove } from '@adapter/ui/render/schedule-undo';
+import { plainTaskTitle } from '@features/schedule/task-title';
 import {
   DATE_SHORTCUTS,
   isDateShortcut,
@@ -10127,7 +10128,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       );
     });
   },
-  'toggle-task': (dispatcher, target, services) => {
+  'toggle-task': (dispatcher, target, services, root) => {
     const raw = target.getAttribute('data-pkc-task-line');
     const line = Number(raw);
     if (raw === null || !Number.isInteger(line) || line < 0) return;
@@ -10221,7 +10222,18 @@ const ACTIONS: Record<string, ActionHandler> = {
       guarded(() => dispatcher.dispatch({ type: 'MATERIALIZE_REPEAT', lid, line, openLine, date: on }), lid);
       return;
     }
-    guarded(() => dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line, openLine }), lid);
+    /**
+     * 🔴 **札(予定の一覧・表・かんばん)の ☐ で未完を済みにしたときは、動かしたときと同じ「元に戻す」を出す**
+     * (#1654 の 2。Gemini 裁定 = #1163 の依頼 44 の 2)。済みにした札は一覧から消えるので、間違えても戻す口が無かった。
+     * ⚠ 本文の面の ☐ には出さない(その場に残るので押し直せる)。済みから戻す押し方にも出さない。
+     */
+    const isCard = target.closest('article[data-pkc-entry]') !== null;
+    const task = isCard ? st.taskScan?.cards.find((c) => c.lid === lid && c.line === line) : undefined;
+    guarded(() => {
+      if (task !== undefined && !task.done && /^\s*(?:[-*+]|\d+[.)])\s+\[ \]/.test(openLine))
+        offerDoneUndo(root, dispatcher, { lid, line, openLine, title: plainTaskTitle(task.text) });
+      dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line, openLine });
+    }, lid);
   },
   'toggle-show-archived': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' }),

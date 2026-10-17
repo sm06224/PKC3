@@ -52,8 +52,23 @@ export const MOVE_ACK_WAIT_MS = 5000;
 /** クリックと数える動きの大きさ(px)。これを超えて動かした押し方は降ろす理由にしない。 */
 export const DISMISS_SLOP_PX = 8;
 
+/**
+ * 🔴 **予定の ☐ を押して済みにした直後**の「元に戻す」(#1654 の 2。Gemini 裁定 = #1163 の依頼 44 の 2)。
+ * 動かしたときと同じ置き場・同じ長さ・同じ口(`schedule-undo-move`)── 新しい口は作らない。
+ * 戻し方は同じ行の `TOGGLE_TASK` を 1 手(印の 1 文字だけ戻る)。
+ */
+export interface DoneOffer {
+  readonly lid: string;
+  readonly line: number;
+  /** 押した時点の行(`- [ ] …`)。⚠ 済みにした後の行はここから作る(一覧から消えるので走査からは引けない)。 */
+  readonly openLine: string;
+  /** 知らせに出す予定の字(印・記法を外した物)。 */
+  readonly title: string;
+}
+
 interface Pending {
-  readonly offer: MoveOffer;
+  readonly offer: MoveOffer | null;
+  readonly done: DoneOffer | null;
   readonly message: string;
   readonly dispatcher: Dispatcher;
   readonly doc: Document;
@@ -103,6 +118,11 @@ export function currentMoveOffer(): MoveOffer | null {
   return pending === null ? null : pending.offer;
 }
 
+/** 持っている「済みにした」の物(test の観測点)。 */
+export function currentDoneOffer(): DoneOffer | null {
+  return pending === null ? null : pending.done;
+}
+
 /** 書込が届いたのを見て、知らせを出す。 */
 function arm(p: Pending): void {
   p.armed = true;
@@ -150,6 +170,7 @@ export function offerMoveUndo(root: HTMLElement, dispatcher: Dispatcher, offer: 
   clearMoveOffer();
   const p: Pending = {
     offer,
+    done: null,
     message: moveMessage(offer.after, offer.verb),
     dispatcher,
     doc: root.ownerDocument,
@@ -178,13 +199,68 @@ export function offerMoveUndo(root: HTMLElement, dispatcher: Dispatcher, offer: 
   evaluate();
 }
 
+/** 知らせの字に出す予定の名前の長さ(字)。 */
+const DONE_TITLE_MAX = 30;
+
+/** 済みにした直後の知らせ。 */
+export function doneMessage(title: string): string {
+  const t = [...title.trim()];
+  const shown = t.length > DONE_TITLE_MAX ? `${t.slice(0, DONE_TITLE_MAX).join('')}…` : t.join('');
+  return shown === '' ? '予定を済みにしました' : `「${shown}」を済みにしました`;
+}
+
+/**
+ * ☐ を押した直後に呼ぶ(未完の行を済みにする 1 手だけ。⚠ 済みから戻す押し方・繰り返しの回では呼ばない)。
+ * 🔴 出すのは**書込が届いてから** ── 札が一覧から消えた / 済みの姿になった回。届く前に失敗が出たら出さない。
+ */
+export function offerDoneUndo(root: HTMLElement, dispatcher: Dispatcher, done: DoneOffer): void {
+  clearMoveOffer();
+  const p: Pending = {
+    offer: null,
+    done,
+    message: doneMessage(done.title),
+    dispatcher,
+    doc: root.ownerDocument,
+    armed: false,
+    errorAtStart: dispatcher.getState().error,
+    unsub: null,
+    timer: null,
+    stop: null,
+  };
+  pending = p;
+  const evaluate = (): void => {
+    if (pending !== p || p.armed) return;
+    const st = dispatcher.getState();
+    if (st.error !== null && st.error !== p.errorAtStart) {
+      clearMoveOffer();
+      return;
+    }
+    if (st.taskScan === null) return;
+    const c = st.taskScan.cards.find((x) => x.lid === done.lid && x.line === done.line);
+    if (c === undefined || c.done) arm(p);
+  };
+  p.timer = setTimeout(() => {
+    if (pending === p && !p.armed) clearMoveOffer();
+  }, MOVE_ACK_WAIT_MS);
+  p.unsub = dispatcher.onState(evaluate);
+}
+
 /** `schedule-undo-move` の本体。戻す 1 手を返す(撃つのは呼び側)。戻さないなら理由を返す。 */
 export function undoScheduleMove(
   state: Pick<AppState, 'taskScan' | 'entryMetas'>,
 ): { readonly action: UserAction } | { readonly refusal: string } | null {
   const p = pending;
   if (p === null || !p.armed) return null;
+  if (p.done !== null) {
+    const d = p.done;
+    clearMoveOffer();
+    // 済みにした後の行 = 押した行の印だけ `x` にした物(書換が disk の行と byte 一致を見る。違えば書換が断る)
+    const m = /^(\s*(?:[-*+]|\d+[.)])\s+\[) (\].*)$/s.exec(d.openLine);
+    if (m === null) return { refusal: SHOWN_LINE_LOST };
+    return { action: { type: 'TOGGLE_TASK', lid: d.lid, line: d.line, openLine: `${m[1]!}x${m[2]!}` } };
+  }
   const offer = p.offer;
+  if (offer === null) return null;
   const scanned = offer.target.kind === 'entry' || state.taskScan !== null;
   const current = slotNow(state, offer.target);
   clearMoveOffer();
