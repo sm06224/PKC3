@@ -28,6 +28,7 @@ import {
   chordOf,
   findCommand,
   matchCommand,
+  resolveUsableBindings,
   validateBinding,
   defaultBindings,
 } from '../../src/features/keymap';
@@ -201,6 +202,14 @@ describe('313 / 117-3: 割り当てを断る', () => {
     const own = KEY_COMMANDS.find((c) => c.contexts.includes('row') && c.defaults.includes('Alt+ArrowUp'));
     expect(own, '前提: Alt+↑ を既定に持つ行の操作が無い').toBeDefined();
     expect(validateBinding(own!.id, 'Alt+ArrowUp', {})).toBeNull();
+  });
+
+  it('🔴 割り当て済みの人の割り当ては、後から「使えない」にしない(欄の編集キーの断りは新しく割り当てるときだけ)', () => {
+    const { bindings, unusable } = resolveUsableBindings({ 'inline-calc': ['Mod+Backspace'] });
+    expect(unusable.map((u) => u.chord), '保存してあった Ctrl+Backspace が使えない扱いになった').not.toContain('Mod+Backspace');
+    expect(bindings['inline-calc']).toContain('Mod+Backspace');
+    // 対照群: 新しく割り当てるときは断る
+    expect(validateBinding('inline-calc', 'Mod+Backspace', {})?.kind).toBe('refused');
   });
 });
 

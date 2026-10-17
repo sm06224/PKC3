@@ -2224,6 +2224,9 @@ export function validateBinding(
   commandId: string,
   chord: string,
   bindings: KeymapBindings,
+  /** 保存や設定ファイルから来た割当の検査か。⚠ 欄の編集キーの断り(117-3)は新しく割り当てるときだけ ──
+   *  割り当て済みの人の割り当てを、後から「使えない」にしない */
+  stored = false,
 ): BindingProblem | null {
   const c = chordFromString(chord);
   if (c === null) return { kind: 'unreadable', message: 'このキーは割り当てられません' };
@@ -2266,7 +2269,7 @@ export function validateBinding(
   //   `Ctrl+←`(単語ごと動く)・`Ctrl+Home` などを奪うと、その欄で元の働きが効かなくなる。素の文字キーを断るのと同じ向き。
   //   ⚠ 自分の既定は断らない(`nav-back` の `Alt+←` など。上の `ownDefault`)。範囲は「欄の中で効く操作」(`typesInField`)だけ ──
   //   表やペインの中だけで効く操作は、欄が無いので奪う相手が居ない。
-  if (!ownDefault && (c.mod || c.alt) && FIELD_EDIT_KEYS.has(c.key) && actsInField(me)) {
+  if (!stored && !ownDefault && (c.mod || c.alt) && FIELD_EDIT_KEYS.has(c.key) && actsInField(me)) {
     return {
       kind: 'refused',
       message: '文字を打つ欄の編集に使うキーです。割り当てると、欄でこのキーの元の働き(単語ごとの移動や削除など)が効かなくなります',
@@ -2412,7 +2415,7 @@ export function resolveUsableBindings(overrides: Readonly<Record<string, unknown
     const kept: string[] = [];
     for (const chord of all[c.id] ?? []) {
       const isOwnDefault = c.defaults.some((d) => sameChord(d, chord));
-      const problem = isOwnDefault ? null : validateBinding(c.id, chord, current);
+      const problem = isOwnDefault ? null : validateBinding(c.id, chord, current, true);
       if (problem === null) {
         kept.push(chord);
         // 通った割当は以降の検査から見えるようにする(自分の 2 件目どうしの重複も拾う)
