@@ -202,6 +202,8 @@ function styled(): { classes: Set<string>; attrs: Set<string> } {
 const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   // 表のセルを押したときに binder が差し込む入力欄(#418 段①)
   'pkc-csv-cell-input': 'src/adapter/ui/actions/binder.ts',
+  // 表のセルを打っている間だけ、升の右上に binder が差し込むセルの名前(B2 など。#1662 の 4)
+  'pkc-csv-cell-name': 'src/adapter/ui/actions/binder.ts',
   /**
    * 本文の `![題名](entry:ノート#h/見出し)` を節の中身で置き換えた器(#1459 ①)。
    * ⚠ `renderMarkdown` が出すのは**展開前の器**(`pkc-transclusion-placeholder`)まで ── 節の中身は
