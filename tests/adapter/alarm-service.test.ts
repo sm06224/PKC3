@@ -26,6 +26,7 @@ import type { TaskCard, TaskScan } from '../../src/features/schedule/task-cards'
 import {
   ALARM_MAX_GAP_MS,
   ALARM_SCAN_FAILED_TEXT,
+  ALARM_SCAN_TRUNCATED_TEXT,
   createAlarmService,
 } from '../../src/adapter/ui/actions/alarm';
 import { missedLabel } from '../../src/features/schedule/schedule-notify';
@@ -448,6 +449,29 @@ describe('アラート(#280)', () => {
     b.advanceMs(30_000);
     b.beat();
     expect(b.posts, '直った後の失敗を言っていない').toEqual([ALARM_SCAN_FAILED_TEXT, ALARM_SCAN_FAILED_TEXT]);
+  });
+
+  it('🔴 上限で切れている間は 1 回だけ「鳴らないことがあります」と積み、直ってまた切れたら言い直す', () => {
+    const b = bench();
+    const scanOf = (truncated: boolean) => ({
+      type: 'SET_TASK_SCAN' as const,
+      scan: { cards: [], totalNotes: 600, scannedNotes: 500, truncated },
+    });
+    b.service.start();
+    b.d.dispatch(scanOf(true));
+    b.advanceMs(30_000);
+    b.beat();
+    b.advanceMs(30_000);
+    b.beat();
+    expect(b.posts, '切れていることを 1 回だけ言う').toEqual([ALARM_SCAN_TRUNCATED_TEXT]);
+    b.d.dispatch(scanOf(false));
+    b.advanceMs(30_000);
+    b.beat();
+    expect(b.posts, '直ったのに言い足した').toEqual([ALARM_SCAN_TRUNCATED_TEXT]);
+    b.d.dispatch(scanOf(true));
+    b.advanceMs(30_000);
+    b.beat();
+    expect(b.posts, '直った後にまた切れたのを言っていない').toEqual([ALARM_SCAN_TRUNCATED_TEXT, ALARM_SCAN_TRUNCATED_TEXT]);
   });
 
   it('対照群:集計できているなら、失敗の知らせは積まない', () => {

@@ -1117,6 +1117,46 @@ describe('掴んで動かす(place-drag)', () => {
     vi.useRealTimers();
   });
 
+  /** 書込が着いた(`BODY_REWRITTEN` が画面の本文を差し替えた)ことを、実際の ack で作る。 */
+  const landed = (d: Dispatcher): void =>
+    d.dispatch({
+      type: 'BODY_REWRITTEN',
+      lid: 'n1',
+      body: BOARD.replace('x=120', 'x=150'),
+      rewrite: { kind: 'place-move', line: 0, x: 150, y: 30 } as never,
+      status: null,
+      date: null,
+      archived: false,
+    });
+
+  it('🔴 書込が着いたなら、描き直しが来なくても 2000ms で跳び戻らない', () => {
+    vi.useFakeTimers();
+    const { d, grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    landed(d);
+    expect(d.getState().openBody?.body, '前提:書込の ack で本文が差し替わっていない').not.toBe(BOARD);
+    expect(block.isConnected, '前提:この台では要素が作り直されない').toBe(true);
+    vi.advanceTimersByTime(3000);
+    expect(block.style.left, '書けた位置から跳び戻った').toBe('150px');
+    expect(block.style.top).toBe('30px');
+    off();
+    vi.useRealTimers();
+  });
+
+  it('🔴 書込が着いた後に別の理由のエラーが立っても、位置は戻らない', () => {
+    const { d, grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    landed(d);
+    d.dispatch({ type: 'OP_FAILED', error: '別の操作のエラー' });
+    expect(block.style.left, '無関係なエラーで跳び戻った').toBe('150px');
+    expect(block.style.top).toBe('30px');
+    off();
+  });
+
   it('🔴 新しい要素へ差し替えられたら(古い要素が外れたら)監視が外れ、2000ms 経過しても戻らない(#1464 案 3 / #1481 6)', () => {
     vi.useFakeTimers();
     const { d, grip, block, off } = mounted();

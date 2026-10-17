@@ -81,6 +81,10 @@ export const ALARM_MAX_GAP_MS = 120_000;
 /** 集計に失敗している間の知らせ。⚠ 鳴らない事実を黙らない。 */
 export const ALARM_SCAN_FAILED_TEXT = '予定を数えられなかったので、時間になってもお知らせできません';
 
+/** 走査の上限(`TASK_LIMITS.notes`)で後ろのノートを数えていない間の知らせ。⚠ 鳴らない事実を黙らない。 */
+export const ALARM_SCAN_TRUNCATED_TEXT =
+  'チェック項目のあるノートが多いため、後ろのノートの時刻つきの予定は鳴らないことがあります';
+
 /**
  * 既定の刻み。⚠ **30 秒**にするのは、1 分の刻みだと**分の境目をまたぐ回が
  * 前後にぶれる**ため(区間で採っているので取りこぼしはしないが、
@@ -110,6 +114,8 @@ export function createAlarmService(deps: AlarmServiceDeps): AlarmService {
   let seenTo: number | null = null;
   /** 集計の失敗を言ったか(立っている間に 1 回だけ言う)。 */
   let failedTold = false;
+  /** 走査が上限で切れたことを言ったか(切れている間に 1 回だけ言う)。 */
+  let truncatedTold = false;
 
   const paint = (): void => deps.onChange([...ringing.values()]);
 
@@ -174,6 +180,20 @@ export function createAlarmService(deps: AlarmServiceDeps): AlarmService {
       }
     } else {
       failedTold = false;
+    }
+    /**
+     * 🔴 **上限で切れて、後ろのノートを数えていないことも黙らない** ── 切れた先の予定は鳴らない。
+     *   切れている間に 1 回だけ言う(直ったら、また切れたときに言い直す)。数え直し中(scan が null)は判断しない。
+     */
+    if (scan !== null) {
+      if (scan.truncated) {
+        if (!truncatedTold) {
+          truncatedTold = true;
+          deps.post?.(ALARM_SCAN_TRUNCATED_TEXT);
+        }
+      } else {
+        truncatedTold = false;
+      }
     }
     /**
      * 🔴 **数え直し中(scan が null)の回は、見た位置を進めない** ── 進めると、その区間の予定が
