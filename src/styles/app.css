@@ -5871,6 +5871,11 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='search-row-title'] {
   font-weight: 600;
 }
+/* 🔴 片付けたノート(依頼 87-1)。色は付けない(地は無彩色)── 薄い字で添える */
+[data-pkc-field='search-row-archived'] {
+  color: var(--muted);
+  font-size: 11px;
+}
 [data-pkc-field='search-row-snippet'] {
   color: var(--muted);
   font-size: 12px;
@@ -7797,6 +7802,20 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   padding-bottom: var(--s2);
   border-bottom: 1px solid var(--border);
   font-size: 12px;
+}
+/* 🔴 **選んでいる間は、一覧の下端に貼り付く**(依頼 82-1)。置き場所(一覧の下)は変えない ──
+ * 数十件を超える一覧で、選んだ直後に帯が画面の外にあって「選べたか」が見えなかった。
+ * ⚠ 印が付いている間だけ(`filer.ts` が `data-pkc-bulk` を付け外しする。`:has()` は使わない ── #1467 段 3-h)。
+ * ⚠ 地は不透明にする(後ろを通る行が透けると、帯の字が読めない)。
+ * 🔴 `data-pkc-bulk-stick` は一覧の見えている高さが帯の 2 倍以上あるときだけ(`bar-stick.ts`)。低い窓で貼り付くと
+ *   帯が下の行を覆って押せなくなった(実測:一覧 248px・帯 166px)── 低いときは従来どおり行の下に流す。 */
+[data-pkc-region='filer-move'][data-pkc-bulk][data-pkc-bulk-stick] {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding-top: var(--s2);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
 }
 /* ⚠ この帯の `<label>` は、いまは**絞り込みの欄**(`smart-field`)だけである ──
  * 移し先のプルダウンは #813 で外した(`filer.ts` の注記)。

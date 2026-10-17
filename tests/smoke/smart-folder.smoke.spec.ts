@@ -15,6 +15,16 @@ const ROWS = '[data-pkc-region="filer-table"] tbody tr';
 const SMART_ROW = `${ROWS}[data-pkc-archetype="smart"]`;
 const WHY = '[data-pkc-field="smart-why"]';
 
+/**
+ * 🔴 読み込み直すと、開いていたフォルダ(スマートフォルダ)の**中のまま**始まる(台帳 #1852 束 C2 / 依頼 277)。
+ * 旧い期待は「ルートから始まるので、行を 2 回押して入り直す」だった ── 入り直そうとしても
+ * 行(スマートフォルダ自身)はこの場に無い。観測点は「条件の帯が出ている」+「自分の行は一覧に無い」。
+ */
+async function backInsideAfterReload(page: Page): Promise<void> {
+  await expect(page.locator(WHY), '読み込み直したら、開いていたスマートフォルダの中に戻っていない').toBeVisible();
+  await expect(page.locator(SMART_ROW), '中に居るのに、スマートフォルダ自身の行が一覧に出ている').toHaveCount(0);
+}
+
 /** 題名と本文を持つノートを 1 件作る(⚠ 2 列の編集で入れる)。 */
 async function makeNote(page: Page, title: string, body: string): Promise<void> {
   await createEntry(page, 'text');
@@ -52,6 +62,26 @@ test('🔴 条件を足すと、タグの付いたノートが場所を越えて
   await expect(page.locator(WHY)).toContainText('条件を選んでください');
   await expect(page.locator(ROWS), '条件が無いのに集めている').toHaveCount(0);
 
+  /**
+   * 🔴 **スマートフォルダの中で「+ ノート」を押すと、作らずに断る**(台帳 #1852 束 C2 / 依頼 338)。
+   * 直す前は黙ってルートに作り、中央は編集に入るのに、この一覧には出なかった ──
+   * 観測点は①断りの知らせ ②中央が編集に入っていない ③一覧の案内が「ここには作れません」。
+   * ⚠ 新しく起動せず、この道中(中へ入った直後)に足す。
+   */
+  await expect(
+    page.locator('[data-pkc-field="filer-create-target"]'),
+    '中に居るのに「ここには作れません」の案内が出ていない',
+  ).toContainText('ここには作れません');
+  await clickReal(page, '[data-pkc-field="create-run"]');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '作れない場所で「+ ノート」を押したのに、断りの知らせが出ない',
+  ).toContainText('スマートフォルダの中には作れません');
+  await expect(
+    page.locator('[data-pkc-field="editor-title"]'),
+    '断るはずが、ノートを作って編集に入っている',
+  ).toHaveCount(0);
+
   // ④ 条件を足す ── ここで初めて worker が本当に走査する
   await page.locator('[data-pkc-field="smart-cond"]').fill('請求');
   await clickReal(page, '[data-pkc-action="smart-cond-add"]');
@@ -64,7 +94,7 @@ test('🔴 条件を足すと、タグの付いたノートが場所を越えて
    *   (端末の保存に置いていたら、ここで消える)。
    */
   await page.reload();
-  await page.locator(SMART_ROW).first().dblclick();
+  await backInsideAfterReload(page);
   await expect(page.locator(WHY), '条件が残っていない').toContainText('1 件');
   await expect(page.locator(ROWS)).toHaveCount(1);
 
@@ -188,7 +218,7 @@ test('🔴 中でタグを外すと、集め直しを待たずに行が消える
    *   開き直しても 0 件のままなら、走査もそう読んでいる。
    */
   await page.reload();
-  await page.locator(SMART_ROW).first().dblclick();
+  await backInsideAfterReload(page);
   await expect(page.locator(WHY), '本文は変わっていなかった').toContainText('0 件');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
@@ -240,7 +270,7 @@ test('🔴 種類で絞ると、その種類だけが集まる (#421 段②)', a
 
   // 🔑 開き直しても効く(条件は本文に在る)
   await page.reload();
-  await page.locator(SMART_ROW).first().dblclick();
+  await backInsideAfterReload(page);
   await expect(page.locator('[data-pkc-field="smart-kind"]'), '条件が残っていない').toHaveValue(
     'text',
   );
@@ -296,7 +326,7 @@ test('🔴 語で絞ると、その語があるノートだけが集まる (#421
 
   // 🔑 開き直しても効く(条件は本文に在る)
   await page.reload();
-  await page.locator(SMART_ROW).first().dblclick();
+  await backInsideAfterReload(page);
   await expect(page.locator('[data-pkc-field="smart-text"]'), '条件が残っていない').toHaveValue(
     '牛乳',
   );
@@ -370,7 +400,7 @@ test('🔴 「未処理がある」で、やり残しのあるノートだけが
 
   // 🔑 開き直しても効く(条件は本文に在る)
   await page.reload();
-  await page.locator(SMART_ROW).first().dblclick();
+  await backInsideAfterReload(page);
   await expect(
     page.locator('[data-pkc-field="smart-openTasks"]'),
     '条件が残っていない',

@@ -39,6 +39,7 @@ import { setPrimary } from './icons';
 import { setBlocked } from './shortcut-hint';
 import { findCommand } from '@features/keymap';
 import { commandQueryOf } from '@features/palette/command-query';
+import { revealDelta } from './list-reveal';
 
 /**
  * タブ。⚠ 文言は「探し方」を表す(「詳細」のような場所の名前にしない)。
@@ -163,6 +164,10 @@ export class BrowseRouter {
   private readonly navBack: HTMLButtonElement | null;
   private readonly navForward: HTMLButtonElement | null;
   private lastHistory: AppState['selectionHistory'] | null = null;
+  /** 🔴 開いているノートの行へ送った最後のノート(依頼 277)。変わったときだけ送る。 */
+  private lastRevealed: string | null = null;
+  /** 送りの予約(最新の 1 本だけ生かす)。 */
+  private revealToken = 0;
   /** 左の列の「+ ノート」(主の操作の印を phase で付け外しする)。 */
   private readonly createRun: HTMLElement | null;
   /** 🔴 指で触る端末へ理由を届ける 1 行(#791 ③)。⚠ CSS が出し分ける。 */
@@ -443,5 +448,32 @@ export class BrowseRouter {
     //    戻したときに元の位置へ帰るのが欲しい振る舞い
     // ② 🔴 **中身を入れ終わってから**戻す(空の器に書いても丸められる)
     this.scroll.use(key);
+    /**
+     * 🔴 **開いているノートの行が見えない所にあれば、見える所まで送る**(依頼 277)。
+     * ⚠ 位置を戻した**後**にやる(戻した位置が上書きする)。⚠ 行の位置を読むと配置が要るので、
+     *   次の描画の直前(`requestAnimationFrame`)に 1 回だけ ── 描き直しの途中で強制レイアウトを払わない
+     *   (`ScrollMemory` の注記と同じ理由)。
+     */
+    if (mode === 'filer' && state.selectedLid !== this.lastRevealed) {
+      this.lastRevealed = state.selectedLid;
+      if (state.selectedLid !== null) this.revealRow(state.selectedLid);
+    }
+  }
+
+  private revealRow(lid: string): void {
+    const token = ++this.revealToken;
+    const win = this.host.ownerDocument.defaultView;
+    if (win === null) return;
+    win.requestAnimationFrame(() => {
+      if (token !== this.revealToken) return;
+      const row = this.panes.filer.querySelector<HTMLElement>(
+        `[data-pkc-region="filer-table"] [data-pkc-entry="${CSS.escape(lid)}"]`,
+      );
+      if (row === null) return;
+      const view = this.host.getBoundingClientRect();
+      const r = row.getBoundingClientRect();
+      const delta = revealDelta(r.top, r.bottom, view.top, view.bottom);
+      if (delta !== 0) this.host.scrollTop += delta;
+    });
   }
 }

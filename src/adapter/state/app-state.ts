@@ -115,7 +115,7 @@ function withSqlSourceSet(
 }
 import { pickErConnection, type ErPendingFrom } from '@features/query/er-connect';
 import { filerRowOptions, listViewOptions } from './list-view-options';
-import { reorderSibling, structuralParentsLookup, wouldMakeCycle } from '@features/relation/tree';
+import { getAncestorFolders, reorderSibling, structuralParentsLookup, wouldMakeCycle } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { isAppendable } from '@features/flavor/append-spec';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
@@ -210,7 +210,7 @@ import {
   pushSelection,
   type SelectionHistory,
 } from '@features/nav/selection-history';
-import { filerRows, rangeInRows, smartLidsOf } from '@features/relation/filer-list';
+import { filerRows, lidShownInScope, rangeInRows, smartLidsOf } from '@features/relation/filer-list';
 import {
   EMPTY_SMART,
   SMART_ARCHETYPE,
@@ -4684,15 +4684,53 @@ function settleOpenedOrder(prev: AppState, result: ReduceResult): ReduceResult {
   return { ...result, state: { ...s, openedAtShown: s.openedAt } };
 }
 
+/**
+ * 🔴 **開いているノートが、いま左の一覧に出ていない場所にあるなら、一覧もそのフォルダへ移る**(依頼 277。Gemini 回答 = A)。
+ *
+ * ⚠ リンクや「操作を探す」で別のフォルダのノートを開いても、左の一覧は前の場所のままで、
+ *   開いているノートの行がどこにも見えなかった。
+ * 🔑 動かすのは次の 3 つが揃うときだけ:
+ *   ①開いているノートが変わった ②その場所(`scopeLid`)を、この操作が動かしていない
+ *   (パンくず・「すべてのフォルダから探す」など、user が場所を決めた操作は尊重する)
+ *   ③絞り込み(語・種類の札)が無く、いまの一覧にそのノートの行が無い
+ *   (絞っているときは、場所を移しても行は出ない ── user の絞りを勝手に外さない)。
+ * ⚠ 行き先は**そのノートの親のフォルダ**(無ければルート)。ノート自身がフォルダなら、その中へは入らず
+ *   親の側に出す(開いたフォルダは、一覧の行として見える)。
+ * ⚠ 場所を移すので前の場所の印(複数選択)は外す(`SET_SCOPE` と同じ理由)。開いたノート自身の印だけ残る。
+ */
+function followSelectionScope(prev: AppState, result: ReduceResult): ReduceResult {
+  const st = result.state;
+  if (st.selectedLid === null || st.selectedLid === prev.selectedLid) return result;
+  if (st.scopeLid !== prev.scopeLid) return result;
+  if (normalizeQuery(st.filterQuery) !== '' || st.kindFilter.size > 0) return result;
+  const lid = st.selectedLid;
+  if (!st.entryMetas.has(lid)) return result;
+  // ⚠ いま居るフォルダ自身を選んだ(パンくずの最後の段を押した)ときは場所を動かさない(#1254 §1)
+  if (lid === st.scopeLid) return result;
+  // 🔑 並べ替えずに答える(選ぶたびに全件を並べ直さない)。スマートフォルダの中だけは当たりの集合で決まる
+  const shown =
+    lidShownInScope(lid, st.scopeLid, st.entryMetas, st.relations, st.filerFlatten) ??
+    filerRows(st.scopeLid, st.entryMetas, st.relations, filerRowOptions(st)).some((m) => m.lid === lid);
+  if (shown) return result;
+  const to = getAncestorFolders(lid, st.entryMetas, st.relations)[0]?.lid ?? null;
+  if (to === st.scopeLid) return result;
+  return {
+    ...result,
+    // ⚠ 開いたノート自身の印(`SELECT_ENTRY` が付けた 1 件)だけは残す ── 移した先の一覧に出る行である
+    state: { ...st, scopeLid: to, selection: [lid], selectionAnchor: lid },
+    events: [...result.events, ...smartScanFor(st, to)],
+  };
+}
+
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
   reduceDepth++;
   try {
-    const r = settleOpenedOrder(state, dropStaleSearchJump(
+    const r = settleOpenedOrder(state, followSelectionScope(state, dropStaleSearchJump(
       startSearchJumpFromField(
         action,
         guardSectionDraftTransition(state, action, reduceWithHistory(state, action)),
       ),
-    ));
+    )));
     // 🔑 追随は**一番外側の 1 回だけ**(内側の `reduce` ごとに撃つと、同じ読みが何本も積まれる)
     return reduceDepth === 1 ? followLauncherTiles(state, r) : r;
   } finally {

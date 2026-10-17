@@ -1408,6 +1408,30 @@ describe('2 ペインのキーボード操作(#273)', () => {
   });
 
   /**
+   * 🔴 **Home / End / PageUp / PageDown**(依頼 337。Gemini 回答 = A)。送り方は ↑↓ と同じ ── カーソルだけが動き、
+   * 印は動かず、押していない側も動かない。⚠ 期待する行は画面の並び(DOM)から引く(実装の配列を使わない)。
+   */
+  it('🔴 Home / End は先頭 / 末尾の行へカーソルだけを送る(依頼 337)', () => {
+    const lids = [
+      ...region.querySelectorAll<HTMLElement>(
+        '[data-pkc-region="dual-pane"][data-pkc-side="left"] [data-pkc-region="dual-table"] tbody [data-pkc-entry]',
+      ),
+    ].map((e) => e.getAttribute('data-pkc-entry')!);
+    expect(lids.length, '前提:行が 3 つ以上ある(端と真ん中を見分けられる)').toBeGreaterThanOrEqual(3);
+    press('left', lids[1]!, 'End');
+    expect(cur('left'), 'End で末尾の行へ行かない').toBe(lids[lids.length - 1]);
+    press('left', lids[lids.length - 1]!, 'Home');
+    expect(cur('left'), 'Home で先頭の行へ行かない').toBe(lids[0]);
+    expect(sel('left'), 'Home / End で印まで動いた').toEqual([]);
+    expect(cur('right'), '押していない側のカーソルが動いた').toBeNull();
+    // PageDown は画面の高さが測れない環境では 10 行 ── 行数より多いので端で止まる(巻き戻らない)
+    press('left', lids[0]!, 'PageDown');
+    expect(cur('left'), 'PageDown が端で止まらない').toBe(lids[lids.length - 1]);
+    press('left', lids[lids.length - 1]!, 'PageUp');
+    expect(cur('left'), 'PageUp が先頭で止まらない').toBe(lids[0]);
+  });
+
+  /**
    * 🔴 **Space で印を付けて 1 行下へ**(FAR / Directory Opus と同型)。
    * ⚠ **下りるところまでが 1 つの操作** ── 下りないと、同じ行に付けたり外したりし
    *   続けることになり、連続して選べない(飛び飛びに選ぶのがこの鍵の目的である)。

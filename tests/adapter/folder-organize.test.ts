@@ -614,29 +614,30 @@ describe('フォルダ整理の導線(画面)', () => {
     ).toEqual([created]);
   });
 
-  it('🔴 スマートフォルダを見ているときは、「入ります」と言わず、作ったらルートにできたと言う', async () => {
+  it('🔴 スマートフォルダを見ているときは、「入ります」と言わず、作る前に断る(依頼 338)', async () => {
     const SM = [meta('f1', 1, 'folder'), meta('s1', 2, 'smart'), meta('n1', 3)];
     const { root, q, d, status } = setup(SM, []);
     d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
     await tick();
     const where = q('[data-pkc-field="filer-create-target"]');
     expect(where, '作る先の案内が出ていない').not.toBeNull();
-    expect(where!.textContent).toBe('ここは条件で集まる場所なので、作るとルートにできます');
+    expect(where!.textContent).toBe('ここは条件で集まる場所なので、ここには作れません。ルートかふつうのフォルダを開いてください');
     expect(where!.textContent, '入らない先に「入ります」と言った').not.toContain('入ります');
 
     const before = d.getState().entryMetas.size;
     root.querySelector<HTMLElement>('[data-pkc-field="create-run"]')!.click();
     await tick();
-    expect(d.getState().entryMetas.size).toBe(before + 1);
-    expect(d.getState().relations, 'ルートに作られていない').toEqual([]);
-    expect(status.at(-1)).toBe('ここは条件で集まる場所なので、ルートに作りました');
-    // 対照群: ふつうのフォルダでは、この一言は出ない
-    status.length = 0;
+    // 🔴 作る前に断る ── 作ってから「ルートに作りました」と言わない(2 ペインと同じ答え)
+    expect(d.getState().entryMetas.size, '断るはずが作ってしまった').toBe(before);
+    expect(d.getState().phase, '断るはずが編集に入った').toBe('ready');
+    expect(d.getState().error).toBe('スマートフォルダの中には作れません。ルートか、ふつうのフォルダを開いてください');
+    expect(status.at(-1) ?? '', '「ルートに作りました」と言った').not.toContain('ルートに作りました');
+    // 対照群: ふつうのフォルダでは作れる
     d.dispatch({ type: 'SET_SCOPE', lid: 'f1' });
     await tick();
     root.querySelector<HTMLElement>('[data-pkc-field="create-run"]')!.click();
     await tick();
-    expect(status, 'ふつうのフォルダでルートに作ったと言った').toEqual([]);
+    expect(d.getState().entryMetas.size, '対照群:ふつうのフォルダでは作れる').toBe(before + 1);
   });
 
   it('🔴 左の列の名前の打ち替え: Safari の変換確定の Enter(keyCode 229)では確定しない', async () => {
@@ -1340,11 +1341,12 @@ describe('フォルダの整理の見直し(#1087)', () => {
   });
 
   it('🔴 表に出ていないノートを選んでいる間は、上へ / 下へを出さない', async () => {
-    const { q, d, enter, nudge } = setup(METAS, [rel('r1', 'f1', 'n1')]);
-    enter('f1'); // 表には n1 だけ
+    const { q, d, nudge } = setup(METAS, [rel('r1', 'f1', 'n1')]);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' }); // ルートのノートを開いてから
+    d.dispatch({ type: 'SET_SCOPE', lid: 'f1' }); // 表には n1 だけ(⚠ 依頼 277: 表に無いノートを「開く」と一覧が移るので、開いた後で場所を変える)
     await tick();
-    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' }); // ルートのノート(いまの表には無い)
-    await tick();
+    expect(d.getState().selectedLid, '前提:n2 を開いたまま f1 の中に居る').toBe('n2');
+    expect(d.getState().scopeLid).toBe('f1');
     expect(q('[data-pkc-field="order-nudge"]'), '表に無いノートの「上へ / 下へ」が出ている').toBeNull();
     expect(nudge('down')).toBeNull();
     // 対照群: 表に出ているノートを選べば出る

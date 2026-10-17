@@ -45,6 +45,7 @@ import { emptyStartActions } from './empty-start';
 import { paintRowMark } from './selection-mark';
 import { buildPressedButton } from './choice-buttons';
 import { chordHint } from './shortcut-hint';
+import { watchBarStick } from './bar-stick';
 import { appKeymap, type KeymapStore } from './keymap';
 import { commandQueryOf } from '@features/palette/command-query';
 
@@ -145,6 +146,8 @@ export class FilerRenderer {
   private lastTrash: AppState['trashPanel'] = null;
   /** 居場所を変える帯の器(中身は選択が変わるたびに差し替える)。 */
   private moveBar: HTMLElement | null = null;
+  /** 帯を貼り付けてよい高さかの観測(組み直すたびに付け替える)。 */
+  private stopBarStick: (() => void) | null = null;
   /** 帯の組み直しをまたいで運ぶ、打ちかけの字と焦点(`captureBarInputs`)。 */
   private keptBar: {
     values: ReadonlyMap<string, string>;
@@ -505,6 +508,21 @@ export class FilerRenderer {
     }
   }
 
+  /**
+   * 🔴 **「すべてのフォルダから探す」**(依頼 115-3 / 336)。探す語はそのままで、居場所だけをルートへ戻す。
+   * ⚠ 受け手は新しく作らない ── 押した所に `data-pkc-entry` が無い `enter-folder` は「ルートへ」(パンくずの
+   *   「ルート」と同じ 1 本)。語を消さないので、ルートで同じ語の当たりがそのまま出る。
+   */
+  private buildSearchAllButton(): HTMLButtonElement {
+    const all = document.createElement('button');
+    all.type = 'button';
+    all.setAttribute('data-pkc-action', 'enter-folder');
+    all.setAttribute('data-pkc-field', 'filer-search-all');
+    all.textContent = 'すべてのフォルダから探す';
+    all.title = '探す語はそのままで、ルートから下のすべてのフォルダを探します';
+    return all;
+  }
+
   private renderMoveBar(state: AppState, scope: EntryMeta | null): void {
     const host = this.moveBar;
     if (!host) return;
@@ -594,6 +612,13 @@ export class FilerRenderer {
       host.append(bulk);
     }
 
+    /**
+     * 🔴 **選んでいる間、帯は一覧の下端に貼り付く**(依頼 82-1。Gemini 回答 = B)。
+     * ⚠ 数十件を超える一覧では、選んだ直後に帯が画面の外にあり、選べたかどうかも見えなかった。
+     *   帯の場所(一覧の下)は変えない ── 選んだ瞬間に行が動かないための置き方(上の注記)。貼り付けるのは CSS。
+     * ⚠ 印が無いときは貼り付けない(並べ替えの案内だけの帯が画面の下に居座らない)。
+     */
+    host.toggleAttribute('data-pkc-bulk', marks.length >= 1);
     this.restoreBarInputs(host);
     // ⚠ 組み直した直後にも当てる ── 断りが届いた回に欄が無かった(帯が出る前)形を拾う
     this.paintRefusedTags(state);
@@ -670,7 +695,9 @@ export class FilerRenderer {
         }
         nudge.append(b);
       }
-      if (!filerFlattenNow(state)) host.append(nudge);
+      // 🔴 **2 件以上選んでいる間は出さない**(依頼 82-2。Gemini 回答 = A)。動くのは開いている 1 件だけなのに、
+      //    帯は「N 件を選んでいます」と言っている ── 押した物と動く物がずれる(ドラッグは選んだ全部がまとまって動く)
+      if (!filerFlattenNow(state) && marks.length < 2) host.append(nudge);
     }
 
     if (scope) {
@@ -681,7 +708,7 @@ export class FilerRenderer {
       // 🔴 スマートフォルダは条件で集まる場所 ── 作るとルートにできる(「入ります」と言うと嘘になる)
       where.textContent =
         scope.archetype === SMART_ARCHETYPE
-          ? 'ここは条件で集まる場所なので、作るとルートにできます'
+          ? 'ここは条件で集まる場所なので、ここには作れません。ルートかふつうのフォルダを開いてください'
           : `新しく作るものは「${scope.title}」に入ります`;
       host.append(where);
     }
@@ -1393,6 +1420,12 @@ export class FilerRenderer {
       const label = document.createElement('span');
       label.setAttribute('data-pkc-field', 'filer-filter-word');
       label.textContent = `絞り込み中: ${state.filterQuery.trim()}`;
+      /**
+       * 🔴 **フォルダの中だけを探していることを言う**(依頼 336。Gemini 回答 = A)。
+       * ⚠ 語を打つと探すのは「いま居るフォルダの下」だけで、ルートや別のフォルダの一致は出ない。
+       *   言わないと、ほかの場所に在るノートが「無い」ように見える。
+       */
+      if (scope !== null) label.textContent += ` ─ 「${scope.title}」の中を探しています`;
       const off = document.createElement('button');
       off.type = 'button';
       off.setAttribute('data-pkc-action', 'clear-entry-filter');
@@ -1400,6 +1433,7 @@ export class FilerRenderer {
       off.textContent = '絞りを外す';
       off.title = '絞りを空にして、いまいる場所のノートに戻します';
       line.append(label, off);
+      if (scope !== null) line.append(this.buildSearchAllButton());
       if (keptTable === null) this.region.append(line);
       else this.region.insertBefore(line, keptTable);
     }
@@ -1484,6 +1518,10 @@ export class FilerRenderer {
     // ⚠ 帯は**表の後**(上の注記)── 選んだ瞬間に行が動かないようにする
     this.region.append(this.moveBar);
     this.renderMoveBar(state, scope);
+    // 🔴 見えている高さが低いと、貼り付いた帯が行を覆って押せない ── 高さが足りるときだけ貼り付ける(bar-stick.ts)
+    this.stopBarStick?.();
+    const scroller = this.region.closest<HTMLElement>('[data-pkc-region="browse-host"]');
+    this.stopBarStick = scroller === null ? null : watchBarStick(this.moveBar, scroller);
 
     if (list.length === 0) {
       const empty = document.createElement('p');
@@ -1512,7 +1550,9 @@ export class FilerRenderer {
             ? '題名に一致するものはありません(本文は探せませんでした。語を打ち直すと、もう一度探します)'
             : bodyPending
               ? '本文を探しています…'
-              : '絞り込みに一致するものがありません'
+              : q !== '' && scope !== null && !smartInside
+                ? 'このフォルダの中には見つかりません'
+                : '絞り込みに一致するものがありません'
           : scope
             ? smartEmpty !== null
               ? smartEmpty
@@ -1536,6 +1576,9 @@ export class FilerRenderer {
         clear.textContent = '絞りを外す';
         clear.title = '絞りを空にして、いまいる場所のノートに戻します';
         this.region.append(clear);
+        // 🔴 フォルダの中を探して 0 件のとき、ほかの場所に在るかもしれない(依頼 115-3 / 336)
+        if (q !== '' && scope !== null && commandQueryOf(state.filterQuery) === null)
+          this.region.append(this.buildSearchAllButton());
       }
       /**
        * 🔴 **本当に 1 件も無いときだけ、次の一手を出す**(#722 P2-13)。

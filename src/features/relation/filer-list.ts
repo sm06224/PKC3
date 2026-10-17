@@ -125,6 +125,37 @@ export function filerRows(
 }
 
 /**
+ * 🔴 **そのノートの行は、絞り込みが無いとき、いまの場所の表に出るか**(依頼 277)。
+ *
+ * ⚠ 開いたノートの行が一覧に無いときに、一覧をそのノートのフォルダへ移すための問い。
+ *   `filerRows` と同じ答えを、**並べ替えずに**(選ぶたびに全件を並べ直さない)返す。
+ *   ⚠ 並び替えと絞り込みは行の有無を変えない(絞り込みが無いときの話) ── 違いが出るのは
+ *   「直下だけ / 中まで全部」の 2 通りだけで、その規則は上の `filerRows` と同じ(`tests/features/filer-list-shown.test.ts` が全数で突き合わせる)。
+ * ⚠ スマートフォルダの中は条件の当たりで決まる(構造では決まらない)── ここでは答えない(`null`)。呼び手が `filerRows` で見る。
+ * @param flatten 「中まで全部出す」(`filerFlattenNow`)。絞り込みが無いので `filerFlatten` と同じ。
+ */
+export function lidShownInScope(
+  lid: string,
+  scopeLid: string | null,
+  entryMetas: ReadonlyMap<string, EntryMeta>,
+  relations: readonly Relation[],
+  flatten: boolean,
+): boolean | null {
+  if (scopeLid !== null && entryMetas.get(scopeLid)?.archetype === SMART_ARCHETYPE) return null;
+  if (!entryMetas.has(lid)) return false;
+  const parentOf = resolveCanonicalParents(entryMetas, relations);
+  if (!flatten) return (parentOf.get(lid) ?? null) === scopeLid;
+  // 平ら: ルートは全件 / フォルダはその配下(自分自身は含めない)。環の guard つきで親をたどる
+  if (scopeLid === null) return true;
+  const seen = new Set<string>([lid]);
+  for (let cur = parentOf.get(lid); cur !== undefined && !seen.has(cur); cur = parentOf.get(cur)) {
+    if (cur === scopeLid) return true;
+    seen.add(cur);
+  }
+  return false;
+}
+
+/**
  * 🔴 **「中まで全部出す」の行に添える親フォルダの名前**(#813 残り。🟣 Gemini 裁定 2026-10-01 = A)。
  *
  * 平らに出すと、階層が見えなくなって「どこの物か」が読めない ── 行の題名の右に

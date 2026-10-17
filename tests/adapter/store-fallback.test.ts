@@ -51,6 +51,7 @@ import { PaneVisibilityStore } from '@adapter/ui/render/pane-visibility';
 import { GroupFoldStore } from '@adapter/ui/render/group-fold';
 import { CreateKindStore } from '@adapter/ui/render/create-kind';
 import { EntrySortStore } from '@adapter/ui/render/entry-sort-memory';
+import { ListPlaceStore } from '@adapter/ui/render/list-place-memory';
 import { FilerFlattenStore } from '@adapter/ui/render/filer-flatten';
 import { PopupHintStore } from '@adapter/ui/render/popup-hint';
 import { PasteSourceStore } from '@adapter/ui/render/paste-source';
@@ -350,6 +351,19 @@ const CASES: readonly {
     },
     a: { sort: 'title', desc: true },
     b: { sort: 'updated', desc: false },
+  },
+  {
+    // 🔴 既定は「憶えていない(null)」── a / b を別の場所にして、控えが死んで null へ戻る実装を捕まえる(依頼 277)
+    name: 'ListPlaceStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new ListPlaceStore(st);
+      const w = (v: unknown): void => {
+        s.set(v as { cid: string; scope: string | null; kinds: string[] });
+      };
+      return { write: w, read: () => s.get() };
+    },
+    a: { cid: 'c1', scope: 'f1', kinds: ['text'] },
+    b: { cid: 'c1', scope: null, kinds: [] },
   },
   {
     // ⚠ 既定が「確認」── a を別の値にする(#1087 S4)
