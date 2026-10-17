@@ -2796,11 +2796,30 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
 /** 🔴 **見つからない添付では理由が出る**(黙って器のままにしない)。 */
 test('🔴 添付が無ければ、その場に理由が出る(#444 段①)', async ({ page }) => {
   await gotoApp(page);
+  // 🔴 読めない画像(壊れた bytes)── 本文に貼ったら、壊れた画像で終わらず理由の 1 行になる(#1087 A3)
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'こわれ.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('これは絵ではない bytes です。'.repeat(8), 'utf8'),
+  });
+  const brokenKey = await page
+    .locator('[data-pkc-action="download-asset"]')
+    .first()
+    .getAttribute('data-pkc-asset-key');
+  expect(brokenKey, '前提:壊れた画像の添付の鍵が取れている').toBeTruthy();
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await ta.click();
-  await page.keyboard.type('```csv asset:ast-nosuchkey\n');
+  await page.keyboard.type('![こわれ](asset:' + brokenKey + ')\n\n```csv asset:ast-nosuchkey\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] [data-pkc-field="attachment-undecodable"]'),
+    '🔴 読めない画像が、理由の 1 行にならない',
+  ).toHaveCount(1, { timeout: 10_000 });
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] img[data-pkc-asset-key]'),
+    '壊れた画像が残っている',
+  ).toHaveCount(0);
 
   const err = page.locator('[data-pkc-fence-asset-error]');
   await expect(err).toBeVisible({ timeout: 10_000 });
