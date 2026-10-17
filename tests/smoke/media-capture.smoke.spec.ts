@@ -212,18 +212,10 @@ test('🔴 録音を止めると本文に入り、その場で聞ける (#413 �
     { timeout: 15_000 },
   );
   const openA = page.locator('[data-pkc-field="status-open"]');
-  /**
-   * ⚠ `expect.soft` ── 「開く」が無くても後ろの道中(A の本文 / 聞ける / 切り出し / 残さずにやめる)は見る。
-   *   赤は赤のまま残る(緩めていない)。出ていなければ A を一覧から選んで続ける。
-   */
-  const openShown = await openA.isVisible();
-  expect.soft(openShown, '知らせの隣に「開く」が出ていない(録音の入れ先の知らせに行き先の押し口が付いていない)').toBe(true);
-  if (openShown) {
-    await expect(openA).toContainText('開く');
-    await clickReal(page, '[data-pkc-field="status-open"]');
-  } else {
-    await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').filter({ hasText: 'ノート 1' }).first().click();
-  }
+  // 🔴 知らせの隣に「開く」が出る(片道の操作を作らない)── 押すと録り始めたノート A に着く
+  await expect(openA, '知らせの隣に「開く」が出ていない(録音の入れ先の知らせに行き先の押し口が付いていない)').toBeVisible();
+  await expect(openA).toContainText('開く');
+  await clickReal(page, '[data-pkc-field="status-open"]');
 
   // ③ 🔴 **「開く」で A に着く**(添付が奪った選択が戻っているのと同じ見え方)
   await expect(detail, '止めたら別の物が開いている').toContainText('定例会議');
