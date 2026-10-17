@@ -104,6 +104,21 @@ test('🔴 雛形を作って、短縮語 + Tab で本文に挿せる (#196)', a
   await clickReal(page, '[data-pkc-action="start-edit"]');
   await expect(ta, '保存した本文に雛形が残っていない').toHaveValue('〒100-0000 山田 様');
 
+  /**
+   * 🔴 **作成の ▼ の「テンプレートから作る…」で、中身の入ったノートが編集の状態で開く**(#1645 項目 4)。
+   * ⚠ 新しく起動せず、この道中に足す。上で作った雛形(`addr`)をテンプレートとして選ぶ。
+   */
+  await clickReal(page, '[data-pkc-action="commit-edit"]'); // 編集中は作成の ▼ が使えない
+  await clickReal(page, '[data-pkc-field="create-pick"]');
+  await clickReal(page, '[data-pkc-region="create-menu"] [data-pkc-action="create-from-template"]');
+  const tplRows = page.locator('[data-pkc-field="pick-template-note"]');
+  await expect(tplRows.first(), 'テンプレートの一覧が出ない').toBeVisible();
+  await expect(tplRows.filter({ hasText: 'addr' }), '雛形が一覧に出ていない').toHaveCount(1);
+  await tplRows.filter({ hasText: 'addr' }).click();
+  const taT = page.locator('[data-pkc-field="editor-body"]');
+  await expect(taT, '選んでも編集の状態でノートが開かない').toBeVisible();
+  await expect(taT, '選んだテンプレートの中身が入っていない').toHaveValue(/〒100-0000/);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

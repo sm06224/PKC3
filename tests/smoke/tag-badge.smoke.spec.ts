@@ -150,6 +150,23 @@ test('🔴 本文のタグが札で出て、押すと一覧が絞られる (#550
     '押しても一覧が絞られていない',
   ).toHaveValue('買い物');
 
+  /**
+   * 🔴 **システム > 表示の「色を付けたタグ」で見渡して外せる**(#1645 項目 1。新しい起動は足さない)。
+   * 付けるのはノートの右のペイン、見渡して外すのは設定の一覧 ── 往復がそろう。
+   */
+  await paintTag(page, '買い物', '#00aa44');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const colorList = page.locator('[data-pkc-field="tag-color-list"]');
+  await expect(colorList, '「色を付けたタグ」の一覧が設定に無い').toBeVisible();
+  const listRow = colorList.locator('[data-pkc-field="tag-color-list-row"]');
+  await expect(listRow, '色を付けたタグが一覧に出ていない').toHaveCount(1);
+  await expect(listRow.locator('[data-pkc-field="tag-color-list-name"]')).toHaveText('買い物');
+  await clickReal(page, listRow.locator('[data-pkc-action="tag-color-clear"]'));
+  await expect(
+    colorList.locator('[data-pkc-field="tag-color-list-empty"]'),
+    '一覧から色を外しても空の案内にならない',
+  ).toHaveText('色を付けたタグはありません');
+
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });
 

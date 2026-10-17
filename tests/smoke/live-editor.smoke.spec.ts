@@ -503,6 +503,17 @@ test('🔴 塊を跨ぐ Ctrl+Z が実機で効く(行の中は OS の取り消�
     await clickReal(page, '[data-pkc-action="replace-all"]');
   };
   await clickReal(page, '[data-pkc-action="toggle-replace"]');
+  /**
+   * 🔴 **探す語を打つと、置換の帯に「N 件」が出る**(#1646 の 2。新しく起動せず、この道中に足す)。
+   * 当たる語は 1 件以上、当たらない語は「0 件」、空に戻すと何も出ない(まだ何も探していない)。
+   */
+  const replaceCount = page.locator('[data-pkc-field="replace-count"]');
+  await page.locator('[data-pkc-field="replace-find"]').fill('段落');
+  await expect(replaceCount, '探す語が本文に在るのに件数が出ない').toHaveText(/^[1-9]\d* 件$/);
+  await page.locator('[data-pkc-field="replace-find"]').fill('本文に無い語ゆうれい');
+  await expect(replaceCount, '当たらない語が「0 件」にならない').toHaveText('0 件');
+  await page.locator('[data-pkc-field="replace-find"]').fill('');
+  await expect(replaceCount, '探す語が空なのに件数が残っている').toHaveText('');
   await replaceAll('段落', '節');
   await expect(live).toContainText('最初の節。');
   await expect(live).not.toContainText('最初の段落。');
