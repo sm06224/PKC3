@@ -165,9 +165,13 @@ describe('filer view (P3-7b)', () => {
     enter('f2');
     await tick();
     // いまは f1 > f2 の中。選んでいるのは f2 の中の b ではなく、別のノート a を選んでおく
+    // ⚠ 依頼 277: f2 の一覧に出ていないノートを開くと、一覧はそのノートのフォルダ(f1)へ移る ──
+    //   この test は「途中の段を押す」場面を作りたいので、場所を f2 へ戻す(場所を決める操作は尊重される)
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'SET_SCOPE', lid: 'f2' });
     await tick();
     expect(d.getState().selectedLid).toBe('a');
+    expect(d.getState().scopeLid, '前提:f2 の中に居る').toBe('f2');
 
     // 対照群: 途中の段(f1)は今までどおり「入る」── 選ばない
     q<HTMLElement>('[data-pkc-region="filer-breadcrumb"] [data-pkc-entry="f1"]')!.click();
@@ -180,8 +184,10 @@ describe('filer view (P3-7b)', () => {
     // ⚠ 行を押して入ると f2 を選んでしまうので、選びを別の物へ戻してから現在地を押す
     //   (戻さないと「選ばれている」が前から成り立っていて、押した効果を見分けられない)
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'SET_SCOPE', lid: 'f2' }); // 依頼 277: 開いたノートのフォルダへ移るので、場所を戻す
     await tick();
     expect(d.getState().selectedLid, '前提:現在地を押す前は f2 を選んでいない').toBe('a');
+    expect(d.getState().scopeLid, '前提:f2 の中に居る').toBe('f2');
 
     // 本体: いま居る f2 を押す → f2 が選ばれる。左の列の場所はそのまま
     const here = q<HTMLElement>('[data-pkc-region="filer-breadcrumb"] [data-pkc-entry="f2"]')!;
@@ -297,18 +303,29 @@ describe('filer view (P3-7b)', () => {
   });
 
   /**
-   * 🔴 **別のフォルダのノートを選んでも現在地は動かない**(#240 段①)。
-   * ⚠ 直す前は「最近傍の祖先フォルダ」へ**勝手に移動**していた ── 一覧から
-   * 検索で当てたノートを選ぶだけで、整理していた場所を見失う形だった。
+   * 🔴 **一覧に出ていないノートを開くと、一覧もそのフォルダへ移る**(依頼 277。Gemini 回答 = A)。
+   * ⚠ 2026-08-17(#240 段①)は「別のフォルダのノートを選んでも現在地は動かない」と決めていた ──
+   *   直す前の「最近傍の祖先フォルダ」への勝手な移動は、**一覧に出ている行を選んだだけで入る**形だった。
+   *   いまは逆の場面(**一覧に行が無い**ノートを開いた)だけ動く。出ている行を選ぶだけなら動かない(下の対照群)。
    */
-  it('🔴 非 folder を選んでも現在地は動かない', async () => {
+  it('🔴 一覧に出ていないノートを開くと、一覧もそのノートのフォルダへ移る(依頼 277)', async () => {
     const { root, d, rows } = setup(METAS, RELS);
     root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
-    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' }); // 別のフォルダの中のノート
+    expect(rows(), '前提:ルートの一覧には a が出ていない').toEqual(['f1']);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' }); // 別のフォルダの中のノート(リンク・「操作を探す」と同じ入り口)
     await tick();
-    expect(rows(), '選んだだけで現在地が動いた').toEqual(['f1']);
-    expect(d.getState().scopeLid).toBeNull();
+    expect(d.getState().scopeLid, '開いたノートのフォルダへ移っていない').toBe('f1');
+    expect(rows(), '一覧に開いたノートの行が出ていない').toEqual(['f2', 'a']);
     expect(d.getState().selectedLid).toBe('a');
+  });
+
+  it('🔴 対照群:一覧に出ているノートを選ぶだけなら、現在地は動かない(#240 段①)', async () => {
+    const { root, d, rows } = setup(METAS, RELS);
+    root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'f1' }); // 出ている行(フォルダ)を選ぶ ── 入らない
+    await tick();
+    expect(d.getState().scopeLid, '行を選んだだけで入った').toBeNull();
+    expect(rows()).toEqual(['f1']);
   });
 
   it('relations の無い container では全 entry が root に平置き', () => {

@@ -59,6 +59,8 @@ function rig(services: Partial<BinderServices>) {
     events.filter((e) => e.type === 'REQUEST_SMART_COND' || e.type === 'REQUEST_SMART_FIELD');
   const startEditing = (): void => {
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    // 依頼 277: 一覧に出ていないノートを開くと一覧がそのフォルダへ移る ── この台は「スマートフォルダを見たまま編集中」を作りたいので戻す
+    d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
     d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '本文\n' });
     d.dispatch({ type: 'START_EDIT' });
     expect(d.getState().phase, '台の前提: 編集に入れていない').toBe('editing');

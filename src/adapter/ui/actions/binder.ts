@@ -1518,13 +1518,25 @@ const createAndEdit = (
   /** 🔴 テンプレートから作るときの本文(#1645)。省略 = 種類の既定の本文。 */
   body?: string,
 ): void => {
+  /**
+   * 🔴 **スマートフォルダの中には作れない ── 作る前に断る**(依頼 338。Gemini 回答 = A)。
+   * ⚠ 直す前は reducer が黙ってルートに作り、中央は編集に入るのに、左の一覧には出なかった
+   *   (画面の下に「ルートに作りました」と出るだけ)。2 ペインは作る前に断っていた(`dualCreate`)── 同じ操作に
+   *   2 つの場所で違う答えを返さない。
+   */
+  if (
+    parentLid !== null &&
+    dispatcher.getState().entryMetas.get(parentLid)?.archetype === SMART_ARCHETYPE
+  ) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: 'スマートフォルダの中には作れません。ルートか、ふつうのフォルダを開いてください',
+    });
+    return;
+  }
   if (dispatcher.getState().viewMode !== 'detail')
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
   const lid = generateLid();
-  // 🔴 スマートフォルダは「条件で集まる場所」── reducer は黙ってルートに作るので、作った後に 1 行で言う
-  const intoSmart =
-    parentLid !== null &&
-    dispatcher.getState().entryMetas.get(parentLid)?.archetype === SMART_ARCHETYPE;
   dispatcher.dispatch({
     type: 'CREATE_ENTRY',
     archetype,
@@ -1535,8 +1547,6 @@ const createAndEdit = (
     ...(body !== undefined ? { body } : {}),
     ...(OPENS_READABLE.includes(archetype) ? { edit: false } : {}),
   });
-  if (intoSmart && dispatcher.getState().entryMetas.has(lid))
-    services.showStatus?.('ここは条件で集まる場所なので、ルートに作りました');
   if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
 };
 
@@ -20353,6 +20363,20 @@ export function bindActions(
    * ⚠ 端では**止まる**(巻き戻さない)── 一覧の端で押し続けると反対側へ飛ぶのは
    *   OS のファイラの挙動ではない。
    */
+  /**
+   * 🔴 **PageUp / PageDown で動く行数**(依頼 337)── 画面に見えている行の数(1 行は重ねる)。
+   * ⚠ 行の高さと器の高さは画面から読む(行の高さは種類・折り返しで変わる)。測れない(高さ 0 ── 隠れている面・
+   *   DOM に高さを持たない環境)ときは 10 行。⚠ 端では止まる(`rowAt` / `dualRowAt` が丸める)。
+   */
+  const pageRows = (from: Element | null): number => {
+    const row = from?.closest('tr') ?? null;
+    const box = from?.closest('[data-pkc-region="browse-host"], [data-pkc-region="dual-pane"]') ?? null;
+    const rowH = row?.getBoundingClientRect().height ?? 0;
+    const boxH = box?.getBoundingClientRect().height ?? 0;
+    if (rowH <= 0 || boxH <= 0) return 10;
+    return Math.max(1, Math.floor(boxH / rowH) - 1);
+  };
+
   const rowAt = (st: AppState, delta: number): string | null => {
     const rows = visibleFilerRows(st);
     if (rows.length === 0) return null;
@@ -20588,6 +20612,28 @@ export function bindActions(
       moveDualCursor(side, lid);
       return true;
     }
+    // 🔴 先頭 / 末尾 / 1 画面ぶん(依頼 337)── 2 ペインはカーソルだけが動く(↑↓ と同じ)
+    if (
+      cmd === 'filer-row-first' ||
+      cmd === 'filer-row-last' ||
+      cmd === 'filer-row-page-up' ||
+      cmd === 'filer-row-page-down'
+    ) {
+      const rows = dualRows(st, side);
+      const lid =
+        cmd === 'filer-row-first'
+          ? (rows[0]?.lid ?? null)
+          : cmd === 'filer-row-last'
+            ? (rows[rows.length - 1]?.lid ?? null)
+            : dualRowAt(
+                st,
+                side,
+                (cmd === 'filer-row-page-down' ? 1 : -1) * pageRows(root.ownerDocument.activeElement),
+              );
+      if (lid === null) return false;
+      moveDualCursor(side, lid);
+      return true;
+    }
     if (cmd === 'filer-extend-down' || cmd === 'filer-extend-up') {
       const from = dualCursor(st, side);
       const lid = dualRowAt(st, side, cmd === 'filer-extend-down' ? 1 : -1);
@@ -20750,6 +20796,27 @@ export function bindActions(
        *   続く `Shift` が効く。⚠ 1 回の dispatch で撃つ(`SELECT_ONLY`。2 回撃つと 1 キーで
        *   2 回描き直す ── #1087 の実測)。
        */
+      dispatcher.dispatch({ type: 'SELECT_ONLY', lid });
+      focusRow(lid);
+      return true;
+    }
+    /**
+     * 🔴 **先頭 / 末尾 / 1 画面ぶん**(依頼 337)。送り方は ↑↓ と同じ(印も動く・中央のノートは開き直さない)。
+     */
+    if (
+      cmd === 'filer-row-first' ||
+      cmd === 'filer-row-last' ||
+      cmd === 'filer-row-page-up' ||
+      cmd === 'filer-row-page-down'
+    ) {
+      const rows = visibleFilerRows(st);
+      const lid =
+        cmd === 'filer-row-first'
+          ? (rows[0]?.lid ?? null)
+          : cmd === 'filer-row-last'
+            ? (rows[rows.length - 1]?.lid ?? null)
+            : rowAt(st, (cmd === 'filer-row-page-down' ? 1 : -1) * pageRows(root.ownerDocument.activeElement));
+      if (lid === null) return false;
       dispatcher.dispatch({ type: 'SELECT_ONLY', lid });
       focusRow(lid);
       return true;

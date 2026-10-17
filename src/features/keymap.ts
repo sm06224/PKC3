@@ -476,6 +476,37 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Shift+ArrowUp'],
   },
   /**
+   * 🔴 **先頭・末尾・1 画面ぶん**(依頼 337。Gemini 回答 = A)。直す前は ↑↓ と Shift+↑↓ だけで、Home / End を
+   * 押すと一覧は端まで動くのに、選んでいる行はそのままだった。パソコンのファイルの画面と同じ動き。
+   * ⚠ 送り方は ↑↓ と同じ(左の列は印も動く / 2 ペインはカーソルだけ。中央のノートは開き直さない)。
+   */
+  {
+    id: 'filer-row-first',
+    label: '先頭の行へ移る',
+    contexts: ['filer', 'dual'],
+    defaults: ['Home'],
+  },
+  {
+    id: 'filer-row-last',
+    label: '最後の行へ移る',
+    contexts: ['filer', 'dual'],
+    defaults: ['End'],
+  },
+  {
+    id: 'filer-row-page-up',
+    label: '1 画面ぶん前の行へ移る',
+    contexts: ['filer', 'dual'],
+    defaults: ['PageUp'],
+    note: '画面に見えている行の数だけ戻ります',
+  },
+  {
+    id: 'filer-row-page-down',
+    label: '1 画面ぶん次の行へ移る',
+    contexts: ['filer', 'dual'],
+    defaults: ['PageDown'],
+    note: '画面に見えている行の数だけ進みます',
+  },
+  /**
    * 🔴 **左の列の行からの整理 3 つの鍵**(#215)。
    *
    * ⚠ 文脈は `filer` **だけ** ── 2 ペインには同じ操作の鍵が既に在る(`dual-rename` F2 /

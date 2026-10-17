@@ -93,7 +93,8 @@ export class SearchRenderer {
       page.rowsQuery,
       page.truncated ? 't' : '',
       page.failed === false ? '' : page.failed,
-      page.rows.map((r) => `${r.lid}|${r.title}|${r.snippet}`).join('\u0001'),
+      // 🔴 片付けたかどうかも指紋に入れる(片付けた直後に、行の「片付け済み」が古いままにならない)
+      page.rows.map((r) => `${r.lid}|${r.title}|${r.snippet}|${state.entryMetas.get(r.lid)?.archived === true ? 'a' : ''}`).join('\u0001'),
     ].join('\u0002');
     if (print === this.last) return;
     this.last = print;
@@ -136,7 +137,19 @@ export class SearchRenderer {
           snippet.append(document.createTextNode(part.text));
         }
       }
-      open.append(title, snippet);
+      /**
+       * 🔴 **片付けたノートには「片付け済み」と添える**(依頼 87-1。Gemini 回答 = 推薦どおり B)。
+       * ⚠ 探す面は片付けたノートも**外さない**(探して見つからないのがいちばん困る)── ただし
+       *   予定の画面では既定で隠している物なので、出ている行が片付けた物だと分かるようにする。
+       */
+      if (state.entryMetas.get(row.lid)?.archived === true) {
+        const done = document.createElement('span');
+        done.setAttribute('data-pkc-field', 'search-row-archived');
+        done.textContent = '片付け済み';
+        open.append(title, done, snippet);
+      } else {
+        open.append(title, snippet);
+      }
       li.append(open);
       list.append(li);
     }

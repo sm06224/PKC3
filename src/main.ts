@@ -37,6 +37,7 @@ import { openDuckDb } from '@adapter/platform/duckdb/duckdb-open';
 import { DuckDbPackStore } from '@adapter/platform/duckdb/duckdb-pack-store';
 import { connectOpenedEffects } from '@adapter/platform/opened-effects';
 import { connectEntrySortMemory } from '@adapter/platform/entry-sort-effects';
+import { connectListPlaceMemory } from '@adapter/platform/list-place-effects';
 import { appOpenedStore } from '@adapter/platform/opened-store';
 import { isRegisteredApp, tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
@@ -5822,6 +5823,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   }
   // 🔴 一覧の並び順も同じ作法(依頼 82-3)。憶えた並びを写し、以後は変わるたびに憶える
   connectEntrySortMemory(dispatcher);
+  // 🔴 開いていたフォルダと種類の札も同じ作法(依頼 277)
+  connectListPlaceMemory(dispatcher);
   /**
    * 🔴 **編集中の字を端末に控え、次に開いたとき戻せるようにする**(#1376)。
    *

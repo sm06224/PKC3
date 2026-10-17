@@ -740,6 +740,8 @@ describe('フォルダの表の鍵', () => {
     press('Enter', clickRow('f')); // scope = f
     // ⚠ 編集に入るには openBody が要る(未読 body の編集を構造的に禁じている)
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    // 依頼 277: 一覧に出ていないノートを開くと一覧がそのフォルダへ移る ── 「f の中に居たまま編集中」を作りたいので戻す
+    d.dispatch({ type: 'SET_SCOPE', lid: 'f' });
     d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '' });
     d.dispatch({ type: 'START_EDIT' });
     expect(d.getState().phase, '編集に入れていない(空振り)').toBe('editing');
