@@ -15788,6 +15788,9 @@ export function bindActions(
      */
     if (field === 'settings-file-input') {
       const f = el.files?.[0] ?? null;
+      // 🔴 **読む前に値を戻す**(#1087)── 適用の後でしか戻さないと、「読めない」と出た後に file を直して
+      //   同じ名前で選び直しても `change` が発火せず、古い表示のままになる。File は掴んであるので戻してよい
+      el.value = '';
       if (f === null) {
         paintSettingsPlan(root, null);
         return;
