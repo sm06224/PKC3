@@ -15,6 +15,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer, type AssetLender } from '../../src/adapter/ui/render/detail';
 import { PlaceEmbeds, type PlaceEmbedDeps } from '../../src/adapter/ui/render/place-embed';
 import { SectionEmbeds, type SectionEmbedDeps } from '../../src/adapter/ui/render/section-embed';
+import { hydrateFenceHosts } from '../../src/adapter/ui/render/fence-asset-hydrate';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
 import { stubRevisionOps } from '../helpers/revision-stub';
@@ -251,5 +252,109 @@ describe('#1087 A4 埋め込みの中の「添付から読む囲み」が中身�
     await tick(50);
     expect(host.querySelector('table'), '捨てた面へ差し込んだ').toBeNull();
     expect(host.querySelector('[data-pkc-fence-asset-key]')).not.toBeNull();
+  });
+
+  const MERMAID_FENCE = '```mermaid asset:ast-k1\n```';
+  const hasFigure = (roots: readonly Element[]): boolean =>
+    roots.some((e) => e.hasAttribute('data-pkc-mermaid-src') || e.querySelector('[data-pkc-mermaid-src]') !== null);
+
+  it('🔴 章の埋め込みの中で、添付から読む図の囲みが差し替わったら、図を描く口(deps.figures)へ渡る', async () => {
+    const host = document.createElement('div');
+    host.innerHTML =
+      '<div class="pkc-transclusion-placeholder" data-pkc-embed-ref="entry:src#h/plan"></div>';
+    document.body.append(host);
+    const embeds = new SectionEmbeds();
+    const seen: Element[][] = [];
+    embeds.sync(host, {
+      selfLid: 'host',
+      excerptOf: () => ({ text: `## Plan\n${MERMAID_FENCE}`, cut: false }),
+      metaOf: (l) => (l === 'src' || l === 'host' ? { title: 't-' + l, archetype: 'text' } : undefined),
+      render: (t) => Promise.resolve(renderMarkdown(t)),
+      wanted: () => {},
+      lender: { lend: async () => null, getBlob: async () => blobOf('graph TD\nA-->B') },
+      figures: (roots) => {
+        seen.push([...roots] as Element[]);
+        return [];
+      },
+      currentContainerId: 'c1',
+    });
+    await waitFor(() => seen.some(hasFigure), '差し替わった図の囲みが deps.figures へ渡らない');
+    embeds.release();
+  });
+
+  it('🔴 付箋の板の中で、添付から読む図の囲みが差し替わったら、図を描く口(deps.figures)へ渡る', async () => {
+    const host = document.createElement('div');
+    host.innerHTML = '<div class="pkc-format-block pkc-place" data-pkc-place-entry="src"></div>';
+    document.body.append(host);
+    const embeds = new PlaceEmbeds();
+    const seen: Element[][] = [];
+    embeds.sync(host, {
+      selfLid: 'board',
+      excerptOf: () => ({ text: MERMAID_FENCE, cut: false }),
+      metaOf: (l) => (l === 'src' ? { title: 't-src', archetype: 'text' } : undefined),
+      render: (t) => Promise.resolve(renderMarkdown(t)),
+      wanted: () => {},
+      lender: { lend: async () => null, getBlob: async () => blobOf('graph TD\nA-->B') },
+      figures: (roots) => {
+        seen.push([...roots] as Element[]);
+        return [];
+      },
+      viewRoot: null,
+      currentContainerId: 'c1',
+    });
+    await waitFor(() => seen.some(hasFigure), '差し替わった図の囲みが deps.figures へ渡らない');
+    embeds.release();
+  });
+});
+
+describe('#1087 囲みの器が外れた(枠を描き直した)あとは、旧い読み込みが何も触らない・読まない', () => {
+  const mk = (): HTMLElement => {
+    const h = document.createElement('div');
+    h.setAttribute('data-pkc-fence-asset-key', 'ast-k1');
+    h.setAttribute('data-pkc-fence-asset-info', 'csv');
+    h.innerHTML = '<p data-pkc-fence-asset-pending>読み込み中</p>';
+    return h;
+  };
+  const env = { allowExternalImages: false, currentContainerId: 'c1' };
+
+  it('読み始める前に外れた器は、添付を読まない', async () => {
+    const gone = mk();
+    document.body.append(gone);
+    gone.remove();
+    const keys: string[] = [];
+    await hydrateFenceHosts({
+      hosts: [gone],
+      getBlob: async (k) => {
+        keys.push(k);
+        return blobOf('あ,い\n1,2');
+      },
+      texts: new Map(),
+      env,
+      stale: () => false,
+    });
+    expect(keys, '外れた器のために添付を読んだ').toEqual([]);
+  });
+
+  it('🔴 読んでいる間に器が外れたら、差し替えない', async () => {
+    const oldHost = mk();
+    document.body.append(oldHost);
+    let open: (b: Blob) => void = () => {};
+    const gate = new Promise<Blob>((r) => {
+      open = r;
+    });
+    const replaced: Element[] = [];
+    const p = hydrateFenceHosts({
+      hosts: [oldHost],
+      getBlob: () => gate,
+      texts: new Map(),
+      env,
+      stale: () => false, // 枠そのものは生きている ── 描き直されたのは中の器だけ
+      onReplaced: (n) => replaced.push(n),
+    });
+    oldHost.remove(); // 枠を描き直して旧い器が外れる
+    open(blobOf('あ,い\n1,2'));
+    await p;
+    expect(replaced, '外れた器を差し替えた').toEqual([]);
+    expect(document.body.querySelector('table'), '画面へ差し込んだ').toBeNull();
   });
 });

@@ -161,7 +161,7 @@ describe('保存名は置換前の原文(#1087 A1)', () => {
     const code = renderToDom('[`a--b`.pdf](asset:k1)');
     expect(code.querySelector('a.pkc-asset-link')!.getAttribute('data-pkc-asset-name')).toBe('a--b.pdf');
     const auto = renderToDom('[<https://example.com/a--b>.pdf](asset:k1)');
-    expect(auto.querySelector('a.pkc-asset-link')!.getAttribute('data-pkc-asset-name')).toContain('a--b');
+    expect(auto.querySelector('a.pkc-asset-link')!.getAttribute('data-pkc-asset-name')).toBe('https://example.com/a--b.pdf');
   });
 
   it('ラベル空は key のまま(原文化しても fallback は生きる)', () => {

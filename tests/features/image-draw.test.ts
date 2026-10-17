@@ -226,7 +226,7 @@ describe('名前と対象', () => {
     expect(drawnImageName('v1.2 report')).toBe('v1.2 report (描き込み).png');
     expect(drawnImageName('2026.10.17 メモ')).toBe('2026.10.17 メモ (描き込み).png');
     expect(drawnImageName('x.pdf')).toBe('x.pdf (描き込み).png');
-    for (const ext of ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'heic', 'heif', 'avif', 'svg', 'tif', 'tiff', 'PNG', 'JpG']) {
+    for (const ext of ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'heic', 'heif', 'avif', 'svg', 'tif', 'tiff', 'PNG', 'JpG', 'jpe', 'jfif', 'pjpeg', 'apng', 'ico', 'jxl']) {
       expect(drawnImageName(`写真.${ext}`), ext).toBe('写真 (描き込み).png');
     }
   });

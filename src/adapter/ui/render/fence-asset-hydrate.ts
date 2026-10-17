@@ -40,9 +40,28 @@ export interface FenceHydrateOptions {
   readonly onReplaced?: (next: Element) => void;
 }
 
+/** 添付から読む囲みの「読み込み中」の印(`markdown-render.ts` が器の中の案内に立て、埋めるか断り文にすると外れる)。 */
+export const FENCE_ASSET_PENDING_SELECTOR = '[data-pkc-fence-asset-pending]';
+
+/**
+ * 🔴 **本文の中に、読み込み中の囲み・章の埋め込みが在るか**(PDF で刷る前に待つ判定。#1087)。
+ * ⚠ 判定は**この 1 つ**に寄せる ── 章の埋め込み(`SECTION_LOADING_SELECTOR`)だけ見ると、
+ *   付箋の板・章の中の「添付から読む囲み」が案内のまま刷られる。本文直下の囲み(読む面)も同じ印を持つので一緒に効く。
+ */
+export function bodyEmbedsLoading(
+  root: ParentNode,
+  bodyHostSelector: string,
+  sectionLoadingSelector: string,
+): boolean {
+  // ⚠ 本文の器の選択子は呼び側が渡す(`detail.ts` の `BODY_HOST_SELECTOR` ── 持ち越した器を掴まない。ここから detail を引くと循環する)
+  const body = root.querySelector(bodyHostSelector);
+  if (body === null) return false;
+  return body.querySelector(`${sectionLoadingSelector}, ${FENCE_ASSET_PENDING_SELECTOR}`) !== null;
+}
+
 /** 器の中の「読み込み中」を断り文にする。 */
 function fail(host: HTMLElement, why: string): void {
-  const pending = host.querySelector('[data-pkc-fence-asset-pending]');
+  const pending = host.querySelector(FENCE_ASSET_PENDING_SELECTOR);
   if (!pending) return;
   pending.setAttribute('data-pkc-fence-asset-error', '');
   pending.removeAttribute('data-pkc-fence-asset-pending');
@@ -57,7 +76,9 @@ function fail(host: HTMLElement, why: string): void {
  * ⚠ 待っている間に `stale()` になったら**何も触らない**(器も断り文も)。
  */
 export async function hydrateFenceHosts(o: FenceHydrateOptions): Promise<void> {
-  const { hosts, getBlob, texts, env } = o;
+  const { getBlob, texts, env } = o;
+  // 🔴 外れた器は読まない(旧い読み込みが、描き直した後も添付を読み続けない)
+  const hosts = o.hosts.filter((h) => h.isConnected);
   if (hosts.length === 0) return;
   if (o.stale()) return;
   /**
@@ -94,6 +115,8 @@ export async function hydrateFenceHosts(o: FenceHydrateOptions): Promise<void> {
           texts.set(key, text);
         }
         for (const h of mine) {
+          // 🔴 同じ枠を描き直すと旧い器は外れる ── 外れた器は差し替えない(新しい器は新しい読み込みが埋める)
+          if (!h.isConnected) continue;
           const info = h.getAttribute('data-pkc-fence-asset-info') ?? '';
           /**
            * ⚠ **器ごと差し替える** ── `renderFenceFromAsset` が返すのは `pkc-md-block` を含む

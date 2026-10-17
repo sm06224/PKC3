@@ -4,10 +4,14 @@
  * ⚠ ここが見るのは **`window.print()` を呼ぶ条件**である ── 紙の組み方
  * (`@media print`)は `tests/adapter/print-css.test.ts` と
  * `tests/smoke/print.smoke.spec.ts` が見ている(**2 か所で数えない**)。
+ *
+ * @vitest-environment happy-dom
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { AppState, Dispatchable } from '../../src/adapter/state/app-state';
+import { bodyEmbedsLoading, FENCE_ASSET_PENDING_SELECTOR } from '../../src/adapter/ui/render/fence-asset-hydrate';
+import { BODY_HOST_SELECTOR } from '../../src/adapter/ui/render/detail';
 import { printNote, type PrintNoteDeps } from '../../src/adapter/platform/print-note';
 
 /** 必要な field だけ持つ state(器ごと組まない ── 判定はこの 5 つで決まる)。 */
@@ -327,3 +331,28 @@ describe('printNote(#187 ── 紙に出す口)', () => {
   });
 });
 
+describe('🔴 刷る前に待つ判定(bodyEmbedsLoading)── 本文の中の読み込み中の囲みも待つ(#1087)', () => {
+  const SECTION = '[data-pkc-section-key^="w"]';
+  const BODY = BODY_HOST_SELECTOR;
+  const rootOf = (inner: string): HTMLElement => {
+    const r = document.createElement('div');
+    r.innerHTML = `<div data-pkc-field="detail-body">${inner}</div><aside><p data-pkc-fence-asset-pending>本文の外</p></aside>`;
+    return r;
+  };
+
+  it('囲みが読み込み中なら待つ / 埋まったら待たない', () => {
+    const loading = rootOf('<div class="pkc-section-embed"><div data-pkc-fence-asset-key="k"><p data-pkc-fence-asset-pending>案内</p></div></div>');
+    expect(bodyEmbedsLoading(loading, BODY, SECTION)).toBe(true);
+    loading.querySelector(`[data-pkc-field="detail-body"] ${FENCE_ASSET_PENDING_SELECTOR}`)!.removeAttribute('data-pkc-fence-asset-pending');
+    expect(bodyEmbedsLoading(loading, BODY, SECTION), '対照群:印が外れたのに待っている(本文の外の印で待っていないか)').toBe(false);
+  });
+
+  it('章の埋め込みの読み込み中の印は従来どおり待つ / 本文の外の印では待たない', () => {
+    expect(bodyEmbedsLoading(rootOf('<div data-pkc-section-key="w1"></div>'), BODY, SECTION)).toBe(true);
+    expect(bodyEmbedsLoading(rootOf('<p>なにもない</p>'), BODY, SECTION), '本文の外の印で待った').toBe(false);
+  });
+
+  it('本文の面が無ければ待たない', () => {
+    expect(bodyEmbedsLoading(document.createElement('div'), BODY, SECTION)).toBe(false);
+  });
+});

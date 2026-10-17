@@ -461,6 +461,7 @@ import {
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
 import { printNote } from '@adapter/platform/print-note';
+import { bodyEmbedsLoading } from '@adapter/ui/render/fence-asset-hydrate';
 import { SECTION_LOADING_SELECTOR } from '@adapter/ui/render/section-embed';
 
 const DB_NAME = 'pkc3';
@@ -5176,8 +5177,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           //    ⚠ 本文が state に届いた直後は、図の器がまだ DOM に無いことがある(実測: 押してすぐだと器 0 個で刷った)
           //    ── 1 コマずつ 3 回、器を引き直して描く
           // 🔴 章の埋め込みが読み込み中のあいだは刷らない(#1087)。印は `SectionEmbeds` が器に立てる
-          //    `data-pkc-section-key`(`w` で始まる = 読み込み中。抜粋が届いた後の描き待ちも含む)
-          embedsLoading: () => document.querySelector(`[data-pkc-field="detail-body"] ${SECTION_LOADING_SELECTOR}`) !== null,
+          //    `data-pkc-section-key`(`w` で始まる = 読み込み中。抜粋が届いた後の描き待ちも含む)と、
+          //    添付から読む囲みの `data-pkc-fence-asset-pending`(判定は `bodyEmbedsLoading` の 1 つ)
+          embedsLoading: () => bodyEmbedsLoading(document, BODY_HOST_SELECTOR, SECTION_LOADING_SELECTOR),
           prepare: async () => {
             for (let i = 0; i < 3; i++) {
               await new Promise<void>((r) =>

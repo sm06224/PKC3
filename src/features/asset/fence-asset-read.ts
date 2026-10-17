@@ -14,7 +14,16 @@ import { decodeImportTextInfo } from '../import/text-decode';
 
 /** 添付 1 件の読み。⚠ 失敗は**理由つき**で返す(黙って空にしない)。 */
 export type FenceAssetRead =
-  | { readonly ok: true; readonly text: string }
+  | {
+      readonly ok: true;
+      readonly text: string;
+      /**
+       * Shift_JIS と推測して読んだ(= UTF-8 として不正だった)。呼び側は今は使わない。
+       * ⚠ 既知の限界:UTF-8 の file に不正なバイトが混じると、Shift_JIS として読み切れてしまう組み合わせがあり
+       *   (不正バイトの並び次第で、着地前レビューの見積もりで約 2% の組み合わせ)、そのとき全体が化ける。見え方は変えていない。
+       */
+      readonly guessedSjis: boolean;
+    }
   | { readonly ok: false; readonly why: string };
 
 /** 鍵 → bytes。⚠ 無ければ `null`(投げてもよい ── ここで受ける)。 */
@@ -41,13 +50,14 @@ export async function readFenceAssetText(
   try {
     // 🔴 UTF-8 固定で読まない(#1087 A2)── Shift_JIS / UTF-16 の CSV が文字化けのまま ok で描かれ、書き出しにも焼き込まれていた。
     //   取り込み・下見と同じ判定(`decodeImportTextInfo`)を通す(判定を増やさない)
-    const text = decodeImportTextInfo(new Uint8Array(await blob.arrayBuffer())).text;
+    const decoded = decodeImportTextInfo(new Uint8Array(await blob.arrayBuffer()));
+    const text = decoded.text;
     // 🔴 `Blob.text()` は binary でも投げない(壊れた字に化けるだけ)── 画像・zip を
     //   字として並べないよう、字の種類でない物が NUL / 置換文字を含むときは断る
     if (!isTextualMime(blob.type ?? '') && (text.includes('\u0000') || text.includes('\uFFFD'))) {
       return { ok: false, why: '字として読めません' };
     }
-    return { ok: true, text };
+    return { ok: true, text, guessedSjis: decoded.used === 'sjis' };
   } catch {
     return { ok: false, why: '字として読めません' };
   }

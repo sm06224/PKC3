@@ -354,7 +354,7 @@ describe('本文が指している添付の鍵を数え上げる(#444 段②)', 
 describe('添付を指すコードブロックの呼び名(#636)', () => {
   const read = (p: string): string => readFileSync(new URL(p, import.meta.url), 'utf8');
   const WRITER = read('../../src/features/markdown/markdown-render.ts');
-  const FAILER = read('../../src/adapter/ui/render/detail.ts');
+  const FAILER = read('../../src/adapter/ui/render/fence-asset-hydrate.ts');
 
   it('🔴 書く側と、失敗を上書きする側が、同じ呼び名を使う', () => {
     // ⚠ 空振り防止 ── そもそもその 1 行が在ること
@@ -404,7 +404,7 @@ describe('添付を字として読む(#1087)', () => {
 
   it('🔴 本物の字は読める(変わった種類名でも / 種類が空でも / 字の種類なら NUL があっても断らない)', async () => {
     const ok = async (b: Blob) => readFenceAssetText(async () => b, 'k');
-    expect(await ok(blobOf('日本語の本文\nline2', 'text/plain'))).toEqual({ ok: true, text: '日本語の本文\nline2' });
+    expect(await ok(blobOf('日本語の本文\nline2', 'text/plain'))).toEqual({ ok: true, text: '日本語の本文\nline2', guessedSjis: false });
     expect(await ok(blobOf('a,b\n1,2', 'text/csv'))).toMatchObject({ ok: true });
     expect(await ok(blobOf('{"a":1}', 'application/json'))).toMatchObject({ ok: true });
     // 変わった種類名 / 空の種類でも、中身が字ならそのまま読める
@@ -443,11 +443,11 @@ describe('囲みの添付の文字コード(#1087 A2)', () => {
     readFenceAssetText(async () => new Blob([b as BlobPart], { type: 'text/csv' }), 'k');
 
   it('Shift_JIS / UTF-16LE(BOM)/ UTF-16BE(BOM)/ UTF-8(BOM)/ 素の UTF-8 を読み分ける', async () => {
-    expect(await read(sjis)).toEqual({ ok: true, text });
-    expect(await read(u16(true, true))).toEqual({ ok: true, text });
-    expect(await read(u16(false, true))).toEqual({ ok: true, text });
-    expect(await read(new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(text)]))).toEqual({ ok: true, text });
-    expect(await read(new TextEncoder().encode(text))).toEqual({ ok: true, text });
+    expect(await read(sjis)).toEqual({ ok: true, text, guessedSjis: true });
+    expect(await read(u16(true, true))).toEqual({ ok: true, text, guessedSjis: false });
+    expect(await read(u16(false, true))).toEqual({ ok: true, text, guessedSjis: false });
+    expect(await read(new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(text)]))).toEqual({ ok: true, text, guessedSjis: false });
+    expect(await read(new TextEncoder().encode(text))).toEqual({ ok: true, text, guessedSjis: false });
   });
 });
 

@@ -181,7 +181,7 @@ export function undoStroke(list: readonly Stroke[]): readonly Stroke[] {
 }
 
 /** 描き込みの保存名で切り落としてよい(= 画像の)拡張子。 */
-const DRAWABLE_IMAGE_EXT_RE = /^(png|jpe?g|webp|bmp|gif|heic|heif|avif|svg|tiff?)$/i;
+const DRAWABLE_IMAGE_EXT_RE = /^(png|jpe|jpe?g|jfif|pjpeg|webp|bmp|gif|heic|heif|avif|apng|ico|jxl|svg|tiff?)$/i;
 
 /**
  * 保存する添付の名前。`写真.jpg` → `写真 (描き込み).png`(保存は常に PNG なので拡張子も揃える)。
