@@ -632,8 +632,8 @@ ${(e as Error).message}`,
     }),
   );
   expect(order[0], '3 つの行が揃っていない').toBeGreaterThanOrEqual(0);
-  expect(order[1], '「音量をそろえる」が「音を聞きやすくする」の直後に無い').toBe(order[0] + 1);
-  expect(order[2], '「頭の中で鳴る感じを和らげる」が「音量をそろえる」の直後に無い').toBe(order[0] + 2);
+  expect(order[1], '「音量をそろえる」が「音を聞きやすくする」の直後に無い').toBe((order[0] ?? -1) + 1);
+  expect(order[2], '「頭の中で鳴る感じを和らげる」が「音量をそろえる」の直後に無い').toBe((order[0] ?? -1) + 2);
 
   // 入れる → 外す で元に戻る(印と保存の値)
   for (const [box, field, label] of [
