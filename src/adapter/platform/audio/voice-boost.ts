@@ -42,6 +42,38 @@ export interface BoostHost {
   source(el: HTMLMediaElement): BoostNode;
   /** 止まっていたら動かす(端末によっては user の操作の中でしか動かない)。 */
   resume(): void;
+  /**
+   * 🔴 **鎖の中身を切り替えに合わせて組み直す**(#952 B2・B3)。⚠ 省略可 ── 持たない器は
+   * 従来の 1 本(声を整える)のまま。⚠ `head` と出口は変えない(繋いだ要素は繋ぎ直さない)。
+   */
+  configure?(mode: BoostMode): void;
+}
+
+/** 🔴 3 つの切り替え(設定の同じ節。互いに独立)。どれか 1 つでも入っていれば鎖を通す。 */
+export interface BoostMode {
+  /** 「音を聞きやすくする」── 低い唸りを落とし、声を持ち上げる。 */
+  readonly voice: boolean;
+  /** 「音量をそろえる」(#952 B2)── 小さい声と大きい声の差を縮める。 */
+  readonly level: boolean;
+  /** 「頭の中で鳴る感じを和らげる」(#952 B3)── 左右を少し混ぜる。 */
+  readonly crossfeed: boolean;
+}
+
+export const MODE_ANY = (m: BoostMode): boolean => m.voice || m.level || m.crossfeed;
+
+/** 鎖の段の名前。⚠ 並びはここ 1 か所が決める(高域の唸り → 圧縮 → 増幅 → 左右)。 */
+export type BoostStage = 'highpass' | 'compressor' | 'makeup' | 'crossfeed';
+
+/**
+ * 🔑 **どの段を通すか**(純粋な判定。test が直接当てる)。
+ * 圧縮と増幅は「声を整える」と「音量をそろえる」が**共有**する ── 両方入れても 2 重には掛けない。
+ */
+export function planStages(mode: BoostMode): BoostStage[] {
+  const out: BoostStage[] = [];
+  if (mode.voice) out.push('highpass');
+  if (mode.voice || mode.level) out.push('compressor', 'makeup');
+  if (mode.crossfeed) out.push('crossfeed');
+  return out;
 }
 
 /**
@@ -62,6 +94,30 @@ export const VOICE_BOOST = {
 } as const;
 
 /**
+ * 🔑 「音量をそろえる」の圧縮(#952 B2)── 声の整え方より**強め**にかけて、
+ * 小さい声と大きい声の差を縮める。両方入っているときは、こちらを使う。
+ * ⚠ `makeupGain` を上げすぎると割れるので、圧縮で下がる分を戻す程度にする。
+ */
+export const LEVEL_OUT = {
+  thresholdDb: -42,
+  kneeDb: 30,
+  ratio: 10,
+  attackSec: 0.003,
+  releaseSec: 0.3,
+  makeupGain: 2.2,
+} as const;
+
+/**
+ * 🔑 「頭の中で鳴る感じを和らげる」(#952 B3)── 反対側の耳へ、低い所だけ少し回す。
+ * `direct` は自分の側、`cross` は反対側から回す量、`lowpassHz` はそこで通す上限。
+ */
+export const CROSSFEED = {
+  direct: 0.8,
+  cross: 0.3,
+  lowpassHz: 700,
+} as const;
+
+/**
  * 再生機を憶えておいて、設定の入切に合わせて繋ぎ替える。
  *
  * ⚠ **憶えるだけでは繋がない** ── 切のときに `source` を作ってしまうと、
@@ -79,6 +135,8 @@ export class VoiceBoostRouter {
   constructor(
     private readonly makeHost: () => BoostHost | null,
     private readonly on: () => boolean,
+    /** 🔴 どの段を通すか(#952)。省略時は従来どおり「声を整える」だけ。 */
+    private readonly mode: () => BoostMode = () => ({ voice: true, level: false, crossfeed: false }),
   ) {}
 
   /** 再生機を 1 枚置いたら呼ぶ。⚠ **切のときは何もしない**(素の再生のまま)。 */
@@ -90,6 +148,8 @@ export class VoiceBoostRouter {
   /** 設定が変わったら呼ぶ。⚠ **既に置いてある再生機も**その場で切り替わる。 */
   refresh(): void {
     const on = this.on();
+    // 🔴 入のままでも**中身の切り替え**が変わりうる ── 鎖を組み直す(繋いだ要素はそのまま)
+    if (on) this.ensureHost()?.configure?.(this.mode());
     for (const el of this.living()) {
       if (on) this.wire(el);
       else this.bypass(el);
@@ -147,6 +207,7 @@ export class VoiceBoostRouter {
      *   (守っているのは型検査であって、この test ではない)。
      */
     if (host === null) return;
+    host.configure?.(this.mode());
     let src = this.wired.get(el);
     if (src === undefined) {
       try {
@@ -194,26 +255,81 @@ export function webAudioHost(): BoostHost | null {
     typeof AudioContext !== 'undefined' ? AudioContext : undefined;
   if (Ctor === undefined) return null;
   const ctx = new Ctor();
-  const hp = ctx.createBiquadFilter();
-  hp.type = 'highpass';
-  hp.frequency.value = VOICE_BOOST.highpassHz;
-  const comp = ctx.createDynamicsCompressor();
-  comp.threshold.value = VOICE_BOOST.thresholdDb;
-  comp.knee.value = VOICE_BOOST.kneeDb;
-  comp.ratio.value = VOICE_BOOST.ratio;
-  comp.attack.value = VOICE_BOOST.attackSec;
-  comp.release.value = VOICE_BOOST.releaseSec;
-  const gain = ctx.createGain();
-  gain.gain.value = VOICE_BOOST.makeupGain;
-  hp.connect(comp);
-  comp.connect(gain);
-  gain.connect(ctx.destination);
+  /** 入口。⚠ 固定 ── 繋ぎ替えのたびに要素を繋ぎ直さないで済むように、中身だけを組み替える。 */
+  const head = ctx.createGain();
+  let built: string | null = null;
+  let nodes: AudioNode[] = [];
+
+  const configure = (mode: BoostMode): void => {
+    const stages = planStages(mode);
+    // 🔑 同じ組み立てなら何もしない(再生中の音を途切れさせない)
+    const key = `${stages.join(',')}|${mode.level ? 'L' : 'V'}`;
+    if (key === built) return;
+    built = key;
+    head.disconnect();
+    for (const n of nodes) n.disconnect();
+    nodes = [];
+    let tail: AudioNode = head;
+    const add = (input: AudioNode, output: AudioNode = input): void => {
+      tail.connect(input);
+      tail = output;
+      nodes.push(input, output);
+    };
+    const p = mode.level ? LEVEL_OUT : VOICE_BOOST;
+    for (const st of stages) {
+      if (st === 'highpass') {
+        const hp = ctx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.value = VOICE_BOOST.highpassHz;
+        add(hp);
+      } else if (st === 'compressor') {
+        const comp = ctx.createDynamicsCompressor();
+        comp.threshold.value = p.thresholdDb;
+        comp.knee.value = p.kneeDb;
+        comp.ratio.value = p.ratio;
+        comp.attack.value = p.attackSec;
+        comp.release.value = p.releaseSec;
+        add(comp);
+      } else if (st === 'makeup') {
+        const gain = ctx.createGain();
+        gain.gain.value = p.makeupGain;
+        add(gain);
+      } else {
+        // 左右を分け、自分の側(direct)+ 反対側から低い所だけ(cross)を混ぜて、また 2 本に戻す
+        const split = ctx.createChannelSplitter(2);
+        const merge = ctx.createChannelMerger(2);
+        const sides: [number, number][] = [
+          [0, 1],
+          [1, 0],
+        ];
+        for (const [from, to] of sides) {
+          const direct = ctx.createGain();
+          direct.gain.value = CROSSFEED.direct;
+          split.connect(direct, from);
+          direct.connect(merge, 0, from);
+          const low = ctx.createBiquadFilter();
+          low.type = 'lowpass';
+          low.frequency.value = CROSSFEED.lowpassHz;
+          const cross = ctx.createGain();
+          cross.gain.value = CROSSFEED.cross;
+          split.connect(low, from);
+          low.connect(cross);
+          cross.connect(merge, 0, to);
+          nodes.push(direct, low, cross);
+        }
+        add(split, merge);
+      }
+    }
+    tail.connect(ctx.destination);
+  };
+  configure({ voice: true, level: false, crossfeed: false });
   return {
     destination: ctx.destination,
-    head: hp,
+    head,
     source: (el) => ctx.createMediaElementSource(el),
     resume: () => {
       if (ctx.state === 'suspended') void ctx.resume();
     },
+    configure,
   };
 }

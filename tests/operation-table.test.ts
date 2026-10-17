@@ -325,7 +325,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'set-entry-sort', 'set-external-images', 'set-flag', 'set-inline-code-copy', 'set-notices-enabled', 'set-open-in-edit', 'set-pdf-reader',
   'set-missing-links', 'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
   'set-query-key', 'set-read-columns', 'set-relative-days', 'set-revision-compare', 'set-sql-engine', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
-  'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'set-voice-boost',
+  'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'set-voice-boost', 'set-voice-crossfeed', 'set-voice-level',
   'skip-to', 
   'smart-cond-add', 'smart-evict', 'smart-field',
   /**
@@ -868,14 +868,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は動画の行の中にしか無く、押した行が対象を、押したボタンが取り出す物を運ぶ。`capture-transcribe` と同じ置き場)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1621): 左のペインの「⋯」(`open-bar-more`)で受け手 +1 ── 登記は増えない(鍵を持たない画面のボタン)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 446,
-      receivers: 377,
+      // ⚠ 2026-10-17(#952 B2・B3): 設定の「音量をそろえる」「頭の中で鳴る感じを和らげる」(`set-voice-level` / `set-voice-crossfeed`)で受け手 +2 ── 登記は増えない(`set-voice-boost` と同じ checkbox)。`receivers` +2 / `total` +2 / `unregistered` +2。
+      total: 448,
+      receivers: 379,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       registered: 172,
       both: 103,
       outsideActionsTable: 69,
-      unregistered: 274,
+      unregistered: 345,
     });
   });
 

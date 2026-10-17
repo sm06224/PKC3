@@ -23,11 +23,22 @@
  * ⚠ **container に入れない** ── ノートのデータではなく、この端末の聞き方である。
  */
 
-import { VoiceBoostRouter, webAudioHost } from '@adapter/platform/audio/voice-boost';
+import {
+  MODE_ANY,
+  VoiceBoostRouter,
+  webAudioHost,
+  type BoostMode,
+} from '@adapter/platform/audio/voice-boost';
 
 const KEY = 'pkc3.voice-boost';
+/** 🔴 「音量をそろえる」(#952 B2)。⚠ 「音を聞きやすくする」とは**独立**に切り替える。 */
+export const LEVEL_KEY = 'pkc3.voice-level';
+/** 🔴 「頭の中で鳴る感じを和らげる」(#952 B3)。⚠ 同じく独立。 */
+export const CROSSFEED_KEY = 'pkc3.voice-crossfeed';
 
-function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
+type Backing = Pick<Storage, 'getItem' | 'setItem'>;
+
+function readStorage(): Backing | null {
   try {
     return typeof localStorage !== 'undefined' ? localStorage : null;
   } catch {
@@ -35,7 +46,8 @@ function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   }
 }
 
-export class VoiceBoostStore {
+/** 入 / 切を 1 つ持つ。⚠ 保存が読めない環境の控え・書込失敗の扱いは 3 つとも同じ。 */
+class OnOffCell {
   /** 保存が読めない環境の控え(この session では効いている)。 */
   private fallback = false;
 
@@ -43,30 +55,83 @@ export class VoiceBoostStore {
   private saveFailed = false;
 
   constructor(
-    private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
+    private readonly storage: Backing | null,
+    private readonly key: string,
   ) {}
 
   /** ⚠ **読むたびに保存を見る**(`AlarmEnabledStore` と同じ理由 ── 書き手が複数)。 */
-  enabled(): boolean {
+  get(): boolean {
     // 🔴 **保存が無い環境では控えを読む**(#278 段② の test が教えた)
     if (this.storage === null || this.saveFailed) return this.fallback;
     try {
-      return this.storage.getItem(KEY) === '1';
+      return this.storage.getItem(this.key) === '1';
     } catch {
       return this.fallback;
     }
   }
 
-  setEnabled(on: boolean): void {
+  set(on: boolean): void {
     this.fallback = on;
     this.saveFailed = false;
     try {
-      this.storage?.setItem(KEY, on ? '1' : '0');
+      this.storage?.setItem(this.key, on ? '1' : '0');
     } catch {
       // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
       this.saveFailed = true;
-      // 保存できないだけ ── この session では効いている(控えが持つ)
     }
+  }
+}
+
+export class VoiceBoostStore {
+  private readonly voice: OnOffCell;
+  private readonly level: OnOffCell;
+  private readonly cross: OnOffCell;
+
+  constructor(storage: Backing | null = readStorage()) {
+    this.voice = new OnOffCell(storage, KEY);
+    this.level = new OnOffCell(storage, LEVEL_KEY);
+    this.cross = new OnOffCell(storage, CROSSFEED_KEY);
+  }
+
+  /** 「音を聞きやすくする」。 */
+  enabled(): boolean {
+    return this.voice.get();
+  }
+
+  setEnabled(on: boolean): void {
+    this.voice.set(on);
+  }
+
+  /** 「音量をそろえる」(#952 B2)。 */
+  levelEnabled(): boolean {
+    return this.level.get();
+  }
+
+  setLevelEnabled(on: boolean): void {
+    this.level.set(on);
+  }
+
+  /** 「頭の中で鳴る感じを和らげる」(#952 B3)。 */
+  crossfeedEnabled(): boolean {
+    return this.cross.get();
+  }
+
+  setCrossfeedEnabled(on: boolean): void {
+    this.cross.set(on);
+  }
+
+  /** 🔑 鎖の組み方(3 つの切り替えをそのまま映す)。 */
+  mode(): BoostMode {
+    return {
+      voice: this.voice.get(),
+      level: this.level.get(),
+      crossfeed: this.cross.get(),
+    };
+  }
+
+  /** どれか 1 つでも入っていれば、鎖を通す。 */
+  anyEnabled(): boolean {
+    return MODE_ANY(this.mode());
   }
 }
 
@@ -77,6 +142,8 @@ export const appVoiceBoost = new VoiceBoostStore();
  * アプリ共有の繋ぎ替え役。⚠ **器(`AudioContext`)はここでは作らない** ──
  * 入にした user が初めて再生機に出会ったときに、はじめて 1 つ作られる。
  */
-export const appVoiceBoostRouter = new VoiceBoostRouter(webAudioHost, () =>
-  appVoiceBoost.enabled(),
+export const appVoiceBoostRouter = new VoiceBoostRouter(
+  webAudioHost,
+  () => appVoiceBoost.anyEnabled(),
+  () => appVoiceBoost.mode(),
 );

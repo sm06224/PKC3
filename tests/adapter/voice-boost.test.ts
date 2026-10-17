@@ -18,11 +18,20 @@
  * 🔑 **偽の器を渡して観測する** ── `WebAudio` は happy-dom に無いが、
  *   守りたいのは**繋ぎ替えの順番**であって音そのものではない。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { codeOnly } from '../helpers/code-only';
-import { VoiceBoostRouter, type BoostHost, type BoostNode } from '@adapter/platform/audio/voice-boost';
+import {
+  LEVEL_OUT,
+  planStages,
+  VOICE_BOOST,
+  VoiceBoostRouter,
+  webAudioHost,
+  type BoostHost,
+  type BoostNode,
+} from '@adapter/platform/audio/voice-boost';
+import { VoiceBoostStore } from '@adapter/ui/render/voice-boost';
 
 /** 繋いだ相手を憶えるだけの節。⚠ `disconnect` で `to` を `null` に戻す。 */
 class FakeNode implements BoostNode {
@@ -248,5 +257,153 @@ describe('書き出した HTML は整えない(#772 設問 1 = A の pin)', () =
     expect(players, '書き出し HTML に再生機を作る所が無い(前処理が壊れている)').toBeGreaterThanOrEqual(2);
     expect(src.includes('appVoiceBoostRouter'), '書き出し HTML が整える鎖を持っている ── 裁定(設問 1 = A)と食い違う').toBe(false);
     expect(src.includes('voice-boost'), '書き出し HTML が voice-boost を import している').toBe(false);
+  });
+});
+
+/**
+ * 🔴 **3 つの切り替え**(#952 B2・B3)── 「音を聞きやすくする」「音量をそろえる」
+ * 「頭の中で鳴る感じを和らげる」は独立で、どれか 1 つでも入っていれば鎖を通る。
+ */
+describe('3 つの切り替え(鎖の組み方)', () => {
+  const m = (voice: boolean, level: boolean, crossfeed: boolean) => ({ voice, level, crossfeed });
+
+  it('段の組み方:声は唸り+圧縮+増幅、音量は圧縮+増幅(2 重に掛けない)、左右は最後', () => {
+    expect(planStages(m(false, false, false))).toEqual([]);
+    expect(planStages(m(true, false, false))).toEqual(['highpass', 'compressor', 'makeup']);
+    expect(planStages(m(false, true, false))).toEqual(['compressor', 'makeup']);
+    expect(planStages(m(false, false, true))).toEqual(['crossfeed']);
+    expect(planStages(m(true, true, true))).toEqual(['highpass', 'compressor', 'makeup', 'crossfeed']);
+  });
+
+  it('保存:3 つは別の鍵に書かれ、互いに動かさない', () => {
+    const map = new Map<string, string>();
+    const st = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => void map.set(k, v) };
+    const s = new VoiceBoostStore(st);
+    s.setLevelEnabled(true);
+    expect([s.enabled(), s.levelEnabled(), s.crossfeedEnabled()]).toEqual([false, true, false]);
+    s.setCrossfeedEnabled(true);
+    expect(s.mode()).toEqual(m(false, true, true));
+    expect(Object.fromEntries(map)).toEqual({ 'pkc3.voice-level': '1', 'pkc3.voice-crossfeed': '1' });
+    // 往復:別の store が同じ保存を読んでも同じ
+    expect(new VoiceBoostStore(st).mode()).toEqual(m(false, true, true));
+  });
+
+  it('🔴 「聞きやすくする」が切でも、他の 1 つが入っていれば再生機は鎖を通る(対照:全部切なら通らない)', () => {
+    const host = fakeHost();
+    const s = new VoiceBoostStore(null);
+    const r = new VoiceBoostRouter(() => host, () => s.anyEnabled(), () => s.mode());
+    r.watch(media());
+    expect(host.sources).toHaveLength(0);
+    s.setCrossfeedEnabled(true);
+    r.refresh();
+    expect(host.sources).toHaveLength(1);
+    s.setCrossfeedEnabled(false);
+    r.refresh();
+    // 切に戻したら出口へ繋ぎ直す(無音にしない)
+    expect(host.sources[0]!.to).toBe(host.destination);
+  });
+
+  it('切り替えが変わるたび、器へ「いまの組み方」が渡る', () => {
+    const host = fakeHost();
+    const seen: unknown[] = [];
+    const configurable = Object.assign(host, { configure: (mode: unknown) => void seen.push(mode) });
+    const s = new VoiceBoostStore(null);
+    s.setLevelEnabled(true);
+    const r = new VoiceBoostRouter(() => configurable, () => s.anyEnabled(), () => s.mode());
+    r.watch(media());
+    s.setCrossfeedEnabled(true);
+    r.refresh();
+    expect(seen.at(-1)).toEqual(m(false, true, true));
+  });
+});
+
+describe('webAudioHost の鎖(WebAudio を偽物に差し替える)', () => {
+  class N {
+    static all: N[] = [];
+    outs = new Set<N>();
+    constructor(public kind: string) {
+      N.all.push(this);
+    }
+    connect(to: N): N {
+      this.outs.add(to);
+      return to;
+    }
+    disconnect(): void {
+      this.outs.clear();
+    }
+    type = '';
+    frequency = { value: 0 };
+    gain = { value: 0 };
+    threshold = { value: 0 };
+    knee = { value: 0 };
+    ratio = { value: 0 };
+    attack = { value: 0 };
+    release = { value: 0 };
+  }
+  class Ctx {
+    state = 'running';
+    destination = new N('destination');
+    createGain = () => new N('gain');
+    createBiquadFilter = () => new N('biquad');
+    createDynamicsCompressor = () => new N('compressor');
+    createChannelSplitter = () => new N('splitter');
+    createChannelMerger = () => new N('merger');
+    createMediaElementSource = () => new N('source');
+    resume = () => Promise.resolve();
+  }
+  const kinds = () => N.all.map((n) => n.kind);
+  const reach = (from: N, seen = new Set<N>()): Set<N> => {
+    for (const o of from.outs) {
+      if (!seen.has(o)) {
+        seen.add(o);
+        reach(o, seen);
+      }
+    }
+    return seen;
+  };
+
+  it('左右を混ぜる段は、入れたときだけ作られ、同じ組み方の再設定では作り直さない', () => {
+    N.all = [];
+    vi.stubGlobal('AudioContext', Ctx);
+    try {
+      const host = webAudioHost()!;
+      const head = host.head as unknown as N;
+      const dest = host.destination as unknown as N;
+      expect(kinds()).not.toContain('splitter');
+      host.configure!({ voice: true, level: false, crossfeed: true });
+      expect(kinds()).toContain('splitter');
+      expect(kinds()).toContain('merger');
+      const n = N.all.length;
+      host.configure!({ voice: true, level: false, crossfeed: true });
+      expect(N.all.length, '同じ組み方で作り直している').toBe(n);
+      // 出口まで届いている(無音にしない)
+      expect(reach(head).has(dest)).toBe(true);
+      // 左右を外す → 経路から splitter が消え、圧縮は残る
+      host.configure!({ voice: true, level: false, crossfeed: false });
+      const comps = [...reach(head)].map((x) => x.kind);
+      expect(comps).not.toContain('splitter');
+      expect(comps).toContain('compressor');
+      expect(reach(head).has(dest)).toBe(true);
+      // 全部切 → 入口が出口へ直結
+      host.configure!({ voice: false, level: false, crossfeed: false });
+      expect([...head.outs]).toEqual([dest]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('音量をそろえるを入れると、圧縮が強め(声だけのときと違う値)になる', () => {
+    N.all = [];
+    vi.stubGlobal('AudioContext', Ctx);
+    try {
+      const host = webAudioHost()!;
+      const ratioOf = (): number => N.all.filter((n) => n.kind === 'compressor').at(-1)!.ratio.value;
+      host.configure!({ voice: true, level: false, crossfeed: false });
+      expect(ratioOf()).toBe(VOICE_BOOST.ratio);
+      host.configure!({ voice: true, level: true, crossfeed: false });
+      expect(ratioOf()).toBe(LEVEL_OUT.ratio);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
