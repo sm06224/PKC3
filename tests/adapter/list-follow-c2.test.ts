@@ -392,7 +392,7 @@ describe('左の列の画面(フォルダの表)', () => {
 
     it('🔴 貼り付く規則が CSS に在る(印だけで、見た目の受け皿が無いのを防ぐ)', () => {
       const css = readFileSync('src/styles/app.css', 'utf8');
-      const m = /\[data-pkc-region='filer-move'\]\[data-pkc-bulk\]\s*\{([^}]*)\}/.exec(css);
+      const m = /\[data-pkc-region='filer-move'\]\[data-pkc-bulk\]\[data-pkc-bulk-stick\]\s*\{([^}]*)\}/.exec(css);
       expect(m, '印に対する規則が無い').not.toBeNull();
       expect(m![1]).toMatch(/position:\s*sticky/);
       expect(m![1]).toMatch(/bottom:\s*0/);

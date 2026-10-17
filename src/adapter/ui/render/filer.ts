@@ -45,6 +45,7 @@ import { emptyStartActions } from './empty-start';
 import { paintRowMark } from './selection-mark';
 import { buildPressedButton } from './choice-buttons';
 import { chordHint } from './shortcut-hint';
+import { watchBarStick } from './bar-stick';
 import { appKeymap, type KeymapStore } from './keymap';
 import { commandQueryOf } from '@features/palette/command-query';
 
@@ -145,6 +146,8 @@ export class FilerRenderer {
   private lastTrash: AppState['trashPanel'] = null;
   /** 居場所を変える帯の器(中身は選択が変わるたびに差し替える)。 */
   private moveBar: HTMLElement | null = null;
+  /** 帯を貼り付けてよい高さかの観測(組み直すたびに付け替える)。 */
+  private stopBarStick: (() => void) | null = null;
   /** 帯の組み直しをまたいで運ぶ、打ちかけの字と焦点(`captureBarInputs`)。 */
   private keptBar: {
     values: ReadonlyMap<string, string>;
@@ -1515,6 +1518,10 @@ export class FilerRenderer {
     // ⚠ 帯は**表の後**(上の注記)── 選んだ瞬間に行が動かないようにする
     this.region.append(this.moveBar);
     this.renderMoveBar(state, scope);
+    // 🔴 見えている高さが低いと、貼り付いた帯が行を覆って押せない ── 高さが足りるときだけ貼り付ける(bar-stick.ts)
+    this.stopBarStick?.();
+    const scroller = this.region.closest<HTMLElement>('[data-pkc-region="browse-host"]');
+    this.stopBarStick = scroller === null ? null : watchBarStick(this.moveBar, scroller);
 
     if (list.length === 0) {
       const empty = document.createElement('p');
