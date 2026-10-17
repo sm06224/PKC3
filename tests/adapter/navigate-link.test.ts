@@ -343,6 +343,29 @@ describe('🔴 章を指すリンク(#579)', () => {
     expect(lastError()).toBeNull();
   });
 
+  it('古い取り込みの `entry:X#<slug>`(h/ なし)も、その見出しが在れば飛ぶ', async () => {
+    const { dispatcher, lastError } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    const hs = plantBody('b', ['ほか', '2026-07-01-090000']);
+    entryLink('entry:b#2026-07-01-090000').click();
+    await settle();
+    expect(dispatcher.getState().selectedLid).toBe('b');
+    expect(hs['2026-07-01-090000']!.scrollIntoView, '見出しへ飛んでいない').toHaveBeenCalled();
+    expect(hs['ほか']!.scrollIntoView).not.toHaveBeenCalled();
+    expect(lastError()).toBeNull();
+  });
+
+  it('古い取り込みの `entry:X#<slug>` で見出しが無ければ、何も出さない(開くだけ)', async () => {
+    const { dispatcher, lastError } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    const hs = plantBody('b', ['ほか']);
+    entryLink('entry:b#log-1719800000-2').click();
+    await settle();
+    expect(dispatcher.getState().selectedLid).toBe('b');
+    expect(hs['ほか']!.scrollIntoView).not.toHaveBeenCalled();
+    expect(lastError(), '黙って探すだけのはずが理由を出した').toBeNull();
+  });
+
   it('⚠ 対照群 ── `#log/…` は lid だけで開き、見出しは探さない', async () => {
     const { dispatcher, lastError } = makeDispatcher();
     stop = bindActions(root, dispatcher);
@@ -351,6 +374,30 @@ describe('🔴 章を指すリンク(#579)', () => {
     await settle();
     expect(dispatcher.getState().selectedLid).toBe('b');
     expect(lastError(), '見出しを探して断った(1 段目の約束を壊した)').toBeNull();
+  });
+});
+
+describe('🔴 アプリ内リンクの中ボタンは、空のタブを開かせない', () => {
+  const aux = (el: Element, button: number): MouseEvent => {
+    const ev = new MouseEvent('auxclick', { button, bubbles: true, cancelable: true });
+    el.dispatchEvent(ev);
+    return ev;
+  };
+  it('entry: / pkc:// のリンクの中ボタンは既定動作(新しいタブ)を止める。ノートは動かさない', () => {
+    const { dispatcher } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    expect(aux(entryLink('entry:b'), 1).defaultPrevented).toBe(true);
+    expect(aux(entryLink('pkc://default/entry/b'), 1).defaultPrevented).toBe(true);
+    expect(dispatcher.getState().selectedLid, '中ボタンで画面が動いた').not.toBe('b');
+  });
+  it('対照群: 外部リンクの中ボタン / 中ボタン以外の auxclick は止めない', () => {
+    const { dispatcher } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    const ext = document.createElement('a');
+    ext.setAttribute('href', 'https://example.com/');
+    root.append(ext);
+    expect(aux(ext, 1).defaultPrevented).toBe(false);
+    expect(aux(entryLink('entry:b'), 2).defaultPrevented).toBe(false);
   });
 });
 

@@ -3,6 +3,7 @@
  * 対応先 = 変換後見出しの slug(時刻精度を落とさない)。未知 id は broken のまま。
  */
 import { describe, expect, it } from 'vitest';
+import { parseLinkTarget } from '../../src/features/entry-ref/link-target';
 import { textlogFlavor } from '../../src/features/flavor/textlog-flavor';
 import {
   buildTextlogAnchorMap,
@@ -53,15 +54,27 @@ describe('textlog anchors (P6)', () => {
       '散文中の #log/log-x は書き換えない',
     ].join('\n');
     const out = rewriteTextlogRefs(src, 'tl1', anchorsByLid, days);
-    expect(out).toContain('[a](entry:tl1#2026-07-01-090000)');
-    expect(out).toContain('[range](entry:tl1#2026-07-01-090000-1)'); // 先頭 log へ
-    expect(out).toContain('[sub](entry:tl1#2026-07-02-103005)'); // 小見出しは落とす
-    expect(out).toContain('[day](entry:tl1#2026-07-01-090000)'); // その日の先頭 log
+    expect(out).toContain('[a](entry:tl1#h/2026-07-01-090000)');
+    expect(out).toContain('[range](entry:tl1#h/2026-07-01-090000-1)'); // 先頭 log へ
+    expect(out).toContain('[sub](entry:tl1#h/2026-07-02-103005)'); // 小見出しは落とす
+    expect(out).toContain('[day](entry:tl1#h/2026-07-01-090000)'); // その日の先頭 log
     expect(out).toContain('[frag](#2026-07-02-103005)'); // 同一 entry 内
-    expect(out).toContain('[legacy](entry:tl1#2026-07-01-090000-1)'); // 裸 fragment
+    expect(out).toContain('[legacy](entry:tl1#h/2026-07-01-090000-1)'); // 裸 fragment
     expect(out).toContain('[unknown](entry:tl1#log/gone-id)'); // 壊れシグナル保存
     expect(out).toContain('[other](entry:other9#log/xyz)'); // 未知 entry も不変
     expect(out).toContain('散文中の #log/log-x は書き換えない');
+  });
+
+  it('書き換えた別ノートへのリンクは PKC3 の節リンクとして読め、見出しの id が取れる', () => {
+    const anchorsByLid = new Map([['tl1', anchors]]);
+    const days = new Map([['tl1', buildFirstLogOfDay(body, anchors)]]);
+    for (const src of ['[a](entry:tl1#log/log-x)', '[d](entry:tl1#day/2026-07-01)', '[l](entry:tl1#log-x)']) {
+      const out = rewriteTextlogRefs(src, 'other', anchorsByLid, days);
+      const href = /\((entry:[^)]+)\)/.exec(out)![1]!;
+      const t = parseLinkTarget(href);
+      expect(t.kind).toBe('entry');
+      expect(t.kind === 'entry' ? t.section : null, `${src} → ${href}`).not.toBeNull();
+    }
   });
 
   it('書換済み slug を legacy 裸 fragment として二重書換しない(冪等)', () => {

@@ -67,7 +67,11 @@ const LINK_RE = new RegExp(`(?<![${LID_CHARS}])entry:([${LID_CHARS}]+)`, 'gi');
  */
 function withoutCode(body: string): string {
   const ranges: Array<[number, number]> = [];
-  if (body.includes('`') || body.includes('~~~')) ranges.push(...scanLinks(body).code);
+  if (body.includes('`') || body.includes('~~~')) {
+    // 🔴 csv / tsv / psv の囲みは**コードではなく表**として描かれ、セルの `entry:` は押せる ──
+    //   参照元・つながり・ごみ箱の警告から外すと「押せるのに数えない」になる(囲みの 1 語目で見分ける)
+    for (const r of scanLinks(body).code) if (!isTableFence(body, r[0])) ranges.push(r);
+  }
   // 字下げのコード(4 スペース / タブ)── markdown-it もコードとして描く(リンクにならない)。範囲は `link-scan.ts`
   if (body.includes('    ') || body.includes('\t')) ranges.push(...indentedCodeRanges(body));
   if (ranges.length === 0) return body;
@@ -81,6 +85,12 @@ function withoutCode(body: string): string {
     cursor = e;
   }
   return out + body.slice(cursor);
+}
+
+/** 範囲の先頭が csv / tsv / psv の囲みの開きか(info string の 1 語目。`-norender` は表にならないので当てない。行内コードは当たらない)。 */
+const TABLE_FENCE_OPEN = /^(?:`{3,}|~{3,})[ \t]*(?:csv|tsv|psv)(?:-render|-both)?(?![^\s`])/i;
+function isTableFence(body: string, start: number): boolean {
+  return TABLE_FENCE_OPEN.test(body.slice(start, start + 32));
 }
 
 /**

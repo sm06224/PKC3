@@ -47,6 +47,11 @@ export function buildTextlogAnchorMap(
   return map;
 }
 
+/**
+ * ⚠ 別のノートの見出しへのリンクは `entry:X#h/<slug>`(PKC3 の節リンクの綴り。`link-target.ts`)で出す。
+ *   素の `#<slug>` だと、ノートは開いても見出しへは飛ばない。同じノート内の `(#<slug>)` は
+ *   文書内アンカー(見出しの id へそのまま移る)なので、そのままにする。
+ */
 /** log id の文字集合(PKC2 entry-ref と同じ opaque token)。 */
 const ID = '[A-Za-z0-9_-]+';
 const DATE = '\\d{4}-\\d{2}-\\d{2}';
@@ -74,7 +79,7 @@ export function rewriteTextlogRefs(
         new RegExp(`entry:(${ID})#log/(${ID})(?:\\.\\.${ID}|/${ID})?`, 'g'),
         (whole, lid: string, id: string) => {
           const slug = slugOf(lid, id);
-          return slug ? `entry:${lid}#${slug}` : whole;
+          return slug ? `entry:${lid}#h/${slug}` : whole;
         },
       )
       // entry:X#day/<date> → その日の先頭 log の slug(day 節は変換後に存在しない)
@@ -82,7 +87,7 @@ export function rewriteTextlogRefs(
         new RegExp(`entry:(${ID})#day/(${DATE})`, 'g'),
         (whole, lid: string, date: string) => {
           const slug = firstLogOfDay.get(lid)?.get(date);
-          return slug ? `entry:${lid}#${slug}` : whole;
+          return slug ? `entry:${lid}#h/${slug}` : whole;
         },
       )
       // fragment-only #log/<id>(同一 entry 内 context-relative)── markdown link の
@@ -100,7 +105,7 @@ export function rewriteTextlogRefs(
         new RegExp(`entry:(${ID})#(${ID})`, 'g'),
         (whole, lid: string, frag: string) => {
           const slug = slugOf(lid, frag);
-          return slug ? `entry:${lid}#${slug}` : whole;
+          return slug ? `entry:${lid}#h/${slug}` : whole;
         },
       )
   );
