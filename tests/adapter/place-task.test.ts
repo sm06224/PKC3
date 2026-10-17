@@ -90,6 +90,7 @@ async function rig(placedBody: string, services: Partial<BinderServices> = {}) {
     lender: null,
     figures: () => [],
     viewRoot: null,
+    currentContainerId: '',
   };
   new PlaceEmbeds().sync(host, deps);
   await flush();

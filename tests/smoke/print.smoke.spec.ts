@@ -216,10 +216,21 @@ test('🔴 画面から印刷すると全文が紙に乗り、+++ で改頁す�
 test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
+  // 🔴 章の中の「添付から読む囲み」(```csv asset:K)── 刷る瞬間に「添付にあります」の案内が残らないことを下で見る(#1087 A4)
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'uriage.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('しなもの,かず\nりんご,120\n', 'utf8'),
+  });
+  const csvKey = await page
+    .locator('[data-pkc-action="download-asset"]')
+    .first()
+    .getAttribute('data-pkc-asset-key');
+  expect(csvKey, '前提:csv の添付の鍵が取れている').toBeTruthy();
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await ta.click();
-  await ta.fill('# 見出し\n\n本文が 1 行。\n');
+  await ta.fill('# 見出し\n\n本文が 1 行。\n\n```csv asset:' + csvKey + '\n```\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
 
@@ -229,7 +240,7 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
    * ⚠ 刷りは 1 回だけ ── `chrome` の `window.print()` は印刷画面が閉じるまで返らず、2 回目は受けない(`busy`)。
    */
   const srcLid = await page
-    .locator('[data-pkc-region="sidebar"] [data-pkc-action="select-entry"][data-pkc-entry]')
+    .locator('[data-pkc-region="sidebar"] [data-pkc-action="select-entry"][data-pkc-entry]', { hasNotText: 'uriage.csv' })
     .first()
     .getAttribute('data-pkc-entry');
   expect(srcLid, '前提:1 件目の lid が引けている').toBeTruthy();
@@ -266,6 +277,8 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
         notes: body?.querySelectorAll('[data-pkc-field="section-embed-note"]').length ?? -1,
         embeds: body?.querySelectorAll('.pkc-section-embed').length ?? -1,
         text: body?.querySelector('.pkc-section-embed')?.textContent ?? '',
+        fencePending: body?.querySelectorAll('[data-pkc-fence-asset-pending]').length ?? -1,
+        csvText: body?.querySelector('.pkc-section-embed table')?.textContent ?? '',
       };
     });
   });
@@ -284,10 +297,14 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
     notes: number;
     embeds: number;
     text: string;
+    fencePending: number;
+    csvText: string;
   };
   expect(atPrint.embeds, '前提:章の埋め込みが本文に在る').toBeGreaterThan(0);
   expect(atPrint.notes, '🔴 刷る瞬間に「読み込んでいます」などの 1 行が残っている').toBe(0);
   expect(atPrint.text, '章の中身が紙に出ていない').toContain('本文が 1 行');
+  expect(atPrint.fencePending, '🔴 刷る瞬間に、章の中の「添付にあります」の案内が残っている').toBe(0);
+  expect(atPrint.csvText, '🔴 章の中の添付から読む囲みが、表として紙に出ていない').toContain('りんご');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

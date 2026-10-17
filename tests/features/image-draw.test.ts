@@ -222,6 +222,15 @@ describe('名前と対象', () => {
     expect(drawnImageName('.hidden')).toBe('.hidden (描き込み).png');
   });
 
+  it('🔴 切り落とすのは既知の画像拡張子だけ(#1087 B8)', () => {
+    expect(drawnImageName('v1.2 report')).toBe('v1.2 report (描き込み).png');
+    expect(drawnImageName('2026.10.17 メモ')).toBe('2026.10.17 メモ (描き込み).png');
+    expect(drawnImageName('x.pdf')).toBe('x.pdf (描き込み).png');
+    for (const ext of ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'heic', 'heif', 'avif', 'svg', 'tif', 'tiff', 'PNG', 'JpG', 'jpe', 'jfif', 'pjpeg', 'apng', 'ico', 'jxl']) {
+      expect(drawnImageName(`写真.${ext}`), ext).toBe('写真 (描き込み).png');
+    }
+  });
+
   it('描き込んだ画像にもう一度描くと、括弧が並ぶ(元をたどれる)', () => {
     expect(drawnImageName('写真 (描き込み).png')).toBe('写真 (描き込み) (描き込み).png');
   });

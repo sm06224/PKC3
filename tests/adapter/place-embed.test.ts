@@ -1725,6 +1725,7 @@ describe('板を 2 つ並べたときの抜粋の読み込み(LRU の奪い合�
           lender: null,
           figures: () => [],
           viewRoot: null,
+          currentContainerId: '',
         };
         e.sync(hosts[b]!, deps);
       });
@@ -1841,6 +1842,7 @@ describe('描画: 板の上限を超えた枠の 1 行(#1264 欠陥 8-b)', () =>
       lender: null,
       figures: () => [],
       viewRoot: null,
+      currentContainerId: '',
     };
     const embeds = new PlaceEmbeds();
     return {

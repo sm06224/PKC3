@@ -137,6 +137,8 @@ function setup(
     open?: 'null';
     blob?: Blob | null;
     externalImages?: boolean;
+    /** 真 = 添付の bytes が無い(`lend` が `null` を返す)。 */
+    lendNull?: boolean;
   } = {},
 ) {
   let state = booted(opts.body ?? BODY);
@@ -154,7 +156,8 @@ function setup(
       return renderMarkdown(t, o);
     },
     allowExternalImages: () => opts.externalImages ?? false,
-    lend: async (key) => ({ url: `blob:${key}`, dispose: () => disposed.push(key) }),
+    lend: async (key) =>
+      opts.lendNull === true ? null : { url: `blob:${key}`, dispose: () => disposed.push(key) },
     getBlob: async () => opts.blob ?? null,
     runAction: vi.fn(),
     fail: (m) => failed.push(m),
@@ -239,6 +242,28 @@ describe('🔴 押した見出しの章だけを、読むだけで出す', () =>
     r.cw.onState(r.state);
     await flush();
     expect(r.disposed, '組み直したのに前の画像を返していない').toEqual(['ast-1']);
+  });
+
+  it('🔴 bytes が無い添付画像には「見つからない」の印が付く(消えたように見えない。#1087 A5)', async () => {
+    const r = setup({ lendNull: true });
+    r.cw.open('n1', LINE_TWO);
+    await flush();
+    const img = r.host()!.querySelector<HTMLImageElement>('img[data-pkc-asset-key]');
+    expect(img, '前提が崩れている(画像が章に無い)').not.toBeNull();
+    expect(img!.hasAttribute('data-pkc-asset-missing'), '印が付いていない').toBe(true);
+    expect(img!.hasAttribute('src')).toBe(false);
+  });
+
+  it('🔴 読めない画像(HEIC・壊れた画像)は壊れた絵で終わらず、理由の 1 行になる(#1087 A3)', async () => {
+    const r = setup();
+    r.cw.open('n1', LINE_TWO);
+    await flush();
+    const img = r.host()!.querySelector<HTMLImageElement>('img[data-pkc-asset-key]')!;
+    expect(img.getAttribute('src')).toBe('blob:ast-1');
+    img.dispatchEvent(new Event('error'));
+    expect(r.host()!.querySelector('img[data-pkc-asset-key]'), '画像が残っている').toBeNull();
+    const why = r.host()!.querySelector('[data-pkc-field="attachment-undecodable"]');
+    expect(why?.textContent ?? '').toContain('このブラウザでは表示できません');
   });
 
   it('⚠ 見出しの無い行で押されたら理由を出し、窓を開かない', () => {

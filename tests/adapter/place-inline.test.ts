@@ -122,6 +122,7 @@ function rig(services: Partial<BinderServices> = {}, body: string = BOARD) {
     lender: null,
     figures: () => [],
     viewRoot: null,
+    currentContainerId: '',
   };
   embeds.sync(host, deps);
   events.length = 0;

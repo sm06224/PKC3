@@ -116,9 +116,10 @@ describe('#444 段① 囲みの中身を添付から取る', () => {
     let read = 0;
     const big = {
       size: OLD_CAP + 1,
-      text: async () => {
+      // ⚠ 文字コードを判定するので bytes で読む(#1087)── text() ではなく arrayBuffer()
+      arrayBuffer: async () => {
         read++;
-        return 'あ,い\n1,2';
+        return new TextEncoder().encode('あ,い\n1,2').buffer;
       },
     };
     const r = setup(

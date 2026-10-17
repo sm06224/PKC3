@@ -180,6 +180,9 @@ export function undoStroke(list: readonly Stroke[]): readonly Stroke[] {
   return list.length === 0 ? list : list.slice(0, -1);
 }
 
+/** 描き込みの保存名で切り落としてよい(= 画像の)拡張子。 */
+const DRAWABLE_IMAGE_EXT_RE = /^(png|jpe|jpe?g|jfif|pjpeg|webp|bmp|gif|heic|heif|avif|apng|ico|jxl|svg|tiff?)$/i;
+
 /**
  * 保存する添付の名前。`写真.jpg` → `写真 (描き込み).png`(保存は常に PNG なので拡張子も揃える)。
  * ⚠ 拡張子の前に入れる(後ろだと書き出したとき OS が種類を見失う)。
@@ -188,8 +191,9 @@ export function undoStroke(list: readonly Stroke[]): readonly Stroke[] {
 export function drawnImageName(name: string): string {
   const tag = ' (描き込み)';
   const dot = name.lastIndexOf('.');
-  // 先頭の「.」は拡張子ではない
-  const stem = dot <= 0 ? name : name.slice(0, dot);
+  // 先頭の「.」は拡張子ではない。🔴 切り落とすのは既知の画像拡張子だけ(#1087 B8:`v1.2 report` を `v1` にしない)
+  const stem =
+    dot <= 0 || !DRAWABLE_IMAGE_EXT_RE.test(name.slice(dot + 1)) ? name : name.slice(0, dot);
   return `${stem}${tag}.png`;
 }
 

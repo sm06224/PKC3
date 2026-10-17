@@ -69,6 +69,7 @@ import { SQL_EMBED_ATTR } from '@features/markdown/sql-embed';
 import { AssetLends, type AssetLender } from './asset-lends';
 import { pruneScopes, type MermaidScope } from './mermaid-hydrate';
 import { markViewBig } from './view-big';
+import { hydrateFenceHosts } from './fence-asset-hydrate';
 import { watchVisible, type VisibleWatch } from './visible-watch';
 
 /** 塊の中の、置いたノートの本文の器。 */
@@ -133,6 +134,8 @@ export interface PlaceEmbedDeps {
    *   余白の内側でも「見えていない」と読まれ、**スクロールに追従して描けなくなる**。
    */
   readonly viewRoot: Element | null;
+  /** いま開いているコンテナの id(囲みの中身を描くとき、読む面と同じ値を渡す)。 */
+  readonly currentContainerId: string;
 }
 
 /** 器を持つ塊の lid を全部返す(板が展開してよい塊だけ)。 */
@@ -359,6 +362,13 @@ export class PlaceEmbeds {
   /** この回で器を埋め直した枠(まとめて 1 回で図の塊を作る ── 観測器を枠ごとに積まない)。 */
   private fresh: HTMLElement[] = [];
 
+  /**
+   * 🔴 **添付から読む囲みの字の控え**(#1087 A4)。⚠ 面を捨てるとき(`release`)に手放す ── 別のノートの本文を握り続けない。
+   * `gen` は `release` のたびに進める ── 待っている間に面が捨てられた読み込みは何も触らない。
+   */
+  private readonly fenceTexts = new Map<string, string>();
+  private gen = 0;
+
   /** 近づいたかの観測(板に 1 つ)。`null` = まだ作っていない / 観測できない環境。 */
   private watcher: VisibleWatch | null = null;
   /** 観測に載せた塊。 */
@@ -376,6 +386,8 @@ export class PlaceEmbeds {
 
   /** 器を手放す(別のノートへ移る / 面を畳む)。⚠ 図の URL と貸出をここで返す(不可侵の規律)。 */
   release(): void {
+    this.gen++;
+    this.fenceTexts.clear();
     for (const lends of this.lends.values()) lends.disposeAll();
     this.lends.clear();
     for (const sc of this.scopes.splice(0)) sc.dispose();
@@ -538,6 +550,35 @@ export class PlaceEmbeds {
     void this.lendsOf(slot).hydrate(slot, deps.lender);
   }
 
+  /**
+   * 🔴 **枠の中の「添付から読む囲み」(```` ```csv asset:k ````)を中身で埋める**(#1087 A4)。
+   * ⚠ 直す前は読む面だけが埋めており、付箋の中では「このコードブロックの中身は添付にあります」の案内のまま残った。
+   * 🔑 埋め方は読む面と同じ 1 本(`fence-asset-hydrate.ts`)。差し替えた塊も、板の中で読む形へ掃除してから入れる
+   *   (`sanitizeEmbedded` ── コピーの帯・原文の面を外し、`id` に枠の接頭辞を付ける)。
+   */
+  private hydrateFences(slot: HTMLElement, deps: PlaceEmbedDeps): void {
+    const hosts = [...slot.querySelectorAll<HTMLElement>('[data-pkc-fence-asset-key]')];
+    if (hosts.length === 0) return;
+    const gen = this.gen;
+    const lender = deps.lender;
+    void hydrateFenceHosts({
+      hosts,
+      getBlob: lender ? (k) => lender.getBlob(k) : null,
+      texts: this.fenceTexts,
+      env: { allowExternalImages: false, currentContainerId: deps.currentContainerId },
+      stale: () => gen !== this.gen || !slot.isConnected,
+      prepare: (holder) =>
+        sanitizeEmbedded(holder, (l) => deps.metaOf(l)?.title ?? null, slot.getAttribute(PLACE_NS_ATTR) ?? '', true),
+      onReplaced: (next) => {
+        if (next.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-math-src]') === null) return;
+        this.fresh.push(next as HTMLElement);
+        this.flushFigures(deps);
+      },
+    }).catch(() => {
+      /* 読めなかっただけ ── 器は案内のまま残る */
+    });
+  }
+
   /** 置いた添付ノートの絵(画像)/ 字(PDF)を枠へ入れる。 */
   private fillAttachment(
     slot: HTMLElement,
@@ -604,6 +645,7 @@ export class PlaceEmbeds {
     slot.removeAttribute(PENDING_ATTR);
     // 🔴 図と画像(W3-②)── 読む面と同じ口へ。⚠ 器を入れた**後**に呼ぶ(繋がっていないと面が読めない)
     this.hydrateImages(slot, deps);
+    this.hydrateFences(slot, deps);
     if (slot.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-math-src]') !== null)
       this.fresh.push(slot);
   }

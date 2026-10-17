@@ -121,3 +121,71 @@ describe('asset: refs in markdown (P4b)', () => {
     expect(img.hasAttribute('data-pkc-external-src')).toBe(false);
   });
 });
+
+describe('保存名は置換前の原文(#1087 A1)', () => {
+  // typographer が化かす字(' ... -- (c) など)と、escape / 記号 / 日本語を混ぜた名前
+  const NAMES = [
+    "Tom's report.pdf", 'a...b.txt', 'x--y.csv', 'x---y.csv', '(c) 2026.pdf', '(C).pdf', '(r).png', '(tm).png',
+    '(p).pdf', '+-.txt', '1/2.txt', 'it\'s.txt', "'quoted'.txt", 'a, b.txt', 'a?!!!.txt', 'a....b.txt',
+    'レポート.pdf', '見積 (写し).xlsx', 'v1.2 report', 'a b  c.txt', 'x&y.txt', 'a<b>.txt', 'q"q.txt',
+    'file_name.txt', 'a-b-c.txt', '2026-10-17.pdf', '100%.txt', 'a=b.txt', '#tag.txt', '@at.txt',
+    'x.y.z.tar.gz', 'COPY (1).pdf', 'dot.', '.hidden', 'N(o).txt', 'a;b.txt', 'a:b.txt', 'a|b.txt',
+    'tab\tname.txt', 'あ…い.txt', 'あ–い.txt', '“q”.txt', '‘q’.txt', 'a~b.txt', 'a^b.txt', 'a`b.txt',
+    'ａｂｃ.txt', 'a_b*c.txt', '日本語--ファイル.pdf', "O'Brien's -- (c).pdf",
+  ];
+  const escapeLabel = (n: string): string => n.replace(/([\\[\]`*_<>&|~#!()])/g, '\\$1');
+
+  it('名前 50 通りで「保存名(data-pkc-asset-name)= 添付名」', () => {
+    expect(NAMES.length).toBeGreaterThanOrEqual(50);
+    for (const name of NAMES) {
+      const host = renderToDom(`[${escapeLabel(name)}](asset:k1)`);
+      const a = host.querySelector('a.pkc-asset-link');
+      expect(a, name).not.toBeNull();
+      expect(a!.getAttribute('data-pkc-asset-name'), name).toBe(name);
+    }
+  });
+
+  it('escape(\\[ \\])は外した平文になる', () => {
+    const host = renderToDom('[\\[1\\].pdf](asset:k1)');
+    expect(host.querySelector('a.pkc-asset-link')!.getAttribute('data-pkc-asset-name')).toBe('[1].pdf');
+  });
+
+  it('画面に見えるリンクの字は今のまま(typographer の置換が効く)', () => {
+    const host = renderToDom("[Tom's x--y.pdf](asset:k1)");
+    const a = host.querySelector('a.pkc-asset-link')!;
+    expect(a.textContent).toBe('Tom’s x–y.pdf');
+    expect(a.getAttribute('data-pkc-asset-name')).toBe("Tom's x--y.pdf");
+  });
+
+  it('code span / 自動リンクの形の名前も原文', () => {
+    const code = renderToDom('[`a--b`.pdf](asset:k1)');
+    expect(code.querySelector('a.pkc-asset-link')!.getAttribute('data-pkc-asset-name')).toBe('a--b.pdf');
+    const auto = renderToDom('[<https://example.com/a--b>.pdf](asset:k1)');
+    expect(auto.querySelector('a.pkc-asset-link')!.getAttribute('data-pkc-asset-name')).toBe('https://example.com/a--b.pdf');
+  });
+
+  it('ラベル空は key のまま(原文化しても fallback は生きる)', () => {
+    const host = renderToDom('[](asset:ast-x)');
+    expect(host.querySelector('a.pkc-asset-link')!.getAttribute('data-pkc-asset-name')).toBe('ast-x');
+  });
+});
+
+describe('画像の alt は平文(#1087 A6)', () => {
+  it('escape の逆斜線が alt に残らない', () => {
+    const host = renderToDom('![\\[1\\].png](asset:k1)');
+    expect(host.querySelector('img.pkc-asset-ref')!.getAttribute('alt')).toBe('[1].png');
+  });
+
+  it('code span の中の逆斜線は字なので残る / 記号は今までどおり', () => {
+    const host = renderToDom('![a `b\\*c` d \\*](asset:k1)');
+    expect(host.querySelector('img.pkc-asset-ref')!.getAttribute('alt')).toBe('a `b\\*c` d *');
+  });
+
+  it('ふつうの alt は変わらない', () => {
+    const host = renderToDom('![全体フロー](asset:k1)');
+    expect(host.querySelector('img.pkc-asset-ref')!.getAttribute('alt')).toBe('全体フロー');
+    const empty = renderToDom('![](asset:k2)');
+    expect(empty.querySelector('img.pkc-asset-ref')!.getAttribute('alt')).toBe('');
+  });
+});
+

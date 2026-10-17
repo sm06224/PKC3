@@ -669,6 +669,8 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
     .locator('[data-pkc-field="editor-body"]')
     .fill(
       '# 議事録\n\n前置き。\n\n## 決定事項\n\n- 牛乳を買う\n\n' +
+        // 🔴 bytes の無い添付の画像(#1087 A5)── 章の窓で「欠けている」印が付く
+        '![ない](asset:ast-nosuch)\n\n' +
         // 🔴 html の囲み(#1044 段4)── 章の窓で高さ合わせが効くかを見るため(本体でしか受け手が
         //    無かったので、窓では高さ 0 の空の箱だった ── 着地前レビュー)
         '```html\n<div style="height:120px">箱の中</div>\n```\n\n## 次回\n\n来週。\n',
@@ -722,6 +724,10 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
     chapterWin.locator('[data-pkc-field="chapter-window-head"] [data-pkc-field="chapter-window-readonly"]'),
     '章の窓の頭に「読むだけ」が見えていない',
   ).toHaveText('読むだけ');
+  await expect(
+    chapterBody.locator('img[data-pkc-asset-missing]'),
+    '🔴 章の窓で、bytes の無い画像に「欠けている」印が付かない',
+  ).toHaveCount(1);
   // 🔴 html の囲みは、窓でも中身の高さになる(高さ合わせの受け手が窓にも付いている)
   const frame = chapterBody.locator('iframe');
   await expect(frame, '前提が崩れている(html の囲みが窓に無い)').toHaveCount(1);

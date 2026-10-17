@@ -701,6 +701,17 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1400, height: 900 });
   await gotoApp(page);
+  // 🔴 付箋の中の「添付から読む囲み」(```csv asset:K)── 案内のままでなく表に埋まる(#1087 A4)。新しい起動は足さない
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'uriage.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('しなもの,かず\nりんご,120\n', 'utf8'),
+  });
+  const csvKey = await page
+    .locator('[data-pkc-action="download-asset"]')
+    .first()
+    .getAttribute('data-pkc-asset-key');
+  expect(csvKey, '前提:csv の添付の鍵が取れている').toBeTruthy();
 
   /**
    * 🔴 **置いたノートの中身**(#529 W3-①)。表・チェック・見出しと、**切る量(4,000 字)を超える長さ**を持つ。
@@ -719,7 +730,7 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
   const lid = await page
-    .locator('[data-pkc-region="sidebar"] [data-pkc-entry]')
+    .locator('[data-pkc-region="sidebar"] [data-pkc-entry]', { hasText: '相手のノート' })
     .first()
     .getAttribute('data-pkc-entry');
   expect(lid, '前提が崩れている(相手の lid が読めない)').not.toBeNull();
@@ -727,7 +738,7 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   // 短いほうのノート(w= h= を省いた塊の相手 ── 既定の大きさの対照)
   await createEntry(page, 'text');
   await page.fill('[data-pkc-field="editor-title"]', '短いノート');
-  await page.fill('[data-pkc-field="editor-body"]', 'みじかい本文\n');
+  await page.fill('[data-pkc-field="editor-body"]', 'みじかい本文\n\n```csv asset:' + csvKey + '\n```\n');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
   // ⚠ 一覧の先頭は新しい順とは限らない ── 題名で引く
@@ -764,6 +775,11 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   await expect(cb, '台の前提:チェックが出ていない').toHaveCount(1);
   await expect(cb, '付箋の中のチェックが押せる形で出ていない(#529 W5-c)').toBeEnabled();
   await expect(dflt.locator(':scope > [data-pkc-field="place-body"]')).toContainText('みじかい本文');
+  await expect(
+    dflt.locator(':scope > [data-pkc-field="place-body"] table'),
+    '🔴 付箋の中の添付から読む囲みが表にならない',
+  ).toContainText('りんご', { timeout: 10_000 });
+  await expect(page.locator('[data-pkc-region="detail"] [data-pkc-fence-asset-pending]')).toHaveCount(0);
 
   /**
    * 🔴 **塗りを付けた `entry=` の付箋は、題名の帯の字も塗りの上の字になる**(#1304 の着地後レビュー)。
