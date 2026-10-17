@@ -633,6 +633,21 @@ export function buildShell(root: HTMLElement): ShellRegions {
     menu.append(item);
   }
 
+  /**
+   * 🔴 **テンプレートから作る**(#1645 項目 4。Gemini 裁定 = #1163 の依頼 39-4=A「推薦どおり」)。
+   *
+   * ⚠ 直す前は「新しいノートを作る → 編集に入る → `Ctrl`+`/` で挿す」の 2 手だった。
+   *   押すと自分のテンプレートの一覧が出て、選ぶと中身の入ったノートが編集の状態で開く。
+   * ⚠ 種類の項目(`pick-create-kind`)ではない ── 押しても種類は変わらず、一覧で選ぶまで作らない。
+   */
+  const fromTemplate = iconButton('create-from-template', 'テンプレートから作る…');
+  fromTemplate.setAttribute('role', 'menuitem');
+  const fromTemplateHint = '自分のテンプレートを一覧から選んで、中身の入った新しいノートを作ります';
+  fromTemplate.setAttribute(HINT_BASE, fromTemplateHint);
+  fromTemplate.setAttribute(HINT_COMMAND, '');
+  fromTemplate.title = hintTitle(fromTemplateHint, '');
+  menu.append(fromTemplate);
+
   const menuSeparator = (): HTMLElement => {
     const hr = document.createElement('div');
     hr.setAttribute('data-pkc-field', 'create-menu-separator');

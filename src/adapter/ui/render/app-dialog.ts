@@ -695,6 +695,31 @@ export function pickSnippetInApp(
 }
 
 /**
+ * 🔴 **テンプレートを選んで、新しいノートを作る**(#1645 項目 4)。
+ *
+ * ⚠ 器は `pickSnippetInApp` と同じ 1 本(`pickRowInApp`)。違うのは題名と、
+ *   **自分のテンプレートだけ**を並べること(組み込みの表・図は「本文に挿す物」で、
+ *   ノートの中身にはならない)。
+ * @returns 選んだテンプレートの lid。`Escape` / 「やめる」/ 外なら `null`
+ */
+export function pickTemplateNoteInApp(
+  host: HTMLElement,
+  items: readonly { readonly lid: string; readonly title: string; readonly abbr: string }[],
+  note: string,
+): Promise<string | null> {
+  return pickRowInApp(host, {
+    title: 'テンプレートから作る',
+    field: 'pick-template-note',
+    indexAttr: 'data-pkc-template-note-index',
+    note,
+    rows: items.map((s) => ({
+      label: s.abbr !== '' ? `${s.title}(${s.abbr})` : s.title,
+      value: s.lid,
+    })),
+  });
+}
+
+/**
  * 🔴 **図の種類を選ぶ**(#528 案 B。user 裁定 2026-09-04)。
  *
  * ⚠ 器は雛形の一覧と**同じ 1 本**(`pickRowInApp`)── 「押した行がそのまま答え」

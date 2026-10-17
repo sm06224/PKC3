@@ -252,7 +252,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'container-rebuild',
   'container-reset',
   'copy-block-md', 'copy-chapter-md', 
-  'copy-section-link', 'copy-section-ref', 'create-date-note', 
+  'copy-section-link', 'copy-section-ref', 'create-date-note', 'create-from-template', 
   'delete-selected', 'deny-external-images',
   'discard-capture', 'dismiss-announce', 'dismiss-notices', 'dismiss-update', 'dual-back',
   'dual-bookmark', 'dual-copy', 'dual-delete', 'dual-focus', 'dual-forward', 'dual-mkdir',
@@ -850,14 +850,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は小窓の帯の 1 か所にしか無く、鍵は Esc が別に持つ)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1646 の 1): 右の列 / 右クリックの「ゴミ箱を開く」(`open-trash`)1 件を登記 ── 受け手も同時に足したので
       //   `total` +1 / `receivers` +1 / `registered` +1 / `both` +1(`unregistered` は動かない)。
-      total: 436,
-      receivers: 369,
+      // ⚠ 2026-10-17(#1645 項目 4): 受け手 +1(`create-from-template`。左上の作成の ▼ の「テンプレートから作る…」── 押した所から何も要らない。
+      //   `open-today` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 437,
+      receivers: 370,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       registered: 170,
       both: 103,
       outsideActionsTable: 67,
-      unregistered: 266,
+      unregistered: 267,
     });
   });
 

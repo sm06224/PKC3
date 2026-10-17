@@ -131,6 +131,7 @@ const ALL_IDS = [
   'read-columns',
   'column-rule',
   'tag-badge',
+  'tag-color-list',
   'editor-mode',
   'open-in-edit',
   'phone-links',
@@ -171,6 +172,7 @@ const DT_ORDER: Record<string, string[]> = {
     '本文の段組み',
     '段の境界線',
     '本文のタグの見せ方',
+    '色を付けたタグ', // #1645
   ],
   'settings-edit': [
     '編集の仕方',

@@ -744,6 +744,7 @@ import {
   pickCommandInApp,
   pickEntryInApp,
   pickSnippetInApp,
+  pickTemplateNoteInApp,
   pickDiagramInApp,
   pickBodyIconInApp,
   pickArchiveInApp,
@@ -1499,6 +1500,8 @@ const createAndEdit = (
   services: BinderServices,
   archetype: string,
   parentLid: string | null,
+  /** 🔴 テンプレートから作るときの本文(#1645)。省略 = 種類の既定の本文。 */
+  body?: string,
 ): void => {
   if (dispatcher.getState().viewMode !== 'detail')
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
@@ -1514,6 +1517,7 @@ const createAndEdit = (
     title: defaultTitle(dispatcher, archetype),
     parentLid,
     relationId: generateLid(),
+    ...(body !== undefined ? { body } : {}),
     ...(OPENS_READABLE.includes(archetype) ? { edit: false } : {}),
   });
   if (intoSmart && dispatcher.getState().entryMetas.has(lid))
@@ -2920,6 +2924,10 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    *   (機械検査は `tests/repo-hygiene.test.ts`)。
    */
   'open-today',
+  /**
+   * 🔴 **テンプレートから作るのも、ノートを 1 件作る**(#1645)── `open-today` と同じ理由で載せる。
+   */
+  'create-from-template',
   /**
    * 🔴 **画面の下の「○○のノートを作る」は、ノートを 1 件作る**(#1169)── `CREATE_ENTRY` は
    *   即永続なので、取り込みが entry を総入れ替えしている裏で足させない
@@ -8168,6 +8176,39 @@ const ACTIONS: Record<string, ActionHandler> = {
     const parent = st.scopeLid === null ? null : (st.entryMetas.get(st.scopeLid) ?? null);
     // 🔑 面の切替・作成・編集権は `createAndEdit` 1 本(行の右クリックと同じ経路 ── #215)
     createAndEdit(dispatcher, services, archetype, parent?.lid ?? null);
+  },
+  /**
+   * 🔴 **テンプレートから作る**(#1645 項目 4。Gemini 裁定 = #1163 の依頼 39-4=A「推薦どおり」)。
+   *
+   * ⚠ 一覧は `insert-snippet` と**同じ走査結果**(`snippetScan`)── 自分のテンプレートだけ並べる
+   *   (組み込みの表・図は本文に挿す物で、ノートの中身にならない)。
+   * ⚠ 本文は `insertSnippet` で空の本文へ挿した結果を使う(日付などの変数の埋め方を 2 か所に書かない)。
+   * ⚠ 入れ先・編集に入る・編集権は `create-entry` と同じ `createAndEdit` 1 本。
+   * ⚠ 一覧を開いている間に編集へ入った / 取り込みが始まったなら、作らずに理由を言う。
+   * ⚠ 無いときは黙らない ── 作り方を書いた 1 行(`snippetMenuNote`)を出す。
+   */
+  'create-from-template': (dispatcher, _target, services, root) => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') return;
+    const scan = st.snippetScan;
+    const items = scan?.items ?? [];
+    if (items.length === 0) {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: snippetMenuNote(scan) });
+      return;
+    }
+    void pickTemplateNoteInApp(root, items, snippetMenuNote(scan)).then((lid) => {
+      if (lid === null) return;
+      const item = items.find((s) => s.lid === lid);
+      if (item === undefined) return;
+      const now = dispatcher.getState();
+      if (now.phase !== 'ready') {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(now.phase)}ノートを作ってください` });
+        return;
+      }
+      const parent = now.scopeLid === null ? null : (now.entryMetas.get(now.scopeLid) ?? null);
+      const body = insertSnippet({ text: '', start: 0, end: 0 }, item.body, new Date()).text;
+      createAndEdit(dispatcher, services, 'text', parent?.lid ?? null, body);
+    });
   },
   /**
    * 🔴 **このフォルダの中に新しいノートを作る**(#215。行の右クリック / 情報ペイン / 鍵)。

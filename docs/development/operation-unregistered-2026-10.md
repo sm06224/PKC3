@@ -403,6 +403,7 @@
 | `close-lightbox` | 低 | 閉じる (Esc) | `src/adapter/ui/render/lightbox.ts:38`<br>`src/adapter/ui/render/lightbox.ts:73` | 拡大表示を閉じる(Esc で足りる) |
 | `close-note-window` | 低 | × 閉じる | `src/adapter/ui/render/center.ts:213` | ノートの小窓を閉じる(Esc でも閉じる。窓の帯の 1 か所のみ) |
 | `create-date-note` | 低 | ○○のノートを作る | `src/adapter/ui/render/shell.ts:1030` | 知らせの隣に出る一時ボタン(日付は知らせが運ぶ) |
+| `create-from-template` | 低 | テンプレートから作る… | `src/adapter/ui/render/shell.ts:638` | 作成の ▼ の中の項目(一覧で選んでから作る。#1645 項目 4。名前で呼ぶ意味は小さい) |
 | `deny-external-images` | 低 | 外部の画像を読み込まない | `src/adapter/ui/render/external-images.ts:176` | 外部画像の確認帯の中のボタン |
 | `discard-draft` | 低 | 消す | `src/adapter/ui/render/draft-offer.ts:121` | 下書きの提案カードの中のボタン |
 | `dismiss-announce` | 低 | お知らせを閉じる | `src/adapter/ui/render/announce.ts:169`<br>`src/adapter/ui/render/announce.ts:268` | お知らせカードの中のボタン |

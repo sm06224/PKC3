@@ -50,6 +50,7 @@ import { createTextScaleSection } from './settings/text-scale';
 import { createReadColumnsSection } from './settings/read-columns';
 import { createColumnRuleSection } from './settings/column-rule';
 import { createTagBadgeSection } from './settings/tag-badge';
+import { createTagColorListSection } from './settings/tag-color-list';
 import { createEditorModeSection } from './settings/editor-mode';
 import { createOpenInEditSection } from './settings/open-in-edit';
 import { createPhoneLinksSection } from './settings/phone-links';
@@ -235,6 +236,7 @@ export class SettingsRenderer {
       createReadColumnsSection(region),
       createColumnRuleSection(region),
       createTagBadgeSection(region),
+      createTagColorListSection(region),
       createEditorModeSection(region, editorMode),
       createOpenInEditSection(region, openInEdit),
       createPhoneLinksSection(region, phoneLinks),

@@ -11692,3 +11692,23 @@ h6:hover > .pkc-heading-anchor,
     scroll-behavior: auto !important;
   }
 }
+
+/* 設定の「色を付けたタグ」の一覧(#1645)── 色の見本・名前・「色を外す」を 1 行に。見本の色は JS が当てる */
+[data-pkc-field='tag-color-list-row'] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+[data-pkc-field='tag-color-list-swatch'] {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--pkc-border, rgba(128, 128, 128, 0.5));
+}
+[data-pkc-field='tag-color-list-name'] {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
