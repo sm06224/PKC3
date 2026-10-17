@@ -30,37 +30,40 @@ function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
 }
 
 export class PasteSourceStore {
-  private value: PasteSource;
+  /** 保存が使えない / 書けなかったときの控え(この session では効いている)。 */
+  private fallback: PasteSource = DEFAULT_PASTE_SOURCE;
+  /** 🔴 直近の書き込みが失敗したか。真の間は読みも控えを返す。 */
+  private saveFailed = false;
 
   constructor(
     private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
   ) {
-    this.value = this.read();
+    this.fallback = this.get();
   }
 
-  private read(): PasteSource {
+  /** ⚠ **読むたびに保存を見る** ── 別のタブで変えた値が再読込なしで届く(`editor-mode.ts` と同じ)。 */
+  get(): PasteSource {
+    if (this.storage === null || this.saveFailed) return this.fallback;
     try {
-      const v = this.storage?.getItem(KEY);
+      const v = this.storage.getItem(KEY);
       return v !== null && v !== undefined && isPasteSource(v) ? v : DEFAULT_PASTE_SOURCE;
     } catch {
-      return DEFAULT_PASTE_SOURCE;
+      return this.fallback;
     }
   }
 
-  get(): PasteSource {
-    return this.value;
-  }
-
-  /** @returns 実際に変わったか(呼び側が描き直しの要否に使う)。 */
+  /** @returns 実際に変わったか(呼び側が描き直しの要否に使う)。⚠ 同じ値でも**書く**(他のタブの値を上書きして正にする)。 */
   set(next: PasteSource): boolean {
-    if (next === this.value) return false;
-    this.value = next;
+    const changed = next !== this.get();
+    this.fallback = next;
+    this.saveFailed = false;
     try {
       this.storage?.setItem(KEY, next);
     } catch {
-      // ⚠ 保存できなくても**この session では効かせる**(黙って戻さない)
+      // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
+      this.saveFailed = true;
     }
-    return true;
+    return changed;
   }
 }
 

@@ -33,12 +33,16 @@ export class ScheduleNotifyStore {
   private fbLead = SCHEDULE_LEAD_DEFAULT;
   private fbMissed = true;
   private fbOpen: Record<string, number> = {};
+  /** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控え(書いた値)を返す。 */
+  private failedLead = false;
+  private failedMissed = false;
+  private failedOpen = false;
 
   constructor(private readonly storage: Store | null = readStorage()) {}
 
   /** `.ics` に入れるアラームの分。⚠ 読むたびに保存を見る(書き手が複数)。 */
   lead(): number {
-    if (this.storage === null) return this.fbLead;
+    if (this.storage === null || this.failedLead) return this.fbLead;
     try {
       const raw = this.storage.getItem(LEAD_KEY);
       return raw === null ? SCHEDULE_LEAD_DEFAULT : normalizeLead(Number(raw));
@@ -50,16 +54,18 @@ export class ScheduleNotifyStore {
   setLead(minutes: number): void {
     const n = normalizeLead(minutes);
     this.fbLead = n;
+    this.failedLead = false;
     try {
       this.storage?.setItem(LEAD_KEY, String(n));
     } catch {
+      this.failedLead = true;
       /* この session では効いている(控えが持つ) */
     }
   }
 
   /** 見逃した予定を知らせるか。既定は入。 */
   missedOn(): boolean {
-    if (this.storage === null) return this.fbMissed;
+    if (this.storage === null || this.failedMissed) return this.fbMissed;
     try {
       const raw = this.storage.getItem(MISSED_KEY);
       return raw === null ? true : raw === '1';
@@ -70,15 +76,17 @@ export class ScheduleNotifyStore {
 
   setMissedOn(on: boolean): void {
     this.fbMissed = on;
+    this.failedMissed = false;
     try {
       this.storage?.setItem(MISSED_KEY, on ? '1' : '0');
     } catch {
+      this.failedMissed = true;
       /* 同上 */
     }
   }
 
   private readOpen(): Record<string, number> {
-    if (this.storage === null) return this.fbOpen;
+    if (this.storage === null || this.failedOpen) return { ...this.fbOpen };
     try {
       const raw = this.storage.getItem(LAST_OPEN_KEY);
       if (raw === null) return {};
@@ -88,7 +96,7 @@ export class ScheduleNotifyStore {
       for (const [k, v] of Object.entries(o)) if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
       return out;
     } catch {
-      return this.fbOpen;
+      return { ...this.fbOpen };
     }
   }
 
@@ -106,9 +114,11 @@ export class ScheduleNotifyStore {
     const keys = Object.keys(all);
     for (const k of keys.slice(0, Math.max(0, keys.length - LAST_OPEN_MAX))) delete all[k];
     this.fbOpen = all;
+    this.failedOpen = false;
     try {
       this.storage?.setItem(LAST_OPEN_KEY, JSON.stringify(all));
     } catch {
+      this.failedOpen = true;
       /* 憶えられないだけ(次回は初回扱いで何も出ない) */
     }
   }

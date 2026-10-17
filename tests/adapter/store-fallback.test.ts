@@ -52,6 +52,8 @@ import { GroupFoldStore } from '@adapter/ui/render/group-fold';
 import { CreateKindStore } from '@adapter/ui/render/create-kind';
 import { FilerFlattenStore } from '@adapter/ui/render/filer-flatten';
 import { PopupHintStore } from '@adapter/ui/render/popup-hint';
+import { PasteSourceStore } from '@adapter/ui/render/paste-source';
+import { ExternalImagePolicy } from '@adapter/ui/render/external-images';
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -305,6 +307,26 @@ const CASES: readonly {
     },
     a: ['inspector'],
     b: [],
+  },
+  {
+    // ⚠ 既定が「自動」── a を別の値にして、控えが死んで既定へ戻る実装を捕まえる(#1087 S4)
+    name: 'PasteSourceStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new PasteSourceStore(st);
+      return { write: (v) => void s.set(v as 'html'), read: () => s.get() };
+    },
+    a: 'html',
+    b: 'auto',
+  },
+  {
+    // ⚠ 既定が「確認」── a を別の値にする(#1087 S4)
+    name: 'ExternalImagePolicy',
+    make: (st: StorageLike | null = null) => {
+      const s = new ExternalImagePolicy(st);
+      return { write: (v) => void s.setMode(v as string), read: () => s.getMode() };
+    },
+    a: 'never',
+    b: 'always',
   },
 ];
 

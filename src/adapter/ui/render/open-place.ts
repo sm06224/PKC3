@@ -23,21 +23,37 @@ function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   }
 }
 
+/** 保存が使えない環境の控え(この session では効いている)。選ぶまでは null。 */
+let fallback: OpenPlace | null = null;
+/** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控えを返す。 */
+let saveFailed = false;
+
 /** いまの開き場所 ── **保存されていれば それ、無ければ別の窓**。 */
 export function currentOpenPlace(): OpenPlace {
   try {
-    const v = readStorage()?.getItem(OPEN_PLACE_KEY);
+    const s = readStorage();
+    if (s === null || saveFailed) return fallback ?? DEFAULT_OPEN_PLACE;
+    const v = s.getItem(OPEN_PLACE_KEY);
     return v !== null && v !== undefined && isOpenPlace(v) ? v : DEFAULT_OPEN_PLACE;
   } catch {
-    return DEFAULT_OPEN_PLACE;
+    return fallback ?? DEFAULT_OPEN_PLACE;
   }
 }
 
 /** user が選んだ ── **保存する**。⚠ 起動時には呼ばない(選んでいないのに固定しない)。 */
 export function chooseOpenPlace(place: OpenPlace): void {
+  fallback = place;
+  saveFailed = false;
   try {
     readStorage()?.setItem(OPEN_PLACE_KEY, place);
   } catch {
-    // 保存できないだけ ── この session では効いている
+    // 🔴 書けなかった ── 次に書けるまで、読みは控え(選んだ値)を返す(戻らない)
+    saveFailed = true;
   }
+}
+
+/** test 用 ── 控えを捨てる。 */
+export function resetOpenPlaceFallbackForTest(): void {
+  fallback = null;
+  saveFailed = false;
 }

@@ -80,6 +80,8 @@ function parse(raw: string | null): string[] {
 export class SearchHistoryStore {
   /** 🔴 保存が無い端末の控え ── この session の中だけ効く。 */
   private fallback: string[] = [];
+  /** 🔴 この store 自身の直近の書込が保存に届かなかったか。真の間だけ控えを返す。 */
+  private saveFailed = false;
 
   constructor(private readonly storage: SearchHistoryStorage | null = browserStorage) {
     if (storage !== null) this.fallback = parse(storage.get(KEY));
@@ -88,12 +90,11 @@ export class SearchHistoryStore {
   /** 新しい順。 */
   list(): readonly string[] {
     // ⚠ **`?.` で書かない**(上の戒め)── `null` のときは控えを返す
-    if (this.storage === null) return this.fallback;
-    const stored = parse(this.storage.get(KEY));
-    // 🔴 **保存は在るが書込だけ失敗する端末**(`setItem` が投げる = 容量・私用ウィンドウ)── 保存は
-    //   空のままなので、控えが非空ならそちらを返す。⚠ 返さないと、積んだ物が**1 度も出ない**。
-    //   ⚠ 保存に 1 件でも在れば保存を正とする(別のタブが積んだ物を拾う ── 上の「読むたびに保存を引く」)。
-    return stored.length === 0 && this.fallback.length > 0 ? this.fallback : stored;
+    if (this.storage === null || this.saveFailed) return this.fallback;
+    // 🔴 **保存は在るが書込だけ失敗する端末**は `saveFailed`(自分の書込が実際に届かなかった)で見分ける。
+    //   ⚠ 「保存が空 + 控えが非空」で見分けない ── 別のタブが消した空の保存と区別できず、
+    //   消した履歴が古い控えから戻って書き戻される。保存を正とする(別のタブの積みも消しも拾う)。
+    return parse(this.storage.get(KEY));
   }
 
   /** 探した語を憶える。**新しい順**の一覧を返す。⚠ 変わらないとき(短すぎ・先頭と同じ)は書かない。 */
@@ -102,13 +103,26 @@ export class SearchHistoryStore {
     const next = pushSearchTerm(now, term);
     if (next.length === now.length && next.every((t, i) => t === now[i])) return now;
     this.fallback = [...next];
-    if (this.storage !== null) this.storage.set(KEY, JSON.stringify(next));
+    if (this.storage !== null) {
+      this.saveFailed = false;
+      try {
+        this.storage.set(KEY, JSON.stringify(next));
+      } catch {
+        this.saveFailed = true;
+      }
+      // 書込の口は失敗を投げないことがある ── 読み戻して、届いたかを見る
+      if (!this.saveFailed) {
+        const back = parse(this.storage.get(KEY));
+        this.saveFailed = back.length !== next.length || back.some((t, i) => t !== next[i]);
+      }
+    }
     return next;
   }
 
   /** 🔴 user が消す口(「検索した語の記録を消す」)。 */
   clear(): void {
     this.fallback = [];
+    this.saveFailed = false;
     if (this.storage !== null) this.storage.remove(KEY);
   }
 }
