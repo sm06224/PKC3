@@ -868,14 +868,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は動画の行の中にしか無く、押した行が対象を、押したボタンが取り出す物を運ぶ。`capture-transcribe` と同じ置き場)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1621): 左のペインの「⋯」(`open-bar-more`)で受け手 +1 ── 登記は増えない(鍵を持たない画面のボタン)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 445,
-      receivers: 376,
+      total: 446,
+      receivers: 377,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       registered: 172,
       both: 103,
       outsideActionsTable: 69,
-      unregistered: 273,
+      unregistered: 274,
     });
   });
 
