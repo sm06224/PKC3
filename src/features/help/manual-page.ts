@@ -315,6 +315,13 @@ export function themeBootScript(
     'function j(){g(location.hash.slice(1))}' +
     'addEventListener("DOMContentLoaded",j);' +
     /**
+     * 🔴 **落とされた file / link で窓ごと移らない**(#1087)。ブラウザの既定は、落とした物の URL へ
+     *   この窓ごと移ること(読んでいた所が消え、移った先が `opener` を持つ)。
+     *   ⚠ 誰も受けなかった落としだけ止める(`defaultPrevented` なら触らない)。
+     */
+    'function b(e){if(!e.defaultPrevented)e.preventDefault()}' +
+    'addEventListener("dragover",b);addEventListener("drop",b);' +
+    /**
      * 🔴 **`blob:null/` の document では、断片への navigate をブラウザが止める**
      * (#648 段③、2026-09-05 実測 ── `chromium` / `headless_shell` の両方)。
      * ⚠ 持ち歩ける 1 枚を `file://` で開くと opener の origin は opaque なので、blob の URL は

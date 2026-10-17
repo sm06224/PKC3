@@ -58,6 +58,7 @@ import {
   type Stroke,
 } from '@features/asset/image-draw';
 import { waitForWindowClose } from './window-close';
+import { blockWindowDrop } from './window-drop-guard';
 
 /** 保存の結果。⚠ 断られたら窓は**開いたまま**(描いた線を失わせない)。 */
 export type ImageDrawSaveResult = { ok: true } | { ok: false; message: string };
@@ -622,6 +623,7 @@ export function openImageDrawWindow(deps: ImageDrawWindowDeps): ImageDrawWindow 
   void waitClose(win).then(finish, finish);
 
   const doc = win.document;
+  blockWindowDrop(doc);
   doc.title = `${deps.title} に描き込む`;
   const style = doc.createElement('style');
   style.textContent = CSS;

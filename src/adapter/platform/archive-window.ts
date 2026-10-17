@@ -30,6 +30,7 @@
  *   配色を足した日にこの窓だけ古くなる(`theme.ts` の `syncThemeColor` と同じ作法)。
  */
 import { waitForWindowClose } from './window-close';
+import { blockWindowDrop } from './window-drop-guard';
 
 /** 一覧に出す 1 行。⚠ 何が並ぶかは `features/archive/zip-browse.ts` が決める。 */
 export interface ArchiveWindowRow {
@@ -125,6 +126,7 @@ export function grabArchiveWindow(
     if (win.document.documentElement.getAttribute(ARCHIVE_BUILT_ATTR) === assetKey) {
       return { win, reused: true };
     }
+    blockWindowDrop(win.document);
     win.document.title = `${title} の中`;
     win.document.body.textContent = '';
     const p = win.document.createElement('p');
@@ -149,6 +151,7 @@ export function grabArchiveWindow(
 export function showArchiveWindowError(win: Window, title: string, text: string): void {
   const doc = win.document;
   if (win.closed || doc.body === null) return;
+  blockWindowDrop(doc);
   doc.body.textContent = '';
   const h = doc.createElement('p');
   h.setAttribute('data-pkc-field', 'archive-window-title');
@@ -223,6 +226,7 @@ export function pickInArchiveWindow(win: Window, deps: ArchivePickDeps): Promise
    * 🔑 閉じていたら「やめた」と同じ答えを返す ── 実際 user はやめたのである。
    */
   if (win.closed || doc.body === null) return Promise.resolve(null);
+  blockWindowDrop(doc);
   doc.body.textContent = '';
 
   const style = doc.createElement('style');
