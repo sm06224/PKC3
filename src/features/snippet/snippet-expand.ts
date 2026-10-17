@@ -46,7 +46,7 @@
 import { pad2 } from '@features/datetime/datetime-format';
 import { dateKey } from '@features/schedule/month-grid';
 import type { TextSelection } from '@features/markdown/text-ops';
-import { advanceFence } from '@features/markdown/list-renumber';
+import { fenceStep } from '@features/markdown/list-renumber';
 
 /**
  * 🔴 **動的値は 4 つだけ**(設計 §4.6)。
@@ -162,9 +162,12 @@ function fenceRegions(text: string): Array<[number, number]> {
   let open = 0;
   let at = 0;
   for (const line of text.split('\n')) {
-    const after = advanceFence(fence, line);
-    if (fence === '' && after !== '') open = at;
-    if (fence !== '' && after === '') out.push([open, at + line.length]);
+    const st = fenceStep(fence, line);
+    const after = st.next;
+    // 入れ物が終わって打ち切られた行は、前の fence の外(塊は前の行で終わる)。同じ行が新しい開きかもしれない
+    if (fence !== '' && !st.inside) out.push([open, at - 1]);
+    if ((fence === '' || !st.inside) && after !== '') open = at;
+    if (fence !== '' && st.inside && after === '') out.push([open, at + line.length]);
     fence = after;
     at += line.length + 1;
   }

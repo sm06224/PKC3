@@ -27,7 +27,7 @@
  */
 import { parseEntryRef } from '../entry-ref/entry-ref';
 import { sectionRange } from './append-target';
-import { advanceFence } from './list-renumber';
+import { fenceStep } from './list-renumber';
 import { clipText, type PlaceExcerpt } from './place-embed';
 
 const SEP = '#h/';
@@ -79,9 +79,9 @@ export function sectionEmbedKeys(body: string): string[] {
   let fence = '';
   for (const line of body.split(/\r?\n/)) {
     // 開閉は `advanceFence`(種類 + 長さ。#1087)
-    const wasIn = fence !== '';
-    fence = advanceFence(fence, line);
-    if (wasIn || fence !== '' || !line.includes('![')) continue;
+    const st = fenceStep(fence, line);
+    fence = st.next;
+    if (st.inside || !line.includes('![')) continue;
     for (const m of line.matchAll(EMBED_RE)) {
       const ref = parseEntryRef(m[1]!);
       if (ref.kind === 'section') out.push(sectionKey(ref.lid, ref.id));

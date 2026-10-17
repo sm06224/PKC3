@@ -34,7 +34,7 @@
  * - `PKC2: docs/development/notation-redesign-2026-05/11-canonicalization-spec.md`
  */
 
-import { advanceFence, advanceIndent, INDENT_START } from './list-renumber';
+import { fenceStep, advanceIndent, INDENT_START } from './list-renumber';
 
 /**
  * `:::` block directive 前後 blank line 正規化(LineMap thread 版)。
@@ -88,8 +88,9 @@ export function ensureBlankAroundColonBlocksWithLineMap(
   for (let i = 0; i < inLines.length; i++) {
     const line = inLines[i]!;
     const inputIdx = lineMapIn[i] ?? i;
-    const nextMarker = advanceFence(fenceMarker, line);
-    let skip = fenceMarker !== '' || nextMarker !== '';
+    const st = fenceStep(fenceMarker, line);
+    const nextMarker = st.next;
+    let skip = st.inside;
     // 字下げのコード(4 SP。#1087 M9)も触らない。fence の外の行だけ追う
     if (!skip) {
       const r = advanceIndent(indentState, line);

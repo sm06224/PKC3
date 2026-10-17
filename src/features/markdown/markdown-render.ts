@@ -22,7 +22,7 @@
  *   - Language class hint on fenced code blocks
  */
 
-import { advanceFence, advanceIndent, INDENT_START, LIST_LEAD, type IndentState } from './list-renumber';
+import { fenceStep, advanceIndent, INDENT_START, LIST_LEAD, type IndentState } from './list-renumber';
 import MarkdownIt from 'markdown-it';
 import { parseTagLine } from '../flavor/body-tags';
 import { MAX_TAGS, sameTag } from '../flavor/tags';
@@ -3602,15 +3602,17 @@ function fenceTransition(line: string, state: FenceState): { state: FenceState; 
   //   ⚠ 引用・リストの項目の中の fence(`> ````  / `- ````)も同じ正本が見る(M9)。
   const inRealFence = state.inFence && state.marker !== '';
   const cur = inRealFence ? state.marker : '';
-  const next = advanceFence(cur, line);
+  const st = fenceStep(cur, line);
+  const next = st.next;
   const ind = state.ind ?? INDENT_START;
-  if (next !== cur) {
+  // 🔴 入れ物(引用・リストの項目)が終わって fence が打ち切られた行は `inside` が偽 ── 外の行として読む
+  if (inRealFence && st.inside && next === cur) return { state, isBoundary: false };
+  if (st.inside) {
     const after: IndentState = { blank: false, list: ind.list || LIST_LEAD.test(line), code: false };
     return next === ''
       ? { state: { inFence: false, marker: '', ind: after }, isBoundary: true }
       : { state: { inFence: true, marker: next, ind: after }, isBoundary: true };
   }
-  if (inRealFence) return { state, isBoundary: false };
   // fence の外 ── 字下げのコード(4 SP。空行の後で、リストの中ではないもの)も素通しの対象(M9)
   const r = advanceIndent(ind, line);
   return { state: { inFence: r.code, marker: '', ind: r.state }, isBoundary: false };
@@ -6187,9 +6189,9 @@ function preprocessHeadingNumbers(text: string, start: number): string {
   let fence = '';
   for (const line of lines) {
     // 開閉は `advanceFence`(種類 + 長さ。#1087)
-    const wasIn = fence !== '';
-    fence = advanceFence(fence, line);
-    if (wasIn || fence !== '') {
+    const st = fenceStep(fence, line);
+    fence = st.next;
+    if (st.inside) {
       out.push(line);
       continue;
     }

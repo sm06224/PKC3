@@ -210,7 +210,10 @@ describe('触らない塊 / 引用 (#1087 sweep)', () => {
     expect(sortTasksByStatus(body)).toBe('- [ ] b\n- [x] a\n  $$\n  - [x] m\n  - [ ] n\n  $$\n');
   });
   it('hasTaskItems は fence の中を数えず、引用の中は hasQuotedTaskItems が言い分ける', () => {
-    expect(hasTaskItems('    ```\n- [ ] a\n```')).toBe(false);
+    expect(hasTaskItems('```\n- [ ] a\n```')).toBe(false);
+    // 文書の頭の 4 SP の ``` は字下げのコードであって fence ではない(markdown-it は後ろの項目を生きた task として描く)。
+    //   事実が動いた: 以前は fence とみなして後ろを飲んでいた(#1087 M9b)
+    expect(hasTaskItems('    ```\n- [ ] a\n```')).toBe(true);
     expect(hasTaskItems('> - [ ] a')).toBe(false);
     expect(hasQuotedTaskItems('> - [ ] a')).toBe(true);
     expect(hasQuotedTaskItems('- [ ] a')).toBe(false);

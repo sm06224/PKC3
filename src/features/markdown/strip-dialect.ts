@@ -27,7 +27,7 @@
  *
  * 🔑 **pure module**。DOM も窓も知らない。
  */
-import { advanceFence } from './list-renumber';
+import { fenceStep } from './list-renumber';
 import { parseBlockDirectiveOpen, isBlockDirectiveClose } from './block-directive-attrs';
 
 /**
@@ -90,9 +90,9 @@ export function stripDialect(markdown: string): string {
 
   for (const line of lines) {
     // ── fence の中は 1 バイトも触らない ── 開閉は `advanceFence`(種類 + 長さ。#1087)
-    const wasIn = fence !== '';
-    fence = advanceFence(fence, line);
-    if (wasIn || fence !== '') {
+    const st = fenceStep(fence, line);
+    fence = st.next;
+    if (st.inside) {
       out.push(line);
       continue;
     }

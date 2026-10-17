@@ -42,32 +42,101 @@ export type ListNumberMode = 'sequential' | 'uniform';
  *   ⚠ 開きの行に ` ` ` が 2 つ目から混ざる(`` ```x``` ``)形は fence ではない(行内のコード)。
  */
 export function advanceFence(fence: string, line: string): string {
-  if (fence !== '') {
-    // 🔑 引用の中で開いた fence は、返す記号の頭に `>` を深さぶん付けて覚える(`>>```` )。
-    //   閉じは同じ深さの引用の中だけ。深さが浅い行(`>` が無い行 = 引用が終わった)は、
-    //   fence ごと終わったものとして閉じる(閉じ忘れが文書の残りを飲まない)。
-    let depth = 0;
-    while (fence[depth] === '>') depth += 1;
-    const mark = fence.slice(depth);
-    const q = depth === 0 ? { depth: 0, rest: line } : unquoteLine(line);
-    if (q.depth < depth) return '';
-    if (q.depth > depth) return fence;
-    const c = /^\s*(`{3,}|~{3,})\s*$/.exec(q.rest);
-    return c !== null && c[1]![0] === mark[0] && c[1]!.length >= mark.length ? '' : fence;
+  return fenceStep(fence, line).next;
+}
+
+/**
+ * `advanceFence` の詳しい版。`inside` = **その行が fence の一部か**(開きの行・中身・閉じの行)。
+ *
+ * 🔴 呼び側は「前の状態が空でない、または次の状態が空でない」で行の所属を決めてはならない ──
+ *   引用・リストの項目が終わって fence が打ち切られた行(`- ```` の次の `- [x] a`)は、
+ *   前の状態が空でなくても **fence の外**の行である。所属は `inside` で読む。
+ */
+export function fenceStep(fence: string, line: string): { next: string; inside: boolean } {
+  if (fence === '') {
+    const o = openFence(line);
+    return { next: o, inside: o !== '' };
   }
+  const next = stepOpen(fence, line);
+  return next === null ? reopen(line) : { next, inside: true };
+}
+
+function reopen(line: string): { next: string; inside: boolean } {
+  const o = openFence(line);
+  return { next: o, inside: o !== '' };
+}
+
+/** 開いている fence を 1 行進める。入れ物が終わって打ち切られたら `null`(その行は読み直す)。 */
+function stepOpen(fence: string, line: string): string | null {
+  // 🔑 状態の形: `>` を引用の深さぶん + (リストの項目の中なら `#内容の桁#`) + 開いた記号の並び。
+  //   引用の中で開いた fence は、閉じも同じ深さの引用の中だけ。
+  let depth = 0;
+  while (fence[depth] === '>') depth += 1;
+  let rest = fence.slice(depth);
+  let col = -1;
+  if (rest[0] === '#') {
+    const end = rest.indexOf('#', 1);
+    col = Number(rest.slice(1, end));
+    rest = rest.slice(end + 1);
+  }
+  const mark = rest;
+  const q = depth === 0 ? { depth: 0, rest: line } : unquoteLine(line);
+  // 引用が終わった行は fence ごと終わったもの ── ⚠ **その行を開きとして読み直す**(`> ```` の直後の
+  //   ` ``` ` は新しい fence の開き。読み直さないと、以降の開閉の偶奇が markdown-it とずれる)
+  if (q.depth < depth) return null;
+  if (q.depth > depth) return fence;
+  const ind = indentCols(q.rest);
+  if (col >= 0) {
+    if (q.rest.trim() === '') return fence;
+    // リストの項目の中の fence は、項目の内容の桁より浅い行で終わる(閉じ忘れが文書の残りを飲まない)。
+    //   ⚠ 同じ行を開きとして読み直す(`- ```` の次の `- ```` は、前の項目の終わりであり新しい開き)
+    if (ind < col) return null;
+  }
+  // 閉じは CommonMark どおり、内容の桁から 3 桁以内の字下げ
+  if (ind - Math.max(col, 0) > 3) return fence;
+  const c = /^\s*(`{3,}|~{3,})\s*$/.exec(q.rest);
+  return c !== null && c[1]![0] === mark[0] && c[1]!.length >= mark.length ? '' : fence;
+}
+
+/** 行頭の空白の桁数(タブは 4 桁刻み)。 */
+function indentCols(s: string): number {
+  let n = 0;
+  for (const ch of s) {
+    if (ch === ' ') n += 1;
+    else if (ch === '\t') n += 4 - (n % 4);
+    else break;
+  }
+  return n;
+}
+
+/** その行が fence の開きなら、状態の文字列。そうでなければ `''`。 */
+function openFence(line: string): string {
   // 開き。⚠ 引用(`> ````)・リストの項目(`- ````)の中の fence も fence である(#1087 M9)。
   //   これを見落とすと、中身の `%%…%%` `||` `__` `+++` が記法として食われる。
   const q = unquoteLine(line);
   let rest = q.rest;
+  let col = 0;
+  let lists = 0;
   for (;;) {
     const l = LIST_LEAD.exec(rest);
     if (l === null) break;
+    // 記号の後ろの空白が 5 桁以上なら、項目の中の字下げのコード(fence ではない)
+    if (indentCols(l[3]!) >= 5) return '';
+    col += indentCols(l[1]!) + l[2]!.length + indentCols(l[3]!);
+    lists += 1;
     rest = rest.slice(l[0].length);
+  }
+  // 最上位(リストの外)の fence は 3 桁までの字下げ。4 桁以上は、字下げのコードか、リストの項目の中の
+  //   fence のどちらか(ここからは見分けられない)── どちらでも「その字下げより浅い行で終わる」と読めば、
+  //   コードの外の行を飲まない(``` `    ```js` の後ろの本文が、閉じ忘れで生きたまま残る)
+  if (lists === 0) {
+    const ind = indentCols(rest);
+    if (ind > 3) col = ind;
   }
   const o = /^\s*(`{3,}|~{3,})(.*)$/.exec(rest);
   if (o === null) return '';
   if (o[1]![0] === '`' && o[2]!.includes('`')) return '';
-  return '>'.repeat(q.depth) + o[1]!;
+  return '>'.repeat(q.depth) + (col > 0 ? '#' + col + '#' : '') + o[1]!;
 }
 
 /**
