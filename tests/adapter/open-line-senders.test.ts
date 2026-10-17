@@ -396,7 +396,7 @@ describe('送り手の全数', () => {
   };
 
   const EXPECT: Array<[string, string, number]> = [
-    ['TOGGLE_TASK', 'openLine', 2], // 本文・留めた枠・付箋・札 / 付箋(binder の 2 口)
+    ['TOGGLE_TASK', 'openLine', 3], // 本文・留めた枠・付箋・札 / 付箋(binder の 2 口)/ 済みにした直後の「元に戻す」(schedule-undo、#1654)
     ['MATERIALIZE_REPEAT', 'openLine', 1],
     ['SET_TASK_RUN', 'openLines', 1],
     ['SET_CSV_CELL', 'openLine', 1],
