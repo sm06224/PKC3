@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 import { describe, expect, it } from 'vitest';
 import { sniffText, sniffedPreview } from '../../src/features/asset/sniff-text';
 

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * #1087: 本文だけを書き換える書込は `keepMeta: true` を渡す(別のタブの改名・並べ替えを巻き戻さない)。
  *

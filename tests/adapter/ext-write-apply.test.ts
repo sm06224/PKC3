@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * #195 / C-5 段③: **書き戻しの当て方**。
  *

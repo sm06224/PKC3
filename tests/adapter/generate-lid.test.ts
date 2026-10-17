@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **id は、窓をまたいでもぶつからない**(#973)。
  *

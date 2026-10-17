@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **markdown-it 15 で変わった「本文のどこがリンクになるか」を pin する**(#78、2026-08-22)。
  *

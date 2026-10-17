@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **マニュアルの本文にも、使わない語(`BANNED_TERMS`)を出さない**(#1087)。
  *

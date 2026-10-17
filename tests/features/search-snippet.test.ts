@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 探す面の抜粋の印(#680)── `features/filter/search-snippet.ts`。
  *

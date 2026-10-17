@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **雛形の表**(#196 / B-2)。
  *

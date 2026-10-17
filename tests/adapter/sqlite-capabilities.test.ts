@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **同梱の sqlite に何が入っているか**(#681 の「先に数え上げる」)。
  *

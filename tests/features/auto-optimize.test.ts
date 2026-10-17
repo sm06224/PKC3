@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **索引の片づけを、いつ自動で打つか**(#999 段③)── 判断(`planAutoOptimize`)と字。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 関係の種類の正本(#185 / 台帳 #180 の A-7)。
  *

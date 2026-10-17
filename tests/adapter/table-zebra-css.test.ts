@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **Markdown 表の縞模様（ゼブラストライプ）と行ホバーハイライト**(#1142)。
  *

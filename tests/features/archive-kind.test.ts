@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **file の型は「含まれる型の積」**(#1017 段④b)。
  *

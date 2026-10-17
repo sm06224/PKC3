@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **PowerPoint のスライドを板へ戻す**(#530 C)── 書き出しとの往復。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * スマホ用画面の判定(#632 段①)。実体は `src/features/phone-layout.ts`。
  *

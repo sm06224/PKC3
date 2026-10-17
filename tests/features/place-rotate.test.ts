@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **付箋の回転**(#530 段⑤d。Gemini 裁定 2026-10-11 依頼 19 Q2)── 記法と計算(features 層)。
  *

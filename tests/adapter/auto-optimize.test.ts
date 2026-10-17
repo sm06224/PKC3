@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **索引の片づけの係(`AutoOptimizer`)**(#999 段③)── 時計と書込の回数を差して通す。
  *

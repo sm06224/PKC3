@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **DuckDB の「時間がかかります」は、表を読み込む回にだけ出す**(#682 の最後の 1 件)の状態の側。
  * 画面側は `sql-pane.test.ts`、合図を出す側(読み込むときだけ呼ぶ)は `duckdb-runner.test.ts`。

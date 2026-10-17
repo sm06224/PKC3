@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **DuckDB のときだけ「書く」文を通す門**(#918 段⑧)。
  *

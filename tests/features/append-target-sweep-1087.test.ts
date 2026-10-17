@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * #1087 追記の入り先の見直し ── 取り消しの位置 / 囲み(fence)の閉じ / 目次との食い違い / CRLF。
  *

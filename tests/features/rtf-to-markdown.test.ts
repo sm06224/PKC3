@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **リッチテキスト(RTF)の貼付**(user 指示 2026-08-25)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * `patch-lo-instable.py`(#135)── 上流が自分で直した日に焼きを止めない(2026-10-07)。
  *

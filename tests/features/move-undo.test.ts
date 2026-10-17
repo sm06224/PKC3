@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **予定を動かした直後の「元に戻す」の材料 / 小さな月の「見ている所」**(#855。
  * Gemini 裁定 = #1163 のコメント 6104130726 の 1・5・6)。実体は `features/schedule/move-undo.ts` と

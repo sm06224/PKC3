@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **xlsx の 1 枚を格子にする**(#854 段③)。
  *

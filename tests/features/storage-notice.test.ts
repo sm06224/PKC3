@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **保存先が取れなかったときの言い方**(#811。user 報告 2026-09-09、iPhone)。
  *

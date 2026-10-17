@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **複数の file を並べて引く ── 判断の部分**(#918 段⑦a。Gemini 裁定 2026-10-01)。
  *

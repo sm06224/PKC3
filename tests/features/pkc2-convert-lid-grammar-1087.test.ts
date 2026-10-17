@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 PKC2 取り込みの lid の付け替えも、読む側(`body-links.ts`)と同じ文法で当てる(#1087 N14 の続き)。
  * 直す前は `entry:` の小文字だけを左の境界なしで写した:`Entry:old1` と PKC2 自身の

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * P5c-1: 行パッチの lossless pin。
  * 「復元が byte 一致する」を最優先で固める(履歴の本文が 1 byte でも変われば

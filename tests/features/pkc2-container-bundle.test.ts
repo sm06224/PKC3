@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * P6c 段④: batch(複数 entry を 1 ZIP)3 形式の受理。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **引っ越しの表は `isOpenable` より先に見る**(#292 段⑤、2026-08-23)。
  *

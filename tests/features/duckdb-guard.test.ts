@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **DuckDB へ打つ字の門**(#682 段②)。
  *

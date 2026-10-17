@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **日付の読み取り 3 件**(#1087)。
  *

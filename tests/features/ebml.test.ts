@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **EBML の読み書き**(#683 段②a)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **csv の表が、中の表を隠さない**(#681 段③)。
  *

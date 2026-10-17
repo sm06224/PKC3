@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 別タブの書込(`SYS_BOOTED`)で、画面に出ている「写し」を取り直す(#1087 の掃き出し)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **vCard の取込と書き出し**(#278 段③)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **「探す」から本文の当たった所へ送る ── 控え(`state.searchJump`)の寿命**(#1102 段①)。
  *

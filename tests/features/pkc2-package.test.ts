@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * P6c 段②: `pkc2-package` の受理。
  *

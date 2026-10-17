@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **`.sqlite` を DuckDB 用の NDJSON の写しにする純粋な規則**(#682 段④d)。
  *

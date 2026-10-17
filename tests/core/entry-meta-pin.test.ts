@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 import { describe, expectTypeOf, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { AppState } from '../../src/adapter/state/app-state';

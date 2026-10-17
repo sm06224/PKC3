@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **手元のファイルを Office へ回す振り分け**(#432)。
  *

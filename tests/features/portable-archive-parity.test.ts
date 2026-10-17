@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **PKC3 入り HTML の取り込みは、zip を作らずに `Pkc3Archive` を直に組む**(#1416)。
  *

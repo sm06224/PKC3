@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * revision 同一内容 skip(P5)の hash pin。決定性と「1 文字差で変わる」だけを
  * 固定する(暗号強度は要求しない ── 衝突の帰結は revision 1 件の skip)。

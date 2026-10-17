@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **行 → 文字位置**(#596 C)。
  *

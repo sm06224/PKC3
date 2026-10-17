@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 保存の ack が差し替える `entryMetas` の「違いが時刻だけか」(#1087)。
  *

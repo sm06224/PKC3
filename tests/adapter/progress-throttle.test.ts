@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /** 進み具合の間引き: 20 件ごと、または 250ms ごと。最後の 1 件は出さない。 */
 import { describe, expect, it } from 'vitest';
 import { createProgressThrottle } from '../../src/adapter/ui/actions/progress-throttle';

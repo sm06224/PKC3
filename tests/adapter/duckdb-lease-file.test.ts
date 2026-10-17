@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **器の中で書いた file を取り出して、すぐ捨てる**(`DuckDbLease.runFile`。#918 段⑥)。
  *

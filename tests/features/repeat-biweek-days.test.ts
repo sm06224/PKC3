@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **隔週と曜日の列**(#855)。
  *

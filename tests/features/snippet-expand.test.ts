@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **スニペットの展開**(#196 / B-2)。
  *

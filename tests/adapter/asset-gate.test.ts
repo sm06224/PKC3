@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * asset 操作の相互排他(P4b review F1)。
  *

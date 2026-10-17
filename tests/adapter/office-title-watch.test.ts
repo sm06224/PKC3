@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 Office の上のバーの文書名を、閉じた文書のまま残さない(#1363 の 3)。
  *

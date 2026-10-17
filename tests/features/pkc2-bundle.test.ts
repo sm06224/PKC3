@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * P6c 段③: `.text.zip`(単体 entry バンドル)の受理。
  *

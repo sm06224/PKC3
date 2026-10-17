@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 import { describe, expect, it } from 'vitest';
 import { LONG_NOTE_LINES, isLongNote } from '../../src/features/markdown/long-note';
 

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **表の升の式**(#418 段②)。
  *

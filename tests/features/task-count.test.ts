@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **数える側は、描く側の superset である**(#277 段②)。
  *

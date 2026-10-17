@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * メッセージ型(設計 doc ui-total-design-2026-09.md §7、段②a)。
  *

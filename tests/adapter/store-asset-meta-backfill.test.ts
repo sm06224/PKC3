@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **bytes は在るが登録行（`assets` 表）が無い添付を、付け直したときに埋める**（#1087）。
  *

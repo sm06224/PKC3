@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * O4: 添付の**版の台帳**(#88)。
  *

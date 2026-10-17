@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * ブラウザの AI(WebMCP)に渡す道具 5 本(#1407 段① / 段④)。
  *

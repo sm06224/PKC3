@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **繰り返しの展開**(#344 段②)。
  *

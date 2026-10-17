@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **その場で計算**(#764。user 裁定 2026-09-06「PKC2 と同じで」)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **組む字が、本物の sqlite で通るか**(#918 段①)。
  *

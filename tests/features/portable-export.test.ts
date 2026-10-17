@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **可搬単一 HTML を書き出す**(#400 段④)。
  *

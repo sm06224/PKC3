@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * P8 段⑩: **切って戻せること**が preview の正しさそのもの。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **Office 側の設定を初期状態に戻す口**(#634)。
  *

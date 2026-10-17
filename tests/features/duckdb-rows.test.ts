@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **DuckDB の返り値を揃える**(#682 段②)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 探す面の書き方(#680)── `features/filter/search-query.ts` の `query` 側。
  *

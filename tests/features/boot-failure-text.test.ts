@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 import { describe, expect, it } from 'vitest';
 import { bootFailureText } from '../../src/features/boot-failure-text';
 

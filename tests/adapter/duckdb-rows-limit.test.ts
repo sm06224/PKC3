@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **DuckDB の答えは、JS の行にする前に上限で切る**(#1087 の見直し)。
  *

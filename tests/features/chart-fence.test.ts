@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * chart フェンスの読み取り(#188 / 台帳 #180 の B-1)。
  *

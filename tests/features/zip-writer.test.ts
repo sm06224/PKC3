@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * P6d 段①: ZIP writer。
  *
