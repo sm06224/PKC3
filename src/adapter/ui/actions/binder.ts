@@ -162,6 +162,7 @@ import { buildVcf, countUnwritableBirthdays, isVcfFileName, vcfNoteOf } from '@f
 import { isIcsFileName } from '@features/schedule/ics-import';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, BAR_TILE_ATTR, setActionIcon } from '@adapter/ui/render/icons';
+import { OVERFLOW_ATTR } from '@adapter/ui/render/bar-overflow';
 import { setContainerRepairToggle } from '@adapter/ui/render/commands';
 import { isIconName } from '@features/icon/symbols';
 import {
@@ -1551,9 +1552,9 @@ const createAndEdit = (
  *   の 3 つは除く ── 前者 2 つは別の場所で読み、`data-pkc-field` は写すと
  *   「その面に 1 つだけ」を前提にした `querySelector` が長押しメニュー側を拾いうる)。
  */
-function barTileMenuItems(bar: Element): MenuItem[] {
+function barTileMenuItems(bar: Element, selector = `[${BAR_TILE_ATTR}]`): MenuItem[] {
   const items: MenuItem[] = [];
-  for (const tile of bar.querySelectorAll<HTMLButtonElement>(`[${BAR_TILE_ATTR}]`)) {
+  for (const tile of bar.querySelectorAll<HTMLButtonElement>(selector)) {
     if (tile.disabled) continue;
     const action = tile.getAttribute('data-pkc-action');
     if (action === null || action === '') continue;
@@ -1568,6 +1569,8 @@ function barTileMenuItems(bar: Element): MenuItem[] {
       if (!attr.name.startsWith('data-pkc-')) continue;
       if (attr.name === 'data-pkc-action' || attr.name === BAR_TILE_ATTR || attr.name === 'data-pkc-field')
         continue;
+      // 🔴 畳みの印(#1621)を写すと、メニューの項目まで `display: none` になる
+      if (attr.name === OVERFLOW_ATTR) continue;
       attrs[attr.name] = attr.value;
     }
     items.push({
@@ -4437,6 +4440,8 @@ const DUAL_MENU_SELECT_FIRST: ReadonlySet<string> = new Set([
  */
 const MENU_OPENERS: ReadonlySet<string> = new Set([
   'phone-menu',
+  // 🔑 #1621 ── 左の列の帯に入りきらない操作の一覧(「⋯」)
+  'open-bar-more',
   'open-repeat-menu',
   // 🔑 #918 段②a ── 前に打った SQL の一覧(指で触る端末の唯一の入口)
   'sql-history-menu',
@@ -14797,6 +14802,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 身元は**押したボタン自身**から読む ── メニューの器は root の直下に出るので、
    *   `closest` では札まで辿れない(`context-menu.ts` の戒め)。
    */
+  /**
+   * 🔴 **帯に入りきらず畳んだ操作を、名前つきで出す**(#1621。「⋯」)。
+   * 🔑 長押しのメニューと**同じ口・同じ項目の組み方**(`barTileMenuItems`)── 畳んだ物だけを渡す。
+   * ⚠ 畳んだ物は DOM に残っている(見た目だけ隠す)ので、項目の字・図案・受け手の属性は
+   *   そのまま読める。
+   */
+  'open-bar-more': (_dispatcher, target, _services, root) => {
+    const bar = target.closest('[data-pkc-region]');
+    if (bar === null) return;
+    const items = barTileMenuItems(bar, `button[${OVERFLOW_ATTR}]`);
+    if (items.length === 0) return;
+    const r = target.getBoundingClientRect();
+    openContextMenu(root, { x: r.left, y: r.bottom }, items, target);
+  },
   'open-repeat-menu': (_dispatcher, target, _services, root) => {
     const lid = target.getAttribute('data-pkc-entry') ?? '';
     const raw = target.getAttribute('data-pkc-task-line');

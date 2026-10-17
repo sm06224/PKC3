@@ -208,6 +208,7 @@ import {
   isUnknownOpError,
   resolveContainerCompat,
 } from '@adapter/platform/storage/resolve-container-compat';
+import { fitSidebarBars } from '@adapter/ui/render/bar-overflow';
 import { buildShell, paintAlarmBar, paintMissedLine, paintCaptureBar, paintTimerBar, showRootText } from '@adapter/ui/render/shell';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { installPhoneBack } from '@adapter/ui/actions/phone-back';
@@ -6227,6 +6228,8 @@ function bootstrap(): void {
       });
       // boot 完了の正本契約(P3-8): smoke / probe は DOM 属性で待つ。
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
+      // 🔴 左の列の帯を、印を立てる前に同期で 1 段へ収める(#1621)
+      fitSidebarBars(root);
       root.setAttribute('data-pkc-boot', 'ready');
       preboot?.booted(); // 以後は勝手に読み直さない(下書きを巻き込まない)
       // 🔴 数字の整形の初回の読み込み(11〜13ms)を、最初の操作の最中ではなく手が空いた時へ(#878)

@@ -220,7 +220,12 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
   const m = await page.evaluate(() => {
     const btn = document.querySelector('[data-pkc-region="sidebar"] [data-pkc-view="settings"]');
     const r = btn?.getBoundingClientRect();
-    const tiles = [...document.querySelectorAll('[data-pkc-region="collection-bar"] button')];
+    // ⚠ 「⋯」(畳んだ物の出口。#1621)はタイルではない ── 広い幅では出ない(幅 0)
+    const tiles = [
+      ...document.querySelectorAll(
+        '[data-pkc-region="collection-bar"] button:not([data-pkc-field="bar-more"])',
+      ),
+    ];
     const others = tiles.map((b) => Math.round(b.getBoundingClientRect().height));
     const widths = tiles.map((b) => Math.round(b.getBoundingClientRect().width));
     // 🔴 #1054 段②-2(F9)── 7 個が「詰め込まれて」同じ行に収まっているか
@@ -274,25 +279,35 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
   for (const width of [1180, 1100, 1000, 900]) {
     await page.setViewportSize({ width, height: 800 });
     const rects = await page.evaluate(() =>
-      [...document.querySelectorAll('[data-pkc-region="collection-bar"] button')].map((b) => {
+      // ⚠ 「⋯」(畳んだ物の出口。#1621)はタイルではない
+      [
+        ...document.querySelectorAll(
+          '[data-pkc-region="collection-bar"] button:not([data-pkc-field="bar-more"])',
+        ),
+      ].map((b) => {
         const r = b.getBoundingClientRect();
-        return { top: Math.round(r.top), w: Math.round(r.width) };
+        return { top: Math.round(r.top), w: Math.round(r.width), folded: b.hasAttribute('data-pkc-overflow') };
       }),
     );
-    const tops = rects.map((r) => r.top);
-    expect(tops, `${width}px: 前提が崩れている(7 個そろっていない)`).toHaveLength(7);
+    expect(rects, `${width}px: 前提が崩れている(7 個そろっていない)`).toHaveLength(7);
+    /**
+     * 🔴 **#1621 で「塊ごと次の行へ」から「入りきらない分は畳む」へ変わった**。
+     *   見えているタイルは**全部同じ段**(1 個だけずれない)で、残りは畳んだ印を持つ
+     *   (消えていない)。⚠ 畳んだ物は幅 0 なので、見えている物だけで段を見る。
+     */
+    const shown = rects.filter((r) => !r.folded);
+    expect(
+      rects.filter((r) => r.folded).length + shown.length,
+      `${width}px: 畳んだ物でも見えている物でもないタイルがある: ${JSON.stringify(rects)}`,
+    ).toBe(7);
     // ⚠ 空振り防止 ── 列が畳まれて全部 0 だと「同じ段」が必ず成り立つ
     expect(
-      rects.every((r) => r.w > 0),
+      shown.length > 0 && shown.every((r) => r.w > 0),
       `${width}px: 前提が崩れている(見えていないタイルがある): ${JSON.stringify(rects)}`,
     ).toBe(true);
     expect(
-      new Set(tops.slice(0, 3)).size,
-      `${width}px: 取り込む / バックアップ / 操作を探す が段をまたいでいる: ${JSON.stringify(tops)}`,
-    ).toBe(1);
-    expect(
-      new Set(tops.slice(3)).size,
-      `${width}px: 集計 / システム / フラグ / ヘルプ が段をまたいでいる: ${JSON.stringify(tops)}`,
+      new Set(shown.map((r) => r.top)).size,
+      `${width}px: 見えているタイルが段をまたいでいる: ${JSON.stringify(rects)}`,
     ).toBe(1);
   }
 });
@@ -373,6 +388,8 @@ const SETTINGS_CHOICE_ROW_FIELDS = [
  */
 test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出さない', async ({ page }) => {
   const seen: { w: number; n: number }[] = [];
+  const foldSeen: { w: number; folded: number }[] = [];
+  let moreOpened = false;
   for (const w of TAB_SWEEP) {
     await page.setViewportSize({ width: w, height: 800 });
     await gotoApp(page);
@@ -388,10 +405,24 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
        *   代わりに**タイル自身が、その帯の外へ出ていないか**を見る。
        */
       const tiles: { where: string; action: string; overflow: number }[] = [];
+      let folded = 0;
+      let foldedTiles = 0;
       for (const btn of side.querySelectorAll('button')) {
+        // 🔴 帯に入りきらず「⋯」の下へ畳んだ物(#1621)は、測らないが**在る**と数える
+        if (btn.hasAttribute('data-pkc-overflow') && !btn.hasAttribute('data-pkc-bar-tile')) {
+          folded++;
+          continue;
+        }
+        // ⚠ 「⋯」自身は名前つきの物に数えない(畳んだ数だけ現れ、幅で数が変わるため)
+        if (btn.getAttribute('data-pkc-field') === 'bar-more') continue;
         // ⚠ 畳まれている物は測らない(器が 0 なので必ず「はみ出し」に見える)
         const box = btn.getBoundingClientRect();
-        if (box.width === 0 || box.height === 0) continue;
+        if (box.width === 0 || box.height === 0) {
+          // 🔴 「⋯」の下へ畳んだタイル(#1621)は、測らないが**在る**と数える
+          if (btn.hasAttribute('data-pkc-overflow') && btn.hasAttribute('data-pkc-bar-tile'))
+            foldedTiles++;
+          continue;
+        }
         if (btn.hasAttribute('data-pkc-bar-tile')) {
           const bar = btn.closest('[data-pkc-region]');
           const barBox = bar?.getBoundingClientRect() ?? null;
@@ -424,12 +455,12 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
           clip: btn.scrollWidth - btn.clientWidth,
         });
       }
-      return { named, tiles };
+      return { named, tiles, folded, foldedTiles };
     });
 
     // ⚠ 空振り防止 ── ボタンを 1 つも拾えていないのに「はみ出し 0」を作らない
     expect(
-      m.named.length,
+      m.named.length + m.folded,
       `w=${w}: 左の列で名前つきのボタンを 1 つも拾えていない`,
     ).toBeGreaterThanOrEqual(8);
     for (const b of m.named) {
@@ -443,7 +474,7 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
       ).toBeLessThanOrEqual(0);
     }
     // ⚠ 空振り防止 ── タイルを 1 つも拾えていないのに「はみ出し 0」を作らない
-    expect(m.tiles.length, `w=${w}: 均一タイルを 1 つも拾えていない`).toBeGreaterThanOrEqual(10);
+    expect(m.tiles.length + m.foldedTiles, `w=${w}: 均一タイルを 1 つも拾えていない`).toBeGreaterThanOrEqual(10);
     for (const t of m.tiles) {
       expect(
         t.overflow,
@@ -471,6 +502,63 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
       expect(rows, `w=${w}: 「作る」帯が ${rows} 段になっている(2 段までにする)`).toBeLessThanOrEqual(2);
     }
     /**
+     * 🔴 **左の列の 3 本の帯(タブ / 作る / 下)は、どの幅でも 1 段**(#1621。🟣 Gemini 裁定 A)。
+     *
+     * 直す前は 1080px 以下で 3 本がそれぞれ別の割れ方で 2 段になり(800px で 4+2 / 5+2 /
+     * 3+4)、下の段に 1〜2 枚だけ残った。入りきらない物は後ろから「⋯」の下へ畳む。
+     * ⚠ 「1 段」だけだと**全部消して 1 段にする**変更が通るので、①畳んだ物は DOM に残る
+     *   ②「⋯」は畳んだ物が在る間だけ出る ③「⋯」を押すと畳んだ物が名前で出る、を一緒に見る。
+     */
+    const bands = await page.evaluate(() => {
+      const side = document.querySelector('[data-pkc-region="sidebar"]')!;
+      return ['browse-tabs', 'create-bar', 'collection-bar'].map((r) => {
+        const bar = side.querySelector(`[data-pkc-region="${r}"]`)!;
+        const on = (el: Element): boolean => el.getBoundingClientRect().width > 0;
+        const more = bar.querySelector('[data-pkc-field="bar-more"]');
+        const shown = [...bar.querySelectorAll('button')].filter(
+          (b) => on(b) && b.getAttribute('data-pkc-field') !== 'bar-more',
+        );
+        const moreShown = more !== null && on(more);
+        return {
+          r,
+          rows: new Set(
+            [...shown, ...(moreShown ? [more!] : [])].map((b) => Math.round(b.getBoundingClientRect().top)),
+          ).size,
+          shown: shown.length,
+          folded: bar.querySelectorAll('button[data-pkc-overflow]').length,
+          moreShown,
+        };
+      });
+    });
+    for (const b of bands) {
+      expect(b.shown, `w=${w}: [${b.r}] 見えているボタンが 0 個`).toBeGreaterThan(0);
+      expect(b.rows, `w=${w}: [${b.r}] が ${b.rows} 段になっている(1 段に収める)`).toBe(1);
+      expect(
+        b.moreShown,
+        `w=${w}: [${b.r}] 畳んだ物が ${b.folded} 個なのに「⋯」が ${b.moreShown ? '在る' : '無い'}`,
+      ).toBe(b.folded > 0);
+    }
+    const foldedAny = bands.find((b) => b.folded > 0);
+    foldSeen.push({ w, folded: bands.reduce((n, b) => n + b.folded, 0) });
+    if (foldedAny !== undefined && !moreOpened) {
+      moreOpened = true;
+      await clickReal(
+        page,
+        `[data-pkc-region="${foldedAny.r}"] [data-pkc-field="bar-more"]`,
+      );
+      const listed = await page.evaluate(
+        () =>
+          [...document.querySelectorAll('[data-pkc-region="context-menu"] button')].filter(
+            (b) => (b.textContent ?? '').trim() !== '',
+          ).length,
+      );
+      expect(listed, `w=${w}: 「⋯」の下に畳んだ ${foldedAny.folded} 個が名前つきで出ない`).toBe(
+        foldedAny.folded,
+      );
+      await page.keyboard.press('Escape');
+      await expect(page.locator('[data-pkc-region="context-menu"]')).toHaveCount(0);
+    }
+    /**
      * 🔴 **設定のボタンの列は、どの幅でも 1 行のまま**(#1038 段J-2、着地前レビュー
      * ── 実測(`TAB_SWEEP` 全幅 + スマホ幅 360/390px)して行が 2 行以上に折れた
      * 項目はプルダウンへ戻した。ここは残った 7 項目が**その後も折れないまま**
@@ -480,7 +568,20 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
      *   既読が残るので再度出ない。
      */
     if (w === TAB_SWEEP[0]) await dismissAnnounce(page);
-    await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+    // 🔴 狭い幅では「システム」が「⋯」の下へ畳まれる(#1621)── その道で開く(畳んだ物が押せることの確認も兼ねる)
+    const settingsFolded = await page
+      .locator('[data-pkc-region="sidebar"] [data-pkc-action="set-view"][data-pkc-view="settings"]')
+      .first()
+      .evaluate((el) => el.hasAttribute('data-pkc-overflow'));
+    if (settingsFolded) {
+      await clickReal(page, '[data-pkc-region="collection-bar"] [data-pkc-field="bar-more"]');
+      await clickReal(
+        page,
+        '[data-pkc-region="context-menu"] [data-pkc-action="set-view"][data-pkc-view="settings"]',
+      );
+    } else {
+      await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+    }
     const rowWrap = await page.evaluate((fields: readonly string[]) => {
       const out: Record<string, number> = {};
       for (const f of fields) {
@@ -502,10 +603,20 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
     // ⚠ 戻す口は押さない ── 次の幅の頭で `gotoApp` が読み直すので不要
     //   (押すと幅によって帯の畳み方が変わり、`clickReal` の reachability が
     //   狭い幅で崩れることがある)
-    seen.push({ w, n: m.named.length });
+    seen.push({ w, n: m.named.length + m.folded });
   }
-  // ⚠ どの幅でも同じ数を見ていること(幅で数が変わるなら、どこかが畳まれている)
+  // ⚠ どの幅でも同じ数を見ていること(畳んだ物も数える ── 消えていないこと。#1621)
   expect(new Set(seen.map((s) => s.n)).size, `幅で拾えた数が違う: ${JSON.stringify(seen)}`).toBe(1);
+  // 🔴 空振り防止 ── 掃いた幅が「畳んだ姿」と「全部見える姿」の両方をまたいでいること
+  expect(
+    foldSeen.some((f) => f.folded > 0),
+    `畳んだ幅を 1 つも見ていない: ${JSON.stringify(foldSeen)}`,
+  ).toBe(true);
+  expect(
+    foldSeen.some((f) => f.folded === 0),
+    `全部見える幅を 1 つも見ていない: ${JSON.stringify(foldSeen)}`,
+  ).toBe(true);
+  expect(moreOpened, '「⋯」を 1 度も押していない').toBe(true);
 });
 
 /** 🔑 1 段に要る幅(実測 209px)に **21px 以上の余り**が出る画面の幅。 */
@@ -531,7 +642,7 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
  * 🔑 だからこの検査は**段数と一緒に「7 個が在ること」を見る** ──
  *   段数だけ見ると、**消して 2 段にする**変更が緑で通る。
  */
-test('🔴 まとめ操作の帯は 2 段に収まり、ボタンは 1 つも消えていない (#475)', async ({
+test('🔴 まとめ操作の帯は 1 段に収まり、ボタンは 1 つも消えていない (#475 / #1621)', async ({
   page,
 }) => {
   /** 帯に在るはずの 7 つ。⚠ **等値で pin する** ── 「7 個ある」だけだと、
@@ -544,11 +655,16 @@ test('🔴 まとめ操作の帯は 2 段に収まり、ボタンは 1 つも消
     const m = await page.evaluate(() => {
       const bar = document.querySelector('[data-pkc-region="collection-bar"]');
       if (!bar) return null;
+      // 🔴 「⋯」の下へ畳んだ物(#1621)も**在る**と数える(消えていない)。見える物だけで段を数える
+      const all = [...bar.querySelectorAll('button')].filter(
+        (b) => b.getAttribute('data-pkc-field') !== 'bar-more' &&
+          (b.getBoundingClientRect().width > 0 || b.hasAttribute('data-pkc-overflow')),
+      );
       const btns = [...bar.querySelectorAll('button')].filter(
         (b) => b.getBoundingClientRect().width > 0,
       );
       return {
-        labels: btns.map((b) => (b.textContent ?? '').trim()),
+        labels: all.map((b) => (b.textContent ?? '').trim()),
         rows: new Set(btns.map((b) => Math.round(b.getBoundingClientRect().top))).size,
         barH: Math.round(bar.getBoundingClientRect().height),
         listH: Math.round(
@@ -565,11 +681,11 @@ test('🔴 まとめ操作の帯は 2 段に収まり、ボタンは 1 つも消
       `w=${w}: まとめ操作のボタンが変わっている(消した / 足した)`,
     ).toEqual(WANT);
 
-    // 🔴 2 段まで(3 段だと帯が 81px を取り、一覧がそのぶん縮む)
+    // 🔴 1 段(#1621 で 2 段までから締めた。3 段だと帯が 81px を取り、一覧がそのぶん縮む)
     expect(
       m!.rows,
       `w=${w}: まとめ操作の帯が ${m!.rows} 段ある(帯 ${m!.barH}px / 一覧 ${m!.listH}px)`,
-    ).toBeLessThanOrEqual(2);
+    ).toBe(1);
     seen.push({ w, rows: m!.rows });
   }
   // ⚠ 空振り防止 ── 幅を 1 つも回していない形で「全部 2 段以下」と言わない
@@ -625,19 +741,21 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
           // ⚠ **左右の大きいほう** ── 語は中央寄せなので両側へ出る
           outside: Math.round(Math.max(lab.right - box.right, box.left - lab.left)),
           top: Math.round(box.top),
+          // 🔴 「⋯」の下へ畳んだ(#1621)。畳んだ物は箱が無いので段・はみ出しの数に入れない
+          folded: b.hasAttribute('data-pkc-overflow'),
         };
       });
       return {
         tabs,
         hostW: host.clientWidth,
         scrollW: host.scrollWidth,
-        // 段数 = 上端の種類の数(折り返すと増える)
-        rows: new Set(tabs.map((t) => t.top)).size,
+        // 段数 = 上端の種類の数(折り返すと増える)。畳んだ物は数えない
+        rows: new Set(tabs.filter((t) => !t.folded).map((t) => t.top)).size,
       };
     });
 
-    // ① 全部在る(畳んでいない ── user 指示「畳まない」)
-    expect(m.tabs.length, `w=${w}: タブが減っている(畳んだ形に戻っている)`).toBe(
+    // ① 全部在る(DOM から消していない。細い幅で入りきらない分は「⋯」の下へ畳む ── #1621 裁定 A)
+    expect(m.tabs.length, `w=${w}: タブが減っている(消えている)`).toBe(
       BROWSE_TABS.length,
     );
     expect(
@@ -656,23 +774,30 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
     // ③ 列から横へ溢れていない(溢れると端のタブが見えない)
     expect(m.scrollW, `w=${w}: タブが列から溢れている(${m.scrollW} / 列 ${m.hostW})`).toBeLessThanOrEqual(m.hostW + 1);
 
-    // ④ 🔴 **段を増やして解決しない** ── 折り返しは最後の手段であって、
-    //    段が増えるのは user の「画面が混み合っている」と正面から逆である。
-    //    ⚠ 直す前は 900px 以下で **3 段**だった(`flex: 1 1 45%` が 2 枚ずつを強制)
-    expect(m.rows, `w=${w}: タブが ${m.rows} 段になっている(2 段までにする)`).toBeLessThanOrEqual(2);
+    // ④ 🔴 **どの幅でも 1 段**(#1621 で「2 段まで」から締めた)。細い幅では折り返さず、
+    //    入りきらない分を後ろから「⋯」の下へ畳む(いま開いているタブは畳まない)。
+    //    ⚠ 直す前は 1080px 以下で 2 段に割れ、下の段の 1〜2 枚だけ横いっぱいに伸びていた
+    expect(m.rows, `w=${w}: タブが ${m.rows} 段になっている(1 段にする)`).toBe(1);
     if (w >= TAB_ONE_ROW_FROM) {
-      // ⚠ ここが落ちたら、**図案を戻したか、タブを 1 枚足した**かである
-      //    ── どちらも「1 段に要る 209px」を超えさせる
-      expect(m.rows, `w=${w}: 広い画面なのにタブが ${m.rows} 段ある`).toBe(1);
+      // ⚠ ここが落ちたら、**図案を戻したか、タブを 1 枚足した**かである ── 広い画面では畳まない
+      expect(
+        m.tabs.filter((t) => t.folded).length,
+        `w=${w}: 広い画面なのにタブが畳まれている`,
+      ).toBe(0);
     }
 
-    seen.push({ w, rows: m.rows, worst: Math.max(...m.tabs.map((t) => t.outside)) });
+    seen.push({
+      w,
+      rows: m.tabs.filter((t) => t.folded).length > 0 ? 2 : 1,
+      worst: Math.max(...m.tabs.map((t) => t.outside)),
+    });
   }
 
   // ⑤ 🔴 **空振り防止 ── これが旧稿に無かったもの。**
   //    掃いた範囲が「1 段の姿」と「折り返した姿」の**両方**をまたいでいること。
   //    ⚠ またいでいなければ、幅を並べても**同じ 1 つの姿**を何度も見ているだけで、
   //      旧稿(900px 1 点)と強さが変わらない。
+  // ⚠ ここでの `rows` は「畳んだか」(1 = 全部見える / 2 = 畳んだ)── 段は上の④で全幅 1 に固定した
   const oneRow = seen.filter((s) => s.rows === 1);
   const wrapped = seen.filter((s) => s.rows > 1);
   expect(
@@ -902,7 +1027,11 @@ test('🔴 図案つきボタンの高さが揃っている', async ({ page }) =
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
   const sizes = await page.evaluate(() =>
-    [...document.querySelectorAll('[data-pkc-region="collection-bar"] button')].map((b) => ({
+    [
+      ...document.querySelectorAll(
+        '[data-pkc-region="collection-bar"] button:not([data-pkc-field="bar-more"])',
+      ),
+    ].map((b) => ({
       h: Math.round(b.getBoundingClientRect().height),
       /**
        * ⚠ 図案は **書体の 1 文字**になった(#770 段①)── 器の `textContent` は**空**で、

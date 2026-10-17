@@ -124,7 +124,10 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
         const q = b.getBoundingClientRect();
         return q.width > 0 && q.height > 0 && q.bottom <= innerHeight && q.right <= g.left + 0.5;
       }).length,
-      want: document.querySelectorAll('[data-pkc-region="collection-bar"] button').length,
+      // ⚠ 「⋯」(畳んだ物の出口。#1621)は帯の操作ではない
+      want: document.querySelectorAll(
+        '[data-pkc-region="collection-bar"] button:not([data-pkc-field="bar-more"])',
+      ).length,
       named: btns.filter((b) => (b.getAttribute('aria-label') ?? '') !== '' && b.title !== '').length,
       grey: bg !== null && bg[1] === bg[2] && bg[2] === bg[3],
     };

@@ -12,6 +12,7 @@
 import { SEALED_ARCHETYPES } from '@features/sealed';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { collectionBarButton, collectionBarItems } from './collection-bar';
+import { installSidebarBarOverflow } from './bar-overflow';
 // 🔴 前回選んだ「作る種類」を覚える(#1045)
 import { appCreateKind } from './create-kind';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
@@ -853,6 +854,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
     commandList,
     collectionBar,
   );
+  // 🔴 3 本の帯は、左の列が細いときも 1 段に収める(#1621)。入りきらない物は「⋯」の下へ
+  installSidebarBarOverflow(sidebar);
 
   // ── 中央(いま開いているもの)────────────────────────
   // 🔑 本文と**追記欄は別の器**にする(P8 段⑧)。本文は書き換わるたびに作り直すので、

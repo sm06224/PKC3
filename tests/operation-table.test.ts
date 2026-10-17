@@ -265,6 +265,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'hide-revision-preview', 'image-align', 'image-width', 'insert-attachment', 'install-office-pack',
   'launch-asset', 'launch-asset-extension', 'launch-asset-raw', 'move-order-down',
   'move-order-up', 'mute-announce', 'next-announce',
+  // ⚠ 2026-10-17(#1621): 左のペインの「⋯」。入りきらないボタンを出すだけで、押した所から何も要らない
+  'open-bar-more',
   // ⚠ 2026-10-08(#1452 案 1): `open-manual-window` は登記簿に載った(名前で呼べる)のでここから外れた
   /**
    * ⚠ **2026-09-21(#1017 段③-2)で 1 件増やした** ── ヘルプの「お知らせを開く」。
@@ -861,14 +863,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `open-today` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1662 2): 右クリックの「ノートを置く…」(`add-place-note`)で受け手 +1 ── 登記は増えない
       //   (押し口は本文の右クリックにしか無く、座標はメニューが運ぶ。`add-place` / `add-place-template` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 444,
-      receivers: 375,
+      // ⚠ 2026-10-17(#1621): 左のペインの「⋯」(`open-bar-more`)で受け手 +1 ── 登記は増えない(鍵を持たない画面のボタン)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 445,
+      receivers: 376,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       registered: 172,
       both: 103,
       outsideActionsTable: 69,
-      unregistered: 272,
+      unregistered: 273,
     });
   });
 
