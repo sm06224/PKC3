@@ -329,6 +329,9 @@ describe('🔴 押せない理由の文(#1087 の見直し 2026-10-14)', () => {
         'export-note-markdown',
         'export-note-pdf',
         'export-transcript-srt',
+        // #1640 ②: 日付のノートを開いていて、その向きに日付のノートがあるときだけ効く
+        'open-next-day-note',
+        'open-prev-day-note',
         'nav-back',
         'nav-forward',
         'open-note-window',

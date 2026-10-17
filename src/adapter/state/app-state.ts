@@ -3017,6 +3017,19 @@ export type UserAction =
    */
   | { type: 'SET_TABLE_FORMAT'; lid: string; line: number; openLine: string; to: TableFormat; header?: boolean }
   /**
+   * 🔴 **本文の画像の大きさ・寄せを書く**(#1640 ③)。`SET_TABLE_FORMAT` と同じ形 ── 書換は 1 本
+   * (`REQUEST_BODY_REWRITE`)を通る。渡さなかった札は保つ、`null` は外す。
+   */
+  | {
+      type: 'SET_IMAGE_ATTRS';
+      lid: string;
+      line: number;
+      openLine: string;
+      key: string;
+      w?: number | null;
+      align?: 'left' | 'center' | 'right' | null;
+    }
+  /**
    * 🔴 **繰り返しの「その回」を済ませる**(#344 段②)。
    * ⚠ `TOGGLE_TASK` と**単位が違う** ── 規則の行の印は動かさず、
    *   **その日ぶんの行を 1 本増やす**(理由は `body-rewrite.ts` の `repeat-done`)。
@@ -8161,6 +8174,35 @@ function reduceCore(
               openLine: action.openLine,
               to: action.to,
               ...(action.header === undefined ? {} : { header: action.header }),
+            },
+          },
+        ],
+      };
+    }
+    /** 🔴 **画像の大きさ・寄せ**(#1640 ③)。⚠ `SET_TABLE_FORMAT` と同じ形 ── 書換は 1 本を通る。 */
+    case 'SET_IMAGE_ATTRS': {
+      // ⚠ 断りは lid で判定する(C6 / #1043)
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null)
+        return { state: { ...state, error: blockedWithSuffix(blocked, `画像の大きさを変えてください`) }, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: {
+              kind: 'image-attrs',
+              line: action.line,
+              openLine: action.openLine,
+              key: action.key,
+              ...(action.w !== undefined ? { w: action.w } : {}),
+              ...(action.align !== undefined ? { align: action.align } : {}),
             },
           },
         ],

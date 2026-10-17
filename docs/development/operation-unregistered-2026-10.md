@@ -241,6 +241,9 @@
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
 | `format-text` | 低 | (整形バーの書式ボタン) | `src/adapter/ui/render/format-bar.ts:40` | 書式の種類を押したボタンから読む。書式ごとの命令が既に別に在る |
+| `insert-attachment` | 高 | 添付を入れる | `src/adapter/ui/render/format-bar.ts:145` | 書式の帯の「添付を入れる」(#1640 ④)。挿す先は打っている欄。登記は別の段で(`insert-entry-link` と同じ仕分け) |
+| `image-width` | 低 | 画像の大きさ | `src/features/entry-actions.ts:1232` | 本文の画像の右クリックの項目(押した画像の行と値は項目が運ぶ)。#1640 ③ |
+| `image-align` | 低 | 画像の寄せ | `src/features/entry-actions.ts:1235` | 同上 |
 
 ## SQL
 

@@ -234,12 +234,15 @@ import {
 } from '@features/schedule/date-shortcuts';
 import { isRealCalendarDate } from '@features/schedule/schedule-date';
 import {
+  adjacentDateNote,
   dateNoteMissingNotice,
   findTodayNote,
+  isDateTitle,
   todayNoteTitle,
 } from '@features/schedule/today-note';
 import { formatLineDate, readLineDate } from '@features/schedule/line-date';
-import { isImageAssetMime } from '@features/asset/asset-ref-format';
+import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
+import { findImageRef, type ImageAlign, type ImageAttrs } from '@features/markdown/image-attrs';
 import {
   adoptableUrls,
   externalImageUrls,
@@ -363,6 +366,9 @@ import {
   NOTE_TOOL_ACTIONS,
   noteToolActions,
   tableMenuActions,
+  imageMenuActions,
+  IMAGE_ALIGN_ATTR,
+  IMAGE_WIDTH_ATTR,
   taskRunMenuActions,
   tableConvertPickLabel,
   tableHeaderPickLabel,
@@ -2912,6 +2918,12 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'task-run-open',
   'task-run-done',
   /**
+   * 🔴 **画像の大きさ・寄せも本文を書く**(#1640 ③)── 画像の直後の `{w=50% align=center}` を書き換える
+   *   (`SET_IMAGE_ATTRS` → `REQUEST_BODY_REWRITE`)。`toggle-task` と同じ門をくぐらせる。
+   */
+  'image-width',
+  'image-align',
+  /**
    * 🔴 **表のセルを打つのも本文を書く**(#418 段①)── `toggle-task` と同じ
    *   `REQUEST_BODY_REWRITE` を撃つので、同じ門をくぐらせる。
    * ⚠ 押した時点では欄を開くだけだが、**確定で書く** ── 門は入口に置く。
@@ -4216,6 +4228,96 @@ const MENU_Y_ATTR = 'data-pkc-menu-y';
  * ⚠ 座標系は**生の body**(frontmatter 込み)── `csv-cell` / `task` と同じ。
  */
 const MENU_TABLE_ATTR = 'data-pkc-menu-table';
+
+/**
+ * 🔴 **右クリックした画像の行と鍵**(#1640 ③)── メニューが運ぶ。行は生の body の行番号(frontmatter を足した座標)。
+ * ⚠ 押した瞬間にしか読めない(メニューの器は root の直下で、画像の中に居ない ── `context-menu.ts` の戒め)。
+ */
+const MENU_IMAGE_LINE_ATTR = 'data-pkc-menu-image-line';
+const MENU_IMAGE_KEY_ATTR = 'data-pkc-menu-image-key';
+
+/**
+ * 🔴 **右クリックした本文の画像を、原文の行と突き合わせる**(#1640 ③)。
+ *
+ * 🔑 画像は段落の中に居るので、行は**囲む塊の範囲**(`data-pkc-source-line` 〜 `-end`)の中から、
+ *   鍵が合う画像を持つ**最初の行**を探す(一致する書き方の判定は `findImageRef` 1 本 ── 書く側と共用)。
+ * ⚠ 見つからなければ `null` = メニューを奪わない(ブラウザ既定の「画像を保存」を残す)。
+ */
+function imageAt(
+  img: Element,
+  body: string | null,
+): { key: string; line: number; attrs: ImageAttrs } | null {
+  if (body === null) return null;
+  const key = img.getAttribute('data-pkc-asset-key');
+  if (key === null || key === '') return null;
+  // ⚠ 段落・箇条書きの項目は `.pkc-md-block` ではない ── 刻印(`data-pkc-source-line`)を持ついちばん近い祖先を取る
+  const block = img.closest<HTMLElement>('[data-pkc-source-line]');
+  if (block === null) return null;
+  const start = Number(block.getAttribute('data-pkc-source-line'));
+  if (!Number.isInteger(start) || start < 0) return null;
+  const endRaw = Number(block.getAttribute('data-pkc-source-end'));
+  const end = Number.isInteger(endRaw) && endRaw > start ? endRaw : start + 1;
+  const offset = frontmatterLineCount(body);
+  const lines = body.split(/\r?\n/);
+  for (let n = start + offset; n < Math.min(end + offset, lines.length); n++) {
+    const hit = findImageRef(lines[n] ?? '', key);
+    if (hit !== null) return { key, line: n, attrs: hit.attrs };
+  }
+  return null;
+}
+
+/**
+ * 🔴 **画像の大きさ・寄せを書く受け手の実体**(#1640 ③)── 向きだけが違う 2 つを 1 本にする。
+ * ⚠ 何を書くかの判断は `body-rewrite.ts`(`image-attrs`)── ここは**運ばれた行・鍵・値を渡し、断る理由を画面に出す**だけ。
+ * 🔴 断りは黙らない:①メニューを出した後にノートが替わった ②忙しい(取り込み・書き出し) ③押した行が変わった。
+ */
+function setImageAttr(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  services: BinderServices,
+  which: 'w' | 'align',
+): void {
+  const line = menuCarriedAt(target, MENU_IMAGE_LINE_ATTR);
+  const key = target.getAttribute(MENU_IMAGE_KEY_ATTR);
+  const raw = target.getAttribute(which === 'w' ? IMAGE_WIDTH_ATTR : IMAGE_ALIGN_ATTR);
+  if (line === null || key === null || key === '' || raw === null || refuseStaleMenu(dispatcher, target)) return;
+  // ⚠ 読めない値は書かない(属性を書き換えられた形)。空は「もとに戻す」
+  let patch: { w: number | null } | { align: ImageAlign | null };
+  if (which === 'w') {
+    const n = raw === '' ? null : Number(raw);
+    if (n !== null && (!Number.isInteger(n) || n < 1 || n > 100)) return;
+    patch = { w: n };
+  } else {
+    if (raw !== '' && raw !== 'left' && raw !== 'center' && raw !== 'right') return;
+    patch = { align: raw === '' ? null : raw };
+  }
+  const st = dispatcher.getState();
+  const ob = st.openBody;
+  if (ob === null) return;
+  const lid = ob.lid;
+  const blocked = bodyWriteBlockReason(st, lid);
+  if (blocked !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, '画像の大きさを変えてください') });
+    return;
+  }
+  if (services.busy?.() === true) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: '取り込みが終わってから、画像の大きさを変えてください' });
+    return;
+  }
+  // 🔴 押した時点のその行の中身(#1087)── 別の窓が上へ行を足しても、別の画像を変えない
+  const openLine = shownBodyLine(st, lid, line);
+  if (openLine === null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+    return;
+  }
+  actUnlessEditedElsewhere(
+    dispatcher,
+    services,
+    [lid],
+    '画像の大きさを変えられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+    () => dispatcher.dispatch({ type: 'SET_IMAGE_ATTRS', lid, line, openLine, key, ...patch }),
+  );
+}
 /**
  * 🔴 **右クリックしたチェックリストの、項目の行番号**(#1173)。`,` で区切った**原文の行番号**
  * (`data-pkc-task-line` と同じ座標系)。⚠ 押した瞬間の DOM から数える ── メニューの器は
@@ -5863,6 +5965,42 @@ export function runGlobalCommand(
     return true;
   }
   /**
+   * 🔴 **前の日・次の日のノートを開く**(#1640 ②。依頼 58 = C)── 押しボタンを持たないので特例で直に呼ぶ。
+   * 🔑 行き先は `adjacentDateNote`(題名が日付のノートのうち、ノートがある日だけ飛ぶ)。作らない。
+   * ⚠ 断りは `dry` では偽(= 一覧は理由を言って押せるふりをしない):①編集中 / 保護中 ②開いているノートの題名が日付でない
+   *   ③その向きに日付のノートが無い。
+   */
+  if (cmd === 'open-prev-day-note' || cmd === 'open-next-day-note') {
+    const st = dispatcher.getState();
+    const why = blockedActionNote(st.phase);
+    if (why !== null) {
+      if (dry) return false;
+      prevent();
+      notify(`いまは移れません: ${why}`, CAUTION);
+      return true;
+    }
+    const cur = st.selectedLid === null ? undefined : st.entryMetas.get(st.selectedLid);
+    if (cur === undefined || !isDateTitle(cur.title)) {
+      if (dry) return false;
+      prevent();
+      notify('題名が日付(2026-10-15 の形)のノートを開いてから呼んでください', CAUTION);
+      return true;
+    }
+    const dir = cmd === 'open-prev-day-note' ? 'prev' : 'next';
+    const to = adjacentDateNote(st.entryMetas.values(), cur.title, dir);
+    if (to === null) {
+      if (dry) return false;
+      prevent();
+      notify(dir === 'prev' ? 'これより前の日付のノートはありません' : 'これより後の日付のノートはありません', CAUTION);
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    if (st.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: to.lid });
+    return true;
+  }
+  /**
    * 🔴 **このノートを Markdown で書き出す**(#1440)── 押しボタンを持たないので特例で直に呼ぶ。
    * 実体は右クリックの `export-entry-markdown` と同じ `services.exportEntryMarkdown`(`ROOT_SERVICES` から引く)。
    * ⚠ 断りは 3 段で、どれも `dry` では偽(= 一覧は「いまは押せません ── <理由>」で押せるふりをしない):
@@ -6243,7 +6381,7 @@ export function commandRowsFor(
     // ⚠ 「メッセージを開く」は押しボタンを持たない(左の列の同名は別の口)── 理由は
     //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
     //   「字幕ファイル(.srt)で書き出す」(#1447)も同じ(押しボタンを持たない)── 時刻つきの行が無い理由は `note` が言う
-    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown' || id === 'export-note-pdf') return blockedActionNote(dispatcher.getState().phase);
+    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown' || id === 'export-note-pdf' || id === 'open-prev-day-note' || id === 'open-next-day-note') return blockedActionNote(dispatcher.getState().phase);
     // 「選択範囲をコピー」── 控えが無いときの理由(押しボタンを持たない)。左の `>` の一覧では選択が残らないので、呼べる道を言う
     if (id === 'copy-selection-md')
       return inPalette ? SELECTION_FIRST : `${SELECTION_FIRST}(選択してから「操作を探す」を開いてください)`;
@@ -9390,6 +9528,47 @@ const ACTIONS: Record<string, ActionHandler> = {
     });
   },
   /**
+   * 🔴 **添付を本文に入れる**(#1640 ④。依頼 37 = A)。
+   *
+   * 🔑 作りは `insert-entry-link` と同じ(caret を先に控える / 選ぶ間は引き直す / 挿すのは `insertText` で `Ctrl+Z` で戻せる)。
+   *   違いは 2 つ:①候補は**添付のノートだけ** ②挿すのは `[題名](entry:…)` ではなく**添付そのものの 1 行**
+   *   (画像は `![名前](asset:…)`、ほかはリンク。組み立ては「参照をコピー」と同じ `formatAssetRef` 1 本)。
+   * ⚠ 添付の key とファイル名・種類は**本文の frontmatter** にしか無い ── 選んだ後に `readBodies` で読む。
+   *   読めなかった / key が無いときは黙らず理由を出す。
+   */
+  'insert-attachment': (dispatcher, _target, services, root) => {
+    const opened = formatTarget(root);
+    if (opened === null) {
+      sayNoFormatTarget(services);
+      return;
+    }
+    const at = { start: opened.selectionStart, end: opened.selectionEnd };
+    void pickEntryInApp(root, (query) => {
+      const st = dispatcher.getState();
+      const only = new Map([...st.entryMetas].filter(([, m]) => m.archetype === 'attachment'));
+      const items = entryPickRows(only, st.order, query, null);
+      const total = entryPickTotal(only, st.order, query, null);
+      return {
+        items,
+        note: total === 0 ? '該当する添付がありません(題名で探しています)' : entryPickNote(items.length, total),
+      };
+    }).then(async (lid) => {
+      if (lid === null) return;
+      const body = (await services.readBodies?.([lid]))?.get(lid);
+      const meta = body === undefined ? null : readAttachmentMeta(body);
+      if (meta === null || meta.assetKey === null || meta.assetKey === '') {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: '添付を読めませんでした(もう一度お試しください)' });
+        return;
+      }
+      // ⚠ 欄は引き直す(待つ間に面が組み直されると、最初の節点は繋がっていない)
+      const ta = formatTarget(root);
+      if (ta === null) return;
+      ta.focus();
+      ta.setSelectionRange(at.start, at.end);
+      insertText(ta, formatAssetRef(meta.name || '', `asset:${meta.assetKey}`, isImageAssetMime(meta.mime)));
+    });
+  },
+  /**
    * 🔴 **雛形を一覧から入れる**(#196 / B-2 段②-b)。
    *
    * ⚠ 短縮語 + `Tab`(上の `keydown`)は**覚えている人の近道**であって入口ではない。
@@ -11537,6 +11716,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'task-run-open': (dispatcher, target, services) => setTaskRun(dispatcher, target, 'open', services),
   'task-run-done': (dispatcher, target, services) => setTaskRun(dispatcher, target, 'done', services),
+  /**
+   * 🔴 **右クリックした画像の大きさ・寄せを書く**(#1640 ③。依頼 37 = A)。
+   * 🔑 向きだけが違う 2 つを 1 本にする(`task-run-*` と同じ作法 ── §7)。値は押した項目の属性が運ぶ
+   *   (空 = もとに戻す = 札を外す)。
+   */
+  'image-width': (dispatcher, target, services) => setImageAttr(dispatcher, target, services, 'w'),
+  'image-align': (dispatcher, target, services) => setImageAttr(dispatcher, target, services, 'align'),
   /**
    * 🔴 **付箋・線の色を選ぶ**(#530 段④。Gemini 裁定 A)── 右クリックの「塗りの色…」「枠の色…」(線は「色…」)。
    *
@@ -15526,6 +15712,8 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   'format-text',
   'insert-date',
   'insert-entry-link',
+  // ⚠ 2026-10-17(#1640 ④): 添付を入れる ── 同じく編集中の本文へ挿す
+  'insert-attachment',
   'insert-snippet',
   // ⚠ 2026-09-04(#528 案 B): 図の一覧 ── 同じく編集中の本文へ挿す
   'insert-diagram',
@@ -18376,7 +18564,19 @@ export function bindActions(
      *   ⚠ 消すと、段② を書く人が**同じ穴を作り直す**(「コピー」「画像を保存」が
      *   代わりも無いまま消える)。
      */
-    if (target.closest('a[href], img, input, textarea, [contenteditable="true"]') !== null) return;
+    /**
+     * 🔴 **本文の添付の画像だけは、大きさ・寄せのために受ける**(#1640 ③)。
+     * ⚠ リンクの中の画像・原文の行が引けない画像・編集中の欄は今までどおりブラウザ既定のまま(「画像を保存」を奪わない)。
+     */
+    const imageEl = target.closest('img.pkc-asset-ref[data-pkc-asset-key]');
+    const imageOb = dispatcher.getState().openBody;
+    const imageHit =
+      imageEl !== null &&
+      imageEl.closest('a[href]') === null &&
+      imageEl.closest('[data-pkc-field="detail-body"]') !== null
+        ? imageAt(imageEl, imageOb?.body ?? null)
+        : null;
+    if (target.closest('a[href], img, input, textarea, [contenteditable="true"]') !== null && imageHit === null) return;
     const sel = root.ownerDocument.getSelection();
     if (sel !== null && !sel.isCollapsed && sel.rangeCount > 0) {
       // ⚠ **選択範囲の中で押したときだけ**残す(別の場所の選択は関係ない)
@@ -18703,6 +18903,20 @@ export function bindActions(
           : taskRunMenuActions().map((a) => ({
               ...a,
               attrs: { [MENU_TASK_LINES_ATTR]: taskLines.join(',') },
+            }))),
+        /**
+         * 🔴 **画像の上なら、大きさ・寄せを頭に足す**(#1640 ③)。⚠ 行と鍵は**この項目にだけ**載せる
+         *   (`attrs`。表・チェックリストと同じ作法)── 画像と関係の無い項目に持たせると、受け手が取り違える。
+         */
+        ...(imageHit === null
+          ? []
+          : imageMenuActions(imageHit.attrs).map((a) => ({
+              ...a,
+              attrs: {
+                ...(a.attrs ?? {}),
+                [MENU_IMAGE_LINE_ATTR]: String(imageHit.line),
+                [MENU_IMAGE_KEY_ATTR]: imageHit.key,
+              },
             }))),
         /**
          * 🔴 **付箋の上なら「題名を直す」を頭に足す**(#529 W5-b)。⚠ 置いたノートが居る付箋だけ

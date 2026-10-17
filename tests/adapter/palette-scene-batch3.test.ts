@@ -158,7 +158,8 @@ describe('④ 登記:2 件が一覧に居る(押しボタン = 命令 id、鍵�
 
   it('「打っている場所に入れる」5 つは全部 CARET_TOOLS に居て、範囲を戻す門(CARET_INSERT_TOOLS)はその 5 つだけ(全文の道具と登記の無い format-text は入らない)', () => {
     for (const id of ALL5) expect(CARET_TOOLS.has(id), `${id} が CARET_TOOLS に無い`).toBe(true);
-    expect([...CARET_INSERT_TOOLS].sort()).toEqual([...ALL5].sort());
+    // ⚠ 2026-10-17(#1640 ④): 書式の帯の「添付を入れる」(`insert-attachment`)が CARET_TOOLS に居るので +1(「操作を探す」には登記が無い = 範囲を戻す門に入っても呼ばれない)
+    expect([...CARET_INSERT_TOOLS].sort()).toEqual([...ALL5, 'insert-attachment'].sort());
     for (const id of ['renumber-lists', 'sort-tasks', 'format-text']) {
       expect(CARET_TOOLS.has(id), `前提:${id} は CARET_TOOLS に居る`).toBe(true);
       expect(CARET_INSERT_TOOLS.has(id), `${id} が範囲を戻す門に入っている`).toBe(false);

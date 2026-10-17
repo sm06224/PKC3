@@ -150,6 +150,28 @@ function figureOf(el: Element): { kind: string; source: string } | null {
 }
 
 /**
+ * 🔴 **画像の大きさ・寄せ**(#1640 ③)── 描画が出した `data-pkc-img-w` / `data-pkc-img-align` を読む。
+ * ⚠ 書く側の綴りは `features/markdown/image-attrs.ts` 1 本。ここは**読むだけ**で、範囲外の値は無いものとして扱う。
+ */
+export interface ImageLook {
+  /** 本文の幅に対する割合(1〜100)。 */
+  readonly widthPct?: number;
+  readonly align?: 'left' | 'center' | 'right';
+}
+
+function imageLookOf(el: Element): ImageLook | undefined {
+  const w = Number(el.getAttribute('data-pkc-img-w'));
+  const a = el.getAttribute('data-pkc-img-align');
+  const widthPct = Number.isInteger(w) && w >= 1 && w <= 100 ? w : undefined;
+  const align = a === 'left' || a === 'center' || a === 'right' ? a : undefined;
+  if (widthPct === undefined && align === undefined) return undefined;
+  return {
+    ...(widthPct !== undefined ? { widthPct } : {}),
+    ...(align !== undefined ? { align } : {}),
+  };
+}
+
+/**
  * HTML(画面と同じもの)→ 塊の列。
  *
  * @param doc `DOMParser` で読んだ document(呼び側が作る ── ここでは作らない。
@@ -164,7 +186,7 @@ export function htmlToDocxBlocks(doc: Document): {
    * 呼び側が解いて `blocks[at]` を `image` か `skipped` に**差し替える**。
    * ⚠ 差し替えを忘れると `skipped` のまま出る = **黙って落ちない**(安全側)。
    */
-  images: { at: number; assetKey: string; alt: string }[];
+  images: { at: number; assetKey: string; alt: string; look?: ImageLook }[];
   /**
    * 🔴 **図とグラフの預かり**(#187 段②)。⚠ ここでは**焼けない**(mermaid /
    * chart.js は adapter の上位が持つ)ので、**原文と場所**だけ返す。
@@ -182,7 +204,7 @@ export function htmlToDocxBlocks(doc: Document): {
   inlineSkipped: string[];
 } {
   const blocks: DocxBlock[] = [];
-  const images: { at: number; assetKey: string; alt: string }[] = [];
+  const images: { at: number; assetKey: string; alt: string; look?: ImageLook }[] = [];
   const figures: { at: number; kind: string; source: string }[] = [];
   let skipped = 0;
   const inlineSkipped: string[] = [];
@@ -198,7 +220,7 @@ export function htmlToDocxBlocks(doc: Document): {
     node: Node,
     style: RunStyle,
     out: DocxRun[],
-    onImage?: (assetKey: string, alt: string) => void,
+    onImage?: (assetKey: string, alt: string, look?: ImageLook) => void,
   ): void => {
     for (const child of Array.from(node.childNodes)) {
       /**
@@ -272,11 +294,12 @@ export function htmlToDocxBlocks(doc: Document): {
          * (`前 IMG 後` が [画像, 前後] になる)。呼び側が `onImage` を渡したときは、
          * 呼び側が「ここまでの字を塊にして → 画像 → 続き」を組む。
          */
+        const look = imageLookOf(el);
         if (onImage !== undefined) {
-          onImage(assetKey, alt);
+          onImage(assetKey, alt, look);
           continue;
         }
-        reserveImage(assetKey, alt);
+        reserveImage(assetKey, alt, look);
         continue;
       }
       /**
@@ -334,8 +357,8 @@ export function htmlToDocxBlocks(doc: Document): {
   };
 
   /** 添付の画像の場所を予約する(bytes と実寸は呼び側が解いて `blocks[at]` を差し替える)。 */
-  function reserveImage(assetKey: string, alt: string): void {
-    images.push({ at: blocks.length, assetKey, alt });
+  function reserveImage(assetKey: string, alt: string, look?: ImageLook): void {
+    images.push({ at: blocks.length, assetKey, alt, ...(look !== undefined ? { look } : {}) });
     blocks.push({ kind: 'skipped', what: `画像「${alt}」`, why: '取り出せませんでした' });
   }
 
@@ -371,14 +394,14 @@ export function htmlToDocxBlocks(doc: Document): {
         emitted = true;
       }
     };
-    collectRuns(el, {}, out, (assetKey, alt) => {
+    collectRuns(el, {}, out, (assetKey, alt, look) => {
       const hadText = out.length > 0;
       flush();
       if (!hadText && !emitted && opts.bulletFirst === true) {
         blocks.push(make([]));
         emitted = true;
       }
-      reserveImage(assetKey, alt);
+      reserveImage(assetKey, alt, look);
       emitted = true;
       afterImage = true;
     });
@@ -528,19 +551,21 @@ export function htmlToDocxBlocks(doc: Document): {
       if (tag === 'table') {
         const rows: DocxCell[][] = [];
         // 🔴 セルの中の画像は、表の**後ろ**へ出す(表の前へ出ていた。セルに画像は置けない)
-        const cellImages: { assetKey: string; alt: string }[] = [];
+        const cellImages: { assetKey: string; alt: string; look?: ImageLook }[] = [];
         for (const tr of Array.from(el.querySelectorAll('tr'))) {
           const cells: DocxCell[] = [];
           for (const cell of Array.from(tr.children)) {
             const isTh = cell.tagName.toLowerCase() === 'th';
             const cellRuns: DocxRun[] = [];
-            collectRuns(cell, {}, cellRuns, (assetKey, alt) => cellImages.push({ assetKey, alt }));
+            collectRuns(cell, {}, cellRuns, (assetKey, alt, look) =>
+              cellImages.push({ assetKey, alt, ...(look !== undefined ? { look } : {}) }),
+            );
             cells.push({ runs: cellRuns, ...(isTh ? { header: true } : {}) });
           }
           if (cells.length > 0) rows.push(cells);
         }
         if (rows.length > 0) blocks.push({ kind: 'table', rows });
-        for (const im of cellImages) reserveImage(im.assetKey, im.alt);
+        for (const im of cellImages) reserveImage(im.assetKey, im.alt, im.look);
         continue;
       }
       /**
@@ -561,7 +586,8 @@ export function htmlToDocxBlocks(doc: Document): {
       const bkey = tag === 'img' ? el.getAttribute('data-pkc-asset-key') : null;
       if (bkey !== null && bkey !== '') {
         const alt = el.getAttribute('alt') || el.getAttribute('data-pkc-asset-name') || '画像';
-        images.push({ at: blocks.length, assetKey: bkey, alt });
+        const look = imageLookOf(el);
+        images.push({ at: blocks.length, assetKey: bkey, alt, ...(look !== undefined ? { look } : {}) });
         blocks.push({ kind: 'skipped', what: `画像「${alt}」`, why: '取り出せませんでした' });
         continue;
       }

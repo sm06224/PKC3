@@ -523,6 +523,30 @@ describe('画像(#187 段②)', () => {
     expect(Math.abs(wPt / hPt - 2)).toBeLessThan(0.01);
   });
 
+  it('🔴 本文で指した割合と寄せを Word にも書く(#1640 ③)── 本文幅の半分・中央', () => {
+    const res = buildDocx(
+      [{ kind: 'image', media: 'media/image1.png', widthPx: 100, heightPx: 40, alt: 'ず', widthPct: 50, align: 'center' }],
+      't',
+      ISO,
+    );
+    const xml = part(res, 'word/document.xml');
+    const ext = /style="width:([\d.]+)pt;height:([\d.]+)pt"/.exec(xml);
+    expect(ext).not.toBeNull();
+    // 本文幅 481.9pt の 50%。⚠ 小さい画像も画面の `width:50%` と同じく本文幅の半分へ伸ばす。比は保つ(100:40)
+    expect(Number(ext![1])).toBeCloseTo(6_120_130 / 12700 / 2, 1);
+    expect(Number(ext![1]) / Number(ext![2])).toBeCloseTo(2.5, 1);
+    expect(xml).toContain('<w:jc w:val="center"/>');
+  });
+
+  it('割合も寄せも指さない画像には jc を書かない(今までと同じ)', () => {
+    const res = buildDocx(
+      [{ kind: 'image', media: 'media/image1.png', widthPx: 100, heightPx: 40, alt: 'ず' }],
+      't',
+      ISO,
+    );
+    expect(part(res, 'word/document.xml')).not.toContain('<w:jc ');
+  });
+
   it('本文幅に収まる画像はそのままの寸法(勝手に拡大しない)', () => {
     const res = buildDocx(
       [{ kind: 'image', media: 'media/image1.png', widthPx: 100, heightPx: 40, alt: 'ず' }],

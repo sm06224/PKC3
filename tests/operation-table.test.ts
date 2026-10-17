@@ -94,6 +94,9 @@ const UNBRIDGED: readonly string[] = [
   'export-note-markdown',
   // 🔴 #1660: このノートを PDF で書き出す ── 受け手を持たない特例(`runGlobalCommand`)。「操作を探す」から呼ぶ
   'export-note-pdf',
+  // 🔴 #1640 ②: 前の日・次の日のノートを開く ── 受け手を持たない特例(`runGlobalCommand`)。「操作を探す」から呼ぶ
+  'open-prev-day-note',
+  'open-next-day-note',
   'append-send',
   /**
    * 🔴 #1032「ノートを閉じる」── **押し所を作らないのが、この直しの中身**である。
@@ -259,7 +262,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'dual-mknote', 'dual-move', 'dual-preview-toggle', 'dual-rename-begin', 'dual-row',
   'dual-select-all', 'dual-sort', 'dual-tab-close', 'end-tile-reorder', 'enter-folder',
   'force-release', 'format-text', 
-  'hide-revision-preview', 'install-office-pack',
+  'hide-revision-preview', 'image-align', 'image-width', 'insert-attachment', 'install-office-pack',
   'launch-asset', 'launch-asset-extension', 'launch-asset-raw', 'move-order-down',
   'move-order-up', 'mute-announce', 'next-announce',
   // ⚠ 2026-10-08(#1452 案 1): `open-manual-window` は登記簿に載った(名前で呼べる)のでここから外れた
@@ -847,6 +850,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は画面の下の知らせの隣の 1 か所にしか無く、鍵も持たない。`undo-dual-move` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1660 依頼 47-1): 「操作を探す」の `export-note-pdf` で登記 +1 / `outsideActionsTable` +1(受け手を持たない特例 ── `export-note-markdown` と同じ置き場)。
       // ⚠ 2026-10-17(#1659 ③): ノートの小窓の「× 閉じる」(`close-note-window`)で受け手 +1 ── 登記は増えない
+      // ⚠ 2026-10-17(#1640 ②、依頼 58 = C): 「操作を探す」の `open-prev-day-note` / `open-next-day-note` で登記 +2 / `outsideActionsTable` +2(受け手を持たない特例 ── `export-note-pdf` と同じ置き場)。
+      // ⚠ 2026-10-17(#1640 ④、依頼 37): 書式の帯の「添付を入れる」(`insert-attachment`)で受け手 +1 ── 登記は増えない(鍵を持たない画面のボタン)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      // ⚠ 2026-10-17(#1640 ③、依頼 37): 画像の右クリックの `image-width` / `image-align` で受け手 +2 ── 登記は増えない(鍵を持たない画面のボタン)。`receivers` +2 / `total` +2 / `unregistered` +2。
       //   (押し口は小窓の帯の 1 か所にしか無く、鍵は Esc が別に持つ)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1646 の 1): 右の列 / 右クリックの「ゴミ箱を開く」(`open-trash`)1 件を登記 ── 受け手も同時に足したので
       //   `total` +1 / `receivers` +1 / `registered` +1 / `both` +1(`unregistered` は動かない)。
@@ -854,14 +860,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `open-today` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1662 2): 右クリックの「ノートを置く…」(`add-place-note`)で受け手 +1 ── 登記は増えない
       //   (押し口は本文の右クリックにしか無く、座標はメニューが運ぶ。`add-place` / `add-place-template` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 438,
-      receivers: 371,
+      total: 443,
+      receivers: 374,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
-      registered: 170,
+      registered: 172,
       both: 103,
-      outsideActionsTable: 67,
-      unregistered: 268,
+      outsideActionsTable: 69,
+      unregistered: 271,
     });
   });
 
@@ -920,9 +926,10 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-12(#582 段③ 依頼 22 の Q3 = A): 「選択範囲をコピー」を登記で `key` 137 → 138(鍵の既定は持たない)
     // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)を登記で `key` 138 → 139(鍵の既定は持たない)
     // ⚠ 2026-10-17(#1660): 「このノートを PDF で書き出す」(`export-note-pdf`)を登記で `key` 139 → 140(鍵の既定は持たない)
+    // ⚠ 2026-10-17(#1640 ②): 「前の日のノートを開く」「次の日のノートを開く」(`open-prev-day-note` / `open-next-day-note`)を登記で `key` 140 → 142(鍵の既定は持たない)
     expect(s().perBook).toEqual({
       // ⚠ 2026-10-17(#1646 の 1): 行のメニューが 22 → 23(`open-trash`)
-      key: 140,
+      key: 142,
       entry: 23,
       body: 3,
       collection: 2,

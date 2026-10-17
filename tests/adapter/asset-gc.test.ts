@@ -75,7 +75,7 @@ describe('asset GC (P4b)', () => {
       scanReferenced: scan,
     });
     const found = await findOrphanAssets(ports);
-    expect(found).toEqual({ keys: [], strays: [], knownBytes: 0 });
+    expect(found).toEqual({ keys: [], strays: [], knownBytes: 0, details: [] });
     expect(scan).not.toHaveBeenCalled();
   });
 
@@ -164,6 +164,25 @@ describe('runExplicitPurge (P4b)', () => {
     expect(text).toContain('消した添付は元に戻せません');
     // 問いは最後に ── 戻せないと読んでから「よろしいですか」を押せる
     expect(text.indexOf('元に戻せません')).toBeLessThan(text.indexOf('よろしいですか'));
+  });
+
+  it('🔴 確認に、消す添付を種類と大きさで最大 10 件並べ、残りは「ほか N 件」に畳む(#1640 ⑤-B)', async () => {
+    const asked = vi.fn(async (...a: [string]) => a.length < 0);
+    const many = Array.from({ length: 13 }, (_, i) => `k${i}`);
+    const { deps } = flowDeps({ ask: asked });
+    deps.ports.listMetas = async () =>
+      many.map((key, i) => ({ key, size: 1024 * (i + 1), mime: i === 0 ? 'image/png' : null }));
+    deps.ports.listBlobKeys = async () => [];
+    deps.ports.scanReferenced = async () => [];
+    await runExplicitPurge(deps);
+    const text = asked.mock.calls[0]![0];
+    const bullets = text.split('\n').filter((l) => l.startsWith('・'));
+    expect(bullets, '10 件 + ほか').toHaveLength(11);
+    expect(bullets[0]).toContain('image/png');
+    expect(bullets[1], '種類が無いとき').toContain('種類不明');
+    expect(bullets[10]).toBe('・ほか 3 件');
+    // 問いと戻せない旨は、並べた後ろに残る
+    expect(text.indexOf('・ほか')).toBeLessThan(text.indexOf('元に戻せません'));
   });
 
   it('confirm 拒否なら何も消さない(fail closed)', async () => {

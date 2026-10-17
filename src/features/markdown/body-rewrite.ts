@@ -45,6 +45,7 @@ import {
   ungroupPlace,
 } from './place-notation';
 import type { PlaceStyle } from './place-color';
+import { writeImageAttrs, type ImageAlign } from './image-attrs';
 import type { PlaceRectValue } from './place-rect';
 import type { PlaceShape } from './place-shape';
 import type { PlaceTemplateId } from './place-template';
@@ -601,6 +602,24 @@ export type BodyRewrite =
        */
       kind: 'attachment-name';
       typed: string;
+    }
+  | {
+      /**
+       * 🔴 **本文の画像の大きさ・寄せを書く**(#1640 ③。🟣 Gemini 依頼 37 の答え「A」)── 画像の直後の
+       * `{w=50% align=center}` だけを書き換える。画像の右クリックの「大きさ」「寄せ」が撃つ。
+       *
+       * ⚠ `line` は**原文の行番号**(0 始まり)、`openLine` は**押した時点のその行の中身**(`task` と同じ門:
+       *   別の窓が上へ行を足して同じ番号が別の行を指す形で、別の画像を変えない)。
+       * ⚠ `key` は画像の添付の鍵 ── 同じ行に画像が 2 つあっても、押した物だけを書く。
+       * 🔑 渡さなかった札は**いま書かれているものを保つ**、`null` は**外す**(置けるなら外せる)。
+       * ⚠ 綴りの読み書きは `image-attrs.ts` の 1 本 ── 描画(読む側)と共用する。
+       */
+      kind: 'image-attrs';
+      line: number;
+      openLine: string;
+      key: string;
+      w?: number | null;
+      align?: ImageAlign | null;
     };
 
 /**
@@ -1012,6 +1031,22 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'csv-shape') return rewriteCsvShape(body, rewrite);
   if (rewrite.kind === 'table-format') return rewriteTableFormat(body, rewrite);
   if (rewrite.kind === 'attachment-name') return rewriteAttachmentName(body, rewrite.typed);
+  if (rewrite.kind === 'image-attrs') {
+    // 🔑 行ごとの改行コードを保つ(偶数番目が行、奇数番目が改行)
+    const parts = body.split(/(\r\n|\n)/);
+    const line = parts[rewrite.line * 2];
+    if (line === undefined) return null;
+    // 🔴 押した時点の中身と違う行は書かない(`task` と同じ。#1087)
+    if (line !== rewrite.openLine) return null;
+    const patch: { w?: number | null; align?: ImageAlign | null } = {};
+    if (rewrite.w !== undefined) patch.w = rewrite.w;
+    if (rewrite.align !== undefined) patch.align = rewrite.align;
+    const next = writeImageAttrs(line, rewrite.key, patch);
+    // 画像が無い / 変わらないときは書かない(同じ本文を書き直して更新日時だけ動かさない)
+    if (next === null || next === line) return null;
+    parts[rewrite.line * 2] = next;
+    return parts.join('');
+  }
   // 🔑 塊の移動と差し込みは `line-move.ts` の 1 本(#684)── 取りやめは body をそのまま返す
   if (rewrite.kind === 'move-lines') return moveLines(body, rewrite);
   if (rewrite.kind === 'insert-lines')
