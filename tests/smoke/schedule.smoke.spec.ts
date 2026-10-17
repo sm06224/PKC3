@@ -98,7 +98,7 @@ async function mouseDragTo(page: Page, source: Locator, target: Locator): Promis
 
 test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付が変わる', async ({ page }) => {
   const errors = collectPageErrors(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 1440, height: 1100 }); // 束 E2: 同上(札が下の帯に隠れる)
   await gotoApp(page);
 
   await createEntry(page, 'text');
@@ -426,6 +426,22 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
   ).toHaveCount(1);
 
   /**
+   * ⑪.5 🔴 **以前に 1 回だけ動かした回が在る規則を動かすと、確認に「以前に 1 回だけ動かした回(1 件)は…そのまま残ります」が出る**
+   * (束 E2 の F。起動は増やさない)。⚠ 直前の ⑪ で振替の行が 1 本できている。やめるので本文は変わらない。
+   */
+  const D12 = inMonth(BASE_DAY + 12);
+  const d12Card = pane.locator(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${D12}"] [data-pkc-entry]`);
+  await expect(d12Card, '来週の回が出ていない(前提)').toHaveCount(1);
+  await mouseDragTo(page, d12Card, gridCell(D3));
+  await page.mouse.up();
+  await expect(dlg, '規則の札を落としても小窓が出ない').toBeVisible();
+  await expect(dlg, '確認に「以前に 1 回だけ動かした回(1 件)」が出ていない').toContainText(
+    '以前に 1 回だけ動かした回(1 件)は、「全部動かす」でもそのまま残ります',
+  );
+  await clickReal(page, '[data-pkc-field="dialog-cancel"]');
+  await expect(dlg).toHaveCount(0);
+
+  /**
    * ⑫ 🔴 **曜日の列(`毎週 月水金`)は「全部」で開始日と一緒に回る**(#1087。起動は増やさない ── この道中の続き)。
    *   水曜の回を木曜へ落として「全部」= +1 日 → 開始日は月曜から火曜へ、列は 月水金 から 火木土 へ。
    *   ⚠ 直す前は日付だけ動いて列が `月水金` のまま残る(本文の字で見分ける)。
@@ -638,7 +654,7 @@ test('🔴 予定のある日とない日で、小さな月の升目の高さが
  */
 test('🔴 期間の札を掴んでずらすと、長さを保ったまま本文が書き替わる', async ({ page }) => {
   const errors = collectPageErrors(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 1440, height: 1100 }); // 束 E2: 同上
   await gotoApp(page);
 
   await createEntry(page, 'text');
@@ -1075,7 +1091,7 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   // ⚠ 高さ 960(以前は 900): ノートが 2 つ以上になると「出すもの」の行が出て(#855 20-A)目盛りが下がる。900 のままだと下へのドラッグで
   //   影が出なかった(高さを足すと通る ── 画面の外を押していたと推定。札の位置は測っていない)
   const errors = collectPageErrors(page);
-  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.setViewportSize({ width: 1440, height: 1200 }); // 束 E2: 予定の欄が時刻の欄で折り返して 1 行増えたので高さを足した(900/960 だと札が下の帯に隠れて掴めない)
   await gotoApp(page);
   await clickReal(page, '[data-pkc-browse="schedule"]');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
@@ -1119,7 +1135,46 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   // 以降の道中は今日の束で見るので、欄を今日へ戻す
   await date.fill(value);
 
-  await pane.locator('[data-pkc-field="schedule-quick-text"]').fill('きょうの用事');
+  const quickText = pane.locator('[data-pkc-field="schedule-quick-text"]');
+  const quickTime = pane.locator('[data-pkc-field="schedule-quick-time"]');
+  const statusLine = page.locator('[data-pkc-region="status"]');
+  const quickUndo = page.locator('[data-pkc-field="status-undo"]');
+  /**
+   * 🔴 **予定を足した直後の知らせと「元に戻す」**(台帳 #1852 束 E2、#1163 の依頼 57-4 / 57-5 / 100-4。起動は増やさない)。
+   * ① 日付が空で時刻だけ → 断られ、打った字も時刻も欄に残る(黙って捨てない)
+   * ② 日付を空にして足す → 「日付なしで足しました」+ 見えない理由 + 「元に戻す」
+   * ③ 日付ありで足す → どのノートへ足したかを言い、「元に戻す」で本文から行が消える(今日の束が 0 に戻る)
+   */
+  await quickText.fill('日付なしの時刻');
+  await quickTime.fill('09:30');
+  await date.fill('');
+  await clickReal(page, '[data-pkc-action="schedule-quick-add"]');
+  await expect(statusLine, '日付が空で時刻だけなのに、断りが出ない').toContainText('時刻を付けるときは、日付も選んでください');
+  await expect(quickText, '断られたのに打った字が消えた').toHaveValue('日付なしの時刻');
+  await expect(quickTime, '断られたのに時刻が消えた').toHaveValue('09:30');
+  await expect(quickUndo, '断られたのに「元に戻す」が出ている(何も足していない)').toBeHidden();
+  await quickTime.fill('');
+  await clickReal(page, '[data-pkc-action="schedule-quick-add"]');
+  await expect(statusLine, '日付を空にして足したのに、知らせが出ない').toContainText('『日付なしの時刻』を今日のノート(');
+  await expect(statusLine).toContainText('に日付なしで足しました');
+  await expect(statusLine, '見えない理由が同じ 1 行に無い').toContainText('「出すもの」で「日付のないもの」を選ぶと見られます');
+  await expect(quickUndo, '日付なしで足した直後に「元に戻す」が出ない').toBeVisible();
+  await clickReal(page, quickUndo);
+  await expect(quickUndo, '「元に戻す」を押しても残っている').toBeHidden();
+  await date.fill(value);
+  await quickText.fill('きょうの用事');
+  await clickReal(page, '[data-pkc-action="schedule-quick-add"]');
+  await expect(statusLine, '足した知らせにノートの名前が出ない').toContainText('『きょうの用事』を今日のノート(');
+  await expect(statusLine).toContainText('足しました');
+  await expect(statusLine, '日付ありなのに「日付なしで」と言っている').not.toContainText('日付なしで');
+  await expect(todayGroup.locator('[data-pkc-field="schedule-group-text"]')).toHaveText('今日(1)');
+  await expect(quickUndo, '足した直後に「元に戻す」が出ない').toBeVisible();
+  await clickReal(page, quickUndo);
+  await expect(
+    todayGroup.locator('[data-pkc-field="schedule-group-text"]'),
+    '「元に戻す」を押しても本文から行が消えない(今日の束が 0 に戻らない)',
+  ).toHaveText('今日(0)');
+  await quickText.fill('きょうの用事');
   await clickReal(page, '[data-pkc-action="schedule-quick-add"]');
 
   /**
@@ -1169,7 +1224,8 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
    */
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
-  await ta.fill(`- [ ] 会議 @${value} 14:00..15:00`);
+  // 🔴 夜勤 = 日をまたぐ幅(束 E2 の C)/ 題名の無い札 = 「(題名なし)」(E)── 起動を増やさず同じ本文に載せる
+  await ta.fill(`- [ ] 会議 @${value} 14:00..15:00\n- [ ] 夜勤 @${value} 22:00..02:00\n- [ ] @${value} 05:15`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await clickReal(page, '[data-pkc-action="schedule-mode"][data-pkc-mode="day"]');
   const dayCard = pane
@@ -1233,6 +1289,9 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   const gx = grab.x + grab.width * 0.6;
   /** 札を 2 時間下へ動かす(14:00 → 16:00)。「元に戻す」の前後で 2 度使う。 */
   const dragTwoHoursDown = async (): Promise<void> => {
+    // 束 E2: 下の「お知らせ」の帯が札に被さらないよう、14:00 を上のほうへ送ってから掴む
+    await pane.locator('[data-pkc-field="schedule-day-scroll"]').evaluate((el) => { el.scrollTop = 400; });
+    await expect(dayCard).toBeVisible();
     const b = (await dayCard.boundingBox())!;
     await page.mouse.move(gx, b.y + 12);
     await page.mouse.down();
@@ -1375,6 +1434,52 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   await insideLane();
   await page.keyboard.press('Escape');
   await expect(createInput).toHaveCount(0);
+
+  /**
+   * 🔴 **日をまたぐ幅(22:00..02:00)は、22:00 から下端まで出て「22:00〜翌02:00」と読め、1 時間動かすと終わりも動く**
+   * (束 E2 の C。起動は増やさない)。⚠ 旧い版は 02:00 < 22:00 を幅と読まず、22:00 の 1 点の札だった。
+   * 🔑 観測点は札の高さ(2 時間 = 80px)と「いつ」の字と、動かした後の本文。
+   */
+  await dayScroll.evaluate((el) => {
+    el.scrollTop = 700; // 22:00 を上のほうへ(下の帯に被せない)
+  });
+  const nightCard = pane
+    .locator('[data-pkc-field="schedule-day-lane"] > [data-pkc-entry]')
+    .filter({ hasText: '夜勤' });
+  await expect(nightCard, '夜勤の札が「日」に出ていない').toHaveCount(1);
+  await expect(nightCard.locator('[data-pkc-field="when"]'), '日をまたぐ幅が「22:00〜翌02:00」と読めていない').toHaveText(
+    '22:00〜翌02:00',
+  );
+  const nightBox = (await nightCard.boundingBox())!;
+  expect(nightBox.height, '22:00 から下端までの 2 時間(80px)になっていない').toBeGreaterThan(78);
+  expect(nightBox.height).toBeLessThan(82);
+  const nightGrid = (await pane.locator('[data-pkc-field="schedule-day-grid"]').boundingBox())!;
+  expect(nightBox.y - nightGrid.y, '札が 22:00 の高さ(22 × 40px)にない').toBeGreaterThan(879);
+  expect(nightBox.y - nightGrid.y).toBeLessThan(881);
+  await page.mouse.move(gx, nightBox.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(gx, nightBox.y + 12 + 15, { steps: 4 });
+  await page.mouse.move(gx, nightBox.y + 12 + 40, { steps: 6 });
+  await page.mouse.up();
+  await expect(
+    nightCard.locator('[data-pkc-field="when"]'),
+    '1 時間動かしたのに、終わりも動いて 23:00〜翌03:00 にならない',
+  ).toHaveText('23:00〜翌03:00');
+  // 札を押して、そのノートを開いてから本文を見る(掴んだだけでは選ばれない)
+  await nightCard.locator('[data-pkc-field="text"]').click();
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(ta, '動かした本文が 23:00..03:00 になっていない').toHaveValue(/@\d{4}-\d{2}-\d{2} 23:00\.\.03:00/);
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+  // 題名の無い札(E)
+  await dayScroll.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await expect(
+    pane
+      .locator('[data-pkc-field="schedule-day-lane"] > [data-pkc-entry]')
+      .filter({ hasText: '(題名なし)' }),
+    '題名の無い予定の札が「(題名なし)」になっていない',
+  ).toHaveCount(1);
 
   /**
    * 🔴 **左の列の「週」は別のウィンドウで開く。開いた窓は 7 列で、その日の列に 14:00 の札**(#855 段 A-2)。
@@ -1525,6 +1630,24 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   await expect(second.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
   expect(context.pages().length, '2 度目の押下で新しい窓が開いていない').toBe(pagesBefore + 1);
   await second.close();
+  /**
+   * 🔴 **週の始まりを「月曜始まり」にすると、小さな月の曜日の見出しが月から始まり、土日は薄いまま。読み直しても残る**
+   * (束 E2 の A。起動は増やさない ── 開いた窓の続き)。⚠ 土日の薄さは並びの位置ではなく曜日で決まる。
+   */
+  const heads = (w: Page) => w.locator('[data-pkc-view-pane="schedule"] [data-pkc-field="schedule-week"]:not(:has(button))').first().locator('span');
+  const weekStartSel = centre.locator('[data-pkc-field="schedule-week-start"]');
+  await expect(weekStartSel, '週の始まりの選択が見えない').toBeVisible();
+  await expect(heads(week).first(), '既定は日曜始まりのはず(対照群)').toHaveText('日');
+  await weekStartSel.selectOption('1');
+  await expect(heads(week), '月曜始まりにしたのに、見出しが月から始まらない').toHaveText(['月', '火', '水', '木', '金', '土', '日']);
+  const headColor = (w: Page, i: number) => heads(w).nth(i).evaluate((e) => getComputedStyle(e).backgroundColor);
+  expect(await headColor(week, 5), '土の見出しが平日(月)と同じ濃さ(薄くない)').not.toBe(await headColor(week, 0));
+  expect(await headColor(week, 6), '日の見出しが平日(月)と同じ濃さ(薄くない)').not.toBe(await headColor(week, 0));
+  expect(await headColor(week, 1), '火は月と同じ濃さのはず(対照群)').toBe(await headColor(week, 0));
+  await week.reload();
+  await expect(week.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await expect(heads(week), '読み直したら月曜始まりが戻った').toHaveText(['月', '火', '水', '木', '金', '土', '日'], { timeout: 20_000 });
+  await expect(weekStartSel).toHaveValue('1');
   expect(weekErrors, `page error: ${weekErrors.join(' / ')}`).toEqual([]);
   await week.close();
 
