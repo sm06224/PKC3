@@ -6,7 +6,7 @@
  * (規則の式を test 側で書き直さない ── 同じ盲点を共有する)。
  */
 import { describe, expect, it } from 'vitest';
-import { attachmentFileName } from '../../src/features/flavor/attachment-flavor';
+import { attachmentFileName, downloadFileName } from '../../src/features/flavor/attachment-flavor';
 
 describe('拡張子の扱い(元の拡張子を偽らせない)', () => {
   it('拡張子を打たなければ、元の拡張子を付ける', () => {
@@ -88,5 +88,54 @@ describe('空・前後の空白', () => {
   it('何も残らなければ元の名前のまま(空のファイル名を作らない)', () => {
     expect(attachmentFileName('', 'scan.pdf')).toBe('scan.pdf');
     expect(attachmentFileName('   ', 'scan.pdf')).toBe('scan.pdf');
+  });
+});
+
+/**
+ * 🔴 **とても長い名前の添付を保存するとき**(#1163 依頼 214。Gemini の裁定:拡張子を残して 200 文字程度で切る)。
+ * 期待値は手で書いた具体的な字数・名前で組む(規則の式を test 側で書き直さない)。
+ */
+describe('保存する名前の長さ(downloadFileName)', () => {
+  it('短い名前はそのまま(日本語も全角も)', () => {
+    expect(downloadFileName('請求書.pdf')).toBe('請求書.pdf');
+    expect(downloadFileName('ＡＢＣ　報告書.pdf')).toBe('ＡＢＣ　報告書.pdf');
+    expect(downloadFileName('あ'.repeat(200))).toBe('あ'.repeat(200));
+  });
+
+  it('🔴 400 字の名前は、拡張子を残して全体 200 字に切る', () => {
+    const out = downloadFileName(`${'長'.repeat(400)}.pdf`);
+    expect([...out]).toHaveLength(200);
+    expect(out.endsWith('.pdf')).toBe(true);
+    expect(out).toBe(`${'長'.repeat(196)}.pdf`);
+  });
+
+  it('二重拡張子(.tar.gz)はひとまとまりで残す', () => {
+    const out = downloadFileName(`${'a'.repeat(300)}.tar.gz`);
+    expect(out).toBe(`${'a'.repeat(193)}.tar.gz`);
+    expect(out).toHaveLength(200);
+  });
+
+  it('🔴 サロゲートペア(𠮷・絵文字)を割らない', () => {
+    // 𠮷 は 1 字だが UTF-16 では 2 つ分。`slice` で切ると半分で割れる
+    const out = downloadFileName(`${'𠮷'.repeat(250)}.txt`);
+    expect([...out]).toHaveLength(200);
+    expect(out).toBe(`${'𠮷'.repeat(196)}.txt`);
+    expect(out).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  });
+
+  it('拡張子の無い長い名前は、名前だけを切る', () => {
+    expect(downloadFileName('x'.repeat(500))).toBe('x'.repeat(200));
+  });
+
+  it('空白を含む後ろは拡張子と見なさない(名前の一部として切る)', () => {
+    const name = `${'a'.repeat(250)}.v1 最終`;
+    const out = downloadFileName(name);
+    expect([...out]).toHaveLength(200);
+    expect(out.endsWith('最終')).toBe(false);
+  });
+
+  it('拡張子そのものが長すぎるときは、拡張子を残さず全体を切る(出力が上限を超えない)', () => {
+    const out = downloadFileName(`a.${'e'.repeat(300)}`);
+    expect([...out]).toHaveLength(200);
   });
 });

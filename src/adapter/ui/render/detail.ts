@@ -172,6 +172,7 @@ import {
 } from '@adapter/platform/extension-grants';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { humanBytes } from '@features/human-bytes';
+import { mimeLabel } from '@features/asset/mime-label';
 /**
  * ⚠ **輪になっているが、実体は一方向である** ── あちらが引くのは `AssetLender` の
  *   **型だけ**(`import type` なので、走る物には残らない)。
@@ -3468,9 +3469,15 @@ export class DetailRenderer {
     const info = document.createElement('div');
     info.setAttribute('data-pkc-field', 'attachment-info');
     const label = document.createElement('span');
-    label.textContent = `${meta.name || '(名前なし)'} — ${meta.mime}${
+    /**
+     * 🔴 **種類は日本語の短い名前で出す。元の英字はマウスを載せたときに出す**(#1163 依頼 85-1 / 102-2。推薦 C)。
+     * ⚠ 直す前は `image/jpeg` / `application/octet-stream` がそのまま出ていた(後者は何の種類か分からない)。
+     *   名前は右のペインの「種類」と同じ口(`mimeLabel`)から引く ── 同じ物に 2 通りの名前を付けない。
+     */
+    label.textContent = `${meta.name || '(名前なし)'} — ${mimeLabel(meta.mime)}${
       meta.size !== null ? ` — ${humanBytes(meta.size)}` : ''
     }`;
+    if (meta.mime !== '') label.title = `ファイルの種類: ${meta.mime}`;
     info.append(label);
     if (meta.assetKey) {
       const dl = document.createElement('button');
@@ -4239,6 +4246,25 @@ export class DetailRenderer {
         img.src = lent.url;
         // 🔴 読めない形式(.heic など)は壊れた画像で終わらせず、理由を 1 行出す(#1087)
         replaceOnMediaError(img, 'image', retype?.mime ?? mime);
+        /**
+         * 🔴 **読み込めたら、縦横の大きさを先頭の 1 行に足す**(#1163 依頼 85-2。推薦 A ──「4000×3000」)。
+         * ⚠ 読み込んだ後にしか分からないので、出るのは読み込み後。SVG は大きさを持たない(既定の 300×150 が返る)ので足さない。
+         * ⚠ 選択が移った後に来た load は捨てる(`token`)── 別の添付の行を書き換えない。
+         */
+        if ((retype?.mime ?? mime) !== 'image/svg+xml') {
+          img.addEventListener('load', () => {
+            if (token !== this.hydrateToken) return;
+            const { naturalWidth: w, naturalHeight: h } = img;
+            if (w <= 0 || h <= 0) return;
+            const label = host.parentElement?.querySelector(
+              ':scope > [data-pkc-field="attachment-info"] > span',
+            );
+            if (label && !label.hasAttribute('data-pkc-dimensions')) {
+              label.setAttribute('data-pkc-dimensions', `${w}x${h}`);
+              label.textContent += ` — ${w}×${h}`;
+            }
+          });
+        }
         host.append(img);
       } else if (kind === 'video' || kind === 'audio') {
         const media = document.createElement(kind);

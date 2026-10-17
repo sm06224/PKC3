@@ -302,8 +302,8 @@ import {
   resetOfficeProfile,
 } from '@adapter/platform/office/office-profile';
 import { readAppStorage } from '@adapter/platform/app-storage';
-import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
-import { formatAssetRef } from '@features/asset/asset-ref-format';
+import { downloadFileName, readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import { createNameDeduper, pastedFileName } from '@features/asset/pasted-image-name';
 import { adoptUrls, fetchImageBlob, HttpStatusError } from '@adapter/ui/actions/adopt-urls';
 import { adoptLinkIcon } from '@adapter/ui/actions/adopt-favicon';
@@ -4092,7 +4092,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           try {
             const item = await maybeShrink(attachDeps, original, shrinkRun);
             const stored = await storeAsset(attachDeps, item, known);
-            refs.push(formatAssetRef(name, `asset:${stored.assetKey}`, true));
+            // 🔴 画像だけとは限らない(#1163 依頼 55 の 3 ── 編集中に「添付」で選んだ PDF などもここを通る)。画像は `![…]`、ほかは `[…]`
+            refs.push(formatAssetRef(name, `asset:${stored.assetKey}`, isImageAssetMime(stored.mime)));
           } catch (e) {
             // 🔴 英語の理由をそのまま出さない。どの画像か分かる形で(#1087)
             dispatcher.dispatch({
@@ -4186,6 +4187,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     drawOnImage: (assetKey, name, mime, lid) => {
       void imageDrawer.run(assetKey, name, mime, lid);
+    },
+    /**
+     * 🔴 **本文に入れた添付のリンクを押したとき**(#1163 依頼 55 の 1・2)。
+     * PDF は別のウィンドウで開く(`viewAsset`)、ほかは保存(`downloadAsset`)。保存名・窓の題は添付のいまの名前
+     * (持ち主の逆引き = `findAssetOwner`。引けなければリンクの字)。
+     * ⚠ 種類は登録の mime で決める(リンクの字の拡張子では決めない ── 字は書いた人が自由に付けられる)。
+     */
+    openAssetLink: (assetKey, label, lid) => {
+      void (async () => {
+        let name = label;
+        let mime = '';
+        try {
+          const [owner, mimes] = await Promise.all([
+            client.request({ op: 'findAssetOwner', cid, assetKey }) as Promise<{ name: string | null }>,
+            assetLender.listMimes(),
+          ]);
+          name = owner.name ?? label;
+          mime = mimes.get(assetKey) ?? '';
+        } catch {
+          // 引けなかった回は今までどおり(リンクの字で保存)── 押して無反応にしない
+        }
+        if (mime === 'application/pdf') services.viewAsset?.(assetKey, name, mime, lid);
+        else services.downloadAsset?.(assetKey, name);
+      })();
     },
     viewAsset: (assetKey, name, mime, lid) => {
       void (async () => {
@@ -4373,7 +4398,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           });
           return;
         }
-        downloadUrl(name, lent.url, lent.dispose);
+        // 🔴 とても長い名前は、拡張子を残して切る(#1163 依頼 214)。ノートの題名は変えない
+        downloadUrl(downloadFileName(name), lent.url, lent.dispose);
       } catch (e) {
         // IDB 障害等を unhandled rejection にしない(可視で終える)
         dispatcher.dispatch({
@@ -5536,7 +5562,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             },
             // ⚠ **知らせるほうは捨てない** ── 走査は worker で数秒かかるので、
             //    その間に別の確認が開いていることがある(器が順番に出す)
-            ask: (msg) => ask(msg, { okLabel: '添付を整理する', danger: true }),
+            ask: (msg) => ask(msg, { okLabel: '使われていない添付を消す', danger: true }),
             tell,
           });
         } catch (e) {

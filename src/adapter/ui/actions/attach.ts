@@ -141,6 +141,36 @@ export const EXT_MIME: Record<string, string> = {
   java: 'text/plain',
   json:'application/json',
   html: 'text/html',
+  /**
+   * 🔴 **拡張子は分かるのに「この種類は画面に出せません」になっていた物**(#1163 依頼 296。Gemini の裁定:推薦 A =
+   * 表に足す)。種類が付かない取り込み(zip・フォルダ・Office の窓からの保存)では、この表だけが種類を決める。
+   * ⚠ ブラウザが再生・表示できる物は、再生ボタンや画像で出る。見えていた物は変わらない(足すだけ)。
+   * ⚠ 書き出しの逆表(`EXT_BY_MIME`)にも同じ対応を足した(往復は `ext-mime-parity` が全数で見る)。
+   * ⚠ `weba` は `audio/webm`(書き出すと `.webm` に戻る ── 音と動画で容器が同じ。上の `webm` の注釈と同じ事情)。
+   */
+  htm: 'text/html',
+  markdown: 'text/markdown',
+  tsv: 'text/plain',
+  jsonl: 'text/plain',
+  sql: 'text/plain',
+  css: 'text/plain',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+  ico: 'image/x-icon',
+  jfif: 'image/jpeg',
+  apng: 'image/apng',
+  jxl: 'image/jxl',
+  opus: 'audio/opus',
+  flac: 'audio/flac',
+  aac: 'audio/aac',
+  weba: 'audio/webm',
+  oga: 'audio/ogg',
+  aiff: 'audio/aiff',
+  amr: 'audio/amr',
+  mov: 'video/quicktime',
+  m4v: 'video/x-m4v',
+  ogv: 'video/ogg',
+  '3gp': 'video/3gpp',
   png: 'image/png',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
@@ -217,6 +247,12 @@ export interface AttachedOne {
   readonly assetKey: string;
   readonly mime: string;
   readonly hash: string | null;
+  /**
+   * 🔴 **同じ中身の bytes が、この取り込みの前から在ったか**(#1163 依頼 213。Gemini の裁定:
+   * 「同じファイルがすでにあります」と 1 行知らせる ── 作業は止めない)。
+   * ⚠ `known` を渡した取り込み(添付ボタン・ドロップ)だけが言える。渡さない経路(録音・Office の保存)は常に未設定。
+   */
+  readonly duplicate?: boolean;
 }
 
 /** 資産として置いた結果。⚠ **ノート(entry)は作らない** ── それは呼び側の仕事。 */
@@ -224,6 +260,19 @@ export interface StoredAsset {
   readonly assetKey: string;
   readonly mime: string;
   readonly hash: string | null;
+  /** 同じ中身の bytes が、置く前から在った(`known` に載っていた)。`AttachedOne.duplicate` の元。 */
+  readonly already: boolean;
+}
+
+/**
+ * 🔴 **同じファイルをもう一度添付したときの、知らせの頭**(#1163 依頼 213)。
+ * ⚠ 作業は止めない ── 添付のノートは今までどおり作り、本文にも入れる。取り込みの知らせの文頭に 1 文足すだけ。
+ */
+export const DUPLICATE_ATTACH_NOTE = '同じファイルがすでにあります。';
+
+/** まとめて取り込んだ回の、同じファイルの件数の言い方。 */
+export function duplicateAttachSummary(count: number): string {
+  return count === 1 ? DUPLICATE_ATTACH_NOTE : `同じファイルがすでにあるものが ${count} 件あります。`;
 }
 
 /**
@@ -281,7 +330,8 @@ export async function storeAsset(
   const { key: assetKey, hash } = deps.hashBlob
     ? assetKeyFromHash(await deps.hashBlob(item.blob))
     : await identifyAsset(item.blob);
-  if (!known?.has(assetKey)) {
+  const already = known?.has(assetKey) === true;
+  if (!already) {
     await deps.putBlob(assetKey, item.blob);
     await deps.putMeta({ key: assetKey, mime, size: item.size, hash });
     known?.add(assetKey);
@@ -296,7 +346,7 @@ export async function storeAsset(
     }
   }
 
-  return { assetKey, mime, hash };
+  return { assetKey, mime, hash, already };
 }
 
 /**
@@ -334,7 +384,7 @@ export async function attachOne(
     });
     return null;
   }
-  const { assetKey, mime, hash } = stored;
+  const { assetKey, mime, hash, already } = stored;
 
   const lid = generateLid();
   dispatcher.dispatch({
@@ -352,7 +402,7 @@ export async function attachOne(
   //    `phase !== 'ready'` を**黙って捨てる** ── 確かめないと、Office の保存を
   //    「取り込んだ」ことにして棚から消し、**文書が消える**
   if (!dispatcher.getState().entryMetas.has(lid)) return null;
-  return { lid, assetKey, mime, hash };
+  return { lid, assetKey, mime, hash, ...(already ? { duplicate: true } : {}) };
 }
 
 /**
@@ -554,7 +604,7 @@ export async function attachFiles(
    *   輪を抜けた時点ではまだ入っていない(`intakeDone` と `put === expected` の両方を見る)。
    * ⚠ 1 件だけの回は締めない(F の「本文のいちばん下に入れました」がそのまま残る)。
    */
-  const tally = { expected: 0, put: 0, last: '' };
+  const tally = { expected: 0, put: 0, last: '', dup: 0 };
   let intakeDone = false;
   const summarize = (): void => {
     if (!intakeDone || tally.expected < 2 || tally.put !== tally.expected) return;
@@ -571,17 +621,19 @@ export async function attachFiles(
      * ⚠ **締めの 1 行も、1 枚ごとの行と同じ物差しで名前を出す**(#809-2)──
      *   片方だけ名前を落とすと、まとめて落とした user だけ行き先が読めなくなる。
      */
+    // 🔴 同じファイルがあった回は、締めの 1 行にも言う(#1163 依頼 213 ── 1 枚ごとの行を上書きするので、ここでも言わないと消える)
+    const lead = `${tally.dup > 0 ? duplicateAttachSummary(tally.dup) : ''}${why}`;
     if (elsewhere) {
       notify(
-        `${why}${tally.put} 件を『${dropped!.title}』の本文に入れました(「${tally.last}」ほか)`,
+        `${lead}${tally.put} 件を『${dropped!.title}』の本文に入れました(「${tally.last}」ほか)`,
         at!.lid,
       );
       return;
     }
     notify(
       namedTitle === undefined
-        ? `${why}${tally.put} 件を本文に入れました(「${tally.last}」ほか)`
-        : `${why}${tally.put} 件を『${namedTitle}』の本文に入れました(「${tally.last}」ほか)`,
+        ? `${lead}${tally.put} 件を本文に入れました(「${tally.last}」ほか)`
+        : `${lead}${tally.put} 件を『${namedTitle}』の本文に入れました(「${tally.last}」ほか)`,
     );
   };
 
@@ -667,6 +719,7 @@ export async function attachFiles(
         endProgress(at);
         // ⚠ `null` は `attachOne` が既に理由を出している(二重に言わない)
         if (attached === null) continue;
+        if (attached.duplicate === true) tally.dup += 1;
         putAssetIntoNote({
           dispatcher,
           queue,
@@ -679,7 +732,8 @@ export async function attachFiles(
           //    MIME を付けない経路(共有 / D&D / Office の窓)でも、`猫.png` が
           //    ちゃんと**絵として**入る(`attach-intake.test.ts` が pin)
           mime: attached.mime,
-          why,
+          // 🔴 同じファイルがすでに在ったら、その 1 文を文頭に足す(#1163 依頼 213。作業は止めない)
+          why: attached.duplicate === true ? `${DUPLICATE_ATTACH_NOTE}${why}` : why,
           batch,
           ...(place === undefined ? {} : { place }),
           ...(elsewhere ? { selectBack: opened.lid } : {}),

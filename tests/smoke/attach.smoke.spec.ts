@@ -323,16 +323,15 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
 });
 
 /**
- * 🔴 **編集中に添付しても断らず、預かって、編集を終えると本文に入る**(#668 B)。
+ * 🔴 **編集中に「添付」で選んだファイルは、打っていた所(カーソルの位置)にすぐ入る**(#1163 依頼 55 の 3。
+ * Gemini の裁定 = 推薦どおり B。旧 #668 B は「預かって、編集を終えると本文のいちばん下に入る」だった)。
  *
- * ⚠ 直す前は「編集を保存するか、編集をやめてから添付してください」と断り、user はファイルを
- *   選び直すことになった。録音・画面録画は編集中に終わっても預かるのに、隣の
- *   「添付」だけが断っていた。
- * 🔑 見るのは user が見る所 ── 押した直後の帯(預かりました)と、編集を終えた後の
- *   本文(絵が描かれている)。⚠ 預かりの仕掛けは unit(`attach-intake.test.ts` の B)
- *   が見るが、**編集を終える操作 → 錠が解けて流れる**は実物の効果層でしか通らない。
+ * ⚠ 直す前は、貼り付けたスクリーンショットだけがカーソルの位置に入り、「添付」で選んだ物は預かられて末尾に入った。
+ *   同じ「編集中に入れる」で入る場所が入れ方で違った。
+ * 🔑 見るのは user が見る所 ── 押した直後の編集欄の中身(カーソルの前と後ろの間に参照が入る)と、
+ *   編集を終えた後の本文(絵が描かれている)。断り文も「預かりました」も出ない。
  */
-test('🔴 編集中に添付しても断らず、編集を終えると本文に入る (#668 B)', async ({ page }) => {
+test('🔴 編集中に添付すると、打っていた所に入る (#1163 依頼 55 の 3)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
@@ -341,28 +340,30 @@ test('🔴 編集中に添付しても断らず、編集を終えると本文に
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
   await ta.click();
-  await page.keyboard.type('# 会議メモ');
+  await page.keyboard.type('あい');
+  await page.keyboard.press('ArrowLeft'); // あ|い ── カーソルを 2 文字の間へ
 
-  // ⚠ **編集中のまま**添付を渡す(ここで断られるのが直す前の症状)
+  // ⚠ **編集中のまま**添付を渡す
   await page.setInputFiles('[data-pkc-field="attach-input"]', {
     name: 'ねこ.png',
     mimeType: 'image/png',
     buffer: PNG_1X1,
   });
+  await expect(ta, 'カーソルの位置に入っていない(末尾に預かられた)').toHaveValue(
+    /^あ!\[ねこ\.png\]\(asset:[^)]+\)\nい$/,
+    { timeout: 15_000 },
+  );
   const status = page.locator('[data-pkc-region="status"]');
-  await expect(status, '保留したことを言っていない').toContainText('「ねこ.png」は、編集中なのでまだ入れていません');
-  await expect(status, '断っている(直す前の症状)').not.toContainText('編集を保存するか、編集をやめてから');
-  // 預かっている間、打っていた本文は無傷
-  await expect(ta).toHaveValue('# 会議メモ');
+  await expect(status, '預かった旨が出ている(直す前の動き)').not.toContainText('編集中なのでまだ入れていません');
+  await expect(status, '断っている').not.toContainText('編集を保存するか、編集をやめてから');
 
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  // 編集を終えると、そのノートは開いたままで、本文に絵が入る
+  // 編集を終えると、そのノートは開いたままで、本文に絵が描かれている
   await expect(
     page.locator('[data-pkc-field="detail-title"]').first(),
     '画面が添付へ移った',
   ).toHaveText('会議メモ', { timeout: 15_000 });
   await expectImageRendered(page, '[data-pkc-region="detail"] img[data-pkc-asset-key]');
-  await expect(status, '入れたことを言っていない').toContainText('「ねこ.png」を本文のいちばん下に入れました');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
@@ -1255,14 +1256,14 @@ test('🔴 大きな画像は縮めるか聞き、断れば原寸のまま入る
    *   **読んでいたものが開いたまま**なので(1 枚目の添付が開いている)、開き直さずに
    *   測ると **1 枚目の大きさを 2 枚目のものとして読む** ── 数字は出るが、
    *   別の物を指している(CLAUDE.md §4「計器の名前が範囲より広い」と同じ形)。
-   * 🔑 だから**中身の行そのもの**(`もう一枚.jpg — image/jpeg`)を待つ ──
+   * 🔑 だから**中身の行そのもの**(`もう一枚.jpg — JPEG`)を待つ ──
    *   題名だけ待つと、本文が「読み込んでいます…」の間に測ってしまう。
    */
   await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:has-text("もう一枚.jpg")');
   await expect(
     page.locator('[data-pkc-region="detail"]'),
     '2 枚目の本文が出ない',
-  ).toContainText('もう一枚.jpg — image/jpeg', { timeout: 15_000 });
+  ).toContainText('もう一枚.jpg — JPEG', { timeout: 15_000 });
   const shrunkSize = await sizeOf();
   expect(shrunkSize, '受けたのに縮んでいない').toBeLessThan(keptSize);
   // 🔑 **十分小さい**(採用の閾値 85% を満たしている)

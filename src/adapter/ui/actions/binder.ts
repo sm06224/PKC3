@@ -1730,6 +1730,15 @@ export interface BinderServices {
   deliverToExtension?(linkId: string, entry: ExtDeliveredEntry): boolean;
   downloadAsset?(assetKey: string, name: string): void;
   /**
+   * 🔴 **本文に入れた添付のリンクを押したとき**(#1163 依頼 55 の 1・2。Gemini の裁定 = 推薦どおり)。
+   *
+   * ⚠ PDF なら、保存せずに**別のウィンドウで開く**(保存は開いたウィンドウか添付のノートの画面から)。それ以外は今までどおり保存。
+   *   保存するときの名前は**リンクの字ではなく、添付のいまの名前**(名前を変えても本文のリンクの字は変えない)。
+   * ⚠ **省略可** ── 無い配線では、今までどおり `downloadAsset` へ落ちる。
+   * @param label リンクの字(添付のいまの名前が引けなかったときの代わり)
+   */
+  openAssetLink?(assetKey: string, label: string, lid?: string): void;
+  /**
    * 🔴 **添付の実体を 1 件読む**(#818)。⚠ **省略可** ── 無い配線では
    *   「この版では中を見られません」と断るだけで、他は壊れない
    *   (`downloadAsset` と同じ規律)。
@@ -13469,7 +13478,16 @@ const ACTIONS: Record<string, ActionHandler> = {
   'download-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');
     const name = target.getAttribute('data-pkc-asset-name') ?? 'download';
-    if (key) services.downloadAsset?.(key, name);
+    if (!key) return;
+    /**
+     * 🔴 **本文のリンク(`.pkc-asset-link`)だけ別の道**(#1163 依頼 55 の 1・2)。⚠ 添付のノートの「添付をダウンロード」ボタンは
+     *   同じ action を使うが、そちらは**必ず保存**する(PDF も保存できる道を残す)── 見分けは押した物の class。
+     */
+    if (target.classList.contains('pkc-asset-link') && services.openAssetLink) {
+      services.openAssetLink(key, name, targetLid(dispatcher, target) ?? undefined);
+      return;
+    }
+    services.downloadAsset?.(key, name);
   },
   /**
    * 🔴 **画像を別窓で見る**(#192)。⚠ 開けなかったとき(popup 阻止)の後始末は
@@ -16716,7 +16734,20 @@ export function bindActions(
     if (field === 'attach-input') {
       const files = el.files ? [...el.files] : [];
       el.value = ''; // 同じファイルの再選択でも change が発火するように
-      if (files.length > 0) services.attachFiles?.(files);
+      if (files.length === 0) return;
+      /**
+       * 🔴 **編集中に添付したら、打っていた所(カーソルの位置)に入れる**(#1163 依頼 55 の 3。Gemini の裁定 = 推薦どおり B)。
+       *
+       * ⚠ 直す前は「編集中なのでまだ入れていません。編集を終えると本文のいちばん下に入れます」と預かり、貼り付けた
+       *   スクリーンショットだけがカーソルの位置に入った ── 同じ「編集中に入れる」で、入る場所が入れ方によって違った。
+       * 🔑 入れ方は貼り付けと同じ道(`insertPasted`)── 資産に置いて、参照の行を打っていた所へ差す(Undo に載る)。
+       *   ⚠ 編集中は添付のノートを作らない(`CREATE_ENTRY` が編集中は黙殺される ── 貼り付けと同じ事情)。
+       *   画像は `![名前](asset:…)`、ほかの種類は `[名前](asset:…)` で入る。
+       * ⚠ 編集中でないとき・編集欄が無いとき・差し込む口が無い環境は、今までどおり添付(`attachFiles`)。
+       */
+      const into = dispatcher.getState().phase === 'editing' ? formatTarget(root) : null;
+      if (into !== null && services.pasteImages) insertPasted(files, into);
+      else services.attachFiles?.(files);
     } else if (field === 'import-input') {
       // ⚠ 添付と同じく**全件**渡す ── md は複数選択できる(1 件ずつ entry に
       // なる)。PKC2 の書出しが複数来たときに断るのは import-file.ts の仕事で、
