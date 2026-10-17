@@ -3424,6 +3424,11 @@ export type UserAction =
    * 触ると `↑↓` が「見て回る」と「選ぶ」を兼ねてしまい、分けた意味が消える。
    * ⚠ `lid` が実在しなければ**何もしない**(消えた行を指さない)。
    */
+  /**
+   * 🔴 **印をまとめて置く**(#1626。移した先で、動いてきた行を選んだままにする)。⚠ 1 件ずつ `DUAL_SELECT` を撃つと
+   *   件数ぶん描き直しが走る ── 数百件を移すと画面が固まるので、**1 回で置く**。実在する lid だけを置き、焦点は動かさない。
+   */
+  | { type: 'DUAL_SELECT_MANY'; side: DualSide; lids: readonly string[] }
   | { type: 'DUAL_SET_CURSOR'; side: DualSide; lid: string }
   | { type: 'DUAL_TAB_ADD'; side: DualSide }
   | { type: 'DUAL_TAB_CLOSE'; side: DualSide; index: number }
@@ -10011,6 +10016,14 @@ function reduceCore(
         ...withPane(state.dual, action.side, next),
         focus: action.side,
       });
+    }
+    case 'DUAL_SELECT_MANY': {
+      const lids = action.lids.filter((l) => state.entryMetas.has(l));
+      if (lids.length === 0) return { state, events: [] };
+      const last = lids[lids.length - 1]!;
+      const pane = paneOf(state.dual, action.side);
+      // ⚠ 焦点は動かさない(`DUAL_SELECT` は押した側を焦点にするが、これは操作の結果として置くだけ)
+      return withDual(state, withPane(state.dual, action.side, withPaneSelection(pane, lids, last, last)));
     }
     case 'DUAL_SET_CURSOR': {
       if (!state.entryMetas.has(action.lid)) return { state, events: [] };

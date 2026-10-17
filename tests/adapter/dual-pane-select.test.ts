@@ -222,6 +222,27 @@ describe('配線(binder)', () => {
       expect(rightRows.length, '移した先の表に選びが出ていない').toBeGreaterThanOrEqual(2);
     });
 
+    it('🔴 300 件を移しても、移した先の選びを置く dispatch は 1 回だけ(件数ぶん描き直さない)', () => {
+      const many = Array.from({ length: 300 }, (_, i) => meta(`m${String(i)}`, 100 + i, `多${String(i)}`));
+      d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [...METAS, ...many], relations: RELS });
+      d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f1' });
+      d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'm0', mode: 'set' });
+      d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'm299', mode: 'range' });
+      expect(paneOf(d.getState().dual, 'left').selection.length, '前提: 300 件選べていない').toBeGreaterThanOrEqual(300);
+      const seen: string[] = [];
+      const orig = d.dispatch.bind(d);
+      d.dispatch = ((a: { type: string }) => {
+        seen.push(a.type);
+        return orig(a as never);
+      }) as typeof d.dispatch;
+      click(region.querySelector('[data-pkc-field="dual-move"]')!);
+      expect(parentsOf('m0'), '前提: 移せていない').toEqual(['f1']);
+      expect(seen.filter((t) => t === 'DUAL_SELECT' || t === 'DUAL_SELECT_MANY'), '選びを件数ぶん撃っている').toEqual([
+        'DUAL_SELECT_MANY',
+      ]);
+      expect(paneOf(d.getState().dual, 'right').selection.length).toBeGreaterThanOrEqual(300);
+    }, 60000);
+
     it('⚠ 対照群 ── 断られて 1 件も動かなかった回は、移した先に何も選ばない', () => {
       // 右はルートのまま(左と同じ場所へ移す = 動く物が無い)
       d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
