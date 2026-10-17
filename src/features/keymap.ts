@@ -251,6 +251,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'create-entry',
     label: 'ノートを作る',
+    alias: '新規 作成 新しいノート',
     contexts: ['global'],
     defaults: ['Mod+N'],
     note: 'いま選んでいる種類で作ります(編集中は効きません)',
@@ -426,6 +427,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'filer-trash',
     label: 'ゴミ箱へ移す',
+    alias: '削除 消す',
     contexts: ['filer', 'dual'],
     // ⚠ `F8` は古典 4 実装が一致している鍵 ── 操作行にもそう書いてある
     defaults: ['Delete', 'F8'],
@@ -485,6 +487,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'filer-rename',
     label: '名前を変える',
+    alias: '名前変更 改名 リネーム 題名を変える',
     contexts: ['filer'],
     defaults: ['F2'],
     note: '行の題名の所で打ち替えます(Enter で確定、Esc でやめます)',
@@ -536,6 +539,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'dual-rename',
     label: '名前を変える',
+    alias: '名前変更 改名 リネーム 題名を変える',
     contexts: ['dual'],
     defaults: ['F2'],
     note: 'その場で打ち替えます',
@@ -560,6 +564,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'dual-new-note',
     label: 'ノートを作る',
+    alias: '新規 作成 新しいノート',
     contexts: ['dual'],
     defaults: ['Shift+F4'],
     note: 'いまの場所に作ります(作っても本文へは移りません。整理を続けられます)',
@@ -1480,6 +1485,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'commit-edit',
     label: '編集を保存する',
+    alias: '保存',
     contexts: ['editor'],
     defaults: ['Mod+S', 'Mod+Enter'],
     note: 'ブラウザの保存ダイアログは開きません',
@@ -1745,6 +1751,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'redo',
     label: 'やり直す',
+    alias: 'やり直し リドゥ',
     contexts: ['live'],
     defaults: ['Mod+Shift+Z', 'Mod+Y'],
   },
