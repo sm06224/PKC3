@@ -174,6 +174,16 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   await ta.press('Alt+ArrowUp');
   await expect(ta, '先頭の行で Alt+↑ が動いた').toHaveValue('あ\nい\nう');
 
+  // ④'''' 🔴 #1852 束 I1 ── 子を持つ項目は子ごと動く(依頼 204)/ 全角「・」の行で箇条書きを押すと `- ` に置き換わる(依頼 205)
+  await ta.fill('- 親A\n  - 子A\n- 親B');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
+  await ta.press('Alt+ArrowDown');
+  await expect(ta, '子を持つ項目が子ごと動いていない').toHaveValue('- 親B\n- 親A\n  - 子A');
+  await ta.fill('・牛乳');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(2, 2));
+  await clickReal(page, '[data-pkc-format="ul"]');
+  await expect(ta, '全角「・」の行が `- ` に置き換わらない').toHaveValue('- 牛乳');
+
   // ⑤ 雛形も入る(表 = 2 列。⚠ プレビューまで見る ── 記号だけ入って
   // markdown として壊れている、を落とす)
   await ta.fill('');

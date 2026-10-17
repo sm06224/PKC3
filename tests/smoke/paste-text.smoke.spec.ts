@@ -128,6 +128,15 @@ test('🔴 ウェブページをコピーして貼ると、形のまま入って
   await gotoApp(page);
   await openLiveRow(page);
 
+  // 🔴 #1852 束 I1(依頼 304)── 行の途中(`メモ: ` の続き)に、表で始まる字を貼ると次の行から始まる
+  await page.locator(ROW).fill('メモ: ');
+  await pasteText(page, ROW, {
+    html: '<table><tr><th>名</th><th>数</th></tr><tr><td>あ</td><td>1</td></tr></table>',
+    plain: '名 数 あ 1',
+  });
+  await expect(page.locator(ROW), '表が行の途中に続けて貼られた(次の行から始まらない)').toHaveValue(/^メモ: \n\| 名 \| 数 \|/);
+  await page.locator(ROW).fill('');
+
   await pasteText(page, ROW, {
     html:
       '<h2>見出し</h2><p>本文と<strong>強調</strong>と<a href="https://e.com/a">リンク</a></p>' +

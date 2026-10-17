@@ -68,6 +68,21 @@ test('🔴 `=` まで打って Enter を押すと、答えが出て次の行へ�
   await page.keyboard.press('Enter');
   await expect(ta, '日付に答えを書いた').toHaveValue('3958.01+9647.86=13605.87\n2026-10-17=\n');
 
+  /**
+   * 🔴 #1852 束 I1(依頼 151 / 136)── 電話番号の形は計算しない(理由が出る)/ 全角は半角にして計算する。
+   * 新しい起動は足さず、この道中の続きで見る。
+   */
+  await ta.fill('');
+  await page.keyboard.type('03-1234-5678=');
+  await page.keyboard.press('Enter');
+  await expect(ta, '電話番号に答えを書いた').toHaveValue('03-1234-5678=\n');
+  await expect(page.locator('body'), '電話番号を計算しない理由が画面に出ていない').toContainText('電話番号や URL の形は計算しません');
+  await ta.fill('');
+  const cdp0 = await page.context().newCDPSession(page);
+  await cdp0.send('Input.insertText', { text: '２＋３＝' });
+  await page.keyboard.press('Enter');
+  await expect(ta, '全角の式が計算されない').toHaveValue('2+3=5\n');
+
   expect(errors, errors.join('\n')).toHaveLength(0);
 });
 
@@ -116,6 +131,14 @@ test('🔴 引用の行で計算しても、取り消しで打った字へ戻れ
   await expect(ta).toHaveValue('- 2+3=5\n- ');
   await page.keyboard.press('Enter');
   await expect(ta, '記号だけの行で Enter を押しても抜けない').toHaveValue('- 2+3=5\n\n');
+
+  // 🔴 #1852 束 I1(依頼 199)── 入れ子の空の項目は 1 段だけ戻る(空行は入らない)
+  await ta.fill('- a\n  - b\n  - ');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(el.value.length, el.value.length));
+  await page.keyboard.press('Enter');
+  await expect(ta, '入れ子の空の項目で 1 段戻らない').toHaveValue('- a\n  - b\n- ');
+  await page.keyboard.press('Enter');
+  await expect(ta, '最後の段から抜けたとき直前に空行が 1 つ入らない').toHaveValue('- a\n  - b\n\n');
 
   expect(errors, errors.join('\n')).toHaveLength(0);
 });
