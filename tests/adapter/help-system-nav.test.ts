@@ -80,6 +80,37 @@ describe('ヘルプから「お知らせを開く」で来たとき(依頼 67-1)
     expect(backBtn()!.hidden, '戻った後も口が残っている').toBe(true);
   });
 
+  it('🔴 マニュアルを入れ直している最中に戻っても、描き終えた後に位置が戻る(5 分離れて手放した回)', async () => {
+    // 描き終えるのを手元で止められるマークダウンの口(手放した本文の入れ直しは非同期)
+    let finish: (html: string) => void = () => undefined;
+    const markdown = {
+      render: () => new Promise<string>((r) => (finish = r)),
+    } as unknown as ConstructorParameters<typeof CenterRouter>[3];
+    document.body.textContent = '';
+    root = document.createElement('div');
+    document.body.append(root);
+    d = new Dispatcher();
+    const detail = document.createElement('div');
+    detail.setAttribute('data-pkc-region', 'detail');
+    root.append(detail);
+    const center = new CenterRouter(detail, undefined, null, markdown);
+    d.onState((st) => center.render(st));
+    bindActions(root, d, {});
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'help' });
+    const manual = root.querySelector<HTMLElement>('[data-pkc-region="help-manual"]')!;
+    manual.scrollTop = 77;
+    root.querySelector<HTMLElement>('[data-pkc-action="open-system-notices"]')!.click();
+    expect(manual.hasAttribute('data-pkc-manual-loading'), '前提:入れ直しの最中になっていない').toBe(true);
+    backBtn()!.click();
+    // 本文がまだ 1 行しか無い間は、ブラウザが位置を 0 に丸める
+    manual.scrollTop = 0;
+    finish('<p>本文</p>');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(manual.hasAttribute('data-pkc-manual-loading'), '描き終えた印が残っている').toBe(false);
+    expect(manual.scrollTop, '描き終えた後に位置を戻していない').toBe(77);
+  });
+
   it('システムを離れたら畳む(開き直しても残らない)', () => {
     d.dispatch({ type: 'SET_VIEW_MODE', mode: 'help' });
     root.querySelector<HTMLElement>('[data-pkc-action="open-system-notices"]')!.click();

@@ -2065,14 +2065,20 @@ function stepHit(delta) {
   /*
    * 🔴 一致した字そのものが見える所まで送る(#1087 の見直し 2026-10-13)。直す前はページの先頭へ送るだけで、
    *   同じページに一致が 3 件あると「次の一致」を押しても数字だけ変わって画面が動かなかった。
-   *   ⚠ そのページの何番目の一致かを数え、描けている印(mark.hit)の同じ番目へ送る。まだ描けていない
-   *   ページ(印が無い)は今までどおりページの先頭のまま。
+   *   ⚠ そのページの何番目の一致かを数え、その一致の先頭を含む印(mark.hit)へ送る。一致の番号と印の番号は
+   *   同じではない(一致が span をまたげば印は複数、隣り合う一致は 1 つの印になる ── `text-hits.js` の
+   *   `markIndexOfHits`)。まだ描けていないページ(印が無い)は今までどおりページの先頭のまま。
    */
   let nth = 0;
   for (let j = 0; j < hitIndex; j += 1) if (hitList[j] === page) nth += 1;
   const box = boxes[page];
   const marks = box ? box.querySelectorAll('mark.hit') : [];
-  if (marks.length > 0) marks[Math.min(nth, marks.length - 1)].scrollIntoView({ block: 'center' });
+  const L = layers[page];
+  if (marks.length > 0 && L) {
+    const at = textHits.markIndexOfHits(L.strs, hitQuery, L.eols);
+    const k = at.length > 0 ? at[Math.min(nth, at.length - 1)] : nth;
+    marks[Math.min(k, marks.length - 1)].scrollIntoView({ block: 'center' });
+  }
 }
 
 $('query').addEventListener('keydown', (ev) => {

@@ -15,6 +15,7 @@ import {
   utf8Length,
 } from '../../src/features/pdf/pdf-quote';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 function meta(lid: string, archetype: string): EntryMeta {
   return {
@@ -134,5 +135,23 @@ describe('resolveQuoteTarget ── どのノートへ引くか', () => {
 
   it('別の添付の関係は拾わない', () => {
     expect(resolveQuoteTarget('att', metas, [rel('r1', 'note', 'att2', 'semantic')])).toBe('att');
+  });
+});
+
+describe('formatPdfQuote ── 添付名は記法として読まれない', () => {
+  const name = 'a*b*[c](d)`e`';
+
+  it('🔴 記法の字(* [ ] `)は逃がして出典に入る', () => {
+    expect(formatPdfQuote('字', 3, name)).toBe('> 字 (p.3、a\\*b\\*\\[c\\](d)\\`e\\`)');
+  });
+
+  it('🔴 描くと名前が字のまま出る(強調・リンク・コードにならない)', () => {
+    const html = renderMarkdown(formatPdfQuote('字', 3, name)!);
+    expect(html).not.toMatch(/<(em|strong|a|code)[ >]/);
+    expect(html).toContain('a*b*[c](d)`e`');
+  });
+
+  it('対照群: 記法の字を含まない名前は変わらない', () => {
+    expect(formatPdfQuote('字', 3, '報告書.pdf')).toBe('> 字 (p.3、報告書.pdf)');
   });
 });

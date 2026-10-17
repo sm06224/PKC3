@@ -100,7 +100,7 @@ describe('openInPdfReader', () => {
     expect(await openInPdfReader(g.deps, pdf)).toBe(true);
     expect(g.opened).toHaveLength(1);
     expect(g.lends).toEqual(['k1']); // 借り直さない
-    expect(g.notes).toEqual(['「a.pdf」はもう開いています']);
+    expect(g.notes).toEqual(['「a.pdf」はもう開いています(見えないときは、ウィンドウを切り替えてください)']);
     expect(JSON.stringify(g.posted)).toContain('focus-request');
   });
 
@@ -117,7 +117,7 @@ describe('openInPdfReader', () => {
     // 名乗った後は、これまでどおり「もう開いています」
     g.hello();
     await openInPdfReader(g.deps, pdf);
-    expect(g.notes[1]).toBe('「a.pdf」はもう開いています');
+    expect(g.notes[1]).toBe('「a.pdf」はもう開いています(見えないときは、ウィンドウを切り替えてください)');
   });
 
   it('🔴 貸している最中の 2 回目の押しは、窓を 2 枚にしない(「ウィンドウを開いています」と言う)', async () => {

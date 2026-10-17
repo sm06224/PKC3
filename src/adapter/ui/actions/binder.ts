@@ -727,6 +727,7 @@ import {
   defaultSettingsStorage,
   SETTINGS_NOT_PERSISTED_TEXT,
 } from '../render/settings-persist-probe';
+import { HELP_MANUAL_DRAWN_EVENT } from '../render/help';
 import { sqlEngineOf } from '@features/query/sql-engine';
 import {
   alertInApp,
@@ -13260,10 +13261,23 @@ const ACTIONS: Record<string, ActionHandler> = {
       .querySelector<HTMLElement>('[data-pkc-field="settings-back-to-help"]')
       ?.setAttribute('hidden', '');
     if (keep === null) return;
-    const outer = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
-    if (outer !== null) outer.scrollTop = keep.outer;
-    const manual = root.querySelector<HTMLElement>('[data-pkc-region="help-manual"]');
-    if (manual !== null) manual.scrollTop = keep.manual;
+    const restore = (): void => {
+      const outer = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
+      if (outer !== null) outer.scrollTop = keep.outer;
+      const manual = root.querySelector<HTMLElement>('[data-pkc-region="help-manual"]');
+      if (manual !== null) manual.scrollTop = keep.manual;
+    };
+    restore();
+    /**
+     * 🔴 **手放してあったマニュアルは、入れ直しが終わってから位置を書く**(5 分離れていた回。`HELP_MANUAL_IDLE_MS`)。
+     * ⚠ 入れ直しは非同期で、描き終えるまでは本文が「読み込んでいます…」の 1 行しか無い ── いま書いても高さが足りず
+     *   0 に丸められ、描き終えた後は先頭のままになる。だから描き終えた合図(`HELP_MANUAL_DRAWN_EVENT`)でもう 1 度書く。
+     */
+    const loading = root.querySelector<HTMLElement>(
+      '[data-pkc-region="help-manual"][data-pkc-manual-loading]',
+    );
+    // ⚠ 聞き耳は**器そのもの**に張る(器は捨てないので、1 回で外れる `once` なら外し忘れは残らない)
+    if (loading !== null) loading.addEventListener(HELP_MANUAL_DRAWN_EVENT, restore, { once: true });
   },
   /**
    * 🔴 **Office の添付の画面から、一式を取り込む場所(システム → 保存領域 → Office 表示)へ**(依頼 61-2)。

@@ -8,6 +8,7 @@
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { STRUCTURAL } from '@features/relation/kinds';
 import { isAppendable } from '@features/flavor/append-spec';
+import { escapeInline } from '@features/markdown/html-to-markdown';
 
 /**
  * 1 回に引ける字の上限(byte。UTF-8)。
@@ -66,7 +67,8 @@ export function formatPdfQuote(text: string, page: number, name: string): string
     .filter((l) => l !== '');
   if (lines.length === 0) return null;
   const p = Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1;
-  const from = stripControls(name).replace(/\s+/g, ' ').trim();
+  // 🔴 名前は記法として読まれない形にする(`*` `` ` `` `[` `]` が強調・リンクになる)
+  const from = escapeInline(stripControls(name).replace(/\s+/g, ' ').trim());
   const cite = from === '' ? `(p.${String(p)})` : `(p.${String(p)}、${from})`;
   lines[lines.length - 1] = `${lines[lines.length - 1]} ${cite}`;
   return lines.map((l) => `> ${l}`).join('\n');

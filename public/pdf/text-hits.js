@@ -127,5 +127,50 @@
     return n;
   }
 
-  root.PkcPdfTextHits = { rangesBySpan: rangesBySpan, countHits: countHits };
+  /**
+   * 一致ごとに「画面の `mark.hit` の何番目から始まるか」を返す(「3 / 7 件」の数字と光っている印を揃える口)。
+   * 🔴 一致の数と印の数は一致しない ── 一致が span をまたげば印は複数になり、隣り合う一致は 1 つの印につながる。
+   *   一致の番号をそのまま印の番号に使うと、数字と光っている所がずれる。
+   * 印の並びは `rangesBySpan` の結果(span の昇順 → span の中の昇順)= 画面の `querySelectorAll('mark.hit')` の順。
+   *
+   * @returns {number[]}  一致の順 → その一致の先頭の字を含む印の番号
+   */
+  function markIndexOfHits(strs, query, eols) {
+    var q = normQuery(query);
+    var out = [];
+    if (q === '') return out;
+    var ranges = rangesBySpan(strs, query, eols);
+    var spans = Array.from(ranges.keys()).sort(function (a, b) {
+      return a - b;
+    });
+    var base = new Map();
+    var acc = 0;
+    spans.forEach(function (j) {
+      base.set(j, acc);
+      acc += ranges.get(j).length;
+    });
+    var b = build(strs, eols);
+    var pos = b.text.indexOf(q);
+    while (pos !== -1) {
+      var n = pos;
+      while (n < pos + q.length && b.own[n] < 0) n += 1;
+      var j = b.own[n];
+      var list = ranges.get(j);
+      var k = 0;
+      if (list !== undefined) {
+        var at = b.at[n];
+        for (var r = 0; r < list.length; r += 1) {
+          if (list[r][0] <= at && at < list[r][1]) {
+            k = r;
+            break;
+          }
+        }
+        out.push(base.get(j) + k);
+      }
+      pos = b.text.indexOf(q, pos + q.length);
+    }
+    return out;
+  }
+
+  root.PkcPdfTextHits = { rangesBySpan: rangesBySpan, countHits: countHits, markIndexOfHits: markIndexOfHits };
 })(typeof self !== 'undefined' ? self : this);
