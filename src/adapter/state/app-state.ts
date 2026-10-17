@@ -205,8 +205,6 @@ import {
   canGoBack,
   canGoForward,
   current as historyCurrent,
-  goBack,
-  goForward,
   pruneHistory,
   pushSelection,
   type SelectionHistory,
@@ -4654,7 +4652,13 @@ function reduceWithHistory(state: AppState, action: Dispatchable): ReduceResult 
     history = pruneHistory(history, (lid) => result.state.entryMetas.has(lid));
     dual = pruneDual(dual, (lid) => result.state.entryMetas.has(lid));
   }
-  if (result.state.selectedLid !== null && result.state.selectedLid !== state.selectedLid)
+  // 🔴 システムのメッセージ / 処理の記録は履歴に積まない(戻る・進むは `SELECT_ENTRY` で選ぶが、
+  //    この 2 件は `entryMetas` に居ないので断られ、押しても何も起きない dead click になっていた)
+  if (
+    result.state.selectedLid !== null &&
+    result.state.selectedLid !== state.selectedLid &&
+    !isSystemMessageLid(result.state.selectedLid)
+  )
     history = pushSelection(history, result.state.selectedLid);
   /**
    * 🔴 **バックリンクも「選択が動いた結果」を 1 か所で見る**(#348、2026-08-23)。
@@ -4707,18 +4711,61 @@ function reduceWithHistory(state: AppState, action: Dispatchable): ReduceResult 
  * 🔑 だから「選択が実際に動いたか」を見て、動いたときだけ履歴を確定させる。
  */
 function navHistory(state: AppState, dir: 'back' | 'forward'): ReduceResult {
-  const moved = dir === 'back' ? goBack(state.selectionHistory) : goForward(state.selectionHistory);
-  if (moved === state.selectionHistory) return { state, events: [] };
-  const target = historyCurrent(moved);
-  if (target === null || target === state.selectedLid) return { state, events: [] };
-  const result = reduceCore(state, { type: 'SELECT_ENTRY', lid: target });
-  if (result.state.selectedLid !== target) return { state, events: [] }; // 断られた(編集中など)
-  return { state: { ...result.state, selectionHistory: moved }, events: result.events };
+  const h = state.selectionHistory;
+  const sel = state.selectedLid;
+  /**
+   * 🔴 **履歴の末尾 =「いま」とは限らない**。掃除(`pruneHistory`)や別タブの削除(選択が null へ)、
+   *   システムのメッセージ(履歴に積まない)を開いているときは、いまの選択と末尾がずれる。
+   *   ずれているときの「戻る」は**末尾へ戻る**(さらに 1 つ飛ばすと、いたノートを跳び越す)。
+   * 🔴 **行き先が選べなければ次の行き先へ**(選べない物を挟むと押しても何も起きない)。
+   *   ただし編集中などで全部断られたら何も変えない。
+   */
+  const tail = historyCurrent(h);
+  const stale = sel !== tail;
+  if (dir === 'back') {
+    const start = stale ? h.past.length - 1 : h.past.length - 2;
+    // いまの選択が履歴の物なら「進む」で戻れるよう未来へ入れる(メッセージ類は入れない)
+    const headFuture =
+      stale
+        ? sel !== null && !isSystemMessageLid(sel)
+          ? [sel, ...h.future]
+          : h.future
+        : [tail as string, ...h.future];
+    for (let i = start; i >= 0; i--) {
+      const target = h.past[i] as string;
+      if (target === sel) continue;
+      const result = reduceCore(state, { type: 'SELECT_ENTRY', lid: target });
+      if (result.state.selectedLid !== target) continue; // 断られた(編集中・居ない)
+      return {
+        state: { ...result.state, selectionHistory: { past: h.past.slice(0, i + 1), future: headFuture } },
+        events: result.events,
+      };
+    }
+    return { state, events: [] };
+  }
+  for (let j = 0; j < h.future.length; j++) {
+    const target = h.future[j] as string;
+    if (target === sel) continue;
+    const result = reduceCore(state, { type: 'SELECT_ENTRY', lid: target });
+    if (result.state.selectedLid !== target) continue;
+    return {
+      state: {
+        ...result.state,
+        selectionHistory: {
+          past: tail === target ? h.past : [...h.past, target],
+          future: h.future.slice(j + 1),
+        },
+      },
+      events: result.events,
+    };
+  }
+  return { state, events: [] };
 }
 
-/** 戻れるか(UI の活殺に使う)。 */
+/** 戻れるか(UI の活殺に使う)。⚠ 末尾といまの選択がずれているときは 1 件でも戻れる。 */
 export function canNavBack(state: AppState): boolean {
-  return canGoBack(state.selectionHistory);
+  const h = state.selectionHistory;
+  return canGoBack(h) || (h.past.length >= 1 && state.selectedLid !== historyCurrent(h));
 }
 
 /** 進めるか。 */

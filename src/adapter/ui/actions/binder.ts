@@ -473,6 +473,7 @@ function openRecentEntries(
   root: HTMLElement,
   dispatcher: Dispatcher,
   notify: (text: string, opts?: StatusOptions) => void,
+  services: BinderServices,
 ): void {
   const st = dispatcher.getState();
   const initialLids = recentNavLids(
@@ -528,7 +529,8 @@ function openRecentEntries(
     { title: '最近開いたノートへ移る' },
   ).then((lid) => {
     if (lid === null) return;
-    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+    // 🔴 編集中に押しても無言で何も起きなかった ── 他のノートを開く道と同じく理由を出す
+    selectEntryOrExplain(dispatcher, lid, 'ノート', root, services);
   });
 }
 
@@ -7660,7 +7662,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     openCopyHistory(root, (t) => services.showStatus?.(t));
   },
   'open-recent': (dispatcher, _target, services, root) => {
-    openRecentEntries(root, dispatcher, (t, o) => services.showStatus?.(t, o));
+    openRecentEntries(root, dispatcher, (t, o) => services.showStatus?.(t, o), services);
   },
   'use-copied': (_dispatcher, target, services) => {
     const raw = target.getAttribute('data-pkc-copied');

@@ -10,6 +10,7 @@
  * `localStorage` へ触るだけで例外が飛ぶ。起動を止めない。
  */
 import { parseSplitLids, serializeSplitLids } from '@features/split-frames';
+import { readScoped, scopedKey } from './portable-scope';
 
 const KEY = 'pkc3.split-lids';
 
@@ -21,19 +22,23 @@ function storage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   }
 }
 
-/** 憶えている並び。⚠ 読めなければ空(= 並べない)。 */
-export function loadSplitLids(): readonly string[] {
+/**
+ * 憶えている並び。⚠ 読めなければ空(= 並べない)。
+ * 🔴 portable は `bundleId` で鍵を分ける(`file://` で別の HTML の枠を上書きしない)。素の PKC3 は `null`。
+ */
+export function loadSplitLids(bundleId: string | null = null): readonly string[] {
   try {
-    return parseSplitLids(storage()?.getItem(KEY) ?? null);
+    const st = storage();
+    return parseSplitLids(st === null ? null : readScoped((k) => st.getItem(k), KEY, bundleId));
   } catch {
     return [];
   }
 }
 
 /** 並びを憶える。⚠ 空でも書く(「全部外した」を憶えるため)。 */
-export function saveSplitLids(lids: readonly string[]): void {
+export function saveSplitLids(lids: readonly string[], bundleId: string | null = null): void {
   try {
-    storage()?.setItem(KEY, serializeSplitLids(lids));
+    storage()?.setItem(scopedKey(KEY, bundleId), serializeSplitLids(lids));
   } catch {
     // 憶えられないだけ ── その回は並べたまま使える
   }

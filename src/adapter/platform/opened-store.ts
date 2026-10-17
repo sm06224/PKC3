@@ -14,6 +14,7 @@
  * **その session の控えには積む**ので、並べ替えは効いたまま閉じるまで続く。
  */
 import { openedMap, OPENED_MAX, pruneOpened, pushOpened, type OpenedAt } from '@features/history/opened-log';
+import { readScoped, scopedKey } from './portable-scope';
 
 const KEY = 'pkc3.opened';
 
@@ -85,14 +86,35 @@ export class OpenedStore {
   /** 🔴 保存が無い端末の控え ── この session の中だけ効く。 */
   private fallback: OpenedAt[] = [];
 
-  constructor(private readonly storage: OpenedStorage | null = browserStorage) {
-    if (storage !== null) this.fallback = parse(storage.get(KEY));
+  /**
+   * 🔴 持ち歩ける 1 枚(portable)のときは、鍵を bundle ごとに分ける(`portable-scope.ts`)。
+   * ⚠ `file://` では localStorage が全部の portable で共有され、B を開いた掃除が A の記録を消していた。
+   * 素の PKC3 は `null` のまま(今までの鍵)。
+   */
+  private bundleId: string | null;
+
+  constructor(
+    private readonly storage: OpenedStorage | null = browserStorage,
+    bundleId: string | null = null,
+  ) {
+    this.bundleId = bundleId;
+    if (storage !== null) this.fallback = this.readStored(storage);
+  }
+
+  private readStored(storage: OpenedStorage): OpenedAt[] {
+    return parse(readScoped((k) => storage.get(k), KEY, this.bundleId));
+  }
+
+  /** 起動で bundle が分かったあとに 1 度だけ呼ぶ(`appOpenedStore` は import 時に作られるため)。 */
+  scopeTo(bundleId: string | null): void {
+    this.bundleId = bundleId;
+    if (this.storage !== null) this.fallback = this.readStored(this.storage);
   }
 
   list(): readonly OpenedAt[] {
     // ⚠ **`?.` で書かない**(上の戒め)── `null` のときは控えを返す
     if (this.storage === null) return this.fallback;
-    return parse(this.storage.get(KEY));
+    return this.readStored(this.storage);
   }
 
   /** lid → 開いた時刻。並べ替えが引く形。 */
@@ -118,12 +140,15 @@ export class OpenedStore {
   /** 🔴 user が消す口(「最近開いた記録を消す」)。 */
   clear(): void {
     this.fallback = [];
-    if (this.storage !== null) this.storage.remove(KEY);
+    if (this.storage === null) return;
+    // 🔴 portable は空を**書く**(消すと、分ける前の鍵が読み直されて記録が戻る)
+    if (this.bundleId === null) this.storage.remove(KEY);
+    else this.storage.set(scopedKey(KEY, this.bundleId), '[]');
   }
 
   private write(next: readonly OpenedAt[]): void {
     this.fallback = [...next];
-    if (this.storage !== null) this.storage.set(KEY, JSON.stringify(next));
+    if (this.storage !== null) this.storage.set(scopedKey(KEY, this.bundleId), JSON.stringify(next));
   }
 }
 
