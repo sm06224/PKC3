@@ -46,8 +46,6 @@
 | `bulk-tag-add` | 低 | タグを付ける | `src/adapter/ui/render/filer.ts:511` | 複数選択してから使う(選択が前提) |
 | `bulk-tag-remove` | 低 | タグを外す | `src/adapter/ui/render/filer.ts:513` | 同上 |
 | `enter-folder` | 低 | (フォルダへ入る) | `src/adapter/ui/render/filer.ts:886`<br>`src/adapter/ui/render/filer.ts:904` | 押した行(フォルダ)を指す |
-| `move-order-down` | 低 | (下へ) | `src/adapter/ui/render/filer.ts:572(綴りを組み立てる)` | 押した行を 1 つ動かす(並べ替えの行ボタン) |
-| `move-order-up` | 低 | (上へ) | `src/adapter/ui/render/filer.ts:572(綴りを組み立てる)` | 同上 |
 | `pick-create-kind` | 低 | (作る種類を選ぶ) | `src/adapter/ui/render/browse.ts:115`<br>`src/adapter/ui/render/shell.ts:571` | 選んだ種類を押した項目から読む。種類ごとの作成は別に登録済み |
 | `rename-attachment` | 低 | (添付の名前欄) | `src/adapter/ui/render/detail.ts:3379` | 入力欄の値を読む |
 | `select-entry` | 低 | (ノートを選ぶ) | `src/adapter/ui/render/captures.ts:629`<br>`src/adapter/ui/render/contacts.ts:230` | 押した行を指す(行そのもの) |
@@ -458,3 +456,8 @@
 | `phone-menu` | 低 | このノートの操作を開く | `src/adapter/ui/render/shell.ts:937` | スマホ幅専用の画面操作 |
 | `phone-page` | 低 | ← 一覧へ戻る ほか | `src/adapter/ui/render/shell.ts:756`<br>`src/adapter/ui/render/shell.ts:916` | スマホ幅専用。押したボタンが行き先を運ぶ |
 
+
+## 2026-10-17(#1163 依頼 153)── 並べ替えの 2 件を登記した
+
+左のペインの「上へ動かす」「下へ動かす」(`move-order-up` / `move-order-down`)を `KEY_COMMANDS` へ登記した(鍵の既定は置かない ── `Alt+↑/↓` は本文の行の入れ替えで使っている)。
+受け手は押しボタンそのもの(`SHORTCUT_BUTTON`)。上の全数表の「低」から外した(`tests/operation-table.test.ts` が「表の行 = 未登記の在庫」で突き合わせる)。

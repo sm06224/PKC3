@@ -268,8 +268,9 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'dual-select-all', 'dual-sort', 'dual-tab-close', 'end-tile-reorder', 'enter-folder',
   'force-release', 'format-text', 
   'hide-revision-preview', 'image-align', 'image-width', 'insert-attachment', 'install-office-pack',
-  'launch-asset', 'launch-asset-extension', 'launch-asset-raw', 'move-order-down',
-  'move-order-up', 'mute-announce', 'next-announce',
+  'launch-asset', 'launch-asset-extension', 'launch-asset-raw',
+  // ⚠ 2026-10-17(#1163 依頼 153): `move-order-down` / `move-order-up` は登記した(名前で呼べる)のでここから外れた
+  'mute-announce', 'next-announce',
   // ⚠ 2026-10-17(#1621): 左のペインの「⋯」。入りきらないボタンを出すだけで、押した所から何も要らない
   'open-bar-more',
   // ⚠ 2026-10-08(#1452 案 1): `open-manual-window` は登記簿に載った(名前で呼べる)のでここから外れた
@@ -882,10 +883,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       receivers: 380,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
-      registered: 176,
-      both: 103,
+      // ⚠ 2026-10-17(#1163 依頼 153): 左のペインの「上へ動かす」「下へ動かす」(`move-order-up` / `move-order-down`)の 2 件を登記 ──
+      //   受け手は前から在った(帯のボタン)ので `registered` +2 / `both` +2 / `unregistered` −2(`total` / `receivers` は動かない)。`undo-trash` と同じ仕分け。
+      registered: 178,
+      both: 105,
       outsideActionsTable: 73,
-      unregistered: 277,
+      unregistered: 275,
     });
   });
 
@@ -945,10 +948,11 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)を登記で `key` 138 → 139(鍵の既定は持たない)
     // ⚠ 2026-10-17(#1660): 「このノートを PDF で書き出す」(`export-note-pdf`)を登記で `key` 139 → 140(鍵の既定は持たない)
     // ⚠ 2026-10-17(#1640 ②): 「前の日のノートを開く」「次の日のノートを開く」(`open-prev-day-note` / `open-next-day-note`)を登記で `key` 140 → 142(鍵の既定は持たない)
+    // ⚠ 2026-10-17(#1163 依頼 153): 「上へ動かす」「下へ動かす」(`move-order-up` / `move-order-down`)を登記で `key` 142 → 144(鍵の既定は持たない)
     expect(s().perBook).toEqual({
       // ⚠ 2026-10-17(#1646 の 1): 行のメニューが 22 → 23(`open-trash`)
       // ⚠ 2026-10-17(依頼 337): 一覧の Home / End / PageUp / PageDown の 4 件を登記で 142 → 146(鍵の既定を持つ)
-      key: 146,
+      key: 148,
       entry: 23,
       body: 3,
       collection: 2,

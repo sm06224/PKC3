@@ -511,10 +511,12 @@ describe('delete (P3-7a)', () => {
       expect(said).toEqual(['戻せるものがありません(ゴミ箱へ移した直後だけ戻せます)']);
     });
 
-    it('🔴 名前で探せて、鍵は付いていない', () => {
+    it('🔴 名前で探せて、鍵はフォルダの表と 2 ペインの Ctrl+Z だけ(#1163 依頼 132)', () => {
       const cmd = KEY_COMMANDS.find((c) => c.id === 'undo-trash');
       expect(cmd, '命令が表に無い').toBeDefined();
-      expect(cmd!.defaults, '既定の鍵が付いている').toEqual([]);
+      expect(cmd!.defaults).toEqual(['Mod+Z']);
+      // 本文の編集・1 画面の取り消しとぶつからないよう、全域にしない
+      expect(cmd!.contexts).toEqual(['filer', 'dual']);
       // 画面の下のボタンの字(`status-open.ts` の「元に戻す」)と同じ語を含む
       expect(cmd!.label).toContain('元に戻す');
     });

@@ -83,8 +83,8 @@ const UNRESOLVED: readonly string[] = [
   'dual-bookmark',
   'dual-forward',
   'install-office-pack',
-  'move-order-down',
-  'move-order-up',
+  // ⚠ 2026-10-17(#1163 依頼 153): `move-order-down` / `move-order-up` はここから外れた ── 鍵と「操作を探す」から呼べるようにして、
+  //   `binder.ts` の `SHORTCUT_BUTTON` に押し口の選択子(`data-pkc-action="move-order-up"`)が静的に載ったため(出口が字で追えるようになった)
   /**
    * ⚠ 2026-10-17(#1621)で 1 件増えた ── 左のペインの「⋯」。押し口は `bar-overflow.ts` が
    *   `BAR_MORE_ACTION` という**定数**で組むので、静的な `data-pkc-action="open-bar-more"` が source のどこにも無い。

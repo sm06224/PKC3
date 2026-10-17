@@ -22,9 +22,11 @@
 /** 修飾キーの状態 + 基本キー。⚠ `mod` は **Ctrl と ⌘ の両方**(下の注記)。 */
 export interface Chord {
   /**
-   * 🔴 **Ctrl と ⌘ を 1 つに畳む**。PKC2 も PKC3 も `ctrlKey || metaKey` で受けており、
-   * mac の人は ⌘、Windows の人は Ctrl を押す ── **同じ操作の別名**である。
+   * 🔴 **Ctrl と ⌘ を 1 つに畳む**。Windows の人は Ctrl、mac の人は ⌘ を押す ── **同じ操作の別名**である。
    * ⚠ 分けると「mac だけ効かない近道」が必ず生まれる(PKC2 が実際にそう作っていた)。
+   * 🔴 **ただし mac の `Ctrl` は畳まない**(#1163 依頼 181)── mac の文字入力は `Ctrl+H`(1 字消す)・
+   *   `Ctrl+K`(行末まで消す)・`Ctrl+B`(1 字戻る)を昔から使う。`Ctrl` も受けると「置換」「リンク」「太字」が
+   *   先に効いて、文章が書けなくなる。mac では `⌘` だけを `mod` とし、`Ctrl` は OS 標準へ返す(`chordOf`)。
    */
   readonly mod: boolean;
   readonly alt: boolean;
@@ -82,7 +84,9 @@ export type KeyContext =
  */
 /** 文脈の見出し。⚠ test が「名乗った文脈の下に出ているか」を全数で突き合わせる。 */
 export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
-  global: '画面のどこでも',
+  // 🔴 文字を打っている間は、`whileTyping` を名乗る一部の操作しか効かない(#1163 依頼 117-2 = A。
+  //   マニュアルには書いてあったが、設定の画面の見出しには書いていなかった)
+  global: '画面のどこでも(文字を打っている間は一部を除く)',
   editor: '2 ペインの編集(原文と題名の欄)',
   append: '追記の欄',
   row: '行の編集(開いている行の欄)',
@@ -686,7 +690,8 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     id: 'open-flags',
     label: 'フラグへ移る',
     contexts: ['global'],
-    defaults: ['Alt+4', 'F12'],
+    // 🔴 `F12` はブラウザの開発者ツールに返した(#1163 依頼 183)。⚠ 開発者ツールは `Ctrl+Shift+I` でも開ける
+    defaults: ['Alt+4'],
     whileTyping: true,
     note: '開発中の切り替え(フラグ)の画面へ移ります',
   },
@@ -1070,7 +1075,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: 'SQL を実行',
     contexts: ['global'],
     defaults: [],
-    note: 'SQL の欄に書いた文を実行します(SQL の画面を開いているときだけ効きます)',
+    note: 'SQL の欄に書いた文を実行します(SQL の画面を開いているときだけ効きます。SQL の欄の中では Ctrl+Enter(Mac は ⌘+Enter)でも実行できます)',
     alias: 'SQL 実行 クエリ データベース',
   },
   {
@@ -1200,16 +1205,45 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    *   鍵だけで使う人には戻す道が無かった。
    * 🔑 受け手は押しボタンの `undo-trash` と同じ(`binder.ts` の `runGlobalCommand` の特例 ── ボタンは
    *   知らせの隣に出ている間しか無い)。字は画面のボタンの字(`元に戻す`)に揃える。
-   * ⚠ 鍵は付けない(`defaults: []`。`KEYLESS` に足すこと)── 欲しい人は設定で割り当てる。
+   * 🔴 **既定は、フォルダの一覧と 2 ペインの行に焦点があるときの `Ctrl+Z`**(#1163 依頼 132 = A)。押し間違えた直後に、
+   *   多くのアプリと同じキーで戻せる。⚠ `global` にしない ── 本文の編集中の `Ctrl+Z`(文字の取り消し)・1 画面の `取り消す`
+   *   (`undo`)と同じ鍵になる。表の行に焦点があるときだけなら、文字を打つ欄とは別の場面でぶつからない。
+   *   ⚠ 「操作を探す」からは、どこからでも呼べる(実体は `runGlobalCommand`)。
    */
   {
     id: 'undo-trash',
     label: '元に戻す(ゴミ箱へ移した直後)',
-    contexts: ['global'],
-    defaults: [],
+    contexts: ['filer', 'dual'],
+    defaults: ['Mod+Z'],
     note: 'ゴミ箱へ移した直後に画面の下に出る「元に戻す」と同じです(移した直後の数秒間だけ効きます)',
     whyNot: 'ゴミ箱へ移した直後だけ効きます',
     alias: 'ゴミ箱 削除 戻す 取り消し 復元 アンドゥ',
+  },
+  /**
+   * 🔴 **ノートの並べ替えを、鍵と「操作を探す」から呼べるようにする**(#1163 依頼 153 = ②)。
+   *
+   * ⚠ 直す前は、左のペインのフォルダの中でノートの順番を変えるのに「上へ動かす」「下へ動かす」のボタンかドラッグしか無かった。
+   * 🔑 受け手は押しボタンそのもの(`SHORTCUT_BUTTON`。並べ替えの実体を 2 つ作らない)。端・並び順が「自分で並べた順」でないときは押せない。
+   * ⚠ **鍵は付けない**(`defaults: []`。`KEYLESS` に足すこと)── `Alt+↑/↓` は本文の行の入れ替えで使っているので、ぶつからないよう
+   *   既定は置かない。欲しい人は設定で割り当てる。⚠ 2 ペインの並べ替えは別の話(ここでは入れない)。
+   */
+  {
+    id: 'move-order-up',
+    label: 'ノートを上へ動かす',
+    contexts: ['global'],
+    defaults: [],
+    note: '左のペインのフォルダの中で、選んでいるノートを 1 つ上へ動かします(並び順が「自分で並べた順」のときだけ効きます)',
+    whyNot: '選んでいるノートが先頭にある、または並び順が「自分で並べた順」ではありません',
+    alias: '並べ替え 順番 移動 上へ',
+  },
+  {
+    id: 'move-order-down',
+    label: 'ノートを下へ動かす',
+    contexts: ['global'],
+    defaults: [],
+    note: '左のペインのフォルダの中で、選んでいるノートを 1 つ下へ動かします(並び順が「自分で並べた順」のときだけ効きます)',
+    whyNot: '選んでいるノートが末尾にある、または並び順が「自分で並べた順」ではありません',
+    alias: '並べ替え 順番 移動 下へ',
   },
   {
     id: 'replace-all',
@@ -1525,8 +1559,8 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '前のノートへ戻る',
     contexts: ['global', 'dual'],
     defaults: ['Alt+ArrowLeft'],
-    whileTyping: true,
-    note: '2 ペインでは、そのタブが 1 つ前に見ていた場所へ戻ります',
+    // 🔴 文字を打っている間は効かない(#1163 依頼 180)── mac の `Option+←` は単語ごとのカーソル移動。画面の「戻る」ボタンは使える
+    note: '2 ペインでは、そのタブが 1 つ前に見ていた場所へ戻ります(文字を打っている間は、カーソルの移動に使うため効きません)',
     whyNot: '戻る先がありません',
   },
   {
@@ -1534,8 +1568,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '次のノートへ進む',
     contexts: ['global', 'dual'],
     defaults: ['Alt+ArrowRight'],
-    whileTyping: true,
-    note: '2 ペインでは、戻る前に見ていた場所へ進みます',
+    note: '2 ペインでは、戻る前に見ていた場所へ進みます(文字を打っている間は、カーソルの移動に使うため効きません)',
     whyNot: '進む先がありません',
   },
   /**
@@ -1967,10 +2000,12 @@ export function baseKeyOf(ev: Pick<KeyboardEvent, 'key' | 'code'>): string | nul
 /** `KeyboardEvent` → 和音。修飾キー単独なら `null`。 */
 export function chordOf(
   ev: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>,
+  mac: boolean = isMac(),
 ): Chord | null {
   const key = baseKeyOf(ev);
   if (key === null) return null;
-  return { mod: ev.ctrlKey || ev.metaKey, alt: ev.altKey, shift: ev.shiftKey, key };
+  // 🔴 mac では `⌘` だけが `mod`(#1163 依頼 181)。`Ctrl` を押した打鍵は `mod` なしになり、素のキー扱いで OS 標準の文字入力へ流れる
+  return { mod: mac ? ev.metaKey : ev.ctrlKey || ev.metaKey, alt: ev.altKey, shift: ev.shiftKey, key };
 }
 
 /** 和音 → 正規化した文字列(保存と比較はこの形だけ)。 */
@@ -2032,7 +2067,7 @@ export function chordLabel(s: string, mac = isMac()): string {
   return parts.join(' + ');
 }
 
-/** mac かどうか(表示のためだけ)。⚠ 判定に使わない ── 割当は `Mod` で 1 つ。 */
+/** mac かどうか(表示と、打鍵の `Ctrl` を `Mod` に畳むか(`chordOf`)だけ)。⚠ 割当の判定に使わない ── 割当は `Mod` で 1 つ。 */
 export function isMac(): boolean {
   try {
     const nav = typeof navigator !== 'undefined' ? navigator : null;
@@ -2141,7 +2176,38 @@ export const REFUSED: readonly string[] = [
   'F5',
   'Mod+F5',
   'Shift+F5',
+  // 🔴 **ブラウザやパソコンが先に取って、ページへ届かないキー**(#1163 依頼 313)。割り当てても効かないので、受け付けない。
+  //   ⚠ 範囲は「新しいウィンドウ・タブ / 閉じる / 閉じたタブを開き直す / タブの切り替え / ウィンドウを閉じる」に絞った。
+  //   Chromium の「ページに渡さない操作」の一覧(新しいタブ・ウィンドウ・シークレットウィンドウ / タブ・ウィンドウを閉じる /
+  //   閉じたタブを開き直す / 次・前のタブ / 終了)に当たる組み合わせ。実機で確かめていない `Ctrl+L` / `Ctrl+D` は入れない
+  //   (確かめずに断ると、割り当てられるキーを黙って減らす)。`Ctrl+N` も入れない ── 「ノートを作る」の既定で、実機の確認が先。
+  'Mod+Shift+N',
+  'Mod+Shift+T',
+  'Mod+Shift+W',
+  'Mod+Shift+Q',
+  'Mod+Tab',
+  'Mod+Shift+Tab',
+  'Mod+PageUp',
+  'Mod+PageDown',
+  'Alt+F4',
 ];
+
+/** 文字を打つ欄の編集に使うキー(`Ctrl` / `Alt` と組むと、単語・行・文書の端への移動や削除になる)。 */
+const FIELD_EDIT_KEYS: ReadonlySet<string> = new Set([
+  'ArrowLeft',
+  'ArrowRight',
+  'ArrowUp',
+  'ArrowDown',
+  'Backspace',
+  'Delete',
+  'Home',
+  'End',
+]);
+
+/** 文字を打つ欄の中で効く操作か(欄の文脈を名乗る / 打っている間も効く)。 */
+function actsInField(cmd: KeyCommand): boolean {
+  return cmd.whileTyping === true || cmd.contexts.some((c) => IN_FIELD_CONTEXTS.has(c));
+}
 
 export interface BindingProblem {
   readonly kind: 'unreadable' | 'bare' | 'refused' | 'conflict' | 'duplicate' | 'unsaved';
@@ -2191,11 +2257,21 @@ export function validateBinding(
     return {
       kind: 'refused',
       // ⚠ Ctrl+W / T / Q はタブ・ウィンドウの操作 ── 列挙から漏らすと「なぜ W が再読込なのか」と読まれる(#1087)
-      message: 'これはブラウザがコピー・貼り付け・タブやウィンドウの操作・再読込・印刷に使う組み合わせです',
+      message: 'これはブラウザやパソコンがコピー・貼り付け・タブやウィンドウの操作・再読込・印刷に使う組み合わせです',
     };
   }
   const me = findCommand(commandId);
   if (me === null) return { kind: 'unreadable', message: '知らないコマンドです' };
+  // 🔴 **文字を打つ欄の編集キーは、打つ欄で効く操作へ割り当てない**(#1163 依頼 117-3 = A)。`Ctrl+Backspace`(単語ごと消す)・
+  //   `Ctrl+←`(単語ごと動く)・`Ctrl+Home` などを奪うと、その欄で元の働きが効かなくなる。素の文字キーを断るのと同じ向き。
+  //   ⚠ 自分の既定は断らない(`nav-back` の `Alt+←` など。上の `ownDefault`)。範囲は「欄の中で効く操作」(`typesInField`)だけ ──
+  //   表やペインの中だけで効く操作は、欄が無いので奪う相手が居ない。
+  if (!ownDefault && (c.mod || c.alt) && FIELD_EDIT_KEYS.has(c.key) && actsInField(me)) {
+    return {
+      kind: 'refused',
+      message: '文字を打つ欄の編集に使うキーです。割り当てると、欄でこのキーの元の働き(単語ごとの移動や削除など)が効かなくなります',
+    };
+  }
   for (const other of KEY_COMMANDS) {
     if (other.id === commandId) continue;
     if (!contextsOverlap(me.contexts, other.contexts)) continue;

@@ -6405,7 +6405,9 @@ export function commandRowsFor(
      * ⚠ 直す前は全域の命令しか聞かなかったので、ノートを読んでいる最中でも「ノートを閉じる」が**いつも灰色**だった
      *   (`runGlobalCommand` には 2 つとも「押せるか」だけ答える口が在り、選んだ後の実行もそこを通るのに、一覧が先に外していた)。
      */
-    if (!c.contexts.some((ctx) => ctx === 'global' || ctx === 'reading' || ctx === 'window')) continue;
+    // 🔴 `undo-trash` は鍵だけフォルダの表(`filer` / `dual`)に付くが、一覧からはどこからでも呼べる(#1163 依頼 132)── 実体は `runGlobalCommand` の 1 本
+    if (!c.contexts.some((ctx) => ctx === 'global' || ctx === 'reading' || ctx === 'window') && c.id !== 'undo-trash')
+      continue;
     if (runGlobalCommand(c.id, root, dispatcher, keymap, noop, noop, true)) ready.add(c.id);
   }
   /**
@@ -15413,6 +15415,9 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
    */
   'nav-back': '[data-pkc-action="nav-back"]',
   'nav-forward': '[data-pkc-action="nav-forward"]',
+  // 🔴 並べ替えも押しボタンをそのまま押す(#1163 依頼 153)。⚠ 帯(`order-nudge`)に限る ── 行や⋯メニューの同名ボタンは押した行の lid を持つ
+  'move-order-up': '[data-pkc-field="order-nudge"] [data-pkc-action="move-order-up"]',
+  'move-order-down': '[data-pkc-field="order-nudge"] [data-pkc-action="move-order-down"]',
   'open-recent': '[data-pkc-action="open-recent"]',
   'create-entry': '[data-pkc-field="create-run"]',
   'edit-entry': '[data-pkc-action="start-edit"]',
@@ -19998,6 +20003,16 @@ export function bindActions(
         return;
       }
       /**
+       * 🔴 **字が無いときの `Esc` は、探す欄から出る**(#1163 依頼 185 = 案どおり)。
+       * ⚠ 直す前は何も起きず、欄に居続けた。🔑 出るだけで、本文は閉じない(次の `Esc` が今までどおり効く)。
+       *   `preventDefault` するのはブラウザの検索欄の標準の動きと二重に走らせないため(上と同じ)。
+       */
+      if (ke.key === 'Escape' && !ke.isComposing && el.value === '') {
+        ke.preventDefault();
+        el.blur();
+        return;
+      }
+      /**
        * 🔴 **`>` を打っている間は、鍵が操作の一覧に効く**(#274 段①)。
        * ⚠ `Enter` = **押せる先頭の行を実行**(操作のパレットと同じ ── 一覧へ焦点を移して
        *   から押させると、絞って即実行という速さが消える)。⚠ 変換確定の Enter では実行しない。
@@ -20179,6 +20194,17 @@ export function bindActions(
        * **本文に記号が入らずヘルプが開く**。
        */
       const chord = chordOf(ke);
+      /**
+       * 🔴 **文字を打っている間の `Alt+←` / `Alt+→` は、カーソルの移動に任せる**(#1163 依頼 180。Gemini 裁定 = 案どおり)。
+       * ⚠ mac の `Option+←/→` は「単語ごとにカーソルを動かす」キーで、直す前は文章を書くたびにカーソルが動かず
+       *   ノートが切り替わった。画面の「戻る」「進む」のボタンはそのまま使える。
+       * ⚠ mac 以外は、欄の中の `Alt+←/→` に欄としての働きが無く、素通しするとブラウザが前のページへ戻って
+       *   書きかけの画面を離れかねない ── 直す前から止めていたので、これまでどおり止める(`preventDefault` だけして何もしない)。
+       */
+      if (typing && (gcmd === 'nav-back' || gcmd === 'nav-forward')) {
+        if (!isMac()) ke.preventDefault();
+        return;
+      }
       if (
         typing &&
         !(findCommand(gcmd)?.whileTyping === true && chord !== null && !typesCharacter(chord))
@@ -20586,6 +20612,9 @@ export function bindActions(
   };
 
   const runDualKey = (cmd: string, side: DualSide): boolean => {
+    // 🔴 ゴミ箱へ移した直後の「元に戻す」(`Ctrl+Z`。#1163 依頼 132)── 実体は「操作を探す」と同じ `runGlobalCommand` の 1 本
+    if (cmd === 'undo-trash')
+      return runGlobalCommand(cmd, root, dispatcher, keymap, () => undefined, tellUser);
     const st = dispatcher.getState();
     /**
      * ⚠ **無言で断らない**(左の列と同じ作法)── `preventDefault` は走るので、
@@ -20739,6 +20768,9 @@ export function bindActions(
   };
 
   const runFilerKey = (cmd: string): boolean => {
+    // 🔴 ゴミ箱へ移した直後の「元に戻す」(`Ctrl+Z`。#1163 依頼 132)── 2 ペインと同じ 1 本(戻す実体を 2 つ作らない)
+    if (cmd === 'undo-trash')
+      return runGlobalCommand(cmd, root, dispatcher, keymap, () => undefined, tellUser);
     const st = dispatcher.getState();
     /**
      * 🔴 **無言で断らない**(2026-08-18 の着地前レビュー 7)。

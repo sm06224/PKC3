@@ -74,6 +74,8 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'open-recent': NOTE,
   'open-copy-history': NOTE,
   'open-note-window': NOTE,
+  'move-order-up': NOTE,
+  'move-order-down': NOTE,
   'hide-history': NOTE,
   'copy-note-md': NOTE,
   'copy-note-rich': NOTE,
