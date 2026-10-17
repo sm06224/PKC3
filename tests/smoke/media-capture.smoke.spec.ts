@@ -1255,6 +1255,8 @@ test('🔴 1 分を超えた録音は、残さずにやめる前に確かめる(
     }, ms);
   const capStatus = bar.locator('[data-pkc-field="capture-status"]');
   const assetRows = page.locator('[data-pkc-capture]');
+  // 録った物の行を数えるため、左の列を「録ったもの」にしておく
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
   const rowsBefore = await assetRows.count();
   await clickReal(page, '[data-pkc-field="start-audio-capture"]');
   await expect(bar, '録音を押しても帯が出ない').toBeVisible();
