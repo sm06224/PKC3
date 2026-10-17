@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { MANUAL_TEXT } from '../../src/adapter/ui/render/help';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import {
+  excerptOf,
   findInManual,
   manualSections,
   MANUAL_FIND_MAX_SECTIONS,
@@ -169,5 +170,41 @@ describe('当たった所の 1 行(依頼 67-2)', () => {
 
   it('大小を無視して当てた行を出す', () => {
     expect(findInManual('## s\nUse PKC here\n', 'pkc')[0]!.excerpt).toBe('Use PKC here');
+  });
+});
+
+/**
+ * 🔴 **打ち方の違いで探す結果が変わらない**(#1087)。マニュアルは「Ctrl+S」と「Ctrl + S」を
+ * 両方書いているので、空白の有無・全角半角で件数が割れると「無い」と読まれる。
+ */
+describe('🔴 空白と全角半角を畳んで探す(#1087)', () => {
+  const sections = (q: string): string[] => findInManual(MANUAL_TEXT, q).map((h) => `${h.section.index}`);
+
+  it('実物のマニュアルで「Ctrl+S」と「Ctrl + S」は同じ節の集合を返す', () => {
+    const a = sections('Ctrl+S');
+    expect(a.length, '空振り防止: 当たりが在る').toBeGreaterThan(8);
+    expect(sections('Ctrl + S')).toEqual(a);
+    expect(sections('ctrl +s')).toEqual(a);
+  });
+
+  it('全角「ｃｔｒｌ」で節が見つかり、半角「ctrl」と同じ集合になる', () => {
+    const half = sections('ctrl');
+    expect(half.length).toBeGreaterThan(0);
+    expect(sections('ｃｔｒｌ')).toEqual(half);
+  });
+
+  it('本文側が全角でも当たる / 空白の無視は + の前後に限る', () => {
+    expect(findInManual('# あ\nＣｔｒｌ＋Ｓ で保存', 'ctrl+s')).toHaveLength(1);
+    expect(findInManual('# あ\na b', 'ab')).toHaveLength(0);
+  });
+
+  it('抜き出しは元の字の上で切れ、+ の前後の空白も残る', () => {
+    const line = '- ' + 'あ'.repeat(30) + ' Ctrl + S ' + 'い'.repeat(30);
+    const ex = excerptOf(line, 'ctrl+s');
+    expect(ex).toContain('Ctrl + S');
+    expect(ex.startsWith('…')).toBe(true);
+    expect(ex.endsWith('…')).toBe(true);
+    expect(excerptOf('Ｃｔｒｌ＋Ｓ', 'ctrl+s')).toBe('Ｃｔｒｌ＋Ｓ');
+    expect(excerptOf('x'.repeat(40) + 'ＣＴＲＬ + Ｓ', 'Ctrl+S')).toContain('ＣＴＲＬ + Ｓ');
   });
 });
