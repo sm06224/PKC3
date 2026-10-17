@@ -628,7 +628,7 @@ describe('横に留めた並びの憶え方(#505 段②)', () => {
   const code = MAIN.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
   it('🔴 憶える購読(saveSplitLids)は、復元(loadSplitLids)の後に張る', () => {
-    const load = code.indexOf('loadSplitLids()');
+    const load = code.indexOf('loadSplitLids(');
     const save = code.indexOf('saveSplitLids(');
     expect(load, '復元が無い').toBeGreaterThan(-1);
     expect(save, '憶える口が無い').toBeGreaterThan(-1);

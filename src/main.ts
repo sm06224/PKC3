@@ -35,6 +35,7 @@ import { DuckDbRunner } from '@adapter/platform/duckdb/duckdb-runner';
 import { openDuckDb } from '@adapter/platform/duckdb/duckdb-open';
 import { DuckDbPackStore } from '@adapter/platform/duckdb/duckdb-pack-store';
 import { connectOpenedEffects } from '@adapter/platform/opened-effects';
+import { appOpenedStore } from '@adapter/platform/opened-store';
 import { isRegisteredApp, tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import {
@@ -5435,6 +5436,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   `opened-effects.ts` が持つ ── この file はどの test からも実行されない
    *   (CLAUDE.md §2)ので、ここは**繋ぐだけ**にする。
    */
+  appOpenedStore.scopeTo(portable === null ? null : portable.bundle.id);
   connectOpenedEffects(dispatcher);
   /**
    * 🔴 **DuckDB は「使うときだけ」載る**(#682 段②。user 裁定 2026-09-15)。
@@ -5814,7 +5816,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 消えたノートの lid が混ざっていても構わない ── 本文が読めなかった分は
    *   effect が `UNPIN_SPLIT_ENTRY` で外す(自己修復)。
    */
-  const restoredSplit = loadSplitLids();
+  const splitScope = portable === null ? null : portable.bundle.id;
+  const restoredSplit = loadSplitLids(splitScope);
   if (restoredSplit.length > 0) {
     dispatcher.dispatch({ type: 'SPLIT_RESTORED', lids: restoredSplit });
   }
@@ -5833,7 +5836,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   dispatcher.onState((state) => {
     if (state.splitLids === lastSplit) return;
     lastSplit = state.splitLids;
-    saveSplitLids(state.splitLids);
+    saveSplitLids(state.splitLids, splitScope);
   });
   /**
    * 🔑 **覚えている探し方が「開いたときに集める」タブなら、起動でそのまま集める**
