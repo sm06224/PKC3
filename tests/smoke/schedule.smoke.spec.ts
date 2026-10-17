@@ -993,6 +993,19 @@ test('🔴 札にマウスを乗せると × が出て、押すと予定から�
   // ① 札がこの日の束から消える
   await expect(card, '押しても札が残っている').toHaveCount(0);
 
+  /**
+   * 🔴 × で外した直後にも「元に戻す」が出て、押すと札が同じ日に戻る(#1632)。
+   * ⚠ 既存の道中の続き(新しく起動しない)。戻したら、もう一度 × で外して以降(本文の確認)へ続ける。
+   */
+  const unscheduleUndo = page.locator('[data-pkc-field="status-undo"]');
+  await expect(unscheduleUndo, '× で外したのに「元に戻す」が出ない').toBeVisible();
+  await expect(unscheduleUndo).toHaveText('元に戻す');
+  await clickReal(page, unscheduleUndo);
+  await expect(card, '「元に戻す」を押しても札が戻らない').toHaveCount(1);
+  await card.hover();
+  await btn.click();
+  await expect(card, '戻した札をもう一度 × で外せない').toHaveCount(0);
+
   // ② 🔴 **本文からも外れている**(画面だけ動いて本文は元のまま、を作らない)
   await clickReal(page, '[data-pkc-action="start-edit"]');
   await expect(ta, '本文から日付が外れていない').toHaveValue(
@@ -1031,6 +1044,37 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
     /^\d{4}-\d{2}-\d{2}$/,
   );
 
+  /**
+   * 🔴 予定が 0 件でも、一覧に「今日(0)」の見出しが出る(#1626。昨日の札を掴んだときの落とし先)。
+   * ⚠ 既存の道中の頭(ノートが 1 件も無い)に載せる ── 新しく起動しない。足した後は (1) になる(下)。
+   */
+  const todayGroup = pane.locator(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${value}"]`);
+  await expect(todayGroup, '予定が 0 件の朝に「今日」の見出しが出ない').toHaveCount(1);
+  await expect(todayGroup.locator('[data-pkc-field="schedule-group-text"]')).toHaveText('今日(0)');
+
+  /**
+   * 🔴 日付の欄を押すと、本文の「日付を入れる」と同じ 今日 / 明日 / 今週末 / 来週 の選び方が開く(#1635 項 2)。
+   * ⚠ ブラウザ標準のピッカーではなくアプリの窓であること(app-dialog が出る)を見る。
+   *   選んだ日が欄に入り、押す前の値と違う(対照群: Esc では変わらない)。
+   */
+  await date.click();
+  const pickDialog = page.locator('[data-pkc-region="app-dialog"]');
+  await expect(pickDialog, '日付の欄を押しても近道つきの選び方が開かない').toBeVisible();
+  await expect(pickDialog.locator('[data-pkc-shortcut="tomorrow"]'), '「明日」の近道が無い').toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(pickDialog).toBeHidden();
+  expect(await date.inputValue(), 'Esc で閉じたのに欄の日付が変わった').toBe(value);
+  await date.click();
+  await expect(pickDialog).toBeVisible();
+  await clickReal(page, '[data-pkc-shortcut="tomorrow"]');
+  await clickReal(page, '[data-pkc-field="dialog-ok"]');
+  await expect(pickDialog).toBeHidden();
+  const tomorrow = await date.inputValue();
+  expect(tomorrow, '「明日」を選んでも欄が変わらない').toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(tomorrow, '「明日」を選んだのに今日のまま').not.toBe(value);
+  // 以降の道中は今日の束で見るので、欄を今日へ戻す
+  await date.fill(value);
+
   await pane.locator('[data-pkc-field="schedule-quick-text"]').fill('きょうの用事');
   await clickReal(page, '[data-pkc-action="schedule-quick-add"]');
 
@@ -1044,6 +1088,7 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
     ),
     '足したのに、その日の束へ出ていない',
   ).toHaveCount(1);
+  await expect(todayGroup.locator('[data-pkc-field="schedule-group-text"]')).toHaveText('今日(1)');
 
   /**
    * 🔴 **☐ で済みにした札は「元に戻す」で戻る**(#1654。起動を増やさず、この道中の続き)。

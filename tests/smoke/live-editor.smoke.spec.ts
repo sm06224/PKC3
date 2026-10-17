@@ -192,6 +192,18 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   await expect(page.locator('[data-pkc-field="detail-body"]')).not.toContainText('打ちかけのままやめる。');
   expect(errors, 'やめるで pageerror').toEqual([]);
 
+  // ④-3 🔴 行の欄を開いて打ちかけのまま Ctrl+S ── 行を確定したうえでノートも保存され、編集が終わる(#1632)。
+  //      ⚠ 直す前は行が閉じるだけで、もう一度 Ctrl+S を押すまで保存されなかった。既存の道中の続き。
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(live).toBeVisible();
+  await modClickReal(page, '[data-pkc-region="editor-live"] p:nth-of-type(1)');
+  await expect(row).toBeFocused();
+  await row.fill('Ctrl+S で保存。');
+  await row.press('Control+s');
+  await expect.poll(leftOvers, '行の欄で Ctrl+S を押しても保存して編集が終わらない').toEqual(GONE);
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('Ctrl+S で保存。');
+  expect(errors, 'Ctrl+S で pageerror').toEqual([]);
+
   /**
    * ⑤ 🔴 #1087 ── **CRLF の本文**の段落を行の欄で開き、何も打たずに閉じても「変えた」にならない。
    *   欄の `value` は改行を LF にして返すので、直す前は原文(CRLF)と比べて必ず食い違い、

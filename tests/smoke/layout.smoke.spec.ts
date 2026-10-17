@@ -1602,7 +1602,9 @@ test('🔴 左の列の行に更新日が出て、行の高さは増えていな
   });
   const when = row.locator('[data-pkc-field="updated"]');
   // ⚠ 「要素が在る」で止めない ── **日付として読める**ことまで見る
-  await expect(when).toHaveText(/^\d{2}\/\d{2}$|^\d{4}\/\d{2}\/\d{2}$/);
+  // ⚠ 今日更新したノートは日付ではなく「今日」と出る(#1635)。title には完全な日付が残る
+  await expect(when).toHaveText(/^今日$|^\d{2}\/\d{2}$|^\d{4}\/\d{2}\/\d{2}$/);
+  await expect(when, 'hover の title に日付が無い').toHaveAttribute('title', /^更新 \d{4}\/\d{2}\/\d{2}/);
   const box = await row.boundingBox();
   expect(box, '行が画面に無い').not.toBeNull();
   // 業務画面の密度を落とさない(--row-h は 26px)
@@ -1666,7 +1668,8 @@ test('🔴 フォルダ面は行の頭に種別、右端に更新日を出す', 
   expect(m.chip, '行の頭に種別の図案が無い').toBe(true);
   // ③ 更新日が**日付として読める**(要素が在るだけでは足りない)。
   //    ⚠ 今年は MM/DD、他の年は YYYY/MM/DD ── 一覧の行と同じ規則
-  expect(m.last).toMatch(/^\d{2}\/\d{2}$|^\d{4}\/\d{2}\/\d{2}$/);
+  // ⚠ 今日更新したノートは「今日」(#1635)
+  expect(m.last).toMatch(/^今日$|^\d{2}\/\d{2}$|^\d{4}\/\d{2}\/\d{2}$/);
   // ④ 切れていない(列幅が足りずに `2026/08/` になる形を落とす)
   expect(m.last.endsWith('/'), `更新日が切れている: ${m.last}`).toBe(false);
 
