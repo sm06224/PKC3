@@ -8245,7 +8245,8 @@ mark[data-pkc-diff-char='del'] {
  *   変えたいなら `height` を書く ── ただしそれは**見え方の変更**なので user の裁定が要る。
  */
 [data-pkc-field='status-open'],
-[data-pkc-field='status-rescue'] {
+[data-pkc-field='status-rescue'],
+[data-pkc-field='status-trash'] {
   flex: 0 0 auto;
   padding: 0 var(--s2);
   font-size: 11px;

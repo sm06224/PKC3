@@ -28,7 +28,7 @@ import {
   type RenderMarkdownOptions,
 } from '@features/markdown/markdown-render';
 import { readFenceAssets } from '@features/asset/fence-asset-read';
-import { mathSourceNotice, writePortableHtml } from '@features/export/pkc3-html';
+import { embedSourceNotice, mathSourceNotice, writePortableHtml } from '@features/export/pkc3-html';
 import { buildOoxmlFile } from '@adapter/platform/export/ooxml-client';
 import type { OoxmlMedia } from '@adapter/platform/export/ooxml-assemble';
 import type { DocxBlock } from '@features/export/docx';
@@ -429,6 +429,8 @@ export async function exportArchive(
         deps.pageFormat ?? DEFAULT_PAGE_FORMAT,
         deps.proseAlign ?? DEFAULT_PROSE_ALIGN,
         deps.askSql,
+        // 🔴 図とグラフは、Word / PowerPoint と同じ産出器で絵にして埋め込む(#1648)
+        { vector: deps.renderFigureVector, raster: deps.renderFigure },
       );
       name = `${base}.html`;
       // ⚠ **可逆ではない**ことをその場で言う(後から見分けられない形にしない ──
@@ -775,6 +777,9 @@ async function collectOfficeBlocks(
   // 🔑 数式は Word / PowerPoint では打った字のまま入る ── 閲覧用 HTML と同じ文面で言う(#1087)
   const mathNotice = mathSourceNotice(doc.querySelectorAll('[data-pkc-math-src]').length);
   if (mathNotice !== null) warnings.push(mathNotice);
+  // 🔑 別のノートの内容の埋め込みも、Word / PowerPoint では説明の字だけが残る ── 閲覧用 HTML と同じ文面で言う(#1648)
+  const embedNotice = embedSourceNotice(doc.querySelectorAll('[data-pkc-embed-ref]').length);
+  if (embedNotice !== null) warnings.push(embedNotice);
   /**
    * 🔴 **添付の画像を入れる**(#187 段②)。
    * ⚠ **縦横比を保つ**ため、実寸を取ってから渡す(PKC2 は全画像を 480×360 px に

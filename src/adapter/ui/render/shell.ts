@@ -75,6 +75,11 @@ export interface ShellRegions {
    */
   statusRescue: HTMLElement;
   /**
+   * 🔴 **見つからないノートの知らせの隣の「ゴミ箱を開く」**(#1648)。押した先は `show-trash`
+   *   の受け手(`binder.ts`)。出し入れは `status-open.ts` の `paintStatusTrash`。
+   */
+  statusTrash: HTMLElement;
+  /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。⚠ 常設で置き、
    *   未読が 1 件以上あるときだけ `hidden` を外す(`main.ts` が state を見て書く)。
    */
@@ -1087,6 +1092,17 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusRescue.textContent = 'ノートの保存データの確認を開く';
   statusRescue.hidden = true;
   /**
+   * 🔴 **見つからないノートの知らせの隣の「ゴミ箱を開く」**(#1648)。ゴミ箱は左のペインの「フォルダ」の
+   *   いちばん下で、知らせの字だけでは辿りにくかった。⚠ 「開く」「元に戻す」と同じ作法 ── 常設で置いて、
+   *   要るときだけ出す(`status-open.ts` が `hidden` を書く)。実行の口は `show-trash` の受け手 1 つ。
+   */
+  const statusTrash = document.createElement('button');
+  statusTrash.type = 'button';
+  statusTrash.setAttribute('data-pkc-field', 'status-trash');
+  statusTrash.setAttribute('data-pkc-action', 'show-trash');
+  statusTrash.textContent = 'ゴミ箱を開く';
+  statusTrash.hidden = true;
+  /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。
    *
    * ⚠ 「開く」「元に戻す」と同じ作法 ── **常設で置いて、未読が 1 件以上あるときだけ
@@ -1129,7 +1145,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   tooNarrowOk.type = 'button';
   tooNarrowOk.setAttribute('data-pkc-field', 'too-narrow-ok');
   tooNarrow.append(tooNarrowText, tooNarrowOk);
-  status.append(statusText, statusOpen, statusUndo, statusCreate, statusRescue, statusMessages, tooNarrow);
+  status.append(statusText, statusOpen, statusUndo, statusCreate, statusRescue, statusTrash, statusMessages, tooNarrow);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -1299,6 +1315,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     statusUndo,
     statusCreate,
     statusRescue,
+    statusTrash,
     statusMessages,
     tooNarrow,
     tooNarrowText,

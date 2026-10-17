@@ -80,6 +80,22 @@ export function paintStatusRescue(btn: HTMLElement, text: string): void {
   if (btn.hidden !== !show) btn.hidden = !show;
 }
 
+/**
+ * 🔴 **見つからないノートの知らせの隣の「ゴミ箱を開く」を出し入れする**(#1648)。
+ *
+ * リンクを押したら「リンク先のノートが見つかりません(ゴミ箱にあれば戻せます。…)」と出るが、
+ * ゴミ箱は左のペインの「フォルダ」のいちばん下で、字だけでは辿りにくかった。
+ * 🔑 出す条件は 1 つ ── **いま画面に出ている 1 行が、その手掛かり(「ゴミ箱にあれば戻せます」)を含む**こと。
+ *   別の知らせが上書きしたら(字が変わるので)その瞬間に畳む(`paintStatusRescue` と同じ作法)。
+ * 🔑 押した先は `show-trash` の受け手(`binder.ts`)── 書くのは `hidden` だけ。
+ */
+export const MISSING_NOTE_LINE_HINT = 'ゴミ箱にあれば戻せます';
+
+export function paintStatusTrash(btn: HTMLElement, text: string): void {
+  const show = text.includes(MISSING_NOTE_LINE_HINT);
+  if (btn.hidden !== !show) btn.hidden = !show;
+}
+
 export interface StatusUndoState {
   /** 直前の塊の移動を戻す材料(`lastMove`)。`null` = 戻す物が無い。 */
   readonly lastMove: object | null;

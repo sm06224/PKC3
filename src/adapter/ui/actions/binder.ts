@@ -14645,7 +14645,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     const index = raw === null ? NaN : Number(raw);
     if (Number.isInteger(index)) void services.localFolder?.open(index);
   },
-  'show-trash': (dispatcher) => dispatcher.dispatch({ type: 'SHOW_TRASH' }),
+  /**
+   * 🔴 **ゴミ箱を開くときは、左の列を「フォルダ」にしておく**(#1648)。ゴミ箱の一覧はフォルダの面の下に
+   *   出るので、別のタブに居るまま `SHOW_TRASH` だけ撃つと開いても見えない。見つからないノートの知らせの隣の
+   *   「ゴミ箱を開く」(`status-trash`)は別のタブから押される。⚠ 同じタブなら `setBrowse` は何も変えない。
+   */
+  'show-trash': (dispatcher, _target, services) => {
+    services.setBrowse?.('filer');
+    dispatcher.dispatch({ type: 'SHOW_TRASH' });
+  },
   'hide-trash': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_TRASH' }),
   /**
    * 🔴 **開いている面を閉じて本文へ戻る**(user 目線レビュー U-3)。
