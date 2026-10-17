@@ -9234,7 +9234,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       }
       const item = items.find((s) => s.lid === picked.lid);
       if (item === undefined) return;
-      writeBack(ta, insertSnippet(sel, item.body, new Date()));
+      writeBack(ta, insertSnippet(sel, item.body, new Date(), { breakLines: true }));
     });
   },
   /**

@@ -59,6 +59,7 @@ import { parseAnchorSpell } from './place-line';
 import { placeRotateOf } from './place-rotate';
 import { isPlaceShape, placeShapeOf, type PlaceShape } from './place-shape';
 import { blockSpanAt, scanContainers } from './source-blocks';
+import { endsInOpenBlockComment } from './task-hidden';
 
 /**
  * 開き行が板の塊なら、その属性(描画と同じパース結果)。違えば null。
@@ -791,7 +792,9 @@ export const NEW_PLACE_H = 120;
 export function endsInsideOpenBlock(body: string): boolean {
   const spans = scanContainers(body);
   const last = spans[spans.length - 1];
-  return last !== undefined && last.open;
+  if (last !== undefined && last.open) return true;
+  // 🔴 閉じていない `%%%` の隠しメモ ── 足した行が末尾まで隠れ、成功と言いながら画面に出ない
+  return endsInOpenBlockComment(body);
 }
 
 /**

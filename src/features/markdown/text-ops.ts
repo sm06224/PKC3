@@ -455,7 +455,7 @@ export const MATH_BLOCK = template(`$$\n${CARET}\n$$\n`);
  *   (`wrapAsBlock` / 表を組む処理)が別々に「行の途中か」を判定すると、
  *   片方だけ直して食い違う(CLAUDE.md §7)。
  */
-function lineBreaksAround(text: string, start: number, end: number): { lead: string; tail: string } {
+export function lineBreaksAround(text: string, start: number, end: number): { lead: string; tail: string } {
   const atLineStart = start === 0 || text[start - 1] === '\n';
   const tailNeedsBreak = end < text.length && text[end] !== '\n';
   return { lead: atLineStart ? '' : '\n', tail: tailNeedsBreak ? '\n' : '' };

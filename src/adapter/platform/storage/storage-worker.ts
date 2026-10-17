@@ -1504,10 +1504,11 @@ function runSnippetScan(cid: string): SnippetScan {
     const item = snippetItemOf(row.lid, row.title, row.body ?? '');
     if (item !== null) items.push(item);
   }
+  const abbrUnread = items.filter((i) => i.abbrUnread === true).length;
   // ⚠ **切ったら必ず言う** ── 黙って切ると user は「無い」と読む。
   //   ⚠ 上限で切った分だけを数える(長すぎて載らなかった雛形は別の理由なので、
   //     ここでは `truncated` にしない ── 画面には「載らなかった」と別に出す)
-  return { items, total, truncated: total > SNIPPET_LIMITS.notes };
+  return { items, total, truncated: total > SNIPPET_LIMITS.notes, ...(abbrUnread > 0 ? { abbrUnread } : {}) };
 }
 
 /**

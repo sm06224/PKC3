@@ -68,6 +68,8 @@ export interface SnippetItem {
   readonly title: string;
   /** 短縮語。書いていなければ `''`(`/` からは呼べるが `Tab` では出ない)。 */
   readonly abbr: string;
+  /** 短縮語を読めなかったとき(`abbr: #…` は注釈として読まれ、値が空の配列になる)だけ付く。 */
+  readonly abbrUnread?: true;
   /** 挿す本文(**frontmatter を除いた残り**)。 */
   readonly body: string;
 }
@@ -79,6 +81,8 @@ export interface SnippetScan {
   readonly total: number;
   /** 🔴 上限で切ったか。⚠ 切ったなら**画面にそう出す**(「無い」と読ませない)。 */
   readonly truncated: boolean;
+  /** 短縮語を読めなかったテンプレートの数(0 のとき付けない)。⚠ 黙って短縮語なしにしない。 */
+  readonly abbrUnread?: number;
 }
 
 /**
@@ -90,7 +94,18 @@ export interface SnippetScan {
 export function snippetItemOf(lid: string, title: string, body: string): SnippetItem | null {
   const parsed = parseFrontmatter(body);
   const raw = parsed.meta[SNIPPET_ABBR_KEY];
-  const abbr = typeof raw === 'string' ? raw.trim() : '';
+  let abbr = typeof raw === 'string' ? raw.trim() : '';
+  let unread = false;
+  /**
+   * 🔴 `abbr: 100` / `001` / `1.5` / `true` / `null` は解釈後の型が文字列でないので、**書いた字のまま**を採る
+   *   (`001` が `1` にならない)。⚠ `abbr: #…` は注釈なので空と区別できない ── 読めなかった印を付けて一覧の注記で言う。
+   */
+  if (!Array.isArray(raw) || raw.length === 0) {
+    const head = body.slice(0, body.length - parsed.body.length);
+    const line = /^abbr:[ \t]*(.*?)\s*$/m.exec(head)?.[1] ?? '';
+    if (line.startsWith('#')) unread = true;
+    else if (raw !== undefined && typeof raw !== 'string') abbr = line.replace(/\s+#.*$/u, '').trim();
+  }
   // 🔑 挿すのは**frontmatter を除いた残り** ── `abbr:` まで本文へ挿さない
   const text = parsed.body.replace(/^\n+/, '');
   if (text === '') return null;
@@ -99,6 +114,7 @@ export function snippetItemOf(lid: string, title: string, body: string): Snippet
     lid,
     title,
     abbr: abbr.length > SNIPPET_LIMITS.abbrChars ? '' : abbr,
+    ...(unread ? { abbrUnread: true as const } : {}),
     body: text,
   };
 }
