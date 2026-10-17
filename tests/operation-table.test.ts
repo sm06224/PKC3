@@ -232,6 +232,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'clear-opened-history', 'clear-search-history', 
   // ⚠ 2026-09-28(#1099): 'close-lightbox' はライトボックスが開いている間だけ意味を持つので未登記。
   'close-lightbox',
+  // ⚠ 2026-10-17(#1659 ③): ノートの小窓の「× 閉じる」。押し口は小窓の帯の 1 か所のみ(Esc は別の口が持つ)。
+  'close-note-window',
   /**
    * ⚠ **2026-10-11(#1376)で 2 件増やした** ── 起動したときの 1 行の「戻す」「消す」。
    * 🔑 **名前で呼べないままにする理由**:1 行が出ている間だけ意味を持ち(出ていなければ何も起きない)、
@@ -844,14 +846,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-17(#1163 依頼 45 の 2、#1657): 題名を変えた直後の「元に戻す」(`undo-rename`)で受け手 +1 ── 登記は増えない
       //   (押し口は画面の下の知らせの隣の 1 か所にしか無く、鍵も持たない。`undo-dual-move` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1660 依頼 47-1): 「操作を探す」の `export-note-pdf` で登記 +1 / `outsideActionsTable` +1(受け手を持たない特例 ── `export-note-markdown` と同じ置き場)。
-      total: 434,
-      receivers: 367,
+      // ⚠ 2026-10-17(#1659 ③): ノートの小窓の「× 閉じる」(`close-note-window`)で受け手 +1 ── 登記は増えない
+      //   (押し口は小窓の帯の 1 か所にしか無く、鍵は Esc が別に持つ)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 435,
+      receivers: 368,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       registered: 169,
       both: 102,
       outsideActionsTable: 67,
-      unregistered: 265,
+      unregistered: 266,
     });
   });
 

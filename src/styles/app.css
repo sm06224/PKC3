@@ -5159,7 +5159,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  * ⚠ `sticky` にする ── 面の中身は縦に流れるので、下まで送ったところで
  *   閉じたくなったときに帯が画面外に居ると**また閉じ方が無い**。
  */
-[data-pkc-region='pane-bar'] {
+[data-pkc-region='pane-bar'],
+[data-pkc-region='note-window-bar'] {
   position: sticky;
   top: 0;
   z-index: 2;

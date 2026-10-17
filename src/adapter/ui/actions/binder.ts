@@ -4177,6 +4177,9 @@ function phoneShowList(dispatcher: Dispatcher): boolean {
   return true;
 }
 
+/** スマホで「別のウィンドウで開く」を押したときの 1 行(#1659 ②)。 */
+export const PHONE_NOTE_WINDOW_NOTICE = 'この端末では、新しいタブで PKC3 がもう 1 つ開きます';
+
 const MENU_LID_ATTR = 'data-pkc-menu-lid';
 /**
  * 🔴 **右クリックした `:::` の塊の開き行**(#677)。`MENU_LINE_ATTR` とは**別の名前**で運ぶ
@@ -14377,6 +14380,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔴 **「探す」の行は、探した語を運ぶ**(#1102 段①)── 受け側が当たった所へ送って塗る。
     //   ⚠ 語を持たない口(一覧の ⋯ など)は今までどおり `undefined`
     const find = target.getAttribute(FIND_ATTR);
+    /**
+     * 🔴 **スマホでは何が起きるかを 1 行で言う**(#1659 ②、Gemini 裁定 = 案 C)。⚠ スマホには小さな窓が無く、
+     *   押すと PKC3 全体が別のタブで開く ── 言わないと「ノートが開く」と読まれる。
+     * ⚠ **開く前に撃つ** ── `window.open` は gesture の中でしか通らず、その前に挟めるのは同期の dispatch だけ。
+     *   塞がれたときの案内は開く側が後から出すので、この 1 行はそれに上書きされる(正しい向き)。
+     */
+    if (appPhone.isPhone()) dispatcher.dispatch({ type: 'OP_NOTICE', message: PHONE_NOTE_WINDOW_NOTICE });
     // 🔑 語を持たない口は、左の列の欄の語を運ぶ(依頼 70-C2)── 「探す」の行の語が先
     services.openNoteWindow?.(
       lid,
@@ -14658,6 +14668,24 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     if (closed === 'refused')
       dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_VIEW_WINDOW_REFUSED });
+  },
+  /**
+   * 🔴 **ノートの小窓の「× 閉じる」**(#1659 ③)。門は Esc と**同じ**(`noteWindowHasTyping` / 編集中は閉じない)
+   * ── 片方にだけ門が在ると、押し方で打ちかけが消える。閉じ方は `close-pane` と同じ `services.closeNoteWindow`。
+   */
+  'close-note-window': (dispatcher, _target, services, root) => {
+    const st = dispatcher.getState();
+    if (services.isNoteWindow?.() !== true) return;
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}閉じてください` });
+      return;
+    }
+    if (noteWindowHasTyping(root, st)) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '打ちかけの字が残っています。足すか消してから閉じてください' });
+      return;
+    }
+    const closed = services.closeNoteWindow?.() ?? 'not-a-window';
+    if (closed === 'refused') dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_NOTE_WINDOW_REFUSED });
   },
   'restore-trash': (dispatcher, target) => {
     const revId = target.getAttribute('data-pkc-rev-id');

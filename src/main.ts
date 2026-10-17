@@ -208,6 +208,7 @@ import {
 } from '@adapter/platform/storage/resolve-container-compat';
 import { buildShell, paintAlarmBar, paintMissedLine, paintCaptureBar, paintTimerBar, showRootText } from '@adapter/ui/render/shell';
 import { appPhone } from '@adapter/ui/render/phone-layout';
+import { installPhoneBack } from '@adapter/ui/actions/phone-back';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createImportUndo, importFailurePanel, importPanel } from '@adapter/ui/actions/import-undo';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
@@ -524,6 +525,8 @@ export interface AppHandle {
    * ⚠ 判断は 2 つとも向こうに在る ── この file はどの test からも実行されない(§2)。
    */
   enterNoteWindow(): void;
+  /** ノートの小窓の「× 閉じる」の帯を出し入れする(#1659 ③)。 */
+  setNoteWindowBar(shown: boolean): void;
   /**
    * 🔴 **探し方(左の列のタブ)を切り替える**(#292 段⑤)。
    * ⚠ 引っ越したディープリンク(`view=calendar` / `view=kanban`)を
@@ -1770,6 +1773,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ `>` でなければ何もしない。描く側が指紋を見るので、同じ中身なら行に触らない。
      */
     repaintCommandList(root, dispatcher, appKeymap);
+  });
+  /**
+   * 🔴 **スマホで端末の「戻る」= 一覧へ**(#1659 ①)。⚠ 状態の購読の後ろに置く ──
+   *   ページの変わりは `appPhone.render` が知らせる。PC・タブレットでは何もしない。
+   */
+  installPhoneBack({
+    onPageChange: (cb) => appPhone.onPageChange(cb),
+    blockReason: () => phaseBlockReason(dispatcher.getState().phase),
+    notifyBlocked: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+    showNote: () => appPhone.showNote(),
+    showList: () => appPhone.showList(),
   });
   // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
   // 🔑 常時見えるのは**版だけ**(P8)。`opfs-sahpool` のような開発者語は
@@ -6051,6 +6065,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       paintTitle();
       announceNote();
     },
+    setNoteWindowBar: (shown) => center.setNoteWindowBar(shown),
     enterNoteWindow: () => {
       // ⚠ 追記欄を出してから焦点の約束をする ── 畳んだままの欄には焦点が乗らない
       applyPaneVisibility(root, appPanes.sessionOnly('append'));
@@ -6186,6 +6201,7 @@ function bootstrap(): void {
           app.repaintStatus();
           app.repaintWindowTitle();
           // 🔴 付箋なら追記欄を出し、本文が届いたら打つ欄へ焦点を入れる(#690 ② A′ / I4)
+          app.setNoteWindowBar(heldNoteWindow);
           if (heldNoteWindow) app.enterNoteWindow();
         },
         fail: (error) => app.dispatcher.dispatch({ type: 'OP_FAILED', error }),

@@ -363,10 +363,43 @@ export class PhoneLayout {
   }
 
   /**
+   * 🔴 **いま出ているページが「変わったとき」に伝える**購読口(#1659 ①、端末の「戻る」)。
+   *
+   * ⚠ 配るのは `page()` の答え(スマホでもタブレットでもなければ `null`)── 判定を 2 つ目の口で
+   *   作り直さない(§7)。⚠ **変わったときだけ**伝える(毎描画で履歴に触らせない)。
+   */
+  onPageChange(cb: (page: PhonePage | null) => void): () => void {
+    this.pageSubs.push(cb);
+    return () => {
+      this.pageSubs = this.pageSubs.filter((f) => f !== cb);
+    };
+  }
+
+  private pageSubs: Array<(page: PhonePage | null) => void> = [];
+  /** 最後に伝えたページ。`undefined` = まだ 1 度も伝えていない。 */
+  private lastPage: PhonePage | null | undefined = undefined;
+  /** スマホ用画面かどうかも伝え済みの値に含める(タブレット ⇄ スマホで `page` が同じでも別物)。 */
+  private lastPageWasPhone = false;
+
+  private tellPage(): void {
+    const page = this.page();
+    const phone = this.isPhone();
+    if (page === this.lastPage && phone === this.lastPageWasPhone) return;
+    this.lastPage = page;
+    this.lastPageWasPhone = phone;
+    for (const cb of [...this.pageSubs]) cb(phone ? page : null);
+  }
+
+  private paint(): void {
+    this.paintInner();
+    this.tellPage();
+  }
+
+  /**
    * 属性と帯を書く。⚠ **ここが唯一の書き手**である ── 面ごとに書くと、
    * 面を 1 つ足した日にその面だけ切り替わらない。
    */
-  private paint(): void {
+  private paintInner(): void {
     const root = this.root;
     if (root === null) return;
     const shell = root.querySelector<HTMLElement>('[data-pkc-region="shell"]');
