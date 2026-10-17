@@ -244,6 +244,56 @@ describe('printNote(#187 ── 紙に出す口)', () => {
     expect(order).toEqual(['prepare-start', 'prepare-done', 'print']);
   });
 
+  it('🔴 章の埋め込みが読み込み中のあいだは刷らない ── 読み込み後に刷る(#1087)', async () => {
+    const h = harness({});
+    let loading = true;
+    const fires: (() => void)[] = [];
+    h.deps.embedsLoading = () => loading;
+    h.deps.setTimer = (cb) => {
+      fires.push(cb);
+      return fires.length;
+    };
+    const p = printNote(h.deps, 'a');
+    await flush();
+    expect(h.prints(), '読み込み中なのに刷った').toBe(0);
+    expect(fires.length, '待ちの時計を張っていない').toBeGreaterThan(0);
+    // 時計が進んでも、まだ読み込み中なら刷らない
+    fires.shift()!();
+    await flush();
+    expect(h.prints(), '時計が進んだだけで刷った').toBe(0);
+    loading = false;
+    while (fires.length > 0) fires.shift()!();
+    await flush();
+    expect(await p).toBe('printed');
+    expect(h.prints(), '読み込みが終わったのに刷っていない').toBe(1);
+  });
+
+  it('章の埋め込みが読み込み終わらなくても、上限(5 秒)で打ち切って刷る / 読み込み中でなければ待たない', async () => {
+    const stuck = harness({});
+    stuck.deps.embedsLoading = () => true;
+    const waits: number[] = [];
+    stuck.deps.setTimer = (cb, ms) => {
+      waits.push(ms);
+      cb();
+      return 1;
+    };
+    expect(await printNote(stuck.deps, 'a')).toBe('printed');
+    expect(stuck.prints()).toBe(1);
+    const total = waits.reduce((a, b) => a + b, 0);
+    expect(total, '上限に届く前に諦めた').toBeGreaterThanOrEqual(5000);
+    expect(total, '上限を超えて待った').toBeLessThanOrEqual(5100);
+
+    const idle = harness({});
+    idle.deps.embedsLoading = () => false;
+    let timers = 0;
+    idle.deps.setTimer = () => {
+      timers += 1;
+      return 1;
+    };
+    expect(await printNote(idle.deps, 'a')).toBe('printed');
+    expect(timers, '読み込み中でないのに待った').toBe(0);
+  });
+
   it('用意が失敗しても刷る / 上限を過ぎたら待たずに刷る(固まらない)', async () => {
     const failing = harness({});
     failing.deps.prepare = () => Promise.reject(new Error('x'));

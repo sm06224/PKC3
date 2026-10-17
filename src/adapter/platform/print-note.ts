@@ -41,6 +41,14 @@ export interface PrintNoteDeps {
    * 待たずに刷ると下の図が原文のまま紙に出る。⚠ 失敗しても刷る(`PREPARE_TIMEOUT_MS` で打ち切る)。
    */
   prepare?(): Promise<void>;
+  /**
+   * 章の埋め込み(`![x](entry:<lid>#h/見出し)`)に、まだ読み込み中の物が在るか(#1087)。
+   * 在るあいだは刷らない ── 刷ると「読み込んでいます」の 1 行が紙に出て、章の中身が出ない。
+   * ⚠ 呼び側が見るのは DOM の読み込み中の印(`data-pkc-section-key` が `w` で始まる器)── 読み込みの状態
+   *   (`SectionEmbeds.asked`)は描画器の private で、その外へ出す口が無い。DOM の印は「頼んだ」から
+   *   「描き終えて差し替えた」までの両方(抜粋が届いた後の描き待ちを含む)で立つので、Promise より取りこぼしが無い。
+   */
+  embedsLoading?(): boolean;
   /** 待ちの上限(ms)。既定 5000。 */
   timeoutMs?: number;
   /** 待ちの時計(test から差せる)。 */
@@ -99,6 +107,29 @@ async function prepareForPrint(deps: PrintNoteDeps): Promise<void> {
   } finally {
     if (timer !== null) clearTimer(timer);
   }
+}
+
+/** 章の埋め込みの読み込みを待つ上限(ms)。過ぎたら**刷る**(固まらない)。 */
+const EMBED_TIMEOUT_MS = 5000;
+/** 読み込み中かを見直す間隔(ms)。 */
+const EMBED_POLL_MS = 50;
+
+/**
+ * 章の埋め込みが読み込み終わるまで待つ。@returns 1 度でも待ったか(待ったなら図の用意をやり直す)。
+ * ⚠ 上限は経過時間で数える(`setTimer` の積み重ね ── test が時計を差せる)。
+ */
+async function waitForEmbeds(deps: PrintNoteDeps): Promise<boolean> {
+  if (!deps.embedsLoading || !deps.embedsLoading()) return false;
+  const setTimer = deps.setTimer ?? ((cb, ms) => setTimeout(cb, ms));
+  let waited = 0;
+  while (waited < EMBED_TIMEOUT_MS && deps.embedsLoading()) {
+    // 発火した時計は解除しない(1 回きりで、残らない)
+    await new Promise<void>((resolve) => {
+      setTimer(resolve, EMBED_POLL_MS);
+    });
+    waited += EMBED_POLL_MS;
+  }
+  return true;
 }
 
 /** 印刷の画面を開いている途中か(`printNote` の 2 回目を受けないため)。 */
@@ -177,6 +208,9 @@ async function printNoteOnce(deps: PrintNoteDeps, lid: string): Promise<PrintNot
     }
   }
   await prepareForPrint(deps);
+  // 🔴 章の埋め込みが読み込み中なら待ってから刷る(#1087)。図の用意の後に見る ── 本文が届いた直後は
+  //    埋め込みの器がまだ DOM に無いことがあり、用意の 3 コマで器が出てから見る。待ったら図を描き直す
+  if (await waitForEmbeds(deps)) await prepareForPrint(deps);
   deps.print();
   // 🔴 **`print()` が返ったのは、印刷の画面が閉じた後**(ブラウザの `window.print()` は閉じるまで返らない。
   //    閉じた後の `afterprint` と同じ時点)。ここで戻す。

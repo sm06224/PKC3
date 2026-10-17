@@ -23,6 +23,7 @@ import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import {
+  SECTION_LOADING_SELECTOR,
   SECTION_MISSING_NOTE,
   SECTION_NO_NOTE,
 } from '../../src/adapter/ui/render/section-embed';
@@ -435,6 +436,17 @@ describe('頼む回数と、読めなかったときの画面', () => {
     await r.apply({ type: 'PLACE_BODY_LOADED', lid: 'other2', body: 'b' });
     expect(r.wanted.filter((k) => k === 'src#h/plan'), '描き直すたびに頼み直している').toHaveLength(1);
     expect(embedOf(r, 'entry:src#h/plan').textContent).toContain('読み込んでいます');
+  });
+
+  it('🔴 印刷が待つ「読み込み中」の印は、届く前に立ち、描き終えたら消える(#1087)', async () => {
+    const r = await rig('host', { ...BODIES }, false);
+    const host = r.root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]')!;
+    expect(host.querySelector(SECTION_LOADING_SELECTOR), '届く前なのに印が無い').not.toBeNull();
+    await r.apply({ type: 'PLACE_BODY_LOADED', lid: 'src#h/plan', body: '## Plan\n要る' });
+    await settle();
+    const el = embedOf(r, 'entry:src#h/plan');
+    expect(el.textContent, '前提:この器は描き終えている').not.toContain('読み込んでいます');
+    expect(el.matches(SECTION_LOADING_SELECTOR), '描き終えたのに印が残っている').toBe(false);
   });
 
   it('🔴 読めなかった(消えた / 失敗)節は「ノートが見つかりません」になる(読み込み中で止まらない)', async () => {
