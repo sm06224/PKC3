@@ -22,7 +22,7 @@
 import type { AssetGate } from './asset-gate';
 import { storeAsset, type AttachDeps } from './attach';
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
-import { pastedImageName } from '@features/asset/pasted-image-name';
+import { createNameDeduper, pastedImageName } from '@features/asset/pasted-image-name';
 
 /** 貼り付けた本文から拾った画像の名乗り(#251)。 */
 export const PASTED_IMAGE_PREFIX = '貼り付け画像';
@@ -120,6 +120,8 @@ export async function adoptUrls(
   //   その窓で整理が走ると貼ったばかりの bytes を「使っていない」と数えて消す
   await deps.gate.queued(async () => {
     const known = new Set(await deps.attach.listStoredBlobKeys().catch(() => []));
+    // 同じ秒に取り込んだ複数枚が同じ名前にならないようにする
+    const uniqueName = createNameDeduper();
     for (const url of urls) {
       let blob: Blob;
       try {
@@ -156,7 +158,7 @@ export async function adoptUrls(
         });
         continue;
       }
-      const name = pastedImageName({ type: blob.type }, deps.now(), namePrefix);
+      const name = uniqueName(pastedImageName({ type: blob.type }, deps.now(), namePrefix));
       try {
         const stored = await storeAsset(
           deps.attach,

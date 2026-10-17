@@ -387,6 +387,62 @@ describe('走っている間はタブを閉じる確認に数える(onActive)', 
   });
 });
 
+describe('🔴 小さな雑音のくり返しの判定は、ワーカーへ渡す前の音の大きさで行う', () => {
+  const transferring = (text: string) =>
+    vi.fn(async (job: AsrJob): Promise<AsrJobResult> => {
+      // 本物(asr-client)と同じく pcm を transfer する ── 渡した側は長さ 0 になる
+      structuredClone(job.pcm, { transfer: [job.pcm.buffer] });
+      return { text, loadMs: 1, runMs: 2 };
+    });
+
+  it('大きな声の「テスト、テスト、…」は捨てない(transfer 後の長さ 0 で RMS が 0 に化けない)', async () => {
+    const h = harness({
+      decode: vi.fn(async () => new Float32Array(16000).fill(0.2)),
+      transcribe: transferring('テスト、テスト、テスト、テスト、テスト、テスト'),
+    });
+    await h.tr.run('a');
+    expect(h.appends, '大きな声なのに繰り返しとして捨てた').toHaveLength(1);
+  });
+
+  it('対照群:小さな雑音のくり返しは捨てる', async () => {
+    const h = harness({
+      decode: vi.fn(async () => new Float32Array(16000).fill(0.0015)),
+      transcribe: transferring('テスト、テスト、テスト、テスト、テスト、テスト'),
+    });
+    await h.tr.run('a');
+    expect(h.appends).toEqual([]);
+    expect(h.notes.at(-1)).toMatch(/小さな雑音/);
+  });
+});
+
+describe('🔴 預かった結果が書かれるまで、タブを閉じる確認に数える(onActive)', () => {
+  const held = (seen: boolean[]) =>
+    harness({ onActive: (a: boolean) => void seen.push(a) }, { writeLock: { lid: 'other' } } as Partial<AppState>);
+
+  it('預かっている間は true のまま、書かれたら 1 回だけ false', async () => {
+    const seen: boolean[] = [];
+    const h = held(seen);
+    await h.tr.run('a');
+    expect(h.notes.at(-1), '前提: 預かっていない').toMatch(/まだ足していません/);
+    expect(seen, '預かっているのに解いた(閉じると結果が黙って消える)').toEqual([true]);
+    h.dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.appends).toHaveLength(1);
+    expect(seen).toEqual([true, false]);
+  });
+
+  it('預かった書込が捨てられた(ノートが消えた)回も、1 回だけ解く', async () => {
+    const seen: boolean[] = [];
+    const h = held(seen);
+    await h.tr.run('a');
+    h.dispatcher.dispatch({ type: 'DELETE_ENTRY', lid: 'a' });
+    h.dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.appends, '前提: 消えたノートへ足している').toEqual([]);
+    expect(seen).toEqual([true, false]);
+  });
+});
+
 describe('④ 2 本同時に走らない', () => {
   it('🔴 走っている間の 2 本目は断る(1.65〜3.6GB を重ねない)', async () => {
     let release: (r: AsrJobResult) => void = () => {};
