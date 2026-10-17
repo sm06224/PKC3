@@ -125,6 +125,44 @@ describe('落とした file の行き先(#535 ①)', () => {
     expect(calls.attach).toHaveLength(0);
   });
 
+  it.each([
+    'メモ.pkc3-full.zip',
+    'メモ.pkc3-part.zip',
+    'メモ.pkc3-notes.zip',
+    '旧.pkc3.zip',
+    '閲覧.pkc3.html',
+    'MEMO.PKC3-FULL.ZIP',
+  ])('🔴 バックアップ %s を落とすと、添付ではなく**取り込む**(#1632)', (name) => {
+    const { outside, calls } = setup();
+    outside.dispatchEvent(dropEvent([file(name, 'application/zip')]));
+    expect(calls.imported, '取込へ行っていない').toHaveLength(1);
+    expect(calls.imported[0]?.[0]?.name).toBe(name);
+    expect(calls.attach, 'まだ添付へ回している').toHaveLength(0);
+  });
+
+  it('🔴 対照群: ふつうの zip / HTML は、これまでどおり**添付**(添付したい人の動きを変えない)', () => {
+    for (const name of ['写真.zip', 'page.html', 'x.pkc3.zip.bak', 'notpkc3.zip']) {
+      const { outside, calls } = setup();
+      outside.dispatchEvent(dropEvent([file(name, 'application/zip')]));
+      expect(calls.attach, name).toHaveLength(1);
+      expect(calls.imported, name).toHaveLength(0);
+    }
+  });
+
+  it('🔴 バックアップが画像と混ざっていたら、これまでどおり添付', () => {
+    const { outside, calls } = setup();
+    outside.dispatchEvent(dropEvent([file('a.pkc3-full.zip'), file('photo.png', 'image/png')]));
+    expect(calls.attach).toHaveLength(1);
+    expect(calls.imported).toHaveLength(0);
+  });
+
+  it('🔴 編集中にバックアップを落としても取込へ倒さない(動線を奪わない)', () => {
+    const { outside, calls } = setup({}, 'editing');
+    outside.dispatchEvent(dropEvent([file('a.pkc3-full.zip')]));
+    expect(calls.imported).toHaveLength(0);
+    expect(calls.attach).toHaveLength(1);
+  });
+
   it('🔴 それ以外は、これまでどおり**添付**(挙動を広げすぎない)', () => {
     const { outside, calls } = setup();
     outside.dispatchEvent(dropEvent([file('scan.pdf', 'application/pdf')]));

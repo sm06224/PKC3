@@ -1753,6 +1753,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     //    **修飾を見ていなかった**ので `Shift+Tab` でも確定していた。和音一致に
     //    変えた時点で静かに落ちており、押すと焦点だけがブラウザ既定で飛んでいた
     defaults: ['Tab', 'Shift+Tab', 'Mod+Enter', 'Mod+S'],
+    note: 'Ctrl を押した割り当て(初めは Ctrl+Enter と Ctrl+S)は、確定したうえでノートも保存して編集を終えます',
   },
   {
     id: 'row-cancel',

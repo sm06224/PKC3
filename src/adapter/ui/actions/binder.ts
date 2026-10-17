@@ -225,7 +225,8 @@ import { safeName } from '@features/export/file-name';
 import { hasTranscriptCues, srtFromTranscript, transcriptCues } from '@features/asr/srt';
 import { decodeTaskDrag, dropTaskCard, encodeTaskDrag } from '@adapter/ui/render/schedule-drag';
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
-import { offerDoneUndo, undoScheduleMove } from '@adapter/ui/render/schedule-undo';
+import { offerDoneUndo, offerMoveUndo, undoScheduleMove } from '@adapter/ui/render/schedule-undo';
+import { slotOfCard } from '@features/schedule/move-undo';
 import { plainTaskTitle } from '@features/schedule/task-title';
 import {
   DATE_SHORTCUTS,
@@ -243,6 +244,7 @@ import {
 import { formatLineDate, readLineDate } from '@features/schedule/line-date';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import { findImageRefs, type ImageAlign, type ImageAttrs } from '@features/markdown/image-attrs';
+import { isBackupFileName } from '@features/export/archive-kind';
 import {
   adoptableUrls,
   externalImageUrls,
@@ -14697,7 +14699,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   (`patchTaskCard` が焼いている)。⚠ 行番号は**札ではなく中の印**に在る
    *   (札にも置くと `[data-pkc-task-line]` を押す既存の経路に当たる、2026-08-23 の罠)。
    */
-  'unschedule-task': (dispatcher, target, services) => {
+  'unschedule-task': (dispatcher, target, services, root) => {
     const st = dispatcher.getState();
     const card = target.closest<HTMLElement>('[data-pkc-entry]');
     const lid = card?.getAttribute('data-pkc-entry') ?? '';
@@ -14706,9 +14708,21 @@ const ACTIONS: Record<string, ActionHandler> = {
     const failed =
       '予定を外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください';
     if (card.hasAttribute('data-pkc-whole-note')) {
-      actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () =>
-        dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null }),
-      );
+      actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () => {
+        const now = dispatcher.getState();
+        const was = now.entryMetas.get(lid)?.date ?? null;
+        const refused = bodyWriteBlockReason(now, lid) !== null;
+        dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
+        // 🔴 × にも「元に戻す」(#1632。Gemini 裁定 = #1163 の依頼 35 Q2-A)── 日付なしへ落としたときと同じ口。
+        //    ⚠ 断られた回(編集中など)・元から日付が無い回は出さない(`offerMoveUndo` が同じ姿は出さない)
+        if (!refused && now.entryMetas.has(lid))
+          offerMoveUndo(root, dispatcher, {
+            target: { kind: 'entry', lid },
+            before: { date: was, time: null, timeEnd: null, until: null, text: '' },
+            after: { date: null, time: null, timeEnd: null, until: null, text: '' },
+            verb: 'moved',
+          });
+      });
       return;
     }
     const raw = card
@@ -14727,9 +14741,38 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ **`until` も外す** ── 記法まるごと消えるので、期間だけ残すと
      *   「頼んでいない指示」になる(落とす経路と同じ渡し方)。
      */
-    actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () =>
-      dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, openLine, date: null, until: null }),
-    );
+    actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () => {
+      const now = dispatcher.getState();
+      const refused = bodyWriteBlockReason(now, lid) !== null;
+      const scanned = now.taskScan?.cards.find((c) => c.lid === lid && c.line === line);
+      dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, openLine, date: null, until: null });
+      /**
+       * 🔴 × にも「元に戻す」(#1632。Gemini 裁定 = #1163 の依頼 35 Q2-A)。毎週の予定を間違えて外すと
+       * 規則ごと消えるので、戻す口が無いのは片道だった。日付なしへ落としたときと同じ口を使う。
+       * ⚠ 断られた回(編集中など)・札が走査に居ない回は出さない。
+       * ⚠ 繰り返しの札の日は「その回の日」なので、戻し先は**規則の行を読んだ姿**(開始日・刻み)にする。
+       */
+      if (refused || scanned === undefined) return;
+      const before = slotOfCard(scanned);
+      const rule = scanned.repeat === null ? null : readLineDate(openLine);
+      offerMoveUndo(root, dispatcher, {
+        target: { kind: 'task', lid, line },
+        before,
+        after: { date: null, time: null, timeEnd: null, until: null, text: before.text },
+        verb: 'moved',
+        ...(rule === null || scanned.repeat === null
+          ? {}
+          : {
+              restore: {
+                date: rule.date,
+                time: rule.time,
+                timeEnd: rule.timeEnd,
+                until: rule.until,
+                repeat: scanned.repeat,
+              },
+            }),
+      });
+    });
   },
   /**
    * 🔴 **札の「繰り返す…」を押した ── 刻みの一覧を出す**(#855 段 0 の 3 つ目。
@@ -17255,7 +17298,13 @@ export function bindActions(
       routeSt.phase === 'ready' &&
       !hasUnsavedTyping(routeSt) &&
       files.every(
-        (f) => isMarkdownFileName(f.name) || isVcfFileName(f.name) || isIcsFileName(f.name),
+        (f) =>
+          isMarkdownFileName(f.name) ||
+          isVcfFileName(f.name) ||
+          isIcsFileName(f.name) ||
+          // 🔴 バックアップ(`.pkc3-full.zip` など)も(#1632)── 添付にすると「元に戻したつもりが zip が増えただけ」
+          //    になり、成功したように見える。取り込みには確認(取り込む / やめる)が出るので、落としただけでは入れ替わらない
+          isBackupFileName(f.name),
       )
     ) {
       services.importFiles([...files]);
