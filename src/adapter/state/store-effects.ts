@@ -9,6 +9,7 @@
 import { bodySaveErrorText, errorText } from '@features/error-text';
 import type { EntryStamps, EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta, type FlavorExtract } from '@features/flavor';
+import { appMessagePost } from '@adapter/platform/message-post';
 import { PersistOnce, type PersistState } from '@adapter/platform/storage-persist';
 // 🔴 追記の楽観検査(#178)── 「読んだ本文」を worker と突き合わせるための指紋
 import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
@@ -2018,9 +2019,10 @@ export function connectStoreEffects(
         enqueue(async () => {
           if (disposed) return;
           try {
-            const body = await store.getBody(ev.lid);
+            // 🔴 書けずに控えへ回った節も含める(#1087 M1)
+            const body = await appMessagePost.withSpool(ev.lid, () => store.getBody(ev.lid));
             if (disposed) return;
-            dispatcher.dispatch({ type: 'BODY_LOADED', lid: ev.lid, body: body ?? '' });
+            dispatcher.dispatch({ type: 'BODY_LOADED', lid: ev.lid, body });
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({

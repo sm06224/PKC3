@@ -25,6 +25,8 @@ import {
   MESSAGE_CAP_OPTIONS,
   parseMessageCap,
   countUnread,
+  postedAtAfterReadMark,
+  withSpooledSections,
   sanitizeMessageText,
   titleForMessageLid,
   type MessageKind,
@@ -83,9 +85,9 @@ export function messagesReadAt(): string | null {
   }
 }
 
-function stampMessagesReadNow(): void {
+function stampMessagesRead(atMs: number): void {
   try {
-    localStorage.setItem(READ_AT_KEY, new Date().toISOString());
+    localStorage.setItem(READ_AT_KEY, new Date(atMs).toISOString());
   } catch {
     /* この端末では憶えられない ── 次回起動でまた未読に見えるだけで、実害は無い */
   }
@@ -229,6 +231,8 @@ export class MessagePost {
   /** ⚠ `job` だけ。他の種類は即座に `deliver()` する(束ねない)。 */
   private jobBatch: JobBatch | null = null;
   private jobTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 直近に積んだ節の時刻(ms)。既読の時刻がこれより前に戻らないための目盛り。 */
+  private lastPostedAtMs = 0;
 
   constructor(private readonly spool: MessageSpool = new IdbMessageSpool()) {}
 
@@ -293,6 +297,38 @@ export class MessagePost {
     this.seedUnread(countUnread(body ?? '', messagesReadAt()), posts);
   }
 
+  /**
+   * 🔴 **画面・書き出しが読む本文は、控えの分も含める**(#1087 M1)。⚠ 書けない状態(壊れ / 容量)では
+   *   節は控えにしか無く、本文だけ読むと「未読 1 件」なのに画面は空だった。
+   * - ノートの本文の後ろへ、その lid の控えの節を作られた順に足す(整形し直さない)。
+   * - 本文が読めなかったときは、控えがあれば控えだけを返す(設計 doc §7「DB が読めなければ控えを出す」)。
+   *   控えも無ければ、元の例外を投げる。
+   * ⚠ 本文 → 控えの順に読む:流しの途中(書いた後・控えから消す前)に読んでも二重にならず、
+   *   落ちるのは一瞬だけで、書込の合図で読み直される。
+   */
+  async withSpool(lid: string, readDb: () => Promise<string | null | undefined>): Promise<string> {
+    let db = '';
+    let failure: unknown = null;
+    let failed = false;
+    try {
+      db = (await readDb()) ?? '';
+    } catch (e) {
+      failed = true;
+      failure = e;
+    }
+    let spooled: string[] = [];
+    try {
+      const cid = this.deps?.cid;
+      spooled = (await this.spool.list())
+        .filter(({ item }) => item.lid === lid && (cid === undefined || item.cid === '' || item.cid === cid))
+        .map(({ item }) => item.section);
+    } catch {
+      /* 控えが読めない ── 本文だけ返す(本文も読めていなければ下で投げる) */
+    }
+    if (failed && spooled.length === 0) throw failure;
+    return withSpooledSections(db, spooled);
+  }
+
   /** 書きかけの分(控えの流しも含む)がすべて終わるまで待つ。 */
   async whenWritten(): Promise<void> {
     for (;;) {
@@ -305,7 +341,8 @@ export class MessagePost {
 
   /** メッセージのノートを開いた ── 既読の時刻を進め、未読を 0 にする。 */
   markRead(): void {
-    stampMessagesReadNow();
+    // 🔴 既読の次の秒へ送って積んだ節(`post`)があれば、その時刻まで進める ── 進めないと数え直しで未読に戻る(#1087 M5)
+    stampMessagesRead(Math.max(Date.now(), this.lastPostedAtMs));
     this.unread = 0;
     this.readCount += 1;
     this.notify();
@@ -326,8 +363,10 @@ export class MessagePost {
     const lid = lidForMessageKind(input.kind);
     const title = titleForMessageLid(lid);
     const cap = capForMessageLid(lid, currentMessageCap());
+    const at = postedAtAfterReadMark(new Date().toISOString(), messagesReadAt());
+    this.lastPostedAtMs = Math.max(this.lastPostedAtMs, Date.parse(at));
     const section = formatMessageSection({
-      at: new Date().toISOString(),
+      at,
       kind: input.kind,
       source: input.source,
       text: sanitizeMessageText(input.text, input.fixedHead),

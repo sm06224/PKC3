@@ -173,8 +173,10 @@ export function formatMessageSection(input: MessageSectionInput): string {
  * - 開きと閉じを数え、深さが 0 に戻った所で 1 つの名前とする(入れ子の 」 は名前の中)。
  * - 深さ 0 で現れた余りの閉じは、直前の名前の続きとみなす(名前に 」 が 1 つだけ入った形:「a」b」)。
  * - 閉じずに終わったら末尾まで潰す(中身を出さない側に倒す)。
- * ⚠ 2 つの名前の間の字(「A」から「B」へ の「から」)は残す。
+ * ⚠ 2 つの名前の間の字(「A」から「B」へ の「から」)は、つなぎの語だけなら残す(それ以外は下の M6 で 1 つに潰す)。
  */
+/** 2 つの名前の間に在ってよい、つなぎの語(これ以外が挟まったら 1 つの名前の中とみなす)。 */
+const CONNECTOR_GAP_RE = /^\s*(?:から|まで|より|と|を|へ|に|の|が|は|で|や|→|⇒|、|・|\/|,)?\s*$/;
 function collapseBrackets(text: string, open: string, close: string): string {
   const spans: Array<[number, number]> = [];
   let depth = 0;
@@ -194,6 +196,21 @@ function collapseBrackets(text: string, open: string, close: string): string {
     }
   }
   if (depth > 0) spans.push([start, text.length - 1]);
+  /**
+   * 🔴 **名前が `」` と `「` を両方含む形は、間の字も名前の続き**(#1087 M6)。⚠ 「${t}」を…」の t が
+   *   `a」秘密「b` だと、括弧は釣り合って 2 つの名前に見え、間の「秘密」が残った。外から見て
+   *   「2 つの名前の間の字」と「名前の中の字」は区別できない ── 間が**つなぎの語だけ**(`CONNECTOR_GAP_RE`)なら
+   *   2 つの名前とみなして間を残し(「A」から「B」へ)、それ以外は中身を出さない側に倒して 1 つに潰す。
+   * ⚠ 残る漏れ:名前が `a」から「b` のようにつなぎの語そのものを挟む形は、そのつなぎの語(1〜2 字)だけが残る。
+   */
+  for (let i = spans.length - 1; i > 0; i--) {
+    const prev = spans[i - 1]!;
+    const cur = spans[i]!;
+    if (!CONNECTOR_GAP_RE.test(text.slice(prev[1] + 1, cur[0]))) {
+      prev[1] = cur[1];
+      spans.splice(i, 1);
+    }
+  }
   let out = '';
   let at = 0;
   for (const [a, b] of spans) {
@@ -296,4 +313,27 @@ export function countUnread(body: string, readAtIso: string | null): number {
     if (at > readMark) count += 1;
   }
   return count;
+}
+
+/**
+ * 🔴 **控えの節をノートの本文の後ろへ足す**(#1087 M1)。⚠ 節は `formatMessageSection` が組んだ後の字で、
+ *   ここでは**何も整形し直さない**(普通の節と同じ形のまま並ぶ)。控えは作られた順に渡す。
+ */
+export function withSpooledSections(dbBody: string, spooled: readonly string[]): string {
+  return dbBody + spooled.join('');
+}
+
+/**
+ * 🔴 **既読の直後に積む節の時刻**(#1087 M5)。⚠ 見出しは**秒まで**なので、既読の時刻と同じ秒に積んだ
+ *   注意は `at > readMark` で数えられず、数え直すと未読から落ちた。既読の秒と同じか前に当たるなら、
+ *   既読の次の秒へ送る(< 1 秒のずれ。順番は崩れない)。
+ * ⚠ 既読が未来(時計のずれ)なら送らない ── 遠い未来の見出しを書かない。
+ */
+export function postedAtAfterReadMark(nowIso: string, readAtIso: string | null): string {
+  if (readAtIso === null) return nowIso;
+  const now = Date.parse(nowIso);
+  const mark = Date.parse(readAtIso);
+  if (Number.isNaN(now) || Number.isNaN(mark) || mark > now + 2000) return nowIso;
+  if (formatHeadingTimestamp(nowIso) > formatHeadingTimestamp(readAtIso)) return nowIso;
+  return new Date(Math.floor(mark / 1000) * 1000 + 1000).toISOString();
 }
