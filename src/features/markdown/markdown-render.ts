@@ -5133,6 +5133,8 @@ export function preprocessAlignPrefix(source: string, lineMapIn: number[], useGu
   // 行頭の空白系文字種は無視(2026-05-08 user 統一方針:行頭系シンプル記法は
   // leading whitespace を全部 strip)。`   |>` / `\t|<` 等もマーカーとして拾う。
   const prefixRe = /^\s*(\|\||\|>|<\||\|<|>\|)(?:\s)?(.*)$/;
+  // 表の区切りの行(`|---|---|` / `---|---` / `|:--|--:|`)。⚠ 水平線(`---` だけ)も形は同じなので、下の判定では `|` を含むものに限る
+  const TABLE_DELIMITER_ROW = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
   // L-9 indent prefix:`__` or `＿`(U+FF3F、全角アンダースコア)。`___`
   // 以上の連続(markdown horizontal rule)は捕まえないため `(?!_)` で除外、
   // また content 末尾が `__` で終わる場合は markdown bold 行と解釈して
@@ -5149,6 +5151,11 @@ export function preprocessAlignPrefix(source: string, lineMapIn: number[], useGu
   // fenced code block 内では align / indent prefix を marker と認識しない
   // (2026-05-08 hotfix)。fence 中は素通し、currentAlign も reset。
   let fence: FenceState = { inFence: false, marker: '' };
+  /**
+   * 🔴 **表の行として読んだ行**(入力の行ごと。台帳 #1852 I2 / 依頼 309)── `||x|y` の判定に使う。
+   * ⚠ 寄せの印として食った行・空行・fence の中は偽のまま。
+   */
+  const rowLike: boolean[] = new Array<boolean>(lines.length).fill(false);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     const inputIdx = lineMapIn[i] ?? i;
@@ -5181,7 +5188,17 @@ export function preprocessAlignPrefix(source: string, lineMapIn: number[], useGu
     // Detect L-5 align prefix
     // 🔴 `|` で終わる行は表の行(#1087)。`|| A | B |`(先頭のセルが空)や
     //   `|>=18|…`(先頭のセルが `<` `>` で始まる)を、寄せの印として食わない。
-    const m = /\|\s*$/.test(line) ? null : prefixRe.exec(line);
+    let m = /\|\s*$/.test(line) ? null : prefixRe.exec(line);
+    /**
+     * 🔴 **表の中の行は、`||` で始まっても表の行**(台帳 #1852 I2 / 依頼 309。Gemini 回答 = 推薦 A)。
+     * `||x|y` のように最初の升を空にして `|` を詰めて書いた行(行末の `|` が無い)は中央寄せの印と読まれ、表から外れていた。
+     * 「上下が表の行」= ①直前の行が表の行として読まれている ②次の行が表の区切りの行(`|---|---|`。この行が見出し行)。
+     * ⚠ 表の外の `||中央寄せ` は、これまでどおり中央寄せの印(上下が表でなければ変えない)。
+     */
+    if (m && m[1] === '||' && (rowLike[i - 1] === true || (i + 1 < lines.length && lines[i + 1]!.includes('|') && TABLE_DELIMITER_ROW.test(lines[i + 1]!)))) {
+      m = null;
+    }
+    rowLike[i] = m === null && /^\s*\|/.test(line);
     if (m) {
       const sym = m[1]!;
       const rest = m[2] ?? '';

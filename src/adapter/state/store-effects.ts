@@ -103,6 +103,7 @@ import {
   type CaptureSource,
 } from '@features/capture/capture-item';
 import { collectEntryTags } from '@features/flavor/entry-tags';
+import { kindChangedNotice } from '@features/flavor/kind-change';
 import { MAX_TAGS, sameTag } from '@features/flavor/tags';
 import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
@@ -2223,6 +2224,63 @@ export function connectStoreEffects(
           }
         });
         break;
+      case 'REQUEST_SET_ARCHETYPE':
+        /**
+         * 🔴 **ノートの種類を書く**(台帳 #1852 I2 / 依頼 157)。本文は 1 バイトも変えない。
+         *
+         * 本文は disk が正(画面の古い本文を基底にしない ── `REQUEST_RENAME` は本文に触れないが、種類は
+         * 抽出列(日付など)も新しい種類の規則で引き直すので、本文を読む)。
+         * ⚠ 読んでから書くまでの間に別の窓が本文を書いていたら、**1 バイトも書かず**断る(`expectHash`。
+         *   追記・書換と同じ門)。⚠ 履歴には積まない(本文が同じ・もう一度押せば戻る)。
+         */
+        enqueue(async () => {
+          if (disposed) return;
+          // 失敗したら画面の種類を元へ戻す(楽観更新のまま残すと、再読み込みで戻って見える)
+          const rollback = (): void => {
+            if (!disposed)
+              dispatcher.dispatch({ type: 'SET_ENTRY_ARCHETYPE_ROLLBACK', lid: ev.lid, from: ev.archetype, to: ev.oldArchetype });
+          };
+          try {
+            const body = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (body === null) {
+              rollback();
+              dispatcher.dispatch({ type: 'OP_FAILED', error: ENTRY_GONE_NOTE });
+              return;
+            }
+            const ext = extractMeta(ev.archetype, body);
+            const stamps = await store.persistEntry(
+              {
+                lid: ev.lid,
+                title: ev.title,
+                archetype: ev.archetype,
+                body,
+                entryOrder: ev.entryOrder,
+                status: ext.status,
+                date: ext.date,
+                archived: ext.archived,
+              },
+              { expectHash: contentHash64Hex(body) },
+            );
+            if (disposed) return;
+            if (stamps.conflict === true) {
+              rollback();
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error:
+                  '別のタブまたはウィンドウがこのノートを書き換えたため、種類を変えられませんでした(もう一度押してください)',
+              });
+              return;
+            }
+            stamp(ev.lid, stamps);
+            dispatcher.dispatch({ type: 'OP_NOTICE', message: kindChangedNotice(ev.archetype) });
+          } catch (e) {
+            rollback();
+            if (!disposed)
+              dispatcher.dispatch({ type: 'OP_FAILED', error: `種類を変えられませんでした: ${errorText(e)}` });
+          }
+        });
+        break;
       case 'REQUEST_RENAME':
         // read→write を 1 op に(同一 lid の先行 persist の後に読む)。
         // body は disk が正 ── 編集中 draft には触れない
@@ -4159,7 +4217,12 @@ export function connectStoreEffects(
                 return undefined;
               }
             };
-            const revBefore = shapeRemove ? await newestRevId() : undefined;
+            /**
+             * 🔴 **「すべて未完了に戻す」を押した直後の「元に戻す」の材料**(台帳 #1852 I2 / 依頼 114-2。Gemini 回答 = 推薦 A)。
+             * ⚠ 何件か動く回だけ(動かない回は書かない)。表の行・列を消す回と同じく、書く前後の「いちばん新しい版」で見る。
+             */
+            const runUndo = run !== null && runTo === 'open' && run.changed > 0;
+            const revBefore = shapeRemove || runUndo ? await newestRevId() : undefined;
             /**
              * 🔴 **読んでから書くまでの間に別の窓が書いていたら、1 バイトも書かない**
              * (#178 残り、2026-08-23)。
@@ -4284,7 +4347,17 @@ export function connectStoreEffects(
                   readAttachmentMeta(newBody).name,
                 ),
               });
-            if (run !== null && runTo !== null && run.skipped.repeat > 0 && !disposed)
+            if (run !== null && runTo !== null && runUndo && !disposed) {
+              // 件数(と、繰り返しを飛ばした数)を言い、隣に「元に戻す」(押すと押す前の版へ戻る)
+              const revAfter = await newestRevId();
+              dispatcher.dispatch({
+                type: 'OP_NOTICE',
+                message: taskRunNotice(run, runTo),
+                ...(revAfter !== undefined && revAfter !== revBefore
+                  ? { restoreUndo: { lid: ev.lid, revId: revAfter } }
+                  : {}),
+              });
+            } else if (run !== null && runTo !== null && run.skipped.repeat > 0 && !disposed)
               dispatcher.dispatch({ type: 'OP_NOTICE', message: taskRunNotice(run, runTo) });
             /**
              * 🔴 **表の行・列を消した直後に「元に戻す」を出す**(#1662 5。Gemini 裁定 = #1163 依頼 48 の 5 = A)。

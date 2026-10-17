@@ -1153,6 +1153,8 @@ describe('チェックリストをそろえる(#1173)', () => {
       '3 件を完了にしました / 2 件は繰り返しなので触りませんでした',
     );
     expect(taskRunNotice(run(0, 2), 'open')).toBe('2 件は繰り返しなので触りませんでした');
+    // 未完了へは「戻しました」(台帳 #1852 I2 / 依頼 114-2)
+    expect(taskRunNotice(run(15, 0), 'open')).toBe('15 件を未完了に戻しました');
     expect(taskRunNotice(run(0, 0), 'done')).toBe('すべて完了になっています');
     expect(taskRunNotice(run(0, 0), 'open')).toBe('すべて未完了になっています');
   });

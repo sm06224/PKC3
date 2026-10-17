@@ -90,3 +90,43 @@ describe('textlog anchors (P6)', () => {
     expect(rewriteTextlogRefs(once, 'tl1', anchorsByLid, days)).toBe(once);
   });
 });
+
+/**
+ * 🔴 日時の無い記録の行(台帳 #1852 I2 / 依頼 158。Gemini 回答 = 推薦 ②)。
+ * 直す前は、日時の無い行の見出しに「取り込んだ時刻」が入り、本当の日付と関係のない日の記録に見えた。
+ */
+describe('日時の無い行の見出し(依頼 158)', () => {
+  const body = JSON.stringify({
+    entries: [
+      { id: 'a1', text: '朝', createdAt: '2026-07-01T09:00:00', flags: [] },
+      { id: 'a2', text: '日時が無い', flags: [] },
+      { id: 'a3', text: '空の日時', createdAt: '', flags: ['important'] },
+    ],
+  });
+
+  it('🔴 日時の無い行(欠けている / 空)の見出しは `(日時なし)`。取り込んだ時刻は書かない', () => {
+    const md = textlogFlavor.fromPkc2!(body);
+    expect(md).toBe('## 2026-07-01 09:00:00\n\n朝\n\n## (日時なし)\n\n日時が無い\n\n## (日時なし) ★\n\n空の日時');
+  });
+
+  it('リンクの書き換えも同じ字を探す(日時の無い行へのリンクが行き先を見失わない)', () => {
+    const md = textlogFlavor.fromPkc2!(body);
+    const anchors = buildTextlogAnchorMap(body, md);
+    expect(anchors.get('a1')).toBe('2026-07-01-090000');
+    expect(anchors.has('a2')).toBe(true);
+    expect(anchors.has('a3')).toBe(true);
+    expect(anchors.get('a2')).not.toBe(anchors.get('a3'));
+  });
+
+  it('日付ごとの先頭の行には、日時の無い行を数えない(読んだ時刻の日に寄せない)', () => {
+    const md = textlogFlavor.fromPkc2!(body);
+    const anchors = buildTextlogAnchorMap(body, md);
+    const days = buildFirstLogOfDay(body, anchors);
+    expect([...days.keys()]).toEqual(['2026-07-01']);
+  });
+
+  it('対照群:日時のある行は今までどおり(書式が壊れた日時は原文の字を残す)', () => {
+    const md = textlogFlavor.fromPkc2!(JSON.stringify({ entries: [{ text: 'x', createdAt: 'いつか' }] }));
+    expect(md).toBe('## いつか\n\nx');
+  });
+});

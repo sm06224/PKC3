@@ -16,7 +16,7 @@
  * 同じ原則)。
  */
 import { parseTextlogBody } from '../textlog/textlog-body';
-import { formatHeadingTimestamp } from '../flavor/textlog-flavor';
+import { logRowHeadingText } from '../flavor/textlog-flavor';
 import { extractHeadingsFromMarkdown } from '../markdown/markdown-toc';
 
 /** 1 つの textlog entry について、log id → 変換後見出し slug の対応表を作る。 */
@@ -34,8 +34,8 @@ export function buildTextlogAnchorMap(
   const headings = extractHeadingsFromMarkdown(convertedMarkdown);
   let cursor = 0;
   for (const e of log.entries) {
-    const star = e.flags.includes('important') ? ' ★' : '';
-    const expected = `${formatHeadingTimestamp(e.createdAt)}${star}`;
+    // 🔴 見出しの字は取り込み(`fromPkc2`)と同じ 1 本(`logRowHeadingText`)── 日時の無い行は `(日時なし)`
+    const expected = logRowHeadingText(e);
     for (let i = cursor; i < headings.length; i++) {
       if (headings[i]!.text === expected) {
         map.set(e.id, headings[i]!.slug);
@@ -127,7 +127,8 @@ export function buildFirstLogOfDay(
   const log = parseTextlogBody(pkc2Body);
   const byDay = new Map<string, string>();
   for (const e of log.entries) {
-    const day = localDateKey(e.createdAt);
+    // 日時の無い行に日付は無い(読んだ時刻の日に寄せない。依頼 158)
+    const day = e.undated === true ? '' : localDateKey(e.createdAt);
     const slug = anchors.get(e.id);
     if (day !== '' && slug !== undefined && !byDay.has(day)) byDay.set(day, slug);
   }

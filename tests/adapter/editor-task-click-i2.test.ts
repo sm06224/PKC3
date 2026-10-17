@@ -157,7 +157,7 @@ describe('1 行ずつ打つ編集のあいだの「番号を振り直す」「�
     const root = await editing('live', []);
     for (const b of tools(root)) {
       expect(b.getAttribute('aria-disabled')).toBe('true');
-      expect(b.disabled).toBeFalsy();
+      expect((b as HTMLButtonElement).disabled).toBeFalsy();
       expect(b.title).toBe(WHOLE_NOTE_REASON);
     }
     expect(WHOLE_NOTE_REASON).toContain('「全文を編集」');

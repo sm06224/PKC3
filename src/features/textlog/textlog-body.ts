@@ -16,6 +16,12 @@ export interface TextlogEntry {
   text: string;
   createdAt: string; // ISO 8601
   flags: TextlogFlag[];
+  /**
+   * 🔴 **元の記録に日時が無かった行**(台帳 #1852 I2 / 依頼 158)。`createdAt` には読んだ時刻が入る(他の読み手は
+   * 日付を要るので)が、**PKC3 の本文へ変換するときは、その時刻を見出しに書かない**(`(日時なし)` と書く)。
+   * ⚠ 日時のある行では付けない(`undefined`)。
+   */
+  undated?: true;
 }
 
 export interface TextlogBody {
@@ -48,8 +54,10 @@ export function readTextlogEntries(body: string): TextlogBody | null {
       .map((e) => ({
         id: typeof e.id === 'string' ? e.id : generateLogId(),
         text: typeof e.text === 'string' ? e.text : '',
-        createdAt: typeof e.createdAt === 'string' ? e.createdAt : new Date().toISOString(),
+        createdAt: typeof e.createdAt === 'string' && e.createdAt !== '' ? e.createdAt : new Date().toISOString(),
         flags: Array.isArray(e.flags) ? (e.flags.filter((f: unknown) => typeof f === 'string') as TextlogFlag[]) : [],
+        // 🔴 日時が無い(文字列でない / 空)行に印を付ける。日時の書式が壊れている行は「日時あり」のまま(原文の字を残す)
+        ...(typeof e.createdAt === 'string' && e.createdAt !== '' ? {} : { undated: true as const }),
       })),
   };
 }

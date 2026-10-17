@@ -213,7 +213,9 @@ describe('前処理の「コードの中」は markdown-it と一致する(乱�
       const got = taskLines(body);
       const why: string[] = [];
       if (JSON.stringify(got) !== JSON.stringify(o.tasks)) why.push(`task 行 ${JSON.stringify(got)} != ${JSON.stringify(o.tasks)}`);
-      const top = o.tasks.some((l) => !/^\s*>/.test(lines[l]!));
+      // 🔴 引用の中の task も数える(台帳 #1852 I2 / 依頼 159: 引用の中も並べ替えるので、`hasTaskItems` も引用の中を数える。
+      //   以前は引用の外の task だけ ── 引用の中は `hasQuotedTaskItems` が言い分けていた)
+      const top = o.tasks.length > 0;
       if (hasTaskItems(body) !== top) why.push(`hasTaskItems ${String(hasTaskItems(body))} != ${String(top)}`);
       const out = stripComments(body).transformed.split('\n');
       if (out.length === lines.length) {

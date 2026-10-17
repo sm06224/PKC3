@@ -878,15 +878,17 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-17(#1621): 左のペインの「⋯」(`open-bar-more`)で受け手 +1 ── 登記は増えない(鍵を持たない画面のボタン)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#952 B2・B3): 設定の「音量をそろえる」「頭の中で鳴る感じを和らげる」(`set-voice-level` / `set-voice-crossfeed`)で受け手 +2 ── 登記は増えない(`set-voice-boost` と同じ checkbox)。`receivers` +2 / `total` +2 / `unregistered` +2。
       // ⚠ 2026-10-17(依頼 198): 左の列の「並びの向きを逆にする」(`toggle-entry-sort-desc`)で受け手 +1 ── 登記は増えない(鍵を持たない画面のボタン。`set-entry-sort` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      // ⚠ 2026-10-17(台帳 #1852 I2 / 依頼 157): 右の列 / 右クリックの「種類を変える…」(`change-entry-kind`)1 件を登記 ── 受け手も同時に足したので
+      //   `total` +1 / `receivers` +1 / `registered` +1 / `both` +1(`unregistered` は動かない)。
       // ⚠ 2026-10-17(依頼 337): 一覧の Home / End / PageUp / PageDown(`filer-row-first` / `-last` / `-page-up` / `-page-down`)で登記 +4 ── 鍵の既定を持つ命令で、受け手は `runFilerKey` / `runDualKey`(押しボタンは持たない)。`registered` +4 / `total` +4 / `outsideActionsTable` +4(`receivers` と `unregistered` は動かない)。
-      total: 453,
-      receivers: 380,
+      total: 454,
+      receivers: 381,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       // ⚠ 2026-10-17(#1163 依頼 153): 左のペインの「上へ動かす」「下へ動かす」(`move-order-up` / `move-order-down`)の 2 件を登記 ──
       //   受け手は前から在った(帯のボタン)ので `registered` +2 / `both` +2 / `unregistered` −2(`total` / `receivers` は動かない)。`undo-trash` と同じ仕分け。
-      registered: 178,
-      both: 105,
+      registered: 179,
+      both: 106,
       outsideActionsTable: 73,
       unregistered: 275,
     });
@@ -951,9 +953,10 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-17(#1163 依頼 153): 「上へ動かす」「下へ動かす」(`move-order-up` / `move-order-down`)を登記で `key` 142 → 144(鍵の既定は持たない)
     expect(s().perBook).toEqual({
       // ⚠ 2026-10-17(#1646 の 1): 行のメニューが 22 → 23(`open-trash`)
+      // ⚠ 2026-10-17(台帳 #1852 I2 / 依頼 157): 行のメニューが 23 → 24(`change-entry-kind`)
       // ⚠ 2026-10-17(依頼 337): 一覧の Home / End / PageUp / PageDown の 4 件を登記で 142 → 146(鍵の既定を持つ)
       key: 148,
-      entry: 23,
+      entry: 24,
       body: 3,
       collection: 2,
       collectionPane: 5,

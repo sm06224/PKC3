@@ -458,12 +458,36 @@ class Parser {
   }
 }
 
+/**
+ * 🔴 **升の字を数として読む**(台帳 #1852 I2 / 依頼 307。Gemini 回答 = 推薦 A)。
+ *
+ * - 全角の数字・符号・小数点(`１２３` / `－５` / `１．５`)は半角として読む
+ * - 桁区切りの `,`(全角の `，` も)は、**3 桁ごとに正しく区切られているときだけ**落とす(`1,200` は 1200。`1,2` は数ではない)
+ * - `¥` `円` `%` の付いた升(`¥300` / `1,200円` / `50%`)は**これまでどおり読まない**(通貨や百分率の読み方は表によって違う)
+ * 🔑 読む前の字を書き換えるのは「読むとき」だけ ── 升の字そのものは 1 バイトも変えない。
+ * @returns 数。読めなければ `null`(空の升もここでは `null`)
+ */
+export function cellNumber(raw: string): number | null {
+  const t = raw.trim();
+  if (t === '') return null;
+  const folded = t
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/[－−]/g, '-')
+    .replace(/＋/g, '+')
+    .replace(/．/g, '.')
+    .replace(/，/g, ',');
+  // 桁区切り: 符号 + 1〜3 桁 + (`,` + 3 桁)の繰り返し + 小数。それ以外の `,` は数ではない(`Number('1,2')` は NaN)
+  const plain = /^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(folded) ? folded.replace(/,/g, '') : folded;
+  const n = Number(plain);
+  return Number.isFinite(n) ? n : null;
+}
+
 function toNum(v: Value): number {
   if (typeof v === 'number') return v;
   if (typeof v === 'boolean') return v ? 1 : 0;
   if (v.trim() === '') return 0;
-  const n = Number(v);
-  if (!Number.isFinite(n)) throw new Fail('#ERR!', `数として読めません: ${v}`);
+  const n = cellNumber(v);
+  if (n === null) throw new Fail('#ERR!', `数として読めません: ${v}`);
   return n;
 }
 
@@ -551,7 +575,7 @@ function roundHalfAway(x: number, digits: number): number {
 function isNumeric(v: Value): boolean {
   if (typeof v === 'number') return true;
   if (typeof v === 'boolean') return false;
-  return v.trim() !== '' && Number.isFinite(Number(v));
+  return cellNumber(v) !== null;
 }
 
 function truthy(v: Value | undefined): boolean {
@@ -559,7 +583,7 @@ function truthy(v: Value | undefined): boolean {
   if (typeof v === 'boolean') return v;
   if (typeof v === 'number') return v !== 0;
   // 🔴 数として読める字は数で(#1087 F-2)── 升の `0` / `0.0` が真になっていた
-  if (isNumeric(v)) return Number(v) !== 0;
+  if (isNumeric(v)) return toNum(v) !== 0;
   return v.trim() !== '' && v.toUpperCase() !== 'FALSE';
 }
 

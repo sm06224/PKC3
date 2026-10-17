@@ -823,7 +823,8 @@ export function applyTaskRun(
  */
 export function taskRunNotice(run: TaskRunApplied, to: 'done' | 'open'): string {
   const parts: string[] = [];
-  if (run.changed > 0) parts.push(`${run.changed} 件を${to === 'done' ? '完了' : '未完了'}にしました`);
+  // 🔴 未完了へは「戻しました」(台帳 #1852 I2 / 依頼 114-2。Gemini 回答 = 推薦 A の字)
+  if (run.changed > 0) parts.push(`${run.changed} 件を${to === 'done' ? '完了にしました' : '未完了に戻しました'}`);
   if (run.skipped.repeat > 0) parts.push(`${run.skipped.repeat} 件は繰り返しなので触りませんでした`);
   if (parts.length === 0) return to === 'done' ? 'すべて完了になっています' : 'すべて未完了になっています';
   return parts.join(' / ');

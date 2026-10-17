@@ -141,6 +141,7 @@ import {
   visibleSelection,
 } from '@features/relation/filer-list';
 import { archetypeLabel } from '@features/flavor/archetype-label';
+import { kindChangeQuestion, kindChangeTarget } from '@features/flavor/kind-change';
 import { HIDDEN_HEAD_ATTR, foldAttachmentHead, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
 import { countMatches } from '@features/markdown/body-replace';
 import { SMART_ARCHETYPE, SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
@@ -3063,6 +3064,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'undo-dual-move',
   // 🔴 題名を変えた直後の「元に戻す」(#1657)── 題名を書き戻すので `rename-attachment` と同じ門
   'undo-rename',
+  // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── 種類を disk へ書くので、同じ門
+  'change-entry-kind',
   // 🔴 取り込みの「取り消す」── ゴミ箱へ入れる `delete-entry` と同じ書込なので同じ門(#1087)
   'undo-import',
   'purge-trash',
@@ -9315,6 +9318,41 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     restoreRenamedTitle(dispatcher, r.lid, r.from, r.withFile);
     dispatcher.dispatch({ type: 'OP_NOTICE', message: `題名を「${r.from}」に戻しました` });
+  },
+  /**
+   * 🔴 **ノートの種類を変える**(台帳 #1852 I2 / 依頼 157。Gemini 回答 = 推薦 ②)。ノート ⇄ ログだけ。
+   *
+   * 押すと**確認が先に出る**(画面で何が変わるかを言う ── 本文はそのまま・追記の足し方が変わる・もう一度押せば戻る)。
+   * ⚠ 書込は `SET_ENTRY_ARCHETYPE` 1 本(reducer が組を検める)── ここは押した行を引いて聞くだけ。
+   * ⚠ 編集中などで変えられないときは**黙らない**(`undo-trash` と同じ断り)。
+   */
+  'change-entry-kind': (dispatcher, target, _services, root) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    const meta = lid === null ? undefined : st.entryMetas.get(lid);
+    if (lid === null || meta === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '種類を変えるノートを選んでください(行を押すと選べます)' });
+      return;
+    }
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}種類を変えてください` });
+      return;
+    }
+    const to = kindChangeTarget(meta.archetype);
+    if (to === null) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `「${archetypeLabel(meta.archetype)}」の種類は変えられません(変えられるのはノートとログです)`,
+      });
+      return;
+    }
+    void confirmInApp(root, kindChangeQuestion(meta.title, meta.archetype, to), {
+      okLabel: `「${archetypeLabel(to)}」に変える`,
+      cancelLabel: 'やめる',
+    }).then((answer) => {
+      if (answer !== 'ok') return;
+      dispatcher.dispatch({ type: 'SET_ENTRY_ARCHETYPE', lid, archetype: to });
+    });
   },
   'delete-entry': (dispatcher, target, services, root) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ

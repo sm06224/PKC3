@@ -88,6 +88,16 @@ function stripListHead(rest: string): string {
  */
 const FULLWIDTH_HEAD = /^(?:・[ \t\u3000]*|(?:[－＊＋]|[０-９]+[.．)）])[ \t\u3000]+)/;
 
+/**
+ * 🔴 **完了したチェック項目の行か**(引用の印を除いた残りで見る。台帳 #1852 I2 / 依頼 114-3)。
+ * ⚠ 読み方は `TASK_LINE` と**同じ**(`- [x]` / `* [X]` / `1. [x]`、印の直後は空白か行末)。未完了(`[ ]`)は含めない ──
+ *   消えて困るのは「済んだ」という記録のほうで、未完了の `[ ]` を箇条書きに替える既存の動きは変えない。
+ */
+function isDoneTaskRest(rest: string): boolean {
+  const m = TASK_LINE.exec(rest);
+  return m !== null && m[2] !== ' ';
+}
+
 /** 行頭の引用の連なり(`> ` / `> > `。字下げ付きも)と、その残り。 */
 function splitQuote(line: string): [string, string] {
   const q = /^(?:[ \t]*>[ \t]?)*/.exec(line)![0];
@@ -127,12 +137,28 @@ export function toggleLinePrefix(sel: TextSelection, kind: LinePrefix): TextSele
   // 🔴 引用の中の行は、引用の印を除いた残りで判定する(#1087)。引用・チェックは行ぜんたいで読む
   const wholeLine = kind === 'quote' || kind === 'task';
   const target = (l: string): string => (wholeLine ? l : splitQuote(l)[1]);
-  const allMarked = lines.every((l) => isBlank(l) || detect.test(target(l)));
+  /**
+   * 🔴 **チェック項目の完了の印は、書式のボタンで消さない**(台帳 #1852 I2 / 依頼 114-3。Gemini 回答 = 推薦 A)。
+   *
+   * > 完了した項目 `- [x] 済み` を選んで「箇条書き」「引用」「見出し」を押すと、`- 済み` になり、完了の記録が黙って消えていた。
+   *
+   * - 箇条書き: チェック付きの箇条書きは**もう箇条書き**なので、その行は変えない
+   * - 引用: `> - [x] 済み`(引用の中でもチェックは押せる)
+   * - 見出し: `# - [x] 済み`(字として残す。もう一度押すと元のチェック項目に戻る)
+   * ⚠ 対象は**完了(`[x]`)の行だけ**。未完了の `- [ ] やること` を箇条書きにすると `- やること` になる既存の動きは変えない
+   *   (依頼に無い)。「番号」も同じ(`- [X] 子` → `1. 子`)── 依頼の外なので触らない。
+   * 🔑 印を付ける側だけの話 ── 外す側(全部付いていたときの取り消し)は元から印を壊さない。
+   */
+  const isTask = (l: string): boolean =>
+    kind === 'task' || kind === 'ol' ? false : isDoneTaskRest(splitQuote(l)[1]);
+  const allMarked = lines.every((l) => isBlank(l) || (kind === 'ul' && isTask(l)) || detect.test(target(l)));
   const keep = INDENT_KEPT.has(kind);
   let n = 0;
   const next = lines
     .map((l) => {
       if (isBlank(l)) return l;
+      // 箇条書きを押した行がもうチェック付きの箇条書きなら、そのまま
+      if (kind === 'ul' && isTask(l)) return l;
       if (allMarked) {
         if (kind === 'task') {
           const m = TASK_LINE.exec(l)!;
@@ -144,7 +170,7 @@ export function toggleLinePrefix(sel: TextSelection, kind: LinePrefix): TextSele
         return q + (keep ? rest.replace(detect, '$1') : rest.replace(detect, ''));
       }
       n += 1;
-      if (kind === 'quote') return `${mark}${stripMark(l)}`;
+      if (kind === 'quote') return isTask(l) ? `${mark}${l}` : `${mark}${stripMark(l)}`;
       // 🔴 引用の印は残し、その内側で印を差し替える。見出しは字下げを落とし、リスト類は字下げを保つ
       const [q, rest] = splitQuote(l);
       if (keep) {
@@ -155,6 +181,8 @@ export function toggleLinePrefix(sel: TextSelection, kind: LinePrefix): TextSele
       }
       // 字下げした `# ` は見出しではない(従来どおり)。字下げした**リスト**の印は、字下げごと落として見出しにする
       const t = rest.replace(/^\s+/, '');
+      // 見出し: チェック項目は完了の印を字として残す(`# - [x] a`)
+      if (isTask(l)) return `${q}${mark}${t}`;
       const indentedHead = t !== rest && /^#{1,6}[ \t]+/.test(t);
       return `${q}${mark}${indentedHead ? rest : stripListHead(t)}`;
     })

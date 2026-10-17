@@ -90,6 +90,8 @@ const EXPECTED_ACTIONS: readonly string[] = [
   // 🔴 左の列の整理 3 つ(#215)── 右クリックと同じ並び(履歴の下・削除の上)
   'rename-entry-begin',
   'move-to-folder',
+  // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── ノートとログだけ見える(他では hidden)
+  'change-entry-kind',
   'create-in-folder',
   // 🔴 ゴミ箱を開く(#1646 の 1)── 削除の隣(開く → 移す)
   'open-trash',

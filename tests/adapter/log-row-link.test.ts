@@ -40,6 +40,7 @@ import {
   dropViewFromHash,
 } from '../../src/features/link/permalink';
 import { isLogRowHeading } from '../../src/features/flavor/textlog-flavor';
+import { logDayOfHeading } from '../../src/features/textlog/log-days';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
@@ -406,7 +407,25 @@ describe('ログの行の見出しの判定(右クリックの字を決める 1 
     expect(isLogRowHeading('text', 2, '2026-10-11 10:00:00')).toBe(false);
     expect(isLogRowHeading('textlog', 3, '2026-10-11 10:00:00')).toBe(false);
     expect(isLogRowHeading('textlog', 2, '手書きの見出し')).toBe(false);
-    expect(isLogRowHeading('textlog', 2, '2026-10-11 10:00')).toBe(false);
     expect(isLogRowHeading(undefined, 2, '2026-10-11 10:00:00')).toBe(false);
+    // 日付として実在しない見出しは行ではない
+    expect(isLogRowHeading('textlog', 2, '2026-13-45 10:00:00')).toBe(false);
+    expect(isLogRowHeading('textlog', 2, '2026-10-11')).toBe(false);
+  });
+  /**
+   * 🔴 台帳 #1852 I2 / 依頼 160(Gemini 回答 = 推薦 ①):秒の無い見出しも行。
+   * 以前は `'2026-10-11 10:00'` が行ではなかった(秒まで書いた形だけが行で、日ごとのまとまりとは食い違っていた)。
+   */
+  it('🔴 秒の無い日時の見出し(手で書いた `12:30 会議` など)も行 ── 日ごとのまとまりと同じ読み方', () => {
+    expect(isLogRowHeading('textlog', 2, '2026-10-11 10:00')).toBe(true);
+    expect(isLogRowHeading('textlog', 2, '2026-10-10 12:30 会議')).toBe(true);
+    expect(isLogRowHeading('textlog', 2, '2026-10-11 10:00 ★')).toBe(true);
+    // 全角の空白・半角の空白で前後が囲まれていても(見出しの字は trim される)
+    expect(isLogRowHeading('textlog', 2, '  2026-10-11 10:00  ')).toBe(true);
+  });
+  it('⚠ 日ごとのまとまり(logDayOfHeading)と行の判定は同じ答えを返す(2 本に戻さない)', () => {
+    for (const t of ['2026-10-11 10:00:00', '2026-10-11 10:00', '2026-10-10 12:30 会議', '手書き', '2026-13-45 10:00', '2026-10-11']) {
+      expect(isLogRowHeading('textlog', 2, t), t).toBe(logDayOfHeading(t) !== null);
+    }
   });
 });

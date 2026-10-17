@@ -8,9 +8,10 @@
  * 秒まで含めるのは PKC2 の textlog-readability-hardening の教訓
  * (高頻度ログの弁別に秒が要る)── 設計メモ §3 の `HH:mm` 表記はこの精度に更新。
  */
-import { readTextlogEntries } from '../textlog/textlog-body';
+import { readTextlogEntries, type TextlogEntry } from '../textlog/textlog-body';
 import { type FlavorSpec } from './flavor-spec';
 import { extractSchedule } from '../schedule/schedule-keys';
+import { logDayOfHeading } from '../textlog/log-days';
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
@@ -29,15 +30,32 @@ export function formatHeadingTimestamp(iso: string): string {
   );
 }
 
-/** ログの 1 行の見出しの字(`formatHeadingTimestamp` が書く形。取り込み時の ` ★` 付きも含む)。 */
-const LOG_ROW_HEADING_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}( ★)?$/;
+/**
+ * 🔴 **日時が無い記録の行の見出し**(台帳 #1852 I2 / 依頼 158。Gemini 回答 = 推薦 ②)。
+ * 直す前は、日時の無い行の見出しに**取り込んだ時刻**が入り、本当の日付と関係のない日の記録に見えた。
+ * ⚠ 無い日時を作らない ── `(日時なし)` と書く。見出しは日時の形ではないので、この行は「章」として扱われる。
+ */
+export const UNDATED_LOG_HEADING = '(日時なし)';
+
+/**
+ * 変換で生成される見出しの字(`## ` の後ろ)。⚠ 取り込み時の見出しと、リンクの書き換え(`textlog-anchors.ts`)が
+ * **同じ字**を期待しなければならないので、組み立てはここ 1 本(片方だけ直すと、リンクが行き先を見失う)。
+ */
+export function logRowHeadingText(e: Pick<TextlogEntry, 'createdAt' | 'flags' | 'undated'>): string {
+  const star = e.flags.includes('important') ? ' ★' : '';
+  return `${e.undated === true ? UNDATED_LOG_HEADING : formatHeadingTimestamp(e.createdAt)}${star}`;
+}
 
 /**
  * 🔴 **ログの 1 行の見出しか**(#1559)。⚠ ログ(`textlog`)の `##` で、字が日時の形のものだけ ──
  *   ログの中に user が書いた別の見出しは「章」のまま。判定はここ 1 本(右クリックの字と、行のリンクの理由が読む)。
+ * 🔴 **秒の無い見出し(`## 2026-10-10 12:30 会議`)も行**(台帳 #1852 I2 / 依頼 160。Gemini 回答 = 推薦 ①)。
+ *   直す前は秒まで書いた形(`12:30:00`)だけが行で、秒の無い見出しは「日ごとのまとまり」ではその日に入るのに、
+ *   右クリックやリンクでは普通の章だった。**日ごとのまとまりと同じ読み方**(`logDayOfHeading`。見出しの頭の
+ *   日時だけを見る ── ` ★` や題名が後ろに付いてよい)に寄せて、扱いを 1 本にした。実在しない日(`2026-13-45`)は行ではない。
  */
 export function isLogRowHeading(archetype: string | undefined, level: number, text: string): boolean {
-  return archetype === 'textlog' && level === 2 && LOG_ROW_HEADING_RE.test(text.trim());
+  return archetype === 'textlog' && level === 2 && logDayOfHeading(text) !== null;
 }
 
 export const textlogFlavor: FlavorSpec = {
@@ -82,8 +100,7 @@ export const textlogFlavor: FlavorSpec = {
     if (log === null) return body;
     return log.entries
       .map((e) => {
-        const star = e.flags.includes('important') ? ' ★' : '';
-        const heading = `## ${formatHeadingTimestamp(e.createdAt)}${star}`;
+        const heading = `## ${logRowHeadingText(e)}`;
         return e.text === '' ? heading : `${heading}\n\n${e.text}`;
       })
       .join('\n\n');
