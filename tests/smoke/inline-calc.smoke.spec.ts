@@ -55,6 +55,19 @@ test('🔴 `=` まで打って Enter を押すと、答えが出て次の行へ�
     '請求は 1200*1.1=',
   );
 
+  /**
+   * 🔴 **答えの整形と、日付は計算しない**(#1087)。⚠ 新しい起動は足さない。
+   * - `3958.01+9647.86=` の答えは `13605.87`(直す前は `13605.870000000001`)
+   * - `2026-10-17=` は答えを書かない(直す前は `1999`)。改行だけが入る
+   */
+  await ta.fill('');
+  await page.keyboard.type('3958.01+9647.86=');
+  await page.keyboard.press('Enter');
+  await expect(ta, '小数の答えに端数が付いた').toHaveValue('3958.01+9647.86=13605.87\n');
+  await page.keyboard.type('2026-10-17=');
+  await page.keyboard.press('Enter');
+  await expect(ta, '日付に答えを書いた').toHaveValue('3958.01+9647.86=13605.87\n2026-10-17=\n');
+
   expect(errors, errors.join('\n')).toHaveLength(0);
 });
 

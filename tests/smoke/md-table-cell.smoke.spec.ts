@@ -77,6 +77,28 @@ test('🔴 markdown の表の升を押して打つと、本文に残る (#708 �
   });
   await expect(page.locator(CELL), '読み直したら列が増えていた').toHaveCount(4);
 
+  /**
+   * 🔴 **先頭の `|` を省いた表の 1 列目に `- x` と打っても、表が切れない**(#1087 B-1)。
+   * 直す前: その行が箇条書きになり、表がそこで切れて下の行が表から外れた。⚠ 新しい起動は足さない。
+   */
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('先頭の棒なし');
+  await page.locator('[data-pkc-field="editor-body"]').fill('a | b\n--|--\nc | d\ne | f\n\n以上。\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(page.locator(CELL), '先頭の | が無い表の升が押せない').toHaveCount(6, { timeout: 15_000 });
+  await page.locator(CELL).nth(2).click();
+  await page.keyboard.press('Control+a');
+  await page.keyboard.type('- x');
+  await page.keyboard.press('Enter');
+  await expect(page.locator(CELL).nth(2), '打った字が升に入っていない').toHaveText('- x', {
+    timeout: 10_000,
+  });
+  await expect(page.locator(CELL), '表の行が変わった(下の行が表から外れた)').toHaveCount(6);
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] table tbody tr'),
+    '表の行数が変わった',
+  ).toHaveCount(2);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
