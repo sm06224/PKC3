@@ -105,17 +105,6 @@ test('🔴 録音を止めると本文に入り、その場で聞ける (#413 �
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'deviceMemory', { value: 2, configurable: true });
   });
-  /**
-   * 🔴 **録った長さの時計だけを進められるようにする**(録音の入れ先 / 残さずにやめる確認)。
-   * ⚠ 1 分待たずに「1 分を超えた」を作る。`performance.now()` に足すだけで、ほかの動きは変えない
-   *   (収録の長さはこれで数える)。既定は 0 = 何も変えない。
-   */
-  await page.addInitScript(() => {
-    const w = window as unknown as { __pkcSkewMs: number };
-    w.__pkcSkewMs = 0;
-    const real = performance.now.bind(performance);
-    performance.now = (): number => real() + w.__pkcSkewMs;
-  });
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
 
@@ -1228,10 +1217,36 @@ ${(e as Error).message}`,
   ).toContainText(/取り出しました:「.*\(絵だけ\)\.webm」/, { timeout: 30_000 });
   await expect(screenRow, '取り出したら元の動画の行が消えた').toBeVisible();
 
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **1 分を超えた録音は、残さずにやめる前に確かめる**(#1163 依頼 50-3 / 90-3)。
+ * ⚠ **上の道中に載せなかった** ── あの 1 本は既に 30 秒の枠の手前まで使っており、足すと時間切れになった
+ *   (`scripts/smoke-budget.mjs` に理由を書いた)。timeout を引き上げて隠さず、別の 1 本にした。
+ */
+test('🔴 1 分を超えた録音は、残さずにやめる前に確かめる(1 分以下は聞かない / 「続ける」で録り続ける)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  /**
+   * 🔴 **録った長さの時計だけを進められるようにする**(録音の入れ先 / 残さずにやめる確認)。
+   * ⚠ 1 分待たずに「1 分を超えた」を作る。`performance.now()` に足すだけで、ほかの動きは変えない
+   *   (収録の長さはこれで数える)。既定は 0 = 何も変えない。
+   */
+  await page.addInitScript(() => {
+    const w = window as unknown as { __pkcSkewMs: number };
+    w.__pkcSkewMs = 0;
+    const real = performance.now.bind(performance);
+    performance.now = (): number => real() + w.__pkcSkewMs;
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  const bar = page.locator('[data-pkc-region="capture-bar"]');
+  const statusLine = page.locator('[data-pkc-region="status"]');
   /**
    * 🔴 **録音を残さずにやめる: 1 分以下は確認なし / 1 分を超えたら確認 → 「続ける」で録り続け、止めると添付になる**
-   * (録音・録画を残さずにやめる)。新しい起動は足さず、この道中の最後に録る。
-   * ⚠ 1 分は待たず、`__pkcSkewMs` で録った長さの時計を進める(上の addInitScript)。
+   * (録音・録画を残さずにやめる)。
+   * ⚠ 1 分は待たず、`__pkcSkewMs` で録った長さの時計を進める(この test の addInitScript)。
    */
   const dialogBox = page.locator('[data-pkc-region="app-dialog"]');
   const skew = (ms: number): Promise<void> =>
