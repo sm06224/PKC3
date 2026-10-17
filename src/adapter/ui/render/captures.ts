@@ -132,8 +132,30 @@ export class CapturesRenderer {
 
   private readonly onReady: () => void;
 
+  /**
+   * 🔑 波形の配色の追従。OS の自動切替や別ウィンドウでテーマが替わっても、`state` も `render` も
+   *   動かない ── <html> の `data-pkc-theme` を見て、色の突き合わせ(`syncWave`)を走らせる。
+   *   ⚠ 観測器は 1 本だけ。波形が要るあいだだけ持ち、`dispose` と波形が要らなくなったときに外す。
+   */
+  private themeObserver: MutationObserver | null = null;
+
+  private watchTheme(on: boolean): void {
+    if (!on) {
+      this.themeObserver?.disconnect();
+      this.themeObserver = null;
+      return;
+    }
+    if (this.themeObserver !== null || typeof MutationObserver !== 'function') return;
+    this.themeObserver = new MutationObserver(() => this.syncWave());
+    this.themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-pkc-theme'],
+    });
+  }
+
   /** ⚠ 面を捨てるときに必ず呼ぶ(借りたままにしない)。 */
   dispose(): void {
+    this.watchTheme(false);
     this.token += 1;
     this.borrowing = null;
     this.missingLid = null;
@@ -265,8 +287,10 @@ export class CapturesRenderer {
     const key = item?.kind === 'audio' ? item.assetKey : null;
     if (item === undefined || key === null || key === undefined || this.assets === null || this.waveSource === null) {
       this.dropWave();
+      this.watchTheme(false);
       return;
     }
+    this.watchTheme(true);
     if (this.waveLid !== null && this.waveLid !== lid) this.dropWave();
     if (this.waveState === 'ready' && this.wave !== null && this.wave.color !== this.waveColor()) this.dropWave();
     if (this.waveLid === null) this.loadWave(item, key);

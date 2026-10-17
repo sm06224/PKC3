@@ -187,6 +187,50 @@ function copyTokens(to: HTMLElement): void {
   }
 }
 
+const TAG_COLORS_SELECTOR = "style[data-pkc-field='tag-colors']";
+const TAG_BADGE_ATTR = 'data-pkc-tag-badge';
+
+/** 開いた側の document にある、user が付けたタグの色の `<style>` の中身(無ければ空)。 */
+function mainTagColorCss(): string {
+  try {
+    return document.querySelector(TAG_COLORS_SELECTOR)?.textContent ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** 開いた側の <html> のタグの見せ方(無ければ空)。 */
+function mainTagBadge(): string {
+  try {
+    return document.documentElement.getAttribute(TAG_BADGE_ATTR) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 🔑 user が付けたタグの色(#1457)を窓へ写す。⚠ 色の `<style>` は本体の document にしか無く、
+ *   窓は head を空にして組むので、写さないと窓のバッジだけ灰色のままになる。
+ *   色の規則は `html[data-pkc-tag-badge=…]` を読むので、見せ方の印も <html> へ写す。
+ */
+function copyTagColors(doc: Document): void {
+  const css = mainTagColorCss();
+  const found = doc.head.querySelector<HTMLStyleElement>(TAG_COLORS_SELECTOR);
+  if (css === '') {
+    found?.remove();
+  } else {
+    const style = found ?? doc.createElement('style');
+    if (found === null) {
+      style.setAttribute('data-pkc-field', 'tag-colors');
+      doc.head.append(style);
+    }
+    if (style.textContent !== css) style.textContent = css;
+  }
+  const badge = mainTagBadge();
+  if (badge === '') doc.documentElement.removeAttribute(TAG_BADGE_ATTR);
+  else doc.documentElement.setAttribute(TAG_BADGE_ATTR, badge);
+}
+
 /**
  * 開いた側でいま効いている配色・書体・字の大きさの指紋。
  * 🔑 窓を開いた後に本体で配色や字の大きさを替えても窓へ届くよう、見張りが前回の指紋と比べて
@@ -198,6 +242,8 @@ export function chapterTokenSignature(): string {
     const body = getComputedStyle(document.body);
     const parts = tokenNames().map((n) => `${n}:${cs.getPropertyValue(n).trim()}`);
     parts.push(`ff:${body.fontFamily}`, `fs:${body.fontSize}`);
+    // タグの色と見せ方も追従させる(替えても本文は同じで、組み直しが走らない)
+    parts.push(`tc:${mainTagColorCss()}`, `tb:${mainTagBadge()}`);
     return parts.join(';');
   } catch {
     return '';
@@ -208,6 +254,7 @@ export function chapterTokenSignature(): string {
 export function syncChapterWindowTokens(win: Window): void {
   try {
     copyTokens(win.document.documentElement);
+    copyTagColors(win.document);
   } catch {
     // 触れない窓 ── 見張りが台帳から外す
   }
@@ -281,6 +328,7 @@ export function paintChapterWindow(
   style.textContent = `${BODY_CSS}\n${CHROME_CSS}`;
   doc.head.append(style);
   copyTokens(doc.documentElement);
+  copyTagColors(doc);
   doc.documentElement.lang = 'ja';
 
   /**

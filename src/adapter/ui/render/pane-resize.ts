@@ -84,6 +84,9 @@ function commit(root: HTMLElement, id: SizedPaneId, outcome: ReturnType<typeof r
   if (outcome.kind === 'collapse') {
     // ⚠ **大きさは覚えたまま**にする ── 戻したときに元の幅で開く
     if (!appPanes.getHidden().includes(id)) applyPaneVisibility(root, appPanes.toggle(id));
+    // 🔴 掴んでいる間に置いた途中の幅を、覚えている幅へ戻す ── 戻さないと、
+    //    畳んだ帯を押して開いたとき途中の幅(例: 130px)で開く(再読込まで直らない)
+    setPaneSizeVar(root, id, appPaneSizes.get()[id] ?? null);
     return;
   }
   // 畳んだ面を掴んで引き出した ── 先に戻す(戻さないと幅だけ変わって見えない)

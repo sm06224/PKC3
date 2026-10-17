@@ -138,6 +138,39 @@ describe('掴んで大きさを変える(#497)', () => {
   });
 
   /**
+   * 🔴 掴んだまま途中の幅を通ってから畳んだら、画面の値は**覚えている幅**へ戻る。
+   * ⚠ 上の test は 1 回しか動かさないので、途中の幅が一度も置かれず空振りする
+   *   (畳む枝は変数に触らないため、途中の値が残る欠陥を見られない)。
+   */
+  it('🔴 途中の幅を通ってから畳み、戻すと、覚えている幅で開く', () => {
+    const root = mounted();
+    const side = root.querySelector<HTMLElement>('[data-pkc-region="sidebar"]')!;
+    measure(side, { width: 240 });
+    drag(grip(root, 'sidebar'), 60, 0); // 300px に決める
+    expect(appPaneSizes.get().sidebar, '前提が崩れている').toBe(300);
+
+    measure(side, { width: 300 });
+    const g = grip(root, 'sidebar');
+    const o = { bubbles: true, pointerId: 1, button: 0 };
+    g.dispatchEvent(new PointerEvent('pointerdown', { ...o, clientX: 0, clientY: 0 }));
+    for (const dx of [-50, -100, -170, -260]) {
+      document.dispatchEvent(new PointerEvent('pointermove', { ...o, clientX: dx, clientY: 0 }));
+    }
+    // 前提: 途中の幅が画面に置かれている(置かれていないと空振り)
+    expect(
+      shellOf(root).style.getPropertyValue('--pkc-pane-sidebar'),
+      '前提が崩れている(途中の幅が置かれていない)',
+    ).toBe('clamp(0px, 130px, 45vw)');
+    document.dispatchEvent(new PointerEvent('pointerup', { ...o, clientX: -260, clientY: 0 }));
+    g.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(shellOf(root).getAttribute('data-pkc-hidden-panes'), '畳んでいない').toBe('sidebar');
+    expect(
+      shellOf(root).style.getPropertyValue('--pkc-pane-sidebar'),
+      '畳んだ後も途中の幅が残っている',
+    ).toBe('clamp(0px, 300px, 45vw)');
+  });
+
+  /**
    * ⚠ **前提を画面に作る**(変異 M8 が生き延びて判明)。`appPanes.setHidden` は
    *   **保存を書くだけ**で器の属性は付かない ── そのまま assert すると
    *   「畳まれていない」が最初から真で、**引き出す配線を消しても緑**になる。

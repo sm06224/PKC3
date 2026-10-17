@@ -389,6 +389,35 @@ describe('一覧の波形(#1232)', () => {
     expect(strips(p.host)[0]!.title).not.toContain('文字起こしの時刻');
   });
 
+  it('🔴 state も render も動かないまま <html> のテーマが替わっても、焼き直す(OS の自動切替・別ウィンドウ)', async () => {
+    const root = document.documentElement;
+    root.setAttribute('data-pkc-theme', 'light');
+    try {
+      const p = pane(wave());
+      p.host.style.color = 'rgb(10, 10, 10)';
+      p.paint({ capturePlayingLid: 'a' });
+      await flush();
+      p.paint();
+      expect(baked, '前提が崩れている(最初の 1 枚が焼けていない)').toHaveLength(1);
+      // ⚠ ここから先は paint / render を呼ばない ── 属性だけが動く
+      p.host.style.color = 'rgb(240, 240, 240)';
+      root.setAttribute('data-pkc-theme', 'dark');
+      await flush();
+      expect(baked, 'テーマが替わったのに焼き直していない').toHaveLength(2);
+      expect(bakedColors[0]).not.toBe(bakedColors[1]);
+      // 対照群: 属性が動かなければ(色だけ替わっても)焼き直さない = 見張りの引き金は属性
+      p.host.style.color = 'rgb(1, 2, 3)';
+      await flush();
+      expect(baked).toHaveLength(2);
+      p.r.dispose();
+      root.setAttribute('data-pkc-theme', 'light');
+      await flush();
+      expect(baked, '捨てた後も見張りが生きている').toHaveLength(2);
+    } finally {
+      root.removeAttribute('data-pkc-theme');
+    }
+  });
+
   it('🔴 配色が変わったら焼き直し、前の絵は返す', async () => {
     const revoked: string[] = [];
     const spy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation((u) => void revoked.push(u));
