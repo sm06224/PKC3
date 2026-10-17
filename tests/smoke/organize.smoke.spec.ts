@@ -128,8 +128,60 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
   await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
   await expect(rows, 'フォルダに入れていない').toHaveCount(0);
 
+  /**
+   * 🔴 **フォルダの中で絞り込むと、探している範囲を言い、全体から探す道がある**(台帳 #1852 束 C2 / 依頼 336・115-3)。
+   * 「ノート」は題名に在る語で、フォルダ「はこ」は空 ── 中では 0 件、全体では 1 件(ルートのノート)。
+   * 観測点は①絞りの行が「「はこ」の中を探しています」と言う ②「すべてのフォルダから探す」が出る
+   * ③0 件の字が「このフォルダの中には見つかりません」(従来の「絞り込みに一致するものがありません」ではない)
+   * ④ボタンを押すと語はそのままルートから探し直す(場所がルートへ戻り、行が 1 件出る)。
+   * ⚠ 新しく起動せず、いまフォルダの中に居るこの道中に足す。
+   */
+  const filterBox = page.locator('[data-pkc-field="entry-filter"]');
+  await filterBox.fill('ノート');
+  const filterLine = page.locator('[data-pkc-field="filer-filter-line"]');
+  await expect(filterLine, '絞りの行が「○○の中を探しています」と言っていない').toContainText(
+    '「はこ」の中を探しています',
+  );
+  await expect(
+    page.locator('[data-pkc-field="filer-search-all"]'),
+    '「すべてのフォルダから探す」が出ていない',
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-pkc-field="filer-empty"]'),
+    '0 件の字が、フォルダの中だと言っていない',
+  ).toHaveText('このフォルダの中には見つかりません');
+  await expect(rows, 'フォルダの中は空なのに行が出ている').toHaveCount(0);
+  await filterBox.fill('');
+  await expect(page.locator('[data-pkc-field="filer-search-all"]'), '絞りを消したのにボタンが残る').toHaveCount(0);
+
+  /**
+   * 🔴 **開いていたフォルダを、読み込み直しても覚えている**(依頼 277)。
+   * 直す前は読み込み直すとルートから始まり、フォルダへ入り直す手が要った。
+   */
+  await page.reload();
+  await expect(
+    page.locator('[data-pkc-region="filer-breadcrumb"]'),
+    '読み込み直したら、開いていたフォルダを忘れてルートに戻っている',
+  ).toContainText('はこ');
+  await expect(rows, '読み込み直したら、フォルダの中の行が違う').toHaveCount(0);
+
   // ④ パンくずのルートで戻る(⚠ 開いているノートは閉じない)
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
+  await expect(rows).toHaveCount(2);
+
+  // 🔴 全体から探す ── もう一度フォルダへ入り直して(間に別の行を押して「連続」を切る)、押す
+  await clickReal(page, noteRow);
+  await doubleClickReal(page, folderRow);
+  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
+  await filterBox.fill('ノート');
+  await clickReal(page, '[data-pkc-field="filer-search-all"]');
+  await expect(
+    page.locator('[data-pkc-region="filer-breadcrumb"]'),
+    '「すべてのフォルダから探す」を押したのに、場所がフォルダの中のまま',
+  ).not.toContainText('はこ');
+  await expect(rows, '全体から探したのに、ルートのノートが出ない').toHaveCount(1);
+  await expect(filterBox, '全体から探すとき、語が消えた').toHaveValue('ノート');
+  await filterBox.fill('');
   await expect(rows).toHaveCount(2);
 
   /**
@@ -510,6 +562,25 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   await expect(summary).toHaveText('この中: ノート 1 件 / フォルダ 0 件');
   await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
   // 戻す(次の手は「ルートでフォルダの行を 2 回押す」)
+  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
+  await expect(rows).toHaveCount(1);
+
+  /**
+   * 🔴 **一覧に無い行のノートへ(最近開いたノートから)移ると、一覧がそのフォルダへ移り、行が見える**
+   * (台帳 #1852 束 C2 / 依頼 277)。いまは一覧がルートで、選んでいるのはフォルダ「はこ」、
+   * ノートは「はこ」の中 ── 行はこの一覧に無い。直す前は中央にノートが開くだけで、左の一覧は
+   * ルートのまま(いま開いているノートの行がどこにも見えない)だった。
+   * ⚠ 新しく起動せず、この道中に足す。戻りは下の「② 中に入れば居る」が前提とする状態(ルート)へ揃える。
+   */
+  await clickReal(page, '[data-pkc-action="open-recent"]');
+  await clickReal(page, page.locator('[data-pkc-field="entry-pick-row"]').first());
+  await expect(
+    page.locator('[data-pkc-region="filer-breadcrumb"]'),
+    '一覧に無い行のノートへ移ったのに、一覧がそのフォルダへ移っていない',
+  ).toContainText('はこ');
+  const followed = page.locator(`${noteRow}[data-pkc-selected]`);
+  await expect(followed, '移った先のノートの行が一覧に出ていない').toHaveCount(1);
+  await expect(followed, '移った先のノートの行が画面の中に見えていない').toBeInViewport();
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
   await expect(rows).toHaveCount(1);
 
