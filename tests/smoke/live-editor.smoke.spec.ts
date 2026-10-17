@@ -462,7 +462,7 @@ test('🔴 塊を跨ぐ Ctrl+Z が実機で効く(行の中は OS の取り消�
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoLive(page);
-  await openLive(page, '# 題\n\n最初の段落。\n\n次の段落。\n');
+  await openLive(page, '# 題\n\n最初の段落。\n\n次の段落。\n\n[docs](https://example.com/docs/api) と docs\n');
 
   const live = page.locator('[data-pkc-region="editor-live"]');
   const row = live.locator('[data-pkc-field="row-source"]');
@@ -510,6 +510,20 @@ test('🔴 塊を跨ぐ Ctrl+Z が実機で効く(行の中は OS の取り消�
   await expect(live, '置換の直後の Ctrl+Z で置換の前へ戻らない').toContainText('最初の段落。');
   await replaceAll('段落', '節');
   await expect(live).toContainText('最初の節。');
+  /**
+   * 🔴 **「すべて置換」はリンクの宛先を書き換えない**(#1087)。見える字(`docs` 2 か所)だけが
+   * `manual` になり、宛先 `https://example.com/docs/api` はそのまま。件数も見える字の数と一致する。
+   * ⚠ 新しく起動せず、この道中に足す。
+   */
+  await replaceAll('docs', 'manual');
+  const docLink = live.locator('a', { hasText: 'manual' });
+  await expect(docLink, '見える字が manual になっていない').toHaveCount(1);
+  await expect(docLink, 'リンクの宛先が書き換わった').toHaveAttribute('href', 'https://example.com/docs/api');
+  await expect(live).toContainText('と manual');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '件数が見える字の数(2)と一致しない',
+  ).toContainText('2 件を置き換えました');
   await live.getByText('最初の節。').click();
   await expect(row).toBeVisible();
   await page.keyboard.press('End');

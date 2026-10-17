@@ -3279,6 +3279,12 @@ export type UserAction =
       afterPrevious?: boolean;
     }
   /**
+   * 🔴 **タグの名前を変えたとき、スマートフォルダの条件の同じ名前も変える**(#1087)。
+   * ⚠ 直す前は条件が旧い名前のまま残り、変えた後に集まるノートが変わった(旧い名前を持つノートが
+   *   もう無いので、スマートフォルダが空になる)。相手は**スマートフォルダ全部**(いま画面に出ている物とは限らない)。
+   */
+  | { type: 'RENAME_SMART_TAG'; from: string; to: string }
+  /**
    * 🔴 **一時の知らせ**(#402 ①)。⚠ `OP_FAILED` と混ぜない ── あちらは赤い帯で、
    *   こちらは成功の内訳である(「3 件は既に付いていました」を失敗にしない)。
    */
@@ -4237,6 +4243,13 @@ export type DomainEvent =
       entries: Array<{ lid: string; title: string; archetype: string; entryOrder: number }>;
     }
   /** 関係の永続化(#185)。⚠ 1 件ずつ ── 作る操作も消す操作も 1 度に 1 つである。 */
+  | {
+      /** 🔴 タグの名前の変更に、スマートフォルダの条件を合わせる(`RENAME_SMART_TAG`)。 */
+      type: 'REQUEST_SMART_TAG_RENAME';
+      from: string;
+      to: string;
+      targets: readonly { lid: string; title: string; archetype: string; entryOrder: number }[];
+    }
   | { type: 'REQUEST_RELATION_UPSERT'; id: string; fromLid: string; toLid: string; kind: string }
   | { type: 'REQUEST_RELATION_DELETE'; id: string; relation?: Relation }
   | {
@@ -9437,6 +9450,17 @@ function reduceCore(
           },
         ],
       };
+    }
+    case 'RENAME_SMART_TAG': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      const from = action.from.trim();
+      const to = action.to.trim();
+      if (from === '' || to === '') return { state, events: [] };
+      const targets = [...state.entryMetas.values()]
+        .filter((m) => m.archetype === SMART_ARCHETYPE)
+        .map((m) => ({ lid: m.lid, title: m.title, archetype: m.archetype, entryOrder: m.entryOrder }));
+      if (targets.length === 0) return { state, events: [] };
+      return { state, events: [{ type: 'REQUEST_SMART_TAG_RENAME', from, to, targets }] };
     }
     case 'SHOW_HISTORY': {
       /**

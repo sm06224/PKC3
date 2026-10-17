@@ -184,6 +184,23 @@ describe('名前を変える', () => {
     ]);
     // 🔴 2 回目(付ける)は 1 回目(外す)の知らせに続けて言う ── 上書きすると外せなかった件数が消える(#1087)
     expect(bulks(s.sent).map((b) => (b as { afterPrevious?: boolean }).afterPrevious === true)).toEqual([false, true]);
+    // 🔴 スマートフォルダの条件の同じ名前も変える(#1087)。⚠ 付ける回の後ろ ── 知らせを続けて言うため
+    const order = s.sent.map((a) => a.type).filter((t) => t === 'BULK_TAG' || t === 'RENAME_SMART_TAG');
+    expect(order).toEqual(['BULK_TAG', 'BULK_TAG', 'RENAME_SMART_TAG']);
+    expect(s.sent.find((a) => a.type === 'RENAME_SMART_TAG')).toEqual({
+      type: 'RENAME_SMART_TAG',
+      from: '請求',
+      to: '請求書',
+    });
+  });
+
+  it('対照群: 「全部外す」はスマートフォルダの条件に触らない(名前は変わらない)', async () => {
+    const s = make();
+    s.btn('query-tag-remove')!.click();
+    await tick();
+    dialogOk().click();
+    await tick();
+    expect(s.sent.some((a) => a.type === 'RENAME_SMART_TAG')).toBe(false);
   });
 
   it('🔴 大小だけ違う名前への付け替えは断らない(Work → work。外す → 付ける で綴りが変わる。#1087)', async () => {

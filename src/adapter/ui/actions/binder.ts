@@ -2631,6 +2631,8 @@ async function queryTagBulk(
       dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [tag], mode: 'remove' });
       if (mode === 'rename') {
         dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [next], mode: 'add', afterPrevious: true });
+        // 🔴 スマートフォルダの条件の同じ名前も変える(#1087)── 変えないと、旧い名前の条件は何も集めなくなる
+        dispatcher.dispatch({ type: 'RENAME_SMART_TAG', from: tag, to: next });
         /**
          * 🔴 **名前を変えたら、色も付いてくる**(#1087)。⚠ 直す前は新しい名前が灰色になり、
          *   古い色は**どのノートにも付かないまま残った**(外す口は「そのタグが付いたノート」にしか無く、

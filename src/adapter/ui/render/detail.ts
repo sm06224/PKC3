@@ -3258,7 +3258,14 @@ export class DetailRenderer {
         curFold = isAttachment ? foldAttachmentHead(text) : null;
         if (curFold === null) ta.removeAttribute(HIDDEN_HEAD_ATTR);
         else ta.setAttribute(HIDDEN_HEAD_ATTR, curFold.head);
-        ta.value = curFold === null ? text : curFold.rest;
+        /**
+         * 🔴 **`ta.value =` で差し替えない**(#1087 A4)── ブラウザの取り消し履歴(Ctrl+Z)が捨てられ、
+         *   「すべて置換」の後に戻れなかった。他の 2 面(上の `syncBody` / `row-swap`)と同じ `replaceChanged`
+         *   (変わった範囲だけを `insertText`)で書く。⚠ `insertText` は焦点の在る欄にしか効かない。
+         *   ⚠ `input` が撃たれるが、上の listener が返す本文は `body` と同じ字(変わらない)。
+         */
+        ta.focus();
+        replaceChanged(ta, curFold === null ? text : curFold.rest);
       };
       ta.addEventListener('input', () => {
         // ⚠ 退避先では**描き直さない**(原文をそのまま編集している面なので)
