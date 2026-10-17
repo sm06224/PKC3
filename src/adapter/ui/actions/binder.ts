@@ -18627,6 +18627,26 @@ export function bindActions(
     root.querySelector('[data-pkc-field="create-pick"]')?.setAttribute('aria-expanded', 'false');
   };
   /**
+   * 🔴 **焦点が一覧の外へ出たら閉じる**(#1087)。Tab で最後の項目の次へ進むと、一覧が開いたまま
+   * 焦点だけが背後へ抜けていた(右クリックのメニューは同じ場面で閉じる ── `context-menu.ts`)。
+   * ⚠ 焦点は**返さない**(出ていった先が user の行き先)。⚠ 行き先が `▼` 自身 / 一覧の中なら閉じない
+   *   (`▼` を押すと焦点が項目から `▼` へ移る ── 閉じ開きは `toggle-create-menu` が持つ)。
+   * ⚠ 行き先が無い(`relatedTarget` が null: 空白を押した / 窓を離れた)ときは何もしない ── 外を押す道は `onCloseCreateMenu`。
+   */
+  const onCreateMenuFocusOut = (ev: FocusEvent): void => {
+    const menu = root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]');
+    if (menu === null || menu.hidden) return;
+    const to = ev.relatedTarget;
+    if (!(to instanceof Node) || menu.contains(to)) return;
+    const pick = root.querySelector<HTMLElement>('[data-pkc-field="create-pick"]');
+    if (pick !== null && pick.contains(to)) return;
+    // 焦点が出たのが一覧か `▼` のときだけ(別の所の focusout では閉じない)
+    const from = ev.target;
+    if (!(from instanceof Node) || !(menu.contains(from) || pick?.contains(from) === true)) return;
+    menu.hidden = true;
+    pick?.setAttribute('aria-expanded', 'false');
+  };
+  /**
    * 🔴 **`create-menu` の中の鍵盤操作**(#1054 段②)。
    * ⚠ `ArrowUp`/`ArrowDown`/`Home`/`End` は**この帯の中だけ**握る ──
    *   `Enter`/`Space` は素の `<button>` が既に持っている(何も書かない)。
@@ -18827,6 +18847,7 @@ export function bindActions(
   //    メニューが消えてから委譲が走り、押しても無言になる。
   listen(root, 'click', onCloseMenu);
   listen(root, 'click', onCloseCreateMenu);
+  listen(root, 'focusout', onCreateMenuFocusOut);
   listen(root.ownerDocument, 'keydown', onCreateMenuKey);
   listen(root.ownerDocument, 'keydown', onFoldKey);
   /**

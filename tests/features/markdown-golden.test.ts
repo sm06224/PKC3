@@ -32,6 +32,9 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *      出していたが、**押しても本文が 1 文字も変わらない** ── 移動 / 追記 /
  *      再読込で全部外れる「チェックしたのに消えた」だった。押せないものは
  *      押せない形にする。
+ *      ⚠ 2026-10-17(#1087)に同じ 3 件へ `aria-label`(項目の字)を足した ── 読み上げが「チェックボックス」
+ *      としか言わなかった。動いた golden は `full-pkc-fixture` / `full-pkc-fixture-anchors` /
+ *      `snippet-task-and-footnote` で、差は属性 1 つだけ(行番号・索引は不変)。
  *   2. 空行マーカー(`_N`)に `style="--pkc-blank-count: N"` を足した(2026-08-05)。
  *      CSS の規則は `height: calc(1.45em * var(--pkc-blank-count, 1))` で**この変数**を
  *      読むのに、出力側は属性しか書いておらず、**`_3` と `_1` が同じ高さ**だった。

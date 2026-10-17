@@ -1425,8 +1425,10 @@ export class DualFilerRenderer {
         th.setAttribute('data-pkc-action', 'dual-sort');
         th.setAttribute('data-pkc-sort', col.sort);
         th.setAttribute('role', 'button');
-        th.tabIndex = -1;
+        // 0 = Tab で巡回に入り、Enter / Space で並べ替える(`binder.ts` の `tabindex="0"` の押し口)
+        th.tabIndex = 0;
         const active = sort === col.sort;
+        th.setAttribute('aria-sort', active ? (sortDesc ? 'descending' : 'ascending') : 'none');
         if (active) th.setAttribute('data-pkc-sorted', sortDesc ? 'desc' : 'asc');
         th.title = active
           ? `${col.label} の${sortDesc ? '大きい' : '小さい'}順です(もう一度押すと逆になります)`
