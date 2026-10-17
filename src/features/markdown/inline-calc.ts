@@ -306,6 +306,27 @@ export function isDateOrTime(before: string | undefined, expr: string): boolean 
 }
 
 /**
+ * 🔴 **電話番号と URL の形は計算しない**(#1163 依頼 151。Gemini 回答は案どおり)。
+ * `TEL 03-1234-5678=` が `-6909`、`https://a.example/?a=1+2=` が `3` になっていた ── 打った覚えのない答えである。
+ *
+ * ## どこで線を引いたか
+ * - **電話番号** = 式が「`0` で始まる市外局番(または `+` 国番号)- 局番 - 番号」の形(`03-1234-5678` / `090-1234-5678` / `0120-123-456` / `+81-3-1234-5678`)。
+ *   ⚠ `10-3-2=` / `1-2-3=` のような普通の引き算は今までどおり計算する(先頭が 0 でも + でもない)。
+ * - **URL** = `=` の手前の「空白で区切られた 1 かたまり」が `scheme://` か `www.` で始まる、または `?a=` の形(クエリ)を含む。
+ *   ⚠ 空白で区切られたかたまりだけを見る ── `結果は 3*4=` のように、前の語に URL があっても影響しない。
+ *
+ * @param line  行の頭から `=` の直前までの字(半角へ直す前の原文)
+ * @param expr  前後の空白を落とした式(半角)
+ */
+export function isPhoneOrUrl(line: string, expr: string): boolean {
+  if (/^(?:0\d{1,4}|\+\d{1,3})(?:-\d{1,4}){1,2}-\d{3,4}$/.test(expr)) return true;
+  const token = /\S+$/.exec(line)?.[0] ?? '';
+  if (/^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/i.test(token)) return true;
+  // クエリ(`?a=` / `?a=1&b=`)。⚠ `&` だけでは URL と読まない(`R&D=…` を巻き込まない)
+  return /\?[\w.%-]*=/.test(token) || (token.includes('?') && /&[\w.%-]*=/.test(token));
+}
+
+/**
  * 🔴 **数を 1 つ書いただけのものは式ではない**(2026-09-07、同じレビュー)。
  *
  * ⚠ `2^3=` は `^` で走査が止まるので式が `3` になり、`2^3=3` と**8 でない答え**が
@@ -374,6 +395,7 @@ export function detectInlineCalcRequest(
   const before = beforeRaw === undefined ? undefined : toHalf(beforeRaw);
   if (startsMidToken(before, expression)) return null;
   if (isDateOrTime(before, expression)) return null;
+  if (isPhoneOrUrl(fullText.slice(lineStart(fullText, caretPos), caretPos - 1), expression)) return null;
   if (hasNoOperation(expression)) return null;
 
   /**
@@ -719,6 +741,8 @@ export function explainCalcMiss(fullText: string, caretPos: number): string | nu
   if (/%\s*$/u.test(body)) return '計算できませんでした(% は「余り」です。百分率ではありません)';
   // ③' 日付や時刻(`2026-10-17=` / `12:30+45=`)
   if (isDateOrTime(undefined, body)) return '計算できませんでした(日付や時刻は計算できません)';
+  // ③'' 電話番号の形(`03-1234-5678=`)。URL は言葉が混ざる行なので、ここへは来ない
+  if (isPhoneOrUrl(head, body)) return '計算できませんでした(電話番号や URL の形は計算しません)';
   // ④ 計算する所が無い(`1200=` / `(1)=`)
   if (hasNoOperation(body)) return '計算できませんでした(足し算や掛け算がありません)';
   // ⑤ 0 で割った(`1/0=` / `1%0=`)

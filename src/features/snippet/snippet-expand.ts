@@ -73,7 +73,16 @@ export interface SnippetSlot {
  * 本文の残り全部を 1 つの印として飲み込む。
  * ⚠ 中身が空(`${}`)は印にしない ── 選んでも何も示さないので、ただの字として残す。
  */
-const SLOT_RE = /\$\{([^}\n]+)\}/g;
+const SLOT_RE = /[$＄][{｛]([^}｝\n]+)[}｝]/g;
+
+/**
+ * 🔴 **全角で打った `＄｛date｝` も同じ印として読む**(#1163 依頼 152。Gemini 回答は案どおり)。
+ * 日本語入力のまま打つと `＄｛date｝` になり、効かない理由に気づきにくい。印の字は 1 字 → 1 字なので位置はずれない。
+ * ⚠ 動的値の名前(`date` / `ｄａｔｅ`)の比べ方は NFKC に揃える。埋める印の中身(`＄｛宛名｝` の `宛名`)は user の字のまま残す。
+ */
+function slotName(raw: string): string {
+  return raw.normalize('NFKC');
+}
 
 /** 動的値を字にする。知らない名前は `null`(= 埋める印として扱う)。 */
 function valueOf(name: string, now: Date): string | null {
@@ -109,7 +118,7 @@ export function fillSnippetVars(body: string, now: Date): { text: string; caret:
   };
   SLOT_RE.lastIndex = 0;
   for (let m = SLOT_RE.exec(body); m !== null; m = SLOT_RE.exec(body)) {
-    const name = m[1]!;
+    const name = slotName(m[1]!);
     if (inCode(m.index)) continue;
     if (name === 'cursor') {
       out += body.slice(at, m.index);
@@ -134,7 +143,7 @@ export function snippetSlots(text: string): SnippetSlot[] {
   for (let m = SLOT_RE.exec(text); m !== null; m = SLOT_RE.exec(text)) {
     const label = m[1]!;
     // ⚠ 動的値は印ではない(挿した時点で字になっているが、後から手で書かれることもある)
-    if ((SNIPPET_VARS as readonly string[]).includes(label)) continue;
+    if ((SNIPPET_VARS as readonly string[]).includes(slotName(label))) continue;
     out.push({ start: m.index, end: m.index + m[0].length, label });
   }
   return out;

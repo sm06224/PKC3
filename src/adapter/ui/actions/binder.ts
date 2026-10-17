@@ -16798,7 +16798,7 @@ export function bindActions(
       !ke.ctrlKey &&
       !ke.altKey &&
       !ke.metaKey &&
-      (field === 'editor-body' || field === 'row-source' || field === 'append-input') &&
+      (field === 'editor-body' || field === 'row-source' || field === 'append-input' || field === SECTION_BOX_INPUT_FIELD) &&
       ke.target instanceof HTMLTextAreaElement &&
       ke.target.selectionStart === ke.target.selectionEnd
     ) {
@@ -16878,7 +16878,8 @@ export function bindActions(
       !ke.ctrlKey &&
       !ke.altKey &&
       !ke.metaKey &&
-      (field === 'editor-body' || field === 'row-source') &&
+      // 🔴 章だけを編集する欄(`SECTION_BOX_INPUT_FIELD`)も同じ(#1163 依頼 150。箇条書きの章で Enter を押しても `- ` が続かなかった)
+      (field === 'editor-body' || field === 'row-source' || field === SECTION_BOX_INPUT_FIELD) &&
       ke.target instanceof HTMLTextAreaElement &&
       // 🔴 範囲を選んでいるときは普通の Enter(選んだ字を改行に置き換える)に任せる ── 規則は caret の行しか見ないので、
       //   空の `> ` / `- ` の行から下へ選んで押すと、選んだ範囲を置き換えずに記号だけ消していた(#1087 調査 7)
@@ -17079,7 +17080,8 @@ export function bindActions(
         ?.click();
       return;
     }
-    if (field === SECTION_BOX_INPUT_FIELD) {
+    // 🔴 `Tab` だけは下の本文と同じ表・テンプレート・字下げの門へ通す(#1163 依頼 150)。⚠ 当たらなければ素通し(焦点は今までどおり出ていく)
+    if (field === SECTION_BOX_INPUT_FIELD && ke.key !== 'Tab') {
       const sectionCmd = keymap.match(ke, 'row');
       if (sectionCmd === null || FORMAT_OF[sectionCmd] === undefined) return;
       ke.preventDefault();
@@ -17107,7 +17109,7 @@ export function bindActions(
      *   行の欄の `Tab` は「行を確定する」で、セルは動かない(`row-swap.ts`)── 届かない枝は置かない(#1087 B-1)。
      */
     if (
-      field === 'editor-body' &&
+      (field === 'editor-body' || field === SECTION_BOX_INPUT_FIELD) &&
       ke.key === 'Tab' &&
       !ke.ctrlKey &&
       !ke.altKey &&
@@ -17129,7 +17131,7 @@ export function bindActions(
       }
     }
 
-    if (field === 'editor-body' && ke.key === 'Tab' && !ke.shiftKey) {
+    if ((field === 'editor-body' || field === SECTION_BOX_INPUT_FIELD) && ke.key === 'Tab' && !ke.shiftKey) {
       const ta = ke.target as HTMLTextAreaElement;
       const plainTab = !ke.ctrlKey && !ke.altKey && !ke.metaKey;
       // 🔑 短縮語 → 次の印の判定は `runSnippetTab` 1 か所(1 面の行の `Tab` も同じ口を通る)
@@ -17151,7 +17153,7 @@ export function bindActions(
     // 🔴 `Shift`+`Tab` は**戻せる字下げがあるときだけ**握る(無ければ焦点が前へ出る)。
     //   ⚠ 表のセルは上の `tableOnTab` が先に取っている
     if (
-      field === 'editor-body' &&
+      (field === 'editor-body' || field === SECTION_BOX_INPUT_FIELD) &&
       ke.key === 'Tab' &&
       ke.shiftKey &&
       !ke.ctrlKey &&

@@ -1145,6 +1145,30 @@ test('🔴 実打鍵で括弧を閉じても二重にならない (#299 / cowork
   await page.keyboard.type('[');
   await expect(row, '選んだ文字を囲めていない').toHaveValue('[ここ]');
 
+  /**
+   * 🔴 #1852 束 I1(依頼 202)── `(` は普通の文では補い(補った直後の Backspace で両方消える)、
+   *   表の行・数式ブロックの中では補わない。⚠ 打鍵で入れる(`fill` は auto pair を通らない)。
+   */
+  await clear();
+  await page.keyboard.type('(');
+  await expect(row, '普通の文で `(` の閉じが補われない').toHaveValue('()');
+  await page.keyboard.press('Backspace');
+  await expect(row, '補った直後の Backspace で両方消えない').toHaveValue('');
+  await row.fill('| a | b |');
+  await page.keyboard.type('(');
+  await expect(row, '表の行で `)` が補われた').toHaveValue('| a | b |(');
+  await row.fill('$$\n');
+  await page.keyboard.type('(');
+  await expect(row, '数式ブロックの中で `)` が補われた').toHaveValue('$$\n(');
+
+  // 🔴 #1852 束 I1(依頼 199)── 1 画面でも箇条書きの空の項目で Enter → 抜けて直前に空行が入る
+  await clear();
+  await page.keyboard.type('- 牛乳');
+  await page.keyboard.press('Enter');
+  await expect(row, '1 画面で箇条書きが続かない').toHaveValue('- 牛乳\n- ');
+  await page.keyboard.press('Enter');
+  await expect(row, '1 画面で空の項目から抜けて空行が入らない').toHaveValue('- 牛乳\n\n');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

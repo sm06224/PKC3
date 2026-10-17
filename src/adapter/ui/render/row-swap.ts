@@ -1337,6 +1337,16 @@ export class RowSwap {
      * 分からない)ので、規則は `commitActive()` の 1 か所に寄せる。
      */
     ta.addEventListener('blur', () => {
+      /**
+       * 🔴 **ウィンドウを離れただけなら、行を閉じない**(#1163 依頼 305。Gemini 回答は案どおり)。
+       *   別のアプリやブラウザの別のタブを見て戻ったら、行は確定されて閉じていた(続きを打つにはもう一度行を押す)。
+       *   ウィンドウごと焦点を失うと、欄に `blur` が飛ぶが、**`activeElement` は欄のまま・`document.hasFocus()` は偽**になる
+       *   (ページの中で別の所を押したときは `activeElement` が欄でなくなる ── ここが見分け目)。
+       *   戻れば焦点は欄に返るので、続きをそのまま打てる。ほかの所を押したときは今までどおり確定して閉じる。
+       * ⚠ 離れている間に画面が閉じられたときの取りこぼしは、`dispose`(`force`)が確定する。
+       */
+      const doc = ta.ownerDocument;
+      if (doc.activeElement === ta && !doc.hasFocus()) return;
       this.commitActive();
     });
     /**
@@ -1723,6 +1733,20 @@ function shrinkTrailingBlank(body: string, start: number, end: number): number {
   return e;
 }
 
+/**
+ * 🔴 **行として立つ物で始まる字か**(#1163 依頼 304。Gemini 回答は案どおり)。
+ * 囲み(``` / ~~~)に加えて、**表**(`|` で始まり、もう 1 つ `|` を含む)・**見出し**(`# `)・**箇条書き / 番号**(`- ` / `1. `)・**引用**(`> `)。
+ * ⚠ どれも行頭に無いと読まれない ── `メモ: ` の続きに貼ると `メモ: ## 見出し` / `メモ: | a | b |` という 1 つの段落になる。
+ * ⚠ ここへ来るのは変換した字(HTML・表計算の貼り付け)だけで、普通の貼り付けは通らない ── 1 行の `- ` 付きの字を貼っても改行は足さない。
+ */
+function startsAsBlock(text: string): boolean {
+  return (
+    /^(?:`{3,}|~{3,})/.test(text) ||
+    /^(?:#{1,6}[ \t]|[-*+][ \t]|\d+[.)][ \t]|>)/.test(text) ||
+    /^\|[^\n]*\|/.test(text)
+  );
+}
+
 /** undo に載る形で挿す。⚠ `value` 直代入は取り消せない飾りになる。 */
 /**
  * 🔴 **囲みは行頭から差す**(#708 段③、着地前レビュー ⚠8)。
@@ -1732,13 +1756,13 @@ function shrinkTrailingBlank(body: string, start: number, end: number): number {
  *   囲みを開く**(実測:空のコードブロックが 1 つ増えた)。
  * 🔑 だから**差す側で 1 行空ける** ── 判定を呼び側(`binder.ts`)に書くと
  *   「経路ごとに挙動が違う」形になる(§7)。
- * ⚠ 直すのは**柵で始まる字だけ** ── ふつうの貼付に改行を足さない。
+ * ⚠ 直すのは**行として立つ物(柵・表・見出し・箇条書き・引用)で始まる字だけ** ── ふつうの貼付に改行を足さない。
  */
 export function insertBlockText(ta: HTMLTextAreaElement, text: string): void {
-  const isFence = /^(?:`{3,}|~{3,})/.test(text);
+  const isBlock = startsAsBlock(text);
   const at = ta.selectionStart ?? ta.value.length;
   const atLineStart = at === 0 || ta.value[at - 1] === '\n';
-  insertText(ta, isFence && !atLineStart ? `\n${text}` : text);
+  insertText(ta, isBlock && !atLineStart ? `\n${text}` : text);
 }
 
 export function insertText(ta: HTMLTextAreaElement, text: string): void {

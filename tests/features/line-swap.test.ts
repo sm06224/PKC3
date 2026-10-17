@@ -166,3 +166,61 @@ describe('置き換えの範囲(呼び側が insertText で書く形)', () => {
     expect(down.text).toBe('| a | b |\n| 1 | 2 |\n|---|---|');
   });
 });
+
+describe('🔴 入れ子の項目は子も一緒に動く(#1163 依頼 204)', () => {
+  const list = '- 牛乳\n  - 低脂肪\n  - 無脂肪\n- 卵\n- パン\n  - 食パン';
+
+  it('↓ ── 子を持つ項目は、子ごと下の兄弟と入れ替わる', () => {
+    const r = ok(swapLines(sel('- |牛乳\n  - 低脂肪\n  - 無脂肪\n- 卵\n- パン\n  - 食パン'), 1));
+    expect(r.text).toBe('- 卵\n- 牛乳\n  - 低脂肪\n  - 無脂肪\n- パン\n  - 食パン');
+    // caret は動かした項目に付いていく
+    expect(r.text.slice(r.start - 2, r.start + 2)).toBe('- 牛乳');
+  });
+
+  it('↑ ── 上の兄弟が子を持つとき、その子ごと越える', () => {
+    const r = ok(swapLines(sel('- 牛乳\n  - 低脂肪\n  - 無脂肪\n- |卵\n- パン\n  - 食パン'), -1));
+    expect(r.text).toBe('- 卵\n- 牛乳\n  - 低脂肪\n  - 無脂肪\n- パン\n  - 食パン');
+  });
+
+  it('↑ ── 子を持つ項目を上へ動かすと、上の兄弟を越える(子もついていく)', () => {
+    const before = sel('- 卵\n- |パン\n  - 食パン');
+    const r = ok(swapLines(before, -1));
+    expect(r.text).toBe('- パン\n  - 食パン\n- 卵');
+    expect(applied(before, r)).toBe(r.text);
+  });
+
+  it('↓ ── 子の項目だけを動かすときは、同じ深さの兄弟と入れ替わる(親を飛び越えない)', () => {
+    const r = ok(swapLines(sel('- 牛乳\n  - |低脂肪\n  - 無脂肪\n- 卵'), 1));
+    expect(r.text).toBe('- 牛乳\n  - 無脂肪\n  - 低脂肪\n- 卵');
+  });
+
+  it('↑ ── 最初の子を上へ動かすと、これまでどおり直前の 1 行(親)と入れ替わる', () => {
+    const r = ok(swapLines(sel('- 牛乳\n  - |低脂肪'), -1));
+    expect(r.text).toBe('  - 低脂肪\n- 牛乳');
+  });
+
+  it('↑ ↓ の往復で元に戻る(子ごと)', () => {
+    const before = sel(list.replace('- 卵', '- |卵'));
+    const up = ok(swapLines(before, -1));
+    const back = ok(swapLines(up, 1));
+    expect(back.text).toBe(before.text);
+    expect([back.start, back.end]).toEqual([before.start, before.end]);
+  });
+
+  it('空行で子は切れる(空行の先は別の塊)・字下げした続きの行は子として一緒に動く', () => {
+    const r = ok(swapLines(sel('- |あ\n\n  い\n- う'), 1));
+    expect(r.text).toBe('\n- あ\n  い\n- う');
+    const r2 = ok(swapLines(sel('- |あ\n  続きの行\n- う'), 1));
+    expect(r2.text).toBe('- う\n- あ\n  続きの行');
+  });
+
+  it('日本語の項目(全角の記号・字)でも同じ', () => {
+    const r = ok(swapLines(sel('- |買い物（週末）\n  - 牛乳　2 本\n- 掃除'), 1));
+    expect(r.text).toBe('- 掃除\n- 買い物（週末）\n  - 牛乳　2 本');
+  });
+
+  it('項目でない行は、深く字下げした行が続いても 1 行だけ動く(これまでどおり)', () => {
+    const r = ok(swapLines(sel('|あ\n  い\nう'), 1));
+    expect(r.text).toBe('  い\nあ\nう');
+  });
+});

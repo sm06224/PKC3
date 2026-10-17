@@ -40,6 +40,7 @@ import cjkFriendlyPlugin from 'markdown-it-cjk-friendly';
 import { makeSlugCounter } from './markdown-toc';
 import { VAR_NAME_SOURCE } from './frontmatter';
 import { expandVarsInText, fenceTransition, VAR_OPEN, VAR_SEP, type FenceState } from './var-expand';
+import { foldIdeographicIndent } from './fullwidth-indent';
 import { highlightCode, isHighlightable } from './code-highlight';
 import { cellEditButtonHtml, detectCsvLang, renderCsvFence, shapeButtonHtml } from './csv-table';
 import { isSqlEmbedInfo, sqlEmbedHostHtml } from './sql-embed';
@@ -6762,6 +6763,8 @@ function renderMarkdownCore(
     // 🔴 剥がして描く面だけがずらす(既定 0)。理由は上の option の注記
     taskLineOffset: Number.isInteger(opts.taskLineOffset) ? (opts.taskLineOffset as number) : 0,
   };
+  // 🔴 行頭の全角の空白で字下げした箇条書きを、入れ子として読む(#1163 依頼 136)。行数は変えない(lineMap は不変)
+  text = foldIdeographicIndent(text);
   // L-5 align prefix + L-9 indent prefix を pre-process で strip(挿入あり)。
   const alignResult = preprocessAlignPrefix(text, lineMap);
   let stripped = alignResult.stripped;
