@@ -411,6 +411,7 @@ export class DualFilerRenderer {
   private lastFilter: string | null = null;
   private lastKinds: ReadonlySet<string> | null = null;
   private lastSort: AppState['entrySort'] | null = null;
+  private lastOpenedShown: AppState['openedAtShown'] | null = null;
   /**
    * 🔴 **向きも門の材料**(2026-08-19、足したその日に test が捕まえた)。
    * ⚠ 入れないと、`▲` を押して state は反転するのに**この面が 1 度も描き直さない**
@@ -533,6 +534,8 @@ export class DualFilerRenderer {
       state.kindFilter === this.lastKinds &&
       state.entrySort === this.lastSort &&
       state.entrySortDesc === this.lastSortDesc &&
+      // 🔴 「最近開いた順」の材料の写し(依頼 274 / 334)
+      (state.entrySort !== 'opened' || state.openedAtShown === this.lastOpenedShown) &&
       state.searchHits === this.lastHits &&
       /**
        * 🔴 **スマートフォルダの当たりとキーの割当も門に載せる**(#1087)── 門を「Map が新しいか」から
@@ -553,6 +556,7 @@ export class DualFilerRenderer {
     this.lastKinds = state.kindFilter;
     this.lastSort = state.entrySort;
     this.lastSortDesc = state.entrySortDesc;
+    this.lastOpenedShown = state.openedAtShown;
     this.lastHits = state.searchHits;
     this.lastBookmarks = bookmarks.join(SEP);
     const frame = this.ensureFrame();

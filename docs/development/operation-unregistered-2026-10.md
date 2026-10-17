@@ -286,6 +286,7 @@
 | `clear-entry-filter` | 低 | 絞りを外す | `src/adapter/ui/render/captures.ts:202`<br>`src/adapter/ui/render/contacts.ts:168` | 絞りが掛かっているときだけ出る欄内のボタン |
 | `set-browse` | 低 | (閲覧の切り替え) | `src/adapter/ui/render/shell.ts:315` | 選んだ値を押したボタンから読む |
 | `set-entry-sort` | 低 | 一覧の並び順 | `src/adapter/ui/render/shell.ts:431` | 選んだ値を読む |
+| `toggle-entry-sort-desc` | 低 | 並びの向きを逆にする | `src/adapter/ui/render/shell.ts:510` | 並び順の欄の隣のボタン。押した所から何も要らない |
 | `set-view` | 低 | (画面の切り替えボタン) | `src/adapter/ui/render/collection-bar.ts:160` | 行き先の面を押したボタンから読む。面ごとの命令は別に在る |
 | `smart-cond-add` | 低 | 条件に足す | `src/adapter/ui/render/filer.ts:373` | 絞りの条件欄の中のボタン |
 | `smart-evict` | 低 | ここから外す | `src/adapter/ui/render/filer.ts:387` | 絞りの条件欄の中のボタン |

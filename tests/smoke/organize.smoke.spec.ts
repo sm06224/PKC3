@@ -1095,6 +1095,71 @@ test('🔴 行を別の行の上半分に落とすと、その行の前へ並べ
   // ③ 中へ入っていない(行数は 3 のまま)
   await expect(rows).toHaveCount(3);
 
+  /**
+   * 🔴 **左の列の並び順**(台帳 #1852 束 C1)── 同じ起動に相乗りさせる(起動は増やさない)。
+   * ① 種類順は種類のボタンと同じ順(ノート → … → フォルダ)で、同じ種類の中は自分で並べた順
+   * ② ⇅ で向きが逆になる(種類だけが逆。種類の中は自分で並べた順のまま)/ 「自分で並べた順」では押せない
+   * ③ 最近開いた順は、行を開いてもその場では動かず、絞り込みを変えると並べ直す
+   * ④ 再読み込みしても並び順と向きが残る
+   */
+  await createEntry(page, 'folder');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(rows).toHaveCount(4);
+  const rowInfo = () =>
+    rows.evaluateAll((els) =>
+      els.map((e) => ({ lid: e.getAttribute('data-pkc-entry'), kind: e.getAttribute('data-pkc-archetype') })),
+    );
+  const manual = await rowInfo();
+  const textsInManual = manual.filter((r) => r.kind === 'text').map((r) => r.lid);
+  const sortSel = page.locator('[data-pkc-field="entry-sort"]');
+  const reverseBtn = page.locator('[data-pkc-field="entry-sort-reverse"]');
+  await expect(reverseBtn, '「自分で並べた順」なのに ⇅ が押せる').toBeDisabled();
+  await sortSel.selectOption('archetype');
+  await expect(reverseBtn, '種類順にしても ⇅ が押せない').toBeEnabled();
+  const byKind = await rowInfo();
+  expect(
+    byKind.map((r) => r.kind),
+    '種類順がノート → フォルダの順でない',
+  ).toEqual(['text', 'text', 'text', 'folder']);
+  expect(
+    byKind.filter((r) => r.kind === 'text').map((r) => r.lid),
+    '同じ種類の中が自分で並べた順でない',
+  ).toEqual(textsInManual);
+  await clickReal(page, '[data-pkc-field="entry-sort-reverse"]');
+  await expect
+    .poll(async () => (await rowInfo()).map((r) => r.kind), { message: '⇅ を押しても向きが逆にならない' })
+    .toEqual(['folder', 'text', 'text', 'text']);
+  expect(
+    (await rowInfo()).filter((r) => r.kind === 'text').map((r) => r.lid),
+    '向きを逆にしたら種類の中まで逆になった',
+  ).toEqual(textsInManual);
+
+  // ③ 最近開いた順
+  await sortSel.selectOption('opened');
+  const shown0 = (await rowInfo()).map((r) => r.lid);
+  const target = shown0[shown0.length - 1]!;
+  await rows.nth(shown0.length - 1).click();
+  await expect(page.locator('[data-pkc-field="inspector-title"]'), '前提: 行を開いた').toBeVisible();
+  expect((await rowInfo()).map((r) => r.lid), '開いたその場で行が動いた').toEqual(shown0);
+  const filterBox = page.locator('[data-pkc-field="entry-filter"]');
+  await filterBox.fill('zz-none');
+  await page.mouse.click(5, 5);
+  await filterBox.fill('');
+  await page.mouse.click(5, 5);
+  await expect
+    .poll(async () => (await rowInfo())[0]?.lid, { message: '絞り込みを変えても最近開いたノートが先頭に来ない' })
+    .toBe(target);
+
+  // ④ 再読み込み
+  await sortSel.selectOption('archetype');
+  await clickReal(page, '[data-pkc-field="entry-sort-reverse"]');
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await expect(sortSel, '再読み込みで並び順が戻った').toHaveValue('archetype');
+  await expect
+    .poll(async () => (await rowInfo())[0]?.kind, { message: '再読み込みで向きが戻った' })
+    .toBe('folder');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

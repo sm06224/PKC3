@@ -27,7 +27,8 @@ export function listViewOptions(state: AppState): ListViewOptions {
     sort: state.entrySort,
     sortDesc: state.entrySortDesc,
     kinds: state.kindFilter,
-    openedAt: state.openedAt,
+    // 🔴 開いた直後の記録ではなく「一覧が最後に並べ直した時点の写し」(依頼 274 / 334)
+    openedAt: state.openedAtShown,
   };
 }
 

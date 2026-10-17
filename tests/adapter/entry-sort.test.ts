@@ -85,7 +85,7 @@ describe('並び順の規則', () => {
     expect(sortOrder(['old', 'new'], metasOf(list), 'updated', NATURAL_DESC['updated'])).toEqual(['new', 'old']);
   });
 
-  it('種類順は archetype の昇順', () => {
+  it('種類順は種類の札の順(添付はスタックの後ろ・チェックリストの前)', () => {
     const list = [meta('t', { archetype: 'todo' }), meta('a', { archetype: 'attachment' })];
     expect(sortOrder(['t', 'a'], metasOf(list), 'archetype', NATURAL_DESC['archetype'])).toEqual(['a', 't']);
   });

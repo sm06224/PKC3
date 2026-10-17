@@ -50,6 +50,7 @@ import { BrowseModeStore } from '@adapter/ui/render/browse-mode';
 import { PaneVisibilityStore } from '@adapter/ui/render/pane-visibility';
 import { GroupFoldStore } from '@adapter/ui/render/group-fold';
 import { CreateKindStore } from '@adapter/ui/render/create-kind';
+import { EntrySortStore } from '@adapter/ui/render/entry-sort-memory';
 import { FilerFlattenStore } from '@adapter/ui/render/filer-flatten';
 import { PopupHintStore } from '@adapter/ui/render/popup-hint';
 import { PasteSourceStore } from '@adapter/ui/render/paste-source';
@@ -335,6 +336,20 @@ const CASES: readonly {
     },
     a: 'html',
     b: 'auto',
+  },
+  {
+    // 🔴 既定は「憶えていない(null)」── a / b を別の並びにして、控えが死んで null へ戻る実装を捕まえる(依頼 82-3)
+    name: 'EntrySortStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new EntrySortStore(st);
+      const w = (v: unknown): void => {
+        const x = v as { sort: 'title' | 'updated'; desc: boolean };
+        s.set(x.sort, x.desc);
+      };
+      return { write: w, read: () => s.get() };
+    },
+    a: { sort: 'title', desc: true },
+    b: { sort: 'updated', desc: false },
   },
   {
     // ⚠ 既定が「確認」── a を別の値にする(#1087 S4)

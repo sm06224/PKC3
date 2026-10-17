@@ -372,6 +372,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    */
   'toggle-container-repair', 'toggle-create-menu',
   'toggle-kind-filter', 'toggle-pane',
+  // ⚠ 2026-10-17(依頼 198): 左の列の「並びの向きを逆にする」。`set-entry-sort`(並び順の欄)と同じ置き場 ── 押し口は探す欄の隣にしか無く、鍵も持たない
+  'toggle-entry-sort-desc',
   /**
    * ⚠ **2026-09-21(#1017 段④b)** ── 貼り付け欄の開閉(「整理案を適用」)。
    * 🔑 `toggle-pane` / `toggle-heading-fold` と同じ仕分け(N・押した所から
@@ -869,14 +871,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1621): 左のペインの「⋯」(`open-bar-more`)で受け手 +1 ── 登記は増えない(鍵を持たない画面のボタン)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#952 B2・B3): 設定の「音量をそろえる」「頭の中で鳴る感じを和らげる」(`set-voice-level` / `set-voice-crossfeed`)で受け手 +2 ── 登記は増えない(`set-voice-boost` と同じ checkbox)。`receivers` +2 / `total` +2 / `unregistered` +2。
-      total: 448,
-      receivers: 379,
+      // ⚠ 2026-10-17(依頼 198): 左の列の「並びの向きを逆にする」(`toggle-entry-sort-desc`)で受け手 +1 ── 登記は増えない(鍵を持たない画面のボタン。`set-entry-sort` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 449,
+      receivers: 380,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       registered: 172,
       both: 103,
       outsideActionsTable: 69,
-      unregistered: 276,
+      unregistered: 277,
     });
   });
 

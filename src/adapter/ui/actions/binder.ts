@@ -8057,6 +8057,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (isEntrySort(v)) dispatcher.dispatch({ type: 'SET_ENTRY_SORT', sort: v });
   },
   /**
+   * 🔴 **並びの向きを逆にする**(依頼 198)。⚠ 2 ペインの列見出し(`dual-sort`)と同じ
+   * `entrySortDesc` 1 本を反転する(面ごとに向きを持たせない)。「自分で並べた順」には向きが無い。
+   */
+  'toggle-entry-sort-desc': (dispatcher) => {
+    const st = dispatcher.getState();
+    if (st.entrySort === 'manual') return;
+    dispatcher.dispatch({ type: 'SET_ENTRY_SORT', sort: st.entrySort, desc: !st.entrySortDesc });
+  },
+  /**
    * 集計の束ね方(#184)。⚠ 空文字は「選んでいない」── `null` へ落とす
    * (空文字の key で問い合わせると、全件が「未設定」の 1 組になる)。
    */

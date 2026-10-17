@@ -1336,7 +1336,8 @@ export class DetailRenderer {
     // ⚠ 手組みの state fixture は並びの field を持たない(`?? ` で既定へ)
     const sort = state.entrySort ?? DEFAULT_ENTRY_SORT;
     const sortDesc = state.entrySortDesc ?? false;
-    const openedAt = state.openedAt ?? new Map<string, number>();
+    // 🔴 左の列と同じ写し(依頼 274 / 334)── 開いた直後に並びを動かさない
+    const openedAt = state.openedAtShown ?? state.openedAt ?? new Map<string, number>();
     const fp = [lid, state.entryMetas, state.relations, sort, sortDesc, openedAt] as const;
     const prev = this.overviewFp;
     if (prev !== null && fp.every((v, i) => v === prev[i])) return;

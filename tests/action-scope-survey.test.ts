@@ -357,7 +357,8 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-17(#1621): N +1(`open-bar-more` = 左のペインの「⋯」。入りきらないボタンを名前つきで出すだけで、押した所から何も要らない)。
     // ⚠ 2026-10-17(#952 A1): P1 +1(`capture-extract`。動画の行の「音だけ取り出す」「絵だけ取り出す」── 押した行が要る。`capture-transcribe` と同じ仕分け)。
     // ⚠ 2026-10-17(#952 B2・B3): N +2(`set-voice-level` / `set-voice-crossfeed` = 設定の checkbox 2 つ。押した欄自身の値を読むだけで、`set-voice-boost` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 79, P2: 34, E: 26, V: 10, N: 230 });
+    // ⚠ 2026-10-17(依頼 198): N +1(`toggle-entry-sort-desc`。左の列の「並びの向きを逆にする」── 押した所から何も要らない。`set-entry-sort` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 79, P2: 34, E: 26, V: 10, N: 231 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

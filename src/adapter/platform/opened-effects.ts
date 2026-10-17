@@ -52,9 +52,13 @@ export function connectOpenedEffects(
     const bk = [...b.keys()];
     return ak.every((k, i) => k === bk[i]);
   };
-  const publish = (next: ReadonlyMap<string, number>, cur: ReadonlyMap<string, number>): void => {
+  const publish = (
+    next: ReadonlyMap<string, number>,
+    cur: ReadonlyMap<string, number>,
+    keepListOrder = false,
+  ): void => {
     if (sameOrder(cur, next)) return;
-    dispatcher.dispatch({ type: 'SET_OPENED_AT', openedAt: next });
+    dispatcher.dispatch({ type: 'SET_OPENED_AT', openedAt: next, ...(keepListOrder ? { keepListOrder } : {}) });
   };
 
   const onState = (s: AppState): void => {
@@ -79,7 +83,8 @@ export function connectOpenedEffects(
      *   残す理由は、書き込む直前でもう一度検めるのが安いからだけである。
      */
     if (!s.entryMetas.has(lid)) return;
-    publish(openedMap(store.push(lid, now())), s.openedAt);
+    // 🔴 開いただけでは一覧の並びを動かさない(依頼 274 / 334)
+    publish(openedMap(store.push(lid, now())), s.openedAt, true);
   };
 
   return dispatcher.onState(onState);

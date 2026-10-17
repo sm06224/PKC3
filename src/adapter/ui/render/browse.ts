@@ -153,6 +153,8 @@ export class BrowseRouter {
   private readonly hideWhileCommand: readonly HTMLElement[];
   /** 左の「一覧の並び順」。⚠ 2 ペインの列見出しからも変わるので、描くたびに state へ合わせる。 */
   private readonly sortSelect: HTMLSelectElement | null;
+  /** 並びの向きを逆にするボタン(依頼 198)。 */
+  private readonly sortReverse: HTMLButtonElement | null;
   /**
    * 🔴 **戻る「‹」/ 進む「›」**(#190)。⚠ **面に関係なく**ここが合わせる(#813 段③-a)。
    * 直す前は一覧の描画器だけが `disabled` を動かしていたので、**既定のフォルダのタブでは
@@ -203,6 +205,7 @@ export class BrowseRouter {
     this.host = host;
     this.commandList = sidebar.querySelector<HTMLElement>('[data-pkc-region="command-list"]');
     this.sortSelect = sidebar.querySelector<HTMLSelectElement>('select[data-pkc-field="entry-sort"]');
+    this.sortReverse = sidebar.querySelector<HTMLButtonElement>('button[data-pkc-field="entry-sort-reverse"]');
     this.hideWhileCommand = [
       '[data-pkc-region="browse-tabs"]',
       '[data-pkc-field="entry-sort"]',
@@ -290,6 +293,8 @@ export class BrowseRouter {
     if (this.sortSelect !== null && this.sortSelect.value !== state.entrySort) {
       this.sortSelect.value = state.entrySort;
     }
+    // 🔴 「自分で並べた順」には向きが無い ── 押せない(依頼 198)
+    if (this.sortReverse !== null) this.sortReverse.disabled = state.entrySort === 'manual';
     // 🔑 面 = 探し方 × 「絞り込み中かどうか」。⚠ 絞り込んだ結果は先頭からが正しく、
     //    戻したときに元の位置へ帰るのが欲しい振る舞い
     // ⚠ **種類の絞りも「絞り込み中」に数える**(#411)── 数えないと、札を押した
