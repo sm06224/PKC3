@@ -133,8 +133,11 @@ import { join } from 'node:path';
  *   `media-capture.smoke.spec.ts` に 1 本足した(起動 1 つ。門の数え方では +2)。⚠ **既存の道中には載せられない** ──
  *   `media-capture` の最初の 1 本は既に 30 秒の枠の手前まで使っており、この確認を足した版は実ブラウザで時間切れになった
  *   (録音ボタンを押した所で 30 秒を超えた)。timeout を引き上げて隠さず、別の 1 本にした。
+ * - 2026-10-17(台帳 #1852 束 U1、閲覧用 HTML の書き出していないノートへのリンク): **530**(そのときの実数 530)。
+ *   `export-entry-html.smoke.spec.ts` で、書き出した HTML を別のページで開いて見る(起動 1 つ)。
+ *   ⚠ **既存の道中には載せられない** ── 見る相手はアプリではなく**配った file そのもの**で、開くには別のページが要る。
  */
-export const BOOT_BUDGET = 529;
+export const BOOT_BUDGET = 530;
 
 /** 実測の 1 起動あたり秒(手元・headless_shell・`workers: 1`)。 */
 export const SECONDS_PER_BOOT = 1.63;
