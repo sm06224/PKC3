@@ -450,6 +450,12 @@ describe('全体の処理の出す側の全数', () => {
       end: /finally \{[\s\S]*deps\.notify\(''\)/,
     },
     {
+      // ⚠ #1652 4: 添付を入れている間の進み具合(1 枚目に 1 秒かかったときだけ)。最後の 1 枚の後に空へ戻す
+      file: 'src/adapter/ui/actions/attach.ts',
+      starts: ['notify(`『${name}』を入れています…(${n}/${total})`);'],
+      end: /if \(showProgress && n === total\) notify\(''\)/,
+    },
+    {
       file: 'src/adapter/platform/view-window.ts',
       starts: ['deps.notify?.(VIEW_WINDOW_OPENING);'],
       end: /deps\.notify\?\.\(''\)/,
@@ -486,8 +492,8 @@ describe('全体の処理の出す側の全数', () => {
     expect(Object.fromEntries([...perFile].sort()), '表に無い出す側が増えた / 減った(表と終わりの合図を直す)').toEqual(
       Object.fromEntries([...expected].sort()),
     );
-    // 空振り防止:合計が 11(表の始まりの数。#1455 (b) で +1)。⚠ 0 件なら走査が何も見ていない
-    expect([...perFile.values()].reduce((a, b) => a + b, 0)).toBe(11);
+    // 空振り防止:合計が 12(表の始まりの数。#1455 (b) で +1、#1652 4 で +1)。⚠ 0 件なら走査が何も見ていない
+    expect([...perFile.values()].reduce((a, b) => a + b, 0)).toBe(12);
   });
 });
 
