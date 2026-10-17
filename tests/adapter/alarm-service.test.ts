@@ -476,8 +476,9 @@ describe('アラート(#280)', () => {
     b.service.start(); // 13:00
     b.advanceTo(13, 59);
     b.beat();
-    // 別のタブが保存 → 札が null に戻る窓で、14:00 をまたぐ刻みが来る
-    b.d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
+    // 別の container を読み込んだ → 札が null に戻る窓で、14:00 をまたぐ刻みが来る
+    // ⚠ 同じ container の読み直し(別のタブの保存)では札を残す(#1087)── null の窓は container が変わったときだけ
+    b.d.dispatch({ type: 'SYS_BOOTED', cid: 'c-other', metas: [meta('a')], relations: [] });
     expect(b.d.getState().taskScan, '前提: 札が null になっていない').toBeNull();
     b.advanceTo(14, 0);
     b.beat();
@@ -488,6 +489,18 @@ describe('アラート(#280)', () => {
     b.beat();
     expect(b.service.ringing(), '数え直し中の刻みで見た位置を進めて、予定が消えた').toHaveLength(1);
     expect(b.chimes()).toBe(1);
+  });
+
+  it('🔴 同じ container の読み直し(別のタブの保存)では札が残り、その間の予定も鳴る(#1087)', () => {
+    const b = bench();
+    b.service.start(); // 13:00
+    b.advanceTo(13, 59);
+    b.beat();
+    b.d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
+    expect(b.d.getState().taskScan, '同じ container なのに札が消えた').not.toBeNull();
+    b.advanceTo(14, 0);
+    b.beat();
+    expect(b.service.ringing(), '読み直しの間に予定を取りこぼした').toHaveLength(1);
   });
 
   /** ⚠ main.ts はどの test からも走らない ── 配線は原文で pin する(弱いと自覚して使う)。 */
