@@ -97,11 +97,13 @@ const COUNT_ATTRS = {
   math: 'data-pkc-math-src',
   /** 外部の画像。⚠ 焼いた(設定が「常にオン」の)ときは `src` が付き、この属性は付かない = 数えない。 */
   externalImage: EXTERNAL_IMAGE_ATTR,
+  /** 別のノートの内容の埋め込み(`![説明](entry:…#h/…)`)。⚠ 開いた先には中身が無く、説明の字だけが出る(#1087)。 */
+  embed: 'data-pkc-embed-ref',
 } as const;
 type CountKind = keyof typeof COUNT_ATTRS;
 
 function countContainers(html: string): Record<CountKind, number> {
-  const out: Record<CountKind, number> = { mermaid: 0, chart: 0, math: 0, externalImage: 0 };
+  const out: Record<CountKind, number> = { mermaid: 0, chart: 0, math: 0, externalImage: 0, embed: 0 };
   for (const kind of Object.keys(COUNT_ATTRS) as CountKind[]) {
     const re = new RegExp(`<[a-zA-Z][^>]*\\s${COUNT_ATTRS[kind]}="`, 'g');
     out[kind] = (html.match(re) ?? []).length;
@@ -109,12 +111,22 @@ function countContainers(html: string): Record<CountKind, number> {
   return out;
 }
 
+/**
+ * 数式が「打った字のまま」出ることの注意(0 件なら `null`)。
+ * 🔑 閲覧用 HTML と Word / PowerPoint が**同じ文面**を使うよう 1 か所に置く(#1087)。
+ */
+export function mathSourceNotice(n: number): string | null {
+  return n > 0 ? `数式 ${n} 件は、開いた先では打った字のまま出ます` : null;
+}
+
 /** 注意の文面(0 件の種類は出さない)。 */
 function openedAsSourceNotices(n: Record<CountKind, number>): string[] {
   const w: string[] = [];
   if (n.mermaid > 0) w.push(`図(mermaid)${n.mermaid} 件は、開いた先では原文の字で出ます`);
   if (n.chart > 0) w.push(`グラフ ${n.chart} 件は、開いた先では原文の字で出ます`);
-  if (n.math > 0) w.push(`数式 ${n.math} 件は、開いた先では打った字のまま出ます`);
+  const math = mathSourceNotice(n.math);
+  if (math !== null) w.push(math);
+  if (n.embed > 0) w.push(`別のノートの内容の埋め込み ${n.embed} 件は、開いた先では説明の字だけで出ます`);
   if (n.externalImage > 0) {
     w.push(
       `外部の画像 ${n.externalImage} 件は、開いた先では空の枠になります` +
@@ -233,7 +245,7 @@ nav p.e{font-size:12px;opacity:.6;margin:2px 10px}
 nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
   border:1px solid #8885;border-radius:6px}
 /* 印刷用の目次と「全体」の入れ物は**画面には出さない**(@media print で出す) */
-#ptoc,#all{display:none}
+#pkc-ptoc,#pkc-all{display:none}
 /* ── 閲覧 HTML だけの素の体裁(2026-08-07 に掃除した)────────────────
    本文の記法の見た目は、style の末尾に焼いた app.css が**正本**である。
 
@@ -255,7 +267,7 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
 /* 🔑 読み幅はここに無い ── **app.css の規則が焼き込みで届く**(user 裁定 2026-08-08 で
  * 統一。46em/器 → 42rem/各ブロック + 表・図・コードは対象外)。あちらの規則は
  * .pkc-md-rendered[data-pkc-prose] 起点なので、抜き出しの判定
- * (build/body-css.ts の isBodyRule)を通る。だから器(#body と「全体を印刷」の箱)には
+ * (build/body-css.ts の isBodyRule)を通る。だから器(#pkc-body と「全体を印刷」の箱)には
  * **class 2 つに加えて散文の印も**付けてある ── 落とすとその面だけ全幅に伸びる。
  * ⚠ ここは注記なので、印の綴り data-pkc-prose を**行頭が * の行に置く** ──
  * 器の数と印の数を突き合わせる検査(page-format-surfaces)は注記を剥いで数えるので、
@@ -285,7 +297,7 @@ a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;bo
    規則を書かないと **300×150** に落ちる(アプリ側で実際に踏んだ症状がこれ)。 */
 object.p{display:block;width:100%;height:calc(100vh - 12rem);min-height:320px;
   border:1px solid #8884;border-radius:6px;margin:8px 0}
-#fail{display:block;margin:24px;font:15px/1.7 system-ui,sans-serif;white-space:pre-wrap}
+#pkc-fail{display:block;margin:24px;font:15px/1.7 system-ui,sans-serif;white-space:pre-wrap}
 
 /* ── 印刷(F-1)。⚠ 画面用の grid と 100vh をほどくのが本題 ── ほどかないと
    1 ページ目だけ出て残りが切れる(main が overflow:auto のスクロール箱なので) */
@@ -306,17 +318,17 @@ object.p{display:block;width:100%;height:calc(100vh - 12rem);min-height:320px;
   /* ⚠ 読み幅を紙でほどく規則(かつての .b の none)は置かない(2026-08-08)──
      器の cap が消えた今は死文で、紙もアプリの印刷と同じ 42rem/ブロックが裁定の向き。 */
   /* 折りたたみは**紙では展開する**(印刷時に details を開くのは JS 側) */
-  #ptoc{display:block;margin:0 0 1.5em;padding:0 0 1em;border-bottom:1px solid #8884}
-  #ptoc h3{font-size:1.05em;margin:0 0 .4em}
-  /* ⚠ 紙の目次は 2 か所に出る(1 件の先頭 = #ptoc / 全体の先頭 = ol.x)──
+  #pkc-ptoc{display:block;margin:0 0 1.5em;padding:0 0 1em;border-bottom:1px solid #8884}
+  #pkc-ptoc h3{font-size:1.05em;margin:0 0 .4em}
+  /* ⚠ 紙の目次は 2 か所に出る(1 件の先頭 = #pkc-ptoc / 全体の先頭 = ol.x)──
      体裁は**両方に当てる**。片方だけだと、全体印刷の目次が
      既定の連番つき青リンクのまま出る(実機で踏んだ) */
-  #ptoc ol,ol.x{list-style:none;margin:0;padding:0}
-  #ptoc li[data-l="2"],ol.x li[data-l="2"]{padding-left:1.2em}
-  #ptoc li[data-l="3"],ol.x li[data-l="3"]{padding-left:2.4em}
+  #pkc-ptoc ol,ol.x{list-style:none;margin:0;padding:0}
+  #pkc-ptoc li[data-l="2"],ol.x li[data-l="2"]{padding-left:1.2em}
+  #pkc-ptoc li[data-l="3"],ol.x li[data-l="3"]{padding-left:2.4em}
   ol.x li[data-l="4"]{padding-left:3.6em}
-  #ptoc li.n,ol.x li.n{margin-top:.5em;font-weight:600}
-  #ptoc a,ol.x a{color:inherit;text-decoration:none}
+  #pkc-ptoc li.n,ol.x li.n{margin-top:.5em;font-weight:600}
+  #pkc-ptoc a,ol.x a{color:inherit;text-decoration:none}
   /* 🔴 **+++ は改頁である**(2026-08-07。出典: PKC2 catalog #14 section break /
      page break)。直す前は**配る HTML でも改頁が起きていなかった**(break-after が
      auto)。しかも hr.pkc-section-break と素の hr は**見た目まで同じ**だった ──
@@ -324,7 +336,7 @@ object.p{display:block;width:100%;height:calc(100vh - 12rem);min-height:320px;
      ⚠ 出し分けは DOM でもう成立している(kind=rule は class 無しの hr)。
      ⚠ display:none にしてはいけない ── 箱が消えると改頁も消えるのに、計算後の
        break-after は page のまま残る(緑のまま壊れる。画面側 app.css の同名の節と同じ)。
-     ⚠ #all(全体印刷)の中の本文も .b 配下なのでここで一緒に効く */
+     ⚠ #pkc-all(全体印刷)の中の本文も .b 配下なのでここで一緒に効く */
   /* 見出しが行末で独りにならない・切ってはいけない箱を切らない */
   main h2{break-after:avoid-page}
   /* 🔴 **紙のリンクは濃緑のまま。正本を 1 本にする**(user 裁定 2026-08-07)。
@@ -344,12 +356,12 @@ object.p{display:block;width:100%;height:calc(100vh - 12rem);min-height:320px;
   /* 紙に操作子は要らない(切替の見た目だけ消す ── どちらの面を見せるかは
      画面での選択をそのまま持ち込む) */
   .b .pkc-render-toggle{display:none}
-  /* 「全体を印刷」── main を隠して #all を出す */
+  /* 「全体を印刷」── main を隠して #pkc-all を出す */
   body[data-print="all"] main{display:none}
-  body[data-print="all"] #all{display:block}
-  #all section{break-before:page}
-  #all section:first-child{break-before:auto}
-  #all section h2{font-size:1.5em;margin:0 0 .6em}
+  body[data-print="all"] #pkc-all{display:block}
+  #pkc-all section{break-before:page}
+  #pkc-all section:first-child{break-before:auto}
+  #pkc-all section h2{font-size:1.5em;margin:0 0 .6em}
 }
 /* 🔴 **紙面フォーマット**(2026-08-08。user 裁定)── 書き出した瞬間の設定を焼く。
    ⚠ ここは VIEWER のテンプレート文字列の中 ── **バッククォートを書かない**
@@ -402,20 +414,20 @@ ${BODY_CSS}
 </style>
 <body data-pkc-page-format="${pageFormat}" data-pkc-prose-align="${proseAlign}">
 <nav>
-  <h1 id="t"></h1>
-  <button id="print" class="p" type="button" hidden>この文書を印刷</button>
-  <button id="printall" class="p" type="button" hidden>全体を印刷</button>
-  <details id="dnotes" open><summary>ノート</summary><div id="list"></div></details>
-  <details id="dtoc" open><summary>この文書の目次</summary><ol id="toc"></ol><p class="e" id="tocempty" hidden>見出しがありません</p></details>
+  <h1 id="pkc-t"></h1>
+  <button id="pkc-print" class="p" type="button" hidden>この文書を印刷</button>
+  <button id="pkc-printall" class="p" type="button" hidden>全体を印刷</button>
+  <details id="pkc-dnotes" open><summary>ノート</summary><div id="pkc-list"></div></details>
+  <details id="pkc-dtoc" open><summary>この文書の目次</summary><ol id="pkc-toc"></ol><p class="e" id="pkc-tocempty" hidden>見出しがありません</p></details>
 </nav>
-<main><div id="ptoc"></div><h2 id="title"></h2><div id="body" class="b pkc-md-rendered" data-pkc-field="detail-body" data-pkc-prose></div></main>
-<div id="all"></div>
-<noscript><p id="fail">このファイルは JavaScript で中身を表示します。有効にして開き直してください。</p></noscript>
+<main><div id="pkc-ptoc"></div><h2 id="pkc-title"></h2><div id="pkc-body" class="b pkc-md-rendered" data-pkc-field="detail-body" data-pkc-prose></div></main>
+<div id="pkc-all"></div>
+<noscript><p id="pkc-fail">このファイルは JavaScript で中身を表示します。有効にして開き直してください。</p></noscript>
 <script>
 (function(){
 // 🔴 黙って真っ白にしない ── 途中で切れたファイル / 壊れた JSON でも理由を出す
 function fail(msg){
-  var p=document.createElement('p');p.id='fail';
+  var p=document.createElement('p');p.id='pkc-fail';
   p.textContent='このファイルを表示できませんでした: '+msg+
     '\\nダウンロードが途中で終わっている可能性があります。';
   document.body.textContent='';document.body.appendChild(p);
@@ -425,7 +437,7 @@ try{
   if(!el)throw new Error('データが見つかりません');
   var d=JSON.parse(el.textContent);
   document.title=d.title||'PKC3';
-  document.getElementById('t').textContent=(d.title||'PKC3')+' ('+d.entries.length+' 件)';
+  document.getElementById('pkc-t').textContent=(d.title||'PKC3')+' ('+d.entries.length+' 件)';
   var mimes={},names={},kinds={};
   d.assets.forEach(function(a){
     mimes[a.key]=a.mime||'application/octet-stream';
@@ -576,6 +588,23 @@ try{
     Array.prototype.forEach.call(box.querySelectorAll('[data-pkc-action="copy-md-block"]'),function(el){
       if(el.parentNode)el.parentNode.removeChild(el);
     });
+    // 🔴 **自分宛の添付リンク(pkc://自分/asset/…)も効かせる**(#1087)。直す前は書き換わらずに残り、
+    //    押しても何も起きなかった。このファイルに添付が入っていれば他の添付リンクと同じく保存 / 開くリンクに、
+    //    入っていなければ字だけにする(押せる顔で動かない物を残さない)
+    Array.prototype.forEach.call(box.querySelectorAll('a[data-pkc-asset-ref]'),function(a){
+      var k=a.getAttribute('data-pkc-asset-ref')||'';
+      if(k&&has(k)){
+        seen[k]=1;
+        a.href=urlFor(k,sink);a.download=names[k]||k;
+        a.removeAttribute('data-pkc-action');a.removeAttribute('data-pkc-asset-ref');
+        return;
+      }
+      var sp=document.createElement('span');
+      sp.setAttribute('data-pkc-asset-missing','');
+      sp.title='このファイルには入っていない添付です';
+      while(a.firstChild)sp.appendChild(a.firstChild);
+      if(a.parentNode)a.parentNode.replaceChild(sp,a);
+    });
     // 🔴 **ノート間リンクを、このファイルの中で効かせる**(#1087 の見直し 2026-10-13)。
     //    直す前はリンク先が書き換わらずに残り、押しても何も起きなかった(普通のリンクの見た目のまま)。
     //    ⚠ このファイルに入っているノートだけを開く。入っていないノートへのリンクは字だけにする
@@ -699,12 +728,12 @@ try{
     return out;
   }
 
-  var list=document.getElementById('list'),cur=null;
+  var list=document.getElementById('pkc-list'),cur=null;
   // ノート間リンクの行き先 ── ノートの番号 → 一覧の何番目か / 一覧のボタン(下で作る)
   var noteAt={},btns=[];
   d.entries.forEach(function(e,i){if(e.${NOTE_ID_KEY})noteAt[e.${NOTE_ID_KEY}]=i});
-  var toc=document.getElementById('toc'),tocEmpty=document.getElementById('tocempty');
-  var ptoc=document.getElementById('ptoc'),all=document.getElementById('all');
+  var toc=document.getElementById('pkc-toc'),tocEmpty=document.getElementById('pkc-tocempty');
+  var ptoc=document.getElementById('pkc-ptoc'),all=document.getElementById('pkc-all');
 
   /**
    * 目次を作る。link が真なら a[href="#id"](紙・PDF 向け)、偽なら button。
@@ -729,8 +758,8 @@ try{
   function show(e,btn,hid){
     release();
     dropAll();  // 紙用に組んだ全件は、読みに戻った時点で捨てる(ObjectURL も)
-    document.getElementById('title').textContent=e.title;
-    var box=document.getElementById('body');box.textContent='';
+    document.getElementById('pkc-title').textContent=e.title;
+    var box=document.getElementById('pkc-body');box.textContent='';
     var hs=hydrate(box,e,live,'');
     // 画面の目次(折りたたみ)と、紙の目次(常に展開)── 同じ見出し列から作る
     toc.textContent='';fillToc(toc,hs,false);
@@ -772,7 +801,7 @@ try{
       sec.appendChild(t);
       // ⚠ 本文の CSS は **class .b** に付けてある ── 同じ id を 2 個作らないため。
       // 🔴 **pkc-md-rendered も要る**(2026-08-07)── app.css から焼いた本文の規則は
-      //    そちらに付いている。**器は 2 か所ある**(#body と、ここ「全体を印刷」)ので
+      //    そちらに付いている。**器は 2 か所ある**(#pkc-body と、ここ「全体を印刷」)ので
       //    片方だけに足すと、全体印刷の紙だけ素の見た目で出る(誰も見ていない経路)
       // 🔴 **data-pkc-prose も要る**(2026-08-08)── 読み幅の規則は
       //    .pkc-md-rendered[data-pkc-prose] 起点で焼かれてくる。
@@ -836,7 +865,7 @@ try{
     fin();
   }
 
-  var pb=document.getElementById('print'),pa=document.getElementById('printall');
+  var pb=document.getElementById('pkc-print'),pa=document.getElementById('pkc-printall');
   pb.hidden=false;pb.onclick=function(){dropAll();doPrint()};
   pa.hidden=false;
   pa.textContent='全体を印刷('+d.entries.length+' 件)';
@@ -952,7 +981,7 @@ export async function writePortableHtml(
   const exportedLids = new Set<string>();
   const linkTargets: string[] = [];
   /** 開いた先で原文の字・空の枠になる物の数(#1087)。 */
-  const opened: Record<CountKind, number> = { mermaid: 0, chart: 0, math: 0, externalImage: 0 };
+  const opened: Record<CountKind, number> = { mermaid: 0, chart: 0, math: 0, externalImage: 0, embed: 0 };
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
     const { rows, done, next } = await src.listBodies(after, BODY_BATCH_BYTES);

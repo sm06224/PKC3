@@ -135,3 +135,25 @@ describe('一部のバックアップのタグの色', () => {
     expect(await source.listTagColors?.()).toEqual([{ tag: '仕事', color: '#ff0000' }]);
   });
 });
+
+describe('Word / PowerPoint の字(ルビ・目次。#1087)', () => {
+  it('🔴 E3 ルビは「親字（よみ）」で書く(漢字かんじ と続けない)', () => {
+    const t = docxText('[[ruby:漢字|かんじ]]\n');
+    expect(t).toContain('漢字');
+    expect(t).toContain('（かんじ）');
+    expect(t).not.toContain('漢字かんじ');
+  });
+
+  it('🔴 E10 目次の見出しの段が箇条書きの深さに残る', () => {
+    const doc = new DOMParser().parseFromString(
+      '<body><nav class="pkc-toc"><ul class="pkc-toc-list">' +
+        '<li data-pkc-toc-level="1"><a href="#a">A</a></li>' +
+        '<li data-pkc-toc-level="2"><a href="#b">B</a></li>' +
+        '<li data-pkc-toc-level="3"><a href="#c">C</a></li>' +
+        '</ul></nav></body>',
+      'text/html',
+    );
+    const lis = htmlToDocxBlocks(doc).blocks.filter((b) => b.kind === 'li') as unknown as { depth: number }[];
+    expect(lis.map((b) => b.depth)).toEqual([0, 1, 2]);
+  });
+});

@@ -1056,18 +1056,18 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   await viewer.goto(`file://${file}`);
 
   // 一覧が出て、最初の entry が自動で開く
-  const items = viewer.locator('#list button');
+  const items = viewer.locator('#pkc-list button');
   await expect(items).toHaveCount(2);
-  await expect(viewer.locator('#title')).toHaveText('ZIP のノート');
+  await expect(viewer.locator('#pkc-title')).toHaveText('ZIP のノート');
   // 🔴 本文の `<!--` + `<script` を**素通りで**読めている = トークナイザが
   // 壊れていない。退避が足りないとページごと真っ白になり、ここへ到達しない
-  await expect(viewer.locator('#body')).toContainText('本文');
+  await expect(viewer.locator('#pkc-body')).toContainText('本文');
   // ⚠ 1 文字一致では見ない ── 本文は markdown として描かれるので、typographer が
   //    `"x"` を丸引用符に変える(それは正しい)。危険なのは **`<` が飲み込まれる**ほうで、
   //    こちらは 1 個でも欠けたら本文が静かに消えている
-  await expect(viewer.locator('#body')).toContainText('<script src=');
+  await expect(viewer.locator('#pkc-body')).toContainText('<script src=');
   expect(
-    await viewer.locator('#body').evaluate((el) => (el.textContent ?? '').split('<').length - 1),
+    await viewer.locator('#pkc-body').evaluate((el) => (el.textContent ?? '').split('<').length - 1),
     '`<` が飲み込まれている(本文が静かに欠けている)',
   ).toBe(2);
   await expect(viewer.locator('script')).toHaveCount(2); // データ用 + 閲覧 UI
@@ -1075,17 +1075,17 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   // 🔴 **描かれている**(P8 段⑲)── かつては本文を丸ごと `<pre>` に入れていたので、
   //    見出しも箇条書きも記号のままだった
   expect(
-    await viewer.locator('#body p, #body h1, #body h2, #body ul, #body ol').count(),
+    await viewer.locator('#pkc-body p, #pkc-body h1, #pkc-body h2, #pkc-body ul, #pkc-body ol').count(),
     '本文が markdown として描かれていない',
   ).toBeGreaterThan(0);
 
   // 添付を持つ entry へ切り替えると、base64 から復元した画像が**実際に描画**される
   await items.nth(1).click();
-  const img = viewer.locator('#body img');
+  const img = viewer.locator('#pkc-body img');
   await expect(img).toHaveCount(1);
   await expect(img).toHaveAttribute('src', /^blob:/);
   await expect
-    .poll(async () => viewer.locator('#body img').evaluate((el) =>
+    .poll(async () => viewer.locator('#pkc-body img').evaluate((el) =>
       (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0))
     .toBe(true);
 
@@ -1094,32 +1094,32 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   //    (表の下に原文、押しても効かないチェックボックス、紙では二重に刷る)。
   //    ⚠ CSS の効きは happy-dom では測れない ── ここが唯一の観測点
   await items.nth(0).click();
-  const fenceSrc = viewer.locator('#body .pkc-render-source');
+  const fenceSrc = viewer.locator('#pkc-body .pkc-render-source');
   expect(
     await fenceSrc.count(),
     'この fixture に描画/原文の fence が無い(切替を測っていない)',
   ).toBeGreaterThan(0);
   await expect(fenceSrc.first(), '描画の下に原文が出ている').toBeHidden();
-  await expect(viewer.locator('#body .pkc-render-slot').first()).toBeVisible();
+  await expect(viewer.locator('#pkc-body .pkc-render-slot').first()).toBeVisible();
   // ⚠ **dead click にしない** ── 属性が変わるだけで見た目が変わらない状態を潰す
-  await viewer.locator('#body .pkc-render-toggle').first().click({ force: true });
+  await viewer.locator('#pkc-body .pkc-render-toggle').first().click({ force: true });
   await expect(fenceSrc.first(), '切替が効いていない(押しても原文が出ない)').toBeVisible();
-  await expect(viewer.locator('#body .pkc-render-slot').first()).toBeHidden();
-  await viewer.locator('#body .pkc-render-toggle').first().click({ force: true });
+  await expect(viewer.locator('#pkc-body .pkc-render-slot').first()).toBeHidden();
+  await viewer.locator('#pkc-body .pkc-render-toggle').first().click({ force: true });
   await expect(fenceSrc.first()).toBeHidden();
 
   // ── F-1: 折りたたみ目次と印刷。⚠ `@media print` が**実際に効く**かは
   //    happy-dom では測れない ── ここが唯一の観測点なので実ブラウザで見る
-  const headings = await viewer.locator('#body h1, #body h2, #body h3').count();
+  const headings = await viewer.locator('#pkc-body h1, #pkc-body h2, #pkc-body h3').count();
   expect(headings, 'この fixture に見出しが 1 個も無い(目次を測っていない)').toBeGreaterThan(0);
-  await expect(viewer.locator('#toc li')).toHaveCount(headings);
+  await expect(viewer.locator('#pkc-toc li')).toHaveCount(headings);
   // 畳める(details であること自体が要件 ── JS を足さずに畳める)
   expect(
-    await viewer.locator('#dtoc').evaluate((el) => el.tagName.toLowerCase()),
+    await viewer.locator('#pkc-dtoc').evaluate((el) => el.tagName.toLowerCase()),
   ).toBe('details');
-  // 目次の行を押すと本文の見出しへ移る(#body はスクロール箱の中)
+  // 目次の行を押すと本文の見出しへ移る(#pkc-body はスクロール箱の中)
   const before = await viewer.locator('main').evaluate((el) => el.scrollTop);
-  await viewer.locator('#toc li').last().locator('button').click();
+  await viewer.locator('#pkc-toc li').last().locator('button').click();
   expect(
     await viewer.locator('main').evaluate((el) => el.scrollTop),
     '目次から移動していない',
@@ -1133,16 +1133,16 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   expect(await styleOf('body', 'display'), '印刷でも grid のまま').toBe('block');
   expect(await styleOf('main', 'overflow'), 'main がスクロール箱のまま').toBe('visible');
   expect(await styleOf('nav', 'display'), '紙に一覧が出てしまう').toBe('none');
-  expect(await styleOf('#ptoc', 'display'), '紙に目次が出ない').not.toBe('none');
+  expect(await styleOf('#pkc-ptoc', 'display'), '紙に目次が出ない').not.toBe('none');
   // 🔴 紙に原文を二重に刷らない / 操作子を刷らない
-  expect(await styleOf('#body .pkc-render-source', 'display'), '紙に原文が二重に出る').toBe('none');
-  expect(await styleOf('#body .pkc-render-toggle', 'display'), '紙に操作子が刷られる').toBe('none');
+  expect(await styleOf('#pkc-body .pkc-render-source', 'display'), '紙に原文が二重に出る').toBe('none');
+  expect(await styleOf('#pkc-body .pkc-render-toggle', 'display'), '紙に操作子が刷られる').toBe('none');
   // 紙の目次は畳まれない(印刷の直前に open を立てる)
-  await viewer.locator('#dtoc').evaluate((el) => {
+  await viewer.locator('#pkc-dtoc').evaluate((el) => {
     (el as HTMLDetailsElement).open = false;
   });
   await viewer.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
-  expect(await viewer.locator('#dtoc').evaluate((el) => (el as HTMLDetailsElement).open)).toBe(true);
+  expect(await viewer.locator('#pkc-dtoc').evaluate((el) => (el as HTMLDetailsElement).open)).toBe(true);
 
   // ── 全体を印刷。
   // 🔴 **観測点は「印刷が始まる瞬間」**(`beforeprint`)であって、押した直後ではない。
@@ -1152,20 +1152,20 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   //    後者では**押して戻った時点で既に片付いている**(= 正しい動作)。
   //    「押した直後に組み上がっている」を assert した版は、手元だけ通って CI で落ちた。
   await viewer.emulateMedia({ media: 'screen' });
-  await expect(viewer.locator('#all')).toBeHidden(); // 画面には出ていない
+  await expect(viewer.locator('#pkc-all')).toBeHidden(); // 画面には出ていない
   await viewer.evaluate(() => {
     // ⚠ 閲覧側の listener は boot 時に付いているので、あとから足すこちらが後に走る
     //    = buildAll() の結果を見ることになる
     (window as unknown as { __snap?: unknown }).__snap = null;
     window.addEventListener('beforeprint', () => {
       (window as unknown as { __snap?: unknown }).__snap = {
-        sections: document.querySelectorAll('#all section').length,
+        sections: document.querySelectorAll('#pkc-all section').length,
         dataPrint: document.body.getAttribute('data-print'),
-        imgs: document.querySelectorAll('#all img').length,
+        imgs: document.querySelectorAll('#pkc-all img').length,
       };
     });
   });
-  await viewer.locator('#printall').click(); // 本物のクリック
+  await viewer.locator('#pkc-printall').click(); // 本物のクリック
   // ⚠ 印刷は**画像が載ってから**始まる(組んだ直後ではない)── poll で待つ
   await expect
     .poll(async () => viewer.evaluate(() => (window as unknown as { __snap?: unknown }).__snap !== null))
@@ -1190,19 +1190,19 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
     window.print = () => {
       w.__printed += 1;
     };
-    document.getElementById('printall')!.click();
+    document.getElementById('pkc-printall')!.click();
   });
   await expect
     .poll(async () => viewer.evaluate(() => (window as unknown as { __printed: number }).__printed))
     .toBe(1);
-  await expect(viewer.locator('#all section')).toHaveCount(3);
-  await expect(viewer.locator('#all'), '画面に紙用の全件が出てしまう').toBeHidden();
+  await expect(viewer.locator('#pkc-all section')).toHaveCount(3);
+  await expect(viewer.locator('#pkc-all'), '画面に紙用の全件が出てしまう').toBeHidden();
   await viewer.emulateMedia({ media: 'print' });
   expect(await styleOf('main', 'display'), '全体印刷で main が残っている').toBe('none');
-  expect(await styleOf('#all', 'display'), '全体が紙に出ない').toBe('block');
+  expect(await styleOf('#pkc-all', 'display'), '全体が紙に出ない').toBe('block');
   // 🔴 組んだものは**捨てる**(印刷後に常駐させない)
   await viewer.evaluate(() => window.dispatchEvent(new Event('afterprint')));
-  await expect(viewer.locator('#all section')).toHaveCount(0);
+  await expect(viewer.locator('#pkc-all section')).toHaveCount(0);
   await viewer.emulateMedia({ media: 'screen' });
 
   expect(viewerErrors).toEqual([]);

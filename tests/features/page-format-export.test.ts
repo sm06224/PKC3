@@ -8,7 +8,7 @@
  *
  * 届く道は 3 つあり、**どれが欠けても静かに壊れる**:
  * ① 器(`<body>`)に印が焼かれている ② その印に当たる規則が `<style>` に在る
- * ③ 本文の器 2 つ(`#body` と「全体を印刷」の箱)が**散文の印**を持っている
+ * ③ 本文の器 2 つ(`#pkc-body` と「全体を印刷」の箱)が**散文の印**を持っている
  */
 import { describe, expect, it } from 'vitest';
 import { writePortableHtml } from '../../src/features/export/pkc3-html';
@@ -59,17 +59,17 @@ describe('書き出す HTML の紙面', () => {
       doc.body.getAttribute('data-pkc-page-format'),
       '器に紙面が焼かれていない(配った HTML だけ既定の幅に戻る)',
     ).toBe('a3-landscape');
-    const body = doc.querySelector('#body');
+    const body = doc.querySelector('#pkc-body');
     expect(body, '本文の器が無い(この検査は空振り)').not.toBeNull();
     // ⚠ **継承で届く**のが仕組みなので、器が body の配下に在ることまで見る
     expect(doc.body.contains(body!), '本文の器が紙面の印の外に出ている').toBe(true);
   });
 
-  it('🔴 散文の印は **2 か所とも**(#body と「全体を印刷」の箱)', async () => {
+  it('🔴 散文の印は **2 か所とも**(#pkc-body と「全体を印刷」の箱)', async () => {
     const out = await html('a4-portrait');
     const doc = new DOMParser().parseFromString(out, 'text/html');
     expect(
-      doc.querySelector('#body')!.hasAttribute('data-pkc-prose'),
+      doc.querySelector('#pkc-body')!.hasAttribute('data-pkc-prose'),
       '読む器に散文の印が無い(本文が全幅に伸びる)',
     ).toBe(true);
     // ⚠ 「全体を印刷」の箱は閲覧側の script が作る ── 字面で pin する

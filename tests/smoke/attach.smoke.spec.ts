@@ -887,7 +887,7 @@ test('🔴 配った HTML でも PDF が読める大きさで出る', async ({ p
 
   const viewer = await page.context().newPage();
   await viewer.goto(`file://${file}`);
-  await expect(viewer.locator('#body')).toBeVisible();
+  await expect(viewer.locator('#pkc-body')).toBeVisible();
   const m = await viewer.evaluate(() => {
     const o = document.querySelector('object[type="application/pdf"]');
     if (!o) return null;
@@ -3045,12 +3045,12 @@ test('🔴 書き出した HTML を単体で開いても、囲みの中身が入
   const viewer = await page.context().newPage();
   await viewer.goto(`file://${file}`);
   await viewer.locator('nav button', { hasText: noteTitle }).first().click();
-  const table = viewer.locator('#body table');
+  const table = viewer.locator('#pkc-body table');
   await expect(table, '配った 1 枚に表が入っていない').toBeVisible({ timeout: 10_000 });
   await expect(table).toContainText('りんご');
   await expect(table).toContainText('120');
   // 🔑 対照群 ── 焼き込めていなければ、この字が残る
-  await expect(viewer.locator('#body')).not.toContainText('中身は添付');
+  await expect(viewer.locator('#pkc-body')).not.toContainText('中身は添付');
   const box = (await table.boundingBox())!;
   expect(box.height, '配った表の高さが無い').toBeGreaterThan(20);
   await viewer.close();
