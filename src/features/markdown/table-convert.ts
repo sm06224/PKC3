@@ -742,7 +742,18 @@ export function convertTable(at: TableAt, to: TableFormat): string | null {
       at.rows.map((r) => ({ ...r, cells: r.cells.map((c) => displayCell(c, raw).text) })),
     );
   }
-  const body = tableToCsv(at.rows.map((r) => ({ ...r, cells: r.cells.map(csvLiteralCell) })));
+  const csvRows = at.rows.map((r) => ({ ...r, cells: r.cells.map(csvLiteralCell) }));
+  /**
+   * 🔴 **1 列の表の、最後の行が空なら `""` で書いて残す**(#1087 B-5)。csv は末尾の空の行を捨てる
+   *   (`parseCsv`)ので、空のまま書くと markdown へ戻したとき**行が減る**。
+   * ⚠ 残すのは**最後の 1 行だけ**でよい ── 読み手は `""` の行で捨てるのを止めるので、
+   *   その前に並んだ空の行は元から捨てられない。2 列以上は `,` が入るので空の行にならない。
+   */
+  const last = csvRows[csvRows.length - 1]!;
+  const keepLast = csvRows.every((r) => r.cells.length === 1) && last.cells[0] === '';
+  const body = keepLast
+    ? `${tableToCsv(csvRows.slice(0, -1))}\n""`
+    : tableToCsv(csvRows);
   const marker = fenceMarkerFor(body);
   // ⚠ 見出しの無い表は `noheader` を宣言する ── 宣言しないと 1 行目が見出しに化ける
   return `${marker}csv${at.rows[0]!.head ? '' : ' noheader'}\n${body}\n${marker}`;

@@ -322,7 +322,8 @@ describe('spreadsheet flavor', () => {
       JSON.stringify({ rows: [['```'], ['secret-data']] }),
     );
     // fence は内容の最長 backtick run より長い ── データが fence 外に漏れない
-    expect(md).toBe('````csv-render\n```\nsecret-data\n````');
+    // (#1087 A-4: 柵に見える升は csv の引用符でも包む ── 柵の長さと二重に守る。事実が動いた分だけ字を直した)
+    expect(md).toBe('````csv-render\n"```"\nsecret-data\n````');
   });
 });
 
