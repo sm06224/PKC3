@@ -31,6 +31,7 @@ import { AssetLends, type AssetLender } from './asset-lends';
 import { pruneScopes, type MermaidScope } from './mermaid-hydrate';
 import { sanitizeEmbedded, PLACE_MORE_NOTE } from './place-embed';
 import { markViewBig } from './view-big';
+import { hydrateFenceHosts } from './fence-asset-hydrate';
 
 /** 展開した器の class(展開前は `pkc-transclusion-placeholder`)。 */
 export const SECTION_EMBED_CLASS = 'pkc-section-embed';
@@ -65,6 +66,8 @@ export interface SectionEmbedDeps {
   readonly wanted: (keys: readonly string[]) => void;
   readonly lender: AssetLender | null;
   readonly figures: (roots: readonly ParentNode[]) => MermaidScope[];
+  /** いま開いているコンテナの id(囲みの中身を描くとき、読む面と同じ値を渡す)。 */
+  readonly currentContainerId: string;
 }
 
 /** 枠ごとの `id` の接頭辞の連番。⚠ module に 1 つ(`place-embed.ts` の `nsSeq` と同じ理由)。 */
@@ -103,9 +106,17 @@ export class SectionEmbeds {
   private readonly lends = new Map<HTMLElement, AssetLends>();
   private readonly scopes: MermaidScope[] = [];
   private fresh: HTMLElement[] = [];
+  /**
+   * 🔴 **添付から読む囲みの字の控え**(#1087 A4)。⚠ 面を捨てるとき(`release`)に手放す。
+   * `gen` は `release` のたびに進める ── 待っている間に面が捨てられた読み込みは何も触らない。
+   */
+  private readonly fenceTexts = new Map<string, string>();
+  private gen = 0;
 
   /** 図の URL と貸出を返す(面を捨てる / 別のノートへ移る)。 */
   release(): void {
+    this.gen++;
+    this.fenceTexts.clear();
     for (const l of this.lends.values()) l.disposeAll();
     this.lends.clear();
     for (const sc of this.scopes.splice(0)) sc.dispose();
@@ -254,6 +265,7 @@ export class SectionEmbeds {
     el.setAttribute(KEY_ATTR, stateKey);
     el.removeAttribute(PENDING_ATTR);
     this.hydrateImages(el, deps);
+    this.hydrateFences(el, deps);
     if (el.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-math-src]') !== null) this.fresh.push(el);
   }
 
@@ -262,6 +274,34 @@ export class SectionEmbeds {
     const roots = this.fresh.filter((s) => s.isConnected);
     this.fresh = [];
     if (roots.length > 0) this.scopes.push(...deps.figures(roots));
+  }
+
+  /**
+   * 🔴 **節の中の「添付から読む囲み」(```` ```csv asset:k ````)を中身で埋める**(#1087 A4)。
+   * ⚠ 直す前は読む面だけが埋めており、節の中では「このコードブロックの中身は添付にあります」の案内のまま残った。
+   * 🔑 埋め方は読む面・付箋と同じ 1 本(`fence-asset-hydrate.ts`)。差し替えた塊も、節の中で読む形へ掃除してから入れる。
+   */
+  private hydrateFences(el: HTMLElement, deps: SectionEmbedDeps): void {
+    const hosts = [...el.querySelectorAll<HTMLElement>('[data-pkc-fence-asset-key]')];
+    if (hosts.length === 0) return;
+    const gen = this.gen;
+    const lender = deps.lender;
+    void hydrateFenceHosts({
+      hosts,
+      getBlob: lender ? (k) => lender.getBlob(k) : null,
+      texts: this.fenceTexts,
+      env: { allowExternalImages: false, currentContainerId: deps.currentContainerId },
+      stale: () => gen !== this.gen || !el.isConnected,
+      prepare: (holder) =>
+        sanitizeEmbedded(holder, (l) => deps.metaOf(l)?.title ?? null, el.getAttribute(NS_ATTR) ?? ''),
+      onReplaced: (next) => {
+        if (next.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-math-src]') === null) return;
+        this.fresh.push(next as HTMLElement);
+        this.flushFigures(deps);
+      },
+    }).catch(() => {
+      /* 読めなかっただけ ── 器は案内のまま残る */
+    });
   }
 
   private hydrateImages(el: HTMLElement, deps: SectionEmbedDeps): void {

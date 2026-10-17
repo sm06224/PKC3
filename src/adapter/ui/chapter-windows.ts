@@ -80,6 +80,7 @@ import {
 import { blocksInRange } from './render/section-box';
 import {
   fenceAssetUnreadableText,
+  replaceBodyImageError,
   hydrateFigures,
   readingRenderOptions,
   selfContainerId,
@@ -478,13 +479,21 @@ export class ChapterWindows {
         } catch {
           lent = null;
         }
-        if (lent === null) return;
         if (stale()) {
-          lent.dispose();
+          lent?.dispose();
+          return;
+        }
+        if (lent === null) {
+          // 🔴 bytes が無い添付は、読む面と同じ印を付ける(#1087 A5)── 付けないと、寸法 0 で消えたように見える
+          for (const img of imgs) img.setAttribute('data-pkc-asset-missing', '');
           return;
         }
         o.disposers.push(lent.dispose);
-        for (const img of imgs) img.src = lent.url;
+        for (const img of imgs) {
+          // 🔴 読めない絵は壊れた画像で終わらせず、理由を 1 行出す(#1087 A3。読む面と同じ 1 本)
+          replaceBodyImageError(img);
+          img.src = lent.url;
+        }
       }),
     );
     if (stale()) return;

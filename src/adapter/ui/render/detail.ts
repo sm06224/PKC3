@@ -11,7 +11,7 @@
  * innerHTML への流し込みは markdown-render が `html: false`(生 HTML 不通過)で
  * 生成した出力に限る(PKC2 と同じ安全前提)。
  */
-import { renderFenceFromAsset, renderMarkdown } from '@features/markdown/markdown-render';
+import { renderMarkdown } from '@features/markdown/markdown-render';
 import {
   frontmatterLineCount,
   bodyBelowFrontmatter,
@@ -28,7 +28,7 @@ import { hydrateMath } from './math-hydrate';
 import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
 import { SqlEmbedHydrator } from './sql-embed-hydrate';
-import { readFenceAssetText } from '@features/asset/fence-asset-read';
+import { fenceAssetUnreadableText, hydrateFenceHosts } from './fence-asset-hydrate';
 import { applyHeadingFold, revealBlock } from './heading-fold';
 import { LOG_DAYS_HOST_ATTR } from './log-days';
 import { applyHeadingAnchors, ID_PREFIX_ATTR } from './heading-anchor';
@@ -242,12 +242,15 @@ export function selfContainerId(state: AppState): string {
 }
 
 /**
- * 添付から中身を取るコード枠が読めなかったときの断り文。
- * 🔑 本文の面と章の別ウィンドウ(#1044 段4)で**同じ 1 本**を使う。
+ * 🔴 **本文に貼った画像が読めなかったら、壊れた画像で終わらせず理由を 1 行出す**(#1087 A3)。
+ * ⚠ 添付の下見・一覧・付箋の画像(`asset-lends.ts`)と**同じ作法・同じ字**。HEIC・壊れた画像・0 バイトが対象。
  */
-export function fenceAssetUnreadableText(why: string): string {
-  return `このコードブロックの中身(添付)を読み込めません: ${why}`;
+export function replaceBodyImageError(img: HTMLImageElement): void {
+  replaceOnMediaError(img, 'image', '', '元のファイルは添付から保存して開いてください');
 }
+
+/** 添付から中身を取るコード枠の断り文(本体は `fence-asset-hydrate.ts`。ここからも引ける)。 */
+export { fenceAssetUnreadableText };
 
 /**
  * 🔴 **編集中のプレビューにも、全文から取った `{{vars.x}}` を渡す**(#1087 N1)。
@@ -1202,6 +1205,7 @@ export class DetailRenderer {
       // 🔴 図と添付画像は**読む面と同じ口**(`hydrateFigures` / 貸出)に乗せる(#529 W3-②)
       lender: this.assets,
       figures: (roots) => hydrateFigures(roots),
+      currentContainerId: this.cidRef,
       // 🔴 「見えそうな枠」の基準 = 板を送る器(W3-③)
       viewRoot: this.scroller,
     });
@@ -1220,6 +1224,7 @@ export class DetailRenderer {
       wanted: (keys) => wanted?.(keys),
       lender: this.assets,
       figures: (roots) => hydrateFigures(roots),
+      currentContainerId: this.cidRef,
     });
     // 🔴 添付ノートは「絵を出せる画像か」が**読んだ後**に分かる ── 既定の大きさを当て直す
     const body = this.lastBody;
@@ -3815,7 +3820,10 @@ export class DetailRenderer {
       const live = this.lends.live(key);
       if (!live) continue;
       live.els.push(...imgs);
-      for (const img of imgs) img.src = live.url!;
+      for (const img of imgs) {
+        replaceBodyImageError(img);
+        img.src = live.url!;
+      }
       byKey.delete(key);
     }
     if (byKey.size === 0) return;
@@ -3832,7 +3840,10 @@ export class DetailRenderer {
             return;
           }
           this.lends.track({ key, url: lent.url, dispose: lent.dispose, els: imgs });
-          for (const img of imgs) img.src = lent.url;
+          for (const img of imgs) {
+            replaceBodyImageError(img);
+            img.src = lent.url;
+          }
         } catch {
           if (token === this.hydrateToken)
             for (const img of imgs) img.setAttribute('data-pkc-asset-missing', '');
@@ -3985,82 +3996,19 @@ export class DetailRenderer {
       for (const el of r.querySelectorAll<HTMLElement>('[data-pkc-fence-asset-key]'))
         hosts.push(el);
     }
-    if (hosts.length === 0) return;
-    if (token !== this.hydrateToken) return;
-    /**
-     * 🔴 **この 1 回で 1 つ**(着地前の自己レビューで判明)── `-both` の切替 id は
-     *   「同じ(言語, 中身)の中で何番目か」で決まり、その数はこの object が憶える。
-     * ⚠ 囲みごとに作り直すと、**同じ囲みを 2 つ書いたときに id が衝突する**
-     *   (片方を押すともう片方が開く)。
-     */
-    const renderEnv: { currentContainerId?: string; allowExternalImages?: boolean } = {
-      currentContainerId: env.currentContainerId,
-      allowExternalImages: env.allowExternalImages,
-    };
-    /** ⚠ 世代が変わっていたら捨てる ── 別のノートの器へ書き込まない。 */
-    const fail = (host: HTMLElement, why: string): void => {
-      const pending = host.querySelector('[data-pkc-fence-asset-pending]');
-      if (!pending) return;
-      pending.setAttribute('data-pkc-fence-asset-error', '');
-      pending.removeAttribute('data-pkc-fence-asset-pending');
-      pending.textContent = fenceAssetUnreadableText(why);
-    };
     const assets = this.assets;
-    await Promise.all(
-      [...new Set(hosts.map((h) => h.getAttribute('data-pkc-fence-asset-key') ?? ''))].map(
-        async (key) => {
-          const mine = hosts.filter(
-            (h) => (h.getAttribute('data-pkc-fence-asset-key') ?? '') === key,
-          );
-          let text = this.fenceTexts.get(key);
-          if (text === undefined) {
-            if (!assets) {
-              for (const h of mine) fail(h, 'いま添付を読み込めません(読み込みの準備ができていません)');
-              return;
-            }
-            /**
-             * 🔑 **読み方は書き出しと同じ 1 本**(#444 段②で寄せた)──
-             *   上限も断り文も `features/asset/fence-asset-read.ts` が持つ。
-             * ⚠ 直す前はここに同じ判定が並んでおり、**書き出し側にだけ上限が
-             *   無い**という食い違いを作れる形だった(CLAUDE.md §7)。
-             */
-            const got = await readFenceAssetText((k) => assets.getBlob(k), key);
-            // ⚠ 待っている間にノートが変わっていたら**何も触らない**(器も断り文も)
-            if (token !== this.hydrateToken) return;
-            if (!got.ok) {
-              for (const h of mine) fail(h, got.why);
-              return;
-            }
-            text = got.text;
-            this.fenceTexts.set(key, text);
-          }
-          for (const h of mine) {
-            const info = h.getAttribute('data-pkc-fence-asset-info') ?? '';
-            /**
-             * ⚠ **器ごと差し替える** ── `renderFenceFromAsset` が返すのは
-             *   `pkc-md-block` を含む**塊そのもの**なので、中へ入れると二重になる。
-             * ⚠ 位置の印(`data-pkc-source-line`)は器が持っているので、
-             *   差し替えた要素へ**写す**(押した行の対応を失わない)。
-             */
-            const holder = document.createElement('div');
-            holder.innerHTML = renderFenceFromAsset(info, text, renderEnv);
-            const next = holder.firstElementChild;
-            if (!next) {
-              fail(h, '描けませんでした');
-              continue;
-            }
-            for (const name of ['data-pkc-source-line', 'data-pkc-source-end']) {
-              const v = h.getAttribute(name);
-              if (v !== null) next.setAttribute(name, v);
-            }
-            h.replaceWith(next);
-            // 🔴 **図とグラフはここでも埋める** ── `asset:` で読み込んだ mermaid が
-            //    器のまま残らないように(この file が 1 度踏んだ「器が空のまま」)
-            this.mermaidScopes.push(...hydrateFigures(next));
-          }
-        },
-      ),
-    );
+    // ⚠ 中身の埋め方は付箋・章の埋め込みと**同じ 1 本**(`fence-asset-hydrate.ts`)。世代が変わったら何も触らない
+    await hydrateFenceHosts({
+      hosts,
+      getBlob: assets ? (k) => assets.getBlob(k) : null,
+      texts: this.fenceTexts,
+      env,
+      stale: () => token !== this.hydrateToken,
+      // 🔴 **図とグラフはここでも埋める** ── `asset:` で読み込んだ mermaid が器のまま残らないように
+      onReplaced: (next) => {
+        this.mermaidScopes.push(...hydrateFigures(next));
+      },
+    });
   }
 
   /**
