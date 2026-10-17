@@ -46,6 +46,9 @@ interface Api {
   headingText(name: string, count: number): string;
   attachRefusal(code: string): string;
   attachLabel(name: string, size: number | null): string;
+  restorePage(items: Item[], page: number): Item[];
+  removedPages(items: Item[], grand: number, live?: (p: number) => boolean): number[];
+  thumbNoText(page: number, pos: number, total: number): string;
 }
 
 function load(): Api {
@@ -414,5 +417,58 @@ describe('別の PDF を足す(#275 結合)── 通し番号で元のページ
     expect(t).toContain('「別の PDF として保存」');
     const host = readFileSync('public/pdf/host.html', 'utf-8');
     expect(host).toContain('>別の PDF として保存</button>');
+  });
+});
+
+describe('外したページを 1 ページだけ戻す(#1663 依頼 49-3)', () => {
+  it('戻したページは、元の並びで一つ前のページの後ろに入る(向きは回していない)', () => {
+    const left = api.removeAt(api.removeAt(api.fresh(5), 3), 1); // 2 と 4 を外した → 1 3 5
+    expect(pages(api.restorePage(left, 2))).toEqual([1, 2, 3, 5]);
+    expect(pages(api.restorePage(left, 4))).toEqual([1, 3, 4, 5]);
+    expect(api.restorePage(left, 4)[2]).toEqual({ page: 4, rot: 0 });
+  });
+  it('先頭のページを戻すと先頭に入り、ほかの編集(回した向き・並べ替え)は残る', () => {
+    const rotated = api.rotateAt(api.fresh(3), 2); // 3 を回す
+    const left = api.removeAt(rotated, 0); // 1 を外す → 2 3(回)
+    const back = api.restorePage(left, 1);
+    expect(pages(back)).toEqual([1, 2, 3]);
+    expect(back[2]).toEqual({ page: 3, rot: 90 });
+    const moved = api.moveTo(api.removeAt(api.fresh(4), 1), 2, 0); // 2 を外して 4 を先頭へ → 4 1 3
+    expect(pages(api.restorePage(moved, 2))).toEqual([4, 1, 2, 3]);
+  });
+  it('並びに既にあるページは増やさない(対照群)。元の並びは書き換えない', () => {
+    const items = api.fresh(3);
+    expect(pages(api.restorePage(items, 2))).toEqual([1, 2, 3]);
+    const left = api.removeAt(items, 1);
+    api.restorePage(left, 2);
+    expect(pages(left)).toEqual([1, 3]);
+  });
+  it('外してあるページの一覧は昇順。戻せない物(live が偽)は数えない', () => {
+    const left = api.removeAt(api.removeAt(api.fresh(5), 3), 1);
+    expect(api.removedPages(left, 5)).toEqual([2, 4]);
+    expect(api.removedPages(left, 7, (p) => p <= 5)).toEqual([2, 4]);
+    expect(api.removedPages(api.fresh(3), 3)).toEqual([]);
+  });
+  it('画面: 外したページの置き場に「戻す」が出て、押すと 1 ページだけ戻る(配線を原文で pin)', () => {
+    const src = readFileSync('public/pdf/reader.js', 'utf-8');
+    expect(src).toContain("'pdf-page-restore'");
+    expect(src).toContain('pageEdit.restorePage(items, page)');
+    expect(src).toContain("head.textContent = '外したページ'");
+    expect(src).toContain("act.textContent = '戻す'");
+  });
+});
+
+describe('並べ替えた後の一覧の番号(#1663 依頼 49-5)', () => {
+  it('位置が元の番号と同じなら位置だけ、違えば「1(元の 5)」と両方を言う', () => {
+    expect(api.thumbNoText(3, 3, 12)).toBe('3');
+    expect(api.thumbNoText(5, 1, 12)).toBe('1(元の 5)');
+    expect(api.thumbNoText(1, 2, 12)).toBe('2(元の 1)');
+  });
+  it('足したページ(通し番号が元の PDF の総数より大きい)は元の番号を言わない', () => {
+    expect(api.thumbNoText(13, 2, 12)).toBe('2');
+  });
+  it('外して詰めた後は、位置と元の番号がずれる(1 3 4 5 → 1, 2(元の 3)…)', () => {
+    const left = api.removeAt(api.fresh(5), 1);
+    expect(left.map((it, k) => api.thumbNoText(it.page, k + 1, 5))).toEqual(['1', '2(元の 3)', '3(元の 4)', '4(元の 5)']);
   });
 });

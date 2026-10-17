@@ -38,6 +38,57 @@
   }
 
   /**
+   * 外したページ `page` を戻す(#1663)。元の並びで一つ前にあたるページ(番号が小さいほうで、いまの並びに残っている
+   * いちばん大きい番号)の後ろへ入れる。どれも残っていなければ先頭。向きは戻した後は回していない状態。
+   * 既に並びにあるなら同じ並びを返す。
+   */
+  function restorePage(items, page) {
+    var has = items.some(function (it) {
+      return it.page === page;
+    });
+    if (has) return items.slice();
+    var at = -1;
+    var best = 0;
+    items.forEach(function (it, i) {
+      if (it.page < page && it.page > best) {
+        best = it.page;
+        at = i;
+      }
+    });
+    var out = items.slice();
+    out.splice(at + 1, 0, { page: page, rot: 0 });
+    return out;
+  }
+
+  /**
+   * 外してあるページ(通し番号の昇順)。`live(page)` が偽のページ(足したのを取り消した PDF のページなど、
+   * 戻せない物)は数えない。
+   */
+  function removedPages(items, grand, live) {
+    var here = {};
+    items.forEach(function (it) {
+      here[it.page] = true;
+    });
+    var out = [];
+    for (var p = 1; p <= grand; p += 1) {
+      if (here[p]) continue;
+      if (typeof live === 'function' && !live(p)) continue;
+      out.push(p);
+    }
+    return out;
+  }
+
+  /**
+   * 一覧の絵の下の番号の字(#1663)。並べ替えてあって元のページ番号と違うときは「1(元の 5)」と、
+   * 新しい位置と元の番号の両方を言う(中央のページと上の「5 / 12」は元の番号のままなので、突き合わせられる)。
+   * 足したページ(`page` > `total`)は元の番号を言わない(通し番号は画面の番号ではない)。
+   */
+  function thumbNoText(page, pos, total) {
+    if (page === pos || page > total) return String(pos);
+    return String(pos) + '(元の ' + String(page) + ')';
+  }
+
+  /**
    * `from` 番目を取り出して、**取り出した後の並びの** `to` 番目へ入れる(ドラッグでもキーでも、これ 1 本)。
    * 範囲の外は端に丸める。動かないなら同じ並びを返す。
    */
@@ -307,6 +358,9 @@
     rotateAt: rotateAt,
     removeAt: removeAt,
     moveTo: moveTo,
+    restorePage: restorePage,
+    removedPages: removedPages,
+    thumbNoText: thumbNoText,
     isChanged: isChanged,
     toJob: toJob,
     appendPages: appendPages,

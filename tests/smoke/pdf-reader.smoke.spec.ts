@@ -708,7 +708,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await clickReal(ed, '[data-pkc-field="pdf-page-remove"][data-thumb-page="2"]');
   await expect(shown).toHaveCount(4);
   expect(await order()).toEqual(['1', '3', '4', '5']);
-  expect(await labels(), '位置の番号が詰まっていない').toEqual(['1', '2', '3', '4']);
+  expect(await labels(), '位置の番号が詰まっていない(並びが変わった所は元の番号を添える)').toEqual(['1', '2(元の 3)', '3(元の 4)', '4(元の 5)']);
   await expect(save).toBeVisible();
   await expect(save).toBeEnabled();
   await expect(save).toHaveText('別の PDF として保存');
@@ -780,7 +780,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   };
   await drag(5, 1);
   await expect.poll(order, { message: 'ドラッグで並びが替わらない', timeout: 10_000 }).toEqual(['5', '1', '3', '4']);
-  expect(await labels()).toEqual(['1', '2', '3', '4']);
+  expect(await labels()).toEqual(['1(元の 5)', '2(元の 1)', '3', '4']);
   await expect(ed.locator('[data-pkc-drop]'), '離した後も線が残っている').toHaveCount(0);
   // 離した直後のクリックは「押した」にならない(読む側が動かない)
   expect(await ed.locator('#pageno').inputValue()).not.toBe('5');
