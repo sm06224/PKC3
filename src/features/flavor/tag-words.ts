@@ -98,3 +98,36 @@ export function strandedHashWords(raw: string): readonly string[] | null {
   if (ws.length < 2 || ws[0] === '#' || tagged(ws[0]!)) return null;
   return ws.slice(1).every(tagged) ? ws : null;
 }
+
+/**
+ * 🔴 **タグを書く key の別名**(台帳 #1852 の束 B1、依頼 175)。
+ *
+ * user の物語: Obsidian などから持ってきた `.md` の前書きは `Tags:` / `tag:` / `keywords:` と書いてある。
+ * `tags:` だけを読むと、取り込んだのにタグが 1 つも付かない。
+ *
+ * 🔑 **正は `tags`**(PKC3 が書く綴り)。別名は**読むだけ**で、取り込んでもノートの字は変えない。
+ *   優先は `tags` > 大小違いの `tags` > `tag` > `keywords`(先に見つかった 1 つだけ読む ── 2 つ以上
+ *   あるときに合算すると、どれが正本か user に説明できない)。
+ * ⚠ `smart-tags`(スマートフォルダの条件)は別の意味の key なので、ここには入れない。
+ * ⚠ 置き場がこの file なのは、読む側が `tags.ts` と `frontmatter.ts` の 2 つあり互いに import できないため(上の注記)。
+ */
+const TAG_KEY_ALIASES: readonly string[] = ['tags', 'tag', 'keywords'];
+
+/** key がタグの key か(別名・大小違いを含む)。 */
+export function isTagKey(key: string): boolean {
+  return TAG_KEY_ALIASES.includes(key.trim().toLowerCase());
+}
+
+/**
+ * 前書きの meta から、タグを読む key を 1 つ選ぶ。無ければ `null`。
+ * ⚠ 返すのは**書いてある綴りそのまま**の key(書き戻すとき、その行を指すため)。
+ */
+export function tagsMetaKey(meta: Readonly<Record<string, unknown>>): string | null {
+  const keys = Object.keys(meta);
+  for (const want of TAG_KEY_ALIASES) {
+    if (want === 'tags' && keys.includes('tags')) return 'tags';
+    const hit = keys.find((k) => k.trim().toLowerCase() === want);
+    if (hit !== undefined) return hit;
+  }
+  return null;
+}

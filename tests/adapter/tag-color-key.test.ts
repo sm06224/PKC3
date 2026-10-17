@@ -33,7 +33,9 @@ describe('色を引く鍵', () => {
     expect(bodySels).toHaveLength(2 * 3); // 規則 3 つ(下地 / hover / 枠だけ)× 2 タグ
     const hit = (selector: string) => host.querySelectorAll(selector).length;
     const aumlaut = bodySels.find((x) => x.includes('ä'))!;
-    const fullwidth = bodySels.find((x) => x.includes('ａ'))!;
+    // 🔴 鍵は全角半角も揃える(#1852 B1、依頼 173)── 「Ａbc」と「ａBC」の鍵は半角の `abc` になる(全角のまま残らない)
+    const fullwidth = bodySels.find((x) => x.includes('data-pkc-tag-key="abc"'))!;
+    expect(bodySels.some((x) => /[\uff00-\uffef]/.test(x)), '全角が鍵に残っている').toBe(false);
     expect(hit(aumlaut), 'Ä/ä の大小違いに本文のバッジが当たらない').toBe(1);
     expect(hit(fullwidth), '全角 Ａ/ａ の大小違いに当たらない').toBe(1);
     const insp = pick(/\[data-pkc-field="inspector-body-tag-find"\]\[data-pkc-tag-key="[^"]*"\]/g)[0]!;

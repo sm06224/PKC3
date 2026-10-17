@@ -28,7 +28,7 @@
  */
 
 import { resolveCap } from '../notation/caps';
-import { looksHashTagged } from '../flavor/tag-words';
+import { isTagKey, looksHashTagged } from '../flavor/tag-words';
 
 export type FrontmatterValue =
   | string
@@ -648,7 +648,8 @@ export function parseFrontmatter(body: string): FrontmatterResult {
 function isTagHashRun(key: string, value: string, next: string | undefined): boolean {
   // ⚠ タグを持つ key は 2 つある ── `smart-tags`(スマートフォルダの条件)を
   //    落とすと、同じ字が入れ物によって別の意味になる(§7)
-  if (key !== 'tags' && key !== 'smart-tags') return false;
+  // 🔴 別名(`Tags` / `tag` / `keywords`)も同じ ── 取り込んだ `.md` の `Tags: #a #b` が 0 個にならないように(#1852 B1、依頼 175)
+  if (!isTagKey(key) && key !== 'smart-tags') return false;
   /**
    * 🔴 **次の行が箇条書きなら、そちらが値である**(着地前レビュー D)。
    *

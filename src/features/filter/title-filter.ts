@@ -18,14 +18,19 @@
  * ここでやると全 body の読込が要る(それは SQL 側の仕事)。
  */
 
-/** 比較に使う形へ(前後の空白を落として小文字化)。空文字 = 絞り込み無し。 */
+import { foldText } from './fold-text';
+
+/**
+ * 比較に使う形へ(全角半角・濁点の持ち方・大小を揃えて、前後の空白を落とす)。空文字 = 絞り込み無し。
+ * 🔴 揃え方は `fold-text.ts` の 1 本(題名とタグで共有)。⚠ 全角の空白は半角になってから落ちる。
+ */
 export function normalizeQuery(query: string): string {
-  return query.trim().toLowerCase();
+  return foldText(query).trim();
 }
 
-/** ⚠ `query` は **`normalizeQuery` 済み**を渡す(1 打鍵ごとに n 回 trim しない)。 */
+/** ⚠ `query` は **`normalizeQuery` 済み**を渡す(1 打鍵ごとに n 回 trim しない)。題名のほうは比べるたびに揃える。 */
 export function matchesTitle(title: string, normalizedQuery: string): boolean {
-  return normalizedQuery === '' || title.toLowerCase().includes(normalizedQuery);
+  return normalizedQuery === '' || foldText(title).includes(normalizedQuery);
 }
 
 /**
