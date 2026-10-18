@@ -706,6 +706,11 @@ select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
+/* 🔴 キーボードで止まった画像・図の枠(依頼 79-3 C)── Enter で大きく表示する。マウスで押したときは出さない(`:focus-visible`) */
+img[data-pkc-action='view-big']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 
 

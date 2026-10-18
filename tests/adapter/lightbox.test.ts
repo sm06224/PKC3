@@ -9,6 +9,8 @@ import {
   LIGHTBOX_REGION,
 } from '../../src/adapter/ui/render/lightbox';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { markViewBig } from '../../src/adapter/ui/render/view-big';
+import { readFileSync } from 'node:fs';
 import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { AppState } from '../../src/adapter/state/app-state';
 
@@ -244,6 +246,54 @@ describe('lightbox', () => {
       expect(lightboxOpen(root)).toBe(false);
 
       unbind();
+    });
+
+    /**
+     * 🔴 依頼 79-3 C: キーボードだけで画像・図を大きく表示できる(Tab で止まり、Enter / Space で開く)。
+     * 直す前は画像を押すしか道が無く、Tab で画像に止まれなかった。
+     */
+    it('🔴 読む面の画像は Tab で止まれて、Enter で大きく表示され、閉じると画像へ焦点が戻る', () => {
+      const root = document.createElement('div');
+      document.body.append(root);
+      const img = document.createElement('img');
+      img.src = 'https://example.com/test.png';
+      img.alt = '図A';
+      root.append(img);
+      markViewBig(img); // 読む面なので印が付く
+      expect(img.tabIndex, 'Tab で止まれない').toBe(0);
+      expect(img.getAttribute('role')).toBe('button');
+      const unbind = bindActions(root, createMockDispatcher());
+      img.focus();
+      expect(document.activeElement, '前提: 画像に焦点が乗らない').toBe(img);
+      img.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      expect(lightboxOpen(root), 'Enter で開かない').toBe(true);
+      expect(root.querySelector('.pkc-lightbox-title')?.textContent).toBe('図A');
+      // 焦点は中(✕)へ移り、閉じると画像に戻る(キーボードの位置が失われない)
+      expect(document.activeElement?.classList.contains('pkc-lightbox-close-btn')).toBe(true);
+      closeLightbox(root);
+      expect(document.activeElement, '閉じても画像に戻らない').toBe(img);
+      // Space でも開く
+      img.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+      expect(lightboxOpen(root), 'Space で開かない').toBe(true);
+      unbind();
+    });
+
+    it('⚠ 対照群: 編集の面(editor-live)の画像には印を付けない ── Tab の止まり先も増えず、押すと原文が開く道を奪わない', () => {
+      const root = document.createElement('div');
+      const live = document.createElement('div');
+      live.setAttribute('data-pkc-region', 'editor-live');
+      const img = document.createElement('img');
+      live.append(img);
+      root.append(live);
+      document.body.append(root);
+      markViewBig(img);
+      expect(img.hasAttribute('tabindex')).toBe(false);
+      expect(img.hasAttribute('data-pkc-action')).toBe(false);
+    });
+
+    it('止まった画像に枠が出る規則がある(印だけ付けて見た目が無い、を防ぐ)', () => {
+      const css = readFileSync('src/styles/app.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+      expect(css).toMatch(/img\[data-pkc-action='view-big'\]:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--accent\)/);
     });
   });
 });
