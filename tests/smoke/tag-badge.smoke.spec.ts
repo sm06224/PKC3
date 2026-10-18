@@ -148,7 +148,7 @@ test('🔴 本文のタグが札で出て、押すと一覧が絞られる (#550
   await expect(
     page.locator('[data-pkc-field="entry-filter"]'),
     '押しても一覧が絞られていない',
-  ).toHaveValue('買い物');
+  ).toHaveValue('#買い物');
 
   /**
    * 🔴 **システム > 表示の「色を付けたタグ」で見渡して外せる**(#1645 項目 1。新しい起動は足さない)。
