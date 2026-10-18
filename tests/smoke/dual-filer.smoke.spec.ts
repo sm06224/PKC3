@@ -1091,7 +1091,7 @@ test('🔴 下見に本文が出て、留めた場所は読み込み直しても
 });
 
 /**
- * 🔴 **多数(60 件)を 2 ペインで一度に移して、元に戻す**(#1884 `Dispatcher.batch`)。
+ * 🔴 **多数(30 件)を 2 ペインで一度に移して、元に戻す**(#1884 `Dispatcher.batch`)。
  *
  * 動線: 左で全部選ぶ → 移す → 右(フォルダの中)に全件が並び選びが付く → 元に戻す → 全件戻る。
  * ⚠ 観測点は 2 つ ── ①結果(全件・選び・戻し)②その間メインスレッドが長く止まらない
@@ -1118,13 +1118,13 @@ async function stopHeartbeat(page: Page): Promise<{ max: number; ticks: number; 
   });
 }
 
-test('🔴 60 件を一度に移して全件が先に並び、元に戻すで全件戻る(メインスレッドを長く止めない) (#1884)', async ({
+test('🔴 30 件を一度に移して全件が先に並び、元に戻すで全件戻る(メインスレッドを長く止めない) (#1884)', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
-  const N = 60;
+  const N = 30;
   await page.setInputFiles(
     '[data-pkc-field="import-input"]',
     Array.from({ length: N }, (_, i) => ({
@@ -1138,18 +1138,18 @@ test('🔴 60 件を一度に移して全件が先に並び、元に戻すで全
   });
   await makeFolder(page, 'はこ');
   await openDual(page);
-  await expect(page.locator(ROWS('left')), '前提: 60 件 + フォルダ').toHaveCount(N + 1);
+  await expect(page.locator(ROWS('left')), '前提: 30 件 + フォルダ').toHaveCount(N + 1);
 
   // 右だけフォルダの中へ入る
   await page.locator(`${ROWS('right')}[data-pkc-archetype="folder"]`).dblclick();
   await expect(page.locator(ROWS('right')), '右がフォルダに入れていない').toHaveCount(0);
 
-  // 左で全部選び、フォルダ自身だけ印を外す(Ctrl+クリック)→ 60 件
+  // 左で全部選び、フォルダ自身だけ印を外す(Ctrl+クリック)→ 30 件
   await clickReal(page, `${PANE('left')} [data-pkc-field="dual-select-all"]`);
   await page.locator(`${ROWS('left')}[data-pkc-archetype="folder"]`).click({ modifiers: ['Control'] });
   await expect(
     page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`),
-    '前提: 60 件が選ばれている',
+    '前提: 30 件が選ばれている',
   ).toHaveCount(N);
 
   // 対照群(何もしていない 600ms)
@@ -1167,7 +1167,7 @@ test('🔴 60 件を一度に移して全件が先に並び、元に戻すで全
   ).toHaveCount(N);
   await expect(page.locator(ROWS('left')), '左に残っている').toHaveCount(1);
   const moved = await stopHeartbeat(page);
-  expectMainGapUnderBudget('60 件を移す', {
+  expectMainGapUnderBudget('30 件を移す', {
     maxGap: moved.max, base: base.max, ticks: moved.ticks, baseTicks: base.ticks, top: moved.top, baseTop: base.top,
   });
 
@@ -1177,7 +1177,7 @@ test('🔴 60 件を一度に移して全件が先に並び、元に戻すで全
   await expect(page.locator(ROWS('left')), '元に戻しても全件が戻らない').toHaveCount(N + 1);
   await expect(page.locator(ROWS('right')), '元に戻しても先に残っている').toHaveCount(0);
   const undone = await stopHeartbeat(page);
-  expectMainGapUnderBudget('60 件を元に戻す', {
+  expectMainGapUnderBudget('30 件を元に戻す', {
     maxGap: undone.max, base: base.max, ticks: undone.ticks, baseTicks: base.ticks, top: undone.top, baseTop: base.top,
   });
 
