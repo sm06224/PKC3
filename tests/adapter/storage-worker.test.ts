@@ -14,7 +14,7 @@ import type {
   StorageRequest,
   StorageResponse,
 } from '../../src/adapter/platform/storage/protocol';
-import { TASK_LIMITS } from '../../src/features/schedule/task-cards';
+import { NOTE_TIME_LIMIT, TASK_LIMITS } from '../../src/features/schedule/task-cards';
 import {
   SNIPPET_ARCHETYPE,
   SNIPPET_LIMITS,
@@ -1965,6 +1965,51 @@ describe('カンバンの札を集める (#277 段②)', () => {
     // 🔑 落としたことは黙らない
     expect(scan.truncated, '落としたのに黙っている').toBe(true);
   });
+
+  /**
+   * 🔴 **前書きの `date: 2026-10-20 14:00` の時刻を運ぶ**(台帳 #1852 / 依頼 192 / 284)。
+   * 抽出列(`date`)には日付だけが入る ── 時刻は本文の頭から読む。対照群:日付だけのノート・日付の無いノートは載せない。
+   */
+  it('🔴 前書きに時刻を書いたノート 1 件の予定だけが noteTimes に載る', async () => {
+    await request({ op: 'openContainer', cid: 'c-nt', title: 'x' });
+    const put = (lid: string, body: string, date: string | null) =>
+      request({ op: 'upsertEntry', cid: 'c-nt', entry: entry(lid, body, { date }) });
+    await put('nt-timed', '---\ndate: 2026-10-20 14:00\n---\n本文\n', '2026-10-20');
+    await put('nt-iso', '---\ndate: 2026-10-21T9:05\n---\n', '2026-10-21');
+    await put('nt-dateonly', '---\ndate: 2026-10-22\n---\n', '2026-10-22');
+    await put('nt-none', '本文だけ\n', null);
+    // 時差つきは時刻を読まない(日付だけ読む今までの動き)
+    await put('nt-zone', '---\ndate: 2026-10-23T10:00:00Z\n---\n', '2026-10-23');
+    const scan = await request({ op: 'taskScan', cid: 'c-nt' });
+    const times = [...(scan.noteTimes ?? [])].sort((a, b) => (a.lid < b.lid ? -1 : 1));
+    expect(times, '時刻つきのノートが運ばれていない').toEqual([
+      { lid: 'nt-iso', date: '2026-10-21', time: '09:05' },
+      { lid: 'nt-timed', date: '2026-10-20', time: '14:00' },
+    ]);
+  });
+
+  /**
+   * 🔴 **時刻の読みが上限で切れたら、`truncated` を立てる**(行の予定の切れと同じ口。黙って切ると、切れた先の予定は鳴らない)。
+   * 件数は `NOTE_TIME_LIMIT` から導く。対照群: 上限に届かない量では立てない。
+   */
+  it('🔴 時刻つきノートが上限を超えたら truncated を立てる。対照群: 届かない量では立てない', async () => {
+    const mk = (n: number) =>
+      Array.from({ length: n }, (_, i) =>
+        entry(`nt-${String(i).padStart(5, '0')}`, '---\ndate: 2026-10-20 14:00\n---\n', { entryOrder: i, date: '2026-10-20' }),
+      );
+    await request({ op: 'openContainer', cid: 'c-nt-few', title: 'x' });
+    await request({ op: 'bulkUpsertEntries', cid: 'c-nt-few', entries: mk(20) });
+    const few = await request({ op: 'taskScan', cid: 'c-nt-few' });
+    expect(few.noteTimes?.length, '前提: 時刻が運ばれている').toBe(20);
+    expect(few.truncated, '届かない量で切ったと言っている').toBe(false);
+
+    await request({ op: 'openContainer', cid: 'c-nt-many', title: 'x' });
+    await request({ op: 'bulkUpsertEntries', cid: 'c-nt-many', entries: mk(NOTE_TIME_LIMIT + 5) });
+    const many = await request({ op: 'taskScan', cid: 'c-nt-many' });
+    expect(many.noteTimes?.length, '上限を超えて読んでいる').toBe(NOTE_TIME_LIMIT);
+    expect(many.truncated, '時刻の読みを切ったのに黙っている').toBe(true);
+    // 5000 件超を入れる重い test ── 全量を並列で回す負荷の下でも切れないよう余裕を持たせる
+  }, 60_000);
 });
 
 /**

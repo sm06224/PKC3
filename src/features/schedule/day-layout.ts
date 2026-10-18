@@ -100,9 +100,10 @@ export function splitDay(items: readonly AgendaItem[]): {
   const allDay: AgendaItem[] = [];
   const timed: { item: AgendaItem; piece: DayPiece }[] = [];
   for (const item of items) {
-    // ⚠ 期間・ノート 1 件の予定は、時刻を持っていても終日に置く(その日いっぱいの前提)
-    const piece =
-      item.until !== null || item.line === null ? null : pieceOf(item.key, item.time, item.timeEnd);
+    // ⚠ 期間は、時刻を持っていても終日に置く(その日いっぱいの前提)。
+    // 🔴 ノート 1 件の予定も、前書きに時刻を書いたもの(`date: 2026-10-20 14:00`。依頼 192 / 284)は目盛りに置く。
+    //   時刻の無いノートは `pieceOf` が `null` を返すので、これまでどおり終日。
+    const piece = item.until !== null ? null : pieceOf(item.key, item.time, item.timeEnd);
     if (piece === null) allDay.push(item);
     else timed.push({ item, piece });
   }

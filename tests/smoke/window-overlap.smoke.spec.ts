@@ -68,17 +68,14 @@ test('🔴 本体が編集中のノートへ、別窓は日付を書かずに理
   await clickReal(win, '[data-pkc-action="set-entry-date"]');
   await expect(win.locator('[data-pkc-field="pick-date"]')).toBeVisible({ timeout: 10_000 });
   /**
-   * 🔴 **ノートに付ける口には、時刻の欄が無い**(#865、2026-09-13)。
-   * ⚠ この小窓は口が 2 つあり(本文の行に入れる / ノート 1 件に付ける)、
-   *   ここは**後者**(`set-entry-date`)── frontmatter の `date:` は
-   *   `YYYY-MM-DD` しか受けないので、時刻を打たせると黙って捨てられる
-   *   (無言の dead input)。既存の対照群は `format-bar.smoke.spec.ts`
-   *   (`insert-date` = 本文の行 ── 時刻の欄が **在る**ことを見ている)。
+   * 🔴 **ノートに付ける口にも、時刻の欄が在る**(台帳 #1852 / 依頼 192・284。#865 では受け取る相手が無く出していなかった)。
+   * ⚠ この小窓は口が 2 つあり(本文の行に入れる / ノート 1 件に付ける)、ここは後者(`set-entry-date`)。
+   *   打った時刻は前書きの `date: 2026-10-20 14:00` に書かれる(書き込みは下で本体の編集に断られるので、欄が在るところまで見る)。
    */
   await expect(
     win.locator('[data-pkc-field="pick-time"]'),
-    '書く先が無いのに時刻の欄が出た(打った字が黙って捨てられる)',
-  ).toHaveCount(0);
+    'ノートの日付にも時刻を書けるはずなのに、時刻の欄が出ていない',
+  ).toBeVisible();
   await clickReal(win, '[data-pkc-field="dialog-ok"]');
   /**
    * 🔴 **本体の窓が編集中なので、別窓の日付付けは断る**(#1087、2026-10-15)。

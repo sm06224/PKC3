@@ -284,7 +284,15 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
     const lane = card.parentElement;
     if (lane === null || !lane.matches(GRID_LANE_SELECTOR)) return;
     const lid = card.getAttribute('data-pkc-entry');
-    const line = card.querySelector('[data-pkc-task-line]')?.getAttribute('data-pkc-task-line') ?? null;
+    /**
+     * 🔴 **ノート 1 件の予定(前書きの `date: 2026-10-20 14:00`)も時刻を動かせる**(台帳 #1852 / 依頼 192 / 284)。
+     *   行番号は無い(`line` は空)── 書き換え先は前書きの `date:`。終わりの時刻は書けないので、下の縁は掴ませない。
+     */
+    const whole = card.hasAttribute('data-pkc-whole-note');
+    if (whole && target?.closest(RESIZE_SELECTOR) != null) return;
+    const line = whole
+      ? ''
+      : (card.querySelector('[data-pkc-task-line]')?.getAttribute('data-pkc-task-line') ?? null);
     const time = card.getAttribute('data-pkc-task-time');
     if (lid === null || line === null || time === null) return;
     const timeEnd = card.getAttribute('data-pkc-task-time-end');
@@ -305,8 +313,8 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
         line,
         from,
         repeat: card.getAttribute('data-pkc-task-repeat') ?? '',
-        // 🔴 掴んだ時点の行の中身(#1087)── 落とした時点の走査から引き直さない
-        ...rawLineOf(dispatcher, lid, line),
+        // 🔴 掴んだ時点の行の中身(#1087)── 落とした時点の走査から引き直さない(ノート 1 件の予定には行が無い)
+        ...(whole ? {} : rawLineOf(dispatcher, lid, line)),
       },
       lane,
       laneHeight,
@@ -475,6 +483,29 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
       dropTaskCard(dispatcher, g.task, r.date, root);
       return;
     }
+    // 🔴 ノート 1 件の予定: 前書きの `date:` へ日と時刻を書く(終わりは書けないので `resize` は来ない)
+    if (g.task.line === '') {
+      if (r.kind !== 'slot') return;
+      if (r.date === g.from && r.startMin === g.startMin) return;
+      const newTime = formatMinutes(r.startMin);
+      // 🔴 門を通ってから書く ── 「元に戻す」は門を通って書いた回(断られていない回)にだけ出す(`dropTaskCard` と同じ作り)
+      gatedScheduleWrite(dispatcher, [g.task.lid], SCHEDULE_DROP_FAILED, () => {
+        const st0 = dispatcher.getState();
+        const wasDate = st0.entryMetas.get(g.task.lid)?.date ?? null;
+        const refusedNote = bodyWriteBlockReason(st0, g.task.lid) !== null;
+        dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid: g.task.lid, date: r.date, time: newTime });
+        if (!refusedNote && wasDate !== null) {
+          const noSlot = { timeEnd: null, until: null, text: '' } as const;
+          offerMoveUndo(root, dispatcher, {
+            target: { kind: 'entry', lid: g.task.lid },
+            before: { date: wasDate, time: g.time, ...noSlot },
+            after: { date: r.date, time: newTime, ...noSlot },
+            verb: 'moved',
+          });
+        }
+      });
+      return;
+    }
     const line = Number(g.task.line);
     if (!Number.isInteger(line)) return;
     const date = r.kind === 'slot' ? r.date : g.from;
@@ -514,7 +545,6 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
             : (overnightEnd() ?? formatMinutes(startMin));
     if (g.task.repeat === '') {
       const st = dispatcher.getState();
-      const refused = bodyWriteBlockReason(st, g.task.lid) !== null;
       // 動かす前の姿は走査が持っている札から取る(中身の指紋もそこにある)。札が走査に無い回は出さない
       const card = st.taskScan?.cards.find((c) => c.lid === g.task.lid && c.line === line);
       // 🔴 札が走査に居ない回は撃たずに断る(#1087)── 札の行の中身が書換の `openLine` になる
@@ -522,27 +552,29 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
         dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
         return;
       }
-      // 🔴 別のタブ・窓が編集中のノートへ / 書出し中は撃たない(#1087)
-      gatedScheduleWrite(dispatcher, [g.task.lid], SCHEDULE_DROP_FAILED, () =>
-      dispatcher.dispatch({
-        type: 'SET_TASK_DATE',
-        lid: g.task.lid,
-        line,
-        openLine: g.task.rawLine ?? card.rawLine,
-        date,
-        time,
-        timeEnd,
-      }));
-      // 🔴 動かしたら「元に戻す」(#855)。⚠ 断られた回・掴んだ日が取れなかった回は出さない
-      if (!refused && g.from !== '' && card !== undefined) {
-        const before = slotOfCard(card);
-        offerMoveUndo(root, dispatcher, {
-          target: { kind: 'task', lid: g.task.lid, line },
-          before,
-          after: { ...before, date, time, timeEnd },
-          verb: r.kind === 'resize' ? 'changed' : 'moved',
+      // 🔴 別のタブ・窓が編集中のノートへ / 書出し中は撃たない(#1087)。「元に戻す」は書いた回にだけ出す(`dropTaskCard` と同じ作り)
+      gatedScheduleWrite(dispatcher, [g.task.lid], SCHEDULE_DROP_FAILED, () => {
+        const refused = bodyWriteBlockReason(dispatcher.getState(), g.task.lid) !== null;
+        dispatcher.dispatch({
+          type: 'SET_TASK_DATE',
+          lid: g.task.lid,
+          line,
+          openLine: g.task.rawLine ?? card.rawLine,
+          date,
+          time,
+          timeEnd,
         });
-      }
+        // 🔴 動かしたら「元に戻す」(#855)。⚠ 断られた回・掴んだ日が取れなかった回は出さない
+        if (!refused && g.from !== '') {
+          const before = slotOfCard(card);
+          offerMoveUndo(root, dispatcher, {
+            target: { kind: 'task', lid: g.task.lid, line },
+            before,
+            after: { ...before, date, time, timeEnd },
+            verb: r.kind === 'resize' ? 'changed' : 'moved',
+          });
+        }
+      });
       return;
     }
     // 繰り返しの回 ── 1 回か全部かを聞いてから書く(日だけ動かす落とし方と同じ小窓)

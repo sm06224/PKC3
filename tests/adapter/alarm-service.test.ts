@@ -31,7 +31,7 @@ import {
 } from '../../src/adapter/ui/actions/alarm';
 import { missedLabel } from '../../src/features/schedule/schedule-notify';
 
-function meta(lid: string, archived = false): EntryMeta {
+function meta(lid: string, archived = false, date: string | null = null): EntryMeta {
   return {
     lid,
     title: 't-' + lid,
@@ -40,7 +40,7 @@ function meta(lid: string, archived = false): EntryMeta {
     updatedAt: null,
     entryOrder: 1,
     status: null,
-    date: null,
+    date,
     archived,
     bodyChars: null,
   };
@@ -68,6 +68,9 @@ function bench(
     scan?: boolean;
     ringer?: () => boolean;
     archived?: boolean;
+    /** 前書きに時刻を書いたノート 1 件の予定(抽出列の日付 = metaDate)。 */
+    noteTimes?: Array<{ lid: string; date: string; time: string }>;
+    metaDate?: string | null;
   } = {},
 ) {
   const d = new Dispatcher();
@@ -81,13 +84,14 @@ function bench(
       off();
     };
   };
-  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', opts.archived ?? false)], relations: [] });
+  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', opts.archived ?? false, opts.metaDate ?? null)], relations: [] });
   if (opts.scan !== false) {
     const scan: TaskScan = {
       cards: opts.cards ?? [card()],
       totalNotes: 1,
       scannedNotes: 1,
       truncated: false,
+      ...(opts.noteTimes === undefined ? {} : { noteTimes: opts.noteTimes }),
     };
     d.dispatch({ type: 'SET_TASK_SCAN', scan });
   }
@@ -561,5 +565,63 @@ describe('アラート(#280)', () => {
     const at = main.indexOf('setAlarmEnabled: (on) => {');
     expect(at, '前提が崩れている ── setAlarmEnabled が無い').toBeGreaterThan(0);
     expect(main.slice(at, at + 400), '入にした直後に見ていない').toContain('alarmService.check();');
+  });
+
+  describe('前書きに時刻を書いたノート 1 件の予定(台帳 #1852 依頼 192 / 284)', () => {
+    const NOTE = { lid: 'a', date: '2026-08-27', time: '14:00' };
+
+    it('🔴 13:59 → 14:00 で 1 回だけ鳴る(音 1 回・帯 1 件)', () => {
+      const b = bench({ cards: [], noteTimes: [NOTE], metaDate: '2026-08-27' });
+      b.service.start();
+      b.advanceTo(13, 59);
+      b.beat();
+      expect(b.service.ringing(), '14:00 前に鳴った').toHaveLength(0);
+      b.advanceTo(14, 0);
+      b.beat();
+      expect(b.service.ringing(), 'ノートの時刻で鳴らない').toHaveLength(1);
+      expect(b.chimes()).toBe(1);
+    });
+
+    it('🔴 二重に鳴らない(その後の刻み・消した後も)', () => {
+      const b = bench({ cards: [], noteTimes: [NOTE], metaDate: '2026-08-27' });
+      b.service.start();
+      b.advanceTo(14, 0);
+      b.beat();
+      b.service.dismiss(b.service.ringing()[0]!.key);
+      b.advanceTo(14, 5);
+      b.beat();
+      expect(b.service.ringing()).toHaveLength(0);
+      expect(b.chimes(), '2 度鳴った').toBe(1);
+    });
+
+    it('対照群: 日付だけのノート(noteTimes なし)は鳴らない', () => {
+      const b = bench({ cards: [], metaDate: '2026-08-27' });
+      b.service.start();
+      b.advanceTo(13, 59);
+      b.beat();
+      b.advanceTo(14, 0);
+      b.beat();
+      expect(b.service.ringing()).toHaveLength(0);
+      expect(b.chimes()).toBe(0);
+    });
+
+    it('対照群: 抽出列の日付と食い違う時刻は鳴らさない', () => {
+      const b = bench({ cards: [], noteTimes: [NOTE], metaDate: '2026-08-28' });
+      b.service.start();
+      b.advanceTo(14, 0);
+      b.beat();
+      expect(b.service.ringing()).toHaveLength(0);
+    });
+
+    it('🔴 長く眠っていた後の復帰は、ノートの予定も鳴らさず見逃しとして 1 件積む', () => {
+      const b = bench({ cards: [], noteTimes: [NOTE], metaDate: '2026-08-27' });
+      b.service.start();
+      b.advanceTo(13, 59);
+      b.beat();
+      b.advanceMs(ALARM_MAX_GAP_MS + 4 * 3600_000);
+      b.jump();
+      expect(b.service.ringing()).toHaveLength(0);
+      expect(b.posts, '見逃しとして積まれていない').toContain(missedLabel(1));
+    });
   });
 });

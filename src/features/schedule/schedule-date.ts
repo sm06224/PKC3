@@ -174,18 +174,54 @@ export function padClockHour(raw: string): string {
 }
 
 /**
- * 🔴 **frontmatter の `date:` の値から、日付の部分を取り出す**(依頼 188 / 192 / 284)。
+ * 🔴 **frontmatter の `date:` の値を、日付・時刻・区切りに割る**(依頼 188 / 192 / 284)。
  *
  * `2026-10-20` はもちろん、`2026-10-20 14:00` / `2026-10-20T10:00` / `２０２６/１０/２０` も
- * 日付 `2026-10-20` として読む。⚠ **時刻は捨てる**(ノート 1 件が丸ごとその日の予定で、
- * 抽出列に時刻の置き場が無い ── 時刻つきで出すのは別の段)。読めなければ `null`。
+ * 日付 `2026-10-20` として読む。読めなければ `null`。
+ * - `time`: 書かれた時刻(`HH:MM`。1 桁の時は 0 を補う)。**書かれていない・読めない時刻・時差つき(`Z` / `+09:00`)は `null`**
+ *   (時差つきの時刻は、この端末の時刻へ直さないと別の時刻になる ── 日付だけ読む今までの動きのまま)。
+ * - `sep`: 日付と時刻の間の字(` ` / `T` / 全角空白)。書き換えるとき同じ綴りで返すために持つ。時刻が無ければ `' '`。
  * 🔑 形の判定は `isScheduleDate` 1 本に通す(ここで 2 本目の形を書かない)。
  */
-export function dateOfFrontmatterText(raw: string): string | null {
-  const m = /^(\S+?)(?:[ T\u3000](\S+))?$/.exec(foldWideDateChars(raw.trim()));
+export function parseFrontmatterWhen(
+  raw: string,
+): { readonly date: string; readonly time: string | null; readonly sep: string } | null {
+  const m = /^(\S+?)(?:([ T\u3000])(\S+))?$/.exec(foldWideDateChars(raw.trim()));
   if (m === null) return null;
   const date = m[1]!.replace(/\//g, '-');
   if (!isScheduleDate(date)) return null;
-  if (m[2] !== undefined && !/^\d{1,2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?$/.test(m[2])) return null;
-  return date;
+  if (m[3] === undefined) return { date, time: null, sep: ' ' };
+  const t = /^(\d{1,2}):(\d{2})(?::\d{2})?(Z|[+-]\d{2}:?\d{2})?$/.exec(m[3]);
+  if (t === null) return null;
+  const hour = Number(t[1]);
+  const minute = Number(t[2]);
+  const ok = t[3] === undefined && hour < 24 && minute < 60;
+  return { date, time: ok ? padClockHour(`${t[1]}:${t[2]}`) : null, sep: m[2] === '\u3000' ? ' ' : m[2]! };
+}
+
+/**
+ * 🔴 **frontmatter の `date:` の値から、日付の部分を取り出す**(依頼 188 / 192 / 284)。
+ * ⚠ 時刻は `parseFrontmatterWhen` が別に返す(抽出列には日付だけを置く ── 時刻は本文から読む)。
+ */
+export function dateOfFrontmatterText(raw: string): string | null {
+  return parseFrontmatterWhen(raw)?.date ?? null;
+}
+
+/**
+ * 🔴 **`date:` の値の日付だけを替える**(予定表でノートを別の日へ動かす)。**書かれた時刻は残す**(綴りも同じ)。
+ * `time` を渡すと時刻も替える(`null` で時刻を外す)。読めない値(日付でない)には `newDate` だけを返す。
+ * 🔴 **時刻として読めない後ろの字(時差つき `T10:00Z` / `25:00` 等)は、`time` を渡さない回は黙って落とさない** ──
+ *   日付の部分だけ差し替えて、後ろの字を原文のまま残す(日を戻せば元の字に戻る)。
+ */
+export function withFrontmatterDate(raw: string, newDate: string, time?: string | null): string {
+  const when = parseFrontmatterWhen(raw);
+  if (time === undefined && when !== null && when.time === null) {
+    // 時刻として読めない後ろの字(日付の直後から末尾まで。区切りを含む)は、原文のまま残す
+    const text = raw.trim();
+    const dateLen = /^(\S+?)(?:[ T\u3000]\S+)?$/.exec(text)?.[1]?.length ?? text.length;
+    const tail = text.slice(dateLen);
+    if (tail !== '') return `${newDate}${tail}`;
+  }
+  const keep = time === undefined ? (when?.time ?? null) : time;
+  return keep === null ? newDate : `${newDate}${when?.sep ?? ' '}${keep}`;
 }

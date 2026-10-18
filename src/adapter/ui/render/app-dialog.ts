@@ -601,6 +601,11 @@ export function pickDateInApp(
      */
     readonly initialDate?: string;
     /**
+     * 開いた時点で時刻欄に入れておく値(`HH:MM`)。⚠ 省略 = 空。ノートの前書きに時刻が既にあるとき、
+     *   空で開くと「日付だけ変えて OK」が時刻を黙って消すので、現在値を入れて開く(台帳 #1852 指摘 2)。
+     */
+    readonly initialTime?: string;
+    /**
      * 日付を空にして「日付を入れる」を押したとき、`null`(やめた)ではなく**空の日付**を返すか。
      * ⚠ 予定の「日付なしで足す」道を、この小窓を通っても残すため(片道にしない)。既定 `false`。
      */
@@ -622,6 +627,7 @@ export function pickDateInApp(
     const time = document.createElement('input');
     time.type = 'time';
     time.setAttribute('data-pkc-field', 'pick-time');
+    if (withTime && opts.initialTime !== undefined) time.value = opts.initialTime;
 
     for (const s of shortcuts) {
       const btn = document.createElement('button');

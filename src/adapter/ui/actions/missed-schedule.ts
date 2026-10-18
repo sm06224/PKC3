@@ -19,6 +19,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { silencedLidsOf } from '@features/alarm/alarm-due';
+import { noteTimeCards } from '@features/schedule/task-cards';
 import {
   localDateOfMs,
   missedItems,
@@ -114,7 +115,13 @@ export function startMissedWatch(deps: MissedWatchDeps): MissedWatch {
         }
         if (st.taskScan === null) return false;
         const silenced = silencedLidsOf(st.entryMetas, st.scheduleHiddenNotes);
-        const n = missedItems(st.taskScan.cards, lastOpen, startedAt, silenced).length;
+        // 🔴 前書きに時刻を書いたノート 1 件の予定も数える(依頼 192 / 284)。今日・明日の件数は行の予定だけ(日付だけのノートも数えていない)
+        const n = missedItems(
+          [...st.taskScan.cards, ...noteTimeCards(st.taskScan, st.entryMetas)],
+          lastOpen,
+          startedAt,
+          silenced,
+        ).length;
         if (n > 0) {
           deps.paint(n);
           deps.post(missedLabel(n));

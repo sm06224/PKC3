@@ -235,6 +235,7 @@ import { decodeTaskDrag, dropTaskCard, encodeTaskDrag } from '@adapter/ui/render
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
 import { offerDoneUndo, offerMoveUndo, undoScheduleMove } from '@adapter/ui/render/schedule-undo';
 import { slotOfCard } from '@features/schedule/move-undo';
+import { noteTimeFor } from '@features/schedule/task-cards';
 import { plainTaskTitle } from '@features/schedule/task-title';
 import {
   DATE_SHORTCUTS,
@@ -271,18 +272,22 @@ import {
   choosePaste,
   describePaste,
   DEFAULT_PASTE_SOURCE,
+  isPlainPasteChord,
   pasteConvertedMessage,
   PASTE_MESSAGE_COALESCE_MS,
+  PLAIN_PASTE_WINDOW_MS,
   type PasteSource,
 } from '@features/markdown/paste-source';
 import { convertPastedPermalink } from '@features/link/permalink';
 import { resolveMime } from './attach';
 import {
   applyFormat,
+  autoPairFor,
   DIAGRAM_CHOICES,
   DIAGRAM_TEMPLATES,
   insertBlock,
   linkifyPastedUrl,
+  pairedBackspaceRange,
   SINGLE_COLUMN_TABLE_NOTE,
   tableOpMadeSingleColumn,
   type FormatOp,
@@ -11381,18 +11386,29 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const lid = dispatcher.getState().selectedLid;
     if (lid === null) return;
+    /**
+     * 🔴 **ノートの現在値で開く**(台帳 #1852 指摘 2)── 空の時刻で開くと、前書きに `date: … 14:00` がある
+     *   ノートの日付だけ変えて OK したとき、時刻が黙って消える。日付も現在の日付から(無ければ今日)。
+     * ⚠ 走査がまだ無い間・時差つきなど読めない時刻は、時刻欄が空で開く。空のまま OK でも**時刻に触らない**(下)。
+     */
+    const st0 = dispatcher.getState();
+    const curDate = st0.entryMetas.get(lid)?.date ?? null;
+    const curTime = noteTimeFor(st0.taskScan, lid, curDate);
     void pickDateInApp(
       root,
       new Date(),
       DATE_SHORTCUTS,
       (id, now) => (isDateShortcut(id) ? shortcutDate(id, now) : ''),
       /**
-       * 🔴 **時刻の欄を出さない**(#865、2026-09-13)。
-       * ⚠ ノートの日付に時刻は無い(抽出列が `YYYY-MM-DD` だけを受ける)ので、
-       *   出すと**打った字が黙って捨てられる**(無言の dead input)。
-       * 🔑 捨てるのは正しい ── 捨てる物を打たせるのが間違いだった。
+       * 🔴 **時刻の欄を出す**(台帳 #1852 / 依頼 192 / 284 で、ノートの日付にも時刻を書けるようにした)。
+       * 打った時刻は前書きの `date: 2026-10-20 14:00` に書く(抽出列には日付だけ)。空なら時刻は付けない。
+       * (#865 では、受け取る相手が無いので欄を出さなかった ── 受け取る相手ができたので出す)
        */
-      { withTime: false },
+      {
+        withTime: true,
+        ...(curDate === null ? {} : { initialDate: curDate }),
+        ...(curTime === null ? {} : { initialTime: curTime }),
+      },
     ).then((picked) => {
       if (picked === null) return;
       // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。選び終えた時点で確かめる。押した瞬間の lid を撃つ)
@@ -11401,7 +11417,13 @@ const ACTIONS: Record<string, ActionHandler> = {
         services,
         [lid],
         '日付を付けられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
-        () => dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: picked.date }),
+        () => dispatcher.dispatch({
+            type: 'SET_ENTRY_DATE',
+            lid,
+            date: picked.date,
+            // 空で開いて空のまま OK された回(時刻を知らない / 読めない時刻の字)は、書かれている字を残す(省略 = 残す)
+            ...(picked.time === null && curTime === null ? {} : { time: picked.time }),
+          }),
       );
     });
   },
@@ -11972,8 +11994,13 @@ const ACTIONS: Record<string, ActionHandler> = {
   'sort-tasks': (dispatcher, target, services) => {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const ta = formatTarget(root);
-    // 🔴 `renumber-lists` と同じ理由(ライブ編集の欄は 1 ブロックだけ)
-    if (isLiveBlockField(ta) || (ta === null && dispatcher.getState().phase === 'editing')) {
+    /**
+     * 🔴 **1 画面で編集している行の欄(押した 1 ブロックだけが入っている)でも、カーソルのあるリストを並べ替える**
+     *   (台帳 #1852 / 依頼 87-2 の残り)。直す前は「全文を編集に切り替えてください」と断っていたが、87-2 で効く範囲を
+     *   「カーソルのあるリストだけ」にしたので、1 ブロックの欄でも範囲は同じ(欄の中のリスト)になる。
+     *   ⚠ 欄が見つからない(`ta === null`)まま編集中なら、これまでどおり断る(どこへ書くか分からない)。
+     */
+    if (ta === null && dispatcher.getState().phase === 'editing') {
       services.showStatus?.(SORT_TASKS_LIVE_NOTE);
       return;
     }
@@ -15524,6 +15551,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () => {
         const now = dispatcher.getState();
         const was = now.entryMetas.get(lid)?.date ?? null;
+        const wasTime = noteTimeFor(now.taskScan, lid, was);
         const refused = bodyWriteBlockReason(now, lid) !== null;
         dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
         // 🔴 × にも「元に戻す」(#1632。Gemini 裁定 = #1163 の依頼 35 Q2-A)── 日付なしへ落としたときと同じ口。
@@ -15531,7 +15559,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         if (!refused && now.entryMetas.has(lid))
           offerMoveUndo(root, dispatcher, {
             target: { kind: 'entry', lid },
-            before: { date: was, time: null, timeEnd: null, until: null, text: '' },
+            before: { date: was, time: wasTime, timeEnd: null, until: null, text: '' },
             after: { date: null, time: null, timeEnd: null, until: null, text: '' },
             verb: 'moved',
           });
@@ -17468,6 +17496,29 @@ export function bindActions(
       }
     }
   };
+  /**
+   * 🔴 **括弧の自動補完と、補った直後の Backspace**(依頼 201 / 202 / 203)。受け持ったら `true`(`preventDefault` 済み)。
+   * ⚠ 規則は持たない ── `text-ops.ts` の `autoPairFor` / `pairedBackspaceRange` が決め、ここは挿す係
+   *   (1 行ずつ編集する画面 `row-swap.ts` の `autoPair` / `backspacePair` と同じ道)。挿すのは `insertText` ── `Ctrl+Z` で戻る。
+   */
+  const pairOnKeydown = (ke: KeyboardEvent, ta: HTMLTextAreaElement): boolean => {
+    if (ke.key === 'Backspace') {
+      if (ke.altKey || ke.shiftKey || ta.selectionStart !== ta.selectionEnd) return false;
+      const range = pairedBackspaceRange(ta.value, ta.selectionStart);
+      if (range === null) return false;
+      ke.preventDefault();
+      ta.setSelectionRange(range.from, range.to);
+      insertText(ta, '');
+      return true;
+    }
+    if (ke.key.length !== 1) return false;
+    const pair = autoPairFor({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, ke.key);
+    if (pair === null) return false;
+    ke.preventDefault();
+    if (pair.kind === 'insert') insertText(ta, pair.insert);
+    ta.setSelectionRange(pair.start, pair.end);
+    return true;
+  };
   const onKeydown = (ev: Event) => {
     const ke = ev as KeyboardEvent;
     // editor の 2 field(本文 textarea / title input)でのみ有効
@@ -17926,6 +17977,20 @@ export function bindActions(
         ?.click();
       return;
     }
+    /**
+     * 🔴 **括弧の自動補完は、全文を編集する画面でも使う**(台帳 #1852 / 依頼 201。1 行ずつ編集する画面(`row-swap.ts`)とそろえる)。
+     *   補う場所・補わない場所(数式・表の行)も、消すとき対で消すのも、`text-ops.ts` の `autoPairFor` / `pairedBackspaceRange` の 1 本。
+     * ⚠ `Ctrl` / `Cmd` を押した打鍵は字ではないので補わない(`Ctrl+[` の字下げに `[]` が入る)。`Ctrl`+`Alt`(AltGr)は字。
+     * ⚠ 変換中は上の `isComposing` の門で弾き済み。
+     */
+    if (
+      (field === 'editor-body' || field === SECTION_BOX_INPUT_FIELD) &&
+      ke.target instanceof HTMLTextAreaElement &&
+      !((ke.ctrlKey || ke.metaKey) && !ke.altKey) &&
+      pairOnKeydown(ke, ke.target)
+    ) {
+      return;
+    }
     // 🔴 `Tab` だけは下の本文と同じ表・テンプレート・字下げの門へ通す(#1163 依頼 150)。⚠ 当たらなければ素通し(焦点は今までどおり出ていく)
     if (field === SECTION_BOX_INPUT_FIELD && ke.key !== 'Tab') {
       const sectionCmd = keymap.match(ke, 'row');
@@ -18275,9 +18340,23 @@ export function bindActions(
    *
    * @returns 既定の貼付を止めたら `true`
    */
-  const pasteText = (ce: ClipboardEvent): boolean => {
+  let plainPasteChordAt: number | null = null;
+  const onPlainPasteChord = (ev: KeyboardEvent): void => {
+    if (isPlainPasteChord(ev)) plainPasteChordAt = Date.now();
+  };
+  const plainChordPressed = (): boolean => {
+    const at = plainPasteChordAt;
+    plainPasteChordAt = null;
+    return at !== null && Date.now() - at <= PLAIN_PASTE_WINDOW_MS;
+  };
+  const pasteText = (ce: ClipboardEvent, plainChord: boolean): boolean => {
     const target = ce.target;
     if (!isBodyInput(target)) return false;
+    /**
+     * 🔴 **Ctrl+Shift+V で貼ったときは何も直さず、書式なしの字だけを入れる**(依頼 93-1。Gemini 回答 = 推薦 A)。
+     *   ⚠ 鍵を押した印は `onPaste` の入口で取り出して消費済み(画像だけの貼付が先に処理しても、次の普通の貼付へ持ち越さない)。
+     */
+    if (plainChord) return false;
     /**
      * 🔴 **コード・数式の中では何も変換しない**(#1087)── fence の中へ表を貼ると fence が入れ子に、
      *   HTML を貼ると `**` やリンクの形が入り、選んだ字へ URL を貼ると `[字](URL)` になっていた。
@@ -18442,6 +18521,8 @@ export function bindActions(
    */
   const onPaste = (e: Event): void => {
     const ce = e as ClipboardEvent;
+    // 🔴 鍵の印は貼付のたびに入口で取り出して消す(`routeFiles` が先に処理した回も残さない)
+    const plainChord = plainChordPressed();
     // 🔴 **ファイル(PDF など)をコピーして貼ったときも、ドロップと同じ行き先へ**(#1652 6。Gemini 裁定 A)。
     //   ⚠ 直す前は画像しか拾わず、エクスプローラーでコピーした PDF を貼っても何も起きず何も出なかった。
     const files = filesOf(ce.clipboardData);
@@ -18470,7 +18551,7 @@ export function bindActions(
       ce.preventDefault();
       return;
     }
-    if (pasteText(ce)) ce.preventDefault();
+    if (pasteText(ce, plainChord)) ce.preventDefault();
   };
 
   /**
@@ -20677,6 +20758,7 @@ export function bindActions(
   };
   listen(root, 'scroll', onScrollCloseMenu, true);
   listen(root.ownerDocument, 'keydown', onMenuKey);
+  listen(root, 'keydown', onPlainPasteChord, true);
   listen(root, 'paste', onPaste);
   /**
    * 🔴 **`dragenter` でも受理を宣言する**(2026-08-21、cowork #15)。

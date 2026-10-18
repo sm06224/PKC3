@@ -221,14 +221,18 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   const liveBoxes = live.locator('input.pkc-task-checkbox');
   await expect(liveBoxes, '編集中の本文にチェックが描かれていない').toHaveCount(2);
 
-  // ② 灰色の 2 つ(1 行ずつ打つ編集)
-  const greyed = ['renumber-lists', 'sort-tasks'].map((a) => bar.locator(`[data-pkc-action="${a}"]`));
+  // ② 灰色は「番号を振り直す」だけ(1 行ずつ打つ編集)。🔴 #1852 依頼 87-2 の残り ── 「完了項目を末尾へ」は
+  //   カーソルのあるリストだけに効くので、1 ブロックの欄でも灰色にしない(対照群として並べて見る)
+  const greyed = ['renumber-lists'].map((a) => bar.locator(`[data-pkc-action="${a}"]`));
   for (const b of greyed) {
     await expect(b, '1 画面編集で aria-disabled が付いていない').toHaveAttribute('aria-disabled', 'true');
     const op = await b.evaluate((el) => Number(getComputedStyle(el).opacity));
     expect(op, `灰色に見えない(opacity=${op})`).toBeGreaterThan(0.4);
     expect(op, `灰色に見えない(opacity=${op})`).toBeLessThan(0.5);
   }
+  const sortBtn = bar.locator('[data-pkc-action="sort-tasks"]');
+  await expect(sortBtn, '🔴 「完了項目を末尾へ」が 1 画面編集でまだ灰色').not.toHaveAttribute('aria-disabled', 'true');
+  expect(await sortBtn.evaluate((el) => Number(getComputedStyle(el).opacity)), '完了項目を末尾へが薄い').toBe(1);
   expect(
     await bar.locator('[data-pkc-format="bold"]').first().evaluate((el) => Number(getComputedStyle(el).opacity)),
     '対照群: ほかのボタンまで灰色',
@@ -241,6 +245,12 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   await expect(live.locator('[data-pkc-field="row-source"]'), 'チェックを押したら行が入力欄に化けた').toHaveCount(0);
   await modClickReal(page, '[data-pkc-region="editor-live"] li:nth-of-type(1)');
   await expect(row, '下書きの原文が [x] になっていない').toHaveValue('- [x] 牛乳');
+  // 🔴 #1852 依頼 87-2 ── 開いた行(1 ブロック)の中で「完了項目を末尾へ」を押すと、その欄のリストが並べ替わる
+  //   (直す前は「全文を編集に切り替えてください」と断るだけで欄は動かなかった)。確かめたら Escape で捨てる
+  await row.fill('- [x] 牛乳\n- [ ] 卵');
+  await clickReal(page, '[data-pkc-action="sort-tasks"]');
+  await expect(row, '🔴 1 ブロックの欄で「完了項目を末尾へ」が効かない').toHaveValue('- [ ] 卵\n- [x] 牛乳');
+  await row.fill('- [x] 牛乳'); // 検証用に足した行を戻してから閉じる(下の全文の中身を変えない)
   await row.press('Escape');
   await expect(live.locator('[data-pkc-field="row-source"]')).toHaveCount(0);
 
@@ -271,6 +281,26 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   // 🔴 灰色が外れるだけでなく、**押すと本当に効く**(直す前は外れず、押すと「全文を編集に切り替えて」と案内するだけだった)
   await clickReal(page, '[data-pkc-action="sort-tasks"]');
   await expect(whole, '全文を編集のまま「完了項目を末尾へ」を押しても効かない').toHaveValue(/- \[ \] 卵\n- \[x\] 牛乳/);
+
+  // 🔴 #1852 依頼 114-3 ── 完了の行に「番号」を押すと `1. [x] 牛乳`(完了の印が残る)。もう一度押すと `- [x] 牛乳` へ戻る
+  //   (`[x] 牛乳` という字にしない)。caret を完了の行に置いて、帯の「番号」を実マウスで押す
+  await whole.evaluate((el: HTMLTextAreaElement) => {
+    const at = el.value.indexOf('- [x] 牛乳') + 3;
+    el.focus();
+    el.setSelectionRange(at, at);
+  });
+  const olBtn = bar.locator('[data-pkc-action="format-text"][data-pkc-format="ol"]');
+  await clickReal(page, olBtn);
+  await expect(whole, '🔴 完了の行に番号を押したら完了の印が消えた').toHaveValue(/\n1\. \[x\] 牛乳\n/);
+  await clickReal(page, olBtn);
+  await expect(whole, '🔴 番号を外したら `- [x]` に戻らない').toHaveValue(/\n- \[x\] 牛乳\n/);
+
+  // 🔴 #1852 束 I3(依頼 201)── 括弧の自動補完は全文の欄(editor-body 相当)でも効く。補った直後の Backspace で対で消える
+  await whole.press('Control+End');
+  await page.keyboard.type('(');
+  await expect(whole, '🔴 全文の欄で `(` の閉じが補われない').toHaveValue(/次の段落です。\(\)$/);
+  await page.keyboard.press('Backspace');
+  await expect(whole, '全文の欄で補った直後の Backspace が対で消えない').toHaveValue(/次の段落です。$/);
 
   // ① 続き: 保存 → 読む面でも済み
   await pressBare('commit-edit');
@@ -1244,6 +1274,22 @@ test('🔴 実打鍵で括弧を閉じても二重にならない (#299 / cowork
   await expect(row, '1 画面で箇条書きが続かない').toHaveValue('- 牛乳\n- ');
   await page.keyboard.press('Enter');
   await expect(row, '1 画面で空の項目から抜けて空行が入らない').toHaveValue('- 牛乳\n\n');
+
+  /**
+   * 🔴 #1852 束 I3(依頼 200)── 表のセルの中の Tab は次のセルへ(行は確定しない)。最後のセルの Tab は今までどおり確定。
+   *   観測点は選ばれた字(`selectionStart..End` の切り出し)と、行の欄が開いたままかどうか。
+   */
+  await row.fill('| a | b |\n| - | - |\n| c | d |');
+  await row.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(el.value.indexOf('a'), el.value.indexOf('a')));
+  await page.keyboard.press('Tab');
+  await expect(row, '🔴 表のセルの Tab で行が確定した(次のセルへ進まない)').toBeVisible();
+  expect(
+    await row.evaluate((el: HTMLTextAreaElement) => el.value.slice(el.selectionStart, el.selectionEnd)),
+    '表のセルの Tab で次のセル(b)が選ばれない',
+  ).toBe('b');
+  await row.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(el.value.length - 3, el.value.length - 3));
+  await page.keyboard.press('Tab');
+  await expect(row, '最後のセルの Tab は今までどおり行の確定').toHaveCount(0);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

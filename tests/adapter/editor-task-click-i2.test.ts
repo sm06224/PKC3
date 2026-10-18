@@ -148,10 +148,9 @@ describe('1 面の編集の行で Enter(依頼 78-2・114-6)', () => {
   });
 });
 
-describe('1 行ずつ打つ編集のあいだの「番号を振り直す」「完了項目を末尾へ」(依頼 78-4)', () => {
+describe('1 行ずつ打つ編集のあいだの「番号を振り直す」(依頼 78-4)。「完了項目を末尾へ」は灰色にしない(依頼 87-2 の残り)', () => {
   const tools = (root: HTMLElement): HTMLElement[] => [
     root.querySelector<HTMLElement>('[data-pkc-action="renumber-lists"]')!,
-    root.querySelector<HTMLElement>('[data-pkc-action="sort-tasks"]')!,
   ];
   it('🔴 live:灰色(aria-disabled)で、マウスを載せると理由が出る。押したときの案内は残るので disabled にはしない', async () => {
     const root = await editing('live', []);
@@ -161,6 +160,10 @@ describe('1 行ずつ打つ編集のあいだの「番号を振り直す」「�
       expect(b.title).toBe(WHOLE_NOTE_REASON);
     }
     expect(WHOLE_NOTE_REASON).toContain('「全文を編集」');
+    // 🔴 対照群: 完了項目を末尾へは、live でも押せる(カーソルのあるリストだけに効くので 1 ブロックの欄でも足りる)
+    const sort = root.querySelector<HTMLElement>('[data-pkc-action="sort-tasks"]')!;
+    expect(sort, '前提: ボタンが在る').not.toBeNull();
+    expect(sort.hasAttribute('aria-disabled'), '灰色のまま').toBe(false);
   });
   it('対照群 split:灰色にならず、元の説明のまま', async () => {
     const root = await editing('split', []);

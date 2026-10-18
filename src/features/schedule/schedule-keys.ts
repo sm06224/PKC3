@@ -30,7 +30,7 @@
  *     全ノートが「未完了」としてカンバンに出る。
  */
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
-import { dateOfFrontmatterText } from './schedule-date';
+import { dateOfFrontmatterText, parseFrontmatterWhen } from './schedule-date';
 
 /**
  * frontmatter に書く鍵。⚠ **文字列を直接書かない**(綴り間違いが静かに効く)。
@@ -59,6 +59,18 @@ export function readScheduleDate(meta: Record<string, FrontmatterValue>): string
   const v = meta[SCHEDULE_KEYS.date];
   // 🔴 時刻つき・全角・`/` 区切りも日付の部分だけ読む(台帳 #1852 束 E1 ── 依頼 188 / 192 / 284)
   return typeof v === 'string' ? dateOfFrontmatterText(v) : null;
+}
+
+/**
+ * 🔴 **ノート 1 件の予定の時刻を読む**(台帳 #1852 / 依頼 192 / 284。Gemini 回答 = 時刻も読む)。
+ *
+ * `date: 2026-10-20 14:00` / `date: 2026-10-20T14:00` の `14:00`。日付だけ・読めない時刻・時差つきは `null`。
+ * ⚠ 抽出列(`entries.date`)には**日付だけ**を置く(保存の形は変えない)。時刻は本文から読み、予定表の走査が運ぶ
+ *   (`task-cards.ts` の `noteTimeOf`)。前の版で書いたノートも、前の版が時刻を読まないだけで本文は 1 バイトも変わらない。
+ */
+export function readScheduleTime(meta: Record<string, FrontmatterValue>): string | null {
+  const v = meta[SCHEDULE_KEYS.date];
+  return typeof v === 'string' ? (parseFrontmatterWhen(v)?.time ?? null) : null;
 }
 
 /**

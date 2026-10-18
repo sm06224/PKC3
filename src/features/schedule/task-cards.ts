@@ -32,6 +32,8 @@
  */
 import { listTaskItems, type TaskItem } from '@features/markdown/task-count';
 import { readLineDate, stripLineDate } from '@features/schedule/line-date';
+import { parseFrontmatter } from '@features/markdown/frontmatter';
+import { readScheduleDate, readScheduleTime } from '@features/schedule/schedule-keys';
 import type { RepeatUnit } from '@features/schedule/repeat';
 
 /**
@@ -80,6 +82,9 @@ export interface TaskCard extends TaskItem {
   readonly substitutes: string | null;
 }
 
+/** 時刻つきのノート 1 件の予定を読む上限(画面に出して意味がある量ではなく、暴走の止め弁)。切ったら `truncated` を立てる。 */
+export const NOTE_TIME_LIMIT = 5000;
+
 /**
  * 上限。⚠ どれも「画面に出して意味がある量」で決めてある ── 大きくすると
  * 盤面が読めなくなり、小さくすると user の項目が**黙って消える**。
@@ -108,9 +113,24 @@ export const TASK_LIMITS = {
   textChars: 200,
 } as const;
 
+/**
+ * 🔴 **ノート 1 件の予定の時刻**(前書きの `date: 2026-10-20 14:00` の `14:00`。台帳 #1852 / 依頼 192 / 284)。
+ * ⚠ `date` も持つ ── 抽出列の日付と食い違う(別の窓・旧ビルドが日付だけ書き換えた)組は使わない。
+ */
+export interface NoteTime {
+  readonly lid: string;
+  readonly date: string;
+  readonly time: string;
+}
+
 /** 走査の結果。⚠ **切ったかどうかを一緒に運ぶ**(黙って切らない)。 */
 export interface TaskScan {
   readonly cards: readonly TaskCard[];
+  /**
+   * 🔴 **時刻つきのノート 1 件の予定**(依頼 192 / 284)。省略 = 無い(旧ビルドのタブが運んだ走査も受ける)。
+   * ⚠ 日付だけのノートは載せない。
+   */
+  readonly noteTimes?: readonly NoteTime[];
   /** 候補になったノートの総数(切る前)。 */
   readonly totalNotes: number;
   /** 実際に本文を読んだノートの数。 */
@@ -232,6 +252,77 @@ export function replaceTaskCards(
   // 🔑 組み立ては `taskCardsOf` 1 本(上の docstring)── ここで組み直さない
   const merged = [...others.slice(0, at), ...taskCardsOf(lid, body), ...others.slice(at)];
   return sameCards(merged, cards) ? cards : merged;
+}
+
+/**
+ * 🔴 **ノート 1 件の予定の時刻を、本文から読む口はここ 1 つ**(`runTaskScan`(worker)と `refreshNoteTimes`(reducer)が通る)。
+ * 時刻が無いノートは `null`(日付だけの予定は載せない)。
+ */
+export function noteTimeOf(lid: string, body: string): NoteTime | null {
+  const { meta } = parseFrontmatter(body);
+  const date = readScheduleDate(meta);
+  const time = readScheduleTime(meta);
+  return date === null || time === null ? null : { lid, date, time };
+}
+
+/**
+ * 🔴 **ノート 1 件の予定の時刻を、走査から引く**(`itemOfNote` に渡す物 / 動かす前後の姿 / 知らせ)。
+ * ⚠ 抽出列の日付(`date`)と食い違う組は**使わない**(別の窓・旧ビルドが日付だけ書き換えた ── 古い時刻を新しい日付に付けない)。
+ * 🔑 引く口はここ 1 本(面の描画・動かす・元に戻すが同じ答えを得る)。
+ */
+export function noteTimeFor(scan: { readonly noteTimes?: readonly NoteTime[] } | null, lid: string, date: string | null): string | null {
+  if (scan === null || date === null) return null;
+  const n = scan.noteTimes?.find((x) => x.lid === lid);
+  return n !== undefined && n.date === date ? n.time : null;
+}
+
+/**
+ * 🔴 **時刻つきのノート 1 件の予定を、アラーム / 見逃しの数え方に渡せる札にする**(依頼 192 / 284)。
+ * 数え方(`dueAlarms` / `missedItems`)は札の `date` / `time` / `done` / `lid` だけを見る ── 行の予定と同じ 1 本に通す。
+ * - `line: 0` = 前書きの先頭(開くとノートの頭へ行く)。⚠ 前書きのあるノートに 0 行目の予定の行は無いので、行の札と鍵が衝突しない。
+ * - 済み(`status: done`)のノートは `done`。抽出列の日付と食い違う組は作らない(`noteTimeFor` と同じ向き)。
+ */
+export function noteTimeCards(
+  scan: { readonly noteTimes?: readonly NoteTime[] } | null,
+  metas: ReadonlyMap<string, { readonly title: string; readonly date: string | null; readonly status: string | null }>,
+): TaskCard[] {
+  const out: TaskCard[] = [];
+  for (const n of scan?.noteTimes ?? []) {
+    const m = metas.get(n.lid);
+    if (m === undefined || m.date !== n.date) continue;
+    out.push({
+      lid: n.lid,
+      line: 0,
+      rawLine: '',
+      text: m.title,
+      done: m.status === 'done',
+      date: n.date,
+      time: n.time,
+      timeEnd: null,
+      until: null,
+      repeat: null,
+      substitutes: null,
+    });
+  }
+  return out;
+}
+
+/**
+ * その lid の時刻を、本文から引き直した一覧にする(押した 1 件だけ組み直す)。
+ * ⚠ 中身が変わっていなければ**同じ配列**を返す(描画の指紋を壊さない。`replaceTaskCards` と同じ作法)。
+ */
+export function replaceNoteTime(
+  list: readonly NoteTime[] | undefined,
+  lid: string,
+  body: string,
+): readonly NoteTime[] | undefined {
+  const prev = list ?? [];
+  const now = noteTimeOf(lid, body);
+  const old = prev.find((n) => n.lid === lid) ?? null;
+  if (old === null && now === null) return list;
+  if (old !== null && now !== null && old.date === now.date && old.time === now.time) return list;
+  const rest = prev.filter((n) => n.lid !== lid);
+  return now === null ? rest : [...rest, now];
 }
 
 /**

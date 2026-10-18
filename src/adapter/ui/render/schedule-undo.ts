@@ -36,6 +36,7 @@ import type { RepeatUnit } from '@features/schedule/repeat';
 import type { AppState, UserAction } from '@adapter/state/app-state';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { SHOWN_LINE_LOST, shownCardLine } from '@adapter/state/shown-line';
+import { noteTimeFor } from '@features/schedule/task-cards';
 
 export type MoveTarget =
   | { readonly kind: 'task'; readonly lid: string; readonly line: number }
@@ -102,7 +103,10 @@ function slotNow(
 ): Slot | undefined {
   if (target.kind === 'entry') {
     const m = state.entryMetas.get(target.lid);
-    return m === undefined ? undefined : { date: m.date ?? null, time: null, timeEnd: null, until: null, text: '' };
+    // 🔴 前書きの時刻も姿の一部(動かした後の姿との比べ・戻す先)── 依頼 192 / 284
+    return m === undefined
+      ? undefined
+      : { date: m.date ?? null, time: noteTimeFor(state.taskScan, m.lid, m.date ?? null), timeEnd: null, until: null, text: '' };
   }
   const c = state.taskScan?.cards.find((x) => x.lid === target.lid && x.line === target.line);
   return c === undefined ? undefined : slotOfCard(c);
@@ -281,7 +285,22 @@ export function undoScheduleMove(
     return { refusal: '動かした後に予定が変わったので、元に戻せませんでした' };
   const b = offer.restore ?? offer.before;
   if (offer.target.kind === 'entry')
-    return { action: { type: 'SET_ENTRY_DATE', lid: offer.target.lid, date: b.date } };
+  {
+    /**
+     * 🔴 動かしても時刻に触れていない回(日だけ動かした)は、戻すときも時刻に触れない ── 時刻として読めない字
+     *   (時差つき `T10:00Z` 等)は走査に載らず `time` が `null` に見えるので、`time: null` を撃つと黙って消えてしまう。
+     *   日付を外した回(after.date が null)は日付ごと消えているので、従来どおり時刻を添えて戻す。
+     */
+    const untouched = b === offer.before && offer.after.date !== null && offer.before.time === offer.after.time;
+    return {
+      action: {
+        type: 'SET_ENTRY_DATE',
+        lid: offer.target.lid,
+        date: b.date,
+        ...(untouched ? {} : { time: b.time }),
+      },
+    };
+  }
   // 🔴 戻す相手の行は「いま走査に見えている姿」── その原文を `openLine` に添える(#1087)。
   //    動かした後に行が替わっていれば、上の `undoVerdict` が先に断っている
   const openLine = shownCardLine(state, offer.target.lid, offer.target.line);

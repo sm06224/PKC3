@@ -114,13 +114,13 @@ describe('リストをそろえる書込(#1173)', () => {
     expect(b.notices).toEqual(['2 件を完了にしました / 1 件は繰り返しなので触りませんでした']);
   });
 
-  it('⚠ 飛ばした行が無ければ、知らせは出さない(画面の印が答えである)', async () => {
+  it('🔴 飛ばした行が無くても、何件を完了にしたかは言う(台帳 #1852 / 依頼 114-2 の残り。件数が見えないと押したのかも分からない)', async () => {
     const b = boot({ a: '- [ ] あ\n- [ ] い\n' });
     dispose = b.dispose;
     b.d.dispatch(run('- [ ] あ\n- [ ] い\n', [0, 1], 'done'));
     await tick();
     expect(b.persists).toHaveLength(1);
-    expect(b.notices).toEqual([]);
+    expect(b.notices).toEqual(['2 件を完了にしました']);
   });
 
   it('🔴 元から全部そろっていれば書かないが、黙らない', async () => {

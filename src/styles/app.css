@@ -7207,6 +7207,11 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='schedule-weekview-lane'] > [data-pkc-entry] > [data-pkc-field='task-resize']:hover {
   background: var(--muted);
 }
+/* ノート 1 件の予定(前書きの `date: … 14:00`)には終わりの時刻が書けないので、下の縁は出さない */
+[data-pkc-field='schedule-day-lane'] > [data-pkc-entry][data-pkc-whole-note] > [data-pkc-field='task-resize'],
+[data-pkc-field='schedule-weekview-lane'] > [data-pkc-entry][data-pkc-whole-note] > [data-pkc-field='task-resize'] {
+  display: none;
+}
 [data-pkc-field='schedule-day-lane'] > [data-pkc-entry][data-pkc-dragging],
 [data-pkc-field='schedule-weekview-lane'] > [data-pkc-entry][data-pkc-dragging] {
   opacity: 0.45;  touch-action: none;

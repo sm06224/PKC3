@@ -7,7 +7,7 @@
  * 検索・種類の絞り(`matchesEntry`)。
  */
 import type { AppState } from '@adapter/state/app-state';
-import type { TaskCard } from '@features/schedule/task-cards';
+import { noteTimeFor, type TaskCard } from '@features/schedule/task-cards';
 import { itemOfCard, itemOfNote, type AgendaItem } from '@features/schedule/agenda';
 import { entryFilterOf, matchesEntry } from '@features/filter/title-filter';
 
@@ -54,7 +54,8 @@ export function scheduleItemsOf(state: AppState): ScheduleItems {
     if (m === undefined || m.date === null) continue;
     if (m.archived && !state.showArchived) continue;
     if (!matchesEntry(m, filter)) continue;
-    const item = itemOfNote(m);
+    // 🔴 前書きの時刻(依頼 192 / 284)。引く口は `noteTimeFor` 1 本(抽出列の日付と食い違う組は使わない)
+    const item = itemOfNote(m, noteTimeFor(state.taskScan, m.lid, m.date));
     // ⚠ 済んだノートは行の札と同じ旗で畳む(`showDoneTasks`)。畳んだ分は数だけ持つ
     if (item.done && !state.showDoneTasks) {
       // 🔴 隠したノートの済んだ予定は「済み(N)」ではなく「隠したノートの分」に数える(#1163 の依頼 247 案 C)

@@ -240,7 +240,6 @@ describe('番号の振り直しが押せる #396', () => {
 describe('1 面のライブ編集の行では、全文の道具は触らず「全文を編集」へ案内する #1087', () => {
   it.each([
     ['renumber-lists', '1. あ\n5. い', '番号を振り直すには、「全文を編集」に切り替えてください'],
-    ['sort-tasks', '- [x] 済\n- [ ] 未', '完了項目を末尾へ移すには、「全文を編集」に切り替えてください'],
   ])('🔴 %s:row-source の欄は書き換えず、行き先を言う(「揃っています」と偽らない)', (id, text, note) => {
     const status: string[] = [];
     const { root, sent } = setup({ showStatus: (t: string) => status.push(t) });
@@ -250,6 +249,19 @@ describe('1 面のライブ編集の行では、全文の道具は触らず「�
     expect(ta.value, '1 ブロックだけの欄を書き換えた').toBe(text);
     expect(status).toEqual([note]);
     expect(sent.find((a) => a.type === 'OP_FAILED'), '「編集中に押してください」は編集中の言い方ではない').toBeUndefined();
+  });
+});
+
+describe('1 面のライブ編集の行でも、カーソルのあるリストの完了項目は末尾へ移せる(台帳 #1852 / 依頼 87-2 の残り)', () => {
+  it('🔴 row-source の欄: カーソルのあるリストだけ並べ替わり、案内で終わらない。対照群: 別のリストは動かない', () => {
+    const status: string[] = [];
+    const { root } = setup({ showStatus: (t: string) => status.push(t) });
+    const text = '- [x] 済\n- [ ] 未\n\n間の段落\n\n- [x] 別の済\n- [ ] 別の未';
+    const ta = editor(root, text, 0, 'row-source');
+    root.querySelector<HTMLElement>('[data-pkc-action="sort-tasks"]')!.click();
+    expect(ta.value, '行の欄なのに並べ替わらない(案内で終わっている)').toBe('- [ ] 未\n- [x] 済\n\n間の段落\n\n- [x] 別の済\n- [ ] 別の未');
+    expect(status.join('')).toContain('このリストの完了したチェック項目を末尾へ移動しました');
+    expect(status.join('')).not.toContain('全文を編集');
   });
 });
 

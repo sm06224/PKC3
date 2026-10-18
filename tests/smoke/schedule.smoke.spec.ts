@@ -543,6 +543,31 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
   ).toHaveCount(1);
   await expect(page.locator('.pkc-date-warn')).toHaveText('日付として読めません(2026-10-17 の形で書きます)');
 
+  /**
+   * ⑮ 🔴 **前書きの `date: 日付 時刻` のノートが、予定表に時刻つきで出て、動かしても時刻が残る**(台帳 #1852 束 I3 / 依頼 192・284。
+   *   起動は増やさない ── この道中の続き)。観測点は札の印(`data-pkc-task-time`)と、保存された本文の `date:` の行。
+   *   ⚠ 時刻が捨てられていれば札に印が付かず、動かすと本文は日付だけになる(どちらも字だけでは満たされない)。
+   */
+  await createEntry(page, 'text');
+  await ta.fill(`---\ndate: ${WED} 14:00\n---\n\n時刻つきノートの本文`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const timedNote = (date: string) =>
+    pane
+      .locator(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${date}"] [data-pkc-entry]`)
+      .and(page.locator('[data-pkc-task-time="14:00"]'));
+  await expect(timedNote(WED), '前書きの `date: ... 14:00` のノートが水曜の札に時刻つきで出ない').toHaveCount(1);
+  await mouseDragTo(page, timedNote(WED), gridCell(THU));
+  await page.mouse.up();
+  await expect(timedNote(THU), '時刻つきのノートを木曜へ動かしたら札に時刻が残らない').toHaveCount(1);
+  await expect(timedNote(WED), '動かしたのに水曜に札が残っている').toHaveCount(0);
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const movedBody = await ta.inputValue();
+  expect(movedBody, '🔴 動かしたら本文の `date:` の時刻が消えた(日付だけになった)').toMatch(
+    new RegExp(`date: "?${THU} 14:00"?\\n`),
+  );
+  expect(movedBody, '動かしたのに水曜の日付が残っている').not.toContain(WED);
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
@@ -946,9 +971,15 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   expect(bar, '縦線の色が札の地と同じ(見分けられない)').not.toContain(cardBg);
 
   await createEntry(page, 'text');
-  await ta.fill(`- [ ] 散歩 @${today}`);
+  // 🔴 #1852 束 I3(依頼 192・284)── このノートは前書きの `date: 日付 時刻` も持つ。.ics には時刻つきの開始(`T163000`)で入り、
+  //   アラーム(15 分前)も付く。観測点は落ちた file の中身。⚠ 日は未来(D6)に置く ── 見逃し判定の件数を日によって動かさない
+  await ta.fill(`---\ndate: ${D6} 16:30\n---\n\n- [ ] 散歩 @${today}`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await clickReal(page, '[data-pkc-browse="schedule"]');
+  const icsNote = await exportText();
+  expect(icsNote, '🔴 前書き `date: ... 16:30` のノートが .ics に時刻つきで入っていない').toMatch(
+    new RegExp(`DTSTART[^\\r\\n]*:${D6.replaceAll('-', '')}T163000`),
+  );
   const allCards = pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-entry]');
   const noteRows = pane.locator('[data-pkc-action="toggle-schedule-note"]');
   await expect(noteRows, '予定のあるノートが 2 つなのに一覧が 2 行にならない').toHaveCount(2);

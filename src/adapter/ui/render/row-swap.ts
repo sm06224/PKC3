@@ -41,6 +41,7 @@ import {
 } from '@features/markdown/source-ranges';
 import { findOpenEnds, scanContainers } from '@features/markdown/source-blocks';
 import { autoPairFor, pairedBackspaceRange } from '@features/markdown/text-ops';
+import { tableOnTab } from '@features/markdown/table-assist';
 import {
   NO_BOUNDARY_STEP,
   stepAtBoundary,
@@ -1303,6 +1304,20 @@ export class RowSwap {
         ev.preventDefault();
         this.cancelActive();
         return;
+      }
+      /**
+       * 🔴 **表のセルの中の `Tab` / `Shift`+`Tab` は、次の / 前のセルへ進む**(台帳 #1852 / 依頼 200。Gemini 回答 = 全文の編集と揃える)。
+       *   ⚠ 表の最後のセルの `Tab`・最初のセルの `Shift`+`Tab`(行を足す・戻る先が無い)と、表の外は今までどおり「行の確定」
+       *   (確定で出る道を残す。行の追加は全文の編集だけ ── ここで足すと `Tab` で抜けられなくなる)。
+       *   判定は `tableOnTab` の 1 本(全文の編集と同じ)。割り当てを替えて `Tab` が確定でなくなっていれば触らない。
+       */
+      if (cmd === 'row-commit' && ke.key === 'Tab' && !ke.ctrlKey && !ke.altKey && !ke.metaKey) {
+        const act = tableOnTab(ta.value, ta.selectionStart, ke.shiftKey);
+        if (act !== null && act.kind === 'navigate') {
+          ev.preventDefault();
+          ta.setSelectionRange(act.start, act.end);
+          return;
+        }
       }
       if (cmd === 'row-commit') {
         ev.preventDefault();
