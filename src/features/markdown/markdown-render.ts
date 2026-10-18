@@ -2974,7 +2974,7 @@ function tagLineHtml(names: readonly string[], interactive: boolean): string {
             // ⚠ 押すと**その語で一覧を絞る**(題名と本文を見る)ので、
             //   「が付いたノートを探す」は嘘になる ── タグの無いノートも混ざる。
             // ⚠ 情報ペインの札(`inspector.ts`)と**同じ字**にする(呼び名を 2 つ作らない)。
-            ` title="「${escapeHtmlAttr(name)}」を含むノートを探します"`
+            ` title="「${escapeHtmlAttr(name)}」が付いたノートだけを並べます"`
           : '');
       return `<span${attrs}>#${md.utils.escapeHtml(name)}</span>`;
     })

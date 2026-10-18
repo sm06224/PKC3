@@ -897,7 +897,7 @@ describe('探す・絞る・目次(隠れた面へ送らない)', () => {
     chip.setAttribute('data-pkc-tag', '買い物');
     s.root.append(chip);
     chip.click();
-    expect(s.d.getState().filterQuery, 'PC なのに絞り込まれていない').toBe('買い物');
+    expect(s.d.getState().filterQuery, 'PC なのに絞り込まれていない').toBe('#買い物');
     expect(s.d.getState().error ?? '', 'PC にスマホ用の断りが出ている').not.toContain(
       '一覧で探してください',
     );
@@ -1065,7 +1065,7 @@ describe('探す・絞る・目次(隠れた面へ送らない)', () => {
     badge.setAttribute('data-pkc-tag', '買い物');
     s.root.querySelector('[data-pkc-region="detail"]')!.append(badge);
     badge.click();
-    expect(s.d.getState().filterQuery, '絞れていない').toBe('買い物');
+    expect(s.d.getState().filterQuery, '絞れていない').toBe('#買い物');
     expect(s.page(), '絞ったのに一覧が見えない(無言の dead click)').toBe('list');
   });
 

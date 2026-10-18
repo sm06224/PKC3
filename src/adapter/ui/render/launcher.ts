@@ -22,6 +22,7 @@ import { SELFHOST_TILE_HINT, type LauncherTile } from '@features/launcher/tiles'
 import { isMovableTile } from '@features/launcher/tile-order';
 import { TILE_MENU_ACTIONS } from '@features/entry-actions';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
+import { tagQueryOf } from '@features/filter/tag-query';
 import { allFolded, encodeFolded, isFolded } from '@features/launcher/group-fold';
 import { appGroupIconOf, sortGroupNames } from '@features/launcher/app-group-spec';
 import type { IconValue } from '@features/icon/icon-value';
@@ -187,7 +188,10 @@ export class LauncherRenderer {
     // ⚠ サイドバーと**同じ絞り込み**を効かせる(探し方を 2 通り覚えさせない)。
     // 規則は `title-filter.ts` の 1 本 ── 面ごとに書くと必ずずれる(review M-1/M-3)
     const q = normalizeQuery(state.filterQuery);
-    const tiles = state.launcherTiles.filter((t) => matchesTitle(t.title, q));
+    const tagMode = tagQueryOf(q) !== null;
+    const tiles = state.launcherTiles.filter((t) =>
+      tagMode ? state.searchHits?.has(t.lid) === true : matchesTitle(t.title, q),
+    );
     /**
      * 🔴 **絞り込んでいる間は掴ませない**(#857 段①、動線レビュー D3)。
      *

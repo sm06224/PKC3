@@ -776,7 +776,7 @@ export class InspectorRenderer {
           find.setAttribute('data-pkc-action', 'filter-by-tag');
           find.setAttribute('data-pkc-tag', tag);
           find.setAttribute('data-pkc-field', 'inspector-tag-find');
-          find.title = `「${tag}」を含むノートを探します`;
+          find.title = `「${tag}」が付いたノートだけを並べます`;
           setTagKey(find, tag);
           find.textContent = tag;
           chip.append(find);
@@ -835,7 +835,7 @@ export class InspectorRenderer {
           find.setAttribute('data-pkc-action', 'filter-by-tag');
           find.setAttribute('data-pkc-tag', name);
           find.setAttribute('data-pkc-field', 'inspector-body-tag-find');
-          find.title = `「${name}」を含むノートを探します`;
+          find.title = `「${name}」が付いたノートだけを並べます`;
           setTagKey(find, name);
           find.textContent = name;
           chip.append(find);

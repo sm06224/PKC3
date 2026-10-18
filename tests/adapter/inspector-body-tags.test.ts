@@ -190,7 +190,7 @@ describe('タグの札を押したときに、結果が見える(#550)', () => {
       'sidebar',
     );
     // ⚠ 絞り込み自体も効いている(開くだけになっていない)
-    expect(d.getState().filterQuery).toBe('買い物');
+    expect(d.getState().filterQuery).toBe('#買い物');
     appPanes.setHidden([]);
   });
 
@@ -213,7 +213,7 @@ describe('札の説明が実態と合っている(#550)', () => {
   it('🔴 「が付いたノートを探す」と言わない(実際は語で絞る)', () => {
     const html = renderMarkdown('#買い物\n', { interactiveTags: true });
     expect(html, '起きないことを書いている').not.toContain('が付いたノートを探す');
-    expect(html, '説明が無い').toContain('を含むノートを探します');
+    expect(html, '説明が無い').toContain('が付いたノートだけを並べます');
   });
 
   it('🔑 情報ペインと同じ字である(呼び名を 2 つ作らない)', () => {
@@ -222,7 +222,7 @@ describe('札の説明が実態と合っている(#550)', () => {
       .querySelector<HTMLElement>('[data-pkc-action="filter-by-tag"]')!
       .getAttribute('title');
     const html = renderMarkdown('#買い物\n', { interactiveTags: true });
-    expect(inspectorTitle, '情報ペイン側の字が違う').toBe('「買い物」を含むノートを探します');
+    expect(inspectorTitle, '情報ペイン側の字が違う').toBe('「買い物」が付いたノートだけを並べます');
     expect(html, '本文の札と情報ペインで字が違う').toContain(inspectorTitle!);
   });
 });

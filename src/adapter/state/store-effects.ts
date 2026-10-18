@@ -113,6 +113,7 @@ import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { SearchDetailRow } from '@features/filter/search-snippet';
+import { tagQueryOf } from '@features/filter/tag-query';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
 import type { TagInputField, TagUndoGroup } from './app-state';
@@ -1147,7 +1148,22 @@ export function connectStoreEffects(
        * 遅れて返った結果は reducer が `query` で捨てるので、順序保証は要らない。
        */
       case 'REQUEST_SEARCH': {
-        const search = store.searchEntries;
+        /**
+         * 🔴 **`#タグ` の問い合わせは、題名・本文を探さず、そのタグが付いたノートを集める**(依頼 317)。
+         * 🔑 集めるのはスマートフォルダと同じ走査(`smartScan`。文書タグ + 本文中のタグ。突き合わせは `sameTag` 1 本)── 規則を
+         *   2 つ作らない(§7)。上限(`SMART_LIMIT`)を超えたら `truncated`(「ほかにもあります」)で言う。
+         */
+        const searchOf = (query: string): typeof store.searchEntries => {
+          const tagName = tagQueryOf(query);
+          if (tagName === null) return store.searchEntries;
+          const scanTag = store.smartScan;
+          if (scanTag === undefined) return undefined;
+          return async () => {
+            const out = await scanTag('', smartQueryOf({ ...EMPTY_SMART, tags: [tagName] }, Date.now()));
+            return { lids: out.lids, truncated: out.total > out.lids.length };
+          };
+        };
+        const search = searchOf(ev.query);
         if (ev.query.trim() === '') {
           searchPending = null;
           break;
@@ -1190,7 +1206,11 @@ export function connectStoreEffects(
             if (next !== null && (next !== query || again) && !disposed) run(next);
           };
           // 同期に投げられても飛行中の印を残さない(Promise の中で呼ぶ)
-          void new Promise<Awaited<ReturnType<typeof search>>>((r) => r(search(query))).then(
+          const ask = searchOf(query);
+          void new Promise<{ lids: string[]; truncated: boolean }>((r, rej) => {
+            if (ask === undefined) rej(new Error('search unavailable'));
+            else r(ask(query));
+          }).then(
             ({ lids, truncated }) => {
               if (!disposed)
                 dispatcher.dispatch({ type: 'SET_SEARCH_HITS', query, lids, truncated });

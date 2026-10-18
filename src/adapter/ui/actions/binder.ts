@@ -330,6 +330,7 @@ import {
 } from '@features/relation/dual-bookmarks';
 import { appDualPrefs } from '@adapter/ui/render/dual-prefs';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
+import { tagQueryText } from '@features/filter/tag-query';
 import { planCopy } from '@features/relation/copy-plan';
 import {
   otherSide,
@@ -7977,7 +7978,8 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   起きたことと言われたことが逆になる形は、無言の dead click より悪い。
      */
     if (!phoneShowList(dispatcher)) return;
-    dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tag });
+    // 🔴 `#タグ` の形で入れる ── 題名・本文の部分一致ではなく、そのタグが付いたノートだけを並べる(依頼 317)
+    dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: tagQueryText(tag) });
     // 🔴 スマホでは列の保存値を触らない(上の `focus-search` と同じ理由)
     if (appPhone.isPhone()) return;
     const hidden = appPanes.getHidden();
