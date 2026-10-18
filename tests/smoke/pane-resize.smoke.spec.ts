@@ -315,6 +315,24 @@ test('🔴 広げた後で画面を狭めても、本文は残る (#497)', async
   expect(side, `狭めても一覧が縮まない(${side})`).toBeLessThanOrEqual(900 * 0.45 + 2);
   expect(center, `本文が潰れた(一覧 ${side} / 本文 ${center})`).toBeGreaterThan(300);
 
+  // 🔴 台帳 #1852 束 S1(依頼 350)── 左右とも最大まで広げて 1100〜1400px で開いても、本文は 480px 以上残る。
+  //    覚えた幅は書き換えない ── 画面を戻せば元の幅に戻る(同じ起動の中で見る)
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await dragGrip(page, 'sidebar', 600);
+  await dragGrip(page, 'inspector', -600);
+  const wideSide = await widthOf(page, 'sidebar');
+  const wideInsp = await widthOf(page, 'inspector');
+  expect(wideSide, '1600px で左の列が広がっていない').toBeGreaterThan(400);
+  expect(wideInsp, '1600px で右の列が広がっていない').toBeGreaterThan(400);
+  for (const w of [1100, 1250, 1400]) {
+    await page.setViewportSize({ width: w, height: 900 });
+    const c = await widthOf(page, 'center');
+    expect(c, `${w}px で本文が 480px を割った(${c})`).toBeGreaterThanOrEqual(478);
+  }
+  await page.setViewportSize({ width: 1600, height: 900 });
+  expect(Math.abs((await widthOf(page, 'sidebar')) - wideSide), '幅を戻しても左の列が元に戻らない').toBeLessThan(4);
+  expect(Math.abs((await widthOf(page, 'inspector')) - wideInsp), '幅を戻しても右の列が元に戻らない').toBeLessThan(4);
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

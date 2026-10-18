@@ -27,6 +27,7 @@ import {
 import {
   fetchPackFromBase,
   fetchPackManifest,
+  PackAbortedError,
   packUrlFailureMessage,
   readPackFromZip,
   readPackInfoFromZip,
@@ -39,13 +40,20 @@ import { humanBytes } from '@features/human-bytes';
 
 export type PackResult =
   | { readonly ok: true; readonly meta: OfficePackMeta | null; readonly message: string }
-  | { readonly ok: false; readonly message: string };
+  /** `cancelled` = user がやめた(失敗ではない ── 画面は「問題」の扱いにしない)。 */
+  | { readonly ok: false; readonly message: string; readonly cancelled?: true };
+
+/** やめたときの知らせ。⚠ 「端末には何も書いていない」まで言う(書きかけが残ったと読まれない)。 */
+export const PACK_CANCELLED_MESSAGE = 'Office 一式の取り込みをやめました(端末には何も書いていません)';
+/** 端末へ書き始めた後にやめようとしたときの知らせ(書き込みは止められない ── 押して無反応にしない)。 */
+export const PACK_CANCEL_TOO_LATE_MESSAGE = 'いま端末に書き込んでいる最中なので、やめられません。まもなく終わります';
 
 /** 取得と保管の口(test は自前の実装を渡す)。 */
 export interface PackInstallDeps {
   readonly store: Pick<OfficePackStore, 'install' | 'remove' | 'readMeta'>;
   readonly fetchManifest?: typeof fetchPackManifest;
   readonly fetchFiles?: typeof fetchPackFromBase;
+  // ⚠ 2 つとも、最後の引数に「やめる」の合図(`AbortSignal`)を受ける(台帳 #1852 束 T1、依頼 156 ②)
   readonly readZip?: typeof readPackFromZip;
   /** zip の中の `pack.json` から版と素性を読む口(O7)。 */
   readonly readZipInfo?: typeof readPackInfoFromZip;
@@ -102,6 +110,11 @@ export class OfficePackInstaller {
   private readonly deps: PackInstallDeps;
   /** ⚠ **二重起動を作らない** ── 93MB を 2 本走らせると quota も帯域も倍食う。 */
   private running = false;
+  /**
+   * 🔴 **取り込みをやめる合図**(依頼 156 ②)。取得の間だけ生きる ── 端末へ書き始めたら外す(書き込みは止められない)。
+   * ⚠ 音声認識の部品の取り込み(`asr-pack-install.ts`)の「やめる」と同じ形。
+   */
+  private abort: AbortController | null = null;
 
   constructor(deps: PackInstallDeps) {
     this.deps = deps;
@@ -109,6 +122,15 @@ export class OfficePackInstaller {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  /**
+   * 取り込みをやめる。@returns やめられたか(`false` = 走っていない、または端末へ書き始めている ── 呼び手が理由を言う)
+   */
+  cancel(): boolean {
+    if (this.abort === null) return false;
+    this.abort.abort();
+    return true;
   }
 
   /** いま入っているもの。⚠ 読めなければ「入っていない」側へ倒す(安全側)。 */
@@ -133,19 +155,23 @@ export class OfficePackInstaller {
 
   /** 取得元(同一 origin)から入れる。 */
   async installFromUrl(): Promise<PackResult> {
-    return this.run('取得', async (progress) => {
+    return this.run('取得', async (progress, signal) => {
       const base = this.deps.base ?? DEFAULT_PACK_BASE;
       progress('取得元を調べています');
       try {
-        const manifest = await (this.deps.fetchManifest ?? fetchPackManifest)(base);
+        const manifest = await (this.deps.fetchManifest ?? fetchPackManifest)(base, undefined, signal);
         const files = await (this.deps.fetchFiles ?? fetchPackFromBase)(
           base,
           manifest.fonts,
           (phase, done, total) => progress(`${phase}(${done}/${total})`),
+          undefined,
+          signal,
         );
         // 🔴 ビルドの素性も持ち帰る(#155)── 版の文字列だけでは新旧を見分けられない
         return { files, version: manifest.version, build: manifest.build, source: 'url' as const };
       } catch (e) {
+        // 🔴 user がやめたのは失敗ではない ── 案内を足さずそのまま上へ(`run` が「やめました」を返す)
+        if (e instanceof PackAbortedError) throw e;
         // 🔴 取得で落ちたときだけ、日本語の理由 + 「ファイルから取り込む」への案内を付ける
         //    (保管側の失敗 = quota などは、この外なので触らない)
         throw new OfficePackError(packUrlFailureMessage(e));
@@ -193,7 +219,7 @@ export class OfficePackInstaller {
 
   private async run(
     what: string,
-    acquire: (progress: (text: string) => void) => Promise<{
+    acquire: (progress: (text: string) => void, signal: AbortSignal) => Promise<{
       files: PackFiles;
       version: string;
       /** ⚠ どのビルドか(#155)。手元の zip から入れたときは `null`。 */
@@ -205,9 +231,14 @@ export class OfficePackInstaller {
       return { ok: false, message: 'すでに取り込み中です。終わるまでお待ちください。' };
     }
     this.running = true;
+    const abort = new AbortController();
+    this.abort = abort;
     const progress = (text: string): void => this.deps.onProgress?.(text);
     try {
-      const { files, version, source, build } = await acquire(progress);
+      const { files, version, source, build } = await acquire(progress, abort.signal);
+      // 🔴 取得が終わる直前にやめた回も、端末には書かない。⚠ ここから先は書き込みなので、やめる合図を外す
+      if (abort.signal.aborted) return { ok: false, message: PACK_CANCELLED_MESSAGE, cancelled: true };
+      this.abort = null;
       progress('配備しています');
       // ⚠ **書く前に**永続化を頼む(拒否されても入れるのは続ける)
       const persisted = await (this.deps.persist ?? requestPersist)();
@@ -231,8 +262,10 @@ export class OfficePackInstaller {
             : '。ただし、このブラウザから「消さずに残す」許可がもらえなかったため、端末の空き容量が減ると自動で消されることがあります'),
       };
     } catch (e) {
+      if (e instanceof PackAbortedError) return { ok: false, message: PACK_CANCELLED_MESSAGE, cancelled: true };
       return { ok: false, message: toMessage(e, what) };
     } finally {
+      this.abort = null;
       // ⚠ **必ず降ろす**(finally)── 落ちたまま立ちっぱなしだと、以後の操作が
       //   全部「すでに取り込み中です」で断られ、リロードするしか無くなる
       this.running = false;

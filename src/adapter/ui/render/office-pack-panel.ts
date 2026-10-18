@@ -108,7 +108,9 @@ export interface PackResultUi {
  */
 export function applyPackResult(
   state: OfficePackState,
-  result: { ok: true; meta: OfficePackMeta | null; message: string } | { ok: false; message: string },
+  result:
+    | { ok: true; meta: OfficePackMeta | null; message: string }
+    | { ok: false; message: string; cancelled?: true },
   ui: PackResultUi,
 ): void {
   if (result.ok) {
@@ -116,7 +118,8 @@ export function applyPackResult(
     ui.redrawDetail();
   }
   // 🔴 失敗(取り込めなかった / 消せなかった)は結果ではなく問題 ── 数秒で消えると理由を読む前に無くなる(#1087)
-  if (result.ok) ui.notify(result.message);
+  //    ⚠ user がやめたのは問題ではない(`cancelled`)── 普通の知らせで言う(台帳 #1852 束 T1、依頼 156 ②)
+  if (result.ok || result.cancelled === true) ui.notify(result.message);
   else ui.notify(result.message, { kind: 'problem' });
 }
 
@@ -229,6 +232,13 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
    * ⚠ **押せなくしない。** 何も保存されていなくても「すでに初期状態です」と答える
    *   ほうが、灰色のボタンより分かる(困っている user は必ずここを押す)。
    */
+  /**
+   * 🔴 **取り込み中だけ出る「取り込みをやめる」**(台帳 #1852 束 T1、依頼 156 ②)。音声認識の部品の取り込みと揃える
+   * (同じ種類の取り込みで、片方にだけ「やめる」があるのは揃っていない)。取得の間は通信を止め、端末には何も書かない。
+   */
+  const cancelInstall = button('cancel-office-install', '取り込みをやめる', 'office-pack-cancel');
+  cancelInstall.title = '取り込みを途中でやめます(端末には何も書きません)';
+  cancelInstall.hidden = true;
   const resetProfile = button(
     'reset-office-profile',
     'Office の設定を初期化',
@@ -237,7 +247,7 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   resetProfile.title =
     'Office の中で変えた設定(ツールバーの形・表示言語など)を消して、次に開くときは素の状態から始めます。'
     + '⚠ Office で書いたマクロも消えます。ノートも一式も消えません';
-  row.append(fromUrl, fromFile, remove, resetProfile, input);
+  row.append(fromUrl, fromFile, cancelInstall, remove, resetProfile, input);
   root.append(row);
 
   const progress = document.createElement('p');
@@ -270,6 +280,7 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
      */
     fromUrl.disabled = busy;
     fromFile.disabled = busy;
+    cancelInstall.hidden = !busy;
     // ⚠ 入っていないのに「Office の一式を消す」を押せると、押しても何も起きないボタンになる
     remove.disabled = busy || meta === null;
     // ⚠ 設定の初期化は**一式が入っていなくても押せる**(落ちて開けない人が使う口

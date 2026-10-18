@@ -21,6 +21,8 @@ interface Wire {
   QUOTE_TIMEOUT_MS: number;
   DOC_FAILED: string;
   QUOTE_NO_REPLY: string;
+  HOST_PING_TIMEOUT_MS: number;
+  HOST_RELOADED: string;
   envelope(kind: string, token: string, payload?: object): Record<string, unknown>;
 }
 
@@ -85,6 +87,16 @@ function boot(): void {
 function fromHost(kind: string, payload: object): void {
   const env = wire.envelope(kind, TOKEN, payload);
   ch.onmessage?.({ data: env });
+}
+
+/**
+ * 本体が生きていて、`ping` に答える(台帳 #1852 束 T1、依頼 333 A)。⚠ 以前からある「返事待ちの上限」の test は
+ * 「本体は生きているが返事が来ない」を見るので、押した直後に本体の `pong` を届ける ── 届けないと 1.5 秒で
+ * 「読み込み直された」と読まれ、別の主張になる。
+ */
+function hostAnswersPing(): void {
+  expect(sentKinds(), '窓が ping を送っていない').toContain('ping');
+  fromHost('pong', {});
 }
 
 /** 字を選んだ状態にする(`selectionchange` が頁の中の字を指す)。 */
@@ -158,6 +170,7 @@ describe('🔴 ノートへ引く返事が来ないとき ── 「ノートへ
     selectText('結論', 3);
     expect(($('quote') as HTMLButtonElement).disabled).toBe(false);
     $('quote').click();
+    hostAnswersPing();
     expect($('status').textContent).toBe('ノートへ引用しています…');
     expect(sentKinds()).toContain('quote');
     vi.advanceTimersByTime(wire.QUOTE_TIMEOUT_MS - 1);
@@ -184,13 +197,50 @@ describe('🔴 ノートへ引く返事が来ないとき ── 「ノートへ
     boot();
     selectText('結論', 3);
     $('quote').click();
+    hostAnswersPing();
     vi.advanceTimersByTime(wire.QUOTE_TIMEOUT_MS - 1000);
     $('quote').click();
+    hostAnswersPing();
     // 最初の押しから見れば上限を過ぎるが、2 度目の押しから見ればまだ待っている
     vi.advanceTimersByTime(2000);
     expect($('status').textContent).toBe('ノートへ引用しています…');
     vi.advanceTimersByTime(wire.QUOTE_TIMEOUT_MS);
     expect($('status').textContent).toBe(wire.QUOTE_NO_REPLY);
+  });
+});
+
+describe('🔴 本体が読み込み直されていたら、10 秒待たずに言う(台帳 #1852 束 T1、依頼 333 A)', () => {
+  it('本体が ping に答えなければ、HOST_PING_TIMEOUT_MS で「読み込み直されました…」と断る(10 秒を待たない)', () => {
+    boot();
+    selectText('結論', 3);
+    $('quote').click();
+    expect(sentKinds().filter((k) => k === 'ping')).toHaveLength(1);
+    vi.advanceTimersByTime(wire.HOST_PING_TIMEOUT_MS - 1);
+    expect($('status').textContent, '早すぎる(本体の一瞬の遅れを「読み込み直された」と読んだ)').toBe('ノートへ引用しています…');
+    vi.advanceTimersByTime(1);
+    expect($('status').textContent).toBe(wire.HOST_RELOADED);
+    expect(wire.HOST_PING_TIMEOUT_MS, '10 秒の上限より十分に短い').toBeLessThan(wire.QUOTE_TIMEOUT_MS / 2);
+    // 上限(10 秒)の側の断りで上書きしない(理由が「確かめられませんでした」に戻らない)
+    vi.advanceTimersByTime(wire.QUOTE_TIMEOUT_MS * 2);
+    expect($('status').textContent, '10 秒の時計が生きていて、理由を上書きした').toBe(wire.HOST_RELOADED);
+  });
+
+  it('対照群: 本体が pong で答えたら、「読み込み直された」とは言わない(返事待ちの上限だけが生きる)', () => {
+    boot();
+    selectText('結論', 3);
+    $('quote').click();
+    hostAnswersPing();
+    vi.advanceTimersByTime(wire.HOST_PING_TIMEOUT_MS * 3);
+    expect($('status').textContent).toBe('ノートへ引用しています…');
+  });
+
+  it('対照群: 返事(quote-result)が先に来ていれば、遅れた ping の時計は何も書かない', () => {
+    boot();
+    selectText('結論', 3);
+    $('quote').click();
+    fromHost('quote-result', { ok: true, message: '引きました' });
+    vi.advanceTimersByTime(wire.HOST_PING_TIMEOUT_MS + 10);
+    expect($('status').textContent, '返事が来たのに「読み込み直された」で上書きした').not.toBe(wire.HOST_RELOADED);
   });
 });
 
@@ -217,6 +267,7 @@ describe('窓の下の一言は、終わった知らせなら 5 秒ほどで消�
     boot();
     selectText('結論', 3);
     $('quote').click();
+    hostAnswersPing();
     vi.advanceTimersByTime(9000);
     expect($('status').textContent).toBe('ノートへ引用しています…');
   });

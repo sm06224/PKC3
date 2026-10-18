@@ -1355,6 +1355,72 @@ describe('可搬 HTML — 目次と印刷(F-1)', () => {
     expect(document.querySelector('#pkc-dnotes #pkc-list')).not.toBeNull();
   });
 
+  /**
+   * 🔴 **スマホの幅では、一覧を本文の上に置き、ノートを選んだら一覧を畳む**(台帳 #1852 束 S1、依頼 77-2 B)。
+   * 直す前は左の一覧が 280px のまま残り、本文に 100px ほどしか残らなかった。
+   * ⚠ 幅の境目はアプリのスマホ画面と同じ数字(`PHONE_MAX_PX`)── 2 つ目の数字を持たない。
+   */
+  describe('スマホの幅(依頼 77-2 B)', () => {
+    const stubMedia = (matches: boolean): (() => void) => {
+      const w = window as unknown as { matchMedia?: (q: string) => { matches: boolean } };
+      const before = w.matchMedia;
+      const asked: string[] = [];
+      w.matchMedia = (q: string) => {
+        asked.push(q);
+        return { matches };
+      };
+      (w as unknown as { __asked?: string[] }).__asked = asked;
+      return () => {
+        w.matchMedia = before;
+      };
+    };
+
+    it('🔴 CSS: 狭い画面では 1 列にして、一覧(nav)を本文の上へ。画面だけの規則(紙には効かない)', async () => {
+      const { PHONE_MAX_PX } = await import('../../src/features/phone-layout');
+      const html = await (await writePortableHtml(DOC, NOW)).blob.text();
+      const at = html.indexOf(`@media screen and (max-width:${String(PHONE_MAX_PX)}px){`);
+      expect(at, '狭い画面の規則が無い(幅の数字が PHONE_MAX_PX と違う)').toBeGreaterThan(0);
+      const block = html.slice(at, html.indexOf('\n}\n', at));
+      expect(block).toContain('grid-template-columns:minmax(0,1fr)');
+      expect(block, '一覧が本文の下に回っている').toContain('grid-template-rows:auto minmax(0,1fr)');
+      expect(block, '一覧が画面を占有する(本文が読めない)').toMatch(/nav\{[^}]*max-height:45vh/);
+      expect(block, '横の区切り線が残っている').toContain('border-right:0');
+      // 紙は別の規則(@media print が nav を消す)── 画面の規則を print に入れていない
+      expect(block, 'print に入っている').not.toContain('print');
+    });
+
+    it('🔴 狭い画面でノートを選ぶと一覧が閉じる(開き直せば戻れる)。最初の 1 件の自動表示では閉じない', async () => {
+      const restore = stubMedia(true);
+      try {
+        await open((await writePortableHtml(DOC, NOW)).blob);
+        const dnotes = document.getElementById('pkc-dnotes') as HTMLDetailsElement;
+        expect(dnotes.open, '最初から閉じている(ノートが 1 つも見えない)').toBe(true);
+        document.querySelectorAll<HTMLButtonElement>('#pkc-list button')[1]!.click();
+        expect(dnotes.open, '選んだのに一覧が本文の上に残る').toBe(false);
+        expect(document.getElementById('pkc-title')!.textContent, '選んだノートが開いていない').toBe('同名');
+        // 閉じても開き直せる(summary は消えていない)
+        dnotes.open = true;
+        expect(dnotes.open).toBe(true);
+        const asked = (window as unknown as { __asked?: string[] }).__asked ?? [];
+        expect(asked.some((q) => q.includes('max-width')), '幅を聞いていない').toBe(true);
+      } finally {
+        restore();
+      }
+    });
+
+    it('対照群: 広い画面では、ノートを選んでも一覧は開いたまま', async () => {
+      const restore = stubMedia(false);
+      try {
+        await open((await writePortableHtml(DOC, NOW)).blob);
+        const dnotes = document.getElementById('pkc-dnotes') as HTMLDetailsElement;
+        document.querySelectorAll<HTMLButtonElement>('#pkc-list button')[1]!.click();
+        expect(dnotes.open, '広い画面でも一覧が閉じた').toBe(true);
+      } finally {
+        restore();
+      }
+    });
+  });
+
   it('🔴 目次は h1〜h3 を深さつきで並べる(h4 は入れない)', async () => {
     await open((await writePortableHtml(DOC, NOW)).blob);
     const items = Array.from(document.querySelectorAll('#pkc-toc li')).map((li) => [

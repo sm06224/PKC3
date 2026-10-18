@@ -512,7 +512,10 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
      * 🔴 **条件つきの「取り込む」まで見る**(着地前レビュー 🔴3)── `BODY_MENU_ACTIONS`
      *   だけと突き合わせる変異は、fixture に外部画像が 0 枚だと素通りした。
      */
+    // ⚠ 台帳 #1852 束 S1(依頼 238 の案 B): 動かせる向きの「ブロックを上へ・下へ移す」が本文の物の前に入る。
+    //   この見出しは上に動かす先が無い(いちばん上)ので「下へ」の 1 つだけ(`block-step-menu.test.ts` が全数を見る)
     expect(acts.slice(8), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+      'move-block-step',
       'add-place',
       'add-place-note',
       'add-place-template',
@@ -556,6 +559,9 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     const r = rig();
     rightClick(r.para);
     expect(r.acts(), '段落の上でも見出しの物が出た').toEqual([
+      // 台帳 #1852 束 S1(依頼 238 の案 B): 段落の上でも「ブロックを上へ・下へ移す」が出る(この段落は両側にブロックが在る)
+      'move-block-step',
+      'move-block-step',
       'add-place',
       'add-place-note',
       'add-place-template',

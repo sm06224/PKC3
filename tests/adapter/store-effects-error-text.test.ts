@@ -58,22 +58,53 @@ async function commitWith(over: Partial<StorePort>): Promise<Dispatcher> {
   d.dispatch({ type: 'START_EDIT' });
   d.dispatch({ type: 'UPDATE_OPEN_BODY', body: 'A2' });
   d.dispatch({ type: 'COMMIT_EDIT' });
-  await until(() => d.getState().phase === 'error');
+  await until(() => d.getState().error !== null);
   return d;
 }
 
 describe('本文の保存が失敗したときの字', () => {
-  it('🔴 空きが足りないとき: 英語の前置きが無く、空きを作った後の「ノートを保存し直す」まで言う', async () => {
+  it('🔴 空きが足りないとき: 編集の画面へ戻り、書きかけの字が残り、「編集を保存する」の押し直しを言う(台帳 #1852 束 S1、依頼 104-1 B)', async () => {
     const d = await commitWith({
       async persistEntry() {
         throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
       },
     });
-    const e = d.getState().error ?? '';
+    const st = d.getState();
+    const e = st.error ?? '';
+    expect(st.phase, '「保存に失敗した」状態で止まっている(空きを作る方法が無い)').toBe('editing');
+    expect(st.openBody?.body, '書きかけの字が消えた').toBe('A2');
+    expect(st.openBody?.baseline, '基準が disk に戻っていない(押し直しても何も書かれない)').toBe('# A');
     expect(e).toContain('空き容量が足りません');
-    expect(e).toContain('使われていない添付を消す');
-    expect(e, '空きを作った後の一手').toContain('「ノートを保存し直す」を押してください');
+    expect(e, '編集の画面にあるボタンを言う').toContain('「編集を保存する」');
+    expect(e, '編集の画面に無いボタンを案内している').not.toContain('ノートを保存し直す');
     expect(e, '括弧の外に英語の前置きが出た').not.toMatch(/^(エラー: )?(Quota|Error)/);
+  });
+
+  it('🔴 戻した後、空きができて「編集を保存する」を押し直すと、同じ字がもう一度書かれて保存される', async () => {
+    let full = true;
+    const written: string[] = [];
+    const d = await commitWith({
+      async persistEntry(entry: { body: string }) {
+        if (full) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+        written.push(entry.body);
+        return stubStamps();
+      },
+    });
+    expect(d.getState().phase).toBe('editing');
+    full = false;
+    d.dispatch({ type: 'COMMIT_EDIT' });
+    await until(() => written.length > 0);
+    expect(written, '押し直しても書かれていない').toEqual(['A2']);
+    expect(d.getState().phase).toBe('ready');
+  });
+
+  it('対照群: 空き以外の失敗は戻さず、従来どおり「保存に失敗した」状態で止める', async () => {
+    const d = await commitWith({
+      async persistEntry() {
+        throw new Error('disk exploded');
+      },
+    });
+    expect(d.getState().phase).toBe('error');
   });
 
   it('対照群: 空き以外の失敗には「保存し直す」の案内を足さず、Error: の前置きも付けない', async () => {

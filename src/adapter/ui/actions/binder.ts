@@ -72,6 +72,7 @@ import {
   BLOCK_GRIP_FIELD,
   BLOCK_LID_ATTR,
   BLOCK_START_ATTR,
+  blockStepsAt,
   grippedBlock,
 } from '../render/block-grip';
 import {
@@ -379,6 +380,8 @@ import {
   IMAGE_ALIGN_ATTR,
   IMAGE_WIDTH_ATTR,
   taskRunMenuActions,
+  blockStepMenuActions,
+  BLOCK_STEP_DIR_ATTR,
   tableConvertPickLabel,
   tableHeaderPickLabel,
   appGroupMenuActions,
@@ -2065,12 +2068,16 @@ export interface BinderServices {
    * @param from 押した窓(⚠ 章の別ウィンドウで押したときは**その窓**から開く ── 押した操作の
    *   続きは押した窓にしか付かないので、本体から開くとポップアップ阻止に掛かる)
    */
+  /**
+   * @returns 窓を開けたかを後で言う(`true` = 開けた)。⚠ 返さない実装は「開けたか分からない」と読む
+   *   (拡大の画面は閉じない ── 台帳 #1852 束 T1、依頼 99-2 C)。
+   */
   viewBig?(
     src: string,
     title: string,
     diagram?: { kind: 'mermaid' | 'chart'; source: string },
     from?: Window,
-  ): void;
+  ): void | Promise<boolean>;
   /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
   purgeOrphanAssets?(): void;
   /** 注意の面を閉じる(P6c review H-2)。 */
@@ -2178,6 +2185,8 @@ export interface BinderServices {
    *   保険ではなく一級の導線として扱う(user 裁定「ローカルとかを介して」)。
    */
   installOfficePack?(): void;
+  /** 取り込み中の「取り込みをやめる」(台帳 #1852 束 T1、依頼 156 ②)。 */
+  cancelOfficeInstall?(): void;
   installOfficePackFromFile?(file: File): void;
   removeOfficePack?(): void;
   /**
@@ -3038,6 +3047,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'undo-append',
   // ⚠ 塊の移動の「元に戻す」も同じ経路(#684 段①)
   'undo-move',
+  // 🔴 ブロックを 1 つ上下へ動かす(台帳 #1852 束 S1、依頼 238)── 実体は `MOVE_BLOCK`(本文を書く)なので同じ門
+  'move-block-step',
   // 🔴 予定を動かした直後の「元に戻す」(#855)── 日付を書き戻す 1 手なので同じ門をくぐらせる
   'schedule-undo-move',
   // 🔑 スタックの保存はノートを 1 件**作る**(`CREATE_ENTRY`。#633 段③)── 取込・書出しの
@@ -4504,6 +4515,14 @@ function setImageAttr(
  * 本文の外に出るので、受け手の時点では読めない。
  */
 const MENU_TASK_LINES_ATTR = 'data-pkc-menu-task-lines';
+/**
+ * 🔴 **右クリック(長押し)したブロックを動かすときの座標**(台帳 #1852 束 S1、依頼 238 の案 B)。
+ * 動かす範囲(`start..end`)と入れる位置(`before`)は**生の body の行番号**(`MOVE_BLOCK` がそのまま読む)。
+ * ⚠ 項目ごとに焼く(向きで入れる位置が違う)。メニューの器は本文の外に出るので、押した瞬間の DOM から数える。
+ */
+const MENU_BLOCK_START_ATTR = 'data-pkc-menu-block-start';
+const MENU_BLOCK_END_ATTR = 'data-pkc-menu-block-end';
+const MENU_BLOCK_BEFORE_ATTR = 'data-pkc-menu-block-before';
 
 /**
  * 🔴 **右クリックした項目が属するリストの、チェック項目の行番号**(#1173)。無ければ `null`。
@@ -4608,11 +4627,34 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   // 🔑 #1621 ── 左の列の帯に入りきらない操作の一覧(「⋯」)
   'open-bar-more',
   'open-repeat-menu',
+  // 🔑 台帳 #1852 束 S1(依頼 128-2)── 予定の札の「⋯」(右クリックのメニューと同じ物を開く)
+  'open-task-menu',
   // 🔑 #918 段②a ── 前に打った SQL の一覧(指で触る端末の唯一の入口)
   'sql-history-menu',
   // 🔑 #918 段④ ── 答えを file へ出す形(csv / tsv / json)の一覧
   'sql-export-menu',
 ]);
+
+/**
+ * 🔴 **予定の札の「⋯」が、合成した `contextmenu` を送っている最中**(台帳 #1852 束 S1、依頼 128-2 A)。
+ * 指で長押しした札のメニューは出さない(長押しはドラッグだけ)が、「⋯」を押して開くメニューは出す ──
+ * 受け手が両者を見分けるための印。⚠ 同期の 1 回の送りの中だけ立つ(`finally` で必ず降ろす)。
+ */
+let taskMenuFromButton = false;
+
+/**
+ * 🔴 **指の長押しで来た `contextmenu` が、ドラッグだけにしたい予定の札の上か**(台帳 #1852 束 S1、依頼 128-2 A)。
+ * Android のブラウザは約 0.5 秒の長押しで `contextmenu` を撃つ。予定の札は同じ 0.5 秒でドラッグも始まる(`schedule-drag.ts`)ので、
+ * 両方起きて「メニューが開いて一覧が押せないまま、ドラッグした予定をどこへも置けない」になっていた。
+ * ⚠ 「⋯」の無い面(週・月の升)は従来どおり(メニューへ入る道がそこには他に無い)。
+ * ⚠ マウスの右クリックは止めない(`isTouchClick` が偽)。
+ */
+function suppressTouchTaskMenu(ev: MouseEvent, target: Element): boolean {
+  if (taskMenuFromButton || !isTouchClick(ev)) return false;
+  const card = target.closest('article[data-pkc-entry]');
+  if (card === null || card.querySelector('[data-pkc-field="task-menu"]') === null) return false;
+  return card.closest('[data-pkc-region="schedule-cards"], [data-pkc-field="schedule-day-lane"]') !== null;
+}
 
 /**
  * メニューが出た時のノートと、いま開いているノートが同じか。
@@ -12138,6 +12180,26 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **右クリックしたチェックリストを丸ごとそろえる**(#1173)。
    * 🔑 向きだけが違う 2 つを 1 本にする(`table-to-*` と同じ作法 ── §7)。
    */
+  /**
+   * 🔴 **押したブロックを、ひとつ上・ひとつ下へ動かす**(台帳 #1852 束 S1、依頼 238 の案 B)。
+   * ⚠ 座標は項目が運ぶ(右クリック / 長押しで開いた時点の本文のもの)。`MOVE_BLOCK` は画面の本文の行と突き合わせて
+   *   書くので、別の窓が動かして行がずれていれば断る(ドラッグで落としたときと同じ門)。
+   */
+  'move-block-step': (dispatcher, target, services) => {
+    if (refuseStaleMenu(dispatcher, target)) return;
+    const lid = target.getAttribute(MENU_LID_ATTR) ?? '';
+    const start = menuCarriedAt(target, MENU_BLOCK_START_ATTR);
+    const end = menuCarriedAt(target, MENU_BLOCK_END_ATTR);
+    const toBefore = menuCarriedAt(target, MENU_BLOCK_BEFORE_ATTR);
+    if (lid === '' || start === null || end === null || toBefore === null) return;
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      '動かせませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => dispatcher.dispatch({ type: 'MOVE_BLOCK', lid, start, end, toBefore }),
+    );
+  },
   'task-run-open': (dispatcher, target, services) => setTaskRun(dispatcher, target, 'open', services),
   'task-run-done': (dispatcher, target, services) => setTaskRun(dispatcher, target, 'done', services),
   /**
@@ -14064,6 +14126,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'install-office-pack': (_dispatcher, _target, services) => {
     services.installOfficePack?.();
   },
+  // 🔴 取り込みをやめる(台帳 #1852 束 T1、依頼 156 ②)。判断と文言は実体(`OfficePackInstaller`)が持つ
+  'cancel-office-install': (_dispatcher, _target, services) => {
+    services.cancelOfficeInstall?.();
+  },
   'choose-office-pack': (_dispatcher, target) => {
     target
       .closest('[data-pkc-region="settings-office"]')
@@ -15202,6 +15268,25 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (items.length === 0) return;
     const r = target.getBoundingClientRect();
     openContextMenu(root, { x: r.left, y: r.bottom }, items, target);
+  },
+  /**
+   * 🔴 **予定の札の「⋯」から、右クリックと同じメニューを開く**(台帳 #1852 束 S1、依頼 128-2 A)。
+   * 🔑 メニューの組み立ては `contextmenu` の受け手(`onContextMenu`)**1 本**に任せる ── 札の上で右クリックしたときと
+   *   同じ項目・同じ「先に選んでから出す」門を通る(項目の一覧を 2 か所に書かない。§7)。
+   *   ⚠ 合成した `contextmenu` は、スマホの長押しのメニュー抑止(`suppressTouchTaskMenu`)を通さない印を立てて送る。
+   */
+  'open-task-menu': (_dispatcher, target) => {
+    const card = target.closest<HTMLElement>('article[data-pkc-entry]');
+    if (card === null) return;
+    const r = target.getBoundingClientRect();
+    taskMenuFromButton = true;
+    try {
+      card.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left, clientY: r.bottom }),
+      );
+    } finally {
+      taskMenuFromButton = false;
+    }
   },
   'open-repeat-menu': (_dispatcher, target, _services, root) => {
     const lid = target.getAttribute('data-pkc-entry') ?? '';
@@ -19142,6 +19227,11 @@ export function bindActions(
       ev.preventDefault();
       return;
     }
+    // 🔴 指で長押しした予定の札は、ドラッグだけにする(メニューは札の「⋯」から)── 依頼 128-2 A
+    if (suppressTouchTaskMenu(ev, target)) {
+      ev.preventDefault();
+      return;
+    }
 
     /**
      * ⚠ 既定を残す場面 ── ここで返すと、ブラウザのメニューがそのまま出る。
@@ -19436,6 +19526,8 @@ export function bindActions(
        *   行番号は**この項目にだけ**載せる(`attrs`。表と同じ作法)。
        */
       const taskLines = taskRunLinesAt(target, host);
+      // 🔴 ブロックを上下へ 1 つ動かす(台帳 #1852 束 S1、依頼 238 の案 B)。指で⠿を掴めない端末の道
+      const steps = host === null || ob === null ? null : blockStepsAt(host, target, ob.body);
       const items = [
         ...(heading === null || line === null
           ? []
@@ -19495,6 +19587,17 @@ export function bindActions(
           : taskRunMenuActions().map((a) => ({
               ...a,
               attrs: { [MENU_TASK_LINES_ATTR]: taskLines.join(',') },
+            }))),
+        ...(steps === null
+          ? []
+          : blockStepMenuActions({ up: steps.up !== null, down: steps.down !== null }).map((a) => ({
+              ...a,
+              attrs: {
+                ...(a.attrs ?? {}),
+                [MENU_BLOCK_START_ATTR]: String(steps.start),
+                [MENU_BLOCK_END_ATTR]: String(steps.end),
+                [MENU_BLOCK_BEFORE_ATTR]: String((a.attrs?.[BLOCK_STEP_DIR_ATTR] === 'up' ? steps.up : steps.down) ?? ''),
+              },
             }))),
         /**
          * 🔴 **画像の上なら、大きさ・寄せを頭に足す**(#1640 ③)。⚠ 行と鍵は**この項目にだけ**載せる

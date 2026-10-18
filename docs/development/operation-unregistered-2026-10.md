@@ -236,6 +236,7 @@
 | `schedule-undo-move` | 低 | 元に戻す | `src/adapter/ui/render/schedule-undo.ts:126` | 動かした直後の知らせに付く一時ボタン |
 | `schedule-print` | 低 | 印刷 | `src/adapter/ui/render/schedule.ts:757` | 予定表の上の帯のボタン。いま見ている範囲(月・週・日・一覧)だけを紙に出す。押した面から範囲を引く |
 | `schedule-week-pick` | 低 | (週の日の見出し) | `src/adapter/ui/render/schedule-week.ts:146` | 押した日を指す |
+| `open-task-menu` | 低 | この予定のメニューを開く(⋯) | `src/adapter/ui/render/task-card.ts:121` | 一覧と「日」の予定の札の右端。押した札が対象で、右クリックと同じメニューを開く(台帳 #1852 束 S1、依頼 128-2 A) |
 
 ## 本文の整形
 
@@ -245,6 +246,7 @@
 | `insert-attachment` | 高 | 添付を入れる | `src/adapter/ui/render/format-bar.ts:145` | 書式の帯の「添付を入れる」(#1640 ④)。挿す先は打っている欄。登記は別の段で(`insert-entry-link` と同じ仕分け) |
 | `image-width` | 低 | 画像の大きさ | `src/features/entry-actions.ts:1232` | 本文の画像の右クリックの項目(押した画像の行と値は項目が運ぶ)。#1640 ③ |
 | `image-align` | 低 | 画像の寄せ | `src/features/entry-actions.ts:1235` | 同上 |
+| `move-block-step` | 低 | このブロックを上へ移す / 下へ移す | `src/features/entry-actions.ts:1265`<br>`src/features/entry-actions.ts:1267` | 本文のブロックの長押し(右クリック)の項目。動かすブロックの範囲と入れる位置は項目が運ぶ(台帳 #1852 束 S1、依頼 238 の案 B) |
 
 ## SQL
 
@@ -437,6 +439,7 @@
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
 | `cancel-asr-install` | 低 | (取り込み中のやめる) | `src/adapter/ui/render/asr-pack-panel.ts:206` | 部品の取り込みの途中でしか出ない |
+| `cancel-office-install` | 低 | 取り込みをやめる | `src/adapter/ui/render/office-pack-panel.ts` | Office 一式の取り込みの途中でしか出ない(台帳 #1852 束 T1、依頼 156 ②) |
 | `choose-office-pack` | 低 | (Office の部品を選ぶ) | `src/adapter/ui/render/office-pack-panel.ts:195` | 部品を取る入口の一部。ファイル選択の中 |
 | `install-asr-part` | 低 | (部品ごとの取り込み) | `src/adapter/ui/render/asr-pack-panel.ts:188` | 数十〜数百 MB の部品を取る(押したボタンが部品を運ぶ)。#772 段②で未登記と判断済み |
 | `install-office-pack` | 低 | 配布元から取り込む | `src/adapter/ui/render/office-pack-panel.ts:182` | 数十〜数百 MB の部品を取る。#772 段②と同じ判断 |

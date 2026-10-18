@@ -139,10 +139,54 @@ describe('CSS へ渡す形(#497)', () => {
    * ⚠ 上限が `vw` / `vh` で入っていることまで見る ── px だけだと縮まない。
    */
   it('🔴 clamp で自分を制限する(JS が resize を聞き直さなくてよい)', () => {
-    expect(paneSizeCss('sidebar', 240)).toBe('clamp(0px, 240px, 45vw)');
-    expect(paneSizeCss('inspector', 300)).toBe('clamp(0px, 300px, 45vw)');
+    expect(paneSizeCss('sidebar', 240)).toBe('clamp(0px, 240px, min(45vw, max(240px, calc((100vw - 500px) / 2))))');
+    expect(paneSizeCss('inspector', 300)).toBe('clamp(0px, 300px, min(45vw, max(240px, calc((100vw - 500px) / 2))))');
     // ⚠ 高さの面は **vh** ── vw を使い回すと、横長の画面で青天井になる
     expect(paneSizeCss('append', 120)).toBe('clamp(0px, 120px, 60vh)');
+  });
+
+  /**
+   * 🔴 **左右を最大まで広げても、幅 1100px 以上の画面では本文に 480px 残る**(台帳 #1852 束 S1、依頼 350 A)。
+   * ⚠ 文字列の一致だけでは「式が正しいか」を言えない ── 実際に **CSS の式を評価**して、本文の幅を出す
+   *   (期待値を実装の定数から組まない: 左右の掴む帯 8px×2 と隙間 1px×4 は `app.css` の枠の値)。
+   * ⚠ 覚えた幅(`sidebar:640` など)そのものは書き換えない ── 上限は表示のときだけ効く。
+   */
+  it('🔴 左右とも最大(640px)でも、幅 1100〜2560px の画面で本文が 480px を割らない', () => {
+    // `paneSizeCss` が返す clamp の第 3 引数(上限)を取り出し、vw ごとに評価する
+    const css = paneSizeCss('sidebar', 640);
+    const m = /^clamp\(0px, 640px, (.+)\)$/.exec(css);
+    expect(m, '上限の式が読めない(形が変わった)').not.toBeNull();
+    const evaluate = (expr: string, vw: number): number => {
+      const e = expr
+        .replace(/calc\(/g, '(')
+        .replace(/(\d+(?:\.\d+)?)vw/g, (_s, n: string) => `(${n}*${String(vw)}/100)`)
+        .replace(/(\d+(?:\.\d+)?)px/g, '$1')
+        .replace(/\bmin\(/g, 'Math.min(')
+        .replace(/\bmax\(/g, 'Math.max(');
+      return new Function(`return (${e});`)() as number;
+    };
+    let minCenter = Infinity;
+    for (const vw of [1100, 1200, 1280, 1366, 1400, 1440, 1600, 1920, 2560]) {
+      const cap = evaluate(m![1]!, vw);
+      const side = Math.min(640, cap); // 左右それぞれ、覚えた 640px か上限の小さいほう
+      const center = vw - 2 * side - 16 - 4; // 掴む帯 8px×2 + 隙間 1px×4
+      minCenter = Math.min(minCenter, center);
+      expect(center, `幅 ${String(vw)}px で本文が ${String(center)}px しか残らない`).toBeGreaterThanOrEqual(480);
+    }
+    // 空振り防止: 上限が効いていない(= 全部 640px のまま)なら、1100px で本文は 1100-1280-20 < 0 になる ── 式を見ている
+    expect(evaluate(m![1]!, 1100), '式が上限になっていない').toBeLessThan(640);
+    expect(minCenter).toBeGreaterThanOrEqual(480);
+  });
+
+  it('対照群: 広い画面(2560px)では覚えた幅の 640px がそのまま効く(広げた幅を勝手に縮めない)', () => {
+    const m = /^clamp\(0px, 640px, (.+)\)$/.exec(paneSizeCss('sidebar', 640))!;
+    const e = m[1]!
+      .replace(/calc\(/g, '(')
+      .replace(/(\d+(?:\.\d+)?)vw/g, (_s, n: string) => `(${n}*2560/100)`)
+      .replace(/(\d+(?:\.\d+)?)px/g, '$1')
+      .replace(/\bmin\(/g, 'Math.min(')
+      .replace(/\bmax\(/g, 'Math.max(');
+    expect(new Function(`return (${e});`)() as number).toBeGreaterThanOrEqual(640);
   });
 
   it('変数名は 1 か所で綴る', () => {

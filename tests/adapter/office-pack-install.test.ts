@@ -12,7 +12,11 @@
  */
 import { OFFICE_PACK_APPROX } from '../../src/features/office/office-pack-size';
 import { describe, expect, it, vi } from 'vitest';
-import { OfficePackInstaller } from '../../src/adapter/platform/office/office-pack-install';
+import {
+  OfficePackInstaller,
+  PACK_CANCELLED_MESSAGE,
+} from '../../src/adapter/platform/office/office-pack-install';
+import { PackAbortedError } from '../../src/adapter/platform/office/office-pack-acquire';
 import {
   OfficePackError,
   parsePackManifest,
@@ -363,5 +367,95 @@ describe('parsePackManifest', () => {
     const m = parsePackManifest({ files: ['soffice.js'], fonts: ['fonts/a.ttf'] });
     expect(m.version).toBe('unknown');
     expect(m.totalBytes).toBe(0);
+  });
+});
+
+/**
+ * 🔴 **取り込みをやめる**(台帳 #1852 束 T1、依頼 156 ②)。取得の間は通信を止め、端末には何も書かない。
+ * 書き込みに入った後は止められない(理由を言う ── 押して無反応にしない)。
+ */
+describe('取り込みをやめる(依頼 156 ②)', () => {
+  /** 取得が user の合図で止まるまで待つ fetchFiles(本物の取得と同じく signal を見る)。 */
+  const waitsForAbort = (): ((base: string, fonts: readonly string[], p?: unknown, s?: number, signal?: AbortSignal) => Promise<never>) =>
+    (_b, _f, _p, _s, signal) =>
+      new Promise<never>((_, reject) => {
+        signal?.addEventListener('abort', () => reject(new PackAbortedError()), { once: true });
+      });
+
+  it('🔴 取得中にやめると「やめました」を返し、端末には何も書かず、門は開く', async () => {
+    const installs: unknown[] = [];
+    const { installer } = make({
+      fetchFiles: waitsForAbort() as never,
+      install: async (...a) => {
+        installs.push(a);
+        return META;
+      },
+    });
+    const running = installer.installFromUrl();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(installer.isRunning()).toBe(true);
+    expect(installer.cancel(), 'やめられなかった').toBe(true);
+    const r = await running;
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.cancelled, 'やめたのが「失敗」と区別できない').toBe(true);
+    expect(r.message).toBe(PACK_CANCELLED_MESSAGE);
+    expect(r.message, '失敗の案内(ファイルから取り込む…)を足している').not.toContain('ファイルから取り込む');
+    expect(installs, 'やめたのに端末へ書いた').toEqual([]);
+    expect(installer.isRunning(), 'やめた後も「取り込み中」のまま').toBe(false);
+    // 門が開いている ── すぐ入れ直せる
+    const again = make();
+    expect((await again.installer.installFromUrl()).ok).toBe(true);
+  });
+
+  it('🔴 取得が終わる直前にやめた回も、端末には書かない', async () => {
+    const installs: unknown[] = [];
+    let release!: () => void;
+    const { installer } = make({
+      fetchFiles: (() =>
+        new Promise((resolve) => {
+          release = () => resolve(new Map([['soffice.js', new Blob(['x'])]]));
+        })) as never,
+      install: async (...a) => {
+        installs.push(a);
+        return META;
+      },
+    });
+    const running = installer.installFromUrl();
+    await Promise.resolve();
+    await Promise.resolve();
+    installer.cancel();
+    release();
+    const r = await running;
+    expect(!r.ok && r.cancelled).toBe(true);
+    expect(installs, '合図の後に書いた').toEqual([]);
+  });
+
+  it('🔴 端末へ書き始めた後は、やめられない(false)── 書き込みは止めず、最後まで入る', async () => {
+    let letGo!: () => void;
+    const { installer } = make({
+      install: () =>
+        new Promise((resolve) => {
+          letGo = () => resolve(META);
+        }),
+    });
+    const running = installer.installFromUrl();
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    expect(installer.isRunning()).toBe(true);
+    expect(installer.cancel(), '書き込み中なのに止められると言った').toBe(false);
+    letGo();
+    const r = await running;
+    expect(r.ok, '書き込みは止めずに完了する').toBe(true);
+  });
+
+  it('対照群: 走っていないときのやめるは何も起こさない(false)', () => {
+    const { installer } = make();
+    expect(installer.cancel()).toBe(false);
+  });
+
+  it('対照群: やめていなければ、今までどおり入る', async () => {
+    const { installer } = make();
+    const r = await installer.installFromUrl();
+    expect(r.ok).toBe(true);
   });
 });

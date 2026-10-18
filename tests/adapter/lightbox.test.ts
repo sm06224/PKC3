@@ -71,6 +71,49 @@ describe('lightbox', () => {
         undefined,
       );
     });
+
+    /**
+     * 🔴 ⧉ を押して別のウィンドウが開けたときだけ、その場の拡大を閉じる(台帳 #1852 束 T1、依頼 99-2 C)。
+     * 直す前は、開けても開けなくても暗い拡大が本文を覆ったままだった。
+     */
+    describe('⧉ で別のウィンドウが開けたとき(依頼 99-2 C)', () => {
+      const opened = async (result: boolean | undefined): Promise<{ closed: number }> => {
+        const out = { closed: 0 };
+        const viewBig = vi.fn(() => (result === undefined ? undefined : Promise.resolve(result)));
+        const root = document.createElement('div');
+        document.body.append(root);
+        openLightbox(root, { src: 'a.png', alt: '図' }, { viewBig } as never);
+        const btn = root.querySelector<HTMLButtonElement>('.pkc-lightbox-open-win-btn')!;
+        btn.click();
+        await Promise.resolve();
+        await Promise.resolve();
+        out.closed = lightboxOpen(root) ? 0 : 1;
+        return out;
+      };
+      it('🔴 開けたら、拡大を閉じる', async () => {
+        expect((await opened(true)).closed, '別のウィンドウが開いたのに拡大が本文を覆ったまま').toBe(1);
+      });
+      it('対照群: 開けなかったら(ポップアップが止められた等)閉じない ── 理由を読め、拡大のまま使える', async () => {
+        expect((await opened(false)).closed, '開けなかったのに閉じた(何も見えなくなる)').toBe(0);
+      });
+      it('対照群: 開けたか分からない呼び手(何も返さない)でも閉じない', async () => {
+        expect((await opened(undefined)).closed).toBe(0);
+      });
+      it('待っている間に user が閉じた / 別の拡大を開いたなら、後から来た「開けた」で触らない', async () => {
+        const root = document.createElement('div');
+        document.body.append(root);
+        let resolve!: (v: boolean) => void;
+        const viewBig = vi.fn(() => new Promise<boolean>((r) => (resolve = r)));
+        openLightbox(root, { src: 'a.png', alt: '図' }, { viewBig } as never);
+        root.querySelector<HTMLButtonElement>('.pkc-lightbox-open-win-btn')!.click();
+        // 待っている間に別の拡大を開き直す(最初の拡大は消える)
+        openLightbox(root, { src: 'b.png', alt: '別の図' }, { viewBig } as never);
+        resolve(true);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(lightboxOpen(root), '別の拡大を巻き添えで閉じた').toBe(true);
+      });
+    });
   });
 
   describe('openLightbox and closeLightbox lifecycle', () => {

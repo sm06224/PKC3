@@ -179,13 +179,18 @@ export function packUrlFailureMessage(e: unknown): string {
  * 🔑 これが在るので、PKC3 側は**フォント名を 1 つも知らなくてよい** ──
  * 「一式とは何か」を配る側と取る側の 2 か所に持たない(`office-pack.ts` 冒頭の教訓)。
  */
-export async function fetchPackManifest(base: string, stallMs: number = PACK_STALL_MS): Promise<PackManifest> {
+export async function fetchPackManifest(
+  base: string,
+  stallMs: number = PACK_STALL_MS,
+  signal?: AbortSignal,
+): Promise<PackManifest> {
   const url = new URL('pack.json', resolveBase(base));
   const got = await guardedFetch(url.href, stallMs, async (res) => {
     if (!res.ok) return { status: res.status, json: null as unknown };
     // ⚠ **JSON として読めた**を「目録だった」と読まない ── 形は `parsePackManifest` が見る
     return { status: 0, json: (await res.json().catch(() => null)) as unknown };
-  }).catch((e: unknown) => {
+  }, signal).catch((e: unknown) => {
+    if (e instanceof PackAbortedError) throw e;
     if (e instanceof PackStalledError) throw new OfficePackError(`配布元からの応答が ${Math.round(stallMs / 1000)} 秒止まりました。`);
     // ⚠ 原因を名指しする ── 「失敗しました」では user が次に何をすべきか分からない
     throw new OfficePackError('配布元に届きません。');
@@ -206,11 +211,23 @@ export const PACK_STALL_MS = 60_000;
 
 class PackStalledError extends Error {}
 
+/**
+ * 🔴 **user が取り込みをやめた**(台帳 #1852 束 T1、依頼 156 ②)。「失敗」ではない ── 呼び手は理由を言い立てず、
+ * 端末に何も書かないまま終える。⚠ `OfficePackError`(取り込めなかった)とは別の型にして、案内の足し込みに巻き込まない。
+ */
+export class PackAbortedError extends Error {
+  constructor() {
+    super('aborted');
+  }
+}
+
 async function guardedFetch<T>(
   href: string,
   stallMs: number,
   read: (res: Response, touch: () => void) => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
+  if (signal?.aborted === true) throw new PackAbortedError();
   const ac = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stall: (e: Error) => void = () => undefined;
@@ -225,6 +242,12 @@ async function guardedFetch<T>(
     }, stallMs);
   };
   touch();
+  // 🔴 user のやめるは、通信を止めて(`ac.abort()`)待ちも打ち切る ── 止まらない実装でも先へ進める
+  const onAbort = (): void => {
+    ac.abort();
+    stall(new PackAbortedError());
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
   const work = (async (): Promise<T> => {
     // 🔴 既定の cache に任せない(O6)── 古い目録 / 古い一式が残ると、配り直した版が取れない。
     //    `no-cache` は毎回検証だけは取りに行く(変わっていなければ 304 で済む)。
@@ -238,6 +261,7 @@ async function guardedFetch<T>(
     return await Promise.race([work, stalled]);
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
   }
 }
 
@@ -266,6 +290,7 @@ export async function fetchPackFromBase(
   fonts: readonly string[],
   onProgress?: AcquireProgress,
   stallMs: number = PACK_STALL_MS,
+  signal?: AbortSignal,
 ): Promise<PackFiles> {
   const root = resolveBase(base);
   if (fonts.length === 0) {
@@ -278,12 +303,13 @@ export async function fetchPackFromBase(
   const names = [...REQUIRED_PACK_FILES, ...fontNames];
   const out: PackFiles = new Map();
   for (const [i, name] of names.entries()) {
+    if (signal?.aborted === true) throw new PackAbortedError();
     onProgress?.(`取得中: ${name}`, i, names.length);
     const url = new URL(name, root);
     // ⚠ 1 file ごとに「進みが止まった」を見る(#1087)── 止まったら理由つきで落ち、呼び側が出口の案内を足す
     const got = await guardedFetch(url.href, stallMs, async (res, touch) => (
       res.ok ? { status: 0, blob: await readBlobWithProgress(res, touch) } : { status: res.status, blob: null }
-    )).catch((e: unknown) => {
+    ), signal).catch((e: unknown) => {
       if (e instanceof PackStalledError) {
         throw new OfficePackError(`配布元から「${name}」を受け取る途中で、${Math.round(stallMs / 1000)} 秒間応答が止まりました。`);
       }

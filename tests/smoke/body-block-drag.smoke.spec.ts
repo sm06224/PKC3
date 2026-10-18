@@ -91,6 +91,23 @@ test('🔴 ⠿ を掴んで別の塊の下へ落とすと、本文の並びが�
     .poll(() => order(page), { timeout: 5000, message: '元に戻らない' })
     .toEqual(['題', '段落 A', '章 B', '本文 B', '章 C', '本文 C']);
 
+  /**
+   * 🔴 台帳 #1852 束 S1(依頼 238 案 B)── ⠿ を掴めない端末の道:ブロックを右クリック(スマホは長押し)→
+   *   「このブロックを下へ移す」で、隣と入れ替わる。下の知らせの「元に戻す」で戻る。🔑 起動を増やさない ── 道中に足す。
+   */
+  await page.locator(`${HOST} > p`).first().click({ button: 'right' });
+  const stepMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(stepMenu, '右クリックしてもメニューが出ない').toBeVisible();
+  await expect(stepMenu, '「このブロックを上へ移す」が出ていない').toContainText('このブロックを上へ移す');
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-block-step-dir="down"]');
+  await expect
+    .poll(() => order(page), { timeout: 5000, message: '「下へ移す」で本文の順が入れ替わらない' })
+    .toEqual(['題', '章 B', '本文 B', '段落 A', '章 C', '本文 C']);
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect
+    .poll(() => order(page), { timeout: 5000, message: '「元に戻す」で戻らない' })
+    .toEqual(['題', '段落 A', '章 B', '本文 B', '章 C', '本文 C']);
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

@@ -143,8 +143,10 @@ describe('#135 ハングの検知(物差しは 2 本)', () => {
     expect(HANG_MESSAGE).toContain('開き直して');
   });
 
-  it('🔴 開き直したあと、打った分が戻せることを言う(.docx / .odt)。文言は言い切らず、対象の形式を添える', () => {
-    expect(HANG_MESSAGE.endsWith('(.docx / .odt は、打った分を次に開くときに戻せます)')).toBe(true);
+  it('🔴 開き直したあと、打った分が戻せることを言う(添付から開いた .docx / .odt)。文言は言い切らず、対象を添える', () => {
+    // 台帳 #1852 束 T1(依頼 367 の案 B)── 手元のファイルや Office の中で新しく作った文書は、一時保存の戻し口が無い。
+    //   以前は「.docx / .odt は〜戻せます」と言い切っていて、その文書には嘘だった
+    expect(HANG_MESSAGE.endsWith('(添付から開いた .docx / .odt は、打った分を次に開くときに戻せます)')).toBe(true);
     expect(HANG_MESSAGE).not.toContain('控え');
   });
 });

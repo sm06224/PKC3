@@ -117,6 +117,21 @@ test('🔴 情報ペインの「閲覧用 HTML」で、そのノートだけの 
     }),
     '薄い字・点線の下線になっていない',
   ).toEqual({ opacity: '0.6', line: 'underline', style: 'dotted' });
+  /**
+   * 🔴 台帳 #1852 束 S1(依頼 77-2 B)── 幅 360px で開くと、一覧が本文の上に出て、ノートを選ぶと一覧が閉じる。
+   * 🔑 起動を増やさない ── 上で開いた配布 file を、同じ page で狭くする。
+   */
+  await viewer.setViewportSize({ width: 360, height: 800 });
+  const navBox = await viewer.locator('nav').boundingBox();
+  const mainBox = await viewer.locator('main').boundingBox();
+  expect(navBox, '一覧(nav)が取れない').not.toBeNull();
+  expect(mainBox, '本文(main)が取れない').not.toBeNull();
+  expect(navBox!.y + navBox!.height, `360px で一覧が本文の上に出ていない(nav ${JSON.stringify(navBox)} / main ${JSON.stringify(mainBox)})`)
+    .toBeLessThanOrEqual(mainBox!.y + 1);
+  expect(mainBox!.width, '360px で本文が潰れている').toBeGreaterThan(300);
+  await expect(viewer.locator('#pkc-dnotes'), '前提: 一覧は開いている').toHaveJSProperty('open', true);
+  await viewer.locator('#pkc-list button').first().click();
+  await expect(viewer.locator('#pkc-dnotes'), 'ノートを選んでも一覧が閉じない(スマホ幅)').toHaveJSProperty('open', false);
   await viewer.close();
 
   expect(errors, 'pageerror が出た').toEqual([]);

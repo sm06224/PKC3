@@ -1,4 +1,4 @@
-import { WRITE_QUOTA_REFUSAL, WRITE_QUOTA_REFUSAL_BODY_SAVE } from './storage/write-quota';
+import { WRITE_QUOTA_REFUSAL, WRITE_QUOTA_REFUSAL_BODY_SAVE, WRITE_QUOTA_REFUSAL_EDITING } from './storage/write-quota';
 /** 空きが足りないときの案内(ボタンの名前は画面の字〔`commands.ts`〕と揃える)。 */
 const QUOTA_JA = '保存できる空き容量が足りません。システムの「使われていない添付を消す」で空きを作ってから、もう一度お試しください';
 
@@ -9,6 +9,11 @@ export const QUOTA_MESSAGE = /QuotaExceededError|SQLITE_FULL|disk is full|quota 
 const QUOTA_JA_BODY_SAVE =
   '保存できる空き容量が足りません。まず、このタブの外で空きを作ってください。' +
   '空きができたら、本文の上の「ノートを保存し直す」を押してください。そのあと、システムの「使われていない添付を消す」で整理できます';
+
+/** ブラウザ / SQLite の「空きが無い」で本文の保存が断られ、編集の画面へ戻したとき。 */
+const QUOTA_JA_EDITING =
+  '保存できる空き容量が足りません。まず、このタブの外で空きを作ってください。' +
+  '書きかけの字は編集の画面に残してあります。空きができたら、もう一度「編集を保存する」を押してください';
 
 /**
  * 🔴 **例外を画面の字に添えるときの 1 か所**(#1087)。
@@ -76,6 +81,18 @@ export function bodySaveErrorText(e: unknown): string {
   // ブラウザ / SQLite の「空きが無い」── 整理(使われていない添付を消す)は保存し直しの後でないと始められない
   if (text.includes(QUOTA_JA)) return text.replace(QUOTA_JA, QUOTA_JA_BODY_SAVE);
   return text;
+}
+
+/**
+ * 🔴 **空きが足りなくて本文の保存が断られ、編集の画面へ戻したとき**の字(台帳 #1852 束 S1、依頼 104-1 B)。
+ * ⚠ 「ノートを保存し直す」ではなく「編集を保存する」を言う(戻した先の画面にあるボタン)。
+ *   空きの失敗でなければ `null`(従来の `bodySaveErrorText` のまま)。
+ */
+export function bodySaveEditingText(e: unknown): string | null {
+  if (!isQuotaFailure(e)) return null;
+  const text = errorText(e);
+  if (text.includes(WRITE_QUOTA_REFUSAL)) return text.replace(WRITE_QUOTA_REFUSAL, WRITE_QUOTA_REFUSAL_EDITING);
+  return QUOTA_JA_EDITING;
 }
 
 /**

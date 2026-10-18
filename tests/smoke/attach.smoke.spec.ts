@@ -1249,6 +1249,8 @@ test('🔴 本文に貼った画像を押すとその場で拡大し、閉じら
     lightbox.locator('.pkc-lightbox-open-win-btn').click(),
   ]);
   await win.waitForSelector('[data-pkc-field="asset-window-image"]', { timeout: 10_000 });
+  // 🔴 台帳 #1852 束 T1(依頼 99-2 C)── 別のウィンドウが開けたら、その場の拡大は閉じる(暗い幕が本文を覆ったままにしない)
+  await expect(lightbox, '「⧉」で別ウィンドウが開いたのに、その場の拡大が残っている').toHaveCount(0);
   const read = async () =>
     win.evaluate(() => {
       const i = document.querySelector('[data-pkc-field="asset-window-image"]') as HTMLImageElement;
@@ -1305,6 +1307,17 @@ test('🔴 本文に貼った画像を押すとその場で拡大し、閉じら
   await win.close();
   // 別窓へ切り出しても、本文は無傷(拡大は開いたままでも閉じてもよいが、絵は居る)
   await expect(img).toHaveAttribute('src', srcBody!);
+
+  // 🔴 ポップアップを止めると、拡大は残る(理由を読め、拡大のまま使える)
+  await openLightbox();
+  await page.evaluate(() => {
+    window.open = () => null;
+  });
+  await lightbox.locator('.pkc-lightbox-open-win-btn').click();
+  await expect(page.locator('[data-pkc-region="status"]'), 'ポップアップを止めた理由が出ない').toContainText(
+    'ポップアップ',
+  );
+  await expect(lightbox, 'ポップアップを止めたのに拡大が閉じた(開けなかったときは残す)').toHaveCount(1);
 
   expect(errors).toEqual([]);
 });

@@ -295,6 +295,7 @@ import {
 import { OfficePackStore } from '@adapter/platform/office/office-pack-store';
 import {
   OfficePackInstaller,
+  PACK_CANCEL_TOO_LATE_MESSAGE,
   type PackResult,
 } from '@adapter/platform/office/office-pack-install';
 import {
@@ -4359,7 +4360,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   添付を見ながら図を開いたときに**添付の窓が図に置き換わる**。
      */
     viewBig: (src, title, diagram, from) => {
-      void (async () => {
+      // 🔴 開けたかを返す(拡大の画面の ⧉ が、開けたときだけ拡大を閉じる ── 台帳 #1852 束 T1、依頼 99-2 C)
+      return (async (): Promise<boolean> => {
         try {
           /**
            * 🔴 **図は原文からベクタを起こす**(user 報告 2026-08-28
@@ -4423,9 +4425,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
               type: 'OP_FAILED',
               error: '別のウィンドウを開けませんでした(ポップアップが止められています)',
             });
+            return false;
           }
+          return true;
         } catch (e) {
           dispatcher.dispatch({ type: 'OP_FAILED', error: `絵を開けませんでした: ${errorText(e)}` });
+          return false;
         }
       })();
     },
@@ -4870,6 +4875,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     installOfficePack: () => {
       void officeInstaller.installFromUrl().then(finishOfficePack);
+    },
+    // 🔴 やめられなかった(端末へ書き始めている / 走っていない)ときは理由を言う ── 押して無反応にしない
+    cancelOfficeInstall: () => {
+      if (officeInstaller.isRunning() && !officeInstaller.cancel()) showStatus(PACK_CANCEL_TOO_LATE_MESSAGE);
     },
     installOfficePackFromFile: (file) => {
       void officeInstaller.installFromZip(file, file.name).then(finishOfficePack);
