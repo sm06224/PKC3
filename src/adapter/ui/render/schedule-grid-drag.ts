@@ -487,22 +487,23 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
     if (g.task.line === '') {
       if (r.kind !== 'slot') return;
       if (r.date === g.from && r.startMin === g.startMin) return;
-      const st0 = dispatcher.getState();
-      const wasDate = st0.entryMetas.get(g.task.lid)?.date ?? null;
-      const refusedNote = bodyWriteBlockReason(st0, g.task.lid) !== null;
       const newTime = formatMinutes(r.startMin);
-      gatedScheduleWrite(dispatcher, [g.task.lid], SCHEDULE_DROP_FAILED, () =>
-        dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid: g.task.lid, date: r.date, time: newTime }),
-      );
-      if (!refusedNote && wasDate !== null) {
-        const noSlot = { timeEnd: null, until: null, text: '' } as const;
-        offerMoveUndo(root, dispatcher, {
-          target: { kind: 'entry', lid: g.task.lid },
-          before: { date: wasDate, time: g.time, ...noSlot },
-          after: { date: r.date, time: newTime, ...noSlot },
-          verb: 'moved',
-        });
-      }
+      // 🔴 門を通ってから書く ── 「元に戻す」は門を通って書いた回(断られていない回)にだけ出す(`dropTaskCard` と同じ作り)
+      gatedScheduleWrite(dispatcher, [g.task.lid], SCHEDULE_DROP_FAILED, () => {
+        const st0 = dispatcher.getState();
+        const wasDate = st0.entryMetas.get(g.task.lid)?.date ?? null;
+        const refusedNote = bodyWriteBlockReason(st0, g.task.lid) !== null;
+        dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid: g.task.lid, date: r.date, time: newTime });
+        if (!refusedNote && wasDate !== null) {
+          const noSlot = { timeEnd: null, until: null, text: '' } as const;
+          offerMoveUndo(root, dispatcher, {
+            target: { kind: 'entry', lid: g.task.lid },
+            before: { date: wasDate, time: g.time, ...noSlot },
+            after: { date: r.date, time: newTime, ...noSlot },
+            verb: 'moved',
+          });
+        }
+      });
       return;
     }
     const line = Number(g.task.line);
@@ -544,7 +545,6 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
             : (overnightEnd() ?? formatMinutes(startMin));
     if (g.task.repeat === '') {
       const st = dispatcher.getState();
-      const refused = bodyWriteBlockReason(st, g.task.lid) !== null;
       // 動かす前の姿は走査が持っている札から取る(中身の指紋もそこにある)。札が走査に無い回は出さない
       const card = st.taskScan?.cards.find((c) => c.lid === g.task.lid && c.line === line);
       // 🔴 札が走査に居ない回は撃たずに断る(#1087)── 札の行の中身が書換の `openLine` になる
@@ -552,27 +552,29 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
         dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
         return;
       }
-      // 🔴 別のタブ・窓が編集中のノートへ / 書出し中は撃たない(#1087)
-      gatedScheduleWrite(dispatcher, [g.task.lid], SCHEDULE_DROP_FAILED, () =>
-      dispatcher.dispatch({
-        type: 'SET_TASK_DATE',
-        lid: g.task.lid,
-        line,
-        openLine: g.task.rawLine ?? card.rawLine,
-        date,
-        time,
-        timeEnd,
-      }));
-      // 🔴 動かしたら「元に戻す」(#855)。⚠ 断られた回・掴んだ日が取れなかった回は出さない
-      if (!refused && g.from !== '' && card !== undefined) {
-        const before = slotOfCard(card);
-        offerMoveUndo(root, dispatcher, {
-          target: { kind: 'task', lid: g.task.lid, line },
-          before,
-          after: { ...before, date, time, timeEnd },
-          verb: r.kind === 'resize' ? 'changed' : 'moved',
+      // 🔴 別のタブ・窓が編集中のノートへ / 書出し中は撃たない(#1087)。「元に戻す」は書いた回にだけ出す(`dropTaskCard` と同じ作り)
+      gatedScheduleWrite(dispatcher, [g.task.lid], SCHEDULE_DROP_FAILED, () => {
+        const refused = bodyWriteBlockReason(dispatcher.getState(), g.task.lid) !== null;
+        dispatcher.dispatch({
+          type: 'SET_TASK_DATE',
+          lid: g.task.lid,
+          line,
+          openLine: g.task.rawLine ?? card.rawLine,
+          date,
+          time,
+          timeEnd,
         });
-      }
+        // 🔴 動かしたら「元に戻す」(#855)。⚠ 断られた回・掴んだ日が取れなかった回は出さない
+        if (!refused && g.from !== '') {
+          const before = slotOfCard(card);
+          offerMoveUndo(root, dispatcher, {
+            target: { kind: 'task', lid: g.task.lid, line },
+            before,
+            after: { ...before, date, time, timeEnd },
+            verb: r.kind === 'resize' ? 'changed' : 'moved',
+          });
+        }
+      });
       return;
     }
     // 繰り返しの回 ── 1 回か全部かを聞いてから書く(日だけ動かす落とし方と同じ小窓)

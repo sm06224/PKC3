@@ -31,6 +31,7 @@ import { stubRevisionOps } from '../helpers/revision-stub';
 import { noteTimeOf, taskCardsOf } from '../../src/features/schedule/task-cards';
 import { openDialog } from './dialog-helper';
 import { clearMoveOffer, currentMoveOffer } from '../../src/adapter/ui/render/schedule-undo';
+import { setScheduleWriteGate } from '../../src/adapter/ui/render/schedule-write-gate';
 
 const TODAY = new Date(2026, 7, 23); // 2026-08-23(日)
 const HOUR = 40; // 1 時間 40px
@@ -947,4 +948,44 @@ describe('動かした直後の「元に戻す」(#855)', () => {
     expect(d.getState().notice ?? '').not.toContain('動かしました');
     detach();
   });
+});
+
+/**
+ * 🔴 **書込の門に断られた回は「元に戻す」を出さない**(ノート 1 件の分岐も行の札の分岐も、`dropTaskCard` と同じく
+ * 門のコールバックの中で出す)。観測点は「撃った書換」と「持っている知らせ(`currentMoveOffer`)」。
+ * 対照群: 門が通した回は書いて、知らせも出る。
+ */
+describe('書込の門に断られた回の「元に戻す」(ノート 1 件 / 行の札)', () => {
+  afterEach(() => clearMoveOffer());
+  const NOTE = '---\ndate: 2026-08-23 14:00\n---\n本文\n';
+  const LINE = '- [ ] 会議 @2026-08-23 14:00..15:00\n';
+
+  const cases: Array<{ name: string; body: string; noteDate: string | null; type: 'SET_ENTRY_DATE' | 'SET_TASK_DATE' }> = [
+    { name: 'ノート 1 件', body: NOTE, noteDate: '2026-08-23', type: 'SET_ENTRY_DATE' },
+    { name: '行の札', body: LINE, noteDate: null, type: 'SET_TASK_DATE' },
+  ];
+
+  for (const c of cases) {
+    it(`🔴 ${c.name}: 門が断ったら何も書かず、知らせも出さない`, async () => {
+      const s = setup(c.body, 'day', c.noteDate);
+      setScheduleWriteGate(s.d, () => {
+        /* 断る: act を呼ばない */
+      });
+      dragCard(s.laneCards()[0]!, s.lanes()[0]!, minPx(14 * 60), minPx(120));
+      await tick(30);
+      expect(s.dispatched.filter((a) => a.type === c.type), '断られたのに書いた').toEqual([]);
+      expect(currentMoveOffer(), '断られたのに「元に戻す」を持っている').toBeNull();
+      s.detach();
+    });
+
+    it(`対照群 ${c.name}: 門が通したら書いて、知らせも出る`, async () => {
+      const s = setup(c.body, 'day', c.noteDate);
+      setScheduleWriteGate(s.d, (_lids, _failed, act) => act());
+      dragCard(s.laneCards()[0]!, s.lanes()[0]!, minPx(14 * 60), minPx(120));
+      await tick(30);
+      expect(s.dispatched.filter((a) => a.type === c.type), '対照群が書いていない').toHaveLength(1);
+      expect(currentMoveOffer(), '対照群で知らせが出ていない').not.toBeNull();
+      s.detach();
+    });
+  }
 });
