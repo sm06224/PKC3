@@ -341,6 +341,7 @@ function setup(
     cid: 'c1',
     metas: [
       meta('n1', '会議メモ'),
+      { ...meta('fold1', '案件'), archetype: 'folder' },
       // 🔑 取り込んだ `.sqlite`(添付のノート)── 選び所に並ぶ相手
       { ...meta('db1', '売上.sqlite'), archetype: 'attachment' },
       { ...meta('db2', '壊れ.sqlite'), archetype: 'attachment' },
@@ -885,6 +886,29 @@ describe('答えをノートへ書き出す(#681 段③ の 3 つ目)', () => {
     expect(wrote?.body, '打った SQL が本文に無い').toContain('SELECT title, n FROM entries');
     expect(wrote?.body, '見出しが本文に無い').toContain('title,n');
     expect(wrote?.body, '行が本文に無い').toContain('あ,1');
+  });
+
+  /**
+   * 🔴 **書き出すノートは、いま左の一覧で開いているフォルダの中にできる**(依頼 91-2 A)。
+   * 対照群 = フォルダを開いていない回(最上位)。
+   */
+  it('🔴 ノートへ ── 開いているフォルダの中にでき、開いていなければ最上位', async () => {
+    const parentOf = (d: Dispatcher, lid: string): string | null =>
+      d.getState().relations.find((r) => r.kind === 'structural' && r.toLid === lid)?.fromLid ?? null;
+    const run = async (inFolder: boolean): Promise<{ made: string; parent: string | null }> => {
+      const { d, type, runBtn, saveBtn } = setup(async () => answer(['n'], [[1]]));
+      if (inFolder) d.dispatch({ type: 'SET_SCOPE', lid: 'fold1' });
+      expect(d.getState().scopeLid, '前提が崩れている').toBe(inFolder ? 'fold1' : null);
+      type('SELECT 1');
+      runBtn.click();
+      await settle();
+      saveBtn.click();
+      const made = [...d.getState().entryMetas.values()].find((m) => m.title.startsWith('SQL の結果'));
+      expect(made, 'ノートができていない').toBeDefined();
+      return { made: made?.lid ?? '', parent: parentOf(d, made?.lid ?? '') };
+    };
+    expect((await run(true)).parent, 'フォルダの中にできていない').toBe('fold1');
+    expect((await run(false)).parent, '対照群: 最上位のはず').toBeNull();
   });
 
   /**
@@ -1753,6 +1777,18 @@ describe('構造をノートへ(#918 段①)', () => {
     // 🔴 **門を緩めていない** ── 打ったのは `select` だけ
     expect(seen.length, '打った数が違う(列 / 繋がり / 本文の csv / 行数の 4 本のはず)').toBe(4);
     for (const q of seen) expect(q.trimStart().slice(0, 6).toLowerCase()).toBe('select');
+  });
+
+  it('🔴 構造をノートへ ── 開いているフォルダの中にできる(依頼 91-2 A)', async () => {
+    const { reply } = schemaReply();
+    const { schemaBtn, d } = setup(reply);
+    d.dispatch({ type: 'SET_SCOPE', lid: 'fold1' });
+    schemaBtn.click();
+    await settleAll();
+    const made = [...d.getState().entryMetas.values()].find((m) => m.title.includes('構造'));
+    expect(made, 'ノートができていない').toBeDefined();
+    const parent = d.getState().relations.find((r) => r.kind === 'structural' && r.toLid === made?.lid)?.fromLid;
+    expect(parent, 'フォルダの中にできていない').toBe('fold1');
   });
 
   it('🔴 構造を集めている間に編集を始めたら、「保存しました」と言わない(#1087)', async () => {

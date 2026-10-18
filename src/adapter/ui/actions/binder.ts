@@ -762,6 +762,7 @@ let rebuildingContainer = false;
 import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { countCappedCells } from '@features/query/sql-cell';
+import { openFolderLid } from './open-folder-lid';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 // 🔴 手持ちのファイルを開く選び所の印(#854 段②)
 import {
@@ -14956,6 +14957,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       type: 'SQL_SCHEMA_TO_NOTE',
       lid: generateLid(),
       relationId: generateLid(),
+      parentLid: openFolderLid(state),
     });
   },
   /**
@@ -15113,7 +15115,8 @@ const ACTIONS: Record<string, ActionHandler> = {
         // 🔴 切ってある升の数(`sqlNoteBody` が末尾で言う)
         capped: countCappedCells(p.rows),
       }),
-      parentLid: null,
+      // 🔴 いま左の一覧で開いているフォルダの中に作る(「+ ノート」と同じ置き場。依頼 91-2)
+      parentLid: openFolderLid(state),
       relationId: generateLid(),
       edit: false,
     });
