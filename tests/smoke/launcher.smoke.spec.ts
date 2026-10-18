@@ -745,6 +745,11 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   });
   for (const id of ['dual', 'sql'] as const) {
     await openTile(page, builtinTile(id));
+    // 🔴 左のペインに置き場の無い面は、塞がれたら「この画面の中央で開きますか」と聞く(#1852 Q1 / 依頼 147)。
+    //    「やめる」なら中央は奪わず、理由だけ出す(以下の確認はその後の画面で見る)
+    expect(await answerAppDialog(page, 'cancel'), `塞がれた ${id} で、中央で開くかを聞いていない`).toContain(
+      'この画面の中央で開きますか',
+    );
     await expect(
       page.locator(`[data-pkc-region="center"] [data-pkc-view-pane="${id}"], [data-pkc-view-pane="${id}"]`).first(),
       `塞がれた ${id} が中央の面に落ちた(読んでいたノートが消える)`,
