@@ -151,6 +151,32 @@ describe('次に開いたとき、見逃した予定を知らせる', () => {
     expect(t.painted).toEqual([2]);
   });
 
+  it('🔴 前書きに時刻を書いたノート 1 件の予定も見逃しに数える(依頼 192 / 284)。対照群: 日付だけのノートは数えない', () => {
+    const run = (withTime: boolean): { painted: number[]; posted: string[] } => {
+      const store = new ScheduleNotifyStore(fakeStorage());
+      store.stampOpen('c1', ms(12, 8, 0));
+      const d = new Dispatcher();
+      d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [{ ...meta(), date: '2026-10-12' }], relations: [] });
+      const painted: number[] = [];
+      const posted: string[] = [];
+      startMissedWatch({
+        dispatcher: d, store, cid: 'c1', now: () => ms(12, 13, 0),
+        paint: (n) => painted.push(n), post: (t) => posted.push(t), tick: () => () => undefined,
+      });
+      d.dispatch({
+        type: 'SET_TASK_SCAN',
+        scan: {
+          cards: [], totalNotes: 1, scannedNotes: 1, truncated: false,
+          ...(withTime ? { noteTimes: [{ lid: 'a', date: '2026-10-12', time: '09:00' }] } : {}),
+        },
+      });
+      return { painted, posted };
+    };
+    expect(run(true).painted).toEqual([1]);
+    expect(run(true).posted[0]).toBe('見逃した予定が 1 件あります');
+    expect(run(false).painted).toEqual([]);
+  });
+
   it('🔴 片付けたノートの予定は見逃しに数えない(#1087)。対照群: 片付けていなければ数える', () => {
     const run = (archived: boolean): { painted: number[]; posted: string[] } => {
       const store = new ScheduleNotifyStore(fakeStorage());
