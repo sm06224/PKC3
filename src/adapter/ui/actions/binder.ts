@@ -271,8 +271,10 @@ import {
   choosePaste,
   describePaste,
   DEFAULT_PASTE_SOURCE,
+  isPlainPasteChord,
   pasteConvertedMessage,
   PASTE_MESSAGE_COALESCE_MS,
+  PLAIN_PASTE_WINDOW_MS,
   type PasteSource,
 } from '@features/markdown/paste-source';
 import { convertPastedPermalink } from '@features/link/permalink';
@@ -18275,9 +18277,26 @@ export function bindActions(
    *
    * @returns 既定の貼付を止めたら `true`
    */
+  let plainPasteChordAt: number | null = null;
+  const onPlainPasteChord = (ev: KeyboardEvent): void => {
+    if (isPlainPasteChord(ev)) plainPasteChordAt = Date.now();
+  };
+  const plainChordPressed = (): boolean => {
+    const at = plainPasteChordAt;
+    plainPasteChordAt = null;
+    return at !== null && Date.now() - at <= PLAIN_PASTE_WINDOW_MS;
+  };
   const pasteText = (ce: ClipboardEvent): boolean => {
     const target = ce.target;
-    if (!isBodyInput(target)) return false;
+    if (!isBodyInput(target)) {
+      plainPasteChordAt = null;
+      return false;
+    }
+    /**
+     * 🔴 **Ctrl+Shift+V で貼ったときは何も直さず、書式なしの字だけを入れる**(依頼 93-1。Gemini 回答 = 推薦 A)。
+     *   ⚠ 鍵を押した印は 1 回の貼付で使い切る(次の普通の貼付まで持ち越さない)。
+     */
+    if (plainChordPressed()) return false;
     /**
      * 🔴 **コード・数式の中では何も変換しない**(#1087)── fence の中へ表を貼ると fence が入れ子に、
      *   HTML を貼ると `**` やリンクの形が入り、選んだ字へ URL を貼ると `[字](URL)` になっていた。
@@ -20677,6 +20696,7 @@ export function bindActions(
   };
   listen(root, 'scroll', onScrollCloseMenu, true);
   listen(root.ownerDocument, 'keydown', onMenuKey);
+  listen(root, 'keydown', onPlainPasteChord, true);
   listen(root, 'paste', onPaste);
   /**
    * 🔴 **`dragenter` でも受理を宣言する**(2026-08-21、cowork #15)。
