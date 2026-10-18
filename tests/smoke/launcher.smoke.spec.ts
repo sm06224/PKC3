@@ -757,6 +757,12 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
       page.locator('[data-pkc-region="status"]'),
       `塞がれた ${id} の理由が出ていない`,
     ).toContainText('ポップアップ');
+    // 🔴 4.5 秒待っても合図が返らないとき「開くのに時間がかかっています」が出る(台帳 #1852 M1 動線 4)。
+    //    ⚠ 待つのは失敗した回だけ(VIEW_WINDOW_ANNOUNCE_MS = 4500)。起動は足していない。
+    await expect(
+      page.locator('[data-pkc-region="status"]'),
+      `塞がれた ${id} で「開くのに時間がかかっています」が出ない`,
+    ).toContainText('開くのに時間がかかっています', { timeout: 12_000 });
   }
   await page.evaluate(() => {
     const w = window as unknown as { __pkcRealOpen?: typeof window.open };
@@ -2135,9 +2141,30 @@ test('🔴 IndexedDB を使うアプリは、素のままで動き、囲いの�
   };
 
   // ① 囲いの中 ── **止まる**(1 行目の SecurityError)
+  /**
+   * 🔴 「アプリを開く」は、押した直後に空の別ウィンドウを先に開く(台帳 #1852 M1 動線 5。依頼 243)。
+   * 観測点は `window.open` の最初の呼び出し:先に開く実装は URL を渡さず(空)、本文を読んでから開く実装は
+   * 読み終えた後の URL を渡す。⚠ 起動は足していない ── 既存の押下に差し込みの観測を足しただけ。
+   */
+  await page.evaluate(() => {
+    const w = window as unknown as { __pkcOpenCalls?: string[]; __pkcOpenOrig?: typeof window.open };
+    w.__pkcOpenCalls = [];
+    w.__pkcOpenOrig = window.open.bind(window);
+    window.open = ((url?: string | URL, ...rest: unknown[]) => {
+      w.__pkcOpenCalls!.push(String(url ?? ''));
+      return (w.__pkcOpenOrig as (...a: unknown[]) => Window | null)(url, ...rest);
+    }) as typeof window.open;
+  });
   const boxedTab = context.waitForEvent('page');
   await clickReal(page, '[data-pkc-action="launch-asset"]');
   const boxed = await boxedTab;
+  const openCalls = await page.evaluate(() => {
+    const w = window as unknown as { __pkcOpenCalls?: string[]; __pkcOpenOrig?: typeof window.open };
+    if (w.__pkcOpenOrig) window.open = w.__pkcOpenOrig;
+    return w.__pkcOpenCalls ?? [];
+  });
+  expect(openCalls.length, '前提が崩れた(window.open が呼ばれていない)').toBeGreaterThan(0);
+  expect(openCalls[0], '押した直後に空の窓を先に開いていない(本文を読んでから開いている)').toBe('');
   expect(await readApp(boxed), '囲いの中で IndexedDB が通ってしまった(隔離が外れている)').toBe(
     '読み込み中…',
   );

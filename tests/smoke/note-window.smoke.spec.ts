@@ -28,6 +28,14 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
   context,
 }) => {
   const errors = collectPageErrors(page);
+  // 付箋の窓でも全文欄(`editor-body`)に打てるよう、2 ペインの編集を context ごとに仕込む(⑦-1。popup の窓にも効く)
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem('pkc3.editor-mode', 'split');
+    } catch {
+      /* sandbox の frame ── 無関係 */
+    }
+  });
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await dismissAnnounce(page);
@@ -195,14 +203,51 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
   // 閉じる処理は keydown の中で同期に走る ── 少し置いて、それでも開いていることを見る
   await win2.waitForTimeout(500);
   expect(win2.isClosed(), '編集中に Escape で付箋の窓が閉じた(打ちかけが消える)').toBe(false);
-  // 編集を抜ける(取り消し)── 以降の後始末は変えない
-  if (await win2.locator('[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]').count()) {
-    await clickReal(win2, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
-  }
-  await expect(
-    win2.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]'),
-    '編集から抜けられていない',
-  ).toHaveCount(0);
+  /**
+   * ⑦-1 🔴 **付箋で打って保存せずに窓を閉じると、本体にその場で 1 行が出て、戻すで開き直せる**(台帳 #1852 M1 動線 1)。
+   * ⚠ 起動を足していない ── ここまでで立ち上がっている `win2`(編集中)で見る。
+   * 以前の「編集を抜ける(取り消し)」の後始末はこれに置き換えた(窓ごと閉じる = 抜ける)。
+   */
+  const dirty = '付箋で打った書きかけ';
+  await win2.locator('[data-pkc-field="editor-body"]').fill(dirty);
+  await expect
+    .poll(
+      () =>
+        win2.evaluate(
+          () =>
+            new Promise<number>((resolve) => {
+              const req = indexedDB.open('pkc3-drafts', 1);
+              req.onerror = () => resolve(0);
+              req.onsuccess = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains('drafts')) {
+                  db.close();
+                  resolve(0);
+                  return;
+                }
+                const q = db.transaction('drafts').objectStore('drafts').getAll();
+                q.onsuccess = () => {
+                  db.close();
+                  resolve((q.result as { body: string }[]).filter((d) => d.body.includes('付箋で打った')).length);
+                };
+                q.onerror = () => resolve(0);
+              };
+            }),
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe(1);
+  await win2.close({ runBeforeUnload: false });
+  await page.bringToFront();
+  const left = page.locator('[data-pkc-region="draft-offer"]');
+  await expect(left, '付箋を書きかけで閉じたのに、本体に 1 行が出ない').toBeVisible({ timeout: 15_000 });
+  await expect(left.locator('[data-pkc-field="draft-offer-text"]')).toHaveText(
+    /^保存していない編集が残っています\(ひとつめ\)/,
+  );
+  await clickReal(page, '[data-pkc-action="restore-draft"]');
+  await expect(page.locator('[data-pkc-field="editor-body"]'), '戻して開き直せていない').toHaveValue(dirty, {
+    timeout: 10_000,
+  });
 
   /**
    * ⑦ 🔴 **付箋のウィンドウは Escape で閉じる**(#1042 followup 指摘 A。
