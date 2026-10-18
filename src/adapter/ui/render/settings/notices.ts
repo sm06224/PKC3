@@ -9,6 +9,7 @@ import {
   recentNotices,
   type Notice,
 } from '@features/notice/notice-log';
+import { buildUpdateAvailableRow, onUpdatePendingChange, updatePending } from '../update-card';
 import { buildCheckboxRow, syncCheckbox } from './checkbox';
 import type { SettingsSection } from './section';
 
@@ -45,7 +46,25 @@ export function createNoticesSection(region: HTMLElement, store: NoticeStore): S
           `出さなくても、過去のお知らせはこの下の「これまでのお知らせ」で${NOTICE_READABLE_TEXT}が読めます。`,
         ],
       });
-      return [row.dt, row.dd];
+      /**
+       * 🔴 **「あとで切り替える」を押した後の、切り替える場所**(台帳 #1852 束 L2。依頼 84-1 C / 120-2 A)。
+       * ⚠ 新しいバージョンが待っている間だけ出る。押し口はカードの「新しいバージョンに切り替える」と同じ受け手。
+       */
+      const updDt = document.createElement('dt');
+      updDt.textContent = '新しいバージョン';
+      const updDd = document.createElement('dd');
+      updDd.append(buildUpdateAvailableRow('div'));
+      const paintUpd = (): void => {
+        updDt.hidden = !updatePending();
+        updDd.hidden = !updatePending();
+      };
+      paintUpd();
+      const off = onUpdatePendingChange(() => {
+        if (!updDt.isConnected && updDt.getAttribute('data-seen') === '1') return void off();
+        if (updDt.isConnected) updDt.setAttribute('data-seen', '1');
+        paintUpd();
+      });
+      return [updDt, updDd, row.dt, row.dd];
     },
     sync(): void {
       syncCheckbox(region, 'notices-enabled', () => store.enabled());

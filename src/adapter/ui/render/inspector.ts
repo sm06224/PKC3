@@ -46,6 +46,8 @@ import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { iconButton } from './icons';
 import { setTagKey, tagColorControls } from './tag-color';
 import { COLLECTION_PANE_COMMANDS } from './commands';
+import { readBundle } from '@adapter/platform/portable-boot';
+import { INSIDE_BUNDLE_REFUSAL } from '@adapter/ui/actions/export-portable';
 import { windowFolderWritePicker } from '@adapter/platform/md-folder-export';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(一覧の行と共有)。
 //    ここで独自に parse していた頃は、一覧に日付を出すときに規則が 2 つに増えた
@@ -2078,7 +2080,15 @@ export class InspectorRenderer {
       const item = document.createElement('div');
       item.setAttribute('data-pkc-field', 'collection-command-item');
       const btn = iconButton(action, label, null);
-      btn.title = title;
+      /**
+       * 🔴 **PKC3 入り HTML の中では、押せない見た目にして、理由をいつも書く**(台帳 #1852 束 L2。依頼 84-4 B)。
+       * ⚠ 直す前は押すと「ここからは作れません」と断られるだけだった。指で触る端末はマウスを載せた説明が読めず、
+       *   出さないと「同じ物が常に同じ場所」から外れるので、ボタンは残して理由を隣に出す。
+       */
+      const insideBundle = action === 'export-portable' && readBundle(document) !== null;
+      const why = insideBundle ? INSIDE_BUNDLE_REFUSAL : title;
+      if (insideBundle) btn.disabled = true;
+      btn.title = why;
       item.append(btn);
       /**
        * 🔑 **既存の `title` を、見える 1 行としても出す**(段④a の指示)。
@@ -2088,7 +2098,7 @@ export class InspectorRenderer {
       const note = document.createElement('p');
       note.setAttribute('data-pkc-field', `${action}-note`);
       note.className = 'settings-note';
-      note.textContent = title;
+      note.textContent = why;
       item.append(note);
       cmds.append(item);
     }

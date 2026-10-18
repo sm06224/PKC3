@@ -52,7 +52,9 @@ import { installBlockGrip } from './block-grip';
 import { applyStackControls } from './stack-controls';
 import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
 // 🔑 system 領域のノートの判定・題名は 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
-import { isSystemMessageLid, titleForMessageLid } from '@features/message/message-log';
+import { isSystemMessageLid, SYSTEM_JOB_LID, titleForMessageLid } from '@features/message/message-log';
+import { messageKindFilter } from '@adapter/platform/message-filter';
+import { buildMessageBar, syncMessageBar } from './message-bar';
 import { installBackToTop, type BackToTopHandle } from './back-to-top';
 import { installReadingProgress, type ReadingProgressHandle } from './reading-progress';
 import { installQuickToc, type QuickTocHandle } from './quick-toc';
@@ -201,7 +203,7 @@ export interface AssetLender {
 type Mode = 'empty' | 'view' | 'editor';
 
 /** 本文の上の操作の**形**。形が変わるときだけ器を組み直す(`renderBar`)。 */
-type BarShape = 'edit' | 'retry' | 'none';
+type BarShape = 'edit' | 'retry' | 'none' | 'messages' | 'jobs';
 
 /**
  * 🔴 **ライブエディタの口**。1 面に畳む(2026-08-05)。
@@ -2256,11 +2258,19 @@ export class DetailRenderer {
      *   「編集」が出て押せてしまう(START_EDIT 自体は `entryMetas` を見ない)。
      */
     if (isSystemMessageLid(lid)) {
-      if (this.barShape !== 'none') {
-        this.barShape = 'none';
+      /**
+       * 🔴 **メッセージ・処理の記録の帯**(台帳 #1852 束 L1。依頼 80-3 / 266)── 出すのは「書き出す」と(メッセージだけ)
+       *   種類の絞りの 2 つで、編集の口ではない。器は形が変わるときだけ組み直す。
+       */
+      const messageShape: BarShape = lid === SYSTEM_JOB_LID ? 'jobs' : 'messages';
+      if (this.barShape !== messageShape) {
+        this.barShape = messageShape;
         this.barButton = null;
+        this.barCopy = null;
         slot.textContent = '';
+        slot.append(buildMessageBar(lid));
       }
+      syncMessageBar(slot, messageKindFilter());
       return;
     }
     // error phase では「編集」を出さない ── START_EDIT は ready 限定なので、

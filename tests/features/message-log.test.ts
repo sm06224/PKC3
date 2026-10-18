@@ -16,11 +16,13 @@ import {
   SYSTEM_MESSAGE_LID,
   capForMessageLid,
   countUnread,
+  filterMessageBody,
   formatMessageSection,
   isSystemMessageLid,
   lidForMessageKind,
   sanitizeMessageText,
   titleForMessageLid,
+  trimSlackForLid,
   trimToCap,
   type MessageKind,
 } from '../../src/features/message/message-log';
@@ -256,5 +258,92 @@ describe('countUnread(注意 / 問題だけ数える)', () => {
   it('読んだ直後(読んだ時刻ちょうど)は未読に数えない', () => {
     const body = formatMessageSection({ at: at(3), kind: 'problem', source: 'a', text: 'x' });
     expect(countUnread(body, at(3))).toBe(0);
+  });
+});
+
+/**
+ * 🔴 **落とす順は「結果などの日常の知らせ → 注意・問題」**(台帳 #1852 束 L1。依頼 343 / 117-1 / 92-2)。
+ * 直す前は、保管件数を超えると種類に関係なく古い順に消え、「コピーしました」が続くと前の「問題」が先に消えた。
+ */
+describe('trimToCap の落とす順(依頼 343)', () => {
+  const sec = (kind: MessageKind, text: string, i: number): string =>
+    formatMessageSection({
+      at: `2026-09-${String(10 + i).padStart(2, '0')}T00:00:00.000Z`,
+      kind,
+      source: 'app',
+      text,
+    });
+
+  it('🔴 古い「問題」「注意」は、結果から先に落ちるあいだ残る', () => {
+    const body = [
+      sec('problem', '古い問題', 1),
+      sec('caution', '古い注意', 2),
+      sec('result', '結果A', 3),
+      sec('result', '結果B', 4),
+      sec('result', '結果C', 5),
+    ].join('');
+    const out = trimToCap(body, 3);
+    expect(out).toContain('古い問題');
+    expect(out).toContain('古い注意');
+    // 結果は古い順に落ちる:A と B が落ち、最新の C が残る
+    expect(out).not.toContain('結果A');
+    expect(out).not.toContain('結果B');
+    expect(out).toContain('結果C');
+    // 対照:種類を区別しない旧い落とし方なら、先頭の問題が消えていた(= この検査が実際に見ている)
+    expect(body.split(/(?=^## )/m).slice(-3).join('')).not.toContain('古い問題');
+  });
+
+  it('🔴 順番は崩さない(残った節は元の並びのまま)', () => {
+    const body = [sec('result', 'r1', 1), sec('problem', 'p1', 2), sec('result', 'r2', 3), sec('problem', 'p2', 4)].join('');
+    const out = trimToCap(body, 3);
+    expect(out.indexOf('p1')).toBeLessThan(out.indexOf('r2'));
+    expect(out.indexOf('r2')).toBeLessThan(out.indexOf('p2'));
+    expect(out).not.toContain('r1');
+  });
+
+  it('🔴 注意・問題だけで上限を超えたら、そこは古い順に落とす(青天井にしない)', () => {
+    const body = [sec('problem', 'p1', 1), sec('caution', 'c2', 2), sec('problem', 'p3', 3)].join('');
+    const out = trimToCap(body, 2);
+    expect(out).not.toContain('p1');
+    expect(out).toContain('c2');
+    expect(out).toContain('p3');
+  });
+
+  it('余裕(slack)があれば、その分まで多めに落とす(処理の記録用)', () => {
+    const body = [1, 2, 3, 4, 5].map((i) => sec('result', `r${i}`, i)).join('');
+    expect(trimToCap(body, 4, 2).split(/(?=^## )/m).filter((x) => x !== '')).toHaveLength(2);
+  });
+});
+
+describe('trimSlackForLid(依頼 267)', () => {
+  it('🔴 余裕を持つのは処理の記録だけ。メッセージは 0(画面の数どおり)', () => {
+    expect(trimSlackForLid(SYSTEM_MESSAGE_LID, 100)).toBe(0);
+    expect(trimSlackForLid(SYSTEM_JOB_LID, JOB_CAP)).toBeGreaterThan(0);
+  });
+});
+
+describe('filterMessageBody(依頼 266)', () => {
+  const sec = (kind: MessageKind, text: string, i: number): string =>
+    formatMessageSection({ at: `2026-09-${String(10 + i).padStart(2, '0')}T00:00:00.000Z`, kind, source: 'app', text });
+  const body = [sec('problem', '問題A', 1), sec('result', '結果A', 2), sec('caution', '注意A', 3), sec('problem', '問題B', 4)].join('');
+
+  it('null は 1 バイトも変えない', () => {
+    expect(filterMessageBody(body, null)).toBe(body);
+  });
+
+  it('🔴 その種類の節だけが残る(順は元のまま)', () => {
+    const out = filterMessageBody(body, 'problem');
+    expect(out).toContain('問題A');
+    expect(out).toContain('問題B');
+    expect(out).not.toContain('結果A');
+    expect(out).not.toContain('注意A');
+    expect(out.indexOf('問題A')).toBeLessThan(out.indexOf('問題B'));
+  });
+
+  it('🔴 該当が 0 件のときは、空にせず 1 行で言う', () => {
+    const out = filterMessageBody(sec('result', '結果A', 1), 'problem');
+    expect(out).toContain('「問題」の知らせはありません');
+    // 対照:別の種類を選べば本文が出る
+    expect(filterMessageBody(sec('result', '結果A', 1), 'result')).toContain('結果A');
   });
 });

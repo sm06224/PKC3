@@ -135,14 +135,21 @@ export class FlagsRenderer {
       input.setAttribute('data-pkc-action', 'set-flag');
       input.setAttribute('data-pkc-flag', f.name);
       this.rows.set(f.name, input);
-      label.append(input, document.createTextNode(` ${f.name}`));
+      /**
+       * 🔴 **読む物(日本語の説明)を先に大きく、英語の名前はその下に小さく**(台帳 #1852 束 L1。依頼 92-3)。
+       * ⚠ 直す前は `render.markdownInline` のような英語の名前が大きく出て、日本語の説明は下に小さく出ていた。
+       *   英語の名前はアドレスに `?pkc-flag=名前` と書くときに使うので、消さずに添える。
+       */
+      label.append(input, document.createTextNode(` ${f.summary}`));
       dt.append(label);
 
       const dd = document.createElement('dd');
       dd.setAttribute('data-pkc-field', 'flag-detail');
-      const what = document.createElement('div');
-      what.textContent = f.summary;
-      dd.append(what);
+      const nameLine = document.createElement('div');
+      nameLine.className = 'settings-note';
+      nameLine.setAttribute('data-pkc-field', 'flag-name');
+      nameLine.textContent = `名前: ${f.name}(アドレスに書くときの名前)`;
+      dd.append(nameLine);
       /**
        * 🔴 **起動前に要るものは、そう書く**(user 指示 2026-08-07)。
        * ⚠ 書かないと「押したのに何も変わらない」に見える ── 実際には

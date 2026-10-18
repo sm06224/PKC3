@@ -83,6 +83,8 @@ interface Harness {
   /** 案内が出た回数ぶんの「押す」関数。 */
   offers: Array<() => void>;
   reloads: () => number;
+  /** 「別のタブが切り替えた」を受けた回数ぶんの「読み込み直す」関数(依頼 131)。 */
+  elsewhere: Array<() => void>;
 }
 
 async function start(
@@ -93,6 +95,7 @@ async function start(
   const registration = new FakeRegistration();
   setup?.(container, registration);
   const offers: Array<() => void> = [];
+  const elsewhere: Array<() => void> = [];
   let reloads = 0;
   await watchForUpdate(
     container,
@@ -101,8 +104,9 @@ async function start(
     () => {
       reloads += 1;
     },
+    (reload) => elsewhere.push(reload),
   );
-  return { container, registration, offers, reloads: () => reloads };
+  return { container, registration, offers, reloads: () => reloads, elsewhere };
 }
 
 describe('更新の案内 — いつ出すか', () => {
@@ -271,5 +275,58 @@ describe('更新の適用 — 押したときだけ、押したタブだけ', ()
     h.container.controllerChanged();
     h.container.controllerChanged();
     expect(h.reloads()).toBe(1);
+  });
+});
+
+/**
+ * 🔴 **別のタブが切り替えたとき、押していないタブへ知らせる**(台帳 #1852 束 L2。依頼 131 A)。
+ *
+ * 直す前は、片方のタブで「新しいバージョンに切り替える」を押すと、もう片方のタブは古いバージョンのまま何も出さなかった。
+ * 後で保存の役目を引き継ぐときに古い部品が無く失敗した。⚠ 書きかけは巻き込まない ── 勝手に読み込み直さず、押されたときだけ。
+ */
+describe('別のタブが切り替えたとき(依頼 131)', () => {
+  it('🔴 もともと版に制御されていたタブは、別のタブの切り替えで案内を受ける(読み込み直しはしない)', async () => {
+    const h = await start((c) => {
+      c.controller = {};
+    });
+    h.container.controllerChanged(); // 別のタブが交代させた(clients.claim)
+    expect(h.elsewhere, '案内が出ていない').toHaveLength(1);
+    expect(h.reloads(), '案内だけのはずが読み込み直した(書きかけを巻き込む)').toBe(0);
+    // 押されたときだけ読み直す
+    h.elsewhere[0]!();
+    expect(h.reloads()).toBe(1);
+    // 連打しても 1 回だけ
+    h.elsewhere[0]!();
+    expect(h.reloads()).toBe(1);
+  });
+
+  it('🔴 案内は 1 回だけ(claim が続けて来ても積まない)', async () => {
+    const h = await start((c) => {
+      c.controller = {};
+    });
+    h.container.controllerChanged();
+    h.container.controllerChanged();
+    expect(h.elsewhere).toHaveLength(1);
+  });
+
+  it('🔴 初めて開いたタブ(制御されていなかった)は、最初の登録の claim を「別のタブが切り替えた」と読まない', async () => {
+    const h = await start(); // controller は null
+    h.container.controllerChanged();
+    expect(h.elsewhere, '誰も切り替えていないのに案内が出た').toHaveLength(0);
+  });
+
+  it('対照群:自分が押したタブは、案内ではなく読み込み直す', async () => {
+    const h = await start((c) => {
+      c.controller = {};
+    });
+    const waiting: UpdateWorker = { postMessage: vi.fn() };
+    h.registration.waiting = waiting;
+    const w = new FakeInstalling();
+    h.registration.found(w);
+    w.advance('installed');
+    h.offers[0]!(); // 自分が「切り替える」を押した
+    h.container.controllerChanged();
+    expect(h.reloads()).toBe(1);
+    expect(h.elsewhere, '自分が押したのに「別のタブ」と言った').toHaveLength(0);
   });
 });

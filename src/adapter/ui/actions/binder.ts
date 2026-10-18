@@ -456,6 +456,8 @@ import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard'
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口・字は 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
 import { appMessagePost, setMessageCap } from '@adapter/platform/message-post';
+import { setMessageKindFilter } from '@adapter/platform/message-filter';
+import { messageFilterOfAttr } from '@adapter/ui/render/message-bar';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
 import {
   isSystemMessageLid,
@@ -2254,6 +2256,8 @@ export interface BinderServices {
    *   ── 設定から戻せる(戻せない導線は作らない)。
    */
   dismissAnnounce?(): void;
+  /** 帯をしまうだけ(読んだことにしない)。カードの「お知らせの一覧を開く」を押したとき(台帳 #1852 束 L2、依頼 80-2)。 */
+  hideAnnounce?(): void;
   nextAnnounce?(): void;
   muteAnnounce?(): void;
   /**
@@ -6000,6 +6004,25 @@ export function runGlobalCommand(
    *   `MESSAGES_READ`)。押せるふりをして黙って何も起きない行にしない:`dry` では偽(= 一覧は
    *   「いまは押せません ── <理由>」と言う)、実行では理由を出す。理由は `blockedActionNote` の 1 か所。
    */
+  /**
+   * 🔴 **メッセージを書き出す**(台帳 #1852 束 L1、依頼 92-1)── 押しボタンはシステムの画面の中にしか無く、面は開くまで
+   *   組まれない。直す前は「システムの画面で『メッセージ』を開いているときだけ」押せたので、未読から開いたメッセージの
+   *   ノートを読んでいる最中は、バグ報告に出す手が無かった。実体は押しボタンと同じ `exportMessagesNote` 1 本。
+   * ⚠ 読み出す口が無い版(古いタブ)は押せない(`dry` では偽 = 一覧が理由を言う)。phase では断らない ── 読むだけで本文に触れない。
+   */
+  if (cmd === 'export-messages') {
+    const svc = ROOT_SERVICES.get(root);
+    if (svc?.readBodies === undefined) {
+      if (dry) return false;
+      prevent();
+      notify('このタブの PKC3 が古いままのため、書き出せません。再読み込みしてください', CAUTION);
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    exportMessagesNote(dispatcher, SYSTEM_MESSAGE_LID, svc);
+    return true;
+  }
   if (cmd === 'open-messages') {
     // 🔴 押せない理由も判定も `blockedActionNote` の 1 か所から(#791 ④ / #516 ── 保存に失敗している
     //   保護中に「編集中」と言わない)。⚠ ここで phase を読み替えて字を直書きしない(§7)
@@ -6409,8 +6432,47 @@ function focusFieldFirst(
  *   既読にしない日が来る(§7)。
  */
 function openMessagesNote(dispatcher: Dispatcher, lid: string): void {
+  // 🔴 開き直したときは種類の絞りを「すべて」へ戻す(前に絞ったまま、知らせが見えない画面で開かない。台帳 #1852 束 L1、依頼 266)
+  setMessageKindFilter(null);
   dispatcher.dispatch({ type: 'MESSAGES_READ', lid });
   appMessagePost.markRead();
+}
+
+/**
+ * 🔴 **メッセージ(・処理の記録)を書き出す実体は 1 本**(設計 doc §7、段②a)── バグ報告に貼る用。
+ *
+ * ⚠ 押しボタン(`export-messages` の受け手。システムの節・メッセージのノートの上の帯)と、「操作を探す」・左の `>` の一覧
+ *   (`runGlobalCommand`。**どの画面からでも**押せる ── 台帳 #1852 束 L1、依頼 92-1)の**両方がここを通る**。
+ * ⚠ **新しい書き出しの仕組みを作らない**(§7「普通のノートと同じ道具」)── 本文をそのまま `.md` として落とすだけ
+ *   (整形・要約はしない)。`lid` で「メッセージ」か「処理の記録」かが決まる(依頼 217 / 265 / 345)。
+ */
+function exportMessagesNote(dispatcher: Dispatcher, lid: string, services: BinderServices): void {
+  const read = services.readBodies;
+  const what = titleForMessageLid(lid);
+  if (!read) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、書き出せません。再読み込みしてください' });
+    return;
+  }
+  /**
+   * 🔴 **書き出したこと・書き出せなかったことを言う**(#1087 の見直し 2026-10-13)── 直す前は成功しても何も言わず、
+   *   読めなかったときも黙って終わっていた。
+   */
+  // 🔴 書けずに控えへ回った節も含める(#1087 M1)
+  void appMessagePost
+    .withSpool(lid, async () => (await read([lid])).get(lid) ?? '')
+    .then((body) => {
+      const today = dayStamp(new Date());
+      const name = `${what}-${today}.md`;
+      downloadBlob(name, new Blob([body], { type: 'text/markdown' }));
+      services.showStatus?.(`${what}を書き出しました(${name})`);
+    })
+    .catch((e: unknown) => {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        // ⚠ 例外の前置き「Error:」は出さない / 次に何をするかを言う(#1087)
+        error: `${what}を書き出せませんでした(${errorText(e)})。もう一度押してください`,
+      });
+    });
 }
 
 /**
@@ -12642,10 +12704,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔴 長すぎて入らなかった設定を言う(#1087)── 黙って落とすと「全部持ち出した」と読まれる
     const tooLong = settingsTooLongToExport(readSetting);
     if (tooLong.length > 0) {
-      // 🔴 書き出せた回なので「結果」(`OP_NOTICE`)── `OP_FAILED` だと「問題」の未読に数えられた
+      // 🔴 全部入った回は赤くない知らせ(`OP_NOTICE`)、**一部入らなかった回は赤い帯**(`OP_FAILED`)で言う
+      //   (台帳 #1852 束 L2、依頼 120-1 A。⚠ 以前は「書き出せた回なので結果」と言っていたが、入らなかった設定が在る回は
+      //   取りこぼしを見逃させないほうを取る ── 取り込みで一部書けなかった回と同じ向き)
       dispatcher.dispatch({
-        type: 'OP_NOTICE',
-        message: `設定を書き出しました。${tooLong.join('・')} は長すぎるので入っていません`,
+        type: 'OP_FAILED',
+        error: `設定を書き出しました。${tooLong.join('・')} は長すぎるので入っていません`,
       });
     }
   },
@@ -14014,7 +14078,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   `CenterRouter.render` が既に「システム」を描いている ── `system-jump` と
    *   違い、押した時点ではまだ settings pane に居ないので `root` から探す。
    */
-  'open-system-notices': (dispatcher, _target, _services, root) => openSystemNotices(dispatcher, root),
+  'open-system-notices': (dispatcher, target, services, root) => {
+    openSystemNotices(dispatcher, root);
+    // 🔴 お知らせのカードから押したときは、カードをしまう(読んだことにはしない)。スマホではカードが画面いっぱいに出ていて、
+    //   しまわないと一覧が下に隠れたままになる(台帳 #1852 束 L2、依頼 80-2)
+    if (target.closest('[data-pkc-region="announce"]') !== null) services.hideAnnounce?.();
+  },
   /**
    * 🔴 **「← ヘルプへ戻る」**(依頼 67-1)── ヘルプから「お知らせを開く」で来たときだけ出る。
    * 読んでいた位置へ戻す(`helpReturn`。位置を控えていない回は先頭のまま)。
@@ -14085,6 +14154,14 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 選べる値以外は `setMessageCap` が黙って無視する(壊れた値を書かせない)。
    * ⚠ `set-theme` と同じ受け方(`<select>` でもボタンでも通す ── #1038 段J)。
    */
+  /**
+   * 🔴 **メッセージを種類で絞る**(台帳 #1852 束 L1、依頼 266)── 画面に出す物を絞るだけ(disk の本文・書き出しは変えない)。
+   * 本文の読み直しは「既読にしない」`MESSAGES_BODY_REFRESH`(絞った本文は `store-effects.ts` が作る)。
+   */
+  'set-message-filter': (dispatcher, target) => {
+    setMessageKindFilter(messageFilterOfAttr(target.getAttribute('data-pkc-message-filter')));
+    dispatcher.dispatch({ type: 'MESSAGES_BODY_REFRESH', lid: SYSTEM_MESSAGE_LID });
+  },
   'set-message-cap': (_dispatcher, target) => {
     const raw =
       target instanceof HTMLSelectElement
@@ -14099,32 +14176,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   本文をそのまま `.md` として落とすだけ(整形・要約はしない)。
    */
   'export-messages': (dispatcher, target, services) => {
-    const lid = target.getAttribute('data-pkc-message-lid') ?? SYSTEM_MESSAGE_LID;
-    const read = services.readBodies;
-    if (!read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、書き出せません。再読み込みしてください' });
-      return;
-    }
-    /**
-     * 🔴 **書き出したこと・書き出せなかったことを言う**(#1087 の見直し 2026-10-13)── 直す前は成功しても何も言わず、
-     *   読めなかったときも黙って終わっていた。
-     */
-    // 🔴 書けずに控えへ回った節も含める(#1087 M1)
-    void appMessagePost
-      .withSpool(lid, async () => (await read([lid])).get(lid) ?? '')
-      .then((body) => {
-        const today = dayStamp(new Date());
-        const name = `${titleForMessageLid(lid)}-${today}.md`;
-        downloadBlob(name, new Blob([body], { type: 'text/markdown' }));
-        services.showStatus?.(`メッセージを書き出しました(${name})`);
-      })
-      .catch((e: unknown) => {
-        dispatcher.dispatch({
-          type: 'OP_FAILED',
-          // ⚠ 例外の前置き「Error:」は出さない / 次に何をするかを言う(#1087)
-          error: `メッセージを書き出せませんでした(${errorText(e)})。もう一度押してください`,
-        });
-      });
+    exportMessagesNote(dispatcher, target.getAttribute('data-pkc-message-lid') ?? SYSTEM_MESSAGE_LID, services);
   },
   'set-paste-source': (_dispatcher, target, services) => {
     // ⚠ `set-external-images` と同じ受け方(`<select>` でもボタンでも通す)
@@ -15683,6 +15735,7 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'stack-save': '[data-pkc-action="stack-save"]',
   'copy-note-md': '[data-pkc-action="copy-note-md"]',
   'copy-note-rich': '[data-pkc-action="copy-note-rich"]',
+  // ⚠ 「操作を探す」からの実行は `runGlobalCommand` が直に撃つ(どの画面からでも ── 台帳 #1852 束 L1)。この行は「受け手の押しボタン」の登記
   'export-messages': '[data-pkc-action="export-messages"]',
   'export-settings': '[data-pkc-action="export-settings"]',
   'schedule-quick-add': '[data-pkc-action="schedule-quick-add"]',

@@ -1546,7 +1546,8 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-10-12(#855 Q1/Q2): `schedule.smoke.spec.ts` に 1 本足した(予定の「月」と「印刷」)→ 528 → 529。起動の予算は 523 → 524(`scripts/smoke-budget.mjs` に理由)。
     // ⚠ 2026-10-14(#1728): `draft-recovery.smoke.spec.ts` に 1 本足した(章の欄に打った字を開き直して戻す)→ 529 → 530。起動の予算は 524 → 526(`scripts/smoke-budget.mjs` に理由)。
     // ⚠ 2026-10-17(#1163 依頼 50-3 / 90-3): `media-capture.smoke.spec.ts` に 1 本足した(1 分を超えた録音の確認。最初の 1 本が 30 秒の枠を超えたため分けた)
-    ).toBe(531);
+    // ⚠ 2026-10-17(台帳 #1852 束 L2、依頼 96-1 A): `help-announce.smoke.spec.ts` に 1 本足した(初めて開いた端末にはお知らせを出さない)→ 531 → 532。起動の予算は 530 → 531(`scripts/smoke-budget.mjs` に理由)。
+    ).toBe(532);
   });
 });
 

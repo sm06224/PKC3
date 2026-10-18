@@ -374,6 +374,7 @@
 | `set-flag` | 低 | (フラグ欄) | `src/adapter/ui/render/flags.ts:121` | 開発者向け。選んだ値を読む |
 | `set-inline-code-copy` | 低 | 本文の小さなコードを押すとコピー | `src/adapter/ui/render/settings/inline-code-copy.ts:20` | チェック欄の値を読む |
 | `set-message-cap` | 低 | メッセージの保存件数 | `src/adapter/ui/render/settings/messages.ts:66` | 選んだ値を読む |
+| `set-message-filter` | 低 | メッセージの種類で絞る(すべて / 問題 / 注意 / 結果 / 配信) | `src/adapter/ui/render/message-bar.ts:48` | 押したボタンの種類を読む |
 | `set-missing-links` | 低 | 見つからないリンクを薄く見せる | `src/adapter/ui/render/settings/missing-links.ts:27` | チェック欄の値を読む |
 | `set-notices-enabled` | 低 | 起動したときにお知らせを出す | `src/adapter/ui/render/settings/notices.ts:37` | チェック欄の値を読む |
 | `set-open-in-edit` | 低 | 開いたら、そのまま編集に入る | `src/adapter/ui/render/settings/open-in-edit.ts:23` | チェック欄の値を読む |

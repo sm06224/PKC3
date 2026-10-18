@@ -89,11 +89,24 @@ export function createMessagesSection(region: HTMLElement): SettingsSection {
       );
 
       // ⚠ 保管件数が効くのはメッセージだけ ── 処理の記録の上限は別(#1087。数は定数から組む)
+      // 🔴 超えたときに消える順を言う(台帳 #1852 束 L1、依頼 343 / 267)。1 行に収まる長さ(`settings-notes.test.ts`)
       const note = buildSettingsNote(
-        `保管件数を超えると、古い知らせから消えます(処理の記録は ${JOB_CAP.toLocaleString('ja-JP')} 件まで)。`,
+        `保管件数を超えると結果から古い順に消えます(注意と問題は最後。処理の記録は ${JOB_CAP.toLocaleString('ja-JP')} 件まで)。`,
       );
 
-      wrap.append(open, openJobs, dl, exportBtn, exportNote, note);
+      /**
+       * 🔴 **処理の記録も書き出せる**(台帳 #1852 束 L1。依頼 217 / 265 / 345)。⚠ 新しい操作を作らない ──
+       *   受け手は `export-messages` と同じ(どちらの記録かはボタンの `data-pkc-message-lid` で決まる)。
+       *   文字数だけで本文を持たない形は同じなので、バグ報告にはメッセージと並べて貼れる。
+       */
+      const exportJobsBtn = document.createElement('button');
+      exportJobsBtn.type = 'button';
+      exportJobsBtn.setAttribute('data-pkc-action', 'export-messages');
+      exportJobsBtn.setAttribute('data-pkc-message-lid', SYSTEM_JOB_LID);
+      exportJobsBtn.textContent = '処理の記録を書き出す';
+      exportJobsBtn.title = '重い処理の記録(文字数だけで、本文は入りません)を .md ファイルで保存します。バグ報告に貼れます。';
+
+      wrap.append(open, openJobs, dl, exportBtn, exportNote, exportJobsBtn, note);
       return wrap;
     },
     /** ⚠ 未読は毎 state で変わりうる(器は触らない ── 字とボタンの列の押され方だけ差し替える)。 */

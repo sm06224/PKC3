@@ -10331,6 +10331,7 @@ h3[data-pkc-section] {
   [data-pkc-action='dual-bookmark'],
   [data-pkc-field='keymap-drop'],
   [data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'],
+  [data-pkc-region='help-oss'] > summary,
   [data-pkc-oss] summary {
     min-width: 24px;
     min-height: 24px;

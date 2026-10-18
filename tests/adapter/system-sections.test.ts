@@ -181,7 +181,7 @@ describe('「これまでのお知らせ」の一覧(#1017 段③-2)', () => {
     expect(list, '一覧が「お知らせ」の中に無い').not.toBeNull();
     const h4s = [...section!.querySelectorAll('h4')].map((h) => h.textContent);
     expect(h4s, 'h4「これまでのお知らせ」がトグルの下に無い').toEqual([
-      'お知らせ',
+      'お知らせを出すか',
       'これまでのお知らせ',
     ]);
   });

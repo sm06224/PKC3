@@ -282,14 +282,57 @@ export function trimToCap(body: string, cap: number, slack = 0): string {
   if (sections.length <= cap) return body;
   // 🔴 上限を超えたときは**余裕の分まで多めに落とす**(#1087 M8)。⚠ ちょうど上限で切ると、満杯の後は
   //   追記のたびに古い 1 件を落として本文全体を書き直す(5000 件で約 440KB)。余裕を持てば、落とすのは
-  //   `slack` 件に 1 回で済む。落とすのは古い順のまま。
+  //   `slack` 件に 1 回で済む。
+  //   ⚠ 余裕を持たせるのは処理の記録(5,000 件)だけ ── メッセージは画面に出す保管件数どおりに保つ
+  //   (台帳 #1852 束 L1。依頼 267)ので、呼び側が `slack = 0` を渡す。
   const keep = Math.max(1, cap - Math.max(0, Math.min(slack, cap - 1)));
-  return sections.slice(sections.length - keep).join('');
+  let drop = sections.length - keep;
+  /**
+   * 🔴 **落とす順は「結果などの日常の知らせ → 注意・問題」**(台帳 #1852 束 L1。依頼 343 / 117-1 / 92-2)。
+   *   「コピーしました」のような結果が続くと、バグの報告に要る注意・問題が先に押し出されていた。
+   *   各グループの中は古い順。⚠ 注意・問題だけで上限を超えたときは、その古い順から落とす(青天井にしない)。
+   */
+  const dropped = new Set<number>();
+  for (const protectedPass of [false, true]) {
+    for (let i = 0; i < sections.length && drop > 0; i++) {
+      if (dropped.has(i)) continue;
+      const m = SECTION_HEAD_RE.exec(sections[i] ?? '');
+      const kind = m ? LABEL_TO_KIND.get(m[2] ?? '') : undefined;
+      const isProtected = kind === 'caution' || kind === 'problem';
+      if (isProtected !== protectedPass) continue;
+      dropped.add(i);
+      drop -= 1;
+    }
+  }
+  return sections.filter((_, i) => !dropped.has(i)).join('');
+}
+
+/**
+ * 🔴 **その種類の知らせだけを残した本文**(台帳 #1852 束 L1。依頼 266)── メッセージのノートを読む画面の絞り込み用。
+ * ⚠ 画面に出す物を絞るだけ(disk の本文も書き出しも変えない)。`kind === null` は絞らない(1 バイトも変えない)。
+ * ⚠ 該当が 0 件のときは、空の画面にせず 1 行で言う。
+ */
+export function filterMessageBody(body: string, kind: MessageKind | null): string {
+  if (kind === null) return body;
+  const kept = splitSections(body).filter((s) => {
+    const m = SECTION_HEAD_RE.exec(s);
+    return m !== null && LABEL_TO_KIND.get(m[2] ?? '') === kind;
+  });
+  return kept.length === 0 ? `(「${MESSAGE_KIND_LABEL[kind]}」の知らせはありません)\n` : kept.join('');
 }
 
 /** 上限を超えたとき、上限よりどれだけ少なく残すか(上限の 5 分の 1 まで、最大 200 件)。 */
 export function messageTrimSlack(cap: number): number {
   return Math.min(200, Math.floor(cap / 5));
+}
+
+/**
+ * 🔴 **余裕を持たせるのは処理の記録だけ**(台帳 #1852 束 L1。依頼 267)。
+ * 「保管件数 100 件」と出しているメッセージは、101 件目で 80 件まで減っていた ── 画面の数どおり(超えた分だけ)に保つ。
+ * 処理の記録は 5,000 件で本文が大きい(追記のたびの書き直しが約 440KB)ので、「5,000 件まで」の範囲で多めに落とす。
+ */
+export function trimSlackForLid(lid: string, cap: number): number {
+  return lid === SYSTEM_JOB_LID ? messageTrimSlack(cap) : 0;
 }
 
 /**

@@ -36,8 +36,12 @@ import {
   type Notice,
 } from '../../src/features/notice/notice-log';
 
-function memory(): NoticeStorage {
-  const data: Record<string, string> = {};
+/**
+ * 既定は「初めてではない」端末(既読の記録が空の配列で在る)。⚠ 記録がまったく無いと「初めて開いた」になり、
+ * お知らせを出さずに読んだことにする(台帳 #1852 束 L2、依頼 96-1)── 初めての端末は `memory(true)`。
+ */
+function memory(firstRun = false): NoticeStorage {
+  const data: Record<string, string> = firstRun ? {} : { 'pkc3.notices.seen': '[]' };
   return {
     get: (k) => data[k] ?? null,
     set: (k, v) => {
@@ -903,6 +907,8 @@ describe('お知らせの文面は固定(#220-7)', () => {
    *   意味は変えていない(言葉の置き換えだけ)ので、既読の user に再び見せる必要は無い。
    */
   const KNOWN: readonly [id: string, digest: string][] = [
+    /** ⚠ **#1852 で足した**(2026-10-17)。枠が満杯だったので、いちばん古い 1 件(`2026-10-17-search-list`)を落とした ── 原本は `CHANGELOG.md`(2026-10-17 の節)。 */
+    ['2026-10-17-messages-notices', 'c5d98939'],
     /** ⚠ **#1852 で足した**(2026-10-17)。枠が満杯だったので、いちばん古い 1 件(`2026-10-17-pdf-help`)を落とした ── 原本は `CHANGELOG.md`(2026-10-17 の節)。 */
     ['2026-10-17-undo-trash', '29ca86da'],
     /** ⚠ **#1852 で足した**(2026-10-17)。枠が満杯だったので、いちばん古い 1 件(`2026-10-17-windows-tiles`)を落とした ── 原本は `CHANGELOG.md`(2026-10-17 の節)。 */
@@ -1001,8 +1007,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-10-17-messages', '8d9c5960'],
     /** ⚠ **取り違えて落としていたのを戻した**(2026-10-17、#1648)。配った文面のまま。 */
     ['2026-10-17-import', 'bfa5eb58'],
-    /** ⚠ **取り違えて落としていたのを戻した**(2026-10-17、#1648)。配った文面のまま。 */
-    ['2026-10-17-search-list', '2befb838'],
     /**
      * ⚠ **#1006(中身を残して作り直す)で足した**(2026-09-18。user 裁定
      *   「全部消さずに建て直す」「『捨てる』の上に置く」)。
@@ -1737,5 +1741,111 @@ describe('お知らせ → メッセージ「配信」(段②b)', () => {
     } finally {
       postSpy.mockRestore();
     }
+  });
+});
+
+/**
+ * 🔴 **この端末で初めて開いたとき**(台帳 #1852 束 L2。依頼 96-1 A)。
+ *
+ * 直す前は、初めて開くと「お知らせ(残り 50 件)」が出た。使ったことのない機能の変更点を 49 回送るか、閉じて全部読んだことにするかだった。
+ * いまは出さずに読んだことにする(消すのではない ── システムの「お知らせ」には残る)。
+ */
+describe('🔴 初めて開いた端末にはお知らせを出さない(依頼 96-1)', () => {
+  it('既読の記録がまったく無い端末では、出さずに全部を読んだことにする(対照:記録が在れば出る)', () => {
+    const first = new NoticeStore(memory(true));
+    createAnnounce(region, first, NOTES).present();
+    expect(region.hidden, '初めてなのに帯が出ている').toBe(true);
+    expect(first.seenIds().slice().sort(), '読んだことになっていない(次に開くとまた出る)').toEqual(
+      NOTES.map((n) => n.id).sort(),
+    );
+    // 対照群:同じ登記表でも、既読の記録が在る端末(= 初めてではない)には出る
+    region.hidden = true;
+    createAnnounce(region, new NoticeStore(memory(false)), NOTES).present();
+    expect(region.hidden, '対照が出ていない(上の検査が何も見ていない)').toBe(false);
+  });
+
+  it('🔴 一度読んだことにしたあと、新しいお知らせが登記されれば出る(初めての扱いは 1 回だけ)', () => {
+    const st = memory(true);
+    createAnnounce(region, new NoticeStore(st), NOTES).present();
+    expect(region.hidden).toBe(true);
+    // 次の起動(同じ保存)に新しい 1 件が増えた
+    const next: Notice[] = [{ id: '2026-09-09-c', title: '更に新しい', items: ['つぎの話'] }, ...NOTES];
+    createAnnounce(region, new NoticeStore(st), next).present();
+    expect(region.hidden, '2 回目の起動でも黙っている').toBe(false);
+    expect(
+      [...region.querySelectorAll('[data-pkc-announce]')].map((e) => e.getAttribute('data-pkc-announce')),
+    ).toEqual(['2026-09-09-c']);
+  });
+
+  it('「今後は出さない」を選んだ記録が在る端末は、初めてではない(読んだことにしない)', () => {
+    const st = memory(true);
+    st.set('pkc3.notices.off', '1');
+    const store = new NoticeStore(st);
+    expect(store.settleFirstRun(NOTES)).toBe(false);
+    expect(store.seenIds(), '出さない設定の人の既読を書き換えた').toEqual([]);
+  });
+
+  it('🔴 settleFirstRun は 1 回だけ効く', () => {
+    const store = new NoticeStore(memory(true));
+    expect(store.settleFirstRun(NOTES)).toBe(true);
+    expect(store.settleFirstRun(NOTES)).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **カードから、過去のお知らせの一覧へ行ける**(依頼 80-2 B)。
+ * 直す前は「過去のお知らせは「システム」から読めます」と字で書いてあるだけで、押せる物が無かった。
+ */
+describe('🔴 お知らせのカードの「お知らせの一覧を開く」(依頼 80-2)', () => {
+  it('カードに、ヘルプと同じ受け手(open-system-notices)のボタンが在る', () => {
+    createAnnounce(region, new NoticeStore(memory()), NOTES).present();
+    const btn = region.querySelector<HTMLElement>('[data-pkc-action="open-system-notices"]');
+    expect(btn, 'カードに一覧へ行くボタンが無い').not.toBeNull();
+    expect(btn?.textContent).toBe('お知らせの一覧を開く');
+  });
+
+  it('押すとシステムが開き、カードはしまう(読んだことにはしない)', async () => {
+    const { Dispatcher } = await import('../../src/adapter/state/dispatcher');
+    const d = new Dispatcher();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    const root = document.createElement('div');
+    document.body.append(root);
+    const band = document.createElement('section');
+    // 本物の器(shell.ts)と同じ印 ── カードの中から押されたかは、この領域の内側かで決める
+    band.setAttribute('data-pkc-region', 'announce');
+    root.append(band);
+    const store = new NoticeStore(memory());
+    const announce = createAnnounce(band, store, NOTES);
+    announce.present();
+    const calls: string[] = [];
+    const stop = bindActions(root, d, {
+      hideAnnounce: () => announce.hide(),
+      dismissAnnounce: () => calls.push('dismiss'),
+    });
+    band.querySelector<HTMLElement>('[data-pkc-action="open-system-notices"]')!.click();
+    expect(d.getState().viewMode, 'システムが開いていない').toBe('settings');
+    expect(band.hidden, 'カードがしまわれていない(スマホでは一覧が下に隠れる)').toBe(true);
+    expect(store.seenIds(), '読んだことにした(次に開いたとき出ない)').toEqual([]);
+    expect(calls).toEqual([]);
+    stop();
+  });
+
+  it('カード以外(ヘルプなど)から押しても、カードは巻き込まない', async () => {
+    const { Dispatcher } = await import('../../src/adapter/state/dispatcher');
+    const d = new Dispatcher();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    const root = document.createElement('div');
+    document.body.append(root);
+    const band = document.createElement('section');
+    root.append(band);
+    const announce = createAnnounce(band, new NoticeStore(memory()), NOTES);
+    announce.present();
+    const outside = document.createElement('button');
+    outside.setAttribute('data-pkc-action', 'open-system-notices');
+    root.append(outside);
+    const stop = bindActions(root, d, { hideAnnounce: () => announce.hide() });
+    outside.click();
+    expect(band.hidden, '関係ない所から押したのにカードが消えた').toBe(false);
+    stop();
   });
 });

@@ -35,6 +35,14 @@ const BATCH = [
   'schedule-quick-add', 'schedule-today', 'export-schedule-ics', 'toggle-show-done', 'toggle-show-archived', 'toggle-show-undated',
 ] as const;
 
+/**
+ * 画面のボタンをそのまま押して実行する 17 件(`export-messages` を除く)。
+ * ⚠ 「メッセージを書き出す」は 2026-10-17(台帳 #1852 束 L1、依頼 92-1)から**どの画面からでも**撃てる ──
+ *   ボタン(システムの画面の中)を介さず直に書き出すので、ここの「ボタンを押す」検査には載せない
+ *   (`tests/adapter/export-messages-anywhere.test.ts` が単独で見る)。
+ */
+const BUTTON_BATCH = BATCH.filter((x) => x !== 'export-messages');
+
 /** 欄が先に要る 4 件(`binder.ts` の `PALETTE_FIELD_FIRST`)と、その欄・親の組み方。 */
 const FIELD_FIRST: Readonly<Record<string, string>> = {
   'add-tag': 'tag-add-input',
@@ -166,7 +174,7 @@ describe('第 1 群 18 件の登記(#582 段③)', () => {
 
   it('① 一覧から呼ぶと、画面のボタンが 1 回押され、直接押したときと同じ dispatch 列になる', () => {
     // 欄が先に要る 4 件は字を入れた形で(空のときは③)
-    for (const id of BATCH) {
+    for (const id of BUTTON_BATCH) {
       const viaBtn = setup();
       const b1 = mount(viaBtn.root, id, { value: 'x' });
       let n1 = 0;
@@ -223,7 +231,7 @@ describe('② 押せないときは灰色 + 理由の 1 行', () => {
   it('ボタンが画面に無い間は、18 件とも押せず、理由は説明の末尾(…のときだけ効きます)から引く', () => {
     const env = setup();
     const rows = commandRowsFor(env.root, env.d, env.store, '', null);
-    for (const id of BATCH) {
+    for (const id of BUTTON_BATCH) {
       const r = rows.find((x) => x.id === id);
       expect(r, `${id} が一覧に無い`).toBeDefined();
       expect(r?.ready, `${id}: ボタンが無いのに押せる顔`).toBe(false);
@@ -240,15 +248,15 @@ describe('② 押せないときは灰色 + 理由の 1 行', () => {
 
   it('ボタンが在れば、同じ 18 件が押せる(灰色が「在るのに押せない」になっていない)', () => {
     const env = setup();
-    for (const id of BATCH) mount(env.root, id, { value: 'x' });
+    for (const id of BUTTON_BATCH) mount(env.root, id, { value: 'x' });
     const rows = commandRowsFor(env.root, env.d, env.store, '', null);
-    for (const id of BATCH) expect(rows.find((x) => x.id === id)?.ready, id).toBe(true);
+    for (const id of BUTTON_BATCH) expect(rows.find((x) => x.id === id)?.ready, id).toBe(true);
   });
 
   it('`hidden` の中に居るボタンは押せない ── 隠れた切替 / 別のタブへ移った後の予定の欄を「押せます」と言わない', () => {
     // 例外の 2 件(添付 / 今日のノート)以外は、全部この規則に掛かる
     const EXEMPT = ['attach-file', 'open-today'];
-    for (const id of BATCH.filter((x) => !EXEMPT.includes(x))) {
+    for (const id of BUTTON_BATCH.filter((x) => !EXEMPT.includes(x))) {
       const env = setup();
       mount(env.root, id, { hidden: true, value: 'x' });
       expect(rowOf(env, id)?.ready, `${id}: 隠れているのに押せる顔`).toBe(false);

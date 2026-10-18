@@ -84,9 +84,22 @@ export async function watchForUpdate(
   registered: Promise<UpdateRegistration | null>,
   present: (apply: () => void) => void,
   reload: () => void,
+  /**
+   * 🔴 **別のタブが切り替えたとき、押していないこのタブへ知らせる**(台帳 #1852 束 L2。依頼 131 A)。
+   * ⚠ 勝手に読み込み直さない(書きかけを巻き込む)── 押されたとき `reload` を呼ぶ形で渡す。
+   */
+  elsewhere?: (reload: () => void) => void,
 ): Promise<void> {
   const registration = await registered;
   if (!registration) return; // SW が成立しない環境(file:// の可搬 HTML など)
+
+  /**
+   * 🔴 **もともと版に制御されていたタブだけ**が「別のタブで切り替わった」と読める。
+   * ⚠ 初めて開いたタブは、最初の登録が済んだ瞬間の `clients.claim()` でも `controllerchange` が来る
+   *   (誰も切り替えていない)ので、ここで弾く。
+   */
+  const hadController = Boolean(container.controller);
+  let toldElsewhere = false;
 
   // ⚠ 押したのが**このタブ**のときだけ再読込する。`clients.claim()` は
   // 全タブに `controllerchange` を投げるので、無条件に再読込すると
@@ -94,6 +107,15 @@ export async function watchForUpdate(
   let requested = false;
   let reloaded = false;
   container.addEventListener('controllerchange', () => {
+    if (!requested && !reloaded && hadController && !toldElsewhere && elsewhere !== undefined) {
+      toldElsewhere = true;
+      elsewhere(() => {
+        if (reloaded) return;
+        reloaded = true;
+        reload();
+      });
+      return;
+    }
     if (!requested || reloaded) return;
     reloaded = true;
     reload();

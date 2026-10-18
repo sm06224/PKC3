@@ -268,6 +268,18 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
   const dl = page.waitForEvent('download');
   // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
 
+  /**
+   * 🔴 **送り主の端末に未読のメッセージがあっても、書き出した HTML には持ち越さない**(台帳 #1852 束 L1。確認 D)。
+   * 先に送り主の端末で「問題」を 1 件起こして、画面下の「未読のメッセージ」を出しておく
+   * (読めない Office 一式のファイルを入れる ── 起動直後は未読 0 件で、これが無いと持ち越しの有無が見えない)。
+   */
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const senderUnread = page.locator('[data-pkc-region="status"] [data-pkc-field="status-messages"]');
+  const chooser = page.waitForEvent('filechooser');
+  await clickReal(page, '[data-pkc-view-pane="settings"] [data-pkc-field="office-pack-file"]');
+  await (await chooser).setFiles({ name: 'broken-pack.zip', mimeType: 'application/zip', buffer: Buffer.from('not a pack') });
+  await expect(senderUnread, '前提が崩れている(送り主に未読が立っていない)').toBeVisible({ timeout: 15_000 });
+
   await gotoCollectionPane(page);
 
   await clickReal(page, '[data-pkc-action="export-portable"]');
@@ -284,6 +296,12 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
   const carried = await page.context().newPage();
   await carried.goto(pathToFileURL(out).href);
   await expect(carried.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  // 🔴 D. 未読の件数は読み込みの後で入る ── 少し置いてから、送り主のメッセージ(未読)が入っていないことを見る
+  await carried.waitForTimeout(1_500);
+  await expect(
+    carried.locator('[data-pkc-region="status"] [data-pkc-field="status-messages"]'),
+    '書き出した HTML に、送り主の未読のメッセージが入っている',
+  ).toBeHidden();
   /**
    * 🔑 診断(#1066)── **assert より前に 1 行で残す**(落ちた回にだけ欲しい)。
    *

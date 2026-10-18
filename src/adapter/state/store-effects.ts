@@ -10,6 +10,8 @@ import { bodySaveErrorText, errorText } from '@features/error-text';
 import type { EntryStamps, EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta, type FlavorExtract } from '@features/flavor';
 import { appMessagePost } from '@adapter/platform/message-post';
+import { messageKindFilter } from '@adapter/platform/message-filter';
+import { filterMessageBody, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import { PersistOnce, type PersistState } from '@adapter/platform/storage-persist';
 // 🔴 追記の楽観検査(#178)── 「読んだ本文」を worker と突き合わせるための指紋
 import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
@@ -2059,7 +2061,13 @@ export function connectStoreEffects(
             // 🔴 書けずに控えへ回った節も含める(#1087 M1)
             const body = await appMessagePost.withSpool(ev.lid, () => store.getBody(ev.lid));
             if (disposed) return;
-            dispatcher.dispatch({ type: 'BODY_LOADED', lid: ev.lid, body });
+            // 🔴 種類で絞っているときは、画面に出す本文だけを絞る(台帳 #1852 束 L1、依頼 266。disk の本文は変えない)。
+            //   絞りはメッセージのノートだけ(処理の記録は種類が 1 つ)
+            dispatcher.dispatch({
+              type: 'BODY_LOADED',
+              lid: ev.lid,
+              body: ev.lid === SYSTEM_MESSAGE_LID ? filterMessageBody(body, messageKindFilter()) : body,
+            });
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({

@@ -45,7 +45,8 @@ export function createPersistSection(region: HTMLElement): SettingsSection {
      */
     build(): Node[] {
       const st = document.createElement('dt');
-      st.textContent = 'PKC3 のデータ';
+      // 🔴 見出し「PKC3 のデータ」と同じ字が続いていた → 中身(ブラウザが消さない扱いにしているか)を言う(台帳 #1852 束 L2、依頼 80-7)
+      st.textContent = 'ブラウザの扱い';
       const sd = document.createElement('dd');
       const snote = document.createElement('p');
       snote.setAttribute('data-pkc-field', 'settings-note');

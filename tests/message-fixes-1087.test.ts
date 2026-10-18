@@ -24,7 +24,8 @@ import {
 } from '../src/features/message/caution-events';
 
 function memory(): NoticeStorage {
-  const data: Record<string, string> = {};
+  // 既読の記録を空の配列で始める = 「初めて開いた端末」ではない(初めてなら出さずに読んだことにする。台帳 #1852 束 L2、依頼 96-1)
+  const data: Record<string, string> = { 'pkc3.notices.seen': '[]' };
   return {
     get: (k) => data[k] ?? null,
     set: (k, v) => {

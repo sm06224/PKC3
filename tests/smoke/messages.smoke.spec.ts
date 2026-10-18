@@ -25,6 +25,11 @@ test('🔴 メッセージ: 一覧に出ない / 開くと中央に出る / 編�
   await gotoApp(page);
   const hashAtBoot = await page.evaluate(() => location.hash);
   await dismissAnnounce(page);
+  // 🔴 タブの題名(台帳 #1852 束 L2): 開発版の build は「PKC3(開発版)」、公開版・検証版は「PKC3」のまま
+  //    ⚠ どちらの build で回しているかは spec から分からないので両方を受ける(記録に残す)。
+  const tabTitle = await page.title();
+  test.info().annotations.push({ type: 'tab-title', description: tabTitle });
+  expect(tabTitle, 'タブの題名が「PKC3」「PKC3(開発版)」のどちらでもない').toMatch(/^PKC3(\(開発版\))?$/);
 
   // ① 🔴 左の一覧に「メッセージ」という行は無い(system 領域は user の一覧に混ざらない)
   const sidebarRows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
@@ -39,10 +44,27 @@ test('🔴 メッセージ: 一覧に出ない / 開くと中央に出る / 編�
   const pane = page.locator('[data-pkc-view-pane="settings"]');
   await expect(pane, 'システムの面が開かない').toBeVisible();
 
-  // ② 🔴 メッセージの節の「開く」を押す
+  // ② 🔴 メッセージの節の「開く」が出ている
   const openBtn = pane.locator('[data-pkc-action="open-messages"]').first();
   await expect(openBtn, '「メッセージ」を開くボタンが無い').toBeVisible();
-  await clickReal(page, openBtn);
+
+  /**
+   * 🔴 **ノートを選ばないまま、画面下の「未読のメッセージ N 件」を押して開く**(台帳 #1852 束 L1)。
+   * 未読は、読めない Office 一式のファイルを入れて「問題」を 1 件起こして作る(起動直後は未読 0 件で、入口が出ていない)。
+   * ⚠ 入口が出ない場合は assert で落とす(押せる場面を作れていない = 確かめていない)。
+   */
+  const unread = page.locator('[data-pkc-region="status"] [data-pkc-field="status-messages"]');
+  await expect(unread, '前提が崩れている(起動直後から未読が出ている)').toBeHidden();
+  const chooser = page.waitForEvent('filechooser');
+  await clickReal(page, pane.locator('[data-pkc-field="office-pack-file"]'));
+  await (await chooser).setFiles({
+    name: 'broken-pack.zip',
+    mimeType: 'application/zip',
+    buffer: Buffer.from('not a pack'),
+  });
+  await expect(unread, '問題を起こしても「未読のメッセージ」の入口が出ない').toBeVisible({ timeout: 15_000 });
+  await expect(unread).toContainText('未読のメッセージ');
+  await clickReal(page, unread);
 
   // 中央に題名「メッセージ」が出る(detail 面)
   const detailPane = page.locator('[data-pkc-view-pane="detail"]');
@@ -62,6 +84,38 @@ test('🔴 メッセージ: 一覧に出ない / 開くと中央に出る / 編�
   // ③ 🔴 帯に「編集」が無い(system のノートは読むだけ)
   const editBtn = detailPane.locator('[data-pkc-action="start-edit"]');
   await expect(editBtn, '「編集」が system のノートにも出てしまった').toHaveCount(0);
+
+  /**
+   * ③b 🔴 **本文の上の帯**(台帳 #1852 束 L1。依頼 80-3 / 266)── 種類で絞るボタンと「メッセージを書き出す」。
+   * ⚠ 「押されている」の印(`aria-pressed`)に**見た目の規則が在るか**を、実ブラウザの計算後の色で見る
+   *   (属性だけ見ると、CSS に受け皿が無くても緑になる)。
+   * 起動の要約は「結果」。「注意」に絞ると消え、「すべて」で戻る。
+   */
+  const bar = detailPane.locator('[data-pkc-field="detail-toolbar"]');
+  const chips = bar.locator('[data-pkc-action="set-message-filter"]');
+  await expect(chips, '種類のボタンが 5 つ(すべて / 問題 / 注意 / 結果 / 配信)出ていない').toHaveText([
+    'すべて',
+    '問題',
+    '注意',
+    '結果',
+    '配信',
+  ]);
+  await expect(bar.locator('[data-pkc-action="export-messages"]'), '帯に「メッセージを書き出す」が無い').toHaveText(
+    'メッセージを書き出す',
+  );
+  const chip = (label: string) => bar.locator('[data-pkc-action="set-message-filter"]', { hasText: new RegExp(`^${label}$`) });
+  const bg = (label: string) => chip(label).evaluate((e) => getComputedStyle(e).backgroundColor);
+  await expect(chip('すべて')).toHaveAttribute('aria-pressed', 'true');
+  const pressedBg = await bg('すべて');
+  const idleBg = await bg('注意');
+  expect(pressedBg, '押されているボタンが、そうでないボタンと見分けられない(CSS に受け皿が無い)').not.toBe(idleBg);
+
+  await clickReal(page, chip('注意'));
+  await expect(chip('注意')).toHaveAttribute('aria-pressed', 'true');
+  expect(await bg('注意'), '「注意」を押したのに見た目が変わらない').toBe(pressedBg);
+  await expect(detailPane, '「注意」に絞ったのに、結果(起動の要約)が残っている').not.toContainText('起動しました');
+  await clickReal(page, chip('すべて'));
+  await expect(detailPane, '「すべて」に戻っても本文が戻らない').toContainText('起動しました');
 
   // ④ 🔴 一連の操作で hash は 1 度も変わっていない(ディープリンク専用)
   const hashAfter = await page.evaluate(() => location.hash);

@@ -442,6 +442,7 @@ import {
   noteOpenElsewhereMessage,
   noteOpenedByUs,
   windowDeepLinkTarget,
+  windowTitleBase,
   windowTitleFor,
   ringingTitle,
 } from '@adapter/platform/deep-link';
@@ -487,6 +488,8 @@ import { SECTION_LOADING_SELECTOR } from '@adapter/ui/render/section-embed';
 const DB_NAME = 'pkc3';
 /** container の題名(書出しのファイル名にも使う ── 1 箇所で決める)。 */
 const CONTAINER_TITLE = 'PKC3';
+/** 窓の題名の根(開発版だけ「(開発版)」が付く。台帳 #1852 束 L2、依頼 84-3)。 */
+const WINDOW_TITLE_BASE = windowTitleBase(CONTAINER_TITLE, BUILD_KIND);
 
 
 export interface AppHandle {
@@ -504,6 +507,8 @@ export interface AppHandle {
    * ⚠ 交代を頼むだけ ── 再読込は交代が済んでから(`watchForUpdate` の側)。
    */
   presentUpdate(apply: () => void): void;
+  /** 別のタブが新しい版に切り替えたことを見せる(押されたら `reload`。台帳 #1852 束 L2、依頼 131 A)。 */
+  presentUpdateElsewhere(reload: () => void): void;
   /**
    * 起動したときのお知らせを見せる(P11 段⑤)。
    * ⚠ **boot が落ち着いてから**呼ぶ ── 何も映っていない画面に帯だけ立てない。
@@ -1961,7 +1966,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         : !heldNoteWindow || st.selectedLid === null
           ? null
           : (st.entryMetas.get(st.selectedLid)?.title ?? null);
-    const next = ringingTitle(windowTitleFor(CONTAINER_TITLE, label), alarmBell);
+    const next = ringingTitle(windowTitleFor(WINDOW_TITLE_BASE, label), alarmBell);
     // ⚠ 同じ字を書かない(`document.title` の代入はタスクバーを触る)
     if (next === titleShown) return;
     titleShown = next;
@@ -5255,7 +5260,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
            *   (SW の precache には載せない。載せると全 user が 6.5MB を先に落とす)。
            */
           fetchTemplate: () => fetchPortableTemplate((u) => fetch(u), document.baseURI),
-          exportImage: async () => (await client.request({ op: 'exportImage' })).image,
+          // 🔴 人に渡すファイルにはメッセージ・処理の記録を入れない(台帳 #1852 束 L1、依頼 216 / 344)
+          exportImage: async () => (await client.request({ op: 'exportImage', withoutMessages: true })).image,
           listAssets: async () =>
             (await client.request({ op: 'listAssetMetas', cid })).map((m) => ({
               key: m.key,
@@ -5338,7 +5344,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             decision === 'here'
               ? NOTE_OPEN_HERE_MESSAGE
               : noteOpenElsewhereMessage(
-                  CONTAINER_TITLE,
+                  WINDOW_TITLE_BASE,
                   dispatcher.getState().entryMetas.get(lid)?.title ?? null,
                 ),
         });
@@ -6216,6 +6222,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     importLaunchFiles,
     navigateAssetRef: (assetKey, what, ownerLid) => services.navigateAssetRef?.(assetKey, what, ownerLid),
     presentUpdate: (apply) => updatePrompt.present(apply),
+    presentUpdateElsewhere: (reload) => updatePrompt.elsewhere(reload),
     presentAnnounce: () => announce.present(),
     // 🔴 起動のたびに軽く検める(#1007 段①)── 実体は `showStatus` の下
     startupIntegrity,
@@ -6417,6 +6424,7 @@ function bootstrap(): void {
         registered,
         (apply) => app.presentUpdate(apply),
         () => location.reload(),
+        (reload) => app.presentUpdateElsewhere(reload),
       );
       /**
        * 🔴 **初回訪問だけ 1 回読み直して分離を成立させる**(#111)。
