@@ -272,7 +272,8 @@ describe('main.ts の配線(原文 pin)', () => {
     expect(call).toContain('openNoteLid: () => dispatcher.getState().selectedLid');
     // 🔑 その文書を本文に載せたノートは、既存の全文検索で引く(新しい口を作らない)
     expect(call).toContain('usersOfAsset: async (assetKey) =>');
-    expect(call).toContain("op: 'searchEntries', cid, query: assetKey, limit: 8");
+    // 🔴 `raw: true` まで pin する(台帳 #1852 束 B2)── 無いと、リンクの宛先の字(`asset:` の key)が検索に当たらず持ち主が 0 件になる
+    expect(call).toContain("op: 'searchEntries', cid, query: assetKey, limit: 8, raw: true");
     expect(call).toContain('notify: (text) => showStatus(text)');
   });
 

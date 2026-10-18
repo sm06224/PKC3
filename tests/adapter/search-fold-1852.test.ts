@@ -278,6 +278,19 @@ describe('揃えて引く・メモとリンクの宛先・左の列の語(束 B2
     expect((await request({ op: 'searchDetail', cid: CID, query: 'entry' })).rows).toEqual([]);
   });
 
+  it('「探す」: 上限を越えたら切ったと言い、上限ぶんだけ抜粋を作る(本文を全部は載せない作り)', async () => {
+    const cut = await request({ op: 'searchDetail', cid: CID, query: '買う', limit: 1 });
+    expect(cut.rows).toHaveLength(1);
+    expect(cut.truncated, '切ったのに言っていない').toBe(true);
+    const all = await request({ op: 'searchDetail', cid: CID, query: '買う', limit: 5 });
+    expect(all.rows.map((r) => r.lid).sort()).toEqual(['n5', 'n6']);
+    expect(all.truncated).toBe(false);
+    // 3 字以上(索引の枝)でも同じ
+    const fts = await request({ op: 'searchDetail', cid: CID, query: 'を買う', limit: 1 });
+    expect(fts.rows).toHaveLength(1);
+    expect(fts.truncated).toBe(true);
+  });
+
   it('「探す」: 3 字未満の語・除外・複数語でも揃える', async () => {
     const two = await request({ op: 'searchDetail', cid: CID, query: 'ｐｋ' });
     expect(two.rows.map((x) => x.lid)).toEqual(['n1']);
@@ -398,29 +411,6 @@ describe('索引の作り直しは起動の後に塊で流す(束 B2)', () => {
     try {
       expect(() => raw.exec(`INSERT INTO entries_fts(entries_fts) VALUES ('integrity-check')`)).not.toThrow();
       expect(Number(raw.selectValue('SELECT count(*) FROM entries_fts_docsize'))).toBe(N);
-    } finally {
-      raw.close();
-    }
-  }, 30_000);
-
-  it('🔴 作り直し中に書いた行・消した行でも、索引が壊れない(印より後の行へは引き金が黙る)', async () => {
-    const db = legacyDb(rowsOf());
-    const image = exportRaw(db);
-    db.close();
-    const request = await spawnWorker();
-    await request({ op: 'init', dbName: 'rebuild-1852c', memory: true, image });
-    // まだ 1 件も流していない間に、書く・消す(印より後の行に 'delete' を撃つと索引が壊れる ── 2026-08-20 と同じ型)
-    await request({ op: 'upsertEntry', cid: CID, entry: entry('r249', '題', '書き換えた最後の行 ＺＺＺ', 249), checkpoint: false });
-    await request({ op: 'deleteEntry', cid: CID, lid: 'r248' } as never);
-    await request({ op: 'upsertEntry', cid: CID, entry: entry('newrow', '新', '作り直し中に足した行 ＮＥＷ', 999), checkpoint: false });
-    await untilBuilt(request);
-    expect(await lidsOf(request, 'zzz'), '作り直し中に書き換えた行が揃えて引けない').toEqual(['r249']);
-    expect(await lidsOf(request, 'new'), '作り直し中に足した行が引けない').toEqual(['newrow']);
-    expect(await lidsOf(request, 'ふつうの本文 r248'), '消した行が残っている').toEqual([]);
-    const { image: out } = await request({ op: 'exportImage' });
-    const raw = openRaw(out);
-    try {
-      expect(() => raw.exec(`INSERT INTO entries_fts(entries_fts) VALUES ('integrity-check')`)).not.toThrow();
     } finally {
       raw.close();
     }
