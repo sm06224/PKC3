@@ -183,7 +183,7 @@ describe('大きい文書の知らせ(台帳 #1852 束 A1。依頼 242)', () => 
   it('文書の名前と MB と、開けないときの次の一手(ダウンロード)を言う', () => {
     const t = largeDocNotice('報告.docx', 1200 * MB)!;
     expect(t).toContain('「報告.docx」');
-    expect(t).toContain('約 1200 MB');
+    expect(t).toContain('1.2 GB');
     expect(t).toContain('開けないことがあります');
     expect(t).toContain('ダウンロード');
   });

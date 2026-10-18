@@ -12,6 +12,7 @@
  * ⚠ ここに DOM も window も持ち込まない ── そうしないと test が実機依存になる。
  */
 
+import { humanBytes } from '../human-bytes';
 import { OFFICE_PACK_APPROX } from './office-pack-size';
 
 /** 添付が Office 文書かどうかの判定に使う MIME。 */
@@ -85,8 +86,7 @@ export const OFFICE_LARGE_DOC_BYTES = 300 * 1024 * 1024;
 /** 大きい文書を開くときの知らせ。⚠ 小さい文書には何も言わない(`null`)。 */
 export function largeDocNotice(name: string, bytes: number): string | null {
   if (!(bytes > OFFICE_LARGE_DOC_BYTES)) return null;
-  const mb = Math.round(bytes / (1024 * 1024));
-  return `「${name}」は大きい文書(約 ${mb} MB)なので、Office で開けないことがあります。開くまで時間がかかります。開けないときは、ダウンロードして別のアプリで開いてください`;
+  return `「${name}」は大きい文書(${humanBytes(bytes)})なので、Office で開けないことがあります。開くまで時間がかかります。開けないときは、ダウンロードして別のアプリで開いてください`;
 }
 
 /** 実行環境に足りないもの(空なら足りている)。 */

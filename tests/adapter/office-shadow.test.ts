@@ -1036,7 +1036,7 @@ describe('🔴 host.html の影の配線', () => {
 
   it('保存の見張りの直後に積み、1 秒ごとに tick する。閉じるとき止める', () => {
     const a = host.indexOf('armSaveWatch(FS, docToken);');
-    const b = host.indexOf('armShadow(FS, function () { return docToken; }, function () { return { name: docName, size: docBytes ? docBytes.length : 0, lid: docToken }; });');
+    const b = host.indexOf('armShadow(FS, function () { return docToken; }, function () { return { name: docName, size: docOriginSize !== null ? docOriginSize : (docBytes ? docBytes.length : 0), lid: docToken }; });');
     expect(a).toBeGreaterThan(0);
     expect(b, '影の見張りを積んでいない').toBeGreaterThan(a);
     expect(host).toContain('shadowTimer = setInterval(function () { void writer.tick(); }, 1000);');

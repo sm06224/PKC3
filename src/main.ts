@@ -2475,7 +2475,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       );
       // 🔴 大きい文書は、開けないことがあると言う(台帳 #1852 束 A1。依頼 242)。⚠ 言うだけで、開くのは止めない
       const large = largeDocNotice(staged.name, staged.bytes.byteLength);
-      if (large !== null) showStatus(large, { kind: 'caution' });
+      if (large !== null) showStatus(large);
       return;
     }
     const r = officeWindow.open({});
