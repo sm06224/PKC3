@@ -5151,6 +5151,27 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   max-width: 100%;
   height: auto;
 }
+/* 🔴 **透明な画像の後ろに薄い格子を敷く**(依頼 138。Gemini 推薦どおり = 市松)。
+ *
+ * 背景が透明な PNG(黒い線のロゴ・図)は、暗いテーマだと線が地に溶けて見えない。
+ * 後ろに「地」と「地を文字色へ 14% 寄せた色」の市松を敷けば、**白い線も黒い線も見え**、
+ * 透明であることも分かる(不透明な画像は絵が格子を隠すので、見た目は 1 ドットも変わらない)。
+ * ⚠ 掛かり先は **`[src]` を持つ画像だけ** ── 読み込み前の placeholder(`:not([src])`)には敷かない。
+ * 🔑 起点は `.pkc-md-rendered`(読む画面 / 別ウィンドウ / Split プレビュー / 書き出し HTML で同じ 1 本 ──
+ *   `build/body-css.ts` が焼く)。色は変数だけなので、テーマにも書き出し先の light / dark にも追従する。
+ * ⚠ 図(mermaid / グラフの PNG)は `pkc-asset-ref` でも `pkc-external-img` でもないので敷かない。 */
+.pkc-md-rendered img.pkc-asset-ref[src],
+.pkc-md-rendered img.pkc-external-img[src] {
+  background-color: var(--surface);
+  background-image:
+    conic-gradient(
+      color-mix(in oklab, var(--surface) 86%, var(--fg)) 25%,
+      transparent 0 50%,
+      color-mix(in oklab, var(--surface) 86%, var(--fg)) 0 75%,
+      transparent 0
+    );
+  background-size: 16px 16px;
+}
 .pkc-md-rendered [data-pkc-asset-missing] {
   outline: 1px dashed var(--warn);
   color: var(--warn);
