@@ -405,7 +405,8 @@ describe('ファイル名 → 題名', () => {
     ['dir/sub/note.md', 'note'],
     ['dir\\sub\\note.md', 'note'],
     ['NOTE.MD', 'NOTE'],
-    ['note.txt', 'note.txt'],
+    // 🔴 .txt も「取り込む」から入るので、題名から拡張子を落とす(依頼 171)
+    ['note.txt', 'note'],
     ['  spaced .md', 'spaced'],
   ])('%s → %s', (name, expected) => {
     expect(titleFromFileName(name)).toBe(expected);

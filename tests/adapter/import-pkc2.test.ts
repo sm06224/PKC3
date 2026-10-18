@@ -468,6 +468,8 @@ describe('importPkc2File (P6b 実行部)', () => {
     // 🔑 対象外のファイルは壊れていない ──「失敗しました」ではなく断りとして出す(#1087)
     expect(d.getState().error).toMatch(/PKC2 の書き出しではない HTML なので、取り込めません/);
     expect(d.getState().error).not.toMatch(/取り込みに失敗しました/);
+    // 🔴 PKC3 の閲覧用 HTML もここに来る ── 使える方法(バックアップ)を 1 行添える(依頼 341)
+    expect(d.getState().error).toContain('PKC3 のバックアップは .pkc3-full.zip です');
     expect(written).toHaveLength(0);
     // 🔴 「取込中…」を出した後で落ちたので、進行中の字を消す(#1017 C5)。⚠ 残ると「まだ続いている」と読める
     expect(notices[0], '前提が崩れた(進行中の字が先に出ていない)').toContain('取り込み中…');

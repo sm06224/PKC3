@@ -12,7 +12,7 @@
  */
 import { failImport } from './import-failure';
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { isMarkdownFileName } from '@features/import/plain-markdown';
+import { isMarkdownFileName, isPlainTextFileName } from '@features/import/plain-markdown';
 import { isVcfFileName } from '@features/contact/vcard';
 import { isPptxFileName } from '@features/import/pptx-board';
 import { isIcsFileName } from '@features/schedule/ics-import';
@@ -40,7 +40,8 @@ export async function importFiles(
   files: readonly File[],
 ): Promise<number | null> {
   if (files.length === 0) return null;
-  const md = files.filter((f) => isMarkdownFileName(f.name));
+  // 🔴 `.txt` も md と同じ道(依頼 171)。⚠ 窓へ落としたときの振り分け(binder)は md 拡張子だけを見る ── `.txt` の落としは添付のまま
+  const md = files.filter((f) => isMarkdownFileName(f.name) || isPlainTextFileName(f.name));
   const vcf = files.filter((f) => isVcfFileName(f.name));
   const pptx = files.filter((f) => isPptxFileName(f.name));
   const ics = files.filter((f) => isIcsFileName(f.name));
@@ -49,7 +50,7 @@ export async function importFiles(
   if (pptx.length === files.length) return importPptxFiles(dispatcher, deps, files);
   if (ics.length === files.length) return importIcsFiles(dispatcher, deps, files);
   if (md.length > 0 || vcf.length > 0 || pptx.length > 0 || ics.length > 0) {
-    return failImport(dispatcher, deps, '種類の違うファイル(Markdown / vCard / カレンダー形式 / PowerPoint / PKC2 の書き出し)は分けて取り込んでください');
+    return failImport(dispatcher, deps, '種類の違うファイル(Markdown・テキスト / vCard / カレンダー形式 / PowerPoint / PKC2 の書き出し)は分けて取り込んでください');
   }
   if (files.length > 1) {
     return failImport(dispatcher, deps, 'バックアップや PKC2 の書き出しは 1 つずつ取り込んでください');

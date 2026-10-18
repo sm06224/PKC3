@@ -12,8 +12,10 @@ import { MD_FORMAT } from '@features/export/pkc3-markdown-zip';
 export const OFFICE_DOC_REFUSAL =
   'これは Word や Excel などの Office 文書なので、取り込めません。ノートに入れたいときは、添付で入れてください(PowerPoint は、名前が .pptx のファイルなら「取り込む」から取り込めます)';
 
+// 🔴 PKC3 で書き出した閲覧用 HTML を選んだときも、ここに来る ── PKC2 の話だけだと「PKC3 のファイルなのに」と迷うので、
+//    使える方法(バックアップ)を 1 行足す(依頼 341。Gemini 裁定 = B)。⚠ 判定に印は足さない(すでに書き出した物も同じ字になる)
 export const NOT_PKC2_HTML_REFUSAL =
-  'PKC2 の書き出しではない HTML なので、取り込めません。PKC2 の書き出し(HTML)を選んでください。ウェブページなどは、添付で入れてください';
+  'PKC2 の書き出しではない HTML なので、取り込めません。PKC2 の書き出し(HTML)を選んでください。PKC3 のバックアップは .pkc3-full.zip です。ウェブページなどは、添付で入れてください';
 
 export const NOT_PKC_ZIP_REFUSAL =
   'PKC の書き出しではない zip なので、取り込めません。PKC2 の書き出し(zip)か、PKC3 のバックアップ(.pkc3-full.zip など)を選んでください';

@@ -397,6 +397,8 @@ import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
 import { confirmSavedBack, createOfficeSaveBack, sharedReplaceQuestion, stagedSavedAt } from '@adapter/platform/office/office-save-back';
 import { openStageDir } from '@adapter/platform/office/office-stage';
 import { importFiles } from '@adapter/ui/actions/import-file';
+import { withFolderHome } from '@adapter/ui/actions/import-folder-home';
+import { openFolderLid } from '@adapter/ui/actions/open-folder-lid';
 import { windowFolderWritePicker, type WritableDirLike } from '@adapter/platform/md-folder-export';
 import { LocalFolder, windowDirectoryPicker, type LocalFileItem } from '@adapter/platform/local-folder';
 import { createLocalFileOpener } from '@adapter/ui/actions/open-local-file';
@@ -3362,7 +3364,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   ): Promise<void> =>
     importFiles(
       dispatcher,
-      handles === undefined
+      // 🔴 取り込んだノートは、いま開いているフォルダの中へ入れる(依頼 340。判断と理由は `import-folder-home.ts`)
+      withFolderHome(
+        handles === undefined
         ? importDeps
         : {
             ...importDeps,
@@ -3382,6 +3386,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
               });
             },
           },
+        openFolderLid(dispatcher.getState()),
+        importDeps.bulkUpsertRelations,
+        importDeps.genRelationId,
+      ),
       files,
     ).then(() => {});
 
