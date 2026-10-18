@@ -3,6 +3,7 @@ import {
   clickReal,
   collectPageErrors,
   createEntry,
+  expectMainGapUnderBudget,
   gotoApp,
   openViewPane,
   useSplitEditor,
@@ -1085,6 +1086,100 @@ test('🔴 下見に本文が出て、留めた場所は読み込み直しても
   ).toHaveCount(0);
   await page.locator('[data-pkc-region="context-menu"] [data-pkc-action="bookmark-note-remove"]').click();
   await expect(noteMark, '外してもバーに残っている').toHaveCount(0);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **多数(60 件)を 2 ペインで一度に移して、元に戻す**(#1884 `Dispatcher.batch`)。
+ *
+ * 動線: 左で全部選ぶ → 移す → 右(フォルダの中)に全件が並び選びが付く → 元に戻す → 全件戻る。
+ * ⚠ 観測点は 2 つ ── ①結果(全件・選び・戻し)②その間メインスレッドが長く止まらない
+ *   (件数ぶん通知して描き直すと止まる)。心拍の道具は attach.smoke.spec.ts と同じ形。
+ */
+async function startHeartbeat(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __g: { gap: number }[]; __hb: number };
+    w.__g = [];
+    let last = performance.now();
+    w.__hb = window.setInterval(() => {
+      const now = performance.now();
+      w.__g.push({ gap: now - last });
+      last = now;
+    }, 4);
+  });
+}
+async function stopHeartbeat(page: Page): Promise<{ max: number; ticks: number; top: number[] }> {
+  return page.evaluate(() => {
+    const w = window as unknown as { __g: { gap: number }[]; __hb: number };
+    clearInterval(w.__hb);
+    const g = [...w.__g].sort((a, b) => b.gap - a.gap);
+    return { max: Math.round(g[0]?.gap ?? 0), ticks: g.length, top: g.slice(0, 5).map((n) => Math.round(n.gap)) };
+  });
+}
+
+test('🔴 60 件を一度に移して全件が先に並び、元に戻すで全件戻る(メインスレッドを長く止めない) (#1884)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  const N = 60;
+  await page.setInputFiles(
+    '[data-pkc-field="import-input"]',
+    Array.from({ length: N }, (_, i) => ({
+      name: `n${String(i).padStart(2, '0')}.md`,
+      mimeType: 'text/markdown',
+      buffer: Buffer.from(`# n${i}\n\n本文 ${i}\n`),
+    })),
+  );
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(N, {
+    timeout: 30_000,
+  });
+  await makeFolder(page, 'はこ');
+  await openDual(page);
+  await expect(page.locator(ROWS('left')), '前提: 60 件 + フォルダ').toHaveCount(N + 1);
+
+  // 右だけフォルダの中へ入る
+  await page.locator(`${ROWS('right')}[data-pkc-archetype="folder"]`).dblclick();
+  await expect(page.locator(ROWS('right')), '右がフォルダに入れていない').toHaveCount(0);
+
+  // 左で全部選び、フォルダ自身だけ印を外す(Ctrl+クリック)→ 60 件
+  await clickReal(page, `${PANE('left')} [data-pkc-field="dual-select-all"]`);
+  await page.locator(`${ROWS('left')}[data-pkc-archetype="folder"]`).click({ modifiers: ['Control'] });
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`),
+    '前提: 60 件が選ばれている',
+  ).toHaveCount(N);
+
+  // 対照群(何もしていない 600ms)
+  await startHeartbeat(page);
+  await page.waitForTimeout(600);
+  const base = await stopHeartbeat(page);
+
+  // ① 移す
+  await startHeartbeat(page);
+  await clickReal(page, '[data-pkc-field="dual-move"]');
+  await expect(page.locator(ROWS('right')), '右に全件が並んでいない').toHaveCount(N);
+  await expect(
+    page.locator(`${PANE('right')} [data-pkc-entry][data-pkc-marked]`),
+    '移した先で全件に選びが付いていない',
+  ).toHaveCount(N);
+  await expect(page.locator(ROWS('left')), '左に残っている').toHaveCount(1);
+  const moved = await stopHeartbeat(page);
+  expectMainGapUnderBudget('60 件を移す', {
+    maxGap: moved.max, base: base.max, ticks: moved.ticks, baseTicks: base.ticks, top: moved.top, baseTop: base.top,
+  });
+
+  // ② 元に戻す
+  await startHeartbeat(page);
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect(page.locator(ROWS('left')), '元に戻しても全件が戻らない').toHaveCount(N + 1);
+  await expect(page.locator(ROWS('right')), '元に戻しても先に残っている').toHaveCount(0);
+  const undone = await stopHeartbeat(page);
+  expectMainGapUnderBudget('60 件を元に戻す', {
+    maxGap: undone.max, base: base.max, ticks: undone.ticks, baseTicks: base.ticks, top: undone.top, baseTop: base.top,
+  });
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
