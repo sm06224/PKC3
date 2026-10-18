@@ -675,6 +675,62 @@ describe('RowSwap — 確定と取り消し', () => {
     }
   });
 
+  /**
+   * 🔴 **表のセルの中の Tab は、次のセルへ進む**(台帳 #1852 / 依頼 200。Gemini 回答 = 全文の編集と揃える)。
+   * 対照群: 最後のセルの Tab・最初のセルの Shift+Tab・表の外は、今までどおり行の確定。
+   */
+  describe('表のセルの中の Tab(依頼 200)', () => {
+    const tab = (ta: HTMLTextAreaElement, shiftKey = false): KeyboardEvent => {
+      const e = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true });
+      ta.dispatchEvent(e);
+      return e;
+    };
+    const openRow = (r: Rig): HTMLTextAreaElement => {
+      openClick(findByText(r.host, 'tr', '3'));
+      const ta = box(r.host)!;
+      expect(ta.value, '前提: 表の行が開いている').toBe('| 3 | 4 |');
+      return ta;
+    };
+
+    it('最初のセルの Tab は次のセルへ進み、行は確定しない。Shift+Tab で戻る', () => {
+      const r = rig();
+      const ta = openRow(r);
+      ta.value = '| 3x | 4 |';
+      ta.setSelectionRange(3, 3);
+      const e = tab(ta);
+      expect(e.defaultPrevented).toBe(true);
+      expect(r.commits, '確定した ── セルへ進んでいない').toEqual([]);
+      expect(ta.value.slice(ta.selectionStart, ta.selectionEnd)).toBe('4');
+      tab(ta, true);
+      expect(r.commits).toEqual([]);
+      expect(ta.value.slice(ta.selectionStart, ta.selectionEnd)).toBe('3x');
+    });
+
+    it('対照群: 最後のセルの Tab と、最初のセルの Shift+Tab は行の確定', () => {
+      const r = rig();
+      const ta = openRow(r);
+      ta.value = '| 3 | 44 |';
+      ta.setSelectionRange(8, 8);
+      tab(ta);
+      expect(r.commits).toHaveLength(1);
+      const r2 = rig();
+      const ta2 = openRow(r2);
+      ta2.value = '| 33 | 4 |';
+      ta2.setSelectionRange(3, 3);
+      tab(ta2, true);
+      expect(r2.commits).toHaveLength(1);
+    });
+
+    it('対照群: 表でない行の Tab は行の確定', () => {
+      const r = rig();
+      openClick(findByText(r.host, 'p', '最初の段落。'));
+      const ta = box(r.host)!;
+      ta.value = 'かえた';
+      tab(ta);
+      expect(r.commits).toHaveLength(1);
+    });
+  });
+
   it('🔴 確定で入力欄を外した瞬間の `blur` で、二重に確定しない(再入)', () => {
     const r = rig(DOC, true);
     openClick(findByText(r.host, 'p', '最初の段落。'));

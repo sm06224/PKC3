@@ -5,7 +5,7 @@
  *
  * 直す前は押しても画面の下に何も出ず、戻す道はノートの履歴だけで、その案内も無かった。
  * 見るのは 4 つ: ①戻した回に知らせ(「N 件を未完了に戻しました」)と戻す先の版が載る
- * ②ボタンは `restore-revision`(押す前の版)を指し、字は「元に戻す」③何も動かない回・「完了にする」の回には出さない(対照群)
+ * ②ボタンは `restore-revision`(押す前の版)を指し、字は「元に戻す」③何も動かない回には出さない(対照群)。「完了にする」の回も出す(残りの分)
  * ④繰り返しの行を飛ばした数は同じ 1 行で言う。
  */
 import { describe, expect, it } from 'vitest';
@@ -90,9 +90,17 @@ describe('「すべて未完了に戻す」の直後の「元に戻す」(依頼
     expect(d.getState().notice).toBe('すべて未完了になっています');
   });
 
-  it('対照群:「すべて完了にする」の回は、これまでどおり知らせも「元に戻す」も出さない', async () => {
-    const { d } = await run('- [ ] 牛乳\n- [ ] 卵\n', 'done');
+  it('🔴 「すべて完了にする」の回も、件数と「元に戻す」を出す(114-2 の残り。まとめて変わる操作は同じ)', async () => {
+    const { d, disk } = await run('- [ ] 牛乳\n- [ ] 卵\n- [x] パン\n', 'done');
+    expect(disk()).toBe('- [x] 牛乳\n- [x] 卵\n- [x] パン\n');
+    const s = d.getState();
+    expect(s.notice).toBe('2 件を完了にしました');
+    expect(s.restoreUndo).toEqual({ lid: 'n1', revId: 'r1', notice: '2 件を完了にしました' });
+  });
+
+  it('対照群:「すべて完了にする」で何も動かない回(もう全部完了)には「元に戻す」を出さない', async () => {
+    const { d } = await run('- [x] 牛乳\n- [x] 卵\n', 'done');
     expect(d.getState().restoreUndo ?? null).toBeNull();
-    expect(d.getState().notice).toBeNull();
+    expect(d.getState().notice).toBe('すべて完了になっています');
   });
 });

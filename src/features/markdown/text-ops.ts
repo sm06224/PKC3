@@ -151,6 +151,12 @@ export function toggleLinePrefix(sel: TextSelection, kind: LinePrefix): TextSele
    */
   const isTask = (l: string): boolean =>
     kind === 'task' || kind === 'ol' ? false : isDoneTaskRest(splitQuote(l)[1]);
+  /**
+   * 🔴 **番号も同じ**(台帳 #1852 / 依頼 114-3 の残り)── 完了の行に「番号」を押すと `1. [x] 済み`(印が残る)。
+   *   番号の付いた完了の行をもう一度押して外すときは、チェック付きの `- [x] 済み` に戻す(`[x] 済み` という字にしない)。
+   *   ⚠ 未完了(`[ ]`)は触らない(依頼に無い ── 消えて困るのは「済んだ」という記録のほう)。
+   */
+  const isDoneOl = (l: string): boolean => kind === 'ol' && isDoneTaskRest(splitQuote(l)[1]);
   const allMarked = lines.every((l) => isBlank(l) || (kind === 'ul' && isTask(l)) || detect.test(target(l)));
   const keep = INDENT_KEPT.has(kind);
   let n = 0;
@@ -167,6 +173,7 @@ export function toggleLinePrefix(sel: TextSelection, kind: LinePrefix): TextSele
         }
         if (kind === 'quote') return l.replace(detect, '');
         const [q, rest] = splitQuote(l);
+        if (isDoneOl(l)) return q + rest.replace(detect, '$1- ');
         return q + (keep ? rest.replace(detect, '$1') : rest.replace(detect, ''));
       }
       n += 1;
@@ -176,7 +183,10 @@ export function toggleLinePrefix(sel: TextSelection, kind: LinePrefix): TextSele
       if (keep) {
         const indent = /^\s*/.exec(rest)![0];
         // 🔴 半角の印 → 全角の記号の順に落とす(`- ・牛乳` のように重なった行も 1 回で直る)
-        const bare = stripListHead(rest.slice(indent.length)).replace(FULLWIDTH_HEAD, '');
+        // 完了の行に番号: 先頭の印(`- ` / `1. `)だけを落とし、`[x]` は残す
+        const bare = isDoneOl(l)
+          ? rest.slice(indent.length).replace(/^(?:[-*+]|\d+[.)])[ \t]+/, '')
+          : stripListHead(rest.slice(indent.length)).replace(FULLWIDTH_HEAD, '');
         return kind === 'ol' ? `${q}${indent}${n}. ${bare}` : `${q}${indent}${mark}${bare}`;
       }
       // 字下げした `# ` は見出しではない(従来どおり)。字下げした**リスト**の印は、字下げごと落として見出しにする
