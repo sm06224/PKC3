@@ -45,10 +45,23 @@ export async function importFiles(
   const vcf = files.filter((f) => isVcfFileName(f.name));
   const pptx = files.filter((f) => isPptxFileName(f.name));
   const ics = files.filter((f) => isIcsFileName(f.name));
-  if (vcf.length === files.length) return importVcfFiles(dispatcher, deps, files);
-  if (md.length === files.length) return importMarkdownFiles(dispatcher, deps, files);
-  if (pptx.length === files.length) return importPptxFiles(dispatcher, deps, files);
-  if (ics.length === files.length) return importIcsFiles(dispatcher, deps, files);
+  /**
+   * 🔴 **読んでいる間・書いている間にタブを閉じたら、「離れますか」を出す**(#1852 束 F1、「見え方を変えずに直す物」)。
+   * ⚠ PKC2 の道(`importPkc2File`)は自分で出し入れしている(ここで包むと同じ持ち主を二重に外す)── 残りの 4 本をここで包む。
+   * ⚠ 出口は 1 本ではない(断り・失敗・成功・例外)ので `finally` で必ず戻す。
+   */
+  const guarded = async (run: () => Promise<number | null>): Promise<number | null> => {
+    deps.onWriting?.(true);
+    try {
+      return await run();
+    } finally {
+      deps.onWriting?.(false);
+    }
+  };
+  if (vcf.length === files.length) return guarded(() => importVcfFiles(dispatcher, deps, files));
+  if (md.length === files.length) return guarded(() => importMarkdownFiles(dispatcher, deps, files));
+  if (pptx.length === files.length) return guarded(() => importPptxFiles(dispatcher, deps, files));
+  if (ics.length === files.length) return guarded(() => importIcsFiles(dispatcher, deps, files));
   if (md.length > 0 || vcf.length > 0 || pptx.length > 0 || ics.length > 0) {
     return failImport(dispatcher, deps, '種類の違うファイル(Markdown・テキスト / vCard / カレンダー形式 / PowerPoint / PKC2 の書き出し)は分けて取り込んでください');
   }
