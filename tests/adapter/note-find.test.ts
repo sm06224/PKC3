@@ -487,7 +487,7 @@ describe('note-find: レビュー指摘の直し', () => {
     openNoteFind(root);
     expect(root.querySelector<HTMLElement>('[data-pkc-region="note-find"]')!.style.top, '位置を JS で計算している').toBe('');
     closeNoteFind(root, true);
-    expect(add.mock.calls.filter((c) => c[0] === 'resize'), 'resize の聞き手が残る').toEqual([]);
+    expect(add.mock.calls.filter((c) => (c[0] as string) === 'resize'), 'resize の聞き手が残る').toEqual([]);
     add.mockRestore();
   });
 
