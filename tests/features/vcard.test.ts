@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import { frontmatterLineCount } from '../../src/features/markdown/frontmatter';
 import { contactOf, type ContactCard } from '../../src/features/contact/contact-card';
-import { buildVcf, countUnwritableBirthdays, isVcfFileName, parseVcf, vcfBirthday, vcfNoteOf } from '../../src/features/contact/vcard';
+import { buildVcf, countUnwritableBirthdays, isVcfFileName, parseVcf, splitNameForN, vcfBirthday, vcfNoteOf } from '../../src/features/contact/vcard';
 
 const CARD_30 = [
   'BEGIN:VCARD',
@@ -670,5 +670,65 @@ describe('vCard 取込の直し(C1〜C4)', () => {
   it('対照群 C4: FN が在れば言わない / 敬称が無ければ言わない', () => {
     expect(card(['N:山田;太郎;;様;', 'FN:山田太郎']).warnings).toEqual([]);
     expect(card(['N:山田;太郎;;;']).warnings).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **名前を姓と名に分けて書き出す / 読みを運ぶ**(依頼 146 / 145。Gemini の回答「推薦どおり」)。
+ *
+ * 146 ③: 題名の最初の空白で姓と名に分けて `N:` に書く(FN は題名のまま。項目は増やさない)。空白の無い名前は今までどおり。
+ * 145: 読み(`SORT-STRING` / `X-PHONETIC-*`)を `yomi:` に写し、書き出しは `SORT-STRING` で返す(往復を閉じる)。
+ */
+describe('姓と名・読み(依頼 146 / 145)', () => {
+  const cardOf = (name: string, yomi?: string): ContactCard => ({
+    lid: 'a',
+    name,
+    org: '',
+    orgParts: [],
+    tels: ['090-1'],
+    emails: [],
+    birthday: '',
+    ...(yomi === undefined ? {} : { yomi }),
+    overlong: false,
+  });
+
+  it('🔴 「山田 太郎」は N:山田;太郎 と書き、FN は題名のまま', () => {
+    const out = buildVcf([cardOf('山田 太郎')]);
+    expect(out).toContain('N:山田;太郎;;;\r\n');
+    expect(out).toContain('FN:山田 太郎\r\n');
+  });
+
+  it('対照群: 空白の無い名前は今までどおり全体を姓の欄へ / 全角の空白でも分かれる / 3 語以上は最初の空白だけで分ける', () => {
+    expect(buildVcf([cardOf('山田太郎')])).toContain('N:山田太郎;;;;\r\n');
+    expect(splitNameForN('山田\u3000太郎')).toEqual(['山田', '太郎']);
+    expect(splitNameForN('山田 太郎 二世')).toEqual(['山田', '太郎 二世']);
+    expect(splitNameForN('  ')).toEqual(['', '']);
+    expect(splitNameForN('単独')).toEqual(['単独', '']);
+  });
+
+  it('🔴 往復しても題名は変わらない(書き出した N を読み戻すと「姓 名」)', () => {
+    const { cards } = parseVcf(buildVcf([cardOf('山田 太郎')]).replace(/FN:.*\r\n/, ''));
+    expect(cards[0]!.name).toBe('山田 太郎');
+  });
+
+  it('🔴 SORT-STRING と X-PHONETIC は yomi に写り、本文の「yomi:」になり、書き出しは SORT-STRING で返す', () => {
+    const a = parseVcf(['BEGIN:VCARD', 'FN:山田 太郎', 'SORT-STRING:やまだ たろう', 'TEL:090-1', 'END:VCARD'].join('\r\n'));
+    expect(a.cards[0]!.yomi).toBe('やまだ たろう');
+    expect(a.warnings).toEqual([]);
+    const b = parseVcf(['BEGIN:VCARD', 'FN:山田 太郎', 'X-PHONETIC-LAST-NAME:やまだ', 'X-PHONETIC-FIRST-NAME:たろう', 'TEL:090-1', 'END:VCARD'].join('\r\n'));
+    expect(b.cards[0]!.yomi).toBe('やまだ たろう');
+    const note = vcfNoteOf(a.cards[0]!);
+    const back = contactOf('a', note.title, note.body)!;
+    expect(back.yomi, '取り込んだ読みが連絡先に届いていない').toBe('やまだ たろう');
+    expect(buildVcf([back])).toContain('SORT-STRING:やまだ たろう\r\n');
+    // 対照群: 読みの無い人は SORT-STRING を書かない / 本文に yomi を書かない
+    expect(buildVcf([cardOf('田中')])).not.toContain('SORT-STRING');
+    expect(vcfNoteOf(parseVcf(CARD_30).cards[0]!).body).not.toContain('yomi');
+  });
+
+  it('SORT-STRING だけのカードも「中身が無い」とは扱わない', () => {
+    const r = parseVcf(['BEGIN:VCARD', 'SORT-STRING:やまだ', 'END:VCARD'].join('\r\n'));
+    expect(r.cards).toHaveLength(1);
+    expect(r.warnings.join(''), '中身が無いので飛ばした').not.toContain('飛ばしました');
   });
 });

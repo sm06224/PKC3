@@ -217,7 +217,8 @@ describe('スタックを全部降ろす(stack-clear)', () => {
     d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'b' });
     key({ key: 'D', code: 'KeyD', altKey: true, shiftKey: true });
     expect(d.getState().splitLids).toEqual([]);
-    expect(said.join(''), '何件降ろしたかが出ていない').toContain('2 件');
+    // 🔴 降ろした直後の「元に戻す」(依頼 98-2)に合わせて、知らせは画面の下の知らせ(OP_NOTICE)で言う
+    expect(d.getState().notice ?? said.join(''), '何件降ろしたかが出ていない').toContain('2 件');
   });
 
   it('🔴 空なら理由を言って終わる / パレットでは押せない', () => {

@@ -136,6 +136,11 @@ const UNRESOLVED: readonly string[] = [
    */
   'undo-bulk-tag',
   /**
+   * ⚠ **2026-10-18(台帳 #1852 Q1 / 依頼 98-2)で 1 件増えた** ── スタックを全部降ろした直後の「元に戻す」(`undo-stack-clear`)。
+   * 🔑 `undo-move` と同じ器(`paintStatusUndo` が `data-pkc-action` を実行時に書き換える)ので、静的な字が source に無い。
+   */
+  'undo-stack-clear',
+  /**
    * ⚠ **2026-10-18(台帳 #1852 P1 / 依頼 362)で 1 件増えた** ── AI の書き足しの直後の「書き足しを元に戻す」(`undo-agent-append`)。
    * 🔑 `undo-move` と同じ器(`paintStatusUndo` が `data-pkc-action` を実行時に書き換える)ので、静的な字が source に無い。
    */

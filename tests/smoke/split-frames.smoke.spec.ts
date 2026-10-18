@@ -561,6 +561,16 @@ test('🔴 帯の「保存…」で星つきの入れ物ができ、載せ直す
   // 全部降ろしてから、入れ物を開いて「このスタックを追加する」→ 同じ順で戻る
   await page.keyboard.press('Alt+Shift+D');
   await expect(page.locator('[data-pkc-region="stack-bar"]')).toHaveCount(0);
+  /**
+   * 🔴 **全部降ろした直後の「元に戻す」で、同じ順に戻る**(依頼 98-2 / 束 Q1)。
+   * ⚠ 確認も戻す道も無く最大 20 件の並びが消えていた。画面の下の知らせの隣に「元に戻す」が出て、押すと
+   *   降ろす前の並び(上から A, B)で帯に戻る。🔑 新しい起動は増やさない ── 戻したら**もう一度降ろして**以降の筋書きへ続ける。
+   */
+  await expect(page.locator('[data-pkc-region="status"]'), '降ろした知らせが出ない').toContainText('スタックから 2 件を降ろしました');
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect(cards, '「元に戻す」で同じ順に戻らない').toHaveText([titleA, titleB]);
+  await page.keyboard.press('Alt+Shift+D');
+  await expect(page.locator('[data-pkc-region="stack-bar"]')).toHaveCount(0);
   await row.click();
   await expect(page.locator('[data-pkc-field="detail-body"] a[href^="entry:"]')).toHaveCount(2);
 

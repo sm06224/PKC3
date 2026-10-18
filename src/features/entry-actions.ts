@@ -497,7 +497,7 @@ export const BODY_MENU_ACTIONS: readonly EntryAction[] = [
    * 行を右クリックすると、その行が**選ばれる**(`selectEntryOrExplain`)──
    * つまり主の枠にも同じノートが来るので、留めた直後の画面は
    * **同じ物が 2 枚並ぶ**。user から見れば「壊れた」である。
-   * 🔑 本文から留めれば、いま読んでいる物が右へ移り、**左は一覧から選び直すだけ**で
+   * 🔑 本文から留めれば、いま読んでいる物が右にも並び(左にも同じノートが残る)、**左は一覧から選び直すだけ**で
    * 「資料を横に並べて突き合わせる」(#505 の user の物語)がその場で完成する。
    *
    * ⚠ 外す口は**枠の中の `× 外す`** に在る ── 置けるなら外せる
@@ -640,12 +640,24 @@ export const APP_GROUP_RESET_ACTION: EntryAction = {
 };
 
 /**
+ * 🔴 **グループの名前を変える**(依頼 83-2。Gemini の回答「推薦どおり」)── そのグループの自分のアプリ全部が一緒に変わる。
+ * ⚠ 出すのは**自分のアプリが入っているグループだけ**(組み込みだけのグループは変えられない ── `appGroupRenamable`)。
+ */
+export const APP_GROUP_RENAME_ACTION: EntryAction = {
+  action: 'rename-app-group',
+  label: '名前を変える…',
+};
+
+/**
  * グループの見出しのメニュー。⚠ **並べ替えをやめる行は、番号が在るときだけ**。
  * 🔑 組み立てをここ 1 か所に置く ── 呼び側(右クリックと長押しの 2 か所)で
  *   別々に組むと、片方だけ行が欠ける(§7「同じ判定が 2 か所」)。
  */
-export function appGroupMenuActions(hasOrder: boolean): readonly EntryAction[] {
-  return hasOrder ? [...APP_GROUP_MENU_ACTIONS, APP_GROUP_RESET_ACTION] : APP_GROUP_MENU_ACTIONS;
+export function appGroupMenuActions(hasOrder: boolean, renamable = false): readonly EntryAction[] {
+  const base = renamable
+    ? [APP_GROUP_RENAME_ACTION, ...APP_GROUP_MENU_ACTIONS]
+    : APP_GROUP_MENU_ACTIONS;
+  return hasOrder ? [...base, APP_GROUP_RESET_ACTION] : base;
 }
 
 export const REPEAT_ATTR = 'data-pkc-repeat';
@@ -988,6 +1000,8 @@ export function blockMenuActions(ctx: {
    * 作らない(形の項目が「いまの形は出さない」のと同じ作法)。省略 = 出す。
    */
   readonly front?: boolean;
+  /** 🔴 既にいちばん後ろの付箋か(依頼 118-1)。真なら「後ろへ送る」を出さない(`front` と対)。省略 = 出す。 */
+  readonly back?: boolean;
 }): readonly EntryAction[] {
   if (!ctx.board) return [{ action: 'copy-block-md', label: 'このブロックをコピー' }];
   /**
@@ -997,9 +1011,10 @@ export function blockMenuActions(ctx: {
    */
   return [
     { action: 'copy-block-md', label: 'この付箋をコピー' },
-    // 🔴 前へ出す(#676 段②)。⚠ 「後ろへ送る」は無い ── 負の z を描画が捨てるので、
-    //    下げる向きは触っていない板の行まで書き換えることになる
+    // 🔴 前へ出す(#676 段②)と後ろへ送る(依頼 118-1)。⚠ 戻すのに他の付箋を 1 枚ずつ前へ出し直さなくて済む。
+    //    どちらも既にその端なら出さない(押しても本文が変わらない口を作らない)
     ...(ctx.front === true ? [] : [{ action: 'raise-place', label: '前へ出す' }]),
+    ...(ctx.back === true ? [] : [{ action: 'lower-place', label: '後ろへ送る' }]),
     // 🔴 数で入れる(#529 W2)。⚠ 窓を開くだけ ── 「やめる」で本文は 1 byte も変わらない
     { action: 'place-rect', label: '位置と大きさ…' },
     /**
@@ -1178,7 +1193,7 @@ export const PLACE_RENAME_ACTION: EntryAction & { readonly hint: string } = {
  */
 export const ADD_PLACE_TEMPLATE_ACTION: EntryAction = {
   action: 'add-place-template',
-  label: 'テンプレートから板を置く…',
+  label: 'テンプレートから付箋を置く…',
 };
 
 /**

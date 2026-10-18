@@ -1035,7 +1035,7 @@ export function pickCopyFormatInApp(
  */
 export function pickPlaceTemplateInApp(host: HTMLElement): Promise<PlaceTemplateId | null> {
   return pickRowInApp<PlaceTemplateId>(host, {
-    title: 'テンプレートから板を置く',
+    title: 'テンプレートから付箋を置く',
     field: 'pick-place-template',
     indexAttr: 'data-pkc-place-template-index',
     note: '押した位置から置きます。置いた後は、1 枚ずつ動かせます。',

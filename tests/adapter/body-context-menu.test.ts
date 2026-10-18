@@ -1613,7 +1613,7 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(r.d.getState().selectedLid, '題名札の右クリックで別ノートへ切り替わった').toBe('n1');
     r.press('copy-block-md');
     expect(r.copied.map((c) => c.text), '板の原文(座標つき)が写っていない').toEqual([BOARD]);
-    expect(r.copied[0]!.done).toBe('板をコピーしました(Markdown の原文)');
+    expect(r.copied[0]!.done).toBe('付箋をコピーしました(Markdown の原文)');
   });
 
   it('板の中の見出しでは、見出しの物と塊の物が**両方**出る(章は出ない)', () => {
@@ -1757,12 +1757,12 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
    * 書換の規則は `tests/features/place-template-rect.test.ts`、窓の検めは `place-rect-dialog.test.ts`。
    * ⚠ ここが守るのは**「やめる」で依頼が 1 本も出ないこと**と、**窓の答えが押した板の行へ届くこと**。
    */
-  it('🔴 「テンプレートから板を置く…」→ 行を選ぶと、押した座標で template つきの place-add になる。やめるなら何も書かない', async () => {
+  it('🔴 「テンプレートから付箋を置く…」→ 行を選ぶと、押した座標で template つきの place-add になる。やめるなら何も書かない', async () => {
     resetAppDialogForTest();
     const r = rig();
     const asks = asksOf(r.d);
     rightClickAt(r.q('p[data-pkc-source-line="2"]'), 37, 61);
-    expect(r.label('add-place-template')).toBe('テンプレートから板を置く…');
+    expect(r.label('add-place-template')).toBe('テンプレートから付箋を置く…');
     r.press('add-place-template');
     expect(asks, '窓の前に書いた').toHaveLength(0);
     const rows = [...document.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-place-template"]')];

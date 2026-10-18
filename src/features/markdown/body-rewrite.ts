@@ -36,6 +36,7 @@ import {
   movePlace,
   movePlaces,
   raisePlace,
+  lowerPlace,
   removePlace,
   removePlaceLine,
   resizePlace,
@@ -58,7 +59,7 @@ import { parseRenderableFence } from './markdown-render';
 import { containerAtLine, quoteLead, quotePrefix, splitLines } from './source-blocks';
 import { TASK_LINE } from './task-line';
 import { hiddenTaskMask } from './task-hidden';
-import { cutLines, insertLines, moveLines, type InsertAnchor } from './line-move';
+import { cutLines, insertLines, moveLines, type InsertAnchor, type MoveLines } from './line-move';
 import { gfmCellText } from './html-to-markdown';
 import {
   convertTable,
@@ -246,9 +247,18 @@ export type BodyRewrite =
   | {
       /**
        * 🔴 **板を前へ出す**(#676 段②)── 他の板の z= の最大 + 1 を開き行の z= に書く。
-       * ⚠ 「後ろへ送る」は無い(負の z を描画が捨てるので、下げる向きは他の板の行を触ることになる)。
+       * 「後ろへ送る」は次の `place-lower`(依頼 118-1)。
        */
       kind: 'place-raise';
+      line: number;
+      openLine: string;
+    }
+  | {
+      /**
+       * 🔴 **板を後ろへ送る**(依頼 118-1)── 他の板より後ろ(下)へ回す。z=0 の板が居るときは、他の板の開き行の z= を
+       * 1 つずつ上げる(順番は保つ)。門は `place-raise` と同じ(`place-notation.ts` の 1 本)。
+       */
+      kind: 'place-lower';
       line: number;
       openLine: string;
     }
@@ -545,6 +555,8 @@ export type BodyRewrite =
       lines: readonly string[];
       /** 🔴 落とし先の行の、落とした時点の中身(#1087)。`line-move.ts` の `MoveLines` と同じ。 */
       toBeforeLine: string | null;
+      /** 🔴 「元に戻す」だけが持つ、動かす前の本文そのもの(依頼 118-3)。`line-move.ts` の `MoveLines` と同じ。 */
+      restore?: { readonly from: string; readonly to: string; readonly redo: MoveLines };
     }
   | {
       /**
@@ -1022,6 +1034,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'place-size') return resizePlace(body, rewrite);
   if (rewrite.kind === 'place-remove') return removePlace(body, rewrite);
   if (rewrite.kind === 'place-raise') return raisePlace(body, rewrite);
+  if (rewrite.kind === 'place-lower') return lowerPlace(body, rewrite);
   if (rewrite.kind === 'place-line-remove') return removePlaceLine(body, rewrite);
   if (rewrite.kind === 'place-shape') return setPlaceShape(body, rewrite, rewrite.shape);
   if (rewrite.kind === 'place-style') return setPlaceStyle(body, rewrite, rewrite.style);

@@ -130,6 +130,32 @@ describe('目印を絵から選ぶ(#770 段②)', () => {
     );
   });
 
+  /**
+   * 依頼 83-2 B: 「グループ」の欄の候補に、いまあるグループ名が出る(打ち間違いで別のグループができるのを防ぐ)。
+   * 候補は `<datalist>`(打った字はそのまま通る ── 新しいグループも作れる)。組み込みのグループは入れない。
+   */
+  it('🔴 「グループ」の欄に、いまあるグループ名が候補で出る(新しい名前は打てる / 組み込みは入れない)', async () => {
+    const h = setup('🧮');
+    h.d.dispatch({
+      type: 'LAUNCHER_TILES_LOADED',
+      tiles: [
+        { lid: 'x1', title: 'x1', group: '資料', kind: 'app' },
+        { lid: 'x2', title: 'x2', group: '作業', kind: 'app' },
+        { lid: 'builtin:manual', title: 'マニュアル', group: '組み込みアプリ', kind: 'manual' },
+      ],
+    });
+    await tick(20);
+    const input = h.q<HTMLInputElement>('[data-pkc-field="app-group"]');
+    expect(input, 'グループの欄が無い').not.toBeNull();
+    const listId = input!.getAttribute('list');
+    expect(listId, '候補(list)が欄に結ばれていない').not.toBeNull();
+    const list = document.getElementById(listId!) ?? h.root.querySelector(`#${CSS.escape(listId!)}`);
+    expect(list, '候補の datalist が無い').not.toBeNull();
+    expect([...list!.querySelectorAll('option')].map((o) => o.value)).toEqual(['作業', '資料']);
+    // 対照群: アイコンの欄には候補を付けない
+    expect(h.q<HTMLInputElement>('[data-pkc-field="app-icon"]')!.getAttribute('list')).toBeNull();
+  });
+
   it('🔴 選ぶ口が画面に在る ── そして**欄は消えていない**', async () => {
     const h = setup('🧮');
     await tick(20);

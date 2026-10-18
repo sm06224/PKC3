@@ -699,7 +699,7 @@ describe('書換の門(MOVE_PLACE)', () => {
     d.dispatch({ type: 'START_EDIT' });
     d.dispatch({ type: 'MOVE_PLACE', lid: 'n1', line: 0, x: 1, y: 2 });
     expect(d.getState().error ?? '', '理由が出ていない').toContain('編集を保存するか');
-    expect(d.getState().error ?? '', '押した場所と文言が合っていない').toContain('板');
+    expect(d.getState().error ?? '', '押した場所と文言が合っていない').toContain('付箋');
     expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
   });
 
@@ -926,7 +926,7 @@ describe('書換の門(MOVE_PLACE)', () => {
     d.dispatch(action);
     const error = d.getState().error ?? '';
     expect(error, '理由が出ていない').toContain('編集を保存するか');
-    expect(error, '押した場所と文言が合っていない').toContain('板');
+    expect(error, '押した場所と文言が合っていない').toContain('付箋');
     expect(error, '操作の名前が文言に無い').toContain(word);
     expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
   });
@@ -1907,7 +1907,7 @@ describe('#529 小さな欠陥 4 件', () => {
     }
   });
 
-  it('🔴 4: 末尾が閉じていないブロックの中へは、「ここに付箋を置く」も「テンプレートから板を置く」も理由を言って断る', () => {
+  it('🔴 4: 末尾が閉じていないブロックの中へは、「ここに付箋を置く」も「テンプレートから付箋を置く」も理由を言って断る', () => {
     const boot = (body: string) => {
       const d = new Dispatcher();
       const events: DomainEvent[] = [];
@@ -1928,7 +1928,7 @@ describe('#529 小さな欠陥 4 件', () => {
       expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE'), '閉じていない本文へ書く依頼が出た').toHaveLength(0);
       const error = d.getState().error ?? '';
       expect(error, `理由が出ていない(template=${String(template)})`).toContain('閉じていない');
-      expect(error).toContain('板を置けません');
+      expect(error).toContain('付箋を置けません');
     }
     // 対照群: 閉じていれば同じ操作が通る
     const { d, events } = boot('本文\n```js\nconst a = 1;\n```\n');

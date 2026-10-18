@@ -387,3 +387,53 @@ describe('matchContact ── 名前と番号を混ぜた探し方(山田 090)',
     expect(matchContact(c('鈴木', ['090-1111-2222']), '(090)-1111')).toBe(true);
   });
 });
+
+/**
+ * 🔴 **読み(`yomi:`)── 読みを書いた人は読みで並ぶ**(依頼 145。Gemini の回答「推薦どおり」= 読みを書けるようにして、あればそれで並べる)。
+ *
+ * 観測点: 並びの順・絞り込みに当たるか・渡る量の門。対照群: 読みの無い人は題名のまま / ひらがなとカタカナは同じ字で並ぶ。
+ */
+describe('読み(yomi)(依頼 145)', () => {
+  const withYomi = (lid: string, name: string, yomi?: string) =>
+    contactOf(lid, name, fm(`tel: 090-0000-000${lid}${yomi === undefined ? '' : `\nyomi: ${yomi}`}`))!;
+
+  it('🔴 `yomi:` を読む / 書いていなければ空', () => {
+    expect(withYomi('1', '山田太郎', 'やまだ たろう').yomi).toBe('やまだ たろう');
+    expect(withYomi('2', '山田太郎').yomi).toBe('');
+  });
+
+  it('🔴 読みを書いた漢字の名前が、題名の並びとは別に読みの五十音順で並ぶ(題名順では 山田 < 鈴木 < 青木 でも)', () => {
+    const cards = [
+      withYomi('1', '山田太郎', 'やまだ たろう'),
+      withYomi('2', '鈴木一郎', 'すずき いちろう'),
+      withYomi('3', '青木花子', 'あおき はなこ'),
+    ];
+    // 読みの五十音: あおき < すずき < やまだ(題名の並びとは別の順であること自体も確かめる)
+    const byTitle = sortContacts(cards.map((c) => ({ ...c, yomi: '' }))).map((c) => c.lid);
+    expect(byTitle, '前提: 読みを外した並び(題名順)が読みの並びと同じだと、この検査は空振りする').not.toEqual(['3', '2', '1']);
+    expect(sortContacts(cards).map((c) => c.lid)).toEqual(['3', '2', '1']);
+  });
+
+  it('対照群: 読みの無い人は題名のまま混ざって並ぶ / ひらがなとカタカナは同じ字として並ぶ', () => {
+    const cards = [
+      withYomi('1', '山田太郎', 'やまだ たろう'),
+      withYomi('2', 'アオキ'),
+      withYomi('3', 'あおき'),
+    ];
+    const out = sortContacts(cards).map((c) => c.lid);
+    // あおき / アオキ(ひらがなとカタカナは同じ字)が、読み「やまだ」の人より前に出る。同じなら lid で割る
+    expect(out).toEqual(['2', '3', '1']);
+  });
+
+  it('🔴 読み(ひらがな)でも探せる', () => {
+    const c = withYomi('1', '山田太郎', 'やまだ たろう');
+    expect(matchContact(c, 'やまだ')).toBe(true);
+    expect(matchContact(c, '山田')).toBe(true);
+    expect(matchContact(c, 'すずき'), '別の人が当たった').toBe(false);
+  });
+
+  it('渡る量の門: 長すぎる読みは持たない(切らずに外す)', () => {
+    const long = 'あ'.repeat(CONTACT_LIMITS.wire + 1);
+    expect(withYomi('1', '山田', long).yomi).toBe('');
+  });
+});

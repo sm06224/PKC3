@@ -24,8 +24,8 @@
  * 集計の `query-tag-rename` / `query-tag-remove`・スマートフォルダの「外す」と落とし。実体は `BULK_TAG`。#1087)/
  * スマートフォルダの条件の書き換え(足す `smart-cond-add` / 選ぶ `smart-field` / 外す `smart-cond-remove`。
  *   確かめるのは条件の入れ物のノート 1 件。#1087)。
- * ⚠ 板の付箋のドラッグ移動・付箋を消す(`remove-place`)・線を消す(`remove-place-line`)には足していない
- *   (離した直後 / 確認の直後の体感が変わるので、見え方の判断待ち。3 つは同じ「判断待ち」の組)。
+ * 板の付箋のドラッグ移動・大きさ・矢印キーの移動(`installPlaceDrag`)・付箋を消す(`remove-place`)・線を消す(`remove-place-line`)にも
+ *   足した(依頼 118-4。Gemini の回答「推薦どおり」)。確かめが要らない回(口が無い / このタブが自分で編集中)は同期のまま書く。
  * 通さない口(理由は設計 doc §6 W5-d): 計時の記録・文字起こし・添付のドロップ。
  */
 import { EDIT_ELSEWHERE_ERROR } from '@features/message/caution-events';

@@ -33,8 +33,8 @@ export interface PlaceTemplate {
 /** ⚠ 並びが選ぶ窓の並び。ここが正本(窓も test もここから引く)。 */
 export const PLACE_TEMPLATES: readonly PlaceTemplate[] = [
   { id: 'sticky4', label: '付箋 4 枚', note: '空の付箋を 2 × 2 に並べます', frames: 4, names: 0 },
-  { id: 'flow3', label: '3 段の流れ図', note: '左から右へ、3 つの枠を線でつなぎます', frames: 3, names: 3 },
-  { id: 'matrix2', label: '2 × 2 の表', note: '4 つの枠と、縦・横の見出しを置きます', frames: 8, names: 0 },
+  { id: 'flow3', label: '3 段の流れ図', note: '左から右へ、3 枚の付箋を線でつなぎます', frames: 3, names: 3 },
+  { id: 'matrix2', label: '2 × 2 の表', note: '4 枚の付箋と、縦・横の見出しを置きます', frames: 8, names: 0 },
 ];
 
 export function isPlaceTemplateId(v: unknown): v is PlaceTemplateId {

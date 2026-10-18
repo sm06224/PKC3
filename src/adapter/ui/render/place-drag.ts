@@ -33,6 +33,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { screenBodyOf } from '@adapter/state/app-state';
+import { editedElsewhereReason, elsewhereCheckNotNeeded, type EditLockPort } from '@adapter/state/edited-elsewhere';
 import { lidOfNode } from '@adapter/ui/actions/lid-of-node';
 import { clampGroupDelta, parsePlaceGroup } from '@features/markdown/place-notation';
 import { placeRotateOf, resizeRotated } from '@features/markdown/place-rotate';
@@ -159,7 +160,15 @@ export function placeTargetOf(
  * root へ 1 度だけ配線する(`installPaneResize` と同じ作法)。
  * @returns 外す関数。アプリ本体では外さない(同寿命)が、test は外せる必要がある。
  */
-export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () => void {
+export function installPlaceDrag(
+  root: HTMLElement,
+  dispatcher: Dispatcher,
+  /**
+   * 🔴 **別のタブ・ウィンドウが編集中のノートの付箋は動かさない**(依頼 118-4。Gemini の回答「推薦どおり」= A)。
+   * ⚠ 省略 = 確かめない(口の無い環境 ── unit)。通すと編集側の保存で上書きされる(`edited-elsewhere.ts`)。
+   */
+  locks?: EditLockPort,
+): () => void {
   const doc = root.ownerDocument;
   let drag: Drag | null = null;
   let swallowClick = false;
@@ -332,7 +341,7 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
    * worker 往復を待つ約 190ms の間、板が元の位置へ戻って見える体験を解消する。
    * 異常系(エラー発生 / 上限時間経過)では元の位置・大きさへロールバックする。
    */
-  const registerPendingDrop = (
+  const commitPendingDrop = (
     d: Drag,
     action:
       | { type: 'MOVE_PLACE'; lid: string; line: number; x: number; y: number }
@@ -432,6 +441,38 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     if (!requested) {
       rollback();
     }
+  };
+
+  /**
+   * 🔴 **別のタブが編集中なら、離した付箋を元へ戻して理由を出す**(依頼 118-4)。
+   * 確かめが要らない回(口が無い / このタブが自分で編集中)は**同期のまま**書く ── 離した直後の手応えを変えない。
+   */
+  type PendingAction = Parameters<typeof commitPendingDrop>[1];
+  const registerPendingDrop = (d: Drag, action: PendingAction): void => {
+    if (locks === undefined || elsewhereCheckNotNeeded(dispatcher, locks, action.lid)) {
+      commitPendingDrop(d, action);
+      return;
+    }
+    void editedElsewhereReason(dispatcher, locks, action.lid).then((why) => {
+      if (why !== null) {
+        restore(d);
+        dispatcher.dispatch({ type: 'OP_FAILED', error: `${why}(付箋は元の位置に戻しました)` });
+        return;
+      }
+      commitPendingDrop(d, action);
+    });
+  };
+
+  /** 矢印で動かした先を書く前に、別のタブの編集を確かめる(見た目は既に戻してある ── 断ったら理由だけ出す)。 */
+  const fireUnlessElsewhere = (lid: string, fire: () => void): void => {
+    if (locks === undefined || elsewhereCheckNotNeeded(dispatcher, locks, lid)) {
+      fire();
+      return;
+    }
+    void editedElsewhereReason(dispatcher, locks, lid).then((why) => {
+      if (why !== null) dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+      else fire();
+    });
   };
 
   const targetOf = (block: HTMLElement): { lid: string; line: number } | null =>
@@ -567,7 +608,9 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     const host = n.block.closest<HTMLElement>('.pkc-board-host');
     if (host !== null && lineRaw !== null) host.setAttribute(PLACE_FOCUS_ATTR, lineRaw);
     if (n.others.length === 0) {
-      dispatcher.dispatch({ type: 'MOVE_PLACE', lid: t.lid, line: t.line, x: n.x, y: n.y });
+      fireUnlessElsewhere(t.lid, () =>
+        dispatcher.dispatch({ type: 'MOVE_PLACE', lid: t.lid, line: t.line, x: n.x, y: n.y }),
+      );
       return;
     }
     // 🔴 グループ(#530 段⑤b)── 仲間も同じだけ動かして 1 回で書く。1 枚でも引けなければ 1 枚も書かない
@@ -577,7 +620,7 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       if (mt === null || mt.lid !== t.lid) return;
       moves.push({ line: mt.line, x: m.startX + (n.x - n.startX), y: m.startY + (n.y - n.startY) });
     }
-    dispatcher.dispatch({ type: 'MOVE_PLACES', lid: t.lid, moves });
+    fireUnlessElsewhere(t.lid, () => dispatcher.dispatch({ type: 'MOVE_PLACES', lid: t.lid, moves }));
   }
 
   const onKeyDown = (e: KeyboardEvent): void => {

@@ -745,6 +745,11 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   });
   for (const id of ['dual', 'sql'] as const) {
     await openTile(page, builtinTile(id));
+    // 🔴 左のペインに置き場の無い面は、塞がれたら「この画面の中央で開きますか」と聞く(#1852 Q1 / 依頼 147)。
+    //    「やめる」なら中央は奪わず、理由だけ出す(以下の確認はその後の画面で見る)
+    expect(await answerAppDialog(page, 'cancel'), `塞がれた ${id} で、中央で開くかを聞いていない`).toContain(
+      'この画面の中央で開きますか',
+    );
     await expect(
       page.locator(`[data-pkc-region="center"] [data-pkc-view-pane="${id}"], [data-pkc-view-pane="${id}"]`).first(),
       `塞がれた ${id} が中央の面に落ちた(読んでいたノートが消える)`,
@@ -1251,6 +1256,38 @@ test('🔴 グループを実際に動かすと並びが入れ替わり、初回
   await expect(
     groupMenu.locator('[data-pkc-action="reset-app-group-order"]'),
     '名前順へ戻したのに、まだ「名前順に戻す」が出ている(番号が残っている)',
+  ).toHaveCount(0);
+
+  /**
+   * 🔴 **グループの名前を変える**(依頼 83-2 / 束 Q1)── 自分のアプリのグループの見出しを右クリック →「名前を変える…」→ 新しい名前を打つ →
+   *   見出しが新しい名前になる。⚠ 組み込みだけのグループ(組み込みアプリ)の見出しには、この項目が出ない(変えられない物を並べない)。
+   * 🔑 新しい起動は増やさない ── 既に在る道中(2 つのグループを持つ)に足す。対照群: 自分のグループには出る。
+   */
+  await expect(
+    groupMenu.locator('[data-pkc-action="rename-app-group"]'),
+    '自分のアプリのグループなのに「名前を変える…」が出ていない(対照群)',
+  ).toHaveText('名前を変える…');
+  await page.keyboard.press('Escape');
+  const builtinHeading = page.locator('[data-pkc-action="toggle-app-group"]').filter({ hasText: '組み込みアプリ' });
+  await builtinHeading.click({ button: 'right' });
+  await expect(groupMenu, '組み込みの見出しの右クリックでメニューが出ない').toBeVisible();
+  await expect(
+    groupMenu.locator('[data-pkc-action="rename-app-group"]'),
+    '組み込みだけのグループに「名前を変える…」が出ている',
+  ).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await toolHeading.click({ button: 'right' });
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="rename-app-group"]');
+  await expect(dialog, '名前を聞く窓が出ない').toBeVisible();
+  await dialog.locator('[data-pkc-field="prompt-input"]').fill('工具箱');
+  await dialog.locator('[data-pkc-field="dialog-ok"]').click();
+  await expect(
+    page.locator('[data-pkc-action="toggle-app-group"]').filter({ hasText: '工具箱' }),
+    '見出しが新しい名前にならない',
+  ).toHaveCount(1);
+  await expect(
+    page.locator('[data-pkc-action="toggle-app-group"][data-pkc-group="道具"]'),
+    '古い名前の見出しが残っている',
   ).toHaveCount(0);
 
   expect(errors).toEqual([]);

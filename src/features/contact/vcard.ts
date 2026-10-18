@@ -46,6 +46,8 @@ export interface VcfCard {
   readonly emails: readonly string[];
   /** BDAY(そのままの字)。 */
   readonly birthday: string;
+  /** 読み(`SORT-STRING`、無ければ `X-PHONETIC-LAST-NAME` + `X-PHONETIC-FIRST-NAME`。依頼 145)。無ければ空文字。 */
+  readonly yomi?: string;
   /** NOTE(エスケープを解いた本文)。 */
   readonly notes: readonly string[];
   /** frontmatter に写せなかった項目(`ADR;TYPE=home: …` の形の行)。 */
@@ -325,6 +327,10 @@ interface VcfDraft {
   tels: string[];
   emails: string[];
   birthday: string;
+  /** 読み。`SORT-STRING` が最優先、無ければ X-PHONETIC の姓・名(依頼 145)。 */
+  sortString: string;
+  phoneticLast: string;
+  phoneticFirst: string;
   notes: string[];
   others: string[];
   /** 種別を落としたことを**このカードで既に言ったか**(200 枚で 200 行にしない)。 */
@@ -350,6 +356,9 @@ function isEmptyCard(cur: VcfDraft): boolean {
     cur.n === '' &&
     cur.orgParts.length === 0 &&
     cur.birthday === '' &&
+    cur.sortString === '' &&
+    cur.phoneticLast === '' &&
+    cur.phoneticFirst === '' &&
     cur.tels.length === 0 &&
     cur.emails.length === 0 &&
     cur.notes.length === 0 &&
@@ -371,9 +380,16 @@ function finishCard(cur: VcfDraft): VcfCard {
     tels: cur.tels,
     emails: cur.emails,
     birthday: cur.birthday,
+    yomi: yomiOf(cur),
     notes: cur.notes,
     others: cur.others,
   };
+}
+
+/** 読み。⚠ `SORT-STRING` を最優先(vCard 3.0 の標準)。無ければ Android / iPhone の `X-PHONETIC-*` を「姓 名」に繋ぐ。 */
+function yomiOf(cur: VcfDraft): string {
+  if (cur.sortString !== '') return cur.sortString;
+  return [cur.phoneticLast, cur.phoneticFirst].filter(Boolean).join(' ');
 }
 
 /** FN が無く N から名前を作ったとき、名前に入れなかった字(敬称など)を言う。無ければ null。 */
@@ -425,7 +441,7 @@ export function parseVcf(text: string): VcfParseResult {
           takeCard(cur);
         }
       }
-      cur = { fn: '', n: '', orgParts: [], tels: [], emails: [], birthday: '', notes: [], others: [], typeSaid: false, qpSaid: false, nExtra: [] };
+      cur = { fn: '', n: '', orgParts: [], tels: [], emails: [], birthday: '', sortString: '', phoneticLast: '', phoneticFirst: '', notes: [], others: [], typeSaid: false, qpSaid: false, nExtra: [] };
       continue;
     }
     if (prop.name === 'END' && prop.value.trim().toUpperCase() === 'VCARD') {
@@ -526,6 +542,21 @@ export function parseVcf(text: string): VcfParseResult {
         if (cur.birthday !== '' && decoded !== '' && decoded !== cur.birthday) cur.others.push(`- ${otherLabel(prop.name, prop.params)}: ${decoded}`);
         else if (cur.birthday === '') cur.birthday = decoded;
         break;
+      /**
+       * 🔴 **読みは `yomi:` に写す**(依頼 145)── 並べ替えと絞り込みが使う。2 つ目以降は上書きせず本文の行として残す。
+       */
+      case 'SORT-STRING':
+        if (cur.sortString !== '' && decoded !== '' && decoded !== cur.sortString) cur.others.push(`- ${otherLabel(prop.name, prop.params)}: ${decoded}`);
+        else if (cur.sortString === '') cur.sortString = decoded;
+        break;
+      case 'X-PHONETIC-LAST-NAME':
+        if (cur.phoneticLast !== '' && decoded !== '' && decoded !== cur.phoneticLast) cur.others.push(`- ${otherLabel(prop.name, prop.params)}: ${decoded}`);
+        else if (cur.phoneticLast === '') cur.phoneticLast = decoded;
+        break;
+      case 'X-PHONETIC-FIRST-NAME':
+        if (cur.phoneticFirst !== '' && decoded !== '' && decoded !== cur.phoneticFirst) cur.others.push(`- ${otherLabel(prop.name, prop.params)}: ${decoded}`);
+        else if (cur.phoneticFirst === '') cur.phoneticFirst = decoded;
+        break;
       case 'NOTE':
         // 🔴 QP の `=0D=0A` は CRLF で戻る ── 本文は `\n` に揃える(単独の CR も)
         if (rawDecoded !== '') cur.notes.push(rawDecoded.replace(/\r\n?/g, '\n'));
@@ -601,6 +632,7 @@ export function vcfNoteOf(card: VcfCard): { title: string; body: string } {
     meta[CONTACT_KEYS.org] =
       card.orgParts.length === 1 ? card.orgParts[0]! : [...card.orgParts];
   if (card.birthday !== '') meta[CONTACT_KEYS.birthday] = card.birthday;
+  if (card.yomi !== undefined && card.yomi !== '') meta[CONTACT_KEYS.yomi] = card.yomi;
   const rest: string[] = [];
   if (card.notes.length > 0) rest.push(...card.notes);
   if (card.others.length > 0) {
@@ -645,6 +677,17 @@ export function countUnwritableBirthdays(cards: readonly ContactCard[]): number 
   return cards.filter((c) => c.birthday !== '' && vcfBirthday(c.birthday) === null).length;
 }
 
+/**
+ * 🔴 **題名を、最初の空白(半角・全角)で姓と名に分ける**(依頼 146)。空白が無い / 先頭が空白だけの名前は `[名前, '']`。
+ * 🔑 取り込み(`nameFromN`)は「姓 名」と空白で繋ぐので、**往復しても題名は変わらない**。
+ */
+export function splitNameForN(name: string): [string, string] {
+  const t = name.trim();
+  const m = /^(\S+?)[ \u3000]+(\S[\s\S]*)$/.exec(t);
+  if (m === null) return [t, ''];
+  return [m[1]!, m[2]!.trim()];
+}
+
 /** 3.0 の値エスケープ(`\` `,` `;` と改行)。 */
 function escapeValue(v: string): string {
   return v.replace(/\\/g, '\\\\').replace(/,/g, '\\,').replace(/;/g, '\\;').replace(/\r\n|\r|\n/g, '\\n'); // 🔴 単独の CR も(#1087。残すと vCard の行が割れる)
@@ -660,10 +703,18 @@ export function buildVcf(cards: readonly ContactCard[]): string {
   const lines: string[] = [];
   for (const c of cards) {
     lines.push('BEGIN:VCARD', 'VERSION:3.0');
-    lines.push(`N:${escapeValue(c.name)};;;;`);
+    /**
+     * 🔴 **名前を最初の空白で姓と名に分けて書く**(依頼 146。Gemini の回答「推薦どおり」= ③)。
+     * ⚠ 全体を「姓」の欄へ入れると、スマホ側で姓・名の並べ替えが効かない。FN は題名のまま(表示名)。
+     *   空白の無い名前は今までどおり全体を姓の欄へ(分けようがない ── 項目は増やさない)。
+     */
+    const [family, given] = splitNameForN(c.name);
+    lines.push(`N:${escapeValue(family)};${escapeValue(given)};;;`);
     // 🔴 題名が空なら FN は最初の電話 / メール(FN が空の vCard は受け手が捨てる)。N は空のまま(#1087)
     lines.push(`FN:${escapeValue(c.name !== '' ? c.name : (c.tels[0] ?? c.emails[0] ?? ''))}`);
     // 🔴 内訳を `;` で繋ぎ直す(#534 段②)── 会社と部署の区切りを相手へ渡す
+    // 🔴 読みは `SORT-STRING` に書く(vCard 3.0 の標準。依頼 145)── 取り込みが読み戻す
+    if (c.yomi !== undefined && c.yomi.trim() !== '') lines.push(`SORT-STRING:${escapeValue(c.yomi.trim())}`);
     if (c.orgParts.length > 0)
       lines.push(`ORG:${c.orgParts.map(escapeValue).join(';')}`);
     // 🔑 取込が `birthday:` を書くので、**書き出しも書く**(往復を閉じる ──

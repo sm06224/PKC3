@@ -2757,6 +2757,12 @@ export type UserAction =
   | { type: 'MOVE_APP_GROUP'; name: string; by: -1 | 1; newLids: readonly string[] }
   | { type: 'RESET_APP_GROUP_ORDER' }
   /**
+   * 🔴 **グループの名前を変える**(依頼 83-2。Gemini の回答「推薦どおり」= C)。
+   * ⚠ そのグループに入っている**自分のアプリ全部**の `attachment.app_group` と、グループ用のノート(目印・並び順)の題名を
+   *   一緒に書き換える ── タイルを 1 つずつ開いて打ち直すと、古い名前のグループのアイコンと並び順が取り残された。
+   */
+  | { type: 'RENAME_APP_GROUP'; from: string; to: string }
+  /**
    * アプリの一覧を読み直す(P8 段⑱)。
    *
    * 🔴 かつては「アプリ」タブで `SET_VIEW_MODE 'launcher'` を撃っていたが、
@@ -2887,6 +2893,8 @@ export type UserAction =
   | { type: 'SET_PLACE_RECT'; lid: string; line: number; rect: PlaceRectValue }
   /** 板を前へ出す(#676 段②)── 他の板の z= の最大 + 1 を書く。同じ門。 */
   | { type: 'RAISE_PLACE'; lid: string; line: number }
+  /** 板を後ろへ送る(依頼 118-1)── 他の板より後ろへ回す。同じ門。 */
+  | { type: 'LOWER_PLACE'; lid: string; line: number }
   /**
    * 🔴 **ふつうの付箋の中の字を、その場で書く**(#1662 1)── 開き行と閉じの間だけを書く。同じ門。
    * `before` = 欄を開いた時点の中身(別の窓が先に直していれば書かない)。
@@ -6895,6 +6903,98 @@ function reduceCore(
         ],
       };
     }
+    case 'RENAME_APP_GROUP': {
+      // 🔴 断るときは理由を出す(目印・並べ替えと同じ門 + タイル設定の書込中)
+      const renameRefusal = appGroupWriteRefusal(state, '名前を変えられます');
+      if (renameRefusal !== null) return { state: { ...state, error: renameRefusal }, events: [] };
+      const from = appGroupName(action.from);
+      const to = appGroupName(action.to);
+      if (from === '' || to === from) return { state, events: [] };
+      if (to === '')
+        return {
+          state: {
+            ...state,
+            error:
+              'グループの名前が空です(グループから外すには、アプリの設定の「グループ」の欄を空にしてください)',
+          },
+          events: [],
+        };
+      if (state.tileWrite)
+        return {
+          state: { ...state, error: 'いまアプリの設定を保存しています。終わってから、もう一度押してください' },
+          events: [],
+        };
+      const tiles = state.launcherTiles;
+      if (tiles === null) return { state, events: [] };
+      // ⚠ 動かせるのは自分のアプリだけ(組み込みは entry を持たない)
+      const members = tiles.filter((t) => isMovableTile(t) && t.group === from);
+      if (members.length === 0)
+        return {
+          state: {
+            ...state,
+            error: 'このグループは名前を変えられません(最初から入っているアプリだけのグループです)',
+          },
+          events: [],
+        };
+      const rows: Array<{
+        lid: string;
+        updates: Record<string, string | number | undefined>;
+        title: string;
+        archetype: string;
+        entryOrder: number;
+      }> = [];
+      for (const t of members) {
+        const meta = state.entryMetas.get(t.lid);
+        if (meta === undefined)
+          return { state: { ...state, error: '名前を変えられません(ノートが見つかりません)' }, events: [] };
+        rows.push({
+          lid: t.lid,
+          updates: { 'attachment.app_group': to },
+          title: meta.title,
+          archetype: meta.archetype,
+          entryOrder: meta.entryOrder,
+        });
+      }
+      /**
+       * 🔑 グループ用のノート(目印・並び順を持つ)も題名を合わせる。⚠ 行き先の名前のノートが既に在るときは動かさない
+       *   (同じ題名のノートを 2 つ作らない ── そのときは行き先のグループへまとまる)。
+       */
+      let next = state;
+      const pre: DomainEvent[] = [];
+      const noteLid = findAppGroupLid(state.order, state.entryMetas, from);
+      const renamedNote = noteLid !== null && findAppGroupLid(state.order, state.entryMetas, to) === null;
+      if (noteLid !== null && renamedNote) {
+        const made = reduce(state, { type: 'RENAME_ENTRY_TITLE', lid: noteLid, title: to });
+        next = made.state;
+        pre.push(...made.events);
+      }
+      const rekey = <T>(o: Readonly<Record<string, T>>): Record<string, T> =>
+        Object.fromEntries(Object.entries(o).map(([k, v]) => [k === from ? to : k, v] as const));
+      const moved: AppState = {
+        ...next,
+        launcherTiles: tiles.map((t) => (isMovableTile(t) && t.group === from ? { ...t, group: to } : t)),
+        appGroupIcons: renamedNote ? rekey(next.appGroupIcons) : next.appGroupIcons,
+        appGroupOrders: renamedNote ? rekey(next.appGroupOrders) : next.appGroupOrders,
+        appGroupGen: next.appGroupGen + 1,
+        tileWrite: { lid: rows[0]!.lid, n: 1 },
+        notice: `グループ「${from}」を「${to}」に変えました(${String(rows.length)} 件のアプリ)`,
+      };
+      return {
+        state: moved,
+        events: [
+          ...pre,
+          {
+            type: 'REQUEST_TILE_ORDER',
+            lid: rows[0]!.lid,
+            gen: state.lockGen,
+            rows,
+            entries: attachmentEntries(state),
+          },
+          // 🔴 書いた「あと」に読み直す(画面を先に動かしたので、書けなかった回は disk の答えへ戻る)
+          readAppGroupNotes(moved),
+        ],
+      };
+    }
     case 'SET_APP_GROUP_ICON': {
       // ⚠ 書込が飛んでいる間は触らせない(`SET_APP_TILE` と同じ規律 ── 読んで
       //    書き戻す操作なので、途中に別の書込が挟まると片方が消える)
@@ -8733,7 +8833,7 @@ function reduceCore(
      * `bodyRewriteGate` 1 か所 ── 下の 3 つ(#676)と共有する。
      */
     case 'MOVE_PLACE':
-      return bodyRewriteGate(state, action.lid, '、板の付箋を動かしてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、付箋を動かしてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         if (!isPlaceCoord(action.x) || !isPlaceCoord(action.y)) return null;
         const openLine = placeOpenLineOf(shown, action.line);
@@ -8741,7 +8841,7 @@ function reduceCore(
         return { kind: 'place-move', line: action.line, openLine, x: action.x, y: action.y };
       });
     case 'MOVE_PLACES':
-      return bodyRewriteGate(state, action.lid, '、板の付箋を動かしてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、付箋を動かしてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         if (action.moves.length === 0) return null;
         const moves: Array<{ line: number; openLine: string; x: number; y: number }> = [];
@@ -8778,7 +8878,7 @@ function reduceCore(
      * (CLAUDE.md「文言は押した場所と対で pin する」)。
      */
     case 'RESIZE_PLACE':
-      return bodyRewriteGate(state, action.lid, '、板の大きさを変えてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、付箋の大きさを変えてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         if (!isPlaceCoord(action.w) || !isPlaceCoord(action.h)) return null;
         const openLine = placeOpenLineOf(shown, action.line);
@@ -8796,7 +8896,7 @@ function reduceCore(
         action.lid,
         PLACE_CONNECT_OPEN_REFUSAL,
         (shown) => endsInsideOpenBlock(shown),
-        bodyRewriteGate(state, action.lid, '、板を線でつないでください', (shown) => {
+        bodyRewriteGate(state, action.lid, '、付箋を線でつないでください', (shown) => {
           if (shown === null) return null; // 画面に無い本文の行番号は信じない
           const from = placeOpenLineOf(shown, action.line);
           const to = placeOpenLineOf(shown, action.toLine);
@@ -8829,7 +8929,7 @@ function reduceCore(
         action.lid,
         PLACE_REMOVE_OPEN_REFUSAL,
         (shown) => placeBlockUnclosed(shown, action.line),
-        bodyRewriteGate(state, action.lid, '、板の付箋を消してください', (shown) => {
+        bodyRewriteGate(state, action.lid, '、付箋を消してください', (shown) => {
           if (shown === null) return null; // 画面に無い本文の行番号は信じない
           const openLine = placeOpenLineOf(shown, action.line);
           if (openLine === null) return null;
@@ -8837,7 +8937,7 @@ function reduceCore(
         }),
       );
     case 'ADD_PLACE': {
-      const gated = bodyRewriteGate(state, action.lid, '、板を置いてください', (shown) =>
+      const gated = bodyRewriteGate(state, action.lid, '、付箋を置いてください', (shown) =>
         // ⚠ 画面に出ていない面へは置かない(押し所は面の上にしか無い ── これまでの門を保つ)
         shown !== null &&
         isPlaceCoord(action.x) &&
@@ -8866,7 +8966,7 @@ function reduceCore(
       return gated;
     }
     case 'SET_PLACE_RECT':
-      return bodyRewriteGate(state, action.lid, '、板の位置と大きさを変えてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、付箋の位置と大きさを変えてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         for (const k of PLACE_RECT_KEYS) {
           const v = action.rect[k];
@@ -8885,14 +8985,21 @@ function reduceCore(
         return { kind: 'place-text', line: action.line, openLine, before, text: action.text };
       });
     case 'RAISE_PLACE':
-      return bodyRewriteGate(state, action.lid, '、板を前へ出してください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、付箋を前へ出してください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-raise', line: action.line, openLine };
       });
+    case 'LOWER_PLACE':
+      return bodyRewriteGate(state, action.lid, '、付箋を後ろへ送ってください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
+        const openLine = placeOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-lower', line: action.line, openLine };
+      });
     case 'SET_PLACE_SHAPE':
-      return bodyRewriteGate(state, action.lid, '、板の形を変えてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、付箋の形を変えてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         // ⚠ 綴りは**ここでも**検める ── 型は境界(postMessage / test の手組み)では効かない
         if (!isPlaceShape(action.shape)) return null;
@@ -9058,6 +9165,8 @@ function reduceCore(
               toBefore: last.toBefore,
               lines: last.lines,
               toBeforeLine: last.toBeforeLine,
+              // 🔴 動かす前の本文そのものへ戻す回(依頼 118-3)── 本文が変わっていなければ空行の数まで元どおりになる
+              ...(last.restore === undefined ? {} : { restore: last.restore }),
             },
           },
         ],
@@ -11448,6 +11557,32 @@ export function hasAppGroupOrder(state: AppState): boolean {
   return Object.keys(state.appGroupOrders).length > 0;
 }
 
+/**
+ * 🔴 **名前を変えられるグループか**(依頼 83-2)── 自分のアプリが 1 つでも入っているグループだけ。
+ * ⚠ メニューに「名前を変える…」を出すかの判定に使う(組み込みだけのグループでは押しても何も変わらない)。
+ */
+export function appGroupRenamable(state: Pick<AppState, 'launcherTiles'>, name: string): boolean {
+  const g = appGroupName(name);
+  return g !== '' && (state.launcherTiles ?? []).some((t) => isMovableTile(t) && t.group === g);
+}
+
+/**
+ * 🔴 **いま在るグループの名前**(依頼 83-2 B)── アプリの設定の「グループ」の欄の候補。
+ * ⚠ 自分のアプリが入っているグループ + グループ用のノートの題名。組み込みのグループは入れない(書いても紛れ込むだけ)。
+ */
+export function knownAppGroupNames(
+  state: Pick<AppState, 'launcherTiles' | 'entryMetas'>,
+): readonly string[] {
+  const names = new Set<string>();
+  for (const t of state.launcherTiles ?? []) if (isMovableTile(t) && t.group !== '') names.add(t.group);
+  // ⚠ 一覧がまだ無い状態(boot 前・部分の state)でも落とさない ── 候補が出ないだけにする
+  for (const meta of (state.entryMetas as ReadonlyMap<string, EntryMeta> | undefined)?.values() ?? []) {
+    if (meta.archetype === APP_GROUP_ARCHETYPE && appGroupName(meta.title) !== '')
+      names.add(appGroupName(meta.title));
+  }
+  return [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
 /** 🔴 **いま番号の付いている群の数**(#857 段③)── 押す前に範囲を言うために要る。 */
 export function appGroupOrderCount(state: AppState): number {
   return Object.keys(state.appGroupOrders).length;
@@ -11974,7 +12109,7 @@ export const APPEND_TEXT_OPEN_BLOCK_REFUSAL =
 
 /** 末尾が閉じていないブロックの中へは板を置けない ── 押した時点で言う断り(#529)。 */
 export const PLACE_OPEN_BLOCK_REFUSAL =
-  '本文の最後のブロックが閉じていないため、板を置けません(ブロックを閉じてから置いてください)';
+  '本文の最後のブロックが閉じていないため、付箋を置けません(ブロックを閉じてから置いてください)';
 
 /**
  * 🔴 **書換が通る見込みのときだけ、閉じていないブロックの理由を言う**(#1087。`ADD_PLACE` の門と同じ形)。
