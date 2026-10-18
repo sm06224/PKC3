@@ -82,6 +82,9 @@ export interface TaskCard extends TaskItem {
   readonly substitutes: string | null;
 }
 
+/** 時刻つきのノート 1 件の予定を読む上限(画面に出して意味がある量ではなく、暴走の止め弁)。切ったら `truncated` を立てる。 */
+export const NOTE_TIME_LIMIT = 5000;
+
 /**
  * 上限。⚠ どれも「画面に出して意味がある量」で決めてある ── 大きくすると
  * 盤面が読めなくなり、小さくすると user の項目が**黙って消える**。

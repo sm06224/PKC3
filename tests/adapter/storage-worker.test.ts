@@ -14,7 +14,7 @@ import type {
   StorageRequest,
   StorageResponse,
 } from '../../src/adapter/platform/storage/protocol';
-import { TASK_LIMITS } from '../../src/features/schedule/task-cards';
+import { NOTE_TIME_LIMIT, TASK_LIMITS } from '../../src/features/schedule/task-cards';
 import {
   SNIPPET_ARCHETYPE,
   SNIPPET_LIMITS,
@@ -1986,6 +1986,28 @@ describe('カンバンの札を集める (#277 段②)', () => {
       { lid: 'nt-iso', date: '2026-10-21', time: '09:05' },
       { lid: 'nt-timed', date: '2026-10-20', time: '14:00' },
     ]);
+  });
+
+  /**
+   * 🔴 **時刻の読みが上限で切れたら、`truncated` を立てる**(行の予定の切れと同じ口。黙って切ると、切れた先の予定は鳴らない)。
+   * 件数は `NOTE_TIME_LIMIT` から導く。対照群: 上限に届かない量では立てない。
+   */
+  it('🔴 時刻つきノートが上限を超えたら truncated を立てる。対照群: 届かない量では立てない', async () => {
+    const mk = (n: number) =>
+      Array.from({ length: n }, (_, i) =>
+        entry(`nt-${String(i).padStart(5, '0')}`, '---\ndate: 2026-10-20 14:00\n---\n', { entryOrder: i, date: '2026-10-20' }),
+      );
+    await request({ op: 'openContainer', cid: 'c-nt-few', title: 'x' });
+    await request({ op: 'bulkUpsertEntries', cid: 'c-nt-few', entries: mk(20) });
+    const few = await request({ op: 'taskScan', cid: 'c-nt-few' });
+    expect(few.noteTimes?.length, '前提: 時刻が運ばれている').toBe(20);
+    expect(few.truncated, '届かない量で切ったと言っている').toBe(false);
+
+    await request({ op: 'openContainer', cid: 'c-nt-many', title: 'x' });
+    await request({ op: 'bulkUpsertEntries', cid: 'c-nt-many', entries: mk(NOTE_TIME_LIMIT + 5) });
+    const many = await request({ op: 'taskScan', cid: 'c-nt-many' });
+    expect(many.noteTimes?.length, '上限を超えて読んでいる').toBe(NOTE_TIME_LIMIT);
+    expect(many.truncated, '時刻の読みを切ったのに黙っている').toBe(true);
   });
 });
 
