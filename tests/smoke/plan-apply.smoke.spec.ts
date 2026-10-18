@@ -189,9 +189,11 @@ test('🔴 壊れの調べと、作り直す/捨てるの 2 段が押せる (#97
   await expect(dialog, '作り直しの説明の窓が出ない').toBeVisible();
   await expect(resetEntryRows, '窓を出しただけでノートが消えた').toHaveCount(2);
   await expect(dialogBody, '何をするのかが書いていない').toContainText('ノートの保存データを作り直します');
-  // 🔴 戻らない物を、押す前に言い切っている(窓の字が features の一覧と揃っていること)
-  await expect(dialogBody, '戻らない物を言っていない').toContainText('戻らないもの');
-  await expect(dialogBody, '履歴が戻らないことを言っていない').toContainText('履歴');
+  // 🔴 束 F2(依頼 119-1 A): 作り直しで戻らない物は無くなった(`REBUILD_LOST` が空)── 「戻らないもの」の欄は出ず、
+  //   履歴・ゴミ箱のノートは「残るもの」に並ぶ(窓の字が features の一覧と揃っていること)
+  await expect(dialogBody, '戻らない物が無いのに「戻らないもの」が出ている').not.toContainText('戻らないもの');
+  await expect(dialogBody, '履歴が残ることを言っていない').toContainText('履歴(前の版)');
+  await expect(dialogBody, 'ゴミ箱のノートが残ることを言っていない').toContainText('ゴミ箱のノート');
   // 🔑 落とせなかったときに止まる、といういちばん怖い所を潰す 1 行
   await expect(dialogBody, '落とせなかったときに止まることを言っていない').toContainText(
     '何も消さずに止まります',
@@ -324,9 +326,9 @@ test('🔴 壊れの調べと、作り直す/捨てるの 2 段が押せる (#97
   await expect(dialogBody, 'つながりを戻したと言っていない').toContainText('つながり 1 件');
   await expect(dialogBody, '履歴を戻したと言っていない').toContainText('履歴 1 版');
   await expect(dialogBody, 'タグの色を戻したと言っていない').toContainText('タグの色 1 件');
-  // ⚠ 戻らない物の名前は手で書く(実装の配列から引くと、配列が縮んだとき検査も一緒に縮む)
-  await expect(dialogBody, '戻らない物(ゴミ箱のノート)を言っていない').toContainText('ゴミ箱のノート');
-  await expect(dialogBody, '戻らない物(システムのメッセージ)を言っていない').toContainText('システムのメッセージ');
+  // 🔴 束 F2(依頼 119-1 A): システムのメッセージは「戻しました」と言い、「戻りません」とは言わない(戻らない物は無くなった)
+  await expect(dialogBody, 'システムのメッセージを戻したと言っていない').toContainText('システムのメッセージも戻しました');
+  await expect(dialogBody, '戻らない物があるように言っている').not.toContainText('戻りません');
 
   // ③ 読み込み直しが走る
   const navigated = page.waitForEvent('framenavigated');
