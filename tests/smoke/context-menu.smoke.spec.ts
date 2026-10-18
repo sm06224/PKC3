@@ -439,9 +439,11 @@ test('🔴 編集中に行を右クリックすると「別のウィンドウで
   await other.click({ button: 'right' });
   const menu = page.locator(MENU);
   await expect(menu, '編集中の行の右クリックでメニューが出ない(#690 ④ が戻った)').toBeVisible();
-  // 🔴 **1 行だけ** ── 選べない編集中に全項目を出すと別のノートに効く
-  const items = menu.locator('button[data-pkc-action]');
-  await expect(items, '編集中なのに「別のウィンドウで開く」以外が出た').toHaveCount(1);
+  // 🔴 **押せるのは 1 つだけ**(依頼 79-2 B)── 選べない編集中に全項目を押せると別のノートに効く。
+  //    ほかの項目は灰色で並び、説明に理由が出る
+  const items = menu.locator('button[data-pkc-action]:not([disabled])');
+  await expect(items, '編集中なのに「別のウィンドウで開く」以外が押せる').toHaveCount(1);
+  await expect(menu.locator('button[data-pkc-action][disabled]').first(), '灰色の項目が並んでいない').toBeVisible();
   await expect(items.first()).toHaveAttribute('data-pkc-action', 'open-note-window');
   await expect(items.first()).toContainText('別のウィンドウで開く');
   // 🔑 lid はボタン自身が運ぶ(「押した行のノート」といういつもの規則 ── 選ばずに済む)

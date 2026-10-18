@@ -223,7 +223,8 @@ export function withEditReady<T extends { readonly action: string; readonly hint
 }
 
 /**
- * 🔴 **書いている最中の行に出す、ただ 1 つ**(#690 ④ A′、user 裁定 2026-09-04)。
+ * 🔴 **書いている最中の行の右クリック ── いつもと同じ項目を並べ、使えない物は灰色にして理由を出す**
+ * (#690 ④ A′、user 裁定 2026-09-04 / 台帳 #1852 束 U1 残り・依頼 79-2 B、Gemini 回答 = 推薦どおり)。
  *
  * ## 物語
  *
@@ -233,18 +234,26 @@ export function withEditReady<T extends { readonly action: string; readonly hint
  * ⚠ 付箋(`open-note-window`)は**中央を動かさずに脇へ出す**ものなので、
  *   下書きを壊す理由が 1 つも無い。断る側の理屈が当たらない唯一の操作である。
  *
- * 🔑 **出すのはこれ 1 つ** ── 他の項目(消す / 書き出す / 印を付ける)は
+ * ## 🔴 79-2: 消えた理由が画面のどこにも出ていなかった
+ *
+ * 直す前は項目が「別のウィンドウで開く」の 1 つだけで、コピー・書き出し・ゴミ箱が消えた理由は
+ * マニュアルにしか書いてなかった。「同じ物が常に同じ場所にある」(業務画面)ので、**いつもと同じ項目を並べ**、
+ * 使えない物は灰色にして、説明に理由(`EDIT_BLOCKED_ROW_HINT`)を出す。
+ *
+ * 🔑 押せるのは `open-note-window` だけ ── 他の項目(消す / 書き出す / 印を付ける)は
  *   `selectEntryOrExplain` が行を選ぶことを前提にしており、編集中は選べない。
  * ⚠ 字も説明も `ENTRY_MENU_ACTIONS` / `ENTRY_ACTION_HINTS` から**引く**
- *   (ここに書き写さない ── 片方だけ直る日を作らない。§7)。
+ *   (ここに書き写さない ── 片方だけ直る日を作らない。§7)。並びも `entryMenuActions` のまま。
+ * @param ctx 押した行のノートの種類など(条件つきの項目の出し分け。省くと条件つきは出さない側)
  */
-export function editingRowMenuActions(): readonly (EntryAction & { readonly hint: string })[] {
-  // ⚠ 材料は要らない(`open-note-window` は `when` を持たない)── 空の文脈で引く
-  const ctx: EntryMenuContext = { archetype: null, linkedFile: null };
-  return ENTRY_MENU_ACTIONS.filter((a) => a.action === 'open-note-window').map((a) => ({
-    ...a,
-    hint: entryActionHint(a.action, ctx),
-  }));
+export const EDIT_BLOCKED_ROW_HINT = '編集を保存するか、編集をやめてから使えます';
+
+export function editingRowMenuActions(
+  ctx: EntryMenuContext = { archetype: null, linkedFile: null },
+): readonly (EntryAction & { readonly hint: string; readonly disabled?: boolean })[] {
+  return entryMenuActions(ctx).map((a) =>
+    a.action === 'open-note-window' ? a : { ...a, disabled: true, hint: EDIT_BLOCKED_ROW_HINT },
+  );
 }
 
 /**

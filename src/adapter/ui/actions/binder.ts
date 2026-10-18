@@ -387,6 +387,7 @@ import {
   PLACE_STYLE_ROTATE_ATTR,
   PLACE_STYLE_WIDTH_ATTR,
   bodyMenuActions,
+  type EntryMenuContext,
   editingRowMenuActions,
   entryMenuActions,
   headingMenuActions,
@@ -20076,14 +20077,41 @@ export function bindActions(
         closeContextMenu(root);
         return;
       }
+      /**
+       * 🔴 **押した行の材料は、編集中も通常も同じ 1 組**(依頼 79-2 B)。⚠ 編集中の枝だけ別に組むと、
+       *   「いつもと同じ項目」が面によって食い違う(ブックマークの入れる / 外すの出し分けなど)。
+       */
+      const archetype = st.entryMetas.get(lid)?.archetype ?? null;
+      const rowCtx: EntryMenuContext = {
+        archetype,
+        linkedFile: st.linkedFiles.get(lid) ?? null,
+        /**
+         * 🔴 **ノートのブックマーク**(#1377)。⚠ 帯が見えるのは**この面だけ**なので、
+         *   ここだけが `bookmarked` を渡す(他の 3 か所は渡さない = 出さない)。
+         * ⚠ フォルダ(入れる物)は渡さない ── 場所は列の頭の ☆ で入れる(口を 2 つにしない)。
+         */
+        ...(archetype !== null && st.cid !== null && !canEnterScope(archetype)
+          ? { bookmarked: appDualPrefs.getBookmarks().includes(noteBookmarkKey(st.cid, lid)) }
+          : {}),
+      };
+      /**
+       * 🔴 **3 つだけ、この行からは出さない**の中身(下の長い注記を参照)。⚠ 編集中の枝も同じ並びにする。
+       */
+      const dualHides = (a: { readonly action: string }): boolean =>
+        a.action !== 'move-to-folder' &&
+        a.action !== 'copy-plain-markdown' &&
+        // 🔴 `copy-asset-link` も同じ理由(添付の key は `openBody.lid === lid` の本文からしか引けない ──
+        //   この分岐は `selectedLid` / `openBody` を動かさないので、押しても必ず断られる)
+        a.action !== 'copy-asset-link' &&
+        a.action !== 'start-edit';
       if (st.phase === 'editing') {
         // 🔑 編集中は既存の枝(#690 ④ A′、下の docstring)と**同じ扱い** ──
-        //   出すのは「別のウィンドウで開く」だけ(`MENU_PREV_LID_ATTR` は付けない ──
-        //   選択を動かしていないので戻す相手が居ない)。
+        //   「別のウィンドウで開く」だけが押せる(`MENU_PREV_LID_ATTR` は付けない ──
+        //   選択を動かしていないので戻す相手が居ない)。他の項目は灰色にして理由を出す(依頼 79-2 B)。
         openContextMenu(
           root,
           { x: ev.clientX, y: ev.clientY },
-          editingRowMenuActions(),
+          editingRowMenuActions(rowCtx).filter(dualHides),
           root.ownerDocument.activeElement,
           { [MENU_LID_ATTR]: lid },
         );
@@ -20122,28 +20150,8 @@ export function bindActions(
        *   押した行 1 件を選んでいるので、**同じ行がその場で打ち替わる**。
        *   側は `data-pkc-side` で運ぶ(メニューは root 直下に出るので、押した所からは辿れない)。
        */
-      const archetype = st.entryMetas.get(lid)?.archetype ?? null;
-      const items = entryMenuActions({
-        archetype,
-        linkedFile: st.linkedFiles.get(lid) ?? null,
-        /**
-         * 🔴 **ノートのブックマーク**(#1377)。⚠ 帯が見えるのは**この面だけ**なので、
-         *   ここだけが `bookmarked` を渡す(他の 3 か所は渡さない = 出さない)。
-         * ⚠ フォルダ(入れる物)は渡さない ── 場所は列の頭の ☆ で入れる(口を 2 つにしない)。
-         */
-        ...(archetype !== null && st.cid !== null && !canEnterScope(archetype)
-          ? { bookmarked: appDualPrefs.getBookmarks().includes(noteBookmarkKey(st.cid, lid)) }
-          : {}),
-      })
-        .filter(
-          (a) =>
-            a.action !== 'move-to-folder' &&
-            a.action !== 'copy-plain-markdown' &&
-            // 🔴 `copy-asset-link` も同じ理由(添付の key は `openBody.lid === lid` の本文からしか引けない ──
-            //   この分岐は `selectedLid` / `openBody` を動かさないので、押しても必ず断られる)
-            a.action !== 'copy-asset-link' &&
-            a.action !== 'start-edit',
-        )
+      const items = entryMenuActions(rowCtx)
+        .filter(dualHides)
         .map((a): MenuItem =>
           a.action === 'rename-entry-begin'
             ? { ...a, action: 'dual-rename-begin', attrs: { 'data-pkc-side': side } }
@@ -20189,10 +20197,15 @@ export function bindActions(
         closeContextMenu(root);
         return;
       }
+      const editSt = dispatcher.getState();
       openContextMenu(
         root,
         { x: ev.clientX, y: ev.clientY },
-        editingRowMenuActions(),
+        // 🔴 いつもと同じ項目を並べ、使えない物は灰色 + 理由(依頼 79-2 B)
+        editingRowMenuActions({
+          archetype: editSt.entryMetas.get(lid)?.archetype ?? null,
+          linkedFile: editSt.linkedFiles.get(lid) ?? null,
+        }),
         root.ownerDocument.activeElement,
         { 'data-pkc-entry': lid },
       );
