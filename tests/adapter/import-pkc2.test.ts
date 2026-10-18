@@ -176,7 +176,7 @@ function harness(opts: HarnessOptions = {}) {
       if (d.getState().phase !== 'ready') {
         d.dispatch({
           type: 'OP_FAILED',
-          error: '取り込みは完了しました。編集を終了すると一覧に反映されます',
+          error: '取り込みは完了しました。編集を保存するか、編集をやめると一覧に反映されます',
         });
         return;
       }
@@ -713,7 +713,7 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(written).toHaveLength(1); // 取込自体は成功している
     expect(d.getState().phase).toBe('editing'); // editor から蹴り出さない
     expect(d.getState().openBody?.body).toBe('# 失いたくない下書き\n'); // draft 無傷
-    expect(d.getState().error).toMatch(/編集を終了すると一覧に反映されます/); // 無言にしない
+    expect(d.getState().error).toMatch(/編集を保存するか、編集をやめると一覧に反映されます/); // 無言にしない
   });
 
   // ── 履歴の配線(review H-2 / M-5 / M-6 / M-25: adapter 層で 1 件も見ていなかった)──
