@@ -135,7 +135,7 @@ const TOKEN_ONLY = new RegExp(`^[${LID_CHARS}]+$`);
 const COMMENT_FENCE = /^ {0,3}%%%\s*$/;
 const CONTAINER_OPEN = /^ {0,3}:::+\s*([A-Za-z][\w-]*)?(\{[^}]*\})?\s*$/;
 const CONTAINER_CLOSE = /^ {0,3}:::+\s*$/;
-function withoutHidden(text: string): string {
+export function withoutHidden(text: string): string {
   if (!text.includes('%%') && !text.includes(':::')) return text;
   const lines = text.split(/(\r\n|[\r\n])/); // 区切りも残す(長さを変えない)
   let hidden = 0;

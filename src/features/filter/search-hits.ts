@@ -9,16 +9,19 @@
  * ## 一致の規則は「探す」と同じ 1 本
  *
  * 語の割り方は `parseSearchTerms`(空白で AND / `"…"` はフレーズ / `-語` は除外)を**そのまま**使い、
- * 大小は区別しない(`excerptAround` = 探すの抜粋と同じ `toLowerCase`)。
- * ⚠ **全角と半角は同じ字として扱わない** ── 探す自身(FTS5 trigram / LIKE)が同じ字として
- *   引かないので、探すで当たっていない本文の位置を、ここだけ「当たり」と数えない。
+ * 大小は区別しない。
+ * 🔴 **全角と半角・半角カナ・濁点の持ち方は同じ字として扱う**(台帳 #1852 の束 B2、依頼 258・335)── 探す自身
+ *   (索引と問い合わせ)がそう引くので、探すで当たった本文の位置をここでも「当たり」と数える
+ *   (数えないと、一覧には当たっているのに「一致しませんでした」と出る)。揃え方は `fold-text.ts` の 1 本。
  * ⚠ **除外の語(`-語`)は塗らない** ── 当たりの条件であって、探している物ではない。
  * 🔑 **text node をまたぐ語も数える**(語の途中に太字・リンク・コードの色分けが入る形)── 同じ
  *   段落(ブロック)の中の text node はつなげて引く(つなぎ方は `search-jump.ts`)。
  * 🔑 **整形された字と打った字の差を吸う**(#1087)── 本文は表示のときに `'` → `’` / `...` → `…` /
  *   `--` → `–` / `(c)` → `©` などへ整形されるので、画面の字をそのまま探すと打った字が当たらない。
  */
+import { splitWords } from './fold-text';
 import { parseSearchTerms } from './search-query';
+import { foldMapped } from './search-text';
 
 /** 運ぶ語の長さの上限(コードポイント)。⚠ 住所(断片)に載せるので、無限には持たない。 */
 export const FIND_QUERY_MAX = 200;
@@ -49,10 +52,8 @@ export function findTerms(query: string): string[] {
  *   (一覧には当たっているのに「一致しませんでした」と出る)。
  */
 export function jumpTerms(query: string, origin: 'find' | 'filter'): string[] {
-  if (origin === 'filter') {
-    const t = query.trim();
-    return t === '' ? [] : [t];
-  }
+  // 🔴 左の列の欄は、空白(全角も)で区切った語を全部含む(依頼 194・260・115-1)。`"…"` も `-語` も読まない
+  if (origin === 'filter') return [...new Set(splitWords(query))];
   return findTerms(query);
 }
 
@@ -89,17 +90,19 @@ export interface HitSpan {
  */
 export function findHitSpans(text: string, terms: readonly string[]): HitSpan[] {
   if (text === '' || terms.length === 0) return [];
-  const hay = straightenQuotes(foldCase(text));
+  // 🔴 揃えた字で引き、当たりは書いた字の位置へ戻す(「か」+「゛」と「が」で長さが違っても追える)
+  const map = foldMapped(text);
+  const hay = straightenQuotes(map.folded);
   const spans: HitSpan[] = [];
   for (const term of terms) {
-    const base = straightenQuotes(foldCase(term));
+    const base = straightenQuotes(foldMapped(term).folded);
     if (base === '') continue;
     // 🔑 記号への置き換え(`...` → `…` など)は描画側で止めた(台帳 #1852 束 R1、依頼 254)── 打った字のまま引く
     let from = 0;
     for (;;) {
       const at = hay.indexOf(base, from);
       if (at < 0) break;
-      spans.push({ start: at, end: at + base.length });
+      spans.push({ start: map.from[at]!, end: map.to[at + base.length - 1]! });
       from = at + base.length;
     }
   }

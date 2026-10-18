@@ -78,6 +78,8 @@ export const CSV_TABLE_RESERVED: readonly string[] = [
   'containers',
   'entries',
   'entries_fts',
+  // ⚠ 本文検索が「索引に入れる字」を読む視点(台帳 #1852 の束 B2)── 取られると、索引を作り直す `rebuild` が別の物を読む
+  'entries_fts_src',
   'relations',
   'revisions',
   'assets',

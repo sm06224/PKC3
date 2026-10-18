@@ -17,8 +17,12 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import sqlite3InitModule, { type Database } from '@sqlite.org/sqlite-wasm';
-import { ENTRY_ADDED_COLUMNS, SCHEMA_DDL } from '../../src/adapter/platform/storage/schema';
-import { applySchema } from '../../src/adapter/platform/storage/storage-worker';
+import {
+  ENTRY_ADDED_COLUMNS,
+  LEGACY_SCHEMA_DDL,
+  SCHEMA_DDL,
+} from '../../src/adapter/platform/storage/schema';
+import { applySchema, foldStep } from '../../src/adapter/platform/storage/storage-worker';
 
 let sqlite3: Awaited<ReturnType<typeof sqlite3InitModule>>;
 
@@ -45,10 +49,12 @@ const ROWS: ReadonlyArray<readonly [string, string]> = [
  * ⚠ DDL は手で書き写さず**本物から削る** ── 写すと本物が変わったときに
  *   ここだけ古くなり、「旧い DB」のつもりで別物を作る(§1 空振り)。
  */
-function preFtsDb(opts: { fts: boolean; triggers: boolean }): Database {
+function preFtsDb(opts: { fts: boolean; triggers: boolean; form?: 'legacy' | 'current' }): Database {
   const db = new sqlite3.oo1.DB(':memory:');
-  const added = ENTRY_ADDED_COLUMNS.map((c) => c.name);
-  for (const ddl of SCHEMA_DDL) {
+  // 🔑 `legacy` = 台帳 #1852 の束 B2 より前の索引の形(旧い DB はその形で作られている)/ `current` = いまの形(列も揃っている)
+  const current = opts.form === 'current';
+  const added = current ? [] : ENTRY_ADDED_COLUMNS.map((c) => c.name);
+  for (const ddl of current ? SCHEMA_DDL : LEGACY_SCHEMA_DDL()) {
     const isFtsTable = /CREATE VIRTUAL TABLE/.test(ddl) && /entries_fts/.test(ddl);
     const isFtsTrigger = /CREATE TRIGGER/.test(ddl) && /entries_fts/.test(ddl);
     if (isFtsTable && !opts.fts) continue;
@@ -59,6 +65,8 @@ function preFtsDb(opts: { fts: boolean; triggers: boolean }): Database {
     db.exec(out);
   }
   db.exec('PRAGMA user_version = 3');
+  // 🔑 いまの形の DB は、索引の形の版(2)を刻んで居る ── 刻んだ DB は作り直さない(旧い形 = 刻みが無い)
+  if (current) db.exec(`INSERT INTO settings(scope, k, v) VALUES ('__fts__', 'form', '2')`);
   for (const [lid, body] of ROWS)
     db.exec({
       sql: `INSERT INTO entries (cid, lid, title, archetype, created_at, updated_at,
@@ -131,10 +139,29 @@ describe('全文検索の索引 migration(2026-08-20 の起動不能)', () => {
    * ⚠ 判定を `count(*) FROM entries_fts` に戻すと、この 1 件が落ちる。
    */
   it('🔴 表は在るが索引が空の DB も、開いたときに組み直される', () => {
-    const db = preFtsDb({ fts: true, triggers: false });
+    const db = preFtsDb({ fts: true, triggers: false, form: 'current' });
     expect(docs(db), '前提が崩れている').toBe(0);
     applySchema(db);
     expect(docs(db), '索引が空のまま素通りした(判定が空振りしている)').toBe(ROWS.length);
+    db.close();
+  });
+
+  /**
+   * 🔴 **束 B2 より前の形の索引は、開いた瞬間には組み直さない**(起動を止めない)── 印を置き、塊で流す。
+   * ⚠ 開いた直後は索引が空で、`foldStep` を回し切ると全件が入る(途中の答えは `search-fold-1852.test.ts` が固定する)。
+   */
+  it('🔴 旧い形の索引は、開いた直後は空 → 塊で流して全件になる(起動を止めない)', () => {
+    const db = preFtsDb({ fts: true, triggers: true });
+    expect(docs(db), '前提が崩れている(旧い形の引き金で埋まっているはず)').toBe(ROWS.length);
+    applySchema(db);
+    expect(docs(db), '起動の中で全件を入れ直している(塊で流す設計が効いていない)').toBe(0);
+    expect(foldStep(db, 2), '3 件を 2 件ずつ流すので 1 塊目の後も続きがある').toBe(true);
+    expect(docs(db)).toBe(2);
+    expect(foldStep(db, 2), '2 塊目で終わる').toBe(false);
+    expect(docs(db)).toBe(ROWS.length);
+    expect(() =>
+      db.exec(`INSERT INTO entries_fts(entries_fts) VALUES ('integrity-check')`),
+    ).not.toThrow();
     db.close();
   });
 
@@ -148,11 +175,9 @@ describe('全文検索の索引 migration(2026-08-20 の起動不能)', () => {
    *   「空のときだけ組み直す」へ壊す変異が**生き延びた**。
    */
   it('索引が一部だけ欠けていても組み直される', () => {
-    const db = preFtsDb({ fts: true, triggers: true });
+    const db = preFtsDb({ fts: true, triggers: true, form: 'current' });
     expect(docs(db), '前提が崩れている(trigger で埋まっているはず)').toBe(ROWS.length);
     // ⚠ 埋め戻しに救わせない ── 派生列を先に埋めて、UPDATE が 1 行も走らない形にする
-    db.exec('ALTER TABLE entries ADD COLUMN task_total INTEGER');
-    db.exec('ALTER TABLE entries ADD COLUMN body_chars INTEGER');
     db.exec('UPDATE entries SET task_total = 0, body_chars = length(body)');
     expect(docs(db), '前提が崩れている(この UPDATE で索引は保たれるはず)').toBe(ROWS.length);
     // 1 doc ぶんだけ影表から落として「ずれた索引」を作る
@@ -175,7 +200,7 @@ describe('全文検索の索引 migration(2026-08-20 の起動不能)', () => {
    *   `0 === 0` で**素通りしてしまう**から ── その取り違えをここで殺す。
    */
   it('🔴 組み直しでも直らない索引は、作り直して起動できる', () => {
-    const db = preFtsDb({ fts: true, triggers: true });
+    const db = preFtsDb({ fts: true, triggers: true, form: 'current' });
     db.exec(`DELETE FROM entries`);
     db.exec(`DROP TABLE entries_fts_docsize`);
     const readable = (): boolean => {
@@ -190,6 +215,16 @@ describe('全文検索の索引 migration(2026-08-20 の起動不能)', () => {
     // ⚠ ここが要 ── 直す前は「起動に失敗しました」と同じ形で throw していた
     expect(() => applySchema(db)).not.toThrow();
     expect(readable(), '索引が壊れたまま素通りした').toBe(true);
+    expect(docs(db)).toBe(0);
+    db.close();
+  });
+
+  /** 旧い形で、しかも影表が壊れている索引(移行で落とせない)── 起動は止まらず、最後の手段が作り直す。 */
+  it('🔴 旧い形で影表が壊れた索引も、起動できる(移行が throw しない)', () => {
+    const db = preFtsDb({ fts: true, triggers: true });
+    db.exec(`DELETE FROM entries`);
+    db.exec(`DROP TABLE entries_fts_docsize`);
+    expect(() => applySchema(db)).not.toThrow();
     expect(docs(db)).toBe(0);
     db.close();
   });
@@ -222,7 +257,7 @@ describe('🔴 古い引き金を作り直す(#984)', () => {
   /** ⚠ 旧 DDL は**本物から削って**作る(手で書き写すと、本物が変わった日にここだけ古くなる)。 */
   const oldTriggerDb = (): Database => {
     const db = new sqlite3.oo1.DB(':memory:');
-    for (const ddl of SCHEMA_DDL) {
+    for (const ddl of LEGACY_SCHEMA_DDL()) {
       db.exec(ddl.replace(/AFTER UPDATE OF title, body ON entries/, 'AFTER UPDATE ON entries'));
     }
     return db;
@@ -260,6 +295,10 @@ describe('🔴 古い引き金を作り直す(#984)', () => {
       bind: ['ゆにーくな語がここに在る'],
     });
     applySchema(db);
+    // 🔑 旧い形の索引は塊で流し直す(束 B2)── 流し切った後で引く
+    while (foldStep(db)) {
+      /* 続きがある間 */
+    }
     const hit = db.selectValue(
       `SELECT count(*) FROM entries_fts WHERE entries_fts MATCH 'ゆにーくな語'`,
     );

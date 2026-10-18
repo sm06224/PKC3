@@ -5,7 +5,7 @@
  * 守るもの:
  * ① 語の割り方は「探す」(`parseSearchTerms`)と**同じ 1 本** ── 空白で AND / `"…"` はフレーズ /
  *    `-語` は除外(塗らない)。⚠ 別の割り方をすると、探すで当たった行を開いても塗られない
- * ② 大小は区別しない・**全角と半角は同じ字にしない**(探す自身が引かない字を、ここだけ当たりと数えない)
+ * ② 大小は区別しない・**全角と半角・半角カナ・濁点の持ち方は同じ字**(台帳 #1852 の束 B2 ── 探す自身がそう引く)
  * ③ 重なる当たりは 1 つに束ねる / 昇順
  * ④ 送りは**端で回る**(`wrapHitIndex`)
  * ⑤ 運ぶ語は上限で切る(住所に載せるので)
@@ -37,8 +37,14 @@ describe('findTerms: 当たるべき語(探すと同じ割り方)', () => {
 });
 
 describe('jumpTerms: 塗る語は、始めた場所の割り方で決まる(#1087)', () => {
-  it.each(['-1', '-メモ', '"a b"', '会議 来週'])('🔴 欄の起点は、打った字を丸ごと 1 句にする: %s', (q) => {
+  it.each(['-1', '-メモ'])('🔴 欄の起点は、`-` を除外と読まない(打った字のまま): %s', (q) => {
     expect(jumpTerms(q, 'filter')).toEqual([q]);
+  });
+
+  it('🔴 欄の起点は、空白(全角も)で区切った語を全部(依頼 194・260・115-1)── 引用符は剥がさない', () => {
+    expect(jumpTerms('会議 来週', 'filter')).toEqual(['会議', '来週']);
+    expect(jumpTerms('会議　来週', 'filter')).toEqual(['会議', '来週']);
+    expect(jumpTerms('"a b"', 'filter')).toEqual(['"a', 'b"']);
   });
 
   it('欄の起点は前後の空白だけ落とす / 空白だけなら 0 語', () => {
@@ -66,9 +72,26 @@ describe('findHitSpans: 1 つの字の並びの中の位置', () => {
     expect(findHitSpans('Hello hello HELLO', ['hello'])).toHaveLength(3);
   });
 
-  it('🔴 全角と半角は同じ字にしない(探す自身が引かない)── 対照群は同じ綴りで当たる', () => {
-    expect(findHitSpans('ＡＢＣ abc', ['abc'])).toEqual([{ start: 4, end: 7 }]);
-    expect(findHitSpans('ＡＢＣ abc', ['ＡＢＣ'])).toEqual([{ start: 0, end: 3 }]);
+  it('🔴 全角と半角は同じ字(台帳 #1852 の束 B2、依頼 258・335)── 位置は書いた字のまま返る', () => {
+    expect(findHitSpans('ＡＢＣ abc', ['abc'])).toEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 7 },
+    ]);
+    expect(findHitSpans('ＡＢＣ abc', ['ＡＢＣ'])).toEqual([
+      { start: 0, end: 3 },
+      { start: 4, end: 7 },
+    ]);
+    // 対照群: ひらがなとカタカナは別の字のまま
+    expect(findHitSpans('りんご リンゴ', ['りんご'])).toEqual([{ start: 0, end: 3 }]);
+  });
+
+  it('🔴 長さが変わる揃え(か+濁点 → が / 半角カナ)でも、位置は書いた字を指す', () => {
+    const text = 'xがy ﾊﾝｶｸ';
+    // 「か」+「゛」(2 字)を「が」で探す
+    expect(findHitSpans(text, ['が'])).toEqual([{ start: 1, end: 3 }]);
+    // 半角カナ(濁点つきは 2 字 → 1 字)を全角カナで探す
+    expect(findHitSpans('ﾊﾞｯｸ', ['バッ'])).toEqual([{ start: 0, end: 3 }]);
+    expect(findHitSpans(text, ['ハンカク'])).toEqual([{ start: 5, end: 9 }]);
   });
 
   it('重なる当たりは 1 つに束ねる(2 語が重なる所を二重に塗らない / 数えない)', () => {
@@ -108,11 +131,14 @@ describe('🔴 #1087: 整形された字(typographer)と打った字の差を吸
   );
 
   it.each([
-    ['Wait…', 'Wait...'],
     ['©', '(c)'],
     ['–', '--'],
   ])('置き換えは止めたので、別の記号 %s は打った %s では当たらない', (shown, typed) => {
     expect(findHitSpans(shown, [typed])).toEqual([]);
+  });
+
+  it('🔑 「…」は揃えると「...」になる(NFKC)ので、題名の絞りと同じく同じ字として当たる(束 B2)', () => {
+    expect(findHitSpans('Wait…', ['Wait...'])).toEqual([{ start: 0, end: 5 }]);
   });
 
   it('対照群: 整形されない字は 1 件 / 無関係は 0 件', () => {

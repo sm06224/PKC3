@@ -37,6 +37,8 @@ export class SearchRenderer {
   /** 打つ欄。⚠ 1 度だけ組む ── 一覧の描き直しで作り直さない(打ちかけを失わせない)。 */
   private input: HTMLInputElement | null = null;
   private note: HTMLElement | null = null;
+  /** 🔴 「除く語:m」の 1 行(台帳 #1852 の束 B2、依頼 259)。除く語として読んだ語があるときだけ出す。 */
+  private excluded: HTMLElement | null = null;
   /** 一覧を描き直す器(`contacts.ts` の `body` と同じ作法)。 */
   private body: HTMLElement | null = null;
   /**
@@ -67,11 +69,15 @@ export class SearchRenderer {
     head.append(title, input);
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'search-page-note');
+    const excluded = document.createElement('p');
+    excluded.setAttribute('data-pkc-field', 'search-page-excluded');
+    excluded.hidden = true;
     const body = document.createElement('div');
     body.setAttribute('data-pkc-field', 'search-page-body');
-    this.host.append(head, note, body);
+    this.host.append(head, note, excluded, body);
     this.input = input;
     this.note = note;
+    this.excluded = excluded;
     this.body = body;
     return body;
   }
@@ -100,6 +106,15 @@ export class SearchRenderer {
     this.last = print;
 
     if (this.note !== null) this.note.textContent = this.noteText(page);
+    /**
+     * 🔴 **除く語として読んだ語を言う**(台帳 #1852 の束 B2、依頼 259 A)。コマンドの `-m` のような語は「m を含むノートを除く」と
+     *   読まれ、結果がほとんど 0 件になるのに、画面のどこにも出ていなかった。書き方は変えず、どう読んだかを出す。
+     */
+    if (this.excluded !== null) {
+      const ex = page.query.trim() === '' ? [] : parseSearchTerms(page.query).exclude;
+      this.excluded.hidden = ex.length === 0;
+      this.excluded.textContent = ex.length === 0 ? '' : `除く語:${ex.join('、')}`;
+    }
     body.textContent = '';
     if (page.rows.length === 0) return;
     const list = document.createElement('ul');
@@ -171,7 +186,13 @@ export class SearchRenderer {
     const terms = parseSearchTerms(page.query);
     if (terms.include.length === 0 && terms.exclude.length > 0) return '除く語だけでは探せません。探す語も打ってください';
     if (page.rowsQuery !== page.query) return 'ノートを探しています…';
-    if (page.rows.length === 0) return `「${page.query}」に一致するノートはありません`;
+    if (page.rows.length === 0) {
+      // 🔴 除く語として読んだ語があるなら、字のまま探す書き方を添える(依頼 259 A。`-m` → `"-m"`)
+      const ex = terms.exclude[0];
+      return ex === undefined
+        ? `「${page.query}」に一致するノートはありません`
+        : `「${page.query}」に一致するノートはありません(字のまま探すには "-${ex}" と囲みます)`;
+    }
     // 🔴 並びは worker の引き方で決まる(3 字未満の語が混じるとノートの並び順)── 見出しはその 1 本から言う
     const byRelevance = isRelevanceOrdered(page.rowsQuery);
     if (page.truncated)

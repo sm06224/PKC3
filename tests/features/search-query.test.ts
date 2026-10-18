@@ -96,20 +96,27 @@ describe('planSearch(syntax: query)', () => {
  * 探す面に書き方を足しても**あちらは丸ごと 1 句のまま**でなければならない。
  * ⚠ 期待値は**字面で pin**(実装と同じ文法で組まない ── CLAUDE.md §1)。
  */
-describe('対照群: 左の列の欄(toFtsMatch / 既定の planSearch)は変わっていない', () => {
-  it('空白も - も " も、丸ごと 1 句として引く', () => {
+describe('対照群: 左の列の欄(toFtsMatch / 既定の planSearch)', () => {
+  it('toFtsMatch は空白も - も " も、丸ごと 1 句として引く(1 語のとき planSearch が通る口)', () => {
     expect(toFtsMatch('a b')).toBe('"a b"');
     expect(toFtsMatch('全文検索 -りんご')).toBe('"全文検索 -りんご"');
     expect(toFtsMatch('AND OR "x*')).toBe('"AND OR ""x*"');
     expect(toFtsMatch('  りんご  ')).toBe('"りんご"');
   });
 
-  it('既定の planSearch は plain(探す面の書き方が漏れていない)', () => {
-    expect(planSearch('全文検索 -りんご')).toEqual({ kind: 'fts', match: '"全文検索 -りんご"' });
+  it('🔴 既定の planSearch は plain: 空白で区切った語は全部を含む(依頼 194・260)が、`-` も `"` も読まない', () => {
+    expect(planSearch('全文検索 -りんご')).toEqual({ kind: 'fts', match: '"全文検索" AND "-りんご"' });
     expect(planSearch('全文検索 -りんご', { syntax: 'plain' })).toEqual({
       kind: 'fts',
-      match: '"全文検索 -りんご"',
+      match: '"全文検索" AND "-りんご"',
     });
+    // 全角の空白も区切り / 3 字未満の語が混じれば全語を LIKE で引く
+    expect(planSearch('会議録　議事録')).toEqual({ kind: 'fts', match: '"会議録" AND "議事録"' });
+    expect(planSearch('会議 議事録')).toEqual({ kind: 'like-terms', include: ['会議', '議事録'], exclude: [] });
+    // 字は揃えてから引く(全角英数・半角カナ・濁点の持ち方)
+    expect(planSearch('ＰＫＣ')).toEqual({ kind: 'fts', match: '"PKC"' });
+    expect(planSearch('ﾊﾝｶｸ')).toEqual({ kind: 'fts', match: '"ハンカク"' });
+    expect(planSearch('が')).toEqual({ kind: 'like', pattern: '%が%' });
     expect(planSearch('会議')).toEqual({ kind: 'like', pattern: '%会議%' });
     expect(planSearch('%_')).toEqual({ kind: 'like', pattern: '%\\%\\_%' });
     expect(planSearch('')).toEqual({ kind: 'none' });

@@ -105,6 +105,23 @@ export const ENTRY_ADDED_COLUMNS: readonly { readonly name: string; readonly ddl
    *   ── worker 側で `realm = 'user'` を書き写さない(CLAUDE.md §7)。
    */
   { name: 'realm', ddl: "TEXT NOT NULL DEFAULT 'user'" },
+  /**
+   * 🔴 **全文検索の索引に入れる字**(台帳 #1852 の束 B2、依頼 258・335・115-2・196・197)。
+   *
+   * 本文の検索は書いた字そのものではなく、**全角と半角・半角カナ・濁点の持ち方を揃え、隠したメモとリンクの宛先の字を
+   * 除いた字**を引く(`features/filter/search-text.ts` が唯一の作り手)。その字を持つ列が `title_f` / `body_f`。
+   * ⚠ **`NULL` = 揃えても書いた字と同じ**(`coalesce(body_f, body)` で読む)── 日本語だけのノートは本文を二重に持たない。
+   * ⚠ `task_total` と同じ作法:NOT NULL にしない / 既定値を入れない。旧ビルドは列を知らないので書かない(NULL のまま)。
+   */
+  { name: 'title_f', ddl: 'TEXT' },
+  { name: 'body_f', ddl: 'TEXT' },
+  /**
+   * 🔴 **上の 2 列の版**(新ビルドが書くたびに 1 つ進める数)。`NULL` = まだ作っていない / 作り直しが要る。
+   * 新ビルドは題名・本文を書くたびに必ず進める。旧ビルドは列を知らないので**進めない** ── だから「題名・本文が書き換わったのに
+   * 版が動かなかった」更新は旧ビルドの書き込みで、引き金(`FTS_DDL` の `entries_fold_stale`)が元の字を捨てて NULL に戻す
+   * (索引は書いた字のまま追い、次の起動が揃え直す)。部分索引 `idx_entries_foldwait` で、本文を読まずに「作り直しが要る行が有るか」が分かる。
+   */
+  { name: 'fold_rev', ddl: 'INTEGER' },
 ];
 
 /**
@@ -155,23 +172,64 @@ export const REVISION_ADDED_COLUMNS: readonly string[] = [
 ];
 
 /**
+ * 🔴 **索引の作り直しの進み具合の置き場**(`settings` の 1 行)。
+ *
+ * 台帳 #1852 の束 B2 で、索引の形を変えた(揃えた字を引く)。**作り直しは起動の後、本文の表示を止めずに塊で流す**ので、
+ * 「どこまで索引に入れたか」を引き金(純 SQL)が読めるよう、DB の中に持つ。
+ * - 行が **無い** = 作り直しは済んでいる(新しい DB / 済んだ DB)
+ * - 行が **在る** = その rowid までを索引に入れた(`-1` = まだ 1 件も入れていない)
+ * 🔑 引き金は **`rowid <= この値` の行にしか索引を触らない**。まだ入れていない行へ `'delete'` を撃つと索引が壊れる
+ *   (`syncFtsIndex` の注記 ── 2026-08-20 の起動不能と同じ型)ので、入れる前の行は引き金が黙る。
+ * ⚠ 旧ビルドも同じ引き金を読む(引き金は DB の中にある)── 行き来しても壊れない。
+ */
+export const FTS_PROGRESS_SCOPE = '__fts__';
+export const FTS_PROGRESS_KEY = 'built_upto';
+/** 引き金が読む「ここまで入れた」の式。⚠ 行が無ければ最大(= 済んでいる)。 */
+const FTS_BUILT_UPTO = `coalesce((SELECT CAST(v AS INTEGER) FROM settings WHERE scope = '${FTS_PROGRESS_SCOPE}' AND k = '${FTS_PROGRESS_KEY}'), 9007199254740991)`;
+
+/**
+ * 🔴 **索引の形の版**(`settings` の `__fts__` / `form`)。台帳 #1852 の束 B2 で 2 にした(1 = 書いた字をそのまま引く形 ──
+ * 版の行が無い DB は 1 と読む)。**索引に入れる字の作り方(`search-text.ts`)を変えたら上げる** ── 起動したとき、保存されている版と
+ * 違えば索引を捨てて作り直す(塊で流す。`storage-worker.ts` の `foldStep`)。
+ * ⚠ 旧ビルドはこの行を知らない(書かない・読まない)── 前の版の PKC3 が同じ保存領域を開いても壊れない。
+ */
+export const FTS_FORM_KEY = 'form';
+export const FTS_FORM_VERSION = '2';
+
+/** 索引の元の字を読む視点の名前。`entries_fts` はこれを内容表にする(`FTS_DDL`)。 */
+export const FTS_SOURCE_VIEW = 'entries_fts_src';
+
+/**
  * 🔴 **全文検索の索引と、その同期 trigger**(#181)。
  *
  * ⚠ **名前を付けて切り出してあるのは、作り直せるようにするため**(2026-08-20)。
  *   索引が壊れて `'rebuild'` でも直らないとき、storage worker は
  *   `DROP TABLE entries_fts` → ここを流し直す → `'rebuild'` で**作り直す**。
  *   ⚠ trigger は `entries` に付いているので drop では消えない(実測で確認)。
+ *
+ * ## 台帳 #1852 の束 B2:索引は「揃えた字」を持つ
+ *
+ * - 内容表は `entries` ではなく **視点 `entries_fts_src`**(`coalesce(title_f, title)` / `coalesce(body_f, body)`)。
+ *   外部内容(`content=`)のままなので、**本文を二重に持たない**(揃えた字が書いた字と違うノートだけ `body_f` が埋まる)。
+ * - 引き金は `title_f` / `body_f` の変更でも索引を書き直し、**入れる前の行(`rowid > built_upto`)には黙る**。
+ * - 旧ビルドが同じ DB を開いても、この引き金・視点・索引はそのまま読み書きできる(旧ビルドは `body_f` を知らないので、
+ *   その行は書いた字のまま索引に入る ── 検索が少し粗くなるだけで壊れない。次の新ビルドの起動が揃え直す)。
  */
 export const FTS_DDL: readonly string[] = [
+  `CREATE VIEW IF NOT EXISTS ${FTS_SOURCE_VIEW} AS
+     SELECT rowid AS rid, coalesce(title_f, title) AS title, coalesce(body_f, body) AS body FROM entries`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
-     title, body, content='entries', content_rowid='rowid', tokenize='trigram'
+     title, body, content='${FTS_SOURCE_VIEW}', content_rowid='rid', tokenize='trigram'
    )`,
-  `CREATE TRIGGER IF NOT EXISTS entries_fts_ai AFTER INSERT ON entries BEGIN
-     INSERT INTO entries_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+  `CREATE TRIGGER IF NOT EXISTS entries_fts_ai AFTER INSERT ON entries
+     WHEN new.rowid <= ${FTS_BUILT_UPTO} BEGIN
+     INSERT INTO entries_fts(rowid, title, body)
+       VALUES (new.rowid, coalesce(new.title_f, new.title), coalesce(new.body_f, new.body));
    END`,
-  `CREATE TRIGGER IF NOT EXISTS entries_fts_ad AFTER DELETE ON entries BEGIN
+  `CREATE TRIGGER IF NOT EXISTS entries_fts_ad AFTER DELETE ON entries
+     WHEN old.rowid <= ${FTS_BUILT_UPTO} BEGIN
      INSERT INTO entries_fts(entries_fts, rowid, title, body)
-       VALUES ('delete', old.rowid, old.title, old.body);
+       VALUES ('delete', old.rowid, coalesce(old.title_f, old.title), coalesce(old.body_f, old.body));
    END`,
   /**
    * 🔴 **題名と本文を書き換えたときだけ発火させる**(#984。2026-09-16)。
@@ -195,12 +253,66 @@ export const FTS_DDL: readonly string[] = [
    *
    * ⚠ **`CREATE TRIGGER IF NOT EXISTS` なので、ここを直しても既存の DB は変わらない**
    *   ── 古い引き金を落とす移行が `storage-worker.ts` に在る(対で効く)。
+   * 🔑 束 B2:索引の元の字(`title_f` / `body_f`)だけが変わる更新(作り直し)でも発火する。逆に、**索引に入る字が
+   *   変わらない更新(同じ本文の保存し直し・作り直しで揃えた字が書いた字と同じだった行)では索引を触らない**。
    */
+  `CREATE TRIGGER IF NOT EXISTS entries_fts_au AFTER UPDATE OF title, body, title_f, body_f ON entries
+     WHEN old.rowid <= ${FTS_BUILT_UPTO}
+      AND (coalesce(old.title_f, old.title) IS NOT coalesce(new.title_f, new.title)
+        OR coalesce(old.body_f, old.body) IS NOT coalesce(new.body_f, new.body)) BEGIN
+     INSERT INTO entries_fts(entries_fts, rowid, title, body)
+       VALUES ('delete', old.rowid, coalesce(old.title_f, old.title), coalesce(old.body_f, old.body));
+     INSERT INTO entries_fts(rowid, title, body)
+       VALUES (new.rowid, coalesce(new.title_f, new.title), coalesce(new.body_f, new.body));
+   END`,
+  /**
+   * 🔴 **旧ビルドが題名・本文だけを書き換えた行を、「作り直しが要る」に戻す**(束 B2)。
+   *
+   * 新ビルドの書き込みは必ず `fold_rev` を進めるので、**題名・本文が書き換わったのに `fold_rev` が動かない**更新は旧ビルドのもの。
+   * 次の新ビルドの起動が `fold_rev IS NULL` の行を揃え直す。
+   * ⚠ **触るのは `fold_rev` だけ**(`title_f` / `body_f` は触らない)── 触ると `entries_fts_au` が走り、先に発火した側と
+   *   「索引に入っている字」の見方が食い違って `'delete'` が合わなくなる(発火の順序は保証されない)。
+   *   索引は「そのとき列にある元の字」で自分と整合したまま ── 旧ビルドが書き換えた本文は、元の字を持つ行(全角などを含む行)に限り、
+   *   次の新ビルドの起動までは古い元の字で引かれる(壊れはしない。旧ビルド自身の検索で、そのノートの新しい本文が引けないだけ)。
+   */
+  `CREATE TRIGGER IF NOT EXISTS entries_fold_stale AFTER UPDATE OF title, body ON entries
+     WHEN new.fold_rev IS old.fold_rev AND new.fold_rev IS NOT NULL BEGIN
+     UPDATE entries SET fold_rev = NULL WHERE rowid = new.rowid;
+   END`,
+  /** 作り直しが要る行(`fold_rev IS NULL`)だけを引く部分索引。⚠ 本文を読まずに「有るか」が分かる。 */
+  `CREATE INDEX IF NOT EXISTS idx_entries_foldwait ON entries (cid) WHERE fold_rev IS NULL`,
+];
+
+/**
+ * 🔴 **束 B2 より前のビルドが作る、全文検索の索引の DDL(書いた字をそのまま引く形)**。
+ *
+ * ⚠ **製品のコードは使わない** ── 次の 2 つのためだけに在る(写しを test に置くと、本物と食い違った「旧い DB」を作る):
+ *   ① 旧い DB の再現(`schema-migration` / `fts-index-migration` の旧い形、移行の test)
+ *   ② **前の版の PKC3 が同じ保存領域を開いて読み書きしても壊れない**ことの test(前の版の読み方の再現)
+ * 🔑 前の版の `applySchema` は、この DDL を `IF NOT EXISTS` で流すだけ ── 新しい形の DB に対しては何も作り直さない。
+ */
+export const LEGACY_FTS_DDL: readonly string[] = [
+  `CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+     title, body, content='entries', content_rowid='rowid', tokenize='trigram'
+   )`,
+  `CREATE TRIGGER IF NOT EXISTS entries_fts_ai AFTER INSERT ON entries BEGIN
+     INSERT INTO entries_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+   END`,
+  `CREATE TRIGGER IF NOT EXISTS entries_fts_ad AFTER DELETE ON entries BEGIN
+     INSERT INTO entries_fts(entries_fts, rowid, title, body)
+       VALUES ('delete', old.rowid, old.title, old.body);
+   END`,
   `CREATE TRIGGER IF NOT EXISTS entries_fts_au AFTER UPDATE OF title, body ON entries BEGIN
      INSERT INTO entries_fts(entries_fts, rowid, title, body)
        VALUES ('delete', old.rowid, old.title, old.body);
      INSERT INTO entries_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
    END`,
+];
+
+/** 束 B2 より前の DDL 全体(`SCHEMA_DDL` の索引の部分を旧い形に差し替えたもの)。⚠ test 専用(`LEGACY_FTS_DDL` の注記)。 */
+export const LEGACY_SCHEMA_DDL = (): string[] => [
+  ...SCHEMA_DDL.filter((ddl) => !FTS_DDL.includes(ddl)),
+  ...LEGACY_FTS_DDL,
 ];
 
 export const SCHEMA_DDL: readonly string[] = [
@@ -226,6 +338,9 @@ export const SCHEMA_DDL: readonly string[] = [
      body_chars INTEGER,
      body_tags TEXT,
      realm TEXT NOT NULL DEFAULT 'user',
+     title_f TEXT,
+     body_f TEXT,
+     fold_rev INTEGER,
      body TEXT NOT NULL DEFAULT '',
      PRIMARY KEY (cid, lid)
    )`,

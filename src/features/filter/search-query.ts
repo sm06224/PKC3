@@ -14,6 +14,7 @@
  * ⇒ **3 文字以上は FTS、2 文字以下は LIKE**(LIKE は対照群で 2 字も引けると確認済み)。
  */
 import { FTS_MIN_CHARS } from '@adapter/platform/storage/schema';
+import { foldWidth, splitWords } from './fold-text';
 
 export type SearchPlan =
   | { kind: 'none' }
@@ -44,16 +45,26 @@ export function toLikePattern(query: string): string {
 }
 
 /**
- * 引き方を決める(左の列の欄 ── 丸ごと 1 句)。⚠ **空は「絞り込み無し」**であって
- * 「0 件」ではない(呼び側が全件を出す)。
+ * 引き方を決める(左の列の欄)。⚠ **空は「絞り込み無し」**であって「0 件」ではない(呼び側が全件を出す)。
+ *
+ * 🔴 **空白(全角も)で区切った語は「全部を含む」**(台帳 #1852 の束 B2、依頼 194・260・115-1 ── 「探す」画面と同じ)。
+ *   ただし `"…"` も `-語` も読まない(左の列の欄は打った字のまま。`-1` / `-メモ` を除外と読むと 0 件になる)。
+ * 🔴 **字は揃えてから引く**(依頼 258・335・115-2 ── 全角と半角・半角カナ・濁点の持ち方。索引側も同じ揃え方)。
+ * ⚠ 語が 1 つのときの返り値は従来のまま(`fts` / `like`)。2 語以上で 3 字未満が混じれば全語を LIKE で引く
+ *   (`like-terms`。trigram は 2 字を当てられないので、FTS と混ぜない)。
  * ⚠ 口は下の `planSearch`(既定 `syntax: 'plain'` = この関数)── 呼び側の綴りは変えない。
  */
-function planPlain(query: string): SearchPlan {
-  const trimmed = query.trim();
-  if (trimmed === '') return { kind: 'none' };
-  if (queryLength(trimmed) >= FTS_MIN_CHARS)
-    return { kind: 'fts', match: toFtsMatch(trimmed) };
-  return { kind: 'like', pattern: toLikePattern(trimmed) };
+function planPlain(query: string): QuerySearchPlan {
+  const words = splitWords(query);
+  if (words.length === 0) return { kind: 'none' };
+  if (words.length === 1) {
+    const w = words[0]!;
+    if (queryLength(w) >= FTS_MIN_CHARS) return { kind: 'fts', match: toFtsMatch(w) };
+    return { kind: 'like', pattern: toLikePattern(w) };
+  }
+  if (words.every((w) => queryLength(w) >= FTS_MIN_CHARS))
+    return { kind: 'fts', match: words.map(quoteFtsTerm).join(' AND ') };
+  return { kind: 'like-terms', include: words, exclude: [] };
 }
 
 /**
@@ -108,6 +119,23 @@ export function parseSearchTerms(query: string): SearchTerms {
   return { include, exclude };
 }
 
+/**
+ * 引く側の語。⚠ 索引と同じ揃え方(`foldWidth`)を通す(台帳 #1852 の束 B2、依頼 258・335)。
+ * `parseSearchTerms` は打った字のまま(画面に出す語・本文の塗りが読む)。
+ */
+export function foldedTerms(query: string): SearchTerms {
+  const { include, exclude } = parseSearchTerms(query);
+  return { include: include.map(foldWidth), exclude: exclude.map(foldWidth) };
+}
+
+/**
+ * 引く側の語(揃えた後)。⚠ `planSearch` が決める引き方と**同じ語**を返す ── 索引が使えない間の全走査(LIKE)が、
+ * 索引と同じ集合を返すため(`storage-worker.ts` の `searchPlanOf`)。
+ */
+export function plannedTerms(query: string, syntax: 'plain' | 'query'): SearchTerms {
+  return syntax === 'plain' ? { include: splitWords(query), exclude: [] } : foldedTerms(query);
+}
+
 /** 1 項を FTS5 の句にする(引用符は 2 つ重ねて escape ── `toFtsMatch` と同じ規則)。 */
 export function quoteFtsTerm(term: string): string {
   return `"${term.replace(/"/g, '""')}"`;
@@ -120,7 +148,7 @@ export function quoteFtsTerm(term: string): string {
  *   (全件が返る形になり、user の意図と違う)。
  */
 export function toFtsQuery(query: string): string | null {
-  const { include, exclude } = parseSearchTerms(query);
+  const { include, exclude } = foldedTerms(query);
   if (include.length === 0) return null;
   const positive = include.map(quoteFtsTerm).join(' AND ');
   if (exclude.length === 0) return positive;
@@ -134,22 +162,26 @@ export function toFtsQuery(query: string): string | null {
  */
 export type QuerySearchPlan =
   | SearchPlan
-  | { kind: 'like-terms'; include: string[]; exclude: string[] };
+  | {
+      kind: 'like-terms';
+      include: string[];
+      exclude: string[];
+    };
 
 /**
  * 引き方を決める。⚠ 既定(`plain`)は**左の列の欄**の規則そのまま(`planPlain`)──
  * 呼び側 2 か所(`searchEntries` / `listEntryMetas`)は綴りも型も変わらない。
  * `syntax: 'query'` は**探す面だけ**(`searchDetail`)。
  */
-export function planSearch(query: string): SearchPlan;
-export function planSearch(query: string, opts: { syntax: 'plain' }): SearchPlan;
+export function planSearch(query: string): QuerySearchPlan;
+export function planSearch(query: string, opts: { syntax: 'plain' }): QuerySearchPlan;
 export function planSearch(query: string, opts: { syntax: 'query' }): QuerySearchPlan;
 export function planSearch(
   query: string,
   opts: { syntax: 'plain' | 'query' } = { syntax: 'plain' },
 ): QuerySearchPlan {
   if (opts.syntax === 'plain') return planPlain(query);
-  const terms = parseSearchTerms(query);
+  const terms = foldedTerms(query);
   if (terms.include.length === 0) return { kind: 'none' };
   const all = [...terms.include, ...terms.exclude];
   if (all.every((t) => queryLength(t) >= FTS_MIN_CHARS)) {

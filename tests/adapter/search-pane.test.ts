@@ -233,6 +233,35 @@ describe('探す面(#680)', () => {
     expect(note()).toContain('に一致するノートはありません');
   });
 
+  /**
+   * 🔴 **除く語として読んだ語を、結果の上に 1 行で言う**(台帳 #1852 の束 B2、依頼 259 A)。
+   * 「-m」で始まる語をコマンドの引数のつもりで打つと、m を含むノートが除かれて 0 件になるのに、読み方がどこにも出ていなかった。
+   */
+  it('🔴 除く語として読んだ語があるとき「除く語:m」を出し、0 件なら字のまま探す書き方を添える(依頼 259)', async () => {
+    const { pane, type, note } = setup(() => ({ rows: [], truncated: false }));
+    const excluded = (): HTMLElement =>
+      pane.querySelector<HTMLElement>('[data-pkc-field="search-page-excluded"]')!;
+    // 前提: 語を打つ前は出ていない
+    expect(excluded().hidden, '打つ前から出ている').toBe(true);
+    type('commit -m');
+    await settle();
+    expect(excluded().hidden, '除く語を読んだのに出ていない').toBe(false);
+    expect(excluded().textContent).toBe('除く語:m');
+    expect(note()).toContain('字のまま探すには "-m" と囲みます');
+    // 対照群: 除く語が無ければ 1 行は消え、添え書きも出ない
+    type('commit');
+    await settle();
+    expect(excluded().hidden, '除く語が無いのに出ている').toBe(true);
+    expect(note()).not.toContain('字のまま探すには');
+    // 複数は並べる / 引用符で囲めば除く語ではない(字のまま探す)
+    type('a -b -c');
+    await settle();
+    expect(excluded().textContent).toBe('除く語:b、c');
+    type('commit "-m"');
+    await settle();
+    expect(excluded().hidden, '引用符で囲んだ語を除く語と読んだ').toBe(true);
+  });
+
   it('⚠ 空にしたら頼まず、結果も空に戻る', async () => {
     const { type, rows, searchDetail, note } = setup(() => ({
       rows: [row('n1', '会議メモ', 'k')],

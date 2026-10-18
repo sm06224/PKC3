@@ -19,6 +19,7 @@ import sqlite3InitModule, { type Database } from '@sqlite.org/sqlite-wasm';
 import {
   DB_SCHEMA_VERSION,
   ENTRY_ADDED_COLUMNS,
+  LEGACY_SCHEMA_DDL,
   SCHEMA_DDL,
 } from '../../src/adapter/platform/storage/schema';
 import {
@@ -34,7 +35,8 @@ import { decodeTags } from '../../src/features/flavor/tags';
  */
 function oldSchemaDdl(drop?: readonly string[]): string[] {
   const added = drop ?? ENTRY_ADDED_COLUMNS.map((c) => c.name);
-  return SCHEMA_DDL
+  // 🔑 台帳 #1852 の束 B2 より前の索引の形(書いた字をそのまま引く)── 旧い DB はその形で作られている
+  return LEGACY_SCHEMA_DDL()
     // ⚠ 後付け列を**使う**もの(索引など)は、旧い DB にはそもそも作れない
     .filter((ddl) => !added.some((n) => new RegExp(`\\b${n}\\b`).test(ddl) && /INDEX/.test(ddl)))
     .map((ddl) => {

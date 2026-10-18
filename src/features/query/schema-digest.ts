@@ -53,6 +53,12 @@ const ftsMatch = (names: string): string =>
     `      and v.sql ${FTS_VIRTUAL_SQL_LIKE}`,
     `      and m.name in (${names}))`,
   ].join('\n');
+/**
+ * 🔴 **本文検索が「索引に入れる字」を読む視点の名前**(台帳 #1852 の束 B2)。裏方なので図・DuckDB へは出さない。
+ * ⚠ 綴りは `schema.ts` の `FTS_SOURCE_VIEW` の写し(features 層から adapter 層は import できない)── 揃っているかは
+ *   `tests/adapter/search-fold-1852.test.ts` が両方を読んで検める。
+ */
+export const FTS_CONTENT_VIEW = 'entries_fts_src';
 const SHADOW_NAMES = FTS_SHADOW_SUFFIXES.map((x) => `v.name || '${x}'`).join(', ');
 export const NOT_FTS_SHADOW = ftsMatch(SHADOW_NAMES);
 
@@ -62,7 +68,7 @@ export const NOT_FTS_SHADOW = ftsMatch(SHADOW_NAMES);
  *   写しだけ「裏方を外す」判定を持たず、本文検索の影の表が全部 DuckDB へ写っていた)。
  * 🔑 影の表に**仮想表本体も足して**外す(図・DuckDB へ写す側。内蔵の sqlite で引く案内は {@link NOT_FTS_SHADOW})。
  */
-export const NOT_FTS_BACKSTAGE = ftsMatch(`v.name, ${SHADOW_NAMES}`);
+export const NOT_FTS_BACKSTAGE = ftsMatch(`v.name, ${SHADOW_NAMES}, '${FTS_CONTENT_VIEW}'`);
 
 /**
  * 🔴 **FTS5 の仮想表本体の名前を引く 1 文**(DuckDB へは写さない ── 写さなかったと言うために要る。着地後レビュー 💭8)。

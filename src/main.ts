@@ -1728,7 +1728,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     usersOfAsset: async (assetKey) =>
       (
-        (await client.request({ op: 'searchEntries', cid, query: assetKey, limit: 8 })) as {
+        (await client.request({ op: 'searchEntries', cid, query: assetKey, limit: 8, raw: true })) as {
           lids: string[];
         }
       ).lids,

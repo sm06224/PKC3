@@ -25,12 +25,21 @@ import { foldText } from './fold-text';
  * 🔴 揃え方は `fold-text.ts` の 1 本(題名とタグで共有)。⚠ 全角の空白は半角になってから落ちる。
  */
 export function normalizeQuery(query: string): string {
-  return foldText(query).trim();
+  // 🔴 空白(全角を含む)の連なりは半角 1 つへ ── 語の区切りは `matchesTitle` が半角の空白で読む(依頼 194・260・115-1)
+  return foldText(query).replace(/\s+/g, ' ').trim();
 }
 
-/** ⚠ `query` は **`normalizeQuery` 済み**を渡す(1 打鍵ごとに n 回 trim しない)。題名のほうは比べるたびに揃える。 */
+/**
+ * ⚠ `query` は **`normalizeQuery` 済み**を渡す(1 打鍵ごとに n 回 trim しない)。題名のほうは比べるたびに揃える。
+ * 🔴 **空白で区切った語は「全部を含む」**(依頼 194・260・115-1 ── 「探す」画面と同じ。全角の空白も区切り)。
+ *   題名だけを見る即時の絞りで、本文の当たり(`bodyHits`)は SQL 側が同じ区切りで返す(語ごとに題名か本文)。
+ */
 export function matchesTitle(title: string, normalizedQuery: string): boolean {
-  return normalizedQuery === '' || foldText(title).includes(normalizedQuery);
+  if (normalizedQuery === '') return true;
+  const folded = foldText(title);
+  if (!normalizedQuery.includes(' ')) return folded.includes(normalizedQuery);
+  for (const w of normalizedQuery.split(' ')) if (!folded.includes(w)) return false;
+  return true;
 }
 
 /**
