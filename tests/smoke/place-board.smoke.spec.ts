@@ -328,6 +328,37 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
     .not.toBe(startBefore);
 
   /**
+   * 🔴 **動かした直後、画面の下の「元に戻す」で付箋が元の座標へ戻る**(依頼 118-2 / 束 Q1)。
+   * ⚠ 片道にしない ── 間違えてドラッグしても、押すと動かす前の本文(x=120 y=40)へ戻る。
+   * 🔑 新しい起動は増やさない ── 上で動かした直後の続きで押す。戻したあと**同じ動かし方をやり直して**
+   *   以降の筋書き(p1 が (220,100) に居る前提)へ戻す。
+   */
+  const placeUndo = page.locator('[data-pkc-field="status-undo"]');
+  await expect(placeUndo, '付箋を動かしたのに「元に戻す」が出ない').toBeVisible();
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('付箋を動かしました');
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect(p1, '「元に戻す」で付箋の x が戻らない').toHaveAttribute('data-pkc-x', '120', {
+    timeout: 5000,
+  });
+  await expect(p1, '「元に戻す」で付箋の y が戻らない').toHaveAttribute('data-pkc-y', '40');
+  // 画面の座標でも戻っている(本文の数字だけでなく、実際に置かれた位置)
+  const p1Back = (await p1.boundingBox())!;
+  const p2Now = (await p2.boundingBox())!;
+  expect(Math.round(p2Now.x - p1Back.x), '戻したあとの付箋が元の位置にない').toBe(460 - 120);
+  // やり直し: 同じ動かし方で (220,100) へ(以降の筋書きの前提)
+  const gAgain = (await page.locator('#p1 [data-pkc-field="place-grip"]').boundingBox())!;
+  await page.mouse.move(gAgain.x + gAgain.width / 2, gAgain.y + gAgain.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(gAgain.x + gAgain.width / 2 + 100, gAgain.y + gAgain.height / 2 + 60, {
+    steps: 5,
+  });
+  await page.mouse.up();
+  await expect(p1, '戻したあとの動かし直しが書かれない').toHaveAttribute('data-pkc-x', '220', {
+    timeout: 5000,
+  });
+  await page.mouse.move(hostBox.x + 40, hostBox.y + hostBox.height - 12);
+
+  /**
    * 🔴 **形を変えても、掴む口は押せる**(#530 案 A。user 裁定 2026-09-14)。
    *
    * ⚠ **ここが実ブラウザでしか見られない所である。** 掴む口(右上)と大きさの
@@ -482,6 +513,45 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   await blockMenu.locator('[data-pkc-action="raise-place"]').click();
   await expect
     .poll(async () => (await zOf(p1)) > (await zOf(p2)), { message: '前へ出しても z が上がらない', timeout: 5000 })
+    .toBe(true);
+
+  /**
+   * 🔴 **「後ろへ送る」**(依頼 118-1 / 束 Q1)── 前へ出した p1 を右クリック →「後ろへ送る」で、重なりの順(z)が入れ替わる。
+   * ⚠ 見るのは本文から描き直された `data-pkc-z`(見た目だけ変えた実装では真にならない)。
+   * ⚠ すでに一番後ろの付箋には「後ろへ送る」が出ない(押しても本文が変わらない口を作らない)── p2 が後ろ → 一番後ろになった p1 に出ない。
+   *   対照群: 前に居る p2 には出る(この観測点が死んでいない証拠)。
+   * 🔑 新しい起動は増やさない。最後に「前へ出す」で p1 を前へ戻し、以降の筋書きの前提を保つ。
+   */
+  await p1.click({ button: 'right' });
+  await expect(
+    blockMenu.locator('[data-pkc-action="lower-place"]'),
+    '一番前の付箋なのに「後ろへ送る」が出ない',
+  ).toHaveText('後ろへ送る');
+  await blockMenu.locator('[data-pkc-action="lower-place"]').click();
+  await expect
+    .poll(async () => (await zOf(p1)) < (await zOf(p2)), {
+      message: '後ろへ送っても z の順が入れ替わらない',
+      timeout: 5000,
+    })
+    .toBe(true);
+  await p1.click({ button: 'right' });
+  await expect(blockMenu, '付箋の右クリックで一覧が出ない').toBeVisible();
+  await expect(
+    blockMenu.locator('[data-pkc-action="lower-place"]'),
+    'すでに一番後ろの付箋に「後ろへ送る」が出ている',
+  ).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await p2.click({ button: 'right' });
+  await expect(
+    blockMenu.locator('[data-pkc-action="lower-place"]'),
+    '前に居る付箋には「後ろへ送る」が出るはず(対照群)',
+  ).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  // 戻す(片道にしない): p1 を前へ出す
+  await p1.click({ button: 'right' });
+  await blockMenu.locator('[data-pkc-action="raise-place"]').click();
+  await expect
+    .poll(async () => (await zOf(p1)) > (await zOf(p2)), { message: '前へ出し直せない', timeout: 5000 })
     .toBe(true);
 
   /**
