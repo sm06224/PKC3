@@ -33,23 +33,19 @@ const ID_PROBE = /entry:|asset:|pkc:\/\//i;
 function withoutLinkIds(text: string, depth = 0): string {
   if (depth > 4 || !ID_PROBE.test(text)) return text;
   const edits: Array<[number, number, string]> = [];
-  let floor = 0;
   for (const site of scanLinks(text).sites) {
     if (!ID_DEST.test(site.dest.trim())) continue;
     if (site.kind === 'inline' && site.labelStart >= 0) {
       const from = site.image && text[site.labelStart - 1] === '!' ? site.labelStart - 1 : site.labelStart;
-      if (from < floor) continue; // 入れ子の内側は外側の見出しの中で処理する
       // 見出しの中にも別のリンクが入りうる(`[![x](asset:a)](entry:b)`)── 中も同じ規則で
       edits.push([from, site.end, withoutLinkIds(text.slice(site.labelStart + 1, site.start), depth + 1)]);
-      floor = site.end;
     } else {
-      if (site.destStart < floor) continue;
       edits.push([site.destStart, site.destEnd, '']);
-      floor = site.destEnd;
     }
   }
   if (edits.length === 0) return text;
-  edits.sort((a, b) => a[0] - b[0]);
+  // 入れ子は外側だけ残す(内側は外側の見出しの中で処理済み)
+  edits.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
   let out = '';
   let at = 0;
   for (const [s, e, r] of edits) {
