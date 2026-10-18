@@ -124,6 +124,24 @@ test('🔴 札の × で外れ、本文からも消える (#494)', async ({ page
   await page.waitForSelector('[data-pkc-action="start-edit"]');
 
   /**
+   * 🔴 台帳 #1852 U1 残り・依頼 317: 右の札「追加」を押すと、左の欄に `#追加` が入り、そのタグが付いたノートだけが並ぶ。
+   * 🔑 対照群 = 「追加」の字を本文に含むだけのノート(札は無い)。直す前は部分一致でこれも並んだ。道中に足す(起動は増やさない)。
+   */
+  await makeNote(page, '字だけの言及', '追加の話をするだけのノート\n');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
+  await expect(rows.filter({ hasText: '字だけの言及' }), '前提: 対照のノートが一覧に無い').toHaveCount(1);
+  await rows.filter({ hasText: '長いタグ' }).click();
+  await expect(page.locator(CHIPS).filter({ hasText: '追加' }), '前提: 選んだノートに札が出ない').toHaveCount(1);
+  await clickReal(page, '[data-pkc-region="inspector"] [data-pkc-field="inspector-tag-find"][data-pkc-tag="追加"]');
+  await expect(page.locator('[data-pkc-field="entry-filter"]'), '札を押しても左の欄が #タグ の形にならない').toHaveValue('#追加');
+  await expect(rows.filter({ hasText: '長いタグ' }), 'そのタグのノートが並んでいない').toHaveCount(1);
+  await expect(rows.filter({ hasText: '字だけの言及' }), '字を含むだけのノートまで並んでいる').toHaveCount(0);
+  await expect(rows.filter({ hasText: 'メモ' }), '無関係のノートが並んでいる').toHaveCount(0);
+  // 片道にしない ── 欄を空にすれば元の一覧に戻る(以降の道中は絞り込み無しで続く)
+  await page.locator('[data-pkc-field="entry-filter"]').fill('');
+  await expect(rows.filter({ hasText: '字だけの言及' }), '欄を空にしても一覧が戻らない').toHaveCount(1);
+
+  /**
    * 🔴 束 H1: タグの前書きが読み違える形(複数行の `[ ]`)のとき、その場で言い、足し外しの欄を出さない。
    * ⚠ 対照群は上の普通のノート(欄が出ている)。
    */
