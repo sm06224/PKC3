@@ -98,6 +98,76 @@ describe('Dispatcher.batch', () => {
     expect(log[log.length - 1]).toBe('state');
   });
 
+  it('🔴 通知中に listener が dispatch しても、全 listener が受け取る state は単調で、最後は最新', () => {
+    const d = new Dispatcher();
+    const a: (string | null)[] = [];
+    const b: (string | null)[] = [];
+    d.onState((s) => {
+      a.push(s.error);
+      if (s.error === 'c') d.dispatch(fail('after'));
+    });
+    d.onState((s) => b.push(s.error));
+    d.batch(() => {
+      d.dispatch(fail('b'));
+      d.dispatch(fail('c'));
+    });
+    expect(d.getState().error).toBe('after');
+    // 後ろの listener にも 'c' が先に届き、その後で 'after'(古い state が後から届く逆転が無い)
+    expect(b).toEqual(['c', 'after']);
+    expect(a).toEqual(['c', 'after']);
+  });
+
+  it('batch の外でも同じ(対照群): 通知中の dispatch は順序を保つ', () => {
+    const d = new Dispatcher();
+    const b: (string | null)[] = [];
+    d.onState((s) => {
+      if (s.error === 'c') d.dispatch(fail('after'));
+    });
+    d.onState((s) => b.push(s.error));
+    d.dispatch(fail('c'));
+    expect(b).toEqual(['c', 'after']);
+  });
+
+  it('fn の例外が先にあるとき、通知側の例外は元の例外を隠さない', () => {
+    const d = new Dispatcher();
+    d.onState(() => {
+      throw new Error('listener');
+    });
+    const orig = console.error;
+    const logged: unknown[] = [];
+    console.error = (...x: unknown[]) => void logged.push(x);
+    try {
+      expect(() =>
+        d.batch(() => {
+          d.dispatch(fail('a'));
+          throw new Error('boom');
+        }),
+      ).toThrow('boom');
+    } finally {
+      console.error = orig;
+    }
+    expect(logged.length, '通知の例外は console へ出す').toBe(1);
+    // draining が戻っている(次の dispatch が積まれたままにならない)
+    const d2 = new Dispatcher();
+    d2.onState(() => {
+      throw new Error('listener');
+    });
+    expect(() => d2.batch(() => d2.dispatch(fail('a')))).toThrow('listener');
+    expect(() => d2.dispatch(fail('b'))).toThrow('listener');
+    expect(d2.getState().error).toBe('b');
+  });
+
+  it('listener の中から呼んだ batch は壊れない(通常どおり通知される)', () => {
+    const d = new Dispatcher();
+    const seen: (string | null)[] = [];
+    d.onState((s) => {
+      seen.push(s.error);
+      if (s.error === 'a') d.batch(() => d.dispatch(fail('inner')));
+    });
+    d.dispatch(fail('a'));
+    expect(seen).toEqual(['a', 'inner']);
+  });
+
   it('戻り値を返す', () => {
     const d = new Dispatcher();
     expect(d.batch(() => 42)).toBe(42);

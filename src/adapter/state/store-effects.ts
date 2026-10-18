@@ -1023,12 +1023,11 @@ export function connectStoreEffects(
   const queuedScans = new Set<string>();
 
   const rescanColumnSmarts = (): void => {
-    dispatcher.batch(() => {
-      for (const [smartLid, hit] of dispatcher.getState().smartHits) {
-        if (hit.failed || !needsRescan(hit.spec)) continue;
-        dispatcher.dispatch({ type: 'SMART_RESCAN', lid: smartLid });
-      }
-    });
+    // ⚠ `SMART_RESCAN` は state を変えない(走査の event を出すだけ)ので、batch で囲んでも通知は減らない ── 囲まない
+    for (const [smartLid, hit] of dispatcher.getState().smartHits) {
+      if (hit.failed || !needsRescan(hit.spec)) continue;
+      dispatcher.dispatch({ type: 'SMART_RESCAN', lid: smartLid });
+    }
   };
 
   /**
@@ -3721,19 +3720,38 @@ export function connectStoreEffects(
                     : `${missing} 件はゴミ箱から消えていたので、元に戻せませんでした`,
               });
             }
-            dispatcher.batch(() => {
-              for (const lid of ev.lids) {
-                const row = rows.find((r) => r.entry_lid === lid);
-                if (!row) continue;
-                const entryOrder = ev.orders?.[lid];
-                dispatcher.dispatch({
-                  type: 'RESTORE_TRASH',
-                  entryLid: lid,
-                  revId: row.id,
-                  ...(entryOrder !== undefined ? { entryOrder } : {}),
-                });
+            /**
+             * 🔴 **同じ ID のノートが既にある分は、先に数えて 1 回で言う**(レビュー指摘)── 1 件ずつ撃つと
+             *   reducer が件数ぶん `error` を上書きし、
+             *   メッセージ集積地に最後の 1 件しか残らない。⚠ 断る条件は reducer の衝突門(`RESTORE_TRASH`)と同じ
+             *   (`entryMetas.has`)。reducer 側の門は直撃ち(ゴミ箱の画面の「戻す」)の守りとして残す。
+             */
+            const present = dispatcher.getState().entryMetas;
+            const collided: string[] = [];
+            // ⚠ `RESTORE_TRASH` は state を変えない(復元の要求 event を出すだけ。state が動くのは書込が終わった後の
+            //   `ENTRY_RESTORED`)ので、batch で囲んでも通知は減らない ── 囲まない
+            for (const lid of ev.lids) {
+              const row = rows.find((r) => r.entry_lid === lid);
+              if (!row) continue;
+              if (present.has(lid)) {
+                collided.push(present.get(lid)?.title ?? '(無題)');
+                continue;
               }
-            });
+              const entryOrder = ev.orders?.[lid];
+              dispatcher.dispatch({
+                type: 'RESTORE_TRASH',
+                entryLid: lid,
+                revId: row.id,
+                ...(entryOrder !== undefined ? { entryOrder } : {}),
+              });
+            }
+            if (collided.length > 0) {
+              const shown = collided.slice(0, 5).join(' / ');
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `${collided.length} 件は同じ ID のノートがあるため戻せませんでした:${shown}${collided.length > 5 ? ' ほか' : ''}`,
+              });
+            }
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({

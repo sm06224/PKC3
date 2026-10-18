@@ -9541,6 +9541,11 @@ const ACTIONS: Record<string, ActionHandler> = {
          * 🔑 書き換えは取り込みと同じ 1 本(`remapEntryLids`)── `entry:<lid>` の lid の部分だけを写す。
          */
         const copied = new Map(steps.map((x) => [x.sourceLid, x.lid] as const));
+        /**
+         * 🔴 **N 件の作成は 1 回の通知にまとめる**(件数ぶん表を作り直さない)。
+         * 🔑 副作用として、`opened-effects`(最近開いた物)へは**最後に選ばれた 1 件だけ**が入る
+         *   (途中の選びは通知されない)── コピー先で最後に選ばれた 1 件だけが一覧に入るのが自然なので、それでよい。
+         */
         dispatcher.batch(() => {
           for (const step of steps) {
             const raw = bodies.get(step.sourceLid);
