@@ -142,3 +142,23 @@ describe('attachmentSavedAt ── 添付の中身が最後に保存された時
     expect(attachmentSavedAt('# 添付\n', 'いつか')).toBeNull();
   });
 });
+
+describe('一時保存の対象外の案内(台帳 #1852 束 T1、依頼 241 B)', () => {
+  it('🔴 Office へ回す形式のうち、窓が一時保存を書ける形式(.docx / .odt)以外は全部、案内が出る', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { OFFICE_LAUNCH_EXTS } = await import('../../src/features/office/office-launch');
+    const { needsNoShadowNote, NO_SHADOW_EXTS } = await import('../../src/features/office/office-shadow');
+    // 期待値は窓の原文(書ける形式の表)から作る ── 実装の配列を種にしない
+    const win = readFileSync('public/office/office-shadow.js', 'utf-8');
+    const table = /var SHADOW_FILTERS = \{([^}]*)\}/.exec(win);
+    expect(table, '窓の「書ける形式」の表が読めない(綴りが変わった)').not.toBeNull();
+    const writable = [...(table![1] ?? '').matchAll(/\b([a-z]+):/g)].map((m) => `.${m[1]}`);
+    expect(writable.sort(), '前提: 窓が書ける形式は .docx / .odt').toEqual(['.docx', '.odt']);
+    const silent = OFFICE_LAUNCH_EXTS.filter((e) => !writable.includes(e) && !needsNoShadowNote(`文書${e}`));
+    expect(silent, '一時保存されないのに案内が出ない形式がある').toEqual([]);
+    for (const e of writable) expect(needsNoShadowNote(`文書${e}`), `${e} は一時保存される`).toBe(false);
+    expect([...NO_SHADOW_EXTS].sort(), '案内の対象に、一時保存される形式が混じった').toEqual(
+      OFFICE_LAUNCH_EXTS.filter((e) => !writable.includes(e)).sort(),
+    );
+  });
+});

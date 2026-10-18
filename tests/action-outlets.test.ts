@@ -76,6 +76,8 @@ const UNRESOLVED: readonly string[] = [
    *   出口は在るが、字では追えない)。
    */
   'cancel-asr-install',
+  // 台帳 #1852 束 T1(依頼 156 ②)── Office 一式の取り込みをやめる。押し所は設定の節の `button()` ヘルパーで組む(`cancel-asr-install` と同じ)
+  'cancel-office-install',
   'install-asr-part',
   'remove-asr-part',
   'choose-office-pack',
@@ -228,6 +230,12 @@ const OBJECT_LONE: readonly string[] = [
    *   「体系の外で足した 2 つ」と読む(`browse-archive` / `capture-play` と同じ扱い)。
    */
   'open-repeat-menu',
+  /**
+   * 🔴 **台帳 #1852 束 S1(依頼 128-2 A)で足した 1 件** ── 予定の札の「⋯」。`open-repeat-menu` と同じく、
+   *   出口は**予定の札そのもの**(`task-card.ts` 1 本。左の列の「予定」タブと別窓の両方が描く)。
+   *   ⚠ #582 の「増やさない」に触れていない(札を畳む・狭くすると消える害は、この札の側が持つ)。
+   */
+  'open-task-menu',
   /**
    * 🔴 **スマホ用画面の 2 つは「1 か所しかない」が設計である**(#632 段①)。
    *

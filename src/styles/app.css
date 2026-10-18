@@ -6692,9 +6692,9 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  */
 [data-pkc-region='schedule-cards'] > [data-pkc-entry] {
   display: grid;
-  /* ⚠ 3 列目は「予定から外す」(#498)── 幅は `auto` なので、
+  /* ⚠ 3 列目は「予定から外す」(#498)、4 列目は「⋯」(依頼 128-2)── 幅は `auto` なので、
    *    出ていないときも**同じ場所**が空く(字が動かない) */
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
   gap: 0 var(--s2);
   align-items: baseline;
   padding: 2px var(--s2);
@@ -6779,6 +6779,47 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-region='schedule-cards'] [data-pkc-field='task-unschedule']:hover {
   color: var(--danger, #b3261e);
+}
+/* 🔴 **予定のメニューを開く「⋯」**(台帳 #1852 束 S1、依頼 128-2 A)。スマホの長押しはドラッグだけにしたので、
+ *   メニューへはここから入る。薄いが**見える**(隠さない ── 見つけられない物は無いのと同じ)。指で押せる大きさ(24px 以上) */
+[data-pkc-field='task-menu'] {
+  display: none;
+}
+[data-pkc-region='schedule-cards'] [data-pkc-field='task-menu'],
+[data-pkc-field='schedule-day-lane'] [data-pkc-field='task-menu'] {
+  display: block;
+  box-sizing: border-box;
+  min-width: 24px;
+  min-height: 24px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 var(--s1);
+  line-height: 1;
+  font-size: var(--btn-fs);
+  opacity: 0.6;
+}
+[data-pkc-region='schedule-cards'] [data-pkc-field='task-menu'] {
+  grid-column: 4;
+  grid-row: 1;
+  align-self: center;
+}
+/* 「日」の札は絶対配置で狭い ── 右端に重ねて、字を隠さないよう札の右に余白を空ける */
+[data-pkc-field='schedule-day-lane'] [data-pkc-field='task-menu'] {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  max-height: 24px;
+}
+[data-pkc-field='task-menu']::before {
+  content: '\22EF';
+}
+[data-pkc-field='task-menu']:hover,
+[data-pkc-field='task-menu']:focus-visible {
+  opacity: 1;
+  color: var(--fg);
 }
 
 /* ── 予定の「日」(#855 段 A-1)────────────────────────────
@@ -6914,6 +6955,10 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 /* 出どころのノート名は狭い札では出さない(高さ 20px に収める) */
 [data-pkc-field='schedule-day-lane'] [data-pkc-field='note'] {
   display: none;
+}
+/* 🔴 「⋯」を右端に置くぶん、字は右に余白を空ける(依頼 128-2。`task-menu` の規則は上) */
+[data-pkc-field='schedule-day-lane'] > [data-pkc-entry] {
+  padding-right: 26px;
 }
 
 /* ── 予定の「週」(#855 段 A-2)────────────────────────────
@@ -9920,6 +9965,12 @@ h3[data-pkc-section] {
   white-space: nowrap;
   font-weight: 600;
 }
+/* 🔴 題名の無いノートの「(題名なし)」は薄く(台帳 #1852 束 S1、依頼 104-3)。色は既存の `--muted` */
+[data-pkc-field='phone-title'][data-pkc-empty],
+[data-pkc-field='phone-return-title'][data-pkc-empty] {
+  color: var(--muted);
+  font-weight: 400;
+}
 [data-pkc-region='phone-bar'] button {
   flex: 0 0 auto;
   /* ⚠ 指で押す所は狭くしない(段② で触る端末の最小丈をまとめて見る) */
@@ -10797,6 +10848,7 @@ h3[data-pkc-section] {
   [data-pkc-print-range] [data-pkc-field='schedule-weekview-head'] button,
   [data-pkc-print-range] [data-pkc-field='schedule-monthview-head'] button,
   [data-pkc-print-range] [data-pkc-field='task-unschedule'],
+  [data-pkc-print-range] [data-pkc-field='task-menu'],
   [data-pkc-print-range] [data-pkc-field='task-resize'],
   [data-pkc-print-range] .pkc-task-checkbox {
     display: none !important;

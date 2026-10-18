@@ -184,7 +184,7 @@ export function buildOfficeEntry(
 }
 
 /**
- * 「Office で開く」の隣に出す 1 行(.xlsx / .pptx は一時保存の対象外)。**出さないときは `null`**。
+ * 「Office で開く」の隣に出す 1 行(.docx / .odt 以外は一時保存の対象外)。**出さないときは `null`**。
  * ⚠ 出すのは押せる入口(`open`)のときだけ ── 使えない・未設置のときは開けないので言う意味が無い。
  */
 export function buildOfficeSaveNote(

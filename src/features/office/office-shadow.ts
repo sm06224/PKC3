@@ -122,14 +122,18 @@ export const SHADOW_OPENED_NOTICE =
 export const SHADOW_GONE_NOTICE = '一時保存した内容を読めませんでした。保存済みの版で開きます';
 
 /**
- * 🔴 **一時保存の対象外の形式には、押す前に 1 行で言う**(Gemini 依頼 61-3、#1163 のコメント 6143814406 の回答 A)。
+ * 🔴 **一時保存の対象外の形式には、押す前に 1 行で言う**(Gemini 依頼 61-3 の回答 A、台帳 #1852 束 T1 の依頼 241 で全形式へ広げた)。
  * 一時保存するのは .docx / .odt だけ(マニュアル「一時保存した内容を、次に開くときに戻せます」)。
- * ⚠ .ods も対象外だが、案内の字は回答の書き方(.xlsx / .pptx)に合わせる。
+ * 🔑 依頼 61-3 は .xlsx / .pptx の名指しだったが、依頼 241 は「Word と ODT 以外の文書」── .doc / .xls / .ppt / .ods / .odp / .rtf も
+ *   同じく対象外なのに黙っていたので、字を「.docx / .odt 以外」に揃えた(後の番号の回答に従う)。
  */
-export const NO_SHADOW_NOTE = '.xlsx / .pptx は一時保存の対象外です。こまめに保存してください';
+export const NO_SHADOW_NOTE = '.docx / .odt 以外の形式は一時保存の対象外です。こまめに保存してください';
 
-/** この添付は、一時保存の対象外として 1 行の案内を出す形式か(.xlsx / .pptx)。 */
+/** 一時保存の対象外の Office 形式(拡張子)。⚠ 一時保存できる形式(窓の `SHADOW_FILTERS`)を引いた残り ── test が窓の原文と突合する。 */
+export const NO_SHADOW_EXTS: readonly string[] = ['.xlsx', '.pptx', '.doc', '.xls', '.ppt', '.ods', '.odp', '.rtf'];
+
+/** この添付は、一時保存の対象外として 1 行の案内を出す形式か(.docx / .odt 以外の Office 形式)。 */
 export function needsNoShadowNote(fileName: string): boolean {
   const name = fileName.trim().toLowerCase();
-  return name.endsWith('.xlsx') || name.endsWith('.pptx');
+  return NO_SHADOW_EXTS.some((ext) => name.endsWith(ext));
 }

@@ -88,7 +88,7 @@ describe('掴んで大きさを変える(#497)', () => {
     expect(
       shellOf(root).style.getPropertyValue('--pkc-pane-sidebar'),
       '画面に反映されていない',
-    ).toBe('clamp(0px, 300px, 45vw)');
+    ).toBe('clamp(0px, 300px, min(45vw, max(240px, calc((100vw - 500px) / 2))))');
     expect(appPaneSizes.get().sidebar, '覚えていない').toBe(300);
   });
 
@@ -134,7 +134,7 @@ describe('掴んで大きさを変える(#497)', () => {
     expect(
       shellOf(root).style.getPropertyValue('--pkc-pane-sidebar'),
       '畳んだときに画面の値まで捨てた',
-    ).toBe('clamp(0px, 300px, 45vw)');
+    ).toBe('clamp(0px, 300px, min(45vw, max(240px, calc((100vw - 500px) / 2))))');
   });
 
   /**
@@ -160,14 +160,14 @@ describe('掴んで大きさを変える(#497)', () => {
     expect(
       shellOf(root).style.getPropertyValue('--pkc-pane-sidebar'),
       '前提が崩れている(途中の幅が置かれていない)',
-    ).toBe('clamp(0px, 130px, 45vw)');
+    ).toBe('clamp(0px, 130px, min(45vw, max(240px, calc((100vw - 500px) / 2))))');
     document.dispatchEvent(new PointerEvent('pointerup', { ...o, clientX: -260, clientY: 0 }));
     g.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(shellOf(root).getAttribute('data-pkc-hidden-panes'), '畳んでいない').toBe('sidebar');
     expect(
       shellOf(root).style.getPropertyValue('--pkc-pane-sidebar'),
       '畳んだ後も途中の幅が残っている',
-    ).toBe('clamp(0px, 300px, 45vw)');
+    ).toBe('clamp(0px, 300px, min(45vw, max(240px, calc((100vw - 500px) / 2))))');
   });
 
   /**

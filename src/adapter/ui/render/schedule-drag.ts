@@ -119,7 +119,8 @@ const TASK_CARD_SELECTOR =
  *   🔑 **同じ部品を別の属性で選ぶ** ── 印は `type="checkbox"`、外す ✕ は
  *   `task-card.ts` が焼く `data-pkc-field="task-unschedule"`。
  */
-const NO_GRAB_SELECTOR = 'input[type="checkbox"], [data-pkc-field="task-unschedule"]';
+const NO_GRAB_SELECTOR =
+  'input[type="checkbox"], [data-pkc-field="task-unschedule"], [data-pkc-field="task-menu"]';
 
 /**
  * 🔴 **時間の目盛りの器**(「日」「週」の札を置く列)。#855 段 B-1。

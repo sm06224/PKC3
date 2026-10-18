@@ -3695,7 +3695,18 @@ export type SystemCommand =
       type: 'OP_FAILED';
       error: string;
     }
-  | { type: 'SYS_ERROR'; error: string }
+  | {
+      type: 'SYS_ERROR';
+      error: string;
+      /**
+       * 🔴 **空き容量が足りずに本文の保存が断られたとき、編集の画面へ戻す**(台帳 #1852 束 S1、依頼 104-1 B)。
+       * 直す前は「保存に失敗した」状態で止まり、空きを作る方法が無かった(保存し直しも断られる)。
+       * 書きかけの字を編集の画面に残し、空きができたら「編集を保存する」を押し直せる。
+       * ⚠ 戻せない場面(別のノートへ移った・別のタブの版が先に在る)は従来どおり `error` を使う。
+       *   そのため戻した場合の字は別に持つ(`editingError`)── 戻していないのに「編集の画面に残してあります」と言わない。
+       */
+      keepEditing?: { editingError: string };
+    }
   | { type: 'REVISION_LIST_LOADED'; lid: string; items: RevisionItem[] }
   | { type: 'TRASH_LIST_LOADED'; items: TrashItem[] }
   /**
@@ -11153,6 +11164,33 @@ function reduceCore(
         state.openBody !== null &&
         state.openBody.baseline !== state.openBody.persisted &&
         !state.openBody.diskAhead;
+      /**
+       * 🔴 **空きが足りない断りは、編集の画面へ戻す**(依頼 104-1 B)。戻せるのは、保存した直後の画面が
+       *   そのノートのままで(`ready`)、別のタブの版が先に在らないとき。書きかけの字(`baseline`)を
+       *   編集の字に戻し、基準は disk(`persisted`)へ戻す ── 「編集を保存する」でもう一度同じ字が書かれる。
+       */
+      const ob = state.openBody;
+      if (
+        action.keepEditing !== undefined &&
+        state.phase === 'ready' &&
+        protecting &&
+        ob !== null &&
+        ob.lid === state.selectedLid
+      ) {
+        return {
+          state: {
+            ...state,
+            phase: 'editing',
+            error: action.keepEditing.editingError,
+            openBody: { lid: ob.lid, body: ob.baseline, baseline: ob.persisted, persisted: ob.persisted, diskAhead: false },
+            revisionPanel: null,
+            revisionPreview: null,
+            editOpenAt: null,
+            lastMove: null,
+          },
+          events: [{ type: 'REQUEST_SNIPPET_SCAN' }],
+        };
+      }
       const phase =
         state.phase === 'editing' ? 'editing' : protecting ? 'error' : state.phase;
       return { state: { ...state, phase, error: action.error }, events: [] };

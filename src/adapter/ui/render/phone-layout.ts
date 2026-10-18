@@ -89,6 +89,20 @@ type MediaLike = {
  *   **保存もしない** ── 「いまこのノートの情報を見ている」「一覧を見ている」は
  *   一時の文脈であり、次に起動したときに引き継ぐと user が頼んでいない画面から始まる。
  */
+/**
+ * 🔴 **帯の題名**(台帳 #1852 束 S1、依頼 104-3)。題名の無いノートを開くと帯の題名が空欄になり、
+ * どのノートを読んでいるか分からなかった。**ノートを開いているのに題名が空**のときだけ
+ * 「(題名なし)」を薄く出す(一覧・検索の字と同じ)。ノートを開いていないとき(`selectedLid` が無い)は空のまま。
+ * ⚠ 薄さは CSS(`[data-pkc-empty]`)が持つ ── 字そのものは薄さを知らない。
+ */
+export const PHONE_NO_TITLE = '(題名なし)';
+function paintPhoneTitle(title: HTMLElement, st: PhoneRenderState): void {
+  const empty = st.title === '' && st.selectedLid !== null;
+  title.textContent = empty ? PHONE_NO_TITLE : st.title;
+  if (empty) title.setAttribute('data-pkc-empty', '');
+  else title.removeAttribute('data-pkc-empty');
+}
+
 export class PhoneLayout {
   private root: HTMLElement | null = null;
   private media: MediaLike | null = null;
@@ -493,7 +507,7 @@ export class PhoneLayout {
         info.hidden = false;
         info.setAttribute('aria-pressed', page === 'info' ? 'true' : 'false');
       }
-      if (title) title.textContent = st.title;
+      if (title) paintPhoneTitle(title, st);
       return;
     }
     if (info) info.removeAttribute('aria-pressed');
@@ -511,7 +525,7 @@ export class PhoneLayout {
     }
     // ⚠ 情報ページでは「情報」を出さない ── いま居る場所へ行くボタンは dead click
     if (info) info.hidden = page === 'info';
-    if (title) title.textContent = st.title;
+    if (title) paintPhoneTitle(title, st);
   }
 
   /**
@@ -529,7 +543,7 @@ export class PhoneLayout {
     back.hidden = !shown;
     if (!shown) return;
     const title = back.querySelector<HTMLElement>('[data-pkc-field="phone-return-title"]');
-    if (title) title.textContent = st.title;
+    if (title) paintPhoneTitle(title, st);
   }
 }
 

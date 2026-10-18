@@ -213,6 +213,14 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   パレットから 1 語で呼べる所に置かない(どの部品かは押したボタン自身が運ぶ)。
    */
   'cancel-asr-install', 'install-asr-part', 'remove-asr-part',
+  /**
+   * ⚠ **2026-10-18(台帳 #1852 束 S1 / T1)で 3 件増やした** ──
+   *   `cancel-office-install`(Office 一式の取り込みをやめる。依頼 156 ②)/ `move-block-step`(ブロックを上下へ 1 つ動かす。依頼 238 の案 B)/
+   *   `open-task-menu`(予定の札の「⋯」。依頼 128-2 A)。
+   * 🔑 **名前で呼べないままにする理由**:`cancel-office-install` は取り込み中の画面にしか居ない(`cancel-asr-install` と同じ)/
+   *   `move-block-step` の座標は右クリック(長押し)したブロックが運ぶ / `open-task-menu` は押した予定の札が対象(`open-repeat-menu` の隣)。
+   */
+  'cancel-office-install', 'move-block-step', 'open-task-menu',
   'add-place', 'add-place-note', 'add-place-template', 'adopt-external-images',
   'adopt-link-icon', 'allow-external-images', 'apply-plan', 'apply-settings',
   'apply-update', 'bulk-tag-add', 'bulk-tag-remove',
@@ -896,8 +904,10 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-17(台帳 #1852 束 L1、依頼 266): メッセージのノートの上の種類のボタン(`set-message-filter`)で受け手 +1 ── 登記は増えない(鍵を持たない画面のボタン。`set-message-cap` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(台帳 #1852 束 K2・J2、#1163 依頼 212): 添付の詳細の「ファイルを差し替える」(`replace-attachment-file`)で受け手 +1 ── 登記は増えない
       //   (押し口は添付の詳細の 1 行にしか無く、鍵も持たない。押したボタンが差し替え先の lid を運ぶ)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 458,
-      receivers: 385,
+      // ⚠ 2026-10-18(台帳 #1852 束 S1 / T1): `cancel-office-install` / `move-block-step` / `open-task-menu` の 3 つで受け手 +3 ── 登記は増えない
+      //   (押し口は取り込み中の設定の節 / 長押しのメニューの項目 / 予定の札の中にしか無く、鍵も持たない)。`receivers` +3 / `total` +3 / `unregistered` +3。
+      total: 461,
+      receivers: 388,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       // ⚠ 2026-10-17(#1163 依頼 153): 左のペインの「上へ動かす」「下へ動かす」(`move-order-up` / `move-order-down`)の 2 件を登記 ──
@@ -905,7 +915,7 @@ describe('操作の全数台帳(#582 段①)', () => {
       registered: 179,
       both: 106,
       outsideActionsTable: 73,
-      unregistered: 279,
+      unregistered: 282,
     });
   });
 

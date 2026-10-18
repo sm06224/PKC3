@@ -41,6 +41,16 @@
   /** ノートへ引く返事が来なかったときの字。 */
   var QUOTE_NO_REPLY = 'ノートへ引用できたか確かめられませんでした。PKC3 のウィンドウから、もう一度開いてください';
 
+  /**
+   * 🔴 **本体が読み込み直されていたら、10 秒待たずに言う**(台帳 #1852 束 T1、依頼 333 A)。
+   * 本体のタブを読み込み直すと、それより前に開いた窓の token は本体から消える ── 窓が「ノートへ引用」などを押しても
+   * 返事は来ず、約 10 秒待ってから断られていた。押すと同時に `ping` を送り、`HOST_PING_TIMEOUT_MS` のうちに `pong` が来なければ
+   * この字を言う。⚠ 他のタブの本体は、知らない token には `pong` を返さない(窓の持ち主だけが返す)。
+   */
+  var HOST_PING_TIMEOUT_MS = 1500;
+  var HOST_RELOADED =
+    'PKC3 の画面が読み込み直されました。このウィンドウを閉じて、PKC3 のウィンドウからもう一度開いてください';
+
   /** 保存の返事が来なかったときの字。⚠ 「保存できなかった」とは言い切らない(添付ができたかもしれない)。 */
   var EDIT_NO_REPLY = '保存できたか確かめられませんでした。PKC3 のウィンドウで、添付が増えているか確かめてください';
 
@@ -97,6 +107,8 @@
     QUOTE_TIMEOUT_MS: QUOTE_TIMEOUT_MS,
     EDIT_TIMEOUT_MS: EDIT_TIMEOUT_MS,
     ATTACH_TIMEOUT_MS: ATTACH_TIMEOUT_MS,
+    HOST_PING_TIMEOUT_MS: HOST_PING_TIMEOUT_MS,
+    HOST_RELOADED: HOST_RELOADED,
     EDIT_NO_REPLY: EDIT_NO_REPLY,
     DOC_FAILED: DOC_FAILED,
     QUOTE_NO_REPLY: QUOTE_NO_REPLY,

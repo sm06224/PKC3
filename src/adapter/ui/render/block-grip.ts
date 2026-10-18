@@ -32,6 +32,7 @@
  */
 import { blockSpanLookup, type BlockSpan } from '@features/markdown/source-blocks';
 import { bodyBelowFrontmatter, frontmatterLineCount } from '@features/markdown/frontmatter';
+import { insertionBlocked } from '@features/markdown/line-move';
 import { chapterSpanOf, headingLevel } from './heading-fold';
 
 /** 口の名前。⚠ `binder.ts` の `dragstart` がこの綴りで拾う。 */
@@ -165,6 +166,69 @@ function topBlockOf(host: HTMLElement, target: Element | null): HTMLElement | nu
   let el: Element | null = target;
   while (el !== null && el.parentElement !== host) el = el.parentElement;
   return el instanceof HTMLElement ? el : null;
+}
+
+/**
+ * 🔴 **押したブロックを、ひとつ上・ひとつ下へ動かすときの座標**(台帳 #1852 束 S1、依頼 238 の案 B)。
+ *
+ * 口(⠿)をドラッグして落とす道は指では使いにくい端末があるので、長押しのメニューからも動かせる。
+ * 座標は口と**同じ範囲の読み方**(`blockRange`)で出す ── 範囲を 2 か所で別々に数えない(CLAUDE.md §7)。
+ *
+ * - `start` / `end` … 動かすブロックの範囲(生の body の行番号・両端含む。`MOVE_BLOCK` がそのまま読む)
+ * - `up` … ひとつ上のブロックの**前**へ入れる位置。いちばん上なら `null`
+ * - `down` … ひとつ下のブロックの**後**へ入れる位置。いちばん下なら `null`
+ * ⚠ 入れてはいけない所(囲みの中など ── `insertionBlocked`)になる向きは `null`(押しても断られる口を出さない)。
+ * ⚠ 見えていないブロック(畳んだ章の中)は数えない ── 畳んだ章は見出しが章ごと 1 つのブロックとして動く。
+ *
+ * @param host   markdown を描いた器(`detail-body`)
+ * @param target 押した要素(host の外なら `null` を返す)
+ * @param body   生の本文(frontmatter 込み)
+ */
+export function blockStepsAt(
+  host: HTMLElement,
+  target: Element | null,
+  body: string,
+): { start: number; end: number; up: number | null; down: number | null } | null {
+  if (target === null) return null;
+  const block = topBlockOf(host, target);
+  if (block === null || block.hidden) return null;
+  if (host.classList.contains('pkc-board-host')) return null; // 板の面は自分の掴みを持つ(`follow` と同じ)
+  const fmBody = bodyBelowFrontmatter(body);
+  const p: Painted = {
+    host,
+    lid: '',
+    fmBody,
+    fm: frontmatterLineCount(body),
+    spans: blockSpanLookup(fmBody),
+    lineCount: -1,
+  };
+  const me = blockRange(p, block);
+  if (me === null) return null;
+  const sibs = [...host.children].filter(
+    (c): c is HTMLElement => c instanceof HTMLElement && !c.hidden && c.hasAttribute('data-pkc-source-line'),
+  );
+  const at = sibs.indexOf(block);
+  if (at < 0) return null;
+  let up: number | null = null;
+  for (let i = at - 1; i >= 0; i--) {
+    const r = blockRange(p, sibs[i]!);
+    if (r !== null && r.start < me.start) {
+      up = r.start;
+      break;
+    }
+  }
+  let down: number | null = null;
+  for (let i = at + 1; i < sibs.length; i++) {
+    const r = blockRange(p, sibs[i]!);
+    // 章(見出し)は自分の中の塊も兄弟として並ぶので、自分の範囲を出た最初の塊を「下」とする
+    if (r !== null && r.start > me.end) {
+      down = r.end + 1;
+      break;
+    }
+  }
+  if (up !== null && insertionBlocked(body, up)) up = null;
+  if (down !== null && insertionBlocked(body, down)) down = null;
+  return { start: me.start, end: me.end, up, down };
 }
 
 function hide(grip: HTMLElement): void {
@@ -324,7 +388,14 @@ export function installBlockGrip(region: HTMLElement, host: HTMLElement, lid: st
       const g = ownGripOf(anchor);
       if (g !== null) follow(anchor, g, e.target as Element | null);
     });
-    anchor.addEventListener('pointerleave', () => {
+    anchor.addEventListener('pointerleave', (e) => {
+      /**
+       * 🔴 **指で触れたときは、離しても口を残す**(台帳 #1852 束 S1、依頼 238 の案 A)。指は触れて離すと
+       *   `pointerleave` が必ず続く ── 隠すと「段落をタップするとつまみが一瞬出て、すぐ消える」ままで、
+       *   指でつまみを掴めなかった。残した口は、次に別のブロックを触れば移る(`pointerover`)。
+       *   ⚠ マウス・ペンは今までどおり(面を出たら隠す)。
+       */
+      if (e.pointerType === 'touch') return;
       const g = ownGripOf(anchor);
       if (g !== null) hide(g);
     });

@@ -74,7 +74,8 @@ export const GRID_EDGE_PX = 32;
 const EDGE_MAX_SPEED = 16;
 
 /** 掴ませない部品(チェックの印 / 外す ✕)。⚠ 属性の綴りを `schedule-drag.ts` と揃える。 */
-const NO_GRAB_SELECTOR = 'input[type="checkbox"], [data-pkc-field="task-unschedule"]';
+const NO_GRAB_SELECTOR =
+  'input[type="checkbox"], [data-pkc-field="task-unschedule"], [data-pkc-field="task-menu"]';
 const RESIZE_SELECTOR = '[data-pkc-field="task-resize"]';
 export const GRID_SCROLLER_SELECTOR =
   '[data-pkc-field="schedule-day-scroll"], [data-pkc-field="schedule-weekview-scroll"]';

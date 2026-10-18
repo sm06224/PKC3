@@ -12,6 +12,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OfficePackInstaller } from '../../src/adapter/platform/office/office-pack-install';
 import {
+  PackAbortedError,
   fetchPackFromBase,
   fetchPackManifest,
   packUrlFailureMessage,
@@ -180,6 +181,59 @@ describe('fetchPackFromBase', () => {
 
   it('フォントを 1 つも指定しない呼び出しは落とす', async () => {
     await expect(fetchPackFromBase('/office/', [])).rejects.toThrow(/フォント/);
+  });
+});
+
+describe('取り込みをやめる(台帳 #1852 束 T1、依頼 156 ②)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** 返事が来ない通信(signal で止まる)── 本物の fetch と同じく abort で reject する。 */
+  const hangs = (): void => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_u: string, init?: RequestInit) =>
+          new Promise<Response>((_, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+          }),
+      ),
+    );
+  };
+
+  it('🔴 通信が止まっていても、やめる合図で打ち切る(60 秒待たない)', async () => {
+    hangs();
+    const ac = new AbortController();
+    const p = fetchPackFromBase('/office/', ['a.ttf'], undefined, 60_000, ac.signal).catch((e: unknown) => e);
+    await Promise.resolve();
+    ac.abort();
+    const e = await p;
+    expect(e, '「応答が止まりました」(失敗)ではなく、やめた合図で終わる').toBeInstanceOf(PackAbortedError);
+  });
+
+  it('🔴 目録の取得もやめられる。「配布元に届きません」(失敗)と取り違えない', async () => {
+    hangs();
+    const ac = new AbortController();
+    const p = fetchPackManifest('/office-pack/', 60_000, ac.signal).catch((e: unknown) => e);
+    await Promise.resolve();
+    ac.abort();
+    expect(await p).toBeInstanceOf(PackAbortedError);
+  });
+
+  it('合図が最初から出ていれば、1 byte も取りに行かない', async () => {
+    const f = vi.fn(async () => new Response('x'));
+    vi.stubGlobal('fetch', f);
+    const ac = new AbortController();
+    ac.abort();
+    await expect(fetchPackFromBase('/office/', ['a.ttf'], undefined, 60_000, ac.signal)).rejects.toBeInstanceOf(PackAbortedError);
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it('対照群: 合図が無ければ今までどおり取れる', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('x', { status: 200 })));
+    const files = await fetchPackFromBase('/office/', ['a.ttf']);
+    expect(files.size).toBe(6);
   });
 });
 

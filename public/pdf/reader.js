@@ -92,7 +92,9 @@ const setStatus = (text) => {
   if (statusTimer !== null) clearTimeout(statusTimer);
   statusTimer = null;
   // 「…しています…」のような途中の一言は、終わりの一言に替わるまで出し続ける(消すのは終わった知らせだけ)
-  if (text === '' || text.endsWith('…')) return;
+  // 🔴 「PKC3 の画面が読み込み直されました…」(台帳 #1852 束 T1、依頼 333 A)も消さない ── 一瞬の知らせではなく、この窓の状態
+  //    (つながりが切れている)で、次にすること(閉じて開き直す)を読み終える前に消えると、また押して 10 秒待つことになる
+  if (text === '' || text.endsWith('…') || text === wire.HOST_RELOADED) return;
   statusTimer = setTimeout(() => {
     statusTimer = null;
     if (statusEl.textContent === text) setStatus('');
@@ -151,6 +153,25 @@ const clearTimer = (h) => {
   if (h !== null) clearTimeout(h);
 };
 
+/**
+ * 🔴 **本体が読み込み直されていないか確かめる**(台帳 #1852 束 T1、依頼 333 A)。本体へ頼む操作(ノートへ引用 /
+ * 別の PDF として保存 / 添付から選ぶ)の直後に呼ぶ。`wire.HOST_PING_TIMEOUT_MS` のうちに `pong` が来なければ `onLost` を呼ぶ ──
+ * 約 10 秒待って断られる代わりに、理由と次にすることをすぐ言う。⚠ 返事待ちの時計は呼び側が持つ(`onLost` が畳む)。
+ */
+let pingTimer = null;
+let pingOnLost = null;
+function watchHost(onLost) {
+  clearTimer(pingTimer);
+  pingOnLost = onLost;
+  pingTimer = setTimeout(() => {
+    pingTimer = null;
+    const f = pingOnLost;
+    pingOnLost = null;
+    if (f !== null) f();
+  }, wire.HOST_PING_TIMEOUT_MS);
+  send('ping', {});
+}
+
 const cache = new PageCache(MAX_LIVE, (url) => URL.revokeObjectURL(url));
 /** ページの一覧の絵の置き場。⚠ 読む頁の置き場(`cache`)とは別 ── 小さな絵が読む頁を押し出さない。 */
 const thumbCache = new PageCache(THUMB_LIVE, (url) => URL.revokeObjectURL(url));
@@ -166,6 +187,11 @@ ch.onmessage = (ev) => {
     void onDoc(m.payload);
   }
   else if (m.kind === 'focus-request') window.focus();
+  else if (m.kind === 'pong') {
+    clearTimer(pingTimer);
+    pingTimer = null;
+    pingOnLost = null;
+  }
   else if (m.kind === 'edit-result') onEditResult(m.payload);
   else if (m.kind === 'attach-list-result') onAttachList(m.payload);
   else if (m.kind === 'attach-get-result') void onAttachGet(m.payload);
@@ -1537,6 +1563,16 @@ appendFromNote.addEventListener('click', () => {
     appendPick.append(msg);
   }, wire.ATTACH_TIMEOUT_MS);
   send('attach-list', {});
+  watchHost(() => {
+    if (attachTimer === null) return;
+    clearTimer(attachTimer);
+    attachTimer = null;
+    appendPick.textContent = '';
+    const msg = document.createElement('div');
+    msg.className = 'append-note';
+    msg.textContent = wire.HOST_RELOADED;
+    appendPick.append(msg);
+  });
 });
 
 /** 本体が教えてくれた、この collection の PDF の添付の一覧を、メニューの下に並べる。 */
@@ -1575,6 +1611,13 @@ function onAttachList(payload) {
         setStatus(pageEdit.attachRefusal('no-reply'));
       }, wire.ATTACH_TIMEOUT_MS);
       send('attach-get', { key: it.key });
+      watchHost(() => {
+        if (attachWanted === null) return;
+        clearTimer(attachTimer);
+        attachTimer = null;
+        attachWanted = null;
+        setStatus(wire.HOST_RELOADED);
+      });
     });
     appendPick.append(b);
   }
@@ -1931,6 +1974,15 @@ async function submitBuild(list, name, kind) {
           : null,
     };
     send('edited', { key: staged.key });
+    watchHost(() => {
+      if (!saving) return;
+      // 返事が来る見込みが無い(本体が入れ替わった)── 「確かめられませんでした」ではなく理由を言う
+      clearTimer(editTimer);
+      editTimer = null;
+      saving = false;
+      setStatus(wire.HOST_RELOADED);
+      updateEditUi();
+    });
   } catch (e) {
     const code = e && e.pkcCode;
     setStatus(EDIT_MESSAGES[code] || '保存できませんでした。もう一度押してください');
@@ -2318,6 +2370,12 @@ quoteBtn.addEventListener('click', () => {
     setStatus(wire.QUOTE_NO_REPLY);
   }, wire.QUOTE_TIMEOUT_MS);
   send('quote', { text: lastSel.text, page: lastSel.page });
+  watchHost(() => {
+    if (quoteTimer === null) return;
+    clearTimer(quoteTimer);
+    quoteTimer = null;
+    setStatus(wire.HOST_RELOADED);
+  });
 });
 
 // ───────── ハイライト(#275 段②-2b/c)── 字を選んで色を付ける・付いたハイライトを外す

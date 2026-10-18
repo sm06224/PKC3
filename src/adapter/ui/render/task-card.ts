@@ -110,7 +110,19 @@ export function createTaskCard(data: AgendaItem): HTMLElement {
   const resize = document.createElement('span');
   resize.setAttribute('data-pkc-field', 'task-resize');
   resize.setAttribute('aria-label', '終わりの時刻を変える');
-  card.append(box, line, note, off, resize);
+  /**
+   * 🔴 **予定のメニューを開く「⋯」**(台帳 #1852 束 S1、依頼 128-2 A)。スマホでは予定を長押しすると
+   *   メニューとドラッグが同時に始まっていたので、長押しは**ドラッグだけ**にして(メニューは出さない)、
+   *   メニューはこのボタンから出す。⚠ 絵は CSS の `::before`(字を持たない ── `textContent` を汚さない)。
+   *   ⚠ 一覧と「日」の札にだけ出す(週・月の升は狭くて置けない ── CSS が隠し、長押しのメニューもそちらでは従来どおり)。
+   */
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.setAttribute('data-pkc-action', 'open-task-menu');
+  more.setAttribute('data-pkc-field', 'task-menu');
+  more.setAttribute('aria-label', 'この予定のメニューを開く');
+  more.title = 'この予定のメニューを開きます(繰り返す・開く・削除など)';
+  card.append(box, line, note, off, more, resize);
   patchTaskCard(card, data, '', null);
   return card;
 }

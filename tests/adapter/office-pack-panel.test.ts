@@ -180,6 +180,31 @@ describe('設定の面(O6-a)', () => {
     expect((q('office-pack-url') as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('🔴 取り込み中だけ「取り込みをやめる」が出る(台帳 #1852 束 T1、依頼 156 ②)', () => {
+    const { state, q } = mount();
+    const cancel = q('office-pack-cancel') as HTMLButtonElement;
+    expect(cancel, '「やめる」ボタンが無い').not.toBeNull();
+    expect(cancel.textContent).toBe('取り込みをやめる');
+    expect(cancel.getAttribute('data-pkc-action')).toBe('cancel-office-install');
+    expect(cancel.hidden, '何もしていないのに「やめる」が出ている').toBe(true);
+    state.setProgress('取得中: soffice.wasm.gz(1/6)');
+    expect(cancel.hidden, '取り込み中なのに「やめる」が出ない').toBe(false);
+    expect(cancel.disabled, '押せない「やめる」(dead click)').toBe(false);
+    state.setProgress('');
+    expect(cancel.hidden, '終わったら消える').toBe(true);
+  });
+
+  it('🔴 押した「やめる」は実体(services)へ届く', () => {
+    const { state, panel } = mount();
+    state.setProgress('取得中');
+    const calls: string[] = [];
+    const d = new Dispatcher({ ...initialState, cid: 'c1' });
+    const unbind = bindActions(panel.root, d, { cancelOfficeInstall: () => calls.push('cancel') });
+    panel.root.querySelector<HTMLElement>('[data-pkc-field="office-pack-cancel"]')!.click();
+    unbind();
+    expect(calls).toEqual(['cancel']);
+  });
+
   it('🔴 状態が変わっても器は組み直さない(押している最中のボタンを差し替えない)', () => {
     const { state, q } = mount();
     const before = q('office-pack-url');
@@ -244,6 +269,18 @@ describe('applyPackResult(設置 / 削除の後始末)', () => {
     const good = ui();
     applyPackResult(state, { ok: true, meta: META, message: '配備しました' }, good);
     expect(good.notify.mock.calls[0]).toEqual(['配備しました']);
+  });
+});
+
+describe('applyPackResult ── user がやめたとき(台帳 #1852 束 T1、依頼 156 ②)', () => {
+  it('🔴 やめたのは「問題」にしない(普通の知らせ)。入っている一式の控えは触らない', () => {
+    const state = new OfficePackState();
+    state.setMeta(META);
+    const u = { redrawDetail: vi.fn(), notify: vi.fn() };
+    applyPackResult(state, { ok: false, message: 'やめました', cancelled: true }, u);
+    expect(u.notify.mock.calls[0]).toEqual(['やめました']);
+    expect(state.getMeta(), 'やめたのに控えが変わった').toBe(META);
+    expect(u.redrawDetail).not.toHaveBeenCalled();
   });
 });
 

@@ -101,14 +101,16 @@ describe('buildOfficeEntry(O3-c)', () => {
     expect(el.tagName).not.toBe('BUTTON');
   });
 
-  it('🔴 .xlsx / .pptx は「一時保存の対象外」の 1 行が出る。.docx には出ない(対照群)', () => {
+  it('🔴 .docx / .odt 以外の Office 形式は「一時保存の対象外」の 1 行が出る。.docx / .odt には出ない(対照群)', () => {
+    // 台帳 #1852 束 T1(依頼 241)── 以前は .xlsx / .pptx だけだった。.doc / .xls / .ppt / .ods / .odp / .rtf も黙っていた
     const xlsx = { ...DOCX, name: '集計.XLSX' };
-    const pptx = { ...DOCX, name: '発表.pptx' };
-    for (const att of [xlsx, pptx]) {
-      const el = buildOfficeSaveNote(att, avail(true))!;
-      expect(el.textContent).toBe('.xlsx / .pptx は一時保存の対象外です。こまめに保存してください');
+    for (const name of ['集計.XLSX', '発表.pptx', '旧.doc', '旧.xls', '旧.ppt', '表.ods', '資料.odp', '文.rtf']) {
+      const el = buildOfficeSaveNote({ ...DOCX, name }, avail(true))!;
+      expect(el, `${name} に案内が出ていない`).not.toBeNull();
+      expect(el.textContent).toBe('.docx / .odt 以外の形式は一時保存の対象外です。こまめに保存してください');
     }
     expect(buildOfficeSaveNote(DOCX, avail(true)), '一時保存される形式に言わない').toBeNull();
+    expect(buildOfficeSaveNote({ ...DOCX, name: '文.odt' }, avail(true)), '.odt は一時保存される').toBeNull();
     expect(buildOfficeSaveNote(xlsx, avail(false)), '開けないときは言う意味が無い').toBeNull();
   });
 

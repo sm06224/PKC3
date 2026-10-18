@@ -62,7 +62,17 @@ export function renderLightboxOverlay(
     openWinBtn.textContent = '⧉';
     openWinBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      services.viewBig?.(opts.src, opts.alt || '図', opts.diagram, opts.defaultView);
+      const opened = services.viewBig?.(opts.src, opts.alt || '図', opts.diagram, opts.defaultView);
+      /**
+       * 🔴 **別のウィンドウが開けたときだけ、この拡大を閉じる**(台帳 #1852 束 T1、依頼 99-2 C)。直す前は ⧉ を押した後も
+       *   暗い拡大が本文を覆ったままだった(別のウィンドウは「本文を書きながら見る」ための物)。
+       *   開けなかったとき(ポップアップが止められた等)は閉じない ── 理由の知らせ(`OP_FAILED`)を読め、拡大のまま使える。
+       * ⚠ 開く側は非同期(図は描き起こす)なので、結果は `Promise<boolean>`。返さない呼び手(`void`)は閉じない側へ倒す。
+       *   ⚠ 待っている間に user が閉じた / 別の拡大を開いたなら触らない(`isConnected`)。
+       */
+      void Promise.resolve(opened).then((ok) => {
+        if (ok === true && overlay.isConnected) onClose?.();
+      });
     });
     actions.append(openWinBtn);
   }

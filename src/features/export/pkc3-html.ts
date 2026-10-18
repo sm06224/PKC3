@@ -36,6 +36,7 @@ import { bakeFigures, type FigureBakers } from './figure-bake';
 import { bakeSqlEmbeds, type SqlEmbedAnswer } from '../markdown/sql-embed';
 import { extractVars } from '../markdown/frontmatter';
 import { createWarnCollector } from './warn-cap';
+import { PHONE_MAX_PX } from '../phone-layout';
 import { EXTERNAL_IMAGE_ATTR } from '../markdown/external-images';
 import { ADOPT_IMAGES_LABEL } from '@features/entry-actions';
 import {
@@ -240,6 +241,14 @@ nav button:hover{background:#8882}
 nav button[aria-current=true]{background:#8883;font-weight:600}
 main{overflow:auto;padding:24px 32px}
 main h2{margin:0 0 16px}
+/* 🔴 **スマホの幅では、一覧を本文の上に置く**(台帳 #1852 束 S1、依頼 77-2 B)。直す前は左の一覧が 280px のまま残り、
+   本文に 100px ほどしか残らなかった。ノートを選ぶと一覧(details)を畳む(JS 側)── 開き直せば一覧に戻れる。
+   幅の境目はアプリのスマホ画面と同じ数字(PHONE_MAX_PX)。⚠ 画面だけの規則 ── 紙は下の print が nav を消す。 */
+@media screen and (max-width:${PHONE_MAX_PX}px){
+  body{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  nav{max-height:45vh;border-right:0;border-bottom:1px solid #8884}
+  main{padding:16px}
+}
 img{max-width:100%;height:auto;display:block;margin:8px 0}
 /* ── 折りたたみ(F-1)。details の既定マーカーだけで畳める ── JS を足さない */
 nav details{margin:6px 0}
@@ -890,7 +899,11 @@ try{
   d.entries.forEach(function(e,i){
     var b=document.createElement('button');
     b.textContent=e.title||'(無題)';
-    b.onclick=function(){show(e,b)};
+    /* 🔴 スマホの幅では、ノートを選んだら一覧を畳む(依頼 77-2 B。見出しの数字は CSS と同じ PHONE_MAX_PX) */
+    b.onclick=function(){
+      show(e,b);
+      if(window.matchMedia&&window.matchMedia('(max-width:${PHONE_MAX_PX}px)').matches)document.getElementById('pkc-dnotes').open=false;
+    };
     btns.push(b);
     list.appendChild(b);
     if(i===0)setTimeout(function(){show(e,b)},0);

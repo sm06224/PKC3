@@ -413,6 +413,36 @@ describe('情報ページ(#609 の行き止まりを作らない)', () => {
   });
 
   /**
+   * 🔴 **題名の無いノートを開いたら、帯に「(題名なし)」を薄く出す**(台帳 #1852 束 S1、依頼 104-3 A)。
+   * 直す前は帯の題名が空欄になり、どのノートを読んでいるか分からなかった(一覧では「(題名なし)」と出る)。
+   */
+  it('🔴 題名の無いノートを開くと、帯と「ノートへ →」の題名が「(題名なし)」になり、薄い印が付く', () => {
+    const s = setup(true);
+    s.d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [META('n1', '買い物'), META('n3', '')],
+      relations: [],
+    });
+    s.open('n3');
+    const title = s.field('phone-title');
+    expect(title.textContent, '空欄のまま').toBe('(題名なし)');
+    expect(title.hasAttribute('data-pkc-empty'), '薄くする印が無い').toBe(true);
+    s.field('phone-back').click();
+    expect(s.field('phone-return-title').textContent, '「ノートへ →」の題名が空欄').toBe('(題名なし)');
+    // 対照群: 題名のあるノートでは出ない / 印も外れる(使い回した器に残らない)
+    s.open('n1');
+    expect(title.textContent).toBe('買い物');
+    expect(title.hasAttribute('data-pkc-empty'), '題名のあるノートに薄い印が残った').toBe(false);
+  });
+
+  it('対照群: ノートを開いていない(選択が無い)ときは「(題名なし)」を出さない', () => {
+    const s = setup(true);
+    expect(s.field('phone-title').textContent).toBe('');
+    expect(s.field('phone-title').hasAttribute('data-pkc-empty')).toBe(false);
+  });
+
+  /**
    * 🔴 **一覧の上に「ノートへ →(題名)」が出る**(user 裁定 2026-09-02)。
    * ⚠ **題名まで見る** ── 字が空だと、user はどのノートへ戻るのか読めない。
    */

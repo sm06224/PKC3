@@ -6,7 +6,7 @@
  * 直列化する。worker handler が将来 async 化しても、app 側から見た op 順序は
  * ここで保証される(「init 以外は同期」という暗黙 invariant に依存しない)。
  */
-import { bodySaveErrorText, errorText } from '@features/error-text';
+import { bodySaveEditingText, bodySaveErrorText, errorText } from '@features/error-text';
 import type { EntryStamps, EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta, type FlavorExtract } from '@features/flavor';
 import { appMessagePost } from '@adapter/platform/message-post';
@@ -2219,7 +2219,15 @@ export function connectStoreEffects(
             if (stamps.recreated === true && !disposed)
               dispatcher.dispatch({ type: 'OP_NOTICE', message: RECREATED_BY_SAVE_TEXT });
           } catch (e) {
-            if (!disposed) dispatcher.dispatch({ type: 'SYS_ERROR', error: bodySaveErrorText(e) });
+            if (!disposed) {
+              // 🔴 空きが足りない断りは、編集の画面へ戻せるなら戻す(台帳 #1852 束 S1、依頼 104-1 B)
+              const editingError = bodySaveEditingText(e);
+              dispatcher.dispatch({
+                type: 'SYS_ERROR',
+                error: bodySaveErrorText(e),
+                ...(editingError === null ? {} : { keepEditing: { editingError } }),
+              });
+            }
           }
         });
         break;

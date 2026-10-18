@@ -404,6 +404,10 @@ export class PdfReaderHost {
       }
       case 'alive':
         return;
+      case 'ping':
+        // 🔴 窓の持ち主だけが返す(台帳 #1852 束 T1、依頼 333 A)── 返事が無ければ、窓は「本体が読み込み直された」と読む
+        this.send('pong', token, {});
+        return;
       case 'loaded':
         // 🔑 窓が Blob を握った ── ここが生成物の寿命の終端。窓の寿命まで握らない
         this.release(live);

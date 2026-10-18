@@ -364,7 +364,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-17(台帳 #1852 束 L1、依頼 266): N +1(`set-message-filter`。メッセージのノートの上の種類のボタン ── 値は押したボタン自身の属性を読むだけで、`set-message-cap` と同じ仕分け)。
     // ⚠ 2026-10-17(台帳 #1852 束 K2・J2、#1163 依頼 212): N +1(`replace-attachment-file`。添付の詳細の「ファイルを差し替える」── 差し替え先は押したボタンが運ぶが、
     //   受け手は `targetLid` の 1 本で引くだけ。`rename-attachment` の隣の置き場)。
-    expect(counts()).toEqual({ P1: 79, P2: 34, E: 26, V: 10, N: 236 });
+    // ⚠ 2026-10-18(台帳 #1852 束 S1 / T1): N +3(`cancel-office-install` = 取り込み中の「取り込みをやめる」/ `move-block-step` = 長押しのメニューの「このブロックを上へ・下へ移す」/
+    //   `open-task-menu` = 予定の札の「⋯」)。いずれも運ぶ物は押した項目自身の属性か器の取得だけで、`cancel-asr-install` / `move-tile-up` / `open-bar-more` と同じ仕分け。
+    expect(counts()).toEqual({ P1: 79, P2: 34, E: 26, V: 10, N: 239 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

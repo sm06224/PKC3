@@ -706,6 +706,54 @@ describe('放送は全タブに届く ── 自分が開いた窓だけ受け�
   });
 });
 
+describe('本体が読み込み直されたことを、窓がすぐ言える(台帳 #1852 束 T1、依頼 333 A)', () => {
+  it('🔴 窓の持ち主の本体は、ping に pong で答える(生きている印)', () => {
+    const g = rig();
+    openAndHello(g);
+    g.win.received.length = 0;
+    g.win.send('ping');
+    expect(g.win.received.map((m) => m.kind)).toEqual(['pong']);
+  });
+
+  it('🔴 対照群: 読み込み直された本体(token を知らない)は pong を返さない ── 窓はそれで「読み込み直された」と読む', () => {
+    // 読み込み直し = 新しい本体(lives が空)。窓の token は新しい本体の知らない token になる
+    const g = rig();
+    const fresh = rig();
+    openAndHello(g);
+    fresh.win.token = g.win.token;
+    fresh.win.send('ping');
+    expect(fresh.win.received, '知らない token に pong を返した(他のタブの窓まで「生きている」と偽る)').toEqual([]);
+  });
+
+  it('🔴 閉じた窓(控えに残る token)にも pong は返さない', () => {
+    const g = rig();
+    openAndHello(g);
+    g.win.send('closed');
+    g.win.received.length = 0;
+    g.win.send('ping');
+    expect(g.win.received).toEqual([]);
+  });
+
+  it('窓の側の字と待ち時間は、窓の実物(reader-wire.js)が持つ。待ち時間は返事待ち(10 秒)よりずっと短い', () => {
+    const w = wire as unknown as { HOST_PING_TIMEOUT_MS: number; HOST_RELOADED: string };
+    expect(w.HOST_RELOADED, '「読み込み直された」と、次にすることを言う').toContain('読み込み直されました');
+    expect(w.HOST_RELOADED).toContain('もう一度開いてください');
+    expect(w.HOST_PING_TIMEOUT_MS, 'すぐ言えない').toBeLessThan(wire.QUOTE_TIMEOUT_MS / 2);
+    expect(w.HOST_PING_TIMEOUT_MS, 'ブラウザの一瞬の遅れで「読み込み直された」と言ってしまう').toBeGreaterThanOrEqual(1000);
+  });
+
+  it('🔴 本体へ頼む 3 つの操作(引用 / 保存 / 添付)は、送った直後に watchHost を呼ぶ(窓の原文)', () => {
+    const src = readFileSync('public/pdf/reader.js', 'utf-8');
+    for (const kind of ["send('quote'", "send('edited'", "send('attach-list'", "send('attach-get'"]) {
+      const at = src.indexOf(kind);
+      expect(at, `${kind} が窓の原文に無い(前提が崩れている)`).toBeGreaterThan(0);
+      // 送った行の次の文が watchHost(…) であること(注釈を挟まない形で pin)
+      const next = src.slice(at).split('\n').slice(1, 3).join('\n');
+      expect(next, `${kind} の直後に watchHost が無い(本体が読み込み直されても 10 秒待たされる)`).toContain('watchHost(');
+    }
+  });
+});
+
 describe('同じ添付の窓が生きているか(2 枚目を開かない)', () => {
   it('開いた直後から生きている扱い / 合図が途絶えて猶予を過ぎたら死んだ扱い', () => {
     const g = rig();
@@ -750,10 +798,10 @@ describe('種類の突合 ── reader.js の原文が送る / 待つ種類を�
 
   it('⚠ 前提: 窓が送る種類・待つ種類を実際に拾えている(空振り防止)', () => {
     expect(new Set(sent).size).toBeGreaterThanOrEqual(7);
-    expect(new Set(awaited).size).toBe(6);
+    expect(new Set(awaited).size).toBe(7);
   });
 
-  it('窓が送る種類は、ちょうどこの 11 個(増えたら本体の受け口と対で足す)', () => {
+  it('窓が送る種類は、ちょうどこの 12 個(増えたら本体の受け口と対で足す)', () => {
     expect([...new Set(sent)].sort()).toEqual(
       [
         'alive',
@@ -766,14 +814,15 @@ describe('種類の突合 ── reader.js の原文が送る / 待つ種類を�
         'hello',
         'load-failed',
         'loaded',
+        'ping',
         'quote',
       ].sort(),
     );
   });
 
-  it('窓が待つ種類は、本体が送る 6 つと同じ', async () => {
+  it('窓が待つ種類は、本体が送る 7 つと同じ', async () => {
     expect([...new Set(awaited)].sort()).toEqual(
-      ['attach-get-result', 'attach-list-result', 'doc', 'edit-result', 'focus-request', 'quote-result'].sort(),
+      ['attach-get-result', 'attach-list-result', 'doc', 'edit-result', 'focus-request', 'pong', 'quote-result'].sort(),
     );
     const g = rig();
     g.attach.items = [{ key: 'ka', name: 'a.pdf', size: 1 }];
@@ -783,14 +832,16 @@ describe('種類の突合 ── reader.js の原文が送る / 待つ種類を�
     g.win.send('edited', { key: 'p1' });
     g.win.send('attach-list');
     g.win.send('attach-get', { key: 'ka' });
+    g.win.send('ping');
     await flush();
     expect(new Set(g.win.received.map((m) => m.kind))).toEqual(new Set(awaited));
   });
 
-  it('窓が送る 11 種を 1 つずつ本体へ通し、どれも「無視」されない(受け口が在る)', async () => {
+  it('窓が送る 12 種を 1 つずつ本体へ通し、どれも「無視」されない(受け口が在る)', async () => {
     const effects: Record<string, (g: Rig) => unknown> = {
       hello: (g) => g.win.received.some((m) => m.kind === 'doc'),
       alive: (g) => g.host.openTokenFor('k1') !== null,
+      ping: (g) => g.win.received.some((m) => m.kind === 'pong'),
       loaded: (g) => g.disposed.length === 1,
       'load-failed': (g) => g.loadFailed.length === 1,
       'fell-back': (g) => g.fellBack.length === 1,

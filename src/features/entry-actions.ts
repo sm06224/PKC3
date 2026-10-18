@@ -1244,6 +1244,30 @@ export function taskRunMenuActions(): readonly (EntryAction & { readonly hint: s
   return items.map((a) => ({ ...a, hint: ENTRY_ACTION_HINTS[a.action] ?? '' }));
 }
 
+/** 本文のブロックを 1 つ動かす項目の向きの属性(`up` / `down`。受け手 `move-block-step` が読む)。 */
+export const BLOCK_STEP_DIR_ATTR = 'data-pkc-block-step-dir';
+
+/**
+ * 🔴 **押した本文のブロックを、ひとつ上・ひとつ下へ動かす**(台帳 #1852 束 S1、依頼 238 の案 B)。
+ *
+ * > 画面の起きること: パソコンでは段落の左のつまみ(⠿)をドラッグしてブロックを並べ替えられるが、スマホでは指で動かす方法が無かった。
+ * > 長押しのメニューから「上へ移す / 下へ移す」で動かせる(パソコンの右クリックにも出る)。
+ *
+ * ⚠ **動かせない向きは出さない**(いちばん上のブロックに「上へ」を出さない ── 押しても何も起きない口を作らない)。
+ * ⚠ `BODY_MENU_ACTIONS` には入れない ── あちらは「読んでいる見え方を変える」物の表で、これは**本文を書き換える**。
+ * 🔑 綴りと字を対で書く(`tableMenuActions` と同じ理由 ── 出口を静的に追えるように)。
+ */
+export function blockStepMenuActions(
+  ctx: { readonly up: boolean; readonly down: boolean },
+): readonly (EntryAction & { readonly hint: string })[] {
+  const items: EntryAction[] = [];
+  if (ctx.up)
+    items.push({ action: 'move-block-step', label: 'このブロックを上へ移す', attrs: { [BLOCK_STEP_DIR_ATTR]: 'up' } });
+  if (ctx.down)
+    items.push({ action: 'move-block-step', label: 'このブロックを下へ移す', attrs: { [BLOCK_STEP_DIR_ATTR]: 'down' } });
+  return items.map((a) => ({ ...a, hint: ENTRY_ACTION_HINTS[a.action] ?? '' }));
+}
+
 /** 画像の寄せの項目の値の属性(受け手 `image-align` が読む)。 */
 export const IMAGE_ALIGN_ATTR = 'data-pkc-image-align';
 /** 画像の大きさの項目の値の属性(受け手 `image-width` が読む。空 = もとの大きさへ戻す)。 */
@@ -1506,6 +1530,9 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   // 🔴 **画像の大きさ・寄せ**(#1640 ③)。⚠ 本文の何が変わるかを言う(画像の直後に {w=50% align=center} を書く)
   'image-width': '本文の幅に対する割合で、この画像の幅を決めます。画像の直後に {w=50%} のように書き込まれます',
   'image-align': 'この画像を本文の左・中央・右に置きます。画像の直後に {align=center} のように書き込まれます',
+  // 🔴 **ブロックを 1 つ動かす**(台帳 #1852 束 S1、依頼 238)。⚠ 動かした直後の戻し方を言う
+  'move-block-step':
+    'このブロック(段落・見出しの章など)を、本文の中で1つ上か下へ動かします。動かした直後は「元に戻す」で戻せます',
   // 🔴 **リストを丸ごとそろえる 2 つ**(#1173)。⚠ 入れ子の項目も動くことと、動かない物・戻し方を先に言う
   'task-run-open':
     'このリストのチェック(入れ子の分も)をすべて外します。繰り返しの項目は触りません。履歴から元へ戻せます',

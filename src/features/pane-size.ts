@@ -161,9 +161,18 @@ export function decodePaneSizes(raw: string | null | undefined): PaneSizes {
  * (`max` は「user がここまで広げられる」、こちらは「画面からはみ出さない」)。
  */
 export function paneSizeCss(id: SizedPaneId, px: number): string {
-  const unit = PANE_SIZE_SPECS[id].axis === 'x' ? '45vw' : '60vh';
+  const unit = PANE_SIZE_SPECS[id].axis === 'x' ? PANE_WIDTH_CAP : '60vh';
   return `clamp(0px, ${roundPaneSize(id, px)}px, ${unit})`;
 }
+
+/**
+ * 🔴 **左右の列の幅の上限 ── 中央の本文に最低 480px 残す**(台帳 #1852 束 S1、依頼 350)。
+ * 広い画面で両方を最大にした幅を、狭い画面(1100〜1400px)で開いても、本文が潰れない。
+ * `(100vw - 500px) / 2` = 左右が同じ幅で分け合ったときに本文が 480px 残る値
+ * (500 = 本文 480 + 掴む帯 8×2 + 隙間 1×4)。⚠ **覚えた幅は書き換えない** ── 画面が広がれば元の幅に戻る。
+ * ⚠ `max(240px, …)` は、もっと狭い画面で上限が 0 に向かわないための床(その幅は下の 45vw が先に効く)。
+ */
+export const PANE_WIDTH_CAP = 'min(45vw, max(240px, calc((100vw - 500px) / 2)))';
 
 /** 画面へ書く変数名。⚠ 1 か所で綴る(CSS と JS が別々に綴ると静かに外れる)。 */
 export function paneSizeVar(id: SizedPaneId): string {
