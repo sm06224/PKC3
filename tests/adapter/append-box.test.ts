@@ -1012,7 +1012,7 @@ describe('🔴 章・コード枠の欄を開いている間の追記欄の場�
     const { d, q } = setup([meta('n1', 'text')], { n1: '本文\n' });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
     await tick();
-    d.dispatch({ type: 'START_EDIT', lid: 'n1' });
+    d.dispatch({ type: 'START_EDIT' });
     await tick();
     expect(lockText(q)).not.toBe('章を編集中');
     expect(q('[data-pkc-field="append-lock"] [data-pkc-action="commit-edit"]')!.hidden).toBe(false);
