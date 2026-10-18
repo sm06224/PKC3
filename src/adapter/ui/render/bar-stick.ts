@@ -18,11 +18,18 @@ export function watchBarStick(bar: HTMLElement, scroller: HTMLElement): () => vo
   const sync = (): void => {
     const on = bar.hasAttribute('data-pkc-bulk') && barFitsSticky(scroller.clientHeight, bar.offsetHeight);
     bar.toggleAttribute('data-pkc-bulk-stick', on);
+    // 🔴 貼り付いている間は、帯の高さぶん「スクロールで見せる範囲」を狭める ── 帯の真下に隠れた行を
+    //   `scrollIntoView` が「見えている」と読んで動かず、押せなかった(pdf-reader.smoke の FL_OUT)。
+    if (on) scroller.style.scrollPaddingBottom = `${bar.offsetHeight}px`;
+    else scroller.style.removeProperty('scroll-padding-bottom');
   };
   sync();
-  if (typeof ResizeObserver === 'undefined') return () => {};
+  if (typeof ResizeObserver === 'undefined') return () => scroller.style.removeProperty('scroll-padding-bottom');
   const ro = new ResizeObserver(sync);
   ro.observe(scroller);
   ro.observe(bar);
-  return () => ro.disconnect();
+  return () => {
+    ro.disconnect();
+    scroller.style.removeProperty('scroll-padding-bottom');
+  };
 }
