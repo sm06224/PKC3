@@ -11386,6 +11386,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const lid = dispatcher.getState().selectedLid;
     if (lid === null) return;
+    /**
+     * 🔴 **ノートの現在値で開く**(台帳 #1852 指摘 2)── 空の時刻で開くと、前書きに `date: … 14:00` がある
+     *   ノートの日付だけ変えて OK したとき、時刻が黙って消える。日付も現在の日付から(無ければ今日)。
+     * ⚠ 走査がまだ無い(= 時刻を知らない)間は、時刻欄を空で開き、空のまま OK でも**時刻に触らない**(下)。
+     */
+    const st0 = dispatcher.getState();
+    const curDate = st0.entryMetas.get(lid)?.date ?? null;
+    const curTime = noteTimeFor(st0.taskScan, lid, curDate);
+    const timeKnown = st0.taskScan !== null;
     void pickDateInApp(
       root,
       new Date(),
@@ -11396,7 +11405,11 @@ const ACTIONS: Record<string, ActionHandler> = {
        * 打った時刻は前書きの `date: 2026-10-20 14:00` に書く(抽出列には日付だけ)。空なら時刻は付けない。
        * (#865 では、受け取る相手が無いので欄を出さなかった ── 受け取る相手ができたので出す)
        */
-      { withTime: true },
+      {
+        withTime: true,
+        ...(curDate === null ? {} : { initialDate: curDate }),
+        ...(curTime === null ? {} : { initialTime: curTime }),
+      },
     ).then((picked) => {
       if (picked === null) return;
       // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。選び終えた時点で確かめる。押した瞬間の lid を撃つ)
@@ -11405,7 +11418,13 @@ const ACTIONS: Record<string, ActionHandler> = {
         services,
         [lid],
         '日付を付けられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
-        () => dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: picked.date, time: picked.time }),
+        () => dispatcher.dispatch({
+            type: 'SET_ENTRY_DATE',
+            lid,
+            date: picked.date,
+            // 時刻を知らないまま空で OK された回は、書かれている時刻を残す(省略 = 残す)
+            ...(picked.time === null && !timeKnown ? {} : { time: picked.time }),
+          }),
       );
     });
   },
