@@ -173,7 +173,17 @@ export function listChangedTests(baseRef, rootDir = process.cwd()) {
     .map((s) => relative(rootDir, s.startsWith('/') ? s : join(rootDir, s)).replace(/\\/g, '/'));
 }
 
-export function runPrTests(baseRef, rootDir = process.cwd()) {
+/**
+ * 🔑 CI は unit を複数 job に割って並列に回す(`--shard=i/n`)。割り方は vitest 本体に任せる ──
+ *   ここは受け取った `--shard=i/n` を、全量でも選んだ集合でも**そのまま vitest へ渡す**だけである
+ *   (全 shard の和 = 1 回で回した集合、になる)。
+ */
+export function parseShardArg(argv) {
+  const hit = argv.find((a) => /^--shard=\d+\/\d+$/.test(a));
+  return hit ? [hit] : [];
+}
+
+export function runPrTests(baseRef, rootDir = process.cwd(), extraArgs = []) {
   const fallbackReason = detectFallbackReason(baseRef, rootDir);
   let plan;
   if (fallbackReason) {
@@ -186,11 +196,11 @@ export function runPrTests(baseRef, rootDir = process.cwd()) {
   }
   if (plan.mode === 'full') {
     console.log('[test:pr] 全量の unit テストを 1 回で実行中...');
-    const res = spawnSync('npx', ['vitest', 'run'], { cwd: rootDir, stdio: 'inherit' });
+    const res = spawnSync('npx', ['vitest', 'run', ...extraArgs], { cwd: rootDir, stdio: 'inherit' });
     return res.status ?? 1;
   }
   console.log(`[test:pr] 差分に関係するテスト + ガード: ${plan.files.length} 件を 1 回で実行中 (base: ${baseRef})...`);
-  const res = spawnSync('npx', ['vitest', 'run', '--passWithNoTests', ...plan.files], {
+  const res = spawnSync('npx', ['vitest', 'run', '--passWithNoTests', ...extraArgs, ...plan.files], {
     cwd: rootDir,
     stdio: 'inherit',
   });
@@ -204,7 +214,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   } else {
     const baseArg = process.argv.slice(2).find((a) => !a.startsWith('--'));
     const base = resolveBase(baseArg, process.env.GITHUB_BASE_REF);
-    const code = runPrTests(base);
+    const code = runPrTests(base, process.cwd(), parseShardArg(process.argv));
     process.exit(code);
   }
 }
