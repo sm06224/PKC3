@@ -316,6 +316,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: '計っている途中の時刻(台帳 #1852 O1 / 依頼 240)。ID を持ち、リロードした同じタブが続きを計るための一時の事実なので、運ぶ物は無い',
   },
   {
+    key: 'pkc3.timer-beats',
+    why: '計っている途中のタブが「まだ動いている / 閉じた」を残す時刻(依頼 75-1)。閉じられたタブの計測を見分けるための一時の事実で、運ぶ物は無い',
+  },
+  {
     key: 'pkc3.tab-id',
     why: '設定ではない(依頼 240)。このタブを見分ける番号(sessionStorage)。タブを閉じれば消える一時の事実で、運ぶ物は無い',
   },

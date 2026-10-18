@@ -30,6 +30,7 @@ import type { StatusOptions } from '@adapter/ui/render/status-notice';
 import { isAppendable } from '@features/flavor/append-spec';
 import { workLogLine, workLogText, type TimerRun } from '@features/timer/timer-run';
 import { elapsedText } from '@features/elapsed-text';
+import type { OrphanRuns } from '@adapter/ui/render/timer-resume';
 import { createWritableQueue } from './writable-queue';
 
 export interface TimerServiceDeps {
@@ -54,7 +55,18 @@ export interface TimerServiceDeps {
   readonly store?: {
     read(): readonly TimerRun[];
     write(runs: readonly TimerRun[]): void;
+    /** 🔴 計っている間、刻みのたびに呼ぶ「まだ動いている」印(依頼 75-1)。省略 = 印を付けない。 */
+    beat?(): void;
+    /** 🔴 閉じられたタブが残した、計っている途中の記録(依頼 75-1)。省略 = 拾わない。 */
+    orphans?(): readonly OrphanRuns[];
+    /** 拾った(または捨てると決めた)記録を消す。 */
+    forget?(tab: string): void;
   };
+  /**
+   * 🔴 **閉じられたタブの計測を、止めたことにして本文に入れるか聞く**(依頼 75-1。Gemini 回答 = 推薦 B)。
+   * `true` = 入れる / `false` = 入れない。省略 = 聞けないので拾わない(控えは残る)。
+   */
+  readonly askOrphan?: (message: string) => Promise<boolean>;
 }
 
 export interface TimerService {
@@ -71,6 +83,11 @@ export interface TimerService {
    * ノートが見つからない・追記できない種類になった控えは、続けず**理由を出す**(計った時間が黙って消えない)。
    */
   resume(): void;
+  /**
+   * 🔴 **前に閉じられたタブが残した計測を、拾うか聞く**(依頼 75-1)。⚠ `resume` の後・ノートの一覧が読めた後に呼ぶ。
+   * 入れる → 止めたことにして本文へ(終わりは最後に動いていた時刻)/ 入れない → 字で言って捨てる。
+   */
+  resumeOrphans(): Promise<void>;
 }
 
 /** 書き足しの結末を待つ上限(ms)。ふつうは 1 秒かからない(待つのは保存の往復だけ)。 */
@@ -99,6 +116,8 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
       reportedActive = active;
       deps.onActive?.(active);
     }
+    // 🔴 まだ動いている印(閉じられたタブの計測を、別のタブが見分けるため)
+    if (active) deps.store?.beat?.();
     deps.onChange([...running.values()]);
   };
 
@@ -224,6 +243,25 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
       if (kept > 0) {
         armTick();
         paint();
+      }
+    },
+
+    async resumeOrphans() {
+      const ask = deps.askOrphan;
+      const store = deps.store;
+      if (ask === undefined || store?.orphans === undefined) return;
+      for (const o of store.orphans()) {
+        for (const run of o.runs) {
+          const what = workLogText(new Date(run.startedAtMs), new Date(o.endedAtMs));
+          const yes = await ask(
+            `計っている途中で閉じられた記録があります。\n「${run.title}」${what}\n止めたことにして、本文に入れますか(終わりの時刻は、最後に動いていた時刻です)`,
+          );
+          // 🔴 聞いている間に別のタブが先に拾っていたら、二重に入れない
+          if (!store.orphans().some((x) => x.tab === o.tab)) break;
+          if (yes) finish(run.lid, run, o.endedAtMs);
+          else deps.notify(`「${run.title}」の計測(${what})は、本文に入れていません`, { kind: 'caution' });
+        }
+        store.forget?.(o.tab);
       }
     },
 
