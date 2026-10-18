@@ -116,6 +116,37 @@ test('🔴 新しい版が配られたら案内が出て、押すと入れ替わ
     await expect(page.locator('[data-pkc-action="apply-update"]')).toBeVisible();
     await clickReal(page, '[data-pkc-action="cancel-edit"]');
 
+    /**
+     * 🔴 **切り替えが止まったら、字を改めて「読み込み直す」を出す**(台帳 #1852 束 A1。依頼 84-6 B)。
+     * ⚠ 直す前は「切り替えています…」のまま、押し直す道が無かった。切り替えの依頼(`SKIP_WAITING`)を黙らせて止まりを作る
+     *   (本物の止まりは再現できないので、受け手を無言にする ── 見るのは画面の続き)。
+     * 🔑 新しい起動は足さない ── 押して止まり、「読み込み直す」で再読込し、案内がまた出る所から ② へ続ける。
+     */
+    await page.evaluate(() => {
+      ServiceWorker.prototype.postMessage = function () {
+        /* 依頼を握りつぶす */
+      };
+      (window as unknown as Record<string, unknown>).__beforeStuck = true;
+    });
+    await clickReal(page, '[data-pkc-action="apply-update"]');
+    await expect(card.locator('[data-pkc-field="update-text"]')).toContainText('切り替えています');
+    await expect(
+      card.locator('[data-pkc-field="update-text"]'),
+      '🔴 切り替わらないまま止まったのに、字が改まらない',
+    ).toContainText('切り替わりませんでした', { timeout: 20_000 });
+    const reloadBtn = card.locator('[data-pkc-action="apply-update"]');
+    await expect(reloadBtn, '🔴 止まったのに「読み込み直す」が出ない').toHaveText('読み込み直す');
+    await clickReal(page, reloadBtn);
+    await page.waitForFunction(
+      () =>
+        !(window as unknown as Record<string, unknown>).__beforeStuck &&
+        document.querySelector('[data-pkc-slot="root"]')?.getAttribute('data-pkc-boot') === 'ready',
+      null,
+      { timeout: 20_000 },
+    );
+    // 読み込み直したら、待機中の版の案内がまた出る(止まりは何も壊していない)
+    await expect(card).toBeVisible({ timeout: 20_000 });
+
     // ② 押すと交代して**再読込まで進む**(押しただけで止まらない)。
     // 🔴 観測点は「**この document が入れ替わったか**」。当初は
     // 「controller があって boot が ready」で待っていたが、**押す前の
