@@ -437,7 +437,12 @@ export class OfficeWindow {
     }
 
     // 🔴 開く指示を出した直後は生存通知が未着 ── 「開いている途中」として扱い、2 つ目を開かない(O2)
-    const opening = this.openedAt !== null && this.now() - this.openedAt < OPENING_GRACE_MS;
+    // 🔴 **生存通知が 1 つでも届いたら、もう「開いている途中」ではない**。通知が届いた後に窓が消えた(`closed` の放送が
+    //    届かないまま閉じた / 落とされた)なら、`isProbablyOpen()` が偽になった時点で「無い」と見る。
+    //    ⚠ 猶予を時刻だけで見ると、`ALIVE_TTL_MS` 途絶えて窓は無いのに、開いてから `OPENING_GRACE_MS` 経つまで
+    //    「開く」を押しても窓が立たない(頼むだけで終わる)。
+    const opening =
+      this.openedAt !== null && this.lastAliveAt < this.openedAt && this.now() - this.openedAt < OPENING_GRACE_MS;
     if (this.isProbablyOpen() || opening) {
       // ⚠ 2 つ立てると常駐が倍になる(1 窓 約 750MB 実測)。開かずに頼む
       this.ch.postMessage({ pkc3Office: 'focus-request', payload: {} });
