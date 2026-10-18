@@ -233,6 +233,42 @@ describe('折りたたみ(4)', () => {
       else proto.checkVisibility = saved;
     }
   });
+
+  it('🔴 見出しで折りたたんだ章([data-pkc-folded])の中の図も、刷る前に開いて描かれ、刷り終えたら元へ戻る', async () => {
+    vi.stubGlobal('requestIdleCallback', undefined);
+    const proto = HTMLElement.prototype as unknown as { checkVisibility?: () => boolean };
+    const saved = proto.checkVisibility;
+    proto.checkVisibility = function (this: HTMLElement): boolean {
+      return this.closest('[hidden]') === null;
+    };
+    try {
+      const root = document.createElement('div');
+      const h2 = document.createElement('h2');
+      h2.textContent = '章';
+      h2.setAttribute('data-pkc-folded', '');
+      const inner = host('graph TD\n H-->M');
+      inner.hidden = true;
+      root.append(h2, inner);
+      document.body.append(root);
+      const scope = hydrateMermaid([inner]);
+      await hydrateAllNow(root);
+      await settle();
+      expect(vi.mocked(renderToPng), '対照群: 見出しの畳みで隠れている間は描かれないはず').not.toHaveBeenCalled();
+
+      const restore = await preparePrintBody(root);
+      await settle();
+      expect(inner.hidden, '見出しの畳みが開いていない').toBe(false);
+      expect(inner.querySelector('img[data-pkc-field="mermaid-image"]'), '畳んだ章の中の図が描かれていない').not.toBeNull();
+      restore();
+      expect(inner.hidden, '刷り終えても隠れていない').toBe(true);
+      expect(h2.hasAttribute('data-pkc-folded'), '見出しの畳みの印が消えている').toBe(true);
+      scope.dispose();
+      root.remove();
+    } finally {
+      if (saved === undefined) delete proto.checkVisibility;
+      else proto.checkVisibility = saved;
+    }
+  });
 });
 
 describe('用意が遅れて終わった回(5)', () => {

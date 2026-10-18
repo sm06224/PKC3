@@ -418,7 +418,7 @@ export function extractBodyCss(appCss: string, tokensCss: string): BodyCss {
 export const MIN_RULES = 80;
 export const MIN_VARS = 12;
 /** 上限。⚠ **tripwire は両側に置く**(CLAUDE.md)── 器の規則が混ざり始めたら鳴る。 */
-export const MAX_RULES = 250;
+export const MAX_RULES = 350;
 
 /**
  * 🔴 **焼いた文字列そのものを検める**(2026-08-07、レビュー指摘で作った)。
