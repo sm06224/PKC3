@@ -463,6 +463,7 @@ import { appQueryKey } from '@adapter/ui/render/query-key-store';
 // 🔴 ▼ で選んだ「作る種類」を端末側に覚える(#1045)
 import { appCreateKind } from '@adapter/ui/render/create-kind';
 import { BODY_HOST_SELECTOR, PAINTED_ATTR } from '@adapter/ui/render/detail';
+import { canNoteFind, closeNoteFind, isNoteFindOpen, openNoteFind } from '@adapter/ui/render/note-find';
 import { openView } from '@adapter/ui/render/open-view';
 import {
   CLOSE_NOTE_WINDOW_REFUSED,
@@ -6134,6 +6135,20 @@ export function runGlobalCommand(
     applyPaneVisibility(root, appPanes.setHidden(next));
     return true;
   }
+  if (cmd === 'find-in-note') {
+    /**
+     * 🔴 **ノートの中だけを探す小さな欄**(#1163 依頼 163 = 案 ③)。実体は `render/note-find.ts`。
+     * ⚠ 開く先の本文が無いとき(ノートを開いていない / 左の探す欄に居る)は、これまでの `Ctrl+F` どおり
+     *   左の「本文ごと探す」欄へ回す ── 答えを返す口は `focus-search` の 1 本(§7)。
+     */
+    const active = root.ownerDocument.activeElement;
+    const inFilter = active?.closest('[data-pkc-field="entry-filter"]') != null;
+    if (inFilter || !canNoteFind(root))
+      return runGlobalCommand('focus-search', root, dispatcher, keymap, prevent, notify, dry);
+    if (dry) return true;
+    prevent();
+    return openNoteFind(root);
+  }
   if (cmd === 'focus-search') {
     const input = root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]');
     if (!input) return false; // 欄が無い面では何も起きない(ブラウザの検索に譲る)
@@ -10057,6 +10072,13 @@ const ACTIONS: Record<string, ActionHandler> = {
       fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
       saved: (message) => dispatcher.dispatch({ type: 'OP_NOTICE', message }),
     }),
+  /**
+   * 🔴 **ノートの中だけを探す小さな欄を出す**(#1163 依頼 163。読む面の帯の「探す」ボタン)。
+   * ⚠ 実体は `Ctrl+F`(`runGlobalCommand('find-in-note')`)と同じ `openNoteFind` の 1 本。
+   */
+  'find-in-note': (_dispatcher, _target, _services, root) => {
+    openNoteFind(root);
+  },
   /**
    * 🔴 **読む面のコピー**(2026-08-08。user 裁定「markdown のテキストとしての
    * コピーと HTML 書式ありのコピーの両方」)。押しても画面が変わらない操作なので、
@@ -21214,7 +21236,7 @@ export function bindActions(
        * 🔑 **覆る条件**:設定やフラグが長い読み物になったら、判定を面の種類ごとではなく
        *   「読む面か」で括り直す。
        */
-      if (gcmd === 'focus-search' && dispatcher.getState().viewMode === 'help') return;
+      if ((gcmd === 'focus-search' || gcmd === 'find-in-note') && dispatcher.getState().viewMode === 'help') return;
       if (runGlobalCommand(gcmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser))
         return;
     } else if (!typing) {
@@ -21245,6 +21267,17 @@ export function bindActions(
          * 🔑 1 回の `Esc` で 1 段だけ(次の `Esc` で今までどおりノートが閉じる)。
          * ⚠ 右クリックのメニューが出ている間は譲る(`deselect-entry` と同じ判定の 1 本)。
          */
+        /**
+         * 🔴 **ノートの中を探す小さな欄が出ている間の `Esc` も、まず欄を閉じるだけ**(#1163 依頼 163)。
+         * ⚠ 欄の入力の中の `Esc` は欄自身が受ける(`note-find.ts`)が、焦点が ‹ › × ボタンや本文にあるときはここへ届く。
+         *   閉じないと `deselect-entry` まで進んで、探していたノートが閉じる。
+         * 🔑 1 回の `Esc` で 1 段だけ(閉じたあとの `Esc` で今までどおりノートが閉じる)。
+         */
+        if (rcmd === 'deselect-entry' && isNoteFindOpen(root) && !contextMenuOpen(root)) {
+          ke.preventDefault();
+          closeNoteFind(root, true);
+          return true;
+        }
         if (
           rcmd === 'deselect-entry' &&
           dispatcher.getState().searchJump != null &&

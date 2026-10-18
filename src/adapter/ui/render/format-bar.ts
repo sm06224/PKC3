@@ -253,6 +253,22 @@ export function buildFormatBar(): HTMLElement {
   sortTasks.append(sortTasksLabel);
   bar.append(sortTasks);
 
+  /**
+   * 🔴 **このノートの中を探す小さな欄を出す**(#1163 依頼 163)。⚠ 読む面の帯の「探す」と**同じ口**(`find-in-note`)。
+   * 編集中は 2 ペインのプレビュー / ライブエディタの描かれた本文を探す。
+   */
+  const findInNote = document.createElement('button');
+  findInNote.type = 'button';
+  findInNote.setAttribute('data-pkc-action', 'find-in-note');
+  findInNote.setAttribute(HINT_BASE, 'このノートの本文の中だけを探す小さな欄を開きます');
+  findInNote.setAttribute(HINT_COMMAND, 'find-in-note');
+  findInNote.title = hintTitle('このノートの本文の中だけを探す小さな欄を開きます', 'find-in-note');
+  const findLabel = document.createElement('span');
+  findLabel.setAttribute('data-pkc-field', 'label');
+  findLabel.textContent = 'ノート内を探す';
+  findInNote.append(findLabel);
+  bar.append(findInNote);
+
   const toggleReplace = document.createElement('button');
   toggleReplace.type = 'button';
   toggleReplace.setAttribute('data-pkc-action', 'toggle-replace');

@@ -329,7 +329,7 @@ describe('🔴 縁の「操作を探す」に、探す欄へ移る鍵を添え�
   const palette = (root: HTMLElement): HTMLButtonElement =>
     edgeButtons(root).find((b) => b.getAttribute('data-pkc-action') === 'open-palette')!;
 
-  it('🔴 説明に「Ctrl + F で探す欄へ」が入り、探す系のボタンは足していない', () => {
+  it('🔴 説明に「Ctrl + Shift + F で探す欄へ」が入り、探す系のボタンは足していない', () => {
     const { root } = mounted();
     const before = edgeButtons(root);
     applyPaneVisibility(root, ['sidebar']);
@@ -339,7 +339,7 @@ describe('🔴 縁の「操作を探す」に、探す欄へ移る鍵を添え�
     expect(before.length).toBe(0);
     expect(edge.map(keyOf)).toEqual(barButtons(root).map(keyOf));
     const title = palette(root).title;
-    expect(title, '探す欄へ移る鍵が説明に無い').toContain('Ctrl + F で探す欄へ');
+    expect(title, '探す欄へ移る鍵が説明に無い').toContain('Ctrl + Shift + F で探す欄へ');
     expect(title, '操作を探す自身の鍵まで消えた').toContain('(Ctrl + Shift + P)');
     // 対照群: ほかの縁のボタンには添えない(「操作を探す」だけの一言)
     for (const b of edge.filter((x) => x !== palette(root))) {
@@ -351,11 +351,11 @@ describe('🔴 縁の「操作を探す」に、探す欄へ移る鍵を添え�
     const { root } = mounted();
     applyPaneVisibility(root, ['sidebar']);
     const k = memStore();
-    k.removeBinding('focus-search', 'Mod+F');
+    k.removeBinding('focus-search', 'Mod+Shift+F');
     expect(k.addBinding('focus-search', 'Alt+9'), '前提: 割当を変えられない').toBeNull();
     expect(applyShortcutHints(root, k), '1 つも書き換えていない(空振り)').toBeGreaterThan(0);
     expect(palette(root).title, '割当を変えたのに古い鍵のまま').toContain('Alt + 9 で探す欄へ');
-    expect(palette(root).title).not.toContain('Ctrl + F');
+    expect(palette(root).title).not.toContain('Ctrl + Shift + F');
     k.removeBinding('focus-search', 'Alt+9');
     applyShortcutHints(root, k);
     expect(palette(root).title, '割当が無いのに鍵を書いている').not.toContain('探す欄へ');

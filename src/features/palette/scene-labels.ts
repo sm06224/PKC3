@@ -174,6 +174,7 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'view-sql': SQL,
   // 検索 ── 探す欄・置換・一致の帯・絞り
   'focus-search': SEARCH,
+  'find-in-note': SEARCH,
   'toggle-replace': SEARCH,
   'replace-all': SEARCH,
   'search-jump-next': SEARCH,

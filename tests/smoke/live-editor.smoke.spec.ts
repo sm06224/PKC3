@@ -1679,3 +1679,102 @@ test('🔴 インライン編集中に「雛形を入れる」を押すと、行
 
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });
+
+/**
+ * 🔴 **ノートの中を探す欄**(依頼 163 ③。`Ctrl+F` = 中央ペイン右上の欄)。
+ *
+ * ⚠ unit(happy-dom)は版面も `CSS.highlights` も持たない ── ここで初めて見える 4 つ:
+ *  ① 実キーの `Ctrl+F` が欄を出す(ライブエディタでも読む面でも)
+ *  ② 一致が **CSS Highlight に載り**、件数が「n / m」になる
+ *  ③ `Enter` で現在の一致が**見える位置**へスクロールされる(`getBoundingClientRect`)
+ *  ④ `Esc` で欄が消えて焦点が戻る / `Ctrl+Shift+F` は左の欄 / 狭い幅でも欄が中央ペインより広くならない
+ * 🔑 起動は足さず、この file の「ライブ編集 → 保存 → 読む面」の道中に載せる(1 本)。
+ */
+test('🔴 Ctrl+F でノートの中を探す欄が出る(ライブエディタ・読む面・狭い幅)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  const filler = (n: number): string =>
+    Array.from({ length: n }, (_, i) => `詰め物の段落 ${i + 1} です。`).join('\n\n');
+  await openLive(page, `# 題\n\nねこが一匹。\n\n${filler(40)}\n\nまたねこ。\n\n${filler(30)}\n\n最後のねこ。\n`);
+
+  const bar = page.locator('[data-pkc-region="note-find"]');
+  const input = page.locator('[data-pkc-field="note-find-input"]');
+  const count = page.locator('[data-pkc-field="note-find-count"]');
+  const hits = (): Promise<number | null> =>
+    page.evaluate(
+      () =>
+        (CSS as unknown as { highlights?: Map<string, { size: number }> }).highlights?.get('pkc-note-find')?.size ??
+        null,
+    );
+  const currentBox = (): Promise<{ top: number; bottom: number; vh: number } | null> =>
+    page.evaluate(() => {
+      const cur = (CSS as unknown as { highlights: Map<string, Set<Range>> }).highlights.get('pkc-note-find-current');
+      const r = cur ? [...cur][0] : undefined;
+      if (!r) return null;
+      const b = r.getBoundingClientRect();
+      return { top: b.top, bottom: b.bottom, vh: window.innerHeight };
+    });
+
+  const exercise = async (surface: string): Promise<void> => {
+    await expect(bar, `${surface}: 欄が最初から出ている`).toHaveCount(0);
+    await page.keyboard.press('Control+f');
+    await expect(bar, `${surface}: Ctrl+F で欄が出ない`).toBeVisible();
+    await expect(input, `${surface}: 欄に焦点が入らない`).toBeFocused();
+    await page.keyboard.type('ねこ');
+    await expect(count, `${surface}: 件数が n / m にならない`).toHaveText('1 / 3');
+    expect(await hits(), `${surface}: 一致が CSS Highlight に載っていない`).toBe(3);
+    // 🔴 Enter で 2 つめ → 3 つめ(末尾)。見える位置にいる
+    await page.keyboard.press('Enter');
+    await expect(count).toHaveText('2 / 3');
+    await page.keyboard.press('Enter');
+    await expect(count).toHaveText('3 / 3');
+    await expect
+      .poll(
+        async () => {
+          const p = await currentBox();
+          return p !== null && p.top >= 0 && p.bottom <= p.vh;
+        },
+        { message: `${surface}: 現在の一致がスクロールで見える位置に来ない` },
+      )
+      .toBe(true);
+    await page.keyboard.press('Shift+Enter');
+    await expect(count, `${surface}: Shift+Enter で前へ戻らない`).toHaveText('2 / 3');
+    // 🔴 日本語入力の確定(keyCode 229 の Enter)では送らない
+    await input.evaluate((el) => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, bubbles: true, cancelable: true }));
+    });
+    await expect(count, `${surface}: 変換確定の Enter で送ってしまった`).toHaveText('2 / 3');
+    await page.keyboard.press('Escape');
+    await expect(bar, `${surface}: Esc で欄が消えない`).toHaveCount(0);
+    expect(await hits(), `${surface}: 閉じたのに塗りが残る`).toBeNull();
+    expect(
+      await page.evaluate(() => document.activeElement?.closest('[data-pkc-region="note-find"]') ?? null),
+      `${surface}: 焦点が欄に残っている`,
+    ).toBeNull();
+  };
+
+  await exercise('ライブエディタ');
+  // 左の欄は Ctrl+Shift+F
+  await page.keyboard.press('Control+Shift+F');
+  await expect(page.locator('[data-pkc-field="entry-filter"]'), 'Ctrl+Shift+F で左の欄に入らない').toBeFocused();
+  await expect(bar).toHaveCount(0);
+
+  // 読む面へ
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"] h1')).toBeVisible();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await exercise('読む面');
+
+  // 狭い幅でも欄は中央ペインを覆いきらない
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.keyboard.press('Control+f');
+  await expect(bar).toBeVisible();
+  const w = await page.evaluate(() => ({
+    bar: document.querySelector('[data-pkc-region="note-find"]')!.getBoundingClientRect().width,
+    center: document.querySelector('[data-pkc-region="center"]')!.getBoundingClientRect().width,
+  }));
+  expect(w.bar, `狭い幅で欄(${w.bar})が中央ペイン(${w.center})より広い`).toBeLessThanOrEqual(w.center);
+  await page.keyboard.press('Escape');
+  expect(errors).toEqual([]);
+});

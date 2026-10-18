@@ -295,13 +295,29 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Escape'],
     note: '中央がコレクションの画面に戻ります(一覧の何も無い所を押しても同じです)',
   },
+  /**
+   * 🔴 **ノートの中だけを探す小さな欄**(#1163 依頼 163 = 採用案 ③。Gemini 裁定 = 推薦どおり)。
+   * ⚠ 読む画面の `Ctrl+F` は、これまで左の「本文ごと探す」欄(全ノート)へ行った。開いているノートの中だけを探す方法が無かったので、
+   *   ノートを開いているときの `Ctrl+F` は**この欄**に替え、全ノートから探す道は `focus-search`(`Ctrl+Shift+F`)に残す。
+   * ⚠ ノートを開いていないとき(一覧・設定など)の `Ctrl+F` は、これまでどおり左の欄へ行く(実体は `binder.ts`)。
+   * 🔑 打っている最中でも効く(編集中は 2 ペインのプレビュー / ライブエディタの描かれた本文を探す)。
+   */
+  {
+    id: 'find-in-note',
+    label: 'このノートの中を探す',
+    contexts: ['global'],
+    defaults: ['Mod+F'],
+    whileTyping: true,
+    note: 'いま見ているノートの本文の中だけを探す小さな欄を出します(Enter で次・Shift+Enter で前の一致へ、Esc で閉じます。ノートを開いていないときは左の「本文ごと探す」欄へ移ります。ヘルプを開いている間は、ブラウザの検索が出ます)',
+    alias: '探す 検索 ページ内 本文 ノート内 一致',
+  },
   {
     id: 'focus-search',
     label: '本文ごと探す欄へ移る',
     contexts: ['global'],
-    defaults: ['Mod+F'],
-    note: '左の一覧の「本文ごと探す」欄にフォーカスを移します(ヘルプを開いている間は、ブラウザの検索が出ます)',
-    alias: '探す 検索 本文ごと探す 絞り込み',
+    defaults: ['Mod+Shift+F'],
+    note: '左の一覧の「本文ごと探す」欄(すべてのノートから探す)にフォーカスを移します',
+    alias: '探す 検索 本文ごと探す 絞り込み 全ノート',
   },
   /**
    * 🔴 **別のウィンドウ・面を閉じる**(#1042 C3。裁定 2026-09-25 Q3 = A)。
@@ -2486,6 +2502,18 @@ export interface UnusableBinding {
   readonly problem: BindingProblem;
 }
 
+/** 前の版の既定(いまの既定ではない)。`resolveUsableBindings` が読み替える。 */
+const RETIRED_DEFAULTS: readonly (readonly [string, string])[] = [['focus-search', 'Mod+F']];
+
+/**
+ * 新しい版で足した既定(#1163 依頼 163)。**この既定だけ**が、前の版で user が別のコマンドへ割り当てていた同じ鍵に負ける。
+ * ⚠ 全部の既定を譲らせない ── 「前のコマンドが後のコマンドの既定を先に取らない」(`keymap-sweep-1087`)の取り決めは今までどおり。
+ */
+const ADDED_DEFAULTS: readonly (readonly [string, string])[] = [
+  ['focus-search', 'Mod+Shift+F'],
+  ['find-in-note', 'Mod+F'],
+];
+
 /**
  * 🔴 **保存や設定ファイルから来た割当にも、割り当てるときと同じ検査を通す**(#1087)。
  * ⚠ 直す前は `resolveBindings` が書式だけを見ていたので、素の `B` で全域の操作が動く /
@@ -2496,19 +2524,54 @@ export interface UnusableBinding {
  *   (「自分の既定を自分の検査が落とす」を作らない)。
  * 衝突は**先に処理した物が勝つ**(表の順)。まだ処理していない上書きの割当は、勝ち負けが決まるまで数えない。
  */
+
 export function resolveUsableBindings(overrides: Readonly<Record<string, unknown>>): {
   readonly bindings: KeymapBindings;
   readonly unusable: readonly UnusableBinding[];
 } {
-  const all = resolveBindings(overrides);
+  const resolved = resolveBindings(overrides);
+  /**
+   * 🔴 **前の版の既定は、いまの既定へ読み替える**(#1163 依頼 163)。`focus-search` の既定は `Mod+F` だったが、`Mod+F` は
+   * 「このノートの中を探す」(`find-in-note`)の既定になった。前の版で `focus-search` に自分の割当(`Mod+F` + `Alt+9` など)を
+   * 保存していた人の `Mod+F` は、「使えない割当」に落とさず、`focus-search` の新しい既定(`Mod+Shift+F`)に読み替える。
+   */
+  const all: Record<string, readonly string[]> = { ...resolved };
+  for (const [id, old] of RETIRED_DEFAULTS) {
+    const c = findCommand(id);
+    if (c === null || !isEffectiveOverride(overrides[id])) continue;
+    const list = resolved[id] ?? [];
+    if (!list.some((x) => sameChord(x, old))) continue;
+    const next: string[] = [];
+    for (const x of list) {
+      for (const y of sameChord(x, old) ? c.defaults : [x]) if (!next.some((n) => sameChord(n, y))) next.push(y);
+    }
+    all[id] = next;
+  }
+  /**
+   * 🔴 **user が自分で割り当てた鍵は、新しい既定に勝つ**(#1163 依頼 163)。新しい版が既定を足したとき(`focus-search` = `Mod+Shift+F`)、
+   * 前の版で別のコマンドへ同じ鍵を割り当てていた人の割当を「使えない」に落とさない ── 負けるのは**既定の側**。
+   * (行き場は残る:`focus-search` は `Ctrl+F`〈ノートを開いていないとき〉・操作を探す・左の欄のクリックで届く)
+   */
+  const yielded = (y: KeyCommand, chord: string): boolean =>
+    ADDED_DEFAULTS.some(([id, d]) => id === y.id && sameChord(d, chord)) &&
+    KEY_COMMANDS.some(
+      (x) =>
+        x.id !== y.id &&
+        isEffectiveOverride(overrides[x.id]) &&
+        contextsOverlap(y.contexts, x.contexts) &&
+        (all[x.id] ?? []).some((u) => sameChord(u, chord) && !x.defaults.some((d) => sameChord(d, u))),
+    );
   const current: Record<string, readonly string[]> = {};
-  for (const c of KEY_COMMANDS) current[c.id] = isEffectiveOverride(overrides[c.id]) ? [] : c.defaults;
+  for (const c of KEY_COMMANDS)
+    current[c.id] = isEffectiveOverride(overrides[c.id]) ? [] : c.defaults.filter((d) => !yielded(c, d));
   const unusable: UnusableBinding[] = [];
   // 🔑 1 巡目:各コマンドの**自分の既定**を先に全部入れる。表の前のコマンドが、後ろのコマンドの既定を
   //    先に取ってしまう(= 後ろの既定が重複して黙って効かない)のを防ぐ
   for (const c of KEY_COMMANDS) {
     if (!isEffectiveOverride(overrides[c.id])) continue;
-    current[c.id] = (all[c.id] ?? []).filter((chord) => c.defaults.some((d) => sameChord(d, chord)));
+    current[c.id] = (all[c.id] ?? []).filter(
+      (chord) => c.defaults.some((d) => sameChord(d, chord)) && !yielded(c, chord),
+    );
   }
   // 2 巡目:残り(既定でない割当)を検査する。並びは保存の並びのまま
   for (const c of KEY_COMMANDS) {
@@ -2516,6 +2579,8 @@ export function resolveUsableBindings(overrides: Readonly<Record<string, unknown
     const kept: string[] = [];
     for (const chord of all[c.id] ?? []) {
       const isOwnDefault = c.defaults.some((d) => sameChord(d, chord));
+      // 譲った既定は、user が自分で外していない限り戻さない(2 巡目で入れ直さない)
+      if (isOwnDefault && yielded(c, chord)) continue;
       const problem = isOwnDefault ? null : validateBinding(c.id, chord, current, true);
       if (problem === null) {
         kept.push(chord);
