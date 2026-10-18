@@ -194,6 +194,8 @@ export function rebuildArchiveSource(opts: {
 }): { readonly source: ArchiveSource; readonly stats: () => RescueStats } {
   const assetPorts = assetArchivePorts(opts.cid, opts.assets);
   const source: ArchiveSource = {
+    // 🔴 拾えた分だけの zip だと、ファイルの中に書く(依頼 119-4)
+    partial: true,
     cid: opts.cid,
     title: opts.title,
     listEntryMetas: async () =>

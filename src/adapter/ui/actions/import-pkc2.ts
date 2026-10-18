@@ -126,7 +126,13 @@ export interface ImportDeps {
    */
   importTagColors?(
     incoming: readonly import('@features/tag-color').TagColorEntry[],
-  ): Promise<{ added: number; kept: number; overLimit: number }>;
+  ): Promise<{
+    added: number;
+    kept: number;
+    overLimit: number;
+    /** 🔴 足した色そのもの(依頼 119-5)。取り消しが「この取り込みで足した色だけ」を外すために憶える。省略可。 */
+    addedColors?: readonly import('@features/tag-color').TagColorEntry[];
+  }>;
   /**
    * 既に **bytes を持っている** key の集合。
    * ⚠ **meta 行で代用しない**(review H-1)── bytes は IDB、meta は sqlite と
@@ -181,7 +187,14 @@ export interface ImportDeps {
    * ⚠ `focus` と同じ理由で **md 経路だけ**が呼ぶ ── PKC2 の container 取込は
    *    ファイルと entry が 1:1 でないので、順で結べない。
    */
-  imported?(lids: readonly string[], opts?: { readonly tagColors?: boolean }): void;
+  imported?(
+    lids: readonly string[],
+    opts?: {
+      readonly tagColors?: boolean;
+      /** 🔴 この取り込みで足した色(依頼 119-5)。取り消しはこれだけを外す(前から在った色は触らない)。 */
+      readonly addedColors?: readonly import('@features/tag-color').TagColorEntry[];
+    },
+  ): void;
   /**
    * ハッシュを取る上限(既定 `HASH_MAX_BYTES` = 64MB)。
    *
@@ -437,8 +450,15 @@ async function runImport(
     return fail(`${phaseBlockReason(phase)}取り込んでください`);
   }
 
-  /** この取り込みでタグの色を 1 件でも足したか(取り消しが色を戻さないことを言うため)。 */
+  /** この取り込みでタグの色を 1 件でも足したか。 */
   let colorsAdded = false;
+  /** 🔴 足した色そのもの(依頼 119-5。取り消しが外す対象)。 */
+  const addedColors: import('@features/tag-color').TagColorEntry[] = [];
+  /** 取り消しに渡す形(`tagColors` は従来どおり、足した色が分かるときだけ `addedColors` を添える)。 */
+  const undoOpts = (): { tagColors: boolean; addedColors?: readonly import('@features/tag-color').TagColorEntry[] } => ({
+    tagColors: colorsAdded,
+    ...(addedColors.length > 0 ? { addedColors: [...addedColors] } : {}),
+  });
   // 書込の到達点。失敗時に「どこまで書けたか」を user に言うために持つ ──
   // 「失敗しました」とだけ言って disk に残すと、素直な再取込が二重取込になる
   let entriesWritten = 0;
@@ -892,6 +912,7 @@ async function runImport(
           // ⚠ 戻せたときは黙る(「注意」に数えない)。付いている色を残した分は仕様どおり。上限で落ちた分は言う
           const r = await deps.importTagColors(colors);
           if (r.added > 0) colorsAdded = true;
+          if (r.addedColors !== undefined) addedColors.push(...r.addedColors);
           if (r.overLimit > 0) {
             result.warnings.push(`上限のため ${r.overLimit} 件の色を戻せませんでした(色を付けられるタグは 500 個までです)`);
           }
@@ -903,7 +924,7 @@ async function runImport(
       // 書けた分は必ず画面へ出す ── 「失敗」と言いながら disk に残すのが最悪
       await deps.reload().catch(() => {});
       // 🔴 書けた分は戻せるようにする(片道にしない)── `report` より先に憶える
-      if (entriesWritten > 0) deps.imported?.(writtenLids, { tagColors: colorsAdded });
+      if (entriesWritten > 0) deps.imported?.(writtenLids, undoOpts());
       return fail(
         entriesWritten > 0
           ? `${entriesWritten} 件のノートまで取り込みました。${stage}の取り込みで失敗しました。もう一度取り込むと同じノートが二重になります(「取り込みを取り消す」で、取り込んだ分をゴミ箱へ入れられます): ${reason(e)}`
@@ -942,7 +963,7 @@ async function runImport(
      *   残っていると、それが出る**(押すと前の取り込み分が消える)。⚠ `report` より先に呼ぶ ──
      *   面の操作は `report` の中で `pending()` から組む。
      */
-    deps.imported?.(rows.map((r) => r.lid), { tagColors: colorsAdded });
+    deps.imported?.(rows.map((r) => r.lid), undoOpts());
     // 🔴 **1 件のノートのバックアップは、そのノートを開く**(依頼 38-1 の裁定 B。#1643)── 1 件だけ渡したメモが
     //   どこに入ったか、画面から分からなかった。⚠ 2 件以上は開かない(どれを開くのが正しいか決められない)。
     //   PKC2 の書き出しは対象外(何十件も入る)── 開くのは PKC3 のバックアップ(`restored`)だけ
@@ -962,7 +983,7 @@ async function runImport(
   } catch (e) {
     if (entriesWritten > 0) {
       await deps.reload().catch(() => {});
-      deps.imported?.(writtenLids, { tagColors: colorsAdded });
+      deps.imported?.(writtenLids, undoOpts());
       return fail(
         `${entriesWritten} 件のノートまで取り込みましたが、その後で失敗しました(もう一度取り込むと同じノートが二重になります。「取り込みを取り消す」で、取り込んだ分をゴミ箱へ入れられます): ${reason(e)}`,
         true,

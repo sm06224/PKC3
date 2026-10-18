@@ -537,23 +537,33 @@ describe('取り込んだノートの時刻を運ぶ・取り込み直せない�
     expect(got.entries[0]!.createdAt).toBe('2020-01-02 03:04:05');
   });
 
-  it('🔴 container.json が取り込み直せる字数を超えたら、書くが警告する(断らない)', async () => {
+  it('🔴 container.json が取り込み直せる字数を超えたら、書き出さずに断る(依頼 119-3 A)', async () => {
     // 小さい上限を注入する。⚠ 日本語の本文: bytes ではなく字数で見ている(bytes なら約 3 倍に数える)
     const f = { entries: [{ lid: 'a', body: 'あ'.repeat(200) }] };
-    const over = await writeArchive(source(f), '2026-10-15T00:00:00Z', 100);
-    expect(over.counts.entries, '警告だけで書くのをやめた').toBe(1);
-    expect(over.warnings.join('\n')).toContain('取り込み直せないことがあります');
-    // 対照群: 上限の内側なら出ない
+    await expect(writeArchive(source(f), '2026-10-15T00:00:00Z', 100)).rejects.toThrow(
+      '大きすぎて取り込み直せないので書き出しません',
+    );
+    await expect(writeArchive(source(f), '2026-10-15T00:00:00Z', 100)).rejects.toThrow('フォルダごとに分けて書き出してください');
+    // 対照群: 上限の内側なら書ける
     const within = await writeArchive(source(f), '2026-10-15T00:00:00Z', 10_000);
+    expect(within.counts.entries).toBe(1);
     expect(within.warnings.join('\n')).not.toContain('取り込み直せない');
-    // 字数の境目: container.json の字数ちょうどでは出ず、1 字足りなければ出る
-    const dir = await readZipDirectory(over.blob);
-    const container = await readZipEntry(over.blob, dir.find((e) => e.name === 'container.json')!);
+    // 字数の境目: container.json の字数ちょうどでは通り、1 字足りなければ断る
+    const dir = await readZipDirectory(within.blob);
+    const container = await readZipEntry(within.blob, dir.find((e) => e.name === 'container.json')!);
     const chars = (await container.text()).length;
     expect(chars, '前提: 字数が bytes より小さい(日本語)').toBeLessThan(container.size);
     const exact = await writeArchive(source(f), '2026-10-15T00:00:00Z', chars);
-    expect(exact.warnings.join('\n'), '上限ちょうどで警告した').not.toContain('取り込み直せない');
-    const short = await writeArchive(source(f), '2026-10-15T00:00:00Z', chars - 1);
-    expect(short.warnings.join('\n'), '1 字超えたのに警告しない').toContain('取り込み直せない');
+    expect(exact.counts.entries, '上限ちょうどで断った').toBe(1);
+    await expect(writeArchive(source(f), '2026-10-15T00:00:00Z', chars - 1), '1 字超えたのに断らない').rejects.toThrow(
+      '書き出しません',
+    );
+  });
+
+  it('🔴 保険の zip(oversize: warn)は大きさで断らず、書いたうえで警告する(作り直しを止めない)', async () => {
+    const f = { entries: [{ lid: 'a', body: 'あ'.repeat(200) }] };
+    const over = await writeArchive(source(f), '2026-10-15T00:00:00Z', 100, 'warn');
+    expect(over.counts.entries, '警告だけで書くのをやめた').toBe(1);
+    expect(over.warnings.join('\n')).toContain('取り込み直せないことがあります');
   });
 });

@@ -89,6 +89,7 @@ describe('peekArchivePreview ── 3 つの file 型 + 旧形式', () => {
       hasRelations: true,
       hasRevisions: true,
       exportedAt: NOW,
+      partial: false,
     });
   });
 
@@ -106,6 +107,7 @@ describe('peekArchivePreview ── 3 つの file 型 + 旧形式', () => {
       hasRelations: false,
       hasRevisions: false,
       exportedAt: NOW,
+      partial: false,
     });
   });
 
@@ -119,6 +121,7 @@ describe('peekArchivePreview ── 3 つの file 型 + 旧形式', () => {
       hasRelations: false,
       hasRevisions: false,
       exportedAt: NOW,
+      partial: false,
     });
   });
 
@@ -140,6 +143,7 @@ describe('peekArchivePreview ── 3 つの file 型 + 旧形式', () => {
       hasRelations: true,
       hasRevisions: false,
       exportedAt: NOW,
+      partial: false,
     });
   });
 
@@ -161,6 +165,7 @@ describe('formatArchivePreviewMessage', () => {
       hasRelations: true,
       hasRevisions: false,
       exportedAt: NOW,
+      partial: false,
     });
     expect(msg).toContain('ノート 3 件');
     expect(msg).toContain('添付 2 件');
@@ -172,7 +177,7 @@ describe('formatArchivePreviewMessage', () => {
 
   it('🔴 窓の頭に、ファイル名と取った日時を出す(#1643 依頼 38-3)', () => {
     const msg = formatArchivePreviewMessage(
-      { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false, exportedAt: '2026-10-10T09:20:00.000Z' },
+      { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false, exportedAt: '2026-10-10T09:20:00.000Z', partial: false },
       'メモ-20261010.pkc3-full.zip',
     );
     const head = msg.split('\n')[0]!;
@@ -184,7 +189,7 @@ describe('formatArchivePreviewMessage', () => {
   });
 
   it('名前だけ・日時だけ・どちらも無い、を壊さずに言う(読めない日時は黙って省く)', () => {
-    const base = { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false };
+    const base = { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false, partial: false };
     expect(archiveSourceLine('a.zip', null)).toBe('a.zip');
     expect(archiveSourceLine(undefined, null)).toBeNull();
     expect(archiveSourceLine('', 'でたらめ')).toBeNull();
@@ -193,5 +198,44 @@ describe('formatArchivePreviewMessage', () => {
     expect(formatArchivePreviewMessage({ ...base, exportedAt: null }).split('\n')[0]).toBe(
       'このバックアップには、次が入っています。',
     );
+  });
+});
+
+describe('🔴 拾えた分だけのバックアップを、ファイルの中の印で言う(依頼 119-4)', () => {
+  const base = { noteCount: 2, assetCount: 0, hasRevisions: false, exportedAt: null };
+
+  it('partial の zip は、名前に依らず peek が partial を返す(対照群: 通常の zip は false)', async () => {
+    const part = await writeArchive({ ...source({ entries: [{ lid: 'a', body: 'A' }] }), partial: true }, NOW);
+    const full = await writeArchive(source({ entries: [{ lid: 'a', body: 'A' }] }), NOW);
+    // ⚠ peek は Blob だけを受ける ── ファイル名は渡せない(= 名前を変えても同じ)
+    expect((await peekArchivePreview(part.blob))!.partial).toBe(true);
+    expect((await peekArchivePreview(full.blob))!.partial).toBe(false);
+  });
+
+  it('作り直しの保険の zip(rebuildArchiveSource)は partial を書く', async () => {
+    const { rebuildArchiveSource } = await import('../../src/features/storage/container-rebuild');
+    const { source: src } = rebuildArchiveSource({
+      cid: 'c1',
+      title: 't',
+      rows: [{ lid: 'a', title: 'A', archetype: 'text', body: 'x', entryOrder: 1, createdAt: null, updatedAt: null }],
+      skipped: 0,
+      empty: 0,
+    });
+    expect((await peekArchivePreview((await writeArchive(src, NOW)).blob))!.partial).toBe(true);
+  });
+
+  it('つながりが入っていないときは「フォルダの入り方は入っていません」と言う', () => {
+    const msg = formatArchivePreviewMessage({ ...base, hasRelations: false, partial: true });
+    expect(msg).toContain('壊れたときに拾えた分だけのバックアップです。フォルダの入り方は入っていません。');
+  });
+
+  it('つながりが入っているときは、嘘になる「入っていません」を言わない', () => {
+    const msg = formatArchivePreviewMessage({ ...base, hasRelations: true, partial: true });
+    expect(msg).toContain('壊れたときに拾えた分だけのバックアップです。読めなかったノート・つながり・履歴は入っていません。');
+    expect(msg).not.toContain('フォルダの入り方は入っていません');
+  });
+
+  it('通常のバックアップには出さない', () => {
+    expect(formatArchivePreviewMessage({ ...base, hasRelations: false, partial: false })).not.toContain('拾えた分だけ');
   });
 });

@@ -31,7 +31,7 @@ import {
 import { createWarnCollector, type WarnCollector } from './warn-cap';
 import { isTooLargeToRead } from '../import/too-large';
 import { relabeledInFileWarning, relabeledWarning } from '../import/relabel-warning';
-import { MAX_EMBED_TEXT_CHARS, notImportableArchiveMessage } from '../storage/image-export-limit';
+import { archiveTooBigRefusal, MAX_EMBED_TEXT_CHARS, notImportableArchiveMessage } from '../storage/image-export-limit';
 import { parseTagColorList, type TagColorEntry } from '../tag-color';
 
 export const ARCHIVE_FORMAT = 'pkc3-archive';
@@ -103,6 +103,11 @@ export interface ArchiveAsset {
 export interface ArchiveSource {
   cid: string;
   title: string;
+  /**
+   * 🔴 **壊れたときに拾えた分だけ**の zip か(台帳 #1852 束 F2 / 依頼 119-4)。立てると `manifest.partial: true` を書く ──
+   * ファイル名を変えても、取り込みの確認が「拾えた分だけ」と言える。⚠ 任意(旧い読み手は知らないキーを読み飛ばす)。
+   */
+  partial?: boolean;
   listEntryMetas(): Promise<
     Array<{
       lid: string;
@@ -249,6 +254,11 @@ export async function writeArchive(
   exportedAt: string,
   /** 試験用: 取り込み直すときに読める `container.json` の字数の上限(既定 = 実際の上限)。 */
   maxContainerChars: number = MAX_EMBED_TEXT_CHARS,
+  /**
+   * 🔴 取り込み直せない大きさだったときの扱い(台帳 #1852 束 F2 / 依頼 119-3 A)。既定 `'refuse'` = **書き出さずに断る**。
+   * `'warn'` は保険の zip(拾い出し・作り直し)だけ ── 大きいコレクションの作り直しを大きさで止めない。
+   */
+  oversize: 'refuse' | 'warn' = 'refuse',
 ): Promise<ArchiveResult> {
   const warnings: string[] = [];
   // 🔑 同種の注意は上限まで(規則は `warn-cap.ts` の 1 本 ── P8 段㉒)
@@ -351,6 +361,7 @@ export async function writeArchive(
         exported_at: exportedAt,
         cid: src.cid,
         title: src.title,
+        ...(src.partial === true ? { partial: true } : {}),
         counts: {
           entries: entryCount,
           relations: relCount,
@@ -360,12 +371,16 @@ export async function writeArchive(
       }),
     ],
   );
-  // 🔴 **取り込み直せない大きさの container.json を、黙って書かない**(#1087)。⚠ 断らない(警告だけ)──
-  //   書き出し自体は成功し、添付は別の entry なので影響しない。user は「バックアップを取った」と
-  //   思うので、必要になった日に初めて読めないと知る前に言う
+  // 🔴 **取り込み直せない大きさの container.json を、黙って書かない**(#1087)。ふつうの書き出しは断る(台帳 #1852 束 F2 /
+  //   依頼 119-3 A ── 「書き出しました」と出るのに取り込めないバックアップを作らない)。保険の zip(`'warn'`)だけは
+  //   書いたうえで警告する ── 作り直しの前の保険を、大きさで止めると作り直せない
   let containerChars = blobChars;
   for (const p of parts) if (typeof p === 'string') containerChars += p.length;
-  if (containerChars > maxContainerChars) warnings.push(notImportableArchiveMessage(containerChars));
+  if (containerChars > maxContainerChars) {
+    // 🔴 断るのは**添付を書く前**(zip の組み立ては捨てる)── 呼び側は何もダウンロードさせない
+    if (oversize === 'refuse') throw new Error(archiveTooBigRefusal(containerChars));
+    warnings.push(notImportableArchiveMessage(containerChars));
+  }
   await w.add(CONTAINER, parts);
 
   let assetCount = 0;
@@ -399,7 +414,15 @@ export async function writeArchive(
 }
 
 export interface Pkc3Archive {
-  manifest: { format: string; version: number; exported_at?: string; cid?: string; title?: string };
+  manifest: {
+    format: string;
+    version: number;
+    exported_at?: string;
+    cid?: string;
+    title?: string;
+    /** 🔴 拾えた分だけの zip(依頼 119-4)。無い = 全部のバックアップ / 旧い版が書いた物。 */
+    partial?: boolean;
+  };
   entries: ArchiveEntry[];
   relations: ArchiveRelation[];
   revisions: ArchiveRevision[];

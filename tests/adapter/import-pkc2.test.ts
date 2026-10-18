@@ -1367,6 +1367,25 @@ describe('importPkc2File (P6b 実行部)', () => {
       await importPkc2File(kept.d, kept.deps, await archiveWith([{ tag: 'a', color: '#123456' }]));
       expect(kept.importedOpts).toEqual([{ tagColors: false }]);
     });
+
+    it('🔴 足した色そのものを取り消しへ渡す(依頼 119-5 A。前から在った色は含めない)', async () => {
+      const h = harness();
+      h.deps.importTagColors = async () => ({
+        added: 1,
+        kept: 1,
+        overLimit: 0,
+        addedColors: [{ tag: 'new', color: '#123456' }],
+      });
+      await importPkc2File(
+        h.d,
+        h.deps,
+        await archiveWith([
+          { tag: 'new', color: '#123456' },
+          { tag: 'old', color: '#abcdef' },
+        ]),
+      );
+      expect(h.importedOpts).toEqual([{ tagColors: true, addedColors: [{ tag: 'new', color: '#123456' }] }]);
+    });
   });
 
   /**
@@ -1487,7 +1506,7 @@ describe('importPkc2File (P6b 実行部)', () => {
       await importPkc2File(d, deps, file);
 
       expect(seen).toEqual([
-        { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false, exportedAt: expect.any(String) },
+        { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false, exportedAt: expect.any(String), partial: false },
       ]);
     });
 

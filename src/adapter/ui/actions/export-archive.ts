@@ -333,7 +333,8 @@ async function fallbackToRescueArchive(
   });
   let out: ArchiveWriteOut;
   try {
-    out = await writeArchive(source, iso);
+    // 🔴 保険の zip は大きさで断らない(依頼 119-3。作り直しの保険と同じ向き)
+    out = await writeArchive(source, iso, undefined, 'warn');
   } catch (e) {
     /**
      * 🔴 **拾い出しが 1 件も拾えなかった**(#1087)。⚠ そのまま投げると、壊れた保存領域の人が

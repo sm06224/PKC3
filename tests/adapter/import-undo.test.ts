@@ -12,8 +12,9 @@ import { initialState, reduce, type AppState } from '../../src/adapter/state/app
 import type { AppPhase, Dispatchable } from '../../src/adapter/state/app-state';
 import { createImportUndo, importPanel } from '../../src/adapter/ui/actions/import-undo';
 import { showNotices } from '../../src/adapter/ui/render/notices';
+import type { TagColorEntry } from '../../src/features/tag-color';
 
-function make(opts: { phase?: AppPhase } = {}): {
+function make(opts: { phase?: AppPhase; removeTagColors?: (c: readonly TagColorEntry[]) => Promise<void> } = {}): {
   undo: ReturnType<typeof createImportUndo>;
   sent: Dispatchable[];
   said: string[];
@@ -32,6 +33,7 @@ function make(opts: { phase?: AppPhase } = {}): {
     },
     phase: () => opts.phase ?? 'ready',
     fail: (m) => failed.push(m),
+    ...(opts.removeTagColors === undefined ? {} : { removeTagColors: opts.removeTagColors }),
   });
   return {
     undo,
@@ -107,6 +109,46 @@ describe('取り込みの戻り道(#535 ②)', () => {
     h.undo.undo();
     expect(h.said.join('')).toContain('取り込んだ分をゴミ箱へ入れました');
     expect(h.said.join('')).toContain('取り込んだタグの色は残ります');
+  });
+
+  it('🔴 足した色が分かる取り込みは、取り消しでその色だけを外す(依頼 119-5 A)', async () => {
+    const removed: TagColorEntry[][] = [];
+    const h = make({ removeTagColors: async (c) => void removed.push([...c]) });
+    const added = [{ tag: '仕事', color: '#112233' }];
+    h.undo.remember(['a'], { tagColors: true, addedColors: added });
+    // 押す前に「外す」と言い、「残ります」とは言わない
+    expect(h.undo.pending()?.title).toContain('取り込みで足したタグの色も外します');
+    expect(h.undo.pending()?.title).not.toContain('残ります');
+    h.undo.undo();
+    await Promise.resolve();
+    expect(removed, '足した色だけが外す口へ渡る').toEqual([added]);
+    expect(h.said.join('')).toContain('取り込みで足したタグの色も外しました');
+    expect(h.said.join('')).not.toContain('残ります');
+    // 2 度押しても 2 度は外さない
+    h.undo.undo();
+    await Promise.resolve();
+    expect(removed).toHaveLength(1);
+  });
+
+  it('対照群: 足した色が 0 件(前から在った色だけ)なら、外す口は呼ばない。口が無い配線は従来どおり「残ります」', async () => {
+    const removed: TagColorEntry[][] = [];
+    const h = make({ removeTagColors: async (c) => void removed.push([...c]) });
+    h.undo.remember(['a'], { tagColors: false });
+    h.undo.undo();
+    await Promise.resolve();
+    expect(removed).toEqual([]);
+    const g = make();
+    g.undo.remember(['a'], { tagColors: true, addedColors: [{ tag: 'x', color: '#112233' }] });
+    expect(g.undo.pending()?.title).toContain('取り込んだタグの色は残ります');
+  });
+
+  it('外せなかったときは、取り消しは済んだうえで言う(黙って食い違わせない)', async () => {
+    const h = make({ removeTagColors: async () => Promise.reject(new Error('x')) });
+    h.undo.remember(['a'], { tagColors: true, addedColors: [{ tag: 'x', color: '#112233' }] });
+    h.undo.undo();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.sent).toEqual([{ type: 'DELETE_ENTRIES', lids: ['a'] }]);
+    expect(h.said.join('')).toContain('タグの色を外せませんでした');
   });
 
   it('対照群: 色を足していない取り込みでは、色のことを言わない。憶え直すと前の回の色は引き継がない', () => {

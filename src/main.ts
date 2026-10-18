@@ -57,6 +57,7 @@ import {
   MAX_TAG_COLORS,
   mergeMissingTagColors,
   tagColorKey,
+  tagColorOf,
   withTagColor,
 } from '@features/tag-color';
 import { normalizeTag } from '@features/flavor/tags';
@@ -3198,6 +3199,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     clear: () => clearNotices(regions.notices),
     phase: () => dispatcher.getState().phase,
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+    /**
+     * 🔴 **取り込みで足したタグの色だけを外す**(台帳 #1852 束 F2 / 依頼 119-5 A)。⚠ **いまも同じ色の物だけ** ──
+     * 取り込んだ後に user が選び直した色・前から在った色は触らない。判断は `import-undo.ts`、ここは書く配線だけ。
+     */
+    removeTagColors: async (colors) => {
+      const now = await client.request({ op: 'listTagColors', cid });
+      let list = now;
+      for (const e of colors) {
+        if (tagColorOf(now, e.tag) !== e.color) continue;
+        const key = tagColorKey(e.tag);
+        if (key === null) continue;
+        await client.request({ op: 'putTagColor', cid, key, tag: normalizeTag(e.tag), color: null });
+        const next = withTagColor(list, e.tag, null);
+        if (next.ok) list = next.list;
+      }
+      applyTagColors(document, list);
+    },
   });
 
   const importDeps: ImportDeps = {
@@ -3289,7 +3307,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           }
         }
         applyTagColors(document, m.list);
-        return { added: m.added.length, kept: m.kept, overLimit: m.overLimit };
+        return { added: m.added.length, kept: m.kept, overLimit: m.overLimit, addedColors: m.added };
       },
       // ⚠ `keepLatest` を**明示で渡す**(review L-2)── 省くと worker の
       // 既定値が使われ、アプリ側の設定と偶然一致しているだけになる。
@@ -4115,7 +4133,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // 🔴 **末尾は `part`**(#1017 段④b)── 読めた分だけの形だと file 名で言う
         //   (つながり・履歴も拾えた分は入る(#1087)。中身の形式は `full` と同一)
         saveArchive: async (source) => {
-          const out = await writeArchive(source, new Date().toISOString());
+          // 🔴 保険の zip は大きさで断らない(依頼 119-3。断ると大きいコレクションは作り直せない)
+          const out = await writeArchive(source, new Date().toISOString(), undefined, 'warn');
           downloadBlob(archiveFileName(`pkc-rescue-${dayStamp(new Date())}`, 'part'), out.blob);
         },
         wipeStorage: async () => client.request({ op: 'wipeStorage' }),
