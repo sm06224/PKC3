@@ -25,6 +25,7 @@
  * ⚠ **押す前**の説明には件数を書いてよい(取り込んだ数は、こちらが知っている)。
  */
 import { phaseBlockReason, type AppPhase, type Dispatchable } from '@adapter/state/app-state';
+import type { TagColorEntry } from '@features/tag-color';
 
 /** 注意の面の頭に置く、1 つだけの操作。 */
 export interface NoticeAction {
@@ -48,15 +49,24 @@ export interface ImportUndoDeps {
   phase(): AppPhase;
   /** 断る理由を出す(`OP_FAILED`)。 */
   fail(message: string): void;
+  /**
+   * 🔴 **取り込みで足したタグの色を外す**(台帳 #1852 束 F2 / 依頼 119-5 A)。⚠ **省略可** ── 無い配線は従来どおり「色は残ります」と言う。
+   * 渡された色のうち、**いまも同じ色が付いている物だけ**を外す(取り込んだ後に user が選び直した色・前から在った色は触らない)。
+   */
+  removeTagColors?(colors: readonly TagColorEntry[]): Promise<void>;
 }
 
 export interface ImportUndo {
   /**
    * 取り込んだ直後に呼ぶ。⚠ 前の記憶は捨てる(戻せるのは**直前の 1 回**だけ)。
-   * 🔴 `tagColors` = この取り込みでタグの色も足したか(#1087)。取り消しが戻すのはノートだけで、
-   *   足した色は**残る** ── 「戻した」と言い切らず、残ることを言う。
+   * 🔴 `tagColors` = この取り込みでタグの色も足したか(#1087)。
+   * 🔴 `addedColors` = 足した色そのもの(依頼 119-5 A)。あれば取り消しが**その色だけ**を外す(前から在った色は触らない)。
+   *   無い(足した色が分からない配線)ときは、足した色は**残る** ── 「戻した」と言い切らず、残ることを言う。
    */
-  remember(lids: readonly string[], opts?: { readonly tagColors?: boolean }): void;
+  remember(
+    lids: readonly string[],
+    opts?: { readonly tagColors?: boolean; readonly addedColors?: readonly TagColorEntry[] },
+  ): void;
   /** いま出せる操作(無ければ null)。 */
   pending(): NoticeAction | null;
   /** ごみ箱へ入れる。⚠ 2 度押しても 2 度は走らない。 */
@@ -66,10 +76,14 @@ export interface ImportUndo {
 export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
   let lids: readonly string[] = [];
   let colorsKept = false;
+  /** 外す色(`removeTagColors` が渡っているときだけ憶える)。 */
+  let colorsToRemove: readonly TagColorEntry[] = [];
   return {
     remember(next, opts) {
       lids = [...next];
-      colorsKept = opts?.tagColors === true;
+      colorsToRemove = deps.removeTagColors !== undefined ? [...(opts?.addedColors ?? [])] : [];
+      // 外せる色が分かっているなら「残る」とは言わない
+      colorsKept = opts?.tagColors === true && colorsToRemove.length === 0;
     },
     pending() {
       if (lids.length === 0) return null;
@@ -78,7 +92,8 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
         action: 'undo-import',
         title:
           `いま取り込んだ ${lids.length} 件をゴミ箱へ入れます(ゴミ箱から戻せます)` +
-          (colorsKept ? '。取り込んだタグの色は残ります' : ''),
+          (colorsKept ? '。取り込んだタグの色は残ります' : '') +
+          (colorsToRemove.length > 0 ? '。取り込みで足したタグの色も外します' : ''),
       };
     },
     undo() {
@@ -94,14 +109,24 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
         return;
       }
       deps.dispatch({ type: 'DELETE_ENTRIES', lids: [...lids] });
+      const removing = colorsToRemove;
+      const keptNote = colorsKept;
       // ⚠ **先に忘れる** ── 帯や面の更新で例外が出ても、2 度目の取り消しを残さない
       lids = [];
+      colorsToRemove = [];
+      colorsKept = false;
       deps.clear();
       deps.notify(
         '取り込んだ分をゴミ箱へ入れました。ゴミ箱から戻せます' +
-          (colorsKept ? '(取り込んだタグの色は残ります)' : ''),
+          (keptNote ? '(取り込んだタグの色は残ります)' : '') +
+          (removing.length > 0 ? '。取り込みで足したタグの色も外しました' : ''),
       );
-      colorsKept = false;
+      // 🔴 足した色を外す(依頼 119-5 A)。外せなくても取り消しは済んでいる ── 失敗は言う(黙って食い違わせない)
+      if (removing.length > 0 && deps.removeTagColors !== undefined) {
+        deps.removeTagColors(removing).catch(() => {
+          deps.notify('取り込みで足したタグの色を外せませんでした(ノートは取り消しました)');
+        });
+      }
     },
   };
 }

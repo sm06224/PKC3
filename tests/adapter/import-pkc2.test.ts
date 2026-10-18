@@ -22,6 +22,10 @@ import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor'
 import { buildZip, bytesOf } from '../features/zip-fixture';
 import { SECTION_DRAFT_NOTE } from '../../src/adapter/state/app-state';
 import { readTags } from '../../src/features/flavor/tags';
+import { writeArchive, type ArchiveSource } from '../../src/features/export/pkc3-archive';
+import { createCancelToken, type CancelToken } from '../../src/features/job-cancel';
+import type { JobControl } from '../../src/adapter/ui/actions/job-control';
+import type { TrashNoteInput } from '../../src/adapter/platform/storage/protocol';
 
 /** PKC2 の export と同じ骨格(slot id と `<\/script` 退避)。 */
 function pkc2Html(payload: unknown): string {
@@ -1284,6 +1288,105 @@ describe('importPkc2File (P6b 実行部)', () => {
   });
 
   /**
+   * 🔴 **ゴミ箱のノートを、ゴミ箱に入れ直す**(台帳 #1852 束 F2 / 依頼 105-2・297 A)。
+   * 実際の書き出し(`writeArchive`)で作ったバックアップを取り込んで、取り込みの本体が
+   * 「生きたノートは entries へ、ゴミ箱のノートは `restoreTrashNotes` へ」分けることを見る。
+   */
+  describe('ゴミ箱のノート', () => {
+    async function backupWithTrash(): Promise<File> {
+      const live = [{ lid: 'live1', body: '本文 entry:trash1 から' }];
+      const src: ArchiveSource = {
+        cid: 'c1',
+        title: 't',
+        listEntryMetas: async () =>
+          live.map((m, i) => ({
+            lid: m.lid, title: '生きた', archetype: 'text', created_at: null, updated_at: null,
+            entry_order: i + 1, status: null, date: null, archived: 0,
+          })),
+        listBodies: async () => ({ rows: live, done: true }),
+        listRelations: async () => [
+          { id: 'r-t', from_lid: 'live1', to_lid: 'trash1', kind: 'semantic', created_at: null, updated_at: null },
+        ],
+        listAssetMetas: async () => [],
+        getAssetBlob: async () => null,
+        listRevisionLids: async () => ['trash1'],
+        getRevisionChain: async () => [
+          { revOrder: 2, createdAt: '2026-03-01 00:00:00', title: '捨てた', archetype: 'text', kind: 'full', snapshot: '捨てた本文', contentHash: null },
+          { revOrder: 1, createdAt: '2026-02-01 00:00:00', title: null, archetype: null, kind: 'full', snapshot: '昔', contentHash: null },
+        ],
+        listTrashHeads: async () => [
+          { lid: 'trash1', title: '捨てた', archetype: 'text', created_at: '2026-01-03 00:00:00',
+            updated_at: '2026-02-20 00:00:00', entry_order: 4, trashed_at: '2026-03-01 00:00:00' },
+        ],
+      };
+      return new File([(await writeArchive(src, '2026-10-18T00:00:00Z')).blob], 'a.pkc3-full.zip');
+    }
+
+    it('🔴 生きたノートだけが一覧(entries)へ書かれ、ゴミ箱のノートは restoreTrashNotes へ渡る。取り消しの対象は生きたノートだけ', async () => {
+      const h = harness();
+      const got: TrashNoteInput[][] = [];
+      h.deps.restoreTrashNotes = async (notes) => {
+        got.push(notes);
+        return { added: notes.length, skippedEntries: [], brokenChains: [] };
+      };
+      const n = await importPkc2File(h.d, h.deps, await backupWithTrash());
+      expect(n, '返す件数は生きたノートだけ').toBe(1);
+      expect(h.written.map((e) => e.lid)).toEqual(['live1']);
+      expect(got).toHaveLength(1);
+      expect(got[0]![0]).toMatchObject({
+        entryLid: 'trash1',
+        title: '捨てた',
+        body: '捨てた本文',
+        trashedAt: '2026-03-01 00:00:00',
+        entryCreatedAt: '2026-01-03 00:00:00',
+        entryUpdatedAt: '2026-02-20 00:00:00',
+      });
+      expect(got[0]![0]!.rows.map((r) => r.revOrder)).toEqual([1]);
+      // 付け替えが要らない取り込みでは remap を付けない
+      expect(got[0]![0]!.remap).toBeUndefined();
+      // ゴミ箱に触るつながりも書かれる(「つなぐ先が無い」の注意は出ない = 297 の症状)
+      expect(h.relations.map((r) => r.id)).toEqual(['r-t']);
+      expect(h.reportedNotes()).toEqual([]);
+      expect(h.importedCalls).toEqual([['live1']]);
+      expect(h.notices.join('\n')).toContain('ゴミ箱のノート 1 件');
+      // 順序: ノート → つながり → ゴミ箱(ゴミ箱は最後に積む)
+      expect(h.opLog.indexOf('entries')).toBeLessThan(h.opLog.indexOf('relations'));
+    });
+
+    it('🔴 lid が既存と衝突したら、ゴミ箱のノートの lid も付け替え、生きたノートの本文の entry: も同じ先を指す', async () => {
+      const h = harness({ existingLids: new Set(['trash1']) });
+      const got: TrashNoteInput[] = [];
+      h.deps.restoreTrashNotes = async (notes) => {
+        got.push(...notes);
+        return { added: notes.length, skippedEntries: [], brokenChains: [] };
+      };
+      await importPkc2File(h.d, h.deps, await backupWithTrash());
+      const fresh = got[0]!.entryLid;
+      expect(fresh).not.toBe('trash1');
+      expect(got[0]!.remap?.lids).toEqual([['trash1', fresh]]);
+      expect(h.written[0]!.body, '生きたノートのリンクが付け替え先を指さない').toContain(`entry:${fresh}`);
+      expect(h.relations[0]!.toLid).toBe(fresh);
+    });
+
+    it('戻せなかったノートは題名で言う(内部の ID を出さない)。取り込み自体は成功する', async () => {
+      const h = harness();
+      h.deps.restoreTrashNotes = async () => ({ added: 0, skippedEntries: ['trash1'], brokenChains: ['trash1: x'] });
+      const n = await importPkc2File(h.d, h.deps, await backupWithTrash());
+      expect(n).toBe(1);
+      expect(h.reportedNotes().join('\n')).toContain('ゴミ箱のノート「捨てた」は戻せませんでした');
+      expect(h.reportedNotes().join('\n')).not.toContain('trash1');
+      expect(h.notices.join('\n'), '戻っていないのに件数を言った').not.toContain('ゴミ箱のノート 1 件');
+    });
+
+    it('口の無い配線では、戻せなかったと言う(黙って落とさない)。生きたノートは入る', async () => {
+      const h = harness();
+      const n = await importPkc2File(h.d, h.deps, await backupWithTrash());
+      expect(n).toBe(1);
+      expect(h.reportedNotes().join('\n')).toContain('ゴミ箱のノート 1 件は、この画面からは戻せませんでした');
+    });
+  });
+
+  /**
    * 🔴 **タグの色(#1457)**: バックアップの色が取り込みの口(`importTagColors`)へ渡り、
    * 戻せなくても取り込みは失敗にしない(色は本文ではない)。色の無いバックアップでは呼ばない。
    */
@@ -1366,6 +1469,25 @@ describe('importPkc2File (P6b 実行部)', () => {
       kept.deps.importTagColors = async () => ({ added: 0, kept: 1, overLimit: 0 });
       await importPkc2File(kept.d, kept.deps, await archiveWith([{ tag: 'a', color: '#123456' }]));
       expect(kept.importedOpts).toEqual([{ tagColors: false }]);
+    });
+
+    it('🔴 足した色そのものを取り消しへ渡す(依頼 119-5 A。前から在った色は含めない)', async () => {
+      const h = harness();
+      h.deps.importTagColors = async () => ({
+        added: 1,
+        kept: 1,
+        overLimit: 0,
+        addedColors: [{ tag: 'new', color: '#123456' }],
+      });
+      await importPkc2File(
+        h.d,
+        h.deps,
+        await archiveWith([
+          { tag: 'new', color: '#123456' },
+          { tag: 'old', color: '#abcdef' },
+        ]),
+      );
+      expect(h.importedOpts).toEqual([{ tagColors: true, addedColors: [{ tag: 'new', color: '#123456' }] }]);
     });
   });
 
@@ -1487,7 +1609,7 @@ describe('importPkc2File (P6b 実行部)', () => {
       await importPkc2File(d, deps, file);
 
       expect(seen).toEqual([
-        { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false, exportedAt: expect.any(String) },
+        { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false, exportedAt: expect.any(String), partial: false, trashCount: 0 },
       ]);
     });
 
@@ -2274,5 +2396,163 @@ describe('取り込みの取りこぼし(I-2 / I-3 / I-5)', () => {
     const ok = harness();
     expect(await importPkc2File(ok.d, ok.deps, oneNote())).toBe(1);
     expect(ok.importedCalls).toEqual([['a']]);
+  });
+});
+
+/**
+ * 🔴 **取り込みを途中でやめる**(台帳 #1852 束 F2 / 依頼 253)。
+ *
+ * 観測点は「何が書かれたか(entries / blob)」「やめた後の state(DELETE_ENTRIES が効いたか)」「画面に出た字」「失敗扱いにしていないこと」。
+ * 対照群は、印を立てない同じ取り込み(最後まで走る)。
+ */
+describe('取り込みを途中でやめる(依頼 253)', () => {
+  /** 仕事の印を test が握る `job`(`start` で返した印を `tokens` に残し、`finish` の回数を数える)。 */
+  function jobWith() {
+    const tokens: CancelToken[] = [];
+    const finished: CancelToken[] = [];
+    const job: JobControl = {
+      start: () => {
+        const t = createCancelToken();
+        tokens.push(t);
+        return t;
+      },
+      finish: (t) => void finished.push(t),
+      cancelCurrent: () => false,
+    };
+    return { job, tokens, finished };
+  }
+
+  const twoAttachments = (): File =>
+    htmlFile({
+      container: {
+        meta: { entry_order: ['a', 'f1', 'f2'] },
+        entries: [
+          { lid: 'a', title: 'ノート', archetype: 'text', body: '# 本文\n' },
+          {
+            lid: 'f1',
+            title: '一つ目',
+            archetype: 'attachment',
+            body: JSON.stringify({ name: 'one.txt', mime: 'text/plain', size: 3, asset_key: 'k1' }),
+          },
+          {
+            lid: 'f2',
+            title: '二つ目',
+            archetype: 'attachment',
+            body: JSON.stringify({ name: 'two.txt', mime: 'text/plain', size: 3, asset_key: 'k2' }),
+          },
+        ],
+        relations: [{ id: 'r1', from: 'a', to: 'f1', kind: 'semantic' }],
+        assets: { k1: base64('one'), k2: base64('two') },
+      },
+      export_meta: { mode: 'full', asset_encoding: 'base64' },
+    });
+
+  it('🔴 添付を書いている途中でやめると、ノートは 1 件も書かない。失敗にも憶えにもしない。出口で印を返す', async () => {
+    const h = harness({ captureFailure: true });
+    const j = jobWith();
+    h.deps.job = j.job;
+    // 1 つ目の添付を書いたところで「やめる」が押された
+    const putBlob = h.deps.putBlob;
+    h.deps.putBlob = async (key, blob) => {
+      await putBlob(key, blob);
+      j.tokens[0]!.cancel();
+    };
+    const out = await importPkc2File(h.d, h.deps, twoAttachments());
+    expect(out, 'やめたのに件数を返した').toBeNull();
+    expect(h.blobs.size, '区切りで止まらず 2 つ目の添付まで書いた').toBe(1);
+    expect(h.written, 'ノートを書いた').toEqual([]);
+    expect(h.relations).toEqual([]);
+    expect(h.notices.at(-1)).toBe('取り込みをやめました(ノートは 1 件も追加されていません)');
+    expect(h.failures, 'やめたのを失敗の欄に出した').toEqual([]);
+    expect(h.d.getState().error, 'やめたのを OP_FAILED にした').toBeNull();
+    expect(h.importedCalls, '書いていないのに「取り消し」の記憶を残した').toEqual([]);
+    expect(h.reportCalls()).toBe(0);
+    expect(j.finished, '出口で印を返していない').toEqual([j.tokens[0]]);
+    expect(h.writingLog.at(-1), '書込中の印が残った').toBe(false);
+  });
+
+  it('対照群: 印を立てなければ最後まで取り込む(止まる区切りが常に効いているのではない)', async () => {
+    const h = harness();
+    const j = jobWith();
+    h.deps.job = j.job;
+    expect(await importPkc2File(h.d, h.deps, twoAttachments())).toBe(3);
+    expect(h.blobs.size).toBe(2);
+    expect(h.notices.at(-1)).toContain('取り込み完了');
+    expect(j.finished).toEqual([j.tokens[0]]);
+  });
+
+  it('🔴 ノートを書いた後(つながりの段)でやめると、ここまでに入れたノートをゴミ箱へ移す(取り消しと同じ DELETE_ENTRIES)', async () => {
+    const h = harness();
+    const j = jobWith();
+    h.deps.job = j.job;
+    const rel = h.deps.bulkUpsertRelations;
+    // ノートを書き終えた後、つながりを書く前に「やめる」が押された
+    h.deps.bulkUpsertRelations = async (r) => {
+      await rel(r);
+    };
+    const bulk = h.deps.bulkUpsertEntries;
+    h.deps.bulkUpsertEntries = async (e) => {
+      await bulk(e);
+      j.tokens[0]!.cancel();
+    };
+    const out = await importPkc2File(h.d, h.deps, twoAttachments());
+    expect(out).toBeNull();
+    expect(h.written.map((e) => e.lid).sort(), '空振り: ノートが書かれていない').toEqual(['a', 'f1', 'f2']);
+    expect(h.relations, 'やめた後の段(つながり)まで書いた').toEqual([]);
+    // 画面からも消えている(DELETE_ENTRIES が効いた)
+    expect([...h.d.getState().entryMetas.keys()], 'ノートが一覧に残っている').toEqual([]);
+    expect(h.notices.at(-1)).toContain('取り込みをやめました。ここまでに入れた 3 件のノートはゴミ箱へ移しました(ゴミ箱から戻せます)');
+    expect(h.d.getState().error).toBeNull();
+    expect(h.importedCalls, '取り消しの記憶(import-undo)へ渡っていない').toEqual([['a', 'f1', 'f2']]);
+    expect(j.finished).toEqual([j.tokens[0]]);
+  });
+
+  it('undoImport が渡っていれば、直に DELETE_ENTRIES を撃たずそちらを呼ぶ(取り込みの取り消しと同じ道を 1 本にする)', async () => {
+    const h = harness();
+    const j = jobWith();
+    h.deps.job = j.job;
+    let undone = 0;
+    h.deps.undoImport = () => void undone++;
+    const bulk = h.deps.bulkUpsertEntries;
+    h.deps.bulkUpsertEntries = async (e) => {
+      await bulk(e);
+      j.tokens[0]!.cancel();
+    };
+    await importPkc2File(h.d, h.deps, twoAttachments());
+    expect(undone).toBe(1);
+    // 直には消していない(消すのは undoImport の仕事。この harness の undoImport は何もしない)
+    expect([...h.d.getState().entryMetas.keys()].sort()).toEqual(['a', 'f1', 'f2']);
+  });
+
+  it('🔴 編集中で取り消せないときは、「ゴミ箱へ移しました」と偽らず、残っていると言う', async () => {
+    const h = harness({
+      onBulkEntries: (d) => {
+        // 取り込みの await 中に user が編集を始めた(上の [H-4] と同じ再現)
+        d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'draft', title: 'd' });
+        d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '# 失いたくない下書き\n' });
+      },
+    });
+    const j = jobWith();
+    h.deps.job = j.job;
+    const bulk = h.deps.bulkUpsertEntries;
+    h.deps.bulkUpsertEntries = async (e) => {
+      await bulk(e);
+      j.tokens[0]!.cancel();
+    };
+    await importPkc2File(h.d, h.deps, twoAttachments());
+    expect(h.d.getState().phase, '空振り: 編集中になっていない').toBe('editing');
+    expect(h.d.getState().openBody?.body, '下書きが消えた').toBe('# 失いたくない下書き\n');
+    const last = h.notices.at(-1) ?? '';
+    expect(last).toContain('ここまでに入れた 3 件のノートは残っています');
+    expect(last).toContain('「取り込みを取り消す」を押してください');
+    expect(last).not.toContain('ゴミ箱へ移しました');
+    // 取り消せる記憶は渡してある(後で「取り込みを取り消す」を押せる)
+    expect(h.importedCalls).toEqual([['a', 'f1', 'f2']]);
+  });
+
+  it('job が無い配線は従来どおり(ボタンなし・最後まで走る)', async () => {
+    const h = harness();
+    expect(h.deps.job).toBeUndefined();
+    expect(await importPkc2File(h.d, h.deps, twoAttachments())).toBe(3);
   });
 });

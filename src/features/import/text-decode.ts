@@ -24,6 +24,20 @@ export type ImportTextEncoding = 'utf8' | 'utf16' | 'sjis';
 export interface ImportTextDecoded {
   readonly text: string;
   readonly used: ImportTextEncoding;
+  /** 🔴 先頭に UTF-8 の BOM(EF BB BF)があったか(台帳 #1852 束 F2 / 依頼 126-1。書き戻しで BOM が落ちることを言うため)。 */
+  readonly bom?: true;
+}
+
+/**
+ * 🔴 **書き戻すと変わってしまう元の文字コード**(台帳 #1852 束 F2 / 依頼 126-1 A)。PKC3 が書き戻すのは **BOM なしの UTF-8** なので、
+ * 元が `'utf8'`(BOM なし)以外のときだけ値がある。`null` = 変わらない。
+ */
+export type ChangedOnWriteBack = 'sjis' | 'utf16' | 'utf8-bom';
+
+export function changedOnWriteBack(d: ImportTextDecoded): ChangedOnWriteBack | null {
+  if (d.used === 'sjis') return 'sjis';
+  if (d.used === 'utf16') return 'utf16';
+  return d.bom === true ? 'utf8-bom' : null;
 }
 
 /**
@@ -38,7 +52,7 @@ export const SJIS_GUESS_NOTE =
 
 export function decodeImportTextInfo(bytes: Uint8Array): ImportTextDecoded {
   if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
-    return { text: new TextDecoder('utf-8').decode(bytes.subarray(3)), used: 'utf8' };
+    return { text: new TextDecoder('utf-8').decode(bytes.subarray(3)), used: 'utf8', bom: true };
   }
   if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
     return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)), used: 'utf16' };

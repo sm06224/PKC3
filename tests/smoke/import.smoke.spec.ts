@@ -1093,6 +1093,19 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(2);
 
+  /**
+   * 🔴 #1852 束 F2(依頼 105-2・297 A): ゴミ箱のノートも書き出しに入り、取り込むとゴミ箱へ戻る(生きた一覧には出ない)。
+   * 既存の往復の道中に足す ── 書き出す前にノートを 1 件作ってゴミ箱へ入れる(生きた 2 件は変わらない)。
+   */
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('ゴミ箱のメモ');
+  await page.locator('[data-pkc-field="editor-body"]').fill('捨てたノートの本文\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(rows).toHaveCount(3);
+  await clickReal(page, rows.filter({ hasText: 'ゴミ箱のメモ' }));
+  await page.keyboard.press('Delete');
+  await expect(rows, 'ゴミ箱へ入っていない').toHaveCount(2);
+
   // 📤 書き出す(実ブラウザの Blob → <a download> 経路を通す)
   const dl = page.waitForEvent('download');
   await clickReal(page, '[data-pkc-action="export-archive"]');
@@ -1134,6 +1147,8 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   // ノート・添付・つながり・履歴の表が出て、「取り込む」を押すまで進まない
   const confirmText = await answerAppDialog(page, 'ok');
   expect(confirmText).toMatch(/ノート \d+ 件/);
+  // 🔴 #1852 束 F2: 確認の表に、ゴミ箱のノートが「ゴミ箱に入った状態で戻ります」と出る(`archive-preview.ts`)
+  expect(confirmText, '確認にゴミ箱のノートが出ない').toContain('ゴミ箱のノート 1 件(ゴミ箱に入った状態で戻ります)');
   // 🔴 #1643: 窓の頭に「ファイル名(いつ取ったか)」、末尾に「残る・追加・取り消せる」の安心の 1 行
   expect(confirmText.split('\n')[0]).toMatch(/^restored\.pkc3\.zip\(.+ に取りました\)$/);
   expect(confirmText.trimEnd().endsWith('いまのノートはそのまま残り、これが追加されます。取り込んだ後でも取り消せます。')).toBe(true);
@@ -1164,8 +1179,52 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   const undo = page.locator('[data-pkc-action="undo-import"]');
   await expect(undo, 'バックアップを取り込んだのに取り消しが出ない').toBeVisible();
   await expect(undo).toHaveAttribute('title', /いま取り込んだ 2 件/);
+  // 🔴 #1852 束 F2: 取り込んだゴミ箱のノートは、生きた一覧(4 件)に出ず、ゴミ箱の一覧に出る
+  await expect(rows.filter({ hasText: 'ゴミ箱のメモ' }), 'ゴミ箱のノートが生きた一覧に出た').toHaveCount(0);
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('ゴミ箱のノート 1 件');
+  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await expect(
+    page.locator('[data-pkc-region="filer-trash"] li').filter({ hasText: 'ゴミ箱のメモ' }),
+    '取り込んだゴミ箱のノートがゴミ箱の一覧に出ない',
+  ).toHaveCount(2); // 書き出す前から居る 1 件 + 取り込みで戻った 1 件(同じ題が 2 つ。1 つなら戻っていない)
+  await clickReal(page, '[data-pkc-action="hide-trash"]');
+  await expect(rows, 'ゴミ箱を閉じたら生きた一覧(4 件)へ戻る').toHaveCount(4);
   await clickReal(page, '[data-pkc-action="undo-import"]');
   await expect(rows, '取り消しても取り込んだ分が残っている').toHaveCount(2);
+
+  /**
+   * 🔴 #1852 束 F2(依頼 253): 長い取り込みは、0.8 秒たっても終わらないと「取り込みをやめる」が出て、押すとノートが増えない。
+   * 時間を伸ばす道具 = 大きな取り込み(ノート 4000 件)+ CDP で CPU を絞る(`delayMs` は 800 ms 固定の既定のまま)。
+   * ⚠ 終わってしまっては押せない ── 出るまで待てなければ落ちる(「出ないこと」を通さない)。
+   */
+  const client = await page.context().newCDPSession(page);
+  await client.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+  const bigEntries = Array.from({ length: 4000 }, (_, i) => ({
+    lid: `big${i}`,
+    title: `大量${i}`,
+    archetype: 'text',
+    body: `# 大量${i}\n${'本文 '.repeat(200)}\n`,
+    created_at: '2025-03-04T05:06:07.000Z',
+  }));
+  const bigHtml = pkc2Html().replace(
+    '"entries":[',
+    `"entries":[${bigEntries.map((e) => JSON.stringify(e)).join(',')},`,
+  );
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'big.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(bigHtml, 'utf-8'),
+  });
+  const cancelJob = page.locator('[data-pkc-action="cancel-job"]');
+  await expect(cancelJob, '長い取り込みに「取り込みをやめる」が出ない').toBeVisible({ timeout: 20_000 });
+  await expect(cancelJob).toHaveText('取り込みをやめる');
+  await cancelJob.click();
+  await expect(page.locator('[data-pkc-region="status"]'), 'やめた知らせが出ない').toContainText('取り込みをやめました', {
+    timeout: 60_000,
+  });
+  await client.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  await expect(cancelJob, 'やめた後もボタンが残る').toHaveCount(0);
+  await expect(rows, 'やめたのにノートが増えた(ゴミ箱へ移っていない)').toHaveCount(2);
 
   expect(errors).toEqual([]);
 });

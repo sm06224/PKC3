@@ -57,6 +57,7 @@ import {
   MAX_TAG_COLORS,
   mergeMissingTagColors,
   tagColorKey,
+  tagColorOf,
   withTagColor,
 } from '@features/tag-color';
 import { normalizeTag } from '@features/flavor/tags';
@@ -217,7 +218,8 @@ import { buildShell, paintAlarmBar, paintMissedLine, paintCaptureBar, paintTimer
 import { showBootFailure, showBootProgress } from '@adapter/ui/render/boot-screen';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { installPhoneBack } from '@adapter/ui/actions/phone-back';
-import { showNotices, clearNotices } from '@adapter/ui/render/notices';
+import { showNotices, clearNotices, showJobPanel, hideJobPanel } from '@adapter/ui/render/notices';
+import { createJobControl } from '@adapter/ui/actions/job-control';
 import { createImportUndo, importFailurePanel, importPanel } from '@adapter/ui/actions/import-undo';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
@@ -1411,6 +1413,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     .then((list) => applyTagColors(document, list))
     .catch(() => {});
   const regions = buildShell(root);
+  /**
+   * 🔴 **長い取り込み・書き出しの「やめる」ボタン**(台帳 #1852 束 F2 / 依頼 253)。結果の欄(`regions.notices`)に、仕事が少し長引いたときだけ出す。
+   * ⚠ いつ出すか・どの仕事の印かの判断は `job-control.ts`。ここは欄へ描く配線だけ。
+   */
+  const jobs = createJobControl({
+    show: (panel) => showJobPanel(regions.notices, panel),
+    hide: () => hideJobPanel(regions.notices),
+  });
   /**
    * 🔴 **版面が入れ替わったときに面を描き直す口**(#671)。⚠ `center` はずっと後で
    *   組まれるので、繋がるまでは何もしない口にしておく(`repaintStatus` と同じ形)。
@@ -2780,6 +2790,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           listTagColors: () => client.request({ op: 'listTagColors', cid }),
           listRevisionLids: () =>
             client.request({ op: 'listRevisionLids', cid }),
+          // 🔴 ゴミ箱のノートも運ぶ(台帳 #1852 束 F2 / 依頼 105-2・297 A)── 全体のバックアップだけ(部分の書き出しの源は持たない)
+          listTrashHeads: () => client.request({ op: 'listTrashHeads', cid }),
           // ⚠ 鎖は**保存形のまま**取る(P6e)── `getRevision` で版ごとに
           // 全文へ復元すると、アーカイブが N×M に膨らみ kind が中身と食い違う
           getRevisionChain: (entryLid) =>
@@ -2804,6 +2816,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         },
         download: downloadBlob,
         notify: (message) => showStatus(message),
+        // 🔴 バックアップなどの書き出しを途中でやめる(依頼 253)
+        job: jobs,
         // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
         // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
         // バックアップで一番知りたい情報がそこにある
@@ -3198,11 +3212,31 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     clear: () => clearNotices(regions.notices),
     phase: () => dispatcher.getState().phase,
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+    /**
+     * 🔴 **取り込みで足したタグの色だけを外す**(台帳 #1852 束 F2 / 依頼 119-5 A)。⚠ **いまも同じ色の物だけ** ──
+     * 取り込んだ後に user が選び直した色・前から在った色は触らない。判断は `import-undo.ts`、ここは書く配線だけ。
+     */
+    removeTagColors: async (colors) => {
+      const now = await client.request({ op: 'listTagColors', cid });
+      let list = now;
+      for (const e of colors) {
+        if (tagColorOf(now, e.tag) !== e.color) continue;
+        const key = tagColorKey(e.tag);
+        if (key === null) continue;
+        await client.request({ op: 'putTagColor', cid, key, tag: normalizeTag(e.tag), color: null });
+        const next = withTagColor(list, e.tag, null);
+        if (next.ok) list = next.list;
+      }
+      applyTagColors(document, list);
+    },
   });
 
   const importDeps: ImportDeps = {
       // 🔴 取り込みの最中にタブを閉じる・読み直すときに「離れますか」を出す(書込は保存の効果層を通らない)
       onWriting: (writing) => unloadGuard.setWriting(writing, 'import'),
+      // 🔴 バックアップの取り込みを途中でやめる(依頼 253)── 印と欄は `job-control.ts`。やめたときの取り消しは取り込みの取り消しと同じ道
+      job: jobs,
+      undoImport: () => importUndo.undo(),
       // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
       // revisions を持つ)と衝突すると、その item がゴミ箱から消え、
       // 取り込んだ entry が他人の履歴を背負う(review H-1、実 sqlite で実証)
@@ -3289,7 +3323,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           }
         }
         applyTagColors(document, m.list);
-        return { added: m.added.length, kept: m.kept, overLimit: m.overLimit };
+        return { added: m.added.length, kept: m.kept, overLimit: m.overLimit, addedColors: m.added };
       },
       // ⚠ `keepLatest` を**明示で渡す**(review L-2)── 省くと worker の
       // 既定値が使われ、アプリ側の設定と偶然一致しているだけになる。
@@ -3301,6 +3335,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           chains,
           keepLatest: REVISION_KEEP_LATEST,
         }),
+      // 🔴 バックアップの中のゴミ箱のノートを、ゴミ箱の中へ戻す(台帳 #1852 束 F2 / 依頼 105-2・297 A)
+      restoreTrashNotes: (notes) =>
+        client.request({ op: 'restoreTrashNotes', cid, notes, keepLatest: REVISION_KEEP_LATEST }),
       // ⚠ **bytes 側の台帳を見る**(review H-1)── meta 行の有無で判定すると、
       // GC が deleteBlob → deleteMeta の途中で失敗した状態(設計上の想定内)で
       // put を省いてしまい、参照だけが書かれる
@@ -4086,7 +4123,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   読み込み直すので、`main.ts` が握っている配線を**差し替えない**
      *   （差し替えると、古い client を閉じ込んだ closure が残って静かに壊れる）。
      */
-    rebuildContainer: async (target: string, onProgress?: RebuildProgress) => {
+    rebuildContainer: async (
+      target: string,
+      onProgress?: RebuildProgress,
+      /** 🔴 読めた数が一覧より少ないとき、捨てる前に聞く(台帳 #1852 束 F2 / 依頼 119-2 A)。判断と字は features / binder に在る。 */
+      few?: { readonly expected: number; readonly confirm: (read: number, expected: number) => Promise<boolean> },
+    ) => {
       /** 開き直した相手。⚠ `reopenStorage` を通る前は無い。 */
       let fresh: StoreClient | null = null;
       const reopened = (): StoreClient => {
@@ -4099,6 +4141,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         holdsWriterLease: () => writerHolder,
         pick: async (afterRowid, chunks) =>
           client.request({ op: 'rescueEntries', afterRowid, chunks }),
+        // 🔴 システムのメッセージも捨てる前に読む（台帳 #1852 束 F2 / 依頼 119-1 A）。zip には入れない
+        pickSystem: async (afterRowid, chunks) =>
+          client.request({ op: 'rescueEntries', afterRowid, chunks, realm: 'system' }),
+        ...(few === undefined ? {} : { expectedNotes: few.expected, confirmFewer: few.confirm }),
         // 🔑 つながりと履歴も拾う（#1087。索引だけ壊れた DB は表走査で読める）
         pickRelations: async (afterRowid, chunks) =>
           client.request({ op: 'rescueRelations', afterRowid, chunks }),
@@ -4115,7 +4161,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // 🔴 **末尾は `part`**(#1017 段④b)── 読めた分だけの形だと file 名で言う
         //   (つながり・履歴も拾えた分は入る(#1087)。中身の形式は `full` と同一)
         saveArchive: async (source) => {
-          const out = await writeArchive(source, new Date().toISOString());
+          // 🔴 保険の zip は大きさで断らない(依頼 119-3。断ると大きいコレクションは作り直せない)
+          const out = await writeArchive(source, new Date().toISOString(), undefined, 'warn');
           downloadBlob(archiveFileName(`pkc-rescue-${dayStamp(new Date())}`, 'part'), out.blob);
         },
         wipeStorage: async () => client.request({ op: 'wipeStorage' }),
@@ -4169,6 +4216,26 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             })),
           });
           return { added: out.added, broken: out.brokenChains.length };
+        },
+        // 🔴 ゴミ箱のノートを、ゴミ箱の中へ戻す（台帳 #1852 束 F2 / 依頼 119-1 A）。⚠ 開き直した相手へ書く
+        writeTrash: async (c: string, notes) => {
+          const out = await reopened().request({
+            op: 'restoreTrashNotes',
+            cid: c,
+            keepLatest: REVISION_KEEP_LATEST,
+            notes: notes.map((n) => ({
+              entryLid: n.lid,
+              title: n.title,
+              archetype: n.archetype,
+              body: n.body,
+              trashedAt: n.trashedAt,
+              entryCreatedAt: n.createdAt,
+              entryUpdatedAt: n.updatedAt,
+              entryOrder: n.entryOrder,
+              rows: n.rows.map((r) => ({ ...r })),
+            })),
+          });
+          return { restored: notes.length - out.skippedEntries.length };
         },
         writeAssetMetas: async (c: string, metas) => {
           for (const m of metas) {
@@ -4643,6 +4710,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     dismissNotices: () => clearNotices(regions.notices),
     // 🔴 直前の取込をごみ箱へ(#535 ②)── 記憶も件数も `import-undo.ts` が持つ
     undoImport: () => importUndo.undo(),
+    // 🔴 長い取り込み・書き出しを途中でやめる(台帳 #1852 束 F2 / 依頼 253)── 印を立てるだけ。止まる区切りは仕事の側
+    cancelJob: () => void jobs.cancelCurrent(),
     /**
      * 🔴 **アプリの窓なら `× 閉じる` で窓ごと閉じる**(#300 段③ の直し)。
      * ⚠ 判断は `view-window.ts` ── ここは `window` を渡すだけである。

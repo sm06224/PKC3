@@ -122,6 +122,57 @@ export interface RebuiltEntry {
   /** 読めた時刻(#1087)。`null` = 取り込んだ今(DB が刻む)。 */
   readonly createdAt: string | null;
   readonly updatedAt: string | null;
+  /** 🔴 `'system'` = システムのメッセージ(台帳 #1852 束 F2 / 依頼 119-1 A。同じ領域へ書き戻す)。省略 = user のノート。 */
+  readonly realm?: 'system';
+}
+
+/** 🔴 書き戻すゴミ箱のノート 1 件(台帳 #1852 束 F2 / 依頼 119-1 A)。⚠ 形は storage の `TrashNoteInput` に揃える(層をまたいで型を引かない)。 */
+export interface RebuiltTrashNote {
+  readonly lid: string;
+  readonly title: string;
+  readonly archetype: string;
+  /** ゴミ箱へ移した時点の本文(頭の行の全文)。 */
+  readonly body: string;
+  readonly trashedAt: string | null;
+  readonly createdAt: string | null;
+  readonly updatedAt: string | null;
+  readonly entryOrder: number | null;
+  /** 頭より古い版(保存形の鎖。新しい → 古い)。 */
+  readonly rows: ReadonlyArray<{
+    readonly revOrder: number;
+    readonly createdAt: string | null;
+    readonly title: string | null;
+    readonly archetype: string | null;
+    readonly kind: string;
+    readonly snapshot: string;
+    readonly contentHash: string | null;
+  }>;
+}
+
+/** 拾ったゴミ箱の履歴 → 書き戻す形(頭 = 先頭の行が本文)。 */
+export function rebuiltTrash(trash: RescuedExtras['trash']): RebuiltTrashNote[] {
+  return [...trash].map(([lid, rows]) => {
+    const head = rows[0]!;
+    return {
+      lid,
+      title: head.title ?? '(無題)',
+      archetype: head.archetype ?? 'text',
+      body: head.snapshot,
+      trashedAt: head.createdAt,
+      createdAt: head.entryCreatedAt ?? null,
+      updatedAt: head.entryUpdatedAt ?? null,
+      entryOrder: head.entryOrder ?? null,
+      rows: rows.slice(1).map((r) => ({
+        revOrder: r.revOrder,
+        createdAt: r.createdAt,
+        title: r.title,
+        archetype: r.archetype,
+        kind: r.kind,
+        snapshot: r.snapshot,
+        contentHash: r.contentHash,
+      })),
+    };
+  });
 }
 
 /** 進み具合を外へ出す(画面が「止まった」と読まれないように)。 */
@@ -194,6 +245,8 @@ export function rebuildArchiveSource(opts: {
 }): { readonly source: ArchiveSource; readonly stats: () => RescueStats } {
   const assetPorts = assetArchivePorts(opts.cid, opts.assets);
   const source: ArchiveSource = {
+    // 🔴 拾えた分だけの zip だと、ファイルの中に書く(依頼 119-4)
+    partial: true,
     cid: opts.cid,
     title: opts.title,
     listEntryMetas: async () =>
@@ -280,6 +333,21 @@ export interface RebuildPorts {
   holdsWriterLease(): boolean;
   /** 壊れた DB から拾う(1 周)。 */
   readonly pick: RescuePick;
+  /**
+   * 🔴 **システムのメッセージを拾う**(台帳 #1852 束 F2 / 依頼 119-1 A)。⚠ 必須 ── 渡し忘れると、静かに戻らなくなる。
+   * 読めなくても建て直しは止めない(メッセージが読めないだけで、ノートを捨てる理由は無い)。zip には入れない(メッセージは書き出さない領域)。
+   */
+  readonly pickSystem: RescuePick;
+  /**
+   * 🔴 **一覧に出ているノートの数**(台帳 #1852 束 F2 / 依頼 119-2 A)。⚠ 省略可 ── 渡したとき、読めた数がこれより少なければ
+   * **捨てる前に** `confirmFewer` で聞く。
+   */
+  readonly expectedNotes?: number;
+  /**
+   * 🔴 読めた数が一覧より少ないとき、**何も書き出さず・捨てず**に聞く(依頼 119-2 A)。`false` なら何もせずやめる(`'declined'`)。
+   * ⚠ 省略 = 聞かない(従来どおり、終わった後に件数を言う)。
+   */
+  confirmFewer?(read: number, expected: number): Promise<boolean>;
   /** 🔑 つながりと履歴を拾う(#1087)。⚠ 必須 ── 渡し忘れると、静かに戻らなくなる。 */
   readonly pickRelations: RescueRelationsPick;
   readonly pickRevisions: RescueRevisionsPick;
@@ -326,6 +394,11 @@ export interface RebuildPorts {
       hash: string | null;
     }>,
   ): Promise<void>;
+  /**
+   * ⑤ 🔴 ゴミ箱のノートを、ゴミ箱の中へ戻す(台帳 #1852 束 F2 / 依頼 119-1 A)。⚠ 必須 ── ノートの後(頭の行は全文なので順は問わないが、
+   * つながりと同じ段で戻す)。返す `restored` = 戻せた件数(同じ lid が既にある / 壊れた鎖は戻らない)。
+   */
+  writeTrash(cid: string, notes: readonly RebuiltTrashNote[]): Promise<{ restored: number }>;
   /** ⑤ 🔴 捨てる前に読んだタグの色を戻す(#1087)。 */
   writeTagColors(cid: string, colors: ReadonlyArray<{ tag: string; color: string }>): Promise<void>;
   /** 消えたノート由来の物をこの端末から落とす(コピー履歴など)。 */
@@ -342,6 +415,11 @@ export interface RebuildPorts {
 export type RebuildOutcome =
   /** 🟢 建て直して、書き戻せた。 */
   | 'rebuilt'
+  /**
+   * 🔴 **読めた数が一覧より少なく、user がやめた**(台帳 #1852 束 F2 / 依頼 119-2 A)。⚠ 何も書き出さず・消していない ──
+   * 呼び側は**読み込み直さない**(この画面の保存は生きている)。
+   */
+  | 'declined'
   /** 🔴 開き直せたが**メモリ上**だった ── 書き戻していない(書いても消えるので)。 */
   | 'memory-only'
   /** 🔴 書き戻しに失敗した。 */
@@ -374,6 +452,10 @@ export interface RebuildReport {
   readonly extrasPartial: boolean;
   /** 戻したタグの色の数(#1087)。 */
   readonly tagColorsRestored: number;
+  /** 🔴 戻したゴミ箱のノートの数(台帳 #1852 束 F2)。 */
+  readonly trashRestored: number;
+  /** 🔴 戻したシステムのメッセージの数(台帳 #1852 束 F2)。 */
+  readonly systemRestored: number;
   /** DB を file ごと捨てたか(`false` = もともとメモリ上だった)。 */
   readonly wiped: boolean;
   /** 捨てられなかったときの理由。 */
@@ -406,6 +488,8 @@ export async function rebuildContainer(
     relations: ports.pickRelations,
     revisions: ports.pickRevisions,
   });
+  // 🔴 システムのメッセージも捨てる前に読む(台帳 #1852 束 F2 / 依頼 119-1 A)。読めなくても止めない。zip には入れない
+  const sys = await collectRescued(ports.pickSystem).catch(() => ({ rows: [] as RescuedRow[] }));
   // 🔴 色は sqlite の `settings` 表 ── 捨てる前でないと読めない。読めなければ空(建て直しは止めない)
   const tagColors = await ports.readTagColors().catch(() => []);
   const { source, stats } = rebuildArchiveSource({
@@ -419,15 +503,44 @@ export async function rebuildContainer(
     tagColors,
     ...(ports.assets === undefined ? {} : { assets: ports.assets }),
   });
-  await ports.saveArchive(source);
-  const rescued = stats();
+  /**
+   * ⚠ 添付の成果(`assets` / `assetBytes`)は zip を組んで初めて分かる ── 「やめた」報告(zip を組まない)は 0 のままでよい。
+   * 組んだ後(下の `saveArchive` の後)で取り直す。
+   */
+  let rescued = stats();
   /** 戻していない間の値(① の後に返す 3 つの結末が使う)。 */
   const none = {
     relationsRestored: 0,
     revisionsRestored: 0,
     extrasPartial: extras.skipped > 0 || extras.truncated,
     tagColorsRestored: 0,
+    trashRestored: 0,
+    systemRestored: 0,
   };
+  /**
+   * 🔴 **読めた数が一覧より少ないなら、書き出す前・捨てる前に聞く**(台帳 #1852 束 F2 / 依頼 119-2 A)。
+   * > 100 件のうち 3 件しか読めなくても、止まらずに捨てていた。件数が分かるのは終わった後だった。
+   * ⚠ 何も書き出さず・消していないので、やめても失う物は無い。呼び側は読み込み直さない(`'declined'`)。
+   */
+  if (
+    ports.expectedNotes !== undefined &&
+    ports.confirmFewer !== undefined &&
+    got.rows.length < ports.expectedNotes &&
+    !(await ports.confirmFewer(got.rows.length, ports.expectedNotes))
+  ) {
+    return {
+      outcome: 'declined',
+      rescued,
+      restored: 0,
+      ...none,
+      wiped: false,
+      note: null,
+      fallbackReason: null,
+      error: null,
+    };
+  }
+  await ports.saveArchive(source);
+  rescued = stats();
 
   /**
    * 🔴 **ここから先では投げない**(#1006 の着地前レビューが出した)。
@@ -477,6 +590,12 @@ export async function rebuildContainer(
 
     // ⑤ 同じ id で作り直して、書き戻す
     const entries = rebuiltEntries(got.rows);
+    // 🔴 メッセージは同じ領域(system)へ書き戻す。件数 `restored` には数えない(ノートの件数と混ぜない)
+    const systemEntries: RebuiltEntry[] = sys.rows.map((r, i) => ({
+      ...rebuiltEntries([r])[0]!,
+      entryOrder: r.entryOrder ?? i,
+      realm: 'system' as const,
+    }));
     /**
      * ⚠ **書き戻す「前」に言う** ── ここは 1 回の bulk なので、終わってから言うと
      *   いちばん長い間ずっと「**拾っています…**」のままになる(user は
@@ -487,15 +606,21 @@ export async function rebuildContainer(
     let revisionsRestored = 0;
     let brokenChains = 0;
     let tagColorsRestored = 0;
+    let trashRestored = 0;
     try {
       await ports.openContainer(cid, title);
-      await ports.writeEntries(cid, entries);
+      await ports.writeEntries(cid, [...entries, ...systemEntries]);
       // 🔴 つながりと履歴は**ノートの後**(履歴の鎖は、書き戻したノートの本文から遡る)
-      await ports.writeRelations(cid, extras.relations);
-      relationsRestored = extras.relations.length;
+      // 🔴 ゴミ箱のノートに触るつながりも(台帳 #1852 束 F2)── 戻したゴミ箱から「戻す」と居場所も戻る
+      const allRelations = [...extras.relations, ...extras.trashRelations];
+      await ports.writeRelations(cid, allRelations);
+      relationsRestored = allRelations.length;
       const rev = await ports.writeRevisions(cid, extras.chains);
       revisionsRestored = rev.added;
       brokenChains = rev.broken;
+      // 🔴 ゴミ箱のノート(台帳 #1852 束 F2 / 依頼 119-1 A)── ゴミ箱の中へ戻す。⚠ 一覧には出ない
+      const trashNotes = rebuiltTrash(extras.trash);
+      if (trashNotes.length > 0) trashRestored = (await ports.writeTrash(cid, trashNotes)).restored;
       /**
        * 🔴 **添付の登録行を組み直す**(#1087)。bytes は IndexedDB に残っているが、
        * 書き出し・容量の内訳は登録行から一覧を取る ── 戻さないと添付が 0 件に見える。
@@ -534,6 +659,8 @@ export async function rebuildContainer(
       outcome: 'rebuilt',
       rescued,
       restored: entries.length,
+      trashRestored,
+      systemRestored: systemEntries.length,
       relationsRestored,
       revisionsRestored,
       extrasPartial: none.extrasPartial || brokenChains > 0,
@@ -595,10 +722,27 @@ export async function rebuildContainer(
  * ⚠ 戻らない物がまた出たら、ここへ足す(マニュアルの表と**等値**で pin してある)。
  */
 /**
- * 🔴 **作り直しで戻らない物**(#1087)── ゴミ箱のノートとシステムのメッセージは拾い出しの対象に入っていない。
- * ⚠ 空にすると窓が「全部戻る」と読める ── 戻す作りにするかは見え方の判断待ち(#1163 依頼 119-1)。
+ * 🔴 **作り直しで戻らない物**(#1087 → 台帳 #1852 束 F2 / 依頼 119-1 A で空にした)。
+ *
+ * ゴミ箱のノートとシステムのメッセージは、拾い出しの対象に入れて**戻す**ようにした(直す前は「戻らないもの」として窓に出していた)。
+ * ⚠ 戻らない物がまた出たら、ここへ足す(マニュアルの表と**等値**で pin してある)。
  */
-export const REBUILD_LOST: readonly string[] = ['ゴミ箱のノート', 'システムのメッセージ'] as const;
+export const REBUILD_LOST: readonly string[] = [] as const;
+
+/**
+ * 🔴 **読めた数が一覧より少ないときに聞く字**(台帳 #1852 束 F2 / 依頼 119-2 A)。押す前の窓(`rebuildExplainMessage`)とは別の、
+ * 「拾ってみたら少なかった」ときの 2 枚目。⚠ 何も書き出さず・消していない段で出す ── やめても失う物は無い。
+ */
+export function rebuildFewerMessage(read: number, expected: number): string {
+  return [
+    `${expected} 件のうち ${read} 件しか読めませんでした。`,
+    '',
+    `続けると、読めた ${read} 件だけで保存データを作り直します。読めなかった ${expected - read} 件は戻りません。`,
+    `読めた分は、${RESCUE_ARCHIVE_SUFFIX} のファイルとして手元にダウンロードされます。`,
+    '',
+    '続けますか。',
+  ].join('\n');
+}
 
 /**
  * 終わった後に画面へ出す字。
@@ -607,6 +751,9 @@ export const REBUILD_LOST: readonly string[] = ['ゴミ箱のノート', 'シス
  *   拾えなかった区画は**必ず字にする**(「拾えた件数」を「全部」と読ませない)。
  */
 export function rebuildDoneMessage(r: RebuildReport): string {
+  if (r.outcome === 'declined') {
+    return '作り直しをやめました(何も書き出さず、何も消していません)。';
+  }
   if (r.outcome === 'memory-only') {
     return (
       'ノートの保存データを作り直せませんでした(このタブでは中身がメモリ上にしか置けません)。' +
@@ -653,6 +800,9 @@ export function rebuildDoneMessage(r: RebuildReport): string {
   if (r.relationsRestored > 0) back.push(`つながり ${r.relationsRestored} 件`);
   if (r.revisionsRestored > 0) back.push(`履歴 ${r.revisionsRestored} 版`);
   if (r.tagColorsRestored > 0) back.push(`タグの色 ${r.tagColorsRestored} 件`);
+  // 🔴 ゴミ箱のノートとメッセージも戻す(台帳 #1852 束 F2 / 依頼 119-1 A)
+  if (r.trashRestored > 0) back.push(`ゴミ箱のノート ${r.trashRestored} 件`);
+  if (r.systemRestored > 0) back.push('システムのメッセージ');
   const backed = back.length === 0 ? '' : `。${back.join('・')}も戻しました`;
   const lost = r.extrasPartial
     ? '⚠ 読み込めなかったつながり・履歴があり、その分は戻っていません。'
@@ -712,7 +862,7 @@ export function rebuildExplainMessage(opts: {
     attach,
     '・設定・見た目・ショートカットキーの割り当て・読んだお知らせの記録',
     // 🔑 読めた分は戻す(#1087。2026-10-14 の実測で、索引だけ壊れた DB はこれらも読めた)
-    '・どのフォルダに入っていたか・ノート同士のつながり・履歴(前の版)・タグの色(読めた分)',
+    '・どのフォルダに入っていたか・ノート同士のつながり・履歴(前の版)・タグの色・ゴミ箱のノート・システムのメッセージ(読めた分)',
     '',
     // ⚠ 呼び名は `REBUILD_LOST` から引く ── 終わった後の字と食い違わせない(空なら節ごと出さない)
     ...(REBUILD_LOST.length === 0

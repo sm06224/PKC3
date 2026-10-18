@@ -199,6 +199,25 @@ describe('取り込んだ後に外で変わったか', () => {
     const file = new File([sjis], 'a.md', { lastModified: 1000 });
     l.remember('n1', fakeHandle('a', { getFile: () => Promise.resolve(file) }), 'a.md', 1000);
     expect((await l.readCurrent('n1'))?.text).toBe('日本語');
+    // 🔴 書き戻すと UTF-8 に変わる元の文字コードも返す(台帳 #1852 束 F2 / 依頼 126-1 A)
+    expect((await l.readCurrent('n1'))?.encoding).toBe('sjis');
+  });
+
+  it('🔴 readCurrent: 元の文字コードを返すのは、書き戻すと変わるときだけ(BOM なし UTF-8・ASCII は返さない。対照群つき)', async () => {
+    const read = async (bytes: number[]) => {
+      const l = new LaunchedFiles();
+      const file = new File([new Uint8Array(bytes)], 'a.md', { lastModified: 1000 });
+      l.remember('n1', fakeHandle('a', { getFile: () => Promise.resolve(file) }), 'a.md', 1000);
+      return l.readCurrent('n1');
+    };
+    // UTF-8(BOM なし)の「日本語」
+    const plain = await read([0xe6, 0x97, 0xa5, 0xe6, 0x9c, 0xac, 0xe8, 0xaa, 0x9e]);
+    expect(plain?.text, '空振り: 読めていない').toBe('日本語');
+    expect(plain && 'encoding' in plain, 'UTF-8 なのに文字コードの注意が付いた').toBe(false);
+    // BOM 付き UTF-8 / UTF-16LE(BOM 付き)
+    expect((await read([0xef, 0xbb, 0xbf, 0x61]))?.encoding).toBe('utf8-bom');
+    expect((await read([0xff, 0xfe, 0x61, 0x00]))?.encoding).toBe('utf16');
+    expect((await read([0xff, 0xfe, 0x61, 0x00]))?.text).toBe('a');
   });
 
   it('🔴 readCurrent: 取り込み時の時刻が無い記憶は changed にしない(今の中身は返す)', async () => {

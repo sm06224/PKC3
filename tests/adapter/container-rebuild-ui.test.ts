@@ -70,6 +70,8 @@ const DONE: RebuildReport = {
   revisionsRestored: 5,
   extrasPartial: false,
   tagColorsRestored: 1,
+  trashRestored: 0,
+  systemRestored: 0,
   wiped: true,
   note: null,
   fallbackReason: null,
@@ -87,6 +89,8 @@ function mount(
     wired?: boolean;
     /** 🔑 走りっぱなしにする(連打の門を見るため ── 解くまで終わらない)。 */
     hold?: Promise<void>;
+    /** 🔑 読めた数が一覧より少ないとき、`few.confirm` に何件で聞くか(渡すと `few` を使って聞く)。 */
+    askFewer?: { read: number };
   } = {},
 ) {
   document.body.innerHTML = '';
@@ -113,6 +117,8 @@ function mount(
   });
   /** 🔑 **進み具合を呼ばれたその場で読む** ── 後から観測すると最後の字しか残らない。 */
   const during: string[] = [];
+  /** 🔑 `few`(読めた数が少ないときに聞く口)を渡されたか・聞いた結果。 */
+  const fewSeen: { expected: number | null; answer: boolean | null } = { expected: null, answer: null };
   const services: BinderServices = {
     ...(over.assetKeys === undefined
       ? {}
@@ -125,8 +131,13 @@ function mount(
     ...(over.wired === false
       ? {}
       : {
-          rebuildContainer: async (cid, onProgress) => {
+          rebuildContainer: async (cid, onProgress, few) => {
             calls.push(cid);
+            fewSeen.expected = few?.expected ?? null;
+            if (over.askFewer !== undefined && few !== undefined) {
+              fewSeen.answer = await few.confirm(over.askFewer.read, few.expected);
+              if (!fewSeen.answer) return { ...DONE, outcome: 'declined', restored: 0, wiped: false };
+            }
             for (const [phase, seen] of over.progress ?? []) {
               onProgress?.(phase, seen, null);
               during.push(
@@ -150,6 +161,7 @@ function mount(
     errors,
     during,
     reloaded: () => reloaded,
+    fewSeen,
     run: root.querySelector<HTMLButtonElement>('[data-pkc-field="container-rebuild-run"]')!,
     summary: () =>
       root.querySelector('[data-pkc-field="container-rebuild-summary"]')?.textContent ?? '',
@@ -304,6 +316,37 @@ describe('走っている間と、その後(#1006)', () => {
   });
 
   /**
+   * 🔴 **読めた数が一覧より少ないときは、書き出す前・捨てる前に聞く**(台帳 #1852 束 F2 / 依頼 119-2 A)。
+   * 一覧の件数(この mount では 3 件)が `few.expected` として届き、「やめる」を押すと何も消さず・読み込み直さない。
+   */
+  it('🔴 一覧の件数を添えて聞き、「やめる」なら読み込み直さず、何も消えていないと言う', async () => {
+    const m = mount({ askFewer: { read: 1 } });
+    m.run.click();
+    await settle();
+    await m.answer('ok');
+    // 2 枚目の窓(読めた数が少ない)
+    expect(m.body(), '「3 件のうち 1 件しか読めませんでした」と聞いていない').toContain('3 件のうち 1 件しか読めませんでした');
+    expect(m.fewSeen.expected, '一覧の件数が渡っていない').toBe(3);
+    await m.answer('cancel');
+    expect(m.fewSeen.answer, 'やめたのに続ける答えになった').toBe(false);
+    expect(m.reloaded(), 'やめたのに読み込み直した(打ちかけを捨てさせる)').toBe(0);
+    expect(m.summaryHidden(), 'やめたのに途中の字が残っている').toBe(true);
+    expect(liveDialog(), 'やめたのに結果の窓が出た').toBeNull();
+  });
+
+  it('対照群: 「続ける」なら通常どおり結果の窓まで進み、読み込み直す', async () => {
+    const m = mount({ askFewer: { read: 1 } });
+    m.run.click();
+    await settle();
+    await m.answer('ok');
+    await m.answer('ok'); // 続ける
+    expect(m.fewSeen.answer).toBe(true);
+    expect(m.body(), '結果の窓が出ていない').toContain('3 件を戻しました');
+    await m.answer('ok');
+    expect(m.reloaded()).toBe(1);
+  });
+
+  /**
    * 🔴 **書き戻せなかった回は、済んだ顔をしない**(`memory-only`)。
    * ⚠ ここが「N 件を戻しました」になると、**戻っていないのに安心する**。
    */
@@ -379,7 +422,7 @@ describe('作り直しの配線(原文 pin)', () => {
     const at = MAIN.indexOf('rebuildContainer:');
     expect(at, '🔴 rebuildContainer の配線が main.ts に無い').toBeGreaterThan(0);
     // ⚠ 見るのは**その塊だけ** ── file 全体で探すと別の呼び出しに満たされる(§1)
-    const block = MAIN.slice(at, at + 1600);
+    const block = MAIN.slice(at, at + 3200);
     const reopen = block.indexOf('reopenStorage');
     expect(reopen, 'reopenStorage を渡していない').toBeGreaterThan(-1);
     const after = block.slice(reopen, reopen + 300);

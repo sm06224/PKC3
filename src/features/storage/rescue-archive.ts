@@ -120,6 +120,10 @@ export interface RescuedRevision {
   readonly kind: string;
   readonly snapshot: string;
   readonly contentHash: string | null;
+  /** 🔴 ゴミ箱へ移すときに控えた作成日・並びの位置・更新日時(台帳 #1852 束 F2)。省略 / null = 控えが無い。 */
+  readonly entryCreatedAt?: string | null;
+  readonly entryOrder?: number | null;
+  readonly entryUpdatedAt?: string | null;
 }
 
 export type RescueRelationsPick = (
@@ -288,6 +292,13 @@ export interface RescuedExtras {
   readonly relations: readonly RescuedRelation[];
   /** 🔑 履歴を持つノートごとに、新しい → 古い。 */
   readonly chains: ReadonlyMap<string, readonly RescuedRevision[]>;
+  /**
+   * 🔴 **ゴミ箱のノート**(台帳 #1852 束 F2 / 依頼 119-1 A)── 拾えたノートに居ない lid の履歴のうち、頭(最も新しい行)が
+   * 全文のもの。ノートごとに新しい → 古い(頭が先頭)。生きたノートの履歴(`chains`)とは混ぜない。
+   */
+  readonly trash: ReadonlyMap<string, readonly RescuedRevision[]>;
+  /** 🔴 ゴミ箱のノートに触るつながり(もう一方の端は、拾えたノートかゴミ箱のノート)。 */
+  readonly trashRelations: readonly RescuedRelation[];
   readonly skipped: number;
   readonly truncated: boolean;
 }
@@ -306,35 +317,26 @@ export async function collectRescuedExtras(
   picks: { relations: RescueRelationsPick; revisions: RescueRevisionsPick },
 ): Promise<RescuedExtras> {
   const relations: RescuedRelation[] = [];
+  const trashRelations: RescuedRelation[] = [];
   const seenRel = new Set<string>();
   const chains = new Map<string, RescuedRevision[]>();
+  /** 拾えたノートに居ない lid の履歴(ゴミ箱のノートの候補)。 */
+  const other = new Map<string, RescuedRevision[]>();
   const seenRev = new Set<string>();
   let skipped = 0;
   let truncated = false;
-  try {
-    const r = await drainPages(picks.relations, (page) => {
-      for (const x of page.rows) {
-        if (x.cid !== cid || !lids.has(x.fromLid) || !lids.has(x.toLid)) continue;
-        if (seenRel.has(x.id)) continue;
-        seenRel.add(x.id);
-        relations.push(x);
-      }
-    });
-    skipped += r.skipped;
-    truncated ||= r.truncated;
-  } catch {
-    skipped += 1;
-  }
+  // 🔴 履歴を先に読む ── ゴミ箱のノートの lid は履歴から分かるので、つながりの両端の判定(下)に要る
   try {
     const r = await drainPages(picks.revisions, (page) => {
       for (const x of page.rows) {
-        if (x.cid !== cid || !lids.has(x.entryLid)) continue;
+        if (x.cid !== cid) continue;
         const key = `${x.revOrder}:${x.entryLid}`;
         if (seenRev.has(key)) continue;
         seenRev.add(key);
-        const list = chains.get(x.entryLid) ?? [];
+        const into = lids.has(x.entryLid) ? chains : other;
+        const list = into.get(x.entryLid) ?? [];
         list.push(x);
-        chains.set(x.entryLid, list);
+        into.set(x.entryLid, list);
       }
     });
     skipped += r.skipped;
@@ -344,7 +346,30 @@ export async function collectRescuedExtras(
   }
   // 保存形の並び(新しい → 古い)にそろえる
   for (const list of chains.values()) list.sort((p, q) => q.revOrder - p.revOrder);
-  return { relations, chains, skipped, truncated };
+  const trash = new Map<string, RescuedRevision[]>();
+  for (const [lid, list] of other) {
+    list.sort((p, q) => q.revOrder - p.revOrder);
+    // 頭が全文でなければ本文が復元できない ── ゴミ箱のノートとしては戻せない(鎖を単独で読めない)
+    if (list[0]!.kind === 'full') trash.set(lid, list);
+  }
+  try {
+    const r = await drainPages(picks.relations, (page) => {
+      for (const x of page.rows) {
+        if (x.cid !== cid) continue;
+        const fromOk = lids.has(x.fromLid) || trash.has(x.fromLid);
+        const toOk = lids.has(x.toLid) || trash.has(x.toLid);
+        if (!fromOk || !toOk) continue;
+        if (seenRel.has(x.id)) continue;
+        seenRel.add(x.id);
+        (trash.has(x.fromLid) || trash.has(x.toLid) ? trashRelations : relations).push(x);
+      }
+    });
+    skipped += r.skipped;
+    truncated ||= r.truncated;
+  } catch {
+    skipped += 1;
+  }
+  return { relations, chains, trash, trashRelations, skipped, truncated };
 }
 
 
@@ -374,10 +399,11 @@ export function extrasTally(x: RescuedExtras): ExtrasTally {
  */
 export function extrasArchivePorts(
   extras: RescuedExtras | undefined,
-): Pick<ArchiveSource, 'listRelations' | 'listRevisionLids' | 'getRevisionChain'> {
+): Pick<ArchiveSource, 'listRelations' | 'listRevisionLids' | 'getRevisionChain' | 'listTrashHeads'> {
   return {
     listRelations: async () =>
-      (extras?.relations ?? []).map((r) => ({
+      // 🔴 ゴミ箱のノートに触る物も渡す(書き出しが「生きた同士」と「ゴミ箱に触る物」に分ける。台帳 #1852 束 F2)
+      [...(extras?.relations ?? []), ...(extras?.trashRelations ?? [])].map((r) => ({
         id: r.id,
         from_lid: r.fromLid,
         to_lid: r.toLid,
@@ -386,8 +412,22 @@ export function extrasArchivePorts(
         updated_at: null,
       })),
     listRevisionLids: async () => [...(extras?.chains.keys() ?? [])],
+    // 🔴 ゴミ箱のノートの頭(台帳 #1852 束 F2 / 依頼 119-1 A)。本文と古い版は `getRevisionChain` が同じ lid で返す
+    listTrashHeads: async () =>
+      [...(extras?.trash.entries() ?? [])].map(([lid, rows]) => {
+        const head = rows[0]!;
+        return {
+          lid,
+          title: head.title,
+          archetype: head.archetype,
+          created_at: head.entryCreatedAt ?? null,
+          updated_at: head.entryUpdatedAt ?? null,
+          entry_order: head.entryOrder ?? null,
+          trashed_at: head.createdAt,
+        };
+      }),
     getRevisionChain: async (lid) =>
-      (extras?.chains.get(lid) ?? []).map((r) => ({
+      (extras?.chains.get(lid) ?? extras?.trash.get(lid) ?? []).map((r) => ({
         revOrder: r.revOrder,
         createdAt: r.createdAt,
         title: r.title,
@@ -535,6 +575,8 @@ export function rescueArchiveSource(opts: {
   };
 
   const source: ArchiveSource = {
+    // 🔴 拾えた分だけの zip だと、ファイルの中に書く(依頼 119-4。名前を変えても見分ける)
+    partial: true,
     cid: opts.cid,
     title: opts.title,
     listEntryMetas: async () => {
@@ -628,6 +670,7 @@ export function rescueArchiveSource(opts: {
     listRelations: async () => extrasArchivePorts(extras).listRelations(),
     listRevisionLids: async () => extrasArchivePorts(extras).listRevisionLids(),
     getRevisionChain: async (lid) => extrasArchivePorts(extras).getRevisionChain(lid),
+    listTrashHeads: async () => extrasArchivePorts(extras).listTrashHeads!(),
   };
 
   return {

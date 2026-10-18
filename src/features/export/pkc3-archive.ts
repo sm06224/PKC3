@@ -31,7 +31,7 @@ import {
 import { createWarnCollector, type WarnCollector } from './warn-cap';
 import { isTooLargeToRead } from '../import/too-large';
 import { relabeledInFileWarning, relabeledWarning } from '../import/relabel-warning';
-import { MAX_EMBED_TEXT_CHARS, notImportableArchiveMessage } from '../storage/image-export-limit';
+import { archiveTooBigRefusal, MAX_EMBED_TEXT_CHARS, notImportableArchiveMessage } from '../storage/image-export-limit';
 import { parseTagColorList, type TagColorEntry } from '../tag-color';
 
 export const ARCHIVE_FORMAT = 'pkc3-archive';
@@ -99,10 +99,34 @@ export interface ArchiveAsset {
   hash: string | null;
 }
 
+/**
+ * 🔴 **ゴミ箱の中のノート**(台帳 #1852 束 F2 / 依頼 105-2・297 A)。`entries` には**混ぜない** ──
+ * 旧い版は `entries` を全部「生きたノート」として取り込むので、混ぜるとゴミ箱の物が一覧に戻ってしまう。
+ * 別の鍵(`trash`)に置けば、旧い版は知らないキーとして読み飛ばす(= 今までと同じ:ゴミ箱は入らない)。
+ * 本文はゴミ箱へ移した時点の全文(`body`)。それより古い版は `trashRevisions`(保存形の鎖。head は含めない)。
+ */
+export interface ArchiveTrashNote {
+  lid: string;
+  title: string;
+  archetype: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+  /** ゴミ箱へ移す前の並びの位置(控えが無ければ null)。 */
+  entryOrder: number | null;
+  /** ゴミ箱へ移した日時。 */
+  trashedAt: string | null;
+  body: string;
+}
+
 /** 書出し元(store に直結せず、test から差せる形にする)。 */
 export interface ArchiveSource {
   cid: string;
   title: string;
+  /**
+   * 🔴 **壊れたときに拾えた分だけ**の zip か(台帳 #1852 束 F2 / 依頼 119-4)。立てると `manifest.partial: true` を書く ──
+   * ファイル名を変えても、取り込みの確認が「拾えた分だけ」と言える。⚠ 任意(旧い読み手は知らないキーを読み飛ばす)。
+   */
+  partial?: boolean;
   listEntryMetas(): Promise<
     Array<{
       lid: string;
@@ -123,6 +147,21 @@ export interface ArchiveSource {
    * ⚠ 任意 ── test の fake は `listBodies` だけでも動く
    */
   getBody?(lid: string): Promise<string | null>;
+  /**
+   * 🔴 **ゴミ箱のノートの頭**(台帳 #1852 束 F2 / 依頼 105-2・297 A)。⚠ 任意 ── 無い源(1 ノート / フォルダの書き出し)は
+   * ゴミ箱を運ばない。本文と古い版は `getRevisionChain(lid)` で引く(頭の行 = ゴミ箱へ移した時点の全文)。
+   */
+  listTrashHeads?(): Promise<
+    Array<{
+      lid: string;
+      title: string | null;
+      archetype: string | null;
+      created_at: string | null;
+      updated_at: string | null;
+      entry_order: number | null;
+      trashed_at: string | null;
+    }>
+  >;
   listBodies(
     after: { entryOrder: number; lid: string } | undefined,
     maxBytes: number,
@@ -174,7 +213,7 @@ export interface ArchiveSource {
 export interface ArchiveResult {
   blob: Blob;
   warnings: string[];
-  counts: { entries: number; relations: number; revisions: number; assets: number };
+  counts: { entries: number; relations: number; revisions: number; assets: number; trash: number };
 }
 
 /**
@@ -238,6 +277,34 @@ export function toArchiveAsset(a: AssetMetaRowLike): ArchiveAsset {
   };
 }
 
+type TrashHeadLike = NonNullable<Awaited<ReturnType<NonNullable<ArchiveSource['listTrashHeads']>>>>[number];
+
+/**
+ * 🔴 **ゴミ箱の頭 + 鎖 → アーカイブの形**(台帳 #1852 束 F2)。書き出し(`writeArchive`)と PKC3 入り HTML の取り込みが
+ * **同じ 1 つ**を通る(規則を 2 か所に持たない)。鎖は新しい → 古い。頭の行(最も新しい行)が全文でなければ `null`
+ * (本文が復元できない ── 呼び側が黙って落とさず注意に出す)。
+ */
+export function toArchiveTrash(
+  h: TrashHeadLike,
+  chain: readonly RevisionRowLike[],
+): { note: ArchiveTrashNote; rows: ArchiveRevision[] } | null {
+  const head = chain[0];
+  if (head === undefined || head.kind !== 'full') return null;
+  return {
+    note: {
+      lid: h.lid,
+      title: h.title ?? head.title ?? '(無題)',
+      archetype: h.archetype ?? head.archetype ?? 'text',
+      createdAt: h.created_at,
+      updatedAt: h.updated_at,
+      entryOrder: h.entry_order,
+      trashedAt: h.trashed_at ?? head.createdAt,
+      body: head.snapshot,
+    },
+    rows: chain.slice(1).map((rv) => toArchiveRevision(h.lid, rv)),
+  };
+}
+
 const j = (v: unknown): string => JSON.stringify(v);
 
 /**
@@ -249,6 +316,11 @@ export async function writeArchive(
   exportedAt: string,
   /** 試験用: 取り込み直すときに読める `container.json` の字数の上限(既定 = 実際の上限)。 */
   maxContainerChars: number = MAX_EMBED_TEXT_CHARS,
+  /**
+   * 🔴 取り込み直せない大きさだったときの扱い(台帳 #1852 束 F2 / 依頼 119-3 A)。既定 `'refuse'` = **書き出さずに断る**。
+   * `'warn'` は保険の zip(拾い出し・作り直し)だけ ── 大きいコレクションの作り直しを大きさで止めない。
+   */
+  oversize: 'refuse' | 'warn' = 'refuse',
 ): Promise<ArchiveResult> {
   const warnings: string[] = [];
   // 🔑 同種の注意は上限まで(規則は `warn-cap.ts` の 1 本 ── P8 段㉒)
@@ -337,9 +409,24 @@ export async function writeArchive(
     const meta = toArchiveAsset(a);
     parts.push(i === 0 ? j(meta) : `,${j(meta)}`);
   });
+  parts.push(']');
+
+  // ── 🔴 ゴミ箱のノート(台帳 #1852 束 F2 / 依頼 105-2・297 A)── `entries` には混ぜず、別の鍵に置く。
+  //   旧い版は知らない鍵を読み飛ばすので、旧い版が読んでも今までと同じ(生きたノートだけが戻る)。
+  const trashParts = await writeTrashParts(src, exportedLids, relations, warn);
+  if (trashParts.count > 0) {
+    parts.push(',"trash":[');
+    parts.push(...trashParts.notes);
+    parts.push('],"trashRelations":[');
+    parts.push(...trashParts.relations);
+    parts.push('],"trashRevisions":[');
+    parts.push(...trashParts.revisions);
+    parts.push(']');
+    blobChars += trashParts.blobChars;
+  }
   // 🔴 タグの色(#1457)── 1 つも無ければキーごと書かない(旧い読み手にも同じ形のまま)
   const tagColors = (await src.listTagColors?.()) ?? [];
-  parts.push(tagColors.length > 0 ? `],"tagColors":${j(tagColors)}}` : ']}');
+  parts.push(tagColors.length > 0 ? `,"tagColors":${j(tagColors)}}` : '}');
 
   const w = new ZipWriter();
   await w.add(
@@ -351,21 +438,28 @@ export async function writeArchive(
         exported_at: exportedAt,
         cid: src.cid,
         title: src.title,
+        ...(src.partial === true ? { partial: true } : {}),
         counts: {
           entries: entryCount,
           relations: relCount,
           revisions: revCount,
           assets: assetMetas.length,
+          // 🔴 ゴミ箱が無いときは鍵ごと書かない(ゴミ箱の無いバックアップの概要は今までと 1 バイトも変えない)
+          ...(trashParts.count > 0 ? { trash: trashParts.count } : {}),
         },
       }),
     ],
   );
-  // 🔴 **取り込み直せない大きさの container.json を、黙って書かない**(#1087)。⚠ 断らない(警告だけ)──
-  //   書き出し自体は成功し、添付は別の entry なので影響しない。user は「バックアップを取った」と
-  //   思うので、必要になった日に初めて読めないと知る前に言う
+  // 🔴 **取り込み直せない大きさの container.json を、黙って書かない**(#1087)。ふつうの書き出しは断る(台帳 #1852 束 F2 /
+  //   依頼 119-3 A ── 「書き出しました」と出るのに取り込めないバックアップを作らない)。保険の zip(`'warn'`)だけは
+  //   書いたうえで警告する ── 作り直しの前の保険を、大きさで止めると作り直せない
   let containerChars = blobChars;
   for (const p of parts) if (typeof p === 'string') containerChars += p.length;
-  if (containerChars > maxContainerChars) warnings.push(notImportableArchiveMessage(containerChars));
+  if (containerChars > maxContainerChars) {
+    // 🔴 断るのは**添付を書く前**(zip の組み立ては捨てる)── 呼び側は何もダウンロードさせない
+    if (oversize === 'refuse') throw new Error(archiveTooBigRefusal(containerChars));
+    warnings.push(notImportableArchiveMessage(containerChars));
+  }
   await w.add(CONTAINER, parts);
 
   let assetCount = 0;
@@ -394,18 +488,92 @@ export async function writeArchive(
       relations: relCount,
       revisions: revCount,
       assets: assetCount,
+      trash: trashParts.count,
     },
   };
 }
 
+/**
+ * 🔴 **ゴミ箱のノートを container.json の部品にする**(台帳 #1852 束 F2 / 依頼 105-2・297 A)。
+ *
+ * - ノート 1 件 = 1 個の Blob(本文を heap に溜めない。`writeArchive` の常駐の規律と同じ)
+ * - 頭の行(ゴミ箱へ移した時点の全文)が本文。それより古い版は保存形の鎖のまま `trashRevisions` に出す
+ * - つながりは「ゴミ箱のノートに触る物」だけ(生きたノート同士の物は `relations` が運ぶ)。両端が書いたノート(生きた物 + ゴミ箱)に居る物だけ
+ * - 頭が全文でない・読めない行は、黙って落とさず注意に出す
+ */
+async function writeTrashParts(
+  src: ArchiveSource,
+  liveLids: ReadonlySet<string>,
+  relations: ReadonlyArray<RelationRowLike>,
+  warn: WarnCollector,
+): Promise<{
+  count: number;
+  notes: Blob[];
+  relations: string[];
+  revisions: Blob[];
+  blobChars: number;
+}> {
+  const out = { count: 0, notes: [] as Blob[], relations: [] as string[], revisions: [] as Blob[], blobChars: 0 };
+  if (src.listTrashHeads === undefined) return out;
+  const heads = await src.listTrashHeads();
+  const trashLids = new Set<string>();
+  let revCount = 0;
+  for (const h of heads) {
+    // 生きているノートと同じ lid は書かない(画面が古い。生きている側が正)
+    if (liveLids.has(h.lid) || trashLids.has(h.lid)) continue;
+    const got = toArchiveTrash(h, await src.getRevisionChain(h.lid));
+    if (got === null) {
+      warn.add('trash-skip', 'ゴミ箱のノートの注意', `ゴミ箱の中の読み出せないノートを飛ばしました: ${h.title ?? '(無題)'}`);
+      continue;
+    }
+    const noteJson = out.count === 0 ? j(got.note) : `,${j(got.note)}`;
+    out.blobChars += noteJson.length;
+    out.notes.push(new Blob([noteJson]));
+    trashLids.add(h.lid);
+    out.count++;
+    let chunk = '';
+    for (const rev of got.rows) chunk += `${revCount++ === 0 ? '' : ','}${j(rev)}`;
+    if (chunk !== '') {
+      out.blobChars += chunk.length;
+      out.revisions.push(new Blob([chunk]));
+    }
+  }
+  let first = true;
+  for (const r of relations) {
+    const touches = trashLids.has(r.from_lid) || trashLids.has(r.to_lid);
+    if (!touches) continue;
+    const bothIn =
+      (trashLids.has(r.from_lid) || liveLids.has(r.from_lid)) && (trashLids.has(r.to_lid) || liveLids.has(r.to_lid));
+    if (!bothIn) continue;
+    const json = j(toArchiveRelation(r));
+    out.relations.push(first ? json : `,${json}`);
+    first = false;
+  }
+  return out;
+}
+
 export interface Pkc3Archive {
-  manifest: { format: string; version: number; exported_at?: string; cid?: string; title?: string };
+  manifest: {
+    format: string;
+    version: number;
+    exported_at?: string;
+    cid?: string;
+    title?: string;
+    /** 🔴 拾えた分だけの zip(依頼 119-4)。無い = 全部のバックアップ / 旧い版が書いた物。 */
+    partial?: boolean;
+  };
   entries: ArchiveEntry[];
   relations: ArchiveRelation[];
   revisions: ArchiveRevision[];
   assets: ArchiveAsset[];
   /** タグの色(#1457)。無いバックアップ・読めない要素は空 / 落とす(`warnings` で言う)。 */
   tagColors: TagColorEntry[];
+  /** 🔴 ゴミ箱のノート(台帳 #1852 束 F2)。無いバックアップ(旧い版が書いた物・ゴミ箱が空だった物)は空。 */
+  trash: ArchiveTrashNote[];
+  /** ゴミ箱のノートに触るつながり。 */
+  trashRelations: ArchiveRelation[];
+  /** ゴミ箱のノートの古い版(保存形の鎖。頭の行は `trash[].body` が持つ)。 */
+  trashRevisions: ArchiveRevision[];
   /** asset key → bytes(**まだ読んでいない**。adapter が 1 件ずつ流す)。 */
   assetSources: Map<string, ReadableAssetSource>;
   warnings: string[];
@@ -495,6 +663,10 @@ export interface ArchiveContainerJson {
   revisions?: ArchiveRevision[];
   assets?: ArchiveAsset[];
   tagColors?: unknown;
+  /** 🔴 ゴミ箱のノート(台帳 #1852 束 F2)。旧い版が書いた物には無い。 */
+  trash?: ArchiveTrashNote[];
+  trashRelations?: ArchiveRelation[];
+  trashRevisions?: ArchiveRevision[];
 }
 
 /**
@@ -520,7 +692,14 @@ export function assembleArchive(
     relations: c.relations?.length ?? 0,
     revisions: c.revisions?.length ?? 0,
   };
-  const COUNT_LABEL: Record<string, string> = { entries: 'ノート', relations: 'つながり', revisions: '履歴' };
+  // 🔴 ゴミ箱の数も照合する(書き出しは 1 件以上あるときだけ記録する)
+  if (typeof counts['trash'] === 'number') actual['trash'] = c.trash?.length ?? 0;
+  const COUNT_LABEL: Record<string, string> = {
+    entries: 'ノート',
+    relations: 'つながり',
+    revisions: '履歴',
+    trash: 'ゴミ箱のノート',
+  };
   for (const [k, v] of Object.entries(actual)) {
     if (typeof counts[k] === 'number' && counts[k] !== v) {
       warnings.push(
@@ -554,6 +733,9 @@ export function assembleArchive(
   return {
     manifest,
     tagColors: colors.list,
+    trash: Array.isArray(c.trash) ? c.trash : [],
+    trashRelations: Array.isArray(c.trashRelations) ? c.trashRelations : [],
+    trashRevisions: Array.isArray(c.trashRevisions) ? c.trashRevisions : [],
     entries: c.entries,
     relations: c.relations ?? [],
     revisions,
@@ -598,6 +780,30 @@ export function restoreArchive(
   /** ⚠ **key だけでなく mime も返す**(review M-4)── 落とすと Blob の type と
    * meta.mime が空になり、画像が preview されなくなる(無言で) */
   assets: Array<{ key: string; mime: string }>;
+  /**
+   * 🔴 **ゴミ箱へ入れ直すノート**(台帳 #1852 束 F2 / 依頼 105-2・297 A)。lid は写し先へ写像済み。
+   * 本文は書き出したときのまま(添付の key・`entry:` の付け替えは取込側が `remapImportedBody` 1 本で当てる)。
+   * `rows` = それより古い版(保存形の鎖。新しい → 古い。lid は写像済み)。
+   */
+  trash: Array<{
+    lid: string;
+    title: string;
+    archetype: string;
+    body: string;
+    createdAt: string | null;
+    updatedAt: string | null;
+    entryOrder: number | null;
+    trashedAt: string | null;
+    rows: Array<{
+      revOrder: number;
+      createdAt: string | null;
+      title: string | null;
+      archetype: string | null;
+      kind: string;
+      snapshot: string;
+      contentHash: string | null;
+    }>;
+  }>;
   /** 保存形の鎖(新しい → 古い)。lid は写し先へ写像済み。 */
   revisionChains: Array<{
     entryLid: string;
@@ -660,15 +866,31 @@ export function restoreArchive(
     };
   });
 
+  // 🔴 ゴミ箱のノート(台帳 #1852 束 F2)── 生きたノートと同じ付け替えの表(`taken` / `lidMap`)を通す。
+  //   ⚠ 並びの位置は持ち込まない(書き出した側の番号は、こちらの並びとは別物)。戻すときは末尾に付く
+  const trashEntries = archive.trash.map((t) => {
+    let lid = t.lid;
+    if (lid === '' || taken.has(lid)) {
+      const fresh = opts.genLid();
+      if (t.lid !== '' && opts.existingLids.has(t.lid)) clashTitles.push(t.title);
+      else relabeled++;
+      lid = fresh;
+    }
+    taken.add(lid);
+    if (!lidMap.has(t.lid)) lidMap.set(t.lid, lid);
+    return { t, lid };
+  });
+
   const takenRel = new Set(opts.existingRelationIds);
   const relations: Array<{ id: string; fromLid: string; toLid: string; kind: string }> = [];
-  for (const r of archive.relations) {
+  for (const r of [...archive.relations, ...archive.trashRelations]) {
     const from = lidMap.get(r.fromLid);
     const to = lidMap.get(r.toLid);
     if (!from || !to) {
       // 端点が居ない = アーカイブが壊れている ── 黙って落とさない
       // 🔴 内部の ID ではなく、残っている側のノートの題名で言う(#1087)
-      const there = archive.entries.find((e) => e.lid === (from ? r.fromLid : r.toLid));
+      const missing = from ? r.fromLid : r.toLid;
+      const there = archive.entries.find((e) => e.lid === missing) ?? archive.trash.find((e) => e.lid === missing);
       danglingTitles.push(there && (from || to) ? `「${there.title || '(無題)'}」` : '');
       continue;
     }
@@ -683,6 +905,7 @@ export function restoreArchive(
   // 履歴に他人の版が並ぶ(P6c review H-1 で実証済みの事故)
   const byLid = new Map<string, typeof archive.revisions>();
   let orphanRevs = 0;
+  let orphanTrashRevs = 0;
   for (const r of archive.revisions) {
     const to = lidMap.get(r.entryLid);
     if (!to) {
@@ -693,11 +916,43 @@ export function restoreArchive(
     if (list) list.push(r);
     else byLid.set(to, [r]);
   }
-  if (orphanRevs > 0) {
-    // entry が居ない履歴 = ゴミ箱の版。**今は復元しない**(entry が無いと鎖の
-    // 起点 = tip が無く、decode できない)── 黙って落とさず件数を言う
-    warnings.push(`ノートの無い履歴 ${orphanRevs} 版は復元しませんでした(ゴミ箱の版)`);
+  const trashRows = new Map<string, typeof archive.trashRevisions>();
+  for (const r of archive.trashRevisions) {
+    const to = lidMap.get(r.entryLid);
+    if (!to) {
+      orphanTrashRevs++;
+      continue;
+    }
+    const list = trashRows.get(to);
+    if (list) list.push(r);
+    else trashRows.set(to, [r]);
   }
+  if (orphanRevs + orphanTrashRevs > 0) {
+    // 🔴 持ち主のノートがバックアップの中に居ない履歴。ゴミ箱のノートは `trash` で運ぶようになった(台帳 #1852 束 F2)ので、
+    //   ここに来るのは**旧い版が書いた物のゴミ箱の版**か、壊れたバックアップ。復元できない ── 黙って落とさず件数を言う
+    warnings.push(`ノートの無い履歴 ${orphanRevs + orphanTrashRevs} 版は復元しませんでした(ゴミ箱の版)`);
+  }
+  const trash = trashEntries.map(({ t, lid }) => ({
+    lid,
+    title: t.title,
+    archetype: t.archetype,
+    body: t.body,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
+    entryOrder: null,
+    trashedAt: t.trashedAt,
+    rows: [...(trashRows.get(lid) ?? [])]
+      .sort((a, b) => b.revOrder - a.revOrder)
+      .map((r) => ({
+        revOrder: r.revOrder,
+        createdAt: r.createdAt,
+        title: r.title,
+        archetype: r.archetype,
+        kind: r.kind,
+        snapshot: r.snapshot,
+        contentHash: r.contentHash ?? null,
+      })),
+  }));
   const revisionChains = [...byLid].map(([entryLid, rows]) => ({
     entryLid,
     rows: [...rows]
@@ -732,5 +987,5 @@ export function restoreArchive(
   }
   const lidRemap: Array<readonly [string, string]> = [];
   for (const [from, to] of lidMap) if (from !== to) lidRemap.push([from, to]);
-  return { entries, relations, assets, revisionChains, tagColors: archive.tagColors, lidRemap, sourceCid: archive.manifest.cid ?? '', warnings };
+  return { entries, relations, assets, trash, revisionChains, tagColors: archive.tagColors, lidRemap, sourceCid: archive.manifest.cid ?? '', warnings };
 }

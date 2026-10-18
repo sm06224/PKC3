@@ -56,6 +56,8 @@ import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { extractHeadingNumberConfig } from '@features/markdown/document-globals';
 import { safeName } from '@features/export/file-name';
 import { createProgressThrottle } from './progress-throttle';
+import type { JobControl } from './job-control';
+import { isOperationCancelled, type CancelToken } from '@features/job-cancel';
 import { dayStamp } from '@features/datetime/date-math';
 import { assetRefsIn } from '@features/asset/asset-ref-scan';
 
@@ -139,6 +141,11 @@ export interface ExportDeps {
     paper?: boolean,
   ): Promise<string | null>;
   now?(): Date;
+  /**
+   * 🔴 **途中でやめる**(台帳 #1852 束 F2 / 依頼 253 ── 大きいバックアップの書き出し)。⚠ **省略可** ── 無い配線は「やめる」ボタンを出さない。
+   * 添付 1 件・ノート 1 かたまりを読むごとに印を見て、立っていればファイルを作らずに抜ける(ダウンロードも始めない)。
+   */
+  job?: JobControl;
   /**
    * 本文 1 件を HTML にする(閲覧用 HTML だけが使う。P8 段⑲)。
    *
@@ -333,7 +340,8 @@ async function fallbackToRescueArchive(
   });
   let out: ArchiveWriteOut;
   try {
-    out = await writeArchive(source, iso);
+    // 🔴 保険の zip は大きさで断らない(依頼 119-3。作り直しの保険と同じ向き)
+    out = await writeArchive(source, iso, undefined, 'warn');
   } catch (e) {
     /**
      * 🔴 **拾い出しが 1 件も拾えなかった**(#1087)。⚠ そのまま投げると、壊れた保存領域の人が
@@ -364,6 +372,8 @@ async function fallbackToRescueArchive(
 function withAssetProgress(
   source: ArchiveSource,
   report: (done: number, total: number) => void,
+  /** 🔴 やめる印(依頼 253)。立っていれば、次の読みで抜ける(読み出しの区切り)。 */
+  token?: CancelToken,
 ): ArchiveSource {
   let total = 0;
   let done = 0;
@@ -373,7 +383,12 @@ function withAssetProgress(
       total = metas.length;
       return metas;
     },
+    listBodies: async (...args: Parameters<ArchiveSource['listBodies']>) => {
+      token?.throwIfCancelled();
+      return source.listBodies(...args);
+    },
     getAssetBlob: async (key: string) => {
+      token?.throwIfCancelled();
       const blob = await source.getAssetBlob(key);
       done = Math.min(done + 1, total);
       report(done, total);
@@ -417,6 +432,7 @@ export async function exportArchive(
 
   deps.notify?.(EXPORT_STARTING[kind]);
   progressShown = true;
+  const token = deps.job?.start('export') ?? null;
   try {
     // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
     await deps.settle();
@@ -431,6 +447,7 @@ export async function exportArchive(
     const src = withAssetProgress(
       deps.source,
       createProgressThrottle((n, m) => deps.notify?.(`${startingText}(添付 ${n} / ${m})`)),
+      token ?? undefined,
     );
 
     let out: ArchiveWriteOut;
@@ -500,6 +517,8 @@ export async function exportArchive(
           }
         }
       } catch (e) {
+        // 🔴 やめた回を「保存領域の問題」と読んで、読めた分だけのバックアップに切り替えない(依頼 253)
+        if (isOperationCancelled(e)) throw e;
         const fb =
           archiveScope === 'full' ? await fallbackToRescueArchive(deps, iso, base, e) : null;
         if (fb === null) throw e;
@@ -508,6 +527,8 @@ export async function exportArchive(
         detail = fb.detail;
       }
     }
+    // 🔴 組み終えた後にやめられても、ダウンロードは始めない(依頼 253)
+    token?.throwIfCancelled();
     deps.download(name, out.blob);
     const notes = [...extraWarnings, ...out.warnings];
     deps.report(notes);
@@ -521,7 +542,15 @@ export async function exportArchive(
     );
     return out.counts.entries;
   } catch (e) {
+    if (isOperationCancelled(e)) {
+      // 🔴 やめた(依頼 253)── 失敗ではない(`OP_FAILED` は出さない)。ファイルは作っていない
+      progressShown = false; // 次の知らせが進行中の欄を空にする
+      deps.notify?.('書き出しをやめました(ファイルは作っていません)');
+      return null;
+    }
     return fail(`書き出しに失敗しました: ${errorText(e)}`);
+  } finally {
+    if (token !== null) deps.job?.finish(token);
   }
 }
 

@@ -22,6 +22,7 @@
 import { isBlankBody } from '@features/markdown/frontmatter';
 import { DIFF_FILE_UNAVAILABLE_NOTE, diffSummary } from '@features/revision/diff-view';
 import { CHANGED_OUTSIDE_WRITE_BACK_NOTE } from '@adapter/platform/launched-files';
+import type { ChangedOnWriteBack } from '@features/import/text-decode';
 import type { ConfirmDiff } from '../render/app-dialog';
 
 /**
@@ -33,6 +34,16 @@ export const WRITE_BACK_EMPTY_NOTE =
   '本文が空なので、元ファイルへは書き戻しません(空にしたいときはパソコン側で空にしてください)';
 
 /**
+ * 🔴 **元の文字コードが UTF-8(BOM なし)でないファイルを書き戻すときの 1 行**(台帳 #1852 束 F2 / 依頼 126-1 A)。
+ * Shift_JIS 前提のほかのアプリで開くと文字化けする ── 書く前に言う(書き戻しは止めない)。画面に出る字なので 1 か所に置く。
+ */
+export const WRITE_BACK_ENCODING_NOTE: Readonly<Record<ChangedOnWriteBack, string>> = {
+  sjis: '元のファイルは Shift_JIS です。UTF-8 で書き戻します',
+  utf16: '元のファイルは UTF-16 です。UTF-8 で書き戻します',
+  'utf8-bom': '元のファイルは BOM 付きの UTF-8 です。BOM なしの UTF-8 で書き戻します',
+};
+
+/**
  * 🔴 **上書きの確認の字**(#1264 §2 欠陥 1)。⚠ `main.ts` に直書きしない(`main.ts` は
  * どの unit からも実行されない)。取り込んだ後にパソコン側で変わっていたら、**1 行足す**。
  */
@@ -41,10 +52,13 @@ export function writeBackConfirmMessage(
   changedOutside: boolean,
   /** 🔴 ファイルの中身を読めず、差分を出せないとき(「違いはありません」と言わず、理由を 1 行足す)。 */
   diffUnavailable = false,
+  /** 🔴 元のファイルの文字コードが、書き戻すと変わるもの(依頼 126-1 A。UTF-8 で BOM なしならなし)。 */
+  encoding?: ChangedOnWriteBack,
 ): string {
   return (
     `「${name}」を、いまのノートの内容で上書きします。\n\n` +
     (changedOutside ? `${CHANGED_OUTSIDE_WRITE_BACK_NOTE}\n\n` : '') +
+    (encoding !== undefined ? `${WRITE_BACK_ENCODING_NOTE[encoding]}\n\n` : '') +
     (diffUnavailable ? `${DIFF_FILE_UNAVAILABLE_NOTE}\n\n` : '') +
     'ファイルの元の内容は失われます(取り消せません)。よろしいですか?'
   );
@@ -122,7 +136,7 @@ export interface WriteBackDeps {
    * ⚠ **必須**(渡し忘れても tsc が黙る形にすると、外での直しを**黙って消す**元の欠陥が戻る)。
    * 読めない・比べられないときは `{ changed: false, text: null }`。⚠ 確認の前に 1 回、**書く直前にもう 1 回**読む(#1087 ── 間に変わったら書かない)。
    */
-  readonly inspectFile: () => Promise<{ changed: boolean; text: string | null }>;
+  readonly inspectFile: () => Promise<{ changed: boolean; text: string | null; encoding?: ChangedOnWriteBack }>;
   /** 済んだことを画面へ出す。 */
   readonly done: (message: string) => void;
   /** 理由つきで断る / 失敗を出す。 */
@@ -174,7 +188,7 @@ export async function writeBackEntry(deps: WriteBackDeps): Promise<void> {
   // ⚠ 見せるのは**確認の前に読んだ本文**との差 ── 確認の間に変わったら、書かずに断る(下)
   const diff = buildWriteBackDiff(file.text, first);
   // ⚠ 差分を出せない(`diff === null` = 大きすぎる / 読めない)ときは、そう言う(黙って素の確認にしない)
-  if (!(await deps.confirm(writeBackConfirmMessage(deps.name, file.changed, diff === null), diff))) return;
+  if (!(await deps.confirm(writeBackConfirmMessage(deps.name, file.changed, diff === null, file.encoding), diff))) return;
   const body = await readForWrite();
   if (body === null) return;
   // 🔴 見せた差分と書く本文を**同じ物**に保つ ── 違えば書かない(差分に無い変更を取り消せない形で書かない)

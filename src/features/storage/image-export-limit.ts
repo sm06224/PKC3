@@ -197,3 +197,21 @@ export function notImportableArchiveMessage(chars: number): string {
     '書き出し自体はできています。フォルダごとなどに分けて書き出すと、取り込み直せます。'
   );
 }
+
+/**
+ * 🔴 **取り込み直せない大きさのバックアップは書き出さない**(台帳 #1852 束 F2 / 依頼 119-3 A)。
+ *
+ * > 画面の物語:ノートの本文が合わせて約 5 億字(ブラウザの 1 本の文字列の上限)を超えると、バックアップは書き出せて
+ * > 「書き出しました」と出た。しかし取り込もうとすると読めなかった。
+ *
+ * ⚠ `notImportableArchiveMessage`(書いたうえで注意する)は、拾い出し・作り直しの保険の zip だけが使う
+ *   (大きいコレクションの作り直しを、大きさで止めない)。ふつうの書き出しはこちらで**書き出す前に**止める。
+ * @param chars ノート・つながり・履歴の部分のおよその字数
+ */
+export function archiveTooBigRefusal(chars: number): string {
+  return (
+    `大きすぎて取り込み直せないので書き出しません(ノート・つながり・履歴の部分が約 ${humanBytes(chars)}あり、` +
+    `取り込み直すときに読める上限は約 ${humanBytes(MAX_EMBED_TEXT_CHARS)}です)。` +
+    'フォルダごとに分けて書き出してください。'
+  );
+}

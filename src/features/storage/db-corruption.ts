@@ -78,6 +78,7 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   'renameLinkTexts',
   'importRevisionChains',
   'restoreRevisionChains',
+  'restoreTrashNotes',
   // 🔴 起動の検めの印(#1007 段①)── 壊れた DB に「検めた」印を残すと、次の起動で黙る
   'integrityStamp',
   // 🔴 タグの色(#1457)── `settings` の 1 行を書く。壊れた DB には打たない

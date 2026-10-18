@@ -39,6 +39,8 @@ function oldSource(data: ImageArchiveData, assets: ReadonlyMap<string, Blob>): A
     listTagColors: async () => data.tagColors,
     listRevisionLids: async () => data.chains.map((c) => c.lid),
     getRevisionChain: async (lid) => chainOf.get(lid) ?? [],
+    // 🔴 ゴミ箱のノート(台帳 #1852 束 F2)
+    listTrashHeads: async () => data.trash,
   };
 }
 
@@ -99,6 +101,15 @@ function fixture(): { data: ImageArchiveData; assets: Map<string, Blob>; bytes: 
         created_at: '2026-01-01T00:00:00Z',
         updated_at: null,
       },
+      // 🔴 ゴミ箱のノート t1 に触るつながり(生きたノート n1 から t1 へ)── `trashRelations` へ分かれる
+      {
+        id: 'r-trash',
+        from_lid: 'n1',
+        to_lid: 't1',
+        kind: 'semantic',
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: null,
+      },
     ],
     assets: [
       { key: 'ast-a', mime: 'image/png', size: 7, hash: 'sha256:aa' },
@@ -112,7 +123,42 @@ function fixture(): { data: ImageArchiveData; assets: Map<string, Blob>; bytes: 
       { tag: '赤', color: '#aa3300' },
       { tag: '青', color: 'blue' },
     ],
+    // 🔴 ゴミ箱のノート(頭 = ゴミ箱へ移した時点の全文 + 古い版 1 つ)
+    trash: [
+      {
+        lid: 't1',
+        title: '捨てたノート',
+        archetype: 'text',
+        created_at: '2026-01-05T00:00:00Z',
+        updated_at: '2026-02-05T00:00:00Z',
+        entry_order: 7,
+        trashed_at: '2026-03-01T00:00:00Z',
+      },
+    ],
     chains: [
+      {
+        lid: 't1',
+        rows: [
+          {
+            revOrder: 2,
+            createdAt: '2026-03-01T00:00:00Z',
+            title: '捨てたノート',
+            archetype: 'text',
+            kind: 'full',
+            snapshot: '捨てた本文 asset:ast-b',
+            contentHash: 'ht2',
+          },
+          {
+            revOrder: 1,
+            createdAt: '2026-02-01T00:00:00Z',
+            title: null,
+            archetype: null,
+            kind: 'patch',
+            snapshot: '@@ -1 +1 @@',
+            contentHash: null,
+          },
+        ],
+      },
       {
         lid: 'n2',
         rows: [
@@ -170,6 +216,12 @@ describe('PKC3 入り HTML → Pkc3Archive: 以前の zip 経由の道と同じ�
     expect(after.entries.map((e) => e.lid)).toEqual(['n1', 'n2', 'n3']);
     expect(after.entries[0]!.archived).toBe(true);
     expect(after.revisions).toHaveLength(2);
+    // 🔴 ゴミ箱のノートは `entries` にも `revisions` にも混ざらず、別の鍵で運ばれる
+    expect(after.trash.map((t) => t.lid)).toEqual(['t1']);
+    expect(after.trash[0]!.body).toBe('捨てた本文 asset:ast-b');
+    expect(after.trashRevisions).toHaveLength(1);
+    expect(after.trashRelations.map((r) => r.id)).toEqual(['r-trash']);
+    expect(after.relations.map((r) => r.id)).toEqual(['r1']);
     expect(after.tagColors).toEqual([{ tag: '赤', color: '#aa3300' }]);
     expect(after.warnings.length, '注意が 1 件も出ない材料では警告の一致を言えない').toBeGreaterThan(0);
 
@@ -177,6 +229,9 @@ describe('PKC3 入り HTML → Pkc3Archive: 以前の zip 経由の道と同じ�
     expect(after.entries).toEqual(before.entries);
     expect(after.relations).toEqual(before.relations);
     expect(after.revisions).toEqual(before.revisions);
+    expect(after.trash).toEqual(before.trash);
+    expect(after.trashRelations).toEqual(before.trashRelations);
+    expect(after.trashRevisions).toEqual(before.trashRevisions);
     expect(after.assets).toEqual(before.assets);
     expect(after.tagColors).toEqual(before.tagColors);
     expect(after.warnings).toEqual(before.warnings);

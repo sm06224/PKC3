@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 import {
   writeBackConfirmMessage,
   writeBackEntry,
+  WRITE_BACK_ENCODING_NOTE,
   WRITE_BACK_CHANGED_NOTE,
   WRITE_BACK_EMPTY_NOTE,
   WRITE_BACK_FILE_CHANGED_NOTE,
@@ -155,6 +156,34 @@ describe('元のファイルへ書き戻す', () => {
     expect(asked[0]).toContain('ファイルが大きい(または読めない)ため、ちがいは出せません');
     // 「違いはありません」(= 同じ)とは言わない
     expect(asked[0]).not.toContain('違いはありません');
+  });
+
+  /**
+   * 🔴 **元が UTF-8(BOM なし)でないファイルは、書き戻すと UTF-8 に変わる ── 確認で言う**(台帳 #1852 束 F2 / 依頼 126-1 A)。
+   * ⚠ 書き戻しは止めない(user が確認で選ぶ)。観測点は**確認の窓へ渡った字**と**書かれたか**。対照群は UTF-8(足さない)。
+   */
+  it('🔴 元が Shift_JIS なら、確認の字に「元のファイルは Shift_JIS です。UTF-8 で書き戻します」が足され、OK なら書く', async () => {
+    const asked: string[] = [];
+    const { deps, written } = harness({
+      inspectFile: async () => ({ changed: false, text: '古い', encoding: 'sjis' }),
+      confirm: async (message) => {
+        asked.push(message);
+        return true;
+      },
+    });
+    await writeBackEntry(deps);
+    expect(asked[0]).toContain('元のファイルは Shift_JIS です。UTF-8 で書き戻します');
+    expect(asked[0]).toBe(writeBackConfirmMessage('メモ.md', false, false, 'sjis'));
+    expect(written).toEqual(['保存した本文']);
+  });
+
+  it('🔴 対照群: 元が UTF-8(文字コードの注意が無い)なら足さない。UTF-16 / BOM 付きはそれぞれの字を足す', async () => {
+    const plain = writeBackConfirmMessage('メモ.md', false);
+    for (const note of Object.values(WRITE_BACK_ENCODING_NOTE)) expect(plain).not.toContain(note);
+    expect(writeBackConfirmMessage('メモ.md', false, false, 'utf16')).toContain('元のファイルは UTF-16 です。UTF-8 で書き戻します');
+    expect(writeBackConfirmMessage('メモ.md', false, false, 'utf8-bom')).toContain(
+      '元のファイルは BOM 付きの UTF-8 です。BOM なしの UTF-8 で書き戻します',
+    );
   });
 
   it('🔴 確認の字(画面に出る物)', () => {

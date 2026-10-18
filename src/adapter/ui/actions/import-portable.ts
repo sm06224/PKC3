@@ -26,8 +26,11 @@ import {
   toArchiveEntry,
   toArchiveRelation,
   toArchiveRevision,
+  toArchiveTrash,
   type ArchiveContainerJson,
   type ArchiveEntry,
+  type ArchiveRevision,
+  type ArchiveTrashNote,
   type Pkc3Archive,
 } from '@features/export/pkc3-archive';
 import { openPortableHtmlBlob, type LazyPortableAsset } from '@features/import/portable-html';
@@ -57,11 +60,36 @@ export function portableArchive(
     const m = metaOf.get(r.lid);
     if (m) entries.push(toArchiveEntry(m, r.body));
   }
-  const revisions = data.chains.flatMap((c) => c.rows.map((rv) => toArchiveRevision(c.lid, rv)));
+  // 🔴 ゴミ箱のノートは書き出しと同じ写し(`toArchiveTrash`)で別の鍵へ(台帳 #1852 束 F2 / 依頼 105-2・297 A)。
+  //   鎖はゴミ箱の lid のぶんも入っている ── 生きたノートの履歴(`revisions`)と混ぜない
+  const trash: ArchiveTrashNote[] = [];
+  const trashRevisions: ArchiveRevision[] = [];
+  const trashLids = new Set<string>();
+  const chainOf = new Map(data.chains.map((c) => [c.lid, c.rows] as const));
+  for (const h of data.trash) {
+    if (metaOf.has(h.lid) || trashLids.has(h.lid)) continue;
+    const got = toArchiveTrash(h, chainOf.get(h.lid) ?? []);
+    if (got === null) continue;
+    trash.push(got.note);
+    trashRevisions.push(...got.rows);
+    trashLids.add(h.lid);
+  }
+  const revisions = data.chains
+    .filter((c) => !trashLids.has(c.lid))
+    .flatMap((c) => c.rows.map((rv) => toArchiveRevision(c.lid, rv)));
+  // ゴミ箱のノートに触るつながりは別の鍵へ(書き出しと同じ分け方。両端がバックアップの中に居る物だけ)
+  const knows = (lid: string): boolean => metaOf.has(lid) || trashLids.has(lid);
+  const trashRelations = data.relations.filter(
+    (r) => (trashLids.has(r.from_lid) || trashLids.has(r.to_lid)) && knows(r.from_lid) && knows(r.to_lid),
+  );
+  const trashRelationIds = new Set(trashRelations.map((r) => r.id));
   const container: ArchiveContainerJson = {
     entries,
-    relations: data.relations.map(toArchiveRelation),
+    relations: data.relations.filter((r) => !trashRelationIds.has(r.id)).map(toArchiveRelation),
     revisions,
+    ...(trash.length > 0
+      ? { trash, trashRelations: trashRelations.map(toArchiveRelation), trashRevisions }
+      : {}),
     assets: data.assets.map(toArchiveAsset),
     // 1 つも無ければ付けない(書き出しと同じ)
     ...(data.tagColors.length > 0 ? { tagColors: data.tagColors } : {}),
@@ -82,9 +110,10 @@ export function portableArchive(
     title: data.title,
     counts: {
       entries: entries.length,
-      relations: data.relations.length,
+      relations: data.relations.length - trashRelations.length,
       revisions: revisions.length,
       assets: data.assets.length,
+      ...(trash.length > 0 ? { trash: trash.length } : {}),
     },
   };
   checkArchiveManifest(manifest);

@@ -619,6 +619,17 @@ export type StorageRequest =
   | { op: 'listRevisionLids'; cid: string }
   | { op: 'listTrash'; cid: string }
   /**
+   * 🔴 **ゴミ箱のノートの頭**(台帳 #1852 束 F2 / 依頼 105-2・297 A)── バックアップに入れるための材料。
+   * `listTrash` と同じ「`entries` に居ない lid の最新の行」に、ゴミ箱へ移すとき控えた作成日・更新日時・並びの位置を添える。
+   * 本文と古い版は `exportRevisionChain` で引く(頭の行 = ゴミ箱へ移した時点の全文)。
+   */
+  | { op: 'listTrashHeads'; cid: string }
+  /**
+   * 🔴 **ゴミ箱のノートを、ゴミ箱の中へ復元する**(台帳 #1852 束 F2)。`restoreRevisionChains` の仲間 ── `entries` には書かず、
+   * 古い版(同じ復元の本体)と頭の行(`deleteEntry` が積む行と同じ形)だけを積む。戻す道は「ゴミ箱から戻す」がそのまま使える。
+   */
+  | { op: 'restoreTrashNotes'; cid: string; notes: TrashNoteInput[]; keepLatest?: number }
+  /**
    * ゴミ箱を空にする。🔴 `lid` を渡すと**その 1 件だけ**を完全に消す(台帳 #1852 G2 / 依頼 301 A)── 履歴と、その lid に触る
    * つながりだけを落とし、ほかのゴミ箱のノートの居場所には触らない。⚠ 生きているノート(ゴミ箱に居ない lid)は消さない。
    */
@@ -716,7 +727,16 @@ export type StorageRequest =
    *   無事なデータでも rc 11 で落ちる(実測)。
    * ⚠ **落ちた区画は飛ばして先へ進む** ── 1 か所で諦めると、その先が全部捨たる。
    */
-  | { op: 'rescueEntries'; afterRowid?: number; chunks?: number }
+  | {
+      op: 'rescueEntries';
+      afterRowid?: number;
+      chunks?: number;
+      /**
+       * 🔴 `'system'` で**システムのメッセージ**の行だけを拾う(台帳 #1852 束 F2 / 依頼 119-1 A)。省略 = user のノート(従来どおり)。
+       * ⚠ バックアップ(zip)には入れない領域 ── 作り直しが「捨てる前に読んで、同じ領域へ書き戻す」ためだけの口。
+       */
+      realm?: 'system';
+    }
   /**
    * 🔴 **つながりと履歴も拾う**(#1087)。⚠ 同じ作法(`NOT INDEXED` / 落ちた区画は飛ばす)。
    * 索引だけ壊れた DB では表走査で読める(2026-10-14 実測)。
@@ -806,8 +826,10 @@ export interface ImageArchiveData {
   relations: RelationRow[];
   assets: AssetMetaRow[];
   tagColors: Array<{ tag: string; color: string }>;
-  /** ノートごとの履歴の鎖(保存形のまま。新しい → 古い)。 */
+  /** ノートごとの履歴の鎖(保存形のまま。新しい → 古い)。ゴミ箱のノートの鎖も入る(頭の行つき)。 */
   chains: Array<{ lid: string; rows: EncodedRevisionRow[] }>;
+  /** 🔴 ゴミ箱のノートの頭(台帳 #1852 束 F2)。本文と古い版は `chains` の同じ lid の鎖から取る。 */
+  trash: TrashHeadRow[];
 }
 
 /** 復元する鎖 1 本。rows は **新しい → 古い**(rev_order の降順)。 */
@@ -822,6 +844,35 @@ export interface EncodedChainInput {
    * ⚠ 当てる規則は `remapImportedBody`(tip を書き換えた口と同じ 1 本)。
    */
   rewrite?: { tip: string; remap: ImportRemap };
+}
+
+/**
+ * 🔴 **ゴミ箱へ入れ直す 1 件**(台帳 #1852 束 F2)。`rows` は頭より古い版(保存形の鎖。新しい → 古い。頭の行は含めない)。
+ * `remap` があるとき、`body` と各版に同じ付け替え(添付の key・`entry:` の lid)を当てて積む。
+ */
+export interface TrashNoteInput {
+  entryLid: string;
+  title: string;
+  archetype: string;
+  /** ゴミ箱へ移した時点の本文(書き出したときのまま)。 */
+  body: string;
+  trashedAt: string | null;
+  entryCreatedAt: string | null;
+  entryUpdatedAt: string | null;
+  entryOrder: number | null;
+  rows: EncodedRevisionRow[];
+  remap?: ImportRemap;
+}
+
+/** `listTrashHeads` の 1 行。 */
+export interface TrashHeadRow {
+  lid: string;
+  title: string | null;
+  archetype: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  entry_order: number | null;
+  trashed_at: string | null;
 }
 
 /** importRevisionChains の結果(何が入って何が落ちたかを可視化する)。 */
@@ -1097,6 +1148,13 @@ export interface RescueRevisionsPage extends RescuePageBase {
     kind: string;
     snapshot: string;
     contentHash: string | null;
+    /**
+     * 🔴 ゴミ箱へ移すときに控えた 作成日・並びの位置・更新日時(台帳 #1852 束 F2 / 依頼 119-1 A)。ゴミ箱のノートの頭の行だけが持つ。
+     * ⚠ NULL / 読めなければ `null`(控えが無い。戻すときは従来どおり)。
+     */
+    entryCreatedAt: string | null;
+    entryOrder: number | null;
+    entryUpdatedAt: string | null;
   }>;
 }
 
@@ -1281,6 +1339,8 @@ export interface ResultMap {
   revisionDiffStats: RevisionDiffStat[];
   listRevisionLids: string[];
   listTrash: RevisionMetaRow[];
+  listTrashHeads: TrashHeadRow[];
+  restoreTrashNotes: ImportRevisionsResult;
   purgeTrash: { purged: number };
   putAssetMeta: null;
   listAssetMetas: AssetMetaRow[];

@@ -715,6 +715,7 @@ import {
 import {
   rebuildDoneMessage,
   rebuildExplainMessage,
+  rebuildFewerMessage,
   type RebuildProgress,
   type RebuildReport,
 } from '@features/storage/container-rebuild';
@@ -2082,7 +2083,15 @@ export interface BinderServices {
    *   「作り直せたがメモリ上だった」は成功でも失敗でもなく、
    *   **user が次にやることが違う**。
    */
-  rebuildContainer?(cid: string, onProgress?: RebuildProgress): Promise<RebuildReport>;
+  rebuildContainer?(
+    cid: string,
+    onProgress?: RebuildProgress,
+    /**
+     * 🔴 読めた数が一覧より少ないとき、捨てる前に聞く(台帳 #1852 束 F2 / 依頼 119-2 A)。`expected` = 一覧に出ている数。
+     * `confirm` が `false` を返したら何もせずやめる(`outcome: 'declined'`)。
+     */
+    few?: { readonly expected: number; readonly confirm: (read: number, expected: number) => Promise<boolean> },
+  ): Promise<RebuildReport>;
   /**
    * 🔴 **読み込み直す**(#986 段③)。⚠ 捨てた後の画面は**もう無い物を映している**。
    * ⚠ optional なのは test のためだけ ── 実機では必ず渡す
@@ -2580,6 +2589,11 @@ export interface BinderServices {
    *   「押された」を伝えるだけ(件数も生死もここで数えない)。
    */
   undoImport?(): void;
+  /**
+   * 🔴 **長い取り込み・書き出しを途中でやめる**(台帳 #1852 束 F2 / 依頼 253)。⚠ どの仕事の印かは `job-control.ts` が持つ ──
+   * binder は「押された」を伝えるだけ。編集中でも押せる(やめるのを門で止めない)。
+   */
+  cancelJob?(): void;
 }
 
 function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
@@ -13617,13 +13631,35 @@ const ACTIONS: Record<string, ActionHandler> = {
            *   何も出さないと「**固まった**」と読まれて窓を閉じられる
            *   (閉じられると、書き戻す前に止まる)。
            */
-          const report = await rebuild(cid, (phase, seen) => {
-            sum.textContent =
-              phase === 'pick'
-                ? `中身を取り出しています… ${seen} 件`
-                : `ノートを戻しています… ${seen} 件`;
-          });
+          const report = await rebuild(
+            cid,
+            (phase, seen) => {
+              sum.textContent =
+                phase === 'pick'
+                  ? `中身を取り出しています… ${seen} 件`
+                  : `ノートを戻しています… ${seen} 件`;
+            },
+            {
+              // 🔴 一覧に出ている数より読めた数が少ないなら、書き出す前・捨てる前に聞く(依頼 119-2 A)
+              expected: dispatcher.getState().entryMetas.size,
+              confirm: async (read, expected) =>
+                (await confirmInApp(root, rebuildFewerMessage(read, expected), {
+                  okLabel: '続ける',
+                  cancelLabel: 'やめる',
+                })) === 'ok',
+            },
+          );
           const done = rebuildDoneMessage(report);
+          /**
+           * 🔴 **やめた回は読み込み直さない**(依頼 119-2 A)── 何も書き出さず・消していないので、この画面の保存は生きている
+           * (読み込み直すと、打ちかけを捨てさせる)。言うだけ言って終える。
+           */
+          if (report.outcome === 'declined') {
+            sum.textContent = '';
+            sum.hidden = true;
+            dispatcher.dispatch({ type: 'OP_NOTICE', message: done });
+            return;
+          }
           sum.textContent = done;
           // 🔴 モーダルを出す前に post する(設計 doc §7、段②a)
           appMessagePost.post({ kind: 'result', source: 'db-rescue-rebuild', text: done });
@@ -14087,6 +14123,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   // 🔴 **直前の取込を取り消す**(#535 ②)── 消す規則も件数も実体側(`import-undo.ts`)
   'undo-import': (_dispatcher, _target, services) => {
     services.undoImport?.();
+  },
+  // 🔴 **長い取り込み・書き出しを途中でやめる**(台帳 #1852 束 F2 / 依頼 253)── 印を立てるだけ。止まる区切りは仕事の側(`job-control.ts`)
+  'cancel-job': (_dispatcher, _target, services) => {
+    services.cancelJob?.();
   },
   /**
    * 🔴 **段組みを回す**(#522 / #426 段②)。
