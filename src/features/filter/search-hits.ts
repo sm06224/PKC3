@@ -77,23 +77,6 @@ export function straightenQuotes(s: string): string {
   return s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
 }
 
-/**
- * 語を、本文を描く規則(typographer)が字を置き換える**のと同じ向き**に置き換える。
- * 🔑 描いた後の本文には `…` `–` `—` `©` `®` `™` `±` が居て、打った `...` `--` `---` `(c)` `(r)` `(tm)` `+-`
- *   とは長さも字も違う ── 語の側も同じに替えた物を、もう 1 つの探し物にする。
- * ⚠ 規則は markdown-it の replacements に合わせた小さな対応表(大小は畳み済みの語を受ける)。
- */
-export function typographed(term: string): string {
-  return term
-    .replace(/\+-/g, '\u00B1')
-    .replace(/\.{2,}/g, '\u2026')
-    .replace(/---/g, '\u2014')
-    .replace(/--/g, '\u2013')
-    .replace(/\(c\)/gi, '\u00A9')
-    .replace(/\(r\)/gi, '\u00AE')
-    .replace(/\(tm\)/gi, '\u2122');
-}
-
 export interface HitSpan {
   /** UTF-16 の添字(`Range.setStart` が受ける物差し)。 */
   readonly start: number;
@@ -111,16 +94,13 @@ export function findHitSpans(text: string, terms: readonly string[]): HitSpan[] 
   for (const term of terms) {
     const base = straightenQuotes(foldCase(term));
     if (base === '') continue;
-    const alt = typographed(base);
-    // 🔑 打った字のまま / 整形された字へ替えた物、の 2 通りで引く(同じなら 1 通り)
-    for (const needle of alt === base ? [base] : [base, alt]) {
-      let from = 0;
-      for (;;) {
-        const at = hay.indexOf(needle, from);
-        if (at < 0) break;
-        spans.push({ start: at, end: at + needle.length });
-        from = at + needle.length;
-      }
+    // 🔑 記号への置き換え(`...` → `…` など)は描画側で止めた(台帳 #1852 束 R1、依頼 254)── 打った字のまま引く
+    let from = 0;
+    for (;;) {
+      const at = hay.indexOf(base, from);
+      if (at < 0) break;
+      spans.push({ start: at, end: at + base.length });
+      from = at + base.length;
     }
   }
   if (spans.length === 0) return [];

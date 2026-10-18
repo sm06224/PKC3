@@ -100,11 +100,19 @@ function valueOf(name: string, now: Date): string | null {
  * ⚠ **埋める印(`${宛名}`)には触らない** ── そちらは本文に残したまま選択する
  * (この file の頭の理由)。
  *
- * @returns 置き換えた字と、`${cursor}` が在った位置(無ければ `null`)
+ * 🔴 **`\${date}` は字のまま `${date}` を出す**(台帳 #1852 束 R1、依頼 273 A)。直前の `\` を 1 つ外して印ごと残す
+ *   (変数の `\{{vars.x}}` と同じ作法)。`\\${date}`(逃がした `\` の後ろ)は逃がしではない ── `\` が奇数個のときだけ。
+ *   外した印は `literals` に位置を返す ── 挿した後に「埋める場所」として選ばない。
+ *
+ * @returns 置き換えた字と、`${cursor}` が在った位置(無ければ `null`)と、字のまま残した印の範囲
  */
-export function fillSnippetVars(body: string, now: Date): { text: string; caret: number | null } {
+export function fillSnippetVars(
+  body: string,
+  now: Date,
+): { text: string; caret: number | null; literals: Array<[number, number]> } {
   let out = '';
   let caret: number | null = null;
+  const literals: Array<[number, number]> = [];
   let at = 0;
   /**
    * 🔴 **コードの中(囲み・文中コード)の `${…}` は値にしない**(#1087)── user が書いたコードの
@@ -120,6 +128,16 @@ export function fillSnippetVars(body: string, now: Date): { text: string; caret:
   for (let m = SLOT_RE.exec(body); m !== null; m = SLOT_RE.exec(body)) {
     const name = slotName(m[1]!);
     if (inCode(m.index)) continue;
+    // 🔴 直前の `\` が奇数個 = 逃がされている ── `\` を 1 つ外して、印をそのまま残す
+    let slashes = 0;
+    for (let k = m.index - 1; k >= at && body[k] === '\\'; k--) slashes++;
+    if (slashes % 2 === 1) {
+      out += body.slice(at, m.index - 1);
+      literals.push([out.length, out.length + m[0].length]);
+      out += m[0];
+      at = m.index + m[0].length;
+      continue;
+    }
     if (name === 'cursor') {
       out += body.slice(at, m.index);
       // ⚠ **最初の 1 つだけ**を採る(2 つ書かれたら後ろのものは印として残る)
@@ -133,7 +151,7 @@ export function fillSnippetVars(body: string, now: Date): { text: string; caret:
     out += body.slice(at, m.index) + v;
     at = m.index + m[0].length;
   }
-  return { text: out + body.slice(at), caret };
+  return { text: out + body.slice(at), caret, literals };
 }
 
 /** 本文に残っている印を全部拾う(前から順)。 */
@@ -309,7 +327,7 @@ export function insertSnippet(
   now: Date,
   opts: { breakLines?: boolean } = {},
 ): TextSelection {
-  const { text: filled, caret } = fillSnippetVars(body, now);
+  const { text: filled, caret, literals } = fillSnippetVars(body, now);
   let lead = '';
   let tailBreak = '';
   // 🔴 複数行のテンプレートを一覧から選んだときだけ、行の途中なら改行して挿す(表・見出しは行頭でないと描かれない)。
@@ -323,8 +341,9 @@ export function insertSnippet(
   const tail = sel.text.slice(sel.end);
   const text = head + lead + filled + tailBreak + tail;
   const base = sel.start + lead.length;
-  // ⚠ コードの中の印は選ばない(`nextSnippetSlot` と同じ範囲)── `${HOME}` より `${cursor}` を優先する
-  const regions = codeRegions(filled);
+  // ⚠ コードの中の印は選ばない(`fillSnippetVars` が値にしない範囲と同じ: 柵・文中コード + 字下げのコード・`$$`・`<pre>`)
+  //   ── `${HOME}` より `${cursor}` を優先する。`\${…}` で字のまま残した印も選ばない(依頼 273 A)
+  const regions = [...codeRegions(filled), ...blockCodeRegions(filled), ...literals];
   const slot = snippetSlots(filled).find((s) => !regions.some(([a, b]) => s.start >= a && s.start <= b));
   if (slot !== undefined) return { text, start: base + slot.start, end: base + slot.end };
   const at = base + (caret ?? filled.length);

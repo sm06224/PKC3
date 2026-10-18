@@ -145,6 +145,46 @@ test('🔴 題名で選ぶと caret の位置にリンクが入り、押すと�
     '元のノートを直したのに追いかけていない',
   ).toContainText('B案へ変更');
 
+  /**
+   * 🔴 束 R1(依頼 86-3)**番号を振った前書きのノートへも、番号なしの字の `entry:ID#h/見出し` で飛べる**。
+   * 前書き(`heading-number: true`)で見出しが「1. 決定」のように番号付きで描かれても、リンクの字は番号なしで通る。
+   * 観測点は、押した後に相手の見出しが画面の上のほうへ来ること(長い本文の末尾に置き、押す前は画面の下)。
+   */
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('番号つきの手順');
+  const numbered = [
+    '---',
+    'heading-number: true',
+    '---',
+    '## はじめに',
+    ...Array.from({ length: 60 }, (_, i) => `前置きの行 ${i}`),
+    '## 結び',
+    ...Array.from({ length: 60 }, (_, i) => `結びの行 ${i}`),
+  ].join('\n');
+  await page.locator('[data-pkc-field="editor-body"]').fill(numbered);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] h2[id]').last(),
+    '前提が崩れている(見出しに番号が付いていない)',
+  ).toContainText(/\d.*結び/);
+  const numLid =
+    (await page
+      .locator('[data-pkc-region="sidebar"] [data-pkc-action="select-entry"][data-pkc-entry]', { hasText: '番号つきの手順' })
+      .first()
+      .getAttribute('data-pkc-entry')) ?? '';
+  expect(numLid, '前提: 番号つきノートの lid が取れない').not.toBe('');
+
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('番号つきへの案内');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`[結びへ](entry:${numLid}#h/結び)`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-field="detail-body"] [data-pkc-action="navigate-entry-ref"]');
+  await expect(page.locator('[data-pkc-field="detail-title"]'), '番号つきのノートが開かない').toContainText('番号つきの手順');
+  const endHeading = page.locator('[data-pkc-field="detail-body"] h2[id]').last();
+  await expect
+    .poll(async () => (await endHeading.boundingBox())?.y ?? 99999, '番号なしの字(#h/結び)で番号つきの見出しへ飛ばない')
+    .toBeLessThan(400);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toHaveLength(0);
 });
 

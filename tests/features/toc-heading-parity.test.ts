@@ -112,13 +112,18 @@ const CORPUS: ReadonlyArray<{
   headingNumber?: { start: number };
   /** その case が「何を実際に出しているか」の空振り防止。 */
   expectIds?: string[];
+  /** 前の名前で飛べるよう、見出しの中に置かれる空の別名 `<span id>`(束 R1 依頼 255 B / 351 A) */
+  expectAliases?: string[];
 }> = [
   {
-    name: '採番(id は 1-第一 / 目次も同じ先を指す)',
+    // 束 R1 の依頼 351 A: id は番号を除いた字から作る(章を足して番号がずれてもリンクが切れない)。
+    // 番号付きの前の名前(`1-第一`)は、見出しの中の空の別名 `<span id>` で残し、そちらでも飛べる
+    name: '採番(id は番号を除いた 第一 / 目次も同じ先を指す / 前の名前 1-第一 は別名で飛べる)',
     body: '# 第一\n\n## 第二\n\n:::toc{depth=2}\n',
     depth: 2,
     headingNumber: { start: 1 },
-    expectIds: ['1-第一', '11-第二'],
+    expectIds: ['第一', '第二'],
+    expectAliases: ['1-第一', '11-第二'],
   },
   {
     name: '行内コメント(本文から消えた字は目次からも消える)',
@@ -237,6 +242,18 @@ describe('目次と本文の見出しは同じ読み手から出る', () => {
         expect(seen.headings.map((h) => h.id), `${c.name}: 本文の見出しが想定と違う`).toEqual(
           c.expectIds,
         );
+      }
+      if (c.expectAliases) {
+        const doc = document.createElement('div');
+        doc.innerHTML = html;
+        const aliases = [...doc.querySelectorAll<HTMLElement>('h1 > span[id], h2 > span[id], h3 > span[id]')];
+        expect(aliases.map((a) => a.id), `${c.name}: 前の名前の別名が想定と違う`).toEqual(c.expectAliases);
+        // 別名は見えない(字を持たない)── 見出しの字・目次の字を汚さない
+        expect(aliases.every((a) => a.textContent === '')).toBe(true);
+        // 前の名前でも、見出しの中の要素として実在する(= `#1-第一` で飛べる)
+        for (const id of c.expectAliases) {
+          expect(doc.querySelector(`[id="${id}"]`), `${c.name}: #${id} が実在しない`).not.toBeNull();
+        }
       }
     });
   }

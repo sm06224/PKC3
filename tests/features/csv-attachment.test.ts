@@ -125,3 +125,25 @@ describe('file 全体を 1 つの表にする', () => {
     });
   });
 });
+
+describe('台帳 #1852 束 R1(依頼 263): 見出しより多い升の余りは「列3」「列4」の列にする', () => {
+  it('見出し a,b の file に 1,2,3,4 の行 ── 3 と 4 は捨てない', () => {
+    const t = buildCsvAttachmentTable('a,b\n1,2,3,4\n5,6', 'csv', note)!;
+    expect(t.columns).toEqual(['_note', '_lid', 'a', 'b', '列3', '列4']);
+    expect(t.rows).toEqual([
+      ['売上.csv', 'n1', '1', '2', '3', '4'],
+      // 対照群: 升の足りない行は今までどおり null で埋まる
+      ['売上.csv', 'n1', '5', '6', null, null],
+    ]);
+  });
+
+  it('対照群: 余りの無い file は列が増えない', () => {
+    const t = buildCsvAttachmentTable('a,b\n1,2', 'csv', note)!;
+    expect(t.columns).toEqual(['_note', '_lid', 'a', 'b']);
+  });
+
+  it('見出しに「列3」がすでに在れば _2 で逃がす(列名が重ならない)', () => {
+    const t = buildCsvAttachmentTable('a,列3\n1,2,3', 'csv', note)!;
+    expect(t.columns).toEqual(['_note', '_lid', 'a', '列3', '列3_2']);
+  });
+});

@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  applyCardTitles,
   applyMissingLinks,
   clearMissingLinks,
   MISSING_ATTR,
@@ -138,5 +139,41 @@ describe('applyMissingLinks', () => {
     }
     expect(MISSING_LINK_TITLE).toContain('見つかりません');
     expect(MISSING_LINK_TITLE).toContain('ゴミ箱');
+  });
+});
+
+describe('applyCardTitles(台帳 #1852 束 R1、依頼 94-1)', () => {
+  const titleOf = (lid: string): string | undefined => (lid === 'here' ? '先週の議事録' : undefined);
+
+  it('🔴 前提: 当てる前の枠の字は「@card」(題名ではない)', () => {
+    const host = hostOf('@[card](entry:here)');
+    expect(host.querySelector('.pkc-card-placeholder')!.textContent).toBe('@card');
+  });
+
+  it('🔴 指したノートの題名が枠の中の字になる(枠の class・押せる属性は今のまま)', () => {
+    const host = hostOf('@[card](entry:here) と @[card:compact](entry:here)');
+    applyCardTitles(host, titleOf, SELF);
+    const cards = [...host.querySelectorAll<HTMLElement>('.pkc-card-placeholder')];
+    expect(cards.map((c) => c.textContent)).toEqual(['先週の議事録', '先週の議事録']);
+    expect(cards[0]!.getAttribute('data-pkc-action')).toBe('navigate-card-ref');
+    expect(cards[0]!.getAttribute('data-pkc-card-target')).toBe('entry:here');
+    expect(cards[0]!.getAttribute('role')).toBe('link');
+  });
+
+  it('対照群: 無いノート・別の PKC・添付を指す枠は元の字のまま', () => {
+    const host = hostOf(['@[card](entry:gone)', '@[card](pkc://other-cid/entry/far)', '@[card](asset:k1)'].join('\n\n'));
+    const before = [...host.querySelectorAll('.pkc-card-placeholder')].map((c) => c.textContent);
+    applyCardTitles(host, titleOf, SELF);
+    expect([...host.querySelectorAll('.pkc-card-placeholder')].map((c) => c.textContent)).toEqual(before);
+    expect(before.every((t) => t === '@card')).toBe(true);
+  });
+
+  it('冪等 / 題名を変えたら追随する', () => {
+    const host = hostOf('@[card](entry:here)');
+    applyCardTitles(host, titleOf, SELF);
+    applyCardTitles(host, titleOf, SELF);
+    expect(host.querySelector('.pkc-card-placeholder')!.textContent).toBe('先週の議事録');
+    applyCardTitles(host, () => '改名後', SELF);
+    expect(host.querySelector('.pkc-card-placeholder')!.textContent).toBe('改名後');
   });
 });

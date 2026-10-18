@@ -28,6 +28,8 @@
 import { parseEntryRef } from '../entry-ref/entry-ref';
 import { sectionRange } from './append-target';
 import { fenceStep } from './list-renumber';
+import { extractVars } from './frontmatter';
+import { expandDefinedVars } from './var-expand';
 import { clipText, type PlaceExcerpt } from './place-embed';
 
 const SEP = '#h/';
@@ -61,7 +63,8 @@ export function sectionExcerptOf(body: string, id: string): PlaceExcerpt {
   if (range === null) return { text: '', cut: false, missing: true };
   const lines = body.split(/\r?\n/).slice(range.start, range.end);
   while (lines.length > 1 && lines[lines.length - 1]!.trim() === '') lines.pop();
-  return clipText(lines.join('\n'));
+  // 🔴 章の中の `{{vars.x}}` は元のノートの前書きの値で出す(台帳 #1852 束 R1、依頼 268 A)。未定義の名前は触らない
+  return clipText(expandDefinedVars(lines.join('\n'), extractVars(body)));
 }
 
 /**

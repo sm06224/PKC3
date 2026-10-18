@@ -28,6 +28,7 @@
  * 🔑 **pure module**。DOM も窓も知らない。
  */
 import { fenceStep } from './list-renumber';
+import { replaceInlineComments } from './inline-comment';
 import { parseBlockDirectiveOpen, isBlockDirectiveClose } from './block-directive-attrs';
 
 /**
@@ -46,7 +47,7 @@ const ROLE_BARE: ReadonlySet<string> = new Set(['sup', 'sub', 'span', 'text', 'r
 
 /** fence の外の 1 行から inline の方言を落とす。 */
 function stripInline(line: string): string {
-  return (
+  const dropped = (
     line
       // `:role:[X]{attrs}` ── 等価が在れば記号へ、無ければ中身だけ
       .replace(
@@ -68,9 +69,9 @@ function stripInline(line: string): string {
       .replace(/\[\[ruby:([^|\]]+)\|[^\]]*\]\]/g, '$1')
       // `[[em:X]]`(圏点の旧形)
       .replace(/\[\[em:([^\]]+)\]\]/g, '$1')
-      // `%%X%%` 行内コメント ── 消す
-      .replace(/%%[^\n]*?%%/g, '')
   );
+  // `%%X%%` 行内コメント ── 消す(`\%%` は字のまま ── 読み方は inline-comment.ts の 1 本)
+  return replaceInlineComments(dropped, () => '');
 }
 
 /**

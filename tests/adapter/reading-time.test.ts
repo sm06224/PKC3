@@ -4,6 +4,7 @@ import { paintReadingTime } from '../../src/adapter/ui/render/reading-time';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
+import { formatBodyStats } from '../../src/features/stats/body-stats';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
 function meta(lid: string): EntryMeta {
@@ -45,8 +46,10 @@ describe('🔴 読了目安時間・文字数バッジ (Issue #1137)', () => {
       paintReadingTime(el, longText);
       expect(el.hidden).toBe(false);
       expect(el.className).toBe('pkc-reading-time');
-      expect(el.textContent).toContain('約 1 分');
-      expect(el.textContent).toContain('300 文字');
+      // 束 R1 依頼 86-3 B: 題名の下は「読了 約 N 分」だけ。文字数は右のペイン(formatBodyStats)に出す
+      expect(el.textContent).toBe('読了 約 1 分');
+      expect(el.textContent).not.toContain('文字');
+      expect(formatBodyStats(longText.length, longText)).toBe('300 文字 (読了 約 1 分)');
     });
   });
 
@@ -74,8 +77,10 @@ describe('🔴 読了目安時間・文字数バッジ (Issue #1137)', () => {
       );
       expect(readingTimeEl).not.toBeNull();
       expect(readingTimeEl?.hidden).toBe(false);
-      expect(readingTimeEl?.textContent).toContain('約 1 分');
-      expect(readingTimeEl?.textContent).toContain('550 文字');
+      // 束 R1 依頼 86-3 B: 題名の下は分数だけ。文字数は右のペインの字(formatBodyStats)で出ることを併せて確かめる
+      expect(readingTimeEl?.textContent).toBe('読了 約 1 分');
+      expect(readingTimeEl?.textContent).not.toContain('文字');
+      expect(formatBodyStats(longBody.length, longBody)).toContain('550 文字');
     });
 
     it('短文ノートでは detail-reading-time 要素が非表示になる', async () => {

@@ -40,7 +40,8 @@ test('🔴 見出しのあるノートで目次が出て、押すとそこまで
 
   await createEntry(page, 'text');
   await page.fill('[data-pkc-field="editor-title"]', '長いノート');
-  await page.fill('[data-pkc-field="editor-body"]', BODY);
+  // 🔴 束 R1: 末尾に本文の `:::toc` を置く(下の「アドレスが変わらない」の観測用。上の位置は変わらない)
+  await page.fill('[data-pkc-field="editor-body"]', `${BODY}\n\n:::toc`);
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
 
@@ -83,6 +84,35 @@ test('🔴 見出しのあるノートで目次が出て、押すとそこまで
   expect(box, '押した見出しが画面から消えた').not.toBeNull();
   expect(box!.y, `見出しが上へ来ていない(${beforeY} → ${box!.y})`).toBeLessThan(beforeY - 300);
   expect(box!.y, `画面の上のほうに来ていない(y=${box!.y})`).toBeLessThan(300);
+
+  /**
+   * 🔴 束 R1(依頼 86-1 B)**飛んだ直後に「元の位置へ戻る」が出て、押すと飛ぶ前のスクロール位置へ戻る**。
+   * ⚠ 起動は増やさない ── 上の目次で飛ぶ道中に足す。観測点は押し口の字と、戻した後の `scrollTop`(飛ぶ前の値)。
+   */
+  const undoJump = page.locator('[data-pkc-field="status-undo"][data-pkc-action="undo-jump"]');
+  await expect(undoJump, '飛んだ直後に「元の位置へ戻る」が出ていない').toBeVisible();
+  await expect(undoJump).toHaveText('元の位置へ戻る');
+  await clickReal(page, '[data-pkc-field="status-undo"][data-pkc-action="undo-jump"]');
+  await expect
+    .poll(() => scroller.evaluate((el) => el.scrollTop), '「元の位置へ戻る」を押しても飛ぶ前の位置へ戻らない')
+    .toBe(before);
+
+  /**
+   * 🔴 束 R1(依頼 86-2 B)**本文の `:::toc` の行を押しても、アドレスが `#…` に変わらない**(目次と同じ `toc-jump`)。
+   * ⚠ 飛んだことも見る(押せても動かない回で通さない)。
+   */
+  const bodyToc = page.locator('[data-pkc-region="detail"] .pkc-toc-formal a.pkc-toc-link');
+  await expect(bodyToc, '本文の :::toc の行が描かれていない').toHaveCount(3);
+  await expect(bodyToc.nth(1), '本文の目次の行が toc-jump になっていない').toHaveAttribute('data-pkc-action', 'toc-jump');
+  const urlBeforeToc = page.url();
+  await bodyToc.nth(1).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  const topBeforeToc = await scroller.evaluate((el) => el.scrollTop);
+  await bodyToc.nth(1).click();
+  await page.waitForTimeout(150);
+  expect(await page.evaluate(() => location.hash), '本文の目次を押したらアドレスが # に変わった').toBe('');
+  expect(page.url(), '本文の目次を押したらアドレスが変わった').toBe(urlBeforeToc);
+  await expect(target, '本文の目次を押しても見出しへ飛ばない').toBeVisible();
+  expect(await scroller.evaluate((el) => el.scrollTop), `本文の目次で飛んでいない(前 ${topBeforeToc})`).not.toBe(topBeforeToc);
 
   /**
    * 🔴 **本文の「目次」を開くと、いま読んでいる章の行が光る**(#1168)。

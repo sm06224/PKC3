@@ -99,6 +99,10 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *      CommonMark の判定は閉じられず `**` が画面に出ていた(PKC2 の golden はその出力)。
  *      `markdown-it-cjk-friendly` で、日本語の字と隣り合うときだけ判定をゆるめる。
  *      ASCII だけの本文は上流のまま。動いた golden は `manual-ch12` の **1 行だけ**。
+ *   9. **本文の `...` / `..` を `…` に置き換えない**(2026-10-18、束 R1 の依頼 254 A で意図して変えた)。
+ *      書いた字と見える字が違うと、写して使うときに事故になる(`(c)` `--` も同じ。引用符の置き換えは残す)。
+ *      PKC2 は typographer の replacements 規則で `…` にしている。動いた golden は `full-pkc-fixture` /
+ *      `full-pkc-fixture-anchors` / `manual-ch12`(差は `…` が `...` / `..` に戻った箇所だけ)。
  *
 
  * 🔴 **golden は「PKC2 と同じ」を守る道具であって、「正しい」を守る道具ではない。**

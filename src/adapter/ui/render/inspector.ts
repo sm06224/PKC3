@@ -579,7 +579,7 @@ export class InspectorRenderer {
             : extractHeadingsFromMarkdown(body, {
                 stripHidden: (s) => stripComments(s).transformed,
                 blockForms: true,
-                // 見出し番号が on のとき、本文の見出し id は番号つきの字から作られる
+                // 見出し番号が on のとき、見出し id は番号を除いた字から作る(依頼 351。印として渡すだけ)
                 numberHeadings: (() => {
                   const cfg = extractHeadingNumberConfig(body);
                   return cfg ? (s: string) => preprocessHeadingNumbers(s, cfg.start) : undefined;

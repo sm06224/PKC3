@@ -670,6 +670,8 @@ try{
       var hi=ref.indexOf('#h/');
       var hid=hi<0?'':ref.slice(hi+3);
       var go=function(){show(d.entries[at],btns[at],hid)};
+      // 枠の字は指したノートの題名にする(画面と同じ。入っていなければ、元の字のまま)
+      if(d.entries[at].title)c.textContent=d.entries[at].title;
       c.onclick=function(ev){ev.preventDefault();go()};
       c.onkeydown=function(ev){if(ev.key==='Enter'){ev.preventDefault();go()}};
     });

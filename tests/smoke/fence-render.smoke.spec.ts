@@ -26,9 +26,18 @@ test('csv 表と html sandbox iframe が可視高さを持つ', async ({ page })
   await ta.fill(
     '```csv-render\n列A,列B\n1,2\n3,4\n```\n\n```html\n<p style="height:120px">sandbox</p>\n```\n\n```javascript\n' +
       longCode +
-      '\n```\n\n| 項目 | 値 | 備考 |\n|---|---|---|\n| a | 1 | x |\n||b|2|y\n\n> [!NOTE]\n> これはアラート注意書きです。\n\nインラインコード `sample-inline-code` です。\n\n[公式リンク](https://example.com) です。',
+      '\n```\n\n| 項目 | 値 | 備考 |\n|---|---|---|\n| a | 1 | x |\n||b|2|y\n\n> [!NOTE]\n> これはアラート注意書きです。\n\nインラインコード `sample-inline-code` です。\n\n[公式リンク](https://example.com) です。\n\n> [!INFO]- 畳みの題\n> 畳まれた中身',
   );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // 🔴 束 R1: `> [!INFO]- 題` は題の字が出て、たたまれ(details が open でない)、押すと開く。⚠ 新しい起動は足さない
+  const fold = page.locator('[data-pkc-field="detail-body"] details', { has: page.locator('summary.pkc-alert-title') });
+  await expect(fold, '`> [!INFO]- 題` が details として描かれていない').toHaveCount(1);
+  await expect(fold.locator('summary.pkc-alert-title'), '題の字が出ていない').toContainText('畳みの題');
+  expect(await fold.evaluate((el) => (el as HTMLDetailsElement).open), '最初から開いている').toBe(false);
+  await fold.locator('summary').click();
+  expect(await fold.evaluate((el) => (el as HTMLDetailsElement).open), '押しても開かない').toBe(true);
+  await expect(fold, '開いても中身が見えない').toContainText('畳まれた中身');
 
   // csv: レンダリング面の table が可視
   const table = page.locator('[data-pkc-field="detail-body"] table').first();

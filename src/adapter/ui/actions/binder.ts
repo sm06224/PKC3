@@ -353,6 +353,7 @@ import {
 import { resolveRelationTarget } from '@features/relation/target-label';
 import { renameOfferingUndo, takeRenameUndo } from '@adapter/ui/render/rename-undo';
 import { offerStackClearUndo, takeStackUndo } from '@adapter/ui/render/stack-undo';
+import { offerJumpBack, restoreScroll, snapshotScroll, takeJumpBack } from '@adapter/ui/render/jump-back';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
@@ -4095,6 +4096,40 @@ function partialDraftBoxText(host: HTMLElement, draft: PartialDraft): string | n
 }
 
 /**
+ * 🔴 **章・コード枠の欄をやめる ── 打った字があるときだけ聞く**(台帳 #1852 束 R1、依頼 86-6 B)。
+ *
+ * 「やめる」ボタンも `Esc` も、この 1 本を通る(1 画面の編集の `cancelFromEditor` と同じ確認の字・同じ選び方)。
+ * 変えていなければ(欄の字 = 開いたときの字)聞かずに閉じる。聞いている間に下書きが別の物に替わった / 閉じたら何もしない。
+ * ⚠ 欄が見つからない(`null`)ときは「変えた」と見なさず閉じる(防波堤 ── 閉じられない箱を残さない)。
+ */
+function cancelPartialDraftAsking(dispatcher: Dispatcher, root: HTMLElement): void {
+  const draft = dispatcher.getState().sectionDraft;
+  if (draft === null || draft === undefined) return;
+  const code = isCodeDraft(draft);
+  const cancel = (): void => {
+    dispatcher.dispatch(code ? { type: 'CANCEL_CODE_DRAFT' } : { type: 'CANCEL_SECTION_DRAFT' });
+  };
+  const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+  const current = host === null ? null : partialDraftBoxText(host, draft);
+  if (current === null || current === draft.original) {
+    cancel();
+    return;
+  }
+  if (cancelAsking) return;
+  cancelAsking = true;
+  void confirmInApp(root, '打った内容を捨てますか', { okLabel: '編集をやめる', cancelLabel: '編集を続ける' }).then(
+    (answer) => {
+      cancelAsking = false;
+      if (answer !== 'ok') return;
+      // 待つ間に閉じた / 別の下書きに替わっていたら何もしない
+      const still = dispatcher.getState().sectionDraft;
+      if (still === null || still === undefined || !sameDraftIdentity(still, draft)) return;
+      cancel();
+    },
+  );
+}
+
+/**
  * 🔴 **`stillOpen` が、待つ前と同じ下書きか**(#1044 段3)。
  * ⚠ 章は名前(`heading`)、コード枠は身元(`line` + `openLine` + `quote`)で見る ──
  *   どちらも `withPartialDraftLeave` の T7 の判定(§9)。
@@ -7200,6 +7235,8 @@ async function tocJump(
   notFound?: string,
   flash = false,
   quiet = false,
+  /** 🔴 目次の押しで飛んだ直後に「元の位置へ戻る」を出す(台帳 #1852 束 R1、依頼 86-1 B)。リンクで来た飛びでは出さない。 */
+  offerBack = false,
 ): Promise<void> {
     if (dispatcher.getState().viewMode !== 'detail') {
       dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
@@ -7219,11 +7256,21 @@ async function tocJump(
      *   **永久に待つ口を作らない**。期限切れなら、いままでどおり断り文を出す。
      */
     await waitPainted(detail, dispatcher.getState().selectedLid);
-    const hit = detail
+    let hit = detail
       ? [...detail.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]')].find(
           (h) => h.id === slug,
         )
       : undefined;
+    /**
+     * 🔴 **古い名前でも飛ぶ**(台帳 #1852 束 R1、依頼 255 / 279)── 見出しの中に置いた空の別名
+     * (`<h2 id="新しい名前"><span id="古い名前"></span>`)を、見出しに引き直す。
+     */
+    if (!hit && detail) {
+      const alias = [...detail.querySelectorAll<HTMLElement>('h1 > span[id], h2 > span[id], h3 > span[id]')].find(
+        (a) => a.id === slug,
+      );
+      hit = alias?.parentElement ?? undefined;
+    }
     if (!hit) {
       // 🔑 推測で飛ぶ呼び方(古い取り込みの `entry:X#<slug>`)は、無ければ何も出さない
       if (quiet) return;
@@ -7250,10 +7297,13 @@ async function tocJump(
      *   🔑 引く口は `foldHostOf` **1 本**(§7)。
      *   器が無い環境(unit の素の fixture)では parentElement へ落とす。
      */
+    // 飛ぶ前の位置(畳みを開く前に控える。「元の位置へ戻る」の戻し先)
+    const before = offerBack ? snapshotScroll(hit) : null;
     const foldHost = foldHostOf(hit) ?? hit.parentElement;
     if (foldHost !== null) revealBlock(foldHost, hit);
     const goHeading = (): void => hit.scrollIntoView({ block: 'start' });
     goHeading();
+    if (before !== null) offerJumpBack(dispatcher, before, hit.textContent ?? '');
     // 🔴 長大なノートは、飛び先の周りが描かれて実寸になった後に 1 度だけ合わせ直す(#1467)
     settleJump(hit, goHeading);
     // 🔴 外から来たリンクは**着いた先を光らせる**(#1559)── 本文のリンクや目次は押した user が行き先を知っている
@@ -7890,7 +7940,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   送ってはいるのに画面が動かない(無言の dead click)。
      */
     appPhone.reveal('note');
-    void tocJump(dispatcher, target, slug);
+    void tocJump(dispatcher, target, slug, undefined, false, false, true);
   },
   /**
    * 🔴 **押した結果が見える所を開く**(2026-08-29 の動線レビュー)。
@@ -8477,13 +8527,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'SAVE_SECTION_DRAFT', text });
   },
   /**
-   * 🔴 **章の編集をやめる**(#1044 段2)。⚠ `cancel-edit` と同じく**聞かない**
-   *   (押すこと自体が「捨ててよい」という声である ── 聞くのは「別のノートを
-   *   選ぶ」ときだけ、設計 doc §3)。
+   * 🔴 **章の編集をやめる**(#1044 段2)。
+   *
+   * 🔴 **打った字があるときだけ、1 画面の編集と同じ「打った内容を捨てますか」を出す**(台帳 #1852 束 R1、依頼 86-6 B)。
+   *   以前は聞かずに閉じ、打った字は消えていた(同じ字のボタンなのに、1 画面の「編集をやめる」とは動きが違った)。
+   *   変えていなければ聞かずに閉じる。`Esc` も同じ 1 本(`cancelPartialDraftAsking`)。
    * ⚠ **ロックはここで返さない**(#1044 段2、F-B。上の `save-section-draft` と同じ理由)。
    */
-  'cancel-section-draft': (dispatcher) => {
-    dispatcher.dispatch({ type: 'CANCEL_SECTION_DRAFT' });
+  'cancel-section-draft': (dispatcher, _target, _services, root) => {
+    cancelPartialDraftAsking(dispatcher, root);
   },
   /**
    * 🔴 **コード枠の欄を保存する**(#1044 段3。`save-section-draft` と同じ形)。
@@ -8497,10 +8549,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'SAVE_CODE_DRAFT', text });
   },
   /**
-   * 🔴 **コード枠の編集をやめる**(#1044 段3。`cancel-section-draft` と同じく聞かない)。
+   * 🔴 **コード枠の編集をやめる**(#1044 段3。`cancel-section-draft` と同じ ── 打った字があるときだけ聞く。依頼 86-6 B)。
    */
-  'cancel-code-draft': (dispatcher) => {
-    dispatcher.dispatch({ type: 'CANCEL_CODE_DRAFT' });
+  'cancel-code-draft': (dispatcher, _target, _services, root) => {
+    cancelPartialDraftAsking(dispatcher, root);
   },
   /**
    * 🔴 **コード枠の ✎ ── その枠だけを、読む面のその場で編集する**(#1044 段3)。
@@ -9753,6 +9805,21 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 書込は無い(スタックは画面の状態)── 降ろす前の並びを下から順に載せ直す(`PIN_SPLIT_ENTRY`。載せた物が一番上に来る)。
    *   消えたノートは載せない。載せ直せない件があれば言う(上限・フォルダ)。
    */
+  /**
+   * 🔴 **目次で飛んだ直後の「元の位置へ戻る」**(台帳 #1852 束 R1、依頼 86-1 B)。口は `status-undo`(出し入れは `status-open.ts`)。
+   * ⚠ 書込は無い ── 飛ぶ前に控えたスクロール位置を書き戻すだけ。戻した事実を知らせの 1 行に出す(隣の押し口は畳まれる)。
+   */
+  'undo-jump': (dispatcher) => {
+    const taken = takeJumpBack();
+    if (taken === null) return;
+    // ⚠ 別のノートへ移った後は戻さない(別のノートの位置を書き換えない)
+    if (taken.lid !== dispatcher.getState().selectedLid) {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: '戻せるものがありません(別のノートへ移っています)' });
+      return;
+    }
+    restoreScroll(taken.snapshot);
+    dispatcher.dispatch({ type: 'OP_NOTICE', message: '元の位置へ戻りました' });
+  },
   'undo-stack-clear': (dispatcher) => {
     const lids = takeStackUndo();
     if (lids === null) return;
@@ -10107,6 +10174,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const at = { start: opened.selectionStart, end: opened.selectionEnd };
     /**
+     * 🔴 **語を選んでいるときは、その語をリンクの字にする**(台帳 #1852 束 R1、依頼 352 A)── URL のリンクを入れるときと同じ。
+     * 書いた文を相手の題名で置き換えない(選んでいないときは今どおり題名)。⚠ 一覧を選んでいる間に欄が組み直されるので、
+     * 選んでいた字は**開いた時点で控える**。
+     */
+    const picked = opened.value.slice(at.start, at.end);
+    /**
      * ⚠ **開いた時点の state を握らない** ── 打つたびに引き直す
      *   (選んでいる間に別のタブがノートを増やしても、そのまま出る)。
      * 🔑 自分自身を外すのは `entryPickRows` の仕事(判定を 2 か所に置かない)。
@@ -10135,7 +10208,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       ta.focus();
       // ⚠ 範囲外は `setSelectionRange` が丸める(短くなっていても落ちない)
       ta.setSelectionRange(at.start, at.end);
-      insertText(ta, formatEntryLink(title, lid));
+      insertText(ta, formatEntryLink(picked !== '' ? picked : title, lid));
     });
   },
   /**
@@ -17776,6 +17849,24 @@ export function bindActions(
      *   ⚠ 直す前は受けず、`preventDefault` もしないのでブラウザの「ページを保存」が開いた。
      *   押すのは**同じ箱の保存ボタン**(新しい経路を作らない。保存中は `disabled` なので二重に撃たない)。
      */
+    /**
+     * 🔴 **`Esc` は「章の編集をやめる」/「コードの編集をやめる」を押したのと同じ**(台帳 #1852 束 R1、依頼 86-6 B)。
+     *   打った字があるときは、1 画面の編集と同じ確認を出す(`cancelPartialDraftAsking`)。
+     *   ⚠ 右クリックのメニューが出ている間は譲る(メニューを閉じるだけにする ── 1 回の `Esc` で 1 段だけ)。
+     */
+    if (
+      (field === SECTION_BOX_INPUT_FIELD || field === CODE_BOX_INPUT_FIELD) &&
+      ke.key === 'Escape' &&
+      !ke.ctrlKey &&
+      !ke.metaKey &&
+      !ke.altKey &&
+      !ke.shiftKey &&
+      !contextMenuOpen(root)
+    ) {
+      ke.preventDefault();
+      cancelPartialDraftAsking(dispatcher, root);
+      return;
+    }
     if (
       (field === SECTION_BOX_INPUT_FIELD || field === CODE_BOX_INPUT_FIELD) &&
       (ke.ctrlKey || ke.metaKey) &&

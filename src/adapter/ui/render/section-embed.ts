@@ -22,10 +22,11 @@
  * ## ⚠ 展開するのは「画像形」の参照だけ
  *
  * 描画器が器を出すのは `![…](entry:…)` だけ。`[字](entry:…)` のふつうのリンクには手を付けない。
- * 見出しを指さない画像形(`![](entry:ノート)` / `#log/…`)は**今までどおり**(空の器のまま。この段の範囲外)。
+ * 見出しを指さない画像形(`![](entry:ノート)` / `#log/…`)は、点線の枠ではなく**ノートの題名のリンク**にする
+ * (台帳 #1852 束 R1、依頼 94-2 A。以前は枠が読み込み待ちに見えたまま変わらなかった)。
  */
 import { parseEntryRef } from '@features/entry-ref/entry-ref';
-import { placeEmbeddable, type PlaceExcerpt } from '@features/markdown/place-embed';
+import { PLACE_BODY_CAP, placeEmbeddable, type PlaceExcerpt } from '@features/markdown/place-embed';
 import { sectionKey } from '@features/markdown/section-embed';
 import { AssetLends, type AssetLender } from './asset-lends';
 import { pruneScopes, type MermaidScope } from './mermaid-hydrate';
@@ -39,6 +40,8 @@ export const SECTION_EMBED_CLASS = 'pkc-section-embed';
 export const SECTION_MISSING_NOTE = '見出しが見つかりません';
 export const SECTION_NO_NOTE = 'ノートが見つかりません';
 export const SECTION_LOADING_NOTE = '読み込んでいます';
+/** 🔴 1 つのノートで展開できる数を超えた分に出す理由(台帳 #1852 束 R1、依頼 270 A)。以前は「読み込んでいます」のまま止まっていた。 */
+export const SECTION_OVER_NOTE = `1 つのノートで表示できる埋め込みは ${String(PLACE_BODY_CAP)} 個までです`;
 
 const KEY_ATTR = 'data-pkc-section-key';
 /** 読み込み中の器の鍵の頭(`w\0<lid>`)。⚠ 他の状態(n/l/g/m/o)と頭が被らない。 */
@@ -143,14 +146,43 @@ export class SectionEmbeds {
     for (const el of host.querySelectorAll<HTMLElement>(SELECTOR)) {
       if (el.parentElement?.closest(NESTED) != null) continue;
       const ref = parseEntryRef(el.getAttribute('data-pkc-embed-ref') ?? '');
-      if (ref.kind !== 'section') continue;
+      if (ref.kind === 'invalid') continue;
+      /**
+       * 🔴 **見出しを指さない `![](entry:ノート)` は、点線の枠を出さず、ノートの題名のリンクにする**
+       * (台帳 #1852 束 R1、依頼 94-2 A)。以前は「別のノートの内容」と書いた枠が読み込み待ちに見えたまま
+       * 押せず、いつまでも変わらなかった(ノート全体は差し込めない)。押せばそのノートへ行ける。
+       * ⚠ ノートが無いときは「ノートが見つかりません」(黙って空にしない)。
+       */
+      if (ref.kind !== 'section') {
+        this.titleLink(el, ref.lid, deps);
+        continue;
+      }
       const key = sectionKey(ref.lid, ref.id);
+      // 🔴 展開できるのは 1 つのノートで `PLACE_BODY_CAP` 個まで(抜粋の入れ物の上限と同じ数)。超えた分は頼まず、理由を出す
+      if (!seen.has(key) && seen.size >= PLACE_BODY_CAP) {
+        this.shell(el, 'x\u0000over', () => [noteLine(el.ownerDocument, SECTION_OVER_NOTE)]);
+        continue;
+      }
       seen.add(key);
       this.one(el, ref.lid, key, deps, need);
     }
     for (const k of this.cache.keys()) if (!seen.has(k)) this.cache.delete(k);
     this.flushFigures(deps);
     if (need.length > 0) deps.wanted(need);
+  }
+
+  /** 見出しを指さない画像形を、題名のリンク(ノートが無ければ断り)にする。 */
+  private titleLink(el: HTMLElement, lid: string, deps: SectionEmbedDeps): void {
+    const meta = deps.metaOf(lid);
+    const doc = el.ownerDocument;
+    if (meta === undefined) {
+      this.shell(el, `n\u0000${lid}`, () => [noteLine(doc, SECTION_NO_NOTE)]);
+      el.setAttribute('data-pkc-embed-title-only', '');
+      return;
+    }
+    this.shell(el, `t\u0000${lid}\u0000${meta.title}`, () => [linkButton(doc, 'place-body-link', lid, meta.title)]);
+    // 題名のリンクだけの器は、節の引用の見た目(左の罫線)を付けない
+    el.setAttribute('data-pkc-embed-title-only', '');
   }
 
   private one(el: HTMLElement, lid: string, key: string, deps: SectionEmbedDeps, need: string[]): void {

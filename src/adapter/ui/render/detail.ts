@@ -38,7 +38,8 @@ import { appCodeCollapse, applyCodeCollapse, clearCodeCollapse } from './code-co
 import { appInlineCodeCopy, applyInlineCodeCopy, clearInlineCodeCopy } from './inline-code-copy';
 import { applyTableSort } from './table-sort';
 import { applyExternalLinks } from './external-link';
-import { applyMissingLinks, clearMissingLinks } from './link-missing';
+import { applyCardTitles, applyMissingLinks, clearMissingLinks } from './link-missing';
+import { applyBodyTocLinks } from './toc-links';
 import { appMissingLinks } from './missing-links';
 import { applyPlaceLayout } from './place-board';
 import { PlaceEmbeds } from './place-embed';
@@ -1181,8 +1182,13 @@ export class DetailRenderer {
    */
   private syncMissingLinks(): void {
     const host = this.bodyHost;
-    if (host === null || this.bodyKind !== 'md' || this.metasRef === null) return;
+    if (host === null || this.bodyKind !== 'md') return;
+    // 🔴 本文の `:::toc` の行は、右のペインの目次と同じ飛び方にする(アドレスを変えない。依頼 86-2)
+    applyBodyTocLinks(host);
+    if (this.metasRef === null) return;
     const metas = this.metasRef;
+    // 🔴 `@[card](entry:…)` の枠は、指したノートの題名で出す(設定に依らない ── 依頼 94-1)
+    applyCardTitles(host, (l) => metas.get(l)?.title, this.cidRef);
     if (appMissingLinks.enabled()) applyMissingLinks(host, (l) => metas.has(l), this.cidRef);
     else clearMissingLinks(host);
   }

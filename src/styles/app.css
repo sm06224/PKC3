@@ -3751,6 +3751,11 @@ li[data-pkc-row-slot] {
   border-left: 3px solid var(--border);
   overflow-wrap: anywhere;
 }
+.pkc-md-rendered .pkc-section-embed[data-pkc-embed-title-only] {
+  /* 見出しを指さない `![](entry:ノート)` は題名のリンクだけ ── 節の引用の罫線は付けない(台帳 #1852 束 R1、依頼 94-2) */
+  border-left: none;
+  padding-left: 0;
+}
 .pkc-section-embed [data-pkc-field='section-embed-source'] {
   display: block;
   margin: 0 0 4px;
@@ -3860,6 +3865,23 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered .pkc-alert-icon {
   font-style: normal;
   line-height: 1;
+}
+/* 🔴 たたむ指定の注意書き(`> [!NOTE]+` / `> [!NOTE]-`、依頼 257)── 題が押せる行。矢印は ::before で出す(題の字を変えない) */
+.pkc-md-rendered details.pkc-md-alert > summary.pkc-alert-title {
+  cursor: pointer;
+  list-style: none;
+}
+.pkc-md-rendered details.pkc-md-alert > summary.pkc-alert-title::-webkit-details-marker {
+  display: none;
+}
+.pkc-md-rendered details.pkc-md-alert > summary.pkc-alert-title::before {
+  content: '▸';
+}
+.pkc-md-rendered details.pkc-md-alert[open] > summary.pkc-alert-title::before {
+  content: '▾';
+}
+.pkc-md-rendered details.pkc-md-alert[open] > summary.pkc-alert-title {
+  margin-bottom: var(--s2);
 }
 .pkc-md-rendered .pkc-section-note .pkc-alert-title,
 .pkc-md-rendered .pkc-section-info .pkc-alert-title {

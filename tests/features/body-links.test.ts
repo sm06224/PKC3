@@ -137,13 +137,19 @@ describe('pkc:// の自分あても同じリンクとして読む (#379)', () =>
    */
   it('🔴 LIKE の字面が、拾える形を全部覆っている', () => {
     const needles = bodyLinkNeedles('n2', CID);
-    expect(needles).toEqual(['entry:n2', 'pkc://c1/entry/n2']);
-    for (const n of needles) {
+    // 末尾の 2 つは「宛先に変数を書いた形」の字面(依頼 271)── lid は前書きの値で決まるので、字面に居ない
+    expect(needles).toEqual(['entry:n2', 'pkc://c1/entry/n2', 'entry:{{', 'pkc://c1/entry/{{']);
+    for (const n of needles.filter((x) => !x.includes('{{'))) {
       const body = `前 [x](${n}) 後`;
       expect(bodyLinksTo(body, 'n2', CID), `${n} が拾えていない`).toBe(true);
     }
-    // ⚠ cid が無ければ字面も 1 つ(絞り込みが広がりすぎない)
-    expect(bodyLinkNeedles('n2')).toEqual(['entry:n2']);
+    // 変数の形は、前書きの値で展開して初めて拾える
+    for (const n of needles.filter((x) => x.includes('{{'))) {
+      const body = `---\nvars:\n  t: n2\n---\n前 [x](${n}vars.t}}) 後`;
+      expect(bodyLinksTo(body, 'n2', CID), `${n} が拾えていない`).toBe(true);
+    }
+    // ⚠ cid が無ければ字面も絞る(絞り込みが広がりすぎない)
+    expect(bodyLinkNeedles('n2')).toEqual(['entry:n2', 'entry:{{']);
   });
 });
 
@@ -282,5 +288,33 @@ describe('🔴 リンクの形になっていない字・隠した囲みの中�
   it('隠しメモが閉じていないとき、閉じのある対照群と区別できる(閉じた後ろは数える)', () => {
     expect(bodyLinkTargets('%%%\n[x](entry:n2)\n%%%\n[a](entry:n3)')).toEqual(['n3']);
     expect(bodyLinkTargets('[a](entry:n3)\n[b](entry:n2) %% 後ろだけ隠す %%')).toEqual(['n3', 'n2']);
+  });
+});
+
+describe('台帳 #1852 束 R1(依頼 271): 画面でリンクとして見える物だけを参照元に数える', () => {
+  it('数式の中の `entry:` は数えない(外のリンクは数える)', () => {
+    expect(bodyLinkTargets('式 $a [x](entry:n2) b$ と [y](entry:n3)')).toEqual(['n3']);
+    expect(bodyLinkTargets('$$\n[x](entry:n2)\n$$\n[y](entry:n3)')).toEqual(['n3']);
+  });
+
+  it('対照群: 数式にならない `$`(通貨など)は数式扱いしない', () => {
+    expect(bodyLinkTargets('[x](entry:n2) は $5 です。[y](entry:n3) は $6 です')).toEqual(['n2', 'n3']);
+    // 閉じの無い `$$` は塊ではない
+    expect(bodyLinkTargets('$$\n[x](entry:n2)')).toEqual(['n2']);
+  });
+
+  it('宛先に変数を書いた `[x](entry:{{vars.t}})` は、前書きの値で数える', () => {
+    const body = '---\nvars:\n  t: n2\n---\n[x](entry:{{vars.t}})';
+    expect(bodyLinkTargets(body)).toEqual(['n2']);
+    expect(bodyLinksTo(body, 'n2')).toBe(true);
+    // 未定義の名前は数えない
+    expect(bodyLinkTargets('[x](entry:{{vars.nope}})')).toEqual([]);
+  });
+
+  it('既に入っている物の対照群: 隠しメモ・画面以外向けの囲み・リンクの形でない `entry:lid` は数えない', () => {
+    expect(bodyLinkTargets('%% [x](entry:n2) %%')).toEqual([]);
+    expect(bodyLinkTargets('%%%\n[x](entry:n2)\n%%%')).toEqual([]);
+    expect(bodyLinkTargets(':::if{format=docx}\n[x](entry:n2)\n:::')).toEqual([]);
+    expect(bodyLinkTargets('entry:n2 とただ書いた')).toEqual([]);
   });
 });

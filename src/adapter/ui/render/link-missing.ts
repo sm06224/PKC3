@@ -65,6 +65,29 @@ export function applyMissingLinks(
   }
 }
 
+/**
+ * 🔴 **`@[card](entry:…)` の枠の字を、指したノートの題名にする**(台帳 #1852 束 R1、依頼 94-1 A)。
+ *
+ * 以前は「@card」と書いた点線の灰色の枠で、どのノートかは押すかマウスを載せるまで分からなかった
+ * (ふつうのリンクは題名が出る)。枠の見た目は今のまま、中の字だけを題名にする。
+ * ⚠ ノートが無い / 別の PKC を指す / 添付を指す枠は、元の字のまま(無いノートは `applyMissingLinks` の点線の下線で見分ける)。
+ * 🔑 markdown は worker で描かれ `entryMetas` を持たないので、描いた後に host へ当てる(`applyMissingLinks` と同じ事情)。
+ *    冪等 ── 字が同じなら触らない。
+ */
+export function applyCardTitles(
+  host: ParentNode,
+  titleOf: (lid: string) => string | undefined,
+  selfContainerId = '',
+): void {
+  for (const el of host.querySelectorAll<HTMLElement>('.pkc-card-placeholder[data-pkc-card-target]')) {
+    const t = parseLinkTarget(el.getAttribute('data-pkc-card-target') ?? '', selfContainerId);
+    if (t.kind !== 'entry' || t.foreign) continue;
+    const title = titleOf(t.lid);
+    if (title === undefined || title.trim() === '') continue;
+    if (el.textContent !== title) el.textContent = title;
+  }
+}
+
 /** 付けた印をすべて外す(設定を切ったとき)。 */
 export function clearMissingLinks(host: ParentNode): void {
   applyMissingLinks(host, () => true);
