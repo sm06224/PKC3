@@ -25,7 +25,7 @@
  * 見出しを指さない画像形(`![](entry:ノート)` / `#log/…`)は**今までどおり**(空の器のまま。この段の範囲外)。
  */
 import { parseEntryRef } from '@features/entry-ref/entry-ref';
-import { placeEmbeddable, type PlaceExcerpt } from '@features/markdown/place-embed';
+import { PLACE_BODY_CAP, placeEmbeddable, type PlaceExcerpt } from '@features/markdown/place-embed';
 import { sectionKey } from '@features/markdown/section-embed';
 import { AssetLends, type AssetLender } from './asset-lends';
 import { pruneScopes, type MermaidScope } from './mermaid-hydrate';
@@ -39,6 +39,8 @@ export const SECTION_EMBED_CLASS = 'pkc-section-embed';
 export const SECTION_MISSING_NOTE = '見出しが見つかりません';
 export const SECTION_NO_NOTE = 'ノートが見つかりません';
 export const SECTION_LOADING_NOTE = '読み込んでいます';
+/** 🔴 1 つのノートで展開できる数を超えた分に出す理由(台帳 #1852 束 R1、依頼 270 A)。以前は「読み込んでいます」のまま止まっていた。 */
+export const SECTION_OVER_NOTE = `1 つのノートで表示できる埋め込みは ${String(PLACE_BODY_CAP)} 個までです`;
 
 const KEY_ATTR = 'data-pkc-section-key';
 /** 読み込み中の器の鍵の頭(`w\0<lid>`)。⚠ 他の状態(n/l/g/m/o)と頭が被らない。 */
@@ -145,6 +147,11 @@ export class SectionEmbeds {
       const ref = parseEntryRef(el.getAttribute('data-pkc-embed-ref') ?? '');
       if (ref.kind !== 'section') continue;
       const key = sectionKey(ref.lid, ref.id);
+      // 🔴 展開できるのは 1 つのノートで `PLACE_BODY_CAP` 個まで(抜粋の入れ物の上限と同じ数)。超えた分は頼まず、理由を出す
+      if (!seen.has(key) && seen.size >= PLACE_BODY_CAP) {
+        this.shell(el, 'x\u0000over', () => [noteLine(el.ownerDocument, SECTION_OVER_NOTE)]);
+        continue;
+      }
       seen.add(key);
       this.one(el, ref.lid, key, deps, need);
     }

@@ -25,7 +25,8 @@
  *
  * 🔑 **pure module**。DOM も窓も知らない。
  */
-import { makeSlugCounter, makeLegacySlugCounter } from './markdown-toc';
+import { makeSlugCounter, makeLegacySlugCounter, stripMismatchedIfBlocks } from './markdown-toc';
+import { classifyDirectiveOpen } from './directive-open';
 import { extractHeadingNumberConfig } from './document-globals';
 import { extractVars, frontmatterLineCount, parseFrontmatter } from './frontmatter';
 import { expandVarsInText } from './var-expand';
@@ -48,6 +49,52 @@ interface HeadingAt extends AppendTarget {
   readonly line: number;
   /** 古い名前(記号を抜いただけの綴り / 見出し番号つきの綴り)。既に書かれたリンクを読み続けるための別名。 */
   readonly legacySlug: string;
+  /**
+   * 🔴 この見出しを包む `:::note` などの囲みの深さ(0 = 囲みの外)。章の範囲は、囲みの中の見出しでは切らない
+   * (台帳 #1852 束 R1、依頼 272 A)。
+   */
+  readonly depth: number;
+  /** 包む囲みの閉じの行(**原文の**行番号)。囲みの外なら `Infinity`。章はこの行を越えない。 */
+  readonly limit: number;
+}
+
+/**
+ * 🔴 **閉じを持つ囲み(`:::note` `:::details` …)の範囲を、行ごとに引く**(依頼 272 A)。
+ *
+ * 返すのは各行について「包んでいる囲みの数」と「いちばん内側の囲みの閉じの行」。
+ * ⚠ 開きは `classifyDirectiveOpen` が `container` と言う物だけ(描画が閉じを消費する物と同じ判定 1 本)。
+ *   `:::toc` の直後の `:::` はその toc の閉じなので数えない。**閉じの無い開きは囲みにしない**
+ *   (描画も字のまま出す ── 後ろの見出し全部が「囲みの中」になって章が切れなくなるのを避ける)。
+ */
+function containerSpans(lines: readonly string[]): { depth: number[]; closeAt: number[] } {
+  const depth = new Array<number>(lines.length).fill(0);
+  const closeAt = new Array<number>(lines.length).fill(-1);
+  const spans: Array<[number, number]> = [];
+  const stack: number[] = [];
+  let fence = '';
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const st = fenceStep(fence, line);
+    fence = st.next;
+    if (st.inside) continue;
+    if (/^[ \t]*:::+[ \t]*$/.test(line)) {
+      const open = stack.pop();
+      if (open !== undefined) spans.push([open, i]);
+      continue;
+    }
+    const kind = classifyDirectiveOpen(line.trim());
+    if (kind === 'container') stack.push(i);
+    else if (kind === 'self-contained' && /^[ \t]*:::+[ \t]*$/.test(lines[i + 1] ?? '')) i += 1;
+  }
+  // 開きが先のものから塗る ── 内側の囲みが後から上書きして、いちばん内側が残る
+  spans.sort((a, b) => a[0] - b[0]);
+  for (const [open, close] of spans) {
+    for (let k = open + 1; k < close; k++) {
+      depth[k]!++;
+      closeAt[k] = close;
+    }
+  }
+  return { depth, closeAt };
 }
 
 /**
@@ -68,7 +115,10 @@ interface HeadingAt extends AppendTarget {
  */
 function scanHeadings(body: string): HeadingAt[] {
   const stripped = stripComments(body);
-  const lines = stripped.transformed.split(/\r?\n/);
+  // 🔴 画面(html)に出ない `:::if{format=docx}` の中の見出しは、描画が見出しにしない ── 数えない(依頼 272 A)。
+  //   行は空行で残す(行数が変わらない)
+  const lines = stripMismatchedIfBlocks(stripped.transformed, 'html', true).split(/\r?\n/);
+  const spans = containerSpans(lines);
   const origin = (i: number): number => stripped.lineMap[i] ?? i;
   // 🔑 frontmatter の**行数**だけ借りて、その先から見る(剥がした本文は使わない)
   const fm = parseFrontmatter(stripped.transformed);
@@ -91,10 +141,15 @@ function scanHeadings(body: string): HeadingAt[] {
   const slugOf = (t: string): string => slugCounter(expandVarsInText(t, vars));
   const legacyOf = (t: string): string => legacyCounter(expandVarsInText(t, vars));
   const out: HeadingAt[] = [];
+  const limitOf = (i: number): number => {
+    const c = spans.closeAt[i] ?? -1;
+    return c < 0 ? Infinity : origin(c);
+  };
   let fence = '';
   // 下線の見出しの本文候補(記法を持たない素の行の並び)と、その最初の行(原文)
   let para: string[] = [];
   let paraAt = 0;
+  let paraI = 0;
   for (let i = skip; i < lines.length; i++) {
     const line = lines[i]!;
     const wasIn = fence !== '';
@@ -135,7 +190,17 @@ function scanHeadings(body: string): HeadingAt[] {
       const at = paraAt;
       para = [];
       if (text !== '') {
-        out.push({ slug: slugOf(text), legacySlug: legacyOf(text), text, level: u[1]![0] === '=' ? 1 : 2, line: at });
+        // 下線の見出しの囲みは、字の最初の行のもの(段落の中で囲みは変わらない)
+        const paraIdx = paraI;
+        out.push({
+          slug: slugOf(text),
+          legacySlug: legacyOf(text),
+          text,
+          level: u[1]![0] === '=' ? 1 : 2,
+          line: at,
+          depth: spans.depth[paraIdx] ?? 0,
+          limit: limitOf(paraIdx),
+        });
       }
       continue;
     }
@@ -147,7 +212,10 @@ function scanHeadings(body: string): HeadingAt[] {
     // 段落の素の行だけを溜める(記法の行・空行で切る)
     if (line.trim() === '' || /^\s{0,3}(?:#|>|[-*+][ \t]|\d+[.)][ \t]|\||:::|%%|<)/.test(line)) para = [];
     else {
-      if (para.length === 0) paraAt = origin(i);
+      if (para.length === 0) {
+        paraAt = origin(i);
+        paraI = i;
+      }
       para.push(line.trim());
     }
     // 閉じの `#` は前に空白が要る(`## C#` の `#` は見出しの字)
@@ -162,6 +230,8 @@ function scanHeadings(body: string): HeadingAt[] {
       text,
       level: m[1]!.length as 1 | 2 | 3,
       line: origin(i),
+      depth: spans.depth[i] ?? 0,
+      limit: limitOf(i),
     });
   }
   return out;
@@ -204,11 +274,16 @@ export function sectionRange(body: string, slug: string): SectionRange | null {
   // 次の**同格以上**の見出し(深い見出しは自分の節の中身なので跨ぐ)
   let end = lines.length;
   for (let i = at + 1; i < heads.length; i++) {
-    if (heads[i]!.level <= me.level) {
-      end = heads[i]!.line;
+    const h = heads[i]!;
+    // 🔴 自分より内側の囲み(`:::note` など)の中の見出しでは切らない ── 囲みは丸ごと 1 つの章に入る(依頼 272 A)
+    if (h.depth > me.depth) continue;
+    if (h.level <= me.level) {
+      end = h.line;
       break;
     }
   }
+  // 🔴 自分が囲みの中の見出しなら、その囲みの閉じを越えない
+  if (me.limit < end) end = me.limit;
   return { start: me.line, end };
 }
 

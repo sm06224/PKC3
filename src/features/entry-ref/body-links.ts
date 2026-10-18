@@ -31,6 +31,9 @@
 import { indentedCodeRanges, scanLinks } from '../markdown/link-scan';
 import { ifFormatMatches, ifFormatOf } from '../markdown/if-format';
 import { replaceInlineComments } from '../markdown/inline-comment';
+import { readMathAt } from '../markdown/math-delims';
+import { extractVars } from '../markdown/frontmatter';
+import { expandVarsInText } from '../markdown/var-expand';
 
 /**
  * 🔴 **同じ容れ物のノートを指す形は 2 つある**(#379)。
@@ -165,6 +168,49 @@ function withoutHidden(text: string): string {
   return lines.join('');
 }
 
+/**
+ * 🔴 **数式の中は、リンクではない**(台帳 #1852 束 R1、依頼 271 A)── `$…$` と、`$$` だけの行で挟んだ塊。
+ * 範囲は空白に置き換えて返す(長さが変わらない)。読み方は描画と同じ `readMathAt`(改行を跨がない / `` ` `` を跨がない)。
+ * ⚠ 1 つ目の版はここを「数式の読みは重いので、worker に持ち込まない」と除いていた。読むのは `$` を含む行だけで、
+ *   `$` が無い本文は走査しない(多くのノートは素通り)。
+ */
+function withoutMath(text: string): string {
+  if (!text.includes('$')) return text;
+  const parts = text.split(/(\r\n|[\r\n])/); // 区切りも残す(長さを変えない)
+  const blank = (s: string): string => s.replace(/[^\r\n]/g, ' ');
+  for (let i = 0; i < parts.length; i += 2) {
+    // `$$` だけの行で開き、`$$` だけの行で閉じる塊(閉じが無ければ塊ではない)
+    if (parts[i]!.trim() === '$$') {
+      let close = -1;
+      for (let j = i + 2; j < parts.length; j += 2) {
+        if (parts[j]!.trim() === '$$') {
+          close = j;
+          break;
+        }
+      }
+      if (close >= 0) {
+        for (let k = i; k <= close; k += 2) parts[k] = blank(parts[k]!);
+        i = close;
+        continue;
+      }
+    }
+    const line = parts[i]!;
+    if (!line.includes('$')) continue;
+    let out = '';
+    let at = 0;
+    for (let c = 0; c < line.length; c++) {
+      if (line[c] !== '$') continue;
+      const span = readMathAt(line, c, line.length);
+      if (span === null) continue;
+      out += line.slice(at, c) + blank(line.slice(c, span.end));
+      at = span.end;
+      c = span.end - 1;
+    }
+    if (at > 0) parts[i] = out + line.slice(at);
+  }
+  return parts.join('');
+}
+
 /** `<entry:…>` / `<pkc://…/entry/…>`(山括弧で囲んだ宛先は、画面ではリンクになる)。 */
 const AUTOLINK_RE = /<((?:entry:|pkc:\/\/)[^<>\s]*)>/gi;
 
@@ -197,7 +243,10 @@ export function bodyLinkTargets(body: string, cid?: string | null): string[] {
     const p = portable?.exec(d);
     return p ? p[1]! : null;
   };
-  const text = withoutHidden(withoutCode(body));
+  // 🔴 画面でリンクとして見える物だけを数える(台帳 #1852 束 R1、依頼 271 A):
+  //   コード・隠しメモ・出ない囲み・数式の中は数えず、`[x](entry:{{vars.t}})` は前書きの値で展開してから読む
+  const hidden = withoutHidden(withoutCode(body));
+  const text = withoutMath(hidden.includes('{{') ? expandVarsInText(hidden, extractVars(body)) : hidden);
   for (const site of scanLinks(text).sites) {
     const lid = lidOf(site.dest);
     if (lid !== null) found.push([site.destStart, lid]);
@@ -231,6 +280,9 @@ export function bodyLinksTo(body: string, lid: string, cid?: string | null): boo
   return bodyLinkTargets(body, cid).includes(lid);
 }
 
+/** 宛先の頭に変数を書いた形の字面。⚠ `bodyLinkTargets` が展開してから読むので、候補に挙げれば拾える。 */
+export const VARIABLE_DEST_NEEDLE = 'entry:{{';
+
 /**
  * 本文の中で `lid` を指しうる**字面**(SQL の LIKE で粗く削るのに使う)。
  *
@@ -244,5 +296,8 @@ export function bodyLinkNeedles(lid: string, cid?: string | null): string[] {
   if (cid !== undefined && cid !== null && TOKEN_ONLY.test(cid)) {
     out.push(`pkc://${cid}/entry/${lid}`);
   }
+  // 🔴 宛先に変数を書いた `[x](entry:{{vars.t}})` は、字面に lid が居ない(前書きの値で展開して初めて決まる。依頼 271)
+  out.push(VARIABLE_DEST_NEEDLE);
+  if (cid !== undefined && cid !== null && TOKEN_ONLY.test(cid)) out.push(`pkc://${cid}/entry/{{`);
   return out;
 }

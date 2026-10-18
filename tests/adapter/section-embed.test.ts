@@ -26,6 +26,7 @@ import {
   SECTION_LOADING_SELECTOR,
   SECTION_MISSING_NOTE,
   SECTION_NO_NOTE,
+  SECTION_OVER_NOTE,
 } from '../../src/adapter/ui/render/section-embed';
 
 function meta(lid: string, archetype = 'text', title = `ノート ${lid}`): EntryMeta {
@@ -478,5 +479,30 @@ describe('展開しない面の字', () => {
   it('🔴 描画器の器に説明の字が入る(書き出し・下見で空の枠にならない)', () => {
     expect(renderMarkdown('![決定事項](entry:n1#h/x)')).toContain('>決定事項</div>');
     expect(renderMarkdown('![](entry:n1#h/x)')).toContain('>別のノートの内容</div>');
+  });
+});
+
+describe('台帳 #1852 束 R1(依頼 270): 1 つのノートで展開できる数を超えた分は、理由を出す', () => {
+  it('🔴 上限(PLACE_BODY_CAP)個まで展開し、超えた分は「読み込んでいます」で止まらず理由が出る', async () => {
+    const total = PLACE_BODY_CAP + 50;
+    const host = Array.from({ length: total }, (_, i) => `![s${String(i)}](entry:src#h/sec${String(i)})`).join('\n\n');
+    const r = await rig('host', { ...BODIES, host });
+    const boxes = [...r.host().querySelectorAll<HTMLElement>('[data-pkc-embed-ref]')];
+    expect(boxes).toHaveLength(total);
+    const over = boxes.filter((b) => b.textContent === SECTION_OVER_NOTE);
+    expect(over, '超えた分に理由が出ていない').toHaveLength(50);
+    // 超えたのは後ろの 50 個
+    expect(boxes.slice(PLACE_BODY_CAP).every((b) => b.textContent === SECTION_OVER_NOTE)).toBe(true);
+    // 上限以内は理由ではなく結果(この節は無いので「見出しが見つかりません」)。「読み込んでいます」のまま止まらない
+    expect(boxes.slice(0, PLACE_BODY_CAP).every((b) => (b.textContent ?? '').includes(SECTION_MISSING_NOTE))).toBe(true);
+    expect(r.host().querySelectorAll(SECTION_LOADING_SELECTOR)).toHaveLength(0);
+    expect(SECTION_OVER_NOTE).toBe(`1 つのノートで表示できる埋め込みは ${String(PLACE_BODY_CAP)} 個までです`);
+  });
+
+  it('対照群: 上限ちょうどなら理由は出ない / 同じ節を何度書いても 1 個として数える', async () => {
+    const same = Array.from({ length: PLACE_BODY_CAP + 20 }, () => '![p](entry:src#h/plan)').join('\n\n');
+    const r = await rig('host', { ...BODIES, host: same });
+    const boxes = [...r.host().querySelectorAll<HTMLElement>('[data-pkc-embed-ref]')];
+    expect(boxes.some((b) => b.textContent === SECTION_OVER_NOTE)).toBe(false);
   });
 });

@@ -238,3 +238,51 @@ describe('⚠ 対照群 ── 本文をそのまま持っていても何も起�
     expect(body).toBe('価格は ${price} 円 / ${date}');
   });
 });
+
+describe('台帳 #1852 束 R1(依頼 273 A): コードの中の ${…} は入力位置にしない / \${…} は字のまま', () => {
+  const at = (text: string, start: number) => ({ text, start, end: start });
+
+  it('🔴 先頭の ${名前} が文中コードの中なら、そこは選ばず、外の印を選ぶ', () => {
+    const r = insertSnippet(at('', 0), '`${HOME}` の下に ${宛名}', NOW);
+    expect(r.text.slice(r.start, r.end)).toBe('${宛名}');
+  });
+
+  it('🔴 字下げのコード・$$ の数式・<pre> の中の印も選ばない(値にしない範囲と同じ)', () => {
+    const indented = insertSnippet(at('', 0), '説明\n\n    ${HOME}\n\n${宛名}', NOW);
+    expect(indented.text.slice(indented.start, indented.end)).toBe('${宛名}');
+    const math = insertSnippet(at('', 0), '$$\n${x}\n$$\n${宛名}', NOW);
+    expect(math.text.slice(math.start, math.end)).toBe('${宛名}');
+    const pre = insertSnippet(at('', 0), '<pre>${HOME}</pre> ${宛名}', NOW);
+    expect(pre.text.slice(pre.start, pre.end)).toBe('${宛名}');
+  });
+
+  it('コードの外に印が無ければ、末尾にカーソル(コードの中の印は選ばれない)', () => {
+    const r = insertSnippet(at('', 0), '`${HOME}` です', NOW);
+    expect(r.start).toBe(r.end);
+    expect(r.start).toBe('`${HOME}` です'.length);
+  });
+
+  it('🔴 \\${date} は字のまま ${date} を出す(日付にならず、逃がしの \\ は残らない)', () => {
+    const r = fillSnippetVars('今日は \\${date}、実際は ${date}', NOW);
+    expect(r.text).toBe('今日は ${date}、実際は 2026-08-25');
+    expect(r.literals).toEqual([[4, 11]]);
+    expect(fillSnippetVars('\\${time}\\${datetime}\\${cursor}', NOW).text).toBe('${time}${datetime}${cursor}');
+  });
+
+  it('${cursor} の逃がしは位置にならない', () => {
+    const r = fillSnippetVars('a\\${cursor}b', NOW);
+    expect(r.text).toBe('a${cursor}b');
+    expect(r.caret).toBeNull();
+  });
+
+  it('対照群: \\ が偶数個(逃がした \\ の後ろ)は逃がしではない / コードの中の \\${date} は触らない', () => {
+    expect(fillSnippetVars('\\\\${date}', NOW).text).toBe('\\\\2026-08-25');
+    expect(fillSnippetVars('`\\${date}`', NOW).text).toBe('`\\${date}`');
+  });
+
+  it('字のまま残した印 \\${宛名} は、挿した後に選ぶ場所にならない', () => {
+    const r = insertSnippet(at('', 0), '\\${宛名} と ${宛先}', NOW);
+    expect(r.text).toBe('${宛名} と ${宛先}');
+    expect(r.text.slice(r.start, r.end)).toBe('${宛先}');
+  });
+});
