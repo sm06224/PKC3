@@ -2,7 +2,7 @@
 /**
  * 🔴 **別のタブ・窓が編集中のノートへは、板(付箋)の書換と、表の行・列を足す口も断る**(#1087。追記と同じ門)。
  *
- * 対象(binder.ts の受け手): 板を置く(`add-place`)/ 前へ出す(`raise-place`)/ 形(`place-shape-*`)/
+ * 対象(binder.ts の受け手): 板を置く(`add-place`)/ 前へ出す(`raise-place`)/ 後ろへ送る(`lower-place`)/ 形(`place-shape-*`)/
  * 色を外す(`place-color-clear`)/ 線の太さ(`place-line-width`)/ 矢じり(`place-line-arrow`)/
  * 文字の大きさ(`place-size`)/ グループを解く(`place-ungroup`)/ 回す(`place-rotate`)/
  * 色を選ぶ(`place-color`。窓で選び終えた時点で確かめる)/ 表の行・列を足す(`shape-cell` の足す回)。
@@ -78,8 +78,10 @@ const CASES: ReadonlyArray<{
   /** 断った回の「もう一度」の字(問い合わせが落ちたとき) */
   failed: string;
 }> = [
-  { action: 'add-place', attrs: { 'data-pkc-menu-x': '5', 'data-pkc-menu-y': '6' }, fires: 'ADD_PLACE', failed: '板を置けませんでした' },
-  { action: 'raise-place', attrs: BLOCK, fires: 'RAISE_PLACE', failed: '板を前へ出せませんでした' },
+  { action: 'add-place', attrs: { 'data-pkc-menu-x': '5', 'data-pkc-menu-y': '6' }, fires: 'ADD_PLACE', failed: '付箋を置けませんでした' },
+  { action: 'raise-place', attrs: BLOCK, fires: 'RAISE_PLACE', failed: '付箋を前へ出せませんでした' },
+  // 🔴 後ろへ送る(依頼 118-1)も同じ門を通る
+  { action: 'lower-place', attrs: BLOCK, fires: 'LOWER_PLACE', failed: '付箋を後ろへ送れませんでした' },
   { action: 'place-shape-diamond', attrs: BLOCK, fires: 'SET_PLACE_SHAPE', failed: '形を変えられませんでした' },
   { action: 'place-color-clear', attrs: { ...BLOCK, 'data-pkc-style-keys': 'fill stroke' }, fires: 'SET_PLACE_STYLE', failed: '色を直せませんでした' },
   { action: 'place-line-width', attrs: { ...BLOCK, 'data-pkc-style-width': '3' }, fires: 'SET_PLACE_STYLE', failed: '線の太さを直せませんでした' },
@@ -214,8 +216,12 @@ describe('全数: 板の受け手は 1 本の門を通る(#1087)', () => {
     expect(code.slice(i, i + 900)).toContain('placeEditedElsewhereGate(');
   });
 
-  it('⚠ ドラッグ移動・付箋 / 線を消す口は、見え方の判断待ちなので通していない(通したらこの注記を直す)', () => {
-    expect(bodyOf('remove-place')).not.toContain('placeEditedElsewhereGate(');
-    expect(bodyOf('remove-place-line')).not.toContain('placeEditedElsewhereGate(');
+  it('🔴 付箋を消す / 線を消す口も通る(依頼 118-4。以前は「見え方の判断待ち」で通していなかった)', () => {
+    expect(bodyOf('remove-place')).toContain('placeEditedElsewhereGate(');
+    expect(bodyOf('remove-place-line')).toContain('placeEditedElsewhereGate(');
+  });
+
+  it('🔴 後ろへ送る(lower-place)も通る', () => {
+    expect(bodyOf('lower-place')).toContain('placeEditedElsewhereGate(');
   });
 });

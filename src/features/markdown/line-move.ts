@@ -47,6 +47,15 @@ export interface MoveLines {
    *   塊は**違う所**へ入る(`insert-lines` の `anchor` と同じ穴)。disk 側の `toBefore` 行目が byte 一致しなければ書かない。
    */
   readonly toBeforeLine: string | null;
+  /**
+   * 🔴 **「元に戻す」だけが持つ、動かす前の本文そのもの**(依頼 118-3。Gemini の回答「推薦どおり」= A)。
+   * 行を動かし直す逆向きの指示は、空行を 2 本入れて区切る書き方だと**空行の数が元と違って**戻る(隣の空行 1 本を
+   * 塊の単位とする規則が、逆向きでは同じ長さを戻せない)。そこで、逆向きが**動かす前の本文と 1 字も違わない**とは言えない回だけ、
+   * 「いまの本文が `from` のままなら、`to`(動かす前の本文)へそのまま戻す」を足す。
+   * `redo` は同じ手の押し直し(戻した結果も「元に戻す」が出る ── `BODY_REWRITTEN` が材料を入れ直す)に使う。
+   * ⚠ 本文が `from` から変わっていたら使わない(別の窓の書込を消さない)── 行を動かし直す指示にそのまま落ちる。
+   */
+  readonly restore?: { readonly from: string; readonly to: string; readonly redo: MoveLines };
 }
 
 /**
@@ -208,6 +217,25 @@ export interface MovedLines {
  * 🔑 `toBefore` が `start..end+1` の中なら**取りやめ** ── `body` をそのまま返す。
  */
 export function moveLinesWithInverse(body: string, move: MoveLines): MovedLines | null {
+  const bare = withoutRestore(move);
+  // 🔴 動かす前の本文そのものへ戻す回(依頼 118-3)── いまの本文が戻す元と 1 字も違わないときだけ
+  if (move.restore !== undefined && body === move.restore.from) {
+    const { from, to, redo } = move.restore;
+    return { body: to, inverse: { ...withoutRestore(redo), restore: { from: to, to: from, redo: bare } } };
+  }
+  const moved = moveCore(body, bare);
+  if (moved === null || moved.inverse === null) return moved;
+  // 逆向きに撃って動かす前の本文と 1 字も違わなく戻るか ── 戻らない回(空行の数が変わる)だけ、そのままの戻し先を足す
+  const again = moveCore(moved.body, moved.inverse);
+  if (again !== null && again.body === body) return moved;
+  return { body: moved.body, inverse: { ...moved.inverse, restore: { from: moved.body, to: body, redo: bare } } };
+}
+
+function withoutRestore(m: MoveLines): MoveLines {
+  return { start: m.start, end: m.end, toBefore: m.toBefore, lines: m.lines, toBeforeLine: m.toBeforeLine };
+}
+
+function moveCore(body: string, move: MoveLines): MovedLines | null {
   const { start, end, toBefore } = move;
   const fm = frontmatterLineCount(body);
   const all = body.split('\n');

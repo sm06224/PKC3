@@ -423,8 +423,7 @@ export function setPlaceText(
 /**
  * 🔴 **板を前へ出す**(#676 段②)── 他の板の z= の最大 + 1 を、この板の z= に書く。
  *
- * ⚠ 「後ろへ送る」は作らない ── 負の z は描画が捨てる(`place-board.ts` の `intAttr`)ので、
- *   下げる向きは「他を全部上げる」しか無く、触っていない板の行まで書き換えることになる。
+ * 🔑 「後ろへ送る」は `lowerPlace`(依頼 118-1)── 負の z は描画が捨てるので、下げる向きは z=0 の板が居るとき他を全部上げる。
  * ⚠ 数えるのは**fence の外の板の開き行だけ**(fence の中の `:::format{… z=99}` はコードの字)。
  *   z= を持たない板は 0 と数える(描画は z 無し = `auto`、z=1 はその上に乗る)。
  * 🔑 既に**独りで**いちばん前なら body をそのまま返す(書く物が無い ≠ 競合)。
@@ -436,6 +435,73 @@ export function raisePlace(body: string, target: PlaceTarget): string | null {
   const { alreadyFront, maxOther } = frontState(at.lines, at.fm, target.line);
   if (alreadyFront) return body;
   return spliceOpenLine(body, target, { z: maxOther + 1 });
+}
+
+/**
+ * 🔴 **板を後ろへ送る**(依頼 118-1。Gemini の回答「推薦どおり」= A)── 他の板より後ろ(下)に回す。
+ *
+ * 🔑 負の z は描画が捨てる(`place-board.ts` の `intAttr`)ので、書ける最小は 0:
+ *   - 他の板の最小の z= が 1 以上 → この板の z= を `最小 - 1` にするだけ(**他の板は 1 バイトも触らない**)
+ *   - 他に z= が 0 の板(z= の無い板を含む)が居る → **他の板を全部 1 つずつ上げて**、この板を 0 にする
+ *     (順番は変わらない。触る他の板は開き行の z= だけ)
+ * 🔑 既に独りでいちばん後ろ(他の板より z が小さい)/ 他に板が無い なら body をそのまま返す(書く物が無い ≠ 競合)。
+ *   同じ z が並んでいる(引き分け)なら 1 つ下げる ── 押した人は後ろに送りたいのである(`raisePlace` と対)。
+ */
+export function lowerPlace(body: string, target: PlaceTarget): string | null {
+  const at = placeLinesAt(body, target);
+  if (at === null) return null;
+  const { alreadyBack, minOther } = backState(at.lines, at.fm, target.line);
+  if (alreadyBack) return body;
+  if (minOther >= 1) return spliceOpenLine(body, target, { z: minOther - 1 });
+  // 他の板に 0 が居る ── 他を全部 1 つ上げる(順番を保つ)
+  const lines = [...at.lines];
+  const mask = fenceMask(lines, at.fm);
+  for (let i = at.fm; i < lines.length; i += 1) {
+    if (i === target.line || mask[i] === true) continue;
+    const attrs = placeOpenAttrs(lines[i]!);
+    if (attrs === null) continue;
+    const next = spliceTokens(lines[i]!, { z: zOf(attrs) + 1 });
+    if (next === null) return null;
+    lines[i] = next;
+  }
+  const self = spliceTokens(lines[target.line]!, { z: 0 });
+  if (self === null) return null;
+  lines[target.line] = self;
+  return lines.join('\n');
+}
+
+/**
+ * 他の板の z= の最小と、この板が既に独りでいちばん後ろか(他に板が無いときも後ろ扱い)。
+ * ⚠ 「後ろへ送る」を書く側(`lowerPlace`)と、メニューに出すかを決める側(`placeIsBackmost`)が**同じ 1 本**を通る(§7)。
+ */
+function backState(
+  lines: readonly string[],
+  fm: number,
+  at: number,
+): { alreadyBack: boolean; minOther: number } {
+  const mask = fenceMask(lines, fm);
+  let minOther = Number.POSITIVE_INFINITY;
+  for (let i = fm; i < lines.length; i += 1) {
+    if (i === at || mask[i] === true) continue;
+    const attrs = placeOpenAttrs(lines[i]!);
+    if (attrs !== null) minOther = Math.min(minOther, zOf(attrs));
+  }
+  const self = placeOpenAttrs(lines[at]!);
+  return {
+    alreadyBack: minOther === Number.POSITIVE_INFINITY || (self !== null && zOf(self) < minOther),
+    minOther,
+  };
+}
+
+/**
+ * 🔴 **この付箋は既にいちばん後ろか**(依頼 118-1)── 真なら「後ろへ送る」を押しても本文は変わらない
+ *   (`lowerPlace` が body をそのまま返す条件)。右クリックの一覧に出さない判定に使う。
+ */
+export function placeIsBackmost(fmBody: string, line: number): boolean {
+  const lines = fmBody.split('\n');
+  if (!Number.isInteger(line) || line < 0 || line >= lines.length) return false;
+  if (!isPlaceOpen(lines[line]!)) return false;
+  return backState(lines, 0, line).alreadyBack;
 }
 
 /**

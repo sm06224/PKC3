@@ -196,6 +196,15 @@ export interface ViewWindowDeps {
    * ⚠ 省略できない ── 省略できるようにすると、渡し忘れた配線だけ「塞がれたら中央を奪う」に戻る。
    */
   readonly hasPaneHome: (view: ViewMode) => boolean;
+  /**
+   * 🔴 **左に居場所が無い面(2 ペイン / SQL / Office …)を、中央で開いてよいかを 1 回だけ聞く**(依頼 147。Gemini の回答「推薦どおり」= ③)。
+   * 別のウィンドウが開けなかったとき、黙って中央へ落とすと読んでいた本文が隠れる。**聞いて「開く」を選んだ人だけ**中央で開く
+   * (どうしても使いたい人が使え、本文が黙って隠れることも無い)。「やめる」は理由だけ出す(今までどおり)。
+   * ⚠ 省略 = 聞かずに理由だけ出す(今までどおり ── 渡さない配線の動きを変えない)。`openCentered` と対で渡す。
+   */
+  readonly askOpenCentered?: (message: string) => Promise<boolean>;
+  /** 中央の面で開く(聞いて「開く」と答えた後だけ撃つ)。開けたかを返す(編集中は断られる)。 */
+  readonly openCentered?: (view: ViewMode) => boolean;
   /** 理由を画面へ出す。 */
   readonly fail: (message: string) => void;
   /**
@@ -336,7 +345,25 @@ function fallback(view: ViewMode | null, deps: ViewWindowDeps, why: string): voi
    * 🔑 理由と許可の出し方だけ出す(付箋・週と同じ形)。「この画面で開きました」とは言わない(開いていない)。
    */
   if (!deps.hasPaneHome(view)) {
-    deps.fail(`${why}。別のウィンドウで使うには、${POPUP_ALLOW_STEP}`);
+    const reason = `${why}。別のウィンドウで使うには、${POPUP_ALLOW_STEP}`;
+    const { askOpenCentered, openCentered } = deps;
+    if (askOpenCentered === undefined || openCentered === undefined) {
+      deps.fail(reason);
+      return;
+    }
+    // 🔴 聞く(依頼 147)── 本文が隠れることと、やめたときの許可の出し方を、押す前に言う
+    void askOpenCentered(
+      `${reason}。いま読んでいる本文の代わりに、この画面の中央で開きますか?(開いている間、本文は隠れます)`,
+    ).then((yes) => {
+      if (!yes) {
+        deps.fail(reason);
+        return;
+      }
+      if (!openCentered(view))
+        deps.fail(
+          `${why}。この画面で開くなら、編集を保存するか、編集をやめてから、もう一度お試しください(別のウィンドウで使うには、${POPUP_ALLOW_STEP})`,
+        );
+    });
     return;
   }
   const landed = deps.openInPane(view);

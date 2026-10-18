@@ -44,7 +44,7 @@ import { applyPlaceLayout } from './place-board';
 import { PlaceEmbeds } from './place-embed';
 import { SectionEmbeds } from './section-embed';
 import { placeFramed } from '@features/markdown/place-embed';
-import { placeBodiesOf } from '@adapter/state/app-state';
+import { knownAppGroupNames, placeBodiesOf } from '@adapter/state/app-state';
 import { folderOverview, hasFolderOverview } from '@features/relation/folder-overview';
 import { buildFolderOverview } from './folder-overview';
 import { DEFAULT_ENTRY_SORT } from '@features/filter/entry-sort';
@@ -1808,7 +1808,7 @@ export class DetailRenderer {
       this.bodyView = EMPTY_VIEW;
       this.bodyHost!.textContent = '';
       this.bodyHost!.removeAttribute(LONG_NOTE_ATTR);
-      this.renderAttachment(body, shown, lid, selfContainerId(state), meta.title);
+      this.renderAttachment(body, shown, lid, selfContainerId(state), meta.title, knownAppGroupNames(state));
       if (keepPick !== null) this.refocusPick(keepPick);
       this.restoreScroll();
       return;
@@ -3473,6 +3473,8 @@ export class DetailRenderer {
     currentContainerId: string,
     /** ⚠ **ノートの題名**(添付の file 名 `meta.name` とは別物)。改名の欄に出す。 */
     entryTitle: string,
+    /** 🔴 いま在るグループの名前(依頼 83-2 B)── 「グループ」の欄の候補。 */
+    groupNames: readonly string[] = [],
   ): void {
     const host = this.bodyHost ?? this.region;
     const meta = readAttachmentMeta(rawBody);
@@ -3787,7 +3789,7 @@ export class DetailRenderer {
        *   名前と違う」)。
        * 🔑 判定を 2 か所に置かない ── 器を出すかは 1 つの関数が答える。
        */
-      const tileBox = appTileControls(rawBody, meta.mime, lid);
+      const tileBox = appTileControls(rawBody, meta.mime, lid, groupNames);
       if (tileBox !== null) host.append(tileBox);
     }
 
@@ -4605,7 +4607,12 @@ function renderHistoryPanel(
  * ⚠ **汎用の frontmatter エディタは作らない**。ここに要るのは 3 つだけで、
  * 汎用にすると「何を書いていいか分からない欄」になる。
  */
-function appTileControls(rawBody: string, mime: string, lid: string): HTMLElement | null {
+function appTileControls(
+  rawBody: string,
+  mime: string,
+  lid: string,
+  groupNames: readonly string[] = [],
+): HTMLElement | null {
   const fm = parseFrontmatter(rawBody).meta;
   /**
    * 🔴 **URL のタイルも受ける**(#856 段①)── `attachment.launcher_url` が在れば、
@@ -4666,6 +4673,7 @@ function appTileControls(rawBody: string, mime: string, lid: string): HTMLElemen
     placeholder: string,
     value: unknown,
     size: number,
+    candidates: readonly string[] = [],
   ): void => {
     // 🔴 見出しを付ける(依頼 83-5)── 字を入れると案内(placeholder)は消えるので、何の欄か分からなくなっていた
     const label = document.createElement('label');
@@ -4681,11 +4689,26 @@ function appTileControls(rawBody: string, mime: string, lid: string): HTMLElemen
     input.value = typeof value === 'string' ? value : '';
     input.defaultValue = input.value; // 断られたときの戻し先(binder の revertIfRefused)
     label.append(head, input);
+    /**
+     * 🔴 **候補は近道であって、打てる語の一覧ではない**(依頼 83-2 B)── `<datalist>` は打った字をそのまま通す
+     *   (新しいグループも作れる)。今あるグループ名を出して、打ち間違いで別のグループができるのを防ぐ。
+     */
+    if (candidates.length > 0) {
+      const list = document.createElement('datalist');
+      list.id = `pkc-app-${name}-candidates-${lid}`;
+      for (const c of candidates) {
+        const opt = document.createElement('option');
+        opt.value = c;
+        list.append(opt);
+      }
+      input.setAttribute('list', list.id);
+      label.append(list);
+    }
     box.append(label);
   };
   // 🔴 見出し + 案内(依頼 83-5。Gemini の回答「推薦どおり」= A)。⚠ 「名前順に並びます」は、並べ替えたグループが
   //    名前順にならないことと食い違っていたので外した
-  field('app-group', 'set-app-group', 'グループ', '例: 資料', fm['attachment.app_group'], 16);
+  field('app-group', 'set-app-group', 'グループ', '例: 資料', fm['attachment.app_group'], 16, groupNames);
   field('app-icon', 'set-app-icon', 'アイコン', '絵文字、または下の一覧から選ぶ', fm['attachment.app_icon'], 8);
   /**
    * 🔴 **リンク先の印を取り込む**(#856 段②。user 裁定 2026-09-12)。

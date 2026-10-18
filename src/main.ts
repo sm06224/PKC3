@@ -717,12 +717,19 @@ function openViewTile(
     // 🔴 **予定表は左の列の「予定」タブへ退避する**(#673 段②)── 中央に開くと
     //    本文が消える(#292 段⑤ の理由)。振り分けは `openViewHere` の 1 か所
     openInPane: (v) => openViewHere(dispatcher, v, openBrowse, focusSearch),
-    // 🔴 左に居場所が無い面(2 ペイン / SQL)は、塞がれても中央へ落とさず理由だけ出す(#1087)
+    // 🔴 左に居場所が無い面(2 ペイン / SQL)は、塞がれても黙って中央へ落とさない(#1087)。聞いて「開く」と答えた人だけ中央で開く(下の askOpenCentered)
     hasPaneHome,
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
     // 🔴 押した瞬間に返事をする(#685 動線レビュー 欠陥 7)── 塞がれた回は
     //    2.5 秒まるごと無反応で、user は「効いていない」と読んでもう一度押す
     notify: (message) => dispatcher.dispatch({ type: 'OP_NOTICE', message }),
+    // 🔴 左に居場所が無い面は、聞いて「開く」と答えた人だけ中央で開く(依頼 147)── 黙って本文を隠さない
+    askOpenCentered: (message) =>
+      confirmInApp(document.querySelector<HTMLElement>('[data-pkc-slot="root"]') ?? document.body, message, {
+        okLabel: 'この画面で開く',
+        cancelLabel: 'やめる',
+      }).then((a) => a === 'ok'),
+    openCentered: (v) => openView(dispatcher, v),
   });
 }
 
@@ -1470,7 +1477,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   /** 🔴 編集中に刷っても、編集欄の中身を全部紙に出す(#1163 依頼 71-2)。⚠ 外さない(アプリと同寿命)。 */
   installEditorPrint(window);
   /** 🔴 板の塊を掴んで動かす配線(#283 P4-b)。⚠ 外さない(アプリと同寿命)。 */
-  installPlaceDrag(root, dispatcher);
+  installPlaceDrag(root, dispatcher, editLockPort);
   /** 🔴 付箋に乗せて ● を掴み、別の付箋へ引いて繋ぐ配線(#530 段③d)。⚠ 外さない(アプリと同寿命)。 */
   installPlaceConnect(root, dispatcher);
   /**

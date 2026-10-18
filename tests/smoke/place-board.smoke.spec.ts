@@ -1644,7 +1644,7 @@ test('🔴 本文を右クリックして「ここに付箋を置く」と、押
   await expect(page.locator('[data-pkc-region="detail"] #p1')).toHaveAttribute('data-pkc-x', '120');
 
   /**
-   * 🔴 **本文を右クリック →「テンプレートから板を置く…」→「付箋 4 枚」**(#529 W4)── 4 枚増える。
+   * 🔴 **本文を右クリック →「テンプレートから付箋を置く…」→「付箋 4 枚」**(#529 W4)── 4 枚増える。
    * ⚠ 数えるのは**描画が板として描いた塊**(`.pkc-place`)── 窓が「置きました」と言うだけでは足りない。
    */
   const framesBefore = await page.locator('[data-pkc-field="detail-body"] .pkc-place').count();
@@ -1745,7 +1745,7 @@ test('🔴 本文を右クリックして「ここに付箋を置く」と、押
   await page.waitForSelector('[data-pkc-action="start-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"][data-pkc-painted]').first()).toBeVisible();
   const openBox = (await page.locator('[data-pkc-field="detail-body"]').boundingBox())!;
-  const refusal = page.locator('[data-pkc-region="status"]', { hasText: '板を置けません' });
+  const refusal = page.locator('[data-pkc-region="status"]', { hasText: '付箋を置けません' });
   await page.mouse.click(Math.floor(openBox.x) + 400, Math.floor(openBox.y) + 10, { button: 'right' });
   await menu.locator('[data-pkc-action="add-place"]').click();
   await expect(refusal, '「ここに付箋を置く」が理由を言っていない').toBeVisible({ timeout: 5000 });
@@ -1753,7 +1753,7 @@ test('🔴 本文を右クリックして「ここに付箋を置く」と、押
   await page.mouse.click(Math.floor(openBox.x) + 400, Math.floor(openBox.y) + 10, { button: 'right' });
   await menu.locator('[data-pkc-action="add-place-template"]').click();
   await dlg.locator('[data-pkc-field="pick-place-template"]').first().click();
-  await expect(refusal, '「テンプレートから板を置く」が理由を言っていない').toBeVisible({ timeout: 5000 });
+  await expect(refusal, '「テンプレートから付箋を置く」が理由を言っていない').toBeVisible({ timeout: 5000 });
   await expect(page.locator('[data-pkc-field="detail-body"] .pkc-place')).toHaveCount(0);
 
   /**

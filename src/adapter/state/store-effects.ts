@@ -50,6 +50,7 @@ import {
   attachmentNameRewriteNotice,
 } from '@features/markdown/body-rewrite';
 import { tableFormatDropsInfo } from '@features/markdown/table-convert';
+import { placeUndoNotice } from '@features/markdown/place-undo-notice';
 import { cutLines, insertLines } from '@features/markdown/line-move';
 import { clipPreview } from '@features/relation/dual-pane';
 import { splitRestoredEdges } from '@features/relation/tree';
@@ -4405,7 +4406,12 @@ export function connectStoreEffects(
              * ⚠ 何件か動く回だけ(動かない回は書かない)。表の行・列を消す回と同じく、書く前後の「いちばん新しい版」で見る。
              */
             const runUndo = run !== null && runTo === 'open' && run.changed > 0;
-            const revBefore = shapeRemove || runUndo ? await newestRevId() : undefined;
+            /**
+             * 🔴 **付箋を動かした・大きさ・色・形・回転を変えた直後の「元に戻す」**(依頼 118-2 / 236)。
+             * 書く前の本文を版として積み(下の `checkpoint`)、書いた後の「いちばん新しい版」が変わったときだけ知らせに繋ぐ。
+             */
+            const placeUndo = placeUndoNotice(ev.rewrite);
+            const revBefore = shapeRemove || runUndo || placeUndo !== null ? await newestRevId() : undefined;
             /**
              * 🔴 **読んでから書くまでの間に別の窓が書いていたら、1 バイトも書かない**
              * (#178 残り、2026-08-23)。
@@ -4466,6 +4472,8 @@ export function connectStoreEffects(
                 ev.rewrite.kind === 'place-line-remove' ||
                 // 🔴 付箋の字を書き換える回も積む(#1662 1)── 書き換えた字は元へ戻す道が版しか無い
                 ev.rewrite.kind === 'place-text' ||
+                // 🔴 動かす・大きさ・色・形・回転・前後・グループ(依頼 118-2 / 236)── 「元に戻す」の行き先になる版を残す
+                placeUndo !== null ||
                 (ev.rewrite.kind === 'place-add' && ev.rewrite.template !== undefined)
                   ? { checkpoint: true }
                   : {}),
@@ -4551,6 +4559,20 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'OP_NOTICE',
                 message: ev.rewrite.what === 'row' ? '表の行を消しました' : '表の列を消しました',
+                ...(revAfter !== undefined && revAfter !== revBefore
+                  ? { restoreUndo: { lid: ev.lid, revId: revAfter } }
+                  : {}),
+              });
+            }
+            /**
+             * 🔴 **付箋を動かした直後に「元に戻す」を出す**(依頼 118-2 / 236)。置き場は表の行・列を消した直後と同じ
+             * (画面の下の知らせの隣)。押すと書く前の版へ戻る。
+             */
+            if (placeUndo !== null && !disposed) {
+              const revAfter = await newestRevId();
+              dispatcher.dispatch({
+                type: 'OP_NOTICE',
+                message: placeUndo,
                 ...(revAfter !== undefined && revAfter !== revBefore
                   ? { restoreUndo: { lid: ev.lid, revId: revAfter } }
                   : {}),

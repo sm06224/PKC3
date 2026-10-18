@@ -456,7 +456,7 @@ describe('書き出し(binder の export-vcards)── §7: 画面と同じ 1 �
       expect(
         d.getState().notice ?? '',
         '何が入っていないかを、押した後に言っていない',
-      ).toContain('名前・所属・電話・メール・誕生日だけ');
+      ).toContain('名前・読み・所属・電話・メール・誕生日だけ');
       // ⚠ 対照群 ── 切っていないので「途中まで」とは言わない
       expect(d.getState().notice ?? '', '切っていないのに断りを出した').not.toContain('途中まで');
 

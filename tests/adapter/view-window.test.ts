@@ -264,6 +264,81 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
   });
 
   /**
+   * 🔴 **依頼 147(Gemini の回答「推薦どおり」= ③):左に居場所が無い面は、聞いて「開く」と答えた人だけ中央で開く。**
+   * 黙って中央へ落とさない(上の test は聞く口を渡さない配線 ── 今までどおり理由だけ)。観測点は「聞いた字」「中央を開いた面」
+   * 「出た理由」。対照群: 「やめる」は中央を奪わず理由だけ / 左に居場所のある面は聞かずに退避する。
+   */
+  describe('左に居場所が無い面を、聞いてから中央で開く(依頼 147)', () => {
+    const ask = (yes: boolean) => {
+      const asked: string[] = [];
+      const centered: ViewMode[] = [];
+      return {
+        asked,
+        centered,
+        extra: {
+          askOpenCentered: async (m: string) => {
+            asked.push(m);
+            return yes;
+          },
+          openCentered: (v: ViewMode) => {
+            centered.push(v);
+            return true;
+          },
+        },
+      };
+    };
+
+    it.each(['dual', 'sql'] as const)('🔴 %s: 「この画面で開く」と答えたら中央で開く / 聞く字は本文が隠れることと許可の出し方を言う', async (view) => {
+      const b = bench({ answered: false });
+      const a = ask(true);
+      expect(await openViewInWindow(view, { ...b.deps, ...a.extra })).toBe('pane');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(a.asked, '聞いていない').toHaveLength(1);
+      expect(a.asked[0], '本文が隠れることを言っていない').toContain('本文');
+      expect(a.asked[0], '許可の出し方を言っていない').toContain(POPUP_ALLOW_STEP);
+      expect(a.centered, '答えたのに中央で開いていない').toEqual([view]);
+      expect(b.fails, '聞く前に理由を出すと二重になる').toEqual([]);
+    });
+
+    it('🔴 「やめる」なら中央を奪わず、今までどおり理由だけ出す', async () => {
+      const b = bench({ answered: false });
+      const a = ask(false);
+      await openViewInWindow('dual', { ...b.deps, ...a.extra });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(a.asked).toHaveLength(1);
+      expect(a.centered, 'やめたのに中央を奪った(本文が消える)').toEqual([]);
+      expect(b.fails).toHaveLength(1);
+      expect(b.fails[0]).toContain(POPUP_ALLOW_STEP);
+    });
+
+    it('対照群: 左に居場所のある面(予定表)は聞かずに左のタブへ退避する / 窓が出たら聞かない', async () => {
+      const blocked = bench({ answered: false });
+      const a = ask(true);
+      await openViewInWindow('schedule', { ...blocked.deps, ...a.extra });
+      expect(a.asked, '左のタブへ退避できる面で聞いた').toEqual([]);
+      expect(blocked.panes).toEqual(['schedule']);
+      const opened = bench({ answered: true });
+      const b = ask(true);
+      await openViewInWindow('dual', { ...opened.deps, ...b.extra });
+      expect(b.asked, '窓が出たのに聞いた').toEqual([]);
+    });
+
+    it('編集中で中央にも開けなかったら、編集を終える手順と許可の出し方を言う', async () => {
+      const b = bench({ answered: false });
+      const a = ask(true);
+      const extra = { ...a.extra, openCentered: () => false };
+      await openViewInWindow('sql', { ...b.deps, ...extra });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(b.fails).toHaveLength(1);
+      expect(b.fails[0]).toContain('編集を保存するか、編集をやめてから');
+      expect(b.fails[0]).toContain(POPUP_ALLOW_STEP);
+    });
+  });
+
+  /**
    * 🔴 **④:`window.open` は待つ前に撃つ。**
    * ⚠ `await` の後ろへ回すと **gesture が切れて必ず塞がれる** ── しかも
    *   「塞がれた」と見分けがつかないので、**常に中央の面へ退避する**ようになる。

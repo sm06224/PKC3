@@ -101,10 +101,28 @@ describe('付箋・線の書換と履歴(#1087)', () => {
     expect(r.checkpoint).not.toBe(true);
   });
 
-  it('付箋を動かす回は積まない(履歴を動かした数だけ伸ばさない)', async () => {
+  it('🔴 付箋を動かす回も積む(依頼 118-2 / 236。「元に戻す」の行き先になる版を残す)', async () => {
     const r = await run(BOARD, { type: 'MOVE_PLACE', lid: 'n1', line: 0, x: 50, y: 60 });
     expect(r.count, '書込が届いていない(前提)').toBe(1);
     expect(r.disk, '動いていない(前提)').not.toBe(BOARD);
-    expect(r.checkpoint).not.toBe(true);
+    expect(r.checkpoint, '動かすのに前の版を積んでいない(元に戻す道が無い)').toBe(true);
+  });
+
+  it('🔴 大きさ・色・形・回転・前後・グループを変える回も積む / 付箋の字・題名の札など別の回は変えない(対照群)', async () => {
+    const cases: Array<[string, Dispatchable]> = [
+      ['大きさ', { type: 'RESIZE_PLACE', lid: 'n1', line: 0, w: 220, h: 120 }],
+      ['色', { type: 'SET_PLACE_STYLE', lid: 'n1', line: 0, style: { fill: '#ff0000' } }],
+      ['回転', { type: 'SET_PLACE_STYLE', lid: 'n1', line: 0, style: { rotate: 15 } }],
+      ['形', { type: 'SET_PLACE_SHAPE', lid: 'n1', line: 0, shape: 'diamond' }],
+      ['前へ出す', { type: 'RAISE_PLACE', lid: 'n1', line: 0 }],
+      ['後ろへ送る', { type: 'LOWER_PLACE', lid: 'n1', line: 4 }],
+      ['位置と大きさ', { type: 'SET_PLACE_RECT', lid: 'n1', line: 0, rect: { x: 11 } }],
+    ];
+    for (const [name, action] of cases) {
+      const r = await run(BOARD, action);
+      expect(r.count, `${name}: 書込が届いていない(前提)`).toBe(1);
+      expect(r.disk, `${name}: 動いていない(前提)`).not.toBe(BOARD);
+      expect(r.checkpoint, `${name}: 前の版を積んでいない`).toBe(true);
+    }
   });
 });

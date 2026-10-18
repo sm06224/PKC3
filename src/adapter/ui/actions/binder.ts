@@ -52,6 +52,7 @@ import {
   placeRectOf,
   placeShapeAt,
   placeIsFrontmost,
+  placeIsBackmost,
   placeStyleAt,
   placeTextOf,
   setPlaceText,
@@ -100,6 +101,7 @@ import {
   hasReverseOnlyRelation,
   hasSameRelation,
   appGroupIconName,
+  appGroupRenamable,
   appGroupOrderCount,
   hasAppGroupOrder,
   isCodeDraft,
@@ -350,6 +352,7 @@ import {
 } from '@adapter/ui/render/dual-move-undo';
 import { resolveRelationTarget } from '@features/relation/target-label';
 import { renameOfferingUndo, takeRenameUndo } from '@adapter/ui/render/rename-undo';
+import { offerStackClearUndo, takeStackUndo } from '@adapter/ui/render/stack-undo';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
@@ -3276,6 +3279,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'undo-bulk-tag',
   // 🔴 題名を変えた直後の「元に戻す」(#1657)── 題名を書き戻すので `rename-attachment` と同じ門
   'undo-rename',
+  // 🔴 スタックを全部降ろした直後の「元に戻す」(依頼 98-2)── 画面の並びを書き戻す(書込は無いが、ほかの「元に戻す」と同じ列)
+  'undo-stack-clear',
   // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── 種類を disk へ書くので、同じ門
   'change-entry-kind',
   // 🔴 取り込みの「取り消す」── ゴミ箱へ入れる `delete-entry` と同じ書込なので同じ門(#1087)
@@ -5182,6 +5187,7 @@ function directiveBlockAt(
   rotate: number;
   rotated: boolean;
   front: boolean;
+  back: boolean;
 } | null {
   let el: Element | null = target.closest('[data-pkc-source-line]');
   while (el !== null && el !== host && host.contains(el)) {
@@ -5201,6 +5207,7 @@ function directiveBlockAt(
         rotated: placeStyleAt(open)?.written.rotate === true,
         // 🔴 既にいちばん前なら「前へ出す」を出さない(#1087)── `raisePlace` と同じ 1 本
         front: placeIsFrontmost(fmBody, line),
+        back: placeIsBackmost(fmBody, line),
         // 🔑 グループも**原文**から読む(#530 段⑤b)── 入っているか / まとめる相手が居るか(1 本: `placeGroupAt` / `placeGroupItems`)
         group: placeGroupAt(open),
         groupable:
@@ -6405,7 +6412,8 @@ export function runGlobalCommand(
     prevent();
     if (cmd === 'stack-clear') {
       dispatcher.dispatch({ type: 'CLEAR_SPLIT' });
-      notify(`スタックから ${String(stack.length)} 件を降ろしました(ノートは消えていません)`);
+      // 🔴 降ろした直後の「元に戻す」(依頼 98-2)── 確かめを挟まず、数秒の間は並びを戻せる
+      offerStackClearUndo(dispatcher, stack);
       return true;
     }
     /**
@@ -9741,6 +9749,23 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'OP_NOTICE', message: `題名を「${r.from}」に戻しました` });
   },
   /**
+   * 🔴 **スタックを全部降ろした直後の「元に戻す」**(依頼 98-2)。口は `status-undo`(出し入れは `status-open.ts`)。
+   * ⚠ 書込は無い(スタックは画面の状態)── 降ろす前の並びを下から順に載せ直す(`PIN_SPLIT_ENTRY`。載せた物が一番上に来る)。
+   *   消えたノートは載せない。載せ直せない件があれば言う(上限・フォルダ)。
+   */
+  'undo-stack-clear': (dispatcher) => {
+    const lids = takeStackUndo();
+    if (lids === null) return;
+    const before = dispatcher.getState().splitLids.length;
+    for (let i = lids.length - 1; i >= 0; i -= 1)
+      dispatcher.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: lids[i]! });
+    const n = dispatcher.getState().splitLids.length - before;
+    dispatcher.dispatch({
+      type: 'OP_NOTICE',
+      message: n > 0 ? `スタックを ${String(n)} 件、元に戻しました` : '戻せるものがありません(ノートがもうありません)',
+    });
+  },
+  /**
    * 🔴 **ノートの種類を変える**(台帳 #1852 I2 / 依頼 157。Gemini 回答 = 推薦 ②)。ノート ⇄ ログだけ。
    *
    * 押すと**確認が先に出る**(画面で何が変わるかを言う ── 本文はそのまま・追記の足し方が変わる・もう一度押せば戻る)。
@@ -12157,7 +12182,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       services,
       fmBody,
       span,
-      board ? '板をコピーしました(Markdown の原文)' : 'ブロックをコピーしました(Markdown の原文)',
+      board ? '付箋をコピーしました(Markdown の原文)' : 'ブロックをコピーしました(Markdown の原文)',
     );
   },
   /**
@@ -12179,7 +12204,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     const lid = ob.lid;
-    placeEditedElsewhereGate(dispatcher, services, lid, '板を置けませんでした', () =>
+    placeEditedElsewhereGate(dispatcher, services, lid, '付箋を置けませんでした', () =>
       dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y }),
     );
   },
@@ -12242,10 +12267,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     void pickPlaceTemplateInApp(root).then((template) => {
       if (template === null) return;
       if (dispatcher.getState().openBody?.lid !== lid) {
-        dispatcher.dispatch({ type: 'OP_NOTICE', message: '別のノートに切り替わったので、板は置いていません' });
+        dispatcher.dispatch({ type: 'OP_NOTICE', message: '別のノートに切り替わったので、付箋は置いていません' });
         return;
       }
-      placeEditedElsewhereGate(dispatcher, services, lid, '板を置けませんでした', () =>
+      placeEditedElsewhereGate(dispatcher, services, lid, '付箋を置けませんでした', () =>
         dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y, template }),
       );
     });
@@ -12266,7 +12291,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const at = line + frontmatterLineCount(ob.body);
     const initial = placeRectOf(ob.body.split('\n')[at] ?? '');
     if (initial === null) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '板が見つかりません(本文を開き直してください)' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '付箋が見つかりません(本文を開き直してください)' });
       return;
     }
     // ⚠ 窓を開いた時点の本文を控える ── reducer の開き行の門は dispatch 時点の本文から行を取り直すので、
@@ -12311,8 +12336,23 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (ob === null) return;
     const lid = ob.lid;
     const at = line + frontmatterLineCount(ob.body);
-    placeEditedElsewhereGate(dispatcher, services, lid, '板を前へ出せませんでした', () =>
+    placeEditedElsewhereGate(dispatcher, services, lid, '付箋を前へ出せませんでした', () =>
       dispatcher.dispatch({ type: 'RAISE_PLACE', lid, line: at }),
+    );
+  },
+  /**
+   * 🔴 **右クリックした板を後ろへ送る**(依頼 118-1)── `raise-place` と対。他の板より後ろ(下)へ回す。
+   * 確認は要らない(重なりの順が変わるだけで、「前へ出す」で戻せる)。
+   */
+  'lower-place': (dispatcher, target, services) => {
+    const line = menuCarriedBlock(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    if (ob === null) return;
+    const lid = ob.lid;
+    const at = line + frontmatterLineCount(ob.body);
+    placeEditedElsewhereGate(dispatcher, services, lid, '付箋を後ろへ送れませんでした', () =>
+      dispatcher.dispatch({ type: 'LOWER_PLACE', lid, line: at }),
     );
   },
   /**
@@ -12592,7 +12632,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   消えても繋がれていた付箋は無傷、もう一度掴めば繋がる(板を消す重さとは違う)。
    * ⚠ 行の座標は `remove-place` と同じ(frontmatter を剥いだ行番号を運び、ここで足す)。
    */
-  'remove-place-line': (dispatcher, target) => {
+  'remove-place-line': (dispatcher, target, services) => {
     const line = menuCarriedBlock(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const st = dispatcher.getState();
@@ -12607,18 +12647,19 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: PLACE_LINE_REMOVE_OPEN_REFUSAL });
       return;
     }
-    dispatcher.dispatch({
-      type: 'REMOVE_PLACE_LINE',
-      lid: ob.lid,
-      line: line + frontmatterLineCount(ob.body),
-    });
+    const lidL = ob.lid;
+    const atL = line + frontmatterLineCount(ob.body);
+    // 🔴 別のタブ・ウィンドウが編集中のノートの線は消さない(依頼 118-4。保存で上書きされる)
+    placeEditedElsewhereGate(dispatcher, services, lidL, '線を消せませんでした', () =>
+      dispatcher.dispatch({ type: 'REMOVE_PLACE_LINE', lid: lidL, line: atL }),
+    );
   },
-  'remove-place': (dispatcher, target, _services, root) => {
+  'remove-place': (dispatcher, target, services, root) => {
     const line = menuCarriedBlock(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}、板の付箋を消してください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}、付箋を消してください` });
       return;
     }
     const ob = st.openBody;
@@ -12646,15 +12687,18 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher,
       () => {
         const now = dispatcher.getState();
-        if (now.phase !== 'ready') return `${phaseBlockReason(now.phase)}、板の付箋を消してください`;
-        if (now.openBody?.lid !== lid) return '別のノートに切り替わったので、板は消していません';
+        if (now.phase !== 'ready') return `${phaseBlockReason(now.phase)}、付箋を消してください`;
+        if (now.openBody?.lid !== lid) return '別のノートに切り替わったので、付箋は消していません';
         // 🔴 確認の間に本文が動いたら書かない(`place-rect` / `place-group` と同じ。別の付箋を消さない)
         if (now.openBody.body !== bodyAtOpen)
           return '確認している間に本文が変わったので、付箋は消していません(もう一度消してください)';
         return null;
       },
       () => {
-        dispatcher.dispatch({ type: 'REMOVE_PLACE', lid, line: line + frontmatterLineCount(bodyAtOpen) });
+        // 🔴 別のタブ・ウィンドウが編集中のノートの付箋は消さない(依頼 118-4。保存で上書きされる)
+        placeEditedElsewhereGate(dispatcher, services, lid, '付箋を消せませんでした', () =>
+          dispatcher.dispatch({ type: 'REMOVE_PLACE', lid, line: line + frontmatterLineCount(bodyAtOpen) }),
+        );
       },
     );
   },
@@ -13074,7 +13118,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const bdayBad = noBday > 0 ? `。${noBday} 件は誕生日の書き方が読めないので、誕生日を書いていません` : '';
     dispatcher.dispatch({
       type: 'OP_NOTICE',
-      message: `連絡先 ${cards.length} 件を書き出しました${cut}(名前・所属・電話・メール・誕生日だけです)${bad}${bdayBad}`,
+      message: `連絡先 ${cards.length} 件を書き出しました${cut}(名前・読み・所属・電話・メール・誕生日だけです)${bad}${bdayBad}`,
     });
   },
   /**
@@ -15021,6 +15065,24 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 2 回目からは何も出ない(もう番号が付いているので、増えるノートが 0 枚になる)。
    * ⚠ `newLids` は**書く群の数だけ**採る(足りないと reducer が何も書かない)。
    */
+  /**
+   * 🔴 **グループの名前を変える**(依頼 83-2。Gemini の回答「推薦どおり」= C)。
+   * ⚠ 名前は聞く(`promptInApp`)── 既定はいまの名前。決めたときに**もう一度**いまの状態から断る理由を見る
+   *   (reducer `RENAME_APP_GROUP`)。空・同じ名前なら何もしない。
+   */
+  'rename-app-group': (dispatcher, target, _services, root) => {
+    const name = target.getAttribute('data-pkc-group') ?? '';
+    if (name === '') return;
+    void promptInApp(root, {
+      title: 'グループの名前を変える',
+      label: `「${name}」に入っているアプリが、みんな新しい名前のグループへ移ります。新しい名前:`,
+      initial: name,
+      okLabel: '名前を変える',
+    }).then((typed) => {
+      if (typed === null) return;
+      dispatcher.dispatch({ type: 'RENAME_APP_GROUP', from: name, to: typed });
+    });
+  },
   'move-app-group-up': (dispatcher, target, services) => moveAppGroup(dispatcher, target, services, -1),
   'move-app-group-down': (dispatcher, target, services) => moveAppGroup(dispatcher, target, services, 1),
   /**
@@ -16682,7 +16744,10 @@ export function bindActions(
       openContextMenu(
         root,
         { x: box.left, y: box.bottom },
-        appGroupMenuActions(hasAppGroupOrder(dispatcher.getState())),
+        appGroupMenuActions(
+          hasAppGroupOrder(dispatcher.getState()),
+          appGroupRenamable(dispatcher.getState(), groupName),
+        ),
         row,
         { 'data-pkc-group': groupName },
       );
@@ -19462,7 +19527,10 @@ export function bindActions(
         openContextMenu(
           root,
           { x: ev.clientX, y: ev.clientY },
-          appGroupMenuActions(hasAppGroupOrder(dispatcher.getState())),
+          appGroupMenuActions(
+          hasAppGroupOrder(dispatcher.getState()),
+          appGroupRenamable(dispatcher.getState(), groupName),
+        ),
           root.ownerDocument.activeElement,
           { 'data-pkc-group': groupName },
         );
@@ -19739,6 +19807,7 @@ export function bindActions(
           rotate: block.rotate,
           rotated: block.rotated,
           front: block.front,
+          back: block.back,
         })),
         /**
          * 🔴 **表の形を変える**(#708 段②)。⚠ 行番号は**この項目にだけ**載せる

@@ -39,6 +39,12 @@ export const CONTACT_KEYS = {
   org: 'org',
   /** 誕生日。⚠ これも単体では連絡先にならない。 */
   birthday: 'birthday',
+  /**
+   * 🔴 **読み**(依頼 145。Gemini の回答「推薦どおり」= 読みを書けるようにして、あればそれで並べる)。
+   * 例: `yomi: やまだ たろう`。⚠ 漢字の名前は文字の並びでは五十音順にならない ── 読みを書いた人だけ、読みで並ぶ。
+   * 書かない人は題名で並ぶ(ひらがな・カタカナの違いは並びでは同じ字 ── `compareTitles`)。単体では連絡先にならない。
+   */
+  yomi: 'yomi',
 } as const;
 
 export interface ContactCard {
@@ -67,6 +73,8 @@ export interface ContactCard {
    *   `buildVcf` が `BDAY:` を書けず、**往復すると誕生日が消えていた**。
    */
   readonly birthday: string;
+  /** 🔴 読み(依頼 145)。書いていなければ空文字。並べるときと探すときに使う。省略 = 書いていない。 */
+  readonly yomi?: string;
   /**
    * 🔴 **長すぎるので外した宛先があるか**(#536 ③)。
    *
@@ -273,7 +281,10 @@ export function contactOf(lid: string, title: string, body: string): ContactCard
    */
   const orgParts = values(meta[CONTACT_KEYS.org]);
   const birthday = values(meta[CONTACT_KEYS.birthday])[0] ?? '';
-  return { lid, name: title, org: orgParts.join(' '), orgParts, tels, emails, birthday, overlong };
+  // ⚠ 渡る量の門は宛先と同じ(長すぎる落書きは読みとして持たない ── 切らずに外す)
+  const yomiRaw = values(meta[CONTACT_KEYS.yomi])[0] ?? '';
+  const yomi = yomiRaw.length <= CONTACT_LIMITS.wire ? yomiRaw : '';
+  return { lid, name: title, org: orgParts.join(' '), orgParts, tels, emails, birthday, yomi, overlong };
 }
 
 /**
@@ -284,7 +295,7 @@ export function contactOf(lid: string, title: string, body: string): ContactCard
 export function matchContact(card: ContactCard, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (q === '') return true;
-  const hay = [card.name, card.org, ...card.tels, ...card.emails].join(' ').toLowerCase();
+  const hay = [card.name, card.yomi ?? '', card.org, ...card.tels, ...card.emails].join(' ').toLowerCase();
   if (hay.includes(q)) return true;
   // 🔴 電話は区切りと全角を無視して探す(#1087)── `09011112222` でも `090-1111` でも `０９０` でも当たる
   // ⚠ 数字の比べ方は、**探す字が数字と区切りだけのとき**に使う。名前と混ぜた「山田 090」で
@@ -311,13 +322,15 @@ export function matchContact(card: ContactCard, query: string): boolean {
  * ⚠ **`localeCompare` を使わない。** 1 稿目は使っており、`山田` と `青木` が
  *   一覧と**逆の順**になった ── user から見て「同じ題名順なのに、面によって
  *   並びが違う」という**理由の分からない差**である(CLAUDE.md §7)。
- * ⚠ どちらも**五十音順にはならない**(読みを持っていないので原理的に無理)。
- *   🔑 揃っていることのほうが、どちらが「正しい順」かより効く。
+ * ⚠ 読みを書いていない漢字の名前は**五十音順にはならない**(読みを持っていないので原理的に無理)。
+ *   🔑 揃っていることのほうが、どちらが「正しい順」かより効く。読みを書いた人(`yomi:`)だけ読みで並ぶ(依頼 145)。
  */
 export function sortContacts(cards: readonly ContactCard[]): ContactCard[] {
   // 🔑 一覧の題名順と同じ比べ方(`compareTitles`)── 面によって順が違わない(#1087)
+  // 🔴 読みを書いた人は読みで並ぶ(依頼 145)── 書かない人は題名のまま。両方が混ざる一覧でも同じ 1 本の比べ方で並べる
+  const keyOf = (c: ContactCard): string => (c.yomi !== undefined && c.yomi.trim() !== '' ? c.yomi : c.name);
   return [...cards].sort((a, b) => {
-    const byName = compareTitles(a.name, b.name);
+    const byName = compareTitles(keyOf(a), keyOf(b));
     if (byName !== 0) return byName;
     return a.lid < b.lid ? -1 : a.lid > b.lid ? 1 : 0;
   });
