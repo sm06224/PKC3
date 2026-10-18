@@ -141,6 +141,11 @@ const UNRESOLVED: readonly string[] = [
    */
   'undo-stack-clear',
   /**
+   * ⚠ **2026-10-18(台帳 #1852 束 R1)で 1 件増えた** ── 章・見出しへ飛んだ直後の「元の位置へ戻る」(`undo-jump`)。
+   * 🔑 `undo-move` と同じ器(`paintStatusUndo` が `data-pkc-action` を実行時に書き換える)ので、静的な字が source に無い。
+   */
+  'undo-jump',
+  /**
    * ⚠ **2026-10-18(台帳 #1852 P1 / 依頼 362)で 1 件増えた** ── AI の書き足しの直後の「書き足しを元に戻す」(`undo-agent-append`)。
    * 🔑 `undo-move` と同じ器(`paintStatusUndo` が `data-pkc-action` を実行時に書き換える)ので、静的な字が source に無い。
    */
