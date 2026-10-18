@@ -518,6 +518,12 @@ export function buildStorageProfile(): HTMLElement {
   note.hidden = true;
   box.append(note);
 
+  // 🔴 一覧の下に 1 行(依頼 59-1)── 重いノートを消しても容量が減らない理由。一覧が空のときは畳む
+  const trash = document.createElement('p');
+  trash.setAttribute('data-pkc-field', 'storage-profile-trash');
+  trash.hidden = true;
+  box.append(trash);
+
   /**
    * 🔴 **ブラウザが言う本当の使用量**(#971 段②)。
    *

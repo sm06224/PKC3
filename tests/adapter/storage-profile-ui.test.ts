@@ -49,6 +49,7 @@ function mount(profile?: () => Promise<StorageProfileResult>) {
     summary: () =>
       root.querySelector('[data-pkc-field="storage-profile-summary"]')?.textContent ?? '',
     shared: () => root.querySelector<HTMLElement>('[data-pkc-field="storage-profile-shared"]')!,
+    trash: () => root.querySelector<HTMLElement>('[data-pkc-field="storage-profile-trash"]')!,
   };
 }
 
@@ -100,6 +101,24 @@ describe('押したとき', () => {
     m.run.click();
     await vi0();
     expect(m.summary()).toContain('使われていない添付を消す');
+  });
+
+  /** 🔴 依頼 59-1 ── 一覧の下に「ゴミ箱に残っている間は容量は減らない」を 1 行。押す前は畳んでおく。 */
+  it('🔴 一覧の下に、ゴミ箱に残っている間は容量が減らない理由が出る(押す前・一覧が空のときは出ない)', async () => {
+    const m = mount(async () => result());
+    expect(m.trash().hidden, '押す前から出ている').toBe(true);
+    m.run.click();
+    await vi0();
+    expect(m.trash().hidden).toBe(false);
+    expect(m.trash().textContent).toContain('ゴミ箱に残っている間は容量は減りません');
+    // 一覧が行を持つ 'ul' の後ろに居る(「一覧の下」)
+    const list = m.root.querySelector('[data-pkc-field="storage-profile-list"]')!;
+    expect(list.compareDocumentPosition(m.trash()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 対照群:重いノートが無ければ畳む
+    const empty = mount(async () => result({ rows: [], totalAssetBytes: 0 }));
+    empty.run.click();
+    await vi0();
+    expect(empty.trash().hidden).toBe(true);
   });
 
   it('⚠ 共有が無ければ但し書きを出さない', async () => {

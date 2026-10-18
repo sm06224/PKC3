@@ -14,6 +14,7 @@ import {
   profileLines,
   profileSummary,
   sharedNote,
+  trashNote,
   type StorageProfileResult,
 } from '../../src/features/storage/storage-profile';
 
@@ -153,6 +154,16 @@ describe('合計の言い方', () => {
     const shared = profileLines(result([row('a', 100, 0, 1)]), metas).find((l) => l.shared)!;
     expect(profileLineText(shared), '前提: 行に「(共有)」が付いていない').toContain('(共有)');
     expect(n).toContain('「(共有)」');
+  });
+
+  /** 🔴 依頼 59-1(Gemini 裁定 = 推薦 A)── 重いノートを消しても容量が減らない理由を、一覧の下で言う。 */
+  it('🔴 一覧が出ているときだけ、ゴミ箱に残っている間は容量が減らないことを言う', () => {
+    const shown = trashNote(profileLines(result([row('a', 100)]), metas));
+    expect(shown).toContain('ゴミ箱に残っている間は容量は減りません');
+    expect(shown, '次にすること(空にする)まで言う').toContain('ゴミ箱を空にすると');
+    expect(shown).toContain('履歴も消え');
+    // 対照群:一覧が空なら要らない注意書きを出さない
+    expect(trashNote([])).toBe('');
   });
 
   it('🔴 一覧が上位だけであることを言う(重いノートはこれで全部、と読ませない)', () => {

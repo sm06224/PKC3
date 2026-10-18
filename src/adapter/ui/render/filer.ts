@@ -357,6 +357,16 @@ export class FilerRenderer {
       label.textContent = `${hit.total} 件${more}`;
     }
     bar.append(label);
+    /**
+     * 🔴 **本文に書いたのに読めなかった条件を言う**(依頼 85-9)。⚠ 全部読めなかったときは上の字が
+     * 「条件を選んでください」になるので、書いたのに無いことにならないよう、**別の 1 行**で理由を添える。
+     */
+    if (hit !== null && !hit.failed && (hit.unreadable ?? 0) > 0) {
+      const unread = document.createElement('span');
+      unread.setAttribute('data-pkc-field', 'smart-unread');
+      unread.textContent = `本文の条件のうち ${String(hit.unreadable)} 個が読めていません(書き方はマニュアルの「条件は本文に書いてあります」)`;
+      bar.append(unread);
+    }
 
     // 🔴 条件のタグ ── **1 つずつ外せる**(置けるなら外せる)
     for (const tag of hit?.spec.tags ?? []) {

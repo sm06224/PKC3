@@ -266,6 +266,11 @@ export interface SmartHitState {
    *   判定(`needsRescan`)にも要る。
    */
   readonly spec: SmartSpec;
+  /**
+   * 🔴 **本文に書いてあるのに読めなかった条件の数**(依頼 85-9)。0 / 省略 = 全部読めた。
+   * ⚠ 帯が「本文の条件のうち N 個が読めていません」と言うために持つ(黙って捨てない)。
+   */
+  readonly unreadable?: number;
 }
 
 export type AppPhase = 'initializing' | 'ready' | 'editing' | 'error';
@@ -3533,6 +3538,8 @@ export type UserAction =
       lids: readonly string[];
       total: number;
       spec: SmartSpec;
+      /** 本文に書いてあるのに読めなかった条件の数(依頼 85-9)。省略 = 0。 */
+      unreadable?: number;
     }
   | { type: 'SMART_SCAN_FAILED'; lid: string }
   /**
@@ -10430,6 +10437,7 @@ function reduceCore(
         total: action.total,
         failed: false,
         spec: action.spec,
+        ...(action.unreadable !== undefined && action.unreadable > 0 ? { unreadable: action.unreadable } : {}),
       });
       return { state: { ...state, smartHits: next }, events: [] };
     }

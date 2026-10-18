@@ -78,5 +78,5 @@ export function folderOverview(
 export const overviewSummary = (o: Pick<FolderOverview, 'notes' | 'folders'>): string =>
   `この中: ${archetypeLabel('text')} ${o.notes} 件 / ${archetypeLabel('folder')} ${o.folders} 件`;
 
-/** 上限で切れたときの 1 行。 */
-export const overviewMore = (more: number): string => `ほか ${more} 件は左のペインで`;
+/** 上限で切れたときの 1 行(押せるボタンの字。押すと左のペインがこのフォルダの中へ移る)。 */
+export const overviewMore = (more: number): string => `ほか ${more} 件を左のペインで開く`;

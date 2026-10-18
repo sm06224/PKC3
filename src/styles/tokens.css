@@ -443,6 +443,12 @@
    *   (地の対比・文字の対比とも実測値は段 G の報告に載せた)。
    */
   --pkc-mark-bg: color-mix(in oklab, var(--fg) 18%, var(--surface));
+  /**
+   * 🔴 **印を付けた行の中の薄い字**(依頼 245)。`--muted` を行の字(`--fg`)へ 6 割寄せる。
+   * ⚠ 地(`--pkc-mark-bg`)が `--fg` を 18% 混ぜて暗く(明るく)なる分、`--muted` のままでは対比が足りない
+   *   (3.3〜4.3)。9 テーマ全部で 4.5 以上を `tests/adapter/muted-contrast-css.test.ts` が計算で見る。
+   */
+  --pkc-muted-on-mark: color-mix(in oklab, var(--fg) 60%, var(--muted));
 
   /**
    * 🔴 **見出しの左端の帯の色**(user 提案 2026-08-27「左端に幅の狭いインデックス

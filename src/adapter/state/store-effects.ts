@@ -56,6 +56,7 @@ import { splitRestoredEdges } from '@features/relation/tree';
 import {
   EMPTY_SMART,
   isSmartEmpty,
+  countUnreadSmartConds,
   readSmartSpec,
   needsRescan,
   smartWriteError,
@@ -1822,6 +1823,7 @@ export function connectStoreEffects(
                 lids: [],
                 total: 0,
                 spec: EMPTY_SMART,
+                unreadable: countUnreadSmartConds(body),
               });
               return;
             }
@@ -1839,6 +1841,7 @@ export function connectStoreEffects(
               lids: out.lids,
               total: out.total,
               spec,
+              unreadable: countUnreadSmartConds(body),
             });
           } catch {
             if (!disposed) dispatcher.dispatch({ type: 'SMART_SCAN_FAILED', lid });

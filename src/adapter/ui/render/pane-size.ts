@@ -49,7 +49,20 @@ export class PaneSizeStore {
   }
 
   set(id: SizedPaneId, px: number): PaneSizes {
-    const next: PaneSizes = { ...this.get(), [id]: roundPaneSize(id, px) };
+    return this.write({ ...this.get(), [id]: roundPaneSize(id, px) });
+  }
+
+  /**
+   * 🔴 **覚えた大きさを忘れる**(依頼 311。境目のダブルクリック)── 触っていない面と同じ「自動の幅」へ戻る。
+   * ⚠ 値を `null` にして残さない(キーごと消す ── 読む側は「無い」を既定として扱う)。
+   */
+  reset(id: SizedPaneId): PaneSizes {
+    const next: PaneSizes = { ...this.get() };
+    delete next[id];
+    return this.write(next);
+  }
+
+  private write(next: PaneSizes): PaneSizes {
     this.fallback = next;
     this.saveFailed = false;
     try {

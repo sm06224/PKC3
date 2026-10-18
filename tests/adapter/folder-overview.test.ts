@@ -176,9 +176,12 @@ describe('フォルダの概要(#1222)', () => {
     detail.render(opened('F', '', booted(metas, rels)));
     await settle();
     expect(rowLids(root)).toHaveLength(FOLDER_OVERVIEW_LIMIT);
-    expect(overviewOf(root)!.querySelector('[data-pkc-field="overview-more"]')!.textContent).toBe(
-      'ほか 7 件は左のペインで',
-    );
+    const moreBtn = overviewOf(root)!.querySelector('[data-pkc-field="overview-more"]')!;
+    expect(moreBtn.textContent).toBe('ほか 7 件を左のペインで開く');
+    // 依頼 85-6:押せる(パンくずと同じ enter-folder が、この概要のフォルダを運ぶ)
+    expect(moreBtn.tagName).toBe('BUTTON');
+    expect(moreBtn.getAttribute('data-pkc-action')).toBe('enter-folder');
+    expect(moreBtn.getAttribute('data-pkc-entry')).toBe('F');
     expect(overviewOf(root)!.querySelector('[data-pkc-field="overview-summary"]')!.textContent).toBe(
       `この中: ノート ${FOLDER_OVERVIEW_LIMIT + 7} 件 / フォルダ 0 件`,
     );

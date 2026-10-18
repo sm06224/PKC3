@@ -354,12 +354,82 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
     expect(settingsPlanNote(empty)).toContain('変わるものはありません');
   });
 
-  /** 🔴 #1087 A2 ── 書き出しは標準のままの項目を入れない。読み込んでも変わらないことを下見が言う。 */
-  it('🔴 下見は、書き出した側で標準のままだった項目はこちらの設定が残ると言う', () => {
+  /** 🔴 #1087 A2 / 依頼 207 ── 古い版の file(標準の項目を持たない)は、こちらの設定が残ると下見が言う。 */
+  it('🔴 下見は、標準の項目を持たないファイルでは「こちらの設定が残る」と言う', () => {
     const note = settingsPlanNote(planSettingsImport(file([{ key: 'pkc3.theme', value: 'dark' }]), () => 'light'));
-    expect(note).toContain('書き出した側で標準のままだった項目は、こちらの設定がそのまま残ります');
+    expect(note).toContain('書き出した側で標準のままだった項目が入っていません');
+    expect(note).toContain('こちらの設定がそのまま残ります');
     // 読めなかった回(error)には添えない
     expect(settingsPlanNote(planSettingsImport('{', () => null))).not.toContain('そのまま残ります');
+  });
+
+  /** 🔴 依頼 207(Gemini 裁定 = 推薦 A)── 標準のままの項目も運び、取り込んだ側も標準に戻す。 */
+  describe('標準のままの項目も運ぶ(依頼 207)', () => {
+    it('書き出し: 設定していない移せる鍵は、全部 defaults に載る(設定している鍵は載らない)', () => {
+      const disk: Record<string, string> = { 'pkc3.theme': 'dark', 'pkc3.text-scale': '' };
+      const f = buildSettingsFile((k) => disk[k] ?? null);
+      expect(f.defaults).toContain('pkc3.text-scale'); // 空 = 標準
+      expect(f.defaults).toContain('pkc3.keymap'); // 無い = 標準
+      expect(f.defaults).not.toContain('pkc3.theme');
+      // 入れる物と標準の物で、移せる鍵の全部を過不足なく分けている
+      expect(new Set([...f.entries.map((e) => e.key), ...(f.defaults ?? [])])).toEqual(
+        new Set(PORTABLE_KEYS.map((p) => p.key)),
+      );
+    });
+
+    it('書き出し: 長すぎて落とした値は「標準」に数えない(取り込み先を標準に戻さない)', () => {
+      const disk: Record<string, string> = { 'pkc3.theme': 'x'.repeat(MAX_SETTING_CHARS + 1) };
+      const f = buildSettingsFile((k) => disk[k] ?? null);
+      expect(f.entries.map((e) => e.key)).not.toContain('pkc3.theme');
+      expect(f.defaults).not.toContain('pkc3.theme');
+    });
+
+    const withDefaults = (entries: { key: string; value: string }[], defaults: unknown): string =>
+      JSON.stringify({ kind: SETTINGS_FILE_KIND, version: 1, entries, defaults });
+
+    it('取り込み: こちらに値が在る項目だけ「標準に戻します」になる(元から標準なら変わらない)', () => {
+      const disk: Record<string, string> = { 'pkc3.text-scale': 'xlarge' };
+      const plan = planSettingsImport(
+        withDefaults([], ['pkc3.text-scale', 'pkc3.theme']),
+        (k) => disk[k] ?? null,
+      );
+      expect(plan.changes).toEqual([{ key: 'pkc3.text-scale', label: '文字の大きさ', from: 'xlarge', to: null }]);
+      expect(canApplySettings(plan), '標準に戻すだけでも押せる').toBe(true);
+      expect(settingsChangeText(plan.changes[0]!)).toBe('文字の大きさ を標準に戻します');
+      expect(settingsPlanNote(plan)).not.toContain('入っていません');
+    });
+
+    it('取り込み: entries に在る鍵は defaults より優先する / 移せない鍵・知らない鍵は消さない', () => {
+      const disk: Record<string, string> = {
+        'pkc3.theme': 'light',
+        'pkc3.flags': '{"a":1}',
+        'pkc3.nobody': 'x',
+      };
+      const plan = planSettingsImport(
+        withDefaults([{ key: 'pkc3.theme', value: 'dark' }], ['pkc3.theme', 'pkc3.flags', 'pkc3.nobody', 5]),
+        (k) => disk[k] ?? null,
+      );
+      expect(plan.changes).toEqual([{ key: 'pkc3.theme', label: '見た目', from: 'light', to: 'dark' }]);
+    });
+
+    it('取り込み: 割り当てを標準に戻すときは、置き換わる件数を言う', () => {
+      const mine = JSON.stringify({ 'create-entry': ['Alt+M'], 'delete-entry': ['Alt+D'] });
+      const plan = planSettingsImport(withDefaults([], ['pkc3.keymap']), (k) => (k === 'pkc3.keymap' ? mine : null));
+      expect(plan.keymapReplace).toEqual({ from: 2, to: 0 });
+    });
+
+    it('取り込み: defaults が配列でないファイルは、古い版と同じ扱い(落ちない)', () => {
+      const plan = planSettingsImport(withDefaults([], 'pkc3.theme'), () => 'dark');
+      expect(plan.defaultsIncluded).toBe(false);
+      expect(plan.changes).toEqual([]);
+    });
+
+    it('書いて読む: 会社(標準)→家(特大)で、取り込むと家も標準に戻る', () => {
+      const office = buildSettingsFile(() => null);
+      const home: Record<string, string> = { 'pkc3.text-scale': 'xlarge' };
+      const plan = planSettingsImport(JSON.stringify(office), (k) => home[k] ?? null);
+      expect(plan.changes.map((c) => [c.key, c.to])).toEqual([['pkc3.text-scale', null]]);
+    });
   });
 
   /** 🔴 #1087 B3 ── 割り当ては全体が置き換わる。件数で言う(動きは変えない)。 */

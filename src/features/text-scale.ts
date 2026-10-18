@@ -57,6 +57,14 @@ export const TEXT_SCALES: readonly TextScaleSpec[] = [
 
 export const DEFAULT_TEXT_SCALE: TextScale = 'standard';
 
+/**
+ * 🔴 **ノートの題名の大きさは、本文と同じ割合で動く**(依頼 348-A。Gemini 裁定)。
+ * 標準(本文 13px)で題名 15px の比を `app.css`(`detail-title` / `editor-title`)の `calc(… * 15 / 13)` が持つ。
+ * ⚠ 2 つの数字は `tests/features/text-scale.test.ts` が CSS と突き合わせる(片方だけ動かさない)。
+ */
+export const TITLE_BASE_FONT_PX = 13;
+export const TITLE_FONT_PX = 15;
+
 export function isTextScale(v: unknown): v is TextScale {
   return typeof v === 'string' && TEXT_SCALES.some((s) => s.id === v);
 }

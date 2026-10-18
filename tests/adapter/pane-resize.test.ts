@@ -417,3 +417,70 @@ describe('🔴 測れない回は何もしない(#497)', () => {
     expect(appPaneSizes.get().sidebar, '配線そのものが死んでいる').toBe(300);
   });
 });
+
+/**
+ * 🔴 依頼 311(Gemini 裁定 = 推薦 A)── 境目をダブルクリックすると、広げた幅が元の自動の幅に戻る。
+ *
+ * ⚠ ブラウザの `dblclick` では書けない ── 1 回目の押しが畳む(`toggle-pane`)ので、2 回目の押しの時点で境目が動いている。
+ *   だから「掴まない押しの直後(400ms 以内・8px 以内)の 2 回目の押し」を見分ける。見るのは
+ *   ① 戻る(覚えた幅が消え、画面の変数も消え、畳まれていない)② 2 回目の click が畳みを起こさない
+ *   ③ 間が空いた / 離れた / 掴んだ直後の押しでは戻らない(対照群)。
+ */
+describe('境目のダブルクリックで元の幅へ戻る(依頼 311)', () => {
+  const press = (g: HTMLElement, x = 0): void => {
+    const opts = { bubbles: true, pointerId: 1, button: 0 };
+    g.dispatchEvent(new PointerEvent('pointerdown', { ...opts, clientX: x, clientY: 0 }));
+    document.dispatchEvent(new PointerEvent('pointerup', { ...opts, clientX: x, clientY: 0 }));
+    g.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  };
+  const widen = (root: HTMLElement): void => {
+    measure(root.querySelector<HTMLElement>('[data-pkc-region="sidebar"]')!, { width: 240 });
+    drag(grip(root, 'sidebar'), 100, 0);
+    // 前提:広げた幅が覚えられ、画面にも載っている(戻した後の「消えた」が空振りでないように)
+    expect(appPaneSizes.get().sidebar, '前提が崩れている(広げた幅が覚えられていない)').toBeDefined();
+    expect(shellOf(root).style.getPropertyValue('--pkc-pane-sidebar')).not.toBe('');
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('続けて 2 回押すと、覚えた幅と画面の幅が消え、畳まれもしない', () => {
+    const root = mounted();
+    widen(root);
+    press(grip(root, 'sidebar'));
+    expect(shellOf(root).getAttribute('data-pkc-hidden-panes'), '1 回目の押しは畳む').toBe('sidebar');
+    press(grip(root, 'sidebar'));
+    expect(appPaneSizes.get().sidebar, '覚えた幅が残っている').toBeUndefined();
+    expect(shellOf(root).style.getPropertyValue('--pkc-pane-sidebar'), '画面の幅が残っている').toBe('');
+    expect(shellOf(root).hasAttribute('data-pkc-hidden-panes'), '畳まれたまま(2 回目の click を捨てていない)').toBe(false);
+  });
+
+  it('対照群:間が空いた 2 回目の押しでは戻らない(畳む・開くの 1 往復になるだけ)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-18T00:00:00Z'));
+    const root = mounted();
+    widen(root);
+    press(grip(root, 'sidebar'));
+    vi.setSystemTime(new Date('2026-10-18T00:00:01Z')); // 1 秒後
+    press(grip(root, 'sidebar'));
+    expect(appPaneSizes.get().sidebar, '間が空いたのに幅を忘れた').toBeDefined();
+    expect(shellOf(root).hasAttribute('data-pkc-hidden-panes'), '畳む → 開く の往復で元に戻っているはず').toBe(false);
+  });
+
+  it('対照群:離れた所の 2 回目の押しでは戻らない', () => {
+    const root = mounted();
+    widen(root);
+    press(grip(root, 'sidebar'), 0);
+    press(grip(root, 'sidebar'), 40);
+    expect(appPaneSizes.get().sidebar).toBeDefined();
+  });
+
+  it('対照群:掴んで動かした直後の押しでは戻らない(掴み直しただけで幅が戻ってはいけない)', () => {
+    const root = mounted();
+    widen(root);
+    const kept = appPaneSizes.get().sidebar;
+    press(grip(root, 'sidebar'));
+    expect(appPaneSizes.get().sidebar).toBe(kept);
+  });
+});
