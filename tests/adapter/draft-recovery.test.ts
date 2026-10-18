@@ -812,7 +812,10 @@ describe('main.ts の配線(main.ts はどの test からも実行されない �
     expect(main).toMatch(/connectDraftWriter\(\{/);
     expect(main).toMatch(/createDraftOffer\(\{/);
     // 書き手 ↔ 聞く側:答えていない控えは上書きしない / 編集の終わり(保存か取り消しか)を伝える
-    expect(main).toMatch(/isPending:\s*\(lid\)\s*=>\s*draftOfferRef\?\.has\(lid\)\s*===\s*true/);
+    // 依頼 330:追記欄の控えも別に数えるので、第 2 引数(append)を渡す
+    expect(main).toMatch(
+      /isPending:\s*\(lid,\s*append\)\s*=>\s*draftOfferRef\?\.has\(lid,\s*append\s*===\s*true\)\s*===\s*true/,
+    );
     expect(main).toMatch(/onEnded:\s*\(lid,\s*committed\)\s*=>\s*draftOfferRef\?\.editEnded\(lid,\s*committed\)/);
     expect(main).toMatch(/enterEdit:\s*\(body\)\s*=>\s*startEditRestoring\(dispatcher,\s*services,\s*body\)/);
     expect(main).toMatch(/restoreDraft:\s*\(\)\s*=>\s*draftOfferRef\?\.restore\(\)/);

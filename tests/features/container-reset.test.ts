@@ -7,6 +7,7 @@
  * ② 🔴 **失敗を飲み込まない** ── 消せなかった数を必ず外へ出す
  *   (「まっさらになりました」と嘘をつかせない)
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   RESET_PASSPHRASE,
@@ -15,6 +16,8 @@ import {
   resetExplainMessage,
   resetPassphraseLabel,
   resetPassphraseOk,
+  WIPED_WAIT_TEXT,
+  reloadAfterWipe,
   wipedElsewhere,
   type ContainerResetPorts,
 } from '../../src/features/storage/container-reset';
@@ -297,5 +300,71 @@ describe('別のタブが捨てたとき(#986 段③)', () => {
     const p = wipedElsewhere(false);
     expect(p.reloadNow, '失う字が無いのに聞いている').toBe(true);
     expect(p.ask).toBeNull();
+  });
+});
+
+/**
+ * 🔴 依頼 360(台帳 #1852 束 M1):ほかのタブは、本体のタブが戻るまで待ってから読み込み直す。
+ * 直す前は聞いた瞬間に読み込み直し、まだ結果を表示している途中の本体と話せず「起動に失敗しました」になった。
+ */
+describe('捨てたと聞いたあとの読み込み直し(依頼 360)', () => {
+  function rig(follower: boolean) {
+    const said: string[] = [];
+    let reloads = 0;
+    let back: (() => void) | null = null;
+    let unsub = 0;
+    const result = reloadAfterWipe({
+      follower,
+      onMainBack: (fn) => {
+        back = fn;
+        return () => {
+          unsub += 1;
+        };
+      },
+      say: (t) => said.push(t),
+      reload: () => {
+        reloads += 1;
+      },
+    });
+    return { result, said, reloads: () => reloads, fire: () => back?.(), unsub: () => unsub, hasListener: () => back !== null };
+  }
+
+  it('本体でないタブは、すぐには読み込み直さず「本体のタブで作業中です」と言い、本体が戻ったら 1 度だけ読み込み直す', () => {
+    const r = rig(true);
+    expect(r.result).toBe('waiting');
+    expect(r.reloads(), '本体が戻る前に読み込み直した').toBe(0);
+    expect(r.said).toEqual([WIPED_WAIT_TEXT]);
+    expect(WIPED_WAIT_TEXT).toContain('本体のタブで作業中です');
+    r.fire();
+    r.fire(); // 名乗りが重なっても 1 度だけ
+    expect(r.reloads()).toBe(1);
+    expect(r.unsub(), '待ちを解いていない').toBe(1);
+  });
+
+  it('対照群:本体の役を持つタブはこれまでどおり、すぐ読み込み直す(待たない・何も言わない)', () => {
+    const r = rig(false);
+    expect(r.result).toBe('reloaded');
+    expect(r.reloads()).toBe(1);
+    expect(r.said).toEqual([]);
+    expect(r.hasListener(), '待つ必要が無いのに待ちを張った').toBe(false);
+  });
+});
+
+describe('main.ts の配線(依頼 360 ── 原文で pin する。弱いと自覚して使う)', () => {
+  const main = readFileSync('src/main.ts', 'utf-8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+  it('捨てたと聞いたら reloadAfterWipe を通る(直接 location.reload しない)/ 待つ間に昇格したら読み込み直す', () => {
+    const i = main.indexOf('onContainerWiped = (): void => {');
+    expect(i, 'onContainerWiped を引けていない').toBeGreaterThan(0);
+    const body = main.slice(i, main.indexOf('const bootTheme', i));
+    expect(body.length, '範囲の切り出しが広すぎる').toBeLessThan(2500);
+    expect(body).toContain('reloadAfterWipe({');
+    expect(body).toMatch(/follower: conn !== null && sync === conn/);
+    expect(body).toMatch(/conn\.onHolderBack\(fn\)/);
+    // 聞く 2 つの枝(編集していない / 「読み込み直す」を選んだ)が、どちらも待つ口を通る
+    expect((body.match(/reloadWhenMainBack\(\)/g) ?? []).length).toBe(2);
+    expect(body, '直接 reload している枝が残っている').not.toMatch(/location\.reload\(\);\s*return;/);
+    expect(main).toMatch(/if \(promotedHost && wipedWaiting\) \{\s*location\.reload\(\);\s*return;\s*\}/);
   });
 });

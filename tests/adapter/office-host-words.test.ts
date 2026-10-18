@@ -64,3 +64,29 @@ describe('O3/O4: 窓の起動と見張り', () => {
     expect(branch, '上限(180 秒)が無い').toContain('lateTries >= 29');
   });
 });
+
+/**
+ * 🔴 依頼 95-4(台帳 #1852 束 M1):保存したのに PKC3 へ渡せなかったことを、見ているこの窓にも出す。
+ * 直す前は PKC3 のタブにだけ出て、保存した内容がこの窓にしか無いことに、窓を見ている user が気づけなかった。
+ * (原文を読む検査 ── 実際に出るかは smoke の領分。守っているのは「渡せなかった枝がこの窓の帯を呼ぶ」「事故の帯を覆わない」)
+ */
+describe('保存を PKC3 へ渡せなかったとき(依頼 95-4)', () => {
+  it('🔴 渡せなかった枝が、PKC3 への知らせ(save-failed)に加えて、この窓の帯を出す', () => {
+    const at = html.indexOf("say('save-failed',");
+    expect(at, 'save-failed の枝が無い').toBeGreaterThan(0);
+    const branch = html.slice(at, at + 400);
+    expect(branch, 'この窓に帯を出していない').toContain('showHandoffFailed(');
+  });
+
+  it('帯の字は「PKC3 へ渡せませんでした」+「この Office のウィンドウにだけある」+ 次の一手。事故の帯が出ている間は重ねない', () => {
+    const start = html.indexOf('function showHandoffFailed(reason)');
+    expect(start, 'showHandoffFailed が無い').toBeGreaterThan(0);
+    const fn = html.slice(start, html.indexOf('function showRestartBand', start));
+    expect(fn).toContain('PKC3 へ渡せませんでした。保存した内容は、この Office のウィンドウにだけあります');
+    expect(fn, '次の一手が無い').toContain('別の名前で書き出す');
+    expect(fn, '事故の帯の上に重ねている').toContain('if (dead || degraded) return;');
+    expect(fn, '閉じる口が無い').toContain("close.textContent = '閉じる'");
+    // 帯の器が文書に在る(無いと getElementById が null で投げる)
+    expect(html).toContain('<div id="handoff" role="alert" hidden></div>');
+  });
+});

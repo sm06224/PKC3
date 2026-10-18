@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { launchTile, EXTERNAL_WINDOW_FEATURES } from '../../src/adapter/ui/launch-tile';
+import { launchTile, openAppWindowEarly, EXTERNAL_WINDOW_FEATURES } from '../../src/adapter/ui/launch-tile';
 import { LAUNCHER_APP_SANDBOX } from '../../src/features/launcher/app-shell';
 import { officeTile, withBuiltinTiles, type LauncherTile } from '../../src/features/launcher/tiles';
 import { isViewMode } from '../../src/adapter/state/app-state';
@@ -678,5 +678,60 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
     ).toMatch(
       /openTileAs: \(lid, target\) => \{\s*if \(isAppOpenTarget\(target\)\) launchLauncherTile\(lid, target\);\s*\},/,
     );
+  });
+});
+
+/**
+ * 🔴 依頼 243(台帳 #1852 束 M1):添付の詳細の「アプリを開く」は、本文を読む `await` の**前**に空の窓を開ける。
+ * Safari は「押した直後」でない窓の開き方を止めることがあるので、読んだ後に開くと何も開かず案内だけが出る恐れがあった。
+ */
+describe('先に空のウィンドウを開ける(詳細の「アプリを開く」── 依頼 243)', () => {
+  const MAIN = readFileSync('src/main.ts', 'utf8')
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join('\n');
+
+  it('普通の起動は、空の窓(url が空)を設定どおりの大きさで先に開ける', () => {
+    const calls: Array<{ url: string; features: string }> = [];
+    const win = {} as Window;
+    const got = openAppWindowEarly(
+      (url, features) => {
+        calls.push({ url, features });
+        return win;
+      },
+      DEFAULT_APP_OPEN_TARGET,
+      {},
+    );
+    expect(got).toEqual({ tried: true, win });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url, '中身を載せた URL ではなく、空の窓を開ける').toBe('');
+  });
+
+  it('その 1 回だけの出し先(右クリック)は設定より優先する。塞がれたら null を返す(開き直さない)', () => {
+    const features: string[] = [];
+    openAppWindowEarly((_u, f) => (features.push(f), null), 'tab', { openTarget: 'window' });
+    const plain: string[] = [];
+    const blocked = openAppWindowEarly((_u, f) => (plain.push(f), null), 'tab', {});
+    expect(blocked).toEqual({ tried: true, win: null });
+    expect(features[0], '右クリックで選んだ出し先が効いていない').not.toBe(plain[0]);
+  });
+
+  it('🔴 対照群:確認を挟む起動(素のまま / 目次を見せて)は先に開けない(確認のダイアログが隠れる)', () => {
+    let opened = 0;
+    const open = (): Window | null => (opened++, null);
+    expect(openAppWindowEarly(open, DEFAULT_APP_OPEN_TARGET, { sameOrigin: true })).toEqual({ tried: false });
+    expect(openAppWindowEarly(open, DEFAULT_APP_OPEN_TARGET, { extension: true })).toEqual({ tried: false });
+    expect(opened, '確認の前に窓を開けた').toBe(0);
+  });
+
+  it('main.ts:launchAsset は本文を読む await より前に先に開け、読めなかった回は閉じる / launchTile の open は先に開けた窓を返す', () => {
+    const i = MAIN.indexOf('launchAsset: (lid, launchOpts) => {');
+    expect(i, 'launchAsset を引けていない').toBeGreaterThan(0);
+    const body = MAIN.slice(i, MAIN.indexOf("op: 'getBody'", i));
+    expect(body, 'getBody の前に openAppWindowEarly が無い').toContain('openAppWindowEarly(');
+    const rest = MAIN.slice(i, i + 6000);
+    // 読めなかった 2 つの枝(本文が無い / 実体が無い)で、先に開けた窓を閉じる
+    expect((rest.match(/abandonEarly\(\);/g) ?? []).length).toBe(2);
+    expect(rest).toContain('open: (url, features) => (early.tried ? early.win : window.open(url, \'_blank\', features))');
   });
 });

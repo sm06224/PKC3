@@ -177,6 +177,29 @@ export interface LaunchOptions {
 }
 
 /**
+ * 🔴 **押した直後に、空のウィンドウを先に開く**(依頼 243。台帳 #1852 束 M1)。
+ *
+ * 何が起きていたか:添付の詳細の「アプリを開く」は、まず添付の本文を保存領域から読み(少し待つ)、そのあとで
+ * 窓を開いていた。Safari は「押した直後」でない窓の開き方を止めることがあるので、Safari では何も開かず、
+ * ポップアップを止めた案内だけが出る恐れがあった(Chrome 系では起きない。Safari では未確認)。
+ * 起動画面のタイルから開くときは先に窓を開けてから中身を流し込む形になっていて、この問題は無い。
+ * 🔑 詳細からも**同じ形**にする ── 呼び側は読み込みの `await` より前にこれを呼び、結果を {@link LaunchDeps.open}
+ *   の返り値として渡す(窓を開く口を 2 つに増やさない)。
+ *
+ * ⚠ **確認を挟む起動(素のまま / 目次を見せて)は先に開かない** ── 確認のダイアログが出る間、空の窓が前に出ると
+ *   ダイアログが隠れる。確認の「開く」を押すのは**新しい user の操作**なので、そちらは従来どおり(下の注釈)。
+ * @returns `tried: false` = 先には開かなかった(従来どおり、`launchTile` が自分で開く)
+ */
+export function openAppWindowEarly(
+  open: LaunchDeps['open'],
+  target: AppOpenTarget,
+  opts: LaunchOptions,
+): { tried: false } | { tried: true; win: Window | null } {
+  if (opts.sameOrigin === true || opts.extension === true) return { tried: false };
+  return { tried: true, win: open('', appWindowFeatures(opts.openTarget ?? target, '')) };
+}
+
+/**
  * 起動する。**囲いの中(既定)は同期で始まる** ── `window.open` は `await` より前に呼ぶ。
  *
  * ⚠ await をまたぐと user の操作(transient activation)が切れて、

@@ -13,6 +13,8 @@ import type {
 import {
   ProxyStoreClient,
   StoreProxyHost,
+  VACUUM_READ_TEXT,
+  VACUUM_WRITE_TEXT,
 } from '@adapter/platform/storage/store-proxy';
 import type { InitResult, StorageRequest } from '@adapter/platform/storage/protocol';
 
@@ -182,6 +184,159 @@ describe('要求の往復', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * 🔴 依頼 359・360(台帳 #1852 束 M1):本体のタブの重い保守・読み込み直しを、ほかのタブへ伝える。
+ */
+describe('本体のタブが保存領域を縮めている間(依頼 359)', () => {
+  /** 縮めが終わるまで返らない本体。 */
+  function slowVacuum() {
+    let finish!: () => void;
+    const gate = new Promise<void>((r) => (finish = r));
+    const calls: StorageRequest[] = [];
+    // ⚠ 本物の worker は 1 本の列で処理する ── 縮めている間、あとから来た要求は縮めが終わるまで並ぶ
+    let vacuuming = false;
+    const client: StoreClientLike = {
+      request: vi.fn(async (req: StorageRequest) => {
+        calls.push(req);
+        if (req.op === 'vacuum') vacuuming = true;
+        if (vacuuming) await gate;
+        if (req.op === 'vacuum') vacuuming = false;
+        return null as never;
+      }) as StoreClientLike['request'],
+      terminate: vi.fn(),
+    };
+    return { client, finish, calls };
+  }
+
+  it('縮めている間の時間切れは、書き込みなら「終わると保存されます」、読みなら「終わってからもう一度」と理由を言う。終わったあとは元の文言(対照群)', async () => {
+    vi.useFakeTimers();
+    try {
+      const hub = makeHub();
+      const real = slowVacuum();
+      const host = new StoreProxyHost({ client: real.client, init: INIT, makeChannel: hub.make, tabId: 'holder' });
+      const p = ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f1' });
+      await vi.advanceTimersByTimeAsync(10);
+      const follower = await p;
+      if (!follower) throw new Error('handshake failed');
+      const vac = host.localClient().request({ op: 'vacuum' });
+      await vi.advanceTimersByTimeAsync(5);
+      // 縮めている最中に、ほかのタブで保存 / 読み
+      const write = follower.request({ op: 'renameEntry', cid: 'c1', lid: 'a', title: 't' });
+      const read = follower.request({ op: 'counts', cid: 'c1' });
+      const gw = expect(write).rejects.toThrow(VACUUM_WRITE_TEXT);
+      const gr = expect(read).rejects.toThrow(VACUUM_READ_TEXT);
+      await vi.advanceTimersByTimeAsync(11_000);
+      await gw;
+      await gr;
+      expect(VACUUM_WRITE_TEXT).toContain('保存領域を縮めています');
+      // 縮め終わる → 以後の時間切れは、ふつうの文言に戻る
+      real.finish();
+      await vac;
+      await vi.advanceTimersByTimeAsync(5);
+      host.close(); // 本体が黙る
+      const write2 = follower.request({ op: 'renameEntry', cid: 'c1', lid: 'a', title: 't2' });
+      const g2 = expect(write2).rejects.toThrow('あとから保存されることがあります');
+      await vi.advanceTimersByTimeAsync(11_000);
+      await g2;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ほかのタブが頼んだ縮めでも放送される(口は 1 つ)/ 縮めの最中に開いたタブにも理由が言える', async () => {
+    vi.useFakeTimers();
+    try {
+      const hub = makeHub();
+      const real = slowVacuum();
+      const host = new StoreProxyHost({ client: real.client, init: INIT, makeChannel: hub.make, tabId: 'holder' });
+      const p1 = ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f1' });
+      await vi.advanceTimersByTimeAsync(10);
+      const f1 = await p1;
+      if (!f1) throw new Error('handshake failed');
+      // f1 自身が縮めを頼んだ(本体が実行する)。⚠ 縮めは 10 秒を超えるので、f1 の待ちは時間切れになる
+      f1.request({ op: 'vacuum' }).catch(() => {});
+      await vi.advanceTimersByTimeAsync(5);
+      // 縮めている最中に 2 枚目が開く
+      const p2 = ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f2' });
+      await vi.advanceTimersByTimeAsync(10);
+      const f2 = await p2;
+      if (!f2) throw new Error('handshake failed');
+      const write = f2.request({ op: 'renameEntry', cid: 'c1', lid: 'a', title: 't' });
+      const g = expect(write).rejects.toThrow(VACUUM_WRITE_TEXT);
+      await vi.advanceTimersByTimeAsync(11_000);
+      await g;
+      real.finish();
+      host.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('縮めが失敗しても終わりは放送される(放送しそびれると、以後ずっと「縮めている」と言う)', async () => {
+    vi.useFakeTimers();
+    try {
+      const hub = makeHub();
+      const client: StoreClientLike = {
+        request: vi.fn(async (req: StorageRequest) => {
+          if (req.op === 'vacuum') throw new Error('disk full');
+          return null as never;
+        }) as StoreClientLike['request'],
+        terminate: vi.fn(),
+      };
+      const host = new StoreProxyHost({ client, init: INIT, makeChannel: hub.make, tabId: 'holder' });
+      const p = ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f1' });
+      await vi.advanceTimersByTimeAsync(10);
+      const follower = await p;
+      if (!follower) throw new Error('handshake failed');
+      await expect(host.localClient().request({ op: 'vacuum' })).rejects.toThrow('disk full');
+      await vi.advanceTimersByTimeAsync(5);
+      host.close();
+      const write = follower.request({ op: 'renameEntry', cid: 'c1', lid: 'a', title: 't' });
+      const g = expect(write).rejects.toThrow('あとから保存されることがあります');
+      await vi.advanceTimersByTimeAsync(11_000);
+      await g;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('本体のタブが戻ったとき(依頼 360)', () => {
+  it('新しい本体が名乗ったら onHolderBack が鳴る。対照群:新しく開いたタブへの返事(宛名つき)では鳴らない', async () => {
+    const hub = makeHub();
+    const real = makeFakeReal();
+    const host = new StoreProxyHost({ client: real.client, init: INIT, makeChannel: hub.make, tabId: 'holder' });
+    const follower = await ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f1' });
+    if (!follower) throw new Error('handshake failed');
+    const back = vi.fn();
+    follower.onHolderBack(back);
+    // 3 枚目のタブが開いた ── 本体は宛名つきで返す(f1 は読まない)
+    const f2 = await ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f2' });
+    await drain();
+    expect(f2).not.toBeNull();
+    expect(back, '別のタブへの返事で「本体が戻った」と読んだ').not.toHaveBeenCalled();
+    // 本体が読み込み直して名乗り直した
+    host.close();
+    new StoreProxyHost({ client: makeFakeReal().client, init: INIT, makeChannel: hub.make, tabId: 'holder2' });
+    await drain();
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
+  it('解除すると鳴らない', async () => {
+    const hub = makeHub();
+    const host = new StoreProxyHost({ client: makeFakeReal().client, init: INIT, makeChannel: hub.make, tabId: 'holder' });
+    const follower = await ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f1' });
+    if (!follower) throw new Error('handshake failed');
+    const back = vi.fn();
+    const off = follower.onHolderBack(back);
+    off();
+    host.close();
+    new StoreProxyHost({ client: makeFakeReal().client, init: INIT, makeChannel: hub.make, tabId: 'holder2' });
+    await drain();
+    expect(back).not.toHaveBeenCalled();
   });
 });
 

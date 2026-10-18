@@ -263,6 +263,43 @@ export const WIPED_ELSEWHERE_ASK =
   'この PKC3 の中身は、別のタブで初期化されました。このタブはもう保存できません。' +
   'いま読み込み直しますか?(やめる を選ぶと、打った字をコピーしてから読み込み直せます)';
 
+/**
+ * 🔴 **本体でないタブが「捨てた」と聞いたときの待ち文**(依頼 360)。
+ *
+ * ⚠ 直す前は、聞いた瞬間に読み込み直していた ── ところが本体のタブは、まだ結果を表示している途中で
+ *   応答できない。読み込み直したタブは本体と話せず「起動に失敗しました」の画面になり、
+ *   本体が読み込み直しても、そのタブは直らなかった。
+ * 🔑 本体が読み込み直して名乗り直すまで待つ。待つ間は何が起きているかを言う(止まったように見せない)。
+ */
+export const WIPED_WAIT_TEXT = '本体のタブで作業中です。終わると、このタブも自動で読み込み直します';
+
+/**
+ * 捨てた後に読み込み直す(依頼 360)。判断はここ、`main.ts` は口を渡すだけ。
+ * @returns `reloaded` = いま読み込み直した / `waiting` = 本体が戻るのを待っている
+ */
+export function reloadAfterWipe(deps: {
+  /** このタブは本体(書き手)でなく、本体経由で保存しているか。 */
+  readonly follower: boolean;
+  /** 本体が(読み込み直して)名乗り直したときに呼ばれる。返り値は購読の解除。 */
+  readonly onMainBack: (fn: () => void) => () => void;
+  readonly say: (text: string) => void;
+  readonly reload: () => void;
+}): 'reloaded' | 'waiting' {
+  if (!deps.follower) {
+    deps.reload();
+    return 'reloaded';
+  }
+  deps.say(WIPED_WAIT_TEXT);
+  let done = false;
+  const off = deps.onMainBack(() => {
+    if (done) return;
+    done = true;
+    off();
+    deps.reload();
+  });
+  return 'waiting';
+}
+
 /** 別のタブが捨てた ── いま読み込み直してよいか。 */
 export function wipedElsewhere(editing: boolean): {
   /** 何も聞かずに読み込み直してよい(失う字が無い)。 */

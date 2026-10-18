@@ -40,6 +40,13 @@ export const HANDSHAKE_TIMEOUT_MS = 1500;
 /** 要求→応答の上限。超えたら reject(永久 hang を作らない ── StoreClient と同じ規律)。 */
 export const REQUEST_TIMEOUT_MS = 10_000;
 
+/** 本体のタブが「いま重い保守の最中」と放送する種類(依頼 359)。いまは保存領域を縮めるだけ。 */
+export type HolderBusy = 'vacuum';
+
+/** 保存領域を縮めている間の断り文(書き込み / 読み)。画面の字 ── 「保存領域を縮める」はシステムのボタンの字。 */
+export const VACUUM_WRITE_TEXT = '本体のタブで保存領域を縮めています。終わると保存されます';
+export const VACUUM_READ_TEXT = '本体のタブで保存領域を縮めています。終わってからもう一度お試しください';
+
 /**
  * 🔴 **応答が無かった要求の断り文**(#1087、複数タブの見直し J5)。
  *
@@ -50,7 +57,14 @@ export const REQUEST_TIMEOUT_MS = 10_000;
  * 🔑 だから書き込みのときは「**保存されたかどうか分からない**」と言い、確かめる手を添える。
  *   読みだけの要求は今までどおり(後から何も起きない)。
  */
-export function timeoutText(op: StorageRequest['op']): string {
+export function timeoutText(op: StorageRequest['op'], busy: HolderBusy | null = null): string {
+  /**
+   * 🔴 **本体が保存領域を縮めている最中なら、そのことを言う**(依頼 359)。⚠ 直す前は 1GB で 13〜18 秒かかる縮めの間、
+   *   ほかのタブの保存が 10 秒で理由なく「応答がありません」になった ── 縮めている最中だとは出なかった。
+   *   要求は本体に並んでいて、縮め終わった後に実行される(書き込みは取り消す口が無い)ので、書き込みは
+   *   「終わると保存されます」と言い切れる。読みだけの要求は後から何も起きない。
+   */
+  if (busy === 'vacuum') return MUTATING_OPS.has(op) ? VACUUM_WRITE_TEXT : VACUUM_READ_TEXT;
   return MUTATING_OPS.has(op)
     ? 'メインのタブから応答がありません。この変更は、あとから保存されることがあります(ノートを開き直して確かめてから、もう一度操作してください)'
     : 'メインのタブと通信できません(応答がありません)';
@@ -205,7 +219,9 @@ export type ProxyWire =
    * `to` が在るときは**その 1 枚だけ**に宛てた返事(新しいタブの `hello` への答え。#1087)。
    * ⚠ 無いときは起動の名乗り(全員宛て ── 待機中の follower が再送・再主張する)。
    */
-  | { kind: 'holder-here'; holder: string; init: InitResult; to?: string }
+  | { kind: 'holder-here'; holder: string; init: InitResult; to?: string; busy?: HolderBusy }
+  /** 🔴 本体のタブが重い保守を始めた / 終えた(依頼 359)。受けたタブは、時間切れの理由に使う。 */
+  | { kind: 'holder-busy'; busy: HolderBusy | null }
   | { kind: 'req'; from: string; id: number; req: StorageRequest }
   | { kind: 'res'; to: string; id: number; ok: true; result: unknown }
   | { kind: 'res'; to: string; id: number; ok: false; error: string }
@@ -321,6 +337,8 @@ export class StoreProxyHost implements TabSync {
   private readonly changedListeners = new Set<(cid: string, lids: string[] | null) => void>();
   private readonly onMutation: (() => void) | null;
   private closed = false;
+  /** いま走らせている重い保守(依頼 359)。新しく来たタブにも教える。 */
+  private busy: HolderBusy | null = null;
 
   constructor(deps: StoreProxyHostDeps) {
     this.real = deps.client;
@@ -349,7 +367,7 @@ export class StoreProxyHost implements TabSync {
       request: async <Op extends StorageRequest['op']>(
         req: RequestFor<Op>,
       ): Promise<ResultMap[Op]> => {
-        const result = await this.real.request(req);
+        const result = await this.runReal(req);
         if (MUTATING_OPS.has(req.op)) this.afterMutation(this.id, req);
         return result;
       },
@@ -357,6 +375,23 @@ export class StoreProxyHost implements TabSync {
         this.real.terminate();
       },
     };
+  }
+
+  /**
+   * 実 worker に頼む唯一の口(本体自身の要求も follower の要求も通る)。
+   * 🔴 保存領域を縮める間だけ「縮めている」と放送する(依頼 359)── ⚠ 2 つの経路を別々に包むと片方が漏れる。
+   *   終わりは成否に関わらず必ず放送する(`finally`)── 放送しそびれると、ほかのタブが以後ずっと「縮めている」と言う。
+   */
+  private async runReal<Op extends StorageRequest['op']>(req: RequestFor<Op>): Promise<ResultMap[Op]> {
+    if (req.op !== 'vacuum') return this.real.request(req);
+    this.busy = 'vacuum';
+    this.ch.postMessage({ kind: 'holder-busy', busy: 'vacuum' } satisfies ProxyWire);
+    try {
+      return await this.real.request(req);
+    } finally {
+      this.busy = null;
+      if (!this.closed) this.ch.postMessage({ kind: 'holder-busy', busy: null } satisfies ProxyWire);
+    }
   }
 
   acquireEdit(cid: string, lid: string): Promise<EditGrant> {
@@ -449,6 +484,8 @@ export class StoreProxyHost implements TabSync {
           holder: this.id,
           init: this.init,
           to: msg.from,
+          // 縮めている最中に開いたタブにも理由が言えるよう、いまの状態を添える(依頼 359)
+          ...(this.busy === null ? {} : { busy: this.busy }),
         } satisfies ProxyWire);
         return;
       case 'req': {
@@ -461,7 +498,7 @@ export class StoreProxyHost implements TabSync {
           return;
         }
         try {
-          const result = await this.real.request(req as RequestFor<StorageRequest['op']>);
+          const result = await this.runReal(req as RequestFor<StorageRequest['op']>);
           this.ch.postMessage({ kind: 'res', to: from, id, ok: true, result } satisfies ProxyWire);
           if (MUTATING_OPS.has(req.op)) {
             this.afterMutation(from, req);
@@ -584,6 +621,10 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
   private readonly revokedListeners = new Set<(cid: string, lid: string) => void>();
   /** 'dead' = 昇格失敗(レビュー H-2)── 以後の要求は**即断る**(静かに積まない)。 */
   private state: 'channel' | 'promoting' | 'real' | 'dead' = 'channel';
+  /** 本体のタブが放送した「いま重い保守の最中」(依頼 359)。時間切れの理由に使う。 */
+  private holderBusy: HolderBusy | null = null;
+  /** 新しい本体が名乗った(依頼 360)。⚠ 宛名つきの返事(新しいタブへの答え)は数えない。 */
+  private readonly holderBackListeners = new Set<() => void>();
   private realClient: StoreClientLike | null = null;
   private buffered: Array<{ req: StorageRequest; resolve: (v: unknown) => void; reject: (e: Error) => void }> = [];
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -670,7 +711,7 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
       };
       p.timer = setT(() => {
         this.pending.delete(id);
-        reject(new Error(timeoutText(req.op)));
+        reject(new Error(timeoutText(req.op, this.holderBusy)));
       }, this.deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS);
       this.pending.set(id, p);
       this.ch.postMessage({ kind: 'req', from: this.id, id, req } satisfies ProxyWire);
@@ -807,6 +848,18 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
     };
   }
 
+  /**
+   * 🔴 **本体のタブが(起動し直して)名乗ったとき**(依頼 360)。⚠ 宛名つきの返事は数えない ──
+   * 新しいタブへの答えであって、本体が替わった合図ではない。中身を消す・作り直す操作の後、
+   * 本体が読み込み直して戻ってくるのを待つ側(`main.ts`)が使う。
+   */
+  onHolderBack(fn: () => void): () => void {
+    this.holderBackListeners.add(fn);
+    return () => {
+      this.holderBackListeners.delete(fn);
+    };
+  }
+
   /** holder 交代時のロック再主張が**否認された**とき(編集権を失った)。 */
   onEditRevoked(fn: (cid: string, lid: string) => void): () => void {
     this.revokedListeners.add(fn);
@@ -909,10 +962,14 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
           const fn = this.onHolderHere;
           this.onHolderHere = null;
           this.initResult = msg.init;
+          this.holderBusy = msg.busy ?? null;
           fn();
           return;
         }
         if (this.state !== 'channel') return;
+        // 本体が(替わって)名乗り直した ── 縮めている最中の印は古い。待っていた側に戻ったと知らせる(依頼 359・360)
+        this.holderBusy = null;
+        for (const fn of [...this.holderBackListeners]) fn();
         // holder 交代(前の holder が死に、別タブが昇格した)。
         // ① 宙に浮いた要求を新 holder へ再送(旧 holder が適用済みでも upsert は
         //    同内容の上書きで、データが欠ける向きにはならない)
@@ -970,6 +1027,10 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
         if (!w) return;
         this.editingWaiters.delete(msg.id);
         w(msg.editing ? 'editing' : 'idle');
+        return;
+      }
+      case 'holder-busy': {
+        this.holderBusy = msg.busy;
         return;
       }
       case 'changed': {
