@@ -13,7 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 // @ts-expect-error -- CI scripts are .mjs
-import { resolveBase, collectGuardTests, ANCHOR_GUARD_TESTS, detectFallbackReasonFromFiles, planPrRun, countAllTests, FULL_RATIO } from '../scripts/test-pr.mjs';
+import { resolveBase, collectGuardTests, ANCHOR_GUARD_TESTS, detectFallbackReasonFromFiles, planPrRun, countAllTests, FULL_RATIO, parseShardArg } from '../scripts/test-pr.mjs';
 
 describe('PR 高速 unit テスト (#1390)', () => {
   it('ci.yml で PR 時は test-pr.mjs、push 時は npm test を呼ぶ', () => {
@@ -87,5 +87,17 @@ describe('PR 高速 unit テスト (#1390)', () => {
     expect(body, 'runPrTests を取り出せていない(前提が崩れている)').toContain('planPrRun(');
     expect(body.match(/'vitest', 'run'/g)?.length, '全量と一覧の 2 つの枝だけ').toBe(2);
     expect(body).not.toContain('--changed');
+  });
+
+  it('parseShardArg は --shard=i/n だけを拾う(base や他の旗を巻き込まない / 不正な綴りは捨てる)', () => {
+    expect(parseShardArg(['origin/main', '--shard=2/3'])).toEqual(['--shard=2/3']);
+    expect(parseShardArg(['origin/main'])).toEqual([]);
+    expect(parseShardArg(['--shard=x/3', '--shard=1'])).toEqual([]);
+  });
+
+  it('runPrTests は渡された --shard を全量・一覧の両方の vitest へ渡す', () => {
+    const src = readFileSync('scripts/test-pr.mjs', 'utf-8');
+    const body = src.slice(src.indexOf('export function runPrTests('), src.indexOf('if (process.argv[1]'));
+    expect(body.match(/\.\.\.extraArgs/g)?.length, '2 つの枝の両方に shard を渡す').toBe(2);
   });
 });

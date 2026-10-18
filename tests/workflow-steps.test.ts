@@ -1159,14 +1159,17 @@ describe('PR gate の形(2026-08-18 / 2026-09-09)', () => {
      *   🔑 分けると並列に走るので**壁時計は伸びず**、赤が出たときに
      *   「依存の話か、コードの話か」が **job の名前で分かる**(1 job = 1 主張)。
      */
-    expect([...jobs.keys()], 'job の切り出しが壊れている').toEqual(['audit', 'verify']);
+    expect([...jobs.keys()], 'job の切り出しが壊れている').toEqual(['audit', 'static', 'unit', 'verify']);
     // ⚠ 空振り防止 ── 本文が取れていない形で「含まない」と言わない(下の 2 つは
     //   `not.toContain` なので、空文字でも通ってしまう)
-    expect(jobs.get('verify'), 'verify の本文が取れていない').toContain('npm run typecheck');
-    expect(jobs.get('verify'), '遅い install が速い lane へ戻っている').not.toContain(
-      'playwright install',
-    );
-    expect(jobs.get('verify'), 'smoke が速い lane へ戻っている').not.toContain('test:smoke');
+    expect(jobs.get('static'), 'static の本文が取れていない').toContain('npm run typecheck');
+    for (const name of ['static', 'unit', 'verify']) {
+      expect(jobs.get(name), `${name} の本文が取れていない`).toBeTruthy();
+      expect(jobs.get(name), `遅い install が速い lane(${name})へ戻っている`).not.toContain(
+        'playwright install',
+      );
+      expect(jobs.get(name), `smoke が速い lane(${name})へ戻っている`).not.toContain('test:smoke');
+    }
     // 🔴 移した先に install が在る(出しただけで壊れていないこと)
     expect(jobsOf(SMOKE).get('smoke'), 'smoke.yml に install が無い').toContain(
       'playwright install',
@@ -1335,12 +1338,16 @@ describe('PR gate の形(2026-08-18 / 2026-09-09)', () => {
     expect(head, '既定が片方のブラウザでない').toContain('default: headless_shell');
   });
 
-  it('🔴 2 つは並列(直列にすると budget の問題が解けない)', () => {
+  it('🔴 検査を回す job(audit / static / unit)は並列(直列にすると budget の問題が解けない)', () => {
     const jobs = jobsOf(CI);
-    for (const [name, body] of jobs) {
+    for (const name of ['audit', 'static', 'unit']) {
+      const body = jobs.get(name);
+      expect(body, `${name} の本文が取れていない(空振り)`).toBeTruthy();
       expect(body, `${name} に needs が付いている(直列になっている)`).not.toContain('needs:');
       expect(body, `${name} に速度予算の tripwire が無い`).toContain('timeout-minutes: 10');
     }
+    // 集約の `verify` だけが needs を持つ(検査は回さないので予算は短い)
+    expect(jobs.get('verify'), 'verify が集約になっていない').toContain('needs: [static, unit]');
   });
 });
 
@@ -1892,5 +1899,53 @@ describe('office-wasm ── 焼いた一式に「頼んだ枝」を残す', () 
     expect(fallback![1], '落ち先と入力の既定が食い違っている').toBe(declared![1]);
     // ⚠ 対照群 ── 揃っていても、揃った先が alpha なら意味が無い
     expect(fallback![1], '落ち先が master(未リリースの alpha)').not.toBe('master');
+  });
+});
+
+/**
+ * 🔴 **`verify` は集約 job で、unit は 3 本に割って並列に回す**(2026-10-18、`ci-verify-speed`)。
+ *
+ * ⚠ 割ると「`verify` が赤を拾わない」「shard の付け忘れ(全量を 3 回回す / 1 本だけ回す)」が静かに起きうる。
+ *   shard の割り方そのものは vitest 本体の機能(`vitest list` は --shard を無視するので数えられない)。
+ *   3 shard の和 = 全量は、実際に 3 本回した passed / skipped 件数を全量と突き合わせて確かめた。
+ */
+describe('verify の割り方(unit shard + 集約)', () => {
+  const CI_TEXT = readFileSync(join('.github', 'workflows', 'ci.yml'), 'utf8')
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n');
+  const jobBody = (name: string): string => {
+    const m = new RegExp(`\\n {2}${name}:\\n([\\s\\S]*?)(?=\\n {2}[A-Za-z0-9_-]+:\\n|$)`).exec(CI_TEXT);
+    return m ? (m[1] as string) : '';
+  };
+
+  it('🔴 verify は static と unit を待ち、always() で赤を拾い、success 以外は落とす', () => {
+    const v = jobBody('verify');
+    expect(v, 'verify の本文が取れていない').toContain('needs: [static, unit]');
+    expect(v, 'always() が無いと needs の失敗で verify が skipped になり赤に見えない').toContain(
+      'always()',
+    );
+    expect(v).toContain('needs.static.result');
+    expect(v).toContain('needs.unit.result');
+    expect(v).toContain('!= "success"');
+    expect(v, '集約 job は検査を回さない').not.toContain('npm ci');
+  });
+
+  it('🔴 unit は matrix 3 本で、PR も main push も --shard を渡す(全量の取りこぼしが無い)', () => {
+    const u = jobBody('unit');
+    expect(u, 'unit の本文が取れていない').toContain('shard: [1, 2, 3]');
+    expect(u).toContain('fail-fast: false');
+    // 行の数 = 実行する step の数(PR 用・main push 用の 2 本)── 両方に shard が付く
+    const runs = u.split('\n').filter((l) => /^\s+run: (node scripts\/test-pr\.mjs|npm test)/.test(l));
+    expect(runs, 'unit の実行行が 2 本ではない(空振り)').toHaveLength(2);
+    for (const r of runs) expect(r, '--shard が付いていない').toContain('--shard=${{ matrix.shard }}/3');
+  });
+
+  it('🔴 static に型 / lint / build / dist 検品が揃っている(unit へ移して落としていない)', () => {
+    const s = jobBody('static');
+    for (const want of ['npm run typecheck', 'npm run lint', 'npm run build', 'check-dist.mjs dev']) {
+      expect(s, `static に ${want} が無い`).toContain(want);
+    }
+    expect(s, 'unit は static に居ない').not.toContain('vitest');
   });
 });

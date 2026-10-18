@@ -78,7 +78,21 @@ jobs:
       - name: Audit (full, informational)
         run: timeout 60 npm audit --fetch-retries=1 --fetch-retry-maxtimeout=10000 || true
 
-  verify:
+  # 🔴 **verify を 3 種の job に割った**(2026-10-18、`ci-verify-speed`)。
+  #
+  # ⚠ 直す前は 1 job が `typecheck → lint → unit(全量) → build` を**直列**で回し、9〜10 分
+  #   (timeout 10 分の寸前)かかっていた。実測(4 core・手元): unit 全量 8 分 15 秒 /
+  #   typecheck 47 秒 / lint 42 秒 / build 10 秒。**効いているのは unit の CPU 総量**
+  #   (1293 file・23.6k test。happy-dom の生成だけで file 数 × 約 0.15 秒)で、
+  #   isolate:false / vmThreads は 38〜86 件が落ちる(file 間の汚染)ので採れない。
+  # 🔑 だから **runner を増やす**: unit を `--shard` で 3 本に割って並列に回し、
+  #   型 / lint / build は別 job で同時に走らせる。**検査は 1 件も減らしていない**
+  #   (3 shard の和 = 全量。`tests/workflow-steps.test.ts` が割り方を pin する)。
+  # 🔴 **`verify` は名前を残した集約 job**(auto-merge・目視が読む check 名)。
+  #   `static` / `unit` が全部 success のときだけ success になる。
+  #   ⚠ `if: always()` が無いと needs の失敗で verify が skipped になり、
+  #   「赤」ではなく「何も無い」に見える。
+  static:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -102,15 +116,6 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
-      # PR では変えた file に関係する unit と、全体を走査する門(repo-hygiene / ui-terms 等)を回す(#1390)
-      # (~5 分 → ~30 秒へ短縮。全量は下の main への push で必ず回す)
-      - name: Unit tests (PR changed files + repo guards)
-        if: github.event_name == 'pull_request'
-        run: node scripts/test-pr.mjs origin/${{ github.base_ref }}
-      # main への push(merge 時)は全量 unit を必ず完走させる
-      - name: Full unit tests (main push)
-        if: github.event_name != 'pull_request'
-        run: npm test
       # ⚠ kind を**明示**する ── 既定(未指定)と `dev` が同じ生成物になるのは
       # `release-meta.ts` が両者を同じ定数へ畳んでいるからで、意図ではなく副作用
       # である(レビュー 2 巡目 L-4)。既定が変わると「CI が検品・smoke した物」と
@@ -121,6 +126,52 @@ jobs:
       # product 固有の検品は tests/build-config.test.ts(config)+ nightly / release(実物)
       - name: dist の検品(map の有無 / 参照の実在 / 配る量の tripwire)
         run: node scripts/check-dist.mjs dev --require-precache-list --require-duckdb --require-pdf
+
+  # unit は 3 本に割る(`--shard=i/3`)。⚠ 割る数を変えるときは matrix と下の 2 行の `/3` を揃える。
+  unit:
+    name: unit (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false # 1 本が赤でも他の shard の結果は最後まで見せる
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # test-pr.mjs の差分(merge-base)に要る
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # PR では変えた file に関係する unit と、全体を走査する門(repo-hygiene / ui-terms 等)を回す(#1390)
+      # (全量は下の main への push で必ず回す)
+      - name: Unit tests (PR changed files + repo guards)
+        if: github.event_name == 'pull_request'
+        run: node scripts/test-pr.mjs origin/${{ github.base_ref }} --shard=${{ matrix.shard }}/3
+      # main への push(merge 時)は全量 unit を必ず完走させる
+      - name: Full unit tests (main push)
+        if: github.event_name != 'pull_request'
+        run: npm test -- --shard=${{ matrix.shard }}/3
+
+  # 集約。check 名 `verify` を残す(auto-merge が名前で待つ)。
+  verify:
+    needs: [static, unit]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: static と unit が全部 success か
+        env:
+          STATIC: ${{ needs.static.result }}
+          UNIT: ${{ needs.unit.result }}
+        run: |
+          echo "static=$STATIC unit=$UNIT"
+          if [ "$STATIC" != "success" ] || [ "$UNIT" != "success" ]; then
+            echo "::error::static か unit が success でない(static=$STATIC unit=$UNIT)"
+            exit 1
+          fi
 
   # ── 実ブラウザ lane は、ここには無い ──────────────────────────────────
   # 🔴 **全量 smoke を PR gate から外した**(user 指示 2026-09-09。不可侵):

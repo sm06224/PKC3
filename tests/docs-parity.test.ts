@@ -1518,7 +1518,7 @@ describe('README と実体の突合(#696)', () => {
     const jobsAt = CI.indexOf('\njobs:\n');
     expect(jobsAt, 'ci.yml に jobs: が無い(空振り)').toBeGreaterThan(0);
     const jobs = [...CI.slice(jobsAt).matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]!);
-    // ⚠ 2026-09-09: `smoke` を出したので PR gate は 2 job(`audit` / `verify`)。
+    // ⚠ 2026-09-09: `smoke` を出したので PR gate は検査 job 3 つ(`audit` / `static` / `unit`)+ 集約の `verify`。
     //   この下限は**空振り防止**であって「2 つ以上あるべき」という主張ではない
     //   ── 切り出しが壊れて 0 件になった形で「全部載っている」と言わないためのもの。
     expect(jobs.length, 'job を読めていない(空振り)').toBeGreaterThanOrEqual(2);
