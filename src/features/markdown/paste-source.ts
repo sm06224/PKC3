@@ -143,7 +143,7 @@ export function pasteConvertedMessage(mac: boolean = isMac()): string {
 }
 
 /**
- * 🔴 **「書式なしで貼る」の鍵か**(Ctrl+Shift+V / Mac は ⌘+Shift+V。台帳 #1852 / 依頼 93-1。Gemini 回答 = 推薦 A)。
+ * 🔴 **「書式なしで貼る」の鍵か**(Ctrl+Shift+V / Mac は ⌘+Shift+V・⌘+Option+Shift+V。台帳 #1852 / 依頼 93-1。Gemini 回答 = 推薦 A)。
  *
  * 貼った字を Markdown に直す知らせは「書式なしで貼る: Ctrl+Shift+V」と案内している。PKC はその鍵を
  * 区別していなかったので、押しても直して入るおそれがあった。鍵を押した直後の貼付(`PLAIN_PASTE_WINDOW_MS` 以内)は
@@ -155,8 +155,13 @@ export function isPlainPasteChord(e: {
   readonly metaKey: boolean;
   readonly shiftKey: boolean;
   readonly altKey: boolean;
+  /** 物理キー(`KeyV`)。⚠ 非ラテン配列(ロシア語・ギリシャ語等)や Mac の Option 併用では `key` が `v` にならないので併せて見る。 */
+  readonly code?: string;
 }): boolean {
-  return (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'v';
+  // 🔑 Mac の Cmd+Option+Shift+V(Chrome の「スタイルを合わせて貼り付け」)も書式なしの貼付。Alt を許すのは Cmd のときだけ
+  //   (Windows の Ctrl+Alt は AltGr と区別がつかず、字を打つ組み合わせ)
+  const altOk = !e.altKey || (e.metaKey && !e.ctrlKey);
+  return (e.ctrlKey || e.metaKey) && e.shiftKey && altOk && (e.key.toLowerCase() === 'v' || e.code === 'KeyV');
 }
 
 /** 鍵を押してから貼付の通知が来るまでの許容(ミリ秒)。通常は同じ操作の中で数 ms 以内に来る。 */

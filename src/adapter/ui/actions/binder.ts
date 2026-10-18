@@ -18349,17 +18349,14 @@ export function bindActions(
     plainPasteChordAt = null;
     return at !== null && Date.now() - at <= PLAIN_PASTE_WINDOW_MS;
   };
-  const pasteText = (ce: ClipboardEvent): boolean => {
+  const pasteText = (ce: ClipboardEvent, plainChord: boolean): boolean => {
     const target = ce.target;
-    if (!isBodyInput(target)) {
-      plainPasteChordAt = null;
-      return false;
-    }
+    if (!isBodyInput(target)) return false;
     /**
      * 🔴 **Ctrl+Shift+V で貼ったときは何も直さず、書式なしの字だけを入れる**(依頼 93-1。Gemini 回答 = 推薦 A)。
-     *   ⚠ 鍵を押した印は 1 回の貼付で使い切る(次の普通の貼付まで持ち越さない)。
+     *   ⚠ 鍵を押した印は `onPaste` の入口で取り出して消費済み(画像だけの貼付が先に処理しても、次の普通の貼付へ持ち越さない)。
      */
-    if (plainChordPressed()) return false;
+    if (plainChord) return false;
     /**
      * 🔴 **コード・数式の中では何も変換しない**(#1087)── fence の中へ表を貼ると fence が入れ子に、
      *   HTML を貼ると `**` やリンクの形が入り、選んだ字へ URL を貼ると `[字](URL)` になっていた。
@@ -18524,6 +18521,8 @@ export function bindActions(
    */
   const onPaste = (e: Event): void => {
     const ce = e as ClipboardEvent;
+    // 🔴 鍵の印は貼付のたびに入口で取り出して消す(`routeFiles` が先に処理した回も残さない)
+    const plainChord = plainChordPressed();
     // 🔴 **ファイル(PDF など)をコピーして貼ったときも、ドロップと同じ行き先へ**(#1652 6。Gemini 裁定 A)。
     //   ⚠ 直す前は画像しか拾わず、エクスプローラーでコピーした PDF を貼っても何も起きず何も出なかった。
     const files = filesOf(ce.clipboardData);
@@ -18552,7 +18551,7 @@ export function bindActions(
       ce.preventDefault();
       return;
     }
-    if (pasteText(ce)) ce.preventDefault();
+    if (pasteText(ce, plainChord)) ce.preventDefault();
   };
 
   /**
