@@ -93,6 +93,17 @@ export interface SaveBackDeps {
    */
   readonly confirmShared: (lid: string, save: StagedSave) => Promise<'replace' | 'separate'>;
   /**
+   * 🔴 **差し替える添付のノートを、別のタブ・ウィンドウが編集中か**(依頼 368。台帳 #1852 束 M1)。
+   *
+   * 直す前は、自分のタブが編集中かどうか(`canWrite`)しか見ていなかった。別のタブでそのノートを編集中でも
+   * 差し替えるので、そのタブが後で保存すると、添付の参照が古いほうに戻ることがあった。
+   * 追記・改名など**ほかの書き込みは、別のタブの編集中を既に断っている**(`edited-elsewhere.ts`)── それに揃える。
+   * @returns `true` = 編集中なので入れない(棚に残し、編集が終わってから撃ち直す。呼び側が撃ち直しの時計を持つ)
+   * ⚠ **optional にしない** ── 配線を落とすと、別のタブの編集を確かめずに差し替える形に戻る。
+   * ⚠ 問い合わせに答えが無い(本体と話せない)ときは `false`(新しい断りを足さない ── `edited-elsewhere.ts` と同じ)。
+   */
+  readonly editedElsewhere: (lid: string) => Promise<boolean>;
+  /**
    * 🔴 **「この保存はこのノートになった」と窓へ返す**(#217)。
    *
    * ⚠ 返さないと、**同じ文書を 2 回保存するとノートが 2 件できる**(cowork 実機
@@ -155,7 +166,9 @@ export interface SaveBackDeps {
  * ⚠ 棚の中身は user から見えないので「残してあります」とは言わない ── 開けるノートにして、そう言う。
  */
 export function localOrphanImportedNotice(name: string): string {
-  return `元のファイルを開いた画面が閉じられたので、Office で保存した内容は元のファイルへ書き戻せませんでした。代わりに添付のノート「${name}」として取り込みました`;
+  // 🔴 依頼 95-1(Claude 推薦 A)── 「元のファイルは変わっていません」まで言う(直す前は「書き戻せませんでした」だけで、
+  //    元のファイルが半端に書き換わったと読めた)。つながりが切れる理由は、PKC3 を読み込み直したことなど
+  return `元のファイルとのつながりが切れていたため、PKC3 に新しい添付のノートとして保存しました(元のファイルは変わっていません): 「${name}」`;
 }
 
 /**
@@ -199,6 +212,15 @@ export function savedHeldNotice(name: string, phase: AppPhase = 'editing'): stri
   if (phase === 'error') return `${head}ノートの保存に失敗しているのでまだ入れていません。「ノートを保存し直す」を押すと入れます`;
   if (phase === 'initializing') return `${head}読み込み中なのでまだ入れていません。読み込みが終わると入れます`;
   return `${head}編集中なのでまだ入れていません。編集を終えると入れます`;
+}
+
+/**
+ * 🔴 **別のタブ・ウィンドウが編集中なので、保存を預かっているときの一言**(依頼 368)。
+ * ⚠ 自分のタブの編集中(`savedHeldNotice`)とは**言い分ける** ── 「編集を終えると入れます」と言うと、
+ *   このタブで編集をしていない user は、何を終えればよいか分からない。
+ */
+export function savedHeldElsewhereNotice(name: string): string {
+  return `Office で保存した「${name}」は、別のタブまたはウィンドウで編集中なのでまだ入れていません。そちらの編集が終わると入れます`;
 }
 
 /**
@@ -282,6 +304,16 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     if (!toldHeld.has(save.key)) {
       toldHeld.add(save.key);
       tell(save, savedHeldNotice(save.name, deps.phase()));
+    }
+    return 'deferred';
+  }
+
+  /** 別のタブの編集中で預かる(依頼 368)。⚠ 言うのは 1 度だけ(`toldHeld` を共有 ── 撃ち直しのたびに出さない)。 */
+  function holdElsewhere(save: StagedSave): IntakeResult {
+    deferred = true;
+    if (!toldHeld.has(save.key)) {
+      toldHeld.add(save.key);
+      tell(save, savedHeldElsewhereNotice(save.name));
     }
     return 'deferred';
   }
@@ -499,6 +531,9 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     let sharedSeparate = false;
     if (token !== undefined && target !== null) {
       if (!deps.canWrite()) return hold(save);
+      // 🔴 別のタブ・ウィンドウがそのノートを編集中なら入れない(依頼 368)。⚠ 聞く(`confirmShared`)より前 ──
+      //    聞いたあとで断ると、user に答えさせたことが無駄になる
+      if (await deps.editedElsewhere(token)) return holdElsewhere(save);
       // 🔴 同じファイルを指す添付がほかにもあれば、差し替えの前に確かめる(#1163 依頼 211・293)。
       //    やめる側は「別の添付として取り込む」── 保存した内容は失わず、ほかのノートのリンクは変わらない
       if ((await deps.confirmShared(token, save)) === 'separate') {

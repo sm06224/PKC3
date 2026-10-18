@@ -113,6 +113,30 @@ test('保存せずにタブを閉じて開き直すと 1 行出る。戻す → 
   // 🔴 やめても控えは残り、1 行がまた出る(戻した字を二度と戻せなくしない)
   await expect(offer, 'やめたら 1 行が戻らない').toBeVisible({ timeout: 10_000 });
   expect((await storedDrafts(next)).map((d) => [d.body, d.title])).toEqual([[TYPED, TITLE]]);
+
+  /**
+   * 🔴 付箋(こちらが開いた窓)には書きかけの 1 行を出さない(台帳 #1852 M1)。
+   * 直す前は、起動の途中で「本体か」を旗で読んでいて常に本体と読まれ、付箋にも同じ 1 行が出ていた。
+   * ⚠ 起動を足していない ── 上で 1 行が出ている本体から付箋を押して開く(window.open の窓は gotoApp の数に出ない)。
+   * 対照群は本体の `offer`(同じ瞬間に出ている)。出ないことは起動が落ち着いてから見る。
+   */
+  const noteWinPromise = context.waitForEvent('page');
+  await clickReal(next, '[data-pkc-action="open-note-window"]');
+  const noteWin = await noteWinPromise;
+  await expect(noteWin.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await expect(noteWin.locator('[data-pkc-view-pane="detail"]')).toBeVisible({ timeout: 20_000 });
+  await noteWin.waitForTimeout(1500);
+  await expect(offer, '対照群:本体の 1 行は出たまま').toBeVisible();
+  await expect(
+    noteWin.locator('[data-pkc-region="draft-offer"]'),
+    '付箋に書きかけの 1 行が出ている(本体の窓だけに出す)',
+  ).toBeHidden();
+  // 🔴 付箋が起動で控えを読んで「聞くことが無い」と片付けると、本体が聞くはずの控えが消える ── 控えが残っていること
+  expect(
+    (await storedDrafts(next)).map((d) => [d.body, d.title]),
+    '付箋の起動が、本体の窓が聞くはずの控えを消した',
+  ).toEqual([[TYPED, TITLE]]);
+  await noteWin.close();
   expect(errors).toEqual([]);
 });
 
@@ -145,6 +169,39 @@ test('消す:1 行も控えも消え、開き直しても出ない', async ({ pa
   await expect(again.locator('[data-pkc-boot="ready"]')).toBeAttached();
   await again.waitForTimeout(1500); // 起動後に非同期で出る物なので、出ないことは少し待ってから見る
   await expect(again.locator('[data-pkc-region="draft-offer"]')).toBeHidden();
+
+  /**
+   * 🔴 追記欄の書きかけ(台帳 #1852 M1 動線 2)── 打つ → 再読み込み → 「保存していない追記が残っています」→ 戻す →
+   * 追記欄に字が戻る(ノートの本文は変わっていない)→ 追記を押すと 1 行が消える。
+   * ⚠ 起動を足していない ── 上の `again` の道中に載せる(再読み込みは gotoApp の数に出ない)。
+   */
+  const APPENDED = '追記の書きかけ';
+  await again.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().click();
+  await expect(again.locator('[data-pkc-field="detail-body"]')).toContainText('牛乳');
+  const box = again.locator('[data-pkc-field="append-input"]');
+  await box.fill(APPENDED);
+  await expect
+    .poll(async () => (await storedDrafts(again)).map((d) => d.body), { timeout: 10_000 })
+    .toEqual([APPENDED]);
+  await again.reload();
+  await expect(again.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  const appendOffer = again.locator('[data-pkc-region="draft-offer"]');
+  await expect(appendOffer, '追記の 1 行が出ていない').toBeVisible({ timeout: 15_000 });
+  await expect(appendOffer.locator('[data-pkc-field="draft-offer-text"]')).toHaveText(
+    /^保存していない追記が残っています\(.+\)$/,
+  );
+  await clickReal(again, '[data-pkc-action="restore-draft"]');
+  await expect(again.locator('[data-pkc-field="append-input"]'), '追記欄に字が戻っていない').toHaveValue(
+    APPENDED,
+    { timeout: 10_000 },
+  );
+  // 🔴 戻しただけでは何も書いていない:ノートの本文は元のまま
+  await expect(again.locator('[data-pkc-field="detail-body"]')).not.toContainText(APPENDED);
+  await clickReal(again, '[data-pkc-action="append-entry"]');
+  await expect(again.locator('[data-pkc-field="detail-body"]'), '追記が本文に入っていない').toContainText(APPENDED, {
+    timeout: 10_000,
+  });
+  await expect(appendOffer, '追記したのに 1 行が残っている').toBeHidden();
   expect(errors).toEqual([]);
   expect(errors2).toEqual([]);
 });

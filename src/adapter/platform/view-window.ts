@@ -60,7 +60,11 @@ import { appWindowFeatures, type AppOpenTarget } from '../../features/launcher/o
  * かかるのは「窓が出て bundle が動き出すまで」だけである。
  * ⚠ 数字は probe の docstring に置く(ここへ書き写すと二重帳簿になる)。
  */
-export const VIEW_WINDOW_ANNOUNCE_MS = 2500;
+export const VIEW_WINDOW_ANNOUNCE_MS = 4500;
+/*
+ * 🔴 2500 → 4500(依頼 220、Gemini 回答「4〜5 秒程度」)。動きの遅い端末では 2.5 秒を過ぎてから窓が出ることがあり、
+ *   そのとき「止められた」と言い切ると、あとから窓が開いて同じノートの窓が 2 枚になる。待つのは失敗した回だけ。
+ */
 
 /** 合図をやり取りする放送路。⚠ store の protocol とは**別にする**(混ぜない)。 */
 export const VIEW_WINDOW_CHANNEL = 'pkc3-view-window';
@@ -236,6 +240,13 @@ export const POPUP_ALLOW_STEP = 'アドレスバーの右端でポップアッ�
  */
 export const VIEW_WINDOW_OPENING = '別のウィンドウを開いています…';
 
+/**
+ * 合図が返らなかったときの理由(依頼 220)。🔴 **「ブロックされた」と言い切らない** ── 動きの遅い端末では
+ * 案内のあとに窓が開くことがある。言い切ると、開いた窓を見て「嘘だった」と読まれ、もう一度押して 2 枚になる。
+ * ⚠ 続く許可の手順(`POPUP_ALLOW_STEP`)は各退避の文が足す ── 「開かないとき」の話であることは、ここで言う。
+ */
+export const VIEW_WINDOW_SLOW = '開くのに時間がかかっています。開かないときはポップアップの設定を確かめてください';
+
 /** どこで開いたか。⚠ 呼び側が数えるためではなく、**test の観測点**として返す。 */
 export type ViewWindowResult = 'window' | 'pane';
 
@@ -286,7 +297,7 @@ export async function openViewInWindow(
   }
   deps.notify?.('');
   // 🔑 合図が返らなかった = 窓が出ていない。**ここで初めて**中央の面を使う
-  fallback(view, deps, 'ブラウザが新しいウィンドウをブロックしたようです');
+  fallback(view, deps, VIEW_WINDOW_SLOW);
   return 'pane';
 }
 

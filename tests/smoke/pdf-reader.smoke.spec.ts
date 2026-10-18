@@ -2069,6 +2069,41 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await cold.close();
   await context.unroute('**/*');
 
+  // ── ⑦′ 本体のタブを読み込み直した後、開いたままの窓で本体へ頼む操作を押す(台帳 #1852 束 T1、依頼 333)──
+  //    約 10 秒待たず、1.5〜3 秒で「PKC3 の画面が読み込み直されました…」と言い、5 秒後も消えない(状態の一言)
+  await clickReal(page, page.locator('[data-pkc-action="select-entry"][data-pkc-entry]', { hasText: '見積.pdf' }));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', '見積.pdf');
+  const [stale] = await Promise.all([
+    context.waitForEvent('page', { timeout: 15_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  await expect(stale.locator('body')).toHaveAttribute('data-pkc-pdf-state', 'ready', { timeout: 20_000 });
+  await expect(stale.locator('.page[data-page="1"] .textLayer span').first()).toBeAttached({ timeout: 15_000 });
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await stale.evaluate(() => {
+    const el = document.querySelector('.page[data-page="1"] .textLayer span');
+    if (el === null) throw new Error('1 頁目の字の層が無い');
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    sel?.addRange(r);
+  });
+  await expect(stale.locator('#quote'), '字を選んでも「ノートへ引用する」が押せない').toBeEnabled();
+  const reloadedAt = Date.now();
+  await clickReal(stale, '#quote');
+  await expect(
+    stale.locator('#status'),
+    '本体を読み込み直した後に押しても、約 3 秒以内に「読み込み直されました」と言わない(10 秒待たされる)',
+  ).toContainText('PKC3 の画面が読み込み直されました', { timeout: 3_000 });
+  expect(Date.now() - reloadedAt, '言うまでに 3 秒を超えた').toBeLessThan(3_500);
+  await stale.waitForTimeout(5_000);
+  await expect(stale.locator('#status'), '5 秒後に「読み込み直されました」が消えた(次にすることを読み終える前に消える)').toContainText(
+    'PKC3 の画面が読み込み直されました',
+  );
+  await stale.close();
+
   // ── ⑧ 保存できないタブ(2 つ目のタブ)から開こうとする ── 窓は開かず、理由が出る
   const tabB = await context.newPage();
   await tabB.setViewportSize({ width: 1280, height: 900 });

@@ -332,7 +332,8 @@ describe('main.ts の配線(原文 pin ── 弱い。`main.ts` は走らない
 
   it('🔴 断り・エラーの直呼びは kind を渡している(5 か所)', () => {
     expect(code).toMatch(/onBroken: \(text\) => showStatus\(text, \{ kind: 'problem' \}\)/);
-    expect(code.match(/kind: 'caution'/g)?.length, 'caution の渡し先が 4 つ(PDF が読めなかった / Office が固まった / 読み込めなかった / 控えを書けなかった)').toBe(4);
+    // 4 → 5(依頼 219・329):別のウィンドウが書きかけのまま閉じたことを、システムのメッセージに「注意」で足す口を 1 つ足した
+    expect(code.match(/kind: 'caution'/g)?.length, 'caution の渡し先が 5 つ(PDF が読めなかった / Office が固まった / 読み込めなかった / 控えを書けなかった / 別のウィンドウの書きかけ)').toBe(5);
     expect(code.match(/kind: 'problem'/g)?.length, 'problem の渡し先が 3 つ(壊れ / 一式 / Office)').toBeGreaterThanOrEqual(3);
   });
 });

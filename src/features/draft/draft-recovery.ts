@@ -91,11 +91,24 @@ export interface DraftRecord {
    * (ノート全文ではない)、`title` = 空、`base` = 開いたときの欄の原文の指紋。無ければ全文編集の控え。
    */
   readonly part?: DraftPart;
+  /**
+   * 🔴 ノートの下の**追記欄**に打っていた字の控えのとき(依頼 330)。このとき `body` = 打っていた字、`title` = 空、
+   * `base` = 空。全文編集・章の編集の控えとは**別の鍵**で持つ(同じ鍵だと、章の編集の控えと取り合って消し合う)。
+   */
+  readonly append?: true;
 }
 
-/** 鍵。⚠ 置き場の鍵と、消すときの鍵はこの 1 本。 */
-export function draftKey(cid: string, lid: string): string {
-  return `${cid}\u0000${lid}`;
+/**
+ * 鍵。⚠ 置き場の鍵と、消すときの鍵はこの 1 本。
+ * 🔴 追記欄の控えは**別の鍵**(依頼 330)── ノートごとに全文編集の控えと追記欄の控えを 1 件ずつ持てる。
+ */
+export function draftKey(cid: string, lid: string, append = false): string {
+  return append ? `${cid}\u0000${lid}\u0000append` : `${cid}\u0000${lid}`;
+}
+
+/** 控え 1 件の鍵(`append` を見て選ぶ。⚠ 置き場 2 つと書き手が同じ 1 本を通る)。 */
+export function draftKeyOf(r: Pick<DraftRecord, 'cid' | 'lid' | 'append'>): string {
+  return draftKey(r.cid, r.lid, r.append === true);
 }
 
 /**
@@ -151,6 +164,36 @@ export function judgeDraft(
  *   `tests/adapter/draft-recovery.test.ts` が、戻した控えを新しい disk の上へ保存して checkpoint が立つことを見る)。
  */
 export const MOVED_TAIL = '。別の場所で更新されています。戻して保存すると、その更新は履歴に残ります';
+
+/**
+ * 追記欄の控えを戻す価値があるか(依頼 330)。
+ * - `gone`  ノートが無い ── 黙って片付ける
+ * - `same`  字が空 / もう本文に入っている(送った後に控えが残った)── 聞くことが無い(片付ける)
+ * - `plain` 戻せる
+ * ⚠ 「本文に入っている」は**字がそのまま含まれるか**で見る(追記は字を足すだけで、書き換えない)。
+ */
+export function judgeAppendDraft(draft: DraftRecord, storedBody: string | null): 'gone' | 'same' | 'plain' {
+  if (storedBody === null) return 'gone';
+  const text = draft.body.trim();
+  if (text === '' || storedBody.includes(text)) return 'same';
+  return 'plain';
+}
+
+/** 起動時の 1 行(追記欄の控え)。題名は空のとき「無題」。 */
+export function draftAppendOfferLine(title: string, rest: number): string {
+  const name = title.trim() === '' ? '無題' : title;
+  const more = rest > 0 ? `。ほか ${String(rest)} 件` : '';
+  return `保存していない追記が残っています(${name})${more}`;
+}
+
+/**
+ * 別のウィンドウ(付箋など)が書きかけのまま閉じたとき、本体の「システム」のメッセージに足す 1 件(依頼 219・329)。
+ * 🔴 **ノートの題名は書かない** ── メッセージは中身を漏らさない決まり(題名は `sanitizeMessageText` が伏せる)。
+ *   ⚠ **「」で囲んだボタン名も書かない** ── 伏せ字処理は「」の中を全部伏せる(ボタン名が「…」になる)。
+ *   どのノートかは、画面の 1 行(`draftOfferLine`)が言う。
+ */
+export const DRAFT_LEFT_MESSAGE =
+  '別のウィンドウで書いていた編集が、保存されないまま残っています。画面に出る戻すボタンから開き直せます';
 
 /** 起動時の 1 行(題名は空のとき「無題」)。 */
 export function draftOfferLine(title: string, moved: boolean, rest: number): string {

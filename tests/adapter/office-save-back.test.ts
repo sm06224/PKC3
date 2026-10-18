@@ -19,6 +19,8 @@ import {
   createOfficeSaveBack,
   LOCAL_ORPHAN_GRACE_MS,
   localOrphanImportedNotice,
+  savedHeldElsewhereNotice,
+  savedHeldNotice,
   originGoneImportedNotice,
   SAME_DOC_MAX,
   sharedReplaceQuestion,
@@ -132,6 +134,8 @@ function harness(over: Partial<SaveBackDeps> = {}): {
     },
     // ⚠ 既定は「同じファイルを指す添付がほかに無い」── 確かめずに差し替える(共有の回は各 it が渡す。#1163 依頼 211・293)
     confirmShared: async () => 'replace',
+    // ⚠ 既定は「別のタブは編集していない」(依頼 368 の回は各 it が渡す)
+    editedElsewhere: async () => false,
     adopt: (key, lid) => adopted.push(`${key}=${lid}`),
     notify: (m, open) => {
       notices.push(m);
@@ -1053,6 +1057,10 @@ describe('手元のファイルの合言葉を知らないタブ(#1087)', () => 
     expect(h.created).toEqual(['報告書.docx']);
     expect(h.replaced, '手元の合言葉でノートを差し替えた').toEqual([]);
     expect(h.notices).toEqual([localOrphanImportedNotice('報告書.docx')]);
+    // 🔴 依頼 95-1:つながりが切れていたことと、元のファイルは変わっていないことを言う
+    expect(h.notices[0]).toContain('元のファイルとのつながりが切れていた');
+    expect(h.notices[0]).toContain('元のファイルは変わっていません');
+    expect(h.notices[0], '半端に書き換わったと読める旧い言い方').not.toContain('書き戻せませんでした');
     expect(h.notices.join(' '), '一般の取り込み通知も出ている').not.toContain('Office で保存した内容を取り込みました');
     expect(h.stage.keys()).toEqual([]);
   });
@@ -1519,5 +1527,73 @@ describe('🔴 共有の確かめ(差し替える前)', () => {
     const noLinks = sharedReplaceQuestion('契約書.pdf', 2, 0, false);
     expect(noLinks).toContain('ほかの添付のノート自身は古い版のままです');
     expect(noLinks, 'やめる側が無いのに、別の添付の案内が出た').not.toContain('別の添付として保存');
+  });
+});
+
+/**
+ * 🔴 依頼 368(台帳 #1852 束 M1):別のタブがそのノートを編集中のとき、Office の保存は添付を書き換えない。
+ * 直す前は自分のタブの編集中(`canWrite`)しか見なかったので、そのタブが後で保存すると添付の参照が古いほうに戻ることがあった。
+ */
+describe('別のタブが編集中のノートへは差し替えない(依頼 368)', () => {
+  it('編集中なら棚に残して預かり、差し替えない。編集が終わって撃ち直したら入る(対照群:終わらなければ入らない)', async () => {
+    let elsewhere = true;
+    const h = harness({ editedElsewhere: async () => elsewhere });
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    expect(await h.sb.receive('o1')).toBe('deferred');
+    expect(h.replaced, '別のタブが編集中なのに差し替えた').toEqual([]);
+    expect(h.created, '差し替えを断ったのに新しいノートを作った').toEqual([]);
+    expect(h.stage.keys(), '預かるはずの保存が棚から消えた(文書が消える)').not.toEqual([]);
+    // 言い分け:自分のタブの編集中(savedHeldNotice)とは別の字で、別のタブと言う
+    expect(h.notices).toEqual([savedHeldElsewhereNotice('x.odt')]);
+    expect(h.notices[0]).toContain('別のタブまたはウィンドウで編集中');
+    expect(h.notices[0]).not.toBe(savedHeldNotice('x.odt'));
+    // まだ編集中のまま撃ち直しても入らない。同じ字を繰り返さない
+    expect(await h.sb.retryDeferred()).toBe(0);
+    expect(h.replaced).toEqual([]);
+    expect(h.notices, '撃ち直しのたびに同じ字を出している').toHaveLength(1);
+    // 編集が終わった
+    elsewhere = false;
+    expect(await h.sb.retryDeferred()).toBe(1);
+    expect(h.replaced).toEqual(['lid-7']);
+    expect(h.stage.keys()).toEqual([]);
+  });
+
+  it('対照群:別のタブが編集していなければ、これまでどおり差し替える。問い合わせるノートは差し替え先の lid', async () => {
+    const asked: string[] = [];
+    const h = harness({ editedElsewhere: async (lid) => (asked.push(lid), false) });
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    expect(await h.sb.receive('o1')).toBe('replaced');
+    expect(asked).toEqual(['lid-7']);
+    expect(h.replaced).toEqual(['lid-7']);
+  });
+
+  it('main.ts の配線(原文 pin ── 弱いと自覚して使う):追記などと同じ問い合わせ(editedElsewhereReason)を通り、預かったら撃ち直しの時計を張る', () => {
+    const main = readFileSync('src/main.ts', 'utf-8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    const i = main.indexOf('createOfficeSaveBack({');
+    expect(i, 'createOfficeSaveBack の配線を引けていない').toBeGreaterThan(0);
+    const wiring = main.slice(i, i + 4000);
+    expect(wiring).toMatch(/editedElsewhere: async \(lid\) => \{/);
+    expect(wiring).toContain('editedElsewhereReason(dispatcher, editLockPort, lid)');
+    expect(wiring).toMatch(/window\.setTimeout\(\(\) => void officeSaveBack\.retryDeferred\(\)/);
+  });
+
+  it('聞く(同じファイルを指す添付の確かめ)より前に断る / 新しい添付のノートを足すだけの回は問い合わせない', async () => {
+    let confirmAsked = 0;
+    const asked: string[] = [];
+    const h = harness({
+      editedElsewhere: async (lid) => (asked.push(lid), true),
+      confirmShared: async () => (confirmAsked++, 'replace'),
+    });
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    await h.sb.receive('o1');
+    expect(confirmAsked, '断る前に user へ聞いた').toBe(0);
+    // 合言葉が無い(新規)なら、どのノートも書き換えないので問い合わせない
+    const h2 = harness({ editedElsewhere: async () => (asked.push('new'), true) });
+    asked.length = 0;
+    h2.stage.put({ key: 'o2', name: '新規.odt' });
+    expect(await h2.sb.receive('o2')).toBe('created');
+    expect(asked, '書き換えない回まで問い合わせた').toEqual([]);
   });
 });

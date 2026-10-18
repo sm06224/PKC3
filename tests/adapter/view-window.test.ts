@@ -298,6 +298,31 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
   });
 
   /**
+   * 🔴 **依頼 220:動きの遅い端末では、2.5 秒を過ぎてから窓が出る。** 待つ時間を 4〜5 秒にし、
+   * 合図が返らなかった回の理由も「止められた」と言い切らない(あとから窓が開いて、同じ窓が 2 枚になる)。
+   */
+  it('🔴 220:猶予は 4 秒以上 5 秒以下。合図が返らなかった回の理由は「ブロックされた」と言い切らず、時間がかかっていると言う', async () => {
+    expect(VIEW_WINDOW_ANNOUNCE_MS, '2.5 秒のままでは遅い端末で言い切ってしまう').toBeGreaterThanOrEqual(4000);
+    expect(VIEW_WINDOW_ANNOUNCE_MS).toBeLessThanOrEqual(5000);
+    const here = { containerId: 'c1', lid: 'n1' };
+    const slow = bench({ answered: false, selected: here });
+    await openViewInWindow(null, slow.deps); // 付箋(退避先が無い)
+    expect(slow.fails).toHaveLength(1);
+    expect(slow.fails[0]).toContain('開くのに時間がかかっています');
+    expect(slow.fails[0]).toContain('開かないときはポップアップの設定を確かめてください');
+    expect(slow.fails[0], '止められたと言い切っている').not.toMatch(/ブロック|止められ/);
+    expect(slow.fails[0], '許可の出し方が無い').toContain(POPUP_ALLOW_STEP);
+    // 面の窓でも同じ理由(言い方を場面ごとに変えない)
+    const pane = bench({ answered: false });
+    await openViewInWindow('dual', pane.deps);
+    expect(pane.fails[0]).toContain('開くのに時間がかかっています');
+    // 対照群:合図が返れば理由は出ない
+    const ok = bench({ answered: true, selected: here });
+    await openViewInWindow(null, ok.deps);
+    expect(ok.fails).toEqual([]);
+  });
+
+  /**
    * ⚠ アドレスが組めないとき(base に `#` が残っている)も**黙って本文で開かない**。
    * 🔑 `currentBaseUrl` が断片を落とすので普通は起きないが、
    *   落とし忘れた日に**無言の dead click** にならないよう、口を閉じておく。

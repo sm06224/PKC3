@@ -189,7 +189,7 @@ import {
 } from '@features/markdown/html-sandbox';
 import { AssetBlobStore } from '@adapter/platform/storage/asset-blob-store';
 import { connectWipedChannel, WIPED_CHANNEL } from '@adapter/platform/storage/wiped-channel';
-import { resetContainer, wipedElsewhere } from '@features/storage/container-reset';
+import { reloadAfterWipe, resetContainer, wipedElsewhere } from '@features/storage/container-reset';
 import { runStartupIntegrity } from '@adapter/platform/storage/startup-integrity';
 import type { StartupIntegrityOutcome } from '@features/storage/integrity-schedule';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
@@ -225,7 +225,8 @@ import { SECTION_BOX_INPUT_FIELD, sectionBoxText } from '@adapter/ui/render/sect
 import { CODE_BOX_INPUT_FIELD, codeBoxText } from '@adapter/ui/render/code-box';
 import { connectDraftWriter, readAfterSettle } from '@adapter/platform/draft-writer';
 import { IdbDraftStore, holdTabLock, liveTabs } from '@adapter/platform/draft-store';
-import type { DraftClock } from '@features/draft/draft-recovery';
+import { announceDraftTab, watchDraftTabs } from '@adapter/platform/draft-tab-watch';
+import { DRAFT_LEFT_MESSAGE, type DraftClock } from '@features/draft/draft-recovery';
 import {
   fixedHeadOfOpError,
   messageTextOfOpError,
@@ -271,7 +272,7 @@ import { appPasteSource } from '@adapter/ui/render/paste-source';
 import { appDualPrefs } from '@adapter/ui/render/dual-prefs';
 import { appFilerFlatten } from '@adapter/ui/render/filer-flatten';
 import { isPasteSource } from '@features/markdown/paste-source';
-import { launchTile } from '@adapter/ui/launch-tile';
+import { launchTile, openAppWindowEarly } from '@adapter/ui/launch-tile';
 import { collectExistingLids, collectExistingRelationIds } from '@features/import/existing-lids';
 import { appOfficePack } from '@adapter/ui/render/office-entry-view';
 import { applyPackResult, syncPackStateFromStore } from '@adapter/ui/render/office-pack-panel';
@@ -940,6 +941,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     onWiped: () => onContainerWiped(),
   });
   let onContainerWiped: () => void = () => location.reload();
+  /** 本体が戻るのを待っている(依頼 360)。⚠ 待つ間に自分が本体へ昇格したら、読み込み直す。 */
+  let wipedWaiting = false;
   bootLease = lease;
 
   /**
@@ -1320,13 +1323,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   まま)に打っていても**聞かずに読み込み直していた**。
      */
     const plan = wipedElsewhere(hasUnsavedTyping(dispatcher.getState()));
+    /**
+     * 🔴 **本体のタブが戻るのを待ってから読み込み直す**(依頼 360)。⚠ 直す前は聞いた瞬間に読み込み直し、
+     *   まだ結果を表示している途中の本体と話せず「起動に失敗しました」になった(そのタブは本体が戻っても直らない)。
+     *   本体の役を持つタブ(本体自身 / 昇格したタブ)はこれまでどおり、すぐ読み込み直す。判断は `reloadAfterWipe`。
+     */
+    const reloadWhenMainBack = (): void => {
+      const conn = followerConn;
+      reloadAfterWipe({
+        follower: conn !== null && sync === conn,
+        onMainBack: (fn) => {
+          wipedWaiting = true;
+          return conn === null ? () => {} : conn.onHolderBack(fn);
+        },
+        say: (text) => showStatus(text),
+        reload: () => location.reload(),
+      });
+    };
     if (plan.ask === null) {
-      location.reload();
+      reloadWhenMainBack();
       return;
     }
     // 🔴 danger ── 打った字は AppState にしか無いので、本当に戻せない
     void ask(plan.ask, { okLabel: 'このタブを読み込み直す', danger: true }).then((yes) => {
-      if (yes) location.reload();
+      if (yes) reloadWhenMainBack();
     });
   };
   // 🎨 配色は**枠より先**に当てる ── 後だと一瞬だけ既定色で描かれて瞬く
@@ -2590,6 +2610,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     void promotion?.then(async (failed) => {
       try {
         if (failed !== null) throw failed.error;
+        // 🔴 捨てたと聞いて本体を待っている間に、本体が閉じて自分が昇格した(依頼 360)── 古い入れ物の書き手に
+        //    なってしまうので、読み込み直して新しい入れ物から始める
+        if (promotedHost && wipedWaiting) {
+          location.reload();
+          return;
+        }
         if (promotedHost) {
           // 🔴 昇格したタブは自分の worker を開いた当事者 ── 起動のときの注意は通っていないのでここで 1 回
           if (promotedInit) announceReservedLock(promotedInit);
@@ -3002,6 +3028,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         cancelLabel: '別の添付として保存',
       });
       return answer === 'ok' ? 'replace' : 'separate';
+    },
+    // 🔴 別のタブ・ウィンドウが編集中のノートへは差し替えない(依頼 368)。追記などと**同じ問い合わせ**
+    //    (`editedElsewhereReason`)── 判断は `office-save-back.ts`。預かった保存は、10 秒おきに撃ち直す
+    //    (別のタブが編集をやめただけだと、書込の放送が来ない)
+    editedElsewhere: async (lid) => {
+      if ((await editedElsewhereReason(dispatcher, editLockPort, lid)) === null) return false;
+      window.setTimeout(() => void officeSaveBack.retryDeferred().catch(() => 0), 10_000);
+      return true;
     },
     // 🔴 #432 段②: 手元のファイルから開いた回は、元のファイルへ戻す
     //    ⚠ 判断(合言葉が手元のものか / 書けたか)は `local-office-files.ts` が持つ
@@ -4750,10 +4784,24 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     launchAsset: (lid, launchOpts) => {
       const meta = dispatcher.getState().entryMetas.get(lid);
       if (!meta) return;
+      /**
+       * 🔴 **押した直後に、空のウィンドウを先に開く**(依頼 243)。⚠ 本文を読む `await` より前に置く ──
+       *   後ろに落とすと、Safari は「押した直後」でない窓の開き方を止めて、何も開かないまま案内だけが出る。
+       *   起動画面のタイルと同じ形(先に窓を開け、読み終えたら流し込む)。判断は `launch-tile.ts` に在る。
+       */
+      const early = openAppWindowEarly(
+        (url, features) => window.open(url, '_blank', features),
+        currentAppOpenTarget(),
+        launchOpts,
+      );
+      const abandonEarly = (): void => {
+        if (early.tried) early.win?.close();
+      };
       void (async () => {
         const body =
           (await client.request({ op: 'getBody', cid, lid })) ?? null;
         if (body === null) {
+          abandonEarly();
           dispatcher.dispatch({
             type: 'OP_FAILED',
             error: '添付が見つかりません(「使われていない添付を消す」で消えた可能性があります)',
@@ -4762,6 +4810,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         }
         const att = readAttachmentMeta(body);
         if (att.assetKey === null || att.assetKey === '') {
+          abandonEarly();
           dispatcher.dispatch({ type: 'OP_FAILED', error: 'この添付には実体がありません' });
           return;
         }
@@ -4776,7 +4825,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           },
           {
             readBlob: (assetKey) => blobs.get(cid, assetKey),
-            open: (url, features) => window.open(url, '_blank', features),
+            // 🔴 先に開けた窓があればそれを渡す(依頼 243)。塞がれて `null` だったときも開き直さない
+            //    (`launchTile` が「塞がれています」と言う)
+            open: (url, features) => (early.tried ? early.win : window.open(url, '_blank', features)),
             // 🔴 どこに出すか(#884 段①)── **同期に読む**(gesture の中で使う)
             openTarget: currentAppOpenTarget,
             createUrl: (blob) => URL.createObjectURL(blob),
@@ -6021,7 +6072,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       readTitle: () =>
         document.querySelector<HTMLInputElement>('[data-pkc-field="editor-title"]')?.value ?? null,
       // 答えていない控えがあるノートは上書きしない / 編集が終わったことを 1 行へ伝える(#1376)
-      isPending: (lid) => draftOfferRef?.has(lid) === true,
+      isPending: (lid, append) => draftOfferRef?.has(lid, append === true) === true,
       onEnded: (lid, committed) => draftOfferRef?.editEnded(lid, committed),
       // 章の欄 / コード枠の欄に打っている字も控える(#1728)。欄の字は state に無いので欄から読む
       readPartText: () => {
@@ -6032,6 +6083,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         el.getAttribute('data-pkc-field') === SECTION_BOX_INPUT_FIELD ||
         el.getAttribute('data-pkc-field') === CODE_BOX_INPUT_FIELD,
       isRestoring: (lid) => draftOfferRef?.isRestoring(lid) === true,
+      // 追記欄に打っている字も控える(依頼 330)。欄の字は state に無いので欄から読む
+      readAppendText: () =>
+        document.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')?.value ?? null,
+      isAppendInput: (el) => el.getAttribute('data-pkc-field') === 'append-input',
       // 🔴 保存の確認の前にノートを離れた控えは、書込の列が済んでから disk を読んで消す(#1087)
       readDiskBody: readAfterSettle(
         async () => {
@@ -6040,7 +6095,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         async (lid) => (await client.request({ op: 'getBody', cid, lid })) ?? null,
       ),
     });
-    if (heldViewWindow === null && !heldNoteWindow) {
+    /**
+     * 🔴 **書きかけの 1 行は本体の窓だけに出す** ── 判定は `openedByUs`(起動の前に決まる)で見る(台帳 #1852 M1 で見つけた)。
+     * ⚠ 直す前は `heldViewWindow === null && !heldNoteWindow` だったが、その 2 つの旗が立つのはディープリンクを当てる
+     *   `startApp(...).then` の中 ── ここ(起動の途中)では常に「本体」と読まれ、付箋や別ウィンドウにも同じ 1 行が出ていた。
+     */
+    if (!openedByUs) {
       draftOfferRef = createDraftOffer({
         region: regions.draftOffer,
         dispatcher,
@@ -6076,6 +6136,25 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           put(40);
           }),
         copyText: copyPlainText,
+        // 追記欄の控えを戻す(依頼 330)。欄は選んだ直後の描画で出る ── 出ていなければ 50ms ごとに最大 2 秒待つ。
+        // 入れたら `input` を撃つ(欄の高さが育ち、書き手が自分の控えとして書き直す)
+        setAppendText: (lid, text) =>
+          new Promise<boolean>((resolve) => {
+            const put = (tries: number): void => {
+              const ta = document.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]');
+              const shown = ta !== null && ta.closest('[hidden]') === null;
+              if (ta === null || !shown || dispatcher.getState().selectedLid !== lid) {
+                if (tries > 0) window.setTimeout(() => put(tries - 1), 50);
+                else resolve(false);
+                return;
+              }
+              // 欄に既に別の字が打たれているなら、それを消さない(後ろへ足す)
+              ta.value = ta.value === '' ? text : `${ta.value}\n${text}`;
+              ta.dispatchEvent(new Event('input', { bubbles: true }));
+              resolve(true);
+            };
+            window.setTimeout(() => put(40), 0);
+          }),
         setTitle: (title) => {
           const set = (): void => {
             const el = document.querySelector<HTMLInputElement>('[data-pkc-field="editor-title"]');
@@ -6087,6 +6166,27 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         say: showStatus,
       });
       void draftOfferRef.present();
+    }
+    /**
+     * 🔴 **別のウィンドウ(付箋など)が書きかけのまま閉じたら、本体がその場で知らせる**(依頼 219・329)。
+     * ⚠ 直す前は起動のとき 1 度しか聞かず、本体を開いたままの人は次に起動し直すまで気づけなかった。
+     *   出すのは①画面の 1 行(押すと戻れる)②「システム」のメッセージ(あとからでも見つけられる)。
+     * ⚠ 別のウィンドウかは `openedByUs`(こちらが開いた窓か)で見る ── `heldNoteWindow` などの旗は
+     *   この時点ではまだ立っていない(ディープリンクを当てるのは起動の後)ので、読むと常に偽になる。
+     */
+    if (openedByUs) {
+      // 別のウィンドウ:自分の印を本体へ知らせる(閉じたあと、本体が書きかけを探す)
+      announceDraftTab(draftTab, cid);
+    } else if (draftOfferRef !== null) {
+      const offer: DraftOffer = draftOfferRef;
+      watchDraftTabs({
+        cid,
+        onEnded: (tab) => {
+          void offer.leftBehind(tab).then((left) => {
+            if (left) appMessagePost.post({ kind: 'caution', source: 'draft', text: DRAFT_LEFT_MESSAGE });
+          });
+        },
+      });
     }
   }
   /**

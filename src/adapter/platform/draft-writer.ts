@@ -37,8 +37,11 @@ export interface DraftWriterDeps {
   clock: DraftClock;
   /** 題名の編集欄の値(欄が無ければ `null`)。 */
   readTitle(): string | null;
-  /** そのノートに、まだ答えていない控え(起動の 1 行)があるか。在れば上書きしない。 */
-  isPending?(lid: string): boolean;
+  /**
+   * そのノートに、まだ答えていない控え(起動の 1 行)があるか。在れば上書きしない。
+   * `append` = 追記欄の控え(依頼 330。全文編集の控えとは別に数える)。
+   */
+  isPending?(lid: string, append?: boolean): boolean;
   /** 編集が終わった。`committed` = 保存で終えた(取り消しではない)。 */
   onEnded?(lid: string, committed: boolean): void;
   /**
@@ -60,6 +63,13 @@ export interface DraftWriterDeps {
    *   移った後はこれで disk を読み、保存した字と同じなら控えを消す。省略 = 従来どおり待つだけ。
    */
   readDiskBody?(lid: string): Promise<string | null>;
+  /**
+   * 🔴 **追記欄に打っている字**(依頼 330)。欄が無ければ `null`。省略 = 追記欄の控えは取らない。
+   * ⚠ 追記欄の字も state に写らない(送るまでノートに書かない)ので、欄そのものから読む。
+   */
+  readAppendText?(): string | null;
+  /** `input` の対象が追記欄か。 */
+  isAppendInput?(el: Element): boolean;
   /** `input` / `pagehide` を拾う先。省略 = `document` / `window`。 */
   doc?: Document;
   win?: Window;
@@ -127,6 +137,15 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
   let partSession: PartSession | null = null;
   /** 保存で終えて、disk に届くのを待っている控え(lid → 確定した本文)。 */
   const awaitingDisk = new Map<string, { body: string; adopted: boolean }>();
+  /**
+   * 🔴 追記欄の打ちかけ(依頼 330)。`input` で拾った**ノートと字の組**を持つ ── 書くときに欄を読み直さない
+   *   (1 秒のあいだに別のノートへ移ると、前のノート宛ての字が、移った先の欄の字で置き換わる)。
+   */
+  let appendPending: { lid: string; text: string } | null = null;
+  /** 追記欄の控えを書いたノート(送れたら消すために覚える)。 */
+  const appendWritten = new Set<string>();
+  /** 最後に見た「直前の追記」(通った印)。 */
+  let lastAppendSeen: AppState['lastAppend'] = dispatcher.getState().lastAppend;
   let chain: Promise<void> = Promise.resolve();
   const enqueue = (job: () => Promise<void>): void => {
     // 失敗は黙って諦める(控えは保険。編集を止めない)
@@ -161,7 +180,36 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
     enqueue(() => store.put(rec));
   };
 
+  /** 追記欄の控えを書く / 消す(依頼 330)。⚠ 全文編集・章の欄とは独立 ── 別の鍵で持つ。 */
+  const writeAppend = (): void => {
+    const p = appendPending;
+    if (p === null) return;
+    appendPending = null;
+    // 🔴 答えていない追記の控えが在るノートは触らない(全文編集と同じ)
+    if (deps.isPending?.(p.lid, true) === true) return;
+    if (p.text === '' || !fitsDraft(p.text, '')) {
+      // 空にした / 大きすぎる ── 古い控えを残すと「戻す」で新しい字が失われて見える。
+      // ⚠ 戻した控えは別のタブが書いた物 ── 自分の字を消した回は誰の控えでも消す
+      appendWritten.delete(p.lid);
+      enqueue(() => store.remove(cid, p.lid, undefined, true));
+      return;
+    }
+    appendWritten.add(p.lid);
+    const rec: DraftRecord = {
+      cid,
+      lid: p.lid,
+      body: p.text,
+      title: '',
+      base: '',
+      at: deps.clock.now(),
+      tab,
+      append: true,
+    };
+    enqueue(() => store.put(rec));
+  };
+
   const write = (): void => {
+    writeAppend();
     if (partSession !== null) {
       writePart();
       return;
@@ -201,6 +249,8 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
     const s = session;
     session = null;
     throttle.cancel();
+    // 🔴 待っていた書込が追記欄の分も運んでいたなら、取り消さずに予約し直す(依頼 330)
+    if (appendPending !== null) throttle.touch();
     const o = st.openBody;
     const bodyCommitted = lastBody !== null && lastBody !== s.startBody && o?.lid === s.lid && o.baseline === lastBody;
     const titleCommitted =
@@ -279,6 +329,8 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
     if (ps === null) return;
     partSession = null;
     throttle.cancel();
+    // 🔴 待っていた書込が追記欄の分も運んでいたなら、取り消さずに予約し直す(依頼 330)
+    if (appendPending !== null) throttle.touch();
     const closedBySystem = !(st.selectedLid === ps.lid && st.entryMetas.has(ps.lid));
     const committed =
       !closedBySystem && ps.saving && st.openBody?.lid === ps.lid && st.openBody.body !== ps.startBody;
@@ -289,7 +341,23 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
     deps.onEnded?.(ps.lid, committed);
   };
 
+  /**
+   * 🔴 追記が通ったら、そのノートの追記欄の控えを消す(依頼 330)。⚠ 通ったかは `lastAppend` の入れ替わりで見る
+   *   (`ENTRY_APPENDED` だけが作る。失敗・強制解放は触らない ── 字が欄に残る回は控えも残す)。
+   */
+  const trackAppend = (st: AppState): void => {
+    if (st.lastAppend === lastAppendSeen) return;
+    const landed = st.lastAppend;
+    lastAppendSeen = landed;
+    if (landed === null) return;
+    const lid = landed.lid;
+    if (appendPending?.lid === lid) appendPending = null;
+    if (!appendWritten.delete(lid)) return;
+    enqueue(() => store.remove(cid, lid, undefined, true));
+  };
+
   const onState = (st: AppState): void => {
+    trackAppend(st);
     trackPart(st);
     if (st.phase === 'editing' && st.openBody) {
       const o = st.openBody;
@@ -326,6 +394,15 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
 
   const onInput = (ev: Event): void => {
     const t = ev.target as HTMLElement | null;
+    if (t !== null && deps.isAppendInput?.(t) === true) {
+      const lid = dispatcher.getState().selectedLid;
+      const text = deps.readAppendText?.() ?? null;
+      if (lid !== null && text !== null) {
+        appendPending = { lid, text };
+        throttle.touch();
+      }
+      return;
+    }
     if (partSession !== null && t !== null && deps.isPartInput?.(t) === true) {
       partSession.lastText = deps.readPartText?.() ?? partSession.lastText;
       throttle.touch();

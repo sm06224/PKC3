@@ -41,4 +41,14 @@ describe('watchBarStick', () => {
     watchBarStick(none.b, none.scroller)();
     expect(none.b.hasAttribute('data-pkc-bulk-stick'), '印が無いのに貼り付く').toBe(false);
   });
+  it('貼り付く間だけ、一覧に帯の高さの scroll-padding-bottom を付ける(行が帯の下に隠れない)', () => {
+    const hi = make(700, 120, true);
+    const stop = watchBarStick(hi.b, hi.scroller);
+    expect(hi.scroller.style.scrollPaddingBottom).toBe('120px');
+    stop();
+    expect(hi.scroller.style.scrollPaddingBottom, '観測をやめたら外す').toBe('');
+    const low = make(248, 166, true);
+    watchBarStick(low.b, low.scroller)();
+    expect(low.scroller.style.scrollPaddingBottom).toBe('');
+  });
 });

@@ -9,13 +9,16 @@
  * ⚠ 書けなかった(quota・私用ウィンドウ)ときは**黙って諦める** ── 控えは保険であって、
  *   書けないことで編集そのものを止めない。
  */
-import { DRAFT_COUNT_MAX, draftKey, isDraftPart, type DraftRecord } from '@features/draft/draft-recovery';
+import { DRAFT_COUNT_MAX, draftKey, draftKeyOf, isDraftPart, type DraftRecord } from '@features/draft/draft-recovery';
 
 /** 置き場の口。test は {@link MemoryDraftStore} を渡す。 */
 export interface DraftStore {
   put(rec: DraftRecord): Promise<void>;
-  /** 控えを消す。`tab` を渡したら、その tab が書いた控えのときだけ消す。 */
-  remove(cid: string, lid: string, tab?: string): Promise<void>;
+  /**
+   * 控えを消す。`tab` を渡したら、その tab が書いた控えのときだけ消す。
+   * `append` = 追記欄の控え(別の鍵。依頼 330)。
+   */
+  remove(cid: string, lid: string, tab?: string, append?: boolean): Promise<void>;
   list(cid: string): Promise<DraftRecord[]>;
   /**
    * 全部消す(中身を消してまっさらにする / 建て直し)。⚠ 消した入れ物の控えは、新しい入れ物から
@@ -39,7 +42,8 @@ function isRecord(v: unknown): v is DraftRecord {
     typeof r.at === 'number' &&
     typeof r.tab === 'string' &&
     // 欄の控え(#1728)── 形が壊れた part は控えごと読まない(戻すとき別の欄を開かない)
-    (r.part === undefined || isDraftPart(r.part))
+    (r.part === undefined || isDraftPart(r.part)) &&
+    (r.append === undefined || r.append === true)
   );
 }
 
@@ -48,7 +52,7 @@ export function overflowKeys(all: readonly DraftRecord[]): string[] {
   return [...all]
     .sort((a, b) => b.at - a.at)
     .slice(DRAFT_COUNT_MAX)
-    .map((r) => draftKey(r.cid, r.lid));
+    .map((r) => draftKeyOf(r));
 }
 
 /**
@@ -63,11 +67,11 @@ export function mayRemove(cur: DraftRecord | undefined, tab: string | undefined)
 export class MemoryDraftStore implements DraftStore {
   readonly map = new Map<string, DraftRecord>();
   async put(rec: DraftRecord): Promise<void> {
-    this.map.set(draftKey(rec.cid, rec.lid), rec);
+    this.map.set(draftKeyOf(rec), rec);
     for (const k of overflowKeys([...this.map.values()])) this.map.delete(k);
   }
-  async remove(cid: string, lid: string, tab?: string): Promise<void> {
-    const k = draftKey(cid, lid);
+  async remove(cid: string, lid: string, tab?: string, append = false): Promise<void> {
+    const k = draftKey(cid, lid, append);
     if (mayRemove(this.map.get(k), tab)) this.map.delete(k);
   }
   async list(cid: string): Promise<DraftRecord[]> {
@@ -121,7 +125,7 @@ export class IdbDraftStore implements DraftStore {
   async put(rec: DraftRecord): Promise<void> {
     const db = await this.need();
     await tx(db, 'readwrite', (s) => {
-      s.put(rec, draftKey(rec.cid, rec.lid));
+      s.put(rec, draftKeyOf(rec));
       // 上限は同じ tx の中で見る(別タブの書込と競っても件数が増え続けない)
       const all = s.getAll();
       all.onsuccess = () => {
@@ -131,10 +135,10 @@ export class IdbDraftStore implements DraftStore {
     });
   }
 
-  async remove(cid: string, lid: string, tab?: string): Promise<void> {
+  async remove(cid: string, lid: string, tab?: string, append = false): Promise<void> {
     const db = await this.need();
     await tx(db, 'readwrite', (s) => {
-      const key = draftKey(cid, lid);
+      const key = draftKey(cid, lid, append);
       if (tab === undefined) {
         s.delete(key);
         return;

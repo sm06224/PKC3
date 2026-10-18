@@ -484,7 +484,8 @@ describe('窓が塞がれたとき', () => {
     expect(await openViewInWindow('schedule', b.d)).toBe('pane');
     expect(b.panes, '左の列へ退避した(開いていない週を開いたと言う)').toEqual([]);
     expect(b.fails).toHaveLength(1);
-    expect(b.fails[0]).toContain('ブロック');
+    // 依頼 220:合図が返らなかった理由は「止められた」と言い切らず、時間がかかっていると言う(許可の出し方は続けて言う)
+    expect(b.fails[0]).toContain('開くのに時間がかかっています');
     expect(b.fails[0]).not.toContain('この画面で開きました');
   });
 
