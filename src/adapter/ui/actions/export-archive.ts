@@ -825,7 +825,10 @@ async function collectOfficeBlocks(
       : baked;
   // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
-  const { blocks, images, figures, inlineSkipped } = htmlToDocxBlocks(doc);
+  // 🔴 Word は添付の画像を置かれた位置の段落の中へ入れる(依頼 142 ②)。PowerPoint は板に置くので今までどおり
+  const { blocks, images, figures, inlineSkipped, inlineImages } = htmlToDocxBlocks(doc, {
+    inlineImages: target.kind === 'docx',
+  });
   // 🔑 数式は Word / PowerPoint では打った字のまま入る ── 閲覧用 HTML と同じ文面で言う(#1087)
   const mathNotice = mathSourceNotice(doc.querySelectorAll('[data-pkc-math-src]').length);
   if (mathNotice !== null) warnings.push(mathNotice);
@@ -885,6 +888,40 @@ async function collectOfficeBlocks(
       ...(img.look?.widthPct !== undefined ? { widthPct: img.look.widthPct } : {}),
       ...(img.look?.align !== undefined ? { align: img.look.align } : {}),
     };
+    media.push({ name, blob });
+  }
+  /**
+   * 🔴 **段落の中に置いた画像を解く**(依頼 142 ②)。解けた結果は入れ物(`holder`)へ書き込む ── 走りの写しにも届く。
+   * ⚠ 解けなかったものは書かない(その場に「入れられませんでした」の理由が出て、注意の件数にも数える)。
+   * 🔑 形式の判定と実寸の取り方は上の塊の画像と同じ(Office が素で読める形だけ)。
+   */
+  for (const [j, ref] of inlineImages.entries()) {
+    const blob = await deps.source.getAssetBlob(ref.assetKey).catch(() => null);
+    if (!blob) continue;
+    const type = blob.type || 'image/png';
+    const ext = /jpe?g/.test(type)
+      ? 'jpeg'
+      : type.includes('gif')
+        ? 'gif'
+        : type.includes('webp')
+          ? 'webp'
+          : type.includes('png')
+            ? 'png'
+            : null;
+    if (ext === null) {
+      ref.holder.failWhy = `この形式は ${target.app} に入れられません(${type})`;
+      continue;
+    }
+    const size = await imageSizeOf(blob);
+    if (size === null) {
+      ref.holder.failWhy = '大きさを読めませんでした';
+      continue;
+    }
+    // ⚠ 塊の画像の名前(`image1…`)と重ならないよう、続きの番号にする
+    const name = `media/image${images.length + j + 1}.${ext}`;
+    ref.holder.media = name;
+    ref.holder.widthPx = size.w;
+    ref.holder.heightPx = size.h;
     media.push({ name, blob });
   }
   /**

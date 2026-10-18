@@ -30,7 +30,13 @@ import {
   placeLineAnchorOf,
   placeLineTargetId,
 } from '@features/markdown/place-line';
-import { DOCX_LIST_DEPTH_MAX, type DocxBlock, type DocxCell, type DocxRun } from '@features/export/docx';
+import {
+  DOCX_LIST_DEPTH_MAX,
+  type DocxBlock,
+  type DocxCell,
+  type DocxRun,
+  type DocxRunImage,
+} from '@features/export/docx';
 import { svgFenceSource } from '@features/export/svg-fence';
 
 /** 走りに掛かる装飾(親から受け継ぐ)。 */
@@ -49,6 +55,7 @@ function pushRun(out: DocxRun[], text: string, style: RunStyle): void {
   // ⚠ 同じ装飾が続くなら 1 つに畳む(段落あたりの `<w:r>` を無駄に増やさない)
   if (
     last !== undefined &&
+    last.image === undefined &&
     last.bold === style.bold &&
     last.italic === style.italic &&
     last.strike === style.strike &&
@@ -189,7 +196,16 @@ function imageLookOf(el: Element): ImageLook | undefined {
  * @param doc `DOMParser` で読んだ document(呼び側が作る ── ここでは作らない。
  *   テストから happy-dom の document をそのまま渡せるようにするため)
  */
-export function htmlToDocxBlocks(doc: Document): {
+export function htmlToDocxBlocks(
+  doc: Document,
+  opts: {
+    /**
+     * 🔴 **添付の画像を、置かれた位置の段落の中へ入れる**(台帳 #1852 束 A1。依頼 142 ②。Word だけが渡す)。
+     * 渡さないと今までどおり、画像は囲む塊の外へ独立した塊として出る(PowerPoint は板に置くので渡さない)。
+     */
+    inlineImages?: boolean;
+  } = {},
+): {
   blocks: DocxBlock[];
   skipped: number;
   /**
@@ -214,7 +230,14 @@ export function htmlToDocxBlocks(doc: Document): {
    * 「入れられなかったもの」の件数から**黙って抜ける**(本文には理由が出るが、注意には数えられない)。
    */
   inlineSkipped: string[];
+  /**
+   * 🔴 **段落の中に置いた画像の預かり**(依頼 142 ②。`inlineImages` を渡したときだけ入る)。
+   * 呼び側が `assetKey` から bytes と実寸を解いて `holder` に書き込む。⚠ 書き込まなければ、その場に「入れられませんでした」が出る。
+   */
+  inlineImages: { holder: DocxRunImage; assetKey: string }[];
 } {
+  const inline = opts.inlineImages === true;
+  const inlineImages: { holder: DocxRunImage; assetKey: string }[] = [];
   const blocks: DocxBlock[] = [];
   const images: { at: number; assetKey: string; alt: string; look?: ImageLook }[] = [];
   const figures: { at: number; kind: string; source: string }[] = [];
@@ -307,6 +330,20 @@ export function htmlToDocxBlocks(doc: Document): {
          * 呼び側が「ここまでの字を塊にして → 画像 → 続き」を組む。
          */
         const look = imageLookOf(el);
+        /**
+         * 🔴 **段落の中の画像は、置かれた位置のまま走りとして残す**(依頼 142 ②)。箇条書きの項目・表のマス・文の途中でも、
+         * 囲む塊を割らず・表の後ろへ送らない。中身は呼び側が解いて入れ物に書き込む。
+         */
+        if (inline) {
+          const holder: DocxRunImage = {
+            alt,
+            ...(look?.widthPct !== undefined ? { widthPct: look.widthPct } : {}),
+            ...(look?.align !== undefined ? { align: look.align } : {}),
+          };
+          out.push({ text: '', image: holder });
+          inlineImages.push({ holder, assetKey });
+          continue;
+        }
         if (onImage !== undefined) {
           onImage(assetKey, alt, look);
           continue;
@@ -400,7 +437,7 @@ export function htmlToDocxBlocks(doc: Document): {
           if (i === 0 && afterImage) t = t.replace(/^\s+/, '');
           return t === r.text ? r : { ...r, text: t };
         })
-        .filter((r) => r.text !== '');
+        .filter((r) => r.text !== '' || r.image !== undefined);
       if (kept.length > 0) {
         blocks.push(make(kept));
         emitted = true;
@@ -750,5 +787,5 @@ export function htmlToDocxBlocks(doc: Document): {
   };
 
   walkBlocks(doc.body);
-  return { blocks, skipped, images, figures, inlineSkipped };
+  return { blocks, skipped, images, figures, inlineSkipped, inlineImages };
 }
