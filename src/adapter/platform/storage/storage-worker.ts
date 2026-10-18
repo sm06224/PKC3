@@ -75,7 +75,13 @@ import {
   type SnippetItem,
   type SnippetScan,
 } from '@features/snippet/snippet-table';
-import { plannedTerms, planSearch, toLikePattern, type QuerySearchPlan } from '@features/filter/search-query';
+import {
+  plannedTerms,
+  planSearch,
+  rawPlannedTerms,
+  toLikePattern,
+  type QuerySearchPlan,
+} from '@features/filter/search-query';
 import { excerptAroundFolded, foldedColumns, searchableBody } from '@features/filter/search-text';
 import { countTaskCandidates } from '@features/markdown/task-count';
 import { bodyTags } from '@features/flavor/entry-tags';
@@ -606,17 +612,17 @@ let foldCursor = FTS_ALL;
  */
 function refoldRow(database: Database, rid: number): void {
   const r = database.selectObjects(
-    'SELECT title, body, title_f, body_f, fold_chars FROM entries WHERE rowid = ?',
+    'SELECT title, body, title_f, body_f, fold_rev FROM entries WHERE rowid = ?',
     [rid],
   )[0] as
-    | { title: string; body: string; title_f: string | null; body_f: string | null; fold_chars: number | null }
+    | { title: string; body: string; title_f: string | null; body_f: string | null; fold_rev: number | null }
     | undefined;
   if (r === undefined) return;
   const f = foldedColumns(r.title, r.body);
-  if (r.title_f === f.titleF && r.body_f === f.bodyF && r.fold_chars === r.body.length) return;
+  if (r.title_f === f.titleF && r.body_f === f.bodyF && r.fold_rev !== null) return;
   database.exec({
-    sql: 'UPDATE entries SET title_f = ?, body_f = ?, fold_chars = ? WHERE rowid = ?',
-    bind: [f.titleF, f.bodyF, r.body.length, rid],
+    sql: 'UPDATE entries SET title_f = ?, body_f = ?, fold_rev = coalesce(fold_rev, 0) + 1 WHERE rowid = ?',
+    bind: [f.titleF, f.bodyF, rid],
   });
 }
 
@@ -628,7 +634,7 @@ const FOLD_CHUNK = 100;
  *
  * - 作り直しの途中(`built_upto < 最大`): `rowid` の順に次の塊を取り、元の字を作り(`refoldRow` ── 引き金は黙る)、
  *   視点から索引へ入れ、印を進める。**1 塊 = 1 tx**なので、途中で止まっても索引と印は合っている。
- * - 済んだ後: 旧ビルドが書いた行(`fold_chars IS NULL`)だけを引き直す(引き金が索引を書き換える)。
+ * - 済んだ後: 旧ビルドが書いた行(`fold_rev IS NULL`)だけを引き直す(引き金が索引を書き換える)。
  * ⚠ **行ごとに本文を読んで捨てる**(100 行を一度に heap へ載せない)。
  * ⚠ 呼ぶのは `foldTick`(起動の後の係)と test だけ。塊と塊の間で worker は他の依頼を捌く。
  */
@@ -640,7 +646,7 @@ export function foldStep(database: Database, chunk = FOLD_CHUNK): boolean {
   try {
     if (cursor >= FTS_ALL) {
       const rids = database.selectObjects(
-        'SELECT rowid AS rid FROM entries WHERE fold_chars IS NULL LIMIT ?',
+        'SELECT rowid AS rid FROM entries WHERE fold_rev IS NULL LIMIT ?',
         [chunk],
       ) as Array<{ rid: number }>;
       for (const r of rids) refoldRow(database, r.rid);
@@ -716,7 +722,7 @@ function startFoldBuild(database: Database): void {
   foldTimer = null;
   const pending =
     foldCursor < FTS_ALL ||
-    database.selectValue('SELECT 1 FROM entries WHERE fold_chars IS NULL LIMIT 1') !== undefined;
+    database.selectValue('SELECT 1 FROM entries WHERE fold_rev IS NULL LIMIT 1') !== undefined;
   if (pending) foldTimer = setTimeout(foldTick, 0);
 }
 
@@ -731,7 +737,11 @@ function searchPlanOf(query: string, syntax: 'plain' | 'query'): QuerySearchPlan
   const plan = syntax === 'plain' ? planSearch(query) : planSearch(query, { syntax: 'query' });
   if (plan.kind === 'fts' && foldCursor < FTS_ALL) {
     const t = plannedTerms(query, syntax);
-    return { kind: 'like-terms', include: t.include, exclude: t.exclude };
+    // 🔴 まだ揃えていない行は書いた字のまま ── 揃えた語に加えて、打った字のままの語でも引く
+    const raw = rawPlannedTerms(query, syntax);
+    return raw === null
+      ? { kind: 'like-terms', include: t.include, exclude: t.exclude }
+      : { kind: 'like-terms', include: t.include, exclude: t.exclude, raw };
   }
   return plan;
 }
@@ -748,19 +758,27 @@ function likeWhere(
 ): string[] {
   const include = plan.kind === 'like' ? [plan.pattern] : plan.include.map(toLikePattern);
   const exclude = plan.kind === 'like' ? [] : plan.exclude.map(toLikePattern);
-  const one = (pattern: string, not: boolean): string => {
-    let sql: string;
-    if (numbered) {
+  // 索引の作り直しの間だけ、語ごとに「書いた字のままの語」も候補にする(`searchPlanOf`)
+  const rawInclude = plan.kind === 'like-terms' ? plan.raw?.include.map(toLikePattern) : undefined;
+  const rawExclude = plan.kind === 'like-terms' ? plan.raw?.exclude.map(toLikePattern) : undefined;
+  const cond = (pattern: string, numberedBind: boolean): string => {
+    if (numberedBind) {
       bind.push(pattern);
       const i = bind.length;
-      sql = `(coalesce(title_f, title) LIKE ?${i} ESCAPE '\\' OR coalesce(body_f, body) LIKE ?${i} ESCAPE '\\')`;
-    } else {
-      bind.push(pattern, pattern);
-      sql = `(coalesce(title_f, title) LIKE ? ESCAPE '\\' OR coalesce(body_f, body) LIKE ? ESCAPE '\\')`;
+      return `(coalesce(title_f, title) LIKE ?${i} ESCAPE '\\' OR coalesce(body_f, body) LIKE ?${i} ESCAPE '\\')`;
     }
+    bind.push(pattern, pattern);
+    return `(coalesce(title_f, title) LIKE ? ESCAPE '\\' OR coalesce(body_f, body) LIKE ? ESCAPE '\\')`;
+  };
+  const one = (pattern: string, rawPattern: string | undefined, not: boolean): string => {
+    let sql = cond(pattern, numbered);
+    if (rawPattern !== undefined && rawPattern !== pattern) sql = `(${sql} OR ${cond(rawPattern, numbered)})`;
     return not ? `NOT ${sql}` : sql;
   };
-  return [...include.map((p) => one(p, false)), ...exclude.map((p) => one(p, true))];
+  return [
+    ...include.map((p, i) => one(p, rawInclude?.[i], false)),
+    ...exclude.map((p, i) => one(p, rawExclude?.[i], true)),
+  ];
 }
 
 /**
@@ -1876,8 +1894,8 @@ const NEEDS_BACKFILL =
 const UPSERT_SQL = `INSERT INTO entries
     (cid, lid, title, archetype, created_at, updated_at,
      entry_order, status, date, archived, task_total, body_chars, body_tags, realm,
-     title_f, body_f, fold_chars, body)
-  VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, datetime('now')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     title_f, body_f, fold_rev, body)
+  VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, datetime('now')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
   ON CONFLICT(cid, lid) DO UPDATE SET
     title = excluded.title,
     archetype = excluded.archetype,
@@ -1891,7 +1909,7 @@ const UPSERT_SQL = `INSERT INTO entries
     body_tags = excluded.body_tags,
     title_f = excluded.title_f,
     body_f = excluded.body_f,
-    fold_chars = excluded.fold_chars,
+    fold_rev = coalesce(entries.fold_rev, 0) + 1,
     body = excluded.body`;
 
 /**
@@ -1949,8 +1967,6 @@ function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
     e.realm ?? 'user',
     folded.titleF,
     folded.bodyF,
-    // 🔑 作った時点の本文の長さ ── 旧ビルドが後から書き換えた行を見つける印(`fold_chars` の注記)
-    e.body.length,
     e.body,
   ];
 }
@@ -2648,7 +2664,7 @@ function updateEntryColumn(
   database.exec({
     // 🔴 並べ替えは更新日時を進めない(#1087)── 居場所の移動(`setEntryParent`)と同じ。改名だけ進める
     // 🔴 改名は索引の元の字(`title_f`)も一緒に書く(台帳 #1852 の束 B2)
-    sql: `UPDATE entries SET ${column} = ?${column === 'title' ? ", updated_at = datetime('now'), title_f = ?" : ''}
+    sql: `UPDATE entries SET ${column} = ?${column === 'title' ? ", updated_at = datetime('now'), title_f = ?, fold_rev = coalesce(fold_rev, 0) + 1" : ''}
             WHERE cid = ? AND lid = ?`,
     bind: column === 'title' ? [value, foldedColumns(String(value), '').titleF, cid, lid] : [value, cid, lid],
   });
@@ -3851,16 +3867,17 @@ const handlers: Handlers = {
           sql: `INSERT INTO entries
                   (cid, lid, title, archetype, created_at, updated_at,
                    entry_order, status, date, archived, task_total, body_chars,
-                   body_tags, realm, title_f, body_f, fold_chars, body)
+                   body_tags, realm, title_f, body_f, fold_rev, body)
                 VALUES (?, ?, ?, 'textlog', datetime('now'), datetime('now'),
-                   0, NULL, NULL, 0, NULL, ?, NULL, 'system', ?, ?, ?, ?)`,
-          bind: [req.cid, req.lid, req.title, next.length, nextFold.titleF, nextFold.bodyF, next.length, next],
+                   0, NULL, NULL, 0, NULL, ?, NULL, 'system', ?, ?, 1, ?)`,
+          bind: [req.cid, req.lid, req.title, next.length, nextFold.titleF, nextFold.bodyF, next],
         });
       } else {
         database.exec({
-          sql: `UPDATE entries SET body = ?, body_chars = ?, body_f = ?, fold_chars = ?, updated_at = datetime('now')
+          sql: `UPDATE entries SET body = ?, body_chars = ?, body_f = ?, fold_rev = coalesce(fold_rev, 0) + 1,
+                  updated_at = datetime('now')
                   WHERE cid = ? AND lid = ?`,
-          bind: [next, next.length, nextFold.bodyF, next.length, req.cid, req.lid],
+          bind: [next, next.length, nextFold.bodyF, req.cid, req.lid],
         });
       }
       database.exec('COMMIT');

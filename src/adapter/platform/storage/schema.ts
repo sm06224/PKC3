@@ -116,11 +116,12 @@ export const ENTRY_ADDED_COLUMNS: readonly { readonly name: string; readonly ddl
   { name: 'title_f', ddl: 'TEXT' },
   { name: 'body_f', ddl: 'TEXT' },
   /**
-   * 🔴 **上の 2 列を、本文のどの長さの時点で作ったか**(= 本文の UTF-16 の長さ)。`NULL` = まだ作っていない。
-   * 新ビルドは書くたびに自分で入れる。旧ビルドが書いた行は NULL のまま(INSERT)、または引き金が NULL に戻す(UPDATE ──
-   * `FTS_DDL` の `entries_fold_stale`)ので、**次の起動で作り直される**(部分索引 `idx_entries_foldwait` で本文を読まずに見つける)。
+   * 🔴 **上の 2 列の版**(新ビルドが書くたびに 1 つ進める数)。`NULL` = まだ作っていない / 作り直しが要る。
+   * 新ビルドは題名・本文を書くたびに必ず進める。旧ビルドは列を知らないので**進めない** ── だから「題名・本文が書き換わったのに
+   * 版が動かなかった」更新は旧ビルドの書き込みで、引き金(`FTS_DDL` の `entries_fold_stale`)が元の字を捨てて NULL に戻す
+   * (索引は書いた字のまま追い、次の起動が揃え直す)。部分索引 `idx_entries_foldwait` で、本文を読まずに「作り直しが要る行が有るか」が分かる。
    */
-  { name: 'fold_chars', ddl: 'INTEGER' },
+  { name: 'fold_rev', ddl: 'INTEGER' },
 ];
 
 /**
@@ -267,17 +268,19 @@ export const FTS_DDL: readonly string[] = [
   /**
    * 🔴 **旧ビルドが題名・本文だけを書き換えた行を、「作り直しが要る」に戻す**(束 B2)。
    *
-   * 旧ビルドは `fold_chars` を知らないので、書き換えても値が変わらない ── 新ビルドの書き込みは必ず
-   * `fold_chars`(本文の長さ)を添えるので、**長さが変わる編集では値が動く**。動かなかった更新だけを NULL に戻す
-   * (同じ長さの編集・題名の変更は新ビルドでも NULL に戻るが、次の起動が同じ行を引き直すだけで害は無い)。
-   * ⚠ この引き金は索引を触らない(索引は上の `entries_fts_au` が、そのときの列の字で書く)。
+   * 新ビルドの書き込みは必ず `fold_rev` を進めるので、**題名・本文が書き換わったのに `fold_rev` が動かない**更新は旧ビルドのもの。
+   * 次の新ビルドの起動が `fold_rev IS NULL` の行を揃え直す。
+   * ⚠ **触るのは `fold_rev` だけ**(`title_f` / `body_f` は触らない)── 触ると `entries_fts_au` が走り、先に発火した側と
+   *   「索引に入っている字」の見方が食い違って `'delete'` が合わなくなる(発火の順序は保証されない)。
+   *   索引は「そのとき列にある元の字」で自分と整合したまま ── 旧ビルドが書き換えた本文は、元の字を持つ行(全角などを含む行)に限り、
+   *   次の新ビルドの起動までは古い元の字で引かれる(壊れはしない。旧ビルド自身の検索で、そのノートの新しい本文が引けないだけ)。
    */
   `CREATE TRIGGER IF NOT EXISTS entries_fold_stale AFTER UPDATE OF title, body ON entries
-     WHEN new.fold_chars IS old.fold_chars AND new.fold_chars IS NOT NULL BEGIN
-     UPDATE entries SET fold_chars = NULL WHERE rowid = new.rowid;
+     WHEN new.fold_rev IS old.fold_rev AND new.fold_rev IS NOT NULL BEGIN
+     UPDATE entries SET fold_rev = NULL WHERE rowid = new.rowid;
    END`,
-  /** 作り直しが要る行(`fold_chars IS NULL`)だけを引く部分索引。⚠ 本文を読まずに「有るか」が分かる。 */
-  `CREATE INDEX IF NOT EXISTS idx_entries_foldwait ON entries (cid) WHERE fold_chars IS NULL`,
+  /** 作り直しが要る行(`fold_rev IS NULL`)だけを引く部分索引。⚠ 本文を読まずに「有るか」が分かる。 */
+  `CREATE INDEX IF NOT EXISTS idx_entries_foldwait ON entries (cid) WHERE fold_rev IS NULL`,
 ];
 
 /**
@@ -337,7 +340,7 @@ export const SCHEMA_DDL: readonly string[] = [
      realm TEXT NOT NULL DEFAULT 'user',
      title_f TEXT,
      body_f TEXT,
-     fold_chars INTEGER,
+     fold_rev INTEGER,
      body TEXT NOT NULL DEFAULT '',
      PRIMARY KEY (cid, lid)
    )`,
