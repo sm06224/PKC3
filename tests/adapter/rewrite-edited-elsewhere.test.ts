@@ -199,7 +199,7 @@ describe('③ ノートの日付を付ける(set-entry-date)', () => {
     t.press('set-entry-date');
     await flush();
     expect(lock.acquireEditLock).toHaveBeenCalledWith('n1');
-    expect(t.rewrites('frontmatter'), '断られたのに日付を書いた').toHaveLength(0);
+    expect(t.rewrites('entry-date'), '断られたのに日付を書いた').toHaveLength(0);
     expect(t.d.getState().error).toBe(EDIT_ELSEWHERE_ERROR);
   });
 
@@ -208,9 +208,10 @@ describe('③ ノートの日付を付ける(set-entry-date)', () => {
     const t = rig(lock);
     t.press('set-entry-date');
     await flush();
-    const r = t.rewrites('frontmatter');
+    const r = t.rewrites('entry-date');
     expect(r).toHaveLength(1);
-    expect((r[0] as { rewrite: { keys: Record<string, unknown> } }).rewrite.keys).toEqual({ date: '2026-10-20' });
+    // 台帳 #1852 / 依頼 192 / 284: 日付の書換は前書きの時刻を残す `entry-date`(選び直しなので time も渡る)
+    expect((r[0] as { rewrite: { date: unknown } }).rewrite.date).toBe('2026-10-20');
   });
 });
 
@@ -221,7 +222,7 @@ describe('④ ノートの日付を外す(clear-entry-date)', () => {
     t.press('clear-entry-date');
     await flush();
     expect(lock.acquireEditLock).toHaveBeenCalledWith('n1');
-    expect(t.rewrites('frontmatter'), '断られたのに日付を外した').toHaveLength(0);
+    expect(t.rewrites('entry-date'), '断られたのに日付を外した').toHaveLength(0);
     expect(t.d.getState().error).toBe(EDIT_ELSEWHERE_ERROR);
   });
 
@@ -230,9 +231,9 @@ describe('④ ノートの日付を外す(clear-entry-date)', () => {
     const t = rig(lock, { date: '2026-10-01' });
     t.press('clear-entry-date');
     await flush();
-    expect(t.rewrites('frontmatter')).toHaveLength(1);
+    expect(t.rewrites('entry-date')).toHaveLength(1);
     const bare = rig({}, { date: '2026-10-01' });
     bare.press('clear-entry-date');
-    expect(bare.rewrites('frontmatter'), '口の無い環境の操作を非同期に変えた').toHaveLength(1);
+    expect(bare.rewrites('entry-date'), '口の無い環境の操作を非同期に変えた').toHaveLength(1);
   });
 });

@@ -162,7 +162,8 @@ const CASES: CaseSpec[] = [
   {
     name: 'SET_ENTRY_DATE',
     action: (lid) => ({ type: 'SET_ENTRY_DATE', lid, date: '2026-09-26' }),
-    rewriteKind: 'frontmatter',
+    // 台帳 #1852 / 依頼 192 / 284: 日付の書換は前書きの時刻を残す `entry-date` 1 本(旧: `frontmatter`)
+    rewriteKind: 'entry-date',
   },
 ];
 
