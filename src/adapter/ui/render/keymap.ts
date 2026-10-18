@@ -23,6 +23,8 @@ import {
   findCommand,
   KEY_COMMANDS,
   matchCommand,
+  matchPositionCommand,
+  positionChordOf,
   resolveUsableBindings,
   sameChord,
   validateBinding,
@@ -224,7 +226,11 @@ export class KeymapStore {
     ev: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>,
     context: KeyContext,
   ): string | null {
-    return matchCommand(chordOf(ev), context, this.getBindings());
+    const printed = chordOf(ev);
+    const hit = matchCommand(printed, context, this.getBindings());
+    if (hit !== null) return hit;
+    // 🔴 日本語配列などで、前の版(位置で保存)に自分で割り当てた記号のキーを、同じキーで効かせ続ける(台帳 #1852、依頼 261 / 310)
+    return matchPositionCommand(positionChordOf(ev), printed, context, this.getBindings());
   }
 
   /**

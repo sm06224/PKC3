@@ -285,7 +285,7 @@ test('🔴 編集中は「+ ノート」が薄くなり、鍵で撃つと理由�
   await page.evaluate(() => {
     (document.activeElement as HTMLElement | null)?.blur();
   });
-  await page.keyboard.press('Control+n');
+  await page.keyboard.press('Alt+n');
   const status = page.locator('[data-pkc-region="status"]');
   await expect(status, '鍵で撃ったのに理由が出ない').toContainText('編集中は使えません', {
     timeout: 10_000,

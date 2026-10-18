@@ -9940,6 +9940,49 @@ h3[data-pkc-section] {
 }
 
 /**
+ * 🔴 **編集中、書く場所を残す**(台帳 #1852、#1163 依頼 237 = A)。
+ *
+ * 横向き(844×390)で編集を始めると、題名・保存 / やめる・書式のボタン(2〜5 段)・「全文を編集」・下の保存 / やめるが
+ * 画面の大半を占め、本文を書く欄が 1 行ぶんしか残らなかった。キーボードが出ると、それも隠れる。
+ *   ① 書式のボタンは **1 段**(太字 / 斜体 / 箇条書き / チェック / リンク)にして、残りは「…」で開く。
+ *   ② 下の保存 / やめる(追記欄の場所に出る組)は出さない ── 上の帯に同じ 2 つが常にある。
+ * ⚠ 広い画面は 1 px も変わらない(この節はスマホ用画面のときだけ当たる。「…」は既定で出ない)。
+ * ⚠ 「…」を開いたら、帯は折り返して全部を出す(押せる道を減らさない)。閉じると 1 段に戻る。
+ */
+[data-pkc-field='format-more'] {
+  display: none;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'] [data-pkc-field='format-more'] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 32px;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'] {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'] button {
+  flex: 0 0 auto;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar']:not([data-pkc-more-open]) [data-pkc-format-more-item] {
+  display: none;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'][data-pkc-more-open] {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+/* 開いている間は「…」を押し込んだ見た目にする(`aria-expanded` を色でも言う) */
+[data-pkc-region='format-bar'] [data-pkc-field='format-more'][aria-expanded='true'] {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='append'][data-pkc-lock-editing] {
+  display: none;
+}
+
+/**
  * 🔴 **ページの帯**(← 一覧 ｜ 題名 ｜ 情報 ｜ ⋯)。⚠ **1 本だけ・44px 以下**
  * (縦の予算。設計 doc §2-11)。既定は `hidden` なので PC では 1px も取らない。
  */

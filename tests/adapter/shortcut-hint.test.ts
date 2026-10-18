@@ -35,13 +35,13 @@ function memStore(): KeymapStore {
 describe('ショートカットの説明', () => {
   it('既定の割当から綴りを作る', () => {
     const k = memStore();
-    expect(chordHint('create-entry', k), '第 1 割当が引けない').toBe('Ctrl + N');
-    expect(hintTitle('新しく作ります', 'create-entry', k)).toBe('新しく作ります(Ctrl + N)');
+    expect(chordHint('create-entry', k), '第 1 割当が引けない').toBe('Alt + N');
+    expect(hintTitle('新しく作ります', 'create-entry', k)).toBe('新しく作ります(Alt + N)');
   });
 
   it('🔴 割当を変えたら、説明も変わる', () => {
     const k = memStore();
-    k.removeBinding('create-entry', 'Mod+N');
+    k.removeBinding('create-entry', 'Alt+N');
     expect(k.addBinding('create-entry', 'Alt+9'), '割当を変えられない(前提が崩れている)').toBeNull();
     expect(hintTitle('新しく作ります', 'create-entry', k)).toBe('新しく作ります(Alt + 9)');
   });
@@ -49,7 +49,7 @@ describe('ショートカットの説明', () => {
   /** ⚠ 空の `()` を画面に出さない(「全部外す」ができる以上、必ず起きる)。 */
   it('🔴 割当を全部外したら、括弧ごと出さない', () => {
     const k = memStore();
-    k.removeBinding('create-entry', 'Mod+N');
+    k.removeBinding('create-entry', 'Alt+N');
     expect(chordHint('create-entry', k)).toBeNull();
     expect(hintTitle('新しく作ります', 'create-entry', k)).toBe('新しく作ります');
   });
@@ -71,10 +71,10 @@ describe('ショートカットの説明', () => {
 
     const k = memStore();
     expect(applyShortcutHints(root, k), '1 つも書き換えていない(空振り)').toBe(1);
-    expect(named.title).toBe('新しく作ります(Ctrl + N)');
+    expect(named.title).toBe('新しく作ります(Alt + N)');
     expect(other.title, '名乗っていない物まで書き換えた').toBe('そのまま');
 
-    k.removeBinding('create-entry', 'Mod+N');
+    k.removeBinding('create-entry', 'Alt+N');
     k.addBinding('create-entry', 'Alt+9');
     applyShortcutHints(root, k);
     expect(named.title, '呼び直しても古い綴りのまま').toBe('新しく作ります(Alt + 9)');
@@ -82,7 +82,7 @@ describe('ショートカットの説明', () => {
 
   /**
    * ⚠ **土台を名乗り損ねた物は触らない**(変異試験 C4 が生き延びて判明)。
-   * 命令 id だけ付けて土台を忘れると、素直に組み立てると `null(Ctrl + N)` が
+   * 命令 id だけ付けて土台を忘れると、素直に組み立てると `null(Alt + N)` が
    * **画面に出る** ── 名乗りが半分の物は、書き換えないのが正しい。
    */
   it('🔴 土台を名乗っていない物は書き換えない', () => {
@@ -114,8 +114,8 @@ describe('ショートカットの説明', () => {
     const k = memStore();
     const off = wireShortcutHints(root, k);
     // ⚠ **1 回目**も撃つ(割当を 1 度も変えない user にも届く)
-    expect(btn.title, '配線した時点で組み立てていない').toBe('新しく作ります(Ctrl + N)');
-    k.removeBinding('create-entry', 'Mod+N');
+    expect(btn.title, '配線した時点で組み立てていない').toBe('新しく作ります(Alt + N)');
+    k.removeBinding('create-entry', 'Alt+N');
     k.addBinding('create-entry', 'Alt+9');
     expect(btn.title, '割当を変えても説明が古いまま').toBe('新しく作ります(Alt + 9)');
     // ⚠ 外したら止まる(購読を返している証拠)
@@ -139,7 +139,7 @@ describe('ショートカットの説明', () => {
     const n = applyShortcutHints(root, k);
     expect(n, '説明を名乗るボタンが 1 つも無い(空振り)').toBeGreaterThanOrEqual(3);
     const create = root.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
-    expect(create?.title).toBe('ノートを新しく作ります(Ctrl + N)');
+    expect(create?.title).toBe('ノートを新しく作ります(Alt + N)');
     const back = root.querySelector<HTMLElement>('[data-pkc-action="nav-back"]');
     expect(back?.title).toBe('前に見ていたノートへ戻ります(Alt + ←)');
   });

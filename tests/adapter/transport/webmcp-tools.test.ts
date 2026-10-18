@@ -67,6 +67,8 @@ function setup(over: Partial<AgentToolDeps> = {}, allow: boolean | ((s: AgentSco
     tags: 0,
     create: [] as Array<[unknown, string, string]>,
     append: [] as Array<[string, string, string | null]>,
+    /** 書き足したと画面に知らせた回(字, 開く先)。 */
+    notified: [] as Array<[string, string]>,
   };
   const deps: AgentToolDeps = {
     meta: (id) => {
@@ -97,6 +99,9 @@ function setup(over: Partial<AgentToolDeps> = {}, allow: boolean | ((s: AgentSco
       return 'lid-new' as string | null;
     },
     appendCheck: () => 'ok',
+    notifyAppended: (message, lid) => {
+      calls.notified.push([message, lid]);
+    },
     append: async (id, text, heading) => {
       calls.append.push([id, text, heading]);
       return { ok: true } as AppendOutcome;
@@ -589,5 +594,100 @@ describe('🔴 A5: 書き足しの断りは AI に言い、user の画面のエ�
     const ok = setup({ appendCheck: () => 'ok' });
     expect((await ok.tool('pkc_append_note').execute({ id: 'a1', text: 'x' }, SIGNAL)).isError).toBeUndefined();
     expect(ok.calls.append.length).toBe(1);
+  });
+});
+
+describe('🔴 依頼 362: 書き足したら、作ったときと同じ形で画面に知らせる', () => {
+  it('通ったら「(相手)がノート『題名』に書き足しました」+ 開く先(書いたノート)で知らせる', async () => {
+    const { tool, calls } = setup();
+    const r = await tool('pkc_append_note').execute({ id: 'a1', text: '続き' }, SIGNAL);
+    expect(r.isError).toBeUndefined();
+    expect(calls.notified).toEqual([[`${AGENT_ORIGIN_LABEL} がノート『買い物』に書き足しました`, 'a1']]);
+  });
+
+  it('組み込み先のページの AI は、その origin を名指しする', async () => {
+    const { tool, calls } = setup({ from: 'https://x.test' });
+    await tool('pkc_append_note').execute({ id: 'a1', text: '続き' }, SIGNAL);
+    expect(calls.notified).toEqual([['https://x.test の AI がノート『買い物』に書き足しました', 'a1']]);
+  });
+
+  it('⚠ 対照群: 断られた回・書けなかった回・時間切れの回は知らせない(書いていないのに「書き足しました」と言わない)', async () => {
+    for (const over of [
+      { appendCheck: () => 'busy' as const },
+      { appendCheck: () => 'gone' as const },
+      { append: async () => ({ ok: false, reason: 'failed', error: null }) as AppendOutcome },
+      { append: async () => ({ ok: false, reason: 'timeout', error: null }) as AppendOutcome },
+    ]) {
+      const { tool, calls } = setup(over);
+      await tool('pkc_append_note').execute({ id: 'a1', text: '続き' }, SIGNAL);
+      expect(calls.notified).toEqual([]);
+    }
+    const denied = setup({}, false);
+    await denied.tool('pkc_append_note').execute({ id: 'a1', text: '続き' }, SIGNAL);
+    expect(denied.calls.notified).toEqual([]);
+  });
+});
+
+describe('🔴 依頼 365: ノートを読むとき、続きの位置(offset)を指定して読める', () => {
+  const LONG = 'あ'.repeat(MAX_BODY) + 'い'.repeat(MAX_BODY) + 'うえお';
+  const withLong = (): ReturnType<typeof setup> =>
+    setup({ bodies: async (ids) => new Map(ids.map((id) => [id, LONG] as const)) });
+
+  it('1 回に返すのは MAX_BODY 字まで。切ったら nextOffset を返し、それを渡すと続きが読める(全部つなぐと原文と一致)', async () => {
+    const { tool } = withLong();
+    const first = json(await tool('pkc_read_note').execute({ id: 'a1' }, SIGNAL));
+    expect(first.body).toHaveLength(MAX_BODY);
+    expect(first.bodyTruncated).toBe(true);
+    expect(first.nextOffset).toBe(MAX_BODY);
+    expect(first.totalLength).toBe(LONG.length);
+    const second = json(await tool('pkc_read_note').execute({ id: 'a1', offset: first.nextOffset }, SIGNAL));
+    expect(second.body).toHaveLength(MAX_BODY);
+    expect(second.offset).toBe(MAX_BODY);
+    expect(second.nextOffset).toBe(MAX_BODY * 2);
+    const third = json(await tool('pkc_read_note').execute({ id: 'a1', offset: second.nextOffset }, SIGNAL));
+    expect(third.body).toBe('うえお');
+    // 最後の回は切っていない(続きは無い)
+    expect(third).not.toHaveProperty('bodyTruncated');
+    expect(third).not.toHaveProperty('nextOffset');
+    expect(first.body + second.body + third.body).toBe(LONG);
+  });
+
+  it('⚠ 対照群: offset を省いた短いノートは、いままでの形のまま(位置の欄を足さない)', async () => {
+    const { tool } = setup();
+    const n = json(await tool('pkc_read_note').execute({ id: 'a1' }, SIGNAL));
+    expect(n.body).toBe(NOTES.a1!.body);
+    for (const k of ['bodyTruncated', 'nextOffset', 'offset', 'totalLength']) expect(n).not.toHaveProperty(k);
+  });
+
+  it('対(サロゲートペア)の途中で切らない ── 続きの先頭も壊れない', async () => {
+    const pair = '\u{20BB7}'; // 𠮷(UTF-16 で 2 単位)
+    const body = 'a'.repeat(MAX_BODY - 1) + pair + 'b';
+    const { tool } = setup({ bodies: async (ids) => new Map(ids.map((id) => [id, body] as const)) });
+    const first = json(await tool('pkc_read_note').execute({ id: 'a1' }, SIGNAL));
+    expect(first.body).toBe('a'.repeat(MAX_BODY - 1));
+    expect(first.nextOffset).toBe(MAX_BODY - 1);
+    const second = json(await tool('pkc_read_note').execute({ id: 'a1', offset: first.nextOffset }, SIGNAL));
+    expect(second.body).toBe(pair + 'b');
+  });
+
+  it('不正な offset(負・小数・文字・範囲外)は断る。許可は聞かない(位置の誤りは入力の誤り)', async () => {
+    for (const offset of [-1, 1.5, 'x', LONG.length, LONG.length + 10]) {
+      const { tool, calls } = withLong();
+      const r = await tool('pkc_read_note').execute({ id: 'a1', offset }, SIGNAL);
+      expect(r.isError, String(offset)).toBe(true);
+      if (typeof offset === 'number' && Number.isInteger(offset) && offset >= LONG.length) {
+        // 範囲外は許可を聞いたあとの断り(本文を返さない)
+        expect(r.content[0]!.text).toContain('本文はここまで');
+      } else {
+        expect(calls.targets, String(offset)).toEqual([]);
+      }
+    }
+  });
+
+  it('入力の形に offset が載っている(AI が知らないと使えない)', () => {
+    const { tool } = setup();
+    const props = tool('pkc_read_note').inputSchema.properties as Record<string, unknown>;
+    expect(props).toHaveProperty('offset');
+    expect(tool('pkc_read_note').description).toContain('nextOffset');
   });
 });

@@ -176,15 +176,41 @@ describe('132: フォルダの表の Ctrl+Z = ゴミ箱へ移した直後の元�
 });
 
 describe('313 / 117-3: 割り当てを断る', () => {
-  it('🔴 ブラウザやパソコンが先に取るキーは断る(「ノートを作る」の既定 Ctrl+N は断らない)', () => {
-    for (const k of ['Mod+Shift+N', 'Mod+Shift+T', 'Mod+Shift+W', 'Mod+Shift+Q', 'Mod+Tab', 'Mod+Shift+Tab', 'Mod+PageUp', 'Mod+PageDown', 'Alt+F4']) {
+  it('🔴 ブラウザやパソコンが先に取るキーは断る(Ctrl+N / T / W を含む)', () => {
+    for (const k of ['Mod+N', 'Mod+T', 'Mod+W', 'Mod+Shift+N', 'Mod+Shift+T', 'Mod+Shift+W', 'Mod+Shift+Q', 'Mod+Tab', 'Mod+Shift+Tab', 'Mod+PageUp', 'Mod+PageDown', 'Alt+F4']) {
       expect(REFUSED, `${k} が REFUSED に無い`).toContain(k);
       expect(validateBinding('add-tag', k, {})?.kind, `${k} を断っていない`).toBe('refused');
     }
-    // 対照群: 届くキーは断らない / 自分の既定は断らない
+    // 対照群: 届くキーは断る側に入れない(`Ctrl+L` / `Ctrl+D` はページが preventDefault で止められる ── 台帳 #1852、依頼 313)
     expect(validateBinding('add-tag', 'Alt+Shift+Y', {})).toBeNull();
-    expect(REFUSED).not.toContain('Mod+N');
-    expect(validateBinding('create-entry', 'Mod+N', {})).toBeNull();
+    for (const k of ['Mod+L', 'Mod+D']) {
+      expect(REFUSED, `${k} を断る側に入れている`).not.toContain(k);
+      expect(validateBinding('add-tag', k, {})?.kind, `${k} を「ブラウザが取る」と断っている`).not.toBe('refused');
+    }
+  });
+
+  /**
+   * 🔴 **「ノートを作る」の既定は Alt+N**(台帳 #1852、依頼 182 = A)。`Ctrl+N` は Chrome / Edge がページへ渡さず、
+   * 新しいウィンドウが開くだけだった。既に保存されている `Ctrl+N` は、読み込みでは捨てない(割り当て済みの人の割り当て)。
+   */
+  it('🔴 ノートを作るの既定は Alt+N。Ctrl+N は新しく割り当てられない', () => {
+    expect(findCommand('create-entry')?.defaults).toEqual(['Alt+N']);
+    expect(validateBinding('create-entry', 'Alt+N', {})).toBeNull(); // 自分の既定は断らない
+    expect(validateBinding('create-entry', 'Mod+N', {})?.kind, 'Ctrl+N を新しく割り当てられる').toBe('refused');
+    expect(validateBinding('edit-entry', 'Mod+N', {})?.kind).toBe('refused');
+  });
+
+  it('🔴 保存済みの Ctrl+N は読み込みで捨てない(ノートを作るの分だけ)', () => {
+    const kept = resolveUsableBindings({ 'create-entry': ['Mod+N', 'Alt+M'] });
+    expect(kept.unusable, '保存済みの Ctrl+N を使えない物にした').toEqual([]);
+    expect(kept.bindings['create-entry']).toEqual(['Mod+N', 'Alt+M']);
+    // 対照群: 別の操作に付けてあった Ctrl+N は、ブラウザが取るキーなので使わない(保存には残る)
+    const other = resolveUsableBindings({ 'edit-entry': ['Mod+N'] });
+    expect(other.unusable.map((u) => `${u.commandId}:${u.chord}:${u.problem.kind}`)).toEqual(['edit-entry:Mod+N:refused']);
+    // 対照群: 設定画面の「割り当てる」(新しく付ける)は断る
+    const store = new KeymapStore({ getItem: () => null, setItem: () => undefined, removeItem: () => undefined });
+    store.removeBinding('create-entry', 'Alt+N');
+    expect(store.addBinding('create-entry', 'Mod+N')?.kind).toBe('refused');
   });
 
   it('🔴 文字を打つ欄の編集キーは、打つ欄で効く操作には割り当てられない(表の操作・自分の既定は別)', () => {

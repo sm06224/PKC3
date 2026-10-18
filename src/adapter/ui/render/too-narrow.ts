@@ -154,12 +154,19 @@ export interface TooNarrowDeps {
   readonly ok: HTMLElement;
   /**
    * 🔴 **この窓は PKC 自身が開いたポップアップか**(#690 ③)── 真なら
-   *   「ウィンドウを広げると直ります」、偽なら「横向きにすると直ります」。
+   *   「ウィンドウを広げると直ります」。偽のときは `touch` で決める(下)。
    * ⚠ 判断は持ち込まない(`deep-link.ts` の `noteOpenedByUs` が正本)── ここは聞くだけ。
    * ⚠ **出すたびに聞く**(起動時に 1 度だけ読まない)── 配線の順番に依らせない。
    * ⚠ optional にしない ── 落とすと、小窓で「横向きにすると直ります」に黙って戻る。
    */
   readonly popup: () => boolean;
+  /**
+   * 🔴 **指で触る端末か**(台帳 #1852、#1163 依頼 74-2 = B)。真のときだけ「横向きにすると直ります」(user が決めた字 ──
+   * スマホで見える字は変えない)。偽(PC のブラウザの窓を細くした)なら、横向きが無いので「ウィンドウを広げると直ります」。
+   * ⚠ 判断は持ち込まない(`touch-device.ts` の `isTouchOnly` が正本)── ここは聞くだけ。出すたびに聞く。
+   * ⚠ optional にしない ── 落とすと、PC の窓で「横向きにすると直ります」に黙って戻る。
+   */
+  readonly touch: () => boolean;
   /**
    * 出し入れが変わったら呼ぶ。
    * ⚠ 状態の行を畳むかどうかは `main.ts` の `paint` **1 か所**が決める ──
@@ -196,7 +203,8 @@ export function installTooNarrow(
      *   OK が指の下から消える。
      */
     // 🔑 一手は窓の種類で決まる(#690 ③)── 窓に「横向き」は無い
-    deps.text.textContent = show ? (deps.popup() ? TOO_NARROW_TEXT_WINDOW : TOO_NARROW_TEXT) : '';
+    // 🔑 横向きがあるのは、指で触る端末の本体の窓だけ(PC のブラウザの窓にも、PKC が開いた小窓にも横向きは無い)
+    deps.text.textContent = show ? (!deps.popup() && deps.touch() ? TOO_NARROW_TEXT : TOO_NARROW_TEXT_WINDOW) : '';
     deps.ok.textContent = show ? TOO_NARROW_OK : '';
     deps.onChange();
   };

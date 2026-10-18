@@ -149,6 +149,6 @@ describe('4. 1 件も読めない保存は「割当なし」ではない', () =>
     expect(s.addBinding('create-entry', 'Alt+M')).toBeNull();
     const saved = JSON.parse(st.map.get(KEY)!) as Record<string, unknown>;
     expect(saved['edit-entry'], '読めない生の値が保存から消えた').toEqual(['Hyper+E']);
-    expect(saved['create-entry']).toEqual(['Mod+N', 'Alt+M']);
+    expect(saved['create-entry']).toEqual(['Alt+N', 'Alt+M']);
   });
 });

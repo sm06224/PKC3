@@ -1564,9 +1564,25 @@ test('🔴 書式バーが 2 段以上に折れても、上の段の余りは地
   const bar = page.locator(REGION('format-bar'));
   await expect(bar).toBeVisible();
 
+  // 🔴 #1852 237 A ── スマホ用画面の編集中は、書式のボタンが 1 段(5 つ + 「…」)で、下の保存 / やめるは出ない
+  const more = bar.locator('[data-pkc-field="format-more"]');
+  await expect(more, 'スマホ用画面に「…」が出ていない').toBeVisible();
+  const rowTops = async (): Promise<number> =>
+    bar.evaluate((el) => new Set([...el.querySelectorAll('button')].filter((b) => b.checkVisibility()).map((b) => Math.round(b.getBoundingClientRect().top))).size);
+  expect(await rowTops(), '閉じているのに書式のボタンが 2 段以上に折れている').toBe(1);
+  expect(
+    await bar.locator('button').evaluateAll((els) => els.filter((e) => e.checkVisibility()).length),
+    '閉じているときに見えるボタンが 5 つ + 「…」でない',
+  ).toBe(6);
+  await expect(page.locator('[data-pkc-region="append"][data-pkc-lock-editing]'), '編集中に下の保存 / やめるが出ている').toBeHidden();
+  // 「…」を押すと全部出て、折り返す(以下の画素の検査は、開いた状態の帯で見る)
+  await more.click();
+  await expect(more).toHaveAttribute('aria-expanded', 'true');
+  expect(await rowTops(), '「…」を開いても折り返していない').toBeGreaterThan(1);
+
   const geo = await bar.evaluate((el) => {
     const box = el.getBoundingClientRect();
-    const btns = [...el.querySelectorAll('button')].map((b) => b.getBoundingClientRect());
+    const btns = [...el.querySelectorAll('button')].filter((b) => b.checkVisibility()).map((b) => b.getBoundingClientRect());
     // 段ごとに分ける(top が同じ物が 1 段)
     const rows = new Map<number, DOMRect[]>();
     for (const r of btns) rows.set(Math.round(r.top), [...(rows.get(Math.round(r.top)) ?? []), r]);

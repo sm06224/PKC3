@@ -386,3 +386,58 @@ describe('知らせの隣の「元に戻す」── ゴミ箱へ移した直後
     expect(b.hidden).toBe(true);
   });
 });
+
+/**
+ * 🔴 依頼 362: AI の書き足しの知らせの隣の「元に戻す」。
+ * ① 材料が持つ知らせの字と、いま出ている字が同じなら出る(押し先は undo-agent-append、字は「書き足しを元に戻す」)
+ * ② 自分の追記(lastAppend)が同じノートに在っても、AI の知らせでは自分の追記の口を出さない(別の手)
+ * ③ 字が別の知らせに上書きされたら畳む / 行き先が違えば出ない / 字を控えていない材料では出ない
+ */
+describe('知らせの隣の「元に戻す」── AI の書き足し(依頼 362)', () => {
+  const AI = 'ブラウザの AI がノート『買い物』に書き足しました';
+  const btn = (): HTMLElement => {
+    const b = document.createElement('button');
+    b.hidden = true;
+    b.setAttribute('data-pkc-action', 'undo-move');
+    return b;
+  };
+  const base = { lastMove: null, notice: AI, noticeOpen: 'n2' } as const;
+
+  it('① 出る。押し先と字が AI の書き足しの物になる', () => {
+    const b = btn();
+    paintStatusUndo(b, { ...base, lastAppend: null, lastAgentAppend: { lid: 'n2', notice: AI } }, AI);
+    expect(b.hidden).toBe(false);
+    expect(b.getAttribute('data-pkc-action')).toBe('undo-agent-append');
+    expect(b.textContent).toBe('書き足しを元に戻す');
+  });
+
+  it('② 自分の追記が同じノートに在っても、AI の知らせには AI の分の口が出る(自分の追記の口は出ない)', () => {
+    const b = btn();
+    paintStatusUndo(
+      b,
+      { ...base, lastAppend: { lid: 'n2' }, lastAgentAppend: { lid: 'n2', notice: AI } },
+      AI,
+    );
+    expect(b.getAttribute('data-pkc-action')).toBe('undo-agent-append');
+    // 対照群: AI の材料が無ければ、これまでどおり自分の追記の口(undo-append)が出る
+    const c = btn();
+    paintStatusUndo(c, { ...base, lastAppend: { lid: 'n2' }, lastAgentAppend: null }, AI);
+    expect(c.getAttribute('data-pkc-action')).toBe('undo-append');
+  });
+
+  it('③ 別の知らせに上書きされたら畳む / 行き先が別のノートなら出ない / 字を控えていない材料では出ない', () => {
+    const over = btn();
+    paintStatusUndo(
+      over,
+      { ...base, notice: 'コピーしました', lastAppend: null, lastAgentAppend: { lid: 'n2', notice: AI } },
+      'コピーしました',
+    );
+    expect(over.hidden).toBe(true);
+    const other = btn();
+    paintStatusUndo(other, { ...base, lastAppend: null, lastAgentAppend: { lid: 'n9', notice: AI } }, AI);
+    expect(other.hidden).toBe(true);
+    const noText = btn();
+    paintStatusUndo(noText, { ...base, lastAppend: null, lastAgentAppend: { lid: 'n2' } }, AI);
+    expect(noText.hidden).toBe(true);
+  });
+});

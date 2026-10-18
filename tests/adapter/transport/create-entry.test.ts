@@ -14,6 +14,7 @@ import {
 } from '../../../src/adapter/transport/create-entry-params';
 import { served, startEmbedBridge } from '../../../src/adapter/transport/embed-bridge';
 import { RPC } from '../../../src/adapter/transport/protocol';
+import type { AgentGate, AgentTarget } from '../../../src/features/agent/agent-gate';
 
 describe('引数の受け取り方', () => {
   it('題名が在ればそれを使う(1 行へ畳み、上限で切る)', () => {
@@ -70,7 +71,10 @@ interface Sent {
   payload: Record<string, unknown>;
 }
 
-function harness(createEntry?: (i: { title: string; body: string }, o: string) => string | null) {
+function harness(
+  createEntry?: (i: { title: string; body: string }, o: string) => string | null,
+  gate: AgentGate = async () => true,
+) {
   const sent: Sent[] = [];
   const source = {
     postMessage: (payload: Record<string, unknown>) => void sent.push({ payload }),
@@ -78,6 +82,7 @@ function harness(createEntry?: (i: { title: string; body: string }, o: string) =
   const detach = startEmbedBridge({
     enabled: true,
     origins: () => ['https://a.test'],
+    gate,
     target: window,
     ...(createEntry === undefined ? {} : { createEntry }),
   });
@@ -152,6 +157,47 @@ describe('外から 1 件作らせる', () => {
     h.post({ title: 'x' });
     await vi.waitFor(() => expect(h.sent).toHaveLength(1));
     expect(h.sent[0]!.payload.error).toMatchObject({ code: RPC.METHOD_NOT_FOUND });
+    h.detach();
+  });
+});
+
+describe('🔴 依頼 364: pkc.createEntry も「ノートを作る」の許可を同じ門で見る', () => {
+  it('門が通せば作る。門へは「作る」+ 相手の origin + 題名が渡る(対照群)', async () => {
+    const asked: AgentTarget[] = [];
+    const made: string[] = [];
+    const h = harness(
+      (i) => {
+        made.push(i.title);
+        return 'lid-1';
+      },
+      async (t) => {
+        asked.push(t);
+        return true;
+      },
+    );
+    h.post({ title: '外から', body: '本文' });
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1));
+    expect(h.sent[0]!.payload.result).toEqual({ lid: 'lid-1', title: '外から' });
+    expect(asked).toEqual([{ action: 'create', title: '外から', from: 'https://a.test' }]);
+    expect(made).toEqual(['外から']);
+    h.detach();
+  });
+
+  it('門が断れば(許可を取り消した / この相手は断る)作らず、理由を相手へ返す', async () => {
+    const made: string[] = [];
+    const h = harness(
+      (i) => {
+        made.push(i.title);
+        return 'lid-1';
+      },
+      async () => false,
+    );
+    h.post({ title: '外から', body: '本文' });
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1));
+    const payload = h.sent[0]!.payload;
+    expect(payload).not.toHaveProperty('result');
+    expect((payload.error as { message: string }).message).toContain('許可しませんでした');
+    expect(made).toEqual([]);
     h.detach();
   });
 });

@@ -186,6 +186,10 @@ function harness(nonce = 'n-9'): Harness {
     enabled: true,
     // 🔴 **許可リストは空** ── 通ったなら合図で通っている(空振り防止)
     origins: () => [],
+    // 🔴 合図の相手は門を通らない(user が自分で押した動線)。呼ばれたら落とす ── 呼ばれない証拠
+    gate: async () => {
+      throw new Error('合図の相手に許可の門は掛けない');
+    },
     capture,
     target: window,
     createEntry: (input, _origin, via) => {

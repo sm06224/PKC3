@@ -286,7 +286,7 @@ describe('上書きの解決', () => {
 
   it('壊れた保存でも既定が生きる', () => {
     const b = resolveBindings({});
-    expect(b['create-entry']).toEqual(['Mod+N']);
+    expect(b['create-entry']).toEqual(['Alt+N']);
   });
 });
 
@@ -295,9 +295,9 @@ describe('打鍵 → コマンド', () => {
   const match = (e: ReturnType<typeof ev>, c: KeyContext) => matchCommand(chordOf(e), c, base);
 
   it('文脈ごとに引く', () => {
-    expect(match(ev({ key: 'n', code: 'KeyN', ctrlKey: true }), 'global')).toBe('create-entry');
+    expect(match(ev({ key: 'n', code: 'KeyN', altKey: true }), 'global')).toBe('create-entry');
     // ⚠ 同じ打鍵でも面が違えば当たらない
-    expect(match(ev({ key: 'n', code: 'KeyN', ctrlKey: true }), 'row')).toBeNull();
+    expect(match(ev({ key: 'n', code: 'KeyN', altKey: true }), 'row')).toBeNull();
     expect(match(ev({ key: 'Tab', code: 'Tab' }), 'row')).toBe('row-commit');
     expect(match(ev({ key: 'Tab', code: 'Tab' }), 'editor')).toBeNull();
   });
@@ -319,7 +319,7 @@ describe('打鍵 → コマンド', () => {
       'create-entry',
     );
     expect(
-      matchCommand(chordOf(ev({ key: 'n', code: 'KeyN', ctrlKey: true })), 'global', b),
+      matchCommand(chordOf(ev({ key: 'n', code: 'KeyN', altKey: true })), 'global', b),
       '既定が残っている(上書きが「足すだけ」になっている)',
     ).toBeNull();
   });

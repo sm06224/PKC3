@@ -33,9 +33,13 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   // ① 🔴 **高さが 1 種類**(user 指示「ボタンサイズ揃えはしてください」)。
   // ⚠ 「同じ CSS 規則を当てた」ではなく**実測の高さ**を見る ── 文字数の違う
   // ボタンが 14 個並ぶので、揃っていなければここで露見する
+  // ⚠ 見えているボタンだけを数える ── 「…」(`format-more`)はスマホ用画面でだけ出る(#1852 237)。
+  //   広い画面では `display: none` で高さ 0 になるので、数に入れると「ばらついている」と誤って落ちる
   const heights = await bar.locator('button').evaluateAll((els) =>
-    els.map((e) => Math.round(e.getBoundingClientRect().height)),
+    els.filter((e) => e.checkVisibility()).map((e) => Math.round(e.getBoundingClientRect().height)),
   );
+  // 🔴 広い画面では「…」が出ない(1 px も変わらない ── 237 の約束)
+  await expect(bar.locator('[data-pkc-field="format-more"]'), '広い画面に「…」が出ている').toBeHidden();
   expect(heights.length).toBeGreaterThan(10);
   expect([...new Set(heights)], `ボタンの高さがばらついている: ${heights.join(',')}`).toHaveLength(1);
 

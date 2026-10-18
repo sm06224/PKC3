@@ -79,6 +79,7 @@ function setup() {
     createEntry: () => null,
     append: async () => ({ ok: true }),
     appendCheck: () => 'ok',
+    notifyAppended: () => undefined,
     gate: async () => true,
   });
   const tool = (name: string) => tools.find((t) => t.name === name)!;

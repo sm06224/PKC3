@@ -47,7 +47,7 @@ describe('1. 設定ファイルの読み込みの後でも、割り当てが消�
     expect(s.addBinding('create-entry', 'Alt+M')).toBeNull();
     expect(saved(st)['edit-entry'], '読み込んだ割り当てが保存から消えた').toEqual(['Mod+E', 'Alt+9']);
     expect(s.getBindings()['edit-entry'], '画面の割り当てにも出ていない').toEqual(['Mod+E', 'Alt+9']);
-    expect(s.getBindings()['create-entry']).toEqual(['Mod+N', 'Alt+M']);
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+M']);
   });
 
   it('戻す前にも読み直す', () => {
@@ -64,7 +64,7 @@ describe('1. 設定ファイルの読み込みの後でも、割り当てが消�
     const s = new KeymapStore(st);
     s.getBindings();
     st.map.set(KEY, JSON.stringify({ 'edit-entry': ['Alt+9'] }));
-    s.removeBinding('create-entry', 'Mod+N');
+    s.removeBinding('create-entry', 'Alt+N');
     expect(saved(st)).toEqual({ 'edit-entry': ['Alt+9'], 'create-entry': [] });
   });
 });
@@ -85,20 +85,20 @@ describe('2. 保存に書けない端末', () => {
     const p = s.addBinding('create-entry', 'Alt+M');
     expect(p?.kind).toBe('unsaved');
     expect(p?.message).toBe(SETTINGS_NOT_PERSISTED_TEXT);
-    expect(s.getBindings()['create-entry']).toEqual(['Mod+N', 'Alt+M']);
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+M']);
   });
 
   it('保存の入れ物が無い(null)ときも同じ', () => {
     const s = new KeymapStore(null);
     expect(s.addBinding('create-entry', 'Alt+M')?.kind).toBe('unsaved');
-    expect(s.getBindings()['create-entry']).toEqual(['Mod+N', 'Alt+M']);
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+M']);
   });
 
   it('書けなかった割り当ては、次の操作で読み直した空の保存に消されない', () => {
     const s = new KeymapStore(dead());
     s.addBinding('create-entry', 'Alt+M');
     s.addBinding('edit-entry', 'Alt+9');
-    expect(s.getBindings()['create-entry']).toEqual(['Mod+N', 'Alt+M']);
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+M']);
   });
 
   it('画面の注: 割り当てた + 保存できない、の言い方になる(「割り当てられません」ではない)', () => {
@@ -135,13 +135,13 @@ describe('2b. 外す・既定に戻すも、保存できなかったことを言
     root.querySelector(`[data-pkc-field="keymap-row"][data-pkc-command="${id}"] [data-pkc-field="settings-note"]`)!;
 
   it('🔴 store は保存できたかを返す(書ける端末では true)', () => {
-    expect(new KeymapStore(fakeStorage()).removeBinding('create-entry', 'Mod+N')).toBe(true);
+    expect(new KeymapStore(fakeStorage()).removeBinding('create-entry', 'Alt+N')).toBe(true);
     const ok = new KeymapStore(fakeStorage());
     ok.addBinding('create-entry', 'Alt+M');
     expect(ok.resetCommand('create-entry')).toBe(true);
     expect(ok.resetAll()).toBe(true);
     const s = new KeymapStore(dead());
-    expect(s.removeBinding('create-entry', 'Mod+N')).toBe(false);
+    expect(s.removeBinding('create-entry', 'Alt+N')).toBe(false);
     s.addBinding('edit-entry', 'Alt+9');
     expect(s.resetCommand('edit-entry')).toBe(false);
     expect(s.resetAll()).toBe(false);
@@ -159,7 +159,7 @@ describe('2b. 外す・既定に戻すも、保存できなかったことを言
       const root = panel.root;
       root
         .querySelector<HTMLButtonElement>(
-          '[data-pkc-field="keymap-drop"][data-pkc-command="create-entry"][data-pkc-chord="Mod+N"]',
+          '[data-pkc-field="keymap-drop"][data-pkc-command="create-entry"][data-pkc-chord="Alt+N"]',
         )!
         .click();
       const dropNote = noteOf(root, 'create-entry').textContent ?? '';
@@ -186,7 +186,7 @@ describe('2b. 外す・既定に戻すも、保存できなかったことを言
 describe('3. 知らない id の割り当ては触らずに残す', () => {
   it('🔴 古い版でキーを 1 つ変えても、新しい版の割り当てが保存から消えない', () => {
     const st = fakeStorage();
-    st.map.set(KEY, JSON.stringify({ 'future-command': ['Alt+Q'], 'create-entry': ['Mod+N'] }));
+    st.map.set(KEY, JSON.stringify({ 'future-command': ['Alt+Q'], 'create-entry': ['Alt+N'] }));
     const s = new KeymapStore(st);
     expect(s.addBinding('edit-entry', 'Alt+9')).toBeNull();
     expect(saved(st)['future-command']).toEqual(['Alt+Q']);
@@ -237,15 +237,15 @@ describe('5. 保存や設定ファイルの割り当ても、割り当てると�
 
   it('🔴 素の B・Ctrl+R・F5 は使わない(保存には残す)', () => {
     const st = fakeStorage();
-    st.map.set(KEY, JSON.stringify({ 'create-entry': ['Mod+N', 'B', 'Mod+R', 'F5', 'Alt+M'] }));
+    st.map.set(KEY, JSON.stringify({ 'create-entry': ['Alt+N', 'B', 'Mod+R', 'F5', 'Alt+M'] }));
     const s = new KeymapStore(st);
-    expect(s.getBindings()['create-entry']).toEqual(['Mod+N', 'Alt+M']);
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+M']);
     expect(s.getUnusable().map((u) => u.chord).sort()).toEqual(['B', 'F5', 'Mod+R']);
     expect(
       s.match({ key: 'b', code: 'KeyB', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false }, 'global'),
     ).toBeNull();
     // 消さない ── 後で直せる
-    expect(saved(st)['create-entry']).toEqual(['Mod+N', 'B', 'Mod+R', 'F5', 'Alt+M']);
+    expect(saved(st)['create-entry']).toEqual(['Alt+N', 'B', 'Mod+R', 'F5', 'Alt+M']);
   });
 
   it('🔴 同じ鍵の 2 件目は黙って死なず、使えない物として数える(表の先が勝つ)', () => {
@@ -259,17 +259,17 @@ describe('5. 保存や設定ファイルの割り当ても、割り当てると�
   });
 
   it('そのコマンド自身の既定を書き直しただけの上書きは、全部使える', () => {
-    const r = resolveUsableBindings({ 'create-entry': ['Mod+N'] });
+    const r = resolveUsableBindings({ 'create-entry': ['Alt+N'] });
     expect(r.unusable).toEqual([]);
-    expect(r.bindings['create-entry']).toEqual(['Mod+N']);
+    expect(r.bindings['create-entry']).toEqual(['Alt+N']);
   });
 
   it('使えない割り当てが在るコマンドに使える鍵を足しても、使えない物を保存から消さない', () => {
     const st = fakeStorage();
-    st.map.set(KEY, JSON.stringify({ 'create-entry': ['Mod+N', 'B'] }));
+    st.map.set(KEY, JSON.stringify({ 'create-entry': ['Alt+N', 'B'] }));
     const s = new KeymapStore(st);
     expect(s.addBinding('create-entry', 'Alt+M')).toBeNull();
-    expect(saved(st)['create-entry']).toEqual(['Mod+N', 'B', 'Alt+M']);
+    expect(saved(st)['create-entry']).toEqual(['Alt+N', 'B', 'Alt+M']);
   });
 
   it('設定ファイルの読み込みの下見に「使えない割り当て N 件」が出る', () => {
@@ -279,12 +279,12 @@ describe('5. 保存や設定ファイルの割り当ても、割り当てると�
         version: 1,
         entries: [{ key: KEY, value: JSON.stringify(value) }],
       });
-    const plan = planSettingsImport(file({ 'create-entry': ['Mod+N', 'B', 'Mod+R'] }), () => null);
+    const plan = planSettingsImport(file({ 'create-entry': ['Alt+N', 'B', 'Mod+R'] }), () => null);
     expect(plan.changes).toHaveLength(1); // 前提: 割り当ては入る
     expect(plan.unusableBindings).toBe(2);
     expect(settingsPlanNote(plan)).toContain('2 件は');
     expect(settingsPlanNote(plan)).toContain('使われません');
-    const clean = planSettingsImport(file({ 'create-entry': ['Mod+N', 'Alt+M'] }), () => null);
+    const clean = planSettingsImport(file({ 'create-entry': ['Alt+N', 'Alt+M'] }), () => null);
     expect(clean.changes).toHaveLength(1);
     expect(clean.unusableBindings).toBe(0);
     expect(settingsPlanNote(clean)).not.toContain('使われません');
@@ -297,11 +297,11 @@ describe('5. 保存や設定ファイルの割り当ても、割り当てると�
         version: 1,
         entries: [{ key: KEY, value: JSON.stringify(value) }],
       });
-    const plan = planSettingsImport(file({ 'create-entry': ['Mod+N', 'Tab', 'Shift+Tab'] }), () => null);
+    const plan = planSettingsImport(file({ 'create-entry': ['Alt+N', 'Tab', 'Shift+Tab'] }), () => null);
     expect(plan.unusableBindings).toBe(2);
     expect(settingsPlanNote(plan)).toContain('使われません');
-    const usable = resolveUsableBindings({ 'create-entry': ['Mod+N', 'Tab'] });
-    expect(usable.bindings['create-entry']).toEqual(['Mod+N']);
+    const usable = resolveUsableBindings({ 'create-entry': ['Alt+N', 'Tab'] });
+    expect(usable.bindings['create-entry']).toEqual(['Alt+N']);
     // 対照: 既定に Tab を持つ操作は、Tab を持ったまま
     expect(resolveUsableBindings({ 'row-commit': ['Tab', 'Mod+Enter'] }).unusable).toEqual([]);
   });
@@ -311,13 +311,13 @@ describe('6. 既に付いているキーをもう一度割り当てる', () => {
   it('🔴 「もう割り当ててあります」と返し、保存は動かさない', () => {
     const st = fakeStorage();
     const s = new KeymapStore(st);
-    const p = s.addBinding('create-entry', 'Mod+N');
+    const p = s.addBinding('create-entry', 'Alt+N');
     expect(p?.kind).toBe('duplicate');
     expect(p?.message).toBe('もう割り当ててあります');
     expect(st.map.size).toBe(0);
     s.addBinding('create-entry', 'Alt+M');
     expect(s.addBinding('create-entry', 'Alt+M')?.kind).toBe('duplicate');
-    expect(s.getBindings()['create-entry']).toEqual(['Mod+N', 'Alt+M']);
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+M']);
   });
 
   it('画面の注に出る(「割り当てられません」ではなく、付いている旨)', () => {
@@ -328,7 +328,7 @@ describe('6. 既に付いているキーをもう一度割り当てる', () => {
       .querySelector<HTMLButtonElement>('[data-pkc-field="keymap-assign"][data-pkc-command="create-entry"]')!
       .click();
     document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'n', code: 'KeyN', ctrlKey: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent('keydown', { key: 'n', code: 'KeyN', altKey: true, bubbles: true, cancelable: true }),
     );
     const note = panel.root.querySelector(
       '[data-pkc-field="keymap-row"][data-pkc-command="create-entry"] [data-pkc-field="settings-note"]',

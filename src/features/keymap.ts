@@ -257,7 +257,9 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: 'ノートを作る',
     alias: '新規 作成 新しいノート',
     contexts: ['global'],
-    defaults: ['Mod+N'],
+    // 🔴 既定は `Alt+N`(台帳 #1852、#1163 依頼 182 = A)。`Ctrl+N`(⌘N)は Chrome / Edge がページへ渡さず、新しいウィンドウが開く
+    //    (`REFUSED` の `Mod+N`)。⚠ 保存済みの `Ctrl+N` は読み込みで断らない(`LEGACY_KEPT`)
+    defaults: ['Alt+N'],
     note: 'いま選んでいる種類で作ります(編集中は効きません)',
   },
   {
@@ -1990,12 +1992,57 @@ const GLYPH_TO_CODE: Readonly<Record<string, string>> = {
   '~': 'Backquote',
 };
 
+/**
+ * 🔴 **記号のキーは、キーに印字された字で見る**(台帳 #1852、#1163 依頼 261 / 310 = A)。
+ *
+ * ⚠ 直す前は全部「キーの位置」(`code`)で見ていた。US 配列では位置と刻印が一致するが、日本語配列では
+ *   `]` の刻印のキーが `Backslash`、`[` の刻印のキーが `BracketRight` の位置にあり、画面に「字下げ Ctrl+]」と出ていても
+ *   `]` の刻印のキーでは動かなかった(`Ctrl+]` を押すと左のペインが畳まれた)。
+ * 🔑 範囲は**記号のキーだけ**。英字と数字は今までどおり位置で見る(日本語入力のまま打っても効かせるため ── 上の注記)。
+ *   mac の `Option+[` のように修飾で字が化けた打鍵は、印字を読めないので位置に落ちる(今までどおり)。
+ * ⚠ 刻印が「Shift を押したときの字」(`{ } | : " < > _ + ? ~`)なのに Shift を押していない打鍵は、位置のまま見る
+ *   (日本語配列の `:` のキーを `;` の割り当てへ寄せない ── 2 つのキーが同じ割り当てを起こさない)。
+ */
+const SYMBOL_CODES: ReadonlySet<string> = new Set([
+  'BracketLeft', 'BracketRight', 'Backslash', 'Semicolon', 'Quote', 'Comma', 'Period', 'Minus', 'Equal', 'Slash', 'Backquote',
+  'IntlYen', 'IntlRo', 'IntlBackslash',
+]);
+/** 刻印 → 割当の名前。⚠ 日本語配列にだけある `@` `^` `¥` を足す(`¥` は今までも `Backslash` の仲間)。 */
+const PRINTED_KEY: Readonly<Record<string, string>> = {
+  ...GLYPH_TO_CODE,
+  '@': '@',
+  '^': '^',
+  '¥': 'Backslash',
+  '￥': 'Backslash',
+};
+/** Shift を押したときの字(Shift 無しで出たら、刻印では見ない)。 */
+const SHIFTED_ONLY: ReadonlySet<string> = new Set(['{', '}', '|', ':', '"', '<', '>', '_', '+', '?', '~']);
+
 /** 修飾キーそのものの打鍵(= 割当にならない)。 */
 const MODIFIER_KEYS = new Set(['Control', 'Meta', 'Alt', 'Shift', 'CapsLock', 'Dead']);
 
-/** `KeyboardEvent` から基本キーを採る。修飾キー単独なら `null`。 */
-export function baseKeyOf(ev: Pick<KeyboardEvent, 'key' | 'code'>): string | null {
-  if (MODIFIER_KEYS.has(ev.key)) return null;
+/** 刻印で見る記号のキーなら、その割当の名前。そうでなければ `null`。 */
+function printedSymbolOf(ev: Pick<KeyboardEvent, 'key' | 'code'> & { shiftKey?: boolean }): string | null {
+  const code = typeof ev.code === 'string' ? ev.code : '';
+  if (!SYMBOL_CODES.has(code)) return null;
+  const k = ev.key;
+  if (typeof k !== 'string' || PRINTED_KEY[k] === undefined) return null;
+  if (ev.shiftKey !== true && SHIFTED_ONLY.has(k)) return null;
+  return PRINTED_KEY[k]!;
+}
+
+/**
+ * 修飾キーの打鍵か。⚠ `Dead`(mac の `Option+N` など)は、`Alt` を押した英字・数字のキーなら**打鍵として読む**
+ * (台帳 #1852、依頼 182 = A ── 既定を `Alt+N` にしたので、mac の `Option+N`(`~` の予備入力)で動かないと割当が死ぬ)。
+ */
+function isModifierOnly(ev: Pick<KeyboardEvent, 'key' | 'code'> & { altKey?: boolean }): boolean {
+  if (ev.key === 'Dead' && ev.altKey === true && /^(Key[A-Z]|Digit[0-9])$/.test(ev.code ?? '')) return false;
+  return MODIFIER_KEYS.has(ev.key);
+}
+
+/** `KeyboardEvent` から基本キーを**キーの位置**で採る(記号も位置)。割り当て済みの人の意味を変えないための橋(`positionChordOf`)。 */
+function positionKeyOf(ev: Pick<KeyboardEvent, 'key' | 'code'> & { altKey?: boolean }): string | null {
+  if (isModifierOnly(ev)) return null;
   const code = typeof ev.code === 'string' ? ev.code : '';
   const letter = /^Key([A-Z])$/.exec(code);
   if (letter) return letter[1]!;
@@ -2014,6 +2061,14 @@ export function baseKeyOf(ev: Pick<KeyboardEvent, 'key' | 'code'>): string | nul
   return k;
 }
 
+/** `KeyboardEvent` から基本キーを採る。修飾キー単独なら `null`。⚠ 記号のキーは刻印(`printedSymbolOf`)、ほかは位置。 */
+export function baseKeyOf(
+  ev: Pick<KeyboardEvent, 'key' | 'code'> & { shiftKey?: boolean; altKey?: boolean },
+): string | null {
+  if (isModifierOnly(ev)) return null;
+  return printedSymbolOf(ev) ?? positionKeyOf(ev);
+}
+
 /** `KeyboardEvent` → 和音。修飾キー単独なら `null`。 */
 export function chordOf(
   ev: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>,
@@ -2022,6 +2077,22 @@ export function chordOf(
   const key = baseKeyOf(ev);
   if (key === null) return null;
   // 🔴 mac では `⌘` だけが `mod`(#1163 依頼 181)。`Ctrl` を押した打鍵は `mod` なしになり、素のキー扱いで OS 標準の文字入力へ流れる
+  return { mod: mac ? ev.metaKey : ev.ctrlKey || ev.metaKey, alt: ev.altKey, shift: ev.shiftKey, key };
+}
+
+/**
+ * 🔴 **記号のキーも「位置」で読んだ和音**(台帳 #1852、依頼 261 / 310 = A の互換)。
+ * 記号のキーを刻印で読むようにした(`chordOf`)ので、**変える前に自分で割り当てた**記号のキー(位置で保存されている)は、
+ * 日本語配列などでは別のキーを指すようになる。その人の割り当てが効かなくなるのを避けるため、
+ * 刻印で読んで何にも当たらなかった打鍵だけ、これで読み直して**自分で割り当てた物**(既定でない物)に当てる(`matchPositionCommand`)。
+ * 位置と刻印が同じ配列(US)では、`chordOf` と同じ値になる ── 読み直しは起きない。
+ */
+export function positionChordOf(
+  ev: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>,
+  mac: boolean = isMac(),
+): Chord | null {
+  const key = positionKeyOf(ev);
+  if (key === null) return null;
   return { mod: mac ? ev.metaKey : ev.ctrlKey || ev.metaKey, alt: ev.altKey, shift: ev.shiftKey, key };
 }
 
@@ -2179,6 +2250,9 @@ export const REFUSED: readonly string[] = [
   'Mod+Q',
   'Mod+W',
   'Mod+T',
+  // 🔴 `Mod+N`(新しいウィンドウ)も断る(台帳 #1852、#1163 依頼 313 = A / 182 = A)。「ノートを作る」の既定を `Alt+N` へ替えたので、
+  //    自分の既定として通す必要が無くなった。⚠ 保存済みの `Ctrl+N` は読み込みでは断らない(`LEGACY_KEPT`)
+  'Mod+N',
   // 🔴 **奪えてしまう鍵**(着地前レビュー 6)── ブラウザが守る `Mod+W` 等と違い、
   //    再読込と印刷は**ページが横取りできる**。奪うと user は戻し道を見失う
   //    (「再読込できないと直せない」と思う)
@@ -2196,8 +2270,9 @@ export const REFUSED: readonly string[] = [
   // 🔴 **ブラウザやパソコンが先に取って、ページへ届かないキー**(#1163 依頼 313)。割り当てても効かないので、受け付けない。
   //   ⚠ 範囲は「新しいウィンドウ・タブ / 閉じる / 閉じたタブを開き直す / タブの切り替え / ウィンドウを閉じる」に絞った。
   //   Chromium の「ページに渡さない操作」の一覧(新しいタブ・ウィンドウ・シークレットウィンドウ / タブ・ウィンドウを閉じる /
-  //   閉じたタブを開き直す / 次・前のタブ / 終了)に当たる組み合わせ。実機で確かめていない `Ctrl+L` / `Ctrl+D` は入れない
-  //   (確かめずに断ると、割り当てられるキーを黙って減らす)。`Ctrl+N` も入れない ── 「ノートを作る」の既定で、実機の確認が先。
+  //   閉じたタブを開き直す / 次・前のタブ / 終了)に当たる組み合わせ。`Ctrl+L`(アドレスバー)/ `Ctrl+D`(ブックマーク)は
+  //   ページが `preventDefault` で止められるので入れない(断ると、割り当てられるキーを黙って減らす)。
+  //   `Mod+N` / `Mod+T` / `Mod+W` は上の列、`Mod+Shift+N` / `Mod+Shift+T` はここ。
   'Mod+Shift+N',
   'Mod+Shift+T',
   'Mod+Shift+W',
@@ -2208,6 +2283,14 @@ export const REFUSED: readonly string[] = [
   'Mod+PageDown',
   'Alt+F4',
 ];
+
+/**
+ * 🔴 **保存済みなら断らない、前の既定**(台帳 #1852、依頼 182 = A)。「ノートを作る」の既定は `Ctrl+N` だった。
+ * 既定を `Alt+N` へ替えたあとも、**保存や設定ファイルに残っている `Ctrl+N` は読み込みで捨てない**
+ * (アプリとして開いた窓などでは `Ctrl+N` が届く。割り当て済みの人の割り当てを後から「使えない」にしない)。
+ * ⚠ 新しく割り当てるとき(`stored = false`)は断る ── 届かないキーを増やさない。
+ */
+const LEGACY_KEPT: ReadonlyArray<readonly [commandId: string, chord: string]> = [['create-entry', 'Mod+N']];
 
 /** 文字を打つ欄の編集に使うキー(`Ctrl` / `Alt` と組むと、単語・行・文書の端への移動や削除になる)。 */
 const FIELD_EDIT_KEYS: ReadonlySet<string> = new Set([
@@ -2271,7 +2354,8 @@ export function validateBinding(
   // ⚠ そのコマンド自身の既定は断らない ── 2 ペインの「反対側へコピー」の既定は `F5`(コマンダー式)で、
   //   「自分の既定を自分の検査が落とす」を作らない(消した既定を戻す口が無くなる)。他のコマンドへの割当は断る
   const ownDefault = findCommand(commandId)?.defaults.some((d) => sameChord(d, norm)) === true;
-  if (!ownDefault && REFUSED.some((r) => sameChord(r, norm))) {
+  const legacyKept = stored && LEGACY_KEPT.some(([id, k]) => id === commandId && sameChord(k, norm));
+  if (!ownDefault && !legacyKept && REFUSED.some((r) => sameChord(r, norm))) {
     // ⚠ 文言は一覧と対(#697)── `Mod+R` / `Mod+P` はコピーでも貼り付けでもないので、
     //    「コピー・貼り付けなど」だけでは user が「なぜ R が駄目か」を読めない
     return {
@@ -2458,6 +2542,36 @@ export function matchCommand(
   if (chord === null) return null;
   return chordIndexOf(bindings, context).get(chordToString(chord)) ?? null;
 }
+
+/**
+ * 🔴 **位置で保存された、自分で割り当てた記号のキーに当てる**(台帳 #1852、依頼 261 / 310 = A の互換)。
+ * 呼ぶのは、刻印で読んだ和音(`chordOf`)が何にも当たらず、位置で読んだ和音(`positionChordOf`)が記号のキーで、
+ * 刻印の和音と違うときだけ(= 日本語配列など)。**既定の割り当ては見ない**(既定は刻印で書いてある ──
+ * 位置で当てると、刻印で読む前と同じ「画面の字と押すキーのずれ」が戻る)。
+ * @returns 当たったコマンドの id。無ければ `null`。
+ */
+export function matchPositionCommand(
+  position: Chord | null,
+  printed: Chord | null,
+  context: KeyContext,
+  bindings: KeymapBindings,
+): string | null {
+  if (position === null || !SYMBOL_POSITION_KEYS.has(position.key)) return null;
+  const want = chordToString(position);
+  if (printed !== null && chordToString(printed) === want) return null;
+  for (const c of KEY_COMMANDS) {
+    if (!c.contexts.includes(context)) continue;
+    for (const b of bindings[c.id] ?? c.defaults) {
+      if (c.defaults.some((d) => sameChord(d, b))) continue;
+      if (sameChord(b, want)) return c.id;
+    }
+  }
+  return null;
+}
+/** 位置で保存されうる記号のキーの名前(`NAMED_CODES` のうち記号のもの)。 */
+const SYMBOL_POSITION_KEYS: ReadonlySet<string> = new Set([
+  'BracketLeft', 'BracketRight', 'Backslash', 'Semicolon', 'Quote', 'Comma', 'Period', 'Minus', 'Equal', 'Slash', 'Backquote',
+]);
 
 /**
  * 割当 × 面 → 「正規化した和音 → コマンド id」の索引(#1087)。

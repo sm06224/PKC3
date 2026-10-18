@@ -38,6 +38,7 @@ function setup(over: Partial<AgentEmbedDeps> = {}, mc: boolean = true) {
     createEntry: () => 'new1',
     append: async () => ({ ok: true }),
     appendCheck: () => 'ok',
+    notifyAppended: () => undefined,
     gate: async (t) => {
       gateCalls.push(t);
       return true;
@@ -203,6 +204,7 @@ describe('list / call(JSON-RPC の道)', () => {
           createEntry: () => 'id',
           append: async () => ({ ok: true }),
           appendCheck: () => 'ok',
+          notifyAppended: () => undefined,
           gate: async () => false,
           from,
         }),
@@ -232,6 +234,7 @@ describe('list / call(JSON-RPC の道)', () => {
           createEntry: () => null,
           append: async () => ({ ok: true }),
           appendCheck: () => 'ok',
+          notifyAppended: () => undefined,
           gate: (_t, signal) => {
             seen = signal;
             return new Promise<boolean>(() => undefined);
@@ -275,6 +278,7 @@ describe('窓口(embed-bridge)経由の tools/list・tools/call', () => {
     const detach = startEmbedBridge({
       enabled: true,
       origins: () => state.allowed,
+      gate: async () => true,
       agent: { ...embed, enabled: () => flag.on },
       target: window,
     });

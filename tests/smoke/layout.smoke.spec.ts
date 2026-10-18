@@ -2088,14 +2088,14 @@ test('🔴 ▼ の合成メニュー: 種類を選ぶとその場で作り、次
   /**
    * ④ 🔴 **Ctrl+N も同じ対象** ── 近道が別のものを作ったら、それは別の機能である。
    */
-  await page.keyboard.press('Control+n');
-  await expect(title, 'Ctrl+N が選んだ種類を無視している').toHaveText(/表 3$/, { timeout: 10_000 });
+  await page.keyboard.press('Alt+n');
+  await expect(title, 'Alt+N が選んだ種類を無視している').toHaveText(/表 3$/, { timeout: 10_000 });
   /**
    * ⚠ **題名が先に変わる** ── `CREATE_ENTRY` は題名を楽観更新するので、
    *   本文(升)はその後に描かれる。フル走行では実際にここで **0** を掴んだ
    *   (単独では通っていた ── CLAUDE.md「flake に見えるものは、たいてい観測点の側」)。
    */
-  await expect(cells, 'Ctrl+N で出来たものが表でない').toHaveCount(15, { timeout: 10_000 });
+  await expect(cells, 'Alt+N で出来たものが表でない').toHaveCount(15, { timeout: 10_000 });
 
   /**
    * ⑤ 🔴 **鍵盤操作**(#1054 段②-2、F3b)── 実ブラウザでも `ArrowDown` で

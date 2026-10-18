@@ -3112,6 +3112,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'apply-plan',
   // ⚠ 追記と**同じ経路**(`REQUEST_BODY_REWRITE`)を撃つので、同じ門をくぐらせる
   'undo-append',
+  // 🔑 AI の書き足しを外すのも本文を書く(依頼 362)── `undo-append` と同じ書換なので同じ門
+  'undo-agent-append',
   // ⚠ 塊の移動の「元に戻す」も同じ経路(#684 段①)
   'undo-move',
   // 🔴 ブロックを 1 つ上下へ動かす(台帳 #1852 束 S1、依頼 238)── 実体は `MOVE_BLOCK`(本文を書く)なので同じ門
@@ -10335,6 +10337,28 @@ const ACTIONS: Record<string, ActionHandler> = {
       // ⚠ 待っている間に別の追記へ替わっていたら、押していない追記を外さない
       () => {
         if (dispatcher.getState().lastAppend?.lid === lid) dispatcher.dispatch({ type: 'UNDO_APPEND' });
+      },
+    );
+  },
+  /**
+   * 🔴 **直前の AI の書き足しを外す**(台帳 #1852 P1 / 依頼 362)。自分の「追記を元に戻す」(`undo-append`)と**材料が別**。
+   * ⚠ 独自の書込経路を持たない ── reducer が `REQUEST_BODY_REWRITE` を出す(§7)。
+   */
+  'undo-agent-append': (dispatcher, _target, services) => {
+    const lid = dispatcher.getState().lastAgentAppend?.lid;
+    if (lid === undefined) {
+      dispatcher.dispatch({ type: 'UNDO_AGENT_APPEND' });
+      return;
+    }
+    // 🔴 別のタブ・窓が編集中のノートへは撃たない(`undo-append` と同じ門)
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      '書き足しを元に戻せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      // ⚠ 待っている間に別の書き足しへ替わっていたら、押していない書き足しを外さない
+      () => {
+        if (dispatcher.getState().lastAgentAppend?.lid === lid) dispatcher.dispatch({ type: 'UNDO_AGENT_APPEND' });
       },
     );
   },

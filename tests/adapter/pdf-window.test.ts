@@ -88,6 +88,10 @@ interface Rig {
   openFailed: PdfSession[];
   lateHello: PdfSession[];
   edits: { session: PdfSession; key: string }[];
+  /** `relend` が貸し直した URL の控え(貸した順)。 */
+  relends: string[];
+  /** 貸し直しを返す前に止める門(test が開ける)。`null` = すぐ返す。 */
+  relendGate: { release: (() => void) | null; hold: boolean };
   /** 本体が「この collection の PDF の添付」として返す一覧(test が書き換える)と、貸した鍵の控え。 */
   attach: { items: { key: string; name: string; size: number | null }[]; lends: string[] };
   clock: { t: number };
@@ -103,6 +107,8 @@ interface Rig {
 function rig(
   quoteResult: PdfQuoteResult = { ok: true, message: '引きました' },
   editResult: PdfEditResult = { ok: true, message: '保存しました' },
+  /** 'ok' = 添付があり貸し直せる / 'none' = 添付が無い / 省略 = `relend` を持たない(従来の本体) */
+  relendMode?: 'ok' | 'none',
 ): Rig {
   const hub = new Hub();
   const clock = { t: 1_000_000 };
@@ -117,6 +123,8 @@ function rig(
     openFailed: [] as PdfSession[],
     lateHello: [] as PdfSession[],
     edits: [] as Rig['edits'],
+    relends: [] as string[],
+    relendGate: { release: null, hold: false } as Rig['relendGate'],
     attach: { items: [], lends: [] } as Rig['attach'],
     clock,
   };
@@ -134,6 +142,17 @@ function rig(
       return Promise.resolve(editResult);
     },
     listAttachments: () => Promise.resolve(r.attach.items),
+    ...(relendMode === undefined
+      ? {}
+      : {
+          relend: async (session: PdfSession): Promise<PdfLent | null> => {
+            if (relendMode === 'none') return null;
+            if (r.relendGate.hold) await new Promise<void>((res) => (r.relendGate.release = res));
+            const url = `blob:re-${session.assetKey}-${String(r.relends.length + 1)}`;
+            r.relends.push(url);
+            return { url, dispose: () => r.disposed.push(url) };
+          },
+        }),
     // 本物(`main.ts`)と同じく、一覧に無い鍵は貸さない(窓の鍵を信用しない)
     lendAttachment: (key) => {
       if (!r.attach.items.some((i) => i.key === key)) return Promise.resolve(null);
@@ -885,5 +904,145 @@ describe('種類の突合 ── reader.js の原文が送る / 待つ種類を�
       await flush();
       expect(effects[kind]?.(g), `${kind} が本体で何も起こさない(受け口が無い)`).toBe(true);
     }
+  });
+});
+
+/**
+ * 🔴 **窓の F5 で、読んでいた PDF が消えない**(台帳 #1852、#1163 依頼 332 = A)。
+ *
+ * 貸した URL は窓が `loaded` と言った時点で返す(生成物は寿命の終端で破棄 ── 不可侵指示 2026-07-27)ので、
+ * 直す前は F5 のあとに渡せる URL が無く、窓は「もう一度開いてください」と出した。直したあとは
+ * 名乗られた**その回だけ**同じ添付を貸し直し、新しい URL も `loaded`(か時間切れ・窓を閉じる)で返す。
+ */
+describe('窓の F5 で同じ PDF を貸し直す(依頼 332 = A)', () => {
+  const docOf = (g: Rig): Record<string, unknown> | undefined => g.win.received.filter((m) => m.kind === 'doc').pop()?.payload;
+
+  it('🔴 loaded の後の F5(closed → hello)は、同じ添付を貸し直して URL を渡す', async () => {
+    const g = rig(undefined, undefined, 'ok');
+    openAndHello(g);
+    g.win.send('loaded');
+    g.win.send('closed');
+    g.win.received.length = 0;
+    g.win.send('hello');
+    await flush();
+    expect(docOf(g), '貸し直していない(F5 で PDF が消える)').toEqual({ url: 'blob:re-k1-1', name: '報告書.pdf' });
+    expect(g.relends).toEqual(['blob:re-k1-1']);
+    // 🔑 貸し直した URL も、窓が握った瞬間に返す(窓の寿命まで握らない)
+    expect(g.disposed).toEqual(['blob:k1']);
+    g.win.send('loaded');
+    expect(g.disposed).toEqual(['blob:k1', 'blob:re-k1-1']);
+  });
+
+  it('🔴 F5 のあとも窓は生きている ── 引用・保存の合図を受ける(控えから生き返らせる)', async () => {
+    const g = rig(undefined, undefined, 'ok');
+    openAndHello(g);
+    g.win.send('loaded');
+    g.win.send('closed');
+    g.win.send('hello');
+    await flush();
+    g.win.send('loaded');
+    g.win.send('quote', { text: 'x', page: 3 });
+    await flush();
+    expect(g.quotes.map((q) => q.page), 'F5 の後の引用を受けていない').toEqual([3]);
+    expect(g.host.openTokenFor('k1'), 'F5 の後が「開いていない」扱いのまま').not.toBeNull();
+  });
+
+  it('🔴 閉じた合図が来る前の名乗り直し(窓が生きたまま URL だけ返してある)も貸し直す', async () => {
+    const g = rig(undefined, undefined, 'ok');
+    openAndHello(g);
+    g.win.send('loaded');
+    g.win.received.length = 0;
+    g.win.send('hello');
+    await flush();
+    expect(docOf(g)).toEqual({ url: 'blob:re-k1-1', name: '報告書.pdf' });
+  });
+
+  it('⚠ 窓が言わないまま放っておいたら、貸し直した URL は時間切れで返す(積まない)', async () => {
+    const g = rig(undefined, undefined, 'ok');
+    openAndHello(g);
+    g.win.send('loaded');
+    g.win.send('closed');
+    g.win.send('hello');
+    await flush();
+    expect(g.disposed).toEqual(['blob:k1']);
+    const t = g.timers.filter((x) => x.live && x.ms === ATTACH_LEND_TTL_MS).pop();
+    expect(t, '貸し直した URL の時計が無い').toBeDefined();
+    t!.fn();
+    expect(g.disposed).toEqual(['blob:k1', 'blob:re-k1-1']);
+  });
+
+  it('⚠ 貸し直したあと窓が閉じられたら、その時点で返す(二重に返さない)', async () => {
+    const g = rig(undefined, undefined, 'ok');
+    openAndHello(g);
+    g.win.send('loaded');
+    g.win.send('closed');
+    g.win.send('hello');
+    await flush();
+    g.win.send('closed');
+    expect(g.disposed).toEqual(['blob:k1', 'blob:re-k1-1']);
+    g.win.send('closed');
+    expect(g.disposed).toEqual(['blob:k1', 'blob:re-k1-1']);
+  });
+
+  it('⚠ F5 を続けて押して貸し直しが重なっても、URL を積まない(先に着いた 1 本だけ)', async () => {
+    const g = rig(undefined, undefined, 'ok');
+    openAndHello(g);
+    g.win.send('loaded');
+    g.win.send('closed');
+    g.relendGate.hold = true;
+    g.win.send('hello');
+    await flush();
+    const first = g.relendGate.release;
+    expect(first, '前提: 1 本目が貸し出しの途中').not.toBeNull();
+    // 1 本目が終わる前に、2 度目の名乗り(控えから生き返る前なのでもう一度控えを引く)
+    g.relendGate.release = null;
+    g.win.send('hello');
+    await flush();
+    const second = g.relendGate.release as (() => void) | null;
+    first!();
+    await flush();
+    second?.();
+    await flush();
+    const returned = g.disposed.filter((u) => u.startsWith('blob:re-'));
+    // 貸した 2 本のうち、窓に渡って握られるのは 1 本。もう 1 本はその場で返っている
+    expect(g.relends.length).toBe(2);
+    expect(returned.length, '貸し直した URL が 2 本とも残っている').toBe(1);
+  });
+
+  it('⚠ 貸し直す前に本体が畳まれたら、貸さずに返す', async () => {
+    const g = rig(undefined, undefined, 'ok');
+    openAndHello(g);
+    g.win.send('loaded');
+    g.win.send('closed');
+    g.relendGate.hold = true;
+    g.win.send('hello');
+    await flush();
+    g.host.dispose();
+    g.relendGate.release!();
+    await flush();
+    expect(g.disposed.filter((u) => u.startsWith('blob:re-')), '畳まれたあとに貸した URL が残っている').toEqual(['blob:re-k1-1']);
+  });
+
+  it('対照群: 添付が見つからなければ、今までどおり空で答える', async () => {
+    const g = rig(undefined, undefined, 'none');
+    openAndHello(g);
+    g.win.send('loaded');
+    g.win.send('closed');
+    g.win.received.length = 0;
+    g.win.send('hello');
+    await flush();
+    expect(docOf(g)).toEqual({ url: null, name: '報告書.pdf' });
+  });
+
+  it('対照群: 「開かなかった」と読んで捨てた回の遅い名乗りは、貸し直さず誤りの言い直しを出す', async () => {
+    const g = rig(undefined, undefined, 'ok');
+    const s = g.host.open({ assetKey: 'k1', name: 'a.pdf', lid: null, lent: g.lent('blob:1') });
+    g.win.token = (g.opened[0]?.url ?? '').split('#')[1] ?? '';
+    g.timers.find((x) => x.ms === HELLO_TIMEOUT_MS)?.fn();
+    g.win.send('hello');
+    await flush();
+    expect(docOf(g)).toEqual({ url: null, name: 'a.pdf' });
+    expect(g.relends).toEqual([]);
+    expect(g.lateHello).toEqual([s]);
   });
 });

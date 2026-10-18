@@ -146,14 +146,16 @@ export function appendUnlessEditedElsewhere(
   heading: string | null,
   timeoutMs: number,
   timers: AppendTimers = REAL_APPEND_TIMERS,
+  /** 追記の回の印(`appendAndSettle` へそのまま渡す)。 */
+  batch?: string,
 ): Promise<AppendOutcome> {
   // 問い合わせが要らない回は**同期のまま**撃つ(口の無い環境の追記を 1 手遅らせない)
   if (elsewhereCheckNotNeeded(dispatcher, port, lid)) {
-    return appendAndSettle(dispatcher, lid, text, heading, timeoutMs, timers);
+    return appendAndSettle(dispatcher, lid, text, heading, timeoutMs, timers, batch);
   }
   return editedElsewhereReason(dispatcher, port, lid).then((why) =>
     why !== null
       ? ({ ok: false, reason: 'refused', error: why } as const)
-      : appendAndSettle(dispatcher, lid, text, heading, timeoutMs, timers),
+      : appendAndSettle(dispatcher, lid, text, heading, timeoutMs, timers, batch),
   );
 }

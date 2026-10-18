@@ -123,6 +123,14 @@ export interface PdfReaderDeps {
    * 無ければ `null`。⚠ 貸した URL は窓が `attach-got` と言うか、`ATTACH_LEND_TTL_MS` 経つか、窓が閉じたときに本体が返す。
    */
   readonly lendAttachment: (key: string) => Promise<PdfLent | null>;
+  /**
+   * 🔴 **窓が読み直された(F5)とき、同じ PDF を貸し直す**(台帳 #1852、#1163 依頼 332 = A)。
+   * ⚠ 貸した URL は、窓が `loaded` と言った時点で返してある(生成物は寿命の終端で破棄 ── 不可侵指示 2026-07-27)。
+   *   直す前は、そのあとの F5 で渡せる URL が無く、窓は「PKC3 のウィンドウから、もう一度開いてください」と出して
+   *   読んでいた PDF が消えた。**貸し直すのは窓が名乗ったその回だけ**で、新しい URL も `loaded`(か時間切れ・窓を閉じる)で返す。
+   * 添付が見つからなければ `null`(= 今までどおり空で答える)。省くと貸し直さない。
+   */
+  readonly relend?: (session: PdfSession) => Promise<PdfLent | null>;
   /** 窓が読めず、内蔵の表示へ退避した(断り文は出さない。状態の行へ 1 行)。 */
   readonly onFellBack: (session: PdfSession) => void;
   /** 窓が文書を取れなかった(貸した URL が既に無い等)。 */
@@ -157,7 +165,10 @@ interface Gone {
 
 interface Live {
   readonly session: PdfSession;
-  readonly lent: PdfLent;
+  /** 窓へ貸している URL。⚠ 窓が読み直したら貸し直すので、差し替わる(`relend`)。 */
+  lent: PdfLent;
+  /** 貸し直した URL を、窓が `loaded` と言わないまま放っておいたときに返す時計(最初の貸し出しは `helloTimer` が見る)。 */
+  lendTimer: unknown;
   lentDisposed: boolean;
   lastAliveAt: number;
   helloTimer: unknown;
@@ -266,6 +277,7 @@ export class PdfReaderHost {
     const live: Live = {
       session,
       lent: args.lent,
+      lendTimer: null,
       lentDisposed: false,
       // 開いた直後は「生きている」側に置く(同じ添付を続けて押しても 2 枚目を開かない)
       lastAliveAt: this.now(),
@@ -311,6 +323,10 @@ export class PdfReaderHost {
 
   /** 貸した URL を返す(1 度だけ)。 */
   private release(l: Live): void {
+    if (l.lendTimer !== null) {
+      this.clearTimer(l.lendTimer);
+      l.lendTimer = null;
+    }
     if (l.lentDisposed) return;
     l.lentDisposed = true;
     try {
@@ -356,6 +372,106 @@ export class PdfReaderHost {
     }
   }
 
+  /** 貸し直しを頼む。落ちたら `null`(= 貸せない)。 */
+  private async tryRelend(session: PdfSession): Promise<PdfLent | null> {
+    try {
+      return (await this.deps.relend?.(session)) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** 貸し直した URL を、窓が `loaded` と言うまで預かる。⚠ 言わないまま放っておかれたら返す(`ATTACH_LEND_TTL_MS`)。 */
+  private adoptRelent(live: Live, lent: PdfLent): void {
+    live.lent = lent;
+    live.lentDisposed = false;
+    if (live.lendTimer !== null) this.clearTimer(live.lendTimer);
+    live.lendTimer = this.setTimer(() => {
+      live.lendTimer = null;
+      this.release(live);
+    }, ATTACH_LEND_TTL_MS);
+  }
+
+  /**
+   * 生きている窓が読み直した(`hello` が 2 回目以降で、最初に貸した URL は返してある)。
+   * ⚠ F5 を続けて押すと貸し直しが重なる ── 先に着いた 1 本だけ採り、あとから着いた分は**その場で返す**(URL を積まない)。
+   */
+  private async relendTo(live: Live): Promise<void> {
+    const token = live.session.token;
+    const lent = await this.tryRelend(live.session);
+    const reply = (url: string | null): void => {
+      try {
+        this.send('doc', token, { url, name: live.session.name });
+      } catch {
+        // 待っている間に放送を閉じた(本体の入れ替わり)── 返す先が無いだけ
+      }
+    };
+    if (lent === null) {
+      reply(null);
+      return;
+    }
+    // 待っている間に窓が閉じた / 本体が畳まれた ── 貸さずに返す
+    if (this.lives.get(token) !== live) {
+      this.disposeQuietly(lent);
+      return;
+    }
+    if (!live.lentDisposed) {
+      // 別の貸し直しが先に着いた ── こちらは返して、先の URL を渡す
+      this.disposeQuietly(lent);
+      reply(live.lent.url);
+      return;
+    }
+    this.adoptRelent(live, lent);
+    reply(lent.url);
+  }
+
+  /**
+   * 閉じた合図のあとに同じ token で名乗られた(窓の F5)。貸し直せたら、窓を**生きている窓として控え直す**
+   * (引用・保存・添付の選択も F5 の後で効く)。貸し直せなければ今までどおり空で答える。
+   */
+  private async reviveGone(token: string, g: Gone): Promise<void> {
+    const lent = await this.tryRelend(g.session);
+    const reply = (url: string | null): void => {
+      try {
+        this.send('doc', token, { url, name: g.session.name });
+      } catch {
+        // 待っている間に放送を閉じた ── 返す先が無いだけ
+      }
+    };
+    if (lent === null) {
+      reply(null);
+      return;
+    }
+    // 待っている間に本体が畳まれた / 別の名乗りが先に生き返らせた ── 貸さずに返す
+    if (this.gone.get(token) !== g || this.lives.has(token)) {
+      this.disposeQuietly(lent);
+      const live = this.lives.get(token);
+      if (live !== undefined && !live.lentDisposed) reply(live.lent.url);
+      return;
+    }
+    this.gone.delete(token);
+    const live: Live = {
+      session: g.session,
+      lent,
+      lendTimer: null,
+      lentDisposed: false,
+      lastAliveAt: this.now(),
+      helloTimer: null,
+      attachLends: new Map(),
+    };
+    this.lives.set(token, live);
+    this.adoptRelent(live, lent);
+    reply(lent.url);
+  }
+
+  private disposeQuietly(lent: PdfLent): void {
+    try {
+      lent.dispose();
+    } catch {
+      // 戻せなかっただけ
+    }
+  }
+
   private send(kind: string, token: string, payload: unknown): void {
     this.ch.postMessage({ [PDF_TAG]: kind, token, payload });
   }
@@ -371,11 +487,18 @@ export class PdfReaderHost {
     if (live === undefined) {
       /**
        * 🔴 **捨てた token が名乗り直した**(窓の F5 / 5 秒より遅い名乗り)。⚠ 直す前は**黙って捨て**て
-       * いたので、窓は「読み込んでいます…」のまま固まった。貸した URL は返した後なので渡せない ──
+       * いたので、窓は「読み込んでいます…」のまま固まった。
+       * 窓の F5 は、貸し直せるなら**同じ PDF を貸し直す**(`relend`。依頼 332 = A)。貸せない / 「開かなかった」と読んだ回は
        * **空で答えて窓に言わせる**(窓は「PKC3 のウィンドウから、もう一度開いてください」と出す)。
        */
       const g = this.gone.get(token);
       if (g !== undefined && kind === 'hello') {
+        // 🔴 窓の F5(閉じた合図のあとの名乗り)は、同じ PDF を貸し直して**窓を生き返らせる**(依頼 332 = A)。
+        //   ⚠ 「開かなかった」と読んで捨てた回(`openFailed`)は貸し直さない ── 断りを言った後なので、言い直す側へ(下)。
+        if (!g.openFailed && this.deps.relend !== undefined) {
+          void this.reviveGone(token, g);
+          return;
+        }
         this.send('doc', token, { url: null, name: g.session.name });
         if (g.openFailed) {
           g.openFailed = false;
@@ -395,7 +518,12 @@ export class PdfReaderHost {
           this.clearTimer(live.helloTimer);
           live.helloTimer = null;
         }
-        // 🔴 貸した URL が既に返っていれば、渡せない(窓が読み直したとき)── 空で答えて窓に言わせる
+        // 🔴 貸した URL が既に返っていれば(窓が読み直したとき)、**貸し直して**渡す(依頼 332 = A)。
+        //   貸し直せない(`relend` を持たない / 添付が無い)ときは、空で答えて窓に言わせる
+        if (live.lentDisposed && this.deps.relend !== undefined) {
+          void this.relendTo(live);
+          return;
+        }
         this.send('doc', token, {
           url: live.lentDisposed ? null : live.lent.url,
           name: live.session.name,

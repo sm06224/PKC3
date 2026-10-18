@@ -579,6 +579,13 @@ function erAfterDuckWrite(
 }
 
 /**
+ * 🔴 **AI の書き足しの印**(台帳 #1852 P1 / 依頼 362)。`APPEND_TO_ENTRY.batch` にこの値が入った追記は、
+ * 自分の「追記を元に戻す」(`lastAppend`)を**上書きせず**、AI の分(`lastAgentAppend`)として別に持つ。
+ * ⚠ 自分の追記と AI の追記が同じ 1 手に継がれない(`batch` が違う)── 別の手として戻せる。
+ */
+export const AGENT_APPEND_BATCH = 'agent-append';
+
+/**
  * 🔴 **直前の追記を、次の追記でどう持ち替えるか**(#395 段① / #668 C)。
  *
  * - 純粋な挿入でなかった回は `null` ── 前の材料を**残したままにしない**
@@ -2108,6 +2115,12 @@ export interface AppState {
    */
   lastAppend: { lid: string; lines: readonly string[]; at?: number; batch?: string } | null;
   /**
+   * 🔴 **直前の AI の書き足し**(台帳 #1852 P1 / 依頼 362)。`lastAppend`(自分の追記)とは**別の 1 手**。
+   * ⚠ AI が書き足しても自分の「追記を元に戻す」は消えない(こちらに入る)。`notice` = 「開く」と並べる知らせの字
+   *   (`OP_NOTICE.agentUndo` が置く)── 別の知らせに上書きされたら「元に戻す」を出さない(`status-open.ts`)。
+   */
+  lastAgentAppend: { lid: string; lines: readonly string[]; at?: number; notice?: string } | null;
+  /**
    * 🔴 **履歴から戻した直後の「元に戻す」の材料**(依頼 68-1)── 戻す前の本文の版 id。
    * ⚠ `lid` を持つ: 別のノートを選んだら出さない(他のノートの版を、いま開いているノートへ書かない)。
    * ⚠ 1 手だけ持つ。次の復元・ノートの切り替えで出番が無くなる(出し入れは `status-open.ts`)。
@@ -2390,6 +2403,7 @@ export const initialState: AppState = {
   linkedFiles: new Map(),
   writeLock: null,
   lastAppend: null,
+  lastAgentAppend: null,
   lastMove: null,
   editOpenAt: null,
   sectionDraft: null,
@@ -3126,6 +3140,13 @@ export type UserAction =
       type: 'UNDO_APPEND';
     }
   | {
+      /**
+       * 🔴 **直前の AI の書き足しを取り消す**(台帳 #1852 P1 / 依頼 362)。`UNDO_APPEND` と同じ形で、
+       * 材料だけが別(`lastAgentAppend`)── 自分の追記の取り消しとは混ざらない。
+       */
+      type: 'UNDO_AGENT_APPEND';
+    }
+  | {
       type: 'APPEND_TO_ENTRY';
       lid: string;
       text: string;
@@ -3400,6 +3421,11 @@ export type UserAction =
        * (もとから付いていたノートは含まない ── 戻すときに触らない)。押し先は `undo-bulk-tag`。省略 = 出さない。
        */
       tagUndo?: { groups: readonly TagUndoGroup[] };
+      /**
+       * 🔴 **AI の書き足しの知らせ**(台帳 #1852 P1 / 依頼 362)。`true` = 隣に「AI の書き足しを元に戻す」を出す
+       * (`lastAgentAppend` が `open` のノートのときだけ。字は知らせと対で控える)。省略 = 出さない。
+       */
+      agentUndo?: true;
     }
   /**
    * 🔴 **画面下の知らせの時間が切れた**(#1017 C5 Q1)。⚠ `message` が**いま載っている知らせと同じとき
@@ -8181,7 +8207,19 @@ function reduceCore(
            * ⚠ 純粋な挿入でなかった回は `null` に落とす ── 前の追記の材料を
            *   **残したままにしない**(古い材料で消すと、別の所が消える)。
            */
-          lastAppend: nextLastAppend(state.lastAppend, action),
+          ...(action.batch === AGENT_APPEND_BATCH
+            ? {
+                // 🔴 AI の書き足しは**別の 1 手**に持つ ── 自分の「追記を元に戻す」(`lastAppend`)を消さない(依頼 362)
+                lastAgentAppend:
+                  action.inserted === null
+                    ? null
+                    : {
+                        lid: action.lid,
+                        lines: action.inserted,
+                        ...(action.insertedAt == null ? {} : { at: action.insertedAt }),
+                      },
+              }
+            : { lastAppend: nextLastAppend(state.lastAppend, action) }),
         },
         events: [
           { type: 'APPEND_SETTLED', lid: action.lid, gen: action.gen, ok: true, error: null },
@@ -8214,6 +8252,31 @@ function reduceCore(
       if (!meta) return { state: { ...state, lastAppend: null }, events: [] };
       return {
         state: { ...state, lastAppend: null },
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'undo-append', lines: last.lines, ...(last.at === undefined ? {} : { at: last.at }) },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **直前の AI の書き足しを取り消す**(台帳 #1852 P1 / 依頼 362)。`UNDO_APPEND` と同じ作法で、
+     * 材料が `lastAgentAppend` なだけ(断った回は材料を残す / 使い切る / 書換は `REQUEST_BODY_REWRITE` の 1 本)。
+     */
+    case 'UNDO_AGENT_APPEND': {
+      const last = state.lastAgentAppend;
+      if (!last) return { state, events: [] };
+      const blockedResult = bodyWriteBlockResult(state, last.lid, '書き足しを元に戻してください');
+      if (blockedResult !== null) return blockedResult;
+      const meta = state.entryMetas.get(last.lid);
+      if (!meta) return { state: { ...state, lastAgentAppend: null }, events: [] };
+      return {
+        state: { ...state, lastAgentAppend: null },
         events: [
           {
             type: 'REQUEST_BODY_REWRITE',
@@ -11222,6 +11285,10 @@ function reduceCore(
             ? {}
             : { restoreUndo: { ...action.restoreUndo, notice: action.message } }),
           ...(action.tagUndo === undefined ? {} : { tagUndo: { ...action.tagUndo, notice: action.message } }),
+          // 🔴 AI の書き足しの知らせ ── 戻す材料(`lastAgentAppend`)が同じノートのときだけ、字を対にして控える
+          ...(action.agentUndo === true && state.lastAgentAppend !== null && state.lastAgentAppend.lid === action.open
+            ? { lastAgentAppend: { ...state.lastAgentAppend, notice: action.message } }
+            : {}),
         },
         events: [],
       };

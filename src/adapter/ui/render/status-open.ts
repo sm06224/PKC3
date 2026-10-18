@@ -130,6 +130,11 @@ export interface StatusUndoState {
    *   **開いていないノートへ足した回**はここだけが戻し方を知っている。
    */
   readonly lastAppend: { readonly lid: string } | null;
+  /**
+   * 🔴 **直前の AI の書き足しを戻す材料**(台帳 #1852 P1 / 依頼 362)。`notice` = 並べる知らせの字(`OP_NOTICE.agentUndo` が置く)。
+   * ⚠ 省略 = 無い。自分の追記(`lastAppend`)とは別の 1 手。
+   */
+  readonly lastAgentAppend?: { readonly lid: string; readonly notice?: string } | null;
   /** その知らせが指している行き先(`OP_NOTICE` の `open`)。 */
   readonly noticeOpen: string | null;
   /** 履歴から戻した直後の「元に戻す」の材料(依頼 68-1)。省略 = 無い。 */
@@ -196,8 +201,16 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
    * ⚠ `notice === shownLine` も要る ── 字が別の知らせに上書きされた後に
    *   「元に戻す」だけ残ると、user は**その知らせが戻る**と読む(「開く」と同じ作法)。
    */
+  /**
+   * 🔴 **AI の書き足しの知らせの隣の「元に戻す」**(依頼 362)。出す条件は**字の一致**で見る(材料が持つ知らせの字が
+   * いま出ている 1 行そのもの)── 自分の追記の「元に戻す」(下の `append`)とは**押し先が別**なので、先に決めて譲らせる。
+   */
+  const la = state.lastAgentAppend ?? null;
+  const agent =
+    !move && la !== null && la.notice !== undefined && la.notice === shownLine && la.lid === state.noticeOpen;
   const append =
     !move &&
+    !agent &&
     state.lastAppend !== null &&
     state.noticeOpen !== null &&
     state.lastAppend.lid === state.noticeOpen &&
@@ -239,7 +252,7 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
   const tagU = state.tagUndo ?? null;
   const bulkTag =
     !move && !append && !schedule && !trash && !restore && !dualMove && !rename && tagU !== null && shownLine === tagU.notice;
-  const show = move || append || schedule || trash || restore || dualMove || rename || bulkTag;
+  const show = move || agent || append || schedule || trash || restore || dualMove || rename || bulkTag;
   // ⚠ **押し先も切り替える** ── 同じ器で 2 つの取り消しを出すので、
   //    字だけ出して受け手を替え忘れると「押すと別の物が戻る」になる
   // 🔴 **字も対象に合わせて切り替える**(#1046)── 器を 1 つで済ませているので、
@@ -248,7 +261,9 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
   if (show) {
     btn.setAttribute(
       'data-pkc-action',
-      restore
+      agent
+        ? 'undo-agent-append'
+        : restore
         ? 'restore-revision'
         : bulkTag
           ? 'undo-bulk-tag'
@@ -277,7 +292,13 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
       btn.removeAttribute('data-pkc-undo-title');
       btn.removeAttribute('data-pkc-undo');
     }
-    btn.textContent = trash || schedule || restore || dualMove || rename || bulkTag ? '元に戻す' : move ? '移動を元に戻す' : '追記を元に戻す';
+    btn.textContent = agent
+      ? '書き足しを元に戻す'
+      : trash || schedule || restore || dualMove || rename || bulkTag
+        ? '元に戻す'
+        : move
+          ? '移動を元に戻す'
+          : '追記を元に戻す';
   }
   if (btn.hidden !== !show) btn.hidden = !show;
   return show;

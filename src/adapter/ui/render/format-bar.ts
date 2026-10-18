@@ -26,6 +26,21 @@ function markWraps(btn: HTMLElement, op: FormatOp): void {
   if (WRAPS_SELECTION_OPS.has(op)) btn.setAttribute(WRAPS_SELECTION_ATTR, op);
 }
 
+/**
+ * 🔴 **狭い画面で、1 段に残す書式のボタン**(台帳 #1852、#1163 依頼 237 = A)。
+ * 横向きや縦の短いスマホ(`data-pkc-layout='phone'`)で帯が 2〜5 段になり、書く欄が 1 行ぶんしか残らなかった。
+ * 残りは「…」(`FORMAT_MORE_FIELD`)で開く。⚠ 狭くない画面は 1 px も変わらない(CSS が phone のときだけ畳む)。
+ * 🔑 選んだのは、スマホで続けて押す書式(太字 / 斜体 / 箇条書き / チェック / リンク)。見出しや表などは「…」の中。
+ */
+export const COMPACT_BAR_OPS: ReadonlySet<string> = new Set(['bold', 'italic', 'ul', 'task', 'link']);
+/** 「…」ボタンの `data-pkc-field`。⚠ `data-pkc-action` は持たない(開閉は帯の中で完結する ── 直接配線)。 */
+export const FORMAT_MORE_FIELD = 'format-more';
+/** 狭い画面で「…」の中にしまうボタンの印。⚠ CSS が読む(`app.css` のスマホの節)。 */
+export const FORMAT_MORE_ITEM_ATTR = 'data-pkc-format-more-item';
+/** 「…」を開いている印(帯に付く)。 */
+export const FORMAT_MORE_OPEN_ATTR = 'data-pkc-more-open';
+const FORMAT_MORE_TITLE = '書式のボタンを、残りも含めてすべて出します / しまいます';
+
 /** 書式パネルを組む。⚠ 押した所は `data-pkc-format` で分かる(binder が読む)。 */
 export function buildFormatBar(): HTMLElement {
   const bar = document.createElement('div');
@@ -250,7 +265,41 @@ export function buildFormatBar(): HTMLElement {
   label.textContent = '置換の欄を開く / 閉じる';
   toggleReplace.append(label);
   bar.append(toggleReplace);
+  addMoreToggle(bar);
   return bar;
+}
+
+/**
+ * 🔴 **狭い画面だけ使う「…」と、しまうボタンの印**(依頼 237 = A)。
+ * ⚠ 広い画面では CSS が「…」を出さない(`display: none`)ので、並びも高さも今までどおり。
+ * ⚠ 開閉は帯の中で完結する(`aria-expanded` と印 1 つ)── アクションの表に載せる操作ではない。
+ *   押しても本文の欄から焦点を奪わない(`mousedown` を止める ── 他の書式ボタンと同じ作法)。
+ */
+function addMoreToggle(bar: HTMLElement): void {
+  for (const btn of Array.from(bar.querySelectorAll<HTMLElement>('button'))) {
+    const op = btn.getAttribute('data-pkc-format');
+    if (op !== null && COMPACT_BAR_OPS.has(op)) continue;
+    btn.setAttribute(FORMAT_MORE_ITEM_ATTR, '');
+  }
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.setAttribute('data-pkc-field', FORMAT_MORE_FIELD);
+  more.setAttribute('aria-expanded', 'false');
+  more.setAttribute('aria-label', FORMAT_MORE_TITLE);
+  more.title = FORMAT_MORE_TITLE;
+  // ⚠ ほかのボタンと同じく字は `label` の span に入れる(段④ の規約 ── 文言の突合がここを読む)
+  const moreLabel = document.createElement('span');
+  moreLabel.setAttribute('data-pkc-field', 'label');
+  moreLabel.textContent = '…';
+  more.append(moreLabel);
+  more.addEventListener('mousedown', (ev) => ev.preventDefault());
+  more.addEventListener('click', () => {
+    const open = !bar.hasAttribute(FORMAT_MORE_OPEN_ATTR);
+    bar.toggleAttribute(FORMAT_MORE_OPEN_ATTR, open);
+    more.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  // ⚠ 並びの最後に置く。狭い画面では「しまう」ボタンが消えるので、1 段の末尾に「…」だけが残る
+  bar.append(more);
 }
 
 /**
