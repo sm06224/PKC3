@@ -6095,7 +6095,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         async (lid) => (await client.request({ op: 'getBody', cid, lid })) ?? null,
       ),
     });
-    if (heldViewWindow === null && !heldNoteWindow) {
+    /**
+     * 🔴 **書きかけの 1 行は本体の窓だけに出す** ── 判定は `openedByUs`(起動の前に決まる)で見る(台帳 #1852 M1 で見つけた)。
+     * ⚠ 直す前は `heldViewWindow === null && !heldNoteWindow` だったが、その 2 つの旗が立つのはディープリンクを当てる
+     *   `startApp(...).then` の中 ── ここ(起動の途中)では常に「本体」と読まれ、付箋や別ウィンドウにも同じ 1 行が出ていた。
+     */
+    if (!openedByUs) {
       draftOfferRef = createDraftOffer({
         region: regions.draftOffer,
         dispatcher,

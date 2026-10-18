@@ -820,8 +820,15 @@ describe('main.ts の配線(main.ts はどの test からも実行されない �
     expect(main).toMatch(/enterEdit:\s*\(body\)\s*=>\s*startEditRestoring\(dispatcher,\s*services,\s*body\)/);
     expect(main).toMatch(/restoreDraft:\s*\(\)\s*=>\s*draftOfferRef\?\.restore\(\)/);
     expect(main).toMatch(/discardDraft:\s*\(\)\s*=>\s*draftOfferRef\?\.discard\(\)/);
-    // 聞くのは本体の窓だけ(付箋・別窓は聞かない)
-    expect(main).toMatch(/heldViewWindow === null && !heldNoteWindow\) \{\s*draftOfferRef = createDraftOffer/);
+    // 聞くのは本体の窓だけ(付箋・別窓は聞かない)── 判定は起動の前に決まる `openedByUs` で見る
+    expect(main).toMatch(/if \(!openedByUs\) \{\s*draftOfferRef = createDraftOffer/);
+    // 🔴 前の判定(`heldViewWindow` / `heldNoteWindow`)はディープリンクを当てる `.then` の中で立つので、
+    //   起動の途中では常に「本体」と読まれていた ── `openedByUs` の代入が `startApp(root)` の呼び出しより前に在ることを見る
+    const assign = main.indexOf('openedByUs = noteOpenedByUs(');
+    const call = main.indexOf('void startApp(root)');
+    expect(assign, 'openedByUs の代入が見つからない').toBeGreaterThan(0);
+    expect(call, 'startApp の呼び出しが見つからない').toBeGreaterThan(0);
+    expect(assign, 'openedByUs が起動より後に決まっている').toBeLessThan(call);
   });
 });
 
