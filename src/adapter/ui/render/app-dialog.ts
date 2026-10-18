@@ -43,10 +43,16 @@ import { moveMark, toggleMark } from '@features/clipboard/scrap';
 import { toggleArchiveMark } from '@features/archive/zip-browse';
 import type { DiffRow } from '@features/revision/diff-view';
 import {
+  type OrphanShadowAnswer,
   SHADOW_DIALOG_TITLE,
+  SHADOW_LIST_ERASE_LABEL,
+  SHADOW_LIST_NOTE,
+  SHADOW_LIST_SKIP_LABEL,
+  SHADOW_LIST_TITLE,
   SHADOW_OPEN_SAVED_LABEL,
   SHADOW_OPEN_SHADOW_LABEL,
   shadowDialogNote,
+  shadowListRowLabel,
 } from '@features/office/office-shadow';
 import {
   AGENT_ASK_LABELS,
@@ -1319,6 +1325,34 @@ export function pickOfficeShadowInApp(
     rows: [
       { label: SHADOW_OPEN_SHADOW_LABEL, value: 'shadow' },
       { label: SHADOW_OPEN_SAVED_LABEL, value: 'saved' },
+    ],
+  });
+}
+
+/**
+ * 🔴 **Office を開くとき、保存していない文書(新しく作った文書など)の控えがあれば並べる**(依頼 367 A)。
+ *
+ * ⚠ **`Escape` / 外を押すは何も開かない**(`null`)── 「消す」を押し損ねの `Escape` で選ばせない。
+ * ⚠ 消す行は最後に区切りを引いて離す(一覧の行と取り違えない)。字は `features/office/office-shadow.ts`。
+ * @returns 開く文書の棚の名前 / スタート画面だけ開く / 全部消してスタート画面を開く / `null` = やめる
+ */
+export function pickOrphanShadowInApp(
+  host: HTMLElement,
+  orphans: readonly { readonly id: string; readonly at: number; readonly docName: string }[],
+  now: number = Date.now(),
+): Promise<OrphanShadowAnswer | null> {
+  return pickRowInApp<OrphanShadowAnswer>(host, {
+    title: SHADOW_LIST_TITLE,
+    field: 'pick-office-shadow-list',
+    indexAttr: 'data-pkc-office-shadow-list-index',
+    note: SHADOW_LIST_NOTE,
+    rows: [
+      ...orphans.map((o) => ({
+        label: shadowListRowLabel(o.docName, o.at, now),
+        value: { kind: 'open', id: o.id } as OrphanShadowAnswer,
+      })),
+      { label: SHADOW_LIST_SKIP_LABEL, value: { kind: 'skip' }, separatorBefore: true },
+      { label: SHADOW_LIST_ERASE_LABEL, value: { kind: 'erase' } },
     ],
   });
 }

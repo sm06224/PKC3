@@ -10,7 +10,9 @@
 import { OFFICE_PACK_APPROX } from '../../src/features/office/office-pack-size';
 import { describe, expect, it } from 'vitest';
 import {
+  OFFICE_LARGE_DOC_BYTES,
   isOfficeAttachment,
+  largeDocNotice,
   missingCapabilities,
   officeEntry,
   readOfficeCapability,
@@ -163,5 +165,26 @@ describe('readOfficeCapability', () => {
       DecompressionStream: function DS() { /* 目印 */ },
     } as unknown as typeof globalThis;
     expect(readOfficeCapability(w).jspi).toBe(false);
+  });
+});
+
+describe('大きい文書の知らせ(台帳 #1852 束 A1。依頼 242)', () => {
+  const MB = 1024 * 1024;
+
+  it('🔴 言い始めは 300MB を超えたとき。ちょうどは言わない・小さい文書には何も言わない', () => {
+    expect(OFFICE_LARGE_DOC_BYTES).toBe(300 * MB);
+    expect(largeDocNotice('a.docx', OFFICE_LARGE_DOC_BYTES)).toBeNull();
+    expect(largeDocNotice('a.docx', 20 * MB)).toBeNull();
+    expect(largeDocNotice('a.docx', 0)).toBeNull();
+    expect(largeDocNotice('a.docx', Number.NaN), '大きさが分からないのに言った').toBeNull();
+    expect(largeDocNotice('a.docx', OFFICE_LARGE_DOC_BYTES + 1)).not.toBeNull();
+  });
+
+  it('文書の名前と MB と、開けないときの次の一手(ダウンロード)を言う', () => {
+    const t = largeDocNotice('報告.docx', 1200 * MB)!;
+    expect(t).toContain('「報告.docx」');
+    expect(t).toContain('1.2 GB');
+    expect(t).toContain('開けないことがあります');
+    expect(t).toContain('ダウンロード');
   });
 });

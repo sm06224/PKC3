@@ -12,6 +12,16 @@ import {
   SHADOW_OPENED_NOTICE,
   SHADOW_OPEN_SAVED_LABEL,
   SHADOW_OPEN_SHADOW_LABEL,
+  SHADOW_LIST_ERASE_LABEL,
+  SHADOW_LIST_NOTE,
+  SHADOW_LIST_SKIP_LABEL,
+  SHADOW_LIST_TITLE,
+  SHADOW_OPENED_LOCAL_NOTICE,
+  SHADOW_OPENED_UNLINKED_NOTICE,
+  SHADOW_UNTITLED,
+  isLocalShadowMatch,
+  isOrphanShadow,
+  shadowListRowLabel,
   isShadowExpired,
   isShadowNewer,
   parseShadowName,
@@ -160,5 +170,46 @@ describe('一時保存の対象外の案内(台帳 #1852 束 T1、依頼 241 B)'
     expect([...NO_SHADOW_EXTS].sort(), '案内の対象に、一時保存される形式が混じった').toEqual(
       OFFICE_LAUNCH_EXTS.filter((e) => !writable.includes(e)).sort(),
     );
+  });
+});
+
+describe('手元のファイル・新しく作った文書の控え(台帳 #1852 束 A1。依頼 367 A)', () => {
+  const shadow = { docName: '報告.docx', size: 100, at: 5000, lid: '' };
+  const file = { name: '報告.docx', size: 100, modifiedAt: 1000 };
+
+  it('持ち主(lid)が居ない控えだけが「持ち主の居ない控え」', () => {
+    expect(isOrphanShadow({ lid: '' })).toBe(true);
+    expect(isOrphanShadow({ lid: 'lid-1' })).toBe(false);
+  });
+
+  it('同じ名前・同じ大きさで、控えがファイルより新しければ、そのファイルの控え', () => {
+    expect(isLocalShadowMatch(shadow, file)).toBe(true);
+  });
+
+  it('🔴 名前・大きさ・新しさのどれか 1 つでも違えば別のファイルの控え(取り違えて古い内容を戻さない)', () => {
+    expect(isLocalShadowMatch({ ...shadow, docName: '別.docx' }, file), '名前').toBe(false);
+    expect(isLocalShadowMatch({ ...shadow, size: 101 }, file), '大きさ').toBe(false);
+    expect(isLocalShadowMatch({ ...shadow, size: null }, file), '大きさが分からない').toBe(false);
+    expect(isLocalShadowMatch({ ...shadow, at: 1000 }, file), '同じ時刻 = ファイルのほうが新しいか同じ').toBe(false);
+    expect(isLocalShadowMatch({ ...shadow, at: 900 }, file), '控えのほうが古い').toBe(false);
+    expect(isLocalShadowMatch({ ...shadow, docName: '' }, { ...file, name: '' }), '名前が空同士').toBe(false);
+    expect(isLocalShadowMatch({ ...shadow, lid: 'lid-1' }, file), '添付の控えを手元のファイルに出した').toBe(false);
+  });
+
+  it('ファイルの更新時刻が分からないときは、訊く側へ倒す', () => {
+    expect(isLocalShadowMatch(shadow, { ...file, modifiedAt: null })).toBe(true);
+  });
+
+  it('一覧の行の字(名前 + 何分前) / 名前が無ければ呼び名', () => {
+    expect(shadowListRowLabel('議事録.docx', 1_000_000 - 12 * 60_000, 1_000_000)).toBe('議事録.docx(12 分前に一時保存)');
+    expect(shadowListRowLabel('', 1_000_000, 1_000_000)).toBe(`${SHADOW_UNTITLED}(1 分以内に一時保存)`);
+  });
+
+  it('🔴 画面の字に禁止の造語を使わない', () => {
+    const all = [
+      SHADOW_LIST_TITLE, SHADOW_LIST_NOTE, SHADOW_LIST_SKIP_LABEL, SHADOW_LIST_ERASE_LABEL,
+      SHADOW_OPENED_LOCAL_NOTICE, SHADOW_OPENED_UNLINKED_NOTICE, SHADOW_UNTITLED,
+    ].join('\n');
+    for (const t of BANNED_TERMS) expect(all.match(t.pattern()), t.banned).toBeNull();
   });
 });

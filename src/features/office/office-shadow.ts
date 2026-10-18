@@ -137,3 +137,65 @@ export function needsNoShadowNote(fileName: string): boolean {
   const name = fileName.trim().toLowerCase();
   return NO_SHADOW_EXTS.some((ext) => name.endsWith(ext));
 }
+
+// ───────────────────────── 手元のファイル・新しく作った文書の控え(台帳 #1852 束 A1。依頼 367 A) ─────────────────────────
+//
+// 🔴 窓は、添付から開いた文書だけでなく、手元のファイルを開いた文書・Office の中で新しく作った文書の控えも書いている
+//   (棚の名前は窓ごとの `w-…`、`meta.json` の `lid` は空)。直す前は、それを戻す口が無く、確認が一度も出ないまま 7 日で消えていた。
+// 🔑 戻す口は 2 つ: ① 手元のファイルを次に開いたとき、同じファイルの控えが在れば添付と同じ確認(`pickOfficeShadowInApp`)
+//   ② Office を開くとき、持ち主の分からない控え(新しく作った文書など)を「保存していない文書」として並べる。
+
+/** 棚の記録から、持ち主(ノート)が居ない控えか。窓の中で作った文書・手元のファイルの控えがこれ。 */
+export function isOrphanShadow(e: { readonly lid: string }): boolean {
+  return e.lid === '';
+}
+
+/**
+ * 手元のファイルを開いたとき、この控えは**そのファイルの控え**か。
+ * 🔑 手元のファイルの合言葉は読み込みごとに変わる(棚の名前に使えない)ので、**名前 + 開いた時の大きさ**で突き合わせる。
+ *   控えを書いた後で元のファイルが保存されていれば、更新時刻が控えより新しくなる(= 控えは古い)。
+ * @param file 今開くファイル(`modifiedAt` = 最終更新の時刻 ms。分からなければ `null` → 訊く側へ倒す)
+ */
+export function isLocalShadowMatch(
+  e: { readonly docName: string; readonly size: number | null; readonly at: number; readonly lid: string },
+  file: { readonly name: string; readonly size: number; readonly modifiedAt: number | null },
+): boolean {
+  if (!isOrphanShadow(e)) return false;
+  if (e.docName === '' || e.docName !== file.name) return false;
+  if (e.size === null || e.size !== file.size) return false;
+  return isShadowNewer(e.at, file.modifiedAt);
+}
+
+/** 「保存していない文書」の一覧(新しく作った文書など)の確認。 */
+export const SHADOW_LIST_TITLE = '保存していない文書があります';
+export const SHADOW_LIST_NOTE =
+  '前に Office で編集して、保存しないまま閉じた(または止まった)文書です。選ぶと、その内容で Office を開きます。保存するまで、添付やファイルは変わりません。';
+/** 名前の無い文書(Office の中で新しく作った文書)の呼び名。 */
+export const SHADOW_UNTITLED = '名前のない文書';
+/** 一覧の最後の 2 行。 */
+export const SHADOW_LIST_SKIP_LABEL = '開かずに、Office のスタート画面を開く(一時保存した内容は残ります)';
+export const SHADOW_LIST_ERASE_LABEL = '一時保存した内容をすべて消して、Office のスタート画面を開く';
+/** 一覧に出す件数の上限(それより多い分は新しい順に切る。古い分は 7 日で消える)。 */
+export const SHADOW_LIST_MAX = 8;
+
+/** 一覧の 1 行(「議事録.docx(12 分前に一時保存)」)。 */
+export function shadowListRowLabel(docName: string, at: number, now: number): string {
+  return `${docName === '' ? SHADOW_UNTITLED : docName}(${shadowAgo(at, now)}に一時保存)`;
+}
+
+/** 一覧の答え。 */
+export type OrphanShadowAnswer =
+  | { readonly kind: 'open'; readonly id: string }
+  | { readonly kind: 'skip' }
+  | { readonly kind: 'erase' };
+
+/** 一覧で選んだ控えが読めなかった(消えた / 空)。スタート画面を開く。 */
+export const SHADOW_GONE_LIST_NOTICE = '一時保存した内容を読めませんでした。Office のスタート画面を開きます';
+
+/** 一覧から開いたとき(新しく作った文書など)、本体の状態の行に出す一言。 */
+export const SHADOW_OPENED_UNLINKED_NOTICE =
+  '一時保存した内容を Office で開きます。保存すると、新しい添付のノートになります';
+
+/** 手元のファイルの控えで開いたとき、本体の状態の行に出す一言。 */
+export const SHADOW_OPENED_LOCAL_NOTICE =
+  '一時保存した内容を Office で開きます。保存するまで、元のファイルは変わりません';

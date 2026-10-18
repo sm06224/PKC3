@@ -17,6 +17,7 @@ import {
   pickArchiveInApp,
   pickDateInApp,
   pickOfficeShadowInApp,
+  pickOrphanShadowInApp,
   pickScrapInApp,
   pickSnippetInApp,
   resetAppDialogForTest,
@@ -713,6 +714,61 @@ describe('Office の編集の控えの確認(#1228 段 2)', () => {
     expect(await a).toBeNull();
     const b = pickOfficeShadowInApp(document.body, NOW - 60_000, NOW);
     // 暗い地を押す = `target` が <dialog> 自身(座標は枠の外)
+    dialog().dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: -1, clientY: -1 }));
+    expect(await b).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **Office を開くとき、保存していない文書(新しく作った文書など)を並べる**(台帳 #1852 束 A1。依頼 367 A)。
+ * 見るのは ①文書ごとの行 + 区切り + 「開かずに」+「すべて消して」の順 ②押した行がそのまま答え
+ * ③`Escape` / 「やめる」は何も選ばない(消す行を押し損ねで選ばせない)④名前の無い文書は呼び名で並ぶ
+ */
+describe('保存していない文書の一覧(依頼 367 A)', () => {
+  const NOW = 1_800_000_000_000;
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    resetAppDialogForTest();
+  });
+  const rows = (): HTMLButtonElement[] =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-office-shadow-list"]'));
+  const orphans = [
+    { id: 'w-1', at: NOW - 12 * 60_000, docName: '議事録.docx' },
+    { id: 'w-2', at: NOW - 3 * 3_600_000, docName: '' },
+  ];
+
+  it('文書ごとの行(新しい順は呼び側)→ 開かずに → すべて消して の順。名前の無い文書は呼び名', async () => {
+    const answered = pickOrphanShadowInApp(document.body, orphans, NOW);
+    expect(rows().map((b) => b.textContent)).toEqual([
+      '議事録.docx(12 分前に一時保存)',
+      '名前のない文書(3 時間前に一時保存)',
+      '開かずに、Office のスタート画面を開く(一時保存した内容は残ります)',
+      '一時保存した内容をすべて消して、Office のスタート画面を開く',
+    ]);
+    expect(q('[data-pkc-field="dialog-title"]').textContent).toBe('保存していない文書があります');
+    // 消す行は区切りの下(取り違えない)
+    expect(document.querySelectorAll('[data-pkc-field="pick-office-shadow-list-sep"]').length).toBe(1);
+    cancelBtn().click();
+    await answered;
+  });
+
+  it('押した行がそのまま答え', async () => {
+    const a = pickOrphanShadowInApp(document.body, orphans, NOW);
+    rows()[1]!.click();
+    expect(await a).toEqual({ kind: 'open', id: 'w-2' });
+    const b = pickOrphanShadowInApp(document.body, orphans, NOW);
+    rows()[2]!.click();
+    expect(await b).toEqual({ kind: 'skip' });
+    const c = pickOrphanShadowInApp(document.body, orphans, NOW);
+    rows()[3]!.click();
+    expect(await c).toEqual({ kind: 'erase' });
+  });
+
+  it('🔴 「やめる」も外も何も選ばない(null)── 押し損ねで一時保存が消えない', async () => {
+    const a = pickOrphanShadowInApp(document.body, orphans, NOW);
+    cancelBtn().click();
+    expect(await a).toBeNull();
+    const b = pickOrphanShadowInApp(document.body, orphans, NOW);
     dialog().dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: -1, clientY: -1 }));
     expect(await b).toBeNull();
   });

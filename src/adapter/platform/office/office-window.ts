@@ -289,6 +289,7 @@ interface SentDocument {
   images: readonly OfficeImagePayload[];
   refresh: OfficeDocumentRefresh | null;
   fromShadow: boolean;
+  originSize: number | null;
 }
 
 interface Broadcaster {
@@ -334,6 +335,7 @@ export class OfficeWindow {
     images: readonly OfficeImagePayload[];
     refresh: OfficeDocumentRefresh | null;
     fromShadow: boolean;
+    originSize: number | null;
   } | null = null;
   /**
    * 🔴 **最後に窓へ送った文書の控え**(#1228 穴①)。窓が**作り直されて**もう一度
@@ -413,7 +415,7 @@ export class OfficeWindow {
    */
   open(opts: OpenOptions = {}): OpenOutcome {
     this.pendingDoc = opts.bytes
-      ? { name: opts.name ?? 'document', bytes: opts.bytes, token: '', images: [], refresh: null, fromShadow: false }
+      ? { name: opts.name ?? 'document', bytes: opts.bytes, token: '', images: [], refresh: null, fromShadow: false, originSize: null }
       : null;
     // ⚠ 新しく開く / 読み直させるので、前の「ちょうだい」は無効にする
     this.askedForDoc = false;
@@ -492,6 +494,7 @@ export class OfficeWindow {
     images: readonly OfficeImagePayload[] = [],
     refresh: OfficeDocumentRefresh | null = null,
     fromShadow = false,
+    originSize: number | null = null,
   ): void {
     // ⚠ 空を渡して Start Center を上書きしない
     if (bytes.byteLength === 0) return;
@@ -501,7 +504,7 @@ export class OfficeWindow {
       this.discardNextProvide -= 1;
       return;
     }
-    this.pendingDoc = { name, bytes, token, images, refresh, fromShadow };
+    this.pendingDoc = { name, bytes, token, images, refresh, fromShadow, originSize };
     if (this.askedForDoc) this.sendDocument();
     else this.repostMissedReload();
   }
@@ -679,8 +682,9 @@ export class OfficeWindow {
       images: doc.refresh ? [] : doc.images,
       refresh: doc.refresh,
       fromShadow: doc.fromShadow,
+      originSize: doc.originSize,
     };
-    this.post(doc.name, doc.bytes, doc.token, doc.images, doc.fromShadow);
+    this.post(doc.name, doc.bytes, doc.token, doc.images, doc.fromShadow, doc.originSize);
   }
 
   private resendLast(): void {
@@ -694,13 +698,13 @@ export class OfficeWindow {
         (src) => {
           // 待つ間に別の文書へ替わった / 閉じた なら送らない(古い文書を出さない)
           if (this.lastSent !== last || src === null || src.bytes.byteLength === 0) return;
-          this.post(last.name, src.bytes, last.token, src.images ?? [], src.fromShadow === true);
+          this.post(last.name, src.bytes, last.token, src.images ?? [], src.fromShadow === true, last.originSize);
         },
         () => { /* 読めなかった ── 窓は 15 秒で Start Center になる */ },
       );
       return;
     }
-    if (last.bytes) this.post(last.name, last.bytes, last.token, last.images, last.fromShadow);
+    if (last.bytes) this.post(last.name, last.bytes, last.token, last.images, last.fromShadow, last.originSize);
   }
 
   /**
@@ -728,6 +732,7 @@ export class OfficeWindow {
     token: string,
     images: readonly OfficeImagePayload[],
     fromShadow: boolean,
+    originSize: number | null,
   ): void {
     // ⚠ BroadcastChannel は **transfer できない**(structured clone のみ)ので、
     //    ここだけはコピーになる。大きい文書で効くなら IDB 経由の受け渡しへ替える。
@@ -744,6 +749,8 @@ export class OfficeWindow {
         ...(images.length > 0 ? { images } : {}),
         // ⚠ 控えの版のときだけ載せる(封筒を組むのはここ 1 か所 ── §7)
         ...(fromShadow ? { fromShadow: true } : {}),
+        // ⚠ 控えの版を、**元のファイルの大きさ**つきで渡すときだけ載せる(次の控えの `meta.json` が元のファイルの大きさを持ち続ける ── 依頼 367 A)
+        ...(fromShadow && originSize !== null ? { originSize } : {}),
       },
     });
   }

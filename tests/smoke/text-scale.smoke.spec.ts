@@ -44,6 +44,19 @@ test('🔴 文字の大きさを変えると本文の字が実際に変わり、
     }));
 
   const before = await measure();
+  /**
+   * 🔴 **右のペインの情報・ステータスバー・設定の注記も大きくなる**(台帳 #1852 束 A1。依頼 88-1 B)。
+   * ⚠ 直す前は 11〜12px の固定で、「大」「特大」にしても本文だけが大きくなり、まわりが取り残された。
+   * 新しい起動は足さず、この道中で前後を測る(`getComputedStyle` ── happy-dom では `var()` が解けない)。
+   */
+  const sideFont = (sel: string): Promise<number> =>
+    page.locator(sel).first().evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+  const INSPECTOR_DL = '[data-pkc-region="inspector"] dl';
+  const STATUS = '[data-pkc-region="status"]';
+  const beforeInspector = await sideFont(INSPECTOR_DL);
+  const beforeStatus = await sideFont(STATUS);
+  expect(beforeInspector, '空振り防止: 情報の既定が 12px でない').toBeCloseTo(12, 1);
+  expect(beforeStatus, '空振り防止: ステータスバーの既定が 11px でない').toBeCloseTo(11, 1);
   // ⚠ **空振り防止** ── 既定が本当に 13px であること(ここがずれると以下は無意味)
   expect(before.font, '既定の字の大きさが 13px でない(表と CSS がずれている)').toBeCloseTo(13, 1);
 
@@ -79,7 +92,10 @@ test('🔴 文字の大きさを変えると本文の字が実際に変わり、
     '選ばれている「標準」の下地が、選ばれていない「大」と同じ(CSS が当たっていない)',
   ).not.toBe(beforeLargeBg);
 
+  const beforeNote = await sideFont('.settings-note');
+  expect(beforeNote, '空振り防止: 設定の注記の既定が 11px でない').toBeCloseTo(11, 1);
   await clickReal(page, largeBtn);
+  expect(await sideFont('.settings-note'), '🔴 設定の注記が大きくなっていない').toBeGreaterThan(beforeNote + 0.5);
   // 🔴 押した効果(字が実際に大きくなる)と、押されている印(aria-pressed)の
   //   両方が移ることを見る(visual parity ── #1038 段J)
   await expect(largeBtn, '押した先が濃く表示されない').toHaveAttribute('aria-pressed', 'true');
@@ -101,6 +117,8 @@ test('🔴 文字の大きさを変えると本文の字が実際に変わり、
   await expect(para).toBeVisible();
   const after = await measure();
   expect(after.font, '選んだのに字が大きくなっていない').toBeGreaterThan(before.font + 1);
+  expect(await sideFont(INSPECTOR_DL), '🔴 右のペインの情報が大きくなっていない').toBeGreaterThan(beforeInspector + 0.5);
+  expect(await sideFont(STATUS), '🔴 ステータスバーが大きくなっていない').toBeGreaterThan(beforeStatus + 0.5);
 
   /**
    * ③ 🔴 **読み幅は動かない** ── `--read-w` は `rem`(`html` 基準)なので、

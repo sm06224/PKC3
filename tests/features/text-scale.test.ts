@@ -317,3 +317,59 @@ describe('題名は本文と同じ割合で大きくなる(依頼 348-A)', () =>
     expect(ruleOf("[data-pkc-field='editor-title']")).toContain(expected);
   });
 });
+
+/**
+ * 🔴 依頼 88-1 B(Gemini 裁定 = 推薦どおり)── 右のペインの情報の行・ステータスバー・設定の注記も、字の大きさに付いていく。
+ * 見るのは ① 「標準」「小」では今と同じ大きさ(下限が元の px)② 「大」「特大」では本文の割合で大きくなる
+ * ③ CSS が、その 3 か所の全部の規則で同じ式を使っている。
+ */
+describe('小さい字(右のペイン・ステータスバー・設定の注記)も「大」「特大」で大きくなる(依頼 88-1 B)', () => {
+  const css = readFileSync('src/styles/app.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const sizeOf = (selector: string): string => {
+    // ⚠ 同じ選択子の規則が複数ある(配置だけの規則など)── font-size を持つ規則を探す
+    const found: string[] = [];
+    for (let at = css.indexOf(`${selector} {`); at >= 0; at = css.indexOf(`${selector} {`, at + 1)) {
+      const m = /font-size: ([^;]+);/.exec(css.slice(at, css.indexOf('}', at)));
+      if (m) found.push(m[1]!);
+    }
+    expect(found.length, `${selector} の font-size が見つからない(空振り)`).toBe(1);
+    return found[0]!;
+  };
+  /** CSS の `max(Npx, calc(var(--pkc-text-size, 13px) * N / 13))` を、本文の大きさ(px)で評価する。 */
+  const evaluate = (expr: string, body: number): number => {
+    const m = /^max\((\d+)px, calc\(var\(--pkc-text-size, 13px\) \* (\d+) \/ 13\)\)$/.exec(expr);
+    expect(m, `想定の式ではない: ${expr}`).not.toBeNull();
+    return Math.max(Number(m![1]), (body * Number(m![2])) / 13);
+  };
+  const SITES: ReadonlyArray<[string, number]> = [
+    ["[data-pkc-region='inspector'] dl", 12],
+    ["[data-pkc-field='inspector-editing-note']", 12],
+    ["[data-pkc-field='inspector-asset-link']", 12],
+    ["[data-pkc-field='inspector-body-tag-where']", 11],
+    ["[data-pkc-region='status']", 11],
+    ["[data-pkc-field='status-undo']", 11],
+    ["[data-pkc-field='status-create-date']", 11],
+    [".settings-note", 11],
+  ];
+
+  it('標準と小では元の大きさのまま(選ばない user の見え方は変わらない)', () => {
+    for (const [sel, px] of SITES) {
+      expect(evaluate(sizeOf(sel), 13), sel).toBe(px);
+      expect(evaluate(sizeOf(sel), 12), sel).toBe(px);
+    }
+  });
+
+  it('大(15px)と特大(17px)では、本文の割合で大きくなる', () => {
+    for (const [sel, px] of SITES) {
+      expect(evaluate(sizeOf(sel), 15), sel).toBeCloseTo((15 * px) / 13, 5);
+      expect(evaluate(sizeOf(sel), 17), sel).toBeGreaterThan(evaluate(sizeOf(sel), 15));
+      expect(evaluate(sizeOf(sel), 17), sel).toBeGreaterThan(px);
+    }
+  });
+
+  it('ステータスバーの「開く」などのボタンの規則も、同じ式で帯に付いていく', () => {
+    const at = css.indexOf("[data-pkc-field='status-trash'] {");
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(css.slice(at, css.indexOf('}', at))).toContain('font-size: max(11px, calc(var(--pkc-text-size, 13px) * 11 / 13));');
+  });
+});

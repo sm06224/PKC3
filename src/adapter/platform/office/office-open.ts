@@ -16,6 +16,7 @@
  *   ので黙って壊れはしないが、呼び出し側へは失敗を返す
  */
 import {
+  largeDocNotice,
   officeEntry,
   readOfficeCapability,
   type OfficeCapability,
@@ -181,6 +182,9 @@ export function createOfficeOpener(deps: OfficeOpenerDeps): OfficeOpener {
       }
       const { bytes, images } = loaded;
       const fromShadow = shadowSrc !== null;
+      // 🔴 大きい文書は、窓へ渡す前に言う(台帳 #1852 束 A1。依頼 242)。⚠ 言うだけで、開くのは止めない
+      const large = largeDocNotice(target.name, bytes.byteLength);
+      if (large !== null) deps.notify?.(large);
       // 🔴 何で開くかを言う(#1228 段 2)。⚠ **開けた版**を言う ── 控えを頼まれて読めなかったときは、保存済みの版で開くと言う
       if (wantShadow) deps.notify?.(fromShadow ? SHADOW_OPENED_NOTICE : SHADOW_GONE_NOTICE);
       // 🔴 **合言葉(= このノートの lid)を預ける**(#205)── 保存が戻って

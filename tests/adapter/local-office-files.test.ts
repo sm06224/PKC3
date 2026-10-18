@@ -82,6 +82,24 @@ describe('控える', () => {
   });
 });
 
+describe('取り出さずに見る(peek。依頼 367 A)', () => {
+  it('名前・大きさ・更新時刻を返し、取り出さない(確認で「やめる」を選ばれても控えたファイルを失わない)', () => {
+    const s = new LocalOfficeFiles();
+    expect(s.peek()).toBeNull();
+    s.stage(fakeHandle().handle, 'a.docx', bytes(1), 12345);
+    expect(s.peek()).toEqual({ name: 'a.docx', size: 3, modifiedAt: 12345 });
+    expect(s.peek(), '見たら無くなった').not.toBeNull();
+    expect(s.take()?.name).toBe('a.docx');
+    expect(s.peek(), '取り出した後も残っている').toBeNull();
+  });
+
+  it('更新時刻を渡さなければ null(訊く側へ倒す)', () => {
+    const s = new LocalOfficeFiles();
+    s.stage(fakeHandle().handle, 'a.docx', bytes(1));
+    expect(s.peek()?.modifiedAt).toBeNull();
+  });
+});
+
 describe('書き戻す', () => {
   it('🔴 元のファイルへ bytes を書いて閉じる', async () => {
     const s = new LocalOfficeFiles();

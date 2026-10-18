@@ -362,6 +362,87 @@ describe('🔴 「Office で開く」の入口が使う束(createOfficeShadows)'
   });
 });
 
+describe('🔴 持ち主の居ない控え(手元のファイル・新しく作った文書)を戻す口(台帳 #1852 束 A1。依頼 367 A)', () => {
+  const mk = (root: FakeDir, now = NOW) =>
+    createOfficeShadows({ openShelf: () => openShadowShelf(root as never), savedAt: async () => null, now: () => now });
+  /** 実物の窓が手元のファイル / 新しい文書で書く形: 合言葉が `local:` か空 → 棚は窓ごとの `w-…`、meta の lid は空。 */
+  async function writeOrphan(root: FakeDir, key: string, at: number, name: string, size: number, bytes = [1, 2, 3]): Promise<void> {
+    await win.shelve({
+      storage: root,
+      id: win.safeId('local:1', key),
+      ext: 'docx',
+      size: bytes.length,
+      now: () => at,
+      read: (into, wanted, pos) => { for (let i = 0; i < wanted; i += 1) into[i] = bytes[pos + i]!; return wanted; },
+      origin: { name, size, lid: 'local:1' },
+    });
+  }
+
+  it('窓が書いた meta の大きさと名前を読む。lid は空 = 持ち主が居ない', async () => {
+    const root = new FakeDir();
+    await writeOrphan(root, 'w-A', NOW - 1000, '報告.docx', 4321);
+    const shelf = (await openShadowShelf(root as never))!;
+    const [e] = await listShadows(shelf);
+    expect(e).toMatchObject({ id: 'w-A', docName: '報告.docx', size: 4321, lid: '' });
+  });
+
+  it('refresh するまで orphans は空 / refresh で新しい順に並ぶ。添付の控えは入らない。7 日を過ぎた分も入らない', async () => {
+    const root = new FakeDir();
+    await writeOrphan(root, 'w-A', NOW - 5000, '古い.docx', 1);
+    await writeOrphan(root, 'w-B', NOW - 1000, '新しい.docx', 2);
+    await writeFromWindow(root, 'lid-1', NOW - 100);   // 添付の控え
+    await writeOrphan(root, 'w-C', NOW - SHADOW_MAX_AGE_MS - 10, '期限切れ.docx', 3);
+    const s = mk(root);
+    expect(s.orphans(), 'refresh の前').toEqual([]);
+    await s.refresh();
+    expect(s.orphans().map((o) => o.docName)).toEqual(['新しい.docx', '古い.docx']);
+    expect(s.orphans()[0]).toMatchObject({ id: 'w-B', ext: 'docx' });
+  });
+
+  it('🔴 mayHaveLocal は同期。名前・大きさ・新しさが合うときだけ真。findLocal も同じ答え', async () => {
+    const root = new FakeDir();
+    await writeOrphan(root, 'w-A', NOW - 1000, '報告.docx', 100);
+    const s = mk(root);
+    const q = { name: '報告.docx', size: 100, modifiedAt: NOW - 5000 };
+    expect(s.mayHaveLocal(q), 'refresh の前に真').toBe(false);
+    await s.refresh();
+    expect(s.mayHaveLocal(q)).toBe(true);
+    expect(await s.findLocal(q)).toMatchObject({ id: 'w-A' });
+    for (const bad of [
+      { ...q, name: '別.docx' }, { ...q, size: 99 }, { ...q, modifiedAt: NOW }, { ...q, modifiedAt: NOW - 1000 },
+    ]) {
+      expect(s.mayHaveLocal(bad), JSON.stringify(bad)).toBe(false);
+      expect(await s.findLocal(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it('findLocal は同じファイルの控えが複数あれば新しいほうを返す。棚が壊れていても投げない', async () => {
+    const root = new FakeDir();
+    await writeOrphan(root, 'w-A', NOW - 5000, '報告.docx', 100);
+    await writeOrphan(root, 'w-B', NOW - 2000, '報告.docx', 100);
+    const s = mk(root);
+    expect((await s.findLocal({ name: '報告.docx', size: 100, modifiedAt: null }))?.id).toBe('w-B');
+    const broken = createOfficeShadows({ openShelf: async () => { throw new Error('x'); }, savedAt: async () => null });
+    expect(await broken.findLocal({ name: 'a', size: 1, modifiedAt: null })).toBeNull();
+  });
+
+  it('readById は棚の名前で bytes を返す(消さない)/ discardById はその棚だけ消し、控えの一覧からも外す', async () => {
+    const root = new FakeDir();
+    await writeOrphan(root, 'w-A', NOW - 2000, '報告.docx', 100, [7, 8, 9]);
+    await writeOrphan(root, 'w-B', NOW - 1000, '別.docx', 5);
+    const s = mk(root);
+    await s.refresh();
+    expect(Array.from((await s.readById('w-A'))!)).toEqual([7, 8, 9]);
+    expect(shelfOf(root)!.dirs.has('w-A')).toBe(true);
+    expect(await s.readById('w-none')).toBeNull();
+    await s.discardById('w-A');
+    expect(shelfOf(root)!.dirs.has('w-A'), '消えていない').toBe(false);
+    expect(shelfOf(root)!.dirs.has('w-B'), '別の棚まで消えた').toBe(true);
+    expect(s.orphans().map((o) => o.id)).toEqual(['w-B']);
+    await s.discardById('w-A');   // 冪等
+  });
+});
+
 // 型の確認(ShadowDir が偽の OPFS を受けられること ── 型が緩すぎないかの見張りではなく、受け口の形の pin)
 const _typed: ShadowDir | null = null;
 void _typed;

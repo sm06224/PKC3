@@ -446,6 +446,26 @@ describe('Word の画像(#187 段②)', () => {
     expect(text, '本文が「写せませんでした」のまま').not.toContain('入れられませんでした');
   });
 
+  it('🔴 表のマスと箇条書きの中の画像も word/media に入り、置いた位置の段落の中を指す(依頼 142 ②)', async () => {
+    const { d, got } = setup();
+    const d2 = {
+      ...d,
+      renderBody: async () =>
+        '<table><tr><td><img data-pkc-asset-key="ast-1" alt="図"></td></tr></table>' +
+        '<ul><li><img data-pkc-asset-key="ast-1" alt="図"> 項目</li></ul>',
+    } as unknown as ExportDeps;
+    const { dispatcher } = fakeDispatcher('ready');
+    expect(await exportEntryDocx(dispatcher, d2, 'n1')).toBe(true);
+    const text = await got[0]!.text();
+    expect(text, '2 枚とも zip に入っていない').toContain('word/media/image1.png');
+    expect(text).toContain('word/media/image2.png');
+    const doc = text.slice(text.indexOf('<w:body>'), text.indexOf('</w:body>'));
+    const tbl = doc.slice(doc.indexOf('<w:tbl>'), doc.indexOf('</w:tbl>'));
+    expect(tbl, '表のマスの中に画像が無い').toContain('<w:pict>');
+    expect(doc.slice(doc.indexOf('</w:tbl>')).match(/<w:pict>/g), '表の後ろ(項目)に 1 枚').toHaveLength(1);
+    expect(text, '本文が「入れられませんでした」のまま').not.toContain('入れられませんでした');
+  });
+
   it('🔴 bytes が取れなければ、理由を残して本文を続ける(黙って消さない)', async () => {
     const { d, got } = setup({ blob: null });
     const { dispatcher } = fakeDispatcher('ready');

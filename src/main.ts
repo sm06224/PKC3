@@ -286,12 +286,13 @@ import {
   openingNotice,
   stagedLaunchNotice,
 } from '@features/office/office-launch';
-import { isOfficeUsable } from '@features/office/office-entry';
+import { isOfficeUsable, largeDocNotice } from '@features/office/office-entry';
 import { attachmentSavedAt } from '@features/office/office-shadow';
 import { OFFICE_CONFIRMING_NOTICE, OFFICE_NOT_REACHED_NOTICE, OFFICE_DECLINED_NOTICE, OfficeWindow, shadowFailedNotice } from '@adapter/platform/office/office-window';
 import { listNoteImages } from '@adapter/platform/office/office-note-images';
 import { createOfficeOpener, type OpenOfficeResult } from '@adapter/platform/office/office-open';
 import { createOfficeShadows } from '@adapter/platform/office/office-shadow-shelf';
+import { openOfficeTile as openOfficeTileWithShadows } from '@adapter/platform/office/office-tile-open';
 import { watchOfficeHang } from '@adapter/platform/office/office-hang-watch';
 import {
   checkPackUpdate,
@@ -487,6 +488,7 @@ import {
   confirmCheckInApp,
   confirmInApp,
   pickOfficeShadowInApp,
+  pickOrphanShadowInApp,
   pickAgentGrantInApp,
   pickAppGroupIconInApp,
   type ConfirmOptions,
@@ -2451,7 +2453,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 既存窓への focus-request は user から**無反応に見える**(レポート #11 ──
    *   noopener の別窓は最前面に来たか分からない)。一言を出す。
    */
-  const openOfficeTile = () => {
+  const openOfficeTilePlain = () => {
     /**
      * 🔴 **控えてある手元のファイルが在れば、それを開く**(#432)。
      *
@@ -2471,12 +2473,41 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           ? `「${staged.name}」を開いています(Office のタブをご覧ください)`
           : openingNotice(staged.name, staged.writable),
       );
+      // 🔴 大きい文書は、開けないことがあると言う(台帳 #1852 束 A1。依頼 242)。⚠ 言うだけで、開くのは止めない
+      const large = largeDocNotice(staged.name, staged.bytes.byteLength);
+      if (large !== null) showStatus(large);
       return;
     }
     const r = officeWindow.open({});
     if (r.kind === 'already-open')
       showStatus('Office は既に開いています(そのタブをご覧ください)');
   };
+  /**
+   * 🔴 **保存していない文書の控えがあれば、開く前に戻す口を出す**(台帳 #1852 束 A1。依頼 367 A)。
+   * ⚠ 判断は `office-tile-open.ts` ── ここは道具を渡すだけ。控えが無ければ上の `openOfficeTilePlain`(今までどおり同期)。
+   */
+  /**
+   * 🔴 戻した控えの棚は、戻した窓の次の控え(または保存)が書けてから消す。⚠ すぐ消すと、窓が落ちた直後の数秒の編集が両方なくなる。
+   */
+  let restoredShelves: string[] = [];
+  officeWindow.onEvent((ev) => {
+    if ((ev.type === 'shadow-written' || ev.type === 'saved') && restoredShelves.length > 0) {
+      const ids = restoredShelves;
+      restoredShelves = [];
+      for (const id of ids) void officeShadows.discardById(id);
+    }
+  });
+  const openOfficeTile = () =>
+    openOfficeTileWithShadows({
+      officeWindow,
+      local: localOffice,
+      shadows: officeShadows,
+      askLocal: (at) => pickOfficeShadowInApp(root, at),
+      askList: (orphans) => pickOrphanShadowInApp(root, orphans),
+      openPlain: openOfficeTilePlain,
+      notify: (text) => showStatus(text),
+      afterRestore: (id) => { restoredShelves.push(id); },
+    });
   /**
    * Office の窓が固まったことに気づく(#135)。⚠ ここは**渡すだけ** ──
    * 物差しも文言も `office-hang-watch.ts` が持つ(`main.ts` は原文 pin の
@@ -3489,6 +3520,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         okLabel: '新しいバージョンに切り替える',
         danger: true,
       }),
+    reload: () => location.reload(),
   });
 
   /**
@@ -6385,7 +6417,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const office = items.filter((i) => isOfficeLaunchFile(i.file.name));
     for (const i of office) {
       const buf = new Uint8Array(await i.file.arrayBuffer());
-      localOffice.stage(i.handle, i.file.name, buf);
+      localOffice.stage(i.handle, i.file.name, buf, i.file.lastModified);
     }
     if (office.length > 0) {
       const last = office[office.length - 1]!;

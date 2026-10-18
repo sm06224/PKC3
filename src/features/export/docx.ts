@@ -38,6 +38,31 @@ export interface DocxRun {
   readonly mono?: boolean;
   /** 外部リンクの URL(空なら素の文字)。 */
   readonly href?: string;
+  /**
+   * 🔴 **この走りは、字ではなく画像 1 枚**(台帳 #1852 束 A1。依頼 142 ②)。箇条書きの項目・表のマス・文の途中に置いた
+   * 画像を、**置いた位置のまま**同じ段落の中へ入れる(直す前は、囲む塊の上や表の後ろへ移していた)。
+   * ⚠ `text` は空。画像の中身は呼び側が後から解いて**この入れ物に書き込む**(bytes は持たない。入れ物は走りを写しても共有される)。
+   * 解けなかった画像は、その場に「入れられませんでした」の字が出る(黙って消えない)。
+   */
+  readonly image?: DocxRunImage;
+}
+
+/**
+ * 段落の中に置く画像の入れ物(`DocxRun.image`)。⚠ **可変** ── 走りの写し(太字にする等)と共有して、
+ * 呼び側が解いた結果が全部の写しに届くようにする。
+ */
+export interface DocxRunImage {
+  /** 読み上げと、入れられなかったときの呼び名。 */
+  readonly alt: string;
+  /** 本文の幅に対する割合(1〜100)・寄せ。画像だけの段落なら寄せを段落に掛ける。 */
+  readonly widthPct?: number;
+  readonly align?: 'left' | 'center' | 'right';
+  /** 呼び側が解いた結果。`media` が無ければ「入れられませんでした」を出す。 */
+  media?: string;
+  widthPx?: number;
+  heightPx?: number;
+  /** 入れられなかった理由(無ければ「取り出せませんでした」)。 */
+  failWhy?: string;
 }
 
 /** 表の 1 セル。 */
@@ -228,6 +253,11 @@ const EMU_PER_PX = 9525;
  */
 const BODY_WIDTH_EMU = Math.round(9638 / 1440 * 914400);
 
+/** 1 twip = 635 EMU。 */
+const TWIP_EMU = 635;
+/** 表のマスの左右の余白の合計(Word の既定 108 twip × 2)。マスの中の画像はこれを引いた幅に収める。 */
+const TABLE_CELL_PAD_TWIPS = 216;
+
 /** 紙の余白(twip = 1/1440 インチ)。2cm ── 画面の紙面設定と別に持つ値ではない。 */
 const PAGE_MARGIN_TWIPS = 1134;
 
@@ -338,9 +368,19 @@ function runXml(run: DocxRun, style: 'normal' | 'code' = 'normal'): string {
  * ⚠ rel を書き忘れると Word が「リンク先が壊れている」と言う(黙って素の文字に
  * ならない)ので、rels は**この関数が集めた分だけ**を書く。
  */
-function runsXml(runs: readonly DocxRun[], rels: Map<string, string>, style: 'normal' | 'code' = 'normal'): string {
+function runsXml(
+  runs: readonly DocxRun[],
+  rels: Map<string, string>,
+  style: 'normal' | 'code' = 'normal',
+  /** 段落の中の画像を入れられる最大の幅(EMU)。箇条書き・表のマスの中では内側の幅。 */
+  maxEmu: number = BODY_WIDTH_EMU,
+): string {
   let out = '';
   for (const run of runs) {
+    if (run.image !== undefined) {
+      out += inlineImageXml(run.image, rels, maxEmu, style);
+      continue;
+    }
     if (run.href) {
       let id = rels.get(run.href);
       if (id === undefined) {
@@ -355,17 +395,138 @@ function runsXml(runs: readonly DocxRun[], rels: Map<string, string>, style: 'no
   return out;
 }
 
+/**
+ * 🔴 **段落の中の画像**(依頼 142 ②)。解けていれば `<w:pict>` を走りに入れる。解けていなければ、その場に理由の字を出す
+ * (⚠ 黙って消さない ── 件数は `buildDocx` が数えて注意に出す)。
+ */
+function inlineImageXml(
+  img: DocxRunImage,
+  rels: Map<string, string>,
+  maxEmu: number,
+  style: 'normal' | 'code',
+): string {
+  if (img.media !== undefined && img.widthPx !== undefined && img.heightPx !== undefined) {
+    return `<w:r>${pictXml(
+      {
+        media: img.media,
+        widthPx: img.widthPx,
+        heightPx: img.heightPx,
+        alt: img.alt,
+        ...(img.widthPct !== undefined ? { widthPct: img.widthPct } : {}),
+      },
+      rels,
+      maxEmu,
+    )}</w:r>`;
+  }
+  return runXml({ text: `［${inlineImageName(img)} は入れられませんでした: ${img.failWhy ?? '取り出せませんでした'}］`, italic: true }, style);
+}
+
+/** 入れられなかった画像の呼び名(`画像「x」`)。⚠ 注意の件数にも同じ字で数える。 */
+function inlineImageName(img: DocxRunImage): string {
+  return `画像「${img.alt}」`;
+}
+
+/** 走りの列の中で、解けていない画像の呼び名(注意の件数に足す)。 */
+function unresolvedInlineImages(runs: readonly DocxRun[]): string[] {
+  const out: string[] = [];
+  for (const r of runs) {
+    if (r.image !== undefined && r.image.media === undefined) out.push(inlineImageName(r.image));
+  }
+  return out;
+}
+
+/** 塊の列に入っている、段落の中の画像(走り)の数と、入れられなかった呼び名。 */
+function inlineImageStats(blocks: readonly DocxBlock[]): { placed: number; failed: string[] } {
+  let placed = 0;
+  const failed: string[] = [];
+  const visit = (runs: readonly DocxRun[]): void => {
+    for (const r of runs) if (r.image?.media !== undefined) placed += 1;
+    failed.push(...unresolvedInlineImages(runs));
+  };
+  for (const b of blocks) {
+    if (b.kind === 'p' || b.kind === 'h' || b.kind === 'li' || b.kind === 'quote') visit(b.runs);
+    else if (b.kind === 'table') for (const row of b.rows) for (const cell of row) visit(cell.runs);
+  }
+  return { placed, failed };
+}
+
 function paragraph(inner: string, styleId?: string, extraPr = ''): string {
   const style = styleId ? `<w:pStyle w:val="${styleId}"/>` : '';
   const pPr = style || extraPr ? `<w:pPr>${style}${extraPr}</w:pPr>` : '';
   return `<w:p>${pPr}${inner}</w:p>`;
 }
 
+/**
+ * 🔴 **画像 1 枚の `<w:pict>`**(#187 段②)。塊の画像と、段落の中の画像(`DocxRun.image`。依頼 142 ②)が**同じ 1 本**を通る(§7)。
+ * @param maxEmu 入れられる最大の幅(EMU)。本文では本文幅、箇条書きの中・表のマスの中ではその内側の幅
+ */
+function pictXml(
+  img: { media: string; widthPx: number; heightPx: number; alt: string; widthPct?: number },
+  rels: Map<string, string>,
+  maxEmu: number = BODY_WIDTH_EMU,
+): string {
+  let cx = Math.max(1, Math.round(img.widthPx * EMU_PER_PX));
+  let cy = Math.max(1, Math.round(img.heightPx * EMU_PER_PX));
+  if (cx > maxEmu) {
+    cy = Math.max(1, Math.round((cy * maxEmu) / cx));
+    cx = maxEmu;
+  }
+  /**
+   * 🔴 **本文の幅に対する割合を指した画像は、画面と同じく本文幅の割合で入れる**(#1640 ③)。
+   * ⚠ 画面の `width:50%` は元の大きさに関わらず本文幅の半分になる(小さい画像は引き伸ばされる)── 書き出しも同じにする。
+   */
+  if (img.widthPct !== undefined) {
+    const nx = Math.max(1, Math.round((maxEmu * img.widthPct) / 100));
+    cy = Math.max(1, Math.round((img.heightPx * EMU_PER_PX * nx) / Math.max(1, img.widthPx * EMU_PER_PX)));
+    cx = nx;
+  }
+  let id = rels.get(img.media);
+  if (id === undefined) {
+    id = `rIdM${rels.size + 1}`;
+    rels.set(img.media, id);
+  }
+  const alt = xmlEscape(xmlSafe(img.alt));
+  const n = rels.size;
+  /**
+   * 🔴 **画像は VML(`w:pict`)で入れる**(#199 / #238。2026-08-17 実測)。
+   *
+   * ⚠ **DrawingML(`w:drawing`)では PKC 内の Office が開けない。**
+   * 同じ画像・同じ文書で入れ物だけ変えて測った:
+   *
+   * | 画像の書き方 | native LO | PKC の Office(wasm) |
+   * |---|---|---|
+   * | DrawingML(PKC が書いた) | ✅ | ❌ **窓が空のまま** |
+   * | DrawingML(**LO 自身**が書いた) | ✅ | ❌ 空 |
+   * | DrawingML + VML の代替(`mc:AlternateContent`) | ✅ | ❌ 空(`mc:Choice` を採って落ちる) |
+   * | **VML のみ** | ✅ | ✅ **開く** |
+   *
+   * ⚠ したがって **`mc:AlternateContent` で両立させることはできない**
+   * (救われるはずの `mc:Fallback` へ行かない)。
+   * ⚠ VML は OOXML の**移行用**(ISO 29500 Part 4)である ── Strict では使えない。
+   *   それでも選ぶのは、**PKC 自身の書き出しが PKC の Office で開けない**ほうが
+   *   実害が大きいからである(user 確認 2026-08-17「VML は開けました」)。
+   * ⚠ `stroked="f"` を落とすと **図の周りに枠線が出る**(VML の既定は枠あり)。
+   */
+  const wPt = (cx / EMU_PER_PT).toFixed(1);
+  const hPt = (cy / EMU_PER_PT).toFixed(1);
+  return (
+    `<w:pict><v:shape id="_x0000_i${1024 + n}" type="#_x0000_t75"` +
+    ` style="width:${wPt}pt;height:${hPt}pt" stroked="f" filled="f" alt="${alt}">` +
+    `<v:imagedata r:id="${xmlEscape(id)}" o:title="${alt}"/></v:shape></w:pict>`
+  );
+}
+
 /** 塊 1 つ → 段落(複数になることもある: 表・コード)。 */
 function blockXml(block: DocxBlock, rels: Map<string, string>, orderedNumId = NUM_ORDERED): string {
   switch (block.kind) {
-    case 'p':
-      return paragraph(runsXml(block.runs, rels));
+    case 'p': {
+      /**
+       * 🔴 **画像だけの段落は、画像の寄せを段落に掛ける**(#1640 ③ / 依頼 142 ②)。⚠ 文の途中の画像は寄せない(行が動く)。
+       */
+      const only = block.runs.length === 1 ? block.runs[0]!.image : undefined;
+      const jc = only?.align === 'center' ? 'center' : only?.align === 'right' ? 'right' : null;
+      return paragraph(runsXml(block.runs, rels), undefined, jc === null ? '' : `<w:jc w:val="${jc}"/>`);
+    }
     case 'h':
       return paragraph(runsXml(block.runs, rels), `Heading${block.level}`);
     case 'quote':
@@ -373,13 +534,15 @@ function blockXml(block: DocxBlock, rels: Map<string, string>, orderedNumId = NU
     case 'li': {
       const ilvl = Math.min(Math.max(block.depth, 0), DOCX_LIST_DEPTH_MAX - 1);
       const numId = block.ordered ? orderedNumId : NUM_BULLET;
+      // 🔴 項目の中の画像は、字の位置(左の字下げ)より内側に収める(依頼 142 ②)
+      const itemMaxEmu = Math.max(EMU_PER_PX * 48, BODY_WIDTH_EMU - 480 * (ilvl + 1) * TWIP_EMU);
       if (block.task === true) {
         // 丸も番号も付けず、同じ深さの項目と字の位置を揃える(`numbering.xml` の水準と同じ字下げ)
         const ind = `<w:ind w:left="${480 * (ilvl + 1)}" w:hanging="360"/>`;
-        return paragraph(runsXml(block.runs, rels), 'ListParagraph', ind);
+        return paragraph(runsXml(block.runs, rels, 'normal', itemMaxEmu), 'ListParagraph', ind);
       }
       const numPr = `<w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${numId}"/></w:numPr>`;
-      return paragraph(runsXml(block.runs, rels), 'ListParagraph', numPr);
+      return paragraph(runsXml(block.runs, rels, 'normal', itemMaxEmu), 'ListParagraph', numPr);
     }
     case 'code': {
       /**
@@ -418,6 +581,7 @@ function blockXml(block: DocxBlock, rels: Map<string, string>, orderedNumId = NU
       return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
     case 'table': {
       const grid = block.rows[0]?.length ?? 1;
+      const cellMaxEmu = Math.max(EMU_PER_PX * 24, (Math.floor(9360 / grid) - TABLE_CELL_PAD_TWIPS) * TWIP_EMU);
       const cols = Array.from({ length: grid }, () => `<w:gridCol w:w="${Math.floor(9360 / grid)}"/>`).join('');
       const rows = block.rows
         .map((row) => {
@@ -429,7 +593,8 @@ function blockXml(block: DocxBlock, rels: Map<string, string>, orderedNumId = NU
               const runs = cell.header
                 ? cell.runs.map((r) => ({ ...r, bold: true }))
                 : cell.runs;
-              return `<w:tc><w:tcPr>${shade}</w:tcPr>${paragraph(runsXml(runs, rels), 'PkcTableCell')}</w:tc>`;
+              // 🔴 マスの中の画像は、マスの幅(余白を引いた内側)に収める(依頼 142 ②)
+              return `<w:tc><w:tcPr>${shade}</w:tcPr>${paragraph(runsXml(runs, rels, 'normal', cellMaxEmu), 'PkcTableCell')}</w:tc>`;
             })
             .join('');
           return `<w:tr>${cells}</w:tr>`;
@@ -438,61 +603,8 @@ function blockXml(block: DocxBlock, rels: Map<string, string>, orderedNumId = NU
       return `<w:tbl><w:tblPr><w:tblStyle w:val="PkcTable"/><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="BBBBBB"/><w:left w:val="single" w:sz="4" w:color="BBBBBB"/><w:bottom w:val="single" w:sz="4" w:color="BBBBBB"/><w:right w:val="single" w:sz="4" w:color="BBBBBB"/><w:insideH w:val="single" w:sz="4" w:color="BBBBBB"/><w:insideV w:val="single" w:sz="4" w:color="BBBBBB"/></w:tblBorders></w:tblPr><w:tblGrid>${cols}</w:tblGrid>${rows}</w:tbl>`;
     }
     case 'image': {
-      /**
-       * 🔴 **縦横比を保って本文幅に収める**(#187 段②)。
-       * ⚠ PKC2 は全画像を 480×360 px に潰していた ── 縦長の図が横に潰れて出る。
-       * 🔑 収めるのは**幅だけ**を見て、高さは同じ比で落とす。
-       */
-      let cx = Math.max(1, Math.round(block.widthPx * EMU_PER_PX));
-      let cy = Math.max(1, Math.round(block.heightPx * EMU_PER_PX));
-      if (cx > BODY_WIDTH_EMU) {
-        cy = Math.max(1, Math.round((cy * BODY_WIDTH_EMU) / cx));
-        cx = BODY_WIDTH_EMU;
-      }
-      /**
-       * 🔴 **本文の幅に対する割合を指した画像は、画面と同じく本文幅の割合で入れる**(#1640 ③)。
-       * ⚠ 画面の `width:50%` は元の大きさに関わらず本文幅の半分になる(小さい画像は引き伸ばされる)── 書き出しも同じにする。
-       */
-      if (block.widthPct !== undefined) {
-        const nx = Math.max(1, Math.round((BODY_WIDTH_EMU * block.widthPct) / 100));
-        cy = Math.max(1, Math.round((block.heightPx * EMU_PER_PX * nx) / Math.max(1, block.widthPx * EMU_PER_PX)));
-        cx = nx;
-      }
-      let id = rels.get(block.media);
-      if (id === undefined) {
-        id = `rIdM${rels.size + 1}`;
-        rels.set(block.media, id);
-      }
-      const alt = xmlEscape(xmlSafe(block.alt));
-      const n = rels.size;
-      /**
-       * 🔴 **画像は VML(`w:pict`)で入れる**(#199 / #238。2026-08-17 実測)。
-       *
-       * ⚠ **DrawingML(`w:drawing`)では PKC 内の Office が開けない。**
-       * 同じ画像・同じ文書で入れ物だけ変えて測った:
-       *
-       * | 画像の書き方 | native LO | PKC の Office(wasm) |
-       * |---|---|---|
-       * | DrawingML(PKC が書いた) | ✅ | ❌ **窓が空のまま** |
-       * | DrawingML(**LO 自身**が書いた) | ✅ | ❌ 空 |
-       * | DrawingML + VML の代替(`mc:AlternateContent`) | ✅ | ❌ 空(`mc:Choice` を採って落ちる) |
-       * | **VML のみ** | ✅ | ✅ **開く** |
-       *
-       * ⚠ したがって **`mc:AlternateContent` で両立させることはできない**
-       * (救われるはずの `mc:Fallback` へ行かない)。
-       * ⚠ VML は OOXML の**移行用**(ISO 29500 Part 4)である ── Strict では使えない。
-       *   それでも選ぶのは、**PKC 自身の書き出しが PKC の Office で開けない**ほうが
-       *   実害が大きいからである(user 確認 2026-08-17「VML は開けました」)。
-       * ⚠ `stroked="f"` を落とすと **図の周りに枠線が出る**(VML の既定は枠あり)。
-       */
-      const wPt = (cx / EMU_PER_PT).toFixed(1);
-      const hPt = (cy / EMU_PER_PT).toFixed(1);
-      const pict =
-        `<w:pict><v:shape id="_x0000_i${1024 + n}" type="#_x0000_t75"` +
-        ` style="width:${wPt}pt;height:${hPt}pt" stroked="f" filled="f" alt="${alt}">` +
-        `<v:imagedata r:id="${xmlEscape(id)}" o:title="${alt}"/></v:shape></w:pict>`;
       const jc = block.align === 'center' ? 'center' : block.align === 'right' ? 'right' : null;
-      return paragraph(`<w:r>${pict}</w:r>`, undefined, jc === null ? '' : `<w:jc w:val="${jc}"/>`);
+      return paragraph(`<w:r>${pictXml(block, rels)}</w:r>`, undefined, jc === null ? '' : `<w:jc w:val="${jc}"/>`);
     }
     case 'skipped':
       /**
@@ -627,9 +739,12 @@ export function buildDocx(
   const app = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>PKC3</Application></Properties>`;
 
+  const inlineImages = inlineImageStats(blocks);
   const whats = [
     ...blocks.flatMap((b) => (b.kind === 'skipped' ? [b.what] : [])),
     ...inlineSkipped,
+    // 🔴 段落の中に置いたが解けなかった画像(依頼 142 ②)── 本文にはその場に理由が出ているので、件数にも数える
+    ...inlineImages.failed,
   ];
   const warnings: string[] = [];
   if (whats.length > 0) {
@@ -658,7 +773,7 @@ export function buildDocx(
       paragraphs: (document.match(/<w:p>|<w:p [^>]*>/g) ?? []).length,
       tables: blocks.filter((b) => b.kind === 'table').length,
       links: [...rels.values()].filter((id) => id.startsWith('rIdL')).length,
-      images: blocks.filter((b) => b.kind === 'image').length,
+      images: blocks.filter((b) => b.kind === 'image').length + inlineImages.placed,
       skipped: whats.length,
     },
   };

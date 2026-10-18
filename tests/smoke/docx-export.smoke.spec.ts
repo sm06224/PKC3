@@ -16,6 +16,11 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 
+const PNG_1X1 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
 test.beforeEach(async ({ page }) => {
   // ⚠ 本文を入れる道具として全文 textarea を使うので、設定で split を明示する
   await useSplitEditor(page);
@@ -123,6 +128,60 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
   const status = page.locator('[data-pkc-region="status"]');
   await expect(status, '書き出しの知らせが出ていない').toContainText('Word で書き出しました');
   expect(await status.innerText(), '🔴 知らせに「ブロック」という数え方が残っている').not.toContain('ブロック');
+
+  /**
+   * 🔴 **束 A1(依頼 142 ②)**。箇条書きの項目・表のマス・文の途中に置いた画像は、**置いた位置のまま**同じ段落の中へ入る。
+   * ⚠ 直す前は、囲む塊の上や表の後ろへ移していた ── 「画像が入る」だけを見る assert は、位置がずれていても通る。
+   * 🔑 新しい起動は足さない ── 同じノートに画像を添付し、本文を書き換えて、もう一度書き出す。
+   */
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'ず.png',
+    mimeType: 'image/png',
+    buffer: PNG_1X1,
+  });
+  const attached = page.locator('[data-pkc-region="detail"] img[data-pkc-asset-key]');
+  await expect(attached, '前提:画像が添付されて本文に入った').toHaveCount(1, { timeout: 15_000 });
+  const key = await attached.first().getAttribute('data-pkc-asset-key');
+  expect(key, '前提:画像の鍵が読める').toBeTruthy();
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    [
+      '- 項目の画像 ![項目の図](asset:' + key + ') 項目のあと',
+      '',
+      '| 見出し | 値 |',
+      '| --- | --- |',
+      '| マスの画像 ![マスの図](asset:' + key + ') | 2 |',
+      '',
+      '文の途中 ![文中の図](asset:' + key + ') の続き',
+    ].join('\n'),
+  );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  const [download2] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30_000 }),
+    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-docx"]'),
+  ]);
+  const path2 = await download2.path();
+  expect(path2, '2 回目の file が落ちてきていない').not.toBeNull();
+  const xml2 = readFileSync(path2!).toString('utf-8');
+  const doc2 = xml2.slice(xml2.indexOf('<w:body'));
+  expect(doc2, '🔴 画像が入れられなかった').not.toContain('入れられませんでした');
+  expect((doc2.match(/<w:pict>/g) ?? []).length, '🔴 画像が 3 枚入っていない').toBe(3);
+  const paras = doc2.split('</w:p>');
+  const itemP = paras.find((p) => p.includes('項目の画像'));
+  expect(itemP, '前提:項目の段落が在る').toBeDefined();
+  expect(itemP, '🔴 項目の中の画像が、その項目の段落に入っていない').toContain('<w:pict>');
+  expect(itemP, '🔴 画像を含む項目が箇条書きでなくなった').toContain('<w:numId');
+  expect(itemP!.indexOf('<w:pict>'), '🔴 画像が項目の字の前後を入れ替えた').toBeGreaterThan(itemP!.indexOf('項目の画像'));
+  expect(itemP!.indexOf('項目のあと'), '🔴 項目の「あと」の字が画像より前に出ている').toBeGreaterThan(itemP!.indexOf('<w:pict>'));
+  const cellTc = doc2.split('</w:tc>').find((c) => c.includes('マスの画像'));
+  expect(cellTc, '前提:マスが在る').toBeDefined();
+  expect(cellTc, '🔴 マスの中の画像が、そのマスに入っていない(表の後ろへ移っている)').toContain('<w:pict>');
+  const midP = paras.find((p) => p.includes('文の途中'));
+  expect(midP, '前提:文の段落が在る').toBeDefined();
+  expect(midP, '🔴 文の途中の画像が、同じ段落に入っていない').toContain('<w:pict>');
+  expect(midP!.indexOf('の続き'), '🔴 文の続きが画像より前に出ている').toBeGreaterThan(midP!.indexOf('<w:pict>'));
 
   // ④ 本文が空のノート ── 断られ、ダウンロードが起きない
   await createEntry(page, 'text');

@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createOfficeOpener, type OfficeTarget } from '../../src/adapter/platform/office/office-open';
 import { OfficeWindow } from '../../src/adapter/platform/office/office-window';
-import type { OfficeCapability } from '../../src/features/office/office-entry';
+import { OFFICE_LARGE_DOC_BYTES, type OfficeCapability } from '../../src/features/office/office-entry';
 import { SHADOW_GONE_NOTICE, SHADOW_OPENED_NOTICE } from '../../src/features/office/office-shadow';
 
 const OK: OfficeCapability = {
@@ -90,6 +90,33 @@ function make(opts: {
   });
   return { opener, officeWindow, readAsset };
 }
+
+describe('大きい文書は渡す前に言う(台帳 #1852 束 A1。依頼 242)', () => {
+  /** 本当に 300MB を確保せず、大きさだけ偽る(窓へ渡る bytes はそのまま)。 */
+  const sized = (n: number): Uint8Array => {
+    const u = new Uint8Array([1, 2, 3]);
+    Object.defineProperty(u, 'byteLength', { value: n });
+    return u;
+  };
+
+  it('🔴 境目を超える文書は、窓へ渡す前に言う。言うだけで、開くのは止めない', async () => {
+    const notes: string[] = [];
+    const { opener, officeWindow } = make({ asset: sized(OFFICE_LARGE_DOC_BYTES + 1), notes });
+    opener.open(DOCX);
+    await vi.waitFor(() => expect(officeWindow.provided.length).toBe(1));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('開けないことがあります');
+    expect(notes[0]).toContain(DOCX.name);
+  });
+
+  it('対照: 境目以下の文書には何も言わない', async () => {
+    const notes: string[] = [];
+    const { opener, officeWindow } = make({ asset: sized(OFFICE_LARGE_DOC_BYTES), notes });
+    opener.open(DOCX);
+    await vi.waitFor(() => expect(officeWindow.provided.length).toBe(1));
+    expect(notes).toEqual([]);
+  });
+});
 
 describe('createOfficeOpener', () => {
   it('🔴 窓は 1 回しか開かない ── bytes は後渡しする', async () => {
