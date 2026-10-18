@@ -58,6 +58,7 @@ import {
 } from '../page-format';
 import { DEFAULT_PROSE_ALIGN, proseAlignCss, type ProseAlign } from '../prose-align';
 import type { ArchiveSource } from './pkc3-archive';
+import { insertPlacedNoteTitles } from './placed-note-title';
 
 export const HTML_FORMAT = 'pkc3-portable';
 export const HTML_VERSION = 1;
@@ -1090,7 +1091,9 @@ export async function writePortableHtml(
        *   (全ノートぶんの絵を heap に残さない ── 不可侵指示 2026-07-27 の「速やかな破棄」)。
        *   描けなかった物は器のまま残り、下の `countContainers` が原文の字で出る件数に数える。
        */
-      const html = figures ? await bakeFigures(sqlBaked, figures, new Map()) : sqlBaked;
+      const baked = figures ? await bakeFigures(sqlBaked, figures, new Map()) : sqlBaked;
+      // 🔴 板に置いたノートは、空の枠ではなく題名を出す(中身は出さない ── #1163 依頼 278 = A)
+      const html = insertPlacedNoteTitles(baked, (id) => metaOf.get(id)?.title ?? null, 'html');
       /**
        * 🔴 **書字方向などの文書属性も一緒に配る**(同 2-7)。画面では
        * `applyDocumentGlobals` が DOM 属性として当てているので、配る側でも

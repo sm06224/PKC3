@@ -83,6 +83,16 @@ export interface SaveBackDeps {
     bytes: Uint8Array<ArrayBuffer>,
   ) => Promise<boolean>;
   /**
+   * 🔴 **同じファイルを指す添付がほかにもあるとき、差し替える前に確かめる**(#1163 依頼 211・293)。
+   *
+   * 中身が同じファイルは 1 つにまとめて持っているので、差し替えると、そのファイルを指しているほかのノートのリンクも
+   * 新しい版になる。ほかに同じファイルを指す添付が無ければ、聞かずに `'replace'`。
+   * @returns `'replace'` = 今までどおり差し替える / `'separate'` = 差し替えず、別の添付のノートとして取り込む
+   *   (リンクは変わらず、編集した内容も失わない)
+   * ⚠ **optional にしない** ── 配線を落とすと、確かめずにほかのノートのリンクが変わる形に戻る。
+   */
+  readonly confirmShared: (lid: string, save: StagedSave) => Promise<'replace' | 'separate'>;
+  /**
    * 🔴 **「この保存はこのノートになった」と窓へ返す**(#217)。
    *
    * ⚠ 返さないと、**同じ文書を 2 回保存するとノートが 2 件できる**(cowork 実機
@@ -154,6 +164,27 @@ export function localOrphanImportedNotice(name: string): string {
  */
 export function originGoneImportedNotice(name: string): string {
   return `元の添付が見つからなかったので、新しい添付のノートとして取り込みました: 「${name}」`;
+}
+
+/**
+ * 🔴 **同じファイルを指す添付がほかにもあり、差し替えずに別の添付のノートにしたときの一言**(#1163 依頼 211・293)。
+ * ⚠ 「取り込みました」だけだと、差し替えたつもりの user は元のノートが更新されたと読む。
+ */
+export function sharedSeparateImportedNotice(name: string): string {
+  return `同じファイルを指すほかの添付があるので、差し替えずに別の添付のノートとして取り込みました: 「${name}」`;
+}
+
+/**
+ * 🔴 **同じファイルを指す添付がほかにもあるときの、差し替え前の確かめの文**(#1163 依頼 211・293)。
+ * ⚠ 画面に出る字なので 1 か所に置く。ほかのノートのリンクの数は、書き換える側と同じ規則で数えた値。
+ */
+export function sharedReplaceQuestion(name: string, sharers: number, links: number, canSeparate: boolean): string {
+  const tail =
+    links > 0
+      ? `このまま保存すると、そのファイルを指しているほかのノートのリンク ${links} か所も新しい版になります`
+      : 'このまま保存すると、ほかの添付のノート自身は古い版のままです';
+  const exit = canSeparate ? '別の添付として保存すると、リンクは変わりません。' : '';
+  return `「${name}」と同じファイルを指す添付が、ほかに ${sharers} 件あります。${tail}。${exit}`;
 }
 
 /**
@@ -465,8 +496,18 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       token = mine;
       target = await deps.readAttachment(mine);
     }
+    let sharedSeparate = false;
     if (token !== undefined && target !== null) {
       if (!deps.canWrite()) return hold(save);
+      // 🔴 同じファイルを指す添付がほかにもあれば、差し替えの前に確かめる(#1163 依頼 211・293)。
+      //    やめる側は「別の添付として取り込む」── 保存した内容は失わず、ほかのノートのリンクは変わらない
+      if ((await deps.confirmShared(token, save)) === 'separate') {
+        sharedSeparate = true;
+        token = undefined;
+        target = null;
+      }
+    }
+    if (token !== undefined && target !== null) {
       const ok = await deps.replaceAsset(token, save, bytes);
       if (!ok) {
         deferred = true;
@@ -482,7 +523,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       return 'replaced';
     }
     // 🔴 元の添付が無い回(合言葉も、先に作ったノートも死んでいる)は、そう言う(#1087)
-    const originGone = !orphan && (save.token !== undefined || mine !== undefined);
+    const originGone = !sharedSeparate && !orphan && (save.token !== undefined || mine !== undefined);
     if (!deps.canCreate()) return hold(save);
     const lid = await deps.createNote(save, bytes);
     if (lid === null) {
@@ -504,7 +545,9 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       save,
       orphan
         ? localOrphanImportedNotice(save.name)
-        : originGone
+        : sharedSeparate
+          ? sharedSeparateImportedNotice(save.name)
+          : originGone
           ? originGoneImportedNotice(save.name)
           : `Office で保存した内容を取り込みました: 「${save.name}」`,
       lid,

@@ -1717,6 +1717,11 @@ export interface BinderServices {
    */
   attachFiles?(files: File[], why?: string, at?: DroppedAt, intoLid?: string | null): void;
   /**
+   * 🔴 添付のファイルを、選んだファイルの中身に差し替える(#1163 依頼 212)。同じファイルを指す添付がほかにあれば、
+   * 差し替える前に確かめる(依頼 211・293)。⚠ 判断は `main.ts` の 1 本の道(Office の保存と同じ)。
+   */
+  replaceAttachmentFile?(lid: string, file: File): void;
+  /**
    * 🔴 **スクショ(画像)の貼付**(#250。user 指示 2026-08-18
    * 「PKC3 でスクショ貼付の導線がない。PKC2 と同様以上に実装してください」)。
    *
@@ -3105,6 +3110,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    * ⚠ `move-entry` を載せた理由(「本文は書かないが disk への書込」)と同じである。
    */
   'rename-attachment',
+  // 🔴 添付のファイルの差し替えは disk への書込(#1163 依頼 212)── 取込・整理が走っている最中は断る
+  'replace-attachment-file',
   /**
    * 🔴 **作るのも disk への書込である**(2026-08-19、機械検査が見つけた 4 件)。
    * ⚠ `move-entry` を入れた理由(「本文は書かないが disk への書込」)と同じなのに、
@@ -11349,6 +11356,18 @@ const ACTIONS: Record<string, ActionHandler> = {
   'end-tile-reorder': (dispatcher) => {
     dispatcher.dispatch({ type: 'SET_LAUNCHER_REORDER', on: false });
   },
+  /**
+   * 🔴 **添付のファイルを差し替える**(#1163 依頼 212)。ファイルを選ぶ欄を開く ── 差し替え先は**押したボタンが持つ**
+   * (`selectedLid` ではない ── 留めた枠でも、その枠のノートに効く)。選んだあとは `change` が受ける。
+   */
+  'replace-attachment-file': (dispatcher, target, _services, root) => {
+    const lid = targetLid(dispatcher, target);
+    if (!lid) return;
+    const input = root.querySelector<HTMLInputElement>('[data-pkc-field="replace-input"]');
+    if (input === null) return;
+    input.setAttribute('data-pkc-replace-lid', lid);
+    input.click();
+  },
   'attach-file': (_dispatcher, _target, _services, root) => {
     // 常設の hidden input を開く(動的生成にしない ── smoke の setInputFiles と
     // ブラウザの user-gesture 要件の両方に効く)
@@ -16910,6 +16929,13 @@ export function bindActions(
       const files = el.files ? [...el.files] : [];
       el.value = ''; // 同じファイルの再選択でも change が発火するように
       if (files.length > 0) services.importFiles?.(files);
+    } else if (field === 'replace-input') {
+      // 🔴 添付のファイルの差し替え(#1163 依頼 212)── 1 件だけ。同じファイルをもう一度選べるよう値は戻す
+      const file = el.files?.[0] ?? null;
+      const lid = el.getAttribute('data-pkc-replace-lid') ?? '';
+      el.value = '';
+      el.removeAttribute('data-pkc-replace-lid');
+      if (file && lid !== '') services.replaceAttachmentFile?.(lid, file);
     } else if (field === 'office-pack-input') {
       // ⚠ **1 件だけ**(一式は zip 1 本)。複数選ばれても先頭で決める ──
       //    2 本目を黙って捨てるのではなく、そもそも 1 本しか意味を持たない

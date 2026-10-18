@@ -140,6 +140,7 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'exportRevisionChain',
   'exportSqliteTable',
   'findAssetOwner',
+  'assetShareProbe',
   'findBacklinks',
   'getBodies',
   'getBody',

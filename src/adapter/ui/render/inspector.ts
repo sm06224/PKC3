@@ -94,6 +94,7 @@ import {
   ENTRY_ACTION_LABELS,
   ENTRY_ACTION_WIDTH_ATTR,
   entryActionHint,
+  FOLDER_EXPORT_BLOCKED_ACTIONS,
   entryActionWidthTier,
 } from '@features/entry-actions';
 import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
@@ -1386,7 +1387,9 @@ export class InspectorRenderer {
        * 「削除」がそれをやると**別のノートを消す**(ファイラの帯で実際に踏んだ形)。
        */
       setAttr(b, 'data-pkc-entry', meta.lid);
-      if (b.disabled !== editing) b.disabled = editing;
+      // 🔴 フォルダのときの書き出し 5 つは押せない(中のノートは入らない。理由は `title` に先に出す ── #1163 依頼 53-1)
+      const folderBlocked = meta.archetype === 'folder' && FOLDER_EXPORT_BLOCKED_ACTIONS.has(action);
+      if (b.disabled !== (editing || folderBlocked)) b.disabled = editing || folderBlocked;
       const shown = editing ? withBlockedNote(title, blockedNote) : title;
       if (b.title !== shown) b.title = shown;
     }

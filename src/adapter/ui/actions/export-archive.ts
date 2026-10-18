@@ -39,6 +39,8 @@ import { DEFAULT_PAGE_FORMAT, type PageFormat } from '@features/page-format';
 import { DEFAULT_PROSE_ALIGN, type ProseAlign } from '@features/prose-align';
 import { writeMarkdownZip, writeMarkdownTo } from '@features/export/pkc3-markdown-zip';
 import { countNoteLinks, noteLinkNotice } from '@features/export/note-link-notice';
+import { undefinedVarNotice } from '@features/export/undefined-var-notice';
+import { insertPlacedNoteTitles } from '@features/export/placed-note-title';
 import {
   createFreshSubfolder,
   folderSink,
@@ -786,7 +788,12 @@ async function collectOfficeBlocks(
    * ⚠ ここも**画面の DOM を読んでいない**(もう一度描いている)ので、画面で埋めた答えは
    *   来ない ── 焼かないと Word / PowerPoint だけ答えの表が無い。原文の SQL は枠として残る。
    */
-  const html = await bakeSqlEmbeds(rendered, deps.askSql);
+  const baked = await bakeSqlEmbeds(rendered, deps.askSql);
+  // 🔴 板に置いたノートは、Word には題名の 1 行を入れる(消えていた。中身は入れない ── #1163 依頼 278 = A)。PowerPoint は付箋の形のまま
+  const html =
+    target.kind === 'docx'
+      ? insertPlacedNoteTitles(baked, (id) => metas.find((m) => m.lid === id)?.title ?? null, 'word')
+      : baked;
   // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
   const { blocks, images, figures, inlineSkipped } = htmlToDocxBlocks(doc);
@@ -796,6 +803,9 @@ async function collectOfficeBlocks(
   // 🔑 別のノートの内容の埋め込みも、Word / PowerPoint では説明の字だけが残る ── 閲覧用 HTML と同じ文面で言う(#1648)
   const embedNotice = embedSourceNotice(doc.querySelectorAll('[data-pkc-embed-ref]').length);
   if (embedNotice !== null) warnings.push(embedNotice);
+  // 🔑 名前の無い変数は字のまま残る ── 画面では色で見えるが、Word / PowerPoint では見えないので数えて言う(#1163 依頼 281)
+  const varNotice = undefinedVarNotice(doc.querySelectorAll('.pkc-variable-undefined').length);
+  if (varNotice !== null) warnings.push(varNotice);
   /**
    * 🔴 **添付の画像を入れる**(#187 段②)。
    * ⚠ **縦横比を保つ**ため、実寸を取ってから渡す(PKC2 は全画像を 480×360 px に
@@ -1012,6 +1022,8 @@ async function exportEntryOffice(
   try {
     const got = await collectOfficeBlocks(deps, renderBody, lid, target, fail);
     if (got === null) return false;
+    // 🔴 本文が空のノート(フォルダ・添付だけのノートなど)は、中身の無い文書を落とさずに断る(#1163 依頼 143 = ②。ボタンの位置は変えない)
+    if (got.blocks.length === 0) return fail(`本文が空なので、${target.app} には書き出しません`);
     const now = deps.now?.() ?? new Date();
     /**
      * 🔴 **組み立てと zip はワーカーで**(#187 段④。user 指示 2026-08-03 の不可侵)。
@@ -1040,12 +1052,15 @@ async function exportEntryOffice(
     // ⚠ 「書き出しました」は `notify`(一時の知らせ)で言う ── state の action に
     //    書き出し用の型は無い(増やさない)
     // ⚠ **数えて見せるものは形式で違う** ── スライドは「枚数」がいちばん効く
+    // 🔴 Word は「ブロック」と言わない(画面のどこにも出てこない数え方。#1163 依頼 53-2 = A)── 画像があるときだけ括弧を付ける
     const how =
       'slides' in built.counts
-        ? `${built.counts.slides} 枚 / 画像 ${built.counts.images} 枚`
-        : `${built.counts.blocks} ブロック / 画像 ${built.counts.images} 枚`;
+        ? `(${built.counts.slides} 枚 / 画像 ${built.counts.images} 枚)`
+        : built.counts.images > 0
+          ? `(画像 ${built.counts.images} 枚)`
+          : '';
     progressShown = false; // ⚠ 次の「書き出しました」が進行中の欄を空にする(結果は進行中の終わりでもある)
-    deps.notify?.(`${target.app} で書き出しました(${how})`);
+    deps.notify?.(`${target.app} で書き出しました${how}`);
     return true;
   } catch (e) {
     return fail(

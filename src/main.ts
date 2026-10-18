@@ -1,7 +1,7 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
 import { errorText, diagramExportErrorText } from '@features/error-text';
-import { APP_GROUP_REORDER_OK_LABEL } from '@features/entry-actions';
+import { APP_GROUP_REORDER_OK_LABEL, FOLDER_EXPORT_NOTE } from '@features/entry-actions';
 import { bootFailureText } from '@features/boot-failure-text';
 import './styles/app.css';
 /**
@@ -388,7 +388,7 @@ import {
   type AttachDeps,
 } from '@adapter/ui/actions/attach';
 import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
-import { confirmSavedBack, createOfficeSaveBack, stagedSavedAt } from '@adapter/platform/office/office-save-back';
+import { confirmSavedBack, createOfficeSaveBack, sharedReplaceQuestion, stagedSavedAt } from '@adapter/platform/office/office-save-back';
 import { openStageDir } from '@adapter/platform/office/office-stage';
 import { importFiles } from '@adapter/ui/actions/import-file';
 import { windowFolderWritePicker, type WritableDirLike } from '@adapter/platform/md-folder-export';
@@ -2834,6 +2834,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
       if (typeof kind === 'object' && 'mdFolder' in kind) {
         await exportMarkdownToFolder(dispatcher, deps, kind.mdFolder);
+      } else if (
+        typeof kind === 'object' &&
+        (kind.as === 'docx' || kind.as === 'pptx' || kind.as === 'html' || kind.as === 'markdown') &&
+        dispatcher.getState().entryMetas.get(kind.entryLid)?.archetype === 'folder'
+      ) {
+        // 🔴 フォルダを書き出しても中のノートは入らない ── 押せない見た目(情報ペイン)の外から来ても同じ字で断る(#1163 依頼 53-1)
+        dispatcher.dispatch({ type: 'OP_FAILED', error: FOLDER_EXPORT_NOTE });
       } else if (typeof kind === 'object') {
         // ⚠ 1 ノートの出口は 4 つ ── バックアップ(取り込み直せる)/ **閲覧用 HTML** /
         //    Word / PowerPoint(後ろの 3 つは片道)
@@ -2879,6 +2886,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 bytes は在るが登録行が無い添付を埋めるため（#1087。作り直しで `assets` 表が消えた後の再付与）
     listMetaKeys: async () =>
       (await client.request({ op: 'listAssetMetas', cid })).map((m) => m.key),
+    // 🔴 1 回目の種類が不明なら、2 回目に分かった種類で登録を直す(#1163 依頼 290)
+    listMetaMimes: async () =>
+      new Map((await client.request({ op: 'listAssetMetas', cid })).map((m): [string, string] => [m.key, m.mime ?? ''])),
     estimate: navigator.storage?.estimate ? () => navigator.storage.estimate() : undefined,
     // 🔴 ハッシュは**ワーカーで**取る(P8 段㉓)。渡さないと
     //    `blob.arrayBuffer()` が最大 64MB をメインの heap に載せる
@@ -2903,6 +2913,69 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   };
 
   /**
+   * 🔴 **添付のファイルを差し替える 1 本の道**(#205 の Office の保存と、#1163 依頼 212 の「ファイルを差し替える」ボタンが同じ道を通る)。
+   * ⚠ 実体を置いて、登録して、`OFFICE_ASSET_SAVED`(参照の書き換えと版の台帳は worker の 1 tx)を撃ち、本当に書けたかを
+   *   disk のノートで確かめて返す。同じファイルを指す添付がほかにあるときの確かめは、呼び側(Office は `confirmShared`)が先に済ませる。
+   */
+  const replaceAttachmentBlob = async (lid: string, name: string, blob: Blob, savedAt: string): Promise<boolean> => {
+    if (dispatcher.getState().phase !== 'ready') return false;
+    let ok = false;
+    let newKey = '';
+    await withAssetGate.queued(async () => {
+      const mime = resolveMime(name, '');
+      const { key, hash } = assetKeyFromHash((await assets.hash(blob)).hash);
+      newKey = key;
+      await blobs.put(cid, key, blob);
+      await client.request({
+        op: 'putAssetMeta',
+        cid,
+        meta: { key, mime, size: blob.size, hash },
+      });
+      dispatcher.dispatch({
+        type: 'OFFICE_ASSET_SAVED',
+        lid,
+        newKey: key,
+        newHash: hash,
+        newBytes: blob.size,
+        /**
+         * 🔴 **綴りと中身の種類も運ぶ**(#214)。⚠ 直す前は `mime` を
+         * 資産の meta(`putAssetMeta`)にだけ書いて、**frontmatter へは
+         * 運んでいなかった** ── `.odt` を `.docx` で上書き保存すると
+         * 「Office で開く」が古い綴りのまま LO へ渡していた。
+         */
+        newName: name,
+        newMime: mime,
+        // 🔴 保存した時刻(Office の保留した保存は窓が保存した時刻 ── あとに打った控えを「古い」にしない。#1087)
+        savedAt,
+      });
+      // ⚠ reducer は**門を 2 つ**持っている(`ready` か / いまも添付か)── 撃てたかを
+      //    ここで確かめる。確かめないと棚から消えて文書が失われる。
+      //    ⚠ 2026-08-16 の着地前レビュー R6: `phase` だけ見ていたので、
+      //    引き取りの途中でノートが消える / archetype が変わると、
+      //    **何も書かずに「取り込みました」と言って棚を空にして**いた
+      const after = dispatcher.getState();
+      ok = after.phase === 'ready' && after.entryMetas.get(lid)?.archetype === 'attachment';
+    });
+    /**
+     * 🔴 **本当に書けたかを、disk のノートで確かめてから「取り込みました」と言う**(#1087、添付の見直し)。
+     * ⚠ 書くのは非同期の効果(`REQUEST_ASSET_REPLACE`)で、容量の拒否・DB の破損で落ちうる。
+     *   直す前は撃った直後に成功と返していたので、棚(書きかけの控え)を捨ててから失敗が出て、
+     *   新しい版の bytes はどのノートからも指されないまま次の整理で消えていた。
+     * ⚠ 待つのは門の**外**(効果の列が門を待つ形になっても固まらないように)。
+     * ⚠ 確かめられなければ成功と言わない(棚は残り、次に引き取れる)。
+     */
+    if (ok) {
+      ok = await confirmSavedBack({
+        settle: async () => {
+          await storeEffects?.settled();
+        },
+        readBody: async () => (await client.request({ op: 'getBody', cid, lid })) ?? null,
+        key: newKey,
+      });
+    }
+    return ok;
+  };
+  /**
    * 🔴 **Office の窓で保存されたものを引き取る**(#205)。⚠ ここは**道具を渡すだけ** ──
    * 判断(holder か / 編集中か / 新規か差し替えか)は `office-save-back.ts` が持つ。
    */
@@ -2915,6 +2988,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     canCreate: () => {
       const phase = dispatcher.getState().phase;
       return phase === 'ready' || phase === 'editing';
+    },
+    // 🔴 同じファイルを指す添付がほかにもあれば、差し替える前に確かめる(#1163 依頼 211・293)。
+    //    ⚠ 数える規則は worker の `assetShareProbe`(書き換える側と同じ関数)。やめる側は別の添付として取り込む
+    confirmShared: async (lid, save) => {
+      const probe = await client.request({ op: 'assetShareProbe', cid, targetLid: lid }).catch(() => null);
+      if (probe === null || probe.sharers === 0) return 'replace';
+      const answer = await confirmInApp(root, sharedReplaceQuestion(save.name, probe.sharers, probe.links, true), {
+        okLabel: '新しい版にする',
+        cancelLabel: '別の添付として保存',
+      });
+      return answer === 'ok' ? 'replace' : 'separate';
     },
     // 🔴 #432 段②: 手元のファイルから開いた回は、元のファイルへ戻す
     //    ⚠ 判断(合言葉が手元のものか / 書けたか)は `local-office-files.ts` が持つ
@@ -2949,65 +3033,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       });
       return lid;
     },
-    replaceAsset: async (lid, save, bytes) => {
-      if (dispatcher.getState().phase !== 'ready') return false;
-      let ok = false;
-      let newKey = '';
-      await withAssetGate.queued(async () => {
-        const mime = resolveMime(save.name, '');
-        const blob = new Blob([bytes]);
-        const { key, hash } = assetKeyFromHash((await assets.hash(blob)).hash);
-        newKey = key;
-        await blobs.put(cid, key, blob);
-        await client.request({
-          op: 'putAssetMeta',
-          cid,
-          meta: { key, mime, size: bytes.byteLength, hash },
-        });
-        dispatcher.dispatch({
-          type: 'OFFICE_ASSET_SAVED',
-          lid,
-          newKey: key,
-          newHash: hash,
-          newBytes: bytes.byteLength,
-          /**
-           * 🔴 **綴りと中身の種類も運ぶ**(#214)。⚠ 直す前は `mime` を
-           * 資産の meta(`putAssetMeta`)にだけ書いて、**frontmatter へは
-           * 運んでいなかった** ── `.odt` を `.docx` で上書き保存すると
-           * 「Office で開く」が古い綴りのまま LO へ渡していた。
-           */
-          newName: save.name,
-          newMime: mime,
-          // 🔴 窓が保存した時刻(保留した保存でも、あとに打った控えを「古い」にしない ── #1087)
-          savedAt: stagedSavedAt(save.at),
-        });
-        // ⚠ reducer は**門を 2 つ**持っている(`ready` か / いまも添付か)── 撃てたかを
-        //    ここで確かめる。確かめないと棚から消えて文書が失われる。
-        //    ⚠ 2026-08-16 の着地前レビュー R6: `phase` だけ見ていたので、
-        //    引き取りの途中でノートが消える / archetype が変わると、
-        //    **何も書かずに「取り込みました」と言って棚を空にして**いた
-        const after = dispatcher.getState();
-        ok = after.phase === 'ready' && after.entryMetas.get(lid)?.archetype === 'attachment';
-      });
-      /**
-       * 🔴 **本当に書けたかを、disk のノートで確かめてから「取り込みました」と言う**(#1087、添付の見直し)。
-       * ⚠ 書くのは非同期の効果(`REQUEST_ASSET_REPLACE`)で、容量の拒否・DB の破損で落ちうる。
-       *   直す前は撃った直後に成功と返していたので、棚(書きかけの控え)を捨ててから失敗が出て、
-       *   新しい版の bytes はどのノートからも指されないまま次の整理で消えていた。
-       * ⚠ 待つのは門の**外**(効果の列が門を待つ形になっても固まらないように)。
-       * ⚠ 確かめられなければ成功と言わない(棚は残り、次に引き取れる)。
-       */
-      if (ok) {
-        ok = await confirmSavedBack({
-          settle: async () => {
-            await storeEffects?.settled();
-          },
-          readBody: async () => (await client.request({ op: 'getBody', cid, lid })) ?? null,
-          key: newKey,
-        });
-      }
-      return ok;
-    },
+    replaceAsset: (lid, save, bytes) =>
+      replaceAttachmentBlob(lid, save.name, new Blob([bytes]), stagedSavedAt(save.at)),
     // 🔴 **作ったノートを窓へ教える**(#217)── 教えないと 2 回目の保存で
     //    ノートが増える。判断は `office-save-back.ts`、ここは運ぶだけ
     adopt: (key, lid) => { officeWindow.adoptSave(key, lid); },
@@ -3762,6 +3789,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     allowExternalImages: (lid) => appExternalImages.allows(lid),
     lend: (key) => assetLender.lend(key),
     getBlob: (key) => assetLender.getBlob(key),
+    // 🔴 本文の音・動画を、章の窓でも読む面と同じ再生ボタンにする(#1163 依頼 291)
+    listMimes: () => assetLender.listMimes(),
     runAction: (el) => {
       if (!runChapterWindowAction(dispatcher, el, services, root)) return;
       // 🔑 よそへ移る口は、移った先(このウィンドウ)を手前へ出す
@@ -3796,6 +3825,28 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     localFolder,
     /** 🔴 章を読むだけの別のウィンドウで(#1044 段4)── 窓は**同期で**掴む。 */
     openChapterWindow: (lid, line) => void chapterWindows.open(lid, line),
+    // 🔴 添付のファイルの差し替え(#1163 依頼 212)。確かめ(依頼 211・293)も、書く道も Office の保存と同じ
+    replaceAttachmentFile: (lid, file) => {
+      void (async () => {
+        const st = dispatcher.getState();
+        if (st.phase !== 'ready') {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}差し替えてください` });
+          return;
+        }
+        if (st.entryMetas.get(lid)?.archetype !== 'attachment') return;
+        const probe = await client.request({ op: 'assetShareProbe', cid, targetLid: lid }).catch(() => null);
+        if (probe !== null && probe.sharers > 0) {
+          const answer = await confirmInApp(root, sharedReplaceQuestion(st.entryMetas.get(lid)?.title ?? file.name, probe.sharers, probe.links, false), {
+            okLabel: 'ファイルを差し替える',
+            cancelLabel: 'やめる',
+          });
+          if (answer !== 'ok') return;
+        }
+        const done = await replaceAttachmentBlob(lid, file.name, file, new Date().toISOString());
+        if (done) showStatus(`ファイルを差し替えました: 「${file.name}」`);
+        else dispatcher.dispatch({ type: 'OP_FAILED', error: `ファイルを差し替えられませんでした: 「${file.name}」` });
+      })();
+    },
     attachFiles: (files, why, at, intoLid) =>
       void withAssetGate(() => attachFiles(dispatcher, attachDeps, files, why, at, intoLid)),
     // 🔴 録音・画面録画(#413)── 押す口は左の列の「添付」の隣に在る
@@ -5407,6 +5458,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           getState: () => dispatcher.getState(),
           dispatch: (a) => dispatcher.dispatch(a),
           onState: (cb) => dispatcher.onState(cb),
+          notify: (message) => showStatus(message),
           // 🔴 刷り終えたら(印刷の画面が閉じたら)、刷るために開けた折りたたみと明るくした図を戻す(#1163 依頼 232 / 234)
           print: () => {
             printRun += 1;

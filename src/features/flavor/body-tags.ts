@@ -30,6 +30,7 @@
  */
 
 import { frontmatterLineCount } from '../markdown/frontmatter';
+import { ifFormatMatches, ifFormatOf } from '../markdown/if-format';
 import { MAX_TAG_CHARS } from './tags';
 
 /** fence の開き閉じ。⚠ `task-count.ts` と同じ形にする(判定を散らさない)。 */
@@ -52,7 +53,6 @@ const COMMENT_FENCE = /^ {0,3}%%%\s*$/;
 const CONTAINER_OPEN = /^ {0,3}:::+\s*([A-Za-z][\w-]*)?(\{[^}]*\})?\s*$/;
 const CONTAINER_CLOSE = /^ {0,3}:::+\s*$/;
 /** `:::if{format=html}` の中身だけが画面に出る(それ以外は飛ばす)。 */
-const IF_FORMAT = /format\s*=\s*([A-Za-z0-9_-]+)/;
 
 /**
  * 🔴 **箇条書きの印**(2026-08-29)。⚠ 中身は**項目の中**なので、画面は札にしない。
@@ -213,9 +213,8 @@ export function scanBodyTags(body: string): BodyTag[] {
     if (co !== null && co[1] !== undefined) {
       const name = co[1];
       const attrs = co[2] ?? '';
-      const fmt = IF_FORMAT.exec(attrs)?.[1];
-      // ⚠ 隠すのは 2 つだけ ── コメントと、画面(html)以外を指した `if`
-      const hide = name === 'comment' || (name === 'if' && fmt !== undefined && fmt !== 'html');
+      // ⚠ 隠すのは 2 つだけ ── コメントと、画面(html)以外を指した `if`(読み方は `if-format.ts` の 1 本)
+      const hide = name === 'comment' || (name === 'if' && !ifFormatMatches(ifFormatOf(attrs), 'html'));
       containers.push(hide);
       if (hide) hidden += 1;
       prevBlank = false;

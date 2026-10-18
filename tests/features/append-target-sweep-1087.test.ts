@@ -94,18 +94,18 @@ describe('2. fence の閉じは、同じ記号で同じ長さ以上', () => {
     const src = [
       '````md',
       '```',
-      ':::if{format=pdf}',
+      ':::if{format=docx}',
       '```',
       '````',
       '',
       '# 残る',
       '',
-      ':::if{format=pdf}',
+      ':::if{format=docx}',
       '# 消える',
       ':::',
       '',
     ].join('\n');
-    // 直す前: ``` で fence が閉じたことになり、fence の中の `:::if{format=pdf}` が本物の開きに読まれ、
+    // 直す前: ``` で fence が閉じたことになり、fence の中の `:::if{format=docx}` が本物の開きに読まれ、
     // 以降の「# 残る」まで消えた
     expect(extractHeadingsFromMarkdown(src).map((h) => h.text)).toEqual(['残る']);
   });

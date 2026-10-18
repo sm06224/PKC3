@@ -127,6 +127,7 @@ describe('止める op の仕分け(#971)', () => {
     'searchDetail',
     'findBacklinks',
     'findAssetOwner',
+    'assetShareProbe',
     'listRelations',
     'revisionCounts',
     'getRevision',

@@ -1554,7 +1554,24 @@ function middleEllipsis(name: string, max: number): string {
  */
 const WRITE_BACK_FRAME = '元のファイル()を上書きします。元の内容は戻せません(押すと確かめのウィンドウが出ます)';
 
+/**
+ * 🔴 **フォルダを選んだまま書き出しても、中のノートは入らない**(#1163 依頼 53-1 = A)。
+ * 押すと出るのはフォルダ自身(説明文だけ)の 1 件なので、5 つの書き出しは押せなくして理由を先に見せる。
+ * ⚠ 右クリックや操作を探すから来ても同じ字で断る(書き出し側の門が `FOLDER_EXPORT_NOTE` を使う)。
+ * 🔑 中身ごと出せるのは「このフォルダをバックアップ」だけ。
+ */
+export const FOLDER_EXPORT_BLOCKED_ACTIONS: ReadonlySet<string> = new Set([
+  'export-entry-html',
+  'export-entry-docx',
+  'export-entry-pptx',
+  'export-entry-pdf',
+  'export-entry-markdown',
+]);
+
+export const FOLDER_EXPORT_NOTE = 'フォルダの中のノートは入りません。1 件ずつ選んでから書き出してください';
+
 export function entryActionHint(action: string, ctx: EntryMenuContext): string {
+  if (ctx.archetype === 'folder' && FOLDER_EXPORT_BLOCKED_ACTIONS.has(action)) return FOLDER_EXPORT_NOTE;
   if (action === 'write-back-file') {
     /**
      * 🔴 **この 1 件だけ上限の門の外に在った**(#587 C-3 の着地後レビュー)。

@@ -465,7 +465,9 @@ export function htmlToDocxBlocks(doc: Document): {
           cloneKids[i]?.remove();
         }
       });
-      pushSplitByImages(clone, (runs) => ({ kind: 'li', ordered, depth: itemDepth, list: listId, runs }), {
+      // 🔴 チェックの項目は丸を出さない(#1163 依頼 280)── 印は描画が項目に付ける class(間に空行の在る一覧では入力欄が段落の中に入るので、入力欄の位置では見ない)
+      const task = li.classList.contains('pkc-task-item');
+      pushSplitByImages(clone, (runs) => ({ kind: 'li', ordered, depth: itemDepth, list: listId, ...(task ? { task: true } : {}), runs }), {
         bulletFirst: true,
         keepEmpty: later.length === 0,
       });
@@ -563,21 +565,30 @@ export function htmlToDocxBlocks(doc: Document): {
       if (tag === 'table') {
         const rows: DocxCell[][] = [];
         // 🔴 セルの中の画像は、表の**後ろ**へ出す(表の前へ出ていた。セルに画像は置けない)
-        const cellImages: { assetKey: string; alt: string; look?: ImageLook }[] = [];
+        const cellImages: { assetKey: string; alt: string; look?: ImageLook; row: number; col: number }[] = [];
         for (const tr of Array.from(el.querySelectorAll('tr'))) {
           const cells: DocxCell[] = [];
           for (const cell of Array.from(tr.children)) {
             const isTh = cell.tagName.toLowerCase() === 'th';
             const cellRuns: DocxRun[] = [];
+            // 🔴 どのマスの画像かを控える(表の後ろに「表の N 行目・M 列目の画像」と添える。#1163 依頼 124-3 = A)
+            const rowNo = rows.length + 1;
+            const colNo = cells.length + 1;
             collectRuns(cell, {}, cellRuns, (assetKey, alt, look) =>
-              cellImages.push({ assetKey, alt, ...(look !== undefined ? { look } : {}) }),
+              cellImages.push({ assetKey, alt, row: rowNo, col: colNo, ...(look !== undefined ? { look } : {}) }),
             );
             cells.push({ runs: cellRuns, ...(isTh ? { header: true } : {}) });
           }
           if (cells.length > 0) rows.push(cells);
         }
         if (rows.length > 0) blocks.push({ kind: 'table', rows });
-        for (const im of cellImages) reserveImage(im.assetKey, im.alt, im.look);
+        for (const im of cellImages) {
+          blocks.push({
+            kind: 'p',
+            runs: [{ text: `表の ${im.row} 行目・${im.col} 列目の画像`, italic: true }],
+          });
+          reserveImage(im.assetKey, im.alt, im.look);
+        }
         continue;
       }
       /**

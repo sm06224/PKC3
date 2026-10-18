@@ -169,6 +169,13 @@ export type StorageRequest =
    */
   | { op: 'findAssetOwner'; cid: string; assetKey: string }
   /**
+   * 🔴 **この添付を差し替えると、ほかに何が新しい版になるか**(#1163 依頼 211・293)。
+   * ⚠ 読むだけ(書かない)。中身が同じファイルは 1 つにまとめて持っているので、同じファイルを指す添付のノートが
+   *   ほかにもあれば、差し替えたときにそのノートを指していた本文のリンクも新しい版になる。保存の前にそれを数えて見せる。
+   *   数える規則は書き換える側(`replaceAssetRefs` の `rewriteAssetRefs`)と同じ関数。
+   */
+  | { op: 'assetShareProbe'; cid: string; targetLid: string }
+  /**
    * 🔴 **本文の全文検索**(#181)。題名だけの絞り込みでは、ノートが増えると
    * 辿れない。⚠ **本文は主スレッドに常駐していない**ので、これは SQL 側の仕事。
    * ⚠ 引き方(FTS / LIKE)の規則は `features/filter/search-query.ts` が 1 か所で持つ
@@ -1144,6 +1151,11 @@ export interface ResultMap {
    * (#1207 I4: 右の列の「本文で使う添付」が、説明文の空の添付に file 名を出す)。
    */
   findAssetOwner: { lid: string | null; name: string | null };
+  /**
+   * `sharers` = 同じファイルを指す、ほかの添付のノートの数 / `linkNotes` = その鍵を指すリンクを持つ、ほかのノートの数 /
+   * `links` = そのリンクの数 / 添付のノートが無い・実体が分からないときは `null`。
+   */
+  assetShareProbe: { sharers: number; linkNotes: number; links: number } | null;
   /**
    * 当たった lid。⚠ **並びは entry_order**(一覧と同じ)── 関連度順にしない。
    * 一覧の並びが検索のたびに変わると、user は「どこへ行ったか」を見失う。

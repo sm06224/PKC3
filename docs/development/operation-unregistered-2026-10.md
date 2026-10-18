@@ -48,6 +48,7 @@
 | `enter-folder` | 低 | (フォルダへ入る) | `src/adapter/ui/render/filer.ts:886`<br>`src/adapter/ui/render/filer.ts:904` | 押した行(フォルダ)を指す |
 | `pick-create-kind` | 低 | (作る種類を選ぶ) | `src/adapter/ui/render/browse.ts:115`<br>`src/adapter/ui/render/shell.ts:571` | 選んだ種類を押した項目から読む。種類ごとの作成は別に登録済み |
 | `rename-attachment` | 低 | (添付の名前欄) | `src/adapter/ui/render/detail.ts:3379` | 入力欄の値を読む |
+| `replace-attachment-file` | 低 | ファイルを差し替える | `src/adapter/ui/render/detail.ts:3498` | 添付の詳細の 1 行。差し替え先は押したボタンが運ぶ |
 | `select-entry` | 低 | (ノートを選ぶ) | `src/adapter/ui/render/captures.ts:629`<br>`src/adapter/ui/render/contacts.ts:230` | 押した行を指す(行そのもの) |
 | `set-entry-date` | 低 | (日付の欄) | `src/adapter/ui/render/inspector.ts:1129`<br>`src/adapter/ui/render/inspector.ts:1124` | 入力欄の値を読む |
 | `set-query-key` | 低 | グループ化する項目 | `src/adapter/ui/render/query.ts:116` | 選んだ値を読む |

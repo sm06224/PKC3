@@ -21,6 +21,8 @@ import {
   localOrphanImportedNotice,
   originGoneImportedNotice,
   SAME_DOC_MAX,
+  sharedReplaceQuestion,
+  sharedSeparateImportedNotice,
   stagedSavedAt,
   type SaveBackDeps,
 } from '@adapter/platform/office/office-save-back';
@@ -128,6 +130,8 @@ function harness(over: Partial<SaveBackDeps> = {}): {
       replaced.push(lid);
       return true;
     },
+    // ⚠ 既定は「同じファイルを指す添付がほかに無い」── 確かめずに差し替える(共有の回は各 it が渡す。#1163 依頼 211・293)
+    confirmShared: async () => 'replace',
     adopt: (key, lid) => adopted.push(`${key}=${lid}`),
     notify: (m, open) => {
       notices.push(m);
@@ -1112,7 +1116,8 @@ describe('保存した時刻(savedAt)', () => {
 
   it('配線: replaceAsset が save.at を渡している', () => {
     const main = readFileSync('src/main.ts', 'utf8');
-    expect(main).toContain('savedAt: stagedSavedAt(save.at)');
+    // 差し替えの道は 1 本(`replaceAttachmentBlob`。#1163 依頼 212 でボタンと共有)── Office の側は窓の時刻を渡す
+    expect(main).toContain('replaceAttachmentBlob(lid, save.name, new Blob([bytes]), stagedSavedAt(save.at))');
   });
 });
 
@@ -1439,5 +1444,80 @@ describe('預かった理由の言い分け(O-10)', () => {
     h.stage.put({ key: 'o1', token: 'lid-7' });
     await h.sb.receive('o1');
     expect(h.relayed[0]!.text).toBe(h.notices[0]);
+  });
+});
+
+/**
+ * 🔴 **同じファイルを指す添付がほかにもあるとき、差し替える前に確かめる**(#1163 依頼 211・293)。
+ *
+ * 中身が同じファイルは 1 つにまとめて持っているので、差し替えると、そのファイルを指しているほかのノートのリンクも
+ * 新しい版になる。確かめの答えが「やめる」なら、**差し替えず、保存した内容は別の添付のノートとして残す**
+ * (編集した内容は失わない / リンクは変わらない)。
+ */
+describe('🔴 共有の確かめ(差し替える前)', () => {
+  it('「別の添付として保存」を選ぶと、差し替えずに新しい添付のノートになる。棚から消え、そう言う', async () => {
+    const asked: string[] = [];
+    const h = harness({
+      confirmShared: async (lid) => {
+        asked.push(lid);
+        return 'separate';
+      },
+    });
+    h.stage.put({ key: 'o1', token: 'lid-7', name: '契約書.docx' });
+    expect(await h.sb.receive('o1')).toBe('created');
+    expect(asked, '差し替え先を確かめていない').toEqual(['lid-7']);
+    expect(h.replaced, '「別の添付」を選んだのに差し替えた').toEqual([]);
+    expect(h.created).toEqual(['契約書.docx']);
+    expect(h.stage.keys(), '保存した内容が棚に残っている').toEqual([]);
+    expect(h.notices[0]).toBe(sharedSeparateImportedNotice('契約書.docx'));
+    expect(h.notices[0], '「元の添付が見つからなかった」と言っていない').not.toContain('見つからなかった');
+    expect(h.adopted, '窓へ新しいノートを返していない(次の保存で増える)').toEqual(['o1=new-lid']);
+  });
+
+  it('対照: 「新しい版にする」なら、今までどおり差し替える', async () => {
+    const h = harness({ confirmShared: async () => 'replace' });
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    expect(await h.sb.receive('o1')).toBe('replaced');
+    expect(h.replaced).toEqual(['lid-7']);
+    expect(h.created).toEqual([]);
+  });
+
+  it('合言葉が無い新規の保存では確かめない(差し替えではない)', async () => {
+    let asked = 0;
+    const h = harness({
+      confirmShared: async () => {
+        asked += 1;
+        return 'separate';
+      },
+    });
+    h.stage.put({ key: 'o1', name: '無題 1.odt' });
+    expect(await h.sb.receive('o1')).toBe('created');
+    expect(asked).toBe(0);
+  });
+
+  it('編集中は確かめる前に預かる(確かめの画面で書きかけを邪魔しない)', async () => {
+    let asked = 0;
+    const h = harness({
+      canWrite: () => false,
+      canCreate: () => true,
+      confirmShared: async () => {
+        asked += 1;
+        return 'replace';
+      },
+    });
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    expect(await h.sb.receive('o1')).toBe('deferred');
+    expect(asked).toBe(0);
+    expect(h.stage.keys().sort(), '預かったのに棚から消えた').toEqual(['o1.bin', 'o1.json']);
+  });
+
+  it('確かめの文: 数を入れ、リンクが無ければ「古い版のまま」と言う / 別の添付の逃げ道は出せるときだけ', () => {
+    const withLinks = sharedReplaceQuestion('契約書.pdf', 1, 3, true);
+    expect(withLinks).toContain('ほかに 1 件');
+    expect(withLinks).toContain('リンク 3 か所も新しい版になります');
+    expect(withLinks).toContain('別の添付として保存すると、リンクは変わりません');
+    const noLinks = sharedReplaceQuestion('契約書.pdf', 2, 0, false);
+    expect(noLinks).toContain('ほかの添付のノート自身は古い版のままです');
+    expect(noLinks, 'やめる側が無いのに、別の添付の案内が出た').not.toContain('別の添付として保存');
   });
 });

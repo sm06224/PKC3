@@ -41,7 +41,8 @@ import { createWarnCollector } from './warn-cap';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readVersions } from '@features/flavor/attachment-versions';
 import { humanBytes } from '@features/human-bytes';
-import { countNoteLinkSites, noteLinkNotice } from './note-link-notice';
+import { noteLinkNotice } from './note-link-notice';
+import { rewriteNoteLinks } from './note-link-rewrite';
 
 export const MD_FORMAT = 'pkc3-markdown';
 export const MD_VERSION = 1;
@@ -284,14 +285,13 @@ function pkc3Meta(m: {
 function rewriteAssetLinks(
   text: string,
   resolve: (key: string) => string | undefined,
-): { text: string; openFence: string | null; noteLinks: number } {
+): { text: string; openFence: string | null } {
   const { sites, openFence } = scanLinks(text);
   const out = rewriteLinkDests(text, sites, (site) => {
     const m = /^asset:([A-Za-z0-9_.-]+)$/.exec(site.dest);
     return m ? resolve(m[1]!) : undefined;
   });
-  // 🔑 ノートへのリンクは書き換えない(見え方の判断)── 同じ走査で**数えるだけ**(#1087)
-  return { text: out, openFence, noteLinks: countNoteLinkSites(sites) };
+  return { text: out, openFence };
 }
 
 /**
@@ -382,12 +382,21 @@ export async function writeMarkdownTo(
     assetMetas.map((a) => [a.key, ASSET_DIR + names.claim(a.key, extForAsset(a.mime, fileNameOf.get(a.key)))]),
   );
   const mdNames = new NameAllocator();
+  /**
+   * 🔴 **書き出す .md の名前は先に配る**(#1163 依頼 116-3)── ノート同士のリンクを、リンク先のファイル名へ書き換えるため。
+   * ⚠ 配る順は一覧の順(本文を読む順と同じ)。同じ題名の番号(`-2`)の付き方は変えない。
+   */
+  const mdNameOf = new Map(metas.map((m) => [m.lid, mdNames.claim(slugForTitle(m.title), 'md')]));
+  const written = new Set<string>();
   const used = new Set<string>();
   /** 控え(`attachment.history` に載っている過去の版)の key。#213 の内訳に使う。 */
   const historyKeys = new Set<string>();
   let entryCount = 0;
   /** 本文の中のノートへのリンク(`entry:…`)の数。外では開けないので最後に言う(#1087)。 */
   let noteLinkCount = 0;
+  /** ファイルへのリンクに書き換えた数 / 題名の字だけにした数(#1163 依頼 116-3)。 */
+  let linksToFile = 0;
+  let linksToText = 0;
   let after: { entryOrder: number; lid: string } | undefined;
 
   for (;;) {
@@ -488,8 +497,15 @@ export async function writeMarkdownTo(
       // 「残骸は原文の suffix」という長さ演算が CRLF の本文で崩れ、
       // 切り出し位置がずれて**本文に 1 文字混入した**(実測で踏んだ)。
       // 宛先限定の書き換えなら frontmatter 部分を通しても実害が無い
-      const { text, openFence, noteLinks } = rewriteAssetLinks(r.body, (key) => pathOf.get(key));
-      noteLinkCount += noteLinks;
+      const asset = rewriteAssetLinks(r.body, (key) => pathOf.get(key));
+      const { openFence } = asset;
+      // 🔴 ノート同士のリンクは、書き出したファイルへのリンクに書き換える(書き出さなかったノートは題名の字だけ)。
+      //    触らなかった物(`![](entry:…)` の埋め込みなど)だけを「開けないリンク」として数える
+      const noteRewrite = rewriteNoteLinks(asset.text, (lid) => mdNameOf.get(lid));
+      const text = noteRewrite.text;
+      noteLinkCount += noteRewrite.untouched;
+      linksToFile += noteRewrite.toFile;
+      linksToText += noteRewrite.toText;
 
       // 書き換えられずに残った参照は**外では開けない** ── 黙って出さない
       ASSET_REF_RE.lastIndex = 0;
@@ -524,7 +540,9 @@ export async function writeMarkdownTo(
       }
       doc = spliceFrontmatterKeys(doc, mine);
 
-      await w.add(mdNames.claim(slugForTitle(m.title), 'md'), [doc]);
+      // 同じ lid を 2 度返す source でも名前が衝突しない(2 度目は新しい名前を配る ── 前進しないカーソルの検めへ届かせる)
+      await w.add(written.has(r.lid) ? mdNames.claim(slugForTitle(m.title), 'md') : mdNameOf.get(r.lid)!, [doc]);
+      written.add(r.lid);
       entryCount++;
     }
     if (done || !next) break;
@@ -577,6 +595,12 @@ export async function writeMarkdownTo(
   }
   const noteLinkWarning = noteLinkNotice(noteLinkCount);
   if (noteLinkWarning !== null) warnings.push(noteLinkWarning);
+  if (linksToFile > 0) {
+    warnings.push(`ノートへのリンク ${linksToFile} 件を、書き出したノートのファイル(.md)へのリンクに書き換えました`);
+  }
+  if (linksToText > 0) {
+    warnings.push(`書き出さなかったノートへのリンク ${linksToText} 件は、リンクの字だけにしました`);
+  }
   const skipped = assetMetas.length - used.size;
   if (skipped > 0) {
     warnings.push(`どの本文からも参照されていない添付 ${skipped} 件は含めませんでした`);

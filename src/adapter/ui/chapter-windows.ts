@@ -86,6 +86,8 @@ import {
   selfContainerId,
 } from './render/detail';
 import type { MermaidScope } from './render/mermaid-hydrate';
+import { BODY_MEDIA_CLASS, BODY_MEDIA_FIELD, assetPreviewKind } from '@features/asset/asset-preview-kind';
+import { replaceOnMediaError } from './render/media-error';
 
 /** 窓が開けなかったとき(`view-window.ts` と同じ字)。 */
 export const CHAPTER_WINDOW_BLOCKED = 'ブラウザが新しいウィンドウをブロックしたようです';
@@ -111,6 +113,11 @@ export interface ChapterWindowsDeps {
   /** 添付を借りる(`assetLender`)。 */
   readonly lend: (key: string) => Promise<{ url: string; dispose: () => void } | null>;
   readonly getBlob: (key: string) => Promise<Blob | null>;
+  /**
+   * 添付の鍵 → 登録の種類(`assetLender.listMimes`)。音・動画の再生ボタンを出すかの判定に使う
+   * (#1163 依頼 291)。省略可 ── 無い環境は種類が分からず、リンクのまま(今までどおり)。
+   */
+  readonly listMimes?: () => Promise<ReadonlyMap<string, string>>;
   /** 窓の中で押された口を、開いた側で走らせる(`runChapterWindowAction`)。 */
   readonly runAction: (el: HTMLElement) => void;
   /** 理由を出す(開けなかった等)。 */
@@ -497,9 +504,70 @@ export class ChapterWindows {
       }),
     );
     if (stale()) return;
+    // ②' 本文に貼った音・動画 ── 読む面と同じ再生ボタンをリンクの隣に置く(#1163 依頼 291 = A)
+    await this.hydrateMedia(o, stale, host);
+    if (stale()) return;
     // ③ 図(mermaid・グラフ・数式)── 本文の面と同じ 1 本
     const scopes = (this.deps.hydrateFigures ?? hydrateFigures)([host]);
     for (const s of scopes) o.disposers.push(() => s.dispose());
+  }
+
+  /**
+   * 🔴 **音・動画の再生ボタンを窓にも置く**(#1163 依頼 291 = A)。直す前は、読む画面では再生ボタンの音・動画が、
+   * 章の別ウィンドウではリンクだけ(押すと保存)だった ── 同じ章がどこで開いても同じ形で見えるようにする。
+   * ⚠ 保存のリンクは残す(置き換えない ── 片道の操作を作らない)。種類は読む面と同じく登録の種類で決め(`assetPreviewKind`)、
+   *   同じ鍵は 1 回だけ借りる。作る要素は**開いた側の `document`** で作る(この file 冒頭の理由)。
+   */
+  private async hydrateMedia(o: OpenChapter, stale: () => boolean, host: HTMLElement): Promise<void> {
+    const listMimes = this.deps.listMimes;
+    if (listMimes === undefined) return;
+    const byKey = new Map<string, HTMLAnchorElement[]>();
+    for (const a of Array.from(host.querySelectorAll<HTMLAnchorElement>('a[data-pkc-asset-key]'))) {
+      const key = a.getAttribute('data-pkc-asset-key') ?? '';
+      if (key !== '') byKey.set(key, [...(byKey.get(key) ?? []), a]);
+    }
+    if (byKey.size === 0) return;
+    let mimes: ReadonlyMap<string, string>;
+    try {
+      mimes = await listMimes();
+    } catch {
+      return;
+    }
+    if (stale()) return;
+    await Promise.all(
+      [...byKey].map(async ([key, links]) => {
+        const mime = mimes.get(key);
+        const kind = assetPreviewKind(mime);
+        if (kind !== 'audio' && kind !== 'video') return;
+        let lent: { url: string; dispose: () => void } | null;
+        try {
+          lent = await this.deps.lend(key);
+        } catch {
+          lent = null;
+        }
+        if (stale()) {
+          lent?.dispose();
+          return;
+        }
+        if (lent === null) return;
+        let placed = 0;
+        for (const a of links) {
+          if (a.nextElementSibling?.getAttribute('data-pkc-field') === BODY_MEDIA_FIELD) continue;
+          const el = document.createElement(kind);
+          el.setAttribute('data-pkc-field', BODY_MEDIA_FIELD);
+          el.className = BODY_MEDIA_CLASS;
+          el.controls = true;
+          el.preload = 'metadata';
+          el.src = lent.url;
+          replaceOnMediaError(el, kind, mime ?? '', '上のリンクから保存して開いてください');
+          a.after(el);
+          placed += 1;
+        }
+        // 1 つも置けなかった回は、借りた物をその場で返す
+        if (placed === 0) lent.dispose();
+        else o.disposers.push(lent.dispose);
+      }),
+    );
   }
 
   private release(o: OpenChapter): void {
