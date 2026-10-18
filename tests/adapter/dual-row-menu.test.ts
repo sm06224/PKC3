@@ -331,13 +331,22 @@ describe('2 ペインの表の行を右クリックしても、2 ペインを抜
       return t;
     }
 
-    it('🔴 中央は dual のまま、出るのは「別のウィンドウで開く」だけ', () => {
+    it('🔴 中央は dual のまま、押せるのは「別のウィンドウで開く」だけ(ほかは灰色 + 理由。依頼 79-2 B)', () => {
       const t = editingSetup();
       rightClick(t.dualRow('left', 'n1'));
       expect(t.d.getState().viewMode, '本文の面へ切り替わった').toBe('dual');
       expect(t.d.getState().phase, '下書きが壊れた').toBe('editing');
       expect(t.hasItem('open-note-window'), '「別のウィンドウで開く」が出ていない').toBe(true);
-      expect(t.hasItem('delete-entry'), '編集中の枝より広い項目が出た').toBe(false);
+      // 🔴 依頼 79-2 B: いつもと同じ項目が並ぶが、押せるのは「別のウィンドウで開く」だけ(ほかは灰色 + 理由)
+      const del = t.root.querySelector<HTMLButtonElement>(`${MENU} [data-pkc-action="delete-entry"]`);
+      expect(del, '灰色の項目が並んでいない(いつもと同じ項目)').not.toBeNull();
+      expect(del!.disabled, '編集中なのに押せる項目が出た').toBe(true);
+      expect(del!.getAttribute('data-pkc-hint')).toBe('編集を保存するか、編集をやめてから使えます');
+      expect(
+        t.root.querySelector<HTMLButtonElement>(`${MENU} [data-pkc-action="open-note-window"]`)!.disabled,
+      ).toBe(false);
+      // 2 ペインでは出さない 3 つ(通常のメニューと同じ並び)は、編集中も出ない
+      expect(t.hasItem('move-to-folder'), '通常のメニューより多い項目が出た').toBe(false);
       // ⚠ 左クリックと同じ 1 本は編集中でも動く(DUAL_SELECT は phase を見ない)
       expect(paneOf(t.d.getState().dual, 'left').selection, '編集中は印が動いていない').toEqual([
         'n1',

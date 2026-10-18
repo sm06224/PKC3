@@ -15,7 +15,12 @@ const MAIN = codeOnly(readFileSync('src/main.ts', 'utf-8'));
 describe('main.ts の配線(束 N1・O1)', () => {
   it('🔴 タイマーは控え(store)を渡し、ノートの一覧が読めてから続きを計る(依頼 240)', () => {
     expect(MAIN).toMatch(/createTimerService\(\{[\s\S]*?store: appTimerRuns,[\s\S]*?\}\);/);
-    expect(MAIN).toMatch(/whenPhaseReady\(dispatcher, \(\) => undefined\)\.then\(\(\) => timerService\.resume\(\)\)/);
+    expect(MAIN).toMatch(
+      /whenPhaseReady\(dispatcher, \(\) => undefined\)\.then\(\(\) => \{\s*timerService\.resume\(\);\s*void timerService\.resumeOrphans\(\);\s*\}\)/,
+    );
+    // 依頼 75-1: 閉じられたタブの計測を聞く口(確認の画面)と、閉じる印(pagehide)
+    expect(MAIN).toMatch(/createTimerService\(\{[\s\S]*?askOrphan: async \(message\) =>[\s\S]*?confirmInApp\(root, message[\s\S]*?\}\);/);
+    expect(MAIN).toMatch(/addEventListener\('pagehide', \(\) => appTimerRuns\.leave\(\)\)/);
   });
 
   it('🔴 録音は、取り込めなかったときにファイルへ保存する口を持つ(依頼 239)', () => {
