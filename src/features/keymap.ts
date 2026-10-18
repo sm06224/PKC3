@@ -2506,6 +2506,15 @@ export interface UnusableBinding {
 const RETIRED_DEFAULTS: readonly (readonly [string, string])[] = [['focus-search', 'Mod+F']];
 
 /**
+ * 新しい版で足した既定(#1163 依頼 163)。**この既定だけ**が、前の版で user が別のコマンドへ割り当てていた同じ鍵に負ける。
+ * ⚠ 全部の既定を譲らせない ── 「前のコマンドが後のコマンドの既定を先に取らない」(`keymap-sweep-1087`)の取り決めは今までどおり。
+ */
+const ADDED_DEFAULTS: readonly (readonly [string, string])[] = [
+  ['focus-search', 'Mod+Shift+F'],
+  ['find-in-note', 'Mod+F'],
+];
+
+/**
  * 🔴 **保存や設定ファイルから来た割当にも、割り当てるときと同じ検査を通す**(#1087)。
  * ⚠ 直す前は `resolveBindings` が書式だけを見ていたので、素の `B` で全域の操作が動く /
  *   `Ctrl+R` を奪う / 同じ鍵の 2 件目が黙って死ぬ、が通った(割り当てる口は `validateBinding` を通すが、
@@ -2544,6 +2553,7 @@ export function resolveUsableBindings(overrides: Readonly<Record<string, unknown
    * (行き場は残る:`focus-search` は `Ctrl+F`〈ノートを開いていないとき〉・操作を探す・左の欄のクリックで届く)
    */
   const yielded = (y: KeyCommand, chord: string): boolean =>
+    ADDED_DEFAULTS.some(([id, d]) => id === y.id && sameChord(d, chord)) &&
     KEY_COMMANDS.some(
       (x) =>
         x.id !== y.id &&
