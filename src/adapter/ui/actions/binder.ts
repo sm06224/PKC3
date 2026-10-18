@@ -20111,7 +20111,7 @@ export function bindActions(
         openContextMenu(
           root,
           { x: ev.clientX, y: ev.clientY },
-          editingRowMenuActions(rowCtx).filter(dualHides),
+          editingRowMenuActions(phaseBlockReason('editing') ?? '', rowCtx).filter(dualHides),
           root.ownerDocument.activeElement,
           { [MENU_LID_ATTR]: lid },
         );
@@ -20202,7 +20202,7 @@ export function bindActions(
         root,
         { x: ev.clientX, y: ev.clientY },
         // 🔴 いつもと同じ項目を並べ、使えない物は灰色 + 理由(依頼 79-2 B)
-        editingRowMenuActions({
+        editingRowMenuActions(phaseBlockReason('editing') ?? '', {
           archetype: editSt.entryMetas.get(lid)?.archetype ?? null,
           linkedFile: editSt.linkedFiles.get(lid) ?? null,
         }),

@@ -23,11 +23,11 @@ import { initialState, type AppState } from '../../src/adapter/state/app-state';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { phaseBlockReason } from '../../src/adapter/state/app-state';
 import { MENU_HINT_FIELD } from '../../src/adapter/ui/render/context-menu';
 import {
   ENTRY_ACTION_HINTS,
   ENTRY_ACTION_LABELS,
-  EDIT_BLOCKED_ROW_HINT,
   editingRowMenuActions,
   entryMenuActions,
 } from '../../src/features/entry-actions';
@@ -120,7 +120,8 @@ describe('編集中の行の右クリック(#690 ④ A′)', () => {
     const copy = s.menu()!.querySelector<HTMLButtonElement>('button[data-pkc-action="copy-entry-ref"]')!;
     expect(copy.disabled, '押せない項目が押せる').toBe(true);
     expect(copy.getAttribute('data-pkc-hint')).toBe('編集を保存するか、編集をやめてから使えます');
-    expect(EDIT_BLOCKED_ROW_HINT).toBe('編集を保存するか、編集をやめてから使えます');
+    // 前置きの出どころは phaseBlockReason 1 か所(手書きの複製を作らない)
+    expect(`${phaseBlockReason('editing')}使えます`).toBe('編集を保存するか、編集をやめてから使えます');
   });
 
   it('🔴 灰色の項目を押しても何も撃たれず、メニューも断り文も出さない(押せない物は押せない)', () => {
@@ -184,14 +185,14 @@ describe('編集中の行の右クリック(#690 ④ A′)', () => {
   /** 🔑 表の側:1 行だけで、字と説明が正本と一致する。 */
   it('🔑 editingRowMenuActions は entryMenuActions と同じ並びで、open-note-window だけが押せる(説明つき)', () => {
     const ctx = { archetype: 'text', linkedFile: null } as const;
-    const rows = editingRowMenuActions(ctx);
+    const rows = editingRowMenuActions(phaseBlockReason('editing') ?? '', ctx);
     expect(rows.map((r) => r.action)).toEqual(entryMenuActions(ctx).map((a) => a.action));
     expect(rows.filter((r) => r.disabled !== true).map((r) => r.action)).toEqual(['open-note-window']);
     const open = rows.find((r) => r.action === 'open-note-window')!;
     expect(open.label).toBe(ENTRY_ACTION_LABELS['open-note-window']);
     expect(open.hint).toBe(ENTRY_ACTION_HINTS['open-note-window']);
     for (const r of rows.filter((x) => x.action !== 'open-note-window')) {
-      expect(r.hint, r.action).toBe(EDIT_BLOCKED_ROW_HINT);
+      expect(r.hint, r.action).toBe('編集を保存するか、編集をやめてから使えます');
     }
   });
 });

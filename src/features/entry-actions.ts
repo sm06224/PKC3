@@ -238,7 +238,7 @@ export function withEditReady<T extends { readonly action: string; readonly hint
  *
  * 直す前は項目が「別のウィンドウで開く」の 1 つだけで、コピー・書き出し・ゴミ箱が消えた理由は
  * マニュアルにしか書いてなかった。「同じ物が常に同じ場所にある」(業務画面)ので、**いつもと同じ項目を並べ**、
- * 使えない物は灰色にして、説明に理由(`EDIT_BLOCKED_ROW_HINT`)を出す。
+ * 使えない物は灰色にして、説明に理由(「<前置き>使えます」)を出す。
  *
  * 🔑 押せるのは `open-note-window` だけ ── 他の項目(消す / 書き出す / 印を付ける)は
  *   `selectEntryOrExplain` が行を選ぶことを前提にしており、編集中は選べない。
@@ -246,13 +246,16 @@ export function withEditReady<T extends { readonly action: string; readonly hint
  *   (ここに書き写さない ── 片方だけ直る日を作らない。§7)。並びも `entryMenuActions` のまま。
  * @param ctx 押した行のノートの種類など(条件つきの項目の出し分け。省くと条件つきは出さない側)
  */
-export const EDIT_BLOCKED_ROW_HINT = '編集を保存するか、編集をやめてから使えます';
-
 export function editingRowMenuActions(
+  /**
+   * 断りの前置き(「編集を保存するか、編集をやめてから」)。⚠ **呼ぶ側が `phaseBlockReason('editing')` から渡す** ──
+   * 前置きの出どころは 1 か所(`app-state.ts`)で、features 層はそこを読めない(層の向き)。ここに書き写さない(§7)。
+   */
+  blockedReason: string,
   ctx: EntryMenuContext = { archetype: null, linkedFile: null },
 ): readonly (EntryAction & { readonly hint: string; readonly disabled?: boolean })[] {
   return entryMenuActions(ctx).map((a) =>
-    a.action === 'open-note-window' ? a : { ...a, disabled: true, hint: EDIT_BLOCKED_ROW_HINT },
+    a.action === 'open-note-window' ? a : { ...a, disabled: true, hint: `${blockedReason}使えます` },
   );
 }
 
