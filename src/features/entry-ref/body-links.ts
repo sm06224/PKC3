@@ -29,6 +29,7 @@
  * 「たぶん起きない」を検査の根拠にしない。
  */
 import { indentedCodeRanges, scanLinks } from '../markdown/link-scan';
+import { ifFormatMatches, ifFormatOf } from '../markdown/if-format';
 
 /**
  * 🔴 **同じ容れ物のノートを指す形は 2 つある**(#379)。
@@ -130,7 +131,6 @@ const TOKEN_ONLY = new RegExp(`^[${LID_CHARS}]+$`);
 const COMMENT_FENCE = /^ {0,3}%%%\s*$/;
 const CONTAINER_OPEN = /^ {0,3}:::+\s*([A-Za-z][\w-]*)?(\{[^}]*\})?\s*$/;
 const CONTAINER_CLOSE = /^ {0,3}:::+\s*$/;
-const IF_FORMAT = /format\s*=\s*([A-Za-z0-9_-]+)/;
 function withoutHidden(text: string): string {
   if (!text.includes('%%') && !text.includes(':::')) return text;
   const lines = text.split(/(\r\n|[\r\n])/); // 区切りも残す(長さを変えない)
@@ -146,8 +146,7 @@ function withoutHidden(text: string): string {
     }
     const co = CONTAINER_OPEN.exec(raw);
     if (co !== null && co[1] !== undefined) {
-      const fmt = IF_FORMAT.exec(co[2] ?? '')?.[1];
-      const hide = co[1] === 'comment' || (co[1] === 'if' && fmt !== undefined && fmt !== 'html');
+      const hide = co[1] === 'comment' || (co[1] === 'if' && !ifFormatMatches(ifFormatOf(co[2] ?? ''), 'html'));
       containers.push(hide);
       if (hide) hidden += 1;
       lines[i] = hidden > 0 ? blank(raw) : raw;

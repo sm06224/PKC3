@@ -85,6 +85,7 @@ import { allDateTokens, readLineDate, unreadableDateTokens } from '../schedule/l
 import { ELAPSED_LINE_HEAD, parseElapsed } from '../elapsed-text';
 import { tagColorKey } from '../tag-color';
 import { confirmColorSpan, isColorCode, isEditableColor } from './color-code';
+import { ifFormatMatches } from './if-format';
 
 const md = new MarkdownIt({
   html: false,          // Disable HTML tags in source (XSS safety)
@@ -4109,7 +4110,8 @@ function processIfBlocks(source: string, lineMapIn: number[], targetFormat: stri
         if (inferred && inferred.key === 'format') formatVal = inferred.value;
       }
     }
-    const match = typeof formatVal === 'string' ? formatVal === targetFormat : true;
+    // 🔴 読み方は `if-format.ts` の 1 本(大文字小文字・カンマ区切り・pdf。#1163 依頼 282)
+    const match = typeof formatVal === 'string' ? ifFormatMatches(formatVal, targetFormat) : true;
 
     // open 行は consume(出力しない)
     i++;

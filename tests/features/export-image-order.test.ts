@@ -60,7 +60,8 @@ describe('添付の画像は置かれた位置の順で出る', () => {
     );
     const s = shape(blocks, images);
     expect(s[0]).toBe('table:');
-    expect(s.slice(1)).toEqual(['img:k1', 'p:next']);
+    // 🔴 どのマスの画像かを添える(#1163 依頼 124-3 = A)── 画像は表の後ろ、2 行目・1 列目の画像と読める 1 行が前に付く
+    expect(s.slice(1)).toEqual(['p:表の 2 行目・1 列目の画像', 'img:k1', 'p:next']);
     const t = blocks[0] as Extract<DocxBlock, { kind: 'table' }>;
     expect(t.rows[1]![0]!.runs.map((r) => r.text).join('').trim()).toBe('c');
   });

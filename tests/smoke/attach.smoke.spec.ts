@@ -566,6 +566,91 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
   await expect(img1, '1 枚目の行を押したのに、1 枚目が光っていない').toHaveAttribute('data-pkc-flash', 'true');
   await expect.poll(() => inView(img1), { message: '1 枚目が画面に収まっていない', timeout: 5_000 }).toBe(true);
 
+  /**
+   * 🔴 **添付の「ファイルを差し替える」**(束 J2 / #1163 依頼 212・211・293)。新しい起動は足さず、この道中で見る。
+   * ① 別のファイルを選ぶ → 同じ添付のまま、本文のリンクが新しい版を指す(古い鍵の画像は残らない)
+   * ② 同じファイルを 2 つの添付として入れてから差し替えると確認が出る(やめる → 何も変わらない / 差し替える → その添付だけ新しい版)
+   */
+  const pngBytes = (w: number, h: number, color: string): Promise<number[]> =>
+    page.evaluate(
+      async ([w, h, color]) => {
+        const c = document.createElement('canvas');
+        c.width = w as number;
+        c.height = h as number;
+        const g = c.getContext('2d')!;
+        g.fillStyle = color as string;
+        g.fillRect(0, 0, c.width, c.height);
+        const blob: Blob = await new Promise((ok) => c.toBlob((b) => ok(b!), 'image/png')!);
+        return Array.from(new Uint8Array(await blob.arrayBuffer()));
+      },
+      [w, h, color] as const,
+    );
+  // 押したボタンが差し替え先を持つので、本物の手順(ボタンを押す → ファイル選択が開く → 選ぶ)で選ぶ
+  const pickReplacement = async (name: string, buffer: Buffer): Promise<void> => {
+    const [chooser] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      clickReal(page, '[data-pkc-action="replace-attachment-file"]'),
+    ]);
+    await chooser.setFiles({ name, mimeType: 'image/png', buffer });
+  };
+  const attRow = (name: string) => page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: name });
+  const keyOfOpen = (name: string) =>
+    page.locator(`[data-pkc-action="download-asset"][data-pkc-asset-name="${name}"]`).getAttribute('data-pkc-asset-key');
+  // ① 3 枚目(本文から指されている)を、別の絵に差し替える
+  await attRow('みっつめ.png').click();
+  expect(await keyOfOpen('みっつめ.png'), '前提:差し替え前の鍵が 3 枚目の鍵').toBe(assetKey3);
+  const replaceBtn = page.locator('[data-pkc-action="replace-attachment-file"]');
+  await expect(replaceBtn, '添付の画面に「ファイルを差し替える」が出ていない').toHaveText('ファイルを差し替える');
+  await pickReplacement('みっつめ.png', Buffer.from(await pngBytes(200, 120, '#cc2222')));
+  await expect
+    .poll(() => keyOfOpen('みっつめ.png'), { message: '🔴 差し替えたのに添付の鍵が新しい版にならない', timeout: 10_000 })
+    .not.toBe(assetKey3);
+  const newKey3 = (await keyOfOpen('みっつめ.png'))!;
+  await expect(attRow('みっつめ.png'), '🔴 差し替えで添付が増えた(同じ添付のままでない)').toHaveCount(1);
+  await page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${noteLid}"]`).click();
+  await expect(
+    page.locator(`[data-pkc-field="detail-body"] img[data-pkc-asset-key="${newKey3}"]`),
+    '🔴 本文のリンクが新しい版を指していない',
+  ).toHaveCount(1, { timeout: 10_000 });
+  await expect(
+    page.locator(`[data-pkc-field="detail-body"] img[data-pkc-asset-key="${assetKey3}"]`),
+    '🔴 本文に古い版が残っている',
+  ).toHaveCount(0);
+  // ② 同じ中身の添付を 2 つ入れる → 一方を差し替えると確認が出る
+  const dupBytes = Buffer.from(await pngBytes(60, 60, '#2255cc'));
+  await page.setInputFiles('[data-pkc-field="attach-input"]', { name: 'おなじA.png', mimeType: 'image/png', buffer: dupBytes });
+  await expect(attRow('おなじA.png')).toHaveCount(1);
+  await page.setInputFiles('[data-pkc-field="attach-input"]', { name: 'おなじB.png', mimeType: 'image/png', buffer: dupBytes });
+  await expect(attRow('おなじB.png')).toHaveCount(1);
+  await attRow('おなじA.png').click();
+  const dupKey = await keyOfOpen('おなじA.png');
+  await attRow('おなじB.png').click();
+  expect(await keyOfOpen('おなじB.png'), '前提:2 つの添付が同じファイルを指している').toBe(dupKey);
+  await attRow('おなじA.png').click();
+  await pickReplacement('おなじA.png', Buffer.from(await pngBytes(60, 60, '#22cc55')));
+  await expect(page.locator('[data-pkc-field="dialog-body"]'), '🔴 同じファイルを指す添付があるのに確認が出ない').toContainText(
+    '同じファイルを指す添付が、ほかに 1 件あります',
+  );
+  // 🔴 ボタンから差し替える道の確認は「ファイルを差し替える / やめる」(別の添付に分ける選択は Office で保存した道の確認だけ)
+  await expect(page.locator('[data-pkc-field="dialog-ok"]')).toHaveText('ファイルを差し替える');
+  await expect(page.locator('[data-pkc-field="dialog-cancel"]')).toHaveText('やめる');
+  expect(await page.locator('[data-pkc-field="dialog-body"]').textContent(), '確認に出せない選択肢の案内が出ている').not.toContain(
+    '別の添付として保存',
+  );
+  // やめる → 何も変わらない
+  await clickReal(page, '[data-pkc-field="dialog-cancel"]');
+  await expect(page.locator('[data-pkc-field="dialog-body"]')).toBeHidden();
+  await page.waitForTimeout(300);
+  expect(await keyOfOpen('おなじA.png'), '🔴 やめたのに差し替わった').toBe(dupKey);
+  // もう一度 → 差し替える: 差し替えた側だけ新しい版になり、同じファイルを指していたもう一方は元のまま
+  await pickReplacement('おなじA.png', Buffer.from(await pngBytes(60, 60, '#22cc55')));
+  await answerAppDialog(page, 'ok');
+  await expect
+    .poll(() => keyOfOpen('おなじA.png'), { message: '🔴 差し替えたのに、その添付が新しい版にならない', timeout: 10_000 })
+    .not.toBe(dupKey);
+  await attRow('おなじB.png').click();
+  expect(await keyOfOpen('おなじB.png'), '🔴 差し替えたら、同じファイルを指していたもう一方の添付まで変わった').toBe(dupKey);
+
   // ── P4b: 「添付の整理」(orphan GC)の end-to-end 配線 ──
   // この asset は attachment frontmatter と本文 asset: の両方から参照されて
   // いるので、実 sqlite 走査の結果は「未参照なし」が正(scan が実際に走った証拠)

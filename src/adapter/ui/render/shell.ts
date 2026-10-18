@@ -767,6 +767,14 @@ export function buildShell(root: HTMLElement): ShellRegions {
   attachInput.setAttribute('data-pkc-field', 'attach-input');
   createBar.append(attachInput);
 
+  // 🔴 添付のファイルを差し替えるための、ファイル選択(1 件だけ。#1163 依頼 212)。⚠ 差し替え先のノートは押したボタンから
+  //    `data-pkc-replace-lid` へ移して選ぶ(常設の 1 つ ── 動的に作らない。`attach-input` と同じ作法)
+  const replaceInput = document.createElement('input');
+  replaceInput.type = 'file';
+  replaceInput.hidden = true;
+  replaceInput.setAttribute('data-pkc-field', 'replace-input');
+  createBar.append(replaceInput);
+
   /**
    * 🔴 **指で触る端末に、押せない理由を届ける 1 行**(#791 ③。2026-09-08)。
    *

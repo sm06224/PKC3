@@ -82,18 +82,26 @@ describe('3. ノートへのリンクは外では開けない ── 件数で�
     expect(noteLinkNotice(3)).toBe('ノートへのリンク 3 件は、書き出した先では開けません(リンクの字のまま残ります)');
   });
 
-  it('zip: 注意が 1 本だけ出て、本文のリンクは書き換わらない', async () => {
+  it('zip: 書き出したノートへのリンクはそのファイルへ書き換わり、触らなかった物(埋め込み)だけが「開けない」と数えられる(#1163 依頼 116-3)', async () => {
     const out = await writeMarkdownZip(
       source({ entries: [{ lid: 'n1', title: 'a', body }, { lid: 'n2', title: 'b', body: '[x](entry:n1)' }] }),
       NOW,
     );
     const hits = out.warnings.filter((w) => w.includes('ノートへのリンク'));
-    expect(hits).toEqual(['ノートへのリンク 4 件は、書き出した先では開けません(リンクの字のまま残ります)']);
+    // 書き換え 2 件(a → b.md / b → a.md)・字だけ 1 件(n3 は書き出さない)・触らない 1 件(`![埋め込み](entry:n2)`)
+    expect(hits).toEqual([
+      'ノートへのリンク 1 件は、書き出した先では開けません(リンクの字のまま残ります)',
+      'ノートへのリンク 2 件を、書き出したノートのファイル(.md)へのリンクに書き換えました',
+      '書き出さなかったノートへのリンク 1 件は、リンクの字だけにしました',
+    ]);
     const dir = await readZipDirectory(out.blob);
     const a = dir.find((e) => e.name === 'a.md')!;
     const text = await readZipText(out.blob, a);
-    expect(text).toContain('[議事録](entry:n2)');
-    expect(text).toContain('![埋め込み](entry:n2)');
+    expect(text).toContain('[議事録](b.md)');
+    expect(text, '書き出さなかったノートへのリンクは字だけ').toContain('と もう一つ');
+    expect(text).not.toContain('(entry:n3');
+    expect(text, '埋め込みは触らない').toContain('![埋め込み](entry:n2)');
+    expect(text, 'コードの中は触らない').toContain('`[コードの中](entry:n9)`');
   });
 
   it('対照群: リンクが無ければ注意は出ない', async () => {

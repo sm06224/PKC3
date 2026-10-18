@@ -3498,6 +3498,21 @@ export class DetailRenderer {
       dl.textContent = '添付をダウンロード';
       info.append(dl);
       /**
+       * 🔴 **ファイルを差し替える**(#1163 依頼 212。Gemini の裁定 = 要る)。
+       * ⚠ 直す前は、新しい版にするには「新しいファイルを添付し直して古いノートを消す」しか無く、本文のリンクが切れた。
+       *   これは**同じ添付のまま**中身だけを新しい版にする ── 本文のリンクは新しい版を指し、前の版は履歴に残る
+       *   (Office で保存したときと同じ道)。押した欄が対象を持つ(留めた枠でも、その枠のノートに効く)。
+       */
+      const replace = document.createElement('button');
+      replace.type = 'button';
+      replace.setAttribute('data-pkc-action', 'replace-attachment-file');
+      replace.setAttribute('data-pkc-field', 'replace-attachment-file');
+      markTargetLid(replace, lid);
+      replace.title =
+        'ファイルを選んで、この添付の中身を新しい版に入れ替えます。本文のリンクは新しい版を指し、前の版は履歴に残ります';
+      replace.textContent = 'ファイルを差し替える';
+      info.append(replace);
+      /**
        * 🔴 **書庫は、落とさなくても中が見られる**(#818。user 要望 2026-09-09
        * 「アーカイブ形式ファイルを右クリックでファイルエクスプローラ開始して、
        * 階層の異なる複数のファイルを指定して展開できるようにしたい」)。

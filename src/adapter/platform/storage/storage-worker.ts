@@ -54,6 +54,7 @@ import {
 } from '@features/storage/image-export-limit';
 import { assetRefsIn, scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import { rewriteAssetRefs } from '@features/asset/asset-ref-rewrite';
 import { extractMeta } from '@features/flavor';
 import { remapImportedBody } from '@features/import/body-remap';
 import { readVersions, totalHistoryBytes } from '@features/flavor/attachment-versions';
@@ -3537,6 +3538,35 @@ const handlers: Handlers = {
       if (body !== undefined) out.push({ lid, body });
     }
     return out;
+  },
+  assetShareProbe: (req) => {
+    const database = need();
+    const target = database.selectObjects('SELECT body FROM entries WHERE cid = ? AND lid = ?', [
+      req.cid,
+      req.targetLid,
+    ])[0] as { body: string } | undefined;
+    if (!target) return null;
+    const oldKey = readAttachmentMeta(target.body).assetKey;
+    if (oldKey === null) return null;
+    let sharers = 0;
+    let linkNotes = 0;
+    let links = 0;
+    database.exec({
+      sql: 'SELECT lid, archetype, body FROM entries WHERE cid = ? AND lid <> ?',
+      bind: [req.cid, req.targetLid],
+      rowMode: 'object',
+      callback: (row) => {
+        const r = row as unknown as { lid: string; archetype: string; body: string };
+        if (r.archetype === 'attachment' && readAttachmentMeta(r.body).assetKey === oldKey) sharers += 1;
+        // 🔑 数える規則は書き換えと同じ(`rewriteAssetRefs`)── 見せる数と、実際に変わる数を食い違わせない
+        const n = rewriteAssetRefs(r.body, oldKey, `${oldKey}-probe`).count;
+        if (n > 0) {
+          linkNotes += 1;
+          links += n;
+        }
+      },
+    });
+    return { sharers, linkNotes, links };
   },
   findAssetOwner: (req) => {
     /**

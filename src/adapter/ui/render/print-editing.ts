@@ -8,6 +8,10 @@
  *   プレビューを隠して箱だけを出す(`app.css` 末尾の `@media print`)。刷り終えたら(`afterprint`)外す。
  * ⚠ 写すのは**字だけ**(`textContent`)── HTML として読まない。
  */
+import { foldSpans } from '@features/markdown/heading-fold';
+import { headingLevel } from './heading-fold';
+import { bodyBlocks } from './log-days';
+
 export const EDITOR_PRINT_FIELD = 'editor-print';
 
 /** 刷る直前: 開いている編集欄ごとに、全文の写しを置く。置いた数を返す。 */
@@ -52,15 +56,52 @@ export function restoreDetailsAfterPrint(): void {
   reclose = [];
 }
 
+/**
+ * 🔴 **見出しで畳んだ章も紙に出す**(#1163 依頼 116-1。推薦 A = 畳んだ章も全部開いて紙に出す)。
+ * 畳みは塊に `hidden` を付けているだけなので、刷る直前に外し、刷り終えたら**外した塊だけ**戻す。
+ * ⚠ 画面の畳み方(`data-pkc-folded`)には触らない ── 刷り終えれば元の見え方に戻る。
+ */
+let rehide: HTMLElement[] = [];
+
+/** 刷る直前: 見出しの畳みで隠れている塊を出す。出した数を返す。 */
+export function openHeadingFoldsForPrint(doc: Document): number {
+  restoreHeadingFoldsAfterPrint();
+  const hosts = new Set<HTMLElement>();
+  for (const h of doc.querySelectorAll('[data-pkc-folded]')) {
+    if (h.parentElement !== null) hosts.add(h.parentElement);
+  }
+  for (const host of hosts) {
+    const blocks = bodyBlocks(host);
+    for (const s of foldSpans(blocks.map(headingLevel))) {
+      for (let i = s.from; i < s.to; i += 1) {
+        const el = blocks[i];
+        if (el instanceof HTMLElement && el.hidden) {
+          el.hidden = false;
+          rehide.push(el);
+        }
+      }
+    }
+  }
+  return rehide.length;
+}
+
+/** 刷り終えたら: 出した塊だけ隠し直す。 */
+export function restoreHeadingFoldsAfterPrint(): void {
+  for (const el of rehide) el.hidden = true;
+  rehide = [];
+}
+
 /** 窓に張る。外す関数を返す。 */
 export function installEditorPrint(win: Window): () => void {
   const before = (): void => {
     void prepareEditorPrint(win.document);
     openDetailsForPrint(win.document);
+    openHeadingFoldsForPrint(win.document);
   };
   const after = (): void => {
     clearEditorPrint(win.document);
     restoreDetailsAfterPrint();
+    restoreHeadingFoldsAfterPrint();
   };
   win.addEventListener('beforeprint', before);
   win.addEventListener('afterprint', after);

@@ -68,6 +68,13 @@ export interface AttachDeps {
    * ⚠ 省略可（無い環境は今までどおり、bytes が在れば登録行には触らない）。アプリは必ず渡す。
    */
   listMetaKeys?(): Promise<readonly string[]>;
+  /**
+   * 🔴 **登録行の種類(鍵 → mime)**(#1163 依頼 290 = A)。同じ中身を 2 回添付したとき、1 回目の種類が「不明」
+   * (`application/octet-stream` / 空)なら、2 回目に分かった種類で登録を直すのに使う(本文の `[x](asset:…)` に
+   * 再生ボタンが出るかは登録の種類で決まる ── 添付の順番で見え方が変わらないように)。
+   * ⚠ 省略可。渡すと `listMetaKeys` の代わりに使われる(同じ「登録行が無い物を埋める」も兼ねる)。アプリは必ず渡す。
+   */
+  listMetaMimes?(): Promise<ReadonlyMap<string, string>>;
   /** quota preflight(無い環境では省略可)。 */
   estimate?(): Promise<{ usage?: number; quota?: number }>;
   /**
@@ -229,6 +236,11 @@ export function resolveMime(name: string, declared: string): string {
   return EXT_MIME[ext] ?? 'application/octet-stream';
 }
 
+/** 種類が分からない(登録行が空、または一般の種類)。 */
+export function isUnknownMime(mime: string): boolean {
+  return mime === '' || mime === 'application/octet-stream';
+}
+
 /**
  * 取り込む 1 件。⚠ **`File` でなくてよい** ── Office の窓から戻ってきた bytes は
  * `File` ではないので、`name` / `type` を**外から**与える形にしてある(#205)。
@@ -335,6 +347,13 @@ export async function storeAsset(
     await deps.putBlob(assetKey, item.blob);
     await deps.putMeta({ key: assetKey, mime, size: item.size, hash });
     known?.add(assetKey);
+  } else if (deps.listMetaMimes !== undefined) {
+    const metas = await deps.listMetaMimes().catch((): ReadonlyMap<string, string> => new Map());
+    const had = metas.get(assetKey);
+    // 登録行が無ければ書く(下と同じ)。在るときは**触らない**が、1 回目の種類が不明で今回は分かるなら直す(#1163 依頼 290)
+    if (had === undefined || (isUnknownMime(had) && !isUnknownMime(mime))) {
+      await deps.putMeta({ key: assetKey, mime, size: item.size, hash });
+    }
   } else if (deps.listMetaKeys !== undefined) {
     /**
      * 🔴 **bytes は在るが登録行が無い**なら書く（#1087）。

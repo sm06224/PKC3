@@ -118,12 +118,41 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
   expect(gFolder, `2 つのバックアップが同じ塊に在る(${String(gEntry)})`).not.toBe(gEntry);
 
   /**
+   * 🔴 **フォルダを選ぶと、書き出し 5 つは押せず、理由が title に出る。フォルダのバックアップだけ押せる**
+   *   (束 K2 / #1163 依頼 53-1)。新しい起動は足さず、いまフォルダを選んだこの道中で見る。
+   */
+  const exportActions = [
+    'export-entry-html',
+    'export-entry-docx',
+    'export-entry-pptx',
+    'export-entry-pdf',
+    'export-entry-markdown',
+  ];
+  for (const action of exportActions) {
+    const btn = page.locator(`[data-pkc-field="inspector-actions"] [data-pkc-action="${action}"]`);
+    await expect(btn, `前提:${action} がフォルダの情報ペインに出ている`).toHaveCount(1);
+    await expect(btn, `🔴 フォルダなのに ${action} が押せる`).toBeDisabled();
+    await expect(btn, `🔴 ${action} の理由が title に出ていない`).toHaveAttribute(
+      'title',
+      /フォルダの中のノートは入りません/,
+    );
+  }
+  await expect(folderBackup, '🔴 「このフォルダをバックアップ」が押せない').toBeEnabled();
+
+  /**
    * ③ 2 クリックで入る。
    * ⚠ **間に別の行を押して「連続」を切る** ── 押さないと、②の 1 クリックと
    *   ③の 1 打目が**続けて押した 2 回**に数えられる(閾値 500ms)。実 user も
    *   同じで、それは仕様どおりだが、ここで見たいのは「2 打で入る」ことである。
    */
   await clickReal(page, noteRow);
+  // ノートを選ぶと、書き出し 5 つは押せる(束 K2。フォルダでだけ塞がっている対照群)
+  for (const action of exportActions) {
+    await expect(
+      page.locator(`[data-pkc-field="inspector-actions"] [data-pkc-action="${action}"]`),
+      `🔴 ノートなのに ${action} が押せない`,
+    ).toBeEnabled();
+  }
   await doubleClickReal(page, folderRow);
   await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
   await expect(rows, 'フォルダに入れていない').toHaveCount(0);

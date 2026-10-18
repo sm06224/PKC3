@@ -93,6 +93,20 @@ describe('importPptxFiles ── 実行部', () => {
     expect(h.reported()).toEqual([]);
   });
 
+  it('🔴 字だけのスライド(題名・本文の枠が位置を持たない)も、1 枚のノートになる(#1163 依頼 124-1)', async () => {
+    const h = harness();
+    const NS =
+      'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"';
+    const frame = (id: number, type: string, text: string): string =>
+      `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="x"/><p:cNvSpPr/><p:nvPr><p:ph type="${type}"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>`;
+    const xml = `<?xml version="1.0"?><p:sld ${NS}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>${frame(2, 'title', '会議の議題')}${frame(3, 'body', '一つ目の議題')}</p:spTree></p:cSld></p:sld>`;
+    const f = await zipFile([{ name: 'ppt/slides/slide1.xml', text: xml }], '会議.pptx');
+    expect(await importPptxFiles(h.d, h.deps, [f])).toBe(1);
+    expect(h.written[0]!.title).toBe('会議の議題');
+    expect(h.written[0]!.body).toBe('一つ目の議題\n');
+    expect(h.reported(), '取り込めなかった数に入れていない').toEqual([]);
+  });
+
   it('🔴 複数のスライドは板を複数に分ける(1 枚 = 1 件)。題名の無い板は「file 名 N」', async () => {
     const h = harness();
     const f = await zipFile(

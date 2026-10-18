@@ -69,8 +69,8 @@ describe('markdown-toc', () => {
     it('filters out mismatched :::if blocks and keeps matching ones', () => {
       const md = [
         '# Common Heading',
-        ':::if{format=pdf}',
-        '## PDF Only Heading',
+        ':::if{format=docx}',
+        '## DOCX Only Heading',
         ':::',
         ':::if{format=html}',
         '## HTML Only Heading',
@@ -87,7 +87,7 @@ describe('markdown-toc', () => {
     });
 
     it('handles CRLF line endings properly', () => {
-      const md = '# CRLF Heading 1\r\n\r\n:::if{format=pdf}\r\n## Hidden\r\n:::\r\n:::if{format=html}\r\n## Visible\r\n:::\r\n';
+      const md = '# CRLF Heading 1\r\n\r\n:::if{format=docx}\r\n## Hidden\r\n:::\r\n:::if{format=html}\r\n## Visible\r\n:::\r\n';
       const headings = extractHeadingsFromMarkdown(md);
       expect(headings.map((h) => h.text)).toEqual(['CRLF Heading 1', 'Visible']);
     });

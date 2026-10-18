@@ -184,7 +184,8 @@ describe('入口(#1440)── 右クリック・右の列・「操作を探す�
       const found = items.find((a) => a.action === 'export-entry-markdown');
       expect(found, `${archetype} の右クリックに無い`).toBeDefined();
       expect(found!.label).toBe('Markdown で書き出す');
-      expect(found!.hint, '説明が空').toContain('添付は入りません');
+      // 🔴 フォルダだけは、中のノートが入らない理由が説明に出る(押せない。#1163 依頼 53-1)
+      expect(found!.hint, '説明が空').toContain(archetype === 'folder' ? 'フォルダの中のノートは入りません' : '添付は入りません');
     }
   });
 

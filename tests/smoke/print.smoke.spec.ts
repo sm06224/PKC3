@@ -483,9 +483,15 @@ test('🔴 暗い配色で刷ると、地は白・字は濃く、リンクは白
   const ta2 = page.locator('[data-pkc-field="editor-body"]');
   await ta2.click();
   const fig = '```mermaid\ngraph TD\n  A["始め"]-->B["終わり"]\n```\n';
-  await ta2.fill(`${fig}\n:::details{summary="畳み"}\n${fig}:::\n`);
+  // 🔴 束 K2(#1163 依頼 116-1):見出しで畳んだ章も、同じ道中で見る(下の beforeprint で数える)
+  await ta2.fill(`${fig}\n:::details{summary="畳み"}\n${fig}:::\n\n# 畳む章\n\n畳まれる本文の段落。\n`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+  const chapterMark = page.locator('[data-pkc-field="detail-body"] h1 [data-pkc-field="heading-fold"]');
+  await expect(chapterMark, '前提:章の畳む口が出ている').toHaveCount(1);
+  await clickReal(page, '[data-pkc-field="detail-body"] h1 [data-pkc-field="heading-fold"]');
+  const chapterBody = page.locator('[data-pkc-field="detail-body"] p', { hasText: '畳まれる本文の段落' });
+  await expect(chapterBody, '前提:章を畳んだら本文が隠れる(対照群)').toBeHidden();
   const figs = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]');
   await expect(figs.first()).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30_000 });
   // 折りたたみの中の図は、閉じている間は焼かれない(見えない器は描かない)
@@ -513,10 +519,17 @@ test('🔴 暗い配色で刷ると、地は白・字は濃く、リンクは白
   await page.evaluate(() => {
     const g = globalThis as unknown as Record<string, unknown>;
     g.__printedK1 = 0;
+    g.__afterK2 = false;
+    window.addEventListener('afterprint', () => {
+      g.__afterK2 = true;
+    });
     g.__figAtPrint = null;
     window.addEventListener('beforeprint', () => {
       g.__printedK1 = ((g.__printedK1 as number | undefined) ?? 0) + 1;
       const imgs = [...document.querySelectorAll<HTMLImageElement>('[data-pkc-field="mermaid-image"]')];
+      g.__chapterAtPrint = [...document.querySelectorAll<HTMLElement>('[data-pkc-field="detail-body"] p')].find(
+        (p) => (p.textContent ?? '').includes('畳まれる本文の段落'),
+      )?.hidden;
       g.__figAtPrint = {
         open: document.querySelectorAll('[data-pkc-field="detail-body"] details:not([open])').length,
         shades: imgs.map((img) => {
@@ -539,9 +552,28 @@ test('🔴 暗い配色で刷ると、地は白・字は濃く、リンクは白
     () => (globalThis as unknown as Record<string, unknown>).__figAtPrint,
   )) as { open: number; shades: number[] };
   expect(atPrint.open, '🔴 刷る瞬間に、閉じた折りたたみが残っている').toBe(0);
+  expect(
+    await page.evaluate(() => (globalThis as unknown as Record<string, unknown>).__chapterAtPrint),
+    '🔴 刷る瞬間に、見出しで畳んだ章が開いていない(hidden のまま)',
+  ).toBe(false);
+  // 🔴 刷る前に出す案内(画面の下)
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '🔴 印刷の画面で「PDF として保存」を選ぶ案内が出ていない',
+  ).toContainText('印刷の画面で「PDF として保存」を選ぶと');
   expect(atPrint.shades.length, '🔴 刷る瞬間、折りたたみの中の図が描かれていない').toBe(2);
   for (const v of atPrint.shades) expect(v, `🔴 刷る瞬間の図が暗い地のまま: ${v}`).toBeGreaterThan(200);
 
+  /**
+   * 刷り終えたら、畳んだ章は畳み直る。⚠ フル chromium は `afterprint` を撃たない(headless_shell は同期で撃つ)ので、
+   * 撃たれていなければここで合成して撃つ ── どちらのビルドでも「afterprint で畳み直す」を見る(import.smoke と同じ作法)。
+   */
+  await page.evaluate(() => {
+    const g = globalThis as unknown as Record<string, unknown>;
+    if (g.__afterK2 !== true) window.dispatchEvent(new Event('afterprint'));
+  });
+  // 刷り終えたら、畳んだ章は畳み直る
+  await expect(chapterBody, '🔴 刷り終えたのに、畳んだ章が開いたまま').toBeHidden();
   // 刷り終えたら、画面の配色と閉じた状態へ戻る
   await expect(folded, '🔴 刷り終えたのに折りたたみが開いたまま').toHaveCount(1);
   await expect

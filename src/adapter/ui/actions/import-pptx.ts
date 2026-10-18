@@ -120,7 +120,7 @@ export async function importPptxFiles(
         rounded += slide.rounded;
         simplified += slide.simplified;
         // 何も置けず題名も無いスライドはノートにしない(中身が無い)
-        if (slide.placed === 0 && slide.title === null) continue;
+        if (slide.placed === 0 && slide.flowed === 0 && slide.title === null) continue;
         const title =
           slide.title ?? (slideNames.length === 1 ? baseName(file.name) : `${baseName(file.name)} ${n}`);
         const ext = extractMeta('text', slide.body);

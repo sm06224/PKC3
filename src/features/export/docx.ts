@@ -65,6 +65,11 @@ export type DocxBlock =
        * 塊**(間に別の塊が挟まらない `li` の並び)を 1 つの一覧と読む。
        */
       readonly list?: number;
+      /**
+       * 🔴 **チェックの項目か**(`- [ ]` / `- [x]`。#1163 依頼 280 = A)。⚠ 字の頭に ☐ / ☑ が付いているので、
+       * 黒丸は出さない(画面は丸を消して ☐ だけを出す ── Word だけ「• ☐」の二重になっていた)。
+       */
+      readonly task?: boolean;
       readonly runs: readonly DocxRun[];
     }
   | { readonly kind: 'quote'; readonly runs: readonly DocxRun[] }
@@ -368,6 +373,11 @@ function blockXml(block: DocxBlock, rels: Map<string, string>, orderedNumId = NU
     case 'li': {
       const ilvl = Math.min(Math.max(block.depth, 0), DOCX_LIST_DEPTH_MAX - 1);
       const numId = block.ordered ? orderedNumId : NUM_BULLET;
+      if (block.task === true) {
+        // 丸も番号も付けず、同じ深さの項目と字の位置を揃える(`numbering.xml` の水準と同じ字下げ)
+        const ind = `<w:ind w:left="${480 * (ilvl + 1)}" w:hanging="360"/>`;
+        return paragraph(runsXml(block.runs, rels), 'ListParagraph', ind);
+      }
       const numPr = `<w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${numId}"/></w:numPr>`;
       return paragraph(runsXml(block.runs, rels), 'ListParagraph', numPr);
     }
@@ -569,8 +579,19 @@ export function buildDocx(
   inlineSkipped: readonly string[] = [],
 ): DocxResult {
   const rels = new Map<string, string>();
-  const ordered = assignOrderedNums(blocks);
-  const body = blocks.map((b, i) => blockXml(b, rels, ordered.ids.get(i))).join('');
+  /**
+   * 🔴 **1 行目にノートの題名を大きな見出しとして入れる**(#1163 依頼 144 = ②)。印刷や受け渡しで何の文書か分かるように。
+   * ⚠ 本文が同じ題名の第 1 見出しで始まっているときは足さない(題名が 2 回続かない)。
+   * ⚠ ここで足す(塊の添字は呼び側が画像・図を差し替え済み)── 先頭に足しても画像の場所は狂わない。
+   */
+  const firstText = (b: DocxBlock | undefined): string | null =>
+    b !== undefined && b.kind === 'h' && b.level === 1 ? b.runs.map((r) => r.text).join('').trim() : null;
+  const titled: readonly DocxBlock[] =
+    title.trim() === '' || firstText(blocks[0]) === title.trim()
+      ? blocks
+      : [{ kind: 'h', level: 1, runs: [{ text: title }] }, ...blocks];
+  const ordered = assignOrderedNums(titled);
+  const body = titled.map((b, i) => blockXml(b, rels, ordered.ids.get(i))).join('');
   /**
    * 🔴 **紙面は画面の設定から採る**(#187 段③)。⚠ 順番が決まっている ──
    * `footerReference` は `pgSz` より**前**でないと Word が読めない。

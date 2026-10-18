@@ -64,6 +64,11 @@ export interface PptxBoardSlide {
   readonly body: string;
   /** 板に置いた付箋の数。 */
   readonly placed: number;
+  /**
+   * 🔴 位置を持たない本文(レイアウトから位置を借りる題名・本文の枠)から、**普通の本文として**取り込んだ枠の数
+   * (#1163 依頼 124-1 = A)。字だけのスライドが 1 枚もノートにならなかった ── 本文は板ではなく上から順の段落にする。
+   */
+  readonly flowed: number;
   /** 引いた線の数。 */
   readonly lines: number;
   /** 戻せなかったものの数。 */
@@ -311,6 +316,38 @@ function readShape(sp: XmlNode): ShapeRead | null {
   };
 }
 
+/**
+ * 🔴 **位置を持たない題名・本文の枠**(#1163 依頼 124-1 = A)。PowerPoint の普通のスライドは、題名と本文の枠の位置を
+ * レイアウトから借りるので `<a:xfrm>` を持たない。位置が無い枠は板に置けないが、字は失わない:
+ * 題名はノートの題名に、本文(副題を含む)は上から順の段落にする。
+ * - 日付・フッター・スライド番号の枠は、スライドの中身ではないので黙って読み飛ばす
+ * - 図・表・グラフの枠(`pic` / `tbl` / …)と、枠の種類が分からないものは今までどおり「取り込めなかったもの」に数える(`null`)
+ * ⚠ 字が無い枠(「クリックして入力」の空の枠)は何も返さない(数えない)。
+ */
+function readFlowShape(sp: XmlNode): { kind: 'title' | 'body' | 'skip'; plain: string; paras: string[] } | null {
+  const ph = kid(kid(kid(sp, 'nvSpPr'), 'nvPr'), 'ph');
+  if (ph === undefined) return null;
+  const type = ph.attrs.type;
+  if (type === 'dt' || type === 'ftr' || type === 'sldNum') return { kind: 'skip', plain: '', paras: [] };
+  const isTitle = type === 'title' || type === 'ctrTitle';
+  if (!isTitle && type !== undefined && type !== 'body' && type !== 'subTitle' && type !== 'obj') return null;
+  const tx = kid(sp, 'txBody') ?? { tag: '', attrs: {}, children: [] };
+  // 空の段落は読み飛ばす(スライドの余白のための改行 ── markdown の段落の区切りは空行で足りる)
+  const paras = kids(tx, 'p').map(paragraphOf).filter((l) => l.trim() !== '');
+  return { kind: isTitle ? 'title' : 'body', plain: foldBreaks(textOf(tx)).trim(), paras };
+}
+
+/** 段落の列を本文にする。箇条書きの行どうしは続け、ふつうの段落は空行で分ける(markdown の段落になる)。 */
+function joinFlowParas(paras: readonly string[]): string {
+  const isItem = (l: string): boolean => /^\s*(?:[-*+]|\d+\.)\s/.test(l);
+  let out = '';
+  paras.forEach((l, i) => {
+    if (i === 0) out = l;
+    else out += (isItem(l) && isItem(paras[i - 1]!) ? '\n' : '\n\n') + l;
+  });
+  return out;
+}
+
 /** 逆算に使う枠(書き出しの `FRAME`)。 */
 type Frame = { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
 
@@ -393,6 +430,9 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
   const conns: XmlNode[] = [];
   let title: string | null = null;
   let hasBodyText = false;
+  // 🔴 位置を持たない本文の枠から読んだ段落(#1163 依頼 124-1)と、その枠の数
+  const flowParas: string[] = [];
+  let flowed = 0;
   // 🔴 グループ(#530 段⑤c)── `<p:grpSp>` を**開いて平らに**読む。名前は後でまとめて決める(下の ⑤)
   const groupNames: string[] = [];
   const walk = (nodes: readonly XmlNode[], depth: number): ShapeRead[] => {
@@ -402,7 +442,17 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
       const t = local(el.tag);
       if (t === 'sp') {
         const s = readShape(el);
-        if (s === null) { dropped += 1; continue; }
+        if (s === null) {
+          const flow = readFlowShape(el);
+          if (flow === null) { dropped += 1; continue; }
+          if (flow.kind === 'title') {
+            if (title === null) title = flow.plain;
+          } else if (flow.kind === 'body' && flow.paras.length > 0) {
+            flowParas.push(...flow.paras);
+            flowed += 1;
+          }
+          continue;
+        }
         if (s.isTitle) {
           if (title === null) title = s.plain;
           continue;
@@ -558,9 +608,13 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
     blocks.push(`:::format{${attrs.join(' ')}}\n${s.text}${s.text === '' ? '' : '\n'}:::\n`);
   });
 
+  const boardBody = [...blocks, ...wires].join('\n');
+  const flowBody = flowParas.length > 0 ? `${joinFlowParas(flowParas)}\n` : '';
   return {
     title,
-    body: [...blocks, ...wires].join('\n'),
+    // 🔴 位置を持たない本文は、板の塊の前に普通の段落として置く(#1163 依頼 124-1)
+    body: flowBody !== '' && boardBody !== '' ? `${flowBody}\n${boardBody}` : flowBody + boardBody,
+    flowed,
     placed: shapes.length,
     lines: wires.length,
     dropped: dropped + reshaped + subtitles,

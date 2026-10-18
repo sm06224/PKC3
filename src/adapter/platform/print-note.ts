@@ -27,6 +27,7 @@
  * file に、判断を書かない」)── だから待ちも分岐もここに在り、`main.ts` は
  * 1 行の配線しか持たない。
  */
+import { FOLDER_EXPORT_NOTE } from '@features/entry-actions';
 import { exportBlockedNote, type AppState, type Dispatchable } from '@adapter/state/app-state';
 
 export interface PrintNoteDeps {
@@ -49,6 +50,11 @@ export interface PrintNoteDeps {
    *   「描き終えて差し替えた」までの両方(抜粋が届いた後の描き待ちを含む)で立つので、Promise より取りこぼしが無い。
    */
   embedsLoading?(): boolean;
+  /**
+   * 🔴 **押した直後に、印刷の画面で何をするかを言う**(#1163 依頼 53-3。推薦 A)。「PDF で書き出す」はファイルを
+   *   落とさず印刷の画面を開くので、画面の下の 1 行で道を示す(ボタンの字は変えない)。
+   */
+  notify?(message: string): void;
   /** 待ちの上限(ms)。既定 5000。 */
   timeoutMs?: number;
   /** 待ちの時計(test から差せる)。 */
@@ -88,6 +94,9 @@ export async function printNote(deps: PrintNoteDeps, lid: string): Promise<Print
     printing = false;
   }
 }
+
+/** 印刷の画面を開く直前に出す案内(画面の字。印刷の画面の側の字は「PDF として保存」)。 */
+export const PRINT_GUIDE = '印刷の画面で「PDF として保存」を選ぶと、PDF になります';
 
 /** 図を描き切るのを待つ上限(ms)。過ぎたら**刷る**(固まらない)。 */
 const PREPARE_TIMEOUT_MS = 10000;
@@ -142,6 +151,11 @@ async function printNoteOnce(deps: PrintNoteDeps, lid: string): Promise<PrintNot
    * ⚠ 情報ペインのボタンは編集中 `disabled` なので普通は届かないが、
    *   近道や別経路から来ることがある ── **判定はここに持つ**。
    */
+  // 🔴 フォルダを刷っても中のノートは紙に出ない ── 情報ペインでは押せないが、右クリック・操作を探すから来ても断る(#1163 依頼 53-1)
+  if (deps.getState().entryMetas.get(lid)?.archetype === 'folder') {
+    deps.dispatch({ type: 'OP_FAILED', error: FOLDER_EXPORT_NOTE });
+    return 'not-ready';
+  }
   const blocked = exportBlockedNote(deps.getState(), 'PDF で書き出してください');
   if (blocked !== null) {
     // ⚠ **黙って何もしない口を作らない**(P8 段⑲ と同じ ── 押しても 1 ドットも
@@ -207,6 +221,7 @@ async function printNoteOnce(deps: PrintNoteDeps, lid: string): Promise<PrintNot
       return 'timeout';
     }
   }
+  deps.notify?.(PRINT_GUIDE);
   await prepareForPrint(deps);
   // 🔴 章の埋め込みが読み込み中なら待ってから刷る(#1087)。図の用意の後に見る ── 本文が届いた直後は
   //    埋め込みの器がまだ DOM に無いことがあり、用意の 3 コマで器が出てから見る。待ったら図を描き直す

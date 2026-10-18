@@ -35,6 +35,7 @@ import { buildTextlogDoc, type TextlogOrder } from '../textlog/textlog-doc';
 import { parseFrontmatter, extractVars } from './frontmatter';
 import { expandVarsInText, restoreUndefinedVars } from './var-expand';
 import { fenceStep } from './list-renumber';
+import { ifFormatMatches, ifFormatOf } from './if-format';
 
 export type TocLevel = 1 | 2 | 3;
 
@@ -268,9 +269,8 @@ export function stripMismatchedIfBlocks(
     }
     if (keepLines) out.push('');
     const attrs = m[1] ?? '';
-    const fmtMatch = /\bformat\s*=\s*"?([\w-]+)"?/.exec(attrs);
-    const fmt = fmtMatch?.[1];
-    const match = fmt ? fmt === targetFormat : true;
+    // 🔴 読み方は `if-format.ts` の 1 本(描画と同じ。#1163 依頼 282)
+    const match = ifFormatMatches(ifFormatOf(attrs), targetFormat);
     i++;
     let depth = 1;
     let innerFence = '';

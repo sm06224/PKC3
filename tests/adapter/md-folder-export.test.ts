@@ -260,7 +260,8 @@ describe('Markdown を PC のフォルダへ(#1455 (b))', () => {
     await go(dispatcher, deps, pickerOf(root));
     const got = [...root.dirs.values()][0]!.flat();
     expect([...got.keys()], '拡張子が bin になっている').toContain('assets/ast-mov.mov');
-    expect(reported.flat()).toContain('ノートへのリンク 2 件は、書き出した先では開けません(リンクの字のまま残ります)');
+    // 🔴 書き出したノートへのリンクは、書き出した .md へのリンクに書き換わる(#1163 依頼 116-3)── 数えて言う
+    expect(reported.flat()).toContain('ノートへのリンク 2 件を、書き出したノートのファイル(.md)へのリンクに書き換えました');
   });
 
   it('🔴 選んだフォルダの中に新しいサブフォルダを作り、もとの file は触らない / 同名は -2, -3', async () => {

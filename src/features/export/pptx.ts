@@ -296,6 +296,8 @@ export interface SlideLine {
   readonly ordered?: boolean;
   /** 等幅(コード)。 */
   readonly mono?: boolean;
+  /** 🔴 チェックの項目(#1163 依頼 280)。字の頭に ☐ / ☑ が付くので丸は出さない(深さは保つ)。 */
+  readonly task?: boolean;
 }
 
 /** 走りを 1 本の素の文字にする(題名に使う)。 */
@@ -476,6 +478,7 @@ function blockToLines(b: ExportBlock): SlideLine[] {
         runs: b.runs,
         bullet: Math.min(b.depth, PPTX_LIST_DEPTH_MAX - 1),
         ...(b.ordered ? { ordered: true } : {}),
+        ...(b.task === true ? { task: true } : {}),
       }];
     case 'quote':
       return [{ runs: b.runs.map((r) => ({ ...r, italic: true })), bullet: null }];
@@ -529,7 +532,9 @@ function lineXml(
   const runs = line.runs.length === 0 ? [{ text: '' } as ExportRun] : line.runs;
   const pPr = line.bullet === null
     ? '<a:pPr><a:buNone/></a:pPr>'
-    : `<a:pPr lvl="${line.bullet}">`
+    : line.task === true
+      ? `<a:pPr lvl="${line.bullet}"><a:buNone/></a:pPr>`
+      : `<a:pPr lvl="${line.bullet}">`
       + (line.ordered === true
         ? '<a:buAutoNum type="arabicPeriod"/>'
         : '<a:buChar char="\u2022"/>')

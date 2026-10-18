@@ -139,6 +139,8 @@ function setup(
     externalImages?: boolean;
     /** 真 = 添付の bytes が無い(`lend` が `null` を返す)。 */
     lendNull?: boolean;
+    /** 添付の鍵 → 登録の種類(音・動画の再生ボタンを出すかの判定。#1163 依頼 291)。省略 = 引けない環境。 */
+    mimes?: Record<string, string>;
   } = {},
 ) {
   let state = booted(opts.body ?? BODY);
@@ -159,6 +161,7 @@ function setup(
     lend: async (key) =>
       opts.lendNull === true ? null : { url: `blob:${key}`, dispose: () => disposed.push(key) },
     getBlob: async () => opts.blob ?? null,
+    ...(opts.mimes === undefined ? {} : { listMimes: async () => new Map(Object.entries(opts.mimes!)) }),
     runAction: vi.fn(),
     fail: (m) => failed.push(m),
     open: opts.open === 'null' ? () => null : () => win,
@@ -264,6 +267,57 @@ describe('🔴 押した見出しの章だけを、読むだけで出す', () =>
     expect(r.host()!.querySelector('img[data-pkc-asset-key]'), '画像が残っている').toBeNull();
     const why = r.host()!.querySelector('[data-pkc-field="attachment-undecodable"]');
     expect(why?.textContent ?? '').toContain('このブラウザでは表示できません');
+  });
+
+  /**
+   * 🔴 **本文の音・動画は、章の窓でも再生ボタンで出る**(#1163 依頼 291 = A)。
+   * 直す前は、読む画面では再生ボタンの音・動画が、章の窓ではリンクだけ(押すと保存)だった。
+   */
+  describe('音・動画の再生ボタン', () => {
+    const MEDIA = '# 一\n\n[録音](asset:ast-a) と [動画](asset:ast-v) と [資料](asset:ast-p) と ![絵](asset:ast-i)\n';
+    const mimes = { 'ast-a': 'audio/mp4', 'ast-v': 'video/mp4', 'ast-p': 'application/pdf', 'ast-i': 'image/png' };
+
+    it('🔴 音は audio、動画は video がリンクの隣に置かれる。保存のリンクは残る。PDF・画像には置かない(対照)', async () => {
+      const r = setup({ body: MEDIA, mimes });
+      expect(r.cw.open('n1', 0)).toBe(true);
+      await flush();
+      const host = r.host()!;
+      const audio = host.querySelector<HTMLAudioElement>('audio[data-pkc-field="body-media"]');
+      const video = host.querySelector<HTMLVideoElement>('video[data-pkc-field="body-media"]');
+      expect(audio?.getAttribute('src'), '音の再生ボタンが無い').toBe('blob:ast-a');
+      expect(video?.getAttribute('src'), '動画の再生ボタンが無い').toBe('blob:ast-v');
+      expect(audio!.controls).toBe(true);
+      // 保存の道を消さない: 再生ボタンの直前の兄弟が元のリンク
+      expect(audio!.previousElementSibling?.getAttribute('data-pkc-asset-key')).toBe('ast-a');
+      expect(host.querySelectorAll('[data-pkc-field="body-media"]'), '音・動画以外に置いた').toHaveLength(2);
+    });
+
+    it('🔴 借りた URL は、組み直したら返す(PDF は音・動画の再生機のために借りない)', async () => {
+      const r = setup({ body: MEDIA, mimes });
+      r.cw.open('n1', 0);
+      await flush();
+      expect(r.disposed).toEqual([]);
+      r.state = { ...r.state, openBody: { ...r.state.openBody!, body: MEDIA.replace('一', '二') } };
+      r.cw.onState(r.state);
+      await flush();
+      expect(r.disposed, '組み直したのに前の URL を返していない').toEqual(expect.arrayContaining(['ast-a', 'ast-v']));
+      expect(r.disposed, 'PDF を借りた').not.toContain('ast-p');
+    });
+
+    it('対照: 種類を引けない環境(listMimes なし)では今までどおりリンクだけ', async () => {
+      const r = setup({ body: MEDIA });
+      r.cw.open('n1', 0);
+      await flush();
+      expect(r.host()!.querySelector('audio,video')).toBeNull();
+      expect(r.host()!.querySelector('a[data-pkc-asset-key="ast-a"]'), '保存のリンクが消えた').not.toBeNull();
+    });
+
+    it('bytes が借りられない添付には何も置かない(壊れた再生機を出さない)', async () => {
+      const r = setup({ body: MEDIA, mimes, lendNull: true });
+      r.cw.open('n1', 0);
+      await flush();
+      expect(r.host()!.querySelector('audio,video')).toBeNull();
+    });
   });
 
   it('⚠ 見出しの無い行で押されたら理由を出し、窓を開かない', () => {
