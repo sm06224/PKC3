@@ -142,6 +142,24 @@ test('🔴 設定に Office 一式の状態と、入れる 2 つの導線が出�
   // ⚠ 何もしていないときに進捗を出さない
   await expect(section.locator('[data-pkc-field="office-pack-progress"]')).toBeHidden();
 
+  /**
+   * 🔴 台帳 #1852 束 T1(依頼 156 ②)── 取り込み中に「取り込みをやめる」を押すと、何も書かれず、また押せる。
+   * 🔑 起動を増やさない ── 道中に足す。配布元の返事を返さないまま止めて(取得の最中)、やめる。
+   */
+  await expect(section.locator('[data-pkc-field="office-pack-cancel"]'), '取り込んでいないのにやめるが出ている').toBeHidden();
+  await page.route('**/office-pack/**', () => {
+    /* 返さない(取得が終わらない状態を作る) */
+  });
+  await clickReal(page, '[data-pkc-field="office-pack-url"]');
+  const cancel = section.locator('[data-pkc-field="office-pack-cancel"]');
+  await expect(cancel, '取り込み中に「取り込みをやめる」が出ない').toBeVisible({ timeout: 10000 });
+  await clickReal(page, '[data-pkc-field="office-pack-cancel"]');
+  await expect(cancel, 'やめたのに「取り込みをやめる」が残る').toBeHidden({ timeout: 10000 });
+  await expect(page.locator('[data-pkc-region="status"]'), 'やめた知らせが出ない').toContainText('取り込みをやめました');
+  await expect(section.locator('[data-pkc-field="office-pack-status"]'), 'やめたのに何か書かれた').toHaveText('入っていません');
+  await expect(section.locator('[data-pkc-field="office-pack-url"]'), 'やめた後にまた押せない').toBeEnabled();
+  await page.unroute('**/office-pack/**');
+
   // この環境で動くかを名指しで言う ── Chromium なら「動きます」
   const cap = await section.locator('[data-pkc-field="office-pack-capability"]').textContent();
   expect(cap ?? '', '環境の可否を 1 行も言っていない').not.toBe('');

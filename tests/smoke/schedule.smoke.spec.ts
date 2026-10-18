@@ -238,6 +238,11 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
   );
   await clickReal(page, '[data-pkc-action="cancel-edit"]');
   await expect(d3Card, '指で戻した後、D3 の札が 1 枚でない').toHaveCount(1);
+  // 🔴 台帳 #1852 束 S1(依頼 128-2)── 指の長押しでドラッグした後も、行のメニューは出ていない(長押しはドラッグだけ)
+  await expect(
+    page.locator('[data-pkc-region="context-menu"]'),
+    '指で掴んで動かしたのに行のメニューが開いた(長押しはドラッグだけ)',
+  ).toBeHidden();
 
   /**
    * 🔴 ⑤.7 **指で縦になぞっても、掴みが始まらない**(#855 決1。
@@ -271,6 +276,18 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
     `- [ ] 見積を送る @${D3}\n- [ ] 体裁のチェック`,
   );
   await clickReal(page, '[data-pkc-action="cancel-edit"]');
+
+  /**
+   * ⑤.8 🔴 **札の「⋯」を押すと、行のメニュー(「予定を繰り返す…」など)が開く**(台帳 #1852 束 S1、依頼 128-2。
+   *   スマホの長押しをドラッグだけにしたので、メニューへ入る道はここ)。🔑 起動を増やさない ── 道中に足す。
+   */
+  await clickReal(page, '[data-pkc-region="schedule-cards"] [data-pkc-field="task-menu"]');
+  await expect(
+    page.locator('[data-pkc-region="context-menu"]'),
+    '「⋯」を押しても行のメニューが出ない',
+  ).toContainText('予定を繰り返す…');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-pkc-region="context-menu"]'), 'Esc でメニューが閉じない').toBeHidden();
 
   /**
    * ⑥ 🔴 **繰り返していない札を右クリック →「繰り返す…」→ 刻みを選ぶと、
