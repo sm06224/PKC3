@@ -2403,7 +2403,7 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
    * 🔴 **画面は動かない**(user 裁定 2026-08-18「OS のファイラ動作に似せる」)──
    * 入れたものが**この場から消える**のが標準の見え方。行き先は状態の行が名乗る。
    */
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('へ入れました');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('へ移しました');
   expect(await lidsOf(), '入れた先へ勝手に移動した').toEqual([folderLid]);
 
   // 中に入る(2 クリック)── ここから「いま見ているフォルダの中に作る」を見る

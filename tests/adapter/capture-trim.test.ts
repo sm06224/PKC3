@@ -93,6 +93,8 @@ function harness(
     ...stateOver,
   } as AppState);
   const attached: AttachItem[] = [];
+  /** 添付を作ったときの置き場(`attach` の第 2 引数)。 */
+  const places: Array<{ parentLid: string | null; keepSelection: boolean }> = [];
   const notes: string[] = [];
   const deps = {
     dispatcher,
@@ -101,14 +103,18 @@ function harness(
     scanVideo: vi.fn(async () => scanned(3_000)),
     cutVideo: vi.fn(async () => videoCut()),
     confirm: vi.fn(async () => true),
-    attach: vi.fn(async (item: AttachItem) => {
-      attached.push(item);
-      return { lid: 'new', assetKey: 'k-2', mime: item.type, hash: 'h' };
-    }),
+    parentOf: vi.fn((): string | null => null),
+    attach: vi.fn(
+      async (item: AttachItem, place: { parentLid: string | null; keepSelection: boolean }) => {
+        attached.push(item);
+        places.push(place);
+        return { lid: 'new', assetKey: 'k-2', mime: item.type, hash: 'h' };
+      },
+    ),
     notify: (t: string) => void notes.push(t),
     ...over,
   };
-  return { dispatcher, deps, attached, notes, trimmer: createCaptureTrimmer(deps) };
+  return { dispatcher, deps, attached, places, notes, trimmer: createCaptureTrimmer(deps) };
 }
 
 const error = (d: Dispatcher): string | null => d.getState().error;
@@ -123,6 +129,23 @@ describe('切り出す(成功する道)', () => {
     expect(h.attached[0]!.type).toBe('audio/webm');
     expect(h.attached[0]!.size).toBe(4);
     expect(error(h.dispatcher), '成功したのに理由が出ている').toBeNull();
+  });
+
+  /**
+   * 🔴 **切り出した物は、元の録音と同じフォルダに作る**(台帳 #1852 O1 / 依頼 355 A。Gemini 回答 = 推薦どおり)。
+   * ⚠ 直す前はフォルダの中にある録音を切り出すと、切り出した物はルートに作られた(画像の描き込みや PDF の別保存は元と同じフォルダ)。
+   */
+  it('🔴 置き場は元の録音の置き場(フォルダの中ならそのフォルダ、ルートならルート)', async () => {
+    const inFolder = harness({ parentOf: vi.fn((lid: string) => (lid === 'a' ? 'folder-1' : null)) });
+    await inFolder.trimmer.run('a', 12_000, 65_000);
+    expect(inFolder.deps.parentOf, '元の録音の置き場を引いていない').toHaveBeenCalledWith('a');
+    expect(inFolder.places, 'フォルダの中の録音から切り出した物がルートに作られた').toEqual([
+      { parentLid: 'folder-1', keepSelection: false },
+    ]);
+    // 対照群: ルートにある録音はルートのまま
+    const atRoot = harness();
+    await atRoot.trimmer.run('a', 12_000, 65_000);
+    expect(atRoot.places).toEqual([{ parentLid: null, keepSelection: false }]);
   });
 
   it('🔴 元は触らない(消しにも書きにも行かない)', async () => {

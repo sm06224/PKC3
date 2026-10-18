@@ -108,6 +108,11 @@ export interface CaptureServiceDeps {
     message: string,
     opts: { okLabel: string; cancelLabel: string; danger: boolean },
   ) => Promise<boolean>;
+  /**
+   * 🔴 **取り込めなかった録音・録画をファイルとして端末へ保存する口**(台帳 #1852 O1 / 依頼 239。Gemini 回答 = 推薦どおり)。
+   * ⚠ 省略 = 申し出ない(これまでどおり)。呼ぶのは user が「録った音をファイルに保存する」を押した後だけ。
+   */
+  readonly saveFile?: (name: string, blob: Blob) => void;
 }
 
 /** これを超えて録った物を捨てるときは確認する(60 秒ちょうどは聞かない)。 */
@@ -294,6 +299,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       //   出していない断り方(reducer が捨てた等)もあるので、ここでも 1 行言う
       // 🔴 種類は「注意」(失敗は未読に数える。既定の「結果」だと見落とされる ── 着地後レビュー ⚠3)
       deps.notify(`${why}${CAPTURE_LABEL[kind]}を取り込めませんでした`, { kind: 'caution' });
+      offerSaveFile(blob, kind, name);
       return false;
     }
     putAssetIntoNote({
@@ -321,6 +327,41 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
      */
     if (deps.dispatcher.getState().captureItems !== null) deps.dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
     return true;
+  };
+
+  /**
+   * 🔴 **取り込めなかった録音・録画は、ファイルとして保存できると申し出る**(台帳 #1852 O1 / 依頼 239。Gemini 回答 = 推薦どおり)。
+   *
+   * ⚠ 直す前は、止めたときに保存領域の空きが足りないと「取り込めませんでした」と 1 行出て、録った音は消えた。救う方法が無かった。
+   * 🔑 確認の器(`confirm`)で「録った音をファイルに保存する」を出す ── 押したときに初めて保存する(ダウンロードは押した操作の中で行う)。
+   * ⚠ 答えを待つ間、録った物はメモリにだけ在るので、タブを閉じる前の確認に数える(`unsettled`)。
+   * ⚠ 取り込めなかった物が続いても、確認は 1 つずつ(`offerChain`)── 2 つ目で 1 つ目を上書きしない。
+   */
+  let offerChain: Promise<void> = Promise.resolve();
+  const offerSaveFile = (blob: Blob, kind: CaptureKind, name: string): void => {
+    const ask = deps.confirm;
+    const save = deps.saveFile;
+    if (ask === undefined || save === undefined) return;
+    unsettled++;
+    syncActive();
+    offerChain = offerChain
+      .then(async () => {
+        const what = kind === 'screen' ? '録画' : '録音';
+        const yes = await ask(
+          `保存領域の空きが足りないなどで、${what}を取り込めませんでした。このままだと録った${kind === 'screen' ? '映像' : '音'}は消えます。ファイルとして端末に保存できます。`,
+          {
+            okLabel: `録った${kind === 'screen' ? '映像' : '音'}をファイルに保存する`,
+            cancelLabel: '保存しない',
+            danger: false,
+          },
+        );
+        if (yes) save(name, blob);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        unsettled--;
+        syncActive();
+      });
   };
 
   /**

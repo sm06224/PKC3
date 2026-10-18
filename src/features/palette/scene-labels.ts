@@ -146,6 +146,7 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'dual-other-pane': PANE2,
   'dual-preview': PANE2,
   'dual-tab-add': PANE2,
+  'undo-dual-move': PANE2,
   'toggle-filer-flatten': PANE2,
   'pc-pick-folder': PANE2,
   // 予定

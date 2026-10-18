@@ -95,7 +95,7 @@ test('🔴 2 ペインを開いて、左で選んだものを右の場所へ移�
   await expect(
     page.locator(`${PANE('left')} [data-pkc-field="dual-count"]`),
     '焦点の側が「元」だと出ていない',
-  ).toContainText('(ここが元)');
+  ).toContainText('(ここから移す・コピーします)');
   await expect(page.locator('[data-pkc-field="dual-move"]')).toContainText('移す');
 
   // ⑤ 移す ── 右(= はこの中)に現れ、左からは消える
@@ -500,7 +500,7 @@ test('🔴 2 ペインの押せる口に、無反応が 1 つも無い (#273)', 
    * 🔴 **行き先を名乗る**(#671 の着地前の動線レビュー A、2026-09-04)。
    *
    * ⚠ 直す前は「1 件を写しました」だけで、**どこへ行ったか 1 文字も出ていなかった** ──
-   *   隣の「移す」は「N 件を『◯◯』へ入れました」と名乗っている。
+   *   隣の「移す」は「N 件を『◯◯』へ移しました」と名乗っている。
    * 🔴 スマホでは相手のペインが**画面に居ない**ので、ここが唯一の手がかりである。
    * 🔑 右のペインは触っていないのでルートに居る ── だから「ルート」と名乗るのが正しい。
    */
@@ -556,7 +556,7 @@ test('🔴 左のペインから掴んで、右のペインへ落とす (#273 �
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '掴んで落とせていない(または行き先を名乗っていない)',
-  ).toContainText('「はこ」へ入れました');
+  ).toContainText('「はこ」へ移しました');
   await expect(page.locator(ROWS('right')), '右(はこ の中)へ入っていない').toHaveCount(1);
   await expect(page.locator(ROWS('left')), '左から消えていない').toHaveCount(1);
 
@@ -831,7 +831,7 @@ test('🔴 フォルダの「行」へ落とすと、その中へ入る (#273 / 
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '行へ落としたのに無言(帯が出ていない)',
-  ).toContainText('「はこ」へ入れました');
+  ).toContainText('「はこ」へ移しました');
   await expect(page.locator(ROWS('left')), '左から消えていない').toHaveCount(1);
 
   /**

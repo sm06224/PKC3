@@ -232,7 +232,9 @@ describe('割当の検め', () => {
   'copy-selection-md',
   // 🔴 #1163 依頼 153(Gemini 回答 = 推薦どおり ②): ノートの並べ替え ── 「操作を探す」から呼ぶ。`Alt+↑/↓` は本文の行の入れ替えなので既定は置かない
   // ⚠ `undo-trash`(ゴミ箱へ移した直後の元に戻す)は依頼 132 で既定 `Ctrl+Z`(フォルダの表)を持つようになったので、この一覧から外した
-  'move-order-up', 'move-order-down'];
+  'move-order-up', 'move-order-down',
+  // 台帳 #1852 N1 / 依頼 324 A: 2 ペインで移した直後の「元に戻す」── 「操作を探す」から呼ぶ。2 ペインの `Ctrl+Z` は `undo-trash` が持っているので既定は置かない
+  'undo-dual-move'];
 
   it('🔴 鍵を持たない操作の一覧は、身元で持つ', () => {
     const ids = new Set(KEY_COMMANDS.map((c) => c.id));

@@ -1116,6 +1116,11 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        *   ボタンの受け手(`ACTIONS['undo-trash']`)を直に呼ぶ特例。
        */
       'undo-trash',
+      /**
+       * ⚠ 2026-10-18 に足した(台帳 #1852 N1 / 依頼 324 A)── 2 ペインで移した直後の「元に戻す」。`undo-trash` と同じ事情
+       *   (押しボタンは知らせの隣に出ている間しか無い)で、ボタンの受け手(`ACTIONS['undo-dual-move']`)を直に呼ぶ特例。
+       */
+      'undo-dual-move',
     ];
     for (const id of special) {
       expect(src, `${id} の特例が消えた`).toContain(`cmd === '${id}'`);

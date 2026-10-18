@@ -5,7 +5,7 @@
  * 見るのは 3 つ:①ドラッグ → 印(CSS で縮んだ幅でも位置が合う)②動かさず離す → 再生位置が移る
  * ③ボタンで打った印と、ドラッグで打った印が **同じ state** になる(切り出しの流れが同じ物を受け取る)。
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState } from '../../src/adapter/state/app-state';
@@ -140,6 +140,64 @@ describe('波形のドラッグ ── 印になる(#1232)', () => {
     expect(t.d.getState().captureTrim).toBeNull();
     expect(Math.abs(t.media.currentTime - 240)).toBeLessThan(0.01);
     t.off();
+  });
+
+  /**
+   * 🔴 **一時停止中に押したときも、その位置から鳴らす**(台帳 #1852 束 O1 / 依頼 354 A。Gemini 回答 = 推薦どおり)。
+   * 直す前は、波形に指を乗せると「押すとその位置から再生します」と出るのに、一時停止中に押すと位置が動くだけで鳴らなかった。
+   */
+  describe('一時停止中の波形の押下(依頼 354 A)', () => {
+    const stub = (media: HTMLMediaElement, paused: boolean, played: Promise<void> = Promise.resolve()) => {
+      Object.defineProperty(media, 'paused', { configurable: true, get: () => paused });
+      const at: number[] = [];
+      const play = vi.fn(() => {
+        at.push(media.currentTime);
+        return played;
+      });
+      media.play = play as never;
+      return { play, at };
+    };
+
+    it('🔴 一時停止中: 押した位置へ移ってから鳴らす(位置は play の前に書く)', () => {
+      const t = setup();
+      const { play, at } = stub(t.media, true);
+      drag(t.strip, xOf(240_000), xOf(240_000));
+      expect(play, '一時停止中に押しても鳴らない').toHaveBeenCalledTimes(1);
+      expect(Math.abs(at[0]! - 240), 'play の時点で押した位置に居ない(先頭から鳴って飛ぶ)').toBeLessThan(0.01);
+      t.off();
+    });
+
+    it('⚠ 対照群 ── 鳴っているときは位置を移すだけで、play し直さない', () => {
+      const t = setup();
+      const { play } = stub(t.media, false);
+      drag(t.strip, xOf(240_000), xOf(240_000));
+      expect(Math.abs(t.media.currentTime - 240)).toBeLessThan(0.01);
+      expect(play).not.toHaveBeenCalled();
+      t.off();
+    });
+
+    it('⚠ 対照群 ── ドラッグ(範囲を決める)では鳴らさない', () => {
+      const t = setup();
+      const { play } = stub(t.media, true);
+      drag(t.strip, xOf(120_000), xOf(300_000));
+      expect(play, '範囲を決めただけで鳴り出した').not.toHaveBeenCalled();
+      t.off();
+    });
+
+    it('鳴らせなかったら(自動再生が許されない等)理由を言う。押し直しの AbortError は言わない', async () => {
+      const refused = setup();
+      stub(refused.media, true, Promise.reject(new DOMException('no', 'NotAllowedError')));
+      drag(refused.strip, xOf(60_000), xOf(60_000));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(refused.d.getState().notice).toBe('再生を始められませんでした');
+      refused.off();
+      const aborted = setup();
+      stub(aborted.media, true, Promise.reject(new DOMException('again', 'AbortError')));
+      drag(aborted.strip, xOf(60_000), xOf(60_000));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(aborted.d.getState().notice ?? '', '押し直しを失敗として言った').toBe('');
+      aborted.off();
+    });
   });
 
   it('切り出せない行(trimmable=0)は、ドラッグしても印は付かない(押せば移る)', () => {

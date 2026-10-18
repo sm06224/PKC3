@@ -450,7 +450,7 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
    * これを先に待つと、落ちたときの意味が「掴めなかった」に定まる。
    */
   await expect(page.locator('[data-pkc-region="status"]'), '掴んで落とせていない').toContainText(
-    '「はこ」へ入れました',
+    '「はこ」へ移しました',
   );
   await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).not.toContainText('はこ');
   await expect(rows, 'ルートから消えていない').toHaveCount(1);
@@ -751,7 +751,7 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   const statusLine = page.locator('[data-pkc-region="status"]');
   await page.dragAndDrop(folderByName('はこ'), folderByName('つぎ'));
   await expect(statusLine, 'フォルダごと入れた知らせが、中の件数を言っていない').toContainText(
-    '「はこ」(中の 1 件ごと)を「つぎ」へ入れました',
+    '「はこ」(中の 1 件ごと)を「つぎ」へ移しました',
   );
   await expect(page.locator(folderByName('はこ')), '「はこ」がルートから消えていない').toHaveCount(0);
   await clickReal(page, '[data-pkc-field="status-undo"]');

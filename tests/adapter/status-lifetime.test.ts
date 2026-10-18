@@ -447,7 +447,8 @@ describe('全体の処理の出す側の全数', () => {
     },
     {
       file: 'src/adapter/ui/actions/capture-transcribe.ts',
-      starts: ['deps.notify(`「${item.name}」を文字にしています…(${ready.part.label}の一式)`);'],
+      // ⚠ 台帳 #1852 O1 / 依頼 149: 長い録音の「N / M」を同じ出す所から言う(`progress(more)` ── 出す側は 1 つのまま)
+      starts: ['deps.notify(`「${item.name}」を文字にしています…(${ready.part.label}の一式${more})`);'],
       end: /deps\.notify\(''\)/,
     },
     {

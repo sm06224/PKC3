@@ -341,7 +341,7 @@ describe('移す… ── 入れ先のフォルダを選ぶ(#215)', () => {
       'n2',
       'n3',
     ]);
-    expect(r.d.getState().notice, '行き先を名乗っていない').toBe('3 件を「t-f1」へ入れました');
+    expect(r.d.getState().notice, '行き先を名乗っていない').toBe('3 件を「t-f1」へ移しました');
   });
 
   /**

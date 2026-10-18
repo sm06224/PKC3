@@ -118,7 +118,7 @@ test('🔴 掴んだままタブの上で止めると面が変わり、drag は�
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '面をまたいで運んだ物が落ちていない',
-  ).toContainText('「はこ」へ入れました', { timeout: 5000 });
+  ).toContainText('「はこ」へ移しました', { timeout: 5000 });
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

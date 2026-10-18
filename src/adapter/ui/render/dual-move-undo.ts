@@ -1,7 +1,7 @@
 /**
  * 🔴 **2 ペインで「移す」を押した直後の「元に戻す」**(Gemini 裁定 = #1163 への依頼 62 の 4)。
  *
- * 移した直後に、画面の下の知らせの行へ「3 件を「会議」へ入れました」と、その隣の **元に戻す** を数秒出す
+ * 移した直後に、画面の下の知らせの行へ「3 件を「会議」へ移しました」と、その隣の **元に戻す** を数秒出す
  * (置き場はゴミ箱へ移した直後・予定を動かした直後と同じ `status-undo`。新しい器を作らない ── 作りは `trash-undo.ts` と同じ)。
  *
  * ## 出し入れ
@@ -34,10 +34,20 @@ export interface DualMove {
    * 省略 / 空 = `from` だけ(従来どおり)。
    */
   readonly fromAll?: readonly string[];
+  /**
+   * 🔴 **移す前の並びの値**(台帳 #1852 N1 / 依頼 154 ②)。移したノートは移し先の末尾へ行くので、戻すときは移す前の位置へ戻す。
+   * 省略 = 並びは戻さない(従来どおり)。
+   */
+  readonly entryOrder?: number;
 }
 
 interface Pending {
   readonly moves: readonly DualMove[];
+  /**
+   * 🔴 **コピーで作った物**(台帳 #1852 N1 / 依頼 97-5 A)。空でなければ「移した」ではなく「コピーした」直後の「元に戻す」で、
+   * 押すと**作った複製をゴミ箱へ入れる**。⚠ `moves` と同時には持たない(1 手は移すかコピーかのどちらか)。
+   */
+  readonly created: readonly string[];
   readonly message: string;
   readonly dispatcher: Dispatcher;
   timer: ReturnType<typeof setTimeout> | null;
@@ -63,9 +73,12 @@ export function dualMoveUndoShown(shownLine: string): boolean {
 /** 持っている物(test の観測点)。 */
 export function currentDualMoveOffer(): {
   readonly moves: readonly DualMove[];
+  readonly created: readonly string[];
   readonly message: string;
 } | null {
-  return pending === null ? null : { moves: pending.moves, message: pending.message };
+  return pending === null
+    ? null
+    : { moves: pending.moves, created: pending.created, message: pending.message };
 }
 
 /**
@@ -78,20 +91,46 @@ export function offerDualMoveUndo(
   message: string,
 ): void {
   if (moves.length === 0) return;
+  begin({ moves, created: [], message, dispatcher, timer: null });
+}
+
+/**
+ * 🔴 **コピーした直後に呼ぶ**(依頼 97-5 A)。⚠ 作った物が 0 件のときは出さない。
+ * 「移す」と同じ器・同じ数秒で、押すと作った複製をゴミ箱へ入れる(押し間違えて、複製を自分で探して消す手間をなくす)。
+ */
+export function offerDualCopyUndo(
+  dispatcher: Dispatcher,
+  created: readonly string[],
+  message: string,
+): void {
+  if (created.length === 0) return;
+  begin({ moves: [], created, message, dispatcher, timer: null });
+}
+
+function begin(p: Pending): void {
   clearDualMoveOffer();
-  const p: Pending = { moves, message, dispatcher, timer: null };
   pending = p;
   p.timer = setTimeout(() => {
     if (pending === p) clearDualMoveOffer();
   }, DUAL_MOVE_OFFER_MS);
-  dispatcher.dispatch({ type: 'OP_NOTICE', message });
+  p.dispatcher.dispatch({ type: 'OP_NOTICE', message: p.message });
 }
 
-/** 「元に戻す」の本体。戻す対象を返し、持っている物を忘れる(撃つのは呼び側)。無ければ `null`。 */
-export function takeDualMoveUndo(): readonly DualMove[] | null {
+/**
+ * 「元に戻す」の本体。戻す対象(移した物 / コピーで作った物)を返し、持っている物を忘れる(撃つのは呼び側)。無ければ `null`。
+ */
+export function takeDualUndo(): {
+  readonly moves: readonly DualMove[];
+  readonly created: readonly string[];
+} | null {
   const p = pending;
   if (p === null) return null;
   pending = null;
   if (p.timer !== null) clearTimeout(p.timer);
-  return p.moves;
+  return { moves: p.moves, created: p.created };
+}
+
+/** 移した物だけを返す(従来の口)。⚠ コピーの回は空の配列。 */
+export function takeDualMoveUndo(): readonly DualMove[] | null {
+  return takeDualUndo()?.moves ?? null;
 }

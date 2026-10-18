@@ -228,22 +228,22 @@ describe('85-8:フォルダを移した知らせは、中の件数も言う', ()
   it('中に 2 件あるフォルダを 1 つ移すと「(中の 2 件ごと)」と言う', async () => {
     const r = setup(METAS, RELS);
     await moveTo(r, ['f'], 't');
-    expect(r.d.getState().notice).toBe('「t-f」(中の 2 件ごと)を「t-t」へ入れました');
+    expect(r.d.getState().notice).toBe('「t-f」(中の 2 件ごと)を「t-t」へ移しました');
   });
 
   it('フォルダとふつうのノートを一緒に移すと「中身を含め N 件」と言う', async () => {
     const r = setup(METAS, RELS);
     await moveTo(r, ['f', 's1'], 't');
-    expect(r.d.getState().notice).toBe('2 件(中身を含め 4 件)を「t-t」へ入れました');
+    expect(r.d.getState().notice).toBe('2 件(中身を含め 4 件)を「t-t」へ移しました');
   });
 
   it('対照群:中が空のフォルダ・ふつうのノートは今までどおり', async () => {
     const r = setup(METAS, RELS);
     await moveTo(r, ['s1'], 't');
-    expect(r.d.getState().notice).toBe('1 件を「t-t」へ入れました');
+    expect(r.d.getState().notice).toBe('1 件を「t-t」へ移しました');
     const r2 = setup([meta('t', 1, 'folder'), meta('e', 2, 'folder')]);
     await moveTo(r2, ['e'], 't');
-    expect(r2.d.getState().notice).toBe('1 件を「t-t」へ入れました');
+    expect(r2.d.getState().notice).toBe('1 件を「t-t」へ移しました');
   });
 });
 

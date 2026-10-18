@@ -231,11 +231,16 @@ export async function splitAlreadyOpen<T extends { handle: LaunchedHandle; file?
   items: readonly T[],
   launched: LaunchedFiles,
   isPresent: (lid: string) => boolean,
-): Promise<{ fresh: T[]; reopened: string[]; changed: string[] }> {
+): Promise<{ fresh: T[]; reopened: string[]; changed: string[]; changedItems: Array<{ lid: string; item: T }> }> {
   const fresh: T[] = [];
   const reopened: string[] = [];
   /** 🔴 `reopened` のうち、**取り込んだ後に file の更新時刻が動いている**もの(#1264 §2 欠陥 1)。 */
   const changed: string[] = [];
+  /**
+   * 🔴 `changed` の lid と、その押した file(台帳 #1852 N1 / 依頼 97-2 A)。⚠ 「取り込み直す」が**どの file の今の中身を読むか**に要る
+   *   (lid だけでは、押した file に辿れない)。`changed` と同じ順・同じ件数。
+   */
+  const changedItems: Array<{ lid: string; item: T }> = [];
   for (const item of items) {
     // ⚠ 紐づけが残っていても **entry が消えていれば取り込み直す**
     //    (ゴミ箱へ入れた後に同じ md を開いたら、また開けるべき)。
@@ -245,12 +250,15 @@ export async function splitAlreadyOpen<T extends { handle: LaunchedHandle; file?
       reopened.push(known);
       // ⚠ 押した 1 件の file は呼び側が読み済み(`getFile()` を足さない)。取り込み時の時刻が無ければ比べない
       const was = launched.modifiedOf(known);
-      if (was !== null && item.file !== undefined && item.file.lastModified !== was) changed.push(known);
+      if (was !== null && item.file !== undefined && item.file.lastModified !== was) {
+        changed.push(known);
+        changedItems.push({ lid: known, item });
+      }
       continue;
     }
     fresh.push(item);
   }
-  return { fresh, reopened, changed };
+  return { fresh, reopened, changed, changedItems };
 }
 
 /** 書き戻しの結果。⚠ 失敗の**理由を持って**返る(黙って終えない)。 */

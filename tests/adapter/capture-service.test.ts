@@ -155,6 +155,8 @@ function bench(
     extra?: string[];
     /** 破棄の確認の答え。省略 = 確認の口を渡さない。 */
     confirm?: (message: string, o: { okLabel: string; cancelLabel: string; danger: boolean }) => Promise<boolean>;
+    /** 取り込めなかった収録を、ファイルとして端末へ保存する口(台帳 #1852 O1 / 依頼 239)。省略 = 申し出ない。 */
+    saveFile?: (name: string, blob: Blob) => void;
   } = {},
 ): Bench {
   const d = new Dispatcher();
@@ -254,6 +256,7 @@ function bench(
     onActive: (a) => actives.push(a),
     ...(opts.lock === undefined ? {} : { lock: opts.lock }),
     ...(opts.confirm === undefined ? {} : { confirm: opts.confirm }),
+    ...(opts.saveFile === undefined ? {} : { saveFile: opts.saveFile }),
     now: () => opts.clock?.at ?? new Date(2026, 7, 27, 3, 1, 2),
     tick: (fn) => {
       beats.push(fn);
@@ -459,6 +462,79 @@ describe('🔴 ③ 入れられない回は黙らない(#413)', () => {
     await tick();
     expect(appends(b.events), '添付が無いのに参照を書いた').toEqual([]);
     expect(b.notices.join(''), '取り込めなかったことを言っていない').toMatch(/取り込めませんでした/);
+  });
+
+  /**
+   * 🔴 **取り込めなかった録音は、ファイルとして保存できると申し出る**(台帳 #1852 束 O1 / 依頼 239。Gemini 回答 = 推薦どおり)。
+   * 直す前は、止めたときに保存領域の空きが足りないと「取り込めませんでした」と 1 行出て、録った音は消えた。救う方法が無かった。
+   */
+  describe('取り込めなかった録音を、ファイルに保存する(依頼 239)', () => {
+    it('🔴 申し出が出て、「録った音をファイルに保存する」を選ぶと、録った音がそのまま保存される', async () => {
+      const saved: Array<{ name: string; blob: Blob }> = [];
+      const asked: Array<{ message: string; okLabel: string }> = [];
+      const b = bench({
+        attachFails: true,
+        blob: new Blob(['録った音'], { type: 'audio/webm' }),
+        confirm: async (message, o) => {
+          asked.push({ message, okLabel: o.okLabel });
+          return true;
+        },
+        saveFile: (name, blob) => void saved.push({ name, blob }),
+      });
+      await b.service.start('audio');
+      b.service.stop();
+      await tick();
+      await tick();
+      expect(asked, '申し出が出ていない(録った音が黙って消える)').toHaveLength(1);
+      expect(asked[0]!.okLabel).toBe('録った音をファイルに保存する');
+      expect(asked[0]!.message).toContain('消えます');
+      expect(saved, '選んだのに保存されていない').toHaveLength(1);
+      expect(saved[0]!.name, '名前が録音の名前ではない').toMatch(/^録音-.*\.webm$/);
+      expect(saved[0]!.blob.size, '録った音そのものを渡していない').toBe(new Blob(['録った音']).size);
+      expect(b.notices.join(''), '取り込めなかったこと自体は言う').toMatch(/取り込めませんでした/);
+    });
+
+    it('⚠ 対照群 ── 「保存しない」なら何も保存しない', async () => {
+      const saved: string[] = [];
+      const b = bench({ attachFails: true, confirm: async () => false, saveFile: (n) => void saved.push(n) });
+      await b.service.start('audio');
+      b.service.stop();
+      await tick();
+      await tick();
+      expect(saved).toEqual([]);
+    });
+
+    it('⚠ 対照群 ── 取り込めたときは申し出ない / 口が無ければ申し出ない(従来どおり)', async () => {
+      let asked = 0;
+      const ok = bench({ confirm: async () => { asked += 1; return true; }, saveFile: () => undefined });
+      await ok.service.start('audio');
+      ok.service.stop();
+      await tick();
+      expect(asked, '取り込めたのに申し出た').toBe(0);
+      const noPort = bench({ attachFails: true, confirm: async () => { asked += 1; return true; } });
+      await noPort.service.start('audio');
+      noPort.service.stop();
+      await tick();
+      expect(asked, '保存の口が無いのに申し出た(押しても何も起きない)').toBe(0);
+    });
+
+    it('🔴 答えを待つ間、録った音はメモリにだけ在るので、タブを閉じる前の確認に数える。答えたら外す', async () => {
+      let answer: (v: boolean) => void = () => undefined;
+      const b = bench({
+        attachFails: true,
+        confirm: () => new Promise<boolean>((r) => { answer = r; }),
+        saveFile: () => undefined,
+      });
+      await b.service.start('audio');
+      b.service.stop();
+      await tick();
+      await tick();
+      expect(b.actives.at(-1), '答えを待っている間に「動いている」が外れた(閉じても確認が出ない)').toBe(true);
+      answer(false);
+      await tick();
+      await tick();
+      expect(b.actives.at(-1), '答えた後も「動いている」が残っている').toBe(false);
+    });
   });
 
   it('⚠ 1 バイトも録れていないときは、添付も作らない', async () => {

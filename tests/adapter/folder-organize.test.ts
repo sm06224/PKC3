@@ -133,8 +133,15 @@ describe('居場所を変える(reducer)', () => {
       relationId: 'rel-3',
     });
     expect(r.state.relations).toHaveLength(0);
+    // 🔴 移す前の居場所を載せる(書けなかったときに画面を戻すため ── 台帳 #1852 N1 / 依頼 115-4 A)
     expect(r.events).toEqual([
-      { type: 'REQUEST_SET_PARENT', lid: 'n1', parentLid: null, relationId: 'rel-3' },
+      {
+        type: 'REQUEST_SET_PARENT',
+        lid: 'n1',
+        parentLid: null,
+        relationId: 'rel-3',
+        previous: [rel('r0', 'f1', 'n1')],
+      },
     ]);
   });
 
@@ -477,7 +484,7 @@ describe('フォルダ整理の導線(画面)', () => {
     expect(q('[data-pkc-region="filer-breadcrumb"]')!.textContent).not.toContain('t-f1');
     // ⚠ ただし**行き先は名乗る**(消えたのか入ったのか分からない、を作らない)
     // 🔴 知らせは「元に戻す」と同じ口(`OP_NOTICE`)に載る(#1087。移す口 4 つで同じ形にした)
-    expect(d.getState().notice, '行き先を言っていない').toBe('1 件を「t-f1」へ入れました');
+    expect(d.getState().notice, '行き先を言っていない').toBe('1 件を「t-f1」へ移しました');
     // ② disk へ届く
     expect(parentCalls).toEqual([
       { lid: 'n1', parentLid: 'f1', relationId: expect.any(String) },
@@ -505,11 +512,12 @@ describe('フォルダ整理の導線(画面)', () => {
     ]);
     // 🔴 出しても**中に居たまま**(OS ファイラと同じ)── f1 は空になる
     expect(rows(), '出した先へ勝手に移動した').toEqual([]);
-    expect(d.getState().notice).toBe('1 件を「ルート」へ入れました');
+    expect(d.getState().notice).toBe('1 件を「ルート」へ移しました');
     // ルートへ戻れば居る
     q<HTMLElement>('[data-pkc-region="filer-breadcrumb"] button')!.click();
     await tick();
-    expect(rows()).toEqual(['f1', 'f2', 'n1', 'n2']);
+    // 🔴 出したノートは、出し先(ルート)の末尾に並ぶ(台帳 #1852 N1 / 依頼 154 ②。直す前は作った順の途中 = n2 の前)
+    expect(rows()).toEqual(['f1', 'f2', 'n2', 'n1']);
   });
 
   /**
@@ -987,7 +995,7 @@ describe('掴んで落とす(#240 段④)', () => {
     );
     await tick();
     expect(d.getState().error ?? '', '断りが出ている').not.toContain('入れられません');
-    expect(d.getState().notice, '押した数と合っていない').toBe('2 件を「t-f1」へ入れました');
+    expect(d.getState().notice, '押した数と合っていない').toBe('2 件を「t-f1」へ移しました');
   });
 
   it('🔴 全部すでにそこに居たら「入れました」と言わない(動いていないのに動いたと言わない)', async () => {
@@ -1004,7 +1012,7 @@ describe('掴んで落とす(#240 段④)', () => {
      * 🔴 **知らせは「いまそこに在る数」を言う**(2026-08-18 の着地前レビュー M-3)。
      * ⚠ 直す前は**断りが混じる筋を通る test が 1 本も無かった**ので、件数を
      * 「掴んだ数」(`lids.length`)にすり替える変異が生き延びる ── そうなると
-     * 画面には「**2 件を「t-f1」へ入れました — ⚠ 1 件は入れられませんでした**」と
+     * 画面には「**2 件を「t-f1」へ移しました — ⚠ 1 件は入れられませんでした**」と
      * **自分同士で矛盾する 1 行**が出る。
      * ⚠ フォルダは自分の中へは入れられないので、`f1` と `n1` を `f1` へ落とすと
      *   `f1` だけが断られる(= 掴んだ 2 件・入った 1 件)。
@@ -1019,7 +1027,7 @@ describe('掴んで落とす(#240 段④)', () => {
       '1 件は入れられませんでした',
     );
     expect(d.getState().notice, '断られた分まで「入れました」と数えた').toBe(
-      '1 件を「t-f1」へ入れました',
+      '1 件を「t-f1」へ移しました',
     );
   });
 
@@ -1110,7 +1118,10 @@ describe('行の上半分 / 下半分に落とすと並べ替え(#215)', () => {
     edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'n1' }), q('tbody [data-pkc-entry="f1"]')!, 110);
     await tick();
     expect(parentCalls.map((c) => c.lid), '中へ入っていない').toEqual(['n1']);
-    expect(reordered, '中へ入れたのに並べ替えが走った').toEqual([]);
+    // 🔴 隣と入れ替える並べ替えは走らない。書くのは「移し先の末尾へ置く」1 件の並びの値だけ(台帳 #1852 N1 / 依頼 154 ②。全体の末尾 = 最大 6 の次の 7)
+    expect(reordered, '中へ入れたのに、隣との並べ替えが走った / 末尾へ置く 1 件が書かれていない').toEqual([
+      { lid: 'n1', entryOrder: 7 },
+    ]);
     expect(rows()).toEqual(['f1', 'f2', 'n2', 'n3', 'n4']);
   });
 

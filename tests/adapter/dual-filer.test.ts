@@ -264,7 +264,7 @@ describe('2 ペインの面(描画)', () => {
    *   変えるたびにボタンの字と幅が入れ替わっていた ── 不可侵指示「同じものが
    *   常に同じ場所にある」と逆である。🔑 いまは**ペインの情報行**が言う。
    */
-  it('🔴 焦点の側に印が付き、「ここが元」の字もそちらへ移る', () => {
+  it('🔴 焦点の側に印が付き、「ここから移す・コピーします」の字もそちらへ移る', () => {
     const r = new DualFilerRenderer(region);
     let s = booted();
     r.render(s);
@@ -273,14 +273,14 @@ describe('2 ペインの面(描画)', () => {
     const foot = (side: string) =>
       pane(side).querySelector('[data-pkc-field="dual-count"]')?.textContent ?? '';
     expect(pane('left').hasAttribute('data-pkc-focused'), '起動時の焦点が左でない').toBe(true);
-    expect(foot('left'), '焦点の側が「元」だと字で出ていない').toContain('(ここが元)');
-    expect(foot('right'), '両側が「元」に見える').not.toContain('(ここが元)');
+    expect(foot('left'), '焦点の側が「元」だと字で出ていない').toContain('(ここから移す・コピーします)');
+    expect(foot('right'), '両側が「元」に見える').not.toContain('(ここから移す・コピーします)');
     s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
     r.render(s);
     expect(pane('right').hasAttribute('data-pkc-focused')).toBe(true);
     expect(pane('left').hasAttribute('data-pkc-focused'), '焦点が 2 つある').toBe(false);
-    expect(foot('right'), '焦点を変えても「元」が移らない').toContain('(ここが元)');
-    expect(foot('left'), '前の焦点に「元」が残っている').not.toContain('(ここが元)');
+    expect(foot('right'), '焦点を変えても「元」が移らない').toContain('(ここから移す・コピーします)');
+    expect(foot('left'), '前の焦点に「元」が残っている').not.toContain('(ここから移す・コピーします)');
   });
 
   /**
@@ -427,7 +427,7 @@ describe('2 ペインの面(描画)', () => {
      *   全部 `null`(数えていない)なので **`—`** が出るのが正しい ──
      *   `0` と出すと「空だ」と読まれる。
      */
-    expect(foot().textContent).toBe('5 件中 1 件を選択 · — / —(ここが元)');
+    expect(foot().textContent).toBe('5 件中 1 件を選択 · — / —(ここから移す・コピーします)');
     // 絞り込みで a が消える ── 印は state に残るが、画面には出ていない
     s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'はこ' }).state;
     r.render(s);
@@ -435,7 +435,7 @@ describe('2 ペインの面(描画)', () => {
      * ⚠ **フォルダしか残っていないので、合計は出さない** ── 出すと `0` になり、
      *   「中身が空だ」と読まれる(フォルダは本文を持たないだけである)。
      */
-    expect(foot().textContent, '画面に無い印を数えている').toBe('2 件(ここが元)');
+    expect(foot().textContent, '画面に無い印を数えている').toBe('2 件(ここから移す・コピーします)');
   });
 
   /**
@@ -2012,7 +2012,8 @@ describe('2 ペインの写す(#273 段③)', () => {
       '元の中身が減った',
     ).toBe(2);
     // 🔴 件数は選んだ数で言い、中身は括弧で(#1087 の見直し 2026-10-13)
-    expect(statuses.at(-1)).toBe('1 件(中身を含め 3 件)を「ルート」へコピーしました');
+    // 🔴 知らせは「元に戻す」と同じ口(`OP_NOTICE`)に載る(台帳 #1852 N1 / 依頼 97-5 A)
+    expect(d.getState().notice).toBe('1 件(中身を含め 3 件)を「ルート」へコピーしました');
   });
 
   it('🔴 反対側がスマートフォルダの中なら、写さずに本当の理由で断る(黙ってルートへ入れない ── #1087 の見直し 2026-10-13)', async () => {
@@ -2035,7 +2036,7 @@ describe('2 ペインの写す(#273 段③)', () => {
     );
     await new Promise((r) => setTimeout(r, 0));
     expect(d.getState().error, '成功したのにエラーの行に出した').toBeNull();
-    expect(statuses.at(-1)).toBe('1 件を「ルート」へコピーしました');
+    expect(d.getState().notice).toBe('1 件を「ルート」へコピーしました');
     expect(d.getState().dual.left.selection, '印が残っている').toEqual([]);
   });
 });

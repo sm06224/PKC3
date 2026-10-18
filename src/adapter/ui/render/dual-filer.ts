@@ -25,7 +25,7 @@
  */
 import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
-import { listViewOptions } from '@adapter/state/list-view-options';
+import { dualListViewOptions } from '@adapter/state/list-view-options';
 import type { DualPaneState, DualSide } from '@features/relation/dual-pane';
 import {
   MAX_TABS,
@@ -37,12 +37,15 @@ import {
 } from '@features/relation/dual-pane';
 import {
   MAX_BOOKMARKS,
+  bookmarkTargetLid,
   isBookmarked,
   liveBookmarks,
   noteRefOf,
 } from '@features/relation/dual-bookmarks';
 import { filerRows, smartLidsOf } from '@features/relation/filer-list';
 import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
+// 🔴 スマートフォルダの「いまの状態」の字は左のペインと同じ 1 本(台帳 #1852 N1 / 依頼 322 A)
+import { smartEmptyText, smartTruncatedText } from './smart-status';
 import { normalizeQuery } from '@features/filter/title-filter';
 import { getAncestorFolders } from '@features/relation/tree';
 import { formatListUpdated, listDayStamp, formatStoredDate } from '@features/datetime/stored-date';
@@ -566,7 +569,7 @@ export class DualFilerRenderer {
         smartLids: smartLidsOf(paneScope(pane), state.smartHits),
         // 🔑 **絞り込みの規則は 1 本**(reducer / binder と同じ `paneFilterOptions`)
         ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
-        ...listViewOptions(state),
+        ...dualListViewOptions(state),
         // ⚠ 2 ペインは「中まで全部出す」(左の列の入り切り)を**持たない**(#813 段②)
         flatten: false,
       });
@@ -721,7 +724,7 @@ export class DualFilerRenderer {
   private paintFootOther(frame: PaneFrame, side: DualSide, other: DualSide, n: number): void {
     const text =
       n > 0
-        ? `${frame.footBase} · ${SIDE_LABEL[other]}に ${String(n)} 件選択中(元は${SIDE_LABEL[side]})`
+        ? `${frame.footBase} · ${SIDE_LABEL[other]}に ${String(n)} 件選択中(移す・コピーするのは${SIDE_LABEL[side]}の選択です)`
         : frame.footBase;
     if (frame.foot.textContent !== text) frame.foot.textContent = text;
   }
@@ -915,7 +918,7 @@ export class DualFilerRenderer {
     frame.forward.disabled = !canGoForward(pane);
 
     const scope = paneScope(pane);
-    const pinned = isBookmarked(bookmarks, scope);
+    const pinned = isBookmarked(bookmarks, scope, state.cid);
     /**
      * ⚠ **ルートは留めない** ── パンくずの左端が常にルートなので、1 押しで
      *   行ける所を帯に並べても枠を食うだけである。
@@ -955,7 +958,7 @@ export class DualFilerRenderer {
     bookmarks: readonly string[],
   ): void {
     const key = bookmarks
-      .map((k) => `${k}${SEP}${state.entryMetas.get(noteRefOf(k)?.lid ?? k)?.title ?? ''}`)
+      .map((k) => `${k}${SEP}${state.entryMetas.get(bookmarkTargetLid(k))?.title ?? ''}`)
       .join(SEP);
     if (key === frame.marksBarKey) return;
     frame.marksBarKey = key;
@@ -968,7 +971,8 @@ export class DualFilerRenderer {
        *   (`key`)、開く口のは**ノートの lid** ── 外すは綴りで引き、開くは lid で引く。
        */
       const noteLid = noteRefOf(key)?.lid ?? null;
-      const lid = noteLid ?? key;
+      // 🔴 古い綴り(素の lid)も新しい綴り(`place:`)も、指す先の lid は 1 本(依頼 328 A)
+      const lid = bookmarkTargetLid(key);
       const wrap = document.createElement('span');
       wrap.setAttribute('data-pkc-region', 'dual-bookmark');
       if (noteLid !== null) wrap.setAttribute('data-pkc-bookmark-kind', 'note');
@@ -1077,8 +1081,20 @@ export class DualFilerRenderer {
       state.dual.renaming !== null && state.dual.renaming.side === side
         ? state.dual.renaming.lid
         : '';
+    /**
+     * 🔴 **スマートフォルダの状態の字**(依頼 322 A)。⚠ 0 行のときの字がこれで変わる ── 指紋に入れないと、
+     *   「集めています」から「条件に合うノートがありません」へ変わる回(行は 0 件のまま)に描き直さず、古い字が残る。
+     */
+    const scopeLid = paneScope(pane);
+    const smartHit =
+      scopeLid !== null && state.entryMetas.get(scopeLid)?.archetype === SMART_ARCHETYPE
+        ? (state.smartHits.get(scopeLid) ?? null)
+        : undefined;
+    const smartText =
+      smartHit !== undefined && rows.length === 0 ? smartEmptyText(smartHit, filtered) : null;
     const signature = [
       filtered ? 'q' : '-',
+      `m:${smartText ?? ''}`,
       // ⚠ 見出しの印が並びと向きで変わる ── 入れないと印が古いまま残る
       `s:${state.entrySort}${state.entrySortDesc ? '-' : '+'}`,
       `r:${renaming}`,
@@ -1136,7 +1152,7 @@ export class DualFilerRenderer {
        *   入力欄は古い題名で作り直される。組み直す直前に、同じ行の入力欄の字とキャレットを採り、後で戻す。
        */
       const typed = this.readRenameInput(frame, renaming);
-      this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc);
+      this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc, smartText);
       if (typed !== null) {
         const input = frame.table.querySelector<HTMLInputElement>('[data-pkc-field="dual-rename"]');
         if (input !== null) {
@@ -1204,7 +1220,7 @@ export class DualFilerRenderer {
      * 🔑 焦点のある側は**そこが「元」である**ことも言う ── 操作行から向きの字を
      *   外した代わりに、ここが受ける。
      */
-    const here = side === state.dual.focus ? '(ここが元)' : '';
+    const here = side === state.dual.focus ? '(ここから移す・コピーします)' : '';
     /**
      * 🔴 **合計も出す**(#273 残件)── 古典 4 実装はどれも
      * 「選んだぶん / 全体」を情報行に出す。⚠ **量を判断に使う**面なので、
@@ -1252,10 +1268,13 @@ export class DualFilerRenderer {
      */
     const totalPart = total.hasBody ? ` · ${size(total)}` : '';
     const markedPart = marked.hasBody && total.hasBody ? ` · ${size(marked)} / ${size(total)}` : '';
+    // 🔴 スマートフォルダが 500 件で切っていたら、総数を言う(依頼 322 A。黙って切ると「これで全部」と読まれる)
+    const cut = smartHit === undefined ? '' : smartTruncatedText(smartHit);
+    const cutPart = cut === '' ? '' : ` · ${cut}`;
     const text =
       shown > 0
-        ? `${rows.length} 件中 ${shown} 件を選択${markedPart === '' ? totalPart : markedPart}${here}`
-        : `${rows.length} 件${totalPart}${here}`;
+        ? `${rows.length} 件中 ${shown} 件を選択${markedPart === '' ? totalPart : markedPart}${cutPart}${here}`
+        : `${rows.length} 件${totalPart}${cutPart}${here}`;
     frame.footBase = text;
     if (frame.foot.textContent !== text) frame.foot.textContent = text;
     this.renderPreview(frame, side, state);
@@ -1360,6 +1379,12 @@ export class DualFilerRenderer {
       const b = document.createElement('button');
       b.type = 'button';
       b.setAttribute('data-pkc-action', 'dual-crumb');
+      /**
+       * 🔴 **パンくずにも行を落として移せる**(台帳 #1852 N1 / 依頼 327 A。Gemini 回答 = 推薦どおり)。
+       * ⚠ 直す前は左のペインのパンくずには落とせるのに、2 ペインのパンくずには落とせなかった(同じ見た目の物に同じ操作が効かない)。
+       *   落とし先の印は左のパンくずと同じ値(`crumb`)── 受け手は 1 本(`dropTargetOf`)。ルートは `data-pkc-entry` が無い = ルートへ。
+       */
+      b.setAttribute('data-pkc-drop', 'crumb');
       b.setAttribute('data-pkc-side', side);
       if (lid !== null) b.setAttribute('data-pkc-entry', lid);
       b.textContent = label;
@@ -1396,6 +1421,8 @@ export class DualFilerRenderer {
     sort: AppState['entrySort'],
     /** いまの向き ── ▲▼ の向きに出す。 */
     sortDesc: boolean,
+    /** スマートフォルダが 0 行のときに言う字(`null` = ふつうの空の字)。 */
+    smartText: string | null,
   ): void {
     const dayStamp = listDayStamp(new Date());
     frame.rows.clear();
@@ -1411,9 +1438,9 @@ export class DualFilerRenderer {
        */
       const empty = document.createElement('p');
       empty.setAttribute('data-pkc-field', 'dual-empty');
-      empty.textContent = filtered
-        ? '探している語に一致するものが、ここにはありません'
-        : 'ここには何もありません';
+      empty.textContent =
+        smartText ??
+        (filtered ? '探している語に一致するものが、ここにはありません' : 'ここには何もありません');
       frame.table.append(empty);
       return;
     }

@@ -312,6 +312,14 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: 'ID を持つ。別の端末では別のノートを指す(あるいはどこも指さない)',
   },
   {
+    key: 'pkc3.timer-runs',
+    why: '計っている途中の時刻(台帳 #1852 O1 / 依頼 240)。ID を持ち、リロードした同じタブが続きを計るための一時の事実なので、運ぶ物は無い',
+  },
+  {
+    key: 'pkc3.tab-id',
+    why: '設定ではない(依頼 240)。このタブを見分ける番号(sessionStorage)。タブを閉じれば消える一時の事実で、運ぶ物は無い',
+  },
+  {
     key: 'pkc3.app.storage',
     why: '保存のキーではない。組み込みアプリとのやりとりに使う合図の名前',
   },

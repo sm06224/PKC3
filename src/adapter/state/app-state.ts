@@ -114,7 +114,7 @@ function withSqlSourceSet(
   };
 }
 import { pickErConnection, type ErPendingFrom } from '@features/query/er-connect';
-import { filerRowOptions, listViewOptions } from './list-view-options';
+import { filerRowOptions, dualListViewOptions } from './list-view-options';
 import { getAncestorFolders, reorderSibling, structuralParentsLookup, wouldMakeCycle } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { isAppendable } from '@features/flavor/append-spec';
@@ -3330,6 +3330,12 @@ export type UserAction =
   /** 同じ親の下で隣と入れ替える(2026-08-06。user 報告 2-10)。 */
   | { type: 'MOVE_ENTRY_ORDER'; lid: string; direction: 'up' | 'down' }
   /**
+   * 🔴 **並びの値を置く**(台帳 #1852 N1 / 依頼 154 ②。Gemini 回答 = 推薦どおり)。別のフォルダへ移したノートを、**移し先の末尾**に並べる。
+   * `'end'` = 全体の末尾(新しく作ったノートと同じ ── 同じ親の下の末尾にもなる)/ 数 = その値へ戻す(「元に戻す」が移す前の位置へ戻す)。
+   * ⚠ 値を戻すだけで、ほかのノートの値は動かさない(戻す値は移す前に読んだ物で、ほかのノートの値は変わっていない)。
+   */
+  | { type: 'SET_ENTRY_ORDER'; lid: string; entryOrder: number | 'end' }
+  /**
    * 🔴 **選んだ全部にタグを付ける / 外す**(#402 ①)。
    * ⚠ 相手は**いま表に出ている印**だけ(`delete-selected` と同じ規則 ── 画面に
    *   無いものを触らない)。呼び側がその集合を渡す。
@@ -3456,6 +3462,11 @@ export type UserAction =
       /** 🔴 画面の下の「元に戻す」から来た復元(#1087)。知らせの字を変え、さらに「元に戻す」を重ねて出さない。 */
       fromUndo?: true;
     }
+  /**
+   * 🔴 **パソコン側で変わったファイルの今の中身を、ノートの本文に取り込み直す**(台帳 #1852 N1 / 依頼 97-2 A)。
+   * 今のノートの中身は履歴に 1 件積まれる(戻せる)。⚠ 本文だけを置き換える(題名・タグの列・つながりは触らない)。
+   */
+  | { type: 'REIMPORT_BODY'; lid: string; body: string }
   | { type: 'SHOW_TRASH' }
   | { type: 'HIDE_TRASH' }
   | {
@@ -3569,6 +3580,12 @@ export type SystemCommand =
   /** 関係の保存に失敗したとき、画面を disk に合わせる(足した物を外す / 消した物を戻す) */
   | { type: 'ROLLBACK_RELATION'; change: 'added'; id: string }
   | { type: 'ROLLBACK_RELATION'; change: 'removed'; relation: Relation }
+  /**
+   * 🔴 **居場所の保存に失敗したとき、画面の移動を元に戻す**(台帳 #1852 N1 / 依頼 115-4 A。Gemini 回答 = 推薦どおり)。
+   * ⚠ 直す前は保存の空きが足りないなどで書けないときも、画面は先に移ったまま赤い字だけが出て、開き直すと元の場所に戻っていた。
+   * `previous` = 移す前のそのノートの居場所(構造のつながり)。いまの居場所を外して戻す。
+   */
+  | { type: 'ROLLBACK_ENTRY_PARENT'; lid: string; previous: readonly Relation[] }
   /**
    * 種類の保存に失敗したとき、画面の種類を元へ戻す(台帳 #1852 I2 / 依頼 157)。
    * ⚠ `to`(変える前)へ戻すのは、画面がまだ `from`(変えた後)のときだけ ── 間に別の変更が入っていたら触らない。
@@ -3742,6 +3759,11 @@ export type SystemCommand =
       undoTitle?: string;
       /** 🔴 「元に戻す」から来た復元(#1087)。知らせを「戻す前の本文に戻しました」にし、「元に戻す」は重ねて出さない。 */
       fromUndo?: true;
+      /**
+       * 🔴 **知らせの字を決める**(台帳 #1852 N1 / 依頼 97-2 A)。履歴の復元の知らせ(「前の版に戻しました」)でなく、
+       * パソコン側のファイルから取り込み直した回が自分の字を言うために使う。省略 = 従来の字。
+       */
+      notice?: string;
       /**
        * 🔴 **ゴミ箱から戻すと頼んだ時点の選択**(#1087)。着いたときの選択がこれと違えば、その間に別のノートを
        * 選び直している ── 選択を奪い返さない(`restoreStealsSelection`)。省略 = 判定しない(従来どおり戻したノートを選ぶ)。
@@ -4190,6 +4212,11 @@ export type DomainEvent =
       relationId: string;
       /** 🔴 2 本目以降の親(依頼 227 A)。reduce が輪・実在を検めて通った分だけ載せる。 */
       alsoIn?: readonly { parentLid: string; relationId: string }[];
+      /**
+       * 🔴 **移す前の居場所**(台帳 #1852 N1 / 依頼 115-4 A)。書けなかったとき、effect が画面を元に戻すために使う。
+       * ⚠ 前に居場所が無かった(ルートに居た)ときは載せない = 戻すときは居場所を外すだけ。
+       */
+      previous?: readonly Relation[];
     }
   | {
       type: 'PERSIST_ENTRY';
@@ -4445,6 +4472,18 @@ export type DomainEvent =
       /** 「元に戻す」から来た復元(`RESTORE_REVISION.fromUndo`)。 */
       fromUndo?: true;
     }
+  | {
+      /**
+       * パソコン側のファイルの今の中身で、本文を置き換える(前進変異 ── 現状を履歴へ積んでから書く)。
+       * ⚠ 読んでから書くまでに別の窓が書いていたら、1 バイトも書かず断る(`expectHash`)。meta snapshot は発火時捕獲。
+       */
+      type: 'REQUEST_REIMPORT';
+      lid: string;
+      title: string;
+      archetype: string;
+      entryOrder: number;
+      body: string;
+    }
   | { type: 'REQUEST_TRASH_LIST' }
   | { type: 'REQUEST_TRASH_UNDO'; lids: readonly string[]; orders?: Readonly<Record<string, number>> }
   | {
@@ -4585,6 +4624,7 @@ const SYSTEM_COMMAND_TYPES: Record<SystemCommand['type'], true> = {
   CODE_SAVED: true,
   CODE_SAVE_FAILED: true,
   ROLLBACK_RELATION: true,
+  ROLLBACK_ENTRY_PARENT: true,
   SET_ENTRY_ARCHETYPE_ROLLBACK: true,
 };
 
@@ -9791,6 +9831,10 @@ function reduceCore(
       const kept = state.relations.filter(
         (r) => !(r.kind === STRUCTURAL && r.toLid === action.lid),
       );
+      // 🔴 移す前の居場所(書けなかったときに戻す。依頼 115-4 A)
+      const removedBefore = state.relations.filter(
+        (r) => r.kind === STRUCTURAL && r.toLid === action.lid,
+      );
       /**
        * 🔴 **2 本目以降の親**(台帳 #1852 G1 / 依頼 227 A)── 「元に戻す」が、入っていたフォルダ全部へ戻すための口。
        * 1 本目と同じ検め(実在するフォルダ・自分でない・輪にならない)を通った分だけ張る。重複は 1 本に畳む。
@@ -9847,6 +9891,40 @@ function reduceCore(
             parentLid,
             relationId: action.relationId,
             ...(extraParents.length > 0 ? { alsoIn: extraParents } : {}),
+            ...(removedBefore.length > 0 ? { previous: removedBefore } : {}),
+          },
+        ],
+      };
+    }
+    case 'SET_ENTRY_ORDER': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      let entryMetas: Map<string, EntryMeta>;
+      let order: string[];
+      if (action.entryOrder === 'end') {
+        const lastLid = state.order[state.order.length - 1];
+        if (lastLid === undefined || lastLid === action.lid) return { state, events: [] };
+        const last = state.entryMetas.get(lastLid);
+        const entryOrder = (last?.entryOrder ?? 0) + 1;
+        entryMetas = new Map(state.entryMetas).set(action.lid, { ...meta, entryOrder });
+        order = [...state.order.filter((l) => l !== action.lid), action.lid];
+      } else {
+        if (!Number.isFinite(action.entryOrder) || meta.entryOrder === action.entryOrder)
+          return { state, events: [] };
+        entryMetas = new Map(state.entryMetas).set(action.lid, { ...meta, entryOrder: action.entryOrder });
+        // ⚠ 並びの規則は boot と同じ 1 本(entryOrder 昇順・同値は lid)
+        order = [...entryMetas.values()]
+          .sort((a, b) => a.entryOrder - b.entryOrder || a.lid.localeCompare(b.lid))
+          .map((m) => m.lid);
+      }
+      const set = entryMetas.get(action.lid)!;
+      return {
+        state: { ...state, entryMetas, order },
+        events: [
+          {
+            type: 'REQUEST_REORDER',
+            entries: [{ lid: set.lid, title: set.title, archetype: set.archetype, entryOrder: set.entryOrder }],
           },
         ],
       };
@@ -9931,6 +10009,13 @@ function reduceCore(
         state: { ...state, entryMetas: new Map(state.entryMetas).set(action.lid, { ...meta, archetype: action.to }) },
         events: [],
       };
+    }
+    case 'ROLLBACK_ENTRY_PARENT': {
+      // ⚠ いまの居場所を外して、移す前の居場所を戻す。移した後にさらに動かしていても、書けなかった分は disk に無いので同じ扱い
+      const kept = state.relations.filter(
+        (r) => !(r.kind === STRUCTURAL && r.toLid === action.lid),
+      );
+      return { state: { ...state, relations: [...kept, ...action.previous] }, events: [] };
     }
     case 'ROLLBACK_RELATION': {
       if (action.change === 'added') {
@@ -10155,6 +10240,32 @@ function reduceCore(
         ],
       };
     }
+    case 'REIMPORT_BODY': {
+      // 🔴 編集中・保存に失敗して止まっている間は、声に出して断る(無言の操作拒否を作らない)
+      if (state.phase !== 'ready') {
+        return {
+          state: { ...state, error: `${phaseBlockReason(state.phase) ?? ''}取り込み直してください` },
+          events: [],
+        };
+      }
+      // 🔴 章の欄が開いている間は断る(`RESTORE_REVISION` と同じ門 ── 復元は本文を丸ごと差し替える)
+      if (state.sectionDraft !== null) return sectionDraftBlockedResult(state);
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_REIMPORT',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            body: action.body,
+          },
+        ],
+      };
+    }
     case 'SHOW_TRASH': {
       /**
        * 🔴 **門を持たない**(#319)。⚠ 直す前は `phase !== 'ready'` で**黙って捨てて**
@@ -10302,7 +10413,7 @@ function reduceCore(
         smartLids: smartLidsOf(paneScope(pane), state.smartHits),
         // 🔑 **絞り込みの規則は 1 本**(`paneFilterOptions`)── 描く側と同じものを見る
         ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
-        ...listViewOptions(state),
+        ...dualListViewOptions(state),
         // ⚠ 2 ペインは「中まで全部出す」(左の列の入り切り)を**持たない**(#813 段②)
         flatten: false,
       });
@@ -10885,11 +10996,13 @@ function reduceCore(
             ...syncShownBodies(state, action.meta.lid, action.body),
             taskScan: refreshTaskCards(state.taskScan, action.meta.lid, action.body),
             smartHits: refreshSmartHits(state.smartHits, action.meta.lid, action.body, state.entryMetas),
-            notice: revisionRestoredNotice(
-              state.entryMetas.get(action.meta.lid)?.title ?? action.meta.title,
-              action.meta.title,
-              action.fromUndo === true,
-            ),
+            notice:
+              action.notice ??
+              revisionRestoredNotice(
+                state.entryMetas.get(action.meta.lid)?.title ?? action.meta.title,
+                action.meta.title,
+                action.fromUndo === true,
+              ),
           },
           events: [],
         };
@@ -10979,11 +11092,13 @@ function reduceCore(
                 // 🔴 「元に戻す」から来たときは、同じ字を出し続けない(#1087)。
                 //   さらに「元に戻す」を出すと、押すたびに同じ字のまま 2 つの本文を行き来する ──
                 //   もとの版は履歴に残っているので、続けて戻すのは履歴から選ぶ。
-                notice: revisionRestoredNotice(
-                  state.entryMetas.get(action.meta.lid)?.title ?? action.meta.title,
-                  action.meta.title,
-                  action.fromUndo === true,
-                ),
+                notice:
+                  action.notice ??
+                  revisionRestoredNotice(
+                    state.entryMetas.get(action.meta.lid)?.title ?? action.meta.title,
+                    action.meta.title,
+                    action.fromUndo === true,
+                  ),
                 // ⚠ 知らせの字そのものも持つ ── 画面の下に出ている字がこの知らせのときだけ「元に戻す」を出す
                 restoreUndo:
                   (action.undoRevId === undefined && action.undoTitle === undefined) || action.fromUndo === true
@@ -10991,11 +11106,13 @@ function reduceCore(
                     : {
                         lid: action.meta.lid,
                         revId: action.undoRevId ?? '',
-                        notice: revisionRestoredNotice(
-                          state.entryMetas.get(action.meta.lid)?.title ?? action.meta.title,
-                          action.meta.title,
-                          false,
-                        ),
+                        notice:
+                          action.notice ??
+                          revisionRestoredNotice(
+                            state.entryMetas.get(action.meta.lid)?.title ?? action.meta.title,
+                            action.meta.title,
+                            false,
+                          ),
                         ...(action.undoTitle === undefined ? {} : { title: action.undoTitle }),
                       },
                 noticeOpen: null,

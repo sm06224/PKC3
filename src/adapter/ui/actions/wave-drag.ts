@@ -133,7 +133,25 @@ export function bindWaveDrag(root: HTMLElement, dispatcher: Dispatcher): () => v
         const media = strip
           .closest('[data-pkc-capture]')
           ?.querySelector<HTMLMediaElement>('[data-pkc-field="capture-media"]');
-        if (media) media.currentTime = ms0 / 1000;
+        if (media) {
+          media.currentTime = ms0 / 1000;
+          /**
+           * 🔴 **一時停止中に押したときも、その位置から鳴らす**(台帳 #1852 O1 / 依頼 354 A。Gemini 回答 = 推薦どおり)。
+           * ⚠ 直す前は、波形に指を乗せると「押すとその位置から再生します」と出るのに、一時停止中に押すと位置が動くだけで鳴らなかった
+           *   (文字起こしの時刻を押したときは鳴る)。字のとおりにし、文字起こしの時刻を押したときと同じ動きにそろえる。
+           * ⚠ 位置は `play()` の前に書く(後に書くと、先頭から鳴り始めた直後に飛ぶ)。鳴っているときは位置を移すだけ(止めない)。
+           */
+          if (media.paused) {
+            const played = media.play();
+            if (played !== undefined && typeof played.catch === 'function') {
+              // ⚠ `AbortError` は「押した直後にもう一度押した」= 次の押しが引き継ぐ。言わない
+              played.catch((err: unknown) => {
+                if (!(err instanceof DOMException && err.name === 'AbortError'))
+                  dispatcher.dispatch({ type: 'OP_NOTICE', message: '再生を始められませんでした' });
+              });
+            }
+          }
+        }
       }
     };
     const onUp = (u: PointerEvent): void => {

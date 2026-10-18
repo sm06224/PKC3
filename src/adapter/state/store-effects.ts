@@ -2256,11 +2256,18 @@ export function connectStoreEffects(
           } catch (e) {
             // ⚠ 画面は既に動かしている(楽観)── 失敗は**必ず言う**。
             //    黙ると「移したつもりで disk は元のまま」になり、次の再読込で戻る
-            if (!disposed)
+            if (!disposed) {
+              // 🔴 画面の移動を元に戻して、赤い字だけを出す(台帳 #1852 N1 / 依頼 115-4 A)。直す前は画面だけ先に移ったままだった
+              dispatcher.dispatch({
+                type: 'ROLLBACK_ENTRY_PARENT',
+                lid: ev.lid,
+                previous: ev.previous ?? [],
+              });
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `フォルダへの所属を変えられませんでした(再読み込みすると元の場所に戻ります): ${errorText(e)}`,
+                error: `フォルダへの所属を変えられませんでした(画面は元の場所に戻しました): ${errorText(e)}`,
               });
+            }
           }
         });
         break;
@@ -3541,6 +3548,97 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'OP_FAILED',
                 error: `戻せませんでした: ${errorText(e)}`,
+              });
+          }
+        });
+        break;
+      case 'REQUEST_REIMPORT':
+        /**
+         * 🔴 **パソコン側のファイルの今の中身で、本文を置き換える**(台帳 #1852 N1 / 依頼 97-2 A)。前進変異 ──
+         * 現状を履歴へ積んでから書く(`checkpoint: true`)ので、画面の下の「元に戻す」で戻せる(`REQUEST_RESTORE` と同じ作り)。
+         * ⚠ 読んでから書くまでに別のタブ・窓が本文を書いていたら、1 バイトも書かず断る(`expectHash`)。
+         * ⚠ 本文が同じなら書かない(履歴を増やさない)。題名・種類・並びは触らない(行は発火時に控えた値で組む)。
+         */
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const current = await store.getBody(ev.lid);
+            if (disposed) return;
+            if (current === null) {
+              dispatcher.dispatch({ type: 'OP_FAILED', error: ENTRY_GONE_NOTE });
+              return;
+            }
+            if (current === ev.body) {
+              dispatcher.dispatch({
+                type: 'OP_NOTICE',
+                message: `「${ev.title}」は、ファイルの今の中身と同じなので、そのままです`,
+              });
+              return;
+            }
+            const ext = extractMeta(ev.archetype, ev.body);
+            const newestRev = async (): Promise<string | undefined> => {
+              try {
+                const rows = await store.listRevisionMetas(ev.lid);
+                let best: { id: string; rev_order: number } | undefined;
+                for (const r of rows) if (best === undefined || r.rev_order > best.rev_order) best = r;
+                return best?.id;
+              } catch {
+                return undefined;
+              }
+            };
+            const newestBefore = await newestRev();
+            const stamps = await store.persistEntry(
+              {
+                lid: ev.lid,
+                title: ev.title,
+                archetype: ev.archetype,
+                body: ev.body,
+                entryOrder: ev.entryOrder,
+                status: ext.status,
+                date: ext.date,
+                archived: ext.archived,
+              },
+              // 🔑 本文だけを書く(題名・種類・並びは disk の値を保つ ── 発火時に控えた画面の値で行を組まない)
+              { checkpoint: true, keepMeta: true, expectHash: contentHash64Hex(current) },
+            );
+            if (disposed) return;
+            if (stamps.conflict === true) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: '別のタブまたはウィンドウがこのノートを書き換えたため、取り込み直せませんでした(もう一度押してください)',
+              });
+              return;
+            }
+            const newestAfter = await newestRev();
+            const undoRevId = newestAfter !== undefined && newestAfter !== newestBefore ? newestAfter : undefined;
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'ENTRY_RESTORED',
+                mode: 'revision',
+                ...(undoRevId === undefined ? {} : { undoRevId }),
+                notice: `「${ev.title}」を、パソコン側のファイルの今の中身に取り込み直しました(前の中身は履歴に残しています)`,
+                meta: {
+                  lid: ev.lid,
+                  title: ev.title,
+                  archetype: ev.archetype,
+                  createdAt: null,
+                  updatedAt: null,
+                  entryOrder: ev.entryOrder,
+                  status: ext.status,
+                  date: ext.date,
+                  archived: ext.archived,
+                  // ⚠ worker が同じ本文から数え直す値と**同じ式**で置く(§7)
+                  bodyChars: ev.body.length,
+                },
+                body: ev.body,
+              });
+            // ⚠ `ENTRY_RESTORED` は meta を丸ごと置き換える(createdAt: null)ので、刻むのは**その後**
+            stamp(ev.lid, stamps);
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `取り込み直せませんでした: ${errorText(e)}`,
               });
           }
         });

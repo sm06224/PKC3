@@ -49,6 +49,21 @@ function parsePkc2Spreadsheet(body: string): Pkc2Spreadsheet {
   }
 }
 
+/**
+ * 🔴 **PKC2 の表が、PKC3 で画面に出ない設定(列の幅・行の高さ・グラフ・列の書式)を持っているか**
+ * (台帳 #1852 N1 / 依頼 97-3 B。Gemini 回答 = 推薦どおり)。取り込みの報告に 1 行足すための問い。
+ * ⚠ 値は frontmatter に保存されるが、画面には一切出ない ── PKC2 でグラフを作っていた人は「消えた」と探す。
+ */
+export function pkc2SheetHasHiddenLayout(body: string): boolean {
+  const s = parsePkc2Spreadsheet(body);
+  return (
+    (s.colWidths?.length ?? 0) > 0 ||
+    (s.rowHeights?.length ?? 0) > 0 ||
+    (s.charts?.length ?? 0) > 0 ||
+    (s.columnFormats?.length ?? 0) > 0
+  );
+}
+
 export const spreadsheetFlavor: FlavorSpec = {
   archetype: 'spreadsheet',
   // 「最初からセルが見えるべき」(PKC2 user direction 2026-06-02)── 5 列 × 3 行の空 grid

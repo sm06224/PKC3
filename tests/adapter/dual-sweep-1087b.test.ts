@@ -152,8 +152,8 @@ describe('A3: 作るとき、そのペインの「名前で絞る」を解く', 
   });
 });
 
-describe('A4: ノートのブックマークは、アプリ共通の探す語と種類の札も解く', () => {
-  it('🔴 語と札が残っていても、開いたノートの行が表に出る', () => {
+describe('A4: ノートのブックマークは、アプリ共通の探す語を解く(種類の札は 2 ペインが見ないので触らない ── 台帳 #1852 N1 / 依頼 323 A)', () => {
+  it('🔴 語が残っていても、開いたノートの行が表に出る。札は外さず、札があっても行は出る', () => {
     const t = setup();
     appDualPrefs.setBookmarks([noteBookmarkKey('c1', 'a')]);
     t.d.dispatch({ type: 'DUAL_SET_FILTER', side: 'left', filter: 'zzz-no-match' }); // 描き直しのきっかけ
@@ -170,7 +170,8 @@ describe('A4: ノートのブックマークは、アプリ共通の探す語と
     go!.click();
     const st = t.d.getState();
     expect(st.filterQuery, '共通の探す語が残っている').toBe('');
-    expect(st.kindFilter.size, '種類の札が残っている').toBe(0);
+    // 🔴 2 ペインは札を見ない ── 左のペインで押した札を勝手に外さない(札が掛かったままでも、ノートの行は出る)
+    expect(st.kindFilter.size, '左のペインの札を勝手に外した').toBe(1);
     expect(paneOf(st.dual, 'left').selection).toEqual(['a']);
     expect(t.row('left', 'a'), '行が 0 行で見えない').not.toBeNull();
   });

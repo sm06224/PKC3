@@ -352,6 +352,8 @@ import { appAsrPack, applyAsrResult } from '@adapter/ui/render/asr-pack-panel';
 import { asrReadyFrom, createCaptureTranscriber } from '@adapter/ui/actions/capture-transcribe';
 import { writeBackEntry } from '@adapter/ui/actions/write-back';
 import { createTimerService } from '@adapter/ui/actions/timer';
+import { appTimerRuns } from '@adapter/ui/render/timer-resume';
+import { offerReimport } from '@adapter/ui/actions/reimport-file';
 import { ALARM_SCAN_FAILED_TEXT, createAlarmService } from '@adapter/ui/actions/alarm';
 import { ALARM_BAR_CHANNEL, createAlarmBarSync, type AlarmBarSync } from '@adapter/platform/alarm-bar-sync';
 import type { AlarmDue } from '@features/alarm/alarm-due';
@@ -3456,6 +3458,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     lock: editLockPort,
     // 🔴 1 分を超えた録音・録画を残さずにやめるときの確認(自前の確認の器 = 他の確認と同じ 1 本)
     confirm: (message, o) => ask(message, o),
+    // 🔴 取り込めなかった録音・録画を、ファイルとして端末へ保存する(台帳 #1852 O1 / 依頼 239)
+    saveFile: (name, blob) => downloadBlob(name, blob),
   });
 
   /**
@@ -3479,10 +3483,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     scanVideo: (blob, startMs, endMs) => videoClient.scan(blob, startMs, endMs),
     cutVideo: (blob, scan, startMs, endMs, mode) => videoClient.cut(blob, scan, startMs, endMs, mode),
     confirm: (message, opts) => ask(message, opts),
-    attach: async (item) => {
+    // 🔴 切り出した物は元の録音と同じフォルダに作る(台帳 #1852 O1 / 依頼 355 A。下の取り出しと同じ引き方)
+    parentOf: (lid) => {
+      const st = dispatcher.getState();
+      return resolveCanonicalParents(st.entryMetas, st.relations).get(lid) ?? null;
+    },
+    attach: async (item, place) => {
       let out: Awaited<ReturnType<typeof attachOne>> = null;
       await withAssetGate.queued(async () => {
-        out = await attachOne(dispatcher, attachDeps, item);
+        out = await attachOne(dispatcher, attachDeps, item, undefined, place);
       });
       return out;
     },
@@ -3587,7 +3596,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     notify: showStatus,
     // 🔴 計っている間にタブを閉じる・読み直すと「離れますか」(計測はメモリ上にだけ在る。録音・預かりと同じ数え方)
     onActive: (active) => unloadGuard.setWriting(active, 'timer'),
+    // 🔴 計っている途中の時刻を端末に控え、開き直したら続けて計る(台帳 #1852 O1 / 依頼 240)
+    store: appTimerRuns,
   });
+  // ノートの一覧が読めてから続ける(消えたノートを見分けるため)
+  void whenPhaseReady(dispatcher, () => undefined).then(() => timerService.resume());
 
   /**
    * 🔴 **アラート**(#280)。段取りは `alarm.ts` が持ち、ここは口を渡すだけ。
@@ -3932,7 +3945,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         );
       });
     },
-    // 🔑 一時の知らせ(「3 件を『はこ』へ入れました」)── **エラーの行とは別**
+    // 🔑 一時の知らせ(「3 件を『はこ』へ移しました」)── **エラーの行とは別**
     showStatus,
     /**
      * 🔴 **何が容量を食っているか**(#415)── 数えるのは worker。
@@ -6202,10 +6215,33 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     );
     // 🔴 **同じファイルを 2 回開いても増やさない**(2026-08-05)。
     //    判定の中身は `launched-files.ts`(ここに書くと test が写しを見るだけになる)
-    const { fresh, reopened, changed } = await splitAlreadyOpen(items, launched, (lid) =>
+    const { fresh, reopened, changed, changedItems } = await splitAlreadyOpen(items, launched, (lid) =>
       dispatcher.getState().entryMetas.has(lid),
     );
     for (const lid of reopened) selectWhenPresent(dispatcher, lid);
+    /**
+     * 🔴 **変わっていたファイルは、聞いたうえで「取り込み直す」**(台帳 #1852 N1 / 依頼 97-2 A)。判断は `reimport-file.ts`。
+     *   ⚠ 聞くのは先頭の 1 件だけ(複数を同時に開いた回で、確認を連発しない)。残りは下の一行で言う。
+     */
+    const reimport = changedItems[0];
+    if (fresh.length === 0 && reimport !== undefined) {
+      const reimported = await offerReimport(
+        {
+          confirm: (message, o) => ask(message, o),
+          readText: async (lid) => {
+            const r = await launched.readCurrent(lid);
+            if (r === null || r.text === null) throw new Error('unreadable');
+            return r.text;
+          },
+          titleOf: (lid) => dispatcher.getState().entryMetas.get(lid)?.title ?? null,
+          replace: (lid, body) => dispatcher.dispatch({ type: 'REIMPORT_BODY', lid, body }),
+          refreshModified: (lid) => launched.refreshModified(lid),
+          say: showStatus,
+        },
+        { lid: reimport.lid, name: reimport.item.file.name },
+      );
+      if (reimported) return;
+    }
     if (fresh.length === 0) {
       // ⚠ **黙って終えない** ── 「開いたのに何も起きない」に見える
       // 🔴 取り込んだ後に file が変わっていたら、それを言う(PKC のノートは古いまま ── #1264 §2 欠陥 1)
