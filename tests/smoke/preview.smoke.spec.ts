@@ -145,7 +145,7 @@ test('🔴 ワーカーの動きが「メッセージ → 処理の記録」に�
   await expect(detailPane.locator('[data-pkc-field="detail-title"]')).toHaveText('処理の記録');
 
   // ③ 🔴 実際の出来事(lane / phase)が記録に並ぶ
-  await expect(detailPane, 'ワーカーの動きが記録に届いていない').toContainText('markdown', {
+  await expect(detailPane, 'ワーカーの動きが記録に届いていない').toContainText('Markdown の表示', {
     timeout: 10_000,
   });
   await expect(detailPane, '完了が記録に無い').toContainText('完了');
