@@ -564,6 +564,53 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
     .toBe(0);
 
   /**
+   * 🔴 **本文の検索で字の違いをそろえる**(台帳 #1852 束 B2。起動は足していない ── 同じ道中の続き)。
+   *   ノートを 4 件書き、左の欄で ① 全角の本文が半角で当たる ② 空白で区切った 2 語は AND ③ 隠したメモの中は当たらない
+   *   を見る。語はどれも題名に無い(題名の絞りで満たされない)。
+   */
+  const writeNote = async (text: string): Promise<void> => {
+    await createEntry(page, 'text');
+    const l = page.locator('[data-pkc-region="editor-live"]');
+    await expect(l).toBeVisible();
+    await clickReal(page, '[data-pkc-region="editor-live"]');
+    await l.locator('[data-pkc-field="row-source"]').fill(text);
+    await page.keyboard.press('Tab');
+    await clickReal(page, '[data-pkc-action="commit-edit"]');
+    await expect(page.locator('[data-pkc-field="detail-body"][data-pkc-painted]').first()).toBeVisible();
+  };
+  await writeNote('ここはＰＫＣの全角の本文です');
+  await writeNote('りんごとみかんの本文');
+  await writeNote('りんごだけの本文');
+  await writeNote('公開の文 %% 秘密のメモ %% 以上');
+  // ① 全角 → 半角(書いたノートは書込みの時点で索引に載る。起動後の作り直しと競っても答えは同じ集合なので、待つ)
+  await field.fill('pkc');
+  await expect(sideRow, '本文の全角「ＰＫＣ」が半角「pkc」で当たらない').toHaveCount(1, { timeout: 15_000 });
+  // ② 空白で区切った 2 語 = 両方を含むものだけ(「りんご」だけのノートは出ない)
+  await field.fill('りんご みかん');
+  await expect(sideRow, '2 語の AND になっていない(片方しか含まないノートが出る / 両方含むノートが出ない)').toHaveCount(1, {
+    timeout: 15_000,
+  });
+  await field.fill('りんご');
+  await expect(sideRow, '対照群:1 語なら「りんご」を含む 2 件が出る').toHaveCount(2, { timeout: 15_000 });
+  // ③ 隠したメモの中は当たらない。対照群 = 隠していない「公開」は当たる
+  await field.fill('公開');
+  await expect(sideRow, '対照群:メモの外の語「公開」で当たらない').toHaveCount(1, { timeout: 15_000 });
+  await field.fill('秘密');
+  await expect(sideRow, '`%% … %%` の中の「秘密」で当たっている').toHaveCount(0, { timeout: 15_000 });
+  await field.fill('');
+
+  // ④ 「探す」画面:コマンドの `-m` は除く語として読み、そのことを 1 行で言う
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=search';
+  });
+  const sPane = page.locator('[data-pkc-view-pane="search"]');
+  await expect(sPane).toBeVisible();
+  await sPane.locator('[data-pkc-field="search-page-input"]').fill('git commit -m');
+  await expect(sPane.locator('[data-pkc-field="search-page-excluded"]'), '「除く語:m」が出ない').toHaveText('除く語:m', {
+    timeout: 10_000,
+  });
+
+  /**
    * 🔴 **同じ道中で SQL の面まで見る**(#681 段②)。
    *
    * ⚠ **起動を足さない**(`location.hash` を書き換えるだけ ── 読み直しは要らない、と
