@@ -968,3 +968,53 @@ describe('🔴 追記欄とコード枠の欄(#1044 段3 2巡目の修理、V4)'
     expect(appendModeOf(s)).toEqual({ kind: 'hidden' });
   });
 });
+
+/**
+ * 🔴 台帳 #1852 束 R1(依頼 86-7 B): 章・コード枠の欄を開いている間、追記欄の場所に「章を編集中」と 1 行出す
+ * (以前は理由なく消えた)。ボタンは出さない。`appendModeOf` は `hidden` のまま(binder の門が読む判定は増やさない)。
+ */
+describe('🔴 章・コード枠の欄を開いている間の追記欄の場所(依頼 86-7)', () => {
+  const lockText = (q: ReturnType<typeof setup>['q']): string =>
+    q('[data-pkc-field="append-lock-reason"]')!.textContent ?? '';
+
+  it('🔴 章の欄: 追記欄は「章を編集中」の 1 行に替わる(打つ欄・ボタンは出ない) / 閉じれば戻る', async () => {
+    const { d, q } = setup([meta('n1', 'text')], { n1: '## 章\n\n中身\n' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick();
+    expect(q('[data-pkc-field="append-form"]')!.hidden, '前提: 追記欄が出ている').toBe(false);
+    d.dispatch({ type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 0 });
+    await tick();
+    const region = q('[data-pkc-region="append"]')!;
+    expect(region.hidden, '場所ごと消えた').toBe(false);
+    expect(q('[data-pkc-field="append-lock"]')!.hidden).toBe(false);
+    expect(lockText(q)).toBe('章を編集中');
+    expect(q('[data-pkc-field="append-form"]')!.hidden, '打つ欄が出ている').toBe(true);
+    // ボタンは出さない(出口は章の欄の「保存 / やめる」)
+    for (const action of ['commit-edit', 'cancel-edit', 'force-release']) {
+      expect(q(`[data-pkc-field="append-lock"] [data-pkc-action="${action}"]`)!.hidden, action).toBe(true);
+    }
+    d.dispatch({ type: 'CANCEL_SECTION_DRAFT' });
+    await tick();
+    expect(q('[data-pkc-field="append-form"]')!.hidden, '閉じても追記欄が戻らない').toBe(false);
+    expect(q('[data-pkc-field="append-lock"]')!.hidden).toBe(true);
+  });
+
+  it('コード枠の欄は「コードを編集中」', async () => {
+    const { d, q } = setup([meta('n1', 'text')], { n1: '```js\nconst a = 1;\n```\n' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick();
+    d.dispatch({ type: 'OPEN_CODE_DRAFT', lid: 'n1', line: 0 });
+    await tick();
+    expect(lockText(q)).toBe('コードを編集中');
+  });
+
+  it('対照群: 全文編集中は今までどおり「編集中」と出口(章の字にならない)/ appendModeOf は hidden のまま', async () => {
+    const { d, q } = setup([meta('n1', 'text')], { n1: '本文\n' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick();
+    d.dispatch({ type: 'START_EDIT', lid: 'n1' });
+    await tick();
+    expect(lockText(q)).not.toBe('章を編集中');
+    expect(q('[data-pkc-field="append-lock"] [data-pkc-action="commit-edit"]')!.hidden).toBe(false);
+  });
+});
