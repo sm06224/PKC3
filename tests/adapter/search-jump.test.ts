@@ -182,14 +182,16 @@ describe('🔴 #1087: 整形された字と、節点をまたぐ語', () => {
   const hits = (md: string, q: string): string[] =>
     collectHitRanges(hostOf(md), q, 'filter').map((r) => r.toString());
 
-  it('前提: 描画は字を整形する(崩れたら以下は空振りになる)', () => {
+  it('前提: 描画は引用符だけ整形し、記号(…・–・©・™・±)には置き換えない(依頼 254)', () => {
     const t = hostOf('don\'t "hi" Wait... a -- b (c) (tm) +-').textContent ?? '';
-    for (const ch of ['’', '“', '…', '–', '©', '™', '±'])
+    for (const ch of ['’', '“'])
       expect(t, `整形後の本文に ${ch} が居る`).toContain(ch);
+    for (const ch of ['…', '–', '©', '™', '±'])
+      expect(t, `本文に ${ch} は出ない`).not.toContain(ch);
   });
 
   it.each(["don't", '"hi"', 'Wait...', 'a -- b', '(c)', '(tm)', '+-'])(
-    '打った字 %s が、整形された本文で 1 件当たる',
+    '打った字 %s が、描かれた本文で 1 件当たる',
     (typed) => {
       const got = hits(`before ${typed} after`, typed);
       expect(got).toHaveLength(1);

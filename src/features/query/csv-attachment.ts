@@ -27,7 +27,7 @@
  *   `validCsvTableName` が守っている規律と同じ理由)。固定名なら誰でも同じ字を打てる。
  */
 import { DELIMITER, parseCsv } from '@features/markdown/csv-table';
-import { CSV_SOURCE_COLUMNS, CSV_TABLE_CELLS_MAX, csvColumnNames } from './csv-tables';
+import { CSV_SOURCE_COLUMNS, CSV_TABLE_CELLS_MAX, csvColumnNames, widenHeader } from './csv-tables';
 import type { SqlSource } from './sqlite-attachment';
 
 /** 添付として選べる CSV 系の言語。 */
@@ -98,7 +98,9 @@ export function buildCsvAttachmentTable(
   const grid = parseCsv(text, DELIMITER[lang]);
   // ⚠ `parseCsv` は空 / 白紙だけの入力に `null` を返す(`csv-tables.ts` と同じ前提)
   if (grid === null) return null;
-  const header = grid[0] ?? [];
+  // 🔴 見出しより升の多い行の余りは、「列3」「列4」の列として足す(捨てない。台帳 #1852 束 R1、依頼 263 A)
+  const width = grid.reduce((w, r) => Math.max(w, r.length), 0);
+  const header = widenHeader(grid[0] ?? [], width);
   const columns = [...CSV_SOURCE_COLUMNS, ...csvColumnNames(header, CSV_SOURCE_COLUMNS)];
   const body = grid.slice(1);
   // ⚠ 列数は必ず 1 以上(`csvColumnNames` は見出しが 1 升でも 1 列返す) ──

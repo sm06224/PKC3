@@ -226,6 +226,20 @@ export function csvColumnNames(
 }
 
 /**
+ * 🔴 **見出しより升の多い行の余りを、捨てずに「列3」「列4」の列にする**(台帳 #1852 束 R1、依頼 263 A)。
+ *
+ * 見出しが `a,b` の csv に `1,2,3,4` の行があると、3 と 4 は表に出ず、何も知らされなかった。
+ * 字を 1 つも捨てないよう、余った位置に `列<位置>` の名前の列を足す。見出しより升の少ない行は今までどおり空(`null`)。
+ * ⚠ 名前の重なりは `csvColumnNames` が `_2` で逃がす(見出しに「列3」があっても壊れない)。
+ */
+export function widenHeader(header: readonly string[], width: number): string[] {
+  if (header.length >= width) return [...header];
+  const out = [...header];
+  for (let i = header.length; i < width; i++) out.push(`列${String(i + 1)}`);
+  return out;
+}
+
+/**
  * 列の名前の重なりを `_2` `_3` で逃がす(大文字小文字は区別しない)。
  * 🔑 `csvColumnNames` は見出しを整える所までやる ── 整えずに重なりだけを直したい面
  *   (JSON の書き出し)はこちら。
@@ -316,7 +330,7 @@ export function collectCsvTables(
     const width = grid.reduce((w, r) => Math.max(w, r.length), 0);
     const header = noHeader
       ? Array.from({ length: width }, (_, i) => `col${String(i + 1)}`)
-      : (grid[0] ?? []);
+      : widenHeader(grid[0] ?? [], width);
     const rows = noHeader ? grid : grid.slice(1);
     out.push({
       name: raw,
@@ -333,9 +347,8 @@ export function collectCsvTables(
  * 同じ名前の囲みを 1 つの表へ積む。
  *
  * ⚠ **列は和集合**(出現順)。無い所は `null` ── 落とすと「書いたのに引けない」。
- * ⚠ 行の升が列より多い分は**捨てない** ── 名前の無い列(`col<N>`)として足す
- *   …のではなく、**見出しの数までで切る**。⚠ ここは切ってよい:見出しの外の升は
- *   csv としても「どの列か」を持たないので、名前の付けようが無い。
+ * 🔴 行の升が見出しより多い分は**捨てない**(依頼 263 A)── 読む側(`widenHeader`)が
+ *   `列3` `列4` の名前の列として足している。以前は「どの列か分からない」と切っていた。
  */
 export function mergeCsvTables(blocks: readonly CsvTableBlock[]): CsvTable[] {
   const byName = new Map<string, CsvTableBlock[]>();

@@ -30,6 +30,7 @@
  */
 import { indentedCodeRanges, scanLinks } from '../markdown/link-scan';
 import { ifFormatMatches, ifFormatOf } from '../markdown/if-format';
+import { replaceInlineComments } from '../markdown/inline-comment';
 
 /**
  * 🔴 **同じ容れ物のノートを指す形は 2 つある**(#379)。
@@ -159,7 +160,7 @@ function withoutHidden(text: string): string {
       continue;
     }
     if (hidden > 0) lines[i] = blank(raw);
-    else if (raw.includes('%%')) lines[i] = raw.replace(/%%[^\n]*?%%/g, blank);
+    else if (raw.includes('%%')) lines[i] = replaceInlineComments(raw, blank);
   }
   return lines.join('');
 }

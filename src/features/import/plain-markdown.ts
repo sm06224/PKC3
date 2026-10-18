@@ -144,6 +144,45 @@ export function firstHeading(body: string): string | null {
 }
 
 /**
+ * 🔴 **見出しから付ける題名は、記号を外した「見える字」にする**(台帳 #1852 束 R1、依頼 262 A)。
+ *
+ * 前書きに題名が無い md は最初の見出しが題名になる。見出しの原文のままだと
+ * `# **太字** と [リンク](http://x)` の題名に記号が残り、一覧で探しにくい。
+ * 外すのは題名にするときだけ ── **本文は 1 字も変わらない**。
+ *   `**` `__` `*` `_` `~~` `==` と `` ` `` は外す / リンクは見える字だけ / 画像は代替の字 /
+ *   `[[Wiki Link]]` は中の字(`[[先|見える字]]` は見える字)/ 行末の `{#…}` `{.…}` は消す /
+ *   `\*` のような逃がしは元の字に戻す。
+ * ⚠ 全部外れて空になったら `null`(次の候補 = ファイル名へ)。
+ */
+export function headingToTitle(raw: string): string | null {
+  const kept: string[] = [];
+  let s = raw.replace(/\\([!-/:-@[-`{-~])/g, (_m, ch: string) => {
+    kept.push(ch);
+    return `\uE000${kept.length - 1}\uE001`;
+  });
+  // 行末の属性 `{#id}` / `{.class}`
+  s = s.replace(/[ \t]*\{[#.][^{}]*\}[ \t]*$/, '');
+  // 画像・リンク(参照形式も)・Wiki リンク・ルビ
+  s = s.replace(/!\[([^\]]*)\]\((?:[^()]|\([^)]*\))*\)/g, '$1');
+  s = s.replace(/\[([^\]]*)\]\((?:[^()]|\([^)]*\))*\)/g, '$1');
+  s = s.replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1');
+  s = s.replace(/\[\[ruby:([^|\]]*)\|[^\]]*\]\]/g, '$1');
+  s = s.replace(/\[\[(?:[^|\]]*\|)?([^\]]*)\]\]/g, '$1');
+  // コード(中の記号は強調ではない ── 先に退避する)
+  s = s.replace(/(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/g, (_m, _q: string, inner: string) => {
+    kept.push(inner);
+    return `\uE000${kept.length - 1}\uE001`;
+  });
+  // 強調・取り消し線・ハイライト
+  s = s.replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, '$2');
+  s = s.replace(/(?<![\p{L}\p{N}_*])([*_])(?=[^\s*_])([^*_]+?)(?<=\S)\1(?![\p{L}\p{N}_*])/gu, '$2');
+  s = s.replace(/(~~|==)(?=\S)(.+?)(?<=\S)\1/g, '$2');
+  s = s.replace(/\uE000(\d+)\uE001/g, (_m, i: string) => kept[Number(i)] ?? '');
+  s = s.trim();
+  return s === '' ? null : s;
+}
+
+/**
  * 相対パス参照(解決しない)を数える。⚠ 数えるだけで、本文は書き換えない。
  *
  * 🔴 走査は **`markdown/link-scan.ts` の 1 本**に寄せてある(review M-3)。
@@ -213,7 +252,9 @@ export function readPlainMarkdown(text: string, fileName: string): PlainMarkdown
   for (const w of parsed.warnings) warnings.push(`前書き: ${w.detail}`);
 
   const metaTitle = parsed.meta['title'];
-  const heading = firstHeading(parsed.body);
+  // 🔴 見出しから付ける題名は記号を外した見える字(依頼 262)。外して空なら見出しは使わない(ファイル名へ)
+  const headingRaw = firstHeading(parsed.body);
+  const heading = headingRaw === null ? null : headingToTitle(headingRaw);
   const fromName = titleFromFileName(fileName);
   // 🔴 数・真偽の `title: 2024` / `title: true` も題名にする(#1087)。⚠ block scalar の印(`|` `>-` など)は
   //    `parseFlatYaml` が字のまま返す ── 中身ではないので題名にしない(見出し → file 名へ)

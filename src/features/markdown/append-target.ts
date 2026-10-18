@@ -25,11 +25,12 @@
  *
  * 🔑 **pure module**。DOM も窓も知らない。
  */
-import { makeSlugCounter } from './markdown-toc';
+import { makeSlugCounter, makeLegacySlugCounter } from './markdown-toc';
+import { extractHeadingNumberConfig } from './document-globals';
 import { extractVars, frontmatterLineCount, parseFrontmatter } from './frontmatter';
 import { expandVarsInText } from './var-expand';
 import { fenceStep } from './list-renumber';
-import { stripComments } from './markdown-render';
+import { stripComments, preprocessHeadingNumbers } from './markdown-render';
 
 /** 追記の入り先 1 つ。 */
 export interface AppendTarget {
@@ -45,6 +46,8 @@ export interface AppendTarget {
 interface HeadingAt extends AppendTarget {
   /** 見出しそのものの行(0 起点、**原文の**行番号)。 */
   readonly line: number;
+  /** 古い名前(記号を抜いただけの綴り / 見出し番号つきの綴り)。既に書かれたリンクを読み続けるための別名。 */
+  readonly legacySlug: string;
 }
 
 /**
@@ -70,11 +73,23 @@ function scanHeadings(body: string): HeadingAt[] {
   // 🔑 frontmatter の**行数**だけ借りて、その先から見る(剥がした本文は使わない)
   const fm = parseFrontmatter(stripped.transformed);
   const skip = fm.found ? lines.length - fm.body.split(/\r?\n/).length : 0;
-  const slugCounter = makeSlugCounter();
+  // 🔴 見出し番号つきの文書は、番号を除いた字から名前を作る(描画・目次と同じ ── 台帳 #1852 束 R1、依頼 279 / 351)
+  const numberCfg = extractHeadingNumberConfig(body);
+  const slugCounter = makeSlugCounter({ stripNumber: numberCfg !== null });
+  const legacyCounter = makeLegacySlugCounter();
+  // 古い名前は、描画が番号を前置した後の字から作られていた ── 同じ前置きを(本文の行だけに)掛けて読む
+  const numberedLines =
+    numberCfg === null
+      ? lines
+      : [
+          ...lines.slice(0, skip),
+          ...preprocessHeadingNumbers(lines.slice(skip).join('\n'), numberCfg.start).split('\n'),
+        ];
   // 🔴 id は描画と同じく**変数を展開した字**から作る(#1087 N2)── 生の `{{vars.x}}` で作ると
   //   描画の id と食い違い、埋め込みが「見出しが見つかりません」になる。展開は描画と同じ関数・その本文自身の vars。
   const vars = extractVars(body);
   const slugOf = (t: string): string => slugCounter(expandVarsInText(t, vars));
+  const legacyOf = (t: string): string => legacyCounter(expandVarsInText(t, vars));
   const out: HeadingAt[] = [];
   let fence = '';
   // 下線の見出しの本文候補(記法を持たない素の行の並び)と、その最初の行(原文)
@@ -120,7 +135,7 @@ function scanHeadings(body: string): HeadingAt[] {
       const at = paraAt;
       para = [];
       if (text !== '') {
-        out.push({ slug: slugOf(text), text, level: u[1]![0] === '=' ? 1 : 2, line: at });
+        out.push({ slug: slugOf(text), legacySlug: legacyOf(text), text, level: u[1]![0] === '=' ? 1 : 2, line: at });
       }
       continue;
     }
@@ -140,7 +155,14 @@ function scanHeadings(body: string): HeadingAt[] {
     if (!m) continue;
     const text = m[2]!.trim();
     if (text === '') continue;
-    out.push({ slug: slugOf(text), text, level: m[1]!.length as 1 | 2 | 3, line: origin(i) });
+    const seen = /^ {0,3}#{1,3}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(numberedLines[i] ?? line);
+    out.push({
+      slug: slugOf(text),
+      legacySlug: legacyOf((seen?.[1] ?? text).trim()),
+      text,
+      level: m[1]!.length as 1 | 2 | 3,
+      line: origin(i),
+    });
   }
   return out;
 }
@@ -173,7 +195,9 @@ export interface SectionRange {
  */
 export function sectionRange(body: string, slug: string): SectionRange | null {
   const heads = scanHeadings(body);
-  const at = heads.findIndex((h) => h.slug === slug);
+  let at = heads.findIndex((h) => h.slug === slug);
+  // 🔴 古い名前でも読む(記号を抜いただけの綴り / 見出し番号つきの綴り。依頼 255 / 279)
+  if (at < 0) at = heads.findIndex((h) => h.legacySlug === slug);
   if (at < 0) return null;
   const me = heads[at]!;
   const lines = body.split(/\r?\n/);

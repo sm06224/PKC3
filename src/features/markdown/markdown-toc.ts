@@ -101,9 +101,64 @@ export type TocNode = TocHeadingNode | TocDayNode | TocLogNode;
 export type TocHeading = Omit<TocHeadingNode, 'kind'> & { kind?: 'heading' };
 
 /**
+ * 🔴 **見出しの原文から、画面に見えている字を作る**(台帳 #1852 束 R1、依頼 255)。
+ *
+ * 飛び先の名前(`#docs`)は「画面に見えている見出しの字」から作る。以前は原文から記号を抜いただけだったので、
+ * `# [Docs](http://a.com)` は `#docshttpacom` と書かないと飛べなかった。
+ * ⚠ 名前を作るためだけの読み方 ── 記号は後段の `slugifyHeading` がどのみち落とすので、
+ *   ここで要るのは「**字が消える / 字が増える**」物(リンク・画像・コード・ルビ・エスケープ・下線の強調)だけである。
+ */
+export function visibleHeadingText(raw: string): string {
+  let s = raw;
+  // エスケープ: `\_` は字の `_`(名前に残す)、ほかの `\記号` は名前に残らない記号なので落とす
+  s = s.replace(/\\([!-/:-@[-`{-~])/g, (_m, ch: string) => (ch === '_' ? '\uE000' : ''));
+  // 画像・リンク: 見える字だけ(入れ子の `()` は 1 段まで)
+  s = s.replace(/!\[([^\]]*)\]\((?:[^()]|\([^)]*\))*\)/g, '$1');
+  s = s.replace(/\[([^\]]*)\]\((?:[^()]|\([^)]*\))*\)/g, '$1');
+  // ルビ・傍点: 本文の字だけ(ルビの読みは名前に入れない)
+  s = s.replace(/\[\[ruby:([^|\]]*)\|[^\]]*\]\]/g, '$1');
+  s = s.replace(/\[\[em:([^\]]*)\]\]/g, '$1');
+  // コード: 中の字(中の `_` は強調ではない ── 先に退避して、最後に戻す)
+  s = s.replace(/(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/g, (_m, _q: string, inner: string) =>
+    inner.replace(/_/g, '\uE000'),
+  );
+  // 下線の強調 `_x_` / `__x__`: 語の境目にあるものだけ(`snake_case` の `_` は字)
+  s = s.replace(
+    /(^|[^\p{L}\p{N}_])_{1,2}(?=\S)([^_]*?\S)_{1,2}(?![\p{L}\p{N}_])/gu,
+    '$1$2',
+  );
+  return s.replace(/\uE000/g, '_');
+}
+
+/** 見出し番号(`1.` / `1.2` / `1.2.3`)の前置き。`preprocessHeadingNumbers` が手書き番号と見なすのと同じ形。 */
+const HEADING_NUMBER_PREFIX = /^\d+(?:\.\d+)*\.?[ \t]+/;
+
+/** 見出し番号が付く文書で、番号を除いた字(番号しか無ければそのまま)。 */
+export function stripHeadingNumber(text: string): string {
+  const stripped = text.replace(HEADING_NUMBER_PREFIX, '');
+  return stripped.trim() === '' ? text : stripped;
+}
+
+/**
  * Slugify a heading text into a URL-/id-friendly token.
+ * 🔴 見出しの**見えている字**から作る(`visibleHeadingText`)。`_` は字として残す(`snake_case` は `snake_case`)。
  */
 export function slugifyHeading(text: string): string {
+  return visibleHeadingText(text)
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}_\s-]/gu, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
+ * 🔴 **古い名前**(依頼 255 B / 279 / 351)── 見出しの原文から記号を抜いただけの綴り。
+ * 既に書かれた `#docshttpacom` や、見出し番号つきの `entry:X#h/11-第一章-概要` を**読み続ける**ために残す。
+ * ⚠ 新しく作るのには使わない(見出しに付く別名としてだけ出す)。
+ */
+export function legacySlugifyHeading(text: string): string {
   return text
     .toLowerCase()
     .trim()
@@ -113,15 +168,12 @@ export function slugifyHeading(text: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-/**
- * Create a slug generator that tracks collisions within a single render.
- */
-export function makeSlugCounter(): (text: string) => string {
+function counterOf(slugify: (t: string) => string, pre?: (t: string) => string): (text: string) => string {
   const counter = new Map<string, number>();
   // 出した id の全部。⚠ `A, A, A-1` で 2 つ目が `a-1` を取ると、3 つ目の素の `a-1` とぶつかる
   const issued = new Set<string>();
   return (text: string) => {
-    const base = slugifyHeading(text) || 'heading';
+    const base = slugify(pre ? pre(text) : text) || 'heading';
     let n = counter.get(base) ?? 0;
     let id = n === 0 ? base : `${base}-${n}`;
     while (issued.has(id)) {
@@ -132,6 +184,20 @@ export function makeSlugCounter(): (text: string) => string {
     issued.add(id);
     return id;
   };
+}
+
+/**
+ * Create a slug generator that tracks collisions within a single render.
+ * @param opts.stripNumber 見出し番号(frontmatter `heading-number`)が付く文書では `true` ── 番号を除いた字から作る
+ *   (番号は見せ方なので、章を足して番号がずれてもリンクの名前は変わらない。依頼 351)
+ */
+export function makeSlugCounter(opts?: { stripNumber?: boolean }): (text: string) => string {
+  return counterOf(slugifyHeading, opts?.stripNumber ? stripHeadingNumber : undefined);
+}
+
+/** 古い名前(`legacySlugifyHeading`)の衝突つき発行器。見出し番号つきの字を渡すと、番号つきの古い名前になる。 */
+export function makeLegacySlugCounter(): (text: string) => string {
+  return counterOf(legacySlugifyHeading);
 }
 
 /**
@@ -147,9 +213,9 @@ export interface ExtractHeadingsOptions {
   /** setext(`===` / `---` の下線)と、引用・リストの中の `#` 見出しも拾う(描画は拾っている) */
   blockForms?: boolean;
   /**
-   * 見出し番号(frontmatter `heading-number`)を本文と同じに振る関数(注入。実体は markdown-render で、循環を避ける)。
-   * 🔑 本文の見出し id は番号つきの字から作られる(`1-概要`)ので、目次の slug も同じ字から作らないと
-   *   押しても「まだ表示されていません」になる。⚠ 目次に出す字(`text`)は番号なしのまま。
+   * 見出し番号(frontmatter `heading-number`)が付く文書であることの印(関数の中身は使わない)。
+   * 🔴 台帳 #1852 束 R1(依頼 351): 本文の見出し id は**番号を除いた字**から作る(章を足して番号がずれても
+   *   リンクが切れない)ので、目次の slug も番号を除いた字から作る。⚠ 目次に出す字(`text`)は番号なしのまま。
    */
   numberHeadings?: (source: string) => string;
 }
@@ -179,17 +245,18 @@ export function extractHeadingsFromMarkdown(
   body = expandVarsInText(body, extractVars(markdown));
   body = stripMismatchedIfBlocks(body, 'html');
 
-  const plain = scanHeadings(body, opts);
-  if (!opts?.numberHeadings) return plain;
-  // 行の挿入・削除はしない番号の前置だけなので、同じ順で同じ数の見出しが出る。slug だけ番号つきの側から取る
-  const numbered = scanHeadings(opts.numberHeadings(body), opts);
-  if (numbered.length !== plain.length) return plain;
-  return plain.map((h, i) => ({ ...h, slug: numbered[i]!.slug }));
+  // 🔴 見出し番号つきの文書は、番号を除いた字から名前を作る(本文の見出し id と同じ ── 依頼 351)。
+  //   番号は本文を描くときの前置きなので、ここでは前置きせずに読み、`stripNumber` で手書きの番号も同じに揃える
+  return scanHeadings(body, opts, opts?.numberHeadings !== undefined);
 }
 
-function scanHeadings(body: string, opts: ExtractHeadingsOptions | undefined): TocHeading[] {
+function scanHeadings(
+  body: string,
+  opts: ExtractHeadingsOptions | undefined,
+  stripNumber: boolean,
+): TocHeading[] {
   const headings: TocHeading[] = [];
-  const slugOf = makeSlugCounter();
+  const slugOf = makeSlugCounter({ stripNumber });
   const lines = body.split(/\r?\n/);
   let fence = '';
   const blockForms = opts?.blockForms === true;

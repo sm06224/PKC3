@@ -150,10 +150,10 @@ describe('保存名は置換前の原文(#1087 A1)', () => {
     expect(host.querySelector('a.pkc-asset-link')!.getAttribute('data-pkc-asset-name')).toBe('[1].pdf');
   });
 
-  it('画面に見えるリンクの字は今のまま(typographer の置換が効く)', () => {
+  it('画面に見えるリンクの字: 引用符は曲がり、記号(--)は書いたまま(依頼 254)', () => {
     const host = renderToDom("[Tom's x--y.pdf](asset:k1)");
     const a = host.querySelector('a.pkc-asset-link')!;
-    expect(a.textContent).toBe('Tom’s x–y.pdf');
+    expect(a.textContent).toBe('Tom’s x--y.pdf');
     expect(a.getAttribute('data-pkc-asset-name')).toBe("Tom's x--y.pdf");
   });
 

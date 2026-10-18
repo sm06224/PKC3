@@ -113,6 +113,15 @@ describe('列の名前を直す', () => {
 describe('本文から拾う', () => {
   const note = { lid: 'l1', title: 'メモ' };
 
+  it('🔴 見出しより升の多い行の余りは「列3」の列になる(台帳 #1852 束 R1、依頼 263)', () => {
+    const got = collectCsvTables(fence('csv name=余り', ['a,b', '1,2,3,4', '5,6']), note);
+    expect(got[0]?.columns).toEqual(['a', 'b', '列3', '列4']);
+    const merged = mergeCsvTables(got)[0]!;
+    expect(merged.columns).toEqual(['_note', '_lid', 'a', 'b', '列3', '列4']);
+    expect(merged.rows[0]).toEqual(['メモ', 'l1', '1', '2', '3', '4']);
+    expect(merged.rows[1]).toEqual(['メモ', 'l1', '5', '6', null, null]);
+  });
+
   it('名前つきの囲みだけを拾う', () => {
     const body = fence('csv name=売上', ['品名,数', 'りんご,3']) + fence('csv', ['a,b', '1,2']);
     const got = collectCsvTables(body, note);

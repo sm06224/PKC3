@@ -69,8 +69,10 @@ export function expandVarsInText(source: string, vars: Record<string, string>): 
     const inTableRow = /^\s*\|/.test(line);
     out = out.replace(VAR_REF_RE, (_match, key: string) => {
       if (Object.prototype.hasOwnProperty.call(vars, key)) {
-        let v = vars[key]!;
-        if (inTableRow) v = v.replace(/\|/g, '\\|').replace(/\r\n|\r|\n/g, ' ');
+        // 🔴 値の改行は空白 1 つにする(台帳 #1852 束 R1、依頼 269 A)── 行が増えると、下のチェック・表の行番号が 1 つずれて
+        //   別の項目に印が付く。変数は語句を差し込む物で、段落を差し込む物ではない
+        let v = vars[key]!.replace(/\r\n|\r|\n/g, ' ');
+        if (inTableRow) v = v.replace(/\|/g, '\\|');
         // escape sentinel char が値内にあれば剥がす(衝突対策)
         return v.replace(new RegExp(`[${VAR_OPEN}${VAR_SEP}]`, 'g'), '');
       }
@@ -81,6 +83,37 @@ export function expandVarsInText(source: string, vars: Record<string, string>): 
   }).join('\n');
 }
 
+
+/**
+ * 🔴 **定義の在る変数だけを展開し、それ以外は 1 字も変えない**(台帳 #1852 束 R1、依頼 268 A)。
+ *
+ * 別のノートの章を埋め込むとき、章の中の `{{vars.案件}}` は**元のノートの前書きの値**で出す
+ * (元のノートで読んだときと同じ字になる)。埋め込んだ側には前書きが無いので、元のノートの側で展開してから渡す。
+ * ⚠ `expandVarsInText` と違い、**未定義の名前と `\{{vars.x}}`(字のまま書く印)は触らない**
+ *   (未定義の印の sentinel は、描画の入り口で潰されるため、そのまま渡せない)。
+ * ⚠ 値の改行は空白 1 つにする(`expandVarsInText` と同じ。行数を変えない)。
+ */
+export function expandDefinedVars(source: string, vars: Record<string, string>): string {
+  if (!source || !source.includes('{{')) return source;
+  const lines = splitLines(source);
+  let fence: FenceState = { inFence: false, marker: '' };
+  return lines.map((line) => {
+    const t = fenceTransition(line, fence);
+    fence = t.state;
+    if (fence.inFence || t.isBoundary) return line;
+    // 字のまま書く `\{{vars.x}}` は先に隠す(`expandVarsInText` と同じ)
+    let out = line.replace(VAR_ESCAPED_RE, '\u{E142}$1\u{E143}');
+    const inTableRow = /^\s*\|/.test(line);
+    out = out.replace(VAR_REF_RE, (match, key: string) => {
+      if (!Object.prototype.hasOwnProperty.call(vars, key)) return match;
+      let v = vars[key]!.replace(/\r\n|\r|\n/g, ' ');
+      if (inTableRow) v = v.replace(/\|/g, '\\|');
+      return v.replace(new RegExp(`[${VAR_OPEN}${VAR_SEP}]`, 'g'), '');
+    });
+    // 隠した物は、逃がしの `\` ごと元に戻す
+    return out.replace(VAR_ESCAPE_BACK_RE, (_m, ref: string) => `\\{{${ref}}}`);
+  }).join('\n');
+}
 
 /**
  * 展開で残した「未定義」の印(U+E140 key U+E141)を、見える字 `{{vars.key}}` へ戻す。

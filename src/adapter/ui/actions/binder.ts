@@ -7219,11 +7219,21 @@ async function tocJump(
      *   **永久に待つ口を作らない**。期限切れなら、いままでどおり断り文を出す。
      */
     await waitPainted(detail, dispatcher.getState().selectedLid);
-    const hit = detail
+    let hit = detail
       ? [...detail.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]')].find(
           (h) => h.id === slug,
         )
       : undefined;
+    /**
+     * 🔴 **古い名前でも飛ぶ**(台帳 #1852 束 R1、依頼 255 / 279)── 見出しの中に置いた空の別名
+     * (`<h2 id="新しい名前"><span id="古い名前"></span>`)を、見出しに引き直す。
+     */
+    if (!hit && detail) {
+      const alias = [...detail.querySelectorAll<HTMLElement>('h1 > span[id], h2 > span[id], h3 > span[id]')].find(
+        (a) => a.id === slug,
+      );
+      hit = alias?.parentElement ?? undefined;
+    }
     if (!hit) {
       // 🔑 推測で飛ぶ呼び方(古い取り込みの `entry:X#<slug>`)は、無ければ何も出さない
       if (quiet) return;

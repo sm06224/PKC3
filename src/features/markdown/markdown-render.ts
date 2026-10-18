@@ -37,7 +37,7 @@ import { allFences, splitLines } from './source-blocks';
 // CJS package だが exports map で `.mjs` を提供しているため ESM import OK。
 import footnotePlugin from 'markdown-it-footnote';
 import cjkFriendlyPlugin from 'markdown-it-cjk-friendly';
-import { makeSlugCounter } from './markdown-toc';
+import { makeSlugCounter, makeLegacySlugCounter } from './markdown-toc';
 import { VAR_NAME_SOURCE } from './frontmatter';
 import { expandVarsInText, fenceTransition, VAR_OPEN, VAR_SEP, type FenceState } from './var-expand';
 import { foldIdeographicIndent } from './fullwidth-indent';
@@ -86,11 +86,12 @@ import { ELAPSED_LINE_HEAD, parseElapsed } from '../elapsed-text';
 import { tagColorKey } from '../tag-color';
 import { confirmColorSpan, isColorCode, isEditableColor } from './color-code';
 import { ifFormatMatches } from './if-format';
+import { replaceInlineComments } from './inline-comment';
 
 const md = new MarkdownIt({
   html: false,          // Disable HTML tags in source (XSS safety)
   linkify: true,        // Auto-convert URL-like text to links
-  typographer: true,    // Smart quotes, em-dash, etc.
+  typographer: true,    // 引用符の「“ ”」への置き換え(smartquotes)。記号への置き換え(replacements)は下で外す
   breaks: true,         // Convert \n to <br> for easier editing
   langPrefix: 'language-', // Code block language class prefix (for highlighting token selectors)
   // Fenced code block syntax highlighting. We return already-escaped
@@ -104,6 +105,18 @@ const md = new MarkdownIt({
     return highlightCode(str, lang);
   },
 });
+
+/**
+ * 🔴 **書いた字を、勝手に別の記号へ置き換えない**(台帳 #1852 束 R1、依頼 254 A)。
+ *
+ * 上流の `replacements` 規則は `(c)` → `©` / `(r)` → `®` / `(tm)` → `™` / `--` → `–` / `---` → `—` /
+ * `...` → `…` / `+-` → `±` / `!!!!` → `!!!` に替える。コマンドの説明(`--force`)や項目の番号 `(c)` が
+ * 別の字で出て、表示した字をコピーしても元に戻らない。日本語の文ではこの置き換えが役に立つ場面がほぼ無い。
+ * ⚠ 引用符(`smartquotes`)は残す ── 外すのは記号の置き換えだけ。コードの中は元から置き換えられない。
+ * 🔑 描くのは本文 / 別ウィンドウ / 書き出し HTML / 印刷とも、この 1 本の `md` を通る。
+ *    検索の当たりの塗りも、この置き換えが無いことに合わせてある(`search-hits.ts`)。
+ */
+md.disable('replacements');
 
 /**
  * 🔴 **URL の中の `user:pass@` は、上流の既定どおり URL の外として読む**
@@ -2674,16 +2687,29 @@ function postProcessVariableUndefined(html: string): string {
 md.renderer.rules.heading_open = function (tokens, idx, options, env, self) {
   const token = tokens[idx]!;
   const level = parseInt(token.tag.slice(1), 10);
+  let alias = '';
   if (level >= 1 && level <= 3) {
     const inline = tokens[idx + 1];
     const text = inline && inline.type === 'inline' ? inline.content.trim() : '';
     if (text) {
-      const e = env as { __pkcHeadingSlug?: (t: string) => string };
-      if (!e.__pkcHeadingSlug) e.__pkcHeadingSlug = makeSlugCounter();
-      token.attrSet('id', e.__pkcHeadingSlug(text));
+      const e = env as {
+        headingNumbered?: boolean;
+        __pkcHeadingSlug?: (t: string) => string;
+        __pkcHeadingLegacySlug?: (t: string) => string;
+      };
+      // 🔴 名前は**画面に見えている字**から作り、見出し番号つきの文書では**番号を除いた字**から作る
+      //   (台帳 #1852 束 R1、依頼 255 / 351)。目次・章の追記先も同じ関数(`makeSlugCounter`)で揃える
+      if (!e.__pkcHeadingSlug) e.__pkcHeadingSlug = makeSlugCounter({ stripNumber: e.headingNumbered === true });
+      if (!e.__pkcHeadingLegacySlug) e.__pkcHeadingLegacySlug = makeLegacySlugCounter();
+      const id = e.__pkcHeadingSlug(text);
+      token.attrSet('id', id);
+      // 🔑 古い名前(記号を抜いただけの綴り / 見出し番号つきの綴り)でも飛べるよう、見出しの中に空の別名を置く。
+      //   ブラウザの `#…` の移動も、目次・参照の飛び先探し(`tocJump`)も、この id を見つける
+      const legacy = e.__pkcHeadingLegacySlug(text);
+      if (legacy !== id) alias = `<span id="${md.utils.escapeHtml(legacy)}"></span>`;
     }
   }
-  return self.renderToken(tokens, idx, options);
+  return self.renderToken(tokens, idx, options) + alias;
 };
 
 // ── Card presentation placeholder (Slice 2, PKC2: docs/spec/card-embed-presentation-v0.md §5) ──
@@ -3404,16 +3430,46 @@ md.core.ruler.after('inline', 'pkc-task-list', function (state) {
 /**
  * 🔴 **見出しの字は日本語で出す**(台帳 #1852 I2 / 依頼 78-5。Gemini 回答 = 推薦 B)。
  * ⚠ 書く記法(`[!NOTE]` など)は変えない ── 変えるのは画面に出る見出しの字だけ。
+ *
+ * 🔴 **Obsidian の種類の名前も受ける**(台帳 #1852 束 R1、依頼 257 A)── Obsidian から持ってきたノートが
+ * そのまま読める形で出る。種類は近い色の注意書き(`role`)に割り当てる。
+ *   info → 情報 / abstract・summary・tldr → 要約 / todo → ToDo / success・check・done → 成功(ヒントの色)/
+ *   question・help・faq → 質問(重要の色)/ failure・fail・missing → 失敗(危険の色)/ danger・error → 危険 /
+ *   bug → バグ(危険の色)/ example → 例(重要の色)/ quote・cite → 引用(要約の色)/ hint → ヒント / attention → 注意
+ * ⚠ 知らない種類(`[!FOO]`)は注意書きにしない(引用のまま)。
  */
 const GFM_ALERT_TYPES: Record<string, { role: string; title: string; icon: string }> = {
   note: { role: 'note', title: 'メモ', icon: 'ℹ' },
   tip: { role: 'tip', title: 'ヒント', icon: '💡' },
+  hint: { role: 'tip', title: 'ヒント', icon: '💡' },
   important: { role: 'important', title: '重要', icon: '🛈' },
   warning: { role: 'warning', title: '警告', icon: '⚠' },
   caution: { role: 'caution', title: '注意', icon: '🛑' },
+  attention: { role: 'warning', title: '注意', icon: '⚠' },
+  info: { role: 'info', title: '情報', icon: 'ℹ' },
+  todo: { role: 'note', title: 'ToDo', icon: '☑' },
+  abstract: { role: 'summary', title: '要約', icon: '📄' },
+  summary: { role: 'summary', title: '要約', icon: '📄' },
+  tldr: { role: 'summary', title: '要約', icon: '📄' },
+  success: { role: 'tip', title: '成功', icon: '✔' },
+  check: { role: 'tip', title: '成功', icon: '✔' },
+  done: { role: 'tip', title: '完了', icon: '✔' },
+  question: { role: 'important', title: '質問', icon: '❓' },
+  help: { role: 'important', title: '質問', icon: '❓' },
+  faq: { role: 'important', title: '質問', icon: '❓' },
+  failure: { role: 'danger', title: '失敗', icon: '✖' },
+  fail: { role: 'danger', title: '失敗', icon: '✖' },
+  missing: { role: 'danger', title: '失敗', icon: '✖' },
+  danger: { role: 'danger', title: '危険', icon: '⚡' },
+  error: { role: 'danger', title: '危険', icon: '⚡' },
+  bug: { role: 'danger', title: 'バグ', icon: '🐞' },
+  example: { role: 'important', title: '例', icon: '📋' },
+  quote: { role: 'summary', title: '引用', icon: '❝' },
+  cite: { role: 'summary', title: '引用', icon: '❝' },
 };
 
-const GFM_ALERT_RE = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:\r?\n|\s+|$)/i;
+/** `[!種類]`、続けて任意の `+`(たたんで開く)/ `-`(たたんで閉じる)。後ろは空白か行末(`[!NOTE]x` は注意書きではない) */
+const GFM_ALERT_RE = /^\[!([A-Za-z]+)\]([+-])?(?=\s|$)/;
 
 md.core.ruler.after('inline', 'pkc-gfm-alerts', function (state) {
   const tokens = state.tokens;
@@ -3427,45 +3483,74 @@ md.core.ruler.after('inline', 'pkc-gfm-alerts', function (state) {
     if (!match) continue;
 
     const typeKey = match[1]!.toLowerCase();
-    const alertMeta = GFM_ALERT_TYPES[typeKey];
+    const alertMeta = Object.prototype.hasOwnProperty.call(GFM_ALERT_TYPES, typeKey)
+      ? GFM_ALERT_TYPES[typeKey]
+      : undefined;
     if (!alertMeta) continue;
+    const fold = match[2];
 
     // blockquote_open を装飾
     const bqOpen = tokens[i - 2]!;
     bqOpen.attrJoin('class', `pkc-section-callout pkc-section-${alertMeta.role} pkc-md-alert`);
     bqOpen.attrSet('data-pkc-role', alertMeta.role);
 
-    // インラインコンテンツから `[!TYPE]` を除去
-    token.content = token.content.slice(match[0].length).replace(/^\n+/, '');
+    // 🔴 たたむ指定(`+` / `-`)は <details> にする(閉じの blockquote_close も同じ深さのものへ)
+    if (fold !== undefined) {
+      let close = -1;
+      for (let j = i + 1; j < tokens.length; j++) {
+        if (tokens[j]!.type === 'blockquote_close' && tokens[j]!.level === bqOpen.level) {
+          close = j;
+          break;
+        }
+      }
+      if (close >= 0) {
+        bqOpen.tag = 'details';
+        tokens[close]!.tag = 'details';
+        if (fold === '+') bqOpen.attrSet('open', '');
+      }
+    }
+    const folded = bqOpen.tag === 'details';
 
-    // children の最初のテキストトークンからも除去し、直後の softbreak も落とす
+    // インラインコンテンツから `[!TYPE]` を除去
+    token.content = token.content.slice(match[0].length).replace(/^[ \t]+/, '');
+
+    // children の最初のテキストトークンからも除去する
     const children = token.children ?? [];
     for (let c = 0; c < children.length; c++) {
       const child = children[c]!;
       if (child.type === 'text') {
-        child.content = child.content.slice(match[0].length);
-        if (child.content === '' && children[c + 1]?.type === 'softbreak') {
-          children.splice(c + 1, 1);
-        }
+        child.content = child.content.slice(match[0].length).replace(/^[ \t]+/, '');
         break;
       }
     }
-    if (children[0]?.type === 'softbreak') {
+
+    // 🔴 同じ行に書いた字は、その注意書きの題にする(`> [!NOTE] 自分で付けた題`)。次の行からが本文
+    let end = children.findIndex((ch) => ch.type === 'softbreak' || ch.type === 'hardbreak');
+    if (end < 0) end = children.length;
+    const customTitle = children.splice(0, end).filter((ch) => !(ch.type === 'text' && ch.content === ''));
+    if (children[0]?.type === 'softbreak' || children[0]?.type === 'hardbreak') {
       children.shift();
     }
+    const nl = token.content.indexOf('\n');
+    token.content = nl < 0 ? '' : token.content.slice(nl + 1);
 
-    // タイトル行トークンを作成
-    const titleOpen = new state.Token('paragraph_open', 'p', 1);
+    // タイトル行トークンを作成(たたむ指定のときは <summary>)
+    const titleTag = folded ? 'summary' : 'p';
+    const titleOpen = new state.Token(folded ? 'summary_open' : 'paragraph_open', titleTag, 1);
     titleOpen.attrs = [['class', 'pkc-alert-title']];
 
     const titleInline = new state.Token('inline', '', 0);
     const iconToken = new state.Token('html_inline', '', 0);
     iconToken.content = `<span class="pkc-alert-icon">${alertMeta.icon}</span> `;
-    const textToken = new state.Token('text', '', 0);
-    textToken.content = alertMeta.title;
-    titleInline.children = [iconToken, textToken];
+    if (customTitle.length > 0) {
+      titleInline.children = [iconToken, ...customTitle];
+    } else {
+      const textToken = new state.Token('text', '', 0);
+      textToken.content = alertMeta.title;
+      titleInline.children = [iconToken, textToken];
+    }
 
-    const titleClose = new state.Token('paragraph_close', 'p', -1);
+    const titleClose = new state.Token(folded ? 'summary_close' : 'paragraph_close', titleTag, -1);
 
     if (token.content.trim() === '' && children.every((ch) => ch.content.trim() === '')) {
       tokens.splice(i - 1, 3, titleOpen, titleInline, titleClose);
@@ -5368,7 +5453,8 @@ export function stripComments(source: string, lineMapIn?: number[]): {
   // `:::comment` 系の unclosed 保護:open 行から close まで buffer、close 見つかれば
   // 捨てる、close 無く EOF なら restore(元 stripComments の挙動を維持)。
   const commentDirectiveBuffer: Array<{ line: string; srcIdx: number }> = [];
-  const stripInline = (s: string) => s.replace(/%%[^\n]*?%%/g, '');
+  // 🔴 `\%%` は字のまま(依頼 256)。読み方は `inline-comment.ts` の 1 本
+  const stripInline = (s: string) => replaceInlineComments(s, () => '');
   // PR-2X hotfix(2026-05-12):inline code 内の `%%%` を block comment 開始と
   // 誤検出するバグ修正。`stripComments` の %%% scan の前に inline backtick
   // span を一時 sentinel に置換、scan 後に復元する。fence 行(``` 単独行)
@@ -6769,6 +6855,8 @@ function renderMarkdownCore(
     interactiveSeek: boolean;
     colorSwatches: boolean;
     taskLineOffset: number;
+    /** 見出し番号(frontmatter `heading-number`)が付く文書か。見出しの名前を番号なしで作るのに使う(依頼 351) */
+    headingNumbered: boolean;
     lineMap?: number[];
     fenceAssets?: Readonly<Record<string, string>>;
     /**
@@ -6806,6 +6894,7 @@ function renderMarkdownCore(
     colorSwatches: opts.colorSwatches === true,
     // 🔴 剥がして描く面だけがずらす(既定 0)。理由は上の option の注記
     taskLineOffset: Number.isInteger(opts.taskLineOffset) ? (opts.taskLineOffset as number) : 0,
+    headingNumbered: Boolean(opts.headingNumber),
   };
   // 🔴 行頭の全角の空白で字下げした箇条書きを、入れ子として読む(#1163 依頼 136)。行数は変えない(lineMap は不変)
   text = foldIdeographicIndent(text);

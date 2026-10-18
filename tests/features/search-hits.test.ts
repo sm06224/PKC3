@@ -100,16 +100,19 @@ describe('🔴 #1087: 整形された字(typographer)と打った字の差を吸
     expect(findHitSpans('“hi”', ['"hi"'])).toEqual([{ start: 0, end: 4 }]);
   });
 
+  it.each(['Wait...', 'a -- b', 'a --- b', '(c)', '(r)', '(TM)', '+-'])(
+    '打った記号は、置き換えられずに本文に残るので、打ったまま当たる(依頼 254)%s',
+    (typed) => {
+      expect(findHitSpans(typed, [typed])).toEqual([{ start: 0, end: typed.length }]);
+    },
+  );
+
   it.each([
     ['Wait…', 'Wait...'],
-    ['a – b', 'a -- b'],
-    ['a — b', 'a --- b'],
     ['©', '(c)'],
-    ['®', '(r)'],
-    ['™', '(TM)'],
-    ['±', '+-'],
-  ])('整形後 %s は 打った %s で当たる', (shown, typed) => {
-    expect(findHitSpans(shown, [typed])).toEqual([{ start: 0, end: shown.length }]);
+    ['–', '--'],
+  ])('置き換えは止めたので、別の記号 %s は打った %s では当たらない', (shown, typed) => {
+    expect(findHitSpans(shown, [typed])).toEqual([]);
   });
 
   it('対照群: 整形されない字は 1 件 / 無関係は 0 件', () => {

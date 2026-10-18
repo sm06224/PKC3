@@ -67,6 +67,7 @@ import {
   readSubstituteTail,
   type RepeatUnit,
 } from './repeat';
+import { inlineCommentRanges, replaceInlineComments } from '../markdown/inline-comment';
 
 /**
  * 走査の網。⚠ **判定はしない**(取るだけ)── 判定は `isScheduleDate` /
@@ -136,7 +137,6 @@ const SPACED_TIME_RANGE = /^(?:[ \t]+(?:\.\.|[〜～~-])[ \t]*|(?:\.\.|[〜～~-
 
 const MASK = '\uE000';
 const INLINE_CODE = /`+[^`\n]*?`+/g;
-const INLINE_COMMENT = /%%[^\n]*?%%/g;
 const LINK_DEST = /(?<=\])\([^)\n]*\)/g;
 
 /**
@@ -150,7 +150,7 @@ const LINK_DEST = /(?<=\])\([^)\n]*\)/g;
 function maskHidden(line: string): string {
   if (!/[`%\]]/.test(line)) return line;
   const fill = (m: string): string => MASK.repeat(m.length);
-  return line.replace(INLINE_CODE, fill).replace(INLINE_COMMENT, fill).replace(LINK_DEST, fill);
+  return replaceInlineComments(line.replace(INLINE_CODE, fill), fill).replace(LINK_DEST, fill);
 }
 
 /**
@@ -460,7 +460,7 @@ export function stripLineDate(line: string): string {
   if (found === null) return line;
   // 🔴 隠しメモ(`%%…%%`)は札の字に出さない(ノートでも見えない。#1087)。⚠ コードの中の `%%` は残す
   const codeMasked = line.replace(INLINE_CODE, (c) => MASK.repeat(c.length));
-  const comments = [...codeMasked.matchAll(INLINE_COMMENT)].map((c) => [c.index!, c.index! + c[0].length] as const);
+  const comments = inlineCommentRanges(codeMasked);
   const dropComment = (from: number, to: number): string => {
     let out = '';
     let at = from;
