@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseFrontmatterWhen,
   dateOfFrontmatterText,
+  foldWideDateChars,
   withFrontmatterDate,
   isScheduleDate,
 } from '../../src/features/schedule/schedule-date';
@@ -197,21 +198,28 @@ describe('書き換え(entry-date)', () => {
 
 describe('🔴 互換:前の版の読み方で、時刻つきのノートを開く', () => {
   /**
-   * 前の版(束 E1 より前)の `readScheduleDate` は `^\d{4}-\d{2}-\d{2}$` の形だけを日付とした
-   * (時刻つきは日付として読まず、そのノートは予定表に出ない)。その読み方を再現する。
-   * 守る主張: 読まれなくても **本文は 1 バイトも失われない**(時刻の字も日付の字も前書きに残る)。
+   * 直前のビルド(5f378957、束 E1 の後・時刻を読む前)の `dateOfFrontmatterText` をそのまま写したもの。
+   * 前書きの `date:` の **日付の部分だけを読み、時刻は捨てる**(時刻つきでも日付として読む)。
+   * 守る主張: 新しい版が時刻つきで書いた前書きを、前の版は壊れずに **日付だけ**読む(予定表には終日で出る)。
+   * ⚠ 期待値を新しい版の関数で作らない(同じ盲点を持つ)── 旧の正規表現を写して使う。
    */
   const oldReadDate = (body: string): string | null => {
     const v = parseFrontmatter(body).meta['date'];
-    return typeof v === 'string' && isScheduleDate(v) ? v : null;
+    if (typeof v !== 'string') return null;
+    const m = /^(\S+?)(?:[ T\u3000](\S+))?$/.exec(foldWideDateChars(v.trim()));
+    if (m === null) return null;
+    const date = m[1]!.replace(/\//g, '-');
+    if (!isScheduleDate(date)) return null;
+    if (m[2] !== undefined && !/^\d{1,2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?$/.test(m[2])) return null;
+    return date;
   };
 
-  it('新しい版が時刻つきで書いた前書きを、前の版は予定の日付として読まない ── でも中身は全部残る', () => {
+  it('新しい版が時刻つきで書いた前書きを、前の版は日付だけ読み、時刻は捨てる ── 壊れず、中身は全部残る', () => {
     const written = applyBodyRewrite(
       '---\ndate: 2026-10-20\nstatus: open\n---\n本文\n',
       { kind: 'entry-date', date: '2026-10-22', time: '10:15' },
     )!;
-    expect(oldReadDate(written), '前の版が時刻つきを日付として読めてしまう(前提が崩れた)').toBeNull();
+    expect(oldReadDate(written), '前の版が日付を読めない(壊れた)').toBe('2026-10-22');
     const kept = parseFrontmatter(written);
     expect(kept.meta['date']).toBe('2026-10-22 10:15');
     expect(kept.meta['status']).toBe('open');
