@@ -38,6 +38,9 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
       '- 箇条書き',
       '  - 入れ子',
       '',
+      '- [x] 済んだ項目',
+      '- [ ] 未了の項目',
+      '',
       /**
        * 🔴 **板 2 枚と、その間の線**(#530 段①/段③e)。
        * ⚠ ここまで、書き出しの smoke の fixture に `.pkc-place` も `.pkc-line` も
@@ -97,6 +100,45 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
    */
   expect(text, '板の字が落ちている').toContain('今日');
   expect(text, '画面に出ない字が Word に漏れている').not.toContain('線の中の見えない字');
+  /**
+   * 🔴 **束 K2(#1163 依頼 144・280・53-2)**。同じ道中で見る(起動は増やさない)。
+   * ① 1 行目にノートの題名が大きな見出しで入る ② チェックリストは ☑ / ☐ で、黒丸(箇条書きの印)を付けない
+   * ③ 書き出した知らせに「ブロック」という数え方が出ない ④ 本文が空のノートは断られ、file は落ちない
+   */
+  const docXml = text.slice(text.indexOf('<w:body'));
+  const titleAt = docXml.indexOf('ワード試験');
+  expect(titleAt, '前提:題名が document.xml に入っている').toBeGreaterThan(-1);
+  expect(titleAt, '🔴 題名が本文より前(1 行目)に入っていない').toBeLessThan(docXml.indexOf('見出し'));
+  expect(docXml.slice(Math.max(0, titleAt - 200), titleAt), '🔴 題名が見出しの書式で入っていない').toContain('Heading1');
+  const doneAt = docXml.indexOf('済んだ項目');
+  const todoAt = docXml.indexOf('未了の項目');
+  expect(doneAt, '前提:チェックの項目が入っている').toBeGreaterThan(-1);
+  expect(docXml.slice(Math.max(0, doneAt - 300), doneAt), '🔴 済みの項目に ☑ が付いていない').toContain('☑');
+  expect(docXml.slice(Math.max(0, todoAt - 300), todoAt), '🔴 未了の項目に ☐ が付いていない').toContain('☐');
+  // 黒丸なし:チェックの段落は箇条書きの番号(numId)を指さない ── 段落の頭から項目の字までを見る
+  for (const [label, at] of [['済み', doneAt], ['未了', todoAt]] as const) {
+    const pStart = docXml.lastIndexOf('<w:p>', at) >= 0 ? docXml.lastIndexOf('<w:p>', at) : docXml.lastIndexOf('<w:p ', at);
+    expect(docXml.slice(pStart, at), `🔴 ${label}のチェック項目に黒丸(numId)が付いている`).not.toContain('<w:numId');
+  }
+  const status = page.locator('[data-pkc-region="status"]');
+  await expect(status, '書き出しの知らせが出ていない').toContainText('Word で書き出しました');
+  expect(await status.innerText(), '🔴 知らせに「ブロック」という数え方が残っている').not.toContain('ブロック');
+
+  // ④ 本文が空のノート ── 断られ、ダウンロードが起きない
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  let downloaded = false;
+  page.on('download', () => {
+    downloaded = true;
+  });
+  await clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-docx"]');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '🔴 本文が空のノートが断られていない',
+  ).toContainText('本文が空なので、Word には書き出しません');
+  await page.waitForTimeout(500);
+  expect(downloaded, '🔴 本文が空なのにダウンロードが起きた').toBe(false);
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 
