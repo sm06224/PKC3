@@ -143,6 +143,7 @@ import {
   type ResultMap,
   type ImportRevisionsResult,
   type EncodedChainInput,
+  type TrashNoteInput,
   type StorageGauge,
 } from './protocol';
 
@@ -1923,7 +1924,24 @@ function restoreOneChain(
     out.skippedEntries.push(chain.entryLid);
     return;
   }
+  stageAndWriteChain(database, cid, chain.entryLid, head, chain, keepLatest, out);
+}
 
+/**
+ * 🔴 **鎖の復元の本体**(台帳 #1852 束 F2 で `restoreOneChain` から切り出した)。`head` = 符号化の起点(生きたノートなら
+ * `entries` の行、ゴミ箱のノートなら頭の行になる全文)。生きたノートの復元(`restoreOneChain`)とゴミ箱のノートの復元
+ * (`restoreOneTrashNote`)が**この 1 本**を通る ── 2 か所に decode / 噛み合わせ検査 / 符号化を書かない。
+ * @returns 積んだ古い版の行数(rev_order は 1..n。頭の行を足すなら n + 1)
+ */
+function stageAndWriteChain(
+  database: Database,
+  cid: string,
+  entryLid: string,
+  head: { body: string; title: string; archetype: string },
+  chain: { rows: EncodedChainInput['rows']; rewrite?: EncodedChainInput['rewrite'] },
+  keepLatest: number,
+  out: ImportRevisionsResult,
+): number {
   /** 新しい → 古い の順に積む(rev_order は件数が決まってから振る)。 */
   const staged: Array<{
     kind: string;
@@ -2022,7 +2040,7 @@ function restoreOneChain(
       bind: [
         cid,
         `rev-${crypto.randomUUID()}`,
-        chain.entryLid,
+        entryLid,
         // 履歴の時刻は捏造しない
         st.createdAt || new Date().toISOString(),
         staged.length - i,
@@ -2036,7 +2054,65 @@ function restoreOneChain(
     });
     out.added++;
   }
+  return staged.length;
 }
+
+/**
+ * 🔴 **ゴミ箱のノート 1 件を、ゴミ箱の中へ復元する**(台帳 #1852 束 F2 / 依頼 105-2・297 A)。
+ *
+ * ゴミ箱は「`entries` に居ない `entry_lid` の `revisions`」なので、`entries` には**書かない**。積むのは
+ * 古い版(`stageAndWriteChain` ── 生きたノートの復元と同じ 1 本)+ 頭の行(ゴミ箱へ移した時点の全文。
+ * `deleteEntry` が積む行と同じ形で、題名・種類・作成日・並びの位置・更新日時の控えを持つ)。
+ * ⚠ 頭が全文なので、ゴミ箱から戻す道(`getRevision` ── 頭を出発点にして遡る)がそのまま使える。
+ * ⚠ 同じ lid が生きているノートに居る / 既に履歴がある lid には積まない(既存の鎖に割り込まない)。
+ */
+function restoreOneTrashNote(
+  database: Database,
+  cid: string,
+  note: TrashNoteInput,
+  keepLatest: number,
+  out: ImportRevisionsResult,
+): void {
+  const alive = database.selectObjects('SELECT 1 AS x FROM entries WHERE cid = ? AND lid = ?', [cid, note.entryLid])[0];
+  if (alive !== undefined || headRevision(database, cid, note.entryLid)) {
+    out.skippedEntries.push(note.entryLid);
+    return;
+  }
+  const remap = note.remap;
+  const headBody = remap === undefined ? note.body : remapImportedBody(note.body, remap);
+  // 頭の行も保持上限に数える(`pruneChain` と同じ ── 頭は消えない)
+  const n = stageAndWriteChain(
+    database,
+    cid,
+    note.entryLid,
+    { body: headBody, title: note.title, archetype: note.archetype },
+    { rows: note.rows, ...(remap === undefined ? {} : { rewrite: { tip: note.body, remap } }) },
+    Math.max(0, keepLatest - 1),
+    out,
+  );
+  database.exec({
+    sql: `INSERT INTO revisions
+            (cid, id, entry_lid, created_at, rev_order, snapshot,
+             title, archetype, content_hash, kind, entry_created_at, entry_order, entry_updated_at)
+          VALUES (?, ?, ?, COALESCE(?, datetime('now')), ?, ?, ?, ?, ?, 'full', ?, ?, ?)`,
+    bind: [
+      cid,
+      `rev-${crypto.randomUUID()}`,
+      note.entryLid,
+      note.trashedAt,
+      n + 1,
+      headBody,
+      note.title,
+      note.archetype,
+      contentHash64Hex(headBody),
+      note.entryCreatedAt,
+      note.entryOrder === null ? null : String(note.entryOrder),
+      note.entryUpdatedAt,
+    ],
+  });
+  out.added++;
+}
+
 
 /**
  * 🔴 **居場所を張り替える中身**(tx の中で呼ぶ ── `BEGIN` はしない)。
@@ -3378,6 +3454,7 @@ const handlers: Handlers = {
         assets: sync(handlers.listAssetMetas({ op: 'listAssetMetas', cid })),
         tagColors: sync(handlers.listTagColors({ op: 'listTagColors', cid })),
         chains,
+        trash: sync(handlers.listTrashHeads({ op: 'listTrashHeads', cid })),
       };
     } finally {
       db = prevDb;
@@ -4472,6 +4549,63 @@ const handlers: Handlers = {
         ORDER BY r.created_at DESC, r.entry_lid`,
       [req.cid],
     ) as unknown as ResultMap['listTrash'],
+  listTrashHeads: (req) => {
+    const rows = need().selectObjects(
+      `SELECT r.entry_lid AS lid, r.title AS title, r.archetype AS archetype,
+              r.entry_created_at AS created_at, r.entry_updated_at AS updated_at,
+              r.entry_order AS entry_order, r.created_at AS trashed_at
+         FROM revisions r
+         JOIN (SELECT entry_lid, MAX(rev_order) AS mx FROM revisions
+                WHERE cid = ?1 GROUP BY entry_lid) m
+           ON m.entry_lid = r.entry_lid AND m.mx = r.rev_order
+        WHERE r.cid = ?1
+          AND NOT EXISTS (SELECT 1 FROM entries e
+                           WHERE e.cid = r.cid AND e.lid = r.entry_lid)
+        ORDER BY r.created_at DESC, r.entry_lid`,
+      [req.cid],
+    ) as unknown as Array<Omit<ResultMap['listTrashHeads'][number], 'entry_order'> & { entry_order: string | number | null }>;
+    // 並びの位置は TEXT で控えてある(列の型は TEXT)── 数へ読み戻す。読めなければ「控え無し」
+    return rows.map((r) => {
+      const n = r.entry_order === null || r.entry_order === undefined ? Number.NaN : Number(r.entry_order);
+      return { ...r, entry_order: Number.isFinite(n) ? n : null };
+    });
+  },
+  restoreTrashNotes: (req) => {
+    const database = need();
+    const keepLatest = Math.max(1, req.keepLatest ?? DEFAULT_REVISION_KEEP);
+    const out: ResultMap['restoreTrashNotes'] = {
+      added: 0,
+      skippedNoChange: 0,
+      droppedOverLimit: 0,
+      skippedEntries: [],
+      brokenChains: [],
+    };
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      for (const note of req.notes) {
+        // 🔴 1 件ずつ救う(`restoreRevisionChains` と同じ) ── 1 件が壊れていても、ほかのゴミ箱のノートは戻す
+        database.exec('SAVEPOINT trashnote');
+        try {
+          restoreOneTrashNote(database, req.cid, note, keepLatest, out);
+          database.exec('RELEASE trashnote');
+        } catch (e) {
+          database.exec('ROLLBACK TO trashnote');
+          database.exec('RELEASE trashnote');
+          out.skippedEntries.push(note.entryLid);
+          out.brokenChains.push(`${note.entryLid}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      database.exec('COMMIT');
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+    return out;
+  },
   purgeTrash: (req) => {
     const database = need();
     /**
@@ -5017,7 +5151,7 @@ const handlers: Handlers = {
     const database = need();
     const rows: ResultMap['rescueEntries']['rows'] = [];
     /**
-     * 🔴 **拾い出しは system 領域のノートを出さない**(設計 doc §1.1、段①)。
+     * 🔴 **拾い出しは(`realm: 'system'` を頼まれない限り)system 領域のノートを出さない**(設計 doc §1.1、段①)。
      *
      * ⚠ **`WHERE` へは足さない** ── `got`(= 区画に何か在ったか)は
      *   「空だった区画」という**壊れの診断**(`rescue-archive.ts` の
@@ -5034,7 +5168,7 @@ const handlers: Handlers = {
       afterRowid: req.afterRowid,
       chunks: req.chunks,
       take: (r) => {
-        if (r[6] !== 'user') return;
+        if (r[6] !== (req.realm === 'system' ? 'system' : 'user')) return;
         rows.push({
           rowid: Number(r[0]),
           cid: String(r[1]),
@@ -5088,7 +5222,7 @@ const handlers: Handlers = {
     const page = rescueScan(need(), {
       table: 'revisions',
       columns:
-        'rowid, cid, entry_lid, rev_order, created_at, title, archetype, kind, snapshot, content_hash',
+        'rowid, cid, entry_lid, rev_order, created_at, title, archetype, kind, snapshot, content_hash, entry_created_at, entry_order, entry_updated_at',
       afterRowid: req.afterRowid,
       chunks: req.chunks,
       take: (r) => {
@@ -5104,6 +5238,10 @@ const handlers: Handlers = {
           kind: r[7] === null || r[7] === undefined ? 'full' : String(r[7]),
           snapshot: r[8] === null || r[8] === undefined ? '' : String(r[8]),
           contentHash: r[9] === null || r[9] === undefined ? null : String(r[9]),
+          entryCreatedAt: r[10] === null || r[10] === undefined ? null : String(r[10]),
+          entryOrder:
+            r[11] === null || r[11] === undefined || !Number.isFinite(Number(r[11])) ? null : Number(r[11]),
+          entryUpdatedAt: r[12] === null || r[12] === undefined ? null : String(r[12]),
         });
       },
     });

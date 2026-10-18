@@ -70,6 +70,8 @@ const DONE: RebuildReport = {
   revisionsRestored: 5,
   extrasPartial: false,
   tagColorsRestored: 1,
+  trashRestored: 0,
+  systemRestored: 0,
   wiped: true,
   note: null,
   fallbackReason: null,
@@ -379,7 +381,7 @@ describe('作り直しの配線(原文 pin)', () => {
     const at = MAIN.indexOf('rebuildContainer:');
     expect(at, '🔴 rebuildContainer の配線が main.ts に無い').toBeGreaterThan(0);
     // ⚠ 見るのは**その塊だけ** ── file 全体で探すと別の呼び出しに満たされる(§1)
-    const block = MAIN.slice(at, at + 1600);
+    const block = MAIN.slice(at, at + 3200);
     const reopen = block.indexOf('reopenStorage');
     expect(reopen, 'reopenStorage を渡していない').toBeGreaterThan(-1);
     const after = block.slice(reopen, reopen + 300);

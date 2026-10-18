@@ -105,6 +105,8 @@ export const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   'deleteRelation',
   'importRevisionChains',
   'restoreRevisionChains',
+  // ⚠ ゴミ箱の中へ積む(台帳 #1852 束 F2)── 足し忘れると、他タブのゴミ箱の一覧が古いまま
+  'restoreTrashNotes',
   'purgeTrash',
   'putAssetMeta',
   'deleteAssetMeta',
@@ -169,6 +171,7 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'listSystemEntries',
   'listTagColors',
   'listTrash',
+  'listTrashHeads',
   'queryScan',
   'readImageArchive',
   'revisionCounts',

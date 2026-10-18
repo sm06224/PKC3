@@ -20,7 +20,7 @@ import {
   narrowByLength,
 } from '@features/import/duplicate-scan';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
-import type { EncodedChainInput } from '@adapter/platform/storage/protocol';
+import type { EncodedChainInput, TrashNoteInput } from '@adapter/platform/storage/protocol';
 import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
 import { decodeAsset } from '@adapter/platform/asset/asset-codec';
@@ -117,6 +117,15 @@ export interface ImportDeps {
     added: number;
     skippedNoChange: number;
     droppedOverLimit: number;
+    skippedEntries: string[];
+    brokenChains: string[];
+  }>;
+  /**
+   * 🔴 **バックアップの中のゴミ箱のノートを、ゴミ箱の中へ戻す**(台帳 #1852 束 F2 / 依頼 105-2・297 A)。⚠ **省略可** ──
+   * 無い配線は戻さない(「戻せませんでした」と言う)。ゴミ箱から「戻す」で使える状態で入る。
+   */
+  restoreTrashNotes?(notes: TrashNoteInput[]): Promise<{
+    added: number;
     skippedEntries: string[];
     brokenChains: string[];
   }>;
@@ -365,6 +374,23 @@ function* batchEncoded(chains: readonly EncodedChainInput[]): Generator<EncodedC
   if (batch.length > 0) yield batch;
 }
 
+/** ゴミ箱のノートも 1 メッセージの量を抑える(`batchEncoded` と同じ作法)。1 件が巨大なら予算は効かない(既知の限界)。 */
+function* batchTrash(notes: readonly TrashNoteInput[]): Generator<TrashNoteInput[]> {
+  let batch: TrashNoteInput[] = [];
+  let bytes = 0;
+  for (const n of notes) {
+    const size = n.body.length + n.rows.reduce((t, r) => t + r.snapshot.length, 0);
+    if (batch.length > 0 && bytes + size > REVISION_BATCH_BYTES) {
+      yield batch;
+      batch = [];
+      bytes = 0;
+    }
+    batch.push(n);
+    bytes += size;
+  }
+  if (batch.length > 0) yield batch;
+}
+
 function* batchChains(
   chains: readonly RevisionChain[],
   keyMap: ReadonlyMap<string, string>,
@@ -466,6 +492,8 @@ async function runImport(
   //   `bulkUpsertEntries` が返った後にだけ埋める(途中で落ちた bulk は、どこまで書けたか分からないので空のまま)
   let writtenLids: readonly string[] = [];
   const revStats = { added: 0, dropped: 0, skipped: 0 };
+  /** ゴミ箱へ入れ直せたノートの数(台帳 #1852 束 F2)。 */
+  let trashRestored = 0;
 
   try {
     const head = new Uint8Array(await file.slice(0, PORTABLE_SNIFF_BYTES).arrayBuffer());
@@ -611,6 +639,8 @@ async function runImport(
           revisionChains: [] as RevisionChain[],
           /** アーカイブ経路だけが持つ**保存形の鎖**(P6e)。 */
           encodedChains: restored.revisionChains,
+          /** 🔴 アーカイブ経路だけが持つ**ゴミ箱へ入れ直すノート**(台帳 #1852 束 F2)。 */
+          trash: restored.trash,
           /** 🔴 アーカイブ経路だけが持つ**タグの色**(#1457)。 */
           tagColors: restored.tagColors,
           /** 🔴 アーカイブ経路だけが持つ**付け替えた lid**(本文の `entry:` を写す。下の `remap`)。 */
@@ -665,7 +695,7 @@ async function runImport(
       if (ownerTitleOf === null) {
         const wanted = new Set(result.assets.map((x) => x.key));
         const m = new Map<string, string>();
-        for (const e of result.entries) {
+        for (const e of [...result.entries, ...('trash' in result ? result.trash : [])]) {
           if (m.size === wanted.size) break;
           for (const t of e.body.match(/[A-Za-z0-9_-]+/g) ?? []) {
             if (wanted.has(t) && !m.has(t)) m.set(t, e.title);
@@ -905,6 +935,37 @@ async function runImport(
           }
         }
       }
+      // 🔴 ゴミ箱のノート(台帳 #1852 束 F2 / 依頼 105-2・297 A)── 生きたノート・つながり・履歴の後。ゴミ箱の中へ積むだけで、一覧には出ない
+      const trashNotes = 'trash' in result ? result.trash : [];
+      if (trashNotes.length > 0) {
+        stage = 'ゴミ箱のノート';
+        if (deps.restoreTrashNotes === undefined) {
+          result.warnings.push(`ゴミ箱のノート ${trashNotes.length} 件は、この画面からは戻せませんでした`);
+        } else {
+          const inputs: TrashNoteInput[] = trashNotes.map((t) => ({
+            entryLid: t.lid,
+            title: t.title,
+            archetype: t.archetype,
+            body: t.body,
+            trashedAt: t.trashedAt,
+            entryCreatedAt: t.createdAt,
+            entryUpdatedAt: t.updatedAt,
+            entryOrder: t.entryOrder,
+            rows: t.rows,
+            // 🔴 本文と各版に、ノート・添付と同じ付け替えを当てる(`remapImportedBody` 1 本)
+            ...(isEmptyRemap(remap) ? {} : { remap }),
+          }));
+          const titleOf = new Map(trashNotes.map((t) => [t.lid, t.title] as const));
+          for (const batch of batchTrash(inputs)) {
+            const r = await deps.restoreTrashNotes(batch);
+            trashRestored += batch.length - r.skippedEntries.length;
+            // 🔴 戻らなかったノートは題名で言う(内部の ID は user には読めない)
+            for (const lid of r.skippedEntries) {
+              result.warnings.push(`ゴミ箱のノート「${titleOf.get(lid) ?? '(無題)'}」は戻せませんでした`);
+            }
+          }
+        }
+      }
       // 🔴 タグの色(#1457)── 履歴の後。色は本文ではないので、戻せなくても取込は失敗にしない
       const colors = 'tagColors' in result ? result.tagColors : [];
       if (colors.length > 0 && deps.importTagColors !== undefined) {
@@ -955,7 +1016,12 @@ async function runImport(
         : []),
       ...(light ? ['添付の中身は含まれていない export です(light)'] : []),
     ];
-    const revNote = revStats.added > 0 ? `(履歴 ${revStats.added} 版)` : '';
+    // 🔴 戻した物を言う(履歴が増えた / ゴミ箱のノートが戻った)。履歴だけのときは従来と同じ「(履歴 N 版)」
+    const tailParts = [
+      ...(revStats.added > 0 ? [`履歴 ${revStats.added} 版`] : []),
+      ...(trashRestored > 0 ? [`ゴミ箱のノート ${trashRestored} 件`] : []),
+    ];
+    const revNote = tailParts.length > 0 ? `(${tailParts.join('・')})` : '';
     /**
      * 🔴 **取り込んだ id を憶える**(#535 ② の漏れ。利用者目線の見直し 2026-10-13)── md / 連絡先 / 予定 /
      *   pptx は憶えていたのに、ここ(PKC2 の書き出し・PKC3 のバックアップ)だけ憶えていなかった。

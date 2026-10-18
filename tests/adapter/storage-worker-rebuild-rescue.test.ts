@@ -139,7 +139,13 @@ beforeAll(async () => {
   await request({
     op: 'bulkUpsertEntries',
     cid: CID,
-    entries: [entry('a1', '# A\n', 30), entry('b2', '# B 版1\n', 10), entry('c3', '# C\n', 20)],
+    entries: [
+      entry('a1', '# A\n', 30),
+      entry('b2', '# B 版1\n', 10),
+      entry('c3', '# C\n', 20),
+      // 🔴 あとでゴミ箱へ移すノート(台帳 #1852 束 F2 / 依頼 119-1 A)
+      entry('d4', '# D 版1\n', 40),
+    ],
   });
   await request({
     op: 'bulkUpsertRelations',
@@ -147,8 +153,16 @@ beforeAll(async () => {
     relations: [
       { id: 'r-parent', fromLid: 'a1', toLid: 'b2', kind: 'structural' },
       { id: 'r-link', fromLid: 'b2', toLid: 'c3', kind: 'semantic' },
+      // ゴミ箱のノートへのつながり(ゴミ箱の間も残る)
+      { id: 'r-trash', fromLid: 'a1', toLid: 'd4', kind: 'semantic' },
     ],
   });
+  for (const body of ['# D 版2\n足した\n', '# D 版3\nさらに足した\n']) {
+    await request({ op: 'upsertEntry', cid: CID, entry: entry('d4', body, 40), checkpoint: true });
+  }
+  await request({ op: 'deleteEntry', cid: CID, lid: 'd4' });
+  // 🔴 システムのメッセージ(作り直しの後も戻る)
+  await request({ op: 'appendMessage', cid: CID, lid: 'sys-messages', title: 'メッセージ', section: '## 知らせ\n', cap: 100000 });
   // 履歴: b2 を 2 回書き換える（checkpoint で版が積まれる）
   for (const body of ['# B 版2\n本文を足した\n', '# B 版3\nさらに足した\n']) {
     await request({
@@ -188,9 +202,10 @@ describe('🔴 索引だけ壊れた DB を作り直す（#1087）', () => {
       raw.selectValue("SELECT count(*) FROM relations WHERE cid='c1' AND from_lid='a1'"),
     ).toThrow(/malformed|corrupt|11/i);
     // 読めること
-    expect(raw.selectValue('SELECT count(*) FROM relations NOT INDEXED')).toBe(2);
+    expect(raw.selectValue('SELECT count(*) FROM relations NOT INDEXED')).toBe(3); // 2 + ゴミ箱のノートへの 1
     expect(Number(raw.selectValue('SELECT count(*) FROM revisions NOT INDEXED'))).toBeGreaterThan(1);
-    expect(raw.selectValue('SELECT count(*) FROM entries NOT INDEXED')).toBe(3);
+    // 3 件のノート + システムのメッセージ 1 件(d4 はゴミ箱へ移して entries から消えている)
+    expect(raw.selectValue('SELECT count(*) FROM entries NOT INDEXED')).toBe(4);
     raw.close();
   });
 
@@ -207,7 +222,7 @@ describe('🔴 索引だけ壊れた DB を作り直す（#1087）', () => {
 
     // 🔑 拾い出しの新しい 2 つの口が、壊れた DB から実際に読めている（作り直しの前に単体で見る）
     const rels = await request({ op: 'rescueRelations', afterRowid: 0, chunks: 2 });
-    expect(rels.rows.map((r) => r.id).sort(), 'つながりを拾えていない').toEqual(['r-link', 'r-parent']);
+    expect(rels.rows.map((r) => r.id).sort(), 'つながりを拾えていない').toEqual(['r-link', 'r-parent', 'r-trash']);
     const revs = await request({ op: 'rescueRevisions', afterRowid: 0, chunks: 2 });
     expect(revs.rows.length, '履歴を拾えていない').toBeGreaterThan(1);
     // 🔴 ノートの並びと時刻も拾えている(#1087)。⚠ 並びは 30/10/20 ── 拾った順(1/2/3)と別の値にしてある
@@ -226,8 +241,27 @@ describe('🔴 索引だけ壊れた DB を作り直す（#1087）', () => {
     const report = await rebuildContainer(CID, 'わたしの PKC', {
       holdsWriterLease: () => true,
       pick: (afterRowid, chunks) => request({ op: 'rescueEntries', afterRowid, chunks }),
+      pickSystem: (afterRowid, chunks) => request({ op: 'rescueEntries', afterRowid, chunks, realm: 'system' }),
       pickRelations: (afterRowid, chunks) => request({ op: 'rescueRelations', afterRowid, chunks }),
       pickRevisions: (afterRowid, chunks) => request({ op: 'rescueRevisions', afterRowid, chunks }),
+      writeTrash: async (cid, notes) => {
+        const out = await reopened()({
+          op: 'restoreTrashNotes',
+          cid,
+          notes: notes.map((n) => ({
+            entryLid: n.lid,
+            title: n.title,
+            archetype: n.archetype,
+            body: n.body,
+            trashedAt: n.trashedAt,
+            entryCreatedAt: n.createdAt,
+            entryUpdatedAt: n.updatedAt,
+            entryOrder: n.entryOrder,
+            rows: n.rows.map((r) => ({ ...r })),
+          })),
+        });
+        return { restored: notes.length - out.skippedEntries.length };
+      },
       readTagColors: () => request({ op: 'listTagColors', cid: CID }),
       assets: {
         listKeys: async () => [...blobs.keys()],
@@ -322,6 +356,8 @@ describe('🔴 索引だけ壊れた DB を作り直す（#1087）', () => {
     expect(relations.map((r) => `${r.id}:${r.kind}:${r.from_lid}>${r.to_lid}`).sort()).toEqual([
       'r-link:semantic:b2>c3',
       'r-parent:structural:a1>b2',
+      // 🔴 ゴミ箱のノートへのつながりも戻る(台帳 #1852 束 F2)
+      'r-trash:semantic:a1>d4',
     ]);
 
     // ── ④ 履歴（各版の本文が元と同じ）
@@ -333,6 +369,30 @@ describe('🔴 索引だけ壊れた DB を作り直す（#1087）', () => {
     expect(originalRevisionBodies.length, '前提: 元の履歴が 2 版以上ある').toBeGreaterThan(1);
     expect(bodies, '履歴の各版が元と違う').toEqual(originalRevisionBodies);
     expect(report.revisionsRestored).toBe(originalRevisionBodies.length);
+
+    // ── ④' 🔴 ゴミ箱のノート(台帳 #1852 束 F2 / 依頼 119-1 A)── 一覧には出ず、ゴミ箱の中へ戻る。版の中身も元と同じ
+    expect(report.trashRestored, 'ゴミ箱のノートが戻っていない').toBe(1);
+    expect((await q({ op: 'listEntryMetas', cid: CID })).map((m) => m.lid).sort(), 'ゴミ箱のノートが一覧に出た').toEqual([
+      'a1',
+      'b2',
+      'c3',
+    ]);
+    const trash = (await q({ op: 'listTrash', cid: CID })).filter((t) => t.entry_lid === 'd4');
+    expect(trash).toHaveLength(1);
+    const head = (await q({ op: 'getRevision', cid: CID, id: trash[0]!.id }))!;
+    expect(head.body).toBe('# D 版3\nさらに足した\n');
+    expect(head.entryOrder, 'ゴミ箱へ移す前の並びの位置が残っていない').toBe(40);
+    expect(head.entryCreatedAt, '作成日の控えが残っていない').toMatch(/^\d{4}-\d{2}-\d{2} /);
+    const trashMetas = await q({ op: 'listRevisionMetas', cid: CID, entryLid: 'd4' });
+    const trashBodies: string[] = [];
+    for (const m of trashMetas) trashBodies.push((await q({ op: 'getRevision', cid: CID, id: m.id }))!.body);
+    expect(trashBodies, 'ゴミ箱のノートの履歴が元と違う').toEqual(['# D 版3\nさらに足した\n', '# D 版2\n足した\n', '# D 版1\n']);
+
+    // ── ④'' 🔴 システムのメッセージも戻る(同じ領域へ。一覧の件数には数えない)
+    expect(report.systemRestored).toBe(1);
+    const sysAfter = await q({ op: 'listSystemEntries', cid: CID });
+    expect(sysAfter.map((e) => e.lid)).toEqual(['sys-messages']);
+    expect(await q({ op: 'getBody', cid: CID, lid: 'sys-messages' })).toBe('## 知らせ\n');
 
     // ── ⑤ 作り直した後の書き出し（全体）に添付が入る
     const source: ArchiveSource = {
@@ -377,12 +437,16 @@ describe('🔴 索引だけ壊れた DB を作り直す（#1087）', () => {
       'k1',
       'k2',
     ]);
-    expect(exported.relations.length).toBe(2);
+    expect(exported.relations.length).toBe(2); // 生きた同士(ゴミ箱に触る物は trashRelations)
 
     // ── ⑥ 保険の zip（捨てる前に落としたもの）にも、つながりと履歴と添付が入っている
     expect(archive, 'zip が落とされていない').not.toBeNull();
     const rescuedZip = await readArchive(archive!);
     expect(rescuedZip.relations.map((r) => r.id).sort()).toEqual(['r-link', 'r-parent']);
+    // 🔴 保険の zip にもゴミ箱のノートが入る(落ちたときに zip から戻せる)。メッセージは入らない
+    expect(rescuedZip.trash.map((t) => t.lid)).toEqual(['d4']);
+    expect(rescuedZip.trashRelations.map((r) => r.id)).toEqual(['r-trash']);
+    expect(rescuedZip.entries.map((e) => e.lid).sort()).toEqual(['a1', 'b2', 'c3']);
     expect(rescuedZip.revisions?.length ?? 0, 'zip に履歴が入っていない').toBeGreaterThan(0);
     expect([...rescuedZip.assetSources.keys()].sort()).toEqual(['k1', 'k2']);
   }, 60_000);

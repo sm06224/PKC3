@@ -22,6 +22,8 @@ import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor'
 import { buildZip, bytesOf } from '../features/zip-fixture';
 import { SECTION_DRAFT_NOTE } from '../../src/adapter/state/app-state';
 import { readTags } from '../../src/features/flavor/tags';
+import { writeArchive, type ArchiveSource } from '../../src/features/export/pkc3-archive';
+import type { TrashNoteInput } from '../../src/adapter/platform/storage/protocol';
 
 /** PKC2 の export と同じ骨格(slot id と `<\/script` 退避)。 */
 function pkc2Html(payload: unknown): string {
@@ -1284,6 +1286,105 @@ describe('importPkc2File (P6b 実行部)', () => {
   });
 
   /**
+   * 🔴 **ゴミ箱のノートを、ゴミ箱に入れ直す**(台帳 #1852 束 F2 / 依頼 105-2・297 A)。
+   * 実際の書き出し(`writeArchive`)で作ったバックアップを取り込んで、取り込みの本体が
+   * 「生きたノートは entries へ、ゴミ箱のノートは `restoreTrashNotes` へ」分けることを見る。
+   */
+  describe('ゴミ箱のノート', () => {
+    async function backupWithTrash(): Promise<File> {
+      const live = [{ lid: 'live1', body: '本文 entry:trash1 から' }];
+      const src: ArchiveSource = {
+        cid: 'c1',
+        title: 't',
+        listEntryMetas: async () =>
+          live.map((m, i) => ({
+            lid: m.lid, title: '生きた', archetype: 'text', created_at: null, updated_at: null,
+            entry_order: i + 1, status: null, date: null, archived: 0,
+          })),
+        listBodies: async () => ({ rows: live, done: true }),
+        listRelations: async () => [
+          { id: 'r-t', from_lid: 'live1', to_lid: 'trash1', kind: 'semantic', created_at: null, updated_at: null },
+        ],
+        listAssetMetas: async () => [],
+        getAssetBlob: async () => null,
+        listRevisionLids: async () => ['trash1'],
+        getRevisionChain: async () => [
+          { revOrder: 2, createdAt: '2026-03-01 00:00:00', title: '捨てた', archetype: 'text', kind: 'full', snapshot: '捨てた本文', contentHash: null },
+          { revOrder: 1, createdAt: '2026-02-01 00:00:00', title: null, archetype: null, kind: 'full', snapshot: '昔', contentHash: null },
+        ],
+        listTrashHeads: async () => [
+          { lid: 'trash1', title: '捨てた', archetype: 'text', created_at: '2026-01-03 00:00:00',
+            updated_at: '2026-02-20 00:00:00', entry_order: 4, trashed_at: '2026-03-01 00:00:00' },
+        ],
+      };
+      return new File([(await writeArchive(src, '2026-10-18T00:00:00Z')).blob], 'a.pkc3-full.zip');
+    }
+
+    it('🔴 生きたノートだけが一覧(entries)へ書かれ、ゴミ箱のノートは restoreTrashNotes へ渡る。取り消しの対象は生きたノートだけ', async () => {
+      const h = harness();
+      const got: TrashNoteInput[][] = [];
+      h.deps.restoreTrashNotes = async (notes) => {
+        got.push(notes);
+        return { added: notes.length, skippedEntries: [], brokenChains: [] };
+      };
+      const n = await importPkc2File(h.d, h.deps, await backupWithTrash());
+      expect(n, '返す件数は生きたノートだけ').toBe(1);
+      expect(h.written.map((e) => e.lid)).toEqual(['live1']);
+      expect(got).toHaveLength(1);
+      expect(got[0]![0]).toMatchObject({
+        entryLid: 'trash1',
+        title: '捨てた',
+        body: '捨てた本文',
+        trashedAt: '2026-03-01 00:00:00',
+        entryCreatedAt: '2026-01-03 00:00:00',
+        entryUpdatedAt: '2026-02-20 00:00:00',
+      });
+      expect(got[0]![0]!.rows.map((r) => r.revOrder)).toEqual([1]);
+      // 付け替えが要らない取り込みでは remap を付けない
+      expect(got[0]![0]!.remap).toBeUndefined();
+      // ゴミ箱に触るつながりも書かれる(「つなぐ先が無い」の注意は出ない = 297 の症状)
+      expect(h.relations.map((r) => r.id)).toEqual(['r-t']);
+      expect(h.reportedNotes()).toEqual([]);
+      expect(h.importedCalls).toEqual([['live1']]);
+      expect(h.notices.join('\n')).toContain('ゴミ箱のノート 1 件');
+      // 順序: ノート → つながり → ゴミ箱(ゴミ箱は最後に積む)
+      expect(h.opLog.indexOf('entries')).toBeLessThan(h.opLog.indexOf('relations'));
+    });
+
+    it('🔴 lid が既存と衝突したら、ゴミ箱のノートの lid も付け替え、生きたノートの本文の entry: も同じ先を指す', async () => {
+      const h = harness({ existingLids: new Set(['trash1']) });
+      const got: TrashNoteInput[] = [];
+      h.deps.restoreTrashNotes = async (notes) => {
+        got.push(...notes);
+        return { added: notes.length, skippedEntries: [], brokenChains: [] };
+      };
+      await importPkc2File(h.d, h.deps, await backupWithTrash());
+      const fresh = got[0]!.entryLid;
+      expect(fresh).not.toBe('trash1');
+      expect(got[0]!.remap?.lids).toEqual([['trash1', fresh]]);
+      expect(h.written[0]!.body, '生きたノートのリンクが付け替え先を指さない').toContain(`entry:${fresh}`);
+      expect(h.relations[0]!.toLid).toBe(fresh);
+    });
+
+    it('戻せなかったノートは題名で言う(内部の ID を出さない)。取り込み自体は成功する', async () => {
+      const h = harness();
+      h.deps.restoreTrashNotes = async () => ({ added: 0, skippedEntries: ['trash1'], brokenChains: ['trash1: x'] });
+      const n = await importPkc2File(h.d, h.deps, await backupWithTrash());
+      expect(n).toBe(1);
+      expect(h.reportedNotes().join('\n')).toContain('ゴミ箱のノート「捨てた」は戻せませんでした');
+      expect(h.reportedNotes().join('\n')).not.toContain('trash1');
+      expect(h.notices.join('\n'), '戻っていないのに件数を言った').not.toContain('ゴミ箱のノート 1 件');
+    });
+
+    it('口の無い配線では、戻せなかったと言う(黙って落とさない)。生きたノートは入る', async () => {
+      const h = harness();
+      const n = await importPkc2File(h.d, h.deps, await backupWithTrash());
+      expect(n).toBe(1);
+      expect(h.reportedNotes().join('\n')).toContain('ゴミ箱のノート 1 件は、この画面からは戻せませんでした');
+    });
+  });
+
+  /**
    * 🔴 **タグの色(#1457)**: バックアップの色が取り込みの口(`importTagColors`)へ渡り、
    * 戻せなくても取り込みは失敗にしない(色は本文ではない)。色の無いバックアップでは呼ばない。
    */
@@ -1506,7 +1607,7 @@ describe('importPkc2File (P6b 実行部)', () => {
       await importPkc2File(d, deps, file);
 
       expect(seen).toEqual([
-        { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false, exportedAt: expect.any(String), partial: false },
+        { noteCount: 1, assetCount: 0, hasRelations: false, hasRevisions: false, exportedAt: expect.any(String), partial: false, trashCount: 0 },
       ]);
     });
 

@@ -136,6 +136,7 @@ describe('止める op の仕分け(#971)', () => {
     'revisionDiffStats',
     'exportRevisionChain',
     'listTrash',
+    'listTrashHeads',
     'listAssetMetas',
     'scanAssetRefs',
     'storageProfile',

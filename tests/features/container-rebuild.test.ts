@@ -22,6 +22,7 @@ import {
   rebuildContainer,
   rebuildDoneMessage,
   rebuildExplainMessage,
+  rebuildFewerMessage,
   rebuiltEntries,
   REBUILD_LOST,
   REBUILD_NOT_WRITER,
@@ -100,6 +101,11 @@ function harness(
     tagColors?: Array<{ tag: string; color: string }>;
     /** つながり・履歴の拾い出しで読めない区画がある。 */
     extrasSkipped?: number;
+    /** 🔴 拾えるシステムのメッセージ(台帳 #1852 束 F2 / 依頼 119-1 A)。 */
+    systemRows?: readonly RescuedRow[];
+    /** 🔴 一覧に出ている数と、少なかったときの答え(依頼 119-2 A)。 */
+    expectedNotes?: number;
+    confirmAnswer?: boolean;
   } = {},
 ): {
   ports: RebuildPorts;
@@ -112,14 +118,18 @@ function harness(
     chains: Map<string, readonly RescuedRevision[]>;
     assetMetas: Array<{ key: string; mime: string | null; size: number | null; hash: string | null }>;
     tagColors: Array<{ tag: string; color: string }>;
+    trash: import('../../src/features/storage/container-rebuild').RebuiltTrashNote[];
   };
+  asked: Array<[number, number]>;
 } {
+  const asked: Array<[number, number]> = [];
   const wrote: {
     relations: RescuedRelation[];
     chains: Map<string, readonly RescuedRevision[]>;
     assetMetas: Array<{ key: string; mime: string | null; size: number | null; hash: string | null }>;
     tagColors: Array<{ tag: string; color: string }>;
-  } = { relations: [], chains: new Map(), assetMetas: [], tagColors: [] };
+    trash: import('../../src/features/storage/container-rebuild').RebuiltTrashNote[];
+  } = { relations: [], chains: new Map(), assetMetas: [], tagColors: [], trash: [] };
   const onePage =
     <R,>(rows: readonly R[]) =>
     async (after: number) => ({
@@ -163,6 +173,23 @@ function harness(
       ...(over.rows === undefined ? {} : { rows: over.rows }),
       ...(over.skippedPerPage === undefined ? {} : { skippedPerPage: over.skippedPerPage }),
     }),
+    // 🔴 システムのメッセージ(既定は無し)
+    pickSystem: fakePick({ rows: over.systemRows ?? [] }),
+    writeTrash: async (_cid, notes) => {
+      calls.push('writeTrash');
+      wrote.trash = [...notes];
+      return { restored: notes.length };
+    },
+    ...(over.expectedNotes === undefined
+      ? {}
+      : {
+          expectedNotes: over.expectedNotes,
+          confirmFewer: async (read: number, expected: number) => {
+            calls.push('confirmFewer');
+            asked.push([read, expected]);
+            return over.confirmAnswer !== false;
+          },
+        }),
     ...(idb === undefined
       ? {}
       : {
@@ -215,7 +242,7 @@ function harness(
       calls.push('announceWiped');
     },
   };
-  return { ports, calls, written: () => written, writtenFull: () => writtenFull, wrote };
+  return { ports, calls, written: () => written, writtenFull: () => writtenFull, wrote, asked };
 }
 
 describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
@@ -596,6 +623,8 @@ describe('🔴 捨てた後に落ちた回(#1006)', () => {
       revisionsRestored: 0,
       extrasPartial: false,
       tagColorsRestored: 0,
+      trashRestored: 0,
+      systemRestored: 0,
       wiped: true,
       note: null,
       fallbackReason: null,
@@ -786,9 +815,10 @@ describe('🔴 つながり・履歴・添付の登録行・色が戻る（#1087
       relations: [
         REL,
         { ...REL, id: 'other-cid', cid: 'someone-else' },
-        { ...REL, id: 'dangling', toLid: 'ghost' },
+        // 履歴も持たない lid(本当に消えた)への辺は、戻しても宙に浮く
+        { ...REL, id: 'dangling', toLid: 'nowhere' },
       ],
-      revisions: [REV({}), REV({ rowid: 2, entryLid: 'ghost' }), REV({ rowid: 3, cid: 'x' })],
+      revisions: [REV({}), REV({ rowid: 3, cid: 'x' })],
     });
     await rebuildContainer('c-old', 't', h.ports);
     expect(h.wrote.relations.map((x) => x.id)).toEqual(['r1']);
@@ -912,5 +942,149 @@ describe('🔴 拾い出しが終わらない形を打ち切る（#1087）', () 
     expect(r.outcome).toBe('rebuilt');
     expect(r.rescued.truncated).toBe(true);
     expect(rebuildDoneMessage(r)).toContain('途中で打ち切りました');
+  });
+});
+
+/**
+ * 🔴 **ゴミ箱のノートとシステムのメッセージも戻す / 少ないときは捨てる前に聞く**(台帳 #1852 束 F2 / 依頼 119-1 A・119-2 A)。
+ * 直す前は「戻らないもの」として窓に出し(`REBUILD_LOST`)、読めた数が一覧より少なくても止まらず捨てていた。
+ */
+describe('🔴 ゴミ箱のノート・メッセージの再建と、少ないときの確認(依頼 119-1 / 119-2)', () => {
+  /** ゴミ箱のノート `t1` の履歴(ノートの一覧には居ない lid)。頭 = 最も新しい行が全文。 */
+  const TRASH_HEAD = REV({
+    rowid: 10,
+    entryLid: 't1',
+    revOrder: 3,
+    title: '捨てたメモ',
+    snapshot: '捨てた本文',
+    entryCreatedAt: '2026-01-05 09:00:00',
+    entryOrder: 7,
+    entryUpdatedAt: '2026-02-05 09:00:00',
+  });
+  const TRASH_OLD = REV({ rowid: 11, entryLid: 't1', revOrder: 2, title: null, kind: 'patch', snapshot: '@@ -1 +1 @@' });
+  const SYSTEM: RescuedRow[] = [
+    { lid: 'sys-messages', title: 'メッセージ', archetype: 'textlog', body: '## 知らせ\n', entryOrder: 0, createdAt: null, updatedAt: null },
+  ];
+
+  it('🔴 一覧に居ない lid の履歴(頭が全文)をゴミ箱のノートとして戻す。頭の本文・作成日・並び・古い版が揃う', async () => {
+    const h = harness({ revisions: [REV({}), TRASH_HEAD, TRASH_OLD] });
+    const r = await rebuildContainer('c-old', 't', h.ports);
+    expect(r.outcome).toBe('rebuilt');
+    expect(r.trashRestored).toBe(1);
+    expect(h.wrote.trash).toHaveLength(1);
+    expect(h.wrote.trash[0]).toMatchObject({
+      lid: 't1',
+      title: '捨てたメモ',
+      body: '捨てた本文',
+      createdAt: '2026-01-05 09:00:00',
+      entryOrder: 7,
+      updatedAt: '2026-02-05 09:00:00',
+    });
+    expect(h.wrote.trash[0]!.rows.map((x) => x.revOrder), '頭より古い版だけが rows').toEqual([2]);
+    // 生きたノートの履歴にはゴミ箱の版が混ざらない
+    expect([...h.wrote.chains.keys()]).toEqual(['a1']);
+    // 書き戻しの順: ノートの後
+    const order = h.calls.filter((c) => c === 'writeEntries:c-old:3' || c === 'writeTrash');
+    expect(order).toEqual(['writeEntries:c-old:3', 'writeTrash']);
+    expect(rebuildDoneMessage(r)).toContain('ゴミ箱のノート 1 件');
+  });
+
+  it('頭が全文でない履歴(鎖を単独で読めない)はゴミ箱のノートとして戻さない', async () => {
+    const h = harness({ revisions: [REV({}), { ...TRASH_OLD, entryLid: 'x9' }] });
+    const r = await rebuildContainer('c-old', 't', h.ports);
+    expect(r.trashRestored).toBe(0);
+    expect(h.calls).not.toContain('writeTrash');
+  });
+
+  it('🔴 ゴミ箱のノートに触るつながりも戻る(対照群: どこにも居ない lid への辺は戻らない)', async () => {
+    const h = harness({
+      relations: [
+        REL,
+        { ...REL, id: 'to-trash', fromLid: 'a1', toLid: 't1' },
+        { ...REL, id: 'to-nowhere', fromLid: 'a1', toLid: 'nowhere' },
+      ],
+      revisions: [TRASH_HEAD],
+    });
+    await rebuildContainer('c-old', 't', h.ports);
+    expect(h.wrote.relations.map((x) => x.id).sort()).toEqual(['r1', 'to-trash']);
+  });
+
+  it('🔴 システムのメッセージは同じ領域(system)へ書き戻す。ノートの件数には数えず、zip には入れない', async () => {
+    const h = harness({ systemRows: SYSTEM });
+    const r = await rebuildContainer('c-old', 't', h.ports);
+    expect(r.restored, 'メッセージをノートの件数に混ぜた').toBe(3);
+    expect(r.systemRestored).toBe(1);
+    const sys = h.writtenFull().filter((e) => e.realm === 'system');
+    expect(sys.map((e) => e.lid)).toEqual(['sys-messages']);
+    expect(h.writtenFull().filter((e) => e.realm !== 'system')).toHaveLength(3);
+    expect(rebuildDoneMessage(r)).toContain('システムのメッセージ');
+    // zip は user のノートだけ(メッセージは書き出さない領域)
+    let blob: Blob | null = null;
+    const h2 = harness({ systemRows: SYSTEM });
+    const ports: RebuildPorts = {
+      ...h2.ports,
+      saveArchive: async (source) => {
+        blob = (await writeArchive(source, NOW)).blob;
+      },
+    };
+    await rebuildContainer('c-old', 't', ports);
+    const arc = await readArchive(blob!);
+    expect(arc.entries.map((e) => e.lid)).toEqual(['a1', 'b2', 'c3']);
+  });
+
+  it('メッセージが読めなくても、ノートの再建は止めない', async () => {
+    const h = harness();
+    const ports: RebuildPorts = {
+      ...h.ports,
+      pickSystem: async () => {
+        throw new Error('読めません');
+      },
+    };
+    const r = await rebuildContainer('c-old', 't', ports);
+    expect(r.outcome).toBe('rebuilt');
+    expect(r.systemRestored).toBe(0);
+  });
+
+  it('🔴 「戻らないもの」はもう無い(窓にも終わりの字にも出さない)', () => {
+    expect(REBUILD_LOST).toEqual([]);
+    expect(rebuildExplainMessage({ notes: 3, assetsOnDisk: 0 })).not.toContain('戻らないもの');
+    expect(rebuildExplainMessage({ notes: 3, assetsOnDisk: 0 })).toContain('ゴミ箱のノート・システムのメッセージ');
+  });
+
+  // ── 119-2
+
+  it('🔴 読めた数が一覧より少ないとき、書き出す前・捨てる前に聞く。やめたら何も書き出さず・消さない', async () => {
+    const h = harness({ expectedNotes: 100, confirmAnswer: false });
+    const r = await rebuildContainer('c-old', 't', h.ports);
+    expect(h.asked).toEqual([[3, 100]]);
+    expect(r.outcome).toBe('declined');
+    expect(h.calls, '聞く前に書き出した / 捨てた').not.toContain('saveArchive');
+    expect(h.calls).not.toContain('wipeStorage');
+    expect(h.calls).not.toContain('announceWiped');
+    expect(rebuildDoneMessage(r)).toContain('何も消していません');
+  });
+
+  it('続けると答えたら、そのまま作り直す(聞くのは捨てる前)', async () => {
+    const h = harness({ expectedNotes: 100, confirmAnswer: true });
+    const r = await rebuildContainer('c-old', 't', h.ports);
+    expect(r.outcome).toBe('rebuilt');
+    const order = h.calls.filter((c) => ['confirmFewer', 'saveArchive', 'wipeStorage'].includes(c));
+    expect(order).toEqual(['confirmFewer', 'saveArchive', 'wipeStorage']);
+  });
+
+  it('対照群: 読めた数が一覧と同じ(または多い)なら聞かない', async () => {
+    for (const expected of [3, 2]) {
+      const h = harness({ expectedNotes: expected });
+      const r = await rebuildContainer('c-old', 't', h.ports);
+      expect(h.asked, `expected=${expected}`).toEqual([]);
+      expect(r.outcome).toBe('rebuilt');
+    }
+  });
+
+  it('聞く字は「N 件のうち M 件しか読めませんでした」と、続けるとどうなるかを言う', () => {
+    const msg = rebuildFewerMessage(3, 100);
+    expect(msg).toContain('100 件のうち 3 件しか読めませんでした');
+    expect(msg).toContain('読めなかった 97 件は戻りません');
+    expect(msg).toContain('続けますか');
   });
 });

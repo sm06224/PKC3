@@ -82,6 +82,7 @@ export const QUOTA_BLOCKED_OPS: readonly string[] = [
   'renameLinkTexts',
   'importRevisionChains',
   'restoreRevisionChains',
+  'restoreTrashNotes',
   // 🔴 メッセージの追記(設計 doc §7、段②a)── 本文を伸ばす書き込みなので増える側。
   //    断られた分は adapter 側の控え(IndexedDB)へ積む(`message-post.ts`)。
   'appendMessage',

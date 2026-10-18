@@ -2781,6 +2781,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           listTagColors: () => client.request({ op: 'listTagColors', cid }),
           listRevisionLids: () =>
             client.request({ op: 'listRevisionLids', cid }),
+          // 🔴 ゴミ箱のノートも運ぶ(台帳 #1852 束 F2 / 依頼 105-2・297 A)── 全体のバックアップだけ(部分の書き出しの源は持たない)
+          listTrashHeads: () => client.request({ op: 'listTrashHeads', cid }),
           // ⚠ 鎖は**保存形のまま**取る(P6e)── `getRevision` で版ごとに
           // 全文へ復元すると、アーカイブが N×M に膨らみ kind が中身と食い違う
           getRevisionChain: (entryLid) =>
@@ -3319,6 +3321,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           chains,
           keepLatest: REVISION_KEEP_LATEST,
         }),
+      // 🔴 バックアップの中のゴミ箱のノートを、ゴミ箱の中へ戻す(台帳 #1852 束 F2 / 依頼 105-2・297 A)
+      restoreTrashNotes: (notes) =>
+        client.request({ op: 'restoreTrashNotes', cid, notes, keepLatest: REVISION_KEEP_LATEST }),
       // ⚠ **bytes 側の台帳を見る**(review H-1)── meta 行の有無で判定すると、
       // GC が deleteBlob → deleteMeta の途中で失敗した状態(設計上の想定内)で
       // put を省いてしまい、参照だけが書かれる
@@ -4104,7 +4109,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   読み込み直すので、`main.ts` が握っている配線を**差し替えない**
      *   （差し替えると、古い client を閉じ込んだ closure が残って静かに壊れる）。
      */
-    rebuildContainer: async (target: string, onProgress?: RebuildProgress) => {
+    rebuildContainer: async (
+      target: string,
+      onProgress?: RebuildProgress,
+      /** 🔴 読めた数が一覧より少ないとき、捨てる前に聞く(台帳 #1852 束 F2 / 依頼 119-2 A)。判断と字は features / binder に在る。 */
+      few?: { readonly expected: number; readonly confirm: (read: number, expected: number) => Promise<boolean> },
+    ) => {
       /** 開き直した相手。⚠ `reopenStorage` を通る前は無い。 */
       let fresh: StoreClient | null = null;
       const reopened = (): StoreClient => {
@@ -4117,6 +4127,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         holdsWriterLease: () => writerHolder,
         pick: async (afterRowid, chunks) =>
           client.request({ op: 'rescueEntries', afterRowid, chunks }),
+        // 🔴 システムのメッセージも捨てる前に読む（台帳 #1852 束 F2 / 依頼 119-1 A）。zip には入れない
+        pickSystem: async (afterRowid, chunks) =>
+          client.request({ op: 'rescueEntries', afterRowid, chunks, realm: 'system' }),
+        ...(few === undefined ? {} : { expectedNotes: few.expected, confirmFewer: few.confirm }),
         // 🔑 つながりと履歴も拾う（#1087。索引だけ壊れた DB は表走査で読める）
         pickRelations: async (afterRowid, chunks) =>
           client.request({ op: 'rescueRelations', afterRowid, chunks }),
@@ -4188,6 +4202,26 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             })),
           });
           return { added: out.added, broken: out.brokenChains.length };
+        },
+        // 🔴 ゴミ箱のノートを、ゴミ箱の中へ戻す（台帳 #1852 束 F2 / 依頼 119-1 A）。⚠ 開き直した相手へ書く
+        writeTrash: async (c: string, notes) => {
+          const out = await reopened().request({
+            op: 'restoreTrashNotes',
+            cid: c,
+            keepLatest: REVISION_KEEP_LATEST,
+            notes: notes.map((n) => ({
+              entryLid: n.lid,
+              title: n.title,
+              archetype: n.archetype,
+              body: n.body,
+              trashedAt: n.trashedAt,
+              entryCreatedAt: n.createdAt,
+              entryUpdatedAt: n.updatedAt,
+              entryOrder: n.entryOrder,
+              rows: n.rows.map((r) => ({ ...r })),
+            })),
+          });
+          return { restored: notes.length - out.skippedEntries.length };
         },
         writeAssetMetas: async (c: string, metas) => {
           for (const m of metas) {

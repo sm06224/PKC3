@@ -33,6 +33,8 @@ export interface ArchivePreview {
   readonly assetCount: number;
   readonly hasRelations: boolean;
   readonly hasRevisions: boolean;
+  /** 🔴 ゴミ箱のノートの件数(台帳 #1852 束 F2 / 依頼 105-2・297 A)。入っていなければ 0。`noteCount` には数えない。 */
+  readonly trashCount: number;
   /** 🔴 バックアップを取った日時(manifest の `exported_at`。ISO 文字列)。無い・読めないときは `null`(#1643)。 */
   readonly exportedAt: string | null;
   /** 🔴 壊れたときに拾えた分だけのバックアップか(依頼 119-4。manifest の `partial`。ファイル名は見ない)。 */
@@ -52,7 +54,7 @@ export async function peekArchivePreview(zip: Blob): Promise<ArchivePreview | nu
     format?: unknown;
     exported_at?: unknown;
     partial?: unknown;
-    counts?: { entries?: unknown; relations?: unknown; revisions?: unknown };
+    counts?: { entries?: unknown; relations?: unknown; revisions?: unknown; trash?: unknown };
   };
   try {
     manifest = JSON.parse(await readZipText(zip, hits[0]!)) as typeof manifest;
@@ -71,6 +73,7 @@ export async function peekArchivePreview(zip: Blob): Promise<ArchivePreview | nu
     assetCount,
     hasRelations: typeof counts.relations === 'number' && counts.relations > 0,
     hasRevisions: typeof counts.revisions === 'number' && counts.revisions > 0,
+    trashCount: typeof counts.trash === 'number' ? counts.trash : 0,
     exportedAt: typeof manifest.exported_at === 'string' ? manifest.exported_at : null,
     partial: manifest.partial === true,
   };
@@ -87,6 +90,7 @@ export function archivePreviewOf(archive: Pkc3Archive): ArchivePreview {
     assetCount: archive.assetSources.size,
     hasRelations: archive.relations.length > 0,
     hasRevisions: archive.revisions.length > 0,
+    trashCount: archive.trash.length,
     exportedAt: typeof archive.manifest.exported_at === 'string' ? archive.manifest.exported_at : null,
     partial: archive.manifest.partial === true,
   };
@@ -119,19 +123,21 @@ export function formatArchivePreviewMessage(preview: ArchivePreview, fileName?: 
   const source = archiveSourceLine(fileName, preview.exportedAt);
   return [
     ...(source !== null ? [source] : []),
-    // 🔴 拾えた分だけのバックアップは、そう言う(依頼 119-4。ファイルの中の印で見分ける)。つながりが入っていれば
+    // 🔴 読み出せた分だけのバックアップは、そう言う(依頼 119-4。ファイルの中の印で見分ける)。つながりが入っていれば
     //   フォルダの入り方も入っている ── 入っていないときだけ「入っていません」と言う(嘘にしない)
     ...(preview.partial
       ? [
-          '壊れたときに拾えた分だけのバックアップです。' +
+          '保存データに問題があったときに、読み出せた分だけを書き出したバックアップです。' +
             (preview.hasRelations
-              ? '読めなかったノート・つながり・履歴は入っていません。'
+              ? '読み出せなかったノート・つながり・履歴は入っていません。'
               : 'フォルダの入り方は入っていません。'),
         ]
       : []),
     `このバックアップには、次が入っています。`,
     `ノート ${String(preview.noteCount)} 件`,
     `添付 ${String(preview.assetCount)} 件`,
+    // 🔴 ゴミ箱のノートも入っていれば言う(依頼 105-2・297 A ── ゴミ箱に入った状態で戻る)。無いときは行ごと出さない
+    ...(preview.trashCount > 0 ? [`ゴミ箱のノート ${String(preview.trashCount)} 件(ゴミ箱に入った状態で戻ります)`] : []),
     `つながり ${preview.hasRelations ? '有' : '無'}`,
     `履歴 ${preview.hasRevisions ? '有' : '無'}`,
     // 🔑 「バックアップ」は「元に戻る(置き換わる)」と読まれやすい ── 足すだけであることを押す前に言う(#1087)。
