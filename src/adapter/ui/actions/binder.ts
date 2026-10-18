@@ -463,7 +463,7 @@ import { appQueryKey } from '@adapter/ui/render/query-key-store';
 // 🔴 ▼ で選んだ「作る種類」を端末側に覚える(#1045)
 import { appCreateKind } from '@adapter/ui/render/create-kind';
 import { BODY_HOST_SELECTOR, PAINTED_ATTR } from '@adapter/ui/render/detail';
-import { canNoteFind, openNoteFind } from '@adapter/ui/render/note-find';
+import { canNoteFind, closeNoteFind, isNoteFindOpen, openNoteFind } from '@adapter/ui/render/note-find';
 import { openView } from '@adapter/ui/render/open-view';
 import {
   CLOSE_NOTE_WINDOW_REFUSED,
@@ -21267,6 +21267,17 @@ export function bindActions(
          * 🔑 1 回の `Esc` で 1 段だけ(次の `Esc` で今までどおりノートが閉じる)。
          * ⚠ 右クリックのメニューが出ている間は譲る(`deselect-entry` と同じ判定の 1 本)。
          */
+        /**
+         * 🔴 **ノートの中を探す小さな欄が出ている間の `Esc` も、まず欄を閉じるだけ**(#1163 依頼 163)。
+         * ⚠ 欄の入力の中の `Esc` は欄自身が受ける(`note-find.ts`)が、焦点が ‹ › × ボタンや本文にあるときはここへ届く。
+         *   閉じないと `deselect-entry` まで進んで、探していたノートが閉じる。
+         * 🔑 1 回の `Esc` で 1 段だけ(閉じたあとの `Esc` で今までどおりノートが閉じる)。
+         */
+        if (rcmd === 'deselect-entry' && isNoteFindOpen(root) && !contextMenuOpen(root)) {
+          ke.preventDefault();
+          closeNoteFind(root, true);
+          return true;
+        }
         if (
           rcmd === 'deselect-entry' &&
           dispatcher.getState().searchJump != null &&

@@ -188,7 +188,6 @@ interface Finder {
   returnFocus: HTMLElement | null;
   observer: MutationObserver | null;
   timer: ReturnType<typeof setTimeout> | null;
-  onResize: () => void;
 }
 
 const FINDERS = new WeakMap<HTMLElement, Finder>();
@@ -196,7 +195,11 @@ const FINDERS = new WeakMap<HTMLElement, Finder>();
 function observe(f: Finder): void {
   f.observer?.disconnect();
   if (f.target === null || typeof MutationObserver === 'undefined') return;
-  f.observer ??= new MutationObserver(() => schedule(f));
+  f.observer ??= new MutationObserver((records) => {
+    // 🔴 欄自身の変化(件数の字)は数え直さない ── 送るたびに全文を数え直す無駄を作らない
+    if (records.every((r) => f.bar.contains(r.target))) return;
+    schedule(f);
+  });
   // 🔑 対象そのものではなく中央ペインを見る ── ノートを切り替えると対象の器ごと差し替わる(対象の中の変化だけ見ていると気づけない)
   const scope = f.target.closest<HTMLElement>('[data-pkc-region="center"]') ?? f.target;
   f.observer.observe(scope, { childList: true, subtree: true, characterData: true });
@@ -217,6 +220,11 @@ function clearPaint(f: Finder): void {
   unwrapMarks(f.marks);
   f.marks = [];
   f.ranges = [];
+}
+
+/** 編集中の面か(ライブエディタ / 2 ペインのプレビュー)。 */
+function isEditSurface(el: HTMLElement): boolean {
+  return el.matches('[data-pkc-region="editor-live"], [data-pkc-region="editor-preview"]');
 }
 
 function label(f: Finder): void {
@@ -283,29 +291,22 @@ function recount(f: Finder, fresh: boolean): void {
     closeNoteFind(f.root, false);
     return;
   }
+  // 🔑 対象の器が替わった(ノートの切り替え / 読む面 ⇄ 編集面)── 位置は引き継がず、先頭から数え直す
+  const replaced = f.target !== target;
   f.target = target;
   const q = f.input.value.trim();
   if (q !== '') {
     f.ranges = collectHitRanges(target, q, 'phrase');
-    if (f.ranges.length > 0 && highlightApi() === null) {
+    // 🔴 `<mark>` で包むのは読む面だけ。編集面(ライブエディタ / 2 ペインのプレビュー)は打つたびに描き直され、行の対応を持つので、
+    //   本文へ字や節点を混ぜる道を断つ ── 塗れないブラウザでは件数と送り(スクロール)だけにする
+    if (f.ranges.length > 0 && highlightApi() === null && !isEditSurface(target)) {
       f.marks = wrapWithMarks(f.ranges);
       f.ranges = [];
     }
   }
-  if (fresh) f.index = 0;
-  paintCurrent(f, fresh);
-  place(f);
+  if (fresh || replaced) f.index = 0;
+  paintCurrent(f, fresh || replaced);
   observe(f);
-}
-
-/** 欄を中央ペインの右上へ置く(面が変わっても同じ場所)。 */
-function place(f: Finder): void {
-  const center = f.root.querySelector<HTMLElement>('[data-pkc-region="center"]');
-  const rect = center?.getBoundingClientRect();
-  const win = f.root.ownerDocument.defaultView;
-  if (rect === undefined || win === null || rect.width === 0) return;
-  f.bar.style.top = `${Math.round(rect.top + 6)}px`;
-  f.bar.style.right = `${Math.round(win.innerWidth - rect.right + 28)}px`;
 }
 
 function step(f: Finder, by: number): void {
@@ -368,12 +369,12 @@ function build(root: HTMLElement): Finder {
     returnFocus: null,
     observer: null,
     timer: null,
-    onResize: () => place(f),
   };
 
   input.addEventListener('input', () => recount(f, true));
   input.addEventListener('keydown', (ev) => {
-    if (ev.isComposing) return; // 日本語入力の変換確定の Enter は送りに使わない
+    // 日本語入力の変換確定の Enter は送りに使わない(Safari は確定の Enter が `isComposing: false` で `keyCode` だけ 229 になる。binder.ts と同じ門)
+    if (ev.isComposing || ev.keyCode === 229) return;
     if (ev.key === 'Enter') {
       ev.preventDefault();
       ev.stopPropagation();
@@ -388,7 +389,6 @@ function build(root: HTMLElement): Finder {
   prev.addEventListener('click', () => step(f, -1));
   next.addEventListener('click', () => step(f, 1));
   end.addEventListener('click', () => closeNoteFind(root, true));
-  doc.defaultView?.addEventListener('resize', f.onResize);
   return f;
 }
 
@@ -408,7 +408,12 @@ export function canNoteFind(root: HTMLElement): boolean {
  */
 export function openNoteFind(root: HTMLElement): boolean {
   const doc = root.ownerDocument;
-  const existing = FINDERS.get(root);
+  let existing = FINDERS.get(root);
+  // 欄が画面から外れていた(中央ペインごと組み直された)なら、持ち物を捨てて組み直す
+  if (existing !== undefined && !existing.bar.isConnected) {
+    closeNoteFind(root, false);
+    existing = undefined;
+  }
   if (existing !== undefined) {
     existing.input.focus();
     existing.input.select();
@@ -422,7 +427,6 @@ export function openNoteFind(root: HTMLElement): boolean {
   f.target = target;
   FINDERS.set(root, f);
   (root.querySelector<HTMLElement>('[data-pkc-region="center"]') ?? root).append(f.bar);
-  place(f);
   observe(f);
   // 選択している字があれば、それを探す語の初期値にする(ブラウザの検索と同じ)
   const sel = doc.getSelection?.()?.toString().trim() ?? '';
@@ -446,7 +450,6 @@ export function closeNoteFind(root: HTMLElement, restoreFocus: boolean): void {
   if (f.timer !== null) clearTimeout(f.timer);
   clearPaint(f);
   f.observer = null;
-  root.ownerDocument.defaultView?.removeEventListener('resize', f.onResize);
   f.bar.remove();
   const back = f.returnFocus;
   if (restoreFocus && back !== null && back.isConnected) back.focus();

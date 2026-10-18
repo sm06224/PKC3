@@ -187,6 +187,8 @@ body {
  * まま ── 画面幅の上書き 3 か所が同じ名前を使っており、名前だけ変えても何も買わない */
 [data-pkc-region='center'] {
   grid-area: detail;
+  /* ノートの中を探す小さな欄(`.pkc-note-find`)の基準。左右のペインの開閉・幅の変更に追従する */
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -11682,13 +11684,17 @@ h6:hover > .pkc-heading-anchor,
 
 /* 🔴 **ノートの中だけを探す小さな欄**(#1163 依頼 163)── `render/note-find.ts`。
  *
- * 🔑 置き場所は**どの面でも中央ペインの右上**(`note-find.ts` の `place` が中央の矩形から `top` / `right` を入れる)。
- *   読む面・編集の 2 ペイン・ライブエディタで場所を変えない / 本文の行を 1px も押し下げない(`fixed`)。
+ * 🔑 置き場所は**どの面でも中央ペインの右上**(中央ペイン `position: relative` を基準にした `absolute`)。
+ *   左右のペインの開閉・幅のドラッグに CSS だけで追従する(位置の計算を持たない)。
+ *   読む面・編集の 2 ペイン・ライブエディタで場所を変えない / 本文の行を 1px も押し下げない。
  * ⚠ 地は無彩色、色は**一致の塗りにだけ**使う(欄は他の押しと同じ配色)。 */
 .pkc-note-find {
-  position: fixed;
-  top: 48px;
+  position: absolute;
+  top: 6px;
   right: 28px;
+  /* 狭い画面(スマホ幅)で本文を覆いすぎない ── 中央ペインの幅に対して抑える */
+  max-width: calc(100% - 56px);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -11703,7 +11709,8 @@ h6:hover > .pkc-heading-anchor,
 
 .pkc-note-find-input {
   width: 14em;
-  max-width: 40vw;
+  min-width: 0;
+  flex: 1 1 auto;
   padding: 2px 6px;
   font-size: 0.9em;
   border: 1px solid var(--border);

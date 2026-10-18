@@ -22,7 +22,8 @@ import { collectHitRanges } from '../../src/adapter/ui/render/search-jump';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
-import { findCommand } from '../../src/features/keymap';
+import { findCommand, resolveUsableBindings } from '../../src/features/keymap';
+import { readFileSync } from 'node:fs';
 
 function fakeStorage() {
   const map = new Map<string, string>();
@@ -72,6 +73,13 @@ const type = (root: HTMLElement, v: string) => {
   const i = input(root)!;
   i.value = v;
   i.dispatchEvent(new Event('input', { bubbles: true }));
+};
+
+const nodeCount = (el: Node): number => {
+  const w = document.createTreeWalker(el, 1 | 4);
+  let n = 0;
+  while (w.nextNode()) n++;
+  return n;
 };
 
 afterEach(() => {
@@ -192,6 +200,11 @@ describe('note-find: 開く・数える・送る・閉じる', () => {
     type(root, 'りんご');
     press('Enter', { isComposing: true }, input(root)!);
     expect(count(root)).toBe('1 / 3');
+    // Safari は変換を確定した Enter が isComposing: false で keyCode だけ 229
+    press('Enter', { keyCode: 229 }, input(root)!);
+    expect(count(root), 'keyCode 229 の Enter で送ってしまった').toBe('1 / 3');
+    press('Enter', {}, input(root)!);
+    expect(count(root), '対照群: ふつうの Enter は送る').toBe('2 / 3');
   });
 
   it('本文が描き直されたら数え直す(編集中のプレビューが打つたびに変わる)/ 対象が消えたら欄ごと閉じる', async () => {
@@ -212,6 +225,7 @@ describe('note-find: 本文の DOM を壊さない', () => {
   it('塗りの表が使えないとき `<mark>` で包み、閉じると元の節点・字へ戻る', () => {
     const { root, body } = mounted();
     const before = body!.innerHTML;
+    const nodesBefore = nodeCount(body!);
     openNoteFind(root);
     type(root, 'りんご');
     expect(
@@ -225,6 +239,8 @@ describe('note-find: 本文の DOM を壊さない', () => {
     closeNoteFind(root, true);
     expect(body!.innerHTML, '閉じても本文が元へ戻っていない').toBe(before);
     expect(body!.querySelector('mark')).toBeNull();
+    // 🔴 字面が同じでも、節点が割れたまま残っていないこと(normalize を忘れると節点の数が増えたままになる)
+    expect(nodeCount(body!), '閉じても字の節点が割れたまま').toBe(nodesBefore);
   });
 
   it('タグをまたぐ語(ab<strong>cd</strong>ef の bcde)も数え、閉じると元へ戻る', () => {
@@ -411,5 +427,165 @@ describe('note-find: 実物の DetailRenderer の 3 面で探せる', () => {
     press('Escape', {}, input(root)!);
     expect(isNoteFindOpen(root)).toBe(false);
     expect(host!.innerHTML, `${hostKey}: 閉じたあと本文が元に戻っていない`).toBe(before);
+  });
+});
+
+const meta = {
+  lid: 'a',
+  title: 't',
+  archetype: 'text',
+  entryOrder: 1,
+  createdAt: null,
+  updatedAt: null,
+  status: null,
+  date: null,
+  archived: false,
+  bodyChars: null,
+} as const;
+
+describe('note-find: レビュー指摘の直し', () => {
+  it('P2: 焦点が欄の外(› ボタン)にあるときの Esc は欄だけ閉じ、ノートは閉じない(次の Esc で閉じる)', () => {
+    const { root, d } = mounted();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    expect(d.getState().selectedLid, '台の前提: ノートが選ばれていない').toBe('a');
+    openNoteFind(root);
+    type(root, 'りんご');
+    const next = root.querySelector<HTMLElement>('[data-pkc-field="note-find-next"]')!;
+    next.focus();
+    press('Escape', {}, next);
+    expect(isNoteFindOpen(root), '欄が閉じていない').toBe(false);
+    expect(d.getState().selectedLid, '探していたノートまで閉じた').toBe('a');
+    press('Escape', {}, document.body);
+    expect(d.getState().selectedLid, '対照群: 欄が無ければ Esc でノートが閉じる').toBeNull();
+  });
+
+  it('P3: 件数の字の更新では数え直さない(送りのたびに全文を数え直さない)/ 本文の変化では数え直す', async () => {
+    vi.useFakeTimers();
+    const { root, body } = mounted();
+    openNoteFind(root);
+    type(root, 'りんご');
+    const marksOf = () => [...body!.querySelectorAll('mark')];
+    const first = marksOf();
+    expect(first.length).toBe(3);
+    press('Enter', {}, input(root)!);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(marksOf().every((m, i) => m === first[i]), '送っただけで数え直した(印が作り直された)').toBe(true);
+    body!.insertAdjacentHTML('beforeend', '<p>無関係</p>');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(marksOf().some((m, i) => m === first[i]), '対照群: 本文の変化で数え直していない').toBe(false);
+  });
+
+  it('P5: 位置は CSS だけ(中央ペイン基準の absolute)で、計算も resize の聞き手も持たない', () => {
+    const css = readFileSync('src/styles/app.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const rule = (sel: string) => css.match(new RegExp(sel.replace(/[.[\]]/g, '\\$&') + '\\s*\\{([^}]*)\\}'))?.[1] ?? '';
+    expect(rule('.pkc-note-find'), '欄が absolute でない').toContain('position: absolute');
+    expect(rule('.pkc-note-find')).toContain('max-width: calc(100% - 56px)');
+    expect(rule("[data-pkc-region='center']"), '基準の中央ペインが relative でない').toContain('position: relative');
+    const add = vi.spyOn(window, 'addEventListener');
+    const { root } = mounted();
+    openNoteFind(root);
+    expect(root.querySelector<HTMLElement>('[data-pkc-region="note-find"]')!.style.top, '位置を JS で計算している').toBe('');
+    closeNoteFind(root, true);
+    expect(add.mock.calls.filter((c) => c[0] === 'resize'), 'resize の聞き手が残る').toEqual([]);
+    add.mockRestore();
+  });
+
+  it('P6: 編集面には mark を差し込まない(塗れないブラウザでは件数と送りだけ)', async () => {
+    localStorage.setItem('pkc3.editor-mode', 'live');
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    bindActions(root, d, {}, new KeymapStore(fakeStorage()));
+    const detail = new DetailRenderer(regions.detail, null, new MarkdownClient(), null);
+    let st = reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas: [meta], relations: [] }).state;
+    st = reduce(st, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    st = reduce(st, { type: 'BODY_LOADED', lid: 'a', body: 'りんごとりんご' }).state;
+    st = reduce(st, { type: 'START_EDIT' }).state;
+    detail.render(st);
+    await new Promise((r) => setTimeout(r, 0));
+    const live = root.querySelector('[data-pkc-region="editor-live"]')!;
+    const before = live.innerHTML;
+    openNoteFind(root);
+    type(root, 'りんご');
+    expect(count(root), '件数は出る').toBe('1 / 2');
+    expect(live.querySelector('mark'), '編集面に mark が混ざった').toBeNull();
+    expect(live.innerHTML, '編集面の DOM が変わった').toBe(before);
+    press('Enter', {}, input(root)!);
+    expect(count(root)).toBe('2 / 2');
+    expect(live.innerHTML).toBe(before);
+    localStorage.removeItem('pkc3.editor-mode');
+  });
+
+  it('Q1: 現在の一致が送りに合わせて変わる(登録された range が ranges[current])', () => {
+    const reg = new Map<string, { ranges: Range[] }>();
+    class FakeHighlight {
+      priority = 0;
+      ranges: Range[] = [];
+      constructor(...rs: Range[]) {
+        this.ranges = rs;
+      }
+      add(r: Range) {
+        this.ranges.push(r);
+      }
+    }
+    vi.stubGlobal('CSS', { highlights: reg });
+    vi.stubGlobal('Highlight', FakeHighlight);
+    const { root, body } = mounted();
+    openNoteFind(root);
+    type(root, 'りんご');
+    const all = collectHitRanges(body!, 'りんご', 'phrase');
+    const same = (a: Range, b: Range) => a.startContainer === b.startContainer && a.startOffset === b.startOffset;
+    const cur = () => reg.get(NOTE_FIND_CURRENT_HIGHLIGHT)!.ranges[0]!;
+    expect(same(cur(), all[0]!)).toBe(true);
+    press('Enter', {}, input(root)!);
+    expect(same(cur(), all[1]!), '送ったのに強調が動いていない').toBe(true);
+    press('Enter', { shiftKey: true }, input(root)!);
+    press('Enter', { shiftKey: true }, input(root)!);
+    expect(same(cur(), all[2]!), '前へ戻ると最後の一致').toBe(true);
+  });
+
+  it('Q3: 対象の器が替わったら先頭から数え直す', async () => {
+    vi.useFakeTimers();
+    const { root, body } = mounted();
+    openNoteFind(root);
+    type(root, 'りんご');
+    press('Enter', {}, input(root)!);
+    press('Enter', {}, input(root)!);
+    expect(count(root)).toBe('3 / 3');
+    const next = document.createElement('div');
+    next.setAttribute('data-pkc-field', 'detail-body');
+    next.innerHTML = '<p>りんご りんご りんご りんご</p>';
+    body!.replaceWith(next);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(count(root), '別のノートなのに前の位置を引き継いだ').toBe('1 / 4');
+  });
+
+  it('Q4: 欄が画面から外れていたら、開き直しで組み直す(欄は 1 つ)', () => {
+    const { root } = mounted();
+    openNoteFind(root);
+    root.querySelector('[data-pkc-region="note-find"]')!.remove();
+    expect(openNoteFind(root)).toBe(true);
+    const bars = root.querySelectorAll('[data-pkc-region="note-find"]');
+    expect(bars.length, '欄が組み直されていない').toBe(1);
+    expect(bars[0]!.isConnected).toBe(true);
+    expect(document.activeElement).toBe(input(root));
+  });
+
+  it('P4: user が自分で割り当てた Mod+Shift+F は、新しい既定(focus-search)に勝つ', () => {
+    // 対照群: 何も割り当てていなければ新しい既定が効く
+    expect(resolveUsableBindings({}).bindings['focus-search']).toEqual(['Mod+Shift+F']);
+    // (b) 前の版で別のコマンドへ Mod+Shift+F を割り当てていた
+    const b = resolveUsableBindings({ 'create-entry': ['Alt+N', 'Mod+Shift+F'] });
+    expect(b.unusable, '使えない割当に落ちた').toEqual([]);
+    expect(b.bindings['create-entry']).toContain('Mod+Shift+F');
+    expect(b.bindings['focus-search'], '既定が user の割当を奪っている').toEqual([]);
+    // (a) 前の版で focus-search に Mod+F と別の鍵を足していた
+    const a = resolveUsableBindings({ 'focus-search': ['Mod+F', 'Alt+9'] });
+    expect(a.unusable, 'Mod+F が使えない割当に落ちた').toEqual([]);
+    expect(a.bindings['focus-search']).toEqual(['Mod+Shift+F', 'Alt+9']);
+    expect(a.bindings['find-in-note'], 'Mod+F は新しい既定のまま').toEqual(['Mod+F']);
   });
 });
