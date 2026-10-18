@@ -134,6 +134,25 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
   // ② 🔴 **本文に絵が入る** ── 参照が hydrate されて実際に描かれる
   await expectImageRendered(page, '[data-pkc-region="detail"] img[data-pkc-asset-key]');
 
+  /**
+   * ②' 🔴 **本文の画像の後ろに市松が敷かれる**(依頼 138)── 計算済みの `background-image` で見る
+   *   (CSS の文字ではなく、実ブラウザが効かせた結果)。暗い配色でも敷かれ、色が地に追従する。
+   *   新しい起動は足さない(この道中で画像が描けた直後に見る)。
+   */
+  const checker = async (): Promise<string> =>
+    page
+      .locator('[data-pkc-region="detail"] img.pkc-asset-ref[src]')
+      .first()
+      .evaluate((el) => getComputedStyle(el).backgroundImage);
+  const lightChecker = await checker();
+  expect(lightChecker, '本文の画像の後ろに市松(conic-gradient)が敷かれていない').toContain('conic-gradient');
+  await page.evaluate(() => document.documentElement.setAttribute('data-pkc-theme', 'dark'));
+  await expect
+    .poll(checker, { message: '暗い配色で市松が敷かれない / 色が地に追従しない' })
+    .toMatch(/conic-gradient/u);
+  expect(await checker(), '配色を替えても市松の色が変わらない(地に追従していない)').not.toBe(lightChecker);
+  await page.evaluate(() => document.documentElement.removeAttribute('data-pkc-theme'));
+
   // ③ ⚠ 何が起きたかを言う(黙って終わらない)
   await expect(
     page.locator('[data-pkc-region="status"]'),

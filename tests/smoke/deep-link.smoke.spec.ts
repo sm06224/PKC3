@@ -667,5 +667,39 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
     '書き出したノートが左の一覧に出ない',
   ).toContainText('SQL の結果', { timeout: 10_000 });
 
+  /**
+   * 🔴 **開いているフォルダの中に書き出される**(依頼 91-2)。新しい起動は足さない ── 同じ道中で
+   *   フォルダを作って入り、SQL の面へ戻って同じ口をもう 1 回押す。
+   * ⚠ 対照群は上の 1 回目(ルートで押した物は最上位 = フォルダの行の中には居ない)。
+   */
+  await createEntry(page, 'folder');
+  const folderRow = page.locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]');
+  await expect(folderRow, '台の前提:フォルダが作れない').toHaveCount(1);
+  const folderLid = (await folderRow.getAttribute('data-pkc-entry'))!;
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${folderLid}"]`).first().dblclick();
+  await expect(page.locator('[data-pkc-field="filer-create-target"]'), '台の前提:フォルダの中に入れていない').toContainText(
+    '新しく作るものは',
+  );
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=sql';
+  });
+  await expect(sql, 'SQL の面へ戻れない').toBeVisible();
+  await sql.locator('[data-pkc-field="sql-input"]').fill('SELECT 1 AS n');
+  await clickReal(page, '[data-pkc-field="sql-run"]');
+  await expect(sql.locator('[data-pkc-field="sql-table"] tbody td'), '2 回目の答えが返らない').toHaveText('1', {
+    timeout: 10_000,
+  });
+  await clickReal(page, '[data-pkc-field="sql-to-note"]');
+  await expect(sql.locator('[data-pkc-field="sql-note"]'), 'フォルダの中での書き出しが言われない').toContainText(
+    '書き出しました',
+  );
+  await expect(
+    page
+      .locator('[data-pkc-region="filer-table"] [data-pkc-entry] [data-pkc-field="title"]')
+      .filter({ hasText: 'SQL の結果' }),
+    '開いているフォルダの中に書き出されていない(最上位に作られている)',
+  ).toHaveCount(1, { timeout: 10_000 });
+
   expect(errors, 'pageerror / console.error が出ている').toEqual([]);
 });

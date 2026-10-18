@@ -26,7 +26,7 @@ test('🔴 tel: を書いたノートが連絡先に並び、押せる宛先に�
   await live
     .locator('[data-pkc-field="row-source"]')
     .fill(
-      '---\ntel: 090-1234-5678\nemail: taro@example.com\norg: 例の会社\n---\n\n# 山田太郎\n\n打ち合わせは水曜が空いているとのこと。',
+      '---\ntel: 090-1234-5678, 03-1111-2222\nemail: 山田 <taro@example.com>, hanako@example.com\norg: 例の会社\n---\n\n# 山田太郎\n\n打ち合わせは水曜が空いているとのこと。',
     );
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
@@ -42,14 +42,28 @@ test('🔴 tel: を書いたノートが連絡先に並び、押せる宛先に�
   });
 
   // 🔴 **押せる宛先になっている**(実ブラウザの href で見る)
-  await expect(
-    row.locator('[data-pkc-field="contact-tel"]'),
-    '電話が押せる宛先になっていない',
-  ).toHaveAttribute('href', 'tel:09012345678');
-  await expect(
-    row.locator('[data-pkc-field="contact-mail"]'),
-    'メールが押せる宛先になっていない',
-  ).toHaveAttribute('href', 'mailto:taro@example.com');
+  // 🔴 依頼 285: 「,」区切りは 1 件ずつ押せ、`名前 <宛先>` は宛先だけが mailto: になる
+  const tels = row.locator('[data-pkc-field="contact-tel"]');
+  const mails = row.locator('[data-pkc-field="contact-mail"]');
+  await expect(tels, '「,」区切りの電話が 2 件に割れていない').toHaveCount(2);
+  await expect(tels.nth(0), '電話が押せる宛先になっていない').toHaveAttribute('href', 'tel:09012345678');
+  await expect(tels.nth(1), '2 件目の電話が押せない(先頭の番号しか掛からない)').toHaveAttribute('href', 'tel:0311112222');
+  await expect(mails, '「,」区切りのメールが 2 件に割れていない').toHaveCount(2);
+  await expect(mails.nth(0), '`名前 <宛先>` が宛先だけの mailto: になっていない').toHaveAttribute(
+    'href',
+    'mailto:taro@example.com',
+  );
+  await expect(mails.nth(1), '2 件目のメールが押せない').toHaveAttribute('href', 'mailto:hanako@example.com');
+  // 🔴 .vcf の EMAIL / TEL にも名前を載せない(実ブラウザの download の中身)
+  const [vcfDl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30_000 }),
+    clickReal(page, '[data-pkc-field="contacts-export"]'),
+  ]);
+  const vcfText = readFileSync((await vcfDl.path())!, 'utf8');
+  expect(vcfText).toContain('EMAIL;TYPE=internet:taro@example.com');
+  expect(vcfText).toContain('EMAIL;TYPE=internet:hanako@example.com');
+  expect(vcfText).toContain('TEL;TYPE=voice:03-1111-2222');
+  expect(vcfText, '.vcf の宛先に名前と <> が残っている').not.toContain('<');
   // ⚠ **字は書いたとおり**(記号を落とすのは href だけ)
   await expect(row).toContainText('090-1234-5678');
   await expect(row, '所属が出ていない').toContainText('例の会社');
