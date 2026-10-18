@@ -101,6 +101,7 @@ import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '@adapter/ui/actions/long-pres
 import { pickRepeatMoveInApp } from './app-dialog';
 import { isRepeatUnit, movedOccurrenceCount, shiftWeekdaysUnit } from '@features/schedule/repeat';
 import { slotOfCard } from '@features/schedule/move-undo';
+import { noteTimeFor } from '@features/schedule/task-cards';
 import { offerMoveUndo } from './schedule-undo';
 
 /** 掴める札。⚠ `kanban-cards` は #292 段⑤で外れた死んだ綴り(`app.css` に残骸あり) ──
@@ -396,14 +397,16 @@ export function dropTaskCard(
     gatedScheduleWrite(dispatcher, [grabbed.lid], SCHEDULE_DROP_FAILED, () => {
       const entryState = dispatcher.getState();
       const was = entryState.entryMetas.get(grabbed.lid)?.date ?? null;
+      // 🔴 前書きに書かれた時刻は、日だけ動かしても残る(外すときは日付ごと消える。依頼 192 / 284)
+      const wasTime = noteTimeFor(entryState.taskScan, grabbed.lid, was);
       const refused = bodyWriteBlockReason(entryState, grabbed.lid) !== null;
       dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid: grabbed.lid, date });
       // 🔴 動かしたら「元に戻す」の 1 行(#855)。⚠ 断られた回(編集中など)・日が変わらない回は出さない
       if (!refused && entryState.entryMetas.has(grabbed.lid))
         offerMoveUndo(host, dispatcher, {
           target: { kind: 'entry', lid: grabbed.lid },
-          before: { date: was, time: null, timeEnd: null, until: null, text: '' },
-          after: { date, time: null, timeEnd: null, until: null, text: '' },
+          before: { date: was, time: wasTime, timeEnd: null, until: null, text: '' },
+          after: { date, time: date === null ? null : wasTime, timeEnd: null, until: null, text: '' },
           verb: 'moved',
         });
     });

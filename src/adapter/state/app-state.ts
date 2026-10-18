@@ -142,7 +142,7 @@ import {
   type InsertAnchor,
   type MoveLines,
 } from '@features/markdown/line-move';
-import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
+import { replaceNoteTime, replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { RepeatUnit } from '@features/schedule/repeat';
 import { isRealCalendarDate } from '@features/schedule/schedule-date';
 import type { ContactScan } from '@features/contact/contact-card';
@@ -2838,7 +2838,16 @@ export type UserAction =
    * ⚠ 書くのは frontmatter の 1 鍵だけ ── 本文は byte 無傷である
    *   (経路は `REQUEST_FRONTMATTER_SET` = todo のトグルと同じ 1 本)。
    */
-  | { type: 'SET_ENTRY_DATE'; lid: string; date: string | null }
+  | {
+      type: 'SET_ENTRY_DATE';
+      lid: string;
+      date: string | null;
+      /**
+       * 🔴 **前書きの `date:` に書く時刻**(台帳 #1852 / 依頼 192 / 284)。省略 = **書かれている時刻を残す**(日だけ動かす)。
+       * `null` = 時刻を外す。`date` が `null`(日付を外す)ときは無視する(日付ごと消える)。
+       */
+      time?: string | null;
+    }
   /**
    * 🔴 **板の塊を動かす**(#283 P4-b)── いま開いているノートの `line` 行目
    * (生の body の行番号 = 描画が焼いた `data-pkc-source-line` + frontmatter)の
@@ -9187,8 +9196,8 @@ function reduceCore(
       // 未知 lid は no-op
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
-      // ⚠ 同じ値なら何もしない(空の書込を投げない)
-      if ((meta.date ?? null) === action.date) return { state, events: [] };
+      // ⚠ 同じ値なら何もしない(空の書込を投げない)。時刻を添えた回は、同じ日でも時刻が違うことがある(書換が同じ字なら書かない)
+      if ((meta.date ?? null) === action.date && action.time === undefined) return { state, events: [] };
       return {
         state,
         events: [
@@ -9198,8 +9207,8 @@ function reduceCore(
             title: meta.title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
-            // ⚠ `undefined` = その鍵を消す(`spliceFrontmatterKeys` の作法)
-            rewrite: { kind: 'frontmatter', keys: { date: action.date ?? undefined } },
+            // 🔴 時刻つきの `date:`(`2026-10-20 14:00`)は日だけ替えて時刻を残す ── 書換は `entry-date` 1 本(依頼 192 / 284)
+            rewrite: { kind: 'entry-date', date: action.date, ...(action.time === undefined ? {} : { time: action.time }) },
           },
         ],
       };
@@ -11834,10 +11843,13 @@ function removeEntryFromState(
   }
   // ⚠ 変化が無ければ**元の参照**のまま(下の docstring)
   const taskCards = state.taskScan === null ? null : withoutLid(state.taskScan.cards, lid);
+  const noteTimesLeft = state.taskScan?.noteTimes?.filter((n) => n.lid !== lid);
   const scanTask =
-    state.taskScan === null || taskCards === state.taskScan.cards
+    state.taskScan === null ||
+    (taskCards === state.taskScan.cards &&
+      (noteTimesLeft === undefined || noteTimesLeft.length === (state.taskScan.noteTimes?.length ?? 0)))
       ? state.taskScan
-      : { ...state.taskScan, cards: taskCards! };
+      : { ...state.taskScan, cards: taskCards!, ...(noteTimesLeft === undefined ? {} : { noteTimes: noteTimesLeft }) };
   const contactCards = state.contactScan === null ? null : withoutLid(state.contactScan.cards, lid);
   const scanContact =
     state.contactScan === null || contactCards === state.contactScan.cards
@@ -12037,7 +12049,11 @@ function keepTasks(
   if (scan === null) return null;
   if (!sameCid) return null;
   const cards = scan.cards.filter((c) => metas.has(c.lid));
-  return cards.length === scan.cards.length ? scan : { ...scan, cards };
+  const noteTimes = scan.noteTimes?.filter((n) => metas.has(n.lid));
+  const sameTimes = noteTimes === undefined || noteTimes.length === (scan.noteTimes?.length ?? 0);
+  return cards.length === scan.cards.length && sameTimes
+    ? scan
+    : { ...scan, cards, ...(noteTimes === undefined ? {} : { noteTimes }) };
 }
 
 /**
@@ -12552,7 +12568,9 @@ function refreshTaskCards(
 ): TaskScan | null {
   if (scan === null) return null;
   const cards = replaceTaskCards(scan.cards, lid, body);
-  return cards === scan.cards ? scan : { ...scan, cards };
+  // 🔴 ノート 1 件の予定の時刻(前書きの `date: … 14:00`。依頼 192 / 284)も同じ口で引き直す
+  const noteTimes = replaceNoteTime(scan.noteTimes, lid, body);
+  return cards === scan.cards && noteTimes === scan.noteTimes ? scan : { ...scan, cards, ...(noteTimes === undefined ? {} : { noteTimes }) };
 }
 
 function buildPersist(

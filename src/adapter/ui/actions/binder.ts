@@ -235,6 +235,7 @@ import { decodeTaskDrag, dropTaskCard, encodeTaskDrag } from '@adapter/ui/render
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
 import { offerDoneUndo, offerMoveUndo, undoScheduleMove } from '@adapter/ui/render/schedule-undo';
 import { slotOfCard } from '@features/schedule/move-undo';
+import { noteTimeFor } from '@features/schedule/task-cards';
 import { plainTaskTitle } from '@features/schedule/task-title';
 import {
   DATE_SHORTCUTS,
@@ -11391,12 +11392,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       DATE_SHORTCUTS,
       (id, now) => (isDateShortcut(id) ? shortcutDate(id, now) : ''),
       /**
-       * 🔴 **時刻の欄を出さない**(#865、2026-09-13)。
-       * ⚠ ノートの日付に時刻は無い(抽出列が `YYYY-MM-DD` だけを受ける)ので、
-       *   出すと**打った字が黙って捨てられる**(無言の dead input)。
-       * 🔑 捨てるのは正しい ── 捨てる物を打たせるのが間違いだった。
+       * 🔴 **時刻の欄を出す**(台帳 #1852 / 依頼 192 / 284 で、ノートの日付にも時刻を書けるようにした)。
+       * 打った時刻は前書きの `date: 2026-10-20 14:00` に書く(抽出列には日付だけ)。空なら時刻は付けない。
+       * (#865 では、受け取る相手が無いので欄を出さなかった ── 受け取る相手ができたので出す)
        */
-      { withTime: false },
+      { withTime: true },
     ).then((picked) => {
       if (picked === null) return;
       // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。選び終えた時点で確かめる。押した瞬間の lid を撃つ)
@@ -11405,7 +11405,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         services,
         [lid],
         '日付を付けられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
-        () => dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: picked.date }),
+        () => dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: picked.date, time: picked.time }),
       );
     });
   },
@@ -15533,6 +15533,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () => {
         const now = dispatcher.getState();
         const was = now.entryMetas.get(lid)?.date ?? null;
+        const wasTime = noteTimeFor(now.taskScan, lid, was);
         const refused = bodyWriteBlockReason(now, lid) !== null;
         dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
         // 🔴 × にも「元に戻す」(#1632。Gemini 裁定 = #1163 の依頼 35 Q2-A)── 日付なしへ落としたときと同じ口。
@@ -15540,7 +15541,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         if (!refused && now.entryMetas.has(lid))
           offerMoveUndo(root, dispatcher, {
             target: { kind: 'entry', lid },
-            before: { date: was, time: null, timeEnd: null, until: null, text: '' },
+            before: { date: was, time: wasTime, timeEnd: null, until: null, text: '' },
             after: { date: null, time: null, timeEnd: null, until: null, text: '' },
             verb: 'moved',
           });

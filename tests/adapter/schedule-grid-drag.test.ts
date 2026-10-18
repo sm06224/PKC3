@@ -28,7 +28,7 @@ import { installScheduleGridDrag } from '../../src/adapter/ui/render/schedule-gr
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '../../src/adapter/ui/actions/long-press';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { stubRevisionOps } from '../helpers/revision-stub';
-import { taskCardsOf } from '../../src/features/schedule/task-cards';
+import { noteTimeOf, taskCardsOf } from '../../src/features/schedule/task-cards';
 import { openDialog } from './dialog-helper';
 import { clearMoveOffer, currentMoveOffer } from '../../src/adapter/ui/render/schedule-undo';
 
@@ -56,7 +56,7 @@ const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 const LANE_SEL = '[data-pkc-field="schedule-day-lane"], [data-pkc-field="schedule-weekview-lane"]';
 
-function setup(body: string, mode: 'day' | 'week') {
+function setup(body: string, mode: 'day' | 'week', noteDate: string | null = null) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
@@ -81,12 +81,19 @@ function setup(body: string, mode: 'day' | 'week') {
       return stubStamps();
     },
   });
-  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('e1')], relations: [] });
+  d.dispatch({
+    type: 'SYS_BOOTED',
+    cid: 'c1',
+    metas: [noteDate === null ? meta('e1') : { ...meta('e1'), date: noteDate }],
+    relations: [],
+  });
   const cards = taskCardsOf('e1', body);
+  // 🔴 前書きに時刻を書いたノート 1 件の予定(依頼 192 / 284)
+  const nt = noteDate === null ? null : noteTimeOf('e1', body);
   const scan = (): void =>
     d.dispatch({
       type: 'SET_TASK_SCAN',
-      scan: { cards, totalNotes: 1, scannedNotes: 1, truncated: false },
+      scan: { cards, totalNotes: 1, scannedNotes: 1, truncated: false, ...(nt === null ? {} : { noteTimes: [nt] }) },
     });
   scan();
   /** 本文が変わった後の走査(札が目盛りと終日の間を行き来する場面)。 */
@@ -219,6 +226,52 @@ describe('札を動かすと始まりの時刻が変わる(長さは保つ)', ()
     expect(laneCards()[0], '描き直しで掴んでいる札が作り直された').toBe(card);
     expect(qa('[data-pkc-field="schedule-drag-ghost"]'), '描き直しで影が消えた').toHaveLength(1);
     pointer(lanes()[0]!, 'pointerup', 'mouse', 640);
+    detach();
+  });
+});
+
+describe('ノート 1 件の予定(前書きの date: に時刻)も目盛りで動かせる(依頼 192 / 284)', () => {
+  const NOTE = '---\ndate: 2026-08-23 14:00\n---\n本文\n';
+
+  it('🔴 目盛りに出て、2 時間下へ動かすと前書きの時刻が 16:00 になる(日付は同じ)。終わりは書かない', async () => {
+    const { laneCards, lanes, store, detach } = setup(NOTE, 'day', '2026-08-23');
+    const card = laneCards()[0]!;
+    expect(card.hasAttribute('data-pkc-whole-note'), '前提: ノート 1 件の予定の札').toBe(true);
+    expect(card.getAttribute('data-pkc-task-time'), '前提: 目盛りの札(時刻つき)').toBe('14:00');
+    dragCard(card, lanes()[0]!, minPx(14 * 60), minPx(120));
+    await tick(20);
+    expect(noteTimeOf('e1', store['e1']!), '前書きの時刻が動いていない').toEqual({
+      lid: 'e1',
+      date: '2026-08-23',
+      time: '16:00',
+    });
+    expect(store['e1']).toContain('\n本文\n');
+    expect(store['e1'], '終わりの時刻を書いた').not.toMatch(/\.\./);
+    detach();
+  });
+
+  it('🔴 下の縁(終わりの取っ手)は掴ませない。引いても何も書かない', async () => {
+    const { laneCards, lanes, store, dispatched, detach } = setup(NOTE, 'day', '2026-08-23');
+    const card = laneCards()[0]!;
+    const handle = card.querySelector<HTMLElement>('[data-pkc-field="task-resize"]')!;
+    pointer(handle, 'pointerdown', 'mouse', minPx(14 * 60));
+    pointer(lanes()[0]!, 'pointermove', 'mouse', minPx(14 * 60) + minPx(60));
+    pointer(lanes()[0]!, 'pointerup', 'mouse', minPx(14 * 60) + minPx(60));
+    await tick(20);
+    expect(store['e1']).toBe(NOTE);
+    expect(dispatched.some((a) => a.type === 'SET_ENTRY_DATE')).toBe(false);
+    detach();
+  });
+
+  it('🔴 「週」で隣の日の列へ動かすと、日と時刻が一緒に変わる', async () => {
+    const { laneCards, lanes, store, detach } = setup(NOTE, 'week', '2026-08-23');
+    const lane = lanes().find((l) => l.getAttribute('data-pkc-drop-date') === '2026-08-25')!;
+    const card = laneCards()[0]!;
+    pointer(card, 'pointerdown', 'mouse', minPx(14 * 60));
+    pointer(lane, 'pointermove', 'mouse', minPx(14 * 60) + minPx(60));
+    pointer(lane, 'pointerup', 'mouse', minPx(14 * 60) + minPx(60));
+    await tick(20);
+    expect(noteTimeOf('e1', store['e1']!)).toEqual({ lid: 'e1', date: '2026-08-25', time: '15:00' });
     detach();
   });
 });

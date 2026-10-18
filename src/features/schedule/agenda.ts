@@ -103,10 +103,10 @@ export function itemOfCard(card: TaskCard): AgendaItem {
 }
 
 /**
- * ノート 1 件を予定にする(frontmatter の `date:`)。
+ * ノート 1 件を予定にする(frontmatter の `date:`)。`time` = 前書きに書いた時刻(`HH:MM`。無ければ `null` = 終日)。
  * ⚠ 鍵は `line` の代わりに `note` ── 行の札と**衝突しない**形にする。
  */
-export function itemOfNote(meta: EntryMeta): AgendaItem {
+export function itemOfNote(meta: EntryMeta, time: string | null = null): AgendaItem {
   return {
     key: `${meta.lid} note`,
     lid: meta.lid,
@@ -115,8 +115,9 @@ export function itemOfNote(meta: EntryMeta): AgendaItem {
     text: meta.title,
     done: meta.status === 'done',
     date: meta.date,
-    time: null,
-    // ⚠ 時刻が無いので幅も無い
+    // 🔴 前書きの `date: 2026-10-20 14:00` の時刻(依頼 192 / 284)。呼び側が走査の `noteTimes` から渡す。無ければ終日
+    time,
+    // ⚠ 前書きには時刻の終わりの置き場が無いので、幅は無い
     timeEnd: null,
     // ⚠ frontmatter には期間の置き場が無い(#344 段②)── 常に `null`
     until: null,

@@ -98,7 +98,9 @@ import { decodeTags, encodeTags } from '@features/flavor/tags';
 import {
   TASK_LIMITS,
   type TaskCard,
+  noteTimeOf,
   taskCardsOf,
+  type NoteTime,
   type TaskScan,
 } from '@features/schedule/task-cards';
 import {
@@ -1876,7 +1878,48 @@ function runTaskScan(cid: string): TaskScan {
     after = { entryOrder: last.entry_order, lid: last.lid };
     if (rows.length < TASK_SCAN_CHUNK) break;
   }
-  return { cards, totalNotes, scannedNotes, truncated };
+  return { cards, totalNotes, scannedNotes, truncated, noteTimes: scanNoteTimes(database, cid) };
+}
+
+/** 時刻つきのノート 1 件の予定を読む上限(画面に出して意味がある量ではなく、暴走の止め弁)。 */
+const NOTE_TIME_LIMIT = 5000;
+/** 前書きだけが要るので、本文の頭だけ読む。窓は前書きの上限(cap)から導いた `FRONTMATTER_SCAN_CHARS`(直書きしない)。 */
+const NOTE_TIME_HEAD_CHARS = FRONTMATTER_SCAN_CHARS;
+
+/**
+ * 🔴 **時刻つきのノート 1 件の予定を集める**(台帳 #1852 / 依頼 192 / 284)。
+ *
+ * 抽出列(`date`)には日付だけが入っている ── 時刻は本文の前書きから読む(保存の形は変えない)。
+ * ⚠ 日付を持つノートだけ・本文の頭だけを塊で読み、塊ごとに捨てる(`runTaskScan` と同じ作法)。読む口は `noteTimeOf` 1 本。
+ */
+function scanNoteTimes(database: ReturnType<typeof need>, cid: string): NoteTime[] {
+  const out: NoteTime[] = [];
+  let after: { entryOrder: number; lid: string } | undefined;
+  for (;;) {
+    const rows = database.selectObjects(
+      after === undefined
+        ? `SELECT lid, entry_order, substr(body, 1, ${NOTE_TIME_HEAD_CHARS}) AS head FROM entries
+            WHERE cid = ? AND ${USER_REALM_SQL} AND date IS NOT NULL
+            ORDER BY entry_order, lid LIMIT ?`
+        : `SELECT lid, entry_order, substr(body, 1, ${NOTE_TIME_HEAD_CHARS}) AS head FROM entries
+            WHERE cid = ? AND ${USER_REALM_SQL} AND date IS NOT NULL
+              AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+            ORDER BY entry_order, lid LIMIT ?`,
+      after === undefined
+        ? [cid, TASK_SCAN_CHUNK * 5]
+        : [cid, after.entryOrder, after.entryOrder, after.lid, TASK_SCAN_CHUNK * 5],
+    ) as unknown as Array<{ lid: string; entry_order: number; head: string | null }>;
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      const nt = noteTimeOf(row.lid, row.head ?? '');
+      if (nt !== null) out.push(nt);
+      if (out.length >= NOTE_TIME_LIMIT) return out;
+    }
+    const last = rows[rows.length - 1]!;
+    after = { entryOrder: last.entry_order, lid: last.lid };
+    if (rows.length < TASK_SCAN_CHUNK * 5) break;
+  }
+  return out;
 }
 
 /**

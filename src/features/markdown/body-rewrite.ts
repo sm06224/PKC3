@@ -20,7 +20,7 @@ import {
   type FrontmatterValue,
 } from './frontmatter';
 import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/line-date';
-import { isScheduleDate } from '../schedule/schedule-date';
+import { isScheduleDate, withFrontmatterDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
 import { replaceColorSpan } from './color-code';
@@ -121,6 +121,16 @@ export type BodyRewrite =
       kind: 'frontmatter';
       /** ⚠ `undefined` はその鍵を**消す**(`spliceFrontmatterKeys` の作法)。 */
       keys: Record<string, FrontmatterValue | undefined>;
+    }
+  | {
+      /**
+       * 🔴 **ノート 1 件の予定の日付を書き換える**(前書きの `date:`。台帳 #1852 / 依頼 192 / 284)。
+       * 書かれている時刻(`date: 2026-10-20 14:00`)は残す ── `time` を渡すと時刻も替える(`null` = 外す)。
+       * `date: null` は日付ごと外す(`date:` の行が消える)。
+       */
+      kind: 'entry-date';
+      date: string | null;
+      time?: string | null;
     }
   | {
       /**
@@ -1002,6 +1012,17 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'frontmatter') {
     const next = spliceFrontmatterKeys(body, rewrite.keys);
     return next === body ? null : next;
+  }
+  if (rewrite.kind === 'entry-date') {
+    const cur = parseFrontmatter(body).meta['date'];
+    const value =
+      rewrite.date === null
+        ? undefined
+        : withFrontmatterDate(typeof cur === 'string' ? cur : '', rewrite.date, rewrite.time);
+    // ⚠ 変わらない回は同じ本文を返す(= 書かない・言わない)。`null` は「断る」で、同じ日を押し直した回に偽の断りを出さない。
+    //   値が同じなら行にも触れない(時刻つきの値は書き直すと引用符が付くので、字を変えない)
+    if (typeof cur === 'string' && value === cur) return body;
+    return spliceFrontmatterKeys(body, { date: value });
   }
   if (rewrite.kind === 'line-date') return rewriteLineDate(body, rewrite);
   if (rewrite.kind === 'undo-append') return removeInsertedLines(body, rewrite.lines, rewrite.at);

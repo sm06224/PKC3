@@ -1965,6 +1965,28 @@ describe('カンバンの札を集める (#277 段②)', () => {
     // 🔑 落としたことは黙らない
     expect(scan.truncated, '落としたのに黙っている').toBe(true);
   });
+
+  /**
+   * 🔴 **前書きの `date: 2026-10-20 14:00` の時刻を運ぶ**(台帳 #1852 / 依頼 192 / 284)。
+   * 抽出列(`date`)には日付だけが入る ── 時刻は本文の頭から読む。対照群:日付だけのノート・日付の無いノートは載せない。
+   */
+  it('🔴 前書きに時刻を書いたノート 1 件の予定だけが noteTimes に載る', async () => {
+    await request({ op: 'openContainer', cid: 'c-nt', title: 'x' });
+    const put = (lid: string, body: string, date: string | null) =>
+      request({ op: 'upsertEntry', cid: 'c-nt', entry: entry(lid, body, { date }) });
+    await put('nt-timed', '---\ndate: 2026-10-20 14:00\n---\n本文\n', '2026-10-20');
+    await put('nt-iso', '---\ndate: 2026-10-21T9:05\n---\n', '2026-10-21');
+    await put('nt-dateonly', '---\ndate: 2026-10-22\n---\n', '2026-10-22');
+    await put('nt-none', '本文だけ\n', null);
+    // 時差つきは時刻を読まない(日付だけ読む今までの動き)
+    await put('nt-zone', '---\ndate: 2026-10-23T10:00:00Z\n---\n', '2026-10-23');
+    const scan = await request({ op: 'taskScan', cid: 'c-nt' });
+    const times = [...(scan.noteTimes ?? [])].sort((a, b) => (a.lid < b.lid ? -1 : 1));
+    expect(times, '時刻つきのノートが運ばれていない').toEqual([
+      { lid: 'nt-iso', date: '2026-10-21', time: '09:05' },
+      { lid: 'nt-timed', date: '2026-10-20', time: '14:00' },
+    ]);
+  });
 });
 
 /**

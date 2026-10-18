@@ -284,7 +284,15 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
     const lane = card.parentElement;
     if (lane === null || !lane.matches(GRID_LANE_SELECTOR)) return;
     const lid = card.getAttribute('data-pkc-entry');
-    const line = card.querySelector('[data-pkc-task-line]')?.getAttribute('data-pkc-task-line') ?? null;
+    /**
+     * 🔴 **ノート 1 件の予定(前書きの `date: 2026-10-20 14:00`)も時刻を動かせる**(台帳 #1852 / 依頼 192 / 284)。
+     *   行番号は無い(`line` は空)── 書き換え先は前書きの `date:`。終わりの時刻は書けないので、下の縁は掴ませない。
+     */
+    const whole = card.hasAttribute('data-pkc-whole-note');
+    if (whole && target?.closest(RESIZE_SELECTOR) != null) return;
+    const line = whole
+      ? ''
+      : (card.querySelector('[data-pkc-task-line]')?.getAttribute('data-pkc-task-line') ?? null);
     const time = card.getAttribute('data-pkc-task-time');
     if (lid === null || line === null || time === null) return;
     const timeEnd = card.getAttribute('data-pkc-task-time-end');
@@ -305,8 +313,8 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
         line,
         from,
         repeat: card.getAttribute('data-pkc-task-repeat') ?? '',
-        // 🔴 掴んだ時点の行の中身(#1087)── 落とした時点の走査から引き直さない
-        ...rawLineOf(dispatcher, lid, line),
+        // 🔴 掴んだ時点の行の中身(#1087)── 落とした時点の走査から引き直さない(ノート 1 件の予定には行が無い)
+        ...(whole ? {} : rawLineOf(dispatcher, lid, line)),
       },
       lane,
       laneHeight,
@@ -473,6 +481,28 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
   const commit = (g: Grab, r: Result): void => {
     if (r.kind === 'date') {
       dropTaskCard(dispatcher, g.task, r.date, root);
+      return;
+    }
+    // 🔴 ノート 1 件の予定: 前書きの `date:` へ日と時刻を書く(終わりは書けないので `resize` は来ない)
+    if (g.task.line === '') {
+      if (r.kind !== 'slot') return;
+      if (r.date === g.from && r.startMin === g.startMin) return;
+      const st0 = dispatcher.getState();
+      const wasDate = st0.entryMetas.get(g.task.lid)?.date ?? null;
+      const refusedNote = bodyWriteBlockReason(st0, g.task.lid) !== null;
+      const newTime = formatMinutes(r.startMin);
+      gatedScheduleWrite(dispatcher, [g.task.lid], SCHEDULE_DROP_FAILED, () =>
+        dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid: g.task.lid, date: r.date, time: newTime }),
+      );
+      if (!refusedNote && wasDate !== null) {
+        const noSlot = { timeEnd: null, until: null, text: '' } as const;
+        offerMoveUndo(root, dispatcher, {
+          target: { kind: 'entry', lid: g.task.lid },
+          before: { date: wasDate, time: g.time, ...noSlot },
+          after: { date: r.date, time: newTime, ...noSlot },
+          verb: 'moved',
+        });
+      }
       return;
     }
     const line = Number(g.task.line);

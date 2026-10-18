@@ -29,6 +29,7 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import { dueAlarms, silencedLidsOf, type AlarmDue } from '@features/alarm/alarm-due';
 import type { Chime } from '@adapter/platform/chime';
 import { missedItems, missedLabel } from '@features/schedule/schedule-notify';
+import { noteTimeCards, type TaskCard } from '@features/schedule/task-cards';
 
 export interface AlarmServiceDeps {
   readonly dispatcher: Dispatcher;
@@ -201,16 +202,21 @@ export function createAlarmService(deps: AlarmServiceDeps): AlarmService {
      */
     if (scan === null) return;
     seenTo = t;
+    // 🔴 行の予定に、前書きに時刻を書いたノート 1 件の予定(依頼 192 / 284)を足して数える
+    const cardsOf = (): readonly TaskCard[] => {
+      const notes = noteTimeCards(scan, st.entryMetas);
+      return notes.length === 0 ? scan.cards : [...scan.cards, ...notes];
+    };
     /**
      * 🔴 **長く空いたら鳴らさず、見逃した予定として 1 件積む**(#1087)── 眠っていた端末の復帰で、
      *   過ぎた予定がまとめて鳴るのを防ぐ。字と口は次に開いたときの見逃しの知らせと同じ。
      */
     if (t - from > ALARM_MAX_GAP_MS) {
-      const n = missedItems(scan.cards, from, t, silencedLidsOf(st.entryMetas, st.scheduleHiddenNotes)).length;
+      const n = missedItems(cardsOf(), from, t, silencedLidsOf(st.entryMetas, st.scheduleHiddenNotes)).length;
       if (n > 0) deps.post?.(missedLabel(n));
       return;
     }
-    const due = dueAlarms(scan.cards, from, t, silencedLidsOf(st.entryMetas, st.scheduleHiddenNotes)).filter((d) => !rang.has(d.key));
+    const due = dueAlarms(cardsOf(), from, t, silencedLidsOf(st.entryMetas, st.scheduleHiddenNotes)).filter((d) => !rang.has(d.key));
     if (due.length === 0) return;
     for (const d of due) {
       rang.add(d.key);

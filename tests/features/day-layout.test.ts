@@ -95,7 +95,7 @@ describe('目盛りの上の幅(pieceOf)', () => {
 });
 
 describe('終日と目盛りを分ける(splitDay)', () => {
-  it('時刻なし・期間・ノート 1 件の予定は終日 / 時刻ありは目盛り', () => {
+  it('時刻なし・期間・時刻の無いノート 1 件の予定は終日 / 時刻ありは目盛り', () => {
     const timed = item('t', '14:00', '15:00');
     const noTime = item('n', null);
     const range = item('r', '10:00', null, { until: '2026-08-25' });
@@ -103,6 +103,13 @@ describe('終日と目盛りを分ける(splitDay)', () => {
     const r = splitDay([timed, noTime, range, wholeNote]);
     expect(r.timed.map((x) => x.item.key)).toEqual(['t']);
     expect(r.allDay.map((x) => x.key)).toEqual(['n', 'r', 'w']);
+  });
+
+  it('🔴 前書きに時刻を書いたノート 1 件の予定(依頼 192 / 284)は目盛りに置く。期間は時刻があっても終日のまま', () => {
+    const timedNote = item('w2', '09:30', null, { line: null });
+    const r = splitDay([timedNote, item('r', '10:00', null, { until: '2026-08-25', line: null })]);
+    expect(r.timed.map((x) => x.item.key)).toEqual(['w2']);
+    expect(r.allDay.map((x) => x.key)).toEqual(['r']);
   });
 });
 
