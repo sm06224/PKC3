@@ -775,12 +775,12 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
       ...bigNotes.map((n) => ({ name: n.filename, data: innerText(n.lid, n.title) })),
     ]),
   });
-  // 取り込んだ後は、いまの階層(「2026」の中)のまま ── ルートへ戻して、大量のフォルダの行を押す
-  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
+  // 取り込んだ後は、いまの階層(「2026」の中)のまま ── 束 F1 以降、開いているフォルダへ入るので、ルートへ戻さず
+  // その場で大量のフォルダの行を押す(以前は取り込み先がルートだった)
   const bigRow = page
     .locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]')
     .filter({ hasText: '大量フォルダ' });
-  await expect(bigRow, '取り込んだ大量のフォルダがルートに出ない').toHaveCount(1);
+  await expect(bigRow, '取り込んだ大量のフォルダが、開いているフォルダ(「2026」)の中に出ない').toHaveCount(1);
   await clickReal(page, bigRow);
   const more = page.locator('[data-pkc-region="folder-overview"] [data-pkc-field="overview-more"]');
   await expect(more, '100 件を超えるフォルダの概要に「ほか N 件」の押し口が出ない').toHaveText(
