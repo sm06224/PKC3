@@ -27,6 +27,7 @@ import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
 import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
 import { dueAlarms, silencedLidsOf } from '../../src/features/alarm/alarm-due';
 import { missedItems } from '../../src/features/schedule/schedule-notify';
+import { buildIcs } from '../../src/features/schedule/ics';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
 describe('読み方(parseFrontmatterWhen)', () => {
@@ -149,6 +150,16 @@ describe('予定の 1 件にする', () => {
     expect(dueAlarms(noteTimeCards(scan, new Map([['a', meta({ status: 'done' })]])), at(13, 59), at(14, 0))).toEqual([]);
     // 日付が食い違えば札にしない
     expect(noteTimeCards(scan, new Map([['a', meta({ date: '2026-10-21' })]]))).toEqual([]);
+  });
+});
+
+describe('書き出し(.ics)', () => {
+  it('🔴 時刻つきのノート 1 件の予定は時刻つきの予定として書き出す。対照群: 時刻の無いノートは終日', () => {
+    const opts = { stamp: new Date(0), zone: { kind: 'tokyo' } } as const;
+    const timed = buildIcs([itemOfNote(meta(), '14:00')], opts).text;
+    expect(timed).toMatch(/DTSTART;TZID=Asia\/Tokyo:20261020T140000/);
+    const allDay = buildIcs([itemOfNote(meta())], opts).text;
+    expect(allDay).toMatch(/DTSTART;VALUE=DATE:20261020/);
   });
 });
 
