@@ -1242,6 +1242,22 @@ test('🔴 本文に貼った画像を押すとその場で拡大し、閉じら
   await expectClosed('背景');
   expect(opened, 'ここまでで別窓が開いている(押すとその場で拡大のはず)').toEqual([]);
 
+  /**
+   * 🔴 台帳 #1852 U1 残り・依頼 79-3: キーボードだけで大きくできる ── 画像に Tab で止まれて、Enter で開き、Esc で閉じると画像に焦点が戻る。
+   * ⚠ 止まれる(= Tab の順に入っている)ことは「1 つ戻って Tab で戻る」で見る(`focus()` は tabindex=-1 でも通る)。
+   */
+  await img.focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(img, '前提: Shift+Tab で画像から離れていない').not.toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(img, 'Tab で画像に焦点が止まらない').toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(lightbox, 'Enter で大きく表示されない').toHaveCount(1);
+  await expect(lbImg, '大きい絵が本文の絵と違う').toHaveAttribute('src', srcBody!);
+  await page.keyboard.press('Escape');
+  await expectClosed('Esc(キーボード)');
+  await expect(img, 'Esc で閉じても画像に焦点が戻らない').toBeFocused();
+
   // 🔴 「⧉ 別窓で開く」で、同じ絵が別窓で開く
   await openLightbox();
   const [win] = await Promise.all([

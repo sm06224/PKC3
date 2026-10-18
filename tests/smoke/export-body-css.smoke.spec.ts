@@ -319,6 +319,41 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
     `紙のリンクが白地で読めない: ${darkPaper.link}`,
   ).toBeGreaterThanOrEqual(4.5);
 
+  /**
+   * 🔴 台帳 #1852 U1 残り・依頼 77-4: 閲覧用 HTML で本文のリンクから別のノートへ移り、ブラウザの「戻る」で前のノートに戻る。
+   * 🔑 起動を増やさない ── 同じ道中で 2 件目のノート(1 件目へのリンク付き)を足し、もう一度書き出す。
+   * ⚠ 上の「全体を印刷」の測定(2 件目の節を見る)は済んでいるので、ここで件数を増やしても壊さない。
+   */
+  const firstLid = await page
+    .locator('[data-pkc-region="filer-table"] [data-pkc-entry]')
+    .first()
+    .getAttribute('data-pkc-entry');
+  expect(firstLid, '前提: 1 件目の住所が取れない').toBeTruthy();
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '行き先ノート');
+  await page.fill('[data-pkc-field="editor-body"]', `二つ目の本文\n\n[元のノートへ](entry:${firstLid})\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('二つ目の本文');
+  await gotoCollectionPane(page);
+  const dl2 = page.waitForEvent('download');
+  await clickReal(page, '[data-pkc-action="export-html"]');
+  const file2 = join(tmpdir(), `pkc3-bodycss-nav-${process.pid}.html`);
+  await (await dl2).saveAs(file2);
+  const nav = await page.context().newPage();
+  await nav.goto(`file://${file2}`);
+  await nav.locator('#pkc-list button', { hasText: '行き先ノート' }).click();
+  await expect(nav.locator('#pkc-body'), '前提: 2 件目が開いていない').toContainText('二つ目の本文');
+  await nav.locator('#pkc-body a', { hasText: '元のノートへ' }).click();
+  await expect(nav.locator('#pkc-body'), 'リンクを押しても 1 件目へ移らない').toContainText('危険');
+  await expect(nav.locator('#pkc-body')).not.toContainText('二つ目の本文');
+  await nav.goBack();
+  await expect(nav.locator('#pkc-body'), '「戻る」で前のノートに戻らない').toContainText('二つ目の本文');
+  await expect(nav.locator('#pkc-body')).not.toContainText('危険');
+  expect(nav.url(), '戻ったら閲覧用 HTML のページから出てしまった').toBe(`file://${file2}`);
+  await nav.goForward();
+  await expect(nav.locator('#pkc-body'), '「進む」で 1 件目へ戻れない').toContainText('危険');
+  await nav.close();
+
   await viewer.close();
   expect(errors, errors.join('\n')).toEqual([]);
 });

@@ -444,6 +444,12 @@ test('🔴 編集中に行を右クリックすると「別のウィンドウで
   const items = menu.locator('button[data-pkc-action]:not([disabled])');
   await expect(items, '編集中なのに「別のウィンドウで開く」以外が押せる').toHaveCount(1);
   await expect(menu.locator('button[data-pkc-action][disabled]').first(), '灰色の項目が並んでいない').toBeVisible();
+  // 🔴 台帳 #1852 U1 残り・依頼 79-2: 「いつもの項目」が並んでいる(灰色が 1 つでなく、いつものメニューの全体)
+  expect(
+    await menu.locator('button[data-pkc-action][disabled]').count(),
+    '編集中のメニューにいつもの項目が並んでいない(灰色が少ない)',
+  ).toBeGreaterThanOrEqual(3);
+  await expect(menu, '編集中のメニューに「ゴミ箱へ移す」が並んでいない').toContainText('ゴミ箱へ移す');
   await expect(items.first()).toHaveAttribute('data-pkc-action', 'open-note-window');
   await expect(items.first()).toContainText('別のウィンドウで開く');
   // 🔑 lid はボタン自身が運ぶ(「押した行のノート」といういつもの規則 ── 選ばずに済む)
