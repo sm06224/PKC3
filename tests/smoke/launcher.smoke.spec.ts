@@ -2392,9 +2392,45 @@ test('🔴 一式を入れた端末では Office タイルが出て、押すと�
   ).toHaveAttribute('data-pkc-symbol', 'page');
   expectRealGlyphs(await tileMarks(page, builtinTile('office')), 1);
 
-  // 🔴 押すと **Office の窓**が開く
+  /**
+   * 🔴 **保存していない文書(新しく作った文書など。持ち主の居ない控え)があれば、開く前に並べる**(台帳 #1852 束 A1。依頼 367 A)。
+   * 🔑 控えは**実物の窓の書き手**(`public/office/office-shadow.js` の `shelve`。`origin.lid` は空)で置く。
+   * 窓が開かないまま見る(一覧を出している間は窓を開けない)── 「消す」は押さない(ここで消すと続きが対照群にならない)。
+   */
+  await page.addScriptTag({ url: '/office/office-shadow.js' });
+  await page.evaluate(async () => {
+    const SH = (window as unknown as { PKC3OfficeShadow: { safeId(t: string, f: string): string; shelve(d: unknown): Promise<unknown> } }).PKC3OfficeShadow;
+    const bytes = new Uint8Array([4, 4, 4]);
+    await SH.shelve({
+      storage: navigator.storage,
+      id: SH.safeId('', 'w-orphan'),
+      ext: 'docx',
+      size: bytes.length,
+      now: () => Date.now(),
+      read: (into: Uint8Array, wanted: number, pos: number) => { into.set(bytes.subarray(pos, pos + wanted)); return wanted; },
+      origin: { name: '議事録.docx', size: 1, lid: '' },
+    });
+    new BroadcastChannel('pkc3-office').postMessage({ pkc3Office: 'shadow-written', payload: { at: Date.now() } });
+  });
+  // 放送で本体が棚を読み直すのを待つ(押した瞬間に間に合わないと、訊かずに窓が開く ── その回は下の assert で落ちる)
+  await page.waitForTimeout(500);
   const popup = context.waitForEvent('page');
+  const listPopups: import('@playwright/test').Page[] = [];
+  const onPage = (p: import('@playwright/test').Page): void => { listPopups.push(p); };
+  context.on('page', onPage);
   await openTile(page, builtinTile('office'));
+  const listRows = page.locator('[data-pkc-field="pick-office-shadow-list"]');
+  await expect(listRows, '🔴 保存していない文書の一覧が出ない(議事録 + 開かずに + すべて消して の 3 行)').toHaveCount(3);
+  await expect(listRows.first()).toContainText('議事録.docx');
+  await expect(listRows.first()).toContainText('一時保存');
+  await expect(listRows.nth(1)).toContainText('Office のスタート画面を開く');
+  await expect(listRows.nth(2)).toContainText('すべて消して');
+  await expect(page.locator('[data-pkc-field="pick-office-shadow-list-note"]')).toContainText('保存しないまま閉じた');
+  expect(listPopups, '🔴 一覧を出している間に窓を開いた').toHaveLength(0);
+  context.off('page', onPage);
+
+  // 🔴 「開かずに、スタート画面を開く」→ 窓が開く(一時保存は残る)
+  await clickReal(page, listRows.nth(1));
   const win = await popup;
   expect(win.url()).toContain('office/host.html');
   await win.close();
