@@ -285,7 +285,22 @@ export function undoScheduleMove(
     return { refusal: '動かした後に予定が変わったので、元に戻せませんでした' };
   const b = offer.restore ?? offer.before;
   if (offer.target.kind === 'entry')
-    return { action: { type: 'SET_ENTRY_DATE', lid: offer.target.lid, date: b.date, time: b.time } };
+  {
+    /**
+     * 🔴 動かしても時刻に触れていない回(日だけ動かした)は、戻すときも時刻に触れない ── 時刻として読めない字
+     *   (時差つき `T10:00Z` 等)は走査に載らず `time` が `null` に見えるので、`time: null` を撃つと黙って消えてしまう。
+     *   日付を外した回(after.date が null)は日付ごと消えているので、従来どおり時刻を添えて戻す。
+     */
+    const untouched = b === offer.before && offer.after.date !== null && offer.before.time === offer.after.time;
+    return {
+      action: {
+        type: 'SET_ENTRY_DATE',
+        lid: offer.target.lid,
+        date: b.date,
+        ...(untouched ? {} : { time: b.time }),
+      },
+    };
+  }
   // 🔴 戻す相手の行は「いま走査に見えている姿」── その原文を `openLine` に添える(#1087)。
   //    動かした後に行が替わっていれば、上の `undoVerdict` が先に断っている
   const openLine = shownCardLine(state, offer.target.lid, offer.target.line);

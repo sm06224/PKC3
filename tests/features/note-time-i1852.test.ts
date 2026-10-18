@@ -76,6 +76,16 @@ describe('読み方(parseFrontmatterWhen)', () => {
     expect(withFrontmatterDate('2026-10-20', '2026-10-21', '08:00')).toBe('2026-10-21 08:00');
     expect(withFrontmatterDate('', '2026-10-21', '08:00')).toBe('2026-10-21 08:00');
   });
+
+  it('🔴 時差つき・読めない時刻部分は、日だけ動かすとき黙って落とさず原文の字のまま残す(戻せば元の字)', () => {
+    expect(withFrontmatterDate('2026-10-20T10:00Z', '2026-10-21')).toBe('2026-10-21T10:00Z');
+    expect(withFrontmatterDate('2026-10-20 10:00+09:00', '2026-10-21')).toBe('2026-10-21 10:00+09:00');
+    expect(withFrontmatterDate('2026-10-20 25:00', '2026-10-21')).toBe('2026-10-21 25:00');
+    expect(withFrontmatterDate(withFrontmatterDate('2026-10-20T10:00Z', '2026-10-21'), '2026-10-20')).toBe('2026-10-20T10:00Z');
+    // 明示した time は従来どおり置き換える / 外す
+    expect(withFrontmatterDate('2026-10-20T10:00Z', '2026-10-21', '09:00')).toBe('2026-10-21T09:00');
+    expect(withFrontmatterDate('2026-10-20T10:00Z', '2026-10-21', null)).toBe('2026-10-21');
+  });
 });
 
 describe('走査が運ぶ物', () => {

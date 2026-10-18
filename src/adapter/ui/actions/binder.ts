@@ -11389,12 +11389,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     /**
      * 🔴 **ノートの現在値で開く**(台帳 #1852 指摘 2)── 空の時刻で開くと、前書きに `date: … 14:00` がある
      *   ノートの日付だけ変えて OK したとき、時刻が黙って消える。日付も現在の日付から(無ければ今日)。
-     * ⚠ 走査がまだ無い(= 時刻を知らない)間は、時刻欄を空で開き、空のまま OK でも**時刻に触らない**(下)。
+     * ⚠ 走査がまだ無い間・時差つきなど読めない時刻は、時刻欄が空で開く。空のまま OK でも**時刻に触らない**(下)。
      */
     const st0 = dispatcher.getState();
     const curDate = st0.entryMetas.get(lid)?.date ?? null;
     const curTime = noteTimeFor(st0.taskScan, lid, curDate);
-    const timeKnown = st0.taskScan !== null;
     void pickDateInApp(
       root,
       new Date(),
@@ -11422,8 +11421,8 @@ const ACTIONS: Record<string, ActionHandler> = {
             type: 'SET_ENTRY_DATE',
             lid,
             date: picked.date,
-            // 時刻を知らないまま空で OK された回は、書かれている時刻を残す(省略 = 残す)
-            ...(picked.time === null && !timeKnown ? {} : { time: picked.time }),
+            // 空で開いて空のまま OK された回(時刻を知らない / 読めない時刻の字)は、書かれている字を残す(省略 = 残す)
+            ...(picked.time === null && curTime === null ? {} : { time: picked.time }),
           }),
       );
     });

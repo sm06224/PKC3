@@ -210,9 +210,18 @@ export function dateOfFrontmatterText(raw: string): string | null {
 /**
  * 🔴 **`date:` の値の日付だけを替える**(予定表でノートを別の日へ動かす)。**書かれた時刻は残す**(綴りも同じ)。
  * `time` を渡すと時刻も替える(`null` で時刻を外す)。読めない値(日付でない)には `newDate` だけを返す。
+ * 🔴 **時刻として読めない後ろの字(時差つき `T10:00Z` / `25:00` 等)は、`time` を渡さない回は黙って落とさない** ──
+ *   日付の部分だけ差し替えて、後ろの字を原文のまま残す(日を戻せば元の字に戻る)。
  */
 export function withFrontmatterDate(raw: string, newDate: string, time?: string | null): string {
   const when = parseFrontmatterWhen(raw);
+  if (time === undefined && when !== null && when.time === null) {
+    // 時刻として読めない後ろの字(日付の直後から末尾まで。区切りを含む)は、原文のまま残す
+    const text = raw.trim();
+    const dateLen = /^(\S+?)(?:[ T\u3000]\S+)?$/.exec(text)?.[1]?.length ?? text.length;
+    const tail = text.slice(dateLen);
+    if (tail !== '') return `${newDate}${tail}`;
+  }
   const keep = time === undefined ? (when?.time ?? null) : time;
   return keep === null ? newDate : `${newDate}${when?.sep ?? ' '}${keep}`;
 }

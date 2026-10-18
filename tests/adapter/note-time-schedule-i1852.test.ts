@@ -130,7 +130,8 @@ describe('日へ落とす・元に戻す', () => {
     expect(r.body()).toContain('"2026-10-23 14:00"');
     expect(r.state().notice).toBe('10/23(金) 14:00 へ動かしました');
     const undo = undoScheduleMove(r.state()) as { action: UserAction };
-    expect(undo.action).toEqual({ type: 'SET_ENTRY_DATE', lid: 'a', date: '2026-10-20', time: '14:00' });
+    // 日だけ動かした回は、戻すときも時刻に触れない(time を撃たない)
+    expect(undo.action).toEqual({ type: 'SET_ENTRY_DATE', lid: 'a', date: '2026-10-20' });
     r.dispatcher.dispatch(undo.action);
     // 戻した字は日付・時刻が元と同じ(引用符の有無だけが違う ── 前書きとして読んだ値は同じ)
     expect(noteTimeOf('a', r.body())).toEqual({ lid: 'a', date: '2026-10-20', time: '14:00' });
@@ -146,12 +147,22 @@ describe('日へ落とす・元に戻す', () => {
     expect(noteTimeOf('a', r.body())).toEqual({ lid: 'a', date: '2026-10-20', time: '14:00' });
   });
 
-  it('対照群: 時刻の無いノートは、これまでどおり日付だけ(知らせに時刻が出ない・戻す手の time は null)', () => {
+  it('対照群: 時刻の無いノートは、これまでどおり日付だけ(知らせに時刻が出ない・戻す手は日付だけ)', () => {
     const r = rig('---\ndate: 2026-10-20\n---\n本文');
     drop(r, '2026-10-23');
     expect(r.state().notice).toBe('10/23(金) へ動かしました');
     const undo = undoScheduleMove(r.state()) as { action: UserAction };
-    expect(undo.action).toEqual({ type: 'SET_ENTRY_DATE', lid: 'a', date: '2026-10-20', time: null });
+    expect(undo.action).toEqual({ type: 'SET_ENTRY_DATE', lid: 'a', date: '2026-10-20' });
+  });
+
+  it('🔴 時差つき(`T10:00Z`)の時刻は、日だけ動かしても字のまま残り、元に戻すと元の字へ戻る(黙って落とさない)', () => {
+    const r = rig('---\ndate: 2026-10-20T10:00Z\n---\n本文');
+    expect(r.state().taskScan?.noteTimes, '前提: 時差つきは走査の時刻に載らない').toBeUndefined();
+    drop(r, '2026-10-23');
+    expect(r.body()).toContain('2026-10-23T10:00Z');
+    const undo = undoScheduleMove(r.state()) as { action: UserAction };
+    r.dispatcher.dispatch(undo.action);
+    expect(r.body(), '元の字に戻っていない').toContain('2026-10-20T10:00Z');
   });
 });
 
