@@ -494,7 +494,10 @@ describe('main.ts の配線(原文 pin)', () => {
     const src = readFileSync('src/main.ts', 'utf-8');
     const run = src.slice(src.indexOf('const runImport = ('), src.indexOf('📣 起動したときのお知らせ'));
     expect(run.length, 'runImport の block が読めない(空振り)').toBeGreaterThan(200);
-    expect(run, '取り込んだときの更新時刻を憶えていない').toContain(
+    // 紐づけの実体は `linkLaunchedFiles`(batch でまとめる)── main.ts は launched を渡して呼ぶ
+    expect(run, '取り込み後に紐づけを呼んでいない').toContain('linkLaunchedFiles(dispatcher, launched, lids, handles, files)');
+    const launchedSrc = readFileSync('src/adapter/platform/launched-files.ts', 'utf-8');
+    expect(launchedSrc, '取り込んだときの更新時刻を憶えていない').toContain(
       'launched.remember(lid, handle, file.name, file.lastModified)',
     );
     const at = src.indexOf('writeBackFile: (lid) => {');

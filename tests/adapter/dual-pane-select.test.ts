@@ -235,13 +235,20 @@ describe('配線(binder)', () => {
         seen.push(a.type);
         return orig(a as never);
       }) as typeof d.dispatch;
+      let stateCalls = 0;
+      d.onState(() => {
+        stateCalls += 1;
+      });
       click(region.querySelector('[data-pkc-field="dual-move"]')!);
       expect(parentsOf('m0'), '前提: 移せていない').toEqual(['f1']);
+      // 🔴 件数ぶん(300 × 2 回)state listener を呼ばない ── 描き直しは O(1)
+      expect(seen.filter((t) => t === 'SET_ENTRY_PARENT').length, '前提: 1 件ずつ撃っていない(batch の効きを測れない)').toBe(300);
+      expect(stateCalls, 'state listener が件数ぶん呼ばれている(batch が効いていない)').toBeLessThan(15);
       expect(seen.filter((t) => t === 'DUAL_SELECT' || t === 'DUAL_SELECT_MANY'), '選びを件数ぶん撃っている').toEqual([
         'DUAL_SELECT_MANY',
       ]);
       expect(paneOf(d.getState().dual, 'right').selection.length).toBeGreaterThanOrEqual(300);
-    }, 60000);
+    });
 
     it('⚠ 対照群 ── 断られて 1 件も動かなかった回は、移した先に何も選ばない', () => {
       // 右はルートのまま(左と同じ場所へ移す = 動く物が無い)

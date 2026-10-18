@@ -23,6 +23,7 @@
  * ブラウザ objects で、比較も複製もできない ── 純粋な reducer に混ぜない。
  */
 import { errorText } from '@features/error-text';
+import type { Dispatcher } from '@adapter/state/dispatcher';
 import { changedOnWriteBack, decodeImportTextInfo, type ChangedOnWriteBack } from '@features/import/text-decode';
 
 /**
@@ -327,4 +328,28 @@ export async function writeBackFile(
       reason: `書き戻せませんでした: ${errorText(e)}`,
     };
   }
+}
+
+/**
+ * 🔴 **取り込んだノートを元ファイルへ紐づける**(`main.ts` の OS から開いた md の取り込みの後段)。
+ * ⚠ 順番で結ぶ(`lids[i]` ↔ `handles[i]` / `files[i]`)。件数ぶんの `FILE_LINKED` は **1 回の通知**にまとめる
+ *   (`dispatcher.batch`)── 1 件ずつ通知すると、件数ぶん一覧が描き直される。
+ */
+export function linkLaunchedFiles(
+  dispatcher: Dispatcher,
+  launched: Pick<LaunchedFiles, 'remember'>,
+  lids: readonly string[],
+  handles: readonly (LaunchedHandle | undefined)[],
+  files: readonly (File | undefined)[],
+): void {
+  dispatcher.batch(() => {
+    lids.forEach((lid, i) => {
+      const handle = handles[i];
+      const file = files[i];
+      if (!handle || !file) return;
+      // 🔴 取り込んだときの更新時刻も憶える(#1264 §2 欠陥 1。外で変わったかを後で比べる)
+      launched.remember(lid, handle, file.name, file.lastModified);
+      dispatcher.dispatch({ type: 'FILE_LINKED', lid, name: file.name });
+    });
+  });
 }

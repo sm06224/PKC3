@@ -1506,24 +1506,26 @@ const moveEntries = (
   }
   let moved = 0;
   let same = 0;
-  for (const lid of lids) {
-    const st = dispatcher.getState();
-    if (alreadyThere(st, lid, parentLid)) {
-      same += 1;
-      continue;
+  dispatcher.batch(() => {
+    for (const lid of lids) {
+      const st = dispatcher.getState();
+      if (alreadyThere(st, lid, parentLid)) {
+        same += 1;
+        continue;
+      }
+      const before = st.relations;
+      dispatcher.dispatch({ type: 'SET_ENTRY_PARENT', lid, parentLid, relationId: generateLid() });
+      if (dispatcher.getState().relations !== before) {
+        moved += 1;
+        /**
+         * 🔴 **移したノートは、移し先の末尾に並べる**(台帳 #1852 N1 / 依頼 154 ②。Gemini 回答 = 推薦どおり)。
+         * ⚠ 直す前は移したノートが、作った順番に応じた**途中の位置**に入り、たくさんのノートに紛れてどこに入ったか分からないことがあった。
+         *   パソコンのファイル画面で移したときと同じ感覚にする。移し先の末尾 = 全体の末尾(並びの値は全体で 1 本)。
+         */
+        dispatcher.dispatch({ type: 'SET_ENTRY_ORDER', lid, entryOrder: 'end' });
+      }
     }
-    const before = st.relations;
-    dispatcher.dispatch({ type: 'SET_ENTRY_PARENT', lid, parentLid, relationId: generateLid() });
-    if (dispatcher.getState().relations !== before) {
-      moved += 1;
-      /**
-       * 🔴 **移したノートは、移し先の末尾に並べる**(台帳 #1852 N1 / 依頼 154 ②。Gemini 回答 = 推薦どおり)。
-       * ⚠ 直す前は移したノートが、作った順番に応じた**途中の位置**に入り、たくさんのノートに紛れてどこに入ったか分からないことがあった。
-       *   パソコンのファイル画面で移したときと同じ感覚にする。移し先の末尾 = 全体の末尾(並びの値は全体で 1 本)。
-       */
-      dispatcher.dispatch({ type: 'SET_ENTRY_ORDER', lid, entryOrder: 'end' });
-    }
-  }
+  });
   const refused = lids.length - moved - same;
   if (moved === 0 && same === 0) {
     dispatcher.dispatch({
@@ -9539,21 +9541,28 @@ const ACTIONS: Record<string, ActionHandler> = {
          * 🔑 書き換えは取り込みと同じ 1 本(`remapEntryLids`)── `entry:<lid>` の lid の部分だけを写す。
          */
         const copied = new Map(steps.map((x) => [x.sourceLid, x.lid] as const));
-        for (const step of steps) {
-          const raw = bodies.get(step.sourceLid);
-          if (raw === undefined) missing += 1;
-          const body = raw === undefined ? undefined : remapEntryLids(raw, copied);
-          dispatcher.dispatch({
-            type: 'CREATE_ENTRY',
-            archetype: step.archetype,
-            lid: step.lid,
-            title: step.title,
-            parentLid: step.parentLid,
-            relationId: generateLid(),
-            edit: false,
-            ...(body === undefined ? {} : { body }),
-          });
-        }
+        /**
+         * 🔴 **N 件の作成は 1 回の通知にまとめる**(件数ぶん表を作り直さない)。
+         * 🔑 副作用として、`opened-effects`(最近開いた物)へは**最後に選ばれた 1 件だけ**が入る
+         *   (途中の選びは通知されない)── コピー先で最後に選ばれた 1 件だけが一覧に入るのが自然なので、それでよい。
+         */
+        dispatcher.batch(() => {
+          for (const step of steps) {
+            const raw = bodies.get(step.sourceLid);
+            if (raw === undefined) missing += 1;
+            const body = raw === undefined ? undefined : remapEntryLids(raw, copied);
+            dispatcher.dispatch({
+              type: 'CREATE_ENTRY',
+              archetype: step.archetype,
+              lid: step.lid,
+              title: step.title,
+              parentLid: step.parentLid,
+              relationId: generateLid(),
+              edit: false,
+              ...(body === undefined ? {} : { body }),
+            });
+          }
+        });
         /**
          * 🔴 **作れたかを見てから言う**(#1087)。編集中は `CREATE_ENTRY` が黙って捨てられる
          *   (`app-state.ts`。コピーの読み待ちの間に編集へ入った場合)ので、dispatch の後に
@@ -9731,35 +9740,37 @@ const ACTIONS: Record<string, ActionHandler> = {
     let back = 0;
     // 🔴 元のフォルダが無くなっていて、いちばん上の階層へ戻した件数(台帳 #1852 N1 / 依頼 155 ②。直す前は「元の場所に戻しました」と言っていたが、実際は元の場所ではなかった)
     let toRoot = 0;
-    for (const m of moves) {
-      if (!st.entryMetas.has(m.lid)) continue;
-      if ((parents.get(m.lid) ?? null) !== m.to) continue;
-      // 元のフォルダがもう無ければルートへ戻す(居ない親へは入れられない)
-      /**
-       * 🔴 **入っていたフォルダ全部へ戻す**(台帳 #1852 G1 / 依頼 227 A)── 2 つ以上に入っていたノートは、まだ居るフォルダ全部へ。
-       *   1 本目(正準の親)が居なければ、居る中の先頭を 1 本目にする(全部居なければルート)。
-       */
-      const homes = (m.fromAll ?? (m.from !== null ? [m.from] : [])).filter((f) => st.entryMetas.has(f));
-      const first = m.from !== null && homes.includes(m.from) ? m.from : (homes[0] ?? null);
-      const parentLid = first;
-      const also = homes.filter((f) => f !== first).map((f) => ({ parentLid: f, relationId: generateLid() }));
-      const before = dispatcher.getState().relations;
-      dispatcher.dispatch({
-        type: 'SET_ENTRY_PARENT',
-        lid: m.lid,
-        parentLid,
-        relationId: generateLid(),
-        ...(also.length > 0 ? { alsoIn: also } : {}),
-      });
-      // 🔴 実際に動いた分だけ数える(#1087)── 元の場所がその後このノートの中へ入っていると、輪になるので断られる
-      if (dispatcher.getState().relations !== before) {
-        back += 1;
-        if (m.from !== null && parentLid === null) toRoot += 1;
-        // 🔴 移す前の並びの位置へ戻す(依頼 154 ②)。⚠ ほかの物の値は動いていないので、この 1 件の値を戻すだけで元の位置になる
-        if (m.entryOrder !== undefined)
-          dispatcher.dispatch({ type: 'SET_ENTRY_ORDER', lid: m.lid, entryOrder: m.entryOrder });
+    dispatcher.batch(() => {
+      for (const m of moves) {
+        if (!st.entryMetas.has(m.lid)) continue;
+        if ((parents.get(m.lid) ?? null) !== m.to) continue;
+        // 元のフォルダがもう無ければルートへ戻す(居ない親へは入れられない)
+        /**
+         * 🔴 **入っていたフォルダ全部へ戻す**(台帳 #1852 G1 / 依頼 227 A)── 2 つ以上に入っていたノートは、まだ居るフォルダ全部へ。
+         *   1 本目(正準の親)が居なければ、居る中の先頭を 1 本目にする(全部居なければルート)。
+         */
+        const homes = (m.fromAll ?? (m.from !== null ? [m.from] : [])).filter((f) => st.entryMetas.has(f));
+        const first = m.from !== null && homes.includes(m.from) ? m.from : (homes[0] ?? null);
+        const parentLid = first;
+        const also = homes.filter((f) => f !== first).map((f) => ({ parentLid: f, relationId: generateLid() }));
+        const before = dispatcher.getState().relations;
+        dispatcher.dispatch({
+          type: 'SET_ENTRY_PARENT',
+          lid: m.lid,
+          parentLid,
+          relationId: generateLid(),
+          ...(also.length > 0 ? { alsoIn: also } : {}),
+        });
+        // 🔴 実際に動いた分だけ数える(#1087)── 元の場所がその後このノートの中へ入っていると、輪になるので断られる
+        if (dispatcher.getState().relations !== before) {
+          back += 1;
+          if (m.from !== null && parentLid === null) toRoot += 1;
+          // 🔴 移す前の並びの位置へ戻す(依頼 154 ②)。⚠ ほかの物の値は動いていないので、この 1 件の値を戻すだけで元の位置になる
+          if (m.entryOrder !== undefined)
+            dispatcher.dispatch({ type: 'SET_ENTRY_ORDER', lid: m.lid, entryOrder: m.entryOrder });
+        }
       }
-    }
+    });
     dispatcher.dispatch({
       type: 'OP_NOTICE',
       message:
@@ -20317,9 +20328,11 @@ export function bindActions(
      *   これまでどおりその 1 件になる ── `TOGGLE_SELECT` は既存の口、規則を増やさない)。
      */
     if (marksBefore.length > 1 && marksBefore.includes(lid)) {
-      for (const m of marksBefore) {
-        if (m !== lid) dispatcher.dispatch({ type: 'TOGGLE_SELECT', lid: m });
-      }
+      dispatcher.batch(() => {
+        for (const m of marksBefore) {
+          if (m !== lid) dispatcher.dispatch({ type: 'TOGGLE_SELECT', lid: m });
+        }
+      });
     }
     /**
      * 🔴 **条件つきの 2 つを、この 1 件で判定する**(#500 案 C)。
