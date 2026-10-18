@@ -171,6 +171,7 @@ describe('🔴 門は画面から足した origin を受け、外した後は受
           createEntry: () => 'x',
           append: async () => ({ ok: true }),
           appendCheck: () => 'ok',
+          notifyAppended: () => undefined,
           gate: async () => true,
           from,
         }),
@@ -274,6 +275,7 @@ describe('🔴 門は画面から足した origin を受け、外した後は受
           createEntry: () => 'x',
           append: async () => ({ ok: true }),
           appendCheck: () => 'ok',
+          notifyAppended: () => undefined,
           gate: async (t) => {
             gateCalls.push(t);
             return true;

@@ -12,11 +12,13 @@
  * **既定はどれも許可なし。** 道具そのものは flag がオンなら登録するが、`execute` の先頭で
  * ここを通り、許可が無ければ**アプリのダイアログで聞く**。
  *
- * ## 聞き方(3 択)
+ * ## 聞き方(4 択)
  *
  * - **この 1 回だけ** ── その 1 回だけ通す。続けて呼ばれると、そのたびにまた聞く
  * - **常に許す** ── この端末に憶える(container には入れない。許可は書き出して配る物ではない)
  * - **許さない** ── 通さない。⚠ 例外は投げず、AI が理由を読める結果で返す
+ * - **この相手は断る(次に起動するまで)** ── 通さない。その相手の呼び出しは、起動し直すまで**聞かずに**断る(依頼 363。
+ *   許可の台帳は変えない ── 許可リストから外さずに黙らせる)
  *
  * ⚠ **ダイアログが出せないとき**(`ask` が無い / 出す途中で落ちた)は**許さない**と同じ扱い
  * (聞けないのに通すのは、許可を飛ばすのと同じである)。
@@ -29,8 +31,12 @@ export type AgentScope = 'read' | 'write' | 'append';
 
 export const AGENT_SCOPES: readonly AgentScope[] = ['read', 'write', 'append'];
 
-/** ダイアログの答え。 */
-export type AgentAnswer = 'once' | 'always' | 'deny';
+/**
+ * ダイアログの答え。
+ * `block` = **この相手は断る(次に起動するまで)**(依頼 363)── 許可の台帳には触れず、この起動の間だけ、
+ * その相手(ブラウザの AI / 組み込み先の origin)の呼び出しを聞かずに断る。
+ */
+export type AgentAnswer = 'once' | 'always' | 'deny' | 'block';
 
 /** 設定の一覧に出す範囲の名前。 */
 export const AGENT_SCOPE_LABEL: Readonly<Record<AgentScope, string>> = {
@@ -121,6 +127,7 @@ export const AGENT_ASK_LABELS = {
   once: 'この 1 回だけ',
   always: '常に許す',
   deny: '許さない',
+  block: 'この相手は断る(次に起動するまで)',
 } as const;
 
 /**
@@ -164,11 +171,30 @@ export type AgentGate = (target: AgentTarget, signal?: AbortSignal) => Promise<b
  */
 export function createAgentGate(deps: AgentGateDeps): AgentGate {
   let chain: Promise<unknown> = Promise.resolve();
-  const decide = async (target: AgentTarget, signal?: AbortSignal): Promise<boolean> => {
+  /**
+   * 🔴 **この起動の間だけ断る相手**(依頼 363「この相手は断る」)。キーは相手(`from`。無い = このブラウザの AI)。
+   * ⚠ 台帳(`grants`)には書かない ── 起動し直せば空に戻る。
+   */
+  const blocked = new Set<string>();
+  const partyOf = (target: AgentTarget): string => target.from ?? '';
+  /**
+   * 🔴 **ダイアログを出しうる依頼で、まだ答えが出ていない物**(列に並んでいる / いま出ている)。
+   * 同じ相手・同じ範囲の「許さない」が出たら、列で待っていた依頼を**聞き直さず**断る(依頼 363
+   * 「同じ相手の確認は、1 つ出ている間は重ねて出さない」)。
+   */
+  interface Waiting {
+    readonly party: string;
+    readonly scope: AgentScope;
+    refused: boolean;
+  }
+  const waiting = new Set<Waiting>();
+  const decide = async (target: AgentTarget, me: Waiting, signal?: AbortSignal): Promise<boolean> => {
     const scope = scopeOf(target);
     // ⚠ 関数にして毎回読む(`await` をまたぐと、型が「まだ取り消されていない」で固まる)
     const cancelled = (): boolean => signal?.aborted === true;
     if (cancelled()) return false;
+    // 列で待っている間に「この相手は断る」「許さない」が出ていた ── 聞き直さない
+    if (blocked.has(me.party) || me.refused) return false;
     let allowed = deps.grants.isAlways(scope, target.from);
     if (!allowed) {
       let answer: AgentAnswer = 'deny';
@@ -181,12 +207,18 @@ export function createAgentGate(deps: AgentGateDeps): AgentGate {
       // 聞いている間に取り消された ── 答えが何であれ通さず、台帳も触らない
       if (cancelled()) return false;
       if (answer === 'always') deps.grants.setAlways(scope, target.from);
+      if (answer === 'block') blocked.add(me.party);
+      if (answer === 'deny') {
+        for (const w of waiting) if (w !== me && w.party === me.party && w.scope === scope) w.refused = true;
+      }
       allowed = answer === 'once' || answer === 'always';
     }
     if (allowed) deps.grants.touch(scope, deps.now(), target.from);
     return allowed;
   };
   return (target, signal) => {
+    // 🔴 断ると決めた相手は、列にも並べず・聞かずに断る(許可済みの台帳より先 ── 断るは今日の判断)
+    if (blocked.has(partyOf(target))) return Promise.resolve(false);
     // 🔴 既に許してある依頼は列に並べない ── 別の origin のダイアログが開いている間、
     //   許可済みの呼び出し(別のページの AI・ブラウザの AI)まで待たされるのを防ぐ。
     //   並べるのは**ダイアログを出しうる依頼だけ**(同じ範囲の 2 枚重なりを防ぐ列の目的はそのまま)
@@ -194,7 +226,9 @@ export function createAgentGate(deps: AgentGateDeps): AgentGate {
       deps.grants.touch(scopeOf(target), deps.now(), target.from);
       return Promise.resolve(true);
     }
-    const run = chain.then(() => decide(target, signal));
+    const me: Waiting = { party: partyOf(target), scope: scopeOf(target), refused: false };
+    waiting.add(me);
+    const run = chain.then(() => decide(target, me, signal)).finally(() => waiting.delete(me));
     // ⚠ 前が転んでも列は進める
     chain = run.catch(() => undefined);
     return run;

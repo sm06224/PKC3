@@ -63,6 +63,19 @@ export function outsideCreatedText(origin: string, via: Via, title: string): str
 }
 
 /**
+ * 既にあるノートへ外から書き足した/書き換えた知らせの字(依頼 362 / 75-3)。作ったときの知らせと同じ形
+ * (「(相手の名前)が…」+ 隣に「開く」)。`verb` は AI の書き足し = 「書き足しました」/ 拡張機能 = 「書き換えました」。
+ */
+export function outsideAppendedText(origin: string, title: string): string {
+  return `${origin} がノート『${title}』に書き足しました`;
+}
+
+/** 拡張機能がノートを書き換えたときの知らせの字(依頼 75-3)。履歴から戻せる。 */
+export function extensionRewroteText(extName: string, title: string): string {
+  return `${extName} がノート『${title}』を書き換えました(履歴から戻せます)`;
+}
+
+/**
  * @returns 作ったノートの ID。**作れなかったら `null`**(呼び側が失敗として返す)。
  */
 export function createEntryFromOutside(

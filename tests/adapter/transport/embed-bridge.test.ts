@@ -30,7 +30,7 @@ describe('埋め込みの受け口を張るか', () => {
       addEventListener: () => (added += 1),
       removeEventListener: () => undefined,
     } as unknown as Window;
-    expect(startEmbedBridge({ enabled: false, origins: () => ['*'], target })).toBeNull();
+    expect(startEmbedBridge({ enabled: false, origins: () => ['*'], gate: async () => true, target })).toBeNull();
     expect(added, 'flag が false なのに張っている').toBe(0);
   });
 
@@ -41,7 +41,7 @@ describe('埋め込みの受け口を張るか', () => {
       addEventListener: () => (added += 1),
       removeEventListener: () => (removed += 1),
     } as unknown as Window;
-    const detach = startEmbedBridge({ enabled: true, origins: () => [], target });
+    const detach = startEmbedBridge({ enabled: true, origins: () => [], gate: async () => true, target });
     expect(detach).not.toBeNull();
     expect(added).toBe(1);
     detach?.();

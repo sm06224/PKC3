@@ -37,7 +37,7 @@ import { UNSET } from '@features/query/group-by';
 import { AGENT_DENIED_TEXT, type AgentGate } from '@features/agent/agent-gate';
 import type { ModelContextTool, ToolResult } from '@features/agent/webmcp-types';
 import { MAX_BODY, parseCreateEntryParams, type CreateEntryInput } from './create-entry-params';
-import { AGENT_ORIGIN_LABEL, agentOriginLabel } from './outside-create';
+import { AGENT_ORIGIN_LABEL, agentOriginLabel, outsideAppendedText } from './outside-create';
 import type { Via } from './message-bridge';
 import { MAX_PER_MINUTE } from './protocol';
 import type { AppendOutcome } from '@adapter/state/append-settle';
@@ -87,6 +87,11 @@ export interface AgentToolDeps {
    * ⚠ AI への断りをここで言うための物 ── dispatch して reducer に断らせると、理由が user 向けの `state.error` に出る。
    */
   appendCheck: (id: string) => 'ok' | 'gone' | 'busy';
+  /**
+   * 🔴 **書き足したと画面に知らせる**(依頼 362)。「開く」と「元に戻す」(AI の分)を添えた知らせを出す。
+   * ⚠ 必須 ── 渡し忘れると、知らないうちに中身が増える(作ったときは `createEntry` が知らせを出すのと対)。
+   */
+  notifyAppended: (message: string, lid: string) => void;
   /** 許可の門(`createAgentGate`)。`signal` は AI が依頼を取り消したとき abort される。 */
   gate: AgentGate;
   /** 時計(回数の窓を測る)。省略 = `Date.now`。 */
@@ -137,18 +142,29 @@ function asRecord(input: unknown): Record<string, unknown> {
     : {};
 }
 
-/** AI へ返すノート 1 件。 */
-function noteOf(id: string, meta: AgentMeta, body: string): Record<string, unknown> {
-  const cut = body.length > MAX_BODY;
+/**
+ * AI へ返すノート 1 件。
+ * 🔴 `offset` = 本文を読み始める位置(字数。依頼 365)。1 回に返すのは `MAX_BODY` 字まで(上限はそのまま)で、
+ * 切ったときは `nextOffset`(続きを読む位置)を返す ── AI は `pkc_read_note` に `offset` を渡して続きを読める。
+ */
+function noteOf(id: string, meta: AgentMeta, body: string, offset = 0): Record<string, unknown> {
+  let end = Math.min(body.length, offset + MAX_BODY);
+  // ⚠ 対(サロゲートペア)の途中で切らない ── 切ると 1 字が壊れ、続きの先頭も壊れる
+  if (end < body.length && end > offset) {
+    const c = body.charCodeAt(end - 1);
+    if (c >= 0xd800 && c <= 0xdbff) end -= 1;
+  }
+  const cut = end < body.length;
   return {
     id,
     title: meta.title,
     kind: meta.archetype,
     updatedAt: meta.updatedAt,
     tags: collectEntryTags(body).all,
-    body: cut ? body.slice(0, MAX_BODY) : body,
-    // ⚠ 切ったことは言う(黙って切ると、AI は「これが全文」と読む)
-    ...(cut ? { bodyTruncated: true } : {}),
+    body: offset === 0 && !cut ? body : body.slice(offset, end),
+    // ⚠ 切ったことは言う(黙って切ると、AI は「これが全文」と読む)。続きの位置も添える(依頼 365)
+    ...(cut ? { bodyTruncated: true, nextOffset: end } : {}),
+    ...(offset > 0 || cut ? { offset, totalLength: body.length } : {}),
   };
 }
 
@@ -224,10 +240,17 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
     name: 'pkc_read_note',
     title: 'ノートを読む',
     description:
-      'ID を指定して、PKC3 のノート 1 件を本文つきで返します。pkc_search_notes で見つけたノートの全文を読むときに使います。',
+      `ID を指定して、PKC3 のノート 1 件を本文つきで返します。pkc_search_notes で見つけたノートの全文を読むときに使います。本文が ${String(MAX_BODY)} 字を超えるときは bodyTruncated: true と nextOffset を返すので、続きは offset に nextOffset を渡して読みます。`,
     inputSchema: {
       type: 'object',
-      properties: { id: { type: 'string', description: 'ノートの ID' } },
+      properties: {
+        id: { type: 'string', description: 'ノートの ID' },
+        offset: {
+          type: 'integer',
+          minimum: 0,
+          description: '本文を読み始める位置(字数。省略 = 先頭)。前の結果の nextOffset を渡すと続きを読めます',
+        },
+      },
       required: ['id'],
     },
     annotations: { readOnlyHint: true, untrustedContentHint: true },
@@ -236,6 +259,11 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
       const input = asRecord(raw);
       const id = typeof input.id === 'string' ? input.id : '';
       if (id === '') return fail('id は空でない文字列である必要があります');
+      const asked = input.offset;
+      if (asked !== undefined && (typeof asked !== 'number' || !Number.isInteger(asked) || asked < 0)) {
+        return fail('offset は 0 以上の整数である必要があります');
+      }
+      const offset = asked ?? 0;
       const meta = deps.meta(id);
       // ⚠ 見取りに無い ID は読ませない(system 領域のノートを、ID を直に渡して読む道を塞ぐ)。
       //   ⚠ 許可を聞く前に断る ── 読めないノートの題名をダイアログに出さない
@@ -245,7 +273,11 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
       }
       const body = (await deps.bodies([id])).get(id);
       if (body === undefined) return fail('そのノートは見つかりません');
-      return ok(noteOf(id, meta, body));
+      // ⚠ 位置が本文の長さを超えていたら、空の本文を返さず断る(続きを読み終えたのに読み続けさせない)
+      if (offset > 0 && offset >= body.length) {
+        return fail(`offset が本文の長さ(${String(body.length)} 字)以上です。本文はここまでで終わりです`);
+      }
+      return ok(noteOf(id, meta, body, offset));
     },
   };
 
@@ -348,7 +380,10 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
       // 🔑 ログは日時の節を付ける(追記欄と同じ `appendHeadingFor`)── 付けないと前の節に溶け込む
       const r = await deps.append(id, text, appendHeadingFor(meta.archetype, new Date(clock())));
       // 🔴 書けなかったときに成功を返さない(AI が「書き足した」と user に言ってしまう)
-      if (r.ok) return ok({ id, title: meta.title });
+      if (r.ok) {
+        deps.notifyAppended(outsideAppendedText(originLabel, meta.title), id);
+        return ok({ id, title: meta.title });
+      }
       if (r.reason === 'timeout') return fail(AGENT_APPEND_TIMEOUT_TEXT);
       return fail(r.error ?? AGENT_APPEND_FAILED_TEXT);
     },

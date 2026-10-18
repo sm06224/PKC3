@@ -1341,7 +1341,7 @@ export async function pickAgentGrantInApp(
   target: AgentTarget,
   signal?: AbortSignal,
 ): Promise<AgentAnswer> {
-  const chosen = await pickRowInApp<'once' | 'always'>(host, {
+  const chosen = await pickRowInApp<'once' | 'always' | 'block'>(host, {
     title: AGENT_ASK_TITLE,
     field: 'pick-agent-grant',
     indexAttr: 'data-pkc-agent-grant-index',
@@ -1353,6 +1353,8 @@ export async function pickAgentGrantInApp(
     rows: [
       { label: AGENT_ASK_LABELS.once, value: 'once' },
       { label: AGENT_ASK_LABELS.always, value: 'always' },
+      // 🔴 起動し直すまで、この相手の確認を出さずに断る(依頼 363)。台帳は変えない
+      { label: AGENT_ASK_LABELS.block, value: 'block', separatorBefore: true },
     ],
   });
   return chosen ?? 'deny';

@@ -44,6 +44,7 @@ function rig(
 ) {
   const wrote: { entry: ExtWriteEntry; expectHash: string; keepMeta: boolean }[] = [];
   let refreshed = 0;
+  const notices: { message: string; open: string | null }[] = [];
   const deps: ExtWriteApplyDeps = {
     // ⚠ 既定は「そのまま走らせる」── chain の有無はここの主題ではない
     run: (job) => job(),
@@ -59,13 +60,14 @@ function rig(
       return {};
     },
     refresh: async () => void (refreshed += 1),
+    notify: (message, open) => void notices.push({ message, open }),
     ...Object.fromEntries(
       Object.entries(over).filter(([k]) => k !== 'conflictOn' && k !== 'gone'),
     ),
   };
   // 🔑 送った時点の指紋 = 台の最初の本文(書かれて disk が動いても、ここは動かない)
   const handed = new Map(Object.entries(disk).map(([k, v]) => [k, contentHash64Hex(v)]));
-  return { deps, wrote, disk, handed, refreshed: (): number => refreshed };
+  return { deps, wrote, disk, handed, notices, refreshed: (): number => refreshed };
 }
 
 const setBody = (lid: string, body: string) => ({ op: 'setBody' as const, lid, body });
@@ -332,5 +334,49 @@ describe('🔑 本文だけを書く / 途中で投げたら件数を言う', ()
     const out = await applyExtWriteOps([setBody('a', '新')], deps, r.handed);
     expect(out.ok).toBe(false);
     expect(!out.ok && out.why).toContain('1 件は書きました');
+  });
+});
+
+describe('🔴 依頼 75-3: 外のアプリ(拡張機能)が書き換えたら、画面に知らせる', () => {
+  it('1 件通ったら「拡張機能 がノート『題名』を書き換えました(履歴から戻せます)」+ 開く先(書いたノート)', async () => {
+    const r = rig({ a: 'ふるい' });
+    const out = await applyExtWriteOps([setBody('a', '新')], r.deps, r.handed);
+    expect(out).toEqual({ ok: true, wrote: 1 });
+    expect(r.notices).toEqual([{ message: '拡張機能 がノート『t-a』を書き換えました(履歴から戻せます)', open: 'a' }]);
+  });
+
+  it('複数件は件数で言い、先頭のノートを開く先にする', async () => {
+    const r = rig({ a: 'ふるい', b: 'ふるい' });
+    await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps, r.handed);
+    expect(r.notices).toEqual([{ message: '拡張機能 がノート 2 件を書き換えました(履歴から戻せます)', open: 'a' }]);
+  });
+
+  it('断ったら理由つきで知らせる(開く先は無い)。編集中 / 送ったあとに書き換わっていた、の 2 通り', async () => {
+    const editing = rig({ a: 'ふるい' }, { phase: () => 'editing' });
+    const o1 = await applyExtWriteOps([setBody('a', '新')], editing.deps, editing.handed);
+    expect(o1.ok).toBe(false);
+    expect(editing.notices).toHaveLength(1);
+    expect(editing.notices[0]!.open).toBeNull();
+    expect(editing.notices[0]!.message).toBe(`拡張機能からの書き換えを受け付けませんでした: ${(o1 as { why: string }).why}`);
+    expect(editing.notices[0]!.message).toContain('編集');
+
+    const stale = rig({ a: 'ふるい' });
+    stale.disk.a = 'user が書いた';
+    const o2 = await applyExtWriteOps([setBody('a', '新')], stale.deps, stale.handed);
+    expect(o2.ok).toBe(false);
+    expect(stale.notices[0]!.message).toContain(STALE_AFTER_HANDOFF);
+  });
+
+  it('⚠ 1 件も書いていない成功(あり得ない形)では、「書き換えました」と言わない / 投げたときも理由つきで知らせて投げ直す', async () => {
+    const thrower = rig(
+      { a: 'ふるい' },
+      {
+        write: async () => {
+          throw new Error('disk が一杯');
+        },
+      },
+    );
+    await expect(applyExtWriteOps([setBody('a', '新')], thrower.deps, thrower.handed)).rejects.toThrow('disk が一杯');
+    expect(thrower.notices).toEqual([{ message: '拡張機能からの書き換えを受け付けませんでした: disk が一杯', open: null }]);
   });
 });

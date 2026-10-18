@@ -135,6 +135,11 @@ const UNRESOLVED: readonly string[] = [
    * 🔑 `undo-move` と同じ器(`paintStatusUndo` が `data-pkc-action` を実行時に書き換える)ので、静的な字が source に無い。
    */
   'undo-bulk-tag',
+  /**
+   * ⚠ **2026-10-18(台帳 #1852 P1 / 依頼 362)で 1 件増えた** ── AI の書き足しの直後の「書き足しを元に戻す」(`undo-agent-append`)。
+   * 🔑 `undo-move` と同じ器(`paintStatusUndo` が `data-pkc-action` を実行時に書き換える)ので、静的な字が source に無い。
+   */
+  'undo-agent-append',
   'view-big',
 ];
 

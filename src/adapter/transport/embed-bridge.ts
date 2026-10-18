@@ -14,6 +14,7 @@ import { METHODS, RPC } from './protocol';
 import { attachMessageBridge, type BridgeOptions, type Via } from './message-bridge';
 import { parseCreateEntryParams, type CreateEntryInput } from './create-entry-params';
 import type { AgentEmbed } from './agent-embed';
+import { AGENT_DENIED_TEXT, type AgentGate } from '@features/agent/agent-gate';
 
 export interface EmbedDeps {
   /** flag が立っているか。 */
@@ -36,6 +37,13 @@ export interface EmbedDeps {
    * `tools/list` / `tools/call` を申告せず、呼ばれても `METHOD_NOT_FOUND` で返す。
    */
   agent?: AgentEmbed & { enabled: () => boolean };
+  /**
+   * 🔴 **許可の門**(台帳 #1852 P1 / 依頼 364)。許可リストの相手の `pkc.createEntry` も、画面の「ノートを作る」の許可
+   * (設定の「許可を取り消す」・確認の「この相手は断る」)を**同じ門で**見る ── AI の道具の `pkc_create_note` と同じ 1 本。
+   * 取り消した相手は作れず、許可の無い相手は確認が出る。⚠ 合図の相手(`'capture'`)は user が自分で押した動線なので通さない。
+   * ⚠ 必須 ── 渡し忘れると「許可を見ずに作れる」側へ倒れる。
+   */
+  gate: AgentGate;
   /** 許す origin(呼ぶたびに読む ── 設定を変えたら張り直さずに効く)。 */
   origins: () => readonly string[];
   onReject?: BridgeOptions['onReject'];
@@ -120,6 +128,10 @@ export function startEmbedBridge(deps: EmbedDeps): (() => void) | null {
                 //    `INVALID_PARAMS` で返す(`message-bridge` は投げた誤りを
                 //    `INTERNAL_ERROR` に畳むので、符号を持たせて投げる)
                 throw Object.assign(new Error(parsed.message), { rpcCode: RPC.INVALID_PARAMS });
+              }
+              // 🔴 許可リストの相手は「ノートを作る」の許可を門で見る(依頼 364)。⚠ 断る理由は相手へ返す(自分の画面のエラー欄には出さない)
+              if (via === 'origin' && !(await deps.gate({ action: 'create', title: parsed.input.title, from: origin }))) {
+                throw new Error(AGENT_DENIED_TEXT);
               }
               const lid = await deps.createEntry!(parsed.input, origin, via);
               if (lid === null) {

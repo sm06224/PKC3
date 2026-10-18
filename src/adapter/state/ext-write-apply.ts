@@ -37,6 +37,7 @@ import type { ExtWriteOp } from '@features/extension/ext-write';
 import { extractMeta } from '@features/flavor';
 import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
 import { blockedWithSuffix, phaseBlockReason, type AppPhase } from '@adapter/state/app-state';
+import { extensionRewroteText } from '@adapter/transport/outside-create';
 
 /** 書き込む 1 行(store の `upsertEntry` に渡す形)。 */
 export interface ExtWriteEntry {
@@ -81,7 +82,18 @@ export interface ExtWriteApplyDeps {
   ): Promise<{ conflict?: boolean } | null | undefined>;
   /** 画面の取り直し。⚠ **1 件も書いていなければ呼ばない**(呼び側が守る)。 */
   refresh(): Promise<void>;
+  /**
+   * 🔴 **画面に知らせる**(依頼 75-3。AI の書き足しの知らせ(依頼 362)と同じ形)。通ったときは「書き換えました」+
+   * 隣に「開く」(`open` = 書いたノート)、断ったときは理由(`open` = `null`)。
+   * ⚠ 必須 ── 渡し忘れると、外のアプリがノートを書き換えても画面に何も出ない。
+   */
+  notify(message: string, open: string | null): void;
 }
+
+/** 断ったときの知らせの頭(理由は拡張にも返る)。 */
+export const EXT_WRITE_REFUSED_PREFIX = '拡張機能からの書き換えを受け付けませんでした: ';
+/** 知らせに出す相手の名前。 */
+export const EXT_WRITE_WHO = '拡張機能';
 
 /** 送ったあとにノートが書き換わっていたときの断り文(アプリの作者にも user にも読まれる)。 */
 export const STALE_AFTER_HANDOFF =
@@ -89,7 +101,42 @@ export const STALE_AFTER_HANDOFF =
 
 export type ExtWriteApplied = { ok: true; wrote: number } | { ok: false; why: string };
 
+/**
+ * 🔴 書き戻しを当て、**結果を画面に知らせる**(依頼 75-3)。当て方は {@link applyOps}。
+ * 通った: 「拡張機能 がノート『題名』を書き換えました(履歴から戻せます)」+「開く」(複数件は件数)。
+ * 断った: 「拡張機能からの書き換えを受け付けませんでした: 理由」。
+ */
 export async function applyExtWriteOps(
+  ops: readonly ExtWriteOp[],
+  deps: ExtWriteApplyDeps,
+  handedOff: ReadonlyMap<string, string>,
+): Promise<ExtWriteApplied> {
+  let result: ExtWriteApplied;
+  try {
+    result = await applyOps(ops, deps, handedOff);
+  } catch (e) {
+    // 投げた場合も黙らない(拡張へは呼び側が返す)
+    deps.notify(`${EXT_WRITE_REFUSED_PREFIX}${e instanceof Error ? e.message : String(e)}`, null);
+    throw e;
+  }
+  if (result.ok) {
+    if (result.wrote > 0) {
+      const first = ops[0]!;
+      const title = deps.metaOf(first.lid)?.title ?? first.lid;
+      deps.notify(
+        result.wrote === 1
+          ? extensionRewroteText(EXT_WRITE_WHO, title)
+          : `${EXT_WRITE_WHO} がノート ${String(result.wrote)} 件を書き換えました(履歴から戻せます)`,
+        first.lid,
+      );
+    }
+  } else {
+    deps.notify(`${EXT_WRITE_REFUSED_PREFIX}${result.why}`, null);
+  }
+  return result;
+}
+
+async function applyOps(
   ops: readonly ExtWriteOp[],
   deps: ExtWriteApplyDeps,
   /**

@@ -69,6 +69,8 @@ export function appendAndSettle(
   heading: string | null,
   timeoutMs: number,
   timers: AppendTimers = REAL_APPEND_TIMERS,
+  /** 追記の回の印(`APPEND_TO_ENTRY.batch`)。AI の書き足しは `AGENT_APPEND_BATCH`(自分の「追記を元に戻す」を消さない)。省略 = 単独の 1 手。 */
+  batch?: string,
 ): Promise<AppendOutcome> {
   const st = dispatcher.getState();
   // 🔑 通ったかは reducer が錠を掛けたかで見る(断った回は錠が動かない。予定の面の追記と同じ)
@@ -98,6 +100,7 @@ export function appendAndSettle(
       heading,
       // ⚠ 末尾へ足す(追記先の選択は本文の画面の話 ── ここでは選ばせない)
       target: null,
+      ...(batch === undefined ? {} : { batch }),
     });
     if (done) return;
     const after = dispatcher.getState();

@@ -4,7 +4,7 @@
  *
  * 守る主張:
  * 1. 1 行目は「何を」(探す語 / 題名)+ 裁定の字、2 行目は「この 1 回だけ」の動き
- * 2. ボタンは「この 1 回だけ」「常に許す」「許さない」の 3 つ
+ * 2. ボタンは「この 1 回だけ」「常に許す」「この相手は断る(次に起動するまで)」と、取り消し側の「許さない」(依頼 363)
  * 3. 🔴 最初の焦点は「許さない」(取り消し側)── 打鍵の最中に出ても、続けた Space / Enter で通さない
  * 4. 🔴 押した行がそのまま答え / 「許さない」・Escape・外を押す は全部 deny
  * 5. 別のダイアログが開いていれば、閉じるのを待って順に出す(捨てない)
@@ -62,11 +62,20 @@ describe('pickAgentGrantInApp', () => {
     expect(await answered).toBe('deny');
   });
 
-  it('ボタンは「この 1 回だけ」「常に許す」と、取り消し側の「許さない」', async () => {
+  it('ボタンは「この 1 回だけ」「常に許す」「この相手は断る(次に起動するまで)」と、取り消し側の「許さない」', async () => {
     const answered = pickAgentGrantInApp(host, SEARCH);
-    expect(rows().map((b) => b.textContent)).toEqual(['この 1 回だけ', '常に許す']);
+    expect(rows().map((b) => b.textContent)).toEqual([
+      'この 1 回だけ',
+      '常に許す',
+      'この相手は断る(次に起動するまで)',
+    ]);
     expect(cancelBtn().textContent).toBe('許さない');
-    expect(AGENT_ASK_LABELS).toEqual({ once: 'この 1 回だけ', always: '常に許す', deny: '許さない' });
+    expect(AGENT_ASK_LABELS).toEqual({
+      once: 'この 1 回だけ',
+      always: '常に許す',
+      deny: '許さない',
+      block: 'この相手は断る(次に起動するまで)',
+    });
     cancelBtn().click();
     await answered;
   });
@@ -104,6 +113,10 @@ describe('pickAgentGrantInApp', () => {
     const b = pickAgentGrantInApp(host, SEARCH);
     rows()[1]!.click();
     expect(await b).toBe('always');
+    // 🔴 依頼 363: 3 つ目の行は「この相手は断る」── 台帳に触れない別の答え(`block`)
+    const c = pickAgentGrantInApp(host, SEARCH);
+    rows()[2]!.click();
+    expect(await c).toBe('block');
   });
 
   it('🔴 「許さない」・外(暗い地)・Escape は全部 deny ── 押し損ねで通さない', async () => {
@@ -129,7 +142,11 @@ describe('pickAgentGrantInApp', () => {
     cancelBtn().click();
     await first;
     await tick();
-    expect(rows().map((b) => b.textContent)).toEqual(['この 1 回だけ', '常に許す']);
+    expect(rows().map((b) => b.textContent)).toEqual([
+      'この 1 回だけ',
+      '常に許す',
+      'この相手は断る(次に起動するまで)',
+    ]);
     rows()[0]!.click();
     expect(await asked).toBe('once');
   });

@@ -27,6 +27,7 @@ import {
   unsavedTypingLidOf,
   hasUnreachedCommit,
   viewModeLabel,
+  AGENT_APPEND_BATCH,
   type ViewMode,
 } from '@adapter/state/app-state';
 import { appendAvailability } from '@adapter/state/append-settle';
@@ -2356,9 +2357,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     }),
     createEntry: createEntryFromOutside,
     // 🔴 書き足しは既存の追記の 1 本(PDF の「ノートへ引く」と同じ `appendAndSettle`)
+    // 🔴 `AGENT_APPEND_BATCH` の印で足す ── 自分の「追記を元に戻す」を消さず、AI の分は別に戻せる(依頼 362)
     append: (id: string, text: string, heading: string | null) =>
-      appendUnlessEditedElsewhere(dispatcher, editLockPort, id, text, heading, AGENT_APPEND_SETTLE_TIMEOUT_MS),
+      appendUnlessEditedElsewhere(dispatcher, editLockPort, id, text, heading, AGENT_APPEND_SETTLE_TIMEOUT_MS, undefined, AGENT_APPEND_BATCH),
     appendCheck: (id: string) => appendAvailability(dispatcher.getState(), id),
+    // 🔴 書き足したら「開く」と「元に戻す」を添えて知らせる(依頼 362)
+    notifyAppended: (message: string, lid: string) =>
+      dispatcher.dispatch({ type: 'OP_NOTICE', message, open: lid, agentUndo: true }),
     gate: agentGate,
   };
   /**
@@ -2390,6 +2395,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appFlags.isOn(FLAG_EMBED.name) ? appEmbedOrigins.list() : [],
     ...(capture === null ? {} : { capture }),
     createEntry: createEntryFromOutside,
+    // 🔴 許可リストの相手の `pkc.createEntry` も「ノートを作る」の許可を同じ門で見る(依頼 364)
+    gate: agentGate,
     agent: { ...agentEmbed, enabled: () => appFlags.isOn(FLAG_WEBMCP.name) },
   });
   /**
@@ -2719,6 +2726,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           keepMeta,
         }),
       refresh: () => reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null, settled: () => storeEffects?.settled() }),
+      // 🔴 通ったときも断ったときも画面に知らせる(依頼 75-3。AI の書き足しと同じ「開く」つきの知らせ)
+      notify: (message, open) =>
+        dispatcher.dispatch(open === null ? { type: 'OP_NOTICE', message } : { type: 'OP_NOTICE', message, open }),
     }, handedOff);
 
   const runExport = (

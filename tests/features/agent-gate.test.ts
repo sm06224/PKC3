@@ -400,3 +400,89 @@ describe('🔴 A4: 許可済みの依頼は、別のダイアログの待ち行�
   });
 });
 
+
+describe('🔴 依頼 363: この相手は断る(次に起動するまで)/ 同じ相手の確認は重ねて出さない', () => {
+  it('「この相手は断る」: その呼び出しは通さず、以後その相手は聞かずに断る。台帳には触れない(対照群: 別の相手は聞く)', async () => {
+    const g = fakeGrants();
+    const asked: AgentTarget[] = [];
+    const gate = createAgentGate({
+      grants: g.grants,
+      ask: async (t) => {
+        asked.push(t);
+        return t.from === undefined ? ('block' as AgentAnswer) : 'once';
+      },
+      now: () => 1,
+    });
+    expect(await gate(READ)).toBe(false);
+    expect(asked).toHaveLength(1);
+    // 以後、このブラウザの AI は範囲が違っても聞かずに断る
+    expect(await gate(READ)).toBe(false);
+    expect(await gate(WRITE)).toBe(false);
+    expect(asked, '聞き直した').toHaveLength(1);
+    // 台帳は変わらない(許可リストから外さずに黙らせる)
+    expect(g.always.size).toBe(0);
+    expect(g.touched).toEqual([]);
+    // 対照群: 別の相手(組み込み先の origin)は別扱いで、聞く
+    expect(await gate({ ...READ, from: 'https://b.test' })).toBe(true);
+    expect(asked).toHaveLength(2);
+  });
+
+  it('🔴 「常に許す」を済ませた相手でも、断ると決めたら断る(断るは今日の判断)', async () => {
+    const g = fakeGrants();
+    let blockNext = false;
+    const gate = createAgentGate({
+      grants: g.grants,
+      ask: async () => (blockNext ? ('block' as AgentAnswer) : 'once'),
+      now: () => 1,
+    });
+    g.always.add('read');
+    expect(await gate(READ), '対照群: 許可済みは通る').toBe(true);
+    blockNext = true;
+    expect(await gate(WRITE)).toBe(false);
+    expect(await gate(READ), '許可済みの範囲でも断る').toBe(false);
+  });
+
+  it('🔴 同じ相手・同じ範囲の確認が出ている間に来た依頼は、「許さない」の後に聞き直さず断る(確認を重ねない)', async () => {
+    const g = fakeGrants();
+    const answers: Array<(a: AgentAnswer) => void> = [];
+    let asks = 0;
+    const gate = createAgentGate({
+      grants: g.grants,
+      ask: () => {
+        asks += 1;
+        return new Promise<AgentAnswer>((r) => answers.push(r));
+      },
+      now: () => 1,
+    });
+    const p1 = gate(READ);
+    const p2 = gate(READ);
+    const p3 = gate(READ);
+    // 別の範囲(write)は同じ「許さない」に巻き込まない
+    const other = gate(WRITE);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(asks).toBe(1);
+    answers[0]!('deny');
+    expect(await p1).toBe(false);
+    expect(await p2).toBe(false);
+    expect(await p3).toBe(false);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(asks, '待っていた同じ範囲の依頼まで聞いた').toBe(2);
+    answers[1]!('once');
+    expect(await other).toBe(true);
+  });
+
+  it('⚠ 対照群: 「この 1 回だけ」の後は、待っていた依頼がそれぞれ聞かれる(1 回ごとに聞くという約束)', async () => {
+    const g = fakeGrants();
+    let asks = 0;
+    const gate = createAgentGate({
+      grants: g.grants,
+      ask: async () => {
+        asks += 1;
+        return 'once';
+      },
+      now: () => 1,
+    });
+    await Promise.all([gate(READ), gate(READ)]);
+    expect(asks).toBe(2);
+  });
+});
