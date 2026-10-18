@@ -1192,6 +1192,40 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   await clickReal(page, '[data-pkc-action="undo-import"]');
   await expect(rows, '取り消しても取り込んだ分が残っている').toHaveCount(2);
 
+  /**
+   * 🔴 #1852 束 F2(依頼 253): 長い取り込みは、0.8 秒たっても終わらないと「取り込みをやめる」が出て、押すとノートが増えない。
+   * 時間を伸ばす道具 = 大きな取り込み(ノート 4000 件)+ CDP で CPU を絞る(`delayMs` は 800 ms 固定の既定のまま)。
+   * ⚠ 終わってしまっては押せない ── 出るまで待てなければ落ちる(「出ないこと」を通さない)。
+   */
+  const client = await page.context().newCDPSession(page);
+  await client.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+  const bigEntries = Array.from({ length: 4000 }, (_, i) => ({
+    lid: `big${i}`,
+    title: `大量${i}`,
+    archetype: 'text',
+    body: `# 大量${i}\n${'本文 '.repeat(200)}\n`,
+    created_at: '2025-03-04T05:06:07.000Z',
+  }));
+  const bigHtml = pkc2Html().replace(
+    '"entries":[',
+    `"entries":[${bigEntries.map((e) => JSON.stringify(e)).join(',')},`,
+  );
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'big.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(bigHtml, 'utf-8'),
+  });
+  const cancelJob = page.locator('[data-pkc-action="cancel-job"]');
+  await expect(cancelJob, '長い取り込みに「取り込みをやめる」が出ない').toBeVisible({ timeout: 20_000 });
+  await expect(cancelJob).toHaveText('取り込みをやめる');
+  await cancelJob.click();
+  await expect(page.locator('[data-pkc-region="status"]'), 'やめた知らせが出ない').toContainText('取り込みをやめました', {
+    timeout: 60_000,
+  });
+  await client.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  await expect(cancelJob, 'やめた後もボタンが残る').toHaveCount(0);
+  await expect(rows, 'やめたのにノートが増えた(ゴミ箱へ移っていない)').toHaveCount(2);
+
   expect(errors).toEqual([]);
 });
 
