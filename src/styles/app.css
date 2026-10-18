@@ -2752,6 +2752,31 @@ li[data-pkc-row-slot] {
 }
 
 /**
+ * 🔴 **つながりを足す欄は、「つながり」の行の中に置く**(台帳 #1852 / 依頼 77-6 C)。
+ * ⚠ 直す前はペインのいちばん下で、スクロールしないと届かなかった。一覧のすぐ下の 1 行に、欄・種類・ボタンを並べる。
+ * ⚠ 欄は縮む(右の列は狭い)。入らない幅ではボタンが下の行へ回る。地は無彩色のまま。
+ */
+[data-pkc-field='inspector-relation-list'] {
+  display: contents;
+}
+[data-pkc-field='relation-add'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+[data-pkc-field='relation-target'] {
+  min-width: 0;
+  width: 6rem;
+  font-size: 12px;
+}
+[data-pkc-field='relation-kind'] {
+  min-width: 0;
+  font-size: 12px;
+}
+
+/**
  * 🔴 **本文の中に書いたタグの行**(#550)。
  *
  * ⚠ 上の「タグ」の行と**同じ並べ方**にする(同じものは同じ形 ── 業務画面の方針)。
