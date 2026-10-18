@@ -1186,7 +1186,7 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   await expect(
     page.locator('[data-pkc-region="filer-trash"] li').filter({ hasText: 'ゴミ箱のメモ' }),
     '取り込んだゴミ箱のノートがゴミ箱の一覧に出ない',
-  ).not.toHaveCount(0);
+  ).toHaveCount(2); // 書き出す前から居る 1 件 + 取り込みで戻った 1 件(同じ題が 2 つ。1 つなら戻っていない)
   await clickReal(page, '[data-pkc-action="hide-trash"]');
   await expect(rows, 'ゴミ箱を閉じたら生きた一覧(4 件)へ戻る').toHaveCount(4);
   await clickReal(page, '[data-pkc-action="undo-import"]');
