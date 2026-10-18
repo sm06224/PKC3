@@ -1093,6 +1093,19 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(2);
 
+  /**
+   * 🔴 #1852 束 F2(依頼 105-2・297 A): ゴミ箱のノートも書き出しに入り、取り込むとゴミ箱へ戻る(生きた一覧には出ない)。
+   * 既存の往復の道中に足す ── 書き出す前にノートを 1 件作ってゴミ箱へ入れる(生きた 2 件は変わらない)。
+   */
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('ゴミ箱のメモ');
+  await page.locator('[data-pkc-field="editor-body"]').fill('捨てたノートの本文\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(rows).toHaveCount(3);
+  await clickReal(page, rows.filter({ hasText: 'ゴミ箱のメモ' }));
+  await page.keyboard.press('Delete');
+  await expect(rows, 'ゴミ箱へ入っていない').toHaveCount(2);
+
   // 📤 書き出す(実ブラウザの Blob → <a download> 経路を通す)
   const dl = page.waitForEvent('download');
   await clickReal(page, '[data-pkc-action="export-archive"]');
@@ -1134,6 +1147,8 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   // ノート・添付・つながり・履歴の表が出て、「取り込む」を押すまで進まない
   const confirmText = await answerAppDialog(page, 'ok');
   expect(confirmText).toMatch(/ノート \d+ 件/);
+  // 🔴 #1852 束 F2: 確認の表に、ゴミ箱のノートが「ゴミ箱に入った状態で戻ります」と出る(`archive-preview.ts`)
+  expect(confirmText, '確認にゴミ箱のノートが出ない').toContain('ゴミ箱のノート 1 件(ゴミ箱に入った状態で戻ります)');
   // 🔴 #1643: 窓の頭に「ファイル名(いつ取ったか)」、末尾に「残る・追加・取り消せる」の安心の 1 行
   expect(confirmText.split('\n')[0]).toMatch(/^restored\.pkc3\.zip\(.+ に取りました\)$/);
   expect(confirmText.trimEnd().endsWith('いまのノートはそのまま残り、これが追加されます。取り込んだ後でも取り消せます。')).toBe(true);
@@ -1164,6 +1179,16 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   const undo = page.locator('[data-pkc-action="undo-import"]');
   await expect(undo, 'バックアップを取り込んだのに取り消しが出ない').toBeVisible();
   await expect(undo).toHaveAttribute('title', /いま取り込んだ 2 件/);
+  // 🔴 #1852 束 F2: 取り込んだゴミ箱のノートは、生きた一覧(4 件)に出ず、ゴミ箱の一覧に出る
+  await expect(rows.filter({ hasText: 'ゴミ箱のメモ' }), 'ゴミ箱のノートが生きた一覧に出た').toHaveCount(0);
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('ゴミ箱のノート 1 件');
+  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await expect(
+    page.locator('[data-pkc-region="filer-trash"] li').filter({ hasText: 'ゴミ箱のメモ' }),
+    '取り込んだゴミ箱のノートがゴミ箱の一覧に出ない',
+  ).not.toHaveCount(0);
+  await clickReal(page, '[data-pkc-action="hide-trash"]');
+  await expect(rows, 'ゴミ箱を閉じたら生きた一覧(4 件)へ戻る').toHaveCount(4);
   await clickReal(page, '[data-pkc-action="undo-import"]');
   await expect(rows, '取り消しても取り込んだ分が残っている').toHaveCount(2);
 
