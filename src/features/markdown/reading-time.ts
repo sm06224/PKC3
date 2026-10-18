@@ -148,8 +148,9 @@ export function estimateReadingTime(markdown: string): ReadingTimeEstimate {
   } else {
     const estimatedMinutes = cjkCount / 500 + wordCount / 200;
     const minutes = Math.max(1, Math.ceil(estimatedMinutes));
-    const formattedChars = charCount.toLocaleString('ja-JP');
-    result = { minutes, charCount, label: `読了 約 ${minutes} 分 (本文 ${formattedChars} 文字)` };
+    // 🔴 題名の下は「読了 約 N 分」だけ(台帳 #1852 束 R1、依頼 86-3 B)。文字数は右のペインだけに出す ──
+    //   同じノートに空白を除いた数とそのままの長さの 2 つが並ぶと、どちらが正しいか迷う
+    result = { minutes, charCount, label: `読了 約 ${minutes} 分` };
   }
   return result;
 }

@@ -20,7 +20,7 @@ describe('estimateReadingTime ── 読了目安時間と文字数の算出 (#1
     const res = estimateReadingTime(text);
     expect(res.charCount).toBe(250);
     expect(res.minutes).toBe(1);
-    expect(res.label).toBe('読了 約 1 分 (本文 250 文字)');
+    expect(res.label).toBe('読了 約 1 分');
   });
 
   it('1,000文字の日本語で約 2 分と判定される (500文字/分)', () => {
@@ -28,7 +28,7 @@ describe('estimateReadingTime ── 読了目安時間と文字数の算出 (#1
     const res = estimateReadingTime(text);
     expect(res.charCount).toBe(1000);
     expect(res.minutes).toBe(2);
-    expect(res.label).toBe('読了 約 2 分 (本文 1,000 文字)');
+    expect(res.label).toBe('読了 約 2 分');
   });
 
   it('英文中心の長文で単語数 (200語/分) に基づき推定される', () => {
@@ -71,7 +71,7 @@ describe('estimateReadingTime ── 1 走査は旧 regex と同じ答え(#1467 
     const { charCount, cjkCount, wordCount } = referenceUnits(content);
     if (charCount < READING_TIME_THRESHOLD_CHARS) return { minutes: 0, charCount, label: null as string | null };
     const minutes = Math.max(1, Math.ceil(cjkCount / 500 + wordCount / 200));
-    return { minutes, charCount, label: `読了 約 ${minutes} 分 (本文 ${charCount.toLocaleString('ja-JP')} 文字)` };
+    return { minutes, charCount, label: `読了 約 ${minutes} 分` };
   };
   const OLD_CJK = /^[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]$/;
   const pad = (s: string) => `${s}\n${'日'.repeat(200)}`; // 閾値を越えさせて minutes / label まで比べる

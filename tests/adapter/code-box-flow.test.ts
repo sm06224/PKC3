@@ -22,6 +22,7 @@ import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
+import { answerDialog, dialogMessage } from './dialog-helper';
 import { bindEditLockRelease } from '../../src/adapter/state/edit-lock-release';
 import type { CodeDraft } from '../../src/adapter/state/app-state';
 import { isCodeDraft } from '../../src/adapter/state/app-state';
@@ -235,14 +236,25 @@ describe('コード枠の ✎ を押し、打って保存する(#1044 段3)', ()
     expect(codeInput(root), '保存後も箱が残っている(DOM)').toBeNull();
   });
 
-  it('🔴 「コードの編集をやめる」で、聞かずに閉じる(disk は無傷)', async () => {
+  it('🔴 「コードの編集をやめる」: 打った字があれば聞き(台帳 #1852 束 R1、依頼 86-6 B)、「編集をやめる」で閉じる(disk は無傷)', async () => {
     const { root, d, disk } = setup();
     await clickEditCodeBlock(root);
     codeInput(root)!.value = '打ちかけ';
     root.querySelector<HTMLElement>('[data-pkc-action="cancel-code-draft"]')!.click();
+    expect(dialogMessage()).toBe('打った内容を捨てますか');
+    await answerDialog('ok');
     await tick();
     expect(d.getState().sectionDraft).toBeNull();
     expect(disk.n1).toBe(DOC);
+  });
+
+  it('対照群: 打っていなければ聞かずに閉じる', async () => {
+    const { root, d } = setup();
+    await clickEditCodeBlock(root);
+    root.querySelector<HTMLElement>('[data-pkc-action="cancel-code-draft"]')!.click();
+    expect(dialogMessage()).toBe('');
+    await tick();
+    expect(d.getState().sectionDraft).toBeNull();
   });
 
   it('🔴 別の場所で書き換えられていたら、1 文字も書かずに断る(箱は残る)', async () => {

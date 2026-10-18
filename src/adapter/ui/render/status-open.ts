@@ -157,6 +157,7 @@ import { trashUndoShown } from './trash-undo';
 import { dualMoveUndoShown } from './dual-move-undo';
 import { renameUndoShown } from './rename-undo';
 import { stackUndoShown } from './stack-undo';
+import { jumpBackShown } from './jump-back';
 import { dateNoteCreateLabel, dateNoteMissingNotice } from '@features/schedule/today-note';
 
 /**
@@ -259,7 +260,22 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
    */
   const stack =
     !move && !append && !schedule && !trash && !restore && !dualMove && !rename && !bulkTag && stackUndoShown(shownLine);
-  const show = move || agent || append || schedule || trash || restore || dualMove || rename || bulkTag || stack;
+  /**
+   * 🔴 **目次で飛んだ直後の「元の位置へ戻る」**(台帳 #1852 束 R1、依頼 86-1 B)。出す条件は 1 つ ── いま出ている 1 行が、
+   * その飛んだ知らせそのもの(`jumpBackShown`)。別の知らせが上書きしたら畳む(ほかの「元に戻す」と同じ作法)。
+   */
+  const jump =
+    !move &&
+    !append &&
+    !schedule &&
+    !trash &&
+    !restore &&
+    !dualMove &&
+    !rename &&
+    !bulkTag &&
+    !stack &&
+    jumpBackShown(shownLine);
+  const show = move || agent || append || schedule || trash || restore || dualMove || rename || bulkTag || stack || jump;
   // ⚠ **押し先も切り替える** ── 同じ器で 2 つの取り消しを出すので、
   //    字だけ出して受け手を替え忘れると「押すと別の物が戻る」になる
   // 🔴 **字も対象に合わせて切り替える**(#1046)── 器を 1 つで済ませているので、
@@ -270,6 +286,8 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
       'data-pkc-action',
       agent
         ? 'undo-agent-append'
+        : jump
+          ? 'undo-jump'
         : restore
         ? 'restore-revision'
         : bulkTag
@@ -303,6 +321,8 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
     }
     btn.textContent = agent
       ? '書き足しを元に戻す'
+      : jump
+        ? '元の位置へ戻る'
       : trash || schedule || restore || dualMove || rename || bulkTag || stack
         ? '元に戻す'
         : move

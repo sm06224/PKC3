@@ -213,16 +213,63 @@ describe('章を右クリックから開き、打って保存する(#1044 段2)'
     expect(sectionInput(root), '保存後も箱が残っている(DOM)').toBeNull();
   });
 
-  it('🔴 「章の編集をやめる」で、聞かずに閉じる(disk は無傷)', async () => {
+  /**
+   * 🔴 台帳 #1852 束 R1(依頼 86-6 B): 打った字があるときだけ、1 画面の編集と同じ「打った内容を捨てますか」を出す。
+   * 以前は聞かずに閉じていた(同じ字のボタンなのに動きが違った)。
+   */
+  it('🔴 「章の編集をやめる」: 打った字があれば「打った内容を捨てますか」と聞き、「編集をやめる」で閉じる(disk は無傷)', async () => {
     const { root, d, disk } = setup();
     await openDraftOnHead2(root, d);
     const ta = sectionInput(root)!;
     ta.value = '## 決定事項\n\n打ちかけ';
     root.querySelector<HTMLElement>('[data-pkc-action="cancel-section-draft"]')!.click();
+    expect(dialogMessage()).toBe('打った内容を捨てますか');
+    // 聞いている間は、まだ閉じていない
+    expect(d.getState().sectionDraft).not.toBeNull();
+    await answerDialog('ok');
     await tick();
     expect(d.getState().sectionDraft).toBeNull();
     expect(disk.n1).toBe(DOC);
     expect(sectionInput(root)).toBeNull();
+  });
+
+  it('🔴 「章の編集をやめる」: 「編集を続ける」を選べば、箱も打った字も残る', async () => {
+    const { root, d } = setup();
+    await openDraftOnHead2(root, d);
+    sectionInput(root)!.value = '## 決定事項\n\n打ちかけ';
+    root.querySelector<HTMLElement>('[data-pkc-action="cancel-section-draft"]')!.click();
+    await answerDialog('cancel');
+    await tick();
+    expect(d.getState().sectionDraft).not.toBeNull();
+    expect(sectionInput(root)!.value).toBe('## 決定事項\n\n打ちかけ');
+  });
+
+  it('対照群: 打っていなければ(開いたときの字のまま)聞かずに閉じる', async () => {
+    const { root, d, disk } = setup();
+    await openDraftOnHead2(root, d);
+    root.querySelector<HTMLElement>('[data-pkc-action="cancel-section-draft"]')!.click();
+    expect(dialogMessage(), '変えていないのに聞いた').toBe('');
+    await tick();
+    expect(d.getState().sectionDraft).toBeNull();
+    expect(disk.n1).toBe(DOC);
+  });
+
+  it('🔴 Esc も同じ: 打った字があれば聞く / 打っていなければ聞かずに閉じる', async () => {
+    const a = setup();
+    await openDraftOnHead2(a.root, a.d);
+    sectionInput(a.root)!.value = '## 決定事項\n\n打ちかけ';
+    sectionInput(a.root)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(dialogMessage(), 'Esc で聞いていない').toBe('打った内容を捨てますか');
+    await answerDialog('ok');
+    await tick();
+    expect(a.d.getState().sectionDraft).toBeNull();
+
+    const b = setup();
+    await openDraftOnHead2(b.root, b.d);
+    sectionInput(b.root)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(dialogMessage(), '変えていないのに聞いた').toBe('');
+    await tick();
+    expect(b.d.getState().sectionDraft).toBeNull();
   });
 
   /**
