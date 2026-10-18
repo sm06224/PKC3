@@ -137,6 +137,20 @@ test('🔴 ウェブページをコピーして貼ると、形のまま入って
   await expect(page.locator(ROW), '表が行の途中に続けて貼られた(次の行から始まらない)').toHaveValue(/^メモ: \n\| 名 \| 数 \|/);
   await page.locator(ROW).fill('');
 
+  // 🔴 #1852 束 I3(依頼 93-1)── Ctrl+Shift+V の直後の貼付は直さない(こちらが止めず、書式なしの字だけ)。
+  //   ⚠ 新しい起動は足さない(この道中の頭)。本物の打鍵を送ってから、同じ欄へ貼付を発火させる。
+  //   観測点は `defaultPrevented`(直して入れるなら止める)と、欄が空のまま(直した字が入っていない)こと
+  await page.locator(ROW).focus();
+  // ⚠ 本物の打鍵だとブラウザ自身の(空の)貼付が先に鍵の印を使い切る ── 鍵の押下だけを欄に発火させ、貼付は下の合成で撃つ
+  await page.locator(ROW).dispatchEvent('keydown', { key: 'V', code: 'KeyV', ctrlKey: true, shiftKey: true, bubbles: true });
+  const handledPlain = await pasteText(page, ROW, {
+    html: '<h2>書式なし確認</h2><p><strong>強調</strong></p>',
+    plain: '書式なし確認 強調',
+  });
+  expect(handledPlain, '🔴 Ctrl+Shift+V の貼付を直して入れようとした(止めている)').toBe(false);
+  await expect(page.locator(ROW), '書式なしの貼付に直した字(##)が入った').not.toHaveValue(/##|\*\*/);
+  // 🔑 印は 1 回で使い切る ── 次の普通の貼付(下)は直して入る(対照群)
+
   await pasteText(page, ROW, {
     html:
       '<h2>見出し</h2><p>本文と<strong>強調</strong>と<a href="https://e.com/a">リンク</a></p>' +
