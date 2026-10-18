@@ -2616,7 +2616,7 @@ li[data-pkc-row-slot] {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: var(--s2) var(--s3);
-  font-size: 12px;
+  font-size: max(12px, calc(var(--pkc-text-size, 13px) * 12 / 13));
 }
 [data-pkc-region='inspector'] dt {
   color: var(--muted);
@@ -2678,7 +2678,7 @@ li[data-pkc-row-slot] {
   color: var(--muted);
   margin: 0;
   padding: 0 var(--s3);
-  font-size: 12px;
+  font-size: max(12px, calc(var(--pkc-text-size, 13px) * 12 / 13));
 }
 /**
  * 🔴 **目次の行**(#493)。⚠ **字下げは属性から**(字で空白を入れると読み上げが読む)。
@@ -2704,7 +2704,7 @@ li[data-pkc-row-slot] {
   min-height: 0;
   text-align: left;
   white-space: normal;
-  font-size: 12px;
+  font-size: max(12px, calc(var(--pkc-text-size, 13px) * 12 / 13));
 }
 [data-pkc-field='inspector-toc-link']:hover,
 [data-pkc-field='inspector-toc-link']:focus-visible,
@@ -2815,7 +2815,7 @@ li[data-pkc-row-slot] {
 }
 [data-pkc-field='inspector-body-tag-where'] {
   color: var(--muted);
-  font-size: 11px;
+  font-size: max(11px, calc(var(--pkc-text-size, 13px) * 11 / 13));
 }
 
 [data-pkc-field='inspector-empty'] {
@@ -8435,7 +8435,7 @@ mark[data-pkc-diff-char='del'] {
   padding: 0 var(--s3);
   background: var(--surface-2);
   color: var(--muted);
-  font-size: 11px;
+  font-size: max(11px, calc(var(--pkc-text-size, 13px) * 11 / 13));
   /* ⚠ 断り書きが 2 行になる幅では折り返す(横へはみ出して切れない) */
   flex-wrap: wrap;
 }
@@ -8498,7 +8498,7 @@ mark[data-pkc-diff-char='del'] {
 [data-pkc-field='status-trash'] {
   flex: 0 0 auto;
   padding: 0 var(--s2);
-  font-size: 11px;
+  font-size: max(11px, calc(var(--pkc-text-size, 13px) * 11 / 13));
 }
 /* 🔴 **知らせの隣の「元に戻す」**(#684 段①。塊を動かした直後)── 「開く」と同じ寸法
  *   (上の注記のとおり、効いていない `min-height` はこちらからも落とした)。
@@ -8506,7 +8506,7 @@ mark[data-pkc-diff-char='del'] {
 [data-pkc-field='status-undo'] {
   flex: 0 0 auto;
   padding: 0 var(--s2);
-  font-size: 11px;
+  font-size: max(11px, calc(var(--pkc-text-size, 13px) * 11 / 13));
 }
 
 /* 🔴 **日付のノートが無かった直後の「○○のノートを作る」**(#1169)── 「開く」と同じ寸法。
@@ -8514,7 +8514,7 @@ mark[data-pkc-diff-char='del'] {
 [data-pkc-field='status-create-date'] {
   flex: 0 0 auto;
   padding: 0 var(--s2);
-  font-size: 11px;
+  font-size: max(11px, calc(var(--pkc-text-size, 13px) * 11 / 13));
 }
 
 [hidden] {
@@ -9322,7 +9322,7 @@ h3[data-pkc-section] {
 .settings-note {
   margin: var(--s2) 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: max(11px, calc(var(--pkc-text-size, 13px) * 11 / 13));
 }
 
 /* フラグの面(P11)。⚠ **色は情報にだけ**(user 指示 2026-08-03) ──
