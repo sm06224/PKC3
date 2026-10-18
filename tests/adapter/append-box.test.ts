@@ -446,6 +446,25 @@ describe('🔴 競合ロック(P8 段⑧、user 指示 2026-08-03)', () => {
     expect(center.hasAttribute('data-pkc-append-hidden'), '隠れたのに MAIN の印が戻らない').toBe(true);
   });
 
+  /**
+   * 🔴 **編集中の印**(台帳 #1852、#1163 依頼 237 = A)。スマホ用画面では、編集中は下の保存 / やめるの帯を出さない
+   * (`app.css` が `data-pkc-lock-editing` を読む)。⚠ 印が付くのは**編集中だけ** ── 追記の書込中(強制解放の出口が要る)や
+   * 追記できる状態では付かない(付くと、書込が返らないときの最後の出口まで消える)。
+   */
+  it('🔴 編集中だけ器に data-pkc-lock-editing が付く(書込中・平常時には付かない)', async () => {
+    const s = setup([meta('log', 'textlog')], { log: '元' });
+    const region = s.root.querySelector<HTMLElement>('[data-pkc-region="append"]')!;
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+    await tick();
+    expect(region.hasAttribute('data-pkc-lock-editing'), '平常時に印が付いている').toBe(false);
+    s.q('[data-pkc-action="start-edit"]')!.click();
+    await tick();
+    expect(region.hasAttribute('data-pkc-lock-editing'), '編集中なのに印が無い(スマホで下の帯が残る)').toBe(true);
+    s.q('[data-pkc-action="cancel-edit"]')!.click();
+    await tick();
+    expect(region.hasAttribute('data-pkc-lock-editing'), '編集をやめたのに印が残る').toBe(false);
+  });
+
   it('🔴 編集中は追記できない(理由と出口が画面に出る)', async () => {
     const s = setup([meta('log', 'textlog')], { log: '元' });
     s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });

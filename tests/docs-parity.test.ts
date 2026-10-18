@@ -629,7 +629,12 @@ describe('マニュアルと実装の突合', () => {
     const bar = buildFormatBar();
     // ⚠ 突き合わせ先は **`BAR_FORMAT_OPS`**(#425 段②-a)── 帯に出さない 4 つは
     //    `tests/adapter/format-append.test.ts` の「鍵から引ける」が守る
-    const labels = [...bar.querySelectorAll('button')].map(
+    // 🔴 2026-10-18(台帳 #1852、依頼 237 = A): 狭い画面で書式を 1 段にまとめる「…」が帯の末尾に増えた。
+    //    ⚠ これは書式・道具ではなく**開閉の押しボタン**(字を持たない)── 数から外し、在ることを別に pin する
+    const moreToggle = bar.querySelectorAll('button[data-pkc-field="format-more"]');
+    expect(moreToggle.length, '狭い画面用の「…」が帯に無い(1 つだけ在る)').toBe(1);
+    expect(bar.lastElementChild, '「…」は帯の末尾に置く').toBe(moreToggle[0]);
+    const labels = [...bar.querySelectorAll('button:not([data-pkc-field="format-more"])')].map(
       (b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? '',
     );
     /**

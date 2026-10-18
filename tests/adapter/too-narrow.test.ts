@@ -67,6 +67,7 @@ function setup(
   narrowNow = false,
   popup = false,
   storage: Pick<Storage, 'getItem' | 'setItem'> | null = fakeStorage(),
+  touch = true,
 ) {
   const root = document.createElement('div');
   root.setAttribute('data-pkc-slot', 'root');
@@ -92,6 +93,7 @@ function setup(
       // ⚠ 本物と同じく**出すたびに聞く**形 ── 起動時に 1 度読む stub にすると、
       //    配線の順番で嘘をつく実装が台では見えない
       popup: () => popup,
+      touch: () => touch,
     },
     store,
   );
@@ -443,11 +445,60 @@ describe('窓の種類で一手が変わる(#690 ③)', () => {
     const ok = document.createElement('button');
     band.append(text, ok);
     root.append(band);
-    installTooNarrow({ band, text, ok, onChange: () => {}, popup: () => popup });
+    installTooNarrow({ band, text, ok, onChange: () => {}, popup: () => popup, touch: () => true });
     narrow.set(true);
     expect(text.textContent).toBe(TOO_NARROW_TEXT);
     narrow.set(false);
     popup = true;
+    narrow.set(true);
+    expect(text.textContent, '配線した時点の答えを使い回している').toBe(TOO_NARROW_TEXT_WINDOW);
+  });
+});
+
+/**
+ * 🔴 **指で触る端末だけ「横向きにすると直ります」**(台帳 #1852、#1163 依頼 74-2 = B)。
+ *
+ * PC のブラウザの窓を細くしたときも同じ字が出ていたが、PC に「横向き」は無い。スマホで見える字は user が決めたまま、
+ * 触る端末でないときだけ「ウィンドウを広げると直ります」にする。
+ */
+describe('触る端末かで一手が変わる(74-2)', () => {
+  it('🔴 触る端末でない(PC のブラウザの窓)なら「ウィンドウを広げると直ります」', () => {
+    const s = setup(true, false, fakeStorage(), false);
+    expect(s.band.hidden, '前提が崩れた(出ていない)').toBe(false);
+    expect(s.text.textContent, 'PC なのに「横向き」と言っている').toBe(TOO_NARROW_TEXT_WINDOW);
+    expect(s.text.textContent).not.toContain('横向き');
+  });
+
+  /** ⚠ 対照群 ── 触る端末(スマホ)は決めた字のまま。 */
+  it('⚠ 触る端末なら今までどおり「横向きにすると直ります」', () => {
+    const s = setup(true, false, fakeStorage(), true);
+    expect(s.text.textContent).toBe(TOO_NARROW_TEXT);
+  });
+
+  /** ⚠ 小窓(PKC が開いたポップアップ)は、触る端末でも横向きが無い ── 窓が先。 */
+  it('⚠ 小窓なら、触る端末でも「ウィンドウを広げると直ります」', () => {
+    const s = setup(true, true, fakeStorage(), true);
+    expect(s.text.textContent).toBe(TOO_NARROW_TEXT_WINDOW);
+  });
+
+  it('⚠ 触る端末かは、出すたびに聞き直す', () => {
+    let touch = true;
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const narrow = new FakeMedia(false);
+    appPhone.install(root, (q) => (q.includes(`${PHONE_MIN_PX - 1}px`) ? narrow : new FakeMedia(true)));
+    const band = document.createElement('div');
+    band.hidden = true;
+    const text = document.createElement('span');
+    const ok = document.createElement('button');
+    band.append(text, ok);
+    root.append(band);
+    installTooNarrow({ band, text, ok, onChange: () => {}, popup: () => false, touch: () => touch });
+    narrow.set(true);
+    expect(text.textContent).toBe(TOO_NARROW_TEXT);
+    narrow.set(false);
+    touch = false;
     narrow.set(true);
     expect(text.textContent, '配線した時点の答えを使い回している').toBe(TOO_NARROW_TEXT_WINDOW);
   });

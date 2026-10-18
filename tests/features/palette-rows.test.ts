@@ -150,12 +150,17 @@ describe('操作を名前で探す(一覧)', () => {
   describe('鍵の字', () => {
     it('割り当たっている鍵が出る(次はこれで呼べる、が伝わる)', () => {
       const row = paletteRows('', BINDINGS, ALL).find((r) => r.id === 'create-entry')!;
-      expect(row.keys).toEqual(['Ctrl + N']);
+      // 🔴 既定は Alt+N(台帳 #1852、依頼 182 = A ── Ctrl+N はブラウザが取る)
+      expect(row.keys).toEqual(['Alt + N']);
     });
 
     it('mac では ⌘ で出る(既定のままでも綴りが違う)', () => {
-      const row = paletteRows('', BINDINGS, ALL, true).find((r) => r.id === 'create-entry')!;
-      expect(row.keys).toEqual(['⌘ + N']);
+      // ⚠ 「ノートを作る」は Alt+N になったので、Ctrl(⌘)を既定に持つ「ノートを編集する」(Ctrl+E)で見る
+      const row = paletteRows('', BINDINGS, ALL, true).find((r) => r.id === 'edit-entry')!;
+      expect(row.keys).toEqual(['⌘ + E']);
+      // 対照群: Alt の既定は mac で ⌥
+      const create = paletteRows('', BINDINGS, ALL, true).find((r) => r.id === 'create-entry')!;
+      expect(create.keys).toEqual(['⌥ + N']);
     });
 
     it('🔴 user が変えた割当で出る(既定を出し続けない)', () => {

@@ -69,7 +69,7 @@ describe('割当の保存', () => {
     expect(st.map.size, '何もしていないのに保存を書いている').toBe(0);
     expect(s.addBinding('create-entry', 'Alt+M')).toBeNull();
     expect(st.map.has('pkc3.keymap')).toBe(true);
-    expect(s.getBindings()['create-entry']).toEqual(['Mod+N', 'Alt+M']);
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+M']);
     expect(s.isDefault('create-entry')).toBe(false);
   });
 
@@ -80,15 +80,15 @@ describe('割当の保存', () => {
     s.resetCommand('create-entry');
     expect(s.isDefault('create-entry')).toBe(true);
     expect(st.map.size, '既定に戻したのに保存が残っている').toBe(0);
-    expect(s.getBindings()['create-entry']).toEqual(['Mod+N']);
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N']);
   });
 
   it('割当を全部外せる ── そのときは「割当なし」で、既定へ勝手に戻さない', () => {
     const s = new KeymapStore(fakeStorage());
-    s.removeBinding('create-entry', 'Mod+N');
+    s.removeBinding('create-entry', 'Alt+N');
     expect(s.getBindings()['create-entry']).toEqual([]);
     s.resetCommand('create-entry');
-    expect(s.getBindings()['create-entry'], '戻し道が無い').toEqual(['Mod+N']);
+    expect(s.getBindings()['create-entry'], '戻し道が無い').toEqual(['Alt+N']);
   });
 
   it('ぶつかる割当は断る(理由と相手を返す)', () => {
@@ -96,14 +96,14 @@ describe('割当の保存', () => {
     const problem = s.addBinding('create-entry', 'Mod+E');
     expect(problem?.kind).toBe('conflict');
     expect(problem?.withCommandId).toBe('edit-entry');
-    expect(s.getBindings()['create-entry'], '断ったのに入っている').toEqual(['Mod+N']);
+    expect(s.getBindings()['create-entry'], '断ったのに入っている').toEqual(['Alt+N']);
   });
 
   it('壊れた保存では既定へ落ちる(近道が全部死なない)', () => {
     const st = fakeStorage();
     st.map.set('pkc3.keymap', '{壊れています');
     const s = new KeymapStore(st);
-    expect(s.getBindings()['create-entry']).toEqual(['Mod+N']);
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N']);
   });
 
   it('保存できない環境でも、この session では効く', () => {
@@ -119,7 +119,7 @@ describe('割当の保存', () => {
     const s = new KeymapStore(dead);
     // 割り当て自体はこの session で効く ── 書けなかったことだけを言う(#1087)
     expect(s.addBinding('create-entry', 'Alt+M')?.kind).toBe('unsaved');
-    expect(s.getBindings()['create-entry']).toEqual(['Mod+N', 'Alt+M']);
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+M']);
   });
 
   it('🔴 別のタブが書き換えたら読み直す(再読込まで効かない、を作らない)', () => {
@@ -130,7 +130,7 @@ describe('割当の保存', () => {
       changed += 1;
     });
     const off = s.watchOtherTabs(window);
-    expect(s.getBindings()['create-entry']).toEqual(['Mod+N']); // 1 度読ませる(cache を作る)
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N']); // 1 度読ませる(cache を作る)
     st.map.set('pkc3.keymap', JSON.stringify({ 'create-entry': ['Alt+M'] }));
     window.dispatchEvent(new StorageEvent('storage', { key: 'pkc3.keymap' }));
     expect(s.getBindings()['create-entry'], 'cache が更新されていない').toEqual(['Alt+M']);
@@ -264,21 +264,21 @@ describe('画面への配線', () => {
     ).toBe(true);
   });
 
-  it('既定の Ctrl+N でノートができる', () => {
+  it('既定の Alt+N でノートができる', () => {
     const { d } = mounted();
-    press('n', { code: 'KeyN', ctrlKey: true });
-    expect(d.getState().selectedLid, 'Ctrl+N が効いていない').toBeTruthy();
+    press('n', { code: 'KeyN', altKey: true });
+    expect(d.getState().selectedLid, 'Alt+N が効いていない').toBeTruthy();
   });
 
-  it('🔴 画像の拡大を開いている間は Ctrl+N が効かない(背後でノートができない)', () => {
+  it('🔴 画像の拡大を開いている間は Alt+N が効かない(背後でノートができない)', () => {
     const { root, d } = mounted();
     openLightbox(root, { src: 'x.png', alt: 'a' });
-    press('n', { code: 'KeyN', ctrlKey: true });
+    press('n', { code: 'KeyN', altKey: true });
     expect(d.getState().selectedLid, '拡大の背後でノートができた').toBeNull();
     // 対照群: 閉じれば同じ鍵で作れる(門が鍵ごと殺していない)
     closeLightbox(root);
-    press('n', { code: 'KeyN', ctrlKey: true });
-    expect(d.getState().selectedLid, '閉じても Ctrl+N が効かない').toBeTruthy();
+    press('n', { code: 'KeyN', altKey: true });
+    expect(d.getState().selectedLid, '閉じても Alt+N が効かない').toBeTruthy();
   });
 
   /**
@@ -357,26 +357,26 @@ describe('画面への配線', () => {
 
   it('🔴 割り当て直すと、新しい鍵が効いて古い鍵は効かない', () => {
     const store = new KeymapStore(fakeStorage());
-    store.removeBinding('create-entry', 'Mod+N');
+    store.removeBinding('create-entry', 'Alt+N');
     expect(store.addBinding('create-entry', 'Alt+M')).toBeNull();
     const { d } = mounted(store);
-    press('n', { code: 'KeyN', ctrlKey: true });
+    press('n', { code: 'KeyN', altKey: true });
     expect(d.getState().selectedLid, '外した既定がまだ効いている').toBeFalsy();
     press('m', { code: 'KeyM', altKey: true });
     expect(d.getState().selectedLid, '割り当てた鍵が効いていない').toBeTruthy();
   });
 
-  it('🔴 1 面の行を打っている最中に Ctrl+N は効かない(別のノートへ飛ばさない)', () => {
+  it('🔴 1 面の行を打っている最中に Alt+N は効かない(別のノートへ飛ばさない)', () => {
     // ⚠ 直す前は `row-source` を「打っている欄」に数えておらず、**打鍵中に飛んでいた**
-    //    ── マニュアルの「Ctrl+N は編集中には効きません」が破れていた
+    //    ── マニュアルの「Alt+N は編集中には効きません」が破れていた
     const { root, d } = mounted();
     const ta = document.createElement('textarea');
     ta.setAttribute('data-pkc-field', 'row-source');
     root.append(ta);
-    press('n', { code: 'KeyN', ctrlKey: true }, ta);
+    press('n', { code: 'KeyN', altKey: true }, ta);
     expect(d.getState().selectedLid, '打鍵中に作られた').toBeFalsy();
     // ⚠ 対照群: 欄の外なら効く(門が全部塞がっている、を「効かない」と読まない)
-    press('n', { code: 'KeyN', ctrlKey: true });
+    press('n', { code: 'KeyN', altKey: true });
     expect(d.getState().selectedLid).toBeTruthy();
   });
 
@@ -390,12 +390,12 @@ describe('画面への配線', () => {
     const input = document.createElement('input');
     input.type = 'search'; // ⚠ 名指しの表に無い欄(絞り込みと同じ型)
     root.append(input);
-    press('n', { code: 'KeyN', ctrlKey: true }, input);
+    press('n', { code: 'KeyN', altKey: true }, input);
     expect(d.getState().selectedLid, '打鍵中の欄で作られた').toBeFalsy();
     // ⚠ 対照群: 押しボタンに焦点があるときは**効く**(キーボードだけの動線を殺さない)
     const btn = document.createElement('button');
     root.append(btn);
-    press('n', { code: 'KeyN', ctrlKey: true }, btn);
+    press('n', { code: 'KeyN', altKey: true }, btn);
     expect(d.getState().selectedLid, 'ボタン上で近道が死んでいる').toBeTruthy();
   });
 
@@ -545,7 +545,7 @@ describe('画面への配線', () => {
     const { root, d } = mounted(store);
     // 編集に入る ── ⚠ ここまで作らないと `COMMIT_EDIT` は phase を動かさず、
     //    「dispatch が走った」だけを見る空振りの test になる(1 稿目がそうだった)
-    press('n', { code: 'KeyN', ctrlKey: true });
+    press('n', { code: 'KeyN', altKey: true });
     d.dispatch({ type: 'START_EDIT' });
     expect(d.getState().phase, '編集に入れていない').toBe('editing');
     const ta = document.createElement('textarea');
@@ -560,7 +560,7 @@ describe('画面への配線', () => {
   it('🔴 編集をやめる鍵も割り当て直せる', () => {
     const store = new KeymapStore(fakeStorage());
     const { root, d } = mounted(store);
-    press('n', { code: 'KeyN', ctrlKey: true });
+    press('n', { code: 'KeyN', altKey: true });
     d.dispatch({ type: 'START_EDIT' });
     const ta = document.createElement('textarea');
     ta.setAttribute('data-pkc-field', 'editor-body');
@@ -789,7 +789,7 @@ describe('設定の面(割り当て直す口)', () => {
     const rows = panel.root.querySelectorAll('[data-pkc-field="keymap-row"]');
     expect(rows.length, 'コマンド表と行数が違う').toBe(KEY_COMMANDS.length);
     const first = panel.root.querySelector('[data-pkc-field="keymap-row"][data-pkc-command="create-entry"]');
-    expect(first?.textContent).toContain(chordLabel('Mod+N', false).replace('Ctrl', 'Ctrl'));
+    expect(first?.textContent).toContain(chordLabel('Alt+N', false).replace('Ctrl', 'Ctrl'));
     panel.dispose();
   });
 
@@ -799,7 +799,7 @@ describe('設定の面(割り当て直す口)', () => {
     document.body.append(panel.root);
     const all = panel.root.querySelector<HTMLButtonElement>('[data-pkc-field="keymap-reset-all"]')!;
     expect(all.disabled, '何も変えていないのに押せる(押しても何も起きない)').toBe(true);
-    store.removeBinding('create-entry', 'Mod+N');
+    store.removeBinding('create-entry', 'Alt+N');
     expect(all.disabled, '変えたのに押せない').toBe(false);
     all.click();
     await answerDialog('ok');
@@ -822,7 +822,7 @@ describe('設定の面(割り当て直す口)', () => {
     expect(store.getBindings()['edit-entry'], 'やめたのに消えた').toContain('Alt+9');
     all.click();
     await answerDialog('ok');
-    expect(store.getBindings()['create-entry']).toEqual(['Mod+N']);
+    expect(store.getBindings()['create-entry']).toEqual(['Alt+N']);
     expect(store.getBindings()['edit-entry']).not.toContain('Alt+9');
     panel.dispose();
   });
@@ -843,7 +843,7 @@ describe('設定の面(割り当て直す口)', () => {
     document.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'm', code: 'KeyM', altKey: true, bubbles: true, cancelable: true }),
     );
-    expect(store.getBindings()['create-entry']).toEqual(['Mod+N', 'Alt+M']);
+    expect(store.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+M']);
     panel.dispose();
   });
 
@@ -862,7 +862,7 @@ describe('設定の面(割り当て直す口)', () => {
       .querySelector<HTMLButtonElement>('[data-pkc-field="keymap-assign"][data-pkc-command="edit-entry"]')!
       .click();
     document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'n', code: 'KeyN', ctrlKey: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent('keydown', { key: 'n', code: 'KeyN', altKey: true, bubbles: true, cancelable: true }),
     );
     expect(d.getState().selectedLid, '割り当てようとしただけでノートができた').toBeFalsy();
     // ⚠ ぶつかる相手なので割当にもならない ── 断り文が出る
@@ -898,9 +898,9 @@ describe('設定の面(割り当て直す口)', () => {
     // ⚠ MUT-7: この分岐は「外して足し直す」筋でしか通らず、test が 1 本も無かった
     const st = fakeStorage();
     const store = new KeymapStore(st);
-    store.removeBinding('create-entry', 'Mod+N');
+    store.removeBinding('create-entry', 'Alt+N');
     expect(st.map.size, '外した時点で上書きが在るはず').toBe(1);
-    expect(store.addBinding('create-entry', 'Mod+N')).toBeNull();
+    expect(store.addBinding('create-entry', 'Alt+N')).toBeNull();
     expect(store.isDefault('create-entry'), '既定と同じ並びなのに上書き扱いのまま').toBe(true);
     expect(st.map.size, '既定と同じ並びの上書きが保存に残っている').toBe(0);
   });
@@ -947,7 +947,7 @@ describe('設定の面(割り当て直す口)', () => {
     document.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }),
     );
-    expect(store.getBindings()['create-entry']).toEqual(['Mod+N']);
+    expect(store.getBindings()['create-entry']).toEqual(['Alt+N']);
     expect(assign.textContent, 'やめたのに待ち続けている').toBe('キーを割り当てる');
     panel.dispose();
   });
@@ -966,7 +966,7 @@ describe('設定の面(割り当て直す口)', () => {
     store.addBinding('create-entry', 'Alt+M');
     expect(reset().disabled, '変えたのに押せない').toBe(false);
     reset().click();
-    expect(store.getBindings()['create-entry']).toEqual(['Mod+N']);
+    expect(store.getBindings()['create-entry']).toEqual(['Alt+N']);
     expect(reset().disabled, '戻したのに押せるまま').toBe(true);
     panel.dispose();
   });
@@ -998,7 +998,7 @@ describe('設定の面(割り当て直す口)', () => {
     document.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'm', code: 'KeyM', altKey: true, bubbles: true, cancelable: true }),
     );
-    expect(store.getBindings()['create-entry'], '外したはずの listener が拾った').toEqual(['Mod+N']);
+    expect(store.getBindings()['create-entry'], '外したはずの listener が拾った').toEqual(['Alt+N']);
   });
 });
 
@@ -1253,8 +1253,8 @@ describe('ヘルプの一覧', () => {
     const cell = () =>
       region.querySelector('[data-pkc-field="help-key-chords"][data-pkc-command="create-entry"]')
         ?.textContent ?? '';
-    expect(cell()).toBe(chordLabel('Mod+N', false));
-    store.removeBinding('create-entry', 'Mod+N');
+    expect(cell()).toBe(chordLabel('Alt+N', false));
+    store.removeBinding('create-entry', 'Alt+N');
     store.addBinding('create-entry', 'Alt+M');
     expect(cell(), 'ヘルプが古い割当のまま').toBe(chordLabel('Alt+M', false));
   });

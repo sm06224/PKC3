@@ -68,6 +68,7 @@ import {
 } from '@adapter/ui/render/read-columns';
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
+import { isTouchOnly } from '@adapter/ui/render/touch-device';
 import { scheduleNumberFormatWarmup } from '@adapter/ui/render/locale-warmup';
 import {
   paintStatusCopyRef,
@@ -2153,6 +2154,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           editLockPort,
         ),
       onEdited: (session, key) => pdfSaveEdited.receive(session, key),
+      // 🔴 窓の F5 で読んでいた PDF が消えないよう、同じ添付を貸し直す(台帳 #1852、依頼 332 = A)。返すのは `PdfReaderHost` が持つ
+      relend: (session) => blobs.lendObjectUrl(cid, session.assetKey),
       listAttachments: listPdfAttachments,
       // 🔴 窓の鍵を信用しない ── 一覧(この collection の PDF の添付)に在る鍵だけ貸す
       lendAttachment: async (key) =>
@@ -2290,6 +2293,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 小窓 / アプリの窓なら「ウィンドウを広げると直ります」(#690 ③)── 判断は
     //    `deep-link.ts` の `noteOpenedByUs`(`bootstrap` が `startApp` より先に決める)
     popup: () => openedByUs,
+    // 🔴 指で触る端末だけ「横向きにすると直ります」。PC のブラウザの窓を細くしたときは「ウィンドウを広げると直ります」(台帳 #1852、依頼 74-2 = B)
+    touch: () => isTouchOnly(),
   });
 
   /**

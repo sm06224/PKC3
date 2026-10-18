@@ -391,6 +391,8 @@ export class AppendBoxRenderer {
     this.form.hidden = mode.kind !== 'ready';
     this.lockBar.hidden = mode.kind === 'ready' || mode.kind === 'hidden';
     this.region.toggleAttribute('data-pkc-lock-open', !this.lockBar.hidden);
+    // 🔴 編集中かどうかの印(台帳 #1852、依頼 237 = A)。スマホの画面では、編集中は中央の帯の保存 / やめるだけにする(CSS が読む)
+    this.region.toggleAttribute('data-pkc-lock-editing', mode.kind === 'editing');
     this.resolve.hidden = mode.kind !== 'editing';
     this.discard.hidden = mode.kind !== 'editing';
     this.release.hidden = mode.kind !== 'writing';

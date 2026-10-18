@@ -25,13 +25,13 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
   const shell = page.locator('[data-pkc-region="shell"]');
   await expect(rows).toHaveCount(0);
 
-  // ① 既定(Ctrl+N)でノートができる ── **実際の打鍵**で
-  await page.keyboard.press('Control+n');
-  await expect(rows, 'Ctrl+N が実機で効いていない').toHaveCount(1);
+  // ① 既定(Alt+N)でノートができる ── **実際の打鍵**で
+  await page.keyboard.press('Alt+n');
+  await expect(rows, 'Alt+N が実機で効いていない').toHaveCount(1);
   // ⚠ 作ると**編集に入る**ので、確定して `ready` へ戻す ── 戻さないと以降の
   //    「作られない」は**編集中だから断られた**だけになる(1 稿目がそれで偽陽性だった)
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await page.keyboard.press('Control+n');
+  await page.keyboard.press('Alt+n');
   await expect(rows, '2 回目が作られない ── 以降の否定の検査が無意味になる').toHaveCount(2);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
@@ -62,9 +62,9 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
   await expect(row.locator('[data-pkc-field="keymap-chord"]')).toHaveCount(2);
 
   // ④ 🔴 捕まえている最中の打鍵は**アプリに届かない**
-  //    (`Ctrl+N` を割り当てようとしただけでノートが増える、を落とす)
+  //    (`Alt+N` を割り当てようとしただけでノートが増える、を落とす)
   await clickReal(page, '[data-pkc-field="keymap-assign"][data-pkc-command="edit-entry"]');
-  await page.keyboard.press('Control+n');
+  await page.keyboard.press('Alt+n');
   await expect(rows, '割り当てようとしただけでノートができた').toHaveCount(2);
   // ぶつかる相手なので断られる(= 断り文が出る)
   await expect(
@@ -179,7 +179,7 @@ test('🔴 近道はブラウザの既定を止める(保存ダイアログ / �
     });
   });
 
-  await page.keyboard.press('Control+n');
+  await page.keyboard.press('Alt+n');
   /**
    * 🔴 #1221: 作った直後は**題名の欄に焦点が在る**(打っている最中)── 打鍵中は
    * `Alt+3` のような近道を受けない(本文を打っているときと同じ規則)。この spec が
@@ -200,7 +200,7 @@ test('🔴 近道はブラウザの既定を止める(保存ダイアログ / �
    * **ページからは確かめられない** ── そこは user の実機で見る話で、ここでは
    * 「アプリが受けて止めている」までを主張する(計器の名前を主張より広げない)。
    */
-  expect(prevented('n'), 'Ctrl+N をアプリが受けて止めていない').toBe(true);
+  expect(prevented('n'), 'Alt+N をアプリが受けて止めていない').toBe(true);
   expect(prevented('3'), 'Alt+3 をアプリが受けて止めていない').toBe(true);
   expect(prevented('f9'), '割り当てていない鍵まで止めている').toBe(false);
 
@@ -281,7 +281,7 @@ test('🔴 帯に無い記法が、鍵で本文に入る (#425)', async ({ page 
   //    2 件目の本文欄で Alt+← を押す(欄の中では戻らない / 欄の外では戻る、の両方を見る)
   const noteRows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   for (const t of ['一', '二']) {
-    await page.keyboard.press('Control+n');
+    await page.keyboard.press('Alt+n');
     const f = page.locator('[data-pkc-field="editor-body"]');
     await expect(f).toBeVisible({ timeout: 15_000 });
     await f.fill(`ノート${t}`);
