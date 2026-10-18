@@ -117,6 +117,31 @@ export function showUpdatingCard(region: HTMLElement, label = '新しいバー�
   region.hidden = false;
 }
 
+/** 切り替えを頼んでから、これだけ待っても切り替わらないときの字(依頼 84-6 B)。 */
+export const UPDATE_STUCK_TEXT = '切り替わりませんでした。ページを読み込み直してください。';
+/** 「切り替わらなかった」と見なすまでの待ち(ミリ秒)。 */
+export const UPDATE_STUCK_MS = 10_000;
+
+/**
+ * 🔴 **「切り替えています…」のまま止まったとき**(台帳 #1852 束 A1。依頼 84-6 B)。
+ * ⚠ 直す前は、このカードのまま押し直す道が無かった。字を改め、読み込み直す道(`apply-update` と同じ受け手)を付ける。
+ */
+export function showUpdateStuckCard(region: HTMLElement, withReload: boolean): void {
+  region.textContent = '';
+  const text = document.createElement('span');
+  text.setAttribute('data-pkc-field', 'update-text');
+  text.textContent = UPDATE_STUCK_TEXT;
+  region.append(text);
+  if (withReload) {
+    const apply = document.createElement('button');
+    apply.type = 'button';
+    apply.setAttribute('data-pkc-action', 'apply-update');
+    apply.textContent = '読み込み直す';
+    region.append(apply);
+  }
+  region.hidden = false;
+}
+
 /**
  * 別のタブで切り替わったときのカード(依頼 131 A)。⚠ 押すのは「読み込み直す」(`apply-update` と同じ受け手)。
  */
@@ -166,6 +191,10 @@ export interface UpdatePromptDeps {
   /** 捨ててよいか聞く。⚠ `delete-entry` / `purge-trash` と同じ倒し方に揃える。 */
   /** ⚠ **非同期**(#299 段③)── 確認はアプリ自身のダイアログになった。 */
   confirmDiscard?(): Promise<boolean>;
+  /** 切り替わらずに止まったときの「読み込み直す」(依頼 84-6 B)。無ければ字だけ出す。 */
+  reload?(): void;
+  /** 止まったと見なすまでの待ち(ミリ秒)。試験で短くする。 */
+  stuckMs?: number;
 }
 
 /**
@@ -184,14 +213,22 @@ export function createUpdatePrompt(
   let pending: (() => void) | null = null;
   /** 別のタブの切り替えを受けた読み込み直しか(押した後の字を変える)。 */
   let isElsewhere = false;
+  /** 「切り替えています…」の見張り(依頼 84-6 B)。別の面に替わったら外す。 */
+  let stuckTimer: ReturnType<typeof setTimeout> | null = null;
+  const stopWatch = (): void => {
+    if (stuckTimer !== null) clearTimeout(stuckTimer);
+    stuckTimer = null;
+  };
   return {
     present(apply) {
+      stopWatch();
       pending = apply;
       isElsewhere = false;
       setUpdatePending(true);
       showUpdateCard(region);
     },
     elsewhere(reload) {
+      stopWatch();
       // ⚠ 待機中の版を持つ印(`updatePending`)は立てない ── 切り替えるのではなく読み込み直すだけ
       pending = reload;
       isElsewhere = true;
@@ -210,8 +247,18 @@ export function createUpdatePrompt(
       // ⚠ 面ごと消さない(review H-2)。押せる導線だけ外し、状況は残す
       showUpdatingCard(region, isElsewhere ? '読み込み直しています…' : undefined);
       run();
+      // 🔴 切り替わらないまま止まったら、字を改めて読み込み直す道を出す(依頼 84-6 B)。
+      //    ⚠ 切り替われば再読込で消えるので、タイマーは残っても害は無い
+      stopWatch();
+      stuckTimer = setTimeout(() => {
+        stuckTimer = null;
+        const reload = deps.reload;
+        if (reload !== undefined) pending = reload;
+        showUpdateStuckCard(region, reload !== undefined);
+      }, deps.stuckMs ?? UPDATE_STUCK_MS);
     },
     dismiss() {
+      stopWatch();
       // ⚠ `pending` は残す(押せる導線が無くなるだけ)。次に開けば再び出る
       clearUpdateCard(region);
     },

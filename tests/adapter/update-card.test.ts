@@ -10,6 +10,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   UPDATE_ELSEWHERE_TEXT,
   UPDATE_HINT,
+  UPDATE_STUCK_MS,
+  UPDATE_STUCK_TEXT,
   UPDATE_TEXT,
   buildUpdateAvailableRow,
   clearUpdateCard,
@@ -118,6 +120,62 @@ describe('更新の案内 — 押されたときの動き', () => {
   it('見せる前に押されても落ちない', () => {
     const prompt = createUpdatePrompt(region());
     expect(() => prompt.apply()).not.toThrow();
+  });
+});
+
+describe('🔴 切り替わらずに止まったとき、字を改めて読み込み直す道を出す(依頼 84-6 B)', () => {
+  const text = (el: HTMLElement) => el.querySelector('[data-pkc-field="update-text"]')?.textContent;
+
+  it('待ちが過ぎるまでは「切り替えています…」のまま、過ぎたら字が変わり読み込み直せる', () => {
+    vi.useFakeTimers();
+    try {
+      const el = region();
+      const reload = vi.fn();
+      const prompt = createUpdatePrompt(el, { reload });
+      prompt.present(vi.fn());
+      prompt.apply();
+      vi.advanceTimersByTime(UPDATE_STUCK_MS - 1);
+      expect(text(el)).toContain('切り替えています');
+      vi.advanceTimersByTime(1);
+      expect(text(el)).toBe(UPDATE_STUCK_TEXT);
+      const btn = el.querySelector('[data-pkc-action="apply-update"]');
+      expect(btn?.textContent).toBe('読み込み直す');
+      prompt.apply(); // ボタンの受け手は同じ `apply`
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('次の版が来た(present)後は、古い見張りが案内を上書きしない', () => {
+    vi.useFakeTimers();
+    try {
+      const el = region();
+      const prompt = createUpdatePrompt(el, { reload: vi.fn() });
+      prompt.present(vi.fn());
+      prompt.apply();
+      prompt.present(vi.fn());
+      vi.advanceTimersByTime(UPDATE_STUCK_MS * 2);
+      expect(text(el)).toContain('新しいバージョン');
+      expect(text(el)).not.toBe(UPDATE_STUCK_TEXT);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('読み込み直しの手段が無ければ字だけ出す(ボタンは出さない)', () => {
+    vi.useFakeTimers();
+    try {
+      const el = region();
+      const prompt = createUpdatePrompt(el, { stuckMs: 50 });
+      prompt.present(vi.fn());
+      prompt.apply();
+      vi.advanceTimersByTime(50);
+      expect(text(el)).toBe(UPDATE_STUCK_TEXT);
+      expect(el.querySelector('[data-pkc-action="apply-update"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

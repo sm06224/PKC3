@@ -3489,6 +3489,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         okLabel: '新しいバージョンに切り替える',
         danger: true,
       }),
+    reload: () => location.reload(),
   });
 
   /**
