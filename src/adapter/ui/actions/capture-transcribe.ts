@@ -21,7 +21,7 @@
 import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { viewModeLabel } from '@adapter/state/app-state';
-import type { AsrJob, AsrJobResult } from '@adapter/platform/asr/asr-run';
+import type { AsrJob, AsrJobResult, AsrSegment } from '@adapter/platform/asr/asr-run';
 import {
   ASR_LANGUAGE,
   ASR_PARTS,
@@ -38,6 +38,7 @@ import {
 import { looksOutOfMemory } from '@features/storage/image-export-limit';
 import { elapsedText } from '@features/elapsed-text';
 import { isNearSilent, pcmRms } from '@features/asr/asr-pcm';
+import { chunkOffsetMs, planAsrChunks, shiftSegments, type AsrChunkOptions } from '@features/asr/asr-chunks';
 import { createWritableQueue } from './writable-queue';
 import { appendUnlessEditedElsewhere, type EditLockPort } from '@adapter/state/edited-elsewhere';
 import { EDIT_ELSEWHERE_ERROR } from '@features/message/caution-events';
@@ -76,6 +77,8 @@ export interface CaptureTranscribeDeps {
   readonly lock?: EditLockPort;
   /** 文字にしている最中かが変わった合図(タブを閉じる前の確認に数える)。 */
   readonly onActive?: (active: boolean) => void;
+  /** 🔴 長い録音を区切る条件(台帳 #1852 O1 / 依頼 149)。省略 = 既定(20 分を超えたら約 10 分ずつ)。⚠ test が小さい値を渡す。 */
+  readonly chunking?: AsrChunkOptions;
 }
 
 export interface CaptureTranscriber {
@@ -175,8 +178,12 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
           fail('この録音の中身が見つかりませんでした。');
           return;
         }
-        deps.notify(`「${item.name}」を文字にしています…(${ready.part.label}の一式)`);
-        progressShown = true;
+        // 🔴 進行中の字を出す所は 1 つ(長い録音の「N / M」もここを通る ── `status-lifetime.ts` の出す側の表を増やさない)
+        const progress = (more = ''): void => {
+          deps.notify(`「${item.name}」を文字にしています…(${ready.part.label}の一式${more})`);
+          progressShown = true;
+        };
+        progress();
         const startedAt = Date.now();
         let pcm: Float32Array;
         try {
@@ -199,12 +206,49 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
         }
         // 🔴 **音の大きさは渡す前に測る**(transcribe がワーカーへ transfer すると pcm は長さ 0 になり、RMS が 0 に化ける)
         const rms = pcmRms(pcm);
-        const out = await deps.transcribe({
-          files: [...ready.files],
-          modelId: ready.part.modelId,
-          language: ASR_LANGUAGE,
-          pcm,
-        });
+        /**
+         * 🔴 **長い録音は区切りながら文字にする**(台帳 #1852 O1 / 依頼 149 ③)。20 分までは今までどおり 1 本。
+         * ⚠ 渡すたびにワーカーへ transfer されて元の PCM が空になるので、区切りは**写して**渡す(全体は最後まで残る)。
+         * ⚠ 途中の 1 本が失敗したら全体を失敗にする(半分だけの文字起こしを「足しました」と言わない)。
+         */
+        const chunks = planAsrChunks(pcm, deps.chunking);
+        let out: AsrJobResult;
+        if (chunks.length <= 1) {
+          out = await deps.transcribe({
+            files: [...ready.files],
+            modelId: ready.part.modelId,
+            language: ASR_LANGUAGE,
+            pcm,
+          });
+        } else {
+          const texts: string[] = [];
+          const segments: AsrSegment[] = [];
+          let withSegments = true;
+          let loadMs = 0;
+          let runMs = 0;
+          for (let i = 0; i < chunks.length; i++) {
+            const c = chunks[i]!;
+            progress(`。長い録音なので分けながら進めます: ${String(i + 1)} / ${String(chunks.length)}`);
+            const part = await deps.transcribe({
+              files: [...ready.files],
+              modelId: ready.part.modelId,
+              language: ASR_LANGUAGE,
+              pcm: pcm.slice(c.start, c.end),
+            });
+            texts.push(part.text);
+            if (part.segments !== undefined) segments.push(...shiftSegments(part.segments, chunkOffsetMs(c)));
+            else if (part.text.trim() !== '') withSegments = false;
+            loadMs += part.loadMs;
+            runMs += part.runMs;
+          }
+          out = {
+            text: texts.filter((t) => t.trim() !== '').join('\n'),
+            // 区切りのどれかが時刻を返さなかったときは、時刻つきにしない(時刻のずれた行を混ぜない)
+            ...(withSegments && segments.length > 0 ? { segments } : {}),
+            loadMs,
+            runMs,
+          };
+        }
         // 時刻つきの行があればそれ、無ければ今までの 1 段落(#1232 段 a)
         const text = transcriptLines(out.segments) ?? transcriptText(out.text);
         if (text === null) {

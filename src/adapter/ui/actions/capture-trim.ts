@@ -73,8 +73,17 @@ export interface CaptureTrimDeps {
   ) => Promise<VideoCutResult>;
   /** 確認を出す口(アプリ自身の `<dialog>`)。⚠ `true` = 切り出す。 */
   readonly confirm: (message: string, opts: { okLabel: string; cancelLabel: string }) => Promise<boolean>;
+  /**
+   * 添付(ノート)の置き場のフォルダ。ルートなら `null`。
+   * 🔴 切り出したものを**元の録音と同じフォルダ**に作るため(台帳 #1852 O1 / 依頼 355 A。Gemini 回答 = 推薦どおり)。⚠ 必須にしてある ──
+   *   任意だと配線を落としても型が黙り、ルートに作られるまま気づけない。
+   */
+  readonly parentOf: (lid: string) => string | null;
   /** bytes を添付にする口。⚠ **`attachOne` を通す**(2 つ目の取込口を作らない)。 */
-  readonly attach: (item: AttachItem) => Promise<AttachedOne | null>;
+  readonly attach: (
+    item: AttachItem,
+    place: { readonly parentLid: string | null; readonly keepSelection: boolean },
+  ) => Promise<AttachedOne | null>;
   /** 一時の知らせ(エラーの行とは別)。 */
   readonly notify: (text: string) => void;
 }
@@ -235,13 +244,21 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
          * 🔑 だから**撃つ前の値を控え**、変わっていたら**そちらを残す**。
          */
         const errorBefore = deps.dispatcher.getState().error;
-        const attached = await deps.attach({
-          name,
-          // 🔑 **元と同じ形**(裁定)── 入れ物も codec も変えないので mime も変えない
-          type: mime,
-          size: made.size,
-          blob: made.blob.type === mime ? made.blob : made.blob.slice(0, made.blob.size, mime),
-        });
+        /**
+         * 🔴 **置き場は元の録音と同じフォルダ**(台帳 #1852 O1 / 依頼 355 A)。⚠ 直す前は、フォルダの中にある録音を切り出すと
+         *   切り出した物は**ルート**に作られた(画像の描き込みや PDF の「別の PDF として保存」は元と同じフォルダに作られる)。
+         *   選択の戻し方は下の `back` のままで変えない(`keepSelection` は偽)。
+         */
+        const attached = await deps.attach(
+          {
+            name,
+            // 🔑 **元と同じ形**(裁定)── 入れ物も codec も変えないので mime も変えない
+            type: mime,
+            size: made.size,
+            blob: made.blob.type === mime ? made.blob : made.blob.slice(0, made.blob.size, mime),
+          },
+          { parentLid: deps.parentOf(lid), keepSelection: false },
+        );
         if (attached === null) {
           // 🔑 具体的な理由が既に出ていれば、それを残す(汎用の字で塗り潰さない)
           if (deps.dispatcher.getState().error === errorBefore) {

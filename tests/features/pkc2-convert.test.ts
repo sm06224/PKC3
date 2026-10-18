@@ -557,3 +557,49 @@ describe('ID の扱いと注意のまとめ(#1087)', () => {
     ]);
   });
 });
+
+/**
+ * 🔴 **表の列の幅・行の高さ・グラフ・列の書式は、値は保存されるが画面には出ない ── 取り込みの報告で言う**
+ * (台帳 #1852 束 N1 / 依頼 97-3 B。Gemini 回答 = 推薦どおり)。
+ * 直す前は報告にもマニュアルにも書いてなく、PKC2 でグラフを作っていた人は「消えた」と探した(データは残っている)。
+ */
+describe('表の見た目の設定は PKC3 で表示されないことを、取り込みの報告で言う(依頼 97-3 B)', () => {
+  const sheet = (extra: Record<string, unknown>): string =>
+    JSON.stringify({ rows: [['a', 'b'], ['1', '2']], ...extra });
+  const WARN = (n: number): string =>
+    `${String(n)} 件の表に付いていた列の幅・行の高さ・グラフ・列の書式は、PKC3 では表示されません(値は保存されています)`;
+
+  it('🔴 4 つの設定のどれかを持つ表の数を言う(持たない表・表でないノートは数えない)', () => {
+    const r = convertPkc2Container(
+      {
+        entries: [
+          { lid: 'w', title: '幅', archetype: 'spreadsheet', body: sheet({ colWidths: [80, 120] }) },
+          { lid: 'h', title: '高さ', archetype: 'spreadsheet', body: sheet({ rowHeights: [30] }) },
+          { lid: 'c', title: 'グラフ', archetype: 'spreadsheet', body: sheet({ charts: [{ type: 'bar' }] }) },
+          { lid: 'f', title: '書式', archetype: 'spreadsheet', body: sheet({ columnFormats: [{ kind: 'currency' }] }) },
+          { lid: 'plain', title: '素の表', archetype: 'spreadsheet', body: sheet({}) },
+          { lid: 'empty', title: '空の設定', archetype: 'spreadsheet', body: sheet({ colWidths: [], charts: [] }) },
+          { lid: 'n', title: 'ノート', archetype: 'text', body: 'colWidths という語を書いたただのノート' },
+        ],
+      },
+      opts(),
+    );
+    expect(r.warnings.filter((w) => w.includes('列の幅'))).toEqual([WARN(4)]);
+  });
+
+  it('⚠ 対照群 ── 設定を持つ表が無ければ、この報告は出ない', () => {
+    const r = convertPkc2Container(
+      { entries: [{ lid: 'plain', title: '素の表', archetype: 'spreadsheet', body: sheet({}) }] },
+      opts(),
+    );
+    expect(r.warnings.filter((w) => w.includes('列の幅'))).toEqual([]);
+  });
+
+  it('値そのものは保存される(「消えた」のではなく「表示されない」)', () => {
+    const r = convertPkc2Container(
+      { entries: [{ lid: 'w', title: '幅', archetype: 'spreadsheet', body: sheet({ colWidths: [80, 120] }) }] },
+      opts(),
+    );
+    expect(r.entries[0]!.body).toContain('sheet.colWidths');
+  });
+});

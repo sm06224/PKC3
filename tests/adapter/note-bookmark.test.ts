@@ -26,6 +26,7 @@ import {
   MAX_BOOKMARKS,
   MAX_BOOKMARKS_STORED,
   noteBookmarkKey,
+  placeBookmarkKey,
 } from '../../src/features/relation/dual-bookmarks';
 
 /** この台のコレクションは 'c1'(`SYS_BOOTED` の cid)。別のコレクションは 'c2'。 */
@@ -232,7 +233,8 @@ describe('消えたノート(#1377)', () => {
 
   it('対照群: 消えた場所(フォルダ)は今までどおり帯に出て、外せる', () => {
     const t = setup();
-    appDualPrefs.setBookmarks(['もう無い']);
+    // 🔴 場所の綴りはコレクションごと(台帳 #1852 N1 / 依頼 328 A)── このコレクションの、消えた場所
+    appDualPrefs.setBookmarks([placeBookmarkKey('c1', 'もう無い')]);
     t.dual.render(t.d.getState());
     const go = t.strip().querySelector<HTMLButtonElement>(
       '[data-pkc-action="dual-bookmark-open"][data-pkc-entry="もう無い"]',

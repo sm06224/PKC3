@@ -15,8 +15,14 @@ import { WaveClient } from './wave-client';
 
 export const WAVE_SAMPLE_RATE = 8000;
 export const WAVE_CACHE_MAX = 24;
-/** 復号する添付の大きさの上限(手違いの検出であって、守らせる規律ではない ── 通常の増加なら上げてよい)。 */
-export const WAVE_MAX_BLOB_BYTES = 48 * 1024 * 1024;
+/**
+ * 復号する添付の大きさの上限(手違いの検出であって、守らせる規律ではない ── 通常の増加なら上げてよい)。
+ * 🔴 **1 本の録音の上限(`CAPTURE_PART_BYTES` = 250MB)に合わせた**(台帳 #1852 O1 / 依頼 356 A。Gemini 回答 = 推薦どおり)。
+ *   直す前は 48MB(約 80 分)で、1〜2 時間の会議の録音で波形が出なかった。PKC3 の録音は約 10KB/秒なので 250MB で約 7 時間。
+ * ⚠ **復号後のメモリは未測定**(8kHz の Float32 でチャンネルごとに約 32KB/秒 ── 7 時間のステレオなら約 1.6GB と見積もるだけ)。
+ *   端末で問題が出たら、ここを下げる(復号に失敗したときは `null` = 帯を出さないだけで、聞く・切り出すは止まらない)。
+ */
+export const WAVE_MAX_BLOB_BYTES = 250 * 1024 * 1024;
 
 export interface WavePeaks {
   readonly peaks: Float32Array;

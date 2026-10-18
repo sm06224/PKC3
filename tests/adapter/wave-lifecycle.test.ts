@@ -154,9 +154,11 @@ describe('WaveSource ── 復号は呼び側・山だけを残す(#1232)', () 
   it('🔴 大きすぎる添付は復号せず null(手違いの検出)/ 上限ちょうどは復号する', async () => {
     const k = ctxOf([new Float32Array([0.5, 0.5])], 1);
     const src = new WaveSource({ client: new WaveClient({ spawn: null }), create: k.create });
-    expect(await src.load('big', new Blob([new Uint8Array(WAVE_MAX_BLOB_BYTES + 1)]), 2)).toBeNull();
+    // 🔴 上限は 250MB に上がった(依頼 356 A)── 大きさだけを偽る(実際に 250MB を確保しない)
+    const sized = (size: number): Blob => ({ size, arrayBuffer: async () => new ArrayBuffer(8) }) as unknown as Blob;
+    expect(await src.load('big', sized(WAVE_MAX_BLOB_BYTES + 1), 2)).toBeNull();
     expect(k.decoded(), '大きすぎるのに復号を始めた').toBe(0);
-    expect(await src.load('ok', new Blob([new Uint8Array(WAVE_MAX_BLOB_BYTES)]), 2)).not.toBeNull();
+    expect(await src.load('ok', sized(WAVE_MAX_BLOB_BYTES), 2)).not.toBeNull();
     expect(k.decoded()).toBe(1);
   });
 

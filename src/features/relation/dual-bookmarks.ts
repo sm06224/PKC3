@@ -92,6 +92,33 @@ export function toggleBookmark(
 /** ノートの印(綴りの前置き)。⚠ 場所(フォルダの lid)と取り違えない。 */
 const NOTE_PREFIX = 'note:';
 
+/**
+ * 🔴 **場所(フォルダ)の綴り**(台帳 #1852 N1 / 依頼 328 A。Gemini 回答 = 推薦どおり)。`place:<コレクションの id>/<lid>`。
+ * ⚠ 直す前は場所の綴りが**素の lid**で、コレクションの印が無かった ── コレクション A でフォルダを 20 件ブックマークしてから B を開くと、
+ *   A の 20 件が「(消えた場所 …)」の押せないボタンとして並び、B で足そうとすると「20 件までです」と断られた。
+ * 🔑 **古い綴り(素の lid)はそのまま読める** ── 開いているコレクションに**その lid のノートがあるときだけ**そのコレクションの物として出す
+ *   (lid は作るたびに別の値なので、別のコレクションの物と取り違えない)。新しく足す物は `place:` で入る。
+ * ⚠ 古い綴りのまま、**開いているコレクションのフォルダが消えた**分は帯から落ちる(保存には残る ── ゴミ箱から戻せば帯へ復活する。ノートと同じ)。
+ */
+const PLACE_PREFIX = 'place:';
+
+/** 場所を一覧に入れるときの綴り(`place:<コレクションの id>/<lid>`)。 */
+export const placeBookmarkKey = (cid: string, lid: string): string =>
+  `${PLACE_PREFIX}${cid}/${lid}`;
+
+/** 綴りが新しい場所の綴りなら、そのコレクションの id と lid。⚠ ノート・古い綴り・読めない綴りは `null`。 */
+export function placeRefOf(key: string): { cid: string; lid: string } | null {
+  if (!key.startsWith(PLACE_PREFIX)) return null;
+  const rest = key.slice(PLACE_PREFIX.length);
+  const at = rest.indexOf('/');
+  if (at <= 0 || at === rest.length - 1) return null;
+  return { cid: rest.slice(0, at), lid: rest.slice(at + 1) };
+}
+
+/** 綴りが指す先の lid(ノート・新しい場所の綴りは中の lid、古い綴りはそのもの)。 */
+export const bookmarkTargetLid = (key: string): string =>
+  noteRefOf(key)?.lid ?? placeRefOf(key)?.lid ?? key;
+
 /** ノートを一覧に入れるときの綴り(`note:<コレクションの id>/<lid>`)。 */
 export const noteBookmarkKey = (cid: string, lid: string): string =>
   `${NOTE_PREFIX}${cid}/${lid}`;
@@ -111,7 +138,8 @@ export function noteRefOf(key: string): { cid: string; lid: string } | null {
 /**
  * 🔴 **いまのコレクションで生きている一覧**(#1377)── 帯に出す物と、上限の数える物。
  *
- * - 場所(フォルダ)は**消えていても残す**(帯に出して外せるようにしてある)
+ * - 場所(フォルダ)は**このコレクションの物**(`place:` の綴り)なら消えていても残す(帯に出して外せるようにしてある)。
+ *   古い綴り(素の lid)は、いまのコレクションに在るときだけ(依頼 328 A)
  * - ノートは**このコレクションの、いま在るもの**だけ(別のコレクションのノートは数えない)
  * 🔑 **保存は書き換えない**(これは見せる側の読み方) ── 消えたノートも別のコレクションの
  *   ノートも保存に残るので、ゴミ箱から戻したノートは、いつでも帯へ復活する。
@@ -122,7 +150,12 @@ export function liveBookmarks(
   exists: (lid: string) => boolean,
 ): string[] {
   return list.filter((k) => {
-    if (!k.startsWith(NOTE_PREFIX)) return true;
+    if (k.startsWith(PLACE_PREFIX)) {
+      // 場所は消えていても残す(帯に出して外せるように)。別のコレクションの物は出さず、数えない
+      const place = placeRefOf(k);
+      return place !== null && cid !== null && place.cid === cid;
+    }
+    if (!k.startsWith(NOTE_PREFIX)) return exists(k); // 古い綴り(素の lid)── このコレクションに在るときだけ
     const ref = noteRefOf(k);
     return ref !== null && cid !== null && ref.cid === cid && exists(ref.lid);
   });
@@ -142,11 +175,32 @@ export function bookmarkRefusal(
   if (stored.includes(key)) return null;
   if (live.length >= MAX_BOOKMARKS)
     return `ブックマークは ${String(MAX_BOOKMARKS)} 件までです(どれか外してください)`;
+  // 🔴 バーに出ていない分(ほかのコレクションの物・消したノートの物)も数えていることを言う(依頼 97-4 A)
   if (stored.length >= MAX_BOOKMARKS_STORED)
-    return `この端末に残っているブックマークが ${String(MAX_BOOKMARKS_STORED)} 件に達したため、足せません(不要なブックマークを外してください)`;
+    return `この端末に残っているブックマークが ${String(MAX_BOOKMARKS_STORED)} 件に達したため、足せません。バーに出ていない分(ほかのコレクションの物や、消したノートの物)も数えています。不要なブックマークを外してください`;
   return null;
 }
 
+/**
+ * その場所が留めてあるときの、一覧の中の綴り(新しい綴りか、古い綴りのどちらか。無ければ `null`)。
+ * ⚠ 外す口が**入っている綴りのほう**を撃つための問い ── 新しい綴りだけを引くと、古い綴りで入っている物が外せない。
+ */
+export function placeBookmarkIn(
+  list: readonly string[],
+  cid: string | null,
+  lid: string | null,
+): string | null {
+  if (lid === null) return null;
+  if (cid !== null) {
+    const key = placeBookmarkKey(cid, lid);
+    if (list.includes(key)) return key;
+  }
+  return list.includes(lid) ? lid : null;
+}
+
 /** 留めてあるか。⚠ 判定はここ 1 か所(押し口の字と帯の並びが食い違わないように)。 */
-export const isBookmarked = (list: readonly string[], lid: string | null): boolean =>
-  lid !== null && list.includes(lid);
+export const isBookmarked = (
+  list: readonly string[],
+  lid: string | null,
+  cid: string | null,
+): boolean => placeBookmarkIn(list, cid, lid) !== null;

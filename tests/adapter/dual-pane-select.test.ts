@@ -61,7 +61,7 @@ const foot = (region: HTMLElement, side: string): string =>
     ?.textContent ?? '';
 
 describe('① パソコンでも、相手のペインに残っている選びを件数の行で言う', () => {
-  it('🔴 焦点の側の件数の行にだけ「左に 2 件選択中(元は右)」が付き、選びを外すと消える', () => {
+  it('🔴 焦点の側の件数の行にだけ「左に 2 件選択中(移す・コピーするのは右の選択です)」が付き、選びを外すと消える', () => {
     document.body.innerHTML = '';
     const region = document.createElement('div');
     document.body.append(region);
@@ -71,14 +71,14 @@ describe('① パソコンでも、相手のペインに残っている選びを
     s = reduce(s, { type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' }).state;
     s = reduce(s, { type: 'DUAL_FOCUS', side: 'right' }).state;
     r.render(s);
-    expect(foot(region, 'right'), '焦点の側に相手の選びが出ていない').toContain('左に 2 件選択中(元は右)');
-    expect(foot(region, 'left'), '選びが残っている側自身には付けない').not.toContain('選択中(元は');
+    expect(foot(region, 'right'), '焦点の側に相手の選びが出ていない').toContain('左に 2 件選択中(移す・コピーするのは右の選択です)');
+    expect(foot(region, 'left'), '選びが残っている側自身には付けない').not.toContain('選択中(移す・コピーするのは');
     // スマホ専用の行は、パソコンでは使わない(同じ数を 2 か所で言わない)
     expect(region.querySelector('[data-pkc-field="dual-other-marks"]')?.textContent).toBe('');
     // 対照群: 選びを外せば添え書きも消える(古い字が残らない)
     s = reduce(s, { type: 'DUAL_CLEAR_SELECTION', side: 'left' }).state;
     r.render(s);
-    expect(foot(region, 'right'), '選びを外したのに添え書きが残っている').not.toContain('選択中(元は');
+    expect(foot(region, 'right'), '選びを外したのに添え書きが残っている').not.toContain('選択中(移す・コピーするのは');
   });
 });
 
@@ -256,7 +256,7 @@ describe('配線(binder)', () => {
       moveAToBox();
       expect(parentsOf('a'), '前提: 移せていない').toEqual(['f1']);
       const line = d.getState().notice ?? '';
-      expect(line).toBe('2 件を「はこ」へ入れました');
+      expect(line).toBe('2 件を「はこ」へ移しました');
       expect(currentDualMoveOffer()?.moves.map((m) => m.lid).sort()).toEqual(['a', 'b']);
       const b = undoBtn();
       paintStatusUndo(b, { ...none, notice: line }, line);
@@ -325,7 +325,7 @@ describe('配線(binder)', () => {
 
     it('🔴 同じ題名が行き先に既にあれば添える。止めずにコピーはする', async () => {
       await copyZ('z');
-      expect(statuses.at(-1)).toBe(
+      expect(d.getState().notice).toBe(
         '1 件を「はこ」へコピーしました(うち 1 件は、同じ題名のノートが既にあります)',
       );
       expect(
@@ -336,7 +336,7 @@ describe('配線(binder)', () => {
 
     it('対照群: 同じ題名が無ければ添えない', async () => {
       await copyZ('a');
-      expect(statuses.at(-1)).toBe('1 件を「はこ」へコピーしました');
+      expect(d.getState().notice).toBe('1 件を「はこ」へコピーしました');
     });
   });
 });

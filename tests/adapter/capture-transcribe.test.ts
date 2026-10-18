@@ -611,3 +611,78 @@ describe('別のタブ・窓が編集中のノート(#1087)', () => {
     expect(h.notes.at(-1)).toContain('文字起こしを足しました');
   });
 });
+
+/**
+ * 🔴 **長い録音は、区切りながら文字にする**(台帳 #1852 束 O1 / 依頼 149。Gemini 回答 = 推薦どおり ③)。
+ *
+ * 直す前: 録音全体を 1 本の PCM にして、認識のワーカーへ一度に渡していた。数時間の録音では端末によってはタブが落ちる可能性があった。
+ * ⚠ 区切る条件は test が小さい値を渡す(実際は 20 分を超えたら約 10 分ずつ ── 本物の 20 分の PCM を確保しない)。
+ */
+describe('長い録音の区切り(台帳 #1852 O1 / 依頼 149 ③)', () => {
+  const SR = 16_000;
+  /** 3.5 秒の PCM(区切りの目標 1 秒 / 2 秒を超えたら区切る)。 */
+  const long = (): Float32Array => new Float32Array(Math.floor(SR * 3.5)).fill(0.1);
+  const chunking = { afterSec: 2, chunkSec: 1, minTailSec: 0.2, searchSec: 0.1 };
+
+  it('🔴 区切りの数だけ別々に渡し、時刻は録音の頭からの値に直し、1 回の文字起こしとして足す', async () => {
+    const seen: number[] = [];
+    const transcribe = vi.fn(async (job: AsrJob): Promise<AsrJobResult> => {
+      seen.push(job.pcm.length);
+      const n = seen.length;
+      return {
+        text: `区切り${String(n)}`,
+        segments: [{ startMs: 500, endMs: 900, text: `区切り${String(n)}の声` }],
+        loadMs: 1,
+        runMs: 1,
+      };
+    });
+    const h = harness({ decode: vi.fn(async () => long()), transcribe, chunking });
+    await h.tr.run('a');
+    expect(seen.length, '区切らずに 1 本で渡した').toBeGreaterThan(2);
+    expect(seen.reduce((a, b) => a + b, 0), '区切りで音が欠けた / 重なった').toBe(long().length);
+    expect(h.appends, '足すのは 1 回だけ').toHaveLength(1);
+    const text = h.appends[0]!.text;
+    // 各区切りの先頭は、前の区切りまでの長さぶん後ろへずれる(同じ時刻に重ならない)
+    const stamps = text.split('\n').map((l) => l.split(' ')[0]!);
+    expect(new Set(stamps).size, '区切りごとの時刻が同じのまま重なっている').toBe(stamps.length);
+    expect(text).toContain('区切り1の声');
+    expect(text).toContain(`区切り${String(seen.length)}の声`);
+    // 進行中の字が「N / M」で進む
+    expect(h.notes.some((t) => t.includes(`1 / ${String(seen.length)}`)), '区切りの進み具合を言っていない').toBe(true);
+  });
+
+  it('⚠ 対照群 ── 短い録音は今までどおり 1 本で渡す', async () => {
+    const transcribe = vi.fn(async (): Promise<AsrJobResult> => ({ text: 'こんにちは', loadMs: 0, runMs: 0 }));
+    const h = harness({ transcribe, chunking });
+    await h.tr.run('a');
+    expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 途中の 1 本が落ちたら、全体を失敗にして何も足さない(半分だけを「足しました」と言わない)', async () => {
+    let n = 0;
+    const transcribe = vi.fn(async (): Promise<AsrJobResult> => {
+      n += 1;
+      if (n === 2) throw new Error('boom');
+      return { text: `区切り${String(n)}`, loadMs: 0, runMs: 0 };
+    });
+    const h = harness({ decode: vi.fn(async () => long()), transcribe, chunking });
+    await h.tr.run('a');
+    expect(h.appends).toEqual([]);
+    expect(h.dispatcher.getState().error ?? '').toContain('文字にできませんでした');
+  });
+
+  it('時刻を返さない区切りが混じったら、時刻つきにせず字だけを足す(ずれた時刻を混ぜない)', async () => {
+    let n = 0;
+    const transcribe = vi.fn(async (): Promise<AsrJobResult> => {
+      n += 1;
+      return n === 1
+        ? { text: '一', segments: [{ startMs: 0, endMs: 100, text: '一' }], loadMs: 0, runMs: 0 }
+        : { text: `続き${String(n)}`, loadMs: 0, runMs: 0 };
+    });
+    const h = harness({ decode: vi.fn(async () => long()), transcribe, chunking });
+    await h.tr.run('a');
+    expect(h.appends).toHaveLength(1);
+    expect(h.appends[0]!.text).not.toMatch(/^\d+:\d\d /m);
+    expect(h.appends[0]!.text).toContain('続き2');
+  });
+});

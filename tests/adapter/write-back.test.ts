@@ -476,7 +476,8 @@ describe('main.ts の配線(原文 pin)', () => {
     );
     const reopen = src.slice(src.indexOf('const importLaunchFiles:'), src.indexOf('openLocalFile = createLocalFileOpener'));
     expect(reopen.length, 'importLaunchFiles の block が読めない(空振り)').toBeGreaterThan(500);
-    expect(reopen, '押し直しで changed を受けていない').toContain('const { fresh, reopened, changed }');
+    // ⚠ 台帳 #1852 N1 / 依頼 97-2 A: 変わっていた file の組(`changedItems`)も受けて、聞いたうえで取り込み直す
+    expect(reopen, '押し直しで changed を受けていない').toContain('const { fresh, reopened, changed, changedItems }');
     expect(reopen, '外で変わったときの字を出していない').toContain('CHANGED_OUTSIDE_REOPEN_NOTE');
   });
 

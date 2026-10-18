@@ -29,6 +29,7 @@ import { appendAndSettle } from '@adapter/state/append-settle';
 import type { StatusOptions } from '@adapter/ui/render/status-notice';
 import { isAppendable } from '@features/flavor/append-spec';
 import { workLogLine, workLogText, type TimerRun } from '@features/timer/timer-run';
+import { elapsedText } from '@features/elapsed-text';
 import { createWritableQueue } from './writable-queue';
 
 export interface TimerServiceDeps {
@@ -46,6 +47,14 @@ export interface TimerServiceDeps {
    * ⚠ 計測はこのタブのメモリにだけ在り、閉じると黙って消える。
    */
   readonly onActive?: (active: boolean) => void;
+  /**
+   * 🔴 **計っている途中の時刻の控え**(台帳 #1852 O1 / 依頼 240)。省略 = 控えない(これまでどおり)。
+   * 始める / 止める / やめるたびに、このタブの計測を書き、`resume` が読んで続きを計る。
+   */
+  readonly store?: {
+    read(): readonly TimerRun[];
+    write(runs: readonly TimerRun[]): void;
+  };
 }
 
 export interface TimerService {
@@ -57,6 +66,11 @@ export interface TimerService {
   discard(lid: string): void;
   /** 走っている計測(帯が読む)。 */
   runs(): readonly TimerRun[];
+  /**
+   * 🔴 **開き直したとき、控えてあった計測を続ける**(依頼 240)。⚠ ノートの一覧が読めた後に呼ぶ(消えたノートを見分けるため)。
+   * ノートが見つからない・追記できない種類になった控えは、続けず**理由を出す**(計った時間が黙って消えない)。
+   */
+  resume(): void;
 }
 
 /** 書き足しの結末を待つ上限(ms)。ふつうは 1 秒かからない(待つのは保存の往復だけ)。 */
@@ -100,6 +114,9 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
       untick = null;
     }
   };
+
+  /** 控えを、いま走っている計測に合わせる。 */
+  const persist = (): void => deps.store?.write([...running.values()]);
 
   const finish = (lid: string, run: TimerRun, endedAtMs: number): void => {
     const from = new Date(run.startedAtMs);
@@ -176,9 +193,38 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
         return;
       }
       running.set(lid, { lid, title: meta.title, startedAtMs: now() });
+      persist();
       armTick();
       paint();
       deps.notify(`「${meta.title}」を計り始めました`);
+    },
+
+    resume() {
+      const saved = deps.store?.read() ?? [];
+      if (saved.length === 0) return;
+      const metas = deps.dispatcher.getState().entryMetas;
+      const at = now();
+      let kept = 0;
+      for (const run of saved) {
+        const meta = metas.get(run.lid);
+        if (meta === undefined || !isAppendable(meta.archetype)) {
+          // 🔴 計った時間を黙って消さない(user が失うのは時間である)
+          deps.notify(
+            `「${run.title}」が見つからないので、控えてあった計測は続けていません(${elapsedText(at - run.startedAtMs)} 経過していました)`,
+            { kind: 'caution' },
+          );
+          continue;
+        }
+        if (running.has(run.lid)) continue;
+        running.set(run.lid, run);
+        kept += 1;
+        deps.notify(`「${run.title}」の計測を続けています(${elapsedText(at - run.startedAtMs)} 経過)`);
+      }
+      persist();
+      if (kept > 0) {
+        armTick();
+        paint();
+      }
     },
 
     stop(lid) {
@@ -190,6 +236,7 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
        */
       const endedAtMs = now();
       running.delete(lid);
+      persist();
       armTick();
       paint();
       finish(lid, run, endedAtMs);
@@ -199,6 +246,7 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
       const run = running.get(lid);
       if (run === undefined) return;
       running.delete(lid);
+      persist();
       armTick();
       paint();
       deps.notify(`「${run.title}」の計測を書かずにやめました(本文には入れていません)`);

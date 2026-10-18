@@ -272,9 +272,8 @@
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
 | `delete-selected` | 低 | まとめてゴミ箱へ移す | `src/adapter/ui/render/filer.ts:482` | 選択が前提。確認を伴う |
-| `undo-dual-move` | 低 | 元に戻す | `src/adapter/ui/render/shell.ts:1019` | 2 ペインで移した直後の知らせに付く一時ボタン(`undo-trash` と同じ器) |
-| `undo-bulk-tag` | 低 | 元に戻す | `src/adapter/ui/render/shell.ts:1019` | まとめてタグを付けた直後の知らせに付く一時ボタン(今回付けたノートだけから外す。`undo-dual-move` と同じ器) |
-| `undo-rename` | 低 | 元に戻す | `src/adapter/ui/render/shell.ts:1019` | 題名を変えた直後の知らせに付く一時ボタン(`undo-dual-move` と同じ器) |
+| `undo-bulk-tag` | 低 | 元に戻す | `src/adapter/ui/render/shell.ts:1019` | まとめてタグを付けた直後の知らせに付く一時ボタン(今回付けたノートだけから外す。`undo-rename` と同じ器) |
+| `undo-rename` | 低 | 元に戻す | `src/adapter/ui/render/shell.ts:1019` | 題名を変えた直後の知らせに付く一時ボタン(`undo-bulk-tag` と同じ器) |
 | `purge-trash` | 低 | ゴミ箱を空にする | `src/adapter/ui/render/filer.ts:1210` | 取り消せない。確認を伴う |
 
 ## 検索・置換
@@ -468,3 +467,9 @@
 
 左のペインの「上へ動かす」「下へ動かす」(`move-order-up` / `move-order-down`)を `KEY_COMMANDS` へ登記した(鍵の既定は置かない ── `Alt+↑/↓` は本文の行の入れ替えで使っている)。
 受け手は押しボタンそのもの(`SHORTCUT_BUTTON`)。上の全数表の「低」から外した(`tests/operation-table.test.ts` が「表の行 = 未登記の在庫」で突き合わせる)。
+
+
+## 2026-10-18(台帳 #1852 束 N1 / 依頼 324 A)── 2 ペインで移した直後の「元に戻す」を登記した
+
+2 ペインで移した(コピーした)直後の「元に戻す」(`undo-dual-move`)を `KEY_COMMANDS` へ登記した(鍵の既定は置かない ── 2 ペインの `Ctrl+Z` は `undo-trash` が持っている)。
+受け手は押しボタンそのもの(`runGlobalCommand` の特例で `ACTIONS['undo-dual-move']` を呼ぶ。`undo-trash` と同じ作り)。上の全数表の「低」から外した(`tests/operation-table.test.ts` が「表の行 = 未登記の在庫」で突き合わせる)。

@@ -290,6 +290,14 @@ describe('絞りが全部の面に届いている', () => {
     expect(src.slice(at), '絞りが届かない面ができる').toContain('...listViewOptions(state),');
   });
 
+  it('🔴 2 ペインは種類の札を空にして渡している(決めて書いた ── 渡し忘れの綴りではない。依頼 323 A)', () => {
+    const src = readFileSync('src/adapter/state/list-view-options.ts', 'utf8');
+    const at = src.indexOf('export function dualListViewOptions');
+    expect(at, '`dualListViewOptions` が無い(この検査は空振り)').toBeGreaterThan(0);
+    expect(src.slice(at, at + 400), '2 ペインに札が届く').toContain('kinds: NO_KINDS');
+    expect(src, '札の空集合が空ではない').toContain('const NO_KINDS: ReadonlySet<string> = new Set<string>();');
+  });
+
   it('`filerRows` を呼ぶ面は、数えた数だけ `kindFilter` を渡している', () => {
     for (const f of FACES) {
       const src = readFileSync(f, 'utf8');
@@ -311,6 +319,11 @@ describe('絞りが全部の面に届いている', () => {
       const passed =
         (src.match(/kinds: (st|state)\.kindFilter,/g) ?? []).length +
         (src.match(/\.\.\.listViewOptions\((st|state)\),/g) ?? []).length +
+        /**
+         * ⚠ 台帳 #1852 N1 / 依頼 323 A: 2 ペインは**種類の札を見ない**(フォルダがいつも出る)── `...dualListViewOptions(state),`
+         *   は「札を渡さない」と**決めた**綴りで、渡し忘れではない。数えるのは「決めて書いた」こと(下の `it` が、札を空にしていることを見る)。
+         */
+        (src.match(/\.\.\.dualListViewOptions\((st|state)\),/g) ?? []).length +
         (src.match(/\bfilerRowOptions\((st|state)\)/g) ?? []).length;
       expect(calls, `${f}: 前提が崩れている(呼び出しが 1 つも無い)`).toBeGreaterThan(0);
       expect(passed, `${f}: ${calls} 回呼んでいるのに ${passed} 回しか渡していない`).toBe(

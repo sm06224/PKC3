@@ -17,6 +17,7 @@
  */
 import { errorText } from '@features/error-text';
 import { getFlavor } from '../flavor';
+import { pkc2SheetHasHiddenLayout } from '@features/flavor/spreadsheet-flavor';
 import { RELATION_KINDS } from '@features/relation/kinds';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { MAX_TAGS, MAX_TAG_CHARS, normalizeTag, readTags, sameTag } from '@features/flavor/tags';
@@ -427,6 +428,18 @@ export function convertPkc2Container(
   }
   if (colored > 0) {
     warnings.push(`${colored} 件のノートに付いていたカラータグは取り込めませんでした(PKC3 にはまだ対応する項目がありません)`);
+  }
+  /**
+   * 🔴 **表の列の幅・行の高さ・グラフ・列の書式は、値は保存されるが画面には出ない**(台帳 #1852 N1 / 依頼 97-3 B)。
+   * ⚠ 言わないと、PKC2 でグラフを作っていた人は「消えた」と探す。数えるのは**そういう設定を持っていた表**の数。
+   */
+  const sheetsWithLayout = users.filter(
+    (u) => u.archetype === 'spreadsheet' && pkc2SheetHasHiddenLayout(u.body),
+  ).length;
+  if (sheetsWithLayout > 0) {
+    warnings.push(
+      `${sheetsWithLayout} 件の表に付いていた列の幅・行の高さ・グラフ・列の書式は、PKC3 では表示されません(値は保存されています)`,
+    );
   }
 
   // ── ⑥ entry_order: meta.entry_order(旧 lid 列)優先、無ければ配列順

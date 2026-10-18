@@ -282,6 +282,10 @@ describe('取り込んだ後に外で変わったか', () => {
     expect(moved.reopened, '変わっていても前のノートを指す(取り込み直さない)').toEqual(['n1']);
     expect(moved.fresh).toEqual([]);
     expect(moved.changed, '外で変わったのに言わない').toEqual(['n1']);
+    // 🔴 「取り込み直す」が、押した file の今の中身を読めるように、lid と押した file の組を返す(台帳 #1852 N1 / 依頼 97-2 A)
+    expect(moved.changedItems.map((c) => c.lid)).toEqual(['n1']);
+    expect(moved.changedItems[0]!.item.file.name, '押した file に辿れない').toBe('a.md');
+    expect(same.changedItems, '変わっていないのに組を返した').toEqual([]);
     expect(state.gets, '押し直しの判定で getFile を呼んだ').toBe(0);
   });
 

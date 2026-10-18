@@ -16,6 +16,10 @@ import {
   liveBookmarks,
   noteBookmarkKey,
   noteRefOf,
+  placeBookmarkKey,
+  placeBookmarkIn,
+  placeRefOf,
+  bookmarkTargetLid,
   bookmarkRefusal,
   MAX_BOOKMARKS_STORED,
   toggleBookmark,
@@ -25,12 +29,12 @@ describe('留めた場所(#273 残件)', () => {
   it('🔴 同じ口が留めと外しの二役をする', () => {
     const once = toggleBookmark([], 'f1');
     expect(once).toEqual(['f1']);
-    expect(isBookmarked(once, 'f1')).toBe(true);
+    expect(isBookmarked(once, 'f1', 'c1')).toBe(true);
     expect(toggleBookmark(once, 'f1'), '2 度押しても外れない').toEqual([]);
   });
 
   it('⚠ ルート(null)は留まっていないと答える', () => {
-    expect(isBookmarked(['f1'], null)).toBe(false);
+    expect(isBookmarked(['f1'], null, 'c1')).toBe(false);
   });
 
   /**
@@ -84,24 +88,73 @@ describe('ノートのブックマーク(#1377)', () => {
     const k = noteBookmarkKey('c1', 'n1');
     const once = toggleBookmark(['f1'], k);
     expect(once).toEqual(['f1', k]);
-    expect(isBookmarked(once, k)).toBe(true);
+    expect(isBookmarked(once, k, 'c1')).toBe(true);
     expect(toggleBookmark(once, k), '2 度押しても外れない').toEqual(['f1']);
     expect(decodeBookmarks(JSON.stringify([k, k]))).toEqual([k]);
   });
 
-  it('🔴 生きている分: 場所は残し、ノートはこのコレクションのいま在るものだけ', () => {
+  it('🔴 生きている分: 場所(新しい綴り)は消えていても残し、ノートはこのコレクションのいま在るものだけ', () => {
     const list = [
-      'gone-folder',
+      placeBookmarkKey('c1', 'gone-folder'), // このコレクションの場所 ── 消えていても帯に残す(外せるように)
       noteBookmarkKey('c1', 'alive'),
       noteBookmarkKey('c1', 'gone'),
       noteBookmarkKey('c2', 'alive'), // 別のコレクションの、同じ lid
       'note:alive', // 開発中の綴り
     ];
     const live = liveBookmarks(list, 'c1', (lid) => lid === 'alive');
-    expect(live, '開発中の綴りが帯 / 上限に出ている').toEqual(['gone-folder', noteBookmarkKey('c1', 'alive')]);
+    expect(live, '開発中の綴りが帯 / 上限に出ている').toEqual([
+      placeBookmarkKey('c1', 'gone-folder'),
+      noteBookmarkKey('c1', 'alive'),
+    ]);
     expect(list, '引数を書き換えた').toHaveLength(5);
-    // コレクションが決まっていない間は、ノートを 1 件も出さない
-    expect(liveBookmarks(list, null, () => true)).toEqual(['gone-folder']);
+    // コレクションが決まっていない間は、ノートも場所も 1 件も出さない
+    expect(liveBookmarks(list, null, () => true)).toEqual([]);
+  });
+
+  /**
+   * 🔴 **場所のブックマークはコレクションごと**(台帳 #1852 N1 / 依頼 328 A)。
+   * 直す前は場所の綴りが素の lid で、コレクション A の 20 件が、B を開くと「(消えた場所 …)」の押せないボタンとして並び、B で足せなくなった。
+   */
+  it('🔴 別のコレクションの場所は、帯にも上限の数にも出ない(20 件ためた A を離れて B を開く)', () => {
+    const inA = Array.from({ length: MAX_BOOKMARKS }, (_, i) => placeBookmarkKey('A', `f${String(i)}`));
+    expect(liveBookmarks(inA, 'A', () => true), 'A では 20 件とも出る').toHaveLength(MAX_BOOKMARKS);
+    const inB = liveBookmarks(inA, 'B', () => false);
+    expect(inB, 'B の帯に A の場所が並んでいる').toEqual([]);
+    expect(bookmarkRefusal(inA, inB, placeBookmarkKey('B', 'g1')), 'B で足せない(A の分を数えている)').toBeNull();
+    expect(bookmarkRefusal(inA, liveBookmarks(inA, 'A', () => true), placeBookmarkKey('A', 'g1')), 'A では満杯').toContain('20 件まで');
+  });
+
+  it('🔴 古い綴り(素の lid)はそのまま読める ── いまのコレクションに在るときだけ、そのコレクションの物として出る', () => {
+    const legacy = ['f-here', 'f-elsewhere'];
+    expect(liveBookmarks(legacy, 'c1', (lid) => lid === 'f-here'), '在る分が読めない').toEqual(['f-here']);
+    // 別のコレクションを開いたら出ない(lid はコレクションをまたいで重ならない)
+    expect(liveBookmarks(legacy, 'c2', () => false)).toEqual([]);
+  });
+
+  it('🔴 留めてあるかと外す相手は、入っている綴りのほう(新しい綴りでも古い綴りでも)', () => {
+    const k = placeBookmarkKey('c1', 'f1');
+    expect(placeBookmarkIn([k], 'c1', 'f1')).toBe(k);
+    expect(placeBookmarkIn(['f1'], 'c1', 'f1'), '古い綴りで入っている物が見つからない').toBe('f1');
+    expect(placeBookmarkIn([placeBookmarkKey('c2', 'f1')], 'c1', 'f1'), '別のコレクションの物を自分の物と読んだ').toBeNull();
+    expect(placeBookmarkIn([k], null, 'f1'), 'コレクションが決まらないのに新しい綴りを引いた').toBeNull();
+    expect(placeBookmarkIn([k], 'c1', null)).toBeNull();
+  });
+
+  it('場所の綴りの読み方 / 指す先の lid は 3 つの綴りで 1 本', () => {
+    expect(placeRefOf(placeBookmarkKey('c1', 'f1'))).toEqual({ cid: 'c1', lid: 'f1' });
+    expect(placeRefOf('f1'), '古い綴りが新しい綴りに化けた').toBeNull();
+    expect(placeRefOf('place:/f1'), '空のコレクション id が通った').toBeNull();
+    expect(placeRefOf(noteBookmarkKey('c1', 'n1')), 'ノートの綴りが場所に化けた').toBeNull();
+    expect(bookmarkTargetLid(placeBookmarkKey('c1', 'f1'))).toBe('f1');
+    expect(bookmarkTargetLid(noteBookmarkKey('c1', 'n1'))).toBe('n1');
+    expect(bookmarkTargetLid('f1')).toBe('f1');
+  });
+
+  it('🔴 保存がいっぱいの断りは、バーに出ていない分も数えていると言う(依頼 97-4 A)', () => {
+    const stored = Array.from({ length: MAX_BOOKMARKS_STORED }, (_, i) => noteBookmarkKey('c2', `o${String(i)}`));
+    const why = bookmarkRefusal(stored, [], noteBookmarkKey('c1', 'new'));
+    expect(why).toContain('バーに出ていない分');
+    expect(why, '外す手がかり(ほかのコレクション・消したノート)を言っていない').toContain('ほかのコレクション');
   });
 
   it('🔴 保存は総数 100 まで読める(帯の 20 件で切らない)', () => {

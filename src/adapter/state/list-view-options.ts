@@ -32,6 +32,19 @@ export function listViewOptions(state: AppState): ListViewOptions {
   };
 }
 
+const NO_KINDS: ReadonlySet<string> = new Set<string>();
+
+/**
+ * 🔴 **2 ペインの並び方 ── 種類の札は見ない**(台帳 #1852 N1 / 依頼 323 A。Gemini 回答 = 推薦どおり)。
+ * ⚠ 直す前は左の列の「ノート」などの札を押したまま 2 ペインを開くと、**両方のペインからフォルダが消え**、入れることも移すこともできなかった
+ *   (空のときの字は「ここには何もありません」だけで、札のせいだと分からない)。2 ペインは整理するための画面なので、フォルダはいつも出す。
+ * 🔑 描く側・範囲選択(reducer)・鍵と一括操作の対象(binder)の 3 か所が**この 1 本**を通る ── 1 か所でも `listViewOptions` を直に使うと、
+ *   目で見た範囲と動く範囲が食い違う(§7)。並び順と「最近開いた順」の材料は左の列と同じ。
+ */
+export function dualListViewOptions(state: AppState): ListViewOptions {
+  return { ...listViewOptions(state), kinds: NO_KINDS };
+}
+
 /**
  * 🔴 **いま、フォルダの表を「下の階層まで平らに」出しているか**(#813 段③-a)。
  *

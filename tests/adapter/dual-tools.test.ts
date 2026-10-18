@@ -17,6 +17,7 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { DualFilerRenderer } from '../../src/adapter/ui/render/dual-filer';
 import { DualPrefsStore } from '../../src/adapter/ui/render/dual-prefs';
 import { paneOf, paneScope, PREVIEW_CHARS } from '../../src/features/relation/dual-pane';
+import { placeBookmarkKey } from '../../src/features/relation/dual-bookmarks';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { stubStamps } from '../helpers/store-stamps';
@@ -202,20 +203,22 @@ describe('留めた場所(#273 残件)', () => {
    */
   it('🔴 消えた場所も帯に出て、そこから外せる', () => {
     const { region, r, prefs } = mount();
-    prefs.toggleBookmark('もう無い');
+    // 🔴 場所の綴りはコレクションごと(依頼 328 A)── このコレクションの、消えた場所
+    prefs.toggleBookmark(placeBookmarkKey('c1', 'もう無い'));
     r.render(booted());
     const go = region.querySelector<HTMLButtonElement>(
       '[data-pkc-side="left"] [data-pkc-action="dual-bookmark-open"][data-pkc-entry="もう無い"]',
     )!;
     expect(go.disabled, '消えた場所へ入れてしまう').toBe(true);
     const off = region.querySelector<HTMLElement>(
-      '[data-pkc-action="dual-bookmark-remove"][data-pkc-entry="もう無い"]',
+      `[data-pkc-action="dual-bookmark-remove"][data-pkc-entry="${placeBookmarkKey('c1', 'もう無い')}"]`,
     );
     expect(off, '外す口が無い(永久に残る)').not.toBeNull();
     const toggleDualBookmark = vi.fn();
     bindActions(region, new Dispatcher(), { toggleDualBookmark });
     off!.click();
-    expect(toggleDualBookmark).toHaveBeenCalledWith('もう無い');
+    // 外す口は綴りそのものを渡す(新しい綴りの物は新しい綴りで外れる)
+    expect(toggleDualBookmark).toHaveBeenCalledWith(placeBookmarkKey('c1', 'もう無い'));
   });
 
   it('🔴 「留める」を押すと、いま開いている場所が渡る(配線)', () => {
@@ -231,7 +234,8 @@ describe('留めた場所(#273 残件)', () => {
     region
       .querySelector<HTMLElement>('[data-pkc-side="left"] [data-pkc-action="dual-bookmark"]')!
       .click();
-    expect(toggleDualBookmark, 'いまの場所が渡っていない').toHaveBeenCalledWith('f2');
+    // 🔴 足す綴りはコレクションごと(依頼 328 A)
+    expect(toggleDualBookmark, 'いまの場所が渡っていない').toHaveBeenCalledWith(placeBookmarkKey('c1', 'f2'));
   });
 
   it('⚠ ルートでは留められない(1 押しで行ける所を帯に並べない)', () => {
@@ -356,7 +360,7 @@ describe('情報行の合計(#273 残件)', () => {
       '[data-pkc-side="left"][data-pkc-region="dual-pane"] [data-pkc-field="dual-count"]',
     )!;
     // a=100 / b=20 ── フォルダは数えない
-    expect(foot.textContent, '合計が出ていない').toBe('4 件中 1 件を選択 · 100 / 120(ここが元)');
+    expect(foot.textContent, '合計が出ていない').toBe('4 件中 1 件を選択 · 100 / 120(ここから移す・コピーします)');
   });
 
   it('⚠ フォルダしか無い場所では合計を出さない(0 と出すと空だと読まれる)', () => {
@@ -366,7 +370,7 @@ describe('情報行の合計(#273 残件)', () => {
     const foot = region.querySelector<HTMLElement>(
       '[data-pkc-side="left"][data-pkc-region="dual-pane"] [data-pkc-field="dual-count"]',
     )!;
-    expect(foot.textContent).toBe('2 件(ここが元)');
+    expect(foot.textContent).toBe('2 件(ここから移す・コピーします)');
   });
 });
 

@@ -128,7 +128,7 @@ import {
 } from '@adapter/state/shown-line';
 import { groupsNeedingNote, planGroupMove } from '@features/launcher/group-order';
 import { isMovableTile } from '@features/launcher/tile-order';
-import { filerFlattenNow, filerRowOptions, listViewOptions } from '@adapter/state/list-view-options';
+import { filerFlattenNow, filerRowOptions, dualListViewOptions } from '@adapter/state/list-view-options';
 import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { LocalFolder } from '@adapter/platform/local-folder';
 import type { LinkedFileTooLarge } from '@adapter/platform/launched-files';
@@ -145,7 +145,7 @@ import { archetypeLabel } from '@features/flavor/archetype-label';
 import { kindChangeQuestion, kindChangeTarget } from '@features/flavor/kind-change';
 import { HIDDEN_HEAD_ATTR, foldAttachmentHead, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
 import { countMatches } from '@features/markdown/body-replace';
-import { SMART_ARCHETYPE, SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
+import { SMART_ARCHETYPE, SMART_FIELDS, needsRescan, type SmartField } from '@features/smart/smart-spec';
 import {
   buildSettingsFile as buildSettingsFileData,
   settingsAppliedNote,
@@ -318,7 +318,13 @@ import {
   listSiblings,
   resolveCanonicalParents,
 } from '@features/relation/tree';
-import { bookmarkRefusal, liveBookmarks, noteBookmarkKey } from '@features/relation/dual-bookmarks';
+import {
+  bookmarkRefusal,
+  liveBookmarks,
+  noteBookmarkKey,
+  placeBookmarkIn,
+  placeBookmarkKey,
+} from '@features/relation/dual-bookmarks';
 import { appDualPrefs } from '@adapter/ui/render/dual-prefs';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { planCopy } from '@features/relation/copy-plan';
@@ -335,7 +341,13 @@ import { appPanes, applyPaneVisibility, refoldPeeked } from '@adapter/ui/render/
 import { requestAppendFocus, requestBodyFocus, takeAppendFocus } from '@adapter/ui/render/focus-request';
 import { isTouchOnly } from '@adapter/ui/render/touch-device';
 import { currentTrashOffer, LINKED_FROM_MAYBE, LINKED_FROM_SOME, offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
-import { offerDualMoveUndo, takeDualMoveUndo } from '@adapter/ui/render/dual-move-undo';
+import { remapEntryLids } from '@features/import/body-remap';
+import {
+  currentDualMoveOffer,
+  offerDualCopyUndo,
+  offerDualMoveUndo,
+  takeDualUndo,
+} from '@adapter/ui/render/dual-move-undo';
 import { resolveRelationTarget } from '@features/relation/target-label';
 import { renameOfferingUndo, takeRenameUndo } from '@adapter/ui/render/rename-undo';
 import { appPhone } from '@adapter/ui/render/phone-layout';
@@ -1193,7 +1205,7 @@ const dualPaneRows = (st: AppState, side: DualSide): EntryMeta[] => {
   return filerRows(paneScope(pane), st.entryMetas, st.relations, {
     smartLids: smartLidsOf(paneScope(pane), st.smartHits),
     ...paneFilterOptions(pane, st.filterQuery, st.searchHits),
-    ...listViewOptions(st),
+    ...dualListViewOptions(st),
     // ⚠ 2 ペインは「中まで全部出す」(左の列の入り切り)を**持たない**(#813 段②)
     flatten: false,
   });
@@ -1321,15 +1333,23 @@ const dualCreate = (
    *   (何も言われない)。解くのは `dual-bookmark-open` と同じ 1 本(`DUAL_SET_FILTER ''`)。
    */
   dispatcher.dispatch({ type: 'DUAL_SET_FILTER', side, filter: '' });
+  const lid = generateLid();
   dispatcher.dispatch({
     type: 'CREATE_ENTRY',
     archetype,
-    lid: generateLid(),
+    lid,
     title: `新しい${what}`,
     parentLid: paneScope(paneOf(st.dual, side)),
     relationId: generateLid(),
     edit: false,
   });
+  /**
+   * 🔴 **作った行にカーソルと印を付ける**(台帳 #1852 N1 / 依頼 326 A。Gemini 回答 = 推薦どおり)。
+   * ⚠ 直す前は作った物が一覧に出るだけで、印もカーソルも付かず、すぐ名前を変えたり移したりするには探して押し直す必要があった。
+   * ⚠ 名前の打ち替えまでは入らない(続けて何件も作るときに邪魔になる)。作れなかった回(編集中など)は選ばない。
+   */
+  if (dispatcher.getState().entryMetas.has(lid))
+    dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'set' });
 };
 
 /** タブの添字。⚠ 数として読めないものは**捨てる**(0 に落とすと別のタブが閉じる)。 */
@@ -1355,6 +1375,37 @@ const leftAtRoot = (before: AppState, after: AppState): number => {
     if (!now.has(child)) n += 1;
   }
   return n;
+};
+
+/**
+ * 🔴 **スマートフォルダへ落としてタグを付けたあと、集まらなかったノートがあれば言う**(台帳 #1852 N1 / 依頼 325 A。Gemini 回答 = 推薦どおり)。
+ *
+ * ⚠ 直す前は、条件が「タグ」だけでなく「種類」「語」「日付」「チェック項目」も持つスマートフォルダへ落とすと、タグは付くのに
+ *   ほかの条件を満たさなければ集まらず、知らせは「付けました」だけだった。タグを付けることには意味があるので断らず、出ない理由だけを伝える。
+ * 🔑 集め直しの結果(`SMART_SCANNED`)が届いてから数える ── 条件がタグだけなら必ず集まるので何も言わない(`needsRescan` が偽)。
+ *   前に集めた結果が無い(一度も開いていない)ときは条件が分からないので言わない。上限で切れた一覧は「無い」と言い切れないので言わない。
+ * ⚠ 結果が届かないときは何も言わず、購読を捨てる(`SMART_DROP_WATCH_MS`)。
+ */
+const SMART_DROP_WATCH_MS = 15_000;
+export const watchSmartDrop = (dispatcher: Dispatcher, smartLid: string, lids: readonly string[]): void => {
+  const prev = dispatcher.getState().smartHits.get(smartLid);
+  if (prev === undefined || prev.failed || !needsRescan(prev.spec)) return;
+  let off: (() => void) | null = null;
+  const timer = setTimeout(() => off?.(), SMART_DROP_WATCH_MS);
+  off = dispatcher.onState((st) => {
+    const hit = st.smartHits.get(smartLid);
+    if (hit === undefined || hit === prev) return;
+    off?.();
+    clearTimeout(timer);
+    if (hit.failed || hit.total > hit.lids.length) return;
+    const inside = new Set(hit.lids);
+    const out = lids.filter((l) => st.entryMetas.has(l) && !inside.has(l)).length;
+    if (out > 0)
+      dispatcher.dispatch({
+        type: 'OP_NOTICE',
+        message: `${String(out)} 件はほかの条件に合わないので、ここには出ません(タグは付けました)`,
+      });
+  });
 };
 
 /**
@@ -1449,7 +1500,15 @@ const moveEntries = (
     }
     const before = st.relations;
     dispatcher.dispatch({ type: 'SET_ENTRY_PARENT', lid, parentLid, relationId: generateLid() });
-    if (dispatcher.getState().relations !== before) moved += 1;
+    if (dispatcher.getState().relations !== before) {
+      moved += 1;
+      /**
+       * 🔴 **移したノートは、移し先の末尾に並べる**(台帳 #1852 N1 / 依頼 154 ②。Gemini 回答 = 推薦どおり)。
+       * ⚠ 直す前は移したノートが、作った順番に応じた**途中の位置**に入り、たくさんのノートに紛れてどこに入ったか分からないことがあった。
+       *   パソコンのファイル画面で移したときと同じ感覚にする。移し先の末尾 = 全体の末尾(並びの値は全体で 1 本)。
+       */
+      dispatcher.dispatch({ type: 'SET_ENTRY_ORDER', lid, entryOrder: 'end' });
+    }
   }
   const refused = lids.length - moved - same;
   if (moved === 0 && same === 0) {
@@ -1493,6 +1552,7 @@ const moveEntries = (
    * 🔴 **フォルダを移したときは、中の件数も言う**(依頼 85-8。Gemini 裁定 = 推薦 C)。
    * ⚠ 直す前は、中に 40 件あるフォルダでも「1 件を『○○』へ入れました」だった(コピーは「中身を含め N 件」と言っている)。
    * 🔑 数えるのは**動かした物自身の配下**(移しても配下の数は変わらない ── 行き先の中身は足さない)。
+   * 🔴 押したボタンの言葉(「移す」)で結果を返す(台帳 #1852 N1 / 依頼 51-4 A。直す前は「入れました」)。
    */
   const st0 = dispatcher.getState();
   const parentsNow = resolveCanonicalParents(st0.entryMetas, st0.relations);
@@ -1505,13 +1565,13 @@ const moveEntries = (
   const total = moved + same;
   if (inside > 0 && lids.length === 1) {
     const only = st0.entryMetas.get(lids[0]!)?.title ?? 'フォルダ';
-    report?.(`「${only}」(中の ${inside} 件ごと)を「${where}」へ入れました`);
+    report?.(`「${only}」(中の ${inside} 件ごと)を「${where}」へ移しました`);
     return;
   }
   report?.(
     inside > 0
-      ? `${total} 件(中身を含め ${total + inside} 件)を「${where}」へ入れました`
-      : `${total} 件を「${where}」へ入れました`,
+      ? `${total} 件(中身を含め ${total + inside} 件)を「${where}」へ移しました`
+      : `${total} 件を「${where}」へ移しました`,
   );
 };
 
@@ -1533,6 +1593,12 @@ const moveEntriesOfferingUndo = (
   const st = dispatcher.getState();
   const before = st.relations;
   const parentsBefore = resolveCanonicalParents(st.entryMetas, st.relations);
+  // 🔴 移す前の並びの値(依頼 154 ②)── 「元に戻す」が移す前の位置へ戻す(移したノートは移し先の末尾へ行くので)
+  const orderBefore = new Map<string, number>();
+  for (const lid of lids) {
+    const o = st.entryMetas.get(lid)?.entryOrder;
+    if (o !== undefined) orderBefore.set(lid, o);
+  }
   // 🔴 入っていたフォルダ全部(依頼 227 A)── 正準親 1 つだけを控えると、戻したとき片方のフォルダにしか戻らない
   const allBefore = new Map<string, string[]>();
   for (const r of st.relations) {
@@ -1560,6 +1626,7 @@ const moveEntriesOfferingUndo = (
       lid,
       from: parentsBefore.get(lid) ?? null,
       to: parentsAfter.get(lid) ?? null,
+      ...(orderBefore.has(lid) ? { entryOrder: orderBefore.get(lid)! } : {}),
       ...((allBefore.get(lid)?.length ?? 0) > 1 ? { fromAll: allBefore.get(lid)! } : {}),
     }));
   if (moves.length > 0 && said !== '') offerDualMoveUndo(dispatcher, moves, said);
@@ -1954,7 +2021,7 @@ export interface BinderServices {
    * ⚠ **省略可** ── 無ければ本文はそのまま(貼付自体は成立する)。
    */
   /**
-   * 🔴 **一時の知らせ**(「3 件を『はこ』へ入れました」)。⚠ エラー(`OP_FAILED`)とは
+   * 🔴 **一時の知らせ**(「3 件を『はこ』へ移しました」)。⚠ エラー(`OP_FAILED`)とは
    * **別の行**である ── `main.ts` が優先順位(エラー > 知らせ > 常設)を持っているので、
    * 成功の一報を `OP_FAILED` に載せない(載せると赤い意味の欄に出る)。
    */
@@ -6404,6 +6471,23 @@ export function runGlobalCommand(
     ACTIONS['undo-trash']!(dispatcher, root, ROOT_SERVICES.get(root) ?? ({} as BinderServices), root);
     return true;
   }
+  /**
+   * 🔴 **2 ペインで移した(コピーした)直後の「元に戻す」**(台帳 #1852 N1 / 依頼 324 A)── `undo-trash` と同じ作り。
+   *   押しボタンは知らせの隣に出ている間しか無いので、特例でボタンの受け手(`ACTIONS['undo-dual-move']`)をそのまま呼ぶ(戻す実体を 2 つ作らない)。
+   * ⚠ 戻せる物が無いときは、`dry` では偽(一覧は「いまは押せません ── <理由>」と言う)、鍵では**黙らず**断る。
+   */
+  if (cmd === 'undo-dual-move') {
+    if (currentDualMoveOffer() === null) {
+      if (dry) return false;
+      prevent();
+      notify('戻せるものがありません(2 ペインで移した直後だけ戻せます)', CAUTION);
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    ACTIONS['undo-dual-move']!(dispatcher, root, ROOT_SERVICES.get(root) ?? ({} as BinderServices), root);
+    return true;
+  }
   const sel = SHORTCUT_BUTTON[cmd];
   if (sel === undefined) return false;
   const btn = root.querySelector<HTMLElement>(sel);
@@ -9183,16 +9267,21 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔴 足すのを断る理由は 1 本(ノートの口と同じ ── `bookmarkRefusal`)。外すときは通る
     const st = dispatcher.getState();
     const stored = appDualPrefs.getBookmarks();
+    /**
+     * 🔴 **場所の綴りはコレクションごと**(依頼 328 A)。⚠ 古い綴り(素の lid)で入っている物を外すときは、**入っている綴り**を撃つ
+     *   (新しい綴りを撃つと、外したつもりが別の物を足す)。入っていなければ新しい綴りで足す(コレクションの id が無いときだけ素の lid)。
+     */
+    const key = placeBookmarkIn(stored, st.cid, scope) ?? (st.cid === null ? scope : placeBookmarkKey(st.cid, scope));
     const why = bookmarkRefusal(
       stored,
       liveBookmarks(stored, st.cid, (l) => st.entryMetas.has(l)),
-      scope,
+      key,
     );
     if (why !== null) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: why });
       return;
     }
-    services.toggleDualBookmark?.(scope);
+    services.toggleDualBookmark?.(key);
   },
   /**
    * 留めた場所へ移る。⚠ **消えた場所は reducer が弾く**(空の表を出さない)。
@@ -9215,12 +9304,12 @@ const ACTIONS: Record<string, ActionHandler> = {
        */
       dispatcher.dispatch({ type: 'DUAL_SET_FILTER', side, filter: '' });
       /**
-       * 🔴 **アプリ共通の探す語と種類の札も解く**(#1087)。ペインの絞りは `paneFilterOptions` が
-       *   「ペインが空なら共通の語に従う」ので、共通の語・札が残っていると行が表に出ない。
-       *   左の列の「作る」(`CREATE_ENTRY`)と同じ作法で、同じ 2 本(`SET_ENTRY_FILTER` / `CLEAR_KIND_FILTER`)を使う。
+       * 🔴 **アプリ共通の探す語も解く**(#1087)。ペインの絞りは `paneFilterOptions` が
+       *   「ペインが空なら共通の語に従う」ので、共通の語が残っていると行が表に出ない。
+       *   左の列の「作る」(`CREATE_ENTRY`)と同じ作法で `SET_ENTRY_FILTER` を使う。
+       * ⚠ 種類の札は解かない ── 2 ペインは札を見ない(台帳 #1852 N1 / 依頼 323 A。`dualListViewOptions`)ので、左の列の札を勝手に外す理由が無い。
        */
       dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
-      dispatcher.dispatch({ type: 'CLEAR_KIND_FILTER' });
       dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid: parent });
       dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'set' });
       return;
@@ -9357,9 +9446,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       .then(
       (bodies) => {
         let missing = 0;
+        /**
+         * 🔴 **一緒にコピーしたノートへのリンクは、コピー先へ付け替える**(台帳 #1852 N1 / 依頼 115-5 A。Gemini 回答 = 推薦どおり)。
+         * ⚠ 直す前は、フォルダごとコピーしても中のノート同士のリンクが**元のノートを指したまま**で、リンクを押すと元が開き、
+         *   元を消すとコピー側のリンクが切れた。コピーしなかったノートへのリンクは元のまま(付け替えは写した組の中だけ)。
+         * 🔑 書き換えは取り込みと同じ 1 本(`remapEntryLids`)── `entry:<lid>` の lid の部分だけを写す。
+         */
+        const copied = new Map(steps.map((x) => [x.sourceLid, x.lid] as const));
         for (const step of steps) {
-          const body = bodies.get(step.sourceLid);
-          if (body === undefined) missing += 1;
+          const raw = bodies.get(step.sourceLid);
+          if (raw === undefined) missing += 1;
+          const body = raw === undefined ? undefined : remapEntryLids(raw, copied);
           dispatcher.dispatch({
             type: 'CREATE_ENTRY',
             archetype: step.archetype,
@@ -9393,7 +9490,7 @@ const ACTIONS: Record<string, ActionHandler> = {
          *
          * ⚠ 直す前は「N 件を写しました」だけで、**どこへ行ったか 1 文字も
          *   出ていなかった** ── 隣の「移す」は
-         *   「N 件を『◯◯』へ入れました」と名乗っている(上の `moveEntries`)。
+         *   「N 件を『◯◯』へ移しました」と名乗っている(上の `moveEntries`)。
          *   **隣り合う 2 つのボタンで扱いが違った。**
          * 🔴 スマホでは相手のペインが**画面に居ない**ので、ここが唯一の
          *   手がかりである ── 見えない場所へ物が飛び、飛んだ先の名前も
@@ -9426,7 +9523,15 @@ const ACTIONS: Record<string, ActionHandler> = {
         if (missing > 0) {
           dispatcher.dispatch({ type: 'OP_FAILED', error: said });
         } else {
-          services.showStatus?.(said);
+          /**
+           * 🔴 **コピーの後にも「元に戻す」を出す**(台帳 #1852 N1 / 依頼 97-5 A)── 「移す」と同じ作法。押すと作った複製をゴミ箱へ入れる
+           *   (`undo-dual-move`)。⚠ 出すのは**作れた複製の lid**(中身を含めた全部)。
+           */
+          offerDualCopyUndo(
+            dispatcher,
+            steps.map((x) => x.lid),
+            said,
+          );
         }
         dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side });
       },
@@ -9509,11 +9614,37 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}戻してください` });
       return;
     }
-    const moves = takeDualMoveUndo();
-    if (moves === null) return;
+    const taken = takeDualUndo();
+    if (taken === null) return;
+    /**
+     * 🔴 **コピーした直後の「元に戻す」は、作った複製をゴミ箱へ入れる**(台帳 #1852 N1 / 依頼 97-5 A。Gemini 回答 = 推薦どおり)。
+     * ⚠ 直す前は「移す」の後にだけ出て、「コピー」の後には出なかった ── 押し間違えると、作られた複製を自分で探してゴミ箱へ入れることになった。
+     * 新しい書込経路は作らない(`DELETE_ENTRIES`)。複製はゴミ箱から戻せる。
+     */
+    if (taken.created.length > 0) {
+      const st = dispatcher.getState();
+      const lids = taken.created.filter((l) => st.entryMetas.has(l));
+      if (lids.length === 0) {
+        dispatcher.dispatch({ type: 'OP_NOTICE', message: '戻せるものがありません(コピーした物がもうありません)' });
+        return;
+      }
+      dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids });
+      const gone = lids.filter((l) => !dispatcher.getState().entryMetas.has(l)).length;
+      dispatcher.dispatch({
+        type: 'OP_NOTICE',
+        message:
+          gone > 0
+            ? `コピーした ${String(gone)} 件をゴミ箱へ入れました(ゴミ箱から戻せます)`
+            : '戻せませんでした(コピーした物をゴミ箱へ入れられませんでした)',
+      });
+      return;
+    }
+    const moves = taken.moves;
     const st = dispatcher.getState();
     const parents = resolveCanonicalParents(st.entryMetas, st.relations);
     let back = 0;
+    // 🔴 元のフォルダが無くなっていて、いちばん上の階層へ戻した件数(台帳 #1852 N1 / 依頼 155 ②。直す前は「元の場所に戻しました」と言っていたが、実際は元の場所ではなかった)
+    let toRoot = 0;
     for (const m of moves) {
       if (!st.entryMetas.has(m.lid)) continue;
       if ((parents.get(m.lid) ?? null) !== m.to) continue;
@@ -9535,14 +9666,24 @@ const ACTIONS: Record<string, ActionHandler> = {
         ...(also.length > 0 ? { alsoIn: also } : {}),
       });
       // 🔴 実際に動いた分だけ数える(#1087)── 元の場所がその後このノートの中へ入っていると、輪になるので断られる
-      if (dispatcher.getState().relations !== before) back += 1;
+      if (dispatcher.getState().relations !== before) {
+        back += 1;
+        if (m.from !== null && parentLid === null) toRoot += 1;
+        // 🔴 移す前の並びの位置へ戻す(依頼 154 ②)。⚠ ほかの物の値は動いていないので、この 1 件の値を戻すだけで元の位置になる
+        if (m.entryOrder !== undefined)
+          dispatcher.dispatch({ type: 'SET_ENTRY_ORDER', lid: m.lid, entryOrder: m.entryOrder });
+      }
     }
     dispatcher.dispatch({
       type: 'OP_NOTICE',
       message:
-        back > 0
-          ? `${String(back)} 件を元の場所に戻しました`
-          : '戻せるものがありません(移した後に、別の場所へ動かしています)',
+        back === 0
+          ? '戻せるものがありません(移した後に、別の場所へ動かしています)'
+          : toRoot === 0
+            ? `${String(back)} 件を元の場所に戻しました`
+            : toRoot === back
+              ? `元のフォルダが無いので、${String(back)} 件をいちばん上の階層に戻しました`
+              : `${String(back)} 件を戻しました(うち ${String(toRoot)} 件は元のフォルダが無いので、いちばん上の階層に戻しました)`,
     });
   },
   /**
@@ -18569,7 +18710,11 @@ export function bindActions(
             services,
             lids,
             'タグを付けられませんでした(別のタブの編集を確かめられませんでした)。もう一度ドロップしてください',
-            () => dispatcher.dispatch({ type: 'SMART_TAGS', smartLid, lids, mode: 'add' }),
+            () => {
+              // 🔴 集め直しの結果を待って、集まらなかった分を言う(依頼 325 A)。購読は書く前に張る(結果が先に届いても取りこぼさない)
+              watchSmartDrop(dispatcher, smartLid, lids);
+              dispatcher.dispatch({ type: 'SMART_TAGS', smartLid, lids, mode: 'add' });
+            },
           );
         }
         return;

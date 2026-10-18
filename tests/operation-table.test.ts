@@ -410,7 +410,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 どれも押し口は画面のボタン 1 か所にしか無く、鍵も持たない(`open-storage-check` と同じ置き場)。
    */
   'back-to-help', 'open-system-office', 'sql-copy',
-  'toggle-todo', 'undo-append', 'undo-bulk-tag', 'undo-dual-move', 'undo-import', 'undo-move', 'undo-rename', 'use-copied',
+  'toggle-todo', 'undo-append', 'undo-bulk-tag', 'undo-import', 'undo-move', 'undo-rename', 'use-copied',
   /**
    * ⚠ **2026-09-21(設計 doc §7、段②a)で 3 件増やした** ── メッセージを開く /
    *   保管件数を選ぶ / 書き出す。🔑 押し所は状態の行の 1 個所と「システム」の
@@ -912,10 +912,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
       // ⚠ 2026-10-17(#1163 依頼 153): 左のペインの「上へ動かす」「下へ動かす」(`move-order-up` / `move-order-down`)の 2 件を登記 ──
       //   受け手は前から在った(帯のボタン)ので `registered` +2 / `both` +2 / `unregistered` −2(`total` / `receivers` は動かない)。`undo-trash` と同じ仕分け。
-      registered: 179,
-      both: 106,
+      // ⚠ 2026-10-18(台帳 #1852 N1 / 依頼 324 A): 2 ペインで移した直後の「元に戻す」(`undo-dual-move`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
+      //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`undo-trash` と同じ仕分け。
+      registered: 180,
+      both: 107,
       outsideActionsTable: 73,
-      unregistered: 282,
+      unregistered: 281,
     });
   });
 
@@ -980,7 +982,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-17(#1646 の 1): 行のメニューが 22 → 23(`open-trash`)
       // ⚠ 2026-10-17(台帳 #1852 I2 / 依頼 157): 行のメニューが 23 → 24(`change-entry-kind`)
       // ⚠ 2026-10-17(依頼 337): 一覧の Home / End / PageUp / PageDown の 4 件を登記で 142 → 146(鍵の既定を持つ)
-      key: 148,
+      // ⚠ 2026-10-18(台帳 #1852 N1 / 依頼 324 A): 「元に戻す(2 ペインで移した直後)」(`undo-dual-move`)を登記で 148 → 149(鍵の既定は持たない)
+      key: 149,
       entry: 24,
       body: 3,
       collection: 2,

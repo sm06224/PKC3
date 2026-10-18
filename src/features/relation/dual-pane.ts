@@ -32,6 +32,15 @@ export interface DualTab {
   readonly past: readonly (string | null)[];
   /** 「戻る」で退けた場所(次に「進む」で戻ってくるものが末尾)。 */
   readonly future: readonly (string | null)[];
+  /**
+   * 🔴 **裏に回ったタブが憶えている選び**(台帳 #1852 N1 / 依頼 97-1 B。Gemini 回答 = 推薦どおり)。
+   * ⚠ **開いているタブは持たない**(選びはペインの `selection` / `anchor` / `cursor` が持つ)── 離れるときにここへ移し、
+   *   戻ったときにペインへ返して消す。ここが二重の持ち主になると、どちらが新しいか読めない。
+   * ⚠ 空のときは**欄ごと置かない**(選びを持たないタブの形を変えない)。
+   */
+  readonly selection?: readonly string[];
+  readonly anchor?: string | null;
+  readonly cursor?: string | null;
 }
 
 /**
@@ -63,6 +72,22 @@ const pushHistory = (
 
 /** タブを 1 枚新しく作る(履歴は持たない ── そのタブはまだどこへも行っていない)。 */
 const freshTab = (scopeLid: string | null): DualTab => ({ scopeLid, past: [], future: [] });
+
+/** 開いているタブが離れるとき、ペインの選びをそのタブへ憶えさせる(空なら欄を置かない)。 */
+const stashSelection = (tab: DualTab, pane: DualPaneState): DualTab => {
+  // 前の控えは捨てて、いまの選びで置き直す(欄を持たない形に戻してから足す)
+  const rest: DualTab = { scopeLid: tab.scopeLid, past: tab.past, future: tab.future };
+  if (pane.selection.length === 0 && pane.cursor === null) return rest;
+  return { ...rest, selection: pane.selection, anchor: pane.anchor, cursor: pane.cursor };
+};
+
+/** 開くタブが憶えていた選びを返し、タブからは消す(開いているタブは持たない)。 */
+const takeSelection = (
+  tab: DualTab,
+): { tab: DualTab; selection: readonly string[]; anchor: string | null; cursor: string | null } => {
+  const rest: DualTab = { scopeLid: tab.scopeLid, past: tab.past, future: tab.future };
+  return { tab: rest, selection: tab.selection ?? [], anchor: tab.anchor ?? null, cursor: tab.cursor ?? null };
+};
 
 /** 片側のペイン。タブを複数持ち、そのうち 1 枚が開いている。 */
 export interface DualPaneState {
@@ -272,8 +297,10 @@ export function withTabAdded(pane: DualPaneState): DualPaneState {
   const at = pane.active + 1;
   // ⚠ **新しいタブは履歴を持たない** ── 複製した瞬間に「戻る」が押せると、
   //   user は「まだどこへも行っていないのに戻れる」を見ることになる
+  // 🔴 離れるタブは選びを憶える(依頼 97-1 B)。新しいタブは選びを持たない
   const tabs = [
-    ...pane.tabs.slice(0, at),
+    ...pane.tabs.slice(0, pane.active),
+    stashSelection(activeTab(pane), pane),
     freshTab(paneScope(pane)),
     ...pane.tabs.slice(at),
   ];
@@ -291,13 +318,41 @@ export function withTabClosed(pane: DualPaneState, index: number): DualPaneState
   if (!isTabIndex(pane, index)) return pane;
   const tabs = pane.tabs.filter((_, i) => i !== index);
   const active = pane.active > index ? pane.active - 1 : Math.min(pane.active, tabs.length - 1);
-  return { ...pane, tabs, active, selection: [], anchor: null };
+  /**
+   * 🔴 **開いていないタブを閉じても、いまの選びは外れない**(依頼 97-1 B)。⚠ 直す前は何を閉じても選びが外れた。
+   * 開いているタブを閉じたときだけ、次に開くタブが憶えていた選びへ替わる。
+   */
+  if (index !== pane.active) return { ...pane, tabs, active };
+  const next = takeSelection(tabs[active]!);
+  return {
+    ...pane,
+    tabs: tabs.map((t, i) => (i === active ? next.tab : t)),
+    active,
+    selection: next.selection,
+    anchor: next.anchor,
+    cursor: next.cursor,
+  };
 }
 
 /** 別のタブへ移る。⚠ 範囲外は無視(state を壊さない)。 */
 export function withTabActive(pane: DualPaneState, index: number): DualPaneState {
   if (!isTabIndex(pane, index) || index === pane.active) return pane;
-  return { ...pane, active: index, selection: [], anchor: null, cursor: null };
+  /**
+   * 🔴 **タブごとに選びを憶える**(台帳 #1852 N1 / 依頼 97-1 B。Gemini 回答 = 推薦どおり)。
+   * ⚠ 直す前は切り替えるたびに選びが全部外れていた(マニュアルは「選んでいたものも、そのタブのものに戻ります」と書いていた)。
+   */
+  const next = takeSelection(pane.tabs[index]!);
+  const tabs = pane.tabs.map((t, i) =>
+    i === pane.active ? stashSelection(t, pane) : i === index ? next.tab : t,
+  );
+  return {
+    ...pane,
+    tabs,
+    active: index,
+    selection: next.selection,
+    anchor: next.anchor,
+    cursor: next.cursor,
+  };
 }
 
 /**
@@ -355,11 +410,17 @@ export function pruneDual(
   ): readonly (string | null)[] => list.filter((lid) => lid === null || alive(lid));
 
   const prune = (p: DualPaneState): DualPaneState => {
+    // 🔴 裏のタブが憶えている選びも、消えた lid を落とす(戻ったときに実在しない物を数えない)
+    const staleSaved = (t: DualTab): boolean =>
+      (t.selection?.some((l) => !alive(l)) ?? false) ||
+      (t.anchor != null && !alive(t.anchor)) ||
+      (t.cursor != null && !alive(t.cursor));
     const dead = p.tabs.some(
       (t) =>
         (t.scopeLid !== null && !alive(t.scopeLid)) ||
         pruneList(t.past).length !== t.past.length ||
-        pruneList(t.future).length !== t.future.length,
+        pruneList(t.future).length !== t.future.length ||
+        staleSaved(t),
     );
     /**
      * 🔴 **見ている場所が変わったら、印も外す** ── `withScope` と**同じ規則**である
@@ -390,17 +451,30 @@ export function pruneDual(
     )
       return p;
     const tabs = dead
-      ? p.tabs.map((t) => ({
-          scopeLid:
-            t.scopeLid !== null && !alive(t.scopeLid)
+      ? p.tabs.map((t) => {
+          const scopeDied = t.scopeLid !== null && !alive(t.scopeLid);
+          const base: DualTab = {
+            scopeLid: scopeDied
               ? (() => {
-                  const up = fallbackOf?.(t.scopeLid) ?? null;
+                  const up = fallbackOf?.(t.scopeLid!) ?? null;
                   return up !== null && alive(up) ? up : null;
                 })()
               : t.scopeLid,
-          past: pruneList(t.past),
-          future: pruneList(t.future),
-        }))
+            past: pruneList(t.past),
+            future: pruneList(t.future),
+          };
+          // ⚠ 場所が死んだタブの選びは捨てる(開き直した先に無い物を選んだままにしない)。生きている場所の分は消えた lid だけ落とす
+          if (scopeDied) return base;
+          const selection = (t.selection ?? []).filter(alive);
+          const cursor = t.cursor != null && alive(t.cursor) ? t.cursor : null;
+          if (selection.length === 0 && cursor === null) return base;
+          return {
+            ...base,
+            selection,
+            anchor: t.anchor != null && alive(t.anchor) ? t.anchor : null,
+            cursor,
+          };
+        })
       : p.tabs;
     return { ...p, tabs, selection, anchor, cursor };
   };
