@@ -412,6 +412,7 @@ import {
   profileLines,
   profileSummary,
   sharedNote,
+  trashNote,
   type StorageProfileResult,
 } from '@features/storage/storage-profile';
 import {
@@ -1485,7 +1486,30 @@ const moveEntries = (
     report?.(`すでに「${where}」に入っています`);
     return;
   }
-  report?.(`${moved + same} 件を「${where}」へ入れました`);
+  /**
+   * 🔴 **フォルダを移したときは、中の件数も言う**(依頼 85-8。Gemini 裁定 = 推薦 C)。
+   * ⚠ 直す前は、中に 40 件あるフォルダでも「1 件を『○○』へ入れました」だった(コピーは「中身を含め N 件」と言っている)。
+   * 🔑 数えるのは**動かした物自身の配下**(移しても配下の数は変わらない ── 行き先の中身は足さない)。
+   */
+  const st0 = dispatcher.getState();
+  const parentsNow = resolveCanonicalParents(st0.entryMetas, st0.relations);
+  let inside = 0;
+  for (const lid of lids) {
+    // ⚠ 数えるのは**行き先に入った物**だけ(断られた物の中身まで足すと、知らせと断りが食い違う)
+    if ((parentsNow.get(lid) ?? null) !== parentLid) continue;
+    inside += Math.max(0, collectSubtreeLids(lid, st0.entryMetas, st0.relations).size - 1);
+  }
+  const total = moved + same;
+  if (inside > 0 && lids.length === 1) {
+    const only = st0.entryMetas.get(lids[0]!)?.title ?? 'フォルダ';
+    report?.(`「${only}」(中の ${inside} 件ごと)を「${where}」へ入れました`);
+    return;
+  }
+  report?.(
+    inside > 0
+      ? `${total} 件(中身を含め ${total + inside} 件)を「${where}」へ入れました`
+      : `${total} 件を「${where}」へ入れました`,
+  );
 };
 
 /**
@@ -1569,6 +1593,28 @@ const moveEntriesOfferingUndo = (
  */
 const OPENS_READABLE: readonly string[] = ['spreadsheet'];
 
+/**
+ * 🔴 **いま居るフォルダの名前を変えるとき、打ち終わったら元のフォルダの中へ戻る**(依頼 85-5。Gemini 裁定 = 推薦 C)。
+ *
+ * > 画面の物語:F2・右クリック・右のペインのどれで名前を変えても、左の一覧が 1 つ上の階層へ移り(名前の欄は親の中の行にしか出ない)、
+ * > 打ち終わっても上の階層にいたままだった。戻る手間が増えていた。
+ *
+ * ⚠ 覚えるのは**「名前を変えたフォルダ」と「押す前にいた階層」だけ**(欄を出すために上へ移した回だけ)。
+ *   戻すのは、いまの階層が**移した先のまま**のときだけ ── 打っている間に user が別の所へ入っていたら動かさない。
+ */
+let rowRenameReturn: { readonly lid: string; readonly parent: string | null } | null = null;
+
+/** 左の列の行の名前の打ち替えを終える。⚠ 確定・やめる・他所を押した、の 3 つが全部ここを通る(戻る道を 1 本にする)。 */
+const endRowRename = (dispatcher: Dispatcher): void => {
+  dispatcher.dispatch({ type: 'ROW_RENAME_END' });
+  const back = rowRenameReturn;
+  rowRenameReturn = null;
+  if (back === null) return;
+  const st = dispatcher.getState();
+  if (st.scopeLid === back.parent && st.entryMetas.has(back.lid))
+    dispatcher.dispatch({ type: 'SET_SCOPE', lid: back.lid });
+};
+
 const createAndEdit = (
   dispatcher: Dispatcher,
   services: BinderServices,
@@ -1604,8 +1650,18 @@ const createAndEdit = (
     parentLid,
     relationId: generateLid(),
     ...(body !== undefined ? { body } : {}),
-    ...(OPENS_READABLE.includes(archetype) ? { edit: false } : {}),
+    ...(OPENS_READABLE.includes(archetype) || archetype === SMART_ARCHETYPE ? { edit: false } : {}),
   });
+  /**
+   * 🔴 **スマートフォルダを作ったら、そのまま中に入る**(依頼 85-4。Gemini 裁定 = 推薦 C)。
+   *
+   * > 画面の物語:作るといきなり編集画面になり条件の行が見えるが、**条件を入れるバーは保存してから中に入らないと出なかった**。
+   * > 作った人がしたいのは条件を入れることで、バーは中にしか無い。
+   *
+   * ⚠ 編集には入らない(読む画面で開く ── 表と同じ)。入れたのは**作れたときだけ**(断られたのに場所だけ変わらない)。
+   */
+  if (archetype === SMART_ARCHETYPE && dispatcher.getState().entryMetas.has(lid))
+    dispatcher.dispatch({ type: 'SET_SCOPE', lid });
   if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
 };
 
@@ -11234,6 +11290,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     // スマホでは名前の欄が出る一覧が隠れている ── 先に一覧を見せてから始める(#1087 P1)。PC は素通り。
     if (!phoneShowList(dispatcher)) return;
+    rowRenameReturn = null;
     dispatcher.dispatch({ type: 'ROW_RENAME_BEGIN', lid });
     const fieldShown = (): boolean =>
       root.querySelector('[data-pkc-field="row-rename"]') !== null;
@@ -11250,8 +11307,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (!fieldShown()) {
       const parent = getAncestorFolders(lid, st.entryMetas, st.relations)[0] ?? null;
       dispatcher.dispatch({ type: 'SET_SCOPE', lid: parent?.lid ?? null });
+      // 🔴 いま居るフォルダ自身の改名なら、打ち終わったら中へ戻る(依頼 85-5)
+      rowRenameReturn = lid === st.scopeLid ? { lid, parent: parent?.lid ?? null } : null;
     }
     if (!fieldShown()) {
+      rowRenameReturn = null;
       dispatcher.dispatch({ type: 'ROW_RENAME_END' });
       dispatcher.dispatch({
         type: 'OP_FAILED',
@@ -12873,8 +12933,16 @@ const ACTIONS: Record<string, ActionHandler> = {
     let failed = 0;
     for (const c of plan.changes) {
       try {
-        localStorage.setItem(c.key, c.to);
+        // 🔴 `to` が `null` は「標準に戻す」(依頼 207)── 鍵を消す(読み手は「無い」を既定として扱う)
+        if (c.to === null) localStorage.removeItem(c.key);
+        else localStorage.setItem(c.key, c.to);
         wrote += 1;
+        /**
+         * 🔴 **取り込んだこのタブにも、配色・文字の大きさ・紙面をすぐ当てる**(依頼 312。Gemini 裁定 = 推薦 A)。
+         * ⚠ `storage` event は書いた側のタブには届かない ── 別のウィンドウが書いたときと**同じ合図**を自分に撃つ
+         *   (`watch*FromOtherWindows` が、鍵が合う物だけ当て直す。当て方を 2 本持たない)。
+         */
+        window.dispatchEvent(new StorageEvent('storage', { key: c.key }));
       } catch {
         // ⚠ 1 件書けなくても残りは当てる(全部捨てるほうが害が大きい)── ただし数えて言う
         failed += 1;
@@ -13008,6 +13076,11 @@ const ACTIONS: Record<string, ActionHandler> = {
         const note = sharedNote(lines);
         shared.textContent = note;
         shared.hidden = note === '';
+        const trash = root.querySelector<HTMLElement>('[data-pkc-field="storage-profile-trash"]');
+        if (trash !== null) {
+          trash.textContent = trashNote(lines);
+          trash.hidden = lines.length === 0;
+        }
         if (lines.length === 0) sum.textContent = `${profileSummary(result)} 重いノートはありません。`;
       },
       () => {
@@ -20250,7 +20323,7 @@ export function bindActions(
       }
       if (ke.key === 'Escape') {
         ke.preventDefault();
-        dispatcher.dispatch({ type: 'ROW_RENAME_END' });
+        endRowRename(dispatcher);
         return;
       }
       return;
@@ -20916,7 +20989,7 @@ export function bindActions(
   /** 左の列の行の版(#215)。⚠ 空白だけ / 変わっていない、の判定は reducer が持つ(上と同じ)。 */
   const commitRowRename = (lid: string, value: string): void => {
     renameEntryFromRow(dispatcher, lid, value);
-    dispatcher.dispatch({ type: 'ROW_RENAME_END' });
+    endRowRename(dispatcher);
   };
 
   const runDualKey = (cmd: string, side: DualSide): boolean => {

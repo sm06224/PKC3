@@ -1329,6 +1329,12 @@ select:focus-visible {
   background: var(--accent-dim) !important;
   color: var(--accent-dim-fg);
   border-left-color: var(--accent) !important;
+  /* 🔴 **選んでいる行の中の薄い字(更新日・予定の出どころのノート名など)は、行の字と同じ色にする**
+   *   (依頼 244。Gemini 裁定 = 案どおり)。直す前は `--muted` のまま選んだ行の地(`--accent-dim`)に載り、
+   *   ターミナルの配色では対比が 2.1(目安 4.5)でほぼ読めなかった(レトロ・GitHub ダーク・Solarized ダーク・Nord も届かない)。
+   *   ⚠ 個々の字に規則を足さず `--muted` の値を行の中だけ差し替える ── 行の中の薄い字は全部これを読むので、
+   *   足した面でも自動で揃う。行の字(`--accent-dim-fg`)は全テーマで 5.0 以上(`tests/adapter/muted-contrast-css.test.ts`)。 */
+  --muted: var(--accent-dim-fg);
 }
 [data-pkc-entry] [data-pkc-field='title'] {
   overflow: hidden;
@@ -1703,7 +1709,10 @@ select:focus-visible {
 }
 [data-pkc-field='detail-title'] {
   margin: 0 0 var(--s3);
-  font-size: 15px;
+  /* 🔴 題名は本文と同じ割合で大きくなる(依頼 348-A。Gemini 裁定)。直す前は 15px 固定で、「特大」(本文 17px)では題名が本文より小さかった。
+   *   ⚠ 標準(13px)では 13 * 15 / 13 = 15px ちょうど ── 選ばない user の見え方は 1 ドットも変わらない。
+   *   `13` と `15` の比は `features/text-scale.ts` の `TITLE_BASE_FONT_PX` / `TITLE_FONT_PX`(test が突き合わせる)。 */
+  font-size: calc(var(--pkc-text-size, 13px) * 15 / 13);
   font-weight: 600;
   padding-bottom: var(--s2);
   border-bottom: 1px solid var(--border);
@@ -1734,6 +1743,19 @@ select:focus-visible {
 }
 [data-pkc-region='folder-overview'] [data-pkc-field='overview-more'] {
   margin: var(--s2) 0 0;
+}
+/* 押せるボタン(依頼 85-6)── 地は無い字のまま、指した時だけ下線 */
+[data-pkc-region='folder-overview'] button[data-pkc-field='overview-more'] {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+[data-pkc-region='folder-overview'] button[data-pkc-field='overview-more']:hover {
+  text-decoration: underline;
 }
 [data-pkc-region='folder-overview'] [data-pkc-field='overview-list'] {
   list-style: none;
@@ -1974,7 +1996,8 @@ button[data-pkc-primary] [data-pkc-icon] {
 [data-pkc-field='editor-title'] {
   width: 100%;
   margin-bottom: var(--s2);
-  font-size: 15px;
+  /* 🔴 閲覧中の題名と同じ割合(依頼 348-A)── 上の `detail-title` の注釈を見ること */
+  font-size: calc(var(--pkc-text-size, 13px) * 15 / 13);
   font-weight: 600;
 }
 /* ── ジョブの可視化(P8 段⑩)──────────────────────
@@ -8696,6 +8719,8 @@ mark[data-pkc-diff-char='del'] {
 [data-pkc-region='dual-table'] tbody tr[data-pkc-marked] td {
   background: var(--pkc-mark-bg);
   font-weight: 600;
+  /* 🔴 フォルダの表の印と同じ(依頼 245)── 薄い字を少し濃くする */
+  --muted: var(--pkc-muted-on-mark);
 }
 [data-pkc-region='dual-table'] tbody tr:hover:not([data-pkc-marked]) td {
   background: var(--surface-hover);
@@ -9064,6 +9089,9 @@ h3[data-pkc-section] {
  * 「A + 濃く」)── `--surface-2`(hover とほぼ同じ濃さ)から `--pkc-mark-bg` へ。 */
 [data-pkc-region='filer-table'] tbody tr[data-pkc-marked] {
   background: var(--pkc-mark-bg);
+  /* 🔴 印を付けた行の薄い字を少し濃くする(依頼 245。Gemini 裁定 = 案どおり)── 更新日は多くの配色で目安 4.5 に
+   *   届かなかった(3.3〜4.3)。行の字(`--fg`)へ 6 割寄せた色にすると全テーマで 4.5 を超える(`tests/adapter/muted-contrast-css.test.ts`)。 */
+  --muted: var(--pkc-muted-on-mark);
 }
 [data-pkc-region='filer-table'] tbody tr[data-pkc-selected] {
   outline: 1px solid var(--accent);

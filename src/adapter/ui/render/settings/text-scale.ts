@@ -33,7 +33,7 @@ export function createTextScaleSection(region: HTMLElement): SettingsSection {
       });
       td.append(tRow);
       // ⚠ **何が動いて、何が動かないか**を書く(押した後に探させない)。詳しくは hover。
-      const tnote = buildSettingsNote('本文と画面の字の大きさを、この端末だけで変えます。');
+      const tnote = buildSettingsNote('本文とノートの題名の字の大きさを、この端末だけで変えます。');
       tRow.title =
         '読み幅(1 行の長さ)は動かないので、大きくすると 1 行に入る字が減ります。' +
         'ノートの中身には入りません。';

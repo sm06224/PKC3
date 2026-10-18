@@ -6,7 +6,7 @@
  *   `tests/features/settings-file.test.ts`。ここが見るのは**繋がり**である ──
  *   選んだら下見が出るか / 押したら本当に書かれるか / 押せない場面で押せないか。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -15,6 +15,8 @@ import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { initialState } from '../../src/adapter/state/app-state';
 import { MAX_SETTING_CHARS, SETTINGS_FILE_KIND } from '../../src/features/settings/settings-file';
 import { SETTINGS_NOT_PERSISTED_TEXT } from '../../src/adapter/ui/render/settings-persist-probe';
+import { applyTheme, watchThemeFromOtherWindows } from '../../src/adapter/ui/render/theme';
+import { applyTextScale, watchTextScaleFromOtherWindows } from '../../src/adapter/ui/render/text-scale';
 
 const tick = async (): Promise<void> => {
   await Promise.resolve();
@@ -282,5 +284,73 @@ describe('設定の持ち出しの配線(#414)', () => {
     ].join('-');
     expect(clicks[0], '名前の日付が端末の暦日でない').toBe(`PKC3-settings-${today}.json`);
     vi.restoreAllMocks();
+  });
+});
+
+/**
+ * 🔴 依頼 312(Gemini 裁定 = 推薦 A)/ 依頼 207(推薦 A)── 取り込んだこのタブにも配色・文字の大きさがすぐ当たる / 標準の項目は標準に戻る。
+ *
+ * ⚠ 観測点は画面(`<html>` の属性)── 保存に書いただけでは「取り込んだタブだけ古い見た目のまま」を見逃す。
+ *   別のウィンドウが書いたときの合図(`storage` event)を自分へ撃つ実装なので、本番と同じ購読(`watch*FromOtherWindows`)を差して見る。
+ */
+describe('取り込んだタブにもすぐ当たる / 標準の項目は標準に戻る(依頼 312 / 207)', () => {
+  const html = document.documentElement;
+  let unwatch: Array<() => void> = [];
+
+  beforeEach(() => {
+    for (const a of [...html.attributes]) if (a.name.startsWith('data-pkc-')) html.removeAttribute(a.name);
+    html.style.removeProperty('--pkc-text-size');
+    unwatch = [watchThemeFromOtherWindows(html, window), watchTextScaleFromOtherWindows(html, window)];
+  });
+  afterEach(() => {
+    for (const f of unwatch) f();
+    unwatch = [];
+  });
+
+  it('配色と文字の大きさが、再読み込みなしでこのタブに当たる', async () => {
+    const { root } = setup();
+    localStorage.setItem('pkc3.theme', 'light');
+    applyTheme(html, 'light');
+    expect(html.getAttribute('data-pkc-theme'), '前提:取り込む前はライト').toBe('light');
+    await choose(
+      root,
+      fileText([
+        { key: 'pkc3.theme', value: 'dark' },
+        { key: 'pkc3.text-scale', value: 'xlarge' },
+      ]),
+    );
+    apply(root).click();
+    await tick();
+    expect(html.getAttribute('data-pkc-theme'), '取り込んだタブだけ古い配色のまま').toBe('dark');
+    expect(html.style.getPropertyValue('--pkc-text-size'), '取り込んだタブだけ古い大きさのまま').toBe('17px');
+  });
+
+  it('知らせは「配色・文字の大きさ・ページ設定などの見た目はすぐ変わる」と言い、再読み込みが要るのはそれ以外と言う', async () => {
+    const { root, sent } = setup();
+    await choose(root, fileText([{ key: 'pkc3.theme', value: 'dark' }]));
+    sent.length = 0;
+    apply(root).click();
+    await tick();
+    const said = sent.find((a) => a.type === 'OP_NOTICE');
+    const msg = said?.type === 'OP_NOTICE' ? said.message : '';
+    expect(msg).toContain('配色・文字の大きさ・ページ設定などの見た目はすぐ変わります');
+    expect(msg).toContain('ほかの項目は再読み込みしてから');
+  });
+
+  it('標準のままの項目を持つファイルを取り込むと、こちらの設定は消え、画面も標準に戻る', async () => {
+    const { root } = setup();
+    localStorage.setItem('pkc3.text-scale', 'xlarge');
+    applyTextScale(html, 'xlarge');
+    expect(html.style.getPropertyValue('--pkc-text-size'), '前提:特大').toBe('17px');
+    await choose(
+      root,
+      JSON.stringify({ kind: SETTINGS_FILE_KIND, version: 1, entries: [], defaults: ['pkc3.text-scale'] }),
+    );
+    expect(changes(root).textContent, '下見が言っていない').toContain('文字の大きさ を標準に戻します');
+    expect(apply(root).disabled, '標準に戻すだけでも押せるはず').toBe(false);
+    apply(root).click();
+    await tick();
+    expect(localStorage.getItem('pkc3.text-scale'), '保存が残っている').toBeNull();
+    expect(html.style.getPropertyValue('--pkc-text-size'), '画面が特大のまま').toBe('13px');
   });
 });

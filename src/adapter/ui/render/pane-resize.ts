@@ -12,6 +12,7 @@
  * | **押す**(動かさない) | 畳む・戻す(#197 の既存の動き ── **変えない**) |
  * | **掴んで動かす** | 大きさが変わる |
  * | **矢印キー** | 同じだけ大きさが変わる(掴めない人の口) |
+ * | **ダブルクリック** | 覚えた幅を忘れて、自動の幅に戻る(依頼 311) |
  * | 下限より小さくした | **畳む**(0 の面を残さない ── 帯は残るので戻せる) |
  *
  * ## ⚠ 押すと掴むを取り違えない
@@ -41,6 +42,10 @@ import { appPanes, applyPaneVisibility } from './pane-visibility';
 /** 押すと掴むの境目(px)。⚠ 小さすぎると、押しただけで幅が動く。 */
 const DRAG_SLOP = 4;
 
+/** 2 回の押しを「ダブルクリック」と見なす間隔(ms)と距離(px)。⚠ 1 回目で境目が動く分、距離は広めに取る。 */
+const DOUBLE_MS = 400;
+const DOUBLE_PX = 8;
+
 interface Drag {
   readonly id: SizedPaneId;
   readonly grip: HTMLElement;
@@ -55,6 +60,8 @@ interface Drag {
   readonly startPx: number | null;
   /** `DRAG_SLOP` を越えたか ── 越えていなければ「押した」として扱う。 */
   moved: boolean;
+  /** 押した時刻(ms)。ダブルクリックの見分けに使う。 */
+  readonly pressedAt: number;
 }
 
 /**
@@ -127,9 +134,38 @@ export function installPaneResize(root: HTMLElement): () => void {
     swallowTimer = null;
   };
 
+  /**
+   * 🔴 **境目をダブルクリックすると、元の自動の幅に戻る**(依頼 311。Gemini 裁定 = 推薦 A)。
+   *
+   * > 画面の物語:左右のペインは境目をドラッグして広げられるが、元の幅に戻す方法が無かった。
+   *
+   * ⚠ **ブラウザの `dblclick` は使えない** ── 1 回目の押しが `toggle-pane`(畳む)を撃つので、2 回目の押しの時点で
+   *   境目は動いており、同じ要素に当たらない。だから**「境目を押した直後(`DOUBLE_MS` 以内・近く)の 2 回目の押し」**を
+   *   自分で見分ける。2 回目の押しは、畳まれていたら戻してから、覚えた幅を忘れる(画面の変数も同時に消す ──
+   *   片方だけ消すと再読込まで古い幅が残る)。その押しの `click` は**どこに当たっても**捨てる(中央の行を選んでしまわない)。
+   */
+  let lastGrip: { readonly id: SizedPaneId; readonly at: number; readonly x: number; readonly y: number } | null = null;
+  let swallowAny = false;
+
   const onPointerDown = (e: PointerEvent): void => {
     disarmSwallow();
+    swallowAny = false;
     if (e.button !== 0) return;
+    const now = Date.now();
+    if (
+      lastGrip !== null &&
+      now - lastGrip.at <= DOUBLE_MS &&
+      Math.hypot(e.clientX - lastGrip.x, e.clientY - lastGrip.y) <= DOUBLE_PX
+    ) {
+      const id = lastGrip.id;
+      lastGrip = null;
+      if (appPanes.getHidden().includes(id)) applyPaneVisibility(root, appPanes.toggle(id));
+      appPaneSizes.reset(id);
+      setPaneSizeVar(root, id, null);
+      swallowAny = true;
+      return;
+    }
+    lastGrip = null;
     const grip = (e.target as Element | null)?.closest<HTMLElement>(
       '[data-pkc-region="pane-grip"]',
     );
@@ -143,6 +179,7 @@ export function installPaneResize(root: HTMLElement): () => void {
       startY: e.clientY,
       startPx: paneStartSize(root, id),
       moved: false,
+      pressedAt: now,
     };
     // ⚠ 掴んだ先が面の外へ出ても追える(捕まえないと、速く動かすと外れる)
     try {
@@ -174,7 +211,12 @@ export function installPaneResize(root: HTMLElement): () => void {
     } catch {
       // 捕まえていなければ何もしない
     }
-    if (!d.moved) return; // 押しただけ ── `toggle-pane` に任せる
+    if (!d.moved) {
+      // 押しただけ ── `toggle-pane` に任せる。⚠ ダブルクリックの 1 回目として憶えるのは**掴んでいない押し**だけ
+      //   (掴んで動かした直後に同じ場所を押し直しただけで、幅が戻ってはいけない)
+      lastGrip = { id: d.id, at: d.pressedAt, x: d.startX, y: d.startY };
+      return;
+    }
     // 🔴 **動かしたなら、続く `click` は捨てる** ── 測れなかった回も捨てる
     //    (捨てないと「掴んだのに畳まれた」になる。測れないのは user のせいではない)
     armSwallow();
@@ -194,6 +236,12 @@ export function installPaneResize(root: HTMLElement): () => void {
   };
 
   const onClick = (e: MouseEvent): void => {
+    if (swallowAny) {
+      swallowAny = false;
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
     if (!swallowClick) return;
     swallowClick = false;
     if (paneOf(e.target as Element | null) === null) return;

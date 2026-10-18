@@ -739,6 +739,63 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   await enterFolderRow(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${subLid}"]`);
   await expect(rows.locator('[data-pkc-field="title"]')).toHaveText(['空フォルダ', '議事録']);
 
+  /**
+   * 🔴 束 N2(台帳 #1852 / 依頼 85-6): 概要の末尾「ほか N 件を左のペインで開く」を押すと、左の一覧がそのフォルダの中へ移る。
+   * ⚠ 新しい起動は足さない ── 同じ起動で 2 本目の取込を重ねる(100 件を超える中身は、画面からは作れない)。
+   *   概要は先頭 100 件までなので、101 件で「ほか 1 件」が出る最小の形。
+   */
+  const bigNotes = Array.from({ length: 101 }, (_, i) => ({
+    lid: `b${i}`,
+    title: `大量${i}`,
+    archetype: 'text',
+    filename: `b${i}.text.zip`,
+    parent_folder_lid: 'big',
+  }));
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: 'folder-taryo-20261018.folder-export.zip',
+    mimeType: 'application/zip',
+    buffer: zipOf([
+      {
+        name: 'manifest.json',
+        data: Buffer.from(
+          JSON.stringify({
+            format: 'pkc2-folder-export-bundle',
+            version: 1,
+            source_folder_lid: 'big',
+            source_folder_title: '大量フォルダ',
+            scope: 'recursive',
+            text_count: 101,
+            textlog_count: 0,
+            compact: false,
+            entries: bigNotes,
+            folders: [{ lid: 'big', title: '大量フォルダ', parent_lid: null }],
+          }),
+        ),
+      },
+      ...bigNotes.map((n) => ({ name: n.filename, data: innerText(n.lid, n.title) })),
+    ]),
+  });
+  // 取り込んだ後は、いまの階層(「2026」の中)のまま ── ルートへ戻して、大量のフォルダの行を押す
+  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
+  const bigRow = page
+    .locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]')
+    .filter({ hasText: '大量フォルダ' });
+  await expect(bigRow, '取り込んだ大量のフォルダがルートに出ない').toHaveCount(1);
+  await clickReal(page, bigRow);
+  const more = page.locator('[data-pkc-region="folder-overview"] [data-pkc-field="overview-more"]');
+  await expect(more, '100 件を超えるフォルダの概要に「ほか N 件」の押し口が出ない').toHaveText(
+    'ほか 1 件を左のペインで開く',
+  );
+  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]'), '前提:押す前は左の一覧はルート').not.toContainText(
+    '大量フォルダ',
+  );
+  await clickReal(page, more);
+  await expect(
+    page.locator('[data-pkc-region="filer-breadcrumb"]'),
+    '「ほか N 件」を押しても、左の一覧がそのフォルダの中へ移らない',
+  ).toContainText('大量フォルダ');
+  await expect(rows, '左の一覧に 101 件が並んでいない').toHaveCount(101);
+
   expect(errors).toEqual([]);
 });
 

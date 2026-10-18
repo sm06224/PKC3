@@ -40,7 +40,7 @@ import {
   spliceFrontmatterKeys,
   type FrontmatterValue,
 } from '../markdown/frontmatter';
-import { isKnownArchetype } from '../flavor/archetype-label';
+import { ARCHETYPE_LABELS, isKnownArchetype } from '../flavor/archetype-label';
 import { countTaskCandidates } from '../markdown/task-count';
 import { MAX_TAG_CHARS, normalizeTag, sameTag, splitTags } from '../flavor/tags';
 import { hashRunWords, strandedHashWords } from '../flavor/tag-words';
@@ -242,11 +242,61 @@ export function readSmartSpec(body: string): SmartSpec {
     kind: readKind(meta[SMART_KIND_KEY]),
     updatedDays: readDays(meta[SMART_UPDATED_KEY]),
     createdDays: readDays(meta[SMART_CREATED_KEY]),
-    dated: readFlag(meta[SMART_DATED_KEY]),
+    dated: readFlag(meta[SMART_DATED_KEY], 'dated'),
     text: readText(meta[SMART_TEXT_KEY]),
-    tasks: readFlag(meta[SMART_TASKS_KEY]),
-    openTasks: readFlag(meta[SMART_OPEN_TASKS_KEY]),
+    tasks: readFlag(meta[SMART_TASKS_KEY], 'tasks'),
+    openTasks: readFlag(meta[SMART_OPEN_TASKS_KEY], 'openTasks'),
   };
+}
+
+/** 条件を書く key の全部。⚠ これ以外の `smart-` で始まる key は「読めていない」と数える(綴りの間違いに気づけるように)。 */
+const SMART_KEYS: readonly string[] = [
+  SMART_TAGS_KEY,
+  SMART_KIND_KEY,
+  SMART_UPDATED_KEY,
+  SMART_CREATED_KEY,
+  SMART_DATED_KEY,
+  SMART_TEXT_KEY,
+  SMART_TASKS_KEY,
+  SMART_OPEN_TASKS_KEY,
+];
+
+/**
+ * 🔴 **本文に書いた条件のうち、読めなかった物の数**(依頼 85-9。Gemini 裁定 = 推薦 C)。
+ *
+ * > 画面の物語:マニュアルは「手で書き換えても効きます」と書いているが、読めない値は黙って捨てられていた。
+ * > 全部捨てられると「条件を選んでください」と出て、**書いたのに無いことになった**。
+ *
+ * 数えるのは ① 値が書いてあるのに読めなかった条件(種類・日数・有無・語)② 上限を超えたタグ ③ 条件のタグが全部読めなかった
+ * ④ 知らない `smart-〇〇` の key(綴りの間違い)。⚠ **読む規則は `readSmartSpec` と同じ関数**を通す(2 本にしない)。
+ * 値が空(`smart-kind:` だけ)は「書いていない」ので数えない。
+ */
+export function countUnreadSmartConds(body: string): number {
+  const { meta } = parseFrontmatter(body);
+  const blank = (v: FrontmatterValue | undefined): boolean =>
+    v === undefined ||
+    v === null ||
+    (typeof v === 'string' && v.trim() === '') ||
+    (Array.isArray(v) && v.filter((x) => x !== null && String(x).trim() !== '').length === 0);
+  let n = 0;
+  const check = (key: string, read: (raw: FrontmatterValue | undefined) => unknown): void => {
+    const raw = meta[key];
+    if (!blank(raw) && read(raw) === null) n += 1;
+  };
+  check(SMART_KIND_KEY, readKind);
+  check(SMART_UPDATED_KEY, readDays);
+  check(SMART_CREATED_KEY, readDays);
+  check(SMART_DATED_KEY, (r) => readFlag(r, 'dated'));
+  check(SMART_TEXT_KEY, readText);
+  check(SMART_TASKS_KEY, (r) => readFlag(r, 'tasks'));
+  check(SMART_OPEN_TASKS_KEY, (r) => readFlag(r, 'openTasks'));
+  const tagsRaw = meta[SMART_TAGS_KEY];
+  if (!blank(tagsRaw)) {
+    if (readSmartTags(tagsRaw).length === 0) n += 1;
+    n += unreadSmartTags(tagsRaw).length;
+  }
+  for (const key of Object.keys(meta)) if (key.startsWith('smart-') && !SMART_KEYS.includes(key)) n += 1;
+  return n;
 }
 
 /**
@@ -322,7 +372,10 @@ function collectSmartTags(raw: FrontmatterValue | undefined, limit: number): rea
 function readKind(raw: FrontmatterValue | undefined): string | null {
   if (typeof raw !== 'string') return null;
   const v = raw.trim();
-  return v !== '' && isKnownArchetype(v) ? v : null;
+  if (v === '') return null;
+  if (isKnownArchetype(v)) return v;
+  // 🔴 画面の選択肢の字(「ノート」「フォルダ」…)でも書ける(依頼 85-9)── 画面で見た名前をそのまま書いて読めないのを無くす
+  return ARCHETYPE_LABELS.find((p) => p[1] === v)?.[0] ?? null;
 }
 
 /**
@@ -334,7 +387,10 @@ function readDays(raw: FrontmatterValue | undefined): number | null {
   if (typeof raw === 'number') return normalizeDays(raw);
   if (typeof raw !== 'string') return null;
   const m = /^\s*(\d+)\s*d?\s*$/i.exec(raw);
-  return m === null ? null : normalizeDays(Number(m[1]));
+  if (m !== null) return normalizeDays(Number(m[1]));
+  // 🔴 画面の字(「30 日以内」「1 年以内」)でも書ける(依頼 85-9)
+  const ja = /^\s*(\d+)\s*(日|年)\s*以内\s*$/u.exec(raw);
+  return ja === null ? null : normalizeDays(Number(ja[1]) * (ja[2] === '年' ? 365 : 1));
 }
 
 const normalizeDays = (n: number): number | null =>
@@ -344,14 +400,26 @@ const normalizeDays = (n: number): number | null =>
  * 有無の条件を読む。受ける形は `true` / `false`(と `yes` / `no`)。
  * ⚠ 読めない綴りは `null`(= 見ない)── 黙って `true` に倒さない。
  */
-function readFlag(raw: FrontmatterValue | undefined): boolean | null {
+function readFlag(raw: FrontmatterValue | undefined, field: 'dated' | 'tasks' | 'openTasks'): boolean | null {
   if (typeof raw === 'boolean') return raw;
   if (typeof raw !== 'string') return null;
   const v = raw.trim().toLowerCase();
   if (v === 'true' || v === 'yes') return true;
   if (v === 'false' || v === 'no') return false;
+  // 🔴 画面の字(その条件の選択肢)と「ある / ない」でも書ける(依頼 85-9)。⚠ 字は条件ごとに違う ── 画面の選択肢
+  //   (`filer.ts` の `SMART_FIELD_UI`)と同じ綴りにする(食い違うと「選べるのに書けない」が逆向きに出る)
+  const [yes, no] = JA_FLAGS[field];
+  if (v === 'ある' || v === yes) return true;
+  if (v === 'ない' || v === '無い' || v === no) return false;
   return null;
 }
+
+/** 有無の条件の、画面での字(ある / ない)。⚠ `filer.ts` の `SMART_FIELD_UI` と同じ(test が突き合わせる)。 */
+export const JA_FLAGS: Readonly<Record<'dated' | 'tasks' | 'openTasks', readonly [string, string]>> = {
+  dated: ['先頭に書いてある', '書いていない'],
+  tasks: ['項目がある', '項目が無い'],
+  openTasks: ['未処理がある', '全部済んでいる'],
+};
 
 /**
  * 条件を書き換えた結果。
@@ -464,7 +532,7 @@ export function withSmartField(
    *   (`readFlag`)。field ごとに書き分けると、綴りが片方だけずれる(§7)。
    */
   if (field === 'dated' || field === 'tasks' || field === 'openTasks') {
-    const next = cleared ? null : readFlag(raw);
+    const next = cleared ? null : readFlag(raw, field);
     if (!cleared && next === null) return { ok: false, reason: 'invalid' };
     const now = field === 'dated' ? spec.dated : field === 'tasks' ? spec.tasks : spec.openTasks;
     if (next === now) return { ok: false, reason: 'unchanged' };

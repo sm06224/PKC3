@@ -65,7 +65,18 @@ export function buildFolderOverview(
   box.append(list);
 
   if (overview.more > 0) {
-    const more = document.createElement('p');
+    /**
+     * 🔴 **押すと、左の列がこのフォルダの中へ移る**(依頼 85-6。Gemini 裁定 = 推薦 B)。
+     *
+     * > 画面の物語:「ほか 120 件は左のペインで」と出るが、フォルダを選んだだけでは左の一覧は動かないので、
+     * > 左が別の場所を見ていると言葉の指す先が無かった。
+     *
+     * ⚠ 新しい action を作らない ── パンくずと同じ `enter-folder`(`data-pkc-entry` = この概要のフォルダ)。
+     */
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.setAttribute('data-pkc-action', 'enter-folder');
+    more.setAttribute('data-pkc-entry', lid);
     more.setAttribute('data-pkc-field', 'overview-more');
     more.textContent = overviewMore(overview.more);
     box.append(more);

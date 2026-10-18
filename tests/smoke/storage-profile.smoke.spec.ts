@@ -49,6 +49,10 @@ test('🔴 調べると重い順に並び、押すとそのノートへ飛ぶ (#
   const rows = page.locator('[data-pkc-field="storage-profile-list"] button');
   await expect(rows.first(), '重い順の行が 1 つも出ていない').toBeVisible();
   await expect(rows.first()).toContainText('容量を見るノート');
+  // 🔴 束 L3(依頼 59-1): 一覧が出ているとき、その下にゴミ箱と容量の説明が 1 行出る(重いノートを消しても容量が減らない理由)
+  const trashNote = page.locator('[data-pkc-field="storage-profile-trash"]');
+  await expect(trashNote, '一覧の下にゴミ箱と容量の説明が出ない').toBeVisible();
+  await expect(trashNote).toContainText('ゴミ箱に残っている間は容量は減りません');
 
   // ③ 🔴 **押すとそのノートへ飛ぶ**(見えても辿り着けない、を作らない)
   await rows.first().click();

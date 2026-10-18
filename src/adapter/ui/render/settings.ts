@@ -230,9 +230,11 @@ export class SettingsRenderer {
     this.sections = [
       createMessagesSection(region),
       createThemeSection(region),
+      // 🔴 読みにくいときにまず触る「文字の大きさ」を 2 番目へ(依頼 77-1。Gemini 裁定 = 推薦 B)。
+      //   幅は「本文の置き場所」と並べて見たいので、ページ設定 → 本文の置き場所は続ける
+      createTextScaleSection(region),
       createPageFormatSection(region),
       createProseAlignSection(region),
-      createTextScaleSection(region),
       createReadColumnsSection(region),
       createColumnRuleSection(region),
       createTagBadgeSection(region),

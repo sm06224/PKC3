@@ -21,6 +21,8 @@ import {
   isTextScale,
   TEXT_SCALES,
   textScaleSpec,
+  TITLE_BASE_FONT_PX,
+  TITLE_FONT_PX,
 } from '../../src/features/text-scale';
 import {
   applyTextScale,
@@ -281,5 +283,37 @@ describe('選んだ大きさ(chosenTextScale)', () => {
       fn,
       '効いている値(root.style)を渡している ── 何も変えずに押しただけで 14px → 13px に縮む',
     ).not.toMatch(/getPropertyValue\(\s*['"]--pkc-text-size['"]\s*\)/);
+  });
+});
+
+/**
+ * 🔴 依頼 348-A(Gemini 裁定)── ノートの題名(閲覧中・編集中)は、本文と同じ割合で大きくなる。
+ * 直す前は 15px 固定で、「特大」(本文 17px)では題名が本文より小さかった。
+ * 見るのは ① 標準で 1 ドットも変わらない(13 → 15 の比)② 全段階で題名が本文より大きい ③ CSS が表の比を使っている。
+ */
+describe('題名は本文と同じ割合で大きくなる(依頼 348-A)', () => {
+  const css = readFileSync('src/styles/app.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const ruleOf = (selector: string): string => {
+    const at = css.indexOf(`${selector} {`);
+    expect(at, `${selector} の規則が見つからない(空振り)`).toBeGreaterThanOrEqual(0);
+    return css.slice(at, css.indexOf('}', at));
+  };
+
+  it('標準の本文(13px)で題名は 15px ちょうど = 選ばない user の見え方は変わらない', () => {
+    expect(textScaleSpec(DEFAULT_TEXT_SCALE).size).toBe(`${TITLE_BASE_FONT_PX}px`);
+    expect((parseFloat(textScaleSpec(DEFAULT_TEXT_SCALE).size) * TITLE_FONT_PX) / TITLE_BASE_FONT_PX).toBe(15);
+  });
+
+  it('どの段階でも、題名は本文より大きい(特大でも逆転しない)', () => {
+    for (const s of TEXT_SCALES) {
+      const body = parseFloat(s.size);
+      expect((body * TITLE_FONT_PX) / TITLE_BASE_FONT_PX, s.id).toBeGreaterThan(body);
+    }
+  });
+
+  it('CSS:閲覧中の題名と編集中の題名が、同じ式(本文の大きさ × 15 / 13)で大きさを決める', () => {
+    const expected = `font-size: calc(var(--pkc-text-size, ${TITLE_BASE_FONT_PX}px) * ${TITLE_FONT_PX} / ${TITLE_BASE_FONT_PX});`;
+    expect(ruleOf("[data-pkc-field='detail-title']")).toContain(expected);
+    expect(ruleOf("[data-pkc-field='editor-title']")).toContain(expected);
   });
 });

@@ -25,6 +25,22 @@ async function backInsideAfterReload(page: Page): Promise<void> {
   await expect(page.locator(SMART_ROW), '中に居るのに、スマートフォルダ自身の行が一覧に出ている').toHaveCount(0);
 }
 
+/**
+ * スマートフォルダを作って題名を付け、元の場所(ルート)へ戻る。
+ * 🔴 作った直後はそのスマートフォルダの**中に入り、編集には入らない**(依頼 85-4。Gemini 裁定 = 推薦 C)── 旧い手順は
+ * 「作る → 編集で題名 → 保存 → 一覧の行を 2 回押して入る」だった。いまは入った状態から、題名を付けるために「編集」を押し、
+ * 保存したら、後の道中(ルートの行を 2 回押して入る)に合わせてパンくずの左端で戻る。
+ */
+async function makeSmart(page: Page, title: string): Promise<void> {
+  await createEntry(page, 'smart');
+  await expect(page.locator(WHY), '作った直後に、そのスマートフォルダの中に入っていない').toBeVisible();
+  await expect(page.locator('[data-pkc-field="editor-title"]'), '作った直後に編集へ入っている').toHaveCount(0);
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await page.locator('[data-pkc-field="editor-title"]').fill(title);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] [data-pkc-action="enter-folder"]');
+}
+
 /** 題名と本文を持つノートを 1 件作る(⚠ 2 列の編集で入れる)。 */
 async function makeNote(page: Page, title: string, body: string): Promise<void> {
   await createEntry(page, 'text');
@@ -49,10 +65,7 @@ test('🔴 条件を足すと、タグの付いたノートが場所を越えて
   await makeNote(page, '買い物', '---\ntags: [家事]\n---\n牛乳\n');
 
   // ② スマートフォルダを作る
-  await createEntry(page, 'smart');
-  const title = page.locator('[data-pkc-field="editor-title"]');
-  if (await title.count()) await title.fill('請求ぜんぶ');
-  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await makeSmart(page, '請求ぜんぶ');
 
   // ③ フォルダの面で 2 回押して中へ入る(⚠ 1 回目は選ぶだけ)
   await expect(page.locator(SMART_ROW), 'スマートフォルダが一覧に出ていない').toHaveCount(1);
@@ -108,10 +121,7 @@ test('🔴 落とすと条件のタグが付き、「ここから外す」で外
   await gotoApp(page);
 
   await makeNote(page, '請求メモ', 'まだタグは無い\n');
-  await createEntry(page, 'smart');
-  const title = page.locator('[data-pkc-field="editor-title"]');
-  if (await title.count()) await title.fill('請求ぜんぶ');
-  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await makeSmart(page, '請求ぜんぶ');
 
   // 条件を入れておく(中へ入って足す → 出る)
   await page.locator(SMART_ROW).first().dblclick();
@@ -178,10 +188,7 @@ test('🔴 中でタグを外すと、集め直しを待たずに行が消える
   await makeNote(page, '請求書', '---\ntags: [請求]\n---\n請求の中身\n');
   await makeNote(page, '請求の控え', '---\ntags: [請求]\n---\n控えの中身\n');
 
-  await createEntry(page, 'smart');
-  const title = page.locator('[data-pkc-field="editor-title"]');
-  if (await title.count()) await title.fill('請求ぜんぶ');
-  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await makeSmart(page, '請求ぜんぶ');
 
   await page.locator(SMART_ROW).first().dblclick();
   await page.locator('[data-pkc-field="smart-cond"]').fill('請求');
@@ -245,10 +252,7 @@ test('🔴 種類で絞ると、その種類だけが集まる (#421 段②)', a
   if (await ft.count()) await ft.fill('はこ');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  await createEntry(page, 'smart');
-  const title = page.locator('[data-pkc-field="editor-title"]');
-  if (await title.count()) await title.fill('フォルダぜんぶ');
-  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await makeSmart(page, 'フォルダぜんぶ');
 
   await page.locator(SMART_ROW).first().dblclick();
   await expect(page.locator(WHY)).toContainText('条件を選んでください');
@@ -298,10 +302,7 @@ test('🔴 語で絞ると、その語があるノートだけが集まる (#421
   await makeNote(page, '請求のひかえ', '請求書をまとめた本文です\n');
   await makeNote(page, '買い物のメモ', '牛乳と卵を買う\n');
 
-  await createEntry(page, 'smart');
-  const title = page.locator('[data-pkc-field="editor-title"]');
-  if (await title.count()) await title.fill('請求まわり');
-  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await makeSmart(page, '請求まわり');
 
   await page.locator(SMART_ROW).first().dblclick();
   await expect(page.locator(WHY)).toContainText('条件を選んでください');
@@ -360,10 +361,7 @@ test('🔴 「未処理がある」で、やり残しのあるノートだけが
   await makeNote(page, '片づいた仕事', '- [x] 済み\n- [x] 済み\n');
   await makeNote(page, 'ただのメモ', '項目はありません\n');
 
-  await createEntry(page, 'smart');
-  const title = page.locator('[data-pkc-field="editor-title"]');
-  if (await title.count()) await title.fill('やり残し');
-  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await makeSmart(page, 'やり残し');
 
   await page.locator(SMART_ROW).first().dblclick();
   await expect(page.locator(WHY)).toContainText('条件を選んでください');
@@ -437,10 +435,7 @@ test('🔴 ノートから「どの入れ物に集まっているか」が分か
   await makeNote(page, '見積書', '---\ntags: [請求]\n---\n見積の中身\n');
 
   // ② 入れ物を作って、中へ入って条件を足す(⚠ ここで初めて worker が舐める)
-  await createEntry(page, 'smart');
-  const title = page.locator('[data-pkc-field="editor-title"]');
-  if (await title.count()) await title.fill('請求ぜんぶ');
-  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await makeSmart(page, '請求ぜんぶ');
   await page.locator(SMART_ROW).first().dblclick();
   await page.locator('[data-pkc-field="smart-cond"]').fill('請求');
   await clickReal(page, '[data-pkc-action="smart-cond-add"]');

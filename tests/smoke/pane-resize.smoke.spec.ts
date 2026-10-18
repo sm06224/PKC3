@@ -243,11 +243,33 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
    * ② 🔴 **掴んで動かした後に畳まれない。** ⚠ ブラウザは指を離した後に `click` も
    * 撃つので、捨てていないと**広げた直後にその面が消える**。
    */
+  const autoW = await widthOf(page, 'sidebar');
   await dragGrip(page, 'sidebar', 100);
-  expect(
-    await widthOf(page, 'sidebar'),
-    '広げた直後に畳まれた(離したときの click を捨てていない)',
-  ).toBeGreaterThan(100);
+  const widenedW = await widthOf(page, 'sidebar');
+  expect(widenedW, '広げた直後に畳まれた(離したときの click を捨てていない)').toBeGreaterThan(100);
+  expect(widenedW, '前提:掴んで広げたら自動の幅より広い').toBeGreaterThan(autoW + 50);
+
+  /**
+   * ③ 🔴 束 L3(台帳 #1852 / 依頼 311): 境目を**掴まずに続けて 2 回押す**と、広げた幅が自動の幅に戻る。
+   * ⚠ 新しい起動は足さない(この道中に載せる)。1 回目の押しは今までどおり畳む(上の「押す = 畳む」)── 2 回目で戻って忘れる。
+   *   2 回とも同じ点を実マウスで押す(2 回目の押しの時点で境目は動いているので、`dblclick` では当たらない)。
+   */
+  const gb = (await page.locator(grip('sidebar')).boundingBox())!;
+  const gx = gb.x + gb.width / 2;
+  const gy = gb.y + gb.height / 2;
+  await page.mouse.move(gx, gy);
+  await page.mouse.down();
+  await page.mouse.up();
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect
+    .poll(() => widthOf(page, 'sidebar'), { message: 'ダブルクリックしても自動の幅に戻らない' })
+    .toBeCloseTo(autoW, 0);
+  expect(await widthOf(page, 'sidebar'), '戻ったのではなく畳まれている').toBeGreaterThan(100);
+  // 対照群:覚えた幅も消えている(読み直しても自動の幅 ── 広げた幅へ戻らない)
+  await page.reload();
+  await expect(page.locator('[data-pkc-slot="root"][data-pkc-boot="ready"]')).toBeAttached();
+  expect(await widthOf(page, 'sidebar'), '読み直したら広げた幅が戻ってきた(覚えた幅を忘れていない)').toBeCloseTo(autoW, 0);
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

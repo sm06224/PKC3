@@ -462,7 +462,21 @@ test('🔴 文字を大きくすると段も広がり、狭い器では畳む (#
   // 空振り防止 ── `column-width` が `auto` なら NaN になる
   expect(stdChars, '段の下限が読めない(auto のまま)').toBeGreaterThan(30);
 
+  /**
+   * 🔴 束 L3(台帳 #1852 / 依頼 348-A): ノートの題名は本文と同じ割合で大きくなる。⚠ 新しい起動は足さない(この道中に載せる)。
+   *   標準は 15px のまま(選ばない user の見え方は 1 ドットも変えない)/ 特大(本文 17px)では題名が本文より大きい。
+   */
+  const titlePx = (): Promise<number> =>
+    page.evaluate(() =>
+      Number.parseFloat(
+        getComputedStyle(document.querySelector('[data-pkc-field="detail-title"]')!).fontSize,
+      ),
+    );
+  expect(await titlePx(), '標準の題名が 15px でない(選ばない user の見え方が変わった)').toBe(15);
+
   await setTextScale(page, 'xlarge');
+  const bigTitle = await titlePx();
+  expect(bigTitle, `特大の題名(${bigTitle}px)が本文(17px)より大きくない`).toBeGreaterThan(17);
   const big = await readGeom(page);
   expect(big.on, '特大にしたら段組みが消えた(広い画面なのに)').toBe(true);
   /**

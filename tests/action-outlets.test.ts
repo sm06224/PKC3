@@ -205,7 +205,8 @@ const OBJECT_LONE: readonly string[] = [
   // ⚠ `dual-row` は 2026-09-04(#687 D-1)に長押し(`long-press.ts`)が 2 つ目の出口になったので外した
   // ⚠ `edit-cell` は 2026-09-05(#708 段④)に markdown の表の升(`markdown-render.ts`)が
   //    2 つ目の出口になったので外した(csv の表は `csv-table.ts`)
-  'enter-folder',
+  // ⚠ `enter-folder` は 2026-10-18(台帳 #1852 束 N2 / 依頼 85-6)にフォルダの概要の「ほか N 件を左のペインで開く」
+  //    (`folder-overview.ts`)が 2 つ目の出口になったので外した(1 つ目はパンくず `filer.ts`)
   'insert-entry-link',
   // ⚠ `move-entry` は #813(2026-09-09)で受け手ごと外した ── プルダウンを消したので
   //    焼く所が 0 件になった(残る口は `move-to-folder` と D&D)

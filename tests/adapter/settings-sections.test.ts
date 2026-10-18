@@ -125,9 +125,10 @@ function setup() {
 const ALL_IDS = [
   'messages',
   'theme',
+  // 依頼 77-1:読みにくいときにまず触る「文字の大きさ」を配色の次へ(幅の 2 つは続ける)
+  'text-scale',
   'page-format',
   'prose-align',
-  'text-scale',
   'read-columns',
   'column-rule',
   'tag-badge',
@@ -166,9 +167,9 @@ const ALL_IDS = [
 const DT_ORDER: Record<string, string[]> = {
   'settings-user': [
     '配色',
+    '文字の大きさ', // 依頼 77-1
     'ページ設定',
     '本文の置き場所',
-    '文字の大きさ',
     '本文の段組み',
     '段の境界線',
     '本文のタグの見せ方',

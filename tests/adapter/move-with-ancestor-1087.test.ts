@@ -163,7 +163,8 @@ describe('選んだ物のうち、祖先も選ばれている物は動かさな�
     expect(parentOf(r, 'f'), 'F が T に入っていない').toEqual(['t']);
     expect(parentOf(r, 'd'), 'D が F から外れた(行き先の直下へ出た)').toEqual(['f']);
     expect(r.parentCalls.map((c) => c.lid), 'D に disk への要求が出ている').toEqual(['f']);
-    expect(r.d.getState().notice, '知らせが実際に動かした件数ではない').toBe('1 件を「t-t」へ入れました');
+    // 依頼 85-8:フォルダを移したときは中の件数も言う(F の配下は D の 1 件)── 動かした件数は 1 件(F だけ)のまま
+    expect(r.d.getState().notice, '知らせが実際に動かした件数ではない').toBe('「t-f」(中の 1 件ごと)を「t-t」へ入れました');
   });
 
   it('🔴 間に選ばれていない物が挟まっていても付いていく(F > M > D、F と D を選ぶ)', async () => {

@@ -344,6 +344,17 @@ export interface SettingsFile {
   readonly kind: string;
   readonly version: number;
   readonly entries: readonly SettingsEntry[];
+  /**
+   * 🔴 **書き出した端末で「標準」のままだった設定の鍵**(依頼 207。Gemini 裁定 = 推薦 A)。
+   *
+   * > 画面の物語:会社の PC が文字の大きさ「標準」、家の PC が「特大」のとき、会社の設定を書き出して家で取り込むと、
+   * > 文字は「特大」のまま残った。取り込みの画面も、そのことを言わなかった。
+   *
+   * ⚠ 値は載せない ── 「標準」の綴りは項目ごとに違い(鍵ごと消える物・`0` の物)、**消す**のが「標準に戻す」の実体である。
+   *   取り込む側は、ここに在る鍵を**標準に戻す**(`entries` に在る鍵は、そちらを優先する)。
+   * ⚠ 省略できる(古い版が書いた file には無い)。無いときは従来どおり「こちらの設定がそのまま残る」。
+   */
+  readonly defaults?: readonly string[];
 }
 
 /** 書き出す。⚠ **無い鍵は入れない**(空文字と「設定していない」を混ぜない)。 */
@@ -355,7 +366,13 @@ export function buildSettingsFile(read: (key: string) => string | null): Setting
     if (value.length > MAX_SETTING_CHARS) continue;
     entries.push({ key, value });
   }
-  return { kind: SETTINGS_FILE_KIND, version: SETTINGS_FILE_VERSION, entries };
+  // 🔴 標準のままの鍵も運ぶ(依頼 207)。⚠ 長すぎて落とした値は「標準」ではない ── 取り込み先を標準に戻してしまうので入れない
+  const defaults: string[] = [];
+  for (const { key } of PORTABLE_KEYS) {
+    const value = read(key);
+    if (value === null || value === '') defaults.push(key);
+  }
+  return { kind: SETTINGS_FILE_KIND, version: SETTINGS_FILE_VERSION, entries, defaults };
 }
 
 /**
@@ -377,7 +394,8 @@ export function settingsTooLongToExport(read: (key: string) => string | null): s
  *   全部書けなかったとき(私用ウィンドウ・容量の上限)も「0 件入れました」と成功と同じ形だった。
  */
 export function settingsAppliedNote(wrote: number, failed: number): string {
-  const head = `設定を ${String(wrote)} 件入れました(画面に出るのは再読み込みしてからです)`;
+  // 🔴 配色・文字の大きさ・ページ設定などの見た目は取り込んだこのタブにも**すぐ**当たる(依頼 312)。それ以外は起動時に読むので再読み込みが要る
+  const head = `設定を ${String(wrote)} 件入れました(配色・文字の大きさ・ページ設定などの見た目はすぐ変わります。ほかの項目は再読み込みしてから出ます)`;
   if (failed === 0) return head;
   return `${head}。${String(failed)} 件はこの端末に保存できず、入っていません(ブラウザの保存領域がいっぱいか、保存を止める設定になっています)`;
 }
@@ -406,7 +424,8 @@ export interface SettingsPlan {
     readonly key: string;
     readonly label: string;
     readonly from: string | null;
-    readonly to: string;
+    /** `null` = 標準に戻す(依頼 207。書き出した側で標準のままだった項目)。 */
+    readonly to: string | null;
   }[];
   /** 読めたが、いまと同じだったもの。 */
   readonly same: number;
@@ -431,6 +450,8 @@ export interface SettingsPlan {
    * `from` = いま変えてある割り当ての件数、`to` = ファイルの件数。割り当てが変わらない回は `null`。
    */
   readonly keymapReplace: { readonly from: number; readonly to: number } | null;
+  /** 🔴 ファイルが「標準のままの項目」を持っていたか(依頼 207)。古い版の file は持たない。 */
+  readonly defaultsIncluded: boolean;
   /** 読めなかった理由。`null` なら読めた。 */
   readonly error: string | null;
 }
@@ -444,6 +465,7 @@ const EMPTY_PLAN: SettingsPlan = {
   unreadable: [],
   unusableBindings: 0,
   keymapReplace: null,
+  defaultsIncluded: false,
   error: null,
 };
 
@@ -506,7 +528,7 @@ export function planSettingsImport(
   const labelOf = new Map(PORTABLE_KEYS.map((p) => [p.key, p.label]));
   const portable = new Map(PORTABLE_KEYS.map((p) => [p.key, p]));
   const skipped = new Set(SKIPPED_KEYS.map((s) => s.key));
-  const changes: { key: string; label: string; from: string | null; to: string }[] = [];
+  const changes: { key: string; label: string; from: string | null; to: string | null }[] = [];
   const refused: string[] = [];
   const unknown: string[] = [];
   const tooLong: string[] = [];
@@ -557,7 +579,37 @@ export function planSettingsImport(
       keymapReplace = { from: countOverriddenBindings(from), to: countOverriddenBindings(value) };
     }
   }
-  return { changes, same, refused, unknown, tooLong, unreadable, unusableBindings, keymapReplace, error: null };
+  /**
+   * 🔴 **書き出した側で標準のままだった項目は、こちらも標準に戻す**(依頼 207)。
+   * ⚠ ファイルの `entries` に在る鍵は上で扱い済み(`seen`)── そちらを優先する。
+   * ⚠ こちらが元から標準(値が無い)なら変わらないので、変更に数えない。
+   */
+  const defaultsRaw = o['defaults'];
+  const defaultsIncluded = Array.isArray(defaultsRaw);
+  if (Array.isArray(defaultsRaw)) {
+    for (const k of defaultsRaw as unknown[]) {
+      if (typeof k !== 'string' || seen.has(k)) continue;
+      const label = labelOf.get(k);
+      if (label === undefined) continue; // 移す鍵でない物はここでは扱わない(消してよい物は名指しの一覧だけ)
+      seen.add(k);
+      const from = read(k);
+      if (from === null || from === '') continue;
+      changes.push({ key: k, label, from, to: null });
+      if (k === KEYMAP_KEY) keymapReplace = { from: countOverriddenBindings(from), to: 0 };
+    }
+  }
+  return {
+    changes,
+    same,
+    refused,
+    unknown,
+    tooLong,
+    unreadable,
+    unusableBindings,
+    keymapReplace,
+    defaultsIncluded,
+    error: null,
+  };
 }
 
 /**
@@ -567,7 +619,9 @@ export function planSettingsImport(
 export function settingsChangeText(c: {
   readonly label: string;
   readonly from: string | null;
+  readonly to?: string | null;
 }): string {
+  if (c.to === null) return `${c.label} を標準に戻します`;
   return c.from === null ? `${c.label} を設定します` : `${c.label} を入れ替えます`;
 }
 
@@ -597,8 +651,9 @@ export function settingsPlanNote(plan: SettingsPlan): string {
     parts.push(
       `ショートカットキーの割り当てのうち ${plan.unusableBindings} 件は、ブラウザが使うキーや他の操作とぶつかるため、入れても使われません`,
     );
-  // 🔴 書き出しは標準のままの項目(空・未設定)を入れない ── 読み込んでも、その項目は変わらない(#1087)
-  parts.push('書き出した側で標準のままだった項目は、こちらの設定がそのまま残ります');
+  // 🔴 標準のままだった項目は、ファイルが運んでいれば標準に戻る(依頼 207)/ 古い版のファイルは運ばない ── こちらの設定が残る(#1087)
+  if (!plan.defaultsIncluded)
+    parts.push('このファイルには、書き出した側で標準のままだった項目が入っていません。その項目は、こちらの設定がそのまま残ります');
   return `${parts.join('。')}。`;
 }
 

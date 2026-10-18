@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, answerAppDialog } from './helpers';
 
 /**
@@ -529,13 +529,17 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   const look = await page.evaluate((sel) => {
     const h = document.querySelector(`${sel} [data-pkc-field="parent-name"]`)!;
     const title = h.parentElement!;
-    const probe = document.createElement('div');
+    const row = h.closest('tr')!;
+    // 🔴 束 N2(依頼 244): 選んでいる行の中は `--muted` を行の字の色へ差し替える ── 測る probe も**行の中**に置く
+    //   (body に置くと、選んでいる行の差し替えが見えない)
+    const probe = document.createElement('span');
     probe.style.color = 'var(--muted)';
-    document.body.append(probe);
+    row.append(probe);
     const muted = getComputedStyle(probe).color;
     probe.remove();
     const cs = getComputedStyle(h);
     return {
+      selected: row.hasAttribute('data-pkc-selected'),
       color: cs.color,
       muted,
       titleColor: getComputedStyle(title).color,
@@ -547,7 +551,13 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
     };
   }, noteRow);
   expect(look.color, '親の名前が共通の薄い色(--muted)でない').toBe(look.muted);
-  expect(look.color, '親の名前が題名と同じ濃さ').not.toBe(look.titleColor);
+  if (look.selected) {
+    // 🔴 束 N2(依頼 244): ターミナルの配色で、選んでいる行の薄い字(親の名前・更新日)は行の字と同じ色(読める濃さ)
+    expect(look.color, '選んでいる行の親の名前が、行の字と同じ色でない').toBe(look.titleColor);
+    expect(look.muted, '選んでいる行の中で、薄い字の色(--muted)が行の字と同じ色になっていない').toBe(look.titleColor);
+  } else {
+    expect(look.color, '親の名前が題名と同じ濃さ').not.toBe(look.titleColor);
+  }
   expect(look.size, '親の名前が題名より小さくない').toBeLessThan(look.titleSize);
   expect(look.ellipsis, '親の名前の側が … で切れない').toBe('ellipsis');
   expect(look.hintH, '親の名前が行からはみ出している').toBeLessThanOrEqual(look.rowH);
@@ -724,6 +734,62 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
     page.locator('[data-pkc-action="commit-edit"]').first(),
     '作る入口を押しても編集に入れない(保存の押し所が出ない)',
   ).toBeVisible();
+
+  /**
+   * 🔴 束 N2(台帳 #1852 / 依頼 85-8): 中身の入ったフォルダを別のフォルダへ掴んで入れると、知らせが中の件数を言い、
+   * 「元に戻す」で戻る。⚠ 新しい起動は足さない(この道中に載せる)。上で「はこ」の中に作ったノートを 1 件、保存して使う。
+   */
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const folderByName = (name: string): string =>
+    `[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]:has([data-pkc-field="title"]:text-is("${name}"))`;
+  const crumbRoot = page.locator('[data-pkc-region="filer-breadcrumb"] button').first();
+  await clickReal(page, crumbRoot);
+  await expect(page.locator(folderByName('はこ')), '前提:ルートに「はこ」が居る').toHaveCount(1);
+  await makeFolder(page, 'つぎ');
+  await clickReal(page, crumbRoot);
+  await expect(page.locator(folderByName('つぎ')), '前提:ルートに「つぎ」が居る').toHaveCount(1);
+  const statusLine = page.locator('[data-pkc-region="status"]');
+  await page.dragAndDrop(folderByName('はこ'), folderByName('つぎ'));
+  await expect(statusLine, 'フォルダごと入れた知らせが、中の件数を言っていない').toContainText(
+    '「はこ」(中の 1 件ごと)を「つぎ」へ入れました',
+  );
+  await expect(page.locator(folderByName('はこ')), '「はこ」がルートから消えていない').toHaveCount(0);
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect(page.locator(folderByName('はこ')), '「元に戻す」で「はこ」がルートに戻らない').toHaveCount(1);
+
+  /**
+   * 🔴 束 N2(依頼 85-5): いま居るフォルダの名前を F2 で変えると、確定・やめる・他所を押す、のどれでも元のフォルダの中へ戻る。
+   *   (直す前は、名前の欄を出すために 1 つ上へ移ったまま、上の階層に居続けた)
+   */
+  await page.locator(folderByName('はこ')).dblclick();
+  const crumb = page.locator('[data-pkc-region="filer-breadcrumb"]');
+  await expect(crumb, '「はこ」へ入れていない').toContainText('はこ');
+  const renameHere = async (end: (box: Locator) => Promise<void>, name: string): Promise<void> => {
+    // パンくずの現在地を押すと、いま居るフォルダが選ばれる(F2 はその名前を変える)
+    await clickReal(page, '[data-pkc-region="filer-breadcrumb"] [data-pkc-action="enter-folder"][data-pkc-entry]');
+    // ⚠ F2 は表の中でしか効かない(`filer-table` の外では撃たない)。居るフォルダの中身の行(別のノート)に焦点を置くと
+    //   その行の改名になってしまうので、表そのものへ鍵を届ける(行に焦点が無い = 選んでいるもの = 居るフォルダ自身)
+    await page.locator('[data-pkc-region="filer-table"]').dispatchEvent('keydown', {
+      key: 'F2',
+      code: 'F2',
+      bubbles: true,
+      cancelable: true,
+    });
+    const box = page.locator('[data-pkc-field="row-rename"]');
+    await expect(box, '名前を変える欄が出ない').toBeVisible();
+    await box.fill(name);
+    await end(box);
+    await expect(box, '名前の欄が残っている').toHaveCount(0);
+  };
+  await renameHere((b) => b.press('Enter'), 'はこ改');
+  await expect(crumb, '確定したのに元のフォルダの中へ戻っていない').toContainText('はこ改');
+  await renameHere((b) => b.press('Escape'), 'はこ没');
+  await expect(crumb, 'やめたのに元のフォルダの中へ戻っていない').toContainText('はこ改');
+  await expect(crumb).not.toContainText('はこ没');
+  await renameHere(async () => {
+    await page.locator('[data-pkc-region="status"]').click({ force: true });
+  }, 'はこ他');
+  await expect(crumb, '他所を押したのに元のフォルダの中へ戻っていない(他所を押すと打った名前で確定する)').toContainText('はこ他');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
