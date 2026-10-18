@@ -739,3 +739,34 @@ describe('寄せの規則が 2 つの面に在る(書き出しだけ古くなら
     );
   });
 });
+
+/**
+ * 🔴 **透明な画像の後ろの格子**(依頼 138)。読む画面・別ウィンドウ・Split プレビューは同じ app.css の
+ * `.pkc-md-rendered` 規則を使い、書き出し HTML には焼かれる ── どちらにも在ることと、
+ * 実際に出る画像の class(`pkc-asset-ref`)に当たる選択子であることを見る。
+ */
+describe('透明な画像の後ろの格子(依頼 138)', () => {
+  const norm = (x: string): string => x.replace(/['"]/g, '').replace(/\s+/g, '').replace(/;\}/g, '}');
+  const VIEWER = shippedStyle().replace(/\/\*[\s\S]*?\*\//g, '');
+  const RULE = '.pkc-md-renderedimg.pkc-asset-ref[src]';
+
+  it('🔴 画像が実際に出す class が、格子の選択子に当たる', () => {
+    const host = document.createElement('div');
+    host.innerHTML = renderMarkdown('![図](asset:k1)\n');
+    const img = host.querySelector('img')!;
+    expect(img.classList.contains('pkc-asset-ref'), '画像の class が変わった').toBe(true);
+    // 読み込んだ後(src が入った後)に当たり、読み込み前には当たらない(否定ケース)
+    img.setAttribute('src', 'blob:x');
+    expect(img.matches('img.pkc-asset-ref[src]')).toBe(true);
+    img.removeAttribute('src');
+    expect(img.matches('img.pkc-asset-ref[src]')).toBe(false);
+  });
+
+  it('🔴 アプリと書き出し HTML の両方に、格子の規則が在る', () => {
+    for (const [name, css] of [['アプリ', CSS], ['書き出し', VIEWER]] as const) {
+      const n = norm(css);
+      expect(n, `${name}に格子の選択子が無い`).toContain(RULE);
+      expect(n, `${name}に市松の描画が無い`).toMatch(/\.pkc-md-renderedimg\.pkc-asset-ref\[src\][^{]*\{[^}]*conic-gradient\(/);
+    }
+  });
+});

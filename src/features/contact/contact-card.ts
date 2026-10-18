@@ -163,6 +163,43 @@ function values(v: FrontmatterValue | undefined): string[] {
 }
 
 /**
+ * 🔴 **「,」で並べた複数の宛先を、1 件ずつに割る**(依頼 285 A)。
+ * ⚠ `email: a@b.co, c@d.co` / `tel: 090-1111-2222, 03-1234-5678` の全体が 1 つの字で残ると、
+ *   メールは押せず、電話は先頭の番号しか掛からない。`- ` で 1 行ずつ書いた形と同じに読む。
+ * ⚠ 割るのは `<…>` ・`"…"`・`(…)` の**外**の「,」「，」だけ ── `"山田, 太郎" <a@b.co>` の名前の中の「,」で割らない。
+ * 🔑 割るのはここ 1 か所 ── 画面・絞り込み・.vcf 書き出しは `ContactCard` の `tels` / `emails` を同じに読む。
+ */
+export function splitWays(s: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let angle = false;
+  let quote = false;
+  let paren = 0;
+  for (const c of s) {
+    if (c === '"') quote = !quote;
+    else if (!quote && c === '<') angle = true;
+    else if (!quote && c === '>') angle = false;
+    else if (!quote && !angle && c === '(') paren += 1;
+    else if (!quote && !angle && c === ')' && paren > 0) paren -= 1;
+    if ((c === ',' || c === '，') && !quote && !angle && paren === 0) {
+      out.push(cur);
+      cur = '';
+    } else cur += c;
+  }
+  out.push(cur);
+  return out.map((x) => x.trim()).filter((x) => x !== '');
+}
+
+/**
+ * 🔴 **`名前 <宛先>` の宛先だけを取る**(依頼 285 A)。`<…>` が末尾に無ければそのまま返す。
+ * ⚠ 押し先(`mailto:` / `tel:`)と .vcf の `EMAIL` / `TEL` は必ずこれを通す ── 名前ごと渡すと壊れた宛先になる。
+ */
+export function wayAddress(s: string): string {
+  const m = /<([^<>]*)>\s*$/.exec(s.trim());
+  return m === null ? s.trim() : m[1]!.trim();
+}
+
+/**
  * 🔴 **手で書いた電話番号の先頭の 0 を落とさない**(#1087)。
  * ⚠ `tel: 09012345678` は frontmatter では**数**として読まれ、`9012345678` になる ──
  *   そのまま `tel:` に使うと**別の番号**へかかる。数として読まれた値は、原文の行から
@@ -249,8 +286,8 @@ export function displayWays(list: readonly string[]): {
  */
 export function contactOf(lid: string, title: string, body: string): ContactCard | null {
   const { meta } = parseFrontmatter(body);
-  const rawTels = telValues(body, meta[CONTACT_KEYS.tel]);
-  const rawEmails = values(meta[CONTACT_KEYS.email]);
+  const rawTels = telValues(body, meta[CONTACT_KEYS.tel]).flatMap(splitWays);
+  const rawEmails = values(meta[CONTACT_KEYS.email]).flatMap(splitWays);
   if (rawTels.length === 0 && rawEmails.length === 0) return null;
   /**
    * 🔴 **渡る量に門を置く**(#536 ③)。⚠ 実測は `CONTACT_LIMITS.wire` の注記に在る
@@ -351,7 +388,7 @@ export function telHref(tel: string): string | null {
    *   (**別の番号**)になった。番号に使う字(数字・`+`・`-`・空白・括弧)が続く所までで切る。
    * ⚠ 全角の数字も番号として読む(`\d` は半角しか当たらない ── 押せない字のままだった)。
    */
-  const half = tel.normalize('NFKC');
+  const half = wayAddress(tel).normalize('NFKC');
   // ⚠ 頭の飾り(`TEL:` など)は今までどおり読み飛ばす ── 最初の数字か `+` から読み始める
   const first = half.search(/[+\d]/);
   if (first < 0) return null;
@@ -387,8 +424,10 @@ export function telHref(tel: string): string | null {
  *   件名・宛先の追加・本文などの**クエリ**として読まれ、書いた宛先と別の相手へ宛てた下書きになる。
  */
 export function mailHref(email: string): string | null {
-  const m = /^[^\s@?&#]+@[^\s@?&#]+$/.exec(email.trim());
-  return m === null ? null : `mailto:${email.trim()}`;
+  // 🔴 `名前 <宛先>` は宛先だけを `mailto:` に載せる(依頼 285 A)
+  const addr = wayAddress(email);
+  const m = /^[^\s@?&#]+@[^\s@?&#]+$/.exec(addr);
+  return m === null ? null : `mailto:${addr}`;
 }
 
 /** 一覧の 1 行に出す字。⚠ **所属が無ければ足さない**(空の括弧を出さない)。 */

@@ -2527,7 +2527,7 @@ export type UserAction =
    * 🔴 **構造 1 枚をノートへ**(#918 段①。user 要望 2026-09-14「ai向けに構造吐き出したり」)。
    * ⚠ 中身は 1 文字も出さない ── 出すのは表・列・型・鍵・繋がり・行数だけである。
    */
-  | { type: 'SQL_SCHEMA_TO_NOTE'; lid: string; relationId: string }
+  | { type: 'SQL_SCHEMA_TO_NOTE'; lid: string; relationId: string; parentLid?: string | null }
   /**
    * 🔴 **つながり図を開く / 閉じる**(#918 段⑤。裁定 2026-09-15 = この窓の中)。
    * ⚠ 開いたとき構造をまだ採っていなければ、採ってくるよう頼む。
@@ -4055,6 +4055,8 @@ export type DomainEvent =
       /** ⚠ **id は押した側が作る** ── 純粋な reducer も effect も乱数を持たない。 */
       lid: string;
       relationId: string;
+      /** 🔴 書き出すノートの置き場(押した時に開いていたフォルダ。無ければ最上位。依頼 91-2)。 */
+      parentLid?: string | null;
     }
   /**
    * 🔴 **つながり図のために構造を採ってきてほしい**(#918 段⑤)。
@@ -5982,6 +5984,7 @@ function reduceCore(
             where: schemaWhereOf(state.sqlPage.guest, state.sqlPage.extraGuests),
             lid: action.lid,
             relationId: action.relationId,
+            parentLid: action.parentLid ?? null,
             ...route,
           },
         ],

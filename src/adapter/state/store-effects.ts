@@ -1429,6 +1429,7 @@ export function connectStoreEffects(
        */
       case 'REQUEST_SQL_SCHEMA': {
         const { where, lid, relationId } = ev;
+        const parentLid = ev.parentLid ?? null;
         /**
          * 🔴 構造をノートへ書く回も、器が表を読み込み始めたら画面で言う(#682)。
          * ⚠ この回は `runToken` を進めない(`SQL_SCHEMA_TO_NOTE`)── 合図の札は**いまの `runToken`**を読む。
@@ -1467,7 +1468,7 @@ export function connectStoreEffects(
                */
               notes: copyDigestNotes(copy, (ev.duckExtra?.length ?? 0) > 0),
             }),
-            parentLid: null,
+            parentLid,
             relationId,
             // 🔴 書き出したノートは**読む面で開く**(兄弟の `sql-to-note` と同じ ── #1087)。
             //   既定(書く状態)だと編集権を取らないまま編集に入り、次の「作る」も断られる

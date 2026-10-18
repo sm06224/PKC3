@@ -29,7 +29,7 @@
  */
 import { serializeFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
 import { foldBreaks, importTitleOf } from '../import/fold-breaks';
-import { CONTACT_KEYS, type ContactCard } from './contact-card';
+import { CONTACT_KEYS, wayAddress, type ContactCard } from './contact-card';
 
 /** 取込の振り分けが見る拡張子(`isMarkdownFileName` と同じ作法 ── 中身では決めない)。 */
 export function isVcfFileName(name: string): boolean {
@@ -711,7 +711,7 @@ export function buildVcf(cards: readonly ContactCard[]): string {
     const [family, given] = splitNameForN(c.name);
     lines.push(`N:${escapeValue(family)};${escapeValue(given)};;;`);
     // 🔴 題名が空なら FN は最初の電話 / メール(FN が空の vCard は受け手が捨てる)。N は空のまま(#1087)
-    lines.push(`FN:${escapeValue(c.name !== '' ? c.name : (c.tels[0] ?? c.emails[0] ?? ''))}`);
+    lines.push(`FN:${escapeValue(c.name !== '' ? c.name : wayAddress(c.tels[0] ?? c.emails[0] ?? ''))}`);
     // 🔴 内訳を `;` で繋ぎ直す(#534 段②)── 会社と部署の区切りを相手へ渡す
     // 🔴 読みは `SORT-STRING` に書く(vCard 3.0 の標準。依頼 145)── 取り込みが読み戻す
     if (c.yomi !== undefined && c.yomi.trim() !== '') lines.push(`SORT-STRING:${escapeValue(c.yomi.trim())}`);
@@ -733,8 +733,8 @@ export function buildVcf(cards: readonly ContactCard[]): string {
      *   `overlong` は「外したことを**帯で言う**」ためだけの印であって、
      *   ここで読む物ではない。
      */
-    for (const t of c.tels) lines.push(`TEL;TYPE=voice:${escapeValue(t)}`);
-    for (const e of c.emails) lines.push(`EMAIL;TYPE=internet:${escapeValue(e)}`);
+    for (const t of c.tels) lines.push(`TEL;TYPE=voice:${escapeValue(wayAddress(t))}`);
+    for (const e of c.emails) lines.push(`EMAIL;TYPE=internet:${escapeValue(wayAddress(e))}`);
     lines.push('END:VCARD');
   }
   return lines.length === 0 ? '' : `${lines.join('\r\n')}\r\n`;

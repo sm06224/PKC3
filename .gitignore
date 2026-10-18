@@ -1,4 +1,6 @@
 node_modules/
+# ⚠ 末尾の / は「フォルダ」にしか当たらない。worktree で張った node_modules のシンボリックリンク(ファイル)も拾うため、/ なしでも書く
+/node_modules
 dist/
 # 可搬単一 HTML の実験用(#400 段①②)── 配り物ではないので追跡しない
 dist-portable/

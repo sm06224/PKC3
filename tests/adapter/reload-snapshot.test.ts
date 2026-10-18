@@ -133,9 +133,9 @@ describe('deferNotice(先送りの案内の差し替え)', () => {
   it('文言を差し替えられる(押した場所と対の文言 ── §1)', async () => {
     const d = editing();
     await reloadSnapshot(d, 'c1', async () => ({ metas: [], relations: [] }), {
-      deferNotice: '同期しました。編集を終了すると反映されます',
+      deferNotice: '同期しました。編集を保存するか、編集をやめると反映されます',
     });
-    expect(d.getState().error).toBe('同期しました。編集を終了すると反映されます');
+    expect(d.getState().error).toBe('同期しました。編集を保存するか、編集をやめると反映されます');
   });
 });
 
