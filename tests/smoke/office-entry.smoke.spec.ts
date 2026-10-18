@@ -14,7 +14,11 @@
  * `crossOriginIsolated` が本当に立つかは**実ブラウザでしか分からない**。
  */
 import { test, expect } from '@playwright/test';
+import { mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { gotoApp, collectPageErrors, clickReal } from './helpers';
+import { OFFICE_LARGE_DOC_BYTES } from '../../src/features/office/office-entry';
 import { ALIVE_TTL_MS } from '../../src/adapter/platform/office/office-window';
 import {
   SHADOW_OPENED_NOTICE,
@@ -183,6 +187,8 @@ test('🔴 保存していない編集があれば、開く前に 2 択を訊く
   page,
   context,
 }) => {
+  // 窓の閉じを待つ道(`closeWindow`)と、境目を越える大きい文書の知らせ(依頼 242)を足したので、既定の 30 秒では足りない
+  test.setTimeout(120_000);
   const errors = collectPageErrors(page);
   await gotoApp(page);
   // Office 一式の meta を仕込む(`launcher.smoke.spec.ts` の Office タイルと同じ ── 入っているかの判定は meta の有無)。
@@ -371,7 +377,38 @@ test('🔴 保存していない編集があれば、開く前に 2 択を訊く
   const win3 = await third;
   expect(win3.url()).toContain('office/host.html');
   await expect(rows.first(), '控えが無いのに訊いた').toBeHidden();
-  await win3.close();
+  await closeWindow(win3);
+
+  /**
+   * 🔴 **大きい文書は、開く前に「開けないことがあります」と言う**(台帳 #1852 束 A1。依頼 242)。
+   * ⚠ 直す前は、とても大きい文書で Office の窓が空のまま止まり、PKC3 は何も言わなかった。言うだけで、開くのは止めない。
+   * 🔑 境目(300MB)を越える疎なファイルを**経路で**渡す(bytes を CDP に載せない)── 新しい起動は足さない。
+   *   対照群は上の小さい文書(開いたとき、この知らせは出ていない)。
+   */
+  await expect(page.locator('[data-pkc-region="status"]'), '対照群:小さい文書で大きい文書の知らせが出ている').not.toContainText('大きい文書');
+  // ⚠ 名前は ASCII ── この headless は非 ASCII の名前の file を経路で渡すと添付にならない(CLAUDE.md §4 の download 名と同じ癖)
+  const bigPath = join(mkdtempSync(join(tmpdir(), 'pkc3-big-')), 'big2.docx');
+  writeFileSync(bigPath, '');
+  truncateSync(bigPath, OFFICE_LARGE_DOC_BYTES + 1024 * 1024);
+  try {
+    await page.setInputFiles('[data-pkc-field="attach-input"]', bigPath);
+    const bigRow = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]:has-text("big2.docx")');
+    await expect(bigRow, '大きい文書の添付が一覧に出ない').toHaveCount(1, { timeout: 90_000 });
+    await clickReal(page, bigRow);
+    const bigOpen = page.locator('[data-pkc-action="open-office"]');
+    await expect(bigOpen, '大きい文書の「Office で開く」が出ない').toHaveCount(1, { timeout: 60_000 });
+    const fourth = context.waitForEvent('page');
+    await clickReal(page, bigOpen);
+    const win4 = await fourth;
+    await expect(
+      page.locator('[data-pkc-region="status"]'),
+      '🔴 大きい文書なのに「開けないことがあります」と言っていない',
+    ).toContainText('Office で開けないことがあります', { timeout: 60_000 });
+    await expect(page.locator('[data-pkc-region="status"]')).toContainText('「big2.docx」は大きい文書');
+    await win4.close();
+  } finally {
+    rmSync(dirname(bigPath), { recursive: true, force: true });
+  }
 
   expect(errors).toEqual([]);
 });
