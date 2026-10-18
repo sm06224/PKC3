@@ -23,7 +23,7 @@
  * ブラウザ objects で、比較も複製もできない ── 純粋な reducer に混ぜない。
  */
 import { errorText } from '@features/error-text';
-import { decodeImportText } from '@features/import/text-decode';
+import { changedOnWriteBack, decodeImportTextInfo, type ChangedOnWriteBack } from '@features/import/text-decode';
 
 /**
  * 🔴 **取り込んだ後にパソコン側で変わっていたときの字**(#1264 §2 欠陥 1。🟣 Gemini 裁定 2026-10-02)。
@@ -142,23 +142,27 @@ export class LaunchedFiles {
    */
   async readCurrent(
     lid: string,
-  ): Promise<{ changed: boolean; text: string | null; tooLarge?: true } | null> {
+  ): Promise<{ changed: boolean; text: string | null; tooLarge?: true; encoding?: ChangedOnWriteBack } | null> {
     const link = this.byLid.get(lid);
     if (link === undefined || typeof link.handle.getFile !== 'function') return null;
     try {
       const file = await link.handle.getFile();
       const changed = link.modifiedAt !== null && file.lastModified !== link.modifiedAt;
       let text: string | null = null;
+      let encoding: ChangedOnWriteBack | null = null;
       if (typeof file.size === 'number' && file.size > DIFF_READ_LIMIT_BYTES)
         return { changed, text, tooLarge: true };
       try {
         // 🔴 取り込みと**同じ読み方**(UTF-8 / UTF-16 / Shift_JIS)── `file.text()`(UTF-8 固定)だと、
-        //    Shift_JIS のファイルの差分が `�` だらけになる(#1087)。⚠ 書く文字コードは変えない(別の裁定)
-        text = decodeImportText(new Uint8Array(await file.arrayBuffer()));
+        //    Shift_JIS のファイルの差分が `�` だらけになる(#1087)。書く文字コードは UTF-8 のまま(元が違うときは書き戻しの確認で言う ── 依頼 126-1 A)
+        //    🔴 元が UTF-8(BOM なし)でないときは、それも返す ── 書き戻すと UTF-8 に変わる(台帳 #1852 束 F2 / 依頼 126-1 A)
+        const decoded = decodeImportTextInfo(new Uint8Array(await file.arrayBuffer()));
+        text = decoded.text;
+        encoding = changedOnWriteBack(decoded);
       } catch {
         /* 中身だけ読めなかった ── 差分なしで進める */
       }
-      return { changed, text };
+      return { changed, text, ...(encoding === null ? {} : { encoding }) };
     } catch {
       return null;
     }
