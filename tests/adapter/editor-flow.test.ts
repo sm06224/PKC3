@@ -58,7 +58,8 @@ function setup(bodies: Record<string, string>, failPersist = false) {
       Promise.reject(new Error('この test では添付の差し替えを使わない')),
     reorderEntry: async () => stubStamps(),
     persistEntry: async (e) => {
-      if (failPersist) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+      // ⚠ 2026-10-18(#1163 依頼 104-1 B): 空き不足は編集の画面へ戻すようになった ── 保存し直しの帯を見るため、空き不足ではない失敗にする
+      if (failPersist) throw new Error('書き込みに失敗しました(test)');
       persisted.push(e);
       return stubStamps();
     },
