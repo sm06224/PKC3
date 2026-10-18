@@ -300,6 +300,32 @@ describe('OfficeWindow', () => {
     expect('fromShadow' in h2.ch.sent.filter((s) => s.type === 'document')[0]!.payload, '保存済みの版に載った').toBe(false);
   });
 
+  /**
+   * 🔴 **元のファイルの大きさ**(依頼 367 A)。控えの版で開いた窓の次の控えが、元のファイルの大きさを持ち続けるために載せる。
+   * 載るのは「控えの版 かつ 大きさを渡したとき」だけ(それ以外の封筒は 1 バイトも変わらない)。送り直しにも引き継ぐ。
+   */
+  it('🔴 originSize は控えの版で大きさを渡したときだけ封筒に載り、送り直しにも引き継ぐ', () => {
+    const h = harness();
+    h.ow.open({ expectDocument: true });
+    h.ow.provideDocument('a.docx', new Uint8Array([1]), 'local:x', [], null, true, 4321);
+    h.ch.deliver('ready-for-document');
+    h.ch.deliver('ready-for-document');
+    const docs = h.ch.sent.filter((s) => s.type === 'document');
+    expect(docs[0]!.payload.originSize).toBe(4321);
+    expect(docs[1]!.payload.originSize, '送り直しに引き継いでいない').toBe(4321);
+
+    for (const args of [
+      ['a.docx', new Uint8Array([1]), 'lid-9', [], null, true],            // 大きさを渡さない
+      ['a.docx', new Uint8Array([1]), 'lid-9', [], null, false, 4321],     // 控えの版でない
+    ] as const) {
+      const h2 = harness();
+      h2.ow.open({ expectDocument: true });
+      h2.ow.provideDocument(...(args as unknown as Parameters<typeof h2.ow.provideDocument>));
+      h2.ch.deliver('ready-for-document');
+      expect('originSize' in h2.ch.sent.filter((s) => s.type === 'document')[0]!.payload).toBe(false);
+    }
+  });
+
   it('対応外・未配備・描画完了は、そのまま呼び出し側へ伝える', () => {
     const h = harness();
     h.ch.deliver('unsupported', { missing: ['JSPI'] });

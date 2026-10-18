@@ -18,6 +18,9 @@
 import {
   OFFICE_SHADOW_META,
   OFFICE_SHADOW_SHELF,
+  SHADOW_LIST_MAX,
+  isLocalShadowMatch,
+  isOrphanShadow,
   isShadowExpired,
   isShadowNewer,
   parseShadowName,
@@ -37,6 +40,8 @@ export interface ShadowEntry {
   readonly docName: string;
   /** `meta.json` が書いたノートの合言葉。無ければ `''`。 */
   readonly lid: string;
+  /** `meta.json` が書いた、開いた時の元の文書の大きさ(byte)。無ければ `null`。手元のファイルの突き合わせに使う(依頼 367 A)。 */
+  readonly size: number | null;
 }
 
 interface OpfsFile {
@@ -91,6 +96,7 @@ async function newestIn(id: string, dir: ShadowDir): Promise<ShadowEntry | null>
   if (best === null) return null;
   let docName = '';
   let lid = '';
+  let size: number | null = null;
   const text = await readText(dir, OFFICE_SHADOW_META);
   if (text !== null) {
     try {
@@ -99,12 +105,13 @@ async function newestIn(id: string, dir: ShadowDir): Promise<ShadowEntry | null>
       if (m.v === 1) {
         if (typeof m.name === 'string') docName = m.name;
         if (typeof m.lid === 'string') lid = m.lid;
+        if (typeof m.size === 'number' && m.size >= 0) size = m.size;
       }
     } catch {
       /* meta が壊れていても控えは引く */
     }
   }
-  return { id, file: best.file, at: best.at, ext: best.ext, docName, lid };
+  return { id, file: best.file, at: best.at, ext: best.ext, docName, lid, size };
 }
 
 /** 棚の全部の最新の控え。 */
@@ -170,6 +177,17 @@ export async function discardShadow(shelf: ShadowDir, lid: string): Promise<bool
   }
 }
 
+/** 棚の名前(id)で指した控えを棚ごと消す(持ち主の居ない控え用。依頼 367 A)。⚠ 冪等。 */
+export async function discardShadowById(shelf: ShadowDir, id: string): Promise<boolean> {
+  if (id === '') return false;
+  try {
+    await shelf.removeEntry(id, { recursive: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 🔴 **起動時の掃除: 7 日を過ぎた控えの棚を消す。**
  *
@@ -215,6 +233,26 @@ export interface ShadowOffer {
   readonly ext: string;
 }
 
+/** 手元のファイルを開くときに突き合わせる相手(依頼 367 A)。 */
+export interface LocalShadowQuery {
+  readonly name: string;
+  readonly size: number;
+  /** 最終更新の時刻(ms)。分からなければ `null`(訊く側へ倒す)。 */
+  readonly modifiedAt: number | null;
+}
+
+/** 「保存していない文書」の一覧の 1 件(持ち主のノートが居ない控え)。 */
+export interface OrphanShadow {
+  /** 棚の名前。⚠ `readById` / `discardById` に渡す。 */
+  readonly id: string;
+  readonly at: number;
+  readonly ext: string;
+  /** 元の文書の名前。無ければ `''`(Office の中で新しく作った文書)。 */
+  readonly docName: string;
+  /** 開いた時の元の文書の大きさ(byte)。無ければ `null`。控えから開き直した窓が持ち越す(次の控えが元の大きさを持つ)。 */
+  readonly size: number | null;
+}
+
 export interface OfficeShadows {
   /**
    * **同期で**答える: そのノートの控えが在るかもしれないか。⚠ 偽のときは今までどおり**同期で窓を開ける**
@@ -232,6 +270,19 @@ export interface OfficeShadows {
   readBytes(lid: string): Promise<Uint8Array<ArrayBuffer> | null>;
   /** 控えを消す(「保存済みの版で開く」)。投げない。 */
   discard(lid: string): Promise<void>;
+  /**
+   * 🔴 **同期で**答える: この手元のファイルの控えが在るかもしれないか(依頼 367 A)。⚠ 偽なら今までどおり同期で窓を開ける。
+   * 偽陰性が無いよう、`refresh` を窓の放送のたびに呼ぶ(添付の `mayHave` と同じ作法)。
+   */
+  mayHaveLocal(q: LocalShadowQuery): boolean;
+  /** その手元のファイルの控え(新しい物。無ければ `null`)。投げない。 */
+  findLocal(q: LocalShadowQuery): Promise<OrphanShadow | null>;
+  /** 持ち主の居ない控え(新しく作った文書など)を新しい順に。**同期**(`refresh` の控え)。 */
+  orphans(): readonly OrphanShadow[];
+  /** 棚の名前で控えの bytes を読む。無ければ `null`。投げない。 */
+  readById(id: string): Promise<Uint8Array<ArrayBuffer> | null>;
+  /** 棚の名前で控えを消す。投げない。 */
+  discardById(id: string): Promise<void>;
 }
 
 export function createOfficeShadows(deps: OfficeShadowDeps): OfficeShadows {
@@ -245,6 +296,9 @@ export function createOfficeShadows(deps: OfficeShadowDeps): OfficeShadows {
    * ⚠ 起動直後(`refresh` が終わるまで)は空 ── その間に押されても同期で開く(控えは棚に残る)。
    */
   let worth = new Map<string, number>();
+  /** 持ち主の居ない控え(期限内)。⚠ `refresh` が据える控え ── `orphans` / `mayHaveLocal` は同期でこれを見る。 */
+  let orphanList: OrphanShadow[] = [];
+  let orphanSizes = new Map<string, number | null>();
   /** `refresh` の世代 ── 遅い読み取りが、後から走った新しい結果を潰さない(偽陰性 = 控えを黙って見逃す、を作らない)。 */
   let gen = 0;
   const refresh = async (): Promise<void> => {
@@ -252,15 +306,25 @@ export function createOfficeShadows(deps: OfficeShadowDeps): OfficeShadows {
     try {
       const shelf = await openShelf();
       const next = new Map<string, number>();
+      const nextOrphans: OrphanShadow[] = [];
+      const nextSizes = new Map<string, number | null>();
       if (shelf !== null) {
         for (const e of await listShadows(shelf)) {
           if (isShadowExpired(e.at, now())) continue;
+          if (isOrphanShadow(e)) {
+            nextOrphans.push({ id: e.id, at: e.at, ext: e.ext, docName: e.docName, size: e.size });
+            nextSizes.set(e.id, e.size);
+          }
           // meta に lid が無い棚(古い窓が書いた)は相手の時刻が分からない → 訊く側へ倒す(`savedAt(null)` と同じ)
           const saved = e.lid === '' ? null : await deps.savedAt(e.lid);
           if (isShadowNewer(e.at, saved)) next.set(e.id, e.at);
         }
       }
-      if (mine === gen) worth = next;
+      if (mine === gen) {
+        worth = next;
+        orphanList = nextOrphans.sort((a, b) => b.at - a.at);
+        orphanSizes = nextSizes;
+      }
     } catch {
       /* 読めなかった ── 前の控えのまま */
     }
@@ -300,6 +364,48 @@ export function createOfficeShadows(deps: OfficeShadowDeps): OfficeShadows {
       }
       forget(lid);
       return null;
+    },
+    mayHaveLocal: (q) =>
+      orphanList.some(
+        (o) =>
+          !isShadowExpired(o.at, now()) &&
+          isLocalShadowMatch({ docName: o.docName, size: orphanSizes.get(o.id) ?? null, at: o.at, lid: '' }, q),
+      ),
+    findLocal: async (q) => {
+      try {
+        const shelf = await openShelf();
+        if (shelf === null) return null;
+        let best: OrphanShadow | null = null;
+        for (const e of await listShadows(shelf)) {
+          if (isShadowExpired(e.at, now()) || !isLocalShadowMatch(e, q)) continue;
+          if (best === null || e.at > best.at) best = { id: e.id, at: e.at, ext: e.ext, docName: e.docName, size: e.size };
+        }
+        return best;
+      } catch {
+        return null;
+      }
+    },
+    orphans: () => orphanList.filter((o) => !isShadowExpired(o.at, now())).slice(0, SHADOW_LIST_MAX),
+    readById: async (id) => {
+      try {
+        const shelf = await openShelf();
+        if (shelf === null) return null;
+        const dir = await shelf.getDirectoryHandle(id);
+        const e = await newestIn(id, dir);
+        return e === null ? null : await readShadow(shelf, e);
+      } catch {
+        return null;
+      }
+    },
+    discardById: async (id) => {
+      try {
+        const shelf = await openShelf();
+        if (shelf !== null) await discardShadowById(shelf, id);
+      } catch {
+        /* 消せなかった ── 控えは残り、次に開くときまた出る */
+      }
+      orphanList = orphanList.filter((o) => o.id !== id);
+      orphanSizes.delete(id);
     },
     readBytes: async (lid) => {
       try {

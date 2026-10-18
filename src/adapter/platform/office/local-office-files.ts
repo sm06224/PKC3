@@ -34,6 +34,14 @@ export interface StagedLocalFile {
   readonly writable: boolean;
 }
 
+/** 控えてあるファイルの中身を読まずに見た姿(控えの突き合わせ用。依頼 367 A)。 */
+export interface PendingLocalInfo {
+  readonly name: string;
+  readonly size: number;
+  /** 最終更新の時刻(ms)。分からなければ `null`。 */
+  readonly modifiedAt: number | null;
+}
+
 interface Held {
   readonly handle: LaunchedHandle;
   readonly name: string;
@@ -43,7 +51,7 @@ export class LocalOfficeFiles {
   /** 合言葉 → handle。⚠ **session 限り**(上の注記)。 */
   private readonly byToken = new Map<string, Held>();
   /** まだ Office へ渡していないもの。⚠ **1 件だけ持つ**(下の注記)。 */
-  private pending: (StagedLocalFile & { readonly handle: LaunchedHandle }) | null = null;
+  private pending: (StagedLocalFile & { readonly handle: LaunchedHandle; readonly modifiedAt: number | null }) | null = null;
   private seq = 0;
   /**
    * 🔴 **この読み込み固有の値**(合言葉に混ぜる)。連番だけだと読み込み直すたびに `local:1` へ戻り、
@@ -58,12 +66,21 @@ export class LocalOfficeFiles {
    *   2 件目を積んでも**開けるのは 1 件**である。積むと「押したら違うほうが開いた」
    *   になるので、**最後に来たものを開く**と決める(呼び手が name を画面に出す)。
    */
-  stage(handle: LaunchedHandle, name: string, bytes: Uint8Array): StagedLocalFile {
+  stage(handle: LaunchedHandle, name: string, bytes: Uint8Array, modifiedAt: number | null = null): StagedLocalFile {
     this.seq += 1;
     const token = localFileToken(`${this.session}-${this.seq}`);
     const writable = typeof handle.createWritable === 'function';
-    this.pending = { token, name, bytes, handle, writable };
+    this.pending = { token, name, bytes, handle, writable, modifiedAt };
     return { token, name, bytes, writable };
+  }
+
+  /**
+   * 控えてあるものの名前・大きさ・更新時刻(無ければ `null`)。⚠ **取り出さない** ── 一時保存の控えを訊いている間に
+   * 「やめる」を選ばれても、控えたファイルを失わない(`take()` は開くと決まってから)。
+   */
+  peek(): PendingLocalInfo | null {
+    const p = this.pending;
+    return p === null ? null : { name: p.name, size: p.bytes.byteLength, modifiedAt: p.modifiedAt };
   }
 
   /** 控えてあるものの名前(無ければ `null`)。⚠ 画面に出すためだけ。 */
