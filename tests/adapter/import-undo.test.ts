@@ -236,7 +236,7 @@ describe('main.ts の配線(#535 ②)', () => {
      * 🔑 上書きしている当の block の中に在ることまで見る(file 全体で数えると、
      *   既定の配線 1 件に満たされる ── CLAUDE.md §1)。
      */
-    const at = main.indexOf('const handle = handles[i];');
+    const at = main.indexOf('linkLaunchedFiles(dispatcher, launched, lids, handles, files);');
     expect(at, '上書きしている block が無い(前提が崩れている)').toBeGreaterThan(-1);
     const block = main.slice(Math.max(0, at - 400), at);
     expect(block, '上書き側で記憶を呼んでいない').toContain('importUndo.remember(lids)');
