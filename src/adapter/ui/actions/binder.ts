@@ -2589,6 +2589,11 @@ export interface BinderServices {
    *   「押された」を伝えるだけ(件数も生死もここで数えない)。
    */
   undoImport?(): void;
+  /**
+   * 🔴 **長い取り込み・書き出しを途中でやめる**(台帳 #1852 束 F2 / 依頼 253)。⚠ どの仕事の印かは `job-control.ts` が持つ ──
+   * binder は「押された」を伝えるだけ。編集中でも押せる(やめるのを門で止めない)。
+   */
+  cancelJob?(): void;
 }
 
 function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
@@ -14118,6 +14123,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   // 🔴 **直前の取込を取り消す**(#535 ②)── 消す規則も件数も実体側(`import-undo.ts`)
   'undo-import': (_dispatcher, _target, services) => {
     services.undoImport?.();
+  },
+  // 🔴 **長い取り込み・書き出しを途中でやめる**(台帳 #1852 束 F2 / 依頼 253)── 印を立てるだけ。止まる区切りは仕事の側(`job-control.ts`)
+  'cancel-job': (_dispatcher, _target, services) => {
+    services.cancelJob?.();
   },
   /**
    * 🔴 **段組みを回す**(#522 / #426 段②)。

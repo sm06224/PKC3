@@ -19,6 +19,7 @@ export function showNotices(
   action: NoticeAction | null = null,
 ): void {
   region.textContent = '';
+  region.removeAttribute(JOB_PANEL_ATTR);
   /**
    * ⚠ **操作が在るときは、注意が 0 件でも出す**(#535 ②)── 取り込みの戻り道は
    *   「注意が出たときだけ在る」ものではない。⚠ 逆に**どちらも無ければ出さない**
@@ -66,5 +67,42 @@ export function showNotices(
 /** 閉じる(次の取込で再び出る)。 */
 export function clearNotices(region: HTMLElement): void {
   region.textContent = '';
+  region.removeAttribute(JOB_PANEL_ATTR);
   region.hidden = true;
+}
+
+/** この欄がいま「やめる」ボタンつきの途中経過の欄か(結果の欄と見分ける印)。 */
+const JOB_PANEL_ATTR = 'data-pkc-job-panel';
+
+/**
+ * 🔴 **途中でやめられる仕事の欄**(台帳 #1852 束 F2 / 依頼 253)── 結果の欄(`showNotices`)と同じ場所・同じ見た目で、
+ * 題と「やめる」ボタンだけを出す。`cancel` が `null` ならボタンなし(やめている最中)。⚠ 閉じるボタンは置かない(仕事が終われば消える)。
+ * 押し所は `data-pkc-action="cancel-job"`(受け口は binder)。
+ */
+export function showJobPanel(
+  region: HTMLElement,
+  panel: { title: string; cancel: string | null; hint: string },
+): void {
+  region.textContent = '';
+  const head = document.createElement('div');
+  head.setAttribute('data-pkc-field', 'notices-title');
+  head.textContent = panel.title;
+  if (panel.cancel !== null) {
+    const act = document.createElement('button');
+    act.type = 'button';
+    act.setAttribute('data-pkc-action', 'cancel-job');
+    act.setAttribute('data-pkc-field', 'notices-action');
+    act.title = panel.hint;
+    act.textContent = panel.cancel;
+    head.append(act);
+  }
+  region.append(head);
+  region.setAttribute(JOB_PANEL_ATTR, '');
+  region.hidden = false;
+}
+
+/** 途中の欄を片づける。⚠ 結果の欄(もう `showNotices` で置き換わっている)は消さない。 */
+export function hideJobPanel(region: HTMLElement): void {
+  if (!region.hasAttribute(JOB_PANEL_ATTR)) return;
+  clearNotices(region);
 }

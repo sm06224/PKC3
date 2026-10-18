@@ -19,6 +19,8 @@ import {
   type ExportDeps,
 } from '../../src/adapter/ui/actions/export-archive';
 import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
+import { createCancelToken, type CancelToken } from '../../src/features/job-cancel';
+import type { JobControl } from '../../src/adapter/ui/actions/job-control';
 import { CORRUPT_REFUSAL } from '../../src/features/storage/db-corruption';
 import {
   forgetRescueWritten,
@@ -479,5 +481,99 @@ describe('exportArchive ── 添付が多いときは進み具合(添付 N / M
     const { deps, notices } = baseDeps({ source: sourceWithAssets(3) });
     await exportArchive(readyDispatcher(), deps);
     expect(notices.filter((m) => PROGRESS.test(m))).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **書き出しを途中でやめる**(台帳 #1852 束 F2 / 依頼 253)。
+ * 観測点は「ダウンロードが始まったか」「失敗の欄(OP_FAILED)に出していないか」「読めた分だけのバックアップへ倒れていないか」「出口で印を返したか」。
+ */
+describe('exportArchive ── 途中でやめる(依頼 253)', () => {
+  function jobWith() {
+    const tokens: CancelToken[] = [];
+    const finished: CancelToken[] = [];
+    const job: JobControl = {
+      start: () => {
+        const t = createCancelToken();
+        tokens.push(t);
+        return t;
+      },
+      finish: (t) => void finished.push(t),
+      cancelCurrent: () => false,
+    };
+    return { job, tokens, finished };
+  }
+  /** 添付 n 件。`onGet` は添付を 1 件読むたびに呼ぶ(やめる印を立てる場所)。 */
+  function sourceWithAssets(n: number, onGet: (i: number) => void = () => undefined): ArchiveSource {
+    const metas = Array.from({ length: n }, (_, i) => ({ key: `ast-${i}`, mime: 'image/png', size: 1, hash: null }));
+    let i = 0;
+    return {
+      ...fakeSource(),
+      listAssetMetas: async () => metas,
+      getAssetBlob: async () => {
+        onGet(i++);
+        return new Blob(['x']);
+      },
+    };
+  }
+
+  it('🔴 添付を読んでいる途中でやめると、ダウンロードを始めず、失敗にも読めた分だけのバックアップにもしない', async () => {
+    const j = jobWith();
+    let reads = 0;
+    const d = readyDispatcher();
+    const { deps, downloaded, notices } = baseDeps({
+      job: j.job,
+      source: sourceWithAssets(5, (i) => {
+        reads++;
+        if (i === 1) j.tokens[0]!.cancel(); // 2 件目を読んだところで「やめる」
+      }),
+      // 倒れ先(読めた分だけのバックアップ)が使われたら見える
+      rescue: { pick: fakeRescuePick(), ...noExtraPicks },
+    });
+    expect(await exportArchive(d, deps)).toBeNull();
+    expect(reads, '区切りで止まらず最後まで読んだ').toBe(2);
+    expect(downloaded, 'やめたのにダウンロードが始まった').toEqual([]);
+    expect(d.getState().error, 'やめたのを失敗の欄に出した').toBeNull();
+    expect(notices.at(-1)).toBe('書き出しをやめました(ファイルは作っていません)');
+    expect(notices.some((m) => m.includes('読めた分')), 'やめたのを保存領域の問題と読んで倒れた').toBe(false);
+    expect(j.finished, '出口で印を返していない').toEqual([j.tokens[0]]);
+  });
+
+  it('対照群: 印を立てなければ最後まで書き出す', async () => {
+    const j = jobWith();
+    let reads = 0;
+    const { deps, downloaded, notices } = baseDeps({ job: j.job, source: sourceWithAssets(5, () => void reads++) });
+    expect(await exportArchive(readyDispatcher(), deps)).toBe(1);
+    expect(reads).toBe(5);
+    expect(downloaded).toHaveLength(1);
+    expect(notices.at(-1)).toMatch(/^書き出しました: /);
+    expect(j.finished).toEqual([j.tokens[0]]);
+  });
+
+  it('🔴 組み終えた後(最後の添付を読み終えた直後)にやめても、ダウンロードは始めない', async () => {
+    const j = jobWith();
+    const { deps, downloaded, notices } = baseDeps({
+      job: j.job,
+      source: sourceWithAssets(2, (i) => {
+        if (i === 1) j.tokens[0]!.cancel(); // 最後の 1 件を読んだところ(次の読みは無い)
+      }),
+    });
+    expect(await exportArchive(readyDispatcher(), deps)).toBeNull();
+    expect(downloaded).toEqual([]);
+    expect(notices.at(-1)).toBe('書き出しをやめました(ファイルは作っていません)');
+  });
+
+  it('失敗した回も出口で印を返す(finally)', async () => {
+    const j = jobWith();
+    const { deps } = baseDeps({ job: j.job, source: fakeSource({ fail: 'boom' }) });
+    expect(await exportArchive(readyDispatcher(), deps)).toBeNull();
+    expect(j.finished).toEqual([j.tokens[0]]);
+  });
+
+  it('job が無い配線は従来どおり(印を作らない)', async () => {
+    const { deps, downloaded } = baseDeps({ source: sourceWithAssets(2) });
+    expect(deps.job).toBeUndefined();
+    expect(await exportArchive(readyDispatcher(), deps)).toBe(1);
+    expect(downloaded).toHaveLength(1);
   });
 });

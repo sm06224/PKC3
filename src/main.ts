@@ -218,7 +218,8 @@ import { buildShell, paintAlarmBar, paintMissedLine, paintCaptureBar, paintTimer
 import { showBootFailure, showBootProgress } from '@adapter/ui/render/boot-screen';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { installPhoneBack } from '@adapter/ui/actions/phone-back';
-import { showNotices, clearNotices } from '@adapter/ui/render/notices';
+import { showNotices, clearNotices, showJobPanel, hideJobPanel } from '@adapter/ui/render/notices';
+import { createJobControl } from '@adapter/ui/actions/job-control';
 import { createImportUndo, importFailurePanel, importPanel } from '@adapter/ui/actions/import-undo';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
@@ -1412,6 +1413,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     .then((list) => applyTagColors(document, list))
     .catch(() => {});
   const regions = buildShell(root);
+  /**
+   * 🔴 **長い取り込み・書き出しの「やめる」ボタン**(台帳 #1852 束 F2 / 依頼 253)。結果の欄(`regions.notices`)に、仕事が少し長引いたときだけ出す。
+   * ⚠ いつ出すか・どの仕事の印かの判断は `job-control.ts`。ここは欄へ描く配線だけ。
+   */
+  const jobs = createJobControl({
+    show: (panel) => showJobPanel(regions.notices, panel),
+    hide: () => hideJobPanel(regions.notices),
+  });
   /**
    * 🔴 **版面が入れ替わったときに面を描き直す口**(#671)。⚠ `center` はずっと後で
    *   組まれるので、繋がるまでは何もしない口にしておく(`repaintStatus` と同じ形)。
@@ -2807,6 +2816,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         },
         download: downloadBlob,
         notify: (message) => showStatus(message),
+        // 🔴 バックアップなどの書き出しを途中でやめる(依頼 253)
+        job: jobs,
         // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
         // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
         // バックアップで一番知りたい情報がそこにある
@@ -3223,6 +3234,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const importDeps: ImportDeps = {
       // 🔴 取り込みの最中にタブを閉じる・読み直すときに「離れますか」を出す(書込は保存の効果層を通らない)
       onWriting: (writing) => unloadGuard.setWriting(writing, 'import'),
+      // 🔴 バックアップの取り込みを途中でやめる(依頼 253)── 印と欄は `job-control.ts`。やめたときの取り消しは取り込みの取り消しと同じ道
+      job: jobs,
+      undoImport: () => importUndo.undo(),
       // ⚠ 生存 entry だけでは足りない ── ゴミ箱の lid(entries に居ないが
       // revisions を持つ)と衝突すると、その item がゴミ箱から消え、
       // 取り込んだ entry が他人の履歴を背負う(review H-1、実 sqlite で実証)
@@ -4696,6 +4710,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     dismissNotices: () => clearNotices(regions.notices),
     // 🔴 直前の取込をごみ箱へ(#535 ②)── 記憶も件数も `import-undo.ts` が持つ
     undoImport: () => importUndo.undo(),
+    // 🔴 長い取り込み・書き出しを途中でやめる(台帳 #1852 束 F2 / 依頼 253)── 印を立てるだけ。止まる区切りは仕事の側
+    cancelJob: () => void jobs.cancelCurrent(),
     /**
      * 🔴 **アプリの窓なら `× 閉じる` で窓ごと閉じる**(#300 段③ の直し)。
      * ⚠ 判断は `view-window.ts` ── ここは `window` を渡すだけである。

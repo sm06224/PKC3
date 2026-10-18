@@ -12,6 +12,8 @@
  */
 import { errorText, isQuotaFailure } from '@features/error-text';
 import { failImport } from './import-failure';
+import type { JobControl } from './job-control';
+import { isOperationCancelled, type CancelToken } from '@features/job-cancel';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { hasUnsavedTyping, phaseBlockReason, SECTION_DRAFT_NOTE } from '@adapter/state/app-state';
 import {
@@ -129,6 +131,16 @@ export interface ImportDeps {
     skippedEntries: string[];
     brokenChains: string[];
   }>;
+  /**
+   * 🔴 **途中でやめる**(台帳 #1852 束 F2 / 依頼 253)。⚠ **省略可** ── 無い配線は「やめる」ボタンを出さない(従来どおり最後まで走る)。
+   * 区切り(添付 1 件ごと・書き込みの段ごと)で印を見て、立っていればそこまでに入れた分を元に戻して抜ける。
+   */
+  job?: JobControl;
+  /**
+   * 🔴 **直前の取り込みを取り消す**(`import-undo.ts` の `undo()`)── やめたときに、ここまでに入れたノートをゴミ箱へ移す(依頼 253)。
+   * ⚠ 省略可 ── 無い配線は `DELETE_ENTRIES` を直に撃つ(同じ「ゴミ箱へ入れる」)。
+   */
+  undoImport?(): void;
   /**
    * 🔴 **バックアップのタグの色を戻す**(#1457)。⚠ **省略可** ── 無い配線では色を戻さない。
    * ⚠ いま付けている色は動かさず、付いていないタグの分だけ足す(`kept` = 見送った数)。
@@ -428,9 +440,12 @@ export async function importPkc2File(
   // 🔴 出口は 1 本ではない(断り・失敗・成功・例外)── `finally` で必ず戻す。戻し忘れると、
   //   終わった後もずっと「離れますか」が出続ける
   deps.onWriting?.(true);
+  /** 🔴 やめる印(依頼 253)。重い読み込みに入るとき `begin` で受け取り、出口(`finally`)で必ず返す。 */
+  const job: { token: CancelToken | null } = { token: null };
   try {
-    return await runImport(dispatcher, deps, inputFile);
+    return await runImport(dispatcher, deps, inputFile, job);
   } finally {
+    if (job.token !== null) deps.job?.finish(job.token);
     deps.onWriting?.(false);
   }
 }
@@ -439,8 +454,18 @@ async function runImport(
   dispatcher: Dispatcher,
   deps: ImportDeps,
   inputFile: File,
+  job: { token: CancelToken | null },
 ): Promise<number | null> {
   const file: File = inputFile;
+  /**
+   * 🔴 **やめられる仕事を始める**(依頼 253)。⚠ 確認の窓(取り込む / やめる)を**待っている間は始めない** ──
+   * 待っている間に「取り込み中」の欄が出ると、確認の窓と二重に見える。重い読み込みの直前に 1 度だけ呼ぶ。
+   */
+  const begin = (): void => {
+    if (job.token === null && deps.job !== undefined) job.token = deps.job.start('import');
+  };
+  /** 区切りで呼ぶ。やめる印が立っていれば `OperationCancelled` を投げる(下の `catch` が「やめました」と言う)。 */
+  const stop = (): void => job.token?.throwIfCancelled();
   /**
    * 🔴 **進行中の字(「取込中…」)を出している間だけ true**(#1017 C5)。⚠ 直す前は、失敗しても
    *   やめても「取込中…」が画面下に**残った**(エラーの行と並んで「まだ続いている」と読める)。
@@ -494,6 +519,34 @@ async function runImport(
   const revStats = { added: 0, dropped: 0, skipped: 0 };
   /** ゴミ箱へ入れ直せたノートの数(台帳 #1852 束 F2)。 */
   let trashRestored = 0;
+  /**
+   * 🔴 **やめた回の終わり方**(台帳 #1852 束 F2 / 依頼 253)。⚠ 失敗ではない(`OP_FAILED` は出さない)。
+   * ノートをまだ 1 件も書いていなければ何も残らない。書いていたら、**取り込みの取り消しと同じ道**(ゴミ箱へ入れる ── 新しい消し方は作らない)で
+   * ここまでに入れた分を元に戻す。⚠ 保存の最中などで取り消せないときは、残っていることをそのまま言う(戻したと偽らない)。
+   */
+  const finishCancelled = async (): Promise<null> => {
+    clearProgress();
+    if (entriesWritten === 0) {
+      deps.notify?.('取り込みをやめました(ノートは 1 件も追加されていません)');
+      return null;
+    }
+    // 書けた分を画面に出してから消す(state に居ない lid の削除は黙って捨てられる)
+    await deps.reload().catch(() => {});
+    deps.imported?.(writtenLids, undoOpts());
+    const blocked = phaseBlockReason(dispatcher.getState().phase);
+    if (blocked !== null) {
+      deps.notify?.(
+        `取り込みをやめました。ここまでに入れた ${entriesWritten} 件のノートは残っています。${blocked}「取り込みを取り消す」を押してください`,
+      );
+      return null;
+    }
+    if (deps.undoImport !== undefined) deps.undoImport();
+    else dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids: [...writtenLids] });
+    deps.notify?.(
+      `取り込みをやめました。ここまでに入れた ${entriesWritten} 件のノートはゴミ箱へ移しました(ゴミ箱から戻せます)`,
+    );
+    return null;
+  };
 
   try {
     const head = new Uint8Array(await file.slice(0, PORTABLE_SNIFF_BYTES).arrayBuffer());
@@ -525,6 +578,7 @@ async function runImport(
         return fail(`「${file.name}」: この画面からは PKC3 入り HTML を取り込めません`);
       }
       try {
+        begin();
         portable = await portableHtmlToArchive(file, deps.readImageArchive, new Date());
       } catch (e) {
         return fail(`「${file.name}」: ${reason(e)}`);
@@ -563,6 +617,7 @@ async function runImport(
             return null;
           }
         }
+        begin();
         const archive = portable ?? (await readArchive(file));
         restored = restoreArchive(archive, {
           existingLids: await deps.existingLids(),
@@ -609,6 +664,7 @@ async function runImport(
         return fail(unreadableZipMessage(file.name, format));
       }
       if (read) {
+        begin();
         const pkg = await read(file);
         container = pkg.container;
         zipAssets = pkg.assetSources;
@@ -616,6 +672,7 @@ async function runImport(
         preWarnings.push(...pkg.warnings);
       }
     } else {
+      begin();
       const payload = parsePkc2Html(await file.text());
       container = payload.container;
       gzipped = payload.exportMeta.assetEncoding === 'gzip+base64';
@@ -668,6 +725,8 @@ async function runImport(
     if (result.entries.length === 0) {
       return fail('取り込めるノートが 1 件も入っていませんでした');
     }
+    // 🔴 読み込みが済んだところが最初の区切り(依頼 253)── まだ何も書いていないので、やめても残る物は無い
+    stop();
     // ── assets: 1 件ずつ復号 → **中身のハッシュで key を決める** → 未所持なら書く
     // (content addressing / user 指示 2026-08-01「ZFS と同じ発想」)。同じ bytes は
     // 必ず同じ key に落ちるので、再取込も、取込と添付の混在も、1 回の取込の中の
@@ -717,6 +776,8 @@ async function runImport(
     //   ノートだけが N 件入り(画像が全部壊れた参照になる)、同じ注意が N 行並んでいた
     let quotaHit = false;
     for (const a of result.assets) {
+      // 🔴 添付 1 件ごとの区切り(依頼 253)── ここまでに書けた添付は、どのノートからも指されないまま残る(「使われていない添付を消す」で回収できる)
+      stop();
       assetProgress(assetsDone++, result.assets.length);
       try {
         // ⚠ gzip は **export 単位**の符号化なので、body 内蔵だった legacy data
@@ -890,6 +951,8 @@ async function runImport(
       }
     }
 
+    // 🔴 ノートを書き始める直前の区切り(依頼 253)── ここから先は、やめるとここまでに入れた分を元に戻す
+    stop();
     // ── entries / relations は bulk(1 行ずつ書かない ── journal 増幅の教訓)
     deps.notify?.(`取り込み中…(${rows.length} 件を書き込んでいます)`);
     // どの段で落ちたかを user に正しく伝える(review L-11 ── 履歴で落ちても
@@ -899,6 +962,7 @@ async function runImport(
       await deps.bulkUpsertEntries(rows);
       entriesWritten = rows.length;
       writtenLids = rows.map((r) => r.lid);
+      stop();
       if (result.relations.length > 0) {
         stage = 'つながり';
         await deps.bulkUpsertRelations(result.relations);
@@ -907,6 +971,7 @@ async function runImport(
       if (result.revisionChains.length > 0) {
         stage = '履歴';
         for (const batch of batchChains(result.revisionChains, keyMap)) {
+          stop();
           const r = await deps.importRevisionChains(batch);
           revStats.added += r.added;
           revStats.dropped += r.droppedOverLimit;
@@ -925,6 +990,7 @@ async function runImport(
       if (encoded.length > 0) {
         stage = '履歴';
         for (const batch of batchEncoded(encoded)) {
+          stop();
           const r = await deps.restoreRevisionChains(batch);
           revStats.added += r.added;
           revStats.dropped += r.droppedOverLimit;
@@ -957,6 +1023,7 @@ async function runImport(
           }));
           const titleOf = new Map(trashNotes.map((t) => [t.lid, t.title] as const));
           for (const batch of batchTrash(inputs)) {
+            stop();
             const r = await deps.restoreTrashNotes(batch);
             trashRestored += batch.length - r.skippedEntries.length;
             // 🔴 戻らなかったノートは題名で言う(内部の ID は user には読めない)
@@ -982,6 +1049,8 @@ async function runImport(
         }
       }
     } catch (e) {
+      // 🔴 やめた(依頼 253)── 失敗ではない。書けた分は元に戻して終える
+      if (isOperationCancelled(e)) return finishCancelled();
       // 書けた分は必ず画面へ出す ── 「失敗」と言いながら disk に残すのが最悪
       await deps.reload().catch(() => {});
       // 🔴 書けた分は戻せるようにする(片道にしない)── `report` より先に憶える
@@ -1047,6 +1116,8 @@ async function runImport(
     }
     return rows.length;
   } catch (e) {
+    // 🔴 やめた(依頼 253)── 読み込み・添付の段でやめた回はここに来る(ノートはまだ 1 件も書いていない)
+    if (isOperationCancelled(e)) return finishCancelled();
     if (entriesWritten > 0) {
       await deps.reload().catch(() => {});
       deps.imported?.(writtenLids, undoOpts());
