@@ -261,7 +261,19 @@ test('🔴 保存していない編集があれば、開く前に 2 択を訊く
    *   ⚠ これは検査が先走っていた分の修正で、本体は変えていない(閉じ方が「放送なし」の窓を ALIVE_TTL_MS のあいだ
    *   開いていると見なすのは設計どおり ── `isProbablyOpen` の注記「断定はできない」)。
    */
-  const closeWindow = async (w: import('@playwright/test').Page): Promise<void> => {
+  /**
+   * 🔴 **閉じる前に、その窓の生存通知が本体に届くまで待つ**(`openedAt` = 開く操作の直前の時刻)。⚠ 窓が起動する前に閉じると、
+   *   「閉じた」も生存通知も本体に来ないまま、本体は `OPENING_GRACE_MS` の間「開いている途中」と見て、次の「開く」を押しても
+   *   窓を立てない(設計どおり ── 起動中の 2 重起動を防ぐ猶予)。しかも下の `silentMs` は**テスト開始からの経過**になって
+   *   即座に満たされ、猶予が残ったまま次を押していた(④ の窓は文書の受け渡しを放送で演じるだけで、実窓の起動を待たずに閉じていた)。
+   */
+  const closeWindow = async (w: import('@playwright/test').Page, openedAt: number): Promise<void> => {
+    await expect
+      .poll(
+        () => page.evaluate((t) => (window as unknown as { __aliveAt: number }).__aliveAt >= t, openedAt),
+        { message: '開いた窓の生存通知が本体に届かない(窓が起動していない)', timeout: 30_000 },
+      )
+      .toBe(true);
     const state = (): Promise<{ closed: number; silentMs: number }> =>
       page.evaluate(async () => {
         await new Promise((r) => setTimeout(r, 0));
@@ -346,6 +358,7 @@ test('🔴 保存していない編集があれば、開く前に 2 択を訊く
   // ③ 一時保存した内容で開く: 窓が開き、渡る bytes は控えの版
   await clickReal(page, open);
   await expect(rows.first()).toBeVisible();
+  const openedAt1 = Date.now();
   const first = context.waitForEvent('page');
   await clickReal(page, rows.nth(0));
   const win1 = await first;
@@ -355,11 +368,12 @@ test('🔴 保存していない編集があれば、開く前に 2 択を訊く
   await expect.poll(async () => (await docs()).length, { message: '文書が窓へ送られない' }).toBe(1);
   expect((await docs())[0], '控えの版が渡っていない').toEqual({ bytes: [7, 7, 7], token: lid, fromShadow: true });
   expect(await shelf(), '控えの版で開いただけで控えを消した(保存するまで残す)').toHaveLength(1);
-  await closeWindow(win1);
+  await closeWindow(win1, openedAt1);
 
   // ④ 保存済みの版で開く: 控えが消え、渡る bytes は保存済みの版
   await clickReal(page, open);
   await expect(rows.first()).toBeVisible();
+  const openedAt2 = Date.now();
   const second = context.waitForEvent('page');
   await clickReal(page, rows.nth(1));
   const win2 = await second;
@@ -369,15 +383,16 @@ test('🔴 保存していない編集があれば、開く前に 2 択を訊く
   expect(saved.bytes, '保存済みの版が渡っていない').toEqual(Array.from(FAKE_DOCX));
   expect(saved.fromShadow, '保存済みの版に fromShadow が載った').toBeNull();
   expect(await shelf(), '保存済みの版で開いたのに控えが残っている').toEqual([]);
-  await closeWindow(win2);
+  await closeWindow(win2, openedAt2);
 
   // ⑤ 対照群: 控えが無ければ、訊かずに窓が開く
+  const openedAt3 = Date.now();
   const third = context.waitForEvent('page');
   await clickReal(page, open);
   const win3 = await third;
   expect(win3.url()).toContain('office/host.html');
   await expect(rows.first(), '控えが無いのに訊いた').toBeHidden();
-  await closeWindow(win3);
+  await closeWindow(win3, openedAt3);
 
   /**
    * 🔴 **大きい文書は、開く前に「開けないことがあります」と言う**(台帳 #1852 束 A1。依頼 242)。

@@ -895,6 +895,27 @@ describe('O1/O2: 開く指示の直後', () => {
     expect(main.slice(j, j + 400)).toContain("error: OFFICE_NOT_REACHED_NOTICE");
   });
 
+  it('🔴 O2: 生存通知が届いた後に「閉じた」の放送が無いまま窓が消えたら、猶予の途中でも開き直せる(smoke の揺れ)', () => {
+    const h = harness();
+    h.ow.open({ name: 'a.docx' });
+    h.tick(500);
+    h.ch.deliver('alive');
+    // `closed` は来ない。生存通知だけが ALIVE_TTL_MS 途絶える(開いてから 5 秒は経っていない)
+    h.tick(ALIVE_TTL_MS + 1);
+    expect(500 + ALIVE_TTL_MS + 1, '前提: まだ開いてから猶予の内').toBeLessThan(OPENING_GRACE_MS);
+    expect(h.ow.isProbablyOpen()).toBe(false);
+    expect(h.ow.open({ name: 'a.docx' }).kind, '窓は無いのに開かない').toBe('opened');
+    expect(h.opened).toHaveLength(2);
+  });
+
+  it('O2 対照群: 生存通知がまだ 1 つも無い間は、猶予の内なら開き直さない', () => {
+    const h = harness();
+    h.ow.open({ name: 'a.docx' });
+    h.tick(ALIVE_TTL_MS + 1);
+    expect(h.ow.open({ name: 'a.docx' }).kind).toBe('already-open');
+    expect(h.opened).toHaveLength(1);
+  });
+
   it('O2: OPENING_GRACE_MS を過ぎても窓が現れなければ、開き直せる', () => {
     const h = harness();
     h.ow.open({ name: 'a.docx' });
