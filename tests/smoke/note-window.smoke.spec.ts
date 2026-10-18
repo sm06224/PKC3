@@ -751,9 +751,13 @@ test('🔴 付箋で目次を押しても、題名と住所が残る (#693)', as
    * ④ ⚠ **対照群** ── 本体の窓(付箋でない)では今までどおり住所が `#<id>` になる
    *   (見出し id のアンカーリンク #658 を壊していない)。
    */
+  // 🔴 束 R1(依頼 86-2 B): 本文の `:::toc` は右のペインの目次と同じ `toc-jump` になり、本体の窓でも住所を `#…` に替えない
+  //    (直す前は `#<id>` になりノートの住所が消えた)。⚠ 古いこの対照群は「住所が `#<id>` になる」を見ていた
   await page.bringToFront();
+  const mainUrl = page.url();
   await clickReal(page, `${TOC_LINK} >> nth=1`);
-  await expect.poll(() => new URL(page.url()).hash, { timeout: 5_000 }).toMatch(/^#(?!pkc\?).+/);
+  await page.waitForTimeout(300);
+  expect(page.url(), '本体の窓で本文の目次を押したら住所が替わった').toBe(mainUrl);
 
   await win.close();
   expect(winErrors, `付箋で page error: ${winErrors.join(' / ')}`).toEqual([]);
