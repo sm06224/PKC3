@@ -3434,8 +3434,8 @@ md.core.ruler.after('inline', 'pkc-task-list', function (state) {
  * 🔴 **Obsidian の種類の名前も受ける**(台帳 #1852 束 R1、依頼 257 A)── Obsidian から持ってきたノートが
  * そのまま読める形で出る。種類は近い色の注意書き(`role`)に割り当てる。
  *   info → 情報 / abstract・summary・tldr → 要約 / todo → ToDo / success・check・done → 成功(ヒントの色)/
- *   question・help・faq → 質問(重要の色)/ failure・fail・missing → 失敗(危険の色)/ danger・error → 危険 /
- *   bug → バグ(危険の色)/ example → 例(重要の色)/ quote・cite → 引用(要約の色)/ hint → ヒント / attention → 注意
+ *   question・help・faq → 質問(重要の色)/ failure・fail・missing → 失敗(赤)/ danger → 警告(赤)・error → エラー(赤) /
+ *   bug → バグ(赤)/ example → 例(重要の色)/ quote・cite → 引用(要約の色)/ hint → ヒント / attention → 注意
  * ⚠ 知らない種類(`[!FOO]`)は注意書きにしない(引用のまま)。
  */
 const GFM_ALERT_TYPES: Record<string, { role: string; title: string; icon: string }> = {
@@ -3460,8 +3460,8 @@ const GFM_ALERT_TYPES: Record<string, { role: string; title: string; icon: strin
   failure: { role: 'danger', title: '失敗', icon: '✖' },
   fail: { role: 'danger', title: '失敗', icon: '✖' },
   missing: { role: 'danger', title: '失敗', icon: '✖' },
-  danger: { role: 'danger', title: '危険', icon: '⚡' },
-  error: { role: 'danger', title: '危険', icon: '⚡' },
+  danger: { role: 'danger', title: '警告', icon: '⚡' },
+  error: { role: 'danger', title: 'エラー', icon: '⚡' },
   bug: { role: 'danger', title: 'バグ', icon: '🐞' },
   example: { role: 'important', title: '例', icon: '📋' },
   quote: { role: 'summary', title: '引用', icon: '❝' },
