@@ -181,7 +181,18 @@ export type StorageRequest =
    * ⚠ 引き方(FTS / LIKE)の規則は `features/filter/search-query.ts` が 1 か所で持つ
    * ── worker は決めない(2 か所に規則を生やさない)。
    */
-  | { op: 'searchEntries'; cid: string; query: string; limit?: number }
+  | {
+      op: 'searchEntries';
+      cid: string;
+      query: string;
+      limit?: number;
+      /**
+       * 🔴 **書いた字のまま引く**(台帳 #1852 の束 B2)。既定は「揃えた字(全角半角・濁点)・隠したメモとリンクの宛先の字を
+       * 除いた本文」を引くが、**リンクの宛先の字(`asset:` の key など)を本文から探す内部の用途**はこちら。
+       * ⚠ 1 句として LIKE で引く(語の区切り・揃えは無い)。
+       */
+      raw?: boolean;
+    }
   /**
    * 🔴 **探す面のための検索**(#680)── 題名 + 本文の抜粋 + 関連度を返す。
    * ⚠ `searchEntries` と別の op なのは、返す物が違うからである(あちらは lid だけ ──

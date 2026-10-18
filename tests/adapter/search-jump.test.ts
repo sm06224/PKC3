@@ -179,8 +179,11 @@ describe('🔴 #1087: 整形された字と、節点をまたぐ語', () => {
     document.body.append(host);
     return host;
   };
+  // 🔑 語の途中に空白がある字は「探す」の引用符で 1 句にする(左の列の欄は空白で区切った語を全部塗る ── 台帳 #1852 の束 B2)
   const hits = (md: string, q: string): string[] =>
-    collectHitRanges(hostOf(md), q, 'filter').map((r) => r.toString());
+    collectHitRanges(hostOf(md), /\s/.test(q) && !q.includes('"') ? `"${q}"` : q, 'find').map((r) =>
+      r.toString(),
+    );
 
   it('前提: 描画は引用符だけ整形し、記号(…・–・©・™・±)には置き換えない(依頼 254)', () => {
     const t = hostOf('don\'t "hi" Wait... a -- b (c) (tm) +-').textContent ?? '';
@@ -209,7 +212,7 @@ describe('🔴 #1087: 整形された字と、節点をまたぐ語', () => {
   it('🔴 色分けされたコードの `const foo`(節点をまたぐ)が 1 件当たる', () => {
     const host = hostOf('```js\nconst foo = 1;\n```');
     expect(host.querySelector('.pkc-tok-keyword'), '前提: 色分けの <span> が居る').not.toBeNull();
-    const r = collectHitRanges(host, 'const foo', 'filter');
+    const r = collectHitRanges(host, '"const foo"', 'find');
     expect(r.map((x) => x.toString())).toEqual(['const foo']);
     expect(r[0]!.startContainer, '始まりと終わりは別の節点').not.toBe(r[0]!.endContainer);
   });
@@ -251,16 +254,35 @@ describe('🔴 欄から始めた塗りは、字を丸ごと 1 句として数�
   it.each([
     ['-1', '<p>残り -1 と -1 です</p>', 2],
     ['-メモ', '<p>-メモ を書いた</p>', 1],
-    ['"a b"', '<p>x "a b" y</p>', 1],
   ])('欄の語 %s は、そのままの字で数える', (q, html, n) => {
     expect(collectHitRanges(host(html), q, 'filter')).toHaveLength(n);
+  });
+
+  it('🔴 欄の空白(全角も)は語の区切り ── 離れた 2 語を両方塗る(台帳 #1852 の束 B2、依頼 194・260・115-1)', () => {
+    const h = host('<p>田中さんの見積を送る。見積は明日。</p>');
+    expect(collectHitRanges(h, '田中\u3000見積', 'filter').map((r) => r.toString())).toEqual([
+      '田中',
+      '見積',
+      '見積',
+    ]);
+    // 引用符は剥がさない(欄は `"` も `-` も読まない)── 2 語の `"a` と `b"` を塗る
+    expect(collectHitRanges(host('<p>x "a b" y</p>'), '"a b"', 'filter').map((r) => r.toString())).toEqual([
+      '"a',
+      'b"',
+    ]);
+  });
+
+  it('🔴 全角と半角・半角カナは同じ字として塗る(束 B2、依頼 258・335)', () => {
+    expect(collectHitRanges(host('<p>ＰＫＣ と ﾊﾝｶｸ</p>'), 'pkc ハンカク', 'filter').map((r) => r.toString())).toEqual([
+      'ＰＫＣ',
+      'ﾊﾝｶｸ',
+    ]);
   });
 
   it('🔴 対照群: 「探す」から来た塗りは、今までどおり除外・引用符を解く(割り方を変えていない)', () => {
     expect(collectHitRanges(host('<p>残り -1 です</p>'), '-1', 'find'), '除外の語を塗った').toEqual([]);
     // 引用符は解かれる(塗るのは `a b` だけ)/ 欄の起点は引用符ごと塗る
     expect(collectHitRanges(host('<p>x "a b" y</p>'), '"a b"', 'find').map((r) => r.toString())).toEqual(['a b']);
-    expect(collectHitRanges(host('<p>x "a b" y</p>'), '"a b"', 'filter').map((r) => r.toString())).toEqual(['"a b"']);
     expect(collectHitRanges(host('<p>会議と中止</p>'), '会議 -中止')).toHaveLength(1); // 起点を省くと「探す」
   });
 

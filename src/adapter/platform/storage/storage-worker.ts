@@ -15,6 +15,10 @@ import {
   REVISION_ADDED_COLUMNS,
   ENTRY_ADDED_COLUMNS,
   FTS_DDL,
+  LEGACY_FTS_DDL,
+  FTS_PROGRESS_KEY,
+  FTS_PROGRESS_SCOPE,
+  FTS_SOURCE_VIEW,
   USER_REALM_SQL,
 } from './schema';
 /**
@@ -69,15 +73,8 @@ import {
   type SnippetItem,
   type SnippetScan,
 } from '@features/snippet/snippet-table';
-import { planSearch, toLikePattern } from '@features/filter/search-query';
-import {
-  excerptAround,
-  SNIPPET_ELLIPSIS,
-  FTS_TMP_CLOSE,
-  FTS_TMP_OPEN,
-  sealFtsSnippet,
-  SNIPPET_TOKENS,
-} from '@features/filter/search-snippet';
+import { plannedTerms, planSearch, toLikePattern, type QuerySearchPlan } from '@features/filter/search-query';
+import { excerptAroundFolded, foldedColumns, searchableBody } from '@features/filter/search-text';
 import { countTaskCandidates } from '@features/markdown/task-count';
 import { bodyTags } from '@features/flavor/entry-tags';
 import { decodeTags, encodeTags } from '@features/flavor/tags';
@@ -520,6 +517,12 @@ async function init(
   }
 
   db = opened;
+  // 🔴 索引の作り直しが要るなら、起動の返事の後に塊で流す(台帳 #1852 の束 B2 ── 本文の表示を止めない)
+  try {
+    startFoldBuild(opened);
+  } catch {
+    // ⚠ 壊れた DB(索引の頁が潰れている等)── 起動は止めない。読み出しと救出は通す(`applySchema` の「整える」段と同じ作法)
+  }
   const base = { ...meta, vfs, journalMode: actualJournalMode, ...reservedLock };
   const withReason = fallbackReason ? { ...base, fallbackReason } : base;
   // 🔴 診断として載せるのは開けなかった回だけ(#1073)。console には出さない。
@@ -566,6 +569,196 @@ function ftsDocCount(database: Database): number | null {
   }
 }
 
+
+/**
+ * 🔴 **索引の作り直しの進み(台帳 #1852 の束 B2)**。`built_upto` の印は `settings` の 1 行
+ * (`schema.ts` の `FTS_PROGRESS_SCOPE` の注記)。**行が無ければ済んでいる** = `FTS_ALL`。
+ */
+const FTS_ALL = Number.MAX_SAFE_INTEGER;
+
+function readFoldCursor(database: Database): number {
+  const v = database.selectValue('SELECT v FROM settings WHERE scope = ? AND k = ?', [
+    FTS_PROGRESS_SCOPE,
+    FTS_PROGRESS_KEY,
+  ]);
+  return v === undefined || v === null ? FTS_ALL : Number(v);
+}
+
+function clearFoldCursor(database: Database): void {
+  database.exec({
+    sql: 'DELETE FROM settings WHERE scope = ? AND k = ?',
+    bind: [FTS_PROGRESS_SCOPE, FTS_PROGRESS_KEY],
+  });
+}
+
+/**
+ * メモリ側の写し。⚠ **検索が「索引で引くか、全走査で引くか」を決めるのはこの値 1 つ**(`searchPlanOf`)。
+ * `init` が読み、`foldStep` が進める。作り直しが済むまでは `FTS_ALL` より小さい。
+ */
+let foldCursor = FTS_ALL;
+
+/** 1 行の「索引の元の字」を作り直して書く。⚠ 引き金が索引を書き換える(`rowid <= built_upto` の行だけ)。 */
+function refoldRow(database: Database, rid: number): void {
+  const r = database.selectObjects('SELECT title, body FROM entries WHERE rowid = ?', [rid])[0] as
+    | { title: string; body: string }
+    | undefined;
+  if (r === undefined) return;
+  const f = foldedColumns(r.title, r.body);
+  database.exec({
+    sql: 'UPDATE entries SET title_f = ?, body_f = ?, fold_chars = ? WHERE rowid = ?',
+    bind: [f.titleF, f.bodyF, r.body.length, rid],
+  });
+}
+
+/** 1 塊に入れる行数。⚠ 本文は 1 行ずつ読んで捨てる(heap に載るのは 1 件ぶん ── ゼロコピーの規律)。 */
+const FOLD_CHUNK = 100;
+
+/**
+ * 🔴 **索引の作り直しを 1 塊だけ進める**(台帳 #1852 の束 B2)。戻り値 = まだ続きがあるか。
+ *
+ * - 作り直しの途中(`built_upto < 最大`): `rowid` の順に次の塊を取り、元の字を作り(`refoldRow` ── 引き金は黙る)、
+ *   視点から索引へ入れ、印を進める。**1 塊 = 1 tx**なので、途中で止まっても索引と印は合っている。
+ * - 済んだ後: 旧ビルドが書いた行(`fold_chars IS NULL`)だけを引き直す(引き金が索引を書き換える)。
+ * ⚠ **行ごとに本文を読んで捨てる**(100 行を一度に heap へ載せない)。
+ * ⚠ 呼ぶのは `foldTick`(起動の後の係)と test だけ。塊と塊の間で worker は他の依頼を捌く。
+ */
+export function foldStep(database: Database, chunk = FOLD_CHUNK): boolean {
+  const cursor = readFoldCursor(database);
+  database.exec('BEGIN IMMEDIATE');
+  let more = false;
+  let next = cursor;
+  try {
+    if (cursor >= FTS_ALL) {
+      const rids = database.selectObjects(
+        'SELECT rowid AS rid FROM entries WHERE fold_chars IS NULL LIMIT ?',
+        [chunk],
+      ) as Array<{ rid: number }>;
+      for (const r of rids) refoldRow(database, r.rid);
+      more = rids.length === chunk;
+    } else {
+      const rids = database.selectObjects(
+        'SELECT rowid AS rid FROM entries WHERE rowid > ? ORDER BY rowid LIMIT ?',
+        [cursor, chunk],
+      ) as Array<{ rid: number }>;
+      if (rids.length === 0) {
+        clearFoldCursor(database);
+        next = FTS_ALL;
+      } else {
+        for (const r of rids) {
+          // ⚠ 新ビルドが書いた行は既に作ってある ── 作り直さない(行を書き直さない)
+          const done = database.selectValue(
+            'SELECT fold_chars IS NOT NULL FROM entries WHERE rowid = ?',
+            [r.rid],
+          );
+          if (Number(done) !== 1) refoldRow(database, r.rid);
+        }
+        const hi = rids[rids.length - 1]!.rid;
+        database.exec({
+          sql: `INSERT INTO entries_fts(rowid, title, body)
+                  SELECT rid, title, body FROM ${FTS_SOURCE_VIEW} WHERE rid > ? AND rid <= ?`,
+          bind: [cursor, hi],
+        });
+        if (rids.length < chunk) {
+          clearFoldCursor(database);
+          next = FTS_ALL;
+        } else {
+          database.exec({
+            sql: 'UPDATE settings SET v = ? WHERE scope = ? AND k = ?',
+            bind: [String(hi), FTS_PROGRESS_SCOPE, FTS_PROGRESS_KEY],
+          });
+          next = hi;
+          more = true;
+        }
+      }
+    }
+    database.exec('COMMIT');
+  } catch (err) {
+    try {
+      database.exec('ROLLBACK');
+    } catch {
+      /* rollback 失敗は元エラーを優先 */
+    }
+    throw err;
+  }
+  if (database === db) foldCursor = next;
+  return more;
+}
+
+let foldTimer: ReturnType<typeof setTimeout> | null = null;
+let foldFailures = 0;
+
+/** 作り直しの係。塊と塊の間で `setTimeout` に戻る ── その間に本文の読込・保存・検索が割り込める。 */
+function foldTick(): void {
+  foldTimer = null;
+  const database = db;
+  if (database === null || dbCorrupt) return;
+  try {
+    if (foldStep(database)) {
+      foldFailures = 0;
+      foldTimer = setTimeout(foldTick, 0);
+    }
+  } catch {
+    // ⚠ 他の処理の tx と重なった等 ── 少し待ってやり直す。続けて落ちるなら諦める(検索は全走査に落ちたまま動く)
+    foldFailures += 1;
+    if (foldFailures < 20) foldTimer = setTimeout(foldTick, 50);
+  }
+}
+
+/** 起動の後に作り直しの係を起こす。⚠ 要るときだけ(印が在る / 旧ビルドが書いた行が在る)。 */
+function startFoldBuild(database: Database): void {
+  foldCursor = readFoldCursor(database);
+  foldFailures = 0;
+  if (foldTimer !== null) clearTimeout(foldTimer);
+  foldTimer = null;
+  const pending =
+    foldCursor < FTS_ALL ||
+    database.selectValue('SELECT 1 FROM entries WHERE fold_chars IS NULL LIMIT 1') !== undefined;
+  if (pending) foldTimer = setTimeout(foldTick, 0);
+}
+
+/**
+ * 🔴 **検索の引き方を決める唯一の口**(台帳 #1852 の束 B2)。`planSearch` の答えを、索引の状態で直す。
+ *
+ * ⚠ **作り直しの途中は索引を使わない**(索引にまだ入っていない行が「無い」と読まれるため)── 全語を LIKE で全走査する
+ *   (遅いが、答えは索引と同じ集合。LIKE は大文字小文字を ASCII しか畳まない差だけ)。作り直しが済めば索引で引く。
+ * ⚠ 全走査が見る字も `coalesce(body_f, body)`(索引と同じ元の字)── 作り直し済みの行は揃えた字、まだの行は書いた字。
+ */
+function searchPlanOf(query: string, syntax: 'plain' | 'query'): QuerySearchPlan {
+  const plan = syntax === 'plain' ? planSearch(query) : planSearch(query, { syntax: 'query' });
+  if (plan.kind === 'fts' && foldCursor < FTS_ALL) {
+    const t = plannedTerms(query, syntax);
+    return { kind: 'like-terms', include: t.include, exclude: t.exclude };
+  }
+  return plan;
+}
+
+/**
+ * 題名か本文に語が入っている(LIKE)の条件を組む。⚠ 索引と同じ元の字(`coalesce(title_f, title)` /
+ * `coalesce(body_f, body)`)を見る。`numbered` = 番号つき引数(`?3`)/ そうでなければ位置引数(`?` を 2 つ → 2 回積む)。
+ * 除く語は `NOT (…)`。戻り値は AND でつなぐ条件の並び。
+ */
+function likeWhere(
+  plan: Extract<QuerySearchPlan, { kind: 'like' | 'like-terms' }>,
+  bind: (string | number)[],
+  numbered: boolean,
+): string[] {
+  const include = plan.kind === 'like' ? [plan.pattern] : plan.include.map(toLikePattern);
+  const exclude = plan.kind === 'like' ? [] : plan.exclude.map(toLikePattern);
+  const one = (pattern: string, not: boolean): string => {
+    let sql: string;
+    if (numbered) {
+      bind.push(pattern);
+      const i = bind.length;
+      sql = `(coalesce(title_f, title) LIKE ?${i} ESCAPE '\\' OR coalesce(body_f, body) LIKE ?${i} ESCAPE '\\')`;
+    } else {
+      bind.push(pattern, pattern);
+      sql = `(coalesce(title_f, title) LIKE ? ESCAPE '\\' OR coalesce(body_f, body) LIKE ? ESCAPE '\\')`;
+    }
+    return not ? `NOT ${sql}` : sql;
+  };
+  return [...include.map((p) => one(p, false)), ...exclude.map((p) => one(p, true))];
+}
+
 /**
  * 🔴 **全文検索の索引を `entries` に合わせる**(#181 / 2026-08-20 の起動不能)。
  *
@@ -577,6 +770,17 @@ function ftsDocCount(database: Database): number | null {
  */
 function syncFtsIndex(database: Database): void {
   const entryCount = Number(database.selectValue('SELECT count(*) FROM entries') ?? 0);
+  /**
+   * 🔴 **索引の作り直しの途中なら、ここでは組み直さない**(台帳 #1852 の束 B2)。
+   *
+   * ⚠ 途中の索引は「数が合わない」のが正しい。ここで `'rebuild'` を撃つと、起動の tx の中で全件を一度に入れ直して
+   *   起動が止まる(= 塊で流す設計の意味が消える)。続きは `foldStep` が流す。
+   * ⚠ ただし数が合っているなら(旧ビルドが全件を組み直した)作り直しは済んでいる ── 印を外して、二重に入れない。
+   */
+  if (readFoldCursor(database) < FTS_ALL) {
+    if (entryCount > 0 && ftsDocCount(database) === entryCount) clearFoldCursor(database);
+    return;
+  }
   if (ftsDocCount(database) === entryCount) return;
   try {
     database.exec(`INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')`);
@@ -818,6 +1022,35 @@ export function applySchema(database: Database): void {
     if (typeof ftsAu === 'string' && !/UPDATE\s+OF/i.test(ftsAu)) {
       database.exec('DROP TRIGGER IF EXISTS entries_fts_au');
     }
+    /**
+     * 🔴 **全文検索の索引を、揃えた字を引く形へ移す**(台帳 #1852 の束 B2)。
+     *
+     * 旧い索引は `content='entries'`(書いた字をそのまま引く)。新しい索引は視点 `entries_fts_src`
+     * (`coalesce(body_f, body)`)を内容表にする。**既存の索引は作り直すしかない**ので、旧い引き金と索引を落とし、
+     * 「まだ 1 件も入れていない」(`built_upto = -1`)の印を置く。中身は起動の後に `foldStep` が塊で流す。
+     * ⚠ 判定は user_version ではなく**いま在る索引の字**(この file の原則)。旧ビルドが索引を作り直した
+     *   (旧い形に戻した)DB も、次の新ビルドの起動でここへ来る。
+     * ⚠ 引き金は `entries` に付いているので、表を落としても残る ── 旧い文面のまま新しい索引に撃たないよう先に落とす
+     *   (下の `SCHEMA_DDL` が新しい文面で作り直す)。
+     */
+    const ftsTable = database.selectValue(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entries_fts'`,
+    ) as string | undefined;
+    if (typeof ftsTable === 'string' && !ftsTable.includes(FTS_SOURCE_VIEW)) {
+      try {
+        database.exec('DROP TABLE IF EXISTS entries_fts');
+        database.exec({
+          sql: `INSERT INTO settings(scope, k, v) VALUES (?, ?, '-1')
+                  ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v`,
+          bind: [FTS_PROGRESS_SCOPE, FTS_PROGRESS_KEY],
+        });
+      } catch {
+        // ⚠ 影の表が壊れていて落とせない索引 ── ここで throw すると起動できない(2026-08-20 と同じ型)。
+        //   索引は残し、下の `syncFtsIndex` の最後の手段(落として作り直す)に任せる。引き金は新しい文面に替える。
+      }
+      for (const t of ['entries_fts_ai', 'entries_fts_ad', 'entries_fts_au'])
+        database.exec(`DROP TRIGGER IF EXISTS ${t}`);
+    }
     // 新規 DB は最新 DDL がそのまま最新形を作る(既存 DB では no-op)。
     // ⚠ 索引はここで作られる ── 上で列を足した**後**であることが要。
     for (const ddl of SCHEMA_DDL) database.exec(ddl);
@@ -929,41 +1162,62 @@ export function applySchema(database: Database): void {
 /** 空白の違いを無視して比べるための正規形。 */
 const normSql = (sql: unknown): string => String(sql ?? '').replace(/\s+/g, ' ').trim();
 
-let ownTriggers: Map<string, string> | null = null;
+let ownTriggers: Map<string, string[]> | null = null;
+let ownViews: Map<string, string> | null = null;
 
 /**
- * 🔴 **客の画像に、PKC3 が作る引き金以外が入っていないか**(#1416)。
+ * 🔴 **客の画像に、PKC3 が作る引き金・ビュー以外が入っていないか**(#1416)。
  *
- * 基準は、新しい DB に `applySchema` が作る引き金の原文(空白を無視して等値)。ビューは PKC3 は作らないので 1 つでもあれば断る。
+ * 基準は、新しい DB に `applySchema` が作る引き金・ビューの原文(空白を無視して等値)。それ以外は 1 つでもあれば断る。
  * ⚠ 旧い `entries_fts_au`(`UPDATE OF` が無い版)だけは、`applySchema` が最初に落とすので通す。
+ * 🔴 台帳 #1852 の束 B2:**束 B2 より前のビルドが書き出した画像**は、全文検索の引き金が旧い文面(`LEGACY_FTS_DDL`)で入っている
+ *   ── これも通す(`applySchema` が新しい形へ移す)。ビューは `entries_fts_src` だけ(原文が等しいとき)。
  */
 function hasOnlyOwnTriggers(
   oo1: { DB: new (name: string) => Database },
   image: Database,
 ): boolean {
-  if (ownTriggers === null) {
+  if (ownTriggers === null || ownViews === null) {
     const fresh = new oo1.DB(':memory:');
+    const legacy = new oo1.DB(':memory:');
     try {
       applySchema(fresh);
-      ownTriggers = new Map(
+      const triggers = new Map<string, string[]>();
+      for (const r of fresh.selectObjects(
+        `SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'`,
+      ) as unknown as Array<{ name: string; sql: string }>)
+        triggers.set(r.name, [normSql(r.sql)]);
+      // 旧い文面は、索引の引き金 3 本だけを最小の表に付けて採る(列の揃った表は要らない)
+      legacy.exec('CREATE TABLE entries (title TEXT, body TEXT)');
+      for (const ddl of LEGACY_FTS_DDL) legacy.exec(ddl);
+      for (const r of legacy.selectObjects(
+        `SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'`,
+      ) as unknown as Array<{ name: string; sql: string }>)
+        triggers.get(r.name)?.push(normSql(r.sql));
+      ownViews = new Map(
         (
           fresh.selectObjects(
-            `SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'`,
+            `SELECT name, sql FROM sqlite_schema WHERE type = 'view'`,
           ) as unknown as Array<{ name: string; sql: string }>
         ).map((r) => [r.name, normSql(r.sql)]),
       );
+      ownTriggers = triggers;
     } finally {
       fresh.close();
+      legacy.close();
     }
   }
   const rows = image.selectObjects(
     `SELECT type, name, sql FROM sqlite_schema WHERE type IN ('trigger', 'view')`,
   ) as unknown as Array<{ type: string; name: string; sql: string }>;
   for (const r of rows) {
-    if (r.type === 'view') return false;
+    if (r.type === 'view') {
+      if (ownViews.get(r.name) === normSql(r.sql)) continue;
+      return false;
+    }
     const expected = ownTriggers.get(r.name);
     if (expected === undefined) return false;
-    if (normSql(r.sql) === expected) continue;
+    if (expected.includes(normSql(r.sql))) continue;
     if (r.name === 'entries_fts_au' && !/UPDATE\s+OF/i.test(r.sql)) continue;
     return false;
   }
@@ -1200,14 +1454,13 @@ function runSmartScan(
    *   ので、ここへは来ない ── 来ても条件を足さないだけで、当たりが広がるだけである。
    */
   if (q.text !== null) {
-    const plan = planSearch(q.text);
+    const plan = searchPlanOf(q.text, 'plain');
     if (plan.kind === 'fts') {
       conds.push('rowid IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)');
       args.push(plan.match);
-    } else if (plan.kind === 'like') {
-      // ⚠ **`ESCAPE` を宣言する**(`searchEntries` と同じ ── `%` `_` を素で通さない)
-      conds.push("(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')");
-      args.push(plan.pattern, plan.pattern);
+    } else if (plan.kind === 'like' || plan.kind === 'like-terms') {
+      // ⚠ **`ESCAPE` を宣言する**(`searchEntries` と同じ ── `%` `_` を素で通さない)。空白で区切った語は全部(依頼 194)
+      conds.push(...likeWhere(plan, args as (string | number)[], false));
     }
   }
   const where = conds.length === 0 ? '' : ` AND ${conds.join(' AND ')}`;
@@ -1600,8 +1853,9 @@ const NEEDS_BACKFILL =
  */
 const UPSERT_SQL = `INSERT INTO entries
     (cid, lid, title, archetype, created_at, updated_at,
-     entry_order, status, date, archived, task_total, body_chars, body_tags, realm, body)
-  VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, datetime('now')), ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     entry_order, status, date, archived, task_total, body_chars, body_tags, realm,
+     title_f, body_f, fold_chars, body)
+  VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, datetime('now')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(cid, lid) DO UPDATE SET
     title = excluded.title,
     archetype = excluded.archetype,
@@ -1613,6 +1867,9 @@ const UPSERT_SQL = `INSERT INTO entries
     task_total = excluded.task_total,
     body_chars = excluded.body_chars,
     body_tags = excluded.body_tags,
+    title_f = excluded.title_f,
+    body_f = excluded.body_f,
+    fold_chars = excluded.fold_chars,
     body = excluded.body`;
 
 /**
@@ -1622,6 +1879,11 @@ const UPSERT_SQL = `INSERT INTO entries
 const UPSERT_RETURNING_SQL = `${UPSERT_SQL} RETURNING created_at, updated_at`;
 
 function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
+  /**
+   * 🔴 **全文検索の索引に入れる字も、書くときここで作る**(台帳 #1852 の束 B2)。理由は `task_total` と同じ ──
+   * 呼び側の経路に持たせると、落とした経路のノートだけ検索が粗くなる。作り手は `search-text.ts` の 1 本。
+   */
+  const folded = foldedColumns(e.title, e.body);
   return [
     cid,
     e.lid,
@@ -1663,6 +1925,10 @@ function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
      * 効かない(`UPSERT_SQL` の ON CONFLICT に `realm` が無い ── 上の注記)。
      */
     e.realm ?? 'user',
+    folded.titleF,
+    folded.bodyF,
+    // 🔑 作った時点の本文の長さ ── 旧ビルドが後から書き換えた行を見つける印(`fold_chars` の注記)
+    e.body.length,
     e.body,
   ];
 }
@@ -2359,9 +2625,10 @@ function updateEntryColumn(
   const database = need();
   database.exec({
     // 🔴 並べ替えは更新日時を進めない(#1087)── 居場所の移動(`setEntryParent`)と同じ。改名だけ進める
-    sql: `UPDATE entries SET ${column} = ?${column === 'title' ? ", updated_at = datetime('now')" : ''}
+    // 🔴 改名は索引の元の字(`title_f`)も一緒に書く(台帳 #1852 の束 B2)
+    sql: `UPDATE entries SET ${column} = ?${column === 'title' ? ", updated_at = datetime('now'), title_f = ?" : ''}
             WHERE cid = ? AND lid = ?`,
-    bind: [value, cid, lid],
+    bind: column === 'title' ? [value, foldedColumns(String(value), '').titleF, cid, lid] : [value, cid, lid],
   });
   // ⚠ **書いた行が無ければ null** ── 消えたノートの書き換えを「成功」と言わない
   if (database.changes() === 0) return null;
@@ -3556,21 +3823,22 @@ const handlers: Handlers = {
       ) as Array<{ body: string }>;
       const existing = rows[0]?.body ?? '';
       const next = trimToCap(`${existing}${req.section}`, req.cap, trimSlackForLid(req.lid, req.cap));
+      const nextFold = foldedColumns(req.title, next);
       if (rows.length === 0) {
         database.exec({
           sql: `INSERT INTO entries
                   (cid, lid, title, archetype, created_at, updated_at,
                    entry_order, status, date, archived, task_total, body_chars,
-                   body_tags, realm, body)
+                   body_tags, realm, title_f, body_f, fold_chars, body)
                 VALUES (?, ?, ?, 'textlog', datetime('now'), datetime('now'),
-                   0, NULL, NULL, 0, NULL, ?, NULL, 'system', ?)`,
-          bind: [req.cid, req.lid, req.title, next.length, next],
+                   0, NULL, NULL, 0, NULL, ?, NULL, 'system', ?, ?, ?, ?)`,
+          bind: [req.cid, req.lid, req.title, next.length, nextFold.titleF, nextFold.bodyF, next.length, next],
         });
       } else {
         database.exec({
-          sql: `UPDATE entries SET body = ?, body_chars = ?, updated_at = datetime('now')
+          sql: `UPDATE entries SET body = ?, body_chars = ?, body_f = ?, fold_chars = ?, updated_at = datetime('now')
                   WHERE cid = ? AND lid = ?`,
-          bind: [next, next.length, req.cid, req.lid],
+          bind: [next, next.length, nextFold.bodyF, next.length, req.cid, req.lid],
         });
       }
       database.exec('COMMIT');
@@ -3682,25 +3950,43 @@ const handlers: Handlers = {
    * 「無い」と読む(§1 の「無言の欠落」)。
    */
   searchEntries: (req) => {
-    const plan = planSearch(req.query);
-    if (plan.kind === 'none') return { lids: [], truncated: false };
     const limit = Math.max(1, Math.min(req.limit ?? SEARCH_LIMIT, SEARCH_LIMIT));
+    const rawQuery = req.query.trim();
+    if (req.raw === true) {
+      // 🔴 書いた字のまま 1 句で引く(リンクの宛先の字を本文から探す内部の用途 ── `protocol.ts` の注記)
+      if (rawQuery === '') return { lids: [], truncated: false };
+      const rows = need().selectObjects(
+        `SELECT lid FROM entries
+          WHERE cid = ?1 AND ${USER_REALM_SQL} AND (title LIKE ?2 ESCAPE '\\' OR body LIKE ?2 ESCAPE '\\')
+          ORDER BY entry_order, lid LIMIT ?3`,
+        [req.cid, toLikePattern(rawQuery), limit + 1],
+      ) as Array<{ lid: string }>;
+      return { lids: rows.slice(0, limit).map((r) => r.lid), truncated: rows.length > limit };
+    }
+    const plan = searchPlanOf(req.query, 'plain');
+    if (plan.kind === 'none') return { lids: [], truncated: false };
     // 🔴 題名の検索は system 領域のノートを出さない(設計 doc §1.1、段①)
-    const sql =
-      plan.kind === 'fts'
-        ? `SELECT e.lid AS lid FROM entries_fts f
-             JOIN entries e ON e.rowid = f.rowid
-            WHERE f.entries_fts MATCH ? AND e.cid = ? AND e.${USER_REALM_SQL}
-            ORDER BY e.entry_order, e.lid LIMIT ?`
-        : // 2 文字以下は trigram が当たらないので LIKE(実測)。⚠ ESCAPE を宣言する
-          `SELECT lid FROM entries
-            WHERE cid = ? AND ${USER_REALM_SQL} AND (title LIKE ?2 ESCAPE '\\' OR body LIKE ?2 ESCAPE '\\')
-            ORDER BY entry_order, lid LIMIT ?3`;
-    const bind =
-      plan.kind === 'fts'
-        ? [plan.match, req.cid, limit + 1]
-        : [req.cid, plan.pattern, limit + 1];
-    const rows = need().selectObjects(sql, bind) as Array<{ lid: string }>;
+    let rows: Array<{ lid: string }>;
+    if (plan.kind === 'fts') {
+      rows = need().selectObjects(
+        `SELECT e.lid AS lid FROM entries_fts f
+           JOIN entries e ON e.rowid = f.rowid
+          WHERE f.entries_fts MATCH ? AND e.cid = ? AND e.${USER_REALM_SQL}
+          ORDER BY e.entry_order, e.lid LIMIT ?`,
+        [plan.match, req.cid, limit + 1],
+      ) as Array<{ lid: string }>;
+    } else {
+      // 2 文字以下(または 3 字未満の語が混じる)は trigram が当たらないので LIKE(実測)。⚠ ESCAPE を宣言する
+      const bind: (string | number)[] = [req.cid];
+      const conds = likeWhere(plan, bind, true);
+      bind.push(limit + 1);
+      rows = need().selectObjects(
+        `SELECT lid FROM entries
+          WHERE cid = ?1 AND ${USER_REALM_SQL} AND ${conds.join(' AND ')}
+          ORDER BY entry_order, lid LIMIT ?${bind.length}`,
+        bind,
+      ) as Array<{ lid: string }>;
+    }
     // 🔑 **1 件多く取って切れたか判る**(件数を数え直す 2 回目の問い合わせを避ける)
     const truncated = rows.length > limit;
     return { lids: rows.slice(0, limit).map((r) => r.lid), truncated };
@@ -3724,60 +4010,49 @@ const handlers: Handlers = {
   searchDetail: (req) => {
     /**
      * 🔴 **書き方は探す面だけ**(`syntax: 'query'`── 空白 = AND / `"…"` = フレーズ /
-     * `-語` = 除外)。左の列(`searchEntries`)は `plain` のまま ── 一覧の意味論は変えない。
+     * `-語` = 除外)。左の列(`searchEntries`)は `plain` のまま。
      * ⚠ 3 字未満の項が 1 つでも混じれば `like-terms`(全項を LIKE で並べる)── trigram は
      *   2 字を当てられず、除外側なら**黙って効かない**ので、FTS へは渡さない。
+     * 🔴 台帳 #1852 の束 B2:引くのは**揃えた字**(全角半角・濁点)で、**隠したメモとリンクの宛先の字は当たらない**。
+     *   索引を作り直している間は `searchPlanOf` が全走査に落とす(答えの集合は同じ)。
      */
-    const plan = planSearch(req.query, { syntax: 'query' });
+    const plan = searchPlanOf(req.query, 'query');
     if (plan.kind === 'none') return { rows: [], truncated: false };
     const limit = Math.max(1, Math.min(req.limit ?? SEARCH_LIMIT, SEARCH_LIMIT));
+    // 抜粋に印を付ける語(最初に見つかった語の所を窓にする ── 揃えた字で探し、書いた字で出す)
+    const needles = plannedTerms(req.query, 'query').include;
+    /**
+     * 🔴 抜粋は**書いた字から JS で作る**(`excerptAroundFolded`)。FTS の `snippet()` は索引の元の字(揃えた字・メモと
+     *   リンクの宛先を除いた字)から切るので、抜粋が「ＰＫＣ」でなく「PKC」で出てしまう ── 書いたまま出す。
+     * ⚠ 本文は当たった行(上限 200 件 + 1)だけ読む。
+     */
+    const excerptOf = (body: string): string => excerptAroundFolded(searchableBody(body), needles);
     // 🔴 全文検索(探す面)は system 領域のノートを出さない(設計 doc §1.1、段①)
     if (plan.kind === 'fts') {
       const rows = need().selectObjects(
-        `SELECT e.lid AS lid, e.title AS title,
-                snippet(entries_fts, 1, ?3, ?4, ?5, ?6) AS snippet,
-                bm25(entries_fts) AS rank
+        `SELECT e.lid AS lid, e.title AS title, e.body AS body, bm25(entries_fts) AS rank
            FROM entries_fts f
            JOIN entries e ON e.rowid = f.rowid
           WHERE f.entries_fts MATCH ?1 AND e.cid = ?2 AND e.${USER_REALM_SQL}
-          ORDER BY rank, e.entry_order, e.lid LIMIT ?7`,
-        [
-          plan.match,
-          req.cid,
-          FTS_TMP_OPEN,
-          FTS_TMP_CLOSE,
-          SNIPPET_ELLIPSIS,
-          SNIPPET_TOKENS,
-          limit + 1,
-        ],
-      ) as Array<{ lid: string; title: string; snippet: string; rank: number }>;
-      // 🔴 本文の中の U+E000 / U+E001 を偽の当たりにしない(#1087)── 仮の印 → 本物の印
+          ORDER BY rank, e.entry_order, e.lid LIMIT ?3`,
+        [plan.match, req.cid, limit + 1],
+      ) as Array<{ lid: string; title: string; body: string; rank: number }>;
       return {
-        rows: rows.slice(0, limit).map((r) => ({ ...r, snippet: sealFtsSnippet(r.snippet) })),
+        rows: rows.slice(0, limit).map((r) => ({
+          lid: r.lid,
+          title: r.title,
+          snippet: excerptOf(r.body),
+          rank: r.rank,
+        })),
         truncated: rows.length > limit,
       };
     }
     /**
-     * LIKE 側 ── 項ごとに `(title LIKE ? OR body LIKE ?)` を AND で並べ、除外は `NOT (…)`。
-     * ⚠ `plain` の `like`(1 句)は `query` では来ないが、型の上では在るので 1 項として畳む。
-     * ⚠ 抜粋の印は**最初の正の項**に付ける(2 項目以降は当たっていても印が付かない ──
-     *   1 行の窓に全項は入らないので、先頭の項を優先する)。
+     * LIKE 側 ── 項ごとに `(題名 LIKE ? OR 本文 LIKE ?)` を AND で並べ、除外は `NOT (…)`。
+     * ⚠ `plain` の `like`(1 句)は `query` では来ないが、型の上では在るので 1 項として畳む(`likeWhere` が受ける)。
      */
-    const terms =
-      plan.kind === 'like-terms'
-        ? plan
-        : { include: [req.query.trim()], exclude: [] as string[] };
-    const clause = (i: number): string => `(title LIKE ?${i} ESCAPE '\\' OR body LIKE ?${i} ESCAPE '\\')`;
     const bind: (string | number)[] = [req.cid];
-    const conds: string[] = [];
-    for (const t of terms.include) {
-      bind.push(toLikePattern(t));
-      conds.push(clause(bind.length));
-    }
-    for (const t of terms.exclude) {
-      bind.push(toLikePattern(t));
-      conds.push(`NOT ${clause(bind.length)}`);
-    }
+    const conds = likeWhere(plan, bind, true);
     bind.push(limit + 1);
     const rows = need().selectObjects(
       `SELECT lid, title, body FROM entries
@@ -3785,12 +4060,11 @@ const handlers: Handlers = {
         ORDER BY entry_order, lid LIMIT ?${bind.length}`,
       bind,
     ) as Array<{ lid: string; title: string; body: string }>;
-    const first = terms.include[0] ?? '';
     return {
       rows: rows.slice(0, limit).map((r) => ({
         lid: r.lid,
         title: r.title,
-        snippet: excerptAround(r.body, first),
+        snippet: excerptOf(r.body),
         rank: 0,
       })),
       truncated: rows.length > limit,

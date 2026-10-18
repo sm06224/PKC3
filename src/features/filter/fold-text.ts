@@ -20,9 +20,24 @@
  *
  * ⚠ **比べるときだけ揃える。保存されているノートの字は 1 字も変えない**(返すのは比較用の字で、
  *   書き戻す口にはつながない)。
- * 🔑 題名の絞り込み(`title-filter.ts`)とタグの突き合わせ(`flavor/tags.ts`)は**どちらもここを通る**
- *   (§7 ── 同じ判定を 2 か所に書かない)。本文の全文検索(FTS)は別の束で、ここでは扱わない。
+ * 🔑 題名の絞り込み(`title-filter.ts`)とタグの突き合わせ(`flavor/tags.ts`)に加え、**本文の全文検索の索引と問い合わせ**
+ *   (台帳 #1852 の束 B2、依頼 258・335・115-2)も**どれもここを通る**(§7 ── 同じ判定を 2 か所に書かない)。
+ *   索引へ入れる字は `foldWidth`(大小は FTS5 の trigram が畳む)、題名・タグ・画面側の比べは `foldText`。
  */
+export function foldWidth(s: string): string {
+  return s.normalize('NFKC');
+}
+
 export function foldText(s: string): string {
-  return s.normalize('NFKC').toLowerCase();
+  return foldWidth(s).toLowerCase();
+}
+
+/**
+ * 🔴 **空白で区切った語に割る**(台帳 #1852 の束 B2、依頼 194・260・115-1)。全角の空白(U+3000)も区切り ──
+ * `foldWidth` が半角へ揃えるので `\s` だけで足りる。空の語は落とす。引用符・`-` は読まない(左の列の欄は打った字のまま)。
+ */
+export function splitWords(s: string): string[] {
+  return foldWidth(s)
+    .split(/\s+/)
+    .filter((w) => w !== '');
 }
