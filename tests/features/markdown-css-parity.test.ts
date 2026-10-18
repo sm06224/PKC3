@@ -314,6 +314,13 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-search-jump': 'src/adapter/ui/render/search-jump.ts',
   'pkc-search-jump-count': 'src/adapter/ui/render/search-jump.ts',
   'pkc-search-jump-btn': 'src/adapter/ui/render/search-jump.ts',
+  // 🔴 ノートの中だけを探す小さな欄(#1163 依頼 163)
+  'pkc-note-find': 'src/adapter/ui/render/note-find.ts',
+  'pkc-note-find-input': 'src/adapter/ui/render/note-find.ts',
+  'pkc-note-find-count': 'src/adapter/ui/render/note-find.ts',
+  'pkc-note-find-btn': 'src/adapter/ui/render/note-find.ts',
+  'pkc-note-find-mark': 'src/adapter/ui/render/note-find.ts',
+  'pkc-note-find-mark-current': 'src/adapter/ui/render/note-find.ts',
   // 🔴 読了目安時間バッジ(#1137)
   'pkc-reading-time': 'src/adapter/ui/render/reading-time.ts',
   'pkc-quick-toc-item': 'src/adapter/ui/render/quick-toc.ts',

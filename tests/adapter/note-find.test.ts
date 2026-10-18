@@ -19,6 +19,9 @@ import {
   resolveFindTarget,
 } from '../../src/adapter/ui/render/note-find';
 import { collectHitRanges } from '../../src/adapter/ui/render/search-jump';
+import { DetailRenderer } from '../../src/adapter/ui/render/detail';
+import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
+import { initialState, reduce } from '../../src/adapter/state/app-state';
 import { findCommand } from '../../src/features/keymap';
 
 function fakeStorage() {
@@ -343,5 +346,70 @@ describe('note-find: Ctrl+F の行き先', () => {
     root.append(b);
     b.click();
     expect(isNoteFindOpen(root)).toBe(true);
+  });
+});
+
+describe('note-find: 実物の DetailRenderer の 3 面で探せる', () => {
+  async function surface(mode: 'live' | 'split' | null) {
+    localStorage.setItem('pkc3.editor-mode', mode ?? 'live');
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    bindActions(root, d, {}, new KeymapStore(fakeStorage()));
+    const detail = new DetailRenderer(regions.detail, null, new MarkdownClient(), null);
+    let st = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        {
+          lid: 'a',
+          title: 't',
+          archetype: 'text',
+          entryOrder: 1,
+          createdAt: null,
+          updatedAt: null,
+          status: null,
+          date: null,
+          archived: false,
+          bodyChars: null,
+        },
+      ],
+      relations: [],
+    }).state;
+    st = reduce(st, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    st = reduce(st, { type: 'BODY_LOADED', lid: 'a', body: 'みかんとりんご\n\nりんごのパン' }).state;
+    if (mode !== null) st = reduce(st, { type: 'START_EDIT' }).state;
+    detail.render(st);
+    await new Promise((r) => setTimeout(r, 0));
+    return { root, detail };
+  }
+
+  afterEach(() => localStorage.removeItem('pkc3.editor-mode'));
+
+  it.each([
+    ['読む面', null, 'detail-body'],
+    ['1 画面の編集(ライブ)', 'live', 'editor-live'],
+    ['2 ペインのプレビュー', 'split', 'editor-preview'],
+  ] as const)('%s: Ctrl+F で欄が出て、りんご 2 件を数え、Esc で閉じて本文は無傷', async (_n, mode, hostKey) => {
+    const { root } = await surface(mode);
+    const host =
+      mode === null
+        ? root.querySelector('[data-pkc-field="detail-body"]')
+        : root.querySelector(`[data-pkc-region="${hostKey}"]`);
+    expect(host, `${hostKey} が組めていない(台の空振り)`).not.toBeNull();
+    const before = host!.innerHTML;
+    expect(resolveFindTarget(root, null), '対象がこの面になっていない').toBe(host);
+    press('f', { code: 'KeyF', ctrlKey: true });
+    expect(isNoteFindOpen(root), `${hostKey}: 欄が出ない`).toBe(true);
+    type(root, 'りんご');
+    expect(count(root), `${hostKey}: 件数が違う`).toBe('1 / 2');
+    press('Enter', {}, input(root)!);
+    expect(count(root)).toBe('2 / 2');
+    press('Escape', {}, input(root)!);
+    expect(isNoteFindOpen(root)).toBe(false);
+    expect(host!.innerHTML, `${hostKey}: 閉じたあと本文が元に戻っていない`).toBe(before);
   });
 });
