@@ -217,3 +217,11 @@ Qt の `EM_JS` / `EM_ASYNC_JS` の本文は **焼いた `soffice.js` に字の�
 再現したのは**最初に trap が出たのと同じ構成**(4 腕 × 3 round、`C,B2,B2w,B2k`)を**そのまま**回した回(121r: trace で経路を確定 / 121q: 門が待った)。
 🔑 競合は「時刻しだい」なので、**狙って当てるより、当たった構成を変えずに回数を足す**ほうが安い。
 ⚠ 構成を変えて 0 件になった回を「直った」と読まない ── 変えたのは窓のほうである。
+
+## 🔑 大きい文書の境目を測る ── 文書は `addInitScript` に埋めず、`fetch` で渡す(2026-10-18、依頼 242)
+
+`open-doc-probe.mjs` は文書を **base64 にして `addInitScript` へ埋める**。120MB の文書でこの段が落ちる(`page.addInitScript: Target page … closed`、900 秒で timeout)── **文書の限界ではなく計器の限界**。
+🔑 大きい文書は probe の server に `/__doc.bin` を足して、送り手(init script)が `ready-for-document` を受けたら `fetch('/__doc.bin').then(r => r.arrayBuffer())` して、`postMessage({ document, bytes })` する(PKC3 の経路と同じ BroadcastChannel)。
+⚠ 一式は `make-pages-bundle.mjs <LO を展開した dir> <出力>` で組み、`PKC3_DIST` に `public/office` だけを写した dir(`<dist>/office/host.html`)を渡せば、`npm run build` を回さずに測れる。
+実測(LO 26.8、ヘッドレス Chromium、メモリ 16GB): 画像だけの .docx は 20〜600MB まで開く(17〜39 秒)/ 900MB・1.2GB は渡るが 36 秒で「この文書は開けませんでした」/ 2.0GB は窓に渡らずスタート画面。.xlsx(10 列 × 100 万行 = 90MB)は 36 秒で開く。
+結論は `src/features/office/office-entry.ts` の `OFFICE_LARGE_DOC_BYTES`(300MB)の注釈。

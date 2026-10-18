@@ -286,7 +286,7 @@ import {
   openingNotice,
   stagedLaunchNotice,
 } from '@features/office/office-launch';
-import { isOfficeUsable } from '@features/office/office-entry';
+import { isOfficeUsable, largeDocNotice } from '@features/office/office-entry';
 import { attachmentSavedAt } from '@features/office/office-shadow';
 import { OFFICE_CONFIRMING_NOTICE, OFFICE_NOT_REACHED_NOTICE, OFFICE_DECLINED_NOTICE, OfficeWindow, shadowFailedNotice } from '@adapter/platform/office/office-window';
 import { listNoteImages } from '@adapter/platform/office/office-note-images';
@@ -2473,6 +2473,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           ? `「${staged.name}」を開いています(Office のタブをご覧ください)`
           : openingNotice(staged.name, staged.writable),
       );
+      // 🔴 大きい文書は、開けないことがあると言う(台帳 #1852 束 A1。依頼 242)。⚠ 言うだけで、開くのは止めない
+      const large = largeDocNotice(staged.name, staged.bytes.byteLength);
+      if (large !== null) showStatus(large, { kind: 'caution' });
       return;
     }
     const r = officeWindow.open({});

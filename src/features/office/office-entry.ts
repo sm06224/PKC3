@@ -55,6 +55,40 @@ export function isOfficeAttachment(mime: string, fileName: string): boolean {
   return OFFICE_EXTS.some((ext) => name.endsWith(ext));
 }
 
+/**
+ * 🔴 **大きい文書は、開く前に「開けないことがあります」と言う**(台帳 #1852 束 A1。#1163 の依頼 242)。
+ *
+ * 直す前は、とても大きい文書を開くと Office のウィンドウが空の画面のまま止まり、PKC3 は何も言わなかった。
+ *
+ * ## 境目の実測(2026-10-18。LO wasm の配布版・ヘッドレス Chromium・メモリ 16GB の箱)
+ *
+ * `build/office-wasm/open-doc-probe.mjs`(PKC3 と同じ BroadcastChannel で bytes を渡す経路)に、自作の文書を大きさ別に渡して測った。
+ * 画像だけで大きくした .docx(1 枚 5MB の乱数画像)と、10 列 × N 行の数値の .xlsx:
+ *
+ * | 文書 | 大きさ | 結果 |
+ * |---|---|---|
+ * | .docx | 20 / 60 / 120 / 200 / 300 / 600 MB | 開く(17 / 15 / 16 / 15 / 20 / 39 秒) |
+ * | .xlsx(40 万行 / 100 万行) | 36 / 90 MB | 開く(21 / 36 秒) |
+ * | .docx | 900 MB / 1.2 GB | 渡るが 36 秒たっても開かず「この文書は開けませんでした (36 秒)」 |
+ * | .docx | 2.0 GB | **窓に渡らず、スタート画面のまま止まる**(15 秒待って諦める) |
+ *
+ * 🔑 失敗は**文書の大きさ**で決まるように見える(画像の枚数や行数ではなく)── 受け渡しが 2 回写され(放送 → 窓の FS)、
+ *   LO が読む分の 4GB の天井に当たる、と読んでいる(未確認。境目はこの箱で 600〜900MB の間)。箱より小さいメモリの端末では、もっと手前で止まる。
+ * 🔑 渡し方(放送 → 窓の FS)は 600MB まで動いたので、**境目の手前では変えなくてよい**。
+ *   境目の先は渡し方を変えても LO の天井が残るので、**開く前に言う**ことにした(OPFS 経由の受け渡しは、天井が動かない限り効かない)。
+ *
+ * ⚠ 言い始めは**実測の失敗(1.2GB)の手前、開くのに 40 秒近くかかり始める 300MB**。小さいメモリの端末ほど手前で止まるので、
+ *   「開けません」ではなく「開けないことがあります」と言う(言うだけで、開くのは止めない)。
+ */
+export const OFFICE_LARGE_DOC_BYTES = 300 * 1024 * 1024;
+
+/** 大きい文書を開くときの知らせ。⚠ 小さい文書には何も言わない(`null`)。 */
+export function largeDocNotice(name: string, bytes: number): string | null {
+  if (!(bytes > OFFICE_LARGE_DOC_BYTES)) return null;
+  const mb = Math.round(bytes / (1024 * 1024));
+  return `「${name}」は大きい文書(約 ${mb} MB)なので、Office で開けないことがあります。開くまで時間がかかります。開けないときは、ダウンロードして別のアプリで開いてください`;
+}
+
 /** 実行環境に足りないもの(空なら足りている)。 */
 export interface OfficeCapability {
   readonly crossOriginIsolated: boolean;
