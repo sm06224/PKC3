@@ -2008,7 +2008,8 @@ describe('カンバンの札を集める (#277 段②)', () => {
     const many = await request({ op: 'taskScan', cid: 'c-nt-many' });
     expect(many.noteTimes?.length, '上限を超えて読んでいる').toBe(NOTE_TIME_LIMIT);
     expect(many.truncated, '時刻の読みを切ったのに黙っている').toBe(true);
-  });
+    // 5000 件超を入れる重い test ── 全量を並列で回す負荷の下でも切れないよう余裕を持たせる
+  }, 60_000);
 });
 
 /**
