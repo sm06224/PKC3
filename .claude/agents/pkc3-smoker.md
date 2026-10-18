@@ -46,6 +46,12 @@ pwd && git worktree list && git log --oneline -1
 ⚠ 同居が疑われる場合(`git status` に自分の覚えのない変更が在る等)は
 **何も走らせずに報告して終わる**。
 
+🔴 **port は必ず自分専用にする**(2026-10-18、並行する 2 人が既定の port 45732 を使い回し、片方が**他人の dist を検品していた**。
+「,」区切りが割れない、という食い違いで初めて気づいた)。依頼に port の番号が無くても既定のまま回さない ──
+`PKC3_SMOKE_PORT` / `PKC3_PLAIN_PORT` / `PKC3_SUBPATH_PORT` を 10 刻みの帯で自分で選び(例 `48310 / 48311 / 48312`)、
+`CI=1` を付け、回す前に `ss -ltnp | grep <port>` で他人が listen していないことを見る(手順は
+`.claude/skills/smoke-testing/SKILL.md` の port の規則)。報告には使った port を書く。
+
 ## 手順
 
 ### 1. 🔴 まず「動線」を名指しする(ここが本体)
