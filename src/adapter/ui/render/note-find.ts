@@ -197,7 +197,9 @@ function observe(f: Finder): void {
   f.observer?.disconnect();
   if (f.target === null || typeof MutationObserver === 'undefined') return;
   f.observer ??= new MutationObserver(() => schedule(f));
-  f.observer.observe(f.target, { childList: true, subtree: true, characterData: true });
+  // 🔑 対象そのものではなく中央ペインを見る ── ノートを切り替えると対象の器ごと差し替わる(対象の中の変化だけ見ていると気づけない)
+  const scope = f.target.closest<HTMLElement>('[data-pkc-region="center"]') ?? f.target;
+  f.observer.observe(scope, { childList: true, subtree: true, characterData: true });
 }
 
 function schedule(f: Finder): void {
