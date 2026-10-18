@@ -111,7 +111,7 @@ function textOf(r: McpResult): string {
   return r.content.map((c) => c.text).join('\n');
 }
 
-/** ダイアログの 3 択。⚠ 「許さない」は取り消し側(`dialog-cancel`)、あとの 2 つは行。 */
+/** ダイアログの 4 択。⚠ 「許さない」は取り消し側(`dialog-cancel`)、あとの 3 つは行(#1852 P1 / 依頼 363 で「この相手は断る」が増えた)。 */
 const ASK_NOTE = '[data-pkc-field="pick-agent-grant-note"]';
 const ASK_ROW = '[data-pkc-field="pick-agent-grant"]';
 const ASK_DENY = '[data-pkc-field="dialog-cancel"]';
@@ -122,8 +122,8 @@ async function expectAsk(page: Page, noteHas: string): Promise<void> {
   await expect(note, 'ダイアログの 1 行目に何をしようとしているかが出ていない').toContainText(noteHas);
   expect(
     await page.locator(ASK_ROW).allTextContents(),
-    'ダイアログの選び口が「この 1 回だけ」「常に許す」ではない',
-  ).toEqual(['この 1 回だけ', '常に許す']);
+    'ダイアログの選び口が「この 1 回だけ」「常に許す」「この相手は断る」ではない',
+  ).toEqual(['この 1 回だけ', '常に許す', 'この相手は断る(次に起動するまで)']);
   await expect(page.locator(ASK_DENY)).toHaveText('許さない');
 }
 
