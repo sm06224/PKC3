@@ -12,14 +12,45 @@
  * ⚠ 後始末は 1 つの関数にまとめて返す。**呼ばれないまま画面が開きっぱなし / 明るいまま**にならないよう、
  *   用意が刷りの上限時間(`print-note.ts` の待ち)を超えて終わった回は、**終わった瞬間に自分で戻す**(`current` が偽)。
  */
+import { foldSpans } from '@features/markdown/heading-fold';
+import { headingLevel } from './heading-fold';
+import { bodyBlocks } from './log-days';
 import { renderDiagramsLightForPrint } from './mermaid-hydrate';
 
-/** 閉じている `<details>` を開き、**開けた物だけ**を戻す関数を返す。 */
+/** 閉じている `<details>` と見出し・日の畳みを開き、**開けた物だけ**を戻す関数を返す。 */
 export function openFoldsForPrint(root: ParentNode): () => void {
   const closed = [...root.querySelectorAll<HTMLDetailsElement>('details:not([open])')];
   for (const d of closed) d.open = true;
+  const hiddenBlocks: HTMLElement[] = [];
+  const hosts = new Set<HTMLElement>();
+  for (const h of root.querySelectorAll('[data-pkc-folded], [data-pkc-day-folded]')) {
+    if (h.parentElement !== null) hosts.add(h.parentElement);
+  }
+  for (const host of hosts) {
+    const blocks = bodyBlocks(host);
+    const hasDayFold = host.querySelector('[data-pkc-day-folded]') !== null;
+    if (hasDayFold) {
+      for (const el of blocks) {
+        if (el instanceof HTMLElement && el.hidden) {
+          el.hidden = false;
+          hiddenBlocks.push(el);
+        }
+      }
+    } else {
+      for (const s of foldSpans(blocks.map(headingLevel))) {
+        for (let i = s.from; i < s.to; i += 1) {
+          const el = blocks[i];
+          if (el instanceof HTMLElement && el.hidden) {
+            el.hidden = false;
+            hiddenBlocks.push(el);
+          }
+        }
+      }
+    }
+  }
   return () => {
     for (const d of closed) if (d.isConnected) d.open = false;
+    for (const el of hiddenBlocks) if (el.isConnected) el.hidden = true;
   };
 }
 

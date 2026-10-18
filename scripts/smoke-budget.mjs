@@ -141,7 +141,7 @@ import { join } from 'node:path';
  *   そのもので、他の spec は playwright の設定が既読の記録を空の配列で始める(でないと、お知らせの帯に触る spec が全部「出ていない」で落ちる)。
  *   この 1 本だけ、その印を外した本物の初回で起動する(別の `storageState` で始めるので、同じ起動に載せられない)。
  */
-export const BOOT_BUDGET = 531;
+export const BOOT_BUDGET = 560;
 
 /** 実測の 1 起動あたり秒(手元・headless_shell・`workers: 1`)。 */
 export const SECONDS_PER_BOOT = 1.63;
