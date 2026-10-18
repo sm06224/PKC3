@@ -78,8 +78,26 @@ export class ScrollMemory {
    * 覚えた値なので、戻しても何も動かない。
    */
   use(key: string): void {
+    const same = this.key === key;
     this.key = key;
-    this.el.scrollTop = this.seen.get(key) ?? 0;
+    const want = this.seen.get(key) ?? 0;
+    /**
+     * 🔴 **同じ面で、覚えている位置より下へ既に動いていたら、戻さない**(`scroll` が出る前に描き直しが来た)。
+     * ⚠ `scroll` イベントは次のフレームで届くので、送った直後(programmatic な `scrollIntoView` を含む)に
+     *   描き直しが来ると、`seen` はまだ古く、ここで書き戻すと**送った分が巻き戻る**(pdf-reader.smoke で、
+     *   行を帯の上へ送った直後に更新時刻の描き直しが来て、行が帯の下へ戻った)。
+     * 🔑 戻してよいのは「縮んで丸められた / 一瞬空になった」= `scrollTop` が覚えた値**以下**に落ちた場合だけ。
+     *   覚えた値より**大きい**値は丸めでは作れないので、送られた位置として採る。
+     * ⚠ 読むのは同じ面のときだけ。この後の書き込みも配置を強いる(上の注記)ので、読みを足しても支払いは増えない。
+     */
+    if (same) {
+      const cur = this.el.scrollTop;
+      if (cur > want) {
+        this.remember(); // いまの位置を覚える(上限の掃除も remember が持つ)
+        return;
+      }
+    }
+    this.el.scrollTop = want;
   }
 
   /** いま覚えている位置(test の観測点)。 */

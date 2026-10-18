@@ -79,8 +79,12 @@ describe('スクロール位置の記憶', () => {
     expect(c.el.scrollTop, '縮んだ後の 0 を前の面の鍵で覚えてしまった').toBe(250);
   });
 
-  /** 🔴 描き直しの中で `scrollTop` を読まない(読むと強制レイアウトを払う ── #1467 段 3-e)。 */
-  it('🔴 use() は scrollTop を読まない(書くだけ)── 位置は scroll イベントでしか覚えない', () => {
+  /**
+   * 🔴 描き直しの中で `scrollTop` を読まない(読むと強制レイアウトを払う ── #1467 段 3-e)。
+   * ⚠ 例外は 1 つ ── **同じ面を描き直すとき**だけ、直後の書き込み(同じく配置を強いる)の前に 1 回読む
+   *   (`scroll` が出る前に描き直しが来ると、送った分が巻き戻るため。下の test)。面を切り替えるときは読まない。
+   */
+  it('🔴 面を切り替える use() は scrollTop を読まない(書くだけ)── 位置は scroll イベントでしか覚えない', () => {
     const el = document.createElement('div');
     let top = 0;
     let reads = 0;
@@ -98,13 +102,39 @@ describe('スクロール位置の記憶', () => {
     m.use('a');
     el.scrollTop = 250;
     reads = 0;
-    m.use('a');
     m.use('b');
     m.use('a');
-    expect(reads, 'use() が scrollTop を読んでいる(描き直しの中で強制レイアウトを払う)').toBe(0);
+    m.use('c');
+    expect(reads, '面を切り替える use() が scrollTop を読んでいる(描き直しの中で強制レイアウトを払う)').toBe(0);
     // 対照群: scroll が届いたときだけ読む
     el.dispatchEvent(new Event('scroll'));
     expect(reads).toBe(1);
+    // 同じ面を描き直すときは 1 回だけ読む(上の例外)
+    reads = 0;
+    m.use('c');
+    expect(reads, '同じ面の use() は読みが 1 回').toBe(1);
+  });
+
+  /**
+   * 🔴 **送った直後(`scroll` イベントの前)に同じ面が描き直されても、送った分を巻き戻さない**。
+   * ⚠ 直す前は `seen`(古い値)を書き戻した ── 帯の下に隠れた行を `scrollIntoView` した直後に更新時刻の描き直しが
+   *   来て、行が帯の下へ戻った。対照群: 丸められて覚えた値より**小さく**なった場合は、従来どおり覚えた値へ戻す。
+   */
+  it('🔴 scroll イベントの前に同じ面を描き直しても、送った位置を保つ(覚えた値より大きい)', () => {
+    const c = container();
+    const m = new ScrollMemory(c.el);
+    m.use('list');
+    c.el.scrollTop = 36;
+    scrolled(c.el); // 覚えた = 36
+    c.el.scrollTop = 62; // 送った(scroll イベントはまだ届いていない)
+    m.use('list'); // 描き直し
+    expect(c.el.scrollTop, '送った位置が古い値へ巻き戻った').toBe(62);
+    expect(m.peek('list'), '送った位置を覚えていない').toBe(62);
+    // 対照群: 丸められて小さくなったときは、覚えた値へ戻す(作り直しで一瞬空になる面)
+    c.setContent(0);
+    c.setContent(1000);
+    m.use('list');
+    expect(c.el.scrollTop, '丸められた分を戻していない').toBe(62);
   });
 
   it('🔴 同じ面を描き直しただけでも戻す(ログのように作り直す面)', () => {
