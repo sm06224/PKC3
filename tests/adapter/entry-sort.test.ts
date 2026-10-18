@@ -308,7 +308,7 @@ describe('タグの札(#182)', () => {
       '家事',
     ]);
     (chips[0] as HTMLElement).click();
-    expect(d.getState().filterQuery, '押しても探さない').toBe('買い物');
+    expect(d.getState().filterQuery, '押しても探さない').toBe('#買い物');
   });
 
   /**

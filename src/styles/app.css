@@ -706,6 +706,11 @@ select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
+/* 🔴 キーボードで止まった画像・図の枠(依頼 79-3 C)── Enter で大きく表示する。マウスで押したときは出さない(`:focus-visible`) */
+img[data-pkc-action='view-big']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 
 
@@ -2748,6 +2753,31 @@ li[data-pkc-row-slot] {
 [data-pkc-field='tag-add-input'] {
   min-width: 0;
   width: 6rem;
+  font-size: 12px;
+}
+
+/**
+ * 🔴 **つながりを足す欄は、「つながり」の行の中に置く**(台帳 #1852 / 依頼 77-6 C)。
+ * ⚠ 直す前はペインのいちばん下で、スクロールしないと届かなかった。一覧のすぐ下の 1 行に、欄・種類・ボタンを並べる。
+ * ⚠ 欄は縮む(右の列は狭い)。入らない幅ではボタンが下の行へ回る。地は無彩色のまま。
+ */
+[data-pkc-field='inspector-relation-list'] {
+  display: contents;
+}
+[data-pkc-field='relation-add'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+[data-pkc-field='relation-target'] {
+  min-width: 0;
+  width: 6rem;
+  font-size: 12px;
+}
+[data-pkc-field='relation-kind'] {
+  min-width: 0;
   font-size: 12px;
 }
 

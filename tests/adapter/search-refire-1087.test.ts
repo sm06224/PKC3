@@ -149,3 +149,41 @@ describe('飛んでいる検索と同じ語の撃ち直し', () => {
     expect(calls, '同じ語の撃ち直しを捨てた').toBe(2);
   });
 });
+
+describe('#タグ の問い合わせ(依頼 317)', () => {
+  it('🔴 札の字(#タグ)は、本文検索ではなくタグ走査(smartScan)へ行き、返った lid が当たりになる', async () => {
+    const d = new Dispatcher();
+    const scanned: Array<{ lid: string; tags: readonly string[] }> = [];
+    let searched = 0;
+    connectStoreEffects(d, {
+      ...stubRevisionOps(),
+      getBody: async () => '',
+      renameEntry: async () => stubStamps(),
+      replaceAssetRefs: () => Promise.reject(new Error('この test では使わない')),
+      reorderEntry: async () => stubStamps(),
+      persistEntry: async () => stubStamps(),
+      deleteEntry: async () => {},
+      setEntryParent: async () => {},
+      searchEntries: async () => {
+        searched += 1;
+        return { lids: ['a', 'b'], truncated: false };
+      },
+      smartScan: async (lid: string, q: { tags: readonly string[] }) => {
+        scanned.push({ lid, tags: q.tags });
+        return { lids: ['b'], total: 3 };
+      },
+    } as unknown as Parameters<typeof connectStoreEffects>[1]);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a'), meta('b')], relations: [] });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '#AI' });
+    await flush();
+    expect(searched, '本文の検索を撃った(題名・本文に AI を含むだけのノートが混ざる)').toBe(0);
+    expect(scanned).toEqual([{ lid: '', tags: ['AI'] }]);
+    expect([...(d.getState().searchHits ?? [])]).toEqual(['b']);
+    expect(d.getState().searchHitsTruncated, '上限で切れたら「ほかにもあります」').toBe(true);
+    // 対照群: ふつうの語は今までどおり本文を探す
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'AI' });
+    await flush();
+    expect(searched).toBe(1);
+    expect(scanned.length).toBe(1);
+  });
+});

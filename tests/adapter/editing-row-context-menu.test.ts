@@ -12,7 +12,8 @@
  *
  * ## 何を守るか
  *
- * - 編集中の行の右クリックで出るメニューは **`open-note-window` の 1 行だけ**(説明つき)
+ * - 編集中の行の右クリックで出るメニューは、いつもと同じ項目を並べ、**押せるのは `open-note-window` だけ**。
+ *   他は灰色(`disabled`)で、説明に「編集を保存するか、編集をやめてから使えます」と出る(台帳 #1852 / 依頼 79-2 B)
  * - 押しても **`selectedLid` が動かない**(`SELECT_ENTRY` を撃たない)し、編集も続く
  * - 対照群 ── 編集中でなければ今までどおり全項目
  * - 居ない lid は理由を出して断る(無言の dead click を作らない)
@@ -22,6 +23,7 @@ import { initialState, type AppState } from '../../src/adapter/state/app-state';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { phaseBlockReason } from '../../src/adapter/state/app-state';
 import { MENU_HINT_FIELD } from '../../src/adapter/ui/render/context-menu';
 import {
   ENTRY_ACTION_HINTS,
@@ -90,21 +92,50 @@ function setup(state: AppState) {
     [...(root.querySelector(MENU)?.querySelectorAll('button[data-pkc-action]') ?? [])].map(
       (b) => b.getAttribute('data-pkc-action')!,
     );
-  return { root, d, opened, rightClick, actions, menu: () => root.querySelector(MENU) };
+  /** 押せる項目だけ(灰色でない物)。 */
+  const enabled = (): string[] =>
+    [...(root.querySelector(MENU)?.querySelectorAll<HTMLButtonElement>('button[data-pkc-action]') ?? [])]
+      .filter((b) => !b.disabled)
+      .map((b) => b.getAttribute('data-pkc-action')!);
+  return { root, d, opened, rightClick, actions, enabled, menu: () => root.querySelector(MENU) };
 }
 
 describe('編集中の行の右クリック(#690 ④ A′)', () => {
-  it('🔴 出るのは「別の窓で開く」1 行だけ ── 断り文は出ない', () => {
+  it('🔴 いつもと同じ項目が並び、押せるのは「別のウィンドウで開く」だけ ── 断り文は出ない', () => {
     const s = setup(editingState());
     const e = s.rightClick('other');
     expect(e.defaultPrevented, '既定を奪っていない(ブラウザのメニューが重なる)').toBe(true);
-    expect(s.actions(), 'メニューの中身が「別の窓で開く」1 行ではない').toEqual(['open-note-window']);
+    expect(s.actions(), 'いつもと同じ項目・同じ順に並んでいない').toEqual(
+      entryMenuActions({ archetype: 'text', linkedFile: null }).map((a) => a.action),
+    );
+    expect(s.actions().length, '前提が崩れた(項目が 1 つしか無い)').toBeGreaterThan(5);
+    expect(s.enabled(), '押せる項目が「別のウィンドウで開く」だけではない').toEqual(['open-note-window']);
     expect(s.d.getState().error, '編集中の断り文が出ている').toBeNull();
     // 🔑 字も説明も正本(`entry-actions.ts`)から来ている
     const btn = s.menu()!.querySelector('button[data-pkc-action="open-note-window"]')!;
     expect(btn.textContent).toBe(ENTRY_ACTION_LABELS['open-note-window']);
     expect(btn.getAttribute('data-pkc-hint')).toBe(ENTRY_ACTION_HINTS['open-note-window']);
     expect(s.menu()!.querySelector(`[data-pkc-field="${MENU_HINT_FIELD}"]`), '説明欄が無い').not.toBeNull();
+    // 🔴 灰色の項目は、理由を説明に持つ(消えた理由が画面のどこにも出ない、が元の不具合)
+    const copy = s.menu()!.querySelector<HTMLButtonElement>('button[data-pkc-action="copy-entry-ref"]')!;
+    expect(copy.disabled, '押せない項目が押せる').toBe(true);
+    expect(copy.getAttribute('data-pkc-hint')).toBe('編集を保存するか、編集をやめてから使えます');
+    // 前置きの出どころは phaseBlockReason 1 か所(手書きの複製を作らない)
+    expect(`${phaseBlockReason('editing')}使えます`).toBe('編集を保存するか、編集をやめてから使えます');
+  });
+
+  it('🔴 灰色の項目を押しても何も撃たれず、メニューも断り文も出さない(押せない物は押せない)', () => {
+    const s = setup(editingState());
+    const fired: string[] = [];
+    const orig = s.d.dispatch.bind(s.d);
+    s.d.dispatch = (a) => {
+      fired.push(a.type);
+      return orig(a);
+    };
+    s.rightClick('other');
+    s.menu()!.querySelector<HTMLButtonElement>('button[data-pkc-action="delete-entry"]')!.click();
+    expect(fired, '灰色の「ゴミ箱へ移す」で何かが撃たれた').toEqual([]);
+    expect(s.d.getState().entryMetas.has('other')).toBe(true);
   });
 
   it('🔴 押すと押した行の窓が出て、下書きも中央のノートも動かない', () => {
@@ -152,10 +183,16 @@ describe('編集中の行の右クリック(#690 ④ A′)', () => {
   });
 
   /** 🔑 表の側:1 行だけで、字と説明が正本と一致する。 */
-  it('🔑 editingRowMenuActions は open-note-window 1 件(説明つき)', () => {
-    const rows = editingRowMenuActions();
-    expect(rows.map((r) => r.action)).toEqual(['open-note-window']);
-    expect(rows[0]!.label).toBe(ENTRY_ACTION_LABELS['open-note-window']);
-    expect(rows[0]!.hint).toBe(ENTRY_ACTION_HINTS['open-note-window']);
+  it('🔑 editingRowMenuActions は entryMenuActions と同じ並びで、open-note-window だけが押せる(説明つき)', () => {
+    const ctx = { archetype: 'text', linkedFile: null } as const;
+    const rows = editingRowMenuActions(phaseBlockReason('editing') ?? '', ctx);
+    expect(rows.map((r) => r.action)).toEqual(entryMenuActions(ctx).map((a) => a.action));
+    expect(rows.filter((r) => r.disabled !== true).map((r) => r.action)).toEqual(['open-note-window']);
+    const open = rows.find((r) => r.action === 'open-note-window')!;
+    expect(open.label).toBe(ENTRY_ACTION_LABELS['open-note-window']);
+    expect(open.hint).toBe(ENTRY_ACTION_HINTS['open-note-window']);
+    for (const r of rows.filter((x) => x.action !== 'open-note-window')) {
+      expect(r.hint, r.action).toBe('編集を保存するか、編集をやめてから使えます');
+    }
   });
 });

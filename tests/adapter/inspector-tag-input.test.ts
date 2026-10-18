@@ -215,7 +215,7 @@ describe('タグをその場で打つ(#494)', () => {
     const find = s.q('[data-pkc-action="filter-by-tag"]');
     expect(find, 'タグを押して探せなくなった').not.toBeNull();
     find!.click();
-    expect(s.d.getState().filterQuery).toBe('買い物');
+    expect(s.d.getState().filterQuery).toBe('#買い物');
   });
 
   it('⚠ 空のまま押したら理由を出す(無言の dead click にしない)', async () => {

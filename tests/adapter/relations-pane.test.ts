@@ -63,7 +63,7 @@ describe('関係の導線', () => {
   }
 
   const box = (root: HTMLElement) =>
-    root.querySelector<HTMLElement>('[data-pkc-field="inspector-relations"]')!;
+    root.querySelector<HTMLElement>('[data-pkc-field="inspector-relation-list"]')!;
 
   it('関係が無いときは「無し」と書く(空欄は不明に見える)', () => {
     const { root } = mounted([meta('n1', 'あ'), meta('n2', 'い')]);
@@ -237,5 +237,26 @@ describe('関係の導線', () => {
     kind.value = other.value;
     add.click();
     expect(d.getState().relations, '種類が違うのに断っている').toHaveLength(2);
+  });
+
+  it('🔴 つながりを足す欄は「つながり」の行の中にあり、描き直しても同じ欄のまま(依頼 77-6 C)', () => {
+    const { root, d } = mounted([meta('n1', 'あ'), meta('n2', 'い')]);
+    const dd = root.querySelector<HTMLElement>('dd[data-pkc-field="inspector-relations"]')!;
+    const bar = root.querySelector<HTMLElement>('[data-pkc-field="relation-add"]')!;
+    expect(dd.contains(bar), '足す欄が「つながり」の行の外(ペインの末尾)にある').toBe(true);
+    // 一覧が先、足す欄がその後(見る場所と足す場所が続く)
+    const list = dd.querySelector('[data-pkc-field="inspector-relation-list"]')!;
+    expect(list.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 打ちかけの字は、一覧の描き直しで消えない
+    const name = bar.querySelector<HTMLInputElement>('[data-pkc-field="relation-target"]')!;
+    name.value = 'い';
+    root.querySelector<HTMLButtonElement>('[data-pkc-action="add-relation"]')!.click();
+    name.value = '打ちかけ';
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    expect(root.querySelector('[data-pkc-field="relation-add"]'), '欄が作り直された').toBe(bar);
+    expect(name.value).toBe('打ちかけ');
+    // 「つながりの図」より後ろに置いていた従来の位置ではない
+    const map = root.querySelector('dd[data-pkc-field="inspector-relation-map"]')!;
+    expect(map.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_PRECEDING, '図より後ろに残っている').toBeTruthy();
   });
 });

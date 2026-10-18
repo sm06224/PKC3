@@ -19,6 +19,7 @@
  */
 
 import { foldText } from './fold-text';
+import { tagQueryOf } from './tag-query';
 
 /**
  * 比較に使う形へ(全角半角・濁点の持ち方・大小を揃えて、前後の空白を落とす)。空文字 = 絞り込み無し。
@@ -106,6 +107,12 @@ export const entryFilterOf = (
 export function matchesEntry(target: FilterTarget, filter: EntryFilter): boolean {
   if (filter.kinds.size > 0 && !filter.kinds.has(target.archetype)) return false;
   if (filter.query === '') return true;
+  /**
+   * 🔴 **`#タグ` の問い合わせは、そのタグが付いたノートだけ**(依頼 317)。題名では当てない ──
+   *   題名に `mail` を含むだけのノートが「AI」の札で並ぶ、が今までの不具合。当たりの lid は worker のタグ走査が返す
+   *   (`bodyHits` が `null` = まだ返っていない間は、何も並べない)。
+   */
+  if (tagQueryOf(filter.query) !== null) return filter.bodyHits?.has(target.lid) === true;
   return matchesTitle(target.title, filter.query) || filter.bodyHits?.has(target.lid) === true;
 }
 

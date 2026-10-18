@@ -19,7 +19,7 @@
  * 付けたまま測ったら**窓が開いて行は開かなかった** ── つまり
  * **図の原文を直す道を丸ごと奪っていた**。
  *
- * ⚠ **印・カーソル・吹き出しはまとめて付ける** ── 片方だけ付けると
+ * ⚠ **印・カーソル・吹き出し・キーボードの止まり先はまとめて付ける** ── 片方だけ付けると
  * 「押せそうに見えるのに押せない」ができる。
  */
 
@@ -46,4 +46,13 @@ export function markViewBig(img: HTMLImageElement): void {
   img.setAttribute('data-pkc-action', VIEW_BIG_ACTION);
   img.style.cursor = 'zoom-in';
   img.title = VIEW_BIG_TITLE;
+  /**
+   * 🔴 **キーボードだけでも大きく表示できる**(台帳 #1852 束 U1 残り、依頼 79-3 C。Gemini 回答 = 推薦どおり)。
+   * ⚠ 直す前は画像を押すしか開く道が無く、Tab で画像に止まれなかった(マウスを使えない人は開けない)。
+   * 🔑 `tabindex="0"` + `data-pkc-action` の要素は、Enter / Space で同じ action を撃つ既存の道に乗る
+   *   (`binder.ts` の `onKeydown`)── 受け手を増やさない。止まった画像の枠は `app.css` の `:focus-visible`。
+   * ⚠ 印を付ける条件は上の「読む面か」と同じ 1 本のまま(編集の面では付かない = Tab の止まり先も増えない)。
+   */
+  img.tabIndex = 0;
+  img.setAttribute('role', 'button');
 }

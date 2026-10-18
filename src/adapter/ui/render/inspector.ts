@@ -206,6 +206,8 @@ export class InspectorRenderer {
     kind: HTMLSelectElement;
     add: HTMLButtonElement;
   } | null = null;
+  /** 「つながり」の行(`dd`)。つながりを足す欄をこの中に置く(依頼 77-6 C)。 */
+  private relDd: HTMLElement | null = null;
   /** タグを打つ欄の器(#494)。⚠ 打てない状況では**畳む**(押せない物を出さない)。 */
   private tagForm: HTMLElement | null = null;
   /** 編集中だけ出る 1 行(#715)。操作の帯の直上 ── 薄くなった理由と出口を字で置く。 */
@@ -776,7 +778,7 @@ export class InspectorRenderer {
           find.setAttribute('data-pkc-action', 'filter-by-tag');
           find.setAttribute('data-pkc-tag', tag);
           find.setAttribute('data-pkc-field', 'inspector-tag-find');
-          find.title = `「${tag}」を含むノートを探します`;
+          find.title = `「${tag}」が付いたノートだけを並べます`;
           setTagKey(find, tag);
           find.textContent = tag;
           chip.append(find);
@@ -835,7 +837,7 @@ export class InspectorRenderer {
           find.setAttribute('data-pkc-action', 'filter-by-tag');
           find.setAttribute('data-pkc-tag', name);
           find.setAttribute('data-pkc-field', 'inspector-body-tag-find');
-          find.title = `「${name}」を含むノートを探します`;
+          find.title = `「${name}」が付いたノートだけを並べます`;
           setTagKey(find, name);
           find.textContent = name;
           chip.append(find);
@@ -1628,6 +1630,7 @@ export class InspectorRenderer {
     this.rows = new Map();
     this.buttons = new Map();
     this.relAdd = null;
+    this.relDd = null;
     this.editingNote = null;
     this.rowDeps.clear();
     this.toc = null; // 器を組み直したら目次の記憶も手放す(新しい `<dd>` は空なので、同じ本文でも埋め直す)
@@ -1652,6 +1655,19 @@ export class InspectorRenderer {
       dd.setAttribute('data-pkc-field', field);
       dl.append(dt, dd);
       this.rows.set(field, dd);
+      /**
+       * 🔴 **つながりの行も器を 2 つに割る**(台帳 #1852 / 依頼 77-6 C)。⚠ 直す前は、つながりを足す欄が
+       *   ペインのいちばん下(「つながりの図」のさらに下)にあり、スクロールしないと届かなかった。
+       *   「タグ」と同じく、**一覧と足す欄を同じ行に置く**(見る場所と足す場所を離さない)。
+       * ⚠ 一覧は描き直しのたびに作り直すが、**打つ欄は作り直さない**(打ちかけの相手名と焦点が消える)。
+       */
+      if (field === 'inspector-relations') {
+        const list = document.createElement('span');
+        list.setAttribute('data-pkc-field', 'inspector-relation-list');
+        dd.append(list);
+        this.rows.set(field, list);
+        this.relDd = dd;
+      }
       // 🔴 **タグの行だけは器を 2 つに割る**(#494)── 下の注記を参照
       if (field === 'inspector-tags') {
         const chips = document.createElement('span');
@@ -1861,7 +1877,8 @@ export class InspectorRenderer {
     const add = iconButton('add-relation', 'つながりを足す', null);
     add.title = '選んでいるノートから、つなぐ先のノートへつながりを付けます';
     addBar.append(target, list, kind, add);
-    this.region.append(addBar);
+    // 🔴 つながりの行の中に置く(上の `row('つながり', …)` が用意した行。無ければ従来どおりペインの末尾)
+    (this.relDd ?? this.region).append(addBar);
     this.relAdd = { target, kind, add };
 
     // ⚠ **操作は対象の隣**(P8)。共通ツールバーに集約しない

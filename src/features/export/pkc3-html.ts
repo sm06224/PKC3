@@ -250,6 +250,8 @@ main h2{margin:0 0 16px}
   main{padding:16px}
 }
 img{max-width:100%;height:auto;display:block;margin:8px 0}
+/* 画像を押すと元の大きさで開く(依頼 77-5) */
+a[data-pkc-img-open]{cursor:zoom-in;display:block;width:fit-content;max-width:100%}
 /* ── 折りたたみ(F-1)。details の既定マーカーだけで畳める ── JS を足さない */
 nav details{margin:6px 0}
 nav summary{cursor:pointer;font-size:12px;opacity:.7;padding:3px 8px;border-radius:6px;
@@ -651,7 +653,7 @@ try{
       // 見出しへの参照(#h/…)は飛び先を運ぶ。見つからなければ先頭のまま
       var hi=ref.indexOf('#h/');
       var hid=hi<0?'':ref.slice(hi+3);
-      a.onclick=function(ev){ev.preventDefault();show(d.entries[at],btns[at],hid)};
+      a.onclick=function(ev){ev.preventDefault();go(at,hid)};
     });
     // 🔴 @[card](entry:…) の札も同じ ── 入っているノートなら押して開く / 入っていなければ字だけ。
     //    (⚠ この節は template literal の中 ── 注記に逆引用符を書かない)
@@ -669,11 +671,11 @@ try{
       if(idp)return;
       var hi=ref.indexOf('#h/');
       var hid=hi<0?'':ref.slice(hi+3);
-      var go=function(){show(d.entries[at],btns[at],hid)};
+      var goCard=function(){go(at,hid)};
       // 枠の字は指したノートの題名にする(画面と同じ。入っていなければ、元の字のまま)
       if(d.entries[at].title)c.textContent=d.entries[at].title;
-      c.onclick=function(ev){ev.preventDefault();go()};
-      c.onkeydown=function(ev){if(ev.key==='Enter'){ev.preventDefault();go()}};
+      c.onclick=function(ev){ev.preventDefault();goCard()};
+      c.onkeydown=function(ev){if(ev.key==='Enter'){ev.preventDefault();goCard()}};
     });
     // 図とグラフは**原文のまま**見せる(閲覧側に mermaid / chart.js を積まない)。
     // ⚠ **両方を回す** ── mermaid だけ書くと、グラフが**空の器**で出荷される
@@ -708,6 +710,21 @@ try{
     (e.attach||[]).concat(e.refs||[]).forEach(function(key){
       if(has(key)&&!seen[key]){seen[key]=1;box.appendChild(view(key,e.title,sink));}
     });
+    /* 🔴 **画像を押すと、元の大きさで新しいタブに開く**(台帳 #1852 束 U1 残り、依頼 77-5 B)。
+       直す前は画面の幅に縮むだけで、押しても何も起きなかった(大きい画像の細部が読めない)。
+       ⚠ 画面の表示だけ(全体印刷の紙には要らない)。⚠ すでにリンクの中にある画像は触らない。
+       ⚠ 開けるのは blob / http(s) の画像だけ(data: は最上位の移動をブラウザが止める)。 */
+    if(!idp){
+      Array.prototype.forEach.call(box.querySelectorAll('img'),function(im){
+        var u=im.getAttribute('src')||'';
+        if(!/^(blob:|https?:)/.test(u)||im.closest('a'))return;
+        var ia=document.createElement('a');
+        ia.href=u;ia.target='_blank';ia.rel='noopener';
+        ia.setAttribute('data-pkc-img-open','');
+        ia.title='押すと、元の大きさで新しいタブに開きます';
+        im.parentNode.insertBefore(ia,im);ia.appendChild(im);
+      });
+    }
     // 🔴 見出し id は **entry ごとに namespace を切る**(F-1)。書出し側の描画は
     //    entry ごとに独立した slug counter を回すので、別ノートの同名見出しは
     //    **同じ id** になる。画面は 1 件ずつなので衝突しないが、全体印刷は
@@ -781,6 +798,29 @@ try{
       li.appendChild(a);ol.appendChild(li);
     });
   }
+
+  /* 🔴 **ブラウザの「戻る」「進む」で、ノートを行き来できる**(台帳 #1852 束 U1 残り、依頼 77-4 C)。
+     直す前は、本文のリンクで別のノートへ移った後に「戻る」を押すと、ファイルを開く前のページへ出てしまった。
+     ⚠ ノートへ移る道(本文のリンク・札・一覧)は**この 1 本**を通す。how: 'replace' = 最初の表示 / 'pop' = 戻る・進むで来た(履歴を作らない)。
+     ⚠ URL は変えない(state だけ積む)── ファイルの場所に # を足さない。使えない環境では黙って今までどおり動く。 */
+  var hist={i:-1,h:''};
+  function go(i,hid,how){
+    var h=hid||'';
+    show(d.entries[i],btns[i],h);
+    if(how!=='pop'){
+      try{
+        var st={pkcI:i,pkcH:h};
+        if(how==='replace')history.replaceState(st,'');
+        else if(hist.i!==i||hist.h!==h)history.pushState(st,'');
+      }catch(_h){}
+    }
+    hist={i:i,h:h};
+  }
+  window.addEventListener('popstate',function(ev){
+    var st=ev.state;
+    if(!st||typeof st.pkcI!=='number'||!d.entries[st.pkcI])return;
+    go(st.pkcI,typeof st.pkcH==='string'?st.pkcH:'','pop');
+  });
 
   function show(e,btn,hid){
     release();
@@ -903,12 +943,12 @@ try{
     b.textContent=e.title||'(無題)';
     /* 🔴 スマホの幅では、ノートを選んだら一覧を畳む(依頼 77-2 B。見出しの数字は CSS と同じ PHONE_MAX_PX) */
     b.onclick=function(){
-      show(e,b);
+      go(i,'');
       if(window.matchMedia&&window.matchMedia('(max-width:${PHONE_MAX_PX}px)').matches)document.getElementById('pkc-dnotes').open=false;
     };
     btns.push(b);
     list.appendChild(b);
-    if(i===0)setTimeout(function(){show(e,b)},0);
+    if(i===0)setTimeout(function(){go(0,'','replace')},0);
   });
 }catch(err){fail(err&&err.message?err.message:String(err))}
 })();

@@ -3699,9 +3699,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     onActive: (active) => unloadGuard.setWriting(active, 'timer'),
     // 🔴 計っている途中の時刻を端末に控え、開き直したら続けて計る(台帳 #1852 O1 / 依頼 240)
     store: appTimerRuns,
+    // 🔴 前に閉じられたタブの計測は、止めたことにして本文に入れるか聞く(依頼 75-1)
+    askOrphan: async (message) =>
+      (await confirmInApp(root, message, { okLabel: '止めたことにして本文に入れる', cancelLabel: '入れない' })) === 'ok',
   });
   // ノートの一覧が読めてから続ける(消えたノートを見分けるため)
-  void whenPhaseReady(dispatcher, () => undefined).then(() => timerService.resume());
+  void whenPhaseReady(dispatcher, () => undefined).then(() => {
+    timerService.resume();
+    void timerService.resumeOrphans();
+  });
+  // 🔴 閉じる(または読み直す)印 ── 開き直した同じタブは、続きを計り始めるときに打ち消す
+  window.addEventListener('pagehide', () => appTimerRuns.leave());
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) appTimerRuns.beat(true);
+  });
 
   /**
    * 🔴 **アラート**(#280)。段取りは `alarm.ts` が持ち、ここは口を渡すだけ。
