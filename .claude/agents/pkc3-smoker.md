@@ -52,6 +52,9 @@ pwd && git worktree list && git log --oneline -1
 `CI=1` を付け、回す前に `ss -ltnp | grep <port>` で他人が listen していないことを見る(手順は
 `.claude/skills/smoke-testing/SKILL.md` の port の規則)。報告には使った port を書く。
 
+🔴 **`test(` を 1 本でも足したら `tests/repo-hygiene.test.ts` の smoke の件数の pin(`.toBe(N)`)を同じ commit で直す**
+(2026-10-18 #1884、足した 1 本を数え忘れて CI の verify が落ちた)。直す前に `node scripts/smoke-budget.mjs` で起動の予算の残りも見る。
+
 ## 手順
 
 ### 1. 🔴 まず「動線」を名指しする(ここが本体)
