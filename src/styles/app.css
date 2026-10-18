@@ -3751,6 +3751,11 @@ li[data-pkc-row-slot] {
   border-left: 3px solid var(--border);
   overflow-wrap: anywhere;
 }
+.pkc-md-rendered .pkc-section-embed[data-pkc-embed-title-only] {
+  /* 見出しを指さない `![](entry:ノート)` は題名のリンクだけ ── 節の引用の罫線は付けない(台帳 #1852 束 R1、依頼 94-2) */
+  border-left: none;
+  padding-left: 0;
+}
 .pkc-section-embed [data-pkc-field='section-embed-source'] {
   display: block;
   margin: 0 0 4px;

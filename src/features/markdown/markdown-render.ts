@@ -6371,13 +6371,28 @@ function postProcessTolerantSentinels(html: string): string {
             'start', 'end', 'center', 'justify', 'left', 'right', 'top', 'bottom',
           ]);
           const alignNext = ALIGN_NEXT.has(rawPos) ? rawPos : 'start';
+          /**
+           * 🔴 **本文に見える字は日本語にする**(台帳 #1852 束 R1、依頼 94-3 A)── 以前は「[align: end]」と英語混じりの目印が
+           * 本文に出ていた。⚠ 物理(左・右)へ潰さない: `end` は右とは限らない(右から左へ書く文書では左)ので、
+           * 書かれた値の意味のまま「行末側」と言う。説明(`title`)は今までどおりマウスを載せたときに出る。
+           */
+          const ALIGN_NEXT_LABEL: Readonly<Record<string, string>> = {
+            start: '行頭側',
+            end: '行末側',
+            center: '中央',
+            justify: '両端揃え',
+            left: '左',
+            right: '右',
+            top: '上',
+            bottom: '下',
+          };
           return (
             `<span class="pkc-align-hint" ` +
             `data-pkc-align-next="${alignNext}" ` +
             `data-pkc-warn-code="${pat.code}" data-pkc-warn-name="align" ` +
             `data-pkc-canonical="${canonical}" ` +
             `title="次の段落の寄せ(${alignNext})として扱っています。${fixTitle}">` +
-            `[align: ${rawPos}]</span>`
+            `(次の段落の寄せ: ${ALIGN_NEXT_LABEL[alignNext]})</span>`
           );
         }
         case 'quote': {

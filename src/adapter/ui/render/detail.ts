@@ -38,7 +38,7 @@ import { appCodeCollapse, applyCodeCollapse, clearCodeCollapse } from './code-co
 import { appInlineCodeCopy, applyInlineCodeCopy, clearInlineCodeCopy } from './inline-code-copy';
 import { applyTableSort } from './table-sort';
 import { applyExternalLinks } from './external-link';
-import { applyMissingLinks, clearMissingLinks } from './link-missing';
+import { applyCardTitles, applyMissingLinks, clearMissingLinks } from './link-missing';
 import { appMissingLinks } from './missing-links';
 import { applyPlaceLayout } from './place-board';
 import { PlaceEmbeds } from './place-embed';
@@ -1183,6 +1183,8 @@ export class DetailRenderer {
     const host = this.bodyHost;
     if (host === null || this.bodyKind !== 'md' || this.metasRef === null) return;
     const metas = this.metasRef;
+    // 🔴 `@[card](entry:…)` の枠は、指したノートの題名で出す(設定に依らない ── 依頼 94-1)
+    applyCardTitles(host, (l) => metas.get(l)?.title, this.cidRef);
     if (appMissingLinks.enabled()) applyMissingLinks(host, (l) => metas.has(l), this.cidRef);
     else clearMissingLinks(host);
   }

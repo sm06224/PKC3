@@ -70,3 +70,24 @@ describe('依頼 256: `\\%%` は字のまま', () => {
     expect(bodyLinkTargets('%%[a](entry:n2)%%')).not.toContain('n2');
   });
 });
+
+describe('依頼 94-3: 本文に出る寄せの目印は日本語', () => {
+  it.each([
+    ['end', '行末側'],
+    ['start', '行頭側'],
+    ['center', '中央'],
+    ['justify', '両端揃え'],
+    ['left', '左'],
+    ['right', '右'],
+  ])(':align:{position=%s} → (次の段落の寄せ: %s)', (pos, label) => {
+    const html = renderMarkdown(`本文 :align:{position=${pos}} の続き\n`, { silentHallucinationWarnings: true });
+    const el = document.createElement('div');
+    el.innerHTML = html;
+    const chip = el.querySelector('.pkc-align-hint')!;
+    expect(chip.textContent).toBe(`(次の段落の寄せ: ${label})`);
+    expect(chip.getAttribute('data-pkc-align-next')).toBe(pos);
+    expect(el.textContent).not.toContain('[align:');
+    // 説明はマウスを載せたときに今までどおり出る
+    expect(chip.getAttribute('title')).toContain('次の段落の寄せ');
+  });
+});

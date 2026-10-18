@@ -23,6 +23,7 @@ import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import {
+  SECTION_LOADING_NOTE,
   SECTION_LOADING_SELECTOR,
   SECTION_MISSING_NOTE,
   SECTION_NO_NOTE,
@@ -197,7 +198,7 @@ describe('描画: 指した節の中身が出る', () => {
 });
 
 describe('展開しないもの(今までどおり)', () => {
-  it('🔴 ふつうのリンク `[字](entry:…)` は展開しない / 見出しを指さない画像形は空の器のまま', async () => {
+  it('🔴 ふつうのリンク `[字](entry:…)` は展開しない / 見出しを指さない画像形は点線の枠ではなく題名のリンク(台帳 #1852 束 R1、依頼 94-2)', async () => {
     const r = await rig();
     const link = r.host().querySelector('a[data-pkc-action="navigate-entry-ref"]');
     expect(link, 'リンクが消えている').not.toBeNull();
@@ -205,10 +206,23 @@ describe('展開しないもの(今までどおり)', () => {
     // 🔑 リンクの中身(字)を書き換えられていない = 展開の対象に数えられていない
     expect(link!.textContent).toBe('リンク');
     expect(link!.querySelector('[data-pkc-field]'), 'リンクの中へ展開している').toBeNull();
+    // 見出しを指さない画像形: 「別のノートの内容」の点線の枠のまま止まらず、指したノートの題名のリンクになる
     const plain = embedOf(r, 'entry:src');
-    expect(plain.classList.contains('pkc-transclusion-placeholder'), '見出しを指さない参照を展開している').toBe(true);
-    // 🔴 展開しない参照は、説明の字が枠に残る(書き出しでも空の枠にならない)
-    expect(plain.textContent).toBe('節ではない');
+    expect(plain.classList.contains('pkc-transclusion-placeholder'), '点線の枠のまま残っている').toBe(false);
+    expect(plain.textContent, '説明の字ではなく題名').toBe('資料');
+    const go = plain.querySelector<HTMLElement>('[data-pkc-field="place-body-link"]')!;
+    expect(go.getAttribute('data-pkc-action')).toBe('select-entry');
+    expect(go.getAttribute('data-pkc-entry')).toBe('src');
+    expect(plain.hasAttribute('data-pkc-embed-title-only')).toBe(true);
+    // 節は展開しない(題名のリンクだけ)── 節の中身・読み込み待ちの字が出ない
+    expect(plain.querySelector('[data-pkc-field="section-embed-source"]')).toBeNull();
+    expect(plain.textContent).not.toContain(SECTION_LOADING_NOTE);
+  });
+
+  it('見出しを指さない画像形で、ノートが無ければ「ノートが見つかりません」', async () => {
+    const body = '![無い](entry:zzz)';
+    const r = await rig('host', { ...BODIES, host: body });
+    expect(embedOf(r, 'entry:zzz').textContent).toBe(SECTION_NO_NOTE);
   });
 });
 

@@ -10117,6 +10117,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const at = { start: opened.selectionStart, end: opened.selectionEnd };
     /**
+     * 🔴 **語を選んでいるときは、その語をリンクの字にする**(台帳 #1852 束 R1、依頼 352 A)── URL のリンクを入れるときと同じ。
+     * 書いた文を相手の題名で置き換えない(選んでいないときは今どおり題名)。⚠ 一覧を選んでいる間に欄が組み直されるので、
+     * 選んでいた字は**開いた時点で控える**。
+     */
+    const picked = opened.value.slice(at.start, at.end);
+    /**
      * ⚠ **開いた時点の state を握らない** ── 打つたびに引き直す
      *   (選んでいる間に別のタブがノートを増やしても、そのまま出る)。
      * 🔑 自分自身を外すのは `entryPickRows` の仕事(判定を 2 か所に置かない)。
@@ -10145,7 +10151,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       ta.focus();
       // ⚠ 範囲外は `setSelectionRange` が丸める(短くなっていても落ちない)
       ta.setSelectionRange(at.start, at.end);
-      insertText(ta, formatEntryLink(title, lid));
+      insertText(ta, formatEntryLink(picked !== '' ? picked : title, lid));
     });
   },
   /**
