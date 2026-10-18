@@ -437,3 +437,42 @@ describe('読み(yomi)(依頼 145)', () => {
     expect(withYomi('1', '山田', long).yomi).toBe('');
   });
 });
+
+describe('「,」区切りと 名前 <宛先> の形(依頼 285 A)', () => {
+  it('🔴 メールを「,」で並べると 1 件ずつに読み、それぞれ押せる', () => {
+    const c = contactOf('a', '山田', fm('email: a@b.co, c@d.co'));
+    expect(c?.emails).toEqual(['a@b.co', 'c@d.co']);
+    expect(c?.emails.map(mailHref)).toEqual(['mailto:a@b.co', 'mailto:c@d.co']);
+  });
+
+  it('🔴 電話を「,」で並べると 2 件目も押せる(全角の「，」も)', () => {
+    const c = contactOf('a', '山田', fm('tel: "090-1111-2222, 03-1234-5678"'));
+    expect(c?.tels).toEqual(['090-1111-2222', '03-1234-5678']);
+    expect(c?.tels.map(telHref)).toEqual(['tel:09011112222', 'tel:0312345678']);
+    expect(contactOf('a', '山田', fm('tel: "090-1111-2222，03-1234-5678"'))?.tels.length).toBe(2);
+  });
+
+  it('🔴 名前 <宛先> は宛先だけが押し先になり、字は書いたまま', () => {
+    const c = contactOf('a', '山田', fm('email: 山田 <a@b.co>'));
+    expect(c?.emails).toEqual(['山田 <a@b.co>']);
+    expect(mailHref('山田 <a@b.co>')).toBe('mailto:a@b.co');
+    expect(telHref('山田2号 <090-1111-2222>'), '名前の中の数字を番号に混ぜた').toBe('tel:09011112222');
+  });
+
+  it('🔴 <> と "" の中の「,」では割らない / 割っても空は作らない(否定ケース)', () => {
+    const c = contactOf('a', '山田', fm('email: "\\"山田, 太郎\\" <a@b.co>, , c@d.co,"'));
+    expect(c?.emails).toEqual(['"山田, 太郎" <a@b.co>', 'c@d.co']);
+    expect(mailHref(c!.emails[0]!)).toBe('mailto:a@b.co');
+    expect(contactOf('a', '山田', fm('tel: 03-1234-5678(代表, 受付)'))?.tels, '括弧の中で割った').toEqual(['03-1234-5678(代表, 受付)']);
+  });
+
+  it('🔴 .vcf は 1 件ずつ書き、名前 <宛先> は宛先だけを EMAIL / TEL に書く', () => {
+    const c = contactOf('a', '山田', fm('email: 山田 <a@b.co>, c@d.co\ntel: 090-1111-2222, 03-1234-5678'))!;
+    const v = buildVcf([c]);
+    expect(v).toContain('EMAIL;TYPE=internet:a@b.co\r\n');
+    expect(v).toContain('EMAIL;TYPE=internet:c@d.co\r\n');
+    expect(v).toContain('TEL;TYPE=voice:090-1111-2222\r\n');
+    expect(v).toContain('TEL;TYPE=voice:03-1234-5678\r\n');
+    expect(v, '名前ごと書いた').not.toContain('山田 <');
+  });
+});
