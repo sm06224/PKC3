@@ -823,7 +823,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   // 判別は中身(magic)でやるので accept は誤選択を減らす補助。
   // ⚠ ここに .zip が無いと、**受理器が動いてもファイルを選べない**
   impInput.accept =
-    '.html,.htm,.zip,.md,.markdown,.vcf,.vcard,.ics,.pptx,text/html,application/zip,text/markdown,text/vcard,text/calendar,application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    '.html,.htm,.zip,.md,.markdown,.txt,.vcf,.vcard,.ics,.pptx,text/html,application/zip,text/markdown,text/plain,text/vcard,text/calendar,application/vnd.openxmlformats-officedocument.presentationml.presentation';
   impInput.multiple = true;
   impInput.hidden = true;
   impInput.setAttribute('data-pkc-field', 'import-input');

@@ -240,3 +240,59 @@ describe('落とした file の行き先(#535 ①)', () => {
     expect(calls.attach).toHaveLength(0);
   });
 });
+
+describe('フォルダを落としたとき(台帳 #1852 束 F1、依頼 172)', () => {
+  /** フォルダ入りの drop(`items` に `webkitGetAsEntry` を持つ)。 */
+  function dirDrop(dirs: string[], files: File[] = []): Event {
+    const e = new Event('drop', { bubbles: true, cancelable: true });
+    const items = [
+      ...dirs.map((name) => ({
+        kind: 'file',
+        webkitGetAsEntry: () => ({ isDirectory: true, name }),
+        getAsFile: () => new File([''], name),
+      })),
+      ...files.map((f) => ({
+        kind: 'file',
+        webkitGetAsEntry: () => ({ isDirectory: false, name: f.name }),
+        getAsFile: () => f,
+      })),
+    ];
+    const all = [...dirs.map((n) => new File([''], n)), ...files];
+    Object.defineProperty(e, 'dataTransfer', {
+      value: {
+        types: ['Files'],
+        dropEffect: 'none',
+        files: { length: all.length, item: (i: number) => all[i] ?? null },
+        items,
+      },
+    });
+    return e;
+  }
+
+  it('🔴 フォルダだけ落とすと、取り込みにも添付にも流さず、日本語で断る', () => {
+    const { outside, calls, dispatcher } = setup();
+    const ev = dirDrop(['資料']);
+    outside.dispatchEvent(ev);
+    expect(calls.imported).toHaveLength(0);
+    expect(calls.attach, '空の添付が出来る').toHaveLength(0);
+    expect(ev.defaultPrevented, '止めないとブラウザがページごと遷移する').toBe(true);
+    const err = dispatcher.getState().error ?? '';
+    expect(err).toContain('「資料」');
+    expect(err).toContain('フォルダのままでは取り込めません');
+    expect(err).toContain('中のファイルを選んでください');
+  });
+
+  it('🔴 ファイルと混ざっていたら、残りも取り込まず、そう言う(部分成功を成功の顔で返さない)', () => {
+    const { outside, calls, dispatcher } = setup();
+    outside.dispatchEvent(dirDrop(['資料'], [file('a.md')]));
+    expect(calls.imported).toHaveLength(0);
+    expect(dispatcher.getState().error ?? '').toContain('ほかのファイルも取り込んでいません');
+  });
+
+  it('対照群: フォルダの無い drop は、これまでどおり取り込みへ行く(断りが全部の drop に出ていない)', () => {
+    const { outside, calls, dispatcher } = setup();
+    outside.dispatchEvent(dirDrop([], [file('a.md')]));
+    expect(calls.imported).toHaveLength(1);
+    expect(dispatcher.getState().error ?? '').not.toContain('フォルダ');
+  });
+});

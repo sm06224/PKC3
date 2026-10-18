@@ -459,7 +459,7 @@ async function runImport(
       return fail(
         `取り込めない形式です(「${file.name}」)。PKC2 の書き出し(HTML / zip)か ` +
           `PKC3 のバックアップ(.pkc3-full.zip / .pkc3-notes.zip / .pkc3-part.zip / 旧 .pkc3.zip)、` +
-          'PKC3 入り HTML(.pkc3.html)、.md / .vcf / .ics / .pptx を選んでください。' +
+          'PKC3 入り HTML(.pkc3.html)、.md / .txt / .vcf / .ics / .pptx を選んでください。' +
           '写真や PDF などは、取り込むのではなく添付で入れてください',
       );
     }

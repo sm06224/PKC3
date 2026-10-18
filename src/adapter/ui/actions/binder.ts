@@ -253,6 +253,7 @@ import { formatLineDate, readLineDate } from '@features/schedule/line-date';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import { findImageRefs, type ImageAlign, type ImageAttrs } from '@features/markdown/image-attrs';
 import { isBackupFileName } from '@features/export/archive-kind';
+import { directoryDropMessage, droppedDirectoryNames } from './dropped-directories';
 import {
   adoptableUrls,
   externalImageUrls,
@@ -18920,6 +18921,20 @@ export function bindActions(
     const at = bodyDropAt(de);
     clearDropTarget();
     const files = filesOf(de.dataTransfer);
+    /**
+     * 🔴 **フォルダを落としたら、日本語で断る**(依頼 172。Gemini 裁定)。フォルダは「名前だけの file」として来るので、
+     *   流すと読めずに英語のエラーが出る。⚠ 部分的には取り込まない(フォルダだけ飛ばして残りを入れると、成功の顔で欠ける)。
+     *   ⚠ `drop` の中で同期に読む(`DataTransferItem` はイベントの後に無効になる)。
+     */
+    const droppedDirs = droppedDirectoryNames(de.dataTransfer);
+    if (droppedDirs.length > 0) {
+      e.preventDefault();
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: directoryDropMessage(droppedDirs, de.dataTransfer?.items?.length ?? files.length),
+      });
+      return;
+    }
     if (files.length === 0) return;
     // ⚠ 受け手がいなくても止める(上の理由 ── 遷移で編集が飛ぶ)
     e.preventDefault();

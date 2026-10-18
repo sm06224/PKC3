@@ -88,11 +88,22 @@ export function isMarkdownFileName(fileName: string): boolean {
   return MARKDOWN_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
+/**
+ * 🔴 **「取り込む」で選べるテキストファイル(`.txt`)**(台帳 #1852 の束 F1、依頼 171。Gemini 裁定 = 取り込めるようにする)。
+ *
+ * ⚠ `MARKDOWN_EXTENSIONS` には入れない ── あちらは `manifest.webmanifest` の `file_handlers` と parity test で縛られ、
+ *   窓へ落としたときの振り分け(`.txt` は添付のまま)も同じ判定を見ている。`.txt` は**選んで取り込む**ときだけ md と同じ道に乗せる。
+ * ⚠ 本文は原文のまま(md と同じ。どんなテキストも md として妥当)。
+ */
+export function isPlainTextFileName(fileName: string): boolean {
+  return fileName.toLowerCase().endsWith('.txt');
+}
+
 /** ファイル名 → 題名候補(ディレクトリと拡張子を落とす)。 */
 export function titleFromFileName(fileName: string): string {
   const base = fileName.split(/[\\/]/).pop() ?? '';
   const lower = base.toLowerCase();
-  const ext = MARKDOWN_EXTENSIONS.find((e) => lower.endsWith(e));
+  const ext = [...MARKDOWN_EXTENSIONS, '.txt'].find((e) => lower.endsWith(e));
   return (ext ? base.slice(0, -ext.length) : base).trim();
 }
 

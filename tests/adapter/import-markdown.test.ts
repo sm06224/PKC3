@@ -296,6 +296,48 @@ describe('振り分け(import-file)', () => {
     expect(h.written.map((e) => e.title)).toEqual(['md 経路']);
   });
 
+  it('🔴 `.txt` も「取り込む」から md と同じ道でノートになる(依頼 171)── 題名は拡張子抜き、本文は原文のまま', async () => {
+    const h = harness();
+    const body = 'そのままの字\n二行目\n';
+    const n = await importFiles(h.d, h.deps, [mdFile(body, 'メモ.txt', 'text/plain')]);
+    expect(n).toBe(1);
+    expect(h.written.map((e) => e.title)).toEqual(['メモ']);
+    expect(h.written[0]!.body).toBe(body);
+    expect(h.d.getState().error ?? '', '取り込めない形式です と断っている').not.toContain('取り込めない');
+  });
+
+  it('`.txt` と `.md` の混在は 1 回で入る(どちらも md の道)。大文字の `.TXT` も同じ', async () => {
+    const h = harness();
+    await importFiles(h.d, h.deps, [mdFile('a\n', 'a.TXT'), mdFile('b\n', 'b.md')]);
+    expect(h.written.map((e) => e.title)).toEqual(['a', 'b']);
+  });
+
+  it('対照群: `.txt` と PKC2 の書き出しの混在は、これまでどおり断る', async () => {
+    const h = harness();
+    expect(await importFiles(h.d, h.deps, [mdFile('a\n', 'a.txt'), pkc2Html()])).toBe(null);
+    expect(h.opLog).toEqual([]);
+  });
+
+  it('🔴 md の取り込みの間も「離れますか」の持ち主になり、終わったら(失敗でも)外す。PKC2 の道は 1 回だけ出し入れする', async () => {
+    const calls: boolean[] = [];
+    const h = harness();
+    h.deps.onWriting = (w) => void calls.push(w);
+    await importFiles(h.d, h.deps, [mdFile('# a\n')]);
+    expect(calls, 'md の道で出し入れしていない').toEqual([true, false]);
+
+    calls.length = 0;
+    const bad = harness({ failWrite: true });
+    bad.deps.onWriting = (w) => void calls.push(w);
+    await importFiles(bad.d, bad.deps, [mdFile('# a\n')]);
+    expect(calls, '失敗の出口で外し忘れている').toEqual([true, false]);
+
+    calls.length = 0;
+    const p2 = harness();
+    p2.deps.onWriting = (w) => void calls.push(w);
+    await importFiles(p2.d, p2.deps, [pkc2Html()]);
+    expect(calls, 'PKC2 の道は自分で出し入れする(二重に包まない)').toEqual([true, false]);
+  });
+
   it('PKC2 の書き出しは PKC2 経路へ', async () => {
     const h = harness();
     await importFiles(h.d, h.deps, [pkc2Html()]);

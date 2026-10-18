@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, useSplitEditor,
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, expectImageRendered, useSplitEditor,
   gotoCollectionPane,
 } from './helpers';
 import { withStateOnFail } from './state-dump';
@@ -775,12 +775,12 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
       ...bigNotes.map((n) => ({ name: n.filename, data: innerText(n.lid, n.title) })),
     ]),
   });
-  // 取り込んだ後は、いまの階層(「2026」の中)のまま ── ルートへ戻して、大量のフォルダの行を押す
-  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
+  // 取り込んだ後は、いまの階層(「2026」の中)のまま ── 束 F1 以降、開いているフォルダへ入るので、ルートへ戻さず
+  // その場で大量のフォルダの行を押す(以前は取り込み先がルートだった)
   const bigRow = page
     .locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]')
     .filter({ hasText: '大量フォルダ' });
-  await expect(bigRow, '取り込んだ大量のフォルダがルートに出ない').toHaveCount(1);
+  await expect(bigRow, '取り込んだ大量のフォルダが、開いているフォルダ(「2026」)の中に出ない').toHaveCount(1);
   await clickReal(page, bigRow);
   const more = page.locator('[data-pkc-region="folder-overview"] [data-pkc-field="overview-more"]');
   await expect(more, '100 件を超えるフォルダの概要に「ほか N 件」の押し口が出ない').toHaveText(
@@ -970,6 +970,112 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
     page.locator('[data-pkc-region="inspector"] [data-pkc-field="inspector-tag"]'),
     '`Tags:` で書いたタグがタグとして読まれていない',
   ).toHaveText(/取込タグ/);
+
+  /**
+   * 🔴 #1852 束 F1(依頼 171): 「取り込む」で `.txt` を選ぶと、拡張子の無い題名のノートが 1 件できる。
+   * ⚠ 起動を足さず、この道中へ載せた。ボタン → ピッカーの経路で選ぶ(accept に `.txt` が在ることも見る)。
+   */
+  expect(
+    await page.locator('[data-pkc-field="import-input"]').getAttribute('accept'),
+    '取り込みの選択に .txt が無い',
+  ).toContain('.txt');
+  const titlesNow = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry] [data-pkc-field="title"]');
+  const txtBefore = await titlesNow.filter({ hasText: /^テキストメモ/ }).count();
+  const txtChooser = page.waitForEvent('filechooser');
+  await clickReal(page, '[data-pkc-region="collection-bar"] [data-pkc-action="import-file"]');
+  await (await txtChooser).setFiles([
+    { name: 'テキストメモ.txt', mimeType: '', buffer: Buffer.from('ただの文字\n', 'utf-8') },
+  ]);
+  await expect(page.locator('[data-pkc-field="detail-title"]'), '.txt を取り込んでも開かない / 題名に拡張子が残る').toHaveText(
+    'テキストメモ',
+    { timeout: 10_000 },
+  );
+  expect(txtBefore, '台の前提:同じ題名が先に居る').toBe(0);
+  await expect(titlesNow.filter({ hasText: /^テキストメモ$/ }), '.txt のノートが 1 件できない').toHaveCount(1);
+  await expect(titlesNow.filter({ hasText: /テキストメモ\.txt/ }), '題名に .txt が残っている').toHaveCount(0);
+
+  /**
+   * 🔴 #1852 束 F1(依頼 340): フォルダを開いた状態で `.md` を取り込むと、そのノートはフォルダの子として出る。
+   *   ルートへ戻すと見えず、フォルダを開き直すと見える。
+   */
+  const lidsBeforeFolder = new Set(
+    await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').evaluateAll((els) =>
+      els.map((e) => e.getAttribute('data-pkc-entry') ?? ''),
+    ),
+  );
+  await createEntry(page, 'folder');
+  const folderRowSel = '[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]';
+  await expect(page.locator(folderRowSel), '台の前提:フォルダが作れない').toHaveCount(1);
+  const homeLid = (await page.locator(folderRowSel).getAttribute('data-pkc-entry'))!;
+  expect(lidsBeforeFolder.has(homeLid)).toBe(false);
+  // 作った直後は編集中 ── 保存して閉じてから入る(編集中は取り込みもフォルダへ入るのも断られる)
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]')).toHaveCount(0);
+  await enterFolderRow(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${homeLid}"]`);
+  await expect(page.locator('[data-pkc-field="filer-create-target"]'), '台の前提:フォルダの中に入れていない').toContainText(
+    '新しく作るものは',
+  );
+  await page.locator('[data-pkc-field="import-input"]').setInputFiles([
+    { name: 'フォルダ行き.md', mimeType: '', buffer: Buffer.from('# フォルダ行き\n', 'utf-8') },
+  ]);
+  await expect(page.locator('[data-pkc-field="detail-title"]'), '台の前提:取り込んだノートが開かない').toHaveText(
+    'フォルダ行き',
+    { timeout: 10_000 },
+  );
+  const inFolder = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry] [data-pkc-field="title"]');
+  await expect(inFolder.filter({ hasText: /^フォルダ行き$/ }), '開いているフォルダの中に入っていない').toHaveCount(1);
+  // ルートへ戻る(パンくずの先頭)── 子なのでルートの一覧には居ない
+  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] [data-pkc-action="enter-folder"]:not([data-pkc-entry])');
+  await expect(page.locator('[data-pkc-field="filer-create-target"]')).toHaveCount(0);
+  await expect(
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry] [data-pkc-field="title"]').filter({ hasText: /^フォルダ行き$/ }),
+    '取り込んだノートがルートに居る(フォルダの子になっていない)',
+  ).toHaveCount(0);
+  await enterFolderRow(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${homeLid}"]`);
+  await expect(
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry] [data-pkc-field="title"]').filter({ hasText: /^フォルダ行き$/ }),
+    'フォルダを開き直してもノートが見えない',
+  ).toHaveCount(1);
+
+  /**
+   * 🔴 #1852 束 F1(依頼 172): 窓へフォルダを落とすと「フォルダのままでは取り込めません」と出る。
+   * ⚠ 本物の OS ドラッグは起こせない ── 本物のフォルダは `webkitGetAsEntry().isDirectory === true` の item として来る。
+   *   その形の dataTransfer を `drop` に載せる(ブラウザが作る形そのものではなく、binder が読む口だけの再現)。
+   */
+  const before = await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').count();
+  await page.evaluate(() => {
+    const ev = new DragEvent('drop', { bubbles: true, cancelable: true });
+    // ブラウザはフォルダを「大きさ 0 の名前だけの file」としても渡す(files にも getAsFile にも居る)
+    const dirFile = new File([], '資料フォルダ');
+    const real = new DataTransfer();
+    real.items.add(dirFile);
+    const fake = {
+      types: ['Files'],
+      files: real.files,
+      items: [
+        { kind: 'file', getAsFile: () => dirFile, webkitGetAsEntry: () => ({ isDirectory: true, name: '資料フォルダ' }) },
+      ],
+      getData: () => '',
+    };
+    Object.defineProperty(ev, 'dataTransfer', { value: fake });
+    document.querySelector('[data-pkc-region="filer-table"]')!.dispatchEvent(ev);
+  });
+  // 断りはシステムのメッセージへ積まれる(状態の行には出ない)── 設定の「メッセージ」を開いて読む
+  expect(await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').count(), 'フォルダの落としでノートが増えた').toBe(before);
+  await page.evaluate(() => {
+    // 「画面が隠れた」を合成して、積み待ちのメッセージを流す(5 秒待つより決定的)
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  });
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await clickReal(page, '[data-pkc-view-pane="settings"] [data-pkc-action="open-messages"][data-pkc-message-lid="sys-messages"]');
+  await expect(
+    page.locator('[data-pkc-view-pane="detail"]'),
+    'フォルダを落としても断りがメッセージに出ない',
+  ).toContainText('フォルダのままでは取り込めません', { timeout: 10_000 });
+  await expect(page.locator('[data-pkc-view-pane="detail"]')).toContainText('(フォルダ)は、フォルダのままでは取り込めません(中のファイルを選んでください)');
+  // ⚠ メッセージの記録は user の入力(フォルダ名)を「…」に伏せる ── 名前そのものは出ない
 
   expect(errors).toEqual([]);
 });
