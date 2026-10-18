@@ -16,6 +16,8 @@ import {
   ENTRY_ADDED_COLUMNS,
   FTS_DDL,
   LEGACY_FTS_DDL,
+  FTS_FORM_KEY,
+  FTS_FORM_VERSION,
   FTS_PROGRESS_KEY,
   FTS_PROGRESS_SCOPE,
   FTS_SOURCE_VIEW,
@@ -597,13 +599,21 @@ function clearFoldCursor(database: Database): void {
  */
 let foldCursor = FTS_ALL;
 
-/** 1 行の「索引の元の字」を作り直して書く。⚠ 引き金が索引を書き換える(`rowid <= built_upto` の行だけ)。 */
+/**
+ * 1 行の「索引の元の字」を作り直して書く。⚠ 引き金が索引を書き換える(`rowid <= built_upto` の行だけ)。
+ * 🔑 **値が変わらない行は書かない**(本文の入った行を無駄に書き直さない)── 索引の形の版を上げた作り直しでも、
+ *   作り方が変わらなかった行は 1 バイトも触れない。
+ */
 function refoldRow(database: Database, rid: number): void {
-  const r = database.selectObjects('SELECT title, body FROM entries WHERE rowid = ?', [rid])[0] as
-    | { title: string; body: string }
+  const r = database.selectObjects(
+    'SELECT title, body, title_f, body_f, fold_chars FROM entries WHERE rowid = ?',
+    [rid],
+  )[0] as
+    | { title: string; body: string; title_f: string | null; body_f: string | null; fold_chars: number | null }
     | undefined;
   if (r === undefined) return;
   const f = foldedColumns(r.title, r.body);
+  if (r.title_f === f.titleF && r.body_f === f.bodyF && r.fold_chars === r.body.length) return;
   database.exec({
     sql: 'UPDATE entries SET title_f = ?, body_f = ?, fold_chars = ? WHERE rowid = ?',
     bind: [f.titleF, f.bodyF, r.body.length, rid],
@@ -644,14 +654,8 @@ export function foldStep(database: Database, chunk = FOLD_CHUNK): boolean {
         clearFoldCursor(database);
         next = FTS_ALL;
       } else {
-        for (const r of rids) {
-          // ⚠ 新ビルドが書いた行は既に作ってある ── 作り直さない(行を書き直さない)
-          const done = database.selectValue(
-            'SELECT fold_chars IS NOT NULL FROM entries WHERE rowid = ?',
-            [r.rid],
-          );
-          if (Number(done) !== 1) refoldRow(database, r.rid);
-        }
+        // ⚠ 作り直す前に、元の字を今の作り方で揃える(`refoldRow` は変わらない行を書かない)
+        for (const r of rids) refoldRow(database, r.rid);
         const hi = rids[rids.length - 1]!.rid;
         database.exec({
           sql: `INSERT INTO entries_fts(rowid, title, body)
@@ -1036,7 +1040,18 @@ export function applySchema(database: Database): void {
     const ftsTable = database.selectValue(
       `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entries_fts'`,
     ) as string | undefined;
-    if (typeof ftsTable === 'string' && !ftsTable.includes(FTS_SOURCE_VIEW)) {
+    // 保存されている索引の形の版(行が無い = 1 = 書いた字をそのまま引く形)。⚠ settings の表が無い古い DB でも落とさない
+    const storedForm =
+      typeof ftsTable === 'string'
+        ? (database.selectValue(`SELECT v FROM settings WHERE scope = ? AND k = ?`, [
+            FTS_PROGRESS_SCOPE,
+            FTS_FORM_KEY,
+          ]) as string | undefined)
+        : undefined;
+    if (
+      typeof ftsTable === 'string' &&
+      (!ftsTable.includes(FTS_SOURCE_VIEW) || storedForm !== FTS_FORM_VERSION)
+    ) {
       try {
         database.exec('DROP TABLE IF EXISTS entries_fts');
         database.exec({
@@ -1054,6 +1069,13 @@ export function applySchema(database: Database): void {
     // 新規 DB は最新 DDL がそのまま最新形を作る(既存 DB では no-op)。
     // ⚠ 索引はここで作られる ── 上で列を足した**後**であることが要。
     for (const ddl of SCHEMA_DDL) database.exec(ddl);
+    // 索引の形の版を刻む(新しい DB も作り直した DB も、いまの形)
+    database.exec({
+      // ⚠ 同じ値なら書かない(開くたびに 1 行書き直さない)
+      sql: `INSERT INTO settings(scope, k, v) VALUES (?, ?, ?)
+              ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v WHERE v IS NOT excluded.v`,
+      bind: [FTS_PROGRESS_SCOPE, FTS_FORM_KEY, FTS_FORM_VERSION],
+    });
     // v2(P5)migration: 判定は user_version ではなく**列の実在**(冪等)──
     // 上記 (d1)(d2) の半端状態も次回 open で自己修復する(schema.ts の原則)
     const revCols = new Set(

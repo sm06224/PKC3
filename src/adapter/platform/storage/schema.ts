@@ -186,6 +186,15 @@ export const FTS_PROGRESS_KEY = 'built_upto';
 /** 引き金が読む「ここまで入れた」の式。⚠ 行が無ければ最大(= 済んでいる)。 */
 const FTS_BUILT_UPTO = `coalesce((SELECT CAST(v AS INTEGER) FROM settings WHERE scope = '${FTS_PROGRESS_SCOPE}' AND k = '${FTS_PROGRESS_KEY}'), 9007199254740991)`;
 
+/**
+ * 🔴 **索引の形の版**(`settings` の `__fts__` / `form`)。台帳 #1852 の束 B2 で 2 にした(1 = 書いた字をそのまま引く形 ──
+ * 版の行が無い DB は 1 と読む)。**索引に入れる字の作り方(`search-text.ts`)を変えたら上げる** ── 起動したとき、保存されている版と
+ * 違えば索引を捨てて作り直す(塊で流す。`storage-worker.ts` の `foldStep`)。
+ * ⚠ 旧ビルドはこの行を知らない(書かない・読まない)── 前の版の PKC3 が同じ保存領域を開いても壊れない。
+ */
+export const FTS_FORM_KEY = 'form';
+export const FTS_FORM_VERSION = '2';
+
 /** 索引の元の字を読む視点の名前。`entries_fts` はこれを内容表にする(`FTS_DDL`)。 */
 export const FTS_SOURCE_VIEW = 'entries_fts_src';
 

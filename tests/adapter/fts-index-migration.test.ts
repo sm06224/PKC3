@@ -65,6 +65,8 @@ function preFtsDb(opts: { fts: boolean; triggers: boolean; form?: 'legacy' | 'cu
     db.exec(out);
   }
   db.exec('PRAGMA user_version = 3');
+  // 🔑 いまの形の DB は、索引の形の版(2)を刻んで居る ── 刻んだ DB は作り直さない(旧い形 = 刻みが無い)
+  if (current) db.exec(`INSERT INTO settings(scope, k, v) VALUES ('__fts__', 'form', '2')`);
   for (const [lid, body] of ROWS)
     db.exec({
       sql: `INSERT INTO entries (cid, lid, title, archetype, created_at, updated_at,
