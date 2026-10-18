@@ -596,7 +596,12 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   await field.fill('公開');
   await expect(sideRow, '対照群:メモの外の語「公開」で当たらない').toHaveCount(1, { timeout: 15_000 });
   await field.fill('秘密');
-  await expect(sideRow, '`%% … %%` の中の「秘密」で当たっている').toHaveCount(0, { timeout: 15_000 });
+  // ⚠ 0 件は「まだ返っていない」でも成り立つ ── 「無い」と言い切る文言が出る(= 本文の答えが返った)まで待ってから数える
+  await expect(
+    page.locator('[data-pkc-field="filer-empty"]'),
+    '本文の答えが返らない(「探しています…」のまま)/ 「秘密」で当たっている',
+  ).toHaveText('絞り込みに一致するものがありません', { timeout: 15_000 });
+  await expect(sideRow, '`%% … %%` の中の「秘密」で当たっている').toHaveCount(0);
   await field.fill('');
 
   // ④ 「探す」画面:コマンドの `-m` は除く語として読み、そのことを 1 行で言う
