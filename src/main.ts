@@ -3444,13 +3444,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
               // ⚠ **上書きしているので、記憶も自分で呼ぶ**(#535 ②)──
               //    ここを忘れると「OS から開いた md だけ戻せない」が静かに残る
               importUndo.remember(lids);
-              lids.forEach((lid, i) => {
-                const handle = handles[i];
-                const file = files[i];
-                if (!handle || !file) return;
-                // 🔴 取り込んだときの更新時刻も憶える(#1264 §2 欠陥 1。外で変わったかを後で比べる)
-                launched.remember(lid, handle, file.name, file.lastModified);
-                dispatcher.dispatch({ type: 'FILE_LINKED', lid, name: file.name });
+              dispatcher.batch(() => {
+                lids.forEach((lid, i) => {
+                  const handle = handles[i];
+                  const file = files[i];
+                  if (!handle || !file) return;
+                  // 🔴 取り込んだときの更新時刻も憶える(#1264 §2 欠陥 1。外で変わったかを後で比べる)
+                  launched.remember(lid, handle, file.name, file.lastModified);
+                  dispatcher.dispatch({ type: 'FILE_LINKED', lid, name: file.name });
+                });
               });
             },
           },

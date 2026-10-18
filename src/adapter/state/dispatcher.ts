@@ -24,6 +24,9 @@ export class Dispatcher {
   private readonly eventListeners = new Set<EventListener>();
   private readonly pending: Dispatchable[] = [];
   private draining = false;
+  /** batch の入れ子の深さ。0 より大きい間は state listener への通知を溜める。 */
+  private batchDepth = 0;
+  private batchDirty = false;
 
   constructor(state: AppState = initialState) {
     this.state = state;
@@ -44,12 +47,37 @@ export class Dispatcher {
         const { state, events } = reduce(this.state, next);
         const changed = state !== this.state;
         this.state = state;
-        if (changed) for (const l of [...this.stateListeners]) l(state);
+        if (changed) {
+          if (this.batchDepth > 0) this.batchDirty = true;
+          else this.notifyState(state);
+        }
         for (const ev of events) for (const l of [...this.eventListeners]) l(ev);
       }
     } finally {
       this.draining = false;
     }
+  }
+
+  /**
+   * 複数件の dispatch をまとめる。reducer は 1 件ずつ即座に走る(`getState()` は常に最新)が、
+   * **state listener への通知は最後に 1 回だけ**(最終 state)。event listener は従来どおり 1 件ずつ即発火。
+   * 入れ子可(最も外側の終了時に 1 回)。fn が throw しても finally で通知してから再 throw する。
+   */
+  batch<T>(fn: () => T): T {
+    this.batchDepth += 1;
+    try {
+      return fn();
+    } finally {
+      this.batchDepth -= 1;
+      if (this.batchDepth === 0 && this.batchDirty) {
+        this.batchDirty = false;
+        this.notifyState(this.state);
+      }
+    }
+  }
+
+  private notifyState(state: AppState): void {
+    for (const l of [...this.stateListeners]) l(state);
   }
 
   onState(listener: StateListener): () => void {

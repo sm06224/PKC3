@@ -1023,10 +1023,12 @@ export function connectStoreEffects(
   const queuedScans = new Set<string>();
 
   const rescanColumnSmarts = (): void => {
-    for (const [smartLid, hit] of dispatcher.getState().smartHits) {
-      if (hit.failed || !needsRescan(hit.spec)) continue;
-      dispatcher.dispatch({ type: 'SMART_RESCAN', lid: smartLid });
-    }
+    dispatcher.batch(() => {
+      for (const [smartLid, hit] of dispatcher.getState().smartHits) {
+        if (hit.failed || !needsRescan(hit.spec)) continue;
+        dispatcher.dispatch({ type: 'SMART_RESCAN', lid: smartLid });
+      }
+    });
   };
 
   /**
@@ -2390,11 +2392,13 @@ export function connectStoreEffects(
                   skipLids: ev.skipLids,
                 });
                 if (disposed) return;
-                for (const w of r.wrote) {
-                  stamp(w.lid, w.stamps);
-                  // 開いている本文ならその場で差し替える(次に開き直すまで古い字が出る、を作らない)
-                  dispatcher.dispatch({ type: 'ENTRY_BODY_REFRESHED', lid: w.lid, body: w.body });
-                }
+                dispatcher.batch(() => {
+                  for (const w of r.wrote) {
+                    stamp(w.lid, w.stamps);
+                    // 開いている本文ならその場で差し替える(次に開き直すまで古い字が出る、を作らない)
+                    dispatcher.dispatch({ type: 'ENTRY_BODY_REFRESHED', lid: w.lid, body: w.body });
+                  }
+                });
                 if (r.wrote.length > 0)
                   dispatcher.dispatch({
                     type: 'OP_NOTICE',
@@ -2753,12 +2757,14 @@ export function connectStoreEffects(
             //    (「取り込みました」は呼び側 `office-save-back.ts` が出す)
             if (r.unchanged) return;
 
-            for (const w of r.wrote) {
-              stamp(w.lid, w.stamps);
-              // ⚠ 開いている本文なら**その場で差し替える**(次に開き直すまで
-              //    古い情報が出る、を作らない)
-              dispatcher.dispatch({ type: 'ENTRY_BODY_REFRESHED', lid: w.lid, body: w.body });
-            }
+            dispatcher.batch(() => {
+              for (const w of r.wrote) {
+                stamp(w.lid, w.stamps);
+                // ⚠ 開いている本文なら**その場で差し替える**(次に開き直すまで
+                //    古い情報が出る、を作らない)
+                dispatcher.dispatch({ type: 'ENTRY_BODY_REFRESHED', lid: w.lid, body: w.body });
+              }
+            });
             // 🔴 **おかしなことだけ言う。** 「取り込みました」は呼び側が出す
             //    (この層は `showStatus` を持たない ── 出せるのは `state.error` だけ)。
             // ⚠ 書き換え漏れは**件数を出す**(黙ると切れた参照が静かに残る)
@@ -3715,17 +3721,19 @@ export function connectStoreEffects(
                     : `${missing} 件はゴミ箱から消えていたので、元に戻せませんでした`,
               });
             }
-            for (const lid of ev.lids) {
-              const row = rows.find((r) => r.entry_lid === lid);
-              if (!row) continue;
-              const entryOrder = ev.orders?.[lid];
-              dispatcher.dispatch({
-                type: 'RESTORE_TRASH',
-                entryLid: lid,
-                revId: row.id,
-                ...(entryOrder !== undefined ? { entryOrder } : {}),
-              });
-            }
+            dispatcher.batch(() => {
+              for (const lid of ev.lids) {
+                const row = rows.find((r) => r.entry_lid === lid);
+                if (!row) continue;
+                const entryOrder = ev.orders?.[lid];
+                dispatcher.dispatch({
+                  type: 'RESTORE_TRASH',
+                  entryLid: lid,
+                  revId: row.id,
+                  ...(entryOrder !== undefined ? { entryOrder } : {}),
+                });
+              }
+            });
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({
