@@ -320,7 +320,17 @@ describe('索引の作り直しは起動の後に塊で流す(束 B2)', () => {
       const lid = `r${String(i).padStart(3, '0')}`;
       // r010 = 全角の ＰＫＣ(最初の塊)/ r200 = 全角の ＱＱＱ(3 塊目)/ r249 = 一意な語
       const body =
-        i === 10 ? '全角ＰＫＣの行' : i === 200 ? '全角ＱＱＱの行' : i === 249 ? 'ゆにーく777の行' : `ふつうの本文 ${lid}`;
+        i === 10
+          ? '全角ＰＫＣの行'
+          : i === 200
+            ? '全角ＱＱＱの行'
+            : i === 249
+              ? 'ゆにーく777の行'
+              : i === 20 || i === 220
+                ? '公開の文 %% 秘密のメモ %% 続き'
+                : i === 30 || i === 230
+                  ? '[議事録](entry:abc123) を見る'
+                  : `ふつうの本文 ${lid}`;
       return [lid, `題 ${lid}`, body] as const;
     });
 
@@ -343,23 +353,29 @@ describe('索引の作り直しは起動の後に塊で流す(束 B2)', () => {
     const request = await spawnWorker();
     await request({ op: 'init', dbName: 'rebuild-1852b', memory: true, image });
 
-    // (a) 1 塊も流していない間 ── 書いた字のままなら全行を引ける(索引が空でも「無い」と言わない)
-    expect(await progress(request)).toBe('-1');
-    expect(await lidsOf(request, 'ゆにーく777'), '索引が空の間に最後の行が見つからない').toEqual(['r249']);
-    expect(await lidsOf(request, 'ふつうの本文 r005')).toEqual(['r005']);
-    expect(
-      await lidsOf(request, 'pkc'),
-      '決まり: 揃える前の行は書いた字のまま ── 全角の「ＰＫＣ」は半角の語ではまだ当たらない',
-    ).toEqual([]);
-    expect(
-      await lidsOf(request, 'ＰＫＣ'),
-      '書いた字のままの語なら当たる(揃えた語だけで引くと、全角で書いた行が作り直しの間だけ消える)',
-    ).toEqual(['r010']);
-    expect(await lidsOf(request, 'ふつうの本文 ＰＫＣ'), '複数語でも、語ごとに書いた字のままで引く').toEqual([]);
-    // 探す面も同じ集合(全走査)
-    expect((await request({ op: 'searchDetail', cid: CID, query: 'ゆにーく777' })).rows.map((r) => r.lid)).toEqual(['r249']);
+    // 作り直しの間の答えは、作り直した後と同じ集合 ── まだの行も、その場で同じ作り方を通して引く
+    const sameAsAfter = async (label: string): Promise<void> => {
+      expect(await lidsOf(request, 'pkc'), `${label}: 全角を半角の語で引けない`).toEqual(['r010']);
+      expect(await lidsOf(request, 'qqq'), `${label}: まだの側の全角を半角の語で引けない`).toEqual(['r200']);
+      expect(await lidsOf(request, 'ＱＱＱ')).toEqual(['r200']);
+      expect(await lidsOf(request, '秘密'), `${label}: 隠したメモの字で一致している(依頼 196)`).toEqual([]);
+      expect(await lidsOf(request, '公開の文')).toEqual(['r020', 'r220']);
+      expect(await lidsOf(request, 'entry'), `${label}: リンクの宛先の字で一致している(依頼 197)`).toEqual([]);
+      expect(await lidsOf(request, 'abc123')).toEqual([]);
+      expect(await lidsOf(request, '議事録')).toEqual(['r030', 'r230']);
+      expect(await lidsOf(request, 'ゆにーく777')).toEqual(['r249']);
+      expect(await lidsOf(request, 'ふつうの本文 r005')).toEqual(['r005']);
+      expect((await request({ op: 'searchDetail', cid: CID, query: '秘密' })).rows).toEqual([]);
+      const d = await request({ op: 'searchDetail', cid: CID, query: 'pkc' });
+      expect(d.rows.map((r) => r.lid)).toEqual(['r010']);
+      expect(marked(d.rows[0]!.snippet)).toEqual(['ＰＫＣ']);
+    };
 
-    // (b) 1 塊だけ流す ── 流し終えた行(rowid <= 印)は揃えた字で引け、まだの行は書いた字のまま
+    // (a) 1 塊も流していない間(索引が空)
+    expect(await progress(request)).toBe('-1');
+    await sameAsAfter('印 -1');
+
+    // (b) 1 塊だけ流す ── 流し終えた行(rowid <= 印)は索引の元の字、まだの行はその場で揃える
     await new Promise((r) => setTimeout(r, 0));
     const cursor = await progress(request);
     expect(cursor, '1 塊流したのに印が動いていない / 全部済んでしまった').not.toBeNull();
@@ -369,9 +385,7 @@ describe('索引の作り直しは起動の後に塊で流す(束 B2)', () => {
     // r010 は rowid 11(流し終えた側)、r200 は rowid 201(まだの側)
     expect(11).toBeLessThanOrEqual(upto);
     expect(201).toBeGreaterThan(upto);
-    expect(await lidsOf(request, 'pkc'), '流し終えた行は揃えて引ける').toEqual(['r010']);
-    expect(await lidsOf(request, 'qqq'), 'まだの行は書いた字のまま').toEqual([]);
-    expect(await lidsOf(request, 'ＱＱＱ')).toEqual(['r200']);
+    await sameAsAfter(`印 ${upto}`);
 
     // (c) 済んだら全部揃えて引ける(索引で引く)
     await untilBuilt(request);

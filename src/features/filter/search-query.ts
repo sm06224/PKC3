@@ -136,19 +136,6 @@ export function plannedTerms(query: string, syntax: 'plain' | 'query'): SearchTe
   return syntax === 'plain' ? { include: splitWords(query), exclude: [] } : foldedTerms(query);
 }
 
-/**
- * 揃える前の語(`plannedTerms` と同じ並び)。⚠ 並びが揃わないとき(揃えた結果の割れ方が変わった)は `null` ──
- * 呼び側は揃えた語だけで引く。
- */
-export function rawPlannedTerms(query: string, syntax: 'plain' | 'query'): SearchTerms | null {
-  const folded = plannedTerms(query, syntax);
-  const raw: SearchTerms =
-    syntax === 'plain'
-      ? { include: query.split(/\s+/).filter((w) => w !== ''), exclude: [] }
-      : parseSearchTerms(query);
-  return raw.include.length === folded.include.length && raw.exclude.length === folded.exclude.length ? raw : null;
-}
-
 /** 1 項を FTS5 の句にする(引用符は 2 つ重ねて escape ── `toFtsMatch` と同じ規則)。 */
 export function quoteFtsTerm(term: string): string {
   return `"${term.replace(/"/g, '""')}"`;
@@ -179,12 +166,6 @@ export type QuerySearchPlan =
       kind: 'like-terms';
       include: string[];
       exclude: string[];
-      /**
-       * 🔴 **揃える前の語**(`include` / `exclude` と同じ並び)── 索引の作り直しの間だけ付く(台帳 #1852 の束 B2)。
-       * 作り直す前の行は書いた字のままなので、揃えた語だけでは全角で書いた本文が一時的に引けなくなる。
-       * 語ごとに「揃えた語 **または** 書いた字のままの語」で引く。
-       */
-      raw?: { include: string[]; exclude: string[] };
     };
 
 /**

@@ -34,7 +34,16 @@ import { fixReservedLock, type ReservedLockOutcome, type ReservedLockSqlite } fr
 // 🔑 メッセージの本文の形は features 層が持つ(判断を 1 か所に。設計 doc §7、段②a)
 import { errorText } from '@features/error-text';
 import { wouldMakeCycle } from '@features/relation/tree';
-import { SYSTEM_JOB_LID, SYSTEM_MESSAGE_LID, trimSlackForLid, trimToCap } from '@features/message/message-log';
+import {
+  SYSTEM_JOB_LID,
+  SYSTEM_MESSAGE_LID,
+  capForMessageLid,
+  formatMessageSection,
+  trimSlackForLid,
+  trimToCap,
+  titleForMessageLid,
+  MESSAGE_CAP_DEFAULT,
+} from '@features/message/message-log';
 // 🔑 数だけをここから取る ── 読み解き(日本語)は features 層に置く(#971 段③)
 import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescue';
 import { INTEGRITY_STAMP_KEY, INTEGRITY_STAMP_SCOPE } from '@features/storage/integrity-schedule';
@@ -78,10 +87,10 @@ import {
 import {
   plannedTerms,
   planSearch,
-  rawPlannedTerms,
   toLikePattern,
   type QuerySearchPlan,
 } from '@features/filter/search-query';
+import { foldWidth } from '@features/filter/fold-text';
 import { excerptAroundFolded, foldedColumns, searchableBody } from '@features/filter/search-text';
 import { countTaskCandidates } from '@features/markdown/task-count';
 import { bodyTags } from '@features/flavor/entry-tags';
@@ -525,6 +534,7 @@ async function init(
   }
 
   db = opened;
+  registerFoldFunctions(opened);
   // 🔴 索引の作り直しが要るなら、起動の返事の後に塊で流す(台帳 #1852 の束 B2 ── 本文の表示を止めない)
   try {
     startFoldBuild(opened);
@@ -582,6 +592,8 @@ function ftsDocCount(database: Database): number | null {
  * 🔴 **索引の作り直しの進み(台帳 #1852 の束 B2)**。`built_upto` の印は `settings` の 1 行
  * (`schema.ts` の `FTS_PROGRESS_SCOPE` の注記)。**行が無ければ済んでいる** = `FTS_ALL`。
  */
+type SearchDetailResult = ResultMap['searchDetail'];
+
 const FTS_ALL = Number.MAX_SAFE_INTEGER;
 
 function readFoldCursor(database: Database): number {
@@ -590,6 +602,38 @@ function readFoldCursor(database: Database): number {
     FTS_PROGRESS_KEY,
   ]);
   return v === undefined || v === null ? FTS_ALL : Number(v);
+}
+
+function setFoldCursor(database: Database, v: number): void {
+  database.exec({
+    sql: `INSERT INTO settings(scope, k, v) VALUES (?, ?, ?)
+            ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v`,
+    bind: [FTS_PROGRESS_SCOPE, FTS_PROGRESS_KEY, String(v)],
+  });
+}
+
+/**
+ * 🔴 **索引を捨てて、最初から作り直す(印を -1 に戻す)**。
+ *
+ * 作り直しの途中(`built_upto` が途中)で、**前の版が `'rebuild'` を撃つ**と、印より後の行まで索引に入る。すると
+ * 印より後の行の書き換え・削除は引き金が黙るので、索引が古い本文のまま残り、続きを流すと二重に入れて壊れる。
+ * 印より後の行が索引に居る(`entries_fts_docsize` の id が印より大きい)のは、**誰かが索引を組み直した**証拠 ── そのときはここへ来る。
+ */
+function resetFtsIndex(database: Database): void {
+  database.exec('DROP TABLE IF EXISTS entries_fts');
+  for (const ddl of FTS_DDL) database.exec(ddl);
+  setFoldCursor(database, -1);
+}
+
+/** 印より後の行が索引に居るか。⚠ 読めない(影の表が壊れている)ときも「居る」と読む(= 作り直す)。 */
+function indexedBeyondCursor(database: Database, cursor: number): boolean {
+  try {
+    return (
+      database.selectValue('SELECT 1 FROM entries_fts_docsize WHERE id > ? LIMIT 1', [cursor]) !== undefined
+    );
+  } catch {
+    return true;
+  }
 }
 
 function clearFoldCursor(database: Database): void {
@@ -626,36 +670,51 @@ function refoldRow(database: Database, rid: number): void {
   });
 }
 
-/** 1 塊に入れる行数。⚠ 本文は 1 行ずつ読んで捨てる(heap に載るのは 1 件ぶん ── ゼロコピーの規律)。 */
+/** 1 塊に入れる行数と、本文の字数の合計の上限。⚠ 本文は 1 行ずつ読んで捨てる(ゼロコピーの規律)── 大きなノートが続く塊を長くしない。 */
 const FOLD_CHUNK = 100;
+const FOLD_CHUNK_CHARS = 4_000_000;
 
 /**
  * 🔴 **索引の作り直しを 1 塊だけ進める**(台帳 #1852 の束 B2)。戻り値 = まだ続きがあるか。
  *
- * - 作り直しの途中(`built_upto < 最大`): `rowid` の順に次の塊を取り、元の字を作り(`refoldRow` ── 引き金は黙る)、
- *   視点から索引へ入れ、印を進める。**1 塊 = 1 tx**なので、途中で止まっても索引と印は合っている。
+ * - 作り直しの途中(`built_upto < 最大`): `rowid` の順に次の塊(`chunk` 行 または 本文 `FOLD_CHUNK_CHARS` 字まで)を取り、
+ *   元の字を作り(`refoldRow` ── 引き金は黙る)、視点から索引へ入れ、印を進める。**1 塊 = 1 tx**なので、途中で止まっても索引と印は合っている。
  * - 済んだ後: 旧ビルドが書いた行(`fold_rev IS NULL`)だけを引き直す(引き金が索引を書き換える)。
- * ⚠ **行ごとに本文を読んで捨てる**(100 行を一度に heap へ載せない)。
+ * ⚠ **行ごとに本文を読んで捨てる**(塊の本文を一度に heap へ載せない)。
  * ⚠ 呼ぶのは `foldTick`(起動の後の係)と test だけ。塊と塊の間で worker は他の依頼を捌く。
  */
 export function foldStep(database: Database, chunk = FOLD_CHUNK): boolean {
   const cursor = readFoldCursor(database);
+  /** 行数と字数の両方で切る(最低 1 行は進む)。 */
+  const cut = (rows: Array<{ rid: number; n: number | null }>): Array<{ rid: number }> => {
+    let sum = 0;
+    const out: Array<{ rid: number }> = [];
+    for (const r of rows) {
+      const n = Number(r.n ?? 0);
+      if (out.length > 0 && sum + n > FOLD_CHUNK_CHARS) break;
+      sum += n;
+      out.push({ rid: r.rid });
+    }
+    return out;
+  };
   database.exec('BEGIN IMMEDIATE');
   let more = false;
   let next = cursor;
   try {
     if (cursor >= FTS_ALL) {
-      const rids = database.selectObjects(
-        'SELECT rowid AS rid FROM entries WHERE fold_rev IS NULL LIMIT ?',
+      const fetched = database.selectObjects(
+        'SELECT rowid AS rid, coalesce(body_chars, length(body)) AS n FROM entries WHERE fold_rev IS NULL LIMIT ?',
         [chunk],
-      ) as Array<{ rid: number }>;
+      ) as Array<{ rid: number; n: number | null }>;
+      const rids = cut(fetched);
       for (const r of rids) refoldRow(database, r.rid);
-      more = rids.length === chunk;
+      more = rids.length < fetched.length || fetched.length === chunk;
     } else {
-      const rids = database.selectObjects(
-        'SELECT rowid AS rid FROM entries WHERE rowid > ? ORDER BY rowid LIMIT ?',
+      const fetched = database.selectObjects(
+        'SELECT rowid AS rid, coalesce(body_chars, length(body)) AS n FROM entries WHERE rowid > ? ORDER BY rowid LIMIT ?',
         [cursor, chunk],
-      ) as Array<{ rid: number }>;
+      ) as Array<{ rid: number; n: number | null }>;
+      const rids = cut(fetched);
       if (rids.length === 0) {
         clearFoldCursor(database);
         next = FTS_ALL;
@@ -668,14 +727,12 @@ export function foldStep(database: Database, chunk = FOLD_CHUNK): boolean {
                   SELECT rid, title, body FROM ${FTS_SOURCE_VIEW} WHERE rid > ? AND rid <= ?`,
           bind: [cursor, hi],
         });
-        if (rids.length < chunk) {
+        // 取り切った(取った行が chunk 未満で、切られてもいない)なら済み
+        if (rids.length === fetched.length && fetched.length < chunk) {
           clearFoldCursor(database);
           next = FTS_ALL;
         } else {
-          database.exec({
-            sql: 'UPDATE settings SET v = ? WHERE scope = ? AND k = ?',
-            bind: [String(hi), FTS_PROGRESS_SCOPE, FTS_PROGRESS_KEY],
-          });
+          setFoldCursor(database, hi);
           next = hi;
           more = true;
         }
@@ -711,6 +768,32 @@ function foldTick(): void {
     // ⚠ 他の処理の tx と重なった等 ── 少し待ってやり直す。続けて落ちるなら諦める(検索は全走査に落ちたまま動く)
     foldFailures += 1;
     if (foldFailures < 20) foldTimer = setTimeout(foldTick, 50);
+    else postFoldGiveUp(database);
+  }
+}
+
+/** 20 回続けて落ちて諦めたとき、システムのメッセージに 1 件残す(検索は全走査のまま動くが、遅い)。 */
+function postFoldGiveUp(database: Database): void {
+  try {
+    const cid = database.selectValue('SELECT cid FROM containers ORDER BY created_at, cid LIMIT 1') as
+      | string
+      | undefined;
+    if (cid === undefined) return;
+    handlers.appendMessage({
+      op: 'appendMessage',
+      cid,
+      lid: SYSTEM_MESSAGE_LID,
+      title: titleForMessageLid(SYSTEM_MESSAGE_LID),
+      section: formatMessageSection({
+        at: new Date().toISOString(),
+        kind: 'problem',
+        source: 'app',
+        text: '検索の索引を作り直せませんでした。検索は動きますが、遅くなります。保存領域の空きを増やして、PKC3 を開き直してください',
+      }),
+      cap: capForMessageLid(SYSTEM_MESSAGE_LID, MESSAGE_CAP_DEFAULT),
+    });
+  } catch {
+    /* メッセージを残せなくても、検索は動く */
   }
 }
 
@@ -729,26 +812,58 @@ function startFoldBuild(database: Database): void {
 /**
  * 🔴 **検索の引き方を決める唯一の口**(台帳 #1852 の束 B2)。`planSearch` の答えを、索引の状態で直す。
  *
- * ⚠ **作り直しの途中は索引を使わない**(索引にまだ入っていない行が「無い」と読まれるため)── 全語を LIKE で全走査する
- *   (遅いが、答えは索引と同じ集合。LIKE は大文字小文字を ASCII しか畳まない差だけ)。作り直しが済めば索引で引く。
- * ⚠ 全走査が見る字も `coalesce(body_f, body)`(索引と同じ元の字)── 作り直し済みの行は揃えた字、まだの行は書いた字。
+ * ⚠ **作り直しの途中は索引を使わない**(索引にまだ入っていない行が「無い」と読まれるため)── 全語を LIKE で全走査する。
+ *   全走査が見る字は `foldedExprs` が決める ── **まだ作り直していない行(`rowid > 印`)も、その場で同じ作り方
+ *   (`foldedColumns` と同じ `searchableBody` + `foldWidth`)を通した字**を見る。だから作り直しの間も、答えは作り直した後と同じ集合になる
+ *   (隠したメモ・リンクの宛先で一致せず、全角は半角の語で一致する)。遅いだけである。作り直しが済めば索引で引く。
  */
 function searchPlanOf(query: string, syntax: 'plain' | 'query'): QuerySearchPlan {
   const plan = syntax === 'plain' ? planSearch(query) : planSearch(query, { syntax: 'query' });
   if (plan.kind === 'fts' && foldCursor < FTS_ALL) {
     const t = plannedTerms(query, syntax);
-    // 🔴 まだ揃えていない行は書いた字のまま ── 揃えた語に加えて、打った字のままの語でも引く
-    const raw = rawPlannedTerms(query, syntax);
-    return raw === null
-      ? { kind: 'like-terms', include: t.include, exclude: t.exclude }
-      : { kind: 'like-terms', include: t.include, exclude: t.exclude, raw };
+    return { kind: 'like-terms', include: t.include, exclude: t.exclude };
   }
   return plan;
 }
 
 /**
- * 題名か本文に語が入っている(LIKE)の条件を組む。⚠ 索引と同じ元の字(`coalesce(title_f, title)` /
- * `coalesce(body_f, body)`)を見る。`numbered` = 番号つき引数(`?3`)/ そうでなければ位置引数(`?` を 2 つ → 2 回積む)。
+ * 全走査(LIKE)が見る題名・本文の式。索引と同じ元の字 ── 作り直し済みの行は `coalesce(title_f, title)` /
+ * `coalesce(body_f, body)`、作り直しの途中なら、まだの行(`rowid > 印`)は登録した関数(`registerFoldFunctions`)でその場で作る。
+ */
+function foldedExprs(): { title: string; body: string } {
+  if (foldCursor >= FTS_ALL) return { title: 'coalesce(title_f, title)', body: 'coalesce(body_f, body)' };
+  const c = Math.trunc(foldCursor); // 数だけを式に埋める(利用者の字は入らない)
+  return {
+    title: `CASE WHEN rowid > ${c} THEN pkc_fold_t(title) ELSE coalesce(title_f, title) END`,
+    body: `CASE WHEN rowid > ${c} THEN pkc_fold_b(body) ELSE coalesce(body_f, body) END`,
+  };
+}
+
+/**
+ * 🔴 **作り直し前の行を、その場で揃えるための SQL 関数**(接続ごとに登録)。⚠ **検索の問い合わせでだけ使う** ──
+ * 引き金からは呼ばない(旧ビルドが同じ DB に書いても `no such function` で落ちない)。
+ */
+function registerFoldFunctions(database: Database): void {
+  const d = database as unknown as {
+    createFunction: (
+      name: string,
+      fn: (cx: unknown, v: unknown) => unknown,
+      opts: { arity: number; deterministic: boolean },
+    ) => void;
+  };
+  d.createFunction('pkc_fold_t', (_cx, v) => (typeof v === 'string' ? foldWidth(v) : v), {
+    arity: 1,
+    deterministic: true,
+  });
+  d.createFunction('pkc_fold_b', (_cx, v) => (typeof v === 'string' ? foldWidth(searchableBody(v)) : v), {
+    arity: 1,
+    deterministic: true,
+  });
+}
+
+/**
+ * 題名か本文に語が入っている(LIKE)の条件を組む。⚠ 索引と同じ元の字(`foldedExprs`)を見る。
+ * `numbered` = 番号つき引数(`?3`)/ そうでなければ位置引数(`?` を 2 つ → 2 回積む)。
  * 除く語は `NOT (…)`。戻り値は AND でつなぐ条件の並び。
  */
 function likeWhere(
@@ -758,27 +873,17 @@ function likeWhere(
 ): string[] {
   const include = plan.kind === 'like' ? [plan.pattern] : plan.include.map(toLikePattern);
   const exclude = plan.kind === 'like' ? [] : plan.exclude.map(toLikePattern);
-  // 索引の作り直しの間だけ、語ごとに「書いた字のままの語」も候補にする(`searchPlanOf`)
-  const rawInclude = plan.kind === 'like-terms' ? plan.raw?.include.map(toLikePattern) : undefined;
-  const rawExclude = plan.kind === 'like-terms' ? plan.raw?.exclude.map(toLikePattern) : undefined;
-  const cond = (pattern: string, numberedBind: boolean): string => {
-    if (numberedBind) {
+  const x = foldedExprs();
+  const cond = (pattern: string): string => {
+    if (numbered) {
       bind.push(pattern);
       const i = bind.length;
-      return `(coalesce(title_f, title) LIKE ?${i} ESCAPE '\\' OR coalesce(body_f, body) LIKE ?${i} ESCAPE '\\')`;
+      return `(${x.title} LIKE ?${i} ESCAPE '\\' OR ${x.body} LIKE ?${i} ESCAPE '\\')`;
     }
     bind.push(pattern, pattern);
-    return `(coalesce(title_f, title) LIKE ? ESCAPE '\\' OR coalesce(body_f, body) LIKE ? ESCAPE '\\')`;
+    return `(${x.title} LIKE ? ESCAPE '\\' OR ${x.body} LIKE ? ESCAPE '\\')`;
   };
-  const one = (pattern: string, rawPattern: string | undefined, not: boolean): string => {
-    let sql = cond(pattern, numbered);
-    if (rawPattern !== undefined && rawPattern !== pattern) sql = `(${sql} OR ${cond(rawPattern, numbered)})`;
-    return not ? `NOT ${sql}` : sql;
-  };
-  return [
-    ...include.map((p, i) => one(p, rawInclude?.[i], false)),
-    ...exclude.map((p, i) => one(p, rawExclude?.[i], true)),
-  ];
+  return [...include.map((p) => cond(p)), ...exclude.map((p) => `NOT ${cond(p)}`)];
 }
 
 /**
@@ -797,10 +902,12 @@ function syncFtsIndex(database: Database): void {
    *
    * ⚠ 途中の索引は「数が合わない」のが正しい。ここで `'rebuild'` を撃つと、起動の tx の中で全件を一度に入れ直して
    *   起動が止まる(= 塊で流す設計の意味が消える)。続きは `foldStep` が流す。
-   * ⚠ ただし数が合っているなら(旧ビルドが全件を組み直した)作り直しは済んでいる ── 印を外して、二重に入れない。
+   * ⚠ ただし**印より後の行が索引に居るなら**(前の版が `'rebuild'` を撃った)、索引を捨てて最初からやり直す
+   *   (`resetFtsIndex`)。「数が合っているから済んだ」とは読まない ── 古い本文のまま居る行が残る。
    */
-  if (readFoldCursor(database) < FTS_ALL) {
-    if (entryCount > 0 && ftsDocCount(database) === entryCount) clearFoldCursor(database);
+  const cursorNow = readFoldCursor(database);
+  if (cursorNow < FTS_ALL) {
+    if (indexedBeyondCursor(database, cursorNow)) resetFtsIndex(database);
     return;
   }
   if (ftsDocCount(database) === entryCount) return;
@@ -1066,6 +1173,7 @@ export function applySchema(database: Database): void {
             FTS_FORM_KEY,
           ]) as string | undefined)
         : undefined;
+    let migrationFailed = false;
     if (
       typeof ftsTable === 'string' &&
       (!ftsTable.includes(FTS_SOURCE_VIEW) || storedForm !== FTS_FORM_VERSION)
@@ -1078,6 +1186,7 @@ export function applySchema(database: Database): void {
           bind: [FTS_PROGRESS_SCOPE, FTS_PROGRESS_KEY],
         });
       } catch {
+        migrationFailed = true; // 版を刻まない ── 刻むと二度と移行されない
         // ⚠ 影の表が壊れていて落とせない索引 ── ここで throw すると起動できない(2026-08-20 と同じ型)。
         //   索引は残し、下の `syncFtsIndex` の最後の手段(落として作り直す)に任せる。引き金は新しい文面に替える。
       }
@@ -1087,8 +1196,9 @@ export function applySchema(database: Database): void {
     // 新規 DB は最新 DDL がそのまま最新形を作る(既存 DB では no-op)。
     // ⚠ 索引はここで作られる ── 上で列を足した**後**であることが要。
     for (const ddl of SCHEMA_DDL) database.exec(ddl);
-    // 索引の形の版を刻む(新しい DB も作り直した DB も、いまの形)
-    database.exec({
+    // 索引の形の版を刻む(新しい DB も作り直した DB も、いまの形)。⚠ 移行に失敗した回は刻まない(次の起動でやり直す)
+    if (!migrationFailed)
+      database.exec({
       // ⚠ 同じ値なら書かない(開くたびに 1 行書き直さない)
       sql: `INSERT INTO settings(scope, k, v) VALUES (?, ?, ?)
               ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v WHERE v IS NOT excluded.v`,
@@ -4066,25 +4176,38 @@ const handlers: Handlers = {
      * ⚠ 本文は当たった行(上限 200 件 + 1)だけ読む。
      */
     const excerptOf = (body: string): string => excerptAroundFolded(searchableBody(body), needles);
+    /**
+     * 🔴 **行ごとに step して抜粋だけ作り、本文は捨てる**(最大 201 件の本文を配列に載せない ── ゼロコピーの規律)。
+     * ⚠ `limit + 1` 件目は「切ったか」を知るためだけに数え、抜粋は作らない。
+     */
+    const stream = (sql: string, bind: (string | number)[], withRank: boolean): SearchDetailResult => {
+      const rows: SearchDetailResult['rows'] = [];
+      let seen = 0;
+      need().exec({
+        sql,
+        bind,
+        rowMode: 'object',
+        callback: (row: unknown) => {
+          seen += 1;
+          if (seen > limit) return false; // 1 件多く取れたら止める
+          const r = row as { lid: string; title: string; body: string; rank?: number };
+          rows.push({ lid: r.lid, title: r.title, snippet: excerptOf(r.body), rank: withRank ? Number(r.rank) : 0 });
+          return undefined;
+        },
+      });
+      return { rows, truncated: seen > limit };
+    };
     // 🔴 全文検索(探す面)は system 領域のノートを出さない(設計 doc §1.1、段①)
     if (plan.kind === 'fts') {
-      const rows = need().selectObjects(
+      return stream(
         `SELECT e.lid AS lid, e.title AS title, e.body AS body, bm25(entries_fts) AS rank
            FROM entries_fts f
            JOIN entries e ON e.rowid = f.rowid
           WHERE f.entries_fts MATCH ?1 AND e.cid = ?2 AND e.${USER_REALM_SQL}
           ORDER BY rank, e.entry_order, e.lid LIMIT ?3`,
         [plan.match, req.cid, limit + 1],
-      ) as Array<{ lid: string; title: string; body: string; rank: number }>;
-      return {
-        rows: rows.slice(0, limit).map((r) => ({
-          lid: r.lid,
-          title: r.title,
-          snippet: excerptOf(r.body),
-          rank: r.rank,
-        })),
-        truncated: rows.length > limit,
-      };
+        true,
+      );
     }
     /**
      * LIKE 側 ── 項ごとに `(題名 LIKE ? OR 本文 LIKE ?)` を AND で並べ、除外は `NOT (…)`。
@@ -4093,21 +4216,13 @@ const handlers: Handlers = {
     const bind: (string | number)[] = [req.cid];
     const conds = likeWhere(plan, bind, true);
     bind.push(limit + 1);
-    const rows = need().selectObjects(
+    return stream(
       `SELECT lid, title, body FROM entries
         WHERE cid = ?1 AND ${USER_REALM_SQL} AND ${conds.join(' AND ')}
         ORDER BY entry_order, lid LIMIT ?${bind.length}`,
       bind,
-    ) as Array<{ lid: string; title: string; body: string }>;
-    return {
-      rows: rows.slice(0, limit).map((r) => ({
-        lid: r.lid,
-        title: r.title,
-        snippet: excerptOf(r.body),
-        rank: 0,
-      })),
-      truncated: rows.length > limit,
-    };
+      false,
+    );
   },
   /**
    * 🔴 **このノートを参照しているのはどれか**(#348、user 裁定 2026-08-23)。
