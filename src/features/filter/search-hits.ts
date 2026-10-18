@@ -51,7 +51,12 @@ export function findTerms(query: string): string[] {
  *   同じ割り方で塗ると、`-1` / `-メモ` は除外の語と読まれて 0 件、`"a b"` は引用符を剥がして外す
  *   (一覧には当たっているのに「一致しませんでした」と出る)。
  */
-export function jumpTerms(query: string, origin: 'find' | 'filter'): string[] {
+export function jumpTerms(query: string, origin: 'find' | 'filter' | 'phrase'): string[] {
+  // 🔴 ノートの中だけを探す小さな欄(#1163 依頼 163)は、ブラウザの「ページ内を検索」と同じく**打った字を丸ごと 1 句**で引く
+  if (origin === 'phrase') {
+    const t = query.trim();
+    return t === '' ? [] : [t];
+  }
   // 🔴 左の列の欄は、空白(全角も)で区切った語を全部含む(依頼 194・260・115-1)。`"…"` も `-語` も読まない
   if (origin === 'filter') return [...new Set(splitWords(query))];
   return findTerms(query);

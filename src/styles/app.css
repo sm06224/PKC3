@@ -10808,6 +10808,8 @@ h3[data-pkc-section] {
   /* ⚠ 「探す」から送ったときの帯も紙には要らない(#1102 段①)── 塗り(`::highlight`)は
    *    印刷に出ないので、帯だけを隠せば紙は元のまま */
   .pkc-search-jump,
+  /* ⚠ ノートの中を探す小さな欄(#1163 依頼 163)も紙には要らない */
+  .pkc-note-find,
   .pkc-heading-anchor,
   .pkc-code-lang,
   .pkc-quick-toc,
@@ -11674,6 +11676,96 @@ h6:hover > .pkc-heading-anchor,
 }
 
 ::highlight(pkc-search-hit-current) {
+  background-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* 🔴 **ノートの中だけを探す小さな欄**(#1163 依頼 163)── `render/note-find.ts`。
+ *
+ * 🔑 置き場所は**どの面でも中央ペインの右上**(`note-find.ts` の `place` が中央の矩形から `top` / `right` を入れる)。
+ *   読む面・編集の 2 ペイン・ライブエディタで場所を変えない / 本文の行を 1px も押し下げない(`fixed`)。
+ * ⚠ 地は無彩色、色は**一致の塗りにだけ**使う(欄は他の押しと同じ配色)。 */
+.pkc-note-find {
+  position: fixed;
+  top: 48px;
+  right: 28px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.15));
+  z-index: 95;
+}
+
+.pkc-note-find-input {
+  width: 14em;
+  max-width: 40vw;
+  padding: 2px 6px;
+  font-size: 0.9em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg, var(--surface));
+  color: var(--fg);
+}
+
+.pkc-note-find-input[aria-invalid='true'] {
+  border-color: var(--danger, #c0392b);
+}
+
+.pkc-note-find-count {
+  min-width: 3.6em;
+  font-size: 0.78em;
+  text-align: center;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.pkc-note-find-btn {
+  padding: 2px 7px;
+  font-size: 0.9em;
+  line-height: 1.2;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+  user-select: none;
+}
+
+.pkc-note-find-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pkc-note-find-btn:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* 🔴 一致の塗り(Custom Highlight API ── 本文の節点は増えない)。名前は `note-find.ts` の
+ *   `NOTE_FIND_HIGHLIGHT` / `NOTE_FIND_CURRENT_HIGHLIGHT` と同じ字。「探す」から送る塗りと同じ配色。 */
+::highlight(pkc-note-find) {
+  background-color: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+
+::highlight(pkc-note-find-current) {
+  background-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* ⚠ 塗りの表が使えないブラウザだけ `<mark>` で包む(閉じると元の節点へ戻す) */
+.pkc-note-find-mark {
+  background-color: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+
+.pkc-note-find-mark-current {
   background-color: var(--accent);
   color: var(--accent-fg);
 }

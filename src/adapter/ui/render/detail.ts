@@ -2320,7 +2320,10 @@ export class DetailRenderer {
           sel.title = '本文の中を選択すると押せます(選択した範囲を Markdown の原文でコピー)';
           sel.disabled = true;
           this.barCopy = { md, rich, sel };
-          bar.append(this.barButton, md, rich, sel);
+          // 🔴 ノートの中だけを探す小さな欄(#1163 依頼 163)。⚠ `Ctrl+F` と同じ口(`find-in-note`)
+          const find = iconButton('find-in-note', 'ノート内を探す');
+          find.title = hintTitle('このノートの本文の中だけを探す小さな欄を開きます', 'find-in-note');
+          bar.append(this.barButton, md, rich, sel, find);
         } else {
           // 保存失敗からの復帰導線: baseline ≠ persisted =「disk に未達の commit が
           // ある」証拠(P3-5 の分離の回収点)。黙って死なせず再送を提示する

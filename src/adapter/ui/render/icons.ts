@@ -124,6 +124,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'set-view:flags': 'flag',
   'set-view:help': 'help',
   'open-palette': 'search',
+  /** このノートの中だけを探す小さな欄(#1163 依頼 163)── 「探す」の虫眼鏡と同じ図案。 */
+  'find-in-note': 'search',
   'import-file': 'arrow-in',
   /** 外部の画像を手元へ取り込む(#264 段①)── **入ってくる**向きなので取込と同じ図案。 */
   'adopt-external-images': 'arrow-in',

@@ -79,7 +79,7 @@ interface Seg {
 export function collectHitRanges(
   host: HTMLElement,
   query: string,
-  origin: 'find' | 'filter' = 'find',
+  origin: 'find' | 'filter' | 'phrase' = 'find',
 ): Range[] {
   const terms = jumpTerms(query, origin);
   if (terms.length === 0) return [];
