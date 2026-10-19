@@ -4,7 +4,8 @@
 # main push / nightly / 手動 dispatch へ。timeout 10 分は速度予算の tripwire。
 #
 # 🔴 **job は 2 つに割ってある**(2026-08-18)。
-#   ⚠ 2026-09-09 注記: いまは **`audit` / `verify`** の 2 job だけである ──
+#   ⚠ 2026-09-09 注記: smoke を出した後は **`audit` / `verify`** の 2 job だった ──
+#   (2026-10-18 に verify を `static` / `unit`(3 shard)/ 集約 `verify` へ割った。下の jobs: を参照)
 #     🔴 **全量 smoke は `smoke.yml`(任意起動)へ出した**(user 指示、下の
 #     「実ブラウザ lane は、ここには無い」を参照)。下の経緯(verify と smoke を
 #     割った理由)は「**smoke をここへ戻すなら、また同じ税を払う**」という
