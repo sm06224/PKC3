@@ -100,8 +100,8 @@ export class AppendBoxRenderer {
   private readonly target: HTMLSelectElement;
   /** 直前の追記を外す(#395 段①)。⚠ 追記が通ったときだけ出す。 */
   private readonly undo: HTMLButtonElement;
-  /** 打つ欄と押す物の行(#496)。⚠ 追記先の `<select>` は**この上**に出る。 */
-  private readonly row: HTMLElement;
+  /** 枠の下段(#1890)。左に追記先の `<select>`、右に「元に戻す」「本文に追記する」。 */
+  private readonly bar: HTMLElement;
   /** いま並べている追記先の指紋。⚠ 同じなら触らない(選んだ物が飛ばない)。 */
   private targetSig: string | null = null;
   /** 前回見出しを拾った本文(同じ字なら拾い直さない)。 */
@@ -186,25 +186,24 @@ export class AppendBoxRenderer {
      */
     this.undo.title = '直前に足した内容(追記・ドロップして入れた行)を、本文から取り除きます';
     /**
-     * 🔴 **追記先は「打つ欄の上の行」に置く**(#496。user 指示 2026-08-27
-     * 「**見出し選択リストはテキストボックスの上に置いて欲しい**」)。
+     * 🔴 **枠 1 つの中に、打つ欄(上)と下段(追記先 左 / 元に戻す・追記 右)をまとめる**(#1890。
+     * user 指示 2026-10-19「追記のテキストボックスに追記ボタンや追記先プルダウン、元に戻すボタンを組み込む」)。
      *
-     * ⚠ 直す前は 4 つとも**横 1 列**で、`<select>` が先頭に居た ── `<select>` は
-     *   規則が 1 つも無く UA 既定の**内容依存幅**なので、見出しが長いノートでは
-     *   **64px → 765px**(実測 1440px 幅)まで伸びる。隣の `append-input` は
-     *   `flex: 1` なので、その差がまるごと打つ欄から奪われ、
-     *   **「追記」ボタンが右へ動く** = ノートを開くたびに押す物の位置が変わる。
-     * 🔑 行を分ければ、`<select>` が伸びても**打つ欄と押す物は動かない**
-     *   (幅を器に固定するのは `app.css` の側)。
-     * ⚠ **`<select>` を器で包まない** ── 見出しが 1 つも無いノートでは
-     *   `this.target.hidden = true` になるので、包むと**空の行が 1 本残る**
-     *   (押す物の無い帯を増やさない)。`this.form` を縦に組み、
-     *   `<select>` を直接その子にすれば、畳んだとき行ごと消える。
+     * ⚠ 直す前は追記先が欄の**上の行**、ボタンが欄の**横**にあり、打つ欄の横幅をボタンが取っていた(#496 → #1443)。
+     * 🔑 枠(`append-form`)が見た目の箱で、打つ欄は枠の中で全幅を使う。下段(`append-bar`)は
+     *   左に追記先、右に押す物。⚠ **追記先の幅は枠の中で固定**(`app.css` の `append-target`:
+     *   固定幅 + `max-width: 100%` + `min-width: 0` + 省略表示)── 見出しが長いノートでも下段の右の押す物は動かず、
+     *   枠の外へ何も押し出さない(#496 の再発防止)。
+     * ⚠ **`<select>` を器で包まない** ── 見出しが無いノートでは `hidden` になる。下段には押す物が
+     *   常にあるので空の行は残らない(`margin-left: auto` で押す物は右に寄ったまま)。
      */
-    this.row = document.createElement('div');
-    this.row.setAttribute('data-pkc-field', 'append-row');
-    this.row.append(this.input, iconButton('append-entry', '本文に追記する'), this.undo);
-    this.form.append(this.target, this.row);
+    this.bar = document.createElement('div');
+    this.bar.setAttribute('data-pkc-field', 'append-bar');
+    const actions = document.createElement('span');
+    actions.setAttribute('data-pkc-field', 'append-actions');
+    actions.append(this.undo, iconButton('append-entry', '本文に追記する'));
+    this.bar.append(this.target, actions);
+    this.form.append(this.input, this.bar);
 
     this.lockBar = document.createElement('div');
     this.lockBar.setAttribute('data-pkc-field', 'append-lock');
