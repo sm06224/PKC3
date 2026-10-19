@@ -1528,39 +1528,67 @@ img[data-pkc-action='view-big']:focus-visible {
   height: var(--pkc-pane-append, auto);
 }
 /**
- * 🔴 **入り先は上の行、打つ欄と押す物は下の行**(#496)。
- * ⚠ 横 1 列に戻すと、見出しの長い `<select>` が打つ欄を押しのける
- *   (実測 64px → 765px)。
+ * 🔴 **枠 1 つの中に、打つ欄(上)と下段(追記先 / 押す物)**(#1890。#496 の「上の行」を枠の中の下段へ)。
+ * ⚠ 枠が箱の見た目を持ち、中の打つ欄は枠線を持たない(二重の線を作らない)。
+ * ⚠ フォーカスの輪郭は枠(`:focus-within`)で見せる ── 打つ欄の輪郭は消す。
  */
 [data-pkc-field='append-form'] {
   display: flex;
   flex-direction: column;
-  gap: var(--s2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
 }
-[data-pkc-field='append-row'] {
+[data-pkc-field='append-form']:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+/* 下段。⚠ 狭いとき(スマホ幅)は折り返す ── 本文を覆わないよう、伸びるのは 1 段ぶんだけ */
+[data-pkc-field='append-bar'] {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--s2);
-  align-items: flex-end;
+  padding: 0 var(--s2) var(--s2);
+  min-width: 0;
+}
+[data-pkc-field='append-actions'] {
+  display: inline-flex;
+  gap: var(--s2);
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 /**
- * 🔴 **入り先の幅は器に固定する**(#496。user 報告「選択リストが見出しサイズに
- * 合わせて横幅を変えるため使えない」)。
+ * 🔴 **入り先の幅は枠の中で固定する**(#496。user 報告「選択リストが見出しサイズに
+ * 合わせて横幅を変えるため使えない」/ #1890 で下段の左へ)。
  * ⚠ 規則が無いと `<select>` は UA 既定の**内容依存幅**になる ── いちばん長い
  *   見出しの字がそのまま幅になり、ノートごとに変わる。
- * ⚠ `min-width: 0` を併せて置く ── flex の子は既定で内容より縮まないので、
- *   これが無いと `width: 100%` を書いても**器からはみ出す**。
+ * ⚠ 幅は**中身で決めない**(固定の値 + `max-width: 100%`)。`min-width: 0` を併せて置く ──
+ *   flex の子は既定で内容より縮まないので、これが無いと枠からはみ出す。
+ * ⚠ 狭い枠では下段が折り返し、`max-width: 100%` で行いっぱいに収まる。
  */
 [data-pkc-field='append-target'] {
-  width: 100%;
+  flex: 0 1 18em;
+  width: 18em;
+  max-width: 100%;
   min-width: 0;
   text-overflow: ellipsis;
 }
 [data-pkc-field='append-input'] {
-  flex: 1;
+  flex: none;
+  width: 100%;
   min-height: calc(var(--row-h) * 2);
   resize: vertical;
   font-family: var(--font-mono);
   font-size: 12.5px;
+  /* 枠が線と輪郭を持つ(#1890) */
+  border: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: transparent;
+}
+[data-pkc-field='append-input']:focus-visible {
+  outline: none;
 }
 /* ロックの帯 ── 理由と出口を同じ行に出す(「押せない」だけにしない) */
 [data-pkc-field='append-lock'] {

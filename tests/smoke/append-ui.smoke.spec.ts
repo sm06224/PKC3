@@ -91,12 +91,11 @@ test('🔴 入り先のリストは、見出しが長くなっても幅を変え
 });
 
 /**
- * 🔴 **リストは打つ欄の「上」に置く**(user の指示そのもの)。
+ * 🔴 **リストは枠の中の下段の左に置く**(#1890。#496 の「打つ欄の上」を、枠 1 つの中の下段へ)。
  *
- * ⚠ 「DOM で前に在る」ではなく**画面で上に在る**ことを見る ── `display: flex` の
- *   向きを横のままにすると DOM 順は同じでも**横に並んだまま**である。
+ * ⚠ 「DOM で後ろに在る」ではなく**画面で打つ欄の下・枠の内側**に在ることを見る。
  */
-test('🔴 入り先のリストは、打つ欄の上に出る (#496)', async ({ page }) => {
+test('🔴 入り先のリストは、枠の中の下段(打つ欄の下)に出る (#1890)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -105,9 +104,21 @@ test('🔴 入り先のリストは、打つ欄の上に出る (#496)', async ({
   const sel = (await page.locator('[data-pkc-field="append-target"]').boundingBox())!;
   const input = (await page.locator('[data-pkc-field="append-input"]').boundingBox())!;
   expect(
-    sel.y + sel.height,
-    `リストが打つ欄の上に無い(list.bottom=${sel.y + sel.height} / input.top=${input.y})`,
-  ).toBeLessThanOrEqual(input.y + 1);
+    sel.y,
+    `リストが打つ欄の下に無い(list.top=${sel.y} / input.bottom=${input.y + input.height})`,
+  ).toBeGreaterThanOrEqual(input.y + input.height - 1);
+  // 枠の内側に部品が収まっている(「元に戻す」は追記が通るまで出ないので、ここでは見ない)
+  const frame = (await page.locator('[data-pkc-field="append-form"]').boundingBox())!;
+  const sendBox = (await page.locator('[data-pkc-action="append-entry"]').boundingBox())!;
+  for (const [name, b] of [
+    ['追記先', sel],
+    ['本文に追記する', sendBox],
+  ] as const) {
+    expect(b.x, `${name}が枠の左にはみ出た`).toBeGreaterThanOrEqual(frame.x - 1);
+    expect(b.x + b.width, `${name}が枠の右にはみ出た`).toBeLessThanOrEqual(frame.x + frame.width + 1);
+    expect(b.y + b.height, `${name}が枠の下にはみ出た`).toBeLessThanOrEqual(frame.y + frame.height + 1);
+  }
+  expect(sendBox.x, '押す物が下段の右(リストより右)に無い').toBeGreaterThan(sel.x + sel.width - 1);
 
   /**
    * 🔴 **手で高さを決めていなければ、打った行数に合わせて伸びる**(#1443)。
@@ -128,8 +139,9 @@ test('🔴 入り先のリストは、打つ欄の上に出る (#496)', async ({
   const h80 = (await field.boundingBox())!.height;
   expect(Math.abs(h80 - h12), `12 行の上限で止まらない(${h12} → ${h80})`).toBeLessThanOrEqual(2);
   const selAfter = (await page.locator('[data-pkc-field="append-target"]').boundingBox())!;
-  expect(selAfter.y + selAfter.height, '伸びた欄が入り先のリストの上へ回り込んだ').toBeLessThanOrEqual(
-    (await field.boundingBox())!.y + 1,
+  const fieldAfter = (await field.boundingBox())!;
+  expect(selAfter.y, '伸びた欄が入り先のリストの下へ回り込んだ').toBeGreaterThanOrEqual(
+    fieldAfter.y + fieldAfter.height - 1,
   );
   expect(
     Math.abs((await send.boundingBox())!.x - sendBefore.x),
