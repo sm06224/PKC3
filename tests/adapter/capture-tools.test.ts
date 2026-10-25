@@ -280,3 +280,41 @@ describe('声と伴奏を分ける', () => {
     expect(h.deps.attach).not.toHaveBeenCalled();
   });
 });
+
+describe('話者を分ける', () => {
+  const turns = [
+    { startMs: 0, endMs: 10_000, speaker: 0 },
+    { startMs: 12_000, endMs: 20_000, speaker: 1 },
+    { startMs: 22_000, endMs: 30_000, speaker: 0 },
+  ];
+  const diarized = () => vi.fn(async (job: VoiceJob) => {
+    void job;
+    return { ok: true as const, kind: 'turns' as const, turns, speakers: 2, durationMs: 30_000 };
+  });
+
+  it('🔴 「## 話者」の節を足し、文字起こしがあれば「## 話者つき文字起こし」も同じ追記に入れる', async () => {
+    const voice = diarized();
+    const h = harness({ tools: { voice } });
+    h.deps.readBody.mockResolvedValue('## 文字起こし\n0:00 はじめに\n0:14 こんにちは\n0:25 どうも');
+    await h.run('speakers');
+    expect(voice.mock.calls[0]![0]).toMatchObject({ op: 'diarize' });
+    expect(h.appends).toEqual([
+      {
+        lid: 'a',
+        heading: '## 話者 2026-10-25 10:30',
+        text: '0:00 話者A\n0:12 話者B\n0:22 話者A\n\n## 話者つき文字起こし 2026-10-25 10:30\n0:00 話者A: はじめに\n0:14 話者B: こんにちは\n0:25 話者A: どうも',
+      },
+    ]);
+    expect(h.notes.at(-1)).toContain('話者 2 人・3 区間の一覧を足しました(話者つきの文字起こしも足しました)');
+  });
+
+  it('文字起こしが無いノートには「## 話者」の節だけを足す。声が無ければ何も足さない', async () => {
+    const h = harness({ tools: { voice: diarized() } });
+    await h.run('speakers');
+    expect(h.appends[0]!.text).toBe('0:00 話者A\n0:12 話者B\n0:22 話者A');
+    const none = harness({ tools: { voice: vi.fn(async () => ({ ok: false as const, reason: 'no-voice' as const })) } });
+    await none.run('speakers');
+    expect(none.appends).toEqual([]);
+    expect(none.dispatcher.getState().error).toContain('話し声が見つかりませんでした');
+  });
+});

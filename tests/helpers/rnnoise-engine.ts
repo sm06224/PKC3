@@ -87,3 +87,63 @@ export function mix(a: Float32Array, b: Float32Array): Float32Array {
   for (let i = 0; i < out.length; i += 1) out[i] = (a[i] ?? 0) + (b[i] ?? 0);
   return out;
 }
+
+/** 母音の共鳴(フォルマント周波数, 帯域幅)の組。 */
+export type Formants = ReadonlyArray<readonly [number, number]>;
+
+/** 男声ふうの母音 5 つ(あ・い・う・え・お の目安)。 */
+export const VOWELS: readonly Formants[] = [
+  [[730, 90], [1090, 110], [2440, 150]],
+  [[270, 70], [2290, 120], [3010, 160]],
+  [[300, 70], [870, 100], [2240, 150]],
+  [[530, 80], [1840, 110], [2480, 150]],
+  [[570, 80], [840, 100], [2410, 150]],
+];
+
+/** formants を `scale` 倍する(声道の長さが違う話者)。 */
+export const scaleFormants = (vs: readonly Formants[], scale: number): Formants[] =>
+  vs.map((f) => f.map(([hz, bw]) => [hz * scale, bw] as const));
+
+/**
+ * 話者らしい合成の発話:母音を `vowelMs` ごとに切り替えながら、`f0` の声門パルス列を通す。
+ * 音節の強弱(4Hz)と F0 のゆらぎ(vibrato)つき。⚠ 実測:F0 120Hz /a/ は RNNoise が声と判定する。
+ */
+export function synthSpeech(seconds: number, f0: number, vowels: readonly Formants[], rate = 48_000, vowelMs = 220, seed = 1): Float32Array {
+  const n = Math.floor(rate * seconds);
+  const out = new Float32Array(n);
+  const coef = (hz: number, bw: number) => {
+    const r = Math.exp((-Math.PI * bw) / rate);
+    const th = (2 * Math.PI * hz) / rate;
+    return { a1: -2 * r * Math.cos(th), a2: r * r };
+  };
+  const state = [0, 1, 2].map(() => ({ y1: 0, y2: 0 }));
+  let phase = 0;
+  const vs = Math.max(1, Math.round((vowelMs * rate) / 1000));
+  let rs = seed;
+  const rnd = (): number => ((rs = (rs * 1664525 + 1013904223) >>> 0) / 4294967296);
+  const vib = 0.05 + rnd() * 0.04;
+  for (let i = 0; i < n; i += 1) {
+    const t = i / rate;
+    const vowel = vowels[Math.floor(i / vs) % vowels.length]!;
+    phase += (f0 * (1 + vib * Math.sin(2 * Math.PI * 3 * t))) / rate;
+    let y = 0;
+    if (phase >= 1) {
+      phase -= 1;
+      y = 1;
+    }
+    for (let k = 0; k < 3; k += 1) {
+      const [hz, bw] = vowel[k]!;
+      const c = coef(hz, bw);
+      const st = state[k]!;
+      const ny = y - c.a1 * st.y1 - c.a2 * st.y2;
+      st.y2 = st.y1;
+      st.y1 = ny;
+      y = ny;
+    }
+    out[i] = y * (0.5 + 0.5 * Math.sin(2 * Math.PI * 4 * t - 1.2));
+  }
+  let m = 0;
+  for (const v of out) m = Math.max(m, Math.abs(v));
+  for (let i = 0; i < n; i += 1) out[i] = (out[i]! / m) * 0.5;
+  return out;
+}

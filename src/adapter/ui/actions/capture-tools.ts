@@ -15,6 +15,13 @@ import { canTrimCapture } from '@features/capture/capture-trim-gate';
 import { chaptersHeading, chaptersText, silenceChapterStarts } from '@features/capture/chapters';
 import { ASR_SAMPLE_RATE } from '@features/asr/asr-parts';
 import { VOICE_MAX_MS, VOICE_RATE } from '@features/audio/voice-lab';
+import {
+  speakerTranscript,
+  speakerTranscriptHeading,
+  speakersHeading,
+  speakersText,
+  speakerName,
+} from '@features/capture/speakers';
 import type { VoiceJob, VoiceRefusal, VoiceResult } from '@adapter/platform/voice/voice-run';
 import type { ToolRunner } from './capture-process';
 
@@ -183,5 +190,32 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
     return audioOutput(r, '話し声と声以外の 2 つの音を作りました');
   };
 
-  return { 'fold-still': foldStill, chapters, 'contact-sheet': contactSheet, denoise, separate };
+
+  /**
+   * 話者を分ける(B4・#949)。声の区間を見つけて特徴でまとめ、「## 話者」の節(話者が替わる時刻 + 名前)を本文の末尾に足す。
+   * そのノートに時刻つきの文字起こしがあれば、話者を添えた「## 話者つき文字起こし」の節も足す。
+   * ⚠ 手法は素朴な特徴(MFCC 平均 + 基本周波数)のクラスタリング ── 似た声は 1 人になりうる。あとから「話者を直す」で直せる。
+   */
+  const speakers: ToolRunner = async ({ blob, progress, readBody }) => {
+    const d = await decodeForVoice(deps, blob);
+    if ('refused' in d) return { kind: 'refused', text: d.refused };
+    progress('話者を分けています(ワーカーで処理)…');
+    const r = await deps.voice({ op: 'diarize', pcm: d.pcm });
+    if (!r.ok) return { kind: 'refused', text: VOICE_REFUSAL[r.reason] };
+    if (r.kind !== 'turns') return { kind: 'refused', text: VOICE_REFUSAL['encode-failed'] };
+    const at = deps.now();
+    const body = await readBody();
+    const lines = body === null ? [] : transcriptLinesOf(body);
+    const named = r.turns.map((t) => ({ ms: t.startMs, name: speakerName(t.speaker) }));
+    const withText = speakerTranscript(named, lines);
+    const text = `${speakersText(r.turns)}${withText === null ? '' : `\n\n${speakerTranscriptHeading(at)}\n${withText}`}`;
+    return {
+      kind: 'note',
+      heading: speakersHeading(at),
+      text,
+      summary: `話者 ${String(r.speakers)} 人・${String(r.turns.length)} 区間の一覧を足しました${withText === null ? '' : '(話者つきの文字起こしも足しました)'}`,
+    };
+  };
+
+  return { 'fold-still': foldStill, chapters, 'contact-sheet': contactSheet, denoise, separate, speakers };
 }

@@ -10,12 +10,14 @@
  * 1 回の依頼ごとに `DenoiseState` を作って、終わったらその場で `destroy()` する(状態を持ち越さない)。
  * ⚠ PCM は **transfer で受ける**(ゼロコピー)。結果の bytes も transfer で返す。
  */
-import { hasVoice, residualOf, runEngine, type FrameEngine } from '@features/audio/voice-lab';
+import { hasVoice, residualOf, runEngine, VOICE_RATE, type FrameEngine } from '@features/audio/voice-lab';
+import { diarize, type SpeakerTurn } from '@features/audio/diarize';
 import { encodeOpusWebm, nativeAudioApi, type AudioApi } from './audio-encode';
 
 export type VoiceJob =
   | { readonly op: 'denoise'; readonly pcm: Float32Array }
-  | { readonly op: 'separate'; readonly pcm: Float32Array };
+  | { readonly op: 'separate'; readonly pcm: Float32Array }
+  | { readonly op: 'diarize'; readonly pcm: Float32Array };
 
 export interface VoiceFile {
   /** 名前に入れる語(`話し声` など)。 */
@@ -28,6 +30,13 @@ export type VoiceRefusal = 'no-encoder' | 'empty' | 'encode-failed' | 'silent' |
 
 export type VoiceResult =
   | { readonly ok: true; readonly kind: 'audio'; readonly files: readonly VoiceFile[] }
+  | {
+      readonly ok: true;
+      readonly kind: 'turns';
+      readonly turns: readonly SpeakerTurn[];
+      readonly speakers: number;
+      readonly durationMs: number;
+    }
   | { readonly ok: false; readonly reason: VoiceRefusal };
 
 /** エンジンの実体。⚠ `destroy` は 1 依頼ごとに呼ぶ。 */
@@ -72,6 +81,17 @@ export class VoiceRunner {
       const { clean, vad } = runEngine(pcm, engine);
       const api = this.deps.audioApi === undefined ? nativeAudioApi() : this.deps.audioApi;
       if (job.op === 'denoise') return await this.encodeFiles(api, [{ tag: '雑音を減らした', pcm: clean }]);
+      if (job.op === 'diarize') {
+        const d = diarize(clean, vad);
+        if (d.turns.length === 0) return { ok: false, reason: 'no-voice' };
+        return {
+          ok: true,
+          kind: 'turns',
+          turns: d.turns,
+          speakers: d.speakers,
+          durationMs: Math.round((pcm.length * 1e3) / VOICE_RATE),
+        };
+      }
       // separate:声 = 雑音(声以外)を引いたもの / 声以外 = 元から声を引いた残り(伴奏・環境音)
       if (!hasVoice(vad)) return { ok: false, reason: 'no-voice' };
       const rest = residualOf(pcm, clean);

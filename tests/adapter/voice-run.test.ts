@@ -10,7 +10,7 @@ import { encodeOpusWebm, ENCODE_RATE, type AudioApi, type AudioDataLike } from '
 import { VoiceRunner, type EngineHandle } from '../../src/adapter/platform/voice/voice-run';
 import { demuxWebmOpus, muxOpusWebm, opusHead, preSkipOf } from '../../src/features/audio/webm-opus';
 import { VOICE_RATE } from '../../src/features/audio/voice-lab';
-import { concat, mix, realEngine, synthVoice, whiteNoise } from '../helpers/rnnoise-engine';
+import { concat, mix, realEngine, scaleFormants, synthSpeech, synthVoice, VOWELS, whiteNoise } from '../helpers/rnnoise-engine';
 import { rmsOf } from '../../src/features/audio/voice-lab';
 
 /** 偽の AudioEncoder。入力 1 秒 → 50 個の 20ms packet(packet の中身は通し番号)。 */
@@ -221,5 +221,39 @@ describe('声と伴奏を分ける(separate)', () => {
     });
     expect(r).toEqual({ ok: false, reason: 'no-voice' });
     expect(audio.log.opened, '断ったのに符号化した').toBe(0);
+  });
+});
+
+describe('話者を分ける(diarize)', () => {
+  const sec = VOICE_RATE;
+  const engineFactory = async (): Promise<EngineHandle> => {
+    const e = await realEngine();
+    return { process: (f) => e.process(f), destroy: () => e.destroy() };
+  };
+
+  it('🔴 男声と女声が交互の録音から、2 人・交互の区間を返す(符号化はしない)', async () => {
+    const audio = fakeAudio();
+    const gap = new Float32Array(Math.round(1.5 * sec));
+    const pcm = concat(
+      synthSpeech(5, 105, VOWELS, sec, 200, 1),
+      gap,
+      synthSpeech(5, 200, scaleFormants(VOWELS, 1.17), sec, 230, 2),
+      gap,
+      synthSpeech(5, 105, VOWELS, sec, 200, 3),
+    );
+    const r = await new VoiceRunner({ createEngine: engineFactory, audioApi: audio.api }).run({ op: 'diarize', pcm });
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'turns') return;
+    expect(r.speakers).toBe(2);
+    expect(r.turns.map((t) => t.speaker)).toEqual([0, 1, 0]);
+    expect(r.durationMs).toBe(Math.round((pcm.length * 1e3) / sec));
+    expect(audio.log.opened, '話者分離で符号化している').toBe(0);
+  });
+
+  it('声が見つからない音は理由を返す', async () => {
+    const bedOnly = new Float32Array(3 * sec);
+    for (let i = 0; i < bedOnly.length; i += 1) bedOnly[i] = 0.1 * Math.sin((2 * Math.PI * 300 * i) / sec);
+    const r = await new VoiceRunner({ createEngine: engineFactory, audioApi: fakeAudio().api }).run({ op: 'diarize', pcm: bedOnly });
+    expect(r).toEqual({ ok: false, reason: 'no-voice' });
   });
 });

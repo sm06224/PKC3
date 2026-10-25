@@ -82,22 +82,26 @@ export interface TimedLine {
   readonly text: string;
 }
 
-/** 「チャプター 3」などの、文字起こしではない時刻つきの行。 */
-const NOT_TRANSCRIPT = /^(?:チャプター \d+|話者\S*)$/;
+/** 文字起こしではない時刻つきの節(「## チャプター」「## 話者」「## 話者つき文字起こし」)の見出し。 */
+const NOT_TRANSCRIPT_SECTION = /^##\s*(?:チャプター|話者)/;
 
 /**
  * ノートの本文から、時刻つきの文字起こしの行を拾う(文字起こしと同じ読み方 = `ELAPSED_LINE_HEAD` + `parseElapsed`)。
- * 「## 話者」「## チャプター」の行(時刻 + 名前だけ)は文字起こしではないので除く。
+ * 「## チャプター」「## 話者」「## 話者つき文字起こし」の節の中(次の見出しまで)の行は、文字起こしではないので除く
+ * (名前を自由に書き換えられるため、行の字では見分けない ── 節で見分ける)。
  */
 export function transcriptLinesOf(body: string): TimedLine[] {
   const out: TimedLine[] = [];
+  let skipping = false;
   for (const line of body.split('\n')) {
+    if (/^#{1,6} /.test(line)) skipping = NOT_TRANSCRIPT_SECTION.test(line);
+    if (skipping) continue;
     const m = ELAPSED_LINE_HEAD.exec(line.trimEnd());
     if (m === null) continue;
     const ms = parseElapsed(m[1]!);
     if (ms === null) continue;
     const text = line.slice(m[0].length).trim();
-    if (text === '' || NOT_TRANSCRIPT.test(text)) continue;
+    if (text === '') continue;
     out.push({ ms, text });
   }
   return out;
