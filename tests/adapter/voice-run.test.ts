@@ -11,7 +11,7 @@ import { VoiceRunner, type EngineHandle } from '../../src/adapter/platform/voice
 import { demuxWebmOpus, muxOpusWebm, opusHead, preSkipOf } from '../../src/features/audio/webm-opus';
 import { VOICE_RATE } from '../../src/features/audio/voice-lab';
 import { concat, mix, realEngine, scaleFormants, synthSpeech, synthVoice, VOWELS, whiteNoise } from '../helpers/rnnoise-engine';
-import { rmsOf } from '../../src/features/audio/voice-lab';
+import { peakOf, rmsOf } from '../../src/features/audio/voice-lab';
 
 /** 偽の AudioEncoder。入力 1 秒 → 50 個の 20ms packet(packet の中身は通し番号)。 */
 function fakeAudio(over: { preSkip?: number | null; supported?: boolean; failAt?: number } = {}) {
@@ -255,5 +255,44 @@ describe('話者を分ける(diarize)', () => {
     for (let i = 0; i < bedOnly.length; i += 1) bedOnly[i] = 0.1 * Math.sin((2 * Math.PI * 300 * i) / sec);
     const r = await new VoiceRunner({ createEngine: engineFactory, audioApi: fakeAudio().api }).run({ op: 'diarize', pcm: bedOnly });
     expect(r).toEqual({ ok: false, reason: 'no-voice' });
+  });
+});
+
+describe('声の大きさをそろえる(level)', () => {
+  const sec = VOICE_RATE;
+  const engineFactory = async (): Promise<EngineHandle> => {
+    const e = await realEngine();
+    return { process: (f) => e.process(f), destroy: () => e.destroy() };
+  };
+
+  it('🔴 遠い人(小さい)と近い人(大きい)の差が縮まる。長さは変わらない', async () => {
+    const audio = fakeAudio();
+    const far = synthSpeech(5, 105, VOWELS, sec, 200, 1).map((v) => v * 0.15);
+    const near = synthSpeech(5, 200, scaleFormants(VOWELS, 1.17), sec, 230, 2);
+    const gap = new Float32Array(Math.round(1.5 * sec));
+    const pcm = concat(far, gap, near);
+    const farRange = { from: Math.round(0.5 * sec), to: 5 * sec };
+    const nearRange = { from: Math.round(7 * sec), to: 11 * sec };
+    const ratioIn = rmsOf(pcm, nearRange.from, nearRange.to) / rmsOf(pcm, farRange.from, farRange.to);
+    expect(ratioIn, '前提: 入力は 5 倍以上離れている').toBeGreaterThan(5);
+    const r = await new VoiceRunner({ createEngine: engineFactory, audioApi: audio.api }).run({ op: 'level', pcm: Float32Array.from(pcm) });
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'audio') return;
+    expect(r.files.map((f) => f.tag)).toEqual(['声の大きさをそろえた']);
+    const out = Float32Array.from(audio.log.copies.flatMap((c) => Array.from(c)));
+    expect(out.length).toBe(pcm.length);
+    const ratioOut = rmsOf(out, nearRange.from, nearRange.to) / rmsOf(out, farRange.from, farRange.to);
+    expect(ratioOut, '差が縮まっていない').toBeLessThan(2);
+    expect(ratioOut).toBeGreaterThan(0.5);
+    expect(rmsOf(out, farRange.from, farRange.to), '遠い人が持ち上がっていない').toBeGreaterThan(rmsOf(pcm, farRange.from, farRange.to) * 3);
+    expect(peakOf(out), '割れている').toBeLessThanOrEqual(1);
+  });
+
+  it('声が無い音は理由を返す(符号化しない)', async () => {
+    const audio = fakeAudio();
+    const bed = new Float32Array(3 * sec);
+    for (let i = 0; i < bed.length; i += 1) bed[i] = 0.1 * Math.sin((2 * Math.PI * 300 * i) / sec);
+    expect(await new VoiceRunner({ createEngine: engineFactory, audioApi: audio.api }).run({ op: 'level', pcm: bed })).toEqual({ ok: false, reason: 'no-voice' });
+    expect(audio.log.opened).toBe(0);
   });
 });

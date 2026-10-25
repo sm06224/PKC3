@@ -318,3 +318,18 @@ describe('話者を分ける', () => {
     expect(none.dispatcher.getState().error).toContain('話し声が見つかりませんでした');
   });
 });
+
+describe('声の大きさをそろえる', () => {
+  it('🔴 level の依頼を出し、結果は新しい音の添付(名前に「声の大きさをそろえた」)', async () => {
+    const voice = vi.fn(async (job: VoiceJob) => {
+      void job;
+      return { ok: true as const, kind: 'audio' as const, files: [{ tag: '声の大きさをそろえた', bytes: new Uint8Array(4).buffer, durationMs: 1000 }] };
+    });
+    const h = harness({ name: '会議.webm', tools: { voice } });
+    h.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
+    await h.run('balance');
+    expect(voice.mock.calls[0]![0]).toMatchObject({ op: 'level' });
+    expect(h.deps.attach.mock.calls[0]![0].name).toBe('会議 (声の大きさをそろえた).webm');
+    expect(h.notes.at(-1)).toContain('声の大きさをそろえた音を作りました');
+  });
+});

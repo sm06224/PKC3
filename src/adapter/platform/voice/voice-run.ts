@@ -10,14 +10,15 @@
  * 1 回の依頼ごとに `DenoiseState` を作って、終わったらその場で `destroy()` する(状態を持ち越さない)。
  * ⚠ PCM は **transfer で受ける**(ゼロコピー)。結果の bytes も transfer で返す。
  */
-import { hasVoice, residualOf, runEngine, VOICE_RATE, type FrameEngine } from '@features/audio/voice-lab';
+import { hasVoice, levelSegments, residualOf, runEngine, VOICE_RATE, type FrameEngine, type Span } from '@features/audio/voice-lab';
 import { diarize, type SpeakerTurn } from '@features/audio/diarize';
 import { encodeOpusWebm, nativeAudioApi, type AudioApi } from './audio-encode';
 
 export type VoiceJob =
   | { readonly op: 'denoise'; readonly pcm: Float32Array }
   | { readonly op: 'separate'; readonly pcm: Float32Array }
-  | { readonly op: 'diarize'; readonly pcm: Float32Array };
+  | { readonly op: 'diarize'; readonly pcm: Float32Array }
+  | { readonly op: 'level'; readonly pcm: Float32Array };
 
 export interface VoiceFile {
   /** 名前に入れる語(`話し声` など)。 */
@@ -91,6 +92,13 @@ export class VoiceRunner {
           speakers: d.speakers,
           durationMs: Math.round((pcm.length * 1e3) / VOICE_RATE),
         };
+      }
+      if (job.op === 'level') {
+        // 雑音を引いた声を、声の塊(6 秒以内)ごとに目標の大きさへ寄せる。遠い人は持ち上がり、近い人は下がる
+        const d = diarize(clean, vad);
+        if (d.segments.length === 0) return { ok: false, reason: 'no-voice' };
+        const spans: Span[] = d.segments.map((s) => ({ start: s.start, end: s.end }));
+        return await this.encodeFiles(api, [{ tag: '声の大きさをそろえた', pcm: levelSegments(clean, spans, VOICE_RATE) }]);
       }
       // separate:声 = 雑音(声以外)を引いたもの / 声以外 = 元から声を引いた残り(伴奏・環境音)
       if (!hasVoice(vad)) return { ok: false, reason: 'no-voice' };

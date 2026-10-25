@@ -217,5 +217,20 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
     };
   };
 
-  return { 'fold-still': foldStill, chapters, 'contact-sheet': contactSheet, denoise, separate, speakers };
+
+  /**
+   * 声の大きさをそろえる(B5)。雑音を引いたうえで、声の塊ごとに大きさを目標へ寄せる(遠い人は持ち上げ、近い人は下げる)。
+   * 元は残し、結果を新しい音の添付にする。
+   */
+  const balance: ToolRunner = async ({ blob, progress }) => {
+    const d = await decodeForVoice(deps, blob);
+    if ('refused' in d) return { kind: 'refused', text: d.refused };
+    progress('声の大きさをそろえています(ワーカーで処理)…');
+    const r = await deps.voice({ op: 'level', pcm: d.pcm });
+    if (!r.ok) return { kind: 'refused', text: VOICE_REFUSAL[r.reason] };
+    if (r.kind !== 'audio') return { kind: 'refused', text: VOICE_REFUSAL['encode-failed'] };
+    return audioOutput(r, '声の大きさをそろえた音を作りました');
+  };
+
+  return { 'fold-still': foldStill, chapters, 'contact-sheet': contactSheet, denoise, separate, speakers, balance };
 }
