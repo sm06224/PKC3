@@ -1280,6 +1280,22 @@ img[data-pkc-action='view-big']:focus-visible {
   background: var(--accent);
   color: var(--accent-fg);
 }
+/**
+ * 🔴 **押されているボタンは、乗せても濃いまま**(2026-10-25)。
+ *
+ * ⚠ 上の規則(0,2,0)は、帯の「乗せた / 焦点」の規則 ──
+ *   `[data-pkc-field='detail-toolbar'] button:hover:not(:disabled)`(0,3,1)・
+ *   `[data-pkc-field='schedule-toolbar'] button:hover:not(:disabled)` など ── より**詳細度が低い**ので、
+ *   押した直後のマウスが乗っている間は**押されている色が薄い地に戻っていた**
+ *   (メッセージの「注意」を押した直後に `rgb(220, 235, 226)` のまま。マウスが乗る前後の競合で smoke が揺れた)。
+ *   user から見ると「押したのに、どれが選ばれているか分からなくなる」。
+ * 🔑 属性を重ねて詳細度を上げる(`:where` の逆)── 乗せた規則(0,3,1)に勝つ最小の形。
+ */
+button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
 [data-pkc-field='kind-clear'] {
   margin-inline-start: auto;
 }
