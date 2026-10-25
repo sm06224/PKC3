@@ -83,6 +83,7 @@ const UNRESOLVED: readonly string[] = [
   // #1038 A1 選んだノートの書き出し ── 「書き出す ▾」(open-selection-export)の項目として動的に組む(binder が MenuItem で焼く)
   'export-selection-archive',
   'export-selection-html',
+  'export-selection-portable',
   'install-asr-part',
   'remove-asr-part',
   'choose-office-pack',

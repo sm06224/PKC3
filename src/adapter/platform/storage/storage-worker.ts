@@ -3380,6 +3380,77 @@ function withMessagesRemoved<T>(make: () => T): T {
 }
 
 /**
+ * 🔴 **選んだノートだけの DB 画像を作る**(#1038 A2)。
+ *
+ * 🔑 本体の DB は**読むだけ**(書かない・消さない)。新しい `:memory:` の DB に `applySchema` を当て、
+ *   SQL の `INSERT … SELECT` の代わりに 1 行ずつ `step` → 束縛で写す(本文を worker の配列に貯めない)。
+ *   写す物: コレクションの行 / `lids` のノート / 両端が `lids` に居るつながり / `assetKeys` の添付の目録。
+ *   ⚠ 写さない物: 履歴・ゴミ箱(`revisions`)/ メッセージと処理の記録 / 設定(受け手の既定から始まる)。
+ * 🔑 作った DB は画像にしたらすぐ閉じる(生成物の即破棄)。
+ */
+function subsetImage(only: { cid: string; lids: string[]; assetKeys: string[] }): Uint8Array {
+  const api = sqliteApi;
+  if (api === null) throw new Error('sqlite が初期化されていません');
+  const src = need();
+  const oo1 = (api as unknown as { oo1: { DB: new (name: string) => Database } }).oo1;
+  const dst = new oo1.DB(':memory:');
+  try {
+    applySchema(dst);
+    const lids = JSON.stringify(only.lids);
+    const keys = JSON.stringify(only.assetKeys);
+    const copy = (table: string, where: string, bind: unknown[]): number => {
+      const cols = (
+        dst.selectObjects(`SELECT name FROM pragma_table_info('${table}') ORDER BY cid`) as Array<{ name: string }>
+      ).map((c) => `"${c.name}"`);
+      const ins = dst.prepare(
+        `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
+      );
+      const sel = src.prepare(`SELECT ${cols.join(', ')} FROM ${table} WHERE ${where}`);
+      let n = 0;
+      try {
+        sel.bind(bind as never);
+        while (sel.step()) {
+          ins.bind(sel.get([]) as never);
+          ins.step();
+          ins.reset(true);
+          n += 1;
+        }
+      } finally {
+        sel.finalize();
+        ins.finalize();
+      }
+      return n;
+    };
+    dst.exec('BEGIN IMMEDIATE');
+    try {
+      copy('containers', 'cid = ?', [only.cid]);
+      copy(
+        'entries',
+        'cid = ? AND lid IN (SELECT value FROM json_each(?))',
+        [only.cid, lids],
+      );
+      copy(
+        'relations',
+        'cid = ? AND from_lid IN (SELECT value FROM json_each(?)) AND to_lid IN (SELECT value FROM json_each(?))',
+        [only.cid, lids, lids],
+      );
+      copy('assets', 'cid = ? AND key IN (SELECT value FROM json_each(?))', [only.cid, keys]);
+      dst.exec('COMMIT');
+    } catch (e) {
+      dst.exec('ROLLBACK');
+      throw e;
+    }
+    return runImageExport((a, ptr) => exportDbImage(a, ptr), dst);
+  } finally {
+    try {
+      dst.close();
+    } catch {
+      // ⚠ 閉じられなくても、参照は手放す
+    }
+  }
+}
+
+/**
  * 🔴 **DB 画像を作る処理の外側**(#971 段④の残り / #1416)── `exportImage` が通る **1 か所**(確保の失敗を言い直す作法)。
  *
  * ⚠ ここは **DB を丸ごと**配列にするので、wasm(32bit)では数 GB を確保できない ──
@@ -3389,10 +3460,11 @@ function withMessagesRemoved<T>(make: () => T): T {
  */
 function runImageExport<T>(
   make: (api: Parameters<typeof exportDbImage>[0], pointer: unknown) => T,
+  target?: Database,
 ): T {
   const api = sqliteApi;
   if (api === null) throw new Error('sqlite が初期化されていません');
-  const database = need();
+  const database = target ?? need();
   let size: number | null = null;
   try {
     const pages = database.selectValue('PRAGMA page_count') as number | undefined;
@@ -3532,7 +3604,9 @@ const handlers: Handlers = {
      *   画像の複製を作らせず、wasm heap から直に写す(wasm heap は一度広がると縮まない)。
      */
     image:
-      req.withoutMessages === true
+      req.only !== undefined
+        ? subsetImage(req.only)
+        : req.withoutMessages === true
         ? withMessagesRemoved(() => runImageExport((api, ptr) => exportDbImage(api, ptr)))
         : runImageExport((api, ptr) => exportDbImage(api, ptr)),
   }),

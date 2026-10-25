@@ -66,6 +66,11 @@ export function sandboxResizeScript(iframeId: string): string {
     'function post(){' +
     'var h=Math.min(' + HTML_SANDBOX_MAX_HEIGHT + ',Math.max(' +
     'document.documentElement.scrollHeight,document.body.scrollHeight));' +
+    // 🔴 計測が 0 のときは申告しない(#529 の取り残し)。箱は余白(body の padding)があるので、中身が空でも 0 にはならない ──
+    //   0 は「まだ配置されていない / 一瞬隠れている」の計測で、申告すると周りの枠が 332 → 40 → 332px と縮んだ
+    //   (実測: 作り直された箱の約 20ms 後に `readyState=complete`・`innerHeight=0`・`scrollHeight=0` で 14〜30 回に 1 回)。
+    //   作り直された箱は前の高さで始まる(`restoreSandboxHeights`)ので、0 を飲めばその高さのまま本当の計測を待てる
+    'if(h<=0)return;' +
     "try{window.parent.postMessage({type:'" + HTML_SANDBOX_RESIZE_MSG_TYPE +
     "',id:id,height:h},'*');}catch(e){}}" +
     'if(window.ResizeObserver){' +

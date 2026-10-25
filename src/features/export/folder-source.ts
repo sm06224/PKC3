@@ -45,7 +45,10 @@ export interface FolderSourceResult {
 }
 
 /** 本文 1 件を引く。⚠ `getBody` が無い相手(test の fake)では走査で当てる。 */
-async function readBody(base: ArchiveSource, lid: string): Promise<string | null> {
+export async function readBody(
+  base: Pick<ArchiveSource, 'getBody' | 'listBodies'>,
+  lid: string,
+): Promise<string | null> {
   const direct = await base.getBody?.(lid);
   if (direct !== undefined && direct !== null) return direct;
   let after: { entryOrder: number; lid: string } | undefined;

@@ -24,6 +24,7 @@ import { safeName } from '@features/export/file-name';
 import { dayStamp } from '@features/datetime/date-math';
 import { writePortableBundle } from '@features/export/portable-bundle';
 import type { PortableBundle } from '@features/portable/bundle';
+import { EmptyClosureError, type PortableClosure } from '@features/export/portable-closure';
 
 /**
  * 🔴 **PKC3 入り HTML の中からは書き出せない理由**(台帳 #1852 束 L2。依頼 84-4 B)。
@@ -41,7 +42,10 @@ export interface PortableExportDeps {
    * ⚠ **同じ origin から取る** ── `file://` では取れないので、呼び側が先に断る。
    */
   fetchTemplate(): Promise<string>;
-  exportImage(): Promise<Uint8Array>;
+  /** `only` を渡すと、その lid のノートと添付だけの画像にする(#1038 A2。本体の DB は変えない)。 */
+  exportImage(only?: { lids: string[]; assetKeys: string[] }): Promise<Uint8Array>;
+  /** 🔴 選んだ N 件の閉包(参照先・添付・祖先フォルダ)を決める。`selection` を渡す呼び出しだけが使う。 */
+  closure?(selection: readonly string[]): Promise<PortableClosure>;
   listAssets(): Promise<ReadonlyArray<{ key: string; mime: string }>>;
   getAsset(key: string): Promise<Blob | null>;
   download(name: string, blob: Blob): void;
@@ -99,6 +103,8 @@ const stamp = (d: Date): string => dayStamp(d, '');
 export async function exportPortable(
   dispatcher: Dispatcher,
   deps: PortableExportDeps,
+  /** 🔑 渡すと「選んだ N 件」だけの PKC3 入り HTML にする(#1038 A2)。省略 = 全件。 */
+  selection?: readonly string[],
 ): Promise<number | null> {
   // 🔴 進行中の字を失敗のときに消す(#1017 C5)── 出す前の断りは消さない(別の知らせを巻き込まない)
   let progressShown = false;
@@ -123,11 +129,26 @@ export async function exportPortable(
   try {
     // 🔴 直前の保存が disk に着いてから読む
     await deps.settle();
-    const image = await deps.exportImage();
+    let closure: PortableClosure | null = null;
+    if (selection !== undefined) {
+      if (deps.closure === undefined) return fail('書き出しに失敗しました: 選んだノートの範囲を決められません');
+      try {
+        closure = await deps.closure(selection);
+      } catch (e) {
+        if (e instanceof EmptyClosureError) return fail('書き出すノートが見つかりません');
+        throw e;
+      }
+    }
+    const image = await deps.exportImage(
+      closure === null ? undefined : { lids: closure.lids, assetKeys: closure.assetKeys },
+    );
     if (image.byteLength === 0) return fail('中身がまだ空です(書き出すものがありません)');
 
     const template = await deps.fetchTemplate();
-    const metas = await deps.listAssets();
+    const allMetas = await deps.listAssets();
+    // 🔑 選んだ分のときは、閉包の添付だけを焼く(画像の目録と焼く bytes を揃える)
+    const keep = closure === null ? null : new Set(closure.assetKeys);
+    const metas = keep === null ? allMetas : allMetas.filter((m) => keep.has(m.key));
     const bundle: PortableBundle = {
       id: (deps.mintId ?? defaultMintId)(),
       exportedAt: (deps.now?.() ?? new Date()).getTime(),
@@ -154,17 +175,22 @@ export async function exportPortable(
 
     const out = await writePortableBundle({ template, bundle, image, assets: assets() });
     const now = deps.now?.() ?? new Date();
-    deps.download(`${safeName(deps.title)}-${stamp(now)}.pkc3.html`, out.blob);
+    deps.download(`${safeName(closure?.title ?? deps.title)}-${stamp(now)}.pkc3.html`, out.blob);
 
     const missing =
       missingCount > 0
         ? [`添付 ${missingCount} 件の中身が見つからず、PKC3 入り HTML には入れられませんでした`]
         : [];
-    const notes = [...missing, ...out.warnings];
+    const notes = [...(closure?.warnings ?? []), ...missing, ...out.warnings];
     if (notes.length > 0) deps.report(notes);
     progressShown = false; // ⚠ 次の「書き出しました」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)
     deps.notify(
-      `PKC3 入り HTML を書き出しました(添付 ${out.assets} 件` +
+      `PKC3 入り HTML を書き出しました(` +
+        // 🔑 選んだ分のときは、入れた範囲を言う(選んでいない参照先・祖先フォルダが混ざるため)
+        (closure === null
+          ? ''
+          : `選んだ ${closure.selected} 件 + 参照先 ${closure.referenced} 件 + 祖先フォルダ ${closure.ancestors} 件 / `) +
+        `添付 ${out.assets} 件` +
         (notes.length > 0 ? ` / 注意 ${notes.length} 件` : '') +
         ')',
     );
