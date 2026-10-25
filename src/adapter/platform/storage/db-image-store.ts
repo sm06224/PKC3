@@ -29,6 +29,11 @@ const KEY = 'db';
 /** 器に置く記録。⚠ **bytes と目録を同じ record に置く**(別々に書くと片方だけ残る)。 */
 export interface StoredImage extends StoredImageMeta {
   readonly image: Uint8Array;
+  /**
+   * この画像に入っている日誌の番号(`portable-journal.ts`)。⚠ 無い記録(旧ビルドが書いた / 日誌の前)は
+   * `savedAt` で代える。旧ビルドはこの欄を無視して読む。
+   */
+  readonly snapshotSeq?: number;
 }
 
 interface RawRecord {
@@ -36,6 +41,7 @@ interface RawRecord {
   exportedAt?: unknown;
   savedAt?: unknown;
   image?: unknown;
+  snapshotSeq?: unknown;
 }
 
 function openDb(name: string): Promise<IDBDatabase> {
@@ -104,6 +110,9 @@ export function decodeStoredImage(raw: unknown): StoredImage | null {
     savedAt: r.savedAt as number,
     bytes: image.byteLength,
     image,
+    ...(typeof r.snapshotSeq === 'number' && Number.isFinite(r.snapshotSeq)
+      ? { snapshotSeq: r.snapshotSeq }
+      : {}),
   };
 }
 
@@ -174,6 +183,7 @@ export class DbImageStore {
     exportedAt: number;
     savedAt: number;
     image: Uint8Array;
+    snapshotSeq?: number;
   }): Promise<void> {
     assertWritableImage(rec.image);
     await tx(await this.need(), 'readwrite', (s) => {

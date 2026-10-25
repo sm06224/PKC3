@@ -24,7 +24,14 @@ import {
   type PortableBundle,
 } from '@features/portable/bundle';
 import { humanBytes } from '@features/human-bytes';
-import { DbImageStore } from './storage/db-image-store';
+import { DbImageStore, type StoredImage } from './storage/db-image-store';
+import {
+  baseSeqOf,
+  entriesAfter,
+  idbJournalBackend,
+  type JournalBackend,
+  type JournalEntry,
+} from './storage/portable-journal';
 
 export const BUNDLE_SELECTOR = 'script[data-pkc-bundle]';
 export const IMAGE_SELECTOR = 'script[data-pkc-db-image]';
@@ -117,6 +124,28 @@ export function takeEmbeddedImage(doc: Document): EmbeddedTake {
   }
 }
 
+/** 日誌から「画像のあとに流し直す分」を選ぶ。⚠ 読めなくても投げない(画像だけで開く)。 */
+async function readReplay(
+  journal: JournalBackend,
+  args: { use: ImageChoice['use']; stored: StoredImage | null; exportedAt: number; neverSaved: boolean },
+): Promise<{ replay: JournalEntry[]; seqFloor: number; failure: string | null }> {
+  const base = baseSeqOf({
+    use: args.use,
+    snapshotSeq: args.stored?.snapshotSeq,
+    savedAt: args.stored?.savedAt,
+    exportedAt: args.exportedAt,
+    neverSaved: args.neverSaved,
+  });
+  const imageSeq = args.stored?.snapshotSeq ?? 0;
+  try {
+    const all = await journal.readAll();
+    const seqFloor = Math.max(imageSeq, base ?? 0, ...all.map((e) => e.seq));
+    return { replay: base === null ? [] : entriesAfter(all, base), seqFloor, failure: null };
+  } catch (e) {
+    return { replay: [], seqFloor: Math.max(imageSeq, base ?? 0), failure: errorText(e) };
+  }
+}
+
 /**
  * 🔴 **読み戻せなかった理由を `why` に足す**(#996)。⚠ 判定(`chooseImage`)そのものは変えない。
  * 🔑 `fresh` のときは「空で開く」ことが、`stored` のときは「配りものは読めなかったが、この端末の
@@ -143,6 +172,17 @@ export interface PortableStart {
   /** 焼き込みを読み戻せなかった理由(`choice.why` にも入っている)。⚠ 画面へ出す合図に使う。 */
   readonly embeddedFailure: string | null;
   readonly store: DbImageStore;
+  /**
+   * 🔴 **画像のあとに流し直す書込 op**(#1589 の根治 ── `storage/portable-journal.ts`)。
+   * 画像に入っていない分だけ、番号順。⚠ 空から始めた回は常に空。
+   */
+  readonly replay: ReadonlyArray<JournalEntry>;
+  /** 日誌の番号の下限(画像の番号と日誌の最大の番号)。⚠ 時計が戻っても番号を増やし続けるため。 */
+  readonly seqFloor: number;
+  /** 器に 1 度も画像が書かれていない回(昇格時の読み直しで、まだ書かれていなければ同じ土台で流す)。 */
+  readonly neverSaved: boolean;
+  /** 日誌の器。⚠ 起動後の追記・整理もこれを使う。 */
+  readonly journal: JournalBackend;
 }
 
 /**
@@ -155,6 +195,7 @@ export interface PortableStart {
 export async function resolvePortableStart(
   doc: Document,
   make: (id: string) => DbImageStore = (id) => new DbImageStore(id),
+  makeJournal: (dbName: string) => JournalBackend = idbJournalBackend,
 ): Promise<PortableStart | null> {
   const bundle = readBundle(doc);
   if (bundle === null) return null;
@@ -190,12 +231,38 @@ export async function resolvePortableStart(
           embeddedBytes: embedded?.byteLength ?? 0,
         });
 
-  const choice = withEmbeddedFailure(picked, embeddedFailure);
+  const choice0 = withEmbeddedFailure(picked, embeddedFailure);
 
   const image =
-    choice.use === 'stored' ? (stored?.image ?? null) : choice.use === 'embedded' ? embedded : null;
+    choice0.use === 'stored' ? (stored?.image ?? null) : choice0.use === 'embedded' ? embedded : null;
 
-  return { bundle, dbName: bundleSqliteName(bundle.id), image, choice, embeddedFailure, store };
+  // 器に 1 度も画像が書かれていない(読めなかったのではない)── 空の DB から始めた回の日誌は、空を土台に流してよい
+  const neverSaved = stored === null && readError === null;
+  const journal = makeJournal(bundleSqliteName(bundle.id));
+  const { replay, seqFloor, failure: journalFailure } = await readReplay(journal, {
+    use: choice0.use,
+    stored,
+    exportedAt: bundle.exportedAt,
+    neverSaved,
+  });
+  // 日誌を読めなかったことは黙らない(画像だけで開く)
+  const choice: ImageChoice =
+    journalFailure === null
+      ? choice0
+      : { use: choice0.use, why: `${choice0.why}(直前の変更の控えを読めませんでした: ${journalFailure})` };
+
+  return {
+    bundle,
+    dbName: bundleSqliteName(bundle.id),
+    image,
+    choice,
+    embeddedFailure,
+    store,
+    replay,
+    seqFloor,
+    neverSaved,
+    journal,
+  };
 }
 
 /**
@@ -209,14 +276,38 @@ export async function resolvePortableStart(
  * ⚠ 読めなかったら**起動の画像へ戻す**(投げない ── 昇格を止めると、いまのノートが保存できなくなる)。
  */
 export async function latestPortableImage(
-  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store'>,
+  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store'> & { neverSaved?: boolean },
 ): Promise<Uint8Array | null> {
+  return (await latestPick({ neverSaved: false, ...portable })).image;
+}
+
+/**
+ * 🔴 **昇格・待ち明けで開く「画像 + その後に流し直す日誌」**。⚠ 画像だけ読み直して日誌を起動時のままにすると、
+ *   先のタブが足した分が抜け、起動時の日誌を新しい画像へ流して**二重になる** ── 必ず組で読む。
+ */
+export async function latestPortableStart(
+  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store' | 'journal' | 'replay' | 'seqFloor' | 'neverSaved'>,
+): Promise<{ image: Uint8Array | null; replay: ReadonlyArray<JournalEntry>; seqFloor: number }> {
+  const pick = await latestPick(portable);
+  const { replay, seqFloor } = await readReplay(portable.journal, {
+    use: pick.use,
+    stored: pick.stored,
+    exportedAt: portable.bundle.exportedAt,
+    neverSaved: pick.neverSaved,
+  });
+  return { image: pick.image, replay, seqFloor: Math.max(seqFloor, portable.seqFloor) };
+}
+
+async function latestPick(
+  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store' | 'neverSaved'>,
+): Promise<{ image: Uint8Array | null; use: ImageChoice['use']; stored: StoredImage | null; neverSaved: boolean }> {
+  const boot = { image: portable.image, use: portable.choice.use, stored: null, neverSaved: portable.neverSaved };
   try {
     const stored = await portable.store.read();
-    if (stored === null || stored.bundleId !== portable.bundle.id || stored.bytes <= 0) return portable.image;
-    if (portable.choice.use === 'embedded' && stored.savedAt < portable.bundle.exportedAt) return portable.image;
-    return stored.image;
+    if (stored === null || stored.bundleId !== portable.bundle.id || stored.bytes <= 0) return boot;
+    if (portable.choice.use === 'embedded' && stored.savedAt < portable.bundle.exportedAt) return boot;
+    return { image: stored.image, use: 'stored', stored, neverSaved: false };
   } catch {
-    return portable.image;
+    return boot;
   }
 }

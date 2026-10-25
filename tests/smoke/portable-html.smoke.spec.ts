@@ -187,6 +187,40 @@ test('🔴 `file://` で作ったノートが再読込で残る (#400 段③)', 
 });
 
 /**
+ * 🔴 **足した直後に閉じても、次に開くと戻る**(#1589 の根治 ── 変更分の日誌)。
+ *
+ * 画像の保存は「1.2 秒待つ → 書き出す → 器へ書く」で、**その前に閉じると以前は直前の分が消えた**。
+ * ⚠ 待たずに閉じる(150ms ── 画像の保存が始まる 1.2 秒より十分手前)。閉じる合図(`visibilitychange`)も送らず、
+ *   ページをそのまま閉じる ── 日誌が先に書かれていなければ、次の起動で空になる。
+ */
+test('🔴 `file://` で足した直後(画像の保存の前)に閉じても、開き直すと戻る (#1589)', async ({ context }) => {
+  const open = async () => {
+    const p = await context.newPage();
+    await p.setViewportSize({ width: 1440, height: 900 });
+    await p.goto(pathToFileURL(HTML).href);
+    await expect(p.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+    return p;
+  };
+  const rowsOf = (p: Awaited<ReturnType<typeof open>>) =>
+    p.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
+  const first = await open();
+  await expect(rowsOf(first), '最初から 1 件ある(前の走りの器が残っている)').toHaveCount(0);
+  await createEntry(first, 'text');
+  await first.locator('[data-pkc-field="editor-title"]').fill('日誌で戻るノート');
+  await clickReal(first, '[data-pkc-action="commit-edit"]');
+  await expect(rowsOf(first)).toHaveCount(1, { timeout: 10_000 });
+  // 画像の保存(1.2 秒)より手前で閉じる。⚠ 確認(離れますか)は出さずに閉じる = 離れる選択をした形
+  await first.waitForTimeout(150);
+  await first.close();
+
+  const second = await open();
+  await expect(rowsOf(second), '🔴 足した直後に閉じたら消えた(日誌が効いていない)').toHaveCount(1, {
+    timeout: 15_000,
+  });
+  await expect(second.locator('[data-pkc-region="filer-table"]')).toContainText('日誌で戻るノート');
+});
+
+/**
  * 🔴 **別のバンドルは互いを上書きしない**(#400 段③ の正しさの要件)。
  *
  * > ⚠ **`file://` では origin が全部 `file://` に潰れる**(2026-08-25 実測)──

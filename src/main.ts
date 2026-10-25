@@ -176,11 +176,17 @@ import {
   sqlLocalFileSize,
 } from '@adapter/state/sql-local-file';
 import { bundleChannelName, bundleLockName } from '@features/portable/bundle';
-import { latestPortableImage, readBundle, resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
+import { latestPortableStart, readBundle, resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
+import {
+  remapCid,
+  replayEntries,
+  type PortableJournal,
+  type ReplayResult,
+} from '@adapter/platform/storage/portable-journal';
+import { connectPortableWiring } from '@adapter/platform/storage/portable-wiring';
 import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
 import { exportPortable, fetchPortableTemplate } from '@adapter/ui/actions/export-portable';
 import {
-  connectPortablePersist,
   persistStatusText,
   type PortablePersist,
 } from '@adapter/platform/storage/portable-persist';
@@ -587,6 +593,10 @@ async function initStorage(
 ): Promise<{
   client: StoreClient;
   init: InitResult;
+  /** 日誌を流し直した件数(0 件 / 素の PKC3 は `null`)。⚠ 流し直したぶんは画像へ畳み直す(`armPersist`)。 */
+  replayed: ReplayResult | null;
+  /** 日誌の番号の下限(`PortableStart.seqFloor`)。 */
+  seqFloor: number;
 }> {
   /**
    * 🔴 **可搬単一 HTML は OPFS を試さない**(#400 段③)。
@@ -623,7 +633,21 @@ async function initStorage(
       );
     },
   });
-  return { client, init };
+  /**
+   * 🔴 **画像のあとに、画像へ入っていない書込を流し直す**(#1589 の根治)。
+   * ⚠ 失敗しても起動は止めない(画像だけで開く)── 数えて `console.error` に残す。
+   */
+  let replayed: ReplayResult | null = null;
+  if (portable !== null && portable.replay.length > 0) {
+    // 🔑 入れ物の id を先に決める(まだ画像に無い回は、ここで採番される)── 日誌の `cid` をそれに読み替える
+    const { cid: dbCid } = await client.request({ op: 'resolveContainer', title: CONTAINER_TITLE });
+    replayed = await replayEntries(portable.replay, (r) =>
+      client.request(remapCid(r, dbCid) as Parameters<StoreClient['request']>[0]),
+    );
+    if (replayed.failed > 0)
+      console.error(`pkc3: 直前の変更の控えのうち ${replayed.failed} 件を流し直せませんでした`, replayed.firstError);
+  }
+  return { client, init, replayed, seqFloor: portable?.seqFloor ?? 0 };
 }
 
 /**
@@ -631,7 +655,7 @@ async function initStorage(
  * 素の PKC3(`null`)はそのまま。
  */
 async function latestPortable(portable: PortableStart | null): Promise<PortableStart | null> {
-  return portable === null ? null : { ...portable, image: await latestPortableImage(portable) };
+  return portable === null ? null : { ...portable, ...(await latestPortableStart(portable)) };
 }
 
 /**
@@ -992,12 +1016,24 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const unloadGuard = createUnloadGuard(window);
   /** ⚠ `paint` はずっと後で組まれるので、繋がるまでは何もしない口にしておく。 */
   let repaintStatus: () => void = () => undefined;
-  const armPersist = (real: StoreClient): void => {
+  const armPersist = (storage: {
+    client: StoreClient;
+    replayed: ReplayResult | null;
+    seqFloor: number;
+  }): void => {
+    const real = storage.client;
     if (portable === null || persist !== null) return;
-    persist = connectPortablePersist({
+    /**
+     * 🔴 **画像の保存 + 変更分の日誌**(#1589 の根治)。⚠ 繋ぎ方(番号を控える順・捨てる条件・再生後の畳み直し)は
+     *   `portable-wiring.ts` が持つ ── この file はどの test からも実行されない(CLAUDE.md §2)。ここは**繋ぐだけ**。
+     */
+    const wiring = connectPortableWiring({
+      backend: portable.journal,
       exportImage: async () => (await real.request({ op: 'exportImage' })).image,
-      write: ({ savedAt, image }) =>
-        portable.store.write({ exportedAt: portable.bundle.exportedAt, savedAt, image }),
+      writeImage: ({ savedAt, image, snapshotSeq }) =>
+        portable.store.write({ exportedAt: portable.bundle.exportedAt, savedAt, image, snapshotSeq }),
+      replayed: storage.replayed,
+      seqFloor: storage.seqFloor,
       onState: (st) => {
         persistState = persistStatusText(st);
         repaintStatus();
@@ -1008,7 +1044,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        *   ⚠ 保存領域への書込(`onWriting`)とは別の持ち主 ── `'portable'` の名前で数える。
        */
       onUnsaved: (unsaved) => unloadGuard.setWriting(unsaved, 'portable'),
+      onJournalError: (why) => console.error('pkc3: 変更の控えを書けませんでした', why),
+      // 🔴 再生の失敗は黙らない ── メッセージ集積地へ(集積地は後で組まれるので、組まれた後に出す)
+      onReplayProblem: (text) => {
+        replayProblem = text;
+      },
     });
+    persist = wiring.persist;
+    portableJournal = wiring.journal;
     /** 🔑 「離れますか」を出す瞬間から流し始める(user が留まれば、その分だけ早く着く)。 */
     unloadGuard.onLeave(() => void persist?.flush().catch(() => undefined));
     /**
@@ -1022,6 +1065,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     });
     window.addEventListener('pagehide', flush);
   };
+  /** 再生に失敗した op の知らせ(`armPersist` が置き、メッセージ集積地が組まれた後に出す)。 */
+  let replayProblem: string | null = null;
+  /** 🔴 日誌(`armPersist` が組む)。⚠ 組まれるまで・素の PKC3 では何もしない。 */
+  let portableJournal: PortableJournal | null = null;
   /**
    * 🔴 **索引の片づけの係**(#999 段③)。⚠ 組むのは effect 層ができた後(`storeEffects` の下)── ここは
    *   **書込の通知を渡す口だけ**を先に置く(host は何度か作られる: 起動 / 待機からの昇格)。
@@ -1029,6 +1076,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   let autoOptimizer: AutoOptimizer | null = null;
   const persistHook = {
+    journal: {
+      begin: (req: unknown): { commit(): void; abort(): void } =>
+        portableJournal?.begin(req) ?? { commit: (): void => undefined, abort: (): void => undefined },
+    },
     onMutation: (): void => {
       persist?.touch();
       autoOptimizer?.noteWrite();
@@ -1063,7 +1114,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   if (immediateHeld) {
     writerHolder = true;
     const real = await initStorage(portable);
-    armPersist(real.client);
+    armPersist(real);
     const host = new StoreProxyHost({ client: real.client, init: real.init, ...proxyDeps, ...persistHook });
     client = host.localClient();
     init = real.init;
@@ -1110,7 +1161,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         await heldP;
         // 🔴 待った間に先のタブが書いた分を落とさない ── 起動の画像ではなく器の最新から開く(T1)
         const real = await initStorage(await latestPortable(portable));
-        armPersist(real.client);
+        armPersist(real);
         const host = new StoreProxyHost({ client: real.client, init: real.init, ...proxyDeps, ...persistHook });
         client = host.localClient();
         init = real.init;
@@ -1147,7 +1198,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
               }
               liveVfs = r.init.vfs;
               // ⚠ 昇格でも arm する(忘れると、続きを書いたぶんが丸ごと保存されない)
-              armPersist(r.client);
+              armPersist(r);
               const host = new StoreProxyHost({
                 client: r.client,
                 init: r.init,
@@ -1632,6 +1683,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     if (portable.embeddedFailure !== null) {
       portableAssetNote = `⚠ ${portable.choice.why}`;
       appMessagePost.post({ kind: 'problem', source: 'portable-boot', text: portable.choice.why });
+    }
+    if (replayProblem !== null) {
+      portableAssetNote = [portableAssetNote, `⚠ ${replayProblem}`].filter((t) => t !== '').join(' — ');
+      appMessagePost.post({ kind: 'problem', source: 'portable-journal', text: replayProblem });
     }
     const r = await restoreEmbeddedAssets(document, cid, blobs);
     if (r.failed > 0)

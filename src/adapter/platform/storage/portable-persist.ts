@@ -43,6 +43,11 @@ export interface PortablePersistDeps {
    *   (1.2 秒の待ちも、画像を書き出している最中も、器には着いていない)。
    */
   onUnsaved?: (unsaved: boolean) => void;
+  /**
+   * 🔴 **画像の保存の外で「まだ着いていない」もの**(日誌に控え中の書込 op など)が在るか。
+   * 真の間は `unsaved()` も真。⚠ 変わったら `recheck()` を呼ぶ。
+   */
+  busy?: () => boolean;
   now?: () => number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (h: unknown) => void;
@@ -58,6 +63,8 @@ export interface PortablePersist {
    * ⚠ 「溜まっている」だけを見ると、画像を書き出している最中に閉じたとき確認が消える。
    */
   unsaved(): boolean;
+  /** `busy` が変わったとき、離れる確認の判定を取り直す。 */
+  recheck(): void;
   /** いまの見え方(test の観測点 ── `onState` を数えるだけだと順番が見えない)。 */
   state(): PersistState;
   dispose(): void;
@@ -104,7 +111,7 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
   let state: PersistState = { kind: 'idle' };
   let lastUnsaved = false;
 
-  const isUnsaved = (): boolean => dirty || running !== null;
+  const isUnsaved = (): boolean => dirty || running !== null || (deps.busy?.() ?? false);
   /** ⚠ 変わったときだけ知らせる(打鍵ごとに離れる確認の登録・解除を叩かない)。 */
   const notifyUnsaved = (): void => {
     const now_ = isUnsaved();
@@ -223,6 +230,7 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
     },
     flush,
     unsaved: isUnsaved,
+    recheck: notifyUnsaved,
     state: () => state,
     dispose(): void {
       disposed = true;

@@ -322,6 +322,12 @@ export interface StoreProxyHostDeps extends CommonDeps {
    * ⚠ 「mutation か」の判定を呼び側にもう 1 つ作らない(CLAUDE.md §7)。
    */
   readonly onMutation?: () => void;
+  /**
+   * 🔴 **書込 op を日誌へ足す**(#1589 の根治。`portable-journal.ts`)。op を worker へ出す**直前**に `begin`、
+   * **成功したら** `commit()`、**失敗したら** `abort()`(飛行中の op を日誌が数えるので、どちらかを必ず呼ぶ)。⚠ 番号は出す瞬間に振る(完了の瞬間では画像との前後が合わない)。
+   * 🔑 自タブの書込も follower の書込も `runMutating` の 1 か所を通る。
+   */
+  readonly journal?: { begin(req: StorageRequest): { commit(): void; abort(): void } };
 }
 
 /**
@@ -339,6 +345,7 @@ export class StoreProxyHost implements TabSync {
   private readonly locks = new Map<string, { tab: string; seenAt: number }>();
   private readonly changedListeners = new Set<(cid: string, lids: string[] | null) => void>();
   private readonly onMutation: (() => void) | null;
+  private readonly journal: { begin(req: StorageRequest): { commit(): void; abort(): void } } | null;
   private closed = false;
   /** いま走らせている重い保守(依頼 359)。新しく来たタブにも教える。 */
   private busy: HolderBusy | null = null;
@@ -349,6 +356,7 @@ export class StoreProxyHost implements TabSync {
     this.id = deps.tabId ?? makeTabId();
     this.now = deps.now ?? ((): number => Date.now());
     this.onMutation = deps.onMutation ?? null;
+    this.journal = deps.journal ?? null;
     for (const l of deps.heldLocks ?? [])
       this.locks.set(lockKey(l.cid, l.lid), { tab: this.id, seenAt: this.now() });
     this.ch = openChannel(deps);
@@ -370,7 +378,7 @@ export class StoreProxyHost implements TabSync {
       request: async <Op extends StorageRequest['op']>(
         req: RequestFor<Op>,
       ): Promise<ResultMap[Op]> => {
-        const result = await this.runReal(req);
+        const result = await this.runMutating(req);
         if (MUTATING_OPS.has(req.op)) this.afterMutation(this.id, req);
         return result;
       },
@@ -378,6 +386,19 @@ export class StoreProxyHost implements TabSync {
         this.real.terminate();
       },
     };
+  }
+
+  /** 書込 op なら日誌に控えながら `runReal` を呼ぶ。⚠ 日誌の番号は worker へ出す直前に振る。 */
+  private async runMutating<Op extends StorageRequest['op']>(req: RequestFor<Op>): Promise<ResultMap[Op]> {
+    const ticket = this.journal && MUTATING_OPS.has(req.op) ? this.journal.begin(req) : null;
+    try {
+      const result = await this.runReal(req);
+      ticket?.commit();
+      return result;
+    } catch (e) {
+      ticket?.abort();
+      throw e;
+    }
   }
 
   /**
@@ -501,7 +522,7 @@ export class StoreProxyHost implements TabSync {
           return;
         }
         try {
-          const result = await this.runReal(req as RequestFor<StorageRequest['op']>);
+          const result = await this.runMutating(req as RequestFor<StorageRequest['op']>);
           this.ch.postMessage({ kind: 'res', to: from, id, ok: true, result } satisfies ProxyWire);
           if (MUTATING_OPS.has(req.op)) {
             this.afterMutation(from, req);

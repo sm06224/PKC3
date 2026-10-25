@@ -1404,6 +1404,7 @@ describe('§9「困ったとき」の引用が画面の字と一致する(#697)'
      */
     // (#1589)「この端末に保存できませんでした」は `main.ts` から `portable-persist.ts` の
     //   `persistStatusText` へ出した(判断を test できる所へ)── 数える先に足しただけで、種類は増減していない
+    // (#1589 根治)「直前の変更の控えを戻せませんでした」を足した(`main.ts`)→ 5 → 6。§9 に行を足した
     const kinds = [
       'src/main.ts',
       'src/features/storage/storage-notice.ts',
@@ -1411,11 +1412,12 @@ describe('§9「困ったとき」の引用が画面の字と一致する(#697)'
     ]
       .map((f) => codeOnly(readFileSync(f, 'utf-8')))
       .flatMap((t) => [...t.matchAll(/[`'"]⚠ /g)]).length;
-    expect(kinds, '⚠ で始まる status の種類が変わった(§9 の表を直す)').toBe(5);
+    expect(kinds, '⚠ で始まる status の種類が変わった(§9 の表を直す)').toBe(6);
     for (const needle of [
       '保存領域が使えません',
       '⚠ メインのタブへの切り替えに失敗しました',
       '⚠ 添付 N 件を読み込めませんでした',
+      '⚠ 直前の変更の控えのうち N 件',
       '⚠ この端末に保存できませんでした',
       '⚠ この HTML ファイルに埋め込まれた中身が',
       'エラー: …',
@@ -2527,6 +2529,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-10-25(1589)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:CHANGELOG.md の 2026-10-17 の節に原本
+     */
+    'スマートフォンと別のウィンドウの使い勝手',
     /**
      * ⚠ **2026-10-25(215)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:CHANGELOG.md の 2026-10-17 の節に原本
