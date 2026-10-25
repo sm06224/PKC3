@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "@duckdb/duckdb-wasm": "^1.33.1-dev57.0",
+    "@shiguredo/rnnoise-wasm": "^2025.1.5",
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "@tailwindcss/browser": "4.3.3",
     "chart.js": "^4.5.1",

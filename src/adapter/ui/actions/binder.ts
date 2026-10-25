@@ -420,6 +420,7 @@ import {
   withEditReady,
 } from '@features/entry-actions';
 import { currentAppOpenTarget } from '@adapter/ui/render/app-open-target';
+import { processToolOf } from '@features/capture/capture-process';
 import {
   type MenuItem,
   closeContextMenu,
@@ -1948,6 +1949,11 @@ export interface BinderServices {
    * ⚠ **省略可**(無い配線では「このタブの PKC3 が古いままのため…」と断る)。段取りは `capture-extract.ts` が持つ。
    */
   extractCapture?(lid: string, part: 'audio' | 'picture'): void;
+  /**
+   * 🔴 **録ったものを仕上げる**(#952 A2・A4・A5・B1・B4・B5・B6、#674)。⚠ **省略可**(無い配線では古いタブとして断る)。
+   * 段取りは `capture-process.ts`、道具の実体は `capture-tools.ts`。
+   */
+  processCapture?(lid: string, tool: string): void;
   /**
    * 🔴 **音声認識の部品を入れる / 途中でやめる / 消す**(#772 段②)。
    * ⚠ **勝手に取りに行かない** ── 押した人にだけ取らせる(Office 一式と同じ作法)。
@@ -4773,6 +4779,8 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   'sql-history-menu',
   // 🔑 #918 段④ ── 答えを file へ出す形(csv / tsv / json)の一覧
   'sql-export-menu',
+  // 🔑 #952 ── 「音/動画」の行の「仕上げ ▾」(道具の一覧)
+  'open-capture-process',
 ]);
 
 /**
@@ -7992,6 +8000,40 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     services.extractCapture(lid, part);
+  },
+  /**
+   * 🔴 **「音/動画」の行の「仕上げ ▾」を押した ── 道具の一覧を出す**(#952)。
+   * ⚠ **`MENU_OPENERS` に載せてある**(載せないと、同じクリックで一覧が閉じて何も出ない)。
+   * 🔑 出す道具は押したボタンが運ぶ(`data-pkc-tools`。行を描いたときの門の結果)── ここで門を引き直さない。
+   *   項目は `capture-process` のただのボタンで、押した行の lid は全項目へ写す(`carry`。メニューの器は root の直下に出るため)。
+   *   塊(映像 / 音を作る / ノートに書く)は表(`PROCESS_TOOLS`)の `group`。
+   */
+  'open-capture-process': (_dispatcher, target, _services, root) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (!lid) return;
+    const items: MenuItem[] = [];
+    for (const id of (target.getAttribute('data-pkc-tools') ?? '').split(',')) {
+      const t = processToolOf(id);
+      if (t === undefined) continue;
+      items.push({ action: 'capture-process', label: t.label, hint: t.title, group: t.group, attrs: { 'data-pkc-part': t.id } });
+    }
+    if (items.length === 0) return;
+    const r = target.getBoundingClientRect();
+    openContextMenu(root, { x: r.left, y: r.bottom }, items, target, { 'data-pkc-entry': lid });
+  },
+  /**
+   * 🔴 **録ったものを仕上げる**(#952)。⚠ 対象は押した行が持つ(`data-pkc-entry`)── 選択中のノートから採らない。
+   *   どの道具かは押したボタン自身が運ぶ(`data-pkc-part`。表は `features/capture/capture-process.ts`)。
+   */
+  'capture-process': (dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    const part = target.getAttribute('data-pkc-part');
+    if (!lid || !part) return;
+    if (!services.processCapture) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、この操作はできません。再読み込みしてください' });
+      return;
+    }
+    services.processCapture(lid, part);
   },
   /**
    * ✏️ 編集に入る。#177: 多重タブでは**先に編集権を取ってから**入る。

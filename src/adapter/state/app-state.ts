@@ -3100,6 +3100,11 @@ export type UserAction =
    */
   | { type: 'SET_ATTACHMENT_NAME'; lid: string; name: string }
   /**
+   * 🔴 **話者を直す**(#952 B6)。⚠ `SET_ATTACHMENT_NAME` と**同じ形**:書換は 1 本(`REQUEST_BODY_REWRITE` の `kind: 'speakers-fix'`)を通り、
+   *   断りは lid で判定する。`renames` は `[いまの名前, 新しい名前]`、`at` は見出しの日時に使う時刻(epoch ms)。
+   */
+  | { type: 'FIX_SPEAKERS'; lid: string; renames: ReadonlyArray<readonly [string, string]>; at: number }
+  /**
    * 🔴 **表のセルを 1 つ書き換える**(#418 段①)。
    * ⚠ `TOGGLE_TASK` と**同じ形**:書換は 1 本(`REQUEST_BODY_REWRITE`)を通り、
    *   面が独自の書込経路を持たない(§7)。何をするかの判断は `body-rewrite.ts`。
@@ -8858,6 +8863,29 @@ function reduceCore(
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
             rewrite: { kind: 'attachment-name', typed: action.name },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **話者を直す**(#952 B6)。⚠ `SET_ATTACHMENT_NAME` と**同じ形** ── 断りは lid で判定する。
+     *   名前の付け替えと「## 話者つき文字起こし」の作り直しは、効果層が本文を読んでから `applyBodyRewrite` で行う。
+     */
+    case 'FIX_SPEAKERS': {
+      const blockedResult = bodyWriteBlockResult(state, action.lid, '話者を直してください');
+      if (blockedResult !== null) return blockedResult;
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'speakers-fix', renames: action.renames, at: action.at },
           },
         ],
       };

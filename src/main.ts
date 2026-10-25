@@ -352,12 +352,18 @@ import { ChapterWindows } from '@adapter/ui/chapter-windows';
 import { createCaptureService } from '@adapter/ui/actions/capture';
 import { createCaptureTrimmer } from '@adapter/ui/actions/capture-trim';
 import { createCaptureExtractor } from '@adapter/ui/actions/capture-extract';
+import { createWiredCaptureProcessor } from '@adapter/ui/actions/capture-process-wiring';
+import { createCaptureJobGate } from '@adapter/ui/actions/capture-job-gate';
+import { createCaptureTools } from '@adapter/ui/actions/capture-tools';
+import { processToolOf } from '@features/capture/capture-process';
 import { createImageDrawer } from '@adapter/ui/actions/image-draw';
 import { openImageDrawWindow } from '@adapter/platform/image-draw-window';
 import { AudioClient } from '@adapter/platform/audio/audio-client';
 import { VideoClient } from '@adapter/platform/video/video-client';
 import { AsrClient } from '@adapter/platform/asr/asr-client';
-import { decodeToMono16k } from '@adapter/platform/asr/asr-decode';
+import { decodeToMono, decodeToMono16k } from '@adapter/platform/asr/asr-decode';
+import { VoiceClient } from '@adapter/platform/voice/voice-client';
+import { VOICE_RATE } from '@features/audio/voice-lab';
 import { AsrPackInstaller } from '@adapter/platform/asr/asr-pack-install';
 import { AsrPackStore } from '@adapter/platform/asr/asr-pack-store';
 import { ASR_PACK_BASE, asrPartOf } from '@features/asr/asr-parts';
@@ -502,6 +508,7 @@ import {
   pickOrphanShadowInApp,
   pickAgentGrantInApp,
   pickAppGroupIconInApp,
+  promptInApp,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
 import { printNote } from '@adapter/platform/print-note';
@@ -3681,12 +3688,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 取り込みは収録と同じ **`queued`**(切り出しも取り直しが利かない)。
    */
   const audioClient = new AudioClient();
+  // 🔴 声の仕上げ(雑音を減らす・話し声とそれ以外に分ける・話者…)のワーカー。遅延起動・アイドルで畳む(`WorkerLease`)
+  const voiceClient = new VoiceClient();
   /**
    * 🔴 **動画は別のワーカー**(#683 段②b-1)── 動画の長い仕事で音の切り出しを待たせない。
    * 元の `Blob` は窓で読む(250MB を開かない)。始まりが手前へ戻るなら、切る前に確認する。
    */
   const videoClient = new VideoClient();
+  // 🔴 切り出し・取り出し・文字起こし・仕上げは 1 本ずつ(どれが走っていても他を断る。両方向)
+  const captureJobGate = createCaptureJobGate();
   const captureTrimmer = createCaptureTrimmer({
+    gate: captureJobGate,
     dispatcher,
     readBlob: (assetKey) => blobs.get(cid, assetKey),
     trim: (blob, startMs, endMs) => audioClient.trim(blob, startMs, endMs),
@@ -3714,10 +3726,48 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔴 置き場は元の添付と同じフォルダ(`imageDrawer` と同じ引き方)。
    */
   const captureExtractor = createCaptureExtractor({
+    gate: captureJobGate,
     dispatcher,
     readBlob: (assetKey) => blobs.get(cid, assetKey),
     extractAudio: (blob) => audioClient.extract(blob),
     extractPicture: (blob) => videoClient.pictureOnly(blob),
+    parentOf: (lid) => {
+      const st = dispatcher.getState();
+      return resolveCanonicalParents(st.entryMetas, st.relations).get(lid) ?? null;
+    },
+    attach: async (item, place) => {
+      let out: Awaited<ReturnType<typeof attachOne>> = null;
+      await withAssetGate.queued(async () => {
+        out = await attachOne(dispatcher, attachDeps, item, undefined, place);
+      });
+      return out;
+    },
+    notify: showStatus,
+  });
+
+  /**
+   * 🔴 **録ったものを仕上げる**(#952 A2・A4・A5・B1・B4・B5・B6、#674)。段取りは `capture-process.ts`、道具の実体は
+   * `capture-tools.ts`。ここは口を渡すだけ(CLAUDE.md §2)。⚠ 重い所は動画 / 音のワーカー(`WorkerLease`)。
+   */
+  const captureProcessor = createWiredCaptureProcessor({
+    gate: captureJobGate,
+    // 🔴 別のタブ・窓が編集中のノートへは足さない(#1087)/ 仕上げている間にタブを閉じる前に確認する(文字起こしと同じ)
+    lock: editLockPort,
+    setWriting: (active, key) => unloadGuard.setWriting(active, key),
+    dispatcher,
+    readBlob: (assetKey) => blobs.get(cid, assetKey),
+    readBody: async (lid) => ((await client.request({ op: 'getBody', cid, lid })) as string | null) ?? null,
+    tools: createCaptureTools({
+      foldStill: (blob) => videoClient.foldStill(blob),
+      scenes: (blob) => videoClient.scenes(blob),
+      contactSheet: (blob, lines, title) => videoClient.contactSheet(blob, lines, title),
+      decode16k: (blob) => decodeToMono16k(blob),
+      decode48k: (blob) => decodeToMono(blob, VOICE_RATE),
+      voice: (job) => voiceClient.run(job),
+      now: () => new Date(),
+      ask: (opts) => promptInApp(root, opts),
+      fixSpeakers: (lid, renames, at) => dispatcher.dispatch({ type: 'FIX_SPEAKERS', lid, renames, at }),
+    }),
     parentOf: (lid) => {
       const st = dispatcher.getState();
       return resolveCanonicalParents(st.entryMetas, st.relations).get(lid) ?? null;
@@ -3776,6 +3826,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const asrInstaller = new AsrPackInstaller({ store: asrStore, base: ASR_PACK_BASE });
   const asrClient = new AsrClient();
   const captureTranscriber = createCaptureTranscriber({
+    gate: captureJobGate,
     dispatcher,
     readBlob: (assetKey) => blobs.get(cid, assetKey),
     decode: (blob) => decodeToMono16k(blob),
@@ -4093,6 +4144,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     transcribeCapture: (lid) => void captureTranscriber.run(lid),
     // 🔴 動画から音だけ / 絵だけを取り出す(#952 A1)── 押す口は動画の行に在る
     extractCapture: (lid, part) => void captureExtractor.run(lid, part),
+    // 🔴 録ったものを仕上げる(#952)── 押す口は「音/動画」の行に在る
+    processCapture: (lid, tool) => {
+      const spec = processToolOf(tool);
+      if (spec !== undefined) void captureProcessor.run(lid, spec.id);
+    },
     // 🔴 音声認識の部品を入れる / やめる / 消す(#772 段②)── 判断も文言も実体が持つ
     installAsrPart: (id) => {
       const part = asrPartOf(id);

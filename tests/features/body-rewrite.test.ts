@@ -1235,3 +1235,20 @@ describe('🔴 行ごとの改行コードを保つ(#1087)', () => {
     expect(out).toBe('- [x] a\r\n- [ ] b');
   });
 });
+
+describe('話者を直す(speakers-fix。#952 B6)', () => {
+  const AT = new Date(2026, 9, 25, 10, 30).getTime();
+  const BODY = ['説明', '', '## 文字起こし', '0:00 はじめに', '', '## 話者 2026-10-25 10:00', '0:00 話者A', '0:12 話者B', ''].join('\n');
+
+  it('名前を替え、話者つき文字起こしを足す。節の外は 1 文字も変わらない', () => {
+    const out = applyBodyRewrite(BODY, { kind: 'speakers-fix', renames: [['話者A', '田中']], at: AT })!;
+    expect(out.startsWith('説明\n\n## 文字起こし\n0:00 はじめに\n\n## 話者 2026-10-25 10:00\n0:00 田中\n0:12 話者B\n')).toBe(true);
+    expect(out).toContain('## 話者つき文字起こし 2026-10-25 10:30\n0:00 田中: はじめに');
+  });
+
+  it('🔴 話者の節が無い本文は null(断る)。付け替えが無ければ同じ本文', () => {
+    expect(applyBodyRewrite('説明だけ', { kind: 'speakers-fix', renames: [], at: AT })).toBeNull();
+    const same = '## 話者\n0:00 話者A\n';
+    expect(applyBodyRewrite(same, { kind: 'speakers-fix', renames: [], at: AT })).toBe(same);
+  });
+});

@@ -32,6 +32,7 @@ import {
   type CaptureItem,
 } from '@features/capture/capture-item';
 import { canExtractFromVideo, canTrimCapture, trimUnavailableText } from '@features/capture/capture-trim-gate';
+import { canProcess, PROCESS_MENU_LABEL, PROCESS_MENU_TITLE, PROCESS_TOOLS } from '@features/capture/capture-process';
 import { trimMarkText, trimNoteFirst } from '@features/audio/trim-text';
 import { humanBytes } from '@features/human-bytes';
 import type { AssetLender } from './detail';
@@ -782,6 +783,25 @@ export class CapturesRenderer {
         part === 'audio'
           ? 'この動画の音だけを新しい音として保存します(元の動画はそのまま残ります)。'
           : 'この動画の絵だけを新しい動画として保存します(音は入りません。元の動画はそのまま残ります)。';
+      li.append(x);
+    }
+    /**
+     * 🔴 **録ったものを仕上げる**(#952 A2・A4・A5・B1・B4・B5・B6、#674)。⚠ 行には **「仕上げ ▾」を 1 つだけ**置く
+     * (道具を 1 つずつ並べると、1 行に 7〜8 個のボタンが並んで業務画面の「詰まっていない」に反する)。押すと道具の一覧が出る
+     * (他の行のメニューと同じ作り ── `context-menu.ts`。選ぶと `capture-process` が走る)。
+     * ⚠ 使える道具が 1 つも無い形(中身の分からない行)には出さない。出す道具は `data-pkc-tools` が運ぶ(開く側が門を引き直さない)。
+     */
+    const tools = PROCESS_TOOLS.filter((t) => canProcess(item, t.id, item.hasSpeakers === true));
+    if (tools.length > 0) {
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.setAttribute('data-pkc-action', 'open-capture-process');
+      x.setAttribute('data-pkc-entry', item.lid);
+      x.setAttribute('data-pkc-tools', tools.map((t) => t.id).join(','));
+      x.setAttribute('data-pkc-field', 'capture-process-menu');
+      x.setAttribute('aria-haspopup', 'menu');
+      x.textContent = PROCESS_MENU_LABEL;
+      x.title = PROCESS_MENU_TITLE;
       li.append(x);
     }
     /**

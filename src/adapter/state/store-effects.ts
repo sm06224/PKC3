@@ -49,6 +49,8 @@ import {
   colorRewriteNotice,
   attachmentNameRewriteNotice,
 } from '@features/markdown/body-rewrite';
+import { fixSpeakers, speakersFixNotice } from '@features/capture/speakers';
+import { transcriptLinesOf } from '@features/capture/contact-sheet-layout';
 import { tableFormatDropsInfo } from '@features/markdown/table-convert';
 import { placeUndoNotice } from '@features/markdown/place-undo-notice';
 import { cutLines, insertLines } from '@features/markdown/line-move';
@@ -4498,6 +4500,9 @@ export function connectStoreEffects(
             if (newBody === body) {
               if (run !== null && runTo !== null && !disposed)
                 dispatcher.dispatch({ type: 'OP_NOTICE', message: taskRunNotice(run, runTo) });
+              // 🔴 話者を直す回は、何も変わらなくても言う(黙ると「押したのに何も起きない」になる)
+              if (ev.rewrite.kind === 'speakers-fix' && !disposed)
+                dispatcher.dispatch({ type: 'OP_NOTICE', message: speakersFixNotice(0, 0) });
               return;
             }
             const ext = extractMeta(ev.archetype, newBody);
@@ -4531,8 +4536,9 @@ export function connectStoreEffects(
              * 表の行・列を消す回と同じ形。名前の付け替えは 1 行の字なので積まない。
              */
             const workDelete = ev.rewrite.kind === 'work-log' && ev.rewrite.next === null;
+            const speakersFix = ev.rewrite.kind === 'speakers-fix';
             const revBefore =
-              shapeRemove || runUndo || placeUndo !== null || workDelete ? await newestRevId() : undefined;
+              shapeRemove || runUndo || placeUndo !== null || workDelete || speakersFix ? await newestRevId() : undefined;
             /**
              * 🔴 **読んでから書くまでの間に別の窓が書いていたら、1 バイトも書かない**
              * (#178 残り、2026-08-23)。
@@ -4590,6 +4596,8 @@ export function connectStoreEffects(
                  * で戻せ、履歴を置いた数だけ伸ばさない。
                  */
                 ev.rewrite.kind === 'place-remove' ||
+                // 🔴 話者を直す回も積む(#952 B6)── 名前の付け替え・統合は元へ戻す道が版しか無い
+                ev.rewrite.kind === 'speakers-fix' ||
                 workDelete ||
                 ev.rewrite.kind === 'place-line-remove' ||
                 // 🔴 付箋の字を書き換える回も積む(#1662 1)── 書き換えた字は元へ戻す道が版しか無い
@@ -4652,6 +4660,21 @@ export function connectStoreEffects(
              * ⚠ 欄に触れて離れただけでも書き換わるので、黙らない。本文へ入った後にだけ言う
              *   (競合・失敗の枝は上で返っている)。変わらなかった回は上の `newBody === body` で返っている。
              */
+            /**
+             * 🔴 **話者を直した直後に「元に戻す」を出す**(#952 B6)。置き場は表の行・列を消した直後と同じ。
+             * ⚠ 本文へ入った後にだけ言う(競合・失敗の枝は上で返っている)。何が変わったかを数えて言う。
+             */
+            if (ev.rewrite.kind === 'speakers-fix' && !disposed) {
+              const fixed = fixSpeakers(body, ev.rewrite.renames, transcriptLinesOf(body), new Date(ev.rewrite.at));
+              const revAfter = await newestRevId();
+              dispatcher.dispatch({
+                type: 'OP_NOTICE',
+                message: speakersFixNotice(fixed?.renamed ?? 0, fixed?.transcriptLines ?? 0),
+                ...(revAfter !== undefined && revAfter !== revBefore
+                  ? { restoreUndo: { lid: ev.lid, revId: revAfter } }
+                  : {}),
+              });
+            }
             if (ev.rewrite.kind === 'attachment-name' && !disposed)
               dispatcher.dispatch({
                 type: 'OP_NOTICE',

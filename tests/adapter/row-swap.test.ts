@@ -2500,13 +2500,19 @@ describe('RowSwap — 大きな本文への連続入力で、開放終端の走�
     openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     openEndScans.n = 0;
+    // ⚠ 時計は固定する ── 実時間だと、負荷のかかった箱では 1 回の入力が 50ms を超えて走査が増える(CI で揺れる)。
+    //   ここで見たいのは「連続入力(間隔 < 50ms)のたびに全文をなめない」ことなので、入力の間隔を 1ms に決める。
+    let clock = 0;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => clock);
     // 最初から大きな本文(2 万字超)にしておく ── 小さい間はその場で走る(対照群が見る)
     let v = 'あ'.repeat(25_000) + '\n';
     for (let i = 0; i < 500; i += 1) {
+      clock += 1;
       v += `行 ${String(i)} の本文です。りんご みかん ぶどう 0123456789 0123456789 0123456789\n`;
       ta.value = v;
       ta.dispatchEvent(new Event('input'));
     }
+    nowSpy.mockRestore();
     // ⚠ 値は 2 万字を超えている(= 大きな本文の枝を通った)
     expect(ta.value.length).toBeGreaterThan(20_000);
     expect(openEndScans.n, '連続入力のたびに全文を走査している').toBeLessThanOrEqual(5);

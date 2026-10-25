@@ -1057,3 +1057,76 @@ export async function planPictureOnly(src: ByteSource, scan: VideoScan): Promise
     },
   };
 }
+
+/** `webmWithout` の結果。 */
+export interface DroppedBlocksPlan {
+  readonly parts: readonly OutputPart[];
+  readonly byteLength: number;
+  readonly durationMs: number;
+}
+
+/**
+ * 🔴 **指定のブロックだけを落とした WebM の計画**(#952 A2)。ほかのブロックは**元のバイトのまま繋ぐ**
+ * (`Blob.slice` の部品)。時刻は 1 つも動かさない(`Cluster` の `Timecode` も元のまま)ので、音との同期も長さも変わらない。
+ * `Tracks` は元のバイトをそのまま写す(音も映像も宣言を変えない)。⚠ `scan` は終わりまで読んだもの。
+ */
+export function webmWithout(scan: VideoScan, drop: ReadonlySet<VideoBlock>): DroppedBlocksPlan {
+  const byCluster: VideoBlock[][] = scan.clusters.map(() => []);
+  for (const b of scan.blocks) if (!drop.has(b)) byCluster[b.cluster]!.push(b);
+  const clusterParts: OutputPart[] = [];
+  for (let ci = 0; ci < scan.clusters.length; ci += 1) {
+    const kept = byCluster[ci]!;
+    if (kept.length === 0) continue;
+    clusterParts.push({ kind: 'bytes', bytes: CLUSTER_HEAD });
+    clusterParts.push({ kind: 'bytes', bytes: timecodeElement(scan.clusters[ci]!.tcMs) });
+    let runStart = kept[0]!.elStart;
+    let runEnd = kept[0]!.elEnd;
+    for (let i = 1; i < kept.length; i += 1) {
+      const b = kept[i]!;
+      if (b.elStart === runEnd) {
+        runEnd = b.elEnd;
+        continue;
+      }
+      clusterParts.push({ kind: 'slice', start: runStart, end: runEnd });
+      runStart = b.elStart;
+      runEnd = b.elEnd;
+    }
+    clusterParts.push({ kind: 'slice', start: runStart, end: runEnd });
+  }
+  const durationMs = scan.sourceEndMs;
+  const header = element(
+    ID_EBML_HEAD,
+    concatBytes([
+      element('4286', uintBytes(1)),
+      element('42f7', uintBytes(1)),
+      element('42f2', uintBytes(4)),
+      element('42f3', uintBytes(8)),
+      element('4282', asciiBytes('webm')),
+      element('4287', uintBytes(4)),
+      element('4285', uintBytes(2)),
+    ]),
+  );
+  const info = element(
+    ID_INFO,
+    concatBytes([
+      element(ID_TIMESTAMP_SCALE, uintBytes(1_000_000)),
+      element('4d80', asciiBytes('pkc3')),
+      element('5741', asciiBytes('pkc3')),
+      element('4489', float64Bytes(durationMs)),
+    ]),
+  );
+  const body: OutputPart[] = [
+    { kind: 'bytes', bytes: info },
+    { kind: 'slice', start: scan.tracksStart, end: scan.tracksEnd },
+    ...clusterParts,
+  ];
+  const lengthOf = (p: OutputPart): number => (p.kind === 'bytes' ? p.bytes.length : p.end - p.start);
+  let bodyLen = 0;
+  for (const p of body) bodyLen += lengthOf(p);
+  const segmentHead = concatBytes([hexBytes(ID_SEGMENT), writeSize(bodyLen)]);
+  return {
+    parts: [{ kind: 'bytes', bytes: concatBytes([header, segmentHead]) }, ...body],
+    byteLength: header.length + segmentHead.length + bodyLen,
+    durationMs,
+  };
+}

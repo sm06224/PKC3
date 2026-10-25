@@ -25,6 +25,7 @@ import { readAttachmentMeta } from '../flavor/attachment-flavor';
 import { CAPTURE_LABEL } from '../asset/capture-text';
 import { ELAPSED_LINE_HEAD, parseElapsed } from '../elapsed-text';
 import { transcriptTimesMs } from '../audio/waveform';
+import { isSpeakersHeading } from './speakers';
 
 /** 一覧に並べる 1 件。⚠ **原値を持つ**(丸めるのは描画器の仕事 ── §7)。 */
 export interface CaptureItem {
@@ -43,6 +44,8 @@ export interface CaptureItem {
    * (`ELAPSED_LINE_HEAD` + `parseElapsed`)。無ければ空(目盛りを出さない)。省略 = 空。
    */
   readonly transcriptMs?: readonly number[];
+  /** 本文に「## 話者」の一覧があるか(#952 B6「話者を直す」を出す門)。省略 = 無い。 */
+  readonly hasSpeakers?: boolean;
 }
 
 /** 一覧に入れる元。⚠ `getBodies` の 1 往復で採れる形にしてある。 */
@@ -92,6 +95,7 @@ export function captureItemsFrom(sources: readonly CaptureSource[]): CaptureItem
       assetKey: meta.assetKey,
       kind,
       transcriptMs: transcriptTimesMs(s.body, ELAPSED_LINE_HEAD, parseElapsed),
+      hasSpeakers: s.body.split('\n').some(isSpeakersHeading),
     });
   }
   return out;

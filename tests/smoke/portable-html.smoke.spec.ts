@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { join, resolve } from 'node:path';
 import { answerAppDialog, clickReal, createEntry,
   gotoCollectionPane,
+  pickCaptureTool,
 } from './helpers';
 
 /**
@@ -579,4 +580,43 @@ test('🔴 持ち歩ける 1 枚で選んだ配色(Dracula)が、blob: の窓の
   expect(seen.theme).toBe('dracula');
   expect(seen.bg, '選んだ配色の地の色になっていない').toBe(rgb);
   await win.close();
+});
+
+/**
+ * 🔴 **`file://` の 1 枚でも、声の仕上げのワーカー(RNNoise の wasm + opus の書き出し)が動く**(#952 B1)。
+ *
+ * 可搬の 1 枚は worker を **classic(iife)の blob** に畳み、wasm を `data:` から読む。声の仕上げのワーカーは、最初の依頼で
+ * `@shiguredo/rnnoise-wasm` を**動的 import** する(約 4.8MB の JS に wasm が base64 で入っている)── 畳んだ形でその import が
+ * 解けるかは、畳んで走らせるまで分からない(普通の配布物では通る)。unit は偽のエンジンしか通さない。
+ */
+test('🔴 `file://` の可搬 HTML で、「雑音を減らす」が動いて新しい音の添付ができる (#952 B1)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(pathToFileURL(HTML).href);
+  await expect(page.locator('[data-pkc-boot="ready"]'), '`file://` で起動しない').toBeAttached({ timeout: 20_000 });
+
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: '声と雑音.webm',
+    mimeType: 'audio/webm',
+    buffer: readFileSync('tests/fixtures/media/voice-noisy-7s.webm'),
+  });
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]'), '前提: 音が取り込めていない').toHaveCount(1, { timeout: 15_000 });
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  const row = page.locator('[data-pkc-capture]:has([data-pkc-field="capture-name"]:text-is("声と雑音.webm"))');
+  await expect(row, '前提: 音の行が一覧に無い').toHaveCount(1, { timeout: 15_000 });
+
+  await pickCaptureTool(page, row, 'denoise');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '可搬の 1 枚で声の仕上げのワーカーが動かない(wasm の動的 import が畳んだ形で解けていない)',
+  ).toContainText('雑音を減らした音を作りました', { timeout: 60_000 });
+  const made = page.locator('[data-pkc-capture]:has([data-pkc-field="capture-name"]:text-is("声と雑音 (雑音を減らした).webm"))');
+  await expect(made, '新しい音の添付が一覧に増えない').toHaveCount(1, { timeout: 15_000 });
+  await clickReal(page, made.locator('[data-pkc-field="capture-play"]'));
+  const audio = made.locator('audio').first();
+  await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.readyState), { message: '新しい音が読み込めない' }).toBeGreaterThanOrEqual(1);
+  expect(await audio.evaluate((a: HTMLAudioElement) => a.duration), '新しい音の長さが元(7 秒)と違う').toBeGreaterThan(6.5);
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

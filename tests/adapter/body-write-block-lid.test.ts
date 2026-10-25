@@ -109,6 +109,12 @@ const CASES: CaseSpec[] = [
     rewriteKind: 'color',
   },
   {
+    // #952 B6: 話者を直す。断りは他の書換と同じ 1 本の門(新しい断り文を作らない)
+    name: 'FIX_SPEAKERS',
+    action: (lid) => ({ type: 'FIX_SPEAKERS', lid, renames: [['話者A', '田中']], at: 0 }),
+    rewriteKind: 'speakers-fix',
+  },
+  {
     name: 'SET_TASK_RUN',
     action: (lid) => ({ type: 'SET_TASK_RUN', lid, lines: [0], to: 'done' }),
     rewriteKind: 'task-run',

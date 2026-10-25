@@ -16,6 +16,7 @@
  * 🔑 **重い所はワーカー**(`AudioClient` / `VideoClient`)。ここは `Blob` を参照で渡すだけで、bytes を開かない。
  * ⚠ **判定を `main.ts` へ出さない**(CLAUDE.md §2:あちらはどの test からも実行されない)。
  */
+import { captureBusyText, type CaptureJobGate } from './capture-job-gate';
 import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { elapsedText } from '@features/elapsed-text';
@@ -68,6 +69,8 @@ export interface CaptureExtractDeps {
   ) => Promise<AttachedOne | null>;
   /** 一時の知らせ(エラーの行とは別)。 */
   readonly notify: (text: string) => void;
+  /** 🔴 録ったものへの重い仕事を 1 本ずつにする門(両方向に断る)。省略 = 門なし(単体の test)。 */
+  readonly gate?: CaptureJobGate;
 }
 
 export interface CaptureExtractor {
@@ -104,6 +107,12 @@ export function createCaptureExtractor(deps: CaptureExtractDeps): CaptureExtract
       // 🔴 本文に書けない間は、重い仕事を始めない(数秒かけて取り出してから断らない)
       if (!canWriteBody(deps.dispatcher)) {
         fail(BUSY_BODY_TEXT);
+        return;
+      }
+      // 🔴 切り出し・取り出し・文字起こし・仕上げは 1 本ずつ(どれが走っていても他を断る)
+      const leaveGate = deps.gate?.tryEnter('取り出し');
+      if (deps.gate !== undefined && leaveGate === null) {
+        fail(captureBusyText(deps.gate.current));
         return;
       }
       running = true;
@@ -170,6 +179,7 @@ export function createCaptureExtractor(deps: CaptureExtractDeps): CaptureExtract
         if (!finished) deps.notify('');
         // ⚠ **必ず解く** ── 解かないと、1 度失敗しただけで以後ずっと断るようになる
         running = false;
+        leaveGate?.();
       }
     },
   };

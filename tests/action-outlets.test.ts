@@ -78,6 +78,8 @@ const UNRESOLVED: readonly string[] = [
   'cancel-asr-install',
   // 台帳 #1852 束 T1(依頼 156 ②)── Office 一式の取り込みをやめる。押し所は設定の節の `button()` ヘルパーで組む(`cancel-asr-install` と同じ)
   'cancel-office-install',
+  // #952 仕上げ ▾ の項目 ── メニューの項目として動的に組む(binder が MenuItem の attrs で焼く)ので、静的な data-pkc-action が source に無い
+  'capture-process',
   'install-asr-part',
   'remove-asr-part',
   'choose-office-pack',
@@ -218,6 +220,10 @@ const OBJECT_LONE: readonly string[] = [
   // ⚠ 2026-10-17(#952 A1): 動画の行の「音だけ取り出す」「絵だけ取り出す」。出口は行の中の 1 か所だけ
   //   (`capture-transcribe` と同じ ── 押した行の lid が要る。取り出す物は押したボタンが運ぶ)。名前で呼べない理由も同じ。
   'capture-extract',
+  // ⚠ 2026-10-25(#952 A2〜B6・#674): 「音/動画」の行の仕上げの道具(静止区間をまとめる・チャプター・雑音を減らす…)。
+  //   出口は行の中の 1 か所だけ(`capture-extract` と同じ ── 押した行の lid が要る。どの道具かは押したボタンが運ぶ)。
+  // #952 仕上げ ▾: 行のボタンは 1 つ(open-capture-process)に畳み、道具の一覧はメニューの項目として開いた先で組む(出口は一覧の 1 か所)
+  'open-capture-process',
   'clear-entry-date',
   'deliver-to-extension',
   'dual-bookmark-open',
