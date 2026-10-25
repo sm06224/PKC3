@@ -168,6 +168,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-10-25-tags-icons-copy',
+    title: '本文のタグの集約・書き出しのアイコン・SQL の COPY',
+    items: [
+      '本文に書いた #タグ は、保存するとき前書きの body-tags: に重複なくまとめます。手で書いた tags: とは分けて残します。',
+      '本文のアイコン(:home: など)が、書き出した HTML と Word にも出ます。',
+      'SQL で調べる(DuckDB)で COPY (…) TO に続けてファイル名を打つと、結果をその名前でダウンロードします。形式は csv・tsv・parquet・json から選べます。',
+    ],
+  },
+  {
     id: '2026-10-19-append-frame',
     title: '追記欄を 1 つの枠にまとめる',
     items: [
@@ -684,14 +693,9 @@ export const NOTICES: readonly Notice[] = [
       'エクスプローラーなどでコピーしたファイル(PDF など)を貼ると、添付として入るようになりました',
     ],
   },
-  {
-    id: '2026-10-17-schedule-undo',
-    title: '予定と連絡先の使い勝手',
-    items: [
-      '予定タブで ☐ を押して済みにすると、画面の下に「元に戻す」が数秒出るようになりました',
-      '連絡先が 1 件も無いとき、スマホの .vcf は左のペインの下の「取り込む」から入れられると出るようになりました',
-    ],
-  },
+  // ⚠ 2026-10-25(1891): 枠を超えたので
+  //    `2026-10-17-schedule-undo` を登記表から落とした ──
+  //    **原本は CHANGELOG.md に在る**(2026-10-17 の節)
   // ⚠ 2026-10-19(1890): 枠を超えたので
   //    `2026-10-17-palette-pdf` を登記表から落とした ──
   //    **原本は CHANGELOG.md に在る**(2026-10-17 の節)
