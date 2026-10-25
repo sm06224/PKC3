@@ -148,6 +148,7 @@ import { isRealCalendarDate } from '@features/schedule/schedule-date';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { CaptureItem } from '@features/capture/capture-item';
 import { clampGraphDepth, GRAPH_DEFAULT_DEPTH } from '@features/relation/graph-view';
+import { relabelWorkLine, type WorkLogScan } from '@features/timer/work-log';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { SearchDetailRow } from '@features/filter/search-snippet';
 import {
@@ -685,6 +686,12 @@ export const VIEW_MODES = [
    */
   'graph',
   /**
+   * 🔴 **計った時間**(#683 ①。user 要望 2026-09-03「時間を測る・画面録画・録音も…組み込みアプリにしたい」)。
+   * ⚠ 録ったものと同じ形 ── 左の列の「時間」タブは残し、同じ `TimersRenderer` を中央の器(別窓)にも描く。
+   *   aside ではない(名前を押した選択はこの面に留まる)。
+   */
+  'timers',
+  /**
    * 🔴 **探す面**(#680。user 要望「検索専用の組み込みアプリ」/ 裁定 2026-09-04
    * 「アプリの基本は別窓」)。
    *
@@ -818,6 +825,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   contacts: '連絡先',
   captures: '音/動画',
   graph: '関係グラフ',
+  timers: '計った時間',
   search: '探す',
   dual: '2 ペインで整理',
   sql: 'SQL で調べる',
@@ -2042,6 +2050,13 @@ export interface AppState {
    */
   graphView: { readonly all: boolean; readonly depth: number };
   /**
+   * 🔴 **計った時間**(#683 ①)。本文の「作業」の行を集めた一覧。`null` = **まだ集めていない**(0 件ではない)。
+   * ⚠ 正本は本文(行を書き換えるのも本文)── ここは映した断面。**タブを開くまで集めない**(録ったものと同じ規律)。
+   */
+  workLogScan: WorkLogScan | null;
+  /** 🔴 **集められなかった**(`contactScanFailed` と同じ理由 ── 「まだ」と区別する)。 */
+  workLogScanFailed: boolean;
+  /**
    * 🔴 **保存が「消えない扱い」か**(#347、user 裁定 2026-08-23)。
    *
    * ⚠ 出すのは**設定の面だけ**である ── 帯にもダイアログにもしない
@@ -2392,6 +2407,8 @@ export const initialState: AppState = {
   captureTrimBusy: false,
   captureTranscribeLid: null,
   graphView: { all: false, depth: GRAPH_DEFAULT_DEPTH },
+  workLogScan: null,
+  workLogScanFailed: false,
   snippetScan: null,
   persistState: 'unknown',
   backlinks: null,
@@ -2730,6 +2747,16 @@ export type UserAction =
   | { type: 'SET_CAPTURE_TRIM_BUSY'; busy: boolean }
   /** 文字にしている録音を知らせる(#772 段②)。`null` = 終わった。 */
   | { type: 'SET_CAPTURE_TRANSCRIBE'; lid: string | null }
+  /** 🔴 計った時間が集まった / 集められなかった(#683 ①)。 */
+  | { type: 'SET_WORK_LOG_SCAN'; scan: WorkLogScan }
+  | { type: 'WORK_LOG_SCAN_FAILED' }
+  /**
+   * 🔴 **計った時間の名前を付け替える**(#683 ①)。`label` が空なら名前を外す。
+   * ⚠ 書換は `REQUEST_BODY_REWRITE`(`work-log`)の 1 本 ── 押した時点の行(一覧が見ていた行)を添えて byte 一致で門をくぐる。
+   */
+  | { type: 'SET_WORK_LOG_LABEL'; lid: string; line: number; label: string }
+  /** 🔴 計った時間の行を本文から消す(#683 ①)。書換は上と同じ 1 本。 */
+  | { type: 'DELETE_WORK_LOG'; lid: string; line: number }
   /** 🔴 関係グラフの見方を変える(#281 ①)。渡した項目だけ変わる。`depth` は 1..6 に丸める。 */
   | { type: 'SET_GRAPH_VIEW'; all?: boolean; depth?: number }
   /** 🔴 雛形を集め終えた(#196 / B-2)。⚠ `null` は失敗 ── **帯は出さず静かに畳む**。 */
@@ -2795,6 +2822,8 @@ export type UserAction =
    */
   | { type: 'REFRESH_TASK_SCAN' }
   | { type: 'REFRESH_CONTACT_SCAN' }
+  /** 🔴 計った時間を集め直す(#683 ①)。⚠ 前の一覧は消さない(録ったものと同じ)。 */
+  | { type: 'REFRESH_WORK_LOG_SCAN' }
   /**
    * 🔴 **本文の検索を、いまの語で撃ち直す**(#1087)。⚠ 書込・取込・別タブの変更の後に出る
    * (`store-effects.ts` の `stamp`)。語が空なら何もしない。前の当たりは**消さない**(返るまで
@@ -4139,6 +4168,8 @@ export type DomainEvent =
    */
   | { type: 'REQUEST_TASK_SCAN' }
   | { type: 'REQUEST_CONTACT_SCAN' }
+  /** 🔴 計った時間を集める(#683 ①)。 */
+  | { type: 'REQUEST_WORK_LOG_SCAN' }
   /**
    * 🔴 **録ったものを集める**(#683 段①)。⚠ **どれを読むかを載せる**
    *   (`REQUEST_LAUNCHER_TILES` と同じ ── effect 層は実行時に state を見ない)。
@@ -5287,6 +5318,8 @@ function reduceCore(
            * ⚠ 落とさないと、**消したノートの行が残って押しても何も起きない**。
            */
           captureItems: keepCaptures(state, sameCid, metas),
+          // 🔴 計った時間も同じ扱い(#683 ①)── 丸ごと `null` にしない / 消えたノートの行は落とす
+          workLogScan: keepWorkLog(state, sameCid, metas),
           /**
            * 🔴 **履歴・ごみ箱の開いた面は、同じ container なら保って取り直す / 別なら畳む**(#1087)。
            * ⚠ 別タブの書込はここを通るが、今まで `...state` で素通りだった ── 履歴の面は
@@ -5380,6 +5413,8 @@ function reduceCore(
            *   連絡先を使わない user に負わせない ── 予定・集計と同じ流儀)。
            */
           ...(state.contactScan === null ? [] : [{ type: 'REQUEST_CONTACT_SCAN' as const }]),
+          // 🔴 計った時間も頼み直す(#683 ①。一度も開いていない user には撃たない)
+          ...(state.workLogScan === null ? [] : [{ type: 'REQUEST_WORK_LOG_SCAN' as const }]),
           /**
            * 🔴 **アプリ一覧のタイルとグループも頼み直す**(#1087。上の連絡先と対)。
            * ⚠ 落とさずに素通りしていたので、別タブの書込・取り込みの再読込・改名・ごみ箱で
@@ -5681,6 +5716,50 @@ function reduceCore(
       };
     case 'CONTACT_SCAN_FAILED':
       return { state: { ...state, contactScanFailed: true }, events: [] };
+    case 'SET_WORK_LOG_SCAN':
+      return { state: { ...state, workLogScan: action.scan, workLogScanFailed: false }, events: [] };
+    case 'WORK_LOG_SCAN_FAILED':
+      return { state: { ...state, workLogScanFailed: true }, events: [] };
+    /**
+     * 🔴 **計った時間の名前を付け替える / 行を消す**(#683 ①)。⚠ `TOGGLE_TASK` と**同じ形**:
+     *   断りは lid で判定し、押した時点の行は**一覧が見ていた断面**(`workLogScan`)から引く
+     *   (行番号だけだと、別の窓が上へ 1 行足したあと別の行を書き換える)。引けなければ撃たずに断る。
+     */
+    case 'SET_WORK_LOG_LABEL':
+    case 'DELETE_WORK_LOG': {
+      const del = action.type === 'DELETE_WORK_LOG';
+      const blockedResult = bodyWriteBlockResult(
+        state,
+        action.lid,
+        del ? '計った時間を消してください' : '名前を直してください',
+      );
+      if (blockedResult !== null) return blockedResult;
+      const meta = state.entryMetas.get(action.lid);
+      const run = state.workLogScan?.runs.find((r) => r.lid === action.lid && r.line === action.line);
+      if (!meta || run === undefined) {
+        return {
+          state: { ...state, error: '計った時間が見つかりません(一覧が古くなっています。開き直すと集め直します)' },
+          events: [{ type: 'REQUEST_WORK_LOG_SCAN' }],
+        };
+      }
+      const next = del ? null : relabelWorkLine(run.rawLine, action.type === 'SET_WORK_LOG_LABEL' ? action.label : '');
+      if (!del && next === null) return { state, events: [] };
+      // 変わらない名前は書かない(同じ本文を書き直して更新日時だけ動かさない)
+      if (next === run.rawLine) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'work-log', line: run.line, openLine: run.rawLine, next },
+          },
+        ],
+      };
+    }
     case 'SET_CAPTURE_ITEMS':
       return {
         state: { ...state, captureItems: action.items, captureScanFailed: false },
@@ -6652,6 +6731,9 @@ function reduceCore(
      */
     case 'REFRESH_CONTACT_SCAN':
       return { state, events: [{ type: 'REQUEST_CONTACT_SCAN' }] };
+    // 🔴 計った時間(#683 ①)── 前の一覧は消さない(行が飛ばない)
+    case 'REFRESH_WORK_LOG_SCAN':
+      return { state, events: [{ type: 'REQUEST_WORK_LOG_SCAN' }] };
     case 'REFRESH_SEARCH':
       return { state, events: searchRefreshEvents(state) };
     /**
@@ -11889,6 +11971,11 @@ function removeEntryFromState(
     state.contactScan === null || contactCards === state.contactScan.cards
       ? state.contactScan
       : { ...state.contactScan, cards: contactCards! };
+  const workRuns = state.workLogScan === null ? null : withoutLid(state.workLogScan.runs, lid);
+  const scanWorkLog =
+    state.workLogScan === null || workRuns === state.workLogScan.runs
+      ? state.workLogScan
+      : { ...state.workLogScan, runs: workRuns! };
   const snippetItems = state.snippetScan === null ? null : withoutLid(state.snippetScan.items, lid);
   const scanSnippet =
     state.snippetScan === null || snippetItems === state.snippetScan.items
@@ -11955,6 +12042,7 @@ function removeEntryFromState(
        */
       taskScan: scanTask,
       contactScan: scanContact,
+      workLogScan: scanWorkLog,
       snippetScan: scanSnippet,
       // 🔴 開いているスマートフォルダの当たり・件数からも落とす(#1087。下の `withoutSmartHit`)
       smartHits: smart.hits,
@@ -12067,6 +12155,22 @@ function keepContacts(
   if (!sameCid) return null;
   const cards = scan.cards.filter((c) => metas.has(c.lid));
   return cards.length === scan.cards.length ? scan : { ...scan, cards };
+}
+
+/**
+ * 🔴 **消えたノートの計った時間を落とす**(#683 ①。`keepContacts` と同じ作法)。
+ * ⚠ 別 container なら全部捨てる / 変化が無いなら同じ参照を返す。
+ */
+function keepWorkLog(
+  state: AppState,
+  sameCid: boolean,
+  metas: ReadonlyMap<string, EntryMeta>,
+): WorkLogScan | null {
+  const scan = state.workLogScan;
+  if (scan === null) return null;
+  if (!sameCid) return null;
+  const runs = scan.runs.filter((r) => metas.has(r.lid));
+  return runs.length === scan.runs.length ? scan : { ...scan, runs };
 }
 
 /**

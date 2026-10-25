@@ -1036,7 +1036,9 @@ img[data-pkc-action='view-big']:focus-visible {
 [data-pkc-region='browse-tabs'] [data-pkc-field='bar-more'] {
   height: auto;
   min-width: 0;
-  padding: 0 var(--s2);
+  /* 🔴 タブが 8 枚になって入りきらない幅が増えた(#281 ① / #683 ①)ので、「⋯」の横の余白を詰めた
+   *   (`padding: 0 var(--s2)` → 1px)。実測で 1440px(左の列 259px)に PC が戻る。 */
+  padding: 0 1px;
 }
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='bar-more'] {
   min-width: 44px;
@@ -12302,4 +12304,74 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-drop-status][data-pkc-dropping] {
   outline: 2px solid var(--fg);
   outline-offset: -2px;
+}
+
+/* ══ 計った時間(#683 ①)══════════════════════════════════════
+ * 🔴 **左の列と中央の面(別窓)に同じ規則**(録ったものと同じ形)。
+ * 左の列は `minmax(242px, 18vw)` なので**縦に積む** ── 時刻・名前・ノート・押し所を横に並べると名前が切れる。 */
+[data-pkc-browse-pane='timers'],
+[data-pkc-view-pane='timers'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-field='timers-note'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='timers-body'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-height: 0;
+}
+[data-pkc-field='timers-day-head'] {
+  margin: 0 0 var(--s1);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+[data-pkc-field='timers-list'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--border);
+}
+[data-pkc-field='timers-list'] > li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s2);
+  background: var(--surface);
+}
+[data-pkc-field='timers-when'] {
+  font-variant-numeric: tabular-nums;
+}
+[data-pkc-field='timers-name'] {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* ノートの名前は行いっぱいの押せる場所にする(マウスだけで完結する。連絡先の名前と同じ) */
+[data-pkc-field='timers-note-open'] {
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+[data-pkc-field='timers-tools'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
 }

@@ -231,6 +231,7 @@ import { insertionForLineDate } from '@features/schedule/line-date';
 import { dayStamp } from '@features/datetime/date-math';
 import { safeName } from '@features/export/file-name';
 import { hasTranscriptCues, srtFromTranscript, transcriptCues } from '@features/asr/srt';
+import { TIMER_RUN_CLEAR_ATTR, TIMER_RUN_LINE_ATTR } from '@adapter/ui/render/timers';
 import { decodeTaskDrag, dropTaskCard, dropTaskToStatus, encodeTaskDrag, statusTargetOf } from '@adapter/ui/render/schedule-drag';
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
 import { offerDoneUndo, offerMoveUndo, undoScheduleMove } from '@adapter/ui/render/schedule-undo';
@@ -3101,6 +3102,9 @@ function targetLid(dispatcher: Dispatcher, target: HTMLElement): string | null {
 
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'start-edit',
+  // 🔑 計った時間の行を直す・消すのも**本文を書く**(#683 ①)── 取込・書出しの最中に走らせない
+  'timer-run-rename',
+  'timer-run-delete',
   // 🔑 **行の右クリックからフォルダの中に作る**(#215)── `create-entry` と同じ
   //    `CREATE_ENTRY` を撃つので、同じ門をくぐらせる
   'create-in-folder',
@@ -7873,6 +7877,57 @@ const ACTIONS: Record<string, ActionHandler> = {
   'graph-scope': (dispatcher, target) => {
     const v = target.getAttribute('data-pkc-graph-scope');
     if (v === 'all' || v === 'selected') dispatcher.dispatch({ type: 'SET_GRAPH_VIEW', all: v === 'all' });
+  },
+  /**
+   * 🔴 **計った時間の名前を付ける・外す**(#683 ①)。⚠ 書換は reducer の `SET_WORK_LOG_LABEL`(1 本)── ここは
+   *   名前を聞いて撃つだけ。対象の行は**一覧が見ていた断面**から引く(reducer が行を照合する)。
+   * ⚠ 別のタブが編集中のノートへは撃たない(`actUnlessEditedElsewhere`。ほかの本文の書換と同じ門)。
+   * ⚠ 小窓で聞く(`promptInApp`)── 何も打たずに決めたときは、いまの名前のまま(何も書かない)。
+   */
+  'timer-run-rename': (dispatcher, target, services, root) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    const line = Number(target.getAttribute(TIMER_RUN_LINE_ATTR));
+    if (lid === null || !Number.isInteger(line)) return;
+    const run = dispatcher.getState().workLogScan?.runs.find((r) => r.lid === lid && r.line === line);
+    const write = (label: string): void =>
+      actUnlessEditedElsewhere(
+        dispatcher,
+        services,
+        [lid],
+        '名前を直せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+        () => dispatcher.dispatch({ type: 'SET_WORK_LOG_LABEL', lid, line, label }),
+      );
+    if (target.hasAttribute(TIMER_RUN_CLEAR_ATTR)) {
+      write('');
+      return;
+    }
+    // 編集中は小窓を出す前に断る(開いても書けない窓を出さない)。断り文は他の本文の書換と同じ 1 本
+    const blocked = bodyWriteBlockReason(dispatcher.getState(), lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, '名前を直してください') });
+      return;
+    }
+    void promptInApp(root, {
+      title: '計った時間の名前',
+      label: 'この計測の名前(何の作業か)',
+      initial: run?.label ?? '',
+      okLabel: '直す',
+    }).then((typed) => {
+      if (typed !== null) write(typed);
+    });
+  },
+  /** 🔴 **計った時間の行を消す**(#683 ①)。⚠ 書換は reducer の `DELETE_WORK_LOG`。消した直後に「元に戻す」が出る。 */
+  'timer-run-delete': (dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    const line = Number(target.getAttribute(TIMER_RUN_LINE_ATTR));
+    if (lid === null || !Number.isInteger(line)) return;
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      '消せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => dispatcher.dispatch({ type: 'DELETE_WORK_LOG', lid, line }),
+    );
   },
   'graph-depth': (dispatcher, target) => {
     const n = Number(target.getAttribute('data-pkc-graph-depth'));

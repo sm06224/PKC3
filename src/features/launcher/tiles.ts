@@ -71,6 +71,7 @@ export interface LauncherTile {
     | 'contacts'
     | 'captures'
     | 'graph'
+    | 'timers'
     | 'search'
     | 'sql'
     | 'manual'
@@ -362,6 +363,22 @@ export function graphTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **計った時間の組み込みタイル**(#683 ①。user 要望 2026-09-03「時間を測る…も…組み込みアプリにしたい」)
+ * ── 録ったものと同じ形。左の列の「時間」タブは残し、同じ面を別窓で開く 2 つ目の入口である。
+ */
+export const TIMERS_TILE_LID = 'builtin:timers';
+
+export function timersTile(): LauncherTile {
+  return {
+    lid: TIMERS_TILE_LID,
+    title: '計った時間',
+    group: BUILTIN_GROUP,
+    kind: 'timers',
+    symbol: 'timer',
+  };
+}
+
+/**
  * 🔴 **探す面の組み込みタイル**(#680。user 要望「検索専用の組み込みアプリ」/
  * 裁定 2026-09-04「アプリの基本は別窓」)。
  *
@@ -517,6 +534,8 @@ export function withBuiltinTiles(
   builtin.push(capturesTile());
   // ⚠ 関係グラフ(#281 ①)も末尾 ── 足しても既に在るタイルの位置が動かない
   builtin.push(graphTile());
+  // ⚠ 計った時間(#683 ①)も末尾 ── 同じ理由(位置を動かさない)
+  builtin.push(timersTile());
   /**
    * 🔴 **組み込みは末尾へ「収納」する**(#531 段② / #281。user 指示 2026-08-28
    * 「組み込みアプリをグループに**収納して**整理する」)。
@@ -557,6 +576,7 @@ export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'contacts',
   'captures',
   'graph',
+  'timers',
   'search',
   'sql',
   'manual',

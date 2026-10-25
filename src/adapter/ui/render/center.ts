@@ -21,6 +21,7 @@ import { ScheduleRenderer } from './schedule';
 import { ContactsRenderer } from './contacts';
 import { CapturesRenderer } from './captures';
 import { GraphRenderer } from './graph';
+import { TimersRenderer } from './timers';
 import { SearchRenderer } from './search';
 import { SqlRenderer } from './sql';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -32,6 +33,7 @@ type PaneView =
   | 'contacts'
   | 'captures'
   | 'graph'
+  | 'timers'
   | 'search'
   | 'dual'
   | 'sql'
@@ -70,6 +72,8 @@ const NOTE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>([
   'captures',
   // ⚠ 関係グラフ(#281 ①)── 連絡先と同じ(節点を押した選択はこの面に留まる)
   'graph',
+  // ⚠ 計った時間(#683 ①)── 録ったものと同じ(名前を押した選択はこの面に留まる)
+  'timers',
   'search',
 ]);
 
@@ -109,6 +113,8 @@ export class CenterRouter {
   private readonly captures: CapturesRenderer;
   /** 🔴 関係グラフ(#281 ①)── 左の列と**同じ class**。 */
   private readonly graph: GraphRenderer;
+  /** 🔴 計った時間(#683 ①)── 左の列と**同じ class**。 */
+  private readonly timers: TimersRenderer;
   /** 🔴 **探す面**(#680)── 左の列に同じものは無い(この器だけ)。 */
   private readonly search: SearchRenderer;
   private readonly dual: DualFilerRenderer;
@@ -200,6 +206,7 @@ export class CenterRouter {
       contacts: pane('contacts'),
       captures: pane('captures'),
       graph: pane('graph'),
+      timers: pane('timers'),
       search: pane('search'),
       dual: pane('dual'),
       sql: pane('sql'),
@@ -250,6 +257,7 @@ export class CenterRouter {
     this.contacts = new ContactsRenderer(this.panes.contacts);
     this.captures = new CapturesRenderer(this.panes.captures, assets, onCaptureReady);
     this.graph = new GraphRenderer(this.panes.graph);
+    this.timers = new TimersRenderer(this.panes.timers);
     this.search = new SearchRenderer(this.panes.search);
     this.dual = new DualFilerRenderer(this.panes.dual);
     this.sql = new SqlRenderer(this.panes.sql);
@@ -366,6 +374,7 @@ export class CenterRouter {
     else if (view === 'contacts') this.contacts.render(state);
     else if (view === 'captures') this.captures.render(state);
     else if (view === 'graph') this.graph.render(state);
+    else if (view === 'timers') this.timers.render(state);
     else if (view === 'search') this.search.render(state);
     else if (view === 'dual') this.dual.render(state);
     else if (view === 'sql') this.sql.render(state);

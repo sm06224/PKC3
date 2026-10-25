@@ -30,6 +30,7 @@ import {
   SQL_TILE_LID,
   CAPTURES_TILE_LID,
   GRAPH_TILE_LID,
+  TIMERS_TILE_LID,
   capturesTile,
   manualTile,
   type LauncherTile,
@@ -271,8 +272,16 @@ describe('組み込みタイルの合流 (#148)', () => {
       kind: 'graph',
       symbol: 'link',
     });
+    // ⚠ 計った時間(#683 ①)も末尾 ── 同じ理由(位置を動かさない)
+    expect(b[10]).toEqual({
+      lid: TIMERS_TILE_LID,
+      title: '計った時間',
+      group: BUILTIN_GROUP,
+      kind: 'timers',
+      symbol: 'timer',
+    });
     // ⚠ entry 由来の並びには触らない(合流は**後置**だけ ── 2026-09-08 に前置から変えた)
-    expect(b, '組み込みが 10 枚ちょうどでない').toHaveLength(10);
+    expect(b, '組み込みが 11 枚ちょうどでない').toHaveLength(11);
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', () => {
@@ -320,6 +329,8 @@ describe('組み込みタイルの合流 (#148)', () => {
       'captures',
       // ⚠ 関係グラフ(#281 ①)── 同じく末尾
       'graph',
+      // ⚠ 計った時間(#683 ①)── 同じく末尾
+      'timers',
     ]);
     // ⚠ Office を入れていない端末でも、面は空にならない
     expect(withBuiltinTiles([], { office: false }).map((t) => t.kind)).toEqual([
@@ -332,6 +343,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       'sql',
       'captures',
       'graph',
+      'timers',
     ]);
   });
 
@@ -348,7 +360,7 @@ describe('組み込みタイルの合流 (#148)', () => {
     const missing = merged.filter((t) => t.symbol === undefined).map((t) => t.title);
     expect(missing, `目印の無い組み込みタイル: ${missing.join(' / ')}`).toEqual([]);
     // ⚠ **空振り防止** ── 組み込みが 1 枚も無ければ上は常に真
-    expect(merged.length).toBeGreaterThanOrEqual(10);
+    expect(merged.length).toBeGreaterThanOrEqual(11);
     // ⚠ 打った字の目印(`icon`)とは**同時に立たない**
     expect(merged.filter((t) => t.icon !== undefined)).toEqual([]);
   });
@@ -368,6 +380,7 @@ describe('組み込みタイルの合流 (#148)', () => {
         ['sql', 'database'],
         ['captures', 'mic'],
         ['graph', 'link'],
+        ['timers', 'timer'],
       ]),
     );
   });
@@ -397,7 +410,7 @@ describe('組み込みタイルの合流 (#148)', () => {
     expect(
       mirrored.map((t) => t.kind),
       '左のタブと対になる組み込みが増減した ── `tiles.ts` の注記とマニュアルも直す',
-    ).toEqual(['schedule', 'contacts', 'captures', 'graph']);
+    ).toEqual(['schedule', 'contacts', 'captures', 'graph', 'timers']);
     for (const t of mirrored) {
       const tab = BROWSE_ICONS[t.kind];
       /**

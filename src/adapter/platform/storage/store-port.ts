@@ -146,6 +146,7 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      */
     taskScan: () => client.request({ op: 'taskScan', cid }),
     contactScan: () => client.request({ op: 'contactScan', cid }),
+    workLogScan: () => client.request({ op: 'workLogScan', cid }),
     snippetScan: () => client.request({ op: 'snippetScan', cid }),
     getBodies: (lids) => client.request({ op: 'getBodies', cid, lids }),
     listBodies: (after, maxBytes) =>

@@ -131,6 +131,8 @@ describe('ランチャーのタイルを読む', () => {
       'captures',
       // ⚠ **関係グラフ**(#281 ①)── 同じ理由で末尾(位置を動かさない)
       'graph',
+      // ⚠ **計った時間**(#683 ①)── 同じ理由で末尾
+      'timers',
     ]);
     off();
   });
@@ -233,7 +235,7 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(
       b.map((t) => t.group),
       '組み込みが既定群のまま(見出しが引かれず、自分のものと地続きに見える)',
-    ).toEqual(Array.from({ length: 10 }, () => BUILTIN_GROUP));
+    ).toEqual(Array.from({ length: 11 }, () => BUILTIN_GROUP));
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', async () => {
@@ -255,6 +257,8 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(b[7]?.kind, 'Office の有無で録ったものの位置が動いた').toBe('captures');
     // ⚠ **関係グラフ**(#281 ①)も末尾
     expect(b[8]?.kind, 'Office の有無で関係グラフの位置が動いた').toBe('graph');
-    expect(b, '組み込みが 9 枚でない').toHaveLength(9);
+    // ⚠ **計った時間**(#683 ①)も末尾
+    expect(b[9]?.kind, 'Office の有無で計った時間の位置が動いた').toBe('timers');
+    expect(b, '組み込みが 10 枚でない').toHaveLength(10);
   });
 });

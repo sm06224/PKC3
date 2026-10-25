@@ -13,6 +13,7 @@ import type {
 import type { ImportRemap } from '@features/import/body-remap';
 import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
+import type { WorkLogScan } from '@features/timer/work-log';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { SearchDetailRow } from '@features/filter/search-snippet';
 // 🔴 「これは何の file か」の正本は features 層に 1 つだけ在る(§7)
@@ -145,6 +146,13 @@ export type StorageRequest =
    *   だから**タブを開いた人にだけ**走らせる(呼び側の規律)。
    */
   | { op: 'contactScan'; cid: string }
+  /**
+   * 🔴 **計った時間(本文の「作業」の行)を集める**(#683 ①)。⚠ `contactScan` と**同じ形**。
+   * 🔑 候補は SQL の `LIKE` で絞る(「作業 」を含む本文だけを JS で読む)── 全部を JS へ運ばない。
+   *   それでも全件の表を走るので、**タブを開いた人にだけ**走らせる(呼び側の規律)。
+   * 🔴 本文は worker から出さない ── 返るのは行(`WorkRun`)だけ。
+   */
+  | { op: 'workLogScan'; cid: string }
   /** 🔴 雛形を集める(#196 / B-2)。⚠ 候補は archetype で絞るので普通のノートは読まない。 */
   | { op: 'snippetScan'; cid: string }
   | { op: 'getBody'; cid: string; lid: string }
@@ -1210,6 +1218,8 @@ export interface ResultMap {
   taskScan: TaskScan;
   /** 連絡先(題名順は描画側)。⚠ 切ったときは `truncated`。 */
   contactScan: ContactScan;
+  /** 計った時間(日ごとの束ね方は描画側)。⚠ 切ったときは `truncated`。 */
+  workLogScan: WorkLogScan;
   snippetScan: SnippetScan;
   getBody: string | null;
   /** 読めたものだけ(要求順)。⚠ 無い lid は**黙って落ちる**。 */

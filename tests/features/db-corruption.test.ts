@@ -120,6 +120,8 @@ describe('止める op の仕分け(#971)', () => {
     'getBodies',
     'taskScan',
     'contactScan',
+    // 計った時間(#683 ①)── 読むだけ
+    'workLogScan',
     'snippetScan',
     'smartScan',
     'queryScan',

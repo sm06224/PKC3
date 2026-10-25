@@ -327,6 +327,8 @@ export const BROWSE_ICONS: Readonly<Record<string, IconName>> = {
   captures: 'mic',
   // 🔴 関係グラフ(#281 ①)── タイルと同じ図案
   graph: 'link',
+  // 🔴 計った時間(#683 ①)── 「時間を計る」の口(`start-timer`)と同じ図案
+  timers: 'timer',
   // 🔴 PC(#215 段①)── 「フォルダ」のタブ(`folder`)と取り違えない別の図案
   pc: 'computer',
 };

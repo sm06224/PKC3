@@ -112,6 +112,7 @@ import { kindChangedNotice } from '@features/flavor/kind-change';
 import { MAX_TAGS, sameTag } from '@features/flavor/tags';
 import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
+import type { WorkLogScan } from '@features/timer/work-log';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { SearchDetailRow } from '@features/filter/search-snippet';
 import { tagQueryOf } from '@features/filter/tag-query';
@@ -239,6 +240,8 @@ export interface StorePort {
    * ⚠ 返るのは**連絡の手段だけ**で、本文は 1 バイトも渡らない。
    */
   contactScan?(): Promise<ContactScan>;
+  /** 🔴 計った時間(本文の「作業」の行。#683 ①)。⚠ 省略可 ── 持たない配線では面が「集められません」と断る。 */
+  workLogScan?(): Promise<WorkLogScan>;
   /**
    * 🔴 **雛形を集める**(#196 / B-2)。⚠ **省略可** ── 持たない配線では
    * 雛形の機能が丸ごと畳まれる(壊れるのではなく、`/` にも `Tab` にも出ない)。
@@ -1140,6 +1143,8 @@ export function connectStoreEffects(
      * ⚠ 走査は `scanAfterWrites` が畳むので、まとめて書いても全件走査は 1 本にまとまる。
      */
     if (dispatcher.getState().contactScan !== null) dispatcher.dispatch({ type: 'REFRESH_CONTACT_SCAN' });
+    // 🔴 計った時間の一覧を開いていれば、集め直す(#683 ①)── 止めたタイマーの行・直した名前・消した行が一覧に追いつく
+    if (dispatcher.getState().workLogScan !== null) dispatcher.dispatch({ type: 'REFRESH_WORK_LOG_SCAN' });
   };
 
   const unsubscribe = dispatcher.onEvent((ev) => {
@@ -2057,6 +2062,28 @@ export function connectStoreEffects(
             dispatcher.dispatch({ type: 'SET_CONTACT_SCAN', scan });
           } catch {
             if (!disposed) dispatcher.dispatch({ type: 'CONTACT_SCAN_FAILED' });
+          }
+        });
+        break;
+      }
+      /**
+       * 🔴 **計った時間を集める**(#683 ①)。⚠ 連絡先(`REQUEST_CONTACT_SCAN`)と**同じ形**:
+       *   持っていないことは画面へ伝える / 書込の後ろで走らせる。
+       */
+      case 'REQUEST_WORK_LOG_SCAN': {
+        const ask = store.workLogScan;
+        if (!ask) {
+          dispatcher.dispatch({ type: 'WORK_LOG_SCAN_FAILED' });
+          break;
+        }
+        scanAfterWrites('workLog', async () => {
+          if (disposed) return;
+          try {
+            const scan = await ask();
+            if (disposed) return;
+            dispatcher.dispatch({ type: 'SET_WORK_LOG_SCAN', scan });
+          } catch {
+            if (!disposed) dispatcher.dispatch({ type: 'WORK_LOG_SCAN_FAILED' });
           }
         });
         break;
@@ -4499,7 +4526,13 @@ export function connectStoreEffects(
              * 書く前の本文を版として積み(下の `checkpoint`)、書いた後の「いちばん新しい版」が変わったときだけ知らせに繋ぐ。
              */
             const placeUndo = placeUndoNotice(ev.rewrite);
-            const revBefore = shapeRemove || runUndo || placeUndo !== null ? await newestRevId() : undefined;
+            /**
+             * 🔴 **計った時間の行を消す回も「元に戻す」を出す**(#683 ①)── 消した行を戻す道が版しか無いのは、
+             * 表の行・列を消す回と同じ形。名前の付け替えは 1 行の字なので積まない。
+             */
+            const workDelete = ev.rewrite.kind === 'work-log' && ev.rewrite.next === null;
+            const revBefore =
+              shapeRemove || runUndo || placeUndo !== null || workDelete ? await newestRevId() : undefined;
             /**
              * 🔴 **読んでから書くまでの間に別の窓が書いていたら、1 バイトも書かない**
              * (#178 残り、2026-08-23)。
@@ -4557,6 +4590,7 @@ export function connectStoreEffects(
                  * で戻せ、履歴を置いた数だけ伸ばさない。
                  */
                 ev.rewrite.kind === 'place-remove' ||
+                workDelete ||
                 ev.rewrite.kind === 'place-line-remove' ||
                 // 🔴 付箋の字を書き換える回も積む(#1662 1)── 書き換えた字は元へ戻す道が版しか無い
                 ev.rewrite.kind === 'place-text' ||
@@ -4647,6 +4681,19 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'OP_NOTICE',
                 message: ev.rewrite.what === 'row' ? '表の行を消しました' : '表の列を消しました',
+                ...(revAfter !== undefined && revAfter !== revBefore
+                  ? { restoreUndo: { lid: ev.lid, revId: revAfter } }
+                  : {}),
+              });
+            }
+            /**
+             * 🔴 **計った時間の行を消した直後に「元に戻す」を出す**(#683 ①)。置き場は表の行・列を消した直後と同じ。
+             */
+            if (workDelete && !disposed) {
+              const revAfter = await newestRevId();
+              dispatcher.dispatch({
+                type: 'OP_NOTICE',
+                message: '計った時間の行を消しました',
                 ...(revAfter !== undefined && revAfter !== revBefore
                   ? { restoreUndo: { lid: ev.lid, revId: revAfter } }
                   : {}),

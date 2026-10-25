@@ -152,6 +152,7 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'integrityPlan',
   'counts',
   'contactScan',
+  'workLogScan',
   'exportImage',
   'exportRevisionChain',
   'exportSqliteTable',

@@ -28,6 +28,7 @@ import { ScheduleRenderer } from './schedule';
 import { ContactsRenderer } from './contacts';
 import { CapturesRenderer } from './captures';
 import { GraphRenderer } from './graph';
+import { TimersRenderer } from './timers';
 import { PcFolderRenderer } from './pc-folder';
 import { LocalFolder } from '@adapter/platform/local-folder';
 import type { AssetLender } from './detail';
@@ -83,6 +84,12 @@ export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
    *   グラフはノート全体のつながりを映す**ノートの見方**で、閉じても失う物が無い。
    */
   { mode: 'graph', label: 'グラフ' },
+  /**
+   * 🔴 **計った時間**(#683 ①。user 要望 2026-09-03)。
+   * ⚠ ここに置くのは、上の表が「**左 = ノート全体**」と決めているからである ──
+   *   計った時間の正本は**ノートの本文**で、閉じても失う物が無い(#292 段⑤ の見分け方)。
+   */
+  { mode: 'timers', label: '時間' },
 ] as const;
 
 /**
@@ -143,6 +150,8 @@ export class BrowseRouter {
   private readonly captures: CapturesRenderer;
   /** 🔴 関係グラフ(#281 ①)。 */
   private readonly graph: GraphRenderer;
+  /** 🔴 計った時間(#683 ①)。 */
+  private readonly timers: TimersRenderer;
   /** 🔴 パソコンのフォルダ(#215 段①)。⚠ handle は持たない(`LocalFolder` が持ち主)。 */
   private readonly pc: PcFolderRenderer;
   /**
@@ -242,6 +251,7 @@ export class BrowseRouter {
       contacts: pane('contacts'),
       captures: pane('captures'),
       graph: pane('graph'),
+      timers: pane('timers'),
       pc: pane('pc'),
     };
     this.scroll = new ScrollMemory(host);
@@ -275,6 +285,7 @@ export class BrowseRouter {
     this.contacts = new ContactsRenderer(this.panes.contacts);
     this.captures = new CapturesRenderer(this.panes.captures, assets, onCaptureReady);
     this.graph = new GraphRenderer(this.panes.graph);
+    this.timers = new TimersRenderer(this.panes.timers);
     this.pc = new PcFolderRenderer(this.panes.pc, pcFolder);
   }
 
@@ -431,6 +442,7 @@ export class BrowseRouter {
     else if (mode === 'contacts') this.contacts.render(state);
     else if (mode === 'captures') this.captures.render(state);
     else if (mode === 'graph') this.graph.render(state);
+    else if (mode === 'timers') this.timers.render(state);
     else if (mode === 'pc') this.pc.render();
     else this.launcher.render(state);
     /*

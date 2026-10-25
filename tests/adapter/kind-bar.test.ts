@@ -39,6 +39,7 @@ const PANE_FILES: Readonly<Record<BrowseMode, readonly string[]>> = {
   contacts: ['contacts.ts'],
   captures: ['captures.ts'],
   graph: ['graph.ts'],
+  timers: ['timers.ts'],
   pc: ['pc-folder.ts'],
 };
 

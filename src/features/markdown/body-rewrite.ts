@@ -659,6 +659,20 @@ export type BodyRewrite =
       nth?: number;
       w?: number | null;
       align?: ImageAlign | null;
+    }
+  | {
+      /**
+       * 🔴 **計った時間の行を直す・消す**(#683 ①)── `- 作業 2026-08-27 06:40–07:03(23:11)` の 1 行。
+       *
+       * ⚠ `line` は**原文の行番号**(0 始まり)、`openLine` は**押した時点のその行そのもの**(`task` と同じ門:
+       *   別の窓が上へ行を足して同じ番号が別の行を指す形で、別の行を書き換えない)。
+       * 🔑 `next` が行の新しい中身、`null` なら**行ごと消す**(前後の行・改行コードは触らない)。
+       *   名前の付け替えの字は `features/timer/work-log.ts` の `relabelWorkLine` が作る(綴りを 2 か所に持たない)。
+       */
+      kind: 'work-log';
+      line: number;
+      openLine: string;
+      next: string | null;
     };
 
 /**
@@ -1129,6 +1143,21 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     // 画像が無い / 変わらないときは書かない(同じ本文を書き直して更新日時だけ動かさない)
     if (next === null || next === line) return null;
     parts[rewrite.line * 2] = next;
+    return parts.join('');
+  }
+  if (rewrite.kind === 'work-log') {
+    // 🔑 行ごとの改行コードを保つ(偶数番目が行、奇数番目が改行)
+    const parts = body.split(/(\r\n|\n)/);
+    const at = rewrite.line * 2;
+    if (parts[at] === undefined || parts[at] !== rewrite.openLine) return null;
+    if (rewrite.next !== null) {
+      parts[at] = rewrite.next;
+      return parts.join('');
+    }
+    // 消す: その行と、後ろの改行(最後の行なら前の改行)を取り除く
+    if (parts[at + 1] !== undefined) parts.splice(at, 2);
+    else if (at > 0) parts.splice(at - 1, 2);
+    else parts.splice(at, 1);
     return parts.join('');
   }
   // 🔑 塊の移動と差し込みは `line-move.ts` の 1 本(#684)── 取りやめは body をそのまま返す
