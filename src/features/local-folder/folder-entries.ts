@@ -14,6 +14,7 @@
  * |---|---|---|
  * | Markdown | ノートになる(元の file と結ぶ) | 🟢 **書き戻せる**(情報ペインの「元ファイルへ書き戻す」) |
  * | vCard | 連絡先のノートになる | 🔴 書き戻せない |
+ * | Office(docx / xlsx / pptx …) | Office の窓で開く(一式が使えない環境では添付のノート) | 🟢 **書き戻せる**(窓で保存 = 元の file へ。書けない環境ではダウンロード) |
  * | それ以外(画像・PDF・Office・テキスト…) | 添付のノートになる | 🔴 書き戻せない |
  *
  * 🔑 **判定は取込の振り分けと同じ関数**(`isMarkdownFileName` / `isVcfFileName`)──
@@ -31,12 +32,10 @@ import type { IconName } from '@features/icon/symbols';
 export const FOLDER_PAGE = 200;
 
 /**
- * 🔴 **フォルダの行を押したときの返事**(#1264 §1)。⚠ 押せる見た目ではないが、押す user は居る ──
- * 何も起きずに理由も出ないと「壊れている」に見える。行の `title` と、押した後の状態の行で**同じ字**を使う。
- * ⚠ 「別のフォルダ…」は帯のボタンの字(`pc-folder.ts` の `band`)と揃える。
+ * 🔴 **サブフォルダの行**(#215)。押すと**その中へ入る**(上の階層へはパンくずで戻る)。
+ * ホバーの字。⚠ 押した結果は一覧が入れ替わることで見える(別の知らせは出さない)。
  */
-export const PC_DIRECTORY_NOTE =
-  '中へは入りません。このフォルダの中を見るには、「別のフォルダ…」を押して、そのフォルダを選んでください';
+export const PC_ENTER_TITLE = 'このフォルダの中を開きます(上の階層へは、上のフォルダ名を押すと戻れます)';
 
 /** vCard の行に見える字で添える(ホバーだけにしない)。 */
 export const PC_CONTACT_NOTE = '連絡先として取り込みます';
@@ -57,13 +56,13 @@ export const PC_LINK_NOTE = '元ファイルとつながります';
 export const PC_STATS_NOTE = '大きさと更新日は、開くときに読みます(一覧ではファイルの中身を読みません)';
 
 /** 取り込まれ方。 */
-export type FolderFileRoute = 'note' | 'contact' | 'attachment';
+export type FolderFileRoute = 'note' | 'contact' | 'office' | 'attachment';
 
 export interface FolderFileKind {
   readonly route: FolderFileRoute;
   /** 一覧の「種類」の字。 */
   readonly label: string;
-  /** 元の file へ書き戻せるか(Markdown だけ)。 */
+  /** 元の file へ書き戻せるか(Markdown と Office)。 */
   readonly writeBack: boolean;
   /** 行頭の絵(#1272)。⚠ 種類の判定と**同じ場所**で決める ── 絵のための拡張子判定を別に持たない。 */
   readonly icon: IconName;
@@ -86,7 +85,8 @@ const endsWithAny = (name: string, exts: readonly string[]): boolean => {
 export function fileKindOf(name: string): FolderFileKind {
   if (isMarkdownFileName(name)) return { route: 'note', label: 'Markdown', writeBack: true, icon: 'note' };
   if (isVcfFileName(name)) return { route: 'contact', label: 'vCard', writeBack: false, icon: 'person' };
-  if (isOfficeLaunchFile(name)) return { route: 'attachment', label: 'Office', writeBack: false, icon: 'presentation' };
+  // 🔴 Office は Office の窓で開き、保存で元の file へ書き戻す(#432。書けない環境ではダウンロード)
+  if (isOfficeLaunchFile(name)) return { route: 'office', label: 'Office', writeBack: true, icon: 'presentation' };
   if (endsWithAny(name, IMAGE_EXTS)) return { route: 'attachment', label: '画像', writeBack: false, icon: 'camera' };
   if (endsWithAny(name, ['.pdf'])) return { route: 'attachment', label: 'PDF', writeBack: false, icon: 'page' };
   if (endsWithAny(name, ['.txt'])) return { route: 'attachment', label: 'テキスト', writeBack: false, icon: 'clip' };

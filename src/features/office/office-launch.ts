@@ -107,7 +107,7 @@ export const localOpenNotice = (fileName: string): string =>
  *   開くと、user は直したものを**行方不明**にする。
  */
 export const cannotWriteBackNotice = (fileName: string): string =>
-  `「${fileName}」は開けますが、元のファイルへは書き戻せません(この環境が対応していません)。`;
+  `「${fileName}」は開けますが、元のファイルへは書き戻せません(書き込みの許可が無いか、この環境が対応していません)。保存すると、ダウンロードに保存します。`;
 
 /**
  * 書き戻せなかった理由(区別できたものだけ)。

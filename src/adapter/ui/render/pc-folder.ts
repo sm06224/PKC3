@@ -5,11 +5,13 @@
  * ## 画面で何が起きるか
  *
  * 1. 「フォルダを選ぶ…」を押す → OS のフォルダ選択が出る
- * 2. 選ぶと、**そのフォルダの直下**が名前順に並ぶ(名前 / 種類。大きさ・更新日は「—」── 一覧では file を読まない、#1271)。
+ * 2. 選ぶと、**そのフォルダの直下**が名前順に並ぶ(サブフォルダの行を押すと**中へ入り**、上のパンくずで**上の階層へ戻れる**。#215)(名前 / 種類。大きさ・更新日は「—」── 一覧では file を読まない、#1271)。
  *    200 件で切れて「さらに表示」
  * 3. ファイルの行を押すと、**PKC に取り込んで中央に開く**(このタブは開いたまま)
  * 4. 「更新」で同じフォルダの一覧を読み直す / 「別のフォルダ…」で選び直す(切らずに済む。#1264 §2)
  * 5. 「切る」で繋ぎを外す(次に開いたときは繋がっていない)
+ * 6. 「Office のファイルを開く…」で、フォルダを繋がずに Office の file を 1 つ選んで開く(#432。保存で元の file へ書き戻す。
+ *    書き戻せない環境ではダウンロードに保存する)。Office の行を押したときも同じ
  *
  * 🔴 **消す口・改名・移動は置かない**(裁定)── パソコンのファイルは取り消せない。
  * ⚠ **Markdown の行にだけ**「元ファイルと結びつきます」を出す(取り込んだあと元のファイルへ
@@ -24,7 +26,7 @@ import type { LocalFolder, LocalFolderRow, LocalFolderView } from '@adapter/plat
 import {
   FOLDER_PAGE,
   PC_CONTACT_NOTE,
-  PC_DIRECTORY_NOTE,
+  PC_ENTER_TITLE,
   PC_LINK_NOTE,
   PC_STATS_NOTE,
   fileKindOf,
@@ -92,13 +94,23 @@ export class PcFolderRenderer {
         this.host.append(
           para('pc-note', 'パソコンのフォルダを選ぶと、中のファイルが並びます。押すと PKC3 に取り込んで開きます。'),
           this.pickButton(),
+          ...this.officeOnly(view),
         );
         return;
       case 'lost':
-        this.host.append(para('pc-note', '許可が切れました。もう一度フォルダを選んでください'), this.pickButton());
+        this.host.append(
+          para('pc-note', '許可が切れました。もう一度フォルダを選んでください'),
+          this.pickButton(),
+          ...this.officeOnly(view),
+        );
         return;
       case 'failed':
-        this.host.append(para('pc-note', view.message ?? 'フォルダを開けませんでした'), this.pickButton());
+        this.host.append(
+          ...(view.crumbs.length > 1 ? [this.band(view)] : []),
+          para('pc-note', view.message ?? 'フォルダを開けませんでした'),
+          ...(view.crumbs.length > 1 ? [] : [this.pickButton()]),
+          ...this.officeOnly(view),
+        );
         return;
       case 'listing':
         this.host.append(this.band(view), para('pc-note', `読み込んでいます… ${view.counted} 件`));
@@ -106,6 +118,20 @@ export class PcFolderRenderer {
       case 'listed':
         this.renderListed(view);
     }
+  }
+
+  private officeOnly(view: LocalFolderView): HTMLButtonElement[] {
+    return view.canPickFile ? [this.officeButton()] : [];
+  }
+
+  /** 🔴 フォルダを繋がずに Office の file を 1 つ選んで開く(#432)。 */
+  private officeButton(): HTMLButtonElement {
+    return button(
+      'pc-open-office-file',
+      'pc-office',
+      'Office のファイルを開く…',
+      'パソコンの Office ファイル(docx / xlsx / pptx など)を選んで Office で開きます。保存すると元のファイルへ書き戻します(書き戻せないときはダウンロードに保存します)',
+    );
   }
 
   private pickButton(): HTMLButtonElement {
@@ -129,7 +155,19 @@ export class PcFolderRenderer {
     field(name, 'pc-folder-name');
     name.textContent = view.folderName ?? '';
     name.title = view.folderName ?? '';
-    band.append(name);
+    // 🔴 パンくず(#215)── 上の階層は押して戻れる。いまの階層(最後)は字だけ
+    const crumbs = document.createElement('span');
+    field(crumbs, 'pc-crumbs');
+    for (const c of view.crumbs.slice(0, -1)) {
+      const b = button('pc-crumb', 'pc-crumb', c.name, `「${c.name}」へ戻ります`);
+      b.setAttribute('data-pkc-pc-level', String(c.level));
+      const sep = document.createElement('span');
+      field(sep, 'pc-crumb-sep');
+      sep.textContent = '/';
+      crumbs.append(b, sep);
+    }
+    crumbs.append(name);
+    band.append(crumbs);
     if (view.phase === 'listed') {
       band.append(
         button(
@@ -147,6 +185,7 @@ export class PcFolderRenderer {
         ),
       );
     }
+    if (view.canPickFile) band.append(this.officeButton());
     band.append(
       button(
         'pc-cut-folder',
@@ -196,23 +235,26 @@ export class PcFolderRenderer {
     // フォルダ(ファイルオンデマンド)では未ダウンロードの実体を一斉に取りに行く。列は残して「—」を出す
     const meta = [row.label, folderSizeText(null), folderModifiedText(null)].join(' · ');
     if (row.kind === 'directory') {
-      // ⚠ フォルダは押せない(直下だけ ── 中へは入らない)。押せる見た目にしない
-      // 🔴 ただし押されても**無言にしない**(#1264 §1)── ホバーと、押した後の状態の行に同じ字
-      li.setAttribute('data-pkc-action', 'pc-dir-note');
-      li.title = PC_DIRECTORY_NOTE;
+      // 🔴 サブフォルダは押すと**中へ入る**(#215)。上の階層へはパンくずで戻る
+      const enter = button('pc-enter-dir', 'pc-enter', '', PC_ENTER_TITLE);
+      enter.setAttribute('data-pkc-pc-index', String(row.index));
       const about = document.createElement('span');
       field(about, 'pc-meta');
       about.textContent = row.label;
-      li.append(head(row), about);
+      enter.append(head(row), about);
+      li.append(enter);
       return li;
     }
+    const isOffice = fileKindOf(row.name).route === 'office';
     const open = button(
       'pc-open-file',
       'pc-open',
       '',
-      row.writeBack
-        ? '取り込んで開きます。直して保存したあと、情報ペインの「元ファイルへ書き戻す」でパソコンのファイルも書き換えられます'
-        : '取り込んで開きます(PKC3 の添付や連絡先になります)。元のファイルへは書き戻せません',
+      isOffice
+        ? 'Office で開きます。保存すると元のファイルへ書き戻します(書き込みの許可を求めます。書き戻せないときはダウンロードに保存します)'
+        : row.writeBack
+          ? '取り込んで開きます。直して保存したあと、情報ペインの「元ファイルへ書き戻す」でパソコンのファイルも書き換えられます'
+          : '取り込んで開きます(PKC3 の添付や連絡先になります)。元のファイルへは書き戻せません',
     );
     open.setAttribute('data-pkc-pc-index', String(row.index));
     const about = document.createElement('span');

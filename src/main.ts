@@ -405,7 +405,9 @@ import { importFiles } from '@adapter/ui/actions/import-file';
 import { withFolderHome } from '@adapter/ui/actions/import-folder-home';
 import { openFolderLid } from '@adapter/ui/actions/open-folder-lid';
 import { windowFolderWritePicker, type WritableDirLike } from '@adapter/platform/md-folder-export';
-import { LocalFolder, windowDirectoryPicker, type LocalFileItem } from '@adapter/platform/local-folder';
+import { LocalFolder, windowDirectoryPicker, windowFilePicker, type LocalFileItem } from '@adapter/platform/local-folder';
+import { appPcFolderPlace } from '@adapter/ui/render/pc-folder-place';
+import { openLocalOffice } from '@adapter/platform/office/open-local-office';
 import { createLocalFileOpener } from '@adapter/ui/actions/open-local-file';
 import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
 import { formatArchivePreviewMessage } from '@features/import/archive-preview';
@@ -1570,6 +1572,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let openLocalFile: (item: LocalFileItem) => Promise<void> = async () => undefined;
   const localFolder = new LocalFolder({
     picker: windowDirectoryPicker(),
+    // 🔴 Office の file を 1 つ選んで開く口(#432)と、開いていた階層の記憶(#215)
+    filePicker: windowFilePicker(),
+    place: appPcFolderPlace,
     open: (item) => openLocalFile(item),
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
     onChange: () => repaintPanes(),
@@ -1656,7 +1661,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔴 **手元のファイルを Office で開く控え**(#432)。⚠ **session 限り** ──
    * 判断も寿命も `local-office-files.ts` が持つ(ここは配線だけ)。
    */
-  const localOffice = new LocalOfficeFiles();
+  // 🔴 書き戻せない保存(許可が無い / 対応していないブラウザ)は、ダウンロードで渡す(#432)
+  const localOffice = new LocalOfficeFiles((name, bytes) =>
+    downloadBlob(name, new Blob([bytes as BlobPart], { type: 'application/octet-stream' })),
+  );
   const officeWindow = new OfficeWindow({
     // 🔴 #433 の計測(flag `office.inputLog`)── 窓を開くたびに読み直す
     //    (フラグ画面で切り替えたら、次に開く窓から効く)
@@ -6509,6 +6517,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   openLocalFile = createLocalFileOpener({
     openNote: importLaunchFiles,
+    // 🔴 Office の文書は Office の窓で開く(#432)。⚠ 判断は `open-local-office.ts`、使えない環境は添付に落ちる
+    openOffice: (item) =>
+      openLocalOffice(
+        {
+          usable: () => isOfficeUsable(appOfficePack.isInstalled(), appOfficePack.capability()),
+          local: localOffice,
+          openTile: openOfficeTile,
+        },
+        item,
+      ),
     // 🔴 作れた 1 枚目の lid を返す(同じ file の記憶用)。⚠ **handle は渡さない** ── 渡すと
     //    連絡先が「元ファイルへ書き戻す」の相手になり、vCard へ本文を書いて壊す
     importContact: async (file) => {

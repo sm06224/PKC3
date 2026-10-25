@@ -47,7 +47,35 @@ interface Held {
   readonly name: string;
 }
 
+/**
+ * 🔴 **書き込みの許可を、user の操作の中で先に取る**(#432)。
+ *
+ * 保存は Office の窓で `Ctrl+S` を押した結果で、その時点の PKC3 のタブには操作の続きが無く、
+ * `requestPermission` が拒否されることがある。だから**開く操作の中**(PC タブの行を押した / ファイルを選んだ)で訊いておく。
+ * PC タブのフォルダは読むだけの許可で繋ぐので、そこから出た file は書く許可がまだ無い。
+ *
+ * @returns 書ける(許可済み / 許可の概念が無い実装)なら `true`。書く口が無い・断られたら `false`
+ *   (呼び手は「書き戻せない」として開く ── 保存はダウンロードになる)。
+ */
+export async function requestWritePermission(handle: LaunchedHandle): Promise<boolean> {
+  if (typeof handle.createWritable !== 'function') return false;
+  try {
+    const want = { mode: 'readwrite' };
+    if (typeof handle.queryPermission !== 'function') return true;
+    if ((await handle.queryPermission(want)) === 'granted') return true;
+    if (typeof handle.requestPermission !== 'function') return false;
+    return (await handle.requestPermission(want)) === 'granted';
+  } catch {
+    return false;
+  }
+}
+
+/** 書き戻せなかった保存を、ダウンロードで渡す口(#432)。 */
+export type LocalDownload = (name: string, bytes: Uint8Array) => void;
+
 export class LocalOfficeFiles {
+  constructor(private readonly download?: LocalDownload) {}
+
   /** 合言葉 → handle。⚠ **session 限り**(上の注記)。 */
   private readonly byToken = new Map<string, Held>();
   /** まだ Office へ渡していないもの。⚠ **1 件だけ持つ**(下の注記)。 */
@@ -66,10 +94,17 @@ export class LocalOfficeFiles {
    *   2 件目を積んでも**開けるのは 1 件**である。積むと「押したら違うほうが開いた」
    *   になるので、**最後に来たものを開く**と決める(呼び手が name を画面に出す)。
    */
-  stage(handle: LaunchedHandle, name: string, bytes: Uint8Array, modifiedAt: number | null = null): StagedLocalFile {
+  stage(
+    handle: LaunchedHandle,
+    name: string,
+    bytes: Uint8Array,
+    modifiedAt: number | null = null,
+    canWrite = true,
+  ): StagedLocalFile {
     this.seq += 1;
     const token = localFileToken(`${this.session}-${this.seq}`);
-    const writable = typeof handle.createWritable === 'function';
+    // ⚠ `canWrite` = 開く操作の中で書く許可を取れたか(取れなかったら、開けるが保存はダウンロード)
+    const writable = canWrite && typeof handle.createWritable === 'function';
     this.pending = { token, name, bytes, handle, writable, modifiedAt };
     return { token, name, bytes, writable };
   }
@@ -133,10 +168,23 @@ export class LocalOfficeFiles {
    *   ⚠ **失敗を黙らせない** ── 呼び手が user に伝える
    *   (書けなかったのに「保存しました」と出すのが、いちばん取り返しがつかない)。
    */
-  async writeBack(token: string, bytes: Uint8Array): Promise<true | false | LocalWriteFailure> {
+  async writeBack(token: string, bytes: Uint8Array): Promise<true | false | 'downloaded' | LocalWriteFailure> {
     const held = this.byToken.get(token);
     if (held === undefined) return false;
-    const { handle } = held;
+    const r = await this.writeHandle(held.handle, bytes);
+    // 🔴 書く口が無い / 許可が得られない ── 保存を失わないよう、ダウンロードで渡す(#432)
+    if ((r === 'unsupported' || r === 'denied') && this.download !== undefined) {
+      try {
+        this.download(held.name, bytes);
+        return 'downloaded';
+      } catch {
+        return r;
+      }
+    }
+    return r;
+  }
+
+  private async writeHandle(handle: LaunchedHandle, bytes: Uint8Array): Promise<true | false | LocalWriteFailure> {
     if (typeof handle.createWritable !== 'function') return 'unsupported';
     /**
      * ⚠ **権限を確かめ直す**(`launched-files.ts` と同じ作法)── OS 起動で来た

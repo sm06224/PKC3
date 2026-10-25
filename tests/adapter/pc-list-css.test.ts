@@ -20,7 +20,7 @@ const css = (): string => withoutMedia(stripComments(readFileSync('src/styles/ap
 const LIST = "[data-pkc-field='pc-list']";
 const ROW = "[data-pkc-field='pc-list'] > li";
 const OPEN = "[data-pkc-field='pc-open']";
-const DIR = "[data-pkc-field='pc-list'] > li[data-pkc-action='pc-dir-note']";
+const DIR = "[data-pkc-field='pc-enter']";
 const HEAD = "[data-pkc-field='pc-head']";
 
 describe('PC タブの一覧の作り(#1272)', () => {
@@ -41,7 +41,7 @@ describe('PC タブの一覧の作り(#1272)', () => {
     expect(blocksFor(css(), ROW).join('\n')).toMatch(decl('border-bottom', '1px solid var\\(--border\\)'));
   });
 
-  it('🔴 押せる行と押せない行(フォルダ)は、同じ規則の中で余白・行間・寄せを持つ', () => {
+  it('🔴 ファイルの行とフォルダの行(どちらも押せる)は、同じ規則の中で余白・行間・寄せを持つ', () => {
     const text = css();
     // ⚠ 別々の規則に同じ値を書くと、片方だけ直る日が来る ── 1 つの選択子リストに入っていること
     const shared = blocksFor(text, OPEN).filter((b) => blocksFor(text, DIR).includes(b));

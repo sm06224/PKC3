@@ -10,6 +10,7 @@
  * |---|---|---|
  * | Markdown | OS から開いたときと同じ口(`importLaunchFiles`) | 🟢 結ぶ(「元ファイルへ書き戻す」が効く)。同じ file は増えない |
  * | vCard | いつもの取込(連絡先になる)。**同じ file は増えない**(下の記憶) | 結ばない |
+ * | Office | Office の窓で開く(#432。保存で元の file へ書き戻す。使えない環境では下の添付) | 🟢 窓の保存が書き戻す(書き戻しの記憶には入れない) |
  * | それ以外 | 添付のノートを 1 件作る(`attachOne`) | 結ばない(⚠ 書き戻しの記憶には入れない) |
  *
  * ## ⚠ 添付・vCard の「同じ file を 2 回押しても増えない」
@@ -48,6 +49,11 @@ export interface OpenLocalFileDeps {
   select(lid: string): void;
   /** 添付を作る。⚠ **待つ側の gate の中**で走らせる。作れなかったら `null`(理由は取込側が言う)。 */
   attach(file: File): Promise<string | null>;
+  /**
+   * Office の文書(#432)── Office の窓で開き、保存で元の file へ書き戻す。
+   * 開けた(窓へ渡した)なら `true`、Office が使えない環境などで渡さなかったら `false`(= 従来どおり添付のノートにする)。
+   */
+  openOffice?(item: LocalFileItem): Promise<boolean>;
   /** 画面の下の 1 行。 */
   say(text: string): void;
 }
@@ -74,6 +80,7 @@ export function createLocalFileOpener(deps: OpenLocalFileDeps): (item: LocalFile
       if (lid !== null) attached.remember(lid, item.handle, item.file.name);
       return;
     }
+    if (kind.route === 'office' && deps.openOffice !== undefined && (await deps.openOffice(item))) return;
     await deps.wait();
     const { fresh, reopened } = await splitAlreadyOpen([item], attached, (lid) => deps.isPresent(lid));
     if (reopened.length > 0) {

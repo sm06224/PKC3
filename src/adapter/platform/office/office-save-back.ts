@@ -131,7 +131,7 @@ export interface SaveBackDeps {
   readonly writeLocal: (
     token: string,
     bytes: Uint8Array<ArrayBuffer>,
-  ) => Promise<boolean | LocalWriteFailure | null>;
+  ) => Promise<boolean | 'downloaded' | LocalWriteFailure | null>;
   /**
    * 🔴 **この合言葉の元のファイルを、このタブが知っているか**(#1087)。手元のファイルの合言葉は
    *   **開いたタブの中にしか無い**(`LocalOfficeFiles.byToken`)ので、知らないタブでは書けない。
@@ -490,7 +490,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     if (save.token !== undefined && !orphan && isLocalFileToken(save.token) && !deps.canWrite()) return hold(save);
     const local = save.token === undefined || orphan ? null : await deps.writeLocal(save.token, bytes);
     if (local !== null) {
-      if (local !== true) {
+      if (local !== true && local !== 'downloaded') {
         if (!toldLocalFail.has(save.key)) {
           toldLocalFail.add(save.key);
           complain(save, localSaveFailedNotice(save.name, local === false ? null : local));
@@ -504,7 +504,12 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       toldLocalFail.delete(save.key);
       toldHeld.delete(save.key);
       toldThrown.delete(save.key);
-      tell(save, `元のファイルへ保存しました: 「${save.name}」`);
+      tell(
+        save,
+        local === 'downloaded'
+          ? `元のファイルへは書き戻せないため、ダウンロードに保存しました: 「${save.name}」`
+          : `元のファイルへ保存しました: 「${save.name}」`,
+      );
       return 'replaced';
     }
 
