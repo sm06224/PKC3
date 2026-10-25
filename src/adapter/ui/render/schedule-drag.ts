@@ -167,6 +167,47 @@ export function decodeTaskDrag(payload: string): GrabbedTask | null {
   return { lid, line: line ?? '', from: from ?? '', repeat: repeat ?? '', ...(rawLine === '' ? {} : { rawLine }) };
 }
 
+/**
+ * 🔴 **カンバンの列への落とし先**(#277)。`data-pkc-drop-status`(`schedule-board.ts` が列に焼く)を持つ列。
+ * ⚠ 日の落とし先(`data-pkc-drop-date`)とは別の属性 ── 同じ札を「日へ」と「状態へ」の両方に落とせるが、
+ *   書き換える場所が違う(`@日付` と `[ ]`/`[x]`)ので混ぜない。
+ */
+export function statusTargetOf(
+  el: Element | null,
+  root: ParentNode,
+): { readonly el: HTMLElement; readonly status: 'open' | 'done' } | null {
+  const found = el?.closest<HTMLElement>('[data-pkc-drop-status]') ?? null;
+  if (found === null || !root.contains(found)) return null;
+  const status = found.getAttribute('data-pkc-drop-status');
+  return status === 'open' || status === 'done' ? { el: found, status } : null;
+}
+
+/**
+ * 🔴 **掴んだ札を、反対の列へ落とした ── 本文のチェックを切り替える**(#277)。
+ *
+ * 🔑 **新しい書換の口を作らない**。落とした札の**印(チェック欄)を押す**のと同じ ── 印の `click()` は
+ *   `binder.ts` の `toggle-task`(書換の門・別のタブの編集の確認・押した時点の行の照合・済みにしたときの
+ *   「元に戻す」)をそのまま通る。マウス(HTML5 drag)と指(長押し)の両方がここ 1 本を呼ぶ。
+ * ⚠ すでにその列に居る札は何もしない。⚠ 掴んだ札が板に居なければ(一覧から掴んだ等)何もしない。
+ */
+export function dropTaskToStatus(
+  column: HTMLElement,
+  grabbed: GrabbedTask,
+  status: 'open' | 'done',
+): void {
+  if (grabbed.line === '') return; // ノート 1 件が丸ごと予定 ── 切り替えるチェック欄が無い
+  const board = column.closest('[data-pkc-region="schedule-board"]');
+  if (board === null) return;
+  for (const card of board.querySelectorAll<HTMLElement>('article[data-pkc-entry]')) {
+    if (card.getAttribute('data-pkc-entry') !== grabbed.lid) continue;
+    const box = card.querySelector<HTMLInputElement>('input[type="checkbox"][data-pkc-task-line]');
+    if (box === null || box.getAttribute('data-pkc-task-line') !== grabbed.line) continue;
+    if (box.checked === (status === 'done')) return;
+    box.click();
+    return;
+  }
+}
+
 /** 長押しが確定するまで(押さえている最中)。 */
 interface Pending {
   readonly card: HTMLElement;
@@ -634,7 +675,13 @@ export function installScheduleDrag(root: HTMLElement, dispatcher: Dispatcher): 
     if (armed === null || e.pointerId !== armed.pointerId) return;
     // 🔑 確定した後は全方向で掴む(押さえ続けた時点で意図は確定している)
     e.preventDefault();
-    const drop = dateTargetOf(underPointer(e));
+    const under = underPointer(e);
+    const status = statusTargetOf(under, root);
+    if (status !== null) {
+      markDrop(status.el);
+      return;
+    }
+    const drop = dateTargetOf(under);
     if (drop === null) {
       // ⚠ 光ったままにしない ── 通ってから別の場所で離すと「そこへ入った」と読む
       clearDrop();
@@ -653,7 +700,13 @@ export function installScheduleDrag(root: HTMLElement, dispatcher: Dispatcher): 
     armed = null;
     armSwallow();
     clearDrop();
-    const drop = dateTargetOf(underPointer(e));
+    const under = underPointer(e);
+    const status = statusTargetOf(under, root);
+    if (status !== null) {
+      dropTaskToStatus(status.el, a, status.status);
+      return;
+    }
+    const drop = dateTargetOf(under);
     if (drop === null) return;
     dropTaskCard(dispatcher, a, drop.date, root);
   };

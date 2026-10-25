@@ -255,12 +255,12 @@ describe('広い面の「週」', () => {
     expect(qa('[data-pkc-region="schedule-group"]')).toHaveLength(2);
   });
 
-  it('押している見せ方は「週」だけが true(広い面は「月」も並ぶ)', () => {
+  it('押している見せ方は「週」だけが true(広い面は「月」「カンバン」も並ぶ)', () => {
     const { qa, showWeek } = setup({});
     showWeek();
     expect(
       qa('[data-pkc-action="schedule-mode"]').map((b) => [b.textContent, b.getAttribute('aria-pressed')]),
-    ).toEqual([['一覧', 'false'], ['日', 'false'], ['週', 'true'], ['月', 'false']]);
+    ).toEqual([['一覧', 'false'], ['日', 'false'], ['週', 'true'], ['月', 'false'], ['カンバン', 'false']]);
   });
 });
 

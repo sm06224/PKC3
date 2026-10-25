@@ -54,7 +54,7 @@ export function getMonthGrid(
  * 🔑 判断はここ 1 か所(描き手は呼ぶだけ)。`shown` は見ている日(`YYYY-MM-DD`)。
  */
 export function viewedMarks(
-  mode: 'list' | 'day' | 'week' | 'month',
+  mode: 'list' | 'day' | 'week' | 'month' | 'board',
   shown: string,
   weekDays: readonly string[],
 ): { readonly day: string | null; readonly week: readonly string[] } {

@@ -231,7 +231,7 @@ import { insertionForLineDate } from '@features/schedule/line-date';
 import { dayStamp } from '@features/datetime/date-math';
 import { safeName } from '@features/export/file-name';
 import { hasTranscriptCues, srtFromTranscript, transcriptCues } from '@features/asr/srt';
-import { decodeTaskDrag, dropTaskCard, encodeTaskDrag } from '@adapter/ui/render/schedule-drag';
+import { decodeTaskDrag, dropTaskCard, dropTaskToStatus, encodeTaskDrag, statusTargetOf } from '@adapter/ui/render/schedule-drag';
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
 import { offerDoneUndo, offerMoveUndo, undoScheduleMove } from '@adapter/ui/render/schedule-undo';
 import { slotOfCard } from '@features/schedule/move-undo';
@@ -11499,7 +11499,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   /** 予定の面の「一覧 / 日」(#855 段 A-1)。値は押したボタンの `data-pkc-mode`。 */
   'schedule-mode': (dispatcher, target, services) => {
     const mode = target.getAttribute('data-pkc-mode');
-    if (mode !== 'list' && mode !== 'day' && mode !== 'week' && mode !== 'month') return;
+    if (mode !== 'list' && mode !== 'day' && mode !== 'week' && mode !== 'month' && mode !== 'board') return;
     /**
      * 🔴 **左の列の「週」は、別のウィンドウで開く**(#855 段 A-2)。左の列は狭く、7 日を並べると
      *   1 日が読めなくなる ── 左の見せ方(一覧 / 日)は変えない。窓が出なかったときの理由は
@@ -11515,6 +11515,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       services.openScheduleWindow(mode, dispatcher.getState().scheduleDay);
       return;
     }
+    // 🔴 カンバン(#277)は別のウィンドウの予定表だけ(左の列には押し所を出していない)。念のため狭い面では受けない
+    if (mode === 'board' && narrow) return;
     // 🔴 狭い面は自分の見せ方(`scheduleNarrowMode`)を持つ ── 中央の見せ方を巻き込まない
     if (narrow && (mode === 'list' || mode === 'day')) {
       dispatcher.dispatch({ type: 'SET_SCHEDULE_NARROW_MODE', mode });
@@ -11539,7 +11541,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (win === null) return;
     const range =
       face.querySelector<HTMLElement>(
-        '[data-pkc-region="schedule-monthview"]:not([hidden]), [data-pkc-region="schedule-weekview"]:not([hidden]), [data-pkc-region="schedule-day"]:not([hidden])',
+        '[data-pkc-region="schedule-monthview"]:not([hidden]), [data-pkc-region="schedule-board"]:not([hidden]), [data-pkc-region="schedule-weekview"]:not([hidden]), [data-pkc-region="schedule-day"]:not([hidden])',
       ) ?? face.querySelector<HTMLElement>('[data-pkc-region="schedule-groups"]');
     if (range === null) return;
     for (const old of doc.querySelectorAll('[data-pkc-print-range]')) old.removeAttribute('data-pkc-print-range');
@@ -18755,6 +18757,14 @@ export function bindActions(
     }
     // 🔴 **予定の札**(双方向)── 落とし先は日の升目 / 束の見出し
     if (de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true) {
+      // 🔴 カンバンの列(#277)── 落とすと状態が変わる。日の落とし先より先に見る
+      const col = statusTargetOf(de.target as Element | null, root);
+      if (col !== null) {
+        e.preventDefault();
+        de.dataTransfer.dropEffect = 'move';
+        markDropTarget(col.el);
+        return;
+      }
       const drop = dateTargetOf(de.target);
       if (drop === null) {
         // ⚠ **光ったままにしない** ── 通ってから別の場所で離すと「そこへ入った」と読む
@@ -18994,6 +19004,15 @@ export function bindActions(
      *   2 つ作らない」/「落とし先の判定は 1 本に保つ」)。
      */
     if (de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true) {
+      // 🔴 カンバンの列(#277)── 掴んだ札の印を押すのと同じ道で、本文のチェックを切り替える
+      const col = statusTargetOf(de.target as Element | null, root);
+      if (col !== null) {
+        clearDropTarget();
+        e.preventDefault();
+        const g = decodeTaskDrag(de.dataTransfer.getData(PKC_TASK_DRAG) || '');
+        if (g !== null) dropTaskToStatus(col.el, g, col.status);
+        return;
+      }
       const drop = dateTargetOf(de.target);
       clearDropTarget();
       if (drop === null) return;

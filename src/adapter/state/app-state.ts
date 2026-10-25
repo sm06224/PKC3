@@ -1690,7 +1690,7 @@ export interface AppState {
    * 予定の面の見せ方(#855 段 A-1)。`list` = 日ごとの一覧(既定)/ `day` = 1 日を時間の目盛りに並べる / `week` = 7 日を並べる(広い面だけ ── 左の列は別のウィンドウで開く。#855 段 A-2)/ `month` = 1 か月を大きな升目で見る(広い面だけ。#855)。
    * ⚠ 保存しない(開き直したら一覧に戻る)── 見え方の一時の選びであって、ノートの中身ではない。
    */
-  scheduleMode: 'list' | 'day' | 'week' | 'month';
+  scheduleMode: 'list' | 'day' | 'week' | 'month' | 'board';
   /**
    * 🔴 **左の列(狭い面)の予定の見せ方**(#855 段 A-2 の直し)。`list` / `day` だけ(既定は一覧。保存しない)。
    * ⚠ 狭い面だけがこれを読み、広い面(中央 / 別のウィンドウ)は `scheduleMode` だけを読む ──
@@ -3280,7 +3280,7 @@ export type UserAction =
   | { type: 'FORCE_RELEASE_LOCK'; discardDraft: boolean }
   | { type: 'SET_CALENDAR_MONTH'; year: number; month: number }
   /** 予定の面の「一覧 / 日」(#855 段 A-1)。 */
-  | { type: 'SET_SCHEDULE_MODE'; mode: 'list' | 'day' | 'week' | 'month' }
+  | { type: 'SET_SCHEDULE_MODE'; mode: 'list' | 'day' | 'week' | 'month' | 'board' }
   | { type: 'SET_SCHEDULE_NARROW_MODE'; mode: 'list' | 'day' }
   /** 「日」で見る日。`null` = 今日に戻る。実在しない日は黙って捨てる(別の日へ寄せない)。 */
   | { type: 'SET_SCHEDULE_DAY'; date: string | null }

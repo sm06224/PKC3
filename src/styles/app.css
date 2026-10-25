@@ -12242,3 +12242,64 @@ h6:hover > .pkc-heading-anchor,
   border-color: var(--fg);
   font-weight: 600;
 }
+
+/* ── 予定の「カンバン」(#277。user 指示 2026-08-19「カンバンとカレンダーを復活」)────────
+ * 未完了 / 完了の 2 列。札は一覧と同じ札(`schedule-cards` の直下)なので、押す・掴む・縦線の色は一覧の規則が
+ * そのまま効く。ここが足すのは列の置き場所と、**落とせる列が掴んで通ったときに光る**線だけ。
+ * 済んだ札は線で示す(一覧の規則)── 色は使わない。 */
+[data-pkc-region='schedule-board'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+}
+[data-pkc-region='schedule-board'][hidden] {
+  display: none;
+}
+[data-pkc-field='schedule-board-note'] {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+[data-pkc-field='schedule-board-columns'] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+  align-items: start;
+}
+[data-pkc-field='schedule-board-column'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  min-width: 0;
+  /* 札が 0 件の列にも落とせるよう、最低限の高さを取る */
+  min-height: 96px;
+  padding: var(--s1);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+[data-pkc-field='schedule-board-head'] {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+[data-pkc-field='schedule-board-cards'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 48px;
+}
+[data-pkc-field='schedule-board-more'] {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+[data-pkc-field='schedule-board-more'][hidden] {
+  display: none;
+}
+[data-pkc-drop-status][data-pkc-dropping] {
+  outline: 2px solid var(--fg);
+  outline-offset: -2px;
+}
