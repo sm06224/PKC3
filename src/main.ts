@@ -352,6 +352,9 @@ import { ChapterWindows } from '@adapter/ui/chapter-windows';
 import { createCaptureService } from '@adapter/ui/actions/capture';
 import { createCaptureTrimmer } from '@adapter/ui/actions/capture-trim';
 import { createCaptureExtractor } from '@adapter/ui/actions/capture-extract';
+import { createCaptureProcessor } from '@adapter/ui/actions/capture-process';
+import { createCaptureTools } from '@adapter/ui/actions/capture-tools';
+import { processToolOf } from '@features/capture/capture-process';
 import { createImageDrawer } from '@adapter/ui/actions/image-draw';
 import { openImageDrawWindow } from '@adapter/platform/image-draw-window';
 import { AudioClient } from '@adapter/platform/audio/audio-client';
@@ -3733,6 +3736,31 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
 
   /**
+   * 🔴 **録ったものを仕上げる**(#952 A2・A4・A5・B1・B4・B5・B6、#674)。段取りは `capture-process.ts`、道具の実体は
+   * `capture-tools.ts`。ここは口を渡すだけ(CLAUDE.md §2)。⚠ 重い所は動画 / 音のワーカー(`WorkerLease`)。
+   */
+  const captureProcessor = createCaptureProcessor({
+    dispatcher,
+    readBlob: (assetKey) => blobs.get(cid, assetKey),
+    readBody: async (lid) => ((await client.request({ op: 'getBody', cid, lid })) as string | null) ?? null,
+    tools: createCaptureTools({
+      foldStill: (blob) => videoClient.foldStill(blob),
+    }),
+    parentOf: (lid) => {
+      const st = dispatcher.getState();
+      return resolveCanonicalParents(st.entryMetas, st.relations).get(lid) ?? null;
+    },
+    attach: async (item, place) => {
+      let out: Awaited<ReturnType<typeof attachOne>> = null;
+      await withAssetGate.queued(async () => {
+        out = await attachOne(dispatcher, attachDeps, item, undefined, place);
+      });
+      return out;
+    },
+    notify: showStatus,
+  });
+
+  /**
    * 🔴 **画像に描き込む**(#683 段③。裁定は #1163)。段取りは `image-draw.ts`、窓は
    * `image-draw-window.ts`。ここは口を渡すだけ(CLAUDE.md §2:この file はどの test からも
    * 実行されない)。⚠ 取り込みは録音の切り出しと同じ `attachOne` の 1 本(門の中で待つ側)。
@@ -4093,6 +4121,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     transcribeCapture: (lid) => void captureTranscriber.run(lid),
     // 🔴 動画から音だけ / 絵だけを取り出す(#952 A1)── 押す口は動画の行に在る
     extractCapture: (lid, part) => void captureExtractor.run(lid, part),
+    // 🔴 録ったものを仕上げる(#952)── 押す口は「音/動画」の行に在る
+    processCapture: (lid, tool) => {
+      const spec = processToolOf(tool);
+      if (spec !== undefined) void captureProcessor.run(lid, spec.id);
+    },
     // 🔴 音声認識の部品を入れる / やめる / 消す(#772 段②)── 判断も文言も実体が持つ
     installAsrPart: (id) => {
       const part = asrPartOf(id);

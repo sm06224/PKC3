@@ -23,6 +23,7 @@ import {
   type VideoCutResult,
   type VideoJob,
   type VideoJobResult,
+  type VideoFoldResult,
   type VideoPictureResult,
   type VideoScanResult,
 } from './video-codec';
@@ -134,6 +135,11 @@ export class VideoClient {
   /** 🔴 音のトラックを落として映像だけにする(#952 A1)。⚠ 断る理由は**値で返る**。 */
   async pictureOnly(blob: Blob): Promise<VideoPictureResult> {
     return (await this.run({ op: 'picture-only', blob })) as VideoPictureResult;
+  }
+
+  /** 🔴 静止している区間を畳む(#952 A2)。⚠ 断る理由は**値で返る**。 */
+  async foldStill(blob: Blob): Promise<VideoFoldResult> {
+    return (await this.run({ op: 'fold-still', blob })) as VideoFoldResult;
   }
 
   dispose(): void {

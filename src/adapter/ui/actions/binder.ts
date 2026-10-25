@@ -1949,6 +1949,11 @@ export interface BinderServices {
    */
   extractCapture?(lid: string, part: 'audio' | 'picture'): void;
   /**
+   * 🔴 **録ったものを仕上げる**(#952 A2・A4・A5・B1・B4・B5・B6、#674)。⚠ **省略可**(無い配線では古いタブとして断る)。
+   * 段取りは `capture-process.ts`、道具の実体は `capture-tools.ts`。
+   */
+  processCapture?(lid: string, tool: string): void;
+  /**
    * 🔴 **音声認識の部品を入れる / 途中でやめる / 消す**(#772 段②)。
    * ⚠ **勝手に取りに行かない** ── 押した人にだけ取らせる(Office 一式と同じ作法)。
    * ⚠ 判断も文言も `AsrPackInstaller` が持つ(投げてこない)。
@@ -7992,6 +7997,20 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     services.extractCapture(lid, part);
+  },
+  /**
+   * 🔴 **録ったものを仕上げる**(#952)。⚠ 対象は押した行が持つ(`data-pkc-entry`)── 選択中のノートから採らない。
+   *   どの道具かは押したボタン自身が運ぶ(`data-pkc-part`。表は `features/capture/capture-process.ts`)。
+   */
+  'capture-process': (dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    const part = target.getAttribute('data-pkc-part');
+    if (!lid || !part) return;
+    if (!services.processCapture) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、この操作はできません。再読み込みしてください' });
+      return;
+    }
+    services.processCapture(lid, part);
   },
   /**
    * ✏️ 編集に入る。#177: 多重タブでは**先に編集権を取ってから**入る。

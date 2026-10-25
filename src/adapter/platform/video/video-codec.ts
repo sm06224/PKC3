@@ -26,6 +26,7 @@
  *   通れば環境は使える(次の録画は押した所ぴったりで切る)── 1 本の失敗で、このページを開いている間ずっと
  *   確認つきの道へ倒さない。通らなければ環境の失敗として「使えない」に倒す
  */
+import { planFoldStill } from '@features/video/fold-still';
 import {
   planPictureOnly,
   planVideoTrim,
@@ -71,6 +72,11 @@ export type VideoJob =
   | {
       /** 🔴 音のトラックを落として映像だけにする(#952 A1)。範囲を持たない。 */
       readonly op: 'picture-only';
+      readonly blob: Blob;
+    }
+  | {
+      /** 🔴 静止している区間を畳む(#952 A2)。範囲を持たない。 */
+      readonly op: 'fold-still';
       readonly blob: Blob;
     };
 
@@ -128,7 +134,19 @@ export type VideoPictureResult =
     }
   | { readonly ok: false; readonly reason: VideoTrimRefusal };
 
-export type VideoJobResult = VideoScanResult | VideoCutResult | VideoPictureResult;
+/** 静止区間を畳んだ結果(#952 A2)。⚠ 出力の `Blob` は**元の部品を指す**(コピーしていない)。 */
+export type VideoFoldResult =
+  | {
+      readonly ok: true;
+      readonly blob: Blob;
+      readonly durationMs: number;
+      readonly runs: number;
+      readonly droppedFrames: number;
+      readonly foldedMs: number;
+    }
+  | { readonly ok: false; readonly reason: VideoTrimRefusal | 'nothing-to-fold' };
+
+export type VideoJobResult = VideoScanResult | VideoCutResult | VideoPictureResult | VideoFoldResult;
 
 /** `Blob` を窓で読む口。 */
 export function blobSource(blob: Blob): ByteSource {
@@ -608,8 +626,29 @@ export async function pictureOnlyVideo(job: { blob: Blob }): Promise<VideoPictur
   return { ok: true, blob, durationMs: p.durationMs, keptVideo: p.keptVideo, droppedAudio: p.droppedAudio };
 }
 
+/**
+ * 🔴 **静止している区間を畳む**(#952 A2)。終わりまで窓で読み、差分フレームを落として元の部品を繋ぐ。
+ * ⚠ 例外を投げない(壊れた file・畳める所が無い、は断る理由を値で返す)。
+ */
+export async function foldStillVideo(job: { blob: Blob }): Promise<VideoFoldResult> {
+  const src = blobSource(job.blob);
+  const scanned = await scanWebmVideo(src, Number.POSITIVE_INFINITY);
+  if (!scanned.ok) return scanned;
+  const planned = planFoldStill(scanned.scan);
+  if (!planned.ok) return planned;
+  const p = planned.plan;
+  const blob = new Blob(
+    p.parts.map((part) =>
+      part.kind === 'bytes' ? (part.bytes as Uint8Array<ArrayBuffer>) : job.blob.slice(part.start, part.end),
+    ),
+    { type: 'video/webm' },
+  );
+  return { ok: true, blob, durationMs: p.durationMs, runs: p.runs, droppedFrames: p.droppedFrames, foldedMs: p.foldedMs };
+}
+
 /** ワーカー / その場の両方が通る 1 本の入口。 */
 export function runVideoJob(job: VideoJob, api?: CodecApi | null): Promise<VideoJobResult> {
   if (job.op === 'picture-only') return pictureOnlyVideo(job);
+  if (job.op === 'fold-still') return foldStillVideo(job);
   return job.op === 'scan' ? scanVideo(job, api) : cutVideo(job, api);
 }

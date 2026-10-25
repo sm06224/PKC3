@@ -41,6 +41,8 @@ export interface VideoFixture {
   readonly scaleNs?: number;
   /** 1 フレームの余分な中身の長さ(窓をまたがせる / 大きくする)。 */
   readonly padBytes?: number;
+  /** フレーム添字 → 余分な中身の長さ(`padBytes` より優先)。静止区間(小さい差分)を作るのに使う。 */
+  readonly padFor?: (index: number) => number;
   /** lacing の旗(0x02 / 0x04 / 0x06)を映像のブロックの flags に立てる(`simple` は SimpleBlock、`group` は Block)。 */
   readonly lacing?: number;
   /** 映像の track 番号(既定 1)。127 を超えると、ブロック先頭の track 番号が 2 バイトになる。 */
@@ -173,7 +175,7 @@ export function buildVideoWebm(f: VideoFixture = {}): BuiltFixture {
       const isKey = keySet.has(e.i);
       // 容器の印(嘘を混ぜる場合は逆にする)
       const containerKey = lies.has(e.i) ? !isKey : isKey;
-      const payload = framePayload(e.i, isKey, tag, pad);
+      const payload = framePayload(e.i, isKey, tag, f.padFor ? f.padFor(e.i) : pad);
       const vt = f.videoTrack ?? 1;
       const trackVint = vt < 0x7f ? [0x80 | vt] : [0x40 | (vt >> 8), vt & 0xff];
       const lacingBits = f.lacing ?? 0;

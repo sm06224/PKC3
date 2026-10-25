@@ -32,6 +32,7 @@ import {
   type CaptureItem,
 } from '@features/capture/capture-item';
 import { canExtractFromVideo, canTrimCapture, trimUnavailableText } from '@features/capture/capture-trim-gate';
+import { canProcess, PROCESS_TOOLS } from '@features/capture/capture-process';
 import { trimMarkText, trimNoteFirst } from '@features/audio/trim-text';
 import { humanBytes } from '@features/human-bytes';
 import type { AssetLender } from './detail';
@@ -782,6 +783,22 @@ export class CapturesRenderer {
         part === 'audio'
           ? 'この動画の音だけを新しい音として保存します(元の動画はそのまま残ります)。'
           : 'この動画の絵だけを新しい動画として保存します(音は入りません。元の動画はそのまま残ります)。';
+      li.append(x);
+    }
+    /**
+     * 🔴 **録ったものを仕上げる**(#952 A2・A4・A5・B1・B4・B5・B6、#674)。押し所は `PROCESS_TOOLS` の表から出す。
+     * ⚠ 使える形にだけ出す(`canProcess`)。結果は新しい添付か本文の末尾への追記で、元のバイトは変えない。
+     */
+    for (const tool of PROCESS_TOOLS) {
+      if (!canProcess(item, tool.id, item.hasSpeakers === true)) continue;
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.setAttribute('data-pkc-action', 'capture-process');
+      x.setAttribute('data-pkc-entry', item.lid);
+      x.setAttribute('data-pkc-part', tool.id);
+      x.setAttribute('data-pkc-field', `capture-process-${tool.id}`);
+      x.textContent = tool.label;
+      x.title = tool.title;
       li.append(x);
     }
     /**

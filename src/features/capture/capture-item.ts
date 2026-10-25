@@ -43,6 +43,8 @@ export interface CaptureItem {
    * (`ELAPSED_LINE_HEAD` + `parseElapsed`)。無ければ空(目盛りを出さない)。省略 = 空。
    */
   readonly transcriptMs?: readonly number[];
+  /** 本文に「## 話者」の一覧があるか(#952 B6「話者を直す」を出す門)。省略 = 無い。 */
+  readonly hasSpeakers?: boolean;
 }
 
 /** 一覧に入れる元。⚠ `getBodies` の 1 往復で採れる形にしてある。 */
@@ -92,6 +94,7 @@ export function captureItemsFrom(sources: readonly CaptureSource[]): CaptureItem
       assetKey: meta.assetKey,
       kind,
       transcriptMs: transcriptTimesMs(s.body, ELAPSED_LINE_HEAD, parseElapsed),
+      hasSpeakers: /^## 話者(?:\s|$)/m.test(s.body),
     });
   }
   return out;
