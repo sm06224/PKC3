@@ -10,10 +10,12 @@
  * 1 回の依頼ごとに `DenoiseState` を作って、終わったらその場で `destroy()` する(状態を持ち越さない)。
  * ⚠ PCM は **transfer で受ける**(ゼロコピー)。結果の bytes も transfer で返す。
  */
-import { runEngine, type FrameEngine } from '@features/audio/voice-lab';
+import { hasVoice, residualOf, runEngine, type FrameEngine } from '@features/audio/voice-lab';
 import { encodeOpusWebm, nativeAudioApi, type AudioApi } from './audio-encode';
 
-export type VoiceJob = { readonly op: 'denoise'; readonly pcm: Float32Array };
+export type VoiceJob =
+  | { readonly op: 'denoise'; readonly pcm: Float32Array }
+  | { readonly op: 'separate'; readonly pcm: Float32Array };
 
 export interface VoiceFile {
   /** 名前に入れる語(`話し声` など)。 */
@@ -67,9 +69,16 @@ export class VoiceRunner {
       return { ok: false, reason: 'no-engine' };
     }
     try {
-      const { clean } = runEngine(pcm, engine);
+      const { clean, vad } = runEngine(pcm, engine);
       const api = this.deps.audioApi === undefined ? nativeAudioApi() : this.deps.audioApi;
-      return await this.encodeFiles(api, [{ tag: '雑音を減らした', pcm: clean }]);
+      if (job.op === 'denoise') return await this.encodeFiles(api, [{ tag: '雑音を減らした', pcm: clean }]);
+      // separate:声 = 雑音(声以外)を引いたもの / 声以外 = 元から声を引いた残り(伴奏・環境音)
+      if (!hasVoice(vad)) return { ok: false, reason: 'no-voice' };
+      const rest = residualOf(pcm, clean);
+      return await this.encodeFiles(api, [
+        { tag: '話し声', pcm: clean },
+        { tag: '声以外', pcm: rest },
+      ]);
     } finally {
       engine.destroy();
     }

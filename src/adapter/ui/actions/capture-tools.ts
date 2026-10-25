@@ -168,5 +168,20 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
     return audioOutput(r, '雑音を減らした音を作りました');
   };
 
-  return { 'fold-still': foldStill, chapters, 'contact-sheet': contactSheet, denoise };
+
+  /**
+   * 声と伴奏を分ける(#674・#949・#683②)。元は残し、「話し声」と「声以外」の 2 つの新しい音にする。
+   * 手法は RNNoise の声の推定(声以外 = 元 − 声)── 話し声と背景の音楽・環境音を分ける用途向け。歌声と楽器の分離ではない。
+   */
+  const separate: ToolRunner = async ({ blob, progress }) => {
+    const d = await decodeForVoice(deps, blob);
+    if ('refused' in d) return { kind: 'refused', text: d.refused };
+    progress('声とそれ以外を分けています(ワーカーで処理)…');
+    const r = await deps.voice({ op: 'separate', pcm: d.pcm });
+    if (!r.ok) return { kind: 'refused', text: VOICE_REFUSAL[r.reason] };
+    if (r.kind !== 'audio') return { kind: 'refused', text: VOICE_REFUSAL['encode-failed'] };
+    return audioOutput(r, '話し声と声以外の 2 つの音を作りました');
+  };
+
+  return { 'fold-still': foldStill, chapters, 'contact-sheet': contactSheet, denoise, separate };
 }

@@ -248,3 +248,35 @@ describe('雑音を減らす', () => {
     expect(noEnc.dispatcher.getState().error).toContain('opus の符号化)に対応していない');
   });
 });
+
+describe('声と伴奏を分ける', () => {
+  const bytes = new Uint8Array([1, 2]).buffer;
+
+  it('🔴 「話し声」と「声以外」の 2 つの新しい音の添付になる。元は残る', async () => {
+    const voice = vi.fn(async (job: VoiceJob) => {
+      void job;
+      return {
+        ok: true as const,
+        kind: 'audio' as const,
+        files: [
+          { tag: '話し声', bytes, durationMs: 1000 },
+          { tag: '声以外', bytes, durationMs: 1000 },
+        ],
+      };
+    });
+    const h = harness({ name: '会議.webm', tools: { voice } });
+    h.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
+    await h.run('separate');
+    expect(voice.mock.calls[0]![0]).toMatchObject({ op: 'separate' });
+    expect(h.deps.attach.mock.calls.map((c) => c[0].name)).toEqual(['会議 (話し声).webm', '会議 (声以外).webm']);
+    expect(h.dispatcher.getState().captureItems?.map((i) => i.lid)).toEqual(['a']);
+    expect(h.notes.at(-1)).toContain('「会議 (話し声).webm」、「会議 (声以外).webm」');
+  });
+
+  it('声が見つからないときは理由を出し、何も作らない', async () => {
+    const h = harness({ tools: { voice: vi.fn(async () => ({ ok: false as const, reason: 'no-voice' as const })) } });
+    await h.run('separate');
+    expect(h.dispatcher.getState().error).toContain('話し声が見つかりませんでした');
+    expect(h.deps.attach).not.toHaveBeenCalled();
+  });
+});

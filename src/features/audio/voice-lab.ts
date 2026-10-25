@@ -62,6 +62,20 @@ export function runEngine(pcm: Float32Array, engine: FrameEngine): EngineRun {
   return { clean, vad };
 }
 
+/** 声があるとみなす声らしさ。 */
+export const VOICE_VAD = 0.5;
+/** 立ち上がりの数枠は声らしさが不安定(雑音だけでも一瞬高く出る。実測)── 数えない。 */
+export const VAD_WARMUP_FRAMES = 10;
+/** 声らしい枠がこれ以上(200ms)なければ「声が見つからない」。 */
+export const VAD_MIN_FRAMES = 20;
+
+/** 声が入っているか(立ち上がりを除いて、声らしい枠が `VAD_MIN_FRAMES` 以上)。 */
+export function hasVoice(vad: Float32Array): boolean {
+  let n = 0;
+  for (let k = VAD_WARMUP_FRAMES; k < vad.length; k += 1) if (vad[k]! > VOICE_VAD) n += 1;
+  return n >= VAD_MIN_FRAMES;
+}
+
 /** `pcm − clean`(声以外の部分)。⚠ 新しい配列を作る。 */
 export function residualOf(pcm: Float32Array, clean: Float32Array): Float32Array {
   const out = new Float32Array(pcm.length);

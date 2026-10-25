@@ -9,6 +9,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   boxSmooth,
+  hasVoice,
+  VAD_MIN_FRAMES,
+  VAD_WARMUP_FRAMES,
   ENGINE_DELAY,
   levelSegments,
   peakOf,
@@ -193,5 +196,19 @@ describe('声の大きさをそろえる(levelSegments)', () => {
     expect(s[0]).toBeCloseTo(1, 6);
     expect(s[3]).toBeCloseTo(3, 6);
     expect(s[5]).toBeCloseTo(4, 6);
+  });
+});
+
+describe('声が入っているか(hasVoice)', () => {
+  it('立ち上がりの高い値は数えず、声らしい枠が 200ms 以上あるときだけ真', () => {
+    const early = new Float32Array(300).fill(0.1);
+    early.fill(0.9, 0, VAD_WARMUP_FRAMES); // 立ち上がりだけ高い(雑音だけでも実測で出る)
+    expect(hasVoice(early)).toBe(false);
+    const few = new Float32Array(300).fill(0.1);
+    few.fill(0.9, 100, 100 + VAD_MIN_FRAMES - 1);
+    expect(hasVoice(few), '19 枠は足りない').toBe(false);
+    few[200] = 0.9;
+    expect(hasVoice(few), '20 枠で足りる').toBe(true);
+    expect(hasVoice(new Float32Array(0))).toBe(false);
   });
 });

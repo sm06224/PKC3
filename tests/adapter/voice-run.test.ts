@@ -11,17 +11,19 @@ import { VoiceRunner, type EngineHandle } from '../../src/adapter/platform/voice
 import { demuxWebmOpus, muxOpusWebm, opusHead, preSkipOf } from '../../src/features/audio/webm-opus';
 import { VOICE_RATE } from '../../src/features/audio/voice-lab';
 import { concat, mix, realEngine, synthVoice, whiteNoise } from '../helpers/rnnoise-engine';
+import { rmsOf } from '../../src/features/audio/voice-lab';
 
 /** 偽の AudioEncoder。入力 1 秒 → 50 個の 20ms packet(packet の中身は通し番号)。 */
 function fakeAudio(over: { preSkip?: number | null; supported?: boolean; failAt?: number } = {}) {
-  const log = { opened: 0, closed: 0, encodedSamples: 0, chunks: [] as number[], closedEncoder: 0, packets: 0 };
+  const log = { opened: 0, closed: 0, encodedSamples: 0, chunks: [] as number[], closedEncoder: 0, packets: 0, copies: [] as Float32Array[], stamps: [] as number[] };
   const api: AudioApi = {
     supported: async () => over.supported ?? true,
     makeData: (samples, rate, ts) => {
       log.opened += 1;
       log.chunks.push(samples.length);
+      log.copies.push(samples.slice()); // 符号化器に渡った PCM(あとで中身を確かめる)
       expect(rate).toBe(ENCODE_RATE);
-      expect(ts).toBe(Math.round((log.encodedSamples * 1e6) / ENCODE_RATE));
+      log.stamps.push(ts);
       log.encodedSamples += samples.length;
       const d: AudioDataLike & { n: number } = {
         n: samples.length,
@@ -70,6 +72,7 @@ describe('opus の WebM へ(encodeOpusWebm)', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(f.log.chunks).toEqual([48_000, 48_000, 4_800]);
+    expect(f.log.stamps, '時刻(マイクロ秒)が 1 秒ずつ進んでいない').toEqual([0, 1_000_000, 2_000_000]);
     expect(f.log.closed, '渡した AudioData を閉じていない').toBe(f.log.opened);
     expect(f.log.closedEncoder).toBe(1);
     const d = demuxWebmOpus(r.bytes);
@@ -168,5 +171,55 @@ describe('ワーカーの中身(VoiceRunner。本物の RNNoise)', () => {
     const r4 = await runner(fakeAudio({ supported: false }), t2).run({ op: 'denoise', pcm: noisyTalk() });
     expect(r4).toEqual({ ok: false, reason: 'no-encoder' });
     expect(t2).toEqual({ created: 1, destroyed: 1 });
+  });
+});
+
+describe('声と伴奏を分ける(separate)', () => {
+  const sec = VOICE_RATE;
+  /** 伴奏の代わり:一定の和音(300Hz + 500Hz。RMS 約 0.1)。 */
+  const bed = (n: number): Float32Array => {
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i += 1) out[i] = 0.1 * Math.sin((2 * Math.PI * 300 * i) / sec) + 0.1 * Math.sin((2 * Math.PI * 500 * i) / sec);
+    return out;
+  };
+  const engineFactory = async (): Promise<EngineHandle> => {
+    const e = await realEngine();
+    return { process: (f) => e.process(f), destroy: () => e.destroy() };
+  };
+
+  it('🔴 話し声と声以外の 2 つの音になり、足すと元に戻り、声の無い区間の伴奏は「声以外」の側に残る', async () => {
+    const audio = fakeAudio();
+    const input = mix(concat(synthVoice(2), new Float32Array(2 * sec)), bed(4 * sec));
+    const r = await new VoiceRunner({ createEngine: engineFactory, audioApi: audio.api }).run({ op: 'separate', pcm: Float32Array.from(input) });
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'audio') return;
+    expect(r.files.map((f) => f.tag)).toEqual(['話し声', '声以外']);
+    // 符号化器に渡った PCM を 1 秒の塊から繋ぎ直す(声 → 声以外の順)
+    const joined = Float32Array.from(audio.log.copies.flatMap((c) => Array.from(c)));
+    const n = input.length;
+    expect(joined.length).toBe(n * 2);
+    const voice = joined.subarray(0, n);
+    const rest = joined.subarray(n);
+    // 前提:入力の無音区間(声なし)には伴奏が鳴っている
+    expect(rmsOf(input, 3 * sec, 4 * sec)).toBeGreaterThan(0.09);
+    // 声の側:声の無い区間の伴奏は 10dB 以上小さい。声の区間は残る
+    expect(20 * Math.log10(rmsOf(input, 3 * sec, 4 * sec) / rmsOf(voice, 3 * sec, 4 * sec))).toBeGreaterThan(10);
+    expect(rmsOf(voice, sec * 0.5, 2 * sec)).toBeGreaterThan(0.05);
+    // 声以外の側:声の無い区間の伴奏がほぼそのまま残る(7 割以上)
+    expect(rmsOf(rest, 3 * sec, 4 * sec) / rmsOf(input, 3 * sec, 4 * sec)).toBeGreaterThan(0.7);
+    // 足せば元に戻る(符号化前の PCM で)
+    let maxDiff = 0;
+    for (let i = 0; i < n; i += 1) maxDiff = Math.max(maxDiff, Math.abs(voice[i]! + rest[i]! - input[i]!));
+    expect(maxDiff).toBeLessThan(1e-5);
+  });
+
+  it('🔴 声が見つからない音(伴奏だけ)は 2 つ作らず、理由を返す', async () => {
+    const audio = fakeAudio();
+    const r = await new VoiceRunner({ createEngine: engineFactory, audioApi: audio.api }).run({
+      op: 'separate',
+      pcm: bed(3 * sec),
+    });
+    expect(r).toEqual({ ok: false, reason: 'no-voice' });
+    expect(audio.log.opened, '断ったのに符号化した').toBe(0);
   });
 });
