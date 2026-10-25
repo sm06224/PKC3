@@ -181,3 +181,38 @@ describe('shouldHideStatusBar ── ステータスバーの行を畳むかど�
   });
 });
 
+describe('保存領域が使えない警告の重大度(#1038 D1)', () => {
+  const WARN = '⚠ 保存領域が使えません。このタブで書いたものは、閉じると消えます';
+
+  it('🔴 重大な statusBase だけが status-warning の器に入り、行の字は変わらない', () => {
+    const el = document.createElement('span');
+    const parts = partsFor('editing', { statusBase: WARN, statusBaseSevere: true, noticeLine: 'コピーしました' });
+    const text = paintStatusText(el, parts);
+    const warn = el.querySelector('[data-pkc-field="status-warning"]');
+    expect(warn?.textContent, '警告が器に入っていない').toBe(WARN);
+    expect(el.querySelector('[data-pkc-field="status-state"]')?.textContent).toBe('編集中');
+    expect(el.textContent).toBe(text);
+    expect(text).toBe(composeStatusLine(parts));
+    // 知らせは読み上げの子に残る(警告を巻き込まない)
+    expect(el.querySelector('[data-pkc-field="status-live"]')?.textContent).toBe('コピーしました');
+    expect(warn?.closest('[data-pkc-field="status-live"]')).toBeNull();
+  });
+
+  it('対照群 ── severe でなければ同じ字でも器に入らない / 空なら出ない', () => {
+    const el = document.createElement('span');
+    paintStatusText(el, partsFor('ready', { statusBase: WARN }));
+    expect(el.querySelector('[data-pkc-field="status-warning"]')).toBeNull();
+    expect(el.textContent).toBe(WARN);
+    paintStatusText(el, partsFor('ready', { statusBaseSevere: true }));
+    expect(el.querySelector('[data-pkc-field="status-warning"]')).toBeNull();
+  });
+
+  it('警告の前後に別の部品があっても順序が保たれる', () => {
+    const el = document.createElement('span');
+    const text = paintStatusText(el, partsFor('ready', { statusBase: WARN, statusBaseSevere: true, sync: '複数タブ: x' }));
+    expect(el.textContent).toBe(text);
+    expect(text).toBe(`${WARN} — 複数タブ: x`);
+    expect(el.querySelector('[data-pkc-field="status-warning"]')?.textContent).toBe(WARN);
+  });
+});
+

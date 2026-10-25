@@ -73,6 +73,7 @@ import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow'
 import { isTouchOnly } from '@adapter/ui/render/touch-device';
 import { scheduleNumberFormatWarmup } from '@adapter/ui/render/locale-warmup';
 import {
+  paintStatusBackup,
   paintStatusCopyRef,
   paintStatusCreate,
   paintStatusMessages,
@@ -90,6 +91,7 @@ import {
 } from '@adapter/ui/render/status-notice';
 import { openStorageWithRetry } from '@adapter/platform/storage/open-with-retry';
 import {
+  isStorageFallback,
   storageStatusLine,
   storageStatusTitle,
   storageWhereLine,
@@ -426,6 +428,7 @@ import { formatArchivePreviewMessage } from '@features/import/archive-preview';
 import {
   exportArchive,
   exportEntry,
+  exportSelection,
   exportFolder,
   exportMarkdownToFolder,
   createMarkdownFolderFlow,
@@ -1955,6 +1958,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔑 原因の綴りは**ツールチップ**へ回す(診断は要るが、読ませたいのは実害のほう)。
    */
   const statusBase = storageStatusLine(init.fallbackReason);
+  const statusBaseSevere = isStorageFallback(init.fallbackReason);
+  // 🔴 警告の隣の「バックアップを書き出す」(#1038 D1)── 常設の警告と同じ寿命なので 1 度だけ出し入れする
+  paintStatusBackup(regions.statusBackup, statusBaseSevere);
   regions.status.title = storageStatusTitle(`${versionText()} — ${init.vfs}`, init.fallbackReason);
   /**
    * #177: メインのタブ経由(follower)で開いているときの常設バッジ。fallback 警告と
@@ -1979,6 +1985,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   paintStatusText(regions.statusText, {
     phase: 'initializing',
     statusBase,
+    statusBaseSevere,
     sync: '',
     portableAssetNote: '',
     persistState: '',
@@ -2035,6 +2042,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const parts = {
       phase: dispatcher.getState().phase,
       statusBase,
+      statusBaseSevere,
       sync,
       portableAssetNote,
       persistState,
@@ -2879,7 +2887,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     kind:
       | ExportKind
       | { entryLid: string; as?: 'archive' | 'html' | 'docx' | 'pptx' | 'folder' | 'markdown' }
-      | { mdFolder: WritableDirLike },
+      | { mdFolder: WritableDirLike }
+      // 🔴 一覧で選んだ N 件だけ(#1038 A1)
+      | { selection: readonly string[]; as: 'archive' | 'html' },
   ): Promise<void> =>
     withAssetGate(async () => {
       const deps: ExportDeps = {
@@ -3023,6 +3033,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
       if (typeof kind === 'object' && 'mdFolder' in kind) {
         await exportMarkdownToFolder(dispatcher, deps, kind.mdFolder);
+      } else if (typeof kind === 'object' && 'selection' in kind) {
+        await exportSelection(dispatcher, deps, kind.selection, kind.as);
       } else if (
         typeof kind === 'object' &&
         (kind.as === 'docx' || kind.as === 'pptx' || kind.as === 'html' || kind.as === 'markdown') &&
@@ -5677,6 +5689,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         });
       }),
     exportEntry: (lid) => void runExport({ entryLid: lid }),
+    exportSelectionHtml: (lids) => void runExport({ selection: lids, as: 'html' }),
+    exportSelectionArchive: (lids) => void runExport({ selection: lids, as: 'archive' }),
     // 🔴 **このノートを、相手が開けるだけの 1 枚にする**(#491)
     exportEntryHtml: (lid) => void runExport({ entryLid: lid, as: 'html' }),
     // 🔴 **本文そのままの 1 つの .md**(#1440)── 入口は右クリック・右の列・「操作を探す」

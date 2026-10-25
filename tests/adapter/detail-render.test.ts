@@ -285,3 +285,17 @@ describe('描けた印(#517)', () => {
     ).toBe('a');
   });
 });
+
+describe('detail: 何も選んでいないときの案内(#1038 F1)', () => {
+  it('ファイルのドロップで添付になることを案内する(対照群: ノートを選べば案内は消える)', async () => {
+    const root = document.createElement('div');
+    const detail = new DetailRenderer(buildShell(root).detail);
+    const s0 = reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] }).state;
+    detail.render(s0);
+    const guide = root.querySelector('[data-pkc-field="detail-empty"]');
+    expect(guide?.textContent, '案内が出ていない').toContain('ファイルをこの画面へドロップすると、添付として入ります');
+    detail.render(stateWithBody('x'));
+    await settle();
+    expect(root.querySelector('[data-pkc-field="detail-empty"]')).toBeNull();
+  });
+});

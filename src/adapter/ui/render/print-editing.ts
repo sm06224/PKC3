@@ -10,6 +10,7 @@
  */
 import { foldSpans } from '@features/markdown/heading-fold';
 import { headingLevel } from './heading-fold';
+import { BODY_HOST_SELECTOR } from './detail';
 import { bodyBlocks } from './log-days';
 
 export const EDITOR_PRINT_FIELD = 'editor-print';
@@ -91,15 +92,62 @@ export function restoreHeadingFoldsAfterPrint(): void {
   rehide = [];
 }
 
+/**
+ * 🔴 **紙の頭に目次を付ける**(#1038 B1。書き出した閲覧用 HTML の「刷るときだけ目次が先頭に付く」と同じ動線)。
+ *
+ * ⚠ アプリの画面には目次の置き場が無く、`Ctrl+P` / 「PDF で書き出す」の紙は本文だけだった。
+ * 🔑 刷る直前(`beforeprint`)に、いま開いているノートの本文の見出し(`h1`〜`h3`)から目次を組み、
+ *   本文の前へ置く。刷り終えたら(`afterprint`)外す(画面には出さない ── `app.css` の `@media print` だけが出す)。
+ * ⚠ 字だけ(`textContent`)── HTML として読まない。見出しが無ければ置かない。
+ */
+export const PRINT_TOC_FIELD = 'print-toc';
+export const PRINT_TOC_TITLE = '目次';
+
+/** 刷る直前: 本文の見出しから目次を置く。置いた項目数を返す(0 = 置かない)。 */
+export function preparePrintToc(doc: Document): number {
+  clearPrintToc(doc);
+  const body = doc.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+  if (body === null || body.parentElement === null) return 0;
+  const items: { level: number; text: string }[] = [];
+  for (const h of body.querySelectorAll<HTMLElement>('h1, h2, h3')) {
+    const clone = h.cloneNode(true) as HTMLElement;
+    for (const x of clone.querySelectorAll('button, [aria-hidden="true"]')) x.remove();
+    const text = (clone.textContent ?? '').trim();
+    if (text !== '') items.push({ level: Number(h.tagName.slice(1)), text });
+  }
+  if (items.length === 0) return 0;
+  const nav = doc.createElement('nav');
+  nav.setAttribute('data-pkc-field', PRINT_TOC_FIELD);
+  const title = doc.createElement('h3');
+  title.textContent = PRINT_TOC_TITLE;
+  const ol = doc.createElement('ol');
+  for (const it of items) {
+    const li = doc.createElement('li');
+    li.setAttribute('data-l', String(it.level));
+    li.textContent = it.text;
+    ol.append(li);
+  }
+  nav.append(title, ol);
+  body.before(nav);
+  return items.length;
+}
+
+/** 刷り終えたら: 置いた目次を外す。 */
+export function clearPrintToc(doc: Document): void {
+  for (const el of doc.querySelectorAll(`[data-pkc-field="${PRINT_TOC_FIELD}"]`)) el.remove();
+}
+
 /** 窓に張る。外す関数を返す。 */
 export function installEditorPrint(win: Window): () => void {
   const before = (): void => {
     void prepareEditorPrint(win.document);
+    preparePrintToc(win.document);
     openDetailsForPrint(win.document);
     openHeadingFoldsForPrint(win.document);
   };
   const after = (): void => {
     clearEditorPrint(win.document);
+    clearPrintToc(win.document);
     restoreDetailsAfterPrint();
     restoreHeadingFoldsAfterPrint();
   };

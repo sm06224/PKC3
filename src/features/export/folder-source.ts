@@ -76,7 +76,6 @@ export async function folderSource(
   base: ArchiveSource,
   rootLid: string,
 ): Promise<FolderSourceResult> {
-  const warnings: string[] = [];
   const rawMetas = await base.listEntryMetas();
   /**
    * ⚠ 木の規則は `features/relation/tree.ts` の 1 本 ── ここで親子の判定を
@@ -114,6 +113,37 @@ export async function folderSource(
   }));
 
   const lids = collectSubtreeLids(rootLid, metaMap, relations);
+  return subsetSource(base, {
+    rawMetas,
+    rawRelations,
+    lids,
+    // 題名はフォルダのもの ── ファイル名がそのままフォルダ名になる
+    title: root.title || rootLid,
+    danglingWarning: (n) => `このフォルダの外へ向かうつながり ${n} 件は含まれません(つなぐ先のノートが入らないため)`,
+  });
+}
+
+/** `subsetSource` への入力。 */
+export interface SubsetInput {
+  readonly rawMetas: Awaited<ReturnType<ArchiveSource['listEntryMetas']>>;
+  readonly rawRelations: Awaited<ReturnType<ArchiveSource['listRelations']>>;
+  /** 入れるノートの lid。 */
+  readonly lids: ReadonlySet<string>;
+  readonly title: string;
+  /** 外へ向かうつながりの件数を言う字。 */
+  readonly danglingWarning: (count: number) => string;
+}
+
+/**
+ * 🔴 **lid の集合で絞った `ArchiveSource` を作る**(フォルダ書き出しと「選んだノート」書き出しで 1 本 ── §7)。
+ * ⚠ 本文を heap に溜めない 2 周の作り(上の説明)はここが持つ。
+ */
+export async function subsetSource(
+  base: ArchiveSource,
+  input: SubsetInput,
+): Promise<FolderSourceResult> {
+  const warnings: string[] = [];
+  const { rawMetas, rawRelations, lids } = input;
   // ⚠ **並びは書出しと同じ規則**(entryOrder → lid)。`listBodies` の cursor は
   //   この順に前進するので、ここで決めた順が正本になる。
   const ordered = rawMetas
@@ -167,9 +197,7 @@ export async function folderSource(
     (r) => lids.has(r.from_lid) !== lids.has(r.to_lid),
   );
   if (dangling.length > 0) {
-    warnings.push(
-      `このフォルダの外へ向かうつながり ${dangling.length} 件は含まれません(つなぐ先のノートが入らないため)`,
-    );
+    warnings.push(input.danglingWarning(dangling.length));
   }
 
   // ── 2 周目の口。⚠ **予算を守って刻む**(一括で返すと writeArchive の規律を壊す)
@@ -214,8 +242,7 @@ export async function folderSource(
     count: ordered.length,
     source: {
       cid: base.cid,
-      // 題名はフォルダのもの ── ファイル名がそのままフォルダ名になる
-      title: root.title || rootLid,
+      title: input.title,
       listEntryMetas: async () => ordered,
       listBodies,
       listRelations: async () => kept,

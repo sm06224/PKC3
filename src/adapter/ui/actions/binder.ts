@@ -135,6 +135,9 @@ import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { LocalFolder } from '@adapter/platform/local-folder';
 import type { LinkedFileTooLarge } from '@adapter/platform/launched-files';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
+import { appSavedSearches } from '@adapter/platform/saved-search-store';
+import { SAVED_ID_ATTR, SAVED_SCOPE_ATTR, currentSearchOf, type SavedSearchScope } from '@adapter/ui/render/saved-searches';
+import { SAVED_SEARCH_MAX } from '@features/history/saved-search';
 import { createHintOf, dismissMissedLine, paintSearchHistory } from '@adapter/ui/render/shell';
 import type { EntryMeta } from '@core/model/entry-meta';
 import {
@@ -2511,6 +2514,12 @@ export interface BinderServices {
   /** このノートだけをアーカイブとして書き出す(P6f)。 */
   exportEntry?(lid: string): void;
   /**
+   * 🔴 **一覧で選んだ N 件だけを閲覧用 HTML(1 枚)/ バックアップ(`.pkc3-notes.zip`)で書き出す**(#1038 A1)。
+   * ⚠ 全件の書き出し(`exportHtml` / `exportArchive`)とは別の物。フォルダの扱いは `selection-source.ts`。
+   */
+  exportSelectionHtml?(lids: string[]): void;
+  exportSelectionArchive?(lids: string[]): void;
+  /**
    * 🔴 **このノートを閲覧用 HTML(1 枚)で書き出す**(#491)。
    * ⚠ 上の `exportEntry` と**別の物** ── あちらは取り込み直せる `.pkc3.zip`、
    *   こちらは相手がブラウザで開くだけで読める片道の HTML である。
@@ -3104,6 +3113,17 @@ const TAG_INPUT_ADD: ReadonlyMap<string, string> = new Map([
  */
 function targetLid(dispatcher: Dispatcher, target: HTMLElement): string | null {
   return target.getAttribute(TARGET_LID_ATTR) ?? dispatcher.getState().selectedLid;
+}
+
+/** 保存した検索の押し口が運ぶ置き場(無ければ左の列)。 */
+function savedScopeOf(target: HTMLElement): SavedSearchScope {
+  return target.closest(`[${SAVED_SCOPE_ATTR}]`)?.getAttribute(SAVED_SCOPE_ATTR) === 'page' ? 'page' : 'filter';
+}
+
+/** 一覧の帯の書き出しが相手にするノート(`delete-selected` と同じ規則 ── 左の列の見えている行の印)。 */
+function selectedExportLids(dispatcher: Dispatcher): string[] {
+  const st = dispatcher.getState();
+  return operationTargets(visibleFilerRows(st), st.selection, null);
 }
 
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
@@ -4781,6 +4801,8 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   'sql-export-menu',
   // 🔑 #952 ── 「音/動画」の行の「仕上げ ▾」(道具の一覧)
   'open-capture-process',
+  // 🔑 #1038 A1 ── 一覧の選択バーの「書き出す ▾」(選んだ N 件の書き出し方の一覧)
+  'open-selection-export',
 ]);
 
 /**
@@ -10710,6 +10732,60 @@ const ACTIONS: Record<string, ActionHandler> = {
     services.showStatus?.('検索した語の記録を消しました');
   },
   /**
+   * 🔴 **保存した検索**(#1038 C1)── 保存・適用・名前を直す・削除の 4 つで 1 組(片道にしない)。
+   * ⚠ 置き場(`filter` = 左の列 / `page` = 探す面)は押した要素が運ぶ(`SAVED_SCOPE_ATTR`)。
+   *   いまの絞りを読む規則は `currentSearchOf` 1 か所(帯が「保存できるか」を決めるのと同じ)。
+   * ⚠ 記憶は端末ごと・書き出しに混ぜない(`saved-search-store.ts` / `settings-file.ts` の `SKIPPED_KEYS`)。
+   */
+  'save-search': (dispatcher, target) => {
+    const scope = savedScopeOf(target);
+    const cur = currentSearchOf(dispatcher.getState(), scope);
+    const r = appSavedSearches.add(cur.query, cur.kinds, archetypeLabel);
+    if (r.kind === 'added') {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: `検索を保存しました: 「${r.added.name}」(名前は「名前を直す」で変えられます)` });
+    } else if (r.kind === 'exists') {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: `同じ検索がもう保存されています: 「${r.existing.name}」` });
+    } else if (r.reason === 'full') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `保存できる検索は ${SAVED_SEARCH_MAX} 件までです。使わない検索を削除してから、もう一度押してください`,
+      });
+    }
+  },
+  'apply-saved-search': (dispatcher, target) => {
+    const id = target.getAttribute(SAVED_ID_ATTR) ?? '';
+    const item = appSavedSearches.list().find((x) => x.id === id);
+    if (item === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'その検索はもう保存されていません(別のタブで削除された可能性があります)' });
+      return;
+    }
+    if (savedScopeOf(target) === 'page') {
+      dispatcher.dispatch({ type: 'SET_SEARCH_PAGE_QUERY', query: item.query });
+      return;
+    }
+    // 🔴 語と札を**置き換える**(足さない)── 保存したときの絞りがそのまま再現される
+    dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: item.query });
+    dispatcher.dispatch({ type: 'CLEAR_KIND_FILTER' });
+    for (const k of item.kinds) dispatcher.dispatch({ type: 'TOGGLE_KIND_FILTER', archetype: k });
+  },
+  'rename-saved-search': (_dispatcher, target, _services, root) => {
+    const id = target.getAttribute(SAVED_ID_ATTR) ?? '';
+    const item = appSavedSearches.list().find((x) => x.id === id);
+    if (item === undefined) return;
+    void promptInApp(root, {
+      title: '保存した検索の名前',
+      label: '名前',
+      initial: item.name,
+      okLabel: '直す',
+    }).then((typed) => {
+      // 何も打たずに決めたときは、いまの名前のまま(名前の無い行を作らない)
+      if (typed !== null) appSavedSearches.rename(id, typed);
+    });
+  },
+  'delete-saved-search': (_dispatcher, target) => {
+    appSavedSearches.remove(target.getAttribute(SAVED_ID_ATTR) ?? '');
+  },
+  /**
    * 🔴 **板の付箋の下端の「追記」**(#529 W5-a)── 押すと付箋の下に小さな欄が開く。
    * ⚠ 追記先は**押した付箋のノート**(ボタンの `data-pkc-entry`)── `selectedLid` は読まない
    *   (板では「選んでいるノート」と「付箋のノート」が別物)。書くのは `place-inline-commit` の 1 本。
@@ -15867,6 +15943,44 @@ const ACTIONS: Record<string, ActionHandler> = {
           repeat: key === '' ? null : key,
         }),
     );
+  },
+  /**
+   * 🔴 **一覧で選んだ N 件だけの書き出し**(#1038 A1)。相手は `delete-selected` と**同じ規則**
+   *   (左の列の見えている行に在る印)── 数と対象が食い違うと、帯の「N 件」が嘘になる。
+   */
+  /**
+   * 🔴 **選択バーの「書き出す ▾」** ── 閲覧用 HTML / バックアップの 2 つを 1 つのボタンに畳む(バーが 1 行ぶん伸びて、
+   *   低い窓で貼り付かなくなった退行の直し)。⚠ `MENU_OPENERS` に載せてある。項目は上の 2 受け手のただのボタン。
+   */
+  'open-selection-export': (dispatcher, target, _services, root) => {
+    const lids = selectedExportLids(dispatcher);
+    if (lids.length === 0) return;
+    const r = target.getBoundingClientRect();
+    openContextMenu(
+      root,
+      { x: r.left, y: r.bottom },
+      [
+        {
+          action: 'export-selection-html',
+          label: `閲覧用 HTML(選んだ ${lids.length} 件)`,
+          hint: `選んでいる ${lids.length} 件だけを、読むだけの HTML ファイル 1 つにまとめます(フォルダの中のノートは入りません。入っていないノートへのリンクは、押せない字になります)`,
+        },
+        {
+          action: 'export-selection-archive',
+          label: '選んだノートのバックアップ',
+          hint: `選んでいる ${lids.length} 件の本文・添付・履歴を保存します(.pkc3-notes.zip。取り込み直せます。選んだフォルダは中のノートも入ります)`,
+        },
+      ],
+      target,
+    );
+  },
+  'export-selection-html': (dispatcher, _target, services) => {
+    const lids = selectedExportLids(dispatcher);
+    if (lids.length > 0) services.exportSelectionHtml?.(lids);
+  },
+  'export-selection-archive': (dispatcher, _target, services) => {
+    const lids = selectedExportLids(dispatcher);
+    if (lids.length > 0) services.exportSelectionArchive?.(lids);
   },
   'export-entry-html': (dispatcher, target, services) => {
     // 🔴 解決規則は隣の `export-entry` / `delete-entry` と**同じ**(#877)── 揃えないと

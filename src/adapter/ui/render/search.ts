@@ -21,6 +21,7 @@
 import type { AppState, SearchPageState } from '@adapter/state/app-state';
 import { splitSnippet } from '@features/filter/search-snippet';
 import { isRelevanceOrdered, parseSearchTerms } from '@features/filter/search-query';
+import { SavedSearchBar } from './saved-searches';
 
 /**
  * 🔴 **行のボタンが持つ、探した語**(#1102 段①)。受け手(`binder.ts` の `open-note-window`)が
@@ -39,6 +40,8 @@ export class SearchRenderer {
   private note: HTMLElement | null = null;
   /** 🔴 「除く語:m」の 1 行(台帳 #1852 の束 B2、依頼 259)。除く語として読んだ語があるときだけ出す。 */
   private excluded: HTMLElement | null = null;
+  /** 🔴 保存した検索の帯(#1038 C1)。語の欄のすぐ下。 */
+  private saved: SavedSearchBar | null = null;
   /** 一覧を描き直す器(`contacts.ts` の `body` と同じ作法)。 */
   private body: HTMLElement | null = null;
   /**
@@ -74,7 +77,10 @@ export class SearchRenderer {
     excluded.hidden = true;
     const body = document.createElement('div');
     body.setAttribute('data-pkc-field', 'search-page-body');
-    this.host.append(head, note, excluded, body);
+    const savedHost = document.createElement('div');
+    savedHost.setAttribute('data-pkc-field', 'search-page-saved');
+    this.saved = new SavedSearchBar(savedHost, 'page');
+    this.host.append(head, savedHost, note, excluded, body);
     this.input = input;
     this.note = note;
     this.excluded = excluded;
@@ -85,6 +91,7 @@ export class SearchRenderer {
   render(state: AppState): void {
     const body = this.ensureFrame();
     const page = state.searchPage;
+    this.saved?.render(state);
     /**
      * ⚠ 欄の字は state が正(renderer は DOM から読まない)。ただし**同じなら触らない**
      *   ── `value` への代入は caret を末尾へ飛ばすので、打っている最中に書き戻さない。

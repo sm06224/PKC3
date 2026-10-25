@@ -11,6 +11,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  clearPrintToc,
+  preparePrintToc,
+  PRINT_TOC_FIELD,
   clearEditorPrint,
   EDITOR_PRINT_FIELD,
   installEditorPrint,
@@ -83,5 +86,53 @@ describe('編集中の印刷', () => {
   it('起動時に窓へ張られている', () => {
     const main = readFileSync('src/main.ts', 'utf-8');
     expect(main).toContain('\n  installEditorPrint(window);\n');
+  });
+});
+
+describe('紙の頭の目次(#1038 B1)', () => {
+  const TOC = `[data-pkc-field="${PRINT_TOC_FIELD}"]`;
+  function note(html: string): HTMLElement {
+    document.body.innerHTML = `<div data-pkc-region="detail"><div data-pkc-field="detail-body" class="pkc-md-rendered">${html}</div></div>`;
+    return document.querySelector<HTMLElement>('[data-pkc-field="detail-body"]')!;
+  }
+
+  it('🔴 見出しから目次を組み、本文の前に置く / 刷り終えたら外す(字だけ・編集ボタンは除く)', () => {
+    const body = note('<h1>はじめに <button>✎</button></h1><p>x</p><h2>&lt;b&gt;背景</h2><h3>詳細</h3><h4>深い</h4>');
+    expect(preparePrintToc(document)).toBe(3);
+    const toc = document.querySelector<HTMLElement>(TOC)!;
+    expect(toc.nextElementSibling).toBe(body);
+    expect([...toc.querySelectorAll('li')].map((l) => [l.getAttribute('data-l'), l.textContent])).toEqual([
+      ['1', 'はじめに'],
+      ['2', '<b>背景'],
+      ['3', '詳細'],
+    ]);
+    expect(toc.querySelector('b'), 'HTML として読まない').toBeNull();
+    clearPrintToc(document);
+    expect(document.querySelector(TOC)).toBeNull();
+  });
+
+  it('見出しが無ければ置かない / 本文が無ければ置かない / 2 度刷っても 1 つ', () => {
+    note('<p>見出しなし</p>');
+    expect(preparePrintToc(document)).toBe(0);
+    expect(document.querySelector(TOC)).toBeNull();
+    document.body.innerHTML = '';
+    expect(preparePrintToc(document)).toBe(0);
+    note('<h1>a</h1>');
+    const off = installEditorPrint(window);
+    window.dispatchEvent(new Event('beforeprint'));
+    window.dispatchEvent(new Event('beforeprint'));
+    expect(document.querySelectorAll(TOC)).toHaveLength(1);
+    window.dispatchEvent(new Event('afterprint'));
+    expect(document.querySelector(TOC), '刷り終えても残っている').toBeNull();
+    off();
+  });
+
+  it('🔴 画面では出さず、紙(@media print)だけが出す / @media print は 1 つだけ', () => {
+    const css = readFileSync('src/styles/app.css', 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const screen = css.slice(0, css.indexOf('@media'));
+    expect(screen).toMatch(/\n\[data-pkc-field='print-toc'\] \{\s*display: none;\s*\}/);
+    const print = css.slice(css.indexOf('@media print'));
+    expect(print).toMatch(/\[data-pkc-field='print-toc'\] \{\s*display: block;/);
+    expect(css.match(/@media print/g)).toHaveLength(1);
   });
 });

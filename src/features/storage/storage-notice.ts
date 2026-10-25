@@ -42,6 +42,14 @@ export const STORAGE_FALLBACK_LINE =
   '保存領域が使えません。このタブで書いたものは、閉じると消えます(ほかのタブを閉じて、読み込み直してください)';
 
 /**
+ * 🔴 **落ちた回か**(#1038 D1)。⚠ 判定は `fallbackReason` が立っているか **1 か所**
+ * (`storageStatusLine` / `storageWhereLine` / 状態の行の重大度・バックアップのボタンが同じ判定を使う)。
+ */
+export function isStorageFallback(fallbackReason: string | undefined): boolean {
+  return fallbackReason !== undefined && fallbackReason !== '';
+}
+
+/**
  * 帯に出す字。⚠ **退避した回だけ**出す。
  *
  * ⚠ 判定を `vfs === 'memory'` にしてはいけない ── 持ち歩ける 1 枚の HTML は

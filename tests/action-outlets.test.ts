@@ -80,6 +80,9 @@ const UNRESOLVED: readonly string[] = [
   'cancel-office-install',
   // #952 仕上げ ▾ の項目 ── メニューの項目として動的に組む(binder が MenuItem の attrs で焼く)ので、静的な data-pkc-action が source に無い
   'capture-process',
+  // #1038 A1 選んだノートの書き出し ── 「書き出す ▾」(open-selection-export)の項目として動的に組む(binder が MenuItem で焼く)
+  'export-selection-archive',
+  'export-selection-html',
   'install-asr-part',
   'remove-asr-part',
   'choose-office-pack',

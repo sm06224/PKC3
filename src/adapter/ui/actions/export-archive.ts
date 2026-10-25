@@ -52,6 +52,8 @@ import {
 } from '@adapter/platform/md-folder-export';
 import { singleEntrySource } from '@features/export/single-entry-source';
 import { folderSource } from '@features/export/folder-source';
+import { EmptySelectionError, selectionSource } from '@features/export/selection-source';
+import { FOLDER_EXPORT_NOTE } from '@features/entry-actions';
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { extractHeadingNumberConfig } from '@features/markdown/document-globals';
 import { safeName } from '@features/export/file-name';
@@ -296,6 +298,38 @@ export async function exportFolder(
     dispatcher.dispatch({
       type: 'OP_FAILED',
       error: `書き出しに失敗しました: ${errorText(e)}`,
+    });
+    return null;
+  }
+}
+
+/**
+ * 🔴 **一覧で選んだ N 件だけ**を書き出す(#1038 A1)。`kind` = `'archive'`(選んだノートのバックアップ。`.pkc3-notes.zip`)
+ * か `'html'`(閲覧用 HTML)。
+ *
+ * ⚠ `exportEntry` / `exportFolder` と**同じ骨組み**(断る条件・`settle()` の位置・最後に呼ぶ `exportArchive`)。
+ * 🔑 違うのは絞り込みの関数だけ(`selectionSource`)。フォルダの扱いは `selection-source.ts` の表が正本。
+ */
+export async function exportSelection(
+  dispatcher: Dispatcher,
+  deps: ExportDeps,
+  lids: readonly string[],
+  kind: 'archive' | 'html',
+): Promise<number | null> {
+  const blocked = exportBlockedNote(dispatcher.getState(), '書き出してください');
+  if (blocked !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: blocked });
+    return null;
+  }
+  try {
+    await deps.settle();
+    const { source, warnings } = await selectionSource(deps.source, lids, kind);
+    return await exportArchive(dispatcher, { ...deps, source }, kind, warnings, 'notes');
+  } catch (e) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      // 🔴 フォルダだけを選んで閲覧用 HTML を押したときは、1 件のときと同じ字で断る
+      error: e instanceof EmptySelectionError ? FOLDER_EXPORT_NOTE : `書き出しに失敗しました: ${errorText(e)}`,
     });
     return null;
   }

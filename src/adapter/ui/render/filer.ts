@@ -619,8 +619,22 @@ export class FilerRenderer {
       move.setAttribute('data-pkc-entry', marks[0] ?? '');
       move.textContent = '移す…';
       move.title = `選んでいる ${marks.length} 件を、別のフォルダへ移します(探して選ぶ小さな画面が開きます)`;
-      if (multi) bulk.append(count, del, move, tag, add, off, clear);
-      else bulk.append(count, tag, add, off, clear);
+      /**
+       * 🔴 **選んだ N 件だけを書き出す**(#1038 A1)。1 件でも出す(右の情報ペインを開かずに、一覧から出せる)。
+       * ⚠ **ボタンは「書き出す ▾」1 つ**(2 つ並べると狭い左の列で帯が 1 行伸び、低い窓で貼り付かなくなった)。
+       *   位置は件数の隣(件数 + 書き出す ▾ が 1 行に収まる ── 帯の行数を A1 前と同じに保つ)。
+       * ⚠ 字は全件の「閲覧用 HTML で書き出す」(全部のノートが入る)と**別**にする ── 件数を字に入れて取り違えを防ぐ。
+       *   実行は `export-selection-*` の受け手(`binder.ts`)。フォルダの扱いはマニュアル「選んだノートだけを書き出す」。
+       */
+      const exportMenu = document.createElement('button');
+      exportMenu.type = 'button';
+      exportMenu.setAttribute('data-pkc-field', 'bulk-export-menu');
+      exportMenu.setAttribute('data-pkc-action', 'open-selection-export');
+      exportMenu.setAttribute('aria-haspopup', 'menu');
+      exportMenu.textContent = '書き出す ▾';
+      exportMenu.title = `選んでいる ${marks.length} 件だけの書き出し方(閲覧用 HTML / バックアップ)を選ぶ一覧を出します`;
+      if (multi) bulk.append(count, exportMenu, del, move, tag, add, off, clear);
+      else bulk.append(count, exportMenu, tag, add, off, clear);
       host.append(bulk);
     }
 
@@ -1438,13 +1452,20 @@ export class FilerRenderer {
        *   言わないと、ほかの場所に在るノートが「無い」ように見える。
        */
       if (scope !== null) label.textContent += ` ─ 「${scope.title}」の中を探しています`;
+      /**
+       * 🔴 **当たった件数を添える**(#1038 C2)。⚠ 表の行を決めた `list` の長さをそのまま使う(数え直さない)。
+       *   字は別の要素にして、語の要素(`filer-filter-word`)の字は変えない。
+       */
+      const count = document.createElement('span');
+      count.setAttribute('data-pkc-field', 'filer-filter-count');
+      count.textContent = `${list.length} 件`;
       const off = document.createElement('button');
       off.type = 'button';
       off.setAttribute('data-pkc-action', 'clear-entry-filter');
       off.setAttribute('data-pkc-field', 'filer-clear-filter-line');
       off.textContent = '絞りを外す';
       off.title = '絞りを空にして、いまいる場所のノートに戻します';
-      line.append(label, off);
+      line.append(label, count, off);
       if (scope !== null) line.append(this.buildSearchAllButton());
       if (keptTable === null) this.region.append(line);
       else this.region.insertBefore(line, keptTable);

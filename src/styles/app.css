@@ -1256,6 +1256,62 @@ img[data-pkc-action='view-big']:focus-visible {
   color: var(--muted);
   cursor: pointer;
 }
+/* 🔴 **保存した検索の帯**(#1038 C1)。⚠ 地は無彩色、色は押されている(= いまの絞りと同じ)検索にだけ。
+ *   置き場は左の列の種類の札の下(`saved-searches`)と探す面の欄の下(`search-page-saved`)── 体裁は同じ 1 本。 */
+[data-pkc-region='saved-searches'],
+[data-pkc-field='search-page-saved'] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 3px 4px;
+  font-size: var(--btn-fs-sm);
+}
+[data-pkc-region='saved-searches'] {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+[data-pkc-region='saved-searches'][hidden],
+[data-pkc-field='search-page-saved'][hidden] {
+  display: none;
+}
+[data-pkc-field='saved-search-save'],
+[data-pkc-field='saved-search-rename'],
+[data-pkc-field='saved-search-delete'] {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: var(--btn-fs-sm);
+  line-height: 1.6;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+[data-pkc-field='saved-search-list'] > summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+[data-pkc-field='saved-search-row'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin-top: 2px;
+}
+[data-pkc-field='saved-search-row'] > [data-pkc-action='apply-saved-search'] {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: var(--btn-fs-sm);
+  line-height: 1.6;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /**
  * 🔴 **選ばれているボタンの濃さは、ここ 1 本で決める**(#1038 段J-2。
  * 着地前レビュー「実ブラウザでは選んでいるボタンが他と見分けが付かない」)。
@@ -2252,6 +2308,10 @@ button[data-pkc-primary] [data-pkc-icon] {
  * (実測: 1280x800 で textarea が 525px で止まり、下に 260px の空白が残っていた) */
 /* ── 編集(左に原文・右にプレビュー)─────────────────
  * 🔑 3 列にしたので、中央を 2 分割すればプレビューは配置の片側として入る。 */
+/* 刷るときだけ使う、紙の頭の目次(#1038 B1。`print-editing.ts`)── 画面には出さない。出すのは file 末尾の `@media print` だけ */
+[data-pkc-field='print-toc'] {
+  display: none;
+}
 /* 刷るときだけ使う、編集欄の全文の写し(#1163 依頼 71-2。`print-editing.ts`)── 画面には出さない */
 [data-pkc-field='editor-print'] {
   display: none;
@@ -5526,6 +5586,12 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 🔴 当たった件数(#1038 C2)── 語が長く省略されても件数は残す */
+[data-pkc-field='filer-filter-count'] {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--fg);
+}
 [data-pkc-field='query-row-hint'] {
   margin: 0 0 var(--s2);
   font-size: 11px;
@@ -8619,6 +8685,18 @@ mark[data-pkc-diff-char='del'] {
 [data-pkc-field='status-state'][data-pkc-phase='error'] {
   color: var(--danger);
 }
+/* 🔴 **保存領域が使えない警告**(#1038 D1。「閉じると消えます」)── 灰色 11px の 1 行に埋もれていた。
+ *   ⚠ 書いたものが消える実害の知らせなので危険色 + 太字(色は情報にだけ。`status-state` の error と同じ使い方)。
+ *   ⚠ 隣の `status-backup` が押す口(出し入れは `status-open.ts`)。 */
+[data-pkc-field='status-warning'] {
+  color: var(--danger);
+  font-weight: 700;
+}
+[data-pkc-field='status-backup'] {
+  flex: 0 0 auto;
+  padding: 0 var(--s2);
+  font-size: max(11px, calc(var(--pkc-text-size, 13px) * 11 / 13));
+}
 /* 🔴 **狭すぎる端末への断り書き**(user 裁定 2026-09-04、#671 の裁定 2・3)。
  *
  * ⚠ **押す口を必ず横に置く** ── 字だけ出して消し方が無いのが直す前の形である。
@@ -10976,6 +11054,29 @@ h3[data-pkc-section] {
   [data-pkc-region='editor-split']:has([data-pkc-field='editor-print']) [data-pkc-field='editor-body'],
   [data-pkc-region='editor-split']:has([data-pkc-field='editor-print']) [data-pkc-region='editor-preview'] {
     display: none;
+  }
+  /* 🔴 **紙の頭の目次**(#1038 B1)── 書き出した閲覧用 HTML の `#pkc-ptoc` と同じ体裁 */
+  [data-pkc-field='print-toc'] {
+    display: block;
+    margin: 0 0 1.5em;
+    padding: 0 0 1em;
+    border-bottom: 1px solid var(--border);
+    break-after: avoid-page;
+  }
+  [data-pkc-field='print-toc'] h3 {
+    font-size: 1.05em;
+    margin: 0 0 0.4em;
+  }
+  [data-pkc-field='print-toc'] ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  [data-pkc-field='print-toc'] li[data-l='2'] {
+    padding-left: 1.2em;
+  }
+  [data-pkc-field='print-toc'] li[data-l='3'] {
+    padding-left: 2.4em;
   }
   [data-pkc-field='editor-print'] {
     display: block;

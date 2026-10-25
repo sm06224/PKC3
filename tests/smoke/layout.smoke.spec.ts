@@ -1155,6 +1155,25 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
   const shape = await host.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
   expect(shape.sh, '一覧が溢れていない(観測の前提が崩れている)').toBeGreaterThan(shape.ch + 50);
 
+  // 🔴 最後のノートを作った直後は、左の列が「開いたノートへ付いていく」送り(最下端へ)をまだ続けている。
+  //    その途中で park すると、後から送りが勝って最下端へ引き戻され、前提が崩れる(間欠で落ちた)。
+  //    ⚠ 固定 sleep ではなく、scrollTop / scrollHeight が 4 フレーム続けて動かなくなるまで待つ。
+  await host.evaluate(
+    (el) =>
+      new Promise<void>((resolve) => {
+        let last = '';
+        let still = 0;
+        const tick = (): void => {
+          const now = `${el.scrollTop}/${el.scrollHeight}`;
+          still = now === last ? still + 1 : 0;
+          last = now;
+          if (still >= 4) resolve();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+
   // 溢れの真ん中あたりへ置く(端だと「戻った」と「動いていない」が区別できない)
   await host.evaluate((el) => (el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2)));
   const parked = await host.evaluate((el) => el.scrollTop);
@@ -1284,6 +1303,10 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
   const bar = page.locator('[data-pkc-region="filer-move"]');
   await expect(bar, '選んだのにバーが貼り付く印を持たない').toHaveAttribute('data-pkc-bulk', '');
   await expect(page.locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-marked]')).toHaveCount(2);
+  // 🔴 #1038 A1 の退行の pin: 選んだノートの書き出しをボタン 2 つ並べると、狭い左の列で帯が 7 行 205px に伸び、
+  //    高さ 700 の窓で貼り付かなくなった。「書き出す ▾」1 つにして 5 行(A1 前と同じ)に保つ。
+  const barRows = await bar.evaluate((b) => new Set([...b.querySelectorAll('button')].map((x) => Math.round(x.getBoundingClientRect().top))).size);
+  expect(barRows, `選択のバーが ${barRows} 行に伸びている(A1 前は 5 行)`).toBeLessThanOrEqual(5);
   const stick = await page.evaluate(() => {
     const h = document.querySelector<HTMLElement>('[data-pkc-region="browse-host"]')!;
     const b = document.querySelector<HTMLElement>('[data-pkc-region="filer-move"]')!;
