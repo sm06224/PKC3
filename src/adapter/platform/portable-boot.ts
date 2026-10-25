@@ -24,7 +24,14 @@ import {
   type PortableBundle,
 } from '@features/portable/bundle';
 import { humanBytes } from '@features/human-bytes';
-import { DbImageStore } from './storage/db-image-store';
+import { DbImageStore, type StoredImage } from './storage/db-image-store';
+import {
+  baseSeqOf,
+  entriesAfter,
+  idbJournalBackend,
+  type JournalBackend,
+  type JournalEntry,
+} from './storage/portable-journal';
 
 export const BUNDLE_SELECTOR = 'script[data-pkc-bundle]';
 export const IMAGE_SELECTOR = 'script[data-pkc-db-image]';
@@ -117,6 +124,25 @@ export function takeEmbeddedImage(doc: Document): EmbeddedTake {
   }
 }
 
+/** 日誌から「画像のあとに流し直す分」を選ぶ。⚠ 読めなくても投げない(画像だけで開く)。 */
+async function readReplay(
+  journal: JournalBackend,
+  args: { use: ImageChoice['use']; stored: StoredImage | null; exportedAt: number },
+): Promise<{ replay: JournalEntry[]; failure: string | null }> {
+  const base = baseSeqOf({
+    use: args.use,
+    snapshotSeq: args.stored?.snapshotSeq,
+    savedAt: args.stored?.savedAt,
+    exportedAt: args.exportedAt,
+  });
+  if (base === null) return { replay: [], failure: null };
+  try {
+    return { replay: entriesAfter(await journal.readAll(), base), failure: null };
+  } catch (e) {
+    return { replay: [], failure: errorText(e) };
+  }
+}
+
 /**
  * 🔴 **読み戻せなかった理由を `why` に足す**(#996)。⚠ 判定(`chooseImage`)そのものは変えない。
  * 🔑 `fresh` のときは「空で開く」ことが、`stored` のときは「配りものは読めなかったが、この端末の
@@ -143,6 +169,13 @@ export interface PortableStart {
   /** 焼き込みを読み戻せなかった理由(`choice.why` にも入っている)。⚠ 画面へ出す合図に使う。 */
   readonly embeddedFailure: string | null;
   readonly store: DbImageStore;
+  /**
+   * 🔴 **画像のあとに流し直す書込 op**(#1589 の根治 ── `storage/portable-journal.ts`)。
+   * 画像に入っていない分だけ、番号順。⚠ 空から始めた回は常に空。
+   */
+  readonly replay: ReadonlyArray<JournalEntry>;
+  /** 日誌の器。⚠ 起動後の追記・整理もこれを使う。 */
+  readonly journal: JournalBackend;
 }
 
 /**
@@ -155,6 +188,7 @@ export interface PortableStart {
 export async function resolvePortableStart(
   doc: Document,
   make: (id: string) => DbImageStore = (id) => new DbImageStore(id),
+  makeJournal: (dbName: string) => JournalBackend = idbJournalBackend,
 ): Promise<PortableStart | null> {
   const bundle = readBundle(doc);
   if (bundle === null) return null;
@@ -190,12 +224,33 @@ export async function resolvePortableStart(
           embeddedBytes: embedded?.byteLength ?? 0,
         });
 
-  const choice = withEmbeddedFailure(picked, embeddedFailure);
+  const choice0 = withEmbeddedFailure(picked, embeddedFailure);
 
   const image =
-    choice.use === 'stored' ? (stored?.image ?? null) : choice.use === 'embedded' ? embedded : null;
+    choice0.use === 'stored' ? (stored?.image ?? null) : choice0.use === 'embedded' ? embedded : null;
 
-  return { bundle, dbName: bundleSqliteName(bundle.id), image, choice, embeddedFailure, store };
+  const journal = makeJournal(bundleSqliteName(bundle.id));
+  const { replay, failure: journalFailure } = await readReplay(journal, {
+    use: choice0.use,
+    stored,
+    exportedAt: bundle.exportedAt,
+  });
+  // 日誌を読めなかったことは黙らない(画像だけで開く)
+  const choice: ImageChoice =
+    journalFailure === null
+      ? choice0
+      : { use: choice0.use, why: `${choice0.why}(直前の変更の控えを読めませんでした: ${journalFailure})` };
+
+  return {
+    bundle,
+    dbName: bundleSqliteName(bundle.id),
+    image,
+    choice,
+    embeddedFailure,
+    store,
+    replay,
+    journal,
+  };
 }
 
 /**
@@ -211,12 +266,35 @@ export async function resolvePortableStart(
 export async function latestPortableImage(
   portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store'>,
 ): Promise<Uint8Array | null> {
+  return (await latestPick(portable)).image;
+}
+
+/**
+ * 🔴 **昇格・待ち明けで開く「画像 + その後に流し直す日誌」**。⚠ 画像だけ読み直して日誌を起動時のままにすると、
+ *   先のタブが足した分が抜け、起動時の日誌を新しい画像へ流して**二重になる** ── 必ず組で読む。
+ */
+export async function latestPortableStart(
+  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store' | 'journal' | 'replay'>,
+): Promise<{ image: Uint8Array | null; replay: ReadonlyArray<JournalEntry> }> {
+  const pick = await latestPick(portable);
+  const { replay } = await readReplay(portable.journal, {
+    use: pick.use,
+    stored: pick.stored,
+    exportedAt: portable.bundle.exportedAt,
+  });
+  return { image: pick.image, replay };
+}
+
+async function latestPick(
+  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store'>,
+): Promise<{ image: Uint8Array | null; use: ImageChoice['use']; stored: StoredImage | null }> {
+  const boot = { image: portable.image, use: portable.choice.use, stored: null };
   try {
     const stored = await portable.store.read();
-    if (stored === null || stored.bundleId !== portable.bundle.id || stored.bytes <= 0) return portable.image;
-    if (portable.choice.use === 'embedded' && stored.savedAt < portable.bundle.exportedAt) return portable.image;
-    return stored.image;
+    if (stored === null || stored.bundleId !== portable.bundle.id || stored.bytes <= 0) return boot;
+    if (portable.choice.use === 'embedded' && stored.savedAt < portable.bundle.exportedAt) return boot;
+    return { image: stored.image, use: 'stored', stored };
   } catch {
-    return portable.image;
+    return boot;
   }
 }
