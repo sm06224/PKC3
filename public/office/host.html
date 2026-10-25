@@ -147,6 +147,7 @@
 <script src="office-unsaved.js"></script>
 <script src="office-shadow.js"></script>
 <script src="office-title-watch.js"></script>
+<script src="office-popup-keys.js"></script>
 <script>
 (function () {
   'use strict';
@@ -776,6 +777,14 @@
     var cmd = MAC ? e.metaKey : (e.ctrlKey && !e.metaKey);
     if (cmd && STOLEN[e.key.toLowerCase()] === 1) e.preventDefault();
   }, true);
+
+  // ── メニューが開いている間、打った字をメニューへ届ける(#1360)─────────────
+  //
+  // 🔴 Qt は IME 用の隠し <input> に焦点を置き、**修飾キーなしの 1 文字キーは「input で処理する」として
+  //    キーイベントにしない**。LO のメニューはキーイベントで鍵(コピー(Y) の Y)を探すので、メニューが開いていても
+  //    Y は文書へ入る(日本語入力オンなら選択範囲が「ｙ」に置き換わる)。判断と配線は `office-popup-keys.js`
+  //    (メニュー = 枠のない Qt の窓が開いているとき、字のキーを合成のキーイベントとして開いているメニューの canvas へ渡す)。
+  if (window.PkcOfficePopupKeys) window.PkcOfficePopupKeys.install(window);
 
   function openDb() {
     return new Promise(function (resolve, reject) {
