@@ -114,5 +114,9 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     include: ['tests/**/*.test.ts'],
+    // happy-dom 21 以降は iframe の src 読み込みが既定で無効（srcdoc は影響なし）。
+    // 無効のままだと src 無し iframe を DOM に挿すたび stderr に例外が出るため、
+    // 20 系の既定に合わせて有効にする（stderr 0 行の維持）。
+    environmentOptions: { happyDOM: { settings: { enableIframePageLoading: true } } },
   },
 });
