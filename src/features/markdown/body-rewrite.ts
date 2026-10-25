@@ -51,6 +51,7 @@ import type { PlaceRectValue } from './place-rect';
 import type { PlaceShape } from './place-shape';
 import type { PlaceTemplateId } from './place-template';
 import { readTagSlots, sameTag, withTagResult } from '../flavor/tags';
+import { bodyTags } from '../flavor/entry-tags';
 import { tagsMetaKey } from '../flavor/tag-words';
 import { attachmentFileName } from '../flavor/attachment-flavor';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
@@ -100,6 +101,19 @@ export type BodyRewrite =
        */
       tags: readonly string[];
       mode: 'add' | 'remove';
+    }
+  | {
+      /**
+       * 🔴 **本文中のタグを frontmatter の `body-tags:` へ集約する**(#550。保存時に自動で 1 回)。
+       *
+       * > user の字: 「frontmatter は本文中に打たれたタグを保存時に重複排除して集約する
+       * > インボディタグ(自動集約)と文書タグ(frontmatter に直接設定)に分け」
+       *
+       * ⚠ 書く先は `body-tags:` だけ。手で書く文書タグ `tags:` には触れない(`isTagKey` の外の key
+       *   なので、旧ビルドも未知キーとして残すだけで、`tags:` とは混ざらない)。
+       * ⚠ 集約が今と同じなら本文を 1 字も変えない。0 件ならキーを消す(無ければ何もしない)。
+       */
+      kind: 'body-tags-sync';
     }
   | {
       /**
@@ -1008,6 +1022,26 @@ function rewriteAttachmentName(body: string, typed: string): string {
  * 書き換える。⚠ **できなければ `null`**(呼び側が「何も起きなかった」を
  * user に言えるようにする ── 黙って別の行を書き換えない)。
  */
+/** 集約の書き先。⚠ `tags` / `tag` / `keywords`(文書タグ)とは別の key にする。 */
+export const BODY_TAGS_KEY = 'body-tags';
+
+/**
+ * 🔴 **本文中のタグを `body-tags:` に写す**(#550)。変わらないなら同じ本文を返す。
+ * ⚠ 閉じていない frontmatter は修理が走るので触らない。
+ */
+function syncBodyTagsKey(body: string): string {
+  if (frontmatterProblem(body) !== null) return body;
+  const want = bodyTags(body);
+  const cur = parseFrontmatter(body).meta[BODY_TAGS_KEY];
+  const have =
+    cur === undefined || cur === null
+      ? []
+      : (Array.isArray(cur) ? cur : [cur]).map((x) => String(x));
+  if (want.length === have.length && want.every((t, i) => t === have[i])) return body;
+  if (want.length === 0 && cur === undefined) return body;
+  return spliceFrontmatterKeys(body, { [BODY_TAGS_KEY]: want.length === 0 ? undefined : want });
+}
+
 export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | null {
   if (rewrite.kind === 'frontmatter') {
     const next = spliceFrontmatterKeys(body, rewrite.keys);
@@ -1024,6 +1058,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     if (typeof cur === 'string' && value === cur) return body;
     return spliceFrontmatterKeys(body, { date: value });
   }
+  if (rewrite.kind === 'body-tags-sync') return syncBodyTagsKey(body);
   if (rewrite.kind === 'line-date') return rewriteLineDate(body, rewrite);
   if (rewrite.kind === 'undo-append') return removeInsertedLines(body, rewrite.lines, rewrite.at);
   if (rewrite.kind === 'tag') {

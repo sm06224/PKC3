@@ -7537,7 +7537,16 @@ function reduceCore(
       // 🔴 捨てるなら**声に出して**捨てる(#723)── 下の `endEditRefusal` を見よ
       if (state.phase !== 'editing' || !state.openBody)
         return { state: { ...state, error: endEditRefusal('保存', state) }, events: [] };
-      const { lid, body, baseline, persisted } = state.openBody;
+      const { lid, body: draft, baseline, persisted } = state.openBody;
+      /**
+       * 🔴 **保存時に本文中のタグを `body-tags:` へ集約する**(#550)。書換は `applyBodyRewrite` の 1 本。
+       * ⚠ 下書きが baseline と同じなら書かない(「変わっていないなら書かない」を壊さない)ので、
+       *   集約は**変更のある保存**でだけ走る。集約が今と同じなら本文は 1 字も変わらない。
+       */
+      const body =
+        draft === baseline
+          ? draft
+          : (applyBodyRewrite(draft, { kind: 'body-tags-sync' }) ?? draft);
       // baseline := body(最終 commit 内容)。disk 確認は persisted が別に持つので
       // これは楽観確定ではない(review E は persisted の導入で解消)
       const { diskAhead } = state.openBody;
