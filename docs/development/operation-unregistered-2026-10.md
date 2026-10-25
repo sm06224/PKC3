@@ -352,7 +352,7 @@
 | `adopt-external-images` | 低 | 外部画像を取り込む | `src/adapter/ui/render/inspector.ts:1518`<br>`src/features/entry-actions.ts:709` | ノートごとの一度きりの整理。情報ペイン/メニューから届く |
 | `adopt-link-icon` | 低 | リンク先のアイコンを取り込む | `src/adapter/ui/render/detail.ts:4334` | 外へ取りに行く一度きりの操作。詳細欄の中 |
 | `pc-cut-folder` | 低 | (PC フォルダの切り取り) | `src/adapter/ui/render/pc-folder.ts:152` | PC フォルダの面の中。動的描画 |
-| `pc-dir-note` | 低 | (PC フォルダのノート) | `src/adapter/ui/render/pc-folder.ts:201` | 同上 |
+| `pc-enter-dir` | 低 | (PC フォルダのノート) | `src/adapter/ui/render/pc-folder.ts:201` | 同上 |
 | `pc-more` | 低 | (PC フォルダのメニュー) | `src/adapter/ui/render/pc-folder.ts:183` | 同上 |
 | `pc-refresh-folder` | 低 | 更新 | `src/adapter/ui/render/pc-folder.ts:136` | PC フォルダの面の中 |
 | `undo-import` | 低 | 取り込みを元に戻す | `src/adapter/ui/actions/import-undo.ts:65` | 取り込み直後の知らせに付く一時ボタン |

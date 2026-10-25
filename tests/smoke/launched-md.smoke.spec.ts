@@ -192,7 +192,14 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
     const entries = [
       mk('メモ.md', ['# パソコンのメモ\n\n本文です。\n'], 'text/markdown'),
       mk('猫.png', [png], 'image/png'),
-      { kind: 'directory', name: '下の階層' },
+      {
+        kind: 'directory',
+        name: '下の階層',
+        queryPermission: () => Promise.resolve('granted'),
+        values: async function* () {
+          yield mk('奥のメモ.md', ['# 奥\n'], 'text/markdown');
+        },
+      },
       mk('名刺.vcf', ['BEGIN:VCARD\nVERSION:3.0\nFN:山田 太郎\nTEL:090-1234-5678\nEND:VCARD\n'], 'text/vcard'),
     ];
     const dir = {
@@ -223,7 +230,9 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   await expect(tab).toHaveAttribute('aria-selected', 'true');
   const pane = page.locator('[data-pkc-browse-pane="pc"]');
   await expect(pane).toBeVisible();
-  await expect(pane.locator('button')).toHaveCount(1);
+  // 「フォルダを選ぶ…」と「Office のファイルを開く…」(#432。showOpenFilePicker がある Chromium)
+  await expect(pane.locator('button')).toHaveCount(2);
+  await expect(pane.locator('[data-pkc-action="pc-open-office-file"]')).toHaveText('Office のファイルを開く…');
 
   // ② 選ぶ → 直下が並ぶ(フォルダ・名前順)。読むだけの許可で選ばせている
   await clickReal(page, '[data-pkc-action="pc-pick-folder"]');
@@ -260,11 +269,11 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   ).toEqual([]);
   await expect(pane.locator('[data-pkc-field="pc-repick"]')).toHaveText('別のフォルダ…');
   await expect(pane.locator('[data-pkc-field="pc-refresh"]')).toHaveText('更新');
-  await expect(row('下の階層').locator('button')).toHaveCount(0);
+  await expect(row('下の階層').locator('button')).toHaveCount(1); // 中へ入る(#215)
   // 🔴 vCard は連絡先になることが見える字で出る(ホバーだけにしない)/ サブフォルダは押しても無言にならない(#1264 §1)
   await expect(row('名刺.vcf').locator('[data-pkc-field="pc-contact-note"]')).toHaveText('連絡先として取り込みます');
   await expect(row('メモ.md').locator('[data-pkc-field="pc-contact-note"]')).toHaveCount(0);
-  await expect(row('下の階層')).toHaveAttribute('title', /中へは入りません/);
+  await expect(row('下の階層').locator('button')).toHaveAttribute('title', /中を開きます/);
   // 🔴 行頭に種類の絵(#1272)── 属性だけでなく、実ブラウザで ::before が字を出し、名前と中心が揃っている
   await expect(pane.locator('[data-pkc-pc-row] [data-pkc-icon]')).toHaveCount(4);
   for (const [name, symbol] of [
@@ -308,13 +317,19 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   expect(look.gap, '行の間を gap で空けている(下地が透ける)').toBe('normal');
   expect(look.borders, '各行の下罫線').toEqual(['1px', '1px', '1px', '1px']);
   expect(Math.max(...look.lefts) - Math.min(...look.lefts), '行頭の絵の左端が行ごとにずれている').toBeLessThan(1);
-  await clickReal(page, row('下の階層'));
-  await expect(
-    page.locator('[data-pkc-region="status"]'),
-    'サブフォルダの行を押したのに、理由が出ない(無言)',
-  ).toContainText('中へは入りません');
-  await expect(tab, '押したら場所が動いた').toHaveAttribute('aria-selected', 'true');
+  // 🔴 サブフォルダの行を押すと中へ入り(#215)、パンくずの上の階層で戻る。左のタブは PC のまま・getFile は呼ばない
+  await clickReal(page, row('下の階層').locator('button'));
+  await expect(pane.locator('[data-pkc-field="pc-folder-name"]')).toHaveText('下の階層');
+  await expect(pane.locator('[data-pkc-pc-row] [data-pkc-field="pc-name"]')).toHaveText(['奥のメモ.md']);
+  await expect(pane.locator('[data-pkc-action="pc-crumb"]')).toHaveText(['資料']);
+  await expect(tab, '入ったら場所が動いた').toHaveAttribute('aria-selected', 'true');
+  expect(
+    await page.evaluate(() => (window as unknown as { __getFile: string[] }).__getFile),
+    '階層の移動で getFile が呼ばれた',
+  ).toEqual([]);
+  await clickReal(page, '[data-pkc-action="pc-crumb"]');
   await expect(pane.locator('[data-pkc-field="pc-folder-name"]')).toHaveText('資料');
+  await expect(pane.locator('[data-pkc-pc-row] [data-pkc-field="pc-name"]')).toHaveCount(4);
 
   // ③ md の行を押す → 取り込まれて中央に開き、元ファイルの名前が出て、書き戻す押し所が在る
   await clickReal(page, row('メモ.md').locator('button'));
