@@ -162,6 +162,10 @@ describe('openLocalOffice', () => {
           },
         },
         openTile: () => void log.push('tile'),
+        openReserved: (plain: () => void) => {
+          log.push('shadow-gate');
+          plain();
+        },
         notify: (t: string) => void log.push(`say:${t}`),
       },
     };
@@ -182,12 +186,12 @@ describe('openLocalOffice', () => {
     const f = fake('prompt', true);
     const x = deps();
     expect(await openLocalOffice(x.d, item(f.handle, 'r.docx', true))).toBe(true);
-    expect(x.log[0], 'もう一度窓を開いている(2 枚目が立つ)').toBe('provide');
+    expect(x.log.slice(0, 2), '影の確認を通していない / 窓を開き直している').toEqual(['shadow-gate', 'provide']);
     expect(x.log).not.toContain('tile');
     expect(x.provided).toHaveLength(1);
     expect(x.provided[0]!.token.startsWith('local:')).toBe(true);
     expect(f.asked).toEqual(['request']);
-    expect(x.log[1]).toContain('「r.docx」');
+    expect(x.log[2]).toContain('「r.docx」');
     expect(x.files.pendingName(), '控えを取り出していない(次の Office で同じ file が開く)').toBeNull();
     expect(x.files.nameOf(x.provided[0]!.token)).toBe('r.docx');
   });
@@ -196,9 +200,9 @@ describe('openLocalOffice', () => {
     const f = fake('prompt', false);
     const x = deps();
     expect(await openLocalOffice(x.d, item(f.handle, 'r.docx', true))).toBe(true);
-    expect(x.log[0]).toBe('provide');
-    expect(x.log[1]).toContain('書き戻せません');
-    expect(x.log[1]).toContain('ダウンロードに保存します');
+    expect(x.log.slice(0, 2)).toEqual(['shadow-gate', 'provide']);
+    expect(x.log[2]).toContain('書き戻せません');
+    expect(x.log[2]).toContain('ダウンロードに保存します');
   });
 
   it('許可を断られても開く。ただし書き戻せない開き方(writable=false)', async () => {

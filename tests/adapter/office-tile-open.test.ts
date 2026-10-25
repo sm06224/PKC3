@@ -10,7 +10,7 @@
  * 5. 読めない・確認が出せないときは開けなくしない
  */
 import { describe, expect, it, vi } from 'vitest';
-import { openOfficeTile, restoredName, type OfficeTileDeps } from '../../src/adapter/platform/office/office-tile-open';
+import { openOfficeTile, openReservedLocal, restoredName, type OfficeTileDeps } from '../../src/adapter/platform/office/office-tile-open';
 import { LocalOfficeFiles } from '../../src/adapter/platform/office/local-office-files';
 import {
   SHADOW_GONE_LIST_NOTICE,
@@ -230,5 +230,46 @@ describe('restoredName', () => {
     expect(restoredName('報告.doc', 'docx')).toBe('報告.docx');
     expect(restoredName('拡張子なし', 'odt')).toBe('拡張子なし.odt');
     expect(restoredName('', 'docx')).toBe(`${SHADOW_UNTITLED}.docx`);
+  });
+});
+
+/**
+ * 🔴 **窓を先に確保した回**(#432。PC タブの Office の行)も、同じ影の確認を通る(依頼 367 A の退行止め)。
+ * ⚠ 窓は押した瞬間に開いてあるので、ここでは **open が 1 回も呼ばれない**(2 枚目を開かない)ことも見る。
+ */
+describe('窓を確保済みの回の影の確認(openReservedLocal)', () => {
+  it('🔴 影がある file: 確認が出て、「一時保存した内容」を選ぶと影の版が元のファイルの合言葉で渡る。窓は開き直さない', async () => {
+    const r = rig({ localShadow: SH, staged: STAGED });
+    openReservedLocal(r.deps);
+    await tick();
+    expect(r.deps.askLocal).toHaveBeenCalledTimes(1);
+    expect(r.calls, '確保済みなのに窓を開いた').toEqual([]);
+    expect(r.provided).toHaveLength(1);
+    expect(Array.from(r.provided[0]!.bytes)).toEqual([9, 9, 9, 9]);
+    expect(r.provided[0]!.fromShadow).toBe(true);
+    expect(r.provided[0]!.token.startsWith('local:')).toBe(true);
+    expect(r.restored).toEqual(['w-A']);
+  });
+
+  it('影がある file で「保存済みの版」を選ぶと影を消して file の版で開く(openPlain)/ 「やめる」は何も渡さない', async () => {
+    const a = rig({ localShadow: SH, staged: STAGED, askLocal: async () => 'saved' });
+    openReservedLocal(a.deps);
+    await tick();
+    expect(a.discarded).toEqual(['w-A']);
+    expect(a.calls).toEqual(['plain']);
+    const b = rig({ localShadow: SH, staged: STAGED, askLocal: async () => null });
+    openReservedLocal(b.deps);
+    await tick();
+    expect(b.calls).toEqual([]);
+    expect(b.provided).toEqual([]);
+    expect(b.local.peek(), '控えたファイルを失った').not.toBeNull();
+  });
+
+  it('🔴 影が無い file: 確認なしで、すぐ file が渡る(openPlain)', async () => {
+    const r = rig({ localShadow: null, staged: STAGED });
+    openReservedLocal(r.deps);
+    expect(r.calls, '同期のうちに渡る').toEqual(['plain']);
+    expect(r.deps.askLocal).not.toHaveBeenCalled();
+    expect(r.calls).not.toContain('open:報告.docx');
   });
 });

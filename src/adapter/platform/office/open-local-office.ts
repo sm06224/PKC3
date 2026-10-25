@@ -32,6 +32,11 @@ export interface OpenLocalOfficeDeps {
   officeWindow: Pick<OfficeWindow, 'provideDocument'>;
   /** Office のタイルを押したときと同じ口(確保していない回の開き方)。 */
   openTile(): void;
+  /**
+   * 確保済みの窓に、影(保存していない編集の控え)の確認を通して文書を渡す口(`openReservedLocal`)。
+   * `openPlain` = 影を使わないとき(無い / 保存済みの版を選んだ)に、確保済みの窓へファイルを渡す処理。
+   */
+  openReserved(openPlain: () => void): void;
   /** 画面の下の 1 行。 */
   notify(text: string): void;
 }
@@ -46,11 +51,14 @@ export async function openLocalOffice(deps: OpenLocalOfficeDeps, item: LocalFile
     deps.openTile();
     return true;
   }
-  // 窓は押した瞬間に開いてある。控えを取り出して(合言葉と handle を結ぶ)渡す
-  const taken = deps.local.take() ?? staged;
-  provideStagedLocal(deps.officeWindow, deps.local, taken);
-  deps.notify(openingNotice(taken.name, taken.writable));
-  const large = largeDocNotice(taken.name, taken.bytes.byteLength);
-  if (large !== null) deps.notify(large);
+  // 窓は押した瞬間に開いてある。🔴 影(保存していない編集の控え)の確認を通してから渡す(依頼 367 A ── 通常のタイルと同じ判断)
+  const plain = (): void => {
+    const taken = deps.local.take() ?? staged;
+    provideStagedLocal(deps.officeWindow, deps.local, taken);
+    deps.notify(openingNotice(taken.name, taken.writable));
+    const large = largeDocNotice(taken.name, taken.bytes.byteLength);
+    if (large !== null) deps.notify(large);
+  };
+  deps.openReserved(plain);
   return true;
 }

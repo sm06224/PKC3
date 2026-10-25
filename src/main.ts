@@ -293,7 +293,7 @@ import { OFFICE_CONFIRMING_NOTICE, OFFICE_NOT_REACHED_NOTICE, OFFICE_DECLINED_NO
 import { listNoteImages } from '@adapter/platform/office/office-note-images';
 import { createOfficeOpener, type OpenOfficeResult } from '@adapter/platform/office/office-open';
 import { createOfficeShadows } from '@adapter/platform/office/office-shadow-shelf';
-import { openOfficeTile as openOfficeTileWithShadows } from '@adapter/platform/office/office-tile-open';
+import { openOfficeTile as openOfficeTileWithShadows, openReservedLocal } from '@adapter/platform/office/office-tile-open';
 import { watchOfficeHang } from '@adapter/platform/office/office-hang-watch';
 import {
   checkPackUpdate,
@@ -2513,17 +2513,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       for (const id of ids) void officeShadows.discardById(id);
     }
   });
-  const openOfficeTile = () =>
-    openOfficeTileWithShadows({
-      officeWindow,
-      local: localOffice,
-      shadows: officeShadows,
-      askLocal: (at) => pickOfficeShadowInApp(root, at),
-      askList: (orphans) => pickOrphanShadowInApp(root, orphans),
-      openPlain: openOfficeTilePlain,
-      notify: (text) => showStatus(text),
-      afterRestore: (id) => { restoredShelves.push(id); },
-    });
+  const officeTileDeps = (openPlain: () => void) => ({
+    officeWindow,
+    local: localOffice,
+    shadows: officeShadows,
+    askLocal: (at: number) => pickOfficeShadowInApp(root, at),
+    askList: (orphans: Parameters<typeof pickOrphanShadowInApp>[1]) => pickOrphanShadowInApp(root, orphans),
+    openPlain,
+    notify: (text: string) => showStatus(text),
+    afterRestore: (id: string) => { restoredShelves.push(id); },
+  });
+  const openOfficeTile = () => openOfficeTileWithShadows(officeTileDeps(openOfficeTilePlain));
+  // 🔴 窓を先に確保した回(PC タブの Office の行)も、同じ影の確認を通す(依頼 367 A)。判断は `office-tile-open.ts`
+  const openOfficeTileReserved = (openPlain: () => void) => openReservedLocal(officeTileDeps(openPlain));
   /**
    * Office の窓が固まったことに気づく(#135)。⚠ ここは**渡すだけ** ──
    * 物差しも文言も `office-hang-watch.ts` が持つ(`main.ts` は原文 pin の
@@ -6531,6 +6533,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           local: localOffice,
           officeWindow,
           openTile: openOfficeTile,
+          openReserved: openOfficeTileReserved,
           notify: (text) => showStatus(text),
         },
         item,
