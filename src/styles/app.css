@@ -2252,6 +2252,10 @@ button[data-pkc-primary] [data-pkc-icon] {
  * (実測: 1280x800 で textarea が 525px で止まり、下に 260px の空白が残っていた) */
 /* ── 編集(左に原文・右にプレビュー)─────────────────
  * 🔑 3 列にしたので、中央を 2 分割すればプレビューは配置の片側として入る。 */
+/* 刷るときだけ使う、紙の頭の目次(#1038 B1。`print-editing.ts`)── 画面には出さない。出すのは file 末尾の `@media print` だけ */
+[data-pkc-field='print-toc'] {
+  display: none;
+}
 /* 刷るときだけ使う、編集欄の全文の写し(#1163 依頼 71-2。`print-editing.ts`)── 画面には出さない */
 [data-pkc-field='editor-print'] {
   display: none;
@@ -10994,6 +10998,29 @@ h3[data-pkc-section] {
   [data-pkc-region='editor-split']:has([data-pkc-field='editor-print']) [data-pkc-field='editor-body'],
   [data-pkc-region='editor-split']:has([data-pkc-field='editor-print']) [data-pkc-region='editor-preview'] {
     display: none;
+  }
+  /* 🔴 **紙の頭の目次**(#1038 B1)── 書き出した閲覧用 HTML の `#pkc-ptoc` と同じ体裁 */
+  [data-pkc-field='print-toc'] {
+    display: block;
+    margin: 0 0 1.5em;
+    padding: 0 0 1em;
+    border-bottom: 1px solid var(--border);
+    break-after: avoid-page;
+  }
+  [data-pkc-field='print-toc'] h3 {
+    font-size: 1.05em;
+    margin: 0 0 0.4em;
+  }
+  [data-pkc-field='print-toc'] ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  [data-pkc-field='print-toc'] li[data-l='2'] {
+    padding-left: 1.2em;
+  }
+  [data-pkc-field='print-toc'] li[data-l='3'] {
+    padding-left: 2.4em;
   }
   [data-pkc-field='editor-print'] {
     display: block;
