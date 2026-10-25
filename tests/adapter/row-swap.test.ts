@@ -26,6 +26,18 @@ vi.mock('../../src/adapter/ui/render/app-dialog', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/adapter/ui/render/app-dialog')>();
   return { ...actual, isAppDialogOpen: () => dialogState.open || actual.isAppDialogOpen() };
 });
+/** 🔴 #1467: `findOpenEnds` が何回走ったか(本物を呼び抜ける。他の test の振る舞いは変えない) */
+const openEndScans = vi.hoisted(() => ({ n: 0 }));
+vi.mock('../../src/features/markdown/source-blocks', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/features/markdown/source-blocks')>();
+  return {
+    ...actual,
+    findOpenEnds: (text: string) => {
+      openEndScans.n += 1;
+      return actual.findOpenEnds(text);
+    },
+  };
+});
 import {
   RowSwap,
   ROW_REOPEN_EVENT,
@@ -2479,5 +2491,46 @@ describe('CRLF の本文の行(#1087 A-2)', () => {
     ta.dispatchEvent(new FocusEvent('blur'));
     expect(r.body()).toBe(DOC.replace('最初の段落。', '最初の段落。X'));
     expect(r.body().includes('\r')).toBe(false);
+  });
+});
+
+describe('RowSwap — 大きな本文への連続入力で、開放終端の走査が 2 乗にならない(#1467)', () => {
+  it('🔴 500 回続けて input しても、全文の走査は数回だけ(1 回ごとに全文をなめない)', async () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    openEndScans.n = 0;
+    // 最初から大きな本文(2 万字超)にしておく ── 小さい間はその場で走る(対照群が見る)
+    let v = 'あ'.repeat(25_000) + '\n';
+    for (let i = 0; i < 500; i += 1) {
+      v += `行 ${String(i)} の本文です。りんご みかん ぶどう 0123456789 0123456789 0123456789\n`;
+      ta.value = v;
+      ta.dispatchEvent(new Event('input'));
+    }
+    // ⚠ 値は 2 万字を超えている(= 大きな本文の枝を通った)
+    expect(ta.value.length).toBeGreaterThan(20_000);
+    expect(openEndScans.n, '連続入力のたびに全文を走査している').toBeLessThanOrEqual(5);
+    // 後ろの 1 回(遅らせた分)で、最後の値に対する答えが出る ── 閉じていない囲いを入れて確かめる
+    ta.value = v + '```js\n';
+    ta.dispatchEvent(new Event('input'));
+    const slot = r.host.querySelector('[data-pkc-row-slot]')!;
+    await new Promise((res) => setTimeout(res, 200));
+    expect(slot.getAttribute('data-pkc-open-end'), '遅らせた走査が最後の値を見ていない').toBe('fence');
+  });
+
+  it('⚠ 対照群: 小さな本文は、打つたびにその場で印が付く(遅らせない)', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    const slot = r.host.querySelector('[data-pkc-row-slot]')!;
+    openEndScans.n = 0;
+    for (let i = 0; i < 20; i += 1) {
+      ta.value = `x${String(i)}`;
+      ta.dispatchEvent(new Event('input'));
+    }
+    expect(openEndScans.n).toBe(20);
+    ta.value = '```js';
+    ta.dispatchEvent(new Event('input'));
+    expect(slot.getAttribute('data-pkc-open-end')).toBe('fence');
   });
 });
