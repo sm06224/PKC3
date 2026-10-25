@@ -102,6 +102,13 @@ describe('枚 1 つを表にする', () => {
     expect(t!.truncated).toBe(false);
   });
 
+  it('🔴 #968: データ行 0 行でも、列が上限を超えれば断る(見出しだけの広い枚)', () => {
+    const wide = [Array.from({ length: 30 }, (_, i) => `h${String(i)}`)];
+    expect(() => buildXlsxAttachmentTable(grid(wide), sheet, note, 20)).toThrow(/大きすぎ/);
+    // 対照群: 収まる幅なら見出しだけでも通る
+    expect(buildXlsxAttachmentTable(grid([['a', 'b']]), sheet, note, 20)!.rows.length).toBe(0);
+  });
+
   it('🔴 `_sheet` には**本当の枚の名前**が入る(`WHERE _sheet = ...` が書ける)', () => {
     const t = buildXlsxAttachmentTable(grid([['a'], ['1']]), { index: 2, name: '第 3 四半期' }, note);
     expect(t!.name, '表の名前は何枚目かで決まる').toBe('sheet3');

@@ -451,10 +451,28 @@ export function csvCellsOverBudget(
 ): string | null {
   let cells = 0;
   for (const t of tables) {
-    cells += t.rows.length * t.columns.length;
+    // 🔴 #968: 行が 0 でも「1 行ぶん」と数える ── 見出しだけの広い表が `0 × 列数 = 0` で素通りしていた
+    cells += Math.max(1, t.rows.length) * t.columns.length;
     if (cells > budget) {
       return `表「${t.name}」が大きすぎます(セル ${String(budget)} 個まで)。ブロックを分けるか、名前を分けてください`;
     }
   }
   return null;
+}
+
+/**
+ * 🔴 **添付の 1 枚(file / 枚)の幅が、升の上限そのものを超えていないか**(#968)。
+ *
+ * ⚠ 添付は行を `cellBudget / 列数` 件で切るが、**列数が上限を超えると 1 行も載らない上に、
+ *   データ行 0 行なら切る対象が無く素通りする**。1 行ぶんすら入らない幅は、切らずに**断る**。
+ * 🔑 判断は `csvCellsOverBudget`(行 0 でも 1 行と数える)と同じ向き ── 呼び側 3 経路で 1 本にする。
+ *
+ * @throws 幅が上限を超えるとき(user に見せる字)
+ */
+export function assertCsvWidthWithinBudget(columnCount: number, budget: number): void {
+  if (columnCount > budget) {
+    throw new Error(
+      `列が多すぎて大きすぎます(${String(columnCount)} 列。セル ${String(budget)} 個まで)。列を分けてください`,
+    );
+  }
 }

@@ -27,7 +27,13 @@
  *   `validCsvTableName` が守っている規律と同じ理由)。固定名なら誰でも同じ字を打てる。
  */
 import { DELIMITER, parseCsv } from '@features/markdown/csv-table';
-import { CSV_SOURCE_COLUMNS, CSV_TABLE_CELLS_MAX, csvColumnNames, widenHeader } from './csv-tables';
+import {
+  CSV_SOURCE_COLUMNS,
+  CSV_TABLE_CELLS_MAX,
+  assertCsvWidthWithinBudget,
+  csvColumnNames,
+  widenHeader,
+} from './csv-tables';
 import type { SqlSource } from './sqlite-attachment';
 
 /** 添付として選べる CSV 系の言語。 */
@@ -105,6 +111,8 @@ export function buildCsvAttachmentTable(
   const body = grid.slice(1);
   // ⚠ 列数は必ず 1 以上(`csvColumnNames` は見出しが 1 升でも 1 列返す) ──
   //   それでも割り算の分母を 1 で床にして、将来の変更に備える。
+  // 🔴 #968: 見出しだけ(データ行 0)の広い file が素通りしない
+  assertCsvWidthWithinBudget(columns.length, cellBudget);
   const perRowBudget = Math.max(1, Math.floor(cellBudget / Math.max(1, columns.length)));
   const truncated = body.length > perRowBudget;
   const kept = truncated ? body.slice(0, perRowBudget) : body;

@@ -17,7 +17,12 @@
  *   **`sheet1` / `sheet2` …** と数え、🔑 **本当の名前は `_sheet` の列で引ける**
  *   ようにする(`WHERE _sheet = '売上'` が書ける ── 名前を捨てない)。
  */
-import { CSV_SOURCE_COLUMNS, CSV_TABLE_CELLS_MAX, csvColumnNames } from './csv-tables';
+import {
+  CSV_SOURCE_COLUMNS,
+  CSV_TABLE_CELLS_MAX,
+  assertCsvWidthWithinBudget,
+  csvColumnNames,
+} from './csv-tables';
 import type { SqlSource } from './sqlite-attachment';
 import type { XlsxCell } from './xlsx-sheet';
 
@@ -100,6 +105,8 @@ export function buildXlsxAttachmentTable(
     ),
   ];
   const body = grid.slice(1);
+  // 🔴 #968: 見出しだけ(データ行 0)の広い file が素通りしない
+  assertCsvWidthWithinBudget(columns.length, cellBudget);
   const perRowBudget = Math.max(1, Math.floor(cellBudget / Math.max(1, columns.length)));
   const truncated = body.length > perRowBudget;
   const kept = truncated ? body.slice(0, perRowBudget) : body;
