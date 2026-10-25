@@ -619,8 +619,25 @@ export class FilerRenderer {
       move.setAttribute('data-pkc-entry', marks[0] ?? '');
       move.textContent = '移す…';
       move.title = `選んでいる ${marks.length} 件を、別のフォルダへ移します(探して選ぶ小さな画面が開きます)`;
-      if (multi) bulk.append(count, del, move, tag, add, off, clear);
-      else bulk.append(count, tag, add, off, clear);
+      /**
+       * 🔴 **選んだ N 件だけを書き出す**(#1038 A1)。1 件でも出す(右の情報ペインを開かずに、一覧から出せる)。
+       * ⚠ 字は全件の「閲覧用 HTML で書き出す」(全部のノートが入る)と**別**にする ── 件数を字に入れて取り違えを防ぐ。
+       *   実行は `export-selection-*` の受け手(`binder.ts`)。フォルダの扱いはマニュアル「選んだノートだけを書き出す」。
+       */
+      const exportHtml = document.createElement('button');
+      exportHtml.type = 'button';
+      exportHtml.setAttribute('data-pkc-field', 'bulk-export-html');
+      exportHtml.setAttribute('data-pkc-action', 'export-selection-html');
+      exportHtml.textContent = `閲覧用 HTML(選んだ ${marks.length} 件)`;
+      exportHtml.title = `選んでいる ${marks.length} 件だけを、読むだけの HTML ファイル 1 つにまとめます(フォルダの中のノートは入りません。入っていないノートへのリンクは、押せない字になります)`;
+      const exportNotes = document.createElement('button');
+      exportNotes.type = 'button';
+      exportNotes.setAttribute('data-pkc-field', 'bulk-export-archive');
+      exportNotes.setAttribute('data-pkc-action', 'export-selection-archive');
+      exportNotes.textContent = '選んだノートのバックアップ';
+      exportNotes.title = `選んでいる ${marks.length} 件の本文・添付・履歴を保存します(.pkc3-notes.zip。取り込み直せます。選んだフォルダは中のノートも入ります)`;
+      if (multi) bulk.append(count, del, move, exportHtml, exportNotes, tag, add, off, clear);
+      else bulk.append(count, exportHtml, exportNotes, tag, add, off, clear);
       host.append(bulk);
     }
 

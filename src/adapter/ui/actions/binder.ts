@@ -2511,6 +2511,12 @@ export interface BinderServices {
   /** このノートだけをアーカイブとして書き出す(P6f)。 */
   exportEntry?(lid: string): void;
   /**
+   * 🔴 **一覧で選んだ N 件だけを閲覧用 HTML(1 枚)/ バックアップ(`.pkc3-notes.zip`)で書き出す**(#1038 A1)。
+   * ⚠ 全件の書き出し(`exportHtml` / `exportArchive`)とは別の物。フォルダの扱いは `selection-source.ts`。
+   */
+  exportSelectionHtml?(lids: string[]): void;
+  exportSelectionArchive?(lids: string[]): void;
+  /**
    * 🔴 **このノートを閲覧用 HTML(1 枚)で書き出す**(#491)。
    * ⚠ 上の `exportEntry` と**別の物** ── あちらは取り込み直せる `.pkc3.zip`、
    *   こちらは相手がブラウザで開くだけで読める片道の HTML である。
@@ -3104,6 +3110,12 @@ const TAG_INPUT_ADD: ReadonlyMap<string, string> = new Map([
  */
 function targetLid(dispatcher: Dispatcher, target: HTMLElement): string | null {
   return target.getAttribute(TARGET_LID_ATTR) ?? dispatcher.getState().selectedLid;
+}
+
+/** 一覧の帯の書き出しが相手にするノート(`delete-selected` と同じ規則 ── 左の列の見えている行の印)。 */
+function selectedExportLids(dispatcher: Dispatcher): string[] {
+  const st = dispatcher.getState();
+  return operationTargets(visibleFilerRows(st), st.selection, null);
 }
 
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
@@ -15867,6 +15879,18 @@ const ACTIONS: Record<string, ActionHandler> = {
           repeat: key === '' ? null : key,
         }),
     );
+  },
+  /**
+   * 🔴 **一覧で選んだ N 件だけの書き出し**(#1038 A1)。相手は `delete-selected` と**同じ規則**
+   *   (左の列の見えている行に在る印)── 数と対象が食い違うと、帯の「N 件」が嘘になる。
+   */
+  'export-selection-html': (dispatcher, _target, services) => {
+    const lids = selectedExportLids(dispatcher);
+    if (lids.length > 0) services.exportSelectionHtml?.(lids);
+  },
+  'export-selection-archive': (dispatcher, _target, services) => {
+    const lids = selectedExportLids(dispatcher);
+    if (lids.length > 0) services.exportSelectionArchive?.(lids);
   },
   'export-entry-html': (dispatcher, target, services) => {
     // 🔴 解決規則は隣の `export-entry` / `delete-entry` と**同じ**(#877)── 揃えないと

@@ -10,6 +10,7 @@
  */
 import { foldSpans } from '@features/markdown/heading-fold';
 import { headingLevel } from './heading-fold';
+import { BODY_HOST_SELECTOR } from './detail';
 import { bodyBlocks } from './log-days';
 
 export const EDITOR_PRINT_FIELD = 'editor-print';
@@ -105,7 +106,7 @@ export const PRINT_TOC_TITLE = '目次';
 /** 刷る直前: 本文の見出しから目次を置く。置いた項目数を返す(0 = 置かない)。 */
 export function preparePrintToc(doc: Document): number {
   clearPrintToc(doc);
-  const body = doc.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+  const body = doc.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
   if (body === null || body.parentElement === null) return 0;
   const items: { level: number; text: string }[] = [];
   for (const h of body.querySelectorAll<HTMLElement>('h1, h2, h3')) {
