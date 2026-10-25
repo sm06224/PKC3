@@ -112,14 +112,20 @@ describe('🔴 tripwire: タブの集め直しは、SYS_BOOTED で頼み直さ�
       const s = browseScanOf(m);
       if (s !== null) scans.add(s);
     }
-    // 空振り防止: 4 種(アプリ / 予定 / 連絡先 / 録ったもの)が実際に引けている
+    // 空振り防止: 5 種(アプリ / 予定 / 連絡先 / 録ったもの / 計った時間)が実際に引けている
     expect([...scans].sort()).toEqual(
-      ['REFRESH_CAPTURE_SCAN', 'REFRESH_CONTACT_SCAN', 'REFRESH_LAUNCHER_TILES', 'REFRESH_TASK_SCAN'].sort(),
+      [
+        'REFRESH_CAPTURE_SCAN',
+        'REFRESH_CONTACT_SCAN',
+        'REFRESH_LAUNCHER_TILES',
+        'REFRESH_TASK_SCAN',
+        'REFRESH_WORK_LOG_SCAN',
+      ].sort(),
     );
     // 「開いたことがある」状態を全部作る(一度集めた = null でない)
     let st = booted();
     st = reduce(st, { type: 'LAUNCHER_TILES_LOADED', tiles: [] }).state;
-    st = { ...st, taskScan: { cards: [] }, contactScan: { cards: [] }, captureItems: [] } as unknown as AppState;
+    st = { ...st, taskScan: { cards: [] }, contactScan: { cards: [] }, captureItems: [], workLogScan: { runs: [] } } as unknown as AppState;
     const boot = types(reduce(st, { type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] }).events);
     for (const scan of scans) {
       // 期待値は「そのタブを開いたときの頼み」を reducer 自身に出させて採る(手で並べない)

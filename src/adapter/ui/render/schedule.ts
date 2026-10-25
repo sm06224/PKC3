@@ -42,6 +42,7 @@ import { materializedDates } from '@features/schedule/repeat';
 import { isRealCalendarDate } from '@features/schedule/schedule-date';
 import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
 import { scheduleItemsOf } from './schedule-items';
+import { ScheduleBoard } from './schedule-board';
 import { buildPressedButton } from './choice-buttons';
 import { ScheduleDay } from './schedule-day';
 import { ScheduleWeek } from './schedule-week';
@@ -190,6 +191,8 @@ export class ScheduleRenderer {
   private readonly week = new ScheduleWeek(DROP_DATE);
   /** 「月」の描き手(#855)。広い面だけで描く。同じく隠すだけで捨てない。 */
   private readonly monthView = new ScheduleMonth(DROP_DATE);
+  /** 「カンバン」の描き手(#277)。広い面だけで描く。同じく隠すだけで捨てない。 */
+  private readonly board = new ScheduleBoard();
   private last: {
     scan: AppState['taskScan'];
     failed: boolean;
@@ -368,6 +371,7 @@ export class ScheduleRenderer {
     const dayMode = mode === 'day';
     const weekMode = mode === 'week';
     const monthMode = mode === 'month';
+    const boardMode = mode === 'board';
     const shown = state.scheduleDay ?? today;
     const skip = materializedDates(all);
     const groups = buildAgenda(items, today, state.showUndatedTasks, { skip });
@@ -437,6 +441,7 @@ export class ScheduleRenderer {
     this.day.el.hidden = !dayMode;
     this.week.el.hidden = !weekMode;
     this.monthView.el.hidden = !monthMode;
+    this.board.el.hidden = !boardMode;
     /**
      * 🔴 **「日」では、「予定を足す」の日付を見ている日に合わせる**(#499 の「見ているところに足したら、
      *   見ているところに出る」を「日」でも保つ。動線レビューの指摘)。⚠ 合わせるのは**日が変わったときだけ** ──
@@ -484,6 +489,19 @@ export class ScheduleRenderer {
         weekStart,
       });
     } else this.monthView.leave();
+    if (boardMode) {
+      /**
+       * 🔴 **カンバンは「済み」を畳む旗に関わらず、未完了と完了の両方を出す**(#277)── 列が状態そのものだから。
+       * ⚠ 絞り込み(探す欄・種類・片付けた・隠したノート)は他の見せ方と同じ口(`scheduleItemsOf`)を通す。
+       */
+      this.board.paint({
+        items: scheduleItemsOf({ ...state, showDoneTasks: true }).items,
+        titleOf: (lid) => state.entryMetas.get(lid)?.title ?? '',
+        selectedLid: state.selectedLid,
+        thisYear: at.getFullYear(),
+        settled: state.taskScan !== null,
+      });
+    } else this.board.leave();
     if (dayMode) {
       this.day.paint({
         day: shown,
@@ -503,7 +521,7 @@ export class ScheduleRenderer {
      */
     this.paintGroups(
       frame.groups,
-      dayMode || weekMode || monthMode
+      dayMode || weekMode || monthMode || boardMode
         ? groups.filter((g) => g.date === null || !isRealCalendarDate(g.date))
         : // 🔴 一覧だけ「今日」の見出しを 0 件でも出す(#1626)── 点・件数の文・空の判定は上の `groups` のまま
           state.taskScan !== null
@@ -939,6 +957,15 @@ export class ScheduleRenderer {
             ? '別のウィンドウで、1 か月を日ごとの欄に分けて開きます'
             : '1 か月を、日ごとの欄に分けて見ます',
         ],
+        /**
+         * 🔴 **カンバン**(#277。user 指示 2026-08-19「カンバンとカレンダーを復活」)。状態(未完了 / 完了)を列に並べ、
+         * 札を掴んで列の間を動かすと本文のチェックが切り替わる。⚠ **別のウィンドウの予定表だけ**(左の列は2 列を並べる幅が無い)。
+         */
+        ...(this.region.hasAttribute('data-pkc-browse-pane')
+          ? []
+          : ([
+              ['board', 'カンバン', '未完了と完了を列に並べて見ます(カードを列の間でドラッグすると、チェックが切り替わります)'],
+            ] as const)),
       ] as const
     )
       .map(([mode, label, title]) =>
@@ -1165,7 +1192,8 @@ export class ScheduleRenderer {
     this.day.el.hidden = true;
     this.week.el.hidden = true;
     this.monthView.el.hidden = true;
-    this.region.append(bar, modeRow, quick, grid, note, clearFilter, toggles, exportIcs, notify, this.day.el, this.week.el, this.monthView.el, groups);
+    this.board.el.hidden = true;
+    this.region.append(bar, modeRow, quick, grid, note, clearFilter, toggles, exportIcs, notify, this.day.el, this.week.el, this.monthView.el, this.board.el, groups);
     this.frame = { month, grid, note, clearFilter, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', lead, missed, toggles, groups, modes, quickDate: qDate, weekStart: weekStartSel };
     return this.frame;
   }

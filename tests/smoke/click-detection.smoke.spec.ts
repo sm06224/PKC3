@@ -18,8 +18,12 @@
 import { test, expect } from '@playwright/test';
 import { gotoApp, expectReachable } from './helpers';
 
-/** 押す相手は何でもよい ── 常に画面に在るものを選ぶ。 */
-const TARGET = '[data-pkc-action="set-browse"]';
+/**
+ * 押す相手は何でもよい ── 常に画面に在るものを選ぶ。
+ * ⚠ 狭い幅では後ろのタブが「⋯」の下へ畳まれる(`data-pkc-overflow`。8 枚になった 2026-10-25 以降、既定の幅でも
+ *   「グラフ」「時間」は畳まれる)── **畳まれていないタブだけ**を選ぶ(畳んだ物は見えないので、届く判定の相手にならない)。
+ */
+const TARGET = '[data-pkc-action="set-browse"]:not([data-pkc-overflow])';
 
 test('🔴 素の画面では届く(対照群 ── これが落ちたら以降の判定は無意味)', async ({ page }) => {
   await gotoApp(page);

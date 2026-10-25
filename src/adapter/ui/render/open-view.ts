@@ -53,6 +53,9 @@ export function openView(dispatcher: Dispatcher, mode: ViewMode): boolean {
   // 🔴 録ったものも同じ流儀(#683 段①)── 開いたときに集める(boot では集めない)
   if (state.viewMode === 'captures' && mode === 'captures')
     dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
+  // 🔴 計った時間も同じ流儀(#683 ①)── 開いたときに集める(boot では集めない)
+  if (state.viewMode === 'timers' && mode === 'timers')
+    dispatcher.dispatch({ type: 'REFRESH_WORK_LOG_SCAN' });
   return state.viewMode === mode;
 }
 

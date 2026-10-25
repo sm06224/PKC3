@@ -332,6 +332,14 @@ const OBJECT_LONE: readonly string[] = [
    */
   'unsplit-entry',
   'untag-entry',
+  /**
+   * 🔴 **2026-10-25 に 2 件増えた**(#683 ①)── 計った時間の一覧の「名前を直す」(`timer-run-rename`。
+   *   「名前を外す」も同じ action)と「消す」(`timer-run-delete`)。押し所は行ごとに 1 か所(`render/timers.ts`)。
+   * 🔑 片道ではない ── 消した直後に画面の下の「元に戻す」が出て、名前は「名前を直す / 外す」で往復できる。
+   *   対象(ノートと行)は押した行の `data-pkc-entry` / `data-pkc-run-line` が運ぶ(開いているノートではない)。
+   */
+  'timer-run-delete',
+  'timer-run-rename',
 ];
 
 describe('操作 → 出口の対応表(#582)', () => {

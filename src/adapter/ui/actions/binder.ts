@@ -231,7 +231,8 @@ import { insertionForLineDate } from '@features/schedule/line-date';
 import { dayStamp } from '@features/datetime/date-math';
 import { safeName } from '@features/export/file-name';
 import { hasTranscriptCues, srtFromTranscript, transcriptCues } from '@features/asr/srt';
-import { decodeTaskDrag, dropTaskCard, encodeTaskDrag } from '@adapter/ui/render/schedule-drag';
+import { TIMER_RUN_CLEAR_ATTR, TIMER_RUN_LINE_ATTR } from '@adapter/ui/render/timers';
+import { decodeTaskDrag, dropTaskCard, dropTaskToStatus, encodeTaskDrag, statusTargetOf } from '@adapter/ui/render/schedule-drag';
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
 import { offerDoneUndo, offerMoveUndo, undoScheduleMove } from '@adapter/ui/render/schedule-undo';
 import { slotOfCard } from '@features/schedule/move-undo';
@@ -3101,6 +3102,9 @@ function targetLid(dispatcher: Dispatcher, target: HTMLElement): string | null {
 
 const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'start-edit',
+  // 🔑 計った時間の行を直す・消すのも**本文を書く**(#683 ①)── 取込・書出しの最中に走らせない
+  'timer-run-rename',
+  'timer-run-delete',
   // 🔑 **行の右クリックからフォルダの中に作る**(#215)── `create-entry` と同じ
   //    `CREATE_ENTRY` を撃つので、同じ門をくぐらせる
   'create-in-folder',
@@ -7865,6 +7869,70 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-entry');
     if (lid) dispatcher.dispatch({ type: 'SET_CAPTURE_PLAYING', lid });
   },
+  /**
+   * 🔴 **関係グラフの見方を変える**(#281 ①)。⚠ 見方は state(`graphView`)が持つ ──
+   *   描画器は左のタブと別窓で 2 つ生きうるので、片方に覚えさせると食い違う。
+   *   読むだけの操作なので編集中でも押せる。
+   */
+  'graph-scope': (dispatcher, target) => {
+    const v = target.getAttribute('data-pkc-graph-scope');
+    if (v === 'all' || v === 'selected') dispatcher.dispatch({ type: 'SET_GRAPH_VIEW', all: v === 'all' });
+  },
+  /**
+   * 🔴 **計った時間の名前を付ける・外す**(#683 ①)。⚠ 書換は reducer の `SET_WORK_LOG_LABEL`(1 本)── ここは
+   *   名前を聞いて撃つだけ。対象の行は**一覧が見ていた断面**から引く(reducer が行を照合する)。
+   * ⚠ 別のタブが編集中のノートへは撃たない(`actUnlessEditedElsewhere`。ほかの本文の書換と同じ門)。
+   * ⚠ 小窓で聞く(`promptInApp`)── 何も打たずに決めたときは、いまの名前のまま(何も書かない)。
+   */
+  'timer-run-rename': (dispatcher, target, services, root) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    const line = Number(target.getAttribute(TIMER_RUN_LINE_ATTR));
+    if (lid === null || !Number.isInteger(line)) return;
+    const run = dispatcher.getState().workLogScan?.runs.find((r) => r.lid === lid && r.line === line);
+    const write = (label: string): void =>
+      actUnlessEditedElsewhere(
+        dispatcher,
+        services,
+        [lid],
+        '名前を直せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+        () => dispatcher.dispatch({ type: 'SET_WORK_LOG_LABEL', lid, line, label }),
+      );
+    if (target.hasAttribute(TIMER_RUN_CLEAR_ATTR)) {
+      write('');
+      return;
+    }
+    // 編集中は小窓を出す前に断る(開いても書けない窓を出さない)。断り文は他の本文の書換と同じ 1 本
+    const blocked = bodyWriteBlockReason(dispatcher.getState(), lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, '名前を直してください') });
+      return;
+    }
+    void promptInApp(root, {
+      title: '計った時間の名前',
+      label: 'この計測の名前(何の作業か)',
+      initial: run?.label ?? '',
+      okLabel: '直す',
+    }).then((typed) => {
+      if (typed !== null) write(typed);
+    });
+  },
+  /** 🔴 **計った時間の行を消す**(#683 ①)。⚠ 書換は reducer の `DELETE_WORK_LOG`。消した直後に「元に戻す」が出る。 */
+  'timer-run-delete': (dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    const line = Number(target.getAttribute(TIMER_RUN_LINE_ATTR));
+    if (lid === null || !Number.isInteger(line)) return;
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      '消せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => dispatcher.dispatch({ type: 'DELETE_WORK_LOG', lid, line }),
+    );
+  },
+  'graph-depth': (dispatcher, target) => {
+    const n = Number(target.getAttribute('data-pkc-graph-depth'));
+    if (Number.isFinite(n)) dispatcher.dispatch({ type: 'SET_GRAPH_VIEW', depth: n });
+  },
   /** 🔴 **やめる**(#683 段①)── 器へ返すのは描画器の `syncBorrow` が引き取る。 */
   'capture-stop': (dispatcher) => {
     dispatcher.dispatch({ type: 'SET_CAPTURE_PLAYING', lid: null });
@@ -11486,7 +11554,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   /** 予定の面の「一覧 / 日」(#855 段 A-1)。値は押したボタンの `data-pkc-mode`。 */
   'schedule-mode': (dispatcher, target, services) => {
     const mode = target.getAttribute('data-pkc-mode');
-    if (mode !== 'list' && mode !== 'day' && mode !== 'week' && mode !== 'month') return;
+    if (mode !== 'list' && mode !== 'day' && mode !== 'week' && mode !== 'month' && mode !== 'board') return;
     /**
      * 🔴 **左の列の「週」は、別のウィンドウで開く**(#855 段 A-2)。左の列は狭く、7 日を並べると
      *   1 日が読めなくなる ── 左の見せ方(一覧 / 日)は変えない。窓が出なかったときの理由は
@@ -11502,6 +11570,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       services.openScheduleWindow(mode, dispatcher.getState().scheduleDay);
       return;
     }
+    // 🔴 カンバン(#277)は別のウィンドウの予定表だけ(左の列には押し所を出していない)。念のため狭い面では受けない
+    if (mode === 'board' && narrow) return;
     // 🔴 狭い面は自分の見せ方(`scheduleNarrowMode`)を持つ ── 中央の見せ方を巻き込まない
     if (narrow && (mode === 'list' || mode === 'day')) {
       dispatcher.dispatch({ type: 'SET_SCHEDULE_NARROW_MODE', mode });
@@ -11526,7 +11596,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (win === null) return;
     const range =
       face.querySelector<HTMLElement>(
-        '[data-pkc-region="schedule-monthview"]:not([hidden]), [data-pkc-region="schedule-weekview"]:not([hidden]), [data-pkc-region="schedule-day"]:not([hidden])',
+        '[data-pkc-region="schedule-monthview"]:not([hidden]), [data-pkc-region="schedule-board"]:not([hidden]), [data-pkc-region="schedule-weekview"]:not([hidden]), [data-pkc-region="schedule-day"]:not([hidden])',
       ) ?? face.querySelector<HTMLElement>('[data-pkc-region="schedule-groups"]');
     if (range === null) return;
     for (const old of doc.querySelectorAll('[data-pkc-print-range]')) old.removeAttribute('data-pkc-print-range');
@@ -18742,6 +18812,14 @@ export function bindActions(
     }
     // 🔴 **予定の札**(双方向)── 落とし先は日の升目 / 束の見出し
     if (de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true) {
+      // 🔴 カンバンの列(#277)── 落とすと状態が変わる。日の落とし先より先に見る
+      const col = statusTargetOf(de.target as Element | null, root);
+      if (col !== null) {
+        e.preventDefault();
+        de.dataTransfer.dropEffect = 'move';
+        markDropTarget(col.el);
+        return;
+      }
       const drop = dateTargetOf(de.target);
       if (drop === null) {
         // ⚠ **光ったままにしない** ── 通ってから別の場所で離すと「そこへ入った」と読む
@@ -18981,6 +19059,15 @@ export function bindActions(
      *   2 つ作らない」/「落とし先の判定は 1 本に保つ」)。
      */
     if (de.dataTransfer?.types?.includes(PKC_TASK_DRAG) === true) {
+      // 🔴 カンバンの列(#277)── 掴んだ札の印を押すのと同じ道で、本文のチェックを切り替える
+      const col = statusTargetOf(de.target as Element | null, root);
+      if (col !== null) {
+        clearDropTarget();
+        e.preventDefault();
+        const g = decodeTaskDrag(de.dataTransfer.getData(PKC_TASK_DRAG) || '');
+        if (g !== null) dropTaskToStatus(col.el, g, col.status);
+        return;
+      }
       const drop = dateTargetOf(de.target);
       clearDropTarget();
       if (drop === null) return;

@@ -85,7 +85,7 @@ export const WEEK_REPEAT_PRESS_MS = REPEAT_PRESS_MS;
  */
 export function weekAnnounceKey(
   heldView: string | null,
-  scheduleMode: 'list' | 'day' | 'week' | 'month',
+  scheduleMode: 'list' | 'day' | 'week' | 'month' | 'board',
   scheduleDay: string | null,
   today: string,
   calendarMonth: { readonly year: number; readonly month: number } | null = null,

@@ -36,6 +36,10 @@ export const BROWSE_MODES = [
   'captures',
   // 🔴 **PC**(パソコンのフォルダ。#215 段①。🟣 Gemini 裁定 2026-10-01)── 繋いだフォルダの直下を並べる面
   'pc',
+  // 🔴 **関係グラフ**(#281 ①)── 組み込みアプリの左のタブ。⚠ 足すのは**末尾**(既にあるタブの位置を動かさない)
+  'graph',
+  // 🔴 **計った時間**(#683 ①)── 組み込みアプリの左のタブ。⚠ これも末尾
+  'timers',
 ] as const;
 
 export type BrowseMode = (typeof BROWSE_MODES)[number];
@@ -85,6 +89,10 @@ const HOME_TAB: Readonly<Partial<Record<ViewMode, BrowseMode>>> = {
   contacts: 'contacts',
   // 🔴 録ったものも同じ形(#683 段①)── 別窓が塞がれたら左のタブへ送る
   captures: 'captures',
+  // 🔴 関係グラフ(#281 ①)も同じ形 ── 別窓が塞がれたら左のタブへ送る
+  graph: 'graph',
+  // 🔴 計った時間(#683 ①)も同じ形 ── 別窓が塞がれたら左のタブへ送る
+  timers: 'timers',
 };
 
 export function homeTabOf(view: ViewMode): BrowseMode | null {
@@ -125,7 +133,8 @@ export type BrowseScan =
   | 'REFRESH_LAUNCHER_TILES'
   | 'REFRESH_TASK_SCAN'
   | 'REFRESH_CONTACT_SCAN'
-  | 'REFRESH_CAPTURE_SCAN';
+  | 'REFRESH_CAPTURE_SCAN'
+  | 'REFRESH_WORK_LOG_SCAN';
 
 const OPEN_SCAN: Readonly<Partial<Record<BrowseMode, BrowseScan>>> = {
   launcher: 'REFRESH_LAUNCHER_TILES',
@@ -134,6 +143,8 @@ const OPEN_SCAN: Readonly<Partial<Record<BrowseMode, BrowseScan>>> = {
   // 🔴 録ったものも開いたときに集める(#683 段①)── 添付の本文を読むので、
   //    この面を使わない user には払わせない
   captures: 'REFRESH_CAPTURE_SCAN',
+  // 🔴 計った時間(#683 ①)── 本文の「作業」の行を集める。この面を使わない user には払わせない
+  timers: 'REFRESH_WORK_LOG_SCAN',
 };
 
 /**

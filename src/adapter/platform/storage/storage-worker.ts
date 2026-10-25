@@ -110,6 +110,7 @@ import {
   type ContactCard,
   type ContactScan,
 } from '@features/contact/contact-card';
+import { WORK_LOG_LIMITS, workRunsOf, type WorkLogScan, type WorkRun } from '@features/timer/work-log';
 import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
 import { capCellText } from '@features/query/sql-cell';
 import { decodeImportTextInfo } from '@features/import/text-decode';
@@ -1736,6 +1737,66 @@ const TASK_SCAN_CHUNK = 100;
  * `entries.body` は本文を丸ごと持つので、読む量は予定と同じ ── だから同じ塊にする。
  */
 const CONTACT_SCAN_CHUNK = 100;
+
+/** 計った時間の走査で 1 度に読むノートの数。⚠ 本文を丸ごと読むので予定・連絡先と同じ塊にする。 */
+const WORK_LOG_SCAN_CHUNK = 100;
+/** 🔑 候補を絞る `LIKE` の型。⚠ SQL の字に日本語を混ぜない(画面の字の検査に SQL の `lid` / `entry` が当たる)ので束縛で渡す。 */
+const WORK_LOG_LIKE = '%作業 %';
+
+/**
+ * 🔴 **計った時間を集める**(#683 ①)── 本文の `- 作業 2026-08-27 06:40–07:03(23:11)` の行。
+ *
+ * 🔑 `runContactScan` と**同じ形**(塊で読み、塊ごとに捨て、切ったら `truncated`)。
+ * 🔑 候補は `LIKE '%作業 %'` で絞る ── 該当しない本文は JS へ運ばない(読むのは sqlite の中だけ)。
+ * 🔴 本文は worker から出さない ── 返るのは行(`WorkRun`)だけ(不可侵指示 2026-07-27「速やかな破棄」)。
+ */
+function runWorkLogScan(cid: string): WorkLogScan {
+  const database = need();
+  const totalNotes = Number(
+    database.selectValue(`SELECT count(*) FROM entries WHERE cid = ? AND ${USER_REALM_SQL}`, [cid]) ?? 0,
+  );
+  const runs: WorkRun[] = [];
+  let scannedNotes = 0;
+  let truncated = false;
+  let stop = false;
+  let after: { entryOrder: number; lid: string } | undefined;
+  while (!stop) {
+    const rows = database.selectObjects(
+      after === undefined
+        ? `SELECT lid, entry_order, body FROM entries
+             WHERE cid = ? AND ${USER_REALM_SQL} AND body LIKE ?
+             ORDER BY entry_order, lid LIMIT ?`
+        : `SELECT lid, entry_order, body FROM entries
+             WHERE cid = ? AND ${USER_REALM_SQL} AND body LIKE ?
+             AND (entry_order > ? OR (entry_order = ? AND lid > ?))
+            ORDER BY entry_order, lid LIMIT ?`,
+      after === undefined
+        ? [cid, WORK_LOG_LIKE, WORK_LOG_SCAN_CHUNK]
+        : [cid, WORK_LOG_LIKE, after.entryOrder, after.entryOrder, after.lid, WORK_LOG_SCAN_CHUNK],
+    ) as unknown as Array<{ lid: string; entry_order: number; body: string | null }>;
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      // ⚠ 切ったら必ず `truncated` ── 黙って切ると user は「無い」と読む
+      if (scannedNotes >= WORK_LOG_LIMITS.notes || runs.length >= WORK_LOG_LIMITS.runs) {
+        truncated = true;
+        stop = true;
+        break;
+      }
+      scannedNotes += 1;
+      for (const r of workRunsOf(row.lid, row.body ?? '')) {
+        if (runs.length >= WORK_LOG_LIMITS.runs) {
+          truncated = true;
+          stop = true;
+          break;
+        }
+        runs.push(r);
+      }
+      after = { entryOrder: row.entry_order, lid: row.lid };
+    }
+    if (rows.length < WORK_LOG_SCAN_CHUNK) break;
+  }
+  return { runs, totalNotes, scannedNotes, truncated };
+}
 
 /**
  * 🔴 **連絡先を集める**(#278 段①)。
@@ -4053,6 +4114,7 @@ const handlers: Handlers = {
   },
   taskScan: (req) => runTaskScan(req.cid),
   contactScan: (req) => runContactScan(req.cid),
+  workLogScan: (req) => runWorkLogScan(req.cid),
   snippetScan: (req) => runSnippetScan(req.cid),
   getBody: (req) => {
     const rows = need().selectObjects(

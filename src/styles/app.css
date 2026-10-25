@@ -894,7 +894,7 @@ img[data-pkc-action='view-big']:focus-visible {
    * ⚠ 折り返しは**最後の手段**である ── 下の `min-width: max-content` と対で
    *   読む:語が入るうちは 1 段のまま伸び、入らなくなった時だけ段が増える。 */
   flex-wrap: wrap;
-  gap: 1px;
+  gap: 0;
   /* ⚠ 下地は**地の色**(#951)。区切りは共有規則が各ボタンの輪で描く。
    * 🔴 下端の 1 本線は「**下地を 1px 透かせる**」形から `border-bottom` へ移した
    *   ── 下地を地の色にした瞬間、透かしても線にならないからである。 */
@@ -917,7 +917,10 @@ img[data-pkc-action='view-big']:focus-visible {
    *   ⚠ 6 枚では 2px のとき **1366px で 2 段**になる(実測)── 1px なら 1 段に戻る。
    *   ⚠ 余りが有る幅では `flex` が伸ばすので、**見た目は 1px も変わらない** ──
    *   変わるのは「あと少しで折り返す」幅だけである。 */
-  padding: 0 1px;
+  /* 🔴 **1px → 0 にした**(2026-10-25、#281 ① / #683 ①で 7・8 枚目が加わった)。⚠ 8 枚は入りきらず「⋯」が出るので、
+   *   その幅ぶん従来の 6 枚が押し出されていた(1366〜1101px で PC が畳まれた)。余白と隙間を 0 にして打ち消した ──
+   *   余りが有る幅では `flex` が伸ばすので見た目は変わらない(実測は `layout.smoke.spec.ts`)。 */
+  padding: 0;
   border: none;
   border-radius: 0;
   justify-content: center;
@@ -1036,7 +1039,9 @@ img[data-pkc-action='view-big']:focus-visible {
 [data-pkc-region='browse-tabs'] [data-pkc-field='bar-more'] {
   height: auto;
   min-width: 0;
-  padding: 0 var(--s2);
+  /* 🔴 タブが 8 枚になって入りきらない幅が増えた(#281 ① / #683 ①)ので、「⋯」の横の余白を詰めた
+   *   (`padding: 0 var(--s2)` → 1px)。実測で 1440px(左の列 259px)に PC が戻る。 */
+  padding: 0 1px;
 }
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='bar-more'] {
   min-width: 44px;
@@ -1271,6 +1276,22 @@ img[data-pkc-action='view-big']:focus-visible {
   border-color: var(--accent);
 }
 [data-pkc-choice-btn][aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+/**
+ * 🔴 **押されているボタンは、乗せても濃いまま**(2026-10-25)。
+ *
+ * ⚠ 上の規則(0,2,0)は、帯の「乗せた / 焦点」の規則 ──
+ *   `[data-pkc-field='detail-toolbar'] button:hover:not(:disabled)`(0,3,1)・
+ *   `[data-pkc-field='schedule-toolbar'] button:hover:not(:disabled)` など ── より**詳細度が低い**ので、
+ *   押した直後のマウスが乗っている間は**押されている色が薄い地に戻っていた**
+ *   (メッセージの「注意」を押した直後に `rgb(220, 235, 226)` のまま。マウスが乗る前後の競合で smoke が揺れた)。
+ *   user から見ると「押したのに、どれが選ばれているか分からなくなる」。
+ * 🔑 属性を重ねて詳細度を上げる(`:where` の逆)── 乗せた規則(0,3,1)に勝つ最小の形。
+ */
+button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disabled) {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-fg);
@@ -12193,4 +12214,183 @@ h6:hover > .pkc-heading-anchor,
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* ══ 関係グラフ(#281 ①)══════════════════════════════════════
+ * 🔴 **左の列と中央の面(別窓)に同じ規則**(連絡先と同じ形)。
+ * 節点は押せるボタン(押すとそのノートを開く)。選んでいるノートは枠を太くする
+ * ── 色ではなく線で示す(地は無彩色、色は情報にだけ)。 */
+[data-pkc-browse-pane='graph'],
+[data-pkc-view-pane='graph'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-field='graph-bar'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+[data-pkc-field='graph-note'],
+[data-pkc-field='graph-legend'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='graph-body'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-height: 0;
+}
+[data-pkc-field='graph-map'] {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+}
+[data-pkc-field='graph-map'] button {
+  padding: 1px 6px;
+  font-size: var(--btn-fs-sm);
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+[data-pkc-field='graph-map'] button[aria-current='true'] {
+  border-width: 2px;
+  border-color: var(--fg);
+  font-weight: 600;
+}
+
+/* ── 予定の「カンバン」(#277。user 指示 2026-08-19「カンバンとカレンダーを復活」)────────
+ * 未完了 / 完了の 2 列。札は一覧と同じ札(`schedule-cards` の直下)なので、押す・掴む・縦線の色は一覧の規則が
+ * そのまま効く。ここが足すのは列の置き場所と、**落とせる列が掴んで通ったときに光る**線だけ。
+ * 済んだ札は線で示す(一覧の規則)── 色は使わない。 */
+[data-pkc-region='schedule-board'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+}
+[data-pkc-region='schedule-board'][hidden] {
+  display: none;
+}
+[data-pkc-field='schedule-board-note'] {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+[data-pkc-field='schedule-board-columns'] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+  align-items: start;
+}
+[data-pkc-field='schedule-board-column'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  min-width: 0;
+  /* 札が 0 件の列にも落とせるよう、最低限の高さを取る */
+  min-height: 96px;
+  padding: var(--s1);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+[data-pkc-field='schedule-board-head'] {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+[data-pkc-field='schedule-board-cards'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 48px;
+}
+[data-pkc-field='schedule-board-more'] {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+[data-pkc-field='schedule-board-more'][hidden] {
+  display: none;
+}
+[data-pkc-drop-status][data-pkc-dropping] {
+  outline: 2px solid var(--fg);
+  outline-offset: -2px;
+}
+
+/* ══ 計った時間(#683 ①)══════════════════════════════════════
+ * 🔴 **左の列と中央の面(別窓)に同じ規則**(録ったものと同じ形)。
+ * 左の列は `minmax(242px, 18vw)` なので**縦に積む** ── 時刻・名前・ノート・押し所を横に並べると名前が切れる。 */
+[data-pkc-browse-pane='timers'],
+[data-pkc-view-pane='timers'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-field='timers-note'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='timers-body'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-height: 0;
+}
+[data-pkc-field='timers-day-head'] {
+  margin: 0 0 var(--s1);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+[data-pkc-field='timers-list'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--border);
+}
+[data-pkc-field='timers-list'] > li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s2);
+  background: var(--surface);
+}
+[data-pkc-field='timers-when'] {
+  font-variant-numeric: tabular-nums;
+}
+[data-pkc-field='timers-name'] {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* ノートの名前は行いっぱいの押せる場所にする(マウスだけで完結する。連絡先の名前と同じ) */
+[data-pkc-field='timers-note-open'] {
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+[data-pkc-field='timers-tools'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
 }
