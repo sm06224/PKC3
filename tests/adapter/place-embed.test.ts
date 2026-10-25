@@ -224,11 +224,12 @@ describe('切り出し(excerptOf)', () => {
       expect(excerptOf(att('image/png'), 'attachment').text, '説明文が出ている').toBe('');
     });
 
-    it('既定の大きさを当てるのは「画像の添付」だけ(読む前は当てない)', () => {
+    it('既定の大きさを当てるのは「画像と PDF の添付」だけ(読む前は当てない / Office 等は当てない)', () => {
       const img = excerptOf(att('image/png'), 'attachment');
       const pdf = excerptOf(att('application/pdf'), 'attachment');
       expect(placeFramed('attachment', img)).toBe(true);
-      expect(placeFramed('attachment', pdf), 'PDF に既定の大きさが当たっている').toBe(false);
+      // 🔴 PDF は 1 ページ目を絵にする(#529 W6)── 高さが無いと絵が潰れる
+      expect(placeFramed('attachment', pdf), 'PDF に既定の大きさが当たっていない').toBe(true);
       expect(placeFramed('attachment', excerptOf(att('application/zip'), 'attachment'))).toBe(false);
       expect(placeFramed('attachment', undefined), '読む前に当たっている').toBe(false);
       expect(placeFramed('text', undefined)).toBe(true);
@@ -1135,21 +1136,32 @@ describe('描画: 図と画像と添付ノート(W3-②)', () => {
       expect([block(r, 'pw').style.width, block(r, 'pw').style.height]).toEqual(['300px', '200px']);
     });
 
-    it('🔴 PDF は題名の帯 + 「PDF」の字だけ(絵は借りない / 大きさは帯のまま)', async () => {
+    it('🔴 PDF は 1 ページ目の絵の器(押すと元のノートへ / 既定の大きさ / 焼けない間は字のまま / ビューアは立てない)', async () => {
       const f = fakeLender();
       const r = await rig(bodies, metas, true, f.lender);
       await settle();
       const slot = slotOf(r, 'pp')!;
+      // 焼けるまで(ここでは焼き手が居ない)は従来の字のボタン
       expect(slot.textContent).toBe('PDF は元のノートで');
       // 🔴 字だけの行ではなく、押すと元のノートが開く(#1264 §1 ── 隣の「続きは元のノートで」と同じ口)
       const skip = slot.querySelector<HTMLElement>('[data-pkc-field="place-body-skip"]')!;
       expect(skip.tagName, '押せる物が button でない').toBe('BUTTON');
       expect(skip.getAttribute('data-pkc-action')).toBe('select-entry');
       expect(skip.getAttribute('data-pkc-entry'), '置いた PDF のノートを指していない').toBe('ap');
-      expect(slot.querySelector('img, object, iframe'), 'PDF を絵や埋め込みで出している').toBeNull();
-      expect(f.lent, 'PDF まで借りている').not.toContain('pdf1');
-      expect(block(r, 'pp').style.height, 'PDF に既定の高さが当たっている').toBe('');
-      expect(block(r, 'pp').hasAttribute('data-pkc-place-framed')).toBe(false);
+      // 🔑 絵の器になっている(値 = 添付の鍵)── 近づいた枠から焼く既存の道(`hydrateDiagrams`)に乗る
+      expect(skip.getAttribute('data-pkc-pdf-src'), 'PDF の添付の鍵が器に載っていない').toBe('pdf1');
+      expect(seen.has(skip), '「見えたとき」の観測に乗っていない').toBe(true);
+      expect(slot.querySelector('object, iframe'), 'PDF をビューアで埋めている').toBeNull();
+      expect(f.lent, 'PDF を ObjectURL で借りている(絵は焼くので借りない)').not.toContain('pdf1');
+      expect(block(r, 'pp').style.height, 'PDF に既定の高さが当たっていない').toBe(`${String(PLACE_ENTRY_DEFAULT_H)}px`);
+      expect(block(r, 'pp').hasAttribute('data-pkc-place-framed')).toBe(true);
+    });
+
+    it('🔴 貸出口が無い板では絵の器にしない(字のまま)', async () => {
+      const r = await rig(bodies, metas, true, null);
+      await settle();
+      const skip = slotOf(r, 'pp')!.querySelector<HTMLElement>('[data-pkc-field="place-body-skip"]')!;
+      expect(skip.hasAttribute('data-pkc-pdf-src')).toBe(false);
     });
 
     it('🔴 添付を差し替えたら絵も差し替わる(古い貸出は返る / 新しい鍵で借りる)', async () => {

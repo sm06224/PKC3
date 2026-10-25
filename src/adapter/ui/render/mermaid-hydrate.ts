@@ -221,6 +221,11 @@ export interface DiagramKind {
   note?(source: string): string | null;
   /** 「図を保存」を出すか(SVG で書き出せる種類だけ)。 */
   savable: boolean;
+  /**
+   * 絵を押すと別窓で大きく見る印(`markViewBig`)を付けるか。既定は付ける。
+   * `false` = 器そのものが別の押し所(板の PDF は器が「元のノートを開く」ボタン)── 絵が奪うと二重になる。
+   */
+  viewBig?: boolean;
 }
 
 export const MERMAID_KIND: DiagramKind = {
@@ -431,7 +436,7 @@ export function hydrateDiagrams(
         p.host.append(img);
         // ⚠ **繋いでから**印を付ける(`markViewBig` は面を `closest` で読むので、
         //    繋ぐ前だと「どの面か」が分からない)
-        markViewBig(img);
+        if (kind.viewBig !== false) markViewBig(img);
         // ⚠ SVG で書き出せる種類だけ「保存」を出す(押せない導線を置かない)
         if (kind.savable) p.host.append(saveButton());
         p.host.setAttribute(`data-pkc-${kind.name}-state`, 'ready');

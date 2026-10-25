@@ -4720,6 +4720,31 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   height: 100%;
   object-fit: contain;
 }
+/* 🔴 置いた PDF の添付ノートの 1 ページ目(#529 W6)── 枠いっぱいに、縦横比を保って収める。
+ *   器は「元のノートで」のボタンのまま(絵になっても、押すと元のノートを開く)。焼けない間・焼けなかったときは
+ *   従来どおり字のボタン。⚠ 絵の幅・高さは焼くときに inline で入る(`mermaid-hydrate.ts`)── 枠に合わせるので上書きする */
+.pkc-place > [data-pkc-field='place-body'][data-pkc-place-attachment='pdf'] {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+[data-pkc-field='place-body-skip'][data-pkc-pdf-state='ready'] {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  text-decoration: none;
+}
+[data-pkc-field='place-body-skip'][data-pkc-pdf-state='ready'] > img {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  object-fit: contain;
+}
 /* 入れ子の置いたノート(題名だけの行)と「続きは元のノートで」── どちらも押すと元のノートを開く */
 [data-pkc-field='place-body-link'],
 [data-pkc-field='place-body-more'],

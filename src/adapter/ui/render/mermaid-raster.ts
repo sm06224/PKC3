@@ -220,6 +220,7 @@ const SEP = '\u0000';
  *   - `configFor`(mermaid の設定: フォント・配置・変数の対応)
  *   - `rasterize`(SVG → PNG の寸法・背景・縮尺の決め方)
  *   - chart の描画(`chart-worker.ts` / `chart-raster.ts` の見た目、chart.js の版上げ)
+ *   - 板の PDF の絵(`pdf-raster.ts` / `platform/pdf/page-baker.ts` の寸法・背景、pdf.js の版上げ)
  * 🔑 mermaid の版上げは `MERMAID_VERSION` が鍵に入っているので、ここは上げなくてよい。
  */
 export const RASTER_BAKE_VERSION = 1;
