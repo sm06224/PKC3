@@ -97,10 +97,16 @@ const UNRESOLVED: readonly string[] = [
    *   さらに表示 / 行を押して取り込む)。⚠ 2026-10-02(#1264 §2)で「更新」(`pc-refresh-folder`)が 1 件増えた。🔑 押し所は `pc-folder.ts` が `button(action, …)` という
    *   **変数の引数**で組むので、静的な `data-pkc-action="pc-…"` が source のどこにも無い
    *   (`set-app-icon` と同じ ── 出口は在るが、字では追えない)。
+   * ⚠ 2026-10-25(#215 / #432)で 3 件増えた ── サブフォルダへ入る(`pc-enter-dir`)/ パンくずで戻る(`pc-crumb`)/
+   *   Office のファイルを選んで開く(`pc-open-office-file`)。同じく `button(action, …)` で組む。
+   *   (旧 `pc-dir-note` は `pc-enter-dir` に替わった。)
    */
+  'pc-crumb',
   'pc-cut-folder',
+  'pc-enter-dir',
   'pc-more',
   'pc-open-file',
+  'pc-open-office-file',
   // ⚠ 2026-10-11(#582 段③ 第 2 群): `pc-pick-folder` は「操作を探す」の受け手(`SHORTCUT_BUTTON`)に字で書かれたので、出口を静的に追えるようになり、この表から抜けた。
   'pc-refresh-folder',
   'remove-office-pack',
