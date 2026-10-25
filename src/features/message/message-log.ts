@@ -126,6 +126,7 @@ export const MESSAGE_SOURCE_LABEL: Readonly<Record<string, string>> = {
   // 🔴 ワーカーの記録の lane 名(#1087 M7)── 内部の名前を英語のまま見せない
   math: '数式',
   chart: 'グラフ',
+  plotly: 'グラフ(plotly)',
   asr: '文字起こし',
   asset: '添付',
   wave: '波形',

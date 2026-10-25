@@ -2167,7 +2167,7 @@ export interface BinderServices {
   viewBig?(
     src: string,
     title: string,
-    diagram?: { kind: 'mermaid' | 'chart'; source: string },
+    diagram?: { kind: 'mermaid' | 'chart' | 'plotly'; source: string },
     from?: Window,
   ): void | Promise<boolean>;
   /** 未参照 asset の掃除(P4b)。確認・報告の UI も実体側の責務。 */
@@ -11974,14 +11974,18 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (!img || img.src === '') return;
     const mmd = img.closest<HTMLElement>('[data-pkc-mermaid-src]');
     const chart = img.closest<HTMLElement>('[data-pkc-chart-src]');
+    const plotly = img.closest<HTMLElement>('[data-pkc-plotly-src]');
     const src = mmd?.getAttribute('data-pkc-mermaid-src') ?? '';
     const csrc = chart?.getAttribute('data-pkc-chart-src') ?? '';
+    const psrc = plotly?.getAttribute('data-pkc-plotly-src') ?? '';
     const diagram =
       src !== ''
         ? { kind: 'mermaid' as const, source: src }
         : csrc !== ''
           ? { kind: 'chart' as const, source: csrc }
-          : undefined;
+          : psrc !== ''
+            ? { kind: 'plotly' as const, source: psrc }
+            : undefined;
 
     // 🔴 章ウィンドウなど、別ドキュメントの窓で押されたときはその場で実寸別窓を開く
     if (img.ownerDocument !== root.ownerDocument) {

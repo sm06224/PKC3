@@ -10,6 +10,7 @@ import { manualPagePlugin } from './build/manual-page-plugin.ts';
 import { mermaidVersionDefine } from './build/mermaid-version.ts';
 import { ossNoticesPlugin } from './build/oss-notices-plugin.ts';
 import { pdfAssetsPlugin } from './build/pdf-assets-plugin.ts';
+import { reactRuntimePlugin } from './build/react-runtime-plugin.ts';
 import { COI_HEADERS as SHARED_COI_HEADERS } from './src/adapter/platform/sw/coi-headers.ts';
 
 /**
@@ -71,6 +72,7 @@ export default defineConfig({
     katexWoff2Plugin(),
     duckdbAssetsPlugin(),
     pdfAssetsPlugin(),
+    reactRuntimePlugin(),
   ],
   // 🔴 **crossOriginIsolated を成立させる**(#88 O2 の前提)。
   //

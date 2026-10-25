@@ -28,6 +28,8 @@ import { hydrateMermaid, pruneScopes, type HydrateOptions, type MermaidScope } f
 import { hydrateMath } from './math-hydrate';
 import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
+import { hydratePlotly } from './plotly-raster';
+import { hydrateReact } from './react-sandbox';
 import { SqlEmbedHydrator } from './sql-embed-hydrate';
 import { fenceAssetUnreadableText, hydrateFenceHosts } from './fence-asset-hydrate';
 import { applyHeadingFold, revealBlock } from './heading-fold';
@@ -81,7 +83,7 @@ export function hydrateFigures(
 ): MermaidScope[] {
   // ⚠ **数式もここに束ねる**(#707)── 面は 6 か所あるので、別の口を作ると
   //    そのうち 1 つで数式だけ字のまま残る(まさに mermaid が踏んだ形)。
-  return [hydrateMermaid(root, opts), hydrateChart(root, opts), hydrateMath(root)];
+  return [hydrateMermaid(root, opts), hydrateChart(root, opts), hydratePlotly(root, opts), hydrateReact(root), hydrateMath(root)];
 }
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
 import { captureCellInput, reopenCellInput } from './cell-input';

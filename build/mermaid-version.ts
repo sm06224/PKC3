@@ -13,6 +13,19 @@ export function mermaidVersion(): string {
   return (JSON.parse(readFileSync(path, 'utf8')) as { version: string }).version;
 }
 
+/** 入れた依存の版(`node_modules/<name>/package.json`)。⚠ 手書きしない。 */
+function installedVersion(name: string): string {
+  const path = fileURLToPath(new URL(`../node_modules/${name}/package.json`, import.meta.url));
+  return (JSON.parse(readFileSync(path, 'utf8')) as { version: string }).version;
+}
+
+/**
+ * 焼いた絵のキャッシュの鍵に入れる**産出器の版**(mermaid #1003 / plotly・pdf.js #528 #529)。
+ * ⚠ 名前はそのまま(両方の config が使う)。plotly と pdf.js の版も同じ `define` で焼く ── 版が上がっても
+ *   鍵が変わらないと、上げた日から古い PNG が返り続ける。
+ */
 export const mermaidVersionDefine = (): Record<string, string> => ({
   __PKC_MERMAID_VERSION__: JSON.stringify(mermaidVersion()),
+  __PKC_PLOTLY_VERSION__: JSON.stringify(installedVersion('plotly.js-dist-min')),
+  __PKC_PDFJS_VERSION__: JSON.stringify(installedVersion('pdfjs-dist')),
 });

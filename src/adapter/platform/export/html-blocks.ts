@@ -132,6 +132,7 @@ function skippedName(el: Element): { what: string; why: string } | null {
 const FIGURE_ATTR: readonly [string, string][] = [
   ['data-pkc-mermaid-src', 'mermaid'],
   ['data-pkc-chart-src', 'chart'],
+  ['data-pkc-plotly-src', 'plotly'],
 ];
 
 /**
@@ -147,7 +148,7 @@ function mathText(el: Element, src: string): string {
 }
 
 /** user に見せる呼び名(内部語を出さない)。 */
-const FIGURE_NAME: Record<string, string> = { mermaid: '図', chart: 'グラフ', svg: '図' };
+const FIGURE_NAME: Record<string, string> = { mermaid: '図', chart: 'グラフ', plotly: 'グラフ', svg: '図' };
 
 function figureOf(el: Element): { kind: string; source: string } | null {
   for (const [attr, kind] of FIGURE_ATTR) {

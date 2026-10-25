@@ -55,6 +55,59 @@ export const HTML_SANDBOX_MAX_HEIGHT = 5000;
 export const HTML_SANDBOX_RESIZE_MSG_TYPE = 'pkc-html-render-resize';
 
 /**
+ * 箱の中から親へ高さを知らせる script(`ResizeObserver` で body を見る)。
+ * 🔑 **`<iframe data-pkc-html-render-id>` を作る者はみなこれを使う**(` ```html ` の箱も、React の箱〔#528 ②〕も)。
+ */
+export function sandboxResizeScript(iframeId: string): string {
+    // ResizeObserver で body の size 変化を watch、postMessage で通知。
+  return (
+    '<script>(function(){' +
+    'var id=' + JSON.stringify(iframeId) + ';' +
+    'function post(){' +
+    'var h=Math.min(' + HTML_SANDBOX_MAX_HEIGHT + ',Math.max(' +
+    'document.documentElement.scrollHeight,document.body.scrollHeight));' +
+    "try{window.parent.postMessage({type:'" + HTML_SANDBOX_RESIZE_MSG_TYPE +
+    "',id:id,height:h},'*');}catch(e){}}" +
+    'if(window.ResizeObserver){' +
+    'var ro=new ResizeObserver(post);' +
+    'if(document.body)ro.observe(document.body);' +
+    '}' +
+    "window.addEventListener('load',post);" +
+    'setTimeout(post,100);setTimeout(post,500);' +
+    '})();</script>'
+  );
+}
+
+/**
+ * 箱の中から、CSP が止めた要求の種別と件数を親へ申告する script(下の本体の注記を読むこと)。
+ * ⚠ **content より前**に置く(解析中の要求を取りこぼす)。
+ */
+export function sandboxViolationScript(
+  iframeId: string,
+  /**
+   * 画像の違反を数えて申告するか(既定 `true` = ` ```html ` の箱)。
+   * 🔴 `false` は「外へ出ない」と決めてある箱(React の箱)── 画像の違反を申告すると、押しても効かない
+   * 「外部の画像を読み込む」の同意の帯が出る(同意しても箱の CSP は開かない)。画像以外の違反だけ知らせる。
+   */
+  countImages: boolean = true,
+): string {
+  return (
+    '<script>(function(){' +
+    'var id=' + JSON.stringify(iframeId) + ';' +
+    'var blocked=0,timer=0,kinds={};' +
+    "document.addEventListener('securitypolicyviolation',function(ev){" +
+    "var d=String(ev.effectiveDirective||ev.violatedDirective||'');" +
+    (countImages
+      ? "if(d.indexOf('img-src')===0)blocked++;else kinds[d]=1;"
+      : "if(d.indexOf('img-src')===0)return;kinds[d]=1;") +
+    'if(timer)return;timer=setTimeout(function(){timer=0;' +
+    "try{window.parent.postMessage({type:'" + HTML_SANDBOX_BLOCKED_MSG_TYPE +
+    "',id:id,blocked:blocked,kinds:Object.keys(kinds)},'*');}catch(e){}},50);});" +
+    '})();</script>'
+  );
+}
+
+/**
  * `<iframe sandbox>` 要素 HTML を生成。content は raw HTML(エスケープなし、
  * sandbox 隔離されているので XSS risk 無し)。
  *
@@ -101,23 +154,7 @@ export function buildHtmlSandboxIframe(
     "object-src 'none'; " +
     "base-uri 'none'";
 
-  // 自動 resize スクリプト(iframe 内から parent に height 通知)。
-  // ResizeObserver で body の size 変化を watch、postMessage で通知。
-  const resizeScript =
-    '<script>(function(){' +
-    'var id=' + JSON.stringify(iframeId) + ';' +
-    'function post(){' +
-    'var h=Math.min(' + HTML_SANDBOX_MAX_HEIGHT + ',Math.max(' +
-    'document.documentElement.scrollHeight,document.body.scrollHeight));' +
-    "try{window.parent.postMessage({type:'" + HTML_SANDBOX_RESIZE_MSG_TYPE +
-    "',id:id,height:h},'*');}catch(e){}}" +
-    'if(window.ResizeObserver){' +
-    'var ro=new ResizeObserver(post);' +
-    'if(document.body)ro.observe(document.body);' +
-    '}' +
-    "window.addEventListener('load',post);" +
-    'setTimeout(post,100);setTimeout(post,500);' +
-    '})();</script>';
+  const resizeScript = sandboxResizeScript(iframeId);
 
   /**
    * 🔴 **止めた画像の件数を親へ申告する**(2026-08-06)。
@@ -151,17 +188,7 @@ export function buildHtmlSandboxIframe(
    * ⚠ 種別の綴りは箱の中で畳まない ── 親側の `sandboxBlockedKind` が
    *   1 か所で決める(§7)。ここは**生の項目名**をそのまま渡す。
    */
-  const violationScript =
-    '<script>(function(){' +
-    'var id=' + JSON.stringify(iframeId) + ';' +
-    'var blocked=0,timer=0,kinds={};' +
-    "document.addEventListener('securitypolicyviolation',function(ev){" +
-    "var d=String(ev.effectiveDirective||ev.violatedDirective||'');" +
-    "if(d.indexOf('img-src')===0)blocked++;else kinds[d]=1;" +
-    'if(timer)return;timer=setTimeout(function(){timer=0;' +
-    "try{window.parent.postMessage({type:'" + HTML_SANDBOX_BLOCKED_MSG_TYPE +
-    "',id:id,blocked:blocked,kinds:Object.keys(kinds)},'*');}catch(e){}},50);});" +
-    '})();</script>';
+  const violationScript = sandboxViolationScript(iframeId);
 
   // 完全 HTML doc(content を body に入れる)。`<!DOCTYPE>` は付けず simple HTML
   // (markdown user は body fragment を書く想定、`<html>` 等は wrapper で補完)。

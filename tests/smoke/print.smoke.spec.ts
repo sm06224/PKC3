@@ -247,7 +247,11 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
   await createEntry(page, 'text');
   const ta2 = page.locator('[data-pkc-field="editor-body"]');
   await ta2.click();
-  await ta2.fill(`![章](entry:${srcLid}#h/見出し)`);
+  // 🔴 #528 ② React の囲みを、**画面の外**(長い余白の先)へ置く ── 印刷は画面の外の物まで箱にして待つ
+  const spacer = Array.from({ length: 150 }, (_, i) => `余白 ${String(i)} 行目`).join('\n\n');
+  await ta2.fill(
+    `![章](entry:${srcLid}#h/見出し)\n\n${spacer}\n\n\`\`\`react\nexport default function App(){ return <p id="pr">印刷の React</p>; }\n\`\`\`\n`,
+  );
   // 🔑 本文の読み出しを 800ms 遅らせる ── 章の中身が「押した瞬間にまだ届いていない」場面を、決定的に作る
   //    (遅らせないと 8 回に 1 回しか出ない競合で、直す前の実装も緑になる)
   await page.evaluate(() => {
@@ -263,6 +267,9 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
   });
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+  // 前提:画面の外の React は、まだ箱になっていない(見えていないので作らない)
+  await expect(page.locator('[data-pkc-react-src]')).toHaveCount(1);
+  await expect(page.locator('iframe.pkc-react-frame'), '前提:画面の外なのに箱が作られている(この検査は空振り)').toHaveCount(0);
 
   // 押した瞬間ではなく、**印刷が始まった**ことを採る
   await page.evaluate(() => {
@@ -279,6 +286,7 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
         text: body?.querySelector('.pkc-section-embed')?.textContent ?? '',
         fencePending: body?.querySelectorAll('[data-pkc-fence-asset-pending]').length ?? -1,
         csvText: body?.querySelector('.pkc-section-embed table')?.textContent ?? '',
+        reactFrames: body?.querySelectorAll('iframe.pkc-react-frame').length ?? -1,
       };
     });
   });
@@ -299,12 +307,14 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
     text: string;
     fencePending: number;
     csvText: string;
+    reactFrames: number;
   };
   expect(atPrint.embeds, '前提:章の埋め込みが本文に在る').toBeGreaterThan(0);
   expect(atPrint.notes, '🔴 刷る瞬間に「読み込んでいます」などの 1 行が残っている').toBe(0);
   expect(atPrint.text, '章の中身が紙に出ていない').toContain('本文が 1 行');
   expect(atPrint.fencePending, '🔴 刷る瞬間に、章の中の「添付にあります」の案内が残っている').toBe(0);
   expect(atPrint.csvText, '🔴 章の中の添付から読む囲みが、表として紙に出ていない').toContain('りんご');
+  expect(atPrint.reactFrames, '🔴 画面の外の React が、刷る瞬間に箱になっていない(紙に描かれない)').toBe(1);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

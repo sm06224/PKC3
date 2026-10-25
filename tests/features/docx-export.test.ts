@@ -653,6 +653,16 @@ describe('図・グラフの器(#187 段②)', () => {
     expect(blocks[0]).toMatchObject({ kind: 'skipped', what: 'グラフ' });
   });
 
+  it('🔴 plotly のグラフも chart と同じ扱い(場所と原文を預け、焼けなければ「グラフ」として案内される / 原文を等幅で出さない・#528)', () => {
+    const PLOTLY =
+      '<div class="pkc-plotly-placeholder" data-pkc-plotly-src="{&quot;data&quot;:[{&quot;y&quot;:[1]}]}" data-pkc-md-block-kind="plotly">' +
+      '<pre class="pkc-plotly-source"><code class="language-plotly">{&quot;data&quot;:[{&quot;y&quot;:[1]}]}</code></pre></div>';
+    const { blocks, figures } = blocksOf(PLOTLY);
+    expect(figures).toEqual([{ at: 0, kind: 'plotly', source: '{"data":[{"y":[1]}]}' }]);
+    expect(blocks[0]).toMatchObject({ kind: 'skipped', what: 'グラフ' });
+    expect(blocks.some((b) => b.kind === 'code')).toBe(false);
+  });
+
   it('⚠ 本文の中の位置が保たれる(前後の段落と混ざらない)', () => {
     const { blocks, figures } = blocksOf(`<p>前</p>${MERMAID}<p>後</p>`);
     expect(figures).toEqual([{ at: 1, kind: 'mermaid', source: 'graph TD; A-->B' }]);

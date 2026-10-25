@@ -23,3 +23,15 @@ declare module 'virtual:pkc-oss-notices' {
   const notices: readonly OssNotice[];
   export default notices;
 }
+
+declare module 'virtual:pkc3-react-runtime' {
+  /** React・ReactDOM・JSX の変換器(sucrase)を畳んだ IIFE の字(`build/react-runtime-plugin.ts`。#528 ②)。 */
+  const code: string;
+  export default code;
+}
+
+declare module 'virtual:pkc3-tailwind' {
+  /** Tailwind の browser build の字(`@tailwindcss/browser` が配る IIFE。#528 ②)。 */
+  const code: string;
+  export default code;
+}

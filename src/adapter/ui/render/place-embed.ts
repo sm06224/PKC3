@@ -67,7 +67,8 @@ import { isAppendable } from '@features/flavor/append-spec';
 import { syncPlaceAppendButton } from './place-inline';
 import { SQL_EMBED_ATTR } from '@features/markdown/sql-embed';
 import { AssetLends, type AssetLender } from './asset-lends';
-import { pruneScopes, type MermaidScope } from './mermaid-hydrate';
+import { hydrateDiagrams, pruneScopes, type MermaidScope } from './mermaid-hydrate';
+import { PDF_PAGE_ATTR, pdfPageKind } from './pdf-raster';
 import { markViewBig } from './view-big';
 import { hydrateFenceHosts } from './fence-asset-hydrate';
 import { watchVisible, type VisibleWatch } from './visible-watch';
@@ -570,7 +571,7 @@ export class PlaceEmbeds {
       prepare: (holder) =>
         sanitizeEmbedded(holder, (l) => deps.metaOf(l)?.title ?? null, slot.getAttribute(PLACE_NS_ATTR) ?? '', true),
       onReplaced: (next) => {
-        if (next.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-math-src]') === null) return;
+        if (next.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-plotly-src], [data-pkc-react-src], [data-pkc-math-src]') === null) return;
         this.fresh.push(next as HTMLElement);
         this.flushFigures(deps);
       },
@@ -609,6 +610,13 @@ export class PlaceEmbeds {
       note.setAttribute('data-pkc-entry', lid);
       note.textContent = PLACE_PDF_NOTE;
       slot.append(note);
+      // 🔴 1 ページ目を絵にして、字の代わりに出す(#529 W6)。焼けない間・焼けなかったとき(pdf.js の実体が無い等)は
+      //    字のまま ── 押すと元のノートへ行く道は絵になっても変わらない(器そのものが押し所)
+      if (deps.lender !== null) {
+        note.setAttribute(PDF_PAGE_ATTR, att.key);
+        note.title = PLACE_PDF_NOTE;
+        this.scopes.push(hydrateDiagrams([note], pdfPageKind(deps.lender, () => title)));
+      }
     }
     // 🔴 画像でなくなった枠(画像の添付 → PDF の添付)── 前の画像の貸出をここで返す
     if (att.kind !== 'image') this.lends.get(slot)?.prune();
@@ -646,7 +654,7 @@ export class PlaceEmbeds {
     // 🔴 図と画像(W3-②)── 読む面と同じ口へ。⚠ 器を入れた**後**に呼ぶ(繋がっていないと面が読めない)
     this.hydrateImages(slot, deps);
     this.hydrateFences(slot, deps);
-    if (slot.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-math-src]') !== null)
+    if (slot.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-plotly-src], [data-pkc-react-src], [data-pkc-math-src]') !== null)
       this.fresh.push(slot);
   }
 }

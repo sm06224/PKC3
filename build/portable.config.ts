@@ -11,6 +11,7 @@ import { manualPagePlugin } from './manual-page-plugin.ts';
 import { mermaidVersionDefine } from './mermaid-version.ts';
 import { katexWoff2Plugin } from './katex-woff2-plugin.ts';
 import { ossNoticesPlugin } from './oss-notices-plugin.ts';
+import { reactRuntimePlugin } from './react-runtime-plugin.ts';
 
 export default defineConfig({
   // 🔴 焼いた図のキャッシュの鍵に入れる mermaid の版(#1003)── 可搬版も同じ鍵の作りにする
@@ -20,7 +21,7 @@ export default defineConfig({
   //    ⚠ 外すと fold が「畳む前にマニュアルの page が焼かれていない」で止まる(黙って落ちない)
   // 🔴 ossNoticesPlugin も要る(#948)── `help.ts` が `virtual:pkc-oss-notices` を
   //    import するので、無いと `build:portable` が import 解決で落ちる。
-  plugins: [manualPagePlugin(), bodyCssPlugin(), katexWoff2Plugin(), ossNoticesPlugin()],
+  plugins: [manualPagePlugin(), bodyCssPlugin(), katexWoff2Plugin(), ossNoticesPlugin(), reactRuntimePlugin()],
   optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
   resolve: {
     alias: {

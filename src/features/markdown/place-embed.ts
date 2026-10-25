@@ -83,9 +83,8 @@ export const PLACE_SQL_FIELD = 'place-sql-note';
  * 🔴 **置いた添付ノートのうち、板に絵を出せる物**(#529 W3-②。Gemini 裁定 2026-10-01 Q2 = A)。
  *
  * - `image` = 画像そのものを枠いっぱいに描く(`object-fit: contain`)
- * - `pdf` = **題名の帯 + 「PDF」の字**だけ。⚠ 1 ページ目は描かない ── PKC3 に PDF を絵にする描画器は無く
- *   (添付の面は**ブラウザ内蔵のビューア**を `<object>` で埋めるだけ)、板に N 枚置くたびに
- *   ビューアを N 個立てるのは、描画のたびに別プロセスを抱える作りになる(依存を足す話は別の裁定)。
+ * - `pdf` = **1 ページ目を PNG に焼いて**枠へ出す(#529 W6)。同梱の pdf.js(PDF の窓と同じ実体)で焼き、
+ *   ビューア(`<object>`)は立てない。焼けない間・焼けなかったときは「PDF は元のノートで」の字のまま。
  * ⚠ Office・zip・その他は**ここに入らない**(`att` が無い = 題名の帯だけ。W3-① のまま)。
  */
 export interface PlaceAttachment {
@@ -137,13 +136,13 @@ export function placeEmbeddable(archetype: string): boolean {
  * 🔴 **この塊に既定の大きさ(320×240)を当てるか**。
  *
  * - 本文を出す型 → 常に当てる(中身で板を伸ばさない)
- * - 添付 → **絵を出せる画像のときだけ**(読むまでは分からない = 読み終えた後に置き直す)。
- *   PDF・Office・その他は今までどおり中身の大きさ(題名の帯だけ)
+ * - 添付 → **絵を出せる画像と PDF のときだけ**(読むまでは分からない = 読み終えた後に置き直す)。
+ *   PDF は 1 ページ目を絵にする(#529 W6)。Office・その他は今までどおり中身の大きさ(題名の帯だけ)
  * - フォルダ → 当てない
  */
 export function placeFramed(archetype: string, excerpt: PlaceExcerpt | undefined): boolean {
   if (archetype === 'folder') return false;
-  if (archetype === 'attachment') return excerpt?.att?.kind === 'image';
+  if (archetype === 'attachment') return excerpt?.att !== undefined;
   return true;
 }
 

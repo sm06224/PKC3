@@ -13,7 +13,7 @@ export const LIGHTBOX_REGION = 'lightbox';
 export interface LightboxOptions {
   src: string;
   alt?: string;
-  diagram?: { kind: 'mermaid' | 'chart'; source: string };
+  diagram?: { kind: 'mermaid' | 'chart' | 'plotly'; source: string };
   defaultView?: Window;
 }
 
