@@ -15,7 +15,7 @@ import {
   asrModelFloorBytes,
 } from '../../src/features/asr/asr-parts';
 import { SNAP_CONFIRM_RULED_TEXT } from '../../src/features/video/video-trim-text';
-import { precisePlanSpec, scanWebmVideo } from '../../src/features/video/webm-vp8';
+import { scanWebmVideo } from '../../src/features/video/webm-vp8';
 import { createHash } from 'node:crypto';
 
 /**
@@ -1644,41 +1644,51 @@ test('🔴 画面録画を押した所ぴったりに切り出せる:確認が�
    * ⚠ 前後の撮り方で**同じフレームを 2 度撮った**(隣の時刻が同じ絵を映す)場合は、0 と同じ絵の候補を「別のフレーム」に数えない。
    * 🔑 見分けられる台であること(隣どうしが、再エンコードの粗さより大きく違う)を先に確かめる。
    */
-  const firstFrame = await frameAt(cutMedia, (to) => seekThere(cutMedia, to), 0);
-  const dists = around.map((f) => frameDistance(firstFrame, f));
-  // 🔴 #1851 A:**同じ絵は同じ位置**として数える。負荷でフレームが落ちると隣の時刻が同じ絵になり、
-  //   `indexOf(min)` は早い側(-2)に倒れる ── 押した所(3)と同じ絵の位置は、どれも「押した所」とみなす。
+  /**
+   * 🔴 #1851 A:**同じ絵は同じ位置**として数える。負荷でフレームが落ちると隣の時刻が同じ絵になり、
+   *   `indexOf(min)` は早い側(-2)に倒れる ── 押した所(3)と同じ絵の位置は、どれも「押した所」とみなす。
+   * 🔑 画素の独立した観測は**残す**(時刻の突き合わせだけにすると、頭のブロックの中身が違う絵でも通る):
+   *   ①前後に押した所と違う絵が在る ②**最初のフレームに最も近いのが、押した所と同じ絵** ── ②は、先頭への移動直後に
+   *   復号が追い付かず別の絵を撮ることがあるので、**撮り直して 3 回まで**見る(3 回とも別の絵なら落とす)。
+   *   元の「別のフレームとの比が 1.5 倍以上」は、再エンコードの粗さと隣との違いが同じ大きさになる負荷の下で
+   *   1.02 まで落ちる(実測)ので、**別の絵のほうが 1.5 倍以上はっきり近い**ときだけ落とす形に緩める。
+   */
   const SAME = 0.05;
   const sameAsPressed = around.map((f) => frameDistance(f, around[3]!) <= SAME);
-  const bestK = dists.indexOf(Math.min(...dists));
-  const nearest = bestK - 3;
-  const nearestIsPressed = sameAsPressed[bestK] === true;
-  const adjacent = frameDistance(around[3]!, around[4]!);
-  const others = dists.filter((_, k) => !sameAsPressed[k]);
-  const ratio = others.length === 0 ? Number.NaN : Math.min(...others) / dists[3]!;
-  test.info().annotations.push({
-    type: '最初のフレームと、押した所の前後(-3〜+3)の絵の違い / いちばん近い位置 / 隣どうしの違い / 別の絵との比',
-    description: `${dists.map((d) => d.toFixed(2)).join(' ')} / ${nearest} / ${adjacent.toFixed(2)} / ${ratio.toFixed(2)}`,
-  });
-  // 空振り防止:前後のどこかに「押した所と違う絵」が在る(全部同じ絵だと、どの位置でも通ってしまう)
   expect(
     sameAsPressed.some((same) => !same),
     '空振り防止:前後 ±3 枚がすべて押した所と同じ絵(見分けられない台)',
   ).toBe(true);
-  /**
-   * 画素の最近傍は**参考(注釈)**にとどめる。再エンコードの粗さと隣との違いが同じ大きさになる負荷の下では揺れ、
-   * 「押した所が最近傍」でも「別の絵が近い」でも、どちらの実測も出る(1.02 / 逆転)── 判定は次の時刻の突き合わせが持つ。
-   */
-  const pressedBest = Math.min(...dists.filter((_, k) => sameAsPressed[k]));
-  const otherBest = Math.min(...dists.filter((_, k) => !sameAsPressed[k]));
+  let dists: number[] = [];
+  let bestK = -1;
+  let pressedBest = Number.NaN;
+  let otherBest = Number.NaN;
+  let attempts = 0;
+  for (; attempts < 3; attempts += 1) {
+    const firstFrame = await frameAt(cutMedia, (to) => seekThere(cutMedia, to), 0);
+    dists = around.map((f) => frameDistance(firstFrame, f));
+    bestK = dists.indexOf(Math.min(...dists));
+    pressedBest = Math.min(...dists.filter((_, k) => sameAsPressed[k]));
+    otherBest = Math.min(...dists.filter((_, k) => !sameAsPressed[k]));
+    if (sameAsPressed[bestK] === true) break;
+    // 先頭から離れて、撮り直す
+    await seekThere(cutMedia, 0.3);
+  }
+  const nearest = bestK - 3;
+  const adjacent = frameDistance(around[3]!, around[4]!);
+  const ratio = otherBest / pressedBest;
   test.info().annotations.push({
-    type: '画素の参考値(判定は時刻で行う)',
-    description: `${nearestIsPressed ? '押した所が最近傍' : `最近傍は別の絵(位置 ${nearest})`} / 押した所の絵 ${pressedBest.toFixed(2)} / 別の絵 ${otherBest.toFixed(2)}`,
+    type: '最初のフレームと、押した所の前後(-3〜+3)の絵の違い / いちばん近い位置 / 隣どうしの違い / 別の絵との比 / 撮った回数',
+    description: `${dists.map((d) => d.toFixed(2)).join(' ')} / ${nearest} / ${adjacent.toFixed(2)} / ${ratio.toFixed(2)} / ${attempts + 1}`,
   });
+  expect(
+    sameAsPressed[bestK],
+    `最初のフレームが押した所のフレームでない(いちばん近い位置 ${nearest} / ${dists.map((d) => d.toFixed(2)).join(' ')})`,
+  ).toBe(true);
   /**
-   * 🔴 #1851 B:**頭のブロックの時刻を、製品の計画と比べる**(画素の比は、再エンコードの粗さと隣との違いが同じ大きさに
+   * 🔴 #1851 B:**頭のブロックの時刻を、元の動画から独立に作った計画と比べる**(画素の比は、再エンコードの粗さと隣との違いが同じ大きさに
    *   なる負荷の下で判定できない ── 実測 1.02)。切り出した動画の映像ブロックを走査し、元の動画から
-   *   `precisePlanSpec` が決める「頭 = 0、続き = 元の時刻 − 押した所」と、先頭から 1 つずつ突き合わせる。
+   *   「頭 = 0、続き = 元の時刻 − 押した所」の計画と、先頭から 1 つずつ突き合わせる。
    *   頭が 1 枚ずれると、2 枚目以降の時刻がフレームの間隔ぶんずれる。
    */
   const cutScan = await scanWebmVideo(
@@ -1686,31 +1696,25 @@ test('🔴 画面録画を押した所ぴったりに切り出せる:確認が�
     1e9,
   );
   if (!cutScan.ok) throw new Error(`切り出した動画を走査できない: ${cutScan.reason}`);
-  const spec = precisePlanSpec(srcScan, Math.round(vStart * 1000), Math.round(vEnd * 1000));
-  expect(spec, '製品の計画が立たない(押した所が録画の外・区切りが無い)').not.toBeNull();
   const cutVideo = cutScan.scan.blocks.filter((b) => b.track === cutScan.scan.videoTrack).map((b) => b.ms);
-  const planned = spec!.emit.map((b, i) => (i === 0 ? 0 : b.ms - spec!.startMs));
-  if (spec!.tailFromMs !== null) {
-    for (const b of srcScan.blocks)
-      if (b.track === srcScan.videoTrack && b.ms >= spec!.tailFromMs && b.ms < Math.round(vEnd * 1000))
-        planned.push(b.ms - spec!.startMs);
-  }
+  /**
+   * 期待値は**製品の計画(`precisePlanSpec`)を使わず**、元の動画の映像ブロックから独立に作る:
+   *   押した所に表示されているフレーム(時刻が押した所以下で最後)が頭(= 0)、続きは「元の時刻 − 押した所」で、
+   *   終わりの手前まで。製品と同じ関数で期待値を作ると、製品の取り違えが期待値にも入って通ってしまう。
+   */
+  const sMs = Math.round(vStart * 1000);
+  const eMs = Math.round(vEnd * 1000);
+  const srcVideo = srcScan.blocks.filter((b) => b.track === srcScan.videoTrack);
+  let headIdx = -1;
+  for (let i = 0; i < srcVideo.length; i += 1) if (srcVideo[i]!.ms <= sMs) headIdx = i;
+  expect(headIdx, '押した所に表示されているフレームが元の動画に無い').toBeGreaterThanOrEqual(0);
+  const planned = [0, ...srcVideo.slice(headIdx + 1).filter((b) => b.ms < eMs).map((b) => b.ms - sMs)];
   const compared = Math.min(planned.length, cutVideo.length, 6);
   test.info().annotations.push({
     type: '切り出した動画の映像ブロックの時刻 / 計画の時刻(ミリ秒)',
     description: `${cutVideo.slice(0, 6).join(',')} / ${planned.slice(0, 6).join(',')}`,
   });
   expect(compared, '空振り防止:突き合わせるブロックが 1 つも無い').toBeGreaterThanOrEqual(1);
-  /**
-   * 🔑 画面が止まっている録画は映像のフレームが少なく(実測:押した所の後ろが 1 枚だけ)、時刻は頭の 0 しか突き合わせられない。
-   *   その回だけは、頭が押した所の絵であることを**画素で**言う(別の絵のほうが 1.5 倍以上近いときだけ落とす)。
-   */
-  if (compared < 2) {
-    expect(
-      otherBest * 1.5,
-      `時刻で突き合わせられない回:最初のフレームが押した所と別の絵のほうがはっきり近い(${dists.map((d) => d.toFixed(2)).join(' ')})`,
-    ).toBeGreaterThanOrEqual(pressedBest);
-  }
   expect(cutVideo[0], '頭のブロックが 0 でない').toBeLessThanOrEqual(1);
   for (let i = 0; i < compared; i += 1) {
     expect(

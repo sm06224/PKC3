@@ -127,19 +127,22 @@ export function takeEmbeddedImage(doc: Document): EmbeddedTake {
 /** 日誌から「画像のあとに流し直す分」を選ぶ。⚠ 読めなくても投げない(画像だけで開く)。 */
 async function readReplay(
   journal: JournalBackend,
-  args: { use: ImageChoice['use']; stored: StoredImage | null; exportedAt: number },
-): Promise<{ replay: JournalEntry[]; failure: string | null }> {
+  args: { use: ImageChoice['use']; stored: StoredImage | null; exportedAt: number; neverSaved: boolean },
+): Promise<{ replay: JournalEntry[]; seqFloor: number; failure: string | null }> {
   const base = baseSeqOf({
     use: args.use,
     snapshotSeq: args.stored?.snapshotSeq,
     savedAt: args.stored?.savedAt,
     exportedAt: args.exportedAt,
+    neverSaved: args.neverSaved,
   });
-  if (base === null) return { replay: [], failure: null };
+  const imageSeq = args.stored?.snapshotSeq ?? 0;
   try {
-    return { replay: entriesAfter(await journal.readAll(), base), failure: null };
+    const all = await journal.readAll();
+    const seqFloor = Math.max(imageSeq, base ?? 0, ...all.map((e) => e.seq));
+    return { replay: base === null ? [] : entriesAfter(all, base), seqFloor, failure: null };
   } catch (e) {
-    return { replay: [], failure: errorText(e) };
+    return { replay: [], seqFloor: Math.max(imageSeq, base ?? 0), failure: errorText(e) };
   }
 }
 
@@ -174,6 +177,10 @@ export interface PortableStart {
    * 画像に入っていない分だけ、番号順。⚠ 空から始めた回は常に空。
    */
   readonly replay: ReadonlyArray<JournalEntry>;
+  /** 日誌の番号の下限(画像の番号と日誌の最大の番号)。⚠ 時計が戻っても番号を増やし続けるため。 */
+  readonly seqFloor: number;
+  /** 器に 1 度も画像が書かれていない回(昇格時の読み直しで、まだ書かれていなければ同じ土台で流す)。 */
+  readonly neverSaved: boolean;
   /** 日誌の器。⚠ 起動後の追記・整理もこれを使う。 */
   readonly journal: JournalBackend;
 }
@@ -229,11 +236,14 @@ export async function resolvePortableStart(
   const image =
     choice0.use === 'stored' ? (stored?.image ?? null) : choice0.use === 'embedded' ? embedded : null;
 
+  // 器に 1 度も画像が書かれていない(読めなかったのではない)── 空の DB から始めた回の日誌は、空を土台に流してよい
+  const neverSaved = stored === null && readError === null;
   const journal = makeJournal(bundleSqliteName(bundle.id));
-  const { replay, failure: journalFailure } = await readReplay(journal, {
+  const { replay, seqFloor, failure: journalFailure } = await readReplay(journal, {
     use: choice0.use,
     stored,
     exportedAt: bundle.exportedAt,
+    neverSaved,
   });
   // 日誌を読めなかったことは黙らない(画像だけで開く)
   const choice: ImageChoice =
@@ -249,6 +259,8 @@ export async function resolvePortableStart(
     embeddedFailure,
     store,
     replay,
+    seqFloor,
+    neverSaved,
     journal,
   };
 }
@@ -264,9 +276,9 @@ export async function resolvePortableStart(
  * ⚠ 読めなかったら**起動の画像へ戻す**(投げない ── 昇格を止めると、いまのノートが保存できなくなる)。
  */
 export async function latestPortableImage(
-  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store'>,
+  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store'> & { neverSaved?: boolean },
 ): Promise<Uint8Array | null> {
-  return (await latestPick(portable)).image;
+  return (await latestPick({ neverSaved: false, ...portable })).image;
 }
 
 /**
@@ -274,26 +286,27 @@ export async function latestPortableImage(
  *   先のタブが足した分が抜け、起動時の日誌を新しい画像へ流して**二重になる** ── 必ず組で読む。
  */
 export async function latestPortableStart(
-  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store' | 'journal' | 'replay'>,
-): Promise<{ image: Uint8Array | null; replay: ReadonlyArray<JournalEntry> }> {
+  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store' | 'journal' | 'replay' | 'seqFloor' | 'neverSaved'>,
+): Promise<{ image: Uint8Array | null; replay: ReadonlyArray<JournalEntry>; seqFloor: number }> {
   const pick = await latestPick(portable);
-  const { replay } = await readReplay(portable.journal, {
+  const { replay, seqFloor } = await readReplay(portable.journal, {
     use: pick.use,
     stored: pick.stored,
     exportedAt: portable.bundle.exportedAt,
+    neverSaved: pick.neverSaved,
   });
-  return { image: pick.image, replay };
+  return { image: pick.image, replay, seqFloor: Math.max(seqFloor, portable.seqFloor) };
 }
 
 async function latestPick(
-  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store'>,
-): Promise<{ image: Uint8Array | null; use: ImageChoice['use']; stored: StoredImage | null }> {
-  const boot = { image: portable.image, use: portable.choice.use, stored: null };
+  portable: Pick<PortableStart, 'bundle' | 'image' | 'choice' | 'store' | 'neverSaved'>,
+): Promise<{ image: Uint8Array | null; use: ImageChoice['use']; stored: StoredImage | null; neverSaved: boolean }> {
+  const boot = { image: portable.image, use: portable.choice.use, stored: null, neverSaved: portable.neverSaved };
   try {
     const stored = await portable.store.read();
     if (stored === null || stored.bundleId !== portable.bundle.id || stored.bytes <= 0) return boot;
     if (portable.choice.use === 'embedded' && stored.savedAt < portable.bundle.exportedAt) return boot;
-    return { image: stored.image, use: 'stored', stored };
+    return { image: stored.image, use: 'stored', stored, neverSaved: false };
   } catch {
     return boot;
   }
