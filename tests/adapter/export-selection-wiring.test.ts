@@ -64,24 +64,28 @@ function rig() {
 }
 
 describe('#1038 A1 選んだノートの書き出しの配線', () => {
-  it('① 選んでいないときは出ない / 1 件でも件数つきで出る', () => {
+  it('① 選んでいないときは出ない / 1 件でも「書き出す ▾」が出て、押すと件数つきの 2 項目が出る', () => {
     const r = rig();
-    expect(r.q('export-selection-html'), '選んでいないのに出ている').toBeNull();
+    expect(r.q('open-selection-export'), '選んでいないのに出ている').toBeNull();
     r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n1' });
-    expect(r.q('export-selection-html')?.textContent).toBe('閲覧用 HTML(選んだ 1 件)');
-    expect(r.q('export-selection-archive')?.textContent).toBe('選んだノートのバックアップ');
-    r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n2' });
-    expect(r.q('export-selection-html')?.textContent).toBe('閲覧用 HTML(選んだ 2 件)');
+    expect(r.q('open-selection-export')?.textContent).toBe('書き出す ▾');
+    expect(r.q('export-selection-html'), '押す前から 2 つ並んでいる(バーが伸びる)').toBeNull();
+    r.q('open-selection-export')!.click();
+    expect(r.q('export-selection-html')?.textContent).toContain('閲覧用 HTML(選んだ 1 件)');
+    expect(r.q('export-selection-archive')?.textContent).toContain('選んだノートのバックアップ');
   });
 
-  it('🔴 ② 押すと選んだ lid の全部で呼ばれ、選んでいない行は混ざらない / ③ 2 つの口は別', () => {
+  it('🔴 ② メニューから押すと選んだ lid の全部で呼ばれ、選んでいない行は混ざらない / ③ 2 つの口は別', () => {
     const r = rig();
     r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n1' });
     r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n3' });
+    r.q('open-selection-export')!.click();
+    expect(r.q('export-selection-html')?.textContent).toContain('選んだ 2 件');
     r.q('export-selection-html')!.click();
     expect(r.html).toHaveLength(1);
     expect([...r.html[0]!].sort()).toEqual(['n1', 'n3']);
     expect(r.archive, '閲覧用 HTML がバックアップの口を叩いた').toHaveLength(0);
+    r.q('open-selection-export')!.click();
     r.q('export-selection-archive')!.click();
     expect(r.archive).toHaveLength(1);
     expect([...r.archive[0]!].sort()).toEqual(['n1', 'n3']);
@@ -91,6 +95,7 @@ describe('#1038 A1 選んだノートの書き出しの配線', () => {
   it('全件の「閲覧用 HTML で書き出す」と字が違う(取り違えない)', () => {
     const r = rig();
     r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n1' });
+    r.q('open-selection-export')!.click();
     expect(r.q('export-selection-html')!.textContent).not.toBe('閲覧用 HTML で書き出す');
   });
 });

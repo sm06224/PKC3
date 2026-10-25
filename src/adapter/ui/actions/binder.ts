@@ -4801,6 +4801,8 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   'sql-export-menu',
   // 🔑 #952 ── 「音/動画」の行の「仕上げ ▾」(道具の一覧)
   'open-capture-process',
+  // 🔑 #1038 A1 ── 一覧の選択バーの「書き出す ▾」(選んだ N 件の書き出し方の一覧)
+  'open-selection-export',
 ]);
 
 /**
@@ -15946,6 +15948,32 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **一覧で選んだ N 件だけの書き出し**(#1038 A1)。相手は `delete-selected` と**同じ規則**
    *   (左の列の見えている行に在る印)── 数と対象が食い違うと、帯の「N 件」が嘘になる。
    */
+  /**
+   * 🔴 **選択バーの「書き出す ▾」** ── 閲覧用 HTML / バックアップの 2 つを 1 つのボタンに畳む(バーが 1 行ぶん伸びて、
+   *   低い窓で貼り付かなくなった退行の直し)。⚠ `MENU_OPENERS` に載せてある。項目は上の 2 受け手のただのボタン。
+   */
+  'open-selection-export': (dispatcher, target, _services, root) => {
+    const lids = selectedExportLids(dispatcher);
+    if (lids.length === 0) return;
+    const r = target.getBoundingClientRect();
+    openContextMenu(
+      root,
+      { x: r.left, y: r.bottom },
+      [
+        {
+          action: 'export-selection-html',
+          label: `閲覧用 HTML(選んだ ${lids.length} 件)`,
+          hint: `選んでいる ${lids.length} 件だけを、読むだけの HTML ファイル 1 つにまとめます(フォルダの中のノートは入りません。入っていないノートへのリンクは、押せない字になります)`,
+        },
+        {
+          action: 'export-selection-archive',
+          label: '選んだノートのバックアップ',
+          hint: `選んでいる ${lids.length} 件の本文・添付・履歴を保存します(.pkc3-notes.zip。取り込み直せます。選んだフォルダは中のノートも入ります)`,
+        },
+      ],
+      target,
+    );
+  },
   'export-selection-html': (dispatcher, _target, services) => {
     const lids = selectedExportLids(dispatcher);
     if (lids.length > 0) services.exportSelectionHtml?.(lids);

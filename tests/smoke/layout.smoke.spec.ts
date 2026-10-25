@@ -1136,10 +1136,7 @@ test('🔴 面の境界が 1 本になっている(2 重線を作らない)', as
  */
 test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを往復しても位置が残る', async ({ page }) => {
   const errors = collectPageErrors(page);
-  // ⚠ 高さ 800(以前は 700)── 選んだノートの書き出しのボタン 2 つ(#1038 A1)で選択のバーが 205px に伸び、
-  //    700 だと一覧の見えている高さ 345px が帯の 2 倍(410px)に満たず、貼り付かない(`bar-stick.ts` の設計どおり)。
-  //    貼り付く検査(⑥)の前提は「一覧が帯の 2 倍以上ある」ことなので、窓の側を合わせる。
-  await page.setViewportSize({ width: 1440, height: 800 });
+  await page.setViewportSize({ width: 1440, height: 700 });
   await gotoApp(page);
 
   // 一覧が溢れるだけ作る。
@@ -1306,6 +1303,10 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
   const bar = page.locator('[data-pkc-region="filer-move"]');
   await expect(bar, '選んだのにバーが貼り付く印を持たない').toHaveAttribute('data-pkc-bulk', '');
   await expect(page.locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-marked]')).toHaveCount(2);
+  // 🔴 #1038 A1 の退行の pin: 選んだノートの書き出しをボタン 2 つ並べると、狭い左の列で帯が 7 行 205px に伸び、
+  //    高さ 700 の窓で貼り付かなくなった。「書き出す ▾」1 つにして 5 行(A1 前と同じ)に保つ。
+  const barRows = await bar.evaluate((b) => new Set([...b.querySelectorAll('button')].map((x) => Math.round(x.getBoundingClientRect().top))).size);
+  expect(barRows, `選択のバーが ${barRows} 行に伸びている(A1 前は 5 行)`).toBeLessThanOrEqual(5);
   const stick = await page.evaluate(() => {
     const h = document.querySelector<HTMLElement>('[data-pkc-region="browse-host"]')!;
     const b = document.querySelector<HTMLElement>('[data-pkc-region="filer-move"]')!;

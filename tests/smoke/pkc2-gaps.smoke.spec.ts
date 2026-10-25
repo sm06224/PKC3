@@ -106,10 +106,12 @@ test('🔴 選んだ N 件の書き出し / 保存した検索 / 件数 / 案内
   await gamma.click({ modifiers: ['ControlOrMeta'] });
   const bulk = page.locator('[data-pkc-field="filer-bulk"]');
   await expect(bulk).toContainText('2 件');
-  await expect(bulk.locator('[data-pkc-field="bulk-export-html"]')).toHaveText('閲覧用 HTML(選んだ 2 件)');
+  await expect(bulk.locator('[data-pkc-field="bulk-export-menu"]')).toHaveText('書き出す ▾');
+  await clickReal(page, '[data-pkc-field="bulk-export-menu"]');
+  await expect(page.locator('[data-pkc-action="export-selection-html"]')).toContainText('閲覧用 HTML(選んだ 2 件)');
   const [htmlDl] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-field="bulk-export-html"]'),
+    clickReal(page, '[data-pkc-action="export-selection-html"]'),
   ]);
   const html = readFileSync((await htmlDl.path())!, 'utf-8');
   expect(html.slice(0, 200).toLowerCase(), 'HTML ではない').toContain('<!doctype html');
@@ -127,9 +129,10 @@ test('🔴 選んだ N 件の書き出し / 保存した検索 / 件数 / 案内
       return orig.call(this);
     };
   });
+  await clickReal(page, '[data-pkc-field="bulk-export-menu"]');
   const [zipDl] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-field="bulk-export-archive"]'),
+    clickReal(page, '[data-pkc-action="export-selection-archive"]'),
   ]);
   // ⚠ 日本語の名前は headless Chromium が "download" に捨てる ── アプリが付けた `<a download>` の値を見る
   const names = await page.evaluate(() => (window as unknown as { __n: string[] }).__n);
