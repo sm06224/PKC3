@@ -29,6 +29,8 @@ import {
   type VideoScanResult,
 } from './video-codec';
 import { precisePlanSpec, type VideoScan } from '@features/video/webm-vp8';
+import type { ContactSheetResult } from './contact-sheet';
+import type { TimedLine } from '@features/capture/contact-sheet-layout';
 
 /** アイドルで畳むまで。⚠ 走査のあと確認を挟んで切るので、続けて呼ばれる。 */
 export const VIDEO_WORKER_IDLE_MS = 15_000;
@@ -146,6 +148,11 @@ export class VideoClient {
   /** 🔴 場面が変わる所を見つける(#952 A4)。⚠ 断る理由は**値で返る**。 */
   async scenes(blob: Blob): Promise<VideoScenesResult> {
     return (await this.run({ op: 'scenes', blob })) as VideoScenesResult;
+  }
+
+  /** 🔴 コンタクトシート(場面ごとの静止画 + 文字起こしの PNG。#952 A5)。⚠ 断る理由は**値で返る**。 */
+  async contactSheet(blob: Blob, lines: readonly TimedLine[], title: string): Promise<ContactSheetResult> {
+    return (await this.run({ op: 'contact-sheet', blob, lines, title })) as ContactSheetResult;
   }
 
   dispose(): void {

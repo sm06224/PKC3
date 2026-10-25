@@ -7,6 +7,8 @@
  * ⚠ 判定を `main.ts` へ出さない(CLAUDE.md §2)── `main.ts` は口を渡すだけ。
  */
 import type { VideoFoldResult, VideoScenesResult } from '@adapter/platform/video/video-codec';
+import type { ContactSheetResult } from '@adapter/platform/video/contact-sheet';
+import { transcriptLinesOf, type TimedLine } from '@features/capture/contact-sheet-layout';
 import { elapsedText } from '@features/elapsed-text';
 import { canProcess, type ProcessTool } from '@features/capture/capture-process';
 import { canTrimCapture } from '@features/capture/capture-trim-gate';
@@ -18,6 +20,8 @@ export interface CaptureToolDeps {
   readonly foldStill: (blob: Blob) => Promise<VideoFoldResult>;
   /** 場面が変わる所(動画。ワーカー)。 */
   readonly scenes: (blob: Blob) => Promise<VideoScenesResult>;
+  /** 場面ごとの静止画 + 文字起こしの PNG(動画。ワーカー)。 */
+  readonly contactSheet: (blob: Blob, lines: readonly TimedLine[], title: string) => Promise<ContactSheetResult>;
   /** 16kHz mono の PCM へ(`asr-decode.ts`)。⚠ 読めなければ例外。 */
   readonly decode16k: (blob: Blob) => Promise<Float32Array>;
   readonly now: () => Date;
@@ -79,5 +83,29 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
       summary: `${String(starts.length)} 件のチャプターを足しました`,
     };
   };
-  return { 'fold-still': foldStill, chapters };
+
+  /**
+   * コンタクトシート。場面ごとの静止画に、そのノートの文字起こし(時刻つきの行)があれば場面ごとに添える。
+   * ⚠ 文字起こしが無くても作れる(絵と時刻だけ)。結果は新しい画像の添付(PNG)。
+   */
+  const contactSheet: ToolRunner = async ({ item, blob, readBody }) => {
+    const body = await readBody();
+    const lines = body === null ? [] : transcriptLinesOf(body);
+    const out = await deps.contactSheet(blob, lines, item.name);
+    if (!out.ok) {
+      if (out.reason === 'no-codec') {
+        return { kind: 'refused', text: 'このブラウザは動画の絵を取り出す仕組みを持っていないため、コンタクトシートを作れません。' };
+      }
+      if (out.reason === 'decode-failed') {
+        return { kind: 'refused', text: 'この動画の絵を取り出せませんでした(このブラウザが対応していない形かもしれません)。' };
+      }
+      return { kind: 'refused', text: FOLD_REFUSAL[out.reason] ?? 'コンタクトシートを作れませんでした。' };
+    }
+    return {
+      kind: 'attach',
+      items: [{ tag: 'コンタクトシート', blob: out.blob, mime: 'image/png', ext: 'png' }],
+      summary: `${String(out.scenes)} 場面のコンタクトシートを作りました${out.withText > 0 ? `(文字起こしを ${String(out.withText)} 場面に添えました)` : ''}`,
+    };
+  };
+  return { 'fold-still': foldStill, chapters, 'contact-sheet': contactSheet };
 }

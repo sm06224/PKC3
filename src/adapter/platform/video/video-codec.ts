@@ -28,6 +28,8 @@
  */
 import { planFoldStill } from '@features/video/fold-still';
 import { sceneStartsFromFrames } from '@features/capture/chapters';
+import type { TimedLine } from '@features/capture/contact-sheet-layout';
+import { contactSheetVideo, type ContactSheetResult } from './contact-sheet';
 import {
   planPictureOnly,
   planVideoTrim,
@@ -84,6 +86,13 @@ export type VideoJob =
       /** 🔴 場面が変わる所を見つける(#952 A4)。範囲を持たない。 */
       readonly op: 'scenes';
       readonly blob: Blob;
+    }
+  | {
+      /** 🔴 場面ごとの静止画と文字起こしを 1 枚の PNG にする(#952 A5)。 */
+      readonly op: 'contact-sheet';
+      readonly blob: Blob;
+      readonly lines: readonly TimedLine[];
+      readonly title: string;
     };
 
 /**
@@ -162,7 +171,8 @@ export type VideoJobResult =
   | VideoCutResult
   | VideoPictureResult
   | VideoFoldResult
-  | VideoScenesResult;
+  | VideoScenesResult
+  | ContactSheetResult;
 
 /** `Blob` を窓で読む口。 */
 export function blobSource(blob: Blob): ByteSource {
@@ -681,5 +691,6 @@ export function runVideoJob(job: VideoJob, api?: CodecApi | null): Promise<Video
   if (job.op === 'picture-only') return pictureOnlyVideo(job);
   if (job.op === 'fold-still') return foldStillVideo(job);
   if (job.op === 'scenes') return scenesVideo(job);
+  if (job.op === 'contact-sheet') return contactSheetVideo(job);
   return job.op === 'scan' ? scanVideo(job, api) : cutVideo(job, api);
 }

@@ -3746,6 +3746,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     tools: createCaptureTools({
       foldStill: (blob) => videoClient.foldStill(blob),
       scenes: (blob) => videoClient.scenes(blob),
+      contactSheet: (blob, lines, title) => videoClient.contactSheet(blob, lines, title),
       decode16k: (blob) => decodeToMono16k(blob),
       now: () => new Date(),
     }),
