@@ -390,7 +390,11 @@ describe('🔴 消す口・改名・移動を作らない(裁定)', () => {
       .sort();
     // ⚠ private の補助(readable / lose / changed / load)は TS の private で、実行時には見える
     expect(names).toEqual(
-      ['changed', 'cut', 'heldHandle', 'load', 'lose', 'more', 'open', 'pick', 'readable', 'refresh', 'view'].sort(),
+      [
+        'changed', 'cut', 'heldHandle', 'load', 'lose', 'more', 'open', 'pick', 'readable', 'refresh', 'view',
+        // #215: 階層(入る / 戻る / 憶えた階層へ戻る / 憶える)と #432: Office の file を選ぶ
+        'dir', 'enter', 'goTo', 'remember', 'restorePlace', 'pickFile',
+      ].sort(),
     );
     expect(names.filter((n) => /remove|delete|rename|move|unlink|write|trash/i.test(n))).toEqual([]);
   });
@@ -398,9 +402,13 @@ describe('🔴 消す口・改名・移動を作らない(裁定)', () => {
   it('🔴 実行する行に、書く・消す API が 1 つも無い', () => {
     const code = codeOnly(readFileSync('src/adapter/platform/local-folder.ts', 'utf-8'));
     expect(code.length, '読めていない').toBeGreaterThan(1000);
-    for (const banned of ['removeEntry', 'createWritable', 'getFileHandle', 'getDirectoryHandle', 'requestPermission', '.move(']) {
+    for (const banned of ['removeEntry', 'createWritable', 'getFileHandle', 'requestPermission', '.move(', 'create:']) {
       expect(code.includes(banned), `${banned} を使っている`).toBe(false);
     }
+    // 🔴 憶えた階層へ戻るための `getDirectoryHandle(name)` だけは使う ── ⚠ 作る口(第 2 引数 `{ create }`)は渡さない
+    const calls = code.match(/getDirectoryHandle\([^)]*\)/g) ?? [];
+    expect(calls.length, '空振り防止 ── 呼び出しが見つからない').toBeGreaterThan(0);
+    for (const c of calls) expect(c, `${c} が第 2 引数を渡している`).not.toContain(',');
   });
 
   it('🔴 handle は state にも IndexedDB にも入れない', () => {
