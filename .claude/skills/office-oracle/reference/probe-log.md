@@ -234,3 +234,48 @@ Qt の `EM_JS` / `EM_ASYNC_JS` の本文は **焼いた `soffice.js` に字の�
 - **#121 Ctrl+C**: `clipboard-probe.mjs` n=2。字 `B1` / 右クリック `B2` / 近道キー `B2k` / 表 `B4` は外が残る。**画像 `B3` は 2/2 で外が空**(LO からの write 依頼も 0 件)→ `qtbase-patch-copy-keep.py`。
 - **#126 Format メニュー**: 再現(2 列に割れてメニューバーの上から画面下端まで)→ `patch-lo-qt-menu-scroll.py`。
 - **#1360**: `ime-compose-probe.mjs` の `ctx-*` 腕。`ctx-kbd`(Shift+F10 → y)は直る前 **2/2 で文書が「y」に置き換わる**、`ctx-kbd-ime`(処理済み keydown + 変換中の「ｙ」)は **2/2 で文書が「ｙ」になって空**。`office-popup-keys.js` を入れると **2/2 ずつで「コピー」が実行され文書は無傷**。`PKC3_WITHOUT_POPUPKEYS=1` が「直る前」の腕。
+
+
+## 2026-10-25 ── #126 / #121 の直しを入れた一式(run 40210059387)を、前の一式(run 38338647742)と対で測った
+
+一式の照合: `lo-wasm-dev` の zip を落とし(sha256 `7518f982…59ac26bb`)、`build-info.json` の `run_id` = **40210059387** / `pkc3_commit` = `6f0d372f8` / `lo_sha` = `400afffc0e31`(前の一式は `d2b3fd7f169b`)。
+`soffice.wasm` は 171,289,667 byte(前 171,234,913)。対照は手元の前の一式(`pack.json` の `run_id` = 38338647742)を**同じ host・同じ probe・同じ箱**で回した。
+
+| probe | 前の一式(38338647742) | 新しい一式(40210059387) |
+|---|---|---|
+| `format-menu` ×3(目で見る) | 2 列に割れ、メニューバーの上から画面下端まで(右列に Rotate or Flip / Group Shapes) | **1 列**、最下行に**下向きのスクロール矢印**。右列なし(3/3 で fault 0) |
+| `macro` / `closedoc` | 6/6 相当(fault 0、対照 landed) / fault 0 | 各 **fault 0**(対照 landed)。差なし |
+| `clipboard-probe` n=2 C / B1 / B2 / B2k / B4 | 外が残る(C は種、B1/B2/B2k/B4 は LO の字・表に置換) | 同じ(差なし) |
+| **`clipboard-probe` B3(画像)** | 外が**空** 2/2、host への write 依頼 0 | 外が**空** 2/2、host への write 依頼 0 → **直っていない** |
+| `ime-compose` ctx-kbd(host の直し入り、n=2+6) | 文書は無傷 8/8 | 無傷 7/8(1 回だけ文書が「q」のみ) |
+| `ime-compose` ctx-kbd-ime(n=2+6) | 無傷 6/8(2 回「q」のみ) | 無傷 **8/8** |
+
+- ⚠ ctx の「q のみ」は**新旧どちらの一式でも出る散発**(新 1/16、旧 2/16。ctx-kbd と ctx-kbd-ime のどちらにも出た)で、一式の差とは読めない。host 側の直し(`office-popup-keys.js`)は新旧とも `copied=true` / 近道キーで「コピー」が走ることを保つ。
+- ⚠ B3 が直らなかった理由は(この時点では)未確定だった ── 次の節で確定(仮説は外れ)。仮説: 画像の `Ctrl+C` では LO が `image/png` 等の**非 text の中身を持つ**ので、`qtbase-patch-copy-keep.py` の `pkcHasBinary` が真になって早期 return せず、従来どおり `preventDefault()` へ進む(= 空で上書き)。確かめるには `clipTrace`(`clip_trace: true` の焼き)で `commonCopyEvent` に入った時の `formats()` を見る。この一式に patch が入っているか自体は、wasm の字だけでは言えない(+55 KB は #126 / #121 / 他 patch の合算)。
+- 配布の判断材料: #126(Format メニュー)は**直っている**。#121 の B3 は**直っていない**が悪化もない。macro / closedoc / 字・表のコピー・ctx は退行なし → 退行は見つからないので office-pack へ配ること自体は妨げない(ただし #121 は閉じない)。
+
+## 2026-10-25 ── #121 B3(画像コピーで外が空)の原因を確定した(clip_trace の焼き run 40230812237、tag `lo-wasm-cliptrace`)
+
+一式の照合: `lo-wasm-cliptrace` の zip の `build-info.json` の `run_id` = **40230812237** / `pkc3_commit` = `434f2a010`(`qtbase-patch-copy-keep.py` を含む)/ `clip_trace` = true / `lo_sha` = `400afffc0e31`。
+
+- ⚠ **`clip_trace` は LO 側(`QtClipboard::setContents` / `formats()` / `retrieve`)の計装で、Qt の `commonCopyEvent` は計装していない。** 仮説(`pkcHasBinary` が真)を直接は見られない。
+  代わりに probe の SPY に **copy / cut event 中の `Event.prototype.preventDefault` と `DataTransfer.prototype.setData` の包み**を足して、Qt が呼んだ物を横から採った(`hostWrites.copyEvents`)。
+  ⚠ Qt の handler は document の capture に居て、**window の bubble の listener には届かない**(event 自体は capture で見える)。bubble で `defaultPrevented` を読む計装は空振りになる。
+- 実測(n=2、全腕で同じ): **`copy` event ごとに `clipboardData.setData('text/plain', '')`(長さ 0)→ `preventDefault()` が 1 回**。B0(何も選ばない Ctrl+C)でも、B3(画像を Shift+→ で選ぶ)でも、B1(字)でも、B3c(画像をクリックで選ぶ)でも同じ。
+  - 仮説は**外れ**。`pkcHasBinary` の手前で止まっていた ── LO の `QtMimeData::formats()` は text/plain を**常に**一覧に出す(B3 は `formats:flavor` 8 個 → `formats:list [text/plain]`、`retrieve:return a=0` = 0 byte)ので `hasText()` は**中身が空でも真**。`!hasText() && !hasHtml()` の門は一度も閉じなかった。
+  - B0 は LO の `setContents` が 0 回なのに外が空になる(Qt の copy event だけで空にしている)。B3 は `setContents` は来るが text/plain 0 byte で、`writeToClipboardApi` は `no content found` で書かずに返る(host への write 依頼 0)。
+- B1 / B3c で外へ届くのは、copy event の**後**に `writeToClipboardApi` の非同期の `clipboard.write` が上書きするため(B3c は `image/png` 199 byte、ok=true)。つまり B3c(クリックで選ぶ)は元から外へ画像が出ていた。
+- ⚠ **probe の判定の誤読**: 旧 probe は `readText()` が空なら「外が空になった」と読むので、B3c(text='' / types=[image/png])を「空」と誤読していた。`emptied` は types も見るように直し、`imageOutside` を足した。
+- 素の Chromium(空の `<input>` に focus して Ctrl+C): 種は copy event を止めても**残る**。空の `setData('text/plain','')` つきで止めたときだけ空になる。
+- 直し: `qtbase-patch-copy-keep.py` を「字 / HTML が**空でない**か、空でない他の型が在るか」で見るように訂正(`tests/office-copy-keep-patch.test.ts`)。
+- 前後(この箱では Qt を焼けないので、直した Qt の挙動を JS で真似る `PKC3_EMULATE_COPYKEEP=1` で測った。⚠ ブラウザ側の主張「空の setData と cancel をやめれば外は残る」だけの検証で、C++ の検算ではない):
+
+| 腕(n=2) | 直る前(焼いたまま) | 真似た直し |
+|---|---|---|
+| B0(何も選ばず Ctrl+C) | 外が空 2/2 | **種が残る 2/2** |
+| B3(画像を Shift+→ で選ぶ) | 外が空 2/2 | **種が残る 2/2** |
+| B3c(画像をクリック) | 外に image/png 2/2 | 同じ 2/2 |
+| B1(字) | LO の字が外へ 2/2 | 同じ 2/2 |
+
+- 焼き直しが要る: Qt の patch の訂正なので CI の `office-wasm-build`(Qt の cache 鍵が変わる)。焼いたら probe の列 **`emptyCancelRounds`**(空の setData + preventDefault の回数。直る前 2/2、直った後 0)と B0 / B3 の `keptSeed` で読む。
+- 言えないこと: B3(キーボードで画像を含む範囲を選ぶ)では LO が text 系の flavor しか出さず(PNG flavor 無し)、外へ画像は出ない。直しは「消さない」まで。画像が外へ出るのはクリックで選んだとき(B3c)。

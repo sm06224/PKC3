@@ -328,6 +328,7 @@ print(sum(1 for f in d['files'] if f['filename'].endswith('/cui/ui/querydialog.u
 `make-clipboard-fixtures.py <dir>` が自作する。腕・判定不能の規則・読み方は probe の先頭に書いてある。
 ⚠ 一式は上の「一式を引く」〜「目録(`pack.json`)を手で書かない」のとおり `make-pages-bundle.mjs` で組む。⚠ ディスクの空きが少ない箱では
 `Response.blob()` が `net::ERR_FAILED` で落ちる(probe は `arrayBuffer()` で入れる)。
+🔑 外の判定は字だけで読まない(`emptied` は types も見る。B3c は text='' でも image/png が外に出る)。Qt の copy event の中身は SPY の `hostWrites.copyEvents`(空の setData + preventDefault = `emptyCancelRounds`)。焼かずに直しを真似るのは `PKC3_EMULATE_COPYKEEP=1`(`probe-log.md` 2026-10-25 の末節)。
 
 ## 焼く・待つ・配る
 

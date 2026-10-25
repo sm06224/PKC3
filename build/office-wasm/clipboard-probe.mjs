@@ -304,7 +304,65 @@ const QT_WINDOW_RECTS = `(() => {
  */
 const SPY = `(() => {
   const W = globalThis;
-  W.__clip = { bc: [], writes: [], texts: [] };
+  W.__clip = { bc: [], writes: [], texts: [], copyEvents: [] };
+  const EMULATE = ${process.env.PKC3_EMULATE_COPYKEEP === '1'};
+  // 🔴 ブラウザの copy / cut event の行き先を横から採る(#121)。Qt の commonCopyEvent() は document の capture に居る。
+  //    window の bubble(最後)で defaultPrevented(Qt が既定の動作を止めたか)と、Qt が clipboardData へ入れた型・長さを読む。
+  //    ⚠ 読むだけ(止めない・書かない)。
+  // keydown(Ctrl+C / Ctrl+X)を Qt が止めたか(window の bubble = Qt の後)と、execCommand('copy') を呼んだか
+  window.addEventListener('keydown', (ev) => {
+    if (ev.ctrlKey && /^[cxv]$/i.test(ev.key)) W.__clip.copyEvents.push({ dt: Date.now() - t0, kind: 'keydown', key: ev.key, defaultPrevented: ev.defaultPrevented });
+  }, false);
+  // 同じ keydown を capture(最初)でも採る。bubble に来ない = 途中で止められた
+  window.addEventListener('keydown', (ev) => {
+    if (ev.ctrlKey && /^[cxv]$/i.test(ev.key)) W.__clip.copyEvents.push({ dt: Date.now() - t0, kind: 'keydown-capture', key: ev.key, target: ev.target && ev.target.tagName, defaultPrevented: ev.defaultPrevented });
+  }, true);
+  try {
+    const oe = document.execCommand.bind(document);
+    document.execCommand = (...a) => { W.__clip.copyEvents.push({ dt: Date.now() - t0, kind: 'execCommand', args: a.map(String) }); return oe(...a); };
+  } catch (e) { /* 採れなくても測る */ }
+  // 🔴 Qt の commonCopyEvent は window の bubble まで届かない(実測)ので、**呼ばれた API を包んで**採る:
+  //    copy / cut の event 中の preventDefault と clipboardData.setData(型・長さ)。読むだけ(引数も返り値も変えない)。
+  let inCopy = null;
+  const opd = Event.prototype.preventDefault;
+  Event.prototype.preventDefault = function (...a) {
+    if (inCopy && this === inCopy.ev) {
+      inCopy.rec.preventDefault = (inCopy.rec.preventDefault || 0) + 1;
+      // PKC3_EMULATE_COPYKEEP=1: 直した Qt(qtbase-patch-copy-keep.py)の挙動を JS で真似る ── 中身が空なら止めない。
+      // ⚠ 焼いた Qt の代わりではない(ブラウザ側の主張「止めなければ外は残る」だけを測る)。計装には数えるが opd は呼ばない
+      if (EMULATE && !inCopy.nonEmpty) { inCopy.rec.suppressed = true; return undefined; }
+    }
+    return opd.apply(this, a);
+  };
+  const osd = DataTransfer.prototype.setData;
+  DataTransfer.prototype.setData = function (t, v) {
+    if (inCopy) {
+      (inCopy.rec.setData = inCopy.rec.setData || []).push({ type: String(t), len: String(v).length });
+      if (String(v).length > 0) inCopy.nonEmpty = true;
+      else if (EMULATE) return undefined;
+    }
+    return osd.call(this, t, v);
+  };
+  for (const kind of ['copy', 'cut']) {
+    window.addEventListener(kind, (ev) => {
+      const rec = { dt: Date.now() - t0, kind: kind + '-api' };
+      W.__clip.copyEvents.push(rec);
+      inCopy = { ev, rec };
+      setTimeout(() => { inCopy = null; }, 0);
+    }, true);
+  }
+  for (const kind of ['copy', 'cut', 'beforecopy', 'beforecut']) {
+    window.addEventListener(kind, (ev) => W.__clip.copyEvents.push({ dt: Date.now() - t0, kind: kind + '-capture', target: ev.target && ev.target.tagName }), true);
+  }
+  for (const kind of ['copy', 'cut']) {
+    window.addEventListener(kind, (ev) => {
+      const cd = ev.clipboardData;
+      const types = cd ? Array.from(cd.types || []) : null;
+      const sizes = {};
+      if (cd) for (const t of types) { try { sizes[t] = cd.getData(t).length; } catch (e) { sizes[t] = 'ERR'; } }
+      W.__clip.copyEvents.push({ dt: Date.now() - t0, kind, defaultPrevented: ev.defaultPrevented, types, sizes, active: document.activeElement ? document.activeElement.tagName : null });
+    }, false);
+  }
   const t0 = Date.now();
   const dec = (buf) => { try { return new TextDecoder().decode(buf).slice(0, 60); } catch (e) { return null; } };
   try {
@@ -874,7 +932,11 @@ async function oneRound(arm, n) {
     }
     const after = await readOutside();
     row.after = { text: after.text ?? null, types: after.types ?? null, focus: after.focus ?? null, errs: [after.textErr, after.readErr, after.hung, after.err].filter(Boolean) };
-    row.emptied = after.text === '' ? true : after.text === undefined ? null : false;
+    // 🔴 字が空でも**画像(types に image/png 等)が在れば空ではない**(B3c は text='' / types=[image/png] で外へ届いている。
+    //    字だけで見ると「外が空になった」と誤読する ── 2026-10-25)
+    row.outsideTypes = (after.types ?? []).flat();
+    row.emptied = after.text === '' ? (row.outsideTypes.length === 0 ? true : false) : after.text === undefined ? null : false;
+    row.imageOutside = row.outsideTypes.some((t) => /^image\//.test(t));
     row.faultsAtRead = row.faults.length;
     /**
      * 🔑 **別の頁からも読む**(同じ origin の空の頁を前面に出して `readText()`)。
@@ -899,6 +961,7 @@ async function oneRound(arm, n) {
       bc: clipLog.bc,
       calls: clipLog.writes.slice(row.hostWritesBefore),
       callsTotal: clipLog.writes.length,
+      copyEvents: clipLog.copyEvents ?? null,
     };
 
     // ⑤' 参考の観測 ── LO の**中**へ貼ってみる(コピーが LO の中で効いたかの傍証。外の判定とは別)。
@@ -966,7 +1029,7 @@ try {
         : r.emptied === true
           ? '外が空になった'
           : r.emptied === false
-            ? `外は空ではない(text=${JSON.stringify(r.after?.text)})`
+            ? `外は空ではない(text=${JSON.stringify(r.after?.text)}${r.imageOutside ? ' / 画像あり ' + JSON.stringify(r.outsideTypes) : ''})`
             : '読めなかった';
       if (!r.undecidable) valid += 1;
       result.rounds.push(r);
@@ -986,6 +1049,10 @@ try {
       emptied: valid.filter((r) => r.emptied === true).length,
       keptSeed: valid.filter((r) => r.emptied === false && r.after?.text === r.seed).length,
       replacedByLo: valid.filter((r) => r.emptied === false && r.after?.text !== r.seed).length,
+      // 🔑 #121 の本命の列: Qt の commonCopyEvent が **空の setData('text/plain','') + preventDefault** を出した回(= 外を空で上書きする形)
+      emptyCancelRounds: valid.filter((r) => (r.hostWrites?.copyEvents ?? []).some((e) => e.kind === 'copy-api' && e.preventDefault > 0 && (e.setData ?? []).length > 0 && (e.setData ?? []).every((d) => d.len === 0))).length,
+      copyCancelRounds: valid.filter((r) => (r.hostWrites?.copyEvents ?? []).some((e) => e.kind === 'copy-api' && e.preventDefault > 0)).length,
+      imageOutsideRounds: valid.filter((r) => r.imageOutside === true).length,
       otherPageEmptied: valid.filter((r) => r.afterOtherPage?.text === '').length,
       // 🔑 #121 の列: host への write 依頼(`navigator.clipboard.write` / `writeText` を host が呼んだ回数が 1 以上の回)
       hostWriteRounds: valid.filter((r) => (r.hostWrites?.calls?.length ?? 0) > 0).length,

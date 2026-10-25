@@ -15,7 +15,15 @@ LO が何も渡してこなかったのに、外の物だけが消える ── 
 
 ## 直し(最小)
 
-運べる物(字 / HTML / 空でない他の型)が 1 つも無いときは、`preventDefault()` を呼ばずに返る。
+運べる物(**空でない**字 / **空でない** HTML / 空でない他の型)が 1 つも無いときは、`preventDefault()` を呼ばずに返る。
+
+## 2026-10-25 の訂正(clip_trace の焼き run 40230812237 + probe の window 計装で確定)
+
+最初の直しは `!hasText() && !hasHtml()` で見ていたが、LO の `QtMimeData::formats()` は text/plain を常に出すので
+`hasText()` は**画像だけの選択でも、何も選ばない Ctrl+C でも真**で、門が一度も閉じなかった。実測は
+`copy` event ごとに `clipboardData.setData('text/plain', '')`(長さ 0)→ `preventDefault()` が 1 回。
+空の setData つきで止めるとブラウザは空で上書きする(setData なしで止めるだけなら上書きしない ── 素の Chromium で確認)。
+なお画像を**クリックで選んだ**(B3c)ときは LO が image/png を出し、`writeToClipboardApi` が 199 byte の PNG を書いて外へ届く。
 ブラウザの既定の `copy` は、選択が空なら**クリップボードに触らない**ので、外の物は残る。
 
 ⚠ 中身があるときの動きは 1 行も変えない(足すのは早期 return の 1 ブロックだけ)。
@@ -44,17 +52,21 @@ void QWasmClipboard::cut(val event)
 """
 REPLACE = """    // PKC3(#121): 運べる物が 1 つも無いのに preventDefault すると、ブラウザは clipboardData に入れた物(= 空)で
     // PKC3(#121): クリップボードを上書きする(外でコピーした字が消える)。何も運べないときは既定の動作に任せる。
-    if (!_mimes->hasText() && !_mimes->hasHtml()) {
-        bool pkcHasBinary = false;
+    // PKC3(#121): ⚠ 「hasText() が真」では足りない ── LO の QtMimeData は text/plain を**一覧に常に出す**ので、
+    // PKC3(#121): 画像だけの選択 / 何も選んでいない Ctrl+C でも hasText() は真で、text() は空(実測 2026-10-25:
+    // PKC3(#121): setData("text/plain", "") + preventDefault が毎回走っていた)。**中身が空でないか**で見る。
+    bool pkcHasContent = (_mimes->hasText() && !_mimes->text().isEmpty())
+            || (_mimes->hasHtml() && !_mimes->html().isEmpty());
+    if (!pkcHasContent) {
         for (auto pkcMime : _mimes->formats()) {
             if (!pkcMime.contains("text/") && !_mimes->data(pkcMime).isEmpty()) {
-                pkcHasBinary = true;
+                pkcHasContent = true;
                 break;
             }
         }
-        if (!pkcHasBinary)
-            return;
     }
+    if (!pkcHasContent)
+        return;
 
     event.call<void>("preventDefault");
 }

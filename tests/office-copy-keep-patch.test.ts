@@ -45,12 +45,16 @@ describe('#121 の直し(copy-keep)', () => {
     try {
       expect(run(t.dir).code).toBe(0);
       const body = fn(t.read());
-      const guard = body.indexOf('if (!pkcHasBinary)');
+      const guard = body.lastIndexOf('if (!pkcHasContent)');
       const prevent = body.indexOf(PREVENT);
       expect(guard).toBeGreaterThan(0);
       expect(guard, '門が preventDefault より後ろ').toBeLessThan(prevent);
       expect(body.slice(guard, guard + 60)).toContain('return;');
-      expect(body, '字 / HTML の有無で門を開けていない').toContain('!_mimes->hasText() && !_mimes->hasHtml()');
+      expect(body, '字の有無だけで見る旧い門が残っている(LO は text/plain を常に出す)').not.toContain('!_mimes->hasText() && !_mimes->hasHtml()');
+      // 🔴 hasText() だけでは足りない(LO は text/plain を常に出し、text() は空)── 空でないことまで見る
+      expect(body, '字が空でないことを見ていない').toContain('_mimes->hasText() && !_mimes->text().isEmpty()');
+      expect(body, 'HTML が空でないことを見ていない').toContain('_mimes->hasHtml() && !_mimes->html().isEmpty()');
+      expect(body, '空でない他の型を見ていない').toContain('!_mimes->data(pkcMime).isEmpty()');
       expect(t.read().split(PREVENT).length, 'preventDefault の数が変わった').toBe(ORIG.split(PREVENT).length);
     } finally {
       t.cleanup();
