@@ -2305,6 +2305,36 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(sqlTable.locator('tbody td'), '書き出しの後で、作った表が引けない').toHaveText(['2'], { timeout: 60_000 });
 
   /**
+   * ⑤-e3 🔴 **`COPY (SELECT …) TO 'x.csv'` がそのままダウンロードになる。場所を指す名前は断る**(#918)。
+   * ⚠ 見るのは**本物のブラウザが受け取った file の名前と中身**(ASCII の名前なので `suggestedFilename` で見られる)。
+   * 🔑 新しい起動は足さない ── ⑤-e2 の続き(DuckDB の器に作った表 `made` が在る)。
+   */
+  await page.fill('[data-pkc-field="sql-input"]', "COPY (SELECT * FROM made) TO 'x.csv'");
+  const copyStarted = page.waitForEvent('download', { timeout: 60_000 });
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  const copyFile = await copyStarted;
+  expect(copyFile.suggestedFilename(), '🔴 COPY の名前がダウンロードの名前になっていない').toBe('x.csv');
+  const copyPath = await copyFile.path();
+  expect(copyPath, 'COPY の file が落ちてこない').toBeTruthy();
+  const copyText = (await readFile(copyPath, null)).toString('utf-8');
+  const copyLines = copyText.trim().split('\n');
+  expect(copyLines.length, '🔴 CSV に見出し + 2 行が入っていない').toBe(3);
+  expect(copyLines[0], '🔴 CSV の先頭行が見出しでない(made の列 id,shinamono)').toContain('shinamono');
+  await expect(note, 'COPY が断られた').not.toHaveAttribute('data-pkc-sql-error', 'yes');
+  // 🔴 場所を指す名前は断る(対照群:直前の同じ形は通っている)── ダウンロードは起きず、断りの行が出る
+  let leaked = false;
+  const onLeak = (): void => {
+    leaked = true;
+  };
+  page.on('download', onLeak);
+  await page.fill('[data-pkc-field="sql-input"]', "COPY (SELECT * FROM made) TO '../x.csv'");
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(note, "🔴 TO '../x.csv' が断られていない").toHaveAttribute('data-pkc-sql-error', 'yes', { timeout: 60_000 });
+  await page.waitForTimeout(500);
+  page.off('download', onLeak);
+  expect(leaked, "🔴 TO '../x.csv' でダウンロードが起きた").toBe(false);
+
+  /**
    * ⑤-f 🔴 **2 つの file を並べて、1 つの SQL で JOIN する**(#918 段⑦。Gemini 裁定 2026-10-01)。
    *
    * ## 🔑 ここでしか言えないこと
@@ -2553,7 +2583,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    * 🔑 **新しい起動は増やしていない**(#820 の規律)── ⑦ が開いたままの
    *   同じ SQL の面の道中に続ける(`gotoApp` / `page.goto` を足さない)。
    *
-   * ⚠ ここまでに**走らせた字**(= 履歴に積まれた字。新しい順。**全 13 件**):
+   * ⚠ ここまでに**走らせた字**(= 履歴に積まれた字。新しい順。**全 14 件**。⚠ 番号の列には ⑤-e3 の `COPY (SELECT * FROM made) TO 'x.csv'` が 4 と 5 の間に 1 件入る。断られた `TO '../x.csv'` は積まれない):
    *   1. `SELECT * FROM csv`(⑥/⑦。⚠ ⑦ は直前と同じなので積まれない)
    *   2. 🔴 `SELECT count(*) AS n FROM json`(⑤-f。#918 段⑦。外した後に 1 件のときの名前で引く)
    *   3. 🔴 `SELECT meisai.shinamono AS m, uriage.shinamono AS u FROM meisai JOIN uriage …`(⑤-f。#918 段⑦)
@@ -2601,7 +2631,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   誰も鳴らない(CLAUDE.md §1「代替物で満たせない条件にする」)。
    */
   await expect(histNote, 'いま何番目かが出ていない(数が合わなければ上の帳簿を直す)').toContainText(
-    '前に打った字(1 / 13)',
+    '前に打った字(1 / 14)',  // 2026-10-25 ⑤-e3(COPY … TO 'x.csv')で 1 つ増えた(断られた '../x.csv' は積まれない)
   );
   /**
    * 🔴 **2 度目の ↑ は、いま「2 番目に新しい字」である**(#682 段④c で 1 つ増えた)。

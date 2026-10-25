@@ -66,6 +66,44 @@ test('🔴 情報ペインでタグを打つと本文に入り、開き直して
   await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry], [data-pkc-entry]');
   await expect(page.locator(CHIPS).first(), '読み直したら消えた').toContainText('買い物');
 
+  /**
+   * 🔴 **#550 本文の `#タグ` は保存時に `body-tags:` へ集約される。手書きの `tags:` は動かない**。
+   * 🔑 新しい起動は足さない ── 上で `tags: [買い物]` を持ったこのノートに、本文のタグを書き足して保存する。
+   * ⚠ 見るのは**保存後の本文そのもの**(札ではない)と、変えずに保存し直したとき**更新日時が動かない**こと。
+   */
+  const UPDATED = '[data-pkc-region="inspector"] [data-pkc-field="inspector-updated"] time';
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const before = await page.inputValue('[data-pkc-field="editor-body"]');
+  const tagsLine = before.split('\n').find((l) => l.startsWith('tags:'));
+  expect(tagsLine, '前提:手書きの tags: 行が在る').toBeDefined();
+  expect(before, '前提:まだ body-tags: は無い').not.toContain('body-tags:');
+  await page.fill('[data-pkc-field="editor-body"]', before.replace(/\s*$/, '') + '\n\n#請求 #家事\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await writesLanded(page);
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const synced = await page.inputValue('[data-pkc-field="editor-body"]');
+  const syncedLines = synced.split('\n');
+  const bodyTagsLine = syncedLines.find((l) => l.startsWith('body-tags:'));
+  expect(bodyTagsLine, '🔴 保存しても body-tags: が frontmatter に出ない').toBeDefined();
+  expect(bodyTagsLine, '🔴 請求が集約されていない').toContain('請求');
+  expect(bodyTagsLine, '🔴 家事が集約されていない').toContain('家事');
+  expect(syncedLines.find((l) => l.startsWith('tags:')), '🔴 手書きの tags: が動いた').toBe(tagsLine);
+  expect(synced.indexOf('body-tags:'), '🔴 body-tags: が本文の先頭(frontmatter)に無い').toBeLessThan(synced.indexOf('#請求'));
+  await page.locator(UPDATED).waitFor({ state: 'attached' });
+  const stamp = await page.locator(UPDATED).getAttribute('datetime');
+  expect(stamp, '前提:更新日時が読める').toBeTruthy();
+  // 変えずに保存し直す(秒の桁が進む間を置く)── 本文も更新日時も動かない
+  await page.waitForTimeout(2100);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await writesLanded(page);
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  expect(await page.inputValue('[data-pkc-field="editor-body"]'), '🔴 変えずに保存したら本文が変わった').toBe(synced);
+  expect(await page.locator(UPDATED).getAttribute('datetime'), '🔴 変えずに保存したのに更新日時が動いた').toBe(stamp);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 
