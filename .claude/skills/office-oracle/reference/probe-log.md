@@ -225,3 +225,12 @@ Qt の `EM_JS` / `EM_ASYNC_JS` の本文は **焼いた `soffice.js` に字の�
 ⚠ 一式は `make-pages-bundle.mjs <LO を展開した dir> <出力>` で組み、`PKC3_DIST` に `public/office` だけを写した dir(`<dist>/office/host.html`)を渡せば、`npm run build` を回さずに測れる。
 実測(LO 26.8、ヘッドレス Chromium、メモリ 16GB): 画像だけの .docx は 20〜600MB まで開く(17〜39 秒)/ 900MB・1.2GB は渡るが 36 秒で「この文書は開けませんでした」/ 2.0GB は窓に渡らずスタート画面。.xlsx(10 列 × 100 万行 = 90MB)は 36 秒で開く。
 結論は `src/features/office/office-entry.ts` の `OFFICE_LARGE_DOC_BYTES`(300MB)の注釈。
+
+## 2026-10-25 ── Basic IDE / Ctrl+W / Ctrl+C / Format メニュー / メニュー中の字のキーを、配布中の一式(LO 26.8、run 38338647742)で測り直した
+
+- **#431 Basic IDE**: `dialog-crash-probe.mjs` の `macro` suite が **6/6 で fault 0**(08-30 の 10/10 落ちは master 由来の別の一式)。新しい `macro-ide` suite(開く → 全部選んで 5 行のマクロを打つ → F5 → `__lo.FS` で書いた file を読む)が **1/1 で `PKC-MACRO-RAN`**。`PKC3-VIEWDATAGONE` は 0 回 = 門が当たらずに消えている(原因側の `patch-lo-timer-mutex.py` が効いた見込み。⚠ 因果は未確定)。
+  ⚠ 新しい失敗: **文法の誤りのあるマクロを F5 で走らせると `Aborted(native code called abort())`**(`macro-ide-error` suite、2/2)。名前つき一式(`lo-wasm-names`、別の sha)では出ない。名前を引くには `lo_ref: libreoffice-26-8` + `profiling_funcs: true` の焼きが要る。
+- **#117 Ctrl+W**: `closedoc` suite 4/4 で fault 0、Start Center へ戻る(99-final を目で確認)。
+- **#121 Ctrl+C**: `clipboard-probe.mjs` n=2。字 `B1` / 右クリック `B2` / 近道キー `B2k` / 表 `B4` は外が残る。**画像 `B3` は 2/2 で外が空**(LO からの write 依頼も 0 件)→ `qtbase-patch-copy-keep.py`。
+- **#126 Format メニュー**: 再現(2 列に割れてメニューバーの上から画面下端まで)→ `patch-lo-qt-menu-scroll.py`。
+- **#1360**: `ime-compose-probe.mjs` の `ctx-*` 腕。`ctx-kbd`(Shift+F10 → y)は直る前 **2/2 で文書が「y」に置き換わる**、`ctx-kbd-ime`(処理済み keydown + 変換中の「ｙ」)は **2/2 で文書が「ｙ」になって空**。`office-popup-keys.js` を入れると **2/2 ずつで「コピー」が実行され文書は無傷**。`PKC3_WITHOUT_POPUPKEYS=1` が「直る前」の腕。

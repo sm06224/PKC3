@@ -333,7 +333,7 @@ describe('#121 の計装(menu-trace)── 印が全部在る', () => {
 });
 
 describe('#121 の計装(menu-trace)── 他の patch と同じ行を触らない', () => {
-  it('🔴 同じ 2 file を触る patch は、この 1 本と uev-trace の 2 本だけ(増えたら、錨が重ならないことと両順同一を書く)', () => {
+  it('🔴 同じ 2 file を触る patch は、この 1 本と uev-trace と qt-menu-scroll の 3 本だけ(増えたら、錨が重ならないことと両順同一を書く)', () => {
     const dir = 'build/office-wasm';
     const files = readdirSync(dir).filter((f) => /^(qtbase-)?patch-.*\.py$/.test(f));
     // ⚠ 空振り防止 ── 一覧が空なら 0 本は真になる
@@ -351,7 +351,13 @@ describe('#121 の計装(menu-trace)── 他の patch と同じ行を触らな
     //    錨の区間が重ならないこと・両順で出力が同一なことは `tests/office-uev-trace-patch.test.ts`
     //    (「idles-trace / menu-trace の錨と区間が交わらない」)が見る。⚠ 3 本目が増えたら、そちらへ足す。
     //    (一時 3 本になったが、#1344 で足した LO 側の直しは効かなかったので外した = 2 本へ戻った。真因は Qt 側。)
-    expect(touching, 'QtMenu.cxx / menu.cxx を触る patch').toEqual(['patch-lo-menu-trace.py', 'patch-lo-uev-trace.py']);
+    // 🔴 2026-10-25: `patch-lo-qt-menu-scroll.py`(#126)が `QtMenu.cxx` の include / file scope / `connectHelpSignalSlots` の末尾へ
+    //    足す。錨が他の 2 本と重ならないことは `tests/office-qt-menu-scroll-patch.test.ts` が見る。
+    expect(touching, 'QtMenu.cxx / menu.cxx を触る patch').toEqual([
+      'patch-lo-menu-trace.py',
+      'patch-lo-qt-menu-scroll.py',
+      'patch-lo-uev-trace.py',
+    ]);
   });
 });
 

@@ -397,6 +397,14 @@ const SUITES = {
     },
   ],
   /**
+   * #126 ── **Format メニューが 2 列に割れて下端で切れないか**。メニューを開いて撮るだけ(落ちる話ではない)。
+   * ⚠ 判定は画像を**目で見る**(`__shots-format-menu/03-format-menu.png`)。列の数は画素からは数えない。
+   */
+  'format-menu': [
+    ...OPEN_DOC,
+    { id: 'format-menu', at: [236, 37], why: 'Format メニューを開く(1 列で下まで収まるか / 2 列に割れて切れるか)', control: false, wait: 5_000 },
+  ],
+  /**
    * #431 ── **Basic IDE を開き、マクロを打ち、走らせ、その結果が出る**(直る前は開く所で落ちた)。
    *
    * 🔑 これまでの `macro` は「開いたか」までしか見ていなかった(user の問いは「**書けるか**」)。この suite は
@@ -609,7 +617,7 @@ async function main() {
               try {
                 const FS = globalThis.__lo?.FS;
                 if (!FS) return { err: 'no-FS' };
-                return { text: new TextDecoder().decode(FS.readFile(path)) };
+                return { text: new globalThis.TextDecoder().decode(FS.readFile(path)) };
               } catch (e) {
                 return { absent: true, why: String(e?.message ?? e).slice(0, 80) };
               }
