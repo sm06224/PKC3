@@ -36,6 +36,8 @@ export const BROWSE_MODES = [
   'captures',
   // 🔴 **PC**(パソコンのフォルダ。#215 段①。🟣 Gemini 裁定 2026-10-01)── 繋いだフォルダの直下を並べる面
   'pc',
+  // 🔴 **関係グラフ**(#281 ①)── 組み込みアプリの左のタブ。⚠ 足すのは**末尾**(既にあるタブの位置を動かさない)
+  'graph',
 ] as const;
 
 export type BrowseMode = (typeof BROWSE_MODES)[number];
@@ -85,6 +87,8 @@ const HOME_TAB: Readonly<Partial<Record<ViewMode, BrowseMode>>> = {
   contacts: 'contacts',
   // 🔴 録ったものも同じ形(#683 段①)── 別窓が塞がれたら左のタブへ送る
   captures: 'captures',
+  // 🔴 関係グラフ(#281 ①)も同じ形 ── 別窓が塞がれたら左のタブへ送る
+  graph: 'graph',
 };
 
 export function homeTabOf(view: ViewMode): BrowseMode | null {

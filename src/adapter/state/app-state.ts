@@ -147,6 +147,7 @@ import type { RepeatUnit } from '@features/schedule/repeat';
 import { isRealCalendarDate } from '@features/schedule/schedule-date';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { CaptureItem } from '@features/capture/capture-item';
+import { clampGraphDepth, GRAPH_DEFAULT_DEPTH } from '@features/relation/graph-view';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { SearchDetailRow } from '@features/filter/search-snippet';
 import {
@@ -678,6 +679,12 @@ export const VIEW_MODES = [
    */
   'captures',
   /**
+   * 🔴 **関係グラフ**(#281 ①。user 指示 2026-08-19「…関連性グラフビューワ…は組み込みアプリでリリースしたい」)。
+   * ⚠ 連絡先と同じ形 ── 左の列の「グラフ」タブは残し、同じ `GraphRenderer` を中央の器(別窓)にも描く。
+   *   aside ではない(節点を押した選択はこの面に留まり、選んだノートから描き直す)。
+   */
+  'graph',
+  /**
    * 🔴 **探す面**(#680。user 要望「検索専用の組み込みアプリ」/ 裁定 2026-09-04
    * 「アプリの基本は別窓」)。
    *
@@ -810,6 +817,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   schedule: '予定表',
   contacts: '連絡先',
   captures: '音/動画',
+  graph: '関係グラフ',
   search: '探す',
   dual: '2 ペインで整理',
   sql: 'SQL で調べる',
@@ -2029,6 +2037,11 @@ export interface AppState {
    */
   captureTranscribeLid: string | null;
   /**
+   * 🔴 **関係グラフの見方**(#281 ①)。`all` = 全体 / 偽 = 選んだノートから `depth` 手先まで。
+   * 🔑 state に置く理由:描画器は左のタブと別窓で 2 つ生きうる(`capturePlayingLid` と同じ)。
+   */
+  graphView: { readonly all: boolean; readonly depth: number };
+  /**
    * 🔴 **保存が「消えない扱い」か**(#347、user 裁定 2026-08-23)。
    *
    * ⚠ 出すのは**設定の面だけ**である ── 帯にもダイアログにもしない
@@ -2378,6 +2391,7 @@ export const initialState: AppState = {
   captureTrim: null,
   captureTrimBusy: false,
   captureTranscribeLid: null,
+  graphView: { all: false, depth: GRAPH_DEFAULT_DEPTH },
   snippetScan: null,
   persistState: 'unknown',
   backlinks: null,
@@ -2716,6 +2730,8 @@ export type UserAction =
   | { type: 'SET_CAPTURE_TRIM_BUSY'; busy: boolean }
   /** 文字にしている録音を知らせる(#772 段②)。`null` = 終わった。 */
   | { type: 'SET_CAPTURE_TRANSCRIBE'; lid: string | null }
+  /** 🔴 関係グラフの見方を変える(#281 ①)。渡した項目だけ変わる。`depth` は 1..6 に丸める。 */
+  | { type: 'SET_GRAPH_VIEW'; all?: boolean; depth?: number }
   /** 🔴 雛形を集め終えた(#196 / B-2)。⚠ `null` は失敗 ── **帯は出さず静かに畳む**。 */
   | { type: 'SET_SNIPPET_SCAN'; scan: SnippetScan | null }
   /** 札が集められなかった(#277 段②-b)。⚠ 「まだ」と区別する ── 文言が違う。 */
@@ -5715,6 +5731,12 @@ function reduceCore(
       return { state: { ...state, captureTrimBusy: action.busy }, events: [] };
     case 'SET_CAPTURE_TRANSCRIBE':
       return { state: { ...state, captureTranscribeLid: action.lid }, events: [] };
+    case 'SET_GRAPH_VIEW': {
+      const all = action.all ?? state.graphView.all;
+      const depth = action.depth === undefined ? state.graphView.depth : clampGraphDepth(action.depth);
+      if (all === state.graphView.all && depth === state.graphView.depth) return { state, events: [] };
+      return { state: { ...state, graphView: { all, depth } }, events: [] };
+    }
     /**
      * 🔴 **雛形は「集められなかった」を帯に出さない**(#196 / B-2)。
      *

@@ -20,6 +20,7 @@ import { DualFilerRenderer } from './dual-filer';
 import { ScheduleRenderer } from './schedule';
 import { ContactsRenderer } from './contacts';
 import { CapturesRenderer } from './captures';
+import { GraphRenderer } from './graph';
 import { SearchRenderer } from './search';
 import { SqlRenderer } from './sql';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -30,6 +31,7 @@ type PaneView =
   | 'schedule'
   | 'contacts'
   | 'captures'
+  | 'graph'
   | 'search'
   | 'dual'
   | 'sql'
@@ -66,6 +68,8 @@ const NOTE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>([
   'contacts',
   // ⚠ 録ったもの(#683 段①)── 連絡先と同じ(名前を押した選択はこの面に留まる)
   'captures',
+  // ⚠ 関係グラフ(#281 ①)── 連絡先と同じ(節点を押した選択はこの面に留まる)
+  'graph',
   'search',
 ]);
 
@@ -103,6 +107,8 @@ export class CenterRouter {
   private readonly contacts: ContactsRenderer;
   /** 🔴 録ったもの(#683 段①)。⚠ 中身を借りるので、閉じるとき返す。 */
   private readonly captures: CapturesRenderer;
+  /** 🔴 関係グラフ(#281 ①)── 左の列と**同じ class**。 */
+  private readonly graph: GraphRenderer;
   /** 🔴 **探す面**(#680)── 左の列に同じものは無い(この器だけ)。 */
   private readonly search: SearchRenderer;
   private readonly dual: DualFilerRenderer;
@@ -193,6 +199,7 @@ export class CenterRouter {
       schedule: pane('schedule'),
       contacts: pane('contacts'),
       captures: pane('captures'),
+      graph: pane('graph'),
       search: pane('search'),
       dual: pane('dual'),
       sql: pane('sql'),
@@ -242,6 +249,7 @@ export class CenterRouter {
     this.schedule = new ScheduleRenderer(this.panes.schedule, now);
     this.contacts = new ContactsRenderer(this.panes.contacts);
     this.captures = new CapturesRenderer(this.panes.captures, assets, onCaptureReady);
+    this.graph = new GraphRenderer(this.panes.graph);
     this.search = new SearchRenderer(this.panes.search);
     this.dual = new DualFilerRenderer(this.panes.dual);
     this.sql = new SqlRenderer(this.panes.sql);
@@ -357,6 +365,7 @@ export class CenterRouter {
     else if (view === 'schedule') this.schedule.render(state);
     else if (view === 'contacts') this.contacts.render(state);
     else if (view === 'captures') this.captures.render(state);
+    else if (view === 'graph') this.graph.render(state);
     else if (view === 'search') this.search.render(state);
     else if (view === 'dual') this.dual.render(state);
     else if (view === 'sql') this.sql.render(state);

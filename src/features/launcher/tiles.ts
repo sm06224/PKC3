@@ -70,6 +70,7 @@ export interface LauncherTile {
     | 'schedule'
     | 'contacts'
     | 'captures'
+    | 'graph'
     | 'search'
     | 'sql'
     | 'manual'
@@ -345,6 +346,22 @@ export function capturesTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **関係グラフの組み込みタイル**(#281 ①。user 指示 2026-08-19「…関連性グラフビューワ…は組み込みアプリでリリースしたい」)
+ * ── 連絡先と同じ形。左の列の「グラフ」タブは残し、同じ面を別窓で開く 2 つ目の入口である。
+ */
+export const GRAPH_TILE_LID = 'builtin:graph';
+
+export function graphTile(): LauncherTile {
+  return {
+    lid: GRAPH_TILE_LID,
+    title: '関係グラフ',
+    group: BUILTIN_GROUP,
+    kind: 'graph',
+    symbol: 'link',
+  };
+}
+
+/**
  * 🔴 **探す面の組み込みタイル**(#680。user 要望「検索専用の組み込みアプリ」/
  * 裁定 2026-09-04「アプリの基本は別窓」)。
  *
@@ -498,6 +515,8 @@ export function withBuiltinTiles(
    *   足しても**既に在るタイルの位置が 1 つも動かない**。
    */
   builtin.push(capturesTile());
+  // ⚠ 関係グラフ(#281 ①)も末尾 ── 足しても既に在るタイルの位置が動かない
+  builtin.push(graphTile());
   /**
    * 🔴 **組み込みは末尾へ「収納」する**(#531 段② / #281。user 指示 2026-08-28
    * 「組み込みアプリをグループに**収納して**整理する」)。
@@ -537,6 +556,7 @@ export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'schedule',
   'contacts',
   'captures',
+  'graph',
   'search',
   'sql',
   'manual',

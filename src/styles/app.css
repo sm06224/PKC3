@@ -12194,3 +12194,51 @@ h6:hover > .pkc-heading-anchor,
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* ══ 関係グラフ(#281 ①)══════════════════════════════════════
+ * 🔴 **左の列と中央の面(別窓)に同じ規則**(連絡先と同じ形)。
+ * 節点は押せるボタン(押すとそのノートを開く)。選んでいるノートは枠を太くする
+ * ── 色ではなく線で示す(地は無彩色、色は情報にだけ)。 */
+[data-pkc-browse-pane='graph'],
+[data-pkc-view-pane='graph'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-field='graph-bar'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+[data-pkc-field='graph-note'],
+[data-pkc-field='graph-legend'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='graph-body'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-height: 0;
+}
+[data-pkc-field='graph-map'] {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+}
+[data-pkc-field='graph-map'] button {
+  padding: 1px 6px;
+  font-size: var(--btn-fs-sm);
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+[data-pkc-field='graph-map'] button[aria-current='true'] {
+  border-width: 2px;
+  border-color: var(--fg);
+  font-weight: 600;
+}

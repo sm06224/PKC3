@@ -7865,6 +7865,19 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-entry');
     if (lid) dispatcher.dispatch({ type: 'SET_CAPTURE_PLAYING', lid });
   },
+  /**
+   * 🔴 **関係グラフの見方を変える**(#281 ①)。⚠ 見方は state(`graphView`)が持つ ──
+   *   描画器は左のタブと別窓で 2 つ生きうるので、片方に覚えさせると食い違う。
+   *   読むだけの操作なので編集中でも押せる。
+   */
+  'graph-scope': (dispatcher, target) => {
+    const v = target.getAttribute('data-pkc-graph-scope');
+    if (v === 'all' || v === 'selected') dispatcher.dispatch({ type: 'SET_GRAPH_VIEW', all: v === 'all' });
+  },
+  'graph-depth': (dispatcher, target) => {
+    const n = Number(target.getAttribute('data-pkc-graph-depth'));
+    if (Number.isFinite(n)) dispatcher.dispatch({ type: 'SET_GRAPH_VIEW', depth: n });
+  },
   /** 🔴 **やめる**(#683 段①)── 器へ返すのは描画器の `syncBorrow` が引き取る。 */
   'capture-stop': (dispatcher) => {
     dispatcher.dispatch({ type: 'SET_CAPTURE_PLAYING', lid: null });
