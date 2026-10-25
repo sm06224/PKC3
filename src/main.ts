@@ -360,7 +360,9 @@ import { openImageDrawWindow } from '@adapter/platform/image-draw-window';
 import { AudioClient } from '@adapter/platform/audio/audio-client';
 import { VideoClient } from '@adapter/platform/video/video-client';
 import { AsrClient } from '@adapter/platform/asr/asr-client';
-import { decodeToMono16k } from '@adapter/platform/asr/asr-decode';
+import { decodeToMono, decodeToMono16k } from '@adapter/platform/asr/asr-decode';
+import { VoiceClient } from '@adapter/platform/voice/voice-client';
+import { VOICE_RATE } from '@features/audio/voice-lab';
 import { AsrPackInstaller } from '@adapter/platform/asr/asr-pack-install';
 import { AsrPackStore } from '@adapter/platform/asr/asr-pack-store';
 import { ASR_PACK_BASE, asrPartOf } from '@features/asr/asr-parts';
@@ -3684,6 +3686,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 取り込みは収録と同じ **`queued`**(切り出しも取り直しが利かない)。
    */
   const audioClient = new AudioClient();
+  // 🔴 声の仕上げ(雑音を減らす・声と伴奏を分ける・話者…)のワーカー。遅延起動・アイドルで畳む(`WorkerLease`)
+  const voiceClient = new VoiceClient();
   /**
    * 🔴 **動画は別のワーカー**(#683 段②b-1)── 動画の長い仕事で音の切り出しを待たせない。
    * 元の `Blob` は窓で読む(250MB を開かない)。始まりが手前へ戻るなら、切る前に確認する。
@@ -3748,6 +3752,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       scenes: (blob) => videoClient.scenes(blob),
       contactSheet: (blob, lines, title) => videoClient.contactSheet(blob, lines, title),
       decode16k: (blob) => decodeToMono16k(blob),
+      decode48k: (blob) => decodeToMono(blob, VOICE_RATE),
+      voice: (job) => voiceClient.run(job),
       now: () => new Date(),
     }),
     parentOf: (lid) => {

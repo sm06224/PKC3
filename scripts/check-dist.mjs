@@ -135,8 +135,13 @@ const DIST = positional[1]
  * 4.8 MB の chunk)と、React の囲みを描く箱へ入れるランタイム(React + ReactDOM + sucrase 約 420 KB / Tailwind の browser build 約 280 KB)を
  * 足した分で、実測 18383.8 KB(約 600 KB の余裕)。どれも**要るまで読まない遅延 chunk**で、使わない人の常駐メモリには載らない。
  * ⚠ **撤廃はしない**(誤取込 1 本は今も止まる)。
+ *
+ * 🔴 **2026-10-25(#952 B1・#674)に 19000 → 24000 KB へ引き上げた** ── 通常の増加である(誤取込ではない)。声の仕上げ
+ * (雑音を減らす・声と伴奏を分ける・話者を分ける)のワーカー chunk に、RNNoise の wasm とモデル(`@shiguredo/rnnoise-wasm`。
+ * 実測 4827 KB。wasm を base64 で JS に抱える作り)が入る分で、実測 23247 KB。**使うときだけ起きる遅延ワーカー**で、
+ * 使わない人の常駐メモリには載らない。⚠ **撤廃はしない**(誤取込 1 本は今も止まる)。
  */
-const SHIPPED_CAP_KB = 19000;
+const SHIPPED_CAP_KB = 24000;
 
 /**
  * 配る量の下限。KB。⚠ **cap だけでは片側しか見ていない** ── entry chunk を
@@ -207,8 +212,10 @@ const SHIPPED_FLOOR_KB = { dev: 3500, product: 800 };
  * 🔑 **2026-10-25(#528)に 14500 → 20000 KB へ引き上げた**。plotly(4.8 MB)と React のランタイム・Tailwind(合計約 5.5 MB)を
  *   1 枚へ inline した分で、実測 18.57 MB(= 約 19015 KB)。本体の cap(13000 → 19000)と同じ理由で、取り違えではない。
  *   ⚠ 余裕は約 1000 KB ── **誤取込 1 本は今も止まる**。
+ * 🔑 **2026-10-25(#952 B1・#674)に 20000 → 27000 KB へ引き上げた**。声の仕上げのワーカー(RNNoise の wasm 入り、約 4.8 MB)を
+ *   1 枚へ inline した分で、実測 24.86 MB(= 約 25457 KB)。本体の cap(19000 → 24000)と同じ理由。取り違えではない。⚠ **誤取込 1 本は今も止まる**。
  */
-const PORTABLE_CAP_KB = 20000;
+const PORTABLE_CAP_KB = 27000;
 const PORTABLE_FLOOR_KB = 3000;
 
 /**

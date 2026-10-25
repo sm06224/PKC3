@@ -430,6 +430,60 @@ export function extractWebmOpusAudio(bytes: Uint8Array): TrimOutcome {
   return trimDemuxed(src, 0, src.durationMs - src.codecDelayMs);
 }
 
+/** 符号化した opus の packet 列(`AudioEncoder` の出力)。 */
+export interface OpusStream {
+  /** `ms` は先頭を 0 とした時刻。 */
+  readonly packets: readonly OpusPacket[];
+  readonly channels: number;
+  /** 符号化器が言う頭の捨て標本数(`OpusHead` の pre-skip)。 */
+  readonly preSkip: number;
+  /** 1 packet の長さ(ミリ秒)。 */
+  readonly packetMs: number;
+}
+
+/** `OpusHead`(RFC 7845 §5.1)を作る。入力の標本化率は 48000 を書く(opus の復号は常に 48kHz)。 */
+export function opusHead(channels: number, preSkip: number, inputRate = 48_000): Uint8Array {
+  const b = new Uint8Array(19);
+  b.set(asciiBytes('OpusHead'), 0);
+  b[8] = 1; // version
+  b[9] = channels;
+  b[10] = preSkip & 0xff;
+  b[11] = (preSkip >> 8) & 0xff;
+  new DataView(b.buffer).setUint32(12, inputRate, true);
+  // [16..17] output gain = 0, [18] channel mapping family = 0
+  return b;
+}
+
+/** `OpusHead` から pre-skip を読む。読めなければ `null`。 */
+export function preSkipOf(head: Uint8Array): number | null {
+  if (head.length < 19 || String.fromCharCode(...head.subarray(0, 8)) !== 'OpusHead') return null;
+  return head[10]! | (head[11]! << 8);
+}
+
+/**
+ * 🔴 **符号化した opus の packet 列を、新しい WebM にする**(#952 B1・#674・B5。声の仕上げの出力口)。
+ *
+ * 🔑 切り出し(`trimWebmOpus`)と**同じ書き手**へ通す ── 2 本目の WebM の書き出しを作らない。
+ * pre-skip は `CodecDelay` として書く(復号側が頭の捨てを知る)。
+ */
+export function muxOpusWebm(stream: OpusStream): TrimOutcome {
+  if (stream.packets.length === 0) return { ok: false, reason: 'empty-range' };
+  const last = stream.packets[stream.packets.length - 1]!;
+  const durationMs = last.ms + stream.packetMs;
+  const codecDelayMs = (stream.preSkip * 1000) / 48_000;
+  const src: WebmOpusSource = {
+    codecPrivate: opusHead(stream.channels, stream.preSkip),
+    channels: stream.channels,
+    sampleRate: 48_000,
+    packets: stream.packets,
+    packetMs: stream.packetMs,
+    durationMs,
+    codecDelayMs,
+    discardPaddingMs: 0,
+  };
+  return trimDemuxed(src, 0, Math.max(1, durationMs - codecDelayMs));
+}
+
 function trimDemuxed(src: WebmOpusSource, startMs: number, endMs: number): TrimOutcome {
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
     return { ok: false, reason: 'empty-range' };

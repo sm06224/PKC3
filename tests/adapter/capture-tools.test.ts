@@ -14,6 +14,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState, type AppState } from '../../src/adapter/state/app-state';
 import { captureItemsFrom } from '../../src/features/capture/capture-item';
 import type { AttachItem, AttachedOne } from '../../src/adapter/ui/actions/attach';
+import type { VoiceJob } from '../../src/adapter/platform/voice/voice-run';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { chaptersHeading } from '../../src/features/capture/chapters';
 
@@ -73,6 +74,8 @@ function harness(opts: {
     foldStill: vi.fn(async () => ({ ok: false as const, reason: 'nothing-to-fold' as const })),
     scenes: vi.fn(async () => ({ ok: true as const, startsMs: [0], sourceEndMs: 1000 })),
     contactSheet: vi.fn(async () => ({ ok: false as const, reason: 'no-codec' as const })),
+    decode48k: vi.fn(async () => new Float32Array(48_000)),
+    voice: vi.fn(async () => ({ ok: false as const, reason: 'no-engine' as const })),
     decode16k: vi.fn(async () => pcmOf([...rep(0.3, 20), ...rep(0.001, 3), ...rep(0.3, 20)])),
     now: () => NOW,
     ...opts.tools,
@@ -200,5 +203,48 @@ describe('コンタクトシート', () => {
     const h2 = harness({ ...VIDEO, tools: { contactSheet: vi.fn(async () => ({ ok: false as const, reason: 'decode-failed' as const })) } });
     await h2.run('contact-sheet');
     expect(h2.dispatcher.getState().error).toContain('絵を取り出せませんでした');
+  });
+});
+
+describe('雑音を減らす', () => {
+  const bytes = new Uint8Array([1, 2, 3]).buffer;
+
+  it('🔴 PCM をワーカーに譲り、結果は新しい音の添付(拡張子は webm に替わる・元の名前の拡張子が m4a でも)', async () => {
+    const voice = vi.fn(async (job: VoiceJob) => {
+      void job;
+      return { ok: true as const, kind: 'audio' as const, files: [{ tag: '雑音を減らした', bytes, durationMs: 1000 }] };
+    });
+    const h = harness({ name: '録音.m4a', mime: 'audio/mp4', tools: { voice } });
+    h.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
+    await h.run('denoise');
+    expect(voice).toHaveBeenCalledTimes(1);
+    expect(voice.mock.calls[0]![0]).toMatchObject({ op: 'denoise' });
+    const item = h.deps.attach.mock.calls[0]![0]!;
+    expect(item.name).toBe('録音 (雑音を減らした).webm');
+    expect(item.type).toBe('audio/webm');
+    expect(item.size).toBe(3);
+    expect(h.dispatcher.getState().error).toBeNull();
+    expect(h.notes.at(-1)).toContain('雑音を減らした音を作りました');
+  });
+
+  it('🔴 長すぎる録音はワーカーに渡さず断る。読めない音・無音・符号化できない環境も理由つき', async () => {
+    const voice = vi.fn(async () => ({ ok: false as const, reason: 'silent' as const }));
+    const long = harness({ tools: { voice, decode48k: vi.fn(async () => ({ length: 48_000 * 60 * 31 }) as unknown as Float32Array) } });
+    await long.run('denoise');
+    expect(long.dispatcher.getState().error).toContain('30 分まで');
+    expect(voice).not.toHaveBeenCalled();
+
+    const bad = harness({ tools: { decode48k: vi.fn(async () => { throw new Error('x'); }) } });
+    await bad.run('denoise');
+    expect(bad.dispatcher.getState().error).toContain('読み取れませんでした');
+
+    const silent = harness({ tools: { voice } });
+    await silent.run('denoise');
+    expect(silent.dispatcher.getState().error).toContain('ほぼ無音');
+    expect(silent.deps.attach).not.toHaveBeenCalled();
+
+    const noEnc = harness({ tools: { voice: vi.fn(async () => ({ ok: false as const, reason: 'no-encoder' as const })) } });
+    await noEnc.run('denoise');
+    expect(noEnc.dispatcher.getState().error).toContain('opus の符号化)に対応していない');
   });
 });

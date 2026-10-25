@@ -14,6 +14,8 @@ import { canProcess, type ProcessTool } from '@features/capture/capture-process'
 import { canTrimCapture } from '@features/capture/capture-trim-gate';
 import { chaptersHeading, chaptersText, silenceChapterStarts } from '@features/capture/chapters';
 import { ASR_SAMPLE_RATE } from '@features/asr/asr-parts';
+import { VOICE_MAX_MS, VOICE_RATE } from '@features/audio/voice-lab';
+import type { VoiceJob, VoiceRefusal, VoiceResult } from '@adapter/platform/voice/voice-run';
 import type { ToolRunner } from './capture-process';
 
 export interface CaptureToolDeps {
@@ -24,7 +26,38 @@ export interface CaptureToolDeps {
   readonly contactSheet: (blob: Blob, lines: readonly TimedLine[], title: string) => Promise<ContactSheetResult>;
   /** 16kHz mono の PCM へ(`asr-decode.ts`)。⚠ 読めなければ例外。 */
   readonly decode16k: (blob: Blob) => Promise<Float32Array>;
+  /** 48kHz mono の PCM へ(声の仕上げ用)。⚠ 読めなければ例外。 */
+  readonly decode48k: (blob: Blob) => Promise<Float32Array>;
+  /** 声の仕上げ(ワーカー)。⚠ `pcm` は譲る(transfer)。断る理由は値で返る。 */
+  readonly voice: (job: VoiceJob) => Promise<VoiceResult>;
   readonly now: () => Date;
+}
+
+/** 声の仕上げが断る理由 → 画面の字。 */
+const VOICE_REFUSAL: Readonly<Record<VoiceRefusal, string>> = {
+  'no-encoder': 'このブラウザは音の書き出し(opus の符号化)に対応していないため、新しい音を作れません。',
+  empty: 'この添付には音が入っていませんでした。',
+  'encode-failed': '新しい音を書き出せませんでした。',
+  silent: 'この添付はほぼ無音で、仕上げる音がありません。',
+  'no-voice': '話し声が見つかりませんでした(声らしい音が入っていません)。',
+  'no-engine': '声の仕上げのライブラリを読み込めませんでした。',
+};
+
+/** 声の仕上げの前処理:48kHz の PCM にして、長すぎる録音は断る。成功すれば PCM、失敗すれば断り文。 */
+async function decodeForVoice(
+  deps: CaptureToolDeps,
+  blob: Blob,
+): Promise<{ readonly pcm: Float32Array } | { readonly refused: string }> {
+  let pcm: Float32Array;
+  try {
+    pcm = await deps.decode48k(blob);
+  } catch {
+    return { refused: 'この音を読み取れませんでした(このブラウザが対応していない形かもしれません)。' };
+  }
+  if (pcm.length > VOICE_MAX_MS * VOICE_RATE * 1e-3) {
+    return { refused: '長すぎる録音は仕上げられません(30 分まで)。先に「この範囲で切り出す」で分けてください。' };
+  }
+  return { pcm };
 }
 
 /** 動画の断り文(`webm-vp8.ts` の `VIDEO_TRIM_REFUSAL_TEXT` と同じ語り口)。 */
@@ -107,5 +140,33 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
       summary: `${String(out.scenes)} 場面のコンタクトシートを作りました${out.withText > 0 ? `(文字起こしを ${String(out.withText)} 場面に添えました)` : ''}`,
     };
   };
-  return { 'fold-still': foldStill, chapters, 'contact-sheet': contactSheet };
+
+  /** 音の結果を新しい添付にする(拡張子は webm に替える)。 */
+  const audioOutput = (r: Extract<VoiceResult, { kind: 'audio' }>, summary: string) =>
+    ({
+      kind: 'attach',
+      items: r.files.map((f) => ({
+        tag: f.tag,
+        blob: new Blob([f.bytes], { type: 'audio/webm' }),
+        mime: 'audio/webm',
+        ext: 'webm',
+      })),
+      summary,
+    }) as const;
+
+  /**
+   * 雑音を減らす(B1)。元は残し、結果を新しい音の添付にする。
+   * 手法は RNNoise(48kHz・小さな再帰型 NN。モデルは wasm の中)。重い所はワーカー。
+   */
+  const denoise: ToolRunner = async ({ blob, progress }) => {
+    const d = await decodeForVoice(deps, blob);
+    if ('refused' in d) return { kind: 'refused', text: d.refused };
+    progress('雑音を減らしています(ワーカーで処理)…');
+    const r = await deps.voice({ op: 'denoise', pcm: d.pcm });
+    if (!r.ok) return { kind: 'refused', text: VOICE_REFUSAL[r.reason] };
+    if (r.kind !== 'audio') return { kind: 'refused', text: VOICE_REFUSAL['encode-failed'] };
+    return audioOutput(r, '雑音を減らした音を作りました');
+  };
+
+  return { 'fold-still': foldStill, chapters, 'contact-sheet': contactSheet, denoise };
 }
