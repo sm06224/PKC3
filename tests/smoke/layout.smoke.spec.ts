@@ -1136,7 +1136,10 @@ test('🔴 面の境界が 1 本になっている(2 重線を作らない)', as
  */
 test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを往復しても位置が残る', async ({ page }) => {
   const errors = collectPageErrors(page);
-  await page.setViewportSize({ width: 1440, height: 700 });
+  // ⚠ 高さ 800(以前は 700)── 選んだノートの書き出しのボタン 2 つ(#1038 A1)で選択のバーが 205px に伸び、
+  //    700 だと一覧の見えている高さ 345px が帯の 2 倍(410px)に満たず、貼り付かない(`bar-stick.ts` の設計どおり)。
+  //    貼り付く検査(⑥)の前提は「一覧が帯の 2 倍以上ある」ことなので、窓の側を合わせる。
+  await page.setViewportSize({ width: 1440, height: 800 });
   await gotoApp(page);
 
   // 一覧が溢れるだけ作る。
@@ -1154,6 +1157,25 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
   const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   const shape = await host.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
   expect(shape.sh, '一覧が溢れていない(観測の前提が崩れている)').toBeGreaterThan(shape.ch + 50);
+
+  // 🔴 最後のノートを作った直後は、左の列が「開いたノートへ付いていく」送り(最下端へ)をまだ続けている。
+  //    その途中で park すると、後から送りが勝って最下端へ引き戻され、前提が崩れる(間欠で落ちた)。
+  //    ⚠ 固定 sleep ではなく、scrollTop / scrollHeight が 4 フレーム続けて動かなくなるまで待つ。
+  await host.evaluate(
+    (el) =>
+      new Promise<void>((resolve) => {
+        let last = '';
+        let still = 0;
+        const tick = (): void => {
+          const now = `${el.scrollTop}/${el.scrollHeight}`;
+          still = now === last ? still + 1 : 0;
+          last = now;
+          if (still >= 4) resolve();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
 
   // 溢れの真ん中あたりへ置く(端だと「戻った」と「動いていない」が区別できない)
   await host.evaluate((el) => (el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2)));
