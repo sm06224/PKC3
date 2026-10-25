@@ -507,6 +507,7 @@ import {
   pickOrphanShadowInApp,
   pickAgentGrantInApp,
   pickAppGroupIconInApp,
+  promptInApp,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
 import { printNote } from '@adapter/platform/print-note';
@@ -3755,6 +3756,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       decode48k: (blob) => decodeToMono(blob, VOICE_RATE),
       voice: (job) => voiceClient.run(job),
       now: () => new Date(),
+      ask: (opts) => promptInApp(root, opts),
+      fixSpeakers: (lid, renames, at) => dispatcher.dispatch({ type: 'FIX_SPEAKERS', lid, renames, at }),
     }),
     parentOf: (lid) => {
       const st = dispatcher.getState();

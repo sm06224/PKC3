@@ -147,6 +147,12 @@ export function namedTurnsText(turns: readonly NamedTurn[]): string {
   return lines.join('\n');
 }
 
+/** 話者を直した回の知らせ。 */
+export function speakersFixNotice(renamed: number, transcriptLines: number): string {
+  const head = renamed > 0 ? `話者の名前を ${String(renamed)} 件直しました` : '話者の一覧は変わりませんでした';
+  return transcriptLines > 0 ? `${head}(話者つき文字起こしを ${String(transcriptLines)} 行で作り直しました)` : head;
+}
+
 export interface FixResult {
   readonly body: string;
   /** 話者の名前を替えた行の数(統合で消えた行は数えない)。 */
@@ -182,8 +188,16 @@ export function fixSpeakers(
     const m = ELAPSED_LINE_HEAD.exec(l.trimEnd());
     return !(m !== null && parseElapsed(m[1]!) !== null);
   });
-  const sectionLines = [all[sec.head]!, ...turnText.split('\n'), ...keep.filter((l) => l.trim() !== '')];
-  let next = [...all.slice(0, sec.head), ...sectionLines, ...(sec.end < all.length ? ['', ...all.slice(sec.end)] : [])];
+  // 節の終わりの空行は、数えて元のとおり戻す(次の節との間・末尾の改行を変えない)
+  let trailing = 0;
+  for (let j = sec.end - 1; j > sec.head && all[j]!.trim() === ''; j -= 1) trailing += 1;
+  const sectionLines = [
+    all[sec.head]!,
+    ...turnText.split('\n'),
+    ...keep.filter((l) => l.trim() !== ''),
+    ...Array.from({ length: trailing }, () => ''),
+  ];
+  let next = [...all.slice(0, sec.head), ...sectionLines, ...all.slice(sec.end)];
   let transcriptLines = 0;
   const text = speakerTranscript(fixed, lines);
   if (text !== null) {

@@ -23,6 +23,8 @@ import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/
 import { isScheduleDate, withFrontmatterDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
+import { fixSpeakers } from '../capture/speakers';
+import { transcriptLinesOf } from '../capture/contact-sheet-layout';
 import { replaceColorSpan } from './color-code';
 import {
   addPlace,
@@ -642,6 +644,18 @@ export type BodyRewrite =
     }
   | {
       /**
+       * 🔴 **話者を直す**(#952 B6)── 本文の「## 話者」の節の名前を付け替え(同じ名前に揃えれば 1 人にまとまる)、
+       * 「## 話者つき文字起こし」を作り直す。節の外は 1 文字も変えない。
+       *
+       * ⚠ `renames` は `[いまの名前, 新しい名前]` の並び(連鎖しない)。`at` は見出しの日時に使う時刻(epoch ms ──
+       *   pure な本層で時計を読まないため、呼び手が渡す)。「## 話者」の節が無い本文は `null` = 断る。
+       */
+      kind: 'speakers-fix';
+      renames: ReadonlyArray<readonly [string, string]>;
+      at: number;
+    }
+  | {
+      /**
        * 🔴 **本文の画像の大きさ・寄せを書く**(#1640 ③。🟣 Gemini 依頼 37 の答え「A」)── 画像の直後の
        * `{w=50% align=center}` だけを書き換える。画像の右クリックの「大きさ」「寄せ」が撃つ。
        *
@@ -1129,6 +1143,10 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'csv-shape') return rewriteCsvShape(body, rewrite);
   if (rewrite.kind === 'table-format') return rewriteTableFormat(body, rewrite);
   if (rewrite.kind === 'attachment-name') return rewriteAttachmentName(body, rewrite.typed);
+  if (rewrite.kind === 'speakers-fix') {
+    const r = fixSpeakers(body, rewrite.renames, transcriptLinesOf(body), new Date(rewrite.at));
+    return r === null ? null : r.body;
+  }
   if (rewrite.kind === 'image-attrs') {
     // 🔑 行ごとの改行コードを保つ(偶数番目が行、奇数番目が改行)
     const parts = body.split(/(\r\n|\n)/);
@@ -1847,6 +1865,7 @@ interface CsvShapeRefused {
  * @returns 理由がはっきりしている断りの字。分からなければ `null`(呼び側の今までの字のまま)
  */
 export function bodyRewriteRefusal(body: string, rewrite: BodyRewrite): string | null {
+  if (rewrite.kind === 'speakers-fix') return '本文に「## 話者」の一覧が見つからないため、話者を直せませんでした(開き直してください)';
   if (rewrite.kind !== 'csv-shape') return null;
   const r = csvShapeResult(body, rewrite);
   if (r === null || typeof r === 'string') return null;

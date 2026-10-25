@@ -43,7 +43,9 @@ export type ProcessOutput =
       readonly text: string;
       readonly summary: string;
     }
-  | { readonly kind: 'refused'; readonly text: string };
+  | { readonly kind: 'refused'; readonly text: string }
+  /** 道具が自分で書き込みまで済ませた(やめた回を含む)。⚠ 知らせは道具の側の書込が出す ── ここでは何も言わない。 */
+  | { readonly kind: 'done' };
 
 export interface ToolContext {
   readonly item: CaptureItem;
@@ -143,6 +145,7 @@ export function createCaptureProcessor(deps: CaptureProcessDeps): CaptureProcess
           fail(out.text);
           return;
         }
+        if (out.kind === 'done') return; // finally が進行中の字を消す
         if (out.kind === 'attach') {
           if (!canWriteBody(deps.dispatcher)) {
             fail(BUSY_BODY_TEXT);

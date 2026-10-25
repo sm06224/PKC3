@@ -6,7 +6,7 @@
  *   「男声 105Hz」「女声 200Hz(声道 1.17 倍)」「別の男声 140Hz(声道 1.05 倍)」。
  *   併合の距離 `MERGE_DISTANCE`(4.3)はこの 3 人の較正値:同じ話者どうし ≤ 3.7、別の話者どうし ≥ 4.8(男声どうし)/ ≥ 9(男女)。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   clusterSegments,
   decimate3,
@@ -24,6 +24,9 @@ import {
 } from '../../src/features/audio/diarize';
 import { runEngine, VOICE_RATE } from '../../src/features/audio/voice-lab';
 import { concat, realEngine, scaleFormants, synthSpeech, VOWELS } from '../helpers/rnnoise-engine';
+
+// 本物の RNNoise(wasm)を回す ── 全量を並列で回すと 5 秒の既定では足りない回がある
+vi.setConfig({ testTimeout: 60_000 });
 
 describe('声の塊(voicedRuns / splitLong)', () => {
   const vadOf = (spec: ReadonlyArray<readonly [number, number]>): Float32Array => {

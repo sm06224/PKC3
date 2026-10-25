@@ -78,6 +78,8 @@ function harness(opts: {
     voice: vi.fn(async () => ({ ok: false as const, reason: 'no-engine' as const })),
     decode16k: vi.fn(async () => pcmOf([...rep(0.3, 20), ...rep(0.001, 3), ...rep(0.3, 20)])),
     now: () => NOW,
+    ask: vi.fn(async () => null as string | null),
+    fixSpeakers: vi.fn(),
     ...opts.tools,
   };
   const deps = {
@@ -331,5 +333,59 @@ describe('声の大きさをそろえる', () => {
     expect(voice.mock.calls[0]![0]).toMatchObject({ op: 'level' });
     expect(h.deps.attach.mock.calls[0]![0].name).toBe('会議 (声の大きさをそろえた).webm');
     expect(h.notes.at(-1)).toContain('声の大きさをそろえた音を作りました');
+  });
+});
+
+describe('話者を直す', () => {
+  const BODY = '## 話者 2026-10-25 10:00\n0:00 話者A\n0:12 話者B\n';
+
+  function setup(typed: string | null, body: string | null = BODY) {
+    const ask = vi.fn(async (opts: { title: string; label: string; initial: string; okLabel: string }) => {
+      void opts;
+      return typed;
+    });
+    const fixSpeakers = vi.fn();
+    const h = harness({ tools: { ask, fixSpeakers } });
+    h.deps.readBody.mockResolvedValue(body);
+    return { h, ask, fixSpeakers };
+  }
+
+  it('🔴 いまの話者を見せて聞き、付け替えの依頼を撃つ(書くのは FIX_SPEAKERS の 1 本。ここでは書かない)', async () => {
+    const { h, ask, fixSpeakers } = setup('話者A=田中、話者B=鈴木');
+    await h.run('fix-speakers');
+    expect(ask.mock.calls[0]![0].label).toContain('いまの話者: 話者A、話者B');
+    expect(fixSpeakers).toHaveBeenCalledWith('a', [['話者A', '田中'], ['話者B', '鈴木']], NOW.getTime());
+    expect(h.appends).toEqual([]);
+    expect(h.dispatcher.getState().error).toBeNull();
+    expect(h.notes.at(-1), '進行中の字が残っている').toBe('');
+  });
+
+  it('空のまま決めると、名前は変えずに作り直しだけを頼む', async () => {
+    const { h, fixSpeakers } = setup('');
+    await h.run('fix-speakers');
+    expect(fixSpeakers).toHaveBeenCalledWith('a', [], NOW.getTime());
+  });
+
+  it('🔴 やめたら何も撃たず、エラーも出さない', async () => {
+    const { h, fixSpeakers } = setup(null);
+    await h.run('fix-speakers');
+    expect(fixSpeakers).not.toHaveBeenCalled();
+    expect(h.dispatcher.getState().error).toBeNull();
+  });
+
+  it('🔴 断る:話者の節が無い / 形が違う / いまの名前に当たらない ── 理由を出して撃たない', async () => {
+    const none = setup('話者A=田中', '説明だけ');
+    await none.h.run('fix-speakers');
+    expect(none.h.dispatcher.getState().error).toContain('先に「話者を分ける」を押してください');
+    expect(none.ask).not.toHaveBeenCalled();
+
+    const bad = setup('田中さんにする');
+    await bad.h.run('fix-speakers');
+    expect(bad.h.dispatcher.getState().error).toContain('「話者A=田中」の形で書いてください');
+
+    const unknown = setup('司会=田中');
+    await unknown.h.run('fix-speakers');
+    expect(unknown.h.dispatcher.getState().error).toContain('付け替える名前がノートの一覧にありません');
+    for (const x of [none, bad, unknown]) expect(x.fixSpeakers).not.toHaveBeenCalled();
   });
 });

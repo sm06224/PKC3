@@ -21,6 +21,8 @@ import {
   speakersHeading,
   speakersText,
   speakerName,
+  parseRenames,
+  readSpeakerTurns,
 } from '@features/capture/speakers';
 import type { VoiceJob, VoiceRefusal, VoiceResult } from '@adapter/platform/voice/voice-run';
 import type { ToolRunner } from './capture-process';
@@ -38,6 +40,10 @@ export interface CaptureToolDeps {
   /** 声の仕上げ(ワーカー)。⚠ `pcm` は譲る(transfer)。断る理由は値で返る。 */
   readonly voice: (job: VoiceJob) => Promise<VoiceResult>;
   readonly now: () => Date;
+  /** 1 行の字を聞く小窓(`promptInApp`)。やめたら `null`。 */
+  readonly ask: (opts: { title: string; label: string; initial: string; okLabel: string }) => Promise<string | null>;
+  /** 話者を直す依頼を撃つ(`FIX_SPEAKERS`)。書込・知らせは効果層が持つ。 */
+  readonly fixSpeakers: (lid: string, renames: ReadonlyArray<readonly [string, string]>, at: number) => void;
 }
 
 /** 声の仕上げが断る理由 → 画面の字。 */
@@ -232,5 +238,48 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
     return audioOutput(r, '声の大きさをそろえた音を作りました');
   };
 
-  return { 'fold-still': foldStill, chapters, 'contact-sheet': contactSheet, denoise, separate, speakers, balance };
+
+  /**
+   * 話者を直す(B6)。本文の「## 話者」の節にある名前を聞いて付け替え(同じ名前に揃えれば 1 人にまとまる)、
+   * 「## 話者つき文字起こし」を作り直す。書くのは `FIX_SPEAKERS` の 1 本(版に残る・元に戻せる)。
+   * 区間ごとの直しは、本文の「## 話者」の行を直接書き換えてから、このボタンを空のまま決めると反映される。
+   */
+  const fixSpeakersTool: ToolRunner = async ({ item, readBody }) => {
+    const body = await readBody();
+    const turns = body === null ? null : readSpeakerTurns(body);
+    if (turns === null) {
+      return { kind: 'refused', text: 'このノートの本文に「## 話者」の一覧が見つかりません。先に「話者を分ける」を押してください。' };
+    }
+    const names = [...new Set(turns.map((t) => t.name))];
+    const typed = await deps.ask({
+      title: '話者を直す',
+      label:
+        `いまの話者: ${names.join('、')}。名前を付け替えるには「${names[0]!}=田中、${names[1] ?? names[0]!}=鈴木」のように書きます` +
+        '(同じ名前にすると 1 人にまとまります)。空のまま決めると、名前は変えずに話者つき文字起こしだけ作り直します。',
+      initial: '',
+      okLabel: '直す',
+    });
+    if (typed === null) return { kind: 'done' };
+    const renames = parseRenames(typed);
+    if (typed !== '' && renames.length === 0) {
+      return { kind: 'refused', text: '「話者A=田中」の形で書いてください(複数は「、」で区切ります)。' };
+    }
+    const known = new Set(names);
+    if (renames.length > 0 && !renames.some(([from]) => known.has(from))) {
+      return { kind: 'refused', text: `付け替える名前がノートの一覧にありません(いまの話者: ${names.join('、')})。` };
+    }
+    deps.fixSpeakers(item.lid, renames, deps.now().getTime());
+    return { kind: 'done' };
+  };
+
+  return {
+    'fold-still': foldStill,
+    chapters,
+    'contact-sheet': contactSheet,
+    denoise,
+    separate,
+    speakers,
+    balance,
+    'fix-speakers': fixSpeakersTool,
+  };
 }

@@ -5,7 +5,7 @@
  * 本物の RNNoise(wasm)+ 偽の opus 符号化器(本物の意味論を真似る:1 秒ずつ受け、20ms の packet を返す。受けた `AudioData` は
  * 呼び側が `close()` するまで開いたまま)。出力の WebM は**実装のほどき(`demuxWebmOpus`)にかけ直して**往復を確かめる。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { encodeOpusWebm, ENCODE_RATE, type AudioApi, type AudioDataLike } from '../../src/adapter/platform/voice/audio-encode';
 import { VoiceRunner, type EngineHandle } from '../../src/adapter/platform/voice/voice-run';
 import { demuxWebmOpus, muxOpusWebm, opusHead, preSkipOf } from '../../src/features/audio/webm-opus';
@@ -63,6 +63,9 @@ function fakeAudio(over: { preSkip?: number | null; supported?: boolean; failAt?
   };
   return { api, log };
 }
+
+// 本物の RNNoise(wasm)を回す ── 全量を並列で回すと 5 秒の既定では足りない回がある
+vi.setConfig({ testTimeout: 60_000 });
 
 describe('opus の WebM へ(encodeOpusWebm)', () => {
   it('🔴 1 秒ずつ渡して、渡した AudioData は全部 close し、出力は demux し直せる(packet・pre-skip・長さが往復する)', async () => {

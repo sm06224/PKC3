@@ -6,7 +6,7 @@
  *  - 遅れの補正は「出力を入力と相互相関して、ずれが 0 に立つ」で見る(補正を外すと 960 に立つ ── 変異試験で確かめる)
  *  - 雑音の低減は「声が無い区間の RMS」で見る(対照:声の区間は残る)
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   boxSmooth,
   hasVoice,
@@ -38,6 +38,9 @@ function bestLag(x: Float32Array, y: Float32Array, from: number, to: number, max
   }
   return best;
 }
+
+// 本物の RNNoise(wasm)を回す ── 全量を並列で回すと 5 秒の既定では足りない回がある
+vi.setConfig({ testTimeout: 60_000 });
 
 describe('エンジンに通す(runEngine。本物の RNNoise)', () => {
   const voice = synthVoice(3);
