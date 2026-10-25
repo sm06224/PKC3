@@ -11,6 +11,7 @@ import { VoiceRunner, type EngineHandle } from '../../src/adapter/platform/voice
 import { demuxWebmOpus, muxOpusWebm, opusHead, preSkipOf } from '../../src/features/audio/webm-opus';
 import { VOICE_RATE } from '../../src/features/audio/voice-lab';
 import { concat, mix, realEngine, scaleFormants, synthSpeech, synthVoice, VOWELS, whiteNoise } from '../helpers/rnnoise-engine';
+import { readFileSync } from 'node:fs';
 import { peakOf, rmsOf } from '../../src/features/audio/voice-lab';
 
 /** 偽の AudioEncoder。入力 1 秒 → 50 個の 20ms packet(packet の中身は通し番号)。 */
@@ -177,7 +178,7 @@ describe('ワーカーの中身(VoiceRunner。本物の RNNoise)', () => {
   });
 });
 
-describe('声と伴奏を分ける(separate)', () => {
+describe('話し声とそれ以外に分ける(separate)', () => {
   const sec = VOICE_RATE;
   /** 伴奏の代わり:一定の和音(300Hz + 500Hz。RMS 約 0.1)。 */
   const bed = (n: number): Float32Array => {
@@ -289,6 +290,47 @@ describe('声の大きさをそろえる(level)', () => {
     expect(ratioOut).toBeGreaterThan(0.5);
     expect(rmsOf(out, farRange.from, farRange.to), '遠い人が持ち上がっていない').toBeGreaterThan(rmsOf(pcm, farRange.from, farRange.to) * 3);
     expect(peakOf(out), '割れている').toBeLessThanOrEqual(1);
+  });
+
+  it('🔴 長く話し続ける 2 人(それぞれ 14 秒 = 6 秒の塊 3 つ)でも、塊を全部見て、どの塊も大きさが寄る', async () => {
+    const audio = fakeAudio();
+    const far = synthSpeech(14, 105, VOWELS, sec, 200, 1).map((v) => v * 0.3);
+    const near = synthSpeech(14, 200, scaleFormants(VOWELS, 1.17), sec, 230, 2);
+    const gap = new Float32Array(Math.round(1.5 * sec));
+    const pcm = concat(far, gap, near, gap, synthSpeech(7, 105, VOWELS, sec, 200, 3).map((v) => v * 0.3));
+    const r = await new VoiceRunner({ createEngine: engineFactory, audioApi: audio.api }).run({ op: 'level', pcm: Float32Array.from(pcm) });
+    expect(r.ok).toBe(true);
+    const out = Float32Array.from(audio.log.copies.flatMap((c) => Array.from(c)));
+    // 声のある 2 秒窓(声の端 0.7 秒は避ける)の大きさを全部集める
+    const windows: Array<[number, number]> = [];
+    for (const [from, to] of [[0.7, 13.3], [15.5 + 0.7, 15.5 + 13.3], [31 + 0.7, 31 + 6.3]] as const) {
+      for (let t = from; t + 2 <= to; t += 2) windows.push([Math.round(t * sec), Math.round((t + 2) * sec)]);
+    }
+    expect(windows.length, '前提: 窓が足りない').toBeGreaterThanOrEqual(10);
+    const rmsIn = windows.map(([a, b]) => rmsOf(pcm, a, b));
+    const rmsOut = windows.map(([a, b]) => rmsOf(out, a, b));
+    expect(Math.max(...rmsIn) / Math.min(...rmsIn), '前提: 入力は 3 倍以上ばらつく').toBeGreaterThan(3);
+    expect(Math.max(...rmsOut) / Math.min(...rmsOut), '長い塊の後ろの方が寄っていない').toBeLessThan(2.2);
+  });
+
+  it('🔴 level はクラスタリング(話者の特徴・距離)を走らせない ── 声の塊の切り出しだけを使う(source 読み)', () => {
+    const src = readFileSync('src/adapter/platform/voice/voice-run.ts', 'utf8');
+    const from = src.indexOf("job.op === 'level'");
+    const to = src.indexOf('// separate:', from);
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeGreaterThan(from);
+    const branch = src.slice(from, to);
+    expect(branch).toContain('splitLong(voicedRuns(vad))');
+    expect(branch).not.toMatch(/diarize\(|clusterSegments|featureOf/);
+  });
+
+  it('🔴 使い終わった PCM を手放す:依頼の pcm は受け取った瞬間に空になる(所有を取る)', async () => {
+    const audio = fakeAudio();
+    const job = { op: 'level' as const, pcm: Float32Array.from(concat(synthSpeech(3, 105, VOWELS, sec, 200, 1), new Float32Array(sec))) };
+    const keep = job.pcm;
+    await new VoiceRunner({ createEngine: engineFactory, audioApi: audio.api }).run(job);
+    expect(job.pcm.length, '依頼が PCM を持ち続けている').toBe(0);
+    expect(keep.length, '前提: 渡した配列そのものは壊していない').toBeGreaterThan(0);
   });
 
   it('声が無い音は理由を返す(符号化しない)', async () => {

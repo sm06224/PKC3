@@ -318,35 +318,105 @@ export interface ClusterInput {
   readonly ms: number;
 }
 
+/** `clusterSegments` の観測(test が計算量を数える)。 */
+export interface ClusterStats {
+  /** 距離を計算した回数。 */
+  distances: number;
+}
+
 /**
  * 塊の特徴を話者にまとめる。戻り値は塊ごとの話者番号(**出てきた順**に 0, 1, …)。
  * 併合は距離 `mergeDistance` 未満の間。話者は最大 `maxSpeakers` 人。合計が `minSpeakerMs` に満たない話者は近い話者へ吸収する。
+ *
+ * 🔴 **計算量は O(n²)**(着地前レビュー ⚠4)。毎回すべての組の距離を測り直すと O(n³) で、n=1000 で約 4 秒・n=3000 で約 2 分かかった。
+ * 各クラスタが**いちばん近い相手(nn)とその距離**を覚え、併合のたびに更新が要る所だけを測り直す:
+ *  - 併合で消えたクラスタが nn だった者だけ、全体を測り直す(O(n))
+ *  - それ以外は、新しいクラスタとの距離 1 つだけを比べる
+ * 最初の表づくりだけが n²/2 回で、あとは併合ごとに O(n) ── 実測は `tests/features/diarize.test.ts`。
  */
 export function clusterSegments(
   inputs: readonly ClusterInput[],
-  options: { readonly mergeDistance?: number; readonly maxSpeakers?: number; readonly minSpeakerMs?: number } = {},
+  options: {
+    readonly mergeDistance?: number;
+    readonly maxSpeakers?: number;
+    readonly minSpeakerMs?: number;
+    readonly stats?: ClusterStats;
+  } = {},
 ): number[] {
   const tau = options.mergeDistance ?? MERGE_DISTANCE;
   const maxSp = options.maxSpeakers ?? MAX_SPEAKERS;
   const minMs = options.minSpeakerMs ?? MIN_SPEAKER_MS;
-  let clusters: Cluster[] = inputs.map((p, i) => ({ members: [i], cep: p.feature.cep, lnF0: p.feature.lnF0, weight: p.ms }));
-  const closest = (): { i: number; j: number; d: number } => {
-    let best = { i: 0, j: 1, d: Number.POSITIVE_INFINITY };
-    for (let i = 0; i < clusters.length; i += 1)
-      for (let j = i + 1; j < clusters.length; j += 1) {
-        const d = distance(clusters[i]!, clusters[j]!);
-        if (d < best.d) best = { i, j, d };
-      }
-    return best;
+  const stats = options.stats;
+  const dist = (a: Cluster, b: Cluster): number => {
+    if (stats !== undefined) stats.distances += 1;
+    return distance(a, b);
   };
-  while (clusters.length > 1) {
-    const c = closest();
-    if (c.d >= tau && clusters.length <= maxSp) break;
-    const merged = mergeClusters(clusters[c.i]!, clusters[c.j]!);
-    clusters = clusters.filter((_, k) => k !== c.i && k !== c.j);
-    clusters.push(merged);
+  const n = inputs.length;
+  const slots: Array<Cluster | null> = inputs.map((p, i) => ({ members: [i], cep: p.feature.cep, lnF0: p.feature.lnF0, weight: p.ms }));
+  const nnIdx = new Int32Array(n).fill(-1);
+  const nnDist = new Float64Array(n).fill(Number.POSITIVE_INFINITY);
+  let alive = n;
+
+  /** `i` のいちばん近い相手を全体から測り直す。 */
+  const recompute = (i: number): void => {
+    nnIdx[i] = -1;
+    nnDist[i] = Number.POSITIVE_INFINITY;
+    const ci = slots[i]!;
+    for (let k = 0; k < n; k += 1) {
+      const ck = slots[k];
+      if (k === i || ck === null || ck === undefined) continue;
+      const d = dist(ci, ck);
+      if (d < nnDist[i]!) {
+        nnDist[i] = d;
+        nnIdx[i] = k;
+      }
+    }
+  };
+
+  // 最初の表:組ごとに 1 回だけ測り、両方の「いちばん近い相手」を更新する
+  for (let i = 0; i < n; i += 1) {
+    for (let j = i + 1; j < n; j += 1) {
+      const d = dist(slots[i]!, slots[j]!);
+      if (d < nnDist[i]!) {
+        nnDist[i] = d;
+        nnIdx[i] = j;
+      }
+      if (d < nnDist[j]!) {
+        nnDist[j] = d;
+        nnIdx[j] = i;
+      }
+    }
   }
-  // 小さな話者を近い話者へ吸収する(大きな話者が 1 つは残る)
+
+  while (alive > 1) {
+    // いま最も近い組(nn の表を 1 周するだけ)
+    let bi = -1;
+    for (let i = 0; i < n; i += 1) if (slots[i] !== null && nnIdx[i]! >= 0 && (bi < 0 || nnDist[i]! < nnDist[bi]!)) bi = i;
+    if (bi < 0) break;
+    const bj = nnIdx[bi]!;
+    if (nnDist[bi]! >= tau && alive <= maxSp) break;
+    slots[bi] = mergeClusters(slots[bi]!, slots[bj]!);
+    slots[bj] = null;
+    alive -= 1;
+    if (alive <= 1) break;
+    recompute(bi);
+    for (let k = 0; k < n; k += 1) {
+      const ck = slots[k];
+      if (k === bi || ck === null || ck === undefined) continue;
+      if (nnIdx[k] === bi || nnIdx[k] === bj) {
+        recompute(k); // いちばん近かった相手が動いた(併合で消えた / 重心が動いた)
+      } else {
+        const d = dist(ck, slots[bi]!);
+        if (d < nnDist[k]!) {
+          nnDist[k] = d;
+          nnIdx[k] = bi;
+        }
+      }
+    }
+  }
+
+  // ここから先は話者の数(最大 maxSpeakers)だけが相手 ── 小さな話者を近い話者へ吸収する(大きな話者が 1 つは残る)
+  let clusters: Cluster[] = slots.filter((c): c is Cluster => c !== null);
   for (;;) {
     if (clusters.length <= 1) break;
     const small = clusters.findIndex((c) => c.weight < minMs);
@@ -357,7 +427,7 @@ export function clusterSegments(
     let nd = Number.POSITIVE_INFINITY;
     for (let k = 0; k < clusters.length; k += 1) {
       if (k === small || clusters[k]!.weight < minMs) continue;
-      const d = distance(clusters[small]!, clusters[k]!);
+      const d = dist(clusters[small]!, clusters[k]!);
       if (d < nd) {
         nd = d;
         nearest = k;
@@ -368,7 +438,7 @@ export function clusterSegments(
     clusters.push(merged);
   }
   // 出てきた順に番号を振る
-  const labelOf = new Array<number>(inputs.length).fill(-1);
+  const labelOf = new Array<number>(n).fill(-1);
   for (let c = 0; c < clusters.length; c += 1) for (const m of clusters[c]!.members) labelOf[m] = c;
   const order = new Map<number, number>();
   return labelOf.map((l) => {

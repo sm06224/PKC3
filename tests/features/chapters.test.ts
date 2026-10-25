@@ -14,6 +14,7 @@ import {
   type FrameInfo,
 } from '../../src/features/capture/chapters';
 import { scenesVideo } from '../../src/adapter/platform/video/video-codec';
+import { readFileSync } from 'node:fs';
 import { buildVideoWebm } from '../helpers/webm-video-fixture';
 
 const f = (ms: number, bytes: number, key = false): FrameInfo => ({ ms, bytes, key });
@@ -42,6 +43,30 @@ describe('場面の変わり目(sceneStartsFromFrames)', () => {
     // 4 秒・8 秒はどれも 2 秒以上止まったあとの変化だが、0 から 10 秒未満なので採らない。30 秒は採る
     expect(sceneStartsFromFrames(frames)).toEqual([0, 30_000]);
     expect(sceneStartsFromFrames(frames, { minGapMs: 1000 })).toEqual([0, 4000, 8000, 30_000]);
+  });
+
+  it('🔴 周期的なキーフレーム(静止していても一定の間隔で出る)は、静止を中断しない ── 大きさが同じなら変わり目にもしない', () => {
+    // 1.5 秒ごとにほぼ同じ大きさ(6000 バイト前後)のキーフレーム、差分は小さい。10 秒に大きな差分
+    const frames: FrameInfo[] = [];
+    for (let t = 0; t < 20_000; t += 100) {
+      const key = t % 1500 === 0;
+      frames.push(f(t, key ? 6000 + (t % 3) * 50 : t === 10_000 ? 5000 : 30, key));
+    }
+    expect(sceneStartsFromFrames(frames), '周期的なキーフレームで静止が切れて場面が見つからない / キーフレームを変わり目にした').toEqual([0, 10_000]);
+  });
+
+  it('🔴 大きさが 1.5 倍以上変わったキーフレーム(絵の入れ替わり)は変わり目。小さいままのキーフレームは変わり目にしない', () => {
+    const frames: FrameInfo[] = [f(0, 800, true)];
+    for (let t = 100; t < 20_000; t += 100) frames.push(f(t, t === 4500 ? 5000 : t === 9000 ? 700 : 30, t === 4500 || t === 9000));
+    // 4.5 秒: 800 → 5000(6 倍)で変わり目 / 9 秒: 5000 → 700(小さくなった)は changeBytes 未満なので変わり目にしない
+    expect(sceneStartsFromFrames(frames, { minGapMs: 1000 })).toEqual([0, 4500]);
+  });
+
+  it('🔴 実際の libvpx の出力(静止 11 秒 → 動く 1 秒 → 静止 3 秒。キーフレーム 1.5 秒ごと)で、動き出しが場面の頭になる', async () => {
+    const bytes = readFileSync('tests/fixtures/vp8/screen-still-motion-still.webm');
+    const r = await scenesVideo({ blob: new Blob([bytes]) });
+    expect(r).toMatchObject({ ok: true });
+    if (r.ok) expect(r.startsMs).toEqual([0, 11_000]);
   });
 
   it('映像が空(フレームが 0 枚)でも先頭の 0 だけを返す', () => {

@@ -37,8 +37,8 @@ export interface StillRun {
 }
 
 /**
- * 静止区間を見つける。映像のブロックを時刻順に見て、**小さな差分フレームが続く区間**を返す。
- * キーフレームは落とさない(区間を区切る)。先頭の 1 枚は必ず残す。
+ * 静止区間を見つける。映像のブロックを時刻順に見て、**小さな差分フレームが続く区間**のうち、**次がキーフレームか動画の終わり**の区間だけを返す
+ * (参照の連鎖が切れて、残した絵が崩れない場合だけ)。キーフレームは落とさない(区間を区切る)。先頭の 1 枚は必ず残す。
  */
 export function findStillRuns(scan: VideoScan, options: StillOptions = {}): StillRun[] {
   const maxBytes = options.maxBytes ?? STILL_DEFAULTS.maxBytes;
@@ -55,10 +55,20 @@ export function findStillRuns(scan: VideoScan, options: StillOptions = {}): Stil
     }
     let j = i;
     while (j < video.length && small(video[j]!)) j += 1;
+    /**
+     * 🔴 **落としてよいのは、次の 1 枚がキーフレームのとき、または動画の終わりまで続くときだけ**(着地前レビュー ⚠2)。
+     * VP8 の差分フレームは前の絵を参照して積み上がる ── 途中で落とすと、**残した次の差分フレームが違う絵を土台に復号され**、
+     * 次のキーフレームまで絵が崩れる。次がキーフレームなら参照の連鎖がそこで切れ、終わりまで落とせば参照する者がいない。
+     * 🔑 この条件のとき、区間の中に golden / altref を更新するフレームがあっても**影響しない**(区間は 1 枚残らず落ちる)。
+     *   実測(libvpx のリアルタイム符号化): 静止した画面でも 8 枚ほどごとに golden を更新する小さなフレームが出る ──
+     *   「更新するフレームは落とさない」とすると、静止区間がほとんどまとまらない。
+     */
+    const next = j < video.length ? video[j]! : null;
+    const closes = next === null || next.key;
     const blocks = video.slice(i, j);
     const fromMs = video[i - 1]!.ms;
-    const toMs = j < video.length ? video[j]!.ms : scan.sourceEndMs;
-    if (blocks.length >= minFrames && toMs - fromMs >= minMs) runs.push({ fromMs, toMs, blocks });
+    const toMs = next !== null ? next.ms : scan.sourceEndMs;
+    if (closes && blocks.length >= minFrames && toMs - fromMs >= minMs) runs.push({ fromMs, toMs, blocks });
     i = j;
   }
   return runs;

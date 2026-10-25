@@ -163,6 +163,7 @@ export async function contactSheetVideo(
       const { idx, keyIdx } = targets[i]!;
       const target = video[idx]!;
       want = { us: target.ms * 1000, cell: i };
+      const drawnBefore = drawn;
       const feed = async (): Promise<void> => {
         for (let k = keyIdx; k <= idx; k += 1) {
           const b: VideoBlock = video[k]!;
@@ -174,6 +175,12 @@ export async function contactSheetVideo(
       };
       await withStall(feed());
       if (error !== null) throw error instanceof Error ? error : new Error(String(error));
+      /**
+       * 🔴 **場面の絵が 1 枚でも取れなかったら、シート全体を失敗にする**(着地前レビュー・変異試験)。
+       * 復号器が何も出さずに終わる(対応外の形・壊れた途中)と、その欄は**灰色のまま**になる ── 灰色の欄を含んだ物を
+       * 「コンタクトシートを作りました」と成功にしない(欠けた場面があることに user が気づけない)。部分的な物は作らない。
+       */
+      if (drawn === drawnBefore) throw new Error(`場面 ${String(i + 1)} の絵が取れなかった`);
       // 欄:時刻 + その場面の文字起こし
       sheet.text(elapsedText(starts[i]!), cell.captionX, cell.captionY, INK, SHEET.fontPx);
       const txt = sceneText(starts, i, job.lines);
@@ -191,7 +198,6 @@ export async function contactSheetVideo(
       /* 閉じられないなら諦める */
     }
   }
-  if (drawn === 0) return { ok: false, reason: 'decode-failed' };
   const png = await sheet.toPng();
   const withText = starts.filter((_, i) => sceneText(starts, i, job.lines) !== '').length;
   return { ok: true, blob: png, scenes: starts.length, withText };

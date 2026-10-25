@@ -25,6 +25,7 @@ import { readAttachmentMeta } from '../flavor/attachment-flavor';
 import { CAPTURE_LABEL } from '../asset/capture-text';
 import { ELAPSED_LINE_HEAD, parseElapsed } from '../elapsed-text';
 import { transcriptTimesMs } from '../audio/waveform';
+import { isSpeakersHeading } from './speakers';
 
 /** 一覧に並べる 1 件。⚠ **原値を持つ**(丸めるのは描画器の仕事 ── §7)。 */
 export interface CaptureItem {
@@ -94,7 +95,7 @@ export function captureItemsFrom(sources: readonly CaptureSource[]): CaptureItem
       assetKey: meta.assetKey,
       kind,
       transcriptMs: transcriptTimesMs(s.body, ELAPSED_LINE_HEAD, parseElapsed),
-      hasSpeakers: /^## 話者(?:\s|$)/m.test(s.body),
+      hasSpeakers: s.body.split('\n').some(isSpeakersHeading),
     });
   }
   return out;

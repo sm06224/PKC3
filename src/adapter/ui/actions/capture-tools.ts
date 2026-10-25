@@ -14,7 +14,9 @@ import { canProcess, type ProcessTool } from '@features/capture/capture-process'
 import { canTrimCapture } from '@features/capture/capture-trim-gate';
 import { chaptersHeading, chaptersText, silenceChapterStarts } from '@features/capture/chapters';
 import { ASR_SAMPLE_RATE } from '@features/asr/asr-parts';
-import { VOICE_MAX_MS, VOICE_RATE } from '@features/audio/voice-lab';
+import { VOICE_FALLBACK_BYTES, VOICE_MAX_MS, VOICE_RATE } from '@features/audio/voice-lab';
+import { webmDurationMs } from '@features/audio/webm-duration';
+import type { CaptureItem } from '@features/capture/capture-item';
 import {
   speakerTranscript,
   speakerTranscriptHeading,
@@ -56,17 +58,47 @@ const VOICE_REFUSAL: Readonly<Record<VoiceRefusal, string>> = {
   'no-engine': '声の仕上げのライブラリを読み込めませんでした。',
 };
 
-/** 声の仕上げの前処理:48kHz の PCM にして、長すぎる録音は断る。成功すれば PCM、失敗すれば断り文。 */
+/**
+ * 🔴 **復号の前に、長すぎる録音を断る**(着地前レビュー ⚠3)。復号してから断ると、断る前にメモリを使い切る。
+ * 長さは webm の先頭の `Duration` → 動画なら映像の走査(窓で読むだけ・復号しない)→ 音なら大きさの目安、の順に引く。
+ * 引けなければ `null`(動画で長さが分からない形は、復号後の検査に任せる)。
+ */
+async function probeTooLong(deps: CaptureToolDeps, item: CaptureItem, blob: Blob): Promise<string | null> {
+  let durationMs: number | null;
+  try {
+    durationMs = webmDurationMs(new Uint8Array(await blob.slice(0, 262_144).arrayBuffer()));
+  } catch {
+    durationMs = null;
+  }
+  if (durationMs === null && item.kind === 'video' && canTrimCapture(item)) {
+    try {
+      const r = await deps.scenes(blob);
+      if (r.ok) durationMs = r.sourceEndMs;
+    } catch {
+      durationMs = null;
+    }
+  }
+  const tooLong = durationMs !== null ? durationMs > VOICE_MAX_MS : item.kind === 'audio' && blob.size > VOICE_FALLBACK_BYTES;
+  if (!tooLong) return null;
+  const length = durationMs !== null ? `(${elapsedText(durationMs)} あります)` : '';
+  return `長すぎる録音は仕上げられません${length}。30 分までです。先に「この範囲で切り出す」で分けてください。`;
+}
+
+/** 声の仕上げの前処理:長さを見て、48kHz の PCM にする。成功すれば PCM、失敗すれば断り文。 */
 async function decodeForVoice(
   deps: CaptureToolDeps,
+  item: CaptureItem,
   blob: Blob,
 ): Promise<{ readonly pcm: Float32Array } | { readonly refused: string }> {
+  const tooLong = await probeTooLong(deps, item, blob);
+  if (tooLong !== null) return { refused: tooLong };
   let pcm: Float32Array;
   try {
     pcm = await deps.decode48k(blob);
   } catch {
     return { refused: 'この音を読み取れませんでした(このブラウザが対応していない形かもしれません)。' };
   }
+  // 長さが分からなかった形の最後の砦(復号できた分の長さで断る)
   if (pcm.length > VOICE_MAX_MS * VOICE_RATE * 1e-3) {
     return { refused: '長すぎる録音は仕上げられません(30 分まで)。先に「この範囲で切り出す」で分けてください。' };
   }
@@ -171,8 +203,8 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
    * 雑音を減らす(B1)。元は残し、結果を新しい音の添付にする。
    * 手法は RNNoise(48kHz・小さな再帰型 NN。モデルは wasm の中)。重い所はワーカー。
    */
-  const denoise: ToolRunner = async ({ blob, progress }) => {
-    const d = await decodeForVoice(deps, blob);
+  const denoise: ToolRunner = async ({ item, blob, progress }) => {
+    const d = await decodeForVoice(deps, item, blob);
     if ('refused' in d) return { kind: 'refused', text: d.refused };
     progress('雑音を減らしています(ワーカーで処理)…');
     const r = await deps.voice({ op: 'denoise', pcm: d.pcm });
@@ -183,11 +215,11 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
 
 
   /**
-   * 声と伴奏を分ける(#674・#949・#683②)。元は残し、「話し声」と「声以外」の 2 つの新しい音にする。
+   * 話し声とそれ以外に分ける(#674・#949・#683②)。元は残し、「話し声」と「声以外」の 2 つの新しい音にする。
    * 手法は RNNoise の声の推定(声以外 = 元 − 声)── 話し声と背景の音楽・環境音を分ける用途向け。歌声と楽器の分離ではない。
    */
-  const separate: ToolRunner = async ({ blob, progress }) => {
-    const d = await decodeForVoice(deps, blob);
+  const separate: ToolRunner = async ({ item, blob, progress }) => {
+    const d = await decodeForVoice(deps, item, blob);
     if ('refused' in d) return { kind: 'refused', text: d.refused };
     progress('声とそれ以外を分けています(ワーカーで処理)…');
     const r = await deps.voice({ op: 'separate', pcm: d.pcm });
@@ -202,8 +234,8 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
    * そのノートに時刻つきの文字起こしがあれば、話者を添えた「## 話者つき文字起こし」の節も足す。
    * ⚠ 手法は素朴な特徴(MFCC 平均 + 基本周波数)のクラスタリング ── 似た声は 1 人になりうる。あとから「話者を直す」で直せる。
    */
-  const speakers: ToolRunner = async ({ blob, progress, readBody }) => {
-    const d = await decodeForVoice(deps, blob);
+  const speakers: ToolRunner = async ({ item, blob, progress, readBody }) => {
+    const d = await decodeForVoice(deps, item, blob);
     if ('refused' in d) return { kind: 'refused', text: d.refused };
     progress('話者を分けています(ワーカーで処理)…');
     const r = await deps.voice({ op: 'diarize', pcm: d.pcm });
@@ -228,8 +260,8 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
    * 声の大きさをそろえる(B5)。雑音を引いたうえで、声の塊ごとに大きさを目標へ寄せる(遠い人は持ち上げ、近い人は下げる)。
    * 元は残し、結果を新しい音の添付にする。
    */
-  const balance: ToolRunner = async ({ blob, progress }) => {
-    const d = await decodeForVoice(deps, blob);
+  const balance: ToolRunner = async ({ item, blob, progress }) => {
+    const d = await decodeForVoice(deps, item, blob);
     if ('refused' in d) return { kind: 'refused', text: d.refused };
     progress('声の大きさをそろえています(ワーカーで処理)…');
     const r = await deps.voice({ op: 'level', pcm: d.pcm });

@@ -10,15 +10,28 @@
  * 1 回の依頼ごとに `DenoiseState` を作って、終わったらその場で `destroy()` する(状態を持ち越さない)。
  * ⚠ PCM は **transfer で受ける**(ゼロコピー)。結果の bytes も transfer で返す。
  */
-import { hasVoice, levelSegments, residualOf, runEngine, VOICE_RATE, type FrameEngine, type Span } from '@features/audio/voice-lab';
-import { diarize, type SpeakerTurn } from '@features/audio/diarize';
+import {
+  hasVoice,
+  levelSegments,
+  residualOf,
+  runEngine,
+  VOICE_FRAME,
+  VOICE_RATE,
+  type FrameEngine,
+  type Span,
+} from '@features/audio/voice-lab';
+import { diarize, splitLong, voicedRuns, type SpeakerTurn } from '@features/audio/diarize';
 import { encodeOpusWebm, nativeAudioApi, type AudioApi } from './audio-encode';
 
+/**
+ * 依頼。⚠ `pcm` は **読み取り専用にしない** ── `VoiceRunner.run` は受け取った瞬間にこの参照を空へ差し替えて所有を取り、
+ * 使い終わった PCM を**依頼の終わりを待たずに手放す**(30 分の PCM は約 330MB。元・雑音を引いた物・声以外の 3 本を同時に持たない)。
+ */
 export type VoiceJob =
-  | { readonly op: 'denoise'; readonly pcm: Float32Array }
-  | { readonly op: 'separate'; readonly pcm: Float32Array }
-  | { readonly op: 'diarize'; readonly pcm: Float32Array }
-  | { readonly op: 'level'; readonly pcm: Float32Array };
+  | { op: 'denoise'; pcm: Float32Array }
+  | { op: 'separate'; pcm: Float32Array }
+  | { op: 'diarize'; pcm: Float32Array }
+  | { op: 'level'; pcm: Float32Array };
 
 export interface VoiceFile {
   /** 名前に入れる語(`話し声` など)。 */
@@ -61,6 +74,8 @@ const peakAndRms = (x: Float32Array): number => {
   return Math.sqrt(s / Math.max(1, x.length));
 };
 
+const EMPTY = new Float32Array(0);
+
 export class VoiceRunner {
   private readonly deps: VoiceDeps;
 
@@ -69,9 +84,12 @@ export class VoiceRunner {
   }
 
   async run(job: VoiceJob): Promise<VoiceResult> {
-    const { pcm } = job;
+    // 🔴 所有を取る:依頼(`job`)が PCM を持ち続けると、使い終わったあとも解放されない
+    let pcm: Float32Array | null = job.pcm;
+    job.pcm = EMPTY;
     if (pcm.length === 0) return { ok: false, reason: 'empty' };
     if (peakAndRms(pcm) < SILENT_RMS) return { ok: false, reason: 'silent' };
+    const lengthSamples = pcm.length;
     let engine: EngineHandle;
     try {
       engine = await this.deps.createEngine();
@@ -79,10 +97,18 @@ export class VoiceRunner {
       return { ok: false, reason: 'no-engine' };
     }
     try {
-      const { clean, vad } = runEngine(pcm, engine);
+      const run = runEngine(pcm, engine);
+      let clean: Float32Array | null = run.clean;
+      const vad = run.vad;
       const api = this.deps.audioApi === undefined ? nativeAudioApi() : this.deps.audioApi;
-      if (job.op === 'denoise') return await this.encodeFiles(api, [{ tag: '雑音を減らした', pcm: clean }]);
+      if (job.op === 'denoise') {
+        pcm = null; // 元の PCM はもう要らない(雑音を引いた物だけを符号化する)
+        const parts = [{ tag: '雑音を減らした', pcm: clean as Float32Array | null }];
+        clean = null;
+        return await this.encodeFiles(api, parts);
+      }
       if (job.op === 'diarize') {
+        pcm = null;
         const d = diarize(clean, vad);
         if (d.turns.length === 0) return { ok: false, reason: 'no-voice' };
         return {
@@ -90,35 +116,50 @@ export class VoiceRunner {
           kind: 'turns',
           turns: d.turns,
           speakers: d.speakers,
-          durationMs: Math.round((pcm.length * 1e3) / VOICE_RATE),
+          durationMs: Math.round((lengthSamples * 1e3) / VOICE_RATE),
         };
       }
       if (job.op === 'level') {
-        // 雑音を引いた声を、声の塊(6 秒以内)ごとに目標の大きさへ寄せる。遠い人は持ち上がり、近い人は下がる
-        const d = diarize(clean, vad);
-        if (d.segments.length === 0) return { ok: false, reason: 'no-voice' };
-        const spans: Span[] = d.segments.map((s) => ({ start: s.start, end: s.end }));
-        return await this.encodeFiles(api, [{ tag: '声の大きさをそろえた', pcm: levelSegments(clean, spans, VOICE_RATE) }]);
+        pcm = null;
+        /**
+         * 雑音を引いた声を、声の塊(6 秒以内)ごとに目標の大きさへ寄せる。遠い人は持ち上がり、近い人は下がる。
+         * 🔴 **塊の切り出しだけを使う**(`voicedRuns` + `splitLong`)── 話者のクラスタリングは走らせない(特徴量の計算も
+         *   距離の計算も要らない。大きさを寄せるのに「誰か」は要らない)。
+         */
+        const runs = splitLong(voicedRuns(vad));
+        if (runs.length === 0) return { ok: false, reason: 'no-voice' };
+        const source = clean;
+        const spans: Span[] = runs.map((r) => ({ start: r.start * VOICE_FRAME, end: Math.min(source.length, r.end * VOICE_FRAME) }));
+        const leveled = levelSegments(source, spans, VOICE_RATE);
+        clean = null; // 倍率をかけた物ができたので、雑音を引いた物は手放す
+        return await this.encodeFiles(api, [{ tag: '声の大きさをそろえた', pcm: leveled as Float32Array | null }]);
       }
       // separate:声 = 雑音(声以外)を引いたもの / 声以外 = 元から声を引いた残り(伴奏・環境音)
       if (!hasVoice(vad)) return { ok: false, reason: 'no-voice' };
       const rest = residualOf(pcm, clean);
-      return await this.encodeFiles(api, [
-        { tag: '話し声', pcm: clean },
-        { tag: '声以外', pcm: rest },
-      ]);
+      pcm = null; // 残りができたので、元の PCM は手放す(声・声以外の 2 本だけが残る)
+      const parts = [
+        { tag: '話し声', pcm: clean as Float32Array | null },
+        { tag: '声以外', pcm: rest as Float32Array | null },
+      ];
+      clean = null;
+      return await this.encodeFiles(api, parts);
     } finally {
       engine.destroy();
     }
   }
 
+  /** 符号化して返す。⚠ 1 本符号化し終えるたびに、その PCM を手放す(`parts` の参照を空にする)。 */
   private async encodeFiles(
     api: AudioApi | null,
-    parts: readonly { tag: string; pcm: Float32Array }[],
+    parts: Array<{ tag: string; pcm: Float32Array | null }>,
   ): Promise<VoiceResult> {
     const files: VoiceFile[] = [];
     for (const p of parts) {
-      const enc = await encodeOpusWebm(p.pcm, api);
+      const source = p.pcm;
+      if (source === null) return { ok: false, reason: 'encode-failed' };
+      const enc = await encodeOpusWebm(source, api);
+      p.pcm = null;
       if (!enc.ok) return { ok: false, reason: enc.reason };
       // ⚠ `bytes` は自前で組んだ `Uint8Array` なので、buffer 全体がそのまま使える(transfer できる)
       files.push({ tag: p.tag, bytes: enc.bytes.buffer as ArrayBuffer, durationMs: enc.durationMs });

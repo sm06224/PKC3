@@ -1,5 +1,5 @@
 /**
- * 🔴 **声の仕上げの計算**(#952 B1 ノイズ低減 / #674 声と伴奏の分離 / B5 声の大きさをそろえる)── pure。
+ * 🔴 **声の仕上げの計算**(#952 B1 ノイズ低減 / #674 話し声とそれ以外の分離 / B5 声の大きさをそろえる)── pure。
  *
  * 土台は RNNoise(Xiph。BSD-3-Clause。`@shiguredo/rnnoise-wasm` の wasm ビルド、版は `package.json`)。
  * 48kHz・mono・480 サンプル(10ms)の枠を 1 枚ずつ受け、**雑音を引いた枠**と**声らしさ(0〜1)**を返す小さな再帰型 NN で、
@@ -18,8 +18,18 @@ export const VOICE_RATE = 48_000;
 export const VOICE_FRAME = 480;
 /** RNNoise の出力が入力より遅れる標本数(実測 960 = 20ms)。 */
 export const ENGINE_DELAY = 960;
-/** 仕上げられる録音の上限(ミリ秒)。⚠ 復号した PCM を丸ごと持つので、メモリで決まる(48kHz mono の float で 30 分 = 約 330MB)。 */
+/**
+ * 仕上げられる録音の上限(ミリ秒)。⚠ 復号した PCM を丸ごと持つので、メモリで決まる。
+ * 48kHz mono の float は 30 分で約 330MB。**同時に持つのは 約 3 倍(約 1GB)**:
+ *  - メイン側の復号:ブラウザが返す全チャンネル(ステレオなら 2 本)+ mono に混ぜた 1 本
+ *  - ワーカー側:元の PCM + 雑音を引いた PCM(+「声以外」を作る回はもう 1 本)── 使い終わった PCM は先に手放す(`voice-run.ts`)
+ */
 export const VOICE_MAX_MS = 30 * 60_000;
+/**
+ * 長さが分からない音(`Duration` の無い webm・webm 以外)を、復号の前に断る大きさの目安(byte)。
+ * 音の 30 分は、256kbps の圧縮でも約 57MB ── それを超えたら長すぎる見込みとして断る(ふつうの録音は 64kbps 前後で 15MB 程度)。
+ */
+export const VOICE_FALLBACK_BYTES = 64 * 1024 * 1024;
 
 /** 1 枠を受けて、その場で書き換え、声らしさ(0〜1)を返す。⚠ 枠は ±32768 の尺度。 */
 export interface FrameEngine {

@@ -216,3 +216,84 @@ describe('全体(diarize。本物の RNNoise + 合成の話者)', () => {
     expect(featureOf(new Float32Array(300))).toBeNull();
   });
 });
+
+/**
+ * 🔴 **まとめ方の計算量**(着地前レビュー ⚠4)。毎回すべての組を測り直す素朴な実装は O(n³): n=1000 で約 4 秒、n=3000 で約 2 分だった。
+ * いまは各クラスタが「いちばん近い相手」を覚えて O(n²)。実測(node, 3 グループの合成特徴): n=300 → 21ms / 1000 → 86ms / 3000 → 859ms。
+ * 🔑 速さそのものではなく**距離を測った回数**で守る(時計に頼らない)。素朴な実装との**結果の一致**も見る(速くしたことで答えが変わっていない)。
+ */
+describe('まとめ方の計算量と正しさ(clusterSegments)', () => {
+  type Input = Parameters<typeof clusterSegments>[0][number];
+  function make(n: number, groups: number, seed = 12345): Input[] {
+    let s = seed;
+    const rnd = (): number => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296) * 2 - 1;
+    return Array.from({ length: n }, (_, i) => {
+      const g = i % groups;
+      const cep = new Float64Array(12);
+      for (let k = 0; k < 12; k += 1) cep[k] = g * 6 + (k === 0 ? 3 : 0) * g + rnd();
+      return { feature: { cep, lnF0: 4.6 + g * 0.3 + rnd() * 0.03, frames: 100 }, ms: 3000 + Math.abs(rnd()) * 3000 };
+    });
+  }
+
+  /** 素朴な実装(毎回すべての組を測る)。重心の更新は同じ式を独立に書く。 */
+  function naive(inputs: readonly Input[], tau: number, maxSp: number): number[] {
+    interface C { m: number[]; cep: Float64Array; ln: number; w: number }
+    let cs: C[] = inputs.map((p, i) => ({ m: [i], cep: p.feature.cep, ln: p.feature.lnF0, w: p.ms }));
+    const d = (a: C, b: C): number => featureDistance({ cep: a.cep, lnF0: a.ln, frames: 1 }, { cep: b.cep, lnF0: b.ln, frames: 1 });
+    while (cs.length > 1) {
+      let bi = 0;
+      let bj = 1;
+      let bd = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < cs.length; i += 1)
+        for (let j = i + 1; j < cs.length; j += 1) {
+          const x = d(cs[i]!, cs[j]!);
+          if (x < bd) {
+            bd = x;
+            bi = i;
+            bj = j;
+          }
+        }
+      if (bd >= tau && cs.length <= maxSp) break;
+      const a = cs[bi]!;
+      const b = cs[bj]!;
+      const w = a.w + b.w;
+      const cep = a.cep.map((v, k) => (v * a.w + b.cep[k]! * b.w) / w);
+      const merged: C = { m: [...a.m, ...b.m], cep, ln: (a.ln * a.w + b.ln * b.w) / w, w };
+      cs = [...cs.filter((_, k) => k !== bi && k !== bj), merged];
+    }
+    const label = new Array<number>(inputs.length).fill(-1);
+    cs.forEach((c, k) => c.m.forEach((m) => (label[m] = k)));
+    const order = new Map<number, number>();
+    return label.map((l) => (order.has(l) ? order.get(l)! : (order.set(l, order.size), order.get(l)!)));
+  }
+
+  it('🔴 距離を測った回数が n の 2 乗で増える(3 乗ではない)── n を 2 倍にして 5 倍未満', () => {
+    const count = (n: number): number => {
+      const stats = { distances: 0 };
+      clusterSegments(make(n, 3), { stats, minSpeakerMs: 0 });
+      return stats.distances;
+    };
+    const a = count(300);
+    const b = count(600);
+    expect(a, '前提: 測っている').toBeGreaterThan(300 * 299 * 0.4);
+    expect(b / a, `3 乗なら 8 倍近くになる(${String(a)} → ${String(b)})`).toBeLessThan(5);
+    // 絶対値:n=1000 で実測 約 276 万回(最初の表が n²/2 = 50 万)。素朴な実装は約 1.7 億回
+    const c = count(1000);
+    expect(c).toBeLessThan(4_000_000);
+  });
+
+  it('🔴 素朴な実装と同じ結果(いくつかの種・グループ数で)', () => {
+    for (const [n, groups, seed] of [[60, 3, 1], [90, 4, 2], [120, 7, 3], [80, 1, 4]] as const) {
+      const inputs = make(n, groups, seed);
+      expect(clusterSegments(inputs, { minSpeakerMs: 0 }), `n=${String(n)} groups=${String(groups)}`).toEqual(naive(inputs, MERGE_DISTANCE, MAX_SPEAKERS));
+    }
+  });
+
+  it('🔴 n=3000 でも実用の時間で終わる(実測 約 0.9 秒。遅い環境でも 20 秒を超えない余裕で守る)', () => {
+    const t = performance.now();
+    const labels = clusterSegments(make(3000, 3));
+    const took = performance.now() - t;
+    expect(new Set(labels).size).toBe(3);
+    expect(took, `${String(Math.round(took))}ms`).toBeLessThan(20_000);
+  });
+});

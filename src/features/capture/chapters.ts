@@ -40,6 +40,12 @@ export interface SceneOptions {
 /**
  * 場面の頭(ms)の一覧。**0 は必ず先頭に入る**(最初のチャプター)。昇順。
  * 「動いていない」= 小さい差分フレーム、または映像のフレームが出ていない間(画面が止まると映像が出ない録画がある)。
+ *
+ * 🔴 **周期的なキーフレームは変化に数えない**(実物の fixture で判明)。エンコーダは絵が止まっていても一定の間隔でキーフレームを出す ──
+ *   キーフレームを「動いた」と数えると、静止が2 秒続く前に必ず区切られて、**場面が1 つも見つからない**(実測: 1.5 秒ごとのキーフレーム)。
+ *   しかも静止画面のキーフレームは中身が同じなので大きさもほぼ同じ。そこで:
+ *   - キーフレームは「動いていた」時刻を進めない(静止の途中で出ても静止は続く)
+ *   - ただし**直前のキーフレームと大きさが 1.5 倍以上変わった**キーフレーム(= 絵が入れ替わった)は、差分フレームの大きな変化と同じく変わり目に数える
  */
 export function sceneStartsFromFrames(frames: readonly FrameInfo[], options: SceneOptions = {}): number[] {
   const quietBytes = options.quietBytes ?? SCENE_DEFAULTS.quietBytes;
@@ -49,14 +55,24 @@ export function sceneStartsFromFrames(frames: readonly FrameInfo[], options: Sce
   const starts: number[] = [0];
   // 最後に「動いていた」フレームの時刻。先頭は動き始めなので 0 を置く
   let lastActiveMs = frames.length > 0 ? frames[0]!.ms : 0;
+  let prevKeyBytes: number | null = frames.length > 0 && frames[0]!.key ? frames[0]!.bytes : null;
+  const accept = (ms: number): void => {
+    if (ms - lastActiveMs >= minQuietMs && ms - starts[starts.length - 1]! >= minGapMs) starts.push(ms);
+  };
   for (let i = 1; i < frames.length; i += 1) {
     const f = frames[i]!;
-    const quiet = !f.key && f.bytes <= quietBytes;
-    if (quiet) continue;
-    const stillFor = f.ms - lastActiveMs;
-    if (f.bytes >= changeBytes && stillFor >= minQuietMs && f.ms - starts[starts.length - 1]! >= minGapMs) {
-      starts.push(f.ms);
+    if (f.key) {
+      const replaced =
+        prevKeyBytes !== null && f.bytes >= changeBytes && (f.bytes > prevKeyBytes * 1.5 || f.bytes * 1.5 < prevKeyBytes);
+      prevKeyBytes = f.bytes;
+      if (replaced) {
+        accept(f.ms);
+        lastActiveMs = f.ms;
+      }
+      continue; // 周期的なキーフレームは、静止を中断しない
     }
+    if (f.bytes <= quietBytes) continue;
+    if (f.bytes >= changeBytes) accept(f.ms);
     lastActiveMs = f.ms;
   }
   return starts;
@@ -145,6 +161,9 @@ export function silenceChapterStarts(pcm: Float32Array, rate: number, options: S
   }
   return starts;
 }
+
+/** 「## チャプター」の節の見出しか(`## チャプター` 単独、または `## チャプター 日時`)。⚠ 判定はここ 1 か所。 */
+export const isChaptersHeading = (line: string): boolean => /^## チャプター(?:\s.*)?$/.test(line.trimEnd());
 
 /** `## チャプター 2026-10-25 10:30`(文字起こしの見出しと同じ作り)。 */
 export function chaptersHeading(at: Date): string {

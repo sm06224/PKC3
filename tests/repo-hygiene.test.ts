@@ -1349,7 +1349,10 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    (関係グラフ / 予定表のカンバン / 計った時間)を実ブラウザで押す。🔴 ここでしか見えない:節点・列・行が本当に押せる所に在る
     //    (`elementFromPoint`)/ HTML5 の drag が列に届いて保存された本文が変わる / タイマーを止める → 本文 → worker の走査 → 面の全段 /
     //    8 枚になって「⋯」の下へ畳まれたタブが名前つきで押せる。107 → 108。起動の予算は 560 のまま(実数 536、残り 24)。
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(108);
+    // ⚠ 2026-10-25(#952 A2/A4/A5/B1): `capture-finish.smoke.spec.ts` を**新設**(+1 file / +1 件)と、`portable-html.smoke.spec.ts` に 1 本(+1 件)。
+    //    🔴 ここでしか見えない:本物の AudioContext 復号 → ワーカー(RNNoise の wasm)→ opus の新しい添付 / WebCodecs の VP8 復号 + OffscreenCanvas → PNG /
+    //    チャプターの時刻を押すと <video> の再生位置が動く / `file://` の 1 枚で声のワーカーの wasm が動的 import で解ける。108 → 109。起動の予算は 560 のまま(実数 543、残り 17)。
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(109);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
@@ -1558,7 +1561,7 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-10-25(#281 ① / #277 / #683 ①): `builtin-apps.smoke.spec.ts`(新設・test 3 本)→ 536 → 539。
     // ⚠ 2026-10-25(#528): `mermaid.smoke.spec.ts` に 1 本足した(plotly は PNG の img / React は隔離した枠の中で動き、外へは出ない)→ 539 → 540。
     //    🔴 ここでしか見えない:plotly.js を実際に動かして PNG になるか / 枠の中で React が動いて押すと数が増え Tailwind が効くか / CSP が外部画像の要求を止めるかは、実ブラウザだけ
-    ).toBe(540);
+    ).toBe(542);
   });
 });
 

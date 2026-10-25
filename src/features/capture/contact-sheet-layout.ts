@@ -5,6 +5,8 @@
  * 決める pure module(`features/` 層。browser API を持たない)── 数字の根拠が 1 か所で、単体で確かめられる。
  */
 import { ELAPSED_LINE_HEAD, parseElapsed } from '../elapsed-text';
+import { isChaptersHeading } from './chapters';
+import { isSpeakerTranscriptHeading, isSpeakersHeading } from './speakers';
 
 export const SHEET = {
   /** 1 行に並べる数。 */
@@ -82,8 +84,13 @@ export interface TimedLine {
   readonly text: string;
 }
 
-/** 文字起こしではない時刻つきの節(「## チャプター」「## 話者」「## 話者つき文字起こし」)の見出し。 */
-const NOT_TRANSCRIPT_SECTION = /^##\s*(?:チャプター|話者)/;
+/**
+ * 文字起こしではない時刻つきの節(「## チャプター」「## 話者」「## 話者つき文字起こし」)の見出しか。
+ * ⚠ 各節の判定は持ち主の 1 か所(`isChaptersHeading` / `isSpeakersHeading` / `isSpeakerTranscriptHeading`)── ここは合成するだけ
+ *   (正規表現を並べて持つと、持ち主が綴りを変えた日にここだけ古いまま残る)。
+ */
+export const isNonTranscriptHeading = (line: string): boolean =>
+  isChaptersHeading(line) || isSpeakersHeading(line) || isSpeakerTranscriptHeading(line);
 
 /**
  * ノートの本文から、時刻つきの文字起こしの行を拾う(文字起こしと同じ読み方 = `ELAPSED_LINE_HEAD` + `parseElapsed`)。
@@ -94,7 +101,7 @@ export function transcriptLinesOf(body: string): TimedLine[] {
   const out: TimedLine[] = [];
   let skipping = false;
   for (const line of body.split('\n')) {
-    if (/^#{1,6} /.test(line)) skipping = NOT_TRANSCRIPT_SECTION.test(line);
+    if (/^#{1,6} /.test(line)) skipping = isNonTranscriptHeading(line);
     if (skipping) continue;
     const m = ELAPSED_LINE_HEAD.exec(line.trimEnd());
     if (m === null) continue;

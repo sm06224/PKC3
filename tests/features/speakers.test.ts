@@ -3,9 +3,12 @@
  *
  * 🔑 期待値は手で書いた固定値(実装と同じ組み立てで作らない)。本文は**他の部分を 1 文字も変えない**ことを、前後の行で見る。
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   fixSpeakers,
+  isSpeakerTranscriptHeading,
+  isSpeakersHeading,
   namedTurnsText,
   parseRenames,
   readSpeakerTurns,
@@ -17,7 +20,9 @@ import {
   speakerTranscript,
   speakerTranscriptHeading,
 } from '../../src/features/capture/speakers';
-import { transcriptLinesOf } from '../../src/features/capture/contact-sheet-layout';
+import { isNonTranscriptHeading, transcriptLinesOf } from '../../src/features/capture/contact-sheet-layout';
+import { captureItemsFrom } from '../../src/features/capture/capture-item';
+import { isChaptersHeading } from '../../src/features/capture/chapters';
 
 const AT = new Date(2026, 9, 25, 10, 30);
 
@@ -176,5 +181,57 @@ describe('話者を直す(fixSpeakers)', () => {
     const body = '## 話者\n0:00 話者A\nこの人は司会\n0:20 話者B';
     const r = fixSpeakers(body, [['話者A', '田中']], [], AT)!;
     expect(r.body).toBe('## 話者\n0:00 田中\n0:20 話者B\nこの人は司会');
+  });
+});
+
+/**
+ * 🔴 **節の見出しの判定は持ち主の 1 つ**(着地前レビュー ⚠8)。「話者」の節かどうかを、行の出し分け(`hasSpeakers`)・読み取り(`readSpeakerTurns`)・
+ * 文字起こしの拾い(`transcriptLinesOf`)が**同じ判定**で答えること。読み手ごとに正規表現を持つと、見出しの綴りを変えた日に片方だけ古いまま残る。
+ */
+describe('節の見出しの判定が読み手ごとに食い違わない(parity)', () => {
+  const HEADINGS = [
+    '## 話者',
+    '## 話者 2026-10-25 10:30',
+    '## 話者\t',
+    '## 話者  ',
+    '## 話者A',
+    '## 話者つき文字起こし',
+    '## 話者つき文字起こし 2026-10-25 10:30',
+    '##話者',
+    '### 話者',
+    '# 話者',
+    '## チャプター',
+    '## チャプター 2026-10-25 10:30',
+    '## チャプターX',
+    '## 文字起こし',
+    '## 文字起こし 2026-10-02 12:34',
+    '話者',
+  ];
+  const media = (extra: string): string =>
+    ['---', 'attachment.name: a.webm', 'attachment.mime: audio/webm', 'attachment.size: 1', 'attachment.asset_key: k', '---', extra].join('\n');
+
+  it.each(HEADINGS)('「%s」', (heading) => {
+    const isSpeakers = isSpeakersHeading(heading);
+    // ① 行の出し分け
+    const item = captureItemsFrom([{ lid: 'a', title: 'a', body: media(`${heading}\n0:00 田中`) }])[0]!;
+    expect(item.hasSpeakers, 'hasSpeakers が isSpeakersHeading と食い違う').toBe(isSpeakers);
+    // ② 読み取り
+    expect(readSpeakerTurns(`${heading}\n0:00 田中`) !== null, 'readSpeakerTurns が isSpeakersHeading と食い違う').toBe(isSpeakers);
+    // ③ 文字起こしの拾い:話者・話者つき文字起こし・チャプターの節の行は文字起こしに数えない
+    const skipped = isSpeakers || isSpeakerTranscriptHeading(heading) || isChaptersHeading(heading);
+    expect(isNonTranscriptHeading(heading)).toBe(skipped);
+    const lines = transcriptLinesOf(`${heading}\n0:00 本文`);
+    expect(lines.length === 0, 'transcriptLinesOf が節の判定と食い違う').toBe(/^#{1,6} /.test(heading) ? skipped : false);
+  });
+
+  it('前提:表には「話者の節」と「そうでないもの」の両方が入っている(全部同じ答えだと何も見ていない)', () => {
+    expect(HEADINGS.filter(isSpeakersHeading).length).toBeGreaterThanOrEqual(3);
+    expect(HEADINGS.filter((h) => !isSpeakersHeading(h)).length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('capture-item.ts は話者の節の正規表現を自前で持たない(source 読み)', () => {
+    const src = readFileSync('src/features/capture/capture-item.ts', 'utf8');
+    expect(src).toContain('isSpeakersHeading');
+    expect(src).not.toMatch(/話者\(\?:/);
   });
 });

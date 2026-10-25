@@ -420,6 +420,7 @@ import {
   withEditReady,
 } from '@features/entry-actions';
 import { currentAppOpenTarget } from '@adapter/ui/render/app-open-target';
+import { processToolOf } from '@features/capture/capture-process';
 import {
   type MenuItem,
   closeContextMenu,
@@ -4778,6 +4779,8 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   'sql-history-menu',
   // 🔑 #918 段④ ── 答えを file へ出す形(csv / tsv / json)の一覧
   'sql-export-menu',
+  // 🔑 #952 ── 「音/動画」の行の「仕上げ ▾」(道具の一覧)
+  'open-capture-process',
 ]);
 
 /**
@@ -7997,6 +8000,26 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     services.extractCapture(lid, part);
+  },
+  /**
+   * 🔴 **「音/動画」の行の「仕上げ ▾」を押した ── 道具の一覧を出す**(#952)。
+   * ⚠ **`MENU_OPENERS` に載せてある**(載せないと、同じクリックで一覧が閉じて何も出ない)。
+   * 🔑 出す道具は押したボタンが運ぶ(`data-pkc-tools`。行を描いたときの門の結果)── ここで門を引き直さない。
+   *   項目は `capture-process` のただのボタンで、押した行の lid は全項目へ写す(`carry`。メニューの器は root の直下に出るため)。
+   *   塊(映像 / 音を作る / ノートに書く)は表(`PROCESS_TOOLS`)の `group`。
+   */
+  'open-capture-process': (_dispatcher, target, _services, root) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (!lid) return;
+    const items: MenuItem[] = [];
+    for (const id of (target.getAttribute('data-pkc-tools') ?? '').split(',')) {
+      const t = processToolOf(id);
+      if (t === undefined) continue;
+      items.push({ action: 'capture-process', label: t.label, hint: t.title, group: t.group, attrs: { 'data-pkc-part': t.id } });
+    }
+    if (items.length === 0) return;
+    const r = target.getBoundingClientRect();
+    openContextMenu(root, { x: r.left, y: r.bottom }, items, target, { 'data-pkc-entry': lid });
   },
   /**
    * 🔴 **録ったものを仕上げる**(#952)。⚠ 対象は押した行が持つ(`data-pkc-entry`)── 選択中のノートから採らない。

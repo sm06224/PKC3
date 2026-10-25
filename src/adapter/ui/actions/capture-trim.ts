@@ -21,6 +21,7 @@
  * ⚠ **取り込み口は `attachOne` の 1 本**(`attach` として注入する)── 2 つ目を作らない。
  * ⚠ **判定を `main.ts` へ出さない**(CLAUDE.md §2:あちらはどの test からも実行されない)。
  */
+import { captureBusyText, type CaptureJobGate } from './capture-job-gate';
 import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { TRIM_REFUSAL_TEXT } from '@features/audio/webm-opus';
@@ -86,6 +87,8 @@ export interface CaptureTrimDeps {
   ) => Promise<AttachedOne | null>;
   /** 一時の知らせ(エラーの行とは別)。 */
   readonly notify: (text: string) => void;
+  /** 🔴 録ったものへの重い仕事を 1 本ずつにする門(両方向に断る)。省略 = 門なし(単体の test)。 */
+  readonly gate?: CaptureJobGate;
 }
 
 export interface CaptureTrimmer {
@@ -135,6 +138,12 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
        */
       if (!canWriteBody(deps.dispatcher)) {
         fail(BUSY_BODY_TEXT);
+        return;
+      }
+      // 🔴 切り出し・取り出し・文字起こし・仕上げは 1 本ずつ(どれが走っていても他を断る)
+      const leaveGate = deps.gate?.tryEnter('切り出し');
+      if (deps.gate !== undefined && leaveGate === null) {
+        fail(captureBusyText(deps.gate.current));
         return;
       }
       running = true;
@@ -295,6 +304,7 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
         if (!finished) deps.notify('');
         // ⚠ **必ず解く** ── 解かないと、1 度失敗しただけで以後ずっと断るようになる
         running = false;
+        leaveGate?.();
         mark(false);
       }
     },

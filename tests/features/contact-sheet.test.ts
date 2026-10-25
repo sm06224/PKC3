@@ -154,7 +154,7 @@ function fakeCodec() {
 }
 
 function fakeDraw() {
-  const log = { frames: [] as { ts: number; x: number; y: number }[], texts: [] as string[], size: [0, 0] };
+  const log = { frames: [] as { ts: number; x: number; y: number }[], texts: [] as string[], size: [0, 0], pngs: 0 };
   const draw: DrawApi = {
     create: (w, h) => {
       log.size = [w, h];
@@ -167,7 +167,10 @@ function fakeDraw() {
           log.texts.push(s);
         },
         measure: (s) => [...s].length * 7,
-        toPng: async () => new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }),
+        toPng: async () => {
+          log.pngs += 1;
+          return new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+        },
       };
     },
   };
@@ -211,6 +214,43 @@ describe('復号して描く(contactSheetVideo)', () => {
     expect(d.log.texts).toContain('二つ目の話');
     expect(d.log.texts).toContain('0:15');
     if (r.ok) expect(r.blob.type).toBe('image/png');
+  });
+
+  /** 偽の復号器に「このフレームは出力しない」を足す(出力が欠ける復号器)。出さなかったフレームは close する(漏らさない)。 */
+  function droppingCodec(skip: (timestampUs: number) => boolean) {
+    const base = fakeCodec();
+    const api: CodecApi = {
+      ...base.api,
+      createDecoder: (init) =>
+        base.api.createDecoder({
+          output: (f) => (skip(f.timestamp) ? f.close() : init.output(f)),
+          error: init.error,
+        }),
+    };
+    return { api, log: base.log };
+  }
+
+  it('🔴 復号器が 1 枚も出さないとき(対応外の形・壊れた途中)は、灰色の欄のシートを成功にせず decode-failed(PNG も作らない)', async () => {
+    const codec = droppingCodec(() => true);
+    const d = fakeDraw();
+    const r = await contactSheetVideo({ blob, lines: [], title: 't' }, codec.api, d.draw);
+    expect(r).toEqual({ ok: false, reason: 'decode-failed' });
+    expect(d.log.frames, '前提: 1 枚も描いていない').toHaveLength(0);
+    expect(d.log.pngs, '失敗なのに PNG を作った').toBe(0);
+    expect(codec.log.closed, '出さなかったフレームを閉じていない').toBe(codec.log.opened);
+  });
+
+  it('🔴 1 場面だけ絵が欠けても失敗にする(2 枚描けていても、3 場面のうち 1 つが灰色のままのシートを残さない)', async () => {
+    // 場面 1(15 秒)の絵だけ出ない
+    const codec = droppingCodec((us) => us === 15_000_000);
+    const d = fakeDraw();
+    const r = await contactSheetVideo({ blob, lines: [], title: 't' }, codec.api, d.draw);
+    expect(r).toEqual({ ok: false, reason: 'decode-failed' });
+    expect(d.log.frames.map((f) => f.ts), '前提: 場面 0 は描けている').toEqual([0]);
+    expect(d.log.pngs).toBe(0);
+    // 対照:何も欠けなければ 3 枚とも描けて成功する(同じ fixture・同じ経路)
+    const ok = await contactSheetVideo({ blob, lines: [], title: 't' }, droppingCodec(() => false).api, fakeDraw().draw);
+    expect(ok).toMatchObject({ ok: true, scenes: 3 });
   });
 
   it('場面が刻めない動画は均等に 6 枚取る', async () => {

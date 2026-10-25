@@ -13,6 +13,7 @@
  *
  * ⚠ **判定を `main.ts` へ出さない**(CLAUDE.md §2:あちらはどの test からも実行されない)。
  */
+import { captureBusyText, type CaptureJobGate } from './capture-job-gate';
 import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { appendUnlessEditedElsewhere, type EditLockPort } from '@adapter/state/edited-elsewhere';
@@ -74,6 +75,8 @@ export interface CaptureProcessDeps {
     place: { readonly parentLid: string | null; readonly keepSelection: boolean },
   ) => Promise<AttachedOne | null>;
   readonly notify: (text: string) => void;
+  /** 🔴 録ったものへの重い仕事を 1 本ずつにする門(両方向に断る)。省略 = 門なし(単体の test)。 */
+  readonly gate?: CaptureJobGate;
   readonly lock?: EditLockPort;
   readonly onActive?: (active: boolean) => void;
 }
@@ -86,6 +89,11 @@ export interface CaptureProcessor {
 export function createCaptureProcessor(deps: CaptureProcessDeps): CaptureProcessor {
   let running = false;
   const queue = createWritableQueue(deps.dispatcher);
+  /**
+   * 🔴 **本文への追記を預かっている `lid × 道具`**(着地前レビュー ⚠5)。預かっている間に同じ道具をもう一度押すと、
+   * 同じ結果が**2 回**足される ── 預かりが解けて書けるまで断る(別の道具・別のノートは通す)。
+   */
+  const pending = new Set<string>();
   const fail = (error: string): void => deps.dispatcher.dispatch({ type: 'OP_FAILED', error });
 
   return {
@@ -109,9 +117,20 @@ export function createCaptureProcessor(deps: CaptureProcessDeps): CaptureProcess
         fail('この添付が見つかりませんでした。');
         return;
       }
+      const pendingKey = `${lid}\u0000${toolId}`;
+      if (pending.has(pendingKey)) {
+        fail(`「${item.name}」への「${spec.label}」の結果は、編集中なので保留しています。編集を終えると足すので、もう一度押す必要はありません。`);
+        return;
+      }
       // 話者の一覧が本文にあるかの門だけは本文を読んで決める(他は mime だけの粗い門)
       if (toolId !== 'fix-speakers' && !canProcess(item, toolId)) {
         fail(`「${spec.label}」は、この形の${item.kind === 'video' ? '動画' : '録音'}にはまだ使えません。`);
+        return;
+      }
+      // 🔴 切り出し・取り出し・文字起こし・仕上げは 1 本ずつ(どれが走っていても他を断る)
+      const leaveGate = deps.gate?.tryEnter('仕上げ');
+      if (deps.gate !== undefined && leaveGate === null) {
+        fail(captureBusyText(deps.gate.current));
         return;
       }
       running = true;
@@ -206,12 +225,14 @@ export function createCaptureProcessor(deps: CaptureProcessDeps): CaptureProcess
             deps.dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
             say(`「${item.name}」に${out.summary}`);
           } finally {
+            pending.delete(pendingKey);
             if (holdsActive) release();
           }
         };
         let writing: Promise<void> = Promise.resolve();
         const held = queue.push(() => (writing = write()), lid);
         holdsActive = held;
+        if (held) pending.add(pendingKey);
         await writing;
         if (held) say(`「${item.name}」の「${spec.label}」の結果は、編集中なのでまだ足していません。編集を終えると、ノートの末尾に足します`);
       } catch (e: unknown) {
@@ -220,6 +241,7 @@ export function createCaptureProcessor(deps: CaptureProcessDeps): CaptureProcess
         if (!finished) deps.notify('');
         // ⚠ **必ず解く** ── 解かないと、1 度失敗しただけで以後ずっと断るようになる
         running = false;
+        leaveGate?.();
         if (!holdsActive) release();
       }
     },

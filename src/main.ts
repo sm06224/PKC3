@@ -352,7 +352,8 @@ import { ChapterWindows } from '@adapter/ui/chapter-windows';
 import { createCaptureService } from '@adapter/ui/actions/capture';
 import { createCaptureTrimmer } from '@adapter/ui/actions/capture-trim';
 import { createCaptureExtractor } from '@adapter/ui/actions/capture-extract';
-import { createCaptureProcessor } from '@adapter/ui/actions/capture-process';
+import { createWiredCaptureProcessor } from '@adapter/ui/actions/capture-process-wiring';
+import { createCaptureJobGate } from '@adapter/ui/actions/capture-job-gate';
 import { createCaptureTools } from '@adapter/ui/actions/capture-tools';
 import { processToolOf } from '@features/capture/capture-process';
 import { createImageDrawer } from '@adapter/ui/actions/image-draw';
@@ -3687,14 +3688,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 取り込みは収録と同じ **`queued`**(切り出しも取り直しが利かない)。
    */
   const audioClient = new AudioClient();
-  // 🔴 声の仕上げ(雑音を減らす・声と伴奏を分ける・話者…)のワーカー。遅延起動・アイドルで畳む(`WorkerLease`)
+  // 🔴 声の仕上げ(雑音を減らす・話し声とそれ以外に分ける・話者…)のワーカー。遅延起動・アイドルで畳む(`WorkerLease`)
   const voiceClient = new VoiceClient();
   /**
    * 🔴 **動画は別のワーカー**(#683 段②b-1)── 動画の長い仕事で音の切り出しを待たせない。
    * 元の `Blob` は窓で読む(250MB を開かない)。始まりが手前へ戻るなら、切る前に確認する。
    */
   const videoClient = new VideoClient();
+  // 🔴 切り出し・取り出し・文字起こし・仕上げは 1 本ずつ(どれが走っていても他を断る。両方向)
+  const captureJobGate = createCaptureJobGate();
   const captureTrimmer = createCaptureTrimmer({
+    gate: captureJobGate,
     dispatcher,
     readBlob: (assetKey) => blobs.get(cid, assetKey),
     trim: (blob, startMs, endMs) => audioClient.trim(blob, startMs, endMs),
@@ -3722,6 +3726,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔴 置き場は元の添付と同じフォルダ(`imageDrawer` と同じ引き方)。
    */
   const captureExtractor = createCaptureExtractor({
+    gate: captureJobGate,
     dispatcher,
     readBlob: (assetKey) => blobs.get(cid, assetKey),
     extractAudio: (blob) => audioClient.extract(blob),
@@ -3744,7 +3749,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔴 **録ったものを仕上げる**(#952 A2・A4・A5・B1・B4・B5・B6、#674)。段取りは `capture-process.ts`、道具の実体は
    * `capture-tools.ts`。ここは口を渡すだけ(CLAUDE.md §2)。⚠ 重い所は動画 / 音のワーカー(`WorkerLease`)。
    */
-  const captureProcessor = createCaptureProcessor({
+  const captureProcessor = createWiredCaptureProcessor({
+    gate: captureJobGate,
+    // 🔴 別のタブ・窓が編集中のノートへは足さない(#1087)/ 仕上げている間にタブを閉じる前に確認する(文字起こしと同じ)
+    lock: editLockPort,
+    setWriting: (active, key) => unloadGuard.setWriting(active, key),
     dispatcher,
     readBlob: (assetKey) => blobs.get(cid, assetKey),
     readBody: async (lid) => ((await client.request({ op: 'getBody', cid, lid })) as string | null) ?? null,
@@ -3817,6 +3826,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const asrInstaller = new AsrPackInstaller({ store: asrStore, base: ASR_PACK_BASE });
   const asrClient = new AsrClient();
   const captureTranscriber = createCaptureTranscriber({
+    gate: captureJobGate,
     dispatcher,
     readBlob: (assetKey) => blobs.get(cid, assetKey),
     decode: (blob) => decodeToMono16k(blob),

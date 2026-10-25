@@ -944,3 +944,15 @@ export async function waitForDiagramSettled(
   }
   throw new Error(`waitForDiagramSettled: 図の描画が ${timeoutMs}ms 以内に落ち着きませんでした`);
 }
+
+/**
+ * 🔴 **「音/動画」の行の「仕上げ ▾」を押し、一覧から道具を選ぶ**(#952)。マウスだけで完結する動線そのもの。
+ * ⚠ 一覧が出ること・選んだら閉じることを毎回見る(出ない / 閉じない が dead click の顔)。
+ */
+export async function pickCaptureTool(page: Page, row: Locator, tool: string): Promise<void> {
+  await clickReal(page, row.locator('[data-pkc-action="open-capture-process"]'));
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '「仕上げ ▾」を押しても一覧が出ない').toBeVisible();
+  await clickReal(page, menu.locator(`[data-pkc-action="capture-process"][data-pkc-part="${tool}"]`));
+  await expect(menu, '選んだのに一覧が閉じない').toBeHidden();
+}

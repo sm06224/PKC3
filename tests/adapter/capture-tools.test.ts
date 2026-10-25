@@ -14,6 +14,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState, type AppState } from '../../src/adapter/state/app-state';
 import { captureItemsFrom } from '../../src/features/capture/capture-item';
 import type { AttachItem, AttachedOne } from '../../src/adapter/ui/actions/attach';
+import { asciiBytes, concatBytes, element, float64Bytes, hexBytes, uintBytes } from '../../src/features/audio/ebml';
 import type { VoiceJob } from '../../src/adapter/platform/voice/voice-run';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { chaptersHeading } from '../../src/features/capture/chapters';
@@ -251,7 +252,7 @@ describe('雑音を減らす', () => {
   });
 });
 
-describe('声と伴奏を分ける', () => {
+describe('話し声とそれ以外に分ける', () => {
   const bytes = new Uint8Array([1, 2]).buffer;
 
   it('🔴 「話し声」と「声以外」の 2 つの新しい音の添付になる。元は残る', async () => {
@@ -387,5 +388,81 @@ describe('話者を直す', () => {
     await unknown.h.run('fix-speakers');
     expect(unknown.h.dispatcher.getState().error).toContain('付け替える名前がノートの一覧にありません');
     for (const x of [none, bad, unknown]) expect(x.fixSpeakers).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 🔴 **復号の前に、長すぎる録音を断る**(着地前レビュー ⚠3)。復号してから断ると、断る前にメモリを使い切る。
+ * 長さは webm の先頭の Duration → 動画なら映像の走査 → 音なら大きさの目安、の順に引く。
+ */
+describe('長すぎる録音は復号の前に断る', () => {
+  /** Duration が書かれた webm の先頭(Cluster は無い)。 */
+  const webmWithDuration = (ms: number): Blob => {
+    const head = element('1a45dfa3', element('4282', asciiBytes('webm')));
+    const info = element('1549a966', concatBytes([element('2ad7b1', uintBytes(1_000_000)), element('4489', float64Bytes(ms))]));
+    const segment = concatBytes([hexBytes('18538067'), Uint8Array.of(0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff), info]);
+    return new Blob([concatBytes([head, segment]) as BlobPart], { type: 'audio/webm' });
+  };
+  const okVoice = () => vi.fn(async (job: VoiceJob) => {
+    void job;
+    return { ok: true as const, kind: 'audio' as const, files: [{ tag: '雑音を減らした', bytes: new Uint8Array(4).buffer, durationMs: 1000 }] };
+  });
+
+  it('🔴 Duration が 30 分を超える音は、復号もワーカーも呼ばずに、長さを言って断る', async () => {
+    const decode48k = vi.fn(async () => new Float32Array(48_000));
+    const voice = okVoice();
+    const h = harness({ tools: { decode48k, voice } });
+    h.deps.readBlob.mockResolvedValue(webmWithDuration(40 * 60_000));
+    await h.run('denoise');
+    expect(decode48k, '復号してしまった').not.toHaveBeenCalled();
+    expect(voice).not.toHaveBeenCalled();
+    expect(h.dispatcher.getState().error).toContain('40:00 あります');
+    expect(h.dispatcher.getState().error).toContain('30 分まで');
+  });
+
+  it('対照群:29 分の音は通る(境目は 30 分)', async () => {
+    const decode48k = vi.fn(async () => new Float32Array(48_000).fill(0.1));
+    const voice = okVoice();
+    const h = harness({ tools: { decode48k, voice } });
+    h.deps.readBlob.mockResolvedValue(webmWithDuration(29 * 60_000));
+    h.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
+    await h.run('denoise');
+    expect(decode48k).toHaveBeenCalledTimes(1);
+    expect(voice).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 Duration の無い音は、大きさの目安(64MB)を超えたら復号の前に断る。以下なら通す', async () => {
+    const big = { size: 70 * 1024 * 1024, type: 'audio/webm', slice: () => ({ arrayBuffer: async () => new ArrayBuffer(0) }) } as unknown as Blob;
+    const decode48k = vi.fn(async () => new Float32Array(48_000).fill(0.1));
+    const h = harness({ tools: { decode48k, voice: okVoice() } });
+    h.deps.readBlob.mockResolvedValue(big);
+    await h.run('denoise');
+    expect(decode48k).not.toHaveBeenCalled();
+    expect(h.dispatcher.getState().error).toContain('30 分まで');
+    // 対照:小さい音は通る
+    const small = harness({ tools: { decode48k, voice: okVoice() } });
+    small.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
+    await small.run('denoise');
+    expect(decode48k).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 Duration の無い動画(VP8)は映像の走査で長さを引き、30 分を超えていれば復号の前に断る', async () => {
+    const decode48k = vi.fn(async () => new Float32Array(48_000).fill(0.1));
+    const scenes = vi.fn(async () => ({ ok: true as const, startsMs: [0], sourceEndMs: 45 * 60_000 }));
+    const h = harness({ mime: 'video/webm;codecs=vp8,opus', name: '画面録画.webm', tools: { decode48k, scenes, voice: okVoice() } });
+    await h.run('denoise');
+    expect(scenes).toHaveBeenCalledTimes(1);
+    expect(decode48k).not.toHaveBeenCalled();
+    expect(h.dispatcher.getState().error).toContain('45:00 あります');
+  });
+
+  it('長さが引けない形(走査も失敗)は復号後の検査に任せる ── 復号後に 30 分を超えていれば、そこで断る', async () => {
+    const decode48k = vi.fn(async () => ({ length: 48_000 * 60 * 31 }) as unknown as Float32Array);
+    const voice = okVoice();
+    const h = harness({ mime: 'video/webm;codecs=vp9,opus', name: 'VP9.webm', tools: { decode48k, voice } });
+    await h.run('denoise');
+    expect(decode48k).toHaveBeenCalledTimes(1);
+    expect(voice).not.toHaveBeenCalled();
+    expect(h.dispatcher.getState().error).toContain('30 分まで');
   });
 });
