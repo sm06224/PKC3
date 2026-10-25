@@ -10,6 +10,7 @@ import {
   buildHtmlSandboxIframe,
   rememberSandboxHeight,
   restoreSandboxHeights,
+  sandboxResizeScript,
 } from '../../src/features/markdown/html-sandbox';
 import { applyBlocks, EMPTY_VIEW } from '../../src/adapter/ui/render/apply-blocks';
 
@@ -238,5 +239,43 @@ describe('#529 作り直された箱が 0 から伸びない(別のノートへ�
     };
     expect(probe(0), '古い憶えが残り続けている').toBe('0px');
     expect(probe(259)).toBe('269px');
+  });
+});
+
+describe('箱の中の計測 script(#529 の取り残し)', () => {
+  /** script を偽の document / window で走らせ、親へ飛んだ高さを集める。 */
+  function run(heights: number[]): number[] {
+    const code = sandboxResizeScript('b1').replace(/^<script>/, '').replace(/<\/script>$/, '');
+    const posted: number[] = [];
+    let i = 0;
+    const at = (): number => heights[Math.min(i, heights.length - 1)]!;
+    const doc = {
+      get documentElement() {
+        return { scrollHeight: at() };
+      },
+      body: {
+        get scrollHeight() {
+          return at();
+        },
+      },
+    };
+    const timers: Array<() => void> = [];
+    const win = {
+      parent: { postMessage: (m: { height: number }) => void posted.push(m.height) },
+      addEventListener: () => undefined,
+    };
+    const exec = new Function('document', 'window', 'setTimeout', code);
+    exec(doc, win, (f: () => void) => void timers.push(f));
+    for (const t of timers) {
+      t();
+      i += 1;
+    }
+    return posted;
+  }
+
+  it('🔴 計測が 0 のときは親へ申告しない(配置前の 0 で周りの枠が縮まない)/ 0 でない計測は申告する', () => {
+    expect(run([0, 316]), '0 を申告している').toEqual([316]);
+    // 対照:0 が無ければ両方とも申告する(検査が「何も申告しない」で緑にならない)
+    expect(run([120, 316])).toEqual([120, 316]);
   });
 });
