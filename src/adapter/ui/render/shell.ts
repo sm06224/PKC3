@@ -535,6 +535,15 @@ export function buildShell(root: HTMLElement): ShellRegions {
   kindBar.hidden = true;
 
   /**
+   * 🔴 **保存した検索の帯**(#1038 C1)。種類の札の**すぐ下**に置く(同じ「一覧の絞り方」)。
+   * ⚠ 器だけ置く(`hidden`)── 中身は `saved-searches.ts` が state と端末の記憶から描く。
+   *   タブの外に置く理由は種類の札と同じ(面を変えても消えない)。
+   */
+  const savedSearches = document.createElement('div');
+  savedSearches.setAttribute('data-pkc-region', 'saved-searches');
+  savedSearches.hidden = true;
+
+  /**
    * 🔴 **分割ボタンにする**(P10、user 指示 2026-08-05
    * 「プルダウン式の新規作成ボタンは使いにくいからマルチメニューに畳んでください。
    *  ▼ を押下した際に種別を選択して、追加ボタンと ctrl+n の対象を更新、
@@ -877,6 +886,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     tabs,
     findBar,
     kindBar,
+    savedSearches,
     createBar,
     menu,
     browseHost,

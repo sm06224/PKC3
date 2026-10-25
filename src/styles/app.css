@@ -1256,6 +1256,62 @@ img[data-pkc-action='view-big']:focus-visible {
   color: var(--muted);
   cursor: pointer;
 }
+/* 🔴 **保存した検索の帯**(#1038 C1)。⚠ 地は無彩色、色は押されている(= いまの絞りと同じ)検索にだけ。
+ *   置き場は左の列の種類の札の下(`saved-searches`)と探す面の欄の下(`search-page-saved`)── 体裁は同じ 1 本。 */
+[data-pkc-region='saved-searches'],
+[data-pkc-field='search-page-saved'] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 3px 4px;
+  font-size: var(--btn-fs-sm);
+}
+[data-pkc-region='saved-searches'] {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+[data-pkc-region='saved-searches'][hidden],
+[data-pkc-field='search-page-saved'][hidden] {
+  display: none;
+}
+[data-pkc-field='saved-search-save'],
+[data-pkc-field='saved-search-rename'],
+[data-pkc-field='saved-search-delete'] {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: var(--btn-fs-sm);
+  line-height: 1.6;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+[data-pkc-field='saved-search-list'] > summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+[data-pkc-field='saved-search-row'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin-top: 2px;
+}
+[data-pkc-field='saved-search-row'] > [data-pkc-action='apply-saved-search'] {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: var(--btn-fs-sm);
+  line-height: 1.6;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /**
  * 🔴 **選ばれているボタンの濃さは、ここ 1 本で決める**(#1038 段J-2。
  * 着地前レビュー「実ブラウザでは選んでいるボタンが他と見分けが付かない」)。

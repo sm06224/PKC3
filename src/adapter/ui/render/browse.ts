@@ -37,6 +37,7 @@ import type { AssetLender } from './detail';
 export type { BrowseMode } from './browse-mode';
 import { DEFAULT_BROWSE_MODE, type BrowseMode } from './browse-mode';
 import { KindBarRenderer } from './kind-bar';
+import { SavedSearchBar } from './saved-searches';
 import { setPrimary } from './icons';
 import { setBlocked } from './shortcut-hint';
 import { findCommand } from '@features/keymap';
@@ -142,6 +143,8 @@ export class BrowseRouter {
    *   面をまたいで居座るので、**開いている面に関係なく毎回**描き直す。
    */
   private readonly kindBar: KindBarRenderer;
+  /** 🔴 保存した検索の帯(#1038 C1)。器が無い組み方(test)では持たない。 */
+  private readonly savedBar: SavedSearchBar | null;
   private readonly filer: FilerRenderer;
   private readonly launcher: LauncherRenderer;
   private readonly schedule: ScheduleRenderer;
@@ -278,6 +281,8 @@ export class BrowseRouter {
     // ⚠ 器が左の列の中に在るとき(既定の組み方)は左の列だけを歩く ── 2 つとも渡すと同じ要素を 2 度拾う(#1087)
     this.roots = sidebar.contains(host) ? [sidebar] : [sidebar, host];
     this.kindBar = new KindBarRenderer(sidebar);
+    const savedHost = sidebar.querySelector<HTMLElement>('[data-pkc-region="saved-searches"]');
+    this.savedBar = savedHost === null ? null : new SavedSearchBar(savedHost, 'filter');
     this.filer = new FilerRenderer(this.panes.filer);
     // 🔴 取り込んだ絵を出すために貸し口を渡す(#856 段②)── 渡さなければ字と図案だけ出る
     this.launcher = new LauncherRenderer(this.panes.launcher, undefined, assets);
@@ -359,6 +364,8 @@ export class BrowseRouter {
     // 🔴 **札の帯は面に関係なく描く**(#478)── 面の中の renderer に持たせると、
     //    その面を開いていない間は**古い DOM のまま**になり、押しても嘘をつく。
     this.kindBar.render(state, mode);
+    // 保存した検索の帯も面に関係なく描く(語と札は面をまたいで効いているため。種類の札と同じ理由)
+    this.savedBar?.render(state);
     /**
      * 🔴 **戻る・進むの生死も面に関係なく合わせる**(#190 → #813 段③-a)。
      * ⚠ 選択と連動して動くことが多いが、掃除(`pruneHistory`)だけが動く回もあるので、
