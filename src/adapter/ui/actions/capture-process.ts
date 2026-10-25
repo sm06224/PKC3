@@ -190,13 +190,13 @@ export function createCaptureProcessor(deps: CaptureProcessDeps): CaptureProcess
             );
             if (!r.ok) {
               if (r.reason === 'refused' && r.error === EDIT_ELSEWHERE_ERROR) {
-                say(`「${item.name}」への${spec.label}の結果は、別のタブまたはウィンドウで編集中なので足していません。そちらを保存するか閉じてから、もう一度押してください`);
+                say(`「${item.name}」への「${spec.label}」の結果は、別のタブまたはウィンドウで編集中なので足していません。そちらを保存するか閉じてから、もう一度押してください`);
               } else if (!deps.dispatcher.getState().entryMetas.has(lid)) {
-                say(`「${item.name}」への${spec.label}の結果は、書き先のノートが見つからなかったので足していません`);
+                say(`「${item.name}」への「${spec.label}」の結果は、書き先のノートが見つからなかったので足していません`);
               } else if (r.reason === 'timeout') {
-                say(`「${item.name}」への${spec.label}の結果が足せたかどうか確かめられませんでした。ノートを開いて確かめてください`);
+                say(`「${item.name}」への「${spec.label}」の結果を足せたかどうか確かめられませんでした。ノートを開いて確かめてください`);
               } else if (r.reason === 'failed') {
-                say(`「${item.name}」への${spec.label}の結果を足せませんでした(${r.error ?? '保存できませんでした'})`);
+                say(`「${item.name}」への「${spec.label}」の結果を足せませんでした(${r.error ?? '保存できませんでした'})`);
               }
               return;
             }
@@ -210,9 +210,9 @@ export function createCaptureProcessor(deps: CaptureProcessDeps): CaptureProcess
         const held = queue.push(() => (writing = write()), lid);
         holdsActive = held;
         await writing;
-        if (held) say(`「${item.name}」の${spec.label}の結果は、編集中なのでまだ足していません。編集を終えると、ノートの末尾に足します`);
+        if (held) say(`「${item.name}」の「${spec.label}」の結果は、編集中なのでまだ足していません。編集を終えると、ノートの末尾に足します`);
       } catch (e: unknown) {
-        fail(`${spec.label}を行えませんでした(${errorText(e)})`);
+        fail(`「${spec.label}」を行えませんでした(${errorText(e)})`);
       } finally {
         if (!finished) deps.notify('');
         // ⚠ **必ず解く** ── 解かないと、1 度失敗しただけで以後ずっと断るようになる

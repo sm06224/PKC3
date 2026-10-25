@@ -3745,6 +3745,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     readBody: async (lid) => ((await client.request({ op: 'getBody', cid, lid })) as string | null) ?? null,
     tools: createCaptureTools({
       foldStill: (blob) => videoClient.foldStill(blob),
+      scenes: (blob) => videoClient.scenes(blob),
+      decode16k: (blob) => decodeToMono16k(blob),
+      now: () => new Date(),
     }),
     parentOf: (lid) => {
       const st = dispatcher.getState();

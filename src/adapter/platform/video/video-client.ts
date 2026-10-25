@@ -25,6 +25,7 @@ import {
   type VideoJobResult,
   type VideoFoldResult,
   type VideoPictureResult,
+  type VideoScenesResult,
   type VideoScanResult,
 } from './video-codec';
 import { precisePlanSpec, type VideoScan } from '@features/video/webm-vp8';
@@ -140,6 +141,11 @@ export class VideoClient {
   /** 🔴 静止している区間を畳む(#952 A2)。⚠ 断る理由は**値で返る**。 */
   async foldStill(blob: Blob): Promise<VideoFoldResult> {
     return (await this.run({ op: 'fold-still', blob })) as VideoFoldResult;
+  }
+
+  /** 🔴 場面が変わる所を見つける(#952 A4)。⚠ 断る理由は**値で返る**。 */
+  async scenes(blob: Blob): Promise<VideoScenesResult> {
+    return (await this.run({ op: 'scenes', blob })) as VideoScenesResult;
   }
 
   dispose(): void {

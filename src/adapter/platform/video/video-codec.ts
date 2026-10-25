@@ -27,6 +27,7 @@
  *   確認つきの道へ倒さない。通らなければ環境の失敗として「使えない」に倒す
  */
 import { planFoldStill } from '@features/video/fold-still';
+import { sceneStartsFromFrames } from '@features/capture/chapters';
 import {
   planPictureOnly,
   planVideoTrim,
@@ -77,6 +78,11 @@ export type VideoJob =
   | {
       /** 🔴 静止している区間を畳む(#952 A2)。範囲を持たない。 */
       readonly op: 'fold-still';
+      readonly blob: Blob;
+    }
+  | {
+      /** 🔴 場面が変わる所を見つける(#952 A4)。範囲を持たない。 */
+      readonly op: 'scenes';
       readonly blob: Blob;
     };
 
@@ -146,7 +152,17 @@ export type VideoFoldResult =
     }
   | { readonly ok: false; readonly reason: VideoTrimRefusal | 'nothing-to-fold' };
 
-export type VideoJobResult = VideoScanResult | VideoCutResult | VideoPictureResult | VideoFoldResult;
+/** 場面の頭の一覧(#952 A4)。`startsMs` は 0 から始まり昇順。 */
+export type VideoScenesResult =
+  | { readonly ok: true; readonly startsMs: readonly number[]; readonly sourceEndMs: number }
+  | { readonly ok: false; readonly reason: VideoTrimRefusal };
+
+export type VideoJobResult =
+  | VideoScanResult
+  | VideoCutResult
+  | VideoPictureResult
+  | VideoFoldResult
+  | VideoScenesResult;
 
 /** `Blob` を窓で読む口。 */
 export function blobSource(blob: Blob): ByteSource {
@@ -646,9 +662,24 @@ export async function foldStillVideo(job: { blob: Blob }): Promise<VideoFoldResu
   return { ok: true, blob, durationMs: p.durationMs, runs: p.runs, droppedFrames: p.droppedFrames, foldedMs: p.foldedMs };
 }
 
+/**
+ * 🔴 **場面が変わる所を見つける**(#952 A4)。終わりまで窓で読み、映像フレームの大きさだけを見る(復号しない)。
+ * ⚠ 例外を投げない(壊れた file は断る理由を値で返る)。
+ */
+export async function scenesVideo(job: { blob: Blob }): Promise<VideoScenesResult> {
+  const scanned = await scanWebmVideo(blobSource(job.blob), Number.POSITIVE_INFINITY);
+  if (!scanned.ok) return scanned;
+  const { scan } = scanned;
+  const frames = scan.blocks
+    .filter((b) => b.track === scan.videoTrack)
+    .map((b) => ({ ms: b.ms, bytes: b.dataEnd - b.dataStart, key: b.key }));
+  return { ok: true, startsMs: sceneStartsFromFrames(frames), sourceEndMs: scan.sourceEndMs };
+}
+
 /** ワーカー / その場の両方が通る 1 本の入口。 */
 export function runVideoJob(job: VideoJob, api?: CodecApi | null): Promise<VideoJobResult> {
   if (job.op === 'picture-only') return pictureOnlyVideo(job);
   if (job.op === 'fold-still') return foldStillVideo(job);
+  if (job.op === 'scenes') return scenesVideo(job);
   return job.op === 'scan' ? scanVideo(job, api) : cutVideo(job, api);
 }
