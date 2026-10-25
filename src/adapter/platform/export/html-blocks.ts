@@ -235,9 +235,15 @@ export function htmlToDocxBlocks(
    * 呼び側が `assetKey` から bytes と実寸を解いて `holder` に書き込む。⚠ 書き込まなければ、その場に「入れられませんでした」が出る。
    */
   inlineImages: { holder: DocxRunImage; assetKey: string }[];
+  /**
+   * 🔴 **本文のアイコン(`:home:`)の預かり**(#853。`inlineImages` を渡したときだけ入る = Word)。
+   * 呼び側が `name`(`data-pkc-symbol`)から PNG を焼いて `holder` に書き込む。⚠ 書き込まなければ、その場に「入れられませんでした」が出る。
+   */
+  inlineIcons: { holder: DocxRunImage; name: string }[];
 } {
   const inline = opts.inlineImages === true;
   const inlineImages: { holder: DocxRunImage; assetKey: string }[] = [];
+  const inlineIcons: { holder: DocxRunImage; name: string }[] = [];
   const blocks: DocxBlock[] = [];
   const images: { at: number; assetKey: string; alt: string; look?: ImageLook }[] = [];
   const figures: { at: number; kind: string; source: string }[] = [];
@@ -314,6 +320,20 @@ export function htmlToDocxBlocks(
       // 🔑 脚注の戻りリンク(↩︎)は文書では要らない(各脚注の行末に付いてしまう)
       if (el.classList.contains('footnote-backref')) continue;
       if (RUN_BREAK_TAGS.has(tag)) breakRun(out, style);
+      /**
+       * 🔴 **本文のアイコン(`:home:`)は、段落の中の小さな画像として預ける**(#853)。
+       * ⚠ 器は字を持たない(絵は CSS の `::before`)ので、素通しすると Word では**黙って消える**。
+       *   絵そのものは呼び側が書体から PNG に焼く。PowerPoint(`inline` でない)は今までどおり入れない。
+       */
+      if (inline && el.hasAttribute('data-pkc-icon')) {
+        const name = el.getAttribute('data-pkc-symbol') ?? '';
+        if (/^[a-z0-9-]+$/.test(name)) {
+          const holder: DocxRunImage = { alt: el.getAttribute('aria-label') || 'アイコン' };
+          out.push({ text: '', image: holder });
+          inlineIcons.push({ holder, name });
+          continue;
+        }
+      }
       const assetKey = el.tagName.toLowerCase() === 'img' ? el.getAttribute('data-pkc-asset-key') : null;
       if (assetKey !== null && assetKey !== '') {
         /**
@@ -787,5 +807,5 @@ export function htmlToDocxBlocks(
   };
 
   walkBlocks(doc.body);
-  return { blocks, skipped, images, figures, inlineSkipped, inlineImages };
+  return { blocks, skipped, images, figures, inlineSkipped, inlineImages, inlineIcons };
 }

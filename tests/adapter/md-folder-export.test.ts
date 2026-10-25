@@ -170,6 +170,7 @@ function setup(over: Partial<ExportDeps> = {}, metas: EntryMeta[] = [noteMeta()]
     settle: async () => {},
     renderFigure: async () => null,
     renderFigureVector: async () => null,
+    renderIcon: async () => null,
     askSql: async () => {
       throw new Error('引かない');
     },

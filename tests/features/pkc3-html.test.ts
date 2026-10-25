@@ -246,6 +246,24 @@ describe('可搬 HTML', () => {
     expect(text, '見本の色の変数が書き出しに載っている').not.toContain('--pkc-swatch');
   });
 
+  it('🔴 本文のアイコン(:home:)は書き出した HTML にも出る(要素と、書体・符号位置の規則が載る。#853)', async () => {
+    const out = await writePortableHtml(
+      source({ entries: [{ lid: 'n1', body: '家は :home: です\n' }] }),
+      NOW,
+    );
+    const text = await out.blob.text();
+    const data = await dataOf(out.blob);
+    // 要素が本文に載っている(黙って消えない)
+    expect(data.entries[0]!.html, '本文のアイコンの要素が無い').toContain('data-pkc-symbol=');
+    expect(data.entries[0]!.html).toContain('home');
+    // 書体は data: URL で焼かれている(外のファイルに頼らない)
+    expect(text, '書体が焼かれていない').toContain("font-family:'PKC Symbols'");
+    expect(text, '書体が data: URL でない').toMatch(/url\(data:font\/woff2;base64,[A-Za-z0-9+/=]{1000,}\)/);
+    // 絵ごとの符号位置(home)と、枠の共通規則
+    expect(text, 'home の符号位置が無い').toMatch(/\[data-pkc-icon\]\[data-pkc-symbol=['"]home['"]\]::before\{content:/);
+    expect(text, '枠の共通規則が無い').toMatch(/\[data-pkc-icon\]\{[^}]*font-family:'PKC Symbols'/);
+  });
+
   it('escapeForScriptData は `<` を退避し、値は変えない', () => {
     expect(escapeForScriptData('a</script>b<!--c')).toBe('a\\u003c/script>b\\u003c!--c');
     expect(escapeForScriptData('x > y')).toBe('x > y'); // それ以外は触らない
@@ -1998,7 +2016,10 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
      * 数え上げる。焼いた CSS の位置は**抜き出し器を呼んで突合**する
      * (`indexOf` の目印より確実で、「一字一句そのまま載っている」も同時に pin できる)。
      */
-    const baked = extractBodyCss(APP_CSS, TOKENS_CSS).css;
+    const baked = extractBodyCss(APP_CSS, TOKENS_CSS, {
+      generatedCss: readFileSync('src/styles/icons.generated.css', 'utf8'),
+      fontBase64: readFileSync('src/styles/fonts/pkc-symbols.woff2').toString('base64'),
+    }).css;
     const at = css.indexOf(baked);
     expect(at, '焼いた CSS がそのままの字面で載っていない').toBeGreaterThan(0);
     // 焼いた分より前に `.b` の規則が並んでいる(空振り防止)

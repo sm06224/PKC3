@@ -65,6 +65,44 @@ export interface BodyCss {
    * ⚠ だから plugin 側はこれが空でなければ **build を止める**。
    */
   readonly missing: readonly string[];
+  /**
+   * 🔴 **焼いた本文アイコン(`:home:`)の規則数**(#853)。書体(`@font-face`)と
+   * `[data-pkc-icon]` の共通規則、`icons.generated.css` の符号位置。0 = 焼いていない。
+   */
+  readonly iconRuleCount: number;
+}
+
+/** 本文アイコンの書体と符号位置(`extractBodyCss` の第 3 引数)。 */
+export interface BodyIcons {
+  /** `src/styles/icons.generated.css` の全文。 */
+  readonly generatedCss: string;
+  /** `src/styles/fonts/pkc-symbols.woff2` の base64。 */
+  readonly fontBase64: string;
+}
+
+/** app.css から抜く、アイコンの枠と重ね描きの共通規則(これだけ。tone の規則は持ち込まない)。 */
+const ICON_BASE_SELECTORS: readonly string[] = [
+  '[data-pkc-icon]',
+  '[data-pkc-icon]::before',
+  '[data-pkc-icon]::after',
+];
+
+/**
+ * 🔴 **本文のアイコン(`:home:`)を書き出し先でも出す規則一式**(#853)。
+ *
+ * ⚠ 書体は **data: URL で焼く**(書き出した HTML は単体で開かれる。外のファイルは無い)。
+ * ⚠ tone(色)は持ち込まない ── 本文のアイコンは tone を持たず、既定(無彩色 = `currentColor`)で出る。
+ */
+function iconCss(appCss: string, icons: BodyIcons): { css: string; count: number } {
+  const base = parseRules(appCss).filter(
+    (r) => r.at.length === 0 && ICON_BASE_SELECTORS.includes(r.selector),
+  );
+  const gen = parseRules(icons.generatedCss).filter((r) => r.at.length === 0);
+  const face =
+    `@font-face{font-family:'PKC Symbols';font-style:normal;font-weight:normal;font-display:block;` +
+    `src:url(data:font/woff2;base64,${icons.fontBase64}) format('woff2')}`;
+  const rules = [...base, ...gen].map((r) => `${r.selector}{${r.body}}`).join('\n');
+  return { css: `${face}\n${rules}`, count: base.length + gen.length };
 }
 
 /** コメントを落とす。⚠ 文字列の中の `/*` は CSS には出ないので単純置換で足りる。 */
@@ -345,7 +383,11 @@ const PLACE_INLINE_VARS: readonly string[] = [
  * ⚠ `--pkc-blank-count` は renderer が inline style で渡す(トークンではない)ので
  * 焼かない ── 焼くと空行の数がその値で固定される。
  */
-export function extractBodyCss(appCss: string, tokensCss: string): BodyCss {
+export function extractBodyCss(
+  appCss: string,
+  tokensCss: string,
+  icons?: BodyIcons,
+): BodyCss {
   const kept = parseRules(appCss).filter((r) => isBodyRule(r.selector));
   const tokens = readTokens(tokensCss);
   const vars = new Set<string>();
@@ -399,6 +441,13 @@ export function extractBodyCss(appCss: string, tokensCss: string): BodyCss {
     const opens = key.split('\u0000');
     parts.push(`${opens.map((o) => `${o}{`).join('')}${body}${'}'.repeat(opens.length)}`);
   }
+  // 🔴 本文アイコン(#853)。⚠ 本文の規則ではない(`.pkc-md-rendered` 起点でない)ので audit の本文規則数には数えない
+  let iconRuleCount = 0;
+  if (icons !== undefined) {
+    const ic = iconCss(appCss, icons);
+    iconRuleCount = ic.count;
+    parts.push(ic.css);
+  }
   // 「基底の層(幾何 + light)に定義が在るか」で見る ── dark にしか無い変数は
   // 明るい環境で無効になるので、それも欠落として数える
   const missing = [...vars].filter((v) => !tokens.invariant.has(v) && !tokens.light.has(v)).sort();
@@ -407,6 +456,7 @@ export function extractBodyCss(appCss: string, tokensCss: string): BodyCss {
     vars: [...vars].sort(),
     ruleCount: kept.length,
     missing,
+    iconRuleCount,
   };
 }
 
@@ -509,6 +559,16 @@ export function auditBodyCss(out: BodyCss): string[] {
   }
   if (emitted > MAX_RULES) {
     bad.push(`焼いた CSS の本文の規則が ${emitted} 本あります(上限 ${MAX_RULES}。器が混ざった?)`);
+  }
+  // 🔴 アイコンを焼く指定なら、書体と符号位置が出力に在ること(#853)
+  if (out.iconRuleCount > 0) {
+    if (!css.includes('@font-face') || !css.includes('data:font/woff2;base64,')) {
+      bad.push('本文アイコンの書体(@font-face / data: URL)が焼かれていません');
+    }
+    const emittedIcons = (css.match(/data-pkc-symbol=/g) ?? []).length;
+    if (emittedIcons < 10) {
+      bad.push(`本文アイコンの符号位置が ${emittedIcons} 本しか焼かれていません`);
+    }
   }
   // ⚠ 印刷の層も落ちうる ── 落ちると紙で改頁が起きず、見出しが行末で独りになる
   if (!css.includes('@media print{')) {

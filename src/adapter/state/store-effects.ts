@@ -99,6 +99,7 @@ import {
 } from '@features/query/sql-guest-source';
 import type { SqliteExportedTable } from '@features/query/sqlite-ndjson';
 import { EMPTY_DUCK_COPY, copyDigestNotes, type DuckDbCopyReport } from '@features/query/duckdb-copy-report';
+import { userCopyOf } from '@features/query/duckdb-copy';
 // 🔴 手持ちのファイルも同じ選び所から開く(#854 段②)
 import { isSqlLocalFileLid } from '@features/query/sql-local-file';
 import { duckRunFailureText, sqlRunFailureText } from '@features/query/sql-guard';
@@ -1572,6 +1573,45 @@ export function connectStoreEffects(
               sql,
               error: 'このタブの PKC3 が古いままのため、DuckDB で SQL を実行できません。再読み込みしてください',
             });
+            break;
+          }
+          /**
+           * 🔴 **`COPY (…) TO 'x.csv'` は、書いたファイルをダウンロードにする**(#918)。
+           * ⚠ 判定は `userCopyOf` の 1 本(字の門 `checkDuckDbRunSql` と同じ)。打った名前は器の中の path にならず、
+           *   ダウンロードの名前にだけなる。終わりは必ず `SQL_SAVED` か `SQL_RUN_FAILED`(どちらも `running` を降ろす)。
+           */
+          const userCopy = userCopyOf(sql);
+          if (userCopy !== null && userCopy.ok) {
+            const exporter = opts.exportDuckDbParquet;
+            const download = opts.downloadFile;
+            if (exporter === undefined || download === undefined) {
+              dispatcher.dispatch({
+                type: 'SQL_RUN_FAILED',
+                token,
+                sql,
+                error: 'このタブの PKC3 が古いままのため、COPY で書き出せません。再読み込みしてください',
+              });
+              break;
+            }
+            void exporter({
+              sql,
+              sources: inputs,
+              onLoad: () => {
+                if (disposed) return;
+                dispatcher.dispatch({ type: 'SQL_DUCK_LOADING', token });
+              },
+            }).then(
+              (bytes) => {
+                if (disposed) return;
+                // ⚠ bytes は Blob へ移したら手放す(この関数の外へ持ち出さない)
+                download(userCopy.fileName, new Blob([bytes as Uint8Array<ArrayBuffer>], { type: userCopy.mime }));
+                dispatcher.dispatch({ type: 'SQL_SAVED', title: userCopy.fileName, kind: 'file' });
+              },
+              (e: unknown) => {
+                if (disposed) return;
+                dispatcher.dispatch({ type: 'SQL_RUN_FAILED', token, sql, error: duckRunFailureText(errorText(e)) });
+              },
+            );
             break;
           }
           void duck({

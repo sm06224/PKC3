@@ -60,7 +60,7 @@ test('🔴 情報ペインの「閲覧用 HTML」で、そのノートだけの 
   await page.fill('[data-pkc-field="editor-title"]', '配る資料');
   await page.fill(
     '[data-pkc-field="editor-body"]',
-    ['# 配る見出し', '', 'ふつうの段落と **太字**。', '', '- 箇条書き', '', '読めない日付 @2026-1-5x の件', '', `[入っていない先](entry:${otherLid})`].join('\n'),
+    ['# 配る見出し', '', 'ふつうの段落と **太字**。', '', '- 箇条書き', '', '読めない日付 @2026-1-5x の件', '', `[入っていない先](entry:${otherLid})`, '', 'アイコン :home: の行'].join('\n'),
   );
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
@@ -117,6 +117,46 @@ test('🔴 情報ペインの「閲覧用 HTML」で、そのノートだけの 
     }),
     '薄い字・点線の下線になっていない',
   ).toEqual({ opacity: '0.6', line: 'underline', style: 'dotted' });
+  /**
+   * 🔴 **#853 本文のアイコン(`:home:`)が、配った file を別ページで開いても豆腐でない**。
+   * ⚠ 対照群に「書体に無い符号位置」を同じ書体で描いて、画素が違うことで見る
+   *   (豆腐も送り幅は同じなので、幅だけでは割れない ── `icon-font.smoke.spec.ts` と同じ作法)。
+   * 🔑 新しい起動は足さない ── 上で開いた配布 file の同じ page で見る。
+   */
+  const icon = viewer.locator('[data-pkc-icon][data-pkc-symbol="home"]');
+  await expect(icon, '配った HTML に :home: の器が出ていない').toHaveCount(1);
+  const iconOut = await icon.evaluate(async (el) => {
+    const before = getComputedStyle(el, '::before');
+    const family = before.fontFamily;
+    const content = before.content.replace(/^["']|["']$/g, '');
+    await document.fonts.ready;
+    const FAMILY = '"PKC Symbols"';
+    const finger = (ch: string): string => {
+      const c = document.createElement('canvas');
+      c.width = 64;
+      c.height = 64;
+      const ctx = c.getContext('2d')!;
+      ctx.font = `48px ${FAMILY}`;
+      ctx.textBaseline = 'middle';
+      ctx.fillText(ch, 8, 32);
+      const d = ctx.getImageData(0, 0, 64, 64).data;
+      let h = '';
+      for (let i = 3; i < d.length; i += 4) h += d[i]! > 0 ? '1' : '0';
+      return h;
+    };
+    return {
+      family,
+      content,
+      loaded: document.fonts.check(`16px ${FAMILY}`, content),
+      glyph: finger(content),
+      tofu: finger(String.fromCodePoint(0xf000)),
+    };
+  });
+  expect(iconOut.family, '🔴 ::before の書体が埋め込みの PKC Symbols でない').toContain('PKC Symbols');
+  expect(iconOut.content.length, '🔴 ::before の字が空(符号位置が焼かれていない)').toBeGreaterThan(0);
+  expect(iconOut.loaded, '🔴 配った file の書体が読み込まれていない').toBe(true);
+  expect(iconOut.glyph.includes('1'), '🔴 描いた絵が空').toBe(true);
+  expect(iconOut.glyph, '🔴 アイコンが豆腐(未定義の符号位置と同じ絵)になっている').not.toBe(iconOut.tofu);
   /**
    * 🔴 台帳 #1852 束 S1(依頼 77-2 B)── 幅 360px で開くと、一覧が本文の上に出て、ノートを選ぶと一覧が閉じる。
    * 🔑 起動を増やさない ── 上で開いた配布 file を、同じ page で狭くする。

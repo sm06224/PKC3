@@ -109,7 +109,7 @@ describe('🔴 DuckDB でも、白名簿の外は断る', () => {
       'ALTER TABLE t ADD COLUMN b INT',
       'TRUNCATE t',
       'ATTACH \'x.db\'',
-      'COPY t TO \'out.csv\'',
+      'COPY t FROM \'in.csv\'',
       'EXPORT DATABASE \'d\'',
       'INSTALL httpfs',
       'LOAD httpfs',
@@ -150,7 +150,7 @@ describe('🔴 DuckDB でも、白名簿の外は断る', () => {
   });
 
   it('🔴 断り文は「ここは読むだけ」と言わず、書き込める形を挙げる', () => {
-    for (const sql of ['ALTER TABLE t ADD COLUMN b INT', 'ATTACH \'x.db\'', "COPY t TO 'o.csv'"]) {
+    for (const sql of ['ALTER TABLE t ADD COLUMN b INT', 'ATTACH \'x.db\'', "EXPORT DATABASE 'd'"]) {
       const r = checkDuckDbRunSql(sql);
       expect(r.why, sql).not.toContain('読むだけ');
       expect(r.why, sql).toContain(DUCKDB_WRITE_FORMS);

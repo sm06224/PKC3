@@ -40,6 +40,8 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
       '',
       'ふつうの段落と **太字**。',
       '',
+      '本文のアイコン :home: の行',
+      '',
       '- 箇条書き',
       '  - 入れ子',
       '',
@@ -97,6 +99,14 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
   expect(text, '見出しが入っていない').toContain('見出し');
   expect(text, '本文が入っていない').toContain('ふつうの段落と');
   expect(text, '箇条書きが numbering を指していない').toContain('<w:numId');
+  /**
+   * 🔴 **#853 本文のアイコン(`:home:`)は Word に画像(PNG)で入る**。
+   * ⚠ 焼くのは実ブラウザの canvas + 書体(unit は node で届かない)。入らないと Word で黙って消える。
+   * 🔑 この時点の本文に画像の添付は無い ── `<w:pict>` はアイコンの分だけ。
+   */
+  expect(text, '🔴 アイコンが Word に画像として入っていない').toContain('<w:pict>');
+  expect(text, '🔴 アイコンが入れられなかった').not.toContain('入れられませんでした');
+  expect(text, '🔴 アイコンの PNG が media に入っていない').toMatch(/word\/media\/[^"<]*\.png/);
   /**
    * 🔴 **板と線は Word に何も足さない**(#530 段①/段③e)。
    * ⚠ Word に自由配置の面は無いので、位置も線も出さない ── だが**中身の字は出る**。

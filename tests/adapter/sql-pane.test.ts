@@ -4037,12 +4037,54 @@ describe('🔴 DuckDB では表を作れる / sqlite では断る(#918 段⑧)',
     expect(runDuckDbSql).toHaveBeenCalledTimes(0);
   });
 
+  it('🔴 DuckDB で打った COPY (…) TO は、引かずに書き出し、TO の名前のファイルが落ちる(#918)', async () => {
+    const { pick, pickEngine, type, runBtn, note, runDuckDbSql, exportDuckDbParquet, downloadFile, d } = setup();
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    type("COPY (SELECT 品名 FROM csv) TO '品名.csv'");
+    runBtn.click();
+    // 押した直後は実行中の印(終わりを言う SQL_SAVED / SQL_RUN_FAILED が降ろす)
+    expect(d.getState().sqlPage.running, '実行中の印が立っていない').toBe(true);
+    await settle();
+    expect(runDuckDbSql, '答えを引きに行っている(書き出しではない)').toHaveBeenCalledTimes(0);
+    expect(exportDuckDbParquet, '書き出しが頼まれていない').toHaveBeenCalledTimes(1);
+    expect(exportDuckDbParquet.mock.calls[0]![0].sql).toBe("COPY (SELECT 品名 FROM csv) TO '品名.csv'");
+    expect(downloadFile, 'ファイルが落ちていない').toHaveBeenCalledTimes(1);
+    const [name, blob] = downloadFile.mock.calls[0]!;
+    expect(name, 'TO の名前でない').toBe('品名.csv');
+    expect(blob.type).toBe('text/csv');
+    expect(d.getState().sqlPage.running, '終わったのに実行中の印が残っている').toBe(false);
+    expect(note()).toContain('「品名.csv」というファイルに書き出しました');
+  });
+
+  it('🔴 COPY の失敗は理由を言い、実行中の印が残らない。場所を指す名前は引かずに断る(#918)', async () => {
+    const { pick, pickEngine, type, runBtn, note, exportDuckDbParquet, downloadFile, d } = setup();
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    exportDuckDbParquet.mockRejectedValueOnce(new Error('器が落ちた'));
+    type("COPY (SELECT 1) TO 'a.csv'");
+    runBtn.click();
+    await settle();
+    expect(downloadFile).not.toHaveBeenCalled();
+    expect(d.getState().sqlPage.running).toBe(false);
+    expect(note()).toContain('器が落ちた');
+    // 対照: 場所を指す名前は、書き出しの頼みを出さずに断る
+    exportDuckDbParquet.mockClear();
+    type("COPY (SELECT 1) TO '../a.csv'");
+    runBtn.click();
+    await settle();
+    expect(exportDuckDbParquet, '断るはずが頼みが飛んだ').not.toHaveBeenCalled();
+    expect(note()).toContain('ファイル名だけ');
+  });
+
   it('🔴 DuckDB でも、白名簿の外は断る(引きに行かない)', async () => {
     const { pick, pickEngine, type, runBtn, note, runDuckDbSql } = setup();
     pick('db4');
     await settle();
     pickEngine('duckdb');
-    for (const sql of ['CREATE VIEW v AS SELECT 1', "COPY csv TO 'o.csv'", 'ALTER TABLE csv ADD COLUMN x INT']) {
+    for (const sql of ['CREATE VIEW v AS SELECT 1', "EXPORT DATABASE 'd'", 'ALTER TABLE csv ADD COLUMN x INT']) {
       type(sql);
       runBtn.click();
       await settle();

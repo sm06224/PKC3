@@ -57,6 +57,7 @@ function deps(calls: Call[]): ExportDeps {
     report: () => undefined,
     askSql: async () => ({ columns: [], rows: [], truncated: false }),
     settle: async () => {},
+    renderIcon: async () => null,
     // 描けた SVG を返す(ベクタの道を通す)── 対照群として、返さない回も下で作る
     renderFigureVector: async (_k, _s, paper) => {
       calls.push({ via: 'vector', paper });

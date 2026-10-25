@@ -44,6 +44,7 @@ function deps(src: ArchiveSource, reports: string[][]): ExportDeps {
     askSql: async () => ({ columns: [], rows: [], truncated: false }),
     settle: async () => {},
     renderFigureVector: async () => null,
+    renderIcon: async () => null,
     renderFigure: async () => null,
     renderBody: async (t, o) => renderMarkdown(t, o),
     now: () => new Date('2026-10-02T00:00:00Z'),

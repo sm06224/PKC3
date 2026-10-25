@@ -68,6 +68,7 @@ import {
 } from '@features/query/sqlite-ndjson';
 import { duckDbWriteKind } from '@features/query/duckdb-write';
 import { DUCKDB_EXPORT_FILE, parquetCopyOf } from '@features/query/duckdb-export';
+import { userCopyOf } from '@features/query/duckdb-copy';
 import {
   DUCKDB_SCHEMA_COLUMNS_SQL,
   DUCKDB_SCHEMA_FK_SQL,
@@ -534,8 +535,15 @@ export class DuckDbRunner {
     return this.serial(async () => {
       this.dropStaleRefused();
       if (input.sources.length === 0) throw new Error('調べる対象がありません');
-      const copy = parquetCopyOf(input.sql);
+      /**
+       * 🔴 **user が打った `COPY (…) TO 'x.csv'` もここを通る**(#918)。⚠ 書き先は**形式ごとの固定の名前**へ
+       *   書き換わっていて(`userCopyOf`)、打った名前はダウンロードの名前にしかならない。
+       *   打っていなければ従来どおり、答えを Parquet に包む(`parquetCopyOf`)。
+       */
+      const user = userCopyOf(input.sql);
+      const copy = user ?? parquetCopyOf(input.sql);
       if (!copy.ok) throw new Error(copy.why);
+      const file = user !== null && user.ok ? user.file : DUCKDB_EXPORT_FILE;
       const multi = input.sources.length > 1;
       return await this.lease
         .runFile(
@@ -544,7 +552,7 @@ export class DuckDbRunner {
             loadMaxMs: DUCKDB_LOAD_MAX_MS,
             data: this.dataOf(input.sources, input.onLoad),
           },
-          { statements: [copy.statement], file: DUCKDB_EXPORT_FILE },
+          { statements: [copy.statement], file },
         )
         .catch((e: unknown) => {
           throw this.withRefused(e, multi);
