@@ -48,6 +48,7 @@ import {
   type SqlCheck,
 } from './sql-guard';
 import { checkDuckDbSql, stripDuckDbNoise } from './duckdb-guard';
+import { userCopyOf } from './duckdb-copy';
 
 /** 書き込みの種類。 */
 export type DuckDbWriteKind = 'create' | 'insert' | 'update' | 'delete' | 'drop';
@@ -199,6 +200,15 @@ export function checkDuckDbRunSql(input: string): SqlCheck {
   const sql = normalizeOutsideMask(input, stripDuckDbNoise(input));
   const bare = stripDuckDbNoise(sql).trim();
   const head = headOf(bare);
+  /**
+   * 🔴 **`COPY (…) TO 'ファイル名'` は書き出しとして通す**(#918)。⚠ 判定は `userCopyOf` の 1 本
+   *   (走らせる側 `store-effects` も同じ関数で「ダウンロードにする」を決める)。通しても器の中の固定の名前へ
+   *   書き換えて打つので、打った名前が書き先になることは無い。
+   */
+  if (head === 'copy') {
+    const c = userCopyOf(sql);
+    if (c !== null) return c.ok ? { ok: true, why: '', sql } : { ok: false, why: c.why, sql };
+  }
   if (!WRITE_HEADS.includes(head as DuckDbWriteKind)) return rewriteRefusal(checkDuckDbSql(input));
 
   // ⚠ 末尾の `;` は許す(打ち慣れた人が付ける)── 中に残れば 2 文目

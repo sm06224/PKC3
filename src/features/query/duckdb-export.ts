@@ -32,38 +32,29 @@
  *   `WITH` / `VALUES` / `TABLE t` は包んでも同じに書ける。⚠ **`)` の前に改行を入れる** ── 末尾が `-- 注釈` だと
  *   閉じ括弧が注釈に呑まれる。⚠ `EXPLAIN` は包めない(書き出す値打ちも無いので、そもそも選ばせない)。
  */
-import { stripDuckDbNoise, checkDuckDbSql } from './duckdb-guard';
+import { checkDuckDbSql } from './duckdb-guard';
 import { duckDbWriteKind } from './duckdb-write';
+import { DUCKDB_EXPORT_FILES, dropTrailingSemicolon, headWord } from './duckdb-copy';
 
 /** 器の中で Parquet を書く path。⚠ **固定の 1 つ**(user に決めさせない ── このファイルの ②)。 */
-export const DUCKDB_EXPORT_FILE = 'pkc-export.parquet';
+export const DUCKDB_EXPORT_FILE = DUCKDB_EXPORT_FILES.parquet;
 
 /** 上流が書き込みの途中に使う名前(実測。`tmp_` + 書き先)。⚠ 許さないと `Permission Error` で書けない。 */
-export const DUCKDB_EXPORT_TMP = 'tmp_pkc-export.parquet';
+export const DUCKDB_EXPORT_TMP = `tmp_${DUCKDB_EXPORT_FILE}`;
 
 /**
- * 🔴 **塞ぐ前に、書いてよい path を 2 つに絞る**。⚠ **器を起こす所で、塞ぐより前に**打つ
+ * 🔴 **塞ぐ前に、書いてよい path を絞る**(形式ごとの固定の名前 3 つ + 上流の書き込み途中の名前 3 つ。#918 で csv / json を足した)。⚠ **器を起こす所で、塞ぐより前に**打つ
  * (塞いだ後は変えられない ── 実測)。他の path は塞ぎのまま断られる。
  */
-export const DUCKDB_ALLOW_EXPORT_SQL = `SET allowed_paths=['${DUCKDB_EXPORT_FILE}','${DUCKDB_EXPORT_TMP}']`;
+export const DUCKDB_ALLOW_EXPORT_SQL = `SET allowed_paths=[${Object.values(DUCKDB_EXPORT_FILES)
+  .flatMap((f) => [f, `tmp_${f}`])
+  .map((f) => `'${f}'`)
+  .join(',')}]`;
 
 /** 書き出し用に包んだ、器の中で打つ 1 文。 */
 export type ParquetCopy =
   | { readonly ok: true; readonly statement: string }
   | { readonly ok: false; readonly why: string };
-
-/** 末尾の `;` を 1 つだけ外す(注釈や文字列の中の `;` は塗り潰した字で見分ける)。 */
-function dropTrailingSemicolon(sql: string): string {
-  const bare = stripDuckDbNoise(sql);
-  const at = bare.lastIndexOf(';');
-  if (at < 0 || bare.slice(at + 1).trim() !== '') return sql;
-  return sql.slice(0, at) + ' ' + sql.slice(at + 1);
-}
-
-/** 先頭の語(小文字)。⚠ 塗り潰した字から採る。 */
-function headWord(sql: string): string {
-  return /^[a-z]+/iu.exec(stripDuckDbNoise(sql).trim().replace(/^[\s(]+/u, ''))?.[0]?.toLowerCase() ?? '';
-}
 
 /**
  * 🔴 **この答えを Parquet にできるか**(画面の「Parquet」を出すか / 受け口が通すかの**共通の 1 本**。§7)。

@@ -2992,10 +2992,33 @@ DuckDB では `.sqlite` を直接開けないので、**表を読み込んでか
   ウィンドウを閉じると返ります)
 - **内蔵の sqlite では、今までどおり打てません。** この PKC3 のノートに書き込む道は、
   ありません(「読み取り専用です」と出ます)
-- 打てるのは上の 5 つの形だけです。`CREATE VIEW` / `ALTER` / `COPY` / `ATTACH` などは
-  受け付けられません。1 度に打てるのは 1 文だけです
+- 打てるのは上の 5 つの形と、次の節の `COPY (…) TO` だけです。`CREATE VIEW` / `ALTER` /
+  `COPY … FROM` / `ATTACH` などは受け付けられません。1 度に打てるのは 1 文だけです
 - `DROP TABLE csv` のように、**読み込んだ表そのものを消した**ときは、
   このウィンドウでは元に戻せません(閉じて開き直してください)
+
+### DuckDB の `COPY (…) TO` で、答えをファイルにしてダウンロードする
+
+**DuckDB を選んでいるとき**、答えをそのままファイルにして**ダウンロード**できます。画面の「CSV」「Parquet」の
+ボタンと同じ結果を、SQL の中から頼む形です。
+
+    COPY (SELECT 品名, sum(数) AS 計 FROM csv GROUP BY 品名) TO '集計.csv'
+    COPY 集計 TO 'summary.parquet' (COMPRESSION zstd)
+
+実行すると、**TO に書いた名前のファイル**がダウンロードされ、「**『集計.csv』というファイルに書き出しました**(ブラウザの保存先をご覧ください)」と出ます。
+
+- **形式は拡張子で決まります**:`.csv` / `.tsv`(タブ区切り)/ `.parquet` / `.json`(1 行に 1 件)/ `.ndjson` / `.jsonl`。
+  拡張子が別のときは `(FORMAT CSV)` のように **FORMAT** を書きます(FORMAT を書けば拡張子より優先します)
+- **使えるオプション**:CSV は `HEADER`(1 行目に列の名前。書かなければ付きます)/ `DELIMITER` / `QUOTE` / `ESCAPE` /
+  `NULL` / `DATEFORMAT` / `TIMESTAMPFORMAT`、Parquet は `COMPRESSION`(snappy / gzip / zstd / uncompressed)/ `ROW_GROUP_SIZE`、
+  JSON は `ARRAY true`(全体を 1 つの配列にする)。それ以外(複数のファイルを作る `PARTITION_BY` など)は断られます
+- **書き先は「ダウンロードされるファイル名」だけです。** `../x.csv` や `/tmp/x.csv`、`https://…` のように
+  場所を指す書き方は断られます。**この端末のほかの場所には書きません**(DuckDB はブラウザの中の仮想の領域で動いていて、
+  書いたファイルはダウンロードにしたあとすぐに捨てます)
+- 括弧の中は **読む SQL だけ**です(`COPY (DELETE …)` や `EXPLAIN` は断られます)。`COPY 表の名前 TO …` は
+  `SELECT * FROM 表の名前` と同じです
+- **取り込み(`COPY … FROM`)は打てません**。ファイルを調べるときは「ファイルを足す」から選びます
+- 内蔵の sqlite では打てません(DuckDB を選んでいるときだけです)
 
 ### 複数のファイルを並べて、1 つの SQL で調べる
 

@@ -23,8 +23,8 @@ const statementOf = (sql: string): string => {
   return c.statement;
 };
 
-describe('🔴 user の COPY は、書き出しを足しても断る', () => {
-  it('COPY … TO は読む SQL でも書き込みの SQL でも通らない', () => {
+describe('🔴 読むだけの門は COPY を断り続ける(書き出しは別の入口 `userCopyOf` だけ)', () => {
+  it('読むだけの門(checkDuckDbSql)は COPY … TO も EXPORT も通さない', () => {
     for (const sql of [
       "COPY (SELECT 1) TO 'x.parquet' (FORMAT PARQUET)",
       "COPY csv TO 'x.csv'",
@@ -32,6 +32,13 @@ describe('🔴 user の COPY は、書き出しを足しても断る', () => {
       "EXPORT DATABASE 'd'",
     ]) {
       expect(checkDuckDbSql(sql).ok, sql).toBe(false);
+    }
+  });
+
+  it('走らせる門(checkDuckDbRunSql)は COPY … TO を通し、COPY … FROM と EXPORT は断る(#918)', () => {
+    expect(checkDuckDbRunSql("COPY (SELECT 1) TO 'x.parquet' (FORMAT PARQUET)").ok).toBe(true);
+    expect(checkDuckDbRunSql("COPY csv TO 'x.csv'").ok).toBe(true);
+    for (const sql of ["COPY csv FROM 'x.csv'", "EXPORT DATABASE 'd'"]) {
       expect(checkDuckDbRunSql(sql).ok, sql).toBe(false);
     }
   });
@@ -82,11 +89,11 @@ describe('🔴 書き出しが打つ 1 文', () => {
   });
 });
 
-describe('🔴 書いてよい path は 2 つだけ', () => {
-  it('許可の 1 文が、書き先と上流の一時名の 2 つだけを名指しする', () => {
+describe('🔴 書いてよい path は形式ごとの固定の名前だけ', () => {
+  it('許可の 1 文が、書き先 3 つと上流の一時名 3 つだけを名指しする', () => {
     expect(DUCKDB_EXPORT_TMP).toBe('tmp_' + DUCKDB_EXPORT_FILE);
     expect(DUCKDB_ALLOW_EXPORT_SQL).toBe(
-      "SET allowed_paths=['pkc-export.parquet','tmp_pkc-export.parquet']",
+      "SET allowed_paths=['pkc-export.parquet','tmp_pkc-export.parquet','pkc-export.csv','tmp_pkc-export.csv','pkc-export.json','tmp_pkc-export.json']",
     );
   });
 });
