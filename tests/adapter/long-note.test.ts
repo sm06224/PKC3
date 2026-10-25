@@ -85,7 +85,7 @@ describe('長大なノートの印(読む面)', () => {
   });
 });
 
-describe('ライブエディタには印を付けない(打鍵の応答を守る)', () => {
+describe('ライブエディタにも印を付ける(#1467。依頼 28 = B を測り直して覆した)', () => {
   const liveOf = (scroller: HTMLElement): HTMLElement | null =>
     scroller.querySelector<HTMLElement>('[data-pkc-region="editor-live"]');
   const wait = async (scroller: HTMLElement): Promise<void> => {
@@ -95,12 +95,22 @@ describe('ライブエディタには印を付けない(打鍵の応答を守る
     }
   };
 
-  it('🔴 5,000 行を超えるノートでも、編集の器には印を付けない(塊は普通に配置する)', async () => {
+  it('🔴 5,000 行を超えるノートの編集の器には印が付く', async () => {
     const { scroller, r } = setup();
     r.render(state('e', bodyOf(5001), 'editing'));
     await wait(scroller);
     // 空振り防止 ── 編集の器に塊が本当に入っている(入っていなければ「付いていない」は何も言わない)
     expect(liveOf(scroller)?.childElementCount ?? 0, '編集の本文が描けていない').toBeGreaterThan(100);
+    expect(liveOf(scroller)?.hasAttribute(LONG_NOTE_ATTR), '長いノートの編集の器に印が無い').toBe(true);
+  });
+
+  it('⚠ 対照群: 5,000 行以下のノートの編集の器には付かない(1 ピクセルも変えない)', async () => {
+    const { scroller, r } = setup();
+    r.render(state('f', bodyOf(400), 'editing'));
+    for (let i = 0; i < 50 && (liveOf(scroller)?.childElementCount ?? 0) < 20; i++) {
+      await new Promise((res) => setTimeout(res, 20));
+    }
+    expect(liveOf(scroller)?.childElementCount ?? 0, '編集の本文が描けていない').toBeGreaterThan(20);
     expect(liveOf(scroller)?.hasAttribute(LONG_NOTE_ATTR)).toBe(false);
   });
 });

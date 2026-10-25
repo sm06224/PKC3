@@ -2925,6 +2925,8 @@ export class DetailRenderer {
     //    塊が散文だったときだけ `row-swap.ts` が印を付ける(表・コード・図を押した
     //    編集欄まで散文の幅に縮めないため)。
     pane.setAttribute('data-pkc-prose', '');
+    // 🔴 長大なノートだけ、画面の外の塊の配置を飛ばす印(#1467)。⚠ 塊を入れる**前**に付ける(最初の配置から効かせる)
+    syncLongNote(pane, initialBody);
     /**
      * 🔴 **本文が空のとき、薄い字で書き始めを案内する**(#1221)。
      *
@@ -3390,6 +3392,7 @@ export class DetailRenderer {
         fmCard.textContent = '';
         fmCard.removeAttribute('data-pkc-has-frontmatter');
       }
+      pane.removeAttribute(LONG_NOTE_ATTR); // 退避先の入力欄 1 つに `> *` の規則を掛けない
       pane.append(ta);
       // 退避先は**すでに原文全体**の編集 ── 本文全体に効く道具は使えるようになる
       const bar = this.region?.querySelector<HTMLElement>('[data-pkc-region="format-bar"]');
@@ -3427,8 +3430,14 @@ export class DetailRenderer {
         // ⚠ 材料は**原文**(`body`)── 描いているのは情報を外した側なので、
         //    そちらからでは globals(frontmatter に書く)が 1 つも見えない
         applyDocumentGlobals(pane, extractDocumentGlobals(body));
-        // ⚠ ライブエディタには `data-pkc-long-note` を付けない(#1467)。付けると打鍵の応答が悪くなる
-        //   (20,000 行の実測:p50 28 → 33 ms、p95 43 → 55 ms)。編集中は塊を普通に配置する。
+        /**
+         * 🔴 **ライブエディタにも `data-pkc-long-note` を付ける**(#1467。🟣 依頼 28 = B「付けない」を、測り直して覆した)。
+         * 依頼 28 の根拠は「20,000 行で打鍵 p50 28 → 33 ms / p95 43 → 55 ms」だった。測り直すと(20,000 行・
+         * フル Chromium・n=40 の打鍵を交互 2 回ずつ)p50 22〜25 → 22〜26 ms、p95 26〜27 → 28〜33 ms で**揺れの範囲**。
+         * 一方、編集に入る待ちは 1.0〜1.1 秒 → 0.43〜0.63 秒(`docs/development/long-note-open-save-2026-10.md` §11)。
+         * ⚠ 塊の差分(`swap.update`)で行数が 5,000 を跨いだら印を付け外しする(判定は `long-note.ts` の 1 本)。
+         */
+        syncLongNote(pane, body);
       },
       (e) => {
         if (!pane.isConnected) return;
