@@ -258,8 +258,10 @@ describe('窓を確保済みの回の影の確認(openReservedLocal)', () => {
     expect(a.discarded).toEqual(['w-A']);
     expect(a.calls).toEqual(['plain']);
     const b = rig({ localShadow: SH, staged: STAGED, askLocal: async () => null });
-    openReservedLocal(b.deps);
+    const closes = vi.fn();
+    openReservedLocal({ ...b.deps, onReservedCancel: closes });
     await tick();
+    expect(closes, '「やめる」で確保した窓を閉じていない(空の窓が残る)').toHaveBeenCalledTimes(1);
     expect(b.calls).toEqual([]);
     expect(b.provided).toEqual([]);
     expect(b.local.peek(), '控えたファイルを失った').not.toBeNull();
@@ -271,5 +273,19 @@ describe('窓を確保済みの回の影の確認(openReservedLocal)', () => {
     expect(r.calls, '同期のうちに渡る').toEqual(['plain']);
     expect(r.deps.askLocal).not.toHaveBeenCalled();
     expect(r.calls).not.toContain('open:報告.docx');
+  });
+
+  it('対照群: 通常のタイル(窓をまだ開いていない)で「やめる」を選んでも、閉じる口は呼ばれない / 戻す・保存済みを選んでも呼ばれない', async () => {
+    const closes = vi.fn();
+    const a = rig({ localShadow: SH, staged: STAGED, askLocal: async () => null });
+    openOfficeTile({ ...a.deps, onReservedCancel: closes });
+    await tick();
+    const b = rig({ localShadow: SH, staged: STAGED, askLocal: async () => 'shadow' });
+    openReservedLocal({ ...b.deps, onReservedCancel: closes });
+    await tick();
+    const c = rig({ localShadow: SH, staged: STAGED, askLocal: async () => 'saved' });
+    openReservedLocal({ ...c.deps, onReservedCancel: closes });
+    await tick();
+    expect(closes).not.toHaveBeenCalled();
   });
 });

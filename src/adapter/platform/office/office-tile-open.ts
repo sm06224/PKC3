@@ -50,6 +50,11 @@ export interface OfficeTileDeps {
   readonly notify: (text: string) => void;
   /** 戻した控えの棚の名前を預ける(次の控えか保存が書けたら `discardById` する ── 呼び側の配線)。 */
   readonly afterRestore: (id: string) => void;
+  /**
+   * 🔴 窓を先に確保した回(`openReservedLocal`)で「やめる」が選ばれたとき。確保した窓は文書待ちのまま残るので、
+   * 呼び手が閉じる(空の窓を開きっぱなしにしない)。通常のタイルでは呼ばれない(窓はまだ開いていない)。
+   */
+  readonly onReservedCancel?: () => void;
 }
 
 /** 控えの拡張子に名前を合わせる(`報告.doc` の控えが `.docx` のときなど)。名前が無ければ呼び名を使う。 */
@@ -114,7 +119,11 @@ async function localThenOpen(deps: OfficeTileDeps, q: LocalShadowQuery, reserved
       deps.openPlain();
       return;
     }
-    if (answer === null) return; // やめる: 控えたファイルも一時保存も、そのまま残す
+    if (answer === null) {
+      // やめる: 控えたファイルも一時保存も、そのまま残す。確保した窓は閉じる(空の窓を残さない)
+      if (reserved) deps.onReservedCancel?.();
+      return;
+    }
     if (answer === 'saved') {
       await deps.shadows.discardById(offer.id);
       deps.openPlain();

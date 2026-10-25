@@ -1577,7 +1577,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 Office の行を押した瞬間(最初の await より前)に窓を確保する(#432)── 許可・読み込みは後。判断は `open-local-office.ts`
     reserve: (name) => {
       if (!isOfficeUsable(appOfficePack.isInstalled(), appOfficePack.capability())) return false;
-      officeWindow.open({ name, expectDocument: true });
+      reservedWindowFresh = officeWindow.open({ name, expectDocument: true }).kind === 'opened';
       return true;
     },
     place: appPcFolderPlace,
@@ -2513,7 +2513,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       for (const id of ids) void officeShadows.discardById(id);
     }
   });
-  const officeTileDeps = (openPlain: () => void) => ({
+  /** 🔴 窓を先に確保した回に、その窓を**この回で新しく開いたか**(開いていた窓へ頼んだだけなら、閉じない)。 */
+  let reservedWindowFresh = false;
+  const officeTileDeps = (openPlain: () => void, onReservedCancel?: () => void) => ({
     officeWindow,
     local: localOffice,
     shadows: officeShadows,
@@ -2522,10 +2524,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     openPlain,
     notify: (text: string) => showStatus(text),
     afterRestore: (id: string) => { restoredShelves.push(id); },
+    ...(onReservedCancel === undefined ? {} : { onReservedCancel }),
   });
   const openOfficeTile = () => openOfficeTileWithShadows(officeTileDeps(openOfficeTilePlain));
   // 🔴 窓を先に確保した回(PC タブの Office の行)も、同じ影の確認を通す(依頼 367 A)。判断は `office-tile-open.ts`
-  const openOfficeTileReserved = (openPlain: () => void) => openReservedLocal(officeTileDeps(openPlain));
+  const openOfficeTileReserved = (openPlain: () => void) => openReservedLocal(
+      // 🔴 「やめる」なら、確保した窓を閉じる(新しく開いた窓だけ ── 別の文書を出している窓は閉じない)
+      officeTileDeps(openPlain, () => {
+        if (reservedWindowFresh) officeWindow.requestClose();
+      }),
+    );
   /**
    * Office の窓が固まったことに気づく(#135)。⚠ ここは**渡すだけ** ──
    * 物差しも文言も `office-hang-watch.ts` が持つ(`main.ts` は原文 pin の
