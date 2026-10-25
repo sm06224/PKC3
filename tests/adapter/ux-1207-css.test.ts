@@ -40,7 +40,7 @@ describe('マニュアルの言い分が見た目と揃っている(#1207)', () 
   it('🔴 消えたリンクは「薄い字 + 点線の下線」と書く(2 か所)。「字の色は変わりません」と言い残さない', () => {
     expect(manual.split('薄い字 + 点線の下線').length - 1, '説明が 2 か所そろっていない').toBe(2);
     // 旧い言い分(色は変わらない)が消えたリンクの節に残っていない
-    const at = manual.indexOf('#### リンク先が無いリンク');
+    const at = manual.indexOf('### リンク先が無いリンク');
     expect(at, '節が見つからない(空振り)').toBeGreaterThan(-1);
     const section = manual.slice(at, at + 400);
     expect(section).not.toContain('字の色は変わりません');
