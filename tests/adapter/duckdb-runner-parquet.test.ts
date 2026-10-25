@@ -104,9 +104,33 @@ describe('🔴 Parquet の書き出し(#918 段⑥)', () => {
     expect(readBytes, '相手を読み直している').toHaveBeenCalledTimes(1);
   });
 
-  it('🔴 書き込みの SQL と EXPLAIN と COPY は、器に 1 文も打たずに断る', async () => {
+  it('🔴 user の COPY TO は、書き先を固定の名前へ書き換えて打ち、読む → 外す(#918)', async () => {
+    const { runner, made, readBytes } = make();
+    const bytes = await runner.exportParquet({
+      sql: "COPY (SELECT * FROM csv) TO 'x.csv'",
+      sources: [{ source: SRC, readBytes }],
+    });
+    expect(Array.from(bytes)).toEqual(PAR1);
+    const steps = made[0]?.steps ?? [];
+    expect(steps.slice(3), '形式ごとの固定の名前で COPY → 読む → 外す').toEqual([
+      "COPY (SELECT * FROM (SELECT * FROM csv\n)) TO 'pkc-export.csv' (FORMAT CSV, HEADER true)",
+      'read:pkc-export.csv',
+      'drop:pkc-export.csv',
+    ]);
+    // 🔴 打った名前は器に 1 度も渡っていない
+    expect(steps.join('\n')).not.toContain("TO 'x.csv'");
+  });
+
+  it('🔴 書き込みの SQL と EXPLAIN と COPY FROM と場所を指す COPY TO は、器に 1 文も打たずに断る', async () => {
     const { runner, open, readBytes } = make();
-    for (const sql of ['CREATE TABLE t AS SELECT 1', 'EXPLAIN SELECT 1', "COPY csv TO 'x.csv'", '']) {
+    for (const sql of [
+      'CREATE TABLE t AS SELECT 1',
+      'EXPLAIN SELECT 1',
+      "COPY csv FROM 'x.csv'",
+      "COPY csv TO '../x.csv'",
+      "COPY (DELETE FROM csv) TO 'x.csv'",
+      '',
+    ]) {
       await expect(
         runner.exportParquet({ sql, sources: [{ source: SRC, readBytes }] }),
         sql,

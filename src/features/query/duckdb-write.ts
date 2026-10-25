@@ -202,7 +202,7 @@ export function checkDuckDbRunSql(input: string): SqlCheck {
   const head = headOf(bare);
   /**
    * 🔴 **`COPY (…) TO 'ファイル名'` は書き出しとして通す**(#918)。⚠ 判定は `userCopyOf` の 1 本
-   *   (走らせる側 `store-effects` も同じ関数で「ダウンロードにする」を決める)。通しても器の中の固定の名前へ
+   *   (実行する側 `store-effects` も同じ関数で「ダウンロードにする」を決める)。通しても器の中の固定の名前へ
    *   書き換えて打つので、打った名前が書き先になることは無い。
    */
   if (head === 'copy') {

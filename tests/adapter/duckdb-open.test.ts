@@ -76,7 +76,7 @@ describe('🔴 開いた直後に拡張を読み込む(#682 段④b)', () => {
       'SET autoinstall_known_extensions=false',
       'SET autoload_known_extensions=false',
       // 🔴 書き出し用に許す path は、塞ぐ前(= 器を起こす所)で掛ける(#918 段⑥。塞いだ後は変えられない ── 実測)
-      "SET allowed_paths=['pkc-export.parquet','tmp_pkc-export.parquet']",
+      "SET allowed_paths=['pkc-export.parquet','tmp_pkc-export.parquet','pkc-export.csv','tmp_pkc-export.csv','pkc-export.json','tmp_pkc-export.json']",
       "SET custom_extension_repository='https://x.test/app/duckdb/ext'",
       'INSTALL parquet',
       'LOAD parquet',

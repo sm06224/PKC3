@@ -27,7 +27,7 @@
  *
  * ## 層
  *
- * 純粋層(browser API なし)。判定は**ここ 1 か所**で、字の門(`duckdb-write.ts`)も走らせる側(`store-effects`)も
+ * 純粋層(browser API なし)。判定は**ここ 1 か所**で、字の門(`duckdb-write.ts`)も実行する側(`store-effects`)も
  * 書く側(`duckdb-runner.ts`)も同じ `userCopyOf` を呼ぶ(§7)。
  */
 import { checkDuckDbSql, stripDuckDbNoise } from './duckdb-guard';
@@ -173,7 +173,7 @@ export function userCopyOf(input: string): UserCopy | null {
   }
   const s = input.slice(lo, hi + 1);
   const b = bare0.slice(lo, hi + 1);
-  if (b.includes(';')) return refuse('SQL は 1 文だけ打てます(; で区切った 2 文目は走らせません)');
+  if (b.includes(';')) return refuse('SQL は 1 文だけ打てます(; で区切った 2 文目は実行しません)');
 
   let i = 4; // `copy` の後ろ
   // ⚠ 空白は元の字で数える(塗り潰した字では引用符つきの表の名前が空白に見える)

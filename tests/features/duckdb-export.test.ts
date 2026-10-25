@@ -35,7 +35,7 @@ describe('🔴 読むだけの門は COPY を断り続ける(書き出しは別�
     }
   });
 
-  it('走らせる門(checkDuckDbRunSql)は COPY … TO を通し、COPY … FROM と EXPORT は断る(#918)', () => {
+  it('実行する門(checkDuckDbRunSql)は COPY … TO を通し、COPY … FROM と EXPORT は断る(#918)', () => {
     expect(checkDuckDbRunSql("COPY (SELECT 1) TO 'x.parquet' (FORMAT PARQUET)").ok).toBe(true);
     expect(checkDuckDbRunSql("COPY csv TO 'x.csv'").ok).toBe(true);
     for (const sql of ["COPY csv FROM 'x.csv'", "EXPORT DATABASE 'd'"]) {
