@@ -104,6 +104,7 @@ function exportDeps(): ExportDeps & { files: string[]; reads: { n: number } } {
     notify: () => {},
     settle: async () => {},
     renderFigureVector: async () => null,
+    renderIcon: async () => null,
     renderFigure: async () => null,
     askSql: async () => {
       throw new Error('引かない');

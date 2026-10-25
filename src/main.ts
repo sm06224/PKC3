@@ -3,6 +3,7 @@
 import { errorText, diagramExportErrorText } from '@features/error-text';
 import { APP_GROUP_REORDER_OK_LABEL, FOLDER_EXPORT_NOTE } from '@features/entry-actions';
 import { bootFailureText } from '@features/boot-failure-text';
+import { rasterizeIcon } from './adapter/platform/export/icon-raster';
 import './styles/app.css';
 /**
  * 🔴 **数式の書体**(#707)。KaTeX の CSS は 20 書体の `@font-face` を持ち、
@@ -2880,6 +2881,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // 🔴 `paper` = Word・PowerPoint 用(#1163 依頼 233)── 画面の配色によらず紙の(明るい)配色で描く。閲覧用 HTML は渡さない
         renderFigureVector: async (kind, source, paper) =>
           kind === 'chart' ? null : renderToSvg(source, paper === true ? PRINT_PALETTE : readPalette()),
+        // 🔴 本文のアイコン(`:home:`)を PNG に焼く(#853。Word に画像で埋める)
+        renderIcon: (name) => rasterizeIcon(name),
         renderFigure: async (kind, source, paper) => {
           // 🔴 ` ```svg ` の囲み(#1163 依頼 235)── 原文が SVG そのもの。EMF にできなかった回の PNG(描く器は図と同じ `rasterize`)
           if (kind === 'svg') {

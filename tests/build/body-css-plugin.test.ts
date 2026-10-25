@@ -37,6 +37,10 @@ function brokenRoot(): string {
   mkdirSync(join(dir, 'src/styles'), { recursive: true });
   writeFileSync(join(dir, 'src/styles/app.css'), '.some-other-scope p{color:red}\n', 'utf8');
   copyFileSync('src/styles/tokens.css', join(dir, 'src/styles/tokens.css'));
+  // 本文アイコン(#853)の材料。⚠ 無いと ENOENT で落ち、「焼き込みが壊れています」の枝まで届かない
+  copyFileSync('src/styles/icons.generated.css', join(dir, 'src/styles/icons.generated.css'));
+  mkdirSync(join(dir, 'src/styles/fonts'), { recursive: true });
+  copyFileSync('src/styles/fonts/pkc-symbols.woff2', join(dir, 'src/styles/fonts/pkc-symbols.woff2'));
   return dir;
 }
 

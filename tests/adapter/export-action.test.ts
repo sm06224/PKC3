@@ -86,6 +86,7 @@ function deps(over: Partial<ExportDeps> = {}): ExportDeps & {
     // ⚠ この file は Word を通らない(図は `export-entry-guard.test.ts` が見る)
     // ⚠ ベクタは使わない腕(ラスタ経路を通す)
     renderFigureVector: async () => null,
+    renderIcon: async () => null,
     renderFigure: async () => null,
     // ⚠ この file は SQL の埋め込みを通らない(`sql-embed-export.test.ts` が見る)
     askSql: async () => {

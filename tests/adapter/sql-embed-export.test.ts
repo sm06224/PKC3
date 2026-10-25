@@ -156,6 +156,7 @@ function deps(
     report: () => {},
     settle: async () => {},
     renderFigureVector: async () => null,
+    renderIcon: async () => null,
     renderFigure: async () => null,
     renderBody: async (t, o) => renderMarkdown(t, o),
     askSql,

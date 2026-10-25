@@ -140,6 +140,13 @@ export interface ExportDeps {
     /** 🔴 紙の配色で起こすか(`renderFigure` と同じ ── #1163 依頼 233)。 */
     paper?: boolean,
   ): Promise<string | null>;
+  /**
+   * 🔴 **本文のアイコン(`:home:`)を 1 枚の PNG に焼く**(#853。Word に画像で埋める)。焼けなければ `null`。
+   * ⚠ optional にしない ── 配線が落ちると Word だけアイコンが黙って「入れられませんでした」になる。
+   * 🔑 絵は画面と**同じ書体と符号位置**(`icons.generated.css`)から描く ── 別の絵を持たない。
+   * @returns 正方形の PNG。`px` は文書に置く 1 辺(CSS px)。
+   */
+  renderIcon(name: string): Promise<{ blob: Blob; px: number } | null>;
   now?(): Date;
   /**
    * 🔴 **途中でやめる**(台帳 #1852 束 F2 / 依頼 253 ── 大きいバックアップの書き出し)。⚠ **省略可** ── 無い配線は「やめる」ボタンを出さない。
@@ -826,7 +833,7 @@ async function collectOfficeBlocks(
   // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
   // 🔴 Word は添付の画像を置かれた位置の段落の中へ入れる(依頼 142 ②)。PowerPoint は板に置くので今までどおり
-  const { blocks, images, figures, inlineSkipped, inlineImages } = htmlToDocxBlocks(doc, {
+  const { blocks, images, figures, inlineSkipped, inlineImages, inlineIcons } = htmlToDocxBlocks(doc, {
     inlineImages: target.kind === 'docx',
   });
   // 🔑 数式は Word / PowerPoint では打った字のまま入る ── 閲覧用 HTML と同じ文面で言う(#1087)
@@ -923,6 +930,31 @@ async function collectOfficeBlocks(
     ref.holder.widthPx = size.w;
     ref.holder.heightPx = size.h;
     media.push({ name, blob });
+  }
+  /**
+   * 🔴 **本文のアイコン(`:home:`)を PNG にして入れる**(#853)。同じ絵は 1 枚を共有する(名前ごとに 1 回だけ焼く)。
+   * ⚠ 焼けなければ書かない(その場に「入れられませんでした」の理由が出て、注意の件数にも数える)。
+   */
+  const iconMedia = new Map<string, { name: string; px: number } | null>();
+  for (const ref of inlineIcons) {
+    if (!iconMedia.has(ref.name)) {
+      const drawn = await deps.renderIcon(ref.name).catch(() => null);
+      if (drawn === null) {
+        iconMedia.set(ref.name, null);
+      } else {
+        const name = `media/icon-${ref.name}.png`;
+        media.push({ name, blob: drawn.blob });
+        iconMedia.set(ref.name, { name, px: drawn.px });
+      }
+    }
+    const hit = iconMedia.get(ref.name) ?? null;
+    if (hit === null) {
+      ref.holder.failWhy = 'アイコンを画像にできませんでした';
+      continue;
+    }
+    ref.holder.media = hit.name;
+    ref.holder.widthPx = hit.px;
+    ref.holder.heightPx = hit.px;
   }
   /**
    * 🔴 **図とグラフを焼いて入れる**(#187 段②)。

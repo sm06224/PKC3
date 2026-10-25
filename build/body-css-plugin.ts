@@ -54,7 +54,15 @@ export function bodyCssPlugin(): Plugin {
       //   古い見た目のまま残り、しかも「直したのに変わらない」としか見えない
       this.addWatchFile(appCssPath);
       this.addWatchFile(tokensPath);
-      const out = extractBodyCss(readFileSync(appCssPath, 'utf8'), readFileSync(tokensPath, 'utf8'));
+      // 🔴 本文アイコン(#853)の書体と符号位置も焼く ── 書き出した HTML / 別ウィンドウで絵が消えないように
+      const iconsPath = join(root, 'src/styles/icons.generated.css');
+      const fontPath = join(root, 'src/styles/fonts/pkc-symbols.woff2');
+      this.addWatchFile(iconsPath);
+      this.addWatchFile(fontPath);
+      const out = extractBodyCss(readFileSync(appCssPath, 'utf8'), readFileSync(tokensPath, 'utf8'), {
+        generatedCss: readFileSync(iconsPath, 'utf8'),
+        fontBase64: readFileSync(fontPath).toString('base64'),
+      });
       const bad = auditBodyCss(out);
       if (bad.length > 0) {
         this.error(`本文の CSS の焼き込みが壊れています:\n- ${bad.join('\n- ')}`);

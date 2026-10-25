@@ -103,6 +103,7 @@ function baseDeps(overrides: Partial<ExportDeps> = {}): {
     settle: async () => {},
     renderFigure: async () => null,
     renderFigureVector: async () => null,
+    renderIcon: async () => null,
     // ⚠ この file は SQL の埋め込みを通らない(`sql-embed-export.test.ts` が見る)
     askSql: async () => {
       throw new Error('この test では引かない');

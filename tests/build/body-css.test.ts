@@ -606,3 +606,33 @@ describe('🔴 印刷は白地に濃い字(#1387)', () => {
     expect(block, '強調の色(リンクの字)を戻していない').toContain(`--accent:${lightValue('--accent')}`);
   });
 });
+
+describe('本文のアイコン(:home:)を焼く(#853)', () => {
+  const ICONS = {
+    generatedCss: readFileSync('src/styles/icons.generated.css', 'utf8'),
+    fontBase64: readFileSync('src/styles/fonts/pkc-symbols.woff2').toString('base64'),
+  };
+
+  it('書体は data: URL で、枠の共通規則と絵ごとの符号位置が入り、audit が通る', () => {
+    const out = extractBodyCss(APP, TOKENS, ICONS);
+    expect(out.iconRuleCount, '数が 0 なら空振り').toBeGreaterThan(100);
+    expect(out.css).toContain('data:font/woff2;base64,' + ICONS.fontBase64.slice(0, 40));
+    expect(out.css).toMatch(/\[data-pkc-icon\]\[data-pkc-symbol='home'\]::after\{content:/);
+    // tone の規則は持ち込まない(本文のアイコンは無彩色)
+    expect(out.css).not.toContain('data-pkc-tone');
+    expect(auditBodyCss(out)).toEqual([]);
+  });
+
+  it('対照: 渡さなければ焼かない(既存の呼び手は変わらない)', () => {
+    expect(extractBodyCss(APP, TOKENS).iconRuleCount).toBe(0);
+    expect(extractBodyCss(APP, TOKENS).css).not.toContain('@font-face');
+  });
+
+  it('audit は書体や符号位置の欠落を止める', () => {
+    const out = extractBodyCss(APP, TOKENS, ICONS);
+    const noFace = { ...out, css: out.css.replace('@font-face', '@x-face') };
+    expect(auditBodyCss(noFace).join('\n')).toContain('書体');
+    const noSym = { ...out, css: out.css.replace(/data-pkc-symbol=/g, 'data-x=') };
+    expect(auditBodyCss(noSym).join('\n')).toContain('符号位置');
+  });
+});

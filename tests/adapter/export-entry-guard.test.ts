@@ -61,6 +61,7 @@ function deps(
     // ⚠ 既定は「焼けない」── 図を見る test は自分で差し替える
     // ⚠ ベクタは使わない腕(ラスタ経路を通す)
     renderFigureVector: async () => null,
+    renderIcon: async () => null,
     renderFigure: async () => null,
     // ⚠ この file は SQL の埋め込みを通らない(`sql-embed-export.test.ts` が見る)
     askSql: async () => {
