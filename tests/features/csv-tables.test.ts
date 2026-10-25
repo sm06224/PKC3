@@ -242,6 +242,13 @@ describe('重すぎる組み立ては断る', () => {
     expect(why).toContain('後');
   });
 
+  it('🔴 #968: データ行 0 行でも、列が多すぎれば断る(行 × 列 が 0 になって素通りしない)', () => {
+    expect(csvCellsOverBudget([table('広い', 0, 201)], 200), '見出しだけの広い表が素通り').not.toBeNull();
+    // 対照群: 見出しだけでも、収まる幅なら通す(ちょうどは通す)
+    expect(csvCellsOverBudget([table('広い', 0, 200)], 200)).toBeNull();
+    expect(csvCellsOverBudget([table('狭い', 0, 3)], 200)).toBeNull();
+  });
+
   it('⚠ 既定の上限が効いている(呼び側が渡し忘れても素通りしない)', () => {
     expect(csvCellsOverBudget([table('t', 1, 1)])).toBeNull();
     expect(csvCellsOverBudget([table('t', CSV_TABLE_CELLS_MAX, 2)])).not.toBeNull();

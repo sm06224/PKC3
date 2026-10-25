@@ -118,6 +118,14 @@ describe('file 全体を 1 つの表にする', () => {
       expect(t!.rows.length).toBe(5);
     });
 
+    it('🔴 #968: データ行 0 行でも、列が上限を超えれば断る(見出しだけの広い file)', () => {
+      const wide = Array.from({ length: 30 }, (_, i) => `h${String(i)}`).join(',') + '\n';
+      expect(() => buildCsvAttachmentTable(wide, 'csv', note, 20)).toThrow(/大きすぎ/);
+      // 対照群: 収まる幅なら見出しだけでも通る
+      const ok = buildCsvAttachmentTable('a,b\n', 'csv', note, 20);
+      expect(ok!.rows.length).toBe(0);
+    });
+
     it('⚠ 既定の上限(CSV_TABLE_CELLS_MAX)は、小さい file では効かない(対照群)', () => {
       const t = buildCsvAttachmentTable(body(5), 'csv', note);
       expect(t!.truncated, '小さい file まで切っている').toBe(false);

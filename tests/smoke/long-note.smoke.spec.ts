@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, dismissAnnounce, collectPageErrors } from './helpers';
+import { gotoApp, dismissAnnounce, collectPageErrors, clickReal, modClickReal } from './helpers';
 
 /**
  * 🔴 **長大なノート(5,000 行超)だけ、画面の外の塊の配置を飛ばす**(#1467、裁定 21 = A)。
@@ -17,6 +17,8 @@ import { gotoApp, dismissAnnounce, collectPageErrors } from './helpers';
  * 3. 目次で遠い見出しへ飛ぶと、周りが描かれた後に見出しが**画面の先頭の数 px 以内**へ落ち着く
  * 4. 飛ばした塊の中の字を、ブラウザの検索(Ctrl+F と同じ `window.find`)が見つけられる
  * 5. 紙(印刷)には全部描く
+ * 6. 編集の面(ライブエディタ)にも印が付き、画面の外の塊を飛ばす(依頼 28 = B を測り直して覆した)。
+ *    ⚠ 飛ばしている塊でも、遠い塊を開いて打て、確定すると本文に入る
  */
 
 const HIRAGANA = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらり';
@@ -172,6 +174,39 @@ test('🔴 長大なノートだけ画面の外を飛ばし、目次で飛んだ
     return kids.filter((k) => getComputedStyle(k).contentVisibility !== 'visible').length;
   });
   expect(printed, '印刷で飛ばしたままの塊が残る').toBe(0);
+
+  // ⑥ 編集の面にも印が付き、画面の外の塊を飛ばす。遠い塊を開いて打てる
+  await page.emulateMedia({ media: 'screen' });
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await expect(live, '編集の面に印が付かない').toHaveAttribute('data-pkc-long-note', '', { timeout: 30_000 });
+  await expect
+    .poll(() => live.evaluate((el) => el.childElementCount), { message: '編集の本文が描けていない', timeout: 30_000 })
+    .toBeGreaterThan(1000);
+  const editSkipped = await live.evaluate((el) => {
+    const kids = [...el.children] as HTMLElement[];
+    return {
+      cv: getComputedStyle(kids[10]!).contentVisibility,
+      skipped: kids.filter((k) => !(k.firstElementChild ?? k).checkVisibility({ contentVisibilityAuto: true })).length,
+    };
+  });
+  expect(editSkipped.cv).toBe('auto');
+  expect(editSkipped.skipped, '編集の面で画面の外の塊を飛ばしていない ── 効いていない').toBeGreaterThan(500);
+  // 末尾の段落(飛ばされている)まで送って、Ctrl+クリックで開いて打つ
+  await live.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  const last = live.locator('p', { hasText: '長末尾の目印' });
+  await expect(last).toBeVisible();
+  await modClickReal(page, last);
+  const row = live.locator('[data-pkc-field="row-source"]');
+  await expect(row, '遠い塊が開かない').toBeVisible();
+  await expect(row).toHaveValue(/長末尾の目印/);
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type('ZZZ');
+  await expect(row).toHaveValue(/長末尾の目印ZZZ$/);
+  await page.keyboard.press('Tab');
+  await expect(live, '確定した字が本文に入らない').toContainText('長末尾の目印ZZZ');
 
   expect(errors).toEqual([]);
 });

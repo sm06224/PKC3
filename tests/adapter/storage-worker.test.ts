@@ -3672,6 +3672,15 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
     );
   });
 
+  it('🔴 #968: データ行 0 行で列だけ極端に多い表も、組み立てずに断る', async () => {
+    const header = Array.from({ length: CSV_TABLE_CELLS_MAX + 1 }, (_, i) => `c${String(i)}`).join(',');
+    await write('csv-wide', fence('csv name=横長', [header]));
+    await expect(run('SELECT 1 AS x FROM 横長')).rejects.toThrow(/大きすぎます/);
+    // ⚠ 対照群 ── 断った後もノートは保存できる
+    await write('csv-wide-after', doc('広い表の後に書く'));
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'csv-wide-after' })).toContain('広い表の後に書く');
+  });
+
   it('⚠ 名前は語の丸ごと一致でだけ拾う(売上高 で 売上 を組み立てない)', async () => {
     // 「売上」は在るが、打った字には語として出てこない ⇒ 表は作られない
     await expect(run('SELECT * FROM 売上高')).rejects.toThrow(/no such table/i);

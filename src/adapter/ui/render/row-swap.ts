@@ -340,6 +340,11 @@ interface Active {
   held: { body: string; html: string; ranges: readonly SourceRange[] } | null;
 }
 
+/** 🔴 この字数を超える本文だけ、連続入力のときに開放終端の走査をまとめる(#1467) */
+const OPEN_END_SYNC_MAX_CHARS = 20_000;
+/** 直前の走査からこの時間(ms)以内の入力は、最後の 1 回にまとめる。通常の打鍵の間隔より短い。 */
+const OPEN_END_BURST_MS = 50;
+
 export class RowSwap {
   private view: BlockView = EMPTY_VIEW;
   private body = '';
@@ -355,6 +360,9 @@ export class RowSwap {
    *   開き直し。⚠ **時間では切らない**(ゆっくり押す人が移動できなくなる)。
    */
   private boundaryStep: BoundaryStep = NO_BOUNDARY_STEP;
+  /** 🔴 開放終端の走査(大きな本文のとき)を遅らせている最中の timer と、直前に走らせた時刻(#1467) */
+  private openEndTimer: ReturnType<typeof setTimeout> | null = null;
+  private openEndScannedAt = -Infinity;
   /**
    * 🔴 **確定を外へ渡して、その結果の描き直しをまだ受けていない**。
    *
@@ -1415,6 +1423,34 @@ export class RowSwap {
      *   章の欄と共有する。2 つ目の実装を作らない)。
      */
     sizeTextareaToContent(a.textarea, ROWS_CAP);
+    /**
+     * 🔴 **大きな本文への連続入力で、全文の走査を入力ごとに回さない**(#1467)。
+     * ⚠ 印は見た目だけだが、走査は本文の長さに比例する ── 長い本文を行ごとに流し込む入力
+     *   (500 行で 874 回の `input`)では、回数 × 長さで 2 乗になっていた。
+     * 🔑 直前の走査から {@link OPEN_END_BURST_MS} 以内で、本文が {@link OPEN_END_SYNC_MAX_CHARS} 字を
+     *   超えるときだけ、最後の入力の後に 1 回へまとめる。⚠ 小さな本文は今までどおりその場で印を付ける
+     *   (普通の打鍵は 1 回の間隔が長いので、大きな本文でもその場で走る)。
+     */
+    const ta = a.textarea;
+    const now = performance.now();
+    if (ta.value.length > OPEN_END_SYNC_MAX_CHARS && now - this.openEndScannedAt < OPEN_END_BURST_MS) {
+      if (this.openEndTimer === null) {
+        this.openEndTimer = setTimeout(() => {
+          this.openEndTimer = null;
+          if (this.active === a) this.paintOpenEnd(a);
+        }, OPEN_END_BURST_MS);
+      }
+      return;
+    }
+    if (this.openEndTimer !== null) {
+      clearTimeout(this.openEndTimer);
+      this.openEndTimer = null;
+    }
+    this.paintOpenEnd(a);
+  }
+
+  private paintOpenEnd(a: Active): void {
+    this.openEndScannedAt = performance.now();
     const open = findOpenEnds(a.textarea.value);
     const block = open.find((o) => o.kind !== 'inline') ?? open[0];
     if (block === undefined) a.slot.removeAttribute('data-pkc-open-end');
