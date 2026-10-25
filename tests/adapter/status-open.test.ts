@@ -24,6 +24,7 @@ import {
 } from '../../src/adapter/ui/render/trash-undo';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import {
+  paintStatusBackup,
   paintStatusCreate,
   paintStatusOpen,
   paintStatusRescue,
@@ -439,5 +440,46 @@ describe('知らせの隣の「元に戻す」── AI の書き足し(依頼 3
     const noText = btn();
     paintStatusUndo(noText, { ...base, lastAppend: null, lastAgentAppend: { lid: 'n2' } }, AI);
     expect(noText.hidden).toBe(true);
+  });
+});
+
+describe('保存領域が使えない警告の隣の「バックアップを書き出す」(#1038 D1)', () => {
+  afterEach(() => {
+    document.body.textContent = '';
+  });
+
+  it('器が押し口を持ち export-archive へ繋がる(最初は畳み、警告の有無で出し入れ)', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const regions = buildShell(root);
+    const b = regions.statusBackup;
+    expect(b.getAttribute('data-pkc-action')).toBe('export-archive');
+    expect(b.textContent).toBe('バックアップを書き出す');
+    expect(b.hidden).toBe(true);
+    expect(regions.status.contains(b)).toBe(true);
+    paintStatusBackup(b, true);
+    expect(b.hidden, '警告の隣に出ていない').toBe(false);
+    paintStatusBackup(b, false);
+    expect(b.hidden, '警告が無いのに出ている').toBe(true);
+  });
+
+  it('押すと exportArchive が呼ばれる', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const regions = buildShell(root);
+    const exportArchive = vi.fn();
+    bindActions(root, new Dispatcher(), { exportArchive });
+    regions.statusBackup.hidden = false;
+    regions.statusBackup.click();
+    expect(exportArchive).toHaveBeenCalledTimes(1);
+  });
+
+  it('main.ts が警告の重大度を状態の行と押し口へ渡している(原文 pin)', () => {
+    const code = readFileSync('src/main.ts', 'utf-8')
+      .split('\n')
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join('\n');
+    expect(code).toContain('paintStatusBackup(regions.statusBackup, statusBaseSevere);');
+    expect(code.match(/statusBaseSevere,/g)?.length, 'paint の 2 か所').toBe(2);
   });
 });

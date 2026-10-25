@@ -8619,6 +8619,18 @@ mark[data-pkc-diff-char='del'] {
 [data-pkc-field='status-state'][data-pkc-phase='error'] {
   color: var(--danger);
 }
+/* 🔴 **保存領域が使えない警告**(#1038 D1。「閉じると消えます」)── 灰色 11px の 1 行に埋もれていた。
+ *   ⚠ 書いたものが消える実害の知らせなので危険色 + 太字(色は情報にだけ。`status-state` の error と同じ使い方)。
+ *   ⚠ 隣の `status-backup` が押す口(出し入れは `status-open.ts`)。 */
+[data-pkc-field='status-warning'] {
+  color: var(--danger);
+  font-weight: 700;
+}
+[data-pkc-field='status-backup'] {
+  flex: 0 0 auto;
+  padding: 0 var(--s2);
+  font-size: max(11px, calc(var(--pkc-text-size, 13px) * 11 / 13));
+}
 /* 🔴 **狭すぎる端末への断り書き**(user 裁定 2026-09-04、#671 の裁定 2・3)。
  *
  * ⚠ **押す口を必ず横に置く** ── 字だけ出して消し方が無いのが直す前の形である。

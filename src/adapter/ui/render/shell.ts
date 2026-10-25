@@ -76,6 +76,11 @@ export interface ShellRegions {
    */
   statusRescue: HTMLElement;
   /**
+   * 🔴 **保存領域が使えないときの警告の隣の「バックアップを書き出す」**(#1038 D1)。
+   * ⚠ 押した先は `export-archive` の受け手 1 つ(`binder.ts`)。出し入れは `status-open.ts` の `paintStatusBackup`。
+   */
+  statusBackup: HTMLElement;
+  /**
    * 🔴 **見つからないノートの知らせの隣の「ゴミ箱を開く」**(#1648)。押した先は `show-trash`
    *   の受け手(`binder.ts`)。出し入れは `status-open.ts` の `paintStatusTrash`。
    */
@@ -1146,6 +1151,18 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusRescue.textContent = 'ノートの保存データの確認を開く';
   statusRescue.hidden = true;
   /**
+   * 🔴 **保存領域が使えない警告の隣の「バックアップを書き出す」**(#1038 D1)。
+   *   「閉じると消えます」と言われて、**消える前に出来る手**が行の隣に無かった。
+   *   ⚠ 「開く」と同じ作法 ── 常設で置いて要るときだけ出す(`status-open.ts` が `hidden` を書く)。
+   *   実行の口は `export-archive` の受け手 1 つ(ヘッダーのバックアップと同じ)。
+   */
+  const statusBackup = document.createElement('button');
+  statusBackup.type = 'button';
+  statusBackup.setAttribute('data-pkc-field', 'status-backup');
+  statusBackup.setAttribute('data-pkc-action', 'export-archive');
+  statusBackup.textContent = 'バックアップを書き出す';
+  statusBackup.hidden = true;
+  /**
    * 🔴 **見つからないノートの知らせの隣の「ゴミ箱を開く」**(#1648)。ゴミ箱は左のペインの「フォルダ」の
    *   いちばん下で、知らせの字だけでは辿りにくかった。⚠ 「開く」「元に戻す」と同じ作法 ── 常設で置いて、
    *   要るときだけ出す(`status-open.ts` が `hidden` を書く)。実行の口は `show-trash` の受け手 1 つ。
@@ -1209,7 +1226,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   tooNarrowOk.type = 'button';
   tooNarrowOk.setAttribute('data-pkc-field', 'too-narrow-ok');
   tooNarrow.append(tooNarrowText, tooNarrowOk);
-  status.append(statusText, statusOpen, statusCopyRef, statusUndo, statusCreate, statusRescue, statusTrash, statusMessages, tooNarrow);
+  status.append(statusText, statusOpen, statusCopyRef, statusUndo, statusCreate, statusRescue, statusBackup, statusTrash, statusMessages, tooNarrow);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -1379,6 +1396,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     statusUndo,
     statusCreate,
     statusRescue,
+    statusBackup,
     statusTrash,
     statusCopyRef,
     statusMessages,

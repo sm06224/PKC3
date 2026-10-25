@@ -106,6 +106,15 @@ export function paintStatusRescue(btn: HTMLElement, text: string): void {
 }
 
 /**
+ * 🔴 **保存領域が使えない警告の隣の「バックアップを書き出す」を出し入れする**(#1038 D1)。
+ * 🔑 出す条件は 1 つ ── 警告が立っていること(`severe`。持ち主は `storage-notice.ts` の `isStorageFallback`)。
+ * 🔑 押した先は `export-archive` の受け手(`binder.ts`)── 書くのは `hidden` だけ。
+ */
+export function paintStatusBackup(btn: HTMLElement, severe: boolean): void {
+  if (btn.hidden !== !severe) btn.hidden = !severe;
+}
+
+/**
  * 🔴 **見つからないノートの知らせの隣の「ゴミ箱を開く」を出し入れする**(#1648)。
  *
  * リンクを押したら「リンク先のノートが見つかりません(ゴミ箱にあれば戻せます。…)」と出るが、

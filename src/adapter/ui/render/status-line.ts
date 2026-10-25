@@ -59,6 +59,12 @@ export interface StatusLineParts {
   readonly phase: AppPhase;
   /** 保存先の注意(`storage-notice.ts`)。 */
   readonly statusBase: string;
+  /**
+   * 🔴 **保存先の注意が「実害のある警告」か**(#1038 D1。保存領域が使えず閉じると消えるとき)。
+   * ⚠ 省略 = 控えめな知らせ。立てると `paintStatusText` が `statusBase` の字だけを危険色 + 太字の器に入れる
+   *   (行の字は変わらない)。
+   */
+  readonly statusBaseSevere?: boolean;
   /** 複数タブ / follower のバッジ。 */
   readonly sync: string;
   readonly portableAssetNote: string;
@@ -155,16 +161,31 @@ export function paintStatusText(el: HTMLElement, parts: StatusLineParts): string
   }
   // 🔑 live 以外を消す(live 自体は触らない ── 登録済みの要素を作り直さない)
   for (const c of Array.from(el.childNodes)) if (c !== live) c.remove();
+  /** 頭の字(状態語の後ろ)を置く。🔑 重大な保存先の警告はその字だけ別の器に入れる(#1038 D1) */
+  const putRest = (rest: string): void => {
+    const base = parts.statusBase;
+    const at = parts.statusBaseSevere === true && base !== '' ? rest.indexOf(base) : -1;
+    if (at < 0) {
+      if (rest !== '') el.insertBefore(doc.createTextNode(rest), live);
+      return;
+    }
+    if (at > 0) el.insertBefore(doc.createTextNode(rest.slice(0, at)), live);
+    const warn = doc.createElement('span');
+    warn.setAttribute('data-pkc-field', 'status-warning');
+    warn.textContent = base;
+    el.insertBefore(warn, live);
+    const after = rest.slice(at + base.length);
+    if (after !== '') el.insertBefore(doc.createTextNode(after), live);
+  };
   if (word !== '') {
     const state = doc.createElement('span');
     state.setAttribute('data-pkc-field', 'status-state');
     state.setAttribute('data-pkc-phase', parts.phase);
     state.textContent = word;
     el.insertBefore(state, live);
-    const rest = head.slice(word.length);
-    if (rest !== '') el.insertBefore(doc.createTextNode(rest), live);
-  } else if (head !== '') {
-    el.insertBefore(doc.createTextNode(head), live);
+    putRest(head.slice(word.length));
+  } else {
+    putRest(head);
   }
   if (live.textContent !== liveText) live.textContent = liveText;
   return text;
