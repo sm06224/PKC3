@@ -5526,6 +5526,12 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 🔴 当たった件数(#1038 C2)── 語が長く省略されても件数は残す */
+[data-pkc-field='filer-filter-count'] {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--fg);
+}
 [data-pkc-field='query-row-hint'] {
   margin: 0 0 var(--s2);
   font-size: 11px;

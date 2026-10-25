@@ -155,6 +155,8 @@ describe('🔴 絞りで 0 件のとき、理由と戻り道を出す(#550)', ()
       const el = line(root);
       expect(el, '当たっているのに 1 行が出ない').not.toBeNull();
       expect(el!.querySelector('[data-pkc-field="filer-filter-word"]')!.textContent).toBe('絞り込み中: 買い物');
+      // 🔴 C2 ── 当たった件数(表の行数と同じ。前提で 1 件)
+      expect(el!.querySelector('[data-pkc-field="filer-filter-count"]')!.textContent).toBe('1 件');
       // 🔑 表の「上」に在る(帯の下ではなく、一覧のすぐ上)
       const table = root.querySelector('[data-pkc-region="filer-table"]')!;
       expect(el!.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING, '表の後ろに出ている').toBeTruthy();

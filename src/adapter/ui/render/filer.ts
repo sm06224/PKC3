@@ -1438,13 +1438,20 @@ export class FilerRenderer {
        *   言わないと、ほかの場所に在るノートが「無い」ように見える。
        */
       if (scope !== null) label.textContent += ` ─ 「${scope.title}」の中を探しています`;
+      /**
+       * 🔴 **当たった件数を添える**(#1038 C2)。⚠ 表の行を決めた `list` の長さをそのまま使う(数え直さない)。
+       *   字は別の要素にして、語の要素(`filer-filter-word`)の字は変えない。
+       */
+      const count = document.createElement('span');
+      count.setAttribute('data-pkc-field', 'filer-filter-count');
+      count.textContent = `${list.length} 件`;
       const off = document.createElement('button');
       off.type = 'button';
       off.setAttribute('data-pkc-action', 'clear-entry-filter');
       off.setAttribute('data-pkc-field', 'filer-clear-filter-line');
       off.textContent = '絞りを外す';
       off.title = '絞りを空にして、いまいる場所のノートに戻します';
-      line.append(label, off);
+      line.append(label, count, off);
       if (scope !== null) line.append(this.buildSearchAllButton());
       if (keptTable === null) this.region.append(line);
       else this.region.insertBefore(line, keptTable);
