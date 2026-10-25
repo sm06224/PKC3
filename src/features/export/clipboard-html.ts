@@ -111,6 +111,22 @@ export function cleanForClipboard(
     el.remove();
     removed += 1;
   }
+  /**
+   * 🔴 **React の囲みは、動く枠(iframe)を貼らず原文の字にする**(#528 ②)。
+   * ⚠ 枠の `srcdoc` はランタイムを丸ごと(約 700 KB)抱えており、貼り先のメール・ノートへ巨大な不活性の iframe が
+   *   混ざる。貼り先で動くわけでもない。器が原文を持っているので、中身を**原文のコード**に置き換える
+   *   (数式・SQL の答えと同じ判断 ── 打った字が残るほうが損が小さい)。⚠ ②で `pkc-react-source` は落とすので、
+   *   class を付けない `<pre>` で置く。
+   */
+  for (const el of [...root.querySelectorAll('[data-pkc-react-src]')]) {
+    const src = el.getAttribute('data-pkc-react-src') ?? '';
+    el.textContent = '';
+    const pre = root.ownerDocument.createElement('pre');
+    const code = root.ownerDocument.createElement('code');
+    code.textContent = src;
+    pre.append(code);
+    el.append(pre);
+  }
   // ② 隠してあるものを落とす。⚠ **CSS で隠れているだけ**なので、貼り先では出る
   for (const cls of COPY_JUNK_CLASSES) {
     for (const el of [...root.querySelectorAll(`.${cls}`)]) {

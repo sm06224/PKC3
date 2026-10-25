@@ -16,7 +16,7 @@ import { errorMessageJa } from '@features/error-text';
 import { reactFrameDoc } from '@adapter/platform/render/react-frame-doc';
 import { watchVisible } from './visible-watch';
 import { typingQuietIn } from './typing-gate';
-import type { MermaidScope } from './mermaid-hydrate';
+import { registerLiveScope, type MermaidScope } from './mermaid-hydrate';
 
 export const REACT_ATTR = 'data-pkc-react-src';
 
@@ -62,6 +62,8 @@ export function hydrateReact(root: ParentNode | readonly ParentNode[]): MermaidS
   /** 器 → 置いた箱。 */
   const frames = new Map<HTMLElement, HTMLIFrameElement>();
   const started = new WeakSet<HTMLElement>();
+  /** 器 → 箱の読み込みが済んだ合図(印刷が待つ)。⚠ 箱を置いた**時点**で聞き始める(後から聞くと、済んだ後の `load` を取りこぼして上限まで待つ)。 */
+  const loaded = new Map<HTMLElement, Promise<void>>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const occurrences = new Map<string, number>();
 
@@ -86,6 +88,7 @@ export function hydrateReact(root: ParentNode | readonly ParentNode[]): MermaidS
       f.srcdoc = reactFrameDoc(source, runtime, tailwind, id);
       host.append(f);
       frames.set(host, f);
+      loaded.set(host, new Promise<void>((resolve) => f.addEventListener('load', () => setTimeout(resolve, 300), { once: true })));
       restoreSandboxHeights([f]);
       host.setAttribute('data-pkc-react-state', 'ready');
       host.removeAttribute('data-pkc-react-error');
@@ -125,10 +128,11 @@ export function hydrateReact(root: ParentNode | readonly ParentNode[]): MermaidS
       if (host.isConnected) continue;
       f.remove();
       frames.delete(host);
+      loaded.delete(host);
     }
   };
 
-  return {
+  return registerLiveScope({
     dispose() {
       disposed = true;
       io?.disconnect();
@@ -136,6 +140,7 @@ export function hydrateReact(root: ParentNode | readonly ParentNode[]): MermaidS
       timers.clear();
       for (const f of frames.values()) f.remove();
       frames.clear();
+      loaded.clear();
     },
     prune() {
       dropGone();
@@ -147,14 +152,12 @@ export function hydrateReact(root: ParentNode | readonly ParentNode[]): MermaidS
       await Promise.all(targets.map((h) => place(h)));
       await Promise.all(
         targets.map((h) => {
-          const f = frames.get(h);
-          if (!f) return Promise.resolve();
-          return new Promise<void>((resolve) => {
-            f.addEventListener('load', () => setTimeout(resolve, 300), { once: true });
-            setTimeout(resolve, 3000);
-          });
+          const done = loaded.get(h);
+          if (!done) return Promise.resolve();
+          // ⚠ 上限を置く(読み込みが済まない箱 1 つで、印刷を止めない)
+          return Promise.race([done, new Promise<void>((resolve) => setTimeout(resolve, 3000))]);
         }),
       );
     },
-  };
+  });
 }

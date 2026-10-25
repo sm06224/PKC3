@@ -10,6 +10,7 @@
  * ⚠ pdf.js の実体は PDF の窓と同じ `pdf/lib/`(単一 HTML の持ち運び版など、無い環境では読めない →
  *   端末の事情の失敗として出し、枠は従来どおり「PDF は元のノートで」のまま残る)。
  */
+import { PDFJS_VERSION } from '@runtime/lib-versions';
 import { PdfPageBaker, PDF_LIB_DIR, type PdfJsLib } from '@adapter/platform/pdf/page-baker';
 import { DeviceRenderError, renderCachedPng, type Raster, type RasterKey } from './mermaid-raster';
 import type { AssetLender } from './detail';
@@ -17,7 +18,7 @@ import type { DiagramKind } from './mermaid-hydrate';
 
 /** 鍵の `kind` / `engine`。⚠ pdf.js の版上げ・描き方の変更は `RASTER_BAKE_VERSION` を上げる。 */
 export const PDF_PAGE_KIND_NAME = 'pdf-page';
-export const PDF_ENGINE = 'pdf.js';
+export const PDF_ENGINE = `pdf.js-${PDFJS_VERSION}`;
 
 /** 器の属性(値 = 添付の鍵)。 */
 export const PDF_PAGE_ATTR = 'data-pkc-pdf-src';

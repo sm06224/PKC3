@@ -17,6 +17,14 @@ interface Rig {
   loads: number;
   workers: Array<{ destroyed: boolean }>;
   tasks: Array<{ destroyed: boolean }>;
+  /** getDocument に渡った引数。 */
+  docArgs: Array<Record<string, unknown>>;
+  /** 1 件の時間切れの timer(手で発火する)。 */
+  jobTimers: Array<() => void>;
+  /** `promise` を返さないままにする(= 壊れた PDF で pdf.js が返らない)。 */
+  hang: boolean;
+  /** 文書を開く直前に呼ぶ(dispose との競合を作る)。 */
+  beforeOpen: (() => void) | null;
   canvases: Array<{ w: number; h: number; released: boolean }>;
   /** 描画の完了を手で止める口。 */
   gate: { hold: boolean; release: () => void };
@@ -31,6 +39,10 @@ function rig(): Rig {
     loads: 0,
     workers: [],
     tasks: [],
+    docArgs: [],
+    jobTimers: [],
+    hang: false,
+    beforeOpen: null,
     canvases: [],
     gate: { hold: false, release: () => undefined },
     timers: [],
@@ -53,10 +65,13 @@ function rig(): Rig {
         this.destroyed = true;
       }
     },
-    getDocument() {
+    getDocument(args: Record<string, unknown>) {
+      r.docArgs.push(args);
+      r.beforeOpen?.();
+      let rejectDoc: (e: Error) => void = () => undefined;
       const task = {
         destroyed: false,
-        promise: Promise.resolve({
+        promise: r.hang ? new Promise((_, rej) => (rejectDoc = rej)) : Promise.resolve({
           getPage: () =>
             Promise.resolve({
               getViewport: ({ scale }: { scale: number }) => ({ width: r.page.w * scale, height: r.page.h * scale, scale }),
@@ -71,6 +86,7 @@ function rig(): Rig {
         }),
         destroy(): Promise<void> {
           task.destroyed = true;
+          rejectDoc(new Error('destroyed'));
           return Promise.resolve();
         },
       };
@@ -84,6 +100,14 @@ function rig(): Rig {
       return Promise.resolve({ lib, baseUrl: 'http://x.test/pdf/lib/' });
     },
     idleMs: 1000,
+    jobTimeoutMs: 5000,
+    setJobTimer: (fn) => {
+      r.jobTimers.push(fn);
+      return r.jobTimers.length;
+    },
+    clearJobTimer: (h) => {
+      r.jobTimers[(h as number) - 1] = () => undefined;
+    },
     setTimer: (fn) => {
       r.timers.push(fn);
       return r.timers.length;
@@ -216,5 +240,62 @@ describe('PDF の 1 ページ目を焼く器', () => {
     await expect(baker.bake(bytes(), 300, 1)).rejects.toThrow('offline');
     await expect(baker.bake(bytes(), 300, 1)).rejects.toThrow('offline');
     expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('🔴 getDocument の引数: PDF 内の JavaScript と eval を許さず、共有の解析ワーカーを渡し、bytes は複製せず渡す', async () => {
+    const r = rig();
+    await r.baker.bake(bytes(), 300, 1);
+    const a = r.docArgs[0]!;
+    expect(a.isEvalSupported).toBe(false);
+    expect(a.enableScripting).toBe(false);
+    expect(a.worker, '共有の解析ワーカーを渡していない(毎回作ると畳めない)').toBe(r.workers[0]);
+    expect(a.data).toBeInstanceOf(Uint8Array);
+    expect(String(a.cMapUrl)).toBe('http://x.test/pdf/lib/cmaps/');
+    expect(String(a.wasmUrl)).toBe('http://x.test/pdf/lib/wasm/');
+    expect(String(a.standardFontDataUrl)).toBe('http://x.test/pdf/lib/standard_fonts/');
+  });
+
+  it('🔴 dispose は飛んでいる 1 件の文書の読み込みも destroy する', async () => {
+    const r = rig();
+    r.gate.hold = true;
+    const p = r.baker.bake(bytes(), 300, 1);
+    await tick();
+    expect(r.tasks[0]!.destroyed).toBe(false);
+    r.baker.dispose();
+    expect(r.tasks[0]!.destroyed, '飛んでいる文書が残っている').toBe(true);
+    r.gate.release();
+    await p.catch(() => undefined);
+  });
+
+  it('🔴 1 件の時間切れ: 返らない PDF は destroy して reject し、列は次へ進む', async () => {
+    const r = rig();
+    r.hang = true;
+    const a = r.baker.bake(bytes(), 300, 1);
+    const b = r.baker.bake(bytes(), 300, 1);
+    await tick();
+    expect(r.tasks, '台の前提:1 件目で止まっている').toHaveLength(1);
+    const assertion = expect(a).rejects.toThrow('描き終わりませんでした');
+    r.hang = false;
+    r.jobTimers[0]!();
+    await assertion;
+    expect(r.tasks[0]!.destroyed, '時間切れの文書が残っている').toBe(true);
+    await expect(b).resolves.toMatchObject({ cssWidth: 300 });
+    expect(r.tasks).toHaveLength(2);
+  });
+
+  it('🔴 dispose と起動の競合: 列から取り出した後に dispose されたら、文書を開かない', async () => {
+    // 解析ワーカーを読み込む最中に dispose する
+    const r2 = rig();
+    const loadGate: { go: () => void } = { go: () => undefined };
+    const baker = new PdfPageBaker({
+      load: () => new Promise((res) => (loadGate.go = () => res({ lib: { GlobalWorkerOptions: { workerSrc: '' }, PDFWorker: class { destroyed = false; destroy() { r2.workers.push(this); } }, getDocument: () => { r2.tasks.push({ destroyed: false }); throw new Error('開いてはいけない'); } } as unknown as PdfJsLib, baseUrl: 'http://x.test/pdf/lib/' }))),
+    });
+    const p = baker.bake(bytes(), 300, 1);
+    await tick();
+    baker.dispose();
+    loadGate.go();
+    await expect(p).rejects.toThrow();
+    expect(r2.tasks, 'dispose の後に文書を開いた').toHaveLength(0);
+    expect(baker.alive, 'dispose の後に解析ワーカーが残っている').toBe(false);
   });
 });

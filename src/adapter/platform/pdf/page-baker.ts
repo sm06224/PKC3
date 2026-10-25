@@ -61,6 +61,10 @@ export interface PageBakerOptions {
   makeCanvas?(w: number, h: number): BakeCanvas;
   setTimer?(fn: () => void, ms: number): unknown;
   clearTimer?(h: unknown): void;
+  /** 1 件の上限(ms)と、その timer(test が差す。⚠ アイドルの timer とは別 ── 数えるものが違う)。 */
+  jobTimeoutMs?: number;
+  setJobTimer?(fn: () => void, ms: number): unknown;
+  clearJobTimer?(h: unknown): void;
 }
 
 /** 焼き先。 */
@@ -193,7 +197,10 @@ export class PdfPageBaker {
   }
 
   private async bakeOne(job: Job): Promise<PageBake> {
+    // 🔴 dispose と起動の競合(`dispose` の後に列から取り出した 1 件が、新しい解析ワーカーを作ってしまう)を止める
+    if (this.disposed) throw new Error('pdf: disposed');
     const { lib, baseUrl, worker } = await this.ensureEngine();
+    if (this.disposed) throw new Error('pdf: disposed');
     const task = lib.getDocument({
       data: new Uint8Array(job.bytes),
       worker,
@@ -206,6 +213,28 @@ export class PdfPageBaker {
       enableScripting: false,
     });
     this.current = task;
+    // 🔴 1 件ごとの時間切れ。壊れた PDF で pdf.js が返らないと、列の後ろの依頼が全部止まる。
+    //    切れたら文書の読み込みを destroy して(解析側も止まる)この 1 件だけ reject し、列は次へ進む
+    const set = this.opts.setJobTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+    const clear = this.opts.clearJobTimer ?? ((h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>));
+    let timer: unknown = null;
+    const expired = new Promise<never>((_, reject) => {
+      timer = set(() => {
+        void task.destroy().catch(() => undefined);
+        reject(new Error('PDF の 1 ページ目を描き終わりませんでした'));
+      }, this.opts.jobTimeoutMs ?? 60_000);
+    });
+    const work = this.render(task, job);
+    // ⚠ 時間切れの後に work が落ちても未処理の reject にしない
+    work.catch(() => undefined);
+    try {
+      return await Promise.race([work, expired]);
+    } finally {
+      clear(timer);
+    }
+  }
+
+  private async render(task: ReturnType<PdfJsLib['getDocument']>, job: Job): Promise<PageBake> {
     let canvas: BakeCanvas | null = null;
     try {
       const doc = await task.promise;
@@ -229,7 +258,7 @@ export class PdfPageBaker {
     } finally {
       // ⚠ 文書・頁・canvas はその場で捨てる(積まない)。解析ワーカーは共有なので task.destroy() では畳まれない
       canvas?.release();
-      this.current = null;
+      if (this.current === task) this.current = null;
       await task.destroy().catch(() => undefined);
     }
   }

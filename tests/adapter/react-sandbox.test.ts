@@ -19,6 +19,7 @@ import {
   scriptLiteral,
 } from '../../src/adapter/platform/render/react-frame-doc';
 import { hydrateReact, setReactRuntimeLoader } from '../../src/adapter/ui/render/react-sandbox';
+import { hydrateAllNow } from '../../src/adapter/ui/render/mermaid-hydrate';
 import { hydrateFigures } from '../../src/adapter/ui/render/detail';
 
 const JSX_SRC = 'export default function App(){ return <b className="p-2">hi</b>; }';
@@ -220,6 +221,30 @@ describe('箱を置く(hydrate)', () => {
     await scope.flush!(document.body);
     expect(h.querySelector('iframe')).not.toBeNull();
     scope.dispose();
+  });
+
+  it('🔴 印刷: 画面の外(まだ見えていない)React の枠も、hydrateAllNow が箱にして待つ / dispose した塊は頼まない', async () => {
+    setReactRuntimeLoader(() => Promise.resolve({ runtime: 'R', tailwind: 'T' }));
+    IO().all.length = 0;
+    const a = host('export default function App(){return <i/>}');
+    const b = host('export default function App(){return <u/>}');
+    const scope = hydrateReact([a, b]);
+    await settle();
+    // 台の前提:誰も「見えた」と言っていない = 箱は無い
+    expect(document.querySelectorAll('iframe')).toHaveLength(0);
+    const printing = hydrateAllNow(document.body);
+    // 箱が load するまで待つ ── happy-dom は load を撃たないので、撃って進める
+    await settle();
+    for (const f of document.querySelectorAll('iframe')) f.dispatchEvent(new Event('load'));
+    await printing;
+    expect(document.querySelectorAll('iframe'), '画面の外の React が箱になっていない(印刷で描かれない)').toHaveLength(2);
+    expect(a.getAttribute('data-pkc-react-state')).toBe('ready');
+    // 畳んだ塊は名簿から外れる(外れないと、畳んだ塊の箱を印刷のたびに作り直す)
+    scope.dispose();
+    expect(document.querySelectorAll('iframe')).toHaveLength(0);
+    const c = host('export default function App(){return <b/>}');
+    await hydrateAllNow(document.body);
+    expect(c.querySelector('iframe'), '畳んだ塊が名簿に残っている').toBeNull();
   });
 
   it('読む面と同じ束ね口(hydrateFigures)に入っている', async () => {

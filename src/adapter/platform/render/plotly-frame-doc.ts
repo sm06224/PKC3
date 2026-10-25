@@ -13,6 +13,8 @@
  * ⚠ 送り主は `event.source === parent` だけで決める(`event.origin` は箱では "null")。
  */
 
+import { escapeScript } from './script-escape';
+
 export const PLOTLY_FRAME_CSP =
   "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:";
 
@@ -47,11 +49,6 @@ export const PLOTLY_FRAME_HARNESS = `
   post({ready:true});
 })();
 `;
-
-/** `</script` を字面のまま script の中へ置くと箱の構文が途切れる ── JS の字の中では `<\/script` と同じ意味になる。 */
-function escapeScript(src: string): string {
-  return src.split('</script').join('<\\/script');
-}
 
 /**
  * @param plotlySource plotly.js の本体(`plotly.min.js` の字)

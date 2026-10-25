@@ -192,6 +192,20 @@ export interface MermaidScope {
 const liveScopes = new Set<MermaidScope>();
 
 /**
+ * 🔴 **塊を「印刷が頼む名簿」へ載せる**(#528 ②)。PNG に焼かない種類(React の枠)も、印刷では画面の外の物まで
+ * 作らせる必要があるので、`flush` を持つ塊はここへ載せる。⚠ `dispose` で名簿から外す(外さないと畳んだ塊を頼み続ける)。
+ */
+export function registerLiveScope(scope: MermaidScope): MermaidScope {
+  liveScopes.add(scope);
+  const dispose = scope.dispose.bind(scope);
+  scope.dispose = () => {
+    liveScopes.delete(scope);
+    dispose();
+  };
+  return scope;
+}
+
+/**
  * `root` の中の図(mermaid / chart)を、見えているかに関わらず全部描いて待つ(#1087 ── 印刷用)。
  * ⚠ 描くのは各塊が持つ既存の道(キャッシュ鍵・直列の焼き・差し替え)をそのまま使う。
  */

@@ -26,6 +26,8 @@ export interface FrameWorkerOptions {
   readonly doc?: Document;
   /** 依頼 1 件の返事を待つ上限(ms)。 */
   readonly jobTimeoutMs?: number;
+  /** 箱が `ready` を返すまで待つ上限(ms)。⚠ 切れたら箱ごと捨て、溜めた依頼も全部落とす(永久に待たせない)。 */
+  readonly readyTimeoutMs?: number;
   /** test が差す timer。 */
   readonly setTimer?: (fn: () => void, ms: number) => unknown;
   readonly clearTimer?: (h: unknown) => void;
@@ -40,6 +42,7 @@ export class FrameWorker {
   private iframe: HTMLIFrameElement | null = null;
   private ready = false;
   private dead = false;
+  private readyTimer: unknown = null;
   private readonly queue: Array<{ msg: unknown; transfer: Transferable[] }> = [];
   private readonly watch = new Map<number, unknown>();
   private readonly onWindowMessage: (ev: MessageEvent) => void;
@@ -51,6 +54,13 @@ export class FrameWorker {
     this.doc = opts.doc ?? document;
     this.onWindowMessage = (ev) => this.receive(ev);
     this.doc.defaultView?.addEventListener('message', this.onWindowMessage);
+    // 🔴 `ready` が来ない箱(中身を作れない・読み込みの失敗・台本の例外)は、溜めた依頼を永久に待たせる ── 上限を置く
+    //    (中身を作る待ちも含めるので、起動の時点から数える)
+    const set = opts.setTimer ?? ((fn, t) => setTimeout(fn, t));
+    this.readyTimer = set(() => {
+      this.readyTimer = null;
+      if (!this.ready) this.fail('描画用の枠が起動しませんでした');
+    }, opts.readyTimeoutMs ?? 20_000);
     opts
       .srcdoc()
       .then((html) => this.mount(html))
@@ -77,6 +87,7 @@ export class FrameWorker {
     const timers = this.opts.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
     for (const h of this.watch.values()) timers(h);
     this.watch.clear();
+    this.cancelReadyTimer();
     this.queue.length = 0;
     // 🔑 箱を外す = 箱の中の plotly.js とその heap を手放す
     this.iframe?.remove();
@@ -96,6 +107,12 @@ export class FrameWorker {
     f.srcdoc = html;
     (this.doc.body ?? this.doc.documentElement).append(f);
     this.iframe = f;
+  }
+
+  private cancelReadyTimer(): void {
+    if (this.readyTimer === null) return;
+    (this.opts.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>)))(this.readyTimer);
+    this.readyTimer = null;
   }
 
   private send(msg: unknown, transfer: Transferable[]): void {
@@ -127,6 +144,7 @@ export class FrameWorker {
     if (d.ready === true) {
       if (this.ready) return;
       this.ready = true;
+      this.cancelReadyTimer();
       for (const q of this.queue.splice(0)) this.send(q.msg, q.transfer);
       return;
     }

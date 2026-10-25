@@ -14,6 +14,7 @@
  * - `import { useState } from 'react'` と書ける(他の import は使えない)
  * - Tailwind の class(`className="p-4 bg-blue-500"`)が効く
  */
+import { escapeScript } from './script-escape';
 import { sandboxResizeScript, sandboxViolationScript } from '@features/markdown/html-sandbox';
 
 export const REACT_FRAME_CSP =
@@ -65,11 +66,6 @@ export function scriptLiteral(text: string): string {
     .join('\\u2029');
 }
 
-/** ランタイムの字を script の中へ置く(`</script` を字面のまま置かない)。 */
-function escapeScript(src: string): string {
-  return src.split('</script').join('<\\/script');
-}
-
 /**
  * @param iframeId 箱の id(`data-pkc-html-render-id`。高さ・止めた要求の申告の宛先を決める)
  */
@@ -79,7 +75,8 @@ export function reactFrameDoc(source: string, runtime: string, tailwind: string,
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
     `<meta http-equiv="Content-Security-Policy" content="${REACT_FRAME_CSP}">` +
     // ⚠ CSP の `<meta>` より後・本文より前(止めた要求を取りこぼさない)
-    sandboxViolationScript(iframeId) +
+    // 🔴 画像の違反は申告しない(箱は外へ出ない方針のまま。同意の帯を出しても CSP は開かない)
+    sandboxViolationScript(iframeId, false) +
     '<style>body{margin:0;padding:0.5rem;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;line-height:1.5;color:#222}*{box-sizing:border-box}img,svg,video,canvas{max-width:100%;height:auto}</style>' +
     '</head><body><div id="root"></div>' +
     `<script>${escapeScript(runtime)}</script>` +

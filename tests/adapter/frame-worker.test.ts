@@ -131,6 +131,57 @@ describe('箱のワーカー', () => {
     expect(fake.got).toHaveLength(0);
   });
 
+  it('🔴 ready が来ない箱は、上限で onerror(溜めた依頼を永久に待たせない)/ ready が来れば畳む', async () => {
+    vi.useFakeTimers();
+    try {
+      const w = new FrameWorker({ srcdoc: () => Promise.resolve('<p/>'), readyTimeoutMs: 1000, jobTimeoutMs: 99999 });
+      await vi.advanceTimersByTimeAsync(0);
+      const errors: string[] = [];
+      w.onerror = (ev) => void errors.push(ev.message);
+      w.postMessage({ id: 1, payload: 'a' }); // ready 前に溜まる
+      await vi.advanceTimersByTimeAsync(999);
+      expect(errors).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(errors, 'ready が来ないのに待ち続けている').toHaveLength(1);
+      expect(errors[0]).toContain('起動しませんでした');
+      w.terminate();
+      expect(frames()).toHaveLength(0);
+
+      // 対照群: ready が来た箱は、上限を過ぎても捨てない
+      const ok = new FrameWorker({ srcdoc: () => Promise.resolve('<p/>'), readyTimeoutMs: 1000 });
+      await vi.advanceTimersByTimeAsync(0);
+      const f = frames()[0]!;
+      Object.defineProperty(f, 'contentWindow', { value: fakeWindow().win, configurable: true });
+      const errors2: string[] = [];
+      ok.onerror = (ev) => void errors2.push(ev.message);
+      fromBox(f.contentWindow, { ready: true });
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(errors2).toHaveLength(0);
+      ok.terminate();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('🔴 ready が来ない箱を WorkerLease が捨て、待っている依頼を reject する', async () => {
+    vi.useFakeTimers();
+    try {
+      const lease = new WorkerLease({
+        name: 'plotly',
+        spawn: () => new FrameWorker({ srcdoc: () => Promise.resolve('<p/>'), readyTimeoutMs: 1000 }) as unknown as Worker,
+      });
+      const p = lease.run({ x: 1 });
+      const assertion = expect(p).rejects.toThrow('起動しませんでした');
+      await vi.advanceTimersByTimeAsync(1500);
+      await assertion;
+      expect(frames(), '失敗した箱が残っている').toHaveLength(0);
+      expect(lease.busy).toBe(0);
+      lease.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('箱の中身を作れなかったら onerror', async () => {
     const w = new FrameWorker({ srcdoc: () => Promise.reject(new Error('chunk 404')) });
     const errors: string[] = [];

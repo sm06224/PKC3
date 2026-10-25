@@ -8,6 +8,7 @@
  * ⚠ 貯める所は mermaid / chart と**同じ 1 つ**(`renderCachedPng`)── 鍵は 原文 + 配色 + 幅 + dpr + 産出器。
  * ⚠ 受け取るのは ArrayBuffer(transfer)で、Blob はここで作る。
  */
+import { PLOTLY_VERSION } from '@runtime/lib-versions';
 import { WorkerLease } from '@adapter/platform/worker-lease';
 import { FrameWorker } from '@adapter/platform/render/frame-worker';
 import { plotlyFrameDoc } from '@adapter/platform/render/plotly-frame-doc';
@@ -17,7 +18,7 @@ import { hydrateDiagrams, type DiagramKind, type HydrateOptions, type MermaidSco
 import { chartHeightFor, seriesColors } from './chart-raster';
 
 /** plotly の産出器の名前(鍵の `engine`)。⚠ plotly.js の版上げ・焼き方の変更は `RASTER_BAKE_VERSION` を上げる。 */
-export const PLOTLY_ENGINE = 'plotly.js';
+export const PLOTLY_ENGINE = `plotly.js-${PLOTLY_VERSION}`;
 
 /** 1 辺の上限(CSS px)。 */
 const MIN_HEIGHT = 160;
