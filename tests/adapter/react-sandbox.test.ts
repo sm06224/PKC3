@@ -3,7 +3,7 @@
  * React(JSX)の囲み(#528 ②)。
  *
  * 守る主張:
- * 1. 本文では placeholder(ランタイムを焼かない)になり、`react` / `jsx` のどちらでも同じ。-norender は原文だけ
+ * 1. 本文では placeholder(ランタイムを焼かない)になり、`react` だけ(`jsx` は従来どおりコード)。-norender は原文だけ
  * 2. 箱は `sandbox="allow-scripts"` のみ・CSP は外へ出られない・**外部 CDN を参照しない**(ランタイムは inline)
  * 3. 箱は**見えたとき**に作り、ランタイムはその時に初めて読む / 器が外れれば箱も外す / dispose で全部外す
  * 4. 箱の台本が**実際に動く**(同梱の React + JSX 変換で、export default / App / 式だけ / import を描く。
@@ -24,8 +24,14 @@ import { hydrateFigures } from '../../src/adapter/ui/render/detail';
 const JSX_SRC = 'export default function App(){ return <b className="p-2">hi</b>; }';
 
 describe('本文での姿(features 層)', () => {
-  it('🔴 react / jsx は描ける fence の一覧に居て、どちらも同じ placeholder になる', () => {
-    for (const lang of ['react', 'jsx']) {
+  it('🔴 react だけが描ける fence の一覧に居る。jsx は従来どおりふつうのコードブロック(既存の本文の見え方を変えない)', () => {
+    expect(RENDERABLE_FENCE_LANGS.has('jsx')).toBe(false);
+    expect(parseRenderableFence('jsx')).toBeNull();
+    expect(parseRenderableFence('jsx-norender')).toBeNull();
+    const code = renderMarkdown(`\`\`\`jsx\n${JSX_SRC}\n\`\`\`\n`);
+    expect(code).not.toContain('pkc-react-placeholder');
+    expect(code).toContain('language-jsx');
+    for (const lang of ['react']) {
       expect(RENDERABLE_FENCE_LANGS.has(lang)).toBe(true);
       const html = renderMarkdown(`\`\`\`${lang}\n${JSX_SRC}\n\`\`\`\n`);
       expect(html, lang).toContain('pkc-react-placeholder');
@@ -40,7 +46,7 @@ describe('本文での姿(features 層)', () => {
   it('既存の html の囲みとは衝突しない(html は今までどおり箱)', () => {
     expect(renderMarkdown('```html\n<p>x</p>\n```\n')).toContain('<iframe');
     expect(parseRenderableFence('html')?.lang).toBe('html');
-    expect(parseRenderableFence('jsx-norender')?.mode).toBe('norender');
+    expect(parseRenderableFence('react-norender')?.mode).toBe('norender');
   });
 
   it('-norender は原文だけ(JSX として彩色する)', () => {

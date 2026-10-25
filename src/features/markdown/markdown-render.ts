@@ -323,12 +323,12 @@ const defaultFence = md.renderer.rules.fence ??
 //    の無い独立 document のため、JS 配線ゼロで全 surface に効く方式を正とする。
 
 export type RenderableFenceLang =
-  | 'html' | 'svg' | 'mermaid' | 'chart' | 'plotly' | 'react' | 'jsx' | 'csv' | 'tsv' | 'psv';
+  | 'html' | 'svg' | 'mermaid' | 'chart' | 'plotly' | 'react' | 'csv' | 'tsv' | 'psv';
 export type RenderableFenceMode = 'both' | 'render' | 'norender';
 
 /** ⚠ 公開しているのは `tests/docs-parity.test.ts` がマニュアルと突合するため。 */
 export const RENDERABLE_FENCE_LANGS: ReadonlySet<string> = new Set([
-  'html', 'svg', 'mermaid', 'chart', 'plotly', 'react', 'jsx', 'csv', 'tsv', 'psv',
+  'html', 'svg', 'mermaid', 'chart', 'plotly', 'react', 'csv', 'tsv', 'psv',
 ]);
 
 export interface RenderableFence {
@@ -468,8 +468,7 @@ function buildRenderableSlotHtml(
       const escapedPlotly = md.utils.escapeHtml(content);
       return `<div class="pkc-plotly-placeholder" data-pkc-plotly-src="${escapedPlotly}" data-pkc-md-block-kind="plotly"><pre class="pkc-plotly-source"><code class="language-plotly">${escapedPlotly}</code></pre></div>`;
     }
-    case 'react':
-    case 'jsx': {
+    case 'react': {
       /**
        * 🔴 **React(JSX)の囲み**(#528 ②)── placeholder だけを出す。ランタイム(react / react-dom / JSX 変換 / Tailwind)は
        * 1 MB 近くあり、markdown の出力(ワーカーとの受け渡し・塊の比較)へ焼くには重い。adapter が**見えたとき**に
