@@ -13,7 +13,7 @@ import { BROWSE_ICONS } from '@adapter/ui/render/icons';
 import { buildShell } from '@adapter/ui/render/shell';
 import { initialState } from '@adapter/state/app-state';
 import { Dispatcher } from '@adapter/state/dispatcher';
-import { PC_CONTACT_NOTE, PC_DIRECTORY_NOTE, PC_LINK_NOTE, PC_STATS_NOTE } from '@features/local-folder/folder-entries';
+import { PC_CONTACT_NOTE, PC_ENTER_TITLE, PC_LINK_NOTE, PC_STATS_NOTE } from '@features/local-folder/folder-entries';
 import { isIconName } from '@features/icon/symbols';
 import { bindActions } from '@adapter/ui/actions/binder';
 import {
@@ -33,9 +33,9 @@ const file = (name: string): FolderEntryHandle => ({
   },
 });
 
-function dir(entries: FolderEntryHandle[], perm = { state: 'granted' }): DirectoryHandleLike {
+function dir(entries: FolderEntryHandle[], perm = { state: 'granted' }, name = '資料'): DirectoryHandleLike {
   return {
-    name: '資料',
+    name,
     values: async function* () {
       for (const e of entries) yield e;
     },
@@ -45,7 +45,14 @@ function dir(entries: FolderEntryHandle[], perm = { state: 'granted' }): Directo
 
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
 
-function setup(picker: (() => Promise<DirectoryHandleLike>) | null): {
+/** 中へ入れるサブフォルダ(一覧の行であり、`values()` を持つ handle そのもの ── 本物と同じ)。 */
+const sub = (name: string, entries: FolderEntryHandle[]): FolderEntryHandle =>
+  Object.assign(dir(entries, { state: 'granted' }, name), { kind: 'directory' }) as unknown as FolderEntryHandle;
+
+function setup(
+  picker: (() => Promise<DirectoryHandleLike>) | null,
+  extra: Partial<ConstructorParameters<typeof LocalFolder>[0]> = {},
+): {
   folder: LocalFolder;
   pane: HTMLElement;
   router: BrowseRouter;
@@ -63,6 +70,7 @@ function setup(picker: (() => Promise<DirectoryHandleLike>) | null): {
     open: async (i) => void opened.push(i.file.name),
     fail: () => {},
     onChange: () => repaint(),
+    ...extra,
   });
   const router = new BrowseRouter(regions.sidebar, regions.browseHost, 'pc', undefined, null, () => {}, folder);
   repaint = () => router.render(initialState, 'pc');
@@ -161,7 +169,8 @@ describe('つなぐ前 / 繋いだ後', () => {
     await folder.pick();
     await settle();
     const rows = [...pane.querySelectorAll<HTMLElement>('[data-pkc-pc-row]')];
-    expect(q(rows[0]!, 'button'), 'フォルダの行が押せる見た目').toBeNull();
+    expect(q(rows[0]!, '[data-pkc-action="pc-enter-dir"]'), 'フォルダの行が押せない').not.toBeNull();
+    expect(q(rows[0]!, '[data-pkc-action="pc-open-file"]'), 'フォルダが取り込みの口になっている').toBeNull();
     const btn = q(rows[1]!, '[data-pkc-action="pc-open-file"]')!;
     expect(btn.getAttribute('data-pkc-pc-index')).toBe('1');
   });
@@ -181,25 +190,43 @@ describe('つなぐ前 / 繋いだ後', () => {
     expect(q(rowOf('猫.png'), '[data-pkc-field="pc-contact-note"]')).toBeNull();
   });
 
-  it('🔴 サブフォルダの行は、ホバーに理由と行き先が在り、押すと同じ字が状態の行へ出る(場所は動かない)', async () => {
-    const { pane, folder } = setup(async () => dir([{ kind: 'directory', name: '下' }, file('a.md')]));
+  it('🔴 サブフォルダの行は押せる button で、押す(binder を通す)と中の一覧に替わる。ファイルは getFile を呼ばない', async () => {
+    getFileCalls = 0;
+    const { pane, folder } = setup(async () => dir([sub('下', [file('中.md')]), file('a.md')]));
     await folder.pick();
     await settle();
-    const row = pane.querySelector<HTMLElement>('[data-pkc-pc-row="0"]')!;
-    expect(row.title).toBe(PC_DIRECTORY_NOTE);
-    expect(PC_DIRECTORY_NOTE).toContain('中へは入りません');
-    expect(PC_DIRECTORY_NOTE, '次にすること(別のフォルダ…を押して選ぶ)が無い').toContain('「別のフォルダ…」を押して');
-    expect(row.getAttribute('data-pkc-action')).toBe('pc-dir-note');
-    // 押す(binder を通す)
+    const enter = pane.querySelector<HTMLElement>('[data-pkc-pc-row="0"] [data-pkc-action="pc-enter-dir"]')!;
+    expect(enter.title).toBe(PC_ENTER_TITLE);
+    expect(enter.tagName).toBe('BUTTON');
     const d = new Dispatcher();
     const off = bindActions(document.body, d, { localFolder: folder });
-    const before = folder.view().folderName;
-    row.click();
+    enter.click();
+    await settle();
     off();
-    expect(d.getState().notice, '押しても無言').toBe(PC_DIRECTORY_NOTE);
-    expect(folder.view().folderName, '場所が動いた').toBe(before);
-    // 対照群:ファイルの行には付かない
-    expect(pane.querySelector('[data-pkc-pc-row="1"]')!.hasAttribute('data-pkc-action')).toBe(false);
+    const names = [...pane.querySelectorAll('[data-pkc-field="pc-name"]')].map((n) => n.textContent);
+    expect(names, '中の一覧に替わっていない').toEqual(['中.md']);
+    expect(getFileCalls, '一覧で getFile を呼んだ(#1271)').toBe(0);
+    // ファイルの行は enter の口を持たない(対照群)
+  });
+
+  it('🔴 パンくず ── 上の階層は押せる button、いまの階層は字だけ。押すと戻る', async () => {
+    const { pane, folder } = setup(async () => dir([sub('下', [sub('奥', [file('x.md')])])]));
+    await folder.pick();
+    await settle();
+    await folder.enter(0);
+    await folder.enter(0);
+    await settle();
+    const crumbs = [...pane.querySelectorAll<HTMLElement>('[data-pkc-field="pc-crumbs"] > button')];
+    expect(crumbs.map((c) => c.textContent)).toEqual(['資料', '下']);
+    expect(pane.querySelector('[data-pkc-field="pc-folder-name"]')!.textContent).toBe('奥');
+    expect(pane.querySelector('[data-pkc-field="pc-folder-name"]')!.tagName, 'いまの階層が押せる').toBe('SPAN');
+    const d = new Dispatcher();
+    const off = bindActions(document.body, d, { localFolder: folder });
+    crumbs[1]!.click();
+    await settle();
+    off();
+    expect(pane.querySelector('[data-pkc-field="pc-folder-name"]')!.textContent).toBe('下');
+    expect([...pane.querySelectorAll('[data-pkc-field="pc-name"]')].map((n) => n.textContent)).toEqual(['奥']);
   });
 
   it('🔴 200 件で切れて「さらに表示」── 押すと足される', async () => {
@@ -399,15 +426,24 @@ describe('帯の「更新」と「別のフォルダ…」(#1264 §2 欠陥 4-a)
 });
 
 describe('🔴 消す・改名・移動のボタンを置かない(裁定)', () => {
-  it('どの状態でも、押し口は 選ぶ / 更新 / 切る / さらに表示 / 開く / フォルダの行の返事 の 6 種だけ', async () => {
+  it('どの状態でも、押し口は 選ぶ / 更新 / 切る / さらに表示 / 開く / 中へ入る / パンくず / Office を選ぶ の 8 種だけ', async () => {
     const seen = new Set<string>();
     const many = Array.from({ length: 230 }, (_, i) => file(`f${i}.md`));
     const states: Array<() => Promise<HTMLElement>> = [
       async () => setup(null).pane,
       async () => setup(async () => dir([])).pane,
       async () => {
-        const s = setup(async () => dir([{ kind: 'directory', name: 'd' }, ...many]));
+        const s = setup(async () => dir([sub('d', [file('z.md')]), ...many]), {
+          filePicker: async () => null,
+        });
         await s.folder.pick();
+        await settle();
+        return s.pane;
+      },
+      async () => {
+        const s = setup(async () => dir([sub('d', [file('z.md')])]));
+        await s.folder.pick();
+        await s.folder.enter(0);
         await settle();
         return s.pane;
       },
@@ -417,15 +453,17 @@ describe('🔴 消す・改名・移動のボタンを置かない(裁定)', () 
       for (const el of pane.querySelectorAll('[data-pkc-action]')) seen.add(el.getAttribute('data-pkc-action')!);
     }
     expect([...seen].sort()).toEqual([
+      'pc-crumb',
       'pc-cut-folder',
-      'pc-dir-note',
+      'pc-enter-dir',
       'pc-more',
       'pc-open-file',
+      'pc-open-office-file',
       'pc-pick-folder',
       'pc-refresh-folder',
     ]);
-    // ⚠ 空振り防止 ── 6 種とも実際に出ている(消す・改名・移動は 1 つも無い)
-    expect(seen.size).toBe(6);
+    // ⚠ 空振り防止 ── 8 種とも実際に出ている(消す・改名・移動は 1 つも無い)
+    expect(seen.size).toBe(8);
   });
 });
 
@@ -438,6 +476,9 @@ describe('押した先が届く(binder)', () => {
       more: async () => void calls.push('more'),
       open: async (i: number) => void calls.push(`open:${i}`),
       refresh: async () => void calls.push('refresh'),
+      enter: async (i: number) => void calls.push(`enter:${i}`),
+      goTo: async (l: number) => void calls.push(`goTo:${l}`),
+      pickFile: async () => void calls.push('pickFile'),
     };
     const root = document.createElement('div');
     document.body.append(root);
@@ -448,12 +489,16 @@ describe('押した先が届く(binder)', () => {
       '<button data-pkc-action="pc-refresh-folder">r</button>',
       '<button data-pkc-action="pc-open-file" data-pkc-pc-index="7">d</button>',
       '<button data-pkc-action="pc-open-file">e</button>',
+      '<button data-pkc-action="pc-enter-dir" data-pkc-pc-index="3">f</button>',
+      '<button data-pkc-action="pc-crumb" data-pkc-pc-level="1">g</button>',
+      '<button data-pkc-action="pc-crumb">h</button>',
+      '<button data-pkc-action="pc-open-office-file">i</button>',
     ].join('');
     const off = bindActions(root, new Dispatcher(), { localFolder: fake });
     for (const b of root.querySelectorAll<HTMLElement>('button')) b.click();
     off();
     // ⚠ 添字の無い行(壊れた DOM)は何も呼ばない
-    expect(calls).toEqual(['pick', 'cut', 'more', 'refresh', 'open:7']);
+    expect(calls).toEqual(['pick', 'cut', 'more', 'refresh', 'open:7', 'enter:3', 'goTo:1', 'pickFile']);
   });
 
   it('🔴 取り込みの最中は行を押せない(他の取込と同じ門)', async () => {
@@ -463,6 +508,9 @@ describe('押した先が届く(binder)', () => {
       cut: () => {},
       more: async () => {},
       refresh: async () => {},
+      enter: async () => {},
+      goTo: async () => {},
+      pickFile: async () => {},
       open: async (i: number) => void calls.push(`open:${i}`),
     };
     const root = document.createElement('div');

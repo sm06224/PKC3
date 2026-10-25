@@ -293,7 +293,7 @@ import { OFFICE_CONFIRMING_NOTICE, OFFICE_NOT_REACHED_NOTICE, OFFICE_DECLINED_NO
 import { listNoteImages } from '@adapter/platform/office/office-note-images';
 import { createOfficeOpener, type OpenOfficeResult } from '@adapter/platform/office/office-open';
 import { createOfficeShadows } from '@adapter/platform/office/office-shadow-shelf';
-import { openOfficeTile as openOfficeTileWithShadows } from '@adapter/platform/office/office-tile-open';
+import { openOfficeTile as openOfficeTileWithShadows, openReservedLocal } from '@adapter/platform/office/office-tile-open';
 import { watchOfficeHang } from '@adapter/platform/office/office-hang-watch';
 import {
   checkPackUpdate,
@@ -405,7 +405,9 @@ import { importFiles } from '@adapter/ui/actions/import-file';
 import { withFolderHome } from '@adapter/ui/actions/import-folder-home';
 import { openFolderLid } from '@adapter/ui/actions/open-folder-lid';
 import { windowFolderWritePicker, type WritableDirLike } from '@adapter/platform/md-folder-export';
-import { LocalFolder, windowDirectoryPicker, type LocalFileItem } from '@adapter/platform/local-folder';
+import { LocalFolder, windowDirectoryPicker, windowFilePicker, type LocalFileItem } from '@adapter/platform/local-folder';
+import { appPcFolderPlace } from '@adapter/ui/render/pc-folder-place';
+import { openLocalOffice } from '@adapter/platform/office/open-local-office';
 import { createLocalFileOpener } from '@adapter/ui/actions/open-local-file';
 import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
 import { formatArchivePreviewMessage } from '@features/import/archive-preview';
@@ -1570,6 +1572,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let openLocalFile: (item: LocalFileItem) => Promise<void> = async () => undefined;
   const localFolder = new LocalFolder({
     picker: windowDirectoryPicker(),
+    // 🔴 Office の file を 1 つ選んで開く口(#432)と、開いていた階層の記憶(#215)
+    filePicker: windowFilePicker(),
+    // 🔴 Office の行を押した瞬間(最初の await より前)に窓を確保する(#432)── 許可・読み込みは後。判断は `open-local-office.ts`
+    reserve: (name) => {
+      if (!isOfficeUsable(appOfficePack.isInstalled(), appOfficePack.capability())) return false;
+      reservedWindowFresh = officeWindow.open({ name, expectDocument: true }).kind === 'opened';
+      return true;
+    },
+    place: appPcFolderPlace,
     open: (item) => openLocalFile(item),
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
     onChange: () => repaintPanes(),
@@ -1656,7 +1667,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔴 **手元のファイルを Office で開く控え**(#432)。⚠ **session 限り** ──
    * 判断も寿命も `local-office-files.ts` が持つ(ここは配線だけ)。
    */
-  const localOffice = new LocalOfficeFiles();
+  // 🔴 書き戻せない保存(許可が無い / 対応していないブラウザ)は、ダウンロードで渡す(#432)
+  const localOffice = new LocalOfficeFiles((name, bytes) =>
+    downloadBlob(name, new Blob([bytes as BlobPart], { type: 'application/octet-stream' })),
+  );
   const officeWindow = new OfficeWindow({
     // 🔴 #433 の計測(flag `office.inputLog`)── 窓を開くたびに読み直す
     //    (フラグ画面で切り替えたら、次に開く窓から効く)
@@ -2499,17 +2513,27 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       for (const id of ids) void officeShadows.discardById(id);
     }
   });
-  const openOfficeTile = () =>
-    openOfficeTileWithShadows({
-      officeWindow,
-      local: localOffice,
-      shadows: officeShadows,
-      askLocal: (at) => pickOfficeShadowInApp(root, at),
-      askList: (orphans) => pickOrphanShadowInApp(root, orphans),
-      openPlain: openOfficeTilePlain,
-      notify: (text) => showStatus(text),
-      afterRestore: (id) => { restoredShelves.push(id); },
-    });
+  /** 🔴 窓を先に確保した回に、その窓を**この回で新しく開いたか**(開いていた窓へ頼んだだけなら、閉じない)。 */
+  let reservedWindowFresh = false;
+  const officeTileDeps = (openPlain: () => void, onReservedCancel?: () => void) => ({
+    officeWindow,
+    local: localOffice,
+    shadows: officeShadows,
+    askLocal: (at: number) => pickOfficeShadowInApp(root, at),
+    askList: (orphans: Parameters<typeof pickOrphanShadowInApp>[1]) => pickOrphanShadowInApp(root, orphans),
+    openPlain,
+    notify: (text: string) => showStatus(text),
+    afterRestore: (id: string) => { restoredShelves.push(id); },
+    ...(onReservedCancel === undefined ? {} : { onReservedCancel }),
+  });
+  const openOfficeTile = () => openOfficeTileWithShadows(officeTileDeps(openOfficeTilePlain));
+  // 🔴 窓を先に確保した回(PC タブの Office の行)も、同じ影の確認を通す(依頼 367 A)。判断は `office-tile-open.ts`
+  const openOfficeTileReserved = (openPlain: () => void) => openReservedLocal(
+      // 🔴 「やめる」なら、確保した窓を閉じる(新しく開いた窓だけ ── 別の文書を出している窓は閉じない)
+      officeTileDeps(openPlain, () => {
+        if (reservedWindowFresh) officeWindow.requestClose();
+      }),
+    );
   /**
    * Office の窓が固まったことに気づく(#135)。⚠ ここは**渡すだけ** ──
    * 物差しも文言も `office-hang-watch.ts` が持つ(`main.ts` は原文 pin の
@@ -6509,6 +6533,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   openLocalFile = createLocalFileOpener({
     openNote: importLaunchFiles,
+    // 🔴 Office の文書は Office の窓で開く(#432)。⚠ 判断は `open-local-office.ts`、使えない環境は添付に落ちる
+    openOffice: (item) =>
+      openLocalOffice(
+        {
+          usable: () => isOfficeUsable(appOfficePack.isInstalled(), appOfficePack.capability()),
+          local: localOffice,
+          officeWindow,
+          openTile: openOfficeTile,
+          openReserved: openOfficeTileReserved,
+          notify: (text) => showStatus(text),
+        },
+        item,
+      ),
     // 🔴 作れた 1 枚目の lid を返す(同じ file の記憶用)。⚠ **handle は渡さない** ── 渡すと
     //    連絡先が「元ファイルへ書き戻す」の相手になり、vCard へ本文を書いて壊す
     importContact: async (file) => {

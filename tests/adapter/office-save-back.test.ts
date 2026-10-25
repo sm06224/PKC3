@@ -712,6 +712,18 @@ describe('手元のファイルへの書き戻し(#432)', () => {
     expect(h.stage.keys(), '棚から片付いていない').toEqual([]);
   });
 
+  it('🔴 ダウンロードに保存したときは、そう言って棚から片付ける(元のファイルへ保存した、と偽らない / #432)', async () => {
+    const h = harness({ writeLocal: async () => 'downloaded' });
+    h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:1' });
+    expect(await h.sb.receive('k1')).toBe('replaced');
+    const said = h.notices.join(' ');
+    expect(said).toContain('ダウンロードに保存しました');
+    expect(said, '元のファイルへ保存した、と偽っている').not.toContain('元のファイルへ保存しました');
+    expect(h.fails, '失敗として言っている').toEqual([]);
+    expect(h.created, 'ノートを増やした').toEqual([]);
+    expect(h.stage.keys(), '棚に残っている(次の起動でまたダウンロードされる)').toEqual([]);
+  });
+
   it('🔴 理由が分かれば理由を言い、行方(PKC3 の中に残してある)を 1 文で言う。棚は残る', async () => {
     const want: [string, string][] = [
       ['denied', '許可が得られなかった'],

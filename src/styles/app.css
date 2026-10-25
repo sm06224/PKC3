@@ -5909,28 +5909,44 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
-/* 押せる行(button)と押せない行(フォルダの li)で、上下左右の余白・行間・寄せを同じにする */
+/* ファイルの行(開く)とフォルダの行(中へ入る)は、どちらも行いっぱいが押せる button。余白・行間・寄せを同じにする */
 [data-pkc-field='pc-open'],
-[data-pkc-field='pc-list'] > li[data-pkc-action='pc-dir-note'] {
+[data-pkc-field='pc-enter'] {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
   padding: var(--s2);
   text-align: left;
-}
-[data-pkc-field='pc-open'] {
   width: 100%;
   height: auto;
   border: none;
   background: none;
   color: var(--fg);
 }
-[data-pkc-field='pc-open']:hover {
+[data-pkc-field='pc-open']:hover,
+[data-pkc-field='pc-enter']:hover {
   background: var(--surface-2);
 }
-/* フォルダの行は押せない ── 余白は同じで、字は一段うすく */
-[data-pkc-field='pc-list'] > li[data-pkc-action='pc-dir-note'] {
+/* パンくず(#215)── 上の階層は押せる字、いまの階層は太字。長い名前は折り返す */
+[data-pkc-field='pc-crumbs'] {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--s1);
+  min-width: 0;
+}
+[data-pkc-field='pc-crumbs'] > [data-pkc-field='pc-folder-name'] {
+  flex: 0 1 auto;
+}
+[data-pkc-field='pc-crumb'] {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-field='pc-crumb-sep'] {
   color: var(--muted);
 }
 /* 1 行目 = 種類の絵 + 名前(絵と名前は中心を揃える) */

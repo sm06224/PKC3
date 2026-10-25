@@ -50,6 +50,11 @@ export interface OfficeTileDeps {
   readonly notify: (text: string) => void;
   /** 戻した控えの棚の名前を預ける(次の控えか保存が書けたら `discardById` する ── 呼び側の配線)。 */
   readonly afterRestore: (id: string) => void;
+  /**
+   * 🔴 窓を先に確保した回(`openReservedLocal`)で「やめる」が選ばれたとき。確保した窓は文書待ちのまま残るので、
+   * 呼び手が閉じる(空の窓を開きっぱなしにしない)。通常のタイルでは呼ばれない(窓はまだ開いていない)。
+   */
+  readonly onReservedCancel?: () => void;
 }
 
 /** 控えの拡張子に名前を合わせる(`報告.doc` の控えが `.docx` のときなど)。名前が無ければ呼び名を使う。 */
@@ -81,7 +86,25 @@ export function openOfficeTile(deps: OfficeTileDeps): boolean {
   return false;
 }
 
-async function localThenOpen(deps: OfficeTileDeps, q: LocalShadowQuery): Promise<void> {
+/**
+ * 🔴 **窓を先に確保した回の、影の確認**(#432 × 依頼 367 A)。手元のファイルを選んだ回は、押した瞬間に窓を確保してある
+ * (`open({ expectDocument: true })` 済み ── user gesture を切らないため)。窓は文書待ちのままなので、ここでは**窓を開かず**、
+ * 通常のタイルと**同じ確認・同じ判断**(`localThenOpen`)を通して文書を渡す。
+ * - 控えが在って「戻す」→ 影の版を渡す / 「保存済みの版」→ 影を捨てて `openPlain`(= ファイルの版を渡す)
+ * - 控えが無ければ確認なしで `openPlain`
+ * - 「やめる」→ 何も渡さない(窓は待ちのまま。控えたファイルも一時保存も残す)
+ * ⚠ `openPlain` は**確保済みの窓へ渡す**口を呼び手が渡す(窓を開き直す口を渡さない)。
+ */
+export function openReservedLocal(deps: OfficeTileDeps): void {
+  const peek = deps.local.peek();
+  if (peek !== null && deps.shadows.mayHaveLocal(peek)) {
+    void localThenOpen(deps, peek, true);
+    return;
+  }
+  deps.openPlain();
+}
+
+async function localThenOpen(deps: OfficeTileDeps, q: LocalShadowQuery, reserved = false): Promise<void> {
   try {
     const offer = await deps.shadows.findLocal(q);
     if (offer === null) {
@@ -96,7 +119,11 @@ async function localThenOpen(deps: OfficeTileDeps, q: LocalShadowQuery): Promise
       deps.openPlain();
       return;
     }
-    if (answer === null) return; // やめる: 控えたファイルも一時保存も、そのまま残す
+    if (answer === null) {
+      // やめる: 控えたファイルも一時保存も、そのまま残す。確保した窓は閉じる(空の窓を残さない)
+      if (reserved) deps.onReservedCancel?.();
+      return;
+    }
     if (answer === 'saved') {
       await deps.shadows.discardById(offer.id);
       deps.openPlain();
@@ -110,7 +137,8 @@ async function localThenOpen(deps: OfficeTileDeps, q: LocalShadowQuery): Promise
       deps.openPlain();
       return;
     }
-    deps.officeWindow.open({ name: staged.name, expectDocument: true });
+    // 🔴 確保済みの回は、窓がもう開いている(2 枚目を開かない)
+    if (!reserved) deps.officeWindow.open({ name: staged.name, expectDocument: true });
     deps.officeWindow.provideDocument(
       staged.name,
       bytes,

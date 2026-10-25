@@ -776,7 +776,6 @@ import { sqlMenuLabel } from '@features/query/sql-tip';
 import { ATTACHMENT_NAME_ATTR, attachmentFileName, readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { assetPermalink, entryPermalink, sectionPermalink } from '@adapter/platform/deep-link';
 import { isLogRowHeading } from '@features/flavor/textlog-flavor';
-import { PC_DIRECTORY_NOTE } from '@features/local-folder/folder-entries';
 import {
   asSqlExportChoice,
   sqlExportChoices,
@@ -2590,7 +2589,7 @@ export interface BinderServices {
    *   選ぶ・列挙・許可の確かめ・取り込みの振り分けは全部実体側。
    *   ⚠ **消す・改名・移動の口は持たない**(パソコンのファイルは取り消せない)。
    */
-  localFolder?: Pick<LocalFolder, 'pick' | 'cut' | 'more' | 'open' | 'refresh'>;
+  localFolder?: Pick<LocalFolder, 'pick' | 'cut' | 'more' | 'open' | 'refresh' | 'enter' | 'goTo' | 'pickFile'>;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   /** 取込(PKC2 の書出し / 素の Markdown)。振り分けは import-file.ts が持つ。 */
   importFiles?(files: File[]): void;
@@ -3326,6 +3325,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'write-back-file',
   // 🔴 パソコンのフォルダの行を押すと取り込む(`CREATE_ENTRY` / 取込)── 取込・書出しの最中は断る(#215 段②)
   'pc-open-file',
+  // 🔴 Office のファイルを選んで開く(#432)── 窓が使えない環境では添付のノートを作るので、同じ門
+  'pc-open-office-file',
 ]);
 
 /**
@@ -16061,8 +16062,19 @@ const ACTIONS: Record<string, ActionHandler> = {
   // 🔴 「更新」(#1264 §2 欠陥 4-a)── 同じ handle で一覧を読み直す。名前と種類だけ(`getFile()` は呼ばない)
   'pc-refresh-folder': (_dispatcher, _target, services) => void services.localFolder?.refresh(),
   'pc-more': (_dispatcher, _target, services) => void services.localFolder?.more(),
-  // 🔴 フォルダの行は押しても中へ入らない ── 無言にせず理由を状態の行へ(場所は動かさない)
-  'pc-dir-note': (dispatcher) => dispatcher.dispatch({ type: 'OP_NOTICE', message: PC_DIRECTORY_NOTE }),
+  // 🔴 サブフォルダの行 = 中へ入る / パンくず = 上の階層へ戻る(#215)。名前と種類だけ読む(`getFile()` は呼ばない)
+  'pc-enter-dir': (_dispatcher, target, services) => {
+    const raw = target.getAttribute('data-pkc-pc-index');
+    const index = raw === null ? NaN : Number(raw);
+    if (Number.isInteger(index)) void services.localFolder?.enter(index);
+  },
+  'pc-crumb': (_dispatcher, target, services) => {
+    const raw = target.getAttribute('data-pkc-pc-level');
+    const level = raw === null ? NaN : Number(raw);
+    if (Number.isInteger(level)) void services.localFolder?.goTo(level);
+  },
+  // 🔴 Office のファイルを 1 つ選んで開く(#432)。⚠ 選択は user の操作の流れの中で呼ぶ(`await` を挟まない)
+  'pc-open-office-file': (_dispatcher, _target, services) => void services.localFolder?.pickFile(),
   'pc-open-file': (_dispatcher, target, services) => {
     const raw = target.getAttribute('data-pkc-pc-index');
     const index = raw === null ? NaN : Number(raw);

@@ -53,6 +53,7 @@ import { GroupFoldStore } from '@adapter/ui/render/group-fold';
 import { CreateKindStore } from '@adapter/ui/render/create-kind';
 import { EntrySortStore } from '@adapter/ui/render/entry-sort-memory';
 import { ListPlaceStore } from '@adapter/ui/render/list-place-memory';
+import { PcFolderPlaceStore } from '@adapter/ui/render/pc-folder-place';
 import { FilerFlattenStore } from '@adapter/ui/render/filer-flatten';
 import { PopupHintStore } from '@adapter/ui/render/popup-hint';
 import { PasteSourceStore } from '@adapter/ui/render/paste-source';
@@ -375,6 +376,15 @@ const CASES: readonly {
     },
     a: { cid: 'c1', scope: 'f1', kinds: ['text'] },
     b: { cid: 'c1', scope: null, kinds: [] },
+  },
+  {
+    name: 'PcFolderPlaceStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new PcFolderPlaceStore(st);
+      return { write: (v) => s.set(v as { root: string; path: string[] }), read: () => s.get() };
+    },
+    a: { root: '資料', path: ['下'] },
+    b: { root: '資料', path: [] },
   },
   {
     // ⚠ 既定が「確認」── a を別の値にする(#1087 S4)
