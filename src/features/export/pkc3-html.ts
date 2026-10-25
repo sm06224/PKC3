@@ -97,6 +97,9 @@ const NOTE_CARD_IN_HTML = /<span\b[^>]*\bdata-pkc-card-target="entry:([^"#]+)/g;
 const COUNT_ATTRS = {
   mermaid: 'data-pkc-mermaid-src',
   chart: 'data-pkc-chart-src',
+  plotly: 'data-pkc-plotly-src',
+  /** React の囲み。⚠ 箱の中でランタイムごと動かす物なので、焼き込まず原文の字で出す(閲覧側に React を積まない)。 */
+  react: 'data-pkc-react-src',
   math: 'data-pkc-math-src',
   /** 外部の画像。⚠ 焼いた(設定が「常にオン」の)ときは `src` が付き、この属性は付かない = 数えない。 */
   externalImage: EXTERNAL_IMAGE_ATTR,
@@ -106,7 +109,7 @@ const COUNT_ATTRS = {
 type CountKind = keyof typeof COUNT_ATTRS;
 
 function countContainers(html: string): Record<CountKind, number> {
-  const out: Record<CountKind, number> = { mermaid: 0, chart: 0, math: 0, externalImage: 0, embed: 0 };
+  const out: Record<CountKind, number> = { mermaid: 0, chart: 0, plotly: 0, react: 0, math: 0, externalImage: 0, embed: 0 };
   for (const kind of Object.keys(COUNT_ATTRS) as CountKind[]) {
     const re = new RegExp(`<[a-zA-Z][^>]*\\s${COUNT_ATTRS[kind]}="`, 'g');
     out[kind] = (html.match(re) ?? []).length;
@@ -135,6 +138,8 @@ function openedAsSourceNotices(n: Record<CountKind, number>): string[] {
   const w: string[] = [];
   if (n.mermaid > 0) w.push(`図(mermaid)${n.mermaid} 件は、開いた先では原文の字で出ます`);
   if (n.chart > 0) w.push(`グラフ ${n.chart} 件は、開いた先では原文の字で出ます`);
+  if (n.plotly > 0) w.push(`グラフ(plotly)${n.plotly} 件は、開いた先では原文の字で出ます`);
+  if (n.react > 0) w.push(`React のコード ${n.react} 件は、開いた先では原文の字で出ます`);
   const math = mathSourceNotice(n.math);
   if (math !== null) w.push(math);
   const embed = embedSourceNotice(n.embed);
@@ -680,7 +685,7 @@ try{
     // 図とグラフは**原文のまま**見せる(閲覧側に mermaid / chart.js を積まない)。
     // ⚠ **両方を回す** ── mermaid だけ書くと、グラフが**空の器**で出荷される
     //    (#188 のレビューで判明。片側だけ直す型の再演)
-    ['data-pkc-mermaid-src','data-pkc-chart-src'].forEach(function(attr){
+    ['data-pkc-mermaid-src','data-pkc-chart-src','data-pkc-plotly-src','data-pkc-react-src'].forEach(function(attr){
       Array.prototype.forEach.call(box.querySelectorAll('['+attr+']'),function(el){
         var s=el.getAttribute(attr)||'';
         el.textContent='';var p=document.createElement('pre');p.className='d';
@@ -1057,7 +1062,7 @@ export async function writePortableHtml(
   const exportedLids = new Set<string>();
   const linkTargets: string[] = [];
   /** 開いた先で原文の字・空の枠になる物の数(#1087)。 */
-  const opened: Record<CountKind, number> = { mermaid: 0, chart: 0, math: 0, externalImage: 0, embed: 0 };
+  const opened: Record<CountKind, number> = { mermaid: 0, chart: 0, plotly: 0, react: 0, math: 0, externalImage: 0, embed: 0 };
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
     const { rows, done, next } = await src.listBodies(after, BODY_BATCH_BYTES);

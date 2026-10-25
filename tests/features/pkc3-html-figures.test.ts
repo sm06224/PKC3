@@ -95,6 +95,33 @@ describe('閲覧用 HTML の図とグラフ(#1648)', () => {
     expect(html.match(/<img alt="図"/g)?.length).toBe(2);
   });
 
+  it('🔴 plotly は chart と同じく絵に焼かれる / React は焼かず原文の字で出て、件数が注意に出る(#528)', async () => {
+    const log: string[] = [];
+    const body =
+      '```plotly\n{"data":[{"y":[1]}]}\n```\n\n```react\nexport default function App(){ return <b>x</b>; }\n```\n';
+    const { html, warnings, whole } = await entryHtml(body, bakers(log));
+    // plotly は PNG の絵。属性は器から外れる(閲覧側の script が原文へ戻さない)
+    expect(html).toContain('<img alt="グラフ" src="data:image/png;base64,');
+    expect(html).not.toContain('data-pkc-plotly-src');
+    expect(log).toEqual(['raster:plotly']);
+    // React は閲覧側に React を積まないので、焼かない ── 器のまま残り、原文の字で出る件数に数える
+    expect(html).toContain('data-pkc-react-src');
+    expect(warnings).toContain('React のコード 1 件は、開いた先では原文の字で出ます');
+    expect(warnings.some((w) => w.includes('plotly'))).toBe(false);
+    // 閲覧側の script は plotly / React の器も原文へ戻す(焼けなかったときの受け皿)
+    expect(whole).toContain("'data-pkc-plotly-src'");
+    expect(whole).toContain("'data-pkc-react-src'");
+  });
+
+  it('🔴 描けなかった plotly は器のまま残り、件数が注意に出る', async () => {
+    const { html, warnings } = await entryHtml(
+      '```plotly\n{"data":[{"y":[1]}]}\n```\n',
+      { vector: async () => null, raster: async () => null },
+    );
+    expect(html).toContain('data-pkc-plotly-src');
+    expect(warnings).toContain('グラフ(plotly)1 件は、開いた先では原文の字で出ます');
+  });
+
   it('閲覧側の script が、絵にした器を原文へ戻さない(器から印の属性が無い)', async () => {
     const { whole } = await entryHtml(BODY, bakers([]));
     // 閲覧側は属性の有無で拾う。焼いた器の側に無いことは上で見た ── ここでは絵の幅の規則が配られることを見る

@@ -112,6 +112,9 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
     'chart fence',
     '```chart\n{"type":"bar","labels":["1月"],"datasets":[{"label":"売上","data":[10]}]}\n```\n',
   ],
+  // 🔴 plotly / React(#528)── 器と原文の受け皿の CSS が誰にも出されなくならないように
+  ['plotly fence', '```plotly\n{"data":[{"type":"bar","y":[1,2]}]}\n```\n'],
+  ['react fence', '```react\nexport default function App(){ return <b>x</b>; }\n```\n'],
   ['カード埋め込み', '@[card](entry:abc)\n'],
   // 🔴 本文の中に書いたタグ行(#550 段③)── バッジの CSS が誰にも当たらないと、
   //    user が「バッジ化して欲しい」と言ったものが**ただの文字で出る**
@@ -200,6 +203,8 @@ function styled(): { classes: Set<string>; attrs: Set<string> } {
  * 🔑 つまり免除ではなく、**別の場所を見る**という指示である。
  */
 const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
+  // React の囲みを描く隔離した枠(#528 ②)。描いた後に、見えたときに adapter が器へ置く(markdown は placeholder まで)
+  'pkc-react-frame': 'src/adapter/ui/render/react-sandbox.ts',
   // 表のセルを押したときに binder が差し込む入力欄(#418 段①)
   'pkc-csv-cell-input': 'src/adapter/ui/actions/binder.ts',
   // 表のセルを打っている間だけ、升の右上に binder が差し込むセルの名前(B2 など。#1662 の 4)
@@ -339,6 +344,8 @@ const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {
   'pkc-md-rendered': '本文の器。中の要素に当てる起点で、自身は素のまま',
   'pkc-mermaid-placeholder': '器。状態は data-pkc-mermaid-state で見る',
   'pkc-chart-placeholder': '器。状態は data-pkc-chart-state で見る(#188)',
+  'pkc-plotly-placeholder': '器。状態は data-pkc-plotly-state で見る(#528)',
+  'pkc-react-placeholder': '器。状態は data-pkc-react-state で見る(#528)',
   'pkc-md-block': '器。中の切替や操作子に当てる起点',
   'pkc-render-slot': '描画面の器。隠す規則は切替側(:checked ~)に在る',
 };

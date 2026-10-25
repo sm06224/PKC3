@@ -322,12 +322,13 @@ const defaultFence = md.renderer.rules.fence ??
 //    sibling combinator)── S2 Viewer popup / S4 entry-window は action-binder
 //    の無い独立 document のため、JS 配線ゼロで全 surface に効く方式を正とする。
 
-export type RenderableFenceLang = 'html' | 'svg' | 'mermaid' | 'chart' | 'csv' | 'tsv' | 'psv';
+export type RenderableFenceLang =
+  | 'html' | 'svg' | 'mermaid' | 'chart' | 'plotly' | 'react' | 'jsx' | 'csv' | 'tsv' | 'psv';
 export type RenderableFenceMode = 'both' | 'render' | 'norender';
 
 /** ⚠ 公開しているのは `tests/docs-parity.test.ts` がマニュアルと突合するため。 */
 export const RENDERABLE_FENCE_LANGS: ReadonlySet<string> = new Set([
-  'html', 'svg', 'mermaid', 'chart', 'csv', 'tsv', 'psv',
+  'html', 'svg', 'mermaid', 'chart', 'plotly', 'react', 'jsx', 'csv', 'tsv', 'psv',
 ]);
 
 export interface RenderableFence {
@@ -367,7 +368,9 @@ export function parseRenderableFence(info: string | null | undefined): Renderabl
 
 /** norender / render-失敗 fallback 用のソース表示(base lang で highlight)。 */
 function renderFenceSourceHtml(content: string, lang: RenderableFenceLang): string {
-  return `<pre><code class="language-${lang}">${highlightCode(content, lang)}</code></pre>`;
+  // 🔑 react は JSX として彩色する(highlight の言語名は jsx)
+  const hl = lang === 'react' ? 'jsx' : lang;
+  return `<pre><code class="language-${hl}">${highlightCode(content, hl)}</code></pre>`;
 }
 
 /**
@@ -455,6 +458,26 @@ function buildRenderableSlotHtml(
        */
       const escapedChart = md.utils.escapeHtml(content);
       return `<div class="pkc-chart-placeholder" data-pkc-chart-src="${escapedChart}" data-pkc-md-block-kind="chart"><pre class="pkc-chart-source"><code class="language-chart">${escapedChart}</code></pre></div>`;
+    }
+    case 'plotly': {
+      /**
+       * 🔴 **chart と同じ形にする**(#528 ①)── placeholder を出し、描くのは adapter(sandbox の箱の中の plotly.js →
+       * PNG の `<img>` 1 枚)。features 層は DOM も plotly も持たない。原文は属性に持つ
+       * (同じ塊の HTML が変わらないことが、生きている `<img>` を捨てないための条件)。
+       */
+      const escapedPlotly = md.utils.escapeHtml(content);
+      return `<div class="pkc-plotly-placeholder" data-pkc-plotly-src="${escapedPlotly}" data-pkc-md-block-kind="plotly"><pre class="pkc-plotly-source"><code class="language-plotly">${escapedPlotly}</code></pre></div>`;
+    }
+    case 'react':
+    case 'jsx': {
+      /**
+       * 🔴 **React(JSX)の囲み**(#528 ②)── placeholder だけを出す。ランタイム(react / react-dom / JSX 変換 / Tailwind)は
+       * 1 MB 近くあり、markdown の出力(ワーカーとの受け渡し・塊の比較)へ焼くには重い。adapter が**見えたとき**に
+       * sandbox の箱(`sandbox="allow-scripts"` + CSP で外へ出られない)へ inline で入れて描く。
+       * ⚠ 原文は属性に持つ(生きている箱を、無関係な編集で作り直さない)。
+       */
+      const escapedReact = md.utils.escapeHtml(content);
+      return `<div class="pkc-react-placeholder" data-pkc-react-src="${escapedReact}" data-pkc-md-block-kind="react"><pre class="pkc-react-source"><code class="language-jsx">${escapedReact}</code></pre></div>`;
     }
     default: {
       // csv / tsv / psv:suffix を剥がした info を渡す(`noheader` 等の

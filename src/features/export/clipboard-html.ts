@@ -69,6 +69,8 @@ export function isCopyControl(el: Element): boolean {
 export const COPY_JUNK_CLASSES = [
   'pkc-mermaid-source',
   'pkc-chart-source',
+  'pkc-plotly-source',
+  'pkc-react-source',
   'pkc-render-source',
   'pkc-md-block-actions',
   // 画面だけの飾り(#1087): 表の「押すと打てます」/ 原文⇄表示の切替 / コードの言語バッジ / 折りたたみ帯

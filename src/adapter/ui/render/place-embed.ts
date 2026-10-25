@@ -571,7 +571,7 @@ export class PlaceEmbeds {
       prepare: (holder) =>
         sanitizeEmbedded(holder, (l) => deps.metaOf(l)?.title ?? null, slot.getAttribute(PLACE_NS_ATTR) ?? '', true),
       onReplaced: (next) => {
-        if (next.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-math-src]') === null) return;
+        if (next.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-plotly-src], [data-pkc-react-src], [data-pkc-math-src]') === null) return;
         this.fresh.push(next as HTMLElement);
         this.flushFigures(deps);
       },
@@ -654,7 +654,7 @@ export class PlaceEmbeds {
     // 🔴 図と画像(W3-②)── 読む面と同じ口へ。⚠ 器を入れた**後**に呼ぶ(繋がっていないと面が読めない)
     this.hydrateImages(slot, deps);
     this.hydrateFences(slot, deps);
-    if (slot.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-math-src]') !== null)
+    if (slot.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-plotly-src], [data-pkc-react-src], [data-pkc-math-src]') !== null)
       this.fresh.push(slot);
   }
 }

@@ -16,8 +16,8 @@
  * - 同じ原文は 1 回しか描かない。描くのは直列(メインスレッドを奪い合わない)。
  * - 器が 0 個なら**何も呼ばない**(図の無いノートの書き出しは 1 バイトも変わらない)。
  *
- * ⚠ 絵にした器からは `data-pkc-mermaid-src` / `data-pkc-chart-src` を**外す**。閲覧側の script は
- *   この 2 つの属性を持つ器の中身を原文に戻すので、残すと絵が消える。原文は `data-pkc-figure-src` に残す。
+ * ⚠ 絵にした器からは `data-pkc-mermaid-src` / `data-pkc-chart-src` / `data-pkc-plotly-src` を**外す**。閲覧側の script は
+ *   この 3 つの属性を持つ器の中身を原文に戻すので、残すと絵が消える。原文は `data-pkc-figure-src` に残す。
  */
 
 export interface FigureBakers {
@@ -29,7 +29,7 @@ export interface FigureBakers {
 
 /** `markdown-render.ts` が出す器(mermaid / chart)。属性の値は HTML の escape 済み。 */
 const FIGURE_RE =
-  /<div class="pkc-(mermaid|chart)-placeholder" data-pkc-(?:mermaid|chart)-src="([^"]*)" data-pkc-md-block-kind="(?:mermaid|chart)"><pre[^>]*><code[^>]*>[\s\S]*?<\/code><\/pre><\/div>/g;
+  /<div class="pkc-(mermaid|chart|plotly)-placeholder" data-pkc-(?:mermaid|chart|plotly)-src="([^"]*)" data-pkc-md-block-kind="(?:mermaid|chart|plotly)"><pre[^>]*><code[^>]*>[\s\S]*?<\/code><\/pre><\/div>/g;
 
 function unescapeAttr(s: string): string {
   return s
@@ -53,7 +53,7 @@ function utf8Base64(text: string): string {
 }
 
 /** 描いた絵の `<img>`(原文は `alt` に入れない ── 長いので `data-pkc-figure-src` へ)。 */
-async function bakeOne(kind: 'mermaid' | 'chart', source: string, bakers: FigureBakers): Promise<string | null> {
+async function bakeOne(kind: 'mermaid' | 'chart' | 'plotly', source: string, bakers: FigureBakers): Promise<string | null> {
   if (kind === 'mermaid') {
     const svg = await bakers.vector('mermaid', source).catch(() => null);
     if (svg !== null && svg.trim() !== '') {
@@ -65,7 +65,7 @@ async function bakeOne(kind: 'mermaid' | 'chart', source: string, bakers: Figure
   if (drawn === null) return null;
   const bytes = new Uint8Array(await drawn.blob.arrayBuffer());
   if (bytes.length === 0) return null;
-  const alt = kind === 'chart' ? 'グラフ' : '図';
+  const alt = kind === 'chart' || kind === 'plotly' ? 'グラフ' : '図';
   return `<img alt="${alt}" src="data:image/png;base64,${toBase64(bytes)}">`;
 }
 
@@ -82,7 +82,7 @@ export async function bakeFigures(
   const hits = [...html.matchAll(FIGURE_RE)];
   if (hits.length === 0) return html;
   for (const m of hits) {
-    const kind = m[1] as 'mermaid' | 'chart';
+    const kind = m[1] as 'mermaid' | 'chart' | 'plotly';
     const source = unescapeAttr(m[2] ?? '');
     const key = `${kind}\n${source}`;
     if (cache.has(key)) continue;

@@ -447,6 +447,7 @@ import { MERMAID_KIND, hydrateAllNow } from '@adapter/ui/render/mermaid-hydrate'
 import { preparePrintBody } from '@adapter/ui/render/print-prepare';
 import { PRINT_PALETTE, PRINT_THEME } from '@adapter/ui/render/diagram-print';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
+import { PLOTLY_KIND } from '@adapter/ui/render/plotly-raster';
 import { askSqlEmbed, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
 import { appExtensionGrants } from '@adapter/platform/extension-grants';
@@ -2959,7 +2960,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
          */
         // 🔴 `paper` = Word・PowerPoint 用(#1163 依頼 233)── 画面の配色によらず紙の(明るい)配色で描く。閲覧用 HTML は渡さない
         renderFigureVector: async (kind, source, paper) =>
-          kind === 'chart' ? null : renderToSvg(source, paper === true ? PRINT_PALETTE : readPalette()),
+          kind === 'chart' || kind === 'plotly' ? null : renderToSvg(source, paper === true ? PRINT_PALETTE : readPalette()),
         // 🔴 本文のアイコン(`:home:`)を PNG に焼く(#853。Word に画像で埋める)
         renderIcon: (name) => rasterizeIcon(name),
         renderFigure: async (kind, source, paper) => {
@@ -2968,7 +2969,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             const drawn = await rasterize(source, 720, 2);
             return { blob: drawn.png, cssWidth: drawn.cssWidth };
           }
-          const diagram = kind === 'chart' ? CHART_KIND : MERMAID_KIND;
+          const diagram = kind === 'chart' ? CHART_KIND : kind === 'plotly' ? PLOTLY_KIND : MERMAID_KIND;
           const raster = await diagram.render({
             source,
             kind,
@@ -4657,9 +4658,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                   //   ⚠ dpr は 2 固定(紙の `renderFigure` と同じ理由 ── 端末ごとに
                   //   違う解像度の絵にしない)。
                   (
-                    await CHART_KIND.render({
+                    await (diagram.kind === 'plotly' ? PLOTLY_KIND : CHART_KIND).render({
                       source: diagram.source,
-                      kind: 'chart',
+                      kind: diagram.kind,
                       theme: document.documentElement.getAttribute('data-pkc-theme') ?? 'light',
                       palette: readPalette(),
                       width: 2048,

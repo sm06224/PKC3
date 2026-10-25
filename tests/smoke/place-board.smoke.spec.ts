@@ -33,6 +33,30 @@ const PNG_1X1 = Buffer.from(
 );
 
 /**
+ * 1 ページだけの本物の PDF(赤い四角つき)── 板の PDF の枠が **1 ページ目を絵にする**(#529 W6)のを見る台。
+ * ⚠ 「%PDF-1.4 / %%EOF」だけの偽物では pdf.js が読めず、絵にならない(= 字のまま)ので、xref まで正しく組む。
+ */
+function minimalPdf(): Buffer {
+  const content = '1 0 0 rg 20 20 260 100 re f';
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Contents 4 0 R >>',
+    `<< /Length ${String(content.length)} >>\nstream\n${content}\nendstream`,
+  ];
+  let out = '%PDF-1.4\n';
+  const offs: number[] = [];
+  objs.forEach((o, i) => {
+    offs.push(out.length);
+    out += `${String(i + 1)} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${String(objs.length + 1)}\n0000000000 65535 f \n${offs.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${String(objs.length + 1)} /Root 1 0 R >>\nstartxref\n${String(xref)}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
+
+/**
  * 🔴 **線の宣言を末尾に持つ**(#530 段③a)。
  *
  * ⚠ 足す前、この spec は `from=` / `to=` を **1 件も持っていなかった** ──
@@ -1069,7 +1093,7 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   await page.setInputFiles('[data-pkc-field="attach-input"]', {
     name: '書類.pdf',
     mimeType: 'application/pdf',
-    buffer: Buffer.from('%PDF-1.4\n%%EOF\n'),
+    buffer: minimalPdf(),
   });
   // 🔴 #529 A-1 ── 図だけのノート / 図 4 種(chart・html・svg・csv)のノート。枠の中で**原文が見えない**ことを見る
   //    (新しい起動は増やさない。同じ道中の板 2 に置く)
@@ -1317,8 +1341,21 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
 
   // 🔴 ⑥-b PDF の枠の「PDF は元のノートで」も押せる(#1264 §1)── 字だけの行ではなく、帯と同じ口で元のノートを開く
   const pdfSkip = slotIn('pd').locator('[data-pkc-field="place-body-skip"]');
-  await expect(pdfSkip, 'PDF の枠に「元のノートで」の押し所が無い').toHaveText('PDF は元のノートで');
-  await expect(pdfSkip).toHaveAttribute('data-pkc-action', 'select-entry');
+  await expect(pdfSkip, 'PDF の枠に「元のノートで」の押し所が無い').toHaveAttribute('data-pkc-action', 'select-entry');
+  // 🔴 #529 W6 ── 1 ページ目が PNG の絵として枠いっぱいに出る(字の代わり)。押し所は器のまま
+  await expect(pdfSkip, 'PDF の 1 ページ目が焼かれていない').toHaveAttribute('data-pkc-pdf-state', 'ready', { timeout: 30000 });
+  const pdfImg = pdfSkip.locator('img[data-pkc-field="place-attachment-pdf-image"]');
+  await expect(pdfImg).toHaveCount(1);
+  expect(
+    await pdfImg.evaluate((el) => ({ n: (el as HTMLImageElement).naturalWidth, src: (el as HTMLImageElement).src.slice(0, 5) })),
+    'PDF の絵が PNG の ObjectURL ではない / 読めていない',
+  ).toMatchObject({ src: 'blob:' });
+  expect(await pdfImg.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  // 絵は枠の中に収まる(はみ出さない)
+  const pdfBox = (await slotIn('pd').boundingBox())!;
+  const pdfImgBox = (await pdfImg.boundingBox())!;
+  expect(pdfImgBox.width, '絵が枠からはみ出している').toBeLessThanOrEqual(pdfBox.width + 1);
+  expect(pdfImgBox.height, '絵が枠からはみ出している').toBeLessThanOrEqual(pdfBox.height + 1);
   await clickReal(page, '#pd [data-pkc-field="place-body-skip"]');
   await expect(
     page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-title"]'),

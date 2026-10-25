@@ -946,3 +946,97 @@ test('🔴 打っている間は画面の外の図を先読みせず、止まる
     .toBeGreaterThan(0);
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });
+
+/**
+ * #528: ` ```plotly ` は PNG の img、` ```react ` は隔離した箱の中で動く画面になる。
+ *
+ * ⚠ 観測点は「出た」ではなく **何が DOM に置かれたか / 箱の中で何が起きたか**:
+ * - plotly: img(blob: の PNG)1 枚で、SVG / canvas を本文に残さない。焼いた画素が表示幅以上
+ * - react: `sandbox="allow-scripts"` のみ(`allow-same-origin` 無し)の iframe の中で、**押すと数が増える**
+ *   (JSX が実際に変換されて動いている)/ Tailwind の class が**実際の背景色**になっている
+ * - 外へ出ない: 箱の中から外部の画像を取りに行くと、CSP が止めて理由の行が出る
+ */
+test('🔴 plotly は PNG の img、react は隔離した箱の中で動く(外へは出ない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  // ⚠ playwright は CSP が止めた要求も `request` に数える ── 見るのは「**止められたか**」(errorText が csp)
+  const attempted = new Set<string>();
+  const outcome = new Map<string, string>();
+  const isExternal = (u: string): boolean => /^https?:\/\/(?!localhost|127\.0\.0\.1)/.test(u);
+  page.on('request', (r) => {
+    if (isExternal(r.url())) attempted.add(r.url());
+  });
+  page.on('requestfailed', (r) => {
+    if (isExternal(r.url())) outcome.set(r.url(), r.failure()?.errorText ?? '');
+  });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('plotly と react');
+  const plotly =
+    '```plotly\n{"data":[{"type":"bar","x":["a","b","c"],"y":[3,7,5]},{"type":"scatter","x":["a","b","c"],"y":[2,4,9]}],' +
+    '"layout":{"title":"売上","images":[{"source":"https://example.invalid/leak.png","x":0,"y":1,"sizex":0.2,"sizey":0.2}]}}\n```\n';
+  const react =
+    "```react\nimport { useState } from 'react';\nexport default function App(){\n  const [n,setN]=useState(0);\n" +
+    '  return <div className="p-4 bg-red-500 text-white"><button id="b" onClick={()=>setN(n+1)}>押した回数 {n}</button>' +
+    '<img src="https://example.invalid/leak2.png" alt="" /></div>;\n}\n```\n';
+  await page.locator('[data-pkc-field="editor-body"]').fill(`${plotly}\n${react}`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // ① plotly
+  const host = page.locator('[data-pkc-field="detail-body"] [data-pkc-plotly-src]');
+  await expect(host).toHaveAttribute('data-pkc-plotly-state', 'ready', { timeout: 60000 });
+  const placed = await host.evaluate((h) => {
+    const img = h.querySelector('img');
+    return {
+      first: h.firstElementChild?.tagName ?? 'NONE',
+      src: img?.getAttribute('src')?.slice(0, 5) ?? '',
+      natural: img?.naturalWidth ?? 0,
+      shown: img?.clientWidth ?? 0,
+      alt: img?.alt ?? '',
+      action: img?.getAttribute('data-pkc-action') ?? '',
+    };
+  });
+  expect(placed.first, 'img ではないものが置かれている').toBe('IMG');
+  expect(placed.src, 'blob の ObjectURL ではない').toBe('blob:');
+  expect(placed.natural, '画像が読めていない').toBeGreaterThan(0);
+  expect(placed.natural / Math.max(1, placed.shown) - (await page.evaluate(() => window.devicePixelRatio)), 'ボケる').toBeGreaterThan(-0.05);
+  expect(placed.alt).toContain('売上');
+  expect(placed.action, '押すと大きく見られる(図・グラフと同じ)').toBe('view-big');
+  expect(
+    await page.evaluate(() => document.querySelectorAll('[data-pkc-field="detail-body"] svg, [data-pkc-field="detail-body"] canvas').length),
+    'SVG / canvas が本文に残っている',
+  ).toBe(0);
+
+  // ② react ── 箱の作り
+  const frame = page.locator('[data-pkc-field="detail-body"] iframe.pkc-react-frame');
+  await expect(frame).toHaveCount(1, { timeout: 30000 });
+  const sandbox = await frame.getAttribute('sandbox');
+  expect(sandbox).toBe('allow-scripts');
+  const inner = page.frameLocator('[data-pkc-field="detail-body"] iframe.pkc-react-frame');
+  const button = inner.locator('#b');
+  await expect(button).toHaveText('押した回数 0', { timeout: 30000 });
+  // 押すと数が増える = JSX が変換され、React が動いている
+  await button.click();
+  await expect(button).toHaveText('押した回数 1');
+  // Tailwind の class が実際の背景色になっている(red-500)
+  const bg = await inner.locator('div.bg-red-500').evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(bg, 'Tailwind が効いていない').not.toBe('rgba(0, 0, 0, 0)');
+  // 箱の高さを箱が申告して、畳まれたままにならない
+  await expect
+    .poll(async () => (await frame.boundingBox())?.height ?? 0, { message: '箱の高さが 0 のまま' })
+    .toBeGreaterThan(30);
+  // ③ 外部への要求は**全部 CSP が止めた**(plotly の外部画像・react の外部画像とも)
+  await expect
+    .poll(() => outcome.size, { message: '台の前提: 外部画像の要求が試みられていない(検査が空振り)' })
+    .toBe(2);
+  expect([...attempted].sort(), '台の前提').toEqual(['https://example.invalid/leak.png', 'https://example.invalid/leak2.png']);
+  expect(
+    [...outcome].filter(([, why]) => !/csp/i.test(why)),
+    '止められずに外へ出た要求がある',
+  ).toEqual([]);
+
+  // ④ 本文を離れると箱が外れる(生成物を残さない)
+  await createEntry(page, 'text');
+  await expect(page.locator('iframe.pkc-react-frame')).toHaveCount(0);
+  expect(errors.filter((e) => !/example\.invalid|Content Security Policy/.test(e))).toEqual([]);
+});

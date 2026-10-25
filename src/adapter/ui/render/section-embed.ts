@@ -298,7 +298,7 @@ export class SectionEmbeds {
     el.removeAttribute(PENDING_ATTR);
     this.hydrateImages(el, deps);
     this.hydrateFences(el, deps);
-    if (el.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-math-src]') !== null) this.fresh.push(el);
+    if (el.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-plotly-src], [data-pkc-react-src], [data-pkc-math-src]') !== null) this.fresh.push(el);
   }
 
   private flushFigures(deps: SectionEmbedDeps): void {
@@ -327,7 +327,7 @@ export class SectionEmbeds {
       prepare: (holder) =>
         sanitizeEmbedded(holder, (l) => deps.metaOf(l)?.title ?? null, el.getAttribute(NS_ATTR) ?? ''),
       onReplaced: (next) => {
-        if (next.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-math-src]') === null) return;
+        if (next.querySelector('[data-pkc-mermaid-src], [data-pkc-chart-src], [data-pkc-plotly-src], [data-pkc-react-src], [data-pkc-math-src]') === null) return;
         this.fresh.push(next as HTMLElement);
         this.flushFigures(deps);
       },

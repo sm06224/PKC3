@@ -967,7 +967,7 @@ async function collectOfficeBlocks(
    *   画素数をそのまま渡すと Retina の端末でだけ図が 2 倍で出る。
    */
   for (const [i, fig] of figures.entries()) {
-    const what = fig.kind === 'chart' ? 'グラフ' : '図';
+    const what = fig.kind === 'chart' || fig.kind === 'plotly' ? 'グラフ' : '図';
     /**
      * 🔴 **まずベクタ(EMF)で試す**(#238)。⚠ これが本命 ── 拡大しても
      * 粗くならず、図形として触れる。
