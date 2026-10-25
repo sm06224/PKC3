@@ -140,6 +140,76 @@ describe('断る場面', () => {
   });
 });
 
+describe('選んだ N 件だけ書き出す(#1038 A2)', () => {
+  const closure = {
+    lids: ['n1', 'f0'],
+    assetKeys: ['k1'],
+    selected: 1,
+    referenced: 0,
+    ancestors: 1,
+    droppedRelations: 2,
+    title: '選んだ甲',
+    warnings: ['選んだノートの外へ向かうつながり 2 件は含まれません(つなぐ先のノートが入らないため)'],
+  };
+
+  it('🔴 閉包を画像の口へ渡し、閉包の添付だけを焼き、題名・注意・件数が選んだ分になる', async () => {
+    const { d } = booted();
+    let gotOnly: unknown;
+    const read: string[] = [];
+    const dp = deps({
+      closure: async (sel) => {
+        expect(sel).toEqual(['n1']);
+        return closure;
+      },
+      exportImage: async (only) => {
+        gotOnly = only;
+        return new Uint8Array([1, 2, 3, 4]);
+      },
+      listAssets: async () => [
+        { key: 'k1', mime: 'image/png' },
+        { key: 'other', mime: 'image/png' },
+      ],
+      getAsset: async (key) => {
+        read.push(key);
+        return new Blob(['x']);
+      },
+    });
+    expect(await exportPortable(d, dp, ['n1'])).toBe(1);
+    expect(gotOnly).toEqual({ lids: ['n1', 'f0'], assetKeys: ['k1'] });
+    expect(read, '閉包に無い添付を読んでいる').toEqual(['k1']);
+    expect(dp.files[0]!.name).toMatch(/^選んだ甲-\d{8}\.pkc3\.html$/);
+    expect(dp.notes[0]!.join()).toContain('2 件は含まれません');
+    expect(dp.said.at(-1)).toContain('選んだ 1 件 + 参照先 0 件 + 祖先フォルダ 1 件');
+  });
+
+  it('対照:全件のときは only を渡さず、題名は器のまま', async () => {
+    const { d } = booted();
+    let gotOnly: unknown = 'unset';
+    const dp = deps({
+      exportImage: async (only) => {
+        gotOnly = only;
+        return new Uint8Array([1, 2, 3, 4]);
+      },
+    });
+    await exportPortable(d, dp);
+    expect(gotOnly).toBeUndefined();
+    expect(dp.files[0]!.name).toMatch(/^器-/);
+  });
+
+  it('閉包が空(選んだ lid が居ない)なら断り、画像も雛形も取りに行かない', async () => {
+    const { d, errors } = booted();
+    const { EmptyClosureError } = await import('../../src/features/export/portable-closure');
+    const dp = deps({
+      closure: async () => {
+        throw new EmptyClosureError();
+      },
+    });
+    expect(await exportPortable(d, dp, ['zzz'])).toBeNull();
+    expect(errors.join()).toContain('見つかりません');
+    expect(dp.order).toEqual(['settle']);
+  });
+});
+
 describe('書き出す', () => {
   it('🔴 保存が着地してから読む(読みは書込の chain の外に居る)', async () => {
     const { d } = booted();

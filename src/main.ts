@@ -188,6 +188,7 @@ import {
 import { connectPortableWiring } from '@adapter/platform/storage/portable-wiring';
 import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
 import { exportPortable, fetchPortableTemplate } from '@adapter/ui/actions/export-portable';
+import { portableClosure } from '@features/export/portable-closure';
 import {
   persistStatusText,
   type PortablePersist,
@@ -2882,6 +2883,62 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       notify: (message, open) =>
         dispatcher.dispatch(open === null ? { type: 'OP_NOTICE', message } : { type: 'OP_NOTICE', message, open }),
     }, handedOff);
+
+  /**
+   * 🔴 **PKC3 入り HTML を書き出す**(全件 / 一覧で選んだ N 件 ── #1038 A2)。
+   * 🔑 `selection` を渡すと、worker が選んだ分だけの新しい DB 画像を作る(本体の DB は変えない)。
+   */
+  const runExportPortable = (selection?: readonly string[]): Promise<void> =>
+    withAssetGate(async () => {
+      await exportPortable(
+        dispatcher,
+        {
+          title: CONTAINER_TITLE,
+          /**
+           * ⚠ **雛形は同じ origin から取る** ── 押したときだけ取りに行く
+           *   (SW の precache には載せない。載せると全 user が 6.5MB を先に落とす)。
+           */
+          fetchTemplate: () => fetchPortableTemplate((u) => fetch(u), document.baseURI),
+          // 🔴 人に渡すファイルにはメッセージ・処理の記録を入れない(台帳 #1852 束 L1、依頼 216 / 344)
+          exportImage: async (only) =>
+            (
+              await client.request(
+                only === undefined
+                  ? { op: 'exportImage', withoutMessages: true }
+                  : { op: 'exportImage', only: { cid, lids: only.lids, assetKeys: only.assetKeys } },
+              )
+            ).image,
+          // 🔴 閉包の読み口は書き出しと同じ op(`runExport` の源と同じ実体)
+          closure: (lids) =>
+            portableClosure(
+              {
+                cid,
+                listEntryMetas: () => client.request({ op: 'listEntryMetas', cid }),
+                getBody: async (lid) => (await client.request({ op: 'getBody', cid, lid })) ?? null,
+                listBodies: (after, maxBytes) =>
+                  client.request({ op: 'listBodies', cid, maxBytes, ...(after ? { after } : {}) }),
+                listRelations: () => client.request({ op: 'listRelations', cid }),
+                listAssetMetas: () => client.request({ op: 'listAssetMetas', cid }),
+              },
+              lids,
+            ),
+          listAssets: async () =>
+            (await client.request({ op: 'listAssetMetas', cid })).map((m) => ({
+              key: m.key,
+              mime: m.mime ?? 'application/octet-stream',
+            })),
+          getAsset: (key) => blobs.get(cid, key),
+          download: downloadBlob,
+          notify: (message) => showStatus(message),
+          report: (notes) => showNotices(regions.notices, '書き出し時の注意', notes),
+          settle: async () => {
+            await storeEffects?.settled();
+          },
+          insideBundle: () => portable !== null,
+        },
+        selection,
+      );
+    });
 
   const runExport = (
     kind:
@@ -5662,32 +5719,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     pasteSource: () => appPasteSource.get(),
     pasteInspect: () => appFlags.isOn(FLAG_PASTE_INSPECT.name),
     leaveMessage: (m) => appMessagePost.post(m),
-    exportPortable: () =>
-      void withAssetGate(async () => {
-        await exportPortable(dispatcher, {
-          title: CONTAINER_TITLE,
-          /**
-           * ⚠ **雛形は同じ origin から取る** ── 押したときだけ取りに行く
-           *   (SW の precache には載せない。載せると全 user が 6.5MB を先に落とす)。
-           */
-          fetchTemplate: () => fetchPortableTemplate((u) => fetch(u), document.baseURI),
-          // 🔴 人に渡すファイルにはメッセージ・処理の記録を入れない(台帳 #1852 束 L1、依頼 216 / 344)
-          exportImage: async () => (await client.request({ op: 'exportImage', withoutMessages: true })).image,
-          listAssets: async () =>
-            (await client.request({ op: 'listAssetMetas', cid })).map((m) => ({
-              key: m.key,
-              mime: m.mime ?? 'application/octet-stream',
-            })),
-          getAsset: (key) => blobs.get(cid, key),
-          download: downloadBlob,
-          notify: (message) => showStatus(message),
-          report: (notes) => showNotices(regions.notices, '書き出し時の注意', notes),
-          settle: async () => {
-            await storeEffects?.settled();
-          },
-          insideBundle: () => portable !== null,
-        });
-      }),
+    exportPortable: () => void runExportPortable(),
+    // 🔴 一覧で選んだ N 件(と参照先・添付・祖先フォルダ)だけの PKC3 入り HTML(#1038 A2)
+    exportSelectionPortable: (lids) => void runExportPortable(lids),
     exportEntry: (lid) => void runExport({ entryLid: lid }),
     exportSelectionHtml: (lids) => void runExport({ selection: lids, as: 'html' }),
     exportSelectionArchive: (lids) => void runExport({ selection: lids, as: 'archive' }),

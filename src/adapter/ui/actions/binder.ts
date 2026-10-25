@@ -2519,6 +2519,8 @@ export interface BinderServices {
    */
   exportSelectionHtml?(lids: string[]): void;
   exportSelectionArchive?(lids: string[]): void;
+  /** 🔴 選んだ N 件(と参照先・添付・祖先フォルダ)だけの PKC3 入り HTML(#1038 A2)。 */
+  exportSelectionPortable?(lids: string[]): void;
   /**
    * 🔴 **このノートを閲覧用 HTML(1 枚)で書き出す**(#491)。
    * ⚠ 上の `exportEntry` と**別の物** ── あちらは取り込み直せる `.pkc3.zip`、
@@ -15949,7 +15951,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   (左の列の見えている行に在る印)── 数と対象が食い違うと、帯の「N 件」が嘘になる。
    */
   /**
-   * 🔴 **選択バーの「書き出す ▾」** ── 閲覧用 HTML / バックアップの 2 つを 1 つのボタンに畳む(バーが 1 行ぶん伸びて、
+   * 🔴 **選択バーの「書き出す ▾」** ── 閲覧用 HTML / バックアップ / PKC3 入り HTML の 3 つを 1 つのボタンに畳む(バーが 1 行ぶん伸びて、
    *   低い窓で貼り付かなくなった退行の直し)。⚠ `MENU_OPENERS` に載せてある。項目は上の 2 受け手のただのボタン。
    */
   'open-selection-export': (dispatcher, target, _services, root) => {
@@ -15970,6 +15972,11 @@ const ACTIONS: Record<string, ActionHandler> = {
           label: '選んだノートのバックアップ',
           hint: `選んでいる ${lids.length} 件の本文・添付・履歴を保存します(.pkc3-notes.zip。取り込み直せます。選んだフォルダは中のノートも入ります)`,
         },
+        {
+          action: 'export-selection-portable',
+          label: `PKC3 入り HTML(選んだ ${lids.length} 件)`,
+          hint: `選んでいる ${lids.length} 件と、そこから参照しているノート・添付・親のフォルダだけを、開けばそのまま PKC3 として読めて編集できる HTML ファイル 1 つにまとめます(履歴・ゴミ箱は入りません。取り込み直せます)`,
+        },
       ],
       target,
     );
@@ -15977,6 +15984,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'export-selection-html': (dispatcher, _target, services) => {
     const lids = selectedExportLids(dispatcher);
     if (lids.length > 0) services.exportSelectionHtml?.(lids);
+  },
+  'export-selection-portable': (dispatcher, _target, services) => {
+    const lids = selectedExportLids(dispatcher);
+    if (lids.length > 0) services.exportSelectionPortable?.(lids);
   },
   'export-selection-archive': (dispatcher, _target, services) => {
     const lids = selectedExportLids(dispatcher);

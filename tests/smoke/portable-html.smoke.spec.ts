@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { answerAppDialog, clickReal, createEntry,
   gotoCollectionPane,
   pickCaptureTool,
+  useSplitEditor,
 } from './helpers';
 
 /**
@@ -618,5 +619,78 @@ test('🔴 `file://` の可搬 HTML で、「雑音を減らす」が動いて�
   const audio = made.locator('audio').first();
   await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.readyState), { message: '新しい音が読み込めない' }).toBeGreaterThanOrEqual(1);
   expect(await audio.evaluate((a: HTMLAudioElement) => a.duration), '新しい音の長さが元(7 秒)と違う').toBeGreaterThan(6.5);
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **選んだ N 件だけの PKC3 入り HTML**(#1038 A2)。
+ *
+ * ① 3 件のうち 2 件を選び、「書き出す ▾」→「PKC3 入り HTML(選んだ 2 件)」で落とす
+ * ② その HTML を `file://` で開くと、選んだ題名だけが一覧に在り、選んでいない題名が無い
+ * ③ 開いた先で足して保存できる(続きが書ける)
+ * ④ 本体の「取り込む」で戻せる(選んだ 2 件だけが増える)
+ * ⚠ 選んでいない本文の字は DB 画像(base64)の中なので file の素の字では見えない ── ②の「一覧に無い」と、
+ *   `tests/adapter/storage-worker-image-subset.test.ts`(画像の bytes に字が残らない)で守る。
+ */
+test('🔴 選んだ N 件だけの PKC3 入り HTML が開けて、編集でき、取り込み直せる (#1038 A2)', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await useSplitEditor(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+
+  const make = async (p: import('@playwright/test').Page, name: string, body: string): Promise<void> => {
+    await createEntry(p, 'text');
+    await p.locator('[data-pkc-field="editor-title"]').fill(name);
+    await p.locator('[data-pkc-field="editor-body"]').fill(body);
+    await clickReal(p, '[data-pkc-action="commit-edit"]');
+    await p.waitForSelector('[data-pkc-action="start-edit"]');
+  };
+  await make(page, 'AlphaNote', 'alpha-body-unique');
+  await make(page, 'BetaNote', 'beta-body-unique');
+  await make(page, 'GammaNote', 'gamma-body-unique');
+  const table = page.locator('[data-pkc-region="filer-table"]');
+  const rows = table.locator('tbody tr');
+  await expect(rows).toHaveCount(3);
+
+  await table.locator('tbody tr:has-text("AlphaNote")').click();
+  await table.locator('tbody tr:has-text("GammaNote")').click({ modifiers: ['ControlOrMeta'] });
+  await clickReal(page, '[data-pkc-field="bulk-export-menu"]');
+  await expect(page.locator('[data-pkc-action="export-selection-portable"]')).toContainText(
+    'PKC3 入り HTML(選んだ 2 件)',
+  );
+  const dl = page.waitForEvent('download', { timeout: 60_000 });
+  await clickReal(page, '[data-pkc-action="export-selection-portable"]');
+  const out = join(mkdtempSync(join(tmpdir(), 'pkc3-sub-')), 'subset.pkc3.html');
+  await (await dl).saveAs(out);
+  expect(readFileSync(out, 'utf-8').length, '書き出した 1 枚が小さすぎる(アプリが入っていない)').toBeGreaterThan(3_000_000);
+
+  // ② 開く ── 選んだ題名だけ
+  const carried = await page.context().newPage();
+  await carried.goto(pathToFileURL(out).href);
+  await expect(carried.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  const cTable = carried.locator('[data-pkc-region="filer-table"]');
+  await expect(cTable, '選んだ題名が入っていない').toContainText('AlphaNote', { timeout: 15_000 });
+  await expect(cTable).toContainText('GammaNote');
+  await expect(cTable, '選んでいない題名が入っている').not.toContainText('BetaNote');
+  await expect(cTable.locator('tbody tr'), '一覧の行が選んだ 2 件ではない').toHaveCount(2);
+  // 本文も選んだ分だけ読める
+  await cTable.locator('tbody tr:has-text("AlphaNote")').click();
+  await expect(carried.locator('[data-pkc-field="detail-body"]')).toContainText('alpha-body-unique');
+
+  // ③ 編集して保存できる
+  await createEntry(carried, 'text');
+  await carried.locator('[data-pkc-field="editor-title"]').fill('先で足した');
+  await clickReal(carried, '[data-pkc-action="commit-edit"]');
+  await expect(cTable).toContainText('先で足した', { timeout: 10_000 });
+  await carried.close();
+
+  // ④ 本体へ取り込み直す ── 選んだ 2 件だけが増える(3 + 2)
+  await page.setInputFiles('[data-pkc-field="import-input"]', out);
+  await answerAppDialog(page, 'ok');
+  await expect(rows, '取り込み直すと選んだ 2 件だけが増える').toHaveCount(5, { timeout: 15_000 });
+  await expect(table.locator('tbody tr:has-text("BetaNote")'), 'Beta が増えた').toHaveCount(1);
+  await expect(table.locator('tbody tr:has-text("AlphaNote")')).toHaveCount(2);
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

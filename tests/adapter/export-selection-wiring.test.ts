@@ -48,7 +48,9 @@ function rig() {
   d.onState((s) => filer.render(s));
   const html: string[][] = [];
   const archive: string[][] = [];
+  const portable: string[][] = [];
   bindActions(root, d, {
+    exportSelectionPortable: (l) => void portable.push(l),
     exportSelectionHtml: (l) => void html.push(l),
     exportSelectionArchive: (l) => void archive.push(l),
   });
@@ -60,7 +62,7 @@ function rig() {
   });
   const q = (action: string): HTMLButtonElement | null =>
     root.querySelector<HTMLButtonElement>(`[data-pkc-action="${action}"]`);
-  return { d, html, archive, q };
+  return { d, html, archive, portable, q };
 }
 
 describe('#1038 A1 選んだノートの書き出しの配線', () => {
@@ -73,6 +75,19 @@ describe('#1038 A1 選んだノートの書き出しの配線', () => {
     r.q('open-selection-export')!.click();
     expect(r.q('export-selection-html')?.textContent).toContain('閲覧用 HTML(選んだ 1 件)');
     expect(r.q('export-selection-archive')?.textContent).toContain('選んだノートのバックアップ');
+    expect(r.q('export-selection-portable')?.textContent).toContain('PKC3 入り HTML(選んだ 1 件)');
+  });
+
+  it('🔴 #1038 A2 「PKC3 入り HTML」は選んだ lid で専用の口を叩き、他の 2 つの口は叩かない', () => {
+    const r = rig();
+    r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n1' });
+    r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n3' });
+    r.q('open-selection-export')!.click();
+    r.q('export-selection-portable')!.click();
+    expect(r.portable).toHaveLength(1);
+    expect([...r.portable[0]!].sort()).toEqual(['n1', 'n3']);
+    expect(r.html).toHaveLength(0);
+    expect(r.archive).toHaveLength(0);
   });
 
   it('🔴 ② メニューから押すと選んだ lid の全部で呼ばれ、選んでいない行は混ざらない / ③ 2 つの口は別', () => {

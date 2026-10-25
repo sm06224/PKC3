@@ -56,6 +56,13 @@ export type StorageRequest =
        * ⚠ 除くのは書き出す間だけ:画像を取ったあと、worker が同じ行を元へ戻す(DB のメッセージは減らない)。
        */
       withoutMessages?: boolean;
+      /**
+       * 🔴 **選んだノートだけの画像にする**(#1038 A2。「選んだ N 件」の PKC3 入り HTML)。
+       * 🔑 本体の DB には一切書かない ── worker が**新しい空の DB**を作り、`lids` の行・両端が `lids` の中にあるつながり・
+       *   `assetKeys` の添付の目録だけを SQL で写して、その画像を返す(履歴・ゴミ箱・メッセージは写さない)。
+       * ⚠ 閉包(何を入れるか)は呼び側が `features/export/portable-closure.ts` で決める。ここは決めない。
+       */
+      only?: { cid: string; lids: string[]; assetKeys: string[] };
     }
   /**
    * 🔴 **入れ物ごと捨てる**(#986 段③)── **壊れた DB でも効く**唯一の消し方。

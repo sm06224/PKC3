@@ -632,7 +632,7 @@ export class FilerRenderer {
       exportMenu.setAttribute('data-pkc-action', 'open-selection-export');
       exportMenu.setAttribute('aria-haspopup', 'menu');
       exportMenu.textContent = '書き出す ▾';
-      exportMenu.title = `選んでいる ${marks.length} 件だけの書き出し方(閲覧用 HTML / バックアップ)を選ぶ一覧を出します`;
+      exportMenu.title = `選んでいる ${marks.length} 件だけの書き出し方(閲覧用 HTML / バックアップ / PKC3 入り HTML)を選ぶ一覧を出します`;
       if (multi) bulk.append(count, exportMenu, del, move, tag, add, off, clear);
       else bulk.append(count, exportMenu, tag, add, off, clear);
       host.append(bulk);
