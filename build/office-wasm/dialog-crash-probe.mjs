@@ -166,6 +166,22 @@ function serve() {
         'Cross-Origin-Resource-Policy': 'same-origin',
         'Cache-Control': 'no-store',
       };
+      // 🔑 `qt_soffice.html` の `qtLoad` の戻り値を window へ出す版(`__lo` = Emscripten の instance。`__lo.FS` で MEMFS を読む)。
+      //    マクロが書いた file を読む観測点(`readFile` の手)に使う。⚠ 他の suite は素の `qt_soffice.html` のまま。
+      if (path === '/__harness') {
+        readFile(join(ROOT, 'qt_soffice.html'), 'utf-8')
+          .then((html) => {
+            const needle = 'const instance = await qtLoad({';
+            if (!html.includes(needle)) throw new Error('qt_soffice.html の形が変わった(qtLoad の錨が無い)');
+            res.writeHead(200, { ...head, 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(html.replace(needle, 'const instance = globalThis.__lo = await qtLoad({'));
+          })
+          .catch(() => {
+            res.writeHead(500, head);
+            res.end('harness: qt_soffice.html の錨が無い');
+          });
+        return;
+      }
       readFile(join(ROOT, path))
         .then((buf) => {
           res.writeHead(200, {
@@ -184,6 +200,17 @@ function serve() {
   });
 }
 
+/** `macro-ide` suite が打つマクロ。⚠ 行頭に空白を置かない(IDE の自動字下げと二重になる)。 */
+const MACRO_MARK_PATH = '/tmp/pkc-macro-ran.txt';
+const MACRO_MARK_TEXT = 'PKC-MACRO-RAN';
+const MACRO_SOURCE = [
+  'Sub Main',
+  `Open "${MACRO_MARK_PATH}" For Output As #1`,
+  `Print #1, "${MACRO_MARK_TEXT}"`,
+  'Close #1',
+  'End Sub',
+].join('\n');
+
 /**
  * 踏む手順。
  * ⚠ **`control` の手は「届いているか」を確かめるためだけに在る** ── これが
@@ -193,6 +220,28 @@ const OPEN_DOC = [
   { id: 'new-doc', key: 'Control+n', why: 'Start Center → Writer の新規文書', control: true, wait: 12_000 },
   { id: 'type-text', type: 'hello world test', why: '⚠ 対照群 ── ただの文字。届いている証拠', control: true },
 ];
+
+/** `macro-ide*` の手順。`source` を打って F5 で走らせ、`MACRO_MARK_PATH` を読む。 */
+function macroIdeSteps(source) {
+  return [
+    ...OPEN_DOC,
+    { id: 'tools-menu', at: [472, 37], why: 'Tools メニューを開く', control: false },
+    { id: 'macros-submenu', at: [56, 592], why: 'Macros ── 子メニューを開く', control: false, wait: 8_000 },
+    { id: 'edit-macros', at: [490, 619], why: '🔴 Edit Macros... ── Basic IDE が開く(直る前は落ちた)', control: false, wait: 25_000 },
+    {
+      id: 'absent',
+      readFile: MACRO_MARK_PATH,
+      expect: null,
+      why: '⚠ 対照群 ── 走らせる前は file が無い(前の回の残りを「走った」と読まない)',
+      control: false,
+    },
+    { id: 'editor-click', at: [700, 330], why: 'IDE のコード欄を押す(焦点を置く)', control: false, wait: 2_000 },
+    { id: 'select-all', key: 'Control+a', why: '既存の Sub Main を全部選ぶ', control: false, wait: 1_000 },
+    { id: 'type-macro', type: source, why: '🔴 マクロを打つ(書ける = 字が IDE に届く)', control: false, wait: 3_000, typeDelay: 40, noRefocus: true },
+    { id: 'run', key: 'F5', why: '🔴 走らせる', control: false, wait: 15_000, noRefocus: true },
+    { id: 'ran', readFile: MACRO_MARK_PATH, expect: MACRO_MARK_TEXT, why: '🔴 マクロが書いた file が在る = 打って走った', control: false },
+  ];
+}
 
 /**
  * 踏む筋。⚠ 座標は 1280x720 の screenshot から採った({@link VIEWPORT})。
@@ -348,6 +397,31 @@ const SUITES = {
     },
   ],
   /**
+   * #126 ── **Format メニューが 2 列に割れて下端で切れないか**。メニューを開いて撮るだけ(落ちる話ではない)。
+   * ⚠ 判定は画像を**目で見る**(`__shots-format-menu/03-format-menu.png`)。列の数は画素からは数えない。
+   */
+  'format-menu': [
+    ...OPEN_DOC,
+    { id: 'format-menu', at: [236, 37], why: 'Format メニューを開く(1 列で下まで収まるか / 2 列に割れて切れるか)', control: false, wait: 5_000 },
+  ],
+  /**
+   * #431 ── **Basic IDE を開き、マクロを打ち、走らせ、その結果が出る**(直る前は開く所で落ちた)。
+   *
+   * 🔑 これまでの `macro` は「開いたか」までしか見ていなかった(user の問いは「**書けるか**」)。この suite は
+   * ① Edit Macros… で IDE が開く(fault 0)② 本文を全部選んで **1 本のマクロを打つ** ③ F5 で走らせる
+   * ④ マクロが **MEMFS に書いた file を読む**(`readFile`。`/__harness` の `__lo.FS`)── ここまで通って初めて「書ける」。
+   *
+   * ⚠ 打つ文字は**行頭に空白を置かない**(IDE の自動字下げと二重になる)。⚠ 判定は
+   *   `result.macroRan`(file の中身が `PKC-MACRO-RAN`)で、`landed` ではない。
+   * ⚠ 走らせる前に **file が無いこと**を確かめる(`absent`)── 前の回の残りを「走った」と読まない(対照群)。
+   */
+  'macro-ide': macroIdeSteps(MACRO_SOURCE),
+  /**
+   * #431 ── 文法の誤りのあるマクロを走らせる(IDE で打つ人は必ず踏む)。⚠ 判定は「落ちない」(`ide.faults === 0`)で、
+   * file は出ない(`ran` は false のまま)。直す前の挙動の記録用: `abort()` で止まる回があるかを数える。
+   */
+  'macro-ide-error': macroIdeSteps('Sub Main\nthis is not basic ((\nEnd Sub'),
+  /**
    * #431 段④ の**対照群**。⚠ `macro` で `Edit Macros...` が無反応に見えたとき、
    * 「製品が動かない」と読む前に **子メニューの項目を押せているのか**を確かめる。
    *
@@ -448,7 +522,8 @@ async function main() {
 
     const t0 = Date.now();
     wd.mark('qt_soffice.html を開く');
-    await page.goto(`${base}/qt_soffice.html`, { waitUntil: 'commit' });
+    // `macro-ide` だけ、MEMFS を読める版(`/__harness`)で起こす
+    await page.goto(`${base}${SUITE.startsWith('macro-ide') ? '/__harness' : '/qt_soffice.html'}`, { waitUntil: 'commit' });
     result.isolated = await page.evaluate(() => globalThis.crossOriginIsolated === true);
 
     const outcome = await page
@@ -534,11 +609,36 @@ async function main() {
 
     for (const [i, step] of (outcome === 'painted' ? [...STEPS.entries()] : [])) {
       const before = faults.length;
+      // 🔑 `readFile` の手は**押さずに** MEMFS を読むだけ(マクロが書いた file の観測点)。⚠ `expect: null` は「無いこと」
+      if (step.readFile) {
+        const got = await Promise.race([
+          page
+            .evaluate((path) => {
+              try {
+                const FS = globalThis.__lo?.FS;
+                if (!FS) return { err: 'no-FS' };
+                return { text: new globalThis.TextDecoder().decode(FS.readFile(path)) };
+              } catch (e) {
+                return { absent: true, why: String(e?.message ?? e).slice(0, 80) };
+              }
+            }, step.readFile)
+            .catch((e) => ({ err: String(e).slice(0, 120) })),
+          new Promise((r) => setTimeout(() => r({ err: 'timeout' }), 15_000)),
+        ]);
+        const text = got.text ?? null;
+        const met = step.expect === null ? got.absent === true : typeof text === 'string' && text.includes(step.expect);
+        result.steps.push({ ...step, got, met, newFaults: faults.slice(before), landed: met });
+        if (step.id === 'ran') result.macroRan = met;
+        if (step.id === 'absent') result.macroAbsentBefore = met;
+        if (faults.length > before) break;
+        continue;
+      }
       // ⚠ **メニュー操作の前にクリックし直さない** ── 開いたメニューが閉じてしまう。
       //    focus を当て直すのはキー入力の手だけ(`Ctrl+N` のあと窓が作り替わるため)
-      if (!step.at) result.focused = await refocus();
+      // ⚠ `noRefocus` の手はクリックし直さない(直前の選択を壊さない ── `macro-ide` の「全部選んで打つ」)
+      if (!step.at && !step.noRefocus) result.focused = await refocus();
       if (step.at) await page.mouse.click(step.at[0], step.at[1]).catch(() => {});
-      else if (step.type) await page.keyboard.type(step.type, { delay: 120 }).catch(() => {});
+      else if (step.type) await page.keyboard.type(step.type, { delay: step.typeDelay ?? 120 }).catch(() => {});
       else await page.keyboard.press(step.key).catch(() => {});
       // ⚠ 落ちると evaluate 自体が通らなくなる ── 待ちは page 越しに使わない
       await new Promise((r) => setTimeout(r, step.wait ?? SETTLE_MS));
@@ -566,6 +666,17 @@ async function main() {
     //    ダイアログを実際に開けた**回だけである。それ以外は空振り
     result.dialogsOpened = result.steps.filter((s) => !s.control && s.landed === true).length;
     result.ok = result.reproduced || (result.controlsLanded && result.dialogsOpened > 0);
+    // 🔑 `macro-ide` は「落ちなかった」では足りない: 開いて、打って、走って、file が出るまで通って初めて ok。
+    //    ⚠ 走らせる前に file が無かった(対照群)ことも要る。落ちた回は ok のまま(再現できた = この probe の成功)ではなく、
+    //    `macroRan` が false のまま残る。
+    if (SUITE === 'macro-ide' || SUITE === 'macro-ide-error') {
+      result.ide = {
+        absentBefore: result.macroAbsentBefore === true,
+        ran: result.macroRan === true,
+        faults: faults.length,
+      };
+      result.ok = result.controlsLanded && result.ide.absentBefore && faults.length === 0 && (SUITE === 'macro-ide-error' || result.ide.ran);
+    }
   } finally {
     await page?.screenshot({ path: join(SHOTS, '99-final.png') }).catch(() => {});
     // ⚠ 既定の 150 行は「落ちた瞬間の周り」を見るのに足りない回がある(#117 の計装は

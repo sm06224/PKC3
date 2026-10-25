@@ -834,7 +834,7 @@ describe('#1408 hop-borrow ── 他の検査との関係', () => {
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/34 → 35\(2026-10-08\)/);
     expect(yml).toContain('patch-lo-hop-borrow.py');
-    expect(yml).toContain('test "$n" -eq 35');
+    expect(yml).toContain('test "$n" -eq 36');
     expect(readdirSync('build/office-wasm').filter((f) => /^patch-.*\.py$/.test(f))).toContain('patch-lo-hop-borrow.py');
   });
 });

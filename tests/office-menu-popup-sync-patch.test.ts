@@ -300,7 +300,7 @@ describe('#121 の直し(menu-popup-sync)── 他の検査との関係', () =>
     expect(yml).toContain('patch-lo-menu-popup-sync.py');
     // 22 → 23 → 24 → 25 → 24: `patch-lo-uev-trace.py`(計装)/ `patch-lo-ime-nowait.py`(直し)を足し、#1344 で足した LO 側の直しは効かなかったので外した(真因は Qt 側)。「21 → 22」の注記は残っている
     // 🔑 本数は workflow の `test "$n" -eq N` の**実行行が正本**(下の pin)── 注釈に「いまの本数」を書かない(足すたびに古くなる)。経緯は workflow の `N → M` の注記
-    expect(yml).toContain('test "$n" -eq 35');
+    expect(yml).toContain('test "$n" -eq 36');
   });
 
   it('🔑 check-patches-on-ref.sh が拾える形(`SRC = "…"`)で当て先を宣言している', () => {

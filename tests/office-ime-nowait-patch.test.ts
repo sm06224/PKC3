@@ -538,12 +538,12 @@ describe('#121 の直し(ime-nowait)── 他の検査との関係', () => {
     expect(yml).toMatch(/23 → 24\(2026-10-04\)/);
     expect(yml).toContain('patch-lo-ime-nowait.py');
     // 🔑 本数は workflow の `test "$n" -eq N` の**実行行が正本**(下の pin)── 注釈に「いまの本数」を書かない(足すたびに古くなる)。経緯は workflow の `N` の行の注釈に在る。
-    expect(yml).toContain('test "$n" -eq 35');
+    expect(yml).toContain('test "$n" -eq 36');
   });
 
-  it('🔑 実在する `patch-*.py` が 35 本(workflow の `-eq` と同じ数。glob と同じ集合)', () => {
+  it('🔑 実在する `patch-*.py` が 36 本(workflow の `-eq` と同じ数。glob と同じ集合)', () => {
     const files = readdirSync('build/office-wasm').filter((f) => /^patch-.*\.py$/.test(f));
-    expect(files.length).toBe(35);
+    expect(files.length).toBe(36);
     expect(files).toContain('patch-lo-ime-nowait.py');
   });
 

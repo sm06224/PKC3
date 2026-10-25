@@ -262,3 +262,13 @@ g++ + pthread の stub harness で、借りて走る / 持っていない呼び�
 **全スレッドの dump**(`PKC3_STACKDUMP=all`):`--remote-debugging-port=0` + `Target.setAutoAttach {flatten:true}` で worker(pthread)にも attach する。
 `Debugger.enable` は**固まる前に**有効化しておく(固まった page は enable を処理しない)。`Atomics.wait` 中の worker は pause しない(`NO PAUSE` と出る)。
 🔑 道具は `build/office-wasm/probe/`(`README.md` に回し方・環境変数・印の読み方・名前の解き方・集計)。`lib.mjs` が `PKC3_JSBEAT` / `PKC3_STACKDUMP` を読み、`alldump.mjs` が全 target の stack を取る。
+
+## 2026-10-25 ── メニューのスクロール(#126)と、コピーで外を空にしない(#121)と、メニュー中の字のキー(#1360)
+
+| 何 | どこ | 主張 | 焼きが要るか |
+|---|---|---|---|
+| `patch-lo-qt-menu-scroll.py`(LO、`PKC3-MENUSCROLL`) | `vcl/qt5/QtMenu.cxx`(`connectHelpSignalSlots` の末尾 + file scope の `QProxyStyle`) | メニューは VCL でなく Qt の `QMenu`。wasm の style は `SH_Menu_Scrollable` が偽で、画面に収まらないと **列を足して割る**(Format が 2 列)。真にして矢印つきでスクロールさせる | 要る(`dialog-crash-probe.mjs` の `format-menu` の画像で 1 列 + 矢印を見る) |
+| `qtbase-patch-copy-keep.py`(Qt) | `qwasmclipboard.cpp` の `commonCopyEvent` | 運べる物が無いのに `preventDefault()` すると外のクリップボードが空で上書きされる(画像の Ctrl+C = `clipboard-probe.mjs` の B3 で 2/2)。無ければ返る | 要る(Qt から約 25 分 + LO) |
+| `public/office/office-popup-keys.js`(host。**焼き不要**) | `host.html` の keydown(capture) | Qt は IME 用 `<input>` の**修飾キーなし 1 文字キーをキーイベントにしない**(`handleKeyForInputContextEvent`)。メニューが開いていても `Y` は文書へ入り、日本語入力オンなら選択が「ｙ」に置き換わる。メニュー(枠のない Qt の窓)が開いている間だけ、字のキーを合成のキーイベントでメニューの canvas へ渡し、始まった変換は捨てる | 要らない(`ime-compose-probe.mjs` の `ctx-kbd` / `ctx-kbd-ime` で前後が採れる) |
+
+🔑 #1360 の再現は **`Shift+F10`**(キーボードで開く = 版面を押さず `<input>` の焦点が残る)。マウスの右クリックは Linux の headless では版面に焦点が移って `<input>` が外れるので再現しない(Mac は残る見込み ── 実機は未測)。

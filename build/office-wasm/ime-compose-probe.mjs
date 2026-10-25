@@ -48,6 +48,8 @@ const SHOTDIR = process.env.PKC3_SHOTDIR ?? '';
 const DOC = process.env.PKC3_DOC ?? 'text.odt';
 const ARMS = (process.env.PKC3_ARMS ?? 'noclick,click,force').split(',');
 const ROUND_SEC = Number(process.env.PKC3_ROUND_SEC ?? 300);
+/** `1` なら `office-popup-keys.js`(#1360 の直し)を空にして起こす = 「直る前」の腕(ctx-* 腕の対照群)。 */
+const WITHOUT_POPUPKEYS = process.env.PKC3_WITHOUT_POPUPKEYS === '1';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css',
@@ -140,6 +142,10 @@ async function oneRound(arm, n) {
   const t0 = Date.now();
   const step = (name, extra = {}) => r.steps.push({ at: Date.now() - t0, name, ...extra });
   const page = await ctx.newPage();
+  if (WITHOUT_POPUPKEYS) {
+    await page.route('**/office-popup-keys.js', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: '' }));
+    r.withoutPopupKeys = true;
+  }
   try { await ctx.grantPermissions(['clipboard-read', 'clipboard-write']); } catch { /* */ }
   page.on('console', (m) => {
     const t = safeLine(`[${m.type()}] ${m.text()}`);
@@ -302,6 +308,11 @@ async function oneRound(arm, n) {
     r.asciiArrived = swapped(fA, fB);
     step('abc を打った', { deep: await deep() });
 
+    if (arm.startsWith('ctx')) {
+      // #1360: 右クリックのメニューと、日本語入力・メニューの鍵(mnemonic)。本文を全部選んでから右クリックする。
+      return await ctxArm({ arm, n, r, page, ctx, box, clip, step, shot, framesOf, swapped, readClip, deep });
+    }
+
     if (arm === 'force') {
       r.forced = await page.evaluate(`(() => {
         let el = null;
@@ -352,6 +363,104 @@ async function oneRound(arm, n) {
   } finally {
     try { await ctx.close(); } catch { /* */ }
   }
+}
+
+/**
+ * #1360 右クリックのメニューと日本語入力。腕(`ctx-*`):
+ *
+ * | 腕 | 手 |
+ * |---|---|
+ * | `ctx-menu`     | 全部選ぶ → 右クリック → **鍵を普通に押す**(`PKC3_CTX_KEY`、既定 `y` = 日本語のメニューの「コピー(Y)」) |
+ * | `ctx-ime-key`  | 同じ手順で、鍵を **日本語入力オンの押し方**(keydown 229 + 変換中の「ｙ」)で届ける |
+ * | `ctx-kbd` / `ctx-kbd-ime` | `ctx-menu` / `ctx-ime-key` と同じだが、**Shift+F10 で開く**(版面を押さない。焦点は Qt の入力用 <input> に残る) |
+ * | `ctx-ime-comp` | 全部選んで**変換中**(「に」)にしたまま右クリックする。メニューが出るか / 変換が文書を置き換えるか |
+ *
+ * 見るもの: `menuOpened`(右クリックの前後で版面が丸ごと入れ替わったか)/ `keyConsumedByMenu`(鍵の後に版面が変わり、
+ * かつ文書の字が残っているか)/ `copied`(外のクリップボードが種から文書の字に替わったか = 「コピー」が実行された)/
+ * `docIntact`(最後に Ctrl+A → Ctrl+C で外へ読んだ文書の字が元のままか。⚠ 「ｙ」に置き換わっていたら false)。
+ * ⚠ 日本語入力は CDP の `Input.imeSetComposition` で再現する(焦点が編集可能要素に無いと何も起きない = 実機と同じ条件)。
+ */
+async function ctxArm({ arm, n, r, page, ctx, box, step, shot, framesOf, swapped, readClip, deep }) {
+  const full = { x: 0, y: 0, width: 1280, height: 800 };
+  const key = process.env.PKC3_CTX_KEY ?? 'y';
+  const FULLWIDTH = { y: 'ｙ', c: 'ｃ', t: 'ｔ' };
+  const cdp = await ctx.newCDPSession(page);
+  const imeKey = async () => {
+    // Mac の日本語入力オンで 1 鍵押したときの形: keydown は keyCode 229(Process)、字は変換中として入る
+    await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Process', code: `Key${key.toUpperCase()}`, windowsVirtualKeyCode: 229 });
+    await cdp.send('Input.imeSetComposition', { text: FULLWIDTH[key] ?? key, selectionStart: 1, selectionEnd: 1 });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: `Key${key.toUpperCase()}`, windowsVirtualKeyCode: key.toUpperCase().charCodeAt(0) });
+  };
+  const seed = `SEED-${arm}-${n}`;
+  await page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(seed)})`).catch(() => {});
+  await page.evaluate('globalThis.__ime.length = 0');
+  await page.keyboard.press('Control+a');
+  await page.waitForTimeout(800);
+  step('全部選んだ', { deep: await deep() });
+  if (arm === 'ctx-ime-comp') {
+    await cdp.send('Input.imeSetComposition', { text: 'に', selectionStart: 1, selectionEnd: 1 });
+    await page.waitForTimeout(800);
+    step('変換中(に)', { deep: await deep() });
+  }
+  const f0 = await framesOf(full);
+  // `ctx-kbd*` はキーボード(Shift+F10)で開く = 版面を押さないので、焦点は Qt の入力用 <input> に残ったまま
+  if (arm.startsWith('ctx-kbd')) await page.keyboard.press('Shift+F10');
+  else await page.mouse.click(box.x + box.w * 0.3, box.y + box.h * 0.31, { button: 'right' });
+  await page.waitForTimeout(2000);
+  const f1 = await framesOf(full);
+  r.menuOpened = swapped(f0, f1);
+  step('右クリックした', { deep: await deep() });
+  await shot('5-contextmenu');
+  // Qt の窓(DOM の `.qt-window`)の一覧。ポップアップ(メニュー)が窓として足されるか・どう見分けられるか
+  r.windowsOutline = await page.evaluate(`(() => {
+    const out = [];
+    const walk = (node) => { for (const el of node.querySelectorAll('*')) {
+      if (el.classList && el.classList.contains('qt-window')) {
+        const r = el.getBoundingClientRect();
+        out.push({ cls: el.className, display: getComputedStyle(el).display, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height),
+          canvases: el.querySelectorAll('canvas').length, attrs: [...el.attributes].map((a) => a.name + '=' + a.value).slice(0, 6),
+          // 窓の外側(qt-decorated-window)の素性。枠なし(メニュー等)と枠あり(本体・ダイアログ)で違うか
+          deco: el.parentElement ? { cls: el.parentElement.className, id: el.parentElement.id, style: (el.parentElement.getAttribute('style') || '').slice(0, 200),
+            children: [...el.parentElement.children].map((c) => c.className || c.tagName).slice(0, 6), host: (el.parentElement.parentElement || {}).className || null } : null });
+      }
+      if (el.shadowRoot) walk(el.shadowRoot); } };
+    walk(document);
+    return out;
+  })()`);
+  r.imeEventsAfterRightClick = await page.evaluate('globalThis.__ime.slice(0, 40)');
+  if (arm !== 'ctx-ime-comp') {
+    if (arm === 'ctx-ime-key' || arm === 'ctx-kbd-ime') await imeKey();
+    else await page.keyboard.press(key);
+    await page.waitForTimeout(2500);
+    const f2 = await framesOf(full);
+    r.keyChangedScreen = swapped(f1, f2);
+    step(`鍵 ${key} を押した`, { deep: await deep() });
+    await shot('6-after-key');
+    r.clipboardAfterKey = await readClip();
+    r.copied = typeof r.clipboardAfterKey === 'string' && r.clipboardAfterKey !== seed && !r.clipboardAfterKey.startsWith('ERR') && r.clipboardAfterKey !== 'HUNG';
+    r.imeEventsAfterKey = await page.evaluate('globalThis.__ime.slice(0, 40)');
+    if (r.copied) {
+      // メニューが閉じた後も、字が普通に打てるか(IME 用 <input> の焦点を壊していないか)。選択を畳んでから 1 字
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.type('q', { delay: 100 });
+      await page.waitForTimeout(1200);
+    }
+  }
+  // 後始末と、文書の字が無傷かの検算(メニューを閉じ、変換中なら確定させず捨て、Ctrl+A → Ctrl+C で外へ読む)
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(800);
+  await cdp.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 }).catch(() => {});
+  await page.waitForTimeout(800);
+  await page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(seed + '-2')})`).catch(() => {});
+  await page.keyboard.press('Control+a');
+  await page.waitForTimeout(800);
+  await page.keyboard.press('Control+c');
+  await page.waitForTimeout(2500);
+  r.docText = await readClip();
+  r.docIntact = typeof r.docText === 'string' && r.docText.includes('abc') && !r.docText.startsWith('SEED-');
+  if (r.copied) r.typingAfterMenu = typeof r.docText === 'string' && r.docText.includes('q');
+  await shot('7-final');
+  return r;
 }
 
 for (let n = 1; n <= ROUNDS; n += 1) {
