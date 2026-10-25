@@ -1574,6 +1574,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     picker: windowDirectoryPicker(),
     // 🔴 Office の file を 1 つ選んで開く口(#432)と、開いていた階層の記憶(#215)
     filePicker: windowFilePicker(),
+    // 🔴 Office の行を押した瞬間(最初の await より前)に窓を確保する(#432)── 許可・読み込みは後。判断は `open-local-office.ts`
+    reserve: (name) => {
+      if (!isOfficeUsable(appOfficePack.isInstalled(), appOfficePack.capability())) return false;
+      officeWindow.open({ name, expectDocument: true });
+      return true;
+    },
     place: appPcFolderPlace,
     open: (item) => openLocalFile(item),
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
@@ -6523,7 +6529,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         {
           usable: () => isOfficeUsable(appOfficePack.isInstalled(), appOfficePack.capability()),
           local: localOffice,
+          officeWindow,
           openTile: openOfficeTile,
+          notify: (text) => showStatus(text),
         },
         item,
       ),

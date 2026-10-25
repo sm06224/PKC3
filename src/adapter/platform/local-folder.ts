@@ -160,11 +160,22 @@ export interface FolderPlaceMemory {
 export interface LocalFileItem {
   file: File;
   handle: LaunchedHandle;
+  /**
+   * 🔴 押した瞬間に Office のウィンドウを**先に確保した**か(#432)。真なら、窓は開いて文書を待っている ──
+   * 受け手は(許可・読み込みの後で)文書を渡すだけでよい。偽 = 受け手が自分で開く。
+   */
+  reserved?: boolean;
 }
 
 export interface LocalFolderDeps {
   /** `null` = このブラウザには無い。 */
   picker: DirectoryPicker | null;
+  /**
+   * 🔴 Office の行を押した**瞬間(最初の `await` より前)**に、Office のウィンドウを確保する口(#432)。
+   * `await` を挟むと user gesture が切れてポップアップ遮断に遭うので、許可・読み込みは**その後**にする。
+   * 確保したら `true`(Office が使えない環境などでは `false` ── 何もしない)。省くと確保しない。
+   */
+  reserve?: (name: string) => boolean;
   /** Office の file を選ぶ口(#432)。省くか `null` = 使えない。 */
   filePicker?: FilePicker | null;
   /** 開いている階層の記憶(#215)。省くと憶えない。 */
@@ -515,6 +526,8 @@ export class LocalFolder {
     const slot = this.slots[index];
     if (dir === null || slot === undefined || slot.kind !== 'file') return;
     if (this.opening.has(index)) return;
+    // 🔴 窓の確保は**同期**(ここより前にも後の最初の await より前にも `await` を置かない ── 順序は test が pin)
+    const reserved = fileKindOf(slot.name).route === 'office' && (this.deps.reserve?.(slot.name) ?? false);
     const gen = this.generation;
     this.opening.add(index);
     try {
@@ -542,7 +555,7 @@ export class LocalFolder {
       }
       // ⚠ 読んでいる間に「切る」が押されていたら、取り込まない(切ったのに開く、を作らない)
       if (gen !== this.generation) return;
-      await this.deps.open({ file, handle: slot.handle });
+      await this.deps.open({ file, handle: slot.handle, ...(reserved ? { reserved } : {}) });
     } finally {
       this.opening.delete(index);
     }

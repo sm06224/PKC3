@@ -310,3 +310,73 @@ describe('🔴 Office のファイルを選んで開く(#432)', () => {
     });
   });
 });
+
+const idx = (f: LocalFolder, name: string): number => f.view().rows.find((r) => r.name === name)!.index;
+
+describe('🔴 Office の行を押した瞬間に窓を確保する(#432。user gesture を切らない)', () => {
+  /** 許可の確認・getFile・取り込みを、reserve と同じ 1 本の列に積む。 */
+  function setup(opts: { reserve?: boolean } = {}) {
+    const log: string[] = [];
+    const items: LocalFileItem[] = [];
+    const doc = fileHandle('報告.docx');
+    const md = fileHandle('メモ.md');
+    const origGet = doc.getFile!;
+    doc.getFile = async () => {
+      log.push('getFile');
+      return origGet();
+    };
+    const root = dirOf('資料', [doc, md]);
+    const origQuery = root.queryPermission!;
+    root.queryPermission = async (d) => {
+      log.push('queryPermission');
+      return origQuery(d);
+    };
+    const folder = new LocalFolder({
+      picker: async () => root,
+      open: async (i) => {
+        log.push('open');
+        items.push(i);
+      },
+      fail: () => {},
+      onChange: () => {},
+      ...(opts.reserve === undefined
+        ? {}
+        : {
+            reserve: (name: string) => {
+              log.push(`reserve:${name}`);
+              return opts.reserve!;
+            },
+          }),
+    });
+    return { folder, log, items };
+  }
+
+  it('reserve は open() を呼んだ同じ同期区間で、最初の await(許可確認・getFile)より前に呼ばれる', async () => {
+    const { folder, log, items } = setup({ reserve: true });
+    await folder.pick();
+    log.length = 0;
+    const p = folder.open(idx(folder, '報告.docx')); // ⚠ await しない ── 同期区間で何が起きたかを見る
+    // ⚠ 許可の確認(queryPermission)の呼び出し自体も同期区間で始まる ── 窓の確保は**それより前**でなければならない
+    expect(log[0], '呼び出しの同期区間の先頭で窓を確保していない').toBe('reserve:報告.docx');
+    expect(log, 'getFile / 取り込みが同期区間で走った').not.toContain('getFile');
+    await p;
+    expect(log).toEqual(['reserve:報告.docx', 'queryPermission', 'getFile', 'open']);
+    expect(items[0]!.reserved, '確保したことが受け手に伝わっていない').toBe(true);
+  });
+
+  it('確保できなかった(reserve が false)/ reserve が無い / Office でない行 では reserved を付けず、確保も呼ばない(対照群)', async () => {
+    const a = setup({ reserve: false });
+    await a.folder.pick();
+    await a.folder.open(idx(a.folder, '報告.docx'));
+    expect(a.items[0]!.reserved).toBeUndefined();
+    const b = setup();
+    await b.folder.pick();
+    await b.folder.open(idx(b.folder, '報告.docx'));
+    expect(b.items[0]!.reserved).toBeUndefined();
+    const c = setup({ reserve: true });
+    await c.folder.pick();
+    c.log.length = 0;
+    await c.folder.open(idx(c.folder, 'メモ.md'));
+    expect(c.log.some((l) => l.startsWith('reserve')), 'Markdown の行で窓を確保した').toBe(false);
+  });
+});

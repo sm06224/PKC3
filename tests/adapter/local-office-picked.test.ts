@@ -138,43 +138,82 @@ describe('保存 ── 書き戻す / ダウンロードに保存する', () =>
 });
 
 describe('openLocalOffice', () => {
-  const item = (h: LaunchedHandle, name = 'r.docx'): LocalFileItem => ({
+  const item = (h: LaunchedHandle, name = 'r.docx', reserved?: boolean): LocalFileItem => ({
     file: new File([bytes], name, { lastModified: 5 }),
     handle: h,
+    ...(reserved === undefined ? {} : { reserved }),
   });
-
-  it('使える環境では、書く許可を訊いてから控えて、Office のタイルと同じ口を開く', async () => {
-    const f = fake('prompt', true);
+  /** `provideDocument` と `openTile` と notify の呼び出しを 1 本の列に積む。 */
+  function deps(usable = true) {
     const log: string[] = [];
     const files = new LocalOfficeFiles();
-    const r = await openLocalOffice(
-      { usable: () => true, local: files, openTile: () => void log.push(`open:${files.pendingName()}`) },
-      item(f.handle),
-    );
+    const provided: { name: string; token: string }[] = [];
+    return {
+      log,
+      files,
+      provided,
+      d: {
+        usable: () => usable,
+        local: files,
+        officeWindow: {
+          provideDocument: (name: string, _b: Uint8Array, token: string) => {
+            provided.push({ name, token });
+            log.push('provide');
+          },
+        },
+        openTile: () => void log.push('tile'),
+        notify: (t: string) => void log.push(`say:${t}`),
+      },
+    };
+  }
+
+  it('確保していない回(ファイルを選んだ回)は、許可を訊いてから控えて、Office のタイルと同じ口を開く', async () => {
+    const f = fake('prompt', true);
+    const x = deps();
+    const r = await openLocalOffice(x.d, item(f.handle));
     expect(r).toBe(true);
     expect(f.asked, '開く操作の中で許可を訊いていない').toEqual(['request']);
-    expect(log, '控えてから開く').toEqual(['open:r.docx']);
-    expect(files.peek()).toEqual({ name: 'r.docx', size: 3, modifiedAt: 5 });
-    expect(files.take()!.writable).toBe(true);
+    expect(x.log).toEqual(['tile']);
+    expect(x.files.peek()).toEqual({ name: 'r.docx', size: 3, modifiedAt: 5 });
+    expect(x.files.take()!.writable).toBe(true);
+  });
+
+  it('🔴 窓を確保済みの回は、タイルを開かず、許可 → 読み込みの後で確保済みの窓へ文書を渡す', async () => {
+    const f = fake('prompt', true);
+    const x = deps();
+    expect(await openLocalOffice(x.d, item(f.handle, 'r.docx', true))).toBe(true);
+    expect(x.log[0], 'もう一度窓を開いている(2 枚目が立つ)').toBe('provide');
+    expect(x.log).not.toContain('tile');
+    expect(x.provided).toHaveLength(1);
+    expect(x.provided[0]!.token.startsWith('local:')).toBe(true);
+    expect(f.asked).toEqual(['request']);
+    expect(x.log[1]).toContain('「r.docx」');
+    expect(x.files.pendingName(), '控えを取り出していない(次の Office で同じ file が開く)').toBeNull();
+    expect(x.files.nameOf(x.provided[0]!.token)).toBe('r.docx');
+  });
+
+  it('🔴 窓は確保したが許可が取れなかった回 ── 開いて、書き戻せない案内(保存はダウンロード)を出す', async () => {
+    const f = fake('prompt', false);
+    const x = deps();
+    expect(await openLocalOffice(x.d, item(f.handle, 'r.docx', true))).toBe(true);
+    expect(x.log[0]).toBe('provide');
+    expect(x.log[1]).toContain('書き戻せません');
+    expect(x.log[1]).toContain('ダウンロードに保存します');
   });
 
   it('許可を断られても開く。ただし書き戻せない開き方(writable=false)', async () => {
     const f = fake('prompt', false);
-    const files = new LocalOfficeFiles();
-    expect(await openLocalOffice({ usable: () => true, local: files, openTile: () => {} }, item(f.handle))).toBe(true);
-    expect(files.take()!.writable).toBe(false);
+    const x = deps();
+    expect(await openLocalOffice(x.d, item(f.handle))).toBe(true);
+    expect(x.files.take()!.writable).toBe(false);
   });
 
   it('使えない環境では何もしない(false ── 呼び手が添付にする)', async () => {
-    const files = new LocalOfficeFiles();
-    let opened = false;
-    const r = await openLocalOffice(
-      { usable: () => false, local: files, openTile: () => void (opened = true) },
-      item(fake('granted').handle),
-    );
+    const x = deps(false);
+    const r = await openLocalOffice(x.d, item(fake('granted').handle, 'r.docx', true));
     expect(r).toBe(false);
-    expect(opened).toBe(false);
-    expect(files.pendingName()).toBeNull();
+    expect(x.log).toEqual([]);
+    expect(x.files.pendingName()).toBeNull();
   });
 });
 
