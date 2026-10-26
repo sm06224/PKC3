@@ -448,6 +448,12 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   await clickReal(win, '[data-pkc-action="search-jump-next"]');
   await expect(win.locator('[data-pkc-field="search-jump-count"]'), '端で回っていない').toHaveText('1/2 件');
   await inView('回って 1 件目');
+  // 🔴 #1102 段③: Ctrl+G(次)/ Ctrl+Shift+G(前)でも送れる ── 実ブラウザの打鍵で(本体の窓の中)
+  await win.locator('[data-pkc-field="search-jump-count"]').focus().catch(() => undefined);
+  await win.keyboard.press('Control+g');
+  await expect(win.locator('[data-pkc-field="search-jump-count"]'), 'Ctrl+G で次へ送れない').toHaveText('2/2 件');
+  await win.keyboard.press('Control+Shift+g');
+  await expect(win.locator('[data-pkc-field="search-jump-count"]'), 'Ctrl+Shift+G で前へ戻れない').toHaveText('1/2 件');
 
   /**
    * × で、塗りも帯も消える ── 🔴 **「操作を探す」から呼んで閉じる**(#582 段③ 第 4 群)。

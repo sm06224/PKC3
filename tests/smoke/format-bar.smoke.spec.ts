@@ -163,6 +163,24 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   await expect(stats, '表の外なのに案内が残った').toHaveText('');
   expect((await toolbar.boundingBox())!.height, '案内を外したら帯の高さが動いた').toBe(toolbarH);
 
+  // ④''-b 🔴 #1451 の続き ── コード・数式・frontmatter の中でも同じ枠に案内が出る(閉じ方つき)。帯の高さは動かない
+  const docText = '---\ntitle: x\n---\n本文\n```js\nlet a = 1;\n```\n$$\nx^2\n$$\n終わり';
+  await ta.fill(docText);
+  for (const [needle, want] of [
+    ['title', 'frontmatter 内: 閉じは ---'],
+    ['let', 'コード内: 記法は働きません(閉じは ```)'],
+    ['x^2', '数式内: TeX で書きます(閉じは $$)'],
+    ['終わり', ''],
+  ] as const) {
+    await ta.evaluate((el, n) => {
+      const t = el as HTMLTextAreaElement;
+      const at = t.value.indexOf(n) + 1;
+      t.setSelectionRange(at, at);
+    }, needle);
+    await expect(stats, `「${needle}」の位置の案内`).toHaveText(want);
+    expect((await toolbar.boundingBox())!.height, `「${needle}」: 案内で帯の高さが動いた`).toBe(toolbarH);
+  }
+
   // ④''' 🔴 行の入れ替え(#1213)── 2 列の欄で Alt+↓ / Alt+↑。caret が行に付いていき、
   //     端では動かず、Ctrl+Z で 1 回で戻る(⚠ `insertText` を通っていないと戻らない)
   await ta.fill('あ\nい\nう');

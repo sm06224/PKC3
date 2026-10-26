@@ -52,6 +52,18 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
     .poll(lidsNow, { message: '選んだノートが 1 つ上へ動いていない' })
     .toEqual([order0[1], order0[0]]);
 
+  // 🔴 #1145: 文字を打っていないときの `?` で、ヘルプが開いてショートカットキーの一覧まで送られる(実座標で画面の中)。
+  //     ⚠ 文字を打つ欄(絞り込み欄)の中の `?` は効かない ── 打てなくなるのを防ぐ対照群
+  await page.locator('[data-pkc-field="entry-filter"]').focus();
+  await page.keyboard.press('Shift+Slash');
+  await expect(page.locator('[data-pkc-region="help-keymap"]'), '打鍵中の ? でヘルプが開いた').toBeHidden();
+  await expect(page.locator('[data-pkc-field="entry-filter"]')).toHaveValue('?');
+  await page.locator('[data-pkc-field="entry-filter"]').fill('');
+  await page.locator('[data-pkc-field="entry-filter"]').blur();
+  await page.keyboard.press('Shift+Slash');
+  await expect(page.locator('[data-pkc-region="help-keymap"]'), '? でヘルプの一覧が開かない').toBeInViewport();
+  await page.keyboard.press('Alt+1');
+
   // ② 面の切替(Alt+3 = 設定)。⚠ **数字キーの `code`(Digit3)**が実機で来るかの検査でもある
   await page.keyboard.press('Alt+3');
   await expect(page.locator('[data-pkc-region="settings-body"]')).toBeVisible();
