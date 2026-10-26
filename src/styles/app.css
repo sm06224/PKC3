@@ -5994,6 +5994,30 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='inspector-owner'] [data-pkc-field='inspector-owner-name'] {
   margin-right: var(--s2);
 }
+/* 設定の「ワークスペース」(#1455)── 1 行に 名前 / 使用中の印 / 押し口。地は無彩色、色は使用中の 1 点だけ */
+[data-pkc-region='workspaces'] [data-pkc-field='workspace-list'] {
+  list-style: none;
+  margin: var(--s2) 0;
+  padding: 0;
+}
+[data-pkc-region='workspaces'] [data-pkc-field='workspace-row'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) 0;
+  border-bottom: 1px solid var(--border);
+}
+[data-pkc-region='workspaces'] [data-pkc-field='workspace-name'] {
+  flex: 1 1 12em;
+}
+[data-pkc-region='workspaces'] [data-pkc-field='workspace-current'] {
+  color: var(--accent);
+  font-weight: 600;
+}
+[data-pkc-region='workspaces'] [data-pkc-field='workspace-new-name'] {
+  min-width: 14em;
+}
 /* ⚠ 印の無い予定(ノート 1 件が丸ごと)は、印の列を**空けたまま**揃える */
 [data-pkc-field='no-check'] {
   display: inline-block;

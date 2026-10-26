@@ -781,9 +781,7 @@ function foldTick(): void {
 /** 20 回続けて落ちて諦めたとき、システムのメッセージに 1 件残す(検索は全走査のまま動くが、遅い)。 */
 function postFoldGiveUp(database: Database): void {
   try {
-    const cid = database.selectValue('SELECT cid FROM containers ORDER BY created_at, cid LIMIT 1') as
-      | string
-      | undefined;
+    const cid = activeContainerCid(database);
     if (cid === undefined) return;
     handlers.appendMessage({
       op: 'appendMessage',
@@ -2754,6 +2752,28 @@ function addParentEdge(
  * ② `':'` を含めない(`asset-blob-store.ts` の `assertCid` ── key 空間が混ざる)
  * 16 進 32 桁 + `c-` の前置きは、その両方に収まる**最も狭い形**である。
  */
+class WorkspacesRemainError extends Error {}
+/** 全部を消す操作を断る文(画面にそのまま出る)。 */
+const WORKSPACES_REMAIN_MESSAGE =
+  '複数のワークスペースがあるため、全部を消す操作はできません(「ワークスペース」で、ほかのワークスペースを先に削除してください)';
+
+/**
+ * 🔴 **いま使う器の cid**(#1455。ワークスペース)。
+ *
+ * - `workspaces` 表の 1 行(`id = 'main'`)の `active_cid` が実在する器ならそれ。
+ * - 無い / 実在しない(削除された)なら、**いちばん古い器**(今までの選び方 ── 既存の DB は何も変わらない)。
+ * ⚠ 選び方を変えると既存のデータが丸ごと見えなくなる(cid は全表の区画鍵) ── だから既定は今までと同じ。
+ */
+function activeContainerCid(database: Database): string | undefined {
+  const marked = database.selectValue(
+    `SELECT c.cid FROM workspaces w JOIN containers c ON c.cid = w.active_cid WHERE w.id = 'main'`,
+  ) as string | undefined;
+  if (typeof marked === 'string' && marked !== '') return marked;
+  return database.selectValue('SELECT cid FROM containers ORDER BY created_at, cid LIMIT 1') as
+    | string
+    | undefined;
+}
+
 function mintContainerId(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
@@ -3373,13 +3393,31 @@ function withMessagesRemoved<T>(make: () => T): T {
     `SELECT count(*) FROM entries WHERE realm = 'system' AND lid IN (?, ?)`,
     lids,
   ) as number | undefined;
-  if (has === undefined || has === 0) return make();
+  /**
+   * 🔴 **使っているワークスペース以外も除く**(#1455)。人に渡すファイルに、ほかのワークスペース(仕事用 /
+   * 個人用 …)のノートを 1 件も入れない。除く物と除き方はメッセージと同じ(確定させず ROLLBACK する)。
+   */
+  const active = activeContainerCid(database);
+  const others =
+    active === undefined
+      ? []
+      : (database.selectObjects('SELECT cid FROM containers WHERE cid <> ?', [active]) as Array<{ cid: string }>).map(
+          (r) => String(r.cid),
+        );
+  if ((has === undefined || has === 0) && others.length === 0) return make();
   const secure = database.selectValue('PRAGMA secure_delete') as number | undefined;
   database.exec('PRAGMA secure_delete = ON');
   try {
     database.exec('BEGIN IMMEDIATE');
     try {
       database.exec({ sql: `DELETE FROM entries WHERE realm = 'system' AND lid IN (?, ?)`, bind: lids });
+      for (const cid of others) {
+        for (const table of ['revisions', 'relations', 'assets', 'entries']) {
+          database.exec({ sql: `DELETE FROM ${table} WHERE cid = ?`, bind: [cid] });
+        }
+        database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [tagColorScope(cid)] });
+        database.exec({ sql: 'DELETE FROM containers WHERE cid = ?', bind: [cid] });
+      }
       return make();
     } finally {
       database.exec('ROLLBACK');
@@ -3586,6 +3624,19 @@ const handlers: Handlers = {
    * ⚠ この後 worker は**何にも答えられない**。呼び側が読み込み直すのが前提である。
    */
   wipeStorage: async () => {
+    /**
+     * 🔴 **ほかのワークスペースが居るとき、全部を消す操作は通さない**(#1455)。「作り直す」「初期化する」は
+     * DB のファイルごと捨てる ── 使っている 1 つのつもりで、ほかのワークスペースまで消える。
+     * ⚠ 壊れた DB は数えられないことがある ── その場合は断らない(壊れを直す道を塞がない)。
+     */
+    try {
+      const n = db?.selectValue('SELECT count(*) FROM containers') as number | undefined;
+      if (typeof n === 'number' && n > 1) {
+        throw new WorkspacesRemainError();
+      }
+    } catch (e) {
+      if (e instanceof WorkspacesRemainError) throw new Error(WORKSPACES_REMAIN_MESSAGE, { cause: e });
+    }
     const pool = sahPool;
     if (pool === null) {
       /**
@@ -4104,12 +4155,97 @@ const handlers: Handlers = {
         createdAt: typeof r['created_at'] === 'string' ? r['created_at'] : null,
       })),
   }),
-  resolveContainer: (req) => {
+  /**
+   * 🔴 **ワークスペースの一覧**(#1455)。ノートの数は user の領域の数(システムのメッセージは数えない)。
+   */
+  listWorkspaces: () => {
     const database = need();
     const rows = database.selectObjects(
-      'SELECT cid FROM containers ORDER BY created_at, cid LIMIT 1',
+      `SELECT c.cid AS cid, c.title AS title, c.created_at AS created_at,
+              (SELECT count(*) FROM entries e WHERE e.cid = c.cid AND e.${USER_REALM_SQL}) AS notes
+         FROM containers c ORDER BY c.created_at, c.cid`,
     );
-    const existing = rows[0]?.cid;
+    return {
+      workspaces: rows.map((r) => ({
+        cid: String(r['cid']),
+        title: typeof r['title'] === 'string' ? r['title'] : '',
+        createdAt: typeof r['created_at'] === 'string' ? r['created_at'] : null,
+        notes: Number(r['notes'] ?? 0),
+      })),
+      activeCid: activeContainerCid(database) ?? null,
+    };
+  },
+  createWorkspace: (req) => {
+    const database = need();
+    const title = req.title.replace(/\s+/g, ' ').trim();
+    if (title === '') throw new Error('ワークスペースの名前を入れてください');
+    const cid = mintContainerId();
+    /**
+     * ⚠ 作成時刻は**必ず今までのどの器よりも後**にする。`created_at` は秒精度で、同じ秒に 2 つ作ると並び
+     *   (`ORDER BY created_at, cid`)が cid の乱数で決まり、「いちばん古い器」(印が無いときに開く器)が揺れる。
+     */
+    database.exec({
+      sql: `INSERT INTO containers (cid, title, created_at, updated_at, schema_version)
+            VALUES (?1, ?2,
+              datetime(max(CAST(strftime('%s','now') AS INTEGER), COALESCE((SELECT max(CAST(strftime('%s', created_at) AS INTEGER)) FROM containers), 0) + 1), 'unixepoch'),
+              datetime('now'), ?3)`,
+      bind: [cid, title, DB_SCHEMA_VERSION],
+    });
+    return { cid };
+  },
+  switchWorkspace: (req) => {
+    const database = need();
+    const has = database.selectValue('SELECT count(*) FROM containers WHERE cid = ?', [req.cid]) as number;
+    if (!has) throw new Error('そのワークスペースは見つかりません');
+    database.exec({
+      sql: `INSERT INTO workspaces (id, name, active_cid) VALUES ('main', '', ?)
+            ON CONFLICT(id) DO UPDATE SET active_cid = excluded.active_cid`,
+      bind: [req.cid],
+    });
+    return null;
+  },
+  renameWorkspace: (req) => {
+    const title = req.title.replace(/\s+/g, ' ').trim();
+    if (title === '') throw new Error('ワークスペースの名前を入れてください');
+    need().exec({
+      sql: `UPDATE containers SET title = ?, updated_at = datetime('now') WHERE cid = ?`,
+      bind: [title, req.cid],
+    });
+    return null;
+  },
+  deleteWorkspace: (req) => {
+    const database = need();
+    const all = database.selectValue('SELECT count(*) FROM containers') as number;
+    if (all <= 1) throw new Error('最後のワークスペースは削除できません');
+    if (activeContainerCid(database) === req.cid) {
+      throw new Error('使っているワークスペースは削除できません(先に別のワークスペースへ切り替えてください)');
+    }
+    const has = database.selectValue('SELECT count(*) FROM containers WHERE cid = ?', [req.cid]) as number;
+    if (!has) throw new Error('そのワークスペースは見つかりません');
+    const removedNotes = database.selectValue(
+      `SELECT count(*) FROM entries WHERE cid = ? AND ${USER_REALM_SQL}`,
+      [req.cid],
+    ) as number;
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      // 🔑 cid を持つ表は全部(entries の削除は索引の引き金が追う)。中身の行は表の外に残さない
+      for (const table of ['revisions', 'relations', 'assets', 'entries']) {
+        database.exec({ sql: `DELETE FROM ${table} WHERE cid = ?`, bind: [req.cid] });
+      }
+      // タグの色は `settings` の区画(`tag-color:<cid>`)に居る
+      database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [tagColorScope(req.cid)] });
+      database.exec({ sql: 'DELETE FROM containers WHERE cid = ?', bind: [req.cid] });
+      database.exec('COMMIT');
+    } catch (e) {
+      database.exec('ROLLBACK');
+      throw e;
+    }
+    return { removedNotes };
+  },
+  resolveContainer: (req) => {
+    const database = need();
+    // 🔴 ワークスペース(#1455)── 印が付いた器があればそれ、無ければ今までどおりいちばん古い器
+    const existing = activeContainerCid(database);
     if (typeof existing === 'string' && existing !== '') {
       return { cid: existing, created: false };
     }

@@ -109,6 +109,8 @@ describe('止める op の仕分け(#971)', () => {
     'openContainer',
     'resolveContainer',
     'listContainerIds',
+    // ワークスペースの一覧(#1455)── 読むだけ
+    'listWorkspaces',
     'counts',
     'listEntryMetas',
     // system 領域のノート一覧(設計 doc §1.1、段①)── listEntryMetas と同じ読み専用

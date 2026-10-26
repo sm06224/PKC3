@@ -216,6 +216,7 @@ import { appCopyHistory } from '@adapter/platform/copy-history-store';
 import { appMessagePost, READ_AT_KEY } from '@adapter/platform/message-post';
 import { connectMessageSync, MESSAGES_CHANNEL } from '@adapter/platform/message-sync';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
+import { appWorkspaces } from '@adapter/platform/storage/workspace-run';
 import { markName, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import {
   purgeBlockReason,
@@ -6334,6 +6335,36 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       vacuum: () => client.request({ op: 'vacuum' }),
       post: (m) => appMessagePost.post(m),
     });
+    /**
+     * 🔴 **ワークスペースの切り替え**(#1455)── 押した user だけが打つ。判断は `Workspaces`(`workspace-run.ts`)と
+     * worker ── この file はどの test からも実行されない(CLAUDE.md §2)ので、ここは**口を渡すだけ**にする。
+     * ⚠ 可搬の単一 HTML では渡さない(DB は器の中の写しで、保存の単位が違う)。
+     */
+    appWorkspaces.attach(
+      {
+        list: () => client.request({ op: 'listWorkspaces' }),
+        create: async (title) => (await client.request({ op: 'createWorkspace', title })).cid,
+        switchTo: async (target) => {
+          await client.request({ op: 'switchWorkspace', cid: target });
+        },
+        rename: async (target, title) => {
+          await client.request({ op: 'renameWorkspace', cid: target, title });
+        },
+        remove: (target) => client.request({ op: 'deleteWorkspace', cid: target }),
+        // 🔑 書込と同じ 1 本の列に載せる(storeEffects が無い間は直に打つ ── 起きない想定)
+        run: (job) => (storeEffects ? storeEffects.run(job) : job()),
+        reload: () => {
+          // 🔑 ディープリンクの hash は前の器の物 ── 残すと、読み込み直した先で「別のコレクションの参照」と断られる
+          try {
+            history.replaceState(null, '', `${location.pathname}${location.search}`);
+          } catch {
+            /* 書き換えられなくても読み込み直しは通す */
+          }
+          location.reload();
+        },
+      },
+      cid,
+    );
   }
   /**
    * 🔴 **一式が入っているかを 1 度だけ読み、控えに写す**(#88 / O3-c)。

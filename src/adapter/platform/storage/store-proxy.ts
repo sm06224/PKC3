@@ -131,6 +131,12 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'openContainer',
   // 入れ物の一覧に足すだけで、ノートもつながりも動かない(broadcastChanged は cid を見て早期 return する)
   'resolveContainer',
+  // ワークスペース(#1455)── 器の一覧・名前・「次に開く器」の印だけを動かす。ほかのタブの一覧は描き直さない
+  // (使っている器の中身は動かない。削除は使っていない器だけ)
+  'createWorkspace',
+  'switchWorkspace',
+  'renameWorkspace',
+  'deleteWorkspace',
   // システムのメッセージはノートの一覧に出ない。知らせのたびに他タブを読み直させない
   'appendMessage',
   // 中身を消す操作は、他タブへは onContainerWiped で知らせる
@@ -165,6 +171,7 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'listAssetMetas',
   'listBodies',
   'listContainerIds',
+  'listWorkspaces',
   'listEntryMetas',
   'listRelations',
   'listRevisionLids',

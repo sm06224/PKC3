@@ -90,6 +90,12 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   'optimizeIndexes',
   // 🔴 保存領域を縮める(#999)── file を丸ごと書き直す書き込み。問題が見つかっている DB には打たない
   'vacuum',
+  // 🔴 ワークスペース(#1455)── 器の一覧・名前・「次に開く器」の印を書く。壊れた DB には打たない
+  //    (一覧を読む `listWorkspaces` は ALLOWED 側)
+  'createWorkspace',
+  'switchWorkspace',
+  'renameWorkspace',
+  'deleteWorkspace',
 ];
 
 /**

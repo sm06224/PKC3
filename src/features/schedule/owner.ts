@@ -18,7 +18,7 @@
  */
 
 /** チェック項目の中の `担当:名前`。名前は空白・句読点・`#` / `@` の手前まで。 */
-const LINE_OWNER = /(?:^|[\s　])担当[:：][ 　]*([^\s　,、。;；#@]+)/;
+const LINE_OWNER = /(?:^|[\s\u3000])担当[:：][ \u3000]*([^\s\u3000,、。;；#@]+)/;
 
 /** 行の字から担当を読む。無ければ `null`。 */
 export function ownerOfText(text: string): string | null {

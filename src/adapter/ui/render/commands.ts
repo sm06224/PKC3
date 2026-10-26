@@ -223,6 +223,8 @@ export function buildSettingsCommands(): DocumentFragment {
   frag.append(buildPurgeOrphanAssets());
   // 🔴 縮める(#999)── 片づけの**隣**に置く(どちらも「保存領域を軽くする」用事)
   frag.append(buildVacuumPanel());
+  // 🔴 ワークスペース(#1455)── 保存領域の用事(器を分ける)なので、縮めるの隣に置く
+  frag.append(buildWorkspacePanel());
   // 🔴 壊れの調べは片づけの**隣**に置く ── 「壊れた」と言われた人が最初に探す並び
   frag.append(buildDbRescue());
   return frag;
@@ -280,6 +282,50 @@ function buildVacuumPanel(): HTMLElement {
   btn.title = '空いたまま確保している分を返して、保存領域の大きさを小さくします';
   btn.disabled = true;
   box.append(btn);
+  return box;
+}
+
+/**
+ * 🔴 **ワークスペース**(#1455)── 仕事用・個人用のように、ノートの束を 2 つ以上持って切り替える。
+ *
+ * ⚠ **ここには判断も数も 1 つも置かない** ── 一覧も押せるかも、`Workspaces`
+ *   (`adapter/platform/storage/workspace-run.ts`)が組み、`SettingsRenderer.syncWorkspaces` が**この器へ映す**。
+ *   ここは器と押し口だけである。
+ */
+function buildWorkspacePanel(): HTMLElement {
+  const box = document.createElement('section');
+  box.setAttribute('data-pkc-region', 'workspaces');
+  box.hidden = true; // 配線が無い環境(可搬の単一 HTML)では出さない ── 映す側が外す
+  const h = document.createElement('h4');
+  h.textContent = 'ワークスペース';
+  box.append(h);
+
+  const lead = document.createElement('p');
+  lead.className = 'settings-note';
+  lead.textContent =
+    'ノートの束を、仕事用・個人用のように分けて使えます。切り替えると画面を読み込み直し、それぞれのノート・履歴・タグの色が別々に出ます。';
+  box.append(lead);
+
+  const list = document.createElement('ul');
+  list.setAttribute('data-pkc-field', 'workspace-list');
+  box.append(list);
+
+  const note = document.createElement('p');
+  note.setAttribute('data-pkc-field', 'workspace-note');
+  note.className = 'settings-note';
+  box.append(note);
+
+  const row = document.createElement('div');
+  row.setAttribute('data-pkc-field', 'settings-command-row');
+  const name = document.createElement('input');
+  name.type = 'text';
+  name.setAttribute('data-pkc-field', 'workspace-new-name');
+  name.setAttribute('aria-label', '新しいワークスペースの名前');
+  name.placeholder = '新しいワークスペースの名前';
+  const btn = iconButton('workspace-create', 'ワークスペースを作る');
+  btn.title = '空のワークスペースを足します(足しただけでは、いまの画面は変わりません)';
+  row.append(name, btn);
+  box.append(row);
   return box;
 }
 

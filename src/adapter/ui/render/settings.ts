@@ -18,6 +18,7 @@ import { AgentOriginGrants, appAgentOriginGrants } from '@adapter/platform/agent
 import { AgentTabStatus, appAgentTabStatus } from '@adapter/platform/agent-tab-status';
 import type { AppState } from '@adapter/state/app-state';
 import { appStorageVacuum, type StorageVacuum } from '@adapter/platform/storage/vacuum-run';
+import { appWorkspaces, type Workspaces } from '@adapter/platform/storage/workspace-run';
 import { STORAGE_SECTION_LABEL } from '@features/asr/asr-text';
 import { appEditorMode, EditorModeStore } from './editor-mode';
 import { appOpenInEdit, OpenInEditStore } from './open-in-edit';
@@ -223,6 +224,11 @@ export class SettingsRenderer {
      * 🔴 **打ちながら補完の候補を出すか**(#1449 / #1450)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly inlineComplete: InlineCompleteStore = appInlineComplete,
+    /**
+     * 🔴 **ワークスペース**(#1455)。⚠ 画面は**この係が組んだ表示を映すだけ**。
+     * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly workspaces: Workspaces = appWorkspaces,
   ) {
     /**
      * 🔴 **節の登録表(#1382)── 並びが画面の並びである。** 節を足す = `settings/` に 1 file 足し、
@@ -525,6 +531,73 @@ export class SettingsRenderer {
     this.vacuum.subscribe(() => this.syncVacuum());
     this.syncVacuum();
     this.vacuum.refresh();
+    // 🔴 ワークスペース(#1455)── 係の表示が変わるたびに映す
+    this.workspaces.subscribe(() => this.syncWorkspaces());
+    this.syncWorkspaces();
+    void this.workspaces.refresh();
+  }
+
+  /**
+   * 🔴 **ワークスペースの一覧を映す**(#1455)。⚠ 判断は `Workspaces` が持つ ── ここは**字と押し口を置くだけ**。
+   * 行は毎回作り直さず、変わったときだけ組み直す(押す寸前のボタンを消さない)。
+   */
+  private syncWorkspaces(): void {
+    const box = this.region.querySelector<HTMLElement>('[data-pkc-region="workspaces"]');
+    if (box === null) return;
+    const v = this.workspaces.view();
+    if (box.hidden === v.attached) box.hidden = !v.attached;
+    if (!v.attached) return;
+    const list = box.querySelector<HTMLElement>('[data-pkc-field="workspace-list"]')!;
+    const sig = JSON.stringify([v.rows, v.busy]);
+    if (list.getAttribute('data-pkc-sig') !== sig) {
+      list.setAttribute('data-pkc-sig', sig);
+      list.textContent = '';
+      const only = v.rows.length <= 1;
+      for (const r of v.rows) {
+        const li = document.createElement('li');
+        li.setAttribute('data-pkc-field', 'workspace-row');
+        li.setAttribute('data-pkc-cid', r.cid);
+        const name = document.createElement('span');
+        name.setAttribute('data-pkc-field', 'workspace-name');
+        name.textContent = `${r.title}(ノート ${String(r.notes)} 件)`;
+        li.append(name);
+        if (r.current) {
+          const mark = document.createElement('span');
+          mark.setAttribute('data-pkc-field', 'workspace-current');
+          mark.textContent = '使用中';
+          li.append(mark);
+        }
+        // ⚠ 押し口の綴りは**字で書く**(`tests/action-outlets.test.ts` が静的に追う ── ヘルパーに渡すと追えない)
+        const mk = (label: string, title: string): HTMLButtonElement => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.setAttribute('data-pkc-cid', r.cid);
+          b.textContent = label;
+          b.title = title;
+          b.disabled = v.busy;
+          return b;
+        };
+        // 使っていない器にだけ「切り替える」「削除」を出す(押しても断られるボタンを出さない)
+        if (!r.current) {
+          const sw = mk('切り替える', 'このワークスペースに切り替えて、画面を読み込み直します');
+          sw.setAttribute('data-pkc-action', 'workspace-switch');
+          li.append(sw);
+        }
+        const rn = mk('名前を変える', 'このワークスペースの名前を直します');
+        rn.setAttribute('data-pkc-action', 'workspace-rename');
+        li.append(rn);
+        if (!r.current && !r.next && !only) {
+          const del = mk('削除', 'このワークスペースを、ノートごと削除します');
+          del.setAttribute('data-pkc-action', 'workspace-delete');
+          li.append(del);
+        }
+        list.append(li);
+      }
+    }
+    const noteEl = box.querySelector<HTMLElement>('[data-pkc-field="workspace-note"]')!;
+    if (noteEl.textContent !== v.note) noteEl.textContent = v.note;
+    const create = box.querySelector<HTMLButtonElement>('[data-pkc-action="workspace-create"]');
+    if (create !== null && create.disabled !== v.busy) create.disabled = v.busy;
   }
 
   /**

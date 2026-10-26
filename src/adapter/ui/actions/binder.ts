@@ -512,6 +512,7 @@ import { appMessagePost, setMessageCap } from '@adapter/platform/message-post';
 import { setMessageKindFilter } from '@adapter/platform/message-filter';
 import { messageFilterOfAttr } from '@adapter/ui/render/message-bar';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
+import { appWorkspaces } from '@adapter/platform/storage/workspace-run';
 import {
   isSystemMessageLid,
   MESSAGE_CAP_OPTIONS,
@@ -3418,6 +3419,11 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // 🔴 ノートの担当を書く / 外すのも前書きを書く(#283)── 日付と同じ門
   'set-entry-owner',
   'clear-entry-owner',
+  // 🔴 ワークスペースの操作(#1455)── 取り込み・書き出しの最中に器を足したり替えたり消したりしない(切り替えは読み込み直しも伴う)
+  'workspace-create',
+  'workspace-switch',
+  'workspace-rename',
+  'workspace-delete',
   'toggle-app-tile',
   /**
    * 🔴 **リンクを足すのも「作る」である**(#401 ①)。⚠ `create-entry` と同じ理由で
@@ -5711,6 +5717,12 @@ function chapterRangeOf(
   if (span === null) return null;
   const offset = body.split('\n').length - fm.split('\n').length;
   return { headingLine: span.start + offset, end: span.end + offset };
+}
+
+/** ワークスペースの操作の結果を、画面の下の知らせ / 失敗の帯で言う。 */
+function say(dispatcher: Dispatcher, r: { kind: 'done' | 'failed' | 'refused'; text: string }): void {
+  if (r.kind === 'done') dispatcher.dispatch({ type: 'OP_NOTICE', message: r.text });
+  else dispatcher.dispatch({ type: 'OP_FAILED', error: r.text });
 }
 
 /**
@@ -12695,6 +12707,58 @@ const ACTIONS: Record<string, ActionHandler> = {
       '担当を外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
       () => dispatcher.dispatch({ type: 'SET_ENTRY_OWNER', lid, owner: null }),
     );
+  },
+  /**
+   * 🔴 **ワークスペースを足す**(#1455)。名前は設定の欄(`workspace-new-name`)から読む。足しただけでは画面は動かない。
+   * ⚠ 判断と書込は `Workspaces`(`workspace-run.ts`)── ここは**渡して結果を言う**だけ。
+   */
+  'workspace-create': (dispatcher, target) => {
+    const input = target.closest<HTMLElement>('[data-pkc-region="workspaces"]')?.querySelector<HTMLInputElement>(
+      '[data-pkc-field="workspace-new-name"]',
+    );
+    const typed = input?.value ?? '';
+    void appWorkspaces.create(typed).then((r) => {
+      if (r.kind === 'done' && input) input.value = '';
+      say(dispatcher, r);
+    });
+  },
+  /** 🔴 **ワークスペースを切り替える**(#1455)。書込が済んでから切り替えの印を書き、画面を読み込み直す。 */
+  'workspace-switch': (dispatcher, target) => {
+    const cid = target.getAttribute('data-pkc-cid');
+    if (cid === null) return;
+    void appWorkspaces.switchTo(cid).then((r) => say(dispatcher, r));
+  },
+  /** 🔴 **ワークスペースの名前を直す**(#1455)。 */
+  'workspace-rename': (dispatcher, target, _services, root) => {
+    const cid = target.getAttribute('data-pkc-cid');
+    if (cid === null) return;
+    const cur = appWorkspaces.view().rows.find((r) => r.cid === cid);
+    void promptInApp(root, {
+      title: 'ワークスペースの名前を変える',
+      label: '新しい名前を入力してください:',
+      initial: cur?.title ?? '',
+      okLabel: '名前を変える',
+    }).then((typed) => {
+      if (typed === null) return;
+      void appWorkspaces.rename(cid, typed).then((r) => say(dispatcher, r));
+    });
+  },
+  /**
+   * 🔴 **ワークスペースを削除する**(#1455)。⚠ ノートごと消えるので、押す前に必ず確認を挟む
+   * (使っていない器だけ ── 使っている器と最後の 1 つは worker も断る)。
+   */
+  'workspace-delete': (dispatcher, target, _services, root) => {
+    const cid = target.getAttribute('data-pkc-cid');
+    if (cid === null) return;
+    const cur = appWorkspaces.view().rows.find((r) => r.cid === cid);
+    void confirmInApp(
+      root,
+      `ワークスペース「${cur?.title ?? ''}」を、ノート ${String(cur?.notes ?? 0)} 件ごと削除します。元に戻せません。`,
+      { okLabel: '削除する', cancelLabel: 'やめる', danger: true },
+    ).then((answer) => {
+      if (answer !== 'ok') return;
+      void appWorkspaces.remove(cid).then((r) => say(dispatcher, r));
+    });
   },
   /** 予定の面の「一覧 / 日」(#855 段 A-1)。値は押したボタンの `data-pkc-mode`。 */
   'schedule-mode': (dispatcher, target, services) => {
