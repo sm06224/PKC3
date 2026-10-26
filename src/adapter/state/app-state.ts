@@ -741,6 +741,12 @@ export const VIEW_MODES = [
    * 別ウィンドウ + タイルだけ。⚠ aside である(`ASIDE_PANES`)── ノートを映す面ではなく**道具**。
    */
   'diff',
+  /**
+   * 🔴 **PC(パソコンのフォルダ)**(#300。user 指示 2026-10-26「全部やるのです」)。左の列のタブ「PC」(#215)と
+   * 同じ中身を別ウィンドウでも開けるようにする面。⚠ aside(ノートを映さない道具)── 行を押すと取り込んで
+   * そのノートを開くので、選んだ瞬間に本文へ退く(左のタブから開いたときと同じ見え方)。
+   */
+  'pc',
   'settings',
   'flags',
   'help',
@@ -789,6 +795,8 @@ const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>([
   'calc',
   // 🔴 差分マージ(#1231)も同じ ── ノートを映さない道具。編集中でも開ける(見比べるだけなら下書きに触れない。保存するときだけ書く)
   'diff',
+  // 🔴 PC(#300)も同じ ── ノートを映さない道具。行を押すと取り込んで開くので、ノートを選んだ瞬間に本文へ退く(`STAY_ON_SELECT` に入れない)
+  'pc',
 ]);
 
 export function isAsidePane(view: ViewMode): boolean {
@@ -871,6 +879,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   textlab: 'テキスト整形',
   calc: '計算スクラッチパッド',
   diff: '差分マージ',
+  pc: 'PC',
   settings: 'システム',
   flags: 'フラグ',
   help: 'ヘルプ',

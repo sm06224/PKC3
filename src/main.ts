@@ -1855,6 +1855,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * しない(層規約)ので、ここで投げる。⚠ 判断は reducer(`PLACE_BODIES_WANTED`)が持つ。
      */
     (lids) => dispatcher.dispatch({ type: 'PLACE_BODIES_WANTED', lids }),
+    // 🔴 パソコンのフォルダ(#300)── 左のタブ・押し口と**同じ 1 つ**
+    localFolder,
   );
   // いま居る場所の印(変わったときだけ属性を触る)
   let markedView: string | null = null;

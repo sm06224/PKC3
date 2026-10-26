@@ -738,6 +738,8 @@ const ALL_VIEWS = [
   'calc',
   // ⚠ 差分マージ(#1231)── 同じく**道具**なので aside
   'diff',
+  // ⚠ PC(#300)── 左のタブと同じ中身を別窓でも開く**道具**なので aside
+  'pc',
   'settings',
   'flags',
   'help',

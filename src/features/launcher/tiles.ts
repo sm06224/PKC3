@@ -77,6 +77,8 @@ export interface LauncherTile {
     | 'textlab'
     | 'calc'
     | 'diff'
+    | 'query'
+    | 'pc'
     | 'manual'
     | 'selfhost';
   /** `kind === 'url'` のときの飛び先。 */
@@ -486,6 +488,45 @@ export function diffTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **集計の組み込みタイル**(#300。user 指示 2026-10-26「全部やるのです」)。
+ *
+ * ⚠ 集計(#184)は中央の面としてだけ在り、別ウィンドウで開く入口が無かった(#300 の洗い出しで残った 1 つ)。
+ * ⚠ 左の列にタブは足さない: 集計は表の面で左の幅に収めると読めないうえ、タブを足すと既存のタブが「⋯」へ畳まれる(#1900)。
+ *   別ウィンドウが塞がれたときの退避先は、これまでどおり中央の集計の面(確認してから開く)。
+ * 🔑 `kind` は `ViewMode` の綴り(`query`)── `launch-tile.ts` がそれを見て別窓へ渡す。
+ */
+export const QUERY_TILE_LID = 'builtin:query';
+
+export function queryTile(): LauncherTile {
+  return {
+    lid: QUERY_TILE_LID,
+    title: '集計',
+    group: BUILTIN_GROUP,
+    kind: 'query',
+    symbol: 'grid',
+  };
+}
+
+/**
+ * 🔴 **PC(パソコンのフォルダ)の組み込みタイル**(#300。user 指示 2026-10-26「全部やるのです」)。
+ *
+ * ⚠ 左の列のタブ「PC」(#215)は残す ── 別ウィンドウが塞がれたときの退避先もそのタブ(`browse-mode.ts` の `HOME_TAB`)。
+ *   別ウィンドウのほうで繋いだフォルダは、**その窓だけの物**になる(フォルダへの許可は窓ごとに持つ)。
+ * 🔑 `kind` は `ViewMode` の綴り(`pc`)。
+ */
+export const PC_TILE_LID = 'builtin:pc';
+
+export function pcTile(): LauncherTile {
+  return {
+    lid: PC_TILE_LID,
+    title: 'PC',
+    group: BUILTIN_GROUP,
+    kind: 'pc',
+    symbol: 'monitor',
+  };
+}
+
+/**
  * 🔴 **マニュアルの組み込みタイル**(#645。user 要望 2026-08-31
  * 「**ヘルプの中からマニュアルをアプリとして出してください**」)。
  *
@@ -608,6 +649,9 @@ export function withBuiltinTiles(
   builtin.push(calcTile());
   // ⚠ 差分マージ(#1231)も末尾 ── 同じ理由(位置を動かさない)
   builtin.push(diffTile());
+  // ⚠ 集計・PC(#300)も末尾 ── 同じ理由(位置を動かさない)
+  builtin.push(queryTile());
+  builtin.push(pcTile());
   /**
    * 🔴 **組み込みは末尾へ「収納」する**(#531 段② / #281。user 指示 2026-08-28
    * 「組み込みアプリをグループに**収納して**整理する」)。
@@ -654,6 +698,8 @@ export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'textlab',
   'calc',
   'diff',
+  'query',
+  'pc',
   'manual',
   'selfhost',
 ]);

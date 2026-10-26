@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, openTile } from './helpers';
 
 /**
  * 🔴 **組み込みアプリ 3 つを、実ブラウザで押す**(#281 ① 関係グラフ / #277 カンバン / #683 ① 計った時間)。
@@ -342,5 +342,39 @@ test('🔴 差分マージ: 2 つのノートのちがいを 1 か所ずつ取�
   await pickNote('left').selectOption('');
   await pickNote('left').selectOption(lidA);
   await expect(summary, '保存したのに、読み直すと元のまま').toHaveText('ちがい 1 か所', { timeout: 10_000 });
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 集計と PC: アプリの一覧のタイルから別ウィンドウで開き、本物の面が描かれる (#300)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+
+  for (const [tile, view] of [
+    ['builtin:query', 'query'],
+    ['builtin:pc', 'pc'],
+  ] as const) {
+    // ⚠ 押した瞬間に別ウィンドウが開く(確認の画面は挟まない)。開いた窓は同じアプリで、画面はアドレスの `view=` で決まる
+    const opened = page.context().waitForEvent('page', { timeout: 20_000 });
+    // ⚠ 2 回押す(1 回目は印が付くだけ ── #857 段①b)
+    await openTile(page, `[data-pkc-action="open-tile"][data-pkc-tile="${tile}"]`);
+    const popup = await opened;
+    await popup.waitForLoadState('domcontentloaded');
+    expect(popup.url(), `${tile} の窓が ${view} の画面を指していない`).toContain(`view=${view}`);
+    const pane = popup.locator(`[data-pkc-view-pane="${view}"]`);
+    await expect(pane, `${view} の画面が別ウィンドウに出ない`).toBeVisible({ timeout: 30_000 });
+    if (view === 'pc') {
+      // 題と中身(フォルダを選ぶボタン、または使えない理由)が描かれている ── 空の器で終わらない
+      await expect(pane.locator('[data-pkc-field="pane-title"]')).toContainText('PC');
+      await expect(
+        pane.locator('[data-pkc-action="pc-pick-folder"], [data-pkc-field="pc-note"]').first(),
+        'PC の中身が描かれていない',
+      ).toBeVisible();
+    } else {
+      await expect(pane, '集計の画面が空').not.toBeEmpty();
+    }
+    await popup.close();
+  }
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

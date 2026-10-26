@@ -139,6 +139,9 @@ describe('ランチャーのタイルを読む', () => {
       'calc',
       // ⚠ **差分マージ**(#1231)── 同じ理由で末尾
       'diff',
+      // ⚠ **集計・PC**(#300)── 同じ理由で末尾
+      'query',
+      'pc',
     ]);
     off();
   });
@@ -241,7 +244,7 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(
       b.map((t) => t.group),
       '組み込みが既定群のまま(見出しが引かれず、自分のものと地続きに見える)',
-    ).toEqual(Array.from({ length: 14 }, () => BUILTIN_GROUP));
+    ).toEqual(Array.from({ length: 16 }, () => BUILTIN_GROUP));
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', async () => {
@@ -271,6 +274,9 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(b[11]?.kind, 'Office の有無で計算スクラッチパッドの位置が動いた').toBe('calc');
     // ⚠ **差分マージ**(#1231)も末尾
     expect(b[12]?.kind, 'Office の有無で差分マージの位置が動いた').toBe('diff');
-    expect(b, '組み込みが 13 枚でない').toHaveLength(13);
+    // ⚠ **集計・PC**(#300)も末尾
+    expect(b[13]?.kind, 'Office の有無で集計の位置が動いた').toBe('query');
+    expect(b[14]?.kind, 'Office の有無で PC の位置が動いた').toBe('pc');
+    expect(b, '組み込みが 15 枚でない').toHaveLength(15);
   });
 });

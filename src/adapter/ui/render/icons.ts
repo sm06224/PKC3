@@ -330,8 +330,10 @@ export const BROWSE_ICONS: Readonly<Record<string, IconName>> = {
   graph: 'link',
   // 🔴 計った時間(#683 ①)── 「時間を計る」の口(`start-timer`)と同じ図案
   timers: 'timer',
-  // 🔴 PC(#215 段①)── 「フォルダ」のタブ(`folder`)と取り違えない別の図案
-  pc: 'computer',
+  // 🔴 PC(#215 段①)── 「フォルダ」のタブ(`folder`)と取り違えない別の図案。
+  //    ⚠ 2026-10-26(#300)に `computer` から `monitor` へ: PC のタイルが加わり、「自分のパソコンで動かす」(`computer`)と
+  //    同じ絵が 2 枚並ぶのを避けた(左のタブの図案は画面に出していない)
+  pc: 'monitor',
 };
 
 /**

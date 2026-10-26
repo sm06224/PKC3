@@ -16,8 +16,12 @@ import {
 } from '../../src/adapter/ui/actions/adopt-icon-file';
 
 function deps(over: Record<string, unknown> = {}, gateRuns = true) {
-  const putBlob = vi.fn(async (_k: string, _b: Blob) => {});
-  const putMeta = vi.fn(async (_m: { key: string; mime: string; size: number; hash: string | null }) => {});
+  const putBlob = vi.fn(async (...args: [string, Blob]) => {
+    void args;
+  });
+  const putMeta = vi.fn(async (...args: [{ key: string; mime: string; size: number; hash: string | null }]) => {
+    void args;
+  });
   const gate = vi.fn(async (run: () => Promise<void>) => {
     if (gateRuns) await run();
   });

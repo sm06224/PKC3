@@ -27,6 +27,8 @@ import { SqlRenderer } from './sql';
 import { TextLabRenderer } from './textlab';
 import { CalcRenderer } from './calc';
 import { DiffMergeRenderer } from './diffmerge';
+import { PcFolderRenderer } from './pc-folder';
+import { LocalFolder } from '@adapter/platform/local-folder';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
 type PaneView =
@@ -43,6 +45,7 @@ type PaneView =
   | 'textlab'
   | 'calc'
   | 'diff'
+  | 'pc'
   | 'settings'
   | 'flags'
   | 'help';
@@ -67,6 +70,8 @@ const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>([
   'calc',
   // ⚠ 差分マージ(#1231)── 同じ
   'diff',
+  // ⚠ PC(#300)── 左のタブと同じ中身を別窓でも開く道具
+  'pc',
 ]);
 
 /**
@@ -138,6 +143,8 @@ export class CenterRouter {
   private readonly calc: CalcRenderer;
   /** 差分マージ(#1231)。 */
   private readonly diff: DiffMergeRenderer;
+  /** PC(パソコンのフォルダ。#300)。 */
+  private readonly pc: PcFolderRenderer;
   private lastPane: PaneView = 'detail';
   /**
    * 🔴 **面を開いて戻ったら、同じ場所に戻る**(user 目線レビュー U-4、2026-08-22)。
@@ -209,6 +216,16 @@ export class CenterRouter {
      * しない(層規約)── 撃つのは `main.ts`。渡さなければ板は題名の行だけを出す。
      */
     onPlaceWanted?: (lids: readonly string[]) => void,
+    /**
+     * 🔴 **パソコンのフォルダ**(#300)。⚠ 持ち主は `main.ts` ── 左のタブ(`browse`)と binder の押し口に渡すのと
+     *   **同じ 1 つ**を渡す(2 つ作ると、押した先と描いている先が別になる)。省略 = このブラウザでは使えない扱い(test 用)。
+     */
+    pcFolder: LocalFolder = new LocalFolder({
+      picker: null,
+      open: async () => {},
+      fail: () => {},
+      onChange: () => {},
+    }),
   ) {
     const pane = (view: PaneView): HTMLElement => {
       const el = document.createElement('div');
@@ -231,6 +248,7 @@ export class CenterRouter {
       textlab: pane('textlab'),
       calc: pane('calc'),
       diff: pane('diff'),
+      pc: pane('pc'),
       settings: pane('settings'),
       flags: pane('flags'),
       help: pane('help'),
@@ -285,6 +303,14 @@ export class CenterRouter {
     this.textlab = new TextLabRenderer(this.panes.textlab);
     this.calc = new CalcRenderer(this.panes.calc);
     this.diff = new DiffMergeRenderer(this.panes.diff);
+    // 🔴 別窓の PC(#300)── 題(`pane-title`)を付け、中身は別の箱へ描く(`PcFolderRenderer` は箱を空にして描き直すため)
+    const pcTitle = document.createElement('h2');
+    pcTitle.setAttribute('data-pkc-field', 'pane-title');
+    pcTitle.textContent = 'PC(パソコンのフォルダ)';
+    const pcBody = document.createElement('div');
+    pcBody.setAttribute('data-pkc-field', 'pc-body');
+    this.panes.pc.append(pcTitle, pcBody);
+    this.pc = new PcFolderRenderer(pcBody, pcFolder);
     this.settings = new SettingsRenderer(this.panes.settings);
     this.flags = new FlagsRenderer(this.panes.flags);
     /**
@@ -405,6 +431,7 @@ export class CenterRouter {
     else if (view === 'textlab') this.textlab.render(state);
     else if (view === 'calc') this.calc.render();
     else if (view === 'diff') this.diff.render(state);
+    else if (view === 'pc') this.pc.render();
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();
     // ⚠ ヘルプにも**コンテナ id を渡す**(Issue #100 段①)── マニュアルも

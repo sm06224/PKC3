@@ -32,6 +32,8 @@ import {
   GRAPH_TILE_LID,
   TIMERS_TILE_LID,
   TEXTLAB_TILE_LID,
+  QUERY_TILE_LID,
+  PC_TILE_LID,
   CALC_TILE_LID,
   DIFF_TILE_LID,
   capturesTile,
@@ -308,7 +310,22 @@ describe('組み込みタイルの合流 (#148)', () => {
       kind: 'diff',
       symbol: 'copy',
     });
-    expect(b, '組み込みが 14 枚ちょうどでない').toHaveLength(14);
+    // ⚠ 集計・PC(#300)も末尾 ── 同じ理由(位置を動かさない)
+    expect(b[14]).toEqual({
+      lid: QUERY_TILE_LID,
+      title: '集計',
+      group: BUILTIN_GROUP,
+      kind: 'query',
+      symbol: 'grid',
+    });
+    expect(b[15]).toEqual({
+      lid: PC_TILE_LID,
+      title: 'PC',
+      group: BUILTIN_GROUP,
+      kind: 'pc',
+      symbol: 'monitor',
+    });
+    expect(b, '組み込みが 16 枚ちょうどでない').toHaveLength(16);
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', () => {
@@ -364,6 +381,9 @@ describe('組み込みタイルの合流 (#148)', () => {
       'calc',
       // ⚠ 差分マージ(#1231)── 同じく末尾
       'diff',
+      // ⚠ 集計・PC(#300)── 同じく末尾
+      'query',
+      'pc',
     ]);
     // ⚠ Office を入れていない端末でも、面は空にならない
     expect(withBuiltinTiles([], { office: false }).map((t) => t.kind)).toEqual([
@@ -380,6 +400,8 @@ describe('組み込みタイルの合流 (#148)', () => {
       'textlab',
       'calc',
       'diff',
+      'query',
+      'pc',
     ]);
   });
 
@@ -396,7 +418,7 @@ describe('組み込みタイルの合流 (#148)', () => {
     const missing = merged.filter((t) => t.symbol === undefined).map((t) => t.title);
     expect(missing, `目印の無い組み込みタイル: ${missing.join(' / ')}`).toEqual([]);
     // ⚠ **空振り防止** ── 組み込みが 1 枚も無ければ上は常に真
-    expect(merged.length).toBeGreaterThanOrEqual(14);
+    expect(merged.length).toBeGreaterThanOrEqual(16);
     // ⚠ 打った字の目印(`icon`)とは**同時に立たない**
     expect(merged.filter((t) => t.icon !== undefined)).toEqual([]);
   });
@@ -420,6 +442,8 @@ describe('組み込みタイルの合流 (#148)', () => {
         ['textlab', 'snippet'],
         ['calc', 'calculator'],
         ['diff', 'copy'],
+        ['query', 'grid'],
+        ['pc', 'monitor'],
       ]),
     );
   });
@@ -449,7 +473,7 @@ describe('組み込みタイルの合流 (#148)', () => {
     expect(
       mirrored.map((t) => t.kind),
       '左のタブと対になる組み込みが増減した ── `tiles.ts` の注記とマニュアルも直す',
-    ).toEqual(['schedule', 'contacts', 'captures', 'graph', 'timers']);
+    ).toEqual(['schedule', 'contacts', 'captures', 'graph', 'timers', 'pc']);
     for (const t of mirrored) {
       const tab = BROWSE_ICONS[t.kind];
       /**
