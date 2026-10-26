@@ -3113,6 +3113,26 @@ export type UserAction =
    */
   | { type: 'SET_CSV_CELL'; lid: string; line: number; openLine: string; col: number; value: string }
   /**
+   * 🔴 **入力欄(` ```yaml form `)の値を、先頭の設定欄に書く**(#1456)。⚠ `SET_CSV_CELL` と同じ形:書換は 1 本
+   *   (`REQUEST_BODY_REWRITE` の `frontmatter`)を通り、面が独自の書込経路を持たない(§7)。
+   * ⚠ 鍵は `vars.<項目名>`(`{{vars.…}}` の差し込みが読む綴り)。値が `undefined` ならその行を消す(空の入力)。
+   */
+  | { type: 'SET_FORM_VALUES'; lid: string; values: Readonly<Record<string, string | number | boolean | undefined>> }
+  /**
+   * 🔴 **入力欄の値を表の行へ書く / 足す**(#1456)。⚠ `SET_CSV_CELL` と同じ形(断りも lid で判定)。
+   */
+  | {
+      type: 'SET_FORM_ROW';
+      lid: string;
+      table: string;
+      mode: 'add' | 'update';
+      row?: number;
+      /** 🔴 押した時点のその行の升(`SET_CSV_CELL` の `openLine` と同じ型)。更新のとき。 */
+      openRow?: readonly string[];
+      fields: ReadonlyArray<{ readonly name: string; readonly label: string }>;
+      cells: Readonly<Record<string, string>>;
+    }
+  /**
    * 🔴 **表の行・列を足す / 消す**(#418 段①)。⚠ `SET_CSV_CELL` と同じ形。
    */
   | {
@@ -8695,6 +8715,58 @@ function reduceCore(
               openLine: action.openLine,
               col: action.col,
               value: action.value,
+            },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **入力欄の値を先頭の設定欄へ**(#1456)。⚠ `SET_CSV_CELL` と同じ形(断りは lid で判定 ── C6 / #1043)。
+     */
+    case 'SET_FORM_VALUES': {
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `入力欄に打ってください`) }, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'form-vars', values: action.values },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **入力欄の値を表の行へ書く / 足す**(#1456)。⚠ `SET_CSV_CELL` と同じ形。
+     */
+    case 'SET_FORM_ROW': {
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `表に書いてください`) }, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: {
+              kind: 'form-row',
+              table: action.table,
+              mode: action.mode,
+              ...(action.row === undefined ? {} : { row: action.row }),
+              ...(action.openRow === undefined ? {} : { openRow: action.openRow }),
+              fields: action.fields,
+              cells: action.cells,
             },
           },
         ],

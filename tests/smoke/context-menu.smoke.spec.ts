@@ -714,7 +714,9 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
         '![ない](asset:ast-nosuch)\n\n' +
         // 🔴 html の囲み(#1044 段4)── 章の窓で高さ合わせが効くかを見るため(本体でしか受け手が
         //    無かったので、窓では高さ 0 の空の箱だった ── 着地前レビュー)
-        '```html\n<div style="height:120px">箱の中</div>\n```\n\n## 次回\n\n来週。\n',
+        '```html\n<div style="height:120px">箱の中</div>\n```\n\n' +
+        // 🔴 本文に埋め込んだ SQL の答え(#1223 の残り)── 章の窓にも答えの表が出る(見えるのを待たずに引く)
+        '```sql embed\nSELECT 41 + 1 AS 答え\n```\n\n## 次回\n\n来週。\n',
     );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toHaveText('議事録');
@@ -758,6 +760,11 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
   const chapterBody = chapterWin.locator('[data-pkc-field="chapter-window-body"]');
   await expect(chapterBody, '章の窓に章が出ていない').toContainText('牛乳を買う');
   await expect(chapterBody, '章の窓に前の章が混ざった').not.toContainText('前置き。');
+  // 🔴 SQL の答えが窓にも出る(別の document でも引いて描く ── #1223 の残り)。⧉ は付かない(受け手が無い)
+  await expect(
+    chapterBody.locator('[data-pkc-sql-embed] td'),
+    '章の窓に SQL の答えの表が出ない',
+  ).toHaveText('42', { timeout: 15_000 });
   await expect(chapterBody, '章の窓に次の章が混ざった').not.toContainText('来週。');
   await expect(chapterWin, '窓の題名が「ノート › 見出し」でない').toHaveTitle(/› 決定事項$/);
   // 🔴 頭の帯で「読むだけ」と言う(#1080)── 実物の窓で、出口の隣に見えている

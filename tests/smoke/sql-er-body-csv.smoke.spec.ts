@@ -71,6 +71,9 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
    */
   await page.keyboard.type('```sql embed\nSELECT 品名, 数 FROM 棚卸 ORDER BY 品名\n```\n');
   await page.keyboard.type('```sql\nSELECT 1\n```\n');
+  // 🔴 名前を付けない囲みも書く(#681 の残り ── 既定の表名 `csv` で引ける)。⚠ 新しい起動を増やさない(この道中に足す)。
+  //   ⚠ 答えの器より**後ろ**に置く ── 前に置くと 2 列の下見で答えの器が画面の外へ出て、見えるまで引かない(仕様)ので表が出ない
+  await page.keyboard.type('```csv\n品名,数\nぶどう,9\n```\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   /**
@@ -90,8 +93,9 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   // ⚠ csv の囲みだけを数える(下の埋め込みの答えも `<table>` で、描くのは見えたあと ──
   //   「本文の table」全部を数えると、答えが出たかどうかで数が変わる)
   const bodyTable = page.locator('[data-pkc-field="detail-body"] [data-pkc-render-lang="csv"] table');
-  await expect(bodyTable, '本文の csv が 2 つとも表になっていない(前提が崩れている)').toHaveCount(
-    2,
+  // ⚠ 3 つ = 名前つき(棚卸)+ 受けられない名前(だめ!)+ 名前なし(既定の表 csv で引ける。#681 の残り)
+  await expect(bodyTable, '本文の csv が 3 つとも表になっていない(前提が崩れている)').toHaveCount(
+    3,
     { timeout: 10_000 },
   );
   await expect(bodyTable.first()).toContainText('りんご');
@@ -271,6 +275,12 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   const sqlTable = page.locator('[data-pkc-field="sql-table"]');
   await expect(sqlTable, '本文の表から行が返らない').toBeVisible({ timeout: 10_000 });
   await expect(sqlTable).toContainText('りんご');
+
+  // 🔴 名前を付けない囲みは、既定の表 csv で引ける(#681 の残り)。⚠ 名前つき(棚卸)の行は混ざらない
+  await sqlInput.fill('select 品名, 数 from csv');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(sqlTable, '名前の無い csv が既定の表 csv で引けない').toContainText('ぶどう', { timeout: 10_000 });
+  await expect(sqlTable, '名前つきの表の行が csv に混ざった').not.toContainText('りんご');
 
   /**
    * ── ② 線が 0 本のとき、理由が出る(#918 段⑤d-3)。

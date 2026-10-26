@@ -20,6 +20,9 @@
 
 import { SQL_EMBED_ATTR } from '../markdown/sql-embed';
 
+/** 貼った SQL の答えの表が途中までのとき、表の下に添える 1 行。 */
+export const SQL_EMBED_PASTE_MORE = '(続きは元のノートで)';
+
 /** 掃除の結果。⚠ **落としたものを数えて返す**(黙って消さない)。 */
 export interface CleanResult {
   html: string;
@@ -104,6 +107,10 @@ export function cleanForClipboard(
     const mark = root.ownerDocument.createTextNode(box.hasAttribute('checked') || (box as HTMLInputElement).checked ? '☑' : '☐');
     box.replaceWith(mark);
   }
+  // 🔴 SQL の答えの「さらに N 行」は ① でボタンごと消えるので、続きがあることを先に控える(貼った表が全部だと読まれない)
+  for (const el of [...root.querySelectorAll(`[${SQL_EMBED_ATTR}]`)]) {
+    if (el.querySelector('[data-pkc-field="sql-embed-more"]') !== null) el.setAttribute('data-pkc-sql-more', '');
+  }
   // ① 操作子を落とす(押せないボタンを本文に混ぜない)。⚠ 綴りは上の 1 か所
   //    🔴 **押す器だけ**を消す ── 中身を持つ要素(csv の升)は残す(上の註記)
   for (const el of [...root.querySelectorAll(COPY_CHROME_SELECTOR)]) {
@@ -139,14 +146,28 @@ export function cleanForClipboard(
     removed += 1;
   }
   /**
-   * 🔴 **本文に埋め込んだ SQL の答えは貼らない**(#1223)。
+   * 🔴 **本文に埋め込んだ SQL の答えは、引けている表だけを貼る**(#1223。「コピーには結果が入らない」を直した)。
    *
-   * ⚠ 答えは**引いた時点の写し**で、貼り先では古くなっても誰も引き直せない。**原文の SQL は
-   *   コード枠として残る**(器の外にある)ので、貼った先でも「何を引いたか」は読める。
+   * ⚠ 答えは**引いた時点の写し**だが、貼るという操作自体が写しを取ることなので(本文の表も同じ)、
+   *   画面に出ている**表だけ**を貼る。メールや表計算へそのまま持っていける。
+   * ⚠ 「引いています…」・失敗の 1 行・「さらに N 行」・注記・「保存したときの結果」は貼らない
+   *   (器ごと外して、表だけを取り出す)。引けていない器は何も貼らない(原文の SQL はコード枠として残る)。
    */
   for (const el of [...root.querySelectorAll(`[${SQL_EMBED_ATTR}]`)]) {
-    el.remove();
-    removed += 1;
+    const table = el.getAttribute('data-pkc-sql-embed-state') === 'ready' ? el.querySelector('table') : null;
+    if (table === null) {
+      el.remove();
+      removed += 1;
+      continue;
+    }
+    const more = el.hasAttribute('data-pkc-sql-more');
+    el.replaceWith(table);
+    if (more) {
+      // 切れていることを貼り先にも残す(表だけだと、見えている行が全部に読める)
+      const note = root.ownerDocument.createElement('p');
+      note.textContent = SQL_EMBED_PASTE_MORE;
+      table.after(note);
+    }
   }
 
   /**

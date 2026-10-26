@@ -142,6 +142,52 @@ describe('貼る用の掃除', () => {
  * ⚠ 既に在る「隠してあるものを落とす」では届かない ── KaTeX が隠すのは
  *   `.katex-mathml` の中で、`[hidden]` でも `COPY_JUNK_CLASSES` でもない。
  */
+describe('本文に埋め込んだ SQL の答え(#1223)', () => {
+  const ready =
+    '<div data-pkc-sql-embed data-pkc-sql-embed-src="select 1" data-pkc-sql-embed-state="ready">' +
+    '<div class="pkc-md-block"><button type="button">⧉</button><table><thead><tr><th>n</th></tr></thead><tbody><tr><td>42</td></tr></tbody></table></div>' +
+    '<p data-pkc-field="sql-embed-saved">保存したときの結果</p><button type="button" data-pkc-field="sql-embed-more">さらに 3 行</button></div>';
+
+  it('🔴 引けている答えは表だけが貼られる(⧉・注記・「さらに N 行」は混ざらない)', () => {
+    const el = host(`<pre><code>select 1</code></pre>${ready}`);
+    const r = cleanForClipboard(el);
+    expect(r.html, '答えの表が貼られていない').toContain('<td>42</td>');
+    expect(r.html).not.toContain('保存したときの結果');
+    expect(r.html).not.toContain('さらに');
+    expect(r.html).not.toContain('⧉');
+    expect(r.html, '原文の SQL は残る').toContain('select 1');
+  });
+
+  it('🔴 「さらに N 行」の在る表には「(続きは元のノートで)」を添える / 全部出ている表には添えない(対照群)', () => {
+    const r = cleanForClipboard(host(`<div>${ready}</div>`));
+    expect(r.html).toContain('<td>42</td>');
+    expect(r.html).toContain('(続きは元のノートで)');
+    const all = ready.replace(/<button type="button" data-pkc-field="sql-embed-more">[^<]*<\/button>/u, '');
+    expect(all, '前提:対照群からボタンが外れていない').not.toContain('sql-embed-more');
+    expect(cleanForClipboard(host(all)).html).not.toContain('続きは元のノートで');
+  });
+
+  it('🔴 引き直し中の器(pending)に古い表が残っていても貼らない', () => {
+    const el = host(
+      '<div data-pkc-sql-embed data-pkc-sql-embed-state="pending"><div class="pkc-md-block"><table><tbody><tr><td>古い答え</td></tr></tbody></table></div></div>',
+    );
+    const r = cleanForClipboard(el);
+    expect(r.html).not.toContain('古い答え');
+    expect(r.html).not.toContain('<table');
+  });
+
+  it('引けていない器(引いています / 失敗)は何も貼らない', () => {
+    const el = host(
+      '<div data-pkc-sql-embed data-pkc-sql-embed-state="pending"><p>SQL を実行しています…</p></div>' +
+        '<div data-pkc-sql-embed data-pkc-sql-embed-state="failed"><p>失敗</p></div>',
+    );
+    const r = cleanForClipboard(el);
+    expect(r.html).not.toContain('実行しています');
+    expect(r.html).not.toContain('失敗');
+    expect(r.removed).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe('数式(#707)', () => {
   const katexish =
     '<span class="pkc-math" data-pkc-math-src="E = mc^2" data-pkc-math-display="0"' +

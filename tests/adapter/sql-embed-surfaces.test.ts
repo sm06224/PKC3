@@ -2,11 +2,12 @@
 /**
  * 🔴 **本文に埋め込んだ SQL(` ```sql embed `)の答えを出す面 / 出さない面**(#1223)。
  *
- * 決まっていること:答えを描くのは**読む面と 2 列の下見だけ**。1 画面編集・添付の説明・章の別
- * ウィンドウ・クリップボードは**原文のコード枠のまま**(表を出さない)。
+ * 決まっていること:答えを描くのは**読む面・2 列の下見・1 画面編集・添付の説明・章の別ウィンドウ**
+ * (当初は読む面と下見だけだったが、#1223 の残りとして 3 面にも広げた)。クリップボードは引けている
+ * 表だけを貼る(`tests/features/clipboard-html.test.ts`)。
  *
- * ⚠ 「出る」だけ見ると、**全部の面で出す**実装でも通る ── 出さない面を**同じ本文・同じ道具で**
- *   対にして見る(出る面で引く口が呼ばれ、出さない面では 1 度も呼ばれない)。
+ * ⚠ 「出る」だけ見ると、**全部の面で出す**実装でも通る ── 素の ` ```sql ` は**どの面でも**引かず、
+ *   器も無い対照群を置く(下の「① 読む面」の対照群 + 各面の対照)。
  * ⚠ 面は `markdown を描く所` を数え上げた 5 つ(`container-id-render.test.ts` の表)と同じ並び:
  *   ①読む面 ②2 列の下見 ③1 画面編集 ④添付の説明 ⑤章の別ウィンドウ(+ クリップボードは
  *   `tests/features/sql-embed.test.ts`)。
@@ -107,21 +108,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   localStorage.removeItem('pkc3.editor-mode');
 });
-
-/** 出さない面の共通の約束: 器は在るが空 / 原文のコード枠は読める / 引く口は 1 度も呼ばれない。 */
-async function expectOriginalOnly(scope: Element, face: string): Promise<void> {
-  const host = scope.querySelector(`[${SQL_EMBED_ATTR}]`);
-  expect(host, `${face}: 器が無い(前提が崩れている ── 描く側が置いていない)`).not.toBeNull();
-  seeAll();
-  await settle();
-  await settle();
-  expect(ran, `${face}: 答えを描かない面なのに引いた`).not.toHaveBeenCalled();
-  expect(host!.querySelector('table'), `${face}: 表が出た`).toBeNull();
-  expect(host!.childElementCount, `${face}: 器に何かが入った`).toBe(0);
-  expect(scope.querySelector('pre code.language-sql')!.textContent, `${face}: 原文が読めない`).toContain(
-    SQL,
-  );
-}
 
 describe('① 読む面 ── 答えが出る', () => {
   it('🔴 見えたら引いて、コード枠の下に表が出る(原文のコード枠も残る)', async () => {
@@ -268,8 +254,8 @@ describe('② 2 列の下見 ── 答えが出る', () => {
   });
 });
 
-describe('③ 1 画面編集 ── 原文のコード枠のまま', () => {
-  it('🔴 器は在るが空で、引かない', async () => {
+describe('③ 1 画面編集 ── 答えが出る', () => {
+  it('🔴 見えたら引いて、コード枠の下に表が出る(素の sql は引かない対照つき)', async () => {
     setLive(true);
     const detail = detailRenderer();
     detail.render(editing(BODY));
@@ -278,12 +264,17 @@ describe('③ 1 画面編集 ── 原文のコード枠のまま', () => {
     expect(pane, '1 画面編集の面が無い').not.toBeNull();
     // ⚠ 退避先(原文の入力欄)に落ちているときは主題を見ていない
     expect(pane.querySelector('textarea')).toBeNull();
-    await expectOriginalOnly(pane, '1 画面編集');
+    expect(pane.querySelector(`[${SQL_EMBED_ATTR}]`), '器が無い(前提)').not.toBeNull();
+    expect(ran, '見えていないのに引いた').not.toHaveBeenCalled();
+    seeAll();
+    await vi.waitFor(() => expect(pane.querySelector(`[${SQL_EMBED_ATTR}] td`)?.textContent).toBe('7'));
+    expect(ran).toHaveBeenCalledTimes(1);
+    expect(pane.querySelector('pre code.language-sql')!.textContent).toContain(SQL);
   });
 });
 
-describe('④ 添付の説明 ── 原文のコード枠のまま', () => {
-  it('🔴 器は在るが空で、引かない', async () => {
+describe('④ 添付の説明 ── 答えが出る', () => {
+  it('🔴 見えたら引いて、説明のコード枠の下に表が出る', async () => {
     const body =
       '---\nattachment.name: a.bin\nattachment.mime: application/octet-stream\n---\n' + BODY;
     const detail = detailRenderer();
@@ -291,11 +282,16 @@ describe('④ 添付の説明 ── 原文のコード枠のまま', () => {
     await settle();
     const desc = root.querySelector('.pkc-md-rendered[data-pkc-field="detail-body"]');
     expect(desc, '説明の面が無い').not.toBeNull();
-    await expectOriginalOnly(desc!, '添付の説明');
+    expect(desc!.querySelector(`[${SQL_EMBED_ATTR}]`), '器が無い(前提)').not.toBeNull();
+    expect(ran, '見えていないのに引いた').not.toHaveBeenCalled();
+    seeAll();
+    await vi.waitFor(() => expect(desc!.querySelector(`[${SQL_EMBED_ATTR}] td`)?.textContent).toBe('7'));
+    expect(ran).toHaveBeenCalledTimes(1);
+    expect(desc!.querySelector('pre code.language-sql')!.textContent).toContain(SQL);
   });
 });
 
-describe('⑤ 章の別ウィンドウ ── 原文のコード枠のまま', () => {
+describe('⑤ 章の別ウィンドウ ── 答えが出る(見えるのを待たずに引く / ⧉ は付けない)', () => {
   const CHAPTER_BODY = '# 一\n\nいち\n\n## 二\n\n```sql embed\n' + SQL + '\n```\n';
 
   function fakeWindow(): Window {
@@ -309,7 +305,7 @@ describe('⑤ 章の別ウィンドウ ── 原文のコード枠のまま', (
     } as unknown as Window;
   }
 
-  it('🔴 窓の中に器は在るが空で、引かない', async () => {
+  it('🔴 窓の中で答えの表が出る', async () => {
     vi.useFakeTimers();
     try {
       const win = fakeWindow();
@@ -332,11 +328,13 @@ describe('⑤ 章の別ウィンドウ ── 原文のコード枠のまま', (
       const host = win.document.querySelector(`[data-pkc-field="${CHAPTER_BODY_FIELD}"]`)!;
       expect(host, '章の窓の本文が無い').not.toBeNull();
       expect(host.querySelector(`[${SQL_EMBED_ATTR}]`), '器が無い(前提が崩れている)').not.toBeNull();
-      seeAll();
+      // ⚠ 別ウィンドウの要素は本体の観測器で「見えた」を取れる保証が無いので、見えるのを待たずに引く
       await vi.advanceTimersByTimeAsync(100);
-      expect(ran, '章の窓で引いた').not.toHaveBeenCalled();
-      expect(host.querySelector(`[${SQL_EMBED_ATTR}] table`)).toBeNull();
+      expect(ran, '章の窓で引いていない').toHaveBeenCalledTimes(1);
+      expect(host.querySelector(`[${SQL_EMBED_ATTR}] td`)?.textContent).toBe('7');
       expect(host.querySelector('pre code.language-sql')!.textContent).toContain(SQL);
+      // 受け手の無い ⧉ は付けない
+      expect(host.querySelector(`[${SQL_EMBED_ATTR}] [data-pkc-action]`)).toBeNull();
     } finally {
       vi.useRealTimers();
     }

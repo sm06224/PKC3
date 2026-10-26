@@ -46,6 +46,9 @@ import { copyButtonHtml } from '@features/markdown/markdown-render';
 import { watchVisible, type VisibleWatch } from './visible-watch';
 import { chordHint } from './shortcut-hint';
 
+/** 打っている途中の面で、SQL が止まってから引くまでの待ち(ms)。 */
+export const SQL_EMBED_TYPING_MS = 300;
+
 /** 引く口(`runReadOnlySql` と同じ形)。⚠ `guest` は無い ── 相手はこの PKC だけ。 */
 export type SqlEmbedRunner = (
   sql: string,
@@ -121,6 +124,14 @@ export function askSqlEmbed(src: string, alive: () => boolean = () => true): Pro
  * `sync` のたびに作らない(`mermaid-hydrate.ts` が 121 個作った失敗の再演を避ける)。
  */
 export class SqlEmbedHydrator {
+  /**
+   * @param opts.copyButton 答えの表に ⧉(コピー)を付けるか(既定 true)。⚠ 別ウィンドウ(章の窓)は
+   *   押した先の受け手が無いので付けない。
+   * @param opts.eager 見えるのを待たずに引くか(既定 false)。⚠ 別ウィンドウの要素は本体の観測器で
+   *   「見えた」を取れる保証が無いので、そこでは直ちに引く(直列の列は共通なので保存は待たせない)。
+   */
+  constructor(private readonly opts: { readonly copyButton?: boolean; readonly eager?: boolean } = {}) {}
+
   /** いまの鍵(本文)。⚠ `null` = まだ何も描いていない / 手放した後。 */
   private epoch: string | null = null;
   /** 鍵が変わる / 手放すたびに進む。⚠ 古い世代の答えは画面に当てない。 */
@@ -136,6 +147,8 @@ export class SqlEmbedHydrator {
   private readonly bound = new WeakSet<HTMLElement>();
   /** 🔴 答えに「保存したときの結果」を添える器(2 列の下見。#1254 §1)。⚠ `sync` のたびに根ごと決まる。 */
   private readonly savedNote = new WeakSet<HTMLElement>();
+  /** 🔴 打っている最中の面の器(引く前に {@link SQL_EMBED_TYPING_MS} 待つ)。 */
+  private readonly typing = new WeakSet<HTMLElement>();
   /** 器 → 「引いています」の 1 行を書いた世代。⚠ 手放した後も居座らせないための印。 */
   private readonly pendingLine = new WeakMap<HTMLElement, number>();
 
@@ -147,7 +160,7 @@ export class SqlEmbedHydrator {
    * @param savedNote 🔴 答えに「保存したときの結果」を添える(2 列の下見だけが立てる。#1254 §1)。
    *   ⚠ 下見の鍵は**編集に入った時点の保存済みの本文**なので、打っている最中の SQL の答えではない。
    */
-  sync(root: Element, epoch: string, savedNote = false): void {
+  sync(root: Element, epoch: string, savedNote = false, typing = savedNote): void {
     if (epoch !== this.epoch) {
       this.epoch = epoch;
       this.gen += 1;
@@ -163,6 +176,8 @@ export class SqlEmbedHydrator {
       // ⚠ 予約済みでも毎回決める(器はどちらか 1 つの根にしか居ない ── 面ごとに答えが変わる)
       if (savedNote) this.savedNote.add(host);
       else this.savedNote.delete(host);
+      if (typing) this.typing.add(host);
+      else this.typing.delete(host);
       if (this.scheduled.get(host) === epoch) continue;
       this.scheduled.set(host, epoch);
       this.observe(host);
@@ -181,7 +196,7 @@ export class SqlEmbedHydrator {
 
   private observe(host: HTMLElement): void {
     // ⚠ 観測器の無い環境(古い端末)では**見えるのを待たず**引く(出ないよりよい)
-    if (typeof IntersectionObserver !== 'function') {
+    if (this.opts.eager === true || typeof IntersectionObserver !== 'function') {
       this.go(host);
       return;
     }
@@ -195,6 +210,41 @@ export class SqlEmbedHydrator {
 
   private go(host: HTMLElement): void {
     if (this.epoch === null) return;
+    /**
+     * 🔴 **打っている途中の SQL は、300 ms 止まってから引く**(#1223 の残り。2 列の下見・1 画面編集)。
+     * ⚠ 直す前は打鍵のたびに「別の SQL」として引いていたので、`SELECT * FR` のような途中の字で
+     *   エラーの 1 行がちらついた。控え(同じ SQL の答え)が在るときは待たずに出す。
+     * ⚠ 読む面(保存済みの本文)は打たれないので待たない。待っている間に器が外れた / 世代が替わったら引かない。
+     */
+    const sql = host.getAttribute(SQL_EMBED_SRC_ATTR) ?? '';
+    if (this.typing.has(host) && !this.cache.has(sql)) {
+      const waitGen = this.gen;
+      // 待っている間も「引いています」は出す(空の器のときだけ。前の表は見せたまま)
+      this.showPending(host, waitGen);
+      setTimeout(() => {
+        if (waitGen !== this.gen || !host.isConnected) return;
+        this.run(host);
+      }, SQL_EMBED_TYPING_MS);
+      return;
+    }
+    this.run(host);
+  }
+
+  /**
+   * 🔴 **引いている間は 1 行出す**(#1254 §1)。⚠ **器が空のときだけ** ── 前の答えの表が
+   * 残っている器(同じ器を引き直すとき)は、新しい答えが来るまでその表を見せたままにする
+   * (一瞬 1 行に縮めると、下の本文が上下に揺れる)。
+   */
+  private showPending(host: HTMLElement, at: number): void {
+    host.setAttribute('data-pkc-sql-embed-state', 'pending');
+    if (this.pendingLine.has(host) || !host.hasChildNodes()) {
+      host.innerHTML = sqlEmbedPendingHtml();
+      this.pendingLine.set(host, at);
+    }
+  }
+
+  private run(host: HTMLElement): void {
+    if (this.epoch === null) return;
     const at = this.gen;
     const stale = (): boolean => at !== this.gen;
     const sql = host.getAttribute(SQL_EMBED_SRC_ATTR) ?? '';
@@ -203,16 +253,7 @@ export class SqlEmbedHydrator {
       answer = askSqlEmbed(sql, () => !stale());
       this.cache.set(sql, answer);
     }
-    host.setAttribute('data-pkc-sql-embed-state', 'pending');
-    /**
-     * 🔴 **引いている間は 1 行出す**(#1254 §1)。⚠ **器が空のときだけ** ── 前の答えの表が
-     * 残っている器(同じ器を引き直すとき)は、新しい答えが来るまでその表を見せたままにする
-     * (一瞬 1 行に縮めると、下の本文が上下に揺れる)。
-     */
-    if (this.pendingLine.has(host) || !host.hasChildNodes()) {
-      host.innerHTML = sqlEmbedPendingHtml();
-      this.pendingLine.set(host, at);
-    }
+    this.showPending(host, at);
     /** 手放した / 世代が変わったとき、**自分が書いた**「引いています」だけを消す(嘘にしない)。 */
     const dropPending = (): void => {
       if (this.pendingLine.get(host) !== at) return;
@@ -277,7 +318,7 @@ export class SqlEmbedHydrator {
      *   書き換える本文が無い。⚠ 並べ替えも付けない(上の註記)。
      * ⚠ 書き出し(`bakeSqlEmbeds`)は ⧉ を持たない(閲覧側に受け手が居ない)── 画面の器だけ。
      */
-    if (table !== null) {
+    if (table !== null && this.opts.copyButton !== false) {
       const block = host.ownerDocument.createElement('div');
       block.className = 'pkc-md-block';
       block.setAttribute('data-pkc-md-block-kind', 'table');

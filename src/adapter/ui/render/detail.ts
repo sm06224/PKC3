@@ -1875,6 +1875,11 @@ export class DetailRenderer {
          */
         interactiveCells: true,
         /**
+         * 🔴 **入力欄の定義(` ```yaml form `)を、打てる形で出す**(#1456)。⚠ **この面だけ**
+         *   (受け手 `form-save` ほかが居る面 ── 書き出した HTML・印刷・章の窓は値の表のまま)。
+         */
+        interactiveForms: true,
+        /**
          * 🔴 **コード枠に ✎ を出し、押せるようにする**(#1044 段3)。
          *
          * ⚠ **書ける窓だけ**(本体の読む面 / ノートの別ウィンドウ)── どちらも
@@ -3198,6 +3203,8 @@ export class DetailRenderer {
         void this.hydrateAssetRefs(els, this.hydrateToken, previewOpts);
         scopes.push(...hydrateFigures(els));
         this.pruneLends();
+        // 🔴 1 画面編集の塊にも SQL の答えを出す(#1223 の残り)。⚠ 鍵は編集に入った時点の本文(2 列の下見と同じ)
+        this.sqlEmbeds.sync(pane, initialBody, true);
       },
     });
     /**
@@ -3438,6 +3445,8 @@ export class DetailRenderer {
          * ⚠ 塊の差分(`swap.update`)で行数が 5,000 を跨いだら印を付け外しする(判定は `long-note.ts` の 1 本)。
          */
         syncLongNote(pane, body);
+        // 🔴 1 画面編集の塊にも SQL の答えを出す(#1223 の残り)。⚠ 鍵は編集に入った時点の本文(2 列の下見と同じ)
+        this.sqlEmbeds.sync(pane, initialBody, true);
       },
       (e) => {
         if (!pane.isConnected) return;
@@ -3876,6 +3885,8 @@ export class DetailRenderer {
       //    `hydrateMermaid` を呼んでおらず、**器が空のまま**残っていた ──
       //    「本文なら描けるのに、添付の説明だと描けない」という一貫性の穴
       this.mermaidScopes.push(...hydrateFigures(desc));
+      // 🔴 添付の説明にも SQL の答えを出す(#1223 の残り。「添付の説明では出ない」を直した)
+      this.sqlEmbeds.sync(desc, description);
     }
   }
 

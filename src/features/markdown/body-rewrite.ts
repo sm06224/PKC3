@@ -16,6 +16,7 @@ import {
   frontmatterLineCount,
   frontmatterProblem,
   parseFrontmatter,
+  removeNestedVar,
   spliceFrontmatterKeys,
   type FrontmatterValue,
 } from './frontmatter';
@@ -64,6 +65,7 @@ import { TASK_LINE } from './task-line';
 import { hiddenTaskMask } from './task-hidden';
 import { cutLines, insertLines, moveLines, type InsertAnchor, type MoveLines } from './line-move';
 import { gfmCellText } from './html-to-markdown';
+import { planFormRow, type FormColumn } from './form-table';
 import {
   convertTable,
   fencesBelowFrontmatter,
@@ -132,6 +134,37 @@ export type BodyRewrite =
       lines: readonly string[];
       /** 足した位置(行、0 起点)。⚠ 在ればそこを先に見る(#1087)。無ければ従来どおり後ろの一致。 */
       at?: number;
+    }
+  | {
+      /**
+       * 🔴 **入力欄の値を先頭の設定欄の `vars.<項目名>` へ書く**(#1456)。
+       *
+       * ⚠ `frontmatter` の鍵書きでは足りない ── 空にした項目は、平らな行を消すだけでなく、手書きの入れ子 `vars:` の
+       *   同じ名前の行も消す(消さないと、空にしたのに値が戻って見える)。
+       */
+      kind: 'form-vars';
+      values: Readonly<Record<string, FrontmatterValue | undefined>>;
+    }
+  | {
+      /**
+       * 🔴 **入力欄の値を表の行へ書く / 行を足す**(#1456)。
+       *
+       * > user の物語:入力欄に打った日報を、押した 1 回で ` ```csv name=日報一覧 ` の表の末尾に足したい
+       * > (または N 行目を書き換えたい)。
+       *
+       * ⚠ 範囲も升の書き方も `form-table.ts` が原文から引く(その行だけ。別の表・別の行は 1 バイトも動かない)。
+       *   断る理由は binder が同じ関数で先に言う ── ここへ来て断られる(`null`)のは、押した後に本文が動いた回だけ。
+       */
+      kind: 'form-row';
+      table: string;
+      mode: 'add' | 'update';
+      /** 更新のとき、データ行の番号(1 始まり)。 */
+      row?: number;
+      /** 更新のとき、押した時点のその行の升(`csv-cell` の `openLine` と同じ型。食い違えば断る)。 */
+      openRow?: readonly string[];
+      fields: readonly FormColumn[];
+      /** 項目名 → 値。 */
+      cells: Readonly<Record<string, string>>;
     }
   | {
       kind: 'frontmatter';
@@ -1071,6 +1104,32 @@ function syncBodyTagsKey(body: string): string {
 }
 
 export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | null {
+  if (rewrite.kind === 'form-vars') {
+    let next = body;
+    const keys: Record<string, FrontmatterValue | undefined> = {};
+    for (const [name, v] of Object.entries(rewrite.values)) {
+      if (v === undefined) next = removeNestedVar(next, name);
+      keys[`vars.${name}`] = v;
+    }
+    next = spliceFrontmatterKeys(next, keys);
+    return next === body ? null : next;
+  }
+  if (rewrite.kind === 'form-row') {
+    const plan = planFormRow(
+      body,
+      rewrite.mode === 'add'
+        ? { mode: 'add', table: rewrite.table, fields: rewrite.fields, cells: rewrite.cells }
+        : {
+            mode: 'update',
+            table: rewrite.table,
+            fields: rewrite.fields,
+            cells: rewrite.cells,
+            row: rewrite.row ?? 0,
+            ...(rewrite.openRow === undefined ? {} : { openRow: rewrite.openRow }),
+          },
+    );
+    return plan.ok && plan.body !== body ? plan.body : null;
+  }
   if (rewrite.kind === 'frontmatter') {
     const next = spliceFrontmatterKeys(body, rewrite.keys);
     return next === body ? null : next;

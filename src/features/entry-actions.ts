@@ -394,6 +394,16 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'export-entry-markdown', label: 'Markdown で書き出す', group: 'export' },
   /**
+   * 🔴 **メールに貼れる下書き**(#1459 段②「コピペしてすぐ送れるメール下書き」)。
+   *
+   * 本文を、`##` や `**` や `|---|` の記号が混ざらない読める字にして、件名つきでクリップボードへ入れる。
+   * 別のノートの章の参照(`![](entry:…#h/…)`)は中身に展開し、`{{vars.…}}` と入力欄の値は差し込んだ字で出る。
+   * ⚠ 書き出し(file)ではなく**コピー**なので、同じ「書き出す」の群れに置くが字は「コピー」と言う
+   *   (押しても file は落ちない ── 他の 6 つと取り違えない)。
+   * ⚠ 種類で絞らない(`when` なし)── 全部のノートの本文は Markdown である。
+   */
+  { action: 'copy-entry-mail', label: 'メール下書きをコピー', group: 'export' },
+  /**
    * 🔴 **開いた元ファイルが在るときだけ出す**(#500 案 C)。
    *
    * ⚠ これは**上書き**である ── 上の書き出し 5 つと違って新しい file を作らない。
@@ -935,6 +945,8 @@ export function headingMenuActions(ctx: {
    *   user は「章」と呼ばない。判定は `isLogRowHeading` 1 本。省略可(古い呼び側は「章」のまま)。
    */
   readonly logRow?: boolean;
+  /** 🔴 この章に添付(`asset:`)の参照が在るか(#677)。真のときだけ「添付ごとコピー」を出す。省略 = 無い。 */
+  readonly assets?: boolean;
 }): readonly EntryAction[] {
   const out: EntryAction[] = [];
   if (ctx.sectionEditable) out.push({ action: 'edit-section', label: 'この章を編集する' });
@@ -952,6 +964,8 @@ export function headingMenuActions(ctx: {
      *   (出しても押して何も起きない口になる)。
      */
     out.push({ action: 'copy-chapter-md', label: 'この章をコピー' });
+    // 🔴 添付(画像)つきの章は、別の PKC へ貼っても絵が出る形でもコピーできる(#677 の残り)
+    if (ctx.assets === true) out.push({ action: 'copy-chapter-md-assets', label: 'この章を添付ごとコピー' });
   }
   // 🔴 章の参照(#579)── 畳めるかとは無関係(引用や `:::` の中の見出しにも id は刻まれる)
   if (ctx.linkable) {
@@ -1014,8 +1028,15 @@ export function blockMenuActions(ctx: {
   readonly front?: boolean;
   /** 🔴 既にいちばん後ろの付箋か(依頼 118-1)。真なら「後ろへ送る」を出さない(`front` と対)。省略 = 出す。 */
   readonly back?: boolean;
+  /** 🔴 この塊に添付(`asset:`)の参照が在るか(#677)。真のときだけ「添付ごとコピー」を出す。省略 = 無い。 */
+  readonly assets?: boolean;
 }): readonly EntryAction[] {
-  if (!ctx.board) return [{ action: 'copy-block-md', label: 'このブロックをコピー' }];
+  if (!ctx.board) {
+    return [
+      { action: 'copy-block-md', label: 'このブロックをコピー' },
+      ...(ctx.assets === true ? [{ action: 'copy-block-md-assets', label: 'このブロックを添付ごとコピー' }] : []),
+    ];
+  }
   /**
    * 🔴 **板だけの物**(#676。user 裁定 2026-09-04)── 置けるなら消せる(user 指示
    *   2026-08-23「片道の操作を作らない」)。⚠ 消すと中の字が本文から消える(履歴には積まれる)ので**確認を挟む**
@@ -1023,6 +1044,7 @@ export function blockMenuActions(ctx: {
    */
   return [
     { action: 'copy-block-md', label: 'この付箋をコピー' },
+    ...(ctx.assets === true ? [{ action: 'copy-block-md-assets', label: 'この付箋を添付ごとコピー' }] : []),
     // 🔴 前へ出す(#676 段②)と後ろへ送る(依頼 118-1)。⚠ 戻すのに他の付箋を 1 枚ずつ前へ出し直さなくて済む。
     //    どちらも既にその端なら出さない(押しても本文が変わらない口を作らない)
     ...(ctx.front === true ? [] : [{ action: 'raise-place', label: '前へ出す' }]),
@@ -1522,6 +1544,9 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   // ⚠ **起きることと、入らない物を先に言う**(押してから「添付が無い」と思わせない)
   'export-entry-markdown':
     '本文をそのまま .md ファイルで保存します。添付は入りません(バックアップなら入ります)',
+  // 🔴 **起きることを先に言う**(user 指示 2026-08-21)── file は落ちず、クリップボードへ入る。送るのは user
+  'copy-entry-mail':
+    '件名と本文を、メールに貼れる字にしてコピーします。別のノートの章は中身に展開されます',
   'export-entry-docx':
     'Word 文書(.docx)で保存します。取り込み直せません(画像も、図はベクタで、グラフは絵で入ります)',
   // ⚠ **切れ方を先に言う**(user 指示 2026-08-21「画面で何が起きるかで書く」)──
@@ -1649,6 +1674,8 @@ export const FOLDER_EXPORT_BLOCKED_ACTIONS: ReadonlySet<string> = new Set([
   'export-entry-pptx',
   'export-entry-pdf',
   'export-entry-markdown',
+  // 🔴 メール下書きも同じ(#1459 段②)── フォルダ自身の説明文しか入らない
+  'copy-entry-mail',
 ]);
 
 export const FOLDER_EXPORT_NOTE = 'フォルダの中のノートは入りません。1 件ずつ選んでから書き出してください';

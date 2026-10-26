@@ -1287,3 +1287,43 @@ export function spliceFrontmatterKeys(
   }
   return `${open}${fmParts.join('')}${rest}`;
 }
+
+/**
+ * 🔴 **手書きの入れ子 `vars:` の中の 1 つの値の行を消す**(#1456)。
+ *
+ * 入力欄は `vars.名前:` の平らな行を書く(`extractVars` は平らな行を優先して読む)。ところが元から
+ * `vars:` の下に字下げして書かれた値は、入力欄を空にして平らな行を消しても**読まれ続ける**
+ * (消したのに戻る)。だから空にするときは入れ子の側の行も消す。
+ * ⚠ 子が 1 つも残らなければ `vars:` の行ごと消す。⚠ 見つからなければ本文をそのまま返す。
+ */
+export function removeNestedVar(body: string, name: string): string {
+  const count = frontmatterLineCount(body);
+  if (count < 2) return body;
+  const lines = body.split('\n');
+  if (!/^---\s*$/u.test((lines[0] ?? '').replace(/\r$/u, ''))) return body;
+  const end = count - 1; // 閉じの行(排他)
+  let head = -1;
+  for (let i = 1; i < end; i += 1) {
+    if (/^vars\s*:\s*$/u.test((lines[i] ?? '').replace(/\r$/u, ''))) {
+      head = i;
+      break;
+    }
+  }
+  if (head < 0) return body;
+  const childRe = new RegExp(`^(\\s+)(${VAR_NAME_SOURCE})\\s*:`, 'u');
+  let hit = -1;
+  let remaining = 0;
+  let j = head + 1;
+  for (; j < end; j += 1) {
+    const raw = (lines[j] ?? '').replace(/\r$/u, '');
+    if (raw.trim() === '' || /^\s+#/u.test(raw)) continue;
+    const m = childRe.exec(raw);
+    if (m === null) break;
+    if (m[2] === name) hit = j;
+    else remaining += 1;
+  }
+  if (hit < 0) return body;
+  lines.splice(hit, 1);
+  if (remaining === 0) lines.splice(head, 1);
+  return lines.join('\n');
+}

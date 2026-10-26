@@ -38,6 +38,7 @@ import { settleJump } from '../render/long-note';
 import { insideCodeOrMath } from '@features/markdown/code-context';
 import { lineStart } from '@features/markdown/line-start';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
+import { assetRefsOf, carryAssets, hasAssetRefs } from '@features/asset/carry-assets';
 import {
   tableAt,
   tableConvertRefusal,
@@ -217,7 +218,9 @@ import { chooseTagBadge } from '@adapter/ui/render/tag-badge';
 import { currentTagColor } from '@adapter/ui/render/tag-color';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
 import { appendModeOf } from '@adapter/ui/render/append-box';
-import { bodyBelowFrontmatter, frontmatterLineCount } from '@features/markdown/frontmatter';
+import { bodyBelowFrontmatter, extractVars, frontmatterLineCount } from '@features/markdown/frontmatter';
+import { isCheckedValue } from '@features/markdown/form-def';
+import { formRowCells, loadFormRow, planFormRow, type FormColumn } from '@features/markdown/form-table';
 import {
   ENTRY_PICK_LIMIT,
   type EntryPickRow,
@@ -2544,6 +2547,11 @@ export interface BinderServices {
    */
   exportEntryMarkdown?(lid: string): void;
   /**
+   * 🔴 **メール下書きをコピーする**(#1459 段②)。⚠ 解決規則は隣の `exportEntryMarkdown` と同じ lid。
+   *   読む・展開する・字にする・コピーする、は `export-archive.ts` の `copyEntryMailDraft` が持つ。
+   */
+  copyEntryMail?(lid: string): void;
+  /**
    * 🔴 **このノートを別の窓で開く**(#685 段②、user 裁定 2026-09-04)。
    *
    * > 「**マルチで付箋開けるといいかもね**」(利用者の感想 2026-09-04)
@@ -3159,6 +3167,12 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'save-code-draft',
   'commit-edit',
   'append-entry',
+  // 🔑 入力欄(` ```yaml form `。#1456)の保存と、表の行への書き / 表からの読み込みも**本文を書く**
+  //    (実体は `SET_FORM_VALUES` / `SET_FORM_ROW`)── 取込・書出しの最中に走らせない
+  'form-save',
+  'form-row-add',
+  'form-row-update',
+  'form-row-load',
   // 🔑 板の付箋の上の追記 / 題名(#529 W5)── `append-entry` と同じ書込なので同じ門
   'place-inline-commit',
   // ⚠ 選んだ全部の本文を書く(#402 ①)── 取込・書出しの最中に走らせない
@@ -5386,6 +5400,87 @@ function directiveBlockAt(
 }
 
 /**
+ * 🔴 **入力欄(` ```yaml form `)の DOM から値を読む**(#1456)。
+ *
+ * ⚠ 定義(YAML)は持ち回らない ── 描画が各欄に焼いた `data-pkc-form-field`(項目名)/ `-label` / `-type` /
+ *   `-required` を読む(読む側と書く側で定義の読み方を 2 つ持たない)。
+ * @returns `cells` は表の升に書く字(項目名 → 字。チェックは true/false)。`values` は設定欄へ書く値
+ *   (空は `undefined` = その行を消す)。`missing` は必須で空の項目の表示名。
+ */
+function readFormInputs(form: HTMLElement): {
+  fields: FormColumn[];
+  cells: Record<string, string>;
+  values: Record<string, string | number | boolean | undefined>;
+  missing: string[];
+} {
+  const fields: FormColumn[] = [];
+  const cells: Record<string, string> = {};
+  const values: Record<string, string | number | boolean | undefined> = {};
+  const missing: string[] = [];
+  for (const el of form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('[data-pkc-form-field]')) {
+    const name = el.getAttribute('data-pkc-form-field') ?? '';
+    if (name === '') continue;
+    const label = el.getAttribute('data-pkc-form-label') ?? name;
+    const type = el.getAttribute('data-pkc-form-type') ?? 'text';
+    fields.push({ name, label });
+    if (type === 'checkbox') {
+      const on = (el as HTMLInputElement).checked;
+      cells[name] = on ? 'true' : 'false';
+      values[name] = on;
+      if (!on && el.getAttribute('data-pkc-form-required') === 'true') missing.push(label);
+      continue;
+    }
+    const raw = el.value;
+    cells[name] = raw;
+    if (raw === '') {
+      values[name] = undefined;
+      if (el.getAttribute('data-pkc-form-required') === 'true') missing.push(label);
+    } else if (type === 'number' && String(Number(raw)) === raw.trim()) {
+      // 🔴 書き戻して同じ字になる数だけ数にする(`007` や `1e3` は数にすると別の字になる ── 字のまま残す)
+      values[name] = Number(raw);
+    } else {
+      values[name] = raw;
+    }
+  }
+  return { fields, cells, values, missing };
+}
+
+/** 入力欄の持ち主のノートと本文。⚠ 開いているノートの入力欄だけ(横に留めた別ノートの入力欄は断る)。 */
+function formOwner(
+  dispatcher: Dispatcher,
+  target: Element,
+): { lid: string; body: string; form: HTMLElement; table: string } | null {
+  const form = target.closest<HTMLElement>('[data-pkc-form]');
+  if (form === null) return null;
+  const st = dispatcher.getState();
+  const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
+  if (lid === null || lid === undefined) return null;
+  if (st.openBody?.lid !== lid) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: '入力欄に打てるのは、開いているノートだけです(このノートを開いてから入力してください)',
+    });
+    return null;
+  }
+  return { lid, body: st.openBody.body, form, table: form.getAttribute('data-pkc-form-table') ?? '' };
+}
+
+const FORM_ELSEWHERE_FAILED = '入力できませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください';
+
+/** 設定欄の `vars.<項目名>` の現在値と、入力欄の値が全部同じか。 */
+function sameAsVars(body: string, values: Record<string, string | number | boolean | undefined>): boolean {
+  const vars = extractVars(body);
+  return Object.entries(values).every(([k, v]) => (v === undefined ? '' : String(v)) === (vars[k] ?? ''));
+}
+
+/** 入力欄の行の番号の欄(1 始まり)。無い / 読めないときは `null`。 */
+function formRowNo(form: HTMLElement): number | null {
+  const raw = form.querySelector<HTMLInputElement>('[data-pkc-form-rowno]')?.value ?? '';
+  const n = Number(raw);
+  return raw.trim() !== '' && Number.isInteger(n) && n >= 1 ? n : null;
+}
+
+/**
  * 原文の行範囲をクリップボードへ写す(章 / 塊のコピー共通。#677)。
  * ⚠ 結果の字は `copyText` に渡す(押しても画面が変わらない操作なので、黙って終えない)。
  */
@@ -5401,6 +5496,90 @@ function copySourceLines(
     return;
   }
   services.copyText(sliceLines(fmBody, span), done);
+}
+
+/** 添付ごとコピーが運ぶ画像の合計の上限(バイト)。⚠ 字にして貼るので、超えたら断る。 */
+const CARRY_ASSETS_MAX_BYTES = 24 * 1024 * 1024;
+
+/** Blob を `data:` の字にする。 */
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result));
+    fr.onerror = () => reject(fr.error ?? new Error('read failed'));
+    fr.readAsDataURL(blob);
+  });
+}
+
+/**
+ * 🔴 **原文の行範囲を、添付(画像)ごと写す**(#677 の残り)。
+ *
+ * 画像の `asset:<key>` を `data:` の字に置き換えて写す ── 別の PKC へ貼ると、貼る側の既存の取り込み
+ * (`data:` を添付へ逃がす。#251)が働いて、その入れ物の添付になる。同じ入れ物へ貼っても動く(同じ画像は
+ * 貼り先で重ねて取り込まれる)。⚠ 画像でない添付の参照は運べないので元のまま残し、その件数を言う。
+ * ⚠ 読めなかった画像も元のまま残す(黙って消さない)。合計が上限を超えるときは写さずに断る。
+ */
+async function copySourceLinesWithAssets(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  fmBody: string,
+  span: { readonly start: number; readonly end: number },
+  what: string,
+): Promise<void> {
+  if (services.copyText === undefined) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
+    return;
+  }
+  const text = sliceLines(fmBody, span);
+  const refs = assetRefsOf(text);
+  if (services.readAssetBlob === undefined || refs.images.length === 0) {
+    services.copyText(
+      text,
+      refs.others > 0
+        ? `${what}をコピーしました(画像ではない添付 ${String(refs.others)} 件は運べないので、元の参照のままです)`
+        : `${what}をコピーしました(運ぶ画像はありませんでした)`,
+    );
+    return;
+  }
+  const urls = new Map<string, string>();
+  let total = 0;
+  let missed = 0;
+  let notImage = 0;
+  for (const key of refs.images) {
+    let blob: Blob | null;
+    try {
+      blob = await services.readAssetBlob(key);
+    } catch {
+      blob = null;
+    }
+    if (blob === null) {
+      missed += 1;
+      continue;
+    }
+    // 🔴 画像でない実体は data: にしない(貼る側の取り込みが画像だけを受ける ── 運べない物は元の参照のまま、件数で言う)
+    if (!blob.type.startsWith('image/')) {
+      notImage += 1;
+      continue;
+    }
+    total += blob.size;
+    if (total > CARRY_ASSETS_MAX_BYTES) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `画像が大きすぎて、添付ごとはコピーできません(合計 ${humanBytes(CARRY_ASSETS_MAX_BYTES)} まで)。ふつうのコピーは使えます`,
+      });
+      return;
+    }
+    urls.set(key, await blobToDataUrl(blob));
+  }
+  const notes: string[] = [];
+  if (missed > 0) notes.push(`読めなかった画像 ${String(missed)} 件は元の参照のまま`);
+  if (refs.others + notImage > 0) {
+    notes.push(`画像ではない添付 ${String(refs.others + notImage)} 件は運べないので元の参照のまま`);
+  }
+  services.copyText(
+    carryAssets(text, urls),
+    `${what}を画像 ${String(urls.size)} 件ごとコピーしました(別の PKC3 へ貼ると、画像も取り込まれます)${notes.length === 0 ? '' : `。${notes.join('、')}`}`,
+  );
 }
 
 /**
@@ -11489,6 +11668,141 @@ const ACTIONS: Record<string, ActionHandler> = {
       );
     });
   },
+  /**
+   * 🔴 **入力欄の値を、そのノートの先頭の設定欄に保存する**(#1456)。
+   * 書くのは `vars.<項目名>`(`{{vars.…}}` の差し込みが読む綴り)。空の欄はその行を消す(双方向)。
+   * 書込は `SET_FORM_VALUES` → `REQUEST_BODY_REWRITE` の 1 本(§7)。
+   */
+  'form-save': (dispatcher, target, services) => {
+    const owner = formOwner(dispatcher, target);
+    if (owner === null) return;
+    const { values } = readFormInputs(owner.form);
+    if (Object.keys(values).length === 0) return;
+    const blocked = bodyWriteBlockReason(dispatcher.getState(), owner.lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `入力してください`) });
+      return;
+    }
+    if (sameAsVars(owner.body, values)) {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: '入力欄に変更はありません' });
+      return;
+    }
+    actUnlessEditedElsewhere(dispatcher, services, [owner.lid], FORM_ELSEWHERE_FAILED, () =>
+      dispatcher.dispatch({ type: 'SET_FORM_VALUES', lid: owner.lid, values }),
+    );
+  },
+  /**
+   * 🔴 **いまの入力を、連携先の表(` ```csv name=… `)の末尾に 1 行足す**(#1456)。表が無ければ項目名を見出しにして作る。
+   * ⚠ 断る理由は `planFormRow`(書く側と同じ関数)で先に言う ── 押した後に黙って何も起きない形を作らない。
+   */
+  'form-row-add': (dispatcher, target, services) => {
+    const owner = formOwner(dispatcher, target);
+    if (owner === null) return;
+    if (owner.table === '') return;
+    const { fields, cells, missing } = readFormInputs(owner.form);
+    if (missing.length > 0) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `必須の項目が未入力です: ${missing.join('、')}` });
+      return;
+    }
+    const blocked = bodyWriteBlockReason(dispatcher.getState(), owner.lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `表に書いてください`) });
+      return;
+    }
+    const plan = planFormRow(owner.body, { mode: 'add', table: owner.table, fields, cells });
+    if (!plan.ok) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: plan.why });
+      return;
+    }
+    actUnlessEditedElsewhere(dispatcher, services, [owner.lid], FORM_ELSEWHERE_FAILED, () =>
+      dispatcher.dispatch({ type: 'SET_FORM_ROW', lid: owner.lid, table: owner.table, mode: 'add', fields, cells }),
+    );
+  },
+  /** 🔴 **指定した行を、いまの入力で書き換える**(#1456)。入力欄に無い列は元の升のまま。 */
+  'form-row-update': (dispatcher, target, services) => {
+    const owner = formOwner(dispatcher, target);
+    if (owner === null) return;
+    if (owner.table === '') return;
+    const row = formRowNo(owner.form);
+    if (row === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '更新する行の番号(1 から)を「行」の欄に入れてください' });
+      return;
+    }
+    const { fields, cells, missing } = readFormInputs(owner.form);
+    if (missing.length > 0) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `必須の項目が未入力です: ${missing.join('、')}` });
+      return;
+    }
+    const blocked = bodyWriteBlockReason(dispatcher.getState(), owner.lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `表に書いてください`) });
+      return;
+    }
+    // 🔴 いま画面が見ている行(押した時点)を運ぶ ── 書く側が disk の行と照合し、食い違えば断る
+    const openRow = formRowCells(owner.body, owner.table, row) ?? undefined;
+    const plan = planFormRow(owner.body, { mode: 'update', table: owner.table, fields, cells, row, ...(openRow === undefined ? {} : { openRow }) });
+    if (!plan.ok) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: plan.why });
+      return;
+    }
+    if (plan.body === owner.body) {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: `行 ${String(row)} は既にその内容です` });
+      return;
+    }
+    actUnlessEditedElsewhere(dispatcher, services, [owner.lid], FORM_ELSEWHERE_FAILED, () =>
+      dispatcher.dispatch({
+        type: 'SET_FORM_ROW',
+        lid: owner.lid,
+        table: owner.table,
+        mode: 'update',
+        row,
+        ...(openRow === undefined ? {} : { openRow: [...openRow] }),
+        fields,
+        cells,
+      }),
+    );
+  },
+  /** 🔴 **表の指定した行を、入力欄へ読み込む**(#1456)。設定欄の `vars.…` に書く(保存と同じ道)。 */
+  'form-row-load': (dispatcher, target, services) => {
+    const owner = formOwner(dispatcher, target);
+    if (owner === null) return;
+    if (owner.table === '') return;
+    const row = formRowNo(owner.form);
+    if (row === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '読み込む行の番号(1 から)を「行」の欄に入れてください' });
+      return;
+    }
+    const { fields } = readFormInputs(owner.form);
+    const got = loadFormRow(owner.body, owner.table, row, fields);
+    if (!got.ok) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: got.why });
+      return;
+    }
+    const types = new Map<string, string>();
+    for (const el of owner.form.querySelectorAll<HTMLElement>('[data-pkc-form-field]')) {
+      types.set(el.getAttribute('data-pkc-form-field') ?? '', el.getAttribute('data-pkc-form-type') ?? 'text');
+    }
+    const values: Record<string, string | number | boolean | undefined> = {};
+    for (const [name, cell] of Object.entries(got.cells)) {
+      const type = types.get(name) ?? 'text';
+      if (type === 'checkbox') values[name] = isCheckedValue(cell);
+      else if (cell === '') values[name] = undefined;
+      else if (type === 'number' && String(Number(cell)) === cell.trim()) values[name] = Number(cell);
+      else values[name] = cell;
+    }
+    const blocked = bodyWriteBlockReason(dispatcher.getState(), owner.lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `読み込んでください`) });
+      return;
+    }
+    if (sameAsVars(owner.body, values)) {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: `行 ${String(row)} は既に入力欄と同じ内容です` });
+      return;
+    }
+    actUnlessEditedElsewhere(dispatcher, services, [owner.lid], FORM_ELSEWHERE_FAILED, () =>
+      dispatcher.dispatch({ type: 'SET_FORM_VALUES', lid: owner.lid, values }),
+    );
+  },
   'toggle-task': (dispatcher, target, services, root) => {
     const raw = target.getAttribute('data-pkc-task-line');
     const line = Number(raw);
@@ -12475,6 +12789,29 @@ const ACTIONS: Record<string, ActionHandler> = {
     copySourceLines(dispatcher, services, fmBody, span, '章をコピーしました(Markdown の原文)');
   },
   /**
+   * 🔴 **その章を、添付(画像)ごと写す**(#677 の残り)。範囲は `copy-chapter-md` と同じ。
+   * ⚠ 見出しが引けなければ理由を出す(押した瞬間にメニューは畳まれるので、黙ると dead click)。
+   */
+  'copy-chapter-md-assets': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+    const heading = host === null ? null : headingAtSourceLine(host, line);
+    const ob = dispatcher.getState().openBody;
+    if (host === null || heading === null || ob === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '章の範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const fmBody = bodyBelowFrontmatter(ob.body);
+    const span = chapterSpanOf(host, heading, fmBody.split('\n').length);
+    if (span === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '章の範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    void copySourceLinesWithAssets(dispatcher, services, fmBody, span, '章');
+  },
+  /**
    * 🔴 **その章を指すリンクを写す**(#579。user 裁定 2026-09-04)。
    *
    * 貼れる 1 行は `[題名 / 見出し](entry:<lid>#h/<見出しの id>)`。押すと相手のノートを開いて
@@ -12593,6 +12930,35 @@ const ACTIONS: Record<string, ActionHandler> = {
       fmBody,
       span,
       board ? '付箋をコピーしました(Markdown の原文)' : 'ブロックをコピーしました(Markdown の原文)',
+    );
+  },
+  /**
+   * 🔴 **`:::` の塊(囲み / 板)を、添付(画像)ごと写す**(#677 の残り)。範囲・断りは `copy-block-md` と同じ
+   * (板の座標は開き行にあるのでそのまま運ぶ)。
+   */
+  'copy-block-md-assets': (dispatcher, target, services) => {
+    const line = menuCarriedBlock(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    const fmBody = ob === null ? null : bodyBelowFrontmatter(ob.body);
+    const span = fmBody === null ? null : blockSpanAt(fmBody, line);
+    if (fmBody === null || span === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ブロックの範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    if (span.open) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'このブロックは閉じていないのでコピーできません(閉じの ::: を足してください)',
+      });
+      return;
+    }
+    void copySourceLinesWithAssets(
+      dispatcher,
+      services,
+      fmBody,
+      span,
+      isPlaceOpen(fmBody.split('\n')[line] ?? '') ? '付箋' : 'ブロック',
     );
   },
   /**
@@ -16068,6 +16434,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
     const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.exportEntryHtml?.(lid);
+  },
+  'copy-entry-mail': (dispatcher, target, services) => {
+    // 🔴 解決規則は隣の `export-entry-markdown` と**同じ**(#877)
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
+    if (lid) services.copyEntryMail?.(lid);
   },
   'export-entry-markdown': (dispatcher, target, services) => {
     // 🔴 解決規則は隣の `export-entry-html` と**同じ**(#877)── 揃えないと「A を書き出して B を削除する」が成立する
@@ -20397,6 +20768,20 @@ export function bindActions(
        *   書き換える側(`body-rewrite.ts`)と**別の答えを持つ口が 2 つ**になる(§7)。
        * ⚠ 表でなければ 1 つも足さない(押しても何も起きない口を作らない)。
        */
+      /**
+       * 🔴 **章 / 塊に添付の参照が在るか**(#677 の残り)── 在るときだけ「添付ごとコピー」を足す。
+       * ⚠ 範囲は押したときの受け手と同じ関数(`chapterSpanOf` / `blockSpanAt`)で引く。
+       */
+      const fmForCarry = ob === null ? null : bodyBelowFrontmatter(ob.body);
+      const chapterSpan =
+        heading !== null && host !== null && fmForCarry !== null && heading.parentElement === host
+          ? chapterSpanOf(host, heading, fmForCarry.split('\n').length)
+          : null;
+      const chapterAssets =
+        chapterSpan !== null && fmForCarry !== null && hasAssetRefs(sliceLines(fmForCarry, chapterSpan));
+      const blockSpan = block === null || fmForCarry === null ? null : blockSpanAt(fmForCarry, block.line);
+      const blockAssets =
+        blockSpan !== null && fmForCarry !== null && !blockSpan.open && hasAssetRefs(sliceLines(fmForCarry, blockSpan));
       const tableLine = tableLineAt(target, ob?.body ?? null);
       const table = tableLine === null || ob === null ? null : tableAt(ob.body, tableLine);
       /**
@@ -20437,6 +20822,7 @@ export function bindActions(
                *   `#`〜`###`(`scanHeadings` が数える段はそこまで)。
                */
               sectionEditable: chapterable,
+              assets: chapterAssets,
               /**
                * 🔴 **章を別のウィンドウで(#1044 段4)**。⚠ 章の範囲を章の欄と**同じ関数**で
                *   決めるので、出す見出しも**同じ条件**にする(書けるかどうかには依らない ──
@@ -20456,6 +20842,7 @@ export function bindActions(
           rotated: block.rotated,
           front: block.front,
           back: block.back,
+          assets: blockAssets,
         })),
         /**
          * 🔴 **表の形を変える**(#708 段②)。⚠ 行番号は**この項目にだけ**載せる

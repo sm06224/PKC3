@@ -17,7 +17,7 @@
  * ⚠ つまりリンク・図・入力欄・選択範囲で**既定を残す**ことは、
  * いままで「行の判定がどのみち先に返す」に救われていた。**もう救われない。**
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { blocksFor, decl, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
@@ -2223,5 +2223,151 @@ describe('見出しの右クリック ── 章を別のウィンドウで(#104
     expect(r.d.getState().entryMetas.has('n1'), '一覧に無い口で本文が消えた').toBe(true);
     expect(runChapterWindowAction(r.d, ok, services, r.root)).toBe(true);
     expect(r.d.getState().selectedLid).toBe('n1');
+  });
+});
+
+/**
+ * 🔴 **章 / 囲み / 板を、添付(画像)ごと写す**(#677 の残り「別の入れ物へ貼ると絵が出ない」)。
+ *
+ * 画像の `asset:<key>` を `data:` の字に置き換えて写す ── 貼る側の既存の取り込み(`data:` を添付へ逃がす)が働く。
+ * ⚠ 対照群: 添付が無い章 / 塊には「添付ごと」を出さない(押しても同じ物が写るだけの口を作らない)。
+ */
+describe('ブロック単位のコピー ── 添付ごと (#677 の残り)', () => {
+  const PNG = new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+  const BODY = [
+    '## 絵のある章', // 0
+    '', // 1
+    '![図](asset:img1)', // 2
+    '', // 3
+    '[仕様書](asset:doc1)', // 4
+    '', // 5
+    ':::note', // 6
+    '![図2](asset:img2)', // 7
+    ':::', // 8
+    '', // 9
+    '## 絵のない章', // 10
+    '', // 11
+    '文だけ', // 12
+    '',
+    ':::note', // 14
+    '囲みだけ', // 15
+    ':::', // 16
+    '',
+  ].join('\n');
+
+  function rig(blobs: Record<string, Blob | null>) {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-field', 'detail-body');
+    host.innerHTML = renderMarkdown(BODY, { sourceLineAnchors: true });
+    applyHeadingFold(host);
+    root.append(host);
+    document.body.append(root);
+    const copied: { text: string; done: string | undefined }[] = [];
+    const d = new Dispatcher();
+    bindActions(root, d, {
+      showStatus: () => 0,
+      copyText: (t, done) => {
+        copied.push({ text: t, done });
+      },
+      readAssetBlob: (key) => Promise.resolve(blobs[key] ?? null),
+    });
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        { lid: 'n1', title: 'ノート', archetype: 'text', created_at: null, updated_at: null, entry_order: 1, status: null, date: null, archived: 0 } as never,
+      ],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: BODY });
+    const q = (sel: string): Element => {
+      const el = host.querySelector(sel);
+      expect(el, `前提が崩れている: 台に ${sel} が無い`).not.toBeNull();
+      return el!;
+    };
+    return {
+      copied,
+      d,
+      q,
+      acts: (): string[] =>
+        [...root.querySelectorAll(`${MENU} button[data-pkc-action]`)].map((b) => b.getAttribute('data-pkc-action') ?? ''),
+      label: (a: string): string => root.querySelector(`${MENU} [data-pkc-action="${a}"]`)?.textContent ?? '',
+      press: (a: string): void => {
+        const b = root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="${a}"]`);
+        expect(b, `メニューに ${a} が無い`).not.toBeNull();
+        b!.click();
+      },
+    };
+  }
+
+  it('🔴 添付の在る章にだけ「この章を添付ごとコピー」が出て、画像が data: になって渡る(PDF は元の参照のまま)', async () => {
+    const r = rig({ img1: PNG, img2: PNG, doc1: new Blob(['x'], { type: 'application/pdf' }) });
+    rightClick(r.q('h2[id="絵のある章"]'));
+    expect(r.acts()).toContain('copy-chapter-md-assets');
+    expect(r.label('copy-chapter-md-assets')).toBe('この章を添付ごとコピー');
+    r.press('copy-chapter-md-assets');
+    await vi.waitFor(() => expect(r.copied).toHaveLength(1));
+    const text = r.copied[0]!.text;
+    expect(text, '画像が data: になっていない').toContain('![図](data:image/png;base64,');
+    expect(text, '塊の中の画像まで data: になっていない').toContain('![図2](data:image/png;base64,');
+    expect(text, '画像でない添付は元の参照のまま').toContain('[仕様書](asset:doc1)');
+    expect(text, '画像の asset: が残っている').not.toContain('asset:img');
+    expect(r.copied[0]!.done).toContain('画像 2 件ごとコピー');
+    expect(r.copied[0]!.done, '運べない添付を言わない').toContain('画像ではない添付 1 件');
+  });
+
+  it('⚠ 対照群 ── 添付の無い章には「添付ごと」を出さない', () => {
+    const r = rig({});
+    rightClick(r.q('h2[id="絵のない章"]'));
+    expect(r.acts(), '本文のメニューが出ていない(台の空振り)').toContain('copy-chapter-md');
+    expect(r.acts()).not.toContain('copy-chapter-md-assets');
+  });
+
+  it('🔴 囲みにも「このブロックを添付ごとコピー」(添付が無い囲みには出さない)', async () => {
+    const r = rig({ img1: PNG, img2: PNG });
+    rightClick(r.q('[data-pkc-source-line="7"]'));
+    expect(r.label('copy-block-md-assets')).toBe('このブロックを添付ごとコピー');
+    r.press('copy-block-md-assets');
+    await vi.waitFor(() => expect(r.copied).toHaveLength(1));
+    expect(r.copied[0]!.text).toMatch(/^:::note\n!\[図2\]\(data:image\/png;base64,[A-Za-z0-9+/=]+\)\n:::$/);
+    // 対照群: 添付の無い囲み
+    const r2 = rig({});
+    rightClick(r2.q('[data-pkc-source-line="15"]'));
+    expect(r2.acts()).toContain('copy-block-md');
+    expect(r2.acts()).not.toContain('copy-block-md-assets');
+  });
+
+  it('🔴 画像の形で書かれていても、実体が画像でなければ data: にせず元の参照のまま(件数で言う)', async () => {
+    const r = rig({ img1: new Blob(['%PDF'], { type: 'application/pdf' }), img2: PNG });
+    rightClick(r.q('h2[id="絵のある章"]'));
+    r.press('copy-chapter-md-assets');
+    await vi.waitFor(() => expect(r.copied).toHaveLength(1));
+    const text = r.copied[0]!.text;
+    expect(text, '画像でない実体が data: になった').not.toContain('data:application/pdf');
+    expect(text).toContain('![図](asset:img1)');
+    expect(text).toContain('![図2](data:image/png;base64,');
+    expect(r.copied[0]!.done).toContain('画像ではない添付 2 件');
+  });
+
+  it('🔴 合計が上限(24 MB)を超えたら断り、何もコピーしない', async () => {
+    const big = new Blob([new Uint8Array(25 * 1024 * 1024)], { type: 'image/png' });
+    const r = rig({ img1: big, img2: PNG });
+    rightClick(r.q('h2[id="絵のある章"]'));
+    r.press('copy-chapter-md-assets');
+    await vi.waitFor(() => expect(r.d.getState().error ?? '').toContain('大きすぎて'));
+    expect(r.copied, '断ったのにコピーした').toHaveLength(0);
+  });
+
+  it('⚠ 読めなかった画像は元の参照のまま残し、その件数を言う(黙って消さない)', async () => {
+    const r = rig({ img1: PNG, img2: null });
+    rightClick(r.q('h2[id="絵のある章"]'));
+    r.press('copy-chapter-md-assets');
+    await vi.waitFor(() => expect(r.copied).toHaveLength(1));
+    expect(r.copied[0]!.text).toContain('![図2](asset:img2)');
+    expect(r.copied[0]!.done).toContain('読めなかった画像 1 件');
   });
 });

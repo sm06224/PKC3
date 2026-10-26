@@ -6,7 +6,7 @@
  * **実物の SQL と実物の鎖ロジック**をそのまま PR gate で検証できる。
  * OPFS SAHPool 固有面(VFS / journal / 永続化)は nightly の probe が担保する。
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { codeOnly } from '../helpers/code-only';
 import type {
@@ -24,6 +24,7 @@ import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
 import { diffCounts } from '../../src/features/revision/diff-view';
 import { FRONTMATTER_SCAN_CHARS } from '../../src/features/query/group-by';
 import { createSmartScan, EMPTY_SMART } from '../../src/features/smart/smart-spec';
+import * as csvTablesModule from '../../src/features/query/csv-tables';
 import { CSV_TABLE_CELLS_MAX } from '../../src/features/query/csv-tables';
 import { SCHEMA_CSV_SQL } from '../../src/features/query/schema-digest';
 import { buildXlsx } from '../features/xlsx-fixture';
@@ -3327,14 +3328,45 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
    *   「**そもそも見ていない**」で緑だった(CLAUDE.md §2「通っていない」)。
    * 🔑 名前つきを 1 つ混ぜると、この本文は**読まれたうえで**名前の無い囲みが落ちる。
    */
-  it('⚠ 名前の無い囲みは表にならない(同じ本文が読まれていても)', async () => {
+  it('🔴 SQL に csv の名前が出ない回は、名前なし囲みを含む本文を拾わない(全走査を払わせない)。出る回は拾う', async () => {
+    await write('csv-lazy', fence('csv', ['品名,数', 'もも,2']) + fence('csv name=遅延', ['x', '1']));
+    const spy = vi.spyOn(csvTablesModule, 'collectCsvTables');
+    try {
+      const unnamedFlags = (): boolean[] => spy.mock.calls.map((c) => c[3]?.unnamed === true);
+      await run('SELECT 1');
+      const quiet = unnamedFlags();
+      expect(spy.mock.calls.length, '空振り:名前つきの囲みの本文は読まれている').toBeGreaterThan(0);
+      expect(quiet.some(Boolean), 'csv の名前が出ない SQL で、名前なし囲みを拾いにいった').toBe(false);
+      spy.mockClear();
+      await run('SELECT count(*) FROM csv');
+      expect(unnamedFlags().every(Boolean), 'csv を引く SQL で拾っていない').toBe(true);
+      expect(spy.mock.calls.length).toBeGreaterThan(0);
+      spy.mockClear();
+      await run('SELECT name FROM csv_tables');
+      expect(unnamedFlags().every(Boolean), '目録を引く SQL でも拾う(csv が目録に出る)').toBe(true);
+    } finally {
+      spy.mockRestore();
+      // 同じ DB を使う後ろの test に、名前なしの囲みを残さない(csv の既定の表に混ざる)
+      await write('csv-lazy', 'もう空');
+    }
+  });
+
+  it('🔑 名前の無い囲みは既定の表 csv に積まれる(#681 の残り)。名前つきの表には混ざらない', async () => {
     await write(
       'csv-noname',
       fence('csv', ['品名,数', 'ぶどう,1']) + fence('csv name=有名', ['x', '1']),
     );
     // ⚠ 空振り防止 ── この本文は実際に読まれている(名前つきの方は引ける)
     expect((await run('SELECT x FROM 有名')).rows).toEqual([['1']]);
-    await expect(run('SELECT * FROM csv')).rejects.toThrow(/no such table/i);
+    const r = await run('SELECT _note, 品名, 数 FROM csv');
+    expect(r.rows).toEqual([[expect.any(String), 'ぶどう', '1']]);
+    // 名前つきの囲みは csv に混ざらない(対照群)
+    expect((await run('SELECT count(*) FROM csv')).rows).toEqual([[1]]);
+    // 目録にも出る(csv を引いた回)
+    const cat = await run("SELECT rows FROM csv_tables WHERE name = 'csv'");
+    expect(cat.rows).toEqual([[1]]);
+    // 引かない回は組み立てない(csv の語が出ない SQL では表が無い)
+    await expect(run('SELECT 1 FROM csv_x')).rejects.toThrow();
   });
 
   it('🔴 同じ名前は積む ── どこから来たかは _note で分かる', async () => {

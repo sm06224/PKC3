@@ -122,6 +122,7 @@ import {
 } from '@features/query/schema-digest';
 import {
   collectCsvTables,
+  CSV_DEFAULT_TABLE,
   csvCellsOverBudget,
   mergeCsvTables,
   csvTablesMentioned,
@@ -2933,8 +2934,16 @@ function buildCsvTables(database: Database, sql: string, made: string[]): void {
    * 🔴 **system 領域のノートは読まない**(設計 doc §1.1、段①)── これは
    *   user の本文を表として引く機能であって、system のノートを混ぜる理由が無い。
    */
+  /**
+   * 🔑 名前の無い囲みの既定の表(`csv`)は、打った SQL に `csv` / `csv_tables` / `csv_columns` が出る回だけ拾う
+   *   (#681。拾うと csv / tsv / psv を含む本文を全部読むことになるので、引かない回には払わせない)。
+   */
+  const unnamed =
+    csvTablesMentioned(sql, [CSV_DEFAULT_TABLE, 'csv_tables', 'csv_columns']).length > 0;
   const notes = database.selectObjects(
-    `SELECT lid, title, body FROM entries WHERE ${USER_REALM_SQL} AND body LIKE '%name=%'`,
+    unnamed
+      ? `SELECT lid, title, body FROM entries WHERE ${USER_REALM_SQL} AND (body LIKE '%name=%' OR body LIKE '%csv%' OR body LIKE '%tsv%' OR body LIKE '%psv%')`
+      : `SELECT lid, title, body FROM entries WHERE ${USER_REALM_SQL} AND body LIKE '%name=%'`,
   ) as unknown as Array<{ lid: string; title: string; body: string }>;
   /**
    * 🔴 **受けられなかった名前も拾う**(#681 段③)── 目録で理由を言うため。
@@ -2943,7 +2952,7 @@ function buildCsvTables(database: Database, sql: string, made: string[]): void {
    */
   const rejects: CsvTableReject[] = [];
   const blocks = notes.flatMap((n) =>
-    collectCsvTables(n.body, { lid: n.lid, title: n.title }, rejects),
+    collectCsvTables(n.body, { lid: n.lid, title: n.title }, rejects, { unnamed }),
   );
   const tables = mergeCsvTables(blocks);
   /**

@@ -1011,6 +1011,18 @@ export class SqlRenderer {
     table.setAttribute('data-pkc-field', 'sql-table');
     const thead = document.createElement('thead');
     const hr = document.createElement('tr');
+    /**
+     * 🔑 **行の左端に通し番号を出す**(#837 K2 の C。K2 の B=見出しの貼り付けと一緒に効く)。
+     * ⚠ 当初は「列が 1 本増える」ので見送っていたが、「いま何行目を見ているか」が転がしている間に
+     *   分からない欠陥のほうが重いので入れる。窓で描くので番号は**答えの先頭からの通し番号**(`from + 1` …)。
+     *   地は無彩色・細い列(`sql-rownum`)で、横幅は数桁ぶんだけ。
+     */
+    const numTh = document.createElement('th');
+    numTh.setAttribute('data-pkc-field', 'sql-rownum');
+    numTh.textContent = '#';
+    // ⚠ 窓で描くと列の幅を最初に見えた行から固定するので、**最後の行の桁数ぶん**を先に空けておく(5 桁の番号が「…」で切れない)
+    numTh.style.minWidth = `${String(String(p.rows.length).length + 1)}ch`;
+    hr.append(numTh);
     for (const c of p.columns) {
       const th = document.createElement('th');
       th.textContent = c;
@@ -1060,6 +1072,10 @@ export class SqlRenderer {
       const row = this.rows[i];
       if (row === undefined) continue;
       const tr = document.createElement('tr');
+      const num = document.createElement('td');
+      num.setAttribute('data-pkc-field', 'sql-rownum');
+      num.textContent = String(i + 1);
+      tr.append(num);
       for (const v of row) {
         const td = document.createElement('td');
         // ⚠ **字として入れる**(worker から来た値を HTML として注入しない)
