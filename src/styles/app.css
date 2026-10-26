@@ -10290,6 +10290,13 @@ h3[data-pkc-section] {
 [data-pkc-field='format-more'] {
   display: none;
 }
+/* 🔴 「この行を計算する」(#766 D-3)は、書式バーを広い画面で長くしない ── 「…」を開いたスマホ用画面でだけ出す */
+[data-pkc-region='format-bar'] [data-pkc-more-only] {
+  display: none;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'][data-pkc-more-open] [data-pkc-more-only] {
+  display: inline-flex;
+}
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'] [data-pkc-field='format-more'] {
   display: inline-flex;
   align-items: center;

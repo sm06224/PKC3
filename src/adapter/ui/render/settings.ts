@@ -27,6 +27,7 @@ import { appMissingLinks, MissingLinksStore } from './missing-links';
 import { appCodeCollapse, CodeCollapseStore } from './code-collapse';
 import { appInlineCodeCopy, InlineCodeCopyStore } from './inline-code-copy';
 import { appPdfReader, PdfReaderStore } from './pdf-reader-setting';
+import { appInlineComplete, InlineCompleteStore } from './inline-complete-setting';
 import { appPhoneLinks, PhoneLinksStore } from './phone-links';
 import { appDateLinks, DateLinksStore } from './date-links';
 import { appRelativeDays, RelativeDaysStore } from './relative-days';
@@ -61,6 +62,7 @@ import { createMissingLinksSection } from './settings/missing-links';
 import { createCodeCollapseSection } from './settings/code-collapse';
 import { createInlineCodeCopySection } from './settings/inline-code-copy';
 import { createPdfReaderSection } from './settings/pdf-reader';
+import { createInlineCompleteSection } from './settings/inline-complete';
 import { createPasteSourceSection } from './settings/paste-source';
 import { createAlarmEnabledSection } from './settings/alarm-enabled';
 import { createVoiceBoostSection } from './settings/voice-boost';
@@ -217,6 +219,10 @@ export class SettingsRenderer {
      * 🔴 **埋め込み先のページの AI を許すページの一覧**(#1407)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly embedOrigins: EmbedOriginsStore = appEmbedOrigins,
+    /**
+     * 🔴 **打ちながら補完の候補を出すか**(#1449 / #1450)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly inlineComplete: InlineCompleteStore = appInlineComplete,
   ) {
     /**
      * 🔴 **節の登録表(#1382)── 並びが画面の並びである。** 節を足す = `settings/` に 1 file 足し、
@@ -241,6 +247,7 @@ export class SettingsRenderer {
       createTagColorListSection(region),
       createEditorModeSection(region, editorMode),
       createOpenInEditSection(region, openInEdit),
+      createInlineCompleteSection(region, inlineComplete),
       createPhoneLinksSection(region, phoneLinks),
       createDateLinksSection(region, dateLinks),
       createRelativeDaysSection(region, relativeDays),

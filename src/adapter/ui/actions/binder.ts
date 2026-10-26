@@ -437,6 +437,7 @@ import {
   openContextMenu,
 } from '../render/context-menu';
 import { bindInlineComplete, removeSelected, type CompleteItem } from '../render/inline-complete';
+import { appInlineComplete } from '../render/inline-complete-setting';
 import { setupLinkPreview, closeLinkPreview } from '../render/link-preview';
 import { setupLightbox, openLightbox, closeLightbox, lightboxOpen } from '../render/lightbox';
 import { chordHint, HINT_BASE, HINT_BLOCKED, setBlocked } from '../render/shortcut-hint';
@@ -2035,6 +2036,11 @@ export interface BinderServices {
    * ⚠ 切り替えたら**その場で本文を描き直す**(同上)。
    */
   setInlineCodeCopy?(on: boolean): void;
+  /**
+   * 🔴 **打ちながら補完の候補を出すか**(#1449 / #1450)。⚠ **省略可**。
+   * ⚠ 切り替えても本文は描き直さない ── 効くのは**次に打つとき**だけ。
+   */
+  setInlineComplete?(on: boolean): void;
   /**
    * 🔴 **PDF を PKC の画面で開くか**(#275 段①)。⚠ **省略可**。
    * ⚠ 切り替えても本文は描き直さない ── 効くのは**次に「別のウィンドウで見る」を押したとき**だけ。
@@ -12263,6 +12269,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 効く先は書式パネルと同じ 1 か所(formatTarget)── 2 列でも live でも動く。
    * ⚠ `insertText` で書く(Undo 履歴に載る。`setRangeText` は履歴を捨てる ── #765)。
    */
+  /**
+   * 🔴 **書式バーの「この行を計算する」**(#766 D-3)── 本文の欄へ当てる命令 `inline-calc` を呼ぶだけ。
+   * ⚠ 規則は `EDITOR_RUN['inline-calc']`(打って `Enter` / 操作を探す / 鍵 `Alt+Shift+C` と同じ 1 か所)。
+   */
+  'calc-line': (_dispatcher, target, services) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const ta = formatTarget(root);
+    if (ta === null) {
+      sayNoFormatTarget(services);
+      return;
+    }
+    ta.focus();
+    EDITOR_RUN['inline-calc']!(ta, (t) => services.showStatus?.(t));
+  },
   'sort-tasks': (dispatcher, target, services) => {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const ta = formatTarget(root);
@@ -15741,6 +15761,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setInlineCodeCopy?.(target.checked);
   },
+  'set-inline-complete': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setInlineComplete?.(target.checked);
+  },
   'set-pdf-reader': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setPdfReader?.(target.checked);
@@ -17087,6 +17111,8 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   'insert-icon',
   'renumber-lists',
   'sort-tasks',
+  // 🔴 #766 D-3: 書式バーの「この行を計算する」── 押した行(caret)を読んで答えを挿すので、押しても焦点を奪わない
+  'calc-line',
 ]);
 
 /**
@@ -21056,6 +21082,8 @@ export function bindActions(
   undo.push(
     bindInlineComplete(root, {
       items: (trigger) => {
+        // 🔴 設定で切れる(読むたびに保存を見る ── 別のタブで切っても追随する)
+        if (!appInlineComplete.enabled()) return [];
         const st = dispatcher.getState();
         if (trigger.kind === 'slash') {
           const snippets = st.snippetScan?.items ?? [];

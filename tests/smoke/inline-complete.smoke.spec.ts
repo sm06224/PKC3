@@ -57,6 +57,16 @@ test('🔴 行頭の / と @ で候補が caret の下に出て、Tab で入る(
   await page.keyboard.type(' A/B');
   await expect(menu).toHaveCount(0);
 
+  // 設定で切ると出ない(読むたびに保存を見る)。戻すと出る
+  await page.evaluate(() => localStorage.setItem('pkc3.inline-complete', '0'));
+  await page.keyboard.type('\n/表');
+  await expect(menu, '設定で切ったのに候補が出た').toHaveCount(0);
+  await page.evaluate(() => localStorage.removeItem('pkc3.inline-complete'));
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('表');
+  await expect(menu, '設定を戻しても候補が出ない').toBeVisible();
+  await page.keyboard.press('Escape');
+
   await dismissAnnounce(page).catch(() => undefined);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

@@ -281,6 +281,21 @@ export function buildFormatBar(): HTMLElement {
   label.textContent = '置換の欄を開く / 閉じる';
   toggleReplace.append(label);
   bar.append(toggleReplace);
+  /**
+   * 🔴 **この行を計算する**(#766 D-3)。⚠ 書式バーを横に長くしないため、**スマホ用画面の「…」を開いたときだけ**出す
+   * (`data-pkc-more-only`。広い画面では CSS が隠す ── 広い画面の入口は **操作を探す** と鍵 `Alt+Shift+C`)。
+   * 🔑 押すと**本文の欄へ当てる命令**(`inline-calc`)をそのまま呼ぶ ── 打って `Enter` / 操作を探す / 鍵と同じ 1 か所。
+   */
+  const calcLine = document.createElement('button');
+  calcLine.type = 'button';
+  calcLine.setAttribute('data-pkc-action', 'calc-line');
+  calcLine.setAttribute('data-pkc-more-only', '');
+  calcLine.title = '打っている行の式(2+3= など)を計算して、行の終わりに答えを入れます';
+  const calcLineLabel = document.createElement('span');
+  calcLineLabel.setAttribute('data-pkc-field', 'label');
+  calcLineLabel.textContent = 'この行を計算する';
+  calcLine.append(calcLineLabel);
+  bar.append(calcLine);
   addMoreToggle(bar);
   return bar;
 }

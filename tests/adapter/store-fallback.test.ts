@@ -37,6 +37,7 @@ import { VoiceBoostStore } from '@adapter/ui/render/voice-boost';
 import { MissingLinksStore } from '@adapter/ui/render/missing-links';
 import { CodeCollapseStore } from '@adapter/ui/render/code-collapse';
 import { InlineCodeCopyStore } from '@adapter/ui/render/inline-code-copy';
+import { InlineCompleteStore } from '@adapter/ui/render/inline-complete-setting';
 import { PdfReaderStore } from '@adapter/ui/render/pdf-reader-setting';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
 import { DateLinksStore } from '@adapter/ui/render/date-links';
@@ -204,6 +205,16 @@ const CASES: readonly {
     name: 'CodeCollapseStore',
     make: (st: StorageLike | null = null) => {
       const s = new CodeCollapseStore(st);
+      return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
+    a: false,
+    b: true,
+  },
+  {
+    // ⚠ 既定が「入」の store(#1449 / #1450)── a を切(false)にして、控えが死んで既定(入)へ戻る実装を捕まえる
+    name: 'InlineCompleteStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new InlineCompleteStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: false,

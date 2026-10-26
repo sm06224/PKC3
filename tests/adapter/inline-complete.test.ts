@@ -160,3 +160,47 @@ describe('@ のノートと日付(#1450)', () => {
     expect(s.ta.value).toBe('[買い物メモ](entry:n2)');
   });
 });
+
+describe('設定で切れる(#1449 / #1450)', () => {
+  it('「入力中に補完の候補を出す」を切ると / も @ も出ない。入れ直すと出る', () => {
+    const s = setup();
+    try {
+      localStorage.setItem('pkc3.inline-complete', '0');
+      s.type('/表');
+      expect(s.menu(), '切ったのに / の候補が出た').toBeNull();
+      s.type('@今日');
+      expect(s.menu(), '切ったのに @ の候補が出た').toBeNull();
+      localStorage.setItem('pkc3.inline-complete', '1');
+      s.type('/表');
+      expect(s.menu(), '入れ直しても出ない(対照群)').not.toBeNull();
+    } finally {
+      localStorage.removeItem('pkc3.inline-complete');
+    }
+  });
+  it('保存が無い端末の既定は入', () => {
+    localStorage.removeItem('pkc3.inline-complete');
+    const s = setup();
+    s.type('/表');
+    expect(s.menu()).not.toBeNull();
+  });
+});
+
+describe('書式バーの「この行を計算する」(#766 D-3)', () => {
+  it('押すと、カーソルの行の式の答えが行の終わりに入る / 式でない行では理由を言う', async () => {
+    const { buildFormatBar } = await import('../../src/adapter/ui/render/format-bar');
+    const s = setup();
+    const bar = buildFormatBar();
+    s.root.append(bar);
+    const btn = bar.querySelector<HTMLElement>('[data-pkc-action="calc-line"]')!;
+    expect(btn.textContent).toBe('この行を計算する');
+    s.ta.value = '2+3=';
+    s.ta.setSelectionRange(4, 4);
+    btn.click();
+    expect(s.ta.value).toBe('2+3=5');
+    // 式でない行 ── 黙らず、本文は変わらない
+    s.ta.value = 'ふつうの文';
+    s.ta.setSelectionRange(5, 5);
+    btn.click();
+    expect(s.ta.value).toBe('ふつうの文');
+  });
+});
