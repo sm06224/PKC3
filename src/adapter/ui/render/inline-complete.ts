@@ -14,7 +14,8 @@
  * - `↑` `↓` で選ぶ / `Tab` で入れる / `Esc` で閉じる(閉じた引き金は、その字を消すまで出し直さない)。
  * - `Enter` で入れるのは、`/` ではいつも、`@` では **`↑` `↓` で選んだあとだけ**
  *   (文の途中の `@` のあとで改行しようとして、意図しないリンクが入る事故を防ぐ)。
- * - 日本語入力の変換中(`isComposing`)は何もしない。変換が終わったときに見直す。
+ * - 日本語入力の変換中(`isComposing` / `keyCode 229`)は何もしない。変換を始めたら閉じ、終わったときに見直す。
+ * - 欄が画面から消えた(ノートを替えた)・ノート切替・編集の確定で閉じる。スクロール・サイズ変更では位置を追う。
  * - 欄の外を押す・欄を離れる・caret が動く(`←` `→` `Home` `End`)・字を選ぶと閉じる。
  * - `Esc` は小窓を閉じるだけで、編集そのものは終わらせない(`stopImmediatePropagation`)。
  */
@@ -33,6 +34,12 @@ export interface CompleteItem {
 
 export interface InlineCompleteDeps {
   items(trigger: CompleteTrigger, ta: HTMLTextAreaElement): readonly CompleteItem[];
+  /**
+   * 🔴 **画面の状態が変わったら閉じるための購読**(ノート切替・編集の確定など)。
+   * 渡された `close` を、閉じたい変化のときに呼ぶ。外す関数を返す。
+   * ⚠ 打鍵のたびに本文の状態は変わるので、**呼び側が「閉じたい変化」だけを選ぶ**。
+   */
+  subscribe?(close: () => void): () => void;
 }
 
 export const COMPLETE_REGION = 'inline-complete';
@@ -72,16 +79,6 @@ export function caretPoint(ta: HTMLTextAreaElement, index: number): { x: number;
   return { x, y, h };
 }
 
-/** 選んでいる範囲を消す(`Ctrl+Z` で戻せる形)。範囲が空なら何もしない。 */
-export function removeSelected(ta: HTMLTextAreaElement): void {
-  const { selectionStart: s, selectionEnd: e } = ta;
-  if (s === null || e === null || s === e) return;
-  const doc = ta.ownerDocument as Document & { execCommand?: (c: string) => boolean };
-  if (doc.execCommand?.('delete') === true) return;
-  ta.setRangeText('', s, e, 'start');
-  ta.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
 export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps): () => void {
   interface Open {
     ta: HTMLTextAreaElement;
@@ -95,9 +92,25 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
   // Esc で閉じた引き金(欄 + 位置 + そのときの語)。同じ語のまま打ち進める間は出し直さない(語が変われば出る)
   let dismissed: { ta: HTMLTextAreaElement; start: number; query: string } | null = null;
 
+  // 🔴 スクロール・サイズ変更の聞き手は、**小窓が開いている間だけ**張る(常時 window に張らない)
+  let following = false;
+  const detachFollow = (): void => {
+    if (!following) return;
+    following = false;
+    root.ownerDocument.removeEventListener('scroll', onScroll, true);
+    root.ownerDocument.defaultView?.removeEventListener('resize', follow);
+  };
+  const attachFollow = (): void => {
+    if (following) return;
+    following = true;
+    root.ownerDocument.addEventListener('scroll', onScroll, true);
+    root.ownerDocument.defaultView?.addEventListener('resize', follow);
+  };
+
   const close = (): void => {
     if (open !== null) open.el.remove();
     open = null;
+    detachFollow();
   };
 
   const paint = (o: Open): void => {
@@ -172,6 +185,7 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
       el.setAttribute('role', 'listbox');
       el.setAttribute('aria-label', trigger.kind === 'slash' ? '記法の候補' : 'ノートと日付の候補');
       root.append(el);
+      attachFollow();
       open = { ta, trigger, items, index: 0, navigated: false, el };
     } else {
       open.trigger = trigger;
@@ -207,8 +221,13 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
     if (ta !== null) refresh(ta);
   };
   const onKeyDown = (ev: KeyboardEvent): void => {
-    if (open === null || ev.isComposing) return;
+    // 🔴 変換中の Enter / Tab / Esc は変換のもの。`isComposing` が false で来る環境(確定の keydown)は keyCode 229 で見る
+    if (open === null || ev.isComposing || ev.keyCode === 229) return;
     const o = open;
+    if (!o.ta.isConnected) {
+      close();
+      return;
+    }
     if (fieldOf(ev.target) !== o.ta) return;
     const eat = (): void => {
       ev.preventDefault();
@@ -274,11 +293,33 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
 
   // caret をマウスで動かしたとき ── 引き金から離れていれば閉じる
   const onClick = (ev: Event): void => {
+    if (open !== null && !open.ta.isConnected) {
+      close();
+      return;
+    }
     const ta = fieldOf(ev.target);
     if (ta !== null && open !== null) refresh(ta);
   };
+  // 🔴 変換を始めたら閉じる(変換中の候補と二重に出さない)。終わったら `compositionend` が見直す
+  const onCompositionStart = (): void => close();
+  // 🔴 スクロール(欄の中も含む)・サイズ変更では位置を追う。欄が消えていたら閉じる
+  const follow = (): void => {
+    if (open === null) return;
+    if (!open.ta.isConnected) {
+      close();
+      return;
+    }
+    place(open);
+  };
+  const onScroll = (ev: Event): void => {
+    // 小窓自身の中のスクロール(候補が多いとき)では動かさない
+    if (open !== null && ev.target instanceof Node && open.el.contains(ev.target)) return;
+    follow();
+  };
+  const unsub = deps.subscribe?.(close);
 
   root.addEventListener('click', onClick);
+  root.addEventListener('compositionstart', onCompositionStart);
   root.addEventListener('input', onInput);
   root.addEventListener('compositionend', onCompositionEnd);
   root.addEventListener('keydown', onKeyDown, true);
@@ -286,6 +327,8 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
   root.addEventListener('focusout', onFocusOut);
   return () => {
     root.removeEventListener('click', onClick);
+    root.removeEventListener('compositionstart', onCompositionStart);
+    unsub?.();
     root.removeEventListener('input', onInput);
     root.removeEventListener('compositionend', onCompositionEnd);
     root.removeEventListener('keydown', onKeyDown, true);

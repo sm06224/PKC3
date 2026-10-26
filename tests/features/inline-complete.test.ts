@@ -56,3 +56,23 @@ describe('atChoices', () => {
     expect(n.map((c) => (c.kind === 'note' ? c.lid : 'date'))).toEqual(['a']);
   });
 });
+
+describe('コードの中・表の行では出ない(着地前レビュー)', () => {
+  const at = (v: string) => detectTrigger(v, v.length);
+  it('フェンスの中(``` / ~~~)では / も @ も出ない。閉じたあとは出る(対照群)', () => {
+    expect(at('```\n/h2')).toBeNull();
+    expect(at('```js\ncode\n@議事')).toBeNull();
+    expect(at('~~~\n/表')).toBeNull();
+    expect(at('```\ncode\n```\n/h2'), '閉じたあとなのに出ない').toMatchObject({ kind: 'slash', query: 'h2' });
+    expect(at('```\ncode\n```\n見て @議事'), '閉じたあとなのに出ない').toMatchObject({ kind: 'at' });
+  });
+  it('行内コードの中では出ない。閉じたあとは出る(対照群)', () => {
+    expect(at('`foo @bar')).toBeNull();
+    expect(at('`a` と @bar'), '閉じたあとなのに出ない').toMatchObject({ kind: 'at', query: 'bar' });
+  });
+  it('表の行(| で始まる行)では出ない。ふつうの行は出る(対照群)', () => {
+    expect(at('| 項目 | @議事')).toBeNull();
+    expect(at('  | a | b | @x')).toBeNull();
+    expect(at('項目 @議事')).toMatchObject({ kind: 'at' });
+  });
+});

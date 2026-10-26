@@ -436,7 +436,7 @@ import {
   contextMenuOpen,
   openContextMenu,
 } from '../render/context-menu';
-import { bindInlineComplete, removeSelected, type CompleteItem } from '../render/inline-complete';
+import { bindInlineComplete, type CompleteItem } from '../render/inline-complete';
 import { appInlineComplete } from '../render/inline-complete-setting';
 import { setupLinkPreview, closeLinkPreview } from '../render/link-preview';
 import { setupLightbox, openLightbox, closeLightbox, lightboxOpen } from '../render/lightbox';
@@ -17059,8 +17059,14 @@ function applySnippetPick(
   picked: SnippetChoice,
   items: readonly SnippetItem[],
   services: BinderServices,
+  /**
+   * 🔴 **打ちかけの引き金(`/見出し`)を消した本文と、入れる位置**(小窓から呼ぶとき)。
+   * ⚠ 消すのと入れるのを別々に書くと Ctrl+Z が 2 手になる ── 消した後の本文を基準に組み、
+   *   `writeBack`(= `replaceChanged`)が**差分の 1 回の `insertText`** で置き換える。
+   */
+  base?: TextSelection,
 ): void {
-  const sel = { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+  const sel = base ?? { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
   if (picked.kind === 'format') {
     writeBack(ta, applyFormatSaying(sel, picked.op, (t) => services.showStatus?.(t)));
     return;
@@ -21081,6 +21087,26 @@ export function bindActions(
    */
   undo.push(
     bindInlineComplete(root, {
+      /**
+       * 🔴 **ノートを替えた・編集を確定 / やめた・開いた本文が替わったら、小窓を閉じる**(着地前レビュー)。
+       * ⚠ 打鍵のたびに `UPDATE_OPEN_BODY` で状態は変わるので、**この 3 つの鍵が変わったときだけ**閉じる。
+       */
+      subscribe: (close) => {
+        // ⚠ 状態を引けない最小の dispatcher(配線だけを見る test の替え玉)でも、組み立てで落とさない
+        if (typeof dispatcher.getState !== 'function' || typeof dispatcher.onState !== 'function') return () => undefined;
+        const keyOf = (): string => {
+          const s = dispatcher.getState();
+          return `${String(s.selectedLid)}|${s.phase}|${String(s.openBody?.lid ?? '')}`;
+        };
+        let last = keyOf();
+        return dispatcher.onState(() => {
+          const now = keyOf();
+          if (now !== last) {
+            last = now;
+            close();
+          }
+        });
+      },
       items: (trigger) => {
         // 🔴 設定で切れる(読むたびに保存を見る ── 別のタブで切っても追随する)
         if (!appInlineComplete.enabled()) return [];
@@ -21090,9 +21116,13 @@ export function bindActions(
           return slashChoices(snippets, trigger.query).map((c): CompleteItem => ({
             title: c.title,
             sub: c.kind === 'snippet' ? 'テンプレート' : c.kind === 'format' ? '書式' : '図',
-            accept: (ta) => {
-              removeSelected(ta);
-              applySnippetPick(ta, c, snippets, services);
+            accept: (ta, tr) => {
+              const caret = ta.selectionEnd;
+              applySnippetPick(ta, c, snippets, services, {
+                text: ta.value.slice(0, tr.start) + ta.value.slice(caret),
+                start: tr.start,
+                end: tr.start,
+              });
               // 行頭の印は、入れたあと**そのまま続きを打てる**ように caret を末尾へ(帯のボタンは行ごと選んだ形で残す)
               if (c.kind === 'format' && isLineOp(c.op)) ta.setSelectionRange(ta.selectionEnd, ta.selectionEnd);
             },

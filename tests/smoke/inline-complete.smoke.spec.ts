@@ -46,12 +46,22 @@ test('🔴 行頭の / と @ で候補が caret の下に出て、Tab で入る(
   await expect(menu).toHaveCount(0);
   await expect(ta, 'Tab で見出し2 に置き換わらない').toHaveValue('## ');
   await expect(ta, 'Tab で焦点が欄から出た').toBeFocused();
+  // 🔴 Ctrl+Z 1 回で `/見出し2` に戻る(消す入力と入れる入力に割れていない)。やり直し(Ctrl+Shift+Z)も 1 手
+  await page.keyboard.press('Control+z');
+  await expect(ta, 'Ctrl+Z 1 回で / の入力に戻らない(2 手に割れている)').toHaveValue('/見出し2');
+  await page.keyboard.press('Control+Shift+z');
+  await expect(ta, 'やり直しで ## に戻らない').toHaveValue('## ');
 
   // @ で日付
   await page.keyboard.type('提出 @today');
   await expect(menu.locator('[data-pkc-field="inline-complete-item"]').first()).toContainText('今日');
   await page.keyboard.press('Tab');
   await expect(ta).toHaveValue(/^## 提出 @\d{4}-\d{2}-\d{2}\s*$/u);
+  // 🔴 @ も Ctrl+Z 1 回で打ちかけに戻る
+  await page.keyboard.press('Control+z');
+  await expect(ta, 'Ctrl+Z 1 回で @today に戻らない').toHaveValue('## 提出 @today');
+  await page.keyboard.press('Control+Shift+z');
+  await expect(ta, 'やり直しで日付に戻らない').toHaveValue(/^## 提出 @\d{4}-\d{2}-\d{2}\s*$/u);
 
   // 行の途中の / では出ない
   await page.keyboard.type(' A/B');

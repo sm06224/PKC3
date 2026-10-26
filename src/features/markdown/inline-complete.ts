@@ -37,6 +37,8 @@ export interface CompleteTrigger {
 export const COMPLETE_LIMIT = 8;
 
 const SLASH_RE = /^[ \t]*([/／・])([^\s]*)$/u;
+/** フェンスの開き / 閉じの行(行頭の ``` か ~~~)。 */
+const FENCE_LINE_RE = /^[ \t]*(?:```|~~~)/gm;
 const AT_RE = /(^|[\s\u3000(（])@([^\s@[\]()（）]*)$/u;
 
 /**
@@ -46,6 +48,15 @@ const AT_RE = /(^|[\s\u3000(（])@([^\s@[\]()（）]*)$/u;
 export function detectTrigger(value: string, caret: number): CompleteTrigger | null {
   const ls = lineStart(value, caret);
   const line = value.slice(ls, caret);
+  /**
+   * 🔴 **コードの中・表の行では出さない**(着地前レビュー)。
+   * - フェンス(``` / ~~~)の中: caret より前の開きフェンスが奇数。コードの中の `/` や `@` は字そのもの。
+   * - 行内コード: caret より前の ` が奇数(同じ行の中)。
+   * - 表の行(`|` で始まる行)。
+   */
+  if ((value.slice(0, ls).match(FENCE_LINE_RE)?.length ?? 0) % 2 === 1) return null;
+  if ((line.match(/`/g)?.length ?? 0) % 2 === 1) return null;
+  if (/^[ \t]*\|/.test(line)) return null;
   const s = SLASH_RE.exec(line);
   if (s !== null) {
     const mark = s[1] ?? '';
