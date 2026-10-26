@@ -99,9 +99,11 @@ describe('タブ「PC」', () => {
     expect(tab!.textContent).toContain('PC');
   });
 
-  it('🔴 開いたときに集め直す頼みは無く、別窓の面も無い(左だけ)', () => {
+  it('🔴 開いたときに集め直す頼みは無い。別窓の面は #300 で足し、塞がれたら左のタブへ戻る', () => {
     expect(browseScanOf('pc')).toBeNull();
-    expect(homeTabOf('pc' as never)).toBeNull();
+    // 🔑 #215 の段割りは「別窓は裁定に無いので足さない」だった。user の原要望「組み込みのアプリは全て別窓で」(#300。
+    //    user 指示 2026-10-26「全部やるのです」)で足した ── 別窓が塞がれたときの退避先は、この左のタブ
+    expect(homeTabOf('pc' as never)).toBe('pc');
   });
 });
 

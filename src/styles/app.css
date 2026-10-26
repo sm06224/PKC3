@@ -11394,6 +11394,12 @@ h3[data-pkc-section] {
   [data-pkc-print-range] [data-pkc-field='schedule-monthview-blank'] {
     min-height: 5.5rem;
   }
+  /* 🔴 再生中の文字起こしの行の光(#1232)は紙には出さない ── 押せない紙で光っていても意味が無い。
+   *   ⚠ 印刷の節はここ 1 つ(別に `@media print` を作らない ── `print-editing.test.ts` / `body-css.test.ts` が数える) */
+  [data-pkc-seek-line][data-pkc-seek-active] {
+    background: none;
+    color: inherit;
+  }
 }
 
 /**
@@ -13015,10 +13021,4 @@ h6:hover > .pkc-heading-anchor,
   border-radius: 3px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-}
-@media print {
-  [data-pkc-seek-line][data-pkc-seek-active] {
-    background: none;
-    color: inherit;
-  }
 }
