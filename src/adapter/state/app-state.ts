@@ -4919,7 +4919,13 @@ export function dropStaleSearchJump(result: ReduceResult): ReduceResult {
    *   (`origin: 'find'`)は欄を触っても消えない。⚠ 見るのは**結果の形**(いまの `filterQuery`)── 欄を
    *   空にする case(語を消す / 絞りを解く)を 1 つずつ見張らない。
    */
-  const orphanedByField = j.origin === 'filter' && normalizeFindQuery(st.filterQuery) === '';
+  /**
+   * 🔴 **欄の語を別の語へ打ち変えたときも消す**(#1102 段③。段②の「覆る条件」を実装)── 塗りが前の語の
+   *   まま残ると、いま欄に出ている語と本文の塗りが食い違う。語が同じ(空白・大小の揺れだけ)なら残す。
+   */
+  const fieldNow = normalizeFindQuery(st.filterQuery);
+  const orphanedByField =
+    j.origin === 'filter' && (fieldNow === '' || fieldNow !== normalizeFindQuery(j.query));
   if (
     !orphanedByField &&
     st.selectedLid === j.lid &&

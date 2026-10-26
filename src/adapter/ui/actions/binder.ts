@@ -6629,6 +6629,20 @@ export function runGlobalCommand(
     return true;
   }
   /**
+   * 🔴 **ショートカットキーの一覧を開く**(#1145。既定 `?`)── ヘルプの面を開き、「ショートカットキー」の節まで送る。
+   * ⚠ 「ヘルプ」を開けるかは**画面のボタンが出ているか**で決める(`open-system-notices` と同じ作り)。
+   */
+  if (cmd === 'open-help-keys') {
+    if (root.querySelector<HTMLElement>(SHORTCUT_BUTTON['open-help']!) === null) return false;
+    if (dry) return true;
+    prevent();
+    openView(dispatcher, 'help');
+    root
+      .querySelector<HTMLElement>('[data-pkc-region="help-keymap"]')
+      ?.scrollIntoView({ block: 'start' });
+    return true;
+  }
+  /**
    * 🔴 **メッセージを開く**(#1017 C5)── 押しボタンを持たない(状態の行の押し口は未読のときだけ
    *   出る)ので、特例で直に開く。⚠ **編集中 / 失敗の画面では開かない**(reducer が断る遷移 ──
    *   `MESSAGES_READ`)。押せるふりをして黙って何も起きない行にしない:`dry` では偽(= 一覧は

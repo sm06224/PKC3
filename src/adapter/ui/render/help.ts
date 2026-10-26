@@ -613,7 +613,7 @@ export class HelpRenderer {
     const kn = document.createElement('p');
     kn.setAttribute('data-pkc-field', 'settings-note');
     kn.textContent =
-      'Ctrl は Mac では ⌘ でも同じように効きます。割り当て直しはシステムの画面でできます。';
+      'Ctrl は Mac では ⌘ でも同じように効きます。この一覧は、文字を打っていないときに ? を押すと、どの画面からでも開けます。割り当て直しはシステムの画面でできます。';
     body.append(kn);
     this.keys = document.createElement('div');
     this.keys.setAttribute('data-pkc-region', 'help-keymap');
