@@ -52,7 +52,18 @@ function deps(src: ArchiveSource, reports: string[][]): ExportDeps {
 }
 
 describe('別のノートの内容の埋め込みの注意', () => {
-  const BODY = '# 題\n\n![議事録](entry:abc#h/x)\n\n![予定](entry:def#h/y)\n';
+  it('🔴 対照群:行ぜんぶが参照の行は章の中身に展開されるので、説明の字だけになる注意は出ない(#1459 段②)', async () => {
+    const reports: string[][] = [];
+    const whole = '# 題\n\n![議事録](entry:abc#h/x)\n';
+    expect(await exportEntryDocx(dispatcher, deps(source(whole), reports), 'n1')).toBe(true);
+    expect(reports.flat().some((m) => m.includes('埋め込み'))).toBe(false);
+  });
+
+  /**
+   * ⚠ 2026-10-26(#1459 段②): **行ぜんぶが 1 つの参照**の行は、書き出すときに章の中身へ展開する(`section-flatten.ts`)ので、
+   *   この注意の対象にならない。注意が残るのは**行の途中に書いた参照**(展開せず、説明の字だけで出る)── だから文の途中に書く。
+   */
+  const BODY = '# 題\n\n本文 ![議事録](entry:abc#h/x) 続き\n\n途中の ![予定](entry:def#h/y) です\n';
   it('🔴 Word: 埋め込み 2 件が説明の字だけになることを、閲覧用 HTML と同じ文面で言う', async () => {
     const reports: string[][] = [];
     expect(await exportEntryDocx(dispatcher, deps(source(BODY), reports), 'n1')).toBe(true);

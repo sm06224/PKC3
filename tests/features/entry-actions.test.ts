@@ -397,6 +397,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['export-entry-html', '9250f3ab'],
       // 🔴 本文そのままの .md(#1440)。2026-10-11 から右の列にも並ぶ
       ['export-entry-markdown', 'd97ee74b'],
+      // 🔴 メールに貼れる下書き(#1459 段②、2026-10-26)
+      ['copy-entry-mail', '7835f5ca'],
       // 🔴 2026-10-13(#1087): 同じ。フォルダの中のノートの履歴も入る(`folder-source.ts` の `getRevisionChain`)
       ['export-folder', '4b51181e'],
       ['export-entry-docx', '93906675'],

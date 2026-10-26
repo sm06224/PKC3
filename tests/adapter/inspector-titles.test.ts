@@ -86,6 +86,8 @@ const EXPECTED_ACTIONS: readonly string[] = [
   'export-entry-pdf',
   // 🔴 本文そのままの .md(2026-10-11 から右の列にも)── PDF の直後
   'export-entry-markdown',
+  // 🔴 メールに貼れる下書き(#1459 段②)── Markdown の直後
+  'copy-entry-mail',
   'show-history',
   // 🔴 左の列の整理 3 つ(#215)── 右クリックと同じ並び(履歴の下・削除の上)
   'rename-entry-begin',

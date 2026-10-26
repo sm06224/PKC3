@@ -268,7 +268,9 @@ describe('見出しで畳んだ章は、刷る間だけ開く(依頼 116-1 = A)'
 
 describe('フォルダの書き出し(依頼 53-1 = A)', () => {
   it('🔴 フォルダのとき、書き出し 5 つの説明は理由になる。ノートのときは今までの説明(対照)', () => {
+    // ⚠ 2026-10-26(#1459 段②): メール下書きのコピー(`copy-entry-mail`)も同じ理由で足した → 5 つ + 1 つ
     expect([...FOLDER_EXPORT_BLOCKED_ACTIONS].sort()).toEqual([
+      'copy-entry-mail',
       'export-entry-docx',
       'export-entry-html',
       'export-entry-markdown',

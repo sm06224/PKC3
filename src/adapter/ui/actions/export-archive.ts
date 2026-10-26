@@ -51,6 +51,12 @@ import {
   type WritableDirLike,
 } from '@adapter/platform/md-folder-export';
 import { singleEntrySource } from '@features/export/single-entry-source';
+import { mailDraftText } from '@features/report/mail-text';
+import {
+  flattenSectionEmbeds,
+  withFlattenedSectionEmbeds,
+  type FlattenStats,
+} from '@features/export/section-flatten';
 import { folderSource } from '@features/export/folder-source';
 import { EmptySelectionError, selectionSource } from '@features/export/selection-source';
 import { FOLDER_EXPORT_NOTE } from '@features/entry-actions';
@@ -65,6 +71,12 @@ import { assetRefsIn } from '@features/asset/asset-ref-scan';
 
 export interface ExportDeps {
   source: ArchiveSource;
+  /**
+   * 🔴 **章の参照を展開した件数の入れ物**(#1459 段②)。⚠ 入口(`exportEntry` / `exportSelection`)が源を
+   *   絞り込む**前**に展開の源で包んだとき、その印と件数を運ぶ ── `exportArchive` が二重に包まず、終わりに言う。
+   *   渡っていなければ `exportArchive` が(閲覧用 HTML のとき)自分で包む。
+   */
+  flattenStats?: FlattenStats;
   /** 生成した Blob を user に渡す(実配線は `<a download>`)。 */
   download(name: string, blob: Blob): void;
   notify?(message: string): void;
@@ -252,11 +264,25 @@ export async function exportEntry(
   try {
     // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
     await deps.settle();
-    const { source, warnings } = await singleEntrySource(deps.source, lid);
+    /**
+     * 🔴 **閲覧用 HTML は、別のノートの章の参照を展開してから絞り込む**(#1459 段②)。
+     * ⚠ 絞り込みの**前**に包む ── 絞り込みが添付の使用を数えるのは展開した後の本文でなければならない。
+     */
+    const flattenStats: FlattenStats | undefined = kind === 'html' ? { expanded: 0, missing: 0 } : undefined;
+    const { source, warnings } = await singleEntrySource(
+      flattenStats === undefined ? deps.source : withFlattenedSectionEmbeds(deps.source, flattenStats),
+      lid,
+    );
     // 🔴 **`archiveScope: 'notes'`**(#1017 段④b)── 1 件だけの書出しは
     //   自動フォールバックの対象にしない(壊れた DB では絞り込みの読み自体が
     //   同じ理由で落ちるので、拾い出しの対象にならない)
-    const n = await exportArchive(dispatcher, { ...deps, source }, kind, warnings, 'notes');
+    const n = await exportArchive(
+      dispatcher,
+      { ...deps, source, ...(flattenStats === undefined ? {} : { flattenStats }) },
+      kind,
+      warnings,
+      'notes',
+    );
     return n;
   } catch (e) {
     dispatcher.dispatch({
@@ -323,8 +349,20 @@ export async function exportSelection(
   }
   try {
     await deps.settle();
-    const { source, warnings } = await selectionSource(deps.source, lids, kind);
-    return await exportArchive(dispatcher, { ...deps, source }, kind, warnings, 'notes');
+    // 🔴 閲覧用 HTML は章の参照を展開してから絞り込む(`exportEntry` と同じ理由 ── #1459 段②)
+    const flattenStats: FlattenStats | undefined = kind === 'html' ? { expanded: 0, missing: 0 } : undefined;
+    const { source, warnings } = await selectionSource(
+      flattenStats === undefined ? deps.source : withFlattenedSectionEmbeds(deps.source, flattenStats),
+      lids,
+      kind,
+    );
+    return await exportArchive(
+      dispatcher,
+      { ...deps, source, ...(flattenStats === undefined ? {} : { flattenStats }) },
+      kind,
+      warnings,
+      'notes',
+    );
   } catch (e) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
@@ -485,8 +523,13 @@ export async function exportArchive(
      *   最初の「書き出しています…」が最後まで残って、止まって見えた。数えるのは `getAssetBlob` の呼び出し。
      */
     const startingText = EXPORT_STARTING[kind].replace(/…$/, '');
+    // 🔴 閲覧用 HTML は、別のノートの章の参照を書き出す側で展開する(#1459 段②)。入口が包み済みなら二重に包まない
+    const flattenStats: FlattenStats | undefined =
+      kind === 'html' ? (deps.flattenStats ?? { expanded: 0, missing: 0 }) : undefined;
     const src = withAssetProgress(
-      deps.source,
+      flattenStats !== undefined && deps.flattenStats === undefined
+        ? withFlattenedSectionEmbeds(deps.source, flattenStats)
+        : deps.source,
       createProgressThrottle((n, m) => deps.notify?.(`${startingText}(添付 ${n} / ${m})`)),
       token ?? undefined,
     );
@@ -510,6 +553,15 @@ export async function exportArchive(
       // ⚠ **可逆ではない**ことをその場で言う(後から見分けられない形にしない ──
       // PKC2 は light / full の別を manifest にしか書いておらず user が困っていた)
       detail = `${out.counts.entries} 件(添付 ${out.counts.assets})、閲覧用(取り込み直せません)`;
+      // 🔴 展開した章の数は言う(渡した先で画面と同じ中身が読めること)。見つからなかった参照は注意に積む
+      if (flattenStats !== undefined && flattenStats.expanded > 0) {
+        detail += `、別のノートの章 ${String(flattenStats.expanded)} 件を展開`;
+      }
+      if (flattenStats !== undefined && flattenStats.missing > 0) {
+        out.warnings.push(
+          `別のノートの章の参照 ${String(flattenStats.missing)} 件は、章またはノートが見つからないため、引用の 1 行にしました`,
+        );
+      }
     } else {
       /**
        * 🔴 **『バックアップ』『Markdown』は、保存領域に問題があるとき自動で
@@ -807,11 +859,17 @@ async function collectOfficeBlocks(
     fail('本文を読む機能が渡っていません');
     return null;
   }
-  const body = await deps.source.getBody(lid);
-  if (body === null) {
+  const rawBody = await deps.source.getBody(lid);
+  if (rawBody === null) {
     fail('ノートが見つかりませんでした');
     return null;
   }
+  /**
+   * 🔴 **別のノートの章の参照を、その章の中身で置き換えてから描く**(#1459 段②)。
+   * ⚠ 描画器は画面と同じなので、Word / PowerPoint にも画面と同じ章が入る(空の枠が残らない)。
+   */
+  const flat = await flattenSectionEmbeds(rawBody, lid, (l) => deps.source.getBody?.(l) ?? Promise.resolve(null));
+  const body = flat.body;
   const metas = await deps.source.listEntryMetas();
   const title = metas.find((m) => m.lid === lid)?.title ?? 'ノート';
   /**
@@ -833,6 +891,11 @@ async function collectOfficeBlocks(
    * ⚠ 読めなかったものは束に入らない ── 器のまま理由が出る(黙って空にしない)。
    */
   const warnings: string[] = [];
+  if (flat.missing > 0) {
+    warnings.push(
+      `別のノートの章の参照 ${String(flat.missing)} 件は、章またはノートが見つからないため、引用の 1 行にしました`,
+    );
+  }
   const fenceAssets = await readFenceAssets(
     (k) => deps.source.getAssetBlob(k),
     collectFenceAssetKeys(body.slice(skip)),
@@ -1124,6 +1187,57 @@ export async function exportEntryMarkdown(
     return true;
   } catch (e) {
     return fail(`書き出しに失敗しました: ${errorText(e)}`);
+  }
+}
+
+/**
+ * 🔴 **このノートを、メールに貼れる下書きにしてコピーする**(#1459 段②「コピペしてすぐ送れるメール下書き」)。
+ *
+ * 流れ:本文を読む → 別のノートの章の参照を展開する → `{{vars.…}}` と入力欄の値を差し込む → 記号を読める字に直す
+ * → 件名つきでクリップボードへ。⚠ file は作らない(押しても何も落ちない)ので、結果は知らせで言う。
+ * 🔑 読み口・待ち・編集中の断りは書き出しと**同じ道**(`exportEntryMarkdown` の隣)── 保存した本文が入る。
+ * ⚠ 字の直しは `features/report/mail-text.ts` の 1 本(ここは配線だけ)。
+ *
+ * @param copy クリップボードへ書く口(`main.ts` が `copyPlainText` を渡す)。⚠ 省略可にしない ── 渡し忘れると
+ *   「コピーしました」が嘘になる。
+ * @returns コピーできたら true
+ */
+export async function copyEntryMailDraft(
+  dispatcher: Dispatcher,
+  deps: ExportDeps,
+  lid: string,
+  copy: (text: string) => Promise<boolean>,
+): Promise<boolean> {
+  const fail = (msg: string): false => {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
+    return false;
+  };
+  // ⚠ 編集中は draft が disk と違う ── 「保存したつもりの本文」が入らない形を作らない
+  const blocked = exportBlockedNote(dispatcher.getState(), 'コピーしてください');
+  if (blocked !== null) return fail(blocked);
+  try {
+    // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
+    await deps.settle();
+    const meta = (await deps.source.listEntryMetas()).find((m) => m.lid === lid);
+    if (!meta) return fail('コピーするノートが見つかりません');
+    const getBody = deps.source.getBody;
+    if (getBody === undefined) return fail('本文を読む機能が渡っていません');
+    const raw = await getBody.call(deps.source, lid);
+    if (raw === null) return fail('コピーするノートの本文を読めませんでした');
+    const flat = await flattenSectionEmbeds(raw, lid, (l) => getBody.call(deps.source, l));
+    const text = mailDraftText(meta.title, flat.body);
+    if (!(await copy(text))) return fail('コピーできませんでした(クリップボードに書けませんでした)');
+    const notes: string[] = [];
+    if (flat.expanded > 0) notes.push(`別のノートの章 ${String(flat.expanded)} 件を展開しました`);
+    if (flat.missing > 0) {
+      notes.push(`見つからない章の参照 ${String(flat.missing)} 件は引用の 1 行にしました`);
+    }
+    deps.notify?.(
+      `メール下書きをコピーしました(件名つき・${String(text.length)} 字)${notes.length === 0 ? '' : `。${notes.join('。')}`}`,
+    );
+    return true;
+  } catch (e) {
+    return fail(`コピーに失敗しました: ${errorText(e)}`);
   }
 }
 

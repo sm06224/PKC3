@@ -2547,6 +2547,11 @@ export interface BinderServices {
    */
   exportEntryMarkdown?(lid: string): void;
   /**
+   * 🔴 **メール下書きをコピーする**(#1459 段②)。⚠ 解決規則は隣の `exportEntryMarkdown` と同じ lid。
+   *   読む・展開する・字にする・コピーする、は `export-archive.ts` の `copyEntryMailDraft` が持つ。
+   */
+  copyEntryMail?(lid: string): void;
+  /**
    * 🔴 **このノートを別の窓で開く**(#685 段②、user 裁定 2026-09-04)。
    *
    * > 「**マルチで付箋開けるといいかもね**」(利用者の感想 2026-09-04)
@@ -16409,6 +16414,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
     const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.exportEntryHtml?.(lid);
+  },
+  'copy-entry-mail': (dispatcher, target, services) => {
+    // 🔴 解決規則は隣の `export-entry-markdown` と**同じ**(#877)
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
+    if (lid) services.copyEntryMail?.(lid);
   },
   'export-entry-markdown': (dispatcher, target, services) => {
     // 🔴 解決規則は隣の `export-entry-html` と**同じ**(#877)── 揃えないと「A を書き出して B を削除する」が成立する

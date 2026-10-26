@@ -437,6 +437,7 @@ import {
   type ExportDeps,
   exportEntryDocx,
   exportEntryMarkdown,
+  copyEntryMailDraft,
   exportEntryPptx,
   type ExportKind,
 } from '@adapter/ui/actions/export-archive';
@@ -2944,7 +2945,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const runExport = (
     kind:
       | ExportKind
-      | { entryLid: string; as?: 'archive' | 'html' | 'docx' | 'pptx' | 'folder' | 'markdown' }
+      | { entryLid: string; as?: 'archive' | 'html' | 'docx' | 'pptx' | 'folder' | 'markdown' | 'mail' }
       | { mdFolder: WritableDirLike }
       // 🔴 一覧で選んだ N 件だけ(#1038 A1)
       | { selection: readonly string[]; as: 'archive' | 'html' },
@@ -3095,7 +3096,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         await exportSelection(dispatcher, deps, kind.selection, kind.as);
       } else if (
         typeof kind === 'object' &&
-        (kind.as === 'docx' || kind.as === 'pptx' || kind.as === 'html' || kind.as === 'markdown') &&
+        (kind.as === 'docx' || kind.as === 'pptx' || kind.as === 'html' || kind.as === 'markdown' || kind.as === 'mail') &&
         dispatcher.getState().entryMetas.get(kind.entryLid)?.archetype === 'folder'
       ) {
         // 🔴 フォルダを書き出しても中のノートは入らない ── 押せない見た目(情報ペイン)の外から来ても同じ字で断る(#1163 依頼 53-1)
@@ -3112,6 +3113,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         else if (kind.as === 'html') await exportEntry(dispatcher, deps, kind.entryLid, 'html');
         // 🔴 **本文そのままの 1 つの .md**(#1440)── 同じ `deps`(読み口・待ち・知らせ)を通る
         else if (kind.as === 'markdown') await exportEntryMarkdown(dispatcher, deps, kind.entryLid);
+        else if (kind.as === 'mail') await copyEntryMailDraft(dispatcher, deps, kind.entryLid, copyPlainText);
         else await exportEntry(dispatcher, deps, kind.entryLid, 'archive');
       }
       else await exportArchive(dispatcher, deps, kind);
@@ -5734,6 +5736,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportEntryHtml: (lid) => void runExport({ entryLid: lid, as: 'html' }),
     // 🔴 **本文そのままの 1 つの .md**(#1440)── 入口は右クリック・右の列・「操作を探す」
     exportEntryMarkdown: (lid) => void runExport({ entryLid: lid, as: 'markdown' }),
+    // 🔴 メールに貼れる下書き(#1459 段②)── 読み口・待ち・知らせは書き出しと同じ `deps` を通る
+    copyEntryMail: (lid) => void runExport({ entryLid: lid, as: 'mail' }),
     /**
      * 🔴 **このノートを別の窓で開く**(#685 段②、user 裁定 2026-09-04)。
      *

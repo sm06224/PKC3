@@ -2037,6 +2037,8 @@ export class InspectorRenderer {
     entryBtn('export-entry-pdf');
     // 🔴 本文そのままの .md(#1440)。2026-10-11 に右クリックだけから右の列にも並べた
     entryBtn('export-entry-markdown');
+    // 🔴 メールに貼れる下書き(#1459 段②)── Markdown の隣(どちらも本文の字を別の形で持ち出す)
+    entryBtn('copy-entry-mail');
     if (shape === 'entry+link') entryBtn('write-back-file');
     entryBtn('show-history');
     /**

@@ -248,3 +248,68 @@ test('🔴 右クリックのメニューにも「閲覧用 HTML」が並ぶ (#4
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });
+
+/**
+ * 🔴 **別のノートの章を集めた報告書を、閲覧用 HTML とメール下書きに出す**(#1459 段②)。
+ *
+ * > user の物語:議事録のノートの「決定事項」の章を、週報のノートから `![](entry:…#h/…)` で集めた。
+ * > **渡す**と、画面で出ていた章が空の枠になっていた。
+ *
+ * 🔑 観測点は**落ちてきた file とクリップボードの中身**(押せたかではない)。
+ * 🔴 対照群 ── 参照先の「次の章」は入らない(章の範囲で切れている)/ メールの字には記号が混ざらない。
+ */
+test('🔴 章を集めた報告書は、閲覧用 HTML にも メール下書きにも章が入る (#1459 段②)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await gotoApp(page);
+
+  // ── 参照先のノート(議事録)
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', 'minutes');
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    '# 議事録\n\n## 決定事項\n\n- 予算は承認された\n\n## 次の章\n\n別の話である。\n',
+  );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  const minutesLid = await page
+    .locator('[data-pkc-action="copy-entry-ref"][data-pkc-entry]')
+    .first()
+    .getAttribute('data-pkc-entry');
+  expect(minutesLid, '議事録の住所が取れない(前提が崩れた)').toBeTruthy();
+
+  // ── 報告書(議事録の章を集める)
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', 'weekly');
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    ['# 週報', '', '今週の**決定**:', '', `![決定事項](entry:${minutesLid}#h/決定事項)`, '', '以上'].join('\n'),
+  );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+
+  // ── 閲覧用 HTML: 章の中身が入り、次の章は入らない
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30_000 }),
+    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-html"]'),
+  ]);
+  const path = await download.path();
+  expect(path, 'file が落ちてきていない').not.toBeNull();
+  const html = readFileSync(path!, 'utf-8');
+  expect(html, '章の中身が書き出した HTML に入っていない').toContain('予算は承認された');
+  expect(html, '章の範囲を越えて次の章まで入った').not.toContain('別の話である');
+  await expect(page.locator('[data-pkc-region="status"]'), '展開した件数を言わない').toContainText('別のノートの章 1 件を展開');
+
+  // ── メール下書き: 件名つき・記号なし・章が展開される
+  await clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="copy-entry-mail"]');
+  await expect(page.locator('[data-pkc-region="status"]'), 'コピーの合図が出ない').toContainText('メール下書きをコピーしました');
+  const mail = await page.evaluate(() => navigator.clipboard.readText());
+  expect(mail.split('\n')[0], '1 行目が件名でない').toBe('件名: weekly');
+  expect(mail, '章の中身が入っていない').toContain('予算は承認された');
+  expect(mail, '次の章まで入った').not.toContain('別の話である');
+  expect(mail, '強調の記号が残っている').not.toContain('**');
+  expect(mail, '見出しの記号が残っている').not.toMatch(/^#/mu);
+  expect(mail, '見出しが読める字になっていない').toContain('【週報】');
+
+  expect(errors).toEqual([]);
+});
