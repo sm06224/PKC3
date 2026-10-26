@@ -150,7 +150,7 @@ describe('本文の右クリック(#426 段② / #522)', () => {
       b.getAttribute('data-pkc-action'),
     );
     // ⚠ 「ここに付箋を置く」(#676)は本文を書き換える物なので `BODY_MENU_ACTIONS` の外 ── 塊の並びの位置
-    expect(acts).toEqual(['add-place', 'add-place-note', 'add-place-template', ...BODY_MENU_ACTIONS.map((a) => a.action)]);
+    expect(acts).toEqual(['add-place', 'add-place-note', 'add-place-drawing', 'add-place-template', ...BODY_MENU_ACTIONS.map((a) => a.action)]);
     /**
      * 🔴 **「削除」を出さない。**
      * ⚠ 本文を押したのに削除が出ると、消えるのは**選んでいるノート**である ──
@@ -523,6 +523,8 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
       'move-block-step',
       'add-place',
       'add-place-note',
+      // ⚠ 「手書きして置く…」は #1448 で足した(「ノートを置く…」の次)
+      'add-place-drawing',
       'add-place-template',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
@@ -569,6 +571,8 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
       'move-block-step',
       'add-place',
       'add-place-note',
+      // ⚠ 「手書きして置く…」は #1448 で足した(「ノートを置く…」の次)
+      'add-place-drawing',
       'add-place-template',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
@@ -1426,7 +1430,7 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
   const NESTED = ':::section\n入れ子の中\n:::';
   const BOARD = ':::format{.pkc-place x=40 y=40 w=320 h=200 entry=n2}\n### 買い出し\n- 牛乳\n:::';
 
-  function rig(body = FULL, archetype = 'text') {
+  function rig(body = FULL, archetype = 'text', extra: Partial<BinderServices> = {}) {
     document.body.textContent = '';
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
@@ -1445,6 +1449,7 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
       copyText: (t, done) => {
         copied.push({ text: t, done });
       },
+      ...extra,
     });
     d.dispatch({
       type: 'SYS_BOOTED',
@@ -1882,6 +1887,59 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     await settle();
     expect(asks).toHaveLength(1);
     expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-add', x: 37, y: 61, entry: 'n2' } });
+  });
+
+  /**
+   * 🔴 **手書きして置く**(#1448)。窓で描いて保存した添付の lid が、押した座標の付箋(`entry=`)として書かれる。
+   * ⚠ 見るのは配線 ── メニュー → `drawBlank(板のノート, onSaved)` → 保存の通知 → `place-add`(entry = 添付)。
+   *   窓の中身そのものは `tests/adapter/image-draw-blank.test.ts` が守る。
+   */
+  it('🔴 「手書きして置く…」→ 保存された添付が、押した座標で entry つきの place-add になる / 描いている間に別のノートへ移ったら置かない', async () => {
+    resetAppDialogForTest();
+    let savedCb: ((lid: string) => void) | null = null;
+    const drawn: string[] = [];
+    const r = rig(FULL, 'text', {
+      drawBlank: (lid, onSaved) => {
+        drawn.push(lid);
+        savedCb = onSaved;
+      },
+    });
+    r.d.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'attachment',
+      lid: 'att',
+      title: '手書き',
+      body: '',
+      edit: false,
+      keepSelection: true,
+    });
+    const asks = asksOf(r.d);
+    rightClickAt(r.q('p[data-pkc-source-line="2"]'), 37, 61);
+    expect(r.label('add-place-drawing')).toBe('手書きして置く…');
+    r.press('add-place-drawing');
+    expect(drawn, '板のノートの lid で白紙を開いていない').toEqual(['n1']);
+    expect(asks, '描く前に書いた').toHaveLength(0);
+    savedCb!('att');
+    await settle();
+    expect(asks).toHaveLength(1);
+    expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-add', x: 37, y: 61, entry: 'att' } });
+
+    // 対照群: 描いている間に別のノートへ移ったら、板には置かない
+    resetAppDialogForTest();
+    const r2 = rig(FULL, 'text', {
+      drawBlank: (_lid, onSaved) => {
+        savedCb = onSaved;
+      },
+    });
+    r2.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'attachment', lid: 'att', title: '手書き', body: '', edit: false, keepSelection: true });
+    const asks2 = asksOf(r2.d);
+    rightClickAt(r2.q('p[data-pkc-source-line="2"]'), 37, 61);
+    r2.press('add-place-drawing');
+    r2.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    r2.d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: 'x\n' });
+    savedCb!('att');
+    await settle();
+    expect(asks2, '別のノートへ移ったのに板へ置いた').toHaveLength(0);
   });
 
   it('🔴 板の上の「位置と大きさ…」→ いまの値で開き、全角で決めると place-rect の依頼。やめるなら 1 本も出ない', async () => {

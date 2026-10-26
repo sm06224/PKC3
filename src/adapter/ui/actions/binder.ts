@@ -403,6 +403,7 @@ import {
   ADD_PLACE_ACTION,
   PLACE_RENAME_ACTION,
   ADD_PLACE_NOTE_ACTION,
+  ADD_PLACE_DRAWING_ACTION,
   ADD_PLACE_TEMPLATE_ACTION,
   placeLineMenuActions,
   PLACE_STYLE_KEYS_ATTR,
@@ -2226,6 +2227,11 @@ export interface BinderServices {
    * ⚠ `mime` は**押した要素が運ぶ**(`viewAsset` と同じ理由)。
    */
   drawOnImage?(assetKey: string, name: string, mime: string, lid?: string): void;
+  /**
+   * 🔴 **白紙から手書きする**(#1448)。`lid` = 呼び出したノート(置き場のフォルダを引く起点)、
+   * `onSaved` = 保存した添付のノートの lid を受ける(板の上から呼ぶときは、それを板に置く)。
+   */
+  drawBlank?(lid: string, onSaved: (attachedLid: string) => void): void;
   /**
    * 🔴 **画面に出ている絵を、別窓で大きく見る**(#527。user 指示 2026-08-28
    * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
@@ -13864,6 +13870,38 @@ const ACTIONS: Record<string, ActionHandler> = {
     });
   },
   /**
+   * 🔴 **白紙に手書きして、板に置く**(#1448)── 別のウィンドウで描いて保存すると、新しい画像の添付ができ、
+   * `add-place` と同じ座標・同じ門(`ADD_PLACE`)で、その添付の付箋(`entry=`)を押した位置へ書く。
+   * ⚠ 窓は押した瞬間(同期)に開く(ポップアップを止められない)。描いている間に別のノートへ移ったら置かない
+   *   (絵は添付として残る ── 知らせの「開く」で開ける)。
+   */
+  'add-place-drawing': (dispatcher, target, services) => {
+    if (refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    const x = menuCarriedAt(target, MENU_X_ATTR);
+    const y = menuCarriedAt(target, MENU_Y_ATTR);
+    if (ob === null || x === null || y === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '置く位置を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const lid = ob.lid;
+    if (services.drawBlank === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では、白紙から手書きできません' });
+      return;
+    }
+    services.drawBlank(lid, (attachedLid) => {
+      const st = dispatcher.getState();
+      if (st.openBody?.lid !== lid) {
+        dispatcher.dispatch({ type: 'OP_NOTICE', message: '別のノートに切り替わったので、手書きは板に置いていません(添付として保存しました)', open: attachedLid });
+        return;
+      }
+      if (!st.entryMetas.has(attachedLid)) return;
+      placeEditedElsewhereGate(dispatcher, services, lid, '手書きを板に置けませんでした', () =>
+        dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y, entry: attachedLid }),
+      );
+    });
+  },
+  /**
    * 🔴 **テンプレートから板を置く**(#529 W4)── 窓で 1 つ選ぶと、`add-place` と同じ座標・同じ門
    * (`ADD_PLACE`)で書く。「やめる」/ `Escape` なら何もしない。
    * ⚠ 窓が開いている間に別のノートへ移ったら置かない(`ob.lid` を窓の前後で照らす)。
@@ -22064,6 +22102,7 @@ export function bindActions(
         // 🔴 板を置く口は**いつも**出す(#676)── 押した座標は下の carry が運ぶ
         ADD_PLACE_ACTION,
         ADD_PLACE_NOTE_ACTION,
+        ADD_PLACE_DRAWING_ACTION,
         ADD_PLACE_TEMPLATE_ACTION,
         ...body,
       ];

@@ -368,7 +368,7 @@ import { createWiredCaptureProcessor } from '@adapter/ui/actions/capture-process
 import { createCaptureJobGate } from '@adapter/ui/actions/capture-job-gate';
 import { createCaptureTools } from '@adapter/ui/actions/capture-tools';
 import { processToolOf } from '@features/capture/capture-process';
-import { createImageDrawer } from '@adapter/ui/actions/image-draw';
+import { BLANK_DRAWING_SIDE, createImageDrawer } from '@adapter/ui/actions/image-draw';
 import { openImageDrawWindow } from '@adapter/platform/image-draw-window';
 import { AudioClient } from '@adapter/platform/audio/audio-client';
 import { VideoClient } from '@adapter/platform/video/video-client';
@@ -3905,6 +3905,26 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const imageDrawer = createImageDrawer({
     dispatcher,
+    // 🔴 白紙の台(#1448)── 白い PNG を 1 枚焼く。⚠ 焼いたあとの canvas は寸法を 0 にして手放す(即破棄)
+    blank: () =>
+      new Promise<Blob>((resolve, reject) => {
+        const c = document.createElement('canvas');
+        c.width = BLANK_DRAWING_SIDE.width;
+        c.height = BLANK_DRAWING_SIDE.height;
+        const g = c.getContext('2d');
+        if (g === null) {
+          reject(new Error('描く台を作れませんでした'));
+          return;
+        }
+        g.fillStyle = '#ffffff';
+        g.fillRect(0, 0, c.width, c.height);
+        c.toBlob((b) => {
+          c.width = 0;
+          c.height = 0;
+          if (b === null) reject(new Error('画像にできませんでした'));
+          else resolve(b);
+        }, 'image/png');
+      }),
     readBlob: (assetKey) => blobs.get(cid, assetKey),
     // 🔴 置き場は PDF の保存(`save-edited`)と同じ:元の添付と同じフォルダ
     parentOf: (lid) => {
@@ -4693,6 +4713,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     drawOnImage: (assetKey, name, mime, lid) => {
       void imageDrawer.run(assetKey, name, mime, lid);
+    },
+    // 🔴 白紙から手書きして、板に置く(#1448)── 段取りは `image-draw.ts`。ここは口を渡すだけ
+    drawBlank: (lid, onSaved) => {
+      void imageDrawer.runBlank(lid, onSaved);
     },
     /**
      * 🔴 **本文に入れた添付のリンクを押したとき**(#1163 依頼 55 の 1・2)。
