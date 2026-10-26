@@ -17,6 +17,7 @@
  *   (`format-bar.smoke.spec.ts` / `live-editor.smoke.spec.ts`)が見る。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CARET_HINT } from '../../src/features/markdown/caret-hint';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -618,5 +619,33 @@ describe('🔴 caret が表の行に在るとき「Tab で次のセル」(#1451)
     flush();
     expect(slot.textContent, '表でなくなったのに案内が残った').toBe('');
     un();
+  });
+});
+
+describe('🔴 caret がコード・数式・frontmatter の中に在るとき案内が出る(#1451 の続き)', () => {
+  const DOC = '---\ntitle: x\n---\n本文\n```js\nlet a = 1;\n```\n$$\nx^2\n$$\n終わり';
+  const at = (s: string): number => DOC.indexOf(s);
+  it('4 つの場所で出る / 外では空(対照群)/ 行の欄では出ない', () => {
+    const { region, slot, ta } = surface('editor-body', DOC);
+    const un = watchSelectionStats(region);
+    select(ta, at('title') + 2, at('title') + 2);
+    expect(slot.textContent).toBe(CARET_HINT.frontmatter);
+    select(ta, at('本文') + 1, at('本文') + 1);
+    expect(slot.textContent, 'frontmatter の外').toBe('');
+    select(ta, at('let') + 2, at('let') + 2);
+    expect(slot.textContent).toBe(CARET_HINT.code);
+    select(ta, at('x^2') + 1, at('x^2') + 1);
+    expect(slot.textContent).toBe(CARET_HINT.math);
+    select(ta, DOC.length, DOC.length);
+    expect(slot.textContent, '数式を閉じた後').toBe('');
+    select(ta, at('let'), at('let') + 3);
+    expect(slot.textContent).toBe('選択: 3 文字(1 行)');
+    un();
+    document.body.textContent = '';
+    const row = surface('row-source', 'let a = 1;');
+    const un2 = watchSelectionStats(row.region);
+    select(row.ta, 2, 2);
+    expect(row.slot.textContent, '行の欄は柵が見えない').toBe('');
+    un2();
   });
 });
