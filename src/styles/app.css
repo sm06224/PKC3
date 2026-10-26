@@ -3990,6 +3990,23 @@ li[data-pkc-row-slot] {
 }
 
 /**
+ * 🔴 **本文の `[[題名]]`(押すとその題名のノートを開く / 無ければ作る案内)**(#1174 段②)。
+ *
+ * ある物はリンクの色 + 下線、**まだ無い物は薄い字 + 点線**(「リンク先が無い」と同じ見え方 ──
+ * 同じ意味に同じ見た目)。🔴 `[data-pkc-prose]` 起点(日付と同じ理由 ── 書き出し HTML へ焼かない)。
+ */
+[data-pkc-prose] .pkc-title-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+[data-pkc-prose] .pkc-title-link[data-pkc-link-missing] {
+  color: var(--muted);
+  text-decoration: underline dotted;
+}
+
+/**
  * 🔴 **日付に見えるのに読めない `@…` の横の「日付として読めません」**(台帳 #1852 束 E1 ── 依頼 283 の B)。
  *
  * 色は `--muted`(無彩色)・小さめ ── 書きかけを赤で責めない。「読めていない」ことは字で言う。

@@ -2369,5 +2369,44 @@ describe('ブロック単位のコピー ── 添付ごと (#677 の残り)', 
     await vi.waitFor(() => expect(r.copied).toHaveLength(1));
     expect(r.copied[0]!.text).toContain('![図2](asset:img2)');
     expect(r.copied[0]!.done).toContain('読めなかった画像 1 件');
+
+describe('本文の日付の右クリック(#1169 段②)', () => {
+  const dateSpan = (s: ReturnType<typeof setup>, date: string): Element => {
+    const span = document.createElement('span');
+    span.className = 'pkc-date-link';
+    span.setAttribute('data-pkc-action', 'open-date-note');
+    span.setAttribute('data-pkc-date', date);
+    span.textContent = '@' + date;
+    s.root.querySelector('[data-pkc-field="detail-body"]')!.append(span);
+    return span;
+  };
+  const acts = (s: ReturnType<typeof setup>): string[] =>
+    [...s.root.querySelectorAll(MENU + ' [data-pkc-action]')].map((b) => b.getAttribute('data-pkc-action') ?? '');
+
+  it('🔴 日付の上では「予定でこの日を見る」が頭に出て、押すと予定のタブでその日になる', () => {
+    const modes: string[] = [];
+    const s = setup({ setBrowse: (m) => modes.push(m) });
+    rightClick(dateSpan(s, '2026-10-15'));
+    expect(acts(s)[0]).toBe('show-schedule-day');
+    s.root.querySelector<HTMLElement>(MENU + ' [data-pkc-action="show-schedule-day"]')!.click();
+    expect(s.dispatcher.getState().scheduleDay).toBe('2026-10-15');
+    expect(s.dispatcher.getState().scheduleNarrowMode).toBe('day');
+    expect(modes, '左のペインが予定のタブにならない').toEqual(['schedule']);
+  });
+
+  it('対照群: 日付でない字の上には出ない', () => {
+    const s = setup();
+    rightClick(s.para);
+    expect(acts(s)).not.toContain('show-schedule-day');
+  });
+
+  it('🔴 暦に無い日付(属性が書き換わった)は、タブを切り替えず理由を言う', () => {
+    const modes: string[] = [];
+    const s = setup({ setBrowse: (m) => modes.push(m) });
+    rightClick(dateSpan(s, '2026-02-31'));
+    s.root.querySelector<HTMLElement>(MENU + ' [data-pkc-action="show-schedule-day"]')!.click();
+    expect(modes).toEqual([]);
+    expect(s.dispatcher.getState().scheduleDay).toBeNull();
+    expect(s.dispatcher.getState().error, '黙って終わった').toContain('2026-02-31');
   });
 });

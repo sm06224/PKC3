@@ -116,3 +116,28 @@ describe('renameLinkTexts(worker の 1 tx)', () => {
     expect(r.links).toBe(0);
   });
 });
+
+describe('[[題名]] の書き換え(#1174 段②)', () => {
+  const T = 'ウィキ旧題';
+  it('🔴 改名で [[旧題]] / [[旧題|表示]] も新しい題名になる(コードの中・別の題名は触らない)', async () => {
+    await put('wt', '的\n', { title: T, entryOrder: 10 });
+    const fence = '```';
+    const body = `前 [[${T}]] と [[${T}|表示]] と [[別の題名]]\n${fence}\n[[${T}]]\n${fence}\n`;
+    await put('wl', body, { entryOrder: 11 });
+    const r = await request({ op: 'renameLinkTexts', cid: CID, lid: 'wt', oldTitle: T, newTitle: 'ウィキ新題', skipLids: [] });
+    expect(r.wrote.map((w) => w.lid)).toEqual(['wl']);
+    expect(r.links).toBe(2);
+    expect(await bodyOf('wl')).toBe(
+      `前 [[ウィキ新題]] と [[ウィキ新題|表示]] と [[別の題名]]\n${fence}\n[[${T}]]\n${fence}\n`,
+    );
+  });
+
+  it('🔴 同じ題名のノートがほかにも在るときは書き換えない(どちらを指していたか分からない)', async () => {
+    await put('dt1', '的\n', { title: '重複題', entryOrder: 20 });
+    await put('dt2', '的\n', { title: '重複題', entryOrder: 21 });
+    await put('dl', '[[重複題]]\n', { entryOrder: 22 });
+    const r = await request({ op: 'renameLinkTexts', cid: CID, lid: 'dt2', oldTitle: '重複題', newTitle: '重複題の改', skipLids: [] });
+    expect(r.wrote).toEqual([]);
+    expect(await bodyOf('dl')).toBe('[[重複題]]\n');
+  });
+});

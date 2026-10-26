@@ -980,6 +980,17 @@ export function headingMenuActions(ctx: {
 }
 
 /**
+ * 🔴 **本文の `@2026-10-15` の上で右クリックしたときに増える 1 つ**(#1169 段②)。
+ *
+ * 左クリックは「その日付のノートを開く」(`open-date-note`)。右クリックでは同じ日を
+ * **左の列の予定のタブ(日の表示)で見る** ── 日付は日々のノートと予定表の両方の入り口なので、
+ * 2 つの行き先を 1 つの字から選べるようにする。頭へ足す(本文のメニューは残す)。
+ */
+export function dateMenuActions(): readonly EntryAction[] {
+  return [{ action: 'show-schedule-day', label: '予定でこの日を見る' }];
+}
+
+/**
  * 🔴 **`:::` の塊の上で出す物**(#677)。
  *
  * ⚠ 板(`.pkc-place` の format 塊)は user の目には「付箋」なので、字を分ける ──

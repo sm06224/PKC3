@@ -406,6 +406,7 @@ import {
   editingRowMenuActions,
   entryMenuActions,
   headingMenuActions,
+  dateMenuActions,
   menuShortcutFor,
   NOTE_TOOL_ACTIONS,
   noteToolActions,
@@ -5945,6 +5946,11 @@ function leaveSectionDraftOrAsk(
   }) === 'sync';
 }
 
+/** `[[題名]]` の題名として読めるか(空でない・200 字まで・改行を含まない。markdown 側の綴りと同じ範囲)。 */
+function isNoteTitleText(t: string): boolean {
+  return t.trim() !== '' && t.length <= 200 && !/[\r\n]/.test(t);
+}
+
 /**
  * 本文の日付(`@2026-10-15`)が指すノートを探して、**あれば開く**(#1169)。
  *
@@ -5962,11 +5968,16 @@ function resolveDateNote(
   rawDate: string | null,
   root: HTMLElement,
   services: BinderServices,
+  /** 🔴 日付でない題名も受けるか(`[[題名]]` のノート。#1174 段②)。⚠ 日付を押す側(`open-date-note`)は受けない。 */
+  allowTitle = false,
 ): string | null {
   const date = rawDate ?? '';
   // ⚠ 属性は書き換えられうる ── 実在する日でなければ、ノートを作らない
-  if (!isRealCalendarDate(date)) {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: '日付の書き方が読めません' });
+  if (!isRealCalendarDate(date) && !(allowTitle && isNoteTitleText(date))) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: allowTitle ? 'ノートの題名が読めません' : '日付の書き方が読めません',
+    });
     return null;
   }
   const what = `${date} のノート`;
@@ -6009,6 +6020,24 @@ function openDateNote(
 }
 
 /**
+ * 本文の `[[題名]]` を押した(#1174 段②)。題名のノートがあれば開き、**無ければ作るかどうかを聞く**(作らない)。
+ * 🔑 日付のノートと**同じ道**(`resolveDateNote` → 知らせ + 「○○のノートを作る」)── 日付は題名の特別な場合である。
+ * ⚠ 作らないのは、打ち間違いの題名でノートが増えないようにするため(日付と同じ)。
+ */
+function openTitleNote(
+  dispatcher: Dispatcher,
+  rawTitle: string | null,
+  root: HTMLElement,
+  services: BinderServices,
+): void {
+  const title = resolveDateNote(dispatcher, rawTitle, root, services, true);
+  if (title === null) return;
+  const message = dateNoteMissingNotice(title);
+  dispatcher.dispatch({ type: 'OP_NOTICE', message, createDate: title });
+  services.showStatus?.(message, { post: false });
+}
+
+/**
  * 画面の下の「○○のノートを作る」を押した。**作って、開く**(編集には入らない)。
  * ⚠ 編集に入らない ── 読んでいた本文から日付を押しただけで、書く気になったとは限らない
  *   (予定の面から足すときと同じ作り)。
@@ -6020,7 +6049,8 @@ function createDateNote(
   root: HTMLElement,
   services: BinderServices,
 ): void {
-  const date = resolveDateNote(dispatcher, rawDate, root, services);
+  // 🔑 押し口は日付のノートと `[[題名]]` のノートで同じ 1 つ(`create-date-note`)── 題名も受ける(#1174 段②)
+  const date = resolveDateNote(dispatcher, rawDate, root, services, true);
   if (date === null) return;
   const lid = generateLid();
   dispatcher.dispatch({
@@ -9787,6 +9817,37 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'open-date-note': (dispatcher, target, services, root) => {
     openDateNote(dispatcher, target.getAttribute('data-pkc-date'), root, services);
+  },
+  /**
+   * 🔴 **本文の日付を右クリック →「予定でこの日を見る」**(#1169 段②)。
+   * 左の列を**予定のタブ**に切り替え、見ている日をその日にする(中央の本文は動かさない ── 補助が主を奪わない)。
+   * ⚠ 畳んでいる左の列は開く(押したのに見えない dead click を作らない)。
+   * ⚠ 日が壊れていれば reducer(`SET_SCHEDULE_DAY`)が捨てるので、タブも切り替えない。
+   */
+  'show-schedule-day': (dispatcher, target, services, root) => {
+    const date = target.getAttribute('data-pkc-date') ?? '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    dispatcher.dispatch({ type: 'SET_SCHEDULE_DAY', date });
+    if (dispatcher.getState().scheduleDay !== date) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${date} は存在しない日付です` });
+      return;
+    }
+    dispatcher.dispatch({ type: 'SET_SCHEDULE_NARROW_MODE', mode: 'day' });
+    const hidden = (
+      root.querySelector('[data-pkc-region="shell"]')?.getAttribute('data-pkc-hidden-panes') ?? ''
+    ).split(' ');
+    if (hidden.includes('sidebar'))
+      root
+        .querySelector<HTMLElement>('[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]')
+        ?.click();
+    services.setBrowse?.('schedule');
+  },
+  /**
+   * 🔴 **本文の `[[題名]]` を押すと、その題名のノートを開く**(#1174 段②)。無ければ画面の下に「作る」を出す。
+   * 題名は押した字が焼いた `data-pkc-title`。
+   */
+  'open-title-note': (dispatcher, target, services, root) => {
+    openTitleNote(dispatcher, target.getAttribute('data-pkc-title'), root, services);
   },
   /** 🔴 画面の下の「○○のノートを作る」── 作って、開く(`open-date-note` の続き)。 */
   'create-date-note': (dispatcher, target, services, root) => {
@@ -21600,7 +21661,16 @@ export function bindActions(
           : false;
       // 🔴 ブロックを上下へ 1 つ動かす(台帳 #1852 束 S1、依頼 238 の案 B)。指で⠿を掴めない端末の道
       const steps = host === null || ob === null ? null : blockStepsAt(host, target, ob.body);
+      /**
+       * 🔴 **本文の日付(`@2026-10-15`)の上なら「予定でこの日を見る」を頭に足す**(#1169 段②)。
+       * ⚠ 日は**押した字が焼いた `data-pkc-date`**(実在する日だけが押せる字になる ── 描く側の門)から引く。
+       */
+      const dateEl = target.closest<HTMLElement>('.pkc-date-link[data-pkc-date]');
+      const dateKey = dateEl?.getAttribute('data-pkc-date') ?? null;
       const items = [
+        ...(dateKey === null
+          ? []
+          : dateMenuActions().map((a) => ({ ...a, attrs: { 'data-pkc-date': dateKey } }))),
         ...(heading === null || line === null
           ? []
           : headingMenuActions({

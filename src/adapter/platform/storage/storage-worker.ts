@@ -76,7 +76,7 @@ import { readVersions, totalHistoryBytes } from '@features/flavor/attachment-ver
 import { planSaveBack } from '@features/asset/asset-replace-plan';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { bodyLinkNeedles, bodyLinksTo } from '@features/entry-ref/body-links';
-import { renameLinkTexts } from '@features/entry-ref/link-text-rename';
+import { renameLinkTexts, renameTitleLinks } from '@features/entry-ref/link-text-rename';
 import {
   SNIPPET_ARCHETYPE,
   SNIPPET_LIMITS,
@@ -4730,6 +4730,16 @@ const handlers: Handlers = {
     database.exec('BEGIN IMMEDIATE');
     try {
       const needles = bodyLinkNeedles(req.lid, req.cid);
+      /**
+       * 🔴 **`[[旧い題名]]` も候補に入れる**(#1174 段②)。⚠ 同じ題名のノートが**ほかにも在る**ときは書き換えない
+       *   (`[[題名]]` は先に作られたほうを指すので、どちらを指していたか分からない ── 誤って付け替えない)。
+       */
+      const dup = database.selectObjects(
+        `SELECT 1 AS x FROM entries WHERE cid = ?1 AND lid <> ?2 AND title = ?3 AND archived = 0 AND ${USER_REALM_SQL} LIMIT 1`,
+        [req.cid, req.lid, req.oldTitle],
+      );
+      const titleLinks = dup.length === 0 && req.oldTitle.trim() !== '';
+      if (titleLinks) needles.push(`[[${req.oldTitle.trim()}`);
       const where = needles.map((_, i) => `body LIKE ?${i + 3} ESCAPE '\\'`).join(' OR ');
       const rows = database.selectObjects(
         `SELECT lid, title, archetype, body, entry_order FROM entries
@@ -4742,7 +4752,11 @@ const handlers: Handlers = {
       let links = 0;
       for (const r of rows) {
         if (skip.has(r.lid)) continue;
-        const res = renameLinkTexts(r.body, req.lid, req.cid, req.oldTitle, req.newTitle);
+        const first = renameLinkTexts(r.body, req.lid, req.cid, req.oldTitle, req.newTitle);
+        const second = titleLinks
+          ? renameTitleLinks(first.body, req.oldTitle, req.newTitle)
+          : { body: first.body, count: 0 };
+        const res = { body: second.body, count: first.count + second.count };
         if (res.count === 0) continue;
         const ext = extractMeta(r.archetype, res.body);
         const w = writeEntryRow(
