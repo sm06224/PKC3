@@ -2188,6 +2188,11 @@ export interface BinderServices {
    */
   adoptLinkIcon?(url: string): Promise<{ ok: true; assetKey: string } | { ok: false; why: string }>;
   /**
+   * 🔴 **選んだ画像を、アプリの目印として置く**(#856 段③)。通信しない(門は要らない)。
+   * ⚠ 判断(画像か・大きさ)は `adopt-icon-file.ts` に在る ── ここは配線だけ。
+   */
+  adoptIconFile?(file: File): Promise<{ ok: true; assetKey: string } | { ok: false; why: string }>;
+  /**
    * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF を追加)。
    * ⚠ 実体は adapter/platform 側(ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
    * ⚠ `mime` は**押した要素が運ぶ** ── 開く側で引き直さない。
@@ -3171,6 +3176,21 @@ const TAG_INPUT_ADD: ReadonlyMap<string, string> = new Map([
  *   だから起動だけでなく**設定の口も**ここを通す(#848)。
  * 🔑 綴りは `render/target-lid.ts` の 1 か所(§7)。
  */
+/**
+ * 🔴 **タイルの目印を書き、書けたかをその場で確かめる**(#856 段②・③の共通)。
+ * ⚠ `SET_APP_TILE` は `phase !== 'ready'` や別の lid の書込中を黙って捨てる。取りに行った / 選んだ後に
+ *   捨てられると「押したのに何も起きない」になるので、受かれば `tileWrite` がこの lid で 1 つ進むことで確かめ、
+ *   進んでいなければ `failure` を言う。
+ */
+function setTileIconChecked(dispatcher: Dispatcher, lid: string, assetKey: string, failure: string): void {
+  const was = dispatcher.getState().tileWrite;
+  const mine = was !== null && was.lid === lid ? was.n : 0;
+  dispatcher.dispatch({ type: 'SET_APP_TILE', lid, iconAssetKey: assetKey });
+  const now = dispatcher.getState().tileWrite;
+  if (now !== null && now.lid === lid && now.n === mine + 1) return;
+  dispatcher.dispatch({ type: 'OP_FAILED', error: failure });
+}
+
 function targetLid(dispatcher: Dispatcher, target: HTMLElement): string | null {
   return target.getAttribute(TARGET_LID_ATTR) ?? dispatcher.getState().selectedLid;
 }
@@ -3265,6 +3285,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    *   少なくとも**押す時点**では止める。
    */
   'adopt-link-icon',
+  // 🔴 画像を選んで目印にするのも `SET_APP_TILE` を撃つ(#856 段③)
+  'pick-icon-file',
   'toggle-todo',
   /**
    * 🔴 **本文を書く点では `toggle-todo` と同じ**(2026-08-19 のレビュー W-4)。
@@ -14048,21 +14070,26 @@ const ACTIONS: Record<string, ActionHandler> = {
          * 🔑 受かったかは**この場で読める** ── 受かれば `tileWrite` がこの lid で
          *   1 つ進む。進んでいなければ**捨てられた**ので、黙らずに言う。
          */
-        const was = dispatcher.getState().tileWrite;
-        const mine = was !== null && was.lid === lid ? was.n : 0;
-        dispatcher.dispatch({ type: 'SET_APP_TILE', lid, iconAssetKey: got.assetKey });
-        const now = dispatcher.getState().tileWrite;
-        if (now !== null && now.lid === lid && now.n === mine + 1) return;
-        dispatcher.dispatch({
-          type: 'OP_FAILED',
-          error: 'リンク先のアイコンは取れましたが、ほかの保存が動いているので入れられませんでした(もう一度押してください)',
-        });
+        setTileIconChecked(dispatcher, lid, got.assetKey, 'リンク先のアイコンは取れましたが、ほかの保存が動いているので入れられませんでした(もう一度押してください)');
       })
       .finally(() => {
         adoptingLinkIcons.delete(lid);
         // ⚠ `render` が組み直していれば、この器はもう画面に無い(触っても害は無い)
         if (btn !== null && label !== null) btn.textContent = label;
       });
+  },
+  /**
+   * 🔴 **手元の画像を、アプリの目印にする**(#856 段③)。ファイルを選ぶ欄を開く ──
+   * 効く先は**押したボタンが持つ**(留めた枠でも、その枠のノートに効く。`replace-attachment-file` と同じ作法)。
+   * 選んだあとは `change`(`icon-file-input`)が受ける。
+   */
+  'pick-icon-file': (dispatcher, target, _services, root) => {
+    const lid = targetLid(dispatcher, target);
+    if (!lid) return;
+    const input = root.querySelector<HTMLInputElement>('[data-pkc-field="icon-file-input"]');
+    if (input === null) return;
+    input.setAttribute('data-pkc-icon-lid', lid);
+    input.click();
   },
   'pick-app-icon': (dispatcher, target) => {
     // 🔴 押した絵が「効く先」も持つ(#848)── 表は留めた枠にも出る
@@ -18843,6 +18870,21 @@ export function bindActions(
       const files = el.files ? [...el.files] : [];
       el.value = ''; // 同じファイルの再選択でも change が発火するように
       if (files.length > 0) services.importFiles?.(files);
+    } else if (field === 'icon-file-input') {
+      // 🔴 目印にする画像(#856 段③)── 1 件だけ。同じ file を選び直せるよう値は戻す(File は掴んである)
+      const file = el.files?.[0] ?? null;
+      const lid = el.getAttribute('data-pkc-icon-lid') ?? '';
+      el.value = '';
+      el.removeAttribute('data-pkc-icon-lid');
+      const go = services.adoptIconFile;
+      if (file === null || lid === '' || go === undefined) return;
+      void go(file).then((got) => {
+        if (!got.ok) {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `アイコンにできませんでした: ${got.why}` });
+          return;
+        }
+        setTileIconChecked(dispatcher, lid, got.assetKey, '画像は取り込めましたが、ほかの保存が動いているので入れられませんでした(もう一度選んでください)');
+      });
     } else if (field === 'replace-input') {
       // 🔴 添付のファイルの差し替え(#1163 依頼 212)── 1 件だけ。同じファイルをもう一度選べるよう値は戻す
       const file = el.files?.[0] ?? null;

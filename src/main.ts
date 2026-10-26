@@ -325,6 +325,7 @@ import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-form
 import { createNameDeduper, pastedFileName } from '@features/asset/pasted-image-name';
 import { adoptUrls, fetchImageBlob, HttpStatusError } from '@adapter/ui/actions/adopt-urls';
 import { adoptLinkIcon } from '@adapter/ui/actions/adopt-favicon';
+import { adoptIconFile } from '@adapter/ui/actions/adopt-icon-file';
 import { waitForWindowClose } from '@adapter/platform/window-close';
 import { copyPlainText } from '@adapter/platform/clipboard';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -4605,6 +4606,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   「画像ではありませんでした」に化けて**直しようが無くなる**(`adoptUrls` と同じ)。
      * ⚠ ページの原文は `text/html` なので `fetchImageBlob` を通さない(別の口で読む)。
      */
+    adoptIconFile: (file) => adoptIconFile({ gate: withAssetGate, attach: attachDeps }, file),
     adoptLinkIcon: (url) =>
       adoptLinkIcon(
         {

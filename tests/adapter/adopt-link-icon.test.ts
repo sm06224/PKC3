@@ -76,6 +76,7 @@ afterEach(() => {
 function setup(
   body: string,
   adopt?: (url: string) => Promise<{ ok: true; assetKey: string } | { ok: false; why: string }>,
+  adoptFile?: (file: File) => Promise<{ ok: true; assetKey: string } | { ok: false; why: string }>,
 ) {
   const root = document.createElement('div');
   document.body.append(root);
@@ -89,7 +90,10 @@ function setup(
     return raw(a);
   }) as typeof d.dispatch;
   d.onState((s) => detail.render(s));
-  bindActions(root, d, adopt === undefined ? {} : { adoptLinkIcon: adopt });
+  bindActions(root, d, {
+    ...(adopt === undefined ? {} : { adoptLinkIcon: adopt }),
+    ...(adoptFile === undefined ? {} : { adoptIconFile: adoptFile }),
+  });
   const bodies: Record<string, string> = { a1: body };
   connectStoreEffects(d, {
     ...stubRevisionOps(),
@@ -302,5 +306,68 @@ describe('字を選んだら、取り込んだ絵は外れる(#856 段②)', () 
     h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', icon: '' });
     await tick(40);
     expect(h.bodies.a1, '「なし」を押したのに絵が残った').not.toContain('app_icon_asset_key');
+  });
+});
+
+describe('手元の画像をアイコンにする(#856 段③)', () => {
+  const pick = (h: ReturnType<typeof setup>) => h.q<HTMLButtonElement>('[data-pkc-field="pick-icon-file"]');
+  const fileInput = (h: ReturnType<typeof setup>) => h.q<HTMLInputElement>('[data-pkc-field="icon-file-input"]');
+  /** 選ぶ欄に file を載せて change を撃つ(実ブラウザの選択と同じ向き)。 */
+  function choose(input: HTMLInputElement, file: File): void {
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  it('🔴 どのタイルにも出る(アドレスのタイルにも、添付の HTML にも)', async () => {
+    for (const body of [urlBody(), appBody()]) {
+      document.body.textContent = '';
+      const h = setup(body);
+      await tick();
+      expect(pick(h), '画像を選ぶボタンが出ていない').not.toBeNull();
+      expect(fileInput(h), '選ぶ欄が shell に無い').not.toBeNull();
+    }
+  });
+
+  it('🔴 押すと選ぶ欄が開き、効く先は押したボタンのノートになる', async () => {
+    const h = setup(urlBody());
+    await tick();
+    const input = fileInput(h)!;
+    const click = vi.spyOn(input, 'click').mockImplementation(() => {});
+    pick(h)!.click();
+    expect(click, '選ぶ欄を開いていない').toHaveBeenCalledTimes(1);
+    expect(input.getAttribute('data-pkc-icon-lid')).toBe('a1');
+  });
+
+  it('🔴 選んだ画像の鍵が本文に着地する(アドレスの無い HTML のアプリでも)', async () => {
+    for (const body of [urlBody(), appBody()]) {
+      document.body.textContent = '';
+      const got: File[] = [];
+      const h = setup(body, undefined, async (f) => {
+        got.push(f);
+        return { ok: true as const, assetKey: 'kf1' };
+      });
+      await tick();
+      const input = fileInput(h)!;
+      vi.spyOn(input, 'click').mockImplementation(() => {});
+      pick(h)!.click();
+      choose(input, new File([new Uint8Array(4)], 'i.png', { type: 'image/png' }));
+      await tick(40);
+      expect(got.map((f) => f.name), '選んだ画像が渡っていない').toEqual(['i.png']);
+      expect(h.bodies.a1, '鍵が本文に書かれていない').toContain('attachment.app_icon_asset_key: kf1');
+      expect(input.value, '同じ画像を選び直せるよう値を戻す').toBe('');
+      expect(input.hasAttribute('data-pkc-icon-lid'), '効く先の印が残っている').toBe(false);
+    }
+  });
+
+  it('🔴 置けなかったら理由を出し、本文は書かない', async () => {
+    const h = setup(urlBody(), undefined, async () => ({ ok: false as const, why: '画像ではありません' }));
+    await tick();
+    const input = fileInput(h)!;
+    vi.spyOn(input, 'click').mockImplementation(() => {});
+    pick(h)!.click();
+    choose(input, new File([new Uint8Array(4)], 'x.txt', { type: 'text/plain' }));
+    await tick(40);
+    expect(errorOf(h) ?? '', '理由が出ていない').toContain('画像ではありません');
+    expect(h.bodies.a1, '置けていないのに鍵を書いた').not.toContain('app_icon_asset_key');
   });
 });

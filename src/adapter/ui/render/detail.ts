@@ -409,7 +409,7 @@ function emptyBodyHint(): string {
  * ⚠ ただし**押した瞬間に焦点を外す作り**(`disabled` を立てる等)にすると、
  *   ここへ足しても**間に合わない**(組み直しの時点で、もう外れている)。
  */
-const REFOCUS_ACTIONS: readonly string[] = ['pick-app-icon', 'adopt-link-icon'];
+const REFOCUS_ACTIONS: readonly string[] = ['pick-app-icon', 'adopt-link-icon', 'pick-icon-file'];
 
 /** 添付の改名欄の id の連番(描くたびに進める。同じ document に同じ id を並べない)。 */
 let attachmentRenameSeq = 0;
@@ -4760,6 +4760,18 @@ function appTileControls(
     adopt.title = '押したときに 1 回だけ、そのサイトへ取りに行きます';
     box.append(adopt);
   }
+  /**
+   * 🔴 **手元の画像をアイコンにする**(#856 段③)── どのタイルにも出す(アドレスの無い HTML のアプリにも)。
+   * ⚠ 通信しない。選んだ画像は端末の中に置くだけ。選ぶ欄は shell に 1 つだけ常設してある。
+   */
+  const pickFile = document.createElement('button');
+  pickFile.type = 'button';
+  pickFile.setAttribute('data-pkc-action', 'pick-icon-file');
+  pickFile.setAttribute('data-pkc-field', 'pick-icon-file');
+  markTargetLid(pickFile, lid);
+  pickFile.textContent = '画像を選んでアイコンにする';
+  pickFile.title = '手元の画像(2 MB まで)をこのアプリのアイコンにします。通信はしません';
+  box.append(pickFile);
   box.append(appIconPick(fm['attachment.app_icon'], lid));
   return box;
 }

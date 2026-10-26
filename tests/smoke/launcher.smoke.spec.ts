@@ -2838,6 +2838,35 @@ test('🔴 リンクを足して、リンク先の印を取り込む (#856 段�
   await expect(adopt, '終わったのに「取りに行っています…」のまま').toHaveText('リンク先のアイコンを取り込む');
 
   /**
+   * 🔴 **手元の画像をアイコンにする**(#856 段③)── 同じタイルに、選んだ画像を当てる。
+   * ⚠ 本物の経路(選ぶ欄 → 検査 → 添付として置く → 本文の鍵 → 一覧の絵)を通す。
+   *   選ぶ欄は常設の 1 つで、ボタンが効く先を渡す。画像でない物は断られ、絵は変わらない。
+   */
+  const before = await tile.first().locator('img[data-pkc-asset-key]').getAttribute('data-pkc-asset-key');
+  const pickBtn = page.locator('[data-pkc-field="pick-icon-file"]');
+  await expect(pickBtn, '画像を選ぶボタンが出ていない').toHaveCount(1);
+  const iconInput = page.locator('[data-pkc-field="icon-file-input"]');
+  await pickBtn.click(); // 効く先を渡す(選ぶ欄の窓は setInputFiles が代わりに閉じる)
+  await iconInput.setInputFiles({ name: 'memo.txt', mimeType: 'text/plain', buffer: Buffer.from('not an image') });
+  await expect(page.getByText('画像ではありません').first(), '画像でない物を断る理由が出ていない').toBeVisible({ timeout: 10_000 });
+  expect(
+    await tile.first().locator('img[data-pkc-asset-key]').getAttribute('data-pkc-asset-key'),
+    '断ったのに絵が変わった',
+  ).toBe(before);
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  await pickBtn.click();
+  await iconInput.setInputFiles({ name: 'mark.png', mimeType: 'image/png', buffer: png });
+  await expect
+    .poll(
+      async () => tile.first().locator('img[data-pkc-asset-key]').getAttribute('data-pkc-asset-key'),
+      { message: '選んだ画像が一覧の絵にならない', timeout: 15_000 },
+    )
+    .not.toBe(before);
+
+  /**
    * ⚠ **1 段目の空振りは出る** ── preview に `/favicon.ico` は無いので、
    *   ブラウザ自身が 404 を console へ出す。**それは製品の誤りではない**。
    * 🔑 名指しで 1 種類だけ外す(全体の既知ノイズに足すと、**どの spec でも
