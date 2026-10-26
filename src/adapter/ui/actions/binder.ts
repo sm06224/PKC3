@@ -779,6 +779,15 @@ import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { countCappedCells } from '@features/query/sql-cell';
 import { openFolderLid } from './open-folder-lid';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
+import { labNoteTitle } from '@features/markdown/text-lab';
+import {
+  LAB_TABLE_ATTR,
+  currentLabOutput,
+  labLoaded,
+  refreshTextLab,
+  setLabLoaded,
+  syncTextLabButtons,
+} from '../render/textlab';
 // 🔴 手持ちのファイルを開く選び所の印(#854 段②)
 import {
   addSourceLidOf,
@@ -3296,6 +3305,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    *   (`contacts-quick-add` と同じ)。機械検査は `tests/repo-hygiene.test.ts`。
    */
   'sql-to-note',
+  // 🔴 テキスト整形の結果を新しいノートにする / 読み込んだノートの本文を置き換える(#1233)── どちらも書込
+  'textlab-to-note',
+  'textlab-apply-note',
   /**
    * 🔴 **予定から外すのも本文を書く**(#498)── 行の `@…` を剥がす
    *   (`SET_TASK_DATE`)か、frontmatter の `date:` を消す(`SET_ENTRY_DATE`)。
@@ -8053,6 +8065,24 @@ function diagramScopeOf(host: HTMLElement, root: HTMLElement): ParentNode {
     host.closest<HTMLElement>('.pkc-md-rendered') ??
     root
   );
+}
+
+/** 🔴 テキスト整形の面(#1233)の、打つ欄 4 つ。 */
+const TEXTLAB_FIELDS: ReadonlySet<string> = new Set([
+  'textlab-input',
+  'textlab-pattern',
+  'textlab-replacement',
+  'textlab-flags',
+]);
+
+function textlabPane(from: Element): HTMLElement | null {
+  return from.closest<HTMLElement>('[data-pkc-view-pane="textlab"]');
+}
+
+/** テキスト整形の面の「結果の上の 1 行」に一言置く(面の中の出来事は面に出す)。 */
+function say(pane: HTMLElement, text: string): void {
+  const el = pane.querySelector<HTMLElement>('[data-pkc-field="textlab-summary"]');
+  if (el !== null) el.textContent = text;
 }
 
 const ACTIONS: Record<string, ActionHandler> = {
@@ -15795,6 +15825,120 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'SQL_SAVED', title, kind: 'note', capped: countCappedCells(p.rows) });
   },
   /**
+   * 🔴 **テキスト整形の面**(#1233)。⚠ 整え方・入力・結果は**面の DOM が持つ**(state に写さない ──
+   *   「まだ当てていない下書き」であって、アプリの状態ではない。整理案 `plan-input` と同じ扱い)。
+   *   規則は `features/markdown/text-lab.ts` の 1 本で、ここは**押された事実を面へ渡す**だけ。
+   */
+  'textlab-toggle': (_dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    target.setAttribute('aria-pressed', target.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    refreshTextLab(pane);
+  },
+  // ⚠ 表の変換は 4 択(同じ組の中で押したものだけが押された状態になる)
+  'textlab-table': (_dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    for (const b of pane.querySelectorAll<HTMLElement>(`[${LAB_TABLE_ATTR}]`)) {
+      b.setAttribute('aria-pressed', b === target ? 'true' : 'false');
+    }
+    refreshTextLab(pane);
+  },
+  'textlab-clear': (dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    const input = pane.querySelector<HTMLTextAreaElement>('[data-pkc-field="textlab-input"]');
+    if (input !== null) {
+      input.value = '';
+      input.focus();
+    }
+    refreshTextLab(pane);
+    syncTextLabButtons(pane, dispatcher.getState());
+  },
+  'textlab-load-note': (dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    const state = dispatcher.getState();
+    const ob = state.openBody;
+    if (state.selectedLid === null || ob === null || ob.lid !== state.selectedLid) {
+      say(pane, '先に、左の一覧でノートを開いてください');
+      return;
+    }
+    const input = pane.querySelector<HTMLTextAreaElement>('[data-pkc-field="textlab-input"]');
+    if (input === null) return;
+    input.value = ob.body;
+    setLabLoaded(pane, ob.lid, ob.body);
+    refreshTextLab(pane);
+    syncTextLabButtons(pane, state);
+  },
+  'textlab-copy': (dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    const { out } = currentLabOutput(pane);
+    if (out.text === '') return;
+    finishCopy(dispatcher, target, copyPlainText(out.text));
+  },
+  'textlab-to-note': (dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    const { out } = currentLabOutput(pane);
+    if (out.text === '') return;
+    const state = dispatcher.getState();
+    // 🔑 編集中は作れないので、そう言う(`sql-to-note` と同じ ── 黙って捨てない)
+    if (state.phase !== 'ready') {
+      say(pane, blockedActionNote(state.phase) ?? '');
+      return;
+    }
+    const title = labNoteTitle(out.text, new Date());
+    const lid = generateLid();
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid,
+      title,
+      body: out.text,
+      // 🔴 いま左の一覧で開いているフォルダの中に作る(「+ ノート」と同じ置き場)
+      parentLid: openFolderLid(state),
+      relationId: generateLid(),
+      edit: false,
+    });
+    say(
+      pane,
+      dispatcher.getState().entryMetas.has(lid)
+        ? `新しいノート「${title}」を作りました`
+        : '作れませんでした(もう一度押してください)',
+    );
+  },
+  'textlab-apply-note': (dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    const { out } = currentLabOutput(pane);
+    const state = dispatcher.getState();
+    const loaded = labLoaded(pane);
+    if (loaded === null || loaded.lid !== state.selectedLid) {
+      say(pane, '「開いているノートを読み込む」を押したノートが開いているときに使えます');
+      return;
+    }
+    if (state.phase !== 'ready') {
+      say(pane, blockedActionNote(state.phase) ?? '');
+      return;
+    }
+    // ⚠ 読み込んだ後にノートが変わっていたら置き換えない(別のウィンドウでの編集を上書きしない)
+    if (state.openBody?.lid !== loaded.lid || state.openBody.body !== loaded.body) {
+      say(pane, '読み込んだあとにノートが変わりました。もう一度「開いているノートを読み込む」を押してください');
+      return;
+    }
+    if (out.text === loaded.body) {
+      say(pane, '変わる所がないため、置き換えていません');
+      return;
+    }
+    dispatcher.dispatch({ type: 'REIMPORT_BODY', lid: loaded.lid, body: out.text });
+    // 置き換えた後は「読み込んだ」状態を捨てる(同じ結果で二重に置き換えない)
+    setLabLoaded(pane, '', '');
+    say(pane, 'ノートの本文を置き換えました(前の版はノートの履歴にあります)');
+    syncTextLabButtons(pane, dispatcher.getState());
+  },
+  /**
    * 🔴 **開く場所**(#826)。⚠ `set-prose-align` と同じ受け方(`<select>` でもボタンでも通す)。
    */
   'set-open-place': (_dispatcher, target, services) => {
@@ -18071,6 +18215,21 @@ export function bindActions(
       el.getAttribute('data-pkc-field') === 'plan-input'
     ) {
       paintPlan(root, dispatcher, el.value);
+      return;
+    }
+    /**
+     * 🔴 **テキスト整形の欄**(#1233)。⚠ 打つそばから結果を描き直す(state に写さない ──
+     *   整理案と同じ「まだ当てていない下書き」)。許可リスト: 面の 4 つの欄だけ。
+     */
+    if (
+      (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) &&
+      TEXTLAB_FIELDS.has(el.getAttribute('data-pkc-field') ?? '')
+    ) {
+      const pane = textlabPane(el);
+      if (pane !== null) {
+        refreshTextLab(pane);
+        syncTextLabButtons(pane, dispatcher.getState());
+      }
       return;
     }
     // 🔑 一覧の絞り込み(P7b 段⑨c)。⚠ **state に写す** ── renderer は

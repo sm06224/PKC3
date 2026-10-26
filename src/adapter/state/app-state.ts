@@ -723,6 +723,12 @@ export const VIEW_MODES = [
    *   打つ前の字の門(`sql-guard.ts`)は「断る理由を読める字で言う」ためのものである。
    */
   'sql',
+  /**
+   * 🔴 **テキスト整形**(#1233。user 指示 2026-10-26)。貼り付けた文章を整える道具 ──
+   * 左の列に置き場は無い(タブを足すと既存のタブが「⋯」へ畳まれる)ので、別ウィンドウ + タイルだけ。
+   * ⚠ aside である(`ASIDE_PANES`)── ノートを映す面ではなく**道具**。
+   */
+  'textlab',
   'settings',
   'flags',
   'help',
@@ -765,6 +771,8 @@ const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>([
    * ② **編集中でも開ける** ── 読むだけなので下書きに触らない
    */
   'sql',
+  // 🔴 テキスト整形(#1233)も同じ ── 開いているノートを映さない道具。編集中でも開ける(読み込むだけで書かない)
+  'textlab',
 ]);
 
 export function isAsidePane(view: ViewMode): boolean {
@@ -803,6 +811,11 @@ const STAY_ON_SELECT: ReadonlySet<ViewMode> = new Set<ViewMode>([
    *   **選び所も打ちかけの SQL も画面から消えていた**。
    */
   'sql',
+  /**
+   * 🔴 **テキスト整形**(#1233)。⚠ 「開いているノートを読み込む」は**左の一覧でノートを選んでから**押す
+   *   ので、選んだ瞬間に面が本文へ退くと、読み込む前に画面が消える(打ちかけの文章も見えなくなる)。
+   */
+  'textlab',
 ]);
 
 /** ノートを選んだら本文へ戻す面か。⚠ 判定はここ 1 か所(上の docstring)。 */
@@ -829,6 +842,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   search: '探す',
   dual: '2 ペインで整理',
   sql: 'SQL で調べる',
+  textlab: 'テキスト整形',
   settings: 'システム',
   flags: 'フラグ',
   help: 'ヘルプ',

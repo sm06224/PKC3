@@ -173,3 +173,53 @@ test('🔴 計った時間: 止めた行が一覧に並び、名前を付けて�
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('元に戻す');
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+test('🔴 テキスト整形: 貼る → 整え方を押す → 右に結果 → 新しいノートにすると本物の一覧に載る (#1233)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  // 別ウィンドウのアプリと同じ面(中央の器)を、ディープリンクで開く
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=textlab';
+  });
+  const pane = page.locator('[data-pkc-view-pane="textlab"]');
+  await expect(pane, 'テキスト整形の面が開かない').toBeVisible({ timeout: 15_000 });
+
+  // 実ブラウザで打つ(input イベントが本物の経路で届く)
+  const input = pane.locator('[data-pkc-field="textlab-input"]');
+  await clickReal(page, input);
+  await page.keyboard.type('- ＡＢＣ\n- １２３');
+  const output = pane.locator('[data-pkc-field="textlab-output"]');
+  await expect(output, '何も選ばないうちは入力のまま').toHaveValue('- ＡＢＣ\n- １２３');
+
+  // 押された整え方は見分けられる(aria-pressed と、地の色が実際に変わる)
+  const strip = pane.locator('[data-pkc-lab-op="strip-bullets"]');
+  const bgBefore = await strip.evaluate((el) => getComputedStyle(el).backgroundColor);
+  await clickReal(page, strip);
+  await expect(strip).toHaveAttribute('aria-pressed', 'true');
+  const bgAfter = await strip.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(bgAfter, '押した整え方が見た目で区別できない').not.toBe(bgBefore);
+  await clickReal(page, pane.locator('[data-pkc-lab-op="to-halfwidth"]'));
+  await expect(output, '重ねた整えが結果に出ない').toHaveValue('ABC\n123');
+
+  // 置換(正規表現)も打つそばから効く
+  await clickReal(page, pane.locator('[data-pkc-field="textlab-pattern"]'));
+  await page.keyboard.type('\\d+');
+  await clickReal(page, pane.locator('[data-pkc-field="textlab-replacement"]'));
+  await page.keyboard.type('#');
+  await expect(output).toHaveValue('ABC\n#');
+
+  // 左右が並んで見え、どちらも押せる所に在る(縦に潰れていない)
+  const [ib, ob] = await Promise.all([input.boundingBox(), output.boundingBox()]);
+  expect(ib && ob && ib.x < ob.x && ib.height > 80 && ob.height > 80, '左右の欄が並んで見えていない').toBe(true);
+
+  // 新しいノートにする ── 本物の一覧(保存された側)に載る
+  await clickReal(page, pane.locator('[data-pkc-action="textlab-to-note"]'));
+  await expect(pane.locator('[data-pkc-field="textlab-summary"]')).toContainText('新しいノート「ABC」を作りました');
+  await expect(
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: 'ABC' }),
+    '作ったノートが一覧に載らない',
+  ).toHaveCount(1, { timeout: 10_000 });
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

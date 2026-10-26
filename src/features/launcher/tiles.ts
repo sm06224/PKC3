@@ -74,6 +74,7 @@ export interface LauncherTile {
     | 'timers'
     | 'search'
     | 'sql'
+    | 'textlab'
     | 'manual'
     | 'selfhost';
   /** `kind === 'url'` のときの飛び先。 */
@@ -420,6 +421,27 @@ export function sqlTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **テキスト整形の組み込みタイル**(#1233。user 指示 2026-10-26「全部やるのです」)。
+ *
+ * ⚠ 本文の上の整え 5 つ(`text-tidy.ts`)とは**別の入口** ── あちらは選んだ範囲を直す。
+ *   こちらは貼った文章を**重ねて整え、結果を見比べてから**ノートへ出す(別ウィンドウ)。
+ * ⚠ 左の列にタブは置かない: タブを足すと広い画面でも既存のタブが「⋯」へ畳まれる(#1900)。
+ *   この窓を閉じて失うのは打った文章だけで、ノートは 1 件も消えない ── アプリで正しい。
+ * 🔑 `kind` は `ViewMode` の綴り(`textlab`)── `launch-tile.ts` がそれを見て別窓へ渡す。
+ */
+export const TEXTLAB_TILE_LID = 'builtin:textlab';
+
+export function textlabTile(): LauncherTile {
+  return {
+    lid: TEXTLAB_TILE_LID,
+    title: 'テキスト整形',
+    group: BUILTIN_GROUP,
+    kind: 'textlab',
+    symbol: 'snippet',
+  };
+}
+
+/**
  * 🔴 **マニュアルの組み込みタイル**(#645。user 要望 2026-08-31
  * 「**ヘルプの中からマニュアルをアプリとして出してください**」)。
  *
@@ -536,6 +558,8 @@ export function withBuiltinTiles(
   builtin.push(graphTile());
   // ⚠ 計った時間(#683 ①)も末尾 ── 同じ理由(位置を動かさない)
   builtin.push(timersTile());
+  // ⚠ テキスト整形(#1233)も末尾 ── 同じ理由(位置を動かさない)
+  builtin.push(textlabTile());
   /**
    * 🔴 **組み込みは末尾へ「収納」する**(#531 段② / #281。user 指示 2026-08-28
    * 「組み込みアプリをグループに**収納して**整理する」)。
@@ -579,6 +603,7 @@ export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'timers',
   'search',
   'sql',
+  'textlab',
   'manual',
   'selfhost',
 ]);

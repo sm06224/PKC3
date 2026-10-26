@@ -12726,3 +12726,88 @@ h6:hover > .pkc-heading-anchor,
   flex-wrap: wrap;
   gap: var(--s1);
 }
+
+/* ══ テキスト整形の面(#1233、2026-10-26)══════════════════════════
+ * 🔴 **中央の面(別窓)だけ**── 左の列に同じ面は無い(SQL で調べると同じ形)。
+ * 地は無彩色、色は**押されている整え方**(`aria-pressed`)にだけ使う(業務画面の作法)。 */
+[data-pkc-view-pane='textlab'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-view-pane='textlab'] [data-pkc-field='pane-title'] {
+  margin: 0;
+  font-size: 14px;
+}
+[data-pkc-field='textlab-note'],
+[data-pkc-field='textlab-summary'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='textlab-ops'],
+[data-pkc-field='textlab-tables'],
+[data-pkc-field='textlab-regex'],
+[data-pkc-field='textlab-in-tools'],
+[data-pkc-field='textlab-out-tools'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+/* 押されている整え方は、地を変えて見分ける(色だけに頼らず、文字も太くする) */
+[data-pkc-view-pane='textlab'] button[aria-pressed='true'] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-color: var(--accent-dim-fg);
+  font-weight: 600;
+}
+[data-pkc-field='textlab-regex'] label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+[data-pkc-field='textlab-regex'] label:nth-child(-n + 2) {
+  flex: 2 1 12em;
+}
+[data-pkc-field='textlab-flags'] {
+  width: 4em;
+}
+[data-pkc-field='textlab-pattern'],
+[data-pkc-field='textlab-replacement'],
+[data-pkc-field='textlab-flags'] {
+  font-family: var(--font-mono);
+}
+[data-pkc-field='textlab-cols'] {
+  display: grid;
+  /* ⚠ 幅の @media は書かない(スマホ用画面の境目は TS が 1 か所で決める)── 狭ければ自然に 1 列へ折れる */
+  grid-template-columns: repeat(auto-fit, minmax(min(20em, 100%), 1fr));
+  gap: var(--s2);
+  min-height: 0;
+}
+[data-pkc-field='textlab-left'],
+[data-pkc-field='textlab-right'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+}
+[data-pkc-field='textlab-left'] h3,
+[data-pkc-field='textlab-right'] h3 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+[data-pkc-field='textlab-input'],
+[data-pkc-field='textlab-output'] {
+  width: 100%;
+  min-height: 14em;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  resize: vertical;
+}

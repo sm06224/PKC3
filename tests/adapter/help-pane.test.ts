@@ -732,6 +732,8 @@ const ALL_VIEWS = [
   'dual',
   // ⚠ SQL の面(#681 段②)── ノートを映さない**道具**なので aside(2 ペインと同じ)
   'sql',
+  // ⚠ テキスト整形(#1233)── ノートを映さない**道具**なので aside(SQL と同じ)
+  'textlab',
   'settings',
   'flags',
   'help',
