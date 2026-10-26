@@ -744,6 +744,45 @@ img[data-pkc-action='view-big']:focus-visible {
   border-radius: var(--radius);
   box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
 }
+/* 🔴 **打ちながら出る補完の小窓**(#1449 / #1450。`render/inline-complete.ts`)── 位置は script が `left` / `top` に入れる。
+ *   選んでいる行は `aria-selected`(右クリックのメニューの hover と同じ色)。添え書きは `--muted`(色は情報にだけ)。 */
+[data-pkc-region='inline-complete'] {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-width: 12rem;
+  max-width: min(28rem, calc(100vw - 8px));
+  max-height: 16rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+}
+[data-pkc-field='inline-complete-item'] {
+  display: flex;
+  gap: 1.5em;
+  justify-content: space-between;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+[data-pkc-field='inline-complete-item'] > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-pkc-field='inline-complete-item'][aria-selected='true'],
+[data-pkc-field='inline-complete-item']:hover {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+[data-pkc-field='inline-complete-sub'] {
+  color: var(--muted);
+  font-size: var(--btn-fs-sm);
+}
 [data-pkc-region='context-menu'] button {
   justify-content: flex-start;
   border: none;
@@ -10250,6 +10289,13 @@ h3[data-pkc-section] {
  */
 [data-pkc-field='format-more'] {
   display: none;
+}
+/* 🔴 「この行を計算する」(#766 D-3)は、書式バーを広い画面で長くしない ── 「…」を開いたスマホ用画面でだけ出す */
+[data-pkc-region='format-bar'] [data-pkc-more-only] {
+  display: none;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'][data-pkc-more-open] [data-pkc-more-only] {
+  display: inline-flex;
 }
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'] [data-pkc-field='format-more'] {
   display: inline-flex;

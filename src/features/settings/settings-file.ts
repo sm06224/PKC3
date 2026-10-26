@@ -183,6 +183,8 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
   { key: 'pkc3.code-collapse', label: '長いコードブロックを最初から折りたたむか', valid: isOnOff },
   /** ⚠ **人に付く好み**(#1087)── 手が滑りやすいので切りたいかは端末ではなく人で決まる。 */
   { key: 'pkc3.inline-code-copy', label: '文中の短いコードを押すとコピーするか', valid: isOnOff },
+  /** ⚠ **人に付く好み**(#1449 / #1450)── 打ちながら補完の候補を出したいかは端末ではなく人で決まる。 */
+  { key: 'pkc3.inline-complete', label: '入力中に補完の候補を出すか', valid: isOnOff },
   /**
    * ⚠ **人に付く好み**(#275 段①)── PDF を PKC の画面で読みたいかは端末の事情ではない。
    *   既定は**切**なので、運ばれるのは**入にした人の `1`** が主になる。運んだ先に窓の仕組みが無くても

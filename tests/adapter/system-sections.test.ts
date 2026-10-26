@@ -80,6 +80,7 @@ const PORTABLE_FIELD_OF: Record<string, string> = {
   'pkc3.missing-links': 'missing-links',
   'pkc3.code-collapse': 'code-collapse',
   'pkc3.inline-code-copy': 'inline-code-copy',
+  'pkc3.inline-complete': 'inline-complete',
   /**
    * 🔴 **唯一の例外**(裁定 2026-09-20)── メッセージの保管件数は
    * 「メッセージ」節の値で、system 領域の「設定」ではない。

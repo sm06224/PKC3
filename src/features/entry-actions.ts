@@ -1271,6 +1271,28 @@ export function taskRunMenuActions(): readonly (EntryAction & { readonly hint: s
   return items.map((a) => ({ ...a, hint: ENTRY_ACTION_HINTS[a.action] ?? '' }));
 }
 
+/**
+ * 🔴 **右クリックしたチェック項目 1 つの日付を、その場で付ける・外す**(#426 段②)。
+ *
+ * > user の物語: 本文のチェックリストの「見積を送る」を今日の予定にしたい。
+ * > いまは行末に `@2026-…` と手で書く(`Ctrl+;` は caret の位置に入れる)。右クリックした項目に直接付けたい。
+ *
+ * ⚠ 「日付を外す」は**日付が書いてある項目にだけ**出す(押しても何も起きない口を作らない)。
+ *   置けるなら外せる(片道にしない)。外した日付は履歴から元へ戻せる。
+ * ⚠ `BODY_MENU_ACTIONS` には入れない ── 本文を書き換える側(`taskRunMenuActions` と同じ)。
+ * 🔑 綴りと字を対で書く(出口を静的に追えるように)。
+ */
+export function taskItemMenuActions(
+  ctx: { readonly dated: boolean },
+): readonly (EntryAction & { readonly hint: string })[] {
+  const items: EntryAction[] = [
+    { action: 'task-item-date-today', label: 'この項目を今日の予定にする' },
+    { action: 'task-item-date-tomorrow', label: 'この項目を明日の予定にする' },
+  ];
+  if (ctx.dated) items.push({ action: 'task-item-date-clear', label: 'この項目の日付を外す' });
+  return items.map((a) => ({ ...a, hint: ENTRY_ACTION_HINTS[a.action] ?? '' }));
+}
+
 /** 本文のブロックを 1 つ動かす項目の向きの属性(`up` / `down`。受け手 `move-block-step` が読む)。 */
 export const BLOCK_STEP_DIR_ATTR = 'data-pkc-block-step-dir';
 
@@ -1565,6 +1587,13 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
     'このリストのチェック(入れ子の分も)をすべて外します。繰り返しの項目は触りません。履歴から元へ戻せます',
   'task-run-done':
     'このリストのチェック(入れ子の分も)をすべて付けます。繰り返しの項目は触りません。履歴から元へ戻せます',
+  // 🔴 **チェック項目 1 つの日付**(#426 段②)。⚠ 行末に書かれる字と、戻し方を言う
+  'task-item-date-today':
+    'この項目の行末に今日の日付(@2026-10-26)を書きます。日付があれば書き換えます。履歴から戻せます',
+  'task-item-date-tomorrow':
+    'この項目の行末に明日の日付(@2026-10-27)を書きます。日付があれば書き換えます。履歴から戻せます',
+  'task-item-date-clear':
+    'この項目の日付(@2026-10-26 の形)を行から消します。項目は残ります。履歴から戻せます',
   // 🔴 **左の列の行からの整理 3 つ**(#215)。⚠ どれも**画面で起きること**で書く
   //    (user 指示 2026-08-21)── 「改名モードへ遷移」ではなく「入力欄が出る」
   'rename-entry-begin': '行の題名の所に入力欄が出ます。Enter で確定、Esc でやめます',

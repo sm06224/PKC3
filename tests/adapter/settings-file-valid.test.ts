@@ -33,6 +33,7 @@ import { ColorSwatchStore } from '../../src/adapter/ui/render/color-swatch';
 import { MissingLinksStore } from '../../src/adapter/ui/render/missing-links';
 import { CodeCollapseStore } from '../../src/adapter/ui/render/code-collapse';
 import { InlineCodeCopyStore } from '../../src/adapter/ui/render/inline-code-copy';
+import { InlineCompleteStore } from '../../src/adapter/ui/render/inline-complete-setting';
 import { PdfReaderStore } from '../../src/adapter/ui/render/pdf-reader-setting';
 import { GroupFoldStore } from '../../src/adapter/ui/render/group-fold';
 import { FilerFlattenStore } from '../../src/adapter/ui/render/filer-flatten';
@@ -85,6 +86,7 @@ const toggles: Record<string, (s: ReturnType<typeof fakeStorage>) => { setEnable
   'pkc3.missing-links': (s) => new MissingLinksStore(s),
   'pkc3.code-collapse': (s) => new CodeCollapseStore(s),
   'pkc3.inline-code-copy': (s) => new InlineCodeCopyStore(s),
+  'pkc3.inline-complete': (s) => new InlineCompleteStore(s),
   'pkc3.pdf-reader': (s) => new PdfReaderStore(s),
   'pkc3.filer-flatten': (s) => new FilerFlattenStore(s),
 };

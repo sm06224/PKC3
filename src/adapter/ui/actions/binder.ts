@@ -243,6 +243,7 @@ import { noteTimeFor } from '@features/schedule/task-cards';
 import { plainTaskTitle } from '@features/schedule/task-title';
 import {
   DATE_SHORTCUTS,
+  type DateShortcut,
   isDateShortcut,
   shortcutDate,
 } from '@features/schedule/date-shortcuts';
@@ -296,10 +297,12 @@ import {
   tableOpMadeSingleColumn,
   type FormatOp,
   type TextSelection,
+  isLineOp,
 } from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
 import { abbrBeforeCaret, type SnippetItem } from '@features/snippet/snippet-table';
-import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
+import { atChoices, slashChoices } from '@features/markdown/inline-complete';
+import { snippetMenu, snippetMenuNote, type SnippetChoice } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { appendAndSettle } from '@adapter/state/append-settle';
 // 🔑 別のタブが編集中かの問い合わせは 1 本(#529 W5-d ── 板の付箋・本文の下の追記欄・PDF・AI が同じ口を通る)
@@ -408,6 +411,7 @@ import {
   IMAGE_ALIGN_ATTR,
   IMAGE_WIDTH_ATTR,
   taskRunMenuActions,
+  taskItemMenuActions,
   blockStepMenuActions,
   BLOCK_STEP_DIR_ATTR,
   tableConvertPickLabel,
@@ -432,6 +436,8 @@ import {
   contextMenuOpen,
   openContextMenu,
 } from '../render/context-menu';
+import { bindInlineComplete, type CompleteItem } from '../render/inline-complete';
+import { appInlineComplete } from '../render/inline-complete-setting';
 import { setupLinkPreview, closeLinkPreview } from '../render/link-preview';
 import { setupLightbox, openLightbox, closeLightbox, lightboxOpen } from '../render/lightbox';
 import { chordHint, HINT_BASE, HINT_BLOCKED, setBlocked } from '../render/shortcut-hint';
@@ -2031,6 +2037,11 @@ export interface BinderServices {
    */
   setInlineCodeCopy?(on: boolean): void;
   /**
+   * 🔴 **打ちながら補完の候補を出すか**(#1449 / #1450)。⚠ **省略可**。
+   * ⚠ 切り替えても本文は描き直さない ── 効くのは**次に打つとき**だけ。
+   */
+  setInlineComplete?(on: boolean): void;
+  /**
    * 🔴 **PDF を PKC の画面で開くか**(#275 段①)。⚠ **省略可**。
    * ⚠ 切り替えても本文は描き直さない ── 効くのは**次に「別のウィンドウで見る」を押したとき**だけ。
    */
@@ -3222,6 +3233,10 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    */
   'task-run-open',
   'task-run-done',
+  // 🔴 チェック項目 1 つの日付を書くのも本文を書く(#426 段②。`toggle-task` と同じ門)
+  'task-item-date-today',
+  'task-item-date-tomorrow',
+  'task-item-date-clear',
   /**
    * 🔴 **画像の大きさ・寄せも本文を書く**(#1640 ③)── 画像の直後の `{w=50% align=center}` を書き換える
    *   (`SET_IMAGE_ATTRS` → `REQUEST_BODY_REWRITE`)。`toggle-task` と同じ門をくぐらせる。
@@ -4683,6 +4698,8 @@ function setImageAttr(
  * 本文の外に出るので、受け手の時点では読めない。
  */
 const MENU_TASK_LINES_ATTR = 'data-pkc-menu-task-lines';
+/** 🔴 右クリックしたチェック項目 **1 つ**の原文の行番号(#426 段②。受け手 `task-item-date-*` が読む)。 */
+const MENU_TASK_LINE_ATTR = 'data-pkc-menu-task-line';
 /**
  * 🔴 **右クリック(長押し)したブロックを動かすときの座標**(台帳 #1852 束 S1、依頼 238 の案 B)。
  * 動かす範囲(`start..end`)と入れる位置(`before`)は**生の body の行番号**(`MOVE_BLOCK` がそのまま読む)。
@@ -4714,6 +4731,23 @@ function taskRunLinesAt(target: Element, host: HTMLElement | null): number[] | n
     if (Number.isInteger(n) && n >= 0) lines.push(n);
   }
   return lines.length === 0 ? null : lines;
+}
+
+/**
+ * 🔴 **右クリックしたチェック項目 1 つの行番号**(#426 段②)。無ければ `null`。
+ * ⚠ 入れ子の子リストの箱ではなく、**押した項目自身の箱**(`li` の直下の最初の箱)を引く。
+ *   付箋の中は出さない(`taskRunLinesAt` と同じ理由)。
+ */
+function taskItemLineAt(target: Element, host: HTMLElement | null): number | null {
+  if (target.closest('[data-pkc-field="place-body"]') !== null) return null;
+  const li = target.closest('li.pkc-task-item');
+  if (li === null || host === null || !host.contains(li)) return null;
+  for (const box of li.querySelectorAll('input.pkc-task-checkbox[data-pkc-task-line]')) {
+    if (box.closest('li') !== li) continue;
+    const n = Number(box.getAttribute('data-pkc-task-line'));
+    return Number.isInteger(n) && n >= 0 ? n : null;
+  }
+  return null;
 }
 
 /**
@@ -5237,6 +5271,38 @@ function setTaskRun(
     [lid],
     'チェックできませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
     () => dispatcher.dispatch({ type: 'SET_TASK_RUN', lid, lines, openLines, to }),
+  );
+}
+
+/**
+ * 🔴 **チェック項目 1 つの日付を付ける・外す受け手の実体**(#426 段②)── 3 つを 1 本にする。
+ * ⚠ 何をするかの判断は `body-rewrite.ts`(`line-date`)── ここは**運ばれた行を渡す**だけ。
+ *   日付の組み立ては `shortcutDate` 1 本(`Ctrl+;` の近道と同じ関数)。断りは reducer(`SET_TASK_DATE`)が言う。
+ */
+function setTaskItemDate(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  which: DateShortcut | null,
+  services: BinderServices,
+): void {
+  if (refuseStaleMenu(dispatcher, target)) return;
+  const line = Number(target.getAttribute(MENU_TASK_LINE_ATTR));
+  const lid = target.getAttribute(MENU_LID_ATTR) ?? '';
+  if (!Number.isInteger(line) || line < 0 || lid === '') return;
+  // 🔴 押した時点の行の中身を添える(#1087)。引けなければ撃たずに断る
+  const openLine = shownBodyLine(dispatcher.getState(), lid, line);
+  if (openLine === null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+    return;
+  }
+  const date = which === null ? null : shortcutDate(which, new Date());
+  actUnlessEditedElsewhere(
+    dispatcher,
+    services,
+    [lid],
+    '日付を書けませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+    // ⚠ `until` も外す ── 記法まるごと消えるので期間だけ残すと「頼んでいない指示」になる(`unschedule-task` と同じ)
+    () => dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, openLine, date, ...(date === null ? { until: null } : {}) }),
   );
 }
 
@@ -10294,7 +10360,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
    * > ついてくるツールとか用意されてもいいかも**」
    *
-   * ⚠ **`@` を打ったら出る形は採らない** ── PKC3 に補完の機構が 1 つも無いうえ、
+   * 【2026-10-26 改訂】`@` の小窓は #1450 で入れた(`render/inline-complete.ts`)。以下は入れる前の記録。
+   * ⚠ (旧)**`@` を打ったら出る形は採らない** ── PKC3 に補完の機構が 1 つも無いうえ、
    *   `@[card](…)` と 1 打鍵目で衝突し、何より不可侵指示
    *   「**マウスだけで完結し、キーボードは近道**」に当たる(打鍵でしか出ない道具は、
    *   マウスの人には存在しないのと同じ)。だから**書式の帯のボタン**にする。
@@ -10474,25 +10541,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       ta.focus();
       // ⚠ 範囲外は `setSelectionRange` が丸める(短くなっていても落ちない)
       ta.setSelectionRange(at.start, at.end);
-      const sel = { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
-      if (picked.kind === 'format') {
-        writeBack(ta, applyFormatSaying(sel, picked.op, (t) => services.showStatus?.(t)));
-        return;
-      }
-      /**
-       * 🔴 **UML の雛形**(#528 段①)。⚠ ここでも**組み立てない** ── 表から
-       *   雛形を引いて、挿すのは既にある `insertBlock` に渡す(上の注記と同じ理由)。
-       * ⚠ 表から消えた id は**黙って落とす**(組み込みの `FormatOp` と同じ作法)──
-       *   無い物を挿そうとして欄を空で書き戻すほうが悪い。
-       */
-      if (picked.kind === 'diagram') {
-        const tpl = DIAGRAM_TEMPLATES.find((d) => d.id === picked.id);
-        if (tpl !== undefined) writeBack(ta, insertBlock(sel, tpl.block));
-        return;
-      }
-      const item = items.find((s) => s.lid === picked.lid);
-      if (item === undefined) return;
-      writeBack(ta, insertSnippet(sel, item.body, new Date(), { breakLines: true }));
+      applySnippetPick(ta, picked, items, services);
     });
   },
   /**
@@ -12220,6 +12269,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 効く先は書式パネルと同じ 1 か所(formatTarget)── 2 列でも live でも動く。
    * ⚠ `insertText` で書く(Undo 履歴に載る。`setRangeText` は履歴を捨てる ── #765)。
    */
+  /**
+   * 🔴 **書式バーの「この行を計算する」**(#766 D-3)── 本文の欄へ当てる命令 `inline-calc` を呼ぶだけ。
+   * ⚠ 規則は `EDITOR_RUN['inline-calc']`(打って `Enter` / 操作を探す / 鍵 `Alt+Shift+C` と同じ 1 か所)。
+   */
+  'calc-line': (_dispatcher, target, services) => {
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const ta = formatTarget(root);
+    if (ta === null) {
+      sayNoFormatTarget(services);
+      return;
+    }
+    ta.focus();
+    EDITOR_RUN['inline-calc']!(ta, (t) => services.showStatus?.(t));
+  },
   'sort-tasks': (dispatcher, target, services) => {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const ta = formatTarget(root);
@@ -12754,6 +12817,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'task-run-open': (dispatcher, target, services) => setTaskRun(dispatcher, target, 'open', services),
   'task-run-done': (dispatcher, target, services) => setTaskRun(dispatcher, target, 'done', services),
+  'task-item-date-today': (dispatcher, target, services) => setTaskItemDate(dispatcher, target, 'today', services),
+  'task-item-date-tomorrow': (dispatcher, target, services) => setTaskItemDate(dispatcher, target, 'tomorrow', services),
+  'task-item-date-clear': (dispatcher, target, services) => setTaskItemDate(dispatcher, target, null, services),
   /**
    * 🔴 **右クリックした画像の大きさ・寄せを書く**(#1640 ③。依頼 37 = A)。
    * 🔑 向きだけが違う 2 つを 1 本にする(`task-run-*` と同じ作法 ── §7)。値は押した項目の属性が運ぶ
@@ -15695,6 +15761,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setInlineCodeCopy?.(target.checked);
   },
+  'set-inline-complete': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setInlineComplete?.(target.checked);
+  },
   'set-pdf-reader': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setPdfReader?.(target.checked);
@@ -16978,6 +17048,40 @@ function applyFormatSaying(
 }
 
 /**
+ * 🔴 **雛形の一覧で選ばれた物を、欄の caret へ入れる**(`insert-snippet` と、打ちながら出る `/` の小窓の**共通の 1 本**)。
+ *
+ * ⚠ 挿す仕事は**既にある 1 本ずつ**(`applyFormat` / `insertBlock` / `insertSnippet`)── ここで組み立てると
+ *   帯のボタンと一覧と小窓で結果が食い違う(CLAUDE.md §7)。
+ * ⚠ 表から消えた図の id は**黙って落とす**(無い物を挿そうとして欄を空で書き戻すほうが悪い)。
+ */
+function applySnippetPick(
+  ta: HTMLTextAreaElement,
+  picked: SnippetChoice,
+  items: readonly SnippetItem[],
+  services: BinderServices,
+  /**
+   * 🔴 **打ちかけの引き金(`/見出し`)を消した本文と、入れる位置**(小窓から呼ぶとき)。
+   * ⚠ 消すのと入れるのを別々に書くと Ctrl+Z が 2 手になる ── 消した後の本文を基準に組み、
+   *   `writeBack`(= `replaceChanged`)が**差分の 1 回の `insertText`** で置き換える。
+   */
+  base?: TextSelection,
+): void {
+  const sel = base ?? { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+  if (picked.kind === 'format') {
+    writeBack(ta, applyFormatSaying(sel, picked.op, (t) => services.showStatus?.(t)));
+    return;
+  }
+  if (picked.kind === 'diagram') {
+    const tpl = DIAGRAM_TEMPLATES.find((d) => d.id === picked.id);
+    if (tpl !== undefined) writeBack(ta, insertBlock(sel, tpl.block));
+    return;
+  }
+  const item = items.find((s) => s.lid === picked.lid);
+  if (item === undefined) return;
+  writeBack(ta, insertSnippet(sel, item.body, new Date(), { breakLines: true }));
+}
+
+/**
  * 🔴 **caret へ書き込む道具は、押しても焦点を奪わない**(user 報告 2026-08-28)。
  *
  * > 「**インライン編集モードで雛形などの挿入ボタンを押しても何もおこらない /
@@ -17013,6 +17117,8 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   'insert-icon',
   'renumber-lists',
   'sort-tasks',
+  // 🔴 #766 D-3: 書式バーの「この行を計算する」── 押した行(caret)を読んで答えを挿すので、押しても焦点を奪わない
+  'calc-line',
 ]);
 
 /**
@@ -20299,6 +20405,12 @@ export function bindActions(
        *   行番号は**この項目にだけ**載せる(`attrs`。表と同じ作法)。
        */
       const taskLines = taskRunLinesAt(target, host);
+      /** 🔴 押した項目 1 つ(#426 段②)。日付が書いてあるかは、画面が見ている本文の行から引く(外す口の出し分け)。 */
+      const taskItemLine = taskItemLineAt(target, host);
+      const taskItemDated =
+        taskItemLine !== null && ob !== null
+          ? readLineDate(shownBodyLine(dispatcher.getState(), ob.lid, taskItemLine) ?? '') !== null
+          : false;
       // 🔴 ブロックを上下へ 1 つ動かす(台帳 #1852 束 S1、依頼 238 の案 B)。指で⠿を掴めない端末の道
       const steps = host === null || ob === null ? null : blockStepsAt(host, target, ob.body);
       const items = [
@@ -20355,6 +20467,12 @@ export function bindActions(
           : tableMenuActions({ from: table.format }).map((a) => ({
               ...a,
               attrs: { [MENU_TABLE_ATTR]: String(tableLine) },
+            }))),
+        ...(taskItemLine === null
+          ? []
+          : taskItemMenuActions({ dated: taskItemDated }).map((a) => ({
+              ...a,
+              attrs: { [MENU_TASK_LINE_ATTR]: String(taskItemLine) },
             }))),
         ...(taskLines === null
           ? []
@@ -20960,6 +21078,79 @@ export function bindActions(
   };
 
   listen(root, 'contextmenu', onContextMenu);
+  /**
+   * 🔴 **打ちながら出る補完の小窓**(#1449 行頭の `/` = 記法 / #1450 `@` = ノートリンクと日付)。
+   *
+   * ⚠ 一覧の元と挿し方は**帯・`Ctrl+/`・`Ctrl+Shift+K`・`Ctrl+;` と同じ関数**(`slashChoices` →
+   *   `applySnippetPick` / `atChoices` → `formatEntryLink` / `insertionForLineDate`)── 入口を増やすだけで、
+   *   挿す仕事の規則を 2 つにしない(§7)。挿すのは `insertText` / `writeBack` なので `Ctrl+Z` で戻せる。
+   */
+  undo.push(
+    bindInlineComplete(root, {
+      /**
+       * 🔴 **ノートを替えた・編集を確定 / やめた・開いた本文が替わったら、小窓を閉じる**(着地前レビュー)。
+       * ⚠ 打鍵のたびに `UPDATE_OPEN_BODY` で状態は変わるので、**この 3 つの鍵が変わったときだけ**閉じる。
+       */
+      subscribe: (close) => {
+        // ⚠ 状態を引けない最小の dispatcher(配線だけを見る test の替え玉)でも、組み立てで落とさない
+        if (typeof dispatcher.getState !== 'function' || typeof dispatcher.onState !== 'function') return () => undefined;
+        const keyOf = (): string => {
+          const s = dispatcher.getState();
+          return `${String(s.selectedLid)}|${s.phase}|${String(s.openBody?.lid ?? '')}`;
+        };
+        let last = keyOf();
+        return dispatcher.onState(() => {
+          const now = keyOf();
+          if (now !== last) {
+            last = now;
+            close();
+          }
+        });
+      },
+      items: (trigger) => {
+        // 🔴 設定で切れる(読むたびに保存を見る ── 別のタブで切っても追随する)
+        if (!appInlineComplete.enabled()) return [];
+        const st = dispatcher.getState();
+        if (trigger.kind === 'slash') {
+          const snippets = st.snippetScan?.items ?? [];
+          return slashChoices(snippets, trigger.query).map((c): CompleteItem => ({
+            title: c.title,
+            sub: c.kind === 'snippet' ? 'テンプレート' : c.kind === 'format' ? '書式' : '図',
+            accept: (ta, tr) => {
+              const caret = ta.selectionEnd;
+              applySnippetPick(ta, c, snippets, services, {
+                text: ta.value.slice(0, tr.start) + ta.value.slice(caret),
+                start: tr.start,
+                end: tr.start,
+              });
+              // 行頭の印は、入れたあと**そのまま続きを打てる**ように caret を末尾へ(帯のボタンは行ごと選んだ形で残す)
+              if (c.kind === 'format' && isLineOp(c.op)) ta.setSelectionRange(ta.selectionEnd, ta.selectionEnd);
+            },
+          }));
+        }
+        return atChoices(trigger.query, new Date(), st.entryMetas, st.order, st.selectedLid).map(
+          (c): CompleteItem =>
+            c.kind === 'date'
+              ? {
+                  title: c.title,
+                  sub: c.date,
+                  accept: (ta, tr) => {
+                    ta.focus();
+                    insertText(ta, insertionForLineDate(ta.value.slice(0, tr.start), c.date, null));
+                  },
+                }
+              : {
+                  title: c.title,
+                  sub: c.sub,
+                  accept: (ta) => {
+                    ta.focus();
+                    insertText(ta, formatEntryLink(c.title, c.lid));
+                  },
+                },
+        );
+      },
+    }),
+  );
   listen(root, 'click', onClick);
   /**
    * 🔴 **外部リンクを初めて押したら、1 度だけ「開かないときは」を言う**(依頼 69-B2)。

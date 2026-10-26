@@ -32,6 +32,7 @@ import { ColorSwatchStore } from '@adapter/ui/render/color-swatch';
 import { MissingLinksStore } from '@adapter/ui/render/missing-links';
 import { CodeCollapseStore } from '@adapter/ui/render/code-collapse';
 import { InlineCodeCopyStore } from '@adapter/ui/render/inline-code-copy';
+import { InlineCompleteStore } from '@adapter/ui/render/inline-complete-setting';
 import { PdfReaderStore } from '@adapter/ui/render/pdf-reader-setting';
 import { TooNarrowOkStore } from '@adapter/ui/render/too-narrow';
 import { PasteSourceStore } from '@adapter/ui/render/paste-source';
@@ -96,6 +97,7 @@ function setup() {
     relativeDays: new RelativeDaysStore(fakeStorage()),
     colorSwatch: new ColorSwatchStore(fakeStorage()),
     pdfReader: new PdfReaderStore(fakeStorage()),
+    inlineComplete: new InlineCompleteStore(fakeStorage()),
   };
   const args: unknown[] = Array.from({ length: 21 }, () => undefined);
   args[1] = stores.externalImages;
@@ -117,7 +119,7 @@ function setup() {
   args[18] = stores.colorSwatch;
   args[20] = stores.pdfReader;
   const Ctor = SettingsRenderer as unknown as new (...a: unknown[]) => SettingsRenderer;
-  const renderer = new Ctor(region, ...args, agent, new AgentTabStatus());
+  const renderer = new Ctor(region, ...args, agent, new AgentTabStatus(), undefined, undefined, stores.inlineComplete);
   return { region, renderer, sameOrigin, extension, agent, stores };
 }
 
@@ -135,6 +137,7 @@ const ALL_IDS = [
   'tag-color-list',
   'editor-mode',
   'open-in-edit',
+  'inline-complete',
   'phone-links',
   'date-links',
   'relative-days',
@@ -178,6 +181,7 @@ const DT_ORDER: Record<string, string[]> = {
   'settings-edit': [
     '編集の仕方',
     '開いたときの状態',
+    '入力中の補完',
     '本文の電話番号',
     '本文の日付',
     '日付までの日数',
@@ -308,6 +312,7 @@ describe('設定画面の節の登録表(#1382)', () => {
         ['missing-links', stores.missingLinks],
         ['code-collapse', stores.codeCollapse],
         ['inline-code-copy', stores.inlineCodeCopy],
+        ['inline-complete', stores.inlineComplete],
         ['pdf-reader', stores.pdfReader],
         ['too-narrow-enabled', stores.tooNarrow],
         ['notices-enabled', stores.notices],
