@@ -6380,7 +6380,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         reload: () => {
           // 🔑 ディープリンクの hash は前の器の物 ── 残すと、読み込み直した先で「別のコレクションの参照」と断られる
           try {
-            history.replaceState(null, '', `${location.pathname}${location.search}`);
+            // 🔑 空の hash に置き換える(アドレスを読まずに済ませる ── クエリは触らない)
+            history.replaceState(null, '', '#');
           } catch {
             /* 書き換えられなくても読み込み直しは通す */
           }
