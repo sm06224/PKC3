@@ -935,6 +935,8 @@ export function headingMenuActions(ctx: {
    *   user は「章」と呼ばない。判定は `isLogRowHeading` 1 本。省略可(古い呼び側は「章」のまま)。
    */
   readonly logRow?: boolean;
+  /** 🔴 この章に添付(`asset:`)の参照が在るか(#677)。真のときだけ「添付ごとコピー」を出す。省略 = 無い。 */
+  readonly assets?: boolean;
 }): readonly EntryAction[] {
   const out: EntryAction[] = [];
   if (ctx.sectionEditable) out.push({ action: 'edit-section', label: 'この章を編集する' });
@@ -952,6 +954,8 @@ export function headingMenuActions(ctx: {
      *   (出しても押して何も起きない口になる)。
      */
     out.push({ action: 'copy-chapter-md', label: 'この章をコピー' });
+    // 🔴 添付(画像)つきの章は、別の PKC へ貼っても絵が出る形でもコピーできる(#677 の残り)
+    if (ctx.assets === true) out.push({ action: 'copy-chapter-md-assets', label: 'この章を添付ごとコピー' });
   }
   // 🔴 章の参照(#579)── 畳めるかとは無関係(引用や `:::` の中の見出しにも id は刻まれる)
   if (ctx.linkable) {
@@ -1014,8 +1018,15 @@ export function blockMenuActions(ctx: {
   readonly front?: boolean;
   /** 🔴 既にいちばん後ろの付箋か(依頼 118-1)。真なら「後ろへ送る」を出さない(`front` と対)。省略 = 出す。 */
   readonly back?: boolean;
+  /** 🔴 この塊に添付(`asset:`)の参照が在るか(#677)。真のときだけ「添付ごとコピー」を出す。省略 = 無い。 */
+  readonly assets?: boolean;
 }): readonly EntryAction[] {
-  if (!ctx.board) return [{ action: 'copy-block-md', label: 'このブロックをコピー' }];
+  if (!ctx.board) {
+    return [
+      { action: 'copy-block-md', label: 'このブロックをコピー' },
+      ...(ctx.assets === true ? [{ action: 'copy-block-md-assets', label: 'このブロックを添付ごとコピー' }] : []),
+    ];
+  }
   /**
    * 🔴 **板だけの物**(#676。user 裁定 2026-09-04)── 置けるなら消せる(user 指示
    *   2026-08-23「片道の操作を作らない」)。⚠ 消すと中の字が本文から消える(履歴には積まれる)ので**確認を挟む**
@@ -1023,6 +1034,7 @@ export function blockMenuActions(ctx: {
    */
   return [
     { action: 'copy-block-md', label: 'この付箋をコピー' },
+    ...(ctx.assets === true ? [{ action: 'copy-block-md-assets', label: 'この付箋を添付ごとコピー' }] : []),
     // 🔴 前へ出す(#676 段②)と後ろへ送る(依頼 118-1)。⚠ 戻すのに他の付箋を 1 枚ずつ前へ出し直さなくて済む。
     //    どちらも既にその端なら出さない(押しても本文が変わらない口を作らない)
     ...(ctx.front === true ? [] : [{ action: 'raise-place', label: '前へ出す' }]),

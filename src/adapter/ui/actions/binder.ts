@@ -38,6 +38,7 @@ import { settleJump } from '../render/long-note';
 import { insideCodeOrMath } from '@features/markdown/code-context';
 import { lineStart } from '@features/markdown/line-start';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
+import { assetRefsOf, carryAssets, hasAssetRefs } from '@features/asset/carry-assets';
 import {
   tableAt,
   tableConvertRefusal,
@@ -5401,6 +5402,82 @@ function copySourceLines(
     return;
   }
   services.copyText(sliceLines(fmBody, span), done);
+}
+
+/** 添付ごとコピーが運ぶ画像の合計の上限(バイト)。⚠ 字にして貼るので、超えたら断る。 */
+const CARRY_ASSETS_MAX_BYTES = 24 * 1024 * 1024;
+
+/** Blob を `data:` の字にする。 */
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result));
+    fr.onerror = () => reject(fr.error ?? new Error('read failed'));
+    fr.readAsDataURL(blob);
+  });
+}
+
+/**
+ * 🔴 **原文の行範囲を、添付(画像)ごと写す**(#677 の残り)。
+ *
+ * 画像の `asset:<key>` を `data:` の字に置き換えて写す ── 別の PKC へ貼ると、貼る側の既存の取り込み
+ * (`data:` を添付へ逃がす。#251)が働いて、その入れ物の添付になる。同じ入れ物へ貼っても動く(同じ画像は
+ * 貼り先で重ねて取り込まれる)。⚠ 画像でない添付の参照は運べないので元のまま残し、その件数を言う。
+ * ⚠ 読めなかった画像も元のまま残す(黙って消さない)。合計が上限を超えるときは写さずに断る。
+ */
+async function copySourceLinesWithAssets(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  fmBody: string,
+  span: { readonly start: number; readonly end: number },
+  what: string,
+): Promise<void> {
+  if (services.copyText === undefined) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
+    return;
+  }
+  const text = sliceLines(fmBody, span);
+  const refs = assetRefsOf(text);
+  if (services.readAssetBlob === undefined || refs.images.length === 0) {
+    services.copyText(
+      text,
+      refs.others > 0
+        ? `${what}をコピーしました(画像ではない添付 ${String(refs.others)} 件は運べないので、元の参照のままです)`
+        : `${what}をコピーしました(運ぶ画像はありませんでした)`,
+    );
+    return;
+  }
+  const urls = new Map<string, string>();
+  let total = 0;
+  let missed = 0;
+  for (const key of refs.images) {
+    let blob: Blob | null = null;
+    try {
+      blob = await services.readAssetBlob(key);
+    } catch {
+      blob = null;
+    }
+    if (blob === null) {
+      missed += 1;
+      continue;
+    }
+    total += blob.size;
+    if (total > CARRY_ASSETS_MAX_BYTES) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `画像が大きすぎて、添付ごとはコピーできません(合計 ${String(Math.floor(CARRY_ASSETS_MAX_BYTES / 1024 / 1024))} MB まで)。ふつうのコピーは使えます`,
+      });
+      return;
+    }
+    urls.set(key, await blobToDataUrl(blob));
+  }
+  const notes: string[] = [];
+  if (missed > 0) notes.push(`読めなかった画像 ${String(missed)} 件は元の参照のまま`);
+  if (refs.others > 0) notes.push(`画像ではない添付 ${String(refs.others)} 件は運べないので元の参照のまま`);
+  services.copyText(
+    carryAssets(text, urls),
+    `${what}を画像 ${String(urls.size)} 件ごとコピーしました(別の PKC3 へ貼ると、画像も取り込まれます)${notes.length === 0 ? '' : `。${notes.join('、')}`}`,
+  );
 }
 
 /**
@@ -12475,6 +12552,29 @@ const ACTIONS: Record<string, ActionHandler> = {
     copySourceLines(dispatcher, services, fmBody, span, '章をコピーしました(Markdown の原文)');
   },
   /**
+   * 🔴 **その章を、添付(画像)ごと写す**(#677 の残り)。範囲は `copy-chapter-md` と同じ。
+   * ⚠ 見出しが引けなければ理由を出す(押した瞬間にメニューは畳まれるので、黙ると dead click)。
+   */
+  'copy-chapter-md-assets': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+    const heading = host === null ? null : headingAtSourceLine(host, line);
+    const ob = dispatcher.getState().openBody;
+    if (host === null || heading === null || ob === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '章の範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const fmBody = bodyBelowFrontmatter(ob.body);
+    const span = chapterSpanOf(host, heading, fmBody.split('\n').length);
+    if (span === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '章の範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    void copySourceLinesWithAssets(dispatcher, services, fmBody, span, '章');
+  },
+  /**
    * 🔴 **その章を指すリンクを写す**(#579。user 裁定 2026-09-04)。
    *
    * 貼れる 1 行は `[題名 / 見出し](entry:<lid>#h/<見出しの id>)`。押すと相手のノートを開いて
@@ -12593,6 +12693,35 @@ const ACTIONS: Record<string, ActionHandler> = {
       fmBody,
       span,
       board ? '付箋をコピーしました(Markdown の原文)' : 'ブロックをコピーしました(Markdown の原文)',
+    );
+  },
+  /**
+   * 🔴 **`:::` の塊(囲み / 板)を、添付(画像)ごと写す**(#677 の残り)。範囲・断りは `copy-block-md` と同じ
+   * (板の座標は開き行にあるのでそのまま運ぶ)。
+   */
+  'copy-block-md-assets': (dispatcher, target, services) => {
+    const line = menuCarriedBlock(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    const fmBody = ob === null ? null : bodyBelowFrontmatter(ob.body);
+    const span = fmBody === null ? null : blockSpanAt(fmBody, line);
+    if (fmBody === null || span === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ブロックの範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    if (span.open) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'このブロックは閉じていないのでコピーできません(閉じの ::: を足してください)',
+      });
+      return;
+    }
+    void copySourceLinesWithAssets(
+      dispatcher,
+      services,
+      fmBody,
+      span,
+      isPlaceOpen(fmBody.split('\n')[line] ?? '') ? '付箋' : 'ブロック',
     );
   },
   /**
@@ -20397,6 +20526,20 @@ export function bindActions(
        *   書き換える側(`body-rewrite.ts`)と**別の答えを持つ口が 2 つ**になる(§7)。
        * ⚠ 表でなければ 1 つも足さない(押しても何も起きない口を作らない)。
        */
+      /**
+       * 🔴 **章 / 塊に添付の参照が在るか**(#677 の残り)── 在るときだけ「添付ごとコピー」を足す。
+       * ⚠ 範囲は押したときの受け手と同じ関数(`chapterSpanOf` / `blockSpanAt`)で引く。
+       */
+      const fmForCarry = ob === null ? null : bodyBelowFrontmatter(ob.body);
+      const chapterSpan =
+        heading !== null && host !== null && fmForCarry !== null && heading.parentElement === host
+          ? chapterSpanOf(host, heading, fmForCarry.split('\n').length)
+          : null;
+      const chapterAssets =
+        chapterSpan !== null && fmForCarry !== null && hasAssetRefs(sliceLines(fmForCarry, chapterSpan));
+      const blockSpan = block === null || fmForCarry === null ? null : blockSpanAt(fmForCarry, block.line);
+      const blockAssets =
+        blockSpan !== null && fmForCarry !== null && !blockSpan.open && hasAssetRefs(sliceLines(fmForCarry, blockSpan));
       const tableLine = tableLineAt(target, ob?.body ?? null);
       const table = tableLine === null || ob === null ? null : tableAt(ob.body, tableLine);
       /**
@@ -20437,6 +20580,7 @@ export function bindActions(
                *   `#`〜`###`(`scanHeadings` が数える段はそこまで)。
                */
               sectionEditable: chapterable,
+              assets: chapterAssets,
               /**
                * 🔴 **章を別のウィンドウで(#1044 段4)**。⚠ 章の範囲を章の欄と**同じ関数**で
                *   決めるので、出す見出しも**同じ条件**にする(書けるかどうかには依らない ──
@@ -20456,6 +20600,7 @@ export function bindActions(
           rotated: block.rotated,
           front: block.front,
           back: block.back,
+          assets: blockAssets,
         })),
         /**
          * 🔴 **表の形を変える**(#708 段②)。⚠ 行番号は**この項目にだけ**載せる
