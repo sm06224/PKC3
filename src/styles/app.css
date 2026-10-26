@@ -2326,6 +2326,117 @@ button[data-pkc-primary] [data-pkc-icon] {
   padding: 0 var(--s2);
 }
 
+/* ── 入力欄(` ```yaml form `。#1456)──────────────────────────
+ * 🔴 本文の規則(`.pkc-md-rendered` 起点)なので、書き出した HTML・章の別ウィンドウにも焼かれる。
+ *   書き出した側は押せない欄を持たず、`.pkc-form-static`(いまの値の表)だけが出る。
+ * 🔑 地は無彩色、色は「未入力」「エラー」の情報にだけ使う(業務画面の原則)。 */
+.pkc-md-rendered .pkc-form {
+  margin: var(--s2) 0;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.pkc-md-rendered .pkc-form-title {
+  margin: 0 0 var(--s2);
+  font-weight: 600;
+}
+.pkc-md-rendered .pkc-form-row {
+  display: grid;
+  grid-template-columns: minmax(6em, 14em) minmax(0, 1fr);
+  gap: var(--s2);
+  align-items: center;
+  margin: var(--s1, 4px) 0;
+}
+/* 狭い画面(スマホ幅)では名前を欄の上に積む */
+@media (max-width: 480px) {
+  .pkc-md-rendered .pkc-form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.pkc-md-rendered .pkc-form-row-check {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+}
+.pkc-md-rendered .pkc-form-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+.pkc-md-rendered .pkc-form-required {
+  margin-left: 2px;
+  color: var(--danger, #b3261e);
+}
+.pkc-md-rendered .pkc-form-row input[type='text'],
+.pkc-md-rendered .pkc-form-row input[type='number'],
+.pkc-md-rendered .pkc-form-row input[type='date'],
+.pkc-md-rendered .pkc-form-row select,
+.pkc-md-rendered .pkc-form-row textarea {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+.pkc-md-rendered .pkc-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  align-items: center;
+  margin-top: var(--s2);
+}
+.pkc-md-rendered .pkc-form-sheet {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  align-items: center;
+  padding-left: var(--s2);
+  border-left: 1px solid var(--border);
+}
+.pkc-md-rendered .pkc-form-rowno {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pkc-md-rendered .pkc-form-rowno input {
+  width: 4.5em;
+  font: inherit;
+}
+.pkc-md-rendered .pkc-form-hint {
+  margin: var(--s2) 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.pkc-md-rendered .pkc-form-error {
+  margin: var(--s1, 4px) 0;
+  color: var(--danger, #b3261e);
+  font-size: 12px;
+}
+.pkc-md-rendered .pkc-form-empty {
+  color: var(--muted);
+}
+.pkc-md-rendered .pkc-form-source {
+  margin-top: var(--s2);
+  font-size: 12px;
+}
+.pkc-md-rendered .pkc-form-source summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+.pkc-md-rendered .pkc-form-static table {
+  width: auto;
+}
+.pkc-md-rendered .pkc-form-static th {
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pkc-md-rendered .pkc-form-btn {
+  font-size: var(--btn-fs-bar);
+  padding: 0 var(--s2);
+}
+
 /* ── 書式パネル(P8 段⑥)──────────────────────────
  * 🔑 **編集欄のすぐ上**に、共有の 1 本線で貼り付ける(段④ の規約:境界線は共有、
  * ギャップは置かない)。14 個入るので狭いときは折り返す ── 畳まない

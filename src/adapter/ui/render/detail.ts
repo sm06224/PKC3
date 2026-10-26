@@ -1875,6 +1875,11 @@ export class DetailRenderer {
          */
         interactiveCells: true,
         /**
+         * 🔴 **入力欄の定義(` ```yaml form `)を、打てる形で出す**(#1456)。⚠ **この面だけ**
+         *   (受け手 `form-save` ほかが居る面 ── 書き出した HTML・印刷・章の窓は値の表のまま)。
+         */
+        interactiveForms: true,
+        /**
          * 🔴 **コード枠に ✎ を出し、押せるようにする**(#1044 段3)。
          *
          * ⚠ **書ける窓だけ**(本体の読む面 / ノートの別ウィンドウ)── どちらも

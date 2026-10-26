@@ -218,7 +218,9 @@ import { chooseTagBadge } from '@adapter/ui/render/tag-badge';
 import { currentTagColor } from '@adapter/ui/render/tag-color';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
 import { appendModeOf } from '@adapter/ui/render/append-box';
-import { bodyBelowFrontmatter, frontmatterLineCount } from '@features/markdown/frontmatter';
+import { bodyBelowFrontmatter, extractVars, frontmatterLineCount } from '@features/markdown/frontmatter';
+import { isCheckedValue } from '@features/markdown/form-def';
+import { loadFormRow, planFormRow, type FormColumn } from '@features/markdown/form-table';
 import {
   ENTRY_PICK_LIMIT,
   type EntryPickRow,
@@ -3160,6 +3162,12 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'save-code-draft',
   'commit-edit',
   'append-entry',
+  // 🔑 入力欄(` ```yaml form `。#1456)の保存と、表の行への書き / 表からの読み込みも**本文を書く**
+  //    (実体は `SET_FORM_VALUES` / `SET_FORM_ROW`)── 取込・書出しの最中に走らせない
+  'form-save',
+  'form-row-add',
+  'form-row-update',
+  'form-row-load',
   // 🔑 板の付箋の上の追記 / 題名(#529 W5)── `append-entry` と同じ書込なので同じ門
   'place-inline-commit',
   // ⚠ 選んだ全部の本文を書く(#402 ①)── 取込・書出しの最中に走らせない
@@ -5384,6 +5392,86 @@ function directiveBlockAt(
     el = el.parentElement?.closest('[data-pkc-source-line]') ?? null;
   }
   return null;
+}
+
+/**
+ * 🔴 **入力欄(` ```yaml form `)の DOM から値を読む**(#1456)。
+ *
+ * ⚠ 定義(YAML)は持ち回らない ── 描画が各欄に焼いた `data-pkc-form-field`(項目名)/ `-label` / `-type` /
+ *   `-required` を読む(読む側と書く側で定義の読み方を 2 つ持たない)。
+ * @returns `cells` は表の升に書く字(項目名 → 字。チェックは true/false)。`values` は設定欄へ書く値
+ *   (空は `undefined` = その行を消す)。`missing` は必須で空の項目の表示名。
+ */
+function readFormInputs(form: HTMLElement): {
+  fields: FormColumn[];
+  cells: Record<string, string>;
+  values: Record<string, string | number | boolean | undefined>;
+  missing: string[];
+} {
+  const fields: FormColumn[] = [];
+  const cells: Record<string, string> = {};
+  const values: Record<string, string | number | boolean | undefined> = {};
+  const missing: string[] = [];
+  for (const el of form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('[data-pkc-form-field]')) {
+    const name = el.getAttribute('data-pkc-form-field') ?? '';
+    if (name === '') continue;
+    const label = el.getAttribute('data-pkc-form-label') ?? name;
+    const type = el.getAttribute('data-pkc-form-type') ?? 'text';
+    fields.push({ name, label });
+    if (type === 'checkbox') {
+      const on = (el as HTMLInputElement).checked;
+      cells[name] = on ? 'true' : 'false';
+      values[name] = on;
+      if (!on && el.getAttribute('data-pkc-form-required') === 'true') missing.push(label);
+      continue;
+    }
+    const raw = el.value;
+    cells[name] = raw;
+    if (raw === '') {
+      values[name] = undefined;
+      if (el.getAttribute('data-pkc-form-required') === 'true') missing.push(label);
+    } else if (type === 'number' && Number.isFinite(Number(raw))) {
+      values[name] = Number(raw);
+    } else {
+      values[name] = raw;
+    }
+  }
+  return { fields, cells, values, missing };
+}
+
+/** 入力欄の持ち主のノートと本文。⚠ 開いているノートの入力欄だけ(横に留めた別ノートの入力欄は断る)。 */
+function formOwner(
+  dispatcher: Dispatcher,
+  target: Element,
+): { lid: string; body: string; form: HTMLElement; table: string } | null {
+  const form = target.closest<HTMLElement>('[data-pkc-form]');
+  if (form === null) return null;
+  const st = dispatcher.getState();
+  const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
+  if (lid === null || lid === undefined) return null;
+  if (st.openBody?.lid !== lid) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: '入力欄に打てるのは、開いているノートだけです(このノートを開いてから入力してください)',
+    });
+    return null;
+  }
+  return { lid, body: st.openBody.body, form, table: form.getAttribute('data-pkc-form-table') ?? '' };
+}
+
+const FORM_ELSEWHERE_FAILED = '入力できませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください';
+
+/** 設定欄の `vars.<項目名>` の現在値と、入力欄の値が全部同じか。 */
+function sameAsVars(body: string, values: Record<string, string | number | boolean | undefined>): boolean {
+  const vars = extractVars(body);
+  return Object.entries(values).every(([k, v]) => (v === undefined ? '' : String(v)) === (vars[k] ?? ''));
+}
+
+/** 入力欄の行の番号の欄(1 始まり)。無い / 読めないときは `null`。 */
+function formRowNo(form: HTMLElement): number | null {
+  const raw = form.querySelector<HTMLInputElement>('[data-pkc-form-rowno]')?.value ?? '';
+  const n = Number(raw);
+  return raw.trim() !== '' && Number.isInteger(n) && n >= 1 ? n : null;
 }
 
 /**
@@ -11565,6 +11653,130 @@ const ACTIONS: Record<string, ActionHandler> = {
         () => dispatcher.dispatch({ type: 'SET_COLOR_CODE', lid, line, nth, from, to }),
       );
     });
+  },
+  /**
+   * 🔴 **入力欄の値を、そのノートの先頭の設定欄に保存する**(#1456)。
+   * 書くのは `vars.<項目名>`(`{{vars.…}}` の差し込みが読む綴り)。空の欄はその行を消す(双方向)。
+   * 書込は `SET_FORM_VALUES` → `REQUEST_BODY_REWRITE` の 1 本(§7)。
+   */
+  'form-save': (dispatcher, target, services) => {
+    const owner = formOwner(dispatcher, target);
+    if (owner === null) return;
+    const { values } = readFormInputs(owner.form);
+    if (Object.keys(values).length === 0) return;
+    const blocked = bodyWriteBlockReason(dispatcher.getState(), owner.lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `入力してください`) });
+      return;
+    }
+    if (sameAsVars(owner.body, values)) {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: '入力欄に変更はありません' });
+      return;
+    }
+    actUnlessEditedElsewhere(dispatcher, services, [owner.lid], FORM_ELSEWHERE_FAILED, () =>
+      dispatcher.dispatch({ type: 'SET_FORM_VALUES', lid: owner.lid, values }),
+    );
+  },
+  /**
+   * 🔴 **いまの入力を、連携先の表(` ```csv name=… `)の末尾に 1 行足す**(#1456)。表が無ければ項目名を見出しにして作る。
+   * ⚠ 断る理由は `planFormRow`(書く側と同じ関数)で先に言う ── 押した後に黙って何も起きない形を作らない。
+   */
+  'form-row-add': (dispatcher, target, services) => {
+    const owner = formOwner(dispatcher, target);
+    if (owner === null) return;
+    if (owner.table === '') return;
+    const { fields, cells, missing } = readFormInputs(owner.form);
+    if (missing.length > 0) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `必須の項目が未入力です: ${missing.join('、')}` });
+      return;
+    }
+    const blocked = bodyWriteBlockReason(dispatcher.getState(), owner.lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `表に書いてください`) });
+      return;
+    }
+    const plan = planFormRow(owner.body, { mode: 'add', table: owner.table, fields, cells });
+    if (!plan.ok) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: plan.why });
+      return;
+    }
+    actUnlessEditedElsewhere(dispatcher, services, [owner.lid], FORM_ELSEWHERE_FAILED, () =>
+      dispatcher.dispatch({ type: 'SET_FORM_ROW', lid: owner.lid, table: owner.table, mode: 'add', fields, cells }),
+    );
+  },
+  /** 🔴 **指定した行を、いまの入力で書き換える**(#1456)。入力欄に無い列は元の升のまま。 */
+  'form-row-update': (dispatcher, target, services) => {
+    const owner = formOwner(dispatcher, target);
+    if (owner === null) return;
+    if (owner.table === '') return;
+    const row = formRowNo(owner.form);
+    if (row === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '更新する行の番号(1 から)を「行」の欄に入れてください' });
+      return;
+    }
+    const { fields, cells, missing } = readFormInputs(owner.form);
+    if (missing.length > 0) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `必須の項目が未入力です: ${missing.join('、')}` });
+      return;
+    }
+    const blocked = bodyWriteBlockReason(dispatcher.getState(), owner.lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `表に書いてください`) });
+      return;
+    }
+    const plan = planFormRow(owner.body, { mode: 'update', table: owner.table, fields, cells, row });
+    if (!plan.ok) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: plan.why });
+      return;
+    }
+    if (plan.body === owner.body) {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: `行 ${String(row)} は既にその内容です` });
+      return;
+    }
+    actUnlessEditedElsewhere(dispatcher, services, [owner.lid], FORM_ELSEWHERE_FAILED, () =>
+      dispatcher.dispatch({ type: 'SET_FORM_ROW', lid: owner.lid, table: owner.table, mode: 'update', row, fields, cells }),
+    );
+  },
+  /** 🔴 **表の指定した行を、入力欄へ読み込む**(#1456)。設定欄の `vars.…` に書く(保存と同じ道)。 */
+  'form-row-load': (dispatcher, target, services) => {
+    const owner = formOwner(dispatcher, target);
+    if (owner === null) return;
+    if (owner.table === '') return;
+    const row = formRowNo(owner.form);
+    if (row === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '読み込む行の番号(1 から)を「行」の欄に入れてください' });
+      return;
+    }
+    const { fields } = readFormInputs(owner.form);
+    const got = loadFormRow(owner.body, owner.table, row, fields);
+    if (!got.ok) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: got.why });
+      return;
+    }
+    const types = new Map<string, string>();
+    for (const el of owner.form.querySelectorAll<HTMLElement>('[data-pkc-form-field]')) {
+      types.set(el.getAttribute('data-pkc-form-field') ?? '', el.getAttribute('data-pkc-form-type') ?? 'text');
+    }
+    const values: Record<string, string | number | boolean | undefined> = {};
+    for (const [name, cell] of Object.entries(got.cells)) {
+      const type = types.get(name) ?? 'text';
+      if (type === 'checkbox') values[name] = isCheckedValue(cell);
+      else if (cell === '') values[name] = undefined;
+      else if (type === 'number' && Number.isFinite(Number(cell))) values[name] = Number(cell);
+      else values[name] = cell;
+    }
+    const blocked = bodyWriteBlockReason(dispatcher.getState(), owner.lid);
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `読み込んでください`) });
+      return;
+    }
+    if (sameAsVars(owner.body, values)) {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: `行 ${String(row)} は既に入力欄と同じ内容です` });
+      return;
+    }
+    actUnlessEditedElsewhere(dispatcher, services, [owner.lid], FORM_ELSEWHERE_FAILED, () =>
+      dispatcher.dispatch({ type: 'SET_FORM_VALUES', lid: owner.lid, values }),
+    );
   },
   'toggle-task': (dispatcher, target, services, root) => {
     const raw = target.getAttribute('data-pkc-task-line');

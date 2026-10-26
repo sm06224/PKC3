@@ -44,6 +44,7 @@ import { foldIdeographicIndent } from './fullwidth-indent';
 import { highlightCode, isHighlightable } from './code-highlight';
 import { cellEditButtonHtml, detectCsvLang, renderCsvFence, shapeButtonHtml } from './csv-table';
 import { isSqlEmbedInfo, sqlEmbedHostHtml } from './sql-embed';
+import { formHtml, isFormInfo } from './form-def';
 import { buildHtmlSandboxIframe } from './html-sandbox';
 import {
   EXTERNAL_IMAGE_ATTR,
@@ -757,6 +758,20 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
       fenceEditable(env, token),
       sqlEmbedHostHtml(content),
     );
+  }
+  /**
+   * 🔴 **` ```yaml form ` は入力欄にする**(#1456)。定義は囲みの中身(YAML)で、値は本文の `vars`(先頭の設定欄の
+   *   `vars.<項目名>:`)から読む。押して打てるのは `interactiveForms` の面だけ(他は値の表)。
+   * ⚠ 添付から取った字は対象外(`fenceAsset.kind === 'none'` のときだけ)── `sql embed` と同じ。
+   * ⚠ `parseRenderableFence` の外で見る ── `yaml` を registry へ足すと、素の ` ```yaml ` まで受けてしまう。
+   */
+  if (fenceAsset.kind === 'none' && isFormInfo(info)) {
+    const fenv = env as { interactiveForms?: boolean; vars?: Readonly<Record<string, string>> } | undefined;
+    return formHtml(content, {
+      interactive: fenv?.interactiveForms === true,
+      vars: fenv?.vars ?? {},
+      sourceAttrs: sourceLineAttrs,
+    });
   }
   const fence = parseRenderableFence(effectiveInfo);
   if (fence) {
@@ -3632,6 +3647,15 @@ export interface RenderMarkdownOptions {
    * ⚠ 渡さなければ属性は 1 つも出ない = goldens は 1 バイトも動かない。
    */
   readonly interactiveCells?: boolean;
+  /**
+   * 🔴 **入力欄の定義(` ```yaml form `)を、押して打てる形で出すか**(#1456。既定 `false` = 値を表で見せるだけ)。
+   *
+   * ⚠ **受け手(`form-save` など)が居る面だけ** `true` にする ── `interactiveCells` と同じ理由で、
+   *   打てるのに本文へ入らないと「入力したのに消えた」になる。書き出した HTML・印刷・Word・章の別ウィンドウは
+   *   受け手が居ないので、いまの値の表だけが出る。
+   * ⚠ 渡さなければ属性は 1 つも出ない = goldens は 1 バイトも動かない(定義の囲みが無い本文は何も変わらない)。
+   */
+  readonly interactiveForms?: boolean;
   /**
    * 🔴 **コード枠に ✎(その場で編集)を出すか**(#1044 段3。既定 `false` = 出さない)。
    *
@@ -6885,6 +6909,10 @@ function renderMarkdownCore(
     allowExternalImages: boolean;
     interactiveTasks: boolean;
     interactiveCells: boolean;
+    /** 入力欄の定義を押して打てる形で出すか(#1456) */
+    interactiveForms: boolean;
+    /** 本文の `vars`(入力欄の現在値。#1456) */
+    vars: Readonly<Record<string, string>>;
     interactiveCodeBlocks: boolean;
     interactiveTags: boolean;
     phoneLinks: boolean;
@@ -6917,6 +6945,9 @@ function renderMarkdownCore(
     interactiveTasks: opts.interactiveTasks === true,
     // 🔴 表のセルを押せる形で出すか(#418 段①)。既定は押せない
     interactiveCells: opts.interactiveCells === true,
+    // 🔴 入力欄の定義を押して打てる形で出すか(#1456)。既定は値の表だけ
+    interactiveForms: opts.interactiveForms === true,
+    vars: opts.vars ?? {},
     // 🔴 コード枠に ✎ を出すか(#1044 段3)。既定は出さない
     interactiveCodeBlocks: opts.interactiveCodeBlocks === true,
     // 🔴 本文中のタグを押せる形で出すか(#550 段③)。既定は押せない
