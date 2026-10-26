@@ -1797,6 +1797,12 @@ export interface AppState {
    * ⚠ 保存しない(その場の見え方)── `showDoneTasks` / `showUndatedTasks` と同じ扱い。
    */
   scheduleHiddenNotes: readonly string[];
+  /**
+   * 🔴 **予定の面を、担当で絞る**(#283)。`null` = 全員(既定)/ `''` = 担当なし / それ以外 = その名前。
+   * ⚠ 保存しない(その場の見え方)── `showDoneTasks` / `scheduleHiddenNotes` と同じ扱い。
+   * ⚠ 絞るだけ ── ノートも予定も消さない(外せば全部戻る)。
+   */
+  scheduleOwner: string | null;
   /** 選択 entry の履歴 panel(P5b)。開いた時点のスナップショット ── 選択遷移 /
    *  編集開始 / view 切替で畳む。boot で revisions に触れない原則の受け皿。 */
   revisionPanel: { lid: string; items: readonly RevisionItem[] } | null;
@@ -2475,6 +2481,7 @@ export const initialState: AppState = {
   showDoneTasks: false,
   showUndatedTasks: false,
   scheduleHiddenNotes: [],
+  scheduleOwner: null,
   revisionPanel: null,
   revisionPreview: null,
   notice: null,
@@ -3405,6 +3412,10 @@ export type UserAction =
   /** 板の「完了」を開く / 畳む(2026-08-20。設計 doc §4-4)。 */
   | { type: 'TOGGLE_SHOW_DONE_TASKS' }
   | { type: 'TOGGLE_SHOW_UNDATED_TASKS' }
+  /** 🔴 予定の面を担当で絞る(#283)。`null` = 全員 / `''` = 担当なし / 名前。見え方だけ(走査は頼み直さない)。 */
+  | { type: 'SET_SCHEDULE_OWNER'; owner: string | null }
+  /** 🔴 ノート 1 件の担当を書く / 外す(#283。前書きの `owner:`)。`owner: null` = 外す(`date` と同じ双方向)。 */
+  | { type: 'SET_ENTRY_OWNER'; lid: string; owner: string | null }
   /** 予定の面で、そのノートの予定を隠す / 出す(「出すもの」のノートの一覧)。 */
   | { type: 'TOGGLE_SCHEDULE_NOTE'; lid: string }
   | { type: 'RETRY_PERSIST' }
@@ -9836,6 +9847,39 @@ function reduceCore(
     case 'TOGGLE_SHOW_DONE_TASKS':
       // ⚠ 選択も走査も動かさない ── 見え方だけを変える
       return { state: { ...state, showDoneTasks: !state.showDoneTasks }, events: [] };
+    case 'SET_ENTRY_OWNER': {
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null)
+        return {
+          state: {
+            ...state,
+            error: blockedWithSuffix(blocked, action.owner === null ? '担当を外してください' : '担当を付けてください'),
+          },
+          events: [],
+        };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      const owner = action.owner === null ? null : action.owner.replace(/\s+/g, ' ').trim();
+      if (owner === '') return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            // ⚠ 書換は既存の `frontmatter` 1 本(鍵を足す / 書き換える / `undefined` で消す)── 新しい書込経路を作らない
+            rewrite: { kind: 'frontmatter', keys: { owner: owner ?? undefined } },
+          },
+        ],
+      };
+    }
+    case 'SET_SCHEDULE_OWNER':
+      return state.scheduleOwner === action.owner
+        ? { state, events: [] }
+        : { state: { ...state, scheduleOwner: action.owner }, events: [] };
     case 'TOGGLE_SHOW_UNDATED_TASKS':
       /**
        * ⚠ **走査を頼み直さない**(2026-08-23)── 日付の無い札も `taskScan` に

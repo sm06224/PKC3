@@ -764,6 +764,7 @@ import {
 import { currentOpenPlace } from '@adapter/ui/render/open-place';
 import { appExternalImages } from '@adapter/ui/render/external-images';
 import { parseFrontmatter } from '@features/markdown/frontmatter';
+import { readScheduleOwner } from '@features/schedule/schedule-keys';
 import { externalImageBlockReason } from './adopt-favicon';
 
 /**
@@ -3414,6 +3415,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    */
   'set-entry-date',
   'clear-entry-date',
+  // 🔴 ノートの担当を書く / 外すのも前書きを書く(#283)── 日付と同じ門
+  'set-entry-owner',
+  'clear-entry-owner',
   'toggle-app-tile',
   /**
    * 🔴 **リンクを足すのも「作る」である**(#401 ①)。⚠ `create-entry` と同じ理由で
@@ -12650,6 +12654,48 @@ const ACTIONS: Record<string, ActionHandler> = {
       () => dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null }),
     );
   },
+  /**
+   * 🔴 **ノート 1 件の担当を付ける / 変える**(#283)。名前を打つ小窓 → 前書きの `owner:` に書く。
+   * ⚠ 書換は `SET_ENTRY_OWNER`(= 既存の `frontmatter` 書換 1 本)。空のまま OK は何もしない。
+   */
+  'set-entry-owner': (dispatcher, _target, services, root) => {
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}担当を付けてください` });
+      return;
+    }
+    const st0 = dispatcher.getState();
+    const lid = st0.selectedLid;
+    if (lid === null) return;
+    const cur = st0.openBody?.lid === lid ? readScheduleOwner(parseFrontmatter(st0.openBody.body).meta) : null;
+    void promptInApp(root, {
+      title: '担当を付ける',
+      label: '担当者の名前を入力してください(連絡先のノートの題名と同じ字にすると、情報の欄から連絡先へ飛べます):',
+      initial: cur ?? '',
+      okLabel: '担当を付ける',
+    }).then((typed) => {
+      if (typed === null || typed.trim() === '') return;
+      actUnlessEditedElsewhere(
+        dispatcher,
+        services,
+        [lid],
+        '担当を付けられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+        () => dispatcher.dispatch({ type: 'SET_ENTRY_OWNER', lid, owner: typed }),
+      );
+    });
+  },
+  /** 🔴 **置けるなら外せる**(片道を作らない)。⚠ 門は reducer が声に出して断る(`clear-entry-date` と同じ)。 */
+  'clear-entry-owner': (dispatcher, _target, services) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null) return;
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      '担当を外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => dispatcher.dispatch({ type: 'SET_ENTRY_OWNER', lid, owner: null }),
+    );
+  },
   /** 予定の面の「一覧 / 日」(#855 段 A-1)。値は押したボタンの `data-pkc-mode`。 */
   'schedule-mode': (dispatcher, target, services) => {
     const mode = target.getAttribute('data-pkc-mode');
@@ -17059,6 +17105,18 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-schedule-week-start': (_dispatcher, target) => {
     if (target instanceof HTMLSelectElement)
       appScheduleWeekStart.set(normalizeWeekStart(target.value));
+  },
+  /**
+   * 🔴 **予定の面を担当で絞る**(#283)。値は選んだ行の `value`(`\u0000all` = 全員 / `\u0000none` = 担当なし / 名前)。
+   * 見え方だけ ── 本文にも保存にも触れない(`BODY_WRITE_ACTIONS` には載せない)。
+   */
+  'set-schedule-owner': (dispatcher, target) => {
+    if (!(target instanceof HTMLSelectElement)) return;
+    const v = target.value;
+    dispatcher.dispatch({
+      type: 'SET_SCHEDULE_OWNER',
+      owner: v === '\u0000all' ? null : v === '\u0000none' ? '' : v,
+    });
   },
   /** 🔴 **次に開いたとき、見逃した予定を知らせるか**(#855 20-C)。⚠ 押した後の値を保存する。 */
   'set-schedule-missed': (_dispatcher, target) => {

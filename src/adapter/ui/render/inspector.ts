@@ -64,7 +64,9 @@ import { stripComments, preprocessHeadingNumbers } from '@features/markdown/mark
 import { extractHeadingNumberConfig } from '@features/markdown/document-globals';
 import { countDrawnTasks } from '@features/markdown/task-drawn';
 import { listAssetUses, type AssetUse } from '@features/asset/asset-refs-in-body';
-import { frontmatterProblem } from '@features/markdown/frontmatter';
+import { frontmatterProblem, parseFrontmatter } from '@features/markdown/frontmatter';
+import { readScheduleOwner } from '@features/schedule/schedule-keys';
+import { contactLidFor } from '@features/schedule/owner';
 import { externalImageUrls } from '@features/asset/inline-url-adopt';
 import { cheapGraphemeCount, countGraphemes, formatBodyStatsFor, formatTaskProgress } from '@features/stats/body-stats';
 import { estimateReadingTime, type ReadingTimeEstimate } from '@features/markdown/reading-time';
@@ -1323,6 +1325,7 @@ export class InspectorRenderer {
     }
     this.scanLid = state.openBody?.lid === meta.lid ? meta.lid : null;
     this.paintDate(meta, editing, blockedNote);
+    this.paintOwner(state, meta, editing, blockedNote);
     this.paintRelationAdd(editing, blockedNote);
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
     //    「どこへ」書くのか分からない操作になる。⚠ 行の有無は形(= build 側)
@@ -1538,6 +1541,76 @@ export class InspectorRenderer {
   }
 
   /**
+   * 🔴 **ノート 1 件の担当**を塗る(#283)。
+   *
+   * - 担当の名前は**連絡先のノートの題名と字で一致すれば押せる札**(連絡先へ飛ぶ)。一致しなければ字のまま。
+   * - ⚠ **「置けるなら外せる」**(片道を作らない)── 付ける / 変えるボタンと、外すボタンの両方を持つ。
+   * - 読むのは**開いている本文の前書き**(列に持たない ── 保存の形を変えない)。本文がまだ来ていない間は何も出さない。
+   * - ⚠ 器は使い回す(押す寸前のボタンを作り直さない)。
+   */
+  private paintOwner(state: AppState, meta: EntryMeta, editing: boolean, blockedNote: string): void {
+    const dd = this.rows.get('inspector-owner');
+    if (!dd) return;
+    const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+    const dt = dd.previousElementSibling;
+    // 本文がまだ無い(読み込み中)/ フォルダなど本文を持たない種類は、行ごと畳む(「無し」と嘘をつかない)
+    const known = body !== null && meta.archetype !== 'folder';
+    dd.hidden = !known;
+    if (dt instanceof HTMLElement) dt.hidden = !known;
+    if (!known) return;
+    const owner = readScheduleOwner(parseFrontmatter(body).meta);
+    let name = dd.querySelector<HTMLElement>('[data-pkc-field="inspector-owner-name"]');
+    let set = dd.querySelector<HTMLButtonElement>('[data-pkc-action="set-entry-owner"]');
+    let clear = dd.querySelector<HTMLButtonElement>('[data-pkc-action="clear-entry-owner"]');
+    if (set === null) {
+      set = document.createElement('button');
+      set.type = 'button';
+      set.setAttribute('data-pkc-action', 'set-entry-owner');
+      clear = document.createElement('button');
+      clear.type = 'button';
+      clear.setAttribute('data-pkc-action', 'clear-entry-owner');
+      clear.textContent = '担当を外す';
+      dd.append(set, clear);
+    }
+    const contact = owner === null ? null : contactLidFor(owner, state.contactScan?.cards ?? []);
+    // 名前は、連絡先と一致するか(押せる札)・しないか(字)で要素の種類が変わる ── 作り直す
+    const wantTag = owner === null ? null : contact === null || contact === meta.lid ? 'span' : 'button';
+    if (name !== null && (wantTag === null || name.tagName.toLowerCase() !== wantTag)) {
+      name.remove();
+      name = null;
+    }
+    if (wantTag !== null) {
+      if (name === null) {
+        name = document.createElement(wantTag);
+        if (name instanceof HTMLButtonElement) name.type = 'button';
+        name.setAttribute('data-pkc-field', 'inspector-owner-name');
+        dd.prepend(name);
+      }
+      if (name.textContent !== owner) name.textContent = owner;
+      if (contact !== null && contact !== meta.lid) {
+        name.setAttribute('data-pkc-action', 'select-entry');
+        name.setAttribute('data-pkc-entry', contact);
+        name.title = '連絡先のノートを開きます';
+      } else {
+        name.removeAttribute('data-pkc-action');
+        name.removeAttribute('data-pkc-entry');
+        name.removeAttribute('title');
+      }
+    }
+    const label = owner === null ? '担当を付ける' : '担当を変える';
+    if (set.textContent !== label) set.textContent = label;
+    set.disabled = editing;
+    const setBase = owner === null ? 'このノートの担当者を、名前で付けます' : '担当者の名前を書き換えます';
+    set.title = editing ? withBlockedNote(setBase, blockedNote) : setBase;
+    if (clear) {
+      // ⚠ 押しても何も起きないボタンを出さない(担当が無ければ外すものが無い)
+      clear.hidden = owner === null;
+      clear.disabled = editing;
+      clear.title = editing ? withBlockedNote('担当を外します', blockedNote) : '担当を外します(ノートは消えません)';
+    }
+  }
+
+  /**
    * 🔴 関係を足す帯も編集中は押せなくする(#513)。
    * ⚠ この帯は操作の帯の loop(`this.buttons`)の**対象外**なので、個別に塗る ──
    *   直す前は編集中も押せて、reducer が黙って捨て、**欄だけ空になっていた**。
@@ -1726,6 +1799,11 @@ export class InspectorRenderer {
      * ⚠ 値は押せるボタンなので `setRow` ではなく専用の器を持つ。
      */
     row('日付', 'inspector-date');
+    /**
+     * 🔴 **ノート 1 件の担当**(#283。前書きの `owner:`)。日付の隣 ── 日付・状態に並ぶ「タスクとしての属性」。
+     * ⚠ 値は押せる札 + ボタンなので `setRow` ではなく専用の器を持つ(日付と同じ)。
+     */
+    row('担当', 'inspector-owner');
     /**
      * 🔴 **見出しから自動で作る目次**(#493)。
      *

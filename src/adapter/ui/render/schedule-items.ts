@@ -7,7 +7,8 @@
  * 検索・種類の絞り(`matchesEntry`)。
  */
 import type { AppState } from '@adapter/state/app-state';
-import { noteTimeFor, type TaskCard } from '@features/schedule/task-cards';
+import { noteOwnerFor, noteTimeFor, type TaskCard } from '@features/schedule/task-cards';
+import { ownerChoices, passesOwnerFilter } from '@features/schedule/owner';
 import { itemOfCard, itemOfNote, type AgendaItem } from '@features/schedule/agenda';
 import { entryFilterOf, matchesEntry } from '@features/filter/title-filter';
 
@@ -27,6 +28,11 @@ export interface ScheduleItems {
   readonly byNote: readonly { readonly lid: string; readonly count: number }[];
   /** ノートを隠したせいで出ていない予定の数(「出すもの(N)」に足す)。他の絞りで出ない分は数えない。 */
   readonly hiddenByNote: number;
+  /**
+   * 🔴 **担当の選択肢**(#283)。担当で絞る前の、予定の面に出うる全部の担当(重複なし)。
+   * 空 = 担当を書いた予定が無い(面は選択肢を出さない ── 押しても何も起きない口を作らない)。
+   */
+  readonly owners: readonly string[];
   /** 済んでいるノートの予定の数(「済み(N)」に足す)。他の絞りを通り、ノートで隠していない分。 */
   readonly doneNotes: number;
 }
@@ -42,6 +48,8 @@ export function scheduleItemsOf(state: AppState): ScheduleItems {
     if (m.archived && !state.showArchived) return false;
     // ⚠ 済んだ行は畳む(板の「完了」と同じ旗)── 予定の面は列が無いので**外す**
     if (c.done && !state.showDoneTasks) return false;
+    // 🔴 担当で絞る(#283)。見え方だけ ── 隠した数には数えない(担当を変えれば全部戻る)
+    if (!passesOwnerFilter(c.owner, state.scheduleOwner)) return false;
     return matchesEntry(m, filter);
   });
   const visible = unhidden.filter((c) => !hiddenNotes.has(c.lid));
@@ -55,6 +63,8 @@ export function scheduleItemsOf(state: AppState): ScheduleItems {
     if (m.archived && !state.showArchived) continue;
     if (!matchesEntry(m, filter)) continue;
     // 🔴 前書きの時刻(依頼 192 / 284)。引く口は `noteTimeFor` 1 本(抽出列の日付と食い違う組は使わない)
+    // 🔴 担当で絞る(#283)。ノート 1 件の担当は前書きの `owner:`(走査の `noteTimes`)
+    if (!passesOwnerFilter(noteOwnerFor(state.taskScan, m.lid, m.date), state.scheduleOwner)) continue;
     const item = itemOfNote(m, noteTimeFor(state.taskScan, m.lid, m.date));
     // ⚠ 済んだノートは行の札と同じ旗で畳む(`showDoneTasks`)。畳んだ分は数だけ持つ
     if (item.done && !state.showDoneTasks) {
@@ -93,5 +103,9 @@ export function scheduleItemsOf(state: AppState): ScheduleItems {
     if (hiddenNotes.has(n.lid)) hiddenByNote++;
   }
   const byNote = [...counts].map(([lid, count]) => ({ lid, count }));
-  return { all, visible, notes, items: [...visible.map(itemOfCard), ...notes], byNote, hiddenByNote, doneNotes };
+  const owners = ownerChoices([
+    ...all.map((c) => c.owner),
+    ...(state.taskScan?.noteTimes ?? []).map((n) => n.owner),
+  ]);
+  return { all, visible, notes, items: [...visible.map(itemOfCard), ...notes], byNote, hiddenByNote, owners, doneNotes };
 }

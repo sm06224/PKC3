@@ -5974,6 +5974,26 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='inspector-date'] button:hover:not(:disabled) {
   border-bottom-color: var(--fg);
 }
+/* 情報の「担当」(#283)。日付と同じ作り ── ボタンらしく主張させない。連絡先と一致した名前だけ押せる札 */
+[data-pkc-field='inspector-owner'] button {
+  padding: 0;
+  margin-right: var(--s2);
+  font: inherit;
+  color: var(--fg);
+  background: none;
+  border: none;
+  border-bottom: 1px dotted var(--border);
+  cursor: pointer;
+}
+[data-pkc-field='inspector-owner'] [data-pkc-action='clear-entry-owner'] {
+  color: var(--muted);
+}
+[data-pkc-field='inspector-owner'] button:hover:not(:disabled) {
+  border-bottom-color: var(--fg);
+}
+[data-pkc-field='inspector-owner'] [data-pkc-field='inspector-owner-name'] {
+  margin-right: var(--s2);
+}
 /* ⚠ 印の無い予定(ノート 1 件が丸ごと)は、印の列を**空けたまま**揃える */
 [data-pkc-field='no-check'] {
   display: inline-block;

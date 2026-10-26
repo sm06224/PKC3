@@ -33,7 +33,8 @@
 import { listTaskItems, type TaskItem } from '@features/markdown/task-count';
 import { readLineDate, stripLineDate } from '@features/schedule/line-date';
 import { parseFrontmatter } from '@features/markdown/frontmatter';
-import { readScheduleDate, readScheduleTime } from '@features/schedule/schedule-keys';
+import { readScheduleDate, readScheduleOwner, readScheduleTime } from '@features/schedule/schedule-keys';
+import { ownerOfText } from '@features/schedule/owner';
 import type { RepeatUnit } from '@features/schedule/repeat';
 
 /**
@@ -80,6 +81,11 @@ export interface TaskCard extends TaskItem {
    *   「その日は出さない」を作る)。ここで展開の判断はしない。
    */
   readonly substitutes: string | null;
+  /**
+   * 🔴 **担当**(#283)。行に `担当:名前` があればそれ、無ければそのノートの前書きの `owner:`。無ければ `null`。
+   * ⚠ 省略は `null` と同じ(旧ビルドのタブが運んだ札も受ける)。
+   */
+  readonly owner?: string | null;
 }
 
 /** 時刻つきのノート 1 件の予定を読む上限(画面に出して意味がある量ではなく、暴走の止め弁)。切ったら `truncated` を立てる。 */
@@ -120,7 +126,10 @@ export const TASK_LIMITS = {
 export interface NoteTime {
   readonly lid: string;
   readonly date: string;
-  readonly time: string;
+  /** 時刻。⚠ 担当だけを書いたノート(時刻なし)も載せるので `null` がある(#283)。 */
+  readonly time: string | null;
+  /** 🔴 前書きの `owner:`(#283)。省略 = 無い。 */
+  readonly owner?: string | null;
 }
 
 /** 走査の結果。⚠ **切ったかどうかを一緒に運ぶ**(黙って切らない)。 */
@@ -169,7 +178,10 @@ export function taskCardKey(card: { lid: string; line: number }): string {
  *   描画側が決める(切替のたびに worker を叩き直さないため)。
  */
 export function taskCardsOf(lid: string, body: string): TaskCard[] {
-  return listTaskItems(body).map((item) => {
+  const items = listTaskItems(body);
+  // 🔴 ノートの担当は 1 度だけ読む(札の数ぶん前書きを解析しない)。札が無いノートは読まない
+  const noteOwner = items.length === 0 ? null : readScheduleOwner(parseFrontmatter(body).meta);
+  return items.map((item) => {
     const when = readLineDate(item.text);
     return {
       lid,
@@ -190,6 +202,8 @@ export function taskCardsOf(lid: string, body: string): TaskCard[] {
       until: when === null ? null : when.until,
       repeat: when === null ? null : when.repeat,
       substitutes: when === null ? null : when.substitutes,
+      // 🔴 行の担当 > ノートの担当(#283)
+      owner: ownerOfText(item.text) ?? noteOwner,
     };
   });
 }
@@ -262,7 +276,10 @@ export function noteTimeOf(lid: string, body: string): NoteTime | null {
   const { meta } = parseFrontmatter(body);
   const date = readScheduleDate(meta);
   const time = readScheduleTime(meta);
-  return date === null || time === null ? null : { lid, date, time };
+  const owner = readScheduleOwner(meta);
+  // 🔴 時刻か担当のどちらかがあれば載せる(#283)。日付だけのノートは今までどおり載せない
+  if (date === null || (time === null && owner === null)) return null;
+  return owner === null ? { lid, date, time } : { lid, date, time, owner };
 }
 
 /**
@@ -274,6 +291,15 @@ export function noteTimeFor(scan: { readonly noteTimes?: readonly NoteTime[] } |
   if (scan === null || date === null) return null;
   const n = scan.noteTimes?.find((x) => x.lid === lid);
   return n !== undefined && n.date === date ? n.time : null;
+}
+
+/**
+ * 🔴 **ノート 1 件の予定の担当を、走査から引く**(#283)。引く条件は `noteTimeFor` と同じ(抽出列の日付と食い違う組は使わない)。
+ */
+export function noteOwnerFor(scan: { readonly noteTimes?: readonly NoteTime[] } | null, lid: string, date: string | null): string | null {
+  if (scan === null || date === null) return null;
+  const n = scan.noteTimes?.find((x) => x.lid === lid);
+  return n !== undefined && n.date === date ? (n.owner ?? null) : null;
 }
 
 /**
@@ -289,7 +315,8 @@ export function noteTimeCards(
   const out: TaskCard[] = [];
   for (const n of scan?.noteTimes ?? []) {
     const m = metas.get(n.lid);
-    if (m === undefined || m.date !== n.date) continue;
+    // ⚠ 時刻の無い組(担当だけを書いたノート。#283)は、アラーム / 見逃しの数え方に渡さない
+    if (m === undefined || m.date !== n.date || n.time === null) continue;
     out.push({
       lid: n.lid,
       line: 0,
@@ -320,7 +347,8 @@ export function replaceNoteTime(
   const now = noteTimeOf(lid, body);
   const old = prev.find((n) => n.lid === lid) ?? null;
   if (old === null && now === null) return list;
-  if (old !== null && now !== null && old.date === now.date && old.time === now.time) return list;
+  if (old !== null && now !== null && old.date === now.date && old.time === now.time && (old.owner ?? null) === (now.owner ?? null))
+    return list;
   const rest = prev.filter((n) => n.lid !== lid);
   return now === null ? rest : [...rest, now];
 }
@@ -357,7 +385,9 @@ function sameCards(a: readonly TaskCard[], b: readonly TaskCard[]): boolean {
       x.repeat !== y.repeat ||
       // ⚠ **振替も見る**(#855 決4)── 見ないと、振替を外した瞬間に
       //    **元の回が塞がれたまま**残る(消したのに出てこない = 刻みと同じ穴)
-      x.substitutes !== y.substitutes
+      x.substitutes !== y.substitutes ||
+      // ⚠ **担当も見る**(#283)── 見ないと、`担当:` だけを書き換えたとき「同じ」と判定され、画面の担当が古いまま残る
+      (x.owner ?? null) !== (y.owner ?? null)
     )
       return false;
   }
