@@ -2342,16 +2342,11 @@ button[data-pkc-primary] [data-pkc-icon] {
 }
 .pkc-md-rendered .pkc-form-row {
   display: grid;
-  grid-template-columns: minmax(6em, 14em) minmax(0, 1fr);
+  /* 幅が足りなければ(スマホ幅)名前を欄の上に積む ── 幅の数字は CSS に書かない(TS と別の幅で切り替わらない) */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9em), 1fr));
   gap: var(--s2);
   align-items: center;
   margin: var(--s1, 4px) 0;
-}
-/* 狭い画面(スマホ幅)では名前を欄の上に積む */
-@media (max-width: 480px) {
-  .pkc-md-rendered .pkc-form-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 .pkc-md-rendered .pkc-form-row-check {
   display: flex;

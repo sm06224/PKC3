@@ -3346,6 +3346,8 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
       expect(unnamedFlags().every(Boolean), '目録を引く SQL でも拾う(csv が目録に出る)').toBe(true);
     } finally {
       spy.mockRestore();
+      // 同じ DB を使う後ろの test に、名前なしの囲みを残さない(csv の既定の表に混ざる)
+      await write('csv-lazy', 'もう空');
     }
   });
 
