@@ -1036,6 +1036,11 @@ export const BAR_FORMAT_OPS: readonly { op: FormatOp; label: string; hint: strin
 
 const LINE_OPS: ReadonlySet<string> = new Set(Object.keys(LINE_MARKS));
 
+/** 行頭に印を付ける書式か(見出し・箇条書き・番号・チェック・引用)。打ちながら出る `/` の小窓が、入れた後の caret の置き場を決めるのに使う。 */
+export function isLineOp(op: string): boolean {
+  return LINE_OPS.has(op);
+}
+
 /**
  * 🔴 **選んでいるときは「選んだ範囲を囲む」側へ倒れる 4 つ**(#950。表 / 図 / コードブロック / 数式)。
  *

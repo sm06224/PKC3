@@ -1356,7 +1356,10 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    🔴 ここでしか見えない:落ちてきた file の中身(選んだ題名だけ / 取り込み直せる)/ localStorage を挟んだ再読み込み後の保存した検索 /
     //    本物の CSS での危険色・太字 / 本物の beforeprint で付いて afterprint で消える目次 / OPFS が取れない起動での隣のボタン。
     //    109 → 110。起動の予算は 560 のまま(実数 545、残り 15)。
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(110);
+    // ⚠ 2026-10-26(#1449 / #1450 / #426 段②): `inline-complete.smoke.spec.ts` を**新設**(+1 file / **+2 件**)。
+    //    🔴 ここでしか見えない:本物のキー入力(Tab / Esc が欄の既定を奪えているか)/ caret の真下に出る実座標 / 右クリックで書いた日付が保存まで届く。
+    //    110 → 111。起動の予算は 560 のまま(実数 547、残り 13)。
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(111);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
@@ -1566,7 +1569,7 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-10-25(#528): `mermaid.smoke.spec.ts` に 1 本足した(plotly は PNG の img / React は隔離した枠の中で動き、外へは出ない)→ 539 → 540。
     //    🔴 ここでしか見えない:plotly.js を実際に動かして PNG になるか / 枠の中で React が動いて押すと数が増え Tailwind が効くか / CSP が外部画像の要求を止めるかは、実ブラウザだけ
     // ⚠ 2026-10-25(#1038 A2): `portable-html.smoke.spec.ts` に 1 本足した(選んだ N 件だけの PKC3 入り HTML を書き出す → `file://` で開く → 選んだ題名だけ → 編集して保存 → 取り込み直す)→ 544 → 545。
-    ).toBe(545);
+    ).toBe(547);
   });
 });
 
