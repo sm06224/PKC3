@@ -98,27 +98,46 @@ export interface FormColumn {
 }
 
 /**
- * 見出しと入力欄を結ぶ。⚠ 見出しは**項目名でも表示名でも**合う(項目名が先)。無い入力欄は見出しの右に足す。
- * @returns 結んだ見出し(足した分を含む)と、項目名 → 見出しの字。`changed` = 見出しに足した。
+ * 見出しと入力欄を結ぶ(**列の位置**で持つ)。
+ *
+ * - 見出しは**項目名でも表示名でも**合う。⚠ **項目名が先**:ある入力欄の表示名が別の入力欄の項目名と同じ字のとき、
+ *   その見出しは項目名を持つ入力欄のもの(表示名で横取りしない)。
+ * - 同じ字の見出しが複数あるときは、**最初の 1 つだけ**に当てる(残りの列は元の升のまま)。
+ * - 見出しに無い入力欄は、見出しの右に足す。
+ * @returns 結んだ見出し(足した分を含む)と、項目名 → 列の位置。`changed` = 見出しに足した。
  */
 function resolveColumns(
   header: readonly string[],
   fields: readonly FormColumn[],
-): { header: string[]; colOf: Map<string, string>; changed: boolean } {
+): { header: string[]; idxOf: Map<string, number>; changed: boolean } {
   const out = header.slice();
-  const colOf = new Map<string, string>();
-  let changed = false;
+  const idxOf = new Map<string, number>();
+  const claimed = new Set<number>();
+  // 1 周目: 項目名で合うものを先に確保する
   for (const f of fields) {
-    const hit = out.find((h) => h === f.name) ?? out.find((h) => h === f.label);
-    if (hit !== undefined) {
-      colOf.set(f.name, hit);
-    } else {
-      out.push(f.name);
-      colOf.set(f.name, f.name);
-      changed = true;
+    const i = out.findIndex((h, k) => h === f.name && !claimed.has(k));
+    if (i >= 0) {
+      idxOf.set(f.name, i);
+      claimed.add(i);
     }
   }
-  return { header: out, colOf, changed };
+  // 2 周目: 残りの入力欄は表示名で合う列へ(確保済みの列は取らない)
+  for (const f of fields) {
+    if (idxOf.has(f.name)) continue;
+    const i = out.findIndex((h, k) => h === f.label && !claimed.has(k));
+    if (i >= 0) {
+      idxOf.set(f.name, i);
+      claimed.add(i);
+    }
+  }
+  let changed = false;
+  for (const f of fields) {
+    if (idxOf.has(f.name)) continue;
+    out.push(f.name);
+    idxOf.set(f.name, out.length - 1);
+    changed = true;
+  }
+  return { header: out, idxOf, changed };
 }
 
 export type FormRowRequest =
@@ -137,29 +156,36 @@ export type FormRowRequest =
       readonly cells: Readonly<Record<string, string>>;
       /** データ行の番号(1 始まり。見出しを数えない)。 */
       readonly row: number;
+      /**
+       * 🔴 **押した時点のその行の中身**(`SET_CSV_CELL` の `openLine` と同じ型)。⚠ 書く側が disk の行と**一致するか**を確かめ、
+       *   食い違えば断る ── 行を足した / 別のタブが書いた後に、番号だけで別の行を書き換えない。省略すると照合しない(test 用)。
+       */
+      readonly openRow?: readonly string[];
     };
 
 function rowText(
   header: readonly string[],
   existing: readonly string[] | null,
-  byHeader: Readonly<Record<string, string>>,
+  byIdx: ReadonlyMap<number, string>,
   delimiter: string,
 ): string {
-  return header
-    .map((h, i) => {
-      const v = Object.prototype.hasOwnProperty.call(byHeader, h) ? byHeader[h]! : (existing?.[i] ?? '');
-      return csvEscapeField(v, delimiter);
-    })
-    .join(delimiter);
+  // 🔴 見出しより多いセルも落とさない(元の行が長いとき、その分は元のまま残す)
+  const n = Math.max(header.length, existing?.length ?? 0);
+  const cells: string[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const v = byIdx.has(i) ? byIdx.get(i)! : (existing?.[i] ?? '');
+    cells.push(csvEscapeField(v, delimiter));
+  }
+  return cells.join(delimiter);
 }
 
-/** 項目名 → 値 を、見出しの字 → 値 に直す。 */
-function byHeaderOf(
+/** 項目名 → 値 を、列の位置 → 値 に直す。 */
+function byIdxOf(
   cells: Readonly<Record<string, string>>,
-  colOf: ReadonlyMap<string, string>,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [name, h] of colOf) if (Object.prototype.hasOwnProperty.call(cells, name)) out[h] = cells[name]!;
+  idxOf: ReadonlyMap<string, number>,
+): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const [name, i] of idxOf) if (Object.prototype.hasOwnProperty.call(cells, name)) out.set(i, cells[name]!);
   return out;
 }
 
@@ -174,7 +200,7 @@ export function planFormRow(body: string, req: FormRowRequest): FormRowPlan {
     // 表が無ければ、項目名を見出しにして末尾に作る
     const r = resolveColumns([], req.fields);
     const head = r.header.map((f) => csvEscapeField(f, ',')).join(',');
-    const row = rowText(r.header, null, byHeaderOf(req.cells, r.colOf), ',');
+    const row = rowText(r.header, null, byIdxOf(req.cells, r.idxOf), ',');
     const base = body.endsWith('\n') || body === '' ? body : body + eol;
     const gap = base === '' || base.endsWith(`${eol}${eol}`) ? '' : eol;
     return { ok: true, body: `${base}${gap}\`\`\`csv name=${req.table}${eol}${head}${eol}${row}${eol}\`\`\`${eol}` };
@@ -195,7 +221,7 @@ export function planFormRow(body: string, req: FormRowRequest): FormRowPlan {
   const resolved = resolveColumns(data.header, req.fields);
   const header = resolved.header;
   const headerChanged = resolved.changed;
-  const byHeader = byHeaderOf(req.cells, resolved.colOf);
+  const byHeader = byIdxOf(req.cells, resolved.idxOf);
   const headerLine = (prefix: string): string => `${prefix}${header.map((h) => csvEscapeField(h, t.delimiter)).join(t.delimiter)}`;
 
   const contentLines = splitLines(contentOf(t));
@@ -229,6 +255,16 @@ export function planFormRow(body: string, req: FormRowRequest): FormRowPlan {
           ? `表「${req.table}」にはデータの行がありません`
           : `行 ${String(req.row)} はありません(表「${req.table}」は 1〜${String(data.rows.length)} 行です)`,
     };
+  }
+  // 🔴 押した時点の行と、いまの行が同じか(違えば別の行を書き換えるので断る)
+  if (req.openRow !== undefined) {
+    const cur = data.rows[req.row - 1] ?? [];
+    if (cur.length !== req.openRow.length || cur.some((c, i) => c !== req.openRow![i])) {
+      return {
+        ok: false,
+        why: `行 ${String(req.row)} は、入力欄を見てから書き換えられています(行が足された / 別のタブが書いた など)。表を見直して、もう一度押してください`,
+      };
+    }
   }
   if (!oneLinePerRow) {
     return {
@@ -266,11 +302,18 @@ export function loadFormRow(body: string, table: string, row: number, fields: re
   }
   const r = data.rows[row - 1] ?? [];
   const cells: Record<string, string> = {};
+  const { idxOf } = resolveColumns(data.header, fields);
   for (const f of fields) {
-    const at = data.header.findIndex((h) => h === f.name) >= 0
-      ? data.header.findIndex((h) => h === f.name)
-      : data.header.findIndex((h) => h === f.label);
-    if (at >= 0) cells[f.name] = r[at] ?? '';
+    const at = idxOf.get(f.name);
+    // 見出しに無い入力欄(足される列)は読まない
+    if (at !== undefined && at < data.header.length) cells[f.name] = r[at] ?? '';
   }
   return { ok: true, cells };
+}
+
+/** 表の `row` 行目(1 始まり)の升の並び。無ければ `null`(押した時点の行の照合に使う)。 */
+export function formRowCells(body: string, table: string, row: number): readonly string[] | null {
+  const data = readFormTable(body, table);
+  if (data === null || !Number.isInteger(row) || row < 1) return null;
+  return data.rows[row - 1] ?? null;
 }

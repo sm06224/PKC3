@@ -3127,6 +3127,8 @@ export type UserAction =
       table: string;
       mode: 'add' | 'update';
       row?: number;
+      /** 🔴 押した時点のその行の升(`SET_CSV_CELL` の `openLine` と同じ型)。更新のとき。 */
+      openRow?: readonly string[];
       fields: ReadonlyArray<{ readonly name: string; readonly label: string }>;
       cells: Readonly<Record<string, string>>;
     }
@@ -8726,8 +8728,6 @@ function reduceCore(
       if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `入力欄に打ってください`) }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
-      const keys: Record<string, string | number | boolean | undefined> = {};
-      for (const [name, v] of Object.entries(action.values)) keys[`vars.${name}`] = v;
       return {
         state,
         events: [
@@ -8737,7 +8737,7 @@ function reduceCore(
             title: meta.title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
-            rewrite: { kind: 'frontmatter', keys },
+            rewrite: { kind: 'form-vars', values: action.values },
           },
         ],
       };
@@ -8764,6 +8764,7 @@ function reduceCore(
               table: action.table,
               mode: action.mode,
               ...(action.row === undefined ? {} : { row: action.row }),
+              ...(action.openRow === undefined ? {} : { openRow: action.openRow }),
               fields: action.fields,
               cells: action.cells,
             },

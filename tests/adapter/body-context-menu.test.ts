@@ -2341,6 +2341,27 @@ describe('ブロック単位のコピー ── 添付ごと (#677 の残り)', 
     expect(r2.acts()).not.toContain('copy-block-md-assets');
   });
 
+  it('🔴 画像の形で書かれていても、実体が画像でなければ data: にせず元の参照のまま(件数で言う)', async () => {
+    const r = rig({ img1: new Blob(['%PDF'], { type: 'application/pdf' }), img2: PNG });
+    rightClick(r.q('h2[id="絵のある章"]'));
+    r.press('copy-chapter-md-assets');
+    await vi.waitFor(() => expect(r.copied).toHaveLength(1));
+    const text = r.copied[0]!.text;
+    expect(text, '画像でない実体が data: になった').not.toContain('data:application/pdf');
+    expect(text).toContain('![図](asset:img1)');
+    expect(text).toContain('![図2](data:image/png;base64,');
+    expect(r.copied[0]!.done).toContain('画像ではない添付 2 件');
+  });
+
+  it('🔴 合計が上限(24 MB)を超えたら断り、何もコピーしない', async () => {
+    const big = new Blob([new Uint8Array(25 * 1024 * 1024)], { type: 'image/png' });
+    const r = rig({ img1: big, img2: PNG });
+    rightClick(r.q('h2[id="絵のある章"]'));
+    r.press('copy-chapter-md-assets');
+    await vi.waitFor(() => expect(r.d.getState().error ?? '').toContain('大きすぎて'));
+    expect(r.copied, '断ったのにコピーした').toHaveLength(0);
+  });
+
   it('⚠ 読めなかった画像は元の参照のまま残し、その件数を言う(黙って消さない)', async () => {
     const r = rig({ img1: PNG, img2: null });
     rightClick(r.q('h2[id="絵のある章"]'));

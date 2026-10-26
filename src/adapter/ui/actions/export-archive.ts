@@ -54,6 +54,10 @@ import { singleEntrySource } from '@features/export/single-entry-source';
 import { mailDraftText } from '@features/report/mail-text';
 import {
   flattenSectionEmbeds,
+  flattenTitlesNote,
+  newFlattenStats,
+  SECTION_FLATTEN_SYSTEM_NOTE,
+  type FlattenOptions,
   withFlattenedSectionEmbeds,
   type FlattenStats,
 } from '@features/export/section-flatten';
@@ -231,6 +235,29 @@ export const EXPORT_STARTING: Record<ExportKind, string> = {
  */
 type ArchiveScope = Extract<ArchiveKind, 'full' | 'notes'>;
 
+/** 章の参照の注意(見つからない / system 領域)。⚠ 書き出しの 3 経路(HTML・Word・メール)で同じ字。 */
+function flattenWarnings(c: { missing: number; blocked: number }): string[] {
+  const out: string[] = [];
+  if (c.missing > 0) {
+    out.push(
+      `別のノートの章の参照 ${String(c.missing)} 件は、章またはノートが見つからないため、引用の 1 行にしました`,
+    );
+  }
+  if (c.blocked > 0) {
+    out.push(
+      `別のノートの章の参照 ${String(c.blocked)} 件は、システムのノートを指していたため、展開せず引用の 1 行にしました ${SECTION_FLATTEN_SYSTEM_NOTE}`,
+    );
+  }
+  return out;
+}
+
+/** 展開の材料(user 領域の lid の集合と題名)。`listEntryMetas` は user 領域だけを返す。 */
+async function flattenOptionsOf(source: ArchiveSource): Promise<FlattenOptions> {
+  const rows = await source.listEntryMetas();
+  const titles = new Map(rows.map((r) => [r.lid, r.title] as const));
+  return { userLids: new Set(titles.keys()), titleOf: (l) => titles.get(l) };
+}
+
 /**
  * このノートだけをアーカイブとして書き出す(P6f)。
  *
@@ -268,7 +295,7 @@ export async function exportEntry(
      * 🔴 **閲覧用 HTML は、別のノートの章の参照を展開してから絞り込む**(#1459 段②)。
      * ⚠ 絞り込みの**前**に包む ── 絞り込みが添付の使用を数えるのは展開した後の本文でなければならない。
      */
-    const flattenStats: FlattenStats | undefined = kind === 'html' ? { expanded: 0, missing: 0 } : undefined;
+    const flattenStats: FlattenStats | undefined = kind === 'html' ? newFlattenStats() : undefined;
     const { source, warnings } = await singleEntrySource(
       flattenStats === undefined ? deps.source : withFlattenedSectionEmbeds(deps.source, flattenStats),
       lid,
@@ -350,7 +377,7 @@ export async function exportSelection(
   try {
     await deps.settle();
     // 🔴 閲覧用 HTML は章の参照を展開してから絞り込む(`exportEntry` と同じ理由 ── #1459 段②)
-    const flattenStats: FlattenStats | undefined = kind === 'html' ? { expanded: 0, missing: 0 } : undefined;
+    const flattenStats: FlattenStats | undefined = kind === 'html' ? newFlattenStats() : undefined;
     const { source, warnings } = await selectionSource(
       flattenStats === undefined ? deps.source : withFlattenedSectionEmbeds(deps.source, flattenStats),
       lids,
@@ -525,7 +552,7 @@ export async function exportArchive(
     const startingText = EXPORT_STARTING[kind].replace(/…$/, '');
     // 🔴 閲覧用 HTML は、別のノートの章の参照を書き出す側で展開する(#1459 段②)。入口が包み済みなら二重に包まない
     const flattenStats: FlattenStats | undefined =
-      kind === 'html' ? (deps.flattenStats ?? { expanded: 0, missing: 0 }) : undefined;
+      kind === 'html' ? (deps.flattenStats ?? newFlattenStats()) : undefined;
     const src = withAssetProgress(
       flattenStats !== undefined && deps.flattenStats === undefined
         ? withFlattenedSectionEmbeds(deps.source, flattenStats)
@@ -555,13 +582,9 @@ export async function exportArchive(
       detail = `${out.counts.entries} 件(添付 ${out.counts.assets})、閲覧用(取り込み直せません)`;
       // 🔴 展開した章の数は言う(渡した先で画面と同じ中身が読めること)。見つからなかった参照は注意に積む
       if (flattenStats !== undefined && flattenStats.expanded > 0) {
-        detail += `、別のノートの章 ${String(flattenStats.expanded)} 件を展開`;
+        detail += `、別のノートの章 ${String(flattenStats.expanded)} 件を展開${flattenTitlesNote(flattenStats.titles)}`;
       }
-      if (flattenStats !== undefined && flattenStats.missing > 0) {
-        out.warnings.push(
-          `別のノートの章の参照 ${String(flattenStats.missing)} 件は、章またはノートが見つからないため、引用の 1 行にしました`,
-        );
-      }
+      if (flattenStats !== undefined) out.warnings.push(...flattenWarnings(flattenStats));
     } else {
       /**
        * 🔴 **『バックアップ』『Markdown』は、保存領域に問題があるとき自動で
@@ -868,7 +891,12 @@ async function collectOfficeBlocks(
    * 🔴 **別のノートの章の参照を、その章の中身で置き換えてから描く**(#1459 段②)。
    * ⚠ 描画器は画面と同じなので、Word / PowerPoint にも画面と同じ章が入る(空の枠が残らない)。
    */
-  const flat = await flattenSectionEmbeds(rawBody, lid, (l) => deps.source.getBody?.(l) ?? Promise.resolve(null));
+  const flat = await flattenSectionEmbeds(
+    rawBody,
+    lid,
+    (l) => deps.source.getBody?.(l) ?? Promise.resolve(null),
+    await flattenOptionsOf(deps.source),
+  );
   const body = flat.body;
   const metas = await deps.source.listEntryMetas();
   const title = metas.find((m) => m.lid === lid)?.title ?? 'ノート';
@@ -891,11 +919,7 @@ async function collectOfficeBlocks(
    * ⚠ 読めなかったものは束に入らない ── 器のまま理由が出る(黙って空にしない)。
    */
   const warnings: string[] = [];
-  if (flat.missing > 0) {
-    warnings.push(
-      `別のノートの章の参照 ${String(flat.missing)} 件は、章またはノートが見つからないため、引用の 1 行にしました`,
-    );
-  }
+  warnings.push(...flattenWarnings(flat));
   const fenceAssets = await readFenceAssets(
     (k) => deps.source.getAssetBlob(k),
     collectFenceAssetKeys(body.slice(skip)),
@@ -1224,14 +1248,15 @@ export async function copyEntryMailDraft(
     if (getBody === undefined) return fail('本文を読む機能が渡っていません');
     const raw = await getBody.call(deps.source, lid);
     if (raw === null) return fail('コピーするノートの本文を読めませんでした');
-    const flat = await flattenSectionEmbeds(raw, lid, (l) => getBody.call(deps.source, l));
+    const flat = await flattenSectionEmbeds(raw, lid, (l) => getBody.call(deps.source, l), await flattenOptionsOf(deps.source));
     const text = mailDraftText(meta.title, flat.body);
     if (!(await copy(text))) return fail('コピーできませんでした(クリップボードに書けませんでした)');
     const notes: string[] = [];
-    if (flat.expanded > 0) notes.push(`別のノートの章 ${String(flat.expanded)} 件を展開しました`);
-    if (flat.missing > 0) {
-      notes.push(`見つからない章の参照 ${String(flat.missing)} 件は引用の 1 行にしました`);
+    if (flat.expanded > 0) {
+      const titles = [...new Set(flat.refs.filter((r) => r.kind === 'expanded').map((r) => r.title))];
+      notes.push(`別のノートの章 ${String(flat.expanded)} 件を展開しました${flattenTitlesNote(titles)}`);
     }
+    notes.push(...flattenWarnings(flat));
     deps.notify?.(
       `メール下書きをコピーしました(件名つき・${String(text.length)} 字)${notes.length === 0 ? '' : `。${notes.join('。')}`}`,
     );

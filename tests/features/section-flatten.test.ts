@@ -108,6 +108,25 @@ describe('章の参照を展開する', () => {
     expect(r.body).toContain('別の話');
   });
 
+  it('🔴 system 領域のノート(本文は読めるが user 領域の一覧に居ない)の章は展開せず、引用の 1 行と結果の種類で返す', async () => {
+    const r = await flattenSectionEmbeds('![秘](entry:other#h/決定事項)\n![ない](entry:none#h/x)\n', 'self', bodyOf, {
+      userLids: new Set(['self']),
+      titleOf: (l) => (l === 'other' ? '議事録' : undefined),
+    });
+    expect(r.body).toContain('> 「秘」: (システムのノートは書き出しに入れません)');
+    expect(r.body).not.toContain('予算は承認');
+    expect(r.blocked).toBe(1);
+    // 対照: 本当に無いノートは「見つかりません」(system と取り違えない)
+    expect(r.body).toContain('> 「ない」: ノートが見つかりません');
+    expect(r.missing).toBe(1);
+    // 対照: user 領域に居れば展開し、題名が結果に乗る
+    const ok = await flattenSectionEmbeds('![決](entry:other#h/決定事項)\n', 'self', bodyOf, {
+      userLids: new Set(['self', 'other']),
+      titleOf: () => '議事録',
+    });
+    expect(ok.refs).toEqual([{ key: 'self\u0000other#決定事項', kind: 'expanded', title: '議事録' }]);
+  });
+
   it('CRLF の本文は CRLF のまま返す', async () => {
     const r = await flattenSectionEmbeds('a\r\n![x](entry:other#h/次の章)\r\nb\r\n', 'self', bodyOf);
     expect(r.body.includes('\r\n')).toBe(true);

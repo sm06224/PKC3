@@ -109,7 +109,53 @@ describe('入力欄の保存', () => {
   });
 });
 
+describe('数と入れ子の vars(着地前レビュー)', () => {
+  it('🔴 書き戻して同じ字になる数だけ数にする(007 や 1e3 は字のまま)', () => {
+    const r = rig(DEF + '\n');
+    r.field('氏名').value = 'a';
+    r.field('件数').value = '007';
+    r.press('form-save');
+    const next = applyBodyRewrite(DEF + '\n', r.rewrites[0]!)!;
+    expect(extractVars(next)['件数']).toBe('007');
+    expect(next).toContain('vars.件数: "007"');
+  });
+
+  it('🔴 手書きの入れ子 vars: の値も、入力欄を空にすると消える(消したのに戻らない)', () => {
+    const body = '---\nvars:\n  氏名: 山田\n  件数: 3\n---\n' + DEF + '\n';
+    const r = rig(body);
+    expect(r.field('氏名').value).toBe('山田');
+    r.field('氏名').value = '';
+    r.press('form-save');
+    const next = applyBodyRewrite(body, r.rewrites[0]!)!;
+    expect(extractVars(next)['氏名'], '空にしたのに値が戻る').toBeUndefined();
+    expect(extractVars(next)['件数'], '他の項目は残る').toBe('3');
+    expect(next).toContain('vars:\n  件数: 3');
+    // 最後の子を消したら vars: の行ごと消える
+    const solo = '---\nvars:\n  氏名: 山田\n---\n' + DEF + '\n';
+    const r2 = rig(solo);
+    r2.field('氏名').value = '';
+    r2.press('form-save');
+    const soloNext = applyBodyRewrite(solo, r2.rewrites[0]!)!;
+    expect(soloNext).not.toContain('vars:');
+    expect(extractVars(soloNext)['氏名']).toBeUndefined();
+  });
+});
+
 describe('表との連携', () => {
+  it('🔴 更新は押した時点の行を運び、その後に別の行が足されていたら書かない', () => {
+    const b = '---\nvars.氏名: 田中\nvars.件数: 8\n---\n' + DEF + '\n\n' + TABLE;
+    const r = rig(b);
+    (r.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '2';
+    r.press('form-row-update');
+    const rw = r.rewrites[0]! as { kind: string; openRow?: string[] };
+    expect(rw.kind).toBe('form-row');
+    expect(rw.openRow).toEqual(['佐藤', '5', 'true']);
+    // 押した後、別のタブが先頭に 1 行足した本文に当てる → 断る(null)
+    const pushed = b.replace('氏名,件数,済\n', '氏名,件数,済\n新規,1,false\n');
+    expect(applyBodyRewrite(pushed, r.rewrites[0]!)).toBeNull();
+    expect(applyBodyRewrite(b, r.rewrites[0]!)).not.toBeNull();
+  });
+
   const body = '---\nvars.氏名: 田中\nvars.件数: 8\n---\n' + DEF + '\n\n' + TABLE;
 
   it('🔴 表に追加 ── 末尾に 1 行(チェックは true/false)・他の行は無傷', () => {

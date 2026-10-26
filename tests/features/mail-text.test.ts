@@ -24,6 +24,26 @@ describe('インラインの記号', () => {
   });
 });
 
+describe('記号に見えるだけの字は剥がさない(着地前レビュー)', () => {
+  it('🔴 演算子・識別子・不等号・インラインコードの中は、そのまま残る', () => {
+    expect(inlineToText('a<b and c>d')).toBe('a<b and c>d');
+    expect(inlineToText('__init__ を呼ぶ')).toBe('__init__ を呼ぶ');
+    expect(inlineToText('a == b == c')).toBe('a == b == c');
+    expect(inlineToText('2 * 3 * 4')).toBe('2 * 3 * 4');
+    expect(inlineToText('`**太字のつもり** と [a](b)`')).toBe('**太字のつもり** と [a](b)');
+    expect(inlineToText('式 `a == b == c` と **強**')).toBe('式 a == b == c と 強');
+  });
+
+  it('対照群:知っているタグは落ち、記号つきの強調は剥がれる', () => {
+    expect(inlineToText('a<br>b <span class="x">c</span> <u>d</u>')).toBe('ab c d');
+    expect(inlineToText('__強い__ と ==印==')).toBe('強い と 印');
+  });
+
+  it('🔴 コードの囲みの中の記号は、行ごと素通しで残る', () => {
+    expect(markdownToMailText('```\n**x** # y a<b>c\n```\n')).toBe('**x** # y a<b>c\n');
+  });
+});
+
 describe('ブロックの記号', () => {
   const body = [
     '---',

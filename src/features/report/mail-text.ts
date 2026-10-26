@@ -61,9 +61,27 @@ export function gridToText(rows: readonly (readonly string[])[], headerRow = tru
   return out;
 }
 
-/** インラインの記号を字に直す。 */
+/** 生の HTML として落とすタグ名(これ以外の `<…>` は字として残す ── `a<b and c>d` を壊さない)。 */
+const KNOWN_TAGS =
+  'a|abbr|b|big|blockquote|br|caption|center|cite|code|col|colgroup|dd|del|details|dfn|div|dl|dt|em|font|h[1-6]|hr|i|img|ins|kbd|label|li|mark|ol|p|pre|q|s|samp|small|span|strike|strong|sub|summary|sup|table|tbody|td|tfoot|th|thead|tr|tt|u|ul|var|video|audio|source|figure|figcaption|section|article|aside|header|footer|nav|iframe|svg|path';
+// ⚠ 属性は `名前=値` の形だけ受ける(`a<b and c>d` の「b and c」を属性つきのタグと読まない)
+const KNOWN_TAG_RE = new RegExp(
+  `</?(?:${KNOWN_TAGS})(?:\\s+[\\w:-]+=(?:"[^"]*"|'[^']*'|[^\\s>"']+))*\\s*/?>`,
+  'giu',
+);
+
+/**
+ * インラインの記号を字に直す。
+ *
+ * 🔴 **インラインコードを先に退避する**(中の `**` や `[a](b)` を剥がさない)。⚠ 強調の記号は**中身の端が空白でないときだけ**
+ *   外す(`2 * 3 * 4` や `a == b == c` の記号は演算子 ── 字のまま残す)。`__init__` のような識別子(単語だけの `__…__`)も残す。
+ */
 export function inlineToText(s: string): string {
-  let t = s;
+  const keep: string[] = [];
+  let t = s.replace(/(`+)([^`\n]+?)\1/gu, (_m, _q: string, code: string) => {
+    keep.push(code);
+    return `\uE000${String(keep.length - 1)}\uE001`;
+  });
   // 画像 → [画像: alt]
   t = t.replace(/!\[((?:\\.|[^\]\\])*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/gu, (_m, alt: string) =>
     alt.trim() === '' ? '[画像]' : `[画像: ${alt.trim()}]`,
@@ -78,16 +96,17 @@ export function inlineToText(s: string): string {
     if (url.startsWith('asset:')) return l === '' ? '[添付]' : `[添付: ${l}]`;
     return l; // entry: / pkc: / # などは、ノートの外では開けない ── 字だけ残す
   });
-  // 強調など(対になっているものだけ)
-  t = t.replace(/\*\*([^*\n]+)\*\*/gu, '$1');
-  t = t.replace(/__([^_\n]+)__/gu, '$1');
-  t = t.replace(/~~([^~\n]+)~~/gu, '$1');
-  t = t.replace(/==(?:\[[a-z]+\])?([^=\n]+)==/gu, '$1');
-  t = t.replace(/(^|[^*\w])\*([^*\n]+)\*(?![*\w])/gu, '$1$2');
-  t = t.replace(/`([^`\n]+)`/gu, '$1');
-  // 生の HTML の印は落とす
-  t = t.replace(/<\/?[a-zA-Z][^>]*>/gu, '');
-  return t;
+  // 強調など(対になっていて、中身の端が空白でないものだけ)
+  t = t.replace(/\*\*(?=\S)([^*\n]*[^*\s])\*\*/gu, '$1');
+  t = t.replace(/(^|[^\w])__(?=\S)([^_\n]*[^_\s])__(?![\w])/gu, (m, pre: string, inner: string) =>
+    /^\w+$/u.test(inner) ? m : `${pre}${inner}`,
+  );
+  t = t.replace(/~~(?=\S)([^~\n]*[^~\s])~~/gu, '$1');
+  t = t.replace(/==(?:\[[a-z]+\])?(?=\S)([^=\n]*[^=\s])==/gu, '$1');
+  t = t.replace(/(^|[^*\w])\*(?=\S)([^*\n]*[^*\s])\*(?![*\w])/gu, '$1$2');
+  // 生の HTML の印は、知っているタグ名だけ落とす
+  t = t.replace(KNOWN_TAG_RE, '');
+  return t.replace(/\uE000(\d+)\uE001/gu, (_m, i: string) => keep[Number(i)] ?? '');
 }
 
 const HEADING_MARK = ['【', '■ ', '▼ ', '● ', '● ', '● '];

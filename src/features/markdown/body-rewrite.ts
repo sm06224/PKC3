@@ -16,6 +16,7 @@ import {
   frontmatterLineCount,
   frontmatterProblem,
   parseFrontmatter,
+  removeNestedVar,
   spliceFrontmatterKeys,
   type FrontmatterValue,
 } from './frontmatter';
@@ -136,6 +137,16 @@ export type BodyRewrite =
     }
   | {
       /**
+       * 🔴 **入力欄の値を先頭の設定欄の `vars.<項目名>` へ書く**(#1456)。
+       *
+       * ⚠ `frontmatter` の鍵書きでは足りない ── 空にした項目は、平らな行を消すだけでなく、手書きの入れ子 `vars:` の
+       *   同じ名前の行も消す(消さないと、空にしたのに値が戻って見える)。
+       */
+      kind: 'form-vars';
+      values: Readonly<Record<string, FrontmatterValue | undefined>>;
+    }
+  | {
+      /**
        * 🔴 **入力欄の値を表の行へ書く / 行を足す**(#1456)。
        *
        * > user の物語:入力欄に打った日報を、押した 1 回で ` ```csv name=日報一覧 ` の表の末尾に足したい
@@ -149,6 +160,8 @@ export type BodyRewrite =
       mode: 'add' | 'update';
       /** 更新のとき、データ行の番号(1 始まり)。 */
       row?: number;
+      /** 更新のとき、押した時点のその行の升(`csv-cell` の `openLine` と同じ型。食い違えば断る)。 */
+      openRow?: readonly string[];
       fields: readonly FormColumn[];
       /** 項目名 → 値。 */
       cells: Readonly<Record<string, string>>;
@@ -1091,12 +1104,29 @@ function syncBodyTagsKey(body: string): string {
 }
 
 export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | null {
+  if (rewrite.kind === 'form-vars') {
+    let next = body;
+    const keys: Record<string, FrontmatterValue | undefined> = {};
+    for (const [name, v] of Object.entries(rewrite.values)) {
+      if (v === undefined) next = removeNestedVar(next, name);
+      keys[`vars.${name}`] = v;
+    }
+    next = spliceFrontmatterKeys(next, keys);
+    return next === body ? null : next;
+  }
   if (rewrite.kind === 'form-row') {
     const plan = planFormRow(
       body,
       rewrite.mode === 'add'
         ? { mode: 'add', table: rewrite.table, fields: rewrite.fields, cells: rewrite.cells }
-        : { mode: 'update', table: rewrite.table, fields: rewrite.fields, cells: rewrite.cells, row: rewrite.row ?? 0 },
+        : {
+            mode: 'update',
+            table: rewrite.table,
+            fields: rewrite.fields,
+            cells: rewrite.cells,
+            row: rewrite.row ?? 0,
+            ...(rewrite.openRow === undefined ? {} : { openRow: rewrite.openRow }),
+          },
     );
     return plan.ok && plan.body !== body ? plan.body : null;
   }

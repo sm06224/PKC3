@@ -25,13 +25,17 @@ const META = (lid: string, title: string, order: number) => ({
   archived: 0,
 });
 
-const REPORT = '# 週報\n\n![決定事項](entry:m1#h/決定事項)\n\n![ない章](entry:m1#h/ない)\n\n以上\n';
+const REPORT =
+  '# 週報\n\n![決定事項](entry:m1#h/決定事項)\n\n![ない章](entry:m1#h/ない)\n\n![秘密](entry:sys1#h/秘密)\n\n以上\n';
+// 🔴 system 領域のノート ── 本文は読めるが、`listEntryMetas`(user 領域だけ)には居ない
+const SYS = '# システム\n\n## 秘密\n\nひみつの中身\n';
 const MEMO = '# メモ\n\n## 決定事項\n\n予算は承認された。\n\n![図](asset:img1)\n\n## 別の章\n\n関係ない話\n';
 
 function source(): ArchiveSource {
   const bodies = new Map([
     ['r1', REPORT],
     ['m1', MEMO],
+    ['sys1', SYS],
   ]);
   return {
     cid: 'c1',
@@ -39,7 +43,7 @@ function source(): ArchiveSource {
     listEntryMetas: async () => [META('r1', '週報', 1), META('m1', 'メモ', 2)],
     getBody: async (lid) => bodies.get(lid) ?? null,
     listBodies: async () => ({
-      rows: [...bodies].map(([lid, body]) => ({ lid, body })),
+      rows: [...bodies].filter(([lid]) => lid !== 'sys1').map(([lid, body]) => ({ lid, body })),
       done: true,
     }),
     listRelations: async () => [],
@@ -97,19 +101,29 @@ describe('閲覧用 HTML に、別のノートの章が入る', () => {
     // 見つからない章は引用の 1 行(黙って空にしない)
     expect(html).toContain('「ない章」: 見出しが見つかりません');
     // 件数: 展開は結果の行で言い、見つからない 1 件は注意に出る
-    expect(r.notices.join('\n')).toContain('別のノートの章 1 件を展開');
-    expect(r.reported.flat().join('\n')).toContain('別のノートの章の参照 1 件は');
+    expect(r.notices.join('\n')).toContain('別のノートの章 1 件を展開(元のノート: メモ)');
+    expect(r.reported.flat().join('\n')).toContain('別のノートの章の参照 1 件は、章またはノートが見つからない');
+    // 🔴 system 領域のノートの章は展開しない(中身は入らず、引用の 1 行と注意が出る)
+    expect(html).not.toContain('ひみつの中身');
+    expect(html).toContain('システムのノートは書き出しに入れません');
+    expect(r.reported.flat().join('\n')).toContain('システムのノートを指していた');
   });
 
   it('選んだ N 件でも、全部でも展開される', async () => {
     const sel = rig();
     await exportSelection(sel.d, sel.deps, ['r1'], 'html');
     expect(await textOf(sel.downloaded[0]!.blob)).toContain('予算は承認された');
+    // 🔴 件数は 2 重に数えない(選んだ N 件の絞り込みは本文を 2 周読む)
+    expect(sel.notices.join('\n')).toContain('別のノートの章 1 件を展開');
+    expect(sel.notices.join('\n')).not.toContain('別のノートの章 2 件');
+    expect(sel.reported.flat().join('\n')).toContain('参照 1 件は、章またはノートが見つからない');
     const all = rig();
     await exportArchive(all.d, all.deps, 'html');
     const html = await textOf(all.downloaded[0]!.blob);
     // 全部の書き出しには参照元のノート(メモ)自身も入っているので、2 か所に出る
     expect(html.split('予算は承認された').length - 1).toBe(2);
+    expect(all.notices.join('\n')).toContain('別のノートの章 1 件を展開');
+    expect(all.notices.join('\n')).not.toContain('別のノートの章 2 件');
   });
 
   it('🔴 対照群 ── バックアップ(zip)は章を展開しない(参照先のノートを本文として読みにも行かない)', async () => {

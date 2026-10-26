@@ -220,7 +220,7 @@ import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-col
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { bodyBelowFrontmatter, extractVars, frontmatterLineCount } from '@features/markdown/frontmatter';
 import { isCheckedValue } from '@features/markdown/form-def';
-import { loadFormRow, planFormRow, type FormColumn } from '@features/markdown/form-table';
+import { formRowCells, loadFormRow, planFormRow, type FormColumn } from '@features/markdown/form-table';
 import {
   ENTRY_PICK_LIMIT,
   type EntryPickRow,
@@ -5435,7 +5435,8 @@ function readFormInputs(form: HTMLElement): {
     if (raw === '') {
       values[name] = undefined;
       if (el.getAttribute('data-pkc-form-required') === 'true') missing.push(label);
-    } else if (type === 'number' && Number.isFinite(Number(raw))) {
+    } else if (type === 'number' && String(Number(raw)) === raw.trim()) {
+      // 🔴 書き戻して同じ字になる数だけ数にする(`007` や `1e3` は数にすると別の字になる ── 字のまま残す)
       values[name] = Number(raw);
     } else {
       values[name] = raw;
@@ -5543,6 +5544,7 @@ async function copySourceLinesWithAssets(
   const urls = new Map<string, string>();
   let total = 0;
   let missed = 0;
+  let notImage = 0;
   for (const key of refs.images) {
     let blob: Blob | null;
     try {
@@ -5552,6 +5554,11 @@ async function copySourceLinesWithAssets(
     }
     if (blob === null) {
       missed += 1;
+      continue;
+    }
+    // 🔴 画像でない実体は data: にしない(貼る側の取り込みが画像だけを受ける ── 運べない物は元の参照のまま、件数で言う)
+    if (!blob.type.startsWith('image/')) {
+      notImage += 1;
       continue;
     }
     total += blob.size;
@@ -5566,7 +5573,9 @@ async function copySourceLinesWithAssets(
   }
   const notes: string[] = [];
   if (missed > 0) notes.push(`読めなかった画像 ${String(missed)} 件は元の参照のまま`);
-  if (refs.others > 0) notes.push(`画像ではない添付 ${String(refs.others)} 件は運べないので元の参照のまま`);
+  if (refs.others + notImage > 0) {
+    notes.push(`画像ではない添付 ${String(refs.others + notImage)} 件は運べないので元の参照のまま`);
+  }
   services.copyText(
     carryAssets(text, urls),
     `${what}を画像 ${String(urls.size)} 件ごとコピーしました(別の PKC3 へ貼ると、画像も取り込まれます)${notes.length === 0 ? '' : `。${notes.join('、')}`}`,
@@ -11729,7 +11738,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `表に書いてください`) });
       return;
     }
-    const plan = planFormRow(owner.body, { mode: 'update', table: owner.table, fields, cells, row });
+    // 🔴 いま画面が見ている行(押した時点)を運ぶ ── 書く側が disk の行と照合し、食い違えば断る
+    const openRow = formRowCells(owner.body, owner.table, row) ?? undefined;
+    const plan = planFormRow(owner.body, { mode: 'update', table: owner.table, fields, cells, row, ...(openRow === undefined ? {} : { openRow }) });
     if (!plan.ok) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: plan.why });
       return;
@@ -11739,7 +11750,16 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     actUnlessEditedElsewhere(dispatcher, services, [owner.lid], FORM_ELSEWHERE_FAILED, () =>
-      dispatcher.dispatch({ type: 'SET_FORM_ROW', lid: owner.lid, table: owner.table, mode: 'update', row, fields, cells }),
+      dispatcher.dispatch({
+        type: 'SET_FORM_ROW',
+        lid: owner.lid,
+        table: owner.table,
+        mode: 'update',
+        row,
+        ...(openRow === undefined ? {} : { openRow: [...openRow] }),
+        fields,
+        cells,
+      }),
     );
   },
   /** 🔴 **表の指定した行を、入力欄へ読み込む**(#1456)。設定欄の `vars.…` に書く(保存と同じ道)。 */
@@ -11767,7 +11787,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       const type = types.get(name) ?? 'text';
       if (type === 'checkbox') values[name] = isCheckedValue(cell);
       else if (cell === '') values[name] = undefined;
-      else if (type === 'number' && Number.isFinite(Number(cell))) values[name] = Number(cell);
+      else if (type === 'number' && String(Number(cell)) === cell.trim()) values[name] = Number(cell);
       else values[name] = cell;
     }
     const blocked = bodyWriteBlockReason(dispatcher.getState(), owner.lid);

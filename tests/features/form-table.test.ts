@@ -127,6 +127,51 @@ describe('表の行を更新', () => {
   });
 });
 
+describe('更新の照合と、列の結び方(着地前レビュー)', () => {
+  it('🔴 押した時点の行と、いまの行が違えば更新を断る(行が足された / 別のタブが書いた後に別の行を書かない)', () => {
+    const req = { mode: 'update', table: '日報一覧', row: 2, fields: FIELDS, cells: { 氏名: 'X' } } as const;
+    // 一致(押した時点 = いま)は通る
+    expect(planFormRow(BODY, { ...req, openRow: ['佐藤', '5', ''] }).ok).toBe(true);
+    // 別のタブが 2 行目の中身を書き換えた後
+    const changed = BODY.replace('佐藤,5,', '鈴木,5,');
+    const p = planFormRow(changed, { ...req, openRow: ['佐藤', '5', ''] });
+    expect(p.ok).toBe(false);
+    expect(p.ok ? '' : p.why).toContain('書き換えられています');
+    // 行が足されて同じ番号が別の行を指す
+    const pushed = BODY.replace('氏名,件数,備考\n', '氏名,件数,備考\n新規,1,\n');
+    expect(planFormRow(pushed, { ...req, openRow: ['佐藤', '5', ''] }).ok).toBe(false);
+    // 書込の道(body-rewrite)も同じ照合を通る
+    const rw = { kind: 'form-row', table: '日報一覧', mode: 'update', row: 2, openRow: ['佐藤', '5', ''], fields: FIELDS, cells: { 氏名: 'X' } } as const;
+    expect(applyBodyRewrite(BODY, rw)).not.toBeNull();
+    expect(applyBodyRewrite(pushed, rw)).toBeNull();
+  });
+
+  it('🔴 見出しより多いセルは更新しても落とさない', () => {
+    const body = '```csv name=T\n氏名,件数\na,1,余り1,余り2\n```\n';
+    const next = ok(planFormRow(body, { mode: 'update', table: 'T', row: 1, fields: FIELDS, cells: { 氏名: 'z' } }));
+    expect(next).toBe('```csv name=T\n氏名,件数\nz,1,余り1,余り2\n```\n');
+  });
+
+  it('🔴 同じ字の見出しが 2 つあるときは、最初の 1 つだけに当てる(2 つ目の列は元のまま)', () => {
+    const body = '```csv name=T\n氏名,氏名,件数\na,b,1\n```\n';
+    const next = ok(planFormRow(body, { mode: 'update', table: 'T', row: 1, fields: FIELDS, cells: { 氏名: 'z' } }));
+    expect(next).toBe('```csv name=T\n氏名,氏名,件数\nz,b,1\n```\n');
+  });
+
+  it('🔴 表示名が別の入力欄の項目名と同じ字のとき、その列は項目名を持つ入力欄のもの(項目名が先)', () => {
+    // 入力欄 A(項目名 x・表示名 y)と B(項目名 y)。見出し y は B のもの
+    const fields = [
+      { name: 'x', label: 'y' },
+      { name: 'y', label: 'y2' },
+    ];
+    const body = '```csv name=T\ny,k\n1,2\n```\n';
+    const next = ok(planFormRow(body, { mode: 'update', table: 'T', row: 1, fields, cells: { x: 'AAA', y: 'BBB' } }));
+    // y 列には B(項目名 y)の値、A は見出しに無いので右に足される
+    expect(next).toBe('```csv name=T\ny,k,x\nBBB,2,AAA\n```\n');
+    expect(loadFormRow(body, 'T', 1, fields)).toEqual({ ok: true, cells: { y: '1' } });
+  });
+});
+
 describe('表の行を読み込む', () => {
   it('見出し（項目名でも表示名でも）に合う列だけを、項目名 → 値で返す', () => {
     const got = loadFormRow(BODY, '日報一覧', 1, [...FIELDS, { name: '区分', label: '区分' }]);

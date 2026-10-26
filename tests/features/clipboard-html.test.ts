@@ -158,6 +158,24 @@ describe('本文に埋め込んだ SQL の答え(#1223)', () => {
     expect(r.html, '原文の SQL は残る').toContain('select 1');
   });
 
+  it('🔴 「さらに N 行」の在る表には「(続きは元のノートで)」を添える / 全部出ている表には添えない(対照群)', () => {
+    const r = cleanForClipboard(host(`<div>${ready}</div>`));
+    expect(r.html).toContain('<td>42</td>');
+    expect(r.html).toContain('(続きは元のノートで)');
+    const all = ready.replace(/<button type="button" data-pkc-field="sql-embed-more">[^<]*<\/button>/u, '');
+    expect(all, '前提:対照群からボタンが外れていない').not.toContain('sql-embed-more');
+    expect(cleanForClipboard(host(all)).html).not.toContain('続きは元のノートで');
+  });
+
+  it('🔴 引き直し中の器(pending)に古い表が残っていても貼らない', () => {
+    const el = host(
+      '<div data-pkc-sql-embed data-pkc-sql-embed-state="pending"><div class="pkc-md-block"><table><tbody><tr><td>古い答え</td></tr></tbody></table></div></div>',
+    );
+    const r = cleanForClipboard(el);
+    expect(r.html).not.toContain('古い答え');
+    expect(r.html).not.toContain('<table');
+  });
+
   it('引けていない器(引いています / 失敗)は何も貼らない', () => {
     const el = host(
       '<div data-pkc-sql-embed data-pkc-sql-embed-state="pending"><p>SQL を実行しています…</p></div>' +
