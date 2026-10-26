@@ -287,3 +287,60 @@ test('🔴 計算スクラッチパッド: 書くと各行の右に結果が同�
   ).toHaveCount(1, { timeout: 10_000 });
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+test('🔴 差分マージ: 2 つのノートのちがいを 1 か所ずつ取り込み、保存すると本物の保存先が変わる (#1231)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  const rowLids = async (): Promise<string[]> =>
+    page
+      .locator('[data-pkc-region="filer-table"] [data-pkc-entry]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute('data-pkc-entry') ?? ''));
+  await createEntry(page, 'text');
+  await writeBody(page, '# 甲\n\nりんご\nみかん\nぶどう');
+  const first = await rowLids();
+  await createEntry(page, 'text');
+  await writeBody(page, '# 甲\n\nバナナ\nみかん\nぶどう\nもも');
+  const both = await rowLids();
+  const lidA = first[0]!;
+  const lidB = both.find((l) => !first.includes(l))!;
+  expect(lidA && lidB && lidA !== lidB, '2 つのノートの lid が読めない').toBe(true);
+
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=diff';
+  });
+  const pane = page.locator('[data-pkc-view-pane="diff"]');
+  await expect(pane, '差分マージの面が開かない').toBeVisible({ timeout: 15_000 });
+  const pickNote = (side: 'left' | 'right'): ReturnType<typeof page.locator> =>
+    pane.locator(`[data-pkc-field="diff-side"][data-pkc-side="${side}"] [data-pkc-pick="note"]`);
+  await pickNote('left').selectOption(lidA);
+  await pickNote('right').selectOption(lidB);
+  const summary = pane.locator('[data-pkc-field="diff-summary"]');
+  await expect(summary, '左右のちがいが出ない').toHaveText('ちがい 2 か所', { timeout: 10_000 });
+
+  // 左右の欄が並んで見え、塊の中の行は同じ高さで並ぶ
+  const hunk = pane.locator('[data-pkc-field="diff-hunk"]').first();
+  const cells = hunk.locator('li');
+  const [l, r] = await Promise.all([cells.nth(0).boundingBox(), cells.nth(1).boundingBox()]);
+  expect(l && r && l.x < r.x && Math.abs(l.y - r.y) < 2, '左右の升が同じ行に並んでいない').toBe(true);
+
+  // 何も取り込んでいないうちは保存を押せない。押せる所に在る → を押す
+  const save = pane.locator('[data-pkc-action="diff-save"]');
+  await expect(save).toBeDisabled();
+  await clickReal(page, hunk.locator('[data-pkc-action="diff-take"][data-pkc-from="b"]'));
+  await expect(summary).toHaveText('ちがい 1 か所');
+  await expect(save, '取り込んだのに保存が押せない').toBeEnabled();
+  // 取り消せる
+  await clickReal(page, pane.locator('[data-pkc-action="diff-undo"]'));
+  await expect(summary).toHaveText('ちがい 2 か所');
+  await clickReal(page, hunk.locator('[data-pkc-action="diff-take"][data-pkc-from="b"]'));
+
+  // 保存 → 本物の保存先が変わる(別の相手に選び直して読み直すと、取り込んだ分のちがいが消えている)
+  await clickReal(page, save);
+  await expect(summary).toContainText('保存しました', { timeout: 15_000 });
+  await pickNote('left').selectOption('');
+  await pickNote('left').selectOption(lidA);
+  await expect(summary, '保存したのに、読み直すと元のまま').toHaveText('ちがい 1 か所', { timeout: 10_000 });
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

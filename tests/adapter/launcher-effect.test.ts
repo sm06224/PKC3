@@ -137,6 +137,8 @@ describe('ランチャーのタイルを読む', () => {
       'textlab',
       // ⚠ **計算スクラッチパッド**(#1230)── 同じ理由で末尾
       'calc',
+      // ⚠ **差分マージ**(#1231)── 同じ理由で末尾
+      'diff',
     ]);
     off();
   });
@@ -239,7 +241,7 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(
       b.map((t) => t.group),
       '組み込みが既定群のまま(見出しが引かれず、自分のものと地続きに見える)',
-    ).toEqual(Array.from({ length: 13 }, () => BUILTIN_GROUP));
+    ).toEqual(Array.from({ length: 14 }, () => BUILTIN_GROUP));
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', async () => {
@@ -267,6 +269,8 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(b[10]?.kind, 'Office の有無でテキスト整形の位置が動いた').toBe('textlab');
     // ⚠ **計算スクラッチパッド**(#1230)も末尾
     expect(b[11]?.kind, 'Office の有無で計算スクラッチパッドの位置が動いた').toBe('calc');
-    expect(b, '組み込みが 12 枚でない').toHaveLength(12);
+    // ⚠ **差分マージ**(#1231)も末尾
+    expect(b[12]?.kind, 'Office の有無で差分マージの位置が動いた').toBe('diff');
+    expect(b, '組み込みが 13 枚でない').toHaveLength(13);
   });
 });

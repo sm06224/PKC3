@@ -3667,7 +3667,10 @@ export function connectStoreEffects(
             if (current === ev.body) {
               dispatcher.dispatch({
                 type: 'OP_NOTICE',
-                message: `「${ev.title}」は、ファイルの今の中身と同じなので、そのままです`,
+                message:
+                  ev.notice === undefined
+                    ? `「${ev.title}」は、ファイルの今の中身と同じなので、そのままです`
+                    : `「${ev.title}」は、同じ内容なので、そのままです`,
               });
               return;
             }
@@ -3712,7 +3715,10 @@ export function connectStoreEffects(
                 type: 'ENTRY_RESTORED',
                 mode: 'revision',
                 ...(undoRevId === undefined ? {} : { undoRevId }),
-                notice: `「${ev.title}」を、パソコン側のファイルの今の中身に取り込み直しました(前の中身は履歴に残しています)`,
+                notice:
+                  ev.notice === undefined
+                    ? `「${ev.title}」を、パソコン側のファイルの今の中身に取り込み直しました(前の中身は履歴に残しています)`
+                    : ev.notice.replaceAll('{title}', ev.title),
                 meta: {
                   lid: ev.lid,
                   title: ev.title,

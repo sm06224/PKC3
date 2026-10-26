@@ -335,6 +335,12 @@ const OBJECT_LONE: readonly string[] = [
    */
   'textlab-apply-note',
   'textlab-load-note',
+  /**
+   * ⚠ **2026-10-26(#1231)に足した 1 件**(差分マージの「開いているノート」)。⚠ #582 の「増やさない」に**触れていない** ──
+   *   出口は左右それぞれの側の中の 1 か所だが、この面は**別窓(アプリの窓)の中の道具**で、面を閉じれば相手も一緒に無くなる。
+   * 🔑 対象は「いま開いているノート」(`state.selectedLid`)で、受け手が state を読むので、この台帳に入る(`textlab-load-note` と同じ)。
+   */
+  'diff-use-open',
   'storage-profile',
   'unschedule-task',
   /**

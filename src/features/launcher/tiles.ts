@@ -76,6 +76,7 @@ export interface LauncherTile {
     | 'sql'
     | 'textlab'
     | 'calc'
+    | 'diff'
     | 'manual'
     | 'selfhost';
   /** `kind === 'url'` のときの飛び先。 */
@@ -464,6 +465,27 @@ export function calcTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **差分マージの組み込みタイル**(#1231。user 指示 2026-10-26「全部やるのです」)。
+ *
+ * ⚠ 履歴の面の「くらべる相手」(段①)は**見るだけ**で、こちらは**ちがいの 1 か所ずつを取り込んで保存できる**別の入口。
+ *   書き換わるのはノートの側だけで、保存を押すまで何も書かない(置き換え前の版はノートの履歴に残る)。
+ * ⚠ 左の列にタブは置かない(タブを足すと既存のタブが「⋯」へ畳まれる ── #1900)。閉じて失うのは取り込みの途中経過だけで、
+ *   ノートは保存するまで 1 件も変わらない ── アプリで正しい。
+ * 🔑 `kind` は `ViewMode` の綴り(`diff`)── `launch-tile.ts` がそれを見て別窓へ渡す。
+ */
+export const DIFF_TILE_LID = 'builtin:diff';
+
+export function diffTile(): LauncherTile {
+  return {
+    lid: DIFF_TILE_LID,
+    title: '差分マージ',
+    group: BUILTIN_GROUP,
+    kind: 'diff',
+    symbol: 'copy',
+  };
+}
+
+/**
  * 🔴 **マニュアルの組み込みタイル**(#645。user 要望 2026-08-31
  * 「**ヘルプの中からマニュアルをアプリとして出してください**」)。
  *
@@ -584,6 +606,8 @@ export function withBuiltinTiles(
   builtin.push(textlabTile());
   // ⚠ 計算スクラッチパッド(#1230)も末尾 ── 同じ理由(位置を動かさない)
   builtin.push(calcTile());
+  // ⚠ 差分マージ(#1231)も末尾 ── 同じ理由(位置を動かさない)
+  builtin.push(diffTile());
   /**
    * 🔴 **組み込みは末尾へ「収納」する**(#531 段② / #281。user 指示 2026-08-28
    * 「組み込みアプリをグループに**収納して**整理する」)。
@@ -629,6 +653,7 @@ export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'sql',
   'textlab',
   'calc',
+  'diff',
   'manual',
   'selfhost',
 ]);

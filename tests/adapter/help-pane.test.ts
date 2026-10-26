@@ -736,6 +736,8 @@ const ALL_VIEWS = [
   'textlab',
   // ⚠ 計算スクラッチパッド(#1230)── 同じく**道具**なので aside
   'calc',
+  // ⚠ 差分マージ(#1231)── 同じく**道具**なので aside
+  'diff',
   'settings',
   'flags',
   'help',

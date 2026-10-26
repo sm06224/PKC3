@@ -12890,3 +12890,107 @@ h6:hover > .pkc-heading-anchor,
   color: var(--danger, #b3261e);
   font-size: 12px;
 }
+
+/* ══ 差分マージの面(#1231、2026-10-26)══════════════════════════════
+ * 🔴 **中央の面(別窓)だけ**── 左の列に同じ面は無い(SQL で調べると同じ形)。
+ * 地は無彩色。色は**足し引きの行**(履歴の面と同じ `[data-pkc-diff]` / `mark[data-pkc-diff-char]`)と、
+ * 押されている切り替え(`aria-pressed`)にだけ使う(業務画面の作法)。 */
+[data-pkc-view-pane='diff'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-view-pane='diff'] [data-pkc-field='pane-title'] {
+  margin: 0;
+  font-size: 14px;
+}
+[data-pkc-field='diff-note'],
+[data-pkc-field='diff-summary'],
+[data-pkc-field='diff-side-note'],
+[data-pkc-field='diff-more'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='diff-sides'] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(18em, 100%), 1fr));
+  gap: var(--s2);
+}
+[data-pkc-field='diff-side'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  min-width: 0;
+}
+[data-pkc-field='diff-side'] h3 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+[data-pkc-field='diff-side'] select {
+  min-width: 0;
+  max-width: 100%;
+}
+[data-pkc-field='diff-tools'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-view-pane='diff'] button[aria-pressed='true'] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-color: var(--accent-dim-fg);
+  font-weight: 600;
+}
+[data-pkc-field='diff-cols'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: var(--s2);
+  color: var(--muted);
+  font-weight: 600;
+}
+[data-pkc-field='diff-body'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+}
+[data-pkc-field='diff-body'] ul[data-pkc-diff-layout='side'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: var(--s2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* ⚠ 差分は**等幅**で読む(桁が揃わないと足し引きが追えない) */
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 13px;
+}
+[data-pkc-field='diff-body'] ul[data-pkc-diff-layout='side'] > li {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-height: 1.4em;
+}
+[data-pkc-field='diff-hunk'] {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: var(--s2);
+}
+[data-pkc-field='diff-hunk-bar'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+}
+[data-pkc-field='diff-hunk-bar'] > span {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 12px;
+}

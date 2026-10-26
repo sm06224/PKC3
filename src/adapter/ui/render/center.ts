@@ -26,6 +26,7 @@ import { SearchRenderer } from './search';
 import { SqlRenderer } from './sql';
 import { TextLabRenderer } from './textlab';
 import { CalcRenderer } from './calc';
+import { DiffMergeRenderer } from './diffmerge';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
 type PaneView =
@@ -41,6 +42,7 @@ type PaneView =
   | 'sql'
   | 'textlab'
   | 'calc'
+  | 'diff'
   | 'settings'
   | 'flags'
   | 'help';
@@ -63,6 +65,8 @@ const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>([
   'textlab',
   // ⚠ 計算スクラッチパッド(#1230)── 同じ
   'calc',
+  // ⚠ 差分マージ(#1231)── 同じ
+  'diff',
 ]);
 
 /**
@@ -132,6 +136,8 @@ export class CenterRouter {
   private readonly textlab: TextLabRenderer;
   /** 計算スクラッチパッド(#1230)。 */
   private readonly calc: CalcRenderer;
+  /** 差分マージ(#1231)。 */
+  private readonly diff: DiffMergeRenderer;
   private lastPane: PaneView = 'detail';
   /**
    * 🔴 **面を開いて戻ったら、同じ場所に戻る**(user 目線レビュー U-4、2026-08-22)。
@@ -224,6 +230,7 @@ export class CenterRouter {
       sql: pane('sql'),
       textlab: pane('textlab'),
       calc: pane('calc'),
+      diff: pane('diff'),
       settings: pane('settings'),
       flags: pane('flags'),
       help: pane('help'),
@@ -277,6 +284,7 @@ export class CenterRouter {
     this.sql = new SqlRenderer(this.panes.sql);
     this.textlab = new TextLabRenderer(this.panes.textlab);
     this.calc = new CalcRenderer(this.panes.calc);
+    this.diff = new DiffMergeRenderer(this.panes.diff);
     this.settings = new SettingsRenderer(this.panes.settings);
     this.flags = new FlagsRenderer(this.panes.flags);
     /**
@@ -396,6 +404,7 @@ export class CenterRouter {
     else if (view === 'sql') this.sql.render(state);
     else if (view === 'textlab') this.textlab.render(state);
     else if (view === 'calc') this.calc.render();
+    else if (view === 'diff') this.diff.render(state);
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();
     // ⚠ ヘルプにも**コンテナ id を渡す**(Issue #100 段①)── マニュアルも

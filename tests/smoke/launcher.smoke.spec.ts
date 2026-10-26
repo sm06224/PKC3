@@ -261,20 +261,20 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   /**
    * 🔴 **組み込みの絵が豆腐になっていない**(#281)。
    * ⚠ 上の 2 つ(属性と空文字)では言えない ── 理由は `tileMarks` の docstring。
-   * 🔑 **条件なしに出る組み込みは 12 枚**(`withBuiltinTiles`: 2 ペイン / 予定表 /
-   *   連絡先 / 探す / マニュアル / 自分のパソコン / SQL / 音・動画 / 関係グラフ / 計った時間 / テキスト整形 / 計算スクラッチパッド)──
+   * 🔑 **条件なしに出る組み込みは 13 枚**(`withBuiltinTiles`: 2 ペイン / 予定表 /
+   *   連絡先 / 探す / マニュアル / 自分のパソコン / SQL / 音・動画 / 関係グラフ / 計った時間 / テキスト整形 / 計算スクラッチパッド / 差分マージ)──
    *   Office だけは端末次第なので、ここでは数に入れない(#148 の test で見る)。
    */
   const marks = await tileMarks(page, '[data-pkc-tile^="builtin:"]');
-  expectRealGlyphs(marks, 12);
+  expectRealGlyphs(marks, 13);
   /**
-   * ⚠ **指紋が潰れていないか** ── 12 枚が全部同じ絵なら測れていない。
-   * 🔑 割り当ては 12 枚とも違う絵なので、種類数は枚数と同じだけ出るはずである。
+   * ⚠ **指紋が潰れていないか** ── 13 枚が全部同じ絵なら測れていない。
+   * 🔑 割り当ては 13 枚とも違う絵なので、種類数は枚数と同じだけ出るはずである。
    */
   expect(
     new Set(marks.map((m) => m.hash)).size,
     `絵が 1 種類しか出ていない(指紋が潰れている?${marks.map((m) => m.symbol).join(',')})`,
-  ).toBeGreaterThanOrEqual(12);
+  ).toBeGreaterThanOrEqual(13);
 
   // ② 🔴 **PKC2 と同じ順** ── 既定群が先頭、グループ内は app_order 順
   await expect(tiles.nth(0)).toContainText('電卓');

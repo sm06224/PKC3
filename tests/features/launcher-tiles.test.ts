@@ -33,6 +33,7 @@ import {
   TIMERS_TILE_LID,
   TEXTLAB_TILE_LID,
   CALC_TILE_LID,
+  DIFF_TILE_LID,
   capturesTile,
   manualTile,
   type LauncherTile,
@@ -299,7 +300,15 @@ describe('組み込みタイルの合流 (#148)', () => {
       kind: 'calc',
       symbol: 'calculator',
     });
-    expect(b, '組み込みが 13 枚ちょうどでない').toHaveLength(13);
+    // ⚠ 差分マージ(#1231)も末尾 ── 同じ理由(位置を動かさない)
+    expect(b[13]).toEqual({
+      lid: DIFF_TILE_LID,
+      title: '差分マージ',
+      group: BUILTIN_GROUP,
+      kind: 'diff',
+      symbol: 'copy',
+    });
+    expect(b, '組み込みが 14 枚ちょうどでない').toHaveLength(14);
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', () => {
@@ -353,6 +362,8 @@ describe('組み込みタイルの合流 (#148)', () => {
       'textlab',
       // ⚠ 計算スクラッチパッド(#1230)── 同じく末尾
       'calc',
+      // ⚠ 差分マージ(#1231)── 同じく末尾
+      'diff',
     ]);
     // ⚠ Office を入れていない端末でも、面は空にならない
     expect(withBuiltinTiles([], { office: false }).map((t) => t.kind)).toEqual([
@@ -368,6 +379,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       'timers',
       'textlab',
       'calc',
+      'diff',
     ]);
   });
 
@@ -384,7 +396,7 @@ describe('組み込みタイルの合流 (#148)', () => {
     const missing = merged.filter((t) => t.symbol === undefined).map((t) => t.title);
     expect(missing, `目印の無い組み込みタイル: ${missing.join(' / ')}`).toEqual([]);
     // ⚠ **空振り防止** ── 組み込みが 1 枚も無ければ上は常に真
-    expect(merged.length).toBeGreaterThanOrEqual(13);
+    expect(merged.length).toBeGreaterThanOrEqual(14);
     // ⚠ 打った字の目印(`icon`)とは**同時に立たない**
     expect(merged.filter((t) => t.icon !== undefined)).toEqual([]);
   });
@@ -407,6 +419,7 @@ describe('組み込みタイルの合流 (#148)', () => {
         ['timers', 'timer'],
         ['textlab', 'snippet'],
         ['calc', 'calculator'],
+        ['diff', 'copy'],
       ]),
     );
   });

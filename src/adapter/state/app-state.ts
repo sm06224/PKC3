@@ -735,6 +735,12 @@ export const VIEW_MODES = [
    * ⚠ aside である(`ASIDE_PANES`)── ノートを映す面ではなく**道具**。
    */
   'calc',
+  /**
+   * 🔴 **差分マージ**(#1231。user 指示 2026-10-26)。2 つのノート(や履歴の版・PC のファイル)を見比べ、
+   * ちがいを 1 か所ずつどちらかへそろえる道具 ── 左の列に置き場は無い(タブを足すと既存のタブが「⋯」へ畳まれる)ので、
+   * 別ウィンドウ + タイルだけ。⚠ aside である(`ASIDE_PANES`)── ノートを映す面ではなく**道具**。
+   */
+  'diff',
   'settings',
   'flags',
   'help',
@@ -781,6 +787,8 @@ const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>([
   'textlab',
   // 🔴 計算スクラッチパッド(#1230)も同じ ── ノートを映さない道具。編集中でも開ける(ノートにするときだけ書く)
   'calc',
+  // 🔴 差分マージ(#1231)も同じ ── ノートを映さない道具。編集中でも開ける(見比べるだけなら下書きに触れない。保存するときだけ書く)
+  'diff',
 ]);
 
 export function isAsidePane(view: ViewMode): boolean {
@@ -829,6 +837,11 @@ const STAY_ON_SELECT: ReadonlySet<ViewMode> = new Set<ViewMode>([
    *   面が退くと、書きかけの式が見えなくなる(打ちかけは覚えているが、画面から消えるのは「押して消えた」に見える)。
    */
   'calc',
+  /**
+   * 🔴 **差分マージ**(#1231)。⚠ 左右の相手は「左の一覧でノートを選んでから『開いているノート』を押す」ことでも
+   *   選ぶので、選んだ瞬間に面が退くと、取り込みの途中経過が画面から消える。
+   */
+  'diff',
 ]);
 
 /** ノートを選んだら本文へ戻す面か。⚠ 判定はここ 1 か所(上の docstring)。 */
@@ -857,6 +870,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   sql: 'SQL で調べる',
   textlab: 'テキスト整形',
   calc: '計算スクラッチパッド',
+  diff: '差分マージ',
   settings: 'システム',
   flags: 'フラグ',
   help: 'ヘルプ',
@@ -3607,7 +3621,17 @@ export type UserAction =
    * 🔴 **パソコン側で変わったファイルの今の中身を、ノートの本文に取り込み直す**(台帳 #1852 N1 / 依頼 97-2 A)。
    * 今のノートの中身は履歴に 1 件積まれる(戻せる)。⚠ 本文だけを置き換える(題名・タグの列・つながりは触らない)。
    */
-  | { type: 'REIMPORT_BODY'; lid: string; body: string }
+  | {
+      type: 'REIMPORT_BODY';
+      lid: string;
+      body: string;
+      /**
+       * 🔴 **画面の下に出す知らせの字**(#1231 / #1233。差分マージ・テキスト整形の保存)。
+       * ⚠ 省略すると「パソコン側のファイルの今の中身に取り込み直しました」と出る ── ファイル以外から来た置き換えが
+       *   それを言うと嘘になるので、呼び側が自分の言葉で渡す。`{title}` は題名に置き換わる。
+       */
+      notice?: string;
+    }
   | { type: 'SHOW_TRASH' }
   | { type: 'HIDE_TRASH' }
   | {
@@ -4628,6 +4652,8 @@ export type DomainEvent =
       archetype: string;
       entryOrder: number;
       body: string;
+      /** `REIMPORT_BODY.notice` をそのまま運ぶ(省略 = ファイルの取り込み直しの字)。 */
+      notice?: string;
     }
   | { type: 'REQUEST_TRASH_LIST' }
   | { type: 'REQUEST_TRASH_UNDO'; lids: readonly string[]; orders?: Readonly<Record<string, number>> }
@@ -10687,6 +10713,7 @@ function reduceCore(
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
             body: action.body,
+            ...(action.notice === undefined ? {} : { notice: action.notice }),
           },
         ],
       };

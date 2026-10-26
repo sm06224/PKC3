@@ -4838,6 +4838,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         ),
       ),
     /**
+     * 🔴 **差分マージの相手の版**(#1231)。⚠ 読むだけ ── 既存の worker の口(`listRevisionMetas` / `getRevision`)をそのまま使う。
+     */
+    diffListRevisions: async (lid: string) =>
+      (await client.request({ op: 'listRevisionMetas', cid, entryLid: lid })).map((r) => ({
+        id: r.id,
+        revOrder: r.rev_order,
+        createdAt: r.created_at,
+        title: r.title,
+      })),
+    diffReadRevision: async (revId: string) =>
+      (await client.request({ op: 'getRevision', cid, id: revId }))?.body ?? null,
+    /**
      * 🔴 **飛んでいる書込を待つ口**(#288)。書き出し(`settle`)と**同じ 1 本**を
      * 渡す ── 2 本目の待ち方を作らない(CLAUDE.md §7)。
      */

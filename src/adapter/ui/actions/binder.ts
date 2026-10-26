@@ -781,6 +781,19 @@ import { openFolderLid } from './open-folder-lid';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 import { labNoteTitle } from '@features/markdown/text-lab';
 import { sheetNoteTitle, sheetToMarkdown, sheetToText } from '@features/calc/sheet';
+import { shortStamp } from '@features/revision/diff-view';
+import {
+  diffSession,
+  diffSideText,
+  dirtySides,
+  isEditableSide,
+  paintDiffBody,
+  paintDiffSides,
+  rebuildMerge,
+  sayDiff,
+  type DiffSideName,
+  type DiffSourceKind,
+} from '../render/diffmerge';
 import {
   currentCalcRows,
   flushCalcDraft,
@@ -1910,6 +1923,16 @@ export interface BinderServices {
    * ⚠ 読めなかった lid は**返さない**(呼び側が件数で「落とした」と言える)。
    */
   readBodies?(lids: readonly string[]): Promise<ReadonlyMap<string, string>>;
+  /**
+   * 🔴 **差分マージの相手に選んだノートの、履歴の版の一覧**(#1231)。新しい版が先とは限らない ── 並べ替えは呼び側。
+   * ⚠ **省略可** ── 無い環境では「この版では版を選べません」と断るだけで、他は壊れない(`readBodies` と同じ規律)。
+   * ⚠ 本文は運ばない(一覧だけ)。読むだけで、1 バイトも書かない。
+   */
+  diffListRevisions?(lid: string): Promise<
+    readonly { id: string; revOrder: number; createdAt: string | null; title: string | null }[]
+  >;
+  /** 🔴 履歴の版 1 つの本文(#1231)。読めなければ `null`。⚠ 読むだけ。省略可(`diffListRevisions` と同じ)。 */
+  diffReadRevision?(revId: string): Promise<string | null>;
   /**
    * 🔴 **飛んでいる書込が着くまで待つ**(#288)。
    *
@@ -3318,6 +3341,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // 🔴 計算スクラッチパッドの結果を新しいノートにする(#1230)── `CREATE_ENTRY` を撃つので同じ門
   'calc-to-table',
   'calc-to-text',
+  // 🔴 差分マージの「変更を保存」(#1231)── 書き換わったノートを `REIMPORT_BODY` で保存する(同じ門)
+  'diff-save',
   /**
    * 🔴 **予定から外すのも本文を書く**(#498)── 行の `@…` を剥がす
    *   (`SET_TASK_DATE`)か、frontmatter の `date:` を消す(`SET_ENTRY_DATE`)。
@@ -8125,6 +8150,178 @@ function calcToNote(dispatcher: Dispatcher, target: HTMLElement, form: 'table' |
       ? `新しいノート「${title}」を作りました`
       : '作れませんでした(もう一度押してください)',
   );
+}
+
+function diffPane(from: Element): HTMLElement | null {
+  return from.closest<HTMLElement>('[data-pkc-view-pane="diff"]');
+}
+
+function diffSideOf(el: Element): DiffSideName | null {
+  const v = el.getAttribute('data-pkc-side');
+  return v === 'left' || v === 'right' ? v : null;
+}
+
+const repaintDiff = (pane: HTMLElement): void => {
+  paintDiffSides(pane);
+  paintDiffBody(pane);
+};
+
+/**
+ * 差分マージの片側を読み込む。⚠ 世代(`token`)を進めてから読む ── 選び直しの前の読み込みが遅れて着いても、
+ * いまの選びを上書きしない。読めなかった理由は**その側の一言**に出す(黙って空にしない)。
+ */
+async function diffLoadSide(
+  pane: HTMLElement,
+  side: DiffSideName,
+  services: BinderServices,
+): Promise<void> {
+  const s = diffSession(pane);
+  const st = s[side];
+  st.token += 1;
+  const token = st.token;
+  st.text = null;
+  st.baseline = null;
+  st.note = '';
+  s.message = '';
+  const ready = st.kind === 'rev' ? st.lid !== null && st.revId !== null : st.lid !== null;
+  if (!ready) {
+    st.load = 'empty';
+    rebuildMerge(pane);
+    repaintDiff(pane);
+    return;
+  }
+  st.load = 'loading';
+  rebuildMerge(pane);
+  repaintDiff(pane);
+  const fail = (why: string): void => {
+    if (st.token !== token) return;
+    st.load = 'failed';
+    st.note = why;
+    rebuildMerge(pane);
+    repaintDiff(pane);
+  };
+  try {
+    let text: string | null = null;
+    if (st.kind === 'note') {
+      if (services.readBodies === undefined) return fail('このバージョンでは本文を読めません');
+      text = (await services.readBodies([st.lid!])).get(st.lid!) ?? null;
+      if (text === null) return fail('ノートの本文を読めませんでした');
+    } else if (st.kind === 'rev') {
+      if (services.diffReadRevision === undefined) return fail('このバージョンでは履歴の版を読めません');
+      text = await services.diffReadRevision(st.revId!);
+      if (text === null) {
+        return fail('その版の本文を読めませんでした(1 つのノートの版は 100 件までで、超えると古い版から消えます)');
+      }
+    } else {
+      if (services.readLinkedFile === undefined) return fail('このバージョンでは PC のファイルを読めません');
+      const r = await services.readLinkedFile(st.lid!);
+      if (r === null) return fail('ファイルを読めませんでした(つながりが切れているか、許可が必要です)');
+      if (typeof r !== 'string') return fail('ファイルが大きいため、見比べられません');
+      text = r;
+    }
+    if (st.token !== token) return;
+    st.text = text;
+    st.baseline = st.kind === 'note' ? text : null;
+    st.load = 'loaded';
+    rebuildMerge(pane);
+    repaintDiff(pane);
+  } catch (e) {
+    fail(`読み込めませんでした(${e instanceof Error ? e.message : String(e)})`);
+  }
+}
+
+/** 版の一覧を読む(相手の種類が「履歴の版」でノートを選んだとき)。 */
+async function diffLoadRevs(pane: HTMLElement, side: DiffSideName, services: BinderServices): Promise<void> {
+  const st = diffSession(pane)[side];
+  st.token += 1;
+  const token = st.token;
+  st.revs = null;
+  st.revId = null;
+  st.text = null;
+  st.load = 'empty';
+  st.note = '';
+  rebuildMerge(pane);
+  repaintDiff(pane);
+  if (services.diffListRevisions === undefined) {
+    st.note = 'このバージョンでは版の一覧を読めません';
+    repaintDiff(pane);
+    return;
+  }
+  try {
+    const rows = await services.diffListRevisions(st.lid!);
+    if (st.token !== token) return;
+    st.revs = [...rows]
+      .sort((a, b) => b.revOrder - a.revOrder)
+      .map((r) => ({
+        id: r.id,
+        label: `${shortStamp(r.createdAt) ?? '(日時なし)'}${r.title === null || r.title === '' ? '' : `  ${r.title}`}`,
+      }));
+  } catch (e) {
+    if (st.token !== token) return;
+    st.revs = [];
+    st.load = 'failed';
+    st.note = `版の一覧を読めませんでした(${e instanceof Error ? e.message : String(e)})`;
+  }
+  repaintDiff(pane);
+}
+
+/**
+ * 差分マージの保存。⚠ 書く前に**もう一度読んで**、読み込んだ時点と食い違っていたら書かない(別のウィンドウでの編集を上書きしない)。
+ * 書いた後は**読み直して**、本当に保存されたかを見てから「保存しました」と言う。
+ */
+async function diffSave(dispatcher: Dispatcher, pane: HTMLElement, services: BinderServices): Promise<void> {
+  const dirty = dirtySides(pane);
+  if (dirty.length === 0) return;
+  const state = dispatcher.getState();
+  if (state.phase !== 'ready') {
+    sayDiff(pane, blockedActionNote(state.phase) ?? '');
+    return;
+  }
+  const s = diffSession(pane);
+  if (s.left.lid !== null && s.left.lid === s.right.lid && dirty.length > 1) {
+    sayDiff(pane, '左右が同じノートです。別のノートを選んでください');
+    return;
+  }
+  if (services.readBodies === undefined) {
+    sayDiff(pane, 'このバージョンでは保存できません');
+    return;
+  }
+  const titleOf = (lid: string): string => state.entryMetas.get(lid)?.title ?? lid;
+  const lids = dirty.map((d) => d.lid);
+  const now = await services.readBodies(lids);
+  for (const d of dirty) {
+    if (now.get(d.lid) !== d.baseline) {
+      sayDiff(pane, `読み込んだあとに「${titleOf(d.lid)}」が変わりました。保存せず、もう一度読み込んでください`);
+      return;
+    }
+  }
+  for (const d of dirty) {
+    dispatcher.dispatch({
+      type: 'REIMPORT_BODY',
+      lid: d.lid,
+      body: d.text,
+      notice: '「{title}」を、差分マージの内容で置き換えました(前の中身は履歴に残しています)',
+    });
+  }
+  await (services.settle?.() ?? null);
+  const after = await services.readBodies(lids);
+  const bad = dirty.filter((d) => after.get(d.lid) !== d.text);
+  if (bad.length > 0) {
+    sayDiff(pane, `保存できませんでした: ${bad.map((d) => `「${titleOf(d.lid)}」`).join('、')}(画面の下の理由を見てください)`);
+    return;
+  }
+  // 保存できた ── いまの字を新しい「読み込んだ状態」にして、残りのちがいを見つけ直す
+  for (const side of ['left', 'right'] as const) {
+    const st = s[side];
+    const text = diffSideText(pane, side);
+    if (text !== null && st.load === 'loaded') {
+      st.text = text;
+      st.baseline = st.kind === 'note' ? text : null;
+    }
+  }
+  rebuildMerge(pane);
+  s.message = `保存しました: ${dirty.map((d) => `「${titleOf(d.lid)}」`).join('、')}(置き換え前の版はノートの履歴にあります)`;
+  repaintDiff(pane);
 }
 
 /** テキスト整形の面の「結果の上の 1 行」に一言置く(面の中の出来事は面に出す)。 */
@@ -15980,7 +16177,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       say(pane, '変わる所がないため、置き換えていません');
       return;
     }
-    dispatcher.dispatch({ type: 'REIMPORT_BODY', lid: loaded.lid, body: out.text });
+    dispatcher.dispatch({
+      type: 'REIMPORT_BODY',
+      lid: loaded.lid,
+      body: out.text,
+      notice: '「{title}」の本文を、テキスト整形の結果で置き換えました(前の中身は履歴に残しています)',
+    });
     // 置き換えた後は「読み込んだ」状態を捨てる(同じ結果で二重に置き換えない)
     setLabLoaded(pane, '', '');
     say(pane, 'ノートの本文を置き換えました(前の版はノートの履歴にあります)');
@@ -16012,6 +16214,135 @@ const ACTIONS: Record<string, ActionHandler> = {
     input.focus();
     refreshCalc(pane);
     flushCalcDraft(pane);
+  },
+  /**
+   * 🔴 **差分マージの面**(#1231)。⚠ 相手・取り込みの途中経過は**面が持つ**(`render/diffmerge.ts` の `DiffSession`。
+   *   state に写さない ── 保存するまで「まだ当てていない下書き」)。規則は `features/revision/merge-hunks.ts` の 1 本で、
+   *   ここは**押された事実を渡し、読み込み(`BinderServices`)を呼ぶ**だけ。
+   */
+  'diff-pick': (_dispatcher, target, services) => {
+    const pane = diffPane(target);
+    const side = diffSideOf(target);
+    if (pane === null || side === null || !(target instanceof HTMLSelectElement)) return;
+    const st = diffSession(pane)[side];
+    const value = target.value;
+    switch (target.getAttribute('data-pkc-pick')) {
+      // ⚠ 選び所は click でも呼ばれる(開いただけ)── 値が同じなら何もしない(読み込み済みの相手を捨てない)
+      case 'kind': {
+        if (st.kind === value) return;
+        st.kind = value as DiffSourceKind;
+        st.lid = null;
+        st.revId = null;
+        st.revs = null;
+        st.token += 1;
+        st.load = 'empty';
+        st.text = null;
+        st.baseline = null;
+        st.note = '';
+        diffSession(pane).message = '';
+        rebuildMerge(pane);
+        repaintDiff(pane);
+        return;
+      }
+      case 'note': {
+        if ((st.lid ?? '') === value) return;
+        st.lid = value === '' ? null : value;
+        st.revId = null;
+        st.revs = null;
+        if (st.kind === 'rev' && st.lid !== null) void diffLoadRevs(pane, side, services);
+        else void diffLoadSide(pane, side, services);
+        return;
+      }
+      case 'rev': {
+        if ((st.revId ?? '') === value) return;
+        st.revId = value === '' ? null : value;
+        void diffLoadSide(pane, side, services);
+        return;
+      }
+    }
+  },
+  'diff-use-open': (dispatcher, target, services) => {
+    const pane = diffPane(target);
+    const side = diffSideOf(target);
+    const lid = dispatcher.getState().selectedLid;
+    if (pane === null || side === null || lid === null) return;
+    const st = diffSession(pane)[side];
+    st.kind = 'note';
+    st.lid = lid;
+    st.revId = null;
+    st.revs = null;
+    void diffLoadSide(pane, side, services);
+  },
+  'diff-take': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    if (pane === null) return;
+    const s = diffSession(pane);
+    const from = target.getAttribute('data-pkc-from') === 'b' ? 'b' : 'a';
+    const hunk = Number(target.getAttribute('data-pkc-hunk'));
+    const dest = from === 'a' ? s.right : s.left;
+    if (s.merge === null || !Number.isInteger(hunk)) return;
+    if (!isEditableSide(dest)) {
+      sayDiff(pane, `${from === 'a' ? '右' : '左'}は読むだけの相手なので、取り込めません`);
+      return;
+    }
+    if (s.left.lid !== null && s.left.lid === s.right.lid && s.left.kind === 'note' && s.right.kind === 'note') {
+      sayDiff(pane, '左右が同じノートです。別のノートを選んでください');
+      return;
+    }
+    s.message = '';
+    s.merge.take(hunk, from);
+    paintDiffBody(pane);
+  },
+  'diff-take-all': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    if (pane === null) return;
+    const s = diffSession(pane);
+    const from = target.getAttribute('data-pkc-from') === 'b' ? 'b' : 'a';
+    const dest = from === 'a' ? s.right : s.left;
+    if (s.merge === null || !isEditableSide(dest)) return;
+    if (s.left.lid !== null && s.left.lid === s.right.lid && s.left.kind === 'note' && s.right.kind === 'note') {
+      sayDiff(pane, '左右が同じノートです。別のノートを選んでください');
+      return;
+    }
+    s.message = '';
+    s.merge.takeAll(from);
+    paintDiffBody(pane);
+  },
+  'diff-undo': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    const m = pane === null ? null : diffSession(pane).merge;
+    if (pane === null || m === null) return;
+    diffSession(pane).message = '';
+    m.undoOne();
+    paintDiffBody(pane);
+  },
+  'diff-redo': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    const m = pane === null ? null : diffSession(pane).merge;
+    if (pane === null || m === null) return;
+    diffSession(pane).message = '';
+    m.redoOne();
+    paintDiffBody(pane);
+  },
+  'diff-reset': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    const m = pane === null ? null : diffSession(pane).merge;
+    if (pane === null || m === null) return;
+    diffSession(pane).message = '';
+    m.reset();
+    paintDiffBody(pane);
+  },
+  'diff-toggle-all': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    if (pane === null) return;
+    const s = diffSession(pane);
+    s.showAll = !s.showAll;
+    paintDiffBody(pane);
+  },
+  'diff-save': (dispatcher, target, services) => {
+    const pane = diffPane(target);
+    if (pane === null) return;
+    void diffSave(dispatcher, pane, services);
   },
   /**
    * 🔴 **開く場所**(#826)。⚠ `set-prose-align` と同じ受け方(`<select>` でもボタンでも通す)。
