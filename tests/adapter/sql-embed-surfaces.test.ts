@@ -109,21 +109,6 @@ afterEach(() => {
   localStorage.removeItem('pkc3.editor-mode');
 });
 
-/** 出さない面の共通の約束: 器は在るが空 / 原文のコード枠は読める / 引く口は 1 度も呼ばれない。 */
-async function expectOriginalOnly(scope: Element, face: string): Promise<void> {
-  const host = scope.querySelector(`[${SQL_EMBED_ATTR}]`);
-  expect(host, `${face}: 器が無い(前提が崩れている ── 描く側が置いていない)`).not.toBeNull();
-  seeAll();
-  await settle();
-  await settle();
-  expect(ran, `${face}: 答えを描かない面なのに引いた`).not.toHaveBeenCalled();
-  expect(host!.querySelector('table'), `${face}: 表が出た`).toBeNull();
-  expect(host!.childElementCount, `${face}: 器に何かが入った`).toBe(0);
-  expect(scope.querySelector('pre code.language-sql')!.textContent, `${face}: 原文が読めない`).toContain(
-    SQL,
-  );
-}
-
 describe('① 読む面 ── 答えが出る', () => {
   it('🔴 見えたら引いて、コード枠の下に表が出る(原文のコード枠も残る)', async () => {
     const detail = detailRenderer();

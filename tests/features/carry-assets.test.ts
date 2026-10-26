@@ -17,7 +17,14 @@ describe('添付ごと持っていく(#677 の残り)', () => {
   });
 
   it('対応表にある画像だけ data: にする(PDF・読めなかった鍵・外部画像・コードの中は触らない)', () => {
-    const out = carryAssets(text, new Map([['k1', 'data:image/png;base64,AAA']]));
+    // 🔴 画像でない参照(d1)の鍵が対応表に **在っても** 触らない(画像の形で書かれた物だけを置き換える)
+    const out = carryAssets(
+      text,
+      new Map([
+        ['k1', 'data:image/png;base64,AAA'],
+        ['d1', 'data:application/pdf;base64,BBB'],
+      ]),
+    );
     expect(out).toContain('![a](data:image/png;base64,AAA) と ![b](data:image/png;base64,AAA)');
     expect(out).toContain('![c](asset:k2)');
     expect(out).toContain('[資料](asset:d1)');

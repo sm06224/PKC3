@@ -378,3 +378,52 @@ test('🔴 編集中の本文へ落とした画像も、そのまま入る', asy
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **章を「添付ごとコピー」して貼ると、貼った先でも画像が出る**(#677 の残り)。
+ *
+ * > 別の PKC3 へ章を持っていくと、`asset:` の参照は貼り先の入れ物に無いので絵が出なかった。
+ * > 「この章を添付ごとコピー」は画像を `data:` の字にして写し、貼る側の既存の取り込みが添付にする。
+ *
+ * ⚠ 別の入れ物は用意できないので、**同じ入れ物の別のノート**へ貼って「取り込みが働き、新しい添付の画像として出る」を見る
+ *   (貼った字は `data:` ではなく `asset:` の参照になる = 取り込み済み)。
+ */
+test('🔴 章を添付ごとコピーして貼ると、画像が取り込まれて出る (#677)', async ({ page, context }) => {
+  const errors = collectPageErrors(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await openLiveRow(page);
+
+  const rowSel = '[data-pkc-region="editor-live"] [data-pkc-field="row-source"]';
+  const row = page.locator(rowSel);
+  await row.fill('## 絵の章\n\n');
+  await sendFiles(page, rowSel, 'paste', [{ name: 'image.png', type: 'image/png', b64: PNG_64_B64 }]);
+  await expect(row).toHaveValue(/asset:/, { timeout: 15_000 });
+  await page.keyboard.press('Tab');
+  await expectImageRendered(page, 'img[data-pkc-asset-key]');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+
+  // ── 章を右クリック → 「この章を添付ごとコピー」(添付が在る章にだけ出る)
+  const h2 = page.locator('[data-pkc-field="detail-body"] h2').first();
+  await expect(h2).toContainText('絵の章');
+  await h2.click({ button: 'right' });
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu.locator('button[data-pkc-action="copy-chapter-md-assets"]'), '添付つきの章に項目が出ない').toBeVisible();
+  await menu.locator('button[data-pkc-action="copy-chapter-md-assets"]').click();
+  await expect(page.locator('[data-pkc-region="status"]'), '写した合図が出ない').toContainText('画像 1 件ごとコピーしました');
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  expect(text, '画像が data: の字になっていない').toMatch(/!\[[^\]]*\]\(data:image\/png;base64,[A-Za-z0-9+/=]+\)/);
+  expect(text, '画像の asset: が残っている').not.toContain('asset:');
+
+  // ── 別のノートへ貼る → 取り込みが働き、新しい添付の画像として出る
+  await openLiveRow(page);
+  await sendFiles(page, rowSel, 'paste', [], text);
+  await expect(row, '貼った画像が添付として取り込まれていない').toHaveValue(/!\[[^\]]*\]\(asset:[^)]+\)/, { timeout: 15_000 });
+  await expect(row).not.toHaveValue(/data:image/);
+  await page.keyboard.press('Tab');
+  await expectImageRendered(page, '[data-pkc-region="editor-live"] img[data-pkc-asset-key]');
+
+  expect(errors).toEqual([]);
+});

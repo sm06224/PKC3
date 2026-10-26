@@ -5451,7 +5451,7 @@ async function copySourceLinesWithAssets(
   let total = 0;
   let missed = 0;
   for (const key of refs.images) {
-    let blob: Blob | null = null;
+    let blob: Blob | null;
     try {
       blob = await services.readAssetBlob(key);
     } catch {
@@ -5465,7 +5465,7 @@ async function copySourceLinesWithAssets(
     if (total > CARRY_ASSETS_MAX_BYTES) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `画像が大きすぎて、添付ごとはコピーできません(合計 ${String(Math.floor(CARRY_ASSETS_MAX_BYTES / 1024 / 1024))} MB まで)。ふつうのコピーは使えます`,
+        error: `画像が大きすぎて、添付ごとはコピーできません(合計 ${humanBytes(CARRY_ASSETS_MAX_BYTES)} まで)。ふつうのコピーは使えます`,
       });
       return;
     }

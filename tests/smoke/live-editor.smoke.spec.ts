@@ -345,6 +345,26 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   expect(errors, 'CRLF の行で pageerror').toEqual([]);
 });
 
+test('🔴 1 面でも、本文に埋め込んだ SQL(sql embed)の答えが表で出る (#1223 の残り)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoLive(page);
+  /**
+   * ⚠ 答えは**保存済みのノート**を相手に引く(打っている最中の下書きではない)── だから下書きの表を引かず、
+   *   下書きに依らない SQL で 2 行返す。出ることだけでなく「保存したときの結果」の添え書きも見る。
+   */
+  await openLive(
+    page,
+    '# 題\n\n```sql embed\nSELECT 1 AS n UNION SELECT 2 ORDER BY n\n```\n',
+  );
+  const embed = page.locator('[data-pkc-region="editor-live"] [data-pkc-sql-embed]');
+  await expect(embed.locator('tbody tr'), '1 面の本文に SQL の答えが出ない').toHaveCount(2, { timeout: 15_000 });
+  await expect(embed.locator('[data-pkc-field="sql-embed-saved"]'), '保存したときの結果の添え書きが無い').toHaveText(
+    '保存したときの結果',
+  );
+  expect(errors).toEqual([]);
+});
+
 test('🔴 ① 行の途中をクリックすると、原文の**その位置**に caret が入る', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
