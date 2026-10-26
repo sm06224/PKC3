@@ -15,8 +15,9 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { isAsidePane, isViewMode, leavesOnSelect, viewModeLabel } from '../../src/adapter/state/app-state';
 import { BUILTIN_KINDS, withBuiltinTiles } from '../../src/features/launcher/tiles';
 import { hasPaneHome } from '../../src/adapter/ui/render/browse-mode';
+import { SHEET_MAX_LINES } from '../../src/features/calc/sheet';
 import { CALC_SAVE_DELAY_MS, setCalcDraftStoreForTest } from '../../src/adapter/ui/render/calc';
-import { CalcDraftStore, CALC_DRAFT_STORAGE_KEY } from '../../src/adapter/ui/render/calc-draft-store';
+import { CalcDraftStore, CALC_DRAFT_MAX_CHARS, CALC_DRAFT_STORAGE_KEY } from '../../src/adapter/ui/render/calc-draft-store';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
@@ -197,5 +198,93 @@ describe('計算スクラッチパッドの面', () => {
     await tick();
     expect(s.persisted).toHaveLength(0);
     expect(s.status()).not.toBe('');
+  });
+
+  /**
+   * 🔴 **窓を閉じる・隠れる直前に、待っている保存を済ませる**(レビュー ⚠7、テストの穴 D)。
+   * ⚠ 打鍵の 400ms 後に書く作りなので、打った直後に閉じると最後の字が落ちていた。
+   *   観測点は**保存先に入った字**(待たずに、イベントの直後に見る)。
+   */
+  it('🔴 pagehide で、待たずに今の字が保存される(打った直後に閉じても落ちない)', () => {
+    const storage = memoryStorage();
+    const s = setup(storage);
+    s.type('最後に打った式 = 12 * 3');
+    // 対照群: まだ書いていない(400ms の待ち中)
+    expect(storage.data.has(CALC_DRAFT_STORAGE_KEY)).toBe(false);
+    window.dispatchEvent(new Event('pagehide'));
+    expect(storage.data.get(CALC_DRAFT_STORAGE_KEY), 'pagehide で保存されていない').toBe('最後に打った式 = 12 * 3');
+  });
+
+  it('🔴 visibilitychange(隠れた)でも保存される。見えている間の発火では保存しない', () => {
+    const storage = memoryStorage();
+    const s = setup(storage);
+    s.type('隠れる前の式 = 5');
+    const set = (v: string): void => {
+      Object.defineProperty(document, 'visibilityState', { value: v, configurable: true });
+    };
+    try {
+      set('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(storage.data.has(CALC_DRAFT_STORAGE_KEY), '見えているのに保存した').toBe(false);
+      set('hidden');
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(storage.data.get(CALC_DRAFT_STORAGE_KEY)).toBe('隠れる前の式 = 5');
+    } finally {
+      set('visible');
+    }
+  });
+
+  /**
+   * 🔴 **保存できなかったことを黙らない**(テストの穴 C)。容量不足などで書けない端末でも、
+   * 式は画面にあり続け、**書けなかったと言う**。書けるようになったら言い直す(知らせが残り続けない)。
+   */
+  it('🔴 保存先に書けなかったら「保存できませんでした」と言い、式は画面に残る。書けたら消える', async () => {
+    const storage = memoryStorage();
+    let broken = true;
+    const flaky = {
+      ...storage,
+      setItem: (k: string, v: string): void => {
+        if (broken) throw new Error('QuotaExceededError');
+        storage.setItem(k, v);
+      },
+    };
+    const s = setup(flaky);
+    s.type('大事な式 = 99');
+    await tick(CALC_SAVE_DELAY_MS + 80);
+    expect(s.status()).toContain('保存できませんでした');
+    expect(s.input.value, '書けなかったのに式が消えた').toBe('大事な式 = 99');
+    expect(storage.data.has(CALC_DRAFT_STORAGE_KEY)).toBe(false);
+    // 知らせは、次の打鍵でも消えない(保存できるまで残る)
+    s.type('大事な式 = 99 + 1');
+    expect(s.status()).toContain('保存できませんでした');
+    broken = false;
+    await tick(CALC_SAVE_DELAY_MS + 80);
+    expect(storage.data.get(CALC_DRAFT_STORAGE_KEY)).toBe('大事な式 = 99 + 1');
+    expect(s.status(), '書けるようになったのに知らせが残っている').toBe('');
+  });
+
+  it('🔴 10 万字ちょうどは保存され、1 字超えると「保存できません」と言い、前に覚えた内容のまま(テストの穴 E)', async () => {
+    const storage = memoryStorage();
+    const s = setup(storage);
+    const edge = '1'.repeat(CALC_DRAFT_MAX_CHARS);
+    s.type(edge);
+    await tick(CALC_SAVE_DELAY_MS + 80);
+    expect(storage.data.get(CALC_DRAFT_STORAGE_KEY)?.length, '上限ちょうどで保存していない').toBe(CALC_DRAFT_MAX_CHARS);
+    expect(s.status()).toBe('');
+    s.type(`${edge}1`);
+    await tick(CALC_SAVE_DELAY_MS + 80);
+    expect(s.status()).toContain('保存できません');
+    expect(s.status()).toContain('100,000');
+    expect(storage.data.get(CALC_DRAFT_STORAGE_KEY)?.length, '上限超えを保存した').toBe(CALC_DRAFT_MAX_CHARS);
+  });
+
+  it('🔴 2000 行までを計算し、2001 行目からは計算しないと言う(テストの穴 E)', () => {
+    const s = setup();
+    s.type(Array.from({ length: SHEET_MAX_LINES }, () => '1').join('\n'));
+    expect(s.results()).toHaveLength(SHEET_MAX_LINES);
+    expect(s.status(), '上限ちょうどで切っている').toBe('');
+    s.type(Array.from({ length: SHEET_MAX_LINES + 1 }, () => '1').join('\n'));
+    expect(s.results(), '2001 行目を計算している').toHaveLength(SHEET_MAX_LINES);
+    expect(s.status()).toContain('2,000 行目までを計算しています');
   });
 });

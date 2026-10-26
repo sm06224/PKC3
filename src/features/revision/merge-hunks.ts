@@ -7,8 +7,8 @@
  *
  * ## 決めたこと
  *
- * - **ちがいの単位は「変わった塊」**(続く削除と追加を 1 つ)。1 行ずつではなく、塊ごとに → ← を押す。
- *   行ごとの取り込みは、塊を揃えたあとに残った差を**もう一度塊として**見つけ直せば足りる、と判断した。
+ * - **ちがいの単位は「変わった塊」**(続く削除と追加を 1 つ)。塊ごとに → ← を押す。
+ *   さらに塊の中の**対(左右の同じ位置の 1 行ずつ)**も 1 組ずつ取り込める(`resolvePair`。レビューで足した)。
  * - 取り込むと、その塊は**両側とも同じ字**になる(`same` に変わる)。取り消しは呼び側が積む控え(`MergeSession`)で戻す。
  * - **字を書き換えるのは「ノート」の側だけ**。履歴の版・PC のファイルは読むだけ(版は書き換えられない・
  *   ファイルは別の書き戻しの確認を通る)── 呼び側が `editable` を決め、ここは**どちらの向きへ取り込めるか**を返さない
@@ -17,9 +17,19 @@
  *
  * 🔑 **pure module**。DOM も store も知らない。
  */
-import { diffLines, splitLines } from './line-patch';
+import { didLastDiffFallBack, diffLines, splitLines } from './line-patch';
 import { sideRows, type SideRow } from './diff-side';
 import type { DiffRow } from './diff-view';
+
+/**
+ * 左右の文章から作った塊の並び + 「細かく比べきれなかった」事実。
+ * ⚠ 行数が多く編集距離の予算を超えると、`diffLines` は中間をまるごと 1 つの塊に置き換える(正しいが細かくない)。
+ *   そのとき画面は黙らずにそう言う(`fellBack`)。
+ */
+export interface MergeBuild {
+  readonly segs: MergeSeg[];
+  readonly fellBack: boolean;
+}
 
 /** 片側の行数の上限。⚠ 超えたら比べない(画面が理由を言う)── 巨大な文章で窓が固まらないため。 */
 export const MERGE_MAX_LINES = 20_000;
@@ -34,6 +44,11 @@ export type MergeSeg =
  * @returns どちらかが `MERGE_MAX_LINES` を超えるなら `null`
  */
 export function buildMergeSegs(left: string, right: string): MergeSeg[] | null {
+  return buildMerge(left, right)?.segs ?? null;
+}
+
+/** `buildMergeSegs` に「予算を超えて 1 塊に縮んだか」を添えたもの。 */
+export function buildMerge(left: string, right: string): MergeBuild | null {
   const a = splitLines(left);
   const b = splitLines(right);
   if (a.length > MERGE_MAX_LINES || b.length > MERGE_MAX_LINES) return null;
@@ -46,7 +61,10 @@ export function buildMergeSegs(left: string, right: string): MergeSeg[] | null {
     del = [];
     ins = [];
   };
-  for (const op of diffLines(left, right).ops) {
+  const patch = diffLines(left, right);
+  // ⚠ 直前の diffLines の結果をすぐ読む(次の呼び出しで消える印)
+  const fellBack = didLastDiffFallBack();
+  for (const op of patch.ops) {
     if (typeof op === 'number') {
       if (op > 0) {
         flush();
@@ -61,7 +79,7 @@ export function buildMergeSegs(left: string, right: string): MergeSeg[] | null {
     }
   }
   flush();
-  return normalizeSegs(segs);
+  return { segs: normalizeSegs(segs), fellBack };
 }
 
 /** 続く `same` を 1 つにし、空の `same` を捨てる。 */
@@ -110,6 +128,40 @@ export function resolveHunk(
       n += 1;
       if (n === hunk) {
         out.push({ kind: 'same', lines: s[from] });
+        done = true;
+        continue;
+      }
+    }
+    out.push(s);
+  }
+  return done ? normalizeSegs(out) : null;
+}
+
+/**
+ * `hunk` 番目のちがいの中の `pair` 番目の対(左右の同じ位置の 1 行)だけを、`from` の側に揃える。
+ * 対は塊の中で前から順に左右を並べたもの(`mergeRows` の `pairs`)── 片側にしか無い対は、
+ * 取り込むと相手側の行が**増える**(`from` の側が空なら、相手側の行が消える)。
+ * 残りの対は、前後 2 つの塊として残る(塊の番号は 1 つ増えることがある)。範囲外は `null`。
+ */
+export function resolvePair(
+  segs: readonly MergeSeg[],
+  hunk: number,
+  pair: number,
+  from: 'a' | 'b',
+): MergeSeg[] | null {
+  let n = -1;
+  const out: MergeSeg[] = [];
+  let done = false;
+  for (const s of segs) {
+    if (s.kind === 'change') {
+      n += 1;
+      if (n === hunk && pair >= 0 && pair < Math.max(s.a.length, s.b.length)) {
+        const before = { kind: 'change' as const, a: s.a.slice(0, pair), b: s.b.slice(0, pair) };
+        const chosen = s[from][pair];
+        const after = { kind: 'change' as const, a: s.a.slice(pair + 1), b: s.b.slice(pair + 1) };
+        if (before.a.length > 0 || before.b.length > 0) out.push(before);
+        if (chosen !== undefined) out.push({ kind: 'same', lines: [chosen] });
+        if (after.a.length > 0 || after.b.length > 0) out.push(after);
         done = true;
         continue;
       }
@@ -244,6 +296,14 @@ export class MergeSession {
   /** 取り込めたら `true`。範囲外は何もしない。 */
   take(hunk: number, from: 'a' | 'b'): boolean {
     const next = resolveHunk(this.current, hunk, from);
+    if (next === null) return false;
+    this.push(next);
+    return true;
+  }
+
+  /** 塊の中の 1 対だけを取り込む。取り込めたら `true`。 */
+  takePair(hunk: number, pair: number, from: 'a' | 'b'): boolean {
+    const next = resolvePair(this.current, hunk, pair, from);
     if (next === null) return false;
     this.push(next);
     return true;

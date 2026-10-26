@@ -6,6 +6,9 @@ import { describe, expect, it } from 'vitest';
 import {
   evaluateSheet,
   formatSheetNumber,
+  SHEET_MAX_LINES,
+  SHEET_NAME_MAX,
+  splitLabel,
   sheetNoteTitle,
   sheetToMarkdown,
   sheetToText,
@@ -153,5 +156,99 @@ describe('ノートに出す', () => {
   });
   it('題名は日時入り', () => {
     expect(sheetNoteTitle(new Date(2026, 9, 26, 9, 5))).toBe('計算メモ 2026-10-26 09:05');
+  });
+});
+
+describe('割合の印は名前に入れても保たれる(レビュー 💭)', () => {
+  it('🔴 税率 = 10% を名前にしても、100 + 税率 は直接 100 + 10% と書いたときと同じ 110', () => {
+    // 期待値は手で書いた固定の数(直接書いた式の結果 110 と、名前を通した結果を突き合わせる)
+    expect(shown('100 + 10%')).toEqual(['110']);
+    expect(shown('税率 = 10%\n100 + 税率')).toEqual(['10%', '110']);
+    expect(shown('税率 = 10%\n100 - 税率')).toEqual(['10%', '90']);
+  });
+  it('割合の名前を掛けるのは今までどおり(0.1 として掛かる)。割合でない名前は足しても割合にならない', () => {
+    expect(shown('税率 = 10%\n小計 = 2000\n小計 * 税率')).toEqual(['10%', '2,000', '200']);
+    expect(shown('率 = 0.1\n100 + 率')).toEqual(['0.1', '100.1']);
+  });
+  it('割合の行の結果を行ごとに見ても、割合は % つきで出る', () => {
+    expect(evaluateSheet('x = 10%')[0]!.pct).toBe(true);
+    expect(evaluateSheet('x = 10')[0]!.pct).toBe(false);
+  });
+});
+
+describe('名前の定義の読みが長い行でも線形(レビュー ⚠1)', () => {
+  it('🔴 空白が 5 万字続く行も、一瞬で読み終わる(旧い正規表現は 2 次式で何秒もかかった)', () => {
+    const t0 = performance.now();
+    const rows = evaluateSheet(`a${' '.repeat(50_000)}b`);
+    const ms = performance.now() - t0;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.kind).toBe('text');
+    expect(ms, `${Math.round(ms)}ms かかった`).toBeLessThan(500);
+  });
+  it('名前の定義の読みは今までと同じ(= か : で区切る・演算子や括弧の手前までが名前・数で始まれば定義でない)', () => {
+    expect(evaluateSheet('単価 = 3')[0]!.name).toBe('単価');
+    expect(evaluateSheet('単価: 3')[0]!.name).toBe('単価');
+    expect(evaluateSheet('  前に空白 =  4')[0]!.name).toBe('前に空白');
+    expect(evaluateSheet('a b = 5')[0]!.name).toBe('a b');
+    // 演算子・括弧が先に来れば名前の定義ではない
+    expect(evaluateSheet('(a) = 5')[0]!.name).toBeNull();
+    expect(evaluateSheet('a + b = 5')[0]!.name).toBeNull();
+    // 数や記号で始めない
+    expect(evaluateSheet('3a = 5')[0]!.name).toBeNull();
+    expect(evaluateSheet('= 5')[0]!.name).toBeNull();
+  });
+});
+
+describe('上限の境目(テストの穴 E)', () => {
+  it('名前は 40 字ちょうどまで定義になり、41 字は定義にならない', () => {
+    const n40 = 'あ'.repeat(SHEET_NAME_MAX);
+    expect(evaluateSheet(`${n40} = 5`)[0]!.name).toBe(n40);
+    expect(evaluateSheet(`${n40}あ = 5`)[0]!.name).toBeNull();
+  });
+  it('2000 行ちょうどまで評価し、2001 行目は評価しない', () => {
+    const rows = evaluateSheet(Array.from({ length: SHEET_MAX_LINES + 1 }, () => '1').join('\n'));
+    expect(rows).toHaveLength(SHEET_MAX_LINES);
+    expect(evaluateSheet(Array.from({ length: SHEET_MAX_LINES }, () => '1').join('\n'))).toHaveLength(SHEET_MAX_LINES);
+  });
+});
+
+describe('名前の定義の割り方は、旧い正規表現と同じ答えを出す(独立した物差しで突き合わせる)', () => {
+  /** 旧い実装そのもの(2 次式になる正規表現)。⚠ 期待値の側にだけ残す。 */
+  const OLD = /^\s*([^\s=:+\-*/%()0-9.,][^=:+\-*/%()]*?)\s*[=:]\s*(.*)$/u;
+  const alphabet = ['a', 'あ', ' ', '=', ':', '+', '-', '*', '/', '%', '(', ')', '1', '.', ',', '\u3000', '\t'];
+  it('短い文字列を総当たりで 4 字まで(全 17^0〜4 通り)と、乱数の長めの列で食い違わない', () => {
+    let checked = 0;
+    const same = (s: string): void => {
+      const m = OLD.exec(s);
+      const got = splitLabel(s);
+      if (m === null) {
+        expect(got, JSON.stringify(s)).toBeNull();
+      } else {
+        expect(got, JSON.stringify(s)).toEqual({ label: m[1]!.trim(), rest: m[2]! });
+      }
+      checked += 1;
+    };
+    const walk = (prefix: string, depth: number): void => {
+      same(prefix);
+      if (depth === 0) return;
+      for (const c of alphabet) walk(prefix + c, depth - 1);
+    };
+    walk('', 4);
+    // 乱数(固定の種)── 長さ 5〜14
+    let seed = 12345;
+    const rnd = (): number => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    for (let i = 0; i < 3000; i++) {
+      const len = 5 + Math.floor(rnd() * 10);
+      let t = '';
+      for (let k = 0; k < len; k++) t += alphabet[Math.floor(rnd() * alphabet.length)]!;
+      same(t);
+    }
+    // 空振り防止: 実際に大量に突き合わせている・定義になる例と、ならない例の両方を通っている
+    expect(checked).toBeGreaterThan(80_000);
+    expect(splitLabel('x = 1')).not.toBeNull();
+    expect(splitLabel('1 = 1')).toBeNull();
   });
 });

@@ -813,17 +813,17 @@ describe('設定の面(割り当て直す口)', () => {
     const panel = buildKeymapPanel(store, document);
     document.body.append(panel.root);
     store.addBinding('create-entry', 'Alt+M');
-    store.addBinding('edit-entry', 'Alt+9');
+    store.addBinding('edit-entry', 'Alt+Q');
     const all = panel.root.querySelector<HTMLButtonElement>('[data-pkc-field="keymap-reset-all"]')!;
     all.click();
     expect(store.getBindings()['create-entry'], '聞く前に消えた').toContain('Alt+M');
     expect(await answerDialog('cancel')).toBe('自分で変えた割り当て 2 件を、全部はじめに戻します');
     expect(store.getBindings()['create-entry'], 'やめたのに消えた').toContain('Alt+M');
-    expect(store.getBindings()['edit-entry'], 'やめたのに消えた').toContain('Alt+9');
+    expect(store.getBindings()['edit-entry'], 'やめたのに消えた').toContain('Alt+Q');
     all.click();
     await answerDialog('ok');
     expect(store.getBindings()['create-entry']).toEqual(['Alt+N']);
-    expect(store.getBindings()['edit-entry']).not.toContain('Alt+9');
+    expect(store.getBindings()['edit-entry']).not.toContain('Alt+Q');
     panel.dispose();
   });
 
@@ -1076,6 +1076,10 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        * 🔑 この 1 行が、左の一覧を押して中央が本文へ戻った後の**唯一の戻り道**である。
        */
       'view-sql',
+      // ⚠ 2026-10-26 に足した(#1233 / #1230 / #1231 のレビュー ⚠2)── `view-sql` と同じ理由(押しボタンを持たない)
+      'view-textlab',
+      'view-calc',
+      'view-diff',
       /**
        * ⚠ 2026-10-03 に足した(#1017 C5)── メッセージを開く。状態の行の押し口は未読のときだけ出る
        *   (常設の押しボタンを持たない)ので、特例で直に開く(実体は `open-messages` の受け手と
@@ -1235,6 +1239,10 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
       'view-dual',
       // ⚠ 2026-09-09 に足した(#681 段② ── わきの面なので打鍵中でも開く)
       'view-sql',
+      // ⚠ 2026-10-26 に足した(#1233 / #1230 / #1231 のレビュー ⚠2 ── 同じくわきの面)
+      'view-textlab',
+      'view-calc',
+      'view-diff',
       'toggle-sidebar',
       'toggle-inspector',
       // ⚠ 2026-08-30 に足した(#609 ── 畳める 3 面のうち追記欄だけ鍵が無かった)

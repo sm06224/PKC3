@@ -7,7 +7,7 @@
  * ③🔴 新しいノートにする / ノートの本文を置き換える は**保存された本文**で見る(画面だけ動く緑を通さない)
  * ④読み込んだ後にノートが変わっていたら置き換えない ⑤編集中は書かない ⑥タイルがあり、別窓で開く面の名前を持つ
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
@@ -17,6 +17,9 @@ import { isAsidePane, isViewMode, leavesOnSelect, viewModeLabel } from '../../sr
 import { withBuiltinTiles, BUILTIN_KINDS } from '../../src/features/launcher/tiles';
 import { hasPaneHome } from '../../src/adapter/ui/render/browse-mode';
 import { LAB_OPS } from '../../src/features/markdown/text-lab';
+import { bindLabClient, labLoaded, refreshTextLab, LAB_TYPING_DEBOUNCE_MS } from '../../src/adapter/ui/render/textlab';
+import { LAB_REGEX_TIMEOUT_NOTE, type LabRegexClient } from '../../src/adapter/platform/text/lab-client';
+import type { LabRegex, LabRegexResult } from '../../src/features/markdown/lab-regex';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
@@ -132,14 +135,18 @@ describe('テキスト整形の面', () => {
     expect(s.pane.querySelectorAll('[data-pkc-lab-op]')).toHaveLength(LAB_OPS.length);
   });
 
-  it('🔴 正規表現の置換が打つそばから効き、読めない式は理由を出して入力を返す', () => {
+  it('🔴 正規表現の置換が打つそばから効き(少し待って)、読めない式は理由を出して入力を返す', async () => {
     const s = setup();
     s.type('textlab-input', 'abc 123');
     s.type('textlab-pattern', '\\d+');
     s.type('textlab-replacement', '#');
+    // 置換はワーカーで走り、打鍵は少し待つ(`LAB_TYPING_DEBOUNCE_MS`)── 待つ間は古い結果を出さない
+    expect(s.summary()).toContain('置換を計算しています');
+    await tick(320);
     expect(s.out()).toBe('abc #');
     expect(s.summary()).toContain('置換: 1 か所');
     s.type('textlab-pattern', '(');
+    await tick(320);
     expect(s.out()).toBe('abc 123');
     expect(s.summary()).toContain('正規表現として読めません');
   });
@@ -180,6 +187,11 @@ describe('テキスト整形の面', () => {
     await tick();
     expect(s.store.e1).toBe('一\n二');
     expect(s.summary()).toContain('置き換えました');
+    // 🔴 画面の下の知らせ: 題名が入り、置き換え前の `{title}` が残らない(テストの穴 B)
+    const notice = s.d.getState().notice ?? '';
+    expect(notice).toContain('「題名-e1」');
+    expect(notice).toContain('テキスト整形の結果で置き換えました');
+    expect(notice, '{title} が置き換わらずに残っている').not.toContain('{');
     // 置き換えた後は、同じ結果でもう一度置き換えられない
     expect(s.q<HTMLButtonElement>('[data-pkc-action="textlab-apply-note"]').disabled).toBe(true);
   });
@@ -205,5 +217,115 @@ describe('テキスト整形の面', () => {
     const load = s.q<HTMLButtonElement>('[data-pkc-action="textlab-load-note"]');
     expect(load.disabled).toBe(true);
     expect(load.title).toContain('ノートを開いてください');
+  });
+
+  /**
+   * 🔴 **置換はワーカーで走る(非同期)── 古い応答が新しい結果を上書きしない / 待つ間は古い結果を出さない / 止めたと言う**
+   * (レビュー ⚠1)。偽の置換口(`LabRegexClient`)を差して、返すタイミングを手で決める。
+   */
+  function fakeClient() {
+    const calls: Array<{ text: string; regex: LabRegex; done: (r: LabRegexResult) => void }> = [];
+    const client = {
+      apply: (text: string, regex: LabRegex) =>
+        new Promise<LabRegexResult>((resolve) => {
+          calls.push({ text, regex, done: resolve });
+        }),
+    } as unknown as LabRegexClient;
+    return { client, calls };
+  }
+
+  it('🔴 古い置換の返事が後から着いても、新しい結果を上書きしない', async () => {
+    const s = setup();
+    const f = fakeClient();
+    bindLabClient(s.pane, f.client);
+    s.q<HTMLTextAreaElement>('[data-pkc-field="textlab-input"]').value = '甲';
+    s.q<HTMLInputElement>('[data-pkc-field="textlab-pattern"]').value = '甲';
+    s.q<HTMLInputElement>('[data-pkc-field="textlab-replacement"]').value = '1';
+    const first = refreshTextLab(s.pane);
+    s.q<HTMLInputElement>('[data-pkc-field="textlab-replacement"]').value = '2';
+    const second = refreshTextLab(s.pane);
+    expect(f.calls).toHaveLength(2);
+    // 新しいほうが先に返り、古いほうが後から返る
+    f.calls[1]!.done({ text: '2', note: null, hits: 1 });
+    await second;
+    expect(s.out()).toBe('2');
+    f.calls[0]!.done({ text: '1', note: null, hits: 1 });
+    await first;
+    expect(s.out(), '古い返事が新しい結果を上書きした').toBe('2');
+  });
+
+  it('🔴 置換の返事を待つ間は、結果を使うボタンを止め、押しても古い結果を出さない', async () => {
+    const s = setup();
+    const f = fakeClient();
+    bindLabClient(s.pane, f.client);
+    s.type('textlab-input', '甲');
+    // 置換を入れる(打鍵は少し待つ)── まだワーカーへ投げていない間も、古い結果を出さない
+    s.q<HTMLInputElement>('[data-pkc-field="textlab-pattern"]').value = '甲';
+    const p = refreshTextLab(s.pane);
+    expect(s.q<HTMLButtonElement>('[data-pkc-field="textlab-copy"]').disabled).toBe(true);
+    expect(s.q<HTMLButtonElement>('[data-pkc-field="textlab-to-note"]').disabled).toBe(true);
+    expect(s.summary()).toContain('置換を計算しています');
+    s.press('[data-pkc-action="textlab-to-note"]');
+    await tick();
+    expect(s.persisted.find((e) => e.lid !== 'e1'), '計算中に古い結果でノートを作った').toBeUndefined();
+    f.calls[0]!.done({ text: '乙', note: null, hits: 1 });
+    await p;
+    expect(s.q<HTMLButtonElement>('[data-pkc-field="textlab-to-note"]').disabled).toBe(false);
+    expect(s.out()).toBe('乙');
+  });
+
+  it('🔴 時間切れで止めたときは、入力のままの結果と「重すぎるので止めました」を出す', async () => {
+    const s = setup();
+    const f = fakeClient();
+    bindLabClient(s.pane, f.client);
+    s.type('textlab-input', 'aaaaaaaaaaaaaaaaaaaaaaaaaaab');
+    s.q<HTMLInputElement>('[data-pkc-field="textlab-pattern"]').value = '(a+)+$';
+    const p = refreshTextLab(s.pane);
+    f.calls[0]!.done({ text: 'aaaaaaaaaaaaaaaaaaaaaaaaaaab', note: LAB_REGEX_TIMEOUT_NOTE, hits: 0 });
+    await p;
+    expect(s.summary()).toContain('この置換は重すぎるので止めました');
+    expect(s.out()).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaab');
+  });
+
+  it('🔴 打鍵はまとめて 1 回だけワーカーへ投げる(1 字ごとに投げない)', async () => {
+    const s = setup();
+    const f = fakeClient();
+    bindLabClient(s.pane, f.client);
+    s.type('textlab-input', 'abc');
+    s.type('textlab-pattern', 'a');
+    s.type('textlab-pattern', 'ab');
+    s.type('textlab-pattern', 'abc');
+    expect(f.calls, '打つたびに投げている').toHaveLength(0);
+    await tick(LAB_TYPING_DEBOUNCE_MS + 60);
+    expect(f.calls).toHaveLength(1);
+    expect(f.calls[0]!.regex.pattern).toBe('abc');
+  });
+
+  it('⚠ 対照群 ── 置換が無い整えは、ワーカーを使わずその場で結果が出る', () => {
+    const s = setup();
+    const f = fakeClient();
+    const spy = vi.spyOn(f.client, 'apply');
+    bindLabClient(s.pane, f.client);
+    s.type('textlab-input', '- a');
+    s.press('[data-pkc-lab-op="strip-bullets"]');
+    expect(s.out()).toBe('a');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  /**
+   * 🔴 **面を離れたら、読み込んだノートの控えを捨てる**(レビュー ⚠9)。
+   * ⚠ 捨てないと、戻ったとき「読み込んだ時点の本文」と開いている本文を突き合わせる門が、古い控えで通る。
+   */
+  it('🔴 別の画面へ移って戻ると、読み込んだノートの控えは無く、置き換えは押せない。打った文章は残る', async () => {
+    const s = setup();
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    await tick();
+    s.press('[data-pkc-action="textlab-load-note"]');
+    expect(labLoaded(s.pane)?.lid).toBe('e1');
+    s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    expect(labLoaded(s.pane), '面を離れても控えが残っている').toBeNull();
+    s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'textlab' });
+    expect(s.q<HTMLButtonElement>('[data-pkc-action="textlab-apply-note"]').disabled).toBe(true);
+    expect(s.q<HTMLTextAreaElement>('[data-pkc-field="textlab-input"]').value, '打った文章まで消えている').toBe('- 一\n- 二');
   });
 });

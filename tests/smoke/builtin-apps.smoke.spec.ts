@@ -179,10 +179,8 @@ test('🔴 テキスト整形: 貼る → 整え方を押す → 右に結果 �
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
 
-  // 別ウィンドウのアプリと同じ面(中央の器)を、ディープリンクで開く
-  await page.evaluate(() => {
-    location.hash = '#pkc?view=textlab';
-  });
+  // 別ウィンドウのアプリと同じ面(中央の器)を、ショートカットキー(Ctrl+Alt+8)で開く(レビュー ⚠2)
+  await page.keyboard.press('Control+Alt+8');
   const pane = page.locator('[data-pkc-view-pane="textlab"]');
   await expect(pane, 'テキスト整形の面が開かない').toBeVisible({ timeout: 15_000 });
 
@@ -221,6 +219,25 @@ test('🔴 テキスト整形: 貼る → 整え方を押す → 右に結果 �
     page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: 'ABC' }),
     '作ったノートが一覧に載らない',
   ).toHaveCount(1, { timeout: 10_000 });
+
+  /**
+   * 🔴 **重い正規表現でも画面が固まらない**(レビュー ⚠1)。27 字の `(a+)+$` は、メインスレッドで回すと何秒も止まる式。
+   * ⚠ 本物のワーカーと `terminate()` を通す(unit は偽のワーカー / Node のスレッド)。
+   *   見るのは ①式を入れた直後にページが応答する(往復が一瞬) ②やがて「重すぎるので止めました」と出る ③そのあと軽い式がまた動く(ワーカーが作り直される)。
+   */
+  await input.fill('aaaaaaaaaaaaaaaaaaaaaaaaaaab');
+  await pane.locator('[data-pkc-field="textlab-pattern"]').fill('(a+)+$');
+  await pane.locator('[data-pkc-field="textlab-replacement"]').fill('x');
+  const t0 = Date.now();
+  await page.evaluate(() => 1);
+  expect(Date.now() - t0, '重い置換の最中にページが固まった').toBeLessThan(1000);
+  await expect(pane.locator('[data-pkc-field="textlab-summary"]'), '重い置換を止めたと言わない').toContainText(
+    'この置換は重すぎるので止めました',
+    { timeout: 15_000 },
+  );
+  await expect(output, '止めたのに結果が変わっている').toHaveValue('aaaaaaaaaaaaaaaaaaaaaaaaaaab');
+  await pane.locator('[data-pkc-field="textlab-pattern"]').fill('a+');
+  await expect(output, '止めたあと、軽い置換が動かない').toHaveValue('xb', { timeout: 15_000 });
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
@@ -229,9 +246,8 @@ test('🔴 計算スクラッチパッド: 書くと各行の右に結果が同�
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
 
-  await page.evaluate(() => {
-    location.hash = '#pkc?view=calc';
-  });
+  // ショートカットキー(Ctrl+Alt+9)で開く(レビュー ⚠2)。もう一度押すと本文へ戻る
+  await page.keyboard.press('Control+Alt+9');
   const pane = page.locator('[data-pkc-view-pane="calc"]');
   await expect(pane, '計算スクラッチパッドの面が開かない').toBeVisible({ timeout: 15_000 });
   const input = pane.locator('[data-pkc-field="calc-input"]');
@@ -268,8 +284,14 @@ test('🔴 計算スクラッチパッド: 書くと各行の右に結果が同�
   await page.keyboard.type('4000 円');
   await expect(results.nth(2), '上の値を直しても下の結果が変わらない').toHaveText('160,000');
 
+  // 🔴 窓を閉じる・隠れる直前に、待たずに保存される(レビュー ⚠7)。打鍵の 400ms 後を待たずに、保存先を直に読む
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  expect(
+    await page.evaluate(() => localStorage.getItem('pkc3.calc-draft')),
+    'pagehide で待たずに保存されていない(最後の数文字が落ちる)',
+  ).toContain('4000 円');
+
   // 読み込み直しても式が戻る(自動で覚える)
-  await page.waitForTimeout(700);
   await page.reload();
   await page.evaluate(() => {
     location.hash = '#pkc?view=calc';
@@ -307,9 +329,8 @@ test('🔴 差分マージ: 2 つのノートのちがいを 1 か所ずつ取�
   const lidB = both.find((l) => !first.includes(l))!;
   expect(lidA && lidB && lidA !== lidB, '2 つのノートの lid が読めない').toBe(true);
 
-  await page.evaluate(() => {
-    location.hash = '#pkc?view=diff';
-  });
+  // ショートカットキー(Ctrl+Alt+0)で開く(レビュー ⚠2)
+  await page.keyboard.press('Control+Alt+0');
   const pane = page.locator('[data-pkc-view-pane="diff"]');
   await expect(pane, '差分マージの面が開かない').toBeVisible({ timeout: 15_000 });
   const pickNote = (side: 'left' | 'right'): ReturnType<typeof page.locator> =>
@@ -342,6 +363,28 @@ test('🔴 差分マージ: 2 つのノートのちがいを 1 か所ずつ取�
   await pickNote('left').selectOption('');
   await pickNote('left').selectOption(lidA);
   await expect(summary, '保存したのに、読み直すと元のまま').toHaveText('ちがい 1 か所', { timeout: 10_000 });
+
+  /**
+   * 🔴 **塊の中の 1 行だけを取り込む**(レビュー ⚠5)。保存の後に残ったちがいは「ぶどう」(改行の有無)と「もも」(右にだけ)の
+   * 2 対 ── 最後の対(右にだけある「もも」)を、行ごとのボタンで除く。本物の CSS で、ボタンが升の中で押せる所に在ることも見る。
+   */
+  const pairs = pane.locator('[data-pkc-action="diff-take-pair"][data-pkc-from="a"]');
+  await expect(pairs, '行ごとの取り込みボタンが対の数だけ無い').toHaveCount(2);
+  await expect(pairs.last()).toBeVisible();
+  await clickReal(page, pairs.last());
+  await expect(pairs, '行ごとに取り込んだ対が残っている').toHaveCount(1);
+  await clickReal(page, pane.locator('[data-pkc-action="diff-undo"]'));
+  await expect(pairs, '取り消しても対が戻らない').toHaveCount(2);
+
+  /**
+   * 🔴 **取り込みがあるのに相手を選び直すと、確認が出る**(レビュー ⚠6)。「やめる」で選び所も取り込みも元のまま。
+   */
+  await clickReal(page, pairs.last());
+  await pickNote('right').selectOption('');
+  await expect(page.getByText('取り込んだ変更は、まだ保存していません'), '確認が出ない').toBeVisible({ timeout: 10_000 });
+  await clickReal(page, page.getByRole('button', { name: 'やめる' }));
+  await expect(pairs, 'やめたのに取り込みが消えた').toHaveCount(1);
+  await expect(pickNote('right'), 'やめたのに選び所が戻っていない').toHaveValue(lidB);
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

@@ -1522,6 +1522,41 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     whileTyping: true,
     note: 'SQL を打って結果を表で見る画面です。文字を打っている間に効くのは Ctrl+Alt+7(Mac は ⌘+Alt+7)のほうです',
   },
+  /**
+   * 🔴 **テキスト整形・計算スクラッチパッド・差分マージにも、開く鍵を置く**(#1233 / #1230 / #1231 のレビュー ⚠2)。
+   *
+   * ⚠ この 3 つも `view-sql` と同じく**左にタブが無く、押しボタンも無い**面で、入口はアプリの一覧のタイルだけだった。
+   *   「ほかの面へ移って戻る」道が画面になく、**鍵と操作パレットの行が無い**と作業の途中から戻れない。
+   * 🔑 番号は `Alt+7`(SQL)の**続き**に足す(既に `Alt+1`〜`Alt+7` を体で覚えた user と保存済みの割当をずらさない)。
+   *   `Alt+8` / `Alt+9` / `Alt+0` は既定の鍵と重ならない。`Mod+Alt+<数字>` は文字を打たないので、打っている間も効く。
+   */
+  {
+    id: 'view-textlab',
+    label: 'テキスト整形へ移る',
+    contexts: ['global'],
+    defaults: ['Alt+8', 'Mod+Alt+8'],
+    whileTyping: true,
+    note: '貼った文章を整えて、結果を見てからノートにする画面です。文字を打っている間に効くのは Ctrl+Alt+8(Mac は ⌘+Alt+8)のほうです',
+    alias: '整形 置換 正規表現 表 CSV',
+  },
+  {
+    id: 'view-calc',
+    label: '計算スクラッチパッドへ移る',
+    contexts: ['global'],
+    defaults: ['Alt+9', 'Mod+Alt+9'],
+    whileTyping: true,
+    note: '文章と式を混ぜて書くと、右に結果が並ぶ画面です。文字を打っている間に効くのは Ctrl+Alt+9(Mac は ⌘+Alt+9)のほうです',
+    alias: '電卓 計算 メモ',
+  },
+  {
+    id: 'view-diff',
+    label: '差分マージへ移る',
+    contexts: ['global'],
+    defaults: ['Alt+0', 'Mod+Alt+0'],
+    whileTyping: true,
+    note: '2 つのノートや履歴の版を見比べ、ちがいを 1 か所ずつ取り込む画面です。文字を打っている間に効くのは Ctrl+Alt+0(Mac は ⌘+Alt+0)のほうです',
+    alias: '比較 差分 マージ くらべる',
+  },
   {
     id: 'toggle-sidebar',
     label: '一覧のペインを折りたたむ / 戻す',

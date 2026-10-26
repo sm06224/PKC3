@@ -391,4 +391,5 @@ export const BANNED_TERMS: readonly BannedTerm[] = [
   banned('横に並べる枠', 'スタックのノート', '造語'),
   banned('右の枠', 'スタックのノート', '造語'),
   banned('左の枠', '本文(左)', '造語'),
+  banned('旗', 'オプション(切替の意味なら フラグ)', '造語', ['国旗', '旗艦']),
 ] as const;

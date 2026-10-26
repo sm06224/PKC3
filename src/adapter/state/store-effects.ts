@@ -3718,7 +3718,8 @@ export function connectStoreEffects(
                 notice:
                   ev.notice === undefined
                     ? `「${ev.title}」を、パソコン側のファイルの今の中身に取り込み直しました(前の中身は履歴に残しています)`
-                    : ev.notice.replaceAll('{title}', ev.title),
+                    : // ⚠ 関数で置換する ── 題名に `$&` `$'` が入っていても、置換文の特殊記法として読まれない(そのまま入る)
+                      ev.notice.replaceAll('{title}', () => ev.title),
                 meta: {
                   lid: ev.lid,
                   title: ev.title,

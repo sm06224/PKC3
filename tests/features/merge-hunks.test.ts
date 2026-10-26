@@ -3,15 +3,18 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  buildMerge,
   buildMergeSegs,
   countHunks,
   isMerged,
   MERGE_MAX_LINES,
+  MERGE_UNDO_MAX,
   MergeSession,
   mergeRows,
   mergeText,
   resolveAll,
   resolveHunk,
+  resolvePair,
 } from '../../src/features/revision/merge-hunks';
 
 const L = 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n';
@@ -187,3 +190,115 @@ describe('画面の行', () => {
     expect(hunks(resolveHunk(segs, 0, 'a')!)).toEqual([0, 1]);
   });
 });
+
+describe('塊の中の 1 対だけを取り込む(レビュー ⚠5)', () => {
+  const seg = (a: string[], b: string[]) => [{ kind: 'change' as const, a, b }];
+  const lines = (...xs: string[]): string[] => xs.map((x) => `${x}\n`);
+
+  it('🔴 同じ数で入れ替わる塊の 2 行目だけを左から右へ。残りの対は前後 2 つの塊として残る', () => {
+    const segs = seg(lines('1', '2', '3'), lines('x', 'y', 'z'));
+    const next = resolvePair(segs, 0, 1, 'a')!;
+    // 期待値は手で書いた固定の字
+    expect(mergeText(next, 'a')).toBe('1\n2\n3\n');
+    expect(mergeText(next, 'b')).toBe('x\n2\nz\n');
+    expect(countHunks(next)).toBe(2);
+    expect(next.map((s) => s.kind)).toEqual(['change', 'same', 'change']);
+  });
+
+  it('右から左へ(向きを取り違えない)', () => {
+    const next = resolvePair(seg(lines('1', '2', '3'), lines('x', 'y', 'z')), 0, 1, 'b')!;
+    expect(mergeText(next, 'a')).toBe('1\ny\n3\n');
+    expect(mergeText(next, 'b')).toBe('x\ny\nz\n');
+  });
+
+  it('🔴 片側にしか無い行: 左だけにある行を右へ取り込むと右に行が増え、右の空を左へ取り込むと左の行が消える', () => {
+    const segs = seg(lines('1', '2', '3'), lines('x'));
+    // 3 行目(対 2)は左だけ。左の内容を右へ → 右に足される
+    const toRight = resolvePair(segs, 0, 2, 'a')!;
+    expect(mergeText(toRight, 'b')).toBe('x\n3\n');
+    expect(mergeText(toRight, 'a')).toBe('1\n2\n3\n');
+    // 右の(空の)内容を左へ → 左のその行が消える
+    const toLeft = resolvePair(segs, 0, 2, 'b')!;
+    expect(mergeText(toLeft, 'a')).toBe('1\n2\n');
+    expect(mergeText(toLeft, 'b')).toBe('x\n');
+  });
+
+  it('範囲外(塊の番号・対の番号)は何もせず null', () => {
+    const segs = seg(lines('1'), lines('x'));
+    expect(resolvePair(segs, 1, 0, 'a')).toBeNull();
+    expect(resolvePair(segs, 0, 1, 'a')).toBeNull();
+    expect(resolvePair(segs, 0, -1, 'a')).toBeNull();
+  });
+
+  it('🔴 全部の対を同じ向きに取り込むと、塊をまるごと取り込んだのと同じ字になる(独立した不変量)', () => {
+    const segs = buildMergeSegs(L, R)!;
+    for (const from of ['a', 'b'] as const) {
+      // 塊の数だけ、毎回先頭の塊の対を全部取り込む
+      let cur: ReturnType<typeof resolvePair> = segs;
+      let guard = 0;
+      while (cur !== null && countHunks(cur) > 0 && guard++ < 50) cur = resolvePair(cur, 0, 0, from) ?? cur;
+      expect(countHunks(cur!), '取り込みきれていない').toBe(0);
+      expect(mergeText(cur!, 'a')).toBe(mergeText(resolveAll(segs, from), 'a'));
+    }
+  });
+
+  it('取り消し・やり直しにも載る(セッション)', () => {
+    const m = new MergeSession(seg(lines('1', '2'), lines('x', 'y')));
+    expect(m.takePair(0, 0, 'a')).toBe(true);
+    expect(m.canUndo).toBe(true);
+    expect(mergeText(m.segs, 'b')).toBe('1\ny\n');
+    m.undoOne();
+    expect(mergeText(m.segs, 'b')).toBe('x\ny\n');
+    m.redoOne();
+    expect(mergeText(m.segs, 'b')).toBe('1\ny\n');
+    expect(m.takePair(9, 0, 'a')).toBe(false);
+  });
+});
+
+describe('細かく比べきれなかったことを言う(レビュー ⚠5、didLastDiffFallBack)', () => {
+  const many = (prefix: string, n: number): string => Array.from({ length: n }, (_, i) => `${prefix}${i}\n`).join('');
+
+  it('🔴 編集距離の予算を超える差(300 行と 300 行が全部違う)は、1 つの大きな塊に縮み、縮んだと返す', () => {
+    const built = buildMerge(many('左', 300), many('右', 300))!;
+    expect(built.fellBack, '縮んだのに言っていない').toBe(true);
+    expect(countHunks(built.segs), '縮んで 1 塊になる').toBe(1);
+    // 縮んでも正しい(どちらの全文も元に戻る)
+    expect(mergeText(built.segs, 'a')).toBe(many('左', 300));
+    expect(mergeText(built.segs, 'b')).toBe(many('右', 300));
+  });
+
+  it('⚠ 対照群 ── 小さな差は縮まない(言わない)。2 回目の呼び出しに前の印を持ち越さない', () => {
+    expect(buildMerge(many('左', 300), many('右', 300))!.fellBack).toBe(true);
+    const small = buildMerge(L, R)!;
+    expect(small.fellBack, '前の呼び出しの印を持ち越した').toBe(false);
+    expect(countHunks(small.segs)).toBe(3);
+  });
+
+  it('上限(MERGE_MAX_LINES)を超えると null(縮みの話ではない)', () => {
+    expect(buildMerge('x\n'.repeat(MERGE_MAX_LINES + 1), '')).toBeNull();
+  });
+});
+
+describe('取り消しの控えの上限の境目(テストの穴 E)', () => {
+  it('🔴 100 回まで取り消せ、101 回目の取り込みで一番古い控えが捨てられる', () => {
+    // 塊が 102 個ある文章(1 行おきに違う)
+    const a = Array.from({ length: 102 }, (_, i) => `左${i}\nそろい${i}\n`).join('');
+    const b = Array.from({ length: 102 }, (_, i) => `右${i}\nそろい${i}\n`).join('');
+    const m = new MergeSession(buildMergeSegs(a, b)!);
+    expect(countHunks(m.segs)).toBe(102);
+    for (let i = 0; i < MERGE_UNDO_MAX + 1; i++) expect(m.take(0, 'a')).toBe(true);
+    let undone = 0;
+    while (m.undoOne()) undone += 1;
+    expect(undone, '控えの上限が守られていない').toBe(MERGE_UNDO_MAX);
+    // 一番古い 1 手は戻せない: 全部戻しても、最初の状態にはならない(塊は 102 - 1)
+    expect(countHunks(m.segs)).toBe(101);
+    // 対照群: 上限ちょうど(100 手)なら最初に戻る
+    const n = new MergeSession(buildMergeSegs(a, b)!);
+    for (let i = 0; i < MERGE_UNDO_MAX; i++) n.take(0, 'a');
+    while (n.undoOne()) {
+      /* 戻す */
+    }
+    expect(countHunks(n.segs)).toBe(102);
+  });
+});
+

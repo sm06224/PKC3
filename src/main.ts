@@ -195,7 +195,7 @@ import {
   type PortablePersist,
 } from '@adapter/platform/storage/portable-persist';
 import { ProxyStoreClient, StoreProxyHost } from '@adapter/platform/storage/store-proxy';
-import type { StoreClientLike, TabSync } from '@adapter/platform/storage/store-proxy';
+import type { Broadcaster, StoreClientLike, TabSync } from '@adapter/platform/storage/store-proxy';
 import type { InitResult } from '@adapter/platform/storage/protocol';
 import {
   installHtmlSandboxBlockedReporter,
@@ -326,6 +326,7 @@ import { createNameDeduper, pastedFileName } from '@features/asset/pasted-image-
 import { adoptUrls, fetchImageBlob, HttpStatusError } from '@adapter/ui/actions/adopt-urls';
 import { adoptLinkIcon } from '@adapter/ui/actions/adopt-favicon';
 import { adoptIconFile } from '@adapter/ui/actions/adopt-icon-file';
+import { LINKED_SHARE_CHANNEL, LinkedFileShare } from '@adapter/platform/linked-file-share';
 import { waitForWindowClose } from '@adapter/platform/window-close';
 import { copyPlainText } from '@adapter/platform/clipboard';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -3588,6 +3589,32 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const launched = new LaunchedFiles();
 
   /**
+   * 🔴 **PC のファイルとのつながりを、別のウィンドウと分け合う**(差分マージの別ウィンドウのレビュー ⚠4)。
+   * ⚠ 判断(同じコレクションか・既に在る lid は上書きしない・複製できないときの扱い)は `linked-file-share.ts`。
+   *   ここは口を渡すだけ。聞くのは差分マージで「PC のファイル」を選んだとき(`services.requestLinkedFiles`)。
+   */
+  const linkShare = new LinkedFileShare({
+    open: () =>
+      typeof BroadcastChannel === 'function'
+        ? (new BroadcastChannel(LINKED_SHARE_CHANNEL) as unknown as Broadcaster)
+        : null,
+    cid: () => dispatcher.getState().cid,
+    list: () => launched.entries(),
+    adopt: (items) => {
+      dispatcher.batch(() => {
+        for (const it of items) {
+          // 居ないノート・既につながっているノートは触らない
+          if (!dispatcher.getState().entryMetas.has(it.lid) || launched.handleOf(it.lid) !== null) continue;
+          launched.remember(it.lid, it.handle, it.name, it.modifiedAt);
+          dispatcher.dispatch({ type: 'FILE_LINKED', lid: it.lid, name: it.name });
+        }
+      });
+    },
+    newId: () => `ls-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
+  });
+  linkShare.start();
+
+  /**
    * 取込の本体。⚠ **gate の外**に置く ── 断る版(user のクリック)と
    * 待つ版(OS の launch。断ると選び直せない)の**両方**が同じ処理を呼ぶ。
    * 2 本に分けると片方だけ直す事故が必ず起きる(P7 段③ review H2)
@@ -4853,6 +4880,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         createdAt: r.created_at,
         title: r.title,
       })),
+    requestLinkedFiles: () => linkShare.request(),
+    /** 🔴 取り込みの途中経過を捨てて相手を選び直すか聞く(差分マージ ⚠6)。 */
+    confirmDiscardMerge: async () =>
+      (await confirmInApp(
+        root,
+        '取り込んだ変更は、まだ保存していません。相手を選び直すと、その取り込みは破棄されます(ノートはまだ書き換わっていません)。',
+        { okLabel: '選び直す', cancelLabel: 'やめる' },
+      )) === 'ok',
     diffReadRevision: async (revId: string) =>
       (await client.request({ op: 'getRevision', cid, id: revId }))?.body ?? null,
     /**

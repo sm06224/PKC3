@@ -43,17 +43,23 @@ export class CalcDraftStore {
     }
   }
 
-  /** ⚠ 空文字は**消す**(空という選択を書き残さない)。上限を超える字は覚えない(控えも作らない)。 */
-  set(text: string): void {
-    if (text.length > CALC_DRAFT_MAX_CHARS) return;
+  /**
+   * ⚠ 空文字は**消す**(空という選択を書き残さない)。上限を超える字は覚えない(控えも作らない)。
+   * @returns `saved` = 覚えた(空は消した) / `too-long` = 上限を超えたので覚えていない(前に覚えた内容のまま) /
+   *   `failed` = 書けなかった(容量不足など。この session の間だけ控えで効く)
+   */
+  set(text: string): 'saved' | 'too-long' | 'failed' {
+    if (text.length > CALC_DRAFT_MAX_CHARS) return 'too-long';
     this.fallback = text === '' ? null : text;
     this.saveFailed = false;
     try {
       if (this.fallback === null) this.storage?.removeItem(KEY);
       else this.storage?.setItem(KEY, this.fallback);
+      return 'saved';
     } catch {
       // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
       this.saveFailed = true;
+      return 'failed';
     }
   }
 }

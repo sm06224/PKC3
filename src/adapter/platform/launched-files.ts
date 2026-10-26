@@ -180,6 +180,14 @@ export class LaunchedFiles {
     return r.text;
   }
 
+  /**
+   * いま憶えている つながり の全部(別のウィンドウへ渡す用 ── `linked-file-share.ts`)。
+   * ⚠ ハンドルを返すだけで、読まない(`getFile()` を呼ばない)。
+   */
+  entries(): { lid: string; name: string; modifiedAt: number | null; handle: LaunchedHandle }[] {
+    return [...this.byLid].map(([lid, l]) => ({ lid, name: l.name, modifiedAt: l.modifiedAt, handle: l.handle }));
+  }
+
   nameOf(lid: string): string | null {
     return this.byLid.get(lid)?.name ?? null;
   }

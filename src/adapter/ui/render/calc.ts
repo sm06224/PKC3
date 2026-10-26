@@ -69,9 +69,11 @@ export function refreshCalc(pane: HTMLElement, opts: { save?: boolean } = {}): v
   const say = field<HTMLElement>(pane, 'calc-status');
   if (say !== null) {
     if (text.length > CALC_DRAFT_MAX_CHARS) {
-      say.textContent = `長すぎるため、自動の保存はしていません(${CALC_DRAFT_MAX_CHARS.toLocaleString('ja-JP')} 字まで)`;
+      say.textContent = `保存できません: 長すぎます(${CALC_DRAFT_MAX_CHARS.toLocaleString('ja-JP')} 字まで)。このまま閉じると、前に覚えた内容に戻ります`;
     } else if (lines > SHEET_MAX_LINES) {
       say.textContent = `${SHEET_MAX_LINES.toLocaleString('ja-JP')} 行目までを計算しています`;
+    } else if (say.hasAttribute('data-pkc-save-failed')) {
+      // 🔴 保存に失敗した知らせは、次に保存できるまで残す(消すのは保存できたとき)
     } else if (say.hasAttribute('data-pkc-kept')) {
       // 「ノートにした」などの知らせは、次に打つまで残す
       if (opts.save === true) {
@@ -94,20 +96,34 @@ export function refreshCalc(pane: HTMLElement, opts: { save?: boolean } = {}): v
       pane,
       setTimeout(() => {
         timers.delete(pane);
-        draft.set(readCalcText(pane));
+        commitDraft(pane);
       }, CALC_SAVE_DELAY_MS),
     );
   }
 }
 
-/** 打ちかけを今すぐ覚える(窓を閉じる前・「消す」)。 */
+/** いまの字を覚え、書けなかったら画面に言う(黙って失敗しない)。 */
+function commitDraft(pane: HTMLElement): void {
+  const result = draft.set(readCalcText(pane));
+  const say = field<HTMLElement>(pane, 'calc-status');
+  if (say === null) return;
+  if (result === 'failed') {
+    say.setAttribute('data-pkc-save-failed', '');
+    say.textContent = '保存できませんでした(この端末の保存領域に書けません)。式はこの画面にだけあります。ノートにして残してください';
+  } else if (say.hasAttribute('data-pkc-save-failed')) {
+    say.removeAttribute('data-pkc-save-failed');
+    say.textContent = '';
+  }
+}
+
+/** 打ちかけを今すぐ覚える(窓を閉じる前・隠れる前・「消す」)。 */
 export function flushCalcDraft(pane: HTMLElement): void {
   const prev = timers.get(pane);
   if (prev !== undefined) {
     clearTimeout(prev);
     timers.delete(pane);
   }
-  draft.set(readCalcText(pane));
+  commitDraft(pane);
 }
 
 /** 面の一言を置く(知らせは次に打つまで残す)。 */
@@ -190,5 +206,17 @@ export class CalcRenderer {
 
     h.append(title, note, tools, sheet, status);
     refreshCalc(h);
+    /**
+     * 🔴 **窓を閉じる・隠れるときに、待っている保存を今すぐ済ませる**(レビュー ⚠7)。
+     * ⚠ 保存は打鍵の 400ms 後なので、打った直後に閉じると最後の数文字が落ちる。`pagehide` は閉じる・移動、
+     *   `visibilitychange`(隠れた)はスマホ・タブ切替で、閉じる合図が来ないことがあるため両方で拾う。
+     */
+    // ⚠ 画面から外れた面(別の面に替わった・作り直された)は触らない
+    window.addEventListener('pagehide', () => {
+      if (h.isConnected) flushCalcDraft(h);
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden' && h.isConnected) flushCalcDraft(h);
+    });
   }
 }

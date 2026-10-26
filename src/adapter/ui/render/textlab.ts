@@ -19,11 +19,13 @@
  *   履歴に前の版が 1 つ残るので、ノートの履歴から戻せる(`REIMPORT_BODY`)。
  */
 import type { AppState } from '@adapter/state/app-state';
+import { appLabRegex, type LabRegexClient } from '@adapter/platform/text/lab-client';
 import {
   LAB_OPS,
   LAB_TABLE_MODES,
   labSummary,
   runTextLab,
+  runTextLabPre,
   type LabOp,
   type LabOutput,
   type LabRecipe,
@@ -68,18 +70,60 @@ export function readLabInput(pane: HTMLElement): string {
   return field<HTMLTextAreaElement>(pane, 'textlab-input')?.value ?? '';
 }
 
-/** いまの結果(画面の右の欄の字ではなく、入力から組み直す ── 欄に触れても結果が変わらない)。 */
-export function currentLabOutput(pane: HTMLElement): { input: string; recipe: LabRecipe; out: LabOutput } {
-  const input = readLabInput(pane);
-  const recipe = readLabRecipe(pane);
-  return { input, recipe, out: runTextLab(input, recipe) };
+/** 正規表現を打つ間の待ち(ms)。⚠ 1 字ごとにワーカーへ投げない。軽い整えだけのときは待たない。 */
+export const LAB_TYPING_DEBOUNCE_MS = 250;
+
+interface LabState {
+  /** 何回目の描き直しか。古い応答が新しい結果を上書きしない。 */
+  gen: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  /** 置き換えられた描き直しの待ち手を、そのまま返す。 */
+  release: (() => void) | null;
+  /** 最後に描き終えた結果(入力と整え方の鍵つき)。 */
+  settled: { key: string; input: string; recipe: LabRecipe; out: LabOutput } | null;
+  client: LabRegexClient;
 }
 
-/** 結果と一言を描き直す。⚠ 入力の欄には触れない(打ちかけの caret を飛ばさない)。 */
-export function refreshTextLab(pane: HTMLElement): void {
-  const { input, recipe, out } = currentLabOutput(pane);
+const STATES = new WeakMap<HTMLElement, LabState>();
+
+function stateOf(pane: HTMLElement): LabState {
+  let st = STATES.get(pane);
+  if (st === undefined) {
+    st = { gen: 0, timer: null, release: null, settled: null, client: appLabRegex };
+    STATES.set(pane, st);
+  }
+  return st;
+}
+
+/** 面ごとに置換の口を差し替える(test が時間切れを作る)。 */
+export function bindLabClient(pane: HTMLElement, client: LabRegexClient): void {
+  stateOf(pane).client = client;
+}
+
+const keyOf = (input: string, recipe: LabRecipe): string =>
+  JSON.stringify([input, [...recipe.ops].sort(), recipe.table, recipe.regex]);
+
+const hasRegex = (recipe: LabRecipe): boolean => recipe.regex !== null && recipe.regex.pattern !== '';
+
+/**
+ * いまの結果。置換が無ければ、その場で組む。⚠ 置換があるときは**描き終えた結果**だけを返す
+ * (入力や整え方が変わって、置換がまだ終わっていなければ `null` ── 古い結果を「コピー」「保存」しない)。
+ */
+export function currentLabOutput(pane: HTMLElement): { input: string; recipe: LabRecipe; out: LabOutput } | null {
+  const input = readLabInput(pane);
+  const recipe = readLabRecipe(pane);
+  if (!hasRegex(recipe)) return { input, recipe, out: runTextLab(input, recipe) };
+  const st = stateOf(pane);
+  if (st.settled !== null && st.settled.key === keyOf(input, recipe)) {
+    return { input, recipe, out: st.settled.out };
+  }
+  return null;
+}
+
+function paint(pane: HTMLElement, input: string, recipe: LabRecipe, out: LabOutput): void {
   const output = field<HTMLTextAreaElement>(pane, 'textlab-output');
   if (output !== null && output.value !== out.text) output.value = out.text;
+  pane.removeAttribute('aria-busy');
   const summary = field<HTMLElement>(pane, 'textlab-summary');
   if (summary !== null) summary.textContent = labSummary(input, out, recipe);
   const empty = out.text === '';
@@ -87,6 +131,86 @@ export function refreshTextLab(pane: HTMLElement): void {
     const b = field<HTMLButtonElement>(pane, name);
     if (b !== null) b.disabled = empty;
   }
+}
+
+/**
+ * 結果と一言を描き直す。⚠ 入力の欄には触れない(打ちかけの caret を飛ばさない)。
+ * 🔴 正規表現の置換はワーカーで時間を切って回すので**非同期**(返る Promise は描き終えたら解ける)。
+ *   置換が無いときは、これまでどおりその場で描く。置換があって打鍵のときは `debounce` で少し待つ。
+ */
+export function refreshTextLab(pane: HTMLElement, opts: { debounce?: boolean } = {}): Promise<void> {
+  const st = stateOf(pane);
+  const input = readLabInput(pane);
+  const recipe = readLabRecipe(pane);
+  st.gen += 1;
+  const gen = st.gen;
+  if (st.timer !== null) {
+    clearTimeout(st.timer);
+    st.timer = null;
+  }
+  // 置き換えられた描き直しの待ち手は、ここで解く(永久に待たせない)
+  st.release?.();
+  st.release = null;
+
+  if (!hasRegex(recipe)) {
+    const out = runTextLab(input, recipe);
+    st.settled = { key: keyOf(input, recipe), input, recipe, out };
+    paint(pane, input, recipe, out);
+    return Promise.resolve();
+  }
+  const pre = runTextLabPre(input, recipe);
+  // 置換が終わるまで、押すと古い結果を出してしまうボタンを止める
+  pane.setAttribute('aria-busy', 'true');
+  const summary = field<HTMLElement>(pane, 'textlab-summary');
+  if (summary !== null && input !== '') summary.textContent = '置換を計算しています…';
+  for (const name of ['textlab-copy', 'textlab-to-note', 'textlab-apply-note']) {
+    const b = field<HTMLButtonElement>(pane, name);
+    if (b !== null) b.disabled = true;
+  }
+  return new Promise<void>((resolve) => {
+    st.release = resolve;
+    const run = (): void => {
+      st.timer = null;
+      st.client.apply(pre.text, recipe.regex!).then(
+        (r) => {
+          if (st.gen !== gen) return;
+          const out: LabOutput = { text: r.text, regexNote: r.note, regexHits: r.hits, tableFound: pre.tableFound };
+          st.settled = { key: keyOf(input, recipe), input, recipe, out };
+          paint(pane, input, recipe, out);
+          st.release = null;
+          resolve();
+        },
+        () => {
+          if (st.gen !== gen) return;
+          const out: LabOutput = {
+            text: pre.text,
+            regexNote: '置換を実行できませんでした(もう一度お試しください)',
+            regexHits: 0,
+            tableFound: pre.tableFound,
+          };
+          st.settled = { key: keyOf(input, recipe), input, recipe, out };
+          paint(pane, input, recipe, out);
+          st.release = null;
+          resolve();
+        },
+      );
+    };
+    if (opts.debounce === true) st.timer = setTimeout(run, LAB_TYPING_DEBOUNCE_MS);
+    else run();
+  });
+}
+
+/** 面を離れたとき: 読み込んだノートの控えと、飛んでいる置換を捨てる(戻ってきたとき、古い控えで上書きしない)。 */
+export function resetTextLab(pane: HTMLElement): void {
+  LOADED.delete(pane);
+  const st = STATES.get(pane);
+  if (st === undefined) return;
+  st.gen += 1;
+  if (st.timer !== null) clearTimeout(st.timer);
+  st.timer = null;
+  st.release?.();
+  st.release = null;
+  pane.removeAttribute('aria-busy');
 }
 
 /** 「読み込む」「置き換える」の押せる・押せないを、いまの state から決める。 */
@@ -103,7 +227,7 @@ export function syncTextLabButtons(pane: HTMLElement, state: AppState): void {
   if (apply !== null) {
     const loaded = labLoaded(pane);
     const same = loaded !== null && loaded.lid === state.selectedLid;
-    apply.disabled = !same || refreshEmpty(pane);
+    apply.disabled = !same || refreshEmpty(pane) || pane.getAttribute('aria-busy') === 'true';
     apply.title = same
       ? '結果で、読み込んだノートの本文を置き換えます(前の版はノートの履歴に残ります)'
       : '「開いているノートを読み込む」を押したノートが開いているときに使えます';
@@ -118,8 +242,14 @@ export class TextLabRenderer {
   private readonly host: HTMLElement;
   private built = false;
 
-  constructor(host: HTMLElement) {
+  constructor(host: HTMLElement, client?: LabRegexClient) {
     this.host = host;
+    if (client !== undefined) bindLabClient(host, client);
+  }
+
+  /** 面を離れた(`CenterRouter` が別の面へ移ったとき呼ぶ)。 */
+  onHidden(): void {
+    resetTextLab(this.host);
   }
 
   render(state: AppState): void {
@@ -187,7 +317,7 @@ export class TextLabRenderer {
     regexRow.append(
       mk('textlab-pattern', '検索パターン(正規表現)', '例: \\s+$'),
       mk('textlab-replacement', '置換後の文字列', '例: $1(空なら消します)'),
-      mk('textlab-flags', '旗', 'g', 'g'),
+      mk('textlab-flags', 'オプション(g i m s)', 'g', 'g'),
     );
 
     const input = document.createElement('textarea');
@@ -236,7 +366,7 @@ export class TextLabRenderer {
     cols.append(left, right);
 
     h.append(title, note, opsRow, tableRow, regexRow, cols);
-    refreshTextLab(h);
+    void refreshTextLab(h);
   }
 
   /** ⚠ 口(`data-pkc-action`)は呼び側が**字で**付ける(変数で配ると出口の全数検査が追えない)。 */

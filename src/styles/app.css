@@ -12985,8 +12985,20 @@ h6:hover > .pkc-heading-anchor,
   padding: 0;
   list-style: none;
   /* ⚠ 差分は**等幅**で読む(桁が揃わないと足し引きが追えない) */
-  font-family: var(--mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 13px;
+}
+/* 塊の中の 1 行(対)だけを取り込む小さなボタン(レビュー ⚠5)。升の右端に寄せ、字の邪魔にならない大きさにする */
+[data-pkc-field='diff-pair-take'] {
+  float: right;
+  margin: 0 0 0 var(--s2);
+  padding: 0 var(--s1);
+  font-size: 11px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+[data-pkc-field='diff-pair-take']:disabled {
+  opacity: 0.35;
 }
 [data-pkc-field='diff-body'] ul[data-pkc-diff-layout='side'] > li {
   display: block;

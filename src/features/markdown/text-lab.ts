@@ -26,7 +26,7 @@
  * - **「改行を詰める」は段落ごと**(空行は段落の境目として残す)。本文の上の操作は選んだ範囲全体を
  *   1 行にするが、貼り付けた文章全体を 1 行にすると段落が消えるので、ここでは段落ごとに結ぶ。
  * - **表は 4 択**(なし / Markdown の表にする / 表を CSV にする / 表を TSV にする)。重ねない。
- * - **置換は JavaScript の正規表現**。`$1` `$&` が使える。旗は g i m s のみ。空の検索パターンは
+ * - **置換は JavaScript の正規表現**。`$1` `$&` が使える。オプションは g i m s のみ。空の検索パターンは
  *   「置換しない」。読めない正規表現は結果を出さずに理由を言う(入力をそのまま返す)。
  * - **置換の上限**: 100 万字を超える入力には置換を掛けない(固まらないため)。理由を言う。
  */
@@ -80,12 +80,9 @@ export const LAB_TABLE_MODES: readonly {
   { id: 'to-tsv', label: '表を TSV にする', hint: 'Markdown の表を TSV(タブ区切り)の行にします' },
 ];
 
-export interface LabRegex {
-  readonly pattern: string;
-  readonly replacement: string;
-  /** g i m s の組み合わせ。それ以外の字は黙って捨てず、理由を言う。 */
-  readonly flags: string;
-}
+import { applyLabRegex, type LabRegex } from './lab-regex';
+export { applyLabRegex, badRegexFlags, expandLabReplacement, LAB_REGEX_FLAGS, LAB_REGEX_MAX_CHARS } from './lab-regex';
+export type { LabRegex, LabRegexResult } from './lab-regex';
 
 export interface LabRecipe {
   readonly ops: ReadonlySet<LabOp> | readonly LabOp[];
@@ -98,17 +95,11 @@ export interface LabOutput {
   readonly text: string;
   /** 置換を掛けなかった理由(読めない正規表現・大きすぎる入力)。無ければ `null`。 */
   readonly regexNote: string | null;
-  /** 置換で当たった数(旗に g が無ければ最大 1)。置換していなければ 0。 */
+  /** 置換で当たった数(オプションに g が無ければ最大 1)。置換していなければ 0。 */
   readonly regexHits: number;
   /** 表の変換を頼まれたが、変換できる表が見つからなかった(結果は表の手前のまま)。 */
   readonly tableFound: boolean;
 }
-
-/** 置換を掛ける入力の上限(文字数)。 */
-export const LAB_REGEX_MAX_CHARS = 1_000_000;
-
-/** 使える旗。 */
-export const LAB_REGEX_FLAGS = ['g', 'i', 'm', 's'] as const;
 
 const BLANK = /^[ \t\u3000\r]*$/;
 
@@ -167,41 +158,11 @@ export function markdownTablesToText(text: string, to: 'csv' | 'tsv'): string | 
   return found ? out.join('\n') : null;
 }
 
-/** 旗の文字列を検めて、使えない字を返す(使える字だけなら `null`)。重複は使えない字として数える。 */
-export function badRegexFlags(flags: string): string | null {
-  const seen = new Set<string>();
-  for (const f of flags) {
-    if (!(LAB_REGEX_FLAGS as readonly string[]).includes(f) || seen.has(f)) return f;
-    seen.add(f);
-  }
-  return null;
-}
-
-function applyRegex(text: string, r: LabRegex): { text: string; note: string | null; hits: number } {
-  if (r.pattern === '') return { text, note: null, hits: 0 };
-  const bad = badRegexFlags(r.flags);
-  if (bad !== null) {
-    return { text, note: `旗「${bad}」は使えません(使えるのは g i m s です)`, hits: 0 };
-  }
-  if (text.length > LAB_REGEX_MAX_CHARS) {
-    return { text, note: '文章が長すぎるため(100 万字まで)、置換は掛けていません', hits: 0 };
-  }
-  let re: RegExp;
-  try {
-    re = new RegExp(r.pattern, r.flags);
-  } catch (e) {
-    const why = e instanceof Error ? e.message.replace(/^Invalid regular expression: /, '') : String(e);
-    return { text, note: `検索パターンが正規表現として読めません(${why})`, hits: 0 };
-  }
-  // 当たった数は g を付けて数える(旗に g が無いときは最初の 1 つだけ置換するので、最大 1)
-  const global = re.global ? re : new RegExp(r.pattern, r.flags + 'g');
-  const all = Array.from(text.matchAll(global)).length;
-  const hits = re.global ? all : Math.min(all, 1);
-  return { text: text.replace(re, r.replacement), note: null, hits };
-}
-
-/** 整えを重ねる。⚠ 入力を書き換えず、副作用も無い。 */
-export function runTextLab(input: string, recipe: LabRecipe): LabOutput {
+/** 整えの手前まで(正規表現の置換を除く)。⚠ 同期で終わる軽い段。 */
+export function runTextLabPre(
+  input: string,
+  recipe: LabRecipe,
+): { text: string; tableFound: boolean } {
   const ops = new Set<LabOp>(recipe.ops);
   let text = input.replace(/\r\n?/g, '\n');
   if (ops.has('join-lines')) text = joinParagraphLines(text);
@@ -220,9 +181,15 @@ export function runTextLab(input: string, recipe: LabRecipe): LabOutput {
     if (converted === null) tableFound = false;
     else text = converted;
   }
-  if (recipe.regex === null) return { text, regexNote: null, regexHits: 0, tableFound };
-  const r = applyRegex(text, recipe.regex);
-  return { text: r.text, regexNote: r.note, regexHits: r.hits, tableFound };
+  return { text, tableFound };
+}
+
+/** 整えを重ねる(置換まで)。⚠ 入力を書き換えず、副作用も無い。画面は `runTextLabPre` + ワーカーの置換で組む。 */
+export function runTextLab(input: string, recipe: LabRecipe): LabOutput {
+  const pre = runTextLabPre(input, recipe);
+  if (recipe.regex === null) return { text: pre.text, regexNote: null, regexHits: 0, tableFound: pre.tableFound };
+  const r = applyLabRegex(pre.text, recipe.regex);
+  return { text: r.text, regexNote: r.note, regexHits: r.hits, tableFound: pre.tableFound };
 }
 
 /** 結果の上の 1 行(何が起きたか)。⚠ 画面の字はここ 1 か所。 */
@@ -240,8 +207,12 @@ export function labSummary(input: string, out: LabOutput, recipe: LabRecipe): st
   else if (recipe.regex !== null && recipe.regex.pattern !== '') {
     parts.push(out.regexHits === 0 ? '置換: 一致はありませんでした' : `置換: ${out.regexHits} か所`);
   }
-  const same = out.text === input.replace(/\r\n?/g, '\n');
-  if (parts.length === 0) parts.push(same ? '変わる所はありません' : `${input.length} 字 → ${out.text.length} 字`);
+  if (parts.length === 0) {
+    if (out.text === input) parts.push('変わる所はありません');
+    // 🔴 改行コードだけが違うとき(CRLF → LF)は「変わらない」と言わない ── コピーすると中身は変わっている
+    else if (out.text === input.replace(/\r\n?/g, '\n')) parts.push('改行コードを LF にそろえました');
+    else parts.push(`${input.length} 字 → ${out.text.length} 字`);
+  }
   return parts.join(' / ');
 }
 

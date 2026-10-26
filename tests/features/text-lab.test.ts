@@ -2,9 +2,11 @@
  * 🔴 **テキスト整形の組み合わせ**(#1233)。純関数なので、期待値は**手で書いた固定の字**で守る
  * (実装と同じ関数で期待値を作らない)。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  applyLabRegex,
   badRegexFlags,
+  expandLabReplacement,
   joinParagraphLines,
   labNoteTitle,
   labSummary,
@@ -96,7 +98,7 @@ describe('正規表現の置換', () => {
     expect(out.text).toBe('1a 22b 3c');
     expect(out.regexHits).toBe(3);
   });
-  it('旗に g が無ければ最初の 1 つだけ', () => {
+  it('オプションに g が無ければ最初の 1 つだけ', () => {
     const out = runTextLab('aaa', re('a', 'b', ''));
     expect(out.text).toBe('baa');
     expect(out.regexHits).toBe(1);
@@ -109,11 +111,11 @@ describe('正規表現の置換', () => {
     expect(out.text).toBe('abc');
     expect(out.regexNote).toContain('正規表現として読めません');
   });
-  it('使えない旗・重複した旗は理由を言う', () => {
+  it('使えないオプション・重複したオプションは理由を言う', () => {
     expect(badRegexFlags('gi')).toBeNull();
     expect(badRegexFlags('gx')).toBe('x');
     expect(badRegexFlags('gg')).toBe('g');
-    expect(runTextLab('a', re('a', 'b', 'y')).regexNote).toContain('旗「y」');
+    expect(runTextLab('a', re('a', 'b', 'y')).regexNote).toContain('オプション「y」');
   });
   it('100 万字を超える入力には置換を掛けない', () => {
     const big = 'a'.repeat(LAB_REGEX_MAX_CHARS + 1);
@@ -146,3 +148,85 @@ describe('一言と題名', () => {
     expect(labNoteTitle('  \n ', new Date(2026, 9, 26, 9, 5))).toBe('整形したテキスト 2026-10-26 09:05');
   });
 });
+
+describe('置換の展開は本物の String.replace と同じ(テストの穴 E / レビュー ⚠1)', () => {
+  /**
+   * ⚠ 期待値は**本物の `String.prototype.replace`**(実装と別の物)。展開を自前で持つのは
+   * 当たった数を 1 回の走査で数えるためで、規則が食い違えば結果が変わる ── 特殊記法の全数で突き合わせる。
+   */
+  const templates = [
+    '', 'x', '$$', '$&', '$`', "$'", '$1', '$2', '$12', '$10', '$01', '$0', '$00', '$3', '$<y>', '$<n>', '$<', '$<y', '$',
+    'a$', '$$1', '$1$2', '$&$&', '[$`|$&|$\']', '$99', '$100',
+  ];
+  const cases: Array<[string, string, string]> = [
+    ['(\\d)(\\d)?', 'g', 'a12b3c'],
+    ['(?<y>[a-z])(?<n>\\d)', 'g', 'a1b2'],
+    ['b', '', 'abcb'],
+    ['(x)?b', 'g', 'abxb'],
+    ['\\d+', 'g', '10 200'],
+  ];
+  for (const [pattern, flags, input] of cases) {
+    for (const t of templates) {
+      it(`/${pattern}/${flags} を ${JSON.stringify(input)} に当てて「${t}」へ置換`, () => {
+        const native = input.replace(new RegExp(pattern, flags), t);
+        const got = applyLabRegex(input, { pattern, replacement: t, flags });
+        expect(got.note).toBeNull();
+        expect(got.text).toBe(native);
+      });
+    }
+  }
+
+  it('expandLabReplacement を直に: 捕獲の数を超える $n は文字のまま・名前つき捕獲が無ければ $<y> も文字のまま', () => {
+    expect(expandLabReplacement('$2|$<y>|$1', 'm', ['c1'], 0, 'm', undefined)).toBe('$2|$<y>|c1');
+  });
+
+  it('🔴 当たった数は 1 回の走査で数える(別に matchAll を回さない)', () => {
+    const spy = vi.spyOn(String.prototype, 'matchAll');
+    try {
+      const out = applyLabRegex('a1 b22 c3', { pattern: '\\d+', replacement: '#', flags: 'g' });
+      expect(out.hits).toBe(3);
+      expect(out.text).toBe('a# b# c#');
+      expect(spy, '数えるために matchAll を別に回している(重い式は 2 倍かかる)').not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('当たらなければ 0 件・g が無ければ最大 1 件(置換の関数が呼ばれた回数がそのまま数になる)', () => {
+    expect(applyLabRegex('abc', { pattern: 'z', replacement: 'x', flags: 'g' }).hits).toBe(0);
+    expect(applyLabRegex('aaa', { pattern: 'a', replacement: 'x', flags: '' }).hits).toBe(1);
+    expect(applyLabRegex('aaa', { pattern: 'a', replacement: 'x', flags: 'g' }).hits).toBe(3);
+  });
+});
+
+describe('入力の上限の境目(テストの穴 E)', () => {
+  it('ちょうど 100 万字は置換を掛け、1 字多いと掛けない', () => {
+    const edge = 'a'.repeat(LAB_REGEX_MAX_CHARS);
+    const ok = applyLabRegex(edge, { pattern: 'b', replacement: 'c', flags: 'g' });
+    expect(ok.note, '上限ちょうどで断っている').toBeNull();
+    expect(ok.text).toBe(edge);
+    const over = applyLabRegex(`${edge}a`, { pattern: 'b', replacement: 'c', flags: 'g' });
+    expect(over.note).toContain('長すぎる');
+  });
+});
+
+describe('改行だけが変わったとき、「変わる所はありません」と言わない(レビュー 💭)', () => {
+  it('CRLF → LF は、改行コードをそろえたと言う。LF のままなら「変わる所はありません」', () => {
+    const crlf = 'a\r\nb';
+    expect(labSummary(crlf, runTextLab(crlf, none), none)).toBe('改行コードを LF にそろえました');
+    expect(labSummary('a\nb', runTextLab('a\nb', none), none)).toBe('変わる所はありません');
+    // 古い Mac の CR だけの改行も同じ
+    expect(labSummary('a\rb', runTextLab('a\rb', none), none)).toBe('改行コードを LF にそろえました');
+    // 字も変わったときは、字数の変化を言う(改行の話にしない)
+    const r: LabRecipe = { ops: ['strip-bullets'], table: 'none', regex: null };
+    expect(labSummary('- a\r\n- b', runTextLab('- a\r\n- b', r), r)).toMatch(/字 → /);
+  });
+});
+
+describe('題名の長さの境目(テストの穴 E)', () => {
+  it('40 字ちょうどはそのまま、41 字から 40 字 + … に切る', () => {
+    expect(labNoteTitle('x'.repeat(40), new Date())).toBe('x'.repeat(40));
+    expect(labNoteTitle('x'.repeat(41), new Date())).toBe(`${'x'.repeat(40)}…`);
+  });
+});
+

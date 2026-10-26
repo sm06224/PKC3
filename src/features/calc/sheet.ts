@@ -53,6 +53,8 @@ export interface SheetRow {
   readonly display: string;
   /** 名前の定義だったとき、その名前。 */
   readonly name: string | null;
+  /** 割合の値か(`10%`)。名前に入れたとき、使う側も割合として読むための印。 */
+  readonly pct: boolean;
 }
 
 /** 合計を表す語(大小文字を区別しない)。 */
@@ -90,7 +92,7 @@ function stripGrouping(s: string): string {
 
 type Tok =
   | { t: 'num'; v: number; pct: boolean }
-  | { t: 'var'; v: number; name: string }
+  | { t: 'var'; v: number; pct: boolean; name: string }
   | { t: 'op'; v: '+' | '-' | '*' | '/' }
   | { t: 'lp' }
   | { t: 'rp'; pct: boolean }
@@ -106,7 +108,7 @@ function isDigit(ch: string | undefined): boolean {
  * 式の部分を字句に割る。名前は**長いものを先に**当てる(`小計2` と `小計` が両方あれば `小計2`)。
  * @returns 割れなければ `null`(`%` が単独で出た等)
  */
-function tokenize(src: string, vars: ReadonlyMap<string, number>): Tok[] | null {
+function tokenize(src: string, vars: ReadonlyMap<string, VarVal>): Tok[] | null {
   // 名前は先頭の 1 字で引く(長いものを先に)── 位置ごとに全部の名前を試さない
   const byFirst = new Map<string, string[]>();
   for (const n of [...vars.keys()].sort((a, b) => b.length - a.length)) {
@@ -126,7 +128,8 @@ function tokenize(src: string, vars: ReadonlyMap<string, number>): Tok[] | null 
     // 名前(語の途中から当てない: 直前が語の字なら、その語の続きとして扱う)
     const hit = nameAt(i);
     if (hit !== undefined) {
-      toks.push({ t: 'var', v: vars.get(hit)!, name: hit });
+      const known = vars.get(hit)!;
+      toks.push({ t: 'var', v: known.v, pct: known.pct, name: hit });
       i += hit.length;
       continue;
     }
@@ -277,7 +280,8 @@ class Parser {
     }
     if (tk.t === 'var') {
       this.i += 1;
-      return { v: tk.v, pct: false };
+      // 🔴 割合で定義した名前(`税率 = 10%`)は、割合の印を保つ(`100 + 税率` = 110。直接 `100 + 10%` と書いたときと同じ)
+      return { v: tk.v, pct: tk.pct };
     }
     if (tk.t === 'lp') {
       this.i += 1;
@@ -296,8 +300,32 @@ class Parser {
 const DATE_LIKE = /\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\b\d{1,2}:\d{2}\b|\d{2,4}-\d{2,4}-\d{3,4}/u;
 const LIST_NUMBER = /^\s*\d+[.)]\s/u;
 const BULLET = /^\s*(?:[-*+>]\s+)+/u;
-/** 名前の定義 `名前 = …` / `名前: …`。名前は数や記号で始めない。 */
-const LABEL = /^\s*([^\s=:+\-*/%()0-9.,][^=:+\-*/%()]*?)\s*[=:]\s*(.*)$/u;
+/** 名前の頭に置けない字(空白・`=` `:`・演算子・括弧・数・`.` `,`)。 */
+const LABEL_FIRST_BAD = /[\s=:+\-*/%()0-9.,]/u;
+/** 名前の途中で打ち切る字。ここで `=` か `:` に当たれば名前の定義、ほかなら定義ではない。 */
+const LABEL_STOP: ReadonlySet<string> = new Set(['=', ':', '+', '-', '*', '/', '%', '(', ')']);
+
+/**
+ * 名前の定義 `名前 = …` / `名前: …` を割る。名前は数や記号で始めない。
+ * 🔴 **1 回の走査で割る**(旧版は正規表現 `…*?\s*[=:]`)── 空白が長く続く行で、遅延量指定と `\s*` が
+ *   互いに押し合って 2 次の時間になった(レビュー ⚠1)。ここは各字を 1 度ずつしか見ない。
+ */
+export function splitLabel(full: string): { label: string; rest: string } | null {
+  let i = 0;
+  while (i < full.length && /\s/u.test(full[i]!)) i += 1;
+  const first = full[i];
+  if (first === undefined || LABEL_FIRST_BAD.test(first)) return null;
+  let j = i + 1;
+  while (j < full.length && !LABEL_STOP.has(full[j]!)) j += 1;
+  const stop = full[j];
+  if (stop !== '=' && stop !== ':') return null;
+  let k = j + 1;
+  while (k < full.length && /\s/u.test(full[k]!)) k += 1;
+  const rest = full.slice(k);
+  // 旧版の `(.*)$` は行の区切りに当たると定義にならなかった(同じ振る舞いに揃える)
+  if (/[\n\r\u2028\u2029]/u.test(rest)) return null;
+  return { label: full.slice(i, j).trim(), rest };
+}
 /** 数に付く語のうち、単位として確かなもの(数だけの行 + 文章のときの判定に使う)。 */
 const UNIT_HINT = /^(?:円|[$¥￥€£]|ドル|ユーロ|時間|分|秒|日|週|月|年|個|人|件|枚|本|台|回|冊|km|kg|cm|mm|g|m|l|ml|%)/iu;
 
@@ -307,11 +335,11 @@ export const SHEET_NAME_MAX = 40;
 export const SHEET_MAX_LINES = 2000;
 
 function makeValue(text: string, v: number, pct: boolean, name: string | null, kind: 'value' | 'sum'): SheetRow {
-  return { text, kind, value: v, display: formatSheetNumber(v, pct), name };
+  return { text, kind, value: v, display: formatSheetNumber(v, pct), name, pct };
 }
 
 function errorRow(text: string, why: string, name: string | null = null): SheetRow {
-  return { text, kind: 'error', value: null, display: why, name };
+  return { text, kind: 'error', value: null, display: why, name, pct: false };
 }
 
 /** 数を画面の字にする。桁区切り・小数は意味のある桁で丸める・割合なら `%`。 */
@@ -336,7 +364,7 @@ export function evaluateSheet(source: string): SheetRow[] {
   const ctx: Ctx = { vars: new Map(), plain: new Set(), block: [] };
   for (const raw of lines) {
     if (raw.trim() === '') {
-      rows.push({ text: raw, kind: 'blank', value: null, display: '', name: null });
+      rows.push({ text: raw, kind: 'blank', value: null, display: '', name: null, pct: false });
       ctx.block = [];
       continue;
     }
@@ -345,7 +373,7 @@ export function evaluateSheet(source: string): SheetRow[] {
     if (row.kind === 'sum') ctx.block = [];
     else if (row.kind === 'value' && row.value !== null) ctx.block.push(row.value);
     if ((row.kind === 'value' || row.kind === 'sum') && row.name !== null && row.value !== null) {
-      ctx.vars.set(row.name, row.value);
+      ctx.vars.set(row.name, { v: row.value, pct: row.pct });
       // 合計の語を名前にした行(`合計 =`)は、次の `合計` を変数にしない(合計の語のまま働く)
       if (row.kind === 'value') ctx.plain.add(row.name);
       else ctx.plain.delete(row.name);
@@ -354,9 +382,15 @@ export function evaluateSheet(source: string): SheetRow[] {
   return rows;
 }
 
+interface VarVal {
+  readonly v: number;
+  /** 割合で定義した(`税率 = 10%`)。使うときも割合として読む。 */
+  readonly pct: boolean;
+}
+
 interface Ctx {
-  /** 名前 → 値。 */
-  readonly vars: Map<string, number>;
+  /** 名前 → 値(と、割合で定義したかの印)。 */
+  readonly vars: Map<string, VarVal>;
   /** 値の行で定義した名前(合計の行で定義した名前は含まない)。 */
   readonly plain: Set<string>;
   /** 直近の空行(か合計)より後の、数を持つ行の値。 */
@@ -364,19 +398,19 @@ interface Ctx {
 }
 
 function evalLine(raw: string, ctx: Ctx): SheetRow {
-  const text = (): SheetRow => ({ text: raw, kind: 'text', value: null, display: '', name: null });
+  const text = (): SheetRow => ({ text: raw, kind: 'text', value: null, display: '', name: null, pct: false });
   const full = normalize(raw).replace(BULLET, '');
   // 日付・時刻・電話番号らしい並び、番号つきの箇条書き、見出しは計算しない(名前の定義より先に見る: `会議 10:30`)
   if (DATE_LIKE.test(full) || LIST_NUMBER.test(full) || /^\s*#/u.test(full)) return text();
 
   let name: string | null = null;
   let rest = full;
-  const lm = LABEL.exec(full);
+  const lm = splitLabel(full);
   if (lm !== null) {
-    const label = lm[1]!.trim();
+    const label = lm.label;
     if (label !== '' && label.length <= SHEET_NAME_MAX) {
       name = label;
-      rest = lm[2]!;
+      rest = lm.rest;
     }
   }
   // 合計: 残りが合計の語だけ(`合計` / `合計 =` / `旅費 = 合計`)。値の行で定義した名前なら変数として読む
@@ -420,7 +454,8 @@ function hasUnitWord(toks: readonly Tok[]): boolean {
  */
 function sumRow(raw: string, name: string | null, word: string, ctx: Ctx): SheetRow {
   if (ctx.block.length === 0 && ctx.vars.has(word)) {
-    return makeValue(raw, ctx.vars.get(word)!, false, name, 'sum');
+    const known = ctx.vars.get(word)!;
+    return makeValue(raw, known.v, known.pct, name, 'sum');
   }
   const total = ctx.block.reduce((a, b) => a + b, 0);
   return makeValue(raw, total, false, name, 'sum');

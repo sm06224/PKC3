@@ -72,6 +72,16 @@ interface Buffered {
   transfer: Transferable[];
 }
 
+/** `runWithin` が時間切れで worker を止めたことを知らせる。⚠ 呼び側は `instanceof` で見分ける。 */
+export class WorkerTimeoutError extends Error {
+  readonly timeoutMs: number;
+  constructor(name: string, timeoutMs: number) {
+    super(`${name}: timeout ${timeoutMs}ms`);
+    this.name = 'WorkerTimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 export class WorkerLease {
   private readonly opts: Required<Omit<WorkerLeaseOptions, 'name' | 'monitor' | 'now'>> & {
     name: string;
@@ -137,6 +147,29 @@ export class WorkerLease {
       this.buffer.push({ id, payload, transfer });
       this.start();
     }
+    return p;
+  }
+
+  /**
+   * 🔴 **時間を切って流す**(#1233)。`ms` 以内に返らなければ、**worker ごと `terminate()`** して
+   * `WorkerTimeoutError` で reject する。
+   *
+   * ⚠ 使うのは「入力次第で終わらないことがある」処理(user が書いた正規表現の置換 ── `(a+)+$` のような入れ子の繰り返し)。
+   *   固まったまま常駐させない。同じ worker に積んであった他の依頼も、`kill` が必ず reject する(永久 hang にしない)。
+   * 🔑 次の `run` / `runWithin` は黙って worker を作り直す(遅延起動と同じ)。
+   * ⚠ 時間は**投函した時点**から数える(起動待ちの時間も含む ── 起動は短いので `ms` に余裕を持たせる)。
+   */
+  runWithin<T>(payload: unknown, ms: number, transfer: Transferable[] = []): Promise<T> {
+    const p = this.run<T>(payload, transfer);
+    if (this.disposed) return p;
+    const id = this.nextId - 1;
+    const timer = this.opts.setTimer(() => {
+      if (!this.pending.has(id)) return;
+      this.note('fail', { id, note: `timeout ${ms}ms` });
+      this.kill(new WorkerTimeoutError(this.opts.name, ms));
+    }, ms);
+    const done = (): void => this.opts.clearTimer(timer);
+    p.then(done, done);
     return p;
   }
 

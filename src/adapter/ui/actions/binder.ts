@@ -782,6 +782,7 @@ import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@feature
 import { labNoteTitle } from '@features/markdown/text-lab';
 import { sheetNoteTitle, sheetToMarkdown, sheetToText } from '@features/calc/sheet';
 import { shortStamp } from '@features/revision/diff-view';
+import type { MergeSession } from '@features/revision/merge-hunks';
 import {
   diffSession,
   diffSideText,
@@ -1933,6 +1934,13 @@ export interface BinderServices {
   >;
   /** 🔴 履歴の版 1 つの本文(#1231)。読めなければ `null`。⚠ 読むだけ。省略可(`diffListRevisions` と同じ)。 */
   diffReadRevision?(revId: string): Promise<string | null>;
+  /**
+   * 🔴 **他のウィンドウに、PC のファイルとのつながりを渡してほしいと頼む**(差分マージの別ウィンドウ ⚠4)。
+   * 頼めたら `true`(返事は後から着き、一覧が増える)。放送が無い環境では `false`。⚠ 省略可。
+   */
+  requestLinkedFiles?(): boolean;
+  /** 🔴 取り込んだ変更を破棄して相手を選び直してよいか聞く(差分マージ ⚠6)。⚠ 省略可 ── 無い環境は聞かずに進める。 */
+  confirmDiscardMerge?(): Promise<boolean>;
   /**
    * 🔴 **飛んでいる書込が着くまで待つ**(#288)。
    *
@@ -6573,6 +6581,21 @@ export function runGlobalCommand(
     });
     return true;
   }
+  /**
+   * 🔴 **テキスト整形・計算スクラッチパッド・差分マージも押しボタンを持たない**(レビュー ⚠2)── `view-sql` と同じく直に投げる。
+   * ⚠ 左にタブが無い面なので、この 3 行が左の一覧を押して中央が本文へ戻った後の**戻り道**になる(`STAY_ON_SELECT` の
+   *   テキスト整形以外は、ノートを選ぶと本文へ退く)。
+   */
+  if (cmd === 'view-textlab' || cmd === 'view-calc' || cmd === 'view-diff') {
+    if (dry) return true;
+    prevent();
+    const mode = cmd === 'view-textlab' ? 'textlab' : cmd === 'view-calc' ? 'calc' : 'diff';
+    dispatcher.dispatch({
+      type: 'SET_VIEW_MODE',
+      mode: nextViewMode(dispatcher.getState().viewMode, mode),
+    });
+    return true;
+  }
   if (cmd === 'open-palette') {
     if (dry) return true;
     prevent();
@@ -8045,20 +8068,51 @@ const pendingSeek = new WeakMap<HTMLMediaElement, number>();
  * ⚠ 再生機と説明が**同じ親**の下に居る面だけ(`seekMedia` と同じ探し方 ── 別の添付の行を光らせない)。
  */
 const activeSeekLine = new WeakMap<Element, Element | null>();
+/**
+ * 説明ごとの時刻の行の控え(行の要素と ms)。⚠ `timeupdate` は 1 秒に数回来る ── 毎回 DOM を引き直さない。
+ * 説明が描き直されると要素が差し替わる(先頭と末尾が DOM から外れる)ので、そのときだけ作り直す。
+ */
+const seekLineCache = new WeakMap<Element, { lines: Element[]; ms: number[]; at: number }>();
+function seekLinesOf(prose: Element): { lines: Element[]; ms: number[]; at: number } {
+  const hit = seekLineCache.get(prose);
+  if (hit !== undefined && (hit.lines.length === 0 || (hit.lines[0]!.isConnected && hit.lines[hit.lines.length - 1]!.isConnected))) {
+    return hit;
+  }
+  const lines: Element[] = [];
+  const ms: number[] = [];
+  for (const line of prose.querySelectorAll('[data-pkc-seek-line]')) {
+    const v = Number(line.querySelector('[data-pkc-seek-ms]')?.getAttribute('data-pkc-seek-ms'));
+    if (!Number.isFinite(v)) continue;
+    lines.push(line);
+    ms.push(v);
+  }
+  const built = { lines, ms, at: -1 };
+  seekLineCache.set(prose, built);
+  return built;
+}
+/** `ms` が昇順のとき、位置以前でいちばん後ろの行の添字(無ければ -1)。前回の位置の近くから確かめ、外れたら二分探索。 */
+function lastLineAtOrBefore(ms: readonly number[], now: number, prev: number): number {
+  const n = ms.length;
+  if (prev >= 0 && prev < n && ms[prev]! <= now && (prev + 1 >= n || now < ms[prev + 1]!)) return prev;
+  let lo = 0;
+  let hi = n; // ms[k] <= now を満たす先頭側の個数を探す
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (ms[mid]! <= now) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo - 1;
+}
 function markActiveSeekLine(media: HTMLMediaElement): void {
   if (media.getAttribute('data-pkc-field') !== 'attachment-media') return;
   // 説明の器(`data-pkc-prose`)と再生機の器(`attachment-preview`)は同じ host の兄弟(`seekMedia` の探し方と逆向き)
   const host = media.closest('[data-pkc-field="attachment-preview"]')?.parentElement ?? media.parentElement;
   const prose = host?.querySelector('[data-pkc-prose]');
   if (prose === null || prose === undefined) return;
-  const now = media.currentTime * 1000;
-  let active: Element | null = null;
-  for (const line of prose.querySelectorAll('[data-pkc-seek-line]')) {
-    const ms = Number(line.querySelector('[data-pkc-seek-ms]')?.getAttribute('data-pkc-seek-ms'));
-    if (!Number.isFinite(ms)) continue;
-    if (ms <= now) active = line;
-    else break;
-  }
+  const cache = seekLinesOf(prose);
+  const idx = lastLineAtOrBefore(cache.ms, media.currentTime * 1000, cache.at);
+  cache.at = idx;
+  const active: Element | null = idx >= 0 ? cache.lines[idx]! : null;
   if (activeSeekLine.get(prose) === active && (active === null || active.hasAttribute('data-pkc-seek-active'))) return;
   for (const old of prose.querySelectorAll('[data-pkc-seek-active]')) old.removeAttribute('data-pkc-seek-active');
   active?.setAttribute('data-pkc-seek-active', '');
@@ -8216,6 +8270,87 @@ const repaintDiff = (pane: HTMLElement): void => {
   paintDiffSides(pane);
   paintDiffBody(pane);
 };
+
+/** 取り込みの共通の門(読むだけの側・同じノート)を通してから、1 回取り込む。 */
+function diffTake(pane: HTMLElement, from: 'a' | 'b', apply: (m: MergeSession) => boolean): void {
+  const s = diffSession(pane);
+  const dest = from === 'a' ? s.right : s.left;
+  if (s.merge === null) return;
+  if (!isEditableSide(dest)) {
+    sayDiff(pane, `${from === 'a' ? '右' : '左'}は読むだけの相手なので、取り込めません`);
+    return;
+  }
+  if (s.left.lid !== null && s.left.lid === s.right.lid && s.left.kind === 'note' && s.right.kind === 'note') {
+    sayDiff(pane, '左右が同じノートです。別のノートを選んでください');
+    return;
+  }
+  s.message = '';
+  apply(s.merge);
+  paintDiffBody(pane);
+}
+
+/**
+ * 🔴 **取り込んだ変更があるときは、相手を選び直す前に聞く**(レビュー ⚠6)。
+ * ⚠ 選び直すと取り込みの途中経過が全部消える(`rebuildMerge`)。やめたら選び所を元の値へ戻す。
+ */
+function guardDiscard(pane: HTMLElement, services: BinderServices, go: () => void): void {
+  const m = diffSession(pane).merge;
+  if (m === null || !m.canUndo || services.confirmDiscardMerge === undefined) {
+    go();
+    return;
+  }
+  // 聞いている間も、選び所を元の値に見せておく(決めるまで state は動かさない)
+  repaintDiff(pane);
+  void services.confirmDiscardMerge().then((ok) => {
+    if (ok) go();
+    else repaintDiff(pane);
+  });
+}
+
+/** 選び所の変更を state へ当てる(`diff-pick` の本体)。 */
+function diffPick(
+  pane: HTMLElement,
+  side: DiffSideName,
+  which: string | null,
+  value: string,
+  services: BinderServices,
+): void {
+  const st = diffSession(pane)[side];
+  switch (which) {
+    case 'kind': {
+      st.kind = value as DiffSourceKind;
+      st.lid = null;
+      st.revId = null;
+      st.revs = null;
+      st.token += 1;
+      st.load = 'empty';
+      st.text = null;
+      st.baseline = null;
+      st.note = '';
+      diffSession(pane).message = '';
+      // 🔴 PC のファイルを選んだら、他のウィンドウが持っているつながりを聞く(⚠4。返事は後から着いて一覧が増える)
+      if (st.kind === 'file' && services.requestLinkedFiles?.() === false) {
+        st.note = '他のウィンドウとつながりを分け合えません。本体のウィンドウの左の PC タブで取り込むと選べます';
+      }
+      rebuildMerge(pane);
+      repaintDiff(pane);
+      return;
+    }
+    case 'note': {
+      st.lid = value === '' ? null : value;
+      st.revId = null;
+      st.revs = null;
+      if (st.kind === 'rev' && st.lid !== null) void diffLoadRevs(pane, side, services);
+      else void diffLoadSide(pane, side, services);
+      return;
+    }
+    case 'rev': {
+      st.revId = value === '' ? null : value;
+      void diffLoadSide(pane, side, services);
+      return;
+    }
+  }
+}
 
 /**
  * 差分マージの片側を読み込む。⚠ 世代(`token`)を進めてから読む ── 選び直しの前の読み込みが遅れて着いても、
@@ -8379,6 +8514,19 @@ async function diffSave(dispatcher: Dispatcher, pane: HTMLElement, services: Bin
 function say(pane: HTMLElement, text: string): void {
   const el = pane.querySelector<HTMLElement>('[data-pkc-field="textlab-summary"]');
   if (el !== null) el.textContent = text;
+}
+
+/**
+ * テキスト整形の描き直し(#1233)。⚠ 置換はワーカーで走る(非同期)── 終わったあとに「読み込む / 置き換える」の押せる・押せないも
+ * 合わせ直す。置換が無いときは、これまでどおり**その場で**描き終わる。
+ */
+function refreshLab(
+  pane: HTMLElement,
+  dispatcher: Dispatcher,
+  opts: { debounce?: boolean } = {},
+): void {
+  void refreshTextLab(pane, opts).then(() => syncTextLabButtons(pane, dispatcher.getState()));
+  syncTextLabButtons(pane, dispatcher.getState());
 }
 
 const ACTIONS: Record<string, ActionHandler> = {
@@ -16145,20 +16293,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   「まだ当てていない下書き」であって、アプリの状態ではない。整理案 `plan-input` と同じ扱い)。
    *   規則は `features/markdown/text-lab.ts` の 1 本で、ここは**押された事実を面へ渡す**だけ。
    */
-  'textlab-toggle': (_dispatcher, target) => {
+  'textlab-toggle': (dispatcher, target) => {
     const pane = textlabPane(target);
     if (pane === null) return;
     target.setAttribute('aria-pressed', target.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
-    refreshTextLab(pane);
+    refreshLab(pane, dispatcher);
   },
   // ⚠ 表の変換は 4 択(同じ組の中で押したものだけが押された状態になる)
-  'textlab-table': (_dispatcher, target) => {
+  'textlab-table': (dispatcher, target) => {
     const pane = textlabPane(target);
     if (pane === null) return;
     for (const b of pane.querySelectorAll<HTMLElement>(`[${LAB_TABLE_ATTR}]`)) {
       b.setAttribute('aria-pressed', b === target ? 'true' : 'false');
     }
-    refreshTextLab(pane);
+    refreshLab(pane, dispatcher);
   },
   'textlab-clear': (dispatcher, target) => {
     const pane = textlabPane(target);
@@ -16168,8 +16316,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       input.value = '';
       input.focus();
     }
-    refreshTextLab(pane);
-    syncTextLabButtons(pane, dispatcher.getState());
+    refreshLab(pane, dispatcher);
   },
   'textlab-load-note': (dispatcher, target) => {
     const pane = textlabPane(target);
@@ -16184,20 +16331,29 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (input === null) return;
     input.value = ob.body;
     setLabLoaded(pane, ob.lid, ob.body);
-    refreshTextLab(pane);
-    syncTextLabButtons(pane, state);
+    refreshLab(pane, dispatcher);
   },
   'textlab-copy': (dispatcher, target) => {
     const pane = textlabPane(target);
     if (pane === null) return;
-    const { out } = currentLabOutput(pane);
+    const cur = currentLabOutput(pane);
+    if (cur === null) {
+      say(pane, '置換を計算しています。終わってからもう一度押してください');
+      return;
+    }
+    const { out } = cur;
     if (out.text === '') return;
     finishCopy(dispatcher, target, copyPlainText(out.text));
   },
   'textlab-to-note': (dispatcher, target) => {
     const pane = textlabPane(target);
     if (pane === null) return;
-    const { out } = currentLabOutput(pane);
+    const cur = currentLabOutput(pane);
+    if (cur === null) {
+      say(pane, '置換を計算しています。終わってからもう一度押してください');
+      return;
+    }
+    const { out } = cur;
     if (out.text === '') return;
     const state = dispatcher.getState();
     // 🔑 編集中は作れないので、そう言う(`sql-to-note` と同じ ── 黙って捨てない)
@@ -16228,7 +16384,12 @@ const ACTIONS: Record<string, ActionHandler> = {
   'textlab-apply-note': (dispatcher, target) => {
     const pane = textlabPane(target);
     if (pane === null) return;
-    const { out } = currentLabOutput(pane);
+    const cur = currentLabOutput(pane);
+    if (cur === null) {
+      say(pane, '置換を計算しています。終わってからもう一度押してください');
+      return;
+    }
+    const { out } = cur;
     const state = dispatcher.getState();
     const loaded = labLoaded(pane);
     if (loaded === null || loaded.lid !== state.selectedLid) {
@@ -16297,72 +16458,44 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (pane === null || side === null || !(target instanceof HTMLSelectElement)) return;
     const st = diffSession(pane)[side];
     const value = target.value;
-    switch (target.getAttribute('data-pkc-pick')) {
-      // ⚠ 選び所は click でも呼ばれる(開いただけ)── 値が同じなら何もしない(読み込み済みの相手を捨てない)
-      case 'kind': {
-        if (st.kind === value) return;
-        st.kind = value as DiffSourceKind;
-        st.lid = null;
-        st.revId = null;
-        st.revs = null;
-        st.token += 1;
-        st.load = 'empty';
-        st.text = null;
-        st.baseline = null;
-        st.note = '';
-        diffSession(pane).message = '';
-        rebuildMerge(pane);
-        repaintDiff(pane);
-        return;
-      }
-      case 'note': {
-        if ((st.lid ?? '') === value) return;
-        st.lid = value === '' ? null : value;
-        st.revId = null;
-        st.revs = null;
-        if (st.kind === 'rev' && st.lid !== null) void diffLoadRevs(pane, side, services);
-        else void diffLoadSide(pane, side, services);
-        return;
-      }
-      case 'rev': {
-        if ((st.revId ?? '') === value) return;
-        st.revId = value === '' ? null : value;
-        void diffLoadSide(pane, side, services);
-        return;
-      }
-    }
+    const which = target.getAttribute('data-pkc-pick');
+    // ⚠ 選び所は click でも呼ばれる(開いただけ)── 値が同じなら何もしない(読み込み済みの相手を捨てない)
+    const unchanged =
+      which === 'kind' ? st.kind === value : which === 'note' ? (st.lid ?? '') === value : (st.revId ?? '') === value;
+    if (unchanged) return;
+    // 🔴 取り込んだ変更があるときは、捨てる前に聞く(⚠6)。やめたら選び所を元の値に戻す
+    guardDiscard(pane, services, () => diffPick(pane, side, which, value, services));
   },
   'diff-use-open': (dispatcher, target, services) => {
     const pane = diffPane(target);
     const side = diffSideOf(target);
     const lid = dispatcher.getState().selectedLid;
     if (pane === null || side === null || lid === null) return;
-    const st = diffSession(pane)[side];
-    st.kind = 'note';
-    st.lid = lid;
-    st.revId = null;
-    st.revs = null;
-    void diffLoadSide(pane, side, services);
+    guardDiscard(pane, services, () => {
+      const st = diffSession(pane)[side];
+      st.kind = 'note';
+      st.lid = lid;
+      st.revId = null;
+      st.revs = null;
+      void diffLoadSide(pane, side, services);
+    });
+  },
+  'diff-take-pair': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    if (pane === null) return;
+    const from = target.getAttribute('data-pkc-from') === 'b' ? 'b' : 'a';
+    const hunk = Number(target.getAttribute('data-pkc-hunk'));
+    const pair = Number(target.getAttribute('data-pkc-pair'));
+    if (!Number.isInteger(hunk) || !Number.isInteger(pair)) return;
+    diffTake(pane, from, (m) => m.takePair(hunk, pair, from));
   },
   'diff-take': (_dispatcher, target) => {
     const pane = diffPane(target);
     if (pane === null) return;
-    const s = diffSession(pane);
     const from = target.getAttribute('data-pkc-from') === 'b' ? 'b' : 'a';
     const hunk = Number(target.getAttribute('data-pkc-hunk'));
-    const dest = from === 'a' ? s.right : s.left;
-    if (s.merge === null || !Number.isInteger(hunk)) return;
-    if (!isEditableSide(dest)) {
-      sayDiff(pane, `${from === 'a' ? '右' : '左'}は読むだけの相手なので、取り込めません`);
-      return;
-    }
-    if (s.left.lid !== null && s.left.lid === s.right.lid && s.left.kind === 'note' && s.right.kind === 'note') {
-      sayDiff(pane, '左右が同じノートです。別のノートを選んでください');
-      return;
-    }
-    s.message = '';
-    s.merge.take(hunk, from);
-    paintDiffBody(pane);
+    if (!Number.isInteger(hunk)) return;
+    diffTake(pane, from, (m) => m.take(hunk, from));
   },
   'diff-take-all': (_dispatcher, target) => {
     const pane = diffPane(target);
@@ -18703,10 +18836,8 @@ export function bindActions(
       TEXTLAB_FIELDS.has(el.getAttribute('data-pkc-field') ?? '')
     ) {
       const pane = textlabPane(el);
-      if (pane !== null) {
-        refreshTextLab(pane);
-        syncTextLabButtons(pane, dispatcher.getState());
-      }
+      // 打鍵は少し待つ(置換があるときだけ。軽い整えはその場で描く)
+      if (pane !== null) refreshLab(pane, dispatcher, { debounce: true });
       return;
     }
     // 🔴 計算スクラッチパッドの式(#1230)。⚠ 打つそばから右の結果を描き直し、打ちかけを覚える(ノートにしても式は残る)

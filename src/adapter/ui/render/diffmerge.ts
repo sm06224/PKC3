@@ -20,7 +20,7 @@
  */
 import type { AppState } from '@adapter/state/app-state';
 import {
-  buildMergeSegs,
+  buildMerge,
   countHunks,
   MergeSession,
   mergeRows,
@@ -68,6 +68,8 @@ export interface DiffSession {
   merge: MergeSession | null;
   /** 行数が多すぎて比べなかった。 */
   tooBig: boolean;
+  /** 行数が多く、細かく比べきれずに大きな 1 か所にまとめた(`didLastDiffFallBack`)。 */
+  fellBack: boolean;
   showAll: boolean;
   /** 保存・取り込みの結果の一言(次の操作まで残す)。 */
   message: string;
@@ -82,7 +84,7 @@ const SESSIONS = new WeakMap<HTMLElement, DiffSession>();
 export function diffSession(pane: HTMLElement): DiffSession {
   let s = SESSIONS.get(pane);
   if (s === undefined) {
-    s = { left: freshSide(), right: freshSide(), merge: null, tooBig: false, showAll: false, message: '' };
+    s = { left: freshSide(), right: freshSide(), merge: null, tooBig: false, fellBack: false, showAll: false, message: '' };
     SESSIONS.set(pane, s);
   }
   return s;
@@ -102,10 +104,38 @@ export function rebuildMerge(pane: HTMLElement): void {
   const s = diffSession(pane);
   s.merge = null;
   s.tooBig = false;
+  s.fellBack = false;
   if (s.left.load !== 'loaded' || s.right.load !== 'loaded') return;
-  const segs = buildMergeSegs(s.left.text ?? '', s.right.text ?? '');
-  if (segs === null) s.tooBig = true;
-  else s.merge = new MergeSession(segs);
+  const built = buildMerge(s.left.text ?? '', s.right.text ?? '');
+  if (built === null) s.tooBig = true;
+  else {
+    s.merge = new MergeSession(built.segs);
+    s.fellBack = built.fellBack;
+  }
+}
+
+/**
+ * 🔴 **面を離れたとき、読み込んだ相手と取り込みの途中経過を捨てる**(レビュー ⚠9)。
+ * ⚠ 捨てないと、戻ってきたとき**古い読み込みの控え**(`baseline`)で保存が判断される ── 別のウィンドウで直したノートを
+ *   「変わっていない」と読み違える。読み込みの世代(`token`)は進めて、飛んでいる読み込みの返事も無効にする。
+ */
+export function resetDiff(pane: HTMLElement): void {
+  const s = diffSession(pane);
+  for (const side of ['left', 'right'] as const) {
+    const st = s[side];
+    const next = st.token + 1;
+    Object.assign(st, freshSide(), { token: next });
+  }
+  s.merge = null;
+  s.tooBig = false;
+  s.fellBack = false;
+  s.showAll = false;
+  s.message = '';
+  OPTION_PRINT.delete(pane);
+  const state = LAST_STATE.get(pane);
+  if (state !== undefined) syncDiffOptions(pane, state);
+  paintDiffSides(pane);
+  paintDiffBody(pane);
 }
 
 /** いまの字(取り込み後)。読めていなければ `null`。 */
@@ -176,7 +206,10 @@ export function syncDiffOptions(pane: HTMLElement, state: AppState): void {
     select.textContent = '';
     const blank = document.createElement('option');
     blank.value = '';
-    blank.textContent = list.length === 0 && st.kind === 'file' ? '(PC のファイルとつながっているノートがありません)' : '(ノートを選んでください)';
+    blank.textContent =
+      list.length === 0 && st.kind === 'file'
+        ? '(PC のファイルとつながっているノートがありません。本体のウィンドウの左の PC タブで取り込むと選べます)'
+        : '(ノートを選んでください)';
     select.append(blank);
     for (const o of list) {
       const opt = document.createElement('option');
@@ -257,6 +290,26 @@ export function paintDiffSides(pane: HTMLElement): void {
   }
 }
 
+/** 塊の中の 1 対だけを取り込むボタン。`from` = 'a' なら左の内容を右へ、'b' なら右の内容を左へ。 */
+function pairTakeButton(from: 'a' | 'b', hunk: number, pair: number, editable: boolean, sourceEmpty: boolean): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.setAttribute('data-pkc-action', 'diff-take-pair');
+  b.setAttribute('data-pkc-field', 'diff-pair-take');
+  b.setAttribute('data-pkc-from', from);
+  b.setAttribute('data-pkc-hunk', String(hunk));
+  b.setAttribute('data-pkc-pair', String(pair));
+  b.textContent = from === 'a' ? '→' : '←';
+  const toward = from === 'a' ? '右' : '左';
+  const label = sourceEmpty
+    ? `この行だけ、${toward}の行を除いてそろえる`
+    : `この行だけ、${from === 'a' ? '左' : '右'}の内容を${toward}へ`;
+  b.setAttribute('aria-label', label);
+  b.disabled = !editable;
+  b.title = editable ? `${label}(保存を押すまで書きません)` : `${toward}は読むだけの相手なので、取り込めません`;
+  return b;
+}
+
 function pairCount(rows: readonly MergeRow[]): number {
   return rows.reduce((n, r) => n + (r.kind === 'change' ? r.pairs.length : 1), 0);
 }
@@ -282,6 +335,8 @@ export function paintDiffBody(pane: HTMLElement): void {
   } else {
     const n = countHunks(m.segs);
     text = n === 0 ? '左右は同じ内容です' : `ちがい ${n} か所`;
+    // 🔴 行数が多くて細かく比べきれなかったことを黙らない(1 か所が大きな塊になっている)
+    if (s.fellBack) text += '(行数が多く細かく比べきれなかったため、大きな 1 か所にまとめています)';
     if (n > 0 && !leftEdit && !rightEdit) text += '(どちらも読むだけの相手なので、取り込めません。ノートを選ぶと取り込めます)';
   }
   if (s.message !== '') text = `${text} / ${s.message}`;
@@ -327,11 +382,22 @@ export function paintDiffBody(pane: HTMLElement): void {
         bar.append(label, toLeft, toRight);
         const ul = document.createElement('ul');
         ul.setAttribute('data-pkc-diff-layout', 'side');
-        for (const p of row.pairs) ul.append(sideCellEl('left', p.left), sideCellEl('right', p.right));
+        // 🔴 1 つの塊が上限を超えるときは、塊の中でも上限で切る(切らないと「4,000 行までを表示」が嘘になり、巨大な塊で画面が重くなる)
+        const shown = cap ? row.pairs.slice(0, Math.max(0, DIFF_ROWS_MAX - used)) : row.pairs;
+        shown.forEach((p, n) => {
+          const l = sideCellEl('left', p.left);
+          const r = sideCellEl('right', p.right);
+          // 🔴 塊の中の 1 行(対)だけを取り込むボタン(レビュー ⚠5)。左の升は「右を左に合わせる」、右の升は「左を右に合わせる」
+          l.prepend(pairTakeButton('a', row.hunk, n, rightEdit, p.left === null));
+          r.prepend(pairTakeButton('b', row.hunk, n, leftEdit, p.right === null));
+          l.removeAttribute('aria-hidden');
+          r.removeAttribute('aria-hidden');
+          ul.append(l, r);
+        });
         hunk.append(bar, ul);
         body.append(hunk);
         list = null;
-        used += row.pairs.length;
+        used += shown.length;
       } else if (row.kind === 'gap') {
         list = newList();
         list.append(diffLineEl({ kind: 'gap', text: '', skipped: row.skipped }));
@@ -379,6 +445,11 @@ export class DiffMergeRenderer {
 
   constructor(host: HTMLElement) {
     this.host = host;
+  }
+
+  /** 面を離れた(`CenterRouter` が別の面へ移ったとき呼ぶ)。 */
+  onHidden(): void {
+    resetDiff(this.host);
   }
 
   render(state: AppState): void {

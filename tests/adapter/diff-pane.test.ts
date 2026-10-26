@@ -47,6 +47,10 @@ interface Opts {
   file?: string | { tooLarge: true } | null;
   /** 読み込みを手で止める(遅れて届く読み込みを作る)。 */
   hold?: (lid: string) => Promise<void> | null;
+  /** 配線の差し替え(確認の口・他のウィンドウへの頼みなど)。 */
+  services?: Partial<NonNullable<Parameters<typeof bindActions>[2]>>;
+  /** 保存の確かめ(書いた後の読み直し)をわざと食い違わせる。 */
+  corruptAfterWrite?: boolean;
 }
 
 function setup(opts: Opts = {}) {
@@ -66,7 +70,8 @@ function setup(opts: Opts = {}) {
     reorderEntry: async () => stubStamps(),
     persistEntry: async (e: { lid: string; body: string }) => {
       persisted.push(e);
-      store[e.lid] = e.body;
+      // 🔴 保存の失敗を再現する: 書いたのに読み直すと別の字(別の窓が書き換えた・保存先が受け取れなかった)
+      store[e.lid] = opts.corruptAfterWrite === true ? `${e.body}#破損` : e.body;
       return stubStamps();
     },
     getBody: async (lid: string) => store[lid] ?? null,
@@ -83,6 +88,7 @@ function setup(opts: Opts = {}) {
     readLinkedFile: async () => (opts.file === undefined ? null : opts.file),
     // 実物と同じ: 飛んでいる書込が着くまで待つ(待たないと、保存の確かめが書込を追い越す)
     settle: () => effects.settled(),
+    ...(opts.services ?? {}),
   });
   d.dispatch({
     type: 'SYS_BOOTED',
@@ -376,3 +382,262 @@ describe('差分マージの面', () => {
     expect(s.summary()).not.toContain('保存しました');
   });
 });
+
+/** 塊の中の行ごとの取り込み(レビュー ⚠5)。 */
+describe('塊の中の 1 行(対)だけを取り込む', () => {
+  const L3 = '見出し\n甲\n乙\n丙\n終\n';
+  const R3 = '見出し\nア\nイ\nウ\n終\n';
+  const pairBtn = (s: ReturnType<typeof setup>, hunk: number, pair: number, from: 'a' | 'b'): HTMLButtonElement =>
+    s.pane.querySelector<HTMLButtonElement>(
+      `[data-pkc-action="diff-take-pair"][data-pkc-hunk="${hunk}"][data-pkc-pair="${pair}"][data-pkc-from="${from}"]`,
+    )!;
+
+  it('🔴 塊の中の対ごとに → ← のボタンがあり、押した 1 行だけが右(左)のノートへ入って保存できる', async () => {
+    const s = setup({ bodies: { n1: L3, n2: R3 } });
+    await s.loadBoth();
+    expect(s.summary()).toBe('ちがい 1 か所');
+    // 3 対 × 左右のボタン
+    expect(s.pane.querySelectorAll('[data-pkc-action="diff-take-pair"]')).toHaveLength(6);
+    // 2 行目の対だけ、右の内容(イ)を左へ取り込む
+    pairBtn(s, 0, 1, 'b').click();
+    expect(s.summary()).toBe('ちがい 2 か所');
+    s.press('diff-save');
+    await tick(60);
+    expect(s.store.n1, '押した 1 行だけが変わっていない').toBe('見出し\n甲\nイ\n丙\n終\n');
+    expect(s.store.n2, '触っていない右が変わっている').toBe(R3);
+  });
+
+  it('🔴 取り込んだ行は、取り消せる。塊単位の → ← と混ぜても取り消しの順に戻る', async () => {
+    const s = setup({ bodies: { n1: L3, n2: R3 } });
+    await s.loadBoth();
+    const pairs = (): number => s.pane.querySelectorAll('[data-pkc-action="diff-take-pair"][data-pkc-from="a"]').length;
+    expect(pairs()).toBe(3);
+    pairBtn(s, 0, 0, 'a').click(); // 左の「甲」を右へ(右のアが甲になる。残りは 2 対の塊)
+    expect(s.summary()).toBe('ちがい 1 か所');
+    expect(pairs(), '取り込んだ対が残っている').toBe(2);
+    s.take(0, 'a'); // 残りの塊をまるごと左から右へ
+    expect(s.summary()).toBe('左右は同じ内容です');
+    expect(pairs()).toBe(0);
+    s.press('diff-undo');
+    expect(pairs(), 'まるごとの取り込みが戻っていない').toBe(2);
+    s.press('diff-undo');
+    expect(pairs(), '対の取り込みが戻っていない').toBe(3);
+    s.press('diff-redo');
+    expect(pairs()).toBe(2);
+  });
+
+  it('読むだけの側には取り込めず、ボタンが塞がって理由が title に出る', async () => {
+    const s = setup({
+      bodies: { n1: L3, n2: R3 },
+      revs: { n1: [{ id: 'r1', revOrder: 1, createdAt: null, title: null }] },
+      revBodies: { r1: L3 },
+    });
+    s.pick('left', 'kind', 'rev');
+    s.pick('left', 'note', 'n1');
+    await tick();
+    s.pick('left', 'rev', 'r1');
+    s.pick('right', 'note', 'n2');
+    await tick();
+    // 左が版(読むだけ)── 「右の内容を左へ」は塞がり、「左の内容を右へ」は押せる
+    expect(pairBtn(s, 0, 0, 'b').disabled).toBe(true);
+    expect(pairBtn(s, 0, 0, 'b').title).toContain('読むだけ');
+    expect(pairBtn(s, 0, 0, 'a').disabled).toBe(false);
+  });
+
+  it('片側にしか無い行: 追加された行を「除く」向きにも取り込める', async () => {
+    const s = setup({ bodies: { n1: '先頭\n末尾\n', n2: '先頭\n足された行\n末尾\n' } });
+    await s.loadBoth();
+    // 右にだけある行(左は空の升)── 左の(空の)内容を右へ = 右のその行を除く
+    pairBtn(s, 0, 0, 'a').click();
+    s.press('diff-save');
+    await tick(60);
+    expect(s.store.n2).toBe('先頭\n末尾\n');
+  });
+});
+
+describe('細かく比べきれなかったとき、画面でそう言う(レビュー ⚠5)', () => {
+  const many = (p: string): string => Array.from({ length: 300 }, (_, i) => `${p}${i}\n`).join('');
+  it('🔴 編集距離の予算を超える差は、大きな 1 か所にまとめたと言う。小さな差では言わない', async () => {
+    const s = setup({ bodies: { n1: many('左'), n2: many('右') } });
+    await s.loadBoth();
+    expect(s.summary()).toContain('ちがい 1 か所');
+    expect(s.summary()).toContain('細かく比べきれなかった');
+    // 対照群: 小さな差では言わない(前の印を持ち越さない)
+    s.pick('left', 'note', 'n3');
+    s.pick('right', 'note', 'n3');
+    await tick();
+    const t = setup();
+    await t.loadBoth();
+    expect(t.summary()).not.toContain('細かく比べきれなかった');
+  });
+});
+
+/** 相手を選び直す前の確認(レビュー ⚠6)。 */
+describe('取り込みがあるとき、相手を選び直す前に聞く', () => {
+  function withConfirm(answer: boolean) {
+    const asked: number[] = [];
+    const s = setup({
+      services: {
+        confirmDiscardMerge: async () => {
+          asked.push(1);
+          return answer;
+        },
+      },
+    });
+    return { s, asked };
+  }
+
+  it('🔴 取り込んでいないうちは聞かずに選び直せる(対照群)', async () => {
+    const { s, asked } = withConfirm(false);
+    await s.loadBoth();
+    s.pick('right', 'note', 'n3');
+    await tick();
+    expect(asked, '取り込んでいないのに聞いた').toHaveLength(0);
+    expect(s.q<HTMLSelectElement>(`${s.side('right')} [data-pkc-pick="note"]`).value).toBe('n3');
+  });
+
+  it('🔴 取り込んだあとに選び直すと聞く。「やめる」なら選び所も取り込みも元のまま', async () => {
+    const { s, asked } = withConfirm(false);
+    await s.loadBoth();
+    s.take(0, 'b');
+    expect(s.summary()).toBe('ちがい 1 か所');
+    s.pick('right', 'note', 'n3');
+    await tick();
+    expect(asked).toHaveLength(1);
+    expect(s.q<HTMLSelectElement>(`${s.side('right')} [data-pkc-pick="note"]`).value, '選び所が戻っていない').toBe('n2');
+    expect(s.summary(), 'やめたのに取り込みが消えた').toBe('ちがい 1 か所');
+    expect(s.saveBtn().disabled).toBe(false);
+  });
+
+  it('🔴 「選び直す」なら新しい相手で読み直し、取り込みの途中経過は捨てる', async () => {
+    const { s, asked } = withConfirm(true);
+    await s.loadBoth();
+    s.take(0, 'b');
+    s.pick('right', 'note', 'n3');
+    await tick();
+    expect(asked).toHaveLength(1);
+    expect(s.q<HTMLSelectElement>(`${s.side('right')} [data-pkc-pick="note"]`).value).toBe('n3');
+    expect(s.saveBtn().disabled, '捨てたはずの取り込みが保存できる').toBe(true);
+  });
+
+  it('種類を変えるとき・「開いているノート」を押すときも聞く', async () => {
+    const { s, asked } = withConfirm(false);
+    await s.loadBoth();
+    s.take(0, 'b');
+    s.pick('left', 'kind', 'rev');
+    await tick();
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n3' });
+    await tick();
+    s.q<HTMLButtonElement>(`${s.side('right')} [data-pkc-action="diff-use-open"]`).click();
+    await tick();
+    expect(asked).toHaveLength(2);
+    // どちらもやめたので、取り込みは残っている
+    expect(s.summary()).toBe('ちがい 1 か所');
+  });
+});
+
+/** 面を離れたら読み込んだ相手を捨てる(レビュー ⚠9)。 */
+describe('面を離れたら、読み込んだ相手と取り込みを捨てる', () => {
+  it('🔴 別の画面へ移って戻ると、相手は空で、取り込みも保存対象も残らない。選び所は空に戻る', async () => {
+    const s = setup();
+    await s.loadBoth();
+    s.take(0, 'b');
+    expect(s.saveBtn().disabled).toBe(false);
+    s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'diff' });
+    expect(s.summary()).toContain('相手を選ぶと');
+    expect(s.saveBtn().disabled).toBe(true);
+    expect(s.q<HTMLSelectElement>(`${s.side('left')} [data-pkc-pick="note"]`).value).toBe('');
+    expect(s.hunks()).toHaveLength(0);
+  });
+
+  it('🔴 離れている間に読み込みが遅れて届いても、戻ったときの画面を上書きしない', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const s = setup({ hold: (lid) => (lid === 'n1' ? gate : null) });
+    s.pick('left', 'note', 'n1'); // 遅い
+    s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    s.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'diff' });
+    release();
+    await tick();
+    expect(s.q(`${s.side('left')} [data-pkc-field="diff-side-note"]`).textContent, '離れる前の読み込みが戻ってきた').not.toContain('読み込みました');
+    expect(s.q<HTMLSelectElement>(`${s.side('left')} [data-pkc-pick="note"]`).value).toBe('');
+  });
+});
+
+/** 保存の失敗の経路(テストの穴 C)。 */
+describe('保存できなかったとき', () => {
+  it('🔴 書いたのに読み直すと別の字だったら、「保存しました」と言わず、できなかったノートを言う', async () => {
+    const s = setup({ corruptAfterWrite: true });
+    await s.loadBoth();
+    s.take(0, 'b');
+    s.press('diff-save');
+    await tick(80);
+    expect(s.summary()).toContain('保存できませんでした');
+    expect(s.summary()).toContain('「左の下書き」');
+    expect(s.summary(), '失敗なのに成功と言っている').not.toContain('保存しました');
+    // 失敗したので、取り込みは残り、もう一度保存を試せる
+    expect(s.saveBtn().disabled).toBe(false);
+  });
+});
+
+/** PC のファイル: 他のウィンドウの持ち物を聞く(レビュー ⚠4)。 */
+describe('PC のファイルの相手(別のウィンドウ)', () => {
+  it('🔴 「PC のファイル」を選ぶと、他のウィンドウにつながりを聞く', async () => {
+    let asked = 0;
+    const s = setup({ services: { requestLinkedFiles: () => (asked++, true) } });
+    s.pick('right', 'kind', 'file');
+    expect(asked).toBe(1);
+    // 対照群: ノートを選ぶだけでは聞かない
+    s.pick('left', 'note', 'n1');
+    await tick();
+    expect(asked).toBe(1);
+  });
+
+  it('🔴 つながりが無いときの選び所の字は、本体のウィンドウの左の PC タブで取り込むと選べると案内する', () => {
+    const s = setup({ services: { requestLinkedFiles: () => true } });
+    s.pick('right', 'kind', 'file');
+    const first = s.pane.querySelector(`${s.side('right')} [data-pkc-pick="note"] option`)!.textContent;
+    expect(first).toContain('本体のウィンドウの左の PC タブ');
+  });
+
+  it('分け合う口が無い環境では、その旨を側の一言に言う', () => {
+    const s = setup({ services: { requestLinkedFiles: () => false } });
+    s.pick('right', 'kind', 'file');
+    expect(s.q(`${s.side('right')} [data-pkc-field="diff-side-note"]`).textContent).toContain('PC タブ');
+  });
+
+  it('他のウィンドウから つながりが着いたら、選び所に出て、選べる', async () => {
+    const s = setup({ services: { requestLinkedFiles: () => true }, file: A.replace('りんご', '外の字') });
+    s.pick('right', 'kind', 'file');
+    // 返事が着いた(main.ts の `adopt` が撃つのと同じ事実)
+    s.d.dispatch({ type: 'FILE_LINKED', lid: 'n2', name: 'from-main.md' });
+    const opts = [...s.pane.querySelectorAll(`${s.side('right')} [data-pkc-pick="note"] option`)].map((o) => o.textContent);
+    expect(opts).toContain('右の下書き(from-main.md)');
+    s.pick('left', 'note', 'n1');
+    s.pick('right', 'note', 'n2');
+    await tick();
+    expect(s.hunks()).toHaveLength(1);
+  });
+});
+
+/** 表に並べる行の上限の境目(テストの穴 E)。 */
+describe('表に並べる行の上限', () => {
+  const many = (p: string, n: number): string => Array.from({ length: n }, (_, i) => `${p}${i}\n`).join('');
+  it('🔴 ちょうど 4000 対までは全部並び、4001 対からは 4000 で切って理由を言う(1 つの大きな塊の中でも切る)', async () => {
+    // 左右が全部違う → 編集距離の予算を超えて 1 つの塊になる(対の数 = 行数)
+    const exact = setup({ bodies: { n1: many('左', 4000), n2: many('右', 4000) } });
+    await exact.loadBoth();
+    expect(exact.pane.querySelectorAll('[data-pkc-action="diff-take-pair"][data-pkc-from="a"]')).toHaveLength(4000);
+    expect(exact.pane.querySelector('[data-pkc-field="diff-more"]'), '上限ちょうどで切っている').toBeNull();
+    document.body.textContent = '';
+    const over = setup({ bodies: { n1: many('左', 4001), n2: many('右', 4001) } });
+    await over.loadBoth();
+    expect(over.pane.querySelectorAll('[data-pkc-action="diff-take-pair"][data-pkc-from="a"]'), '4001 対目を描いている').toHaveLength(4000);
+    expect(over.pane.querySelector('[data-pkc-field="diff-more"]')?.textContent).toContain('4,000 行までを表示');
+    // 切った分も、塊ごとの取り込みの対象
+    over.take(0, 'b');
+    expect(over.summary()).toContain('左右は同じ内容です');
+  }, 30_000);
+});
+
