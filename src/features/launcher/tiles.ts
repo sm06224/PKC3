@@ -75,6 +75,7 @@ export interface LauncherTile {
     | 'search'
     | 'sql'
     | 'textlab'
+    | 'calc'
     | 'manual'
     | 'selfhost';
   /** `kind === 'url'` のときの飛び先。 */
@@ -442,6 +443,27 @@ export function textlabTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **計算スクラッチパッドの組み込みタイル**(#1230。user 指示 2026-10-26「全部やるのです」)。
+ *
+ * ⚠ 本文の「この行を計算する」(書き込み型)とは**別の入口** ── あちらは字が本文に残る。こちらは
+ *   値を直すと下の結果も変わる**追従型**で、書いた式はこの窓にだけ残り、ノートにするのは user が押したとき。
+ * ⚠ 左の列にタブは置かない(タブを足すと既存のタブが「⋯」へ畳まれる ── #1900)。閉じて失うのは打った式だけで、
+ *   ノートは 1 件も消えない ── アプリで正しい。
+ * 🔑 `kind` は `ViewMode` の綴り(`calc`)── `launch-tile.ts` がそれを見て別窓へ渡す。
+ */
+export const CALC_TILE_LID = 'builtin:calc';
+
+export function calcTile(): LauncherTile {
+  return {
+    lid: CALC_TILE_LID,
+    title: '計算スクラッチパッド',
+    group: BUILTIN_GROUP,
+    kind: 'calc',
+    symbol: 'calculator',
+  };
+}
+
+/**
  * 🔴 **マニュアルの組み込みタイル**(#645。user 要望 2026-08-31
  * 「**ヘルプの中からマニュアルをアプリとして出してください**」)。
  *
@@ -560,6 +582,8 @@ export function withBuiltinTiles(
   builtin.push(timersTile());
   // ⚠ テキスト整形(#1233)も末尾 ── 同じ理由(位置を動かさない)
   builtin.push(textlabTile());
+  // ⚠ 計算スクラッチパッド(#1230)も末尾 ── 同じ理由(位置を動かさない)
+  builtin.push(calcTile());
   /**
    * 🔴 **組み込みは末尾へ「収納」する**(#531 段② / #281。user 指示 2026-08-28
    * 「組み込みアプリをグループに**収納して**整理する」)。
@@ -604,6 +628,7 @@ export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'search',
   'sql',
   'textlab',
+  'calc',
   'manual',
   'selfhost',
 ]);

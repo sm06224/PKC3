@@ -734,6 +734,8 @@ const ALL_VIEWS = [
   'sql',
   // ⚠ テキスト整形(#1233)── ノートを映さない**道具**なので aside(SQL と同じ)
   'textlab',
+  // ⚠ 計算スクラッチパッド(#1230)── 同じく**道具**なので aside
+  'calc',
   'settings',
   'flags',
   'help',

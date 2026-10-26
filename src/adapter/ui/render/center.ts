@@ -25,6 +25,7 @@ import { TimersRenderer } from './timers';
 import { SearchRenderer } from './search';
 import { SqlRenderer } from './sql';
 import { TextLabRenderer } from './textlab';
+import { CalcRenderer } from './calc';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
 type PaneView =
@@ -39,6 +40,7 @@ type PaneView =
   | 'dual'
   | 'sql'
   | 'textlab'
+  | 'calc'
   | 'settings'
   | 'flags'
   | 'help';
@@ -59,6 +61,8 @@ const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>([
   'sql',
   // ⚠ テキスト整形(#1233)── ノートを映さない道具(SQL と同じ扱い)
   'textlab',
+  // ⚠ 計算スクラッチパッド(#1230)── 同じ
+  'calc',
 ]);
 
 /**
@@ -126,6 +130,8 @@ export class CenterRouter {
   private readonly sql: SqlRenderer;
   /** テキスト整形(#1233)。 */
   private readonly textlab: TextLabRenderer;
+  /** 計算スクラッチパッド(#1230)。 */
+  private readonly calc: CalcRenderer;
   private lastPane: PaneView = 'detail';
   /**
    * 🔴 **面を開いて戻ったら、同じ場所に戻る**(user 目線レビュー U-4、2026-08-22)。
@@ -217,6 +223,7 @@ export class CenterRouter {
       dual: pane('dual'),
       sql: pane('sql'),
       textlab: pane('textlab'),
+      calc: pane('calc'),
       settings: pane('settings'),
       flags: pane('flags'),
       help: pane('help'),
@@ -269,6 +276,7 @@ export class CenterRouter {
     this.dual = new DualFilerRenderer(this.panes.dual);
     this.sql = new SqlRenderer(this.panes.sql);
     this.textlab = new TextLabRenderer(this.panes.textlab);
+    this.calc = new CalcRenderer(this.panes.calc);
     this.settings = new SettingsRenderer(this.panes.settings);
     this.flags = new FlagsRenderer(this.panes.flags);
     /**
@@ -387,6 +395,7 @@ export class CenterRouter {
     else if (view === 'dual') this.dual.render(state);
     else if (view === 'sql') this.sql.render(state);
     else if (view === 'textlab') this.textlab.render(state);
+    else if (view === 'calc') this.calc.render();
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();
     // ⚠ ヘルプにも**コンテナ id を渡す**(Issue #100 段①)── マニュアルも

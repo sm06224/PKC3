@@ -135,6 +135,8 @@ describe('ランチャーのタイルを読む', () => {
       'timers',
       // ⚠ **テキスト整形**(#1233)── 同じ理由で末尾
       'textlab',
+      // ⚠ **計算スクラッチパッド**(#1230)── 同じ理由で末尾
+      'calc',
     ]);
     off();
   });
@@ -237,7 +239,7 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(
       b.map((t) => t.group),
       '組み込みが既定群のまま(見出しが引かれず、自分のものと地続きに見える)',
-    ).toEqual(Array.from({ length: 12 }, () => BUILTIN_GROUP));
+    ).toEqual(Array.from({ length: 13 }, () => BUILTIN_GROUP));
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', async () => {
@@ -263,6 +265,8 @@ describe('組み込み Office タイルの合流 (#148)', () => {
     expect(b[9]?.kind, 'Office の有無で計った時間の位置が動いた').toBe('timers');
     // ⚠ **テキスト整形**(#1233)も末尾
     expect(b[10]?.kind, 'Office の有無でテキスト整形の位置が動いた').toBe('textlab');
-    expect(b, '組み込みが 11 枚でない').toHaveLength(11);
+    // ⚠ **計算スクラッチパッド**(#1230)も末尾
+    expect(b[11]?.kind, 'Office の有無で計算スクラッチパッドの位置が動いた').toBe('calc');
+    expect(b, '組み込みが 12 枚でない').toHaveLength(12);
   });
 });

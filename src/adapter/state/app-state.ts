@@ -729,6 +729,12 @@ export const VIEW_MODES = [
    * ⚠ aside である(`ASIDE_PANES`)── ノートを映す面ではなく**道具**。
    */
   'textlab',
+  /**
+   * 🔴 **計算スクラッチパッド**(#1230。user 指示 2026-10-26)。文章と式を混ぜて書くと右に結果が並ぶ道具 ──
+   * 左の列に置き場は無い(タブを足すと既存のタブが「⋯」へ畳まれる)ので、別ウィンドウ + タイルだけ。
+   * ⚠ aside である(`ASIDE_PANES`)── ノートを映す面ではなく**道具**。
+   */
+  'calc',
   'settings',
   'flags',
   'help',
@@ -773,6 +779,8 @@ const ASIDE_PANES: ReadonlySet<ViewMode> = new Set<ViewMode>([
   'sql',
   // 🔴 テキスト整形(#1233)も同じ ── 開いているノートを映さない道具。編集中でも開ける(読み込むだけで書かない)
   'textlab',
+  // 🔴 計算スクラッチパッド(#1230)も同じ ── ノートを映さない道具。編集中でも開ける(ノートにするときだけ書く)
+  'calc',
 ]);
 
 export function isAsidePane(view: ViewMode): boolean {
@@ -816,6 +824,11 @@ const STAY_ON_SELECT: ReadonlySet<ViewMode> = new Set<ViewMode>([
    *   ので、選んだ瞬間に面が本文へ退くと、読み込む前に画面が消える(打ちかけの文章も見えなくなる)。
    */
   'textlab',
+  /**
+   * 🔴 **計算スクラッチパッド**(#1230)。⚠ 計算しながらノートを見比べる道具なので、左の一覧でノートを選んでも
+   *   面が退くと、書きかけの式が見えなくなる(打ちかけは覚えているが、画面から消えるのは「押して消えた」に見える)。
+   */
+  'calc',
 ]);
 
 /** ノートを選んだら本文へ戻す面か。⚠ 判定はここ 1 か所(上の docstring)。 */
@@ -843,6 +856,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   dual: '2 ペインで整理',
   sql: 'SQL で調べる',
   textlab: 'テキスト整形',
+  calc: '計算スクラッチパッド',
   settings: 'システム',
   flags: 'フラグ',
   help: 'ヘルプ',

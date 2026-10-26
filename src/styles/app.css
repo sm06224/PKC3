@@ -7212,7 +7212,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   opacity: 1;
 }
 [data-pkc-region='schedule-cards'] [data-pkc-field='task-unschedule']:hover {
-  color: var(--danger, #b3261e);
+  color: var(--danger);
 }
 /* 🔴 **予定のメニューを開く「⋯」**(台帳 #1852 束 S1、依頼 128-2 A)。スマホの長押しはドラッグだけにしたので、
  *   メニューへはここから入る。薄いが**見える**(隠さない ── 見つけられない物は無いのと同じ)。指で押せる大きさ(24px 以上) */
@@ -12810,4 +12810,83 @@ h6:hover > .pkc-heading-anchor,
   font-family: var(--font-mono);
   font-size: 13px;
   resize: vertical;
+}
+
+/* ══ 計算スクラッチパッドの面(#1230、2026-10-26)══════════════════
+ * 🔴 **中央の面(別窓)だけ**── 左の列に同じ面は無い(SQL で調べると同じ形)。
+ * 地は無彩色。色は**エラーの行**と**合計の行**にだけ使う(業務画面の作法)。
+ * ⚠ 左の欄と右の結果の**行の高さを px で揃える**(`--calc-lh`)── 折り返さない欄 + 固定の高さの行でないと、
+ *   長い式が 1 行ぶん下へずれて、結果が別の行の物に見える。 */
+[data-pkc-view-pane='calc'] {
+  --calc-lh: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-view-pane='calc'] [data-pkc-field='pane-title'] {
+  margin: 0;
+  font-size: 14px;
+}
+[data-pkc-field='calc-note'],
+[data-pkc-field='calc-status'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='calc-status']:empty {
+  display: none;
+}
+[data-pkc-field='calc-tools'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+[data-pkc-field='calc-sheet'] {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(8em, 2fr);
+  gap: 0;
+  height: min(60vh, 32em);
+  min-height: 12em;
+  border: 1px solid var(--border);
+}
+[data-pkc-field='calc-input'],
+[data-pkc-field='calc-results'] {
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--s2);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: var(--calc-lh);
+  white-space: pre;
+}
+[data-pkc-field='calc-input'] {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  overflow: auto;
+  border: none;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+}
+[data-pkc-field='calc-results'] {
+  overflow: hidden;
+  background: var(--surface-2);
+  text-align: right;
+}
+[data-pkc-field='calc-results'] > div {
+  height: var(--calc-lh);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-pkc-calc-row='sum'] {
+  font-weight: 600;
+  /* ⚠ 罫線は影で引く(border だと行の高さが変わり、左の欄の行とずれる) */
+  box-shadow: inset 0 1px 0 var(--border);
+}
+[data-pkc-calc-row='error'] {
+  color: var(--danger, #b3261e);
+  font-size: 12px;
 }

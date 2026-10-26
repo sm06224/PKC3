@@ -780,6 +780,13 @@ import { countCappedCells } from '@features/query/sql-cell';
 import { openFolderLid } from './open-folder-lid';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 import { labNoteTitle } from '@features/markdown/text-lab';
+import { sheetNoteTitle, sheetToMarkdown, sheetToText } from '@features/calc/sheet';
+import {
+  currentCalcRows,
+  flushCalcDraft,
+  refreshCalc,
+  sayCalc,
+} from '../render/calc';
 import {
   LAB_TABLE_ATTR,
   currentLabOutput,
@@ -3308,6 +3315,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // 🔴 テキスト整形の結果を新しいノートにする / 読み込んだノートの本文を置き換える(#1233)── どちらも書込
   'textlab-to-note',
   'textlab-apply-note',
+  // 🔴 計算スクラッチパッドの結果を新しいノートにする(#1230)── `CREATE_ENTRY` を撃つので同じ門
+  'calc-to-table',
+  'calc-to-text',
   /**
    * 🔴 **予定から外すのも本文を書く**(#498)── 行の `@…` を剥がす
    *   (`SET_TASK_DATE`)か、frontmatter の `date:` を消す(`SET_ENTRY_DATE`)。
@@ -8077,6 +8087,44 @@ const TEXTLAB_FIELDS: ReadonlySet<string> = new Set([
 
 function textlabPane(from: Element): HTMLElement | null {
   return from.closest<HTMLElement>('[data-pkc-view-pane="textlab"]');
+}
+
+function calcPane(from: Element): HTMLElement | null {
+  return from.closest<HTMLElement>('[data-pkc-view-pane="calc"]');
+}
+
+/** 計算スクラッチパッドの結果を、新しいノートにする(表 / テキスト)。 */
+function calcToNote(dispatcher: Dispatcher, target: HTMLElement, form: 'table' | 'text'): void {
+  const pane = calcPane(target);
+  if (pane === null) return;
+  const rows = currentCalcRows(pane);
+  const body = form === 'table' ? sheetToMarkdown(rows) : sheetToText(rows);
+  if (body === null || body.trim() === '') return;
+  const state = dispatcher.getState();
+  // 🔑 編集中は作れないので、そう言う(`sql-to-note` と同じ ── 黙って捨てない)
+  if (state.phase !== 'ready') {
+    sayCalc(pane, blockedActionNote(state.phase) ?? '');
+    return;
+  }
+  const title = sheetNoteTitle(new Date());
+  const lid = generateLid();
+  dispatcher.dispatch({
+    type: 'CREATE_ENTRY',
+    archetype: 'text',
+    lid,
+    title,
+    body,
+    // 🔴 いま左の一覧で開いているフォルダの中に作る(「+ ノート」と同じ置き場)
+    parentLid: openFolderLid(state),
+    relationId: generateLid(),
+    edit: false,
+  });
+  sayCalc(
+    pane,
+    dispatcher.getState().entryMetas.has(lid)
+      ? `新しいノート「${title}」を作りました`
+      : '作れませんでした(もう一度押してください)',
+  );
 }
 
 /** テキスト整形の面の「結果の上の 1 行」に一言置く(面の中の出来事は面に出す)。 */
@@ -15939,6 +15987,33 @@ const ACTIONS: Record<string, ActionHandler> = {
     syncTextLabButtons(pane, dispatcher.getState());
   },
   /**
+   * 🔴 **計算スクラッチパッドの面**(#1230)。⚠ 式と結果は**面の DOM が持つ**(state に写さない ──
+   *   打ちかけは `pkc3.calc-draft` が覚える)。規則は `features/calc/sheet.ts` の 1 本で、ここは**押された事実を渡す**だけ。
+   */
+  'calc-to-table': (dispatcher, target) => {
+    calcToNote(dispatcher, target, 'table');
+  },
+  'calc-to-text': (dispatcher, target) => {
+    calcToNote(dispatcher, target, 'text');
+  },
+  'calc-copy': (dispatcher, target) => {
+    const pane = calcPane(target);
+    if (pane === null) return;
+    const text = sheetToText(currentCalcRows(pane));
+    if (text.trim() === '') return;
+    finishCopy(dispatcher, target, copyPlainText(text));
+  },
+  'calc-clear': (_dispatcher, target) => {
+    const pane = calcPane(target);
+    if (pane === null) return;
+    const input = pane.querySelector<HTMLTextAreaElement>('[data-pkc-field="calc-input"]');
+    if (input === null) return;
+    input.value = '';
+    input.focus();
+    refreshCalc(pane);
+    flushCalcDraft(pane);
+  },
+  /**
    * 🔴 **開く場所**(#826)。⚠ `set-prose-align` と同じ受け方(`<select>` でもボタンでも通す)。
    */
   'set-open-place': (_dispatcher, target, services) => {
@@ -18230,6 +18305,12 @@ export function bindActions(
         refreshTextLab(pane);
         syncTextLabButtons(pane, dispatcher.getState());
       }
+      return;
+    }
+    // 🔴 計算スクラッチパッドの式(#1230)。⚠ 打つそばから右の結果を描き直し、打ちかけを覚える(ノートにしても式は残る)
+    if (el instanceof HTMLTextAreaElement && el.getAttribute('data-pkc-field') === 'calc-input') {
+      const pane = calcPane(el);
+      if (pane !== null) refreshCalc(pane, { save: true });
       return;
     }
     // 🔑 一覧の絞り込み(P7b 段⑨c)。⚠ **state に写す** ── renderer は

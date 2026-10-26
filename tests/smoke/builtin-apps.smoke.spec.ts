@@ -223,3 +223,67 @@ test('🔴 テキスト整形: 貼る → 整え方を押す → 右に結果 �
   ).toHaveCount(1, { timeout: 10_000 });
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+test('🔴 計算スクラッチパッド: 書くと各行の右に結果が同じ高さで並び、値を直すと下も変わり、読み込み直しても式が戻る (#1230)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=calc';
+  });
+  const pane = page.locator('[data-pkc-view-pane="calc"]');
+  await expect(pane, '計算スクラッチパッドの面が開かない').toBeVisible({ timeout: 15_000 });
+  const input = pane.locator('[data-pkc-field="calc-input"]');
+  const results = pane.locator('[data-pkc-field="calc-results"] > div');
+
+  await clickReal(page, input);
+  await page.keyboard.type('基本単価 = 3200 円\n作業時間 = 40 時間\n小計 = 基本単価 * 作業時間\n\n電車 1200円\nバス 300円\n合計');
+  await expect(results, '結果の行数が左の行数と違う').toHaveCount(7);
+  await expect(results.nth(2)).toHaveText('128,000');
+  await expect(results.nth(6)).toHaveText('1,500');
+
+  // 🔴 右の結果が、左の同じ行と同じ高さに並ぶ(長い式でも 1 行ぶんずれない)
+  const ys = await page.evaluate(() => {
+    const ta = document.querySelector('[data-pkc-field="calc-input"]') as HTMLTextAreaElement;
+    const rows = [...document.querySelectorAll('[data-pkc-field="calc-results"] > div')] as HTMLElement[];
+    const cs = getComputedStyle(ta);
+    const lh = parseFloat(cs.lineHeight);
+    const top = ta.getBoundingClientRect().top + parseFloat(cs.paddingTop) + parseFloat(cs.borderTopWidth);
+    return rows.map((r, i) => ({ row: r.getBoundingClientRect().top, line: top + i * lh }));
+  });
+  for (const [i, y] of ys.entries()) {
+    expect(Math.abs(y.row - y.line), `${i + 1} 行目の結果が左の行とずれている`).toBeLessThan(2);
+  }
+
+  // 値を直すと、下の結果も変わる(追従)
+  await input.evaluate((el) => {
+    const t = el as HTMLTextAreaElement;
+    t.setSelectionRange(0, 0);
+    t.focus();
+  });
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('End');
+  for (let i = 0; i < 6; i += 1) await page.keyboard.press('Backspace'); // 「3200 円」を消す
+  await page.keyboard.type('4000 円');
+  await expect(results.nth(2), '上の値を直しても下の結果が変わらない').toHaveText('160,000');
+
+  // 読み込み直しても式が戻る(自動で覚える)
+  await page.waitForTimeout(700);
+  await page.reload();
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=calc';
+  });
+  await expect(pane).toBeVisible({ timeout: 15_000 });
+  await expect(input, '読み込み直したら式が消えた').toHaveValue(/4000 円/);
+  await expect(results.nth(2)).toHaveText('160,000');
+
+  // ノートにする(表)── 本物の一覧に載る
+  await clickReal(page, pane.locator('[data-pkc-action="calc-to-table"]'));
+  await expect(pane.locator('[data-pkc-field="calc-status"]')).toContainText('新しいノート「計算メモ');
+  await expect(
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '計算メモ' }),
+    '作ったノートが一覧に載らない',
+  ).toHaveCount(1, { timeout: 10_000 });
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
