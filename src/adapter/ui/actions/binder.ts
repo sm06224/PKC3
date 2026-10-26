@@ -243,6 +243,7 @@ import { noteTimeFor } from '@features/schedule/task-cards';
 import { plainTaskTitle } from '@features/schedule/task-title';
 import {
   DATE_SHORTCUTS,
+  type DateShortcut,
   isDateShortcut,
   shortcutDate,
 } from '@features/schedule/date-shortcuts';
@@ -410,6 +411,7 @@ import {
   taskRunMenuActions,
   blockStepMenuActions,
   BLOCK_STEP_DIR_ATTR,
+  taskItemMenuActions,
   tableConvertPickLabel,
   tableHeaderPickLabel,
   appGroupMenuActions,
@@ -3225,6 +3227,10 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   /**
    * 🔴 **画像の大きさ・寄せも本文を書く**(#1640 ③)── 画像の直後の `{w=50% align=center}` を書き換える
    *   (`SET_IMAGE_ATTRS` → `REQUEST_BODY_REWRITE`)。`toggle-task` と同じ門をくぐらせる。
+  // 🔴 チェック項目 1 つの日付を書くのも本文を書く(#426 段②。`toggle-task` と同じ門)
+  'task-item-date-today',
+  'task-item-date-tomorrow',
+  'task-item-date-clear',
    */
   'image-width',
   'image-align',
@@ -4686,6 +4692,8 @@ const MENU_TASK_LINES_ATTR = 'data-pkc-menu-task-lines';
 /**
  * 🔴 **右クリック(長押し)したブロックを動かすときの座標**(台帳 #1852 束 S1、依頼 238 の案 B)。
  * 動かす範囲(`start..end`)と入れる位置(`before`)は**生の body の行番号**(`MOVE_BLOCK` がそのまま読む)。
+/** 🔴 右クリックしたチェック項目 **1 つ**の原文の行番号(#426 段②。受け手 `task-item-date-*` が読む)。 */
+const MENU_TASK_LINE_ATTR = 'data-pkc-menu-task-line';
  * ⚠ 項目ごとに焼く(向きで入れる位置が違う)。メニューの器は本文の外に出るので、押した瞬間の DOM から数える。
  */
 const MENU_BLOCK_START_ATTR = 'data-pkc-menu-block-start';
@@ -4719,6 +4727,23 @@ function taskRunLinesAt(target: Element, host: HTMLElement | null): number[] | n
 /**
  * 🔴 **押した所の表が、原文の何行目から始まるか**(#708 段②)。表でなければ `null`。
  *
+/**
+ * 🔴 **右クリックしたチェック項目 1 つの行番号**(#426 段②)。無ければ `null`。
+ * ⚠ 入れ子の子リストの箱ではなく、**押した項目自身の箱**(`li` の直下の最初の箱)を引く。
+ *   付箋の中は出さない(`taskRunLinesAt` と同じ理由)。
+ */
+function taskItemLineAt(target: Element, host: HTMLElement | null): number | null {
+  if (target.closest('[data-pkc-field="place-body"]') !== null) return null;
+  const li = target.closest('li.pkc-task-item');
+  if (li === null || host === null || !host.contains(li)) return null;
+  for (const box of li.querySelectorAll('input.pkc-task-checkbox[data-pkc-task-line]')) {
+    if (box.closest('li') !== li) continue;
+    const n = Number(box.getAttribute('data-pkc-task-line'));
+    return Number.isInteger(n) && n >= 0 ? n : null;
+  }
+  return null;
+}
+
  * 🔑 引くのは**塊(`.pkc-md-block`)に焼かれた行**である ── 表の升から
  *   `closest('[data-pkc-source-line]')` すると `<tr>` に当たり、**行ごとに違う番号**が
  *   返る(csv の囲みは `<tr>` に焼いていないので、そちらだけ塊に当たる = 非対称)。
@@ -5243,6 +5268,38 @@ function setTaskRun(
 function menuCarriedLine(target: Element): number | null {
   return menuCarriedAt(target, MENU_LINE_ATTR);
 }
+/**
+ * 🔴 **チェック項目 1 つの日付を付ける・外す受け手の実体**(#426 段②)── 3 つを 1 本にする。
+ * ⚠ 何をするかの判断は `body-rewrite.ts`(`line-date`)── ここは**運ばれた行を渡す**だけ。
+ *   日付の組み立ては `shortcutDate` 1 本(`Ctrl+;` の近道と同じ関数)。断りは reducer(`SET_TASK_DATE`)が言う。
+ */
+function setTaskItemDate(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  which: DateShortcut | null,
+  services: BinderServices,
+): void {
+  if (refuseStaleMenu(dispatcher, target)) return;
+  const line = Number(target.getAttribute(MENU_TASK_LINE_ATTR));
+  const lid = target.getAttribute(MENU_LID_ATTR) ?? '';
+  if (!Number.isInteger(line) || line < 0 || lid === '') return;
+  // 🔴 押した時点の行の中身を添える(#1087)。引けなければ撃たずに断る
+  const openLine = shownBodyLine(dispatcher.getState(), lid, line);
+  if (openLine === null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+    return;
+  }
+  const date = which === null ? null : shortcutDate(which, new Date());
+  actUnlessEditedElsewhere(
+    dispatcher,
+    services,
+    [lid],
+    '日付を書けませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+    // ⚠ `until` も外す ── 記法まるごと消えるので期間だけ残すと「頼んでいない指示」になる(`unschedule-task` と同じ)
+    () => dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, openLine, date, ...(date === null ? { until: null } : {}) }),
+  );
+}
+
 
 /** 右クリックのメニューが運んできた `:::` の塊の開き行(#677)。無ければ `null`。 */
 function menuCarriedBlock(target: Element): number | null {
@@ -12740,6 +12797,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   'move-block-step': (dispatcher, target, services) => {
     if (refuseStaleMenu(dispatcher, target)) return;
     const lid = target.getAttribute(MENU_LID_ATTR) ?? '';
+  'task-item-date-today': (dispatcher, target, services) => setTaskItemDate(dispatcher, target, 'today', services),
+  'task-item-date-tomorrow': (dispatcher, target, services) => setTaskItemDate(dispatcher, target, 'tomorrow', services),
+  'task-item-date-clear': (dispatcher, target, services) => setTaskItemDate(dispatcher, target, null, services),
     const start = menuCarriedAt(target, MENU_BLOCK_START_ATTR);
     const end = menuCarriedAt(target, MENU_BLOCK_END_ATTR);
     const toBefore = menuCarriedAt(target, MENU_BLOCK_BEFORE_ATTR);
@@ -20313,6 +20373,12 @@ export function bindActions(
               // 🔴 ログの日時の見出しは「行」と呼ぶ(#1559)── 判定は `isLogRowHeading` 1 本
               logRow: isLogRowHeading(
                 ob === null ? undefined : dispatcher.getState().entryMetas.get(ob.lid)?.archetype,
+      /** 🔴 押した項目 1 つ(#426 段②)。日付が書いてあるかは、画面が見ている本文の行から引く(外す口の出し分け)。 */
+      const taskItemLine = taskItemLineAt(target, host);
+      const taskItemDated =
+        taskItemLine !== null && ob !== null
+          ? readLineDate(shownBodyLine(dispatcher.getState(), ob.lid, taskItemLine) ?? '') !== null
+          : false;
                 level,
                 headingPlainText(heading),
               ),
@@ -20370,6 +20436,12 @@ export function bindActions(
                 ...(a.attrs ?? {}),
                 [MENU_BLOCK_START_ATTR]: String(steps.start),
                 [MENU_BLOCK_END_ATTR]: String(steps.end),
+        ...(taskItemLine === null
+          ? []
+          : taskItemMenuActions({ dated: taskItemDated }).map((a) => ({
+              ...a,
+              attrs: { [MENU_TASK_LINE_ATTR]: String(taskItemLine) },
+            }))),
                 [MENU_BLOCK_BEFORE_ATTR]: String((a.attrs?.[BLOCK_STEP_DIR_ATTR] === 'up' ? steps.up : steps.down) ?? ''),
               },
             }))),

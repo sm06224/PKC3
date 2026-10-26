@@ -435,6 +435,10 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 **リストを丸ごとそろえる 2 つ**(#1173、2026-10-01)
       ['task-run-open', '8e3e5aee'],
       ['task-run-done', '926e25f8'],
+      // 🔴 **チェック項目 1 つの日付 3 つ**(#426 段②、2026-10-26)
+      ['task-item-date-today', '9e34c823'],
+      ['task-item-date-tomorrow', '851dac02'],
+      ['task-item-date-clear', '7440e53a'],
       // 🔴 **画像の大きさ・寄せ 2 つ**(#1640 ③、2026-10-17)
       ['image-width', 'b2d39ea9'],
       ['image-align', '642ef46e'],

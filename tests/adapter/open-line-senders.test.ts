@@ -404,8 +404,8 @@ describe('送り手の全数', () => {
     ['SET_TABLE_FORMAT', 'openLine', 1], // 表の形変え(右クリックと ▾ の小窓は `applyTableFormat` の 1 口)
     // 一覧の行を本文へ落とす(binder)/ 落とした所へ入れる添付(asset-into-note)── どちらも落とした所の目印を運ぶ
     ['INSERT_LINES', 'anchor', 2],
-    // 札を外す(binder)/ 札を日へ落とす(schedule-drag)/ 繰り返しを全部ずらす(同)/ 目盛りで動かす(grid-drag)/ 戻す(undo)
-    ['SET_TASK_DATE', 'openLine', 5],
+    // 札を外す(binder)/ チェック項目の右クリック 今日・明日・外す(binder、#426 段②)/ 札を日へ落とす(schedule-drag)/ 繰り返しを全部ずらす(同)/ 目盛りで動かす(grid-drag)/ 戻す(undo)
+    ['SET_TASK_DATE', 'openLine', 6],
     ['SET_TASK_REPEAT', 'openLine', 1],
     ['MOVE_REPEAT_OCCURRENCE', 'openLine', 1],
   ];
