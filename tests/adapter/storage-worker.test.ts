@@ -3327,14 +3327,22 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
    *   「**そもそも見ていない**」で緑だった(CLAUDE.md §2「通っていない」)。
    * 🔑 名前つきを 1 つ混ぜると、この本文は**読まれたうえで**名前の無い囲みが落ちる。
    */
-  it('⚠ 名前の無い囲みは表にならない(同じ本文が読まれていても)', async () => {
+  it('🔑 名前の無い囲みは既定の表 csv に積まれる(#681 の残り)。名前つきの表には混ざらない', async () => {
     await write(
       'csv-noname',
       fence('csv', ['品名,数', 'ぶどう,1']) + fence('csv name=有名', ['x', '1']),
     );
     // ⚠ 空振り防止 ── この本文は実際に読まれている(名前つきの方は引ける)
     expect((await run('SELECT x FROM 有名')).rows).toEqual([['1']]);
-    await expect(run('SELECT * FROM csv')).rejects.toThrow(/no such table/i);
+    const r = await run('SELECT _note, 品名, 数 FROM csv');
+    expect(r.rows).toEqual([[expect.any(String), 'ぶどう', '1']]);
+    // 名前つきの囲みは csv に混ざらない(対照群)
+    expect((await run('SELECT count(*) FROM csv')).rows).toEqual([[1]]);
+    // 目録にも出る(csv を引いた回)
+    const cat = await run("SELECT rows FROM csv_tables WHERE name = 'csv'");
+    expect(cat.rows).toEqual([[1]]);
+    // 引かない回は組み立てない(csv の語が出ない SQL では表が無い)
+    await expect(run('SELECT 1 FROM csv_x')).rejects.toThrow();
   });
 
   it('🔴 同じ名前は積む ── どこから来たかは _note で分かる', async () => {

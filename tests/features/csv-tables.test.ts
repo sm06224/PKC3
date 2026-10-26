@@ -23,6 +23,7 @@ import {
   CSV_TABLE_NAME_MAX,
   CSV_TABLE_CELLS_MAX,
   CSV_SOURCE_COLUMNS,
+  CSV_DEFAULT_TABLE,
 } from '../../src/features/query/csv-tables';
 import type { CsvTableBlock } from '../../src/features/query/csv-tables';
 
@@ -129,6 +130,15 @@ describe('本文から拾う', () => {
     expect(got[0]?.name).toBe('売上');
     expect(got[0]?.columns).toEqual(['品名', '数']);
     expect(got[0]?.rows).toEqual([['りんご', '3']]);
+  });
+
+  it('🔑 unnamed を指定したときだけ、名前の無い囲みを既定の表名 csv で拾う(#681)', () => {
+    const body = fence('csv name=売上', ['a', '1']) + fence('tsv', ['x\ty', '1\t2']);
+    expect(collectCsvTables(body, note).map((b) => b.name)).toEqual(['売上']);
+    const got = collectCsvTables(body, note, undefined, { unnamed: true });
+    expect(got.map((b) => b.name)).toEqual(['売上', CSV_DEFAULT_TABLE]);
+    expect(got[1]?.columns).toEqual(['x', 'y']);
+    expect(validCsvTableName(CSV_DEFAULT_TABLE)).toBe(true);
   });
 
   it('noheader は col1 / col2 …(見出しを行として食わない)', () => {

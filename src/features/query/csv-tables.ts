@@ -88,6 +88,15 @@ export const CSV_TABLE_RESERVED: readonly string[] = [
   'workspaces',
 ];
 
+/**
+ * 🔑 **名前を付けていない囲みの既定の表名**(#681 の残り「`name=` を付けなくても引ける案」)。
+ *
+ * 名前を付けていない csv / tsv / psv の囲みは、全ノート分まとめて `csv` という 1 つの表に積まれる
+ * (`SELECT * FROM csv`)。出所は `_note` / `_lid` で分かる。⚠ 打った SQL に `csv` が出る回だけ組み立てる
+ * (名前を付けた表と同じ「引く物だけ作る」規律)。名前を付けた囲みが `name=csv` を名乗れば同じ表に積まれる。
+ */
+export const CSV_DEFAULT_TABLE = 'csv';
+
 /** どの行がどこから来たかの列(必ず先頭に付く)。 */
 export const CSV_SOURCE_COLUMNS = ['_note', '_lid'] as const;
 
@@ -294,6 +303,8 @@ export function collectCsvTables(
   note: { readonly lid: string; readonly title: string },
   /** 受けられなかった囲みを積む先(渡さなければ数えない)。 */
   rejects?: CsvTableReject[],
+  /** 🔑 名前の無い囲みを既定の表名(`CSV_DEFAULT_TABLE`)で拾うか(既定は拾わない)。 */
+  options?: { readonly unnamed?: boolean },
 ): CsvTableBlock[] {
   const lines = body.split('\n');
   const out: CsvTableBlock[] = [];
@@ -308,8 +319,9 @@ export function collectCsvTables(
     const info = fenceInfo(openLead === null ? openRaw : openRaw.slice(openLead));
     const lang = detectCsvLang(info);
     if (lang === null) continue;
-    const raw = csvTableNameRaw(info);
-    if (raw === null) continue;
+    const named = csvTableNameRaw(info);
+    if (named === null && options?.unnamed !== true) continue;
+    const raw = named ?? CSV_DEFAULT_TABLE;
     const grid = parseCsv(fenceText(lines, span), DELIMITER[lang]);
     /**
      * ⚠ **`grid.length === 0` は書かない** ── `parseCsv` は空の入力に `null` を返すので、
