@@ -352,11 +352,11 @@ describe('🔴 縁の「操作を探す」に、探す欄へ移る鍵を添え�
     applyPaneVisibility(root, ['sidebar']);
     const k = memStore();
     k.removeBinding('focus-search', 'Mod+Shift+F');
-    expect(k.addBinding('focus-search', 'Alt+9'), '前提: 割当を変えられない').toBeNull();
+    expect(k.addBinding('focus-search', 'Alt+Q'), '前提: 割当を変えられない').toBeNull();
     expect(applyShortcutHints(root, k), '1 つも書き換えていない(空振り)').toBeGreaterThan(0);
-    expect(palette(root).title, '割当を変えたのに古い鍵のまま').toContain('Alt + 9 で探す欄へ');
+    expect(palette(root).title, '割当を変えたのに古い鍵のまま').toContain('Alt + Q で探す欄へ');
     expect(palette(root).title).not.toContain('Ctrl + Shift + F');
-    k.removeBinding('focus-search', 'Alt+9');
+    k.removeBinding('focus-search', 'Alt+Q');
     applyShortcutHints(root, k);
     expect(palette(root).title, '割当が無いのに鍵を書いている').not.toContain('探す欄へ');
     expect(palette(root).title, '操作を探す自身の鍵は残る').toContain('(Ctrl + Shift + P)');

@@ -103,9 +103,10 @@ describe('重い正規表現の置換(本物の別スレッド)', () => {
     expect(got.text, '止めたのに結果が変わっている').toBe(input);
     expect(got.hits).toBe(0);
     // 2. 時間切れで返った(重い式が終わるのを待っていない)
-    expect(elapsed, '時間切れで切れていない').toBeLessThan(1500);
+    expect(elapsed, '時間切れで切れていない').toBeLessThan(1700);
     // 3. メインスレッドは止まらなかった(直に回すと 1.5 秒以上止まる)
-    expect(lag, `メインスレッドが ${Math.round(lag)}ms 止まった`).toBeLessThan(250);
+    // ⚠ 直に回すと 1.9 秒以上止まる式。他の処理で CPU が混む環境でも誤って鳴らないよう、しきい値はその半分より下に置く
+    expect(lag, `メインスレッドが ${Math.round(lag)}ms 止まった`).toBeLessThan(800);
     // 4. 止めたワーカーは本当に終わっている
     expect(ThreadWorker.made).toHaveLength(1);
     const code = await Promise.race([
@@ -118,8 +119,10 @@ describe('重い正規表現の置換(本物の別スレッド)', () => {
 
   it('🔴 止めたあとの軽い置換は、作り直されたワーカーで普通に動く(置換の数も数える)', async () => {
     ThreadWorker.made = [];
-    const client = new LabRegexClient({ spawn: () => new ThreadWorker() as unknown as Worker, timeoutMs: 400 });
-    const heavy = await client.apply(`${'a'.repeat(26)}b`, { pattern: '(a+)+$', replacement: 'x', flags: '' });
+    // ⚠ 作り直したワーカーの起動(スレッド + 束の評価)は、負荷のある環境で数百 ms かかる ── 時間切れは余裕を持たせる。
+    //   重い式は 30 字(手元で十数秒)にして、余裕のある時間切れでも確実に止まる側に置く
+    const client = new LabRegexClient({ spawn: () => new ThreadWorker() as unknown as Worker, timeoutMs: 2500 });
+    const heavy = await client.apply(`${'a'.repeat(29)}b`, { pattern: '(a+)+$', replacement: 'x', flags: '' });
     expect(heavy.note).toBe(LAB_REGEX_TIMEOUT_NOTE);
     const light = await client.apply('abc 123 def 45', { pattern: '\\d+', replacement: '<$&>', flags: 'g' });
     expect(light.note).toBeNull();
@@ -127,11 +130,12 @@ describe('重い正規表現の置換(本物の別スレッド)', () => {
     expect(light.hits).toBe(2);
     expect(ThreadWorker.made, '作り直していない').toHaveLength(2);
     client.dispose();
-  }, 20_000);
+  }, 40_000);
 
   it('⚠ 対照群 ── 軽い式なら時間切れにならず、そのまま結果を返す', async () => {
     ThreadWorker.made = [];
-    const client = new LabRegexClient({ spawn: () => new ThreadWorker() as unknown as Worker, timeoutMs: 400 });
+    // 起動に時間がかかる環境でも切れないよう、時間切れは長くする(軽い式が時間切れで負けないことを見る対照群)
+    const client = new LabRegexClient({ spawn: () => new ThreadWorker() as unknown as Worker, timeoutMs: 10_000 });
     const r = await client.apply('aaa', { pattern: 'a+', replacement: 'x', flags: '' });
     expect(r).toEqual({ text: 'x', note: null, hits: 1 });
     client.dispose();

@@ -198,6 +198,10 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'view-detail': SCREEN,
   'view-query': SCREEN,
   'view-dual': SCREEN,
+  // 左にタブの無い組み込みアプリの画面(テキスト整形 / 計算スクラッチパッド / 差分マージ)
+  'view-textlab': APP,
+  'view-calc': APP,
+  'view-diff': APP,
   'refresh-query': SCREEN,
   'cycle-read-columns': SCREEN,
   'clear-selection': SCREEN,

@@ -583,9 +583,9 @@ describe('note-find: レビュー指摘の直し', () => {
     expect(b.bindings['create-entry']).toContain('Mod+Shift+F');
     expect(b.bindings['focus-search'], '既定が user の割当を奪っている').toEqual([]);
     // (a) 前の版で focus-search に Mod+F と別の鍵を足していた
-    const a = resolveUsableBindings({ 'focus-search': ['Mod+F', 'Alt+9'] });
+    const a = resolveUsableBindings({ 'focus-search': ['Mod+F', 'Alt+Q'] });
     expect(a.unusable, 'Mod+F が使えない割当に落ちた').toEqual([]);
-    expect(a.bindings['focus-search']).toEqual(['Mod+Shift+F', 'Alt+9']);
+    expect(a.bindings['focus-search']).toEqual(['Mod+Shift+F', 'Alt+Q']);
     expect(a.bindings['find-in-note'], 'Mod+F は新しい既定のまま').toEqual(['Mod+F']);
   });
 });
