@@ -36,6 +36,7 @@ import {
   askSqlEmbed,
   setSqlEmbedRunner,
   SqlEmbedHydrator,
+  SQL_EMBED_TYPING_MS,
   type SqlEmbedRunner,
 } from '../../src/adapter/ui/render/sql-embed-hydrate';
 import { SQL_MAX_MS, SQL_MAX_STEPS } from '../../src/adapter/state/store-effects';
@@ -162,6 +163,62 @@ afterEach(() => {
   setSqlEmbedRunner(null);
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe('打っている途中の面は、止まってから引く(#1223 の残り)', () => {
+  it('🔴 下見(savedNote)の器は 300 ms 待ってから引く / 読む面の器は待たない(対照群)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      const { run, spy } = realRunner();
+      setSqlEmbedRunner(run);
+      const body = embedBody('SELECT 1 AS x');
+      mount(body);
+      const hydrator = new SqlEmbedHydrator();
+      hydrator.sync(root, body, true);
+      seeAll();
+      await Promise.resolve();
+      expect(spy, '待たずに引いた(打鍵のたびに途中の字を引く)').not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(SQL_EMBED_TYPING_MS - 1);
+      expect(spy, '待ちが足りないうちに引いた').not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2);
+      expect(spy, '止まったのに引かない').toHaveBeenCalledTimes(1);
+      hydrator.release();
+
+      // 対照群: 読む面(savedNote 無し)は待たずに引く
+      spy.mockClear();
+      document.body.textContent = '';
+      watchers.length = 0;
+      mount(body);
+      const reading = new SqlEmbedHydrator();
+      reading.sync(root, body);
+      seeAll();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(spy, '読む面まで待たされている').toHaveBeenCalledTimes(1);
+      reading.release();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('🔴 待っている間に器が外れたら引かない', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      const { run, spy } = realRunner();
+      setSqlEmbedRunner(run);
+      const body = embedBody('SELECT 2 AS x');
+      mount(body);
+      const hydrator = new SqlEmbedHydrator();
+      hydrator.sync(root, body, true);
+      seeAll();
+      root.remove();
+      await vi.advanceTimersByTimeAsync(SQL_EMBED_TYPING_MS + 10);
+      expect(spy, '外れた器のために引いた').not.toHaveBeenCalled();
+      hydrator.release();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('見えたときに引いて、表にする(実 worker)', () => {

@@ -86,6 +86,7 @@ import {
   selfContainerId,
 } from './render/detail';
 import type { MermaidScope } from './render/mermaid-hydrate';
+import { SqlEmbedHydrator } from './render/sql-embed-hydrate';
 import { BODY_MEDIA_CLASS, BODY_MEDIA_FIELD, assetPreviewKind } from '@features/asset/asset-preview-kind';
 import { replaceOnMediaError } from './render/media-error';
 
@@ -168,6 +169,12 @@ interface OpenChapter {
   /** 囲みが止められたと申告してきた種別(組み直すたびに空へ戻す ── 囲みも作り直されて申告し直す)。 */
   blocked: Set<SandboxBlockedKind>;
   pending: unknown;
+  /**
+   * 本文に埋め込んだ SQL の答え(#1223)。⚠ 窓ごとに 1 つ。コピーの ⧉ は付けず(受け手が無い)、
+   * 別ウィンドウの要素は本体の観測器で「見えた」を取れる保証が無いので見えるのを待たず引く
+   * (引く口は本体と共通の直列の列なので、保存は待たせない)。
+   */
+  readonly sqlEmbeds: SqlEmbedHydrator;
 }
 
 export class ChapterWindows {
@@ -227,6 +234,7 @@ export class ChapterWindows {
         sandbox: null,
         blocked: new Set(),
         pending: null,
+        sqlEmbeds: new SqlEmbedHydrator({ copyButton: false, eager: true }),
       };
       this.windows.set(name, o);
       // ⚠ 開いた瞬間に「待っている」と分かる形にする(白紙を見せない)
@@ -349,7 +357,7 @@ export class ChapterWindows {
     });
     if (host === null) return;
     applyDocumentGlobals(host, extractDocumentGlobals(body));
-    await this.hydrate(o, gen, host, opts);
+    await this.hydrate(o, gen, host, opts, body);
   }
 
   /**
@@ -434,6 +442,7 @@ export class ChapterWindows {
     gen: number,
     host: HTMLElement,
     env: { readonly allowExternalImages: boolean; readonly currentContainerId: string },
+    body: string,
   ): Promise<void> {
     const stale = (): boolean => gen !== o.gen || o.win.closed;
     // ① 添付から中身を取る枠(#444)── 描けたら図もその中で埋める
@@ -510,6 +519,8 @@ export class ChapterWindows {
     // ③ 図(mermaid・グラフ・数式)── 本文の面と同じ 1 本
     const scopes = (this.deps.hydrateFigures ?? hydrateFigures)([host]);
     for (const s of scopes) o.disposers.push(() => s.dispose());
+    // ④ 本文に埋め込んだ SQL の答え(#1223 の残り)。⚠ 鍵は本文そのもの(本体の読む面と同じ)
+    o.sqlEmbeds.sync(host, body);
   }
 
   /**
@@ -584,6 +595,8 @@ export class ChapterWindows {
   private dispose(o: OpenChapter): void {
     o.gen++;
     this.release(o);
+    // 🔴 SQL の答えの控えも手放す(窓を閉じたら何も残さない)
+    o.sqlEmbeds.release();
     o.sandbox?.off();
     o.sandbox = null;
     if (o.pending !== null) {

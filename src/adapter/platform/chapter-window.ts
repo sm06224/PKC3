@@ -150,6 +150,10 @@ body{background:var(--bg,Canvas);color:var(--fg,CanvasText)}
 [data-pkc-field="${CHAPTER_BODY_FIELD}"]{padding:12px 16px}
 [data-pkc-field="${CHAPTER_BLOCKED_FIELD}"]{margin:0;padding:8px 16px 16px;font-size:12px;color:var(--muted,GrayText)}
 [data-pkc-field="${CHAPTER_NOTE_FIELD}"]{padding:24px 16px;color:var(--muted,GrayText)}
+[data-pkc-sql-embed]{overflow-x:auto}
+[data-pkc-sql-embed]:not(:empty){margin-top:6px}
+[data-pkc-sql-embed] [data-pkc-field="sql-embed-note"]{margin:6px 0 0;color:var(--muted,GrayText)}
+[data-pkc-sql-embed] [data-pkc-field="sql-embed-more"]{margin-top:6px;font:inherit;font-size:12px}
 [data-pkc-field="${CHAPTER_BODY_FIELD}"] a:not([href]){color:inherit;text-decoration:none;cursor:default}
 `;
 
