@@ -24,12 +24,15 @@ import type { DroppedAt } from './asset-into-note';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { BUILTIN_KINDS, isLaunchableUrl, tileSelectsEntry } from '@features/launcher/tiles';
 import {
+  allHeadingFoldState,
   chapterSpanOf,
   headingAtSourceLine,
   headingLevel,
   isHeadingFolded,
   revealBlock,
   toggleHeadingFold,
+  toggleAllHeadingFolds,
+  toggleAllLogDays,
   toggleLogDay,
 } from '../render/heading-fold';
 import { ADAPTER_SETTING_VALIDATORS } from '../render/settings-validators';
@@ -37,6 +40,11 @@ import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
 import { settleJump } from '../render/long-note';
 import { insideCodeOrMath } from '@features/markdown/code-context';
+import {
+  chapterLinkLine,
+  chapterLinkUnder,
+  planChapterCut,
+} from '@features/markdown/chapter-split';
 import { lineStart } from '@features/markdown/line-start';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
 import { assetRefsOf, carryAssets, hasAssetRefs } from '@features/asset/carry-assets';
@@ -3230,6 +3238,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // 🔑 **章だけ編集も同じ理由**(#1044 段2)── `edit-from-heading` と同じく、
   //    取込・書出しの最中に書込を始める入口を作らない
   'edit-section',
+  // 🔴 章の切り出し / 元に戻す(#1439)── ノートを作り、本文を書くので同じ門
+  'split-chapter',
+  'restore-chapter',
   'save-section-draft',
   // 🔑 **コード枠だけ編集も同じ理由**(#1044 段3)
   'edit-code-block',
@@ -5659,6 +5670,43 @@ async function copySourceLinesWithAssets(
     carryAssets(text, urls),
     `${what}を画像 ${String(urls.size)} 件ごとコピーしました(別の PKC3 へ貼ると、画像も取り込まれます)${notes.length === 0 ? '' : `。${notes.join('、')}`}`,
   );
+}
+
+/**
+ * 🔴 **章の切り出し / 元に戻すの、メニューに出す側を決める**(#1439)。判定は 1 本。
+ *
+ * - 見出しが本文の直下で、書き方が ATX(`#`)で、ログの行ではない。
+ * - 見出しの下が「実在するノートへのリンク 1 行」だけ → 元に戻す。
+ * - それ以外で、章に本文がある → 切り出す。
+ */
+function chapterSplitMenuFlags(
+  host: HTMLElement | null,
+  heading: Element | null,
+  body: string | null,
+  st: AppState,
+  level: number,
+  text: string,
+): { splitChapter?: boolean; restoreChapter?: boolean } {
+  if (host === null || heading === null || body === null || heading.parentElement !== host) return {};
+  if (isLogRowHeading(st.openBody === null ? undefined : st.entryMetas.get(st.openBody.lid)?.archetype, level, text)) return {};
+  const ctx = chapterRangeOf(host, heading, body);
+  if (ctx === null) return {};
+  const link = chapterLinkUnder(body, ctx.headingLine, ctx.end);
+  if (link !== null) return st.entryMetas.has(link.lid) ? { restoreChapter: true } : {};
+  return planChapterCut(body, ctx.headingLine, ctx.end).ok ? { splitChapter: true } : {};
+}
+
+/** 見出しの章の範囲を**生の body の行**で返す(frontmatter の行数を足す)。引けなければ `null`。 */
+function chapterRangeOf(
+  host: HTMLElement,
+  heading: Element,
+  body: string,
+): { headingLine: number; end: number } | null {
+  const fm = bodyBelowFrontmatter(body);
+  const span = chapterSpanOf(host, heading, fm.split('\n').length);
+  if (span === null) return null;
+  const offset = body.split('\n').length - fm.split('\n').length;
+  return { headingLine: span.start + offset, end: span.end + offset };
 }
 
 /**
@@ -13266,8 +13314,27 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 本文は 1 バイトも変わらない(見え方だけ)ので `BODY_WRITE_ACTIONS` には載せない。
    */
   'toggle-log-day': (_dispatcher, target) => {
-    const row = target.closest<HTMLElement>('[data-pkc-log-day]');
+    // 🔴 日の行も月の行(#1441 月別)も同じ口 ── 畳みの印を反転するだけ
+    const row = target.closest<HTMLElement>('[data-pkc-log-day],[data-pkc-log-month]');
     if (row !== null) toggleLogDay(row);
+  },
+  /**
+   * 🔴 **ログの日・月をまとめて畳む / 出す**(#1441)。1 つでも開いていれば全部畳み、全部畳んであれば全部出す。
+   * ⚠ 本文は 1 バイトも変わらない(見え方だけ)ので `BODY_WRITE_ACTIONS` には載せない。
+   */
+  'toggle-log-day-all': (_dispatcher, target) => {
+    const host = target.closest<HTMLElement>('[data-pkc-log-all]')?.parentElement;
+    if (host !== null && host !== undefined) toggleAllLogDays(host);
+  },
+  /**
+   * 🔴 **すべての見出しをまとめて畳む / 出す**(#1441 (a)。見出しの右クリックのメニュー)。
+   * ⚠ 本文は 1 バイトも変わらない(見え方だけ)ので `BODY_WRITE_ACTIONS` には載せない。
+   */
+  'toggle-all-heading-fold': (dispatcher, target) => {
+    if (refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+    if (host !== null) toggleAllHeadingFolds(host);
   },
   /**
    * 🔴 **長大なコードブロックの折りたたみ／展開切り替え**(#1139)。
@@ -13327,6 +13394,99 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     pickAppendTarget(dispatcher, root, line);
+  },
+  /**
+   * 🔴 **この章を新しいノートに切り出す**(#1439。user 設問への回答 = 推薦どおり)。
+   *
+   * 章の見出しの下が新しいノート(題名は見出しの字)になり、元には `[見出し](entry:<新しいノート>)` の 1 行が
+   * 残る。⚠ 書く順番は**入れてから切る**(先に新しいノートを作り、次に元をリンクにする)── 元を書けなかった
+   * 回は二重になるだけで、章は消えない。戻す道は `restore-chapter`(片道にしない)。
+   */
+  'split-chapter': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+    const heading = host === null ? null : headingAtSourceLine(host, line);
+    const st = dispatcher.getState();
+    const ob = st.openBody;
+    const meta = ob === null ? undefined : st.entryMetas.get(ob.lid);
+    const range = host === null || heading === null || ob === null ? null : chapterRangeOf(host, heading, ob.body);
+    if (host === null || heading === null || ob === null || meta === undefined || range === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '章の範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const plan = planChapterCut(ob.body, range.headingLine, range.end);
+    if (!plan.ok) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: plan.reason });
+      return;
+    }
+    const title = headingPlainText(heading).trim() || '切り出した章';
+    const lid = ob.lid;
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      '章を切り出せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => {
+        const cur = dispatcher.getState();
+        if (cur.phase !== 'ready') {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(cur.phase)}、章を切り出してください` });
+          return;
+        }
+        const childLid = generateLid();
+        // 1 手目: 新しいノートを作る(選択も開いている本文も動かさない)。元と同じフォルダへ
+        const parent = cur.relations.find((r) => r.kind === STRUCTURAL && r.toLid === lid)?.fromLid ?? null;
+        dispatcher.dispatch({
+          type: 'CREATE_ENTRY',
+          archetype: 'text',
+          lid: childLid,
+          title,
+          body: plan.cut.childBody,
+          parentLid: parent,
+          relationId: generateLid(),
+          edit: false,
+          keepSelection: true,
+        });
+        if (!dispatcher.getState().entryMetas.has(childLid)) return; // 作れなかった(理由は reducer が言う)
+        // 2 手目: 元の章をリンク 1 行にする(失敗したら二重になるだけ)
+        dispatcher.dispatch({
+          type: 'SPLIT_CHAPTER',
+          lid,
+          start: plan.cut.start,
+          end: plan.cut.end,
+          link: chapterLinkLine(title, childLid),
+          childLid,
+          childTitle: title,
+        });
+      },
+    );
+  },
+  /**
+   * 🔴 **切り出した章を元に戻す**(#1439。片道にしない)。見出しの下のリンク 1 行を、切り出し先の本文で置き換え、
+   * 切り出し先のノートを削除する(ゴミ箱から戻せる)。
+   */
+  'restore-chapter': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+    const heading = host === null ? null : headingAtSourceLine(host, line);
+    const ob = dispatcher.getState().openBody;
+    const range = host === null || heading === null || ob === null ? null : chapterRangeOf(host, heading, ob.body);
+    const link = range === null || ob === null ? null : chapterLinkUnder(ob.body, range.headingLine, range.end);
+    if (ob === null || link === null || !dispatcher.getState().entryMetas.has(link.lid)) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '切り出した章のリンクを読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const lid = ob.lid;
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid, link.lid],
+      '章を戻せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => dispatcher.dispatch({ type: 'RESTORE_CHAPTER', lid, childLid: link.lid, line: link.line }),
+    );
   },
   /**
    * 🔴 **その章を原文の Markdown でまるごと写す**(#677。user 裁定 2026-09-04)。
@@ -21680,6 +21840,8 @@ export function bindActions(
           : headingMenuActions({
               folded: isHeadingFolded(heading),
               foldable: heading.parentElement === host,
+              // 🔴 すべての見出しをまとめて(#1441 (a))── 畳める見出しが 2 つ以上のときだけ
+              foldAll: host === null ? null : allHeadingFoldState(host),
               appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
               // 🔴 章の参照(#579)── 描画が id を刻んだ見出しだけ(`#`〜`###`)
               linkable: heading.id !== '',
@@ -21705,6 +21867,8 @@ export function bindActions(
                *   `sectionEditable` も書ける状態を見ていない、形だけの条件である)。
                */
               chapterWindow: chapterable,
+              // 🔴 章を新しいノートに切り出す / 元に戻す(#1439)── 片方だけが出る(`chapterSplitStateAt` が決める)
+              ...chapterSplitMenuFlags(host, heading, ob?.body ?? null, dispatcher.getState(), level, headingPlainText(heading)),
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
         ...(block === null ? [] : blockMenuActions({

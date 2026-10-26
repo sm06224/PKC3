@@ -3025,6 +3025,18 @@ export type UserAction =
    */
   | { type: 'MOVE_BLOCK'; lid: string; start: number; end: number; toBefore: number }
   /**
+   * 🔴 **章を新しいノートに切り出したあと、元の本文の章をリンク 1 行にする**(#1439)。
+   * 新しいノートは binder が先に `CREATE_ENTRY` で作ってある(入れてから切る ── 書けなかった回は
+   * 二重になるだけで、章は消えない)。`start..end` は**生の body** の行(章の見出しの下)。
+   * 掴んだ時点の行は reducer が画面の本文から捕える(`MOVE_BLOCK` と同じ)。
+   */
+  | { type: 'SPLIT_CHAPTER'; lid: string; start: number; end: number; link: string; childLid: string; childTitle: string }
+  /**
+   * 🔴 **切り出した章を元に戻す**(#1439。片道にしない)── リンクの 1 行を新しいノートの本文で置き換え、
+   * 新しいノートを削除する(ゴミ箱から戻せる)。2 つのノートを触るので専用の event(`REQUEST_CHAPTER_RESTORE`)。
+   */
+  | { type: 'RESTORE_CHAPTER'; lid: string; childLid: string; line: number }
+  /**
    * 🔴 **本文の塊を、別のノートへ持っていく**(#684 段③)。
    *
    * > user 要望 2026-09-03:「本文の行 / 塊を、別のノートへ」
@@ -4428,6 +4440,16 @@ export type DomainEvent =
       entryOrder: number;
       /** 何をするか。規則は `features/markdown/body-rewrite.ts` の 1 か所。 */
       rewrite: BodyRewrite;
+    }
+  | {
+      /**
+       * 🔴 **切り出した章を元に戻す要求**(#1439)── 元のノートのリンク 1 行を、切り出し先の本文で置き換える。
+       * ⚠ どちらの本文も効果層が disk から読み直す(`REQUEST_BLOCK_HANDOFF` と同じ作法)。
+       *   **先に元へ書き**、書けたら切り出し先を削除する ── 書けなかった回は何も消えない。
+       */
+      type: 'REQUEST_CHAPTER_RESTORE';
+      into: { lid: string; title: string; archetype: string; entryOrder: number; line: number; openLine: string };
+      child: { lid: string; title: string };
     }
   | {
       /**
@@ -9345,6 +9367,52 @@ function reduceCore(
           toBeforeLine: lines[toBefore] ?? null,
         };
       });
+    case 'SPLIT_CHAPTER':
+      return bodyRewriteGate(state, action.lid, '、章を切り出してください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
+        const { start, end, link } = action;
+        if (!Number.isInteger(start) || !Number.isInteger(end) || link === '') return null;
+        const rows = shown.split('\n');
+        if (start < 0 || end < start || end >= rows.length) return null;
+        return {
+          kind: 'chapter-split',
+          start,
+          end,
+          lines: rows.slice(start, end + 1),
+          link,
+          childLid: action.childLid,
+          childTitle: action.childTitle,
+        };
+      });
+    case 'RESTORE_CHAPTER': {
+      const blocked =
+        bodyWriteBlockReason(state, action.lid) ?? bodyWriteBlockReason(state, action.childLid);
+      if (blocked !== null)
+        return { state: { ...state, error: blockedWithSuffix(blocked, '、章を元に戻してください') }, events: [] };
+      const into = state.entryMetas.get(action.lid);
+      const child = state.entryMetas.get(action.childLid);
+      if (!into || !child || action.lid === action.childLid) return { state, events: [] };
+      const shown = screenBodyOf(state, action.lid);
+      const openLine = shown?.split('\n')[action.line];
+      if (shown === null || openLine === undefined) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_CHAPTER_RESTORE',
+            into: {
+              lid: into.lid,
+              title: into.title,
+              archetype: into.archetype,
+              entryOrder: into.entryOrder,
+              line: action.line,
+              openLine,
+            },
+            child: { lid: child.lid, title: child.title },
+          },
+        ],
+      };
+    }
     /**
      * 🔴 **本文の塊を、別のノートへ持っていく**(#684 段③)。
      *

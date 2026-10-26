@@ -95,3 +95,43 @@ export function logDayRuns(
   }
   return out;
 }
+
+/** 月の連なり 1 つ。`start`〜`end` は塊の添字(`end` は含まない)、`days` はその月に入る日の連なりの数。 */
+export interface LogMonthRun {
+  /** `YYYY-MM` */
+  readonly month: string;
+  readonly start: number;
+  readonly end: number;
+  readonly days: number;
+}
+
+/** 日(`YYYY-MM-DD`)の属する月(`YYYY-MM`)。 */
+export function logMonthOfDay(day: string): string {
+  return day.slice(0, 7);
+}
+
+/** 月の行に出す字(`2026年10月`)。 */
+export function formatLogMonth(month: string): string {
+  return `${month.slice(0, 4)}年${Number(month.slice(5, 7))}月`;
+}
+
+/**
+ * 日の連なりを**月ごとに束ねる**(#1441 の月別)。
+ *
+ * - 束ねるのは「**間に何も挟まらず続く**(前の `end` = 次の `start`)同じ月の日」だけ。
+ *   時刻でない `##` の節が挟まったら月も切れる(間の節を畳みに巻き込まない ── 日の連なりと同じ規則)。
+ * - ⚠ 月の行を出すかどうか(日が 2 つ以上あるか)は呼び側が決める ── ここは範囲だけを返す。
+ */
+export function logMonthRuns(runs: readonly LogDayRun[]): readonly LogMonthRun[] {
+  const out: LogMonthRun[] = [];
+  for (const run of runs) {
+    const month = logMonthOfDay(run.day);
+    const last = out[out.length - 1];
+    if (last !== undefined && last.month === month && last.end === run.start) {
+      out[out.length - 1] = { month, start: last.start, end: run.end, days: last.days + 1 };
+    } else {
+      out.push({ month, start: run.start, end: run.end, days: 1 });
+    }
+  }
+  return out;
+}

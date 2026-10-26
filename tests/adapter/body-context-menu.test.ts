@@ -496,7 +496,9 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     // ⚠ 「この章を編集する」は #1044 段2 で**頭**へ足した(「ここから編集する」の上)
     // ⚠ 7 つ目「この章を別のウィンドウで読む」は #1044 段4 で足した(見出しの物の最後)
     // ⚠ 「章のリンクをコピー」は #1559 で足した(「章の参照をコピー」の隣 ── 本文に貼る物と外へ貼る物)
-    expect(acts.slice(0, 8), '見出しの 8 つが出ていない').toEqual([
+    // ⚠ 「すべての見出しの中身を折りたたむ」は #1441 (a) で足した(見出しの物の最後。畳める見出しが 2 つ以上のとき)
+    // ⚠ 「この章を新しいノートに切り出す」は #1439 で足した(「別のウィンドウで読む」の次)
+    expect(acts.slice(0, 10), '見出しの 10 個が出ていない').toEqual([
       'edit-section',
       'edit-from-heading',
       'append-at-heading',
@@ -505,6 +507,8 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
       'copy-section-ref',
       'copy-section-link',
       'open-chapter-window',
+      'split-chapter',
+      'toggle-all-heading-fold',
     ]);
     /**
      * 🔴 **差し替えていないことを、ここで見る。**
@@ -515,7 +519,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
      */
     // ⚠ 台帳 #1852 束 S1(依頼 238 の案 B): 動かせる向きの「ブロックを上へ・下へ移す」が本文の物の前に入る。
     //   この見出しは上に動かす先が無い(いちばん上)ので「下へ」の 1 つだけ(`block-step-menu.test.ts` が全数を見る)
-    expect(acts.slice(8), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+    expect(acts.slice(10), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
       'move-block-step',
       'add-place',
       'add-place-note',
@@ -591,6 +595,74 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     // ⚠ **対照群**:1 つ目の章の中身は畳まれない(先頭を掴んでいない証拠)
     expect((r.para as HTMLElement).hidden, '2 つ目を押したのに 1 つ目が畳まれた').toBe(false);
     expect((r.deep as HTMLElement).hidden, '2 つ目の章の中身が畳まれていない').toBe(true);
+  });
+
+  it('🔴 「すべての見出しの中身を折りたたむ」は全部畳み、字が変わり、もう一度で全部出す(#1441 (a))', () => {
+    const r = rig();
+    applyHeadingFold(r.host);
+    rightClick(r.head);
+    const label = (): string =>
+      r.root.querySelector(`${MENU} [data-pkc-action="toggle-all-heading-fold"]`)?.textContent ?? '';
+    expect(label()).toBe('すべての見出しの中身を折りたたむ');
+    r.press('toggle-all-heading-fold');
+    expect((r.para as HTMLElement).hidden, '畳まれていない').toBe(true);
+    expect((r.deep as HTMLElement).hidden, '2 つ目の章まで畳まれていない').toBe(true);
+    rightClick(r.head);
+    expect(label()).toBe('すべての見出しの中身を出す');
+    r.press('toggle-all-heading-fold');
+    expect((r.para as HTMLElement).hidden).toBe(false);
+    expect((r.deep as HTMLElement).hidden).toBe(false);
+  });
+
+  it('🔴 「この章を新しいノートに切り出す」: 新しいノートが作られ、元の章はリンク 1 行になる(#1439)', () => {
+    const r = rig();
+    const events: Array<{ type: string; rewrite?: { kind: string; link?: string; lines?: string[]; start?: number; end?: number } }> = [];
+    r.d.onEvent((e) => events.push(e as never));
+    rightClick(r.head);
+    expect(r.acts()).toContain('split-chapter');
+    expect(r.acts(), '下がリンクではないのに「元に戻す」が出た').not.toContain('restore-chapter');
+    r.press('split-chapter');
+    const made = [...r.d.getState().entryMetas.values()].find((m) => m.title === '章' && m.lid !== 'n1');
+    expect(made, '新しいノートが作られていない').toBeDefined();
+    expect(r.d.getState().selectedLid, '切り出しで開いているノートが退いた').toBe('n1');
+    const rw = events.find((e) => e.type === 'REQUEST_BODY_REWRITE')?.rewrite;
+    expect(rw?.kind).toBe('chapter-split');
+    expect(rw?.link).toBe(`[章](entry:${made!.lid} "切り出した章")`);
+    expect(rw?.lines).toEqual(['', '中身']);
+    expect([rw?.start, rw?.end]).toEqual([1, 2]);
+  });
+
+  it('🔴 見出しの下が「印のあるリンク 1 行」なら「元に戻す」が出て、押すと RESTORE_CHAPTER が行を運ぶ(#1439)', () => {
+    const r = rig();
+    r.d.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid: 'kid',
+      title: '章',
+      body: '中身\n',
+      edit: false,
+      keepSelection: true,
+    });
+    const linked = HEAD_BODY.replace('中身', '[章](entry:kid "切り出した章")');
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: linked });
+    const events: Array<{ type: string; into?: { line: number; openLine: string }; child?: { lid: string } }> = [];
+    r.d.onEvent((e) => events.push(e as never));
+    rightClick(r.head);
+    expect(r.acts()).toContain('restore-chapter');
+    expect(r.acts(), '切り出し済みなのに「切り出す」が出た').not.toContain('split-chapter');
+    r.press('restore-chapter');
+    const ev = events.find((e) => e.type === 'REQUEST_CHAPTER_RESTORE');
+    expect(ev?.child?.lid).toBe('kid');
+    expect(ev?.into?.line).toBe(2);
+    expect(ev?.into?.openLine).toBe('[章](entry:kid "切り出した章")');
+  });
+
+  it('🔴 印の無い普通のリンク 1 行の章には「元に戻す」を出さない(別のノートを消さない)(#1439)', () => {
+    const r = rig();
+    r.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'kid', title: '別', body: 'x\n', edit: false, keepSelection: true });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: HEAD_BODY.replace('中身', '[別](entry:kid)') });
+    rightClick(r.head);
+    expect(r.acts()).not.toContain('restore-chapter');
   });
 
   it('🔴 2 つ目の見出しからは、2 つ目の行で編集に入る', () => {

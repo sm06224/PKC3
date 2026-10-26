@@ -11234,6 +11234,8 @@ h3[data-pkc-section] {
   .pkc-md-copy-btn,
   /* ⚠ ログの日の行(#1441)も紙には要らない ── 押せる物が無い */
   [data-pkc-log-day],
+  [data-pkc-log-month],
+  [data-pkc-log-all],
   /* 🔴 画面専用の操作子は紙に要らない(#1129, #1137) */
   .pkc-back-to-top-container,
   .pkc-reading-progress,
@@ -11512,7 +11514,8 @@ h3[data-pkc-section] {
  * 字の大きさのまま、色だけ薄くする)。地は無彩色、色は情報にだけ ── 畳んでいる間だけ強調色を使う。
  * ⚠ 押せる物は `<button>`(鍵でも届く)。畳んだ印は `aria-expanded` と ▸ で出す。
  */
-[data-pkc-log-day] {
+[data-pkc-log-day],
+[data-pkc-log-month] {
   display: block;
   width: 100%;
   margin: 1.1em 0 0.3em;
@@ -11525,18 +11528,42 @@ h3[data-pkc-section] {
   border-bottom: 1px solid var(--border, currentColor);
   cursor: pointer;
 }
-[data-pkc-log-day]::before {
+[data-pkc-log-day]::before,
+[data-pkc-log-month]::before {
   content: '▾ ';
 }
-[data-pkc-log-day][aria-expanded='false']::before {
+[data-pkc-log-day][aria-expanded='false']::before,
+[data-pkc-log-month][aria-expanded='false']::before {
   content: '▸ ';
 }
-[data-pkc-log-day][aria-expanded='false'] {
+[data-pkc-log-day][aria-expanded='false'],
+[data-pkc-log-month][aria-expanded='false'] {
   color: var(--accent);
 }
 [data-pkc-log-day]:hover,
-[data-pkc-log-day]:focus-visible {
+[data-pkc-log-day]:focus-visible,
+[data-pkc-log-month]:hover,
+[data-pkc-log-month]:focus-visible,
+[data-pkc-log-all]:hover,
+[data-pkc-log-all]:focus-visible {
   color: var(--accent);
+}
+/* 🔴 月の行(#1441 月別)は日の行より一段目立たせる ── 字は本文と同じ大きさのまま、太さだけ変える */
+[data-pkc-log-month] {
+  margin-top: 1.4em;
+  font-weight: 600;
+}
+/* 🔴 「すべて折りたたむ / すべて出す」(#1441)── 先頭に小さく 1 本。右へ寄せて、本文の頭を押し下げない */
+[data-pkc-log-all] {
+  display: block;
+  margin: 0 0 0.2em auto;
+  padding: 0.1em 0.4em;
+  font: inherit;
+  font-size: 0.85em;
+  color: var(--muted, inherit);
+  background: none;
+  border: 0;
+  cursor: pointer;
 }
 
 /**
