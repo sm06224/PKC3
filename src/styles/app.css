@@ -12994,3 +12994,20 @@ h6:hover > .pkc-heading-anchor,
   color: var(--muted);
   font-size: 12px;
 }
+
+/* ══ 再生中の文字起こしの行(#1232、2026-10-26)══════════════════════
+ * 🔴 時刻の行(`data-pkc-seek-line`)のうち、いま鳴っている位置にいちばん近い 1 行だけを薄い地で光らせる。
+ * 色は情報(いまここ)にだけ使う ── 字の色は変えない。紙には出さない(押せない紙で光っていても意味が無い)。 */
+[data-pkc-seek-line][data-pkc-seek-active] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+@media print {
+  [data-pkc-seek-line][data-pkc-seek-active] {
+    background: none;
+    color: inherit;
+  }
+}

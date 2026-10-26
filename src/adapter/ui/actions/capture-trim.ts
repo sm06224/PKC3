@@ -27,6 +27,8 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import { TRIM_REFUSAL_TEXT } from '@features/audio/webm-opus';
 import { trimmedCaptureName } from '@features/audio/trim-text';
 import { elapsedText } from '@features/elapsed-text';
+import { clipTranscript } from '@features/capture/clip-transcript';
+import { transcriptHeading } from '@features/asr/asr-text';
 import { VIDEO_TRIM_REFUSAL_TEXT, type VideoScan } from '@features/video/webm-vp8';
 import { snapConfirm, snapDoneNote } from '@features/video/video-trim-text';
 import type { AudioTrimResult } from '@adapter/platform/audio/audio-codec';
@@ -85,6 +87,11 @@ export interface CaptureTrimDeps {
     item: AttachItem,
     place: { readonly parentLid: string | null; readonly keepSelection: boolean },
   ) => Promise<AttachedOne | null>;
+  /**
+   * 🔴 **元の録音のノートの本文を読む口**(#1232。範囲にかかる文字起こしの行を、切り出した録音へ移すため)。
+   * ⚠ 省略可 ── 無い配線では字は移さない(切り出しそのものは今までどおり)。読めなければ `null`。
+   */
+  readonly readBody?: (lid: string) => Promise<string | null>;
   /** 一時の知らせ(エラーの行とは別)。 */
   readonly notify: (text: string) => void;
   /** 🔴 録ったものへの重い仕事を 1 本ずつにする門(両方向に断る)。省略 = 門なし(単体の test)。 */
@@ -286,6 +293,35 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
         // 🔑 印は消す ── 同じ範囲をもう一度押して**同じものを 2 つ**作らせない
         deps.dispatcher.dispatch({ type: 'CLEAR_CAPTURE_TRIM' });
         /**
+         * 🔴 **範囲にかかる文字起こしの行を、切り出した録音へ移す**(#1232。user 指示 2026-10-26)。
+         * 時刻は切り出しの始まり(動画は実際に始まる所)を引いて、切り出した録音の中の位置にする。
+         * ⚠ 移せなくても切り出しは済んでいる ── 失敗は黙って字を移さないだけ(元の文字起こしは残る)。
+         */
+        let movedNote = '';
+        if (deps.readBody !== undefined) {
+          try {
+            const src = await deps.readBody(lid);
+            const clip = src === null ? null : clipTranscript(src, made.nameStartMs, endMs);
+            if (clip !== null) {
+              // ⚠ 書き込める間だけ ── 追記が詰まっていると、赤い断りが出て切り出しの結果が隠れる。移せなかったことは一行で言う
+              if (canWriteBody(deps.dispatcher) && deps.dispatcher.getState().entryMetas.has(attached.lid)) {
+                deps.dispatcher.dispatch({
+                  type: 'APPEND_TO_ENTRY',
+                  lid: attached.lid,
+                  text: clip.text,
+                  heading: transcriptHeading(new Date()),
+                  target: null,
+                });
+                movedNote = `。範囲の文字起こし ${clip.lines} 行も移しました`;
+              } else {
+                movedNote = '。範囲の文字起こしは、本文に書き込めなかったので移していません(元の録音の文字起こしは残っています)';
+              }
+            }
+          } catch {
+            /* 字が移せなくても、切り出した録音は出来ている */
+          }
+        }
+        /**
          * 🔴 **一覧を集め直す**(#683 段②a、着地前の実ブラウザ smoke が拾った)。
          *
          * ⚠ この面の一覧(`captureItems`)は**タブを開いた瞬間に 1 度**集めるだけで、
@@ -297,7 +333,9 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
         deps.dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
         finished = true; // ⚠ 次の「切り出しました」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)
         // 🔑 戻ったときは、済んだ後の一行にも「何秒早く始まるか」を残す(確認で見た数字を後から確かめられる)
-        deps.notify(`切り出しました:「${name}」(${elapsedText(made.durationMs)})${snapDoneNote(made.snapBackMs)}`);
+        deps.notify(
+          `切り出しました:「${name}」(${elapsedText(made.durationMs)})${snapDoneNote(made.snapBackMs)}${movedNote}`,
+        );
       } catch (e: unknown) {
         fail(`切り出せませんでした(${errorText(e)})`);
       } finally {

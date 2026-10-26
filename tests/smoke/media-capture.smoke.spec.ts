@@ -66,6 +66,13 @@ async function viaPalette(page: Page, command: string, label: string): Promise<v
 }
 
 test('🔴 録音を止めると本文に入り、その場で聞ける (#413 段①②)', async ({ page }) => {
+  /**
+   * 🔴 **90 秒に引き上げた**(2026-10-26、#1232)。この 1 本は録る → 文字にする → 波形 → 切り出す → 取り出す、と
+   *   本物の部品(マイク・復号・ワーカー)を続けて通す道中で、文字起こしを移す切り出しの段(+約 10 秒)を足して 30 秒の枠を超えた。
+   *   ⚠ 切り出しが文字起こしを移す段は、文字起こしの付いた録音が要るので、この道中の続きにしか書けない(別の 1 本にすると
+   *   録音・部品の取り込み・文字にするを丸ごと繰り返す)。下の 2 本(画面録画)と同じ作法。
+   */
+  test.setTimeout(90_000);
   const errors = collectPageErrors(page);
   /**
    * 🔴 **「繋いだこと」を数える計器**(#772 段① B)。
@@ -937,6 +944,18 @@ ${(e as Error).message}`,
   // 🔑 押せる字は行頭の 2 つだけ(区切りの数と同じ)
   await expect(body.locator('[data-pkc-action="seek-media"]'), '行頭の時刻が行の数だけ出ていない').toHaveCount(2);
   /**
+   * 🔴 #1232: **再生している間、いま話されている行が光る**。位置は録音の中(数秒)── `0:00` の行は位置以前、`1:05` の行は位置より後なので、
+   *   光るのは `0:00` の行だけ。⚠ 実ブラウザの `timeupdate` / `seeked` が実際に届くこと、光った行の地が実際に塗られること(CSS の受け皿)を見る。
+   */
+  const lit = body.locator('[data-pkc-seek-line][data-pkc-seek-active]');
+  await expect(lit, '再生位置の行が光っていない(実ブラウザの timeupdate が届いていない)').toHaveCount(1, { timeout: 10_000 });
+  await expect(lit).toContainText('0:00 一行目の偽の字');
+  await expect(body.locator('[data-pkc-seek-line]'), '時刻の行が 2 つの器で包まれていない').toHaveCount(2);
+  expect(
+    await lit.evaluate((el: HTMLElement) => getComputedStyle(el).backgroundColor),
+    '光った行の地が塗られていない(CSS の受け皿が無い)',
+  ).not.toBe('rgba(0, 0, 0, 0)');
+  /**
    * 🔴 #1232 段 b(Gemini 裁定 Q3 = B / Q4 = B): **音の再生機は、スクロールしても画面の上に貼り付いて見え続ける** /
    * 時刻に載せると「0:15 から再生」が出る(`title`)。
    * ⚠ 貼り付くのは `<audio>` ではなく**それを包む器**(`<audio>` の親は音の高さしか持たず、そこでは動けない)──
@@ -1100,6 +1119,22 @@ ${(e as Error).message}`,
     '文字起こしの時刻の行に目盛りが付いていない(録音の長さの内側の行が 1 本は在る)',
   ).toBeGreaterThanOrEqual(1);
 
+  /**
+   * 🔴 #1232: **前後の無音を除く範囲にする**。波形ができたのでボタンが生きる。偽のマイクの音は拍ごとに鳴る信号で、
+   *   前後が無音かは環境次第 ── 押せるなら押して印(`capture-trim` の字)に入ること、押せないなら理由が title に出ることを見る
+   *   (どちらでも、黙って押せない形にはならない)。
+   */
+  const quietBtn = originalRow.locator('[data-pkc-field="capture-trim-silence"]');
+  await expect(quietBtn, '波形ができたのに「前後の無音を除く範囲にする」が出ていない').toBeVisible();
+  if (await quietBtn.isEnabled()) {
+    expect(Number(await quietBtn.getAttribute('data-pkc-end-ms'))).toBeGreaterThan(Number(await quietBtn.getAttribute('data-pkc-start-ms')));
+    await clickReal(page, quietBtn);
+    await expect(originalRow.locator('[data-pkc-field="capture-trim"]'), '無音を除く範囲が印に入っていない').toHaveText(/^\d+:\d{2}〜\d+:\d{2}\(/);
+    await clickReal(page, originalRow.locator('[data-pkc-field="capture-trim-clear"]'));
+  } else {
+    expect(await quietBtn.getAttribute('title'), '押せない理由が出ていない').toMatch(/除ける無音はありません|声が見つかりません/);
+  }
+
   // ② 切り出した録音(2 秒): 押すとその位置から再生 → ドラッグで範囲 → 「この範囲で切り出す」で新しい録音が増える
   await ensurePlaying(cutRow);
   const cutWave = waveOf(cutRow);
@@ -1141,6 +1176,36 @@ ${(e as Error).message}`,
   await expect(rows, 'ドラッグで決めた範囲から、新しい録音が増えていない').toHaveCount(3, { timeout: 15_000 });
   // ⚠ 済むまで待つ(走っている間に次の操作へ進むと、状態の行が切り出しの字で埋まる)
   await expect(statusLine, '切り出しが済んでいない').toContainText('切り出しました', { timeout: 15_000 });
+
+  /**
+   * 🔴 #1232: **文字起こしのある録音を切り出すと、範囲に入る行が切り出した録音へ移る**(元は残る)。
+   * ⚠ 本物の経路(復号 → 切り出し → 添付 → 元のノートの本文を worker から読む → 追記)を通す。unit は読む口を模している。
+   *   元の録音の行 `0:00 …` は範囲(先頭から 2 秒付近)に入り、`1:05 …`(録音より後ろ)は入らない。
+   */
+  await ensurePlaying(originalRow);
+  const origWave = waveOf(originalRow);
+  await expect(origWave.locator('img[data-pkc-field="capture-wave-img"]')).toBeVisible({ timeout: 20_000 });
+  const ob = (await origWave.boundingBox())!;
+  const oy = ob.y + ob.height / 2;
+  await page.mouse.move(ob.x + ob.width * 0.02, oy);
+  await page.mouse.down();
+  await page.mouse.move(ob.x + ob.width * 0.3, oy, { steps: 4 });
+  await page.mouse.move(ob.x + ob.width * 0.5, oy, { steps: 4 });
+  await page.mouse.up();
+  await clickReal(page, originalRow.locator('[data-pkc-field="capture-trim-run"]'));
+  await expect(rows, '文字起こしのある録音を切り出しても、新しい録音が増えない').toHaveCount(4, { timeout: 15_000 });
+  await expect(statusLine, '字を移したと言っていない').toContainText('範囲の文字起こし 1 行も移しました', { timeout: 15_000 });
+  const withText = page.locator('[data-pkc-capture]', { hasText: /\(0:0\d(?:\.\d)?〜/ }).filter({ hasNotText: '(0:01〜0:03)' });
+  await clickReal(page, withText.first().locator('[data-pkc-field="capture-name"]'));
+  const cutBody = page.locator('[data-pkc-view-pane="detail"]');
+  await expect(cutBody, '切り出した録音に文字起こしの節が足されていない').toContainText(/文字起こし \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+  await expect(cutBody, '範囲にかかる行(0:00)が移っていない').toContainText('0:00 一行目の偽の字');
+  await expect(cutBody, '範囲の外の行(1:05)まで移っている').not.toContainText('1:05');
+  // 元の録音の文字起こしは残る
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await clickReal(page, originalRow.locator('[data-pkc-field="capture-name"]'));
+  await expect(page.locator('[data-pkc-view-pane="detail"]'), '元の録音の文字起こしが消えた').toContainText('1:05');
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
 
   /**
    * 🔴 **画面録画も、開いたら長さが出て終わりまで飛べる**(#952 A3 の残り)。

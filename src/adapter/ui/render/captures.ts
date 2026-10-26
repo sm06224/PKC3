@@ -40,6 +40,8 @@ import { appVoiceBoostRouter } from './voice-boost';
 import { replaceOnMediaError, SAVE_HINT_OPEN_NOTE } from './media-error';
 import { ASR_TRANSCRIBE_LABEL, ASR_TRANSCRIBING_LABEL } from '@features/asr/asr-text';
 import { msToFrac, peakCountFor } from '@features/audio/waveform';
+import { silenceTrimRange, type SilenceTrim } from '@features/audio/silence-trim';
+import { elapsedText } from '@features/elapsed-text';
 import { appWaveSource, type WaveProvider } from '@adapter/platform/audio/wave-source';
 import { placeRange } from '../actions/wave-drag';
 import { bakeWavePng } from './wave-bake';
@@ -66,6 +68,11 @@ interface WaveBake {
   readonly durationMs: number;
   /** 焼いたときの文字色。⚠ いまの色と違えば(テーマが変わった)焼き直す。 */
   readonly color: string;
+  /**
+   * 🔴 前後の無音を除く範囲(#1232)。⚠ 山の配列は持たず、**見つけた範囲だけ**を覚える
+   *   (山は焼いた後に捨てる ── 常駐を増やさない)。
+   */
+  readonly silence: SilenceTrim;
 }
 
 /** 波形の場所に出す字(場所は最初から 40px 取ってあるので、絵が届いても高さは動かない)。 */
@@ -348,6 +355,40 @@ export class CapturesRenderer {
       const mark = this.trim !== null && this.trim.lid === lid ? this.trim : null;
       placeRange(strip, mark?.startMs ?? null, mark?.endMs ?? null, wave.durationMs);
     }
+    this.syncSilence();
+  }
+
+  /**
+   * 「前後の無音を除く範囲にする」の押せる状態と、入れる範囲(`data-pkc-start-ms` / `data-pkc-end-ms`)を決める。
+   * ⚠ 押せない理由は**title に言う**(波形を作っている間 / 声が見つからない / 除く無音が無い)。
+   */
+  private applySilence(btn: HTMLButtonElement, lid: string): void {
+    const s: SilenceTrim | null = this.waveReady(lid) ? this.wave!.silence : null;
+    btn.removeAttribute('data-pkc-start-ms');
+    btn.removeAttribute('data-pkc-end-ms');
+    if (s === null) {
+      btn.disabled = true;
+      btn.title = this.waveState === 'failed' ? '波形を作れなかったので、無音を見つけられません。' : '波形を作っています…。できると押せます。';
+    } else if (s.kind === 'silent') {
+      btn.disabled = true;
+      btn.title = 'ほぼ無音で、声が見つかりませんでした。';
+    } else if (s.kind === 'nothing') {
+      btn.disabled = true;
+      btn.title = '前後に除ける無音はありませんでした。';
+    } else {
+      btn.disabled = this.trimBusy;
+      btn.setAttribute('data-pkc-start-ms', String(s.startMs));
+      btn.setAttribute('data-pkc-end-ms', String(s.endMs));
+      btn.title = `声のある所(${elapsedText(s.startMs)}〜${elapsedText(s.endMs)})を切り出す範囲にします。波形で確かめて、端はドラッグで直せます。`;
+    }
+  }
+
+  /** 波形の状態が変わったとき、帯の中の「無音を除く」を差し替える(帯は組み直さない)。 */
+  private syncSilence(): void {
+    for (const b of this.host.querySelectorAll<HTMLButtonElement>('[data-pkc-field="capture-trim-silence"]')) {
+      const lid = b.getAttribute('data-pkc-entry');
+      if (lid !== null) this.applySilence(b, lid);
+    }
   }
 
   /** 焼くときの色(文字色)。⚠ テーマが変わるとこの値が変わる ── 焼いた画像の色と突き合わせる。 */
@@ -389,7 +430,7 @@ export class CapturesRenderer {
         if (url === null) return fail();
         // 🔑 前の URL が残っていれば、置き換える前に返す(1 行につき生きている URL は常に 1 つ)
         if (this.wave !== null) URL.revokeObjectURL(this.wave.url);
-        this.wave = { lid, url, durationMs: r.durationMs, color };
+        this.wave = { lid, url, durationMs: r.durationMs, color, silence: silenceTrimRange(r.peaks, r.durationMs) };
         url = null;
         this.waveState = 'ready';
         this.syncWave();
@@ -625,6 +666,23 @@ export class CapturesRenderer {
     until.title =
       item.kind === 'video' ? 'いま見ている所を、切り出しの終わりにします。' : 'いま鳴っている所を、切り出しの終わりにします。';
     bar.append(until);
+
+    /**
+     * 🔴 **前後の無音を除く範囲を、印として入れる**(#1232。user 指示 2026-10-26)。音だけ ── 動画の無音は絵が動くので決められない。
+     * ⚠ 見つけるのは波形の山(`silence-trim.ts`)で、波形が焼けるまでは押せない。**切るのは既存の「この範囲で切り出す」**
+     *   (入れた印は波形で確かめ、端をドラッグで直してから切れる)。
+     * ⚠ 帯は波形が焼けても組み直されない(押そうとした部品を作り替えない)── 押せる状態は `syncSilence` が差し替える。
+     */
+    if (item.kind === 'audio') {
+      const quiet = document.createElement('button');
+      quiet.type = 'button';
+      quiet.setAttribute('data-pkc-action', 'capture-trim-silence');
+      quiet.setAttribute('data-pkc-field', 'capture-trim-silence');
+      quiet.setAttribute('data-pkc-entry', item.lid);
+      quiet.textContent = '前後の無音を除く範囲にする';
+      bar.append(quiet);
+      this.applySilence(quiet, item.lid);
+    }
 
     if (startMs !== null && endMs !== null) {
       /**

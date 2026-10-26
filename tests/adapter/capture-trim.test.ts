@@ -715,3 +715,95 @@ describe('動画を押した所ぴったりに切り出す(#683 段②b-2)', () 
     expect(error(h.dispatcher)).toBe('この動画は途中までしか読めませんでした。');
   });
 });
+
+/**
+ * 🔴 **切り出した録音へ、範囲に入る文字起こしの行を移す**(#1232。user 指示 2026-10-26「全部やるのです」)。
+ *
+ * ⚠ 観測点は `REQUEST_APPEND`(書込の依頼)── 何を・どの見出しで・どのノートへ足すか。時刻は切り出しの始まりを引いた値。
+ */
+describe('文字起こしを移す(#1232)', () => {
+  const SOURCE = [
+    '---',
+    'attachment.name: 録音-2026-09-12-143000.webm',
+    '---',
+    '',
+    '## 文字起こし 2026-10-01 09:00',
+    '0:05 古い版の行',
+    '',
+    '## 文字起こし 2026-10-02 12:34',
+    '0:05 こんにちは',
+    '0:15 本題です',
+    '0:40 範囲の外',
+    '1:10 もっと外',
+  ].join('\n');
+
+  function run(over: Partial<Parameters<typeof createCaptureTrimmer>[0]> = {}) {
+    const h = harness(
+      { readBody: vi.fn(async () => SOURCE), ...over },
+      // ⚠ 切り出した先(new)も目録に居させる ── 居ないと追記は黙って捨てられる(本物は `attachOne` の `CREATE_ENTRY` が入れる)
+      { entryMetas: new Map([['a', meta('a')], ['new', meta('new')]]) },
+    );
+    const appends: Array<{ lid: string; text: string; heading: string | null }> = [];
+    h.dispatcher.onEvent((e) => {
+      if (e.type === 'REQUEST_APPEND') appends.push({ lid: e.lid, text: e.text, heading: e.heading });
+    });
+    return { ...h, appends };
+  }
+
+  it('🔴 範囲にかかる行だけを、始まりを引いた時刻で、切り出した添付へ足す(最後の節だけ)', async () => {
+    const h = run();
+    await h.trimmer.run('a', 10_000, 30_000);
+    expect(h.appends).toHaveLength(1);
+    expect(h.appends[0]!.lid, '元の録音へ足している').toBe('new');
+    // 0:05 の発言(5〜15 秒)は 10 秒の時点で続いている → 0:00。0:15 は 10 秒を引いて 0:05。古い節の行と、範囲の外の行(0:40・1:10)は移さない
+    expect(h.appends[0]!.text).toBe('0:00 こんにちは\n0:05 本題です');
+    expect(h.appends[0]!.heading).toMatch(/^## 文字起こし \d{4}-\d\d-\d\d \d\d:\d\d$/);
+    expect(h.notes.at(-1)).toContain('範囲の文字起こし 2 行も移しました');
+  });
+
+  it('範囲の始まりちょうどの行は入り、終わりちょうどの行は入らない(半開区間)', async () => {
+    const h = run();
+    await h.trimmer.run('a', 5_000, 40_000);
+    expect(h.appends[0]!.text).toBe('0:00 こんにちは\n0:10 本題です');
+  });
+
+  it('範囲に入る行が無ければ、何も足さない(言わない)', async () => {
+    const h = run();
+    await h.trimmer.run('a', 100_000, 110_000);
+    expect(h.appends).toHaveLength(0);
+    expect(h.notes.at(-1)).not.toContain('文字起こし');
+  });
+
+  it('文字起こしの節が無い録音・読めない本文でも、切り出しは今までどおり出来る', async () => {
+    const none = run({ readBody: vi.fn(async () => '---\nattachment.name: x\n---\n本文だけ') });
+    await none.trimmer.run('a', 10_000, 30_000);
+    expect(none.attached).toHaveLength(1);
+    expect(none.appends).toHaveLength(0);
+    const broken = run({ readBody: vi.fn(async () => { throw new Error('読めない'); }) });
+    await broken.trimmer.run('a', 10_000, 30_000);
+    expect(broken.attached).toHaveLength(1);
+    expect(error(broken.dispatcher), '字が移せないことで赤い断りが出ている').toBeNull();
+    // 口が無い配線(古い test)は今までどおり
+    const noPort = harness();
+    await noPort.trimmer.run('a', 10_000, 30_000);
+    expect(noPort.attached).toHaveLength(1);
+  });
+
+  it('切っている間に本文へ書き込めなくなったら、字を移さず、そう言う(元の文字起こしは残る)', async () => {
+    let d: Dispatcher | null = null;
+    const h = run({
+      // 切り出した添付ができた直後に、別の追記が走り出した(書込の錠が掛かる)場面
+      attach: vi.fn(async (item: AttachItem) => {
+        d!.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: 'x', heading: null, target: null });
+        return { lid: 'new', assetKey: 'k-2', mime: item.type, hash: 'h' };
+      }),
+    });
+    d = h.dispatcher;
+    h.appends.length = 0;
+    await h.trimmer.run('a', 10_000, 30_000);
+    // 前提: 別の追記は走っている(空振り防止)
+    expect(h.dispatcher.getState().writeLock).not.toBeNull();
+    expect(h.appends.filter((a) => a.lid === 'new')).toHaveLength(0);
+    expect(h.notes.at(-1)).toContain('移していません');
+  });
+});

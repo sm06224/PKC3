@@ -3224,7 +3224,19 @@ md.core.ruler.after('inline', 'pkc-seek-link', function (state) {
     let inLink = 0;
     let lineStart = true;
     let changed = false;
+    /**
+     * 🔴 **時刻の行を 1 つの器で包む**(#1232。再生中の行を光らせるため)。行頭の時刻から、次の改行(か段落の終わり)まで。
+     * ⚠ 光らせるのは描画後の DOM を見る側(`binder.ts` の `markActiveSeekLine`)── ここは**印(`data-pkc-seek-line`)を置くだけ**。
+     */
+    let lineOpen = false;
+    const closeLine = (): void => {
+      const close = new state.Token('html_inline', '', 0);
+      close.content = '</span>';
+      out.push(close);
+      lineOpen = false;
+    };
     for (const t of children) {
+      if (lineOpen && (t.type === 'softbreak' || t.type === 'hardbreak')) closeLine();
       if (t.type === 'link_open') inLink += 1;
       else if (t.type === 'link_close') inLink -= 1;
       const atHead = lineStart;
@@ -3239,6 +3251,10 @@ md.core.ruler.after('inline', 'pkc-seek-link', function (state) {
         out.push(t);
         continue;
       }
+      const open = new state.Token('html_inline', '', 0);
+      open.content = '<span data-pkc-seek-line>';
+      out.push(open);
+      lineOpen = true;
       const tok = new state.Token('html_inline', '', 0);
       const note = md.utils.escapeHtml(seekLinkTitle(m[1]!));
       tok.content =
@@ -3251,6 +3267,7 @@ md.core.ruler.after('inline', 'pkc-seek-link', function (state) {
       out.push(tail);
       changed = true;
     }
+    if (lineOpen) closeLine();
     // ⚠ 当たらなかった段落は**触らない**(token の同一性を無駄に壊さない)
     if (changed) token.children = out;
   }

@@ -8013,6 +8013,35 @@ const SEEK_RESEEK_TOLERANCE_S = 0.5;
  *   (2 度押したのに最初の位置へ飛ぶ)。聞き手は 1 本にして、**最新の位置**を読ませる。
  */
 const pendingSeek = new WeakMap<HTMLMediaElement, number>();
+
+/**
+ * 🔴 **再生中の文字起こしの行を光らせる**(#1232。user 指示 2026-10-26 ── 「再生中、いま話されている行が見える」)。
+ *
+ * 再生機(`attachment-media`)の位置を見て、同じ詳細の説明の中の時刻の行(`data-pkc-seek-line`。
+ * `markdown-render.ts` が置く)のうち、**位置以前でいちばん後ろの行**に `data-pkc-seek-active` を付ける。
+ * ⚠ 位置が最初の行より前なら、どの行も光らせない。⚠ 同じ行のままなら DOM に触れない(1 秒に数回の更新)。
+ * ⚠ 再生機と説明が**同じ親**の下に居る面だけ(`seekMedia` と同じ探し方 ── 別の添付の行を光らせない)。
+ */
+const activeSeekLine = new WeakMap<Element, Element | null>();
+function markActiveSeekLine(media: HTMLMediaElement): void {
+  if (media.getAttribute('data-pkc-field') !== 'attachment-media') return;
+  // 説明の器(`data-pkc-prose`)と再生機の器(`attachment-preview`)は同じ host の兄弟(`seekMedia` の探し方と逆向き)
+  const host = media.closest('[data-pkc-field="attachment-preview"]')?.parentElement ?? media.parentElement;
+  const prose = host?.querySelector('[data-pkc-prose]');
+  if (prose === null || prose === undefined) return;
+  const now = media.currentTime * 1000;
+  let active: Element | null = null;
+  for (const line of prose.querySelectorAll('[data-pkc-seek-line]')) {
+    const ms = Number(line.querySelector('[data-pkc-seek-ms]')?.getAttribute('data-pkc-seek-ms'));
+    if (!Number.isFinite(ms)) continue;
+    if (ms <= now) active = line;
+    else break;
+  }
+  if (activeSeekLine.get(prose) === active && (active === null || active.hasAttribute('data-pkc-seek-active'))) return;
+  for (const old of prose.querySelectorAll('[data-pkc-seek-active]')) old.removeAttribute('data-pkc-seek-active');
+  active?.setAttribute('data-pkc-seek-active', '');
+  activeSeekLine.set(prose, active);
+}
 function seekMedia(dispatcher: Dispatcher, target: HTMLElement): void {
   const raw = target.getAttribute('data-pkc-seek-ms');
   const ms = Number(raw);
@@ -8500,6 +8529,21 @@ const ACTIONS: Record<string, ActionHandler> = {
   'capture-trim-end': (dispatcher, target) => markTrim(dispatcher, target, 'end'),
   'capture-trim-clear': (dispatcher) => {
     dispatcher.dispatch({ type: 'CLEAR_CAPTURE_TRIM' });
+  },
+  /**
+   * 🔴 **前後の無音を除く範囲を、切り出しの印に入れる**(#1232。user 指示 2026-10-26)。
+   *
+   * ⚠ 範囲は**描画器が波形の山から決めて、押したボタンに載せている**(`data-pkc-start-ms` / `data-pkc-end-ms`)──
+   *   ここで山を引き直さない。⚠ 切るのは既存の `capture-trim-run`(印を入れるだけ)。
+   * ⚠ 前の印は**先に消す** ── 片方だけ残った印と新しい範囲が逆転すると、`SET_CAPTURE_TRIM_MARK` が片側を落とす。
+   */
+  'capture-trim-silence': (dispatcher, target) => {
+    const startMs = Number(target.getAttribute('data-pkc-start-ms'));
+    const endMs = Number(target.getAttribute('data-pkc-end-ms'));
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || !(endMs > startMs)) return;
+    dispatcher.dispatch({ type: 'CLEAR_CAPTURE_TRIM' });
+    dispatcher.dispatch({ type: 'SET_CAPTURE_TRIM_MARK', edge: 'start', ms: startMs });
+    dispatcher.dispatch({ type: 'SET_CAPTURE_TRIM_MARK', edge: 'end', ms: endMs });
   },
   /**
    * 🔴 **切り出す**(#683 段②a)。⚠ 段取りは `capture-trim.ts` が持つ ──
@@ -22240,6 +22284,12 @@ export function bindActions(
   listen(root, 'mousedown', onMousedown);
   listen(root, 'input', onInput);
   listen(root, 'change', onChange);
+  // 🔴 再生中の文字起こしの行を光らせる(#1232)。⚠ media の event は bubble しない ── 捕まえる側(capture)で受ける
+  const onMediaMoved = (ev: Event): void => {
+    if (ev.target instanceof HTMLMediaElement) markActiveSeekLine(ev.target);
+  };
+  listen(root, 'timeupdate', onMediaMoved, true);
+  listen(root, 'seeked', onMediaMoved, true);
   // 🔴 本文を打ったり、置換を撃ったりして本文が動いたときも、件数を出し直す(#1646 の 2。同じ字なら DOM に触れない)
   //   ⚠ 配線を組む時点で購読するのはここだけ ── 一部しか持たない仮の dispatcher(test)でも組めるよう、口が在るときだけ繋ぐ
   const onState = (dispatcher as Partial<Dispatcher>).onState;

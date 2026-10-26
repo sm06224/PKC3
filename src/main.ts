@@ -3789,6 +3789,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       });
       return out;
     },
+    // 🔴 範囲に入る文字起こしの行を切り出した録音へ移す(#1232)── 読むだけ
+    readBody: async (lid) => (await client.request({ op: 'getBodies', cid, lids: [lid] }))[0]?.body ?? null,
     notify: showStatus,
   });
 
