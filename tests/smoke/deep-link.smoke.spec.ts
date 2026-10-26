@@ -638,10 +638,10 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
     .fill("SELECT count(*) AS n FROM entries WHERE body LIKE '%けんさくご%'");
   await clickReal(page, '[data-pkc-field="sql-run"]');
   await expect(
-    sql.locator('[data-pkc-field="sql-table"] tbody td'),
+    sql.locator('[data-pkc-field="sql-table"] tbody td:not([data-pkc-field="sql-rownum"])'),
     '本物の worker から答えが返らない(SQL が sqlite まで届いていない)',
   ).toHaveText('1', { timeout: 10_000 });
-  await expect(sql.locator('[data-pkc-field="sql-table"] thead th'), '列の名前が出ない').toHaveText(
+  await expect(sql.locator('[data-pkc-field="sql-table"] thead th:not([data-pkc-field="sql-rownum"])'), '列の名前が出ない').toHaveText(
     'n',
   );
   await expect(
@@ -687,7 +687,7 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   await expect(sql, 'SQL の面へ戻れない').toBeVisible();
   await sql.locator('[data-pkc-field="sql-input"]').fill('SELECT 1 AS n');
   await clickReal(page, '[data-pkc-field="sql-run"]');
-  await expect(sql.locator('[data-pkc-field="sql-table"] tbody td'), '2 回目の答えが返らない').toHaveText('1', {
+  await expect(sql.locator('[data-pkc-field="sql-table"] tbody td:not([data-pkc-field="sql-rownum"])'), '2 回目の答えが返らない').toHaveText('1', {
     timeout: 10_000,
   });
   await clickReal(page, '[data-pkc-field="sql-to-note"]');

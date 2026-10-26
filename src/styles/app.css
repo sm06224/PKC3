@@ -6712,6 +6712,13 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   background: var(--surface-2);
   box-shadow: inset 0 -1px 0 var(--border);
 }
+/* 🔑 通し番号の列(#837 K2 C)── 無彩色・右寄せ・細く。字は選べても表計算に貼る範囲には入れない */
+[data-pkc-field='sql-table'] [data-pkc-field='sql-rownum'] {
+  color: var(--muted);
+  text-align: right;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
 /* ⚠ 「空の字」と「値が無い」を**見分けられる**ようにする(字は描画器が入れる) */
 [data-pkc-field='sql-table'] td[data-pkc-sql-null='yes'] {
   color: var(--muted);

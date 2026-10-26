@@ -1893,7 +1893,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    * 🔑 だから**待てる形で見る** ── `toHaveText` は再試行するので、
    *   「まだ組み直していない」と「そもそも違う」を取り違えない。
    */
-  const th = sqlTable.locator('thead th');
+  const th = sqlTable.locator('thead th:not([data-pkc-field="sql-rownum"])');
   await expect(th.nth(0), '先頭の列が _note でない(前の答えの表を読んでいる)').toHaveText(
     '_note',
     { timeout: 10_000 },
@@ -2005,7 +2005,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   // ⚠ 1564 行と同じ形 ── `toBeVisible` は**前の答えの表**でも素通りするので、列名は
   //   再試行する `toHaveText` で待つ(負荷で 2 回目の答えが遅れると古い列を読む。
   //   2026-10-01 のフル記録で `['name','sheet','rows']` を sheet1 の列として読んで落ちた)
-  const sheetTh = sqlTable.locator('thead th');
+  const sheetTh = sqlTable.locator('thead th:not([data-pkc-field="sql-rownum"])');
   await expect(sheetTh.nth(0), 'xlsx_sheets の 1 列目が name でない(前の答えの表を読んでいる)').toHaveText(
     'name',
     { timeout: 10_000 },
@@ -2022,7 +2022,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM sheet1');
   await clickReal(page, '[data-pkc-action="run-sql"]');
   await expect(sqlTable, 'sheet1 から行が返らない').toBeVisible({ timeout: 10_000 });
-  const xlsxTh = sqlTable.locator('thead th');
+  const xlsxTh = sqlTable.locator('thead th:not([data-pkc-field="sql-rownum"])');
   await expect(xlsxTh.nth(0), '先頭の列が _note でない(前の答えの表 xlsx_sheets を読んでいる)').toHaveText(
     '_note',
     { timeout: 10_000 },
@@ -2207,7 +2207,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    */
   await expect(sqlTable, '.parquet から行が返らない').toBeVisible({ timeout: 60_000 });
   expect(
-    await sqlTable.locator('thead th').allTextContents(),
+    await sqlTable.locator('thead th:not([data-pkc-field="sql-rownum"])').allTextContents(),
     '相手の列を勝手に増やしている(parquet には _note / _lid を足さない)',
   ).toEqual(['id', 'shinamono']);
   await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(3);
@@ -2235,7 +2235,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await clickReal(page, '[data-pkc-action="run-sql"]');
   await expect(sqlTable, '.json から行が返らない').toBeVisible({ timeout: 60_000 });
   expect(
-    await sqlTable.locator('thead th').allTextContents(),
+    await sqlTable.locator('thead th:not([data-pkc-field="sql-rownum"])').allTextContents(),
     '相手の列を勝手に増やしている(json には _note / _lid を足さない)',
   ).toEqual(['id', 'shinamono']);
   await expect(sqlTable.locator('tbody tr'), '行の数が合わない').toHaveCount(2);
@@ -2267,7 +2267,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await clickReal(page, '[data-pkc-action="run-sql"]');
   await expect(sqlTable, '作った表を引けない').toBeVisible({ timeout: 60_000 });
   // ⚠ 数だけでなく**中身が元と同じ**(2 行 = 元の json の行数)── 空の表でも 0 行を返すので
-  await expect(sqlTable.locator('tbody td'), '作った表の行数が合わない').toHaveText(['2']);
+  await expect(sqlTable.locator('tbody td:not([data-pkc-field="sql-rownum"])'), '作った表の行数が合わない').toHaveText(['2']);
   await expect(note, '引いた後に、書き込みの知らせが残っている').not.toContainText('消えます');
 
   /**
@@ -2302,7 +2302,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   // 🔑 書き出しの後も器は生きている(作った表を引ける ── 書き出しが器を壊していない)
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT count(*) AS n FROM made');
   await clickReal(page, '[data-pkc-action="run-sql"]');
-  await expect(sqlTable.locator('tbody td'), '書き出しの後で、作った表が引けない').toHaveText(['2'], { timeout: 60_000 });
+  await expect(sqlTable.locator('tbody td:not([data-pkc-field="sql-rownum"])'), '書き出しの後で、作った表が引けない').toHaveText(['2'], { timeout: 60_000 });
 
   /**
    * ⑤-e3 🔴 **`COPY (SELECT …) TO 'x.csv'` がそのままダウンロードになる。場所を指す名前は断る**(#918)。
@@ -2389,7 +2389,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   );
   await clickReal(page, '[data-pkc-action="run-sql"]');
   await expect(
-    sqlTable.locator('tbody td'),
+    sqlTable.locator('tbody td:not([data-pkc-field="sql-rownum"])'),
     '足したのに、作った表がまだ在る(器を作り直していない)',
   ).toHaveText(['0'], { timeout: 60_000 });
   // 🔴 2 つの表を JOIN で突き合わせる(両方の file の列が 1 行に並ぶ)
@@ -2398,11 +2398,11 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     'SELECT meisai.shinamono AS m, uriage.shinamono AS u FROM meisai JOIN uriage USING (id) ORDER BY id',
   );
   await clickReal(page, '[data-pkc-action="run-sql"]');
-  await expect(sqlTable.locator('thead th'), 'JOIN の答えの列が出ない').toHaveText(['m', 'u'], {
+  await expect(sqlTable.locator('thead th:not([data-pkc-field="sql-rownum"])'), 'JOIN の答えの列が出ない').toHaveText(['m', 'u'], {
     timeout: 60_000,
   });
   // ⚠ 総当たり(行数の掛け算)ではなく、id で突き合わさっていること(2 行 × 3 行 = 6 ではない)
-  await expect(sqlTable.locator('tbody td'), 'JOIN の中身が合わない').toHaveText([
+  await expect(sqlTable.locator('tbody td:not([data-pkc-field="sql-rownum"])'), 'JOIN の中身が合わない').toHaveText([
     'ringo',
     'ringo',
     'mikan',
@@ -2416,7 +2416,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   );
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT count(*) AS n FROM json');
   await clickReal(page, '[data-pkc-action="run-sql"]');
-  await expect(sqlTable.locator('tbody td'), '外した後に、1 件のときの表の名前(json)で引けない').toHaveText(['2'], {
+  await expect(sqlTable.locator('tbody td:not([data-pkc-field="sql-rownum"])'), '外した後に、1 件のときの表の名前(json)で引けない').toHaveText(['2'], {
     timeout: 60_000,
   });
 
@@ -2812,7 +2812,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   );
 
   const widthsBefore = await sqlTable
-    .locator('thead th')
+    .locator('thead th:not([data-pkc-field="sql-rownum"])')
     .evaluateAll((ths) => ths.map((th) => (th as HTMLElement).offsetWidth));
 
   // ② 下まで転がす → 末尾の行(5000)が見える
@@ -2834,7 +2834,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   長い値が来て切られうる場所である。
    */
   const lastTitles = await sqlTable
-    .locator('tbody td')
+    .locator('tbody td:not([data-pkc-field="sql-rownum"])')
     .evaluateAll((tds) =>
       tds
         .filter((td) => (td as HTMLElement).getAttribute('title') !== null)
@@ -2847,7 +2847,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
 
   // ③ 転がしても列の幅は動かない(幅は転がる前に固定してある)
   const widthsAfter = await sqlTable
-    .locator('thead th')
+    .locator('thead th:not([data-pkc-field="sql-rownum"])')
     .evaluateAll((ths) => ths.map((th) => (th as HTMLElement).offsetWidth));
   expect(widthsAfter, '転がしたら列の幅が動いた').toEqual(widthsBefore);
 
@@ -2960,25 +2960,25 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     // 🔴 元の表の名前のまま、DuckDB の字で引ける(件数が元の 3 件と同じ)
     await page.fill('[data-pkc-field="sql-input"]', 'FROM 売上 SELECT count(*) AS n');
     await clickReal(page, '[data-pkc-action="run-sql"]');
-    await expect(sqlTable.locator('thead th'), 'DuckDB が答えを返さない').toHaveText(['n'], {
+    await expect(sqlTable.locator('thead th:not([data-pkc-field="sql-rownum"])'), 'DuckDB が答えを返さない').toHaveText(['n'], {
       timeout: 60_000,
     });
-    await expect(sqlTable.locator('tbody td'), '写した表の件数が元と合わない').toHaveText(['3']);
+    await expect(sqlTable.locator('tbody td:not([data-pkc-field="sql-rownum"])'), '写した表の件数が元と合わない').toHaveText(['3']);
     // 🔴 BLOB は base64 の字で入り、元の長さ(3 bytes)へ戻せる ── 捨てていない / 化けていない
     await page.fill(
       '[data-pkc-field="sql-input"]',
       'SELECT octet_length(from_base64(記録)) AS bytes FROM 売上 WHERE id = 1',
     );
     await clickReal(page, '[data-pkc-action="run-sql"]');
-    await expect(sqlTable.locator('thead th'), 'BLOB の答えの列が出ない').toHaveText(['bytes'], {
+    await expect(sqlTable.locator('thead th:not([data-pkc-field="sql-rownum"])'), 'BLOB の答えの列が出ない').toHaveText(['bytes'], {
       timeout: 60_000,
     });
-    await expect(sqlTable.locator('tbody td'), 'BLOB が元の長さへ戻らない').toHaveText(['3']);
+    await expect(sqlTable.locator('tbody td:not([data-pkc-field="sql-rownum"])'), 'BLOB が元の長さへ戻らない').toHaveText(['3']);
     // 🔴 空の表も引ける(列が残っている ── 0 行の答え)
     await page.fill('[data-pkc-field="sql-input"]', 'SELECT a FROM 空');
     await clickReal(page, '[data-pkc-action="run-sql"]');
-    await expect(sqlTable.locator('thead th'), '空の表の列が出ない').toHaveText(['a'], { timeout: 60_000 });
-    await expect(sqlTable.locator('tbody td'), '空の表なのに行が出ている').toHaveCount(0);
+    await expect(sqlTable.locator('thead th:not([data-pkc-field="sql-rownum"])'), '空の表の列が出ない').toHaveText(['a'], { timeout: 60_000 });
+    await expect(sqlTable.locator('tbody td:not([data-pkc-field="sql-rownum"])'), '空の表なのに行が出ている').toHaveCount(0);
 
     /**
      * ⑬ 🔴 **`.sqlite` を含めて 2 つ並べたとき、つながり図が DuckDB の器から出る**(#918。🟣 Gemini 裁定 2026-10-02 = A)。
@@ -3024,10 +3024,10 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
       /select\s+品名\s+from\s+kakei_売上/iu,
     );
     await clickReal(page, '[data-pkc-action="run-sql"]');
-    await expect(sqlTable.locator('thead th'), '図から組んだ SELECT が引けない').toHaveText(['品名'], {
+    await expect(sqlTable.locator('thead th:not([data-pkc-field="sql-rownum"])'), '図から組んだ SELECT が引けない').toHaveText(['品名'], {
       timeout: 60_000,
     });
-    await expect(sqlTable.locator('tbody td'), '図から組んだ SELECT の中身が合わない').toHaveText([
+    await expect(sqlTable.locator('tbody td:not([data-pkc-field="sql-rownum"])'), '図から組んだ SELECT の中身が合わない').toHaveText([
       'りんご',
       'みかん',
       'ぶどう',

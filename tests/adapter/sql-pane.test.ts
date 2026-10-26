@@ -371,12 +371,12 @@ function setup(
   };
   const note = (): string => pane.querySelector('[data-pkc-field="sql-note"]')?.textContent ?? '';
   const heads = (): string[] =>
-    [...pane.querySelectorAll('[data-pkc-field="sql-table"] thead th')].map(
+    [...pane.querySelectorAll('[data-pkc-field="sql-table"] thead th:not([data-pkc-field="sql-rownum"])')].map(
       (e) => e.textContent ?? '',
     );
   const cells = (): string[][] =>
     [...pane.querySelectorAll('[data-pkc-field="sql-table"] tbody tr')].map((tr) =>
-      [...tr.querySelectorAll('td')].map((td) => td.textContent ?? ''),
+      [...tr.querySelectorAll('td:not([data-pkc-field="sql-rownum"])')].map((td) => td.textContent ?? ''),
     );
   const saveBtn = pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-note"]')!;
   // 🔑 **構造をノートへ**(#918 段①)── 答えが無くても押せる側
@@ -2229,7 +2229,7 @@ describe('打つ所(#918 段②a)', () => {
       const drawn = (): string[] =>
         [...pane.querySelectorAll('[data-pkc-field="sql-table"] tbody tr')]
           .filter((tr) => tr.getAttribute('data-pkc-field') !== 'sql-row-spacer')
-          .map((tr) => tr.querySelector('td')?.textContent ?? '');
+          .map((tr) => tr.querySelector('td:not([data-pkc-field="sql-rownum"])')?.textContent ?? '');
       const spacers = (): number =>
         pane.querySelectorAll('[data-pkc-field="sql-row-spacer"]').length;
 
@@ -2251,7 +2251,7 @@ describe('打つ所(#918 段②a)', () => {
 
       const table = pane.querySelector<HTMLElement>('[data-pkc-field="sql-table"]')!;
       expect(table.style.tableLayout, '列幅を固定していない(転がすたびに列が動く)').toBe('fixed');
-      const th = pane.querySelector<HTMLElement>('[data-pkc-field="sql-table"] th')!;
+      const th = pane.querySelector<HTMLElement>('[data-pkc-field="sql-table"] th:not([data-pkc-field="sql-rownum"])')!;
       expect(th.style.width, '列の幅を当てていない').toBe('50px');
       /**
        * 🔴 **表そのものの幅も決まっている**(実ブラウザが 3/3 で再現して分かった)。
@@ -2260,13 +2260,13 @@ describe('打つ所(#918 段②a)', () => {
        * 🔑 ここで見えるのは「当てたか」だけ ── **効いたか**は実ブラウザ
        *   (`attach.smoke.spec.ts` の ⑪ ③)でしか言えない。
        */
-      expect(table.style.width, '表そのものの幅を決めていない(固定が効かない)').toBe('50px');
+      expect(table.style.width, '表そのものの幅を決めていない(固定が効かない)').toBe('100px');
       /**
        * 🔴 **升は全文を持っている**(幅で切られても読める道)。
        * ⚠ 窓に入ると幅を固定するので、長い値は「…」で切られる ── 直す前は
        *   表が広がって横に転がせた(= **この PR で読めなくなった**、CLAUDE.md §10)。
        */
-      const td = pane.querySelector<HTMLElement>('[data-pkc-field="sql-table"] tbody td')!;
+      const td = pane.querySelector<HTMLElement>('[data-pkc-field="sql-table"] tbody td:not([data-pkc-field="sql-rownum"])')!;
       expect(td.title, '切られた字を読む道が無い').toBe(td.textContent);
       expect(td.title, '空振り(升に字が入っていない)').not.toBe('');
 
@@ -2282,6 +2282,19 @@ describe('打つ所(#918 段②a)', () => {
       top = N * 20;
       body.dispatchEvent(new Event('scroll'));
       expect(drawn().at(-1), '下端なのに最後の行が出ていない').toBe(String(N - 1));
+      /**
+       * 🔑 通し番号の列(#837 K2 C)── 窓が転がっても**答えの先頭からの番号**のまま(0 始まりの値 i に対して i + 1)。
+       * ⚠ 値の列と取り違えないよう、番号の升だけを読む。
+       */
+      const nums = [
+        ...pane.querySelectorAll('[data-pkc-field="sql-table"] tbody td[data-pkc-field="sql-rownum"]'),
+      ].map((e) => e.textContent ?? '');
+      expect(nums.at(-1), '下端の通し番号が最後の行と合っていない').toBe(String(N));
+      expect(nums.length, '空振り(通し番号の升が無い)').toBeGreaterThan(10);
+      expect(
+        pane.querySelector('[data-pkc-field="sql-table"] thead th[data-pkc-field="sql-rownum"]')
+          ?.textContent,
+      ).toBe('#');
     } finally {
       if (rowH) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', rowH);
       if (rowW) Object.defineProperty(HTMLElement.prototype, 'offsetWidth', rowW);
