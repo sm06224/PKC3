@@ -4,17 +4,17 @@
  *
  * ## 何か
  *
- * ワークスペース = 保存領域の中の**器(コンテナ)1 つ**。ノート・つながり・履歴・添付の目録・タグの色は
- * 全部 `cid` で区切られているので、**切り替え = 次に開く器を替えて読み込み直す**だけで済む。
+ * ワークスペース = 保存領域の中の**コンテナ 1 つ**。ノート・つながり・履歴・添付の目録・タグの色は
+ * 全部 `cid` で区切られているので、**切り替え = 次に開くコンテナを替えて読み込み直す**だけで済む。
  * 保存の形(表の列)は 1 つも変えない ── 切り替えの印は `workspaces` 表の 1 行(今まで誰も使っていなかった表)。
  *
  * ## 守っていること
  *
  * - 🔴 **自動では動かない**。作る・切り替える・名前を直す・削除する、は押した user だけが打つ。
- * - 🔴 **書込の列に載せる**(`run`)── 保存の途中に切り替えて、書きかけの 1 件を別の器へ落とさない。
- * - 🔴 **削除は使っていない器だけ / 最後の 1 つは残す**(worker が断る。ここは理由を言い換える)。
- * - 🔴 **切り替えたら読み込み直す**(`reload`)── 画面・検索の索引・開いている本文は全部前の器の物。
- *   ⚠ 読み込み直すまで、ほかの操作は前の器へ書く(切り替えの印を書いただけでは、いまの画面は動かない)。
+ * - 🔴 **書込の列に載せる**(`run`)── 保存の途中に切り替えて、書きかけの 1 件を別のワークスペースへ落とさない。
+ * - 🔴 **削除は使っていないワークスペースだけ / 最後の 1 つは残す**(worker が断る。ここは理由を言い換える)。
+ * - 🔴 **切り替えたら読み込み直す**(`reload`)── 画面・検索の索引・開いている本文は全部前のワークスペースの物。
+ *   ⚠ 読み込み直すまで、ほかの操作は前のワークスペースへ書く(切り替えの印を書いただけでは、いまの画面は動かない)。
  * - 🔑 画面は `view()` を映すだけ。判断(押せるか・断る文)はここに 1 か所。
  */
 import type { ResultMap } from './protocol';
@@ -31,7 +31,7 @@ export interface WorkspaceDeps {
   /** 画面ごと読み込み直す。 */
   reload(): void;
   /**
-   * 🔴 **その器を、ほかのタブが開いているか**(#1455 レビュー ⚠3)。Web Locks(`pkc3-ws:<cid>` を各タブが shared で握る)で見る。
+   * 🔴 **そのワークスペースを、ほかのタブが開いているか**(#1455 レビュー ⚠3)。Web Locks(`pkc3-ws:<cid>` を各タブが shared で握る)で見る。
    * ⚠ 省略 = 確かめる手段が無い環境(Web Locks が無い)。確かめられないときは、確認の文で「ほかのタブで開いていないこと」を言う。
    */
   isOpenElsewhere?(cid: string): Promise<boolean>;
@@ -44,9 +44,9 @@ export interface WorkspaceDeps {
   confirmDiscard?(): Promise<boolean>;
 }
 
-/** 開いているタブが居る器の削除を断る文。 */
+/** 開いているタブが居るワークスペースの削除を断る文。 */
 export const WORKSPACE_OPEN_ELSEWHERE_TEXT =
-  'その器はほかのタブで開かれているため、削除できません(そのタブを閉じてから、もう一度押してください)';
+  'そのワークスペースはほかのタブで開かれているため、削除できません(そのタブを閉じてから、もう一度押してください)';
 /** 確かめる手段が無い環境で、削除の確認に添える一文。 */
 export const WORKSPACE_OPEN_UNCHECKED_TEXT =
   'ほかのタブで、このワークスペースを開いていないことを確かめてから削除してください(この環境では自動では確かめられません)。';
@@ -56,9 +56,9 @@ export interface WorkspaceRow {
   readonly cid: string;
   readonly title: string;
   readonly notes: number;
-  /** いま開いている器か(= このタブが書いている器)。 */
+  /** いま開いているワークスペースか(= このタブが書いているワークスペース)。 */
   readonly current: boolean;
-  /** 次に開く器か(切り替えの印が指す器)。`current` と違うのは、切り替えて読み込み直す前の短い間だけ。 */
+  /** 次に開くワークスペースか(切り替えの印が指す先)。`current` と違うのは、切り替えて読み込み直す前の短い間だけ。 */
   readonly next: boolean;
 }
 
@@ -97,7 +97,7 @@ export class Workspaces {
   private failed = false;
   private busy = false;
   private last = '';
-  /** このタブが書いている器(起動のときに決めた cid)。 */
+  /** このタブが書いているワークスペース(起動のときに決めた cid)。 */
   private currentCid: string | null = null;
   private readonly listeners = new Set<() => void>();
 
@@ -176,7 +176,7 @@ export class Workspaces {
       return { kind: 'cancelled', text: '切り替えをやめました' };
     return this.act(async (d) => {
       await d.run(() => d.switchTo(cid));
-      // 🔑 読み込み直す。⚠ これより後に何も書かない(前の器の画面が、新しい器の印を知らずに書き戻さない)
+      // 🔑 読み込み直す。⚠ これより後に何も書かない(前のワークスペースの画面が、新しい方の印を知らずに書き戻さない)
       d.reload();
       return `「${row.title}」へ切り替えます…`;
     });
@@ -197,7 +197,7 @@ export class Workspaces {
     if (row.current || row.next)
       return { kind: 'refused', text: '使っているワークスペースは削除できません(先に別のワークスペースへ切り替えてください)' };
     return this.act(async (d) => {
-      // 🔴 ほかのタブが開いている器は消さない(開いたままのタブは、消えた器へ書き続けて壊れる)。確かめられない環境は確認の文が言う
+      // 🔴 ほかのタブが開いているワークスペースは消さない(開いたままのタブは、消えたワークスペースへ書き続けて壊れる)。確かめられない環境は確認の文が言う
       if (d.isOpenElsewhere !== undefined && (await d.isOpenElsewhere(cid)))
         throw new Error(WORKSPACE_OPEN_ELSEWHERE_TEXT);
       const r = await d.run(() => d.remove(cid));

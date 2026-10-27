@@ -44,6 +44,7 @@ import { setBlocked } from './shortcut-hint';
 import { findCommand } from '@features/keymap';
 import { commandQueryOf } from '@features/palette/command-query';
 import { revealDelta } from './list-reveal';
+import { fitSidebarBars } from './bar-overflow';
 
 /**
  * タブ。⚠ 文言は「探し方」を表す(「詳細」のような場所の名前にしない)。
@@ -312,7 +313,11 @@ export class BrowseRouter {
 
   /** 🔴 手書きのタブを出す / 畳む(#1448)。描いている間だけ出す。 */
   setDrawTab(visible: boolean): void {
-    if (this.drawTab !== null) this.drawTab.hidden = !visible;
+    if (this.drawTab === null) return;
+    this.drawTab.hidden = !visible;
+    // 🔴 タブの数が変わる ⇒ 1 段に収まるか測り直す(帯の幅は変わらず、`ResizeObserver` は鳴らない)
+    const bar = this.drawTab.closest<HTMLElement>('[data-pkc-region="sidebar"]');
+    if (bar !== null) fitSidebarBars(bar.parentElement ?? bar);
   }
 
   /**

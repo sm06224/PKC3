@@ -758,7 +758,8 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
           outside: Math.round(Math.max(lab.right - box.right, box.left - lab.left)),
           top: Math.round(box.top),
           // 🔴 「⋯」の下へ畳んだ(#1621)。畳んだ物は箱が無いので段・はみ出しの数に入れない
-          folded: b.hasAttribute('data-pkc-overflow'),
+          // 🔴 描いている間だけ出る「手書き」(#1448)は、隠れている間は箱が無い ⇒ 段・はみ出しの数に入れない
+          folded: b.hasAttribute('data-pkc-overflow') || (b as HTMLElement).hidden,
         };
       });
       return {

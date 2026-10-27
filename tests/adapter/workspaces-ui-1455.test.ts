@@ -262,7 +262,7 @@ describe('設定の節の描画と押し口 #1455(実 DOM)', () => {
 });
 
 /** `SettingsRenderer` の `workspaces` の位置(末尾の引数。位置引数の並びは `settings.ts` が持つ)。 */
-const WORKSPACES_ARG_INDEX = 26;
+const WORKSPACES_ARG_INDEX = 27;
 
 describe('ほかのタブが開いている器の削除(#1455 レビュー ⚠3)', () => {
   it('🔴 ほかのタブが開いている器は削除を断り、保存側へ削除を打たない', async () => {

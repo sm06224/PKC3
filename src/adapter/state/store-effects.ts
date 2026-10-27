@@ -4512,7 +4512,7 @@ export function connectStoreEffects(
               type: 'OP_NOTICE',
               message: gone
                 ? `『${ev.child.title}』の章を元のノートに戻しました(切り出し先のノートは削除しました。ゴミ箱から戻せます)`
-                : `『${ev.child.title}』の章を元のノートに戻しましたが、切り出し先のノートは残っています(編集を終えてから削除してください)`,
+                : `『${ev.child.title}』の章を元のノートに戻しましたが、切り出し先のノートは残っています(いまの編集を済ませてから削除してください)`,
             });
           } catch (e) {
             fail(errorText(e));
