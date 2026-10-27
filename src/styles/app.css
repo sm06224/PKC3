@@ -5994,6 +5994,94 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='inspector-owner'] [data-pkc-field='inspector-owner-name'] {
   margin-right: var(--s2);
 }
+/* 左の列の「手書き」タブ(#1448)── 別ウィンドウが塞がれたときの退避先。道具と台は別ウィンドウと同じ部品。
+ * 地は無彩色、押している道具は地と字の反転で示す(選んでいる物を属性だけにしない)。幅が狭いので道具の列は折り返す。 */
+[data-pkc-browse-pane='draw'] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+[data-pkc-browse-pane='draw'][hidden] {
+  display: none;
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-bar'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  align-items: center;
+  padding: var(--s1);
+  border-bottom: 1px solid var(--border);
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-bar'] button,
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-close'] {
+  font: inherit;
+  cursor: pointer;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px var(--s2);
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-bar'] button[aria-pressed='true'] {
+  background: var(--fg);
+  color: var(--surface);
+  font-weight: 600;
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-bar'] button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-sep'] {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-status'] {
+  flex: 1 1 100%;
+  color: var(--muted);
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-status'][data-pkc-tone='error'] {
+  color: var(--danger, var(--fg));
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-confirm'] {
+  display: flex;
+  gap: var(--s1);
+  align-items: center;
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-confirm'][hidden] {
+  display: none;
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-stage'] {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s1);
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-canvas'] {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: none;
+  cursor: crosshair;
+  background: #fff;
+  border: 1px solid var(--border);
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-text-input'] {
+  position: fixed;
+  z-index: 10;
+  margin: 0;
+  padding: 0;
+  border: 1px dashed var(--fg);
+  background: rgba(255, 255, 255, 0.85);
+  outline: none;
+  min-width: 6em;
+  line-height: 1.2;
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-loading'] {
+  margin: var(--s2);
+  color: var(--muted);
+}
+
 /* 設定の「ワークスペース」(#1455)── 1 行に 名前 / 使用中の印 / 押し口。地は無彩色、色は使用中の 1 点だけ */
 [data-pkc-region='workspaces'] [data-pkc-field='workspace-list'] {
   list-style: none;

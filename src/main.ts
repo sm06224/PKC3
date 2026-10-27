@@ -369,7 +369,8 @@ import { createCaptureJobGate } from '@adapter/ui/actions/capture-job-gate';
 import { createCaptureTools } from '@adapter/ui/actions/capture-tools';
 import { processToolOf } from '@features/capture/capture-process';
 import { BLANK_DRAWING_SIDE, createImageDrawer } from '@adapter/ui/actions/image-draw';
-import { openImageDrawWindow } from '@adapter/platform/image-draw-window';
+import { createDrawPane } from '@adapter/ui/render/draw-pane';
+import { openImageDrawInPane, openImageDrawWindow } from '@adapter/platform/image-draw-window';
 import { AudioClient } from '@adapter/platform/audio/audio-client';
 import { VideoClient } from '@adapter/platform/video/video-client';
 import { AsrClient } from '@adapter/platform/asr/asr-client';
@@ -3903,8 +3904,24 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * `image-draw-window.ts`。ここは口を渡すだけ(CLAUDE.md §2:この file はどの test からも
    * 実行されない)。⚠ 取り込みは録音の切り出しと同じ `attachOne` の 1 本(門の中で待つ側)。
    */
+  /**
+   * 🔴 **手書きの退避先: 左の列の「手書き」タブ**(#1448)。別ウィンドウが塞がれたときだけ使う(段取りは `image-draw.ts`)。
+   * ⚠ 探し方の切替は `services.setBrowse`(唯一の口)を通す。
+   */
+  const drawPane = createDrawPane({
+    root: browse.drawPaneRoot(),
+    setTab: (visible) => browse.setDrawTab(visible),
+    current: () => browseMode,
+    select: (mode) => services.setBrowse?.(mode),
+  });
   const imageDrawer = createImageDrawer({
     dispatcher,
+    // 🔴 タブでも描きかけの線が在る間は「離れますか」(窓と同じ持ち主の名前の作法)
+    openPane: (args) =>
+      openImageDrawInPane(drawPane, {
+        ...args,
+        onDirty: (dirty) => unloadGuard.setWriting(dirty, `image-draw:${args.windowName}`),
+      }),
     // 🔴 白紙の台(#1448)── 白い PNG を 1 枚焼く。⚠ 焼いたあとの canvas は寸法を 0 にして手放す(即破棄)
     blank: () =>
       new Promise<Blob>((resolve, reject) => {
@@ -5730,7 +5747,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        */
       leaveLauncherIf(dispatcher, mode);
       browseMode = mode;
-      appBrowseMode.set(mode); // 次に開いたときも同じ探し方で出す(#240 段⑤)
+      // 🔴 手書き(#1448)は憶えない ── 次の起動で、描いていない空の面を開かない
+      if (mode !== 'draw') appBrowseMode.set(mode); // 次に開いたときも同じ探し方で出す(#240 段⑤)
       markBrowse(mode);
       browse.render(dispatcher.getState(), mode);
       /**

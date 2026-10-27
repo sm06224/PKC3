@@ -290,3 +290,56 @@ test('🔴 板を右クリックして「手書きして置く…」→ 白紙�
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+test('🔴 ポップアップが止められたら、左の「手書き」タブに白紙が開き、描いて保存すると板に置かれてタブが畳まれる (#1448)', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await gotoApp(page);
+  // ブラウザがポップアップを止めた状態(window.open が null を返す)
+  await page.evaluate(() => {
+    window.open = () => null;
+  });
+
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '退避の板');
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    ':::format{.pkc-place x=40 y=40 w=240 h=100}\n最初の付箋\n:::\n',
+  );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await writesLanded(page);
+  const host = page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-body"]');
+  const cards = host.locator('.pkc-place');
+  await expect(cards).toHaveCount(1);
+
+  const tab = page.locator('[data-pkc-browse="draw"]');
+  await expect(tab, '普段から手書きのタブが出ている').toBeHidden();
+
+  await host.click({ button: 'right', position: { x: 520, y: 120 } });
+  await page.locator(MENU).locator('[data-pkc-action="add-place-drawing"]').click();
+
+  // 中央ではなく左のタブに道具が出る
+  await expect(tab).toBeVisible({ timeout: 10_000 });
+  const canvas = page.locator('[data-pkc-browse-pane="draw"] [data-pkc-field="image-draw-canvas"]');
+  await expect(canvas, '手書きのタブに台が出ていない').toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-pkc-region="detail"] [data-pkc-field="image-draw-canvas"]'), '中央に台が出ている').toHaveCount(0);
+  await expect(cards, '手書きを開いたら中央の板が消えた').toHaveCount(1);
+  const save = page.locator('[data-pkc-browse-pane="draw"] [data-pkc-field="image-draw-save"]');
+  await expect(save).toBeDisabled();
+  const box = (await canvas.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.3);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.5, { steps: 8 });
+  await page.mouse.up();
+  await expect(save).toBeEnabled();
+  await expect(cards, '台を押しただけで、読んでいる板が閉じた').toHaveCount(1);
+  await save.click();
+
+  await expect(cards, '手書きの付箋が板に置かれていない').toHaveCount(2, { timeout: 10_000 });
+  await expect(tab, '保存後も手書きのタブが残っている').toBeHidden({ timeout: 10_000 });
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

@@ -41,6 +41,8 @@ const PANE_FILES: Readonly<Record<BrowseMode, readonly string[]>> = {
   graph: ['graph.ts'],
   timers: ['timers.ts'],
   pc: ['pc-folder.ts'],
+  // 🔴 手書き(#1448)── 別ウィンドウが塞がれたときの退避先の面
+  draw: ['draw-pane.ts'],
 };
 
 const readsKindFilter = (mode: BrowseMode): boolean =>

@@ -18,7 +18,7 @@ export const WORKSPACES_REMAIN_MESSAGE =
  * @param count ワークスペースの数を返す口(失敗しうる)
  */
 export async function refuseWhenWorkspacesRemain(count: () => Promise<number>): Promise<void> {
-  let n = 0;
+  let n: number;
   try {
     n = await count();
   } catch {

@@ -92,6 +92,11 @@ export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
    *   計った時間の正本は**ノートの本文**で、閉じても失う物が無い(#292 段⑤ の見分け方)。
    */
   { mode: 'timers', label: '時間' },
+  /**
+   * 🔴 **手書き**(#1448)。別ウィンドウ(「画像に描き込む」「手書きして置く…」)が塞がれたときの退避先 ──
+   * 退避先は中央ではなく**左のタブ**(中央の本文を奪わない)。⚠ **描いている間だけ**タブが出る(普段は隠れている)。
+   */
+  { mode: 'draw', label: '手書き' },
 ] as const;
 
 /**
@@ -158,6 +163,8 @@ export class BrowseRouter {
   private readonly timers: TimersRenderer;
   /** 🔴 パソコンのフォルダ(#215 段①)。⚠ handle は持たない(`LocalFolder` が持ち主)。 */
   private readonly pc: PcFolderRenderer;
+  /** 🔴 手書きのタブ(#1448)。描いている間だけ出す。 */
+  private readonly drawTab: HTMLElement | null;
   /**
    * 🔑 **面ごとに位置を覚える**(P8 段⑫。user 指示「サイドバーも同じ、
    * スクロールが発生するすべての画面が対象だよ」)。3 つの面が**同じ器**を
@@ -257,7 +264,10 @@ export class BrowseRouter {
       graph: pane('graph'),
       timers: pane('timers'),
       pc: pane('pc'),
+      draw: pane('draw'),
     };
+    this.drawTab = sidebar.querySelector<HTMLElement>('[data-pkc-browse="draw"]');
+    if (this.drawTab !== null) this.drawTab.hidden = true;
     this.scroll = new ScrollMemory(host);
     /**
      * 🔴 **探す欄は面の外にある**(2026-08-29、#536 ②)。⚠ 面の中の renderer に
@@ -293,6 +303,16 @@ export class BrowseRouter {
     this.graph = new GraphRenderer(this.panes.graph);
     this.timers = new TimersRenderer(this.panes.timers);
     this.pc = new PcFolderRenderer(this.panes.pc, pcFolder);
+  }
+
+  /** 🔴 手書きの面の器(#1448)。道具と台はここへ組む(`openImageDrawInPane`)。 */
+  drawPaneRoot(): HTMLElement {
+    return this.panes.draw;
+  }
+
+  /** 🔴 手書きのタブを出す / 畳む(#1448)。描いている間だけ出す。 */
+  setDrawTab(visible: boolean): void {
+    if (this.drawTab !== null) this.drawTab.hidden = !visible;
   }
 
   /**

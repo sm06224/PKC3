@@ -377,6 +377,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
     tx.setAttribute('data-pkc-field', 'label');
     tx.textContent = label;
     btn.append(ic, tx);
+    // 🔴 手書きのタブは描いている間だけ出す(#1448。`BrowseRouter.setDrawTab`)
+    if (mode === 'draw') btn.hidden = true;
     tabs.append(btn);
   }
 

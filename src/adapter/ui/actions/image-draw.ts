@@ -48,6 +48,14 @@ export function imageDrawPhaseBlockedText(phase: AppPhase): string {
 export const IMAGE_DRAW_POPUP_BLOCKED_TEXT =
   '別のウィンドウを開けませんでした。ブラウザのポップアップの許可を出してから、もう一度押してください';
 
+/** 窓の代わりに左の「手書き」タブへ出したときの知らせ。 */
+export const IMAGE_DRAW_PANE_NOTICE =
+  '別のウィンドウを開けなかったので、左の列の「手書き」タブに出しました(保存するか、閉じるまでここで描けます)';
+
+/** 左の「手書き」タブが別の絵で使われているとき。 */
+export const IMAGE_DRAW_PANE_BUSY_TEXT =
+  '左の「手書き」タブで別の絵を描いている途中です。保存するか閉じてから、もう一度押してください';
+
 export interface ImageDrawDeps {
   readonly dispatcher: Dispatcher;
   /** 元の bytes を読む口。⚠ `null` = 中身がもう無い。 */
@@ -61,6 +69,11 @@ export interface ImageDrawDeps {
   ) => Promise<AttachedOne | null>;
   /** 描き込みの窓を**同期で**開く口。開けなければ `null`。 */
   readonly openWindow: (deps: ImageDrawWindowDeps) => ImageDrawWindow | null;
+  /**
+   * 🔴 **窓が開けなかったときの退避先: 左の列の「手書き」タブ**(#1448)。省略 = 退避先なし(従来どおり断る)。
+   * ⚠ 退避先は中央ではない(中央の本文を奪わない)。面は 1 つなので同時に 1 枚。
+   */
+  readonly openPane?: (deps: ImageDrawWindowDeps) => ImageDrawWindow | null;
   /** 結果の知らせ。`openLid` = 知らせの「開く」が指す、保存した添付のノート。 */
   readonly notify: (text: string, openLid: string) => void;
   /**
@@ -96,6 +109,8 @@ export function createImageDrawer(deps: ImageDrawDeps): ImageDrawer {
   let saving = false;
   /** 開いている窓(添付ごとに 1 枚)。 */
   const windows = new Map<string, ImageDrawWindow>();
+  /** 左の「手書き」タブに出している窓(面は 1 つ)。 */
+  let paneWin: ImageDrawWindow | null = null;
   const fail = (error: string): void => deps.dispatcher.dispatch({ type: 'OP_FAILED', error });
 
   /**
@@ -115,16 +130,32 @@ export function createImageDrawer(deps: ImageDrawDeps): ImageDrawer {
       existing.focus();
       return;
     }
-    const win = deps.openWindow({
+    const winDeps: ImageDrawWindowDeps = {
       title: opts.title,
       windowName: `pkc3-draw-${opts.key}`,
       onClosed: () => {
         if (windows.get(opts.key) === win) windows.delete(opts.key);
       },
-    });
+    };
+    let win = deps.openWindow(winDeps);
     if (win === null) {
-      fail(IMAGE_DRAW_POPUP_BLOCKED_TEXT);
-      return;
+      // 🔴 窓が塞がれた → 左の「手書き」タブへ退避する(中央は使わない)。面は 1 つ ── 別の絵を描いている途中なら断る
+      const busy = paneWin !== null && !paneWin.closed;
+      if (deps.openPane === undefined) {
+        fail(IMAGE_DRAW_POPUP_BLOCKED_TEXT);
+        return;
+      }
+      if (busy) {
+        fail(IMAGE_DRAW_PANE_BUSY_TEXT);
+        return;
+      }
+      win = deps.openPane(winDeps);
+      if (win === null) {
+        fail(IMAGE_DRAW_POPUP_BLOCKED_TEXT);
+        return;
+      }
+      paneWin = win;
+      deps.dispatcher.dispatch({ type: 'OP_NOTICE', message: IMAGE_DRAW_PANE_NOTICE });
     }
     windows.set(opts.key, win);
     const loaded = await opts.load();

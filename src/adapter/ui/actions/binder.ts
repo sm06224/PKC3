@@ -19005,6 +19005,11 @@ export function bindActions(
         )
       )
         return;
+      /**
+       * 🔴 **「手書き」のタブの中は、「何も無い所」ではない**(#1448)。⚠ 描くために台を押しただけで、読んでいるノートが
+       *   閉じていた(保存しても、手書きを置く先の板が無くなる)。
+       */
+      if ((ev.target as HTMLElement | null)?.closest('[data-pkc-browse-pane="draw"]')) return;
       const host = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
         '[data-pkc-region="browse-host"]',
       );
