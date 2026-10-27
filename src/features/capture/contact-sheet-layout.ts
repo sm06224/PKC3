@@ -4,7 +4,7 @@
  * 絵を描く所(OffscreenCanvas・復号)は adapter 側(`platform/video/contact-sheet.ts`)。ここは**どこに何を置くか**だけを
  * 決める pure module(`features/` 層。browser API を持たない)── 数字の根拠が 1 か所で、単体で確かめられる。
  */
-import { ELAPSED_LINE_HEAD, parseElapsed } from '../elapsed-text';
+import { readElapsedHead } from '../elapsed-text';
 import { isChaptersHeading } from './chapters';
 import { isSpeakerTranscriptHeading, isSpeakersHeading } from './speakers';
 
@@ -103,13 +103,11 @@ export function transcriptLinesOf(body: string): TimedLine[] {
   for (const line of body.split('\n')) {
     if (/^#{1,6} /.test(line)) skipping = isNonTranscriptHeading(line);
     if (skipping) continue;
-    const m = ELAPSED_LINE_HEAD.exec(line.trimEnd());
-    if (m === null) continue;
-    const ms = parseElapsed(m[1]!);
-    if (ms === null) continue;
-    const text = line.slice(m[0].length).trim();
+    const head = readElapsedHead(line.trimEnd());
+    if (head === null) continue;
+    const text = line.trimEnd().slice(head.headLength).trim();
     if (text === '') continue;
-    out.push({ ms, text });
+    out.push({ ms: head.startMs, text });
   }
   return out;
 }

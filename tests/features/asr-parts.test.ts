@@ -23,6 +23,7 @@ import {
   asrDownloadBytes,
   asrModelFloorBytes,
   asrMemoryNote,
+  asrRecommendNote,
   asrModelDir,
   asrPartLabel,
   asrPartOf,
@@ -268,6 +269,16 @@ describe('PCM と本文へ足す字', () => {
     expect(lines!.split('\n').map((l) => l.split(' ')[0])).toEqual([0, 15_400, 3_723_900].map(elapsedText));
   });
 
+  it('🔴 #1447: 終わりの時刻があれば「0:07 〜0:12 字」で持つ。終わりが無い・同じ秒・以前なら従来の形', () => {
+    const lines = transcriptLines([
+      { startMs: 7_000, endMs: 12_400, text: 'こんにちは' },
+      { startMs: 20_000, endMs: null, text: '終わり無し' },
+      { startMs: 30_000, endMs: 30_900, text: '同じ秒' },
+      { startMs: 40_000, endMs: 39_000, text: '以前' },
+    ]);
+    expect(lines).toBe(['0:07 〜0:12 こんにちは', '0:20 終わり無し', '0:30 同じ秒', '0:40 以前'].join('\n'));
+  });
+
   it('#1232: 使える行が無ければ null(呼び側は今の 1 段落へ倒す)', () => {
     expect(transcriptLines(undefined)).toBeNull();
     expect(transcriptLines([])).toBeNull();
@@ -284,5 +295,15 @@ describe('PCM と本文へ足す字', () => {
 
   it('入口の名前は「音声認識」(節の見出しと案内が同じ字を引く)', () => {
     expect(ASR_SECTION_LABEL).toBe('音声認識');
+  });
+});
+
+describe('🔴 #1446 端末ごとの推奨', () => {
+  it('必要量の境目で軽い→正確が替わり、読めない値には言わない', () => {
+    expect(asrRecommendNote(1)).toContain('「軽い」');
+    expect(asrRecommendNote(4)).toContain('「軽い」');
+    expect(asrRecommendNote(7.9)).toContain('「軽い」');
+    expect(asrRecommendNote(8)).toContain('「正確」');
+    for (const v of [undefined, 0, -1, Number.NaN]) expect(asrRecommendNote(v)).toBeNull();
   });
 });

@@ -246,7 +246,15 @@ import { STACK_ARCHETYPE, stackBody } from '@features/flavor/stack-flavor';
 import { insertionForLineDate } from '@features/schedule/line-date';
 import { dayStamp } from '@features/datetime/date-math';
 import { safeName } from '@features/export/file-name';
-import { hasTranscriptCues, srtFromTranscript, transcriptCues } from '@features/asr/srt';
+import {
+  hasEmbeddedSrt,
+  hasEstimatedCue,
+  hasTranscriptCues,
+  srtFromTranscript,
+  srtMarkdownBlock,
+  srtSavedNotice,
+  transcriptCues,
+} from '@features/asr/srt';
 import { TIMER_RUN_CLEAR_ATTR, TIMER_RUN_LINE_ATTR } from '@adapter/ui/render/timers';
 import { decodeTaskDrag, dropTaskCard, dropTaskToStatus, encodeTaskDrag, statusTargetOf } from '@adapter/ui/render/schedule-drag';
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
@@ -2626,6 +2634,10 @@ export interface BinderServices {
    *   読む・展開する・字にする・コピーする、は `export-archive.ts` の `copyEntryMailDraft` が持つ。
    */
   copyEntryMail?(lid: string): void;
+  /**
+   * 🔴 **文字起こしを字幕ファイル(.srt)で書き出す**(#1447)。⚠ 解決規則は隣の `exportEntryMarkdown` と同じ lid。
+   */
+  exportEntrySrt?(lid: string): void;
   /**
    * 🔴 **このノートを別の窓で開く**(#685 段②、user 裁定 2026-09-04)。
    *
@@ -6819,13 +6831,14 @@ export function runGlobalCommand(
    *   ③時刻つきの行が無い。⚠ ②③の字は `note`(`keymap.ts`)が一覧で出すので、ここは実行の断りだけ。
    * ⚠ 終了時刻は**推定**(次の行の開始 / 最後は `LAST_CUE_MS`)── 知らせでそう言う(黙って作らない)。
    */
-  if (cmd === 'export-transcript-srt') {
+  if (cmd === 'export-transcript-srt' || cmd === 'embed-transcript-srt') {
+    const embed = cmd === 'embed-transcript-srt';
     const st = dispatcher.getState();
     const why = blockedActionNote(st.phase);
     if (why !== null) {
       if (dry) return false;
       prevent();
-      notify(`いまは字幕ファイルを書き出せません: ${why}`, CAUTION);
+      notify(`いまは字幕を${embed ? '埋め込め' : '書き出せ'}ません: ${why}`, CAUTION);
       return true;
     }
     const lid = st.selectedLid;
@@ -6840,17 +6853,33 @@ export function runGlobalCommand(
     if (!hasTranscriptCues(open.body)) {
       if (dry) return false;
       prevent();
-      notify('行頭に時刻のある行(文字起こし)が無いので、字幕ファイルにできません', CAUTION);
+      notify('行頭に時刻のある行(文字起こし)が無いので、字幕にできません', CAUTION);
       return true;
     }
     if (dry) return true;
     prevent();
+    if (embed) {
+      /**
+       * 🔴 **本文の末尾へ ```srt の囲みとして足す**(#1447 の「Markdown への埋め込み」)── 外の AI にそのまま渡せる形。
+       * 新しい書込経路は作らない: 追記(`APPEND_TO_ENTRY`)の 1 本で、足した後は「追記を元に戻す」で戻せる(片道にしない)。
+       * ⚠ 囲みの中は字幕の読みに入らないので、足したあとも「字幕ファイルで書き出す」は二重にならない。
+       */
+      const block = srtMarkdownBlock(open.body);
+      if (block === null) return false;
+      // ⚠ 2 回押して同じ字幕が 2 つ並ばないように断る(置き換える口は作らない ── 足したものは「追記を元に戻す」か手で消せる)
+      if (hasEmbeddedSrt(open.body)) {
+        notify('字幕(SRT)はすでに本文に埋め込まれています。入れ直すときは、本文の「## 字幕(SRT)」の節を消してからもう一度押してください', CAUTION);
+        return true;
+      }
+      dispatcher.dispatch({ type: 'APPEND_TO_ENTRY', lid, text: block, heading: '## 字幕(SRT)', target: null });
+      return true;
+    }
     const srt = srtFromTranscript(open.body);
     if (srt === null) return false; // ⚠ `hasTranscriptCues` が真なら来ない(同じ読み)── tsc のための null 除け
     const title = st.entryMetas.get(lid)?.title ?? lid;
     downloadBlob(`${safeName(title)}-${dayStamp(new Date())}.srt`, new Blob([srt], { type: 'application/x-subrip' }));
     const n = transcriptCues(open.body).length;
-    notify(`字幕ファイルを保存しました(${String(n)} 件。終わりの時刻は次の行の始まりです。次の行が無い・時刻が進んでいない行は 5 秒後と見なしています)`);
+    notify(srtSavedNotice(n, hasEstimatedCue(open.body)));
     return true;
   }
   /**
@@ -7350,7 +7379,7 @@ export function commandRowsFor(
     // ⚠ 「メッセージを開く」は押しボタンを持たない(左の列の同名は別の口)── 理由は
     //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
     //   「字幕ファイル(.srt)で書き出す」(#1447)も同じ(押しボタンを持たない)── 時刻つきの行が無い理由は `note` が言う
-    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown' || id === 'export-note-pdf' || id === 'open-prev-day-note' || id === 'open-next-day-note') return blockedActionNote(dispatcher.getState().phase);
+    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'embed-transcript-srt' || id === 'export-note-markdown' || id === 'export-note-pdf' || id === 'open-prev-day-note' || id === 'open-next-day-note') return blockedActionNote(dispatcher.getState().phase);
     // 「選択範囲をコピー」── 控えが無いときの理由(押しボタンを持たない)。左の `>` の一覧では選択が残らないので、呼べる道を言う
     if (id === 'copy-selection-md')
       return inPalette ? SELECTION_FIRST : `${SELECTION_FIRST}(選択してから「操作を探す」を開いてください)`;
@@ -8213,21 +8242,25 @@ const activeSeekLine = new WeakMap<Element, Element | null>();
  * 説明ごとの時刻の行の控え(行の要素と ms)。⚠ `timeupdate` は 1 秒に数回来る ── 毎回 DOM を引き直さない。
  * 説明が描き直されると要素が差し替わる(先頭と末尾が DOM から外れる)ので、そのときだけ作り直す。
  */
-const seekLineCache = new WeakMap<Element, { lines: Element[]; ms: number[]; at: number }>();
-function seekLinesOf(prose: Element): { lines: Element[]; ms: number[]; at: number } {
+const seekLineCache = new WeakMap<Element, { lines: Element[]; ms: number[]; ends: Array<number | null>; at: number }>();
+function seekLinesOf(prose: Element): { lines: Element[]; ms: number[]; ends: Array<number | null>; at: number } {
   const hit = seekLineCache.get(prose);
   if (hit !== undefined && (hit.lines.length === 0 || (hit.lines[0]!.isConnected && hit.lines[hit.lines.length - 1]!.isConnected))) {
     return hit;
   }
   const lines: Element[] = [];
   const ms: number[] = [];
+  const ends: Array<number | null> = [];
   for (const line of prose.querySelectorAll('[data-pkc-seek-line]')) {
     const v = Number(line.querySelector('[data-pkc-seek-ms]')?.getAttribute('data-pkc-seek-ms'));
     if (!Number.isFinite(v)) continue;
     lines.push(line);
     ms.push(v);
+    // 終わりつきの行(`data-pkc-seek-end`)── 終わりを過ぎたら光らせない
+    const e = line.getAttribute('data-pkc-seek-end');
+    ends.push(e === null || !Number.isFinite(Number(e)) ? null : Number(e));
   }
-  const built = { lines, ms, at: -1 };
+  const built = { lines, ms, ends, at: -1 };
   seekLineCache.set(prose, built);
   return built;
 }
@@ -8251,9 +8284,11 @@ function markActiveSeekLine(media: HTMLMediaElement): void {
   const prose = host?.querySelector('[data-pkc-prose]');
   if (prose === null || prose === undefined) return;
   const cache = seekLinesOf(prose);
-  const idx = lastLineAtOrBefore(cache.ms, media.currentTime * 1000, cache.at);
+  const nowMs = media.currentTime * 1000;
+  const idx = lastLineAtOrBefore(cache.ms, nowMs, cache.at);
   cache.at = idx;
-  const active: Element | null = idx >= 0 ? cache.lines[idx]! : null;
+  const end = idx >= 0 ? cache.ends[idx] : null;
+  const active: Element | null = idx >= 0 && !(end !== null && end !== undefined && nowMs >= end) ? cache.lines[idx]! : null;
   if (activeSeekLine.get(prose) === active && (active === null || active.hasAttribute('data-pkc-seek-active'))) return;
   for (const old of prose.querySelectorAll('[data-pkc-seek-active]')) old.removeAttribute('data-pkc-seek-active');
   active?.setAttribute('data-pkc-seek-active', '');
@@ -9337,6 +9372,7 @@ const ACTIONS: Record<string, ActionHandler> = {
                   entryMenuActions({
                     archetype: st.entryMetas.get(lid)?.archetype ?? null,
                     linkedFile: st.linkedFiles.get(lid) ?? null,
+                    ...transcriptMenuCtx(st, lid),
                   }),
                   st.openBody?.lid === lid,
                 ),
@@ -17636,6 +17672,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.copyEntryMail?.(lid);
   },
+  'export-entry-srt': (dispatcher, target, services) => {
+    // 🔴 解決規則は隣の `export-entry-markdown` と**同じ**(#877)
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
+    if (lid) services.exportEntrySrt?.(lid);
+  },
   'export-entry-markdown': (dispatcher, target, services) => {
     // 🔴 解決規則は隣の `export-entry-html` と**同じ**(#877)── 揃えないと「A を書き出して B を削除する」が成立する
     const lid = rowLidOrSelected(dispatcher.getState(), target);
@@ -18697,6 +18738,18 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
 export const CARET_INSERT_TOOLS: ReadonlySet<string> = new Set(
   [...CARET_TOOLS].filter((id) => id !== 'renumber-lists' && id !== 'sort-tasks' && id !== 'format-text'),
 );
+
+
+/**
+ * 🔴 **右クリックの「字幕ファイル(.srt)」を出すか**(#1447)。本文を読むのは**開いているノートのときだけ**
+ * (別の行は右クリックのために worker を叩かない)。時刻つきの行が在るときだけ `transcript: true`。
+ */
+function transcriptMenuCtx(
+  st: ReturnType<Dispatcher['getState']>,
+  lid: string,
+): { readonly transcript?: true } {
+  return st.openBody?.lid === lid && hasTranscriptCues(st.openBody.body) ? { transcript: true } : {};
+}
 
 /**
  * 🔴 **記法を当てられる欄か**(#425 段②-b)。
@@ -22226,6 +22279,7 @@ export function bindActions(
       const rowCtx: EntryMenuContext = {
         archetype,
         linkedFile: st.linkedFiles.get(lid) ?? null,
+        ...transcriptMenuCtx(st, lid),
         /**
          * 🔴 **ノートのブックマーク**(#1377)。⚠ 帯が見えるのは**この面だけ**なので、
          *   ここだけが `bookmarked` を渡す(他の 3 か所は渡さない = 出さない)。
@@ -22434,6 +22488,7 @@ export function bindActions(
       entryMenuActions({
         archetype: st.entryMetas.get(lid)?.archetype ?? null,
         linkedFile: st.linkedFiles.get(lid) ?? null,
+        ...transcriptMenuCtx(st, lid),
       }).map(withRowShortcut),
       st.openBody?.lid === lid,
     );

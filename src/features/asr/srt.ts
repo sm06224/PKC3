@@ -19,10 +19,19 @@
  * ⚠ 時刻の綴りは秒までなので、`,000` が付く(本文の精度そのまま。偽の精度を作らない)。
  */
 
-import { ELAPSED_LINE_HEAD, parseElapsed, srtTime } from '../elapsed-text';
+import { readElapsedHead, srtTime } from '../elapsed-text';
+import { inlineToText } from '../report/mail-text';
 
 /** 次の行が無い(か、時刻が進んでいない)行に足す長さ。⚠ 推定である(呼び側の知らせの字と対で変える)。 */
 export const LAST_CUE_MS = 5000;
+
+/**
+ * 🔴 **字幕 1 件の長さの上限**(#1447 の残り「長い無音の区間は次の行まで字幕が出続ける」)。
+ * 次の行が遠い(無音・録音の途切れ)とき、前の字幕を次の行まで出しっぱなしにしない。
+ * 🔑 30 秒 = 認識が 1 度に読む区切り(`chunk_length_s`)の目安。1 つの行がこれより長く喋り続けることは
+ *   認識の側が作らない(行は区切りごとに出る)ので、普通の字幕は切れない。
+ */
+export const MAX_CUE_MS = 30_000;
 
 /** 字幕 1 件。 */
 export interface SrtCue {
@@ -40,7 +49,9 @@ const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
 const LINE_PREFIX = /^ {0,3}(?:>|[-*+] |\d{1,9}[.)] |#{1,6} ) ?/;
 
 /** 1 行ずつ「行頭に時刻のある行」を出す(コードブロックの中は飛ばす)。 */
-function* transcriptHeads(body: string): Generator<{ readonly ms: number; readonly text: string }> {
+function* transcriptHeads(
+  body: string,
+): Generator<{ readonly ms: number; readonly endMs: number | null; readonly text: string }> {
   let fence: { readonly ch: string; readonly len: number } | null = null;
   for (const line of body.split('\n')) {
     if (fence !== null) {
@@ -64,14 +75,13 @@ function* transcriptHeads(body: string): Generator<{ readonly ms: number; readon
     // ⚠ 4 つ以上の空白で始まる残りは code(markdown の字下げ code)── 画面でも押せない
     if (/^ {4}/.test(rest)) continue;
     rest = rest.replace(/^ {0,3}/, '');
-    const m = ELAPSED_LINE_HEAD.exec(rest);
-    if (m === null) continue;
-    const ms = parseElapsed(m[1]!);
-    if (ms === null) continue;
-    const text = rest.slice(m[1]!.length).trim();
+    // 🔑 行頭の読みは `readElapsedHead` 1 本(画面で押せる字にする側と同じ。終わりつきの形も受ける)
+    const head = readElapsedHead(rest);
+    if (head === null) continue;
+    const text = rest.slice(head.headLength).trim();
     // ⚠ 字が空の行(時刻だけ)は捨てる ── 空の字幕は再生機で「何も出ない区間」になるだけ
     if (text === '') continue;
-    yield { ms, text };
+    yield { ms: head.startMs, endMs: head.endMs, text };
   }
 }
 
@@ -83,14 +93,19 @@ export function hasTranscriptCues(body: string): boolean {
 
 /**
  * 本文から「行頭に時刻のある行」を拾い、終了時刻を付ける。
- * ⚠ 字は時刻の後ろを**そのまま**(前後の空白だけ落とす。markdown の記号も剥がさない)。
+ * ⚠ 字は時刻の後ろ。再生機は markdown を解釈しないので、インラインの記号は `inlineToText`(メール下書きと同じ 1 本)で外す。
  */
 export function transcriptCues(body: string): readonly SrtCue[] {
   const heads = [...transcriptHeads(body)];
   return heads.map((h, i) => {
     const next = heads[i + 1];
-    const endMs = next !== undefined && next.ms > h.ms ? next.ms : h.ms + LAST_CUE_MS;
-    return { startMs: h.ms, endMs, text: h.text };
+    // 🔑 行が終わりを持っていれば、それが字幕の終了(認識が持っていた実際の値。推定しない)
+    const rawEnd = h.endMs ?? (next !== undefined && next.ms > h.ms ? next.ms : h.ms + LAST_CUE_MS);
+    // ⚠ 上限で切るのは推定のときだけ(「次の行までが遠い」。終わりを持つ行は実測なので切らない)
+    const endMs = h.endMs !== null ? rawEnd : Math.min(rawEnd, h.ms + MAX_CUE_MS);
+    // 🔴 本文の markdown の記号(`**強調**` / リンク / コード)は字幕に出さない ── 再生機は記号を解釈しない(#1447)
+    const text = inlineToText(h.text).trim();
+    return { startMs: h.ms, endMs, text: text === '' ? h.text : text };
   });
 }
 
@@ -104,4 +119,44 @@ export function srtFromTranscript(body: string): string | null {
   const cues = transcriptCues(body);
   if (cues.length === 0) return null;
   return cues.map((c, i) => `${String(i + 1)}\n${srtTime(c.startMs)} --> ${srtTime(c.endMs)}\n${c.text}\n`).join('\n') + '\n';
+}
+
+/**
+ * 🔴 **字幕を保存したときの知らせ**(#1447)。⚠ 「操作を探す」と右クリック・右の列の両方の口がこの 1 本を呼ぶ
+ * (文面が 2 か所にあると、片方だけ直した日に食い違う)。
+ * @param estimated 終わりを推定した行が 1 つでもあるか(全部が終わりつきなら推定の説明は要らない)
+ */
+export function srtSavedNotice(count: number, estimated: boolean): string {
+  const head = `字幕ファイルを保存しました(${String(count)} 件`;
+  return estimated
+    ? `${head}。終わりの時刻が無い行は次の行の始まりまで、次の行が無い・時刻が進んでいない行は 5 秒後と見なし、1 件は 30 秒までです)`
+    : `${head})`;
+}
+
+/**
+ * 本文に、埋め込み済みの字幕(`## 字幕(SRT)` の見出しの直後の ```srt)が在るか(#1447。2 回押して二重に並べない)。
+ * ⚠ 見出しから最初のコードブロックの開きまでが空行だけのときに限る(別の節の中の同名の字を拾わない)。
+ */
+export function hasEmbeddedSrt(body: string): boolean {
+  return /^## 字幕\(SRT\)[ \t]*\n+(`{3,}|~{3,})srt[ \t]*\n/m.test(body);
+}
+
+/** 字幕の中に、終わりを推定した行が在るか(`srtSavedNotice` の第 2 引数)。 */
+export function hasEstimatedCue(body: string): boolean {
+  for (const h of transcriptHeads(body)) if (h.endMs === null) return true;
+  return false;
+}
+
+/**
+ * 🔴 **字幕を本文に埋め込む**ための ```srt 囲み(#1447 の「Markdown への埋め込み」)。
+ * 外の AI にそのまま渡せる形で、ノートの末尾へ足す。時刻つきの行が無ければ `null`。
+ * ⚠ 囲みの中は `transcriptHeads` が読まない(コードブロック)ので、**書き出し直しても二重にならない**。
+ * ⚠ 字幕の字に ``` が含まれていても閉じないよう、囲みは字の中の最長の連なりより 1 つ長くする。
+ */
+export function srtMarkdownBlock(body: string): string | null {
+  const srt = srtFromTranscript(body);
+  if (srt === null) return null;
+  const longest = Math.max(2, ...(srt.match(/`+/g) ?? []).map((m) => m.length));
+  const fence = '`'.repeat(longest + 1);
+  return `${fence}srt\n${srt.replace(/\n+$/, '')}\n${fence}`;
 }

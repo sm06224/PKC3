@@ -33,6 +33,7 @@ import { isTooLargeToRead } from '../import/too-large';
 import { relabeledInFileWarning, relabeledWarning } from '../import/relabel-warning';
 import { archiveTooBigRefusal, MAX_EMBED_TEXT_CHARS, notImportableArchiveMessage } from '../storage/image-export-limit';
 import { parseTagColorList, type TagColorEntry } from '../tag-color';
+import { safeName } from './file-name';
 
 export const ARCHIVE_FORMAT = 'pkc3-archive';
 /**
@@ -46,6 +47,19 @@ const ARCHIVE_MIN_VERSION = 1;
 const MANIFEST = 'manifest.json';
 const CONTAINER = 'container.json';
 const ASSET_PREFIX = 'assets/';
+/** 🔴 人が読める本文の置き場(#986。`readableNotes` を立てた書き出しだけが書く。読み込みは見ない)。 */
+const NOTES_PREFIX = 'notes/';
+/**
+ * 🔴 **`notes/` を入れる本文の総量の上限(字数)**(#986)。
+ * ⚠ 正直に書く: `notes/*.md` は本文を**もう 1 度** zip の部品(Blob)として持つので、zip が出来上がるまで
+ *   本文の総量ぶんの Blob が**container.json の分とは別に**もう 1 組み残る(Blob は heap の外だが、メモリは倍になる)。
+ *   壊れた保存領域の復旧は「まれに 1 回」でも、巨大なコレクションで倍にして落とすのは本末転倒なので、
+ *   **総量が上限を超えたら notes/ を全部省き**、省いたことを注意で言う(取り込み(container.json)は無傷)。
+ * 🔑 200M 字 ≒ 日本語で 600MB 弱。測った値ではなく「container.json の上限(`MAX_EMBED_TEXT_CHARS`)と同じ桁の目安」。
+ * ⚠ ゴミ箱のノートは `notes/` に入れない: `notes/` は「いま生きているノートを読む」ための物で、ゴミ箱の物を混ぜると
+ *   「消したはずのノートが生きているように見える」(取り込み側も `trash` を別に扱う)。
+ */
+export const READABLE_NOTES_MAX_CHARS = 200_000_000;
 /** 1 バッチで取る本文の目安(postMessage に全量を載せない)。 */
 const BODY_BATCH_BYTES = 4 * 1024 * 1024;
 
@@ -127,6 +141,12 @@ export interface ArchiveSource {
    * ファイル名を変えても、取り込みの確認が「拾えた分だけ」と言える。⚠ 任意(旧い読み手は知らないキーを読み飛ばす)。
    */
   partial?: boolean;
+  /**
+   * 🔴 **zip を開けば中身が読める**ように、本文を `notes/<連番>-<題名>.md` としても同梱する(#986 の残り項目)。
+   * ⚠ 任意。読み込み(`readArchive`)は `assets/` 以外を見ないので、同梱しても取り込みは変わらない。
+   * 本文は 1 件ずつ Blob にして手放す(heap に溜めない)。
+   */
+  readableNotes?: boolean;
   listEntryMetas(): Promise<
     Array<{
       lid: string;
@@ -321,6 +341,8 @@ export async function writeArchive(
    * `'warn'` は保険の zip(拾い出し・作り直し)だけ ── 大きいコレクションの作り直しを大きさで止めない。
    */
   oversize: 'refuse' | 'warn' = 'refuse',
+  /** 試験用: `notes/` を省く本文の総量(字数。既定 = `READABLE_NOTES_MAX_CHARS`)。 */
+  readableMaxChars: number = READABLE_NOTES_MAX_CHARS,
 ): Promise<ArchiveResult> {
   const warnings: string[] = [];
   // 🔑 同種の注意は上限まで(規則は `warn-cap.ts` の 1 本 ── P8 段㉒)
@@ -337,6 +359,11 @@ export async function writeArchive(
   /** 実際に書いたノートの lid(下の relations / revisions を、書いたノートに絞るために持つ)。 */
   const exportedLids = new Set<string>();
   let blobChars = 0;
+  /** 人が読める本文(`readableNotes` のとき)。⚠ Blob のまま持つ(文字列を溜めない)。 */
+  let readable: Array<{ name: string; blob: Blob }> = [];
+  let readableChars = 0;
+  /** 総量が上限を超えて、notes/ を省くと決めた(以後は溜めない)。 */
+  let readableDropped = false;
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
     const { rows, done, next } = await src.listBodies(after, BODY_BATCH_BYTES);
@@ -357,6 +384,18 @@ export async function writeArchive(
       chunk += entryCount === 0 ? j(e) : `,${j(e)}`;
       entryCount++;
       exportedLids.add(e.lid);
+      if (src.readableNotes === true && !readableDropped) {
+        readableChars += r.body.length;
+        if (readableChars > readableMaxChars) {
+          readable = []; // 溜めた Blob を手放す
+          readableDropped = true;
+        } else {
+          readable.push({
+            name: `${NOTES_PREFIX}${String(entryCount).padStart(5, '0')}-${safeName(m.title)}.md`,
+            blob: new Blob([r.body]),
+          });
+        }
+      }
     }
     // 🔴 取り込み直す側は container.json を `Blob.text()` で 1 本の文字列にする ── 上限は**字数**で効く。
     //   Blob にすると字数が見えなくなる(bytes は日本語で約 3 倍)ので、手放す前に数える
@@ -461,6 +500,11 @@ export async function writeArchive(
     warnings.push(notImportableArchiveMessage(containerChars));
   }
   await w.add(CONTAINER, parts);
+  if (readableDropped) {
+    warnings.push('本文の総量が大きいため、読む用の notes/ フォルダは入れていません(取り込みには影響しません)');
+  }
+  // 🔴 人が読める本文(#986)── container.json の後ろ・添付の前。⚠ 連番で名前の重なりを避ける
+  for (const n of readable) await w.add(n.name, [n.blob]);
 
   let assetCount = 0;
   for (const a of assetMetas) {

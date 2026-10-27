@@ -83,7 +83,7 @@ import {
 } from '../link/card-presentation';
 import { findPhones } from '../contact/phone-link';
 import { allDateTokens, readLineDate, unreadableDateTokens } from '../schedule/line-date';
-import { ELAPSED_LINE_HEAD, parseElapsed } from '../elapsed-text';
+import { readElapsedHead } from '../elapsed-text';
 import { tagColorKey } from '../tag-color';
 import { confirmColorSpan, isColorCode, isEditableColor } from './color-code';
 import { ifFormatMatches } from './if-format';
@@ -3245,8 +3245,7 @@ md.inline.ruler.after('link', 'pkc_title_link', function titleLinkRule(state, si
  * ⚠ 字は**そのまま**(`0:15`)。後ろの空白と字には触らない。リンクの中では当てない。
  * 🔑 `<span role="button" tabindex="0">` ── 鍵(Enter / Space)は binder の「`tabindex="0"` の押せる物」の道に乗る。
  */
-// 🔑 綴りは `ELAPSED_LINE_HEAD`(`elapsed-text.ts`)── 字幕ファイル(#1447)と同じ 1 本で「時刻つきの行」を読む
-const SEEK_LINE_HEAD = ELAPSED_LINE_HEAD;
+// 🔑 読みは `readElapsedHead`(`elapsed-text.ts`)── 字幕ファイル(#1447)・切り出しの移送と同じ 1 本で「時刻つきの行」を読む
 /**
  * 🔴 **時刻に載せると「0:15 から再生」と出る**(#1232 段 b、Gemini 裁定 Q4 = B)。
  * ⚠ 字の形は**ここ 1 か所**(`title` = マウスを載せたときの小さな案内、`aria-label` = 読み上げ。
@@ -3285,25 +3284,26 @@ md.core.ruler.after('inline', 'pkc-seek-link', function (state) {
         out.push(t);
         continue;
       }
-      const m = SEEK_LINE_HEAD.exec(t.content);
-      const ms = m === null ? null : parseElapsed(m[1]!);
-      if (m === null || ms === null) {
+      const head = readElapsedHead(t.content);
+      if (head === null) {
         out.push(t);
         continue;
       }
       const open = new state.Token('html_inline', '', 0);
-      open.content = '<span data-pkc-seek-line>';
+      // 🔑 終わりつきの行(`0:07 〜0:12`)は終わりも載せる ── 再生位置が終わりを過ぎたら光らせない(無音の間は誰も光らない)
+      open.content = head.endMs === null ? '<span data-pkc-seek-line>' : `<span data-pkc-seek-line data-pkc-seek-end="${head.endMs}">`;
       out.push(open);
       lineOpen = true;
       const tok = new state.Token('html_inline', '', 0);
-      const note = md.utils.escapeHtml(seekLinkTitle(m[1]!));
+      const note = md.utils.escapeHtml(seekLinkTitle(head.startText));
       tok.content =
         `<span class="pkc-seek-link" data-pkc-action="seek-media" ` +
-        `data-pkc-seek-ms="${ms}" role="button" tabindex="0" title="${note}" aria-label="${note}">` +
-        `${md.utils.escapeHtml(m[1]!)}</span>`;
+        `data-pkc-seek-ms="${head.startMs}" role="button" tabindex="0" title="${note}" aria-label="${note}">` +
+        `${md.utils.escapeHtml(head.startText)}</span>`;
       out.push(tok);
       const tail = new state.Token('text', '', 0);
-      tail.content = t.content.slice(m[1]!.length);
+      // 終わりつきの行は ` 〜0:12 字` を字として残す(押せるのは始まりだけ)
+      tail.content = t.content.slice(head.startText.length);
       out.push(tail);
       changed = true;
     }

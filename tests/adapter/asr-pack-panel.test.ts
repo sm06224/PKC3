@@ -92,6 +92,18 @@ describe('部品 2 択の見え方', () => {
     }
   });
 
+  it('🔴 #1446 端末のメモリに合う 1 つを取り込む前に案内する(読めない端末・取り込み済みでは出さない)', () => {
+    const rec = (p: { root: HTMLElement }): HTMLElement => q(p.root, 'asr-recommend');
+    const small = buildAsrPackPanel(new AsrPackState(), { deviceMemory: () => 2 });
+    expect(rec(small).hidden).toBe(false);
+    expect(rec(small).textContent).toContain('「軽い」がお勧め');
+    const big = buildAsrPackPanel(new AsrPackState(), { deviceMemory: () => accurate.needMemoryGb });
+    expect(rec(big).textContent).toContain('「正確」がお勧め');
+    const unknown = buildAsrPackPanel(new AsrPackState(), { deviceMemory: () => undefined });
+    expect(rec(unknown).hidden).toBe(true);
+    expect(rec(unknown).textContent).toBe('');
+  });
+
   it('🔴 ② 既定は navigator.deviceMemory を読む(差し替えなければ実際の値)', () => {
     vi.stubGlobal('navigator', { ...navigator, deviceMemory: 1 });
     try {
@@ -104,6 +116,18 @@ describe('部品 2 択の見え方', () => {
 });
 
 describe('状態で切り替わる', () => {
+  it('🔴 #1446 取り込み済みなら、推奨の案内は消える。消したあとは戻る(片道にしない)', () => {
+    const s = new AsrPackState();
+    const p = buildAsrPackPanel(s, { deviceMemory: () => 2 });
+    const rec = q(p.root, 'asr-recommend');
+    expect(rec.hidden, '前提: 未取り込みでは出ている(出ていなければ下の assert は空振り)').toBe(false);
+    s.setInstalled(INSTALLED_LIGHT);
+    expect(rec.hidden, '取り込み済みなのに案内が残っている').toBe(true);
+    expect(rec.textContent).toBe('');
+    s.setInstalled({ runtime: null, parts: {} } as unknown as AsrInstalled);
+    expect(rec.hidden, '消したあとに案内が戻らない').toBe(false);
+  });
+
   it('③ 取り込み済み:取り込むボタンは隠れ、「取り込み済み」と消すボタンが出る(案内は出さない)', () => {
     const s = new AsrPackState();
     const p = buildAsrPackPanel(s, { deviceMemory: () => 1 });

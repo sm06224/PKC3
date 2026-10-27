@@ -83,6 +83,7 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'export-note-markdown': NOTE,
   'export-note-pdf': NOTE,
   'export-transcript-srt': NOTE,
+  'embed-transcript-srt': NOTE,
   'append-send': NOTE,
   // 編集 ── 本文の欄の中の操作
   'insert-date': EDIT,

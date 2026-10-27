@@ -26,6 +26,7 @@
 import {
   ASR_PARTS,
   asrMemoryNote,
+  asrRecommendNote,
   asrPartLabel,
   type AsrPart,
   type AsrPartId,
@@ -171,6 +172,12 @@ export function buildAsrPackPanel(
     '一式を 1 度取り込めば、次からは端末の中から動きます。軽いほうは速く、正確なほうは時間がかかります。';
   root.append(intro);
 
+  // 🔴 端末のメモリに合う 1 つを、取り込む前に案内する(#1446)。読めない端末には出さない
+  const recommend = document.createElement('p');
+  recommend.setAttribute('data-pkc-field', 'asr-recommend');
+  recommend.hidden = true;
+  root.append(recommend);
+
   interface Row {
     readonly part: AsrPart;
     readonly wrap: HTMLElement;
@@ -230,6 +237,11 @@ export function buildAsrPackPanel(
       r.note.hidden = text === null;
       r.note.textContent = text ?? '';
     }
+    // 🔑 どれも取り込み済みなら案内は要らない
+    const anyHas = rows.some((r) => installedAll.parts[r.part.id] !== undefined);
+    const rec = anyHas ? null : asrRecommendNote(memory());
+    recommend.hidden = rec === null;
+    recommend.textContent = rec ?? '';
     progress.hidden = !busy;
     progress.textContent = state.progress();
     cancel.hidden = !busy;

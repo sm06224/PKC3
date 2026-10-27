@@ -740,11 +740,8 @@ test('🔴 パレットを外から閉じた後でも、編集を保存できる
   // 🔴 字幕ファイル(.srt)で書き出す(#1447)── ノートを開いていないときは**出るが押せず、理由が出る**
   //   (同じ道中に assert を足す。新しく起動しない)
   await page.locator('[data-pkc-field="palette-filter"]').fill('字幕');
-  const srtRow = page.locator('[data-pkc-field="palette-row"]').first();
-  await expect(srtRow, '字幕の操作が名前で探せない').toHaveAttribute(
-    'data-pkc-command',
-    'export-transcript-srt',
-  );
+  const srtRow = page.locator('[data-pkc-field="palette-row"][data-pkc-command="export-transcript-srt"]');
+  await expect(srtRow, '字幕の操作が名前で探せない').toHaveCount(1);
   await expect(srtRow, 'ノートを開いていないのに押せる').toBeDisabled();
   await expect(
     srtRow.locator('[data-pkc-field="palette-why"]'),
@@ -789,7 +786,8 @@ test('🔴 パレットを外から閉じた後でも、編集を保存できる
    */
   await page.keyboard.press('Control+Shift+P');
   await expect(dialog, '保存後にパレットが開かない').toBeVisible();
-  await page.locator('[data-pkc-field="palette-filter"]').fill('字幕');
+  // 🔑 「字幕 書き出し」で 1 件に絞り、**Enter で走る道**(鍵だけの user の道)を通す。埋め込みの行は「書き出し」を持たない
+  await page.locator('[data-pkc-field="palette-filter"]').fill('字幕 書き出し');
   const srtRow2 = page.locator('[data-pkc-field="palette-row"]').first();
   await expect(srtRow2).toHaveAttribute('data-pkc-command', 'export-transcript-srt');
   await expect(srtRow2, '時刻つきの行が在るのに押せない').toBeEnabled();
@@ -801,6 +799,27 @@ test('🔴 パレットを外から閉じた後でも、編集を保存できる
   expect(srtText, 'SRT の 1 件目が組まれていない').toContain('00:00:15,000 --> 00:00:20,000');
   expect(srtText).toContain('こんにちは');
   expect(srtText).toContain('さようなら');
+
+  // 🔴 #1447 の残り ── 右の列に「字幕ファイル(.srt)で書き出す」が出て(時刻つきの行があるノートだけ)、押すと落ちる
+  const srtBtn = page.locator('[data-pkc-region="inspector"] [data-pkc-action="export-entry-srt"]');
+  await expect(srtBtn, '時刻つきの行があるノートなのに、右の列に字幕のボタンが出ていない').toBeVisible();
+  const srtDl2 = page.waitForEvent('download');
+  await srtBtn.click();
+  expect(readFileSync(await (await srtDl2).path(), 'utf8'), '右の列から落とした字幕が違う').toContain(
+    '00:00:15,000 --> 00:00:20,000',
+  );
+
+  // 🔴 字幕(SRT)を本文の末尾に埋め込む ── ```srt の囲みが本文に足される
+  await page.keyboard.press('Control+Shift+P');
+  await expect(dialog).toBeVisible();
+  await page.locator('[data-pkc-field="palette-filter"]').fill('埋め込む');
+  const embedRow = page.locator('[data-pkc-field="palette-row"][data-pkc-command="embed-transcript-srt"]');
+  await expect(embedRow, '時刻つきの行が在るのに押せない(埋め込み)').toBeEnabled();
+  await embedRow.click();
+  await expect(
+    page.locator('[data-pkc-field="detail-body"]'),
+    '字幕の囲みが本文の末尾に足されていない',
+  ).toContainText('00:00:15,000 --> 00:00:20,000');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

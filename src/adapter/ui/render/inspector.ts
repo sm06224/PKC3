@@ -40,6 +40,7 @@
 import { blockedActionNote, type AppState } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { ScrollMemory } from './scroll-memory';
+import { hasTranscriptCues } from '@features/asr/srt';
 import { archetypeLabel } from '@features/flavor/archetype-label';
 import { candidateText, countTitles } from '@features/relation/target-label';
 import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
@@ -236,6 +237,8 @@ export class InspectorRenderer {
    * 描き直しのたびに行を走査し直さない。⚠ 本文が読めなくなったら手放す(常駐させない)。
    */
   private taskCount: { body: string; total: number; done: number } | null = null;
+  /** 字幕ボタンを出すか(時刻つきの行が在るか)。鍵は本文の字(#1447)。 */
+  private srtCues: { body: string; has: boolean } | null = null;
 
   /**
    * 🔴 **目次の見出しの列**(#1467 段 3-i)── `imgCount` と同じ作り。本文の字を鍵に憶え、同じなら
@@ -1367,6 +1370,21 @@ export class InspectorRenderer {
     // 🔴 種類を変える口はノートとログにだけ(台帳 #1852 I2 / 依頼 157)── 判定は `canChangeKind` 1 本
     const kindBtn = this.buttons.get('change-entry-kind');
     if (kindBtn) kindBtn.hidden = !canChangeKind(meta.archetype);
+    // 🔴 字幕ファイルは、時刻つきの行があるノートにだけ(#1447。本文の読みは `hasTranscriptCues` 1 本)。
+    //   鍵は `taskCount` と同じ**本文の字そのもの**(描き直しのたびに全文を読み直さない)。⚠ 編集中(stale)は前回の値のまま
+    const srtBtn = this.buttons.get('export-entry-srt');
+    if (srtBtn) {
+      const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+      if (body === null) {
+        this.srtCues = null;
+      } else if (stale && this.srtCues !== null && this.srtCues.body !== body) {
+        this.scanDeferred = true;
+      } else if (this.srtCues?.body !== body) {
+        this.srtCues = { body, has: hasTranscriptCues(body) };
+      }
+      const show = this.srtCues?.has === true;
+      if (srtBtn.hidden === show) srtBtn.hidden = !show;
+    }
     // 🔴 保存したスタックにだけ出す(#633 段③)── `export-folder` と同じ作法(消さずに畳む)
     const stackBtn = this.buttons.get('stack-load');
     if (stackBtn) stackBtn.hidden = meta.archetype !== STACK_ARCHETYPE;
@@ -2117,6 +2135,8 @@ export class InspectorRenderer {
     entryBtn('export-entry-markdown');
     // 🔴 メールに貼れる下書き(#1459 段②)── Markdown の隣(どちらも本文の字を別の形で持ち出す)
     entryBtn('copy-entry-mail');
+    // 🔴 文字起こしの字幕ファイル(#1447)── 時刻つきの行があるノートのときだけ見える(`render` で畳む)
+    entryBtn('export-entry-srt');
     if (shape === 'entry+link') entryBtn('write-back-file');
     entryBtn('show-history');
     /**

@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { writeArchive, readArchive, ARCHIVE_FORMAT } from '../../src/features/export/pkc3-archive';
-import { readAssetSource } from '../../src/features/import/zip-reader';
+import { readAssetSource, readZipDirectory, readZipText } from '../../src/features/import/zip-reader';
 import {
   RESCUE_IDLE_PAGE_LIMIT,
   rescueArchiveDetail,
@@ -92,6 +92,71 @@ describe('🔴 拾い出しが「戻せる形」で出る(#986)', () => {
     expect(got.entries.map((e) => e.body)).toEqual(THREE.map((r) => r.body));
     expect(stats().entries).toBe(3);
     expect(stats().bodyMissing, '本文が落ちている').toBe(0);
+  });
+
+  it('🔴 zip を開けば読めるよう notes/*.md も同梱し、しかも取り込み(readArchive)は変わらない(#986)', async () => {
+    const f = fakePick({ rows: THREE });
+    const { source } = rescueArchiveSource({ cid: 'c1', title: '拾い出し', pick: f.pick });
+    const out = await writeArchive(source, NOW);
+    const dir = await readZipDirectory(out.blob);
+    const notes = dir.filter((e) => e.name.startsWith('notes/') && !e.isDirectory);
+    // 空振り防止: 3 件ぶん在り、名前が重ならない
+    expect(notes.map((e) => e.name)).toEqual([
+      'notes/00001-牛乳を買う.md',
+      'notes/00002-会議のメモ.md',
+      'notes/00003-日本語の題.md',
+    ]);
+    // 中身は本文そのまま
+    expect(await readZipText(out.blob, notes[1]!)).toBe(THREE[1]!.body);
+    // 往復は同梱の有無で変わらない
+    const got = await readArchive(out.blob);
+    expect(got.entries).toHaveLength(3);
+    expect(got.warnings).toEqual([]);
+  });
+
+  it('🔴 notes/ を頼まない書き出し(通常のバックアップ)には、notes/ が 1 つも入らない(対照群)', async () => {
+    const f = fakePick({ rows: THREE });
+    const { source } = rescueArchiveSource({ cid: 'c1', title: '拾い出し', pick: f.pick });
+    const out = await writeArchive({ ...source, readableNotes: undefined }, NOW);
+    const dir = await readZipDirectory(out.blob);
+    expect(dir.some((e) => e.name.startsWith('notes/')), '通常の書き出しに notes/ が混ざった').toBe(false);
+    expect((await readArchive(out.blob)).entries).toHaveLength(3);
+  });
+
+  it('🔴 本文の総量が上限を超えたら notes/ を全部省き、注意で言う(取り込みは無傷)', async () => {
+    const f = fakePick({ rows: THREE });
+    const { source } = rescueArchiveSource({ cid: 'c1', title: '拾い出し', pick: f.pick });
+    const out = await writeArchive(source, NOW, undefined, 'refuse', 10);
+    const dir = await readZipDirectory(out.blob);
+    expect(dir.some((e) => e.name.startsWith('notes/')), '上限を超えたのに notes/ が入っている').toBe(false);
+    expect(out.warnings.join('\n')).toContain('notes/');
+    expect((await readArchive(out.blob)).entries, '取り込みの本体が欠けた').toHaveLength(3);
+    // 対照: 上限に収まるなら入る(上の主張が「いつも省く」で満たされていない)
+    const f2 = fakePick({ rows: THREE });
+    const again = rescueArchiveSource({ cid: 'c1', title: '拾い出し', pick: f2.pick });
+    const ok = await writeArchive(again.source, NOW, undefined, 'refuse', 1_000_000);
+    expect((await readZipDirectory(ok.blob)).filter((e) => e.name.startsWith('notes/'))).toHaveLength(3);
+  });
+
+  it('🔴 ゴミ箱のノートは notes/ に入らない(取り込みでは trash として戻る)', async () => {
+    const f = fakePick({ rows: THREE });
+    const { source } = rescueArchiveSource({ cid: 'c1', title: '拾い出し', pick: f.pick });
+    const withTrash = {
+      ...source,
+      listTrashHeads: async () => [
+        { lid: 'z9', title: 'ごみ箱の題', archetype: 'text', created_at: null, updated_at: null, entry_order: null, trashed_at: null },
+      ],
+      getRevisionChain: async (lid: string) =>
+        lid === 'z9'
+          ? [{ revOrder: 1, createdAt: null, title: 'ごみ箱の題', archetype: 'text', kind: 'full', snapshot: '捨てた本文', contentHash: null }]
+          : [],
+    };
+    const out = await writeArchive(withTrash, NOW);
+    const got = await readArchive(out.blob);
+    expect(got.trash.map((t) => t.title), '前提: ゴミ箱のノートが書かれていない').toEqual(['ごみ箱の題']);
+    const names = (await readZipDirectory(out.blob)).map((e) => e.name).filter((n) => n.startsWith('notes/'));
+    expect(names).toHaveLength(3);
+    expect(names.join('\n')).not.toContain('ごみ箱');
   });
 
   /**

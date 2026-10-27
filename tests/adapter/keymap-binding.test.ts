@@ -1103,6 +1103,8 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        *   画面に出ている本文(`openBody`)から組んで落とすので、特例で直に実行する。
        */
       'export-transcript-srt',
+      // ⚠ #1447 の残り ── 字幕(SRT)を本文の末尾に埋め込む(追記 1 本。同じ特例の枝)
+      'embed-transcript-srt',
       /**
        * ⚠ 2026-10-10 に足した(#1440)── このノートを Markdown で書き出す。押しボタンを持たず、
        *   root に結んだ services(右クリックの `export-entry-markdown` と同じ口)から直に呼ぶ特例。

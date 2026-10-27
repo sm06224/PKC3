@@ -88,6 +88,8 @@ const EXPECTED_ACTIONS: readonly string[] = [
   'export-entry-markdown',
   // 🔴 メールに貼れる下書き(#1459 段②)── Markdown の直後
   'copy-entry-mail',
+  // 🔴 文字起こしの字幕ファイル(#1447)── 時刻つきの行があるノートだけ見える
+  'export-entry-srt',
   'show-history',
   // 🔴 左の列の整理 3 つ(#215)── 右クリックと同じ並び(履歴の下・削除の上)
   'rename-entry-begin',

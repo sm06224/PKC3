@@ -1049,6 +1049,29 @@ describe('字幕ファイル(.srt)で書き出す(#1447)', () => {
     }
   });
 
+  it('🔴 #1447 「字幕(SRT)を本文の末尾に埋め込む」は追記 1 本で、```srt の囲みを足す。時刻の行が無ければ押せない', async () => {
+    const { root, d, sent } = setup();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '会議は 14:00 から\n' });
+    await openPalette(root, '埋め込む');
+    expect(rowOf('embed-transcript-srt')!.disabled, '時刻の行が無いのに押せる').toBe(true);
+    dialog()?.close();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: TRANSCRIPT });
+    await openPalette(root, '埋め込む');
+    const row = rowOf('embed-transcript-srt');
+    expect(row, '一覧に出ていない').toBeDefined();
+    expect(row!.disabled).toBe(false);
+    const before = sent.length;
+    row!.click();
+    await tick();
+    const appended = sent.slice(before).find((a) => a.type === 'APPEND_TO_ENTRY');
+    expect(appended, '追記が撃たれていない').toBeDefined();
+    const a = appended as { lid: string; text: string; heading: string | null };
+    expect(a.lid).toBe('n1');
+    expect(a.heading).toBe('## 字幕(SRT)');
+    expect(a.text).toBe('```srt\n1\n00:00:00,000 --> 00:00:15,000\nこんにちは\n\n2\n00:00:15,000 --> 00:00:20,000\n晴れ\n```');
+  });
+
   it('🔴 時刻つきの行が無いノートでは押せず、理由(note)が出る', async () => {
     const { root, d } = setup();
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });

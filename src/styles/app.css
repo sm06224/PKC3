@@ -9701,6 +9701,11 @@ mark[data-pkc-diff-char='del'] {
   color: var(--muted);
   font-size: 12px;
 }
+[data-pkc-field='asr-recommend'] {
+  margin: var(--s2) 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
 [data-pkc-field='asr-progress'] {
   margin: var(--s2) 0 0;
   color: var(--muted);

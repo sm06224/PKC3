@@ -18,6 +18,15 @@ import { contactSheetVideo, type DrawApi } from '../../src/adapter/platform/vide
 import type { CodecApi, FrameLike } from '../../src/adapter/platform/video/video-codec';
 import { buildVideoWebm } from '../helpers/webm-video-fixture';
 
+describe('#1447 範囲つきの文字起こしの行', () => {
+  it('🔴 0:07 〜0:12 字 も、始まりの時刻と字(範囲の字を除く)で読む', () => {
+    expect(transcriptLinesOf('## 文字起こし\n0:07 〜0:12 こんにちは\n0:20 おわり')).toEqual([
+      { ms: 7000, text: 'こんにちは' },
+      { ms: 20_000, text: 'おわり' },
+    ]);
+  });
+});
+
 describe('割り付け', () => {
   it('3 列で折り返し、枠は重ならず、シートの内側に収まる', () => {
     const l = layoutSheet(7, 16 / 9);

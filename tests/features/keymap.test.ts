@@ -206,6 +206,8 @@ describe('割当の検め', () => {
   'open-messages',
   // 🔴 #1447: 字幕ファイル(.srt)で書き出す ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
   'export-transcript-srt',
+  // 🔴 #1447: 字幕(SRT)を本文の末尾に埋め込む ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
+  'embed-transcript-srt',
   // 🔴 #1440: このノートを Markdown で書き出す ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
   'export-note-markdown',
   // 🔴 #1660: このノートを PDF で書き出す ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
