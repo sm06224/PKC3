@@ -33,8 +33,8 @@ import {
 } from '@features/storage/vacuum';
 import type { VacuumResult } from './protocol';
 import {
-  postMaintenanceDone,
-  postMaintenanceFailed,
+  maintenanceIdentity,
+  reportMaintenance,
   type MaintenanceBaseDeps,
   type MaintenanceTaskIdentity,
 } from './maintenance-task';
@@ -78,7 +78,7 @@ const TEXT_NOT_WRITER =
 
 export class StorageVacuum implements MaintenanceTaskIdentity {
   readonly source = VACUUM_SOURCE;
-  readonly name = '保存領域を縮める';
+  readonly name = maintenanceIdentity(VACUUM_SOURCE).name;
   private deps: VacuumDeps | null = null;
   private gauge: VacuumGauge | null = null;
   private quota: QuotaSample = {};
@@ -176,12 +176,12 @@ export class StorageVacuum implements MaintenanceTaskIdentity {
       });
       if ('kind' in outcome) return outcome;
       const text = vacuumDoneText(outcome.before.fileBytes, outcome.after.fileBytes, outcome.elapsedMs);
-      postMaintenanceDone(d.post, VACUUM_SOURCE, text);
+      reportMaintenance(d.post, this, { kind: 'done', text });
       return { kind: 'done', text };
     } catch (e) {
       const text = vacuumFailedText(String(e));
       // 🔴 アプリが組んだ固定の理由なので、案内のボタン名を括弧で潰さない(#1087)
-      postMaintenanceFailed(d.post, VACUUM_SOURCE, text);
+      reportMaintenance(d.post, this, { kind: 'failed', text });
       return { kind: 'failed', text };
     } finally {
       this.running = false;

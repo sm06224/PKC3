@@ -8,12 +8,14 @@
  * - 配線の共通部(`MaintenanceBaseDeps`): lease を握っているか / 書込の列に載せる / 処理の記録へ積む。
  *   `vacuum-run.ts` と `auto-optimize.ts` の `*Deps` はこれを継ぐ(同じ 3 口を 2 か所に書かない)。
  * - 処理の記録へ積む 1 件の形(`MaintenanceJobPost`)と、結果の種類(`MaintenanceOutcomeKind`)。
- * - 記録へ積む 1 行(`postMaintenanceDone` / `postMaintenanceFailed`)。⚠ 失敗は**アプリが組んだ固定の理由**なので
- *   `fixedHead` に同じ字を渡す(案内のボタン名を括弧で潰さない ── #1087)。
+ * - 記録へ積む 1 本の口(`reportMaintenance`)。完了 / 失敗 / 断りの違いはここで吸収する。
+ *   `asset-gc.ts`(添付の整理)もここを通る。
  *
  * ⚠ この file は `vacuum-run.ts` / `auto-optimize.ts` のどちらも import しない
  *   (縮める係は押し口だけ、自動の係は縮めない ── 互いを知らない構造を保つ)。
  */
+
+import { messageSourceLabel } from '@features/message/message-log';
 
 /** 処理の記録(メッセージの種類「処理」)へ 1 件積む形。 */
 export interface MaintenanceJobPost {
@@ -27,6 +29,12 @@ export interface MaintenanceJobPost {
 
 /** 片づけの 1 回の結果の種類。 */
 export type MaintenanceOutcomeKind = 'done' | 'failed' | 'refused';
+
+/** 片づけの 1 回の結果。`text` は画面と処理の記録に出す、アプリが組んだ固定の文。 */
+export interface MaintenanceResult {
+  kind: MaintenanceOutcomeKind;
+  text: string;
+}
 
 /** 3 本の片づけが共通に受け取る口。 */
 export interface MaintenanceBaseDeps {
@@ -44,20 +52,29 @@ export interface MaintenanceTaskIdentity {
   readonly name: string;
 }
 
-/** 終わったことを記録へ積む。 */
-export function postMaintenanceDone(
-  post: MaintenanceBaseDeps['post'],
-  source: string,
-  text: string,
-): void {
-  post({ kind: 'job', source, text });
+/**
+ * 出所から名乗りを組む。⚠ 呼び名は**処理の記録の見出しに出る字と同じ表**(`MESSAGE_SOURCE_LABEL`)から引く ──
+ * 画面の呼び名を 2 か所に書かない。表に無い出所は出所そのものになる(test が空振りを見張る)。
+ */
+export function maintenanceIdentity(source: string): MaintenanceTaskIdentity {
+  return { source, name: messageSourceLabel(source) };
 }
 
-/** 失敗を記録へ積む。⚠ `text` はアプリが組んだ固定の理由(例外の字をそのまま渡さない)。 */
-export function postMaintenanceFailed(
+/**
+ * 片づけの結果を処理の記録へ報告する(3 本の片づけが通る 1 本の口)。
+ *
+ * - `done`: 終わったことを 1 件積む。
+ * - `failed`: 失敗を 1 件積む。⚠ `text` はアプリが組んだ固定の理由なので `fixedHead` に同じ字を渡す
+ *   (案内のボタン名を括弧で潰さない ── #1087)。
+ * - `refused`: **積まない**(何も起きていない。断った理由は呼び側が画面に言う)。
+ *   記録を積まない片づけ(添付の整理が途中で止まった回など)との形の違いは、この 1 点で吸収する。
+ */
+export function reportMaintenance(
   post: MaintenanceBaseDeps['post'],
-  source: string,
-  text: string,
+  task: MaintenanceTaskIdentity,
+  result: MaintenanceResult,
 ): void {
-  post({ kind: 'job', source, text, fixedHead: text });
+  if (result.kind === 'refused') return;
+  if (result.kind === 'done') post({ kind: 'job', source: task.source, text: result.text });
+  else post({ kind: 'job', source: task.source, text: result.text, fixedHead: result.text });
 }

@@ -27,7 +27,8 @@
  */
 import type { OptimizeIndexesResult } from './protocol';
 import {
-  postMaintenanceDone,
+  maintenanceIdentity,
+  reportMaintenance,
   type MaintenanceBaseDeps,
   type MaintenanceTaskIdentity,
 } from './maintenance-task';
@@ -56,7 +57,7 @@ export const AUTO_OPTIMIZE_SOURCE = 'storage-optimize';
 
 export class AutoOptimizer implements MaintenanceTaskIdentity {
   readonly source = AUTO_OPTIMIZE_SOURCE;
-  readonly name = '索引の最適化(自動)';
+  readonly name = maintenanceIdentity(AUTO_OPTIMIZE_SOURCE).name;
   private readonly now: () => number;
   private readonly hidden: () => boolean;
   private readonly schedule: (fn: () => void, ms: number) => () => void;
@@ -178,15 +179,14 @@ export class AutoOptimizer implements MaintenanceTaskIdentity {
         try {
           const r = await this.deps.optimize();
           this.lastFailed = false;
-          postMaintenanceDone(
-            this.deps.post,
-            AUTO_OPTIMIZE_SOURCE,
-            optimizeDoneText(r.elapsedMs, r.after.freeBytes),
-          );
+          reportMaintenance(this.deps.post, this, {
+            kind: 'done',
+            text: optimizeDoneText(r.elapsedMs, r.after.freeBytes),
+          });
         } catch {
           // 🔴 同じ失敗は連続で積まない(成功したら数え直す)
           if (!this.lastFailed) {
-            this.deps.post({ kind: 'job', source: AUTO_OPTIMIZE_SOURCE, text: OPTIMIZE_FAILED_TEXT });
+            reportMaintenance(this.deps.post, this, { kind: 'failed', text: OPTIMIZE_FAILED_TEXT });
           }
           this.lastFailed = true;
         }
