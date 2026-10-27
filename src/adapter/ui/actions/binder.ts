@@ -5750,7 +5750,7 @@ async function refuseIfWorkspacesRemain(dispatcher: Dispatcher): Promise<boolean
 }
 
 /** ワークスペースの操作の結果を、画面の下の知らせ / 失敗の帯で言う。 */
-function say(dispatcher: Dispatcher, r: { kind: 'done' | 'failed' | 'refused' | 'cancelled'; text: string }): void {
+function sayWorkspace(dispatcher: Dispatcher, r: { kind: 'done' | 'failed' | 'refused' | 'cancelled'; text: string }): void {
   if (r.kind === 'cancelled') return;
   if (r.kind === 'done') dispatcher.dispatch({ type: 'OP_NOTICE', message: r.text });
   else dispatcher.dispatch({ type: 'OP_FAILED', error: r.text });
@@ -12750,14 +12750,14 @@ const ACTIONS: Record<string, ActionHandler> = {
     const typed = input?.value ?? '';
     void appWorkspaces.create(typed).then((r) => {
       if (r.kind === 'done' && input) input.value = '';
-      say(dispatcher, r);
+      sayWorkspace(dispatcher, r);
     });
   },
   /** 🔴 **ワークスペースを切り替える**(#1455)。書込が済んでから切り替えの印を書き、画面を読み込み直す。 */
   'workspace-switch': (dispatcher, target) => {
     const cid = target.getAttribute('data-pkc-cid');
     if (cid === null) return;
-    void appWorkspaces.switchTo(cid).then((r) => say(dispatcher, r));
+    void appWorkspaces.switchTo(cid).then((r) => sayWorkspace(dispatcher, r));
   },
   /** 🔴 **ワークスペースの名前を直す**(#1455)。 */
   'workspace-rename': (dispatcher, target, _services, root) => {
@@ -12771,7 +12771,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       okLabel: '名前を変える',
     }).then((typed) => {
       if (typed === null) return;
-      void appWorkspaces.rename(cid, typed).then((r) => say(dispatcher, r));
+      void appWorkspaces.rename(cid, typed).then((r) => sayWorkspace(dispatcher, r));
     });
   },
   /**
@@ -12790,7 +12790,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       { okLabel: '削除する', cancelLabel: 'やめる', danger: true },
     ).then((answer) => {
       if (answer !== 'ok') return;
-      void appWorkspaces.remove(cid).then((r) => say(dispatcher, r));
+      void appWorkspaces.remove(cid).then((r) => sayWorkspace(dispatcher, r));
     });
   },
   /** 予定の面の「一覧 / 日」(#855 段 A-1)。値は押したボタンの `data-pkc-mode`。 */
