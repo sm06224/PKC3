@@ -8,9 +8,9 @@
  * ⚠ 書き換えるのはラベルの 1 区間だけ。そのほかの byte(宛先 `#章` ・題の引用・改行コード)は動かさない。
  * ⚠ pure module。書込は worker の `renameLinkTexts`(走査と書込を 1 tx に閉じ込める)が持つ。
  */
-import { codeContextAt } from '../markdown/code-context';
 import { escapeLinkLabel } from '../markdown/link-format';
 import { indentedCodeRanges, scanLinks } from '../markdown/link-scan';
+import { isWritableLinkTitle, scanTitleLinks } from '../markdown/title-link';
 
 const LID_CHARS = 'A-Za-z0-9_\\-';
 
@@ -68,39 +68,29 @@ export function renameLinkTexts(
   return { body: out + body.slice(cursor), count: edits.length };
 }
 
-/** 題名として `[[…]]` に書ける字か(markdown 側の綴り `TITLE_LINK_RE` と同じ範囲: `[` `]` `|` 改行を含まない)。 */
-export function isWritableLinkTitle(t: string): boolean {
-  return t.trim() !== '' && t.length <= 200 && !/[[\]|\r\n]/.test(t);
-}
-
-const TITLE_LINK_SCAN = /\[\[([^[\]\r\n|]{1,200}?)(\|[^[\]\r\n]{1,200})?\]\]/g;
+export { isWritableLinkTitle } from '../markdown/title-link';
 
 /**
  * 🔴 **改名のとき、`[[旧い題名]]` / `[[旧い題名|表示]]` も新しい題名へ**(#1174 段②)。
  *
  * `[[題名]]` は番号ではなく**題名で**指すので、改名すると指す先が無くなる。番号リンク(`entry:`)の字と同じく、
  * 改名に合わせて書き換える。書き換えるのは題名の 1 区間だけ(`|表示` と前後の空白・ほかの byte は動かさない)。
- * ⚠ コードの中(囲み・行内・字下げ)は読まない。⚠ `[[ruby:…]]` / `[[em:…]]` は別の記法で題名ではない。
- * ⚠ 新しい題名が `[[…]]` に書けない字(`[` `]` `|` 改行)を含むなら書き換えない(書くと別の記法に化ける)。
+ * 🔑 **どれがリンクか**は描画と同じ正本(`markdown/title-link.ts` の `scanTitleLinks`)── 画面でリンクになっていない
+ *   `[[ ]]`(コード・数式・リンクの字・エスケープ・表のセルをまたぐ物)は書き換えない。
+ * ⚠ 新しい題名が `[[…]]` に書けない字(`[` `]` `|` `\` 改行・`ruby:` / `em:` 始まり)なら書き換えない
+ *   (書くと別の記法に化ける / リンクでなくなる)。
  */
 export function renameTitleLinks(body: string, oldTitle: string, newTitle: string): LinkTextRename {
   if (oldTitle === '' || newTitle === '' || oldTitle === newTitle) return { body, count: 0 };
-  if (!isWritableLinkTitle(newTitle) || !body.includes('[[') || !body.includes(oldTitle)) return { body, count: 0 };
-  const indented = body.includes('    ') || body.includes('\t') ? indentedCodeRanges(body) : [];
+  if (!isWritableLinkTitle(newTitle) || !body.includes(oldTitle.trim())) return { body, count: 0 };
+  const old = oldTitle.trim();
   let out = '';
   let cursor = 0;
   let count = 0;
-  TITLE_LINK_SCAN.lastIndex = 0;
-  for (let m = TITLE_LINK_SCAN.exec(body); m !== null; m = TITLE_LINK_SCAN.exec(body)) {
-    if ((m[1] ?? '').trim() !== oldTitle) continue;
-    if (indented.some(([a, b]) => m.index >= a && m.index < b)) continue;
-    if (codeContextAt(body, m.index) !== null) continue;
-    // 題名の区間(前後の空白は残す)
-    const raw = m[1] ?? '';
-    const lead = raw.length - raw.trimStart().length;
-    const from = m.index + 2 + lead;
-    out += body.slice(cursor, from) + newTitle;
-    cursor = from + oldTitle.length;
+  for (const site of scanTitleLinks(body)) {
+    if (site.title !== old) continue;
+    out += body.slice(cursor, site.titleFrom) + newTitle.trim();
+    cursor = site.titleFrom + old.length;
     count += 1;
   }
   if (count === 0) return { body, count: 0 };

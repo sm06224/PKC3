@@ -164,12 +164,15 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   expect((await toolbar.boundingBox())!.height, '案内を外したら帯の高さが動いた').toBe(toolbarH);
 
   // ④''-b 🔴 #1451 の続き ── コード・数式・frontmatter の中でも同じ枠に案内が出る(閉じ方つき)。帯の高さは動かない
-  const docText = '---\ntitle: x\n---\n本文\n```js\nlet a = 1;\n```\n$$\nx^2\n$$\n終わり';
+  const docText =
+    '---\ntitle: x\n---\n本文\n```js\nlet a = 1;\n```\n$$\nx^2\n$$\n:::format{.pkc-place x=1 y=1}\n付箋の中\n:::\n~~~csv\na,b\n~~~\n終わり';
   await ta.fill(docText);
   for (const [needle, want] of [
     ['title', 'frontmatter 内: 閉じは ---'],
     ['let', 'コード内: 記法は働きません(閉じは ```)'],
     ['x^2', '数式内: TeX で書きます(閉じは $$)'],
+    ['付箋の中', '板の付箋内: x= y= w= h=(閉じは :::)'],
+    ['a,b', '表(csv)の中: 閉じは ~~~'],
     ['終わり', ''],
   ] as const) {
     await ta.evaluate((el, n) => {

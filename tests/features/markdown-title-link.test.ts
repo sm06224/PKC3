@@ -27,12 +27,22 @@ describe('[[題名]] を押せる字にする', () => {
     expect(html).toContain('>背景</span>');
   });
 
-  it('🔴 渡さない面(書き出し等)は 1 文字も変わらない / 渡すと変わる(空振り防止)', () => {
-    const html = off('[[設計の背景]]');
+  it('🔴 渡さない面(書き出し・印刷等)は、押せる印を焼かず、生の括弧も出さない(表示の字か題名だけ)', () => {
+    const html = off('[[設計の背景]] と [[設計の背景|背景]]');
     expect(html).not.toContain('pkc-title-link');
     expect(html).not.toContain('open-title-note');
-    expect(html).toContain('[[設計の背景]]');
-    expect(on('[[設計の背景]]')).not.toBe(html);
+    expect(html, '生の括弧が出ている').not.toContain('[[');
+    expect(html).toContain('<span data-pkc-title-ref="設計の背景">設計の背景</span>');
+    expect(html).toContain('<span data-pkc-title-ref="設計の背景">背景</span>');
+    expect(on('[[設計の背景]]')).not.toBe(off('[[設計の背景]]'));
+  });
+
+  it('🔴 これまでリンクだった [見出し [[A]]](url) は、入れ子の括弧があってもリンクのまま', () => {
+    for (const f of [on, off]) {
+      const html = f('[見出し [[A]]](https://example.com/x)');
+      expect(html).toContain('<a href="https://example.com/x"');
+      expect(html).not.toContain('open-title-note');
+    }
   });
 
   it('🔴 ruby / em の記法は取り違えない(対照群: 同じ面で両方が働く)', () => {
@@ -49,6 +59,15 @@ describe('[[題名]] を押せる字にする', () => {
     expect(on('[[a\nb]]')).not.toContain('pkc-title-link');
     expect(on('[[題名]](https://example.com)')).not.toContain('open-title-note');
     expect(on('`[[題名]]`'), 'コードの中は字のまま').not.toContain('open-title-note');
+  });
+
+  it('🔴 チェック項目の読み上げの名前に、括弧を外した表示の字が入る(題名が抜けず、括弧も出ない)', () => {
+    for (const f of [on, off]) {
+      const html = f('- [ ] [[設計の背景|背景]] を確かめる\n- [ ] [[題名のみ]] を済ませる\n');
+      expect(html).toContain('aria-label="背景 を確かめる"');
+      expect(html).toContain('aria-label="題名のみ を済ませる"');
+      expect(html).not.toMatch(/aria-label="[^"]*\[\[/);
+    }
   });
 
   it('同じ行に 2 つ書けば 2 つとも押せる', () => {

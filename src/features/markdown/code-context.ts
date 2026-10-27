@@ -18,7 +18,7 @@ import { advanceFence, fenceStep } from './list-renumber';
 export type CodeContext = 'fence' | 'math' | 'inline' | null;
 
 /** 行頭の `>` の連なりを剥がす。 */
-function unquote(line: string): { depth: number; rest: string } {
+export function unquote(line: string): { depth: number; rest: string } {
   const m = /^((?:\s*>)+ ?)(.*)$/.exec(line);
   if (m === null) return { depth: 0, rest: line };
   return { depth: (m[1]!.match(/>/g) ?? []).length, rest: m[2]! };

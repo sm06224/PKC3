@@ -1914,7 +1914,7 @@ export class DetailRenderer {
         interactiveDates: appDateLinks.enabled(),
         /**
          * 🔴 **本文の `[[題名]]` を押せるようにする**(#1174 段②)。⚠ この面だけ(受け手 `open-title-note` が居る面。
-         *   書き出した HTML・印刷・別ウィンドウ・プレビューは字のまま)。設定は持たない ── 書いた人が打った記法だから。
+         *   書き出した HTML・印刷・別ウィンドウ・プレビューは押せない字で、括弧を外した表示の字だけを出す)。設定は持たない ── 書いた人が打った記法だから。
          */
         titleLinks: true,
         /**

@@ -125,6 +125,22 @@ describe('markdown worker', () => {
   });
 
   /**
+   * 🔴 **本文の `[[題名]]` を押せる字にする旗も落とさない**(#1174 段②。穴 C)。読む面はワーカー経由で描くので、
+   * 素通しでないと「同期では押せるのに、ワーカーが立っていると押せない」という環境で割れる形になる。
+   */
+  it('🔴 opts の titleLinks を落とさない([[題名]] が worker でも押せる)', () => {
+    const text = '指す [[設計の背景]] です\n';
+    const on = send(1, text, { titleLinks: true }) as { result: string };
+    const off = send(2, text) as { result: string };
+    expect(on.result).not.toBe(off.result);
+    expect(on.result).toContain('data-pkc-action="open-title-note"');
+    expect(off.result).not.toContain('open-title-note');
+    // 押せない面は生の括弧を出さない
+    expect(off.result).not.toContain('[[');
+    expect(on.result).toBe(renderMarkdown(text, { titleLinks: true }));
+  });
+
+  /**
    * 🔴 **囲みの中身(添付)も落とさない**(#444 段②)。
    *
    * 書き出しは `renderBody` 経由で**ワーカーへ行くことがある** ── ここが素通しで

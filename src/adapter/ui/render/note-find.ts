@@ -347,9 +347,9 @@ function build(root: HTMLElement): Finder {
     b.textContent = text;
     return b;
   };
-  const prev = btn('‹', '前の一致へ(Shift+Enter)');
+  const prev = btn('‹', '前の一致へ(Shift+Enter / Ctrl+Shift+G)');
   prev.setAttribute('data-pkc-field', 'note-find-prev');
-  const next = btn('›', '次の一致へ(Enter)');
+  const next = btn('›', '次の一致へ(Enter / Ctrl+G)');
   next.setAttribute('data-pkc-field', 'note-find-next');
   const end = btn('×', '閉じる(Esc)');
   end.setAttribute('data-pkc-field', 'note-find-close');
@@ -376,6 +376,11 @@ function build(root: HTMLElement): Finder {
     // 日本語入力の変換確定の Enter は送りに使わない(Safari は確定の Enter が `isComposing: false` で `keyCode` だけ 229 になる。binder.ts と同じ門)
     if (ev.isComposing || ev.keyCode === 229) return;
     if (ev.key === 'Enter') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      step(f, ev.shiftKey ? -1 : 1);
+    } else if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.code === 'KeyG' || ev.key.toLowerCase() === 'g')) {
+      // 🔴 Ctrl+G / Ctrl+Shift+G でも次・前へ(#1102 段③。「探す」から来た一致の送りと同じ鍵)。ブラウザの「ページ内を検索」の既定を止める
       ev.preventDefault();
       ev.stopPropagation();
       step(f, ev.shiftKey ? -1 : 1);

@@ -51,7 +51,7 @@ dual-bookmark-open dual-bookmark-remove dual-tab-activate unsplit-entry dual-cru
 stack-link-up stack-link-down capture-play capture-transcribe capture-extract move-tile-up move-tile-down
 open-repeat-menu set-task-repeat toggle-app-group pick-app-group-icon sql-history-pick
 move-app-group-up move-app-group-down open-tile-as
-sql-er-table sql-er-column sql-er-link sql-er-unlink system-jump jump-to-asset-use open-date-note
+sql-er-table sql-er-column sql-er-link sql-er-unlink system-jump jump-to-asset-use open-date-note open-title-note show-schedule-day
 run-command-row pick-color pc-open-file seek-media`.split(/\s+/);
 
 /** 点を取るが、state の現在値(`selectedLid` / `dual.focus`)で代替できる。 */

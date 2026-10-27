@@ -187,7 +187,7 @@ import type {
 import { NO_KINDS, entryFilterOf, normalizeQuery, visibleOrder } from '@features/filter/title-filter';
 import { commandQueryOf } from '@features/palette/command-query';
 import { toggleKind } from '@features/filter/kind-filter';
-import { normalizeFindQuery } from '@features/filter/search-hits';
+import { foldCase, jumpTerms, normalizeFindQuery } from '@features/filter/search-hits';
 import { DIRECTIONLESS_KINDS, STRUCTURAL, type RelationKind } from '@features/relation/kinds';
 import { replaceAll } from '@features/markdown/body-replace';
 import { foldAttachmentHead, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
@@ -4925,7 +4925,7 @@ export function dropStaleSearchJump(result: ReduceResult): ReduceResult {
    */
   const fieldNow = normalizeFindQuery(st.filterQuery);
   const orphanedByField =
-    j.origin === 'filter' && (fieldNow === '' || fieldNow !== normalizeFindQuery(j.query));
+    j.origin === 'filter' && (fieldNow === '' || !sameFilterTerms(fieldNow, j.query));
   if (
     !orphanedByField &&
     st.selectedLid === j.lid &&
@@ -4934,6 +4934,16 @@ export function dropStaleSearchJump(result: ReduceResult): ReduceResult {
   )
     return result;
   return { ...result, state: { ...st, searchJump: null } };
+}
+
+/**
+ * 欄の語が「同じ語」か。🔑 塗る側(`jumpTerms(…, 'filter')`)と同じ切り方 ── 空白(全角も)で区切った語の集合を、
+ * 大小を畳んで比べる(語の順・空白の数・大文字小文字の揺れでは塗りを消さない)。
+ */
+function sameFilterTerms(a: string, b: string): boolean {
+  const key = (q: string): string =>
+    jumpTerms(q, 'filter').map(foldCase).sort().join('\u0000');
+  return key(a) === key(b);
 }
 
 /**

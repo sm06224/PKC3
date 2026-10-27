@@ -88,6 +88,7 @@ import { tagColorKey } from '../tag-color';
 import { confirmColorSpan, isColorCode, isEditableColor } from './color-code';
 import { ifFormatMatches } from './if-format';
 import { replaceInlineComments } from './inline-comment';
+import { titleLinkAt } from './title-link';
 
 const md = new MarkdownIt({
   html: false,          // Disable HTML tags in source (XSS safety)
@@ -3188,72 +3189,41 @@ md.core.ruler.after('inline', 'pkc-date-link', function (state) {
 });
 
 /**
- * 🔴 **本文の `[[題名]]` を、その題名のノートへの押せる字にする**(#1174 段②)。
+ * 🔴 **本文の `[[題名]]` を、その題名のノートへの字にする**(#1174 段②)。
  *
  * > 「どの知識が記録済みで、どれがこれから書くべきか」を、読みながら一目で分かり、
  * > 無ければその場で作って書き始めたい。
  *
  * 綴りは `[[題名]]` と `[[題名|表示する字]]`。**番号(lid)ではなく題名で指す**ので、まだ無いノートも書ける
  * (`entry:` の番号リンクは作ったノートにしか書けない)。ノートが無ければ画面の下に「作る」を出す(受け手は `binder.ts`)。
- * ⚠ **`[[ruby:…]]` / `[[em:…]]` は別の記法**(先に token になる。崩れて残った字もここでは拾わない)。
- * ⚠ **既定は切**(`env.titleLinks`)── 受け手が居る面(中央の読む画面)だけ `true`。書き出した HTML には何も焼かない。
- * ⚠ 題名は 200 字まで・改行と `[` `]` を含まない。リンクの中では当てない。字は括弧を外した題名(か表示する字)で出す。
- * 🔑 `<span role="link" tabindex="0">`(日付と同じ形)── Enter / Space は binder の既存の道に乗る。
+ * 🔑 **綴りと「どこがリンクか」の正本は `title-link.ts`**(改名で書き換える側も同じ物を読む)。
+ *   inline 規則なので、コード・数式・エスケープ・リンクの字の中には自然に届かない(`link` の後に置く:
+ *   `[[a]](url)` は通常のリンクが勝つ)。
+ * ⚠ **`[[ruby:…]]` / `[[em:…]]` は別の記法**(`isWritableLinkTitle` が題名として断る)。
+ * ⚠ **押せるのは `env.titleLinks` の面だけ**(受け手が居る中央の読む画面)。それ以外(書き出した HTML・印刷・別窓・
+ *   プレビュー)は**生の括弧を出さず**、表示の字(無ければ題名)だけにする。字には `data-pkc-title-ref` を付ける
+ *   (PKC3 入りの HTML 書き出しは、相手のノートが入っていればそこでリンクにする)。
+ * 🔑 押せる字は `<span role="link" tabindex="0">`(日付と同じ形)── Enter / Space は binder の既存の道に乗る。
  * 🔑 「あるか / 無いか」は markdown(ワーカー)は知らない ── 描いた後に `title-links.ts` が印を当てる。
  */
-const TITLE_LINK_RE = /\[\[([^[\]\r\n|]{1,200}?)(?:\|([^[\]\r\n]{1,200}))?\]\]/g;
-md.core.ruler.after('inline', 'pkc-title-link', function (state) {
-  if ((state.env as { titleLinks?: boolean }).titleLinks !== true) return true;
-  for (const token of state.tokens) {
-    if (token.type !== 'inline') continue;
-    const children = token.children;
-    if (!children) continue;
-    const out: typeof children = [];
-    let inLink = 0;
-    let changed = false;
-    for (const t of children) {
-      if (t.type === 'link_open') inLink += 1;
-      else if (t.type === 'link_close') inLink -= 1;
-      if (t.type !== 'text' || inLink > 0 || !t.content.includes('[[')) {
-        out.push(t);
-        continue;
-      }
-      let at = 0;
-      let touched = false;
-      TITLE_LINK_RE.lastIndex = 0;
-      for (let m = TITLE_LINK_RE.exec(t.content); m !== null; m = TITLE_LINK_RE.exec(t.content)) {
-        const title = (m[1] ?? '').trim();
-        // 別の記法(ruby / em)の取りこぼしと、空の題名は拾わない
-        if (title === '' || /^(?:ruby|em):/.test(title)) continue;
-        const label = (m[2] ?? '').trim() || title;
-        if (m.index > at) {
-          const head = new state.Token('text', '', 0);
-          head.content = t.content.slice(at, m.index);
-          out.push(head);
-        }
-        const tok = new state.Token('html_inline', '', 0);
-        // ⚠ 属性も本文も**必ず escape する**(日付と同じ作法)
-        tok.content =
-          `<span class="pkc-title-link" data-pkc-action="open-title-note" ` +
-          `data-pkc-title="${escapeHtmlAttr(title)}" role="link" tabindex="0">` +
-          `${md.utils.escapeHtml(label)}</span>`;
-        out.push(tok);
-        at = m.index + m[0].length;
-        touched = true;
-      }
-      if (!touched) {
-        out.push(t);
-        continue;
-      }
-      if (at < t.content.length) {
-        const tail = new state.Token('text', '', 0);
-        tail.content = t.content.slice(at);
-        out.push(tail);
-      }
-      changed = true;
-    }
-    if (changed) token.children = out;
-  }
+md.inline.ruler.after('link', 'pkc_title_link', function titleLinkRule(state, silent) {
+  // ⚠ `silent`(リンクの字の範囲を測る走査)では**何も読まない** ── 読むと `[見出し [[A]]](url)` の入れ子の `[` を
+  //   「1 つの塊」と数えて、これまでリンクだった物がリンクでなくなる(従来どおり `[` は 1 字ずつ数える)
+  if (silent) return false;
+  if (((state as { linkLevel?: number }).linkLevel ?? 0) > 0) return false;
+  const m = titleLinkAt(state.src, state.pos, state.posMax);
+  if (m === null) return false;
+  const tok = state.push('html_inline', '', 0);
+  // 🔑 読み上げ用の字(チェック項目の aria-label)── 括弧を外した表示の字。`taskPlainText` が読む
+  tok.meta = { plain: m.label };
+  // ⚠ 属性も本文も**必ず escape する**(日付と同じ作法)
+  tok.content =
+    (state.env as { titleLinks?: boolean }).titleLinks === true
+      ? `<span class="pkc-title-link" data-pkc-action="open-title-note" ` +
+        `data-pkc-title="${escapeHtmlAttr(m.title)}" role="link" tabindex="0">` +
+        `${md.utils.escapeHtml(m.label)}</span>`
+      : `<span data-pkc-title-ref="${escapeHtmlAttr(m.title)}">${md.utils.escapeHtml(m.label)}</span>`;
+  state.pos = m.end;
   return true;
 });
 
@@ -3466,6 +3436,9 @@ function taskPlainText(tokens: readonly Token[]): string {
     if (t.type === 'text' || t.type === 'code_inline') out += t.content;
     else if (t.type === 'softbreak' || t.type === 'hardbreak') out += ' ';
     else if (t.type === 'image') out += t.children ? taskPlainText(t.children) : '';
+    // `[[題名]]` は括弧を外した表示の字を読む(html_inline でも字を持つ物だけ)
+    else if (t.type === 'html_inline' && typeof (t.meta as { plain?: unknown } | null)?.plain === 'string')
+      out += (t.meta as { plain: string }).plain;
   }
   return out;
 }

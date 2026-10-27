@@ -810,6 +810,28 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     );
   });
 
+  it('🔴 [[題名]](#1174 段②)は、生の括弧を出さず、同じ題名のノートが入っていれば押して開く / 無ければ字のまま', async () => {
+    const out = await writePortableHtml(
+      source({
+        entries: [
+          { lid: 'n1', title: '一つ目', body: '行き先 [[二つ目]] と [[二つ目|別の字]] と [[入っていない]]\n' },
+          { lid: 'n2', title: '二つ目', body: '二つ目の本文\n' },
+        ],
+      }),
+      NOW,
+      (t) => Promise.resolve(renderMarkdown(t)),
+    );
+    await run(out.blob);
+    const body = document.getElementById('pkc-body')!;
+    expect(body.textContent, '生の括弧が出ている').not.toContain('[[');
+    const refs = [...body.querySelectorAll<HTMLElement>('[data-pkc-title-ref]')];
+    expect(refs.map((r) => r.textContent)).toEqual(['二つ目', '別の字', '入っていない']);
+    expect(refs[0]!.getAttribute('role'), '入っているノートなのに押せない').toBe('link');
+    expect(refs[2]!.getAttribute('role'), '入っていないノートが押せる顔').toBeNull();
+    refs[1]!.click();
+    expect(document.getElementById('pkc-title')!.textContent, '押しても開かない').toBe('二つ目');
+  });
+
   it('🔴 @[card](entry:…) の札も、書き出すときの注意に数え、入っているノートなら押して開く / 入っていなければ字だけ(#1087)', async () => {
     const out = await writePortableHtml(
       source({

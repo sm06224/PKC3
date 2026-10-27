@@ -94,6 +94,6 @@ describe('renameTitleLinks(#1174 段②)', () => {
     expect(r.body).toBe(body);
   });
   it('新しい題名が [[ ]] に書けない字なら書き換えない', () => {
-    for (const t of ['a|b', 'a]b', 'a[b', 'a\nb', ' ']) expect(renameTitleLinks('[[旧い]]', '旧い', t).count).toBe(0);
+    for (const t of ['a|b', 'a]b', 'a[b', 'a\nb', ' ', 'ruby:x', 'em:y', ' ruby:z', 'a\\b']) expect(renameTitleLinks('[[旧い]]', '旧い', t).count).toBe(0);
   });
 });

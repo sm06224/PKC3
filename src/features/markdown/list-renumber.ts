@@ -61,6 +61,11 @@ export function fenceStep(fence: string, line: string): { next: string; inside: 
   return next === null ? reopen(line) : { next, inside: true };
 }
 
+/** 開いている fence を 1 行進める。入れ物が終わって打ち切られたなら `null`(その行は新しい開きとして読み直す)。 */
+export function stepFence(fence: string, line: string): string | null {
+  return stepOpen(fence, line);
+}
+
 function reopen(line: string): { next: string; inside: boolean } {
   const o = openFence(line);
   return { next: o, inside: o !== '' };

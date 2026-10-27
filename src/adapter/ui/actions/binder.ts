@@ -834,7 +834,7 @@ import {
   defaultSettingsStorage,
   SETTINGS_NOT_PERSISTED_TEXT,
 } from '../render/settings-persist-probe';
-import { HELP_MANUAL_DRAWN_EVENT } from '../render/help';
+import { HELP_GOTO_KEYS_EVENT, HELP_MANUAL_DRAWN_EVENT } from '../render/help';
 import { sqlEngineOf } from '@features/query/sql-engine';
 import {
   alertInApp,
@@ -6667,9 +6667,10 @@ export function runGlobalCommand(
     if (dry) return true;
     prevent();
     openView(dispatcher, 'help');
+    // 🔑 送るのはヘルプの面自身(`HelpRenderer.gotoKeys`)── マニュアルを描き終えてから送る
     root
-      .querySelector<HTMLElement>('[data-pkc-region="help-keymap"]')
-      ?.scrollIntoView({ block: 'start' });
+      .querySelector<HTMLElement>('[data-pkc-view-pane="help"]')
+      ?.dispatchEvent(new CustomEvent(HELP_GOTO_KEYS_EVENT));
     return true;
   }
   /**
@@ -9827,6 +9828,8 @@ const ACTIONS: Record<string, ActionHandler> = {
   'show-schedule-day': (dispatcher, target, services, root) => {
     const date = target.getAttribute('data-pkc-date') ?? '';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    // 🔴 スマホは一覧と本文が同時に出ない ── 予定のタブ(左の列)は一覧のページにあるので、一覧まで出す(編集中は理由を言って断る)
+    if (!phoneShowList(dispatcher)) return;
     dispatcher.dispatch({ type: 'SET_SCHEDULE_DAY', date });
     if (dispatcher.getState().scheduleDay !== date) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${date} は存在しない日付です` });

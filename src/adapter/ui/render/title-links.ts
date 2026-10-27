@@ -13,29 +13,25 @@
  * 題名の集合は 1 回だけ作る(リンクごとに全ノートを舐めない)。
  *
  * ## 判定は 1 本
- * 「題名で探す」は `findTodayNote`(`schedule/today-note.ts`。ゴミ箱の中を拾わない・同名は先に作られた方)と
+ * 「題名で探す」は `findTodayNote`(`schedule/today-note.ts`。片付けたノートを拾わない・同名は一覧で上のほう)と
  * **同じ規則**でなければならない ── 印が「ある」と言うのに押すと「無い」になるのを防ぐため、
- * ここは集合の作り方(`archived` を除く)だけをその関数と揃える。
+ * 規則の本体(`preferTitleNote`)を共有する `titleNoteIndex` を引く。
  *
  * ⚠ 当てるのは中央の読む面だけ(書き出した HTML・別窓には `entryMetas` が無く、1 バイトも変えない)。
  * ⚠ `title` は user が付けたものを潰さない(空のときだけ書き、消すのも自分の字のときだけ)。
  */
 import type { EntryMeta } from '@core/model/entry-meta';
+import { titleNoteIndex } from '@features/schedule/today-note';
 
 export const TITLE_LINK_MISSING_HINT = 'まだ無いノートです(押すと作る案内が出ます)';
 const ATTR = 'data-pkc-link-missing';
 
-/** ノートがある題名の集合(ゴミ箱の中は含めない ── `findTodayNote` と同じ)。 */
-export function titleSet(metas: Iterable<EntryMeta>): Set<string> {
-  const out = new Set<string>();
-  for (const m of metas) if (!m.archived) out.add(m.title);
-  return out;
-}
 
 export function applyTitleLinks(host: ParentNode, metas: Iterable<EntryMeta>): void {
   const links = host.querySelectorAll<HTMLElement>('.pkc-title-link[data-pkc-title]');
   if (links.length === 0) return;
-  const titles = titleSet(metas);
+  // 🔑 「ある」の規則は `findTodayNote`(押したときに開くノートを選ぶ関数)と同じ 1 本 ── `titleNoteIndex`
+  const titles = titleNoteIndex(metas);
   for (const el of links) {
     const missing = !titles.has(el.getAttribute('data-pkc-title') ?? '');
     if (missing) {

@@ -17,7 +17,6 @@
  *   (`format-bar.smoke.spec.ts` / `live-editor.smoke.spec.ts`)が見る。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CARET_HINT } from '../../src/features/markdown/caret-hint';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -629,13 +628,13 @@ describe('🔴 caret がコード・数式・frontmatter の中に在るとき�
     const { region, slot, ta } = surface('editor-body', DOC);
     const un = watchSelectionStats(region);
     select(ta, at('title') + 2, at('title') + 2);
-    expect(slot.textContent).toBe(CARET_HINT.frontmatter);
+    expect(slot.textContent).toBe('frontmatter 内: 閉じは ---');
     select(ta, at('本文') + 1, at('本文') + 1);
     expect(slot.textContent, 'frontmatter の外').toBe('');
     select(ta, at('let') + 2, at('let') + 2);
-    expect(slot.textContent).toBe(CARET_HINT.code);
+    expect(slot.textContent).toBe('コード内: 記法は働きません(閉じは ```)');
     select(ta, at('x^2') + 1, at('x^2') + 1);
-    expect(slot.textContent).toBe(CARET_HINT.math);
+    expect(slot.textContent).toBe('数式内: TeX で書きます(閉じは $$)');
     select(ta, DOC.length, DOC.length);
     expect(slot.textContent, '数式を閉じた後').toBe('');
     select(ta, at('let'), at('let') + 3);
