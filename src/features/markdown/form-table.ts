@@ -18,6 +18,7 @@ import { fenceInfo, quoteLead, splitLines, type FenceSpan } from './source-block
 import { fencesBelowFrontmatter } from './table-convert';
 import { DELIMITER, csvEscapeField, detectCsvLang, isHeaderDisabled, parseCsv, type CsvFenceLang } from './csv-table';
 import { csvTableNameRaw } from '../query/csv-tables';
+import { detectEol } from './line-eol';
 
 export interface LocatedFormTable {
   readonly span: FenceSpan;
@@ -32,7 +33,7 @@ export interface LocatedFormTable {
 }
 
 function eolOf(body: string): string {
-  return body.includes('\r\n') ? '\r\n' : '\n';
+  return detectEol(body);
 }
 
 /** 名前が `name` の csv / tsv / psv の囲みを探す(最初の 1 つ)。 */

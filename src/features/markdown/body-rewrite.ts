@@ -25,6 +25,7 @@ import { isScheduleDate, withFrontmatterDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
 import { applyChapterRestore, applyChapterSplit } from './chapter-split';
+import { detectEol } from './line-eol';
 import { fixSpeakers } from '../capture/speakers';
 import { transcriptLinesOf } from '../capture/contact-sheet-layout';
 import { replaceColorSpan } from './color-code';
@@ -761,9 +762,6 @@ const LINK_LINE = /^\s*(?:[-*+]|\d+[.)])\s+\[(?:\\.|[^\]\\])*\]\(entry:[A-Za-z0-
 const LIST_BLOCK_END = /^\s{0,3}(?:#{1,6}(?:\s|$)|```|~~~|([-*_])(?:\s*\1){2,}\s*$)/;
 
 /** 🔴 本文の改行コード（CRLF or LF）を検知する(#1075, #1097)。 */
-function detectEol(text: string): '\r\n' | '\n' {
-  return text.includes('\r\n') ? '\r\n' : '\n';
-}
 
 /**
  * 🔴 **行を組み直すとき、行ごとの改行コードを保つ**(#1087)。

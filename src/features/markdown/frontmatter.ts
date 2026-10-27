@@ -29,6 +29,7 @@
 
 import { resolveCap } from '../notation/caps';
 import { hasMisreadableTagShape, isTagKey, looksHashTagged } from '../flavor/tag-words';
+import { detectEol } from './line-eol';
 
 export type FrontmatterValue =
   | string
@@ -1120,7 +1121,7 @@ export function spliceFrontmatterKeys(
         ? `${key}: [${value.map(serializeScalar).join(', ')}]`
         : `${key}: ${serializeScalar(value)}`;
 
-  const eol = body.includes('\r\n') ? '\r\n' : '\n'; // 新規行のみに使う
+  const eol = detectEol(body); // 新規行のみに使う
 
   if (!OPEN_FENCE.test(body)) {
     const lines = entries.map(lineFor).filter((l): l is string => l !== null);

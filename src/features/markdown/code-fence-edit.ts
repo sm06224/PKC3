@@ -23,6 +23,7 @@
  * 🔑 **pure module**。DOM も state も知らない。
  */
 import { allFences, quoteLead, type FenceSpan } from './source-blocks';
+import { detectEol } from './line-eol';
 
 /** 開いたときに控える身元(#1044 段3、§9)。 */
 export interface CodeFenceIdentity {
@@ -160,7 +161,7 @@ export function replaceCodeFenceContent(
   const openLead = quoteLead(lines[target.start]!, target.quote) ?? 0;
   const leadStr = lines[target.start]!.slice(0, openLead);
   const newInner = text.split(/\r?\n/).map((l) => leadStr + l);
-  const eol = body.includes('\r\n') ? '\r\n' : '\n';
+  const eol = detectEol(body);
   const newBody = [
     ...lines.slice(0, target.start + 1),
     ...newInner,

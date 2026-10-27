@@ -32,6 +32,7 @@ import { extractVars, frontmatterLineCount, parseFrontmatter } from './frontmatt
 import { expandVarsInText } from './var-expand';
 import { fenceStep } from './list-renumber';
 import { stripComments, preprocessHeadingNumbers } from './markdown-render';
+import { detectEol } from './line-eol';
 
 /** 追記の入り先 1 つ。 */
 export interface AppendTarget {
@@ -332,7 +333,7 @@ export function appendIntoSection(
    *   挟む行にも `\r` を足す。本文の最後の行(改行なし)の後ろへ挟むときだけ、前の行に `\r` を足し、
    *   最後の行には足さない(終わりの改行の有無を変えない)。
    */
-  const crlf = base.includes('\r\n');
+  const crlf = detectEol(base) === '\r\n';
   const cr = crlf ? '\r' : '';
   const inner = crlf ? (s: string): string => s.replace(/\r?\n/g, '\r\n') : (s: string): string => s;
   const block = (heading === null ? [inner(body)] : [inner(heading), '', inner(body)]).map((l) => l + cr);
@@ -500,7 +501,7 @@ export function replaceSectionByHeading(
    */
   const parts = body.split(/(?<=\n)/);
   const eolOf = (p: string | undefined): string => (p === undefined ? '' : p.endsWith('\r\n') ? '\r\n' : p.endsWith('\n') ? '\n' : '');
-  const eol = eolOf(parts[range.start]) || (body.includes('\r\n') ? '\r\n' : '\n');
+  const eol = eolOf(parts[range.start]) || detectEol(body);
   // 章の最後の行に改行が在ったか(本文の終わりの章で、最後に改行が無ければ足さない)
   const tail = range.end > range.start ? eolOf(parts[range.end - 1]) : '';
   const newBody =
