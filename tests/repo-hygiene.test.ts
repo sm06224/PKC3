@@ -13,6 +13,7 @@ import { join, resolve } from 'node:path';
 import { codeOnly as stripComments } from './helpers/code-only';
 // ⚠ 配色の正本(#718)── `index.html` の inline script が持つ写しを突き合わせる
 import { THEMES, THEME_STORAGE_KEY, initialTheme, resolveTheme } from '../src/adapter/ui/render/theme';
+import { readReducerSource } from './helpers/reducer-source';
 
 /**
  * 追跡対象のテキスト file を集める(生成物・依存は見ない)。
@@ -517,7 +518,7 @@ describe('画面の文字列に記法を書かない(2026-08-18)', () => {
  *   **機械で数え上げて**突き合わせる。
  */
 describe('本文を書く導線は、忙しい間の門に載っている', () => {
-  const STATE = readFileSync('src/adapter/state/app-state.ts', 'utf-8');
+  const STATE = readReducerSource();
   const BINDER = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
 
   /** reducer の `case 'X':` を境に切って、本文の書込を出す型を拾う。 */
@@ -725,7 +726,7 @@ describe('新しい本文が state に入る所は、札の組み直しを通る
    * ⚠ この罠は `tests/docs-parity.test.ts` の `codeOnly` が名指しで戒めているのに、
    *   **同じセッションでそれを引用しておきながら踏んだ**。
    */
-  const STATE = readFileSync('src/adapter/state/app-state.ts', 'utf-8')
+  const STATE = readReducerSource()
     .split('\n')
     .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
     .join('\n');

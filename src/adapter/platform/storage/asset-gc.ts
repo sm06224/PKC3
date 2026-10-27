@@ -14,6 +14,18 @@
  */
 import { humanBytes } from '@features/human-bytes';
 import { assetRefsIn } from '@features/asset/asset-ref-scan';
+import {
+  maintenanceIdentity,
+  reportMaintenance,
+  type MaintenanceBaseDeps,
+  type MaintenanceTaskIdentity,
+} from './maintenance-task';
+
+/** 処理の記録に書く出所(固定の機能名)。呼び名は `MESSAGE_SOURCE_LABEL` の「添付の整理」。 */
+export const ASSET_GC_SOURCE = 'asset-gc';
+
+/** 添付の整理が名乗る出所と呼び名(他の片づけと同じ口 `reportMaintenance` で記録へ報告する)。 */
+export const ASSET_GC_TASK: MaintenanceTaskIdentity = maintenanceIdentity(ASSET_GC_SOURCE);
 export interface AssetGcPorts {
   /** sqlite assets 表(meta)。 */
   listMetas(): Promise<Array<{ key: string; size: number | null; mime?: string | null }>>;
@@ -244,6 +256,12 @@ export interface PurgeFlowDeps {
    */
   ask(message: string): Promise<boolean>;
   tell(message: string): Promise<void>;
+  /**
+   * 処理の記録へ積む(`appMessagePost.post`)。⚠ **optional にしない**(配線を落としても tsc が黙ると、
+   * 「消したのに記録に残らない」という気づけない形になる)。積むのは**実際に消した回だけ**
+   * (0 件・断った・確認で止めた回は `refused` ── 何も起きていない)。
+   */
+  post: MaintenanceBaseDeps['post'];
 }
 
 /**
@@ -293,9 +311,14 @@ export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
    * 🔑 **容量の内訳の数が古くなったことも言う**(#1087 の見直し 2026-10-13)── 内訳は「容量を調べる」を押したときにだけ
    *   数えるので、消した後も「うち 120 MB は使われていません」がそのまま残り、読み返すと事実と違っていた。
    */
-  await deps.tell(
+  const doneText =
     `${r.deleted} 件を消しました` +
-      (r.failed > 0 ? `(${r.failed} 件は失敗、再実行で回収されます)` : '') +
-      (r.deleted > 0 ? '。容量の内訳は、もう一度「容量を調べる」を押すと新しくなります' : ''),
-  );
+    (r.failed > 0 ? `(${r.failed} 件は失敗、再実行で回収されます)` : '') +
+    (r.deleted > 0 ? '。容量の内訳は、もう一度「容量を調べる」を押すと新しくなります' : '');
+  await deps.tell(doneText);
+  // 🔑 記録へは共通の口で。1 件でも消した回は done、全部失敗した回は failed(固定の文なので括弧で潰さない)、何も起きなかった回は refused(積まない)
+  reportMaintenance(deps.post, ASSET_GC_TASK, {
+    kind: r.deleted === 0 ? (r.failed > 0 ? 'failed' : 'refused') : 'done',
+    text: doneText,
+  });
 }

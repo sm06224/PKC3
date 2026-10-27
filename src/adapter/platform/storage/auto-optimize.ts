@@ -27,21 +27,21 @@
  */
 import type { OptimizeIndexesResult } from './protocol';
 import {
+  maintenanceIdentity,
+  reportMaintenance,
+  type MaintenanceBaseDeps,
+  type MaintenanceTaskIdentity,
+} from './maintenance-task';
+import {
   OPTIMIZE_FAILED_TEXT,
   optimizeDoneText,
   planAutoOptimize,
   type AutoOptimizePlan,
 } from '@features/storage/auto-optimize';
 
-export interface AutoOptimizerDeps {
-  /** 書込の lease を握っているか(`main.ts` の `writerHolder`)。 */
-  holdsWriterLease(): boolean;
-  /** 書込の列に載せて走らせる(`StoreEffects.run`)。 */
-  run<T>(job: () => Promise<T>): Promise<T>;
+export interface AutoOptimizerDeps extends MaintenanceBaseDeps {
   /** worker の `optimizeIndexes` を 1 回打つ。 */
   optimize(): Promise<OptimizeIndexesResult>;
-  /** 処理の記録へ積む(`appMessagePost.post`)。 */
-  post(input: { kind: 'job'; source: string; text: string }): void;
   /** いま(ms)。既定は `Date.now`。 */
   now?: () => number;
   /** タブが隠れているか。既定は `document.hidden`。 */
@@ -55,7 +55,9 @@ export interface AutoOptimizerDeps {
 /** 処理の記録に書く出所(固定の機能名。user の入力は含めない)。 */
 export const AUTO_OPTIMIZE_SOURCE = 'storage-optimize';
 
-export class AutoOptimizer {
+export class AutoOptimizer implements MaintenanceTaskIdentity {
+  readonly source = AUTO_OPTIMIZE_SOURCE;
+  readonly name = maintenanceIdentity(AUTO_OPTIMIZE_SOURCE).name;
   private readonly now: () => number;
   private readonly hidden: () => boolean;
   private readonly schedule: (fn: () => void, ms: number) => () => void;
@@ -177,15 +179,14 @@ export class AutoOptimizer {
         try {
           const r = await this.deps.optimize();
           this.lastFailed = false;
-          this.deps.post({
-            kind: 'job',
-            source: AUTO_OPTIMIZE_SOURCE,
+          reportMaintenance(this.deps.post, this, {
+            kind: 'done',
             text: optimizeDoneText(r.elapsedMs, r.after.freeBytes),
           });
         } catch {
           // 🔴 同じ失敗は連続で積まない(成功したら数え直す)
           if (!this.lastFailed) {
-            this.deps.post({ kind: 'job', source: AUTO_OPTIMIZE_SOURCE, text: OPTIMIZE_FAILED_TEXT });
+            reportMaintenance(this.deps.post, this, { kind: 'failed', text: OPTIMIZE_FAILED_TEXT });
           }
           this.lastFailed = true;
         }

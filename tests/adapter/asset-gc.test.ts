@@ -17,6 +17,7 @@ import {
   type AssetGcPorts,
   type PurgeFlowDeps,
 } from '../../src/adapter/platform/storage/asset-gc';
+import type { MaintenanceJobPost } from '../../src/adapter/platform/storage/maintenance-task';
 import {
   AssetBlobStore,
   splitStoreKey,
@@ -137,6 +138,7 @@ describe('runExplicitPurge (P4b)', () => {
       isReady: async () => ({ ok: true, reason: '' }),
       ask: () => Promise.resolve(true),
       tell: async (m) => void alerts.push(m),
+      post: () => undefined,
       ...over,
     };
     return { deps, calls, alerts };
@@ -225,6 +227,7 @@ describe('runExplicitPurge (P4b)', () => {
       isReady: async () => ({ ok: true, reason: '' }),
       ask: () => Promise.resolve(true),
       tell: async (m) => void alerts.push(m),
+      post: () => undefined,
     });
     // 消してよいのは「両方の走査で orphan」だった k-orphan-blob だけ
     expect(calls.filter((c) => c.startsWith('blob:'))).toEqual(['blob:k-orphan-blob']);
@@ -267,6 +270,7 @@ describe('整理はタブ間の編集も見る(#253)', () => {
       }),
       ask: () => Promise.resolve(true),
       tell: async (m) => void alerts.push(m),
+      post: () => undefined,
     });
     expect(calls.filter((c) => c.startsWith('blob:')), '編集中なのに消した').toHaveLength(0);
     expect(alerts[0]).toContain('他のタブで編集中です');
@@ -285,6 +289,7 @@ describe('整理はタブ間の編集も見る(#253)', () => {
       }),
       ask: () => Promise.resolve(true),
       tell: async (m) => void alerts.push(m),
+      post: () => undefined,
     });
     expect(alerts[0], '「編集中」と言い切っている').not.toContain('他のタブで編集中です');
     expect(alerts[0]).toContain('確かめられません');
@@ -416,6 +421,7 @@ describe('器の無い bytes(#260)', () => {
         return true;
       },
       tell: async (m) => void messages.push(m),
+      post: () => undefined,
     });
     expect(messages[0], '残骸を数えていない').toContain('2 件');
     expect(messages.join(' '), '残骸だけだと「ありません」で止まる').not.toContain(
@@ -450,5 +456,55 @@ describe('main.ts の purgeOrphanAssets(原文 pin、#1044 段2 5巡目の修理
     // ⚠ 2 回とも出る(起点 + isReady の TOCTOU 再検査)ことを数える
     const hits = block.split('hasUnsavedTyping(').length - 1;
     expect(hits, 'hasUnsavedTyping を通していない箇所がある(章の欄の gap が戻っている)').toBe(2);
+  });
+});
+
+/** #1385: 添付の整理も、他の片づけと同じ口(`reportMaintenance`)で処理の記録へ報告する。 */
+describe('runExplicitPurge の処理の記録(#1385)', () => {
+  function run(over: Partial<PurgeFlowDeps> = {}) {
+    const { ports, calls } = fakePorts();
+    const posts: MaintenanceJobPost[] = [];
+    const deps: PurgeFlowDeps = {
+      ports,
+      isReady: async () => ({ ok: true, reason: '' }),
+      ask: () => Promise.resolve(true),
+      tell: async () => undefined,
+      post: (m) => void posts.push(m),
+      ...over,
+    };
+    return { deps, posts, calls };
+  }
+
+  it('消した回は出所 asset-gc で 1 件積む(固定の頭は付けない = done)', async () => {
+    const { deps, posts, calls } = run();
+    await runExplicitPurge(deps);
+    expect(calls.filter((c) => c.startsWith('blob:')).length, '前提: 実際に消している').toBeGreaterThan(0);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ kind: 'job', source: 'asset-gc' });
+    expect(posts[0]?.text).toContain('件を消しました');
+    expect(posts[0]?.fixedHead).toBeUndefined();
+  });
+
+  it('確認で止めた回・断られた回・0 件の回は積まない', async () => {
+    const a = run({ ask: () => Promise.resolve(false) });
+    await runExplicitPurge(a.deps);
+    const b = run({ isReady: async () => ({ ok: false, reason: '他のタブで編集中です' }) });
+    await runExplicitPurge(b.deps);
+    const c = run();
+    c.deps.ports.listMetas = async () => [];
+    c.deps.ports.listBlobKeys = async () => [];
+    await runExplicitPurge(c.deps);
+    expect([a.posts, b.posts, c.posts]).toEqual([[], [], []]);
+  });
+
+  it('1 件も消せず失敗だけの回は failed として固定の頭つきで積む', async () => {
+    const { deps, posts } = run();
+    deps.ports.deleteBlob = async () => {
+      throw new Error('boom');
+    };
+    await runExplicitPurge(deps);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.fixedHead).toBe(posts[0]?.text);
+    expect(posts[0]?.text).toContain('失敗');
   });
 });

@@ -84,6 +84,7 @@ import { TILE_ICON_CHOICES } from '../src/features/icon/tile-icons';
 import { withBuiltinTiles } from '../src/features/launcher/tiles';
 import { RELATION_MAP_DEPTH } from '../src/adapter/ui/render/relation-map';
 import { MAX_DEPTH } from '../src/features/relation/neighbourhood';
+import { readReducerSource } from './helpers/reducer-source';
 
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
 
@@ -1342,7 +1343,7 @@ describe('設定の画面の節とマニュアルの突合(#697)', () => {
   });
 
   it('🔴 マニュアルが引用する競合の知らせ 2 文が、app-state.ts の文と一字違わない(#1087)', () => {
-    const src = readFileSync('src/adapter/state/app-state.ts', 'utf-8');
+    const src = readReducerSource();
     // 実装側は文字列の連結で書かれているので、継ぎ目(引用符 + 改行)を除いてから探す
     const joined = src.replace(/['`]\s*\+\s*\n\s*['`]/gu, '');
     const overlap = '別のタブまたはウィンドウの変更と重なりました。こちらの内容で保存し、';

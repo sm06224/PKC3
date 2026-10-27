@@ -27,6 +27,8 @@
  * 🔑 **pure module**。
  */
 
+import { detectEol } from './line-eol';
+
 export type ListNumberMode = 'sequential' | 'uniform';
 
 /**
@@ -211,8 +213,8 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
   // 🔴 高速化: 番号付きリストの記号が本文に無ければ、行配列化・走査を行わずに即時脱出 (#1110)
   if (body === '' || !/\d+[.)]/.test(body)) return body;
 
-  const isCrlf = body.includes('\r\n');
-  const eol = isCrlf ? '\r\n' : '\n';
+  const eol = detectEol(body);
+  const isCrlf = eol === '\r\n';
   const lines = isCrlf ? body.split('\r\n') : body.split('\n');
   const out: string[] = [];
   /** 字下げの幅 → 次に振る番号。⚠ 深い段から抜けたら捨てる。 */

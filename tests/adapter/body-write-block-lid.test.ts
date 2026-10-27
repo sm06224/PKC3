@@ -18,7 +18,6 @@
  *   `center-pane.test.ts`(`toggle-task` の横に留めた枠)、
  *   `table-format-menu.test.ts`(`applyTableFormat`)。
  */
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { codeOnly } from '../helpers/code-only';
 import {
@@ -29,6 +28,7 @@ import {
   type AppState,
 } from '../../src/adapter/state/app-state';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
+import { readReducerSource } from '../helpers/reducer-source';
 
 function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
   return {
@@ -478,7 +478,7 @@ describe('#1081 ── 強制解放は、錠のノートの下書きだけを捨
  *   「既知の 34 件のどれかを直した」も、ここへ来て一覧を書き換える。
  */
 describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
-  const STATE = codeOnly(readFileSync('src/adapter/state/app-state.ts', 'utf-8'));
+  const STATE = codeOnly(readReducerSource());
 
   /**
    * ⚠ `||` の追加条件は**左右どちらに書かれていても**拾う(着地前レビュー:

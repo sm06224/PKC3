@@ -2319,7 +2319,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   あちらは**エラーの行**(赤い意味の欄)で、壊れの知らせは「失敗」ではなく
    *   「検めて見つけた」なので別の行に置く。⚠ 2026-09-20 の目線レビュー時点は
    *   `SELECT_ENTRY` が `error: null` で消していたが、**いまは消さない**
-   *   (`app-state.ts` の `SELECT_ENTRY`)── 理由は上の「別の行」だけである。
+   *   (`slices/boot.ts` の `SELECT_ENTRY`)── 理由は上の「別の行」だけである。
    *   こちらは次の一時の知らせが来るまで残り、同じ字を「問題」としてメッセージにも積む。
    *   字は `integritySummary` が持つ(ボタン名の門もそちら)。
    * ⚠ タブが隠れたら次の表へ進まず**待つ**(裏で数 GB を読み続けない / 止めもしない)。
@@ -6171,6 +6171,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             //    その間に別の確認が開いていることがある(器が順番に出す)
             ask: (msg) => ask(msg, { okLabel: '使われていない添付を消す', danger: true }),
             tell,
+            post: (m) => appMessagePost.post(m),
           });
         } catch (e) {
           dispatcher.dispatch({

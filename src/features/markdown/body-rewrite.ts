@@ -25,6 +25,7 @@ import { isScheduleDate, withFrontmatterDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
 import { applyChapterRestore, applyChapterSplit } from './chapter-split';
+import { detectEol } from './line-eol';
 import { fixSpeakers } from '../capture/speakers';
 import { transcriptLinesOf } from '../capture/contact-sheet-layout';
 import { replaceColorSpan } from './color-code';
@@ -761,9 +762,6 @@ const LINK_LINE = /^\s*(?:[-*+]|\d+[.)])\s+\[(?:\\.|[^\]\\])*\]\(entry:[A-Za-z0-
 const LIST_BLOCK_END = /^\s{0,3}(?:#{1,6}(?:\s|$)|```|~~~|([-*_])(?:\s*\1){2,}\s*$)/;
 
 /** 🔴 本文の改行コード（CRLF or LF）を検知する(#1075, #1097)。 */
-function detectEol(text: string): '\r\n' | '\n' {
-  return text.includes('\r\n') ? '\r\n' : '\n';
-}
 
 /**
  * 🔴 **行を組み直すとき、行ごとの改行コードを保つ**(#1087)。
@@ -1282,7 +1280,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
    * 🔴 **切り取り**(#684 段③)。
    *
    * ⚠ **ここは「合流」の口である** ── 保存に失敗した状態(`phase: 'error'`)から
-   *   基底へ書換を当て直す経路(`app-state.ts` の `BODY_REWRITTEN`)が通る。
+   *   基底へ書換を当て直す経路(`slices/block-ops.ts` の `BODY_REWRITTEN`)が通る。
    *   🔴 1 稿目は「配線の取り違えだから何もしない」と書いて `null` を返していたが、
    *   **事実と違った**(着地前レビュー 💭-2)── そこで捨てると基底に切り取りが
    *   反映されず、**再保存で塊が元へ戻って二重になる**。

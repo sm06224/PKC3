@@ -12,7 +12,7 @@
  *
  * `sql-guard.ts` の `checkReadOnlySql` は**そのまま**である ── この PKC のノートの DB に
  * 書く道を作らない(1 行で全ノートを消せる口になる)。ここは **DuckDB 専用の門**で、
- * `app-state.ts` の `RUN_SQL` が**engine が DuckDB のときだけ**呼ぶ。
+ * `slices/sql.ts` の `RUN_SQL` が**engine が DuckDB のときだけ**呼ぶ。
  *
  * ## ③ ⚠ ここは**境ではない**(`duckdb-guard.ts` の冒頭と同じ)
  *

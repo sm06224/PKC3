@@ -23,6 +23,7 @@
  */
 import { parseEntryRef } from '../entry-ref/entry-ref';
 import { sectionRange } from '../markdown/append-target';
+import { detectEol } from '../markdown/line-eol';
 import { fenceStep } from '../markdown/list-renumber';
 import { expandDefinedVars } from '../markdown/var-expand';
 import { extractVars } from '../markdown/frontmatter';
@@ -91,7 +92,7 @@ export async function flattenSectionEmbeds(
   opts: FlattenOptions = {},
 ): Promise<FlattenResult> {
   if (!body.includes('](entry:')) return { body, expanded: 0, missing: 0, blocked: 0, refs: [] };
-  const eol = body.includes('\r\n') ? '\r\n' : '\n';
+  const eol = detectEol(body);
   const lines = body.split(/\r?\n/u);
   const out: string[] = [];
   const cache = new Map<string, string | null>();

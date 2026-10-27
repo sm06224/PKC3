@@ -338,7 +338,7 @@ describe('処理の記録(#999 段③)', () => {
     r.noteWrites(MIN);
     await r.advance(AUTO_OPTIMIZE_QUIET_MS);
     expect(r.optimizeCalls()).toBe(1);
-    expect(r.posts).toEqual([{ kind: 'job', source: 'storage-optimize', text: OPTIMIZE_FAILED_TEXT }]);
+    expect(r.posts).toEqual([{ kind: 'job', source: 'storage-optimize', text: OPTIMIZE_FAILED_TEXT, fixedHead: OPTIMIZE_FAILED_TEXT }]);
     expect(r.posts[0]?.text).not.toContain('秘密');
   });
 

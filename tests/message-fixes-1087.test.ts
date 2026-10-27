@@ -22,6 +22,7 @@ import {
   fixedHeadOfOpError,
   messageTextOfOpError,
 } from '../src/features/message/caution-events';
+import { readReducerSource } from './helpers/reducer-source';
 
 function memory(): NoticeStorage {
   // 既読の記録を空の配列で始める = 「初めて開いた端末」ではない(初めてなら出さずに読んだことにする。台帳 #1852 束 L2、依頼 96-1)
@@ -78,7 +79,7 @@ describe('M6 アプリが書いた断り文', () => {
 
   it('正本の字と一致している(各 file の中に同じ字が在る)', () => {
     const files = ['src/adapter/ui/actions/binder.ts', 'src/adapter/state/app-state.ts', 'src/main.ts'].map((p) =>
-      readFileSync(p, 'utf8'),
+      p === 'src/adapter/state/app-state.ts' ? readReducerSource() : readFileSync(p, 'utf8'),
     );
     for (const e of APP_REFUSAL_LITERALS) {
       expect(

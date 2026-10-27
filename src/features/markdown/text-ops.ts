@@ -24,6 +24,9 @@ import { lineStart } from './line-start';
 import { TASK_LINE } from './task-line';
 import { tableToMarkdown } from './table-copy';
 
+/** 改行コードの判定は leaf の `line-eol.ts` が正本(#1384)。ここからも使える。 */
+export { detectEol } from './line-eol';
+
 export interface TextSelection {
   text: string;
   start: number;

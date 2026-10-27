@@ -12,6 +12,7 @@ import { initialState, reduce, type AppState } from '../../src/adapter/state/app
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import type { BrowseMode } from '../../src/adapter/ui/render/browse-mode';
+import { readReducerSource } from '../helpers/reducer-source';
 
 function meta(lid: string, order: number, over: Partial<EntryMeta> = {}): EntryMeta {
   return {
@@ -300,7 +301,7 @@ describe('絞りが全部の面に届いている', () => {
 
   it('`filerRows` を呼ぶ面は、数えた数だけ `kindFilter` を渡している', () => {
     for (const f of FACES) {
-      const src = readFileSync(f, 'utf8');
+      const src = f === 'src/adapter/state/app-state.ts' ? readReducerSource() : readFileSync(f, 'utf8');
       const calls = (src.match(/\bfilerRows\(/g) ?? []).length;
       /**
        * ⚠ **綴りは 2 通りある**(2026-09-11、#215 残り①)── 同じ 3 つ

@@ -21,6 +21,7 @@ import {
 } from '@adapter/platform/local-folder';
 import { FOLDER_PAGE } from '@features/local-folder/folder-entries';
 import { codeOnly } from '../helpers/code-only';
+import { readReducerSource } from '../helpers/reducer-source';
 
 interface FakeFile extends FolderEntryHandle {
   gets: number;
@@ -416,7 +417,7 @@ describe('🔴 消す口・改名・移動を作らない(裁定)', () => {
     for (const banned of ['indexedDB', 'localStorage', 'sessionStorage', 'dispatch(', 'postMessage']) {
       expect(code.includes(banned), `${banned} に触れている`).toBe(false);
     }
-    const state = codeOnly(readFileSync('src/adapter/state/app-state.ts', 'utf-8'));
+    const state = codeOnly(readReducerSource());
     expect(state.includes('DirectoryHandle'), 'state が handle を持っている').toBe(false);
     expect(state.includes('local-folder'), 'state が local-folder を知っている').toBe(false);
   });

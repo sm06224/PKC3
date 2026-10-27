@@ -49,6 +49,7 @@
  */
 
 import { classifyDirectiveOpen } from './directive-open';
+import { detectEol } from './line-eol';
 
 /**
  * 🔴 **本文を行に割る**(#1075)。
@@ -453,7 +454,7 @@ export function blockSpanLookup(body: string): (openLine: number) => BlockSpan |
 
 /** 行範囲(両端含む)を原文のまま切り出す。⚠ 末尾の改行は付けない(行の並びそのもの)。 */
 export function sliceLines(body: string, span: { readonly start: number; readonly end: number }): string {
-  const eol = body.includes('\r\n') ? '\r\n' : '\n';
+  const eol = detectEol(body);
   return splitLines(body).slice(span.start, span.end + 1).join(eol);
 }
 

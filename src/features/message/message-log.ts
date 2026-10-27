@@ -122,6 +122,7 @@ export const MESSAGE_SOURCE_LABEL: Readonly<Record<string, string>> = {
   'db-rescue-reset': 'ノートの保存データの初期化',
   'storage-vacuum': '保存領域を縮める',
   'storage-optimize': '索引の整理',
+  'asset-gc': '添付の整理',
   'force-release': '書き込みの強制終了',
   // 🔴 ワーカーの記録の lane 名(#1087 M7)── 内部の名前を英語のまま見せない
   math: '数式',

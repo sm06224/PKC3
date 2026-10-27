@@ -26,6 +26,7 @@ import {
   type Dispatchable,
   type SectionDraft,
 } from '../../src/adapter/state/app-state';
+import { readReducerSource } from '../helpers/reducer-source';
 
 /**
  * このファイルは章の下書きだけを組む(#1044 段3 でコード枠も同じ field を
@@ -1165,7 +1166,7 @@ describe('blockedWithSuffix(#1087)', () => {
     const { readFileSync } = await import('node:fs');
     for (const f of ['src/adapter/state/app-state.ts', 'src/adapter/ui/actions/binder.ts']) {
       // ⚠ 注釈を落としてから見る(自分の説明に満たされない)
-      const code = readFileSync(f, 'utf8')
+      const code = (f === 'src/adapter/state/app-state.ts' ? readReducerSource() : readFileSync(f, 'utf8'))
         .split('\n')
         .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l));
       let fromBodyGate = false;
