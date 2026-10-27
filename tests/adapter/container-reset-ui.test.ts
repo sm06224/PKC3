@@ -30,6 +30,8 @@ import {
 } from '../../src/features/storage/rescue-archive';
 import { OFFICE_PACK_APPROX } from '../../src/features/office/office-pack-size';
 import { DIALOG_REGION } from '../../src/adapter/ui/render/app-dialog';
+import { appWorkspaces } from '../../src/adapter/platform/storage/workspace-run';
+import { WORKSPACES_REMAIN_MESSAGE } from '../../src/features/storage/workspace-guard';
 
 const meta = (lid: string, title: string): EntryMeta =>
   ({
@@ -374,5 +376,51 @@ describe('拾い出しに添付の口を渡している（原文 pin）', () => 
     const block = MAIN.slice(at, at + 200);
     expect(block, 'rescueAssets に listKeys が無い').toContain('listKeys');
     expect(block, 'rescueAssets に get が無い').toContain('get');
+  });
+});
+
+describe('ワークスペースが 2 つ以上のとき(#1455 レビュー 🔴1)', () => {
+  it('🔴 説明の窓も出さずに断り、何も消さない', async () => {
+    appWorkspaces.attach(
+      {
+        list: async () => ({
+          workspaces: [
+            { cid: 'c1', title: '仕事用', createdAt: null, notes: 3 },
+            { cid: 'c2', title: '個人用', createdAt: null, notes: 1 },
+          ],
+          activeCid: 'c1',
+        }),
+        create: async () => 'c3',
+        switchTo: async () => undefined,
+        rename: async () => undefined,
+        remove: async () => ({ removedNotes: 0 }),
+        run: (job) => job(),
+        reload: () => undefined,
+      },
+      'c1',
+    );
+    const m = mount({ assetKeys: ['k1'] });
+    m.run.click();
+    await settle();
+    expect(liveDialog(), '断るはずが説明の窓が出た').toBeNull();
+    expect(m.calls, '断ったのに消した').toEqual([]);
+    expect(m.d.getState().error).toBe(WORKSPACES_REMAIN_MESSAGE);
+    // 対照群: 1 つに戻れば、同じ操作で説明の窓が出る
+    appWorkspaces.attach(
+      {
+        list: async () => ({ workspaces: [{ cid: 'c1', title: '仕事用', createdAt: null, notes: 3 }], activeCid: 'c1' }),
+        create: async () => 'c3',
+        switchTo: async () => undefined,
+        rename: async () => undefined,
+        remove: async () => ({ removedNotes: 0 }),
+        run: (job) => job(),
+        reload: () => undefined,
+      },
+      'c1',
+    );
+    const n = mount({ assetKeys: ['k1'] });
+    n.run.click();
+    await settle();
+    expect(n.body(), '1 つのときに説明が出ない').toContain('元に戻せません');
   });
 });

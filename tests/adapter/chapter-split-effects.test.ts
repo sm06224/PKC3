@@ -53,7 +53,7 @@ function harness(over: { conflictOn?: string } = {}) {
     if (s.notice !== null && !notices.some((x) => x.message === s.notice))
       notices.push({ message: s.notice, ...(s.noticeOpen === null ? {} : { open: s.noticeOpen }) });
   });
-  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', '元')], relations: [] });
+  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', '元'), meta('b', '別')], relations: [] });
   d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
   d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: ORIGINAL });
   return { d, disk, deleted, errors, notices };
@@ -69,6 +69,8 @@ function planChapter1() {
 function split(h: ReturnType<typeof harness>, lid = 'kid') {
   const cut = planChapter1();
   h.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid, title: '第一章', body: cut.childBody, edit: false, keepSelection: true });
+  // 切り出しと同じく、子 → 親の「出典」のつながりを作る(binder の split-chapter がやること)
+  h.d.dispatch({ type: 'ADD_RELATION', id: `r-${lid}`, fromLid: lid, toLid: 'a', kind: 'provenance' });
   h.d.dispatch({
     type: 'SPLIT_CHAPTER',
     lid: 'a',
@@ -155,5 +157,73 @@ describe('章の切り出し(#1439)', () => {
     await tick();
     expect(h.disk.get('a')).toBe(ORIGINAL);
     expect(h.errors.length).toBeGreaterThan(0);
+  });
+});
+
+describe('戻すときの安全(#1439 レビュー ⚠4)', () => {
+  async function splitted() {
+    const h = harness();
+    split(h);
+    await tick();
+    const shown = h.disk.get('a')!;
+    const line = shown.split('\n').findIndex((l) => l.includes('切り出した章"'));
+    h.d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: shown });
+    return { h, shown, line };
+  }
+
+  it('🔴 つながりの無い子(リンクの複製など)は戻さない: 本文も子も触らない', async () => {
+    const { h, shown, line } = await splitted();
+    // つながりを外す(複製されたリンクは、つながりを持たない)
+    const rel = h.d.getState().relations.find((r) => r.kind === 'provenance')!;
+    h.d.dispatch({ type: 'REMOVE_RELATION', id: rel.id });
+    h.d.dispatch({ type: 'RESTORE_CHAPTER', lid: 'a', childLid: 'kid', line });
+    await tick();
+    expect(h.disk.get('a')).toBe(shown);
+    expect(h.deleted).toEqual([]);
+  });
+
+  it('🔴 子に前書きがあれば、親へ移さず断る(本文・子とも無傷)', async () => {
+    const { h, shown, line } = await splitted();
+    h.disk.set('kid', '---\ntags: [重要]\n---\n一章の本文\n');
+    h.d.dispatch({ type: 'RESTORE_CHAPTER', lid: 'a', childLid: 'kid', line });
+    await tick();
+    expect(h.errors.some((e) => e.includes('前書き')), '前書きが失われることを言っていない').toBe(true);
+    expect(h.disk.get('a'), '前書きの混ざった本文を親へ書いた').toBe(shown);
+    expect(h.disk.get('kid')).toContain('tags: [重要]');
+    expect(h.deleted, '断ったのに子を削除した').toEqual([]);
+  });
+
+  it('🔴 子が普通のノートでなくなっていれば断る', async () => {
+    const h = harness();
+    h.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'textlog', lid: 'kid', title: 'ログ', body: '## 2026-10-01 09:00:00\n\nx\n', edit: false, keepSelection: true });
+    h.d.dispatch({ type: 'ADD_RELATION', id: 'r1', fromLid: 'kid', toLid: 'a', kind: 'provenance' });
+    h.d.dispatch({ type: 'RESTORE_CHAPTER', lid: 'a', childLid: 'kid', line: 7 });
+    await tick();
+    expect(h.errors.some((e) => e.includes('種類')), '種類が違うのに戻そうとした').toBe(true);
+    expect(h.deleted).toEqual([]);
+  });
+
+  it('戻せたら「削除しました」と言い、切り出し先は一覧から消えている', async () => {
+    const { h, line } = await splitted();
+    h.d.dispatch({ type: 'RESTORE_CHAPTER', lid: 'a', childLid: 'kid', line });
+    await tick();
+    expect(h.d.getState().entryMetas.has('kid'), '削除したのに一覧に残っている').toBe(false);
+    expect(h.notices.some((n) => n.message.includes('削除しました'))).toBe(true);
+    expect(h.notices.some((n) => n.message.includes('残っています'))).toBe(false);
+    expect(h.disk.get('a')).toBe(ORIGINAL);
+  });
+
+  it('🔴 削除が通らなかった回(別のノートを編集中)は、「残っています」と正しく言う', async () => {
+    const { h, line } = await splitted();
+    h.d.dispatch({ type: 'RESTORE_CHAPTER', lid: 'a', childLid: 'kid', line });
+    // 書き込みの途中で、別のノート(b)の編集が始まった ── DELETE_ENTRY は読む画面のときだけ通る
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
+    h.d.dispatch({ type: 'BODY_LOADED', lid: 'b', body: 'x\n' });
+    h.d.dispatch({ type: 'START_EDIT' });
+    await tick();
+    expect(h.disk.get('a'), '本文は戻っている').toBe(ORIGINAL);
+    expect(h.d.getState().entryMetas.has('kid'), '前提: 削除が通らなかった').toBe(true);
+    expect(h.notices.some((n) => n.message.includes('削除しました')), '残っているのに「削除しました」と言った').toBe(false);
+    expect(h.notices.some((n) => n.message.includes('残っています'))).toBe(true);
   });
 });

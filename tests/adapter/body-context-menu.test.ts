@@ -629,6 +629,10 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     const made = [...r.d.getState().entryMetas.values()].find((m) => m.title === '章' && m.lid !== 'n1');
     expect(made, '新しいノートが作られていない').toBeDefined();
     expect(r.d.getState().selectedLid, '切り出しで開いているノートが退いた').toBe('n1');
+    expect(
+      r.d.getState().relations.some((x) => x.kind === 'provenance' && x.fromLid === made!.lid && x.toLid === 'n1'),
+      '切り出した子 → 親の「出典」のつながりを作っていない(「戻す」を出す条件)',
+    ).toBe(true);
     const rw = events.find((e) => e.type === 'REQUEST_BODY_REWRITE')?.rewrite;
     expect(rw?.kind).toBe('chapter-split');
     expect(rw?.link).toBe(`[章](entry:${made!.lid} "切り出した章")`);
@@ -649,6 +653,8 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     });
     const linked = HEAD_BODY.replace('中身', '[章](entry:kid "切り出した章")');
     r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: linked });
+    // 切り出したときに作る、子 → 親の「出典」のつながり(これが無い印つきリンクは複製として扱う)
+    r.d.dispatch({ type: 'ADD_RELATION', id: 'rel1', fromLid: 'kid', toLid: 'n1', kind: 'provenance' });
     const events: Array<{ type: string; into?: { line: number; openLine: string }; child?: { lid: string } }> = [];
     r.d.onEvent((e) => events.push(e as never));
     rightClick(r.head);
@@ -659,6 +665,26 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     expect(ev?.child?.lid).toBe('kid');
     expect(ev?.into?.line).toBe(2);
     expect(ev?.into?.openLine).toBe('[章](entry:kid "切り出した章")');
+  });
+
+  it('🔴 印つきのリンクをコピーで複製しても(つながりが無い)「元に戻す」は出ない / 同じ親の中の複製も出ない', () => {
+    const r = rig();
+    r.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'kid', title: '章', body: '中身\n', edit: false, keepSelection: true });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: HEAD_BODY.replace('中身', '[章](entry:kid "切り出した章")') });
+    rightClick(r.head);
+    expect(r.acts(), 'つながりが無いのに「元に戻す」が出た').not.toContain('restore-chapter');
+    // つながりを作ると出る(対照群)。さらに同じ親に同じリンクが 2 つあれば出ない
+    r.d.dispatch({ type: 'ADD_RELATION', id: 'rel1', fromLid: 'kid', toLid: 'n1', kind: 'provenance' });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: HEAD_BODY.replace('中身', '[章](entry:kid "切り出した章")') });
+    rightClick(r.head);
+    expect(r.acts()).toContain('restore-chapter');
+    r.d.dispatch({
+      type: 'BODY_LOADED',
+      lid: 'n1',
+      body: HEAD_BODY.replace('中身', '[章](entry:kid "切り出した章")\n\n[章](entry:kid "切り出した章")'),
+    });
+    rightClick(r.head);
+    expect(r.acts(), '同じ親の中の複製があるのに出た').not.toContain('restore-chapter');
   });
 
   it('🔴 印の無い普通のリンク 1 行の章には「元に戻す」を出さない(別のノートを消さない)(#1439)', () => {

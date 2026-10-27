@@ -31,7 +31,7 @@ import {
   formatLogMonth,
   logDayOfHeading,
   logDayRuns,
-  logMonthRuns,
+  logGrouping,
 } from '@features/textlog/log-days';
 
 /** 行の印(値 = `YYYY-MM-DD`)。⚠ 行かどうかを問う口はこの属性 1 つ。 */
@@ -146,14 +146,8 @@ export function syncLogDays(
 
   const enabled = host.hasAttribute(LOG_DAYS_HOST_ATTR);
   const runs = enabled ? logDayRuns(levels, daysOf(blocks, levels)) : [];
-  /**
-   * 🔴 **月・すべての行は、畳む物が増えるときだけ足す**(押し所だけが増えるのを避ける)。
-   * - 月の行: 日が**2 つ以上の月にまたがる**とき(1 か月に収まるログに月の行は要らない)。
-   * - 「すべて」の行: 日が**3 つ以上**あるとき(2 日なら日の行 2 つで足りる)。
-   */
-  const allMonths = runs.length >= 2 ? logMonthRuns(runs) : [];
-  const months = new Set(allMonths.map((m) => m.month)).size >= 2 ? allMonths : [];
-  const grouped = runs.length >= 3;
+  // 🔴 月・すべての行を出すかは `logGrouping` 1 本(畳む物が増えるときだけ足す)
+  const { months, all: grouped } = logGrouping(runs);
 
   /**
    * 行は「日 + その日の何番目の連なりか」(`day#n`)で引く ── 畳みの引き継ぎも、行の使い回しも同じ鍵。
@@ -266,13 +260,8 @@ export function syncLogDays(
       if (focused) allRow.focus({ preventScroll: true });
     }
     keep.add(allRow);
-    const open = placed.some((p) => !p.row.hasAttribute(DAY_FOLDED));
-    const label = open ? 'すべて折りたたむ' : 'すべて出す';
-    if (allRow.textContent !== label) allRow.textContent = label;
-    allRow.setAttribute('aria-expanded', open ? 'true' : 'false');
-    const hint = open ? 'ログの日と月を、すべて折りたたみます' : 'ログの日と月を、すべて出します';
-    allRow.title = hint;
-    allRow.setAttribute('aria-label', hint);
+    // 字は `paintAllRow`(行の表示が決まった後に、見えている物から決める)── 作った直後はひとまず「折りたたむ」
+    if (allRow.textContent === '') paintAllRowWith(allRow, true);
   }
   for (const row of existing) if (!keep.has(row)) row.remove();
   return { hidden, managed, rows: placed };
@@ -299,9 +288,9 @@ export function openLogDayCovering(
       opened = true;
     }
   }
-  const allMonths = logMonthRuns(runs);
-  if (new Set(allMonths.map((m) => m.month)).size >= 2) {
-    for (const mr of allMonths) {
+  const grouping = logGrouping(runs);
+  if (grouping.months.length > 0) {
+    for (const mr of grouping.months) {
       if (idx < mr.start || idx >= mr.end) continue;
       const dayRow = blocks[mr.start]!.previousElementSibling;
       const row = dayRow?.previousElementSibling ?? null;
@@ -322,15 +311,46 @@ export function flipLogDay(row: Element): void {
   else row.setAttribute(DAY_FOLDED, '');
 }
 
+/** 見えている(隠れていない)畳める行。⚠ 月の畳みの中の日の行・章の畳みで隠れた行は数えない。 */
+function visibleFoldableRows(host: HTMLElement): HTMLElement[] {
+  return foldableRows(host).filter((r) => !r.hidden);
+}
+
+/**
+ * 🔴 **いま見えている行が、全部畳まれているか**(#1441 レビュー)。「すべて」の字と、押したときの向きは
+ * **この 1 つの答え**から決める ── 月の行だけ畳んだ状態(日の行は月の中に隠れている)で、字が「折りたたむ」のまま
+ * 押すと「出す」側へ動く、という食い違いを作らない。
+ */
+export function logRowsAllFolded(host: HTMLElement): boolean {
+  const v = visibleFoldableRows(host);
+  return v.length > 0 && v.every((r) => r.hasAttribute(DAY_FOLDED));
+}
+
+function paintAllRowWith(allRow: HTMLElement, open: boolean): void {
+  const label = open ? 'すべて折りたたむ' : 'すべて出す';
+  if (allRow.textContent !== label) allRow.textContent = label;
+  allRow.setAttribute('aria-expanded', open ? 'true' : 'false');
+  const hint = open ? 'ログの日と月を、すべて折りたたみます' : 'ログの日と月を、すべて出します';
+  allRow.title = hint;
+  allRow.setAttribute('aria-label', hint);
+}
+
+/** 「すべて」の行の字を、いま見えている行から決め直す(`applyHeadingFold` が行の表示を決めた後に呼ぶ)。 */
+export function paintAllRow(host: HTMLElement): void {
+  const allRow = [...host.children].find((c): c is HTMLElement => c instanceof HTMLElement && isLogAllRow(c));
+  if (allRow !== undefined) paintAllRowWith(allRow, !logRowsAllFolded(host));
+}
+
 /**
  * 🔴 **日・月の行を、まとめて畳む / 出す**(#1441 の「全部畳む / 全部開く」)。
- * 1 つでも開いていれば全部畳み、全部畳んであれば全部出す(押し所は 1 つで、いつも何かが起きる)。
+ * 見えている行に 1 つでも開いている物があれば全部畳み、見えている行が全部畳んであれば全部出す(押し所は 1 つで、いつも何かが起きる)。
  * 🔑 印を付け外すだけ ── 見え方は `applyHeadingFold` が計算し直す。時刻見出しの畳みは触らない。
  * @returns 畳んだ(true)/ 出した(false)
  */
 export function foldAllLogDays(host: HTMLElement): boolean {
+  // 向きは「いま見えている物」から決める(字と同じ答え ── `logRowsAllFolded`)。印は隠れた行にも付け外す
   const rows = foldableRows(host);
-  const fold = rows.some((r) => !r.hasAttribute(DAY_FOLDED));
+  const fold = !logRowsAllFolded(host);
   for (const r of rows) {
     if (fold) r.setAttribute(DAY_FOLDED, '');
     else r.removeAttribute(DAY_FOLDED);

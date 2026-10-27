@@ -13,6 +13,7 @@ import {
   toggleLogDay,
 } from '../../src/adapter/ui/render/heading-fold';
 import { LOG_DAYS_HOST_ATTR } from '../../src/adapter/ui/render/log-days';
+import { logGrouping } from '../../src/features/textlog/log-days';
 
 const LOG =
   '<h2>2026-10-09 09:00:00</h2><p>a1</p>' +
@@ -142,6 +143,31 @@ describe('ログの「すべて折りたたむ / すべて出す」 #1441', () =
     toggleAllLogDays(h);
     expect(shown(h)).toEqual([]);
     expect(rows(h).filter((r) => r.hidden)).toHaveLength(3);
+  });
+
+  it('🔴 月の行だけ畳んだ状態(日の行は月の中に隠れて開いたまま)では、字は「すべて出す」で、押すと全部出る', () => {
+    const h = host(MULTI);
+    applyHeadingFold(h);
+    // 9 月・10 月の月の行を畳む(日の行は開いたまま、月の畳みの中で隠れる)
+    toggleLogDay(monthRows(h)[0]!);
+    toggleLogDay(monthRows(h)[1]!);
+    expect(rows(h).every((r) => r.hidden), '前提: 日の行は月の中に隠れている').toBe(true);
+    expect(rows(h).every((r) => r.getAttribute('aria-expanded') === 'true'), '前提: 日の行自体は開いたまま').toBe(true);
+    expect(allRows(h)[0]!.textContent, '見えている物は全部畳まれているのに「折りたたむ」と言っている').toBe('すべて出す');
+    toggleAllLogDays(h);
+    expect(shown(h)).toEqual(['s1', 'o1', 'o2', 'o3']);
+    expect(allRows(h)[0]!.textContent).toBe('すべて折りたたむ');
+    // 対照群: 月の行が 1 つでも開いていれば「折りたたむ」
+    toggleLogDay(monthRows(h)[0]!);
+    expect(allRows(h)[0]!.textContent).toBe('すべて折りたたむ');
+  });
+
+  it('月・すべての行を出す条件は 1 関数(logGrouping): 2 日なら両方なし / 3 日なら「すべて」/ 2 か月にまたがれば月も', () => {
+    const run = (day: string, i: number) => ({ day, start: i * 2, end: i * 2 + 2 });
+    expect(logGrouping([run('2026-10-01', 0), run('2026-10-02', 1)])).toEqual({ months: [], all: false });
+    expect(logGrouping([run('2026-10-01', 0), run('2026-10-02', 1), run('2026-10-03', 2)])).toMatchObject({ months: [], all: true });
+    expect(logGrouping([run('2026-09-30', 0), run('2026-10-01', 1)])).toMatchObject({ all: false });
+    expect(logGrouping([run('2026-09-30', 0), run('2026-10-01', 1)]).months).toHaveLength(2);
   });
 
   it('描き直しで「すべて」の行は 1 本のまま、字も状態に追いつく', () => {

@@ -135,3 +135,18 @@ export function logMonthRuns(runs: readonly LogDayRun[]): readonly LogMonthRun[]
   }
   return out;
 }
+
+/**
+ * 🔴 **月の行・「すべて」の行を出すかの判断は、ここ 1 つ**(#1441 レビュー)。描く側(`syncLogDays`)と目次から飛ぶ側
+ * (`openLogDayCovering`)が同じ答えを得る ── 2 か所で数え直すと、片方だけ変えた日に「行が無いのに開こうとする」。
+ *
+ * - 月の行: 日が**2 つ以上の月にまたがる**とき(1 か月に収まるログに月の行は要らない)。
+ * - 「すべて」の行: 日が**3 つ以上**あるとき(2 日なら日の行 2 つで足りる)。
+ */
+export function logGrouping(runs: readonly LogDayRun[]): { readonly months: readonly LogMonthRun[]; readonly all: boolean } {
+  const months = runs.length >= 2 ? logMonthRuns(runs) : [];
+  return {
+    months: new Set(months.map((m) => m.month)).size >= 2 ? months : [],
+    all: runs.length >= 3,
+  };
+}

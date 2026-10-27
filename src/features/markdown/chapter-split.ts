@@ -163,3 +163,22 @@ export function applyChapterRestore(
   rows.splice(rw.line, 1, ...text.split('\n'));
   return rows.join('\n');
 }
+
+/**
+ * 🔴 **本当に「ここから切り出した子」か**(#1439 レビュー ⚠4)。「戻す」を出す / 通す条件を 1 本にする。
+ *
+ * - 切り出したとき、子から親へ**出典のつながり**(`provenance`: from = 子 / to = 親)を作る。それが在ること。
+ *   ⚠ リンクの字だけでは足りない ── リンクの行はコピーで他のノートへ複製できる(つながりは複製されない)。
+ *   複製を見て「戻す」を出すと、**まったく別のノートを今の位置へ貼り込んで削除する**ことになる。
+ * - 親の本文に、その子へのリンク(`entry:<lid>`)がちょうど 1 つであること(同じ親の中での複製も除く)。
+ */
+export function isOwnChapterChild(
+  relations: ReadonlyArray<{ readonly kind: string; readonly fromLid: string; readonly toLid: string }>,
+  parentLid: string,
+  childLid: string,
+  parentBody: string,
+): boolean {
+  if (!relations.some((r) => r.kind === 'provenance' && r.fromLid === childLid && r.toLid === parentLid)) return false;
+  const re = new RegExp(`entry:${childLid.replace(/[^A-Za-z0-9_-]/g, '')}(?![A-Za-z0-9_-])`, 'g');
+  return (parentBody.match(re) ?? []).length === 1;
+}

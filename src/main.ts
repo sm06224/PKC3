@@ -2922,7 +2922,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             (
               await client.request(
                 only === undefined
-                  ? { op: 'exportImage', withoutMessages: true }
+                  ? { op: 'exportImage', withoutMessages: true, keepCid: cid }
                   : { op: 'exportImage', only: { cid, lids: only.lids, assetKeys: only.assetKeys } },
               )
             ).image,
@@ -4409,6 +4409,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       resetContainer(target, {
         listAssetKeys: (c) => blobs.listKeys(c),
         deleteAsset: (c, key) => blobs.delete(c, key),
+        countWorkspaces: async () => (await client.request({ op: 'listWorkspaces' })).workspaces.length,
         wipeStorage: async () => client.request({ op: 'wipeStorage' }),
         // ⚠ 消えたノート由来の断片を残さない(貼り付けの一覧にだけ本文が残る)
         forgetLocal: () => {
@@ -4477,6 +4478,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           const out = await writeArchive(source, new Date().toISOString(), undefined, 'warn');
           downloadBlob(archiveFileName(`pkc-rescue-${dayStamp(new Date())}`, 'part'), out.blob);
         },
+        countWorkspaces: async () => (await client.request({ op: 'listWorkspaces' })).workspaces.length,
         wipeStorage: async () => client.request({ op: 'wipeStorage' }),
         reopenStorage: async () => {
           // 🔴 **掴んでいる手を先に離す** ── これが無いと黙って memory へ落ちる
@@ -6364,6 +6366,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * worker ── この file はどの test からも実行されない(CLAUDE.md §2)ので、ここは**口を渡すだけ**にする。
      * ⚠ 可搬の単一 HTML では渡さない(DB は器の中の写しで、保存の単位が違う)。
      */
+    // 🔴 このタブが開いている器を、タブが生きている間 shared で握る(落とさない・返さない。閉じれば自動で外れる)
+    if (typeof navigator !== 'undefined' && navigator.locks !== undefined) {
+      void navigator.locks.request(`pkc3-ws:${cid}`, { mode: 'shared' }, () => new Promise<void>(() => undefined)).catch(() => undefined);
+    }
     appWorkspaces.attach(
       {
         list: () => client.request({ op: 'listWorkspaces' }),
@@ -6377,6 +6383,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         remove: (target) => client.request({ op: 'deleteWorkspace', cid: target }),
         // 🔑 書込と同じ 1 本の列に載せる(storeEffects が無い間は直に打つ ── 起きない想定)
         run: (job) => (storeEffects ? storeEffects.run(job) : job()),
+        // 🔴 切り替える前に打ちかけを守る(更新のカードと同じ型。読み込み直しは本文を確認なしで捨てる)
+        isEditing: () => hasUnsavedTyping(dispatcher.getState()),
+        confirmDiscard: () =>
+          ask('編集中の内容は保存されません。ワークスペースを切り替えますか?', {
+            okLabel: '切り替える',
+            danger: true,
+          }),
+        // 🔴 ほかのタブが開いている器の削除を断る(Web Locks)── 各タブは開いている器を shared で握り、削除側は exclusive を即時に試す
+        ...(typeof navigator !== 'undefined' && navigator.locks !== undefined
+          ? {
+              isOpenElsewhere: (target: string) =>
+                navigator.locks.request(`pkc3-ws:${target}`, { mode: 'exclusive', ifAvailable: true }, (lock) => lock === null),
+            }
+          : {}),
         reload: () => {
           // 🔑 ディープリンクの hash は前の器の物 ── 残すと、読み込み直した先で「別のコレクションの参照」と断られる
           try {

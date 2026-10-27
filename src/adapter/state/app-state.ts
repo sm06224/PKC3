@@ -9403,6 +9403,17 @@ function reduceCore(
       const into = state.entryMetas.get(action.lid);
       const child = state.entryMetas.get(action.childLid);
       if (!into || !child || action.lid === action.childLid) return { state, events: [] };
+      // 🔴 本当にここから切り出した子だけ(つながりが在る)。種類が変わっていたら断る(#1439 レビュー ⚠4)
+      if (!state.relations.some((r) => r.kind === 'provenance' && r.fromLid === action.childLid && r.toLid === action.lid))
+        return {
+          state: { ...state, error: 'このノートから切り出した章ではないため、元に戻せません(つながりが見つかりません)' },
+          events: [],
+        };
+      if (child.archetype !== 'text')
+        return {
+          state: { ...state, error: '切り出した先の種類が変わっているため、元に戻せません(普通のノートに戻してから試してください)' },
+          events: [],
+        };
       const shown = screenBodyOf(state, action.lid);
       const openLine = shown?.split('\n')[action.line];
       if (shown === null || openLine === undefined) return { state, events: [] };

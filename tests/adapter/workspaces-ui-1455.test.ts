@@ -8,7 +8,13 @@
  * 4. 配線が無い環境(可搬の単一 HTML)では節ごと隠す
  */
 import { describe, expect, it } from 'vitest';
-import { Workspaces, appWorkspaces, type WorkspaceDeps } from '../../src/adapter/platform/storage/workspace-run';
+import {
+  Workspaces,
+  appWorkspaces,
+  WORKSPACE_OPEN_ELSEWHERE_TEXT,
+  WORKSPACE_OPEN_UNCHECKED_TEXT,
+  type WorkspaceDeps,
+} from '../../src/adapter/platform/storage/workspace-run';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { initialState } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -257,3 +263,159 @@ describe('設定の節の描画と押し口 #1455(実 DOM)', () => {
 
 /** `SettingsRenderer` の `workspaces` の位置(末尾の引数。位置引数の並びは `settings.ts` が持つ)。 */
 const WORKSPACES_ARG_INDEX = 26;
+
+describe('ほかのタブが開いている器の削除(#1455 レビュー ⚠3)', () => {
+  it('🔴 ほかのタブが開いている器は削除を断り、保存側へ削除を打たない', async () => {
+    const f = fake({ isOpenElsewhere: async (cid) => cid === 'c2' });
+    const w = new Workspaces();
+    w.attach(f.deps, 'c1');
+    await w.refresh();
+    const r = await w.remove('c2');
+    expect(r).toEqual({ kind: 'failed', text: WORKSPACE_OPEN_ELSEWHERE_TEXT });
+    expect(f.calls.filter((c) => c.startsWith('remove')), '断ったのに削除を打った').toEqual([]);
+    expect(f.table.some((t) => t.cid === 'c2')).toBe(true);
+  });
+
+  it('対照群: 開いているタブが居なければ削除できる', async () => {
+    const f = fake({ isOpenElsewhere: async () => false });
+    const w = new Workspaces();
+    w.attach(f.deps, 'c1');
+    await w.refresh();
+    expect((await w.remove('c2')).kind).toBe('done');
+    expect(f.calls).toContain('remove:c2');
+  });
+
+  it('確かめる手段が無い環境では canCheckOpen=false(確認の文に一文を添える材料)', async () => {
+    const f = fake();
+    const w = new Workspaces();
+    w.attach(f.deps, 'c1');
+    expect(w.view().canCheckOpen).toBe(false);
+    const g = fake({ isOpenElsewhere: async () => false });
+    const w2 = new Workspaces();
+    w2.attach(g.deps, 'c1');
+    expect(w2.view().canCheckOpen).toBe(true);
+  });
+
+  it('🔴 確かめられない環境の削除の確認には「ほかのタブで開いていないこと」を出し、確かめられる環境には出さない', async () => {
+    resetAppDialogForTest();
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    document.body.append(root);
+    const host = document.createElement('div');
+    root.append(host);
+    const f = fake(); // isOpenElsewhere なし
+    appWorkspaces.attach(f.deps, 'c1');
+    await appWorkspaces.refresh();
+    const R = SettingsRenderer as unknown as new (...a: unknown[]) => SettingsRenderer;
+    const args: unknown[] = new Array(WORKSPACES_ARG_INDEX + 1).fill(undefined);
+    args[0] = host;
+    new R(...args).render(initialState);
+    bindActions(root, new Dispatcher());
+    host.querySelector<HTMLElement>('[data-pkc-action="workspace-delete"]')!.click();
+    await flush();
+    expect(openDialog()?.textContent ?? '').toContain(WORKSPACE_OPEN_UNCHECKED_TEXT);
+    await answerDialog('cancel');
+    await flush();
+
+    const g = fake({ isOpenElsewhere: async () => false });
+    appWorkspaces.attach(g.deps, 'c1');
+    await appWorkspaces.refresh();
+    host.querySelector<HTMLElement>('[data-pkc-action="workspace-delete"]')!.click();
+    await flush();
+    expect(openDialog()?.textContent ?? '').not.toContain(WORKSPACE_OPEN_UNCHECKED_TEXT);
+    await answerDialog('cancel');
+  });
+});
+
+describe('切り替え前の打ちかけの確認(#1455 レビュー ⚠5)', () => {
+  async function setup(over: Partial<WorkspaceDeps>) {
+    const f = fake(over);
+    const w = new Workspaces();
+    w.attach(f.deps, 'c1');
+    await w.refresh();
+    return { f, w };
+  }
+  it('🔴 編集中で「やめる」なら、何も変えず読み込み直しもしない', async () => {
+    let asked = 0;
+    const { f, w } = await setup({
+      isEditing: () => true,
+      confirmDiscard: async () => {
+        asked += 1;
+        return false;
+      },
+    });
+    const r = await w.switchTo('c2');
+    expect(r.kind).toBe('cancelled');
+    expect(asked).toBe(1);
+    expect(f.calls, '断られたのに印を書いた / 読み込み直した').toEqual([]);
+  });
+  it('編集中で「切り替える」なら進む / 編集中でなければ聞かない', async () => {
+    let asked = 0;
+    const a = await setup({
+      isEditing: () => true,
+      confirmDiscard: async () => {
+        asked += 1;
+        return true;
+      },
+    });
+    expect((await a.w.switchTo('c2')).kind).toBe('done');
+    expect(a.f.calls).toEqual(['run', 'switch:c2', 'reload']);
+    const b = await setup({
+      isEditing: () => false,
+      confirmDiscard: async () => {
+        asked += 1;
+        return false;
+      },
+    });
+    expect((await b.w.switchTo('c2')).kind).toBe('done');
+    expect(asked, '編集中でないのに聞いた').toBe(1);
+  });
+});
+
+describe('current と next が食い違う行(#1455 レビュー テストの穴 C)', () => {
+  /** 別のタブで切り替えた後: 開いている器(c1)と、次に開く器(c2)が違う。 */
+  async function skewed(over: Partial<WorkspaceDeps> = {}) {
+    const f = fake({ ...over });
+    f.table.push({ cid: 'c3', title: '三つ目', createdAt: null, notes: 0 });
+    await f.deps.switchTo('c2'); // 印だけ c2 へ(このタブは c1 を開いたまま)
+    f.calls.length = 0;
+    const w = new Workspaces();
+    w.attach(f.deps, 'c1');
+    await w.refresh();
+    return { f, w };
+  }
+  it('開いている器(current)も、次に開く器(next)も削除できない / どちらでもない器は削除できる', async () => {
+    const { f, w } = await skewed();
+    expect(w.view().rows.map((r) => [r.cid, r.current, r.next])).toEqual([
+      ['c1', true, false],
+      ['c2', false, true],
+      ['c3', false, false],
+    ]);
+    expect((await w.remove('c1')).kind, '開いている器を削除できる').toBe('refused');
+    expect((await w.remove('c2')).kind, '次に開く器を削除できる').toBe('refused');
+    expect(f.calls.filter((c) => c.startsWith('remove'))).toEqual([]);
+    expect((await w.remove('c3')).kind).toBe('done');
+  });
+  it('画面: current の行は「切り替える」「削除」なし、next の行は「切り替える」あり・「削除」なし、残りの行は両方あり', async () => {
+    resetAppDialogForTest();
+    document.body.textContent = '';
+    const host = document.createElement('div');
+    document.body.append(host);
+    const f = fake();
+    f.table.push({ cid: 'c3', title: '三つ目', createdAt: null, notes: 0 });
+    await f.deps.switchTo('c2');
+    appWorkspaces.attach(f.deps, 'c1');
+    await appWorkspaces.refresh();
+    const R = SettingsRenderer as unknown as new (...a: unknown[]) => SettingsRenderer;
+    const args: unknown[] = new Array(WORKSPACES_ARG_INDEX + 1).fill(undefined);
+    args[0] = host;
+    new R(...args).render(initialState);
+    const acts = (cid: string): string[] =>
+      [...host.querySelectorAll<HTMLElement>(`[data-pkc-field="workspace-row"][data-pkc-cid="${cid}"] button`)].map(
+        (b) => b.getAttribute('data-pkc-action') ?? '',
+      );
+    expect(acts('c1')).toEqual(['workspace-rename']);
+    expect(acts('c2')).toEqual(['workspace-switch', 'workspace-rename']);
+    expect(acts('c3')).toEqual(['workspace-switch', 'workspace-rename', 'workspace-delete']);
+  });
+});

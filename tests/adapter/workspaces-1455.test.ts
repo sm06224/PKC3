@@ -9,6 +9,7 @@
  * 6. 複数のワークスペースがあるとき、DB を丸ごと捨てる操作は断る(ほかのワークスペースを巻き込まない)
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { CID_SCOPED_TABLES, SCHEMA_DDL } from '../../src/adapter/platform/storage/schema';
 import type {
   ResultMap,
   StorageRequest,
@@ -156,5 +157,67 @@ describe('ワークスペース(保存側) #1455', () => {
     await request({ op: 'resolveContainer', title: 'PKC3' });
     const r = await request({ op: 'wipeStorage' });
     expect(r.wiped).toBe(false); // node にディスクは無い(メモリ上)── 断られていない
+  });
+});
+
+describe('器ごとの表の全数(#1455 レビュー 🔴2 / テストの穴 A)', () => {
+  it('cid の列を持つ表は、CID_SCOPED_TABLES + containers に過不足なく一致する(表を足した日に落ちる)', () => {
+    const withCid = SCHEMA_DDL.map((d) => /^\s*CREATE TABLE IF NOT EXISTS (\w+) \(([\s\S]*)\)\s*$/.exec(d))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .filter((m) => /\bcid\s+TEXT/.test(m[2]!))
+      .map((m) => m[1]!)
+      .sort();
+    expect(withCid.length, '表を 1 つも拾えていない(走査が壊れた)').toBeGreaterThanOrEqual(5);
+    expect(withCid).toEqual([...CID_SCOPED_TABLES, 'containers'].sort());
+  });
+
+  async function seed(cid: string, mark: string): Promise<void> {
+    // 履歴(旧版)を作る: 2 回 checkpoint
+    for (const body of [`${mark} 一版目の本文`, `${mark} 二版目の本文`]) {
+      await request({
+        op: 'upsertEntry',
+        cid,
+        entry: { lid: `n-${mark}`, title: `${mark}-題名`, archetype: 'text', body, entryOrder: 1, status: null, date: null, archived: false },
+        checkpoint: true,
+      });
+    }
+    await request({
+      op: 'upsertEntry',
+      cid,
+      entry: { lid: `m-${mark}`, title: `${mark}-相手`, archetype: 'text', body: 'x', entryOrder: 2, status: null, date: null, archived: false },
+      checkpoint: false,
+    });
+    await request({ op: 'bulkUpsertRelations', cid, relations: [{ id: `REL-${mark}`, fromLid: `n-${mark}`, toLid: `m-${mark}`, kind: 'semantic' }] });
+    await request({ op: 'putAssetMeta', cid, meta: { key: `ASSET-${mark}`, mime: 'image/png', size: 3, hash: `HASH-${mark}` } });
+  }
+  const text = (img: Uint8Array): string => new TextDecoder('utf-8', { fatal: false }).decode(img);
+
+  it('🔴 切り替えの印が別の器でも、渡すのは「このタブが開いている器」だけ(旧版・つながり・添付の目録まで他の器が残らない)', async () => {
+    const a = (await request({ op: 'resolveContainer', title: 'PKC3' })).cid;
+    await seed(a, 'AAAA');
+    const { cid: b } = await request({ op: 'createWorkspace', title: '別の器' });
+    await seed(b, 'BBBB');
+    // 別のタブが切り替えた後: 印は b。このタブ(= a を開いている)が書き出す
+    await request({ op: 'switchWorkspace', cid: b });
+
+    const mine = text((await request({ op: 'exportImage', withoutMessages: true, keepCid: a })).image);
+    for (const present of ['AAAA-題名', 'AAAA 二版目の本文', 'REL-AAAA', 'ASSET-AAAA'])
+      expect(mine.includes(present), `このタブの器の ${present} が画像に無い`).toBe(true);
+    for (const leaked of ['BBBB-題名', 'BBBB 一版目の本文', 'BBBB 二版目の本文', 'BBBB-相手', 'REL-BBBB', 'ASSET-BBBB', 'HASH-BBBB'])
+      expect(mine.includes(leaked), `他の器の ${leaked} が人に渡る画像に残っている`).toBe(false);
+
+    // 対照群 1: keepCid を渡さなければ印(= b)で決まる ── keepCid が効いている証拠(a/b が逆になる)
+    const byMark = text((await request({ op: 'exportImage', withoutMessages: true })).image);
+    expect(byMark.includes('BBBB-題名')).toBe(true);
+    expect(byMark.includes('AAAA-題名'), '印で決める経路が a を残している').toBe(false);
+    // 対照群 2: 全部入りの画像には両方ある(検査が空振りでない)
+    const all = text((await request({ op: 'exportImage' })).image);
+    expect(all.includes('AAAA-題名') && all.includes('BBBB-題名')).toBe(true);
+    expect(all.includes('BBBB 一版目の本文'), '旧版が画像に載る前提が崩れた(revisions の行が文字として残っていない)').toBe(true);
+    // 本体は無傷(ROLLBACK)
+    expect((await request({ op: 'listEntryMetas', cid: b })).length).toBe(2);
+    expect((await request({ op: 'listRelations', cid: b })).length).toBe(1);
+    // 実在しない器を残そうとしたら断る
+    await expect(request({ op: 'exportImage', withoutMessages: true, keepCid: 'nope' })).rejects.toThrow('見つかりません');
   });
 });

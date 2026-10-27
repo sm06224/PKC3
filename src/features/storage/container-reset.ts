@@ -34,9 +34,15 @@
  */
 
 import { BACKUP_LABEL } from './rescue-labels';
+import { refuseWhenWorkspacesRemain } from './workspace-guard';
 
 /** 捨てるのに要る口。⚠ **全部必須**(optional にすると、渡し忘れが黙って通る)。 */
 export interface ContainerResetPorts {
+  /**
+   * ワークスペースの数(#1455)。⚠ 必須。2 つ以上なら**添付を消す前に**断る(DB ごと捨てるとほかの器が巻き込まれる)。
+   * 数えられなかったとき(壊れた DB)は例外でよい ── 断らずに進む。
+   */
+  countWorkspaces(): Promise<number>;
   /** IDB に在る添付の key(この入れ物の分だけ)。 */
   listAssetKeys(cid: string): Promise<string[]>;
   /** 添付の bytes を 1 件消す。 */
@@ -78,6 +84,8 @@ export async function resetContainer(
   cid: string,
   ports: ContainerResetPorts,
 ): Promise<ContainerResetReport> {
+  // 🔴 添付の bytes を消す**前**に断る(#1455)── 断ったのに添付だけ失っている形を作らない
+  await refuseWhenWorkspacesRemain(() => ports.countWorkspaces());
   let assets = 0;
   let assetFailures = 0;
 

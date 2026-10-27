@@ -7,6 +7,7 @@
  * メモリ 2 原則(§4.2): stmt は毎回 finalize(exec/selectObjects/selectValue の
  * 内部完結 API のみを使う)/ 大きな値は保持しない。
  */
+import { WORKSPACES_REMAIN_MESSAGE } from '@features/storage/workspace-guard';
 import sqlite3InitModule, { type Database } from '@sqlite.org/sqlite-wasm';
 import { exportDbImage } from './db-image-export';
 import {
@@ -22,6 +23,7 @@ import {
   FTS_PROGRESS_SCOPE,
   FTS_SOURCE_VIEW,
   USER_REALM_SQL,
+  CID_SCOPED_TABLES,
 } from './schema';
 /**
  * 全文検索が 1 度に返す上限(#181)。⚠ **切ったことは呼び側へ言う** ── 黙って
@@ -2753,9 +2755,6 @@ function addParentEdge(
  * 16 進 32 桁 + `c-` の前置きは、その両方に収まる**最も狭い形**である。
  */
 class WorkspacesRemainError extends Error {}
-/** 全部を消す操作を断る文(画面にそのまま出る)。 */
-const WORKSPACES_REMAIN_MESSAGE =
-  '複数のワークスペースがあるため、全部を消す操作はできません(「ワークスペース」で、ほかのワークスペースを先に削除してください)';
 
 /**
  * 🔴 **いま使う器の cid**(#1455。ワークスペース)。
@@ -3377,6 +3376,19 @@ async function exportOneTable(
 }
 
 /**
+ * 🔴 **器 1 つぶんの行を、全部の表から消す**(#1455)── 器の削除と、人に渡す画像から他の器を除く処理が同じ 1 本を通る。
+ * 消す表は `CID_SCOPED_TABLES`(旧版・つながり・添付の目録まで)+ タグの色(`settings` の区画)+ `containers` の行。
+ * ⚠ 呼び側が transaction を握っている前提(ここでは開かない)。
+ */
+function deleteContainerRows(database: Database, cid: string): void {
+  for (const table of CID_SCOPED_TABLES) {
+    database.exec({ sql: `DELETE FROM ${table} WHERE cid = ?`, bind: [cid] });
+  }
+  database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [tagColorScope(cid)] });
+  database.exec({ sql: 'DELETE FROM containers WHERE cid = ?', bind: [cid] });
+}
+
+/**
  * 🔴 **メッセージ(・処理の記録)の行を除いた状態で `make` を走らせる**(台帳 #1852 束 L1。依頼 216 / 344)。
  *
  * ⚠ 人に渡す PKC3 入り HTML に、送り主の知らせ(使った機能と時刻)を入れない。
@@ -3386,7 +3398,7 @@ async function exportOneTable(
  * ⚠ `sqlite3_serialize` は pager を通してページを読むので、transaction の中の(まだ確定していない)状態が画像に入る。
  * ⚠ 除いた行の名残が空きページに残らないよう、除く間だけ `secure_delete` を入れる(元の値へ戻す)。
  */
-function withMessagesRemoved<T>(make: () => T): T {
+function withMessagesRemoved<T>(make: () => T, keepCid?: string): T {
   const database = need();
   const lids = [SYSTEM_MESSAGE_LID, SYSTEM_JOB_LID];
   const has = database.selectValue(
@@ -3397,7 +3409,15 @@ function withMessagesRemoved<T>(make: () => T): T {
    * 🔴 **使っているワークスペース以外も除く**(#1455)。人に渡すファイルに、ほかのワークスペース(仕事用 /
    * 個人用 …)のノートを 1 件も入れない。除く物と除き方はメッセージと同じ(確定させず ROLLBACK する)。
    */
-  const active = activeContainerCid(database);
+  /**
+   * 🔴 **残す器は、呼んだタブの器**(`keepCid`。レビュー 🔴2)。⚠ 「次に開く器の印」(`activeContainerCid`)ではない ──
+   *   別のタブで切り替えの印だけが動いた後は、印 ≠ このタブが開いている器になる。印で残すと、**書き出す人が見ている器ではなく
+   *   別の器**が人に渡るファイルに入る。渡されなければ(古い呼び側)印で決める。
+   */
+  const active = keepCid ?? activeContainerCid(database);
+  if (keepCid !== undefined && database.selectValue('SELECT count(*) FROM containers WHERE cid = ?', [keepCid]) === 0) {
+    throw new Error('書き出すワークスペースが見つかりません(開き直してください)');
+  }
   const others =
     active === undefined
       ? []
@@ -3411,13 +3431,7 @@ function withMessagesRemoved<T>(make: () => T): T {
     database.exec('BEGIN IMMEDIATE');
     try {
       database.exec({ sql: `DELETE FROM entries WHERE realm = 'system' AND lid IN (?, ?)`, bind: lids });
-      for (const cid of others) {
-        for (const table of ['revisions', 'relations', 'assets', 'entries']) {
-          database.exec({ sql: `DELETE FROM ${table} WHERE cid = ?`, bind: [cid] });
-        }
-        database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [tagColorScope(cid)] });
-        database.exec({ sql: 'DELETE FROM containers WHERE cid = ?', bind: [cid] });
-      }
+      for (const cid of others) deleteContainerRows(database, cid);
       return make();
     } finally {
       database.exec('ROLLBACK');
@@ -3668,7 +3682,7 @@ const handlers: Handlers = {
       req.only !== undefined
         ? subsetImage(req.only)
         : req.withoutMessages === true
-        ? withMessagesRemoved(() => runImageExport((api, ptr) => exportDbImage(api, ptr)))
+        ? withMessagesRemoved(() => runImageExport((api, ptr) => exportDbImage(api, ptr)), req.keepCid)
         : runImageExport((api, ptr) => exportDbImage(api, ptr)),
   }),
   /**
@@ -4228,13 +4242,7 @@ const handlers: Handlers = {
     ) as number;
     database.exec('BEGIN IMMEDIATE');
     try {
-      // 🔑 cid を持つ表は全部(entries の削除は索引の引き金が追う)。中身の行は表の外に残さない
-      for (const table of ['revisions', 'relations', 'assets', 'entries']) {
-        database.exec({ sql: `DELETE FROM ${table} WHERE cid = ?`, bind: [req.cid] });
-      }
-      // タグの色は `settings` の区画(`tag-color:<cid>`)に居る
-      database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [tagColorScope(req.cid)] });
-      database.exec({ sql: 'DELETE FROM containers WHERE cid = ?', bind: [req.cid] });
+      deleteContainerRows(database, req.cid);
       database.exec('COMMIT');
     } catch (e) {
       database.exec('ROLLBACK');

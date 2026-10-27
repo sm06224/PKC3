@@ -30,7 +30,26 @@ export interface WorkspaceDeps {
   run<T>(job: () => Promise<T>): Promise<T>;
   /** 画面ごと読み込み直す。 */
   reload(): void;
+  /**
+   * 🔴 **その器を、ほかのタブが開いているか**(#1455 レビュー ⚠3)。Web Locks(`pkc3-ws:<cid>` を各タブが shared で握る)で見る。
+   * ⚠ 省略 = 確かめる手段が無い環境(Web Locks が無い)。確かめられないときは、確認の文で「ほかのタブで開いていないこと」を言う。
+   */
+  isOpenElsewhere?(cid: string): Promise<boolean>;
+  /**
+   * 🔴 **保存していない編集・打ちかけが在るか**(#1455 レビュー ⚠5)。読み込み直しは本文を**確認なしで捨てる**
+   * (本文は画面の状態にしか無い)── 切り替える前に聞く。`update-card` の `isEditing` / `confirmDiscard` と同じ型。
+   */
+  isEditing?(): boolean;
+  /** 捨ててよいか聞く(アプリ自身の確認)。 */
+  confirmDiscard?(): Promise<boolean>;
 }
+
+/** 開いているタブが居る器の削除を断る文。 */
+export const WORKSPACE_OPEN_ELSEWHERE_TEXT =
+  'その器はほかのタブで開かれているため、削除できません(そのタブを閉じてから、もう一度押してください)';
+/** 確かめる手段が無い環境で、削除の確認に添える一文。 */
+export const WORKSPACE_OPEN_UNCHECKED_TEXT =
+  'ほかのタブで、このワークスペースを開いていないことを確かめてから削除してください(この環境では自動では確かめられません)。';
 
 /** 画面に出す 1 行。 */
 export interface WorkspaceRow {
@@ -48,12 +67,16 @@ export interface WorkspaceView {
   readonly attached: boolean;
   readonly rows: readonly WorkspaceRow[];
   readonly busy: boolean;
+  /** 「ほかのタブで開いているか」を自動で確かめられるか(`false` のとき、削除の確認に一文を添える)。 */
+  readonly canCheckOpen: boolean;
   /** 一覧の下に出す 1 行(読み込み中 / 失敗 / 前回の結果)。 */
   readonly note: string;
 }
 
 export type WorkspaceResult =
   | { readonly kind: 'done'; readonly text: string }
+  /** 確認で「やめる」と答えた。⚠ 何も変えていない・何も言わない(やめた人を責めない)。 */
+  | { readonly kind: 'cancelled'; readonly text: string }
   | { readonly kind: 'failed'; readonly text: string }
   | { readonly kind: 'refused'; readonly text: string };
 
@@ -87,7 +110,7 @@ export class Workspaces {
   }
 
   view(): WorkspaceView {
-    if (this.deps === null) return { attached: false, rows: [], busy: false, note: '' };
+    if (this.deps === null) return { attached: false, rows: [], busy: false, canCheckOpen: false, note: '' };
     const note = this.busy
       ? '処理しています…'
       : this.failed
@@ -95,7 +118,13 @@ export class Workspaces {
         : !this.loaded
           ? NOTE_LOADING
           : this.last;
-    return { attached: true, rows: this.rows, busy: this.busy, note };
+    return {
+      attached: true,
+      rows: this.rows,
+      busy: this.busy,
+      canCheckOpen: this.deps.isOpenElsewhere !== undefined,
+      note,
+    };
   }
 
   subscribe(fn: () => void): () => void {
@@ -141,6 +170,10 @@ export class Workspaces {
     const row = this.rows.find((r) => r.cid === cid);
     if (row === undefined) return { kind: 'refused', text: 'そのワークスペースは一覧にありません(開き直してください)' };
     if (row.next && row.current) return { kind: 'refused', text: 'いま使っているワークスペースです' };
+    // 🔴 読み込み直しは打ちかけを捨てる ── 編集中なら、切り替える前に聞く(断られたら何も変えない)
+    const g = this.deps;
+    if (g?.isEditing?.() === true && !((await g.confirmDiscard?.()) ?? true))
+      return { kind: 'cancelled', text: '切り替えをやめました' };
     return this.act(async (d) => {
       await d.run(() => d.switchTo(cid));
       // 🔑 読み込み直す。⚠ これより後に何も書かない(前の器の画面が、新しい器の印を知らずに書き戻さない)
@@ -164,6 +197,9 @@ export class Workspaces {
     if (row.current || row.next)
       return { kind: 'refused', text: '使っているワークスペースは削除できません(先に別のワークスペースへ切り替えてください)' };
     return this.act(async (d) => {
+      // 🔴 ほかのタブが開いている器は消さない(開いたままのタブは、消えた器へ書き続けて壊れる)。確かめられない環境は確認の文が言う
+      if (d.isOpenElsewhere !== undefined && (await d.isOpenElsewhere(cid)))
+        throw new Error(WORKSPACE_OPEN_ELSEWHERE_TEXT);
       const r = await d.run(() => d.remove(cid));
       return `「${row.title}」を削除しました(ノート ${r.removedNotes} 件)`;
     });

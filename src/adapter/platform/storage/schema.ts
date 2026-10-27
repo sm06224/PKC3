@@ -151,6 +151,14 @@ export type Realm = 'user' | 'system';
  */
 export const USER_REALM_SQL = "realm = 'user'";
 
+/**
+ * 🔴 **器(cid)ごとに区切られた表**(`containers` を除く)── 器を丸ごと除く / 消すとき、**ここに載る表を全部**消す(#1455)。
+ * ⚠ 手で 2 か所に並べると、表を足した日に片方だけ漏れる(旧版・つながり・添付の目録に他の器の行が残る)。
+ *   完全性は `tests/adapter/workspaces-1455.test.ts` が `pragma_table_info` で全数突き合わせる。
+ * 🔑 順は子 → 親(entries を最後)。
+ */
+export const CID_SCOPED_TABLES = ['revisions', 'relations', 'assets', 'entries'] as const;
+
 export const REVISION_ADDED_COLUMNS: readonly string[] = [
   'title',
   'archetype',

@@ -4,6 +4,7 @@ import {
   applyChapterSplit,
   chapterLinkLine,
   chapterLinkUnder,
+  isOwnChapterChild,
   planChapterCut,
 } from '../../src/features/markdown/chapter-split';
 
@@ -73,5 +74,23 @@ describe('章の切り出しと戻し(本文の書換) #1439', () => {
     expect(chapterLinkUnder(`## A\n\n${link}\n${link}\n`, 0, 3)).toBeNull();
     expect(chapterLinkUnder('## A\n\n[B](entry:k1)\n', 0, 2)).toBeNull();
     expect(chapterLinkUnder(`## A\n\n${link}\n`, 0, 2)?.lid).toBe('k1');
+  });
+});
+
+describe('本当にここから出た子か(isOwnChapterChild) #1439', () => {
+  const rel = [{ kind: 'provenance', fromLid: 'kid', toLid: 'p1' }];
+  const body = `## A\n\n${chapterLinkLine('A', 'kid')}\n`;
+  it('つながりが在り、リンクが 1 つなら true', () => {
+    expect(isOwnChapterChild(rel, 'p1', 'kid', body)).toBe(true);
+  });
+  it('つながりが無ければ false(リンクの複製) / 向き・親・種類が違っても false', () => {
+    expect(isOwnChapterChild([], 'p1', 'kid', body)).toBe(false);
+    expect(isOwnChapterChild([{ kind: 'provenance', fromLid: 'p1', toLid: 'kid' }], 'p1', 'kid', body)).toBe(false);
+    expect(isOwnChapterChild(rel, 'p2', 'kid', body)).toBe(false);
+    expect(isOwnChapterChild([{ kind: 'semantic', fromLid: 'kid', toLid: 'p1' }], 'p1', 'kid', body)).toBe(false);
+  });
+  it('同じ親の中にリンクが 2 つ以上なら false / 別の lid の接頭辞では数えない', () => {
+    expect(isOwnChapterChild(rel, 'p1', 'kid', `${body}\n${chapterLinkLine('B', 'kid')}\n`)).toBe(false);
+    expect(isOwnChapterChild(rel, 'p1', 'kid', `## A\n\n${chapterLinkLine('A', 'kid')}\n\n[x](entry:kid2)\n`)).toBe(true);
   });
 });

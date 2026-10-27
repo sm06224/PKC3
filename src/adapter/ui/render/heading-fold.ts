@@ -29,7 +29,7 @@ import {
   hiddenByFolds,
   type ChapterSpan,
 } from '@features/markdown/heading-fold';
-import { bodyBlocks, flipLogDay, foldAllLogDays, openLogDayCovering, syncLogDays } from './log-days';
+import { bodyBlocks, flipLogDay, foldAllLogDays, openLogDayCovering, paintAllRow, syncLogDays } from './log-days';
 
 /** 畳んでいる印。⚠ 見出しそのものに付ける(配下ではない)。 */
 const FOLDED = 'data-pkc-folded';
@@ -127,6 +127,8 @@ export function applyHeadingFold(host: HTMLElement): number {
     const el = blocks[i];
     if (el instanceof HTMLElement) el.hidden = hidden.has(i);
   }
+  // 🔴 「すべて」の字は、行の表示が決まった後に、見えている行から決める(月の畳みの中の日の行は数えない)
+  paintAllRow(host);
   return spans.length;
 }
 

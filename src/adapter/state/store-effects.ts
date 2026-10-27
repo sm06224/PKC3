@@ -75,7 +75,7 @@ import {
   type SmartQuery,
   type SmartSpec,
 } from '@features/smart/smart-spec';
-import { frontmatterProblem, spliceFrontmatterKeys } from '@features/markdown/frontmatter';
+import { frontmatterLineCount, frontmatterProblem, spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
 import {
   appGroupIconsOf,
@@ -4465,6 +4465,12 @@ export function connectStoreEffects(
             if (disposed) return;
             if (intoBody === null || childBody === null)
               return fail('章を戻せません(ノートが見つかりません)');
+            // 🔴 前書き(タグ・日付など)が書かれた子は、そのままは戻さない(#1439 レビュー ⚠4)。
+            //    本文の途中に前書きの `---` が混ざり、書かれていた値も親へは移らず失われる ── 値を黙って捨てない
+            if (frontmatterLineCount(childBody) > 0)
+              return fail(
+                '切り出したノートに前書き(タグ・日付など)が書かれているため、そのままは戻せません(戻すと前書きの値が失われます)。前書きを消すか親へ移してから、もう一度押してください',
+              );
             const next = applyChapterRestore(intoBody, {
               line: ev.into.line,
               openLine: ev.into.openLine,
@@ -4500,9 +4506,13 @@ export function connectStoreEffects(
             });
             stamp(ev.into.lid, stamps);
             dispatcher.dispatch({ type: 'DELETE_ENTRY', lid: ev.child.lid });
+            // 🔴 消えたかを**見てから**言う(編集中などで削除が通らない回に「削除しました」と言わない)
+            const gone = !dispatcher.getState().entryMetas.has(ev.child.lid);
             dispatcher.dispatch({
               type: 'OP_NOTICE',
-              message: `『${ev.child.title}』の章を元のノートに戻しました(切り出し先のノートは削除しました。ゴミ箱から戻せます)`,
+              message: gone
+                ? `『${ev.child.title}』の章を元のノートに戻しました(切り出し先のノートは削除しました。ゴミ箱から戻せます)`
+                : `『${ev.child.title}』の章を元のノートに戻しましたが、切り出し先のノートは残っています(編集を終えてから削除してください)`,
             });
           } catch (e) {
             fail(errorText(e));

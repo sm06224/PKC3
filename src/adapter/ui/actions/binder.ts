@@ -43,6 +43,7 @@ import { insideCodeOrMath } from '@features/markdown/code-context';
 import {
   chapterLinkLine,
   chapterLinkUnder,
+  isOwnChapterChild,
   planChapterCut,
 } from '@features/markdown/chapter-split';
 import { lineStart } from '@features/markdown/line-start';
@@ -513,7 +514,11 @@ import { appMessagePost, setMessageCap } from '@adapter/platform/message-post';
 import { setMessageKindFilter } from '@adapter/platform/message-filter';
 import { messageFilterOfAttr } from '@adapter/ui/render/message-bar';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
-import { appWorkspaces } from '@adapter/platform/storage/workspace-run';
+import {
+  appWorkspaces,
+  WORKSPACE_OPEN_UNCHECKED_TEXT,
+} from '@adapter/platform/storage/workspace-run';
+import { WORKSPACES_REMAIN_MESSAGE } from '@features/storage/workspace-guard';
 import {
   isSystemMessageLid,
   MESSAGE_CAP_OPTIONS,
@@ -5708,7 +5713,10 @@ function chapterSplitMenuFlags(
   const ctx = chapterRangeOf(host, heading, body);
   if (ctx === null) return {};
   const link = chapterLinkUnder(body, ctx.headingLine, ctx.end);
-  if (link !== null) return st.entryMetas.has(link.lid) ? { restoreChapter: true } : {};
+  if (link !== null)
+    return st.openBody !== null && st.entryMetas.has(link.lid) && isOwnChapterChild(st.relations, st.openBody.lid, link.lid, body)
+      ? { restoreChapter: true }
+      : {};
   return planChapterCut(body, ctx.headingLine, ctx.end).ok ? { splitChapter: true } : {};
 }
 
@@ -5725,8 +5733,25 @@ function chapterRangeOf(
   return { headingLine: span.start + offset, end: span.end + offset };
 }
 
+/**
+ * 🔴 **ワークスペースが 2 つ以上のとき、「作り直す」「初期化する」を窓の前に断る**(#1455)。
+ * 一覧を読み直してから数える(設定を開かずに押した場合でも)。読めなければ断らない(壊れを直す道を塞がない)。
+ * ⚠ 本当の門は `resetContainer` / `rebuildContainer` の入口と worker の `wipeStorage` ── ここは窓を出さないための前置き。
+ */
+async function refuseIfWorkspacesRemain(dispatcher: Dispatcher): Promise<boolean> {
+  try {
+    await appWorkspaces.refresh();
+  } catch {
+    return false;
+  }
+  if (appWorkspaces.view().rows.length <= 1) return false;
+  dispatcher.dispatch({ type: 'OP_FAILED', error: WORKSPACES_REMAIN_MESSAGE });
+  return true;
+}
+
 /** ワークスペースの操作の結果を、画面の下の知らせ / 失敗の帯で言う。 */
-function say(dispatcher: Dispatcher, r: { kind: 'done' | 'failed' | 'refused'; text: string }): void {
+function say(dispatcher: Dispatcher, r: { kind: 'done' | 'failed' | 'refused' | 'cancelled'; text: string }): void {
+  if (r.kind === 'cancelled') return;
   if (r.kind === 'done') dispatcher.dispatch({ type: 'OP_NOTICE', message: r.text });
   else dispatcher.dispatch({ type: 'OP_FAILED', error: r.text });
 }
@@ -12759,7 +12784,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     const cur = appWorkspaces.view().rows.find((r) => r.cid === cid);
     void confirmInApp(
       root,
-      `ワークスペース「${cur?.title ?? ''}」を、ノート ${String(cur?.notes ?? 0)} 件ごと削除します。元に戻せません。`,
+      `ワークスペース「${cur?.title ?? ''}」を、ノート ${String(cur?.notes ?? 0)} 件ごと削除します。元に戻せません。${
+        appWorkspaces.view().canCheckOpen ? '' : WORKSPACE_OPEN_UNCHECKED_TEXT
+      }`,
       { okLabel: '削除する', cancelLabel: 'やめる', danger: true },
     ).then((answer) => {
       if (answer !== 'ok') return;
@@ -13565,6 +13592,15 @@ const ACTIONS: Record<string, ActionHandler> = {
           keepSelection: true,
         });
         if (!dispatcher.getState().entryMetas.has(childLid)) return; // 作れなかった(理由は reducer が言う)
+        // 🔴 子 → 親の「出典」のつながりを作る(#1439 レビュー ⚠4)── 本当にここから出た子だけに「戻す」を出すための記録。
+        //    リンクの行はコピーで複製できるが、つながりは複製されない
+        dispatcher.dispatch({
+          type: 'ADD_RELATION',
+          id: generateLid(),
+          fromLid: childLid,
+          toLid: lid,
+          kind: 'provenance',
+        });
         // 2 手目: 元の章をリンク 1 行にする(失敗したら二重になるだけ)
         dispatcher.dispatch({
           type: 'SPLIT_CHAPTER',
@@ -13591,7 +13627,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     const ob = dispatcher.getState().openBody;
     const range = host === null || heading === null || ob === null ? null : chapterRangeOf(host, heading, ob.body);
     const link = range === null || ob === null ? null : chapterLinkUnder(ob.body, range.headingLine, range.end);
-    if (ob === null || link === null || !dispatcher.getState().entryMetas.has(link.lid)) {
+    if (
+      ob === null ||
+      link === null ||
+      !dispatcher.getState().entryMetas.has(link.lid) ||
+      !isOwnChapterChild(dispatcher.getState().relations, ob.lid, link.lid, ob.body)
+    ) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '切り出した章のリンクを読めませんでした(本文を開き直してください)' });
       return;
     }
@@ -15186,8 +15227,9 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     rebuildingContainer = true;
     void counting
-      .then((assetsOnDisk) =>
-        confirmInApp(
+      .then(async (assetsOnDisk) =>
+        // 🔴 ワークスペースが 2 つ以上なら、説明の窓も出さずに断る(#1455)
+        (await refuseIfWorkspacesRemain(dispatcher)) ? ('cancel' as const) : confirmInApp(
           root,
           rebuildExplainMessage({ notes: dispatcher.getState().entryMetas.size, assetsOnDisk }),
           { okLabel: 'ノートの保存データを作り直す', cancelLabel: 'やめる' },
@@ -15332,8 +15374,9 @@ const ACTIONS: Record<string, ActionHandler> = {
             () => null,
           );
     void counting
-      .then((assetsOnDisk) =>
-        confirmInApp(
+      .then(async (assetsOnDisk) =>
+        // 🔴 ワークスペースが 2 つ以上なら、説明の窓も出さずに断る(#1455)
+        (await refuseIfWorkspacesRemain(dispatcher)) ? ('cancel' as const) : confirmInApp(
           root,
           resetExplainMessage({
             notes: dispatcher.getState().entryMetas.size,

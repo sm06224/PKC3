@@ -31,6 +31,7 @@ function bench(over: Partial<ContainerResetPorts> = {}): {
 } {
   const log: string[] = [];
   const ports: ContainerResetPorts = {
+    countWorkspaces: async () => 1,
     listAssetKeys: async (cid) => {
       log.push(`list:${cid}`);
       return ['a', 'b'];

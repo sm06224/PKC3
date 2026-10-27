@@ -18,7 +18,7 @@ import { scheduleItemsOf } from '../../src/adapter/ui/render/schedule-items';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
-import { noteOwnerFor, noteTimeOf, taskCardsOf } from '../../src/features/schedule/task-cards';
+import { noteOwnerFor, noteTimeOf, replaceNoteTime, replaceTaskCards, taskCardsOf } from '../../src/features/schedule/task-cards';
 import {
   contactLidFor,
   ownerChoices,
@@ -309,5 +309,35 @@ describe('担当の書換(frontmatter 1 本)', () => {
     expect(readScheduleOwner(parseFrontmatter(withOwner!).meta)).toBe('田中');
     const back = applyBodyRewrite(withOwner!, { kind: 'frontmatter', keys: { owner: undefined } });
     expect(back).toBe(body);
+  });
+});
+
+describe('担当だけを書き換えたときも、変化を拾う(#283 レビュー テストの穴 B)', () => {
+  it('🔴 replaceTaskCards: 行の 担当: だけを直しても「同じ」と見なさず、新しい札を返す(画面の担当が古いまま残らない)', () => {
+    const before = taskCardsOf('e1', '- [ ] 見積 @2026-10-20 担当:田中\n');
+    const after = replaceTaskCards(before, 'e1', '- [ ] 見積 @2026-10-20 担当:鈴木\n');
+    expect(after, '担当だけの変更が「同じ」と判定された').not.toBe(before);
+    expect(after[0]!.owner).toBe('鈴木');
+    // 対照群: 何も変えなければ同じ配列(描き直しを増やさない)
+    expect(replaceTaskCards(before, 'e1', '- [ ] 見積 @2026-10-20 担当:田中\n')).toBe(before);
+  });
+
+  it('🔴 replaceTaskCards: ノートの前書き owner: だけを直しても(行に担当が無い札)変化を拾う', () => {
+    const before = taskCardsOf('e1', '---\nowner: 田中\n---\n- [ ] 見積 @2026-10-20\n');
+    expect(before[0]!.owner).toBe('田中');
+    const after = replaceTaskCards(before, 'e1', '---\nowner: 鈴木\n---\n- [ ] 見積 @2026-10-20\n');
+    expect(after).not.toBe(before);
+    expect(after[0]!.owner).toBe('鈴木');
+  });
+
+  it('🔴 replaceNoteTime: 担当だけの変更を拾う / 同じなら同じ配列 / 担当を外すと一覧から外れる(時刻も無いとき)', () => {
+    const body = (o: string): string => `---\ndate: 2026-10-20\n${o === '' ? '' : `owner: ${o}\n`}---\n`;
+    const list = replaceNoteTime(undefined, 'n1', body('田中'));
+    expect(list).toEqual([{ lid: 'n1', date: '2026-10-20', time: null, owner: '田中' }]);
+    const changed = replaceNoteTime(list, 'n1', body('鈴木'));
+    expect(changed, '担当だけの変更が「同じ」と判定された').not.toBe(list);
+    expect(changed![0]!.owner).toBe('鈴木');
+    expect(replaceNoteTime(list, 'n1', body('田中'))).toBe(list);
+    expect(replaceNoteTime(list, 'n1', body(''))).toEqual([]);
   });
 });
