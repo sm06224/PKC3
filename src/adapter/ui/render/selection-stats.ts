@@ -4,7 +4,8 @@
  * ## 何が起きるか
  *
  * 編集中に入力欄で字を選ぶと、編集の帯(`detail-toolbar`)の右端に「選択: 142 文字(3 行)」。
- * 選びが無く caret が表の行に在るときは「Tab で次のセル」(#1451。選びが勝つ)。
+ * 選びが無く caret が表の行に在るときは「Tab で次のセル」、コード・数式・frontmatter の中なら
+ * それぞれの案内(#1451。選びが勝つ。判定は `features/markdown/caret-hint.ts`)。
  * 選びを外すと枠は空になる(枠は残る ── 版面は動かない)。
  * 効く欄は `formatTarget` が引く 3 つ(2 列の `editor-body` / 1 画面の行の欄 `row-source` /
  * 「全文を編集」の欄)。追記欄・章の欄・別窓・読む面には出さない。
@@ -31,7 +32,7 @@
  *   `compositionend` で 1 度合わせ直す。
  */
 import { formatSelectionStats, selectionLineCount } from '@features/stats/body-stats';
-import { tableRowAt } from '@features/markdown/table-assist';
+import { createCaretBlockResolver, TABLE_HINT } from '@features/markdown/caret-hint';
 import { formatTarget } from '../actions/format-target';
 
 /**
@@ -48,7 +49,7 @@ export const SELECTION_STATS_FIELD = 'selection-stats';
  * Tab が実際にセルを移す欄(`editor-body` / `row-source` = `formatTarget`)と同じ欄でだけ出る。
  * 枠は同じ `<span>` を使い回す ── 帯の高さは動かない。
  */
-export const TABLE_TAB_HINT = 'Tab で次のセル';
+export const TABLE_TAB_HINT = TABLE_HINT;
 
 /**
  * 🔴 **caret の行の判定の控え**(#1451。「再計算は行が変わったときだけ」)。
@@ -59,9 +60,12 @@ interface LineCache {
   ta: HTMLTextAreaElement;
   from: number;
   to: number;
-  table: boolean;
+  hint: string | null;
 }
-type CacheRef = { current: LineCache | null };
+type CacheRef = { current: LineCache | null; resolver: ReturnType<typeof createCaretBlockResolver> };
+
+/** 控えを渡さない呼び方(test 用)の解決器。 */
+const fallbackResolver = createCaretBlockResolver();
 
 /** 字を打つ欄ではない `<input>`(ここへ焦点が在っても、選んだ字の数は残してよい)。 */
 const NON_TEXT_INPUT = new Set([
@@ -117,12 +121,14 @@ export function syncSelectionStats(region: HTMLElement, cache?: CacheRef): boole
     else {
       let c = cache?.current ?? null;
       if (c === null || c.ta !== ta || start < c.from || start > c.to) {
-        const r = tableRowAt(ta.value, start);
-        c = { ta, from: r.from, to: r.to, table: r.table };
+        // 🔑 索引は本文が変わるまで使い回す(`caret-hint.ts`)── 行が変わるたびに全文をなぞらない
+        const r = (cache?.resolver ?? fallbackResolver).at(ta.value, start);
+        c = { ta, from: r.from, to: r.to, hint: r.hint };
         if (cache !== undefined) cache.current = c;
       }
-      // 🔴 行の欄(`row-source`)の `Tab` は行を確定するだけでセルは動かない ── 案内は 2 列の欄だけ(#1087 B-1)
-      if (c.table && ta.getAttribute('data-pkc-field') !== 'row-source') text = TABLE_TAB_HINT;
+      // 🔴 行の欄(`row-source`)の `Tab` は行を確定するだけでセルは動かない / 欄は 1 行だけで柵や先頭の設定が見えない
+      //    ── 案内は 2 列の欄と全文の欄だけ(#1087 B-1)
+      if (c.hint !== null && ta.getAttribute('data-pkc-field') !== 'row-source') text = c.hint;
     }
   }
   if (slot.textContent === text) return false;
@@ -137,7 +143,7 @@ export function syncSelectionStats(region: HTMLElement, cache?: CacheRef): boole
 export function watchSelectionStats(region: HTMLElement): () => void {
   const doc = region.ownerDocument;
   let composing = false;
-  const cache: CacheRef = { current: null };
+  const cache: CacheRef = { current: null, resolver: createCaretBlockResolver() };
   const invalidate = (): void => {
     cache.current = null;
   };

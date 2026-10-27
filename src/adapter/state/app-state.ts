@@ -187,7 +187,7 @@ import type {
 import { NO_KINDS, entryFilterOf, normalizeQuery, visibleOrder } from '@features/filter/title-filter';
 import { commandQueryOf } from '@features/palette/command-query';
 import { toggleKind } from '@features/filter/kind-filter';
-import { normalizeFindQuery } from '@features/filter/search-hits';
+import { foldCase, jumpTerms, normalizeFindQuery } from '@features/filter/search-hits';
 import { DIRECTIONLESS_KINDS, STRUCTURAL, type RelationKind } from '@features/relation/kinds';
 import { replaceAll } from '@features/markdown/body-replace';
 import { foldAttachmentHead, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
@@ -4919,7 +4919,13 @@ export function dropStaleSearchJump(result: ReduceResult): ReduceResult {
    *   (`origin: 'find'`)は欄を触っても消えない。⚠ 見るのは**結果の形**(いまの `filterQuery`)── 欄を
    *   空にする case(語を消す / 絞りを解く)を 1 つずつ見張らない。
    */
-  const orphanedByField = j.origin === 'filter' && normalizeFindQuery(st.filterQuery) === '';
+  /**
+   * 🔴 **欄の語を別の語へ打ち変えたときも消す**(#1102 段③。段②の「覆る条件」を実装)── 塗りが前の語の
+   *   まま残ると、いま欄に出ている語と本文の塗りが食い違う。語が同じ(空白・大小の揺れだけ)なら残す。
+   */
+  const fieldNow = normalizeFindQuery(st.filterQuery);
+  const orphanedByField =
+    j.origin === 'filter' && (fieldNow === '' || !sameFilterTerms(fieldNow, j.query));
   if (
     !orphanedByField &&
     st.selectedLid === j.lid &&
@@ -4928,6 +4934,16 @@ export function dropStaleSearchJump(result: ReduceResult): ReduceResult {
   )
     return result;
   return { ...result, state: { ...st, searchJump: null } };
+}
+
+/**
+ * 欄の語が「同じ語」か。🔑 塗る側(`jumpTerms(…, 'filter')`)と同じ切り方 ── 空白(全角も)で区切った語の集合を、
+ * 大小を畳んで比べる(語の順・空白の数・大文字小文字の揺れでは塗りを消さない)。
+ */
+function sameFilterTerms(a: string, b: string): boolean {
+  const key = (q: string): string =>
+    jumpTerms(q, 'filter').map(foldCase).sort().join('\u0000');
+  return key(a) === key(b);
 }
 
 /**

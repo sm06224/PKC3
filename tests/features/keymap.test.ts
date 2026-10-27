@@ -223,7 +223,7 @@ describe('割当の検め', () => {
   'copy-note-md', 'copy-note-rich', 'export-messages', 'export-settings',
   'schedule-quick-add', 'schedule-today', 'export-schedule-ics', 'toggle-show-done', 'toggle-show-archived', 'toggle-show-undated',
   // 🔴 #582 段③ 第 2 群: 名前で呼べなかった「高」の 26 件 ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
-  'renumber-lists', 'sort-tasks', 'run-sql', 'sql-er-toggle', 'sql-schema-to-note', 'sql-to-note', 'start-audio-capture', 'start-screen-capture', 'start-timer', 'clear-selection', 'show-trash', 'hide-trash', 'replace-all', 'search-jump-next', 'search-jump-prev', 'dual-tab-add', 'clear-kind-filter', 'toggle-filer-flatten', 'db-check', 'storage-profile', 'contacts-quick-add', 'export-vcards', 'open-system-notices', 'add-url-tile', 'pc-pick-folder', 'hide-history',
+  'renumber-lists', 'sort-tasks', 'run-sql', 'sql-er-toggle', 'sql-schema-to-note', 'sql-to-note', 'start-audio-capture', 'start-screen-capture', 'start-timer', 'clear-selection', 'show-trash', 'hide-trash', 'replace-all', 'dual-tab-add', 'clear-kind-filter', 'toggle-filer-flatten', 'db-check', 'storage-profile', 'contacts-quick-add', 'export-vcards', 'open-system-notices', 'add-url-tile', 'pc-pick-folder', 'hide-history',
   // 🔴 #582 段③ 第 3 群: 打っている場所に入れる 2 件 ── 「操作を探す」から呼ぶ(開いたときの範囲を戻してから押す)。鍵は user が設定で割り当てる
   'insert-diagram', 'insert-icon',
   // 🔴 #582 段③ 第 4 群: 録音・録画の最中と切り出し 6 件 + 検索の帯を閉じる 1 件 ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる

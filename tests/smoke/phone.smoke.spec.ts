@@ -596,6 +596,7 @@ test('🔴 お知らせは画面いっぱいに出て、「今後は出さない
  * happy-dom では答えられない(CSS を組まない)。
  */
 test('🔴 ← 一覧 で戻っても、「ノートへ →」で読んでいた所へ帰れる', async ({ page }) => {
+  await useSplitEditor(page);
   await gotoApp(page);
   await dismissAnnounce(page);
   await createEntry(page, 'text');
@@ -632,6 +633,20 @@ test('🔴 ← 一覧 で戻っても、「ノートへ →」で読んでいた
     page.locator(REGION('center')),
     '一覧の行を押しても本文へ戻らない(dead tap)',
   ).toBeVisible();
+
+  /**
+   * 🔴 **本文の日付を右クリック →「予定でこの日を見る」は、スマホでは一覧のページを出す**(#1169 段②)。
+   * ⚠ 起動を増やさず、同じ道中の続きで見る。スマホは一覧と本文が同時に出ない ── 予定のタブは一覧のページにあるので、
+   *   一覧まで出さないと、押したのに何も見えない(dead tap)。
+   */
+  await clickReal(page, `${REGION('detail')} [data-pkc-action="start-edit"]`);
+  await page.locator('[data-pkc-field="editor-body"]').fill('@2026-10-15 の件\n');
+  await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
+  await page.locator('.pkc-date-link').first().click({ button: 'right' });
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="show-schedule-day"]');
+  await expect(page.locator(REGION('sidebar')), '一覧のページが出ていない').toBeVisible();
+  await expect(page.locator('[data-pkc-browse-pane="schedule"]'), '予定のタブにならない').toBeVisible();
+  await expect(page.locator('[data-pkc-field="schedule-day-label"]')).toContainText(/10月15日/);
 });
 
 /**

@@ -10,7 +10,7 @@
  * ⚠ 期待値は手で組んだ原文から作る(実装の規則を test 側で書き直さない)。
  */
 import { describe, expect, it } from 'vitest';
-import { renameLinkTexts } from '../../src/features/entry-ref/link-text-rename';
+import { renameLinkTexts, renameTitleLinks } from '../../src/features/entry-ref/link-text-rename';
 
 const run = (body: string, oldT = '旧い', newT = '新しい', lid = 'n1', cid: string | null = 'c1') =>
   renameLinkTexts(body, lid, cid, oldT, newT);
@@ -78,5 +78,22 @@ describe('renameLinkTexts', () => {
     const r = run(body);
     expect(r.count).toBe(0);
     expect(r.body).toBe(body);
+  });
+});
+
+describe('renameTitleLinks(#1174 段②)', () => {
+  it('題名の区間だけ書き換える(表示・前後の空白・ほかの byte は動かさない)', () => {
+    const r = renameTitleLinks('前 [[ 旧い |表示]] 後 [[旧い]]\r\n', '旧い', '新しい');
+    expect(r.count).toBe(2);
+    expect(r.body).toBe('前 [[ 新しい |表示]] 後 [[新しい]]\r\n');
+  });
+  it('別の題名・部分一致・コードの中は残す', () => {
+    const body = '[[旧い案内]] `[[旧い]]` [[ruby:旧い|ふりがな]]\n\n    [[旧い]]\n\n```\n[[旧い]]\n```\n';
+    const r = renameTitleLinks(body, '旧い', '新しい');
+    expect(r.count).toBe(0);
+    expect(r.body).toBe(body);
+  });
+  it('新しい題名が [[ ]] に書けない字なら書き換えない', () => {
+    for (const t of ['a|b', 'a]b', 'a[b', 'a\nb', ' ', 'ruby:x', 'em:y', ' ruby:z', 'a\\b']) expect(renameTitleLinks('[[旧い]]', '旧い', t).count).toBe(0);
   });
 });

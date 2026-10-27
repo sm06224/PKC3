@@ -505,6 +505,18 @@ describe('画面への配線', () => {
     expect(d.getState().viewMode).toBe('help');
   });
 
+  it('🔴 `?` でヘルプの面が開き、一覧の節がある。文字を打っている間は効かない(#1145)', () => {
+    const { root, d } = mounted();
+    const ta = document.createElement('textarea');
+    ta.setAttribute('data-pkc-field', 'editor-body');
+    root.append(ta);
+    press('?', { code: 'Slash', shiftKey: true }, ta);
+    expect(d.getState().viewMode, '打鍵中に ? がヘルプを開いた(? が打てない)').toBe('detail');
+    // 対照群: 打っていなければ開く
+    press('?', { code: 'Slash', shiftKey: true });
+    expect(d.getState().viewMode).toBe('help');
+  });
+
   it('面を開く鍵は押しボタンと同じ経路(もう一度で戻る)', () => {
     const { d } = mounted();
     press('3', { code: 'Digit3', altKey: true });
@@ -1100,6 +1112,8 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
       // ⚠ #1640 ②: 前の日・次の日のノートを開く ── 押しボタンを持たない特例(`runGlobalCommand`)
       'open-prev-day-note',
       'open-next-day-note',
+      // ⚠ #1145: `?` でショートカットキーの一覧を開く ── ヘルプの面を開いて節まで送る特例(`runGlobalCommand`)
+      'open-help-keys',
       /**
        * ⚠ 2026-10-08 に足した(#1452 案 1)── マニュアルを別のウィンドウで開く。押しボタンはヘルプの面の
        *   中にしか無く、面は開くまで組まれないので、root に結んだ services から直に呼ぶ特例。

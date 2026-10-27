@@ -167,6 +167,30 @@ describe('note-find: 開く・数える・送る・閉じる', () => {
     expect(count(root), '先頭から最後へ戻れない').toBe('3 / 3');
   });
 
+  it('🔴 Ctrl+G で次・Ctrl+Shift+G で前へ(ブラウザの「ページ内を検索」の既定を止める)', () => {
+    const { root } = mounted();
+    openNoteFind(root);
+    type(root, 'りんご');
+    const i = input(root)!;
+    const g = (shiftKey: boolean): KeyboardEvent => {
+      const ev = new KeyboardEvent('keydown', { key: 'g', code: 'KeyG', ctrlKey: true, shiftKey, bubbles: true, cancelable: true });
+      i.dispatchEvent(ev);
+      return ev;
+    };
+    const e1 = g(false);
+    expect(count(root), 'Ctrl+G で次へ送れない').toBe('2 / 3');
+    expect(e1.defaultPrevented, 'ブラウザの検索が出る').toBe(true);
+    g(true);
+    expect(count(root), 'Ctrl+Shift+G で前へ戻れない').toBe('1 / 3');
+    g(true);
+    expect(count(root), '先頭から最後へ戻れない').toBe('3 / 3');
+    // 対照群: Ctrl なしの g は送りではない
+    const plain = new KeyboardEvent('keydown', { key: 'g', code: 'KeyG', bubbles: true, cancelable: true });
+    i.dispatchEvent(plain);
+    expect(count(root)).toBe('3 / 3');
+    expect(plain.defaultPrevented).toBe(false);
+  });
+
   it('ボタンでも次・前・閉じる', () => {
     const { root } = mounted();
     openNoteFind(root);

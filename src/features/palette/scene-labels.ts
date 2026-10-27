@@ -216,6 +216,7 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'open-flags': SYSTEM,
   'open-palette': SYSTEM,
   'open-help': SYSTEM,
+  'open-help-keys': SYSTEM,
   'open-messages': SYSTEM,
   'open-manual-window': SYSTEM,
   'open-system-notices': SYSTEM,

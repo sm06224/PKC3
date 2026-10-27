@@ -157,6 +157,12 @@ export const HELP_MANUAL_IDLE_MS = 5 * 60_000;
  */
 export const HELP_MANUAL_DRAWN_EVENT = 'pkc-help-manual-drawn';
 
+/**
+ * 「ショートカットキーの一覧まで送って」の合図(`?` / 「ショートカットキーの一覧を開く」から。面の器に撃つ)。
+ * 🔑 マニュアルを描き終えてから送る ── 先に送ると、10 万字ぶんの高さが無い間の位置に着いて、描き終わると一覧が遠くへ流れる。
+ */
+export const HELP_GOTO_KEYS_EVENT = 'pkc-help-goto-keys';
+
 export class HelpRenderer {
   private built = false;
   private manualHost: HTMLElement | null = null;
@@ -235,7 +241,25 @@ export class HelpRenderer {
      * ⚠ 既定は `null` = **出さない**(この面だけを組む test を壊さない)。
      */
     private readonly storageWhere: (() => string) | null = null,
-  ) {}
+  ) {
+    this.region.addEventListener(HELP_GOTO_KEYS_EVENT, () => {
+      void this.gotoKeys();
+    });
+  }
+
+  /** マニュアルを描き終えるのを待ってから、一覧まで送る(描いている間の高さで送らない)。 */
+  private async gotoKeys(): Promise<void> {
+    try {
+      await this.manualReady;
+    } catch {
+      // 描けなかった(素の原文を出す退避)でも、一覧は送れる
+    }
+    this.scrollToKeys();
+    // 描き終えた直後の版面が落ち着いてから、もう一度合わせる
+    globalThis.requestAnimationFrame?.(() => {
+      this.scrollToKeys();
+    });
+  }
 
   /**
    * 🔴 **この面が見えなくなった**(#531 H3)── `CenterRouter` が面を入れ替えた
@@ -613,7 +637,7 @@ export class HelpRenderer {
     const kn = document.createElement('p');
     kn.setAttribute('data-pkc-field', 'settings-note');
     kn.textContent =
-      'Ctrl は Mac では ⌘ でも同じように効きます。割り当て直しはシステムの画面でできます。';
+      'Ctrl は Mac では ⌘ でも同じように効きます。この一覧は、文字を入力していないときに ? を押すと開きます。割り当て直しはシステムの画面でできます。';
     body.append(kn);
     this.keys = document.createElement('div');
     this.keys.setAttribute('data-pkc-region', 'help-keymap');

@@ -321,6 +321,8 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
 /* 入っていないノートへのリンク(依頼 77-3)。字を薄くし、点線の下線で「押せない」ことを見せる
    (理由は title だけで、指で触る端末では読めない)。⚠ 閲覧側だけが作る要素 ── アプリに対応物が無い。 */
 .b [data-pkc-outside-note]{opacity:.6;text-decoration:underline dotted}
+/* 本文の [[題名]] で、入っているノートへ飛べる字(#1174 段②)。⚠ 閲覧側だけが作る要素。 */
+.b [data-pkc-title-ref][role=link]{text-decoration:underline;cursor:pointer}
 /* 一覧の行(表)は器から溢れさせない。⚠ 焼いた側に対応物なし。 */
 .b>*{max-width:100%}
 a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;border-radius:6px;
@@ -682,6 +684,18 @@ try{
       c.onclick=function(ev){ev.preventDefault();goCard()};
       c.onkeydown=function(ev){if(ev.key==='Enter'){ev.preventDefault();goCard()}};
     });
+    // 🔴 本文の [[題名]](#1174 段②)── このファイルに同じ題名のノートが入っていれば、押して開く。無ければ字のまま。
+    //    (⚠ 描く側は書き出しでは生の括弧を出さず、表示の字だけを span に載せる)
+    //    全体印刷では飛ばす先の見出しが無いので、紙の上の字のままにする。
+    Array.prototype.forEach.call(box.querySelectorAll('span[data-pkc-title-ref]'),function(c){
+      if(idp)return;
+      var t=c.getAttribute('data-pkc-title-ref')||'';
+      if(!Object.prototype.hasOwnProperty.call(titleAt,t))return;
+      var at=titleAt[t];
+      c.setAttribute('role','link');c.setAttribute('tabindex','0');
+      c.onclick=function(ev){ev.preventDefault();go(at,'')};
+      c.onkeydown=function(ev){if(ev.key==='Enter'){ev.preventDefault();go(at,'')}};
+    });
     // 図とグラフは**原文のまま**見せる(閲覧側に mermaid / chart.js を積まない)。
     // ⚠ **両方を回す** ── mermaid だけ書くと、グラフが**空の器**で出荷される
     //    (#188 のレビューで判明。片側だけ直す型の再演)
@@ -781,6 +795,9 @@ try{
   // ノート間リンクの行き先 ── ノートの番号 → 一覧の何番目か / 一覧のボタン(下で作る)
   var noteAt={},btns=[];
   d.entries.forEach(function(e,i){if(e.${NOTE_ID_KEY})noteAt[e.${NOTE_ID_KEY}]=i});
+  // 題名 → 一覧の何番目か(同名は先に載っているほう。[[題名]] の行き先)
+  var titleAt={};
+  d.entries.forEach(function(e,i){if(e.title&&!Object.prototype.hasOwnProperty.call(titleAt,e.title))titleAt[e.title]=i});
   var toc=document.getElementById('pkc-toc'),tocEmpty=document.getElementById('pkc-tocempty');
   var ptoc=document.getElementById('pkc-ptoc'),all=document.getElementById('pkc-all');
 

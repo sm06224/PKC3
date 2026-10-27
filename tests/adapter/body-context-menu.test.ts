@@ -42,6 +42,7 @@ import { applyPlaceLayout } from '../../src/adapter/ui/render/place-board';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { bodyBelowFrontmatter, frontmatterLineCount } from '../../src/features/markdown/frontmatter';
 import type { DomainEvent } from '../../src/adapter/state/app-state';
+import { appPhone } from '../../src/adapter/ui/render/phone-layout';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { parseViewDeepLinkEntry, parseViewDeepLinkFragment } from '../../src/features/link/permalink';
 
@@ -2369,5 +2370,87 @@ describe('ブロック単位のコピー ── 添付ごと (#677 の残り)', 
     await vi.waitFor(() => expect(r.copied).toHaveLength(1));
     expect(r.copied[0]!.text).toContain('![図2](asset:img2)');
     expect(r.copied[0]!.done).toContain('読めなかった画像 1 件');
+  });
+});
+
+describe('本文の日付の右クリック(#1169 段②)', () => {
+  const dateSpan = (s: ReturnType<typeof setup>, date: string): Element => {
+    const span = document.createElement('span');
+    span.className = 'pkc-date-link';
+    span.setAttribute('data-pkc-action', 'open-date-note');
+    span.setAttribute('data-pkc-date', date);
+    span.textContent = '@' + date;
+    s.root.querySelector('[data-pkc-field="detail-body"]')!.append(span);
+    return span;
+  };
+  const acts = (s: ReturnType<typeof setup>): string[] =>
+    [...s.root.querySelectorAll(MENU + ' [data-pkc-action]')].map((b) => b.getAttribute('data-pkc-action') ?? '');
+
+  it('🔴 日付の上では「予定でこの日を見る」が頭に出て、押すと予定のタブでその日になる', () => {
+    const modes: string[] = [];
+    const s = setup({ setBrowse: (m) => modes.push(m) });
+    rightClick(dateSpan(s, '2026-10-15'));
+    expect(acts(s)[0]).toBe('show-schedule-day');
+    s.root.querySelector<HTMLElement>(MENU + ' [data-pkc-action="show-schedule-day"]')!.click();
+    expect(s.dispatcher.getState().scheduleDay).toBe('2026-10-15');
+    expect(s.dispatcher.getState().scheduleNarrowMode).toBe('day');
+    expect(modes, '左のペインが予定のタブにならない').toEqual(['schedule']);
+  });
+
+  it('🔴 畳んである左のペインは開いてから予定のタブにする(穴 E)', () => {
+    const modes: string[] = [];
+    const s = setup({ setBrowse: (m) => modes.push(m) });
+    const shell = document.createElement('div');
+    shell.setAttribute('data-pkc-region', 'shell');
+    shell.setAttribute('data-pkc-hidden-panes', 'sidebar');
+    const toggle = document.createElement('button');
+    toggle.setAttribute('data-pkc-action', 'toggle-pane');
+    toggle.setAttribute('data-pkc-pane', 'sidebar');
+    let toggled = 0;
+    toggle.addEventListener('click', () => (toggled += 1));
+    s.root.append(shell, toggle);
+    rightClick(dateSpan(s, '2026-10-15'));
+    s.root.querySelector<HTMLElement>(MENU + ' [data-pkc-action="show-schedule-day"]')!.click();
+    expect(toggled, '畳んだ左のペインを開いていない').toBe(1);
+    expect(modes).toEqual(['schedule']);
+  });
+
+  it('🔴 スマホ幅では一覧のページを出してから予定のタブにする。編集中は理由を言って断る(⚠4)', () => {
+    vi.spyOn(appPhone, 'isPhone').mockReturnValue(true);
+    const list = vi.spyOn(appPhone, 'showList').mockImplementation(() => undefined);
+    vi.spyOn(appPhone, 'page').mockReturnValue('list');
+    const modes: string[] = [];
+    const s = setup({ setBrowse: (m) => modes.push(m) });
+    rightClick(dateSpan(s, '2026-10-15'));
+    s.root.querySelector<HTMLElement>(MENU + ' [data-pkc-action="show-schedule-day"]')!.click();
+    expect(list, 'スマホなのに一覧のページを出していない').toHaveBeenCalled();
+    expect(modes).toEqual(['schedule']);
+    expect(s.dispatcher.getState().scheduleDay).toBe('2026-10-15');
+    // 編集中: 黙らず断る
+    modes.length = 0;
+    s.dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    s.dispatcher.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文' });
+    s.dispatcher.dispatch({ type: 'START_EDIT' });
+    rightClick(dateSpan(s, '2026-10-16'));
+    s.root.querySelector<HTMLElement>(MENU + ' [data-pkc-action="show-schedule-day"]')!.click();
+    expect(modes, '編集中なのにタブを替えた').toEqual([]);
+    expect(s.dispatcher.getState().error ?? '').toContain('一覧で探してください');
+    vi.restoreAllMocks();
+  });
+
+  it('対照群: 日付でない字の上には出ない', () => {
+    const s = setup();
+    rightClick(s.para);
+    expect(acts(s)).not.toContain('show-schedule-day');
+  });
+
+  it('🔴 暦に無い日付(属性が書き換わった)は、タブを切り替えず理由を言う', () => {
+    const modes: string[] = [];
+    const s = setup({ setBrowse: (m) => modes.push(m) });
+    rightClick(dateSpan(s, '2026-02-31'));
+    s.root.querySelector<HTMLElement>(MENU + ' [data-pkc-action="show-schedule-day"]')!.click();
+    expect(modes).toEqual([]);
+    expect(s.dispatcher.getState().scheduleDay).toBeNull();
+    expect(s.dispatcher.getState().error, '黙って終わった').toContain('2026-02-31');
   });
 });

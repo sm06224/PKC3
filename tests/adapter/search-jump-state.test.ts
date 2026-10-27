@@ -240,7 +240,20 @@ describe('🔴 左の列の欄の語で始まる(段②)', () => {
     expect(s.searchJump, '前提: 塗っている').not.toBeNull();
     expect(typed(s, '').searchJump).toBeNull();
     expect(typed(s, '   ').searchJump, '空白だけも「空」').toBeNull();
-    expect(typed(s, '会').searchJump, '対照群: 別の語に変えただけなら消えない').not.toBeNull();
+  });
+
+  it('🔴 欄の語を別の語へ打ち変えると塗りも消える(#1102 段③)。同じ語(空白の揺れ)なら残る / 探す起点は残る', () => {
+    const s = press(typed(opened(), '会議'), 'a');
+    expect(s.searchJump, '前提: 塗っている').not.toBeNull();
+    expect(typed(s, '会').searchJump, '別の語').toBeNull();
+    expect(typed(s, '会議録').searchJump, '別の語(伸ばした)').toBeNull();
+    expect(typed(s, ' 会議 ').searchJump, '対照群: 空白の揺れだけなら残る').not.toBeNull();
+    const two = press(typed(opened(), 'Abc  会議'), 'a');
+    expect(two.searchJump, '前提: 2 語で塗っている').not.toBeNull();
+    expect(typed(two, '会議 aBC').searchJump, '対照群: 語の順・空白の数・大小の揺れだけなら残る').not.toBeNull();
+    expect(typed(two, 'Abc').searchJump, '語が減ったら消える').toBeNull();
+    const found = start(typed(opened(), '会議'));
+    expect(typed(found, '別').searchJump, '探す起点は欄に従わない').toMatchObject({ origin: 'find' });
   });
 
   it('🔴 「探す」起点の塗りは、欄の語を消しても残る(欄は持ち主ではない)', () => {

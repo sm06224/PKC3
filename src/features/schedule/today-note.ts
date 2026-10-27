@@ -38,16 +38,38 @@ export function todayNoteTitle(now: Date): string {
  *   (user から見ると壊れている)。捨てたなら**新しく作る**のが素直である。
  * ⚠ 種類は問わない ── user がその日の入れ物を別の種類に変えていたら、
  *   それは**その user の決め方**であって、こちらが上書きするものではない。
- * 🔑 同じ題名が複数在ったら**先に作られたほう**(`entryOrder` が小さいほう)を返す
+ * 🔑 同じ題名が複数在ったら**一覧で上にあるほう**(`entryOrder` が小さいほう。並びを自分で決めていなければ先に作ったほう)を返す
  *   ── 押すたびに違うノートが開くと、user は「どっちが本物か」を追えなくなる。
  */
 export function findTodayNote(metas: Iterable<EntryMeta>, title: string): EntryMeta | null {
   let best: EntryMeta | null = null;
   for (const m of metas) {
-    if (m.title !== title || m.archived) continue;
-    if (best === null || m.entryOrder < best.entryOrder) best = m;
+    if (m.title !== title) continue;
+    best = preferTitleNote(best, m);
   }
   return best;
+}
+
+/**
+ * 🔴 **題名で指すノートを選ぶ規則 ── これ 1 本**(#1174 段②)。
+ * 片付けた(`archived`)ノートは対象外。同じ題名が複数あれば `entryOrder` が小さいほう
+ * (= 一覧を「自分で並べた順」にしたときに上にあるほう)。
+ * `findTodayNote`(日付・`[[題名]]` を押したとき)と `titleNoteIndex`(本文の `[[題名]]` の「ある / まだ無い」の印)が
+ * **同じ規則**でなければ、印が「ある」と言うのに押すと「無い」になる。
+ */
+function preferTitleNote(best: EntryMeta | null, m: EntryMeta): EntryMeta | null {
+  if (m.archived) return best;
+  return best === null || m.entryOrder < best.entryOrder ? m : best;
+}
+
+/** 題名 → 指すノート(`findTodayNote` と同じ規則で、全ノートを 1 回だけ舐める)。 */
+export function titleNoteIndex(metas: Iterable<EntryMeta>): Map<string, EntryMeta> {
+  const out = new Map<string, EntryMeta>();
+  for (const m of metas) {
+    const best = preferTitleNote(out.get(m.title) ?? null, m);
+    if (best !== null) out.set(m.title, best);
+  }
+  return out;
 }
 
 /** 題名が `YYYY-MM-DD` の実在する日付か(`2026-13-45` は日付ではない)。 */

@@ -1292,16 +1292,17 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     id: 'search-jump-next',
     label: '次の一致へ',
     contexts: ['global'],
-    defaults: [],
-    note: '本文の検索で、次に一致した所へ移ります(検索で一致した所を巡っているときだけ効きます)',
+    // 🔑 Ctrl+G / Ctrl+Shift+G は「次を検索 / 前を検索」の古典の位置(#1102 段③。Enter・F3 は行を開く鍵と取り合うので使わない)
+    defaults: ['Mod+G'],
+    note: '本文の検索で、次に一致した所へ移ります(Ctrl+G でも。検索で一致した所を巡っているときだけ効きます)',
     alias: '検索 一致 次 ジャンプ',
   },
   {
     id: 'search-jump-prev',
     label: '前の一致へ',
     contexts: ['global'],
-    defaults: [],
-    note: '本文の検索で、前に一致した所へ戻ります(検索で一致した所を巡っているときだけ効きます)',
+    defaults: ['Mod+Shift+G'],
+    note: '本文の検索で、前に一致した所へ戻ります(Ctrl+Shift+G でも。検索で一致した所を巡っているときだけ効きます)',
     alias: '検索 一致 前 ジャンプ',
   },
   {
@@ -1367,6 +1368,19 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: [],
     note: 'いま出ている連絡先を、1 つの .vcf ファイルにして保存します(連絡先の画面を開いていて、連絡先があるときだけ効きます)',
     alias: '連絡先 vCard vcf 書き出し エクスポート',
+  },
+  /**
+   * 🔴 **ショートカットキーの一覧を、`?` 1 つで開く**(#1145。GitHub / Gmail / Slack と同じ作法)。
+   * ⚠ 素の `?`(Shift+/)は文字なので、**文字を打っている間は効かない**(`typesCharacter`)。F1 のようにヘルプの先頭へ
+   *   ではなく、**一覧の節まで送る**(ヘルプの上はマニュアルが 10 万字ある)。
+   */
+  {
+    id: 'open-help-keys',
+    label: 'ショートカットキーの一覧を開く',
+    contexts: ['global'],
+    defaults: ['Shift+Slash'],
+    note: 'ヘルプの「ショートカットキー」の節まで送ります。文字を打っている間は効きません(「?」を入力できるように)',
+    alias: 'ショートカット キー 一覧 チートシート キーボード ヘルプ 疑問符',
   },
   {
     id: 'open-system-notices',
@@ -2281,6 +2295,8 @@ function isTabKey(chord: Chord): boolean {
 const NON_TYPING_CONTEXTS: ReadonlySet<KeyContext> = new Set<KeyContext>(['filer', 'dual']);
 
 function bareAllowed(key: string, commandId?: string): boolean {
+  // 🔴 `?`(Shift+/)は `open-help-keys` の既定だけ(#1145)。⚠ 打鍵中は `typesCharacter` で効かない
+  if (commandId === 'open-help-keys' && key === 'Slash') return true;
   if (BARE_ALLOWED.has(key) || /^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return true;
   const cmd = commandId === undefined ? null : findCommand(commandId);
   return cmd !== null && cmd !== undefined && cmd.contexts.every((c) => NON_TYPING_CONTEXTS.has(c));

@@ -49,7 +49,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
     .locator('[data-pkc-field="editor-body"]')
     // 🔴 3 行目は色コード(#1224)── 起動を増やさず、同じ「リンク元」で見本を見る
     .fill(
-      `[あちらへ](entry:${targetLid ?? ''})\n\n@2026-10-15 と @2026-10-16 の件\n\n色は \`#3b82f6\` と \`#FFF\` と \`#3b82f6\` です\n`,
+      `[あちらへ](entry:${targetLid ?? ''})\n\n@2026-10-15 と @2026-10-16 の件\n\n色は \`#3b82f6\` と \`#FFF\` と \`#3b82f6\` です\n\n題名で指す [[未作成の題名]] です\n`,
     );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
@@ -254,6 +254,59 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
     page.locator('[data-pkc-field="editor-body"]'),
     '作ったら編集に入ってしまった(読んでいた物の続きで開くだけのはず)',
   ).toBeHidden();
+
+  /**
+   * 🔴 **本文の `[[題名]]`**(#1174 段②)── 起動を増やさず、同じ「リンク元」で見る。
+   *   ① まだ無い題名は点線 + 薄い字(計算後の見た目。受け皿の CSS は unit に無い)
+   *   ② 押しただけでは作らず画面の下で聞く / 「作る」を押したときだけ作る
+   *   ③ 作った後、開き直さなくても点線が消えて実線(リンクの色)になる
+   */
+  await backToSource();
+  const titleLink = page.locator('[data-pkc-field="detail-body"] .pkc-title-link');
+  await expect(titleLink, '[[題名]] が押せる字になっていない').toHaveCount(1);
+  await expect(titleLink).toHaveText('未作成の題名');
+  const lookTitle = async (): Promise<{ style: string; line: string; color: string; muted: string; cursor: string }> =>
+    titleLink.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--muted)';
+      el.after(probe);
+      const muted = getComputedStyle(probe).color;
+      probe.remove();
+      return { style: cs.textDecorationStyle, line: cs.textDecorationLine, color: cs.color, muted, cursor: cs.cursor };
+    });
+  const lookNone = await lookTitle();
+  expect(lookNone.style, '無い題名が点線でない').toBe('dotted');
+  expect(lookNone.color, '無い題名が薄い字でない').toBe(lookNone.muted);
+  expect(lookNone.cursor).toBe('pointer');
+  const beforeTitle = await rows.count();
+  await clickReal(page, titleLink);
+  await expect(status, '無い題名を押したのに何も言わない(無言の dead click)').toContainText(
+    '未作成の題名 のノートはまだありません',
+  );
+  await expect(create).toHaveText('未作成の題名 のノートを作る');
+  expect(await rows.count(), '押しただけでノートが増えた').toBe(beforeTitle);
+  await clickReal(page, create);
+  await expect(rows.filter({ hasText: '未作成の題名' }), '作っていない').toHaveCount(1);
+  await backToSource();
+  await expect(titleLink).not.toHaveAttribute('data-pkc-link-missing', /.*/);
+  const lookHave = await lookTitle();
+  expect(lookHave.style, '作ったのに点線のまま').toBe('solid');
+  expect(lookHave.color, '在る題名がリンクの色でない(薄いまま)').not.toBe(lookHave.muted);
+
+  /**
+   * 🔴 **日付の右クリック →「予定でこの日を見る」**(#1169 段②)── 左のペインが予定のタブに替わり、その日が出る。
+   *   中央の本文(リンク元)は動かない。見終わったらフォルダのタブへ戻して続ける。
+   */
+  await day15.click({ button: 'right' });
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="show-schedule-day"]');
+  await expect(page.locator('[data-pkc-browse-pane="schedule"]'), '予定のタブにならない').toBeVisible();
+  await expect(page.locator('[data-pkc-field="schedule-day-label"]'), '見ている日が 10/15 でない').toContainText(
+    /10月15日/,
+  );
+  await expect(page.locator('[data-pkc-field="detail-title"]'), '本文が動いた').toContainText('リンク元');
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="filer"]');
+  await expect(page.locator('[data-pkc-browse-pane="filer"]')).toBeVisible();
 
   // 🔑 橋 ── 下の #1174 は「リンク先(題名 2026-10-15)のノートが開いている」所から始まる。
   //   上の #1169 ③ で作った 2026-10-16 のノートが開いているので、リンク先を開き直す。

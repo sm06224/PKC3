@@ -76,7 +76,8 @@ import { readVersions, totalHistoryBytes } from '@features/flavor/attachment-ver
 import { planSaveBack } from '@features/asset/asset-replace-plan';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { bodyLinkNeedles, bodyLinksTo } from '@features/entry-ref/body-links';
-import { renameLinkTexts } from '@features/entry-ref/link-text-rename';
+import { isWritableLinkTitle, renameLinkTexts, renameTitleLinks } from '@features/entry-ref/link-text-rename';
+import { scanTitleLinks } from '@features/markdown/title-link';
 import {
   SNIPPET_ARCHETYPE,
   SNIPPET_LIMITS,
@@ -4463,6 +4464,27 @@ const handlers: Handlers = {
      * 挙がらない**(取りこぼし側へ倒れる)。字面は `bodyLinkNeedles` が持つ。
      */
     const needles = bodyLinkNeedles(req.lid, req.cid);
+    /**
+     * 🔴 **`[[題名]]` で指されたノートの参照元にも出す**(#1174 段②)。題名で指す記法は、画面で押したとき開くノート
+     *   (`findTodayNote` と同じ規則 ── 片付けていない同名の中で `entry_order` がいちばん小さい)だけを指す。
+     *   ⚠ 同順位の同名が他に居る・自分が片付け済み・題名が `[[ ]]` に書けない字のときは、どれを指すか決まらない/指さないので出さない。
+     */
+    const me = need().selectObjects(
+      `SELECT title, entry_order, archived FROM entries WHERE cid = ?1 AND lid = ?2`,
+      [req.cid, req.lid],
+    ) as Array<{ title: string; entry_order: number; archived: number }>;
+    let titleOfTarget: string | null = null;
+    const m0 = me[0];
+    if (m0 !== undefined && m0.archived === 0 && isWritableLinkTitle(m0.title)) {
+      const rival = need().selectObjects(
+        `SELECT 1 AS x FROM entries WHERE cid = ?1 AND lid <> ?2 AND title = ?3 AND archived = 0 AND ${USER_REALM_SQL} AND entry_order <= ?4 LIMIT 1`,
+        [req.cid, req.lid, m0.title, m0.entry_order],
+      );
+      if (rival.length === 0) {
+        titleOfTarget = m0.title.trim();
+        needles.push(`[[${titleOfTarget}`);
+      }
+    }
     const where = needles.map((_, i) => `body LIKE ?${i + 3} ESCAPE '\\'`).join(' OR ');
     // 🔴 backlink は system 領域のノートを出さない(設計 doc §1.1、段①)
     const rows = need().selectObjects(
@@ -4480,7 +4502,11 @@ const handlers: Handlers = {
     const hit: string[] = [];
     let truncated = false;
     for (const r of rows) {
-      if (!bodyLinksTo(r.body, req.lid, req.cid)) continue;
+      if (
+        !bodyLinksTo(r.body, req.lid, req.cid) &&
+        !(titleOfTarget !== null && scanTitleLinks(r.body).some((x) => x.title === titleOfTarget))
+      )
+        continue;
       // 🔑 **1 件多く取って切れたか判る**(`searchEntries` と同じ作法)
       if (hit.length >= limit) {
         truncated = true;
@@ -4730,6 +4756,24 @@ const handlers: Handlers = {
     database.exec('BEGIN IMMEDIATE');
     try {
       const needles = bodyLinkNeedles(req.lid, req.cid);
+      /**
+       * 🔴 **`[[旧い題名]]` も候補に入れる**(#1174 段②)。書き換えるのは次の 2 つがどちらも無いときだけ:
+       *   ① 同じ(旧い)題名のノートが**ほかにも在る**(`[[題名]]` は一覧で上のほうを指すので、どちらを指していたか分からない)
+       *   ② 新しい題名のノートが**既に在る**(書き換えると、リンクが別のノートを指してしまう)
+       * ⚠ 数えるのは画面の `titleNoteIndex`(`findTodayNote`)と同じ範囲 ── 片付けた(`archived`)ノートは数えない。
+       *   ゴミ箱へ移したノートは `entries` に居ないので数えない。
+       */
+      const titleTaken = (title: string): boolean =>
+        database.selectObjects(
+          `SELECT 1 AS x FROM entries WHERE cid = ?1 AND lid <> ?2 AND title = ?3 AND archived = 0 AND ${USER_REALM_SQL} LIMIT 1`,
+          [req.cid, req.lid, title],
+        ).length > 0;
+      const titleLinks =
+        req.oldTitle.trim() !== '' &&
+        isWritableLinkTitle(req.newTitle) &&
+        !titleTaken(req.oldTitle) &&
+        !titleTaken(req.newTitle);
+      if (titleLinks) needles.push(`[[${req.oldTitle.trim()}`);
       const where = needles.map((_, i) => `body LIKE ?${i + 3} ESCAPE '\\'`).join(' OR ');
       const rows = database.selectObjects(
         `SELECT lid, title, archetype, body, entry_order FROM entries
@@ -4742,7 +4786,11 @@ const handlers: Handlers = {
       let links = 0;
       for (const r of rows) {
         if (skip.has(r.lid)) continue;
-        const res = renameLinkTexts(r.body, req.lid, req.cid, req.oldTitle, req.newTitle);
+        const first = renameLinkTexts(r.body, req.lid, req.cid, req.oldTitle, req.newTitle);
+        const second = titleLinks
+          ? renameTitleLinks(first.body, req.oldTitle, req.newTitle)
+          : { body: first.body, count: 0 };
+        const res = { body: second.body, count: first.count + second.count };
         if (res.count === 0) continue;
         const ext = extractMeta(r.archetype, res.body);
         const w = writeEntryRow(

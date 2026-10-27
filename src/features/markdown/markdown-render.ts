@@ -88,6 +88,7 @@ import { tagColorKey } from '../tag-color';
 import { confirmColorSpan, isColorCode, isEditableColor } from './color-code';
 import { ifFormatMatches } from './if-format';
 import { replaceInlineComments } from './inline-comment';
+import { titleLinkAt } from './title-link';
 
 const md = new MarkdownIt({
   html: false,          // Disable HTML tags in source (XSS safety)
@@ -3188,6 +3189,45 @@ md.core.ruler.after('inline', 'pkc-date-link', function (state) {
 });
 
 /**
+ * 🔴 **本文の `[[題名]]` を、その題名のノートへの字にする**(#1174 段②)。
+ *
+ * > 「どの知識が記録済みで、どれがこれから書くべきか」を、読みながら一目で分かり、
+ * > 無ければその場で作って書き始めたい。
+ *
+ * 綴りは `[[題名]]` と `[[題名|表示する字]]`。**番号(lid)ではなく題名で指す**ので、まだ無いノートも書ける
+ * (`entry:` の番号リンクは作ったノートにしか書けない)。ノートが無ければ画面の下に「作る」を出す(受け手は `binder.ts`)。
+ * 🔑 **綴りと「どこがリンクか」の正本は `title-link.ts`**(改名で書き換える側も同じ物を読む)。
+ *   inline 規則なので、コード・数式・エスケープ・リンクの字の中には自然に届かない(`link` の後に置く:
+ *   `[[a]](url)` は通常のリンクが勝つ)。
+ * ⚠ **`[[ruby:…]]` / `[[em:…]]` は別の記法**(`isWritableLinkTitle` が題名として断る)。
+ * ⚠ **押せるのは `env.titleLinks` の面だけ**(受け手が居る中央の読む画面)。それ以外(書き出した HTML・印刷・別窓・
+ *   プレビュー)は**生の括弧を出さず**、表示の字(無ければ題名)だけにする。字には `data-pkc-title-ref` を付ける
+ *   (PKC3 入りの HTML 書き出しは、相手のノートが入っていればそこでリンクにする)。
+ * 🔑 押せる字は `<span role="link" tabindex="0">`(日付と同じ形)── Enter / Space は binder の既存の道に乗る。
+ * 🔑 「あるか / 無いか」は markdown(ワーカー)は知らない ── 描いた後に `title-links.ts` が印を当てる。
+ */
+md.inline.ruler.after('link', 'pkc_title_link', function titleLinkRule(state, silent) {
+  // ⚠ `silent`(リンクの字の範囲を測る走査)では**何も読まない** ── 読むと `[見出し [[A]]](url)` の入れ子の `[` を
+  //   「1 つの塊」と数えて、これまでリンクだった物がリンクでなくなる(従来どおり `[` は 1 字ずつ数える)
+  if (silent) return false;
+  if (((state as { linkLevel?: number }).linkLevel ?? 0) > 0) return false;
+  const m = titleLinkAt(state.src, state.pos, state.posMax);
+  if (m === null) return false;
+  const tok = state.push('html_inline', '', 0);
+  // 🔑 読み上げ用の字(チェック項目の aria-label)── 括弧を外した表示の字。`taskPlainText` が読む
+  tok.meta = { plain: m.label };
+  // ⚠ 属性も本文も**必ず escape する**(日付と同じ作法)
+  tok.content =
+    (state.env as { titleLinks?: boolean }).titleLinks === true
+      ? `<span class="pkc-title-link" data-pkc-action="open-title-note" ` +
+        `data-pkc-title="${escapeHtmlAttr(m.title)}" role="link" tabindex="0">` +
+        `${md.utils.escapeHtml(m.label)}</span>`
+      : `<span data-pkc-title-ref="${escapeHtmlAttr(m.title)}">${md.utils.escapeHtml(m.label)}</span>`;
+  state.pos = m.end;
+  return true;
+});
+
+/**
  * 🔴 **文字起こしの行頭の時刻を押すと、その位置から再生する**(#1232 段 b)。
  *
  * > user の物語:録音の文字起こしに `0:15 こんにちは` と並んだ。その行を読んで、**その場の音**を聞き直したい。
@@ -3396,6 +3436,9 @@ function taskPlainText(tokens: readonly Token[]): string {
     if (t.type === 'text' || t.type === 'code_inline') out += t.content;
     else if (t.type === 'softbreak' || t.type === 'hardbreak') out += ' ';
     else if (t.type === 'image') out += t.children ? taskPlainText(t.children) : '';
+    // `[[題名]]` は括弧を外した表示の字を読む(html_inline でも字を持つ物だけ)
+    else if (t.type === 'html_inline' && typeof (t.meta as { plain?: unknown } | null)?.plain === 'string')
+      out += (t.meta as { plain: string }).plain;
   }
   return out;
 }
@@ -3719,6 +3762,13 @@ export interface RenderMarkdownOptions {
    *   (`renderMarkdown` の env 組み立て)。
    */
   readonly interactiveDates?: boolean;
+  /**
+   * 🔴 **本文の `[[題名]]` を、その題名のノートへの押せる字にするか**(#1174 段②。既定 `false` = 字のまま)。
+   *
+   * ⚠ **受け手(`open-title-note`)が居る面だけ** `true` にする(`interactiveDates` と同じ理由)。
+   *   渡さなければ書き出した HTML は 1 バイトも変わらない。
+   */
+  readonly titleLinks?: boolean;
   /**
    * 🔴 **文字起こしの行頭の時刻(`0:15 `)を押せる字にするか**(#1232 段 b。既定 `false` = 押せない)。
    *
@@ -6934,6 +6984,7 @@ function renderMarkdownCore(
     interactiveTags: boolean;
     phoneLinks: boolean;
     interactiveDates: boolean;
+    titleLinks: boolean;
     interactiveSeek: boolean;
     colorSwatches: boolean;
     taskLineOffset: number;
@@ -6973,6 +7024,8 @@ function renderMarkdownCore(
     phoneLinks: opts.phoneLinks === true,
     // 🔴 本文の `@日付` を押せる字にするか(#1169)。既定は押せない
     interactiveDates: opts.interactiveDates === true,
+    // 🔴 本文の `[[題名]]` を押せる字にするか(#1174 段②)。既定は字のまま
+    titleLinks: opts.titleLinks === true,
     // 🔴 文字起こしの行頭の時刻を押せる字にするか(#1232 段 b)。既定は押せない
     interactiveSeek: opts.interactiveSeek === true,
     // 🔴 色コードの左に見本を出すか(#1224)。既定は出さない

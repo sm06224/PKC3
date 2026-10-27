@@ -155,7 +155,9 @@ describe('第 2 群 26 件の登記(#582 段③)', () => {
     for (const { id } of BATCH2) {
       const c = findCommand(id);
       expect(c, `${id} が KEY_COMMANDS に無い`).toBeDefined();
-      expect(c?.defaults, `${id} に鍵が付いている`).toEqual([]);
+      // 🔴 #1102 段③: 一致の送りだけは既定の鍵を持つ(Ctrl+G / Ctrl+Shift+G)
+      const keyed: Record<string, string[]> = { 'search-jump-next': ['Mod+G'], 'search-jump-prev': ['Mod+Shift+G'] };
+      expect(c?.defaults, `${id} の鍵`).toEqual(keyed[id] ?? []);
       expect(c?.contexts, `${id} は全域`).toEqual(['global']);
       expect((c?.note ?? '').length, `${id} に説明(押せない理由を兼ねる)が無い`).toBeGreaterThan(0);
     }

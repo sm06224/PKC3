@@ -52,6 +52,30 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
     .poll(lidsNow, { message: '選んだノートが 1 つ上へ動いていない' })
     .toEqual([order0[1], order0[0]]);
 
+  // 🔴 #1145: 文字を打っていないときの `?` で、ヘルプが開いてショートカットキーの一覧まで送られる(実座標で画面の中)。
+  //     ⚠ 文字を打つ欄(絞り込み欄)の中の `?` は効かない ── 打てなくなるのを防ぐ対照群
+  await page.locator('[data-pkc-field="entry-filter"]').focus();
+  await page.keyboard.press('Shift+Slash');
+  await expect(page.locator('[data-pkc-region="help-keymap"]'), '打鍵中の ? でヘルプが開いた').toBeHidden();
+  await expect(page.locator('[data-pkc-field="entry-filter"]')).toHaveValue('?');
+  await page.locator('[data-pkc-field="entry-filter"]').fill('');
+  await page.locator('[data-pkc-field="entry-filter"]').blur();
+  await page.keyboard.press('Shift+Slash');
+  await expect(page.locator('[data-pkc-region="help-keymap"]'), '? でヘルプの一覧が開かない').toBeInViewport();
+  // 🔴 穴 A: 「画面の中」だけでは、マニュアルを描き終える前の高さで送った(描き終えると遠くへ流れる)形も通る。
+  //   描き終えた後も一覧が画面の上寄りに居ること(上端が窓の上 1/3 以内)を、落ち着くまで待って見る
+  await expect
+    .poll(
+      () =>
+        page.locator('[data-pkc-region="help-keymap"]').evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return r.top > -4 && r.top < window.innerHeight / 3;
+        }),
+      { message: '? で送った一覧が、マニュアルを描き終えた後に画面の上寄りに無い', timeout: 15_000 },
+    )
+    .toBe(true);
+  await page.keyboard.press('Alt+1');
+
   // ② 面の切替(Alt+3 = 設定)。⚠ **数字キーの `code`(Digit3)**が実機で来るかの検査でもある
   await page.keyboard.press('Alt+3');
   await expect(page.locator('[data-pkc-region="settings-body"]')).toBeVisible();
