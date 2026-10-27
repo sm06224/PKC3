@@ -22,7 +22,7 @@ UPDATE_UI_TERMS_DOC=1 npx vitest run tests/features/ui-terms-doc.test.ts
 
 <!-- ui-terms:generated:start -->
 
-### 造語(130 語)
+### 造語(131 語)
 
 | 使わない語 | 言い換え先 | 除く語(実在の複合語) |
 |---|---|---|
@@ -156,6 +156,7 @@ UPDATE_UI_TERMS_DOC=1 npx vitest run tests/features/ui-terms-doc.test.ts
 | `横に並べる枠` | スタックのノート |  |
 | `右の枠` | スタックのノート |  |
 | `左の枠` | 本文(左) |  |
+| `旗` | オプション(切替の意味なら フラグ) | `国旗` `旗艦` |
 
 ### 評価語・脅し語(8 語)
 
