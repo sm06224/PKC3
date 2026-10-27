@@ -18,7 +18,7 @@
  *
  * ⚠ 「話者」で始まる見出しだけを話者の節として読む(`## 話者` と `## 話者つき文字起こし`)。文字起こしの節には触れない。
  */
-import { ELAPSED_LINE_HEAD, elapsedText, parseElapsed } from '../elapsed-text';
+import { elapsedText, readElapsedHead } from '../elapsed-text';
 import type { SpeakerTurn } from '../audio/diarize';
 import type { TimedLine } from './contact-sheet-layout';
 
@@ -110,11 +110,10 @@ export function readSpeakerTurns(body: string): NamedTurn[] | null {
   if (sec === null) return null;
   const turns: NamedTurn[] = [];
   for (let i = sec.head + 1; i < sec.end; i += 1) {
-    const m = ELAPSED_LINE_HEAD.exec(lines[i]!.trimEnd());
-    if (m === null) continue;
-    const ms = parseElapsed(m[1]!);
-    const name = lines[i]!.slice(m[0].length).trim();
-    if (ms !== null && name !== '') turns.push({ ms, name });
+    const head = readElapsedHead(lines[i]!.trimEnd());
+    if (head === null) continue;
+    const name = lines[i]!.trimEnd().slice(head.headLength).trim();
+    if (name !== '') turns.push({ ms: head.startMs, name });
   }
   return turns.length === 0 ? null : turns.sort((a, b) => a.ms - b.ms);
 }
@@ -185,8 +184,7 @@ export function fixSpeakers(
   const turnText = namedTurnsText(fixed);
   // 見出しの行はそのまま、中身だけを置き換える(節の中の読めない行・注釈は捨てない:時刻つきの行だけを差し替える)
   const keep = all.slice(sec.head + 1, sec.end).filter((l) => {
-    const m = ELAPSED_LINE_HEAD.exec(l.trimEnd());
-    return !(m !== null && parseElapsed(m[1]!) !== null);
+    return readElapsedHead(l.trimEnd()) === null;
   });
   // 節の終わりの空行は、数えて元のとおり戻す(次の節との間・末尾の改行を変えない)
   let trailing = 0;

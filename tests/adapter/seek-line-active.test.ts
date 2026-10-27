@@ -15,11 +15,11 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 
 const TRANSCRIPT = '0:05 はじめに\n0:15 つぎに\n0:40 おわりに\n';
 
-function detail(root: HTMLElement) {
+function detail(root: HTMLElement, text: string = TRANSCRIPT) {
   const host = document.createElement('div');
   const prose = document.createElement('div');
   prose.setAttribute('data-pkc-prose', '');
-  prose.innerHTML = renderMarkdown(TRANSCRIPT, { interactiveSeek: true });
+  prose.innerHTML = renderMarkdown(text, { interactiveSeek: true });
   const preview = document.createElement('div');
   preview.setAttribute('data-pkc-field', 'attachment-preview');
   const media = document.createElement('audio');
@@ -95,6 +95,19 @@ describe('再生位置に合わせて光る', () => {
     d.move(6, 'seeked');
     expect(d.active()).toEqual(['0:05 はじめに']);
     expect(d.prose.querySelectorAll('[data-pkc-seek-active]')).toHaveLength(1);
+  });
+
+  it('🔴 #1447 終わりつきの行(0:05 〜0:10)は、終わりを過ぎたら光らない。終わりの無い行は次の行まで光る(対照)', () => {
+    const root = setup();
+    const d = detail(root, '0:05 〜0:10 はじめに\n0:20 つぎに\n');
+    d.move(7);
+    expect(d.active()).toEqual(['0:05 〜0:10 はじめに']);
+    d.move(12);
+    expect(d.active(), '終わりを過ぎたのに光っている(無音の間)').toEqual([]);
+    d.move(21);
+    expect(d.active()).toEqual(['0:20 つぎに']);
+    d.move(300);
+    expect(d.active(), '終わりの無い行は光り続ける').toEqual(['0:20 つぎに']);
   });
 
   it('🔴 別の添付の行は光らない(同じ詳細の中だけ)', () => {

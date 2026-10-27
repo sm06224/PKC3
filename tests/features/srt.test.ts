@@ -195,10 +195,13 @@ describe('画面で押せる行と字幕の行は同じ 1 本で読む(#1447 ④
     expect(ELAPSED_LINE_HEAD.source).toBe(
       '^((?:\\d{1,2}:)?\\d{1,2}:\\d{2}) (?:〜((?:\\d{1,2}:)?\\d{1,2}:\\d{2}) )?',
     );
-    // 字幕の側は `readElapsedHead`(= ELAPSED_LINE_HEAD の 1 関数)、画面の側は ELAPSED_LINE_HEAD を参照する
+    // 行頭の時刻を読む所は全部 `readElapsedHead`(= ELAPSED_LINE_HEAD の 1 関数)を通る
     for (const [f, ref] of [
       ['src/features/asr/srt.ts', 'readElapsedHead'],
-      ['src/features/markdown/markdown-render.ts', 'ELAPSED_LINE_HEAD'],
+      ['src/features/markdown/markdown-render.ts', 'readElapsedHead'],
+      ['src/features/capture/clip-transcript.ts', 'readElapsedHead'],
+      ['src/features/capture/contact-sheet-layout.ts', 'readElapsedHead'],
+      ['src/features/capture/speakers.ts', 'readElapsedHead'],
     ] as const) {
       const code = codeOnly(readFileSync(f, 'utf-8'));
       expect(code, `${f} が ${ref} を参照していない`).toContain(ref);

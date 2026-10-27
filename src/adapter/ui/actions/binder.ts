@@ -8242,21 +8242,25 @@ const activeSeekLine = new WeakMap<Element, Element | null>();
  * 説明ごとの時刻の行の控え(行の要素と ms)。⚠ `timeupdate` は 1 秒に数回来る ── 毎回 DOM を引き直さない。
  * 説明が描き直されると要素が差し替わる(先頭と末尾が DOM から外れる)ので、そのときだけ作り直す。
  */
-const seekLineCache = new WeakMap<Element, { lines: Element[]; ms: number[]; at: number }>();
-function seekLinesOf(prose: Element): { lines: Element[]; ms: number[]; at: number } {
+const seekLineCache = new WeakMap<Element, { lines: Element[]; ms: number[]; ends: Array<number | null>; at: number }>();
+function seekLinesOf(prose: Element): { lines: Element[]; ms: number[]; ends: Array<number | null>; at: number } {
   const hit = seekLineCache.get(prose);
   if (hit !== undefined && (hit.lines.length === 0 || (hit.lines[0]!.isConnected && hit.lines[hit.lines.length - 1]!.isConnected))) {
     return hit;
   }
   const lines: Element[] = [];
   const ms: number[] = [];
+  const ends: Array<number | null> = [];
   for (const line of prose.querySelectorAll('[data-pkc-seek-line]')) {
     const v = Number(line.querySelector('[data-pkc-seek-ms]')?.getAttribute('data-pkc-seek-ms'));
     if (!Number.isFinite(v)) continue;
     lines.push(line);
     ms.push(v);
+    // 終わりつきの行(`data-pkc-seek-end`)── 終わりを過ぎたら光らせない
+    const e = line.getAttribute('data-pkc-seek-end');
+    ends.push(e === null || !Number.isFinite(Number(e)) ? null : Number(e));
   }
-  const built = { lines, ms, at: -1 };
+  const built = { lines, ms, ends, at: -1 };
   seekLineCache.set(prose, built);
   return built;
 }
@@ -8280,9 +8284,11 @@ function markActiveSeekLine(media: HTMLMediaElement): void {
   const prose = host?.querySelector('[data-pkc-prose]');
   if (prose === null || prose === undefined) return;
   const cache = seekLinesOf(prose);
-  const idx = lastLineAtOrBefore(cache.ms, media.currentTime * 1000, cache.at);
+  const nowMs = media.currentTime * 1000;
+  const idx = lastLineAtOrBefore(cache.ms, nowMs, cache.at);
   cache.at = idx;
-  const active: Element | null = idx >= 0 ? cache.lines[idx]! : null;
+  const end = idx >= 0 ? cache.ends[idx] : null;
+  const active: Element | null = idx >= 0 && !(end !== null && end !== undefined && nowMs >= end) ? cache.lines[idx]! : null;
   if (activeSeekLine.get(prose) === active && (active === null || active.hasAttribute('data-pkc-seek-active'))) return;
   for (const old of prose.querySelectorAll('[data-pkc-seek-active]')) old.removeAttribute('data-pkc-seek-active');
   active?.setAttribute('data-pkc-seek-active', '');

@@ -13,12 +13,14 @@
  * - **範囲に少しでもかかる行**を移す。行は「次の行の始まり」まで続く発言とみなす(最後の行と、次の行が遠い行は
  *   `LINE_SPAN_MS` まで)。切り出しの始まりが発言の途中でも、その発言は落とさず、`0:00` に置く
  *   (始まりの手前から続く発言を黙って失わない)。
- * - 行の綴りは本文の時刻リンクと**同じ 1 本**(`ELAPSED_LINE_HEAD` + `parseElapsed`)。読めない綴り(`0:75`)の行は移さない。
+ * - 行の綴りは本文の時刻リンクと**同じ 1 本**(`readElapsedHead`。`0:07 〜0:12 字` の終わりつきの形も読む)。読めない綴り(`0:75`)の行は移さない。
+ * - 🔑 終わりつきの行は、その終わりまでを発言の長さとして使い(推定の `LINE_SPAN_MS` は使わない)、移すときは
+ *   **終わりも切り出しの範囲に収めて付け直す**(`0:07 〜0:12` を [5s, 10s) で切ると `0:02 〜0:05`)。
  * - 範囲にかかる行が無ければ `null`(何も足さない)。
  *
  * 🔑 **pure module**。時刻の綴りを作るのは `elapsedText` の 1 本(ここで割り算を書かない)。
  */
-import { ELAPSED_LINE_HEAD, elapsedText, parseElapsed } from '../elapsed-text';
+import { elapsedLineHead, readElapsedHead } from '../elapsed-text';
 
 /** 文字起こしの節の見出し(`## 文字起こし 2026-10-02 12:34`)。⚠ `asr-text.ts` の `transcriptHeading` が作る形。 */
 const SECTION_HEAD = /^##\s+文字起こし(?:\s|$)/;
@@ -43,22 +45,25 @@ export function clipTranscript(body: string, startMs: number, endMs: number): Cl
   let from = -1;
   for (let i = 0; i < lines.length; i++) if (SECTION_HEAD.test(lines[i]!.trimEnd())) from = i;
   if (from === -1) return null;
-  const timed: { ms: number; rest: string }[] = [];
+  const timed: { ms: number; endMs: number | null; rest: string }[] = [];
   for (let i = from + 1; i < lines.length; i++) {
     const line = lines[i]!.trimEnd();
     if (ANY_HEAD.test(line)) break;
-    const m = ELAPSED_LINE_HEAD.exec(line);
-    if (m === null) continue;
-    const ms = parseElapsed(m[1]!);
-    if (ms !== null) timed.push({ ms, rest: line.slice(m[1]!.length) });
+    const head = readElapsedHead(line);
+    if (head === null) continue;
+    timed.push({ ms: head.startMs, endMs: head.endMs, rest: line.slice(head.headLength) });
   }
   const out: string[] = [];
   timed.forEach((t, i) => {
     const next = timed[i + 1];
-    const last = Math.min(next === undefined ? t.ms + LINE_SPAN_MS : next.ms, t.ms + LINE_SPAN_MS);
+    // 終わりを持つ行はそれが発言の終わり(実測)。無い行は次の行の始まり(最長 `LINE_SPAN_MS`)
+    const last = t.endMs ?? Math.min(next === undefined ? t.ms + LINE_SPAN_MS : next.ms, t.ms + LINE_SPAN_MS);
     // 発言は [t.ms, last)。範囲 [startMs, endMs) に少しでもかかるものを移す
     if (last <= startMs || t.ms >= endMs) return;
-    out.push(`${elapsedText(Math.max(0, t.ms - startMs))}${t.rest}`);
+    const newStart = Math.max(0, t.ms - startMs);
+    // 終わりは切り出しの範囲に収めて付け直す(範囲の外へ伸ばさない)
+    const newEnd = t.endMs === null ? null : Math.min(t.endMs, endMs) - startMs;
+    out.push(`${elapsedLineHead(newStart, newEnd)}${t.rest}`);
   });
   return out.length === 0 ? null : { text: out.join('\n'), lines: out.length };
 }
