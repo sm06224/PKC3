@@ -50,6 +50,7 @@ const ALLOWED: Readonly<Record<string, string>> = {
   '.b hr': '余白。焼いた側は border 系だけ',
   '.b pre.d': '図の原文。閲覧側だけが作る要素(アプリに対応物なし)',
   '.b [data-pkc-asset-missing]': '薄さ。焼いた側は outline / color / min-height',
+  '.b [data-pkc-title-ref][role=link]': '本文の [[題名]] で、入っているノートへ飛べる字の下線(#1174 段②)。閲覧側だけが作る要素',
   '.b [data-pkc-outside-note]': '入っていないノートへのリンクの薄さと点線。閲覧側だけが作る要素(依頼 77-3)',
   '.b>*': '器の直下を溢れさせない。焼いた側に対応物なし',
   '.b a.f': '添付のボタン。閲覧側だけの操作子(焼いた分より後ろに置く)',

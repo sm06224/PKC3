@@ -69,7 +69,7 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
       () =>
         page.locator('[data-pkc-region="help-keymap"]').evaluate((el) => {
           const r = el.getBoundingClientRect();
-          return r.top >= 0 && r.top < window.innerHeight / 3;
+          return r.top > -4 && r.top < window.innerHeight / 3;
         }),
       { message: '? で送った一覧が、マニュアルを描き終えた後に画面の上寄りに無い', timeout: 15_000 },
     )

@@ -1,4 +1,5 @@
 import { unquote } from './code-context';
+import { lineStart } from './line-start';
 import { advanceFence, fenceStep, stepFence } from './list-renumber';
 
 /**
@@ -111,7 +112,7 @@ export function scanBlockSpans(value: string): BlockSpan[] {
  *   ⚠ 閉じ行は「中」に数えない(閉じ方を案内する場所ではない)。
  */
 export function blockSpanAtCaret(spans: readonly BlockSpan[], value: string, caret: number): BlockSpan | null {
-  const ls = caret <= 0 ? 0 : value.lastIndexOf('\n', caret - 1) + 1;
+  const ls = lineStart(value, caret);
   // from <= ls を満たす最後の塊(二分探索)
   let lo = 0;
   let hi = spans.length - 1;

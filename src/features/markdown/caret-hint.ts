@@ -39,8 +39,8 @@ const FENCE_NAMES: Readonly<Record<RenderableFenceLang, string>> = {
   mermaid: '図(mermaid)',
   chart: 'グラフ(chart)',
   plotly: 'グラフ(plotly)',
-  react: 'React の部品',
-  html: 'html の部品',
+  react: 'React コンポーネント',
+  html: 'html の埋め込み',
   svg: 'svg の図',
 };
 
