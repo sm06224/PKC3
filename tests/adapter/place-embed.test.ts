@@ -50,6 +50,7 @@ import {
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { setSqlEmbedRunner } from '../../src/adapter/ui/render/sql-embed-hydrate';
 import { codeOnly } from '../helpers/code-only';
+import { readReducerSource } from '../helpers/reducer-source';
 
 /**
  * 🔑 焼く所は差す ── ここで見たいのは**どこで・いつ・どの鍵で焼くか**であって、絵ではない
@@ -442,7 +443,7 @@ describe('state: 板のための本文', () => {
 
   it('🔑 書込に追随する口は 1 本(`syncSplitBody` を直に呼ぶ所が残っていない)', () => {
     // ⚠ 呼び口を 2 本に割ると、片方だけ古いまま映す(#757 / #684 ㋑ で 2 度踏んだ形)
-    const src = codeOnly(readFileSync('src/adapter/state/app-state.ts', 'utf8'));
+    const src = codeOnly(readReducerSource());
     const calls = src.match(/syncSplitBody\(/g) ?? [];
     // 定義 1 + `syncShownBodies` の中の呼び 1
     expect(calls.length).toBe(2);

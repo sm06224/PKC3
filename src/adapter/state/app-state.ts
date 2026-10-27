@@ -8,18 +8,36 @@
  *   selectedLid が選択の単一情報源
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
+import { reduceBoot } from './slices/boot';
+import { reduceQueryScan } from './slices/query-scan';
+import { reduceSql } from './slices/sql';
+import { reduceView } from './slices/view';
+import { reduceLauncher } from './slices/launcher';
+import { reduceEdit } from './slices/edit';
+import { reduceAppend } from './slices/append';
+import { reduceBodyEdit } from './slices/body-edit';
+import { reducePlaces } from './slices/places';
+import { reduceBlockOps } from './slices/block-ops';
+import { reduceCalendar } from './slices/calendar';
+import { reducePersisted } from './slices/persisted';
+import { reduceSelection } from './slices/selection';
+import { reduceEntries } from './slices/entries';
+import { reduceHistory } from './slices/history';
+import { reduceTrash } from './slices/trash';
+import { reduceDual } from './slices/dual';
+import { reduceSmart } from './slices/smart';
+import { reduceSplit } from './slices/split';
+import { reduceRestore } from './slices/restore';
+import { reduceSearchJump } from './slices/search-jump';
+import { reduceNotice } from './slices/notice';
 import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filter/entry-sort';
-import { checkReadOnlySql } from '@features/query/sql-guard';
-import { checkDuckDbRunSql, duckDbWriteKind } from '@features/query/duckdb-write';
-import { DEFAULT_SQL_ENGINE, sqlEngineOf, type SqlEngine } from '@features/query/sql-engine';
-import { parquetCopyOf } from '@features/query/duckdb-export';
-import { schemaModel, type Grid, type SchemaLink, type SchemaModel } from '@features/query/schema-digest';
+import { DEFAULT_SQL_ENGINE, type SqlEngine } from '@features/query/sql-engine';
+import { type Grid, type SchemaLink, type SchemaModel } from '@features/query/schema-digest';
 import { isSystemMessageLid } from '@features/message/message-log';
-import { erSql, type ErAction } from '@features/query/er-sql';
+import { type ErAction } from '@features/query/er-sql';
 import { isDuckDbOnlySource, sqlGuestSourceOf } from '@features/query/sql-guest-source';
-import { checkAddSource, type SqlExtraSource } from '@features/query/sql-multi-source';
+import { type SqlExtraSource } from '@features/query/sql-multi-source';
 import type { DuckDbCopyReport } from '@features/query/duckdb-copy-report';
-import { DUCKDB_LOAD_TOO_LONG, DUCKDB_TOO_LONG } from '@adapter/platform/duckdb/duckdb-lease';
 
 /**
  * 🔴 **構造(つながり図・構造ノート)を、どこへ頼むか**(#682 段④c → #918 で「断る」から「頼み先を変える」へ)。
@@ -60,14 +78,14 @@ export function schemaRouteOf(
  * ⚠ 1 件のときは今までどおり lid だけ。**足した相手も含める** ── 含めないと、足した / 外した直後に
  *   「前の組の図」を「いまの組の図」として使い回す(名札は同じ・中身は別の file の組)。
  */
-function erSourceKey(
+export function erSourceKey(
   guest: { readonly lid: string } | null,
   extras: readonly SqlExtraSource[] = [],
 ): string {
   return guest === null ? '' : [guest.lid, ...extras.map((e) => e.lid)].join('|');
 }
 /** 構造ノートの題名・見出しに出す「どこの構造か」(2 件以上は ` + ` で並べる)。 */
-function schemaWhereOf(
+export function schemaWhereOf(
   guest: { readonly name: string } | null,
   extras: readonly SqlExtraSource[] = [],
 ): string | null {
@@ -83,7 +101,7 @@ function schemaWhereOf(
  * 🔑 つながり図は**組が変わったら採り直す**(`erSourceKey` が足した相手も含む)── 開いていれば
  *   新しい組の構造を DuckDB の器から採る(1 件へ戻った回は 1 件のときの作りへ戻る)。
  */
-function withSqlSourceSet(
+export function withSqlSourceSet(
   state: AppState,
   extras: readonly SqlExtraSource[],
 ): { state: AppState; events: DomainEvent[] } {
@@ -113,71 +131,52 @@ function withSqlSourceSet(
     events: er.events,
   };
 }
-import { pickErConnection, type ErPendingFrom } from '@features/query/er-connect';
-import { filerRowOptions, dualListViewOptions } from './list-view-options';
-import { getAncestorFolders, reorderSibling, structuralParentsLookup, wouldMakeCycle } from '@features/relation/tree';
-import { extractMeta, seedBodyFor } from '@features/flavor';
-import { isAppendable } from '@features/flavor/append-spec';
-import { kindChangeTarget } from '@features/flavor/kind-change';
-import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
+import { type ErPendingFrom } from '@features/query/er-connect';
+import { filerRowOptions, } from './list-view-options';
+import { getAncestorFolders, } from '@features/relation/tree';
+import { extractMeta, } from '@features/flavor';
+import { type BodyRewrite } from '@features/markdown/body-rewrite';
 import type { TableFormat } from '@features/markdown/table-convert';
 import {
-  endsInsideOpenBlock,
   isLineOpen,
   isPlaceOpen,
-  placeTextOf,
-  placeBlockUnclosed,
   placeEntryLids,
 } from '@features/markdown/place-notation';
-import { isPlaceStyle, type PlaceStyle } from '@features/markdown/place-color';
-import { isPlaceShape, type PlaceShape } from '@features/markdown/place-shape';
-import { isPlaceRectNumber, PLACE_RECT_KEYS, type PlaceRectValue } from '@features/markdown/place-rect';
-import { isPlaceTemplateId, type PlaceTemplateId } from '@features/markdown/place-template';
-import { sectionAt, sectionRange } from '@features/markdown/append-target';
-import { openCodeFenceAt } from '@features/markdown/code-fence-edit';
-import { frontmatterLineCount } from '@features/markdown/frontmatter';
+import { type PlaceStyle } from '@features/markdown/place-color';
+import { type PlaceShape } from '@features/markdown/place-shape';
+import { type PlaceRectValue } from '@features/markdown/place-rect';
+import { type PlaceTemplateId } from '@features/markdown/place-template';
 import {
-  BLOCK_MOVED_NOTICE,
-  moveLinesWithInverse,
   type InsertAnchor,
   type MoveLines,
 } from '@features/markdown/line-move';
 import { replaceNoteTime, replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { RepeatUnit } from '@features/schedule/repeat';
-import { isRealCalendarDate } from '@features/schedule/schedule-date';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { CaptureItem } from '@features/capture/capture-item';
-import { clampGraphDepth, GRAPH_DEFAULT_DEPTH } from '@features/relation/graph-view';
-import { relabelWorkLine, type WorkLogScan } from '@features/timer/work-log';
+import { GRAPH_DEFAULT_DEPTH } from '@features/relation/graph-view';
+import { type WorkLogScan } from '@features/timer/work-log';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { SearchDetailRow } from '@features/filter/search-snippet';
 import {
-  normalizeSplitLids,
   pinSplitLid,
   STACK_MAX,
   unpinSplitLid,
 } from '@features/split-frames';
-import { STACK_ARCHETYPE, stackLids } from '@features/flavor/stack-flavor';
+import { stackLids } from '@features/flavor/stack-flavor';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import type { PersistState } from '@adapter/platform/storage-persist';
 import type { OpenExtension } from '@adapter/platform/extension-links';
 import type { LauncherTile } from '@features/launcher/tiles';
-import { planGroupMove } from '@features/launcher/group-order';
 import {
   APP_GROUP_ARCHETYPE,
   appGroupIconOf,
   appGroupName,
-  appGroupSeed,
-  withAppGroupIcon,
-  writeAppGroupIcon,
-  writeAppGroupOrder,
   type AppGroupIcons,
   type AppGroupOrders,
 } from '@features/launcher/app-group-spec';
 import {
-  applyTileWrites,
   isMovableTile,
-  planTileMove,
   type TileMoveTarget,
 } from '@features/launcher/tile-order';
 import type {
@@ -186,20 +185,15 @@ import type {
 } from '@features/query/group-by';
 import { NO_KINDS, entryFilterOf, normalizeQuery, visibleOrder } from '@features/filter/title-filter';
 import { commandQueryOf } from '@features/palette/command-query';
-import { toggleKind } from '@features/filter/kind-filter';
 import { foldCase, jumpTerms, normalizeFindQuery } from '@features/filter/search-hits';
 import { DIRECTIONLESS_KINDS, STRUCTURAL, type RelationKind } from '@features/relation/kinds';
-import { replaceAll } from '@features/markdown/body-replace';
-import { foldAttachmentHead, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
 import {
   excerptOf,
   PLACE_BODY_CAP,
-  placeEmbeddable,
   sameExcerpt,
   type PlaceExcerpt,
 } from '@features/markdown/place-embed';
 import {
-  baseLidOfKey,
   parseSectionKey,
   sectionEmbedKeys,
   sectionExcerptOf,
@@ -213,9 +207,8 @@ import {
   pushSelection,
   type SelectionHistory,
 } from '@features/nav/selection-history';
-import { filerRows, lidShownInScope, rangeInRows, smartLidsOf } from '@features/relation/filer-list';
+import { filerRows, lidShownInScope, } from '@features/relation/filer-list';
 import {
-  EMPTY_SMART,
   SMART_ARCHETYPE,
   needsRescan,
   matchesSmartTags,
@@ -230,22 +223,7 @@ import {
   pruneDual,
   scopeFallbackNote,
   scopeFellBack,
-  withPane,
-  withScope as withPaneScope,
-  withSelection as withPaneSelection,
-  withCursor,
-  withFilter as withPaneFilter,
-  withBack as withPaneBack,
-  withForward as withPaneForward,
-  canGoBack as paneCanGoBack,
-  canGoForward as paneCanGoForward,
-  paneFilterOptions,
   clipPreview,
-  isTabIndex,
-  withTabActive,
-  withTabAdded,
-  withTabClosed,
-  type DualPaneState,
   type DualSide,
   type DualState,
 } from '@features/relation/dual-pane';
@@ -517,7 +495,7 @@ export interface SqlPageState {
  * @param emit いま頼んでよい回か(⚠ 相手を**開き終えた**回だけ真 ── 開く前に頼むと
  *   前の相手へ飛ぶ)。偽なら「採っています」のまま待つ。
  */
-function erForSource(
+export function erForSource(
   er: SqlPageState['er'],
   source: string,
   route: SchemaRoute,
@@ -565,7 +543,7 @@ function erForSource(
  * ⚠ `erForSource` を使わない ── あちらは `mine` / `pendingFrom` も捨てる(**別の相手へ替わった**回の作法)。
  *   ここは**同じ相手のまま構造だけが変わった**ので、user が引いた線は残す。
  */
-function erAfterDuckWrite(
+export function erAfterDuckWrite(
   er: SqlPageState['er'],
   source: string,
   route: SchemaRoute,
@@ -601,7 +579,7 @@ export const AGENT_APPEND_BATCH = 'agent-append';
  * ⚠ 継いだ行は本文の中で**連続している**(同じ回の追記は全部末尾へ足すので)──
  *   `removeInsertedLines` は連続した並びを探すので、1 手として消せる。
  */
-function nextLastAppend(
+export function nextLastAppend(
   prev: AppState['lastAppend'],
   next: { lid: string; inserted: readonly string[] | null; insertedAt?: number | null; batch?: string },
 ): AppState['lastAppend'] {
@@ -916,7 +894,7 @@ export function phaseBlockReason(phase: AppPhase): string | null {
 /**
  * 🔴 **ノートを開く(`SELECT_ENTRY`)を reducer が捨てる phase の断り文**(#1087)。
  *
- * ⚠ 捨てるのは `editing` と `error` の 2 つだけ(下の `SELECT_ENTRY`)── 読み込み中(`initializing`)は捨てない。
+ * ⚠ 捨てるのは `editing` と `error` の 2 つだけ(`slices/boot.ts` の `SELECT_ENTRY`)── 読み込み中(`initializing`)は捨てない。
  *   `phase !== 'ready'` で断ると、reducer が通す `initializing` まで断ってしまう(reducer と断りの条件がずれる)。
  * 🔑 ノートを開く口(一覧 / リンク / 添付のリンク / アドレス)は、断るかどうかをここ 1 本で決める
  *   (口ごとに `editing` だけを見ると、保存失敗中に原因違いの字が出る)。
@@ -1177,7 +1155,7 @@ export function codeSaveFailureNote(reason: 'missing' | 'ambiguous'): string {
  *   `...clearedSectionDraftAdvisory(state)` の形でスプレッドする(章の欄が閉じる /
  *   開き直る箇所では、控えも必ず `null` に戻す)。
  */
-function clearedSectionDraftAdvisory(state: {
+export function clearedSectionDraftAdvisory(state: {
   readonly error: string | null;
   readonly sectionAdvisory: string | null;
 }): { error: string | null; sectionAdvisory: null } {
@@ -1327,7 +1305,7 @@ export function blockedWithSuffix(blocked: string, suffix: string): string {
  *   `sectionAdvisory` に触らない。
  * @returns 断るなら `ReduceResult`。書いてよいなら `null`(呼び手はそのまま続ける)。
  */
-function bodyWriteBlockResult(state: AppState, lid: string, suffix: string): ReduceResult | null {
+export function bodyWriteBlockResult(state: AppState, lid: string, suffix: string): ReduceResult | null {
   const blocked = bodyWriteBlockReason(state, lid);
   if (blocked === null) return null;
   // ⚠ 章 / コードのどちらでも同じ扱い(#1044 段3) ── PARTIAL_DRAFT_OWN_NOTES 参照。
@@ -1356,7 +1334,7 @@ function bodyWriteBlockResult(state: AppState, lid: string, suffix: string): Red
  *   下書きの種類**(`state.sectionDraft`)で決める ── これから開こうとしている
  *   種類ではない(二重に開かない門は「先に居るほうを勝たせる」設計 ── §9)。
  */
-function sectionDraftBlockedResult(state: AppState): ReduceResult {
+export function sectionDraftBlockedResult(state: AppState): ReduceResult {
   const note =
     state.sectionDraft === null
       ? SECTION_DRAFT_NOTE
@@ -1404,7 +1382,7 @@ export function nextViewMode(current: ViewMode, want: ViewMode): ViewMode {
  *   (「読めなかった」と「空だった」が見分けられなくなる)。
  * 🔑 判定はここ 1 か所 ── 呼び手ごとに書くと、ある経路だけ古い行を映し続ける。
  */
-function dualPreviewTarget(state: AppState, dual: DualState): string | null {
+export function dualPreviewTarget(state: AppState, dual: DualState): string | null {
   const lid = paneOf(dual, dual.focus).cursor;
   if (lid === null) return null;
   const meta = state.entryMetas.get(lid);
@@ -1427,13 +1405,13 @@ function dualPreviewTarget(state: AppState, dual: DualState): string | null {
  *   いくつもある。呼び手ごとに書くと**ある経路だけ集め直さない**
  *   (症状は「押したのに前の並びのまま」という、いちばん気づけない形)。
  */
-function smartScanFor(state: AppState, lid: string | null): DomainEvent[] {
+export function smartScanFor(state: AppState, lid: string | null): DomainEvent[] {
   if (lid === null) return [];
   if (state.entryMetas.get(lid)?.archetype !== SMART_ARCHETYPE) return [];
   return [{ type: 'REQUEST_SMART_SCAN', lid }];
 }
 
-function withDual(state: AppState, dual: DualState): ReduceResult {
+export function withDual(state: AppState, dual: DualState): ReduceResult {
   /**
    * ⚠ **何も変わらないなら state ごと同じものを返す** ── 新しい object を返すと、
    *   「押しても何も変わらない」場面で**面が毎回組み直る**(この面の門は
@@ -1461,7 +1439,7 @@ function withDual(state: AppState, dual: DualState): ReduceResult {
   ]);
 }
 
-function withDualFocus(state: AppState, side: DualSide): ReduceResult {
+export function withDualFocus(state: AppState, side: DualSide): ReduceResult {
   if (state.dual.focus === side) return withDual(state, state.dual);
   return withDual(state, { ...state.dual, focus: side });
 }
@@ -3014,13 +2992,13 @@ export type UserAction =
   | { type: 'SET_PLACE_TEXT'; lid: string; line: number; text: string }
   /**
    * 板の形を変える(#530 案 A。user 裁定 2026-09-14)── 開き行の `shape=` を書く。同じ門。
-   * ⚠ 綴りは `PlaceShape` に閉じる ── 知らない字は reducer で断る(下の case)。
+   * ⚠ 綴りは `PlaceShape` に閉じる ── 知らない字は reducer で断る(`slices/places.ts` の `SET_PLACE_SHAPE`)。
    */
   | { type: 'SET_PLACE_SHAPE'; lid: string; line: number; shape: PlaceShape }
   /**
    * 🔴 **付箋の色・線の色と太さを書く**(#530 段④。Gemini 裁定 A、2026-10-02)── 開き行の
    * `fill=` / `stroke=` / `width=` を書く(`null` の札は**消す**)。同じ門。
-   * ⚠ 綴りは `PlaceStyle` に閉じる ── 読めない値・持てない札は reducer で断る(下の case)。
+   * ⚠ 綴りは `PlaceStyle` に閉じる ── 読めない値・持てない札は reducer で断る(`slices/places.ts` の `SET_PLACE_STYLE`)。
    */
   | { type: 'SET_PLACE_STYLE'; lid: string; line: number; style: PlaceStyle }
   /**
@@ -4008,7 +3986,7 @@ export type SystemCommand =
       type: 'SECTION_SAVED';
       lid: string;
       gen: number;
-      /** 身元検査(`app-state.ts` の `SECTION_SAVED` reducer 参照)。 */
+      /** 身元検査(`slices/edit.ts` の `SECTION_SAVED` 参照)。 */
       heading: string;
       /** 章を差し替えた**後**の全文。 */
       body: string;
@@ -4032,7 +4010,7 @@ export type SystemCommand =
       type: 'CODE_SAVED';
       lid: string;
       gen: number;
-      /** 身元検査(`app-state.ts` の `CODE_SAVED` reducer 参照)。 */
+      /** 身元検査(`slices/edit.ts` の `CODE_SAVED` 参照)。 */
       line: number;
       openLine: string;
       quote: number;
@@ -4752,7 +4730,7 @@ export const SQL_HISTORY_MAX = 20;
  * 走った字を履歴へ積む。⚠ **同じ字を 2 つ並べない**(直前と同じなら積み直さない)。
  * 🔑 純粋な関数にしてあるので、reducer の中で `if` を増やさずに済む。
  */
-function historyPush(
+export function historyPush(
   history: readonly string[],
   sql: string,
 ): { readonly history: readonly string[] } {
@@ -4764,7 +4742,7 @@ function historyPush(
  * 履歴の**いま見ている所**へ、手直しした字を控える。
  * ⚠ 呼ぶのは `historyAt >= 0` のときだけ(打ちかけの側は `sql` 自身が正本)。
  */
-function withHistoryEdit(p: SqlPageState, sql: string): readonly (string | undefined)[] {
+export function withHistoryEdit(p: SqlPageState, sql: string): readonly (string | undefined)[] {
   const edits = [...p.historyEdits];
   edits[p.historyAt] = sql;
   return edits;
@@ -4778,7 +4756,7 @@ function withHistoryEdit(p: SqlPageState, sql: string): readonly (string | undef
  * 🔑 `↑` `↓`(`SQL_HISTORY_STEP`)と一覧から選ぶ(`SQL_HISTORY_PICK`)が
  *   **同じ 1 か所**を通る ── 2 つ目の数え方を作らない(CLAUDE.md §7)。
  */
-function goHistory(p: SqlPageState, at: number, from: number): SqlPageState {
+export function goHistory(p: SqlPageState, at: number, from: number): SqlPageState {
   const draft = from === -1 && at >= 0 ? p.sql : p.historyDraft;
   // 🔑 **手直しした字が在ればそちら**(無ければ走らせた字そのもの)
   const sql = at < 0 ? draft : (p.historyEdits[at] ?? p.history[at] ?? p.sql);
@@ -5308,6614 +5286,276 @@ function reduceCore(
   action: Exclude<Dispatchable, { type: 'NAV_HISTORY' }>,
 ): ReduceResult {
   switch (action.type) {
-    case 'SYS_BOOTED': {
-      const metas = new Map(action.metas.map((m) => [m.lid, m]));
-      // entryOrder の tie は lid 辞書順で安定化(review P5b F3 ── trash 復元と
-      // CREATE の並行採番は重複しうる。正準親の tie-break とも同じ規約)
-      const order = [...action.metas]
-        .sort((a, b) => a.entryOrder - b.entryOrder || a.lid.localeCompare(b.lid))
-        .map((m) => m.lid);
-      // 🔴 **同じ container への再読込なら選択を保つ**(2026-08-05、user 報告)。
-      //
-      // ここは元々「再 boot では旧選択・旧 openBody を持ち越さない」だった。
-      // 意図は **container 切替**での lid 偶然衝突の防止(review F)で、それは正しい。
-      // ただし取込は**同じ container の再読込**でもここを通る ── つまり
-      // **md を 1 件開いただけで、いま読んでいたノートが画面から消えて**
-      // 「左の一覧から選ぶと…」に戻っていた(実測)。
-      //
-      // ⚠ 保つ条件は 2 つとも要る:**cid が同じ**(別 container なら従来どおり捨てる)
-      //    かつ **その lid が新しい一覧に在る**(消えたノートを選んだままにしない)。
-      // ⚠ `openBody` は必ず捨てる ── 再読込で本文が変わっている可能性がある。
-      //    代わりに `REQUEST_BODY` を出して**取り直す**(選択の意味論は SELECT_ENTRY と同じ)
-      /**
-       * 🔴 **システムのメッセージ / 処理の記録を開いているときも保つ**(#1087)。
-       * ⚠ この 2 件は `entryMetas` に居ない(§1.1)ので、`metas.has` だけで検めると
-       *   別タブが保存・改名・削除するたびに(300ms 後の再読込で)閉じて「何も選んでいない」へ戻っていた。
-       *   居る場所が違うだけで消えてはいないので、保って**メッセージ用の口**で取り直す(`REQUEST_BODY` ではない)。
-       */
-      const keepsLid = (l: string): boolean => metas.has(l) || isSystemMessageLid(l);
-      const keepLid =
-        state.cid === action.cid && state.selectedLid !== null && keepsLid(state.selectedLid)
-          ? state.selectedLid
-          : null;
-      /**
-       * 🔴 **現在地と印も同じ規則で検める**(#240 の着地前レビュー 1)。
-       *
-       * ⚠ `SYS_BOOTED` は**別タブが書くたび**に飛ぶ(`main.ts` の 300ms 束ね)。
-       *    選択だけ検めて `scopeLid` を素通りさせると、**別タブがそのフォルダを
-       *    消した瞬間**に「現在地は在るが実体は無い」状態になり、表は 0 行・
-       *    パンくずはルートだけ ── **データが全部消えたように見える**。
-       *    そこで「+ ノート」を押すと親が付かず、作ったものも画面に出ない。
-       * ⚠ 印(`selection`)も同じ ── 消えた lid が残ると「N 件を選んでいます」の
-       *    帯だけが出て、まとめて削除が**画面に無いものを消す**。
-       * ⚠ 別 container(`cid` 違い)なら全部捨てる ── lid の偶然衝突を持ち越さない。
-       */
-      const sameCid = state.cid === action.cid;
-      const keepScope =
-        sameCid && state.scopeLid !== null && metas.has(state.scopeLid) ? state.scopeLid : null;
-      const keepMarks = sameCid ? state.selection.filter(keepsLid) : [];
-      /**
-       * ⚠ **別 container なら 2 ペインも畳む**(印の持ち越しと同じ判断)──
-       * lid の偶然衝突で「他人のフォルダを開いた 2 枚のタブ」を残さない。
-       * 🔑 同じ container のときの掃除は `reduce` の 1 か所がやる(上の注記)。
-       */
-      const keepDual = sameCid ? state.dual : initialDual;
-      /**
-       * 🔴 **読んでいたノートが、別のタブの操作で一覧から無くなったら、そう言う**(台帳 #1852 G2 / 依頼 298 A)。
-       * ⚠ 直す前は何の知らせもなく「何も選んでいない」画面になり、データが消えたように見えた。
-       *   取り込みの総入れ替えでもここを通るので、断定せず「ゴミ箱へ移されたかもしれません」と言う。
-       */
-      const lostReading =
-        sameCid && state.selectedLid !== null && !keepsLid(state.selectedLid)
-          ? state.entryMetas.get(state.selectedLid)?.title
-          : undefined;
-      const keepAnchor =
-        sameCid && state.selectionAnchor !== null && keepsLid(state.selectionAnchor)
-          ? state.selectionAnchor
-          : null;
-      return {
-        state: {
-          ...state,
-          phase: 'ready',
-          error: null,
-          cid: action.cid,
-          entryMetas: metas,
-          order,
-          relations: action.relations,
-          selectedLid: keepLid,
-          scopeLid: keepScope,
-          dual: keepDual,
-          ...(lostReading === undefined
-            ? {}
-            : {
-                notice: `読んでいたノート「${lostReading}」が一覧から無くなりました(別のタブでゴミ箱へ移されたかもしれません。ゴミ箱から戻せます)`,
-                noticeOpen: null,
-                noticeCreate: null,
-              }),
-          selection: keepMarks,
-          selectionAnchor: keepAnchor,
-          openBody: null,
-          freshLid: null,
-          // 🔴 別の container なら、板・見出しの節の抜粋も捨てる(lid の偶然衝突で他人の本文を出さない)。
-          //    同じ container の再読込では保つ(書込の追随は `syncShownBodies` が担う)
-          placeBodies: sameCid ? state.placeBodies : new Map<string, PlaceExcerpt>(),
-          // ⚠ 元ファイルの紐づけは**このセッションの持ち物**なので、同じ container の
-          //    再読込では保つ(取込のたびに消えると、開いた直後に書き戻せなくなる)。
-          //    ⚠ ただし**消えた lid は落とす** ── 居ない entry を指す導線を残さない
-          linkedFiles: keepLinks(state, action.cid, metas),
-          /**
-           * 🔴 **集計の数字は再読込で捨てる**(レビュー C-1)。⚠ 取込はここを通るので、
-           * 残すと「N 件のノートを見ました」が**古い数**のまま出続ける。
-           * ⚠ 捨てるだけでは「数えています…」で止まるので、**面を開いていれば
-           * 数え直しも頼む**(捨てる側と頼む側は対で要る)。
-           * ⚠ 束ね方(`queryKey`)は端末の設定なので**保つ**。
-           */
-          queryKeys: null,
-          queryGroups: null,
-          queryFailed: false,
-          /**
-           * 🔴 **予定の札は、同じ container なら保って集め直す / 別なら捨てる**(#1087。連絡先と同じ作法)。
-           * ⚠ 丸ごと `null` にすると、本体で保存するたびに**同じ中身を見ている別ウィンドウの予定表が
-           *   「集めています…」の空表へ戻る**。消えた lid の札だけ落とす(`keepTasks`)。
-           *
-           * (以下は捨てていた頃の理由。別 container では今も当てはまる ── #277 段②-b)
-           * ⚠ 取込はここを通るので、残すと**消えたノートの札**が盤面に残り、
-           *   押すと「見つからない」になる。⚠ 捨てるだけでは「集めています…」で
-           *   止まるので、**一度でも集めていれば集め直しも頼む**(対で要る)。
-           */
-          taskScan: keepTasks(state, sameCid, metas),
-          taskScanFailed: false,
-          // 🔴 **雛形も捨てる**(同じ理由)── 残すと**消えたノートの雛形**が
-          //    `/` に並び、押すと本文が入らない(押しても何も起きない導線)
-          snippetScan: null,
-          /**
-           * 🔴 **連絡先も再読込で検め直す**(#278 段③ の動線レビュー 2026-08-28)。
-           *
-           * ⚠ ここは **`contactScan` だけが漏れていた** ── 集計・予定・雛形は
-           *   捨てて頼み直すのに、連絡先は表にも events にも居なかった。
-           *   帰結は 2 つで、どちらも user のデータに触る:
-           *   ① **取込はここを通る**ので、`.vcf` を 200 枚入れても一覧は
-           *      「連絡先はまだありません」のまま ── user は「入らなかった」と読み、
-           *      **同じ file をもう一度取り込んで 400 件になる**
-           *      (`reload-snapshot.ts` が「二重取込が実データとして残る」と書いている形)
-           *   ② ノートを消しても行が残り、押しても**何も起きない**
-           *      (`SELECT_ENTRY` は居ない lid を黙って捨てる)
-           * 🔑 直し方は**予定と同じにしない** ── あちらは丸ごと `null` にするが、
-           *   連絡先で同じことをすると**別タブが書くたびに一覧が空へ飛ぶ**
-           *   (`SYS_BOOTED` は 300ms 束ねで頻繁に飛ぶ。`REFRESH_CONTACT_SCAN` が
-           *   「消すと行が飛ぶ」とわざわざ書いているのはそのため)。
-           * 🔑 だから**消えた lid だけ落として頼み直す** ── この reducer が
-           *   `selection` に対して既にやっている形と同じである(`keepMarks`)。
-           */
-          contactScan: keepContacts(state, sameCid, metas),
-          /**
-           * 🔴 **録ったものも同じ扱い**(#683 段①。上の `contactScan` と対)。
-           * ⚠ 丸ごと `null` にしない ── `SYS_BOOTED` は別タブが書くたびに飛ぶので、
-           *   捨てると一覧が「集めています…」へ落ちて**行が飛ぶ**。
-           * ⚠ 落とさないと、**消したノートの行が残って押しても何も起きない**。
-           */
-          captureItems: keepCaptures(state, sameCid, metas),
-          // 🔴 計った時間も同じ扱い(#683 ①)── 丸ごと `null` にしない / 消えたノートの行は落とす
-          workLogScan: keepWorkLog(state, sameCid, metas),
-          /**
-           * 🔴 **履歴・ごみ箱の開いた面は、同じ container なら保って取り直す / 別なら畳む**(#1087)。
-           * ⚠ 別タブの書込はここを通るが、今まで `...state` で素通りだった ── 履歴の面は
-           *   **別タブが保存した版が増えない**。ノートが消えていれば畳む(居ない lid の履歴を出さない)。
-           * ⚠ 前の答えは取り直しが届くまで保つ(ちらつかせない)。
-           */
-          revisionPanel:
-            sameCid && state.revisionPanel !== null && metas.has(state.revisionPanel.lid)
-              ? state.revisionPanel
-              : null,
-          trashPanel: sameCid ? state.trashPanel : null,
-        },
-        events: [
-          ...(keepLid === null
-            ? []
-            : [
-                isSystemMessageLid(keepLid)
-                  ? { type: 'REQUEST_MESSAGES_BODY' as const, lid: keepLid }
-                  : { type: 'REQUEST_BODY' as const, lid: keepLid },
-              ]),
-          // 🔴 参照元・履歴・ごみ箱・横に留めた枠・板の抜粋も、別タブの書込で古くなる(#1087)。
-          //    題名 / 件数が同じだと `entryListChanged` では取り直されないので、ここで頼む。
-          ...(keepLid !== null && !isSystemMessageLid(keepLid) && state.backlinks !== null
-            ? [{ type: 'REQUEST_BACKLINKS' as const, lid: keepLid }]
-            : []),
-          ...(sameCid && state.revisionPanel !== null && metas.has(state.revisionPanel.lid)
-            ? [{ type: 'REQUEST_REVISION_LIST' as const, lid: state.revisionPanel.lid }]
-            : []),
-          ...(sameCid && state.trashPanel !== null ? [{ type: 'REQUEST_TRASH_LIST' as const }] : []),
-          // ⚠ 本文は捨てない(返事が届くまで今の字を映す)。留めた枠は読むだけの面なので、
-          //    編集中の打鍵を上書きしない(編集の入れ物は `openBody` / 編集 draft で別)
-          ...(sameCid
-            ? state.splitLids
-                .filter((l) => metas.has(l))
-                .map((l) => ({ type: 'REQUEST_SPLIT_BODY' as const, lid: l }))
-            : []),
-          ...(sameCid
-            ? [...placeBodiesOf(state).keys()]
-                .filter((k) => metas.has(baseLidOfKey(k)))
-                .map((k) => ({ type: 'REQUEST_PLACE_BODY' as const, lid: k }))
-            : []),
-          // 🔴 取込・別タブの変更で本文が変わっている ── 絞っている語で撃ち直す(#1087)
-          ...searchRefreshEvents(state),
-          // 🔴 2 ペインの下見も撃ち直す(#1087)── 別タブが書くと古い本文のままだった。
-          //    消えた行・畳んだ下見には撃たない。前の本文は届くまで保つ(ちらつかせない)
-          ...(sameCid &&
-          state.dual.previewOn &&
-          state.dual.preview !== null &&
-          metas.has(state.dual.preview.lid) &&
-          dualPreviewTarget(state, state.dual) === state.dual.preview.lid
-            ? [{ type: 'REQUEST_DUAL_PREVIEW' as const, lid: state.dual.preview.lid }]
-            : []),
-          ...(state.viewMode === 'query'
-            ? [{ type: 'REQUEST_QUERY_SCAN' as const, key: state.queryKey }]
-            : []),
-          /**
-           * 🔴 **予定は「開いているか」ではなく「一度でも集めたか」で頼み直す**
-           * (#292 段⑤、2026-08-23)。
-           *
-           * ⚠ 中央の面だった頃は `state.viewMode === 'kanban'` で足りたが、
-           *   予定は**左の列のタブ**になったので、reducer からは開いているか
-           *   どうかが見えない(`BrowseMode` は state に持たせていない ──
-           *   「どう探すか」は画面側の都合で container のデータではない)。
-           * 🔑 だから**直前に札を持っていたか**で決める ── 持っていたなら
-           *   その user は予定を開いており、いま `null` に落としたので
-           *   頼み直さないと**「集めています…」で止まったまま**になる。
-           * ⚠ 一度も開いていない user には撃たない(全ノートの走査を、
-           *   予定を使わない user に負わせない ── 集計と同じ流儀)。
-           * ⚠ **判定を `main.ts` へ出さない** ── あちらはどの test からも
-           *   実行されない(CLAUDE.md §2)。
-           */
-          ...(state.taskScan === null ? [] : [{ type: 'REQUEST_TASK_SCAN' as const }]),
-          /**
-           * 🔴 **開いているスマートフォルダも集め直す**(#1087。予定・連絡先・録ったものと同じ作法)。
-           * ⚠ `smartHits` は持ち越されるので、別タブがタグを足す・外す / 取り込みで `SYS_BOOTED` が来ても
-           *   撃ち直さないと**中身が古いまま追随しない**。「一度でも集めた」= `smartHits` に居る物だけ撃つ
-           *   (一度も開いていないスマートフォルダには走査を負わせない)。
-           * ⚠ 消えたノート・別のコレクションの lid には撃たない。
-           */
-          ...(sameCid
-            ? [...state.smartHits.keys()]
-                .filter((l) => metas.get(l)?.archetype === SMART_ARCHETYPE)
-                .map((l) => ({ type: 'REQUEST_SMART_SCAN' as const, lid: l }))
-            : []),
-          /**
-           * 🔴 **連絡先も頼み直す**(上の `contactScan` と対)。
-           * ⚠ 落とすだけでは、**取り込んだ 200 件が 1 件も現れない** ──
-           *   集め直しの合図は「左のタブを連絡先へ切り替えたとき」1 か所しか
-           *   無いので、タブを開いたままの user には永久に届かない。
-           * ⚠ 一度も開いていない user には撃たない(全ノートの走査を、
-           *   連絡先を使わない user に負わせない ── 予定・集計と同じ流儀)。
-           */
-          ...(state.contactScan === null ? [] : [{ type: 'REQUEST_CONTACT_SCAN' as const }]),
-          // 🔴 計った時間も頼み直す(#683 ①。一度も開いていない user には撃たない)
-          ...(state.workLogScan === null ? [] : [{ type: 'REQUEST_WORK_LOG_SCAN' as const }]),
-          /**
-           * 🔴 **アプリ一覧のタイルとグループも頼み直す**(#1087。上の連絡先と対)。
-           * ⚠ 落とさずに素通りしていたので、別タブの書込・取り込みの再読込・改名・ごみ箱で
-           *   **旧名や消した物のタイルが残り、押すとごみ箱の物を開いた**。
-           * ⚠ 一度も開いていない user には撃たない(`launcherTiles === null`)。
-           * ⚠ **新しい `order` / `metas` で数える**(取り込んだ添付を載せるため)。
-           */
-          ...(state.launcherTiles === null ? [] : launcherReloadEvents(order, metas, state.appGroupGen)),
-          /**
-           * 🔴 **録ったものも頼み直す**(#683 段①。上の連絡先と対)。
-           * ⚠ 落とすだけでは、**取り込んだ録音が 1 件も現れない** ── 集め直しの
-           *   合図は「タブを開いたとき」しか無いので、開いたままの user には届かない。
-           * ⚠ 一度も開いていない user には撃たない(添付の本文の走査を、
-           *   この面を使わない user に負わせない ── 予定・連絡先と同じ流儀)。
-           */
-          ...(state.captureItems === null
-            ? []
-            : [
-                {
-                  type: 'REQUEST_CAPTURE_ITEMS' as const,
-                  /**
-                   * ⚠ **新しい `metas` / `order` で数える** ── `state`(古い方)から
-                   *   採ると、いま取り込んだ添付が 1 件も載らない
-                   *   (取込はこの枝を通るので、それが本命の場面である)。
-                   */
-                  entries: attachmentEntriesOf(order, metas),
-                },
-              ]),
-        ],
-      };
-    }
-    case 'MESSAGES_UNREAD_SET': {
-      // ⚠ 値を写すだけ ── 「注意 / 問題だけ数える」判定は countUnread(features 層)側
-      if (state.messagesUnread === action.count) return { state, events: [] };
-      return { state: { ...state, messagesUnread: action.count }, events: [] };
-    }
-    case 'MESSAGES_BODY_REFRESH': {
-      // ⚠ 開いているそのノートだけ。`BODY_LOADED` も編集中 / 別の選択なら捨てるので、ここで先に止める
-      if (state.selectedLid !== action.lid || state.phase !== 'ready') return { state, events: [] };
-      return { state, events: [{ type: 'REQUEST_MESSAGES_BODY', lid: action.lid }] };
-    }
-    case 'SELECT_ENTRY': {
-      if (state.phase === 'editing') return { state, events: [] }; // 編集中は選択遷移しない
-      // error phase(= persist 失敗)でも遷移しない ── openBody の baseline が
-      // 「disk 未達 commit の唯一の写し」であり、選択遷移は無警告破棄になる
-      // (P3-6b review #2)。出口は 再保存(RETRY_PERSIST)
-      if (state.phase === 'error') return { state, events: [] };
-      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
-      // 同一 lid でも openBody が確立していなければ再要求する
-      // (読み失敗後の再クリックが自然な retry になる ── review C)
-      // 🔴 **設定を開いたまま一覧を押したら、中央をノートへ戻す**(P8 段⑲)。
-      //    直す前は右の情報ペインだけ切り替わり、中央は設定のまま・追記欄も
-      //    消えたままで、ノートが開かない理由が画面のどこにも無かった
-      //    (マニュアル「行の右クリックから整理する」の「中央は常にいま開いているノート」の当の破れ)
-      // 🔴 **`isAsidePane` ではない**(#906)── SQL の面は退かない(上の `leavesOnSelect`)
-      const leaveSettings = leavesOnSelect(state.viewMode);
-      if (state.selectedLid === action.lid && state.openBody?.lid === action.lid) {
-        /**
-         * 🔴 **すでに開いている行を素で押したときも、印は 1 件へ戻す**(#240 段②)。
-         *
-         * ⚠ ここは「同じノートをもう一度押した」だけの早期 return だが、
-         * **印(複数選択)はその外に在る** ── 直す前は 3 件に印を付けたあと、
-         * そのうちの 1 件を素で押しても**印が 3 件のまま**だった(実ブラウザ smoke で
-         * 判明。unit は「別の行を押す」筋しか通っていなかった)。
-         * 🔑 修飾なしのクリックは「これだけを相手にする」の意味なので、
-         *   どの行を押したかに関わらず印は 1 件になる。
-         */
-        const marks =
-          state.selection.length === 1 && state.selection[0] === action.lid
-            ? state
-            : { ...state, selection: [action.lid], selectionAnchor: action.lid };
-        return leaveSettings
-          ? { state: { ...marks, viewMode: 'detail' as const }, events: [] }
-          : { state: marks, events: [] };
-      }
-      // 選択が変わったら旧 openBody は破棄(速やかな破棄の原則)し、新 body を要求。
-      // 🔴 **知らせは選択で消えない**(設計 doc §7、段②a)── 「注意 / 問題」を
-      // 消せるのは「メッセージ」のノートを開いたとき(`MESSAGES_READ`)だけ。
-      return {
-        state: {
-          ...state,
-          ...(leaveSettings ? { viewMode: 'detail' as const } : {}),
-          selectedLid: action.lid,
-          /**
-           * ⚠ **印は 1 件へ置き換える**(#240 段②)── 修飾なしのクリックは
-           * 「これだけを相手にする」の意味。`Ctrl` / `Shift` は別の action で入る。
-           */
-          selection: [action.lid],
-          selectionAnchor: action.lid,
-          openBody: null,
-          revisionPanel: null, // panel は選択に従属(P5b)
-          // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
-          revisionPreview: null,
-        },
-        events: [{ type: 'REQUEST_BODY', lid: action.lid }],
-      };
-    }
-    case 'MESSAGES_READ': {
-      /**
-       * 🔴 **メッセージ(system 領域のノート)を開く**(設計 doc §7、段②a)。
-       *
-       * ⚠ `SELECT_ENTRY` と**同じ形の遷移**だが、`state.entryMetas.has(lid)` は
-       *   通さない(system 領域のノートは `entryMetas` に無い ── §1.1)。
-       * ⚠ **編集中 / error phase では遷移しない**(`SELECT_ENTRY` と同じ理由 ──
-       *   openBody の baseline が disk 未達 commit の唯一の写しである)。
-       */
-      if (state.phase === 'editing' || state.phase === 'error') return { state, events: [] };
-      const leaveSettings = leavesOnSelect(state.viewMode);
-      return {
-        state: {
-          ...state,
-          ...(leaveSettings ? { viewMode: 'detail' as const } : {}),
-          selectedLid: action.lid,
-          selection: [action.lid],
-          selectionAnchor: action.lid,
-          openBody: null,
-          revisionPanel: null,
-          revisionPreview: null,
-          // 🔴 **既読はここで消える**(§7)── 選ぶだけでは消えない(直前の case の注記)。
-          error: null,
-          messagesUnread: 0,
-        },
-        events: [{ type: 'REQUEST_MESSAGES_BODY', lid: action.lid }],
-      };
-    }
-    case 'BODY_LOADED': {
-      // 編集中は受理しない ── 遅延到着の応答が入力中の body/baseline を
-      // 巻き戻す事故の防止(review B)
-      if (state.phase === 'editing') return { state, events: [] };
-      // 応答が現選択と食い違う(遅延到着)なら捨てる ── stale 反映防止
-      if (state.selectedLid !== action.lid) return { state, events: [] };
-      return {
-        state: {
-          ...state,
-          // 🔴 **`error` はここで消さない**(設計 doc §7、段②a)。
-          openBody: {
-            lid: action.lid,
-            body: action.body,
-            baseline: action.body,
-            persisted: action.body,
-            diskAhead: false,
-          },
-          /**
-           * ⚠ **disk の本文は、板の走査より新しいことがある**(別タブが書いた等)。
-           *   組み直さないと、その 1 件だけ古い行番号を指したまま押せる。
-           * 🔑 板を開いていなければ即 `null` で返るので、実費はほぼ無い。
-           */
-          taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
-          // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
-          smartHits: refreshSmartHits(
-            state.smartHits,
-            action.lid,
-            action.body,
-            state.entryMetas,
-          ),
-        },
-        events: [],
-      };
-    }
-    case 'BODY_LOAD_FAILED': {
-      if (state.selectedLid !== action.lid) return { state, events: [] };
-      // phase は落とさない(読み失敗はアプリ死ではない ── 再クリックが retry)。
-      // エラーは state に持つ: 次の成功 / 選択までステータスに残る
-      return {
-        state: { ...state, error: action.error === ENTRY_GONE_NOTE ? ENTRY_GONE_NOTE : `本文を読み込めませんでした: ${action.error}` },
-        events: [],
-      };
-    }
+    case 'SYS_BOOTED':
+    case 'MESSAGES_UNREAD_SET':
+    case 'MESSAGES_BODY_REFRESH':
+    case 'SELECT_ENTRY':
+    case 'MESSAGES_READ':
+    case 'BODY_LOADED':
+    case 'BODY_LOAD_FAILED':
+      return reduceBoot(state, action);
     case 'SET_ENTRY_FILTER':
-      // ⚠ 選択は消さない(`SET_VIEW_MODE` と同じ規約)── 絞り込んで消えた行を
-      // 選んでいても、解除すれば戻ってくる
-      if (state.filterQuery === action.query) return { state, events: [] };
-      /**
-       * 🔴 **問い合わせが変わったら本文の当たりは捨てる**(#181)── 残すと
-       * 「前の語で当たった行」が新しい絞り込みに混ざる。⚠ 捨てたうえで
-       * `REQUEST_SEARCH` を出し、返ってきたら `SET_SEARCH_HITS` で増やす。
-       */
-      return {
-        state: {
-          ...state,
-          filterQuery: action.query,
-          searchHits: null,
-          searchHitsQuery: '',
-          // ⚠ 前の語の「ほかにもあります」を持ち越さない(#680)
-          searchHitsTruncated: false,
-          searchHitsFailed: false,
-          /**
-           * 🔴 **絞り込んだら並べ替えモードは落とす**(#857 段①b-2)。
-           * ⚠ 出ているのは絞った後のタイルだが、並び順の正本は**全件**なので、
-           *   そのまま「上へ」を押しても**画面が 1 ドットも動かない**
-           *   (隠れた隣と入れ替わっただけ)。⚠ 判定を 2 か所に置かない ──
-           *   ここで落とすので、描く側も押す側も `launcherReorder` 1 つを読む。
-           */
-          launcherReorder:
-            normalizeQuery(action.query) === '' ? state.launcherReorder : false,
-        },
-        /**
-         * 🔴 **`>` で始まる字は、本文を探さない**(#274 段①)── 操作の名前を探している
-         *   のであって、`>` ごと SQL で全文検索しても当たりは 0 件で、worker を無駄に叩く。
-         * ⚠ 語は `filterQuery` に**写す**(欄の字の正本は state)。一覧を操作に替えるのは
-         *   描く側(`browse.ts`)で、ここは検索を撃たないことだけを決める。
-         */
-        events:
-          commandQueryOf(action.query) !== null
-            ? []
-            : [{ type: 'REQUEST_SEARCH', query: action.query }],
-      };
-    /**
-     * 🔴 **種類の札を押した / もう一度押した**(#411)。
-     * ⚠ 選択は消さない(`SET_ENTRY_FILTER` と同じ規約)── 絞って消えた行を
-     *   選んでいても、外せば戻ってくる。
-     * ⚠ **本文の当たり(`searchHits`)は捨てない** ── 語は変わっていないので、
-     *   捨てると当たりが返るまで**本文だけ当たっていた行が消える**(ちらつく)。
-     */
-    case 'TOGGLE_KIND_FILTER': {
-      const kinds = toggleKind(state.kindFilter, action.archetype);
-      return { state: { ...state, kindFilter: kinds }, events: [] };
-    }
+    case 'TOGGLE_KIND_FILTER':
     case 'CLEAR_KIND_FILTER':
-      if (state.kindFilter.size === 0) return { state, events: [] };
-      return { state: { ...state, kindFilter: NO_KINDS }, events: [] };
-    /**
-     * 🔴 **最近開いた記録が入れ替わった**(#215 残り①)。
-     * ⚠ **時刻はここで作らない**(reducer は純粋)── 呼び側(effect)が
-     *   `Date.now()` を読んで、出来上がった表を渡す。
-     * ⚠ 同じ中身なら**新しい参照を作らない** ── 指紋が毎回変わると、
-     *   一覧が 1 文字も変わっていないのに描き直される。
-     */
-    case 'SET_OPENED_AT': {
-      const now = state.openedAt;
-      if (now.size === action.openedAt.size) {
-        let same = true;
-        for (const [lid, at] of action.openedAt) {
-          if (now.get(lid) !== at) {
-            same = false;
-            break;
-          }
-        }
-        if (same && (action.keepListOrder === true || state.openedAtShown === now))
-          return { state, events: [] };
-        if (same) return { state: { ...state, openedAtShown: now }, events: [] };
-      }
-      return {
-        state: {
-          ...state,
-          openedAt: action.openedAt,
-          // ⚠ 開いただけでは一覧の並びを動かさない(`openedAtShown` の注記)
-          openedAtShown: action.keepListOrder === true ? state.openedAtShown : action.openedAt,
-        },
-        events: [],
-      };
-    }
-    case 'SET_ENTRY_SORT': {
-      // ⚠ 選択は消さない ── 並び替えただけで開いているノートが変わると驚く
-      const desc = action.desc ?? NATURAL_DESC[action.sort];
-      if (state.entrySort === action.sort && state.entrySortDesc === desc)
-        return { state, events: [] };
-      return { state: { ...state, entrySort: action.sort, entrySortDesc: desc }, events: [] };
-    }
-    case 'SET_QUERY_KEY': {
-      if (state.queryKey === action.key) return { state, events: [] };
-      /**
-       * 🔴 **前の表を必ず捨てる**(#184)。⚠ 残すと「見出しだけ変わって中身が
-       * 古いまま」の表になる ── 検索が `searchHits` を捨てるのと同じ理由。
-       */
-      const cleared = { ...state, queryKey: action.key, queryGroups: null, queryFailed: false };
-      if (action.key === null) return { state: cleared, events: [] };
-      return { state: cleared, events: [{ type: 'REQUEST_QUERY_SCAN', key: action.key }] };
-    }
+    case 'SET_OPENED_AT':
+    case 'SET_ENTRY_SORT':
+    case 'SET_QUERY_KEY':
     case 'REFRESH_QUERY':
-      // ⚠ 前の表は**消さない**(ランチャーと同じ ── 読み直しの間に空白を出さない)
-      return {
-        state: { ...state, queryFailed: false },
-        events: [{ type: 'REQUEST_QUERY_SCAN', key: state.queryKey }],
-      };
     case 'SET_QUERY_SCAN':
-      // ⚠ **遅れて返った古い結果を捨てる**(検索と同じ ── 選び直しは結果より速い)
-      if (action.key !== state.queryKey) return { state, events: [] };
-      return {
-        state: {
-          ...state,
-          queryKeys: action.keys,
-          // ⚠ key が無い走査は表を持たない ── そのとき前の表を消さない
-          queryGroups: action.groups ?? state.queryGroups,
-          queryFailed: false,
-        },
-        events: [],
-      };
     case 'QUERY_FAILED':
-      return { state: { ...state, queryFailed: true }, events: [] };
     case 'SET_TASK_SCAN':
-      return { state: { ...state, taskScan: action.scan, taskScanFailed: false }, events: [] };
     case 'TASK_SCAN_FAILED':
-      return { state: { ...state, taskScanFailed: true }, events: [] };
     case 'SET_CONTACT_SCAN':
-      return {
-        state: { ...state, contactScan: action.scan, contactScanFailed: false },
-        events: [],
-      };
     case 'CONTACT_SCAN_FAILED':
-      return { state: { ...state, contactScanFailed: true }, events: [] };
     case 'SET_WORK_LOG_SCAN':
-      return { state: { ...state, workLogScan: action.scan, workLogScanFailed: false }, events: [] };
     case 'WORK_LOG_SCAN_FAILED':
-      return { state: { ...state, workLogScanFailed: true }, events: [] };
-    /**
-     * 🔴 **計った時間の名前を付け替える / 行を消す**(#683 ①)。⚠ `TOGGLE_TASK` と**同じ形**:
-     *   断りは lid で判定し、押した時点の行は**一覧が見ていた断面**(`workLogScan`)から引く
-     *   (行番号だけだと、別の窓が上へ 1 行足したあと別の行を書き換える)。引けなければ撃たずに断る。
-     */
     case 'SET_WORK_LOG_LABEL':
-    case 'DELETE_WORK_LOG': {
-      const del = action.type === 'DELETE_WORK_LOG';
-      const blockedResult = bodyWriteBlockResult(
-        state,
-        action.lid,
-        del ? '計った時間を消してください' : '名前を直してください',
-      );
-      if (blockedResult !== null) return blockedResult;
-      const meta = state.entryMetas.get(action.lid);
-      const run = state.workLogScan?.runs.find((r) => r.lid === action.lid && r.line === action.line);
-      if (!meta || run === undefined) {
-        return {
-          state: { ...state, error: '計った時間が見つかりません(一覧が古くなっています。開き直すと集め直します)' },
-          events: [{ type: 'REQUEST_WORK_LOG_SCAN' }],
-        };
-      }
-      const next = del ? null : relabelWorkLine(run.rawLine, action.type === 'SET_WORK_LOG_LABEL' ? action.label : '');
-      if (!del && next === null) return { state, events: [] };
-      // 変わらない名前は書かない(同じ本文を書き直して更新日時だけ動かさない)
-      if (next === run.rawLine) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: { kind: 'work-log', line: run.line, openLine: run.rawLine, next },
-          },
-        ],
-      };
-    }
+    case 'DELETE_WORK_LOG':
     case 'SET_CAPTURE_ITEMS':
-      return {
-        state: { ...state, captureItems: action.items, captureScanFailed: false },
-        events: [],
-      };
     case 'CAPTURE_SCAN_FAILED':
-      return { state: { ...state, captureScanFailed: true }, events: [] };
     case 'SET_CAPTURE_PLAYING':
-      // ⚠ 同じ行をもう一度押したら**やめる**(押す口を 2 つ作らない)
-      return {
-        state: {
-          ...state,
-          capturePlayingLid: state.capturePlayingLid === action.lid ? null : action.lid,
-          // 🔴 鳴らす物が変わったら印は消す ── 別の録音の時刻を残さない
-          captureTrim: null,
-        },
-        events: [],
-      };
-    case 'SET_CAPTURE_TRIM_MARK': {
-      // 🔴 **鳴っていなければ印は付かない** ── 時刻は「いま鳴っている所」の話なので、
-      //   鳴っていなければ意味を持たない(押し所を出さないのは描画側の仕事)
-      const lid = state.capturePlayingLid;
-      if (lid === null) return { state, events: [] };
-      const ms = Math.max(0, Math.round(action.ms));
-      const prev = state.captureTrim?.lid === lid ? state.captureTrim : null;
-      const startMs = action.edge === 'start' ? ms : prev?.startMs ?? null;
-      const endMs = action.edge === 'end' ? ms : prev?.endMs ?? null;
-      return {
-        state: {
-          ...state,
-          captureTrim: {
-            lid,
-            // ⚠ **逆転を残さない** ── いま押していない側を落とす(次に押せば戻る)
-            startMs: endMs !== null && startMs !== null && startMs >= endMs
-              ? (action.edge === 'start' ? startMs : null)
-              : startMs,
-            endMs: endMs !== null && startMs !== null && startMs >= endMs
-              ? (action.edge === 'end' ? endMs : null)
-              : endMs,
-          },
-        },
-        events: [],
-      };
-    }
+    case 'SET_CAPTURE_TRIM_MARK':
     case 'CLEAR_CAPTURE_TRIM':
-      return { state: { ...state, captureTrim: null }, events: [] };
     case 'SET_CAPTURE_TRIM_BUSY':
-      return { state: { ...state, captureTrimBusy: action.busy }, events: [] };
     case 'SET_CAPTURE_TRANSCRIBE':
-      return { state: { ...state, captureTranscribeLid: action.lid }, events: [] };
-    case 'SET_GRAPH_VIEW': {
-      const all = action.all ?? state.graphView.all;
-      const depth = action.depth === undefined ? state.graphView.depth : clampGraphDepth(action.depth);
-      if (all === state.graphView.all && depth === state.graphView.depth) return { state, events: [] };
-      return { state: { ...state, graphView: { all, depth } }, events: [] };
-    }
-    /**
-     * 🔴 **雛形は「集められなかった」を帯に出さない**(#196 / B-2)。
-     *
-     * ⚠ 予定(`taskScanFailed`)と作法が違うのはわざとである ── 予定は**面そのもの**
-     *   なので「集めています…」で止まると壊れて見えるが、雛形は**入力の補助**なので、
-     *   出せないときは**静かに畳む**のが正しい(打っている最中に帯が出るほうが邪魔)。
-     * 🔑 だから失敗も `null` で表す ── `Tab` も `/` もただ何も出さず、
-     *   **既定の `Tab`(焦点移動)は生きたまま**である。
-     */
+    case 'SET_GRAPH_VIEW':
     case 'SET_SNIPPET_SCAN':
-      return { state: { ...state, snippetScan: action.scan }, events: [] };
     case 'SET_SEARCH_HITS':
-      // ⚠ **遅れて返った古い結果を捨てる**(打鍵は結果より速い)
-      if (action.query !== state.filterQuery) return { state, events: [] };
-      return {
-        state: {
-          ...state,
-          searchHits: new Set(action.lids),
-          searchHitsQuery: action.query,
-          searchHitsTruncated: action.truncated,
-          searchHitsFailed: action.failed === true,
-        },
-        events: [],
-      };
-    /**
-     * 🔴 **探す面の欄に打った**(#680)。⚠ 左の一覧(`filterQuery`)には触らない。
-     * ⚠ 前の行は**消さない**(`rowsQuery` が古いまま = まだ返っていない、と読める)──
-     *   打つたびに一覧が空になるとちらつく。空にしたら結果も空にする(頼まない)。
-     */
-    case 'SET_SEARCH_PAGE_QUERY': {
-      const page = state.searchPage;
-      if (page.query === action.query) return { state, events: [] };
-      if (action.query.trim() === '') {
-        return {
-          state: {
-            ...state,
-            searchPage: { query: action.query, rows: [], rowsQuery: action.query, truncated: false, failed: false },
-          },
-          events: [],
-        };
-      }
-      return {
-        state: { ...state, searchPage: { ...page, query: action.query, failed: false } },
-        events: [{ type: 'REQUEST_SEARCH_DETAIL', query: action.query }],
-      };
-    }
-    /** 欄に打っただけ ── **走らせない**(重い問い合わせを打鍵ごとに投げない)。 */
+    case 'SET_SEARCH_PAGE_QUERY':
+      return reduceQueryScan(state, action);
     case 'SET_SQL_TEXT':
-      // ⚠ 断りの字は消す(打ち直したのに前の断りが残ると、直したか分からない)
-      /**
-       * ⚠ 書き出しの知らせも消す(打ち直したのに前の知らせが残ると、いま出た表の話に見える)。
-       * 🔴 **開けなかった断りも消す**(#681 の着地前レビュー F4)── 直す前は
-       *   `SET_SQL_SOURCE` と `SQL_GUEST_OPENED` でしか消えず、`noteLine` は
-       *   **その行をいちばん先に返す**ので、一度 file を開き損ねた人は
-       *   **以後の知らせを全部食われていた**(切った / 0 行 / 書き出した、が出ない)。
-       */
-      return {
-        state: {
-          ...state,
-          sqlPage: {
-            ...state.sqlPage,
-            sql: action.sql,
-            error: '',
-            saved: '',
-            guestError: '',
-            /**
-             * 🔴 **履歴の中で直した字は、その場に控える**(#918 段②a、動線レビュー)。
-             * ⚠ 控えないと、**直してからもう一度 `↑` を押した瞬間に消える**
-             *   (`↓` で帰ってくるのは直す前の字になる)── この repo が
-             *   いちばん嫌う「さっきまでやっていたことが消える」形である。
-             * ⚠ `-1`(打ちかけ)のときは何もしない ── そこは `sql` 自身が
-             *   打ちかけの字であり、控えは `↑` を押す瞬間に取る。
-             */
-            ...(state.sqlPage.historyAt < 0
-              ? // ⚠ 打ちかけを打ち直したら、控えは**古い**ので捨てる ── 残すと
-                //   画面の「打ちかけの字を見ています」が嘘になる(戻る先はもう無い)
-                { historyDraft: '' }
-              : { historyEdits: withHistoryEdit(state.sqlPage, action.sql) }),
-          },
-        },
-        events: [],
-      };
-    /**
-     * 🔴 **走らせる**(#681 段②)。
-     * ⚠ 走らせる前に**字で見分ける** ── ここは「断る理由を読める字で言う」ための門で、
-     *   境ではない(境は worker 側の `PRAGMA query_only` と進み具合の見張り)。
-     * ⚠ **走っている間は受けない** ── 同じ問い合わせを二重に投げない。
-     */
-    case 'RUN_SQL': {
-      if (state.sqlPage.running) return { state, events: [] };
-      /**
-       * 🔴 **選んだファイルがまだ開けていないときは、走らせない**(#1087)。
-       * ⚠ 欄にはファイルの名前が出ているのに、この PKC 自身の DB へ走らせると、
-       *   **ファイルの中身を引いたつもりの答え**が返る(いちばん気づけない外し方)。
-       * 🔑 開けなかった回は `guestError` が既にいちばん上で理由を言っているので、
-       *   そのまま残す(上書きしない)。開いている最中だけ、`error` で待つよう言う。
-       */
-      if (state.sqlPage.guestChosen !== '' && state.sqlPage.guest === null) {
-        if (state.sqlPage.guestError !== '') return { state, events: [] };
-        // 開いている最中 = `guestPending` が居る。居ないのは「開けなかった後、打ち直して断りが消えた」回
-        const why = state.sqlPage.guestPending !== '' ? SQL_GUEST_OPENING_TEXT : SQL_GUEST_NOT_OPEN_TEXT;
-        return { state: { ...state, sqlPage: { ...state.sqlPage, error: why } }, events: [] };
-      }
-      /**
-       * 🔴 **engine ごとに門が違う**(#682 段②)。
-       * ⚠ DuckDB には sqlite に無い書き方(`FROM t SELECT x` / `PIVOT`)と、
-       *   sqlite に無い危ない語(`INSTALL` / `LOAD` / `SET`)が在るので、
-       *   **同じ門では見られない**(`duckdb-guard.ts` の冒頭)。
-       * 🔑 どちらで引くかは `sqlEngineOf` **1 か所**が決める ── ここで
-       *   `state.sqlPage.engine` を直に読むと、選べない相手のときに
-       *   「画面は sqlite なのに DuckDB の門を通す」が起きる。
-       */
-      const engine = sqlEngineOf(state.sqlPage);
-      /**
-       * 🔴 **書ける門は DuckDB のときだけ**(#918 段⑧)。⚠ sqlite の門(`checkReadOnlySql`)は
-       *   **そのまま** ── この PKC のノートの DB に書く道を作らない(1 行で全ノートを消せる口になる)。
-       */
-      const checked = engine === 'duckdb' ? checkDuckDbRunSql(state.sqlPage.sql) : checkReadOnlySql(state.sqlPage.sql);
-      if (!checked.ok) {
-        return {
-          state: {
-            ...state,
-            /**
-             * 🔴 **断った回も、直した字を欄へ返す**(2026-09-09 の着地前レビュー)。
-             * ⚠ `sql-guard.ts` は「`ok:false` の側にも `sql` を残すのは、断り文の隣に
-             *   **直した後の字**を出して『なぜ断られたか』を読めるようにするためである」と
-             *   書いているのに、初稿はここで**捨てていた** ── 全角のまま打った人は、
-             *   断り文には半角の `DELETE` と出るのに欄は全角のままで、
-             *   **画面の中で辻褄が合わない**。
-             */
-            sqlPage: { ...state.sqlPage, sql: checked.sql, error: checked.why },
-          },
-          events: [],
-        };
-      }
-      const token = state.sqlPage.runToken + 1;
-      return {
-        state: {
-          ...state,
-          // 🔑 **直した字を欄へ戻す**(全角で打った人に、実際に走った字を見せる)
-          sqlPage: {
-            ...state.sqlPage,
-            sql: checked.sql,
-            /**
-             * 🔴 **走った字だけを憶える**(#918 段②a)── 打ちかけは積まない。
-             * ⚠ **同じ字を 2 つ並べない**(直前と同じなら積み直さない)。
-             * ⚠ 上限 `SQL_HISTORY_MAX` で切る ── 打つほど重くなる形にしない。
-             */
-            ...historyPush(state.sqlPage.history, checked.sql),
-            historyAt: -1,
-            historyDraft: '',
-            historyEdits: [],
-            running: true,
-            duckLoading: false,
-            error: '',
-            saved: '',
-            // 🔴 開けなかった断りもここで消す(#681 F4 ── 上の `SET_SQL_TEXT` と同じ理由)
-            guestError: '',
-            runToken: token,
-          },
-        },
-        events: [
-          {
-            type: 'REQUEST_SQL_RUN',
-            sql: checked.sql,
-            token,
-            engine,
-            ...(state.sqlPage.guest === null ? {} : { guest: true }),
-            /**
-             * ⚠ **相手は「いま開いている物」から採る** ── `engine` が `duckdb` に
-             *   なるのは**取り込んだ file を選んでいるとき**だけなので
-             *   (`enginesForSource` ── csv / tsv / parquet / json。#682 段④c)、
-             *   ここで `guest` が `null` になることは無い。⚠ それでも `?.` で書くのは、
-             *   将来 engine の表が変わった日に**落ちるのではなく sqlite へ落ちる**ため。
-             */
-            ...(engine === 'duckdb' && state.sqlPage.guest !== null
-              ? { duck: { lid: state.sqlPage.guest.lid, name: state.sqlPage.guest.name } }
-              : {}),
-            /**
-             * 🔴 **足した相手も、いまの相手から採る**(#918 段⑦)。⚠ `engine` を見ない ──
-             *   足した相手が在れば `sqlEngineOf` が DuckDB へ固定するので、ここへ来る回は
-             *   必ず DuckDB である(`engine === 'duckdb'` を重ねると、決める口が 2 つになる)。
-             */
-            ...(state.sqlPage.extraGuests.length > 0
-              ? { duckExtra: state.sqlPage.extraGuests.map((g) => ({ lid: g.lid, name: g.name })) }
-              : {}),
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **構造 1 枚をノートへ**(#918 段①)。
-     * ⚠ 走っている間は**受けない**(2 本走らせると同じノートが 2 つできる)。
-     * 🔑 `running` を立てるので、**終わりを言う 2 つ**(`SQL_SAVED` / `SQL_SAVE_FAILED`)が
-     *   必ず降ろす ── 降ろし忘れると、以後ずっと押せなくなる。
-     */
-    /**
-     * 🔴 **前に打った字を戻す / 進む**(#918 段②a)。
-     *
-     * ⚠ **打ちかけの字を潰さない** ── 遡る前に控え、いちばん新しい所から
-     *   さらに ↓ を押したら**それを返す**(shell と同じ手触り)。
-     * ⚠ 履歴が空の回は**何も起きない**(押しても字が消えたりしない)。
-     */
-    case 'SQL_HISTORY_STEP': {
-      const p = state.sqlPage;
-      if (p.history.length === 0) return { state, events: [] };
-      const at = action.back
-        ? Math.min(p.historyAt + 1, p.history.length - 1)
-        : p.historyAt - 1;
-      if (at === p.historyAt) return { state, events: [] };
-      return { state: { ...state, sqlPage: goHistory(p, at, p.historyAt) }, events: [] };
-    }
-    case 'SQL_HISTORY_PICK': {
-      const p = state.sqlPage;
-      // ⚠ 範囲の外は黙って捨てる(一覧を組み直す前の押しが飛んでくる)
-      if (action.at < 0 || action.at >= p.history.length) return { state, events: [] };
-      return { state: { ...state, sqlPage: goHistory(p, action.at, p.historyAt) }, events: [] };
-    }
-    /**
-     * 🔴 **答えを Parquet にする**(#918 段⑥)。
-     * ⚠ 走っている間は**受けない**(`SQL_SCHEMA_TO_NOTE` と同じ ── 2 本走らせると同じ file が 2 つ落ちる)。
-     * 🔑 `running` を立てるので、終わりを言う 2 つ(`SQL_SAVED` / `SQL_SAVE_FAILED`)が必ず降ろす。
-     * ⚠ 出す側(選び所)は DuckDB で引いた読む SQL の答えのときしか Parquet を出さないが、**選び所を開いたまま
-     *   相手や engine を替えた押し**が飛んでくる ── 受け口でも同じ判定(`parquetCopyOf`)で断り、**理由を画面へ出す**
-     *   (黙って捨てると押した人には「壊れている」と「押せていない」の区別が付かない)。
-     */
-    case 'SQL_EXPORT_PARQUET': {
-      const p = state.sqlPage;
-      if (p.running) return { state, events: [] };
-      const refuse = (error: string): ReduceResult => ({
-        state: { ...state, sqlPage: { ...p, error, saved: '' } },
-        events: [],
-      });
-      if (p.ranSql === '' || p.columns.length === 0) return refuse('先に SQL を実行してください');
-      if (sqlEngineOf(p) !== 'duckdb' || p.guest === null) {
-        return refuse('Parquet は DuckDB で引いた答えだけ書き出せます');
-      }
-      const copy = parquetCopyOf(p.ranSql);
-      if (!copy.ok) return refuse(copy.why);
-      return {
-        state: { ...state, sqlPage: { ...p, running: true, duckLoading: false, error: '', saved: '' } },
-        events: [
-          {
-            type: 'REQUEST_SQL_EXPORT_PARQUET',
-            sql: p.ranSql,
-            fileName: action.fileName,
-            duck: { lid: p.guest.lid, name: p.guest.name },
-            ...(p.extraGuests.length > 0
-              ? { duckExtra: p.extraGuests.map((g) => ({ lid: g.lid, name: g.name })) }
-              : {}),
-          },
-        ],
-      };
-    }
-    case 'SQL_SCHEMA_TO_NOTE': {
-      if (state.sqlPage.running) return { state, events: [] };
-      /**
-       * 🔴 **頼み先は 1 か所で決める**(`schemaRouteOf`)。⚠ DuckDB でしか読めない相手や 2 件以上は
-       *   DuckDB の器へ頼む(以前はここで断っていた ── #918)。
-       */
-      const route = schemaRouteOf(state.sqlPage.guest, state.sqlPage.extraGuests);
-      return {
-        state: { ...state, sqlPage: { ...state.sqlPage, running: true, duckLoading: false, error: '', saved: '' } },
-        events: [
-          {
-            type: 'REQUEST_SQL_SCHEMA',
-            where: schemaWhereOf(state.sqlPage.guest, state.sqlPage.extraGuests),
-            lid: action.lid,
-            relationId: action.relationId,
-            parentLid: action.parentLid ?? null,
-            ...route,
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **つながり図を開く / 閉じる**(#918 段⑤。裁定 2026-09-15 = この窓の中)。
-     * ⚠ **開いたら畳める** ── 開きっぱなしにすると答えの表を押し下げ続ける
-     *   (#300「補助的な物が主の作業領域を奪わない」)。
-     * 🔑 採ってあるのが**いまの相手の構造なら採り直さない**(開くたびに DB を舐めない)。
-     */
-    case 'SQL_ER_TOGGLE': {
-      const p = state.sqlPage;
-      if (p.er.open) {
-        return {
-          state: { ...state, sqlPage: { ...p, er: { ...p.er, open: false, note: '' } } },
-          events: [],
-        };
-      }
-      const source = erSourceKey(p.guest, p.extraGuests);
-      if (p.er.model !== null && p.er.source === source) {
-        return {
-          state: { ...state, sqlPage: { ...p, er: { ...p.er, open: true, note: '' } } },
-          events: [],
-        };
-      }
-      const token = p.er.token + 1;
-      return {
-        state: {
-          ...state,
-          sqlPage: {
-            ...p,
-            er: {
-              open: true,
-              loading: true,
-              model: null,
-              note: '',
-              source,
-              token,
-              // 🔑 まだ開いたことが無い相手でも、`connecting`(入切そのもの)は
-              //   user の好みなので持ち越す。`mine` / `pendingFrom` は新しい模型の分。
-              connecting: p.er.connecting,
-              pendingFrom: null,
-              mine: [],
-            },
-          },
-        },
-        // 🔴 頼み先は 1 か所で決める(`schemaRouteOf`。DuckDB でしか読めない相手 / 2 件以上は DuckDB の器へ)
-        events: [{ type: 'REQUEST_SQL_ER', token, ...schemaRouteOf(p.guest, p.extraGuests) }],
-      };
-    }
-    /**
-     * 🔴 **「繋ぐ」モードの入切**(#918 段⑤d-1。user 報告 2026-09-16
-     *   「er のキー同士の掛け合わせとかちゃんと描きたいのにできない」)。
-     * ⚠ **切るときは `pendingFrom` を必ず捨てる** ── 残すと、入れ直した回に
-     *   前の相手が復活して見える(押していないのに「ここから」が付いている)。
-     * ⚠ **入れるときも捨てる** ── 前に断られた回の理由(`note`)を、
-     *   新しく入れた回まで持ち越さない。
-     */
-    case 'SQL_ER_CONNECT_TOGGLE': {
-      const p = state.sqlPage;
-      return {
-        state: {
-          ...state,
-          sqlPage: {
-            ...p,
-            er: { ...p.er, connecting: !p.er.connecting, pendingFrom: null, note: '' },
-          },
-        },
-        events: [],
-      };
-    }
-    /**
-     * 🔴 **繋ぐモード中に図の列を押した**(#918 段⑤d-1)。
-     * ⚠ 判定は `pickErConnection`(pure)に寄せる ── ここは結果を state へ写すだけ
-     *   (CLAUDE.md §7「同じ値・同じ判定が複数の場所にある」)。
-     * 🔑 **`erSql` は 1 バイトも変えない** ── 出来た `SchemaLink` を、宣言された
-     *   外部キーとまったく同じ形で `{ kind: 'link', link }` として渡すだけでよい。
-     */
-    case 'SQL_ER_PICK': {
-      const p = state.sqlPage;
-      const result = pickErConnection(p.er.model, p.er.mine, p.er.pendingFrom, action.table, action.column);
-      if (result.kind === 'from') {
-        return {
-          state: {
-            ...state,
-            sqlPage: { ...p, er: { ...p.er, pendingFrom: result.pendingFrom, note: '' } },
-          },
-          events: [],
-        };
-      }
-      if (result.kind === 'cancel') {
-        return {
-          state: { ...state, sqlPage: { ...p, er: { ...p.er, pendingFrom: null, note: '' } } },
-          events: [],
-        };
-      }
-      if (result.kind === 'denied') {
-        // ⚠ **黙って何もしないのは禁止** ── 押したのに繋がらなかった理由を言う。
-        //   ⚠ `pendingFrom` は捨てない ── 押し直しのために「ここから」は残す。
-        return {
-          state: { ...state, sqlPage: { ...p, er: { ...p.er, note: result.why } } },
-          events: [],
-        };
-      }
-      // result.kind === 'linked' ── 図には必ず線を足す。SQL への JOIN 追記は
-      // 「その場で足せるか」に依るので best-effort(足せなければ理由を note で言う)。
-      const mine = [...p.er.mine, result.link];
-      const r = erSql(p.sql, { kind: 'link', link: result.link });
-      return {
-        state: {
-          ...state,
-          sqlPage: {
-            ...p,
-            ...(r.ok ? { sql: r.sql, error: '' } : {}),
-            er: { ...p.er, mine, pendingFrom: null, note: r.ok ? '' : r.why },
-            ...(r.ok && p.historyAt >= 0 ? { historyEdits: withHistoryEdit(p, r.sql) } : {}),
-          },
-        },
-        events: [],
-      };
-    }
-    /**
-     * 🔴 **自分で引いた線を消す**(#918 段⑤d-1)。⚠ **片道の操作を作らない** ──
-     *   置けるだけで外せないと、間違えて引いた線を消すのに model を採り直すしかない
-     *   (CLAUDE.md「面は『映すだけ』にしない」の同じ向き)。
-     * ⚠ 宣言された外部キーはここへ来ない(描画側が `mine` の線にしか消す口を出さない)。
-     */
-    case 'SQL_ER_UNLINK': {
-      const p = state.sqlPage;
-      const mine = p.er.mine.filter(
-        (l) =>
-          !(
-            l.from === action.link.from &&
-            l.fromColumn === action.link.fromColumn &&
-            l.to === action.link.to &&
-            l.toColumn === action.link.toColumn
-          ),
-      );
-      if (mine.length === p.er.mine.length) return { state, events: [] };
-      return { state: { ...state, sqlPage: { ...p, er: { ...p.er, mine } } }, events: [] };
-    }
-    /**
-     * 🔴 **図の中を押した**(#918 段⑤c)。
-     * ⚠ **打っている字は捨てない** ── 足せるかを決めるのは `erSql`(pure)で、
-     *   足せないときは**理由**を控えて画面へ出す(黙って何もしない形を作らない)。
-     * 🔑 履歴の手直しの控えは `SET_SQL_TEXT` と**同じ作法**で取る ── ここだけ
-     *   忘れると、図から足した字が `↑` を押した瞬間に消える。
-     */
-    case 'SQL_ER_PRESS': {
-      const p = state.sqlPage;
-      const r = erSql(p.sql, action.press);
-      if (!r.ok) {
-        return {
-          state: { ...state, sqlPage: { ...p, er: { ...p.er, note: r.why } } },
-          events: [],
-        };
-      }
-      return {
-        state: {
-          ...state,
-          sqlPage: {
-            ...p,
-            sql: r.sql,
-            error: '',
-            er: { ...p.er, note: '' },
-            ...(p.historyAt < 0 ? {} : { historyEdits: withHistoryEdit(p, r.sql) }),
-          },
-        },
-        events: [],
-      };
-    }
-    /**
-     * 構造が採れた(#918 段⑤)。
-     * ⚠ **札が違えば捨てる** ── 採っている間に相手を変えられる(`SQL_RUN_DONE` と同じ)。
-     * 🔑 **模型を組むのはここ** ── `schemaModel` は pure なので reducer に置ける。
-     *   effect に置くと、採る側と組む側が 2 か所に分かれる(§7)。
-     */
-    case 'SQL_ER_LOADED': {
-      const p = state.sqlPage;
-      if (p.er.token !== action.token) return { state, events: [] };
-      const model = schemaModel({
-        source: p.guest?.name ?? '',
-        columns: action.columns,
-        fks: action.fks,
-        ...(action.counts === null ? {} : { counts: action.counts }),
-        // 🔴 本文の csv の表も図に出す(#918 段⑤d-2)
-        ...(action.csv === null ? {} : { csv: action.csv }),
-      });
-      return {
-        state: {
-          ...state,
-          sqlPage: {
-            ...p,
-            // 🔴 DuckDB の器から採った回は、写した報告も受ける(内蔵の sqlite の回は動かさない)
-            duckCopy: action.copy ?? p.duckCopy,
-            er: { ...p.er, loading: false, model },
-          },
-        },
-        events: [],
-      };
-    }
-    /** 構造を採れなかった(#918 段⑤)。⚠ 黙って空の図を出さない ── 理由を言う。 */
-    case 'SQL_ER_FAILED': {
-      const p = state.sqlPage;
-      if (p.er.token !== action.token) return { state, events: [] };
-      return {
-        state: {
-          ...state,
-          sqlPage: {
-            ...p,
-            // 🔑 `model` を捨てる回は `mine` / `pendingFrom` も一緒に捨てる(#918 段⑤d-1)
-            er: { ...p.er, loading: false, model: null, note: action.error, mine: [], pendingFrom: null },
-          },
-        },
-        events: [],
-      };
-    }
-    /**
-     * 🔴 **古い回の答えは捨てる**(#681 の着地前レビュー F3-A)。
-     * ⚠ 走っている最中に相手を変えられるので、受けると**新しい名札のまま
-     *   古い DB の中身**が出る ── 数字は本物なので気づけない。
-     */
-    case 'SET_SQL_RESULT': {
-      const p = state.sqlPage;
-      if (p.runToken !== action.token) return { state, events: [] };
-      /**
-       * 🔴 **DuckDB で書いた文(`CREATE` / `DROP` / `ALTER` …)が通ったら、つながり図を採り直す**
-       *   (#682 段④d の着地後レビュー R1)。
-       * ⚠ 直す前は `er` に触らず、図は**書く前の構造のまま**だった ── `DROP TABLE 売上` の後も 売上 の四角が残り、
-       *   押すと `no such table` で断られる(作った表は四角に出ない)。
-       * 🔑 判定は字の門と**同じ 1 本**(`duckDbWriteKind`)。⚠ 図の構造を DuckDB の器から採る相手
-       *   (`schemaRouteOf(...).duck`)のときだけ ── 内蔵の sqlite から採る相手の図は、DuckDB で何を書いても変わらない。
-       * 🔑 自分で引いた線(`mine`)は残す(user の作業。消えた表を指す線は図が「線にできなかった繋がり」と言う)。
-       *   押しかけの「ここから」(`pendingFrom`)は捨てる(その列がもう無いかもしれない)。
-       */
-      const route = schemaRouteOf(p.guest, p.extraGuests);
-      const redraw =
-        duckDbWriteKind(action.sql) !== null && route.duck !== undefined
-          ? erAfterDuckWrite(p.er, erSourceKey(p.guest, p.extraGuests), route)
-          : null;
-      return {
-        state: {
-          ...state,
-          sqlPage: {
-            ...p,
-            ranSql: action.sql,
-            columns: action.columns,
-            rows: action.rows,
-            truncated: action.truncated,
-            ms: action.ms,
-            running: false,
-            duckLoading: false,
-            error: '',
-            duckCopy: action.copy ?? p.duckCopy,
-            ...(redraw === null ? {} : { er: redraw.er }),
-          },
-        },
-        events: redraw === null ? [] : redraw.events,
-      };
-    }
-    /**
-     * 🔴 **書き出したことを画面で言う**(#681 段③ の 3 つ目)。
-     * ⚠ 別の窓で開いている面なので、**言わないと押せなかったように見える**。
-     */
+    case 'RUN_SQL':
+    case 'SQL_HISTORY_STEP':
+    case 'SQL_HISTORY_PICK':
+    case 'SQL_EXPORT_PARQUET':
+    case 'SQL_SCHEMA_TO_NOTE':
+    case 'SQL_ER_TOGGLE':
+    case 'SQL_ER_CONNECT_TOGGLE':
+    case 'SQL_ER_PICK':
+    case 'SQL_ER_UNLINK':
+    case 'SQL_ER_PRESS':
+    case 'SQL_ER_LOADED':
+    case 'SQL_ER_FAILED':
+    case 'SET_SQL_RESULT':
     case 'SQL_SAVED':
-      // ⚠ **`running` を必ず降ろす**(#918 段①)── `SQL_SAVE_FAILED` と対である
-      return {
-        state: {
-          ...state,
-          sqlPage: {
-            ...state.sqlPage,
-            running: false,
-            saved: action.title,
-            savedKind: action.kind,
-            savedCapped: action.capped ?? 0,
-          },
-        },
-        events: [],
-      };
-    /**
-     * 🔴 **調べる相手を選ぶ**(#681 段③ の 2 つ目)。
-     *
-     * ⚠ **前の相手は必ず手放す** ── 選び直すたびに常駐メモリが積み上がる
-     *   (不可侵指示 2026-07-27「生成とライフサイクル後の速やかな破棄」)。
-     * ⚠ **前の答えも消す** ── 相手が変われば、出ている表は**別の DB の話**である
-     *   (残すと「新しい相手を調べた答え」に見える ── いちばん気づけない外し方)。
-     */
-    /**
-     * 🔴 **どのエンジンで引くかを選んだ**(#682 段②)。
-     *
-     * ⚠ **表も断りも消さない** ── 相手は変わっていないので、いま出ている答えは
-     *   そのまま正しい(`SET_SQL_SOURCE` は相手ごと変わるので消す ── 役目が違う)。
-     * ⚠ 走っている最中でも受ける ── 次に押したときから効く(押した印は必ず付く)。
-     */
     case 'SET_SQL_ENGINE':
-      if (state.sqlPage.engine === action.engine) return { state, events: [] };
-      return { state: { ...state, sqlPage: { ...state.sqlPage, engine: action.engine } }, events: [] };
-    case 'SET_SQL_SOURCE': {
-      /**
-       * ⚠ **手放すのは「さっきまでの相手」** ── `guestChosen` はまだ書き換えていないので、
-       *   ここで読むと前の選択が入っている(#682 段④c)。
-       */
-      const events: DomainEvent[] = [
-        { type: 'REQUEST_SQL_GUEST_CLOSE', prev: state.sqlPage.guestChosen },
-      ];
-      /**
-       * 🔴 **足した相手は、1 件目を選び直したら全部外す**(#918 段⑦)。⚠ 外した分の控え
-       *   (手持ちの file)も**ここで手放す** ── 手放さないと、選び直すたびに
-       *   `File` を握ったまま積み上がる(不可侵指示 2026-07-27)。
-       */
-      if (state.sqlPage.extraGuests.length > 0) {
-        events.push({
-          type: 'REQUEST_SQL_EXTRA_RELEASE',
-          lids: state.sqlPage.extraGuests.map((g) => g.lid),
-        });
-      }
-      if (action.lid !== '') {
-        events.push({ type: 'REQUEST_SQL_GUEST_OPEN', lid: action.lid, name: action.name });
-      }
-      /**
-       * 🔴 **前の相手の図を持ち越さない**(#918 段⑤)。
-       * ⚠ ノートへ戻る回(`lid === ''`)は**その場で採り直せる**が、よその DB へ移る回は
-       *   **まだ開いていない**ので頼めない ── 開けた回(`SQL_GUEST_OPENED`)が頼む。
-       */
-      const er = erForSource(state.sqlPage.er, action.lid, {}, action.lid === '');
-      events.push(...er.events);
-      return {
-        state: {
-          ...state,
-          sqlPage: {
-            ...state.sqlPage,
-            guest: null,
-            extraGuests: [],
-            guestError: '',
-            guestPending: action.lid,
-            // 🔴 選び所の見た目は、開けたかどうかに関わらずここで確定させる
-            guestChosen: action.lid,
-            /**
-             * 🔴 **走っている答えを無効にする**(#681 F3-A)── 札を進めると、
-             *   飛んでいる回の答えは捨てられる。
-             * ⚠ `running` も下ろす ── 下ろさないと「走らせています…」が
-             *   **永久に消えない**(答えは捨てるので、もう来ない)。
-             */
-            runToken: state.sqlPage.runToken + 1,
-            running: false,
-            ranSql: '',
-            columns: [],
-            rows: [],
-            truncated: false,
-            ms: 0,
-            error: '',
-            saved: '',
-            duckCopy: null,
-            duckLoading: false,
-            er: er.er,
-          },
-        },
-        events,
-      };
-    }
-    /**
-     * 🔴 **調べる相手をもう 1 つ足す**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A、設問 2 は B)。
-     *
-     * ⚠ **確認は出さない**(設問 2 = B)── 代わりに字で言う(案内文と、作った表が通った直後の 1 行)。
-     *   足すと**器を作り直す**ので、作った表は消える(`DUCKDB_TABLE_RESET`)。
-     * ⚠ **足せない相手は断りの字を返す**(黙って何も起きない形を作らない)。断った回も
-     *   **控えは手放す**(手持ちの file を選んだ直後に断ると、`File` が握られたまま残る)。
-     * 🔑 開く仕事は無い ── 足した相手は DuckDB が走らせる回に読む(sqlite へは開かない)。
-     */
-    case 'ADD_SQL_SOURCE': {
-      const p = state.sqlPage;
-      const checked = checkAddSource(p.guest, p.extraGuests, { lid: action.lid, name: action.name });
-      /**
-       * ⚠ **使っている相手の控えは手放さない** ── 同じ lid をもう一度足した回(`はもう並べてあります`)に
-       *   手放すと、**使っている file を消す**。判定は lid の一致で見る(種類に寄りかからない)。
-       */
-      const inUse = p.guest?.lid === action.lid || p.extraGuests.some((e) => e.lid === action.lid);
-      if (!checked.ok) {
-        return {
-          state: { ...state, sqlPage: { ...p, error: checked.why } },
-          events: inUse ? [] : [{ type: 'REQUEST_SQL_EXTRA_RELEASE', lids: [action.lid] }],
-        };
-      }
-      const extras = [...p.extraGuests, { lid: action.lid, name: action.name }];
-      return withSqlSourceSet(state, extras);
-    }
-    /**
-     * 🔴 **足した相手を外す**(#918 段⑦)。⚠ 1 件目は外せない(選び所で別の相手を選ぶ ──
-     *   外す口は「足した分」にだけ在る)。足していない lid は**何もしない**(控えも手放さない)。
-     */
-    case 'REMOVE_SQL_SOURCE': {
-      const p = state.sqlPage;
-      if (!p.extraGuests.some((e) => e.lid === action.lid)) return { state, events: [] };
-      const extras = p.extraGuests.filter((e) => e.lid !== action.lid);
-      const next = withSqlSourceSet(state, extras);
-      return {
-        state: next.state,
-        events: [...next.events, { type: 'REQUEST_SQL_EXTRA_RELEASE', lids: [action.lid] }],
-      };
-    }
-    /**
-     * 🔴 **いま選んでいる相手の答えだけ受ける**(#681 段③ の 2 つ目)。
-     * ⚠ 選び直した直後は、**前の相手の「開けました」が後から届く** ── 受けると
-     *   選んでいない DB を「調べています」と出し、打った SQL はそちらへ飛ぶ。
-     */
-    case 'SQL_GUEST_OPENED': {
-      if (state.sqlPage.guestPending !== action.lid) return { state, events: [] };
-      // 開き終わる前に押された断り(RUN_SQL)は、開けた時点で嘘になるので降ろす
-      const waitNote = state.sqlPage.error === SQL_GUEST_OPENING_TEXT;
-      /**
-       * 🔴 開けた相手の構造を採り直す(図を開いているときだけ ── §7 の 1 か所)。
-       * ⚠ **`.parquet` / `.json` も採る**(#918)── 頼み先は `schemaRouteOf`(DuckDB の器)。
-       *   以前は「採れない」理由をここで書いて頼まなかった。
-       */
-      const opened = { lid: action.lid, name: action.name };
-      const er = erForSource(
-        state.sqlPage.er,
-        erSourceKey(opened, state.sqlPage.extraGuests),
-        schemaRouteOf(opened, state.sqlPage.extraGuests),
-        true,
-      );
-      return {
-        state: {
-          ...state,
-          sqlPage: {
-            ...state.sqlPage,
-            guest: {
-              lid: action.lid,
-              name: action.name,
-              tables: action.tables,
-              bytes: action.bytes,
-              truncated: action.truncated,
-              ...(action.sjis === true ? { sjis: true } : {}),
-            },
-            guestError: '',
-            guestPending: '',
-            ...(waitNote ? { error: '' } : {}),
-            er: er.er,
-          },
-        },
-        events: er.events,
-      };
-    }
+    case 'SET_SQL_SOURCE':
+    case 'ADD_SQL_SOURCE':
+    case 'REMOVE_SQL_SOURCE':
+    case 'SQL_GUEST_OPENED':
     case 'SQL_GUEST_FAILED':
-      // ⚠ 断りも**いま選んでいる相手の分だけ**受ける(古い断りで新しい選択を消さない)
-      if (state.sqlPage.guestPending !== action.lid) return { state, events: [] };
-      /**
-       * ⚠ **`guest` は触らない** ── `SET_SQL_SOURCE` が既に `null` にしてあるので、
-       *   ここで書くと**外しても誰も落ちない行**になる(変異試験 A5 が SURVIVED で
-       *   教えた ── CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」)。
-       */
-      return {
-        state: {
-          ...state,
-          sqlPage: {
-            ...state.sqlPage,
-            guestError: action.error,
-            guestPending: '',
-            /**
-             * ⚠ **「採っています」で止めない**(#918 段⑤)── 開けなかったので
-             *   構造は永久に来ない。⚠ 理由は `guestError` が言うので、ここでは繰り返さない
-             *   (同じ断りが 2 行出ると、別々のことが起きたように見える)。
-             * 🔑 `mine` / `pendingFrom` も一緒に捨てる(#918 段⑤d-1)。
-             */
-            er: { ...state.sqlPage.er, loading: false, model: null, source: '', mine: [], pendingFrom: null },
-          },
-        },
-        events: [],
-      };
-    /**
-     * 🔴 **書き出せなかった理由を画面へ**(#681 の着地前レビュー F1)。
-     * ⚠ 断りの色が付く行(`error`)へ出す ── 黙って何も起きない形を作らない。
-     */
     case 'SQL_SAVE_FAILED':
-      // ⚠ **`running` を必ず降ろす**(#918 段①)── 構造の書き出しはここを終わりにするので、
-      //    降ろさないと以後ずっと押せなくなる。⚠ 元から false の回に書いても害は無い。
-      return {
-        state: {
-          ...state,
-          sqlPage: { ...state.sqlPage, running: false, error: action.error, saved: '' },
-        },
-        events: [],
-      };
-    case 'SQL_DUCK_LOADING': {
-      const p = state.sqlPage;
-      // ⚠ 古い回の合図・走っていない間の合図は捨てる(終わった画面に「時間がかかります」を残さない)
-      if (!p.running || p.runToken !== action.token) return { state, events: [] };
-      return { state: { ...state, sqlPage: { ...p, duckLoading: true } }, events: [] };
-    }
+    case 'SQL_DUCK_LOADING':
     case 'SQL_RUN_FAILED':
-      /**
-       * ⚠ **前の表は残す**(消すと「失敗して 0 件だった」に見える)── 印だけ立てる
-       *   (`SEARCH_DETAIL_FAILED` と同じ作法)。
-       */
-      if (state.sqlPage.runToken !== action.token) return { state, events: [] };
-      {
-        /**
-         * 🔴 **時計で器が畳まれた回は、開いたままのつながり図を採り直す**(着地後レビュー 💭10)。
-         * ⚠ 30 秒の門(`DUCKDB_TOO_LONG`)・写す所の 120 秒の門(`DUCKDB_LOAD_TOO_LONG`)が鳴ると器は**畳まれる** ──
-         *   写した表も、`CREATE` で作った表も消える。直す前は図に**もう無い表の四角が残り**、押すと `no such table` だった
-         *   (`SET_SQL_RESULT` の書き込み後 R1 と同じ症状)。
-         * 🔑 作法も R1 と同じ `erAfterDuckWrite`(user が引いた線 `mine` は残す)。⚠ 図の構造を **DuckDB の器から採る相手**
-         *   (`schemaRouteOf(...).duck`)のときだけ ── 内蔵の sqlite から採る図は器と関係が無い。
-         * 🔑 判定は断りの**字**(`DUCKDB_TOO_LONG` / `DUCKDB_LOAD_TOO_LONG`。字を 1 か所で持つ ── 後ろに写せなかった表の
-         *   理由が付いても拾えるよう `includes`)。それ以外の失敗(字の誤り・表が無い)では器は畳まれていないので触らない。
-         */
-        const p = state.sqlPage;
-        const route = schemaRouteOf(p.guest, p.extraGuests);
-        const folded =
-          route.duck !== undefined &&
-          (action.error.includes(DUCKDB_TOO_LONG) || action.error.includes(DUCKDB_LOAD_TOO_LONG));
-        const redraw = folded ? erAfterDuckWrite(p.er, erSourceKey(p.guest, p.extraGuests), route) : null;
-        return {
-          state: {
-            ...state,
-            sqlPage: { ...p, running: false, duckLoading: false, error: action.error, ...(redraw === null ? {} : { er: redraw.er }) },
-          },
-          events: redraw === null ? [] : redraw.events,
-        };
-      }
+      return reduceSql(state, action);
     case 'SET_SEARCH_DETAIL':
-      // ⚠ **遅れて返った古い結果を捨てる**(`SET_SEARCH_HITS` と同じ)
-      if (action.query !== state.searchPage.query) return { state, events: [] };
-      return {
-        state: {
-          ...state,
-          searchPage: {
-            query: action.query,
-            rows: action.rows,
-            rowsQuery: action.query,
-            truncated: action.truncated,
-            failed: false,
-          },
-        },
-        events: [],
-      };
     case 'SEARCH_DETAIL_FAILED':
-      if (action.query !== state.searchPage.query) return { state, events: [] };
-      // ⚠ 前の行は残す(消すと「失敗して空になった」に見える)── 印だけ立てる
-      return {
-        state: { ...state, searchPage: { ...state.searchPage, rowsQuery: action.query, failed: action.stale ? 'stale' : 'error' } },
-        events: [],
-      };
     case 'SET_OPEN_EXTENSIONS':
-      /**
-       * ⚠ **写すだけ**(選択も面も動かさない)── 窓が開いた / 閉じたことは
-       *   user が「いま何を見ているか」を変える出来事ではない。
-       */
-      return { state: { ...state, openExtensions: action.open }, events: [] };
     case 'SET_VIEW_MODE':
-      // selection は消さない(PKC2 規約)。panel は view に従属するので畳む
-      /**
-       * 🔴 **編集中でも「ノートを映さない面」は開ける**(user 裁定 2026-08-08。
-       * P11 の Q5「開けないまま」を**覆した**)。
-       *
-       * 覆した理由は意見ではなく、**調べたら止めている理由が無かった**から:
-       *  ① 面は `hidden` の付け外しで**生きたまま常駐**する(`center.ts` の `pane()`
-       *     は 1 度だけ作り、`render` は非 active な面を描かない)
-       *  ② 戻ったとき本文の面は**組み直されない**(`detail.ts` の `render` が
-       *     「編集中かつ同じ lid」で早期 return する)
-       *  → **textarea も native の取り消し履歴も壊れない**。
-       *
-       * 🔑 一方で止めるコストは実在した ── **「書きながらマニュアルを読む」は
-       * ヘルプの主目的**であり、P11 で無言の dead click が 1 個 → 3 個に増えていた。
-       *
-       * ⚠ **一覧のノートを押す(`SELECT_ENTRY`)は開けない**。あちらは「下書きを
-       *   守る」理由が実在する ── ただし無言で断らないのが正しい(別主題)。
-       */
-      /**
-       * 🔴 **本文へ戻る道は塞がない**(2026-08-19、リリース前監査で判明)。
-       *
-       * ⚠ 直す前は `!isAsidePane(action.mode)` だけを見ていたので、
-       * **`'detail'` への切替も編集中は捨てられていた** ── つまり編集中に
-       * ヘルプ・設定・フラグ・2 ペインを開くと、**同じボタンをもう一度押しても
-       * 本文へ戻れない**(`set-view` のトグルは `'detail'` を撃つ)。
-       * ⚠ マニュアルは「**寄り道して戻っても**、打ちかけの本文も取り消しも
-       * そのまま残ります」と約束しており、**その約束が守られていなかった**。
-       * 🔑 止める理由も無い ── 編集の面は `detail` **そのもの**なので、
-       * 戻るのは「編集へ帰る」であって「編集から離れる」ではない。
-       * ⚠ かんばん / カレンダー / 集計は引き続き断る(あちらはノートを並べる面で、
-       * 開くと編集していたものが画面から消える)。
-       */
-      /**
-       * 🔴 **断るなら、声に出して断る**(user 目線レビュー U-2)。
-       *
-       * ⚠ 直す前は `events: []` で**黙って捨てて**いた ── 押しても画面が 1 ドットも
-       *   動かず、帯にも何も出ない。user から見ると**タイルが壊れている**か、
-       *   押せていないのかも分からない(CLAUDE.md が繰り返し戒めている
-       *   「無言の dead click」そのもの)。
-       * ⚠ このリポジトリは**同じ場面で既に声を出している** ── `binder.ts` の
-       *   ごみ箱の復元は「編集を保存するか、編集をやめてから戻してください」と言う(#319)。
-       *   ここだけ黙っていた。
-       * 🔑 **判定はここ 1 か所のまま**にする(CLAUDE.md §7)── 呼び側
-       *   (`set-view` / タイル / 鍵)に `phase !== 'ready'` を配ると、
-       *   足すたびに取りこぼす。`error` を載せて返せば、出口は既存の 1 本で足りる。
-       */
-      if (state.phase === 'editing' && !isAsidePane(action.mode) && action.mode !== 'detail')
-        return {
-          state: {
-            ...state,
-            error: `編集中は${viewModeLabel(action.mode)}を開けません(「編集を保存する」か「編集をやめる」を押すと開けます)`,
-          },
-          events: [],
-        };
-      return {
-        state: {
-          ...state,
-          viewMode: action.mode,
-          revisionPanel: null,
-          // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
-          revisionPreview: null,
-          trashPanel: null,
-        },
-        // 🔑 ランチャーを開いたら**そのとき**タイルを要求する(P7b 段⑩)。
-        // ⚠ 元データ(`registered_as_app` 等)は attachment の frontmatter で
-        // **常駐していない** ── boot で全部読むと、ランチャーを一度も開かない
-        // user にも全添付の body 読込を負わせることになる。
-        // ⚠ **毎回要求する**。ただし前回のタイルは**消さない** ── 2 回目以降は
-        // 前回の並びを出したまま読み直し、届いたら差し替える(review L-5 で
-        // 「古い一覧を見せない」と書いてあったのは嘘だったので、実装ではなく
-        // 記述を直した ── ランチャーを開くたびに「読み込んでいます…」を
-        // 挟むほうが体感として悪い。読み直しは store 1 往復で終わる)
-        // 🔑 **集計も同じ流儀**(#184)── 開いたときに問い合わせる。
-        // ⚠ 元データ(frontmatter)は常駐していないので、boot で読むと
-        // 集計を一度も開かない user にも全本文の走査を負わせることになる。
-        // ⚠ 前の表は**消さない**(ランチャーと同じ ── 読み直しの間に空白を出さない)。
-        // ⚠ ランチャーの枝は #241 段⑥-b で畳んだ ── アプリの一覧は**左の列の
-        //    タブ**が持つ面になったので、読み直しは `REFRESH_LAUNCHER_TILES`
-        //    (`main.ts` が探し方の切替で撃つ)1 本である
-        // ⚠ **予定は中央の面ではない**(#292 段⑤)── 左の列のタブなので、
-        //    集め直しは `main.ts` が `REFRESH_TASK_SCAN` で頼む。
-        events:
-          action.mode === 'query'
-            ? [{ type: 'REQUEST_QUERY_SCAN', key: state.queryKey }]
-            : [],
-      };
     case 'REFRESH_TASK_SCAN':
-      return { state, events: [{ type: 'REQUEST_TASK_SCAN' }] };
-    /**
-     * 🔴 **連絡先を集め直す**(#278 段①)。⚠ **毎回要求する**が、前の一覧は
-     *   消さない ── 消すと、集め直すたびに一覧が空になって**行が飛ぶ**。
-     */
     case 'REFRESH_CONTACT_SCAN':
-      return { state, events: [{ type: 'REQUEST_CONTACT_SCAN' }] };
-    // 🔴 計った時間(#683 ①)── 前の一覧は消さない(行が飛ばない)
     case 'REFRESH_WORK_LOG_SCAN':
-      return { state, events: [{ type: 'REQUEST_WORK_LOG_SCAN' }] };
     case 'REFRESH_SEARCH':
-      return { state, events: searchRefreshEvents(state) };
-    /**
-     * 🔴 **録ったものを集め直す**(#683 段①)。⚠ **毎回要求する**が、前の一覧は
-     *   消さない(連絡先・アプリと同じ ── 集め直すたびに空白を出さない)。
-     */
     case 'REFRESH_CAPTURE_SCAN':
-      return {
-        state,
-        events: [{ type: 'REQUEST_CAPTURE_ITEMS', entries: attachmentEntries(state) }],
-      };
     case 'REFRESH_SNIPPET_SCAN':
-      return { state, events: [{ type: 'REQUEST_SNIPPET_SCAN' }] };
+      return reduceView(state, action);
     case 'REFRESH_LAUNCHER_TILES':
-      // ⚠ **毎回要求する**。ただし前回のタイルは消さない(古い並びを出したまま
-      //    読み直し、届いたら差し替える ── 「読み込んでいます…」を挟まない)
-      return {
-        state,
-        events: [
-          { type: 'REQUEST_LAUNCHER_TILES', entries: attachmentEntries(state) },
-          /**
-           * ⚠ **引き金は同じでも、読み筋は別**(#857 段②)── 混ぜると
-           *   `tileFrom` が両方を同じ土俵で処理することになる。
-           */
-          readAppGroupNotes(state),
-        ],
-      };
-    /**
-     * 🔴 **1 回目の押し ── 印を付けるだけ**(#857 段①b)。
-     * ⚠ 右の列に何を出すかは `selectedLid` のままなので、**ここでは触らない**
-     *   (entry を持つタイルは呼び側が `SELECT_ENTRY` も撃つ ── 判定の正本は
-     *   `tileSelectsEntry` 1 本で、ここに 2 つ目を書かない)。
-     */
     case 'PICK_APP_TILE':
-      if (state.launcherPick === action.lid) return { state, events: [] };
-      return { state: { ...state, launcherPick: action.lid }, events: [] };
-    /**
-     * 🔴 **並べ替えモードへ入る / 出る**(#857 段①b-2)。
-     *
-     * ⚠ **入るときだけ門を通す** ── 出るのはいつでもできる(閉じ込めない)。
-     * 🔑 門は `MOVE_APP_TILE` と**同じ 2 つ**(`phase` と絞り込み)だけにする ──
-     *   保存中(`writeLock` / `tileWrite`)は**数百ミリ秒で消える**ので、入口で
-     *   断ると「押しても入れない」が偶発的に起きる。**動かすときに断れば足りる**。
-     */
-    case 'SET_LAUNCHER_REORDER': {
-      if (!action.on) {
-        if (!state.launcherReorder) return { state, events: [] };
-        return { state: { ...state, launcherReorder: false }, events: [] };
-      }
-      const blocked = phaseBlockReason(state.phase);
-      if (blocked !== null)
-        return { state: { ...state, error: `${blocked}並べ替えられます` }, events: [] };
-      if (normalizeQuery(state.filterQuery) !== '')
-        return {
-          state: {
-            ...state,
-            error: '絞り込みを消してから並べ替えられます(いまは一部しか出ていません)',
-          },
-          events: [],
-        };
-      if (state.launcherReorder) return { state, events: [] };
-      return { state: { ...state, launcherReorder: true }, events: [] };
-    }
+    case 'SET_LAUNCHER_REORDER':
     case 'LAUNCHER_TILES_LOADED':
-      return { state: { ...state, launcherTiles: action.tiles }, events: [] };
     case 'APP_GROUP_NOTES_LOADED':
-      /**
-       * 🔴 **世代が違う読み直しは画面に当てない**(#857 段③。
-       * 実ブラウザ smoke が 3 回に 1 回落ちて見つかった)。
-       *
-       * ⚠ 落ちていたのは「**名前順へ戻したのに、まだ『すべて名前順に戻す』が出ている**」。
-       *   並べ替えが積んだ読み直しが**戻す操作のあとに**返ってきて、
-       *   **戻す前の本文**(= まだ番号が載っている)を画面へ当てていた。
-       * 🔑 `APP_TILE_SAVED` が既に持っている作法を、こちらにも置いた
-       *   (**片側にしか無い門**は §7 の型である)。
-       * ⚠ 捨てても画面は置き去りにならない ── 世代を進めた側が必ず読み直しを
-       *   1 本積むので、**すぐ後ろに正しい答えが来る**。
-       */
-      if (action.gen !== state.appGroupGen) return { state, events: [] };
-      return {
-        state: { ...state, appGroupIcons: action.icons, appGroupOrders: action.orders },
-        events: [],
-      };
-    /**
-     * 🔴 **グループを 1 つ上へ / 下へ**(#857 段③)。
-     *
-     * 🔑 計画は `planGroupMove`(純関数)── **どこへ入るか**の規則をここに書かない。
-     * ⚠ **書くのは「動かした先より上に在る群」まで** ── 番号のある群は必ず先に来るので、
-     *   部分的には付けられない(`group-order.ts` の説明)。
-     * ⚠ 動かせるのは**名前の付いた、動かせるタイルを持つ群**だけ ── 組み込みは末尾に固定。
-     */
-    case 'MOVE_APP_GROUP': {
-      // ⚠ 門は `MOVE_APP_TILE` と同じ 2 つ(保存中は触らせない / 絞り込み中は動かさない)
-      // 🔴 断るときは理由を出す(#1087。黙って返すと、押したのに何も起きない)
-      const moveRefusal = appGroupWriteRefusal(state, '並べ替えられます');
-      if (moveRefusal !== null) return { state: { ...state, error: moveRefusal }, events: [] };
-      if (normalizeQuery(state.filterQuery) !== '')
-        return {
-          state: {
-            ...state,
-            error: '絞り込みを消してから並べ替えられます(いまは一部しか出ていません)',
-          },
-          events: [],
-        };
-      const tiles = state.launcherTiles;
-      if (tiles === null) return { state, events: [] };
-      /**
-       * ⚠ **動かせる群だけを渡す** ── 組み込みしか居ない群を混ぜると、
-       *   「押せるのに末尾から動かない」という食い違いになる。
-       */
-      const movable: string[] = [];
-      for (const t of tiles)
-        if (t.group !== '' && isMovableTile(t) && !movable.includes(t.group)) movable.push(t.group);
-      const plan = planGroupMove(movable, state.appGroupOrders, appGroupName(action.name), action.by);
-      if (plan.length === 0) return { state, events: [] };
-      /**
-       * ⚠ **lid が足りなければ書かない** ── 呼び側が採り損ねたぶんを別の群の lid で
-       *   埋めると、**別のノートを書き潰す**(いちばん戻せない壊れ方)。
-       */
-      const rows: Array<{
-        name: string;
-        order: number;
-        lid: string;
-        title: string;
-        archetype: string;
-        entryOrder: number;
-      }> = [];
-      /**
-       * 🔴 **無い群のノートは、ここで `CREATE_ENTRY` を通して作る**
-       *   ── effect に作らせない(2026-09-13。CI の全数門が入口になって判った)。
-       *
-       * ⚠ 直す前は effect が `store.persistEntry` で直に行を作っていた。門は
-       *   「書込 1 回に刻み 1 回」を**数える**だけなので、刻みを 1 つ足せば緑になる
-       *   ── ⚠ **ところがその刻みは届かない**:`ENTRY_STAMPED` は
-       *   **`entryMetas` に居ない lid を捨てる**ので、作ったばかりの行には当たらない。
-       * 🔴 つまり本当の欠陥は刻みではなく、**作った物が state に入らないこと**だった
-       *   ── サイドバーにも目録にも出ず、**次に開き直すまで存在しないように見える**。
-       * 🔑 だから作り方を目印(`SET_APP_GROUP_ICON`)と揃える ── 作る口は
-       *   **既存の 1 本**(`CREATE_ENTRY`)。⚠ `CREATE_ENTRY` は本文ごと書くので、
-       *   新しく作る群は `REQUEST_APP_GROUP_ORDER` の行に**入れなくてよい**
-       *   (番号は雛形に入っている)。
-       */
-      let next = state;
-      let fresh = 0;
-      const created: DomainEvent[] = [];
-      for (const w of plan) {
-        const lid = findAppGroupLid(next.order, next.entryMetas, w.name);
-        if (lid !== null) {
-          const meta = next.entryMetas.get(lid)!;
-          rows.push({
-            name: w.name,
-            order: w.order,
-            lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-          });
-          continue;
-        }
-        const newLid = action.newLids[fresh];
-        fresh += 1;
-        /**
-         * ⚠ **lid が足りなければ 1 バイトも書かない** ── 呼び側が採り損ねたぶんを
-         *   別の群の lid で埋めると、**別のノートを書き潰す**(いちばん戻せない壊れ方)。
-         * 🔴 **黙って止まらない**(2026-09-13、着地前レビュー)── 呼び側は確認の小窓を
-         *   出す**前**に lid を採るので、user が「はい」を押すまでの間に別のタブが群を
-         *   増やすと、ここで足りなくなる。⚠ 何も言わずに返すと
-         *   **「はい」を押したのに画面が 1 ドットも変わらない**(無言の dead click)。
-         */
-        if (newLid === undefined)
-          return {
-            state: {
-              ...state,
-              error: '一覧が変わったため、並べ替えを保存しませんでした(もう一度押してください)',
-            },
-            events: [],
-          };
-        const made = reduce(next, {
-          type: 'CREATE_ENTRY',
-          archetype: APP_GROUP_ARCHETYPE,
-          lid: newLid,
-          title: w.name,
-          body: writeAppGroupOrder(appGroupSeed(w.name), w.order),
-          // 🔴 見ていた物を退かさない(目印と同じ ── user は並べ替えたいだけである)
-          keepSelection: true,
-        });
-        next = made.state;
-        created.push(...made.events);
-      }
-      /**
-       * 🔑 **画面は先に動かす**(タイルと同じ)── disk の往復を待つと数百 ms 動かず、
-       *   「押したのに動かない」になる。⚠ 番号は state に持つので、書き戻しは要らない。
-       * 🔴 **世代を 1 つ進める**(#857 段③)── 画面を先に動かした以上、
-       *   **この瞬間より前に積んだ読み直しは、書き換える前の本文を読む**ので当ててはいけない。
-       */
-      const moved: AppState = {
-        ...next,
-        appGroupOrders: Object.fromEntries([
-          ...Object.entries(next.appGroupOrders),
-          ...plan.map((w) => [w.name, w.order] as const),
-        ]),
-        appGroupGen: next.appGroupGen + 1,
-      };
-      return {
-        state: moved,
-        events: [
-          ...created,
-          { type: 'REQUEST_APP_GROUP_ORDER', rows },
-          /**
-           * 🔴 **書いた「あと」に必ず読み直す**(2026-09-13、着地前レビュー)。
-           *
-           * ⚠ 画面は先に動かす(上)ので、**書込が途中で止まると画面と disk が食い違う** ──
-           *   別の窓が先に書いていれば `expectHash` が弾いて 1 行目までしか書けないのに、
-           *   画面は最後まで動いた姿を出し続ける(`F5` まで誰も気づかない)。
-           * 🔑 effect の列は 1 本なので、ここへ置けば**書込のあと**に走り、
-           *   成功でも衝突でも `appGroupOrders` を disk の実値へ戻す
-           *   (`REQUEST_TILE_ORDER` が同じことをしている)。
-           */
-          readAppGroupNotes(moved),
-        ],
-      };
-    }
-    /**
-     * 🔴 **並べ替えをやめて名前順へ戻す**(#857 段③。着地前の動線レビューが出した)。
-     *
-     * ⚠ **片道の操作を作らない**(CLAUDE.md 不可侵)── 「上へ / 下へ」を逆に押せば
-     *   見た目は戻るが、**番号はノートに残り続ける**ので「番号の付いていない状態」へは
-     *   帰れなかった。目印は「なし」で 1 回で外せるのに、並びだけ戻せないのは
-     *   釣り合いが崩れている。
-     * 🔑 **ノートは消さない** ── 消すのは `appgroup.order` の 1 行だけである
-     *   (目印や説明が同じノートに載っているので、丸ごと片付けない)。
-     */
-    case 'RESET_APP_GROUP_ORDER': {
-      // 🔴 断るときは理由を出す(#1087)
-      const resetRefusal = appGroupWriteRefusal(state, '名前順に戻せます');
-      if (resetRefusal !== null) return { state: { ...state, error: resetRefusal }, events: [] };
-      const rows: Array<{
-        name: string;
-        order: number | null;
-        lid: string;
-        title: string;
-        archetype: string;
-        entryOrder: number;
-      }> = [];
-      for (const name of Object.keys(state.appGroupOrders)) {
-        const lid = findAppGroupLid(state.order, state.entryMetas, name);
-        // ⚠ ノートが消えていれば書く先が無い ── その群は state から落ちるだけでよい
-        if (lid === null) continue;
-        const meta = state.entryMetas.get(lid)!;
-        rows.push({
-          name,
-          order: null,
-          lid,
-          title: meta.title,
-          archetype: meta.archetype,
-          entryOrder: meta.entryOrder,
-        });
-      }
-      /**
-       * ⚠ **番号が 1 つも無ければ何も起きない**(押し所はそもそも出ないが、門は両側に置く)。
-       *
-       * 🔴 **`rows.length === 0 &&` を外した**(2026-09-13。自分の diff を読み直して検算)。
-       * ⚠ `rows` は `appGroupOrders` の key から作るので、**番号が空なら rows も必ず空** ──
-       *   前半は後半に含まれる、**書いても何も守らない条件**だった。
-       * ⚠ 実測で両方向を見た:**前半だけ外すと緑のまま**(= 冗長)/
-       *   **門を丸ごと外すと落ちる**(= 門そのものは効いている)。
-       * 🔑 CLAUDE.md「『これが無いと壊れる』と書いたら、外して壊れることを 1 度は見る。
-       *   見ないなら書かない」── 見たら、前半は書いてはいけない側だった。
-       * ⚠ 番号は在るのにノートが消えている(`rows` だけ空)ときは、**通してよい** ──
-       *   画面の番号を落として名前順へ戻すのが正しい(書く先が無いだけである)。
-       */
-      if (Object.keys(state.appGroupOrders).length === 0) return { state, events: [] };
-      // 🔑 画面は先に戻す(書き戻しを待たない ── 動かすときと同じ流儀)。
-      // 🔴 世代を進める理由は `MOVE_APP_GROUP` と同じ ── ここが**当の症状**が出た所で、
-      //    「戻したのに、また『すべて名前順に戻す』が出る」は飛んでいた読み直しの仕業だった。
-      const cleared: AppState = { ...state, appGroupOrders: {}, appGroupGen: state.appGroupGen + 1 };
-      return {
-        state: cleared,
-        events: [
-          { type: 'REQUEST_APP_GROUP_ORDER', rows },
-          // 🔴 書いたあとに読み直す(上の `MOVE_APP_GROUP` と同じ理由)
-          readAppGroupNotes(cleared),
-        ],
-      };
-    }
-    case 'RENAME_APP_GROUP': {
-      // 🔴 断るときは理由を出す(目印・並べ替えと同じ門 + タイル設定の書込中)
-      const renameRefusal = appGroupWriteRefusal(state, '名前を変えられます');
-      if (renameRefusal !== null) return { state: { ...state, error: renameRefusal }, events: [] };
-      const from = appGroupName(action.from);
-      const to = appGroupName(action.to);
-      if (from === '' || to === from) return { state, events: [] };
-      if (to === '')
-        return {
-          state: {
-            ...state,
-            error:
-              'グループの名前が空です(グループから外すには、アプリの設定の「グループ」の欄を空にしてください)',
-          },
-          events: [],
-        };
-      if (state.tileWrite)
-        return {
-          state: { ...state, error: 'いまアプリの設定を保存しています。終わってから、もう一度押してください' },
-          events: [],
-        };
-      const tiles = state.launcherTiles;
-      if (tiles === null) return { state, events: [] };
-      // ⚠ 動かせるのは自分のアプリだけ(組み込みは entry を持たない)
-      const members = tiles.filter((t) => isMovableTile(t) && t.group === from);
-      if (members.length === 0)
-        return {
-          state: {
-            ...state,
-            error: 'このグループは名前を変えられません(最初から入っているアプリだけのグループです)',
-          },
-          events: [],
-        };
-      const rows: Array<{
-        lid: string;
-        updates: Record<string, string | number | undefined>;
-        title: string;
-        archetype: string;
-        entryOrder: number;
-      }> = [];
-      for (const t of members) {
-        const meta = state.entryMetas.get(t.lid);
-        if (meta === undefined)
-          return { state: { ...state, error: '名前を変えられません(ノートが見つかりません)' }, events: [] };
-        rows.push({
-          lid: t.lid,
-          updates: { 'attachment.app_group': to },
-          title: meta.title,
-          archetype: meta.archetype,
-          entryOrder: meta.entryOrder,
-        });
-      }
-      /**
-       * 🔑 グループ用のノート(目印・並び順を持つ)も題名を合わせる。⚠ 行き先の名前のノートが既に在るときは動かさない
-       *   (同じ題名のノートを 2 つ作らない ── そのときは行き先のグループへまとまる)。
-       */
-      let next = state;
-      const pre: DomainEvent[] = [];
-      const noteLid = findAppGroupLid(state.order, state.entryMetas, from);
-      const renamedNote = noteLid !== null && findAppGroupLid(state.order, state.entryMetas, to) === null;
-      if (noteLid !== null && renamedNote) {
-        const made = reduce(state, { type: 'RENAME_ENTRY_TITLE', lid: noteLid, title: to });
-        next = made.state;
-        pre.push(...made.events);
-      }
-      const rekey = <T>(o: Readonly<Record<string, T>>): Record<string, T> =>
-        Object.fromEntries(Object.entries(o).map(([k, v]) => [k === from ? to : k, v] as const));
-      const moved: AppState = {
-        ...next,
-        launcherTiles: tiles.map((t) => (isMovableTile(t) && t.group === from ? { ...t, group: to } : t)),
-        appGroupIcons: renamedNote ? rekey(next.appGroupIcons) : next.appGroupIcons,
-        appGroupOrders: renamedNote ? rekey(next.appGroupOrders) : next.appGroupOrders,
-        appGroupGen: next.appGroupGen + 1,
-        tileWrite: { lid: rows[0]!.lid, n: 1 },
-        notice: `グループ「${from}」を「${to}」に変えました(${String(rows.length)} 件のアプリ)`,
-      };
-      return {
-        state: moved,
-        events: [
-          ...pre,
-          {
-            type: 'REQUEST_TILE_ORDER',
-            lid: rows[0]!.lid,
-            gen: state.lockGen,
-            rows,
-            entries: attachmentEntries(state),
-          },
-          // 🔴 書いた「あと」に読み直す(画面を先に動かしたので、書けなかった回は disk の答えへ戻る)
-          readAppGroupNotes(moved),
-        ],
-      };
-    }
-    case 'SET_APP_GROUP_ICON': {
-      // ⚠ 書込が飛んでいる間は触らせない(`SET_APP_TILE` と同じ規律 ── 読んで
-      //    書き戻す操作なので、途中に別の書込が挟まると片方が消える)
-      // 🔴 断るときは理由を出す(#1087)
-      const iconRefusal = appGroupWriteRefusal(state, '目印を変えられます');
-      if (iconRefusal !== null) return { state: { ...state, error: iconRefusal }, events: [] };
-      const name = appGroupName(action.name);
-      // ⚠ 名前の無い群は見出しを持たない ── 目印を置く場所がそもそも無い
-      if (name === '') return { state, events: [] };
-      /**
-       * 🔴 **画面を先に動かす**(#1076)。
-       *
-       * ⚠ 直す前は `appGroupIcons` が変わるのが**読み直しの ack が返ってから**で、
-       *   その間に「目印を選ぶ…」を開き直すと**選ぶ前の絵に枠が付いていた**
-       *   (表は開いた瞬間の値で組まれ、開いている間は変わらない)── 見出しの絵も同じ間だけ古い。
-       * 🔑 **世代を進める** ── 先に飛んでいた読み直し(この変更を知らない本文)に
-       *   巻き戻させない(§7。`MOVE_APP_GROUP` と同じ作法)。disk の答えは、
-       *   下で積む読み直しが**必ず後ろから**持って来る(書けなかったときはそれで戻る)。
-       */
-      const optimistic = (s: AppState): AppState => ({
-        ...s,
-        appGroupIcons: withAppGroupIcon(s.appGroupIcons, name, action.icon),
-        appGroupGen: s.appGroupGen + 1,
-      });
-      const found = findAppGroupLid(state.order, state.entryMetas, name);
-      if (found !== null) {
-        const meta = state.entryMetas.get(found)!;
-        const next = optimistic(state);
-        return {
-          state: next,
-          events: [
-            {
-              type: 'REQUEST_APP_GROUP_ICON_WRITE',
-              lid: found,
-              title: meta.title,
-              archetype: meta.archetype,
-              entryOrder: meta.entryOrder,
-              icon: action.icon,
-            },
-            // ⚠ 書いた**あと**に読み直す(effect の列は 1 本なので順番は保たれる)──
-            //    読み直さないと、押した結果が出るのは「次にタブを開き直したとき」になる
-            // ⚠ **進めた後の世代で**積む(当てる前の state で積むと、出た瞬間に捨てられる)
-            readAppGroupNotes(next),
-          ],
-        };
-      }
-      /**
-       * ⚠ **外すだけなら作らない** ── 目印の無いグループで「なし」を押したときに
-       *   空のノートが生えると、user は**頼んでいない物**を片付ける羽目になる。
-       */
-      if (action.icon === null) return { state, events: [] };
-      /**
-       * 🔑 **作る口は既存の 1 本を通す**(`CREATE_ENTRY`)── ここで並びも目録も
-       *   自分で組むと、作り方が 2 つになる(§7)。
-       */
-      const created = reduce(state, {
-        type: 'CREATE_ENTRY',
-        archetype: APP_GROUP_ARCHETYPE,
-        lid: action.newLid,
-        title: name,
-        body: writeAppGroupIcon(appGroupSeed(name), action.icon),
-        /**
-         * 🔴 **見ていた物を退かさない**(`keepSelection`)。
-         *
-         * ⚠ 既定の `CREATE_ENTRY` は「作って開く」なので、そのまま呼ぶと
-         *   **目印を選んだだけで右の面が作りたてのノートに変わり、絞り込みの欄と
-         *   種類の絞りまで消える** ── user は見出しに絵を置きたかっただけである
-         *   (CLAUDE.md「欠陥の多くは『さっきまでやっていたことが消える』形で出る」)。
-         * 🔑 `keepSelection` は選択・絞り込み・開いている本文を**そのまま残し**、
-         *   編集にも入らない(この case の docstring がそう書いている)。
-         */
-        keepSelection: true,
-      });
-      const next = optimistic(created.state);
-      return {
-        state: next,
-        events: [
-          ...created.events,
-          // ⚠ **作った後の並び**で読む(作りたてのノートが入っていないと、目印が出ない)
-          readAppGroupNotes(next),
-        ],
-      };
-    }
-    case 'APP_TILE_SAVED': {
-      // 🔴 **世代が違う ack は本文に触らない**が、**ロックは必ず解く**
-      //    (追記と同じ ── 握ったままにすると user は二度と設定を変えられない)
-      const left = (state.tileWrite?.n ?? 1) - 1;
-      const released: AppState = {
-        ...state,
-        tileWrite: left > 0 && state.tileWrite ? { ...state.tileWrite, n: left } : null,
-      };
-      // ⚠ 世代が違う ack は本文に触らないが、**数は必ず減らす**
-      //    (減らさないと user は二度と設定を変えられず、しかも理由が分からない)
-      if (action.gen !== state.lockGen) return { state: released, events: [] };
-      // 失敗(書けなかった)── ロックだけ解いて本文は触らない
-      if (action.body === null) return { state: released, events: [] };
-      const body = action.body;
-      const ob = state.openBody;
-      /**
-       * 🔴 **主の枠が別のノートを開いていても、留めた枠には映す**(#848、2026-09-13)。
-       *
-       * ⚠ 直す前はここで丸ごと捨てていた ── 留めた枠に出した設定を押すと、
-       *   **disk には書けるのに画面が 1 ドットも変わらない**(主の枠が別のノートを
-       *   開いていると `ob?.lid !== action.lid` で返っていたため)。
-       * 🔑 押した物と効く先を揃えた口(`data-pkc-target-lid`)を出す以上、
-       *   **その結果が戻る経路も同じ数だけ要る**(CLAUDE.md §7)。
-       */
-      if (ob?.lid !== action.lid) {
-        return { state: { ...released, ...syncShownBodies(state, action.lid, body) }, events: [] };
-      }
-      /**
-       * 🔴 **留めた枠にも追随させる**(#848、2026-09-13)。
-       *
-       * ⚠ ここだけ `syncSplitBody` を通っていなかった ── 同じノートを
-       *   **横に並べた枠に留めている**と、添付の設定を変えても**そちらは古い本文のまま**で、
-       *   押しても**何も変わらないように見える**(`aria-pressed` も動かない)。
-       * 🔑 書込の口を数え上げると `BODY_REWRITTEN` / `BODY_PERSISTED` / `REMOTE_BODY` は
-       *   通っており、**ここだけが非対称**だった(CLAUDE.md §7「片側を直したら反対側を疑う」)。
-       * ⚠ 編集中の枝でも通す ── draft は触らないが、**留めた枠が映すのは disk の姿**である。
-       */
-      if (state.phase === 'editing') {
-        // 🔴 **draft は触らないが、disk が進んだ印は残す**(P8 段⑯。レビュー H-1)。
-        //    かつては丸ごと捨てていたので、無変更 commit / cancel で**旧本文が
-        //    disk を上書きし、書けたはずの設定が消えた**(実測で再現)。
-        //    `TODO_TOGGLED` の editing 窓と同型に揃える ── 変更ありの commit は
-        //    draft が勝ち(可視内容の last-write-wins)、無変更 commit / cancel は
-        //    disk を採る
-        return {
-          state: {
-            ...released,
-            openBody: { ...ob, persisted: body, diskAhead: true },
-            ...syncShownBodies(state, action.lid, body),
-          },
-          events: [],
-        };
-      }
-      return {
-        state: {
-          ...released,
-          openBody: { lid: action.lid, body, baseline: body, persisted: body, diskAhead: false },
-          ...syncShownBodies(state, action.lid, body),
-        },
-        events: [],
-      };
-    }
-    case 'OFFICE_ASSET_SAVED': {
-      // 🔴 **`ready` でなければ何もしない。** ⚠ ただし**捨ててよいのは、呼び側が
-      //    棚から消さずに撃ち直すから**である(`office-save-back.ts`)── その対を
-      //    崩すと、編集中に届いた保存が消える
-      if (state.phase !== 'ready') return { state, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      // 消された / 添付でなくなったノートへは書かない(呼び側が新規作成へ倒す)
-      if (!meta || meta.archetype !== 'attachment') return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_ASSET_REPLACE',
-            targetLid: action.lid,
-            newKey: action.newKey,
-            newHash: action.newHash,
-            newBytes: action.newBytes,
-            newName: action.newName,
-            newMime: action.newMime,
-            savedAt: action.savedAt,
-            // 🔑 **ノートの一覧はもう運ばない**(2026-08-25)── 走査ごと
-            //    worker の 1 tx へ移したので、題名も並びも **worker が自分で読む**。
-            //    ⚠ 運び続けると「受け手のいない payload」になる(5,000 件の meta を
-            //    毎回作って捨てることになるうえ、次に読む人が「効く」と思う)。
-          },
-        ],
-      };
-    }
-    case 'ENTRY_BODY_REFRESHED': {
-      const ob = state.openBody;
-      // 🔴 **留めた枠にも映す**(#1087)── 主の枠が別のノートを開いていても、留めた枠だけが
-      //    このノートを映していることがある。⚠ 直す前は丸ごと捨てていたので古い本文のままだった
-      //    (持っていない lid では `syncShownBodies` は何もしない)
-      if (ob?.lid !== action.lid) {
-        const shown = syncShownBodies(state, action.lid, action.body);
-        return { state: sameShownBodies(state, shown) ? state : { ...state, ...shown }, events: [] };
-      }
-      // 🔴 **編集中の draft は触らない**(`APP_TILE_SAVED` と同じ ── 捨てると
-      //    無変更 commit / cancel で旧本文が disk を上書きする)
-      if (state.phase === 'editing') {
-        return {
-          state: {
-            ...state,
-            openBody: { ...ob, persisted: action.body, diskAhead: true },
-            ...syncShownBodies(state, action.lid, action.body),
-          },
-          events: [],
-        };
-      }
-      return {
-        state: {
-          ...state,
-          ...syncShownBodies(state, action.lid, action.body),
-          openBody: {
-            lid: action.lid,
-            body: action.body,
-            baseline: action.body,
-            persisted: action.body,
-            diskAhead: false,
-          },
-          // ⚠ 名前のとおり**本文が入れ替わる**所 ── 札も組み直す(上と同じ理由)
-          taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
-          // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
-          smartHits: refreshSmartHits(
-            state.smartHits,
-            action.lid,
-            action.body,
-            state.entryMetas,
-          ),
-        },
-        events: [],
-      };
-    }
-    case 'SET_APP_TILE': {
-      // ⚠ 書込が飛んでいる間は触らせない(追記と同じ規律)── 読んで書き戻す
-      //    操作なので、途中に別の書込が挟まると片方が消える
-      // ⚠ 追記が飛んでいる間は触らない(あちらは本文を丸ごと書き戻す)
-      // 🔴 **断るときは理由を出す**(並べ替え `MOVE_APP_TILE` と同じ)── 黙って捨てると、
-      //   欄には新しい値が残ったまま何も保存されない(押したのに効いていない)。
-      const refusal = appTileRefusal(state, action.lid);
-      if (refusal !== null) return { state: { ...state, error: refusal }, events: [] };
-      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
-      const updates: Record<string, string | boolean | undefined> = {};
-      // ⚠ **false は書かない**(PKC2 と同じ)── 既定値を明示的に持つと、
-      //    frontmatter が「登録していない」行で埋まる
-      if (action.registered !== undefined)
-        updates['attachment.registered_as_app'] = action.registered ? true : undefined;
-      if (action.group !== undefined) {
-        // ⚠ **書くときも前後の空白を落とす**(#857 段②)── 残すと、見出しの字と
-        //    グループ用のノートの題名が食い違い、目印が引けなくなる(読む側も同じ口を通す)
-        const g = appGroupName(action.group ?? '');
-        updates['attachment.app_group'] = g === '' ? undefined : g;
-      }
-      if (action.icon !== undefined) {
-        updates['attachment.app_icon'] =
-          action.icon === null || action.icon === '' ? undefined : action.icon;
-        /**
-         * 🔴 **字や図案を選んだら、取り込んだ絵は外す**(#856 段②)。
-         *
-         * ⚠ 出す側は**絵を字より先に**使うので、外さないと
-         *   **選んだのに画面が変わらない** ── この repo がいちばん嫌う
-         *   無言の dead click になる。
-         * ⚠ 「なし」(空文字)でも外す ── user が求めているのは
-         *   「印を出さない」ことであって、「字だけ消す」ことではない。
-         * 🔑 **規則を 1 つにする**(例外を作らない)── 絵に戻したければ
-         *   もう一度「リンク先の印を取り込む」を押せばよい。
-         */
-        updates['attachment.app_icon_asset_key'] = undefined;
-      }
-      if (action.iconAssetKey !== undefined)
-        updates['attachment.app_icon_asset_key'] =
-          action.iconAssetKey === null || action.iconAssetKey === ''
-            ? undefined
-            : action.iconAssetKey;
-      if (Object.keys(updates).length === 0) return { state, events: [] };
-      const meta = state.entryMetas.get(action.lid)!;
-      return {
-        // 🔴 **飛んでいる数を数える**(P8 段⑯。レビュー H-1/H-7)。これは
-        //    **読んで書き戻す**操作なので、往復の窓に編集が割り込むと片方が消える。
-        //    実測で再現: 登録にチェック → ack が返る前に編集して保存 → disk に
-        //    着地した `registered_as_app: true` が旧本文の書き戻しで**黙って消えた**。
-        //    ⚠ `writeLock` を借りると**連続した設定変更が無言で落ちる**(登録 →
-        //    グループ → 目印 を続けて触ると 2 件目以降が拒否される。smoke が実際に
-        //    落ちた)── タイルの書込どうしは disk を読み直すので互いに安全
-        state: { ...state, tileWrite: { lid: action.lid, n: (state.tileWrite?.n ?? 0) + 1 } },
-        events: [
-          {
-            type: 'REQUEST_TILE_UPDATE',
-            lid: action.lid,
-            gen: state.lockGen,
-            updates,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            entries: attachmentEntries(state),
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **タイルを並べ替える**(#857 段①)。
-     *
-     * 🔑 計画は `planTileMove`(純関数)── **どこへ入るか**の規則をここに書かない。
-     * 🔑 画面は**先に**動かす(`applyTileWrites`)── 掴んだ手を離してから disk の
-     *   往復を待つと数百 ms 動かず、「掴めたのに動かない」になる。
-     */
-    case 'MOVE_APP_TILE': {
-      const tiles = state.launcherTiles;
-      // ⚠ まだ読み込んでいない(タブを開いた直後)── 掴めないので、ここへは来ない
-      if (tiles === null) return { state, events: [] };
-      const moved = tiles.find((t) => t.lid === action.lid);
-      if (moved === undefined) return { state, events: [] };
-      /**
-       * 🔴 **断るときは理由を出す**(無言の操作拒否を作らない)。
-       * ⚠ `SET_APP_TILE` は黙って落とすが、あちらは**押し直せば済む設定**である。
-       *   並べ替えは**掴んで離した後**なので、黙って元へ戻ると「壊れている」に見える。
-       */
-      const refuse = (error: string): ReduceResult => ({ state: { ...state, error }, events: [] });
-      // ⚠ 組み込みは entry を持たない ── 掴ませない側でも止めるが、門は 2 枚置く
-      if (!isMovableTile(moved)) return refuse('最初から入っているアプリは並べ替えられません');
-      /**
-       * 🔴 **`phase !== 'ready'` を「編集中」と読み替えない**(この file の
-       * `phaseBlockReason` が戒めている当のもの ── 1 稿目はそれを踏んでいた)。
-       * ⚠ `phase` には `'error'`(保存に失敗したときの保護)も `'initializing'` も
-       *   在るので、一律に「編集を終えてから」と出すと**嘘になる** ── user は
-       *   編集していないのに、**存在しない編集画面を探す**。
-       */
-      const blocked = phaseBlockReason(state.phase);
-      if (blocked !== null) return refuse(`${blocked}並べ替えられます`);
-      /**
-       * 🔴 **絞り込んでいる間は並べ替えない**(動線レビュー D3)。
-       *
-       * ⚠ 画面に出ているのは絞った後のタイルだが、並び順の正本は**全件**である ──
-       *   隠れたタイルをまたぐ移動になるので、「上へ」を 1 回押しても
-       *   **画面が 1 ドットも動かない**(隣の隠れた 1 枚と入れ替わっただけ)。
-       *   落とすほうも、線を引いた所と**違う場所に着く**。
-       * 🔑 どちらも「効いていないように見えて、実は書いている」という
-       *   いちばん読めない形なので、**受けずに理由を言う**側へ倒す。
-       *   ⚠ 掴ませない門は `launcher.ts` にも置いてある(門は 2 枚)。
-       */
-      if (normalizeQuery(state.filterQuery) !== '')
-        return refuse('絞り込みを消してから並べ替えられます(いまは一部しか出ていません)');
-      if (state.writeLock)
-        return refuse('いま保存しています。少し待ってから、もう一度動かしてください');
-      if (state.tileWrite)
-        return refuse('いま並べ替えを保存しています。終わってから、もう一度動かしてください');
-
-      const plan = planTileMove(tiles, action.lid, action.target);
-      if (plan.length === 0) {
-        /**
-         * 🔴 **端で押したときは理由を言う**(動線レビュー D2)。
-         * ⚠ 「上へ」を押して**画面も言葉も動かない**のは、この repo がいちばん嫌う
-         *   無言の dead click である(フォルダの帯は同じ場面で押せなくして
-         *   「すでに先頭です」と出している)。
-         * 🔑 **落とし戻した回とは分ける** ── あちらは「動かさないと決めた」操作なので
-         *   断りではない。⚠ 刻みの移動で計画が空になるのは**端のときだけ**である。
-         */
-        if (action.target.kind === 'step')
-          return refuse(
-            action.target.by < 0
-              ? 'すでにこのまとまりのいちばん上です'
-              : 'すでにこのまとまりのいちばん下です',
-          );
-        // ⚠ 元の位置へ落とし戻した回 ── **断りではない**ので、理由は出さない
-        return { state, events: [] };
-      }
-
-      const rows: Array<{
-        lid: string;
-        updates: Record<string, string | number | undefined>;
-        title: string;
-        archetype: string;
-        entryOrder: number;
-      }> = [];
-      for (const w of plan) {
-        const meta = state.entryMetas.get(w.lid);
-        /**
-         * ⚠ 素性の読めない行が 1 つでもあれば、**1 件も書かずにやめる**。
-         *
-         * 🔴 **これが守れるのは「書き始める前」までである**(2026-09-12 に訂正)。
-         *   1 稿目はここに「丸ごとやめる」と書いていたが、⚠ 書き始めた後に
-         *   別の窓との衝突が起きた回は **effect が途中で止まり、書いた分は戻らない**
-         *   (`store-effects.ts` の `REQUEST_TILE_ORDER`)── 元でも狙いでもない
-         *   第 3 の並びが disk に残る。
-         * 🔑 だから断り文のほうを事実に合わせてある(「途中まで」と言う)。
-         *   ⚠ 本当に全か無かにするには worker の 1 tx が要る ── そこまでは今やらない。
-         */
-        if (meta === undefined) return refuse('並べ替えられません(ノートが見つかりません)');
-        const updates: Record<string, string | number | undefined> = {
-          'attachment.app_order': w.order,
-        };
-        // ⚠ 群は**変わるときだけ**書く。既定群(空文字)へ移すのは**行ごと消す**
-        //    (`SET_APP_TILE` と同じ意味論 ── 既定値で frontmatter を埋めない)
-        if (w.group !== undefined)
-          updates['attachment.app_group'] = w.group === '' ? undefined : w.group;
-        rows.push({
-          lid: w.lid,
-          updates,
-          title: meta.title,
-          archetype: meta.archetype,
-          entryOrder: meta.entryOrder,
-        });
-      }
-      return {
-        state: {
-          ...state,
-          launcherTiles: applyTileWrites(tiles, plan),
-          // ⚠ 数えるのは 1 つ ── effect は最後に 1 回だけ ack を撃つ
-          tileWrite: { lid: action.lid, n: 1 },
-        },
-        events: [
-          {
-            type: 'REQUEST_TILE_ORDER',
-            lid: action.lid,
-            gen: state.lockGen,
-            rows,
-            entries: attachmentEntries(state),
-          },
-        ],
-      };
-    }
-    case 'START_EDIT': {
-      // openBody が現選択の body を持っているときだけ編集に入れる
-      // (= 未読 body の編集・保存が構造的に不可能)
-      if (state.phase !== 'ready') return { state, events: [] };
-      if (!state.openBody || state.openBody.lid !== state.selectedLid)
-        return { state, events: [] };
-      // 🔴 **system 領域のノート(メッセージ・処理の記録)は編集に入れない**
-      // (#1038 台帳③ C1 の着地前レビュー)。⚠ 押し口は描画側が出さない
-      // (`detail.ts` / ⋯ の `phone-menu`)── ここは backstop。押し口が 1 つ増えた日に
-      // 素通りして、アプリが書く記録を user の手で書き換えられる形にしない。
-      if (isSystemMessageLid(state.openBody.lid)) return { state, events: [] };
-      /**
-       * 🔴 **章の欄が開いているノートでは、全文編集に入れない**(#1044 段2。
-       *   設計 doc §3)。⚠ **無言では返さない**(design「do not silently drop
-       *   the draft」)── 押した人には「章の欄を閉じれば入れる」と分かる字を出す。
-       */
-      if (state.sectionDraft?.lid === state.openBody.lid) {
-        return sectionDraftBlockedResult(state);
-      }
-      // 🔴 **追記の書込が飛んでいる間は編集に入れない**(P8 段⑧)。
-      // 入れてしまうと editor が古い body を掴み、着弾した追記を保存で上書きする
-      // ── これが「追記が黙って消える」の実体。
-      // ⚠ ここは**backstop** ── 無言の拒否にならないよう、描画側は書込中
-      // 「編集」を出さずにロックの帯(理由 + 強制解放)を出す(`detail.ts`)
-      // ⚠ タイル設定の書込中も編集に入れない(交錯すると disk の設定が消える)
-      if (state.tileWrite && state.tileWrite.lid === state.openBody.lid)
-        return { state, events: [] };
-      if (state.writeLock && state.writeLock.lid === state.openBody.lid)
-        return { state, events: [] };
-      // ⚠ 編集がロックを握ることは**書かない** ── `phase === 'editing'` が既に
-      // それを表している(`bodyLockOf`)。ここで別の field に写すと 2 つ目の真実
-      return {
-        state: {
-          ...state,
-          phase: 'editing',
-          openBody:
-            action.restoreBody === undefined
-              ? state.openBody
-              : { ...state.openBody, body: action.restoreBody },
-          revisionPanel: null,
-          // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
-          revisionPreview: null,
-          /**
-           * 🔴 **押した行を持って編集へ入る**(#395 段③)。
-           * ⚠ **毎回入れ替える**(`?? null`)── 前回の値を残すと、普通に
-           *   「編集」を押しただけで**前に押した行が開く**。
-           */
-          editOpenAt: action.atLine ?? null,
-          // ⚠ 編集は行をずらすので「元に戻す」の材料は捨てる(#684 段①。`lastMove` の注記)
-          lastMove: null,
-        },
-        /**
-         * 🔴 **編集に入るたびに雛形を集め直す**(#196 / B-2)。
-         *
-         * ⚠ 「一度集めたら使い回す」にしない ── **さっき直した雛形が次の編集で
-         *   古いまま**になる(自分で作った物が効かないのは、いちばん困る形)。
-         * 🔑 実費は「archetype で絞った ≤200 行を worker で読む」1 往復で、
-         *   しかも**押した瞬間ではなく編集を開いた瞬間**に走るので、`Tab` の
-         *   反応には乗らない。
-         * ⚠ 頼むのは配線ではなくここ ── `main.ts` に書くと、どの test からも
-         *   実行されない場所に判断が沈む(CLAUDE.md §2)。
-         */
-        events: [{ type: 'REQUEST_SNIPPET_SCAN' }],
-      };
-    }
-    /**
-     * 🔴 **本文の置換**(#191)。⚠ 編集中だけ ── 読んでいるだけの面から本文を
-     * 書き換えると、user が「編集していない」と思っている間に内容が変わる。
-     * ⚠ **0 件のときも state を返す**(何も起きないのではなく「見つからなかった」と
-     * 言う)── 押しても無反応な dead click を作らない。
-     */
-    case 'REPLACE_IN_BODY': {
-      /**
-       * 🔴 **編集中でないときも黙らない**(#1087 の見直し 2026-10-13)── 置換の欄は保存した後も開いたまま残るので、
-       *   そのまま「すべて置換」を押すと何も起きなかった(ショートカットキーと操作を探すは押す前に断っていたが、ボタンだけ無言)。
-       */
-      if (state.phase !== 'editing' || !state.openBody)
-        return {
-          state: { ...state, error: '「すべて置換」は編集中のノートでだけ使えます(「ノートを編集する」を押してから)' },
-          events: [],
-        };
-      /**
-       * 🔴 **置換の結果は「結果」の知らせで言う。エラーの行に入れない**(#1087 の見直し 2026-10-13)。
-       * ⚠ 直す前は 3 つとも `error` に入れていたので、画面下に「エラー: 2 件を置き換えました」と出て、
-       *   メッセージには種類「問題」で積まれていた(成功したのに失敗の顔)。
-       * ⚠ 探す語が空のときは、空の鉤括弧(「」は本文に見つかりませんでした)ではなく、何を入れるかを言う。
-       */
-      if (action.find === '') return { state: { ...state, notice: '探す語を入れてください', noticeOpen: null, noticeCreate: null }, events: [] };
-      /**
-       * 🔴 **添付ノートは、画面に出ていない設定の行を置換の外に置く**(#1579 Q1 = A)。
-       * ⚠ 設定の行(`attachment.*`)は編集欄に畳まれて見えない。そこへ当てると、
-       *   見えない所が書き換わって添付が壊れる。切り方は編集欄と同じ `foldAttachmentHead` 1 本。
-       *   件数も見える本文だけを数える(`replaceAll` の返す count をそのまま使う)。
-       */
-      const fold =
-        state.entryMetas.get(state.openBody.lid)?.archetype === 'attachment'
-          ? foldAttachmentHead(state.openBody.body)
-          : null;
-      const done = replaceAll(fold === null ? state.openBody.body : fold.rest, action.find, action.replace, {
-        caseSensitive: action.caseSensitive === true,
-      });
-      const count = done.count;
-      const body = fold === null ? done.body : joinHiddenHead(fold.head, done.body);
-      if (count === 0)
-        return {
-          state: { ...state, notice: `「${action.find}」は本文に見つかりませんでした`, noticeOpen: null, noticeCreate: null },
-          events: [],
-        };
-      return {
-        state: { ...state, notice: `${count} 件を置き換えました`, noticeOpen: null, noticeCreate: null, openBody: { ...state.openBody, body } },
-        events: [],
-      };
-    }
-    case 'UPDATE_OPEN_BODY': {
-      if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
-      return {
-        state: { ...state, openBody: { ...state.openBody, body: action.body } },
-        events: [],
-      };
-    }
-    case 'COMMIT_EDIT': {
-      // 🔴 捨てるなら**声に出して**捨てる(#723)── 下の `endEditRefusal` を見よ
-      if (state.phase !== 'editing' || !state.openBody)
-        return { state: { ...state, error: endEditRefusal('保存', state) }, events: [] };
-      const { lid, body: draft, baseline, persisted } = state.openBody;
-      /**
-       * 🔴 **保存時に本文中のタグを `body-tags:` へ集約する**(#550)。書換は `applyBodyRewrite` の 1 本。
-       * ⚠ 下書きが baseline と同じなら書かない(「変わっていないなら書かない」を壊さない)ので、
-       *   集約は**変更のある保存**でだけ走る。集約が今と同じなら本文は 1 字も変わらない。
-       */
-      const body =
-        draft === baseline
-          ? draft
-          : (applyBodyRewrite(draft, { kind: 'body-tags-sync' }) ?? draft);
-      // baseline := body(最終 commit 内容)。disk 確認は persisted が別に持つので
-      // これは楽観確定ではない(review E は persisted の導入で解消)
-      const { diskAhead } = state.openBody;
-      const next: AppState = {
-        ...state,
-        phase: 'ready',
-        freshLid: state.freshLid === lid ? null : state.freshLid,
-        // 変更ありの commit は draft が正(可視内容の last-write-wins)── disk
-        // 先行の印はここで畳む
-        openBody: { lid, body, baseline: body, persisted, diskAhead: false },
-      };
-      // 変わっていないなら書かない(PKC2 #1024 の教訓を最初から)。
-      // ローカル変更が無く disk が先行(編集中に toggle ack ── diskAhead)なら
-      // **disk が勝つ** ── stale baseline を持ち越すと、後日の無関係な commit が
-      // toggle を黙って巻き戻す(P3-6a review #4)
-      if (body === baseline) {
-        if (diskAhead) {
-          return {
-            state: {
-              ...state,
-              phase: 'ready',
-              freshLid: state.freshLid === lid ? null : state.freshLid,
-              openBody: {
-                lid,
-                body: persisted,
-                baseline: persisted,
-                persisted,
-                diskAhead: false,
-              },
-            },
-            events: [],
-          };
-        }
-        return {
-          state: { ...next, openBody: { ...next.openBody!, diskAhead: false } },
-          events: [],
-        };
-      }
-      const meta = state.entryMetas.get(lid);
-      if (!meta) {
-        // openBody は SELECT_ENTRY(存在検査済)経由でしか確立しない ── ここに
-        // 来たら不変量違反。書かずに可視エラーで終える(黙って捨てない)
-        return {
-          state: { ...state, phase: 'ready', error: ENTRY_GONE_NOTE },
-          events: [],
-        };
-      }
-      // 抽出はイベント発火時(= この reduce)に同期で行い、行全体を確定して運ぶ
-      const { entryMetas, entry, taskScan, smartHits } = buildPersist(state, meta, body);
-      // 変更前(baseline)を履歴に積むかどうか(P5c: 実際の記録は worker が
-      // 同 tx で行う ── ここは「刻むか / 頭を張り替えるだけか」の意思決定)。
-      // 新規作成の初回 commit は積まない ──「flavor seed へ戻す」だけの復元先は
-      // ゴミ(PKC2 は無条件に積んで肥大した)。
-      // ⚠ freshLid だけでは足りない(review P5b F4): rename が fresh を解除する
-      // ため「作成 → title → 本文 → 保存」の普通の流れで seed revision が積まれる
-      // ── baseline が flavor seed のままなら fresh 扱いで skip する
-      /**
-       * 🔴 **別の窓の版を上書きするなら、必ず履歴へ積む**(#178、2026-08-22)。
-       *
-       * ⚠ ここは **last-write-wins のまま**である(「変更ありの commit は draft が
-       *   正」── P3-6a review #4 の判断は覆さない)。user が打った字を、
-       *   別の窓の都合で**捨てさせない**ためである。
-       * 🔑 変えるのは**残るかどうか**と**黙るかどうか**の 2 つだけ:
-       *   ① `checkpoint` を強制する(下の断り文「履歴に残しました」を**本当にする**)
-       *   ② 画面に出す ── 直す前は**完全に無言**で、user は「カレンダーで付けた
-       *      日付が消えた」としか見えなかった(戻せることを知る道が無い)。
-       * ⚠ ①は「たぶん積まれる」では足りない ── 新規作成の初回 commit は
-       *   `checkpoint` が false なので、そこだけ本当に消える。
-       */
-      const checkpoint =
-        diskAhead || (state.freshLid !== lid && baseline !== seedBodyFor(meta.archetype));
-      return {
-        state: {
-          ...next,
-          entryMetas,
-          taskScan,
-          smartHits,
-          ...(diskAhead
-            ? {
-                error:
-                  '別のタブまたはウィンドウの変更と重なりました。こちらの内容で保存し、' +
-                  '別のタブまたはウィンドウの版は履歴に残してあります(履歴から戻せます)',
-              }
-            : {}),
-        },
-        /**
-         * 🔑 **保存したのが入れ物自身なら、条件が変わったかもしれない**
-         *   (本文の `smart-tags:` は手で書ける ── マニュアルにもそう書いてある)。
-         * ⚠ 上の `refreshSmartHits` は**自分自身を触らない**(自分は集めないので
-         *   正しい)ので、条件の変更はここでしか拾えない。
-         * ⚠ 入れ物でなければ `smartScanFor` が空を返す ── 普通の保存で走査は走らない。
-         */
-        events: [
-          { type: 'PERSIST_ENTRY', entry, checkpoint, keepMeta: true },
-          ...smartScanFor(state, lid),
-        ],
-      };
-    }
-    case 'RETRY_PERSIST': {
-      // persist 失敗(error phase)からの復帰: baseline(最後に commit した内容)が
-      // disk(persisted)に未達なら、現 meta で行を組み直して再送する。
-      // baseline ≠ persisted が「未達の証拠」── P3-5 で導入した分離の回収点
-      if (state.phase !== 'error' || !state.openBody) return { state, events: [] };
-      const { lid, baseline, persisted, diskAhead } = state.openBody;
-      // ⚠ `diskAhead` でも**止めない**(#1087)── 別のタブが先に書いた版がある状態で再保存を
-      //   黙って断ると、未達の字の出口が無くなる。通すが、履歴に残して知らせる(commit と同じ)
-      if (baseline === persisted) return { state, events: [] };
-      const meta = state.entryMetas.get(lid);
-      if (!meta) return { state, events: [] };
-      const { entryMetas, entry, taskScan, smartHits } = buildPersist(state, meta, baseline);
-      // 再送でも刻む意思は同じ(worker 側の hash skip が重複を防ぐので二重に
-      // 積まれることはない ── 初回 persist が失敗していれば disk はまだ前の内容)
-      const checkpoint =
-        diskAhead || (state.freshLid !== lid && persisted !== seedBodyFor(meta.archetype));
-      return {
-        state: {
-          ...state,
-          phase: 'ready',
-          error: diskAhead
-            ? '別のタブまたはウィンドウの変更と重なりました。こちらの内容で保存し、' +
-              '別のタブまたはウィンドウの版は履歴に残してあります(履歴から戻せます)'
-            : null,
-          entryMetas,
-          taskScan,
-          smartHits,
-          openBody: { lid, body: baseline, baseline, persisted, diskAhead: false },
-        },
-        events: [{ type: 'PERSIST_ENTRY', entry, checkpoint, keepMeta: true }],
-      };
-    }
-    case 'CANCEL_EDIT': {
-      // 🔴 捨てるなら**声に出して**捨てる(#723)── 下の `endEditRefusal` を見よ
-      if (state.phase !== 'editing' || !state.openBody)
-        return { state: { ...state, error: endEditRefusal('取り消し', state) }, events: [] };
-      const { lid, body, baseline, persisted, diskAhead } = state.openBody;
-      // 新規作成直後の未編集 cancel は entry ごと掃除する ── PKC2 は掃除が無く
-      // 「作成 → Esc」で既定 title の空 entry が堆積した(P3-7a)。draft を
-      // 打ち込んでからの cancel は PKC2 同様 entry を残す(誤 Esc で消さない)
-      if (state.freshLid === lid && body === baseline) {
-        /**
-         * 🔴 **何も書かれていないノートは、ゴミ箱へ移さず消す**(#1087)。直す前は「新規 → 何も打たず Esc」の
-         *   たびに空のノートがゴミ箱へ溜まった。⚠ 消してよいのは**本当に手付かず**の物だけ ──
-         *   本文が種のまま(`seedBodyFor`)で、題名も作ったときのまま(改名は `freshLid` を外す)。
-         *   取り込み・貼り付けなどで中身を持って作った物は `seedBodyFor` と違うので、ゴミ箱を通る。
-         */
-        const meta = state.entryMetas.get(lid);
-        const untouched = meta !== undefined && baseline === seedBodyFor(meta.archetype);
-        return removeEntryFromState(state, lid, [
-          untouched ? { type: 'REQUEST_DELETE', lid, untouched: true } : { type: 'REQUEST_DELETE', lid },
-        ]);
-      }
-      // draft 破棄。disk 先行(diskAhead)なら disk を採用(review #4)。
-      // 自 commit の ack 待ちで persisted が遅れているだけなら baseline が正。
-      // fresh は非掃除分岐でも解除する ── draft を打った cancel は「残す意思」で
-      // あり、後日の無変更 Esc が作業済み entry を消してはならない
-      // (P3-7a review 中: toggle を跨いで freshLid が生き残る反例)
-      const restored = diskAhead ? persisted : baseline;
-      return {
-        state: {
-          ...state,
-          phase: 'ready',
-          freshLid: state.freshLid === lid ? null : state.freshLid,
-          openBody: {
-            lid,
-            body: restored,
-            baseline: restored,
-            persisted,
-            diskAhead: false,
-          },
-        },
-        events: [],
-      };
-    }
-    /**
-     * 🔴 **章だけの下書きを開く**(#1044 段2)。
-     *
-     * ⚠ 見出しは**押した行**で特定する(`sectionAt`)── ここでは行はまだずれていない
-     *   (開く瞬間なので、押した行がそのまま本文の行である)。保存のときだけ
-     *   **名前で**探し直す(その間に別の窓が書いているかもしれないため)。
-     * ⚠ **章の範囲は追記欄と同じ関数**(`sectionRange`)── 2 つ目の規則を作らない
-     *   (設計 doc §3)。
-     */
-    case 'OPEN_SECTION_DRAFT': {
-      const { lid, line } = action;
-      if (state.phase !== 'ready') return { state, events: [] };
-      if (!state.openBody || state.openBody.lid !== lid) return { state, events: [] };
-      // 🔴 system 領域のノートは編集に入れない(START_EDIT と同じ backstop)
-      if (isSystemMessageLid(lid)) return { state, events: [] };
-      /**
-       * 🔴 **二重に開かない。ただし無言にしない**(#1044 段2、F-E)。
-       *
-       * ⚠ 直す前は無言で何もしなかった ── 呼び手(binder)が同じノートの**別の
-       *   見出し**を押したときも、reducer がここで黙って捨てるので**押しても
-       *   何も起きなかった**(押し間違いと区別できない dead click)。
-       * 🔑 binder 側(`startSectionEditAt`)が `leaveSectionDraftOrAsk` と同じ
-       *   3 択を先に通し、通った後にだけ `OPEN_SECTION_DRAFT` を撃つ ── ここへ
-       *   来るのは**その門を通らずに撃った**とき(防波堤)なので、可視の理由を出す。
-       */
-      if (state.sectionDraft != null) {
-        return sectionDraftBlockedResult(state);
-      }
-      const body = state.openBody.body;
-      const abs = line + frontmatterLineCount(body);
-      const sec = sectionAt(body, abs);
-      const range = sec === null ? null : sectionRange(body, sec.slug);
-      if (sec === null || range === null) {
-        return {
-          state: { ...state, error: '章の範囲を読めませんでした(本文を開き直してください)' },
-          events: [],
-        };
-      }
-      const lines = body.split(/\r?\n/);
-      const original = lines.slice(range.start, range.end).join('\n');
-      /**
-       * 🔴 **開けたら、章の欄自身の断り文は消す**(#1044 段2 2巡目の修理、R5)。
-       * ⚠ 「二重に開かない」門(上)が出した `SECTION_DRAFT_NOTE` は、
-       *   ここまで来た時点で通っている(前の下書きは閉じられている)ので、
-       *   もう画面に残す理由が無い。
-       */
-      return {
-        state: {
-          ...state,
-          sectionDraft: { lid, heading: sec.text, original, saving: false },
-          ...clearedSectionDraftAdvisory(state),
-        },
-        events: [],
-      };
-    }
-    /**
-     * 🔴 **章の欄を保存する**(#1044 段2。3巡目の修理、S1 で読み直しの向きを直した)。
-     *
-     * 🔴 **本文は event に載せない。書く瞬間に disk から読み直す**(#1044 段2 3巡目の
-     *   修理、S1)。⚠ 直す前は `state.openBody.body`(章の欄が開いている間ずっと
-     *   更新されない、画面の古い写し)を土台に差し替えていた ── 別の窓がその間に
-     *   本文を進めていても、章の欄が開いている限り `openBody` は追随しないので、
-     *   保存は**その別の窓の書込を巻き戻す**(disk へは反映されるが、こちらの土台には
-     *   乗っていないので黙って消える)。
-     * 🔑 **追記(`APPEND_TO_ENTRY`)と同じ作法** ── ここでは
-     *   「保存中」の印を立てて要求を出すだけ、探し直し・比較・差し替えは
-     *   effect が disk から読んだ本文へ {@link replaceSectionByHeading} を当てる
-     *   (features 層の純関数 1 本 ── 2 本目の規則を作らない)。
-     * ⚠ **断ったら `sectionDraft` は残す**(箱も残る)── 書きかけを消さない。
-     */
-    case 'SAVE_SECTION_DRAFT': {
-      const draft = state.sectionDraft ?? null;
-      // ⚠ **コード枠の下書きが開いているのに撃たれたら、黙って捨てる**(#1044 段3)──
-      //   binder は種類ごとに別の action を撃つので、ここへ来るのは防波堤のみ。
-      if (draft === null || isCodeDraft(draft)) return { state, events: [] };
-      /**
-       * 🔴 **二重押しは黙って捨てる**(#1044 段2 3巡目の修理、S1)。
-       * ⚠ **追記の `writeLock` と同じ作法**(`app-state.ts` の `APPEND_TO_ENTRY`
-       *   `if (state.writeLock) return { state, events: [] };`)── 箱は
-       *   `saving` の間押せない見た目になる(`detail.ts`)ので、ここは
-       *   その見た目をすり抜けた回の防波堤である。
-       */
-      if (draft.saving) return { state, events: [] };
-      /**
-       * 🔴 **「null章を保存してください」を作らない**(#1044 段2、F-D)。
-       *
-       * ⚠ 直す前は `${phaseBlockReason(state.phase)}章を保存してください` の 1 行で
-       *   3 つの前提を一括で断っていたが、`phaseBlockReason('ready')` は `null` を
-       *   返す ── **phase が `ready` のまま `openBody` だけ欠けている窓**
-       *   (`SYS_BOOTED` が `openBody: null` にしてから `BODY_LOADED` が戻すまでの
-       *   数百 ms。別タブが書くたびに起きる)で、断り文に文字列 `"null"` が混ざっていた。
-       * 🔑 だから **phase の断りだけをここで見る**。⚠ **`openBody` の有無はもう見ない**
-       *   (S1)── 保存は disk から読み直すので、画面側の `openBody` が読み直し中でも
-       *   保存の正しさに影響しない(`SECTION_DRAFT_RELOADING_NOTE` は要らなくなった)。
-       */
-      if (state.phase !== 'ready') {
-        return { state: { ...state, error: `${phaseBlockReason(state.phase)}章を保存してください` }, events: [] };
-      }
-      const meta = state.entryMetas.get(draft.lid);
-      if (!meta) {
-        // openBody は SELECT_ENTRY(存在検査済)経由でしか確立しない ── ここに
-        // 来たら不変量違反(COMMIT_EDIT と同じ backstop)。
-        return { state: { ...state, error: ENTRY_GONE_NOTE }, events: [] };
-      }
-      return {
-        state: {
-          ...state,
-          sectionDraft: { ...draft, saving: true },
-          ...clearedSectionDraftAdvisory(state),
-        },
-        events: [
-          {
-            type: 'REQUEST_SECTION_SAVE',
-            lid: draft.lid,
-            gen: state.lockGen,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            heading: draft.heading,
-            original: draft.original,
-            text: action.text,
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **章の保存が disk に着いた**(#1044 段2 3巡目の修理、S1)。⚠ **世代の合わない
-     *   ack は捨てる**(強制解放の後着 ── `ENTRY_APPENDED` と同じ作法)。
-     * ⚠ **draft の身元も見る**(`lid` + `heading`) ── system command で
-     *   `guardSectionDraftTransition` が sectionDraft を先に閉じていたら(別タブが
-     *   このノートを消した等)、後から来たこの ack は当てない(閉じた後の draft は
-     *   もう「保存の行き先」ではない)。
-     */
-    case 'SECTION_SAVED': {
-      if (action.gen !== state.lockGen) return { state, events: [] };
-      const draft = state.sectionDraft;
-      if (
-        draft === null ||
-        isCodeDraft(draft) ||
-        draft.lid !== action.lid ||
-        draft.heading !== action.heading
-      ) {
-        return { state, events: [] };
-      }
-      const meta = state.entryMetas.get(action.lid);
-      const entryMetas = !meta
-        ? state.entryMetas
-        : new Map(state.entryMetas).set(action.lid, {
-            ...meta,
-            status: action.status,
-            date: action.date,
-            archived: action.archived,
-          });
-      const openBody = {
-        lid: action.lid,
-        body: action.body,
-        baseline: action.body,
-        persisted: action.body,
-        diskAhead: false,
-      };
-      /**
-       * 🔴 **保存できたら、章の欄自身の断り文は消す**(#1044 段2 2巡目の修理、R5)。
-       * ⚠ 直す前はここを 1 バイトも触っていなかった ── `SECTION_DRAFT_NOTE` を
-       *   出した後に保存し直しても、画面には「章を編集中は使えません」が保存の
-       *   **成功後も**残っていた。
-       */
-      return {
-        state: {
-          ...state,
-          entryMetas,
-          sectionDraft: null,
-          ...clearedSectionDraftAdvisory(state),
-          openBody,
-          taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
-          smartHits: refreshSmartHits(state.smartHits, action.lid, action.body, entryMetas),
-          ...syncShownBodies(state, action.lid, action.body),
-        },
-        events: smartScanFor(state, action.lid),
-      };
-    }
-    /**
-     * 🔴 **章の保存が断られた**(#1044 段2 3巡目の修理、S1)。⚠ **ロックは必ず解く**
-     *   (`saving: false`)── 解かないと箱が永久に押せなくなる。⚠ **draft(箱・書きかけ)
-     *   は残す** ── 断ったのは disk 側の事情で、user が打った字とは無関係。
-     * 🔴 **`sectionAdvisory` も同時に控える**(#1044 段2 5巡目の修理、U3)。
-     *   ⚠ `action.error` は固定の 4 文言だけではない ── `REQUEST_SECTION_SAVE` の
-     *   catch-all(「章を保存できませんでした: <e>」、例外の中身が動く字)もここを通る。
-     *   その動く字も「章の欄自身がいま置いた字」として同じ扱いにするため、
-     *   中身を問わず `action.error` をそのまま控える。
-     */
-    case 'SECTION_SAVE_FAILED': {
-      if (action.gen !== state.lockGen) return { state, events: [] };
-      const draft = state.sectionDraft;
-      if (
-        draft === null ||
-        isCodeDraft(draft) ||
-        draft.lid !== action.lid ||
-        draft.heading !== action.heading
-      ) {
-        return { state, events: [] };
-      }
-      return {
-        state: {
-          ...state,
-          sectionDraft: { ...draft, saving: false },
-          error: action.error,
-          sectionAdvisory: action.error,
-        },
-        events: [],
-      };
-    }
-    /**
-     * 🔴 **章の欄を、書かずに閉じる**(#1044 段2)。
-     * ⚠ **閉じたら、章の欄自身の断り文も消す**(#1044 段2 2巡目の修理、R5)──
-     *   `OPEN_SECTION_DRAFT` / `SAVE_SECTION_DRAFT` の成功と同じ寿命の考え方。
-     * 🔴 **保存中は黙って捨てる**(#1044 段2 3巡目の修理、S1)。⚠ `saving` の間に
-     *   閉じさせると、あとから届く保存の ack(成功 / 失敗)が**もう居ない draft**
-     *   を当てようとする ── 身元検査(`SECTION_SAVED` / `SECTION_SAVE_FAILED` の
-     *   `lid`+`heading` 一致)で黒巻き戻しは起きないが、user から見ると
-     *   「やめたのに書きかけが disk へ着く」ことがある(効果が読んだ後に閉じた回)。
-     *   箱は `saving` の間押せない見た目になる(`detail.ts`)ので、ここは
-     *   その見た目をすり抜けた回の防波堤である(`save-section-draft` と同じ作法)。
-     */
+    case 'MOVE_APP_GROUP':
+    case 'RESET_APP_GROUP_ORDER':
+    case 'RENAME_APP_GROUP':
+    case 'SET_APP_GROUP_ICON':
+    case 'APP_TILE_SAVED':
+    case 'OFFICE_ASSET_SAVED':
+    case 'ENTRY_BODY_REFRESHED':
+    case 'SET_APP_TILE':
+    case 'MOVE_APP_TILE':
+      return reduceLauncher(state, action);
+    case 'START_EDIT':
+    case 'REPLACE_IN_BODY':
+    case 'UPDATE_OPEN_BODY':
+    case 'COMMIT_EDIT':
+    case 'RETRY_PERSIST':
+    case 'CANCEL_EDIT':
+    case 'OPEN_SECTION_DRAFT':
+    case 'SAVE_SECTION_DRAFT':
+    case 'SECTION_SAVED':
+    case 'SECTION_SAVE_FAILED':
     case 'CANCEL_SECTION_DRAFT':
-      return state.sectionDraft == null || state.sectionDraft.saving
-        ? { state, events: [] }
-        : {
-            state: {
-              ...state,
-              sectionDraft: null,
-              ...clearedSectionDraftAdvisory(state),
-            },
-            events: [],
-          };
-    /**
-     * 🔴 **コード枠だけの下書きを開く**(#1044 段3)。⚠ **段2 と同じ 3 つの門**
-     *   (`OPEN_SECTION_DRAFT` の docstring と同じ):phase 検査 / system 領域の
-     *   backstop / 「二重に開かない。ただし無言にしない」。
-     *
-     * 🔑 枠の特定と身元の取り出しは {@link openCodeFenceAt} **1 本**(features 層の
-     *   純関数 ── reducer に走査の規則を書かない、CLAUDE.md §7)。
-     */
-    case 'OPEN_CODE_DRAFT': {
-      const { lid, line } = action;
-      if (state.phase !== 'ready') return { state, events: [] };
-      if (!state.openBody || state.openBody.lid !== lid) return { state, events: [] };
-      if (isSystemMessageLid(lid)) return { state, events: [] };
-      if (state.sectionDraft != null) {
-        return sectionDraftBlockedResult(state);
-      }
-      const body = state.openBody.body;
-      const abs = line + frontmatterLineCount(body);
-      const identity = openCodeFenceAt(body, abs);
-      if (identity === null) {
-        return {
-          state: { ...state, error: 'このコードブロックを編集できませんでした(本文を開き直してください)' },
-          events: [],
-        };
-      }
-      return {
-        state: {
-          ...state,
-          sectionDraft: { lid, ...identity, saving: false },
-          ...clearedSectionDraftAdvisory(state),
-        },
-        events: [],
-      };
-    }
-    /**
-     * 🔴 **コード枠の欄を保存する**(#1044 段3)。⚠ **段2(`SAVE_SECTION_DRAFT`)と
-     *   全く同じ形**(本文は event に載せない / 二重押しは黙って捨てる /
-     *   phase だけを見る / 断ったら draft は残す)。差し替えの純関数だけが違う
-     *   ({@link replaceCodeFenceContent})。
-     */
-    case 'SAVE_CODE_DRAFT': {
-      const draft = state.sectionDraft ?? null;
-      if (draft === null || !isCodeDraft(draft)) return { state, events: [] };
-      if (draft.saving) return { state, events: [] };
-      if (state.phase !== 'ready') {
-        return {
-          state: { ...state, error: `${phaseBlockReason(state.phase)}コードを保存してください` },
-          events: [],
-        };
-      }
-      const meta = state.entryMetas.get(draft.lid);
-      if (!meta) {
-        return { state: { ...state, error: ENTRY_GONE_NOTE }, events: [] };
-      }
-      return {
-        state: {
-          ...state,
-          sectionDraft: { ...draft, saving: true },
-          ...clearedSectionDraftAdvisory(state),
-        },
-        events: [
-          {
-            type: 'REQUEST_CODE_SAVE',
-            lid: draft.lid,
-            gen: state.lockGen,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            line: draft.line,
-            openLine: draft.openLine,
-            original: draft.original,
-            quote: draft.quote,
-            text: action.text,
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **コード枠の保存が disk に着いた**(#1044 段3)。⚠ **世代 + 身元
-     *   (`lid` + `line` + `openLine` + `quote`)の両方を見る**(`SECTION_SAVED` と同じ理由)。
-     */
-    case 'CODE_SAVED': {
-      if (action.gen !== state.lockGen) return { state, events: [] };
-      const draft = state.sectionDraft;
-      if (
-        draft === null ||
-        !isCodeDraft(draft) ||
-        draft.lid !== action.lid ||
-        draft.line !== action.line ||
-        draft.openLine !== action.openLine ||
-        draft.quote !== action.quote
-      ) {
-        return { state, events: [] };
-      }
-      const meta = state.entryMetas.get(action.lid);
-      const entryMetas = !meta
-        ? state.entryMetas
-        : new Map(state.entryMetas).set(action.lid, {
-            ...meta,
-            status: action.status,
-            date: action.date,
-            archived: action.archived,
-          });
-      const openBody = {
-        lid: action.lid,
-        body: action.body,
-        baseline: action.body,
-        persisted: action.body,
-        diskAhead: false,
-      };
-      return {
-        state: {
-          ...state,
-          entryMetas,
-          sectionDraft: null,
-          ...clearedSectionDraftAdvisory(state),
-          openBody,
-          taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
-          smartHits: refreshSmartHits(state.smartHits, action.lid, action.body, entryMetas),
-          ...syncShownBodies(state, action.lid, action.body),
-        },
-        events: smartScanFor(state, action.lid),
-      };
-    }
-    /**
-     * 🔴 **コード枠の保存が断られた**(#1044 段3)。⚠ **ロックは必ず解く**
-     *   (`SECTION_SAVE_FAILED` と同じ作法)。
-     */
-    case 'CODE_SAVE_FAILED': {
-      if (action.gen !== state.lockGen) return { state, events: [] };
-      const draft = state.sectionDraft;
-      if (
-        draft === null ||
-        !isCodeDraft(draft) ||
-        draft.lid !== action.lid ||
-        draft.line !== action.line ||
-        draft.openLine !== action.openLine ||
-        draft.quote !== action.quote
-      ) {
-        return { state, events: [] };
-      }
-      return {
-        state: {
-          ...state,
-          sectionDraft: { ...draft, saving: false },
-          error: action.error,
-          sectionAdvisory: action.error,
-        },
-        events: [],
-      };
-    }
-    /**
-     * 🔴 **コード枠の欄を、書かずに閉じる**(#1044 段3。`CANCEL_SECTION_DRAFT` と同じ形)。
-     */
+    case 'OPEN_CODE_DRAFT':
+    case 'SAVE_CODE_DRAFT':
+    case 'CODE_SAVED':
+    case 'CODE_SAVE_FAILED':
     case 'CANCEL_CODE_DRAFT':
-      return state.sectionDraft == null || !isCodeDraft(state.sectionDraft) || state.sectionDraft.saving
-        ? { state, events: [] }
-        : {
-            state: {
-              ...state,
-              sectionDraft: null,
-              ...clearedSectionDraftAdvisory(state),
-            },
-            events: [],
-          };
-    /**
-     * 🔑 **追記**(P8 段⑧)。編集画面を開かず、末尾に足して**直に disk へ書く**。
-     *
-     * ⚠ **編集中のノート自身へは断る + ロック**。編集中のノートへ裏で書くと、
-     * 保存で上書きされて追記が消える。書込中の二重要求も断る(直列 queue には載るが、
-     * 2 通目の基底が 1 通目の結果になるかは queue 実装に依存させない)。
-     * ⚠ **本文を event に載せない** ── effect が disk から読み直す。画面が持つ
-     * 本文を基底にすると、別経路(toggle / 復元)の書込を巻き戻す。
-     *
-     * 🔴 **断るなら声に出す**(#1051)。⚠ 直す前は 1 行目が `phase !== 'ready'`、
-     *   2 行目が `writeLock` で、どちらも `{ state, events: [] }` を返して
-     *   **黙って捨てて**いた。🔴 実害の形:①保存の往復が返る前に「本文に追記する」を
-     *   押すと、**何も起きず理由も出ない**(`format-bar.smoke.spec.ts` が混んだ回に
-     *   踏んだ)②予定の面の「足す」は押した直後に欄を空にするので、
-     *   **打った字ごと消えていた**(binder の `schedule-quick-add`)。
-     * 🔑 断る条件は**本文を書き換える他の操作と同じ門**(`bodyWriteBlockReason`。
-     *   C6 / #1043)── 編集中でも**別のノート**へは通す。⚠ 安全の根拠は 2 つ:
-     *   ①`ENTRY_APPENDED` が `openBody` を差し替えるのは `openBody.lid` が一致する
-     *   ときだけで、編集中のノート自身へは上の門が通さない ②書込中のノートの編集には
-     *   入れない(`START_EDIT` の `writeLock` の門)。
-     */
-    case 'APPEND_TO_ENTRY': {
-      const blockedResult = bodyWriteBlockResult(state, action.lid, '追記してください');
-      if (blockedResult !== null) return blockedResult;
-      if (state.writeLock) return { state: { ...state, error: APPEND_BUSY_NOTE }, events: [] };
-      /**
-       * 🔴 **章の欄が、この lid で開いていれば断る**(#1044 段2 2巡目の修理、R11)
-       *   ── 上の門(`bodyWriteBlockResult`)がこれも見ている。
-       *
-       * ⚠ R11 の前は章の欄を見る門が無く、`phase` は章の欄の間も `ready` のままなので
-       *   素通りした ── file を落として置き所が解けなかった回(末尾へ
-       *   落ちる回。`attach.ts` の `putAssetIntoNote`)は `INSERT_LINES`
-       *   (`bodyRewriteGate` 経由で `bodyWriteBlockReason` を通る)ではなく
-       *   **ここ**(`APPEND_TO_ENTRY`)を通るので、章の下書きが持つ古い原文の
-       *   すぐ下へ本文が直に書き換わっていた(下書きは気づかず、保存すると
-       *   その 1 行が消える)。
-       * 🔑 `INSERT_LINES` と**同じ関数**(`bodyWriteBlockReason`)で見る
-       *   (§7:同じ判定を複数の場所に書かない)。
-       */
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      if (action.text.trim() === '') return { state, events: [] }; // 空の追記は作らない
-      // 🔴 末尾へ足す回で、画面の本文の末尾が閉じていないブロックの中なら、押した時点で理由を言う
-      //   (`ADD_PLACE` と同じ関数。画面に無いノートは書込側 = effect が同じ条件で断る)
-      if (action.target === null) {
-        const shown = screenBodyOf(state, action.lid);
-        if (shown !== null && endsInsideOpenBlock(shown))
-          return { state: { ...state, error: APPEND_OPEN_BLOCK_REFUSAL }, events: [] };
-      }
-      return {
-        state: { ...state, writeLock: { lid: action.lid }, revisionPanel: null, revisionPreview: null },
-        events: [
-          {
-            type: 'REQUEST_APPEND',
-            lid: meta.lid,
-            gen: state.lockGen,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            heading: action.heading,
-            text: action.text,
-            target: action.target,
-            ...(action.batch === undefined ? {} : { batch: action.batch }),
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **強制解放**(user 指示 2026-08-03)。
-     * ⚠ **世代を上げる**のが本体 ── 解放しただけだと、飛んでいる書込の ack が
-     * 後から着いて user が見ている本文を巻き戻す。世代が変われば古い ack は捨てる。
-     *
-     * 🔴 **章の欄の保存中にも効く**(#1044 段2 4巡目の修理、T1)。⚠ 直す前は
-     *   `writeLock` / `tileWrite` しか見ておらず、章の欄が `saving: true` のまま
-     *   詰まったとき **逃げ道が 1 つも無かった**(2 つのボタンは押せず(`saving` の
-     *   間は disable)、離れる操作は外側の門(`guardSectionDraftTransition`)が
-     *   断り続け、`F5` 以外に出口が無かった)。
-     * 🔑 **追記(`writeLock`)と同じ「打ち切る」作法を移す** ── ただし章の欄は
-     *   `writeLock` を握らない(追記と違う lock の器)ので、ここで
-     *   `sectionDraft.saving` を直に解く。⚠ **discardDraft では捨てない** ──
-     *   章の欄は「箱と書きかけは残す(user がコピーできる)」が設計(T1)。
-     *   `lockGen` はここで必ず上がるので、その後に遅れて届く `SECTION_SAVED` /
-     *   `SECTION_SAVE_FAILED` は **`gen` 不一致で無視される**(両 reducer が
-     *   既に `action.gen !== state.lockGen` を見ている)── 打ち切った箱を
-     *   後着の ack が閉じたり書き換えたりしない。
-     */
-    case 'FORCE_RELEASE_LOCK': {
-      /**
-       * 🔴 **捨てる下書きは、錠を握っていたノートの物だけ**(#1081)。
-       * ⚠ 直す前は `phase === 'editing'` だけを見ていた ── #1051 から、ノート A の編集中に
-       *   別のノート B への追記が錠を握れる(`APPEND_TO_ENTRY` は別のノートなら編集中も通す)。
-       *   B の書込が詰まって打ち切ると、**無関係な A の打ちかけが消えていた**。
-       * ⚠ いま `discardDraft: true` を撃つ口は無い(`binder.ts` の `force-release` は `false`
-       *   だけ)── 口を足した日に静かに消さないための門である。
-       */
-      const lockedLid = state.writeLock?.lid ?? state.tileWrite?.lid ?? null;
-      const draft =
-        action.discardDraft &&
-        state.phase === 'editing' &&
-        state.openBody &&
-        (lockedLid === null || lockedLid === state.openBody.lid);
-      const section = state.sectionDraft;
-      return {
-        state: {
-          ...state,
-          writeLock: null,
-          // ⚠ タイル設定の書込も一緒に畳む(片方だけ残ると編集に入れないままになる)
-          tileWrite: null,
-          lockGen: state.lockGen + 1,
-          ...(draft
-            ? {
-                phase: 'ready' as const,
-                // draft を捨てる = disk で確認できている内容へ戻す
-                openBody: {
-                  lid: state.openBody!.lid,
-                  body: state.openBody!.persisted,
-                  baseline: state.openBody!.persisted,
-                  persisted: state.openBody!.persisted,
-                  diskAhead: false,
-                },
-              }
-            : {}),
-          ...(section?.saving ? { sectionDraft: { ...section, saving: false } } : {}),
-        },
-        events: [],
-      };
-    }
-    /** 追記が disk に着いた。⚠ **世代の合わない ack は捨てる**(強制解放の後着)。 */
-    case 'ENTRY_APPENDED': {
-      if (action.gen !== state.lockGen) return { state, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      // 再 boot 済み(entry が消えた)でも**ロックは必ず解く**
-      if (!meta) {
-        return {
-          state: { ...state, writeLock: null },
-          events: [
-            {
-              type: 'APPEND_SETTLED',
-              lid: action.lid,
-              gen: action.gen,
-              ok: false,
-              error: 'ノートの状態を確かめられませんでした',
-            },
-          ],
-        };
-      }
-      const entryMetas = new Map(state.entryMetas).set(action.lid, {
-        ...meta,
-        status: action.status,
-        date: action.date,
-        archived: action.archived,
-      });
-      // ⚠ 編集中のノート自身へは APPEND_TO_ENTRY が通らない(#1051 からは
-      //    別のノートへは編集中も通る)ので、lid が一致する openBody は
-      //    編集欄を持たない ── 丸ごと差し替えて安全
-      const openBody =
-        state.openBody?.lid === action.lid
-          ? {
-              lid: action.lid,
-              body: action.body,
-              baseline: action.body,
-              persisted: action.body,
-              diskAhead: false,
-            }
-          : state.openBody;
-      return {
-        state: {
-          ...state,
-          entryMetas,
-          openBody,
-          writeLock: null,
-          /**
-           * 🔴 **ここも「新しい本文が state に入る所」である**(2026-08-20 に判明)。
-           *
-           * ⚠ `refreshTaskCards` の docstring は「2 か所**だけ**を通す」と宣言して
-           *   いたが、**この 3 か所目が漏れていた** ── §7 の「数えた数だけ通す」で
-           *   数を間違えた形である(宣言が在るぶん、次に読む人は疑わない)。
-           * ⚠ いまの追記は**末尾に足す**ので既存の札の行番号はずれない。実害は
-           *   「**足したチェック項目が板に出ない**」(開き直すまで)。⚠ ただし
-           *   板から「やること」を足す口を作ると、これが正面の欠陥になる。
-           */
-          taskScan: refreshTaskCards(state.taskScan, action.lid, action.body),
-          /**
-           * 🔴 **横に留めた枠にも、同じノートが出ていることがある**(#684 ㋑、
-           *   着地前レビュー 重大 ①)。
-           *
-           * ⚠ `syncSplitBody` を呼ぶ口は `BODY_REWRITTEN` / `BODY_PERSISTED` /
-           *   `REMOTE_BODY_CHANGED` の 3 つで、**追記(ここ)だけ抜けていた** ──
-           *   しかも追記は `BODY_PERSISTED` を通らない(`store-effects` は
-           *   `ENTRY_APPENDED` しか撃たない)ので、**どこからも直らない**。
-           * 🔴 実害:留めた枠へ落とした file が入った回、知らせは
-           *   「『◯◯』の本文に入れました」と言うのに**目の前の枠は 1 文字も変わらない**
-           *   ── user は入っていないと読んで、もう一度落とす(行が二重になる)。
-           * ⚠ 同じ穴を #757 が `BODY_REWRITTEN` で塞いだばかりで、その注記が
-           *   「§7 ── 片方だけ直る」と戒めている。**4 か所目がここだった。**
-           */
-          ...syncShownBodies(state, action.lid, action.body),
-          // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
-          smartHits: refreshSmartHits(
-            state.smartHits,
-            action.lid,
-            action.body,
-            state.entryMetas,
-          ),
-          /**
-           * 🔴 **直前の 1 手だけ覚える**(#395 段①)── 「元に戻す」の材料。
-           * ⚠ 純粋な挿入でなかった回は `null` に落とす ── 前の追記の材料を
-           *   **残したままにしない**(古い材料で消すと、別の所が消える)。
-           */
-          ...(action.batch === AGENT_APPEND_BATCH
-            ? {
-                // 🔴 AI の書き足しは**別の 1 手**に持つ ── 自分の「追記を元に戻す」(`lastAppend`)を消さない(依頼 362)
-                lastAgentAppend:
-                  action.inserted === null
-                    ? null
-                    : {
-                        lid: action.lid,
-                        lines: action.inserted,
-                        ...(action.insertedAt == null ? {} : { at: action.insertedAt }),
-                      },
-              }
-            : { lastAppend: nextLastAppend(state.lastAppend, action) }),
-        },
-        events: [
-          { type: 'APPEND_SETTLED', lid: action.lid, gen: action.gen, ok: true, error: null },
-        ],
-      };
-    }
-    /**
-     * 🔴 **直前の追記を取り消す**(#395 段①)。
-     *
-     * ⚠ **消すのは「足した行そのもの」**で、行番号ではない ── 取り消すまでの間に
-     *   別の窓が上へ足していれば番号はずれる。見つからなければ
-     *   `applyBodyRewrite` が `null` を返して effect が断る(黙って別の所を消さない)。
-     * ⚠ **1 手で使い切る**(`lastAppend` を落とす)── 2 度押しで、同じ字の
-     *   別の行まで消えるのを止める。
-     */
-    case 'UNDO_APPEND': {
-      const last = state.lastAppend;
-      if (!last) return { state, events: [] };
-      /**
-       * 🔴 **断るなら声に出す。判定は lid で**(#1051)。⚠ 直す前は `phase !== 'ready'` で
-       *   **黙って捨てて**いた ── 状態の行の「追記を元に戻す」は phase を見ずに出て、
-       *   `START_EDIT` は材料も知らせも捨てないので、横に留めた別のノートへファイルを
-       *   入れた後に編集を始めると、押しても何も起きなかった(実ブラウザ:
-       *   `body-block-drag.smoke.spec.ts`「横に留めた枠へファイルを落とす」の末尾)。
-       * ⚠ 断った回は**材料を残す**(編集を終えてから押し直せる)。
-       */
-      const blockedResult = bodyWriteBlockResult(state, last.lid, '追記を元に戻してください');
-      if (blockedResult !== null) return blockedResult;
-      const meta = state.entryMetas.get(last.lid);
-      if (!meta) return { state: { ...state, lastAppend: null }, events: [] };
-      return {
-        state: { ...state, lastAppend: null },
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: { kind: 'undo-append', lines: last.lines, ...(last.at === undefined ? {} : { at: last.at }) },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **直前の AI の書き足しを取り消す**(台帳 #1852 P1 / 依頼 362)。`UNDO_APPEND` と同じ作法で、
-     * 材料が `lastAgentAppend` なだけ(断った回は材料を残す / 使い切る / 書換は `REQUEST_BODY_REWRITE` の 1 本)。
-     */
-    case 'UNDO_AGENT_APPEND': {
-      const last = state.lastAgentAppend;
-      if (!last) return { state, events: [] };
-      const blockedResult = bodyWriteBlockResult(state, last.lid, '書き足しを元に戻してください');
-      if (blockedResult !== null) return blockedResult;
-      const meta = state.entryMetas.get(last.lid);
-      if (!meta) return { state: { ...state, lastAgentAppend: null }, events: [] };
-      return {
-        state: { ...state, lastAgentAppend: null },
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: { kind: 'undo-append', lines: last.lines, ...(last.at === undefined ? {} : { at: last.at }) },
-          },
-        ],
-      };
-    }
-    case 'APPEND_FAILED': {
-      // ⚠ 世代が違っても**ロックは解く** ── 「古い ack だから無視」で握ったままに
-      // すると、user は永久に追記できず、しかも理由が分からない。
-      // 巻き戻しの危険があるのは**本文を採る**ときだけで、解放は常に安全
-      if (action.gen !== state.lockGen) return { state, events: [] };
-      // 失敗は非致命。理由は effect が OP_FAILED で別に出す(phase は落とさない)
-      return {
-        state: { ...state, writeLock: null, error: action.error },
-        events: [
-          { type: 'APPEND_SETTLED', lid: action.lid, gen: action.gen, ok: false, error: action.error },
-        ],
-      };
-    }
-    /**
-     * 🔴 **面から予定を動かす**(user 指示 2026-08-23「なんで双方向にする発想が
-     * でねぇんだよ」)。⚠ `TOGGLE_TASK` と**同じ形** ── 書換は 1 本
-     * (`REQUEST_BODY_REWRITE`)を通り、面が独自の書込経路を持たない(§7)。
-     * ⚠ `date: null` は**外す**(予定から落とす。消すのではない)。
-     */
-    case 'SET_TASK_DATE': {
-      /**
-       * 🔴 **断るなら、声に出して断る**(#516)。
-       *
-       * ⚠ 直す前は `events: []` で**黙って捨てて**いた ── 予定の面で札を掴んで
-       *   日に落とすと、**札が黙って元に戻る**(成功でも失敗でもない見た目)。
-       *   ⚠ 皮肉なことに `set-entry-date` の docstring 自身が
-       *   「**主の道は予定の面で掴んで落とすこと**」と書いており、
-       *   #513 / #515 で塞いだのは**主の道ではない 2 つ**だった。
-       * 🔑 **判定はここ 1 か所**にする(§7 ── `SET_VIEW_MODE` と同じ形)。
-       *   撃つ口は `SET_ENTRY_DATE` が 4 か所・`SET_TASK_DATE` が 2 か所あり、
-       *   呼び側に配ると**足すたびに取りこぼす**。
-       * 🔑 動詞は **`action.date` から導ける**(null = 外す)ので、1 か所でも
-       *   「外す / 付ける」を言い分けられる ── 呼び側ごとに文言を配らなくてよい。
-       * ⚠ **呼び名は分ける**(行の予定 / ノートの日付)── 一括りにすると
-       *   user は別のものを探す(#515 のレビューの指摘と同じ)。
-       */
-      // ⚠ 断りは lid で判定する(C6 / #1043)── 予定表の他の書換(繰り返しの回)と揃える
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null)
-        return {
-          state: {
-            ...state,
-            error: blockedWithSuffix(blocked, action.date === null ? '行の予定を外してください' : '行に予定を付けてください'),
-          },
-          events: [],
-        };
-      // 未知 lid は no-op(押した物が消えている ── 言うことが無い)
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: {
-              kind: 'line-date',
-              line: action.line,
-              openLine: action.openLine,
-              date: action.date,
-              ...(action.time === undefined ? {} : { time: action.time }),
-              // ⚠ **渡されたときだけ**載せる(渡していないのに `null` を載せると、
-              //    「期間を外す」という**頼んでいない指示**になる)
-              ...(action.until === undefined ? {} : { until: action.until }),
-              // ⚠ 同じ向き ── 渡されたときだけ(渡していないのに `null` を載せると終わりを外してしまう)
-              ...(action.timeEnd === undefined ? {} : { timeEnd: action.timeEnd }),
-              ...(action.repeat === undefined ? {} : { repeat: action.repeat }),
-            },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **その行の繰り返しを付け替える**(#855 段 0 の 3 つ目)。
-     *
-     * ⚠ 断り方は上の `SET_TASK_DATE` と**同じ形**(黙って捨てない)。
-     * 🔑 「日付が無い行では何もしない」は `rewriteLineDate` が持つ ── ここでは
-     *   本文を読まない(右クリックのたびに worker を叩く経路を増やさない)。
-     */
-    case 'SET_TASK_REPEAT': {
-      // ⚠ 断りは lid で判定する(C6 / #1043)── 予定表の他の書換(繰り返しの回)と揃える
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null)
-        return {
-          state: {
-            ...state,
-            error: blockedWithSuffix(blocked, action.repeat === null ? '繰り返しをやめてください' : '繰り返しにしてください'),
-          },
-          events: [],
-        };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            /**
-             * ⚠ **`date` を渡さない** ── 渡すと「日付も書き換える」意味になる。
-             *   ⚠ とくに**繰り返しの回の札**は、札に焼いてある日が
-             *   **その回の日**であって規則の開始日ではないので、渡すと
-             *   **開始日がその回の日へずれる**(静かに予定がまるごと動く)。
-             */
-            rewrite: { kind: 'line-date', line: action.line, openLine: action.openLine, repeat: action.repeat },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **取り込んだ外部画像を本文へ当てる**(#264 段①)。⚠ `TOGGLE_TASK` と
-     *   **同じ形** ── 書換は 1 本(`REQUEST_BODY_REWRITE`)を通る(§7)。
-     * ⚠ **対応が空なら撃たない** ── 1 枚も読めなかったとき、effect の
-     *   「本文が変わっているため反映できませんでした(開き直してください)」が出て、
-     *   **原因と無関係な直し方**を user に指示することになる(理由は binder が言う)。
-     */
-    case 'ADOPT_EXTERNAL_IMAGES': {
-      /**
-       * 🔴 **断るなら声に出す。判定は lid で**(#1051)。⚠ 直す前は `phase !== 'ready'` で
-       *   **黙って捨てて**いた ── 画像を取りに行くのは数秒かかるので、その間に
-       *   同じノートの編集へ入ると、binder は「取り込みました」と言うのに
-       *   **本文は 1 文字も変わらなかった**(binder も同じ門で見て、断った回は
-       *   取り込めた旨を言わない)。
-       */
-      const blockedResult = bodyWriteBlockResult(state, action.lid, 'もう一度取り込んでください');
-      if (blockedResult !== null) return blockedResult;
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      if (Object.keys(action.adopted).length === 0) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: { kind: 'adopt-images', adopted: action.adopted },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **表のセルを書き換える**(#418 段①)。⚠ `TOGGLE_TASK` と**同じ形**。
-     *
-     * 🔴 **断るのは lid で判定する**(C6 / #1043)。⚠ 直す前は `phase` だけを見て
-     *   **編集中は全ノートを黙って捨てて**いた ── 横に留めた別ノートの升も無言の
-     *   dead click になっていた。編集中のノート自身だけ、声に出して断る。
-     */
-    case 'SET_CSV_CELL': {
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `表を打ってください`) }, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: {
-              kind: 'csv-cell',
-              line: action.line,
-              openLine: action.openLine,
-              col: action.col,
-              value: action.value,
-            },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **入力欄の値を先頭の設定欄へ**(#1456)。⚠ `SET_CSV_CELL` と同じ形(断りは lid で判定 ── C6 / #1043)。
-     */
-    case 'SET_FORM_VALUES': {
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `入力欄に打ってください`) }, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: { kind: 'form-vars', values: action.values },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **入力欄の値を表の行へ書く / 足す**(#1456)。⚠ `SET_CSV_CELL` と同じ形。
-     */
-    case 'SET_FORM_ROW': {
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `表に書いてください`) }, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: {
-              kind: 'form-row',
-              table: action.table,
-              mode: action.mode,
-              ...(action.row === undefined ? {} : { row: action.row }),
-              ...(action.openRow === undefined ? {} : { openRow: action.openRow }),
-              fields: action.fields,
-              cells: action.cells,
-            },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **表の行・列を足す / 消す**(#418 段①)。⚠ `SET_CSV_CELL` と同じ形。
-     * ⚠ 断りも同じ(C6 / #1043、lid で判定)。
-     */
-    case 'SET_CSV_SHAPE': {
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `表を触ってください`) }, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: {
-              kind: 'csv-shape',
-              line: action.line,
-              openLine: action.openLine,
-              col: action.col,
-              what: action.what,
-              mode: action.mode,
-            },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **表の形を変える**(#708 段②)。⚠ `SET_CSV_SHAPE` と同じ形 ── 書換は
-     *   1 本(`REQUEST_BODY_REWRITE`)を通り、面が独自の書込経路を持たない(§7)。
-     */
-    case 'SET_TABLE_FORMAT': {
-      // ⚠ 断りは lid で判定する(C6 / #1043)
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null)
-        return { state: { ...state, error: blockedWithSuffix(blocked, `表の形を変えてください`) }, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: {
-              kind: 'table-format',
-              line: action.line,
-              openLine: action.openLine,
-              to: action.to,
-              ...(action.header === undefined ? {} : { header: action.header }),
-            },
-          },
-        ],
-      };
-    }
-    /** 🔴 **画像の大きさ・寄せ**(#1640 ③)。⚠ `SET_TABLE_FORMAT` と同じ形 ── 書換は 1 本を通る。 */
-    case 'SET_IMAGE_ATTRS': {
-      // ⚠ 断りは lid で判定する(C6 / #1043)
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null)
-        return { state: { ...state, error: blockedWithSuffix(blocked, `画像の大きさを変えてください`) }, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: {
-              kind: 'image-attrs',
-              line: action.line,
-              openLine: action.openLine,
-              key: action.key,
-              ...(action.nth !== undefined ? { nth: action.nth } : {}),
-              ...(action.w !== undefined ? { w: action.w } : {}),
-              ...(action.align !== undefined ? { align: action.align } : {}),
-            },
-          },
-        ],
-      };
-    }
-    /**
-     * ⚠ 断りは lid で判定する(C6 / #1043)── 編集中のノート自身だけ断る。
-     *   他ノートのチェックは binder(`toggle-task`)が先に同じ判定を通す。
-     */
-    case 'TOGGLE_TASK': {
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `チェックしてください`) }, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: { kind: 'task', line: action.line, openLine: action.openLine },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **本文の色コードを 1 つ書き換える**(#1224)。⚠ `TOGGLE_TASK` と**同じ形** ──
-     *   断りは lid で判定する(新しい断り文を作らない。理由は `bodyWriteBlockReason` の 1 本)。
-     */
-    case 'SET_COLOR_CODE': {
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `色を直してください`) }, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: {
-              kind: 'color',
-              line: action.line,
-              nth: action.nth,
-              from: action.from,
-              to: action.to,
-            },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **添付のファイル名を書き換える**(#1220)。⚠ `SET_COLOR_CODE` と**同じ形** ── 断りは lid で判定する。
-     * ⚠ 題名は呼び手が先に `RENAME_ENTRY_TITLE` で撃つ(題名の門は別 ── 編集中でも通る)。
-     *   断りの文は他の本文の書換と同じ 1 本(`bodyWriteBlockResult`)。
-     */
-    case 'SET_ATTACHMENT_NAME': {
-      const blockedResult = bodyWriteBlockResult(state, action.lid, 'ファイル名を変えてください');
-      if (blockedResult !== null) return blockedResult;
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: { kind: 'attachment-name', typed: action.name },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **話者を直す**(#952 B6)。⚠ `SET_ATTACHMENT_NAME` と**同じ形** ── 断りは lid で判定する。
-     *   名前の付け替えと「## 話者つき文字起こし」の作り直しは、効果層が本文を読んでから `applyBodyRewrite` で行う。
-     */
-    case 'FIX_SPEAKERS': {
-      const blockedResult = bodyWriteBlockResult(state, action.lid, '話者を直してください');
-      if (blockedResult !== null) return blockedResult;
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: { kind: 'speakers-fix', renames: action.renames, at: action.at },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **リストを丸ごとそろえる**(#1173)。⚠ `TOGGLE_TASK` と**同じ形** ── 断りは lid で判定する。
-     *   繰り返しの行を飛ばした数の知らせは、効果層が本文を読んだ後に言う
-     *   (reducer は本文を持たない)。
-     */
-    case 'SET_TASK_RUN': {
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null)
-        return {
-          state: {
-            ...state,
-            error: blockedWithSuffix(blocked, action.to === 'done' ? '完了にしてください' : '未完了に戻してください'),
-          },
-          events: [],
-        };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta || action.lines.length === 0) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: { kind: 'task-run', lines: action.lines, openLines: action.openLines, to: action.to },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **繰り返しの回を済ませる**(#344 段②)。⚠ `TOGGLE_TASK` と**同じ形** ──
-     *   書換は 1 本(`REQUEST_BODY_REWRITE`)を通る(§7)。何をするかの判断は
-     *   `body-rewrite.ts` が持ち、ここは**単位を選ぶだけ**である。
-     */
-    case 'MATERIALIZE_REPEAT': {
-      // ⚠ 断りは lid で判定する(C6 / #1043)
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null)
-        return { state: { ...state, error: blockedWithSuffix(blocked, `その日の分を済ませてください`) }, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: { kind: 'repeat-done', line: action.line, openLine: action.openLine, date: action.date },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **繰り返しの「その回だけ」を動かす**(#855 決4)。
-     * ⚠ すぐ上と**同じ形** ── 書換は 1 本(`REQUEST_BODY_REWRITE`)を通り、
-     *   何をするかの判断は `body-rewrite.ts` が持つ。
-     */
-    case 'MOVE_REPEAT_OCCURRENCE': {
-      // ⚠ 断りは lid で判定する(C6 / #1043)
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null)
-        return { state: { ...state, error: blockedWithSuffix(blocked, `繰り返しの回を動かしてください`) }, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: {
-              kind: 'repeat-move',
-              line: action.line,
-              openLine: action.openLine,
-              from: action.from,
-              to: action.to,
-              ...(action.time === undefined ? {} : { time: action.time }),
-              ...(action.timeEnd === undefined ? {} : { timeEnd: action.timeEnd }),
-            },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **板の塊を動かす**(#283 P4-b)。門(phase / 画面に出ている本文 / 開き行の捕捉)は
-     * `bodyRewriteGate` 1 か所 ── 下の 3 つ(#676)と共有する。
-     */
+      return reduceEdit(state, action);
+    case 'APPEND_TO_ENTRY':
+    case 'FORCE_RELEASE_LOCK':
+    case 'ENTRY_APPENDED':
+    case 'UNDO_APPEND':
+    case 'UNDO_AGENT_APPEND':
+    case 'APPEND_FAILED':
+      return reduceAppend(state, action);
+    case 'SET_TASK_DATE':
+    case 'SET_TASK_REPEAT':
+    case 'ADOPT_EXTERNAL_IMAGES':
+    case 'SET_CSV_CELL':
+    case 'SET_FORM_VALUES':
+    case 'SET_FORM_ROW':
+    case 'SET_CSV_SHAPE':
+    case 'SET_TABLE_FORMAT':
+    case 'SET_IMAGE_ATTRS':
+    case 'TOGGLE_TASK':
+    case 'SET_COLOR_CODE':
+    case 'SET_ATTACHMENT_NAME':
+    case 'FIX_SPEAKERS':
+    case 'SET_TASK_RUN':
+    case 'MATERIALIZE_REPEAT':
+    case 'MOVE_REPEAT_OCCURRENCE':
+      return reduceBodyEdit(state, action);
     case 'MOVE_PLACE':
-      return bodyRewriteGate(state, action.lid, '、付箋を動かしてください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        if (!isPlaceCoord(action.x) || !isPlaceCoord(action.y)) return null;
-        const openLine = placeOpenLineOf(shown, action.line);
-        if (openLine === null) return null;
-        return { kind: 'place-move', line: action.line, openLine, x: action.x, y: action.y };
-      });
     case 'MOVE_PLACES':
-      return bodyRewriteGate(state, action.lid, '、付箋を動かしてください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        if (action.moves.length === 0) return null;
-        const moves: Array<{ line: number; openLine: string; x: number; y: number }> = [];
-        for (const m of action.moves) {
-          if (!isPlaceCoord(m.x) || !isPlaceCoord(m.y)) return null;
-          const openLine = placeOpenLineOf(shown, m.line);
-          if (openLine === null) return null; // 1 枚でも読めなければ 1 枚も書かない
-          moves.push({ line: m.line, openLine, x: m.x, y: m.y });
-        }
-        return { kind: 'place-move-group', moves };
-      });
     case 'GROUP_PLACES':
-      return bodyRewriteGate(state, action.lid, '、付箋をグループにしてください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        if (action.lines.length < 2) return null;
-        const members: Array<{ line: number; openLine: string }> = [];
-        for (const line of action.lines) {
-          const openLine = placeOpenLineOf(shown, line);
-          if (openLine === null) return null;
-          members.push({ line, openLine });
-        }
-        return { kind: 'place-group', members };
-      });
     case 'UNGROUP_PLACE':
-      return bodyRewriteGate(state, action.lid, '、グループを解いてください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        const openLine = placeOpenLineOf(shown, action.line);
-        if (openLine === null) return null;
-        return { kind: 'place-ungroup', line: action.line, openLine };
-      });
-    /**
-     * 🔴 **板を画面から作る・大きさを変える・消す**(#676)── 3 つとも `MOVE_PLACE` と
-     * 同じ門(`bodyRewriteGate`)を通る。断り文だけが**押した場所と対**で違う
-     * (CLAUDE.md「文言は押した場所と対で pin する」)。
-     */
     case 'RESIZE_PLACE':
-      return bodyRewriteGate(state, action.lid, '、付箋の大きさを変えてください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        if (!isPlaceCoord(action.w) || !isPlaceCoord(action.h)) return null;
-        const openLine = placeOpenLineOf(shown, action.line);
-        if (openLine === null) return null;
-        return { kind: 'place-size', line: action.line, openLine, w: action.w, h: action.h };
-      });
-    /**
-     * 🔴 **板を線で繋ぐ**(#530 段③d)── ⚠ **本文が増える**操作である
-     *   (名前の無い板には `#板1` が足される)ので、門は動かすときと同じだけ通す。
-     * 🔑 **2 枚とも**開き行を捕える ── 片方だけだと、もう片方が別の塊でも書ける。
-     */
     case 'CONNECT_PLACE':
-      return openBlockRefused(
-        state,
-        action.lid,
-        PLACE_CONNECT_OPEN_REFUSAL,
-        (shown) => endsInsideOpenBlock(shown),
-        bodyRewriteGate(state, action.lid, '、付箋を線でつないでください', (shown) => {
-          if (shown === null) return null; // 画面に無い本文の行番号は信じない
-          const from = placeOpenLineOf(shown, action.line);
-          const to = placeOpenLineOf(shown, action.toLine);
-          if (from === null || to === null) return null;
-          return {
-            kind: 'place-connect',
-            from: { line: action.line, openLine: from },
-            to: { line: action.toLine, openLine: to },
-            fromAnchor: action.fromAnchor,
-            toAnchor: action.toAnchor,
-          };
-        }),
-      );
     case 'REMOVE_PLACE_LINE':
-      return openBlockRefused(
-        state,
-        action.lid,
-        PLACE_LINE_REMOVE_OPEN_REFUSAL,
-        (shown) => placeBlockUnclosed(shown, action.line),
-        bodyRewriteGate(state, action.lid, '、線を消してください', (shown) => {
-          if (shown === null) return null; // 画面に無い本文の行番号は信じない
-          const openLine = lineOpenLineOf(shown, action.line);
-          if (openLine === null) return null;
-          return { kind: 'place-line-remove', line: action.line, openLine };
-        }),
-      );
     case 'REMOVE_PLACE':
-      return openBlockRefused(
-        state,
-        action.lid,
-        PLACE_REMOVE_OPEN_REFUSAL,
-        (shown) => placeBlockUnclosed(shown, action.line),
-        bodyRewriteGate(state, action.lid, '、付箋を消してください', (shown) => {
-          if (shown === null) return null; // 画面に無い本文の行番号は信じない
-          const openLine = placeOpenLineOf(shown, action.line);
-          if (openLine === null) return null;
-          return { kind: 'place-remove', line: action.line, openLine };
-        }),
-      );
-    case 'ADD_PLACE': {
-      const gated = bodyRewriteGate(state, action.lid, '、付箋を置いてください', (shown) =>
-        // ⚠ 画面に出ていない面へは置かない(押し所は面の上にしか無い ── これまでの門を保つ)
-        shown !== null &&
-        isPlaceCoord(action.x) &&
-        isPlaceCoord(action.y) &&
-        (action.template === undefined || isPlaceTemplateId(action.template)) &&
-        // 🔴 ほかのノートを置く回(#1662 2)── 置く先が台帳に在るノートのときだけ(居ないノートの付箋は「(見つかりません)」になる)
-        (action.entry === undefined || (action.template === undefined && state.entryMetas.has(action.entry)))
-          ? action.entry !== undefined
-            ? { kind: 'place-add', x: action.x, y: action.y, entry: action.entry }
-            : action.template === undefined
-              ? { kind: 'place-add', x: action.x, y: action.y }
-              : { kind: 'place-add', x: action.x, y: action.y, template: action.template }
-          : null,
-      );
-      /**
-       * 🔴 **末尾が閉じていないブロックの中なら、理由を言って断る**(#529)。
-       * ⚠ 板は本文の末尾に足すので、閉じていないコードブロックなどの中へ書くと板ではなく**コードの字**になる
-       *   (`addPlace` / `addPlaceTemplate` が断る ── 同じ `endsInsideOpenBlock`)。断りは書込側(effect)でも
-       *   出るが「本文が変わっているため」と**別の理由**を言うので、押した時点で本当の理由を言う。
-       */
-      if (gated.events.length > 0) {
-        const shown = screenBodyOf(state, action.lid);
-        if (shown !== null && endsInsideOpenBlock(shown))
-          return { state: { ...state, error: PLACE_OPEN_BLOCK_REFUSAL }, events: [] };
-      }
-      return gated;
-    }
+    case 'ADD_PLACE':
     case 'SET_PLACE_RECT':
-      return bodyRewriteGate(state, action.lid, '、付箋の位置と大きさを変えてください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        for (const k of PLACE_RECT_KEYS) {
-          const v = action.rect[k];
-          if (v !== undefined && !isPlaceRectNumber(k, v)) return null;
-        }
-        const openLine = placeOpenLineOf(shown, action.line);
-        if (openLine === null) return null;
-        return { kind: 'place-rect', line: action.line, openLine, rect: action.rect };
-      });
     case 'SET_PLACE_TEXT':
-      return bodyRewriteGate(state, action.lid, '、付箋の字を直してください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        const openLine = placeOpenLineOf(shown, action.line);
-        const before = placeTextOf(shown, action.line);
-        if (openLine === null || before === null) return null;
-        return { kind: 'place-text', line: action.line, openLine, before, text: action.text };
-      });
     case 'RAISE_PLACE':
-      return bodyRewriteGate(state, action.lid, '、付箋を前へ出してください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        const openLine = placeOpenLineOf(shown, action.line);
-        if (openLine === null) return null;
-        return { kind: 'place-raise', line: action.line, openLine };
-      });
     case 'LOWER_PLACE':
-      return bodyRewriteGate(state, action.lid, '、付箋を後ろへ送ってください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        const openLine = placeOpenLineOf(shown, action.line);
-        if (openLine === null) return null;
-        return { kind: 'place-lower', line: action.line, openLine };
-      });
     case 'SET_PLACE_SHAPE':
-      return bodyRewriteGate(state, action.lid, '、付箋の形を変えてください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        // ⚠ 綴りは**ここでも**検める ── 型は境界(postMessage / test の手組み)では効かない
-        if (!isPlaceShape(action.shape)) return null;
-        const openLine = placeOpenLineOf(shown, action.line);
-        if (openLine === null) return null;
-        return { kind: 'place-shape', line: action.line, openLine, shape: action.shape };
-      });
     case 'SET_PLACE_STYLE':
-      return bodyRewriteGate(state, action.lid, '、色や太さを変えてください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        // ⚠ 綴りは**ここでも**検める ── 型は境界(postMessage / test の手組み)では効かない
-        if (!isPlaceStyle(action.style)) return null;
-        // 🔑 受ける開き行は付箋と線の両方(どちらの札が書けるかは `setPlaceStyle` が決める)
-        const openLine = placeOpenLineOf(shown, action.line) ?? lineOpenLineOf(shown, action.line);
-        if (openLine === null) return null;
-        return { kind: 'place-style', line: action.line, openLine, style: action.style };
-      });
-    /**
-     * 🔴 **本文の塊を掴んで並べ替える**(#684 段①)── 板と**同じ門**。
-     * 🔑 掴んだ時点の行そのものは**ここで**画面の本文から捕える(`placeOpenLineOf` と同じ
-     *   向き)── disk 側とずれていれば `line-move.ts` が byte 一致で断る。
-     * ⚠ `dragstart` では phase を見ない(掴むのは自由)── 落としたときにここで断る。
-     */
+      return reducePlaces(state, action);
     case 'MOVE_BLOCK':
-      return bodyRewriteGate(state, action.lid, '、本文のブロックを動かしてください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        const { start, end, toBefore } = action;
-        if (!Number.isInteger(start) || !Number.isInteger(end) || !Number.isInteger(toBefore)) return null;
-        const lines = shown.split('\n');
-        if (start < 0 || end < start || end >= lines.length) return null;
-        // 🔴 落とし先の行の中身も捕える(#1087)── 行数と等しい `toBefore` は末尾(`null`)、それ以外は範囲外
-        if (toBefore < 0 || toBefore > lines.length) return null;
-        return {
-          kind: 'move-lines',
-          start,
-          end,
-          toBefore,
-          lines: lines.slice(start, end + 1),
-          toBeforeLine: lines[toBefore] ?? null,
-        };
-      });
     case 'SPLIT_CHAPTER':
-      return bodyRewriteGate(state, action.lid, '、章を切り出してください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        const { start, end, link } = action;
-        if (!Number.isInteger(start) || !Number.isInteger(end) || link === '') return null;
-        const rows = shown.split('\n');
-        if (start < 0 || end < start || end >= rows.length) return null;
-        return {
-          kind: 'chapter-split',
-          start,
-          end,
-          lines: rows.slice(start, end + 1),
-          link,
-          childLid: action.childLid,
-          childTitle: action.childTitle,
-        };
-      });
-    case 'RESTORE_CHAPTER': {
-      const blocked =
-        bodyWriteBlockReason(state, action.lid) ?? bodyWriteBlockReason(state, action.childLid);
-      if (blocked !== null)
-        return { state: { ...state, error: blockedWithSuffix(blocked, '、章を元に戻してください') }, events: [] };
-      const into = state.entryMetas.get(action.lid);
-      const child = state.entryMetas.get(action.childLid);
-      if (!into || !child || action.lid === action.childLid) return { state, events: [] };
-      // 🔴 本当にここから切り出した子だけ(つながりが在る)。種類が変わっていたら断る(#1439 レビュー ⚠4)
-      if (!state.relations.some((r) => r.kind === 'provenance' && r.fromLid === action.childLid && r.toLid === action.lid))
-        return {
-          state: { ...state, error: 'このノートから切り出した章ではないため、元に戻せません(つながりが見つかりません)' },
-          events: [],
-        };
-      if (child.archetype !== 'text')
-        return {
-          state: { ...state, error: '切り出した先の種類が変わっているため、元に戻せません(普通のノートに戻してから試してください)' },
-          events: [],
-        };
-      const shown = screenBodyOf(state, action.lid);
-      const openLine = shown?.split('\n')[action.line];
-      if (shown === null || openLine === undefined) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_CHAPTER_RESTORE',
-            into: {
-              lid: into.lid,
-              title: into.title,
-              archetype: into.archetype,
-              entryOrder: into.entryOrder,
-              line: action.line,
-              openLine,
-            },
-            child: { lid: child.lid, title: child.title },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **本文の塊を、別のノートへ持っていく**(#684 段③)。
-     *
-     * 門(どれか 1 つでも外れたら黙って何もしない):
-     * - 相(`ready`)── 編集中は**声に出して断る**(`bodyRewriteGate` と同じ言い方)
-     * - 元のノートの本文が**画面に出ている**(掴んだ時点の行をそこから捕える)
-     * - 行き先が**別のノート**で、実在し、**本文に入れられる種類**
-     *   (フォルダ・添付・スタックへは持っていかない ── 断り方は落とす側が出す)
-     * ⚠ 同じノートなら `MOVE_BLOCK` の仕事である(ここでは撃たない)。
-     */
-    case 'HANDOFF_BLOCK': {
-      const { fromLid, start, end, toLid } = action;
-      if (state.phase !== 'ready')
-        return {
-          state: {
-            ...state,
-            error: `${phaseBlockReason(state.phase)}、本文のブロックを別のノートへ移してください`,
-          },
-          events: [],
-        };
-      if (fromLid === toLid) return { state, events: [] };
-      const from = state.entryMetas.get(fromLid);
-      const to = state.entryMetas.get(toLid);
-      if (!from || !to || !isAppendable(to.archetype)) return { state, events: [] };
-      const shown = screenBodyOf(state, fromLid);
-      if (shown === null) return { state, events: [] };
-      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start)
-        return { state, events: [] };
-      const rows = shown.split('\n');
-      if (end >= rows.length) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BLOCK_HANDOFF',
-            from: {
-              lid: from.lid,
-              title: from.title,
-              archetype: from.archetype,
-              entryOrder: from.entryOrder,
-              start,
-              end,
-              lines: rows.slice(start, end + 1),
-            },
-            to: {
-              lid: to.lid,
-              title: to.title,
-              archetype: to.archetype,
-              entryOrder: to.entryOrder,
-              toBefore: action.toBefore,
-              ...(action.anchor === undefined ? {} : { anchor: action.anchor }),
-            },
-          },
-        ],
-      };
-    }
-    /**
-     * 🔴 **一覧の行を本文へ落とすとリンクになる**(#684 段②)── 同じ門。空の並びは撃たない。
-     * ⚠ 落とした所へ入れる添付(#684 段④)も同じ口を通る ── 入る字が違うだけで、
-     *   「本文のここへ 1 塊を差し込む」は同じ 1 つの操作である(§7)。
-     * 🔑 断り文の**続き**は**押した場所と対**なので、掴んだ物の名前は呼び側が渡す
-     *   (`refusal`。前置きは `bodyRewriteGate` が `phaseBlockReason` から付ける ──
-     *   C11b / #1045)── ここで 1 本に丸めると、file を落とした user が「一覧の行」と言われる。
-     * ⚠ 段④ は `writable-queue` が**書けるようになってから**撃つので、実際にはここへ
-     *   来ない ── それでも既定に頼らず渡すのは、来たときに嘘を言わせないためである。
-     * 🔴 **`shown` を読まない**(座標も字も呼び側が持っている)── だから画面に本文が
-     *   出ていなくても通す。⚠ これは緩めているのではなく、**この経路では画面に
-     *   出ていないのが普通**だからである:添付を取り込むと `CREATE_ENTRY` が選択を
-     *   移し、`SELECT_ENTRY` で戻す時に旧 `openBody` が捨てられる(本文は非同期に
-     *   読み直される)。画面を要求すると、落とした所は**一度も使われない**。
-     */
+    case 'RESTORE_CHAPTER':
+    case 'HANDOFF_BLOCK':
     case 'INSERT_LINES':
-      return bodyRewriteGate(
-        state,
-        action.lid,
-        action.refusal ?? '、一覧の行を本文へドロップしてください',
-        () =>
-          Number.isInteger(action.toBefore) && action.lines.length > 0
-            ? {
-                kind: 'insert-lines',
-                toBefore: action.toBefore,
-                lines: action.lines,
-                anchor: action.anchor,
-                ...(action.batch === undefined ? {} : { batch: action.batch }),
-              }
-            : null,
-      );
-    /**
-     * 🔴 **直前の塊の移動を元に戻す**(#684 段①)── `UNDO_APPEND` と同じ形。
-     * ⚠ **1 手で使い切る**(`lastMove` を落とす)。戻した結果も `BODY_REWRITTEN` が
-     *   `move-lines` として届くので、そこでまた「戻す」の材料が入る(= 押し直せる)。
-     */
-    case 'UNDO_MOVE': {
-      const last = state.lastMove;
-      if (!last) return { state, events: [] };
-      /**
-       * 🔴 **断るなら声に出す。判定は lid で**(#1051)。⚠ 直す前は `phase !== 'ready'` で
-       *   **黙って捨てて**いた。`START_EDIT` は材料を捨てるが、🔴 **動かした書換の ack が
-       *   編集に入った後に返ると、材料がもう一度入る**(`BODY_REWRITTEN` の `move-lines` は
-       *   phase を見ない)── 状態の行に「移動を元に戻す」が出て、押しても何も起きなかった。
-       * ⚠ 編集中に**新しく**塊を動かす道は、いまの画面には無い(留めた枠の ⠿ が編集中は
-       *   出ない ── #1081)。ここを lid で見るのは、他の書換と同じ門に揃えるためである。
-       * ⚠ 断った回は**材料を残す**(`UNDO_APPEND` と同じ)。
-       */
-      const blockedResult = bodyWriteBlockResult(state, last.lid, '移動を元に戻してください');
-      if (blockedResult !== null) return blockedResult;
-      const meta = state.entryMetas.get(last.lid);
-      if (!meta) return { state: { ...state, lastMove: null }, events: [] };
-      return {
-        state: { ...state, lastMove: null },
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            rewrite: {
-              kind: 'move-lines',
-              start: last.start,
-              end: last.end,
-              toBefore: last.toBefore,
-              lines: last.lines,
-              toBeforeLine: last.toBeforeLine,
-              // 🔴 動かす前の本文そのものへ戻す回(依頼 118-3)── 本文が変わっていなければ空行の数まで元どおりになる
-              ...(last.restore === undefined ? {} : { restore: last.restore }),
-            },
-          },
-        ],
-      };
-    }
-    case 'SET_ENTRY_DATE': {
-      // 🔴 **黙って捨てない**(#516)── 理由は上の `SET_TASK_DATE` に書いた
-      // ⚠ 断りは lid で判定する(C6 / #1043)── 予定表の他の書換(繰り返しの回)と揃える
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null)
-        return {
-          state: {
-            ...state,
-            error: blockedWithSuffix(blocked, action.date === null ? 'ノートの日付を外してください' : 'ノートに日付を付けてください'),
-          },
-          events: [],
-        };
-      // 未知 lid は no-op
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      // ⚠ 同じ値なら何もしない(空の書込を投げない)。時刻を添えた回は、同じ日でも時刻が違うことがある(書換が同じ字なら書かない)
-      if ((meta.date ?? null) === action.date && action.time === undefined) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            // 🔴 時刻つきの `date:`(`2026-10-20 14:00`)は日だけ替えて時刻を残す ── 書換は `entry-date` 1 本(依頼 192 / 284)
-            rewrite: { kind: 'entry-date', date: action.date, ...(action.time === undefined ? {} : { time: action.time }) },
-          },
-        ],
-      };
-    }
-    /**
-     * ⚠ 断りは lid で判定する(C6 / #1043)── todo 以外・未知 lid は今までどおり no-op。
-     */
-    case 'TOGGLE_TODO_STATUS': {
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null)
-        return { state: { ...state, error: blockedWithSuffix(blocked, `状態を切り替えてください`) }, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta || meta.archetype !== 'todo') return { state, events: [] };
-      const nextStatus = meta.status === 'done' ? 'open' : 'done';
-      // state はまだ動かさない ── store への書込が確定した TODO_TOGGLED(ack)で
-      // 列が動く(persisted 規律と同じ「enqueue と ack を混同しない」)。
-      // ack 前の連打は stale meta 基準で同方向になる(往復しない)── 安全側の
-      // debounce 的意味論として意図どおり(review #6)
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: 'todo',
-            entryOrder: meta.entryOrder,
-            rewrite: { kind: 'frontmatter', keys: { status: nextStatus } },
-          },
-        ],
-      };
-    }
-    case 'BODY_REWRITTEN': {
-      // TODO(P6/P7 コンテナ切替導入時): cid を event/ack に載せて跨ぎ ack を
-      // 捨てる(lid 偶然衝突 ── review F と同型の穴。P3-6a review #7)
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] }; // 再 boot 済みなら捨てる
-      const entryMetas = new Map(state.entryMetas).set(action.lid, {
-        ...meta,
-        status: action.status,
-        date: action.date,
-        archived: action.archived,
-      });
-      let openBody = state.openBody;
-      if (openBody?.lid === action.lid) {
-        if (state.phase === 'editing') {
-          // toggle 直後に同じ entry の編集へ入った稀な窓: draft は触らず、
-          // persisted の追従 + **diskAhead の印**だけ付ける。変更ありの commit は
-          // draft が勝つ(可視内容の last-write-wins)が、無変更 commit / cancel は
-          // disk を採用する(review #4 ── 窓の外へ帰結を生き残らせない)
-          openBody = { ...openBody, persisted: action.body, diskAhead: true };
-        } else if (
-          state.phase === 'error' &&
-          openBody.baseline !== openBody.persisted &&
-          !openBody.diskAhead
-        ) {
-          // persist 失敗中(未達 commit あり)に後着 toggle が成功した窓:
-          // 丸ごと差し替えると baseline===persisted になり「未達の証拠」ごと
-          // 消える(review #4 ── v2 が回収不能)。baseline に status を合流させ、
-          // 再保存が「未達のテキスト + 新しい status」の両方の意図を書く
-          // ⚠ 合流も**やった書換そのもの**で当て直す(#276 / #277)── todo の
-          //   status に固定していると、日付やチェックを書いた回で**それが落ちる**
-          const merged = applyBodyRewrite(openBody.baseline, action.rewrite) ?? openBody.baseline;
-          openBody = {
-            lid: action.lid,
-            body: openBody.body === openBody.baseline ? merged : openBody.body,
-            baseline: merged,
-            persisted: action.body,
-            diskAhead: false,
-          };
-        } else {
-          // ready では body===baseline 不変量が立つので丸ごと差し替えで安全
-          openBody = {
-            lid: action.lid,
-            body: action.body,
-            baseline: action.body,
-            persisted: action.body,
-            diskAhead: false,
-          };
-        }
-      }
-      /**
-       * 🔴 **押した札をその場で動かす**(#277 段②-b)。ack は**新しい本文**を
-       * 持っているので、そのノートの札はここで組み直せる ── 集め直しを頼むと
-       * 往復のぶん札が固まったままになり、押した手応えが消える。
-       * ⚠ 触るのは**そのノートの札だけ**(他のノートを並び直さない)。
-       * ⚠ 盤面を一度も開いていなければ `null` のまま(何もしない)。
-       */
-      const taskScan = refreshTaskCards(state.taskScan, action.lid, action.body);
-      /**
-       * 🔴 **塊を動かした回は「元に戻す」の材料を入れ、知らせを出す**(#684 段①)。
-       *
-       * 逆向きの指示は、動かす**前**の本文(この ack が届く前に画面が持っていた本文)から
-       * 計算する。⚠ その本文から同じ結果(`action.body`)が出ないとき(= 画面が古かった)は
-       * 材料を入れない ── 当てずっぽうの位置へ戻さない(`undo-append` の「見つからなければ
-       * 断る」と同じ向き)。
-       * ⚠ 同じノートへの**別の**書換は、行がずれうるので材料を捨てる(`lastMove` は位置を持つ)。
-       * 🔑 知らせは `OP_NOTICE` と同じ 2 つ(`notice` / `noticeOpen`)を書く ── 「開く」の
-       *   身元は添えないので `null`(次の知らせで消える作法のまま)。
-       */
-      let lastMove = state.lastMove;
-      let notice = state.notice;
-      let noticeOpen = state.noticeOpen;
-      if (action.rewrite.kind === 'move-lines') {
-        const before = screenBodyOf(state, action.lid);
-        const moved = before === null ? null : moveLinesWithInverse(before, action.rewrite);
-        lastMove =
-          moved !== null && moved.body === action.body && moved.inverse !== null
-            ? { lid: action.lid, ...moved.inverse }
-            : null;
-        if (lastMove !== null) {
-          notice = BLOCK_MOVED_NOTICE;
-          noticeOpen = null;
-        }
-      } else if (lastMove !== null && lastMove.lid === action.lid) {
-        lastMove = null;
-      }
-      /**
-       * 🔴 **差し込んだ回も「元に戻す」の材料を入れる**(#684 段④)。
-       *
-       * ⚠ 直す前、本文へ入る添付は `APPEND_TO_ENTRY`(末尾)だけで、そちらは
-       *   `ENTRY_APPENDED` が材料を入れていた ── **落とした所へ入れる経路に
-       *   移した瞬間、追記欄の「元に戻す」が黙って消える**(動線を 1 つ失う。
-       *   user 指示 2026-08-23「片道の操作を作らない」)。
-       * 🔑 **足した行は「結果から」取り出す**(`insertedLines`)── 前後に空行を補う
-       *   作法をここで書き写すと、規則が 2 か所になる(§7)。⚠ 補った空行まで
-       *   材料に入るので、まとめて落とした 2 枚目以降の run は 1 枚目の**すぐ後ろ**に
-       *   並ぶ = `removeInsertedLines` が 1 手として消せる(`nextLastAppend` の前提)。
-       * ⚠ **画面の本文は読まない**(着地前レビュー E で直した)── ここへ来る書換は
-       *   画面に本文が出ていなくても通る(段④ の経路がまさにそれ)。材料は
-       *   **書いた結果から**効果層が出し、純粋な挿入でなければ `null` が届く
-       *   ── そのときは材料を入れない(当てずっぽうで消さない)。
-       */
-      let lastAppend = state.lastAppend;
-      if (action.rewrite.kind === 'insert-lines') {
-        lastAppend = nextLastAppend(lastAppend, {
-          lid: action.lid,
-          inserted: action.inserted ?? null,
-          insertedAt: action.insertedAt ?? null,
-          ...(action.rewrite.batch === undefined ? {} : { batch: action.rewrite.batch }),
-        });
-      }
-      /**
-       * 🔴 **表の形を変えたら、変えたと言う**(#708 段②、着地前レビュー・動線 ①)。
-       *
-       * ⚠ 直す前は**完全に無言**だった ── 本文が丸ごと書き換わるのに、画面に出る
-       *   変化は「表の幅が変わる」だけで、user には**壊れたように見える**。
-       * 🔑 言うのは**できるようになったこと**である(幅ではなく用途)。
-       * ⚠ **2026-09-05(段④)に字を直した** ── それまでは csv 側を「升を押して打てる」と
-       *   言っていたが、段④ で**markdown の表の升も押せる**ようになったので、
-       *   その字は**両方で真 = 何も伝えていない**。いま形で変わるのは
-       *   **行・列の ＋ ×** と**式**である(そこだけを言う)。
-       * ⚠ **戻し方も同じ 1 行で言う** ── 帰り道を知っているのは実装した本人だけ、
-       *   という形にしない(#300 の実害と同じ型)。
-       * 🔴 **帰り道は「▾」で言う**(#708 裁定②の着地前レビュー・動線 D1)。
-       *   ⚠ 直す前は「もう一度**右クリック**」と書いていたが、
-       *   **指で触る端末に右クリックは無い** ── この裁定はまさに
-       *   「右クリックが無い端末に入口を作る」ためのもので、そこで押した user に
-       *   **その端末に存在しない操作**で戻れと言っていた。
-       *   🔑 「▾」は**どちらの端末にも出る**(表の右上)ので、常に真である。
-       * 🔴 **往復で落ちるものも同じ 1 行で言う**(同 D6 / I5)。
-       *   ⚠ 「もう一度押せば戻る」は**完全には戻らない** ── 桁揃え(右寄せ・中央寄せ)は
-       *   csv に書けないので落ち、markdown へ戻すと行・列の ＋ × と式が使えなくなる。
-       *   ⚠ マニュアルには書いてあるが、**右クリックの節の中だけ**だった
-       *   (指の端末の user はその節を読まない)。
-       */
-      if (action.rewrite.kind === 'table-format' && action.rewrite.header !== undefined) {
-        // 🔴 見出しの切り替え(#1662 3)── 戻し方も言う(同じ ▾ の小窓)
-        notice = action.rewrite.header
-          ? '表の 1 行目を見出しにしました(戻すには表の右上の ▾ から)'
-          : '表の見出しをやめました(戻すには表の右上の ▾ から)';
-        noticeOpen = null;
-      } else if (action.rewrite.kind === 'table-format') {
-        notice =
-          action.rewrite.to === 'csv'
-            ? '表を CSV の表にしました。式が使えます(戻すには表の右上の ▾ から。桁揃えは戻りません)'
-            : '表を Markdown の表にしました。よそへ貼りやすい字になります(戻すには表の右上の ▾ から。式は使えなくなります)';
-        noticeOpen = null;
-      }
-      /**
-       * 🔑 **タグを付けたら、開いている入れ物にその場で落ちる**(user 要望 2026-08-26)。
-       * ⚠ ここは**まとめてタグを付ける**経路でもある(`REQUEST_BULK_TAG` が 1 件ずつ
-       *   ack を撃つ)── worker に頼み直す形だと 100 件で 100 回の全件走査になる。
-       */
-      const smartHits = refreshSmartHits(state.smartHits, action.lid, action.body, entryMetas);
-      /**
-       * 🔴 **タグを書いたら候補を捨てる**(#494 段②)── 次に欄へ焦点が当たったら
-       * 集め直す。⚠ 捨てないと、**付けたばかりのタグが候補に出ない** ── user は
-       * 「効いていない」と読む(押した手応えが消える型)。
-       * ⚠ **その場で足すのではなく捨てる** ── 足すだけだと「外した最後の 1 件」が
-       *   候補に残り続ける(片側だけ追随する形。§7)。
-       */
-      const tagSuggestions =
-        action.rewrite.kind === 'tag' ? null : state.tagSuggestions;
-      /**
-       * 🔴 **留めた枠にも同じノートが出ていることがある**(#757、2026-09-08)。
-       *
-       * ⚠ **これが無いと、左で升を打っても・チェックを押しても・日付を書いても、
-       *   右(横に留めた枠)は古い字のまま**である ── user から見れば
-       *   「どちらが本当か分からない」形で、直したはずの所をもう一度直すことになる。
-       *
-       * 🔴 **`BODY_PERSISTED` と `REMOTE_BODY_CHANGED` には既に在ったのに、
-       *   ここだけ抜けていた**(§7「同じ問いに答える口が複数あると、片方だけ直る」)。
-       *   ⚠ しかも**いちばん通る経路**である ── 升を打つ・チェックを押す・日付を書くは
-       *   全部 `REQUEST_BODY_REWRITE` → `BODY_REWRITTEN` を通り、
-       *   `BODY_PERSISTED` は**通らない**(`store-effects.ts` が `BODY_REWRITTEN` しか出さない)。
-       */
-      const rewrittenShown = syncShownBodies(state, action.lid, action.body);
-      return {
-        state: {
-          ...state,
-          entryMetas,
-          openBody,
-          taskScan,
-          smartHits,
-          tagSuggestions,
-          lastMove,
-          lastAppend,
-          notice,
-          noticeOpen,
-          ...rewrittenShown,
-        },
-        events: [],
-      };
-    }
-    case 'SET_CALENDAR_MONTH': {
-      // 月送りの正規化(binder は 0 や 13 を送ってよい)
-      let { year, month } = action;
-      if (month < 1) {
-        year -= 1;
-        month = 12;
-      } else if (month > 12) {
-        year += 1;
-        month = 1;
-      }
-      return { state: { ...state, calendarMonth: { year, month } }, events: [] };
-    }
+    case 'UNDO_MOVE':
+    case 'SET_ENTRY_DATE':
+    case 'TOGGLE_TODO_STATUS':
+    case 'BODY_REWRITTEN':
+      return reduceBlockOps(state, action);
+    case 'SET_CALENDAR_MONTH':
     case 'SET_SCHEDULE_MODE':
-      return { state: { ...state, scheduleMode: action.mode }, events: [] };
     case 'SET_SCHEDULE_NARROW_MODE':
-      return { state: { ...state, scheduleNarrowMode: action.mode }, events: [] };
-    case 'SET_SCHEDULE_DAY': {
-      // ⚠ 今日に戻るときは小さな月も今月へ戻す(日と月が別の場所を指したままにしない)
-      if (action.date === null)
-        return { state: { ...state, scheduleDay: null, calendarMonth: null }, events: [] };
-      if (!isRealCalendarDate(action.date)) return { state, events: [] };
-      // 🔑 見ている日の月を小さな月も映す(‹ › で月をまたいだとき、升目が置いて行かれない)
-      return {
-        state: {
-          ...state,
-          scheduleDay: action.date,
-          calendarMonth: {
-            year: Number(action.date.slice(0, 4)),
-            month: Number(action.date.slice(5, 7)),
-          },
-        },
-        events: [],
-      };
-    }
+    case 'SET_SCHEDULE_DAY':
     case 'TOGGLE_SHOW_ARCHIVED':
-      return { state: { ...state, showArchived: !state.showArchived }, events: [] };
     case 'TOGGLE_SHOW_DONE_TASKS':
-      // ⚠ 選択も走査も動かさない ── 見え方だけを変える
-      return { state: { ...state, showDoneTasks: !state.showDoneTasks }, events: [] };
-    case 'SET_ENTRY_OWNER': {
-      const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null)
-        return {
-          state: {
-            ...state,
-            error: blockedWithSuffix(blocked, action.owner === null ? '担当を外してください' : '担当を付けてください'),
-          },
-          events: [],
-        };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      const owner = action.owner === null ? null : action.owner.replace(/\s+/g, ' ').trim();
-      if (owner === '') return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BODY_REWRITE',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            // ⚠ 書換は既存の `frontmatter` 1 本(鍵を足す / 書き換える / `undefined` で消す)── 新しい書込経路を作らない
-            rewrite: { kind: 'frontmatter', keys: { owner: owner ?? undefined } },
-          },
-        ],
-      };
-    }
+    case 'SET_ENTRY_OWNER':
     case 'SET_SCHEDULE_OWNER':
-      return state.scheduleOwner === action.owner
-        ? { state, events: [] }
-        : { state: { ...state, scheduleOwner: action.owner }, events: [] };
     case 'TOGGLE_SHOW_UNDATED_TASKS':
-      /**
-       * ⚠ **走査を頼み直さない**(2026-08-23)── 日付の無い札も `taskScan` に
-       *   載っているので、切替は**描画側の絞り**だけで済む。
-       * 🔑 頼み直す形にすると、押すたびに worker を叩き、しかも
-       *   **戻ってくるまで盤面が空になる**(押した手応えが消える)。
-       */
-      return { state: { ...state, showUndatedTasks: !state.showUndatedTasks }, events: [] };
-    case 'TOGGLE_SCHEDULE_NOTE': {
-      // ⚠ 走査は頼み直さない(隠すのは描画側の絞り)。選択も動かさない
-      const hidden = state.scheduleHiddenNotes;
-      return {
-        state: {
-          ...state,
-          scheduleHiddenNotes: hidden.includes(action.lid)
-            ? hidden.filter((l) => l !== action.lid)
-            : [...hidden, action.lid],
-        },
-        events: [],
-      };
-    }
-    case 'BODY_PERSISTED': {
-      /**
-       * 🔴 **留めた枠にも同じノートが出ていることがある**(#505 段②)。
-       * ⚠ ここで追随させないと、主の枠で直しても**留めた枠だけ古いまま**になる。
-       * ⚠ `openBody` の早期 return の**前**に置く ── 後ろに置くと、
-       *   選択が移った後の ack で留めた枠が更新されない(片側だけ在る非対称)。
-       */
-      const persistedShown = syncShownBodies(state, action.lid, action.body);
-      const base = sameShownBodies(state, persistedShown) ? state : { ...state, ...persistedShown };
-      // ack された内容を disk 事実として記録(選択が移って openBody が破棄
-      // 済みなら捨てる ── stale ack で別 entry の作業域を汚さない)
-      if (!state.openBody || state.openBody.lid !== action.lid)
-        return { state: base, events: [] };
-      const ob = state.openBody;
-      if (ob.persisted === action.body) return { state: base, events: [] };
-      return {
-        state: { ...base, openBody: { ...ob, persisted: action.body } },
-        events: [],
-      };
-    }
-    /**
-     * 🔴 **別の窓が書いたことを、編集中のタブが知る**(#178)。
-     *
-     * ⚠ 直す前、他タブの `changed` は **`reloadSnapshot` を頼むだけ**で、
-     *   編集中は**まるごと先送り**されていた(`main.ts`)── つまり編集中のタブは
-     *   「自分が読んだ後に誰かが書いた」ことを**最後まで知らなかった**。
-     * 🔑 ここでやるのは**印を立てることだけ**。下書きには 1 バイトも触らない
-     *   (`ENTRY_RESTORED` / `BODY_REWRITTEN` の編集中分岐と同じ作法)。
-     */
-    case 'REMOTE_BODY_CHANGED': {
-      // 🔴 留めた枠は**編集中かどうかに関わらず**追随させる(#505 段②)──
-      //    別の窓が書いたものを、こちらの留めた枠が古いまま映し続けない
-      const remoteShown = syncShownBodies(state, action.lid, action.body);
-      const base = sameShownBodies(state, remoteShown) ? state : { ...state, ...remoteShown };
-      // ⚠ 編集中だけ ── `ready` は `reloadSnapshot` が先送りなしで面倒を見る
-      //   (両方で受けると、同じ問いに答える口が 2 つになる。CLAUDE.md §7)
-      // 🔴 保存に失敗して止まっている間も受ける(#1087)── 未達の字(`baseline`)を持ったまま
-      //   別のタブが書いたら、再保存がそれを黙って上書きする
-      if (state.phase !== 'editing' && !hasUnreachedCommit(state)) return { state: base, events: [] };
-      const ob = state.openBody;
-      if (!ob || ob.lid !== action.lid) return { state: base, events: [] };
-      // ⚠ 自分が書いた内容がそのまま返ってきた回は印を立てない(自分と衝突しない)
-      if (ob.persisted === action.body) return { state: base, events: [] };
-      return {
-        state: { ...base, openBody: { ...ob, persisted: action.body, diskAhead: true } },
-        events: [],
-      };
-    }
-    /**
-     * 🔴 保存が「消えない扱い」かの ack(#347)。
-     * ⚠ **同じなら state を差し替えない** ── 差し替えると指紋が変わり、
-     *   関係の無い面が組み直される(この repo が何度も踏んでいる形)。
-     */
-    /**
-     * 🔴 バックリンクが届いた(#348)。
-     * ⚠ **遅れて届いた別のノートの分は捨てる** ── 選択を切り替えた直後に
-     *   前のノートの答えが着くと、**別のノートの一覧**がその場に出る。
-     */
+    case 'TOGGLE_SCHEDULE_NOTE':
+      return reduceCalendar(state, action);
+    case 'BODY_PERSISTED':
+    case 'REMOTE_BODY_CHANGED':
     case 'BACKLINKS_LOADED':
-      return action.lid !== state.selectedLid
-        ? { state, events: [] }
-        : {
-            state: {
-              ...state,
-              backlinks: {
-                lid: action.lid,
-                lids: action.lids,
-                truncated: action.truncated,
-                ...(action.failed ? { failed: true as const } : {}),
-              },
-            },
-            events: [],
-          };
     case 'PERSIST_STATE':
-      return action.state === state.persistState
-        ? { state, events: [] }
-        : { state: { ...state, persistState: action.state }, events: [] };
-    case 'ENTRY_STAMPED': {
-      const meta = state.entryMetas.get(action.lid);
-      // 消えた entry の ack は捨てる(削除と書込の競合)
-      if (!meta) return { state, events: [] };
-      const charsChanged = action.bodyChars !== undefined && meta.bodyChars !== action.bodyChars;
-      if (
-        meta.createdAt === action.createdAt &&
-        meta.updatedAt === action.updatedAt &&
-        !charsChanged
-      )
-        return { state, events: [] };
-      const entryMetas = new Map(state.entryMetas);
-      entryMetas.set(action.lid, {
-        ...meta,
-        // ⚠ 既にある createdAt を null で塗り潰さない(行が消えていた場合に null が来る)
-        createdAt: action.createdAt ?? meta.createdAt,
-        updatedAt: action.updatedAt ?? meta.updatedAt,
-        // 🔴 刻みが同じでも字数が違えば追従する(#1087)。⚠ 名乗らない口では動かさない
-        ...(action.bodyChars === undefined ? {} : { bodyChars: action.bodyChars }),
-      });
-      return { state: { ...state, entryMetas }, events: [] };
-    }
-    case 'TOGGLE_SELECT': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
-      const has = state.selection.includes(action.lid);
-      const selection = has
-        ? state.selection.filter((l) => l !== action.lid)
-        : [...state.selection, action.lid];
-      /**
-       * ⚠ **開いているノートは動かさない**(#240 段②)── `Ctrl` クリックのたびに
-       * 中央が開き直ると、`REQUEST_BODY` が n 回飛ぶうえ「印を付けただけ」で
-       * 本文が入れ替わる。
-       * ⚠ 起点は**外したときも**更新する(次の `Shift` はここから伸ばす)。
-       */
-      return {
-        state: { ...state, selection, selectionAnchor: action.lid },
-        events: [],
-      };
-    }
-    case 'SELECT_RANGE': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
-      /**
-       * 🔴 **表示順で採る**(#240 段②)。⚠ データの順(`order`)で採ると、
-       * 並べ替えや絞り込みを掛けているとき**目で見た範囲と違うものが選ばれる**。
-       * 規則は `filerRows` 1 か所(描く側と同じ関数)。
-       */
-      const rows = filerRows(state.scopeLid, state.entryMetas, state.relations, filerRowOptions(state));
-      const range = rangeInRows(rows, state.selectionAnchor, action.lid);
-      if (range.length === 0) return { state, events: [] };
-      // ⚠ 起点は動かさない ── 動かすと `Shift` を押すたびに範囲が縮んでいく
-      return { state: { ...state, selection: range }, events: [] };
-    }
-    case 'SELECT_ALL': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      // ⚠ 規則は `filerRows` 1 か所(描く側・範囲選択と同じ答えになる)
-      const rows = filerRows(
-        state.scopeLid,
-        state.entryMetas,
-        state.relations,
-        filerRowOptions(state),
-      ).map((m) => m.lid);
-      if (rows.length === 0) return { state, events: [] };
-      return {
-        state: { ...state, selection: rows, selectionAnchor: rows[rows.length - 1] ?? null },
-        events: [],
-      };
-    }
-    case 'SELECT_ONLY': {
-      /**
-       * 🔑 **一覧で ↑↓ を押したときの「印を空にしてから 1 件付ける」を 1 回で**(#1087)。
-       * ⚠ 直す前は `CLEAR_SELECTION` と `TOGGLE_SELECT` の 2 回撃っていたので、1 キーで画面を
-       *   2 回描き直し、そのたびにスクロール位置の書き込みが配置の計算を強いていた(実測)。
-       * ⚠ 門は `TOGGLE_SELECT` と同じ(編集中・無いノートは何もしない)。
-       */
-      if (state.phase !== 'ready') return { state, events: [] };
-      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
-      if (state.selection.length === 1 && state.selection[0] === action.lid && state.selectionAnchor === action.lid)
-        return { state, events: [] };
-      return { state: { ...state, selection: [action.lid], selectionAnchor: action.lid }, events: [] };
-    }
-    case 'CLEAR_SELECTION': {
-      if (state.selection.length === 0 && state.selectionAnchor === null)
-        return { state, events: [] };
-      return { state: { ...state, selection: [], selectionAnchor: null }, events: [] };
-    }
-    case 'SET_SCOPE': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      if (state.scopeLid === action.lid) return { state, events: [] };
-      /**
-       * ⚠ **実在しない lid へは入らない**(消えたフォルダを指したまま「空です」と
-       * 出るのを防ぐ)。⚠ ただし `null`(ルート)は常に受ける。
-       */
-      if (action.lid !== null && !state.entryMetas.has(action.lid))
-        return { state, events: [] };
-      /**
-       * 🔴 **印は現在地のもの**(着地前レビュー 2)。場所を移ったら外す ──
-       * 残すと「画面に印が 1 つも無いのに帯だけが N 件と言う」状態になり、
-       * 押すと**画面に無いものがゴミ箱へ入る**。
-       * ⚠ 起点(`selectionAnchor`)も一緒に外す ── 別の場所の行を起点に
-       * `Shift` の範囲を採ると、見た範囲と違う集合が選ばれる。
-       */
-      return {
-        state: { ...state, scopeLid: action.lid, selection: [], selectionAnchor: null },
-        // 🔑 入った先がスマートフォルダなら集め直す(判定は `smartScanFor` 1 か所)
-        events: smartScanFor(state, action.lid),
-      };
-    }
-    case 'SET_FILER_FLATTEN': {
-      if (state.filerFlatten === action.on) return { state, events: [] };
-      /**
-       * 🔴 **印は「いま出ている行」のもの**(`SET_SCOPE` と同じ理由)。出る行の集合が
-       * 変わるので外す ── 残すと、画面に無い行の印を帯が数えて「画面に無いものが
-       * ゴミ箱へ入る」。起点も一緒に外す(別の並びの行を起点に `Shift` で範囲を採らない)。
-       * ⚠ **開いているノート(`selectedLid`)は動かさない** ── 見え方を変えただけで
-       *   中央の本文が閉じない。
-       */
-      return {
-        state: { ...state, filerFlatten: action.on, selection: [], selectionAnchor: null },
-        events: [],
-      };
-    }
-    case 'DESELECT_ENTRY': {
-      // filer の「ルート」導線(scope は selection の純関数なので、root 表示 =
-      // 選択解除)。openBody は速やかに破棄
-      if (state.phase !== 'ready') return { state, events: [] };
-      if (state.selectedLid === null) return { state, events: [] };
-      // 🔴 **`error` はここで消さない**(設計 doc §7、段②a)。
-      return {
-        state: { ...state, selectedLid: null, openBody: null },
-        events: [],
-      };
-    }
-    case 'CREATE_ENTRY': {
-      // ready 限定(ただし keepSelection 時は編集中でも編集状態を保ったまま作成可能 ── #1085)。
-      // lid 衝突は作らない(binder 生成の単調 lid が壊れた場合の防波堤)
-      // 🔑 `keepSelection` は「読んでいる物を退かさない」なので、編集にも入らない
-      const keep = action.keepSelection === true;
-      if (state.phase !== 'ready' && !(state.phase === 'editing' && keep)) return { state, events: [] };
-      if (state.entryMetas.has(action.lid)) {
-        return {
-          // ⚠ 英語の内部文と ID を画面に出さない(#1087)── 新しい ID は押すたびに作り直すので、もう一度で通る
-          state: { ...state, error: 'ノートを作れませんでした(同じ番号のノートがすでにありました)。もう一度押してください' },
-          events: [],
-        };
-      }
-      const body = action.body ?? seedBodyFor(action.archetype);
-      const wantsEdit = action.edit !== false && !keep;
-      const ext = extractMeta(action.archetype, body);
-      const lastLid = state.order[state.order.length - 1];
-      const entryOrder = lastLid
-        ? (state.entryMetas.get(lastLid)?.entryOrder ?? 0) + 1
-        : 1;
-      const meta: EntryMeta = {
-        lid: action.lid,
-        title: action.title,
-        archetype: action.archetype,
-        createdAt: null, // worker が datetime('now') を刻む(次 boot で読み戻る)
-        updatedAt: null,
-        entryOrder,
-        status: ext.status,
-        date: ext.date,
-        archived: ext.archived,
-        // ⚠ worker が同じ本文から数え直す値と**同じ式**で置く(§7)
-        bodyChars: body.length,
-      };
-      /**
-       * 🔴 **いま見ているフォルダの中に作る**(2026-08-05)。
-       * ⚠ 入れ先が folder でない / 実在しないなら**黙ってルートに作る** ──
-       *    ここで作成ごと断ると、user は「押しても何も起きない」を見る
-       *    (作れないより、意図と違う場所に見えているほうが直せる)。
-       * ⚠ 自己辺は作らない(作った当人が入れ先になることはあり得ないが、
-       *    lid 生成が壊れたときの防波堤)。
-       */
-      const parentMeta =
-        action.parentLid != null && action.parentLid !== action.lid && action.relationId
-          ? state.entryMetas.get(action.parentLid)
-          : undefined;
-      const parentLid =
-        parentMeta && parentMeta.archetype === 'folder' ? (action.parentLid as string) : null;
-      const relations =
-        parentLid === null
-          ? state.relations
-          : [
-              ...state.relations,
-              {
-                id: action.relationId as string,
-                fromLid: parentLid,
-                toLid: action.lid,
-                kind: STRUCTURAL,
-                // ⚠ 時刻は worker が刻む(SET_ENTRY_PARENT と同じ約束)
-                createdAt: null,
-                updatedAt: null,
-              },
-            ];
-      /**
-       * 🔴 **添付の作成は絞りを外さない**(#668 D)。
-       *
-       * 下の「絞り込みを解除する」の理由(review M-2 / #411)は「**作った物が絞りに
-       * 弾かれて一生一覧に出ない** → user が Esc で消してしまう」である ── ⚠ 添付には
-       * 当たらない。添付は**開いていたノートの本文に入る**(#666)ので一覧で見せる
-       * 必要が無く、編集に入らないので Esc の掃除も無い。
-       * ⚠ むしろ外すと害が出る:「探す」に打っていた字と種類の札が、写真を 1 枚
-       *   足しただけで**黙って消える**(user は絞りを打ち直す)。
-       * 🔑 判定は archetype 1 つ ── 添付を作る経路(取込 / 録音 / 画面録画 /
-       *   ランチャーのタイル)は全部ここを通る。
-       */
-      const keepFilter = action.archetype === 'attachment';
-      // 作成 = 即永続(PKC2 と同じ)。この初回 PERSIST が失敗した場合、editing 中の
-      // 無変更 commit は skip するが、行は upsert なので次の変更 commit が自己修復する
-      // (二重故障窓のみ残る ── SYS_ERROR が可視。P3-7a 設計判断)
-      return {
-        state: {
-          ...state,
-          relations,
-          phase: keep ? state.phase : wantsEdit ? 'editing' : 'ready', // keepSelection 時は相を維持(#1085)、既定は作成 → 即編集(PKC2 の遷移)
-          entryMetas: new Map(state.entryMetas).set(action.lid, meta),
-          order: [...state.order, action.lid],
-          selectedLid: keep ? state.selectedLid : action.lid,
-          // 🔴 **絞り込みを解除する**(review M-2)。既定題名は絞り込み語に一致
-          // しないので、絞り込み中に作ると **一生一覧に出ない** entry ができていた
-          // (実証: 保存しても出ず、「効かなかった」と思って Esc を押すと
-          // 新規未編集 cancel の掃除で entry ごと消える)。
-          // ⚠ 欄の文字も消える ── 書き戻しは sidebar が持つ
-          filterQuery: keepFilter || keep ? state.filterQuery : '',
-          /**
-           * 🔴 **種類の絞りも外す**(#411)── **同じ事故が軸を変えて戻ってくる**。
-           * 「添付だけ」を出しているときに「ノート」を作ると、作った物は
-           * 札に弾かれて**一生一覧に出ない**。user は「効かなかった」と思って
-           * Esc を押し、新規未編集 cancel の掃除で **entry ごと消える**
-           * (review M-2 で `filterQuery` について実証済みの経路そのもの)。
-           */
-          kindFilter: keepFilter || keep ? state.kindFilter : NO_KINDS,
-          freshLid: wantsEdit ? action.lid : null, // 非編集作成は fresh 掃除の対象外
-          // 🔴 **`error` はここで消さない**(設計 doc §7、段②a)。
-          // ⚠ 退かさない作成では、開いている本文もそのまま(新しい物は選ばれていないので持たない)
-          openBody: keep
-            ? state.openBody
-            : {
-                lid: action.lid,
-                body,
-                baseline: body,
-                persisted: body, // 楽観(ack 前)── 上記コメントの範囲で許容
-                diskAhead: false,
-              },
-        },
-        events: [
-          {
-            type: 'PERSIST_ENTRY',
-            entry: {
-              lid: action.lid,
-              title: action.title,
-              archetype: action.archetype,
-              body,
-              entryOrder,
-              status: ext.status,
-              date: ext.date,
-              archived: ext.archived,
-            },
-            /**
-             * 🔴 **居場所は同じ tx で書く**(#258)。直す前は `REQUEST_SET_PARENT` を
-             * 後ろに並べる **2 手**で、effect が 1 件ずつ worker へ流すので
-             * 「行を書く → ack → 辺を書く」の隙にタブを閉じると**親だけ飛んだ**
-             * (フォルダの中に作ったのにルートに現れる)。⚠ 並びを入れ替えても直らない
-             * (行の無いところへ辺を張ることになる)── **1 tx にする**のが答え。
-             */
-            ...(parentLid === null
-              ? {}
-              : { parent: { parentLid, relationId: action.relationId as string } }),
-          },
-          /**
-           * 🔴 **作って即編集の経路でも雛形を集める**(#196 / B-2)。
-           *
-           * ⚠ 2026-08-25 に**実ブラウザの smoke が拾った** ── `START_EDIT` にだけ
-           *   置いていたので、**作成から入った編集では短縮語が 1 つも当たらなかった**。
-           *   unit は「編集」を押す経路しか通しておらず、**この経路は 1 度も
-           *   走っていなかった**(CLAUDE.md §2)。
-           * 🔑 「編集に入る」は 2 経路ある ── 片方だけに置くと、もう片方が黙って死ぬ。
-           */
-          ...(wantsEdit ? [{ type: 'REQUEST_SNIPPET_SCAN' as const }] : []),
-        ],
-      };
-    }
-    case 'DELETE_ENTRY': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
-      // UI からは即時に消す(楽観)── worker 側 op は relations / revisions 込みの
-      // 同 tx 掃除(P3-6b)。失敗は OP_FAILED 通知(reload で再出現 = 非破壊)
-      return removeEntryFromState(state, action.lid, [
-        { type: 'REQUEST_DELETE', lid: action.lid },
-      ]);
-    }
-    case 'DELETE_ENTRIES': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      // ⚠ 居ないものは黙って落とす(消えた行を選んだまま押しても事故にしない)
-      const targets = action.lids.filter((lid) => state.entryMetas.has(lid));
-      if (targets.length === 0) return { state, events: [] };
-      /**
-       * ⚠ **1 件ずつ `removeEntryFromState` を畳む**(規則を 2 つ書かない)。
-       * 後継の選択・履歴の掃除・ゴミ箱の畳みは、そちらが 1 か所で持っている。
-       * ⚠ 事象(`REQUEST_DELETE`)は**まとめて 1 回**の worker op にせず 1 件ずつ出す
-       * ── 既存の効果の口をそのまま使い、片方だけ失敗しても残りが進む。
-       */
-      let next = state;
-      const events: DomainEvent[] = [];
-      /**
-       * 🔴 **後継は最後に 1 回だけ選ぶ**(#1087)。1 件ずつ選ぶと、消す途中の後継ごとに本文の読み出し
-       *   (`REQUEST_BODY`)が積まれ、3000 件で 2999 回読んでいた(しかも毎回 `visibleOrder` を作り直す)。
-       * 🔑 規則は 1 件ずつ消したときと同じ:消す位置の次(居なければ手前の最後)── 消す物を除いた
-       *   見えている並びで、位置は「選んでいた物より前に残る数」。
-       */
-      let successor: string | null = null;
-      const removesSelected = state.selectedLid !== null && targets.includes(state.selectedLid);
-      if (removesSelected) {
-        const gone = new Set(targets);
-        const before = visibleOrder(
-          state.order,
-          (l) => state.entryMetas.get(l),
-          entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter),
-        );
-        const vIdx = before.indexOf(state.selectedLid!);
-        // 🔴 まず左の列に出ている行から選ぶ(#1087。1 件ずつ消す側と同じ規則)。居なければ従来どおり
-        const shown = successorInShownRows(state, state.selectedLid!, gone);
-        if (shown !== undefined) {
-          successor = shown;
-        } else if (vIdx >= 0) {
-          const kept = before.filter((l) => !gone.has(l));
-          const pos = before.slice(0, vIdx).filter((l) => !gone.has(l)).length;
-          successor = kept[Math.min(pos, kept.length - 1)] ?? null;
-        }
-      }
-      for (const lid of targets) {
-        const r = removeEntryFromState(next, lid, [{ type: 'REQUEST_DELETE', lid }], {
-          pickSuccessor: false,
-        });
-        next = r.state;
-        events.push(...r.events);
-      }
-      if (removesSelected && successor !== null) events.push({ type: 'REQUEST_BODY', lid: successor });
-      // ⚠ 消したものが印に残らない(`removeEntryFromState` が 1 件ずつ外している)
-      return {
-        state: {
-          ...next,
-          selectedLid: removesSelected ? successor : next.selectedLid,
-          selection: [],
-          selectionAnchor: null,
-        },
-        events,
-      };
-    }
-    case 'RENAME_ENTRY_TITLE': {
-      if (state.phase !== 'ready' && state.phase !== 'editing')
-        return { state, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      const title = action.title.trim();
-      // 🔴 空は元のまま ── ただし**黙らず言う**(本文は触らない。保存の経路はこの後も同じ)
-      if (meta && title === '') return { state: { ...state, notice: EMPTY_TITLE_NOTE }, events: [] };
-      if (!meta || title === meta.title) return { state, events: [] };
-      // title はローカルが唯一の知識源なので楽観更新(sidebar が即応)。
-      // 永続化は effect が disk body を読んで行全体を書く(REQUEST_RENAME)。
-      // 直後に COMMIT_EDIT が続く場合も、更新済み meta から行を組むので title は保たれる
-      return {
-        state: {
-          ...state,
-          entryMetas: new Map(state.entryMetas).set(action.lid, { ...meta, title }),
-          freshLid: state.freshLid === action.lid ? null : state.freshLid,
-        },
-        events: [
-          {
-            type: 'REQUEST_RENAME',
-            lid: action.lid,
-            title,
-            oldTitle: meta.title,
-            skipLids: state.phase === 'editing' && state.openBody ? [state.openBody.lid] : [],
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-          },
-        ],
-      };
-    }
-    case 'SET_ENTRY_ARCHETYPE': {
-      // 編集中は変えない ── 開いている下書きの種類(追記・見出しの扱い)が途中で変わる。理由を言う(黙って断らない)
-      if (state.phase !== 'ready') {
-        return {
-          state: { ...state, error: `${phaseBlockReason(state.phase) ?? ''}種類を変えてください` },
-          events: [],
-        };
-      }
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta || meta.archetype === action.archetype) return { state, events: [] };
-      // ⚠ 変えられるのはノート ⇄ ログだけ(`kindChangeTarget`)。それ以外は手を付けない
-      if (kindChangeTarget(meta.archetype) !== action.archetype) return { state, events: [] };
-      // 種類は画面が先に変わる(題名の改名と同じ楽観更新)。永続化は effect が disk の本文を読んで行を書く
-      return {
-        state: {
-          ...state,
-          entryMetas: new Map(state.entryMetas).set(action.lid, { ...meta, archetype: action.archetype }),
-        },
-        events: [
-          {
-            type: 'REQUEST_SET_ARCHETYPE',
-            lid: action.lid,
-            title: meta.title,
-            archetype: action.archetype,
-            oldArchetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-          },
-        ],
-      };
-    }
-    case 'SET_ENTRY_PARENT': {
-      // 🔴 **フォルダ整理の唯一の入口**(2026-08-05、user 報告
-      // 「フォルダ整理のための導線がない」)。直す前は UI どころか
-      // action・reducer・effect のどこにも relation を編集する経路が無く、
-      // フォルダは作れるのに**永久に空**だった。
-      if (state.phase !== 'ready') return { state, events: [] };
-      const child = state.entryMetas.get(action.lid);
-      if (!child) return { state, events: [] };
-      const parentLid = action.parentLid;
-      if (parentLid !== null) {
-        const parent = state.entryMetas.get(parentLid);
-        // ⚠ 入れ先は**実在するフォルダ**でなければならない(木の規約 ──
-        //    `resolveCanonicalParents` は非 folder 親の辺を無視するので、
-        //    ここで通すと「移したのに動かない」黙りになる)
-        if (!parent || parent.archetype !== 'folder') return { state, events: [] };
-        if (parentLid === action.lid) return { state, events: [] }; // 自分の中へは入れない
-        // 🔴 **自分の子孫の中へは入れない**(輪ができて木でなくなる)。
-        //    ⚠ 判定はここでやる ── worker は metas を持たないので木を知らない
-        // 🔴 辿るのは正準親だけではなく**居場所の辺すべて**(多重親の別の鎖に自分が居ても輪になる)。
-        //    ⚠ 訪問済みで止める ── disk に輪が残った器を開いたとき(#1087 ゴミ箱の見直し)に回り続けない。
-        //    判定は `wouldMakeCycle` 1 本(worker の tx の門と同じ)
-        if (wouldMakeCycle(action.lid, parentLid, structuralParentsLookup(state.relations))) {
-          return { state, events: [] };
-        }
-      }
-      // 楽観更新 ── 画面(ファイラ)は state.relations から描くので、
-      // ここで直さないと「押したのに動かない」に見える
-      const kept = state.relations.filter(
-        (r) => !(r.kind === STRUCTURAL && r.toLid === action.lid),
-      );
-      // 🔴 移す前の居場所(書けなかったときに戻す。依頼 115-4 A)
-      const removedBefore = state.relations.filter(
-        (r) => r.kind === STRUCTURAL && r.toLid === action.lid,
-      );
-      /**
-       * 🔴 **2 本目以降の親**(台帳 #1852 G1 / 依頼 227 A)── 「元に戻す」が、入っていたフォルダ全部へ戻すための口。
-       * 1 本目と同じ検め(実在するフォルダ・自分でない・輪にならない)を通った分だけ張る。重複は 1 本に畳む。
-       */
-      const extraParents: { parentLid: string; relationId: string }[] = [];
-      if (parentLid !== null) {
-        const lookup = structuralParentsLookup(state.relations);
-        for (const extra of action.alsoIn ?? []) {
-          const ep = state.entryMetas.get(extra.parentLid);
-          if (!ep || ep.archetype !== 'folder') continue;
-          if (extra.parentLid === action.lid || extra.parentLid === parentLid) continue;
-          if (extraParents.some((x) => x.parentLid === extra.parentLid)) continue;
-          if (wouldMakeCycle(action.lid, extra.parentLid, lookup)) continue;
-          extraParents.push(extra);
-        }
-      }
-      const relations =
-        parentLid === null
-          ? kept
-          : [
-              ...kept,
-              {
-                id: action.relationId,
-                fromLid: parentLid,
-                toLid: action.lid,
-                kind: STRUCTURAL,
-                // ⚠ 時刻は **worker が刻む**(`datetime('now')`)。ここは楽観表示の
-                //    ための仮値で、次の再読込で本物に置き換わる
-                createdAt: null,
-                updatedAt: null,
-              },
-              ...extraParents.map((x) => ({
-                id: x.relationId,
-                fromLid: x.parentLid,
-                toLid: action.lid,
-                kind: STRUCTURAL,
-                createdAt: null,
-                updatedAt: null,
-              })),
-            ];
-      // ⚠ 何も変わらないなら書かない(同じ親へ落としても永続化が走らない)
-      if (
-        relations.length === state.relations.length &&
-        relations.every((r, i) => r === state.relations[i])
-      ) {
-        return { state, events: [] };
-      }
-      return {
-        state: { ...state, relations },
-        events: [
-          {
-            type: 'REQUEST_SET_PARENT',
-            lid: action.lid,
-            parentLid,
-            relationId: action.relationId,
-            ...(extraParents.length > 0 ? { alsoIn: extraParents } : {}),
-            ...(removedBefore.length > 0 ? { previous: removedBefore } : {}),
-          },
-        ],
-      };
-    }
-    case 'SET_ENTRY_ORDER': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      let entryMetas: Map<string, EntryMeta>;
-      let order: string[];
-      if (action.entryOrder === 'end') {
-        const lastLid = state.order[state.order.length - 1];
-        if (lastLid === undefined || lastLid === action.lid) return { state, events: [] };
-        const last = state.entryMetas.get(lastLid);
-        const entryOrder = (last?.entryOrder ?? 0) + 1;
-        entryMetas = new Map(state.entryMetas).set(action.lid, { ...meta, entryOrder });
-        order = [...state.order.filter((l) => l !== action.lid), action.lid];
-      } else {
-        if (!Number.isFinite(action.entryOrder) || meta.entryOrder === action.entryOrder)
-          return { state, events: [] };
-        entryMetas = new Map(state.entryMetas).set(action.lid, { ...meta, entryOrder: action.entryOrder });
-        // ⚠ 並びの規則は boot と同じ 1 本(entryOrder 昇順・同値は lid)
-        order = [...entryMetas.values()]
-          .sort((a, b) => a.entryOrder - b.entryOrder || a.lid.localeCompare(b.lid))
-          .map((m) => m.lid);
-      }
-      const set = entryMetas.get(action.lid)!;
-      return {
-        state: { ...state, entryMetas, order },
-        events: [
-          {
-            type: 'REQUEST_REORDER',
-            entries: [{ lid: set.lid, title: set.title, archetype: set.archetype, entryOrder: set.entryOrder }],
-          },
-        ],
-      };
-    }
-    case 'MOVE_ENTRY_ORDER': {
-      /**
-       * 🔴 **並べ替え**(2026-08-06。user 報告 2-10「並べ替えの手段が無い」)。
-       *
-       * ⚠ 規則は `reorderSibling` が 1 本で持つ(features 層)── reducer に
-       *   2 つ目の並べ方を書かない。ここがやるのは
-       *   「metas の値を書き換えて、`order` を**同じ規則で**引き直す」だけ。
-       */
-      if (state.phase !== 'ready') return { state, events: [] };
-      const moves = reorderSibling(
-        action.lid,
-        action.direction,
-        state.entryMetas,
-        state.relations,
-      );
-      if (moves.length === 0) return { state, events: [] }; // 端 ── 黙って何もしない
-      const entryMetas = new Map(state.entryMetas);
-      const rows: Array<{ lid: string; title: string; archetype: string; entryOrder: number }> = [];
-      for (const mv of moves) {
-        const m = entryMetas.get(mv.lid);
-        if (!m) continue;
-        entryMetas.set(mv.lid, { ...m, entryOrder: mv.entryOrder });
-        rows.push({
-          lid: mv.lid,
-          title: m.title,
-          archetype: m.archetype,
-          entryOrder: mv.entryOrder,
-        });
-      }
-      if (rows.length === 0) return { state, events: [] };
-      // ⚠ 並びの規則は boot と同じ 1 本(entryOrder 昇順・同値は lid)
-      const order = [...entryMetas.values()]
-        .sort((a, b) => a.entryOrder - b.entryOrder || a.lid.localeCompare(b.lid))
-        .map((m) => m.lid);
-      return {
-        state: { ...state, entryMetas, order },
-        events: [{ type: 'REQUEST_REORDER', entries: rows }],
-      };
-    }
-    /**
-     * 🔴 **関係を作る**(#185)。
-     * ⚠ 自分自身へは張らない / 同じ組・同じ種類は 2 本作らない(押すたびに増えない)。
-     * ⚠ 居場所は弾く ── 型でも弾いているが、**実行時にも**弾く
-     *   (dispatch は型を通らない経路からも来る)。
-     */
-    case 'ADD_RELATION': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      if (action.kind === STRUCTURAL) return { state, events: [] };
-      const { fromLid, toLid, kind } = action;
-      if (fromLid === toLid) return { state, events: [] };
-      if (!state.entryMetas.has(fromLid) || !state.entryMetas.has(toLid))
-        return { state, events: [] };
-      if (hasSameRelation(state.relations, fromLid, toLid, kind)) return { state, events: [] };
-      return {
-        state: {
-          ...state,
-          /**
-           * ⚠ 時刻は **null** で置く ── **disk が正**(worker が `datetime('now')` を
-           * 入れる)。ここで `new Date()` を呼ぶと reducer が純関数でなくなり、
-           * しかも**画面と disk で違う値**を持つことになる。
-           */
-          relations: [
-            ...state.relations,
-            { id: action.id, fromLid, toLid, kind, createdAt: null, updatedAt: null },
-          ],
-        },
-        events: [{ type: 'REQUEST_RELATION_UPSERT', id: action.id, fromLid, toLid, kind }],
-      };
-    }
-    /**
-     * 🔴 **保存に失敗した関係を画面から巻き戻す**。⚠ 画面が先に動くので、disk が断ったら
-     * 画面だけに残る(再読み込みで逆に見える)。足した物は外し、消した物は戻す。冪等。
-     */
-    case 'SET_ENTRY_ARCHETYPE_ROLLBACK': {
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta || meta.archetype !== action.from) return { state, events: [] };
-      return {
-        state: { ...state, entryMetas: new Map(state.entryMetas).set(action.lid, { ...meta, archetype: action.to }) },
-        events: [],
-      };
-    }
-    case 'ROLLBACK_ENTRY_PARENT': {
-      // ⚠ いまの居場所を外して、移す前の居場所を戻す。移した後にさらに動かしていても、書けなかった分は disk に無いので同じ扱い
-      const kept = state.relations.filter(
-        (r) => !(r.kind === STRUCTURAL && r.toLid === action.lid),
-      );
-      return { state: { ...state, relations: [...kept, ...action.previous] }, events: [] };
-    }
-    case 'ROLLBACK_RELATION': {
-      if (action.change === 'added') {
-        if (!state.relations.some((r) => r.id === action.id)) return { state, events: [] };
-        return { state: { ...state, relations: state.relations.filter((r) => r.id !== action.id) }, events: [] };
-      }
-      if (state.relations.some((r) => r.id === action.relation.id)) return { state, events: [] };
-      return { state: { ...state, relations: [...state.relations, action.relation] }, events: [] };
-    }
-    /** 関係を消す。⚠ 居ない id でも**黙って成功**(冪等 ── 2 回押しても壊れない)。 */
-    case 'REMOVE_RELATION': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      const target = state.relations.find((r) => r.id === action.id);
-      if (!target) return { state, events: [] };
-      // ⚠ 居場所はここから消させない ── 消すとファイラの階層が壊れ、戻す導線が無い
-      if (target.kind === STRUCTURAL) return { state, events: [] };
-      return {
-        state: { ...state, relations: state.relations.filter((r) => r.id !== action.id) },
-        events: [{ type: 'REQUEST_RELATION_DELETE', id: action.id, relation: target }],
-      };
-    }
-    /**
-     * 🔴 **選んだ全部にタグを付ける / 外す**(#402 ①)。
-     *
-     * > user の物語: フォルダで 12 件選んだ。全部に `#請求済` を付けたい。
-     * > いま一括でできるのは「ゴミ箱へ」だけで、**12 回開いて 12 回書く**。
-     *
-     * ⚠ ready 限定(編集中の裏書換を作らない ── `TOGGLE_TASK` と同じ)。
-     * ⚠ **居ない lid は落とす**(消えたノートへ書きに行かない)。
-     * ⚠ 空の相手・空のタグでは**何も撃たない**(押して無反応にならないよう、
-     *   帯の側がそもそも押せない形にしてある)。
-     */
-    case 'BULK_TAG': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      // ⚠ 空の名前は落とす(打った字の割り方は `splitTags` が持つ ── ここは受けるだけ)
-      const tags = action.tags.map((t) => t.trim()).filter((t) => t !== '');
-      if (tags.length === 0) return { state, events: [] };
-      const targets = action.lids
-        .map((lid) => state.entryMetas.get(lid))
-        .filter((m): m is EntryMeta => m !== undefined)
-        .map((m) => ({
-          lid: m.lid,
-          title: m.title,
-          archetype: m.archetype,
-          entryOrder: m.entryOrder,
-        }));
-      if (targets.length === 0) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_BULK_TAG',
-            tags,
-            mode: action.mode,
-            targets,
-            ...(action.field === undefined ? {} : { field: action.field }),
-            ...(action.afterPrevious === true ? { afterPrevious: true } : {}),
-            ...(action.renameFirst === true ? { renameFirst: true } : {}),
-          },
-        ],
-      };
-    }
-    case 'RENAME_SMART_TAG': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      const from = action.from.trim();
-      const to = action.to === null ? null : action.to.trim();
-      if (from === '' || to === '') return { state, events: [] };
-      const targets = [...state.entryMetas.values()]
-        .filter((m) => m.archetype === SMART_ARCHETYPE)
-        .map((m) => ({ lid: m.lid, title: m.title, archetype: m.archetype, entryOrder: m.entryOrder }));
-      if (targets.length === 0) return { state, events: [] };
-      return { state, events: [{ type: 'REQUEST_SMART_TAG_RENAME', from, to, targets }] };
-    }
-    case 'SHOW_HISTORY': {
-      /**
-       * ready のみ。一覧は要求時に引く(boot で revisions に触れない)。
-       * 🔴 **引く相手は `action.lid`**(#891)── ⚠ ここで `state.selectedLid` を
-       *   読み直すと、**押した物と効く先が食い違う**(メニューが開いている間に
-       *   選択が動くと、別のノートの履歴が開く)。撃つ側が既に解決している。
-       */
-      if (state.phase !== 'ready' || !action.lid) return { state, events: [] };
-      return {
-        state,
-        events: [{ type: 'REQUEST_REVISION_LIST', lid: action.lid }],
-      };
-    }
-    /**
-     * 🔴 **戻す前に中身を見る**(#398 段②)。
-     * ⚠ **押した版が既に開いていたら畳む**(同じ物をもう一度押したら閉じる)──
-     *   開きっぱなしにすると、閉じる道が「別の版を押す」しか無くなる
-     *   (user 指示 2026-08-23「置けるなら外せる」の面版)。
-     */
-    case 'PREVIEW_REVISION': {
-      if (state.phase !== 'ready' || !state.selectedLid) return { state, events: [] };
-      if (state.revisionPreview?.revId === action.revId)
-        return { state: { ...state, revisionPreview: null }, events: [] };
-      return {
-        state,
-        events: [
-          { type: 'REQUEST_REVISION_BODY', lid: state.selectedLid, revId: action.revId },
-        ],
-      };
-    }
+    case 'ENTRY_STAMPED':
+      return reducePersisted(state, action);
+    case 'TOGGLE_SELECT':
+    case 'SELECT_RANGE':
+    case 'SELECT_ALL':
+    case 'SELECT_ONLY':
+    case 'CLEAR_SELECTION':
+    case 'SET_SCOPE':
+    case 'SET_FILER_FLATTEN':
+    case 'DESELECT_ENTRY':
+      return reduceSelection(state, action);
+    case 'CREATE_ENTRY':
+    case 'DELETE_ENTRY':
+    case 'DELETE_ENTRIES':
+    case 'RENAME_ENTRY_TITLE':
+    case 'SET_ENTRY_ARCHETYPE':
+    case 'SET_ENTRY_PARENT':
+    case 'SET_ENTRY_ORDER':
+    case 'MOVE_ENTRY_ORDER':
+    case 'ADD_RELATION':
+    case 'SET_ENTRY_ARCHETYPE_ROLLBACK':
+    case 'ROLLBACK_ENTRY_PARENT':
+    case 'ROLLBACK_RELATION':
+    case 'REMOVE_RELATION':
+    case 'BULK_TAG':
+    case 'RENAME_SMART_TAG':
+      return reduceEntries(state, action);
+    case 'SHOW_HISTORY':
+    case 'PREVIEW_REVISION':
     case 'HIDE_REVISION_PREVIEW':
-      return { state: { ...state, revisionPreview: null }, events: [] };
-    case 'REVISION_PREVIEW_LOADED': {
-      // ⚠ 遅れて着いた分が別のノートのものなら捨てる(`BODY_LOADED` と同型)
-      if (state.selectedLid !== action.lid) return { state, events: [] };
-      // 🔴 履歴を閉じた後・別の版を待っている間に着いた分は捨てる(次に開いたとき、押していない版が選ばれて見える)
-      if (state.revisionPanel === null || state.revisionPanel.lid !== action.lid) return { state, events: [] };
-      if (!state.revisionPanel.items.some((it) => it.id === action.revId)) return { state, events: [] };
-      return {
-        state: {
-          ...state,
-          // ⚠ 相手は**必ず `current` から**(版を開き直したら、前の相手を持ち越さない)
-          revisionPreview: {
-            lid: action.lid,
-            revId: action.revId,
-            body: action.body,
-            compare: { kind: 'current' },
-          },
-        },
-        events: [],
-      };
-    }
-    case 'SET_REVISION_COMPARE': {
-      const pv = state.revisionPreview;
-      if (state.phase !== 'ready' || pv === null || state.selectedLid !== pv.lid)
-        return { state, events: [] };
-      const set = (compare: RevisionCompare, events: DomainEvent[] = []) => ({
-        state: { ...state, revisionPreview: { ...pv, compare } },
-        events,
-      });
-      if (action.value === 'current') return set({ kind: 'current' });
-      // ⚠ PC のファイルは**結びついているノートだけ**(選択肢を出していない相手を、値の直撃で選ばせない)
-      if (action.value === 'file') {
-        if (!state.linkedFiles.has(pv.lid)) return { state, events: [] };
-        return set({ kind: 'file', load: { state: 'loading' } });
-      }
-      if (action.value.startsWith('rev:')) {
-        const revId = action.value.slice('rev:'.length);
-        // ⚠ 見ている版そのものとの比較は意味が無い(選択肢にも出さない)/ 履歴に並んでいない版は読まない
-        const items = state.revisionPanel?.lid === pv.lid ? state.revisionPanel.items : [];
-        if (revId === pv.revId || !items.some((it) => it.id === revId)) return { state, events: [] };
-        return set({ kind: 'rev', revId, load: { state: 'loading' } }, [
-          { type: 'REQUEST_REVISION_BODY', lid: pv.lid, revId, forCompareOf: pv.revId },
-        ]);
-      }
-      return { state, events: [] };
-    }
-    case 'REVISION_COMPARE_LOADED': {
-      const pv = state.revisionPreview;
-      if (pv === null || pv.lid !== action.lid || pv.revId !== action.previewRevId)
-        return { state, events: [] };
-      const c = pv.compare;
-      if (c.kind === 'current') return { state, events: [] };
-      const now = c.kind === 'rev' ? `rev:${c.revId}` : 'file';
-      if (now !== action.against || c.load.state !== 'loading') return { state, events: [] };
-      const load: RevisionCompareLoad =
-        action.text === null
-          ? action.tooLarge === true
-            ? { state: 'failed', tooLarge: true }
-            : { state: 'failed' }
-          : { state: 'loaded', text: action.text };
-      return {
-        state: { ...state, revisionPreview: { ...pv, compare: { ...c, load } } },
-        events: [],
-      };
-    }
+    case 'REVISION_PREVIEW_LOADED':
+    case 'SET_REVISION_COMPARE':
+    case 'REVISION_COMPARE_LOADED':
     case 'HIDE_HISTORY':
-      // ⚠ **見ていた版も一緒に畳む** ── 一覧を閉じたのに差分だけ残ると、
-      //    どの版の物か分からない孤児になる
-      return { state: { ...state, revisionPanel: null, revisionPreview: null }, events: [] };
-    case 'REVISION_LIST_LOADED': {
-      // 遅延到着が現選択と食い違うなら捨てる(stale 反映防止 ── BODY_LOADED と同型)
-      if (state.selectedLid !== action.lid) return { state, events: [] };
-      if (state.phase !== 'ready') return { state, events: [] };
-      return {
-        state: { ...state, revisionPanel: { lid: action.lid, items: action.items } },
-        events: [],
-      };
-    }
-    case 'RESTORE_REVISION': {
-      if (state.phase !== 'ready' || !state.selectedLid)
-        return { state, events: [] };
-      /**
-       * 🔴 **章の欄が開いている間は断る**(#1044 段2 2巡目の修理、R2)。
-       *
-       * ⚠ 直す前はここを素通りしていた ── `RESTORE_REVISION` 自身は
-       *   `selectedLid` を動かさないので、外側の門(`guardSectionDraftTransition`)
-       *   はこの時点では何も気づかない。効果層が古い版を disk へ書き終えた**後**
-       *   `ENTRY_RESTORED` が届き、`phase !== 'editing'`(章の欄は `phase` を
-       *   `ready` のまま保つ)の枝が `openBody` を丸ごと復元前の版へ差し替える ──
-       *   これは**同じノートの中で** `openBody.lid` が動かないので、外側の門の
-       *   `movedAway` 判定にも `entryGone` 判定にも引っかからない
-       *   (§1「強制する規則は、強制しなければ false になる場面で見ないと空振りする」
-       *   と同じ形 ── selectedLid が動かない経路は素通りする)。放っておくと
-       *   章の下書きは古い `original` を握ったまま、本文だけ復元前の版に変わる。
-       * 🔑 だからここで **断る**(`SAVE_SECTION_DRAFT` / `OPEN_SECTION_DRAFT` と
-       *   同じ字)── system command 側の「知らせて閉じる」は使わない。これは
-       *   user 自身の操作(履歴の戻し)であり、断って選び直させれば済む。
-       */
-      if (state.sectionDraft !== null) {
-        return sectionDraftBlockedResult(state);
-      }
-      const meta = state.entryMetas.get(state.selectedLid);
-      if (!meta) return { state, events: [] };
-      // panel は畳む(復元で履歴が 1 件伸びるので開き直しが正)。meta snapshot は
-      // 発火時捕獲(C-1 規律)
-      return {
-        state: { ...state, revisionPanel: null, revisionPreview: null, restoreUndo: null },
-        events: [
-          {
-            type: 'REQUEST_RESTORE',
-            lid: meta.lid,
-            revId: action.revId,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            ...(action.fromUndo === true ? { fromUndo: true as const } : {}),
-          },
-        ],
-      };
-    }
-    case 'REIMPORT_BODY': {
-      // 🔴 編集中・保存に失敗して止まっている間は、声に出して断る(無言の操作拒否を作らない)
-      if (state.phase !== 'ready') {
-        return {
-          state: { ...state, error: `${phaseBlockReason(state.phase) ?? ''}取り込み直してください` },
-          events: [],
-        };
-      }
-      // 🔴 章の欄が開いている間は断る(`RESTORE_REVISION` と同じ門 ── 復元は本文を丸ごと差し替える)
-      if (state.sectionDraft !== null) return sectionDraftBlockedResult(state);
-      const meta = state.entryMetas.get(action.lid);
-      if (!meta) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_REIMPORT',
-            lid: meta.lid,
-            title: meta.title,
-            archetype: meta.archetype,
-            entryOrder: meta.entryOrder,
-            body: action.body,
-            ...(action.notice === undefined ? {} : { notice: action.notice }),
-          },
-        ],
-      };
-    }
-    case 'SHOW_TRASH': {
-      /**
-       * 🔴 **門を持たない**(#319)。⚠ 直す前は `phase !== 'ready'` で**黙って捨てて**
-       * いたので、編集中に「ゴミ箱」を押すと**1 ドットも変わらず理由も出なかった**
-       * ── P8 段⑲ で潰した「無言の操作拒否」そのものである。
-       * 🔑 **開くのは読むだけ**で、下書きに 1 バイトも触らない ── この file の
-       *   2 ペインの節が既に同じ判断を書いている(「断りが要るのは**実際に動かす
-       *   操作**だけ」)。動かす側(復元・空にする)はそちらで断る。
-       * ⚠ 外すなら `TRASH_LIST_LOADED` も同時に ── 片方だけだと
-       *   「押せるのに一覧が来ない」という**別の無言**を作る。
-       */
-      return { state, events: [{ type: 'REQUEST_TRASH_LIST' }] };
-    }
-    case 'FILE_LINKED': {
-      // ⚠ **居ない entry には紐づけない**(取込が失敗した後に届いても導線を作らない)
-      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
-      if (state.linkedFiles.get(action.lid) === action.name) return { state, events: [] };
-      const linkedFiles = new Map(state.linkedFiles);
-      linkedFiles.set(action.lid, action.name);
-      return { state: { ...state, linkedFiles }, events: [] };
-    }
+    case 'REVISION_LIST_LOADED':
+    case 'RESTORE_REVISION':
+    case 'REIMPORT_BODY':
+      return reduceHistory(state, action);
+    case 'SHOW_TRASH':
+    case 'FILE_LINKED':
     case 'HIDE_TRASH':
-      return { state: { ...state, trashPanel: null }, events: [] };
     case 'TRASH_LIST_LOADED':
-      // 🔴 **開く側と対で門を外す**(#319)── 片方だけ残すと
-      //    「押せるのに一覧が来ない」という別の無言になる
-      return {
-        state: {
-          ...state,
-          // 🔴 **いま存在する entry は「ゴミ箱」ではない**(P8 段⑪ の hotfix)。
-          // ゴミ箱の定義は「entry が居ない revision」なので、届いた一覧を
-          // **その場の真実で濾す**。これが無いと、開いた直後に復元したとき
-          // **先に飛んだ一覧要求の応答が後から着いて、復元したものを戻す**
-          // ── 画面には「復元したのにゴミ箱に残っている」が出る(smoke が
-          // 3 回に 2 回落ちる形で表面化していた)。
-          // ⚠ 世代(token)ではなく**導出**で塞ぐ ── どの順で着いても正しい
-          trashPanel: { items: action.items.filter((t) => !state.entryMetas.has(t.entryLid)) },
-        },
-        events: [],
-      };
-    case 'RESTORE_TRASH': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      /**
-       * 🔴 **章の欄が開いている間は断る**(#1044 段2 2巡目の修理、R2)。
-       *
-       * ⚠ 直す前はここを素通りしていた ── `RESTORE_TRASH` 自身は `selectedLid`
-       *   を動かさない(効果層へ `REQUEST_TRASH_RESTORE` を頼むだけ)ので、
-       *   外側の門(`guardSectionDraftTransition`)はこの時点では何も気づかない。
-       *   効果層が復元を終えた**後** `ENTRY_RESTORED` が届き、`phase !== 'editing'`
-       *   の枝が `selectedLid` を復元先へ無条件に動かす ── これはようやく
-       *   外側の門に引っかかるが、system command 側の枝(「結果は受け入れ、
-       *   知らせて閉じる」)を通ってしまい、断り文が
-       *   「このノートが別の場所で消されたか入れ替わったため」と**事実と違う理由**を
-       *   言う(実際はこの user 自身の操作が引き起こした)。
-       * 🔑 だから起点(ここ)で断る ── `REQUEST_TRASH_RESTORE` を出す前に止めれば、
-       *   ENTRY_RESTORED も system 側の枝も一度も走らない。
-       */
-      if (state.sectionDraft !== null) {
-        return sectionDraftBlockedResult(state);
-      }
-      if (state.entryMetas.has(action.entryLid)) {
-        // lid 衝突(同 lid が再作成済み)── 黙って上書きしない(可視で止める)
-        return {
-          state: {
-            ...state,
-            // 🔴 内部の ID ではなく題名で言う(#1087)。user に見えない値を出さない
-            error: `復元できません: 同じ ID のノート「${state.entryMetas.get(action.entryLid)?.title ?? '(無題)'}」が既にあります`,
-          },
-          events: [],
-        };
-      }
-      const lastLid = state.order[state.order.length - 1];
-      // 🔴 「元に戻す」は移す前の並びへ挿す(#1087)。ゴミ箱の一覧から戻すときは並びを知らないので末尾
-      const entryOrder =
-        action.entryOrder ??
-        (lastLid ? (state.entryMetas.get(lastLid)?.entryOrder ?? 0) + 1 : 1);
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_TRASH_RESTORE',
-            entryLid: action.entryLid,
-            revId: action.revId,
-            entryOrder,
-            ...(action.entryOrder !== undefined ? { explicitOrder: true } : {}),
-            selectedAtIssue: state.selectedLid,
-          },
-        ],
-      };
-    }
-    case 'UNDO_TRASH': {
-      // ⚠ 起点で断る(`RESTORE_TRASH` と同じ ── 章の欄が開いている間は復元が選択を動かす)
-      if (state.phase !== 'ready' || action.lids.length === 0) return { state, events: [] };
-      if (state.sectionDraft !== null) return sectionDraftBlockedResult(state);
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_TRASH_UNDO',
-            lids: action.lids,
-            ...(action.orders ? { orders: action.orders } : {}),
-          },
-        ],
-      };
-    }
-    case 'PURGE_TRASH': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      return {
-        state,
-        events: [{ type: 'REQUEST_TRASH_PURGE', ...(action.lid === undefined ? {} : { lid: action.lid }) }],
-      };
-    }
-    /* ── 2 ペインタブファイラ(#241 段⑥)───────────────────────────
-     * 🔴 **どれも `phase` を見ない**(= 編集中でも通る)。
-     * ⚠ 直前の稿は `phase !== 'ready'` で黙って捨てていたが、それは #240 と P11 で
-     *   2 度踏んだ**無言の操作拒否**そのものである ── 場所を移る・印を付けるは
-     *   下書きに 1 バイトも触らないので、止める理由が無い(`SET_VIEW_MODE` が
-     *   ヘルプ・設定を編集中に通すのと同じ判断:「書きながら置き場を眺める」)。
-     * 🔑 **断りが要るのは「実際に動かす操作」だけ** ── そちらは `moveEntries` /
-     *   `DELETE_ENTRIES` が既に**声に出して**断っている(判定を増やさない)。
-     */
+    case 'RESTORE_TRASH':
+    case 'UNDO_TRASH':
+    case 'PURGE_TRASH':
+      return reduceTrash(state, action);
     case 'DUAL_FOCUS':
-      return withDualFocus(state, action.side);
-    case 'DUAL_SET_SCOPE': {
-      // ⚠ 実在しない lid へは入らない(消えたフォルダの中身として空の表を出さない)
-      if (action.lid !== null && !state.entryMetas.has(action.lid))
-        return { state, events: [] };
-      const pane = withPaneScope(paneOf(state.dual, action.side), action.lid);
-      if (pane === paneOf(state.dual, action.side)) return withDualFocus(state, action.side);
-      // 🔑 場所を触った側へ焦点も移す(移す向きは「焦点のある側から」なので、
-      //    触った側が元にならないと user の意図と逆へ流れる)
-      return withDual(state, {
-        ...withPane(state.dual, action.side, pane),
-        focus: action.side,
-      });
-    }
-    case 'DUAL_SELECT': {
-      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
-      const pane = paneOf(state.dual, action.side);
-      /**
-       * 🔑 **範囲は「表示している並び」で採る**(#240 段②と同じ規則・同じ関数)。
-       * ⚠ ここで並びを組み直すと、目で見た範囲と選ばれる範囲が食い違う。
-       */
-      const rows = filerRows(paneScope(pane), state.entryMetas, state.relations, {
-        smartLids: smartLidsOf(paneScope(pane), state.smartHits),
-        // 🔑 **絞り込みの規則は 1 本**(`paneFilterOptions`)── 描く側と同じものを見る
-        ...paneFilterOptions(pane, state.filterQuery, state.searchHits),
-        ...dualListViewOptions(state),
-        // ⚠ 2 ペインは「中まで全部出す」(左の列の入り切り)を**持たない**(#813 段②)
-        flatten: false,
-      });
-      let next: DualPaneState;
-      if (action.mode === 'range') {
-        const range = rangeInRows(rows, pane.anchor, action.lid);
-        if (range.length === 0) return { state, events: [] };
-        // ⚠ 起点は動かさない(動かすと Shift を押すたびに範囲が縮む)
-        // ⚠ カーソルは**押した行**へ(範囲の端であって、起点ではない)
-        next = withPaneSelection(pane, range, pane.anchor, action.lid);
-      } else if (action.mode === 'toggle') {
-        const has = pane.selection.includes(action.lid);
-        const sel = has
-          ? pane.selection.filter((l) => l !== action.lid)
-          : [...pane.selection, action.lid];
-        // ⚠ 起点は**外したときも**更新する(次の Shift はここから伸ばす)
-        next = withPaneSelection(pane, sel, action.lid, action.lid);
-      } else {
-        next = withPaneSelection(pane, [action.lid], action.lid, action.lid);
-      }
-      return withDual(state, {
-        ...withPane(state.dual, action.side, next),
-        focus: action.side,
-      });
-    }
-    case 'DUAL_SELECT_MANY': {
-      const lids = action.lids.filter((l) => state.entryMetas.has(l));
-      if (lids.length === 0) return { state, events: [] };
-      const last = lids[lids.length - 1]!;
-      const pane = paneOf(state.dual, action.side);
-      // ⚠ 焦点は動かさない(`DUAL_SELECT` は押した側を焦点にするが、これは操作の結果として置くだけ)
-      return withDual(state, withPane(state.dual, action.side, withPaneSelection(pane, lids, last, last)));
-    }
-    case 'DUAL_SET_CURSOR': {
-      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
-      const pane = paneOf(state.dual, action.side);
-      if (pane.cursor === action.lid && state.dual.focus === action.side)
-        return withDual(state, state.dual);
-      return withDual(state, {
-        ...withPane(state.dual, action.side, withCursor(pane, action.lid)),
-        // ⚠ 動かした側が「元」になる(押した側が焦点、と同じ規則)
-        focus: action.side,
-      });
-    }
-    case 'DUAL_TAB_ADD': {
-      const pane = withTabAdded(paneOf(state.dual, action.side));
-      if (pane === paneOf(state.dual, action.side)) return { state, events: [] };
-      return withDual(state, {
-        ...withPane(state.dual, action.side, pane),
-        focus: action.side,
-      });
-    }
-    case 'DUAL_TAB_CLOSE': {
-      const pane = withTabClosed(paneOf(state.dual, action.side), action.index);
-      if (pane === paneOf(state.dual, action.side)) return { state, events: [] };
-      return withDual(state, {
-        ...withPane(state.dual, action.side, pane),
-        focus: action.side,
-      });
-    }
-    case 'DUAL_CLEAR_SELECTION': {
-      const pane = paneOf(state.dual, action.side);
-      if (pane.selection.length === 0 && pane.anchor === null) return { state, events: [] };
-      return withDual(
-        state,
-        /**
-         * ⚠ **カーソルは残す**(2026-08-19)── ここは「移した直後に印を外す」
-         *   ための入口なので、カーソルまで消すと**次の 1 打鍵が先頭へ飛ぶ**。
-         */
-        withPane(state.dual, action.side, withPaneSelection(pane, [], null, pane.cursor)),
-      );
-    }
-    case 'DUAL_RENAME_BEGIN': {
-      // ⚠ 実在しない行の名前は打てない(消えた行の入力欄を出さない)
-      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
-      // ⚠ 打ち始めた側へ焦点も移す(他の押し方と揃える)
-      return {
-        state: {
-          ...state,
-          dual: { ...state.dual, focus: action.side, renaming: { side: action.side, lid: action.lid } },
-        },
-        events: [],
-      };
-    }
-    case 'DUAL_RENAME_END': {
-      if (state.dual.renaming === null) return { state, events: [] };
-      return { state: { ...state, dual: { ...state.dual, renaming: null } }, events: [] };
-    }
-    case 'ROW_RENAME_BEGIN': {
-      // ⚠ 編集中は打たせない(`RENAME_ENTRY_TITLE` 自体は editing でも通るが、
-      //    その入力欄は 2 ペインの編集画面の題名欄であって、左の列の行ではない)
-      if (state.phase !== 'ready') return { state, events: [] };
-      // ⚠ 実在しない行の名前は打てない(消えた行の入力欄を出さない)
-      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
-      if (state.renamingLid === action.lid) return { state, events: [] };
-      return { state: { ...state, renamingLid: action.lid }, events: [] };
-    }
-    case 'ROW_RENAME_END': {
-      if (state.renamingLid === null) return { state, events: [] };
-      return { state: { ...state, renamingLid: null }, events: [] };
-    }
-    case 'DUAL_SET_FILTER': {
-      const pane = withPaneFilter(paneOf(state.dual, action.side), action.filter);
-      if (pane === paneOf(state.dual, action.side)) return { state, events: [] };
-      // 🔑 打った側へ焦点も移す(他の押し方と揃える)
-      return withDual(state, {
-        ...withPane(state.dual, action.side, pane),
-        focus: action.side,
-      });
-    }
+    case 'DUAL_SET_SCOPE':
+    case 'DUAL_SELECT':
+    case 'DUAL_SELECT_MANY':
+    case 'DUAL_SET_CURSOR':
+    case 'DUAL_TAB_ADD':
+    case 'DUAL_TAB_CLOSE':
+    case 'DUAL_CLEAR_SELECTION':
+    case 'DUAL_RENAME_BEGIN':
+    case 'DUAL_RENAME_END':
+    case 'ROW_RENAME_BEGIN':
+    case 'ROW_RENAME_END':
+    case 'DUAL_SET_FILTER':
     case 'DUAL_BACK':
-    case 'DUAL_FORWARD': {
-      const cur = paneOf(state.dual, action.side);
-      /**
-       * ⚠ **押せないときは何もしない**(焦点も動かさない)── 端で押したときに
-       *   焦点だけ動くと、「戻ったのに場所が同じ」に見える。
-       */
-      const can = action.type === 'DUAL_BACK' ? paneCanGoBack(cur) : paneCanGoForward(cur);
-      if (!can) return { state, events: [] };
-      const pane = action.type === 'DUAL_BACK' ? withPaneBack(cur) : withPaneForward(cur);
-      return withDual(state, {
-        ...withPane(state.dual, action.side, pane),
-        focus: action.side,
-      });
-    }
-    case 'DUAL_SET_PREVIEW': {
-      if (state.dual.previewOn === action.on) return { state, events: [] };
-      /**
-       * ⚠ **切ったら中身も捨てる** ── 残すと、次に点けた瞬間に
-       *   **前に見ていた行の本文**が一瞬出る(いま指している行のものではない)。
-       */
-      return withDual(state, { ...state.dual, previewOn: action.on, preview: null });
-    }
-    /**
-     * 🔴 **スマートフォルダの当たりが届いた**(#421 段①)。
-     * ⚠ **lid で入れ物を分ける** ── 同じ表に複数のスマートフォルダの結果が
-     *   入る(左と右で別々のものを開ける)ので、上書きにすると片方が消える。
-     */
-    case 'SMART_SCANNED': {
-      const next = new Map(state.smartHits);
-      next.set(action.lid, {
-        lids: [...action.lids],
-        total: action.total,
-        failed: false,
-        spec: action.spec,
-        ...(action.unreadable !== undefined && action.unreadable > 0 ? { unreadable: action.unreadable } : {}),
-      });
-      return { state: { ...state, smartHits: next }, events: [] };
-    }
-    /**
-     * ⚠ **黙って空にしない** ── 「集められない」と「0 件」は別の話である
-     *   (旧い worker が service worker のキャッシュに残っている端末で起きる)。
-     */
-    case 'SMART_SCAN_FAILED': {
-      const next = new Map(state.smartHits);
-      // ⚠ 条件は**そのまま残す**(集められなかっただけで、条件は在る)
-      next.set(action.lid, {
-        lids: [],
-        total: 0,
-        failed: true,
-        spec: state.smartHits.get(action.lid)?.spec ?? EMPTY_SMART,
-      });
-      return { state: { ...state, smartHits: next }, events: [] };
-    }
-    /**
-     * 🔴 **落としたら条件のタグが付く / 外すと外れる**(#421 段①)。
-     *
-     * ⚠ **条件はここで読めない**(reducer は本文を持たない)ので、読むのは effect。
-     * 🔑 書くのは**既にある口**(`BULK_TAG` → `REQUEST_BULK_TAG`)── タグを本文へ
-     *   書く規則を 2 つ作らない(§7)。
-     */
-    case 'SMART_TAGS': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      const lids = action.lids.filter((lid) => state.entryMetas.has(lid));
-      if (lids.length === 0) return { state, events: [] };
-      if (!state.entryMetas.has(action.smartLid)) return { state, events: [] };
-      return {
-        state,
-        events: [
-          { type: 'REQUEST_SMART_TAGS', smartLid: action.smartLid, lids, mode: action.mode },
-        ],
-      };
-    }
-    /**
-     * 🔴 **条件を書き換える**(#421 段①)。書き終えたら**集め直す** ── そこまでが
-     * 1 つの操作である(条件だけ変わって並びが古いままだと、user は「効いていない」
-     * と読む)。⚠ 集め直しは effect が書込の後に頼む(順番が要る)。
-     */
-    case 'SMART_COND': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      if (action.tag.trim() === '') return { state, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (meta === undefined || meta.archetype !== SMART_ARCHETYPE) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_SMART_COND',
-            target: {
-              lid: meta.lid,
-              title: meta.title,
-              archetype: meta.archetype,
-              entryOrder: meta.entryOrder,
-            },
-            tag: action.tag,
-            mode: action.mode,
-          },
-        ],
-      };
-    }
-    case 'SMART_FIELD': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      const meta = state.entryMetas.get(action.lid);
-      if (meta === undefined || meta.archetype !== SMART_ARCHETYPE) return { state, events: [] };
-      return {
-        state,
-        events: [
-          {
-            type: 'REQUEST_SMART_FIELD',
-            target: {
-              lid: meta.lid,
-              title: meta.title,
-              archetype: meta.archetype,
-              entryOrder: meta.entryOrder,
-            },
-            field: action.field,
-            value: action.value,
-          },
-        ],
-      };
-    }
+    case 'DUAL_FORWARD':
+    case 'DUAL_SET_PREVIEW':
+      return reduceDual(state, action);
+    case 'SMART_SCANNED':
+    case 'SMART_SCAN_FAILED':
+    case 'SMART_TAGS':
+    case 'SMART_COND':
+    case 'SMART_FIELD':
     case 'SMART_RESCAN':
-      return { state, events: smartScanFor(state, action.lid) };
-    case 'SWAP_OPEN_ENTRY': {
-      const i = state.splitLids.indexOf(action.lid);
-      const old = state.selectedLid;
-      /**
-       * ⚠ **入れ替えられないときは、ただ開く**(3 通り)──
-       *   ①行き先が枠に居ない ②中央が空 ③同じもの。
-       * ⚠ そして **`folder` は枠に置けない**(`PIN_SPLIT_ENTRY` が断る)ので、
-       *   中央がフォルダなら入れ替えない ── 入れ替えると**枠が永久に空**になる。
-       */
-      if (
-        i < 0 ||
-        old === null ||
-        old === action.lid ||
-        state.entryMetas.get(old)?.archetype === 'folder'
-      )
-        return reduce(state, { type: 'SELECT_ENTRY', lid: action.lid });
-      /**
-       * 🔴 **枠を触る前に、選択が本当に動けるかを確かめる**(#1044 段2 2巡目の修理、R10)。
-       *
-       * ⚠ 直す前はここで先に `splitLids` を差し替え、その state を内側の `reduce()`
-       *   へ渡していた ── 章の欄が開いている間そのノートから離れる遷移を断る門
-       *   (`guardSectionDraftTransition`)は選択を戻すだけなので、**渡した state に
-       *   すでに焼き込まれていた枠の差し替えは戻らない**。結果「選択の移動は断られた
-       *   のに、枠の並びだけ書き換わる」という部分適用になっていた。
-       * 🔑 断る条件をここに書き写さない(理由が section draft か編集ロックかに関わらず
-       *   同じ形で守れる) ── **触っていない `state` で `reduce()` を試し撃ちし**、
-       *   選択が本当に `action.lid` へ動いたかだけを見る。動かなければ、その結果
-       *   (章の欄の断り文・編集ロックの無言など、理由が何であれ)をそのまま返し、
-       *   枠には 1 バイトも触れない。
-       */
-      const trial = reduce(state, { type: 'SELECT_ENTRY', lid: action.lid });
-      if (trial.state.selectedLid !== action.lid) return trial;
-      const swapped = [...state.splitLids];
-      swapped[i] = old;
-      /**
-       * 🔑 **選択の遷移は `SELECT_ENTRY` に任せる**(§7:開く判定を 2 か所に書かない)──
-       *   ここがやるのは**枠の中身の差し替え**だけである。
-       * ⚠ 枠の本文は**入れ替えた側を捨て、入った側を頼む** ── 捨てないと、
-       *   降ろしたノートの本文が器に残り続ける(常駐が積み上がる)。
-       */
-      const r = reduce(
-        {
-          ...state,
-          splitLids: swapped,
-          splitBodies: dropSplitBody(state.splitBodies, action.lid),
-        },
-        { type: 'SELECT_ENTRY', lid: action.lid },
-      );
-      return {
-        state: r.state,
-        events: r.state.splitBodies.has(old)
-          ? r.events
-          : [...r.events, { type: 'REQUEST_SPLIT_BODY', lid: old }],
-      };
-    }
-    case 'PIN_SPLIT_ENTRY': {
-      const meta = state.entryMetas.get(action.lid);
-      // ⚠ 居ないものは留めない(消えた lid を指す枠を作らない)
-      if (meta === undefined) return { state, events: [] };
-      /**
-       * ⚠ **フォルダは本文を持たない** ── 留めると枠が永久に空になる。
-       * 🔑 断るときは**理由を言う**(黙って何も起きないのが dead click である)。
-       */
-      if (!canStack(meta))
-        return {
-          state: { ...state, notice: 'フォルダはスタックに載せられません(本文がありません)' },
-          events: [],
-        };
-      const pinned = pinSplitLid(state.splitLids, action.lid);
-      if (pinned === state.splitLids) {
-        /**
-         * ⚠ 「**もう一番上に在る**」と「**満杯**」を分ける ── 前者は黙ってよいが、後者は言う。
-         * 🔑 直す前は「既に在る」を黙っていたが、いまは**載せ直すと先頭へ上がる**ので、
-         *   黙るのは**もう先頭に在るとき**だけである(#633 段①)。
-         */
-        if (state.splitLids[0] === action.lid) return { state, events: [] };
-        return {
-          state: {
-            ...state,
-            notice: `スタックに載せられるのは ${String(STACK_MAX)} 件までです(1 つ降ろしてから載せてください)`,
-          },
-          events: [],
-        };
-      }
-      return {
-        state: { ...state, splitLids: pinned },
-        // ⚠ 既に読めているなら読み直さない(留め直すたびに全文を往復させない)
-        events: state.splitBodies.has(action.lid)
-          ? []
-          : [{ type: 'REQUEST_SPLIT_BODY', lid: action.lid }],
-      };
-    }
-    case 'UNPIN_SPLIT_ENTRY': {
-      const rest = unpinSplitLid(state.splitLids, action.lid);
-      if (rest === state.splitLids) return { state, events: [] };
-      return {
-        state: {
-          ...state,
-          splitLids: rest,
-          splitBodies: dropSplitBody(state.splitBodies, action.lid),
-          /**
-           * 🔴 **消えたので降ろしたときだけ 1 行言う**(#633 段①)。
-           * ⚠ 直す前は無言だった ── user から見ると「札が勝手に消えた」である。
-           * ⚠ 題名は**降ろす前の `entryMetas`** から引く(別タブで消された直後は
-           *   まだ残っていることが多い。無ければ「消えたノート」)。
-           */
-          ...(action.gone === true
-            ? { notice: goneFromStackNotice(state.entryMetas.get(action.lid)?.title) }
-            : {}),
-        },
-        events: [],
-      };
-    }
-    case 'CLEAR_SPLIT': {
-      // ⚠ 空なら**同じ state**を返す(描き直しの指紋を動かさない ── `UNPIN` と同じ作法)
-      if (state.splitLids.length === 0) return { state, events: [] };
-      return {
-        state: { ...state, splitLids: [], splitBodies: new Map<string, string>() },
-        events: [],
-      };
-    }
-    case 'LOAD_STACK': {
-      const meta = state.entryMetas.get(action.lid);
-      if (meta === undefined || meta.archetype !== STACK_ARCHETYPE) return { state, events: [] };
-      /**
-       * 🔑 本文が画面に在ればその場で積む(`screenBodyOf` ── 主の枠か横の枠)。
-       *   無ければ効果層に読ませる(押した瞬間に何も起きない、を作らない)。
-       */
-      const shown = screenBodyOf(state, action.lid);
-      if (shown === null) return { state, events: [{ type: 'REQUEST_STACK_BODY', lid: action.lid }] };
-      return loadStackFromBody(state, shown);
-    }
-    case 'STACK_BODY_LOADED': {
-      const meta = state.entryMetas.get(action.lid);
-      if (meta === undefined || meta.archetype !== STACK_ARCHETYPE) return { state, events: [] };
-      return loadStackFromBody(state, action.body);
-    }
-    case 'MOVE_STACK_LINK': {
-      // ⚠ 入れ物以外では何もしない(押し所はスタックの入れ物にしか生えない ── 綴りの取り違えの防波堤)
-      if (state.entryMetas.get(action.lid)?.archetype !== STACK_ARCHETYPE) return { state, events: [] };
-      // 🔑 門と event の組み立ては板の書換と**同じ 1 本**(`bodyRewriteGate`(#684 で `placeRewrite` から改名))── 編集中は声に出して断る
-      return bodyRewriteGate(state, action.lid, '、並べ替えてください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        const openLine = shown.split('\n')[action.line];
-        if (openLine === undefined) return null;
-        return { kind: 'link-move', line: action.line, openLine, dir: action.dir };
-      });
-    }
-    case 'SPLIT_BODY_LOADED': {
-      /**
-       * ⚠ **追い越しを捨てる**(`DUAL_PREVIEW_LOADED` と同じ)── 読みは非同期なので、
-       * 外した後に届くことが普通に起きる。留めていないものは黙って捨てる。
-       */
-      if (!state.splitLids.includes(action.lid)) return { state, events: [] };
-      if (state.splitBodies.get(action.lid) === action.body) return { state, events: [] };
-      const bodies = new Map(state.splitBodies);
-      bodies.set(action.lid, action.body);
-      return { state: { ...state, splitBodies: bodies }, events: [] };
-    }
-    case 'PLACE_BODIES_WANTED': {
-      /**
-       * ⚠ **居ないノートは頼まない**(消えた lid を読んでも何も無い。板は題名の行で断る)。
-       * ⚠ **フォルダは頼まない**(本文が無い ── 描く側も同じ判定で札だけにする)。
-       *   🔑 添付は**頼む**(#529 W3-②)── 本文は frontmatter だけで小さく、絵を出せる種類か
-       *   (画像 / PDF)はそこから分かる。
-       * 🔑 持っている物も頼まない。⚠ 1 度に頼める数は `PLACE_BODY_CAP` まで
-       *   (それ以上は持てないので、頼んでも手放すだけになる)。
-       */
-      const have = placeBodiesOf(state);
-      const want: string[] = [];
-      for (const lid of action.lids) {
-        if (want.length >= PLACE_BODY_CAP) break;
-        if (have.has(lid) || want.includes(lid)) continue;
-        // 🔑 見出しの節(#1459 ①)の鍵は `<lid>#h/<印>` ── 居るか・読めるかは**ノート**で決める
-        const meta = state.entryMetas.get(baseLidOfKey(lid));
-        if (meta === undefined || !placeEmbeddable(meta.archetype)) continue;
-        want.push(lid);
-      }
-      return {
-        state,
-        events: want.map((lid) => ({ type: 'REQUEST_PLACE_BODY', lid })),
-      };
-    }
-    case 'PLACE_BODY_LOADED': {
-      const have = placeBodiesOf(state);
-      // 🔴 読めなかった(`null`)── 見出しの節の鍵だけ「読めなかった」と持つ(「読み込んでいます」で止めない)。
-      //    板の抜粋は今までどおり何もしない(板は題名の行で断る)
-      if (action.body === null) {
-        if (parseSectionKey(action.lid) === null) return { state, events: [] };
-        const gone: PlaceExcerpt = { text: '', cut: false, missing: true, gone: true };
-        const prevGone = have.get(action.lid);
-        if (prevGone !== undefined && sameExcerpt(prevGone, gone)) return { state, events: [] };
-        return {
-          state: { ...state, placeBodies: withPlaceBody(have, action.lid, gone, () => placeLidsOnScreen(state)) },
-          events: [],
-        };
-      }
-      // 🔑 添付は絵を出せるかを**本文(frontmatter)から**読む ── 型は一覧(entryMetas)が知っている
-      //    見出しの節の鍵(#1459 ①)は、その節だけを切り出す(板の抜粋と同じ入れ物・同じ口)
-      const sec = parseSectionKey(action.lid);
-      const next =
-        sec !== null
-          ? sectionExcerptOf(action.body, sec.id)
-          : excerptOf(action.body, state.entryMetas.get(action.lid)?.archetype);
-      const prev = have.get(action.lid);
-      if (prev !== undefined && sameExcerpt(prev, next)) return { state, events: [] };
-      return {
-        state: { ...state, placeBodies: withPlaceBody(have, action.lid, next, () => placeLidsOnScreen(state)) },
-        events: [],
-      };
-    }
-    case 'SPLIT_RESTORED': {
-      const restored = normalizeSplitLids(action.lids);
-      if (restored.length === 0) return { state, events: [] };
-      /**
-       * ⚠ ここでは**知らない lid を落とさない** ── 起動の順で `entryMetas` が
-       * まだ空のことがあり、落とすと**憶えた並びが黙って消える**。
-       * 🔑 消えたノートは effect が本文 `null` を受けて外す(自己修復)。
-       */
-      return {
-        state: { ...state, splitLids: restored },
-        events: restored.map((lid) => ({ type: 'REQUEST_SPLIT_BODY', lid })),
-      };
-    }
-    case 'DUAL_PREVIEW_LOADED': {
-      /**
-       * ⚠ **追い越しを捨てる**(#273 残件)── 読みは非同期なので、送った先の行を
-       *   通り過ぎた後で届くことが普通に起きる。いま指している行のものでなければ
-       *   **黙って捨てる**(古い本文を映すほうがずっと悪い)。
-       */
-      if (!state.dual.previewOn) return { state, events: [] };
-      if (dualPreviewTarget(state, state.dual) !== action.lid) return { state, events: [] };
-      if (state.dual.preview?.lid === action.lid && state.dual.preview.body === action.body)
-        return { state, events: [] };
-      return {
-        state: {
-          ...state,
-          dual: { ...state.dual, preview: { lid: action.lid, body: action.body } },
-        },
-        events: [],
-      };
-    }
-    case 'DUAL_TAB_ACTIVATE': {
-      const cur = paneOf(state.dual, action.side);
-      // ⚠ **実在するタブを押したときだけ**焦点を移す ── 存在しない添字で
-      //    焦点が動くと、「押したものが在る」という嘘の合図になる
-      if (!isTabIndex(cur, action.index)) return { state, events: [] };
-      const pane = withTabActive(cur, action.index);
-      if (pane === cur) return withDualFocus(state, action.side);
-      return withDual(state, {
-        ...withPane(state.dual, action.side, pane),
-        focus: action.side,
-      });
-    }
-    case 'ENTRY_RESTORED': {
-      // 🔒 編集中の着弾(review P5b F1 ── 反例実験で draft 全損と editor
-      // 乗っ取りを実証): 選択と editor は絶対に乗っ取らない。
-      // - 同一 lid: disk 先行の印だけ付ける(TODO_TOGGLED の editing 分岐と同じ
-      //   意味論 ── 変更あり commit は draft が勝ち、無変更 commit / cancel は
-      //   disk = 復元内容が勝つ)
-      // - 別 lid: ゴミ箱からの復元は一覧にだけ足す(下)/ 履歴復元は破棄(復元は disk 側で完了済み)
-      if (state.phase === 'editing') {
-        if (state.openBody?.lid === action.meta.lid) {
-          return {
-            state: {
-              ...state,
-              entryMetas: new Map(state.entryMetas).set(action.meta.lid, action.meta),
-              openBody: { ...state.openBody, persisted: action.body, diskAhead: true },
-              ...syncShownBodies(state, action.meta.lid, action.body),
-            },
-            events: [],
-          };
-        }
-        /**
-         * 🔴 **別のノートをゴミ箱から戻した着弾は、一覧にだけ足す**(#1087)。
-         * ⚠ 直す前は破棄していた ── 「元に戻す」の途中で編集に入ると、戻したノートが画面の一覧に出ず
-         *   (再読み込みまで見えない)、「元に戻す」だけが使われた扱いになっていた。
-         * 🔑 選択と開いている本文には触らない(編集を乗っ取らない)。居る物の二重復元は従来どおり捨てる。
-         */
-        if (action.mode === 'trash' && !state.entryMetas.has(action.meta.lid)) {
-          const metasE = new Map(state.entryMetas).set(action.meta.lid, action.meta);
-          return {
-            state: {
-              ...state,
-              entryMetas: metasE,
-              order: state.order.includes(action.meta.lid)
-                ? state.order
-                : insertByOrder(state.order, action.meta.lid, metasE),
-              relations: mergeRelations(state.relations, action.relations ?? []),
-              trashPanel: state.trashPanel
-                ? { items: state.trashPanel.items.filter((t) => t.entryLid !== action.meta.lid) }
-                : null,
-            },
-            events: [],
-          };
-        }
-        return { state, events: [] };
-      }
-      if (state.phase !== 'ready') return { state, events: [] };
-      // 整合判定(review P5b F2): 履歴復元は entry が居るのが前提 ── 発行後に
-      // 削除されていたら破棄(disk も queue 直列で「復元 → 削除」の順に終わって
-      // おり、捨てる = 整合)。trash 復元は居ないのが前提(二重復元の後着を破棄)
-      const exists = state.entryMetas.has(action.meta.lid);
-      if (action.mode === 'revision' ? !exists : exists)
-        return { state, events: [] };
-      // 履歴復元(既存 meta 置換)と trash 復元(再出現)の合流点。復元先を
-      // 選択して結果を見せる。openBody は disk 確定値で確立(persisted = body)
-      const entryMetas = new Map(state.entryMetas).set(action.meta.lid, action.meta);
-      /**
-       * 🔴 **履歴の復元が着く前に別のノートを選んでいたら、選択を奪い返さない**(#1087)。
-       * ⚠ 直す前は無条件に `selectedLid` と `openBody` を差し替えていた ── 戻すを押した直後に別のノートを押すと、
-       *   押したノートが開かず、戻したノートへ引き戻されていた(押したのに何も起きないように見える)。
-       * 🔑 戻したこと自体は言う(書込は済んでいる)。並び・本文の画面は選んでいるノートのまま。
-       */
-      if (action.mode === 'trash' && restoreKeepsSelection(state, action)) {
-        /**
-         * 🔴 **ゴミ箱から戻した着弾も同じ**(#1087)── 頼んでから着くまでの間に別のノートを選び直していたら、
-         *   選択と開いている本文は動かさず、戻したことは一覧と知らせで言う(居場所も戻す)。
-         */
-        const metasK = new Map(state.entryMetas).set(action.meta.lid, action.meta);
-        const orderK = state.order.includes(action.meta.lid)
-          ? state.order
-          : insertByOrder(state.order, action.meta.lid, metasK);
-        const relationsK = mergeRelations(state.relations, action.relations ?? []);
-        return {
-          state: {
-            ...state,
-            entryMetas: metasK,
-            order: orderK,
-            relations: relationsK,
-            trashPanel: state.trashPanel
-              ? { items: state.trashPanel.items.filter((t) => t.entryLid !== action.meta.lid) }
-              : null,
-            notice: trashRestoredNotice(action.meta.lid, relationsK, metasK),
-            restoreUndo: null,
-            noticeOpen: null,
-            noticeCreate: null,
-          },
-          events: [],
-        };
-      }
-      if (action.mode === 'revision' && state.selectedLid !== action.meta.lid) {
-        return {
-          state: {
-            ...state,
-            entryMetas,
-            ...syncShownBodies(state, action.meta.lid, action.body),
-            taskScan: refreshTaskCards(state.taskScan, action.meta.lid, action.body),
-            smartHits: refreshSmartHits(state.smartHits, action.meta.lid, action.body, state.entryMetas),
-            notice:
-              action.notice ??
-              revisionRestoredNotice(
-                state.entryMetas.get(action.meta.lid)?.title ?? action.meta.title,
-                action.meta.title,
-                action.fromUndo === true,
-              ),
-          },
-          events: [],
-        };
-      }
-      /**
-       * 🔴 **元の位置へ戻す**(2026-08-06。user 報告 2-9)。
-       *
-       * 直す前は `[...state.order, lid]` = **末尾に飛んでいた**。並びの規則は
-       * boot と同じ「`entryOrder` 昇順・同値は lid」なので、**その規則で挿す**
-       * ── 別の規則を書かない(復元だけ並びが違う、を作らない)。
-       */
-      const order = state.order.includes(action.meta.lid)
-        ? state.order
-        : insertByOrder(state.order, action.meta.lid, entryMetas);
-      /**
-       * 🔴 **居場所を戻す**(同上)。disk の relations は消えていないので、
-       * 効果層が読み直したものを常駐へ合流させる。
-       * ⚠ **同じ id は上書き**(二重復元で関係が 2 本にならない)。
-       */
-      const relations = mergeRelations(state.relations, action.relations ?? []);
-      const trashPanel = state.trashPanel
-        ? {
-            items: state.trashPanel.items.filter(
-              (t) => t.entryLid !== action.meta.lid,
-            ),
-          }
-        : null;
-      return {
-        state: {
-          ...state,
-          entryMetas,
-          order,
-          relations,
-          trashPanel,
-          revisionPanel: null,
-          // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
-          revisionPreview: null,
-          selectedLid: action.meta.lid,
-          // 🔴 留めた枠・板の抜粋も新しい本文へ(#1087)── 主の枠だけ追随すると、同じノートを留めた枠が古い本文のまま残る
-          ...syncShownBodies(state, action.meta.lid, action.body),
-          openBody: {
-            lid: action.meta.lid,
-            body: action.body,
-            baseline: action.body,
-            persisted: action.body,
-            diskAhead: false,
-          },
-          /**
-           * 🔴 **復元も「新しい本文が state に入る所」である**(2026-08-20 に判明)。
-           *
-           * ⚠ 履歴の復元も ゴミ箱からの復元も、本文を**丸ごと**入れ替える ──
-           *   板を開いたまま古い版へ戻すと、札は**入れ替わる前の行番号**を指したまま
-           *   押せる。押すと**別の行が黙って完了になる**(#277 段②-b と同じ形)。
-           * 🔑 この漏れは、手で数え直したのではなく **`tests/repo-hygiene.test.ts` が
-           *   reducer を全数走査して見つけた** ── 宣言(「2 か所だけ」)を信じて
-           *   いた間は、2 つとも見えていなかった。
-           * ⚠ 上の editing 分岐は `persisted` の印だけを付ける(本文を差し替えない)
-           *   ので、こちらは通さない ── そもそも編集中に板は開けない。
-           */
-          taskScan: refreshTaskCards(state.taskScan, action.meta.lid, action.body),
-          // 🔑 タグが変われば、開いている入れ物の中身も変わる(#421 / user 要望 2026-08-26)
-          smartHits: refreshSmartHits(
-            state.smartHits,
-            action.meta.lid,
-            action.body,
-            state.entryMetas,
-          ),
-          error: null,
-          /**
-           * 🔴 **履歴から戻したら、戻したことを言う**(#1087 の見直し 2026-10-13)。
-           * ⚠ 直す前は履歴の一覧が畳まれるだけで、何も出なかった ── 押した人には
-           *   戻ったのか分からず、取り消し方(画面の下の「元に戻す」/ 履歴から戻す前の版を選ぶ)も見えない。
-           * 🔴 **ゴミ箱から戻したときも、ここで言う**(#1087)── 直す前は、移した直後の「元に戻す」(binder の `undo-trash`)
-           *   だけが「ゴミ箱から元に戻しました」を出し、**ゴミ箱の一覧の「ゴミ箱から戻す」は何も出なかった**。
-           *   戻った先のフォルダが分かるときは、その題名も言う(居場所は `relations` から引く ── `order` と同じく合流後の値)。
-           */
-          ...(action.mode === 'trash'
-            ? {
-                notice: trashRestoredNotice(action.meta.lid, relations, entryMetas),
-                restoreUndo: null,
-                noticeOpen: null,
-                noticeCreate: null,
-              }
-            : {}),
-          ...(action.mode === 'revision'
-            ? {
-                // 🔴 「元に戻す」から来たときは、同じ字を出し続けない(#1087)。
-                //   さらに「元に戻す」を出すと、押すたびに同じ字のまま 2 つの本文を行き来する ──
-                //   もとの版は履歴に残っているので、続けて戻すのは履歴から選ぶ。
-                notice:
-                  action.notice ??
-                  revisionRestoredNotice(
-                    state.entryMetas.get(action.meta.lid)?.title ?? action.meta.title,
-                    action.meta.title,
-                    action.fromUndo === true,
-                  ),
-                // ⚠ 知らせの字そのものも持つ ── 画面の下に出ている字がこの知らせのときだけ「元に戻す」を出す
-                restoreUndo:
-                  (action.undoRevId === undefined && action.undoTitle === undefined) || action.fromUndo === true
-                    ? null
-                    : {
-                        lid: action.meta.lid,
-                        revId: action.undoRevId ?? '',
-                        notice:
-                          action.notice ??
-                          revisionRestoredNotice(
-                            state.entryMetas.get(action.meta.lid)?.title ?? action.meta.title,
-                            action.meta.title,
-                            false,
-                          ),
-                        ...(action.undoTitle === undefined ? {} : { title: action.undoTitle }),
-                      },
-                noticeOpen: null,
-                noticeCreate: null,
-              }
-            : {}),
-        },
-        events: [],
-      };
-    }
-    case 'TRASH_PURGED': {
-      /**
-       * 🔴 **消したあとに、何が起きたかと、残る物を言う**(台帳 #1852 G1 / 依頼 140 ③、G2 / 依頼 301 A)。
-       * ⚠ 直す前は一覧が「空です」になるだけで知らせが無かった。消したノートの添付ファイルの中身は端末に残ったままで、
-       *   容量を空けるのは別の「使われていない添付を消す」だけ ── 押した人はそれを知らないと容量が減らず戸惑う。
-       * ⚠ 件数は**ノートの数**(一覧の行)で数える ── `purged` は履歴の版の数で、ノート数ではない。
-       */
-      const items = state.trashPanel?.items ?? null;
-      const only = action.lid;
-      const tail = '添付ファイルの分の容量は、システムの「使われていない添付を消す」で空きます';
-      const notice =
-        only !== undefined
-          ? `「${items?.find((t) => t.entryLid === only)?.title ?? '(無題)'}」を完全に消しました(${tail})`
-          : items === null || items.length === 0
-            ? null
-            : `ゴミ箱を空にしました(${String(items.length)} 件を消しました。${tail})`;
-      return {
-        state: {
-          ...state,
-          trashPanel: state.trashPanel
-            ? { items: only === undefined ? [] : state.trashPanel.items.filter((t) => t.entryLid !== only) }
-            : null,
-          ...(notice === null ? {} : { notice, noticeOpen: null, noticeCreate: null }),
-        },
-        events: [],
-      };
-    }
-    case 'SEARCH_JUMP_START': {
-      const query = normalizeFindQuery(action.query);
-      // ⚠ 断るときは何も動かさない(上の `UserAction` の注記)。`sectionDraft` は手組み fixture で
-      //   `undefined` のことがあるので `!= null`
-      /**
-       * 🔴 **編集中に送られたときは、黙って捨てずに 1 行言う**(#1206 D9)。⚠ 直す前は窓が前に出る
-       *   だけで**塗られもせず、理由も出なかった**(壊れたと読む)。⚠ 言うのは「そのノートを編集中」
-       *   のときだけ ── 別のノートが選ばれている / 語が空 / 編集以外の phase は、塗れない理由が
-       *   画面に既にあるか、言う意味が無いので今までどおり黙る(state は 1 ビットも動かさない)。
-       */
-      if (query !== '' && state.phase === 'editing' && state.selectedLid === action.lid)
-        return {
-          state: {
-            ...state,
-            notice: SEARCH_JUMP_EDITING_NOTICE,
-            noticeOpen: null,
-            noticeCreate: null,
-          },
-          events: [],
-        };
-      if (
-        query === '' ||
-        state.phase !== 'ready' ||
-        state.selectedLid !== action.lid ||
-        state.sectionDraft != null
-      )
-        return { state, events: [] };
-      return {
-        state: {
-          ...state,
-          searchJump: {
-            lid: action.lid,
-            query,
-            step: 0,
-            gen: (state.searchJump?.gen ?? 0) + 1,
-            origin: action.origin ?? 'find',
-          },
-        },
-        events: [],
-      };
-    }
-    case 'SEARCH_JUMP_STEP': {
-      const j = state.searchJump ?? null;
-      if (j === null) return { state, events: [] };
-      return {
-        state: { ...state, searchJump: { ...j, step: j.step + action.by, gen: j.gen + 1 } },
-        events: [],
-      };
-    }
+      return reduceSmart(state, action);
+    case 'SWAP_OPEN_ENTRY':
+    case 'PIN_SPLIT_ENTRY':
+    case 'UNPIN_SPLIT_ENTRY':
+    case 'CLEAR_SPLIT':
+    case 'LOAD_STACK':
+    case 'STACK_BODY_LOADED':
+    case 'MOVE_STACK_LINK':
+    case 'SPLIT_BODY_LOADED':
+    case 'PLACE_BODIES_WANTED':
+    case 'PLACE_BODY_LOADED':
+    case 'SPLIT_RESTORED':
+    case 'DUAL_PREVIEW_LOADED':
+    case 'DUAL_TAB_ACTIVATE':
+      return reduceSplit(state, action);
+    case 'ENTRY_RESTORED':
+    case 'TRASH_PURGED':
+      return reduceRestore(state, action);
+    case 'SEARCH_JUMP_START':
+    case 'SEARCH_JUMP_STEP':
     case 'SEARCH_JUMP_END':
-      if ((state.searchJump ?? null) === null) return { state, events: [] };
-      return { state: { ...state, searchJump: null }, events: [] };
+      return reduceSearchJump(state, action);
     case 'NOTICE_EXPIRED':
-      if (state.notice !== action.message) return { state, events: [] };
-      return {
-        state: { ...state, notice: null, noticeOpen: null, noticeCreate: null },
-        events: [],
-      };
     case 'OP_NOTICE':
-      // ⚠ **`error` を触らない** ── 知らせが出たからといって、出ているエラーを
-      //    消してよい理由は無い(`main.ts` が別の行として組んでいる)
-      // ⚠ 「開く」の身元は知らせと**対で**置く ── 添えない知らせが来たら消える
-      return {
-        state: {
-          ...state,
-          notice: action.message,
-          noticeOpen: action.open ?? null,
-          noticeCreate: action.createDate ?? null,
-          ...(action.restoreUndo === undefined
-            ? {}
-            : { restoreUndo: { ...action.restoreUndo, notice: action.message } }),
-          ...(action.tagUndo === undefined ? {} : { tagUndo: { ...action.tagUndo, notice: action.message } }),
-          // 🔴 AI の書き足しの知らせ ── 戻す材料(`lastAgentAppend`)が同じノートのときだけ、字を対にして控える
-          ...(action.agentUndo === true && state.lastAgentAppend !== null && state.lastAgentAppend.lid === action.open
-            ? { lastAgentAppend: { ...state.lastAgentAppend, notice: action.message } }
-            : {}),
-        },
-        events: [],
-      };
-    /**
-     * 🔴 **タグの候補が要る**(#494 段②)。
-     *
-     * ⚠ **既に持っていれば何もしない** ── 焦点が当たるたびに全ノートの
-     *   frontmatter を舐めると、打つ気になった瞬間に画面が重くなる。
-       * 🔑 捨てるのは**タグを書いたとき**(下の `BODY_REWRITTEN`)と、**集めた後にノートの一覧が
-     *   変わったとき**(本文の `#タグ` を保存した・消した・取り込んだ ── `tagSuggestionsMetas`)。
-     */
-    case 'ASK_TAG_SUGGESTIONS': {
-      if (state.phase !== 'ready') return { state, events: [] };
-      // 🔑 集めた後にノートの一覧が変わっていたら集め直す(本文のタグ・消した・取り込んだ ── 上の注釈)
-      if (state.tagSuggestions !== null && state.tagSuggestionsMetas === state.entryMetas)
-        return { state, events: [] };
-      return { state, events: [{ type: 'REQUEST_TAG_SUGGESTIONS' }] };
-    }
-    /**
-     * ⚠ **空配列も答えである**(0 件だった)── `null` に戻さない。戻すと
-     *   焦点が当たるたびに全走査が走る(#421 の `SMART_SCAN_FAILED` と同じ規律)。
-     */
+    case 'ASK_TAG_SUGGESTIONS':
     case 'SET_TAG_SUGGESTIONS':
-      return { state: { ...state, tagSuggestions: action.tags, tagSuggestionsMetas: state.entryMetas }, events: [] };
-    /**
-     * 🔴 **入らなかったタグを欄ごとに積む**(#640 案 A)。⚠ 同じ名前は 1 度だけ ──
-     *   まとめて付ける経路は名前ごとに 1 回しか言わないが、二重に撃たれても欄に
-     *   `#今月 #今月` と出ないように、ここで留める。並びは**届いた順**(= 打った順)。
-     */
-    case 'TAGS_REFUSED': {
-      const had = state.refusedTags[action.field];
-      const add = action.tags.filter((t) => !had.includes(t));
-      if (add.length === 0) return { state, events: [] };
-      return {
-        state: { ...state, refusedTags: { ...state.refusedTags, [action.field]: [...had, ...add] } },
-        events: [],
-      };
-    }
-    case 'CLEAR_REFUSED_TAGS': {
-      if (state.refusedTags[action.field].length === 0) return { state, events: [] };
-      return {
-        state: { ...state, refusedTags: { ...state.refusedTags, [action.field]: [] } },
-        events: [],
-      };
-    }
+    case 'TAGS_REFUSED':
+    case 'CLEAR_REFUSED_TAGS':
     case 'OP_FAILED':
-      // 非致命: 通知のみ。phase は動かさない(kanban 等の操作性を殺さない)
-      return { state: { ...state, error: action.error }, events: [] };
-    case 'SYS_ERROR': {
-      // エラーは state 駆動(表示は state.error を読む)── event 通知は廃止。
-      // - editing 中の着弾は editing 維持(draft 破壊防止 ── P3-6b review #3)
-      // - error phase に落とすのは「守るべき未達 commit(baseline ≠ persisted)が
-      //   ある」ときだけ ── error phase の意味は唯一の写しの保護であり、守る
-      //   ものが無いのに落とすと無言ロックになる(P3-7a review 重大: 作成 →
-      //   即 cancel × 初回 persist 失敗の合成で実証)。それ以外は通知のみ
-      const protecting =
-        state.openBody !== null &&
-        state.openBody.baseline !== state.openBody.persisted &&
-        !state.openBody.diskAhead;
-      /**
-       * 🔴 **空きが足りない断りは、編集の画面へ戻す**(依頼 104-1 B)。戻せるのは、保存した直後の画面が
-       *   そのノートのままで(`ready`)、別のタブの版が先に在らないとき。書きかけの字(`baseline`)を
-       *   編集の字に戻し、基準は disk(`persisted`)へ戻す ── 「編集を保存する」でもう一度同じ字が書かれる。
-       */
-      const ob = state.openBody;
-      if (
-        action.keepEditing !== undefined &&
-        state.phase === 'ready' &&
-        protecting &&
-        ob !== null &&
-        ob.lid === state.selectedLid
-      ) {
-        return {
-          state: {
-            ...state,
-            phase: 'editing',
-            error: action.keepEditing.editingError,
-            openBody: { lid: ob.lid, body: ob.baseline, baseline: ob.persisted, persisted: ob.persisted, diskAhead: false },
-            revisionPanel: null,
-            revisionPreview: null,
-            editOpenAt: null,
-            lastMove: null,
-          },
-          events: [{ type: 'REQUEST_SNIPPET_SCAN' }],
-        };
-      }
-      const phase =
-        state.phase === 'editing' ? 'editing' : protecting ? 'error' : state.phase;
-      return { state: { ...state, phase, error: action.error }, events: [] };
-    }
+    case 'SYS_ERROR':
+      return reduceNotice(state, action);
   }
 }
 
@@ -11931,7 +5571,7 @@ function reduceCore(
  * 舐めることになる(5,000 件のノートを持つ user には致命的)。
  * ⚠ 選ぶのは reducer 側 ── effect 層は実行時に state を見ない(review L-6)。
  */
-function attachmentEntries(state: AppState): Array<{ lid: string; title: string }> {
+export function attachmentEntries(state: AppState): Array<{ lid: string; title: string }> {
   return attachmentEntriesOf(state.order, state.entryMetas);
 }
 
@@ -11955,7 +5595,7 @@ function attachmentEntries(state: AppState): Array<{ lid: string; title: string 
  *   手で同じ字にすれば 2 つ作れる。決め方を機械で読める形にしておく
  *   (`appGroupIconsOf` の畳み方と**同じ向き**)。
  */
-function findAppGroupLid(
+export function findAppGroupLid(
   order: readonly string[],
   metas: ReadonlyMap<string, EntryMeta>,
   name: string,
@@ -12056,7 +5696,7 @@ function appGroupEntriesOf(
  * ⚠ 渡すのは**変更を当てた後の state** である ── 並びも世代もそこから読む
  *   (当てる前の state を渡すと、作りたてのノートが入らない / 世代が 1 つ古くなる)。
  */
-function readAppGroupNotes(s: AppState): DomainEvent {
+export function readAppGroupNotes(s: AppState): DomainEvent {
   return {
     type: 'REQUEST_APP_GROUP_NOTES',
     entries: appGroupEntriesOf(s.order, s.entryMetas),
@@ -12068,7 +5708,7 @@ function readAppGroupNotes(s: AppState): DomainEvent {
  * 🔴 **アプリ一覧のタイルとグループの読み直し 2 本**(#1087)。封筒を組む口は `readAppGroupNotes` と
  * ここの 2 つに寄せる ── 並びと世代は**変更を当てた後**のものを渡す。
  */
-function launcherReloadEvents(
+export function launcherReloadEvents(
   order: readonly string[],
   metas: ReadonlyMap<string, EntryMeta>,
   gen: number,
@@ -12079,7 +5719,7 @@ function launcherReloadEvents(
   ];
 }
 
-function attachmentEntriesOf(
+export function attachmentEntriesOf(
   order: readonly string[],
   metas: ReadonlyMap<string, EntryMeta>,
 ): Array<{ lid: string; title: string }> {
@@ -12095,7 +5735,7 @@ function attachmentEntriesOf(
  * `entryOrder` 昇順(同値は lid)の位置へ挿す ── **boot の並びと同じ規則**。
  * ⚠ 規則を 2 つ書かない(復元だけ並びが違う、を作らない)。
  */
-function insertByOrder(
+export function insertByOrder(
   order: readonly string[],
   lid: string,
   metas: ReadonlyMap<string, EntryMeta>,
@@ -12118,7 +5758,7 @@ function insertByOrder(
  * ゴミ箱の復元はノートがまだ居ないので `selectedLid === meta.lid` では比べられない ── 頼んだ時点の選択
  * (`selectedAtIssue`)と、着いたいまの選択が違えば「その間に選び直した」。省略時は判定しない。
  */
-function restoreKeepsSelection(
+export function restoreKeepsSelection(
   state: AppState,
   action: { selectedAtIssue?: string | null },
 ): boolean {
@@ -12129,7 +5769,7 @@ function restoreKeepsSelection(
  * 🔴 **ゴミ箱から戻した知らせ**(#1087)。字の頭は、移した直後の「元に戻す」(binder の `undo-trash`)と同じ。
  * 戻った先のフォルダが今も在るときだけ、その題名を添える。
  */
-function trashRestoredNotice(
+export function trashRestoredNotice(
   lid: string,
   relations: readonly Relation[],
   metas: ReadonlyMap<string, EntryMeta>,
@@ -12174,7 +5814,7 @@ export function hasReverseOnlyRelation(
 }
 
 /** 同じ id は後着で上書きして合流(二重復元で関係が 2 本にならない)。 */
-function mergeRelations(
+export function mergeRelations(
   current: readonly Relation[],
   incoming: readonly Relation[],
 ): readonly Relation[] {
@@ -12193,7 +5833,7 @@ function mergeRelations(
  * ⚠ 開いているノートが見えている行に居ない / 残りが 0 件のときは `undefined` ── 呼び側は従来の選び方へ倒す
  *   (見えている物が無くても、中央を空にしない)。reducer なので state だけから導く。
  */
-function successorInShownRows(
+export function successorInShownRows(
   state: AppState,
   selected: string,
   gone: ReadonlySet<string>,
@@ -12209,7 +5849,7 @@ function successorInShownRows(
   return kept[Math.min(pos, kept.length - 1)];
 }
 
-function removeEntryFromState(
+export function removeEntryFromState(
   state: AppState,
   lid: string,
   extraEvents: DomainEvent[],
@@ -12408,7 +6048,7 @@ function withoutSmartHit(
  * 再読込を跨いで残す紐づけ。別 container なら**全部捨てる**(lid の偶然衝突で
  * 他人のノートに「書き戻す」を出さない ── 選択の持ち越しと同じ判断)。
  */
-function keepLinks(
+export function keepLinks(
   state: AppState,
   cid: string,
   metas: ReadonlyMap<string, EntryMeta>,
@@ -12428,7 +6068,7 @@ function keepLinks(
  * (`searchPage.query`)の 2 つが在る。⚠ 判定はここ 1 か所(`SET_ENTRY_FILTER` と同じ条件:
  * 語が空 / `>` で始まる欄は撃たない)。前の当たりは消さない ── 返るまで一覧がちらつかない。
  */
-function searchRefreshEvents(
+export function searchRefreshEvents(
   state: AppState,
 ): Array<{ type: 'REQUEST_SEARCH'; query: string; again?: true } | { type: 'REQUEST_SEARCH_DETAIL'; query: string }> {
   const out: Array<{ type: 'REQUEST_SEARCH'; query: string; again?: true } | { type: 'REQUEST_SEARCH_DETAIL'; query: string }> = [];
@@ -12448,7 +6088,7 @@ function searchRefreshEvents(
  * ⚠ 別 container(`cid` 違い)なら全部捨てる ── lid の偶然衝突を持ち越さない。
  * ⚠ 変化が無いなら**同じ参照**を返す(描画の指紋を無駄に壊さない ── `keepLinks` と同じ作法)。
  */
-function keepContacts(
+export function keepContacts(
   state: AppState,
   sameCid: boolean,
   metas: ReadonlyMap<string, EntryMeta>,
@@ -12464,7 +6104,7 @@ function keepContacts(
  * 🔴 **消えたノートの計った時間を落とす**(#683 ①。`keepContacts` と同じ作法)。
  * ⚠ 別 container なら全部捨てる / 変化が無いなら同じ参照を返す。
  */
-function keepWorkLog(
+export function keepWorkLog(
   state: AppState,
   sameCid: boolean,
   metas: ReadonlyMap<string, EntryMeta>,
@@ -12481,7 +6121,7 @@ function keepWorkLog(
  * ⚠ 別 container なら全部捨てる ── lid の偶然衝突を持ち越さない。
  * ⚠ 変化が無いなら**同じ参照**を返す(描画の指紋を無駄に壊さない)。
  */
-function keepTasks(
+export function keepTasks(
   state: AppState,
   sameCid: boolean,
   metas: ReadonlyMap<string, EntryMeta>,
@@ -12502,7 +6142,7 @@ function keepTasks(
  * ⚠ 別 container なら全部捨てる ── lid の偶然衝突を持ち越さない。
  * ⚠ 変化が無いなら**同じ参照**を返す(描画の指紋を無駄に壊さない)。
  */
-function keepCaptures(
+export function keepCaptures(
   state: AppState,
   sameCid: boolean,
   metas: ReadonlyMap<string, EntryMeta>,
@@ -12575,7 +6215,7 @@ export const PLACE_OPEN_BLOCK_REFUSAL =
  *   **開き直しても直らない**。だから押した時点で本当の理由を言う。判定は書込側と**同じ関数**を渡す(§7)。
  * ⚠ `gated.events` が空(編集中の断り・行が板でない)のときは**そちらの理由を残す**。
  */
-function openBlockRefused(
+export function openBlockRefused(
   state: AppState,
   lid: string,
   refusal: string,
@@ -12625,7 +6265,7 @@ function openBlockRefused(
  *   ⚠ ここを 1 か所に寄せず各 `build` に持たせるのは、**新しい case が黙って
  *   `null` を素通りしない**ようにするためである(既定で通すと取り違えが静かに出る)。
  */
-function bodyRewriteGate(
+export function bodyRewriteGate(
   state: AppState,
   lid: string,
   refusalSuffix: string,
@@ -12662,21 +6302,21 @@ function bodyRewriteGate(
  * 🔑 開き行は**この場で**捕捉する(描画が焼いた行番号 → 画面が見ている本文の字)。
  * disk 側とずれていれば `place-notation.ts` が byte 一致で断る。板の開き行でなければ `null`。
  */
-function placeOpenLineOf(shown: string, line: number): string | null {
+export function placeOpenLineOf(shown: string, line: number): string | null {
   if (!Number.isInteger(line) || line < 0) return null;
   const openLine = shown.split('\n')[line];
   return openLine !== undefined && isPlaceOpen(openLine) ? openLine : null;
 }
 
 /** `placeOpenLineOf` の線版 ── その行が線の開き行のときだけ、その字そのもの。 */
-function lineOpenLineOf(shown: string, line: number): string | null {
+export function lineOpenLineOf(shown: string, line: number): string | null {
   if (!Number.isInteger(line) || line < 0) return null;
   const openLine = shown.split('\n')[line];
   return openLine !== undefined && isLineOpen(openLine) ? openLine : null;
 }
 
 /** 板の座標・大きさの値 ── 整数で 0 以上だけ(描画も負の値は捨てる)。 */
-function isPlaceCoord(n: number): boolean {
+export function isPlaceCoord(n: number): boolean {
   return Number.isInteger(n) && n >= 0;
 }
 
@@ -12690,11 +6330,11 @@ function isPlaceCoord(n: number): boolean {
  * 🔑 載せた後の本文の読みは `REQUEST_SPLIT_BODY`(帯の札と同じ 1 本)── まだ持っていない物だけ。
  */
 /** スタックに載せられるノートか ── フォルダは本文が無いので載せない。載せる口は全部この 1 本を通る。 */
-function canStack(meta: { readonly archetype: string }): boolean {
+export function canStack(meta: { readonly archetype: string }): boolean {
   return meta.archetype !== 'folder';
 }
 
-function loadStackFromBody(state: AppState, body: string): ReduceResult {
+export function loadStackFromBody(state: AppState, body: string): ReduceResult {
   const wanted = stackLids(body);
   const exist = wanted.filter((l) => state.entryMetas.has(l));
   /**
@@ -12728,11 +6368,11 @@ function loadStackFromBody(state: AppState, body: string): ReduceResult {
  * 🔴 **消えたノートをスタックから降ろしたときの 1 行**(#633 段①)── 字はここ 1 か所。
  * ⚠ 呼び手は 2 つ(削除 / 効果層の本文 null)── 別々に書くと片方だけ直る(§7)。
  */
-function goneFromStackNotice(title: string | undefined): string {
+export function goneFromStackNotice(title: string | undefined): string {
   return `「${title ?? '消えたノート'}」は消えたのでスタックから降ろしました`;
 }
 
-function dropSplitBody(
+export function dropSplitBody(
   bodies: ReadonlyMap<string, string>,
   lid: string,
 ): ReadonlyMap<string, string> {
@@ -12776,7 +6416,7 @@ export function placeBodiesOf(state: AppState): ReadonlyMap<string, PlaceExcerpt
  *   ⚠ 1 つの板が頼める数は `PLACE_BODIES_WANTED` が `PLACE_BODY_CAP` で切る(上限を超える板は先頭から)。
  * ⚠ `onScreen` は**超えたときだけ**呼ぶ(板の本文を数える ── 毎回は数えない)。
  */
-function withPlaceBody(
+export function withPlaceBody(
   bodies: ReadonlyMap<string, PlaceExcerpt>,
   lid: string,
   excerpt: PlaceExcerpt,
@@ -12800,7 +6440,7 @@ function withPlaceBody(
  * いま画面に出ている板(主の枠 / 横に留めた枠 ── `screenBodyOf` と同じ 2 つの入れ物)が置いている lid。
  * ⚠ 板の置き先は本文の `entry=` が正本 ── 板が描くときに頼む lid(`PlaceEmbeds`)と同じ読み方。
  */
-function placeLidsOnScreen(state: AppState): ReadonlySet<string> {
+export function placeLidsOnScreen(state: AppState): ReadonlySet<string> {
   const out = new Set<string>();
   if (state.openBody) for (const l of placeEntryLids(state.openBody.body)) out.add(l);
   for (const body of state.splitBodies.values()) for (const l of placeEntryLids(body)) out.add(l);
@@ -12819,7 +6459,7 @@ function placeLidsOnScreen(state: AppState): ReadonlySet<string> {
  * ⚠ 持っていない lid では**何もしない**(触っていない Map を作り直すと、面が毎回組み直る)。
  * ⚠ 板のほうは**切った抜粋を入れ直す**(全文を持たない)。
  */
-function syncShownBodies(
+export function syncShownBodies(
   state: AppState,
   lid: string,
   body: string,
@@ -12865,7 +6505,7 @@ function syncShownBodies(
 }
 
 /** `syncShownBodies` の答えが、いまの state と同じか(同じなら state を差し替えない)。 */
-function sameShownBodies(
+export function sameShownBodies(
   state: AppState,
   shown: ReturnType<typeof syncShownBodies>,
 ): boolean {
@@ -12946,7 +6586,7 @@ function dropLink(
  * ⚠ 並べる順は **worker と同じ**(`entry_order`、同値なら lid)── 揃えないと、
  *   付けた瞬間だけ末尾に出て、開き直すと別の場所へ跳ぶ。
  */
-function refreshSmartHits(
+export function refreshSmartHits(
   smartHits: ReadonlyMap<string, SmartHitState>,
   lid: string,
   body: string,
@@ -13002,7 +6642,7 @@ function refreshSmartHits(
   return next ?? smartHits;
 }
 
-function refreshTaskCards(
+export function refreshTaskCards(
   scan: TaskScan | null,
   lid: string,
   body: string,
@@ -13014,7 +6654,7 @@ function refreshTaskCards(
   return cards === scan.cards && noteTimes === scan.noteTimes ? scan : { ...scan, cards, ...(noteTimes === undefined ? {} : { noteTimes }) };
 }
 
-function buildPersist(
+export function buildPersist(
   state: AppState,
   meta: EntryMeta,
   body: string,

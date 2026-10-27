@@ -18,6 +18,7 @@ import {
   isRelationKind,
   relationLabel,
 } from '../../src/features/relation/kinds';
+import { readReducerSource } from '../helpers/reducer-source';
 
 describe('関係の種類', () => {
   it('🔴 一覧に漏れがなく、全部に表示名がある', () => {
@@ -53,7 +54,7 @@ describe('関係の種類', () => {
       'src/adapter/state/app-state.ts',
     ];
     for (const f of files) {
-      const src = readFileSync(f, 'utf-8');
+      const src = f === 'src/adapter/state/app-state.ts' ? readReducerSource() : readFileSync(f, 'utf-8');
       // ⚠ 注釈は除く ── 説明文に語が出るのは構わない(実装が持っていないこと)
       const code = src
         .split('\n')

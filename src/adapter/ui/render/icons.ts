@@ -500,7 +500,7 @@ export function markBarTile(btn: HTMLButtonElement): HTMLButtonElement {
  *
  * 🔴 **押しても何も起きないボタンを、いちばん濃くしない**(着地前レビュー・動線 1、
  * 2026-09-06)。⚠ 「+ ノート」は `CREATE_ENTRY` が `phase !== 'ready'` を
- * **黙って捨てる**(`app-state.ts` の `CREATE_ENTRY`)ので、**編集中は押しても
+ * **黙って捨てる**(`slices/entries.ts` の `CREATE_ENTRY`)ので、**編集中は押しても
  * 1 ドットも動かない** ── そこを画面でいちばん濃くすると、
  * 「濃い = 次に押す物」と教えた直後に嘘をつくことになる。
  * ⚠ **押した結果は変えていない**(黙って捨てるのは前からの穴で、別に起票した)──
