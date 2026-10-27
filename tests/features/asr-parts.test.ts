@@ -23,6 +23,7 @@ import {
   asrDownloadBytes,
   asrModelFloorBytes,
   asrMemoryNote,
+  asrRecommendNote,
   asrModelDir,
   asrPartLabel,
   asrPartOf,
@@ -284,5 +285,15 @@ describe('PCM と本文へ足す字', () => {
 
   it('入口の名前は「音声認識」(節の見出しと案内が同じ字を引く)', () => {
     expect(ASR_SECTION_LABEL).toBe('音声認識');
+  });
+});
+
+describe('🔴 #1446 端末ごとの推奨', () => {
+  it('必要量の境目で軽い→正確が替わり、読めない値には言わない', () => {
+    expect(asrRecommendNote(1)).toContain('「軽い」');
+    expect(asrRecommendNote(4)).toContain('「軽い」');
+    expect(asrRecommendNote(7.9)).toContain('「軽い」');
+    expect(asrRecommendNote(8)).toContain('「正確」');
+    for (const v of [undefined, 0, -1, Number.NaN]) expect(asrRecommendNote(v)).toBeNull();
   });
 });

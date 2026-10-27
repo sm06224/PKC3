@@ -92,6 +92,18 @@ describe('部品 2 択の見え方', () => {
     }
   });
 
+  it('🔴 #1446 端末のメモリに合う 1 つを取り込む前に案内する(読めない端末・取り込み済みでは出さない)', () => {
+    const rec = (p: { root: HTMLElement }): HTMLElement => q(p.root, 'asr-recommend');
+    const small = buildAsrPackPanel(new AsrPackState(), { deviceMemory: () => 2 });
+    expect(rec(small).hidden).toBe(false);
+    expect(rec(small).textContent).toContain('「軽い」がお勧め');
+    const big = buildAsrPackPanel(new AsrPackState(), { deviceMemory: () => accurate.needMemoryGb });
+    expect(rec(big).textContent).toContain('「正確」がお勧め');
+    const unknown = buildAsrPackPanel(new AsrPackState(), { deviceMemory: () => undefined });
+    expect(rec(unknown).hidden).toBe(true);
+    expect(rec(unknown).textContent).toBe('');
+  });
+
   it('🔴 ② 既定は navigator.deviceMemory を読む(差し替えなければ実際の値)', () => {
     vi.stubGlobal('navigator', { ...navigator, deviceMemory: 1 });
     try {

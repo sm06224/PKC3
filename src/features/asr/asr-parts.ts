@@ -165,6 +165,23 @@ export function asrMemoryNote(part: AsrPart, deviceMemoryGb: number | undefined)
   return `この端末のメモリ(${humanBytes(deviceMemoryGb * 1024 ** 3)})では動かない見込みです`;
 }
 
+/**
+ * 🔴 **この端末に向く 1 つを案内する**(#1446 の残り「端末ごとの推奨表示」)。
+ *
+ * 🔑 根拠は `needMemoryGb`(上の `asrMemoryNote` と同じ 1 本)── 大きいほうの必要量を満たす端末なら「正確」、
+ *   満たさなければ「軽い」。⚠ `deviceMemory` が読めない端末(Firefox / Safari)には**案内しない**(`null`。言えない)。
+ * ⚠ WebGPU の可否は使わない: 推論は wasm(CPU)で走り、WebGPU を使う実行器はまだ配っていないので、
+ *   見ても推奨は変わらない(変わらない物を画面に出さない)。実行器を配る日にここへ足す。
+ * ⚠ 案内だけで、どちらも押せる(押して試すことは止めない)。
+ */
+export function asrRecommendNote(deviceMemoryGb: number | undefined): string | null {
+  if (typeof deviceMemoryGb !== 'number' || !Number.isFinite(deviceMemoryGb) || deviceMemoryGb <= 0) {
+    return null;
+  }
+  const best = [...ASR_PARTS].reverse().find((p) => deviceMemoryGb >= p.needMemoryGb) ?? ASR_PARTS[0]!;
+  return `この端末のメモリ(${humanBytes(deviceMemoryGb * 1024 ** 3)})には「${best.label}」がお勧めです`;
+}
+
 // ── 目録(`pack.json`)を読む ────────────────────────────────────────────
 
 export interface AsrPackFile {
