@@ -25,6 +25,11 @@ test.beforeEach(async ({ page }) => {
 const SW_PATH = fileURLToPath(new URL('../../dist/sw.js', import.meta.url));
 
 test('🔴 新しい版が配られたら案内が出て、押すと入れ替わる', async ({ page, context }) => {
+  // 🔴 既定の 30 秒では**この test の固定の待ちだけで足りない**(2026-10 に負荷下で 3 回落ちた。落ちる場所は回ごとに違った)。
+  // 内訳: 「切り替わりませんでした」は製品の仕様で `UPDATE_STUCK_MS`(10 秒)を**必ず**待つ + reload 4 回
+  // (それぞれ SW の取り直し / 再 boot)+ オフライン再読込。負荷平均 20 超の機械で 12 回測って 26〜38 秒(中央 28 秒)── 既定の 30 秒の上に居る。
+  // ⚠ 緩めたのは**全体の上限だけ**で、個々の assert と待ち(20 秒)は据え置き ── 止まりは各所の待ちが先に捕まえる。
+  test.setTimeout(120_000);
   const errors = collectPageErrors(page);
   const original = readFileSync(SW_PATH, 'utf-8');
   const buildId = /const BUILD = "([^"]+)"/.exec(original)?.[1];
