@@ -1,5 +1,5 @@
 import { test, expect, type CDPSession, type Locator, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, writesLanded } from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
 test.beforeEach(async ({ page }) => {
@@ -1008,6 +1008,9 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   // 保存が済んでから読み直す(読み直しで書きかけを捨てない)
   await expect(page.locator('[data-pkc-action="start-edit"]'), '保存が済んでいない').toBeVisible();
+  // 🔴 画面に出ても disk へ届いたとは限らない(本文の書込は画面が先・disk が後)── 届く前に読み直すと、
+  //   起動時の全走査がこの新しいノートを見ず、見逃しの件数が 1 件少なくなる(実測: 6 回に 1 回)
+  await writesLanded(page);
   const cid = await page.locator('[data-pkc-container]').first().getAttribute('data-pkc-container');
   expect(cid, '器の id が読めない').not.toBeNull();
   // 🔴 予定表を開いたこの端末では、記録が始まっている(使ったことが無いコレクションには書かない ── 全走査を負わせない)
