@@ -10,9 +10,19 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { LAST_CUE_MS, MAX_CUE_MS, hasTranscriptCues, srtFromTranscript, srtMarkdownBlock, transcriptCues } from '../../src/features/asr/srt';
+import {
+  LAST_CUE_MS,
+  MAX_CUE_MS,
+  hasEmbeddedSrt,
+  hasEstimatedCue,
+  hasTranscriptCues,
+  srtFromTranscript,
+  srtMarkdownBlock,
+  srtSavedNotice,
+  transcriptCues,
+} from '../../src/features/asr/srt';
 import { codeOnly } from '../helpers/code-only';
-import { ELAPSED_LINE_HEAD, srtTime } from '../../src/features/elapsed-text';
+import { ELAPSED_LINE_HEAD, readElapsedHead, srtTime } from '../../src/features/elapsed-text';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 const BODY = [
@@ -182,10 +192,16 @@ describe('画面で押せる行と字幕の行は同じ 1 本で読む(#1447 ④
    *   区別できない)。⚠ 注釈を落としてから見る(§1 の 5 度目)。
    */
   it('🔴 字幕の側も画面の側も ELAPSED_LINE_HEAD を参照し、時刻の綴りを直書きしていない', () => {
-    expect(ELAPSED_LINE_HEAD.source).toBe('^((?:\\d{1,2}:)?\\d{1,2}:\\d{2}) ');
-    for (const f of ['src/features/asr/srt.ts', 'src/features/markdown/markdown-render.ts']) {
+    expect(ELAPSED_LINE_HEAD.source).toBe(
+      '^((?:\\d{1,2}:)?\\d{1,2}:\\d{2}) (?:〜((?:\\d{1,2}:)?\\d{1,2}:\\d{2}) )?',
+    );
+    // 字幕の側は `readElapsedHead`(= ELAPSED_LINE_HEAD の 1 関数)、画面の側は ELAPSED_LINE_HEAD を参照する
+    for (const [f, ref] of [
+      ['src/features/asr/srt.ts', 'readElapsedHead'],
+      ['src/features/markdown/markdown-render.ts', 'ELAPSED_LINE_HEAD'],
+    ] as const) {
       const code = codeOnly(readFileSync(f, 'utf-8'));
-      expect(code, `${f} が ELAPSED_LINE_HEAD を参照していない`).toContain('ELAPSED_LINE_HEAD');
+      expect(code, `${f} が ${ref} を参照していない`).toContain(ref);
       expect(code, `${f} に時刻の綴りの直書きがある`).not.toMatch(/\\d\{1,2\}:/);
     }
   });
@@ -214,5 +230,56 @@ describe('#1447 の残り(長い無音・記号・本文への埋め込み)', ()
   it('🔴 字の中に ``` があっても囲みが閉じない(囲みを 1 つ長くする)', () => {
     const block = srtMarkdownBlock('0:00 a ``` b')!;
     expect(block.startsWith('````srt\n')).toBe(true);
+  });
+});
+
+describe('#1447 の残り(終わりの時刻つきの行・知らせ・二重埋め込み)', () => {
+  it('🔴 終わりつきの行(0:07 〜0:12 text)は、その終わりが字幕の終了になる(推定も 30 秒上限も使わない)', () => {
+    const c = transcriptCues('0:07 〜0:12 こんにちは\n2:00 〜2:50 遠い行\n');
+    expect(c).toEqual([
+      { startMs: 7_000, endMs: 12_000, text: 'こんにちは' },
+      // 50 秒は上限(30 秒)を超えるが、実測の終わりなので切らない
+      { startMs: 120_000, endMs: 170_000, text: '遠い行' },
+    ]);
+    expect(hasEstimatedCue('0:07 〜0:12 a\n0:20 〜0:25 b')).toBe(false);
+    expect(hasEstimatedCue('0:07 〜0:12 a\n0:20 b')).toBe(true);
+  });
+
+  it('🔴 終わりが始まり以前・読めない綴りの行は、従来の行として読む(範囲の字は本文に残る)', () => {
+    expect(readElapsedHead('0:07 〜0:05 text')).toMatchObject({ endMs: null, headLength: 5 });
+    expect(readElapsedHead('0:07 〜0:75 text')).toMatchObject({ endMs: null, headLength: 5 });
+    expect(transcriptCues('0:07 〜0:05 text')[0]!.text).toBe('〜0:05 text');
+    expect(readElapsedHead('0:07 〜0:12 text')).toMatchObject({ startMs: 7_000, endMs: 12_000, headLength: 11 });
+    expect(readElapsedHead('0:75 text')).toBeNull();
+  });
+
+  it('🔴 旧ビルド(範囲を知らない)が範囲の行を読んだとき: 行頭の時刻は効き、本文に「〜0:12」が残る', () => {
+    // 旧ビルドの綴り(この変更の前の ELAPSED_LINE_HEAD)をそのまま再現する
+    const OLD = /^((?:\d{1,2}:)?\d{1,2}:\d{2}) /;
+    const line = '0:07 〜0:12 こんにちは';
+    const m = OLD.exec(line);
+    expect(m, '旧ビルドが範囲の行の時刻を読めない(行頭の時刻が効かなくなる)').not.toBeNull();
+    expect(m![1]).toBe('0:07');
+    expect(line.slice(m![0].length)).toBe('〜0:12 こんにちは');
+  });
+
+  it('🔴 空の字幕の行(時刻だけ)は捨てる。範囲だけの行も同じ', () => {
+    expect(transcriptCues('0:01 \n0:02 〜0:05 \n0:09 ある').map((c) => c.text)).toEqual(['ある']);
+    expect(hasTranscriptCues('0:01\n0:02 〜0:05 ')).toBe(false);
+  });
+
+  it('🔴 知らせの文面は 1 本: 推定があるときだけ推定の説明が付く', () => {
+    expect(srtSavedNotice(2, true)).toContain('5 秒後');
+    expect(srtSavedNotice(2, true)).toContain('30 秒');
+    expect(srtSavedNotice(2, true)).toContain('2 件');
+    expect(srtSavedNotice(2, false)).toBe('字幕ファイルを保存しました(2 件)');
+  });
+
+  it('🔴 埋め込み済みの判定: 見出しの直後の ```srt だけが当たる(別の節・普通のコードブロックは当たらない)', () => {
+    const body = '0:00 a\n';
+    expect(hasEmbeddedSrt(`${body}\n## 字幕(SRT)\n\n${srtMarkdownBlock(body)!}`)).toBe(true);
+    expect(hasEmbeddedSrt(body)).toBe(false);
+    expect(hasEmbeddedSrt('## 字幕(SRT)\n\nただの文章\n```srt\nx\n```')).toBe(false);
+    expect(hasEmbeddedSrt('## 別の節\n\n```srt\n1\n```')).toBe(false);
   });
 });

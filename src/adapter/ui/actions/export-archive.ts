@@ -52,7 +52,7 @@ import {
 } from '@adapter/platform/md-folder-export';
 import { singleEntrySource } from '@features/export/single-entry-source';
 import { mailDraftText } from '@features/report/mail-text';
-import { srtFromTranscript, transcriptCues } from '@features/asr/srt';
+import { hasEstimatedCue, srtFromTranscript, srtSavedNotice, transcriptCues } from '@features/asr/srt';
 import {
   flattenSectionEmbeds,
   flattenTitlesNote,
@@ -1246,9 +1246,7 @@ export async function exportEntrySrt(
     const now = deps.now?.() ?? new Date();
     deps.download(`${safeName(meta.title)}-${stamp(now)}.srt`, new Blob([srt], { type: 'application/x-subrip' }));
     const n = transcriptCues(body).length;
-    deps.notify?.(
-      `字幕ファイルを保存しました(${String(n)} 件。終わりの時刻は次の行の始まりです。次の行が無い・時刻が進んでいない行は 5 秒後と見なし、1 件は 30 秒までです)`,
-    );
+    deps.notify?.(srtSavedNotice(n, hasEstimatedCue(body)));
     return true;
   } catch (e) {
     return fail(`書き出しに失敗しました: ${errorText(e)}`);

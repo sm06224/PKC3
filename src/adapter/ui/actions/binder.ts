@@ -246,7 +246,15 @@ import { STACK_ARCHETYPE, stackBody } from '@features/flavor/stack-flavor';
 import { insertionForLineDate } from '@features/schedule/line-date';
 import { dayStamp } from '@features/datetime/date-math';
 import { safeName } from '@features/export/file-name';
-import { hasTranscriptCues, srtFromTranscript, srtMarkdownBlock, transcriptCues } from '@features/asr/srt';
+import {
+  hasEmbeddedSrt,
+  hasEstimatedCue,
+  hasTranscriptCues,
+  srtFromTranscript,
+  srtMarkdownBlock,
+  srtSavedNotice,
+  transcriptCues,
+} from '@features/asr/srt';
 import { TIMER_RUN_CLEAR_ATTR, TIMER_RUN_LINE_ATTR } from '@adapter/ui/render/timers';
 import { decodeTaskDrag, dropTaskCard, dropTaskToStatus, encodeTaskDrag, statusTargetOf } from '@adapter/ui/render/schedule-drag';
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
@@ -6858,6 +6866,11 @@ export function runGlobalCommand(
        */
       const block = srtMarkdownBlock(open.body);
       if (block === null) return false;
+      // ⚠ 2 回押して同じ字幕が 2 つ並ばないように断る(置き換える口は作らない ── 足したものは「追記を元に戻す」か手で消せる)
+      if (hasEmbeddedSrt(open.body)) {
+        notify('字幕(SRT)はすでに本文に埋め込まれています。入れ直すときは、本文の「## 字幕(SRT)」の節を消してからもう一度押してください', CAUTION);
+        return true;
+      }
       dispatcher.dispatch({ type: 'APPEND_TO_ENTRY', lid, text: block, heading: '## 字幕(SRT)', target: null });
       return true;
     }
@@ -6866,7 +6879,7 @@ export function runGlobalCommand(
     const title = st.entryMetas.get(lid)?.title ?? lid;
     downloadBlob(`${safeName(title)}-${dayStamp(new Date())}.srt`, new Blob([srt], { type: 'application/x-subrip' }));
     const n = transcriptCues(open.body).length;
-    notify(`字幕ファイルを保存しました(${String(n)} 件。終わりの時刻は次の行の始まりです。次の行が無い・時刻が進んでいない行は 5 秒後と見なしています)`);
+    notify(srtSavedNotice(n, hasEstimatedCue(open.body)));
     return true;
   }
   /**
@@ -9353,6 +9366,7 @@ const ACTIONS: Record<string, ActionHandler> = {
                   entryMenuActions({
                     archetype: st.entryMetas.get(lid)?.archetype ?? null,
                     linkedFile: st.linkedFiles.get(lid) ?? null,
+                    ...transcriptMenuCtx(st, lid),
                   }),
                   st.openBody?.lid === lid,
                 ),
@@ -18719,6 +18733,18 @@ export const CARET_INSERT_TOOLS: ReadonlySet<string> = new Set(
   [...CARET_TOOLS].filter((id) => id !== 'renumber-lists' && id !== 'sort-tasks' && id !== 'format-text'),
 );
 
+
+/**
+ * 🔴 **右クリックの「字幕ファイル(.srt)」を出すか**(#1447)。本文を読むのは**開いているノートのときだけ**
+ * (別の行は右クリックのために worker を叩かない)。時刻つきの行が在るときだけ `transcript: true`。
+ */
+function transcriptMenuCtx(
+  st: ReturnType<Dispatcher['getState']>,
+  lid: string,
+): { readonly transcript?: true } {
+  return st.openBody?.lid === lid && hasTranscriptCues(st.openBody.body) ? { transcript: true } : {};
+}
+
 /**
  * 🔴 **記法を当てられる欄か**(#425 段②-b)。
  * ⚠ **欄の名前で見る**(面ではなく)── 2 列の本文と 1 面の行は別の面に在るが、
@@ -22247,6 +22273,7 @@ export function bindActions(
       const rowCtx: EntryMenuContext = {
         archetype,
         linkedFile: st.linkedFiles.get(lid) ?? null,
+        ...transcriptMenuCtx(st, lid),
         /**
          * 🔴 **ノートのブックマーク**(#1377)。⚠ 帯が見えるのは**この面だけ**なので、
          *   ここだけが `bookmarked` を渡す(他の 3 か所は渡さない = 出さない)。
@@ -22455,6 +22482,7 @@ export function bindActions(
       entryMenuActions({
         archetype: st.entryMetas.get(lid)?.archetype ?? null,
         linkedFile: st.linkedFiles.get(lid) ?? null,
+        ...transcriptMenuCtx(st, lid),
       }).map(withRowShortcut),
       st.openBody?.lid === lid,
     );

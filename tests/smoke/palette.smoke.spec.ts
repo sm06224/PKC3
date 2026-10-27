@@ -786,11 +786,13 @@ test('🔴 パレットを外から閉じた後でも、編集を保存できる
    */
   await page.keyboard.press('Control+Shift+P');
   await expect(dialog, '保存後にパレットが開かない').toBeVisible();
-  await page.locator('[data-pkc-field="palette-filter"]').fill('字幕');
-  const srtRow2 = page.locator('[data-pkc-field="palette-row"][data-pkc-command="export-transcript-srt"]');
+  // 🔑 「字幕 書き出し」で 1 件に絞り、**Enter で走る道**(鍵だけの user の道)を通す。埋め込みの行は「書き出し」を持たない
+  await page.locator('[data-pkc-field="palette-filter"]').fill('字幕 書き出し');
+  const srtRow2 = page.locator('[data-pkc-field="palette-row"]').first();
+  await expect(srtRow2).toHaveAttribute('data-pkc-command', 'export-transcript-srt');
   await expect(srtRow2, '時刻つきの行が在るのに押せない').toBeEnabled();
   const srtDl = page.waitForEvent('download');
-  await srtRow2.click();
+  await page.keyboard.press('Enter');
   const srtFile = await srtDl;
   const srtPath = await srtFile.path();
   const srtText = readFileSync(srtPath, 'utf8');

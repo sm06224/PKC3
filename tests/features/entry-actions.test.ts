@@ -495,6 +495,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       ...entryMenuActions({ archetype: 'attachment', linkedFile: null }),
       // 🔴 種類を変える口はノートとログでだけ出る(台帳 #1852 I2 / 依頼 157)
       ...entryMenuActions({ archetype: 'text', linkedFile: null }),
+      // 🔴 字幕ファイル(#1447)は時刻つきの行があるノート(`transcript`)でだけ出る
+      ...entryMenuActions({ archetype: 'text', linkedFile: null, transcript: true }),
     ];
     const seen = new Set(rows.map((a) => a.action));
     // ⚠ 空振り防止 ── 条件つきの行を含めて全部出ている

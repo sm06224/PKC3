@@ -269,6 +269,16 @@ describe('PCM と本文へ足す字', () => {
     expect(lines!.split('\n').map((l) => l.split(' ')[0])).toEqual([0, 15_400, 3_723_900].map(elapsedText));
   });
 
+  it('🔴 #1447: 終わりの時刻があれば「0:07 〜0:12 字」で持つ。終わりが無い・同じ秒・以前なら従来の形', () => {
+    const lines = transcriptLines([
+      { startMs: 7_000, endMs: 12_400, text: 'こんにちは' },
+      { startMs: 20_000, endMs: null, text: '終わり無し' },
+      { startMs: 30_000, endMs: 30_900, text: '同じ秒' },
+      { startMs: 40_000, endMs: 39_000, text: '以前' },
+    ]);
+    expect(lines).toBe(['0:07 〜0:12 こんにちは', '0:20 終わり無し', '0:30 同じ秒', '0:40 以前'].join('\n'));
+  });
+
   it('#1232: 使える行が無ければ null(呼び側は今の 1 段落へ倒す)', () => {
     expect(transcriptLines(undefined)).toBeNull();
     expect(transcriptLines([])).toBeNull();

@@ -66,7 +66,8 @@ export interface EntryAction {
     | 'bookmarkable'
     | 'bookmarked'
     | 'attachment'
-    | 'kind-changeable';
+    | 'kind-changeable'
+    | 'transcript';
   /**
    * 🔴 **塊(見出し)の綴り**(#1029 段 C)。⚠ 書いていないものは**塊を持たない**
    *   (見出しの前後に置かれない ── `TASK_REPEAT_MENU_ACTION` のような単発の項目)。
@@ -159,6 +160,11 @@ export interface EntryMenuContext {
    *   入れても「入れたのに見えない」になる。2 ペインの行のメニューだけが渡す。
    */
   readonly bookmarked?: boolean;
+  /**
+   * 🔴 **時刻つきの行(文字起こし)が在るか**(#1447)。⚠ 本文を読むのは呼び側で、**開いているノートのときだけ**渡す
+   *   (別の行の本文は右クリックのためだけに読まない)。省く = 出さない。
+   */
+  readonly transcript?: boolean;
 }
 
 /**
@@ -179,6 +185,8 @@ const WHEN: Readonly<
   bookmarked: (ctx) => ctx.bookmarked === true,
   // 🔴 種類を変えられるのはノートとログだけ(台帳 #1852 I2 / 依頼 157)── 判定は `canChangeKind` 1 本
   'kind-changeable': (ctx) => canChangeKind(ctx.archetype),
+  // 🔴 字幕ファイル(#1447)── 時刻つきの行があるノートだけ。`undefined`(本文を知らない)は出さない
+  transcript: (ctx) => ctx.transcript === true,
 };
 
 /**
@@ -407,11 +415,11 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    * 🔴 **文字起こしを字幕ファイル(.srt)で書き出す**(#1447 の残り「常設のボタンにするか」)。
    *
    * 「文字にする」が足した `0:15 こんにちは` の行を、時刻つきの字幕にして保存する(動画の字幕・AI への議事録の入力)。
-   * ⚠ 種類で絞らない(`when` なし)が、右の列では**時刻つきの行があるノートのときだけ**出す(`inspector.ts` の `render` が
-   *   `hidden` を付け外しする。他のノートに押しても必ず断られる物を常設しない)。右クリックには常に出て、無ければ理由を言う。
+   * ⚠ **時刻つきの行があるノートのときだけ**出す(`when: 'transcript'`)。右の列は `inspector.ts` の `render` が `hidden` を付け外し、
+   *   右クリックは**開いているノート**の行だけ(別の行の本文は右クリックのために読まない)。押しても必ず断られる物を常設しない。
    * 🔑 「操作を探す」の `export-transcript-srt` と同じ字幕の組み立て(`srtFromTranscript`)── 口だけが違う。
    */
-  { action: 'export-entry-srt', label: '字幕ファイル(.srt)で書き出す', group: 'export' },
+  { action: 'export-entry-srt', label: '字幕ファイル(.srt)で書き出す', group: 'export', when: 'transcript' },
   /**
    * 🔴 **開いた元ファイルが在るときだけ出す**(#500 案 C)。
    *

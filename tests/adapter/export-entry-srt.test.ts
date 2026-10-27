@@ -14,6 +14,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { exportEntrySrt, type ExportDeps } from '../../src/adapter/ui/actions/export-archive';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { entryMenuActions } from '../../src/features/entry-actions';
 import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
 
 const META = (lid: string, title: string, order: number) => ({
@@ -133,5 +134,17 @@ describe('右の列のボタンは、時刻つきの行があるノートのと�
     show('n1');
     load('n1');
     expect(btn().hidden, '時刻の行が無いノートで見えている').toBe(true);
+  });
+});
+
+describe('右クリックの「字幕ファイル(.srt)で書き出す」も、時刻つきの行があるノートだけ', () => {
+  it('🔴 transcript を渡したときだけ出る(渡さない・偽では出ない)', () => {
+    const has = (t?: boolean): boolean =>
+      entryMenuActions({ archetype: 'text', linkedFile: null, ...(t === undefined ? {} : { transcript: t }) }).some(
+        (a) => a.action === 'export-entry-srt',
+      );
+    expect(has(true)).toBe(true);
+    expect(has(false)).toBe(false);
+    expect(has(undefined)).toBe(false);
   });
 });

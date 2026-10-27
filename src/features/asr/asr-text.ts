@@ -6,7 +6,7 @@
  * 「そのノートの本文の末尾に追記、日時見出しつき」)。
  */
 
-import { elapsedText } from '../elapsed-text';
+import { elapsedLineHead } from '../elapsed-text';
 
 /** 画面に出る入口の名前。⚠ 設定の節の見出し・案内の字は、全部ここから引く(§7)。 */
 export const ASR_SECTION_LABEL = '音声認識';
@@ -44,18 +44,19 @@ export function transcriptText(raw: string): string | null {
  * (呼び側は `transcriptText` の 1 段落へ倒す)。
  *
  * 🔑 時刻の綴りは `elapsedText`(`0:07` / `12:34` / `1:02:03`)── 割り算を書き足さない。
+ * 🔑 終わりの時刻があれば `0:07 〜0:12 こんにちは` の形で持つ(#1447。字幕ファイルの終了に使う。読みは `readElapsedHead` 1 本)。
  * 🔑 行は `\n` で並べる(markdown は `breaks: true` なので 1 段落の中で行ごとに見える)。
  * ⚠ 字の正規化は `transcriptText` と同じ。出た字は**そのまま**(同じ字の繰り返しも畳まない)。
  *   例外は `isQuietRepetition` が真のとき**だけ**で、それは畳むのではなく**出力ごと捨てる**(呼び側が字にしない)。
  */
 export function transcriptLines(
-  segments: ReadonlyArray<{ readonly startMs: number; readonly text: string }> | undefined,
+  segments: ReadonlyArray<{ readonly startMs: number; readonly endMs?: number | null; readonly text: string }> | undefined,
 ): string | null {
   if (segments === undefined) return null;
   const lines: string[] = [];
   for (const seg of segments) {
     const t = transcriptText(seg.text);
-    if (t !== null) lines.push(`${elapsedText(seg.startMs)} ${t}`);
+    if (t !== null) lines.push(`${elapsedLineHead(seg.startMs, seg.endMs)}${t}`);
   }
   return lines.length === 0 ? null : lines.join('\n');
 }

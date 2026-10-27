@@ -51,7 +51,46 @@ export function parseElapsed(text: string): number | null {
  *   別々に書くと「押せるのに字幕に出ない / 字幕に出るのに押せない」行が生まれる(§7)。
  * ⚠ 当たっても `parseElapsed` が `null` を返す綴り(`0:75`)は時刻ではない ── 呼び側は両方を通す。
  */
-export const ELAPSED_LINE_HEAD = /^((?:\d{1,2}:)?\d{1,2}:\d{2}) /;
+export const ELAPSED_LINE_HEAD = /^((?:\d{1,2}:)?\d{1,2}:\d{2}) (?:〜((?:\d{1,2}:)?\d{1,2}:\d{2}) )?/;
+
+/**
+ * 🔴 **行頭の時刻の読みを 1 本にする**(#1447 の残り「終わりの時刻」)。
+ *
+ * 形は `0:07 こんにちは`(従来)と `0:07 〜0:12 こんにちは`(終わりつき。「文字にする」が足す行)。
+ * 🔑 **始まりの後ろに空白を置いてから `〜`** にした: 旧いビルド(範囲を知らない)も `0:07 ` までを時刻と読むので、
+ *   **行頭の時刻は旧ビルドでも効き、本文に `〜0:12` が字として残る**(読めなくなる形にしない)。
+ * ⚠ 当たっても `parseElapsed` が `null` の綴り(`0:75`)は時刻ではない → `null`。終わりだけ読めない・始まり以前のときは
+ *   終わりを無かったことにして(`endMs: null`)従来の行として読む(`headLength` も従来どおり)。
+ */
+export interface ElapsedHead {
+  /** 表示の綴り(始まり。`0:15`)。 */
+  readonly startText: string;
+  readonly startMs: number;
+  /** 終わり(ms)。無い・読めない・始まり以前なら `null`。 */
+  readonly endMs: number | null;
+  /** 行頭から本文の頭までの長さ(時刻・範囲・後ろの空白)。 */
+  readonly headLength: number;
+}
+export function readElapsedHead(line: string): ElapsedHead | null {
+  const m = ELAPSED_LINE_HEAD.exec(line);
+  if (m === null) return null;
+  const startMs = parseElapsed(m[1]!);
+  if (startMs === null) return null;
+  const endMs = m[2] === undefined ? null : parseElapsed(m[2]);
+  if (endMs === null || endMs <= startMs) {
+    // 終わりが使えない行は、範囲の字を本文として残す(従来の読み)
+    return { startText: m[1]!, startMs, endMs: null, headLength: m[1]!.length + 1 };
+  }
+  return { startText: m[1]!, startMs, endMs, headLength: m[0].length };
+}
+
+/** 文字起こしの行頭(`0:07 ` / `0:07 〜0:12 `)を組む。⚠ 終わりが始まり以前なら従来の形。 */
+export function elapsedLineHead(startMs: number, endMs?: number | null): string {
+  if (endMs === undefined || endMs === null || Math.floor(endMs / 1000) <= Math.floor(startMs / 1000)) {
+    return `${elapsedText(startMs)} `;
+  }
+  return `${elapsedText(startMs)} 〜${elapsedText(endMs)} `;
+}
 
 /** 3 桁に揃える(ミリ秒)。 */
 const three = (n: number): string => String(n).padStart(3, '0');
