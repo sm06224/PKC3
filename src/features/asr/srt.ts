@@ -20,9 +20,18 @@
  */
 
 import { ELAPSED_LINE_HEAD, parseElapsed, srtTime } from '../elapsed-text';
+import { inlineToText } from '../report/mail-text';
 
 /** 次の行が無い(か、時刻が進んでいない)行に足す長さ。⚠ 推定である(呼び側の知らせの字と対で変える)。 */
 export const LAST_CUE_MS = 5000;
+
+/**
+ * 🔴 **字幕 1 件の長さの上限**(#1447 の残り「長い無音の区間は次の行まで字幕が出続ける」)。
+ * 次の行が遠い(無音・録音の途切れ)とき、前の字幕を次の行まで出しっぱなしにしない。
+ * 🔑 30 秒 = 認識が 1 度に読む区切り(`chunk_length_s`)の目安。1 つの行がこれより長く喋り続けることは
+ *   認識の側が作らない(行は区切りごとに出る)ので、普通の字幕は切れない。
+ */
+export const MAX_CUE_MS = 30_000;
 
 /** 字幕 1 件。 */
 export interface SrtCue {
@@ -83,14 +92,18 @@ export function hasTranscriptCues(body: string): boolean {
 
 /**
  * 本文から「行頭に時刻のある行」を拾い、終了時刻を付ける。
- * ⚠ 字は時刻の後ろを**そのまま**(前後の空白だけ落とす。markdown の記号も剥がさない)。
+ * ⚠ 字は時刻の後ろ。再生機は markdown を解釈しないので、インラインの記号は `inlineToText`(メール下書きと同じ 1 本)で外す。
  */
 export function transcriptCues(body: string): readonly SrtCue[] {
   const heads = [...transcriptHeads(body)];
   return heads.map((h, i) => {
     const next = heads[i + 1];
-    const endMs = next !== undefined && next.ms > h.ms ? next.ms : h.ms + LAST_CUE_MS;
-    return { startMs: h.ms, endMs, text: h.text };
+    const rawEnd = next !== undefined && next.ms > h.ms ? next.ms : h.ms + LAST_CUE_MS;
+    // ⚠ 上限で切るのは「次の行までが遠い」ときだけ(推定の 5 秒は上限より短いので影響しない)
+    const endMs = Math.min(rawEnd, h.ms + MAX_CUE_MS);
+    // 🔴 本文の markdown の記号(`**強調**` / リンク / コード)は字幕に出さない ── 再生機は記号を解釈しない(#1447)
+    const text = inlineToText(h.text).trim();
+    return { startMs: h.ms, endMs, text: text === '' ? h.text : text };
   });
 }
 
@@ -104,4 +117,18 @@ export function srtFromTranscript(body: string): string | null {
   const cues = transcriptCues(body);
   if (cues.length === 0) return null;
   return cues.map((c, i) => `${String(i + 1)}\n${srtTime(c.startMs)} --> ${srtTime(c.endMs)}\n${c.text}\n`).join('\n') + '\n';
+}
+
+/**
+ * 🔴 **字幕を本文に埋め込む**ための ```srt 囲み(#1447 の「Markdown への埋め込み」)。
+ * 外の AI にそのまま渡せる形で、ノートの末尾へ足す。時刻つきの行が無ければ `null`。
+ * ⚠ 囲みの中は `transcriptHeads` が読まない(コードブロック)ので、**書き出し直しても二重にならない**。
+ * ⚠ 字幕の字に ``` が含まれていても閉じないよう、囲みは字の中の最長の連なりより 1 つ長くする。
+ */
+export function srtMarkdownBlock(body: string): string | null {
+  const srt = srtFromTranscript(body);
+  if (srt === null) return null;
+  const longest = Math.max(2, ...(srt.match(/`+/g) ?? []).map((m) => m.length));
+  const fence = '`'.repeat(longest + 1);
+  return `${fence}srt\n${srt.replace(/\n+$/, '')}\n${fence}`;
 }

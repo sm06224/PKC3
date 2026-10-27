@@ -40,6 +40,7 @@
 import { blockedActionNote, type AppState } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { ScrollMemory } from './scroll-memory';
+import { hasTranscriptCues } from '@features/asr/srt';
 import { archetypeLabel } from '@features/flavor/archetype-label';
 import { candidateText, countTitles } from '@features/relation/target-label';
 import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
@@ -1368,6 +1369,13 @@ export class InspectorRenderer {
     const kindBtn = this.buttons.get('change-entry-kind');
     if (kindBtn) kindBtn.hidden = !canChangeKind(meta.archetype);
     // 🔴 保存したスタックにだけ出す(#633 段③)── `export-folder` と同じ作法(消さずに畳む)
+    // 🔴 字幕ファイルは、時刻つきの行があるノートにだけ(#1447。本文の読みは `hasTranscriptCues` 1 本)
+    const srtBtn = this.buttons.get('export-entry-srt');
+    if (srtBtn) {
+      const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+      const show = body !== null && hasTranscriptCues(body);
+      if (srtBtn.hidden === show) srtBtn.hidden = !show;
+    }
     const stackBtn = this.buttons.get('stack-load');
     if (stackBtn) stackBtn.hidden = meta.archetype !== STACK_ARCHETYPE;
     this.paintAdoptImages(state, meta.lid, stale);
@@ -2117,6 +2125,8 @@ export class InspectorRenderer {
     entryBtn('export-entry-markdown');
     // 🔴 メールに貼れる下書き(#1459 段②)── Markdown の隣(どちらも本文の字を別の形で持ち出す)
     entryBtn('copy-entry-mail');
+    // 🔴 文字起こしの字幕ファイル(#1447)── 時刻つきの行があるノートのときだけ見える(`render` で畳む)
+    entryBtn('export-entry-srt');
     if (shape === 'entry+link') entryBtn('write-back-file');
     entryBtn('show-history');
     /**

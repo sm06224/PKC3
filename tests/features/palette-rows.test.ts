@@ -313,6 +313,7 @@ describe('🔴 押せない理由の文(#1087 の見直し 2026-10-14)', () => {
       'export-note-markdown': 'ノートを開いているときだけ効きます',
       'export-note-pdf': 'ノートを開いているときだけ効きます',
       'export-transcript-srt': 'ノートを開いていて、行頭に時刻のある行があるときだけ効きます',
+      'embed-transcript-srt': 'ノートを開いていて、行頭に時刻のある行があるときだけ効きます',
     };
     for (const [id, text] of Object.entries(EXPECTED)) {
       expect(why(id), id).toBe(`${NOT_READY_PREFIX}${text}`);
@@ -333,6 +334,7 @@ describe('🔴 押せない理由の文(#1087 の見直し 2026-10-14)', () => {
         'copy-entry-link',
         'export-note-markdown',
         'export-note-pdf',
+        'embed-transcript-srt',
         'export-transcript-srt',
         // #1640 ②: 日付のノートを開いていて、その向きに日付のノートがあるときだけ効く
         'open-next-day-note',

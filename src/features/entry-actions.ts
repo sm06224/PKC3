@@ -404,6 +404,15 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'copy-entry-mail', label: 'メール下書きをコピー', group: 'export' },
   /**
+   * 🔴 **文字起こしを字幕ファイル(.srt)で書き出す**(#1447 の残り「常設のボタンにするか」)。
+   *
+   * 「文字にする」が足した `0:15 こんにちは` の行を、時刻つきの字幕にして保存する(動画の字幕・AI への議事録の入力)。
+   * ⚠ 種類で絞らない(`when` なし)が、右の列では**時刻つきの行があるノートのときだけ**出す(`inspector.ts` の `render` が
+   *   `hidden` を付け外しする。他のノートに押しても必ず断られる物を常設しない)。右クリックには常に出て、無ければ理由を言う。
+   * 🔑 「操作を探す」の `export-transcript-srt` と同じ字幕の組み立て(`srtFromTranscript`)── 口だけが違う。
+   */
+  { action: 'export-entry-srt', label: '字幕ファイル(.srt)で書き出す', group: 'export' },
+  /**
    * 🔴 **開いた元ファイルが在るときだけ出す**(#500 案 C)。
    *
    * ⚠ これは**上書き**である ── 上の書き出し 5 つと違って新しい file を作らない。
@@ -1584,6 +1593,8 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   //    `svg-emf.ts` のベクタ)。マニュアル(§5)もお知らせ 2 件も「入る」と言っており、
   //    ⚠ **画面の説明だけが古いまま user に嘘をついていた**(押すのを諦めさせる向き)。
   // ⚠ **起きることと、入らない物を先に言う**(押してから「添付が無い」と思わせない)
+  'export-entry-srt':
+    '文字起こしの行(0:15 こんにちは)を、字幕ファイル(.srt)で保存します。終わりの時刻は次の行の始まりです',
   'export-entry-markdown':
     '本文をそのまま .md ファイルで保存します。添付は入りません(バックアップなら入ります)',
   // 🔴 **起きることを先に言う**(user 指示 2026-08-21)── file は落ちず、クリップボードへ入る。送るのは user
@@ -1716,6 +1727,7 @@ export const FOLDER_EXPORT_BLOCKED_ACTIONS: ReadonlySet<string> = new Set([
   'export-entry-pptx',
   'export-entry-pdf',
   'export-entry-markdown',
+  'export-entry-srt',
   // 🔴 メール下書きも同じ(#1459 段②)── フォルダ自身の説明文しか入らない
   'copy-entry-mail',
 ]);

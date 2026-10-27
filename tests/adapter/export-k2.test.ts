@@ -276,6 +276,8 @@ describe('フォルダの書き出し(依頼 53-1 = A)', () => {
       'export-entry-markdown',
       'export-entry-pdf',
       'export-entry-pptx',
+      // ⚠ 2026-10-27(#1447): 字幕ファイル(`export-entry-srt`)も同じ理由で足した → 5 つ + 2 つ
+      'export-entry-srt',
     ]);
     for (const a of FOLDER_EXPORT_BLOCKED_ACTIONS) {
       expect(entryActionHint(a, { archetype: 'folder', linkedFile: null }), a).toBe(FOLDER_EXPORT_NOTE);

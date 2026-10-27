@@ -52,6 +52,7 @@ import {
 } from '@adapter/platform/md-folder-export';
 import { singleEntrySource } from '@features/export/single-entry-source';
 import { mailDraftText } from '@features/report/mail-text';
+import { srtFromTranscript, transcriptCues } from '@features/asr/srt';
 import {
   flattenSectionEmbeds,
   flattenTitlesNote,
@@ -1207,6 +1208,46 @@ export async function exportEntryMarkdown(
     deps.report(notes);
     deps.notify?.(
       notes.length > 0 ? `Markdown で書き出しました。${notes.join('。')}` : 'Markdown で書き出しました',
+    );
+    return true;
+  } catch (e) {
+    return fail(`書き出しに失敗しました: ${errorText(e)}`);
+  }
+}
+
+/**
+ * 🔴 **このノートの文字起こしを、字幕ファイル(.srt)で書き出す**(#1447 の残り「常設のボタン」)。
+ *
+ * 🔑 右クリック・右の列の `export-entry-srt` の実体。⚠ 字幕の組み立ては「操作を探す」の
+ *   `export-transcript-srt` と**同じ `srtFromTranscript` 1 本**(口は 2 つ、組み立ては 1 つ)。
+ * ⚠ 読みは保存した本文(`getBody`)── 右クリックした行が開いているノートと別でも、その行のノートを書き出す。
+ * ⚠ 終了時刻は**推定**(次の行の開始 / 最後は 5 秒後 / 1 件は 30 秒まで)── 知らせでそう言う。
+ * @returns 書き出せたら true
+ */
+export async function exportEntrySrt(
+  dispatcher: Dispatcher,
+  deps: ExportDeps,
+  lid: string,
+): Promise<boolean> {
+  const fail = (msg: string): false => {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
+    return false;
+  };
+  const blocked = exportBlockedNote(dispatcher.getState(), '書き出してください');
+  if (blocked !== null) return fail(blocked);
+  try {
+    await deps.settle();
+    const meta = (await deps.source.listEntryMetas()).find((m) => m.lid === lid);
+    if (!meta) return fail('書き出すノートが見つかりません');
+    const body = (await deps.source.getBody?.(lid)) ?? null;
+    if (body === null) return fail('書き出すノートの本文を読めませんでした');
+    const srt = srtFromTranscript(body);
+    if (srt === null) return fail('行頭に時刻のある行(文字起こし)が無いので、字幕ファイルにできません');
+    const now = deps.now?.() ?? new Date();
+    deps.download(`${safeName(meta.title)}-${stamp(now)}.srt`, new Blob([srt], { type: 'application/x-subrip' }));
+    const n = transcriptCues(body).length;
+    deps.notify?.(
+      `字幕ファイルを保存しました(${String(n)} 件。終わりの時刻は次の行の始まりです。次の行が無い・時刻が進んでいない行は 5 秒後と見なし、1 件は 30 秒までです)`,
     );
     return true;
   } catch (e) {

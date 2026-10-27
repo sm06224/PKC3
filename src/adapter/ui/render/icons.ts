@@ -184,6 +184,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'export-entry-html': 'globe',
   'export-entry-markdown': 'page',
   'copy-entry-mail': 'mail',
+  'export-entry-srt': 'page',
   'show-history': 'clock',
   'delete-entry': 'trash',
   'open-trash': 'trash',

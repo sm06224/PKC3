@@ -399,6 +399,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['export-entry-markdown', 'd97ee74b'],
       // 🔴 メールに貼れる下書き(#1459 段②、2026-10-26)
       ['copy-entry-mail', '7835f5ca'],
+      // 🔴 文字起こしの字幕ファイル(#1447 の残り、2026-10-27)
+      ['export-entry-srt', 'e5c1b39c'],
       // 🔴 2026-10-13(#1087): 同じ。フォルダの中のノートの履歴も入る(`folder-source.ts` の `getRevisionChain`)
       ['export-folder', '4b51181e'],
       ['export-entry-docx', '93906675'],
