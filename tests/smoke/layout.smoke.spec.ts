@@ -759,7 +759,8 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
           top: Math.round(box.top),
           // 🔴 「⋯」の下へ畳んだ(#1621)。畳んだ物は箱が無いので段・はみ出しの数に入れない
           // 🔴 描いている間だけ出る「手書き」(#1448)は、隠れている間は箱が無い ⇒ 段・はみ出しの数に入れない
-          folded: b.hasAttribute('data-pkc-overflow') || (b as HTMLElement).hidden,
+          folded: b.hasAttribute('data-pkc-overflow'),
+          hidden: (b as HTMLElement).hidden,
         };
       });
       return {
@@ -767,7 +768,7 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
         hostW: host.clientWidth,
         scrollW: host.scrollWidth,
         // 段数 = 上端の種類の数(折り返すと増える)。畳んだ物は数えない
-        rows: new Set(tabs.filter((t) => !t.folded).map((t) => t.top)).size,
+        rows: new Set(tabs.filter((t) => !t.folded && !t.hidden).map((t) => t.top)).size,
       };
     });
 
