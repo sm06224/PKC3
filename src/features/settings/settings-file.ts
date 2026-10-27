@@ -330,6 +330,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: '計っている途中のタブが「まだ動いている / 閉じた」を残す時刻(依頼 75-1)。閉じられたタブの計測を見分けるための一時の事実で、運ぶ物は無い',
   },
   {
+    key: 'pkc3.calc-draft',
+    why: '計算スクラッチパッドの打ちかけ(#1230)。金額など端末の外へ出したくない字が入りうる作業中の下書きなので、設定ファイルには載せない(ノートにすれば保存される)',
+  },
+  {
     key: 'pkc3.tab-id',
     why: '設定ではない(依頼 240)。このタブを見分ける番号(sessionStorage)。タブを閉じれば消える一時の事実で、運ぶ物は無い',
   },

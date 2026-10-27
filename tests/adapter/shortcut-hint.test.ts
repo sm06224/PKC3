@@ -42,8 +42,8 @@ describe('ショートカットの説明', () => {
   it('🔴 割当を変えたら、説明も変わる', () => {
     const k = memStore();
     k.removeBinding('create-entry', 'Alt+N');
-    expect(k.addBinding('create-entry', 'Alt+9'), '割当を変えられない(前提が崩れている)').toBeNull();
-    expect(hintTitle('新しく作ります', 'create-entry', k)).toBe('新しく作ります(Alt + 9)');
+    expect(k.addBinding('create-entry', 'Alt+Q'), '割当を変えられない(前提が崩れている)').toBeNull();
+    expect(hintTitle('新しく作ります', 'create-entry', k)).toBe('新しく作ります(Alt + Q)');
   });
 
   /** ⚠ 空の `()` を画面に出さない(「全部外す」ができる以上、必ず起きる)。 */
@@ -75,9 +75,9 @@ describe('ショートカットの説明', () => {
     expect(other.title, '名乗っていない物まで書き換えた').toBe('そのまま');
 
     k.removeBinding('create-entry', 'Alt+N');
-    k.addBinding('create-entry', 'Alt+9');
+    k.addBinding('create-entry', 'Alt+Q');
     applyShortcutHints(root, k);
-    expect(named.title, '呼び直しても古い綴りのまま').toBe('新しく作ります(Alt + 9)');
+    expect(named.title, '呼び直しても古い綴りのまま').toBe('新しく作ります(Alt + Q)');
   });
 
   /**
@@ -116,13 +116,13 @@ describe('ショートカットの説明', () => {
     // ⚠ **1 回目**も撃つ(割当を 1 度も変えない user にも届く)
     expect(btn.title, '配線した時点で組み立てていない').toBe('新しく作ります(Alt + N)');
     k.removeBinding('create-entry', 'Alt+N');
-    k.addBinding('create-entry', 'Alt+9');
-    expect(btn.title, '割当を変えても説明が古いまま').toBe('新しく作ります(Alt + 9)');
+    k.addBinding('create-entry', 'Alt+Q');
+    expect(btn.title, '割当を変えても説明が古いまま').toBe('新しく作ります(Alt + Q)');
     // ⚠ 外したら止まる(購読を返している証拠)
     off();
-    k.removeBinding('create-entry', 'Alt+9');
-    k.addBinding('create-entry', 'Alt+8');
-    expect(btn.title, '外したのに動いている').toBe('新しく作ります(Alt + 9)');
+    k.removeBinding('create-entry', 'Alt+Q');
+    k.addBinding('create-entry', 'Alt+Y');
+    expect(btn.title, '外したのに動いている').toBe('新しく作ります(Alt + Q)');
   });
 
   /**

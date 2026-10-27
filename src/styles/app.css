@@ -6163,16 +6163,27 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 
 /* ══ PC(パソコンのフォルダ。#215 段①②、2026-10-02)═══════════════════════════════
- * 🔴 **左の列だけ**(別窓は無い)。作法は録ったものと同じ縦積み ── 名前・種類・
+ * 🔴 **左の列と、別窓(#300。`pc-body`)の 2 か所**。作法は録ったものと同じ縦積み ── 名前・種類・
  *   大きさ・更新日を横に並べると 200px で名前が切れる。
  * ⚠ 行は**行いっぱいが押せる場所**(字だけを的にしない ── マウスだけで完結する)。 */
-[data-pkc-browse-pane='pc'] {
+[data-pkc-browse-pane='pc'],
+[data-pkc-field='pc-body'] {
   display: flex;
   flex-direction: column;
   gap: var(--s2);
   padding: var(--s2);
   min-height: 0;
   overflow: auto;
+}
+/* 別窓の PC(#300)── 題の下に、行の幅を広げすぎない一覧を置く */
+[data-pkc-view-pane='pc'] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+[data-pkc-view-pane='pc'] [data-pkc-field='pc-body'] {
+  max-width: 60rem;
+  flex: 1 1 auto;
 }
 [data-pkc-field='pc-note'] {
   margin: 0;
@@ -7212,7 +7223,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   opacity: 1;
 }
 [data-pkc-region='schedule-cards'] [data-pkc-field='task-unschedule']:hover {
-  color: var(--danger, #b3261e);
+  color: var(--danger);
 }
 /* 🔴 **予定のメニューを開く「⋯」**(台帳 #1852 束 S1、依頼 128-2 A)。スマホの長押しはドラッグだけにしたので、
  *   メニューへはここから入る。薄いが**見える**(隠さない ── 見つけられない物は無いのと同じ)。指で押せる大きさ(24px 以上) */
@@ -11383,6 +11394,12 @@ h3[data-pkc-section] {
   [data-pkc-print-range] [data-pkc-field='schedule-monthview-blank'] {
     min-height: 5.5rem;
   }
+  /* 🔴 再生中の文字起こしの行の光(#1232)は紙には出さない ── 押せない紙で光っていても意味が無い。
+   *   ⚠ 印刷の節はここ 1 つ(別に `@media print` を作らない ── `print-editing.test.ts` / `body-css.test.ts` が数える) */
+  [data-pkc-seek-line][data-pkc-seek-active] {
+    background: none;
+    color: inherit;
+  }
 }
 
 /**
@@ -12725,4 +12742,295 @@ h6:hover > .pkc-heading-anchor,
   display: flex;
   flex-wrap: wrap;
   gap: var(--s1);
+}
+
+/* ══ テキスト整形の面(#1233、2026-10-26)══════════════════════════
+ * 🔴 **中央の面(別窓)だけ**── 左の列に同じ面は無い(SQL で調べると同じ形)。
+ * 地は無彩色、色は**押されている整え方**(`aria-pressed`)にだけ使う(業務画面の作法)。 */
+[data-pkc-view-pane='textlab'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-view-pane='textlab'] [data-pkc-field='pane-title'] {
+  margin: 0;
+  font-size: 14px;
+}
+[data-pkc-field='textlab-note'],
+[data-pkc-field='textlab-summary'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='textlab-ops'],
+[data-pkc-field='textlab-tables'],
+[data-pkc-field='textlab-regex'],
+[data-pkc-field='textlab-in-tools'],
+[data-pkc-field='textlab-out-tools'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+/* 押されている整え方は、地を変えて見分ける(色だけに頼らず、文字も太くする) */
+[data-pkc-view-pane='textlab'] button[aria-pressed='true'] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-color: var(--accent-dim-fg);
+  font-weight: 600;
+}
+[data-pkc-field='textlab-regex'] label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+[data-pkc-field='textlab-regex'] label:nth-child(-n + 2) {
+  flex: 2 1 12em;
+}
+[data-pkc-field='textlab-flags'] {
+  width: 4em;
+}
+[data-pkc-field='textlab-pattern'],
+[data-pkc-field='textlab-replacement'],
+[data-pkc-field='textlab-flags'] {
+  font-family: var(--font-mono);
+}
+[data-pkc-field='textlab-cols'] {
+  display: grid;
+  /* ⚠ 幅の @media は書かない(スマホ用画面の境目は TS が 1 か所で決める)── 狭ければ自然に 1 列へ折れる */
+  grid-template-columns: repeat(auto-fit, minmax(min(20em, 100%), 1fr));
+  gap: var(--s2);
+  min-height: 0;
+}
+[data-pkc-field='textlab-left'],
+[data-pkc-field='textlab-right'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+}
+[data-pkc-field='textlab-left'] h3,
+[data-pkc-field='textlab-right'] h3 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+[data-pkc-field='textlab-input'],
+[data-pkc-field='textlab-output'] {
+  width: 100%;
+  min-height: 14em;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  resize: vertical;
+}
+
+/* ══ 計算スクラッチパッドの面(#1230、2026-10-26)══════════════════
+ * 🔴 **中央の面(別窓)だけ**── 左の列に同じ面は無い(SQL で調べると同じ形)。
+ * 地は無彩色。色は**エラーの行**と**合計の行**にだけ使う(業務画面の作法)。
+ * ⚠ 左の欄と右の結果の**行の高さを px で揃える**(`--calc-lh`)── 折り返さない欄 + 固定の高さの行でないと、
+ *   長い式が 1 行ぶん下へずれて、結果が別の行の物に見える。 */
+[data-pkc-view-pane='calc'] {
+  --calc-lh: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-view-pane='calc'] [data-pkc-field='pane-title'] {
+  margin: 0;
+  font-size: 14px;
+}
+[data-pkc-field='calc-note'],
+[data-pkc-field='calc-status'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='calc-status']:empty {
+  display: none;
+}
+[data-pkc-field='calc-tools'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+[data-pkc-field='calc-sheet'] {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(8em, 2fr);
+  gap: 0;
+  height: min(60vh, 32em);
+  min-height: 12em;
+  border: 1px solid var(--border);
+}
+[data-pkc-field='calc-input'],
+[data-pkc-field='calc-results'] {
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--s2);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: var(--calc-lh);
+  white-space: pre;
+}
+[data-pkc-field='calc-input'] {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  overflow: auto;
+  border: none;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+}
+[data-pkc-field='calc-results'] {
+  overflow: hidden;
+  background: var(--surface-2);
+  text-align: right;
+}
+[data-pkc-field='calc-results'] > div {
+  height: var(--calc-lh);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-pkc-calc-row='sum'] {
+  font-weight: 600;
+  /* ⚠ 罫線は影で引く(border だと行の高さが変わり、左の欄の行とずれる) */
+  box-shadow: inset 0 1px 0 var(--border);
+}
+[data-pkc-calc-row='error'] {
+  color: var(--danger, #b3261e);
+  font-size: 12px;
+}
+
+/* ══ 差分マージの面(#1231、2026-10-26)══════════════════════════════
+ * 🔴 **中央の面(別窓)だけ**── 左の列に同じ面は無い(SQL で調べると同じ形)。
+ * 地は無彩色。色は**足し引きの行**(履歴の面と同じ `[data-pkc-diff]` / `mark[data-pkc-diff-char]`)と、
+ * 押されている切り替え(`aria-pressed`)にだけ使う(業務画面の作法)。 */
+[data-pkc-view-pane='diff'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-view-pane='diff'] [data-pkc-field='pane-title'] {
+  margin: 0;
+  font-size: 14px;
+}
+[data-pkc-field='diff-note'],
+[data-pkc-field='diff-summary'],
+[data-pkc-field='diff-side-note'],
+[data-pkc-field='diff-more'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='diff-sides'] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(18em, 100%), 1fr));
+  gap: var(--s2);
+}
+[data-pkc-field='diff-side'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  min-width: 0;
+}
+[data-pkc-field='diff-side'] h3 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+[data-pkc-field='diff-side'] select {
+  min-width: 0;
+  max-width: 100%;
+}
+[data-pkc-field='diff-tools'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-view-pane='diff'] button[aria-pressed='true'] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-color: var(--accent-dim-fg);
+  font-weight: 600;
+}
+[data-pkc-field='diff-cols'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: var(--s2);
+  color: var(--muted);
+  font-weight: 600;
+}
+[data-pkc-field='diff-body'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+}
+[data-pkc-field='diff-body'] ul[data-pkc-diff-layout='side'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: var(--s2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* ⚠ 差分は**等幅**で読む(桁が揃わないと足し引きが追えない) */
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+/* 塊の中の 1 行(対)だけを取り込む小さなボタン(レビュー ⚠5)。升の右端に寄せ、字の邪魔にならない大きさにする */
+[data-pkc-field='diff-pair-take'] {
+  float: right;
+  margin: 0 0 0 var(--s2);
+  padding: 0 var(--s1);
+  font-size: 11px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+[data-pkc-field='diff-pair-take']:disabled {
+  opacity: 0.35;
+}
+[data-pkc-field='diff-body'] ul[data-pkc-diff-layout='side'] > li {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-height: 1.4em;
+}
+[data-pkc-field='diff-hunk'] {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: var(--s2);
+}
+[data-pkc-field='diff-hunk-bar'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+}
+[data-pkc-field='diff-hunk-bar'] > span {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ══ 再生中の文字起こしの行(#1232、2026-10-26)══════════════════════
+ * 🔴 時刻の行(`data-pkc-seek-line`)のうち、いま鳴っている位置にいちばん近い 1 行だけを薄い地で光らせる。
+ * 色は情報(いまここ)にだけ使う ── 字の色は変えない。紙には出さない(押せない紙で光っていても意味が無い)。 */
+[data-pkc-seek-line][data-pkc-seek-active] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }

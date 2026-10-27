@@ -1026,15 +1026,16 @@ describe('ノートでない面から、一覧を押したら中央が戻る', (
    *   ことになり、実装が間違える形では期待値も同じように間違える(CLAUDE.md §1)。
    * 🔑 面を足した人がここへ足し忘れても、下の**全数の突き合わせ**が落とす。
    */
-  const LEAVES = ['settings', 'flags', 'help', 'dual'] as const;
+  const LEAVES = ['settings', 'flags', 'help', 'dual', 'pc'] as const;
   /**
-   * 🔴 **わきの面なのに退かない、唯一の例外**(#906。user 裁定 2026-09-14)。
+   * 🔴 **わきの面なのに退かない例外**(#906。user 裁定 2026-09-14。2026-10-26 に「テキスト整形」も加わった ──
+   * 「開いているノートを読み込む」は左の一覧でノートを選んでから押すので、選んだ瞬間に面が退くと読み込めない)。
    *
    * 「SQL で調べる」は**調べる面**なので、`.csv` を見ている最中に
    * 「もう 1 つ入れて見比べよう」と添付しても、**選び所と打ちかけの SQL を
    * 画面から消さない**(直す前は `SELECT_ENTRY` が飛んで両方消えていた)。
    */
-  const STAYS = ['sql'] as const;
+  const STAYS = ['sql', 'textlab', 'calc', 'diff'] as const;
 
   for (const view of LEAVES) {
     it(`🔴 ${view} を開いたまま別のノートを押すと detail へ戻る`, () => {

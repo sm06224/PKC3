@@ -135,6 +135,7 @@ export const MESSAGE_SOURCE_LABEL: Readonly<Record<string, string>> = {
   ooxml: 'Office の書き出し',
   markdown: 'Markdown の表示',
   video: '動画',
+  textlab: 'テキスト整形の置換',
 };
 
 export function messageSourceLabel(source: string): string {

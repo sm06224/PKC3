@@ -789,6 +789,14 @@ export function buildShell(root: HTMLElement): ShellRegions {
   replaceInput.setAttribute('data-pkc-field', 'replace-input');
   createBar.append(replaceInput);
 
+  // 🔴 アプリの目印にする画像を選ぶ欄(#856 段③。1 件だけ。効く先は押したボタンから `data-pkc-icon-lid` へ移す)
+  const iconInput = document.createElement('input');
+  iconInput.type = 'file';
+  iconInput.accept = 'image/*';
+  iconInput.hidden = true;
+  iconInput.setAttribute('data-pkc-field', 'icon-file-input');
+  createBar.append(iconInput);
+
   /**
    * 🔴 **指で触る端末に、押せない理由を届ける 1 行**(#791 ③。2026-09-08)。
    *

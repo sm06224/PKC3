@@ -24,6 +24,11 @@ import { GraphRenderer } from './graph';
 import { TimersRenderer } from './timers';
 import { SearchRenderer } from './search';
 import { SqlRenderer } from './sql';
+import { TextLabRenderer } from './textlab';
+import { CalcRenderer } from './calc';
+import { DiffMergeRenderer } from './diffmerge';
+import { PcFolderRenderer } from './pc-folder';
+import { LocalFolder } from '@adapter/platform/local-folder';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
 
 type PaneView =
@@ -37,6 +42,10 @@ type PaneView =
   | 'search'
   | 'dual'
   | 'sql'
+  | 'textlab'
+  | 'calc'
+  | 'diff'
+  | 'pc'
   | 'settings'
   | 'flags'
   | 'help';
@@ -55,6 +64,14 @@ const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>([
   'dual',
   // ⚠ SQL の面(#681 段②)── ノートを映さない**道具**(2 ペインと同じ扱い)
   'sql',
+  // ⚠ テキスト整形(#1233)── ノートを映さない道具(SQL と同じ扱い)
+  'textlab',
+  // ⚠ 計算スクラッチパッド(#1230)── 同じ
+  'calc',
+  // ⚠ 差分マージ(#1231)── 同じ
+  'diff',
+  // ⚠ PC(#300)── 左のタブと同じ中身を別窓でも開く道具
+  'pc',
 ]);
 
 /**
@@ -120,6 +137,14 @@ export class CenterRouter {
   private readonly dual: DualFilerRenderer;
   /** SQL を打つ面(#681 段2)。 */
   private readonly sql: SqlRenderer;
+  /** テキスト整形(#1233)。 */
+  private readonly textlab: TextLabRenderer;
+  /** 計算スクラッチパッド(#1230)。 */
+  private readonly calc: CalcRenderer;
+  /** 差分マージ(#1231)。 */
+  private readonly diff: DiffMergeRenderer;
+  /** PC(パソコンのフォルダ。#300)。 */
+  private readonly pc: PcFolderRenderer;
   private lastPane: PaneView = 'detail';
   /**
    * 🔴 **面を開いて戻ったら、同じ場所に戻る**(user 目線レビュー U-4、2026-08-22)。
@@ -191,6 +216,16 @@ export class CenterRouter {
      * しない(層規約)── 撃つのは `main.ts`。渡さなければ板は題名の行だけを出す。
      */
     onPlaceWanted?: (lids: readonly string[]) => void,
+    /**
+     * 🔴 **パソコンのフォルダ**(#300)。⚠ 持ち主は `main.ts` ── 左のタブ(`browse`)と binder の押し口に渡すのと
+     *   **同じ 1 つ**を渡す(2 つ作ると、押した先と描いている先が別になる)。省略 = このブラウザでは使えない扱い(test 用)。
+     */
+    pcFolder: LocalFolder = new LocalFolder({
+      picker: null,
+      open: async () => {},
+      fail: () => {},
+      onChange: () => {},
+    }),
   ) {
     const pane = (view: PaneView): HTMLElement => {
       const el = document.createElement('div');
@@ -210,6 +245,10 @@ export class CenterRouter {
       search: pane('search'),
       dual: pane('dual'),
       sql: pane('sql'),
+      textlab: pane('textlab'),
+      calc: pane('calc'),
+      diff: pane('diff'),
+      pc: pane('pc'),
       settings: pane('settings'),
       flags: pane('flags'),
       help: pane('help'),
@@ -261,6 +300,17 @@ export class CenterRouter {
     this.search = new SearchRenderer(this.panes.search);
     this.dual = new DualFilerRenderer(this.panes.dual);
     this.sql = new SqlRenderer(this.panes.sql);
+    this.textlab = new TextLabRenderer(this.panes.textlab);
+    this.calc = new CalcRenderer(this.panes.calc);
+    this.diff = new DiffMergeRenderer(this.panes.diff);
+    // 🔴 別窓の PC(#300)── 題(`pane-title`)を付け、中身は別の箱へ描く(`PcFolderRenderer` は箱を空にして描き直すため)
+    const pcTitle = document.createElement('h2');
+    pcTitle.setAttribute('data-pkc-field', 'pane-title');
+    pcTitle.textContent = 'PC(パソコンのフォルダ)';
+    const pcBody = document.createElement('div');
+    pcBody.setAttribute('data-pkc-field', 'pc-body');
+    this.panes.pc.append(pcTitle, pcBody);
+    this.pc = new PcFolderRenderer(pcBody, pcFolder);
     this.settings = new SettingsRenderer(this.panes.settings);
     this.flags = new FlagsRenderer(this.panes.flags);
     /**
@@ -359,6 +409,13 @@ export class CenterRouter {
        */
       if (this.lastPane === 'captures') this.captures.dispose();
       /**
+       * 🔴 **テキスト整形・差分マージから出たら、読み込んだ相手の控えを捨てる**(レビュー ⚠9)。
+       * ⚠ 捨てないと、戻ったとき古い控え(読み込んだ時点の本文)で「置き換える」「保存」が判断される。
+       *   打ちかけの文章(テキスト整形の左の欄)は残す ── 失うのは「どのノートを読み込んだか」だけ。
+       */
+      if (this.lastPane === 'textlab') this.textlab.onHidden();
+      if (this.lastPane === 'diff') this.diff.onHidden();
+      /**
        * 🔴 **編集のまま別の画面へ出たら、持ち越した読む面を捨てる**(#1467 段 5)。
        * ⚠ 持ち越しは「その編集が終わるまで」の物 ── 別の画面を見ている間まで節点を常駐させない
        *   (戻ったとき編集は続いているが、読む面は保存か取り消しの後に今までどおり描く)。
@@ -378,6 +435,10 @@ export class CenterRouter {
     else if (view === 'search') this.search.render(state);
     else if (view === 'dual') this.dual.render(state);
     else if (view === 'sql') this.sql.render(state);
+    else if (view === 'textlab') this.textlab.render(state);
+    else if (view === 'calc') this.calc.render();
+    else if (view === 'diff') this.diff.render(state);
+    else if (view === 'pc') this.pc.render();
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();
     // ⚠ ヘルプにも**コンテナ id を渡す**(Issue #100 段①)── マニュアルも

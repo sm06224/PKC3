@@ -261,20 +261,20 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   /**
    * 🔴 **組み込みの絵が豆腐になっていない**(#281)。
    * ⚠ 上の 2 つ(属性と空文字)では言えない ── 理由は `tileMarks` の docstring。
-   * 🔑 **条件なしに出る組み込みは 10 枚**(`withBuiltinTiles`: 2 ペイン / 予定表 /
-   *   連絡先 / 探す / マニュアル / 自分のパソコン / SQL / 音・動画 / 関係グラフ / 計った時間)──
+   * 🔑 **条件なしに出る組み込みは 15 枚**(`withBuiltinTiles`: 2 ペイン / 予定表 /
+   *   連絡先 / 探す / マニュアル / 自分のパソコン / SQL / 音・動画 / 関係グラフ / 計った時間 / テキスト整形 / 計算スクラッチパッド / 差分マージ / 集計 / PC)──
    *   Office だけは端末次第なので、ここでは数に入れない(#148 の test で見る)。
    */
   const marks = await tileMarks(page, '[data-pkc-tile^="builtin:"]');
-  expectRealGlyphs(marks, 10);
+  expectRealGlyphs(marks, 15);
   /**
-   * ⚠ **指紋が潰れていないか** ── 10 枚が全部同じ絵なら測れていない。
-   * 🔑 割り当ては 10 枚とも違う絵なので、種類数は枚数と同じだけ出るはずである。
+   * ⚠ **指紋が潰れていないか** ── 15 枚が全部同じ絵なら測れていない。
+   * 🔑 割り当ては 15 枚とも違う絵なので、種類数は枚数と同じだけ出るはずである。
    */
   expect(
     new Set(marks.map((m) => m.hash)).size,
     `絵が 1 種類しか出ていない(指紋が潰れている?${marks.map((m) => m.symbol).join(',')})`,
-  ).toBeGreaterThanOrEqual(10);
+  ).toBeGreaterThanOrEqual(15);
 
   // ② 🔴 **PKC2 と同じ順** ── 既定群が先頭、グループ内は app_order 順
   await expect(tiles.nth(0)).toContainText('電卓');
@@ -2836,6 +2836,35 @@ test('🔴 リンクを足して、リンク先の印を取り込む (#856 段�
   // ⚠ **`toBeEnabled()` では見ない** ── いまは `disabled` を立てない作りなので、
   //    それは**常に真**(空振り)である。見るのは**字が戻ったか**である。
   await expect(adopt, '終わったのに「取りに行っています…」のまま').toHaveText('リンク先のアイコンを取り込む');
+
+  /**
+   * 🔴 **手元の画像をアイコンにする**(#856 段③)── 同じタイルに、選んだ画像を当てる。
+   * ⚠ 本物の経路(選ぶ欄 → 検査 → 添付として置く → 本文の鍵 → 一覧の絵)を通す。
+   *   選ぶ欄は常設の 1 つで、ボタンが効く先を渡す。画像でない物は断られ、絵は変わらない。
+   */
+  const before = await tile.first().locator('img[data-pkc-asset-key]').getAttribute('data-pkc-asset-key');
+  const pickBtn = page.locator('[data-pkc-field="pick-icon-file"]');
+  await expect(pickBtn, '画像を選ぶボタンが出ていない').toHaveCount(1);
+  const iconInput = page.locator('[data-pkc-field="icon-file-input"]');
+  await pickBtn.click(); // 効く先を渡す(選ぶ欄の窓は setInputFiles が代わりに閉じる)
+  await iconInput.setInputFiles({ name: 'memo.txt', mimeType: 'text/plain', buffer: Buffer.from('not an image') });
+  await expect(page.getByText('画像ではありません').first(), '画像でない物を断る理由が出ていない').toBeVisible({ timeout: 10_000 });
+  expect(
+    await tile.first().locator('img[data-pkc-asset-key]').getAttribute('data-pkc-asset-key'),
+    '断ったのに絵が変わった',
+  ).toBe(before);
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  await pickBtn.click();
+  await iconInput.setInputFiles({ name: 'mark.png', mimeType: 'image/png', buffer: png });
+  await expect
+    .poll(
+      async () => tile.first().locator('img[data-pkc-asset-key]').getAttribute('data-pkc-asset-key'),
+      { message: '選んだ画像が一覧の絵にならない', timeout: 15_000 },
+    )
+    .not.toBe(before);
 
   /**
    * ⚠ **1 段目の空振りは出る** ── preview に `/favicon.ico` は無いので、

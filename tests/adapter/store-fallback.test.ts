@@ -48,6 +48,7 @@ import { TooNarrowOkStore } from '@adapter/ui/render/too-narrow';
 import { EditorModeStore } from '@adapter/ui/render/editor-mode';
 import { PaneSizeStore } from '@adapter/ui/render/pane-size';
 import { QueryKeyStore } from '@adapter/ui/render/query-key-store';
+import { CalcDraftStore } from '@adapter/ui/render/calc-draft-store';
 import { BrowseModeStore } from '@adapter/ui/render/browse-mode';
 import { PaneVisibilityStore } from '@adapter/ui/render/pane-visibility';
 import { GroupFoldStore } from '@adapter/ui/render/group-fold';
@@ -279,6 +280,16 @@ const CASES: readonly {
     },
     a: 'tags',
     b: null,
+  },
+  {
+    // 🔴 計算スクラッチパッドの打ちかけ(#1230)。空文字は「消す」(空という選択を書かない)
+    name: 'CalcDraftStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new CalcDraftStore(st);
+      return { write: (v) => s.set(v as string), read: () => s.get() };
+    },
+    a: '基本単価 = 3200 円\n合計',
+    b: '',
   },
   {
     name: 'CreateKindStore',

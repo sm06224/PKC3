@@ -467,6 +467,14 @@ export function mdTableAt(body: string, line: number): TableAt | null {
 }
 
 /**
+ * {@link mdTableAt} の gate 版。⚠ 行を何度も引く呼び手(`text-lab.ts` の表の総なめ)が、
+ * 引くたびに本文を割り直さないための口。門は {@link mdTableRun} の 1 本のまま。
+ */
+export function mdTableAtGate(gate: MdCellGate, line: number): TableAt | null {
+  return mdTableRun(gate, line);
+}
+
+/**
  * 🔴 **升を打つときの門を 1 本にまとめた入れ物**(#747)。
  *
  * ⚠ 焼く側(描画)と書く側(`body-rewrite`)が**別々に門を数えていた**ため、

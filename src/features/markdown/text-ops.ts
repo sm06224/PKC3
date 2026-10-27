@@ -813,7 +813,7 @@ export const SINGLE_COLUMN_TABLE_NOTE = '1 列の表にしました(区切りが
  *   でほぼ確実に意図的な区切りだが、comma は自然文にも桁区切りにも大量に
  *   出るので、tab の実在のほうが強い証拠になる)。
  */
-function pickCsvDelimiter(text: string): string {
+export function pickCsvDelimiter(text: string): string {
   const isSelfConsistent = (delimiter: string): boolean => {
     const rows = parseCsv(text, delimiter);
     if (rows === null || rows.length === 0) return false;

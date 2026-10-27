@@ -74,6 +74,11 @@ export interface LauncherTile {
     | 'timers'
     | 'search'
     | 'sql'
+    | 'textlab'
+    | 'calc'
+    | 'diff'
+    | 'query'
+    | 'pc'
     | 'manual'
     | 'selfhost';
   /** `kind === 'url'` のときの飛び先。 */
@@ -420,6 +425,108 @@ export function sqlTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **テキスト整形の組み込みタイル**(#1233。user 指示 2026-10-26「全部やるのです」)。
+ *
+ * ⚠ 本文の上の整え 5 つ(`text-tidy.ts`)とは**別の入口** ── あちらは選んだ範囲を直す。
+ *   こちらは貼った文章を**重ねて整え、結果を見比べてから**ノートへ出す(別ウィンドウ)。
+ * ⚠ 左の列にタブは置かない: タブを足すと広い画面でも既存のタブが「⋯」へ畳まれる(#1900)。
+ *   この窓を閉じて失うのは打った文章だけで、ノートは 1 件も消えない ── アプリで正しい。
+ * 🔑 `kind` は `ViewMode` の綴り(`textlab`)── `launch-tile.ts` がそれを見て別窓へ渡す。
+ */
+export const TEXTLAB_TILE_LID = 'builtin:textlab';
+
+export function textlabTile(): LauncherTile {
+  return {
+    lid: TEXTLAB_TILE_LID,
+    title: 'テキスト整形',
+    group: BUILTIN_GROUP,
+    kind: 'textlab',
+    symbol: 'snippet',
+  };
+}
+
+/**
+ * 🔴 **計算スクラッチパッドの組み込みタイル**(#1230。user 指示 2026-10-26「全部やるのです」)。
+ *
+ * ⚠ 本文の「この行を計算する」(書き込み型)とは**別の入口** ── あちらは字が本文に残る。こちらは
+ *   値を直すと下の結果も変わる**追従型**で、書いた式はこの窓にだけ残り、ノートにするのは user が押したとき。
+ * ⚠ 左の列にタブは置かない(タブを足すと既存のタブが「⋯」へ畳まれる ── #1900)。閉じて失うのは打った式だけで、
+ *   ノートは 1 件も消えない ── アプリで正しい。
+ * 🔑 `kind` は `ViewMode` の綴り(`calc`)── `launch-tile.ts` がそれを見て別窓へ渡す。
+ */
+export const CALC_TILE_LID = 'builtin:calc';
+
+export function calcTile(): LauncherTile {
+  return {
+    lid: CALC_TILE_LID,
+    title: '計算スクラッチパッド',
+    group: BUILTIN_GROUP,
+    kind: 'calc',
+    symbol: 'calculator',
+  };
+}
+
+/**
+ * 🔴 **差分マージの組み込みタイル**(#1231。user 指示 2026-10-26「全部やるのです」)。
+ *
+ * ⚠ 履歴の面の「くらべる相手」(段①)は**見るだけ**で、こちらは**ちがいの 1 か所ずつを取り込んで保存できる**別の入口。
+ *   書き換わるのはノートの側だけで、保存を押すまで何も書かない(置き換え前の版はノートの履歴に残る)。
+ * ⚠ 左の列にタブは置かない(タブを足すと既存のタブが「⋯」へ畳まれる ── #1900)。閉じて失うのは取り込みの途中経過だけで、
+ *   ノートは保存するまで 1 件も変わらない ── アプリで正しい。
+ * 🔑 `kind` は `ViewMode` の綴り(`diff`)── `launch-tile.ts` がそれを見て別窓へ渡す。
+ */
+export const DIFF_TILE_LID = 'builtin:diff';
+
+export function diffTile(): LauncherTile {
+  return {
+    lid: DIFF_TILE_LID,
+    title: '差分マージ',
+    group: BUILTIN_GROUP,
+    kind: 'diff',
+    symbol: 'copy',
+  };
+}
+
+/**
+ * 🔴 **集計の組み込みタイル**(#300。user 指示 2026-10-26「全部やるのです」)。
+ *
+ * ⚠ 集計(#184)は中央の面としてだけ在り、別ウィンドウで開く入口が無かった(#300 の洗い出しで残った 1 つ)。
+ * ⚠ 左の列にタブは足さない: 集計は表の面で左の幅に収めると読めないうえ、タブを足すと既存のタブが「⋯」へ畳まれる(#1900)。
+ *   別ウィンドウが塞がれたときの退避先は、これまでどおり中央の集計の面(確認してから開く)。
+ * 🔑 `kind` は `ViewMode` の綴り(`query`)── `launch-tile.ts` がそれを見て別窓へ渡す。
+ */
+export const QUERY_TILE_LID = 'builtin:query';
+
+export function queryTile(): LauncherTile {
+  return {
+    lid: QUERY_TILE_LID,
+    title: '集計',
+    group: BUILTIN_GROUP,
+    kind: 'query',
+    symbol: 'grid',
+  };
+}
+
+/**
+ * 🔴 **PC(パソコンのフォルダ)の組み込みタイル**(#300。user 指示 2026-10-26「全部やるのです」)。
+ *
+ * ⚠ 左の列のタブ「PC」(#215)は残す ── 別ウィンドウが塞がれたときの退避先もそのタブ(`browse-mode.ts` の `HOME_TAB`)。
+ *   別ウィンドウのほうで繋いだフォルダは、**その窓だけの物**になる(フォルダへの許可は窓ごとに持つ)。
+ * 🔑 `kind` は `ViewMode` の綴り(`pc`)。
+ */
+export const PC_TILE_LID = 'builtin:pc';
+
+export function pcTile(): LauncherTile {
+  return {
+    lid: PC_TILE_LID,
+    title: 'PC',
+    group: BUILTIN_GROUP,
+    kind: 'pc',
+    symbol: 'monitor',
+  };
+}
+
+/**
  * 🔴 **マニュアルの組み込みタイル**(#645。user 要望 2026-08-31
  * 「**ヘルプの中からマニュアルをアプリとして出してください**」)。
  *
@@ -536,6 +643,15 @@ export function withBuiltinTiles(
   builtin.push(graphTile());
   // ⚠ 計った時間(#683 ①)も末尾 ── 同じ理由(位置を動かさない)
   builtin.push(timersTile());
+  // ⚠ テキスト整形(#1233)も末尾 ── 同じ理由(位置を動かさない)
+  builtin.push(textlabTile());
+  // ⚠ 計算スクラッチパッド(#1230)も末尾 ── 同じ理由(位置を動かさない)
+  builtin.push(calcTile());
+  // ⚠ 差分マージ(#1231)も末尾 ── 同じ理由(位置を動かさない)
+  builtin.push(diffTile());
+  // ⚠ 集計・PC(#300)も末尾 ── 同じ理由(位置を動かさない)
+  builtin.push(queryTile());
+  builtin.push(pcTile());
   /**
    * 🔴 **組み込みは末尾へ「収納」する**(#531 段② / #281。user 指示 2026-08-28
    * 「組み込みアプリをグループに**収納して**整理する」)。
@@ -579,6 +695,11 @@ export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'timers',
   'search',
   'sql',
+  'textlab',
+  'calc',
+  'diff',
+  'query',
+  'pc',
   'manual',
   'selfhost',
 ]);

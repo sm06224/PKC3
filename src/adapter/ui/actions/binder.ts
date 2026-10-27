@@ -779,6 +779,36 @@ import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { countCappedCells } from '@features/query/sql-cell';
 import { openFolderLid } from './open-folder-lid';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
+import { labNoteTitle } from '@features/markdown/text-lab';
+import { sheetNoteTitle, sheetToMarkdown, sheetToText } from '@features/calc/sheet';
+import { shortStamp } from '@features/revision/diff-view';
+import type { MergeSession } from '@features/revision/merge-hunks';
+import {
+  diffSession,
+  diffSideText,
+  dirtySides,
+  isEditableSide,
+  paintDiffBody,
+  paintDiffSides,
+  rebuildMerge,
+  sayDiff,
+  type DiffSideName,
+  type DiffSourceKind,
+} from '../render/diffmerge';
+import {
+  currentCalcRows,
+  flushCalcDraft,
+  refreshCalc,
+  sayCalc,
+} from '../render/calc';
+import {
+  LAB_TABLE_ATTR,
+  currentLabOutput,
+  labLoaded,
+  refreshTextLab,
+  setLabLoaded,
+  syncTextLabButtons,
+} from '../render/textlab';
 // 🔴 手持ちのファイルを開く選び所の印(#854 段②)
 import {
   addSourceLidOf,
@@ -1895,6 +1925,23 @@ export interface BinderServices {
    */
   readBodies?(lids: readonly string[]): Promise<ReadonlyMap<string, string>>;
   /**
+   * 🔴 **差分マージの相手に選んだノートの、履歴の版の一覧**(#1231)。新しい版が先とは限らない ── 並べ替えは呼び側。
+   * ⚠ **省略可** ── 無い環境では「この版では版を選べません」と断るだけで、他は壊れない(`readBodies` と同じ規律)。
+   * ⚠ 本文は運ばない(一覧だけ)。読むだけで、1 バイトも書かない。
+   */
+  diffListRevisions?(lid: string): Promise<
+    readonly { id: string; revOrder: number; createdAt: string | null; title: string | null }[]
+  >;
+  /** 🔴 履歴の版 1 つの本文(#1231)。読めなければ `null`。⚠ 読むだけ。省略可(`diffListRevisions` と同じ)。 */
+  diffReadRevision?(revId: string): Promise<string | null>;
+  /**
+   * 🔴 **他のウィンドウに、PC のファイルとのつながりを渡してほしいと頼む**(差分マージの別ウィンドウ ⚠4)。
+   * 頼めたら `true`(返事は後から着き、一覧が増える)。放送が無い環境では `false`。⚠ 省略可。
+   */
+  requestLinkedFiles?(): boolean;
+  /** 🔴 取り込んだ変更を破棄して相手を選び直してよいか聞く(差分マージ ⚠6)。⚠ 省略可 ── 無い環境は聞かずに進める。 */
+  confirmDiscardMerge?(): Promise<boolean>;
+  /**
    * 🔴 **飛んでいる書込が着くまで待つ**(#288)。
    *
    * ⚠ 書込は effect 層の chain に直列化されるが、**編集の開始はその外**に在る ──
@@ -2148,6 +2195,11 @@ export interface BinderServices {
    * ⚠ 呼ぶのは**設定の門を通した後**である(押していないのに通信しない)。
    */
   adoptLinkIcon?(url: string): Promise<{ ok: true; assetKey: string } | { ok: false; why: string }>;
+  /**
+   * 🔴 **選んだ画像を、アプリの目印として置く**(#856 段③)。通信しない(門は要らない)。
+   * ⚠ 判断(画像か・大きさ)は `adopt-icon-file.ts` に在る ── ここは配線だけ。
+   */
+  adoptIconFile?(file: File): Promise<{ ok: true; assetKey: string } | { ok: false; why: string }>;
   /**
    * 🔴 **添付を別の窓で見る**(#192 で画像、2026-08-15 に PDF を追加)。
    * ⚠ 実体は adapter/platform 側(ObjectURL の寿命が絡むので、binder は**呼ぶだけ**)。
@@ -3132,6 +3184,21 @@ const TAG_INPUT_ADD: ReadonlyMap<string, string> = new Map([
  *   だから起動だけでなく**設定の口も**ここを通す(#848)。
  * 🔑 綴りは `render/target-lid.ts` の 1 か所(§7)。
  */
+/**
+ * 🔴 **タイルの目印を書き、書けたかをその場で確かめる**(#856 段②・③の共通)。
+ * ⚠ `SET_APP_TILE` は `phase !== 'ready'` や別の lid の書込中を黙って捨てる。取りに行った / 選んだ後に
+ *   捨てられると「押したのに何も起きない」になるので、受かれば `tileWrite` がこの lid で 1 つ進むことで確かめ、
+ *   進んでいなければ `failure` を言う。
+ */
+function setTileIconChecked(dispatcher: Dispatcher, lid: string, assetKey: string, failure: string): void {
+  const was = dispatcher.getState().tileWrite;
+  const mine = was !== null && was.lid === lid ? was.n : 0;
+  dispatcher.dispatch({ type: 'SET_APP_TILE', lid, iconAssetKey: assetKey });
+  const now = dispatcher.getState().tileWrite;
+  if (now !== null && now.lid === lid && now.n === mine + 1) return;
+  dispatcher.dispatch({ type: 'OP_FAILED', error: failure });
+}
+
 function targetLid(dispatcher: Dispatcher, target: HTMLElement): string | null {
   return target.getAttribute(TARGET_LID_ATTR) ?? dispatcher.getState().selectedLid;
 }
@@ -3226,6 +3293,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    *   少なくとも**押す時点**では止める。
    */
   'adopt-link-icon',
+  // 🔴 画像を選んで目印にするのも `SET_APP_TILE` を撃つ(#856 段③)
+  'pick-icon-file',
   'toggle-todo',
   /**
    * 🔴 **本文を書く点では `toggle-todo` と同じ**(2026-08-19 のレビュー W-4)。
@@ -3296,6 +3365,14 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    *   (`contacts-quick-add` と同じ)。機械検査は `tests/repo-hygiene.test.ts`。
    */
   'sql-to-note',
+  // 🔴 テキスト整形の結果を新しいノートにする / 読み込んだノートの本文を置き換える(#1233)── どちらも書込
+  'textlab-to-note',
+  'textlab-apply-note',
+  // 🔴 計算スクラッチパッドの結果を新しいノートにする(#1230)── `CREATE_ENTRY` を撃つので同じ門
+  'calc-to-table',
+  'calc-to-text',
+  // 🔴 差分マージの「変更を保存」(#1231)── 書き換わったノートを `REIMPORT_BODY` で保存する(同じ門)
+  'diff-save',
   /**
    * 🔴 **予定から外すのも本文を書く**(#498)── 行の `@…` を剥がす
    *   (`SET_TASK_DATE`)か、frontmatter の `date:` を消す(`SET_ENTRY_DATE`)。
@@ -6504,6 +6581,21 @@ export function runGlobalCommand(
     });
     return true;
   }
+  /**
+   * 🔴 **テキスト整形・計算スクラッチパッド・差分マージも押しボタンを持たない**(レビュー ⚠2)── `view-sql` と同じく直に投げる。
+   * ⚠ 左にタブが無い面なので、この 3 行が左の一覧を押して中央が本文へ戻った後の**戻り道**になる(`STAY_ON_SELECT` の
+   *   テキスト整形以外は、ノートを選ぶと本文へ退く)。
+   */
+  if (cmd === 'view-textlab' || cmd === 'view-calc' || cmd === 'view-diff') {
+    if (dry) return true;
+    prevent();
+    const mode = cmd === 'view-textlab' ? 'textlab' : cmd === 'view-calc' ? 'calc' : 'diff';
+    dispatcher.dispatch({
+      type: 'SET_VIEW_MODE',
+      mode: nextViewMode(dispatcher.getState().viewMode, mode),
+    });
+    return true;
+  }
   if (cmd === 'open-palette') {
     if (dry) return true;
     prevent();
@@ -7966,6 +8058,66 @@ const SEEK_RESEEK_TOLERANCE_S = 0.5;
  *   (2 度押したのに最初の位置へ飛ぶ)。聞き手は 1 本にして、**最新の位置**を読ませる。
  */
 const pendingSeek = new WeakMap<HTMLMediaElement, number>();
+
+/**
+ * 🔴 **再生中の文字起こしの行を光らせる**(#1232。user 指示 2026-10-26 ── 「再生中、いま話されている行が見える」)。
+ *
+ * 再生機(`attachment-media`)の位置を見て、同じ詳細の説明の中の時刻の行(`data-pkc-seek-line`。
+ * `markdown-render.ts` が置く)のうち、**位置以前でいちばん後ろの行**に `data-pkc-seek-active` を付ける。
+ * ⚠ 位置が最初の行より前なら、どの行も光らせない。⚠ 同じ行のままなら DOM に触れない(1 秒に数回の更新)。
+ * ⚠ 再生機と説明が**同じ親**の下に居る面だけ(`seekMedia` と同じ探し方 ── 別の添付の行を光らせない)。
+ */
+const activeSeekLine = new WeakMap<Element, Element | null>();
+/**
+ * 説明ごとの時刻の行の控え(行の要素と ms)。⚠ `timeupdate` は 1 秒に数回来る ── 毎回 DOM を引き直さない。
+ * 説明が描き直されると要素が差し替わる(先頭と末尾が DOM から外れる)ので、そのときだけ作り直す。
+ */
+const seekLineCache = new WeakMap<Element, { lines: Element[]; ms: number[]; at: number }>();
+function seekLinesOf(prose: Element): { lines: Element[]; ms: number[]; at: number } {
+  const hit = seekLineCache.get(prose);
+  if (hit !== undefined && (hit.lines.length === 0 || (hit.lines[0]!.isConnected && hit.lines[hit.lines.length - 1]!.isConnected))) {
+    return hit;
+  }
+  const lines: Element[] = [];
+  const ms: number[] = [];
+  for (const line of prose.querySelectorAll('[data-pkc-seek-line]')) {
+    const v = Number(line.querySelector('[data-pkc-seek-ms]')?.getAttribute('data-pkc-seek-ms'));
+    if (!Number.isFinite(v)) continue;
+    lines.push(line);
+    ms.push(v);
+  }
+  const built = { lines, ms, at: -1 };
+  seekLineCache.set(prose, built);
+  return built;
+}
+/** `ms` が昇順のとき、位置以前でいちばん後ろの行の添字(無ければ -1)。前回の位置の近くから確かめ、外れたら二分探索。 */
+function lastLineAtOrBefore(ms: readonly number[], now: number, prev: number): number {
+  const n = ms.length;
+  if (prev >= 0 && prev < n && ms[prev]! <= now && (prev + 1 >= n || now < ms[prev + 1]!)) return prev;
+  let lo = 0;
+  let hi = n; // ms[k] <= now を満たす先頭側の個数を探す
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (ms[mid]! <= now) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo - 1;
+}
+function markActiveSeekLine(media: HTMLMediaElement): void {
+  if (media.getAttribute('data-pkc-field') !== 'attachment-media') return;
+  // 説明の器(`data-pkc-prose`)と再生機の器(`attachment-preview`)は同じ host の兄弟(`seekMedia` の探し方と逆向き)
+  const host = media.closest('[data-pkc-field="attachment-preview"]')?.parentElement ?? media.parentElement;
+  const prose = host?.querySelector('[data-pkc-prose]');
+  if (prose === null || prose === undefined) return;
+  const cache = seekLinesOf(prose);
+  const idx = lastLineAtOrBefore(cache.ms, media.currentTime * 1000, cache.at);
+  cache.at = idx;
+  const active: Element | null = idx >= 0 ? cache.lines[idx]! : null;
+  if (activeSeekLine.get(prose) === active && (active === null || active.hasAttribute('data-pkc-seek-active'))) return;
+  for (const old of prose.querySelectorAll('[data-pkc-seek-active]')) old.removeAttribute('data-pkc-seek-active');
+  active?.setAttribute('data-pkc-seek-active', '');
+  activeSeekLine.set(prose, active);
+}
 function seekMedia(dispatcher: Dispatcher, target: HTMLElement): void {
   const raw = target.getAttribute('data-pkc-seek-ms');
   const ms = Number(raw);
@@ -8053,6 +8205,328 @@ function diagramScopeOf(host: HTMLElement, root: HTMLElement): ParentNode {
     host.closest<HTMLElement>('.pkc-md-rendered') ??
     root
   );
+}
+
+/** 🔴 テキスト整形の面(#1233)の、打つ欄 4 つ。 */
+const TEXTLAB_FIELDS: ReadonlySet<string> = new Set([
+  'textlab-input',
+  'textlab-pattern',
+  'textlab-replacement',
+  'textlab-flags',
+]);
+
+function textlabPane(from: Element): HTMLElement | null {
+  return from.closest<HTMLElement>('[data-pkc-view-pane="textlab"]');
+}
+
+function calcPane(from: Element): HTMLElement | null {
+  return from.closest<HTMLElement>('[data-pkc-view-pane="calc"]');
+}
+
+/** 計算スクラッチパッドの結果を、新しいノートにする(表 / テキスト)。 */
+function calcToNote(dispatcher: Dispatcher, target: HTMLElement, form: 'table' | 'text'): void {
+  const pane = calcPane(target);
+  if (pane === null) return;
+  const rows = currentCalcRows(pane);
+  const body = form === 'table' ? sheetToMarkdown(rows) : sheetToText(rows);
+  if (body === null || body.trim() === '') return;
+  const state = dispatcher.getState();
+  // 🔑 編集中は作れないので、そう言う(`sql-to-note` と同じ ── 黙って捨てない)
+  if (state.phase !== 'ready') {
+    sayCalc(pane, blockedActionNote(state.phase) ?? '');
+    return;
+  }
+  const title = sheetNoteTitle(new Date());
+  const lid = generateLid();
+  dispatcher.dispatch({
+    type: 'CREATE_ENTRY',
+    archetype: 'text',
+    lid,
+    title,
+    body,
+    // 🔴 いま左の一覧で開いているフォルダの中に作る(「+ ノート」と同じ置き場)
+    parentLid: openFolderLid(state),
+    relationId: generateLid(),
+    edit: false,
+  });
+  sayCalc(
+    pane,
+    dispatcher.getState().entryMetas.has(lid)
+      ? `新しいノート「${title}」を作りました`
+      : '作れませんでした(もう一度押してください)',
+  );
+}
+
+function diffPane(from: Element): HTMLElement | null {
+  return from.closest<HTMLElement>('[data-pkc-view-pane="diff"]');
+}
+
+function diffSideOf(el: Element): DiffSideName | null {
+  const v = el.getAttribute('data-pkc-side');
+  return v === 'left' || v === 'right' ? v : null;
+}
+
+const repaintDiff = (pane: HTMLElement): void => {
+  paintDiffSides(pane);
+  paintDiffBody(pane);
+};
+
+/** 取り込みの共通の門(読むだけの側・同じノート)を通してから、1 回取り込む。 */
+function diffTake(pane: HTMLElement, from: 'a' | 'b', apply: (m: MergeSession) => boolean): void {
+  const s = diffSession(pane);
+  const dest = from === 'a' ? s.right : s.left;
+  if (s.merge === null) return;
+  if (!isEditableSide(dest)) {
+    sayDiff(pane, `${from === 'a' ? '右' : '左'}は読むだけの相手なので、取り込めません`);
+    return;
+  }
+  if (s.left.lid !== null && s.left.lid === s.right.lid && s.left.kind === 'note' && s.right.kind === 'note') {
+    sayDiff(pane, '左右が同じノートです。別のノートを選んでください');
+    return;
+  }
+  s.message = '';
+  apply(s.merge);
+  paintDiffBody(pane);
+}
+
+/**
+ * 🔴 **取り込んだ変更があるときは、相手を選び直す前に聞く**(レビュー ⚠6)。
+ * ⚠ 選び直すと取り込みの途中経過が全部消える(`rebuildMerge`)。やめたら選び所を元の値へ戻す。
+ */
+function guardDiscard(pane: HTMLElement, services: BinderServices, go: () => void): void {
+  const m = diffSession(pane).merge;
+  if (m === null || !m.canUndo || services.confirmDiscardMerge === undefined) {
+    go();
+    return;
+  }
+  // 聞いている間も、選び所を元の値に見せておく(決めるまで state は動かさない)
+  repaintDiff(pane);
+  void services.confirmDiscardMerge().then((ok) => {
+    if (ok) go();
+    else repaintDiff(pane);
+  });
+}
+
+/** 選び所の変更を state へ当てる(`diff-pick` の本体)。 */
+function diffPick(
+  pane: HTMLElement,
+  side: DiffSideName,
+  which: string | null,
+  value: string,
+  services: BinderServices,
+): void {
+  const st = diffSession(pane)[side];
+  switch (which) {
+    case 'kind': {
+      st.kind = value as DiffSourceKind;
+      st.lid = null;
+      st.revId = null;
+      st.revs = null;
+      st.token += 1;
+      st.load = 'empty';
+      st.text = null;
+      st.baseline = null;
+      st.note = '';
+      diffSession(pane).message = '';
+      // 🔴 PC のファイルを選んだら、他のウィンドウが持っているつながりを聞く(⚠4。返事は後から着いて一覧が増える)
+      if (st.kind === 'file' && services.requestLinkedFiles?.() === false) {
+        st.note = '他のウィンドウとつながりを分け合えません。本体のウィンドウの左の PC タブで取り込むと選べます';
+      }
+      rebuildMerge(pane);
+      repaintDiff(pane);
+      return;
+    }
+    case 'note': {
+      st.lid = value === '' ? null : value;
+      st.revId = null;
+      st.revs = null;
+      if (st.kind === 'rev' && st.lid !== null) void diffLoadRevs(pane, side, services);
+      else void diffLoadSide(pane, side, services);
+      return;
+    }
+    case 'rev': {
+      st.revId = value === '' ? null : value;
+      void diffLoadSide(pane, side, services);
+      return;
+    }
+  }
+}
+
+/**
+ * 差分マージの片側を読み込む。⚠ 世代(`token`)を進めてから読む ── 選び直しの前の読み込みが遅れて着いても、
+ * いまの選びを上書きしない。読めなかった理由は**その側の一言**に出す(黙って空にしない)。
+ */
+async function diffLoadSide(
+  pane: HTMLElement,
+  side: DiffSideName,
+  services: BinderServices,
+): Promise<void> {
+  const s = diffSession(pane);
+  const st = s[side];
+  st.token += 1;
+  const token = st.token;
+  st.text = null;
+  st.baseline = null;
+  st.note = '';
+  s.message = '';
+  const ready = st.kind === 'rev' ? st.lid !== null && st.revId !== null : st.lid !== null;
+  if (!ready) {
+    st.load = 'empty';
+    rebuildMerge(pane);
+    repaintDiff(pane);
+    return;
+  }
+  st.load = 'loading';
+  rebuildMerge(pane);
+  repaintDiff(pane);
+  const fail = (why: string): void => {
+    if (st.token !== token) return;
+    st.load = 'failed';
+    st.note = why;
+    rebuildMerge(pane);
+    repaintDiff(pane);
+  };
+  try {
+    let text: string | null = null;
+    if (st.kind === 'note') {
+      if (services.readBodies === undefined) return fail('このバージョンでは本文を読めません');
+      text = (await services.readBodies([st.lid!])).get(st.lid!) ?? null;
+      if (text === null) return fail('ノートの本文を読めませんでした');
+    } else if (st.kind === 'rev') {
+      if (services.diffReadRevision === undefined) return fail('このバージョンでは履歴の版を読めません');
+      text = await services.diffReadRevision(st.revId!);
+      if (text === null) {
+        return fail('その版の本文を読めませんでした(1 つのノートの版は 100 件までで、超えると古い版から消えます)');
+      }
+    } else {
+      if (services.readLinkedFile === undefined) return fail('このバージョンでは PC のファイルを読めません');
+      const r = await services.readLinkedFile(st.lid!);
+      if (r === null) return fail('ファイルを読めませんでした(つながりが切れているか、許可が必要です)');
+      if (typeof r !== 'string') return fail('ファイルが大きいため、見比べられません');
+      text = r;
+    }
+    if (st.token !== token) return;
+    st.text = text;
+    st.baseline = st.kind === 'note' ? text : null;
+    st.load = 'loaded';
+    rebuildMerge(pane);
+    repaintDiff(pane);
+  } catch (e) {
+    fail(`読み込めませんでした(${e instanceof Error ? e.message : String(e)})`);
+  }
+}
+
+/** 版の一覧を読む(相手の種類が「履歴の版」でノートを選んだとき)。 */
+async function diffLoadRevs(pane: HTMLElement, side: DiffSideName, services: BinderServices): Promise<void> {
+  const st = diffSession(pane)[side];
+  st.token += 1;
+  const token = st.token;
+  st.revs = null;
+  st.revId = null;
+  st.text = null;
+  st.load = 'empty';
+  st.note = '';
+  rebuildMerge(pane);
+  repaintDiff(pane);
+  if (services.diffListRevisions === undefined) {
+    st.note = 'このバージョンでは版の一覧を読めません';
+    repaintDiff(pane);
+    return;
+  }
+  try {
+    const rows = await services.diffListRevisions(st.lid!);
+    if (st.token !== token) return;
+    st.revs = [...rows]
+      .sort((a, b) => b.revOrder - a.revOrder)
+      .map((r) => ({
+        id: r.id,
+        label: `${shortStamp(r.createdAt) ?? '(日時なし)'}${r.title === null || r.title === '' ? '' : `  ${r.title}`}`,
+      }));
+  } catch (e) {
+    if (st.token !== token) return;
+    st.revs = [];
+    st.load = 'failed';
+    st.note = `版の一覧を読めませんでした(${e instanceof Error ? e.message : String(e)})`;
+  }
+  repaintDiff(pane);
+}
+
+/**
+ * 差分マージの保存。⚠ 書く前に**もう一度読んで**、読み込んだ時点と食い違っていたら書かない(別のウィンドウでの編集を上書きしない)。
+ * 書いた後は**読み直して**、本当に保存されたかを見てから「保存しました」と言う。
+ */
+async function diffSave(dispatcher: Dispatcher, pane: HTMLElement, services: BinderServices): Promise<void> {
+  const dirty = dirtySides(pane);
+  if (dirty.length === 0) return;
+  const state = dispatcher.getState();
+  if (state.phase !== 'ready') {
+    sayDiff(pane, blockedActionNote(state.phase) ?? '');
+    return;
+  }
+  const s = diffSession(pane);
+  if (s.left.lid !== null && s.left.lid === s.right.lid && dirty.length > 1) {
+    sayDiff(pane, '左右が同じノートです。別のノートを選んでください');
+    return;
+  }
+  if (services.readBodies === undefined) {
+    sayDiff(pane, 'このバージョンでは保存できません');
+    return;
+  }
+  const titleOf = (lid: string): string => state.entryMetas.get(lid)?.title ?? lid;
+  const lids = dirty.map((d) => d.lid);
+  const now = await services.readBodies(lids);
+  for (const d of dirty) {
+    if (now.get(d.lid) !== d.baseline) {
+      sayDiff(pane, `読み込んだあとに「${titleOf(d.lid)}」が変わりました。保存せず、もう一度読み込んでください`);
+      return;
+    }
+  }
+  for (const d of dirty) {
+    dispatcher.dispatch({
+      type: 'REIMPORT_BODY',
+      lid: d.lid,
+      body: d.text,
+      notice: '「{title}」を、差分マージの内容で置き換えました(前の中身は履歴に残しています)',
+    });
+  }
+  await (services.settle?.() ?? null);
+  const after = await services.readBodies(lids);
+  const bad = dirty.filter((d) => after.get(d.lid) !== d.text);
+  if (bad.length > 0) {
+    sayDiff(pane, `保存できませんでした: ${bad.map((d) => `「${titleOf(d.lid)}」`).join('、')}(画面の下の理由を見てください)`);
+    return;
+  }
+  // 保存できた ── いまの字を新しい「読み込んだ状態」にして、残りのちがいを見つけ直す
+  for (const side of ['left', 'right'] as const) {
+    const st = s[side];
+    const text = diffSideText(pane, side);
+    if (text !== null && st.load === 'loaded') {
+      st.text = text;
+      st.baseline = st.kind === 'note' ? text : null;
+    }
+  }
+  rebuildMerge(pane);
+  s.message = `保存しました: ${dirty.map((d) => `「${titleOf(d.lid)}」`).join('、')}(置き換え前の版はノートの履歴にあります)`;
+  repaintDiff(pane);
+}
+
+/** テキスト整形の面の「結果の上の 1 行」に一言置く(面の中の出来事は面に出す)。 */
+function say(pane: HTMLElement, text: string): void {
+  const el = pane.querySelector<HTMLElement>('[data-pkc-field="textlab-summary"]');
+  if (el !== null) el.textContent = text;
+}
+
+/**
+ * テキスト整形の描き直し(#1233)。⚠ 置換はワーカーで走る(非同期)── 終わったあとに「読み込む / 置き換える」の押せる・押せないも
+ * 合わせ直す。置換が無いときは、これまでどおり**その場で**描き終わる。
+ */
+function refreshLab(
+  pane: HTMLElement,
+  dispatcher: Dispatcher,
+  opts: { debounce?: boolean } = {},
+): void {
+  void refreshTextLab(pane, opts).then(() => syncTextLabButtons(pane, dispatcher.getState()));
+  syncTextLabButtons(pane, dispatcher.getState());
 }
 
 const ACTIONS: Record<string, ActionHandler> = {
@@ -8225,6 +8699,21 @@ const ACTIONS: Record<string, ActionHandler> = {
   'capture-trim-end': (dispatcher, target) => markTrim(dispatcher, target, 'end'),
   'capture-trim-clear': (dispatcher) => {
     dispatcher.dispatch({ type: 'CLEAR_CAPTURE_TRIM' });
+  },
+  /**
+   * 🔴 **前後の無音を除く範囲を、切り出しの印に入れる**(#1232。user 指示 2026-10-26)。
+   *
+   * ⚠ 範囲は**描画器が波形の山から決めて、押したボタンに載せている**(`data-pkc-start-ms` / `data-pkc-end-ms`)──
+   *   ここで山を引き直さない。⚠ 切るのは既存の `capture-trim-run`(印を入れるだけ)。
+   * ⚠ 前の印は**先に消す** ── 片方だけ残った印と新しい範囲が逆転すると、`SET_CAPTURE_TRIM_MARK` が片側を落とす。
+   */
+  'capture-trim-silence': (dispatcher, target) => {
+    const startMs = Number(target.getAttribute('data-pkc-start-ms'));
+    const endMs = Number(target.getAttribute('data-pkc-end-ms'));
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || !(endMs > startMs)) return;
+    dispatcher.dispatch({ type: 'CLEAR_CAPTURE_TRIM' });
+    dispatcher.dispatch({ type: 'SET_CAPTURE_TRIM_MARK', edge: 'start', ms: startMs });
+    dispatcher.dispatch({ type: 'SET_CAPTURE_TRIM_MARK', edge: 'end', ms: endMs });
   },
   /**
    * 🔴 **切り出す**(#683 段②a)。⚠ 段取りは `capture-trim.ts` が持つ ──
@@ -13729,21 +14218,26 @@ const ACTIONS: Record<string, ActionHandler> = {
          * 🔑 受かったかは**この場で読める** ── 受かれば `tileWrite` がこの lid で
          *   1 つ進む。進んでいなければ**捨てられた**ので、黙らずに言う。
          */
-        const was = dispatcher.getState().tileWrite;
-        const mine = was !== null && was.lid === lid ? was.n : 0;
-        dispatcher.dispatch({ type: 'SET_APP_TILE', lid, iconAssetKey: got.assetKey });
-        const now = dispatcher.getState().tileWrite;
-        if (now !== null && now.lid === lid && now.n === mine + 1) return;
-        dispatcher.dispatch({
-          type: 'OP_FAILED',
-          error: 'リンク先のアイコンは取れましたが、ほかの保存が動いているので入れられませんでした(もう一度押してください)',
-        });
+        setTileIconChecked(dispatcher, lid, got.assetKey, 'リンク先のアイコンは取れましたが、ほかの保存が動いているので入れられませんでした(もう一度押してください)');
       })
       .finally(() => {
         adoptingLinkIcons.delete(lid);
         // ⚠ `render` が組み直していれば、この器はもう画面に無い(触っても害は無い)
         if (btn !== null && label !== null) btn.textContent = label;
       });
+  },
+  /**
+   * 🔴 **手元の画像を、アプリの目印にする**(#856 段③)。ファイルを選ぶ欄を開く ──
+   * 効く先は**押したボタンが持つ**(留めた枠でも、その枠のノートに効く。`replace-attachment-file` と同じ作法)。
+   * 選んだあとは `change`(`icon-file-input`)が受ける。
+   */
+  'pick-icon-file': (dispatcher, target, _services, root) => {
+    const lid = targetLid(dispatcher, target);
+    if (!lid) return;
+    const input = root.querySelector<HTMLInputElement>('[data-pkc-field="icon-file-input"]');
+    if (input === null) return;
+    input.setAttribute('data-pkc-icon-lid', lid);
+    input.click();
   },
   'pick-app-icon': (dispatcher, target) => {
     // 🔴 押した絵が「効く先」も持つ(#848)── 表は留めた枠にも出る
@@ -15793,6 +16287,266 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     dispatcher.dispatch({ type: 'SQL_SAVED', title, kind: 'note', capped: countCappedCells(p.rows) });
+  },
+  /**
+   * 🔴 **テキスト整形の面**(#1233)。⚠ 整え方・入力・結果は**面の DOM が持つ**(state に写さない ──
+   *   「まだ当てていない下書き」であって、アプリの状態ではない。整理案 `plan-input` と同じ扱い)。
+   *   規則は `features/markdown/text-lab.ts` の 1 本で、ここは**押された事実を面へ渡す**だけ。
+   */
+  'textlab-toggle': (dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    target.setAttribute('aria-pressed', target.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    refreshLab(pane, dispatcher);
+  },
+  // ⚠ 表の変換は 4 択(同じ組の中で押したものだけが押された状態になる)
+  'textlab-table': (dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    for (const b of pane.querySelectorAll<HTMLElement>(`[${LAB_TABLE_ATTR}]`)) {
+      b.setAttribute('aria-pressed', b === target ? 'true' : 'false');
+    }
+    refreshLab(pane, dispatcher);
+  },
+  'textlab-clear': (dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    const input = pane.querySelector<HTMLTextAreaElement>('[data-pkc-field="textlab-input"]');
+    if (input !== null) {
+      input.value = '';
+      input.focus();
+    }
+    refreshLab(pane, dispatcher);
+  },
+  'textlab-load-note': (dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    const state = dispatcher.getState();
+    const ob = state.openBody;
+    if (state.selectedLid === null || ob === null || ob.lid !== state.selectedLid) {
+      say(pane, '先に、左の一覧でノートを開いてください');
+      return;
+    }
+    const input = pane.querySelector<HTMLTextAreaElement>('[data-pkc-field="textlab-input"]');
+    if (input === null) return;
+    input.value = ob.body;
+    setLabLoaded(pane, ob.lid, ob.body);
+    refreshLab(pane, dispatcher);
+  },
+  'textlab-copy': (dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    const cur = currentLabOutput(pane);
+    if (cur === null) {
+      say(pane, '置換を計算しています。終わってからもう一度押してください');
+      return;
+    }
+    const { out } = cur;
+    if (out.text === '') return;
+    finishCopy(dispatcher, target, copyPlainText(out.text));
+  },
+  'textlab-to-note': (dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    const cur = currentLabOutput(pane);
+    if (cur === null) {
+      say(pane, '置換を計算しています。終わってからもう一度押してください');
+      return;
+    }
+    const { out } = cur;
+    if (out.text === '') return;
+    const state = dispatcher.getState();
+    // 🔑 編集中は作れないので、そう言う(`sql-to-note` と同じ ── 黙って捨てない)
+    if (state.phase !== 'ready') {
+      say(pane, blockedActionNote(state.phase) ?? '');
+      return;
+    }
+    const title = labNoteTitle(out.text, new Date());
+    const lid = generateLid();
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid,
+      title,
+      body: out.text,
+      // 🔴 いま左の一覧で開いているフォルダの中に作る(「+ ノート」と同じ置き場)
+      parentLid: openFolderLid(state),
+      relationId: generateLid(),
+      edit: false,
+    });
+    say(
+      pane,
+      dispatcher.getState().entryMetas.has(lid)
+        ? `新しいノート「${title}」を作りました`
+        : '作れませんでした(もう一度押してください)',
+    );
+  },
+  'textlab-apply-note': (dispatcher, target) => {
+    const pane = textlabPane(target);
+    if (pane === null) return;
+    const cur = currentLabOutput(pane);
+    if (cur === null) {
+      say(pane, '置換を計算しています。終わってからもう一度押してください');
+      return;
+    }
+    const { out } = cur;
+    const state = dispatcher.getState();
+    const loaded = labLoaded(pane);
+    if (loaded === null || loaded.lid !== state.selectedLid) {
+      say(pane, '「開いているノートを読み込む」を押したノートが開いているときに使えます');
+      return;
+    }
+    if (state.phase !== 'ready') {
+      say(pane, blockedActionNote(state.phase) ?? '');
+      return;
+    }
+    // ⚠ 読み込んだ後にノートが変わっていたら置き換えない(別のウィンドウでの編集を上書きしない)
+    if (state.openBody?.lid !== loaded.lid || state.openBody.body !== loaded.body) {
+      say(pane, '読み込んだあとにノートが変わりました。もう一度「開いているノートを読み込む」を押してください');
+      return;
+    }
+    if (out.text === loaded.body) {
+      say(pane, '変わる所がないため、置き換えていません');
+      return;
+    }
+    dispatcher.dispatch({
+      type: 'REIMPORT_BODY',
+      lid: loaded.lid,
+      body: out.text,
+      notice: '「{title}」の本文を、テキスト整形の結果で置き換えました(前の中身は履歴に残しています)',
+    });
+    // 置き換えた後は「読み込んだ」状態を捨てる(同じ結果で二重に置き換えない)
+    setLabLoaded(pane, '', '');
+    say(pane, 'ノートの本文を置き換えました(前の版はノートの履歴にあります)');
+    syncTextLabButtons(pane, dispatcher.getState());
+  },
+  /**
+   * 🔴 **計算スクラッチパッドの面**(#1230)。⚠ 式と結果は**面の DOM が持つ**(state に写さない ──
+   *   打ちかけは `pkc3.calc-draft` が覚える)。規則は `features/calc/sheet.ts` の 1 本で、ここは**押された事実を渡す**だけ。
+   */
+  'calc-to-table': (dispatcher, target) => {
+    calcToNote(dispatcher, target, 'table');
+  },
+  'calc-to-text': (dispatcher, target) => {
+    calcToNote(dispatcher, target, 'text');
+  },
+  'calc-copy': (dispatcher, target) => {
+    const pane = calcPane(target);
+    if (pane === null) return;
+    const text = sheetToText(currentCalcRows(pane));
+    if (text.trim() === '') return;
+    finishCopy(dispatcher, target, copyPlainText(text));
+  },
+  'calc-clear': (_dispatcher, target) => {
+    const pane = calcPane(target);
+    if (pane === null) return;
+    const input = pane.querySelector<HTMLTextAreaElement>('[data-pkc-field="calc-input"]');
+    if (input === null) return;
+    input.value = '';
+    input.focus();
+    refreshCalc(pane);
+    flushCalcDraft(pane);
+  },
+  /**
+   * 🔴 **差分マージの面**(#1231)。⚠ 相手・取り込みの途中経過は**面が持つ**(`render/diffmerge.ts` の `DiffSession`。
+   *   state に写さない ── 保存するまで「まだ当てていない下書き」)。規則は `features/revision/merge-hunks.ts` の 1 本で、
+   *   ここは**押された事実を渡し、読み込み(`BinderServices`)を呼ぶ**だけ。
+   */
+  'diff-pick': (_dispatcher, target, services) => {
+    const pane = diffPane(target);
+    const side = diffSideOf(target);
+    if (pane === null || side === null || !(target instanceof HTMLSelectElement)) return;
+    const st = diffSession(pane)[side];
+    const value = target.value;
+    const which = target.getAttribute('data-pkc-pick');
+    // ⚠ 選び所は click でも呼ばれる(開いただけ)── 値が同じなら何もしない(読み込み済みの相手を捨てない)
+    const unchanged =
+      which === 'kind' ? st.kind === value : which === 'note' ? (st.lid ?? '') === value : (st.revId ?? '') === value;
+    if (unchanged) return;
+    // 🔴 取り込んだ変更があるときは、捨てる前に聞く(⚠6)。やめたら選び所を元の値に戻す
+    guardDiscard(pane, services, () => diffPick(pane, side, which, value, services));
+  },
+  'diff-use-open': (dispatcher, target, services) => {
+    const pane = diffPane(target);
+    const side = diffSideOf(target);
+    const lid = dispatcher.getState().selectedLid;
+    if (pane === null || side === null || lid === null) return;
+    guardDiscard(pane, services, () => {
+      const st = diffSession(pane)[side];
+      st.kind = 'note';
+      st.lid = lid;
+      st.revId = null;
+      st.revs = null;
+      void diffLoadSide(pane, side, services);
+    });
+  },
+  'diff-take-pair': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    if (pane === null) return;
+    const from = target.getAttribute('data-pkc-from') === 'b' ? 'b' : 'a';
+    const hunk = Number(target.getAttribute('data-pkc-hunk'));
+    const pair = Number(target.getAttribute('data-pkc-pair'));
+    if (!Number.isInteger(hunk) || !Number.isInteger(pair)) return;
+    diffTake(pane, from, (m) => m.takePair(hunk, pair, from));
+  },
+  'diff-take': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    if (pane === null) return;
+    const from = target.getAttribute('data-pkc-from') === 'b' ? 'b' : 'a';
+    const hunk = Number(target.getAttribute('data-pkc-hunk'));
+    if (!Number.isInteger(hunk)) return;
+    diffTake(pane, from, (m) => m.take(hunk, from));
+  },
+  'diff-take-all': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    if (pane === null) return;
+    const s = diffSession(pane);
+    const from = target.getAttribute('data-pkc-from') === 'b' ? 'b' : 'a';
+    const dest = from === 'a' ? s.right : s.left;
+    if (s.merge === null || !isEditableSide(dest)) return;
+    if (s.left.lid !== null && s.left.lid === s.right.lid && s.left.kind === 'note' && s.right.kind === 'note') {
+      sayDiff(pane, '左右が同じノートです。別のノートを選んでください');
+      return;
+    }
+    s.message = '';
+    s.merge.takeAll(from);
+    paintDiffBody(pane);
+  },
+  'diff-undo': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    const m = pane === null ? null : diffSession(pane).merge;
+    if (pane === null || m === null) return;
+    diffSession(pane).message = '';
+    m.undoOne();
+    paintDiffBody(pane);
+  },
+  'diff-redo': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    const m = pane === null ? null : diffSession(pane).merge;
+    if (pane === null || m === null) return;
+    diffSession(pane).message = '';
+    m.redoOne();
+    paintDiffBody(pane);
+  },
+  'diff-reset': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    const m = pane === null ? null : diffSession(pane).merge;
+    if (pane === null || m === null) return;
+    diffSession(pane).message = '';
+    m.reset();
+    paintDiffBody(pane);
+  },
+  'diff-toggle-all': (_dispatcher, target) => {
+    const pane = diffPane(target);
+    if (pane === null) return;
+    const s = diffSession(pane);
+    s.showAll = !s.showAll;
+    paintDiffBody(pane);
+  },
+  'diff-save': (dispatcher, target, services) => {
+    const pane = diffPane(target);
+    if (pane === null) return;
+    void diffSave(dispatcher, pane, services);
   },
   /**
    * 🔴 **開く場所**(#826)。⚠ `set-prose-align` と同じ受け方(`<select>` でもボタンでも通す)。
@@ -18073,6 +18827,25 @@ export function bindActions(
       paintPlan(root, dispatcher, el.value);
       return;
     }
+    /**
+     * 🔴 **テキスト整形の欄**(#1233)。⚠ 打つそばから結果を描き直す(state に写さない ──
+     *   整理案と同じ「まだ当てていない下書き」)。許可リスト: 面の 4 つの欄だけ。
+     */
+    if (
+      (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) &&
+      TEXTLAB_FIELDS.has(el.getAttribute('data-pkc-field') ?? '')
+    ) {
+      const pane = textlabPane(el);
+      // 打鍵は少し待つ(置換があるときだけ。軽い整えはその場で描く)
+      if (pane !== null) refreshLab(pane, dispatcher, { debounce: true });
+      return;
+    }
+    // 🔴 計算スクラッチパッドの式(#1230)。⚠ 打つそばから右の結果を描き直し、打ちかけを覚える(ノートにしても式は残る)
+    if (el instanceof HTMLTextAreaElement && el.getAttribute('data-pkc-field') === 'calc-input') {
+      const pane = calcPane(el);
+      if (pane !== null) refreshCalc(pane, { save: true });
+      return;
+    }
     // 🔑 一覧の絞り込み(P7b 段⑨c)。⚠ **state に写す** ── renderer は
     // DOM から値を読まない、というこのリポジトリの規約
     if (
@@ -18228,6 +19001,21 @@ export function bindActions(
       const files = el.files ? [...el.files] : [];
       el.value = ''; // 同じファイルの再選択でも change が発火するように
       if (files.length > 0) services.importFiles?.(files);
+    } else if (field === 'icon-file-input') {
+      // 🔴 目印にする画像(#856 段③)── 1 件だけ。同じ file を選び直せるよう値は戻す(File は掴んである)
+      const file = el.files?.[0] ?? null;
+      const lid = el.getAttribute('data-pkc-icon-lid') ?? '';
+      el.value = '';
+      el.removeAttribute('data-pkc-icon-lid');
+      const go = services.adoptIconFile;
+      if (file === null || lid === '' || go === undefined) return;
+      void go(file).then((got) => {
+        if (!got.ok) {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `アイコンにできませんでした: ${got.why}` });
+          return;
+        }
+        setTileIconChecked(dispatcher, lid, got.assetKey, '画像は取り込めましたが、ほかの保存が動いているので入れられませんでした(もう一度選んでください)');
+      });
     } else if (field === 'replace-input') {
       // 🔴 添付のファイルの差し替え(#1163 依頼 212)── 1 件だけ。同じファイルをもう一度選べるよう値は戻す
       const file = el.files?.[0] ?? null;
@@ -21669,6 +22457,12 @@ export function bindActions(
   listen(root, 'mousedown', onMousedown);
   listen(root, 'input', onInput);
   listen(root, 'change', onChange);
+  // 🔴 再生中の文字起こしの行を光らせる(#1232)。⚠ media の event は bubble しない ── 捕まえる側(capture)で受ける
+  const onMediaMoved = (ev: Event): void => {
+    if (ev.target instanceof HTMLMediaElement) markActiveSeekLine(ev.target);
+  };
+  listen(root, 'timeupdate', onMediaMoved, true);
+  listen(root, 'seeked', onMediaMoved, true);
   // 🔴 本文を打ったり、置換を撃ったりして本文が動いたときも、件数を出し直す(#1646 の 2。同じ字なら DOM に触れない)
   //   ⚠ 配線を組む時点で購読するのはここだけ ── 一部しか持たない仮の dispatcher(test)でも組めるよう、口が在るときだけ繋ぐ
   const onState = (dispatcher as Partial<Dispatcher>).onState;

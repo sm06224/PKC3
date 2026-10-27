@@ -203,4 +203,33 @@ describe('本文を置き換える書き込み(REIMPORT_BODY → REQUEST_REIMPOR
     expect(busy.written).toEqual([]);
     expect(busy.d.getState().error ?? '', '編集中に黙って断った').toContain('取り込み直してください');
   });
+
+  /**
+   * 🔴 **知らせの `{title}` は題名に置き換わり、`{` が残らない。題名の `$` は特殊な記法として読まれない**
+   * (差分マージ・テキスト整形のレビュー、テストの穴 B)。
+   * ⚠ 文字列の置換は、置換文の `$&` `$'` `` $` `` を「一致した字」などに読み替える ── 関数で置換していないと、
+   *   題名に `$&` を含むノートで知らせが壊れる。`{title}` を 2 回書いた知らせも、2 回とも題名になる。
+   */
+  it.each([
+    ['メモ', '「メモ」を、整えた内容で置き換えました。もう一度「メモ」を見てください'],
+    ['価格 $& と $\' と $`', '「価格 $& と $\' と $`」を、整えた内容で置き換えました。もう一度「価格 $& と $\' と $`」を見てください'],
+    ['{title}', '「{title}」を、整えた内容で置き換えました。もう一度「{title}」を見てください'],
+  ])('🔴 題名「%s」が知らせに入り、置換の特殊記法として読まれない', async (title, expected) => {
+    const disk = { body: '元の本文' };
+    const { d } = wired(disk);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n9', title)], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n9' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n9', body: '元の本文' });
+    d.dispatch({
+      type: 'REIMPORT_BODY',
+      lid: 'n9',
+      body: '直した本文',
+      notice: '「{title}」を、整えた内容で置き換えました。もう一度「{title}」を見てください',
+    });
+    await tick();
+    const notice = d.getState().notice ?? '';
+    expect(notice).toBe(expected);
+    // 題名そのものに `{` を含む回を除き、未置換の `{title}` が残らない
+    if (title !== '{title}') expect(notice, '{title} が置き換わらずに残っている').not.toContain('{');
+  });
 });

@@ -93,6 +93,8 @@ const HOME_TAB: Readonly<Partial<Record<ViewMode, BrowseMode>>> = {
   graph: 'graph',
   // 🔴 計った時間(#683 ①)も同じ形 ── 別窓が塞がれたら左のタブへ送る
   timers: 'timers',
+  // 🔴 PC(#300)も同じ ── 別窓が塞がれたら左の「PC」タブへ送る
+  pc: 'pc',
 };
 
 export function homeTabOf(view: ViewMode): BrowseMode | null {

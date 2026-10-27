@@ -425,8 +425,18 @@ export function unusableViewMessage(): string {
    *   ` / ` では状態の行の予算(幅 90)を 1 単位はみ出した ── `deep-link.test.ts`)。
    *   並ぶのは**打つ字**なので、空白を挟まないほうが「そのまま打てる」向きでもある。
    */
-  return `画面名は ${openableViewNames().join('/')} のどれかです`;
+  const names = openableViewNames();
+  /**
+   * 🔴 **先頭の数個だけ出し、残りは数で言う**(2026-10-26、#1233 で面が 14 に増え、状態の行の予算(幅 110)を超えた)。
+   * ⚠ 並べ続けると、面を足すたびに後ろが切れる ── `deep-link.test.ts` が「上げるのではなく畳む」と
+   *   書いていた形にした。一覧の置き場はマニュアルの「開いたときの画面を指定する」。
+   */
+  if (names.length <= MESSAGE_VIEW_NAMES) return `画面名は ${names.join('/')} のどれかです`;
+  return `画面名は ${names.slice(0, MESSAGE_VIEW_NAMES).join('/')} ほか ${names.length - MESSAGE_VIEW_NAMES} 個のどれかです(ヘルプに一覧)`;
 }
+
+/** 断り文に並べる画面名の数(残りは「ほか N 個」)。 */
+const MESSAGE_VIEW_NAMES = 8;
 
 /** `connectViewDeepLink` の配線。⚠ 購読は**解除できる形**で渡す。 */
 export interface DeepLinkWiring {
