@@ -32,20 +32,20 @@ import {
   type VacuumGauge,
 } from '@features/storage/vacuum';
 import type { VacuumResult } from './protocol';
+import {
+  postMaintenanceDone,
+  postMaintenanceFailed,
+  type MaintenanceBaseDeps,
+  type MaintenanceTaskIdentity,
+} from './maintenance-task';
 
-export interface VacuumDeps {
-  /** 書込の lease を握っているか(`main.ts` の `writerHolder`)。 */
-  holdsWriterLease(): boolean;
-  /** 書込の列に載せて走らせる(`StoreEffects.run`)。 */
-  run<T>(job: () => Promise<T>): Promise<T>;
+export interface VacuumDeps extends MaintenanceBaseDeps {
   /** worker の `storageGauge`(読むだけ)。 */
   gauge(): Promise<VacuumGauge>;
   /** ブラウザが言う使用量(読めない端末は `{}`)。 */
   quota(): Promise<QuotaSample>;
   /** worker の `vacuum` を 1 回打つ。 */
   vacuum(): Promise<VacuumResult>;
-  /** 処理の記録へ積む(`appMessagePost.post`)。 */
-  post(input: { kind: 'job'; source: string; text: string; fixedHead?: string }): void;
   /** いま(ms)。既定は `Date.now`。 */
   now?: () => number;
 }
@@ -76,7 +76,9 @@ const TEXT_RUNNING = '縮めています…(終わるまで保存できません
 const TEXT_NOT_WRITER =
   'このタブは保存を担当していないので縮められません(保存を担当しているタブで押してください)';
 
-export class StorageVacuum {
+export class StorageVacuum implements MaintenanceTaskIdentity {
+  readonly source = VACUUM_SOURCE;
+  readonly name = '保存領域を縮める';
   private deps: VacuumDeps | null = null;
   private gauge: VacuumGauge | null = null;
   private quota: QuotaSample = {};
@@ -174,12 +176,12 @@ export class StorageVacuum {
       });
       if ('kind' in outcome) return outcome;
       const text = vacuumDoneText(outcome.before.fileBytes, outcome.after.fileBytes, outcome.elapsedMs);
-      d.post({ kind: 'job', source: VACUUM_SOURCE, text });
+      postMaintenanceDone(d.post, VACUUM_SOURCE, text);
       return { kind: 'done', text };
     } catch (e) {
       const text = vacuumFailedText(String(e));
       // 🔴 アプリが組んだ固定の理由なので、案内のボタン名を括弧で潰さない(#1087)
-      d.post({ kind: 'job', source: VACUUM_SOURCE, text, fixedHead: text });
+      postMaintenanceFailed(d.post, VACUUM_SOURCE, text);
       return { kind: 'failed', text };
     } finally {
       this.running = false;
