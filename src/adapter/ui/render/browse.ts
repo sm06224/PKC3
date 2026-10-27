@@ -39,6 +39,7 @@ import { DEFAULT_BROWSE_MODE, type BrowseMode } from './browse-mode';
 import { KindBarRenderer } from './kind-bar';
 import { SavedSearchBar } from './saved-searches';
 import { setPrimary } from './icons';
+import { contactsKnownEmpty, markContactsTabEmpty } from './tabs-a11y';
 import { setBlocked } from './shortcut-hint';
 import { findCommand } from '@features/keymap';
 import { commandQueryOf } from '@features/palette/command-query';
@@ -321,6 +322,9 @@ export class BrowseRouter {
   }
 
   render(state: AppState, mode: BrowseMode): void {
+    // 🔴 連絡先が 0 件と分かっている間は、左のタブを「⋯」の下へ回す(#475 項目 5)
+    const doc = this.roots[0]?.ownerDocument;
+    if (doc !== undefined) markContactsTabEmpty(doc, contactsKnownEmpty(state));
     // 🔴 並び順の選択欄を state に合わせる(2 ペインの列見出しで変えたとき、欄が古いままだった)
     if (this.sortSelect !== null && this.sortSelect.value !== state.entrySort) {
       this.sortSelect.value = state.entrySort;

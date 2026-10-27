@@ -398,3 +398,58 @@ test('🔴 「足す」で書いた人が一覧に並び、押せる宛先にな
 
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });
+
+/**
+ * 🔴 **連絡先が 0 件と分かっている間、左の「連絡先」タブは「⋯」の下へ回り、そこから開ける。1 件でもあれば元の位置に戻る**
+ * (#475 項目 5)。入口は消えない(片道にしない)。
+ * ⚠ 「まだ集めていない」(開くまで走らない)では回さない ── 対照群として、最初は元の位置にある。
+ */
+test('🔴 連絡先が空なら「⋯」の下へ回り、そこから開ける。1 件あれば戻る (#475 項目 5)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  const tab = page.locator('[data-pkc-region="browse-tabs"] [data-pkc-browse="contacts"]');
+  const more = page.locator('[data-pkc-region="browse-tabs"] [data-pkc-field="bar-more"]');
+
+  // 対照群: まだ集めていない間は元の位置にある
+  await expect(tab).toBeVisible();
+  await expect(tab).not.toHaveAttribute('data-pkc-overflow', '');
+
+  // 開くと集める。0 件の案内(作り方)が出る
+  await clickReal(page, tab);
+  await expect(page.locator('[data-pkc-browse-pane="contacts"]')).toContainText('連絡先はまだありません', {
+    timeout: 10_000,
+  });
+  // 開いている間は回さない(どこに居るか分からなくなる)
+  await expect(tab).not.toHaveAttribute('data-pkc-overflow', '');
+
+  // 別のタブへ移ると、0 件と分かっているので「⋯」の下へ回る
+  await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+  await expect(tab, '空の連絡先のタブが「⋯」へ回らない').toHaveAttribute('data-pkc-overflow', '');
+  await expect(more).toBeVisible();
+
+  // 「⋯」から開ける(入口は消えない)
+  await clickReal(page, more);
+  await clickReal(
+    page,
+    '[data-pkc-region="context-menu"] [data-pkc-action="set-browse"][data-pkc-browse="contacts"]',
+  );
+  await expect(page.locator('[data-pkc-browse-pane="contacts"]')).toBeVisible();
+  await expect(tab, '開いたタブは元の位置に居る').not.toHaveAttribute('data-pkc-overflow', '');
+
+  // 1 件入れると、別のタブへ移っても元の位置のまま
+  const vcf = ['BEGIN:VCARD', 'VERSION:3.0', 'FN:山田太郎', 'TEL;TYPE=CELL:090-1234-5678', 'END:VCARD', ''].join('\r\n');
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: '連絡先.vcf',
+    mimeType: '',
+    buffer: Buffer.from(vcf, 'utf8'),
+  });
+  await expect(page.locator('[data-pkc-browse-pane="contacts"] [data-pkc-contact]')).toHaveCount(1, {
+    timeout: 10_000,
+  });
+  await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+  await expect(tab, '1 件あるのに「⋯」の下のまま').not.toHaveAttribute('data-pkc-overflow', '');
+  await expect(tab).toBeVisible();
+
+  expect(errors, '例外が出ている').toEqual([]);
+});

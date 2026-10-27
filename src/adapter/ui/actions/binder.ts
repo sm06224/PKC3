@@ -14,6 +14,7 @@
  */
 import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { partitionDrop, setupFileDragHint } from './file-drag-hint';
 import { bindWaveDrag } from './wave-drag';
 import { renameAttachmentAndFile, renameEntryFromRow, restoreRenamedTitle } from './attachment-rename';
 import { lidOfNode } from './lid-of-node';
@@ -19940,9 +19941,9 @@ export function bindActions(
       services.importFiles([...files]);
       return true;
     }
+    // 🔑 振り分けは `partitionDrop` ── ドラッグ中に出す字(#1380)も同じ 1 本を通る
     const inBody = isBodyInput(target);
-    const images = inBody ? files.filter(isImageFile) : [];
-    const rest = files.filter((f) => !images.includes(f));
+    const { images, rest } = partitionDrop(files, inBody, isImageFile);
     let handled = false;
     if (images.length > 0 && services.pasteImages) {
       insertPasted(images, target as HTMLTextAreaElement);
@@ -23775,6 +23776,13 @@ export function bindActions(
   listen(root, 'keydown', onKeydown);
   // 🔴 波形の上のドラッグ(#1232)── 印は既存の `SET_CAPTURE_TRIM_MARK` に入る
   undo.push(bindWaveDrag(root, dispatcher));
+  // 🔴 外からファイルを掴んで窓に入っている間の落とせる所の線 + ステータスバーの字(#1380)
+  undo.push(
+    setupFileDragHint(root, {
+      overBody: isBodyInput,
+      isImageMime: isImageAssetMime,
+    }),
+  );
   const teardownLinkPreview = setupLinkPreview(root, dispatcher, services);
   const teardownLightbox = setupLightbox(root);
   return () => {

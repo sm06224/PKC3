@@ -33,6 +33,11 @@ export interface BarOverflowOptions {
   readonly candidates: (bar: HTMLElement) => HTMLElement[];
   /** 畳んではいけない物(いま開いているタブ)。 */
   readonly protect?: (el: HTMLElement) => boolean;
+  /**
+   * 幅に関係なく「⋯」の下へ回す物(#475 項目 5。空の連絡先のタブ)。
+   * ⚠ 消すのではなく回す ── 「⋯」から開ける。`protect` の物(いま開いている)は回さない。
+   */
+  readonly forced?: (el: HTMLElement) => boolean;
 }
 
 /** 「⋯」のボタンを組む。⚠ `bar-tile` ではない(自分を長押しメニューに載せない)。 */
@@ -73,7 +78,15 @@ export function fitBar(bar: HTMLElement, more: HTMLButtonElement, opts: BarOverf
   more.remove();
   if (bar.getBoundingClientRect().width === 0) return;
   const track = (): HTMLElement[] => [...cands.filter((c) => !c.hasAttribute(OVERFLOW_ATTR)), more];
-  if (rowCount(cands) <= 1) return;
+  // 🔴 先に「回す物」を回す(幅が余っていても)── 「⋯」はその間 DOM に居る
+  let forcedAny = false;
+  for (const el of cands) {
+    if (opts.forced?.(el) !== true || opts.protect?.(el) === true) continue;
+    el.setAttribute(OVERFLOW_ATTR, '');
+    forcedAny = true;
+  }
+  if (forcedAny) bar.append(more);
+  if (rowCount(track()) <= 1) return;
   bar.append(more);
   for (let i = cands.length - 1; i >= 0; i--) {
     const el = cands[i]!;
@@ -117,7 +130,11 @@ export function installBarOverflow(bar: HTMLElement, opts: BarOverflowOptions): 
     opts.protect === undefined || typeof MutationObserver === 'undefined'
       ? null
       : new MutationObserver(() => fitBar(bar, more, opts));
-  mo?.observe(bar, { attributes: true, attributeFilter: ['data-pkc-active'], subtree: true });
+  mo?.observe(bar, {
+    attributes: true,
+    attributeFilter: ['data-pkc-active', 'data-pkc-tab-empty'],
+    subtree: true,
+  });
   /**
    * 🔴 **字体が届くと語の幅が変わる**(帯の幅は変わらないので `ResizeObserver` は鳴らない)。
    * 届いた後にも 1 度測り直す。⚠ 無い環境(test)では何もしない。
@@ -141,6 +158,8 @@ export function installSidebarBarOverflow(sidebar: HTMLElement): void {
     installBarOverflow(tabs, {
       candidates: (b) => [...b.querySelectorAll<HTMLElement>(':scope > button[data-pkc-browse]')],
       protect: (el) => el.hasAttribute('data-pkc-active'),
+      // 🔴 連絡先が 0 件と分かっている間は「⋯」の下へ(#475 項目 5。`markContactsTabEmpty`)
+      forced: (el) => el.hasAttribute('data-pkc-tab-empty'),
     });
   for (const r of ['create-bar', 'collection-bar']) {
     const el = bar(r);

@@ -1364,7 +1364,11 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    閲覧用 HTML とメール下書き(export-entry-html)。🔴 ここでしか見えない:読む面の入力欄に実際に打って保存 → 再読み込みで欄に戻る /
     //    表の升が増える / content-visibility 下の見えるときだけの SQL / 実クリップボードの data: 画像を貼って添付になる / 落ちてきた file とクリップボードの中身。
     //    111 → 112。起動の予算は 560 のまま。
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(112);
+    // ⚠ 2026-10-27(#1380): `file-drag-hint.smoke.spec.ts` を**新設**(+1 file / +1 件)。🔴 ここでしか見えない:外のファイルを入れた間だけ縁に実際の線
+    //    (computed の outline)が出る / 本文・中央・一覧の `getBoundingClientRect` が 1px も動かない / dragleave・Esc・drop で消える。112 → 113。
+    // ⚠ 2026-10-27(#1380 レビュー / #475 項目 5): 同 spec が 1 → 3 本(畳まれたステータスバーのままラベルに出る / 編集中の字と本文の欄の字 / 窓内の <img> のドラッグ)で +2 件、
+    //    `contacts.smoke.spec.ts` に「空の連絡先のタブが ⋯ へ回り、そこから開ける」1 件で +1 件。束 A 着地後の 556 → 559(file 数は 113 のまま)。
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(113);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
@@ -1584,7 +1588,7 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    🔴 ここでしか見えない:左右の升が実座標で同じ行に並ぶ / 実ブラウザの <select> の選びが change で届く / 保存した本文を worker から読み直して変わっている。
     // ⚠ 2026-10-26(#300): `builtin-apps.smoke.spec.ts` に 1 本足した(集計と PC ── アプリの一覧のタイルを押すと別ウィンドウが開き、`view=` の画面が本物に描かれる)→ 554 → 555。起動の予算は 560 のまま。
     //    🔴 ここでしか見えない:実ブラウザの `window.open`(popup イベント)で 2 枚目が開く / 開いた窓が `#pkc?view=` を読んで面を描く。
-    ).toBe(555);
+    ).toBe(559);
   });
 });
 

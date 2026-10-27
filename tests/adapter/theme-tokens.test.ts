@@ -78,6 +78,7 @@ const PAIRS: readonly { fg: string; bg: string; min: number; what: string }[] = 
    */
   { fg: '--accent', bg: '--bg', min: 3, what: '焦点の輪(全体の地)' },
   { fg: '--accent', bg: '--surface-2', min: 3, what: '焦点の輪(帯・ツールバー)' },
+  { fg: '--accent', bg: '--accent-dim', min: 3, what: '焦点の輪(選択中の行の上)' },
   /**
    * 🔴 **選んでいるタブの下線**(#720 ②。着地前レビュー・実装 1)。
    * ⚠ この PR が**新しく作った重なり**である ── 線は `--fg`、乗る地は

@@ -82,7 +82,12 @@ import {
   paintStatusTrash,
   paintStatusUndo,
 } from '@adapter/ui/render/status-open';
-import { composeStatusLine, paintStatusText, shouldHideStatusBar } from '@adapter/ui/render/status-line';
+import {
+  fileDragHintLine,
+  paintFileDragLabel,
+  subscribeFileDragHint,
+} from '@adapter/ui/actions/file-drag-hint';
+import { paintStatusText, statusBarWithFileDrag } from '@adapter/ui/render/status-line';
 import { createStatusNotices, type StatusNotices } from '@adapter/ui/render/status-lifetime';
 import {
   createStatusPoster,
@@ -2057,8 +2062,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       progressLine: progressLine(),
       noticeLine: noticeLine(),
       errorLine,
+      fileDragLine: fileDragHintLine(root),
     };
-    const text = composeStatusLine(parts);
     /**
      * 🔴 **断り書きが出ている間、および未読メッセージがある間は、字が空でも器を畳まない**(#671 の裁定 3 / #1071)。
      * ⚠ 畳むと **`OK` や「未読 N 件」ごと画面から消える** ── 押す口が無いまま出しっぱなしに
@@ -2066,11 +2071,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔑 器を畳むかどうかを決めるのは**この 1 か所**である ── 判断は `status-line.ts` が持つ。
      */
     const hasUnreadMessages = dispatcher.getState().messagesUnread > 0;
-    const hide = shouldHideStatusBar({
-      text,
+    const { text, hide, floating } = statusBarWithFileDrag(parts, {
       hasTooNarrow: !regions.tooNarrow.hidden,
       hasUnreadMessages,
     });
+    /**
+     * 🔴 **外のファイルをドラッグしている間の 1 行**(#1380)。ステータスバーが畳まれているときは、
+     * 畳んだまま(= 左と中央を縮めない)左の一覧の下端のラベルに出す。⚠ 下の「変わらないなら塗らない」より前。
+     */
+    paintFileDragLabel(root, floating);
     if (text === statusShown && regions.status.hidden === hide) return;
     statusShown = text;
     // 🔴 保存が止まった断り書きの隣の入口(#1010 B)── 判断は `status-open.ts`
@@ -2078,7 +2087,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 見つからないノートの知らせの隣の「ゴミ箱を開く」(#1648)── 判断は `status-open.ts`
     paintStatusTrash(regions.statusTrash, text);
     // ⚠ 状態の 1 語だけを別の器に入れる(`status-line.ts` の `paintStatusText`)── 字は同じ
-    paintStatusText(regions.statusText, parts);
+    paintStatusText(regions.statusText, floating === '' ? parts : { ...parts, fileDragLine: '' });
     regions.status.hidden = hide;
   };
   /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */
@@ -2147,6 +2156,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   次の保存で「画像が出ない理由」が画面から消える。
    */
   if (syncLine !== '' || persistState !== '' || portableAssetNote !== '') paint();
+  // 🔴 外からファイルを掴んで窓に入っている間の状態の字(#1380)。出入りで塗り直す
+  subscribeFileDragHint(root, paint);
   /**
    * 🔴 **知らせの隣の「開く」**(#668 A)── 判断は `status-open.ts`(test が届く所)。
    * ⚠ `showStatus` からも撃つ ── 字だけの知らせ(コピーした等)が上書きしたら、
