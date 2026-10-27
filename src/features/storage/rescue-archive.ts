@@ -577,6 +577,8 @@ export function rescueArchiveSource(opts: {
   const source: ArchiveSource = {
     // 🔴 拾えた分だけの zip だと、ファイルの中に書く(依頼 119-4。名前を変えても見分ける)
     partial: true,
+    // 🔴 zip を開けばすぐ読めるように、本文を notes/*.md としても入れる(#986)
+    readableNotes: true,
     cid: opts.cid,
     title: opts.title,
     listEntryMetas: async () => {

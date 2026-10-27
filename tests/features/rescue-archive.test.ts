@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { writeArchive, readArchive, ARCHIVE_FORMAT } from '../../src/features/export/pkc3-archive';
-import { readAssetSource } from '../../src/features/import/zip-reader';
+import { readAssetSource, readZipDirectory, readZipText } from '../../src/features/import/zip-reader';
 import {
   RESCUE_IDLE_PAGE_LIMIT,
   rescueArchiveDetail,
@@ -92,6 +92,26 @@ describe('🔴 拾い出しが「戻せる形」で出る(#986)', () => {
     expect(got.entries.map((e) => e.body)).toEqual(THREE.map((r) => r.body));
     expect(stats().entries).toBe(3);
     expect(stats().bodyMissing, '本文が落ちている').toBe(0);
+  });
+
+  it('🔴 zip を開けば読めるよう notes/*.md も同梱し、しかも取り込み(readArchive)は変わらない(#986)', async () => {
+    const f = fakePick({ rows: THREE });
+    const { source } = rescueArchiveSource({ cid: 'c1', title: '拾い出し', pick: f.pick });
+    const out = await writeArchive(source, NOW);
+    const dir = await readZipDirectory(out.blob);
+    const notes = dir.filter((e) => e.name.startsWith('notes/') && !e.isDirectory);
+    // 空振り防止: 3 件ぶん在り、名前が重ならない
+    expect(notes.map((e) => e.name)).toEqual([
+      'notes/00001-牛乳を買う.md',
+      'notes/00002-会議のメモ.md',
+      'notes/00003-日本語の題.md',
+    ]);
+    // 中身は本文そのまま
+    expect(await readZipText(out.blob, notes[1]!)).toBe(THREE[1]!.body);
+    // 往復は同梱の有無で変わらない
+    const got = await readArchive(out.blob);
+    expect(got.entries).toHaveLength(3);
+    expect(got.warnings).toEqual([]);
   });
 
   /**

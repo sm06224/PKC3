@@ -33,6 +33,7 @@ import { isTooLargeToRead } from '../import/too-large';
 import { relabeledInFileWarning, relabeledWarning } from '../import/relabel-warning';
 import { archiveTooBigRefusal, MAX_EMBED_TEXT_CHARS, notImportableArchiveMessage } from '../storage/image-export-limit';
 import { parseTagColorList, type TagColorEntry } from '../tag-color';
+import { safeName } from './file-name';
 
 export const ARCHIVE_FORMAT = 'pkc3-archive';
 /**
@@ -46,6 +47,8 @@ const ARCHIVE_MIN_VERSION = 1;
 const MANIFEST = 'manifest.json';
 const CONTAINER = 'container.json';
 const ASSET_PREFIX = 'assets/';
+/** 🔴 人が読める本文の置き場(#986。`readableNotes` を立てた書き出しだけが書く。読み込みは見ない)。 */
+const NOTES_PREFIX = 'notes/';
 /** 1 バッチで取る本文の目安(postMessage に全量を載せない)。 */
 const BODY_BATCH_BYTES = 4 * 1024 * 1024;
 
@@ -127,6 +130,12 @@ export interface ArchiveSource {
    * ファイル名を変えても、取り込みの確認が「拾えた分だけ」と言える。⚠ 任意(旧い読み手は知らないキーを読み飛ばす)。
    */
   partial?: boolean;
+  /**
+   * 🔴 **zip を開けば中身が読める**ように、本文を `notes/<連番>-<題名>.md` としても同梱する(#986 の残り項目)。
+   * ⚠ 任意。読み込み(`readArchive`)は `assets/` 以外を見ないので、同梱しても取り込みは変わらない。
+   * 本文は 1 件ずつ Blob にして手放す(heap に溜めない)。
+   */
+  readableNotes?: boolean;
   listEntryMetas(): Promise<
     Array<{
       lid: string;
@@ -337,6 +346,8 @@ export async function writeArchive(
   /** 実際に書いたノートの lid(下の relations / revisions を、書いたノートに絞るために持つ)。 */
   const exportedLids = new Set<string>();
   let blobChars = 0;
+  /** 人が読める本文(`readableNotes` のとき)。⚠ Blob のまま持つ(文字列を溜めない)。 */
+  const readable: Array<{ name: string; blob: Blob }> = [];
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
     const { rows, done, next } = await src.listBodies(after, BODY_BATCH_BYTES);
@@ -357,6 +368,12 @@ export async function writeArchive(
       chunk += entryCount === 0 ? j(e) : `,${j(e)}`;
       entryCount++;
       exportedLids.add(e.lid);
+      if (src.readableNotes === true) {
+        readable.push({
+          name: `${NOTES_PREFIX}${String(entryCount).padStart(5, '0')}-${safeName(m.title)}.md`,
+          blob: new Blob([r.body]),
+        });
+      }
     }
     // 🔴 取り込み直す側は container.json を `Blob.text()` で 1 本の文字列にする ── 上限は**字数**で効く。
     //   Blob にすると字数が見えなくなる(bytes は日本語で約 3 倍)ので、手放す前に数える
@@ -461,6 +478,8 @@ export async function writeArchive(
     warnings.push(notImportableArchiveMessage(containerChars));
   }
   await w.add(CONTAINER, parts);
+  // 🔴 人が読める本文(#986)── container.json の後ろ・添付の前。⚠ 連番で名前の重なりを避ける
+  for (const n of readable) await w.add(n.name, [n.blob]);
 
   let assetCount = 0;
   for (const a of assetMetas) {
