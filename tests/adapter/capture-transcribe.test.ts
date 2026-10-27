@@ -142,7 +142,7 @@ describe('文字にする(成功する道)', () => {
     expect(scans.length, '足したのに一覧の目盛りが古いまま').toBe(1);
   });
 
-  it('🔴 #1232 段 a: 時刻つきの区切りが在れば、1 行ずつ「時刻 字」で足す(見出しは同じ)', async () => {
+  it('🔴 #1232 段 a: 時刻つきの区切りが在れば、1 行ずつ「時刻 字」(終わりがあれば「始まり 〜終わり 字」)で足す(見出しは同じ)', async () => {
     const h = harness({
       transcribe: vi.fn(async (): Promise<AsrJobResult> => ({
         text: 'こんにちは。 今日は晴れです',
@@ -156,7 +156,7 @@ describe('文字にする(成功する道)', () => {
     });
     await h.tr.run('a');
     expect(h.appends).toEqual([
-      { lid: 'a', heading: transcriptHeading(NOW), text: '0:00 こんにちは。\n0:15 今日は晴れです' },
+      { lid: 'a', heading: transcriptHeading(NOW), text: '0:00 〜0:02 こんにちは。\n0:15 今日は晴れです' },
     ]);
   });
 
