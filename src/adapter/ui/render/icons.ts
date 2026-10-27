@@ -334,6 +334,8 @@ export const BROWSE_ICONS: Readonly<Record<string, IconName>> = {
   //    ⚠ 2026-10-26(#300)に `computer` から `monitor` へ: PC のタイルが加わり、「自分のパソコンで動かす」(`computer`)と
   //    同じ絵が 2 枚並ぶのを避けた(左のタブの図案は画面に出していない)
   pc: 'monitor',
+  // 🔴 手書き(#1448)── 「画像に描き込む」の口(`draw-on-image`)と同じ図案
+  draw: 'palette',
 };
 
 /**

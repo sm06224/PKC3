@@ -148,19 +148,35 @@ const THICKNESSES: ReadonlyArray<{ thickness: DrawThickness; label: string }> = 
 ];
 
 /**
+ * 🔴 **描く道具の置き場**(#1448 の退避先)。別ウィンドウ(`popup: true`)と、**左の列のタブ**(`popup: false`)で
+ * **同じ道具・同じ操作**を使う ── 2 つ目の描画部品を作らない。
+ * - `root`: 道具と台を組む器(窓なら `body`、タブなら手書きの面)。
+ * - `win`: 描き直しの予約と終了時の確認に使う窓(タブなら本体の窓)。
+ * - `popup`: 別ウィンドウか。別ウィンドウだけが ① 番人(本体が閉じたとき押しても無反応にしない)を持ち
+ *   ② ×で閉じるときのブラウザの確認を持ち ③ Ctrl+Z を窓全体で受ける。タブは本体の「離れますか」(`onDirty`)に任せ、
+ *   Ctrl+Z は面の中だけで受ける(本体の他の操作を奪わない)。
+ */
+export interface DrawHost {
+  readonly doc: Document;
+  readonly root: HTMLElement;
+  readonly win: Pick<Window, 'requestAnimationFrame' | 'cancelAnimationFrame' | 'addEventListener'>;
+  readonly popup: boolean;
+}
+
+/**
  * 窓の中身を組み、操作を結ぶ。返す `release` は何度呼んでもよい。
  * @param leave 閉じる(保存し終えた / 捨てると決めた)。⚠ `beforeunload` の確認を外してから閉じる。
  */
-async function build(
-  win: Window,
+export async function buildImageDraw(
+  host: DrawHost,
   blob: Blob,
   save: (png: Blob) => Promise<ImageDrawSaveResult>,
   createBitmap: (b: Blob) => Promise<ImageDrawBitmap>,
   close: () => void,
   onDirty: (dirty: boolean) => void,
 ): Promise<() => void> {
-  const doc = win.document;
-  doc.body.textContent = '';
+  const { doc, win } = host;
+  host.root.textContent = '';
 
   const bar = doc.createElement('div');
   bar.setAttribute('data-pkc-field', 'image-draw-bar');
@@ -169,10 +185,12 @@ async function build(
   const canvas = doc.createElement('canvas');
   canvas.setAttribute('data-pkc-field', 'image-draw-canvas');
   stage.append(canvas);
-  doc.body.append(bar, stage);
-  const guard = doc.createElement('script');
-  guard.textContent = GUARD_SCRIPT;
-  doc.body.append(guard);
+  host.root.append(bar, stage);
+  if (host.popup) {
+    const guard = doc.createElement('script');
+    guard.textContent = GUARD_SCRIPT;
+    host.root.append(guard);
+  }
 
   const status = doc.createElement('span');
   status.setAttribute('data-pkc-field', 'image-draw-status');
@@ -375,13 +393,16 @@ async function build(
   };
 
   // ---- 線があるまま × で閉じるときだけ、ブラウザの確認を出す ----
-  win.addEventListener('beforeunload', (ev: Event) => {
-    // ⚠ 打ちかけの文字(まだ線の一覧に入っていない)も、失うものに数える
-    const typing = textInput !== null && textInput.value.trim() !== '';
-    if (leaving || released || (strokes.length === 0 && !typing)) return;
-    ev.preventDefault();
-    (ev as BeforeUnloadEvent).returnValue = '';
-  });
+  // ⚠ タブ(本体の窓)では付けない ── 本体の「離れますか」(`onDirty` → `unloadGuard`)が同じことを言う。2 度聞かない
+  if (host.popup) {
+    win.addEventListener('beforeunload', (ev: Event) => {
+      // ⚠ 打ちかけの文字(まだ線の一覧に入っていない)も、失うものに数える
+      const typing = textInput !== null && textInput.value.trim() !== '';
+      if (leaving || released || (strokes.length === 0 && !typing)) return;
+      ev.preventDefault();
+      (ev as BeforeUnloadEvent).returnValue = '';
+    });
+  }
 
   // ---- 画像を読み込む ----
   try {
@@ -446,7 +467,7 @@ async function build(
     });
     input.addEventListener('blur', () => commitText());
     input.addEventListener('input', () => sync());
-    doc.body.append(input);
+    host.root.append(input);
     textInput = input;
     input.focus();
   };
@@ -537,14 +558,19 @@ async function build(
   // 捕まえた指を失ったら、そこで線を終える(押しっぱなしの記録が残って描けなくなるのを防ぐ)
   canvas.addEventListener('lostpointercapture', (ev: PointerEvent) => end(ev, true));
 
-  doc.addEventListener('keydown', (ev: KeyboardEvent) => {
+  // 別ウィンドウは窓全体で受ける。タブは面の中だけ(本体の Ctrl+Z を奪わない)── 面は押した所へ焦点を取る
+  if (!host.popup) {
+    host.root.tabIndex = -1;
+    canvas.addEventListener('pointerdown', () => host.root.focus({ preventScroll: true }));
+  }
+  (host.popup ? doc : host.root).addEventListener('keydown', ((ev: KeyboardEvent) => {
     // ⚠ 文字を打っている最中の Ctrl+Z は、入力欄の打ち消しに任せる(直前に描いた線を消さない)
     if (ev.target === textInput) return;
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z' && !ev.shiftKey) {
       ev.preventDefault();
       undoBtn.click();
     }
-  });
+  }) as EventListener);
 
   // ---- 保存する ----
   const doSave = async (): Promise<void> => {
@@ -652,7 +678,14 @@ export function openImageDrawWindow(deps: ImageDrawWindowDeps): ImageDrawWindow 
     close,
     async start(blob, save): Promise<void> {
       try {
-        release = await build(win, blob, save, createBitmap, close, deps.onDirty ?? (() => undefined));
+        release = await buildImageDraw(
+          { doc, root: doc.body, win, popup: true },
+          blob,
+          save,
+          createBitmap,
+          close,
+          deps.onDirty ?? (() => undefined),
+        );
       } catch (e) {
         close();
         throw e;
@@ -662,6 +695,80 @@ export function openImageDrawWindow(deps: ImageDrawWindowDeps): ImageDrawWindow 
     },
     fail(message: string): void {
       loading.textContent = message;
+    },
+  };
+}
+
+
+/**
+ * 🔴 **左の列のタブに描く**(#1448 の退避先。CLAUDE.md の「別ウィンドウが塞がれたときの退避先は、中央ではなく左の列のタブ」)。
+ *
+ * 別ウィンドウ(`openImageDrawWindow`)が塞がれた / 開けない環境で、同じ道具を左の列の「手書き」タブに出す。
+ * 台の組み立て・道具・保存の門は `buildImageDraw` の 1 本(別ウィンドウと同じ)。違うのは置き場だけ:
+ * - 置き場は呼び側が渡す `pane`(面の器 + タブを出す / 畳む口)。**同時に 1 枚**(面は 1 つ)。
+ * - 閉じる = 面を空にして、タブを畳み、前に見ていたタブへ戻す(`pane.leave`)。
+ */
+export interface DrawPane {
+  /** 道具と台を組む器(左の列の「手書き」の面)。 */
+  readonly root: HTMLElement;
+  /** 面を開く: タブを出して選ぶ。 */
+  enter(): void;
+  /** 面を畳む: タブを隠し、前のタブへ戻る。 */
+  leave(): void;
+}
+
+export function openImageDrawInPane(pane: DrawPane, deps: ImageDrawWindowDeps & { createBitmap?: ImageDrawWindowDeps['createBitmap'] }): ImageDrawWindow {
+  const doc = pane.root.ownerDocument;
+  const win = doc.defaultView ?? globalThis.window;
+  const createBitmap =
+    deps.createBitmap ?? ((b: Blob) => createImageBitmap(b, { imageOrientation: 'from-image' }) as Promise<ImageDrawBitmap>);
+  let release: (() => void) | null = null;
+  let finished = false;
+  const finish = (): void => {
+    release?.();
+    if (finished) return;
+    finished = true;
+    pane.root.textContent = '';
+    pane.leave();
+    deps.onClosed?.();
+  };
+  pane.root.textContent = '';
+  const loading = doc.createElement('p');
+  loading.setAttribute('data-pkc-field', 'image-draw-loading');
+  loading.textContent = '画像を読み込んでいます';
+  pane.root.append(loading);
+  pane.enter();
+  return {
+    get closed(): boolean {
+      return finished;
+    },
+    focus: () => pane.enter(),
+    close: finish,
+    async start(blob, save): Promise<void> {
+      try {
+        release = await buildImageDraw(
+          { doc, root: pane.root, win, popup: false },
+          blob,
+          save,
+          createBitmap,
+          finish,
+          deps.onDirty ?? (() => undefined),
+        );
+      } catch (e) {
+        finish();
+        throw e;
+      }
+      if (finished) release();
+    },
+    fail(message: string): void {
+      loading.textContent = message;
+      // 面は窓と違って × が無い ── 出られる口を添える(置き場が塞がらないように)
+      const b = doc.createElement('button');
+      b.type = 'button';
+      b.setAttribute('data-pkc-field', 'image-draw-close');
+      b.textContent = '閉じる';
+      b.addEventListener('click', finish);
+      pane.root.append(b);
     },
   };
 }

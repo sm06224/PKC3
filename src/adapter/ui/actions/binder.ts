@@ -24,12 +24,15 @@ import type { DroppedAt } from './asset-into-note';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { BUILTIN_KINDS, isLaunchableUrl, tileSelectsEntry } from '@features/launcher/tiles';
 import {
+  allHeadingFoldState,
   chapterSpanOf,
   headingAtSourceLine,
   headingLevel,
   isHeadingFolded,
   revealBlock,
   toggleHeadingFold,
+  toggleAllHeadingFolds,
+  toggleAllLogDays,
   toggleLogDay,
 } from '../render/heading-fold';
 import { ADAPTER_SETTING_VALIDATORS } from '../render/settings-validators';
@@ -37,6 +40,12 @@ import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
 import { settleJump } from '../render/long-note';
 import { insideCodeOrMath } from '@features/markdown/code-context';
+import {
+  chapterLinkLine,
+  chapterLinkUnder,
+  isOwnChapterChild,
+  planChapterCut,
+} from '@features/markdown/chapter-split';
 import { lineStart } from '@features/markdown/line-start';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
 import { assetRefsOf, carryAssets, hasAssetRefs } from '@features/asset/carry-assets';
@@ -395,6 +404,7 @@ import {
   ADD_PLACE_ACTION,
   PLACE_RENAME_ACTION,
   ADD_PLACE_NOTE_ACTION,
+  ADD_PLACE_DRAWING_ACTION,
   ADD_PLACE_TEMPLATE_ACTION,
   placeLineMenuActions,
   PLACE_STYLE_KEYS_ATTR,
@@ -504,6 +514,11 @@ import { appMessagePost, setMessageCap } from '@adapter/platform/message-post';
 import { setMessageKindFilter } from '@adapter/platform/message-filter';
 import { messageFilterOfAttr } from '@adapter/ui/render/message-bar';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
+import {
+  appWorkspaces,
+  WORKSPACE_OPEN_UNCHECKED_TEXT,
+} from '@adapter/platform/storage/workspace-run';
+import { WORKSPACES_REMAIN_MESSAGE } from '@features/storage/workspace-guard';
 import {
   isSystemMessageLid,
   MESSAGE_CAP_OPTIONS,
@@ -756,6 +771,7 @@ import {
 import { currentOpenPlace } from '@adapter/ui/render/open-place';
 import { appExternalImages } from '@adapter/ui/render/external-images';
 import { parseFrontmatter } from '@features/markdown/frontmatter';
+import { readScheduleOwner } from '@features/schedule/schedule-keys';
 import { externalImageBlockReason } from './adopt-favicon';
 
 /**
@@ -2217,6 +2233,11 @@ export interface BinderServices {
    */
   drawOnImage?(assetKey: string, name: string, mime: string, lid?: string): void;
   /**
+   * 🔴 **白紙から手書きする**(#1448)。`lid` = 呼び出したノート(置き場のフォルダを引く起点)、
+   * `onSaved` = 保存した添付のノートの lid を受ける(板の上から呼ぶときは、それを板に置く)。
+   */
+  drawBlank?(lid: string, onSaved: (attachedLid: string) => void): void;
+  /**
    * 🔴 **画面に出ている絵を、別窓で大きく見る**(#527。user 指示 2026-08-28
    * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
    *
@@ -3230,6 +3251,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // 🔑 **章だけ編集も同じ理由**(#1044 段2)── `edit-from-heading` と同じく、
   //    取込・書出しの最中に書込を始める入口を作らない
   'edit-section',
+  // 🔴 章の切り出し / 元に戻す(#1439)── ノートを作り、本文を書くので同じ門
+  'split-chapter',
+  'restore-chapter',
   'save-section-draft',
   // 🔑 **コード枠だけ編集も同じ理由**(#1044 段3)
   'edit-code-block',
@@ -3403,6 +3427,14 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    */
   'set-entry-date',
   'clear-entry-date',
+  // 🔴 ノートの担当を書く / 外すのも前書きを書く(#283)── 日付と同じ門
+  'set-entry-owner',
+  'clear-entry-owner',
+  // 🔴 ワークスペースの操作(#1455)── 取り込み・書き出しの最中に器を足したり替えたり消したりしない(切り替えは読み込み直しも伴う)
+  'workspace-create',
+  'workspace-switch',
+  'workspace-rename',
+  'workspace-delete',
   'toggle-app-tile',
   /**
    * 🔴 **リンクを足すのも「作る」である**(#401 ①)。⚠ `create-entry` と同じ理由で
@@ -5659,6 +5691,69 @@ async function copySourceLinesWithAssets(
     carryAssets(text, urls),
     `${what}を画像 ${String(urls.size)} 件ごとコピーしました(別の PKC3 へ貼ると、画像も取り込まれます)${notes.length === 0 ? '' : `。${notes.join('、')}`}`,
   );
+}
+
+/**
+ * 🔴 **章の切り出し / 元に戻すの、メニューに出す側を決める**(#1439)。判定は 1 本。
+ *
+ * - 見出しが本文の直下で、書き方が ATX(`#`)で、ログの行ではない。
+ * - 見出しの下が「実在するノートへのリンク 1 行」だけ → 元に戻す。
+ * - それ以外で、章に本文がある → 切り出す。
+ */
+function chapterSplitMenuFlags(
+  host: HTMLElement | null,
+  heading: Element | null,
+  body: string | null,
+  st: AppState,
+  level: number,
+  text: string,
+): { splitChapter?: boolean; restoreChapter?: boolean } {
+  if (host === null || heading === null || body === null || heading.parentElement !== host) return {};
+  if (isLogRowHeading(st.openBody === null ? undefined : st.entryMetas.get(st.openBody.lid)?.archetype, level, text)) return {};
+  const ctx = chapterRangeOf(host, heading, body);
+  if (ctx === null) return {};
+  const link = chapterLinkUnder(body, ctx.headingLine, ctx.end);
+  if (link !== null)
+    return st.openBody !== null && st.entryMetas.has(link.lid) && isOwnChapterChild(st.relations, st.openBody.lid, link.lid, body)
+      ? { restoreChapter: true }
+      : {};
+  return planChapterCut(body, ctx.headingLine, ctx.end).ok ? { splitChapter: true } : {};
+}
+
+/** 見出しの章の範囲を**生の body の行**で返す(frontmatter の行数を足す)。引けなければ `null`。 */
+function chapterRangeOf(
+  host: HTMLElement,
+  heading: Element,
+  body: string,
+): { headingLine: number; end: number } | null {
+  const fm = bodyBelowFrontmatter(body);
+  const span = chapterSpanOf(host, heading, fm.split('\n').length);
+  if (span === null) return null;
+  const offset = body.split('\n').length - fm.split('\n').length;
+  return { headingLine: span.start + offset, end: span.end + offset };
+}
+
+/**
+ * 🔴 **ワークスペースが 2 つ以上のとき、「作り直す」「初期化する」を窓の前に断る**(#1455)。
+ * 一覧を読み直してから数える(設定を開かずに押した場合でも)。読めなければ断らない(壊れを直す道を塞がない)。
+ * ⚠ 本当の門は `resetContainer` / `rebuildContainer` の入口と worker の `wipeStorage` ── ここは窓を出さないための前置き。
+ */
+async function refuseIfWorkspacesRemain(dispatcher: Dispatcher): Promise<boolean> {
+  try {
+    await appWorkspaces.refresh();
+  } catch {
+    return false;
+  }
+  if (appWorkspaces.view().rows.length <= 1) return false;
+  dispatcher.dispatch({ type: 'OP_FAILED', error: WORKSPACES_REMAIN_MESSAGE });
+  return true;
+}
+
+/** ワークスペースの操作の結果を、画面の下の知らせ / 失敗の帯で言う。 */
+function sayWorkspace(dispatcher: Dispatcher, r: { kind: 'done' | 'failed' | 'refused' | 'cancelled'; text: string }): void {
+  if (r.kind === 'cancelled') return;
+  if (r.kind === 'done') dispatcher.dispatch({ type: 'OP_NOTICE', message: r.text });
+  else dispatcher.dispatch({ type: 'OP_FAILED', error: r.text });
 }
 
 /**
@@ -12602,6 +12697,102 @@ const ACTIONS: Record<string, ActionHandler> = {
       () => dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null }),
     );
   },
+  /**
+   * 🔴 **ノート 1 件の担当を付ける / 変える**(#283)。名前を打つ小窓 → 前書きの `owner:` に書く。
+   * ⚠ 書換は `SET_ENTRY_OWNER`(= 既存の `frontmatter` 書換 1 本)。空のまま OK は何もしない。
+   */
+  'set-entry-owner': (dispatcher, _target, services, root) => {
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}担当を付けてください` });
+      return;
+    }
+    const st0 = dispatcher.getState();
+    const lid = st0.selectedLid;
+    if (lid === null) return;
+    const cur = st0.openBody?.lid === lid ? readScheduleOwner(parseFrontmatter(st0.openBody.body).meta) : null;
+    void promptInApp(root, {
+      title: '担当を付ける',
+      label: '担当者の名前を入力してください(連絡先のノートの題名と同じ字にすると、情報の欄から連絡先へ飛べます):',
+      initial: cur ?? '',
+      okLabel: '担当を付ける',
+    }).then((typed) => {
+      if (typed === null || typed.trim() === '') return;
+      actUnlessEditedElsewhere(
+        dispatcher,
+        services,
+        [lid],
+        '担当を付けられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+        () => dispatcher.dispatch({ type: 'SET_ENTRY_OWNER', lid, owner: typed }),
+      );
+    });
+  },
+  /** 🔴 **置けるなら外せる**(片道を作らない)。⚠ 門は reducer が声に出して断る(`clear-entry-date` と同じ)。 */
+  'clear-entry-owner': (dispatcher, _target, services) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null) return;
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      '担当を外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => dispatcher.dispatch({ type: 'SET_ENTRY_OWNER', lid, owner: null }),
+    );
+  },
+  /**
+   * 🔴 **ワークスペースを足す**(#1455)。名前は設定の欄(`workspace-new-name`)から読む。足しただけでは画面は動かない。
+   * ⚠ 判断と書込は `Workspaces`(`workspace-run.ts`)── ここは**渡して結果を言う**だけ。
+   */
+  'workspace-create': (dispatcher, target) => {
+    const input = target.closest<HTMLElement>('[data-pkc-region="workspaces"]')?.querySelector<HTMLInputElement>(
+      '[data-pkc-field="workspace-new-name"]',
+    );
+    const typed = input?.value ?? '';
+    void appWorkspaces.create(typed).then((r) => {
+      if (r.kind === 'done' && input) input.value = '';
+      sayWorkspace(dispatcher, r);
+    });
+  },
+  /** 🔴 **ワークスペースを切り替える**(#1455)。書込が済んでから切り替えの印を書き、画面を読み込み直す。 */
+  'workspace-switch': (dispatcher, target) => {
+    const cid = target.getAttribute('data-pkc-cid');
+    if (cid === null) return;
+    void appWorkspaces.switchTo(cid).then((r) => sayWorkspace(dispatcher, r));
+  },
+  /** 🔴 **ワークスペースの名前を直す**(#1455)。 */
+  'workspace-rename': (dispatcher, target, _services, root) => {
+    const cid = target.getAttribute('data-pkc-cid');
+    if (cid === null) return;
+    const cur = appWorkspaces.view().rows.find((r) => r.cid === cid);
+    void promptInApp(root, {
+      title: 'ワークスペースの名前を変える',
+      label: '新しい名前を入力してください:',
+      initial: cur?.title ?? '',
+      okLabel: '名前を変える',
+    }).then((typed) => {
+      if (typed === null) return;
+      void appWorkspaces.rename(cid, typed).then((r) => sayWorkspace(dispatcher, r));
+    });
+  },
+  /**
+   * 🔴 **ワークスペースを削除する**(#1455)。⚠ ノートごと消えるので、押す前に必ず確認を挟む
+   * (使っていない器だけ ── 使っている器と最後の 1 つは worker も断る)。
+   */
+  'workspace-delete': (dispatcher, target, _services, root) => {
+    const cid = target.getAttribute('data-pkc-cid');
+    if (cid === null) return;
+    const cur = appWorkspaces.view().rows.find((r) => r.cid === cid);
+    void confirmInApp(
+      root,
+      `ワークスペース「${cur?.title ?? ''}」を、ノート ${String(cur?.notes ?? 0)} 件ごと削除します。元に戻せません。${
+        appWorkspaces.view().canCheckOpen ? '' : WORKSPACE_OPEN_UNCHECKED_TEXT
+      }`,
+      { okLabel: '削除する', cancelLabel: 'やめる', danger: true },
+    ).then((answer) => {
+      if (answer !== 'ok') return;
+      void appWorkspaces.remove(cid).then((r) => sayWorkspace(dispatcher, r));
+    });
+  },
   /** 予定の面の「一覧 / 日」(#855 段 A-1)。値は押したボタンの `data-pkc-mode`。 */
   'schedule-mode': (dispatcher, target, services) => {
     const mode = target.getAttribute('data-pkc-mode');
@@ -13266,8 +13457,27 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 本文は 1 バイトも変わらない(見え方だけ)ので `BODY_WRITE_ACTIONS` には載せない。
    */
   'toggle-log-day': (_dispatcher, target) => {
-    const row = target.closest<HTMLElement>('[data-pkc-log-day]');
+    // 🔴 日の行も月の行(#1441 月別)も同じ口 ── 畳みの印を反転するだけ
+    const row = target.closest<HTMLElement>('[data-pkc-log-day],[data-pkc-log-month]');
     if (row !== null) toggleLogDay(row);
+  },
+  /**
+   * 🔴 **ログの日・月をまとめて畳む / 出す**(#1441)。1 つでも開いていれば全部畳み、全部畳んであれば全部出す。
+   * ⚠ 本文は 1 バイトも変わらない(見え方だけ)ので `BODY_WRITE_ACTIONS` には載せない。
+   */
+  'toggle-log-day-all': (_dispatcher, target) => {
+    const host = target.closest<HTMLElement>('[data-pkc-log-all]')?.parentElement;
+    if (host !== null && host !== undefined) toggleAllLogDays(host);
+  },
+  /**
+   * 🔴 **すべての見出しをまとめて畳む / 出す**(#1441 (a)。見出しの右クリックのメニュー)。
+   * ⚠ 本文は 1 バイトも変わらない(見え方だけ)ので `BODY_WRITE_ACTIONS` には載せない。
+   */
+  'toggle-all-heading-fold': (dispatcher, target) => {
+    if (refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+    if (host !== null) toggleAllHeadingFolds(host);
   },
   /**
    * 🔴 **長大なコードブロックの折りたたみ／展開切り替え**(#1139)。
@@ -13327,6 +13537,113 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     pickAppendTarget(dispatcher, root, line);
+  },
+  /**
+   * 🔴 **この章を新しいノートに切り出す**(#1439。user 設問への回答 = 推薦どおり)。
+   *
+   * 章の見出しの下が新しいノート(題名は見出しの字)になり、元には `[見出し](entry:<新しいノート>)` の 1 行が
+   * 残る。⚠ 書く順番は**入れてから切る**(先に新しいノートを作り、次に元をリンクにする)── 元を書けなかった
+   * 回は二重になるだけで、章は消えない。戻す道は `restore-chapter`(片道にしない)。
+   */
+  'split-chapter': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+    const heading = host === null ? null : headingAtSourceLine(host, line);
+    const st = dispatcher.getState();
+    const ob = st.openBody;
+    const meta = ob === null ? undefined : st.entryMetas.get(ob.lid);
+    const range = host === null || heading === null || ob === null ? null : chapterRangeOf(host, heading, ob.body);
+    if (host === null || heading === null || ob === null || meta === undefined || range === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '章の範囲を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const plan = planChapterCut(ob.body, range.headingLine, range.end);
+    if (!plan.ok) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: plan.reason });
+      return;
+    }
+    const title = headingPlainText(heading).trim() || '切り出した章';
+    const lid = ob.lid;
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      '章を切り出せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => {
+        const cur = dispatcher.getState();
+        if (cur.phase !== 'ready') {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(cur.phase)}、章を切り出してください` });
+          return;
+        }
+        const childLid = generateLid();
+        // 1 手目: 新しいノートを作る(選択も開いている本文も動かさない)。元と同じフォルダへ
+        const parent = cur.relations.find((r) => r.kind === STRUCTURAL && r.toLid === lid)?.fromLid ?? null;
+        dispatcher.dispatch({
+          type: 'CREATE_ENTRY',
+          archetype: 'text',
+          lid: childLid,
+          title,
+          body: plan.cut.childBody,
+          parentLid: parent,
+          relationId: generateLid(),
+          edit: false,
+          keepSelection: true,
+        });
+        if (!dispatcher.getState().entryMetas.has(childLid)) return; // 作れなかった(理由は reducer が言う)
+        // 🔴 子 → 親の「出典」のつながりを作る(#1439 レビュー ⚠4)── 本当にここから出た子だけに「戻す」を出すための記録。
+        //    リンクの行はコピーで複製できるが、つながりは複製されない
+        dispatcher.dispatch({
+          type: 'ADD_RELATION',
+          id: generateLid(),
+          fromLid: childLid,
+          toLid: lid,
+          kind: 'provenance',
+        });
+        // 2 手目: 元の章をリンク 1 行にする(失敗したら二重になるだけ)
+        dispatcher.dispatch({
+          type: 'SPLIT_CHAPTER',
+          lid,
+          start: plan.cut.start,
+          end: plan.cut.end,
+          link: chapterLinkLine(title, childLid),
+          childLid,
+          childTitle: title,
+        });
+      },
+    );
+  },
+  /**
+   * 🔴 **切り出した章を元に戻す**(#1439。片道にしない)。見出しの下のリンク 1 行を、切り出し先の本文で置き換え、
+   * 切り出し先のノートを削除する(ゴミ箱から戻せる)。
+   */
+  'restore-chapter': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+    const heading = host === null ? null : headingAtSourceLine(host, line);
+    const ob = dispatcher.getState().openBody;
+    const range = host === null || heading === null || ob === null ? null : chapterRangeOf(host, heading, ob.body);
+    const link = range === null || ob === null ? null : chapterLinkUnder(ob.body, range.headingLine, range.end);
+    if (
+      ob === null ||
+      link === null ||
+      !dispatcher.getState().entryMetas.has(link.lid) ||
+      !isOwnChapterChild(dispatcher.getState().relations, ob.lid, link.lid, ob.body)
+    ) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '切り出した章のリンクを読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const lid = ob.lid;
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid, link.lid],
+      '章を戻せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => dispatcher.dispatch({ type: 'RESTORE_CHAPTER', lid, childLid: link.lid, line: link.line }),
+    );
   },
   /**
    * 🔴 **その章を原文の Markdown でまるごと写す**(#677。user 裁定 2026-09-04)。
@@ -13590,6 +13907,38 @@ const ACTIONS: Record<string, ActionHandler> = {
       }
       placeEditedElsewhereGate(dispatcher, services, lid, '付箋を置けませんでした', () =>
         dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y, entry: picked }),
+      );
+    });
+  },
+  /**
+   * 🔴 **白紙に手書きして、板に置く**(#1448)── 別のウィンドウで描いて保存すると、新しい画像の添付ができ、
+   * `add-place` と同じ座標・同じ門(`ADD_PLACE`)で、その添付の付箋(`entry=`)を押した位置へ書く。
+   * ⚠ 窓は押した瞬間(同期)に開く(ポップアップを止められない)。描いている間に別のノートへ移ったら置かない
+   *   (絵は添付として残る ── 知らせの「開く」で開ける)。
+   */
+  'add-place-drawing': (dispatcher, target, services) => {
+    if (refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    const x = menuCarriedAt(target, MENU_X_ATTR);
+    const y = menuCarriedAt(target, MENU_Y_ATTR);
+    if (ob === null || x === null || y === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '置く位置を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const lid = ob.lid;
+    if (services.drawBlank === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では、白紙から手書きできません' });
+      return;
+    }
+    services.drawBlank(lid, (attachedLid) => {
+      const st = dispatcher.getState();
+      if (st.openBody?.lid !== lid) {
+        dispatcher.dispatch({ type: 'OP_NOTICE', message: '別のノートに切り替わったので、手書きは板に置いていません(添付として保存しました)', open: attachedLid });
+        return;
+      }
+      if (!st.entryMetas.has(attachedLid)) return;
+      placeEditedElsewhereGate(dispatcher, services, lid, '手書きを板に置けませんでした', () =>
+        dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y, entry: attachedLid }),
       );
     });
   },
@@ -14878,8 +15227,9 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     rebuildingContainer = true;
     void counting
-      .then((assetsOnDisk) =>
-        confirmInApp(
+      .then(async (assetsOnDisk) =>
+        // 🔴 ワークスペースが 2 つ以上なら、説明の窓も出さずに断る(#1455)
+        (await refuseIfWorkspacesRemain(dispatcher)) ? ('cancel' as const) : confirmInApp(
           root,
           rebuildExplainMessage({ notes: dispatcher.getState().entryMetas.size, assetsOnDisk }),
           { okLabel: 'ノートの保存データを作り直す', cancelLabel: 'やめる' },
@@ -15024,8 +15374,9 @@ const ACTIONS: Record<string, ActionHandler> = {
             () => null,
           );
     void counting
-      .then((assetsOnDisk) =>
-        confirmInApp(
+      .then(async (assetsOnDisk) =>
+        // 🔴 ワークスペースが 2 つ以上なら、説明の窓も出さずに断る(#1455)
+        (await refuseIfWorkspacesRemain(dispatcher)) ? ('cancel' as const) : confirmInApp(
           root,
           resetExplainMessage({
             notes: dispatcher.getState().entryMetas.size,
@@ -16900,6 +17251,18 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (target instanceof HTMLSelectElement)
       appScheduleWeekStart.set(normalizeWeekStart(target.value));
   },
+  /**
+   * 🔴 **予定の面を担当で絞る**(#283)。値は選んだ行の `value`(`\u0000all` = 全員 / `\u0000none` = 担当なし / 名前)。
+   * 見え方だけ ── 本文にも保存にも触れない(`BODY_WRITE_ACTIONS` には載せない)。
+   */
+  'set-schedule-owner': (dispatcher, target) => {
+    if (!(target instanceof HTMLSelectElement)) return;
+    const v = target.value;
+    dispatcher.dispatch({
+      type: 'SET_SCHEDULE_OWNER',
+      owner: v === '\u0000all' ? null : v === '\u0000none' ? '' : v,
+    });
+  },
   /** 🔴 **次に開いたとき、見逃した予定を知らせるか**(#855 20-C)。⚠ 押した後の値を保存する。 */
   'set-schedule-missed': (_dispatcher, target) => {
     if (target instanceof HTMLInputElement) appScheduleNotify.setMissedOn(target.checked);
@@ -18642,6 +19005,11 @@ export function bindActions(
         )
       )
         return;
+      /**
+       * 🔴 **「手書き」のタブの中は、「何も無い所」ではない**(#1448)。⚠ 描くために台を押しただけで、読んでいるノートが
+       *   閉じていた(保存しても、手書きを置く先の板が無くなる)。
+       */
+      if ((ev.target as HTMLElement | null)?.closest('[data-pkc-browse-pane="draw"]')) return;
       const host = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
         '[data-pkc-region="browse-host"]',
       );
@@ -21680,6 +22048,8 @@ export function bindActions(
           : headingMenuActions({
               folded: isHeadingFolded(heading),
               foldable: heading.parentElement === host,
+              // 🔴 すべての見出しをまとめて(#1441 (a))── 畳める見出しが 2 つ以上のときだけ
+              foldAll: host === null ? null : allHeadingFoldState(host),
               appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
               // 🔴 章の参照(#579)── 描画が id を刻んだ見出しだけ(`#`〜`###`)
               linkable: heading.id !== '',
@@ -21705,6 +22075,8 @@ export function bindActions(
                *   `sectionEditable` も書ける状態を見ていない、形だけの条件である)。
                */
               chapterWindow: chapterable,
+              // 🔴 章を新しいノートに切り出す / 元に戻す(#1439)── 片方だけが出る(`chapterSplitStateAt` が決める)
+              ...chapterSplitMenuFlags(host, heading, ob?.body ?? null, dispatcher.getState(), level, headingPlainText(heading)),
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
         ...(block === null ? [] : blockMenuActions({
@@ -21778,6 +22150,7 @@ export function bindActions(
         // 🔴 板を置く口は**いつも**出す(#676)── 押した座標は下の carry が運ぶ
         ADD_PLACE_ACTION,
         ADD_PLACE_NOTE_ACTION,
+        ADD_PLACE_DRAWING_ACTION,
         ADD_PLACE_TEMPLATE_ACTION,
         ...body,
       ];

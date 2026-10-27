@@ -229,6 +229,11 @@ const OBJECT_LONE: readonly string[] = [
   // #952 仕上げ ▾: 行のボタンは 1 つ(open-capture-process)に畳み、道具の一覧はメニューの項目として開いた先で組む(出口は一覧の 1 か所)
   'open-capture-process',
   'clear-entry-date',
+  // ⚠ 2026-10-26(#283): ノートの担当を付ける / 外す。出口は情報ペインの「担当」の行 1 か所だけ(`clear-entry-date` と
+  //   同じ形 ── 日付の隣の同じ作り。効く先は選んでいるノート)。⚠ 「#582 の増やさない」に触れていない理由も同じ:
+  //   画面に足したのは、既にある情報ペインの行 1 つで、別の面を作っていない。
+  'clear-entry-owner',
+  'set-entry-owner',
   'deliver-to-extension',
   'dual-bookmark-open',
   'dual-bookmark-remove',

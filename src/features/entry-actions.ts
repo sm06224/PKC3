@@ -947,6 +947,19 @@ export function headingMenuActions(ctx: {
   readonly logRow?: boolean;
   /** 🔴 この章に添付(`asset:`)の参照が在るか(#677)。真のときだけ「添付ごとコピー」を出す。省略 = 無い。 */
   readonly assets?: boolean;
+  /**
+   * 🔴 **すべての見出しをまとめて畳む / 出す**(#1441 (a))。`null` / 省略 = 出さない
+   *   (畳める見出しが 2 つに満たない)。`'fold'` = 1 つでも開いている(押すと全部畳む)、
+   *   `'unfold'` = 全部畳んである(押すと全部出す)── 字は起きることで書く。
+   */
+  readonly foldAll?: 'fold' | 'unfold' | null;
+  /**
+   * 🔴 **この章を新しいノートに切り出せるか**(#1439)。章の範囲を引けて(本文の直下の見出し)、
+   *   下が「切り出した章へのリンク」だけではないとき。ログの行の見出しには出さない。
+   */
+  readonly splitChapter?: boolean;
+  /** 🔴 **切り出した章を元に戻せるか**(#1439)── 見出しの下が、実在するノートへのリンク 1 行だけのとき。 */
+  readonly restoreChapter?: boolean;
 }): readonly EntryAction[] {
   const out: EntryAction[] = [];
   if (ctx.sectionEditable) out.push({ action: 'edit-section', label: 'この章を編集する' });
@@ -976,6 +989,12 @@ export function headingMenuActions(ctx: {
   // 🔴 章の別ウィンドウ(#1044 段4)── 章の欄と同じ形の条件(書けるかどうかには依らない)
   if (ctx.chapterWindow)
     out.push({ action: 'open-chapter-window', label: 'この章を別のウィンドウで読む' });
+  // 🔴 章の切り出し / 元に戻す(#1439)── 双方向。どちらか片方だけが出る(下がリンク 1 行だけなら戻す側)
+  if (ctx.splitChapter === true) out.push({ action: 'split-chapter', label: 'この章を新しいノートに切り出す' });
+  if (ctx.restoreChapter === true) out.push({ action: 'restore-chapter', label: '切り出した章を元に戻す' });
+  // 🔴 すべての見出しをまとめて(#1441 (a))── 見出しの物の最後。畳める見出しが 2 つ以上のときだけ
+  if (ctx.foldable && ctx.foldAll === 'fold') out.push({ action: 'toggle-all-heading-fold', label: 'すべての見出しの中身を折りたたむ' });
+  else if (ctx.foldable && ctx.foldAll === 'unfold') out.push({ action: 'toggle-all-heading-fold', label: 'すべての見出しの中身を出す' });
   return out;
 }
 
@@ -1250,6 +1269,18 @@ export const ADD_PLACE_TEMPLATE_ACTION: EntryAction = {
 export const ADD_PLACE_NOTE_ACTION: EntryAction = {
   action: 'add-place-note',
   label: 'ノートを置く…',
+};
+
+/**
+ * 🔴 **白紙に手書きして、板に置く**(#1448。板をホワイトボードとして使うときの「手書き」)。
+ * 押すと別のウィンドウに白紙が開き、ペンで描いて保存すると、**新しい画像の添付**ができて、押した位置へそのまま付箋として置かれる。
+ * 🔑 新しい本文の形は作らない ── 手書きの正体は**画像の添付**(既存の「画像に描き込む」の窓)で、板に置くのは
+ *   「ノートを置く…」と同じ付箋(`entry=`)である。置いたあとは付箋の右クリックで消せる(片道にしない)。
+ * ⚠ 板の無いノートでも出る(`ADD_PLACE_ACTION` と同じ。1 枚目を置くと器が板になる)。
+ */
+export const ADD_PLACE_DRAWING_ACTION: EntryAction = {
+  action: 'add-place-drawing',
+  label: '手書きして置く…',
 };
 
 /**

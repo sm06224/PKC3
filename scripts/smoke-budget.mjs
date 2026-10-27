@@ -140,8 +140,11 @@ import { join } from 'node:path';
  *   `help-announce.smoke.spec.ts` に 1 本足した(起動 1 つ)。⚠ **既存の道中には載せられない** ── 見る相手は「既読の記録がまったく無い端末」
  *   そのもので、他の spec は playwright の設定が既読の記録を空の配列で始める(でないと、お知らせの帯に触る spec が全部「出ていない」で落ちる)。
  *   この 1 本だけ、その印を外した本物の初回で起動する(別の `storageState` で始めるので、同じ起動に載せられない)。
+ * - 2026-10-27(#1441 / #1439 / #283 / #1455 / #1448、構造まわり): **565**(そのときの実数 561)。
+ *   `structure.smoke.spec.ts` を新設した(5 本 = 起動 5 つ)。⚠ **既存の道中には載せられない** ── ワークスペースの切り替えは
+ *   読み込み直し(2 回目の起動)が本命で、手書きの退避は `window.open` を塞いだ起動で、ほかの道中とは前提が違う。
  */
-export const BOOT_BUDGET = 560;
+export const BOOT_BUDGET = 565;
 
 /** 実測の 1 起動あたり秒(手元・headless_shell・`workers: 1`)。 */
 export const SECONDS_PER_BOOT = 1.63;

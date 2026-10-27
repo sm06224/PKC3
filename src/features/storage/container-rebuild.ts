@@ -66,6 +66,7 @@
  *   これは上限を決めて断るより強い(門ではなく、**順番で守っている**)。
  */
 
+import { refuseWhenWorkspacesRemain } from './workspace-guard';
 import { extractMeta } from '../flavor';
 import type { ArchiveSource } from '../export/pkc3-archive';
 import { archiveSuffix } from '../export/archive-kind';
@@ -331,6 +332,11 @@ export interface RebuildPorts {
    * 開き直しは手を取れずメモリ上へ落ちる。だから**何も拾わない前に**断る。
    */
   holdsWriterLease(): boolean;
+  /**
+   * ワークスペースの数(#1455)。⚠ 必須。2 つ以上なら**何も拾う前に**断る(DB ごと捨てるとほかの器が巻き込まれる)。
+   * 数えられなかったとき(壊れた DB)は例外でよい ── 断らずに進む。
+   */
+  countWorkspaces(): Promise<number>;
   /** 壊れた DB から拾う(1 周)。 */
   readonly pick: RescuePick;
   /**
@@ -481,6 +487,8 @@ export async function rebuildContainer(
 ): Promise<RebuildReport> {
   // 🔴 ① より前に断る(まだ何も読んでも消してもいない)
   if (!ports.holdsWriterLease()) throw new Error(REBUILD_NOT_WRITER);
+  // 🔴 ワークスペースが 2 つ以上なら、zip も書かず・何も消す前に断る(#1455)
+  await refuseWhenWorkspacesRemain(() => ports.countWorkspaces());
   // ① 拾う → zip を落とす。⚠ ここで落ちたら例外で抜ける(**まだ何も消していない**)
   const got = await collectRescued(ports.pick, ports.onProgress);
   // 🔑 つながりと履歴も、ノートと同じ ① の段で拾う(捨てた後の DB からはもう読めない)

@@ -42,6 +42,7 @@ import { materializedDates } from '@features/schedule/repeat';
 import { isRealCalendarDate } from '@features/schedule/schedule-date';
 import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
 import { scheduleItemsOf } from './schedule-items';
+import { passesOwnerFilter } from '@features/schedule/owner';
 import { ScheduleBoard } from './schedule-board';
 import { buildPressedButton } from './choice-buttons';
 import { ScheduleDay } from './schedule-day';
@@ -182,6 +183,8 @@ export class ScheduleRenderer {
     quickDate: HTMLInputElement;
     /** 🔴 週の始まり(日曜 / 月曜。#1163 の依頼 191)。 */
     weekStart: HTMLSelectElement;
+    /** 🔴 担当で絞る(#283)。担当を書いた予定が 1 件も無い間は隠す。 */
+    owner: HTMLSelectElement;
   } | null = null;
   /** 「予定を足す」の日付を最後に合わせた日(`null` = 合わせていない)。 */
   private quickDay: string | null = null;
@@ -207,6 +210,7 @@ export class ScheduleRenderer {
     showDone: boolean;
     showUndated: boolean;
     hiddenNotes: AppState['scheduleHiddenNotes'];
+    owner: AppState['scheduleOwner'];
     tagColors: ReturnType<typeof currentTagColors>;
     calendarMonth: AppState['calendarMonth'];
     mode: AppState['scheduleMode'];
@@ -314,6 +318,8 @@ export class ScheduleRenderer {
       showUndated: state.showUndatedTasks,
       // 🔴 隠したノートと、タグの色も指紋(縦線の色が変わる ── 入れないと描き直さない)
       hiddenNotes: state.scheduleHiddenNotes,
+      // 🔴 担当の絞りも指紋(#283。入れないと選んでも描き直さない)
+      owner: state.scheduleOwner,
       tagColors: currentTagColors(),
       calendarMonth: state.calendarMonth,
       // 🔴 見せ方と見ている日も指紋(入れないと「日」を押しても描き直さない)
@@ -352,7 +358,8 @@ export class ScheduleRenderer {
      * 🔑 **何を出すかは `scheduleItemsOf` 1 か所**(`.ics` の書き出しも同じ口を呼ぶ ── §7)。
      * 絞り込み・片付けた・済んだ行の規則と、ノート 1 件が丸ごと予定のもの(frontmatter の `date:`、段④)もそこにある。
      */
-    const { all, visible, notes, items, byNote, hiddenByNote, doneNotes } = scheduleItemsOf(state);
+    const { all, visible, notes, items, byNote, hiddenByNote, doneNotes, owners } = scheduleItemsOf(state);
+    this.paintOwner(frame.owner, owners, state.scheduleOwner);
     const dated = visible.filter((c) => c.date !== null);
     /**
      * 🔴 **済んだ回は「絞り込む前」の札から拾う**(#344 段②)。
@@ -720,6 +727,35 @@ export class ScheduleRenderer {
     }
   }
 
+  /**
+   * 🔴 **担当の選択肢を詰める**(#283)。⚠ **担当を書いた予定が無く、絞ってもいないなら出さない**
+   * (押しても何も起きない口を作らない)。いま絞っている名前が選択肢から消えても、選んだ行は残す
+   * (黙って「全員」に戻すと、絞ったつもりの画面が突然増える)。
+   */
+  private paintOwner(sel: HTMLSelectElement, owners: readonly string[], current: string | null): void {
+    const show = owners.length > 0 || current !== null;
+    if (sel.hidden === show) sel.hidden = !show;
+    const names = current !== null && current !== '' && !owners.includes(current) ? [...owners, current] : [...owners];
+    const rows: Array<[string, string]> = [
+      ['\u0000all', '担当: すべて'],
+      ['\u0000none', '担当なし'],
+      ...names.map((n): [string, string] => [n, n]),
+    ];
+    const sig = rows.map((r) => r[0]).join('\n');
+    if (sel.getAttribute('data-pkc-sig') !== sig) {
+      sel.textContent = '';
+      for (const [value, label] of rows) {
+        const o = document.createElement('option');
+        o.value = value;
+        o.textContent = label;
+        sel.append(o);
+      }
+      sel.setAttribute('data-pkc-sig', sig);
+    }
+    const want = current === null ? '\u0000all' : current === '' ? '\u0000none' : current;
+    if (sel.value !== want) sel.value = want;
+  }
+
   /** 「日付のない項目も出す」の切替。⚠ **押しても何も起きないボタンを出さない**。 */
   private paintUndatedToggle(box: HTMLInputElement, state: AppState, undated: number): number {
     const show = undated > 0 || state.showUndatedTasks;
@@ -749,6 +785,8 @@ export class ScheduleRenderer {
       if (m === undefined) return false;
       if (m.archived && !state.showArchived) return false;
       if (c.date === null && !state.showUndatedTasks) return false;
+      // 🔴 担当の絞り(#283)── 押して出る数に合わせる
+      if (!passesOwnerFilter(c.owner, state.scheduleOwner)) return false;
       return matchesEntry(m, filter);
     }).length;
     const show = hidden > 0 || state.showDoneTasks;
@@ -993,7 +1031,18 @@ export class ScheduleRenderer {
       o.textContent = weekStartLabel(n);
       weekStartSel.append(o);
     }
-    modeRow.append(...modes, weekStartSel);
+    /**
+     * 🔴 **担当で絞る**(#283。エントリ / グループをタスクとして扱う)。選択肢は予定の面に出うる担当だけ
+     * (`scheduleItemsOf` の `owners`)── 中身は描くたびに `paintOwner` が詰める。
+     * ⚠ 口は字で書く(`tests/action-outlets.test.ts` が静的に追う)。見え方だけ ── 本文にも保存にも触れない。
+     */
+    const ownerSel = document.createElement('select');
+    ownerSel.setAttribute('data-pkc-field', 'schedule-owner');
+    ownerSel.setAttribute('data-pkc-action', 'set-schedule-owner');
+    ownerSel.setAttribute('aria-label', '担当で絞る');
+    ownerSel.title = '担当で絞ります(ノートの前書きの owner: か、チェック項目の「担当:名前」)';
+    ownerSel.hidden = true;
+    modeRow.append(...modes, weekStartSel, ownerSel);
     /**
      * 🔴 **予定の面から、その場でやることを足す**(#402 ②)。
      *
@@ -1194,7 +1243,7 @@ export class ScheduleRenderer {
     this.monthView.el.hidden = true;
     this.board.el.hidden = true;
     this.region.append(bar, modeRow, quick, grid, note, clearFilter, toggles, exportIcs, notify, this.day.el, this.week.el, this.monthView.el, this.board.el, groups);
-    this.frame = { month, grid, note, clearFilter, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', lead, missed, toggles, groups, modes, quickDate: qDate, weekStart: weekStartSel };
+    this.frame = { month, grid, note, clearFilter, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', lead, missed, toggles, groups, modes, quickDate: qDate, weekStart: weekStartSel, owner: ownerSel };
     return this.frame;
   }
 }

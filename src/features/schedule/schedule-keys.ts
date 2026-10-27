@@ -42,6 +42,12 @@ export const SCHEDULE_KEYS = {
   status: 'status',
   /** 片付いた印。⚠ 列に写すのは todo だけ(下の `extractSchedule` を参照)。 */
   archived: 'archived',
+  /**
+   * 🔴 **担当**(#283。タスクとして扱う ── 状態・期日の次の 1 つ)。字で書く名前 1 つ。
+   * ⚠ **列にしない**(保存の形を変えない)── 本文の前書きから読み、予定の走査が運ぶ(`noteTimeOf`)。
+   *   連絡先のノートの題名と一致すれば、情報ペインで押せるリンクになる(無くても書ける)。
+   */
+  owner: 'owner',
 } as const;
 
 /**
@@ -71,6 +77,14 @@ export function readScheduleDate(meta: Record<string, FrontmatterValue>): string
 export function readScheduleTime(meta: Record<string, FrontmatterValue>): string | null {
   const v = meta[SCHEDULE_KEYS.date];
   return typeof v === 'string' ? (parseFrontmatterWhen(v)?.time ?? null) : null;
+}
+
+/**
+ * 担当を読む(#283)。⚠ 書いていなければ `null`(既定値を作らない)。前後の空白は落とす。
+ */
+export function readScheduleOwner(meta: Record<string, FrontmatterValue>): string | null {
+  const v = meta[SCHEDULE_KEYS.owner];
+  return typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
 }
 
 /**

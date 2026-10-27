@@ -48,6 +48,14 @@ export function imageDrawPhaseBlockedText(phase: AppPhase): string {
 export const IMAGE_DRAW_POPUP_BLOCKED_TEXT =
   '別のウィンドウを開けませんでした。ブラウザのポップアップの許可を出してから、もう一度押してください';
 
+/** 窓の代わりに左の「手書き」タブへ出したときの知らせ。 */
+export const IMAGE_DRAW_PANE_NOTICE =
+  '別のウィンドウを開けなかったので、左のペインの「手書き」タブに出しました(保存するか、閉じるまでここで描けます)';
+
+/** 左の「手書き」タブが別の絵で使われているとき。 */
+export const IMAGE_DRAW_PANE_BUSY_TEXT =
+  '左の「手書き」タブで別の絵を描いている途中です。保存するか閉じてから、もう一度押してください';
+
 export interface ImageDrawDeps {
   readonly dispatcher: Dispatcher;
   /** 元の bytes を読む口。⚠ `null` = 中身がもう無い。 */
@@ -61,20 +69,135 @@ export interface ImageDrawDeps {
   ) => Promise<AttachedOne | null>;
   /** 描き込みの窓を**同期で**開く口。開けなければ `null`。 */
   readonly openWindow: (deps: ImageDrawWindowDeps) => ImageDrawWindow | null;
+  /**
+   * 🔴 **窓が開けなかったときの退避先: 左のペインの「手書き」タブ**(#1448)。省略 = 退避先なし(従来どおり断る)。
+   * ⚠ 退避先は中央ではない(中央の本文を奪わない)。面は 1 つなので同時に 1 枚。
+   */
+  readonly openPane?: (deps: ImageDrawWindowDeps) => ImageDrawWindow | null;
   /** 結果の知らせ。`openLid` = 知らせの「開く」が指す、保存した添付のノート。 */
   readonly notify: (text: string, openLid: string) => void;
+  /**
+   * 🔴 **白紙の画像を作る口**(#1448。板の上で手書きするための台)。省略 = 白紙から描く道は無い。
+   * ⚠ 台の大きさは呼び側が決める(`BLANK_DRAWING_SIDE` を使う)。PNG の Blob を返す。
+   */
+  readonly blank?: () => Promise<Blob>;
+  /** 保存名に入れる時刻(test が差せる)。既定は `new Date()`。 */
+  readonly now?: () => Date;
+}
+
+/** 白紙の台の大きさ(px)。板の標準の付箋(320×240)より一回り大きく、描き込みの上限(4096)に十分収まる。 */
+export const BLANK_DRAWING_SIDE = { width: 1280, height: 800 } as const;
+
+/** 白紙から描いた絵の保存名(`手書き-20261026-1540.png`)。同じ分に 2 枚描いても別の添付になる(名前は重複してよい)。 */
+export function blankDrawingName(at: Date): string {
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `手書き-${String(at.getFullYear())}${p(at.getMonth() + 1)}${p(at.getDate())}-${p(at.getHours())}${p(at.getMinutes())}.png`;
 }
 
 export interface ImageDrawer {
   /** @param lid 押した添付のノート(置き場のフォルダを引く起点)。無ければルート。 */
   run(assetKey: string, name: string, mime: string, lid?: string): Promise<void>;
+  /**
+   * 🔴 **白紙から手書きする**(#1448)。描いた絵は新しい添付になり、`onSaved` にそのノートの lid が渡る
+   * (板の上から呼ぶときは、それを板に置く)。置き場は `lid`(呼び出したノート)と同じフォルダ。
+   * @param lid 呼び出したノート(置き場のフォルダを引く起点)
+   */
+  runBlank(lid: string, onSaved?: (attachedLid: string) => void): Promise<void>;
 }
 
 export function createImageDrawer(deps: ImageDrawDeps): ImageDrawer {
   let saving = false;
   /** 開いている窓(添付ごとに 1 枚)。 */
   const windows = new Map<string, ImageDrawWindow>();
+  /** 左の「手書き」タブに出している窓(面は 1 つ)。 */
+  let paneWin: ImageDrawWindow | null = null;
   const fail = (error: string): void => deps.dispatcher.dispatch({ type: 'OP_FAILED', error });
+
+  /**
+   * 窓を開いて描かせ、保存を受ける共通の道(`run` と `runBlank` が通る ── 保存の門・同時 1 本・窓 1 枚は 1 か所)。
+   * ⚠ 窓は呼び出しの**同期のうち**に開く(後ろへ回すとポップアップが止められる)。
+   */
+  async function present(opts: {
+    readonly key: string;
+    readonly title: string;
+    readonly parentLid: string | null;
+    readonly load: () => Promise<Blob | { readonly error: string }>;
+    readonly saveName: () => string;
+    readonly onSaved?: (attachedLid: string) => void;
+  }): Promise<void> {
+    const existing = windows.get(opts.key);
+    if (existing !== undefined && !existing.closed) {
+      existing.focus();
+      return;
+    }
+    const winDeps: ImageDrawWindowDeps = {
+      title: opts.title,
+      windowName: `pkc3-draw-${opts.key}`,
+      onClosed: () => {
+        if (windows.get(opts.key) === win) windows.delete(opts.key);
+      },
+    };
+    let win = deps.openWindow(winDeps);
+    if (win === null) {
+      // 🔴 窓が塞がれた → 左の「手書き」タブへ退避する(中央は使わない)。面は 1 つ ── 別の絵を描いている途中なら断る
+      const busy = paneWin !== null && !paneWin.closed;
+      if (deps.openPane === undefined) {
+        fail(IMAGE_DRAW_POPUP_BLOCKED_TEXT);
+        return;
+      }
+      if (busy) {
+        fail(IMAGE_DRAW_PANE_BUSY_TEXT);
+        return;
+      }
+      win = deps.openPane(winDeps);
+      if (win === null) {
+        fail(IMAGE_DRAW_POPUP_BLOCKED_TEXT);
+        return;
+      }
+      paneWin = win;
+      deps.dispatcher.dispatch({ type: 'OP_NOTICE', message: IMAGE_DRAW_PANE_NOTICE });
+    }
+    windows.set(opts.key, win);
+    const loaded = await opts.load();
+    if (!(loaded instanceof Blob)) {
+      win.fail(loaded.error);
+      return;
+    }
+    await win.start(loaded, async (png: Blob): Promise<ImageDrawSaveResult> => {
+      if (saving) return { ok: false, message: 'いま保存しています。終わるまで待ってください。' };
+      // 🔑 編集中でも通す(`CREATE_ENTRY` は `keepSelection` なら editing を受ける)。断るのは書込の錠だけ
+      const phase = deps.dispatcher.getState().phase;
+      if (deps.dispatcher.getState().writeLock !== null) return { ok: false, message: IMAGE_DRAW_BUSY_TEXT };
+      // ⚠ 書込の錠でない理由(保存に失敗して止まっている / 読み込み中)は、その理由を言う ──
+      //   「別の保存の最中」と言い切ると、待っても通らない場面で待たせる
+      if (phase !== 'ready' && phase !== 'editing') {
+        return { ok: false, message: imageDrawPhaseBlockedText(phase) };
+      }
+      saving = true;
+      try {
+        const newName = opts.saveName();
+        // attachOne が理由を先に OP_FAILED で出すので、撃つ前の値を控えて取り違えない
+        const errorBefore = deps.dispatcher.getState().error;
+        const attached = await deps.attach(
+          { name: newName, type: 'image/png', size: png.size, blob: png },
+          // 読んでいるノートも選択も動かさない。置くのは元と同じフォルダ
+          { parentLid: opts.parentLid, keepSelection: true },
+        );
+        if (attached === null) {
+          const now = deps.dispatcher.getState().error;
+          return {
+            ok: false,
+            message: now !== null && now !== errorBefore ? now : '保存できませんでした。',
+          };
+        }
+        deps.notify(`描き込んだ画像を保存しました:「${newName}」`, attached.lid);
+        opts.onSaved?.(attached.lid);
+        return { ok: true };
+      } finally {
+        saving = false;
+      }
+    });
+  }
 
   return {
     async run(assetKey: string, name: string, mime: string, lid?: string): Promise<void> {
@@ -83,75 +206,47 @@ export function createImageDrawer(deps: ImageDrawDeps): ImageDrawer {
         fail(`この種類の画像には描き込めません(対応は PNG・JPEG・WebP・BMP です): 「${name}」`);
         return;
       }
-      // 開いている窓があれば、開き直さず手前に出す(2 枚目の復号も待ちも作らない)
       /**
        * 🔴 窓の鍵は「どのノートの、どの画像か」(#1087)。⚠ 画像の鍵は中身で決まるので、同じ写真を 2 つのノートに
        *   入れていると、片方の窓が開いている間にもう片方で押しても前の窓が出るだけで、絵は前のノートの隣へ入っていた。
        */
       const key = lid === undefined ? assetKey : `${assetKey}-${lid}`;
-      const existing = windows.get(key);
-      if (existing !== undefined && !existing.closed) {
-        existing.focus();
-        return;
-      }
-      // ⚠ 押した瞬間のうちに開く(`await` の前)── 後ろへ回すとポップアップが止められる
-      const win = deps.openWindow({
-        title: name,
-        windowName: `pkc3-draw-${key}`,
-        onClosed: () => {
-          if (windows.get(key) === win) windows.delete(key);
-        },
-      });
-      if (win === null) {
-        fail(IMAGE_DRAW_POPUP_BLOCKED_TEXT);
-        return;
-      }
-      windows.set(key, win);
       // 置き場は押した瞬間に採る(読んでいる間に選択が動いても、元の隣へ入る)
       const parentLid = lid === undefined ? null : deps.parentOf(lid);
-      let blob: Blob | null;
-      try {
-        blob = await deps.readBlob(assetKey);
-      } catch (e) {
-        win.fail(`画像を読み込めませんでした(${errorText(e)})`);
-        return;
-      }
-      if (blob === null) {
-        win.fail('画像の中身が見つかりませんでした');
-        return;
-      }
-      await win.start(blob, async (png: Blob): Promise<ImageDrawSaveResult> => {
-        if (saving) return { ok: false, message: 'いま保存しています。終わるまで待ってください。' };
-        // 🔑 編集中でも通す(`CREATE_ENTRY` は `keepSelection` なら editing を受ける)。断るのは書込の錠だけ
-        const phase = deps.dispatcher.getState().phase;
-        if (deps.dispatcher.getState().writeLock !== null) return { ok: false, message: IMAGE_DRAW_BUSY_TEXT };
-        // ⚠ 書込の錠でない理由(保存に失敗して止まっている / 読み込み中)は、その理由を言う ──
-        //   「別の保存の最中」と言い切ると、待っても通らない場面で待たせる
-        if (phase !== 'ready' && phase !== 'editing') {
-          return { ok: false, message: imageDrawPhaseBlockedText(phase) };
-        }
-        saving = true;
-        try {
-          const newName = drawnImageName(name);
-          // attachOne が理由を先に OP_FAILED で出すので、撃つ前の値を控えて取り違えない
-          const errorBefore = deps.dispatcher.getState().error;
-          const attached = await deps.attach(
-            { name: newName, type: 'image/png', size: png.size, blob: png },
-            // 読んでいるノートも選択も動かさない。置くのは元と同じフォルダ
-            { parentLid, keepSelection: true },
-          );
-          if (attached === null) {
-            const now = deps.dispatcher.getState().error;
-            return {
-              ok: false,
-              message: now !== null && now !== errorBefore ? now : '保存できませんでした。',
-            };
+      await present({
+        key,
+        title: name,
+        parentLid,
+        load: async () => {
+          try {
+            const blob = await deps.readBlob(assetKey);
+            return blob ?? { error: '画像の中身が見つかりませんでした' };
+          } catch (e) {
+            return { error: `画像を読み込めませんでした(${errorText(e)})` };
           }
-          deps.notify(`描き込んだ画像を保存しました:「${newName}」`, attached.lid);
-          return { ok: true };
-        } finally {
-          saving = false;
-        }
+        },
+        saveName: () => drawnImageName(name),
+      });
+    },
+    async runBlank(lid: string, onSaved?: (attachedLid: string) => void): Promise<void> {
+      const blank = deps.blank;
+      if (blank === undefined) {
+        fail('この環境では、白紙から手書きできません');
+        return;
+      }
+      await present({
+        key: `blank-${lid}`,
+        title: '手書き',
+        parentLid: deps.parentOf(lid),
+        load: async () => {
+          try {
+            return await blank();
+          } catch (e) {
+            return { error: `白紙の画像を作れませんでした(${errorText(e)})` };
+          }
+        },
+        saveName: () => blankDrawingName((deps.now ?? (() => new Date()))()),
+        ...(onSaved === undefined ? {} : { onSaved }),
       });
     },
   };

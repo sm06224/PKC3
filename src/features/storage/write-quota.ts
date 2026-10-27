@@ -93,6 +93,8 @@ export const QUOTA_BLOCKED_OPS: readonly string[] = [
   //    ⚠ ここは床(64MB)で断るだけ ── 「いまの大きさぶんの空きが在るか」は
   //    押す前に `features/storage/vacuum.ts` の `vacuumBlock` が見る(押せなくする)
   'vacuum',
+  // 🔴 空のワークスペースを足す(#1455)── 器の行が 1 本増える(小さいが「増やす側」)
+  'createWorkspace',
 ];
 
 /**
@@ -113,6 +115,10 @@ export const QUOTA_ALLOWED_WRITES: readonly string[] = [
   'integrityStamp',
   // タグの色(#1457)── `settings` の 1 行(外すときは減る)。空きが無くても付け外しできる
   'putTagColor',
+  // ワークスペース(#1455)── 切り替え・改名は 1 行を上書きするだけ。削除は減らす側。空きが無くても通す
+  'switchWorkspace',
+  'renameWorkspace',
+  'deleteWorkspace',
 ];
 
 /**

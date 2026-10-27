@@ -4115,6 +4115,15 @@ describe('SQL の窓が 2 枚でも取り合わない(#836)', () => {
 describe('入れ物ごと捨てる(#986 段③)', () => {
   const CID = 'c-wipe';
 
+  /**
+   * このファイルは 1 つの worker を共有していて、これまでの test が器を何本も足している。
+   * 🔴 複数のワークスペースが居ると「全部を消す」は断られる(#1455)── 使っている 1 つだけにしてから捨てる。
+   */
+  beforeAll(async () => {
+    const { workspaces, activeCid } = await request({ op: 'listWorkspaces' });
+    for (const w of workspaces) if (w.cid !== activeCid) await request({ op: 'deleteWorkspace', cid: w.cid });
+  });
+
   it('🔴 メモリ上の DB では「捨てた」と言わず、理由を返す', async () => {
     const r = await request({ op: 'wipeStorage' });
     expect(r.wiped, 'file が無いのに「捨てた」と言っている').toBe(false);

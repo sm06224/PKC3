@@ -1797,6 +1797,12 @@ export interface AppState {
    * ⚠ 保存しない(その場の見え方)── `showDoneTasks` / `showUndatedTasks` と同じ扱い。
    */
   scheduleHiddenNotes: readonly string[];
+  /**
+   * 🔴 **予定の面を、担当で絞る**(#283)。`null` = 全員(既定)/ `''` = 担当なし / それ以外 = その名前。
+   * ⚠ 保存しない(その場の見え方)── `showDoneTasks` / `scheduleHiddenNotes` と同じ扱い。
+   * ⚠ 絞るだけ ── ノートも予定も消さない(外せば全部戻る)。
+   */
+  scheduleOwner: string | null;
   /** 選択 entry の履歴 panel(P5b)。開いた時点のスナップショット ── 選択遷移 /
    *  編集開始 / view 切替で畳む。boot で revisions に触れない原則の受け皿。 */
   revisionPanel: { lid: string; items: readonly RevisionItem[] } | null;
@@ -2475,6 +2481,7 @@ export const initialState: AppState = {
   showDoneTasks: false,
   showUndatedTasks: false,
   scheduleHiddenNotes: [],
+  scheduleOwner: null,
   revisionPanel: null,
   revisionPreview: null,
   notice: null,
@@ -3025,6 +3032,18 @@ export type UserAction =
    */
   | { type: 'MOVE_BLOCK'; lid: string; start: number; end: number; toBefore: number }
   /**
+   * 🔴 **章を新しいノートに切り出したあと、元の本文の章をリンク 1 行にする**(#1439)。
+   * 新しいノートは binder が先に `CREATE_ENTRY` で作ってある(入れてから切る ── 書けなかった回は
+   * 二重になるだけで、章は消えない)。`start..end` は**生の body** の行(章の見出しの下)。
+   * 掴んだ時点の行は reducer が画面の本文から捕える(`MOVE_BLOCK` と同じ)。
+   */
+  | { type: 'SPLIT_CHAPTER'; lid: string; start: number; end: number; link: string; childLid: string; childTitle: string }
+  /**
+   * 🔴 **切り出した章を元に戻す**(#1439。片道にしない)── リンクの 1 行を新しいノートの本文で置き換え、
+   * 新しいノートを削除する(ゴミ箱から戻せる)。2 つのノートを触るので専用の event(`REQUEST_CHAPTER_RESTORE`)。
+   */
+  | { type: 'RESTORE_CHAPTER'; lid: string; childLid: string; line: number }
+  /**
    * 🔴 **本文の塊を、別のノートへ持っていく**(#684 段③)。
    *
    * > user 要望 2026-09-03:「本文の行 / 塊を、別のノートへ」
@@ -3393,6 +3412,10 @@ export type UserAction =
   /** 板の「完了」を開く / 畳む(2026-08-20。設計 doc §4-4)。 */
   | { type: 'TOGGLE_SHOW_DONE_TASKS' }
   | { type: 'TOGGLE_SHOW_UNDATED_TASKS' }
+  /** 🔴 予定の面を担当で絞る(#283)。`null` = 全員 / `''` = 担当なし / 名前。見え方だけ(走査は頼み直さない)。 */
+  | { type: 'SET_SCHEDULE_OWNER'; owner: string | null }
+  /** 🔴 ノート 1 件の担当を書く / 外す(#283。前書きの `owner:`)。`owner: null` = 外す(`date` と同じ双方向)。 */
+  | { type: 'SET_ENTRY_OWNER'; lid: string; owner: string | null }
   /** 予定の面で、そのノートの予定を隠す / 出す(「出すもの」のノートの一覧)。 */
   | { type: 'TOGGLE_SCHEDULE_NOTE'; lid: string }
   | { type: 'RETRY_PERSIST' }
@@ -4428,6 +4451,16 @@ export type DomainEvent =
       entryOrder: number;
       /** 何をするか。規則は `features/markdown/body-rewrite.ts` の 1 か所。 */
       rewrite: BodyRewrite;
+    }
+  | {
+      /**
+       * 🔴 **切り出した章を元に戻す要求**(#1439)── 元のノートのリンク 1 行を、切り出し先の本文で置き換える。
+       * ⚠ どちらの本文も効果層が disk から読み直す(`REQUEST_BLOCK_HANDOFF` と同じ作法)。
+       *   **先に元へ書き**、書けたら切り出し先を削除する ── 書けなかった回は何も消えない。
+       */
+      type: 'REQUEST_CHAPTER_RESTORE';
+      into: { lid: string; title: string; archetype: string; entryOrder: number; line: number; openLine: string };
+      child: { lid: string; title: string };
     }
   | {
       /**
@@ -9345,6 +9378,63 @@ function reduceCore(
           toBeforeLine: lines[toBefore] ?? null,
         };
       });
+    case 'SPLIT_CHAPTER':
+      return bodyRewriteGate(state, action.lid, '、章を切り出してください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
+        const { start, end, link } = action;
+        if (!Number.isInteger(start) || !Number.isInteger(end) || link === '') return null;
+        const rows = shown.split('\n');
+        if (start < 0 || end < start || end >= rows.length) return null;
+        return {
+          kind: 'chapter-split',
+          start,
+          end,
+          lines: rows.slice(start, end + 1),
+          link,
+          childLid: action.childLid,
+          childTitle: action.childTitle,
+        };
+      });
+    case 'RESTORE_CHAPTER': {
+      const blocked =
+        bodyWriteBlockReason(state, action.lid) ?? bodyWriteBlockReason(state, action.childLid);
+      if (blocked !== null)
+        return { state: { ...state, error: blockedWithSuffix(blocked, '、章を元に戻してください') }, events: [] };
+      const into = state.entryMetas.get(action.lid);
+      const child = state.entryMetas.get(action.childLid);
+      if (!into || !child || action.lid === action.childLid) return { state, events: [] };
+      // 🔴 本当にここから切り出した子だけ(つながりが在る)。種類が変わっていたら断る(#1439 レビュー ⚠4)
+      if (!state.relations.some((r) => r.kind === 'provenance' && r.fromLid === action.childLid && r.toLid === action.lid))
+        return {
+          state: { ...state, error: 'このノートから切り出した章ではないため、元に戻せません(つながりが見つかりません)' },
+          events: [],
+        };
+      if (child.archetype !== 'text')
+        return {
+          state: { ...state, error: '切り出した先の種類が変わっているため、元に戻せません(普通のノートに戻してから試してください)' },
+          events: [],
+        };
+      const shown = screenBodyOf(state, action.lid);
+      const openLine = shown?.split('\n')[action.line];
+      if (shown === null || openLine === undefined) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_CHAPTER_RESTORE',
+            into: {
+              lid: into.lid,
+              title: into.title,
+              archetype: into.archetype,
+              entryOrder: into.entryOrder,
+              line: action.line,
+              openLine,
+            },
+            child: { lid: child.lid, title: child.title },
+          },
+        ],
+      };
+    }
     /**
      * 🔴 **本文の塊を、別のノートへ持っていく**(#684 段③)。
      *
@@ -9768,6 +9858,39 @@ function reduceCore(
     case 'TOGGLE_SHOW_DONE_TASKS':
       // ⚠ 選択も走査も動かさない ── 見え方だけを変える
       return { state: { ...state, showDoneTasks: !state.showDoneTasks }, events: [] };
+    case 'SET_ENTRY_OWNER': {
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null)
+        return {
+          state: {
+            ...state,
+            error: blockedWithSuffix(blocked, action.owner === null ? '担当を外してください' : '担当を付けてください'),
+          },
+          events: [],
+        };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      const owner = action.owner === null ? null : action.owner.replace(/\s+/g, ' ').trim();
+      if (owner === '') return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            // ⚠ 書換は既存の `frontmatter` 1 本(鍵を足す / 書き換える / `undefined` で消す)── 新しい書込経路を作らない
+            rewrite: { kind: 'frontmatter', keys: { owner: owner ?? undefined } },
+          },
+        ],
+      };
+    }
+    case 'SET_SCHEDULE_OWNER':
+      return state.scheduleOwner === action.owner
+        ? { state, events: [] }
+        : { state: { ...state, scheduleOwner: action.owner }, events: [] };
     case 'TOGGLE_SHOW_UNDATED_TASKS':
       /**
        * ⚠ **走査を頼み直さない**(2026-08-23)── 日付の無い札も `taskScan` に

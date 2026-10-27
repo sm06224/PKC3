@@ -5974,6 +5974,138 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='inspector-date'] button:hover:not(:disabled) {
   border-bottom-color: var(--fg);
 }
+/* 情報の「担当」(#283)。日付と同じ作り ── ボタンらしく主張させない。連絡先と一致した名前だけ押せる札 */
+[data-pkc-field='inspector-owner'] button {
+  padding: 0;
+  margin-right: var(--s2);
+  font: inherit;
+  color: var(--fg);
+  background: none;
+  border: none;
+  border-bottom: 1px dotted var(--border);
+  cursor: pointer;
+}
+[data-pkc-field='inspector-owner'] [data-pkc-action='clear-entry-owner'] {
+  color: var(--muted);
+}
+[data-pkc-field='inspector-owner'] button:hover:not(:disabled) {
+  border-bottom-color: var(--fg);
+}
+[data-pkc-field='inspector-owner'] [data-pkc-field='inspector-owner-name'] {
+  margin-right: var(--s2);
+}
+/* 左の列の「手書き」タブ(#1448)── 別ウィンドウが塞がれたときの退避先。道具と台は別ウィンドウと同じ部品。
+ * 地は無彩色、押している道具は地と字の反転で示す(選んでいる物を属性だけにしない)。幅が狭いので道具の列は折り返す。 */
+[data-pkc-browse-pane='draw'] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+[data-pkc-browse-pane='draw'][hidden] {
+  display: none;
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-bar'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  align-items: center;
+  padding: var(--s1);
+  border-bottom: 1px solid var(--border);
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-bar'] button,
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-close'] {
+  font: inherit;
+  cursor: pointer;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px var(--s2);
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-bar'] button[aria-pressed='true'] {
+  background: var(--fg);
+  color: var(--surface);
+  font-weight: 600;
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-bar'] button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-sep'] {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-status'] {
+  flex: 1 1 100%;
+  color: var(--muted);
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-status'][data-pkc-tone='error'] {
+  color: var(--danger, var(--fg));
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-confirm'] {
+  display: flex;
+  gap: var(--s1);
+  align-items: center;
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-confirm'][hidden] {
+  display: none;
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-stage'] {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s1);
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-canvas'] {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: none;
+  cursor: crosshair;
+  background: #fff;
+  border: 1px solid var(--border);
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-text-input'] {
+  position: fixed;
+  z-index: 10;
+  margin: 0;
+  padding: 0;
+  border: 1px dashed var(--fg);
+  background: rgba(255, 255, 255, 0.85);
+  outline: none;
+  min-width: 6em;
+  line-height: 1.2;
+}
+[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-loading'] {
+  margin: var(--s2);
+  color: var(--muted);
+}
+
+/* 設定の「ワークスペース」(#1455)── 1 行に 名前 / 使用中の印 / 押し口。地は無彩色、色は使用中の 1 点だけ */
+[data-pkc-region='workspaces'] [data-pkc-field='workspace-list'] {
+  list-style: none;
+  margin: var(--s2) 0;
+  padding: 0;
+}
+[data-pkc-region='workspaces'] [data-pkc-field='workspace-row'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) 0;
+  border-bottom: 1px solid var(--border);
+}
+[data-pkc-region='workspaces'] [data-pkc-field='workspace-name'] {
+  flex: 1 1 12em;
+}
+[data-pkc-region='workspaces'] [data-pkc-field='workspace-current'] {
+  color: var(--accent);
+  font-weight: 600;
+}
+[data-pkc-region='workspaces'] [data-pkc-field='workspace-new-name'] {
+  min-width: 14em;
+}
 /* ⚠ 印の無い予定(ノート 1 件が丸ごと)は、印の列を**空けたまま**揃える */
 [data-pkc-field='no-check'] {
   display: inline-block;
@@ -11234,6 +11366,8 @@ h3[data-pkc-section] {
   .pkc-md-copy-btn,
   /* ⚠ ログの日の行(#1441)も紙には要らない ── 押せる物が無い */
   [data-pkc-log-day],
+  [data-pkc-log-month],
+  [data-pkc-log-all],
   /* 🔴 画面専用の操作子は紙に要らない(#1129, #1137) */
   .pkc-back-to-top-container,
   .pkc-reading-progress,
@@ -11512,7 +11646,8 @@ h3[data-pkc-section] {
  * 字の大きさのまま、色だけ薄くする)。地は無彩色、色は情報にだけ ── 畳んでいる間だけ強調色を使う。
  * ⚠ 押せる物は `<button>`(鍵でも届く)。畳んだ印は `aria-expanded` と ▸ で出す。
  */
-[data-pkc-log-day] {
+[data-pkc-log-day],
+[data-pkc-log-month] {
   display: block;
   width: 100%;
   margin: 1.1em 0 0.3em;
@@ -11525,18 +11660,42 @@ h3[data-pkc-section] {
   border-bottom: 1px solid var(--border, currentColor);
   cursor: pointer;
 }
-[data-pkc-log-day]::before {
+[data-pkc-log-day]::before,
+[data-pkc-log-month]::before {
   content: '▾ ';
 }
-[data-pkc-log-day][aria-expanded='false']::before {
+[data-pkc-log-day][aria-expanded='false']::before,
+[data-pkc-log-month][aria-expanded='false']::before {
   content: '▸ ';
 }
-[data-pkc-log-day][aria-expanded='false'] {
+[data-pkc-log-day][aria-expanded='false'],
+[data-pkc-log-month][aria-expanded='false'] {
   color: var(--accent);
 }
 [data-pkc-log-day]:hover,
-[data-pkc-log-day]:focus-visible {
+[data-pkc-log-day]:focus-visible,
+[data-pkc-log-month]:hover,
+[data-pkc-log-month]:focus-visible,
+[data-pkc-log-all]:hover,
+[data-pkc-log-all]:focus-visible {
   color: var(--accent);
+}
+/* 🔴 月の行(#1441 月別)は日の行より一段目立たせる ── 字は本文と同じ大きさのまま、太さだけ変える */
+[data-pkc-log-month] {
+  margin-top: 1.4em;
+  font-weight: 600;
+}
+/* 🔴 「すべて折りたたむ / すべて出す」(#1441)── 先頭に小さく 1 本。右へ寄せて、本文の頭を押し下げない */
+[data-pkc-log-all] {
+  display: block;
+  margin: 0 0 0.2em auto;
+  padding: 0.1em 0.4em;
+  font: inherit;
+  font-size: 0.85em;
+  color: var(--muted, inherit);
+  background: none;
+  border: 0;
+  cursor: pointer;
 }
 
 /**

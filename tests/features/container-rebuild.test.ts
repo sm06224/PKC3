@@ -145,6 +145,7 @@ function harness(
   let writtenFull: readonly import('../../src/features/storage/container-rebuild').RebuiltEntry[] = [];
   const idb = over.assets;
   const ports: RebuildPorts = {
+    countWorkspaces: async () => 1,
     holdsWriterLease: () => over.notWriter !== true,
     pickRelations: onePage(over.relations ?? []),
     pickRevisions: onePage(over.revisions ?? []),

@@ -150,7 +150,7 @@ describe('本文の右クリック(#426 段② / #522)', () => {
       b.getAttribute('data-pkc-action'),
     );
     // ⚠ 「ここに付箋を置く」(#676)は本文を書き換える物なので `BODY_MENU_ACTIONS` の外 ── 塊の並びの位置
-    expect(acts).toEqual(['add-place', 'add-place-note', 'add-place-template', ...BODY_MENU_ACTIONS.map((a) => a.action)]);
+    expect(acts).toEqual(['add-place', 'add-place-note', 'add-place-drawing', 'add-place-template', ...BODY_MENU_ACTIONS.map((a) => a.action)]);
     /**
      * 🔴 **「削除」を出さない。**
      * ⚠ 本文を押したのに削除が出ると、消えるのは**選んでいるノート**である ──
@@ -496,7 +496,9 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     // ⚠ 「この章を編集する」は #1044 段2 で**頭**へ足した(「ここから編集する」の上)
     // ⚠ 7 つ目「この章を別のウィンドウで読む」は #1044 段4 で足した(見出しの物の最後)
     // ⚠ 「章のリンクをコピー」は #1559 で足した(「章の参照をコピー」の隣 ── 本文に貼る物と外へ貼る物)
-    expect(acts.slice(0, 8), '見出しの 8 つが出ていない').toEqual([
+    // ⚠ 「すべての見出しの中身を折りたたむ」は #1441 (a) で足した(見出しの物の最後。畳める見出しが 2 つ以上のとき)
+    // ⚠ 「この章を新しいノートに切り出す」は #1439 で足した(「別のウィンドウで読む」の次)
+    expect(acts.slice(0, 10), '見出しの 10 個が出ていない').toEqual([
       'edit-section',
       'edit-from-heading',
       'append-at-heading',
@@ -505,6 +507,8 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
       'copy-section-ref',
       'copy-section-link',
       'open-chapter-window',
+      'split-chapter',
+      'toggle-all-heading-fold',
     ]);
     /**
      * 🔴 **差し替えていないことを、ここで見る。**
@@ -515,10 +519,12 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
      */
     // ⚠ 台帳 #1852 束 S1(依頼 238 の案 B): 動かせる向きの「ブロックを上へ・下へ移す」が本文の物の前に入る。
     //   この見出しは上に動かす先が無い(いちばん上)ので「下へ」の 1 つだけ(`block-step-menu.test.ts` が全数を見る)
-    expect(acts.slice(8), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+    expect(acts.slice(10), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
       'move-block-step',
       'add-place',
       'add-place-note',
+      // ⚠ 「手書きして置く…」は #1448 で足した(「ノートを置く…」の次)
+      'add-place-drawing',
       'add-place-template',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
@@ -565,6 +571,8 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
       'move-block-step',
       'add-place',
       'add-place-note',
+      // ⚠ 「手書きして置く…」は #1448 で足した(「ノートを置く…」の次)
+      'add-place-drawing',
       'add-place-template',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
@@ -591,6 +599,100 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     // ⚠ **対照群**:1 つ目の章の中身は畳まれない(先頭を掴んでいない証拠)
     expect((r.para as HTMLElement).hidden, '2 つ目を押したのに 1 つ目が畳まれた').toBe(false);
     expect((r.deep as HTMLElement).hidden, '2 つ目の章の中身が畳まれていない').toBe(true);
+  });
+
+  it('🔴 「すべての見出しの中身を折りたたむ」は全部畳み、字が変わり、もう一度で全部出す(#1441 (a))', () => {
+    const r = rig();
+    applyHeadingFold(r.host);
+    rightClick(r.head);
+    const label = (): string =>
+      r.root.querySelector(`${MENU} [data-pkc-action="toggle-all-heading-fold"]`)?.textContent ?? '';
+    expect(label()).toBe('すべての見出しの中身を折りたたむ');
+    r.press('toggle-all-heading-fold');
+    expect((r.para as HTMLElement).hidden, '畳まれていない').toBe(true);
+    expect((r.deep as HTMLElement).hidden, '2 つ目の章まで畳まれていない').toBe(true);
+    rightClick(r.head);
+    expect(label()).toBe('すべての見出しの中身を出す');
+    r.press('toggle-all-heading-fold');
+    expect((r.para as HTMLElement).hidden).toBe(false);
+    expect((r.deep as HTMLElement).hidden).toBe(false);
+  });
+
+  it('🔴 「この章を新しいノートに切り出す」: 新しいノートが作られ、元の章はリンク 1 行になる(#1439)', () => {
+    const r = rig();
+    const events: Array<{ type: string; rewrite?: { kind: string; link?: string; lines?: string[]; start?: number; end?: number } }> = [];
+    r.d.onEvent((e) => events.push(e as never));
+    rightClick(r.head);
+    expect(r.acts()).toContain('split-chapter');
+    expect(r.acts(), '下がリンクではないのに「元に戻す」が出た').not.toContain('restore-chapter');
+    r.press('split-chapter');
+    const made = [...r.d.getState().entryMetas.values()].find((m) => m.title === '章' && m.lid !== 'n1');
+    expect(made, '新しいノートが作られていない').toBeDefined();
+    expect(r.d.getState().selectedLid, '切り出しで開いているノートが退いた').toBe('n1');
+    expect(
+      r.d.getState().relations.some((x) => x.kind === 'provenance' && x.fromLid === made!.lid && x.toLid === 'n1'),
+      '切り出した子 → 親の「出典」のつながりを作っていない(「戻す」を出す条件)',
+    ).toBe(true);
+    const rw = events.find((e) => e.type === 'REQUEST_BODY_REWRITE')?.rewrite;
+    expect(rw?.kind).toBe('chapter-split');
+    expect(rw?.link).toBe(`[章](entry:${made!.lid} "切り出した章")`);
+    expect(rw?.lines).toEqual(['', '中身']);
+    expect([rw?.start, rw?.end]).toEqual([1, 2]);
+  });
+
+  it('🔴 見出しの下が「印のあるリンク 1 行」なら「元に戻す」が出て、押すと RESTORE_CHAPTER が行を運ぶ(#1439)', () => {
+    const r = rig();
+    r.d.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid: 'kid',
+      title: '章',
+      body: '中身\n',
+      edit: false,
+      keepSelection: true,
+    });
+    const linked = HEAD_BODY.replace('中身', '[章](entry:kid "切り出した章")');
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: linked });
+    // 切り出したときに作る、子 → 親の「出典」のつながり(これが無い印つきリンクは複製として扱う)
+    r.d.dispatch({ type: 'ADD_RELATION', id: 'rel1', fromLid: 'kid', toLid: 'n1', kind: 'provenance' });
+    const events: Array<{ type: string; into?: { line: number; openLine: string }; child?: { lid: string } }> = [];
+    r.d.onEvent((e) => events.push(e as never));
+    rightClick(r.head);
+    expect(r.acts()).toContain('restore-chapter');
+    expect(r.acts(), '切り出し済みなのに「切り出す」が出た').not.toContain('split-chapter');
+    r.press('restore-chapter');
+    const ev = events.find((e) => e.type === 'REQUEST_CHAPTER_RESTORE');
+    expect(ev?.child?.lid).toBe('kid');
+    expect(ev?.into?.line).toBe(2);
+    expect(ev?.into?.openLine).toBe('[章](entry:kid "切り出した章")');
+  });
+
+  it('🔴 印つきのリンクをコピーで複製しても(つながりが無い)「元に戻す」は出ない / 同じ親の中の複製も出ない', () => {
+    const r = rig();
+    r.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'kid', title: '章', body: '中身\n', edit: false, keepSelection: true });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: HEAD_BODY.replace('中身', '[章](entry:kid "切り出した章")') });
+    rightClick(r.head);
+    expect(r.acts(), 'つながりが無いのに「元に戻す」が出た').not.toContain('restore-chapter');
+    // つながりを作ると出る(対照群)。さらに同じ親に同じリンクが 2 つあれば出ない
+    r.d.dispatch({ type: 'ADD_RELATION', id: 'rel1', fromLid: 'kid', toLid: 'n1', kind: 'provenance' });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: HEAD_BODY.replace('中身', '[章](entry:kid "切り出した章")') });
+    rightClick(r.head);
+    expect(r.acts()).toContain('restore-chapter');
+    r.d.dispatch({
+      type: 'BODY_LOADED',
+      lid: 'n1',
+      body: HEAD_BODY.replace('中身', '[章](entry:kid "切り出した章")\n\n[章](entry:kid "切り出した章")'),
+    });
+    rightClick(r.head);
+    expect(r.acts(), '同じ親の中の複製があるのに出た').not.toContain('restore-chapter');
+  });
+
+  it('🔴 印の無い普通のリンク 1 行の章には「元に戻す」を出さない(別のノートを消さない)(#1439)', () => {
+    const r = rig();
+    r.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'kid', title: '別', body: 'x\n', edit: false, keepSelection: true });
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: HEAD_BODY.replace('中身', '[別](entry:kid)') });
+    rightClick(r.head);
+    expect(r.acts()).not.toContain('restore-chapter');
   });
 
   it('🔴 2 つ目の見出しからは、2 つ目の行で編集に入る', () => {
@@ -1354,7 +1456,7 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
   const NESTED = ':::section\n入れ子の中\n:::';
   const BOARD = ':::format{.pkc-place x=40 y=40 w=320 h=200 entry=n2}\n### 買い出し\n- 牛乳\n:::';
 
-  function rig(body = FULL, archetype = 'text') {
+  function rig(body = FULL, archetype = 'text', extra: Partial<BinderServices> = {}) {
     document.body.textContent = '';
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
@@ -1373,6 +1475,7 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
       copyText: (t, done) => {
         copied.push({ text: t, done });
       },
+      ...extra,
     });
     d.dispatch({
       type: 'SYS_BOOTED',
@@ -1810,6 +1913,59 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     await settle();
     expect(asks).toHaveLength(1);
     expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-add', x: 37, y: 61, entry: 'n2' } });
+  });
+
+  /**
+   * 🔴 **手書きして置く**(#1448)。窓で描いて保存した添付の lid が、押した座標の付箋(`entry=`)として書かれる。
+   * ⚠ 見るのは配線 ── メニュー → `drawBlank(板のノート, onSaved)` → 保存の通知 → `place-add`(entry = 添付)。
+   *   窓の中身そのものは `tests/adapter/image-draw-blank.test.ts` が守る。
+   */
+  it('🔴 「手書きして置く…」→ 保存された添付が、押した座標で entry つきの place-add になる / 描いている間に別のノートへ移ったら置かない', async () => {
+    resetAppDialogForTest();
+    let savedCb: ((lid: string) => void) | null = null;
+    const drawn: string[] = [];
+    const r = rig(FULL, 'text', {
+      drawBlank: (lid, onSaved) => {
+        drawn.push(lid);
+        savedCb = onSaved;
+      },
+    });
+    r.d.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'attachment',
+      lid: 'att',
+      title: '手書き',
+      body: '',
+      edit: false,
+      keepSelection: true,
+    });
+    const asks = asksOf(r.d);
+    rightClickAt(r.q('p[data-pkc-source-line="2"]'), 37, 61);
+    expect(r.label('add-place-drawing')).toBe('手書きして置く…');
+    r.press('add-place-drawing');
+    expect(drawn, '板のノートの lid で白紙を開いていない').toEqual(['n1']);
+    expect(asks, '描く前に書いた').toHaveLength(0);
+    savedCb!('att');
+    await settle();
+    expect(asks).toHaveLength(1);
+    expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-add', x: 37, y: 61, entry: 'att' } });
+
+    // 対照群: 描いている間に別のノートへ移ったら、板には置かない
+    resetAppDialogForTest();
+    const r2 = rig(FULL, 'text', {
+      drawBlank: (_lid, onSaved) => {
+        savedCb = onSaved;
+      },
+    });
+    r2.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'attachment', lid: 'att', title: '手書き', body: '', edit: false, keepSelection: true });
+    const asks2 = asksOf(r2.d);
+    rightClickAt(r2.q('p[data-pkc-source-line="2"]'), 37, 61);
+    r2.press('add-place-drawing');
+    r2.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    r2.d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: 'x\n' });
+    savedCb!('att');
+    await settle();
+    expect(asks2, '別のノートへ移ったのに板へ置いた').toHaveLength(0);
   });
 
   it('🔴 板の上の「位置と大きさ…」→ いまの値で開き、全角で決めると place-rect の依頼。やめるなら 1 本も出ない', async () => {

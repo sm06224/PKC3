@@ -57,6 +57,12 @@ export type StorageRequest =
        */
       withoutMessages?: boolean;
       /**
+       * 🔴 **残す器**(#1455 レビュー 🔴2)── `withoutMessages` のとき、これ以外のワークスペースの行を画像から除く。
+       * 呼ぶタブは**自分が開いている器**(`cid`)を渡す。⚠ 渡さないと worker は「次に開く器の印」で決める ──
+       * 別のタブで切り替えた後は印 ≠ このタブの器で、別の器が人に渡るファイルに入りうる。
+       */
+      keepCid?: string;
+      /**
        * 🔴 **選んだノートだけの画像にする**(#1038 A2。「選んだ N 件」の PKC3 入り HTML)。
        * 🔑 本体の DB には一切書かない ── worker が**新しい空の DB**を作り、`lids` の行・両端が `lids` の中にあるつながり・
        *   `assetKeys` の添付の目録だけを SQL で写して、その画像を返す(履歴・ゴミ箱・メッセージは写さない)。
@@ -100,6 +106,24 @@ export type StorageRequest =
    *   器が増えたときに、掃除が**他の器の bytes を消す**形になる。
    */
   | { op: 'listContainerIds' }
+  /**
+   * 🔴 **ワークスペース(= 器)の一覧**(#1455)。名前・ノートの数・使用中かを返す。
+   * ⚠ 使用中 = 次の起動で開く器(`resolveContainer` が返す物)。切り替えの印は `workspaces` 表の 1 行だけ。
+   */
+  | { op: 'listWorkspaces' }
+  /** 🔴 新しいワークスペース(空の器)を足す(#1455)。⚠ 使用中は動かさない(切り替えは `switchWorkspace`)。 */
+  | { op: 'createWorkspace'; title: string }
+  /**
+   * 🔴 使うワークスペースを切り替える(#1455)。次の `resolveContainer` からその器を開く
+   * (呼び側が読み込み直す)。⚠ 実在しない cid は断る。
+   */
+  | { op: 'switchWorkspace'; cid: string }
+  | { op: 'renameWorkspace'; cid: string; title: string }
+  /**
+   * 🔴 ワークスペースを丸ごと削除する(#1455)。⚠ **使用中は削除できない / 最後の 1 つは残す**。
+   * 添付の実体(IndexedDB)は、器の一覧から外れた接頭辞として次の整理(残骸の掃除)で消える。
+   */
+  | { op: 'deleteWorkspace'; cid: string }
   | { op: 'listEntryMetas'; cid: string }
   /**
    * 🔴 **system 領域のノートだけを一覧する**(設計 doc §1.1、段①)。
@@ -1215,6 +1239,14 @@ export interface ResultMap {
    *   埋め忘れると**並びの主張が黙って壊れる**。返さないと test から見えない。
    */
   listContainerIds: { containers: Array<{ cid: string; createdAt: string | null }> };
+  listWorkspaces: {
+    workspaces: Array<{ cid: string; title: string; createdAt: string | null; notes: number }>;
+    activeCid: string | null;
+  };
+  createWorkspace: { cid: string };
+  switchWorkspace: null;
+  renameWorkspace: null;
+  deleteWorkspace: { removedNotes: number };
   listEntryMetas: EntryMetaRow[];
   listSystemEntries: EntryMetaRow[];
   /** 追記できたら `null`(設計 doc §7、段②a)。 */

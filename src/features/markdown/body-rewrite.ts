@@ -24,6 +24,7 @@ import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/
 import { isScheduleDate, withFrontmatterDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
+import { applyChapterRestore, applyChapterSplit } from './chapter-split';
 import { fixSpeakers } from '../capture/speakers';
 import { transcriptLinesOf } from '../capture/contact-sheet-layout';
 import { replaceColorSpan } from './color-code';
@@ -599,6 +600,31 @@ export type BodyRewrite =
       start: number;
       end: number;
       lines: readonly string[];
+    }
+  | {
+      /**
+       * 🔴 **章をリンク 1 行にする**(#1439。新しいノートへ切り出したあとの元の側)。
+       * ⚠ `start..end` は**生の body** の行(見出しの下)。`lines` は掴んだ時点の行そのもの ── disk 側と
+       *   byte 一致しなければ書かない。規則の実体は `chapter-split.ts`(pure)。
+       */
+      kind: 'chapter-split';
+      start: number;
+      end: number;
+      lines: readonly string[];
+      link: string;
+      /** 切り出した先(知らせの「開く」と題名に使う。書換の規則は読まない)。 */
+      childLid: string;
+      childTitle: string;
+    }
+  | {
+      /**
+       * 🔴 **リンク 1 行を、切り出した章の本文に戻す**(#1439)。`openLine` が disk と一致しなければ書かない。
+       * ⚠ 切り出し先の本文(`text`)は効果層が disk から読む ── `applyBodyRewrite` は渡された字を信じるだけ。
+       */
+      kind: 'chapter-restore';
+      line: number;
+      openLine: string;
+      text: string;
     }
   | {
       /**
@@ -1238,6 +1264,8 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     return parts.join('');
   }
   // 🔑 塊の移動と差し込みは `line-move.ts` の 1 本(#684)── 取りやめは body をそのまま返す
+  if (rewrite.kind === 'chapter-split') return applyChapterSplit(body, rewrite);
+  if (rewrite.kind === 'chapter-restore') return applyChapterRestore(body, rewrite);
   if (rewrite.kind === 'move-lines') return moveLines(body, rewrite);
   if (rewrite.kind === 'insert-lines')
     return insertLines(body, rewrite.toBefore, rewrite.lines, rewrite.anchor ?? undefined);

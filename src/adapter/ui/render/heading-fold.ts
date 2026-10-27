@@ -29,7 +29,7 @@ import {
   hiddenByFolds,
   type ChapterSpan,
 } from '@features/markdown/heading-fold';
-import { bodyBlocks, flipLogDay, openLogDayCovering, syncLogDays } from './log-days';
+import { bodyBlocks, flipLogDay, foldAllLogDays, openLogDayCovering, paintAllRow, syncLogDays } from './log-days';
 
 /** 畳んでいる印。⚠ 見出しそのものに付ける(配下ではない)。 */
 const FOLDED = 'data-pkc-folded';
@@ -121,12 +121,14 @@ export function applyHeadingFold(host: HTMLElement): number {
    * ⚠ 日の畳みでは隠さない(でないと畳んだ行が自分で消える)── 見るのは**見出しの畳みだけ**で、
    *   `#` の章を畳んだときに中の日の行だけが残らないようにする。
    */
-  for (const r of days.rows) r.row.hidden = hidden.has(r.start);
+  for (const r of days.rows) r.row.hidden = hidden.has(r.start) || r.inFoldedMonth;
   for (const i of days.hidden) hidden.add(i);
   for (const i of managed) {
     const el = blocks[i];
     if (el instanceof HTMLElement) el.hidden = hidden.has(i);
   }
+  // 🔴 「すべて」の字は、行の表示が決まった後に、見えている行から決める(月の畳みの中の日の行は数えない)
+  paintAllRow(host);
   return spans.length;
 }
 
@@ -236,4 +238,44 @@ export function toggleLogDay(row: Element): void {
   if (host === null) return;
   flipLogDay(row);
   applyHeadingFold(host);
+}
+
+/**
+ * 🔴 **ログの日・月をまとめて畳む / 出す**(#1441)。印を付け外すだけ ── 見え方は計算し直す。
+ */
+export function toggleAllLogDays(host: HTMLElement): void {
+  foldAllLogDays(host);
+  applyHeadingFold(host);
+}
+
+/**
+ * 🔴 **すべての見出しを畳む / 出す**(#1441 (a)。ログに限らず全ノート)。
+ *
+ * 1 つでも開いている見出しがあれば**全部畳み**、全部畳んであれば**全部出す**。畳める見出し
+ * (`foldSpans`)だけを触る ── 畳みの印の付け外しだけで、本文には触れない。
+ * @returns 畳んだ(true)/ 出した(false)/ 畳める見出しが無い(null)
+ */
+export function toggleAllHeadingFolds(host: HTMLElement): boolean | null {
+  const blocks = bodyBlocks(host);
+  const spans = foldSpans(blocks.map(headingLevel));
+  if (spans.length === 0) return null;
+  const fold = spans.some((s) => !blocks[s.heading]!.hasAttribute(FOLDED));
+  for (const s of spans) {
+    if (fold) blocks[s.heading]!.setAttribute(FOLDED, '');
+    else blocks[s.heading]!.removeAttribute(FOLDED);
+  }
+  applyHeadingFold(host);
+  return fold;
+}
+
+/**
+ * 「すべての見出し」の押し所の状態(メニューの字を決める)。
+ * 畳める見出しが 2 つに満たなければ `null`(1 つなら見出し自身の項目で足りる ── 押しても同じ口を増やさない)、
+ * すべて畳んであれば `'unfold'`(出す)、それ以外は `'fold'`(畳む)。
+ */
+export function allHeadingFoldState(host: HTMLElement): 'fold' | 'unfold' | null {
+  const blocks = bodyBlocks(host);
+  const spans = foldSpans(blocks.map(headingLevel));
+  if (spans.length < 2) return null;
+  return spans.every((s) => blocks[s.heading]!.hasAttribute(FOLDED)) ? 'unfold' : 'fold';
 }

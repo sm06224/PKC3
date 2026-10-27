@@ -137,6 +137,22 @@ describe('一覧の何も無い所を押すと、開いているノートが閉�
     expect(m.d.getState().selectedLid, '行を押したのに閉じた').toBe('b');
   });
 
+  it('🔴 「手書き」のタブの中(台・道具の余白)を押しても閉じない(#1448。置く先の板が無くなる)', () => {
+    const m = mount();
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    const pane = document.createElement('div');
+    pane.setAttribute('data-pkc-browse-pane', 'draw');
+    const canvas = document.createElement('canvas');
+    pane.append(canvas);
+    m.host.append(pane);
+    canvas.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    pane.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(m.d.getState().selectedLid, '手書きの台を押したら、読んでいるノートが閉じた').toBe('a');
+    // 対照: 同じ器の余白は従来どおり閉じる(上の判定が空振りしていない)
+    clickBlank(m.host);
+    expect(m.d.getState().selectedLid).toBeNull();
+  });
+
   it('⚠ 何も開いていなければ、余白を押しても状態は動かない', () => {
     const m = mount();
     expect(m.d.getState().selectedLid, '前提: 何か開いている').toBeNull();

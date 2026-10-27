@@ -40,6 +40,10 @@ export const BROWSE_MODES = [
   'graph',
   // 🔴 **計った時間**(#683 ①)── 組み込みアプリの左のタブ。⚠ これも末尾
   'timers',
+  // 🔴 **手書き**(#1448)── 別ウィンドウが塞がれたときの、手書きの退避先。⚠ これも末尾。
+  //   描いている間だけタブが出る(`BrowseRouter.setDrawTab`)。⚠ **憶えない**(`main.ts` の `setBrowse`)── 次の起動で
+  //   描いていない手書きの面を開かない
+  'draw',
 ] as const;
 
 export type BrowseMode = (typeof BROWSE_MODES)[number];

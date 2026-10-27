@@ -239,6 +239,7 @@ describe('🔴 索引だけ壊れた DB を作り直す（#1087）', () => {
     let archive: Blob | null = null;
     let fresh: ResultMap['init'] | null = null;
     const report = await rebuildContainer(CID, 'わたしの PKC', {
+      countWorkspaces: async () => (await request({ op: 'listWorkspaces' })).workspaces.length,
       holdsWriterLease: () => true,
       pick: (afterRowid, chunks) => request({ op: 'rescueEntries', afterRowid, chunks }),
       pickSystem: (afterRowid, chunks) => request({ op: 'rescueEntries', afterRowid, chunks, realm: 'system' }),

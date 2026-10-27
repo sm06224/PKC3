@@ -49,6 +49,7 @@ import {
   colorRewriteNotice,
   attachmentNameRewriteNotice,
 } from '@features/markdown/body-rewrite';
+import { applyChapterRestore } from '@features/markdown/chapter-split';
 import { fixSpeakers, speakersFixNotice } from '@features/capture/speakers';
 import { transcriptLinesOf } from '@features/capture/contact-sheet-layout';
 import { tableFormatDropsInfo } from '@features/markdown/table-convert';
@@ -74,7 +75,7 @@ import {
   type SmartQuery,
   type SmartSpec,
 } from '@features/smart/smart-spec';
-import { frontmatterProblem, spliceFrontmatterKeys } from '@features/markdown/frontmatter';
+import { frontmatterLineCount, frontmatterProblem, spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { buildTiles, withBuiltinTiles, type TileSource } from '@features/launcher/tiles';
 import {
   appGroupIconsOf,
@@ -4443,6 +4444,81 @@ export function connectStoreEffects(
           }
         });
         break;
+      /**
+       * 🔴 **切り出した章を元に戻す**(#1439)── 元のノートのリンク 1 行を、切り出し先の本文で置き換える。
+       *
+       * ## 順番に意味がある ── **先に元へ書き、書けたら切り出し先を削除する**
+       *
+       * ⚠ 先に消すと、元へ書けなかった回に章がどこにも無くなる。先に書けば、削除に失敗しても**二重になるだけ**
+       *   (見えるし、消せる)。削除は通常のノートの削除(ゴミ箱から戻せる)。
+       * ⚠ どちらの本文も disk から読み直す。リンクの行が押した時点と byte 一致しなければ書かない。
+       */
+      case 'REQUEST_CHAPTER_RESTORE':
+        enqueue(async () => {
+          if (disposed) return;
+          const fail = (error: string): void => {
+            if (!disposed) dispatcher.dispatch({ type: 'OP_FAILED', error });
+          };
+          try {
+            const intoBody = await store.getBody(ev.into.lid);
+            const childBody = await store.getBody(ev.child.lid);
+            if (disposed) return;
+            if (intoBody === null || childBody === null)
+              return fail('章を戻せません(ノートが見つかりません)');
+            // 🔴 前書き(タグ・日付など)が書かれた子は、そのままは戻さない(#1439 レビュー ⚠4)。
+            //    本文の途中に前書きの `---` が混ざり、書かれていた値も親へは移らず失われる ── 値を黙って捨てない
+            if (frontmatterLineCount(childBody) > 0)
+              return fail(
+                '切り出したノートに前書き(タグ・日付など)が書かれているため、そのままは戻せません(戻すと前書きの値が失われます)。前書きを消すか親へ移してから、もう一度押してください',
+              );
+            const next = applyChapterRestore(intoBody, {
+              line: ev.into.line,
+              openLine: ev.into.openLine,
+              text: childBody,
+            });
+            if (next === null)
+              return fail('本文が変わっているため、章を戻せませんでした(開き直してください)');
+            const ext = extractMeta(ev.into.archetype, next);
+            const stamps = await store.persistEntry(
+              {
+                lid: ev.into.lid,
+                title: ev.into.title,
+                archetype: ev.into.archetype,
+                body: next,
+                entryOrder: ev.into.entryOrder,
+                status: ext.status,
+                date: ext.date,
+                archived: ext.archived,
+              },
+              { keepMeta: true, expectHash: contentHash64Hex(intoBody) },
+            );
+            if (disposed) return;
+            if (stamps.conflict === true)
+              return fail('別のタブまたはウィンドウが書き換えたため、章を戻せませんでした(もう一度押してください)');
+            dispatcher.dispatch({
+              type: 'BODY_REWRITTEN',
+              lid: ev.into.lid,
+              body: next,
+              rewrite: { kind: 'chapter-restore', line: ev.into.line, openLine: ev.into.openLine, text: childBody },
+              status: ext.status,
+              date: ext.date,
+              archived: ext.archived,
+            });
+            stamp(ev.into.lid, stamps);
+            dispatcher.dispatch({ type: 'DELETE_ENTRY', lid: ev.child.lid });
+            // 🔴 消えたかを**見てから**言う(編集中などで削除が通らない回に「削除しました」と言わない)
+            const gone = !dispatcher.getState().entryMetas.has(ev.child.lid);
+            dispatcher.dispatch({
+              type: 'OP_NOTICE',
+              message: gone
+                ? `『${ev.child.title}』の章を元のノートに戻しました(切り出し先のノートは削除しました。ゴミ箱から戻せます)`
+                : `『${ev.child.title}』の章を元のノートに戻しましたが、切り出し先のノートは残っています(いまの編集を済ませてから削除してください)`,
+            });
+          } catch (e) {
+            fail(errorText(e));
+          }
+        });
+        break;
       case 'REQUEST_BODY_REWRITE':
         // read→rewrite→write を 1 op として直列 queue に載せる ── 同一 lid の
         // 先行 persist の後に読むことが保証される(基底の取り違え防止)
@@ -4682,6 +4758,12 @@ export function connectStoreEffects(
                   : {}),
               });
             }
+            if (ev.rewrite.kind === 'chapter-split' && !disposed)
+              dispatcher.dispatch({
+                type: 'OP_NOTICE',
+                message: `この章を『${ev.rewrite.childTitle}』に切り出しました(元のノートには見出しとリンクが残ります。戻すには、見出しを右クリックして「切り出した章を元に戻す」)`,
+                open: ev.rewrite.childLid,
+              });
             if (ev.rewrite.kind === 'attachment-name' && !disposed)
               dispatcher.dispatch({
                 type: 'OP_NOTICE',

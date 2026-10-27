@@ -216,6 +216,7 @@ import { appCopyHistory } from '@adapter/platform/copy-history-store';
 import { appMessagePost, READ_AT_KEY } from '@adapter/platform/message-post';
 import { connectMessageSync, MESSAGES_CHANNEL } from '@adapter/platform/message-sync';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
+import { appWorkspaces } from '@adapter/platform/storage/workspace-run';
 import { markName, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import {
   purgeBlockReason,
@@ -367,8 +368,9 @@ import { createWiredCaptureProcessor } from '@adapter/ui/actions/capture-process
 import { createCaptureJobGate } from '@adapter/ui/actions/capture-job-gate';
 import { createCaptureTools } from '@adapter/ui/actions/capture-tools';
 import { processToolOf } from '@features/capture/capture-process';
-import { createImageDrawer } from '@adapter/ui/actions/image-draw';
-import { openImageDrawWindow } from '@adapter/platform/image-draw-window';
+import { BLANK_DRAWING_SIDE, createImageDrawer } from '@adapter/ui/actions/image-draw';
+import { createDrawPane } from '@adapter/ui/render/draw-pane';
+import { openImageDrawInPane, openImageDrawWindow } from '@adapter/platform/image-draw-window';
 import { AudioClient } from '@adapter/platform/audio/audio-client';
 import { VideoClient } from '@adapter/platform/video/video-client';
 import { AsrClient } from '@adapter/platform/asr/asr-client';
@@ -2921,7 +2923,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             (
               await client.request(
                 only === undefined
-                  ? { op: 'exportImage', withoutMessages: true }
+                  ? { op: 'exportImage', withoutMessages: true, keepCid: cid }
                   : { op: 'exportImage', only: { cid, lids: only.lids, assetKeys: only.assetKeys } },
               )
             ).image,
@@ -3902,8 +3904,44 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * `image-draw-window.ts`。ここは口を渡すだけ(CLAUDE.md §2:この file はどの test からも
    * 実行されない)。⚠ 取り込みは録音の切り出しと同じ `attachOne` の 1 本(門の中で待つ側)。
    */
+  /**
+   * 🔴 **手書きの退避先: 左の列の「手書き」タブ**(#1448)。別ウィンドウが塞がれたときだけ使う(段取りは `image-draw.ts`)。
+   * ⚠ 探し方の切替は `services.setBrowse`(唯一の口)を通す。
+   */
+  const drawPane = createDrawPane({
+    root: browse.drawPaneRoot(),
+    setTab: (visible) => browse.setDrawTab(visible),
+    current: () => browseMode,
+    select: (mode) => services.setBrowse?.(mode),
+  });
   const imageDrawer = createImageDrawer({
     dispatcher,
+    // 🔴 タブでも描きかけの線が在る間は「離れますか」(窓と同じ持ち主の名前の作法)
+    openPane: (args) =>
+      openImageDrawInPane(drawPane, {
+        ...args,
+        onDirty: (dirty) => unloadGuard.setWriting(dirty, `image-draw:${args.windowName}`),
+      }),
+    // 🔴 白紙の台(#1448)── 白い PNG を 1 枚焼く。⚠ 焼いたあとの canvas は寸法を 0 にして手放す(即破棄)
+    blank: () =>
+      new Promise<Blob>((resolve, reject) => {
+        const c = document.createElement('canvas');
+        c.width = BLANK_DRAWING_SIDE.width;
+        c.height = BLANK_DRAWING_SIDE.height;
+        const g = c.getContext('2d');
+        if (g === null) {
+          reject(new Error('描く台を作れませんでした'));
+          return;
+        }
+        g.fillStyle = '#ffffff';
+        g.fillRect(0, 0, c.width, c.height);
+        c.toBlob((b) => {
+          c.width = 0;
+          c.height = 0;
+          if (b === null) reject(new Error('画像にできませんでした'));
+          else resolve(b);
+        }, 'image/png');
+      }),
     readBlob: (assetKey) => blobs.get(cid, assetKey),
     // 🔴 置き場は PDF の保存(`save-edited`)と同じ:元の添付と同じフォルダ
     parentOf: (lid) => {
@@ -4388,6 +4426,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       resetContainer(target, {
         listAssetKeys: (c) => blobs.listKeys(c),
         deleteAsset: (c, key) => blobs.delete(c, key),
+        countWorkspaces: async () => (await client.request({ op: 'listWorkspaces' })).workspaces.length,
         wipeStorage: async () => client.request({ op: 'wipeStorage' }),
         // ⚠ 消えたノート由来の断片を残さない(貼り付けの一覧にだけ本文が残る)
         forgetLocal: () => {
@@ -4456,6 +4495,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           const out = await writeArchive(source, new Date().toISOString(), undefined, 'warn');
           downloadBlob(archiveFileName(`pkc-rescue-${dayStamp(new Date())}`, 'part'), out.blob);
         },
+        countWorkspaces: async () => (await client.request({ op: 'listWorkspaces' })).workspaces.length,
         wipeStorage: async () => client.request({ op: 'wipeStorage' }),
         reopenStorage: async () => {
           // 🔴 **掴んでいる手を先に離す** ── これが無いと黙って memory へ落ちる
@@ -4692,6 +4732,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     drawOnImage: (assetKey, name, mime, lid) => {
       void imageDrawer.run(assetKey, name, mime, lid);
+    },
+    // 🔴 白紙から手書きして、板に置く(#1448)── 段取りは `image-draw.ts`。ここは口を渡すだけ
+    drawBlank: (lid, onSaved) => {
+      void imageDrawer.runBlank(lid, onSaved);
     },
     /**
      * 🔴 **本文に入れた添付のリンクを押したとき**(#1163 依頼 55 の 1・2)。
@@ -5703,7 +5747,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        */
       leaveLauncherIf(dispatcher, mode);
       browseMode = mode;
-      appBrowseMode.set(mode); // 次に開いたときも同じ探し方で出す(#240 段⑤)
+      // 🔴 手書き(#1448)は憶えない ── 次の起動で、描いていない空の面を開かない
+      if (mode !== 'draw') appBrowseMode.set(mode); // 次に開いたときも同じ探し方で出す(#240 段⑤)
       markBrowse(mode);
       browse.render(dispatcher.getState(), mode);
       /**
@@ -6334,6 +6379,55 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       vacuum: () => client.request({ op: 'vacuum' }),
       post: (m) => appMessagePost.post(m),
     });
+    /**
+     * 🔴 **ワークスペースの切り替え**(#1455)── 押した user だけが打つ。判断は `Workspaces`(`workspace-run.ts`)と
+     * worker ── この file はどの test からも実行されない(CLAUDE.md §2)ので、ここは**口を渡すだけ**にする。
+     * ⚠ 可搬の単一 HTML では渡さない(DB は器の中の写しで、保存の単位が違う)。
+     */
+    // 🔴 このタブが開いている器を、タブが生きている間 shared で握る(落とさない・返さない。閉じれば自動で外れる)
+    if (typeof navigator !== 'undefined' && navigator.locks !== undefined) {
+      void navigator.locks.request(`pkc3-ws:${cid}`, { mode: 'shared' }, () => new Promise<void>(() => undefined)).catch(() => undefined);
+    }
+    appWorkspaces.attach(
+      {
+        list: () => client.request({ op: 'listWorkspaces' }),
+        create: async (title) => (await client.request({ op: 'createWorkspace', title })).cid,
+        switchTo: async (target) => {
+          await client.request({ op: 'switchWorkspace', cid: target });
+        },
+        rename: async (target, title) => {
+          await client.request({ op: 'renameWorkspace', cid: target, title });
+        },
+        remove: (target) => client.request({ op: 'deleteWorkspace', cid: target }),
+        // 🔑 書込と同じ 1 本の列に載せる(storeEffects が無い間は直に打つ ── 起きない想定)
+        run: (job) => (storeEffects ? storeEffects.run(job) : job()),
+        // 🔴 切り替える前に打ちかけを守る(更新のカードと同じ型。読み込み直しは本文を確認なしで捨てる)
+        isEditing: () => hasUnsavedTyping(dispatcher.getState()),
+        confirmDiscard: () =>
+          ask('編集中の内容は保存されません。ワークスペースを切り替えますか?', {
+            okLabel: '切り替える',
+            danger: true,
+          }),
+        // 🔴 ほかのタブが開いている器の削除を断る(Web Locks)── 各タブは開いている器を shared で握り、削除側は exclusive を即時に試す
+        ...(typeof navigator !== 'undefined' && navigator.locks !== undefined
+          ? {
+              isOpenElsewhere: (target: string) =>
+                navigator.locks.request(`pkc3-ws:${target}`, { mode: 'exclusive', ifAvailable: true }, (lock) => lock === null),
+            }
+          : {}),
+        reload: () => {
+          // 🔑 ディープリンクの hash は前の器の物 ── 残すと、読み込み直した先で「別のコレクションの参照」と断られる
+          try {
+            // 🔑 空の hash に置き換える(アドレスを読まずに済ませる ── クエリは触らない)
+            history.replaceState(null, '', '#');
+          } catch {
+            /* 書き換えられなくても読み込み直しは通す */
+          }
+          location.reload();
+        },
+      },
+      cid,
+    );
   }
   /**
    * 🔴 **一式が入っているかを 1 度だけ読み、控えに写す**(#88 / O3-c)。
