@@ -196,6 +196,34 @@ body {
   gap: 1px;
   background: var(--border);
 }
+/* 🔴 外からファイルを掴んで窓に入っている間だけ、落とせる 2 つのペインの縁に細い線を出す(#1380。
+ * `file-drag-hint.ts` が root に `data-pkc-file-drag` を付け外しする)。
+ * ⚠ `outline` + 負の `outline-offset` だけ ── 本文の上に何も重ねず、寸法も動かさない。色は強調色(状態を伝える情報)。 */
+[data-pkc-file-drag] [data-pkc-region='sidebar'],
+[data-pkc-file-drag] [data-pkc-region='center'] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* 🔴 ステータスバーが畳まれているとき、外のファイルをドラッグしている間の 1 行を出すラベル(#1380。`paintFileDragLabel`)。
+ * ⚠ 位置は JS が左の一覧の下端に合わせる。`fixed` + `pointer-events: none` なので配置を動かさず、操作も奪わない。
+ *   1 行に収める(折れて縦に伸びない)。 */
+[data-pkc-field='file-drag-label'] {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  box-sizing: border-box;
+  padding: var(--s1) var(--s3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+}
+[data-pkc-field='file-drag-label'][hidden] {
+  display: none;
+}
 [data-pkc-region='inspector'] {
   grid-area: inspector;
 }

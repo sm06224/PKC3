@@ -48,3 +48,35 @@ export function markBrowseTabs(host: ParentNode, mode: string): void {
     else btn.removeAttribute('data-pkc-active');
   }
 }
+
+/** 「連絡先は 0 件と分かっている」印。⚠ `bar-overflow.ts` の `forced` と `app.css` が読む。 */
+export const TAB_EMPTY_ATTR = 'data-pkc-tab-empty';
+
+/**
+ * 🔴 **連絡先が 0 件と分かっているか**(#475 項目 5)。
+ * ⚠ **「まだ集めていない」と「0 件」は別**(`contactScan === null` は前者 ── 開くまで走らない)。
+ *   集めた結果が 0 件で、上限で切っておらず、失敗でもないときだけ空と言う
+ *   (切った・失敗したを「無い」と読ませない)。
+ */
+export function contactsKnownEmpty(state: {
+  readonly contactScan: { readonly cards: readonly unknown[]; readonly truncated: boolean } | null;
+  readonly contactScanFailed: boolean;
+}): boolean {
+  const scan = state.contactScan;
+  return scan !== null && !state.contactScanFailed && !scan.truncated && scan.cards.length === 0;
+}
+
+/**
+ * 🔴 **連絡先が空のあいだ、左のタブを「⋯」の下へ回す**(#475 項目 5)。
+ *
+ * 畳むのではなく**回す**: 「⋯」の中から開ける(入口は消えない ── 片道にしない)。
+ * 1 件でも見つかれば印を外し、元の位置に戻る。いま開いているタブは回さない(`bar-overflow.ts`)。
+ * 空の面は作り方(`tel:` / `email:`)を教える入口なので、「⋯」から開けば今までどおり出る。
+ */
+export function markContactsTabEmpty(host: ParentNode, empty: boolean): void {
+  const btn = host.querySelector<HTMLElement>('[data-pkc-region="browse-tabs"] [data-pkc-browse="contacts"]');
+  if (btn === null) return;
+  if (empty === btn.hasAttribute(TAB_EMPTY_ATTR)) return;
+  if (empty) btn.setAttribute(TAB_EMPTY_ATTR, '');
+  else btn.removeAttribute(TAB_EMPTY_ATTR);
+}

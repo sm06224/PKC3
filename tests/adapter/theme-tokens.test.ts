@@ -72,6 +72,14 @@ const PAIRS: readonly { fg: string; bg: string; min: number; what: string }[] = 
   { fg: '--danger', bg: '--surface', min: 4, what: '危険な操作' },
   { fg: '--accent', bg: '--surface', min: 3, what: 'リンク・強調' },
   /**
+   * 🔴 **焦点の輪**(#1388。`outline: 2px solid var(--accent)`)が乗る地は `--surface` だけではない ──
+   * 帯・ツールバー(`--surface-2`)と全体の地(`--bg`)にも輪は出る。WCAG 2.1 の
+   * 非テキスト 3:1 を、輪が実際に重なる 3 つの地すべてで持つ(専用の色は持たない = 強調色と同じ)。
+   */
+  { fg: '--accent', bg: '--bg', min: 3, what: '焦点の輪(全体の地)' },
+  { fg: '--accent', bg: '--surface-2', min: 3, what: '焦点の輪(帯・ツールバー)' },
+  { fg: '--accent', bg: '--accent-dim', min: 3, what: '焦点の輪(選択中の行の上)' },
+  /**
    * 🔴 **選んでいるタブの下線**(#720 ②。着地前レビュー・実装 1)。
    * ⚠ この PR が**新しく作った重なり**である ── 線は `--fg`、乗る地は
    *   タブ自身の `--accent-dim`(`app.css` の `browse-tabs [data-pkc-active]`)。

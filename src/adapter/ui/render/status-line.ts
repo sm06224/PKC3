@@ -80,6 +80,8 @@ export interface StatusLineParts {
   /** 一時の知らせ(コピーした・取り込んだ)。 */
   readonly noticeLine: string;
   readonly errorLine: string;
+  /** 外からファイルを掴んで窓に入っている間の字(#1380。空 = 出さない)。 */
+  readonly fileDragLine?: string;
 }
 
 /**
@@ -93,6 +95,7 @@ export interface StatusLineParts {
 export function composeStatusLine(parts: StatusLineParts): string {
   return [
     editingStateWord(parts.phase),
+    parts.fileDragLine ?? '',
     parts.statusBase,
     parts.sync,
     parts.portableAssetNote,
@@ -104,6 +107,27 @@ export function composeStatusLine(parts: StatusLineParts): string {
   ]
     .filter((t) => t !== '')
     .join(' — ');
+}
+
+/**
+ * 🔴 **外のファイルをドラッグしている間の 1 行の出し先を決める**(#1380)。
+ *
+ * ⚠ ふだん(ready・通知なし)はステータスバーが畳まれている ── そこへ字を足すと現れて
+ *   **左と中央が縮む**(配置が動く)。だから:
+ * - ステータスバーが**見えている**なら、そこに足す(`text`)
+ * - **畳まれている**なら畳んだまま、字は別のラベルに出す(`floating`。`paintFileDragLabel`)
+ * 🔑 畳むかの判定は `shouldHideStatusBar` に**ドラッグの字を除いた行**を渡す(1 か所)。
+ */
+export function statusBarWithFileDrag(
+  parts: StatusLineParts,
+  ctx: { readonly hasTooNarrow: boolean; readonly hasUnreadMessages: boolean },
+): { text: string; hide: boolean; floating: string } {
+  const line = parts.fileDragLine ?? '';
+  const base = composeStatusLine({ ...parts, fileDragLine: '' });
+  const hide = shouldHideStatusBar({ text: base, ...ctx });
+  if (line === '') return { text: base, hide, floating: '' };
+  if (hide) return { text: base, hide: true, floating: line };
+  return { text: composeStatusLine(parts), hide: false, floating: '' };
 }
 
 /**
