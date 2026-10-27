@@ -1081,6 +1081,9 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
 });
 
 test('🔴 バックアップ: 書き出して → 取り込み直すと中身が戻る(round-trip)', async ({ page }) => {
+  // 往復 + ゴミ箱 + ノート 4000 件を CPU 6 分の 1 で取り込んで「やめる」まで 1 本に通すので、素の箱でも 25 秒前後かかる。
+  // 既定の 30 秒だと、負荷のある箱では「その時点で待っていた assert」(やめた知らせ / ボタンが消える)が落ちる(落ちる場所は原因ではない)
+  test.setTimeout(90_000);
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
