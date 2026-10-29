@@ -833,8 +833,34 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
     `折り返した幅を 1 つも見ていない(掃いた範囲が狭すぎる): ${JSON.stringify(seen)}`,
   ).toBeGreaterThan(0);
 
-  // ⑥ 表ごと空にする変異を素通りさせない(2026-10-25 時点で 8 枚)
-  expect(BROWSE_TABS.length, 'タブの表が縮んでいる').toBeGreaterThanOrEqual(8);
+  // ⑥ 表ごと空にする変異を素通りさせない(2026-10-29 時点で 10 枚 ── 手書きは描いている間だけ出る)
+  expect(BROWSE_TABS.length, 'タブの表が縮んでいる').toBeGreaterThanOrEqual(10);
+});
+
+/**
+ * 🔴 **タブが 10 枚になっても、畳まれたタブ(最後尾の「シェル」)は「⋯」から必ず開ける**(#274)。
+ * 別ウィンドウが塞がれたときの退避先は、中央ではなくこのタブ ── 畳まれていても名前つきで押せなければ、退避先が行き止まりになる。
+ * ⚠ 畳まれる幅を掃いて探す(畳まれた幅を 1 つも見ていなければ落とす ── 何も確かめていないのに緑、を作らない)。
+ */
+test('🔴 畳まれた「シェル」のタブも、「⋯」から名前つきで開ける', async ({ page }) => {
+  let foldedSeen = 0;
+  for (const w of [901, 1101, 1280, 1440]) {
+    await page.setViewportSize({ width: w, height: 800 });
+    await gotoApp(page);
+    const tab = page.locator('[data-pkc-region="browse-tabs"] [data-pkc-browse="shell"]');
+    const folded = await tab.evaluate((el) => el.hasAttribute('data-pkc-overflow'));
+    if (!folded) {
+      // 畳まれていない幅では、そのまま押せる
+      await clickReal(page, tab);
+    } else {
+      foldedSeen += 1;
+      await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-field="bar-more"]');
+      await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="set-browse"][data-pkc-browse="shell"]');
+    }
+    await expect(page.locator('[data-pkc-browse-pane="shell"]'), `w=${w}: シェルのタブが開かない(畳まれていた: ${String(folded)})`).toBeVisible();
+    await expect(page.locator('[data-pkc-browse-pane="shell"] [data-pkc-field="shell-input"]')).toBeVisible();
+  }
+  expect(foldedSeen, '畳まれた幅を 1 つも見ていない(掃く幅が広すぎる)').toBeGreaterThan(0);
 });
 
 /**
