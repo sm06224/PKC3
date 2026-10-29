@@ -9,6 +9,8 @@ import {
 } from '../../src/features/asr/asr-silence';
 import {
   ASR_LOOP_CHAR_KEEP,
+  ASR_LOOP_CHAR_RUN,
+  ASR_LOOP_UNIT_RUN,
   ASR_LOOP_SEGMENT_RUN,
   collapseRunaway,
   dropLoopedSegments,
@@ -126,13 +128,29 @@ describe('暴走したくり返しの除去(#1446 ①)', () => {
     expect(collapseRunaway('はいはいはい、そうです')).toBe('はいはいはい、そうです');
   });
   it('transcriptText / transcriptLines を通る(暴走だけ消え、前後の字は残る)', () => {
-    expect(transcriptText(`こんにちは。${'ああ'.repeat(30)}さようなら`)).toBe('こんにちは。あああさようなら');
-    const lines = transcriptLines([
+    const looped = `こんにちは。${'ああ'.repeat(30)}さようなら`;
+    expect(transcriptText(looped, { collapseRunaway: true })).toBe('こんにちは。あああさようなら');
+    const segs = [
       { startMs: 0, text: 'はい' },
       ...Array.from({ length: 20 }, (_, i) => ({ startMs: 1000 * (i + 1), text: ' you ' })),
-    ]);
+    ];
+    const lines = transcriptLines(segs, { collapseRunaway: true });
     expect(lines!.split('\n').filter((l) => l.includes('you'))).toHaveLength(1);
+    // 🔴 対照群(レビュー指摘 8): 指定が無ければ(通常の音量)そのまま残る
+    expect(transcriptText(looped)).toContain('ああ'.repeat(30));
+    expect(transcriptLines(segs)!.split('\n').filter((l) => l.includes('you'))).toHaveLength(20);
   });
+  it('🔴 閾値はリテラルで固定する(同じ字 12 回 / 同じ並び 8 回 / 同じ行 6 行 ── 定数だけを書き換えても気づく)', () => {
+    expect(ASR_LOOP_CHAR_RUN).toBe(12);
+    expect(ASR_LOOP_UNIT_RUN).toBe(8);
+    expect(ASR_LOOP_SEGMENT_RUN).toBe(6);
+    // 境目: 11 字は残り、12 字は畳む / 7 回は残り、8 回は畳む
+    expect(collapseRunaway('あ'.repeat(11))).toBe('あ'.repeat(11));
+    expect(collapseRunaway('あ'.repeat(12))).toBe('あ'.repeat(ASR_LOOP_CHAR_KEEP));
+    expect(collapseRunaway('はい'.repeat(7))).toBe('はい'.repeat(7));
+    expect(collapseRunaway('はい'.repeat(8))).toBe('はい');
+  });
+
   it('同じ区切りが ASR_LOOP_SEGMENT_RUN 未満なら残す(境目)', () => {
     const seg = (n: number) => Array.from({ length: n }, () => ({ text: 'はい' }));
     expect(dropLoopedSegments(seg(ASR_LOOP_SEGMENT_RUN - 1))).toHaveLength(ASR_LOOP_SEGMENT_RUN - 1);
