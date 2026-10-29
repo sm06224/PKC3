@@ -52,6 +52,11 @@ export interface ShellOps {
   env(session: ShellSession): ShellEnv;
   /** `.` が指す対象が 2 ペインの焦点のペイン / 選んでいるノートかを含め、プロンプトの現在地の字。 */
   promptText(session: ShellSession): string;
+  /**
+   * 🔴 **いま実行できない理由**(編集中・保存に失敗している間など)。書き込む効果を含むときだけ答える ── 確認を出してから断る、を作らない。
+   * `null` = 実行してよい。
+   */
+  blocked(effects: readonly ShellEffect[]): string | null;
   applyPlan(ops: readonly PlanOp[]): OpResult;
   create(title: string, body: string, parent: string | null): OpResult;
   append(lid: string, text: string): Promise<OpResult>;
@@ -98,6 +103,11 @@ export async function runShellLine(ops: ShellOps, session: ShellSession, raw: st
   session.update(block, { lines: [...plan.lines], table: plan.table ?? null, pending: hasEffects });
   if (!hasEffects) return block;
 
+  const blocked = ops.blocked(plan.effects);
+  if (blocked !== null) {
+    session.update(block, { lines: [...block.lines, blocked], failed: true, pending: false });
+    return block;
+  }
   if (plan.confirm !== undefined && !(await ops.askConfirm(plan.confirm, plan.confirmDanger === true))) {
     session.update(block, { lines: [...block.lines, 'やめました(何も実行していません)'], pending: false });
     return block;

@@ -37,6 +37,7 @@ function fake(answer = true) {
       newLid: () => 'x',
     }),
     promptText: () => '/>',
+    blocked: () => null,
     applyPlan: (p) => (calls.push(`plan:${String(p.length)}`), ok('適用')),
     create: (t) => (calls.push(`create:${t}`), ok('作った', ['nx'])),
     append: async (l, t) => (calls.push(`append:${l}:${t}`), ok('追記した')),
@@ -52,7 +53,7 @@ function fake(answer = true) {
     search: async () => ({ rows: [{ lid: 'n1', title: '議事録', snippet: '…一致…' }], truncated: false, error: '' }),
     operation: async (q) => (calls.push(`op:${q}`), { kind: 'ran', text: '実行した' }),
     operations: () => ({ kind: 'many', text: '2 件', table: { columns: ['操作'], rows: [['a'], ['b']], lids: [null, null] } }),
-    askConfirm: async (m, _d) => (calls.push(`confirm:${m}`), answer),
+    askConfirm: async (m) => (calls.push(`confirm:${m}`), answer),
     copyText: async (t) => (calls.push(`copyText:${t}`), true),
   };
   return { ops, calls };

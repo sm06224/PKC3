@@ -7796,6 +7796,12 @@ export function makeShellOps(h: {
       const path = shellPathOf(e, e.cwd);
       return surface === 'dual' ? `${dispatcher.getState().dual.focus === 'left' ? '左' : '右'} ${path}>` : `${path}>`;
     },
+    blocked: (effects) => {
+      const writes = effects.some((e) =>
+        e.type === 'plan' || e.type === 'create' || e.type === 'append' || e.type === 'move' || e.type === 'copy' || e.type === 'trash' || e.type === 'tag',
+      );
+      return writes ? stopped('実行') : null;
+    },
     applyPlan: (planOps) => {
       const stop = stopped('実行');
       if (stop !== null) return fail(stop);
