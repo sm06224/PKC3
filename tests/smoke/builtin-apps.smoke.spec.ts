@@ -524,9 +524,13 @@ test('🔴 コマンドシェル: 打って Enter で結果が出て、移す・
   await page.keyboard.press('ArrowUp');
   await expect(tabInput, '左のタブで履歴が戻らない').not.toHaveValue('');
   await page.keyboard.press('Escape');
+  await page.keyboard.type('cd 資料');
+  await page.keyboard.press('Enter');
+  // 🔴 cd すると「現在地:」の行も変わる(state が動かなくても塗り直す)
+  await expect(tab.locator('[data-pkc-field="shell-cwd"]')).toHaveText('現在地: /資料');
   await page.keyboard.type('pwd');
   await page.keyboard.press('Enter');
-  await expect(tab.locator('[data-pkc-field="shell-block"]').last()).toContainText('/');
+  await expect(tab.locator('[data-pkc-field="shell-block"]').last()).toContainText('/資料');
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

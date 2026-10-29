@@ -316,6 +316,7 @@ export class ShellPaneRenderer {
   private seenEpoch = -1;
   private unsubscribe: (() => void) | null = null;
   private shown = '';
+  private state: AppState | null = null;
 
   constructor(
     private readonly host: HTMLElement,
@@ -324,13 +325,21 @@ export class ShellPaneRenderer {
   ) {}
 
   render(state: AppState): void {
+    this.state = state;
     if (!this.built) this.build();
+    this.paintCwd();
+    this.sync();
+  }
+
+  /** 現在地の行。🔴 `cd` は state を動かさず session だけを動かすので、`render` だけでなく `sync` からも塗る。 */
+  private paintCwd(): void {
+    const state = this.state;
+    if (state === null) return;
     const cwd = this.session.cwd !== null && state.entryMetas.has(this.session.cwd) ? this.session.cwd : null;
     // 消えたフォルダを現在地に持ち続けない(次の命令がルートで動く)
     if (cwd !== this.session.cwd) this.session.cwd = cwd;
     const text = `現在地: ${pathOf({ metas: state.entryMetas, relations: state.relations }, cwd)}`;
     if (this.cwdLine.textContent !== text) this.cwdLine.textContent = text;
-    this.sync();
   }
 
   /** 非表示の間は購読を外す(隠れた画面を、命令の結果のたびに描き直さない)。 */
@@ -369,6 +378,7 @@ export class ShellPaneRenderer {
   sync(): void {
     if (!this.built) return;
     this.attach();
+    this.paintCwd();
     if (this.seenEpoch !== this.session.epoch) {
       this.seenEpoch = this.session.epoch;
       for (const e of this.els.values()) e.remove();

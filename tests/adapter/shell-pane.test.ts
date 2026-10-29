@@ -156,6 +156,15 @@ describe('シェルの面', () => {
     expect(ctx.created.find((c) => c.title === '新規メモ')?.body).toBe('一行目 \n二行目');
   });
 
+  it('🔴 cd すると「現在地:」の行が変わる(state が動かなくても)', async () => {
+    const cwd = (): string => ctx.root.querySelector('[data-pkc-view-pane="shell"] [data-pkc-field="shell-cwd"]')!.textContent ?? '';
+    expect(cwd()).toBe('現在地: /');
+    await run(input, 'cd 資料');
+    expect(cwd()).toBe('現在地: /資料');
+    await run(input, 'cd ..');
+    expect(cwd()).toBe('現在地: /');
+  });
+
   it('mkdir と rename は整理案と同じ実体で、題名が変わる', async () => {
     await run(input, 'mkdir 新しいフォルダ');
     expect([...ctx.d.getState().entryMetas.values()].some((m) => m.title === '新しいフォルダ' && m.archetype === 'folder')).toBe(true);
