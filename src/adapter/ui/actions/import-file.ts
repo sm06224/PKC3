@@ -21,6 +21,7 @@ import { importMarkdownFiles } from './import-markdown';
 import { importVcfFiles } from './import-vcf';
 import { importPptxFiles } from './import-pptx';
 import { importIcsFiles } from './import-ics';
+import type { CancelToken } from '@features/job-cancel';
 
 /**
  * 選ばれたファイルを取り込む。
@@ -40,7 +41,7 @@ export async function importFiles(
   files: readonly File[],
 ): Promise<number | null> {
   if (files.length === 0) return null;
-  // 🔴 `.txt` も md と同じ道(依頼 171)。⚠ 窓へ落としたときの振り分け(binder)は md 拡張子だけを見る ── `.txt` の落としは添付のまま
+  // 🔴 `.txt` も md と同じ道(依頼 171)。窓へ落としたときの振り分け(binder の `routeFiles`)も同じ判定を見る
   const md = files.filter((f) => isMarkdownFileName(f.name) || isPlainTextFileName(f.name));
   const vcf = files.filter((f) => isVcfFileName(f.name));
   const pptx = files.filter((f) => isPptxFileName(f.name));
@@ -50,18 +51,24 @@ export async function importFiles(
    * ⚠ PKC2 の道(`importPkc2File`)は自分で出し入れしている(ここで包むと同じ持ち主を二重に外す)── 残りの 4 本をここで包む。
    * ⚠ 出口は 1 本ではない(断り・失敗・成功・例外)ので `finally` で必ず戻す。
    */
-  const guarded = async (run: () => Promise<number | null>): Promise<number | null> => {
+  const guarded = async (run: (token: CancelToken | undefined) => Promise<number | null>): Promise<number | null> => {
     deps.onWriting?.(true);
+    /**
+     * 🔴 **少し長引いたら「取り込みをやめる」を出す**(台帳 #1852 の F2・依頼 253 の残り。バックアップ・PKC2 の道と同じ `job-control.ts`)。
+     * ⚠ 読み込みの区切り(ファイル 1 本・スライド 1 枚ごと)と書く直前で印を見る。書き込みは 1 回で、途中で割り込まない。
+     */
+    const token = deps.job?.start('import');
     try {
-      return await run();
+      return await run(token);
     } finally {
+      if (token !== undefined) deps.job?.finish(token);
       deps.onWriting?.(false);
     }
   };
-  if (vcf.length === files.length) return guarded(() => importVcfFiles(dispatcher, deps, files));
-  if (md.length === files.length) return guarded(() => importMarkdownFiles(dispatcher, deps, files));
-  if (pptx.length === files.length) return guarded(() => importPptxFiles(dispatcher, deps, files));
-  if (ics.length === files.length) return guarded(() => importIcsFiles(dispatcher, deps, files));
+  if (vcf.length === files.length) return guarded((t) => importVcfFiles(dispatcher, deps, files, t));
+  if (md.length === files.length) return guarded((t) => importMarkdownFiles(dispatcher, deps, files, t));
+  if (pptx.length === files.length) return guarded((t) => importPptxFiles(dispatcher, deps, files, t));
+  if (ics.length === files.length) return guarded((t) => importIcsFiles(dispatcher, deps, files, t));
   if (md.length > 0 || vcf.length > 0 || pptx.length > 0 || ics.length > 0) {
     return failImport(dispatcher, deps, '種類の違うファイル(Markdown・テキスト / vCard / カレンダー形式 / PowerPoint / PKC2 の書き出し)は分けて取り込んでください');
   }

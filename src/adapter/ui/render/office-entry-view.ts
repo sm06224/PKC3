@@ -27,6 +27,7 @@ import {
 import type { OfficePackMeta } from '@adapter/platform/office/office-pack';
 import { NO_SHADOW_NOTE, needsNoShadowNote } from '@features/office/office-shadow';
 import { iconButton } from './icons';
+import { appOfficeImageNote, OFFICE_IMAGE_NOTE, type OfficeImageNoteStore } from './office-image-note';
 
 /** 入口を決めるのに要る「いまの状態」。⚠ **同期で答えられる**ことが条件。 */
 export interface OfficeAvailabilitySource {
@@ -196,5 +197,25 @@ export function buildOfficeSaveNote(
   const note = document.createElement('p');
   note.setAttribute('data-pkc-field', 'office-save-note');
   note.textContent = NO_SHADOW_NOTE;
+  return note;
+}
+
+/**
+ * 「Office で開く」の隣に出す、**初回だけ**の案内(Office の窓では外部の画像が出ない。#88 の user 指示 2026-08-09)。
+ * **出さないときは `null`**。
+ * ⚠ 出すのは押せる入口(`open`)のときだけ ── 開けないときに言う意味が無い。
+ * ⚠ ここは押す前の予告で、**既読にはしない**。既読にして状態の行へ言うのは `OfficeWindow.open()` の合流点
+ *   (`office-image-note.ts` の `announceOfficeImageNote`)── どの入口から開いても 1 回だけ。
+ */
+export function buildOfficeImageNote(
+  att: OfficeAttachment,
+  avail: OfficeAvailabilitySource = appOfficePack,
+  seen: Pick<OfficeImageNoteStore, 'seen'> = appOfficeImageNote,
+): HTMLElement | null {
+  if (officeEntryOf(att.name, att.mime, avail).kind !== 'open') return null;
+  if (seen.seen()) return null;
+  const note = document.createElement('p');
+  note.setAttribute('data-pkc-field', 'office-image-note');
+  note.textContent = OFFICE_IMAGE_NOTE;
   return note;
 }

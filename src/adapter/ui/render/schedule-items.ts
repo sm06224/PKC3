@@ -7,7 +7,7 @@
  * 検索・種類の絞り(`matchesEntry`)。
  */
 import type { AppState } from '@adapter/state/app-state';
-import { noteOwnerFor, noteTimeFor, type TaskCard } from '@features/schedule/task-cards';
+import { noteOwnerFor, noteWhenFor, type TaskCard } from '@features/schedule/task-cards';
 import { ownerChoices, passesOwnerFilter } from '@features/schedule/owner';
 import { itemOfCard, itemOfNote, type AgendaItem } from '@features/schedule/agenda';
 import { entryFilterOf, matchesEntry } from '@features/filter/title-filter';
@@ -65,7 +65,8 @@ export function scheduleItemsOf(state: AppState): ScheduleItems {
     // 🔴 前書きの時刻(依頼 192 / 284)。引く口は `noteTimeFor` 1 本(抽出列の日付と食い違う組は使わない)
     // 🔴 担当で絞る(#283)。ノート 1 件の担当は前書きの `owner:`(走査の `noteTimes`)
     if (!passesOwnerFilter(noteOwnerFor(state.taskScan, m.lid, m.date), state.scheduleOwner)) continue;
-    const item = itemOfNote(m, noteTimeFor(state.taskScan, m.lid, m.date));
+    const when = noteWhenFor(state.taskScan, m.lid, m.date);
+    const item = itemOfNote(m, when.time, { until: when.until, repeat: when.repeat, allDay: when.allDay });
     // ⚠ 済んだノートは行の札と同じ旗で畳む(`showDoneTasks`)。畳んだ分は数だけ持つ
     if (item.done && !state.showDoneTasks) {
       // 🔴 隠したノートの済んだ予定は「済み(N)」ではなく「隠したノートの分」に数える(#1163 の依頼 247 案 C)

@@ -70,6 +70,15 @@ describe('予定を足す先の「今日のノート」(#1087)', () => {
     expect(h.appends().map((a) => a.lid)).toEqual(['today']);
   });
 
+  it('🔴 足し先がログ(textlog)なら日時の見出しの節にする。ノートには見出しを付けない', () => {
+    const log = boot('textlog');
+    void addScheduleItem(log.d, { text: '見積', date: '2026-10-30' });
+    expect(log.appends()[0]!.heading, 'ログへ見出し無しで足した(直前のログの行に混ざる)').toMatch(/^## \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    const note = boot('text');
+    void addScheduleItem(note.d, { text: '見積', date: '2026-10-30' });
+    expect(note.appends()[0]!.heading ?? null, 'ノートに見出しを足した').toBeNull();
+  });
+
   it('🔴 錠の確かめも同じ相手に対して行う ── 追記できない種類の「今日」の錠は取りに行かない', async () => {
     const acquire = vi.fn(async () => 'denied' as const);
     const h = boot('folder');

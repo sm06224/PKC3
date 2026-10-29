@@ -11,6 +11,7 @@
  * innerHTML への流し込みは markdown-render が `html: false`(生 HTML 不通過)で
  * 生成した出力に限る(PKC2 と同じ安全前提)。
  */
+import { DAY_NAV_FIELD, paintDayNav } from './day-nav';
 import { renderMarkdown } from '@features/markdown/markdown-render';
 import { flipTaskInDraft } from '@features/markdown/body-rewrite';
 import {
@@ -154,7 +155,7 @@ import {
   type AttachmentFold,
 } from '@features/flavor/attachment-edit-fold';
 import { isAppMime } from '@features/launcher/tiles';
-import { buildOfficeEntry, buildOfficeSaveNote, officeEntryOf } from './office-entry-view';
+import { buildOfficeEntry, buildOfficeImageNote, buildOfficeSaveNote, officeEntryOf } from './office-entry-view';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import {
   assetPreviewKind,
@@ -566,6 +567,8 @@ export class DetailRenderer {
   private shownPanel: AppState['revisionPanel'] = null;
   /** 外部画像の確認の帯(2026-08-06)。⚠ 本文の器の**外**。 */
   private noticeSlot: HTMLElement | null = null;
+  /** 日付ノートの「‹ 前の日 / 次の日 ›」(#1640 項 2)。⚠ 本文の器の**外**。主の枠だけ。 */
+  private dayNavEl: HTMLElement | null = null;
   /**
    * 🔴 **フォルダの概要の器**(#1222)。⚠ 本文の器の**外**(`applyBlocks` の差分に消されない)。
    * 主の枠だけが持つ(留めた枠は `null` ── スタックのノートには出さない)。
@@ -1111,6 +1114,7 @@ export class DetailRenderer {
     this.barHeightWatch = null;
     this.panelSlot = null;
     this.noticeSlot = null;
+    this.dayNavEl = null;
     this.overviewSlot = null;
     this.overviewFp = null;
     this.bodyHost = null;
@@ -1671,7 +1675,14 @@ export class DetailRenderer {
       this.noticeSlot.setAttribute('data-pkc-field', this.field('detail-notice-slot'));
       this.bodyHost = adopted !== null ? adopted.host : document.createElement('div');
       if (adopted === null) this.bodyHost.setAttribute('data-pkc-field', this.field('detail-body-host'));
-      const head = [this.titleEl, this.readingTimeEl, this.barSlot, this.panelSlot, this.noticeSlot];
+      // 🔴 日付ノートの前後(#1640 項 2)は主の枠だけ ── 留めた枠は別のノートを出す面で、`detail-*` の field を持たない
+      this.dayNavEl = null;
+      if (this.pinnedLid === null) {
+        this.dayNavEl = document.createElement('div');
+        this.dayNavEl.setAttribute('data-pkc-field', DAY_NAV_FIELD);
+        this.dayNavEl.hidden = true;
+      }
+      const head = [this.titleEl, ...(this.dayNavEl === null ? [] : [this.dayNavEl]), this.readingTimeEl, this.barSlot, this.panelSlot, this.noticeSlot];
       // ⚠ 持ち越した器は動かさず、その手前へ差し込む
       if (adopted !== null) this.bodyHost.before(...head);
       else this.region.append(...head, this.bodyHost);
@@ -1729,6 +1740,8 @@ export class DetailRenderer {
     if (this.readingTimeEl) {
       paintReadingTime(this.readingTimeEl, body);
     }
+    // 🔴 日付ノートの前後へ飛ぶ(#1640 項 2)。留めた枠は別のノートを出すので持たない
+    if (this.dayNavEl !== null && this.pinnedLid === null) paintDayNav(this.dayNavEl, state.entryMetas, lid);
 
     if (body === null) {
       /**
@@ -2338,7 +2351,16 @@ export class DetailRenderer {
           // 🔴 ノートの中だけを探す小さな欄(#1163 依頼 163)。⚠ `Ctrl+F` と同じ口(`find-in-note`)
           const find = iconButton('find-in-note', 'ノート内を探す');
           find.title = hintTitle('このノートの本文の中だけを探す小さな欄を開きます', 'find-in-note');
-          bar.append(this.barButton, md, rich, sel, find);
+          /**
+           * 🔴 **段組みの切替を、読む面の帯にも置く**(#522 の残り。user 指示 2026-08-28「段組み表示を表示変更導線を
+           *   センターペイン…に用意したい」)。⚠ `Alt+C` / 本文の右クリックと同じ受け手(`cycle-read-columns`)の 1 本 ──
+           *   段数の決め方も断り文も `cycleReadColumns` が 1 か所で持つ。
+           * 🔑 本文を退かさない: 帯の右端に 1 つ足すだけ(帯は元からあり、新しい帯を作らない)。押した直後に画面の下へ
+           *   「本文の段組み: N 段」と出るので、いま何段かは押せば分かる。
+           */
+          const cols = iconButton('cycle-read-columns', '段組みを切り替える');
+          cols.title = hintTitle('本文の段組みを 1 → 2 → 3 → 4 段の順に切り替えます', 'cycle-read-columns');
+          bar.append(this.barButton, md, rich, sel, find, cols);
         } else {
           // 保存失敗からの復帰導線: baseline ≠ persisted =「disk に未達の commit が
           // ある」証拠(P3-5 の分離の回収点)。黙って死なせず再送を提示する
@@ -3725,6 +3747,9 @@ export class DetailRenderer {
       if (office) info.append(office);
       const saveNote = buildOfficeSaveNote({ name: meta.name, mime: meta.mime, assetKey: meta.assetKey, lid });
       if (saveNote) info.append(saveNote);
+      // 🔴 Office の窓では外部画像が出ないことを、初回だけ(#88 の user 指示 2026-08-09)
+      const imageNote = buildOfficeImageNote({ name: meta.name, mime: meta.mime, assetKey: meta.assetKey, lid });
+      if (imageNote) info.append(imageNote);
     }
     host.append(info);
 

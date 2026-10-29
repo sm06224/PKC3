@@ -77,6 +77,7 @@ export function reduceBodyEdit(state: AppState, action: BodyEditAction): ReduceR
               // ⚠ 同じ向き ── 渡されたときだけ(渡していないのに `null` を載せると終わりを外してしまう)
               ...(action.timeEnd === undefined ? {} : { timeEnd: action.timeEnd }),
               ...(action.repeat === undefined ? {} : { repeat: action.repeat }),
+              ...(action.allDay === undefined ? {} : { allDay: action.allDay }),
             },
           },
         ],

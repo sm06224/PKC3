@@ -674,7 +674,9 @@ const DESCRIPTION_MAX = 300;
 
 /** 予定 1 件 → チェック項目の 1 行。⚠ 読み戻して食い違えば、題名を「」で囲んで記法と切り離す。 */
 function lineOf(e: IcsEvent): string {
-  const head = formatLineDate(e.date, e.time, e.until, e.repeat, undefined, e.timeEnd);
+  // 🔴 `DTSTART;VALUE=DATE`(時刻なし・期間なし)は終日の予定 ── 「時刻未定」と区別して `終日` を書く(台帳 #344 の残り)
+  const allDay = e.time === null && e.until === null;
+  const head = formatLineDate(e.date, e.time, e.until, e.repeat, undefined, e.timeEnd, allDay);
   const attempt = (summary: string): string => `- [ ] ${head} ${summary}`;
   const same = (line: string): boolean => {
     const r = readLineDate(line.slice('- [ ] '.length));
@@ -684,6 +686,7 @@ function lineOf(e: IcsEvent): string {
       r.time === e.time &&
       r.timeEnd === e.timeEnd &&
       r.until === e.until &&
+      r.allDay === allDay &&
       r.repeat === e.repeat &&
       // 🔴 題名の中の「振替2026-01-01」を行の振替と読んで題名から外す形も食い違い(#1087)── 取り込みは振替を作らない
       r.substitutes === null

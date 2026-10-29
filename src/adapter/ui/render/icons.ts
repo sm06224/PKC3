@@ -126,12 +126,16 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'open-palette': 'search',
   /** このノートの中だけを探す小さな欄(#1163 依頼 163)── 「探す」の虫眼鏡と同じ図案。 */
   'find-in-note': 'search',
+  /** 本文の段組みの切替(#522 の残り。読む面の帯)。段の並びに近い「縦に並ぶ行」の図案。 */
+  'cycle-read-columns': 'list',
   'import-file': 'arrow-in',
   /** 外部の画像を手元へ取り込む(#264 段①)── **入ってくる**向きなので取込と同じ図案。 */
   'adopt-external-images': 'arrow-in',
   'export-archive': 'archive',
   'export-html': 'globe',
   'export-portable': 'archive',
+  /** PKC2 の HTML で書き出す(台帳 #1416)── PKC3 入り HTML と同じ「1 つにまとめる」図案。 */
+  'export-pkc2-html': 'archive',
   'export-markdown': 'page',
   'export-markdown-folder': 'page',
   /** 構成(目次の形)を写す ── 中身ではなく**並び**を渡すので一覧の図案。 */
@@ -155,6 +159,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
    *   門は `tests/adapter/icons.test.ts`「第 3 引数の鍵は登記に在る」。
    */
   'open-today': 'calendar',
+  'open-today-as': 'calendar',
   'create-from-template': 'snippet',
   'start-timer': 'timer',
   'start-audio-capture': 'mic',

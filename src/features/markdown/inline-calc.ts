@@ -94,6 +94,30 @@ const FULLWIDTH_TO_HALF: Readonly<Record<string, string>> = {
 const READ_ONLY_OPS: Readonly<Record<string, string>> = { '×': '*', '÷': '/' };
 const LONG_VOWEL = 'ー';
 
+/**
+ * 🔴 **数に付いた単位**(台帳 #1852 I2 / 依頼 308 B。`100円*3=` を計算する)。表の升の式の単位の一覧
+ * (`calc/sheet.ts` の `UNIT_HINT`)と同じ範囲。⚠ 数の**直後**(`3個`)にあり、その次が演算子・空白・閉じ括弧・`=` のときだけ単位と読む。
+ * 次が数字だと、2 つの数をくっつけてしまう(`10月3日+2=` の `月`)ので読まない。
+ */
+const UNIT_TAIL = /(?:円|ドル|ユーロ|時間|分|秒|日|週|月|年|個|人|件|枚|本|台|回|冊|km|kg|cm|mm|ml|g|m|l)$/iu;
+const UNIT_NEXT = /^[\s+\-*/%×÷)）=＝ー]/u;
+const CURRENCY_PREFIX = /^[$¥￥€£]$/u;
+
+/**
+ * `text[0..end)` の終わりが、数に付いた単位ならその長さ(単位でなければ 0)。
+ * ⚠ 単位の**手前**は数字か閉じ括弧、**次**は {@link UNIT_NEXT}(= `end` の字)。
+ */
+function unitEndingAt(text: string, end: number): number {
+  const m = UNIT_TAIL.exec(text.slice(Math.max(0, end - 2), end));
+  if (m === null) return 0;
+  const len = m[0].length;
+  const prev = text[end - len - 1];
+  if (prev === undefined || !(isDigitCh(prev) || prev === ')' || prev === '）')) return 0;
+  const next = text[end];
+  if (next === undefined || !UNIT_NEXT.test(toRead(next))) return 0;
+  return len;
+}
+
 /** 数字(半角・全角)か。 */
 function isDigitCh(ch: string | undefined): boolean {
   return ch !== undefined && /[0-9０-９]/u.test(ch);
@@ -441,22 +465,50 @@ export function detectInlineCalcRequest(
   const after = fullText[caretPos];
   if (after !== undefined && after !== '\n') return null;
 
-  // `=` から後ろへ、計算に使える字の間だけ戻る
+  // `=` から後ろへ、計算に使える字(と、数に付いた単位)の間だけ戻る
   let start = caretPos - 1;
+  let skippedUnit = false;
   while (start > 0) {
     const ch = fullText[start - 1]!;
-    if (ch === '\n' || !isCalcCharAt(fullText, start - 1)) break;
-    start -= 1;
+    if (ch === '\n') break;
+    if (isCalcCharAt(fullText, start - 1)) {
+      start -= 1;
+      continue;
+    }
+    const unitLen = unitEndingAt(fullText, start);
+    if (unitLen > 0) {
+      start -= unitLen;
+      skippedUnit = true;
+      continue;
+    }
+    // 通貨記号(`$100*3=`)── 数の直前だけ
+    if (CURRENCY_PREFIX.test(ch) && isDigitCh(fullText[start])) {
+      start -= 1;
+      skippedUnit = true;
+      continue;
+    }
+    break;
   }
 
+  /**
+   * 🔴 **単位は読み飛ばす**(台帳 #1852 I2 / 依頼 308 B)── 読むだけで、打った単位は本文に残る(答えだけが足される)。
+   *   式に残すのは計算に使える字だけ(走査が通ったのは計算の字と単位だけなので、それ以外を落とす)。
+   */
+  const readSlice = (a: number, b: number): string => {
+    const half = toHalfWidth(fullText.slice(a, b));
+    if (!skippedUnit) return half;
+    let out = '';
+    for (let k = 0; k < half.length; k += 1) if (isCalcCharAt(fullText, a + k)) out += half[k]!;
+    return out;
+  };
   // 行頭なら、箇条書きの印を式から外す(`- 1+2=` の `- `)
   const atLineStart = start === 0 || fullText[start - 1] === '\n';
   if (atLineStart) {
-    const m = LIST_MARKER.exec(toHalfWidth(fullText.slice(start, caretPos - 1)));
+    const m = LIST_MARKER.exec(readSlice(start, caretPos - 1));
     if (m !== null) start += m[0].length;
   }
 
-  const raw = toHalfWidth(fullText.slice(start, caretPos - 1));
+  const raw = readSlice(start, caretPos - 1);
   const expression = raw.trim();
   if (expression === '') return null;
 
@@ -465,6 +517,9 @@ export function detectInlineCalcRequest(
   const beforeRaw = start + lead > 0 ? fullText[start + lead - 1] : undefined;
   const before = beforeRaw === undefined ? undefined : toHalf(beforeRaw);
   if (startsMidToken(before, expression)) return null;
+  // 🔴 単位を読み飛ばした式の手前が字(かな・漢字・英字)なら計算しない ── 数が語の一部(`令和8年+1=` / `第3回+2=` / `10月3日+2=`)で、
+  //    足し算にすると別のものになる。単位を読み飛ばすのは、手前が空白・行頭・記号の「独立した数」のときだけ(`牛乳 100円*3=`)
+  if (skippedUnit && before !== undefined && /\p{L}/u.test(before)) return null;
   if (isDateOrTime(before, expression)) return null;
   if (isPhoneOrUrl(fullText.slice(lineStart(fullText, caretPos), caretPos - 1), expression)) return null;
   if (hasNoOperation(expression)) return null;

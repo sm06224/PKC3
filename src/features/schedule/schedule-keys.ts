@@ -30,7 +30,7 @@
  *     全ノートが「未完了」としてカンバンに出る。
  */
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
-import { dateOfFrontmatterText, parseFrontmatterWhen } from './schedule-date';
+import { dateOfScheduleWhen, parseScheduleWhen, type ScheduleWhen } from './schedule-when';
 
 /**
  * frontmatter に書く鍵。⚠ **文字列を直接書かない**(綴り間違いが静かに効く)。
@@ -64,7 +64,8 @@ export const SCHEDULE_KEYS = {
 export function readScheduleDate(meta: Record<string, FrontmatterValue>): string | null {
   const v = meta[SCHEDULE_KEYS.date];
   // 🔴 時刻つき・全角・`/` 区切りも日付の部分だけ読む(台帳 #1852 束 E1 ── 依頼 188 / 192 / 284)
-  return typeof v === 'string' ? dateOfFrontmatterText(v) : null;
+  // 🔴 期間・繰り返し・終日つきの値も開始の日を読む(台帳 #344 の残り。文法は `schedule-when.ts` の 1 本)
+  return typeof v === 'string' ? dateOfScheduleWhen(v) : null;
 }
 
 /**
@@ -76,7 +77,16 @@ export function readScheduleDate(meta: Record<string, FrontmatterValue>): string
  */
 export function readScheduleTime(meta: Record<string, FrontmatterValue>): string | null {
   const v = meta[SCHEDULE_KEYS.date];
-  return typeof v === 'string' ? (parseFrontmatterWhen(v)?.time ?? null) : null;
+  return typeof v === 'string' ? (parseScheduleWhen(v)?.time ?? null) : null;
+}
+
+/**
+ * 🔴 **ノート 1 件の予定の「いつ」を全部読む**(台帳 #344 の残り ── 期間・繰り返し・終日)。読めなければ `null`。
+ * ⚠ 抽出列には開始の日だけ(保存の形は変えない)。残りは本文から読み、予定表の走査が運ぶ(`noteTimeOf`)。
+ */
+export function readScheduleWhen(meta: Record<string, FrontmatterValue>): ScheduleWhen | null {
+  const v = meta[SCHEDULE_KEYS.date];
+  return typeof v === 'string' ? parseScheduleWhen(v) : null;
 }
 
 /**

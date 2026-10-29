@@ -58,6 +58,7 @@ import { ListPlaceStore } from '@adapter/ui/render/list-place-memory';
 import { PcFolderPlaceStore } from '@adapter/ui/render/pc-folder-place';
 import { FilerFlattenStore } from '@adapter/ui/render/filer-flatten';
 import { PopupHintStore } from '@adapter/ui/render/popup-hint';
+import { OfficeImageNoteStore } from '@adapter/ui/render/office-image-note';
 import { PasteSourceStore } from '@adapter/ui/render/paste-source';
 import { ExternalImagePolicy } from '@adapter/ui/render/external-images';
 
@@ -346,6 +347,17 @@ const CASES: readonly {
     make: (st: StorageLike | null = null) => {
       const s = new PopupHintStore(st);
       return { write: (v) => s.setShown(v as boolean), read: () => s.shown() };
+    },
+    a: true,
+    b: false,
+  },
+  {
+    // 🔴 既定が「まだ見せていない」の store(#88。Office の窓では外部画像が出ないことの初回の案内)── a を true(見せた)にして、
+    //   控えが死んで既定のまま読まれる実装を 1 回目の読みで捕まえる
+    name: 'OfficeImageNoteStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new OfficeImageNoteStore(st);
+      return { write: (v) => s.setSeen(v as boolean), read: () => s.seen() };
     },
     a: true,
     b: false,

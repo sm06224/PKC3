@@ -215,6 +215,29 @@ export function readSubstituteTail(rest: string): SubstituteTail | null {
   return isScheduleDate(date) ? { date, length: m[0].length } : null;
 }
 
+/**
+ * 🔴 **終日の語**(`@2026-08-25 終日`。台帳 #344 の残り ── 「終日」と「時刻未定」の区別 = 鍵の表の `all_day`)。
+ *
+ * - 時刻を書いていない予定は「時刻未定」(いつか今日やる)。**書いたうえで終日**と言い切る物が `終日` ── 休み・出張の日など。
+ * - ⚠ **時刻と同時には書けない**(終日に時刻は無い)。期間(`..`)は元から終日なので付けない。
+ * - ⚠ **走査の網は広げない**(`REPEAT_TAIL` と同じ作法 ── 日付の**直後**の字だけを別に見る)。
+ * - ⚠ **直後が字のときは読まない**(`終日の休み` `終日休み` は散文のまま)。読むのは直後が末尾・空白・句読点・括弧・刻みの語のとき。
+ *   🔑 散文を記法に取り込んで、既に書かれた本文の意味を変えない。
+ */
+export const ALL_DAY_WORD = '終日';
+const ALL_DAY_TAIL = /^[ \t\u3000]*終日(?=$|[\s。、，,.．:：;；!！?？)）\]」』】］(（[［「『【]|毎[日週月年]|隔週)/;
+
+export interface AllDayTail {
+  /** 語までの長さ(前の空白を含む)。⚠ **記法の範囲を伸ばす**のに使う。 */
+  readonly length: number;
+}
+
+/** 日付の直後から「終日」を読む。読めなければ `null`。 */
+export function readAllDayTail(rest: string): AllDayTail | null {
+  const m = ALL_DAY_TAIL.exec(rest);
+  return m === null ? null : { length: m[0].length };
+}
+
 export interface RepeatTail {
   readonly unit: RepeatUnit;
   /** 語までの長さ(前の空白を含む)。⚠ **記法の範囲を伸ばす**のに使う。 */

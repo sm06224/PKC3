@@ -49,7 +49,7 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
 
   // ② 4 つの書き出しが、実際に見えて押せる形で在る(畳まれていない)
   //    ⚠ 見える説明(`title` の 1 行)まで見る ── 押した後どうなるか読めること
-  const actions = ['export-html', 'export-portable', 'export-markdown', 'export-structure'];
+  const actions = ['export-html', 'export-portable', 'export-pkc2-html', 'export-markdown', 'export-structure'];
   for (const action of actions) {
     const btn = pane.locator(`[data-pkc-action="${action}"]`);
     await expect(btn, `${action} が見えていない`).toBeVisible();
@@ -80,6 +80,27 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
 
   // ③ 押した結果を観測する(0 件のときの断り)── 例外を出さずに終わる
   await clickReal(page, '[data-pkc-field="collection-pane"] [data-pkc-action="export-structure"]');
+
+  /**
+   * 🔴 #1416: 「PKC2 の HTML で書き出す」── 元にする PKC2 の HTML を選ぶと、データを入れ替えた HTML が落ちる。
+   * 新しい起動は足さない(この空の状態で、実際のファイル選択 → ダウンロードまで通す)。
+   */
+  const shell =
+    '<!doctype html><html data-pkc-schema="1"><head><title>PKC2</title></head><body>' +
+    '<script id="pkc-meta" type="application/json">{}</script>' +
+    '<script id="pkc-data" type="application/json">{"old":true}</script></body></html>';
+  const chooser = page.waitForEvent('filechooser');
+  await clickReal(page, '[data-pkc-field="collection-pane"] [data-pkc-action="export-pkc2-html"]');
+  const dl = page.waitForEvent('download');
+  await (await chooser).setFiles([{ name: 'pkc2.html', mimeType: 'text/html', buffer: Buffer.from(shell, 'utf-8') }]);
+  const got = await dl;
+  expect(got.suggestedFilename(), 'PKC2 の HTML の名前になっていない').toMatch(/^pkc2-.*\.html$/);
+  const stream = await got.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const c of stream) chunks.push(Buffer.from(c));
+  const out = Buffer.concat(chunks).toString('utf-8');
+  expect(out, 'データが入れ替わっていない').not.toContain('{"old":true}');
+  expect(out, 'PKC2 のデータの形になっていない').toContain('"container"');
 
   // ④ ノートを 1 件選ぶと、右の列がそのノートの情報に変わる(双方向の片側)
   await createEntry(page, 'text');

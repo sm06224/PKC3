@@ -312,6 +312,16 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   //   上の #1169 ③ で作った 2026-10-16 のノートが開いているので、リンク先を開き直す。
   await rows.filter({ hasText: '2026-10-15' }).first().click();
   await expect(page.locator('[data-pkc-field="detail-title"]')).toContainText('2026-10-15');
+  // 🔴 #1640 項 2: 日付のノートの本文の上に「前の日 / 次の日」。前は無いので薄く、次(2026-10-16)は押せる
+  const dayPrev = page.locator('[data-pkc-field="detail-day-nav"] [data-pkc-action="open-adjacent-day"][data-pkc-dir="prev"]');
+  const dayNext = page.locator('[data-pkc-field="detail-day-nav"] [data-pkc-action="open-adjacent-day"][data-pkc-dir="next"]');
+  await expect(dayNext, '次の日のボタンが無い').toBeVisible();
+  await expect(dayPrev, '前の日が無いのに押せる').toBeDisabled();
+  await expect(dayNext, '次の日があるのに押せない').toBeEnabled();
+  await clickReal(page, '[data-pkc-field="detail-day-nav"] [data-pkc-action="open-adjacent-day"][data-pkc-dir="next"]');
+  await expect(page.locator('[data-pkc-field="detail-title"]'), '次の日へ移らない').toContainText('2026-10-16');
+  await clickReal(page, '[data-pkc-field="detail-day-nav"] [data-pkc-action="open-adjacent-day"][data-pkc-dir="prev"]');
+  await expect(page.locator('[data-pkc-field="detail-title"]'), '前の日へ戻れない').toContainText('2026-10-15');
   // ⚠ 右の列は開いた直後に「参照元」(worker から届く)で後から伸びる ── 実測で
   //   「ゴミ箱へ移す」が y=582 → 653 → 815 と動き、途中の瞬間に押すとお知らせのカードに
   //   覆われて落ちた(9 回中 3 回)。伸びる元が届くのを待ってから押す(実時間では待たない)。

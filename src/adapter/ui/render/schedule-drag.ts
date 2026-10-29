@@ -100,8 +100,9 @@ import { addDays, daysBetween } from '@features/datetime/date-math';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '@adapter/ui/actions/long-press';
 import { pickRepeatMoveInApp } from './app-dialog';
 import { isRepeatUnit, movedOccurrenceCount, shiftWeekdaysUnit } from '@features/schedule/repeat';
-import { slotOfCard } from '@features/schedule/move-undo';
-import { noteTimeFor } from '@features/schedule/task-cards';
+import { noteSlotMoved, noteSlotOf, slotOfCard } from '@features/schedule/move-undo';
+import { repeatWord } from '@features/schedule/repeat';
+import { noteWhenFor } from '@features/schedule/task-cards';
 import { offerMoveUndo } from './schedule-undo';
 
 /** 掴める札。⚠ `kanban-cards` は #292 段⑤で外れた死んだ綴り(`app.css` に残骸あり) ──
@@ -422,7 +423,9 @@ export function dropTaskCard(
    *   この設計の要なので(`repeat.ts` の頭)、そこは開けない。
    * 🔑 だから**どこを直せばよいかまで言う**(本文の `@… 毎週` を直す)。
    */
-  if (grabbed.repeat !== '') {
+  // 🔴 ノート 1 件の予定(`line === ''`)の繰り返しは、行のように「その回だけ」を実体の行にできない(行が無い) ──
+  //   下のノートの枝で**規則ごと**動かす(台帳 #344 の残り)。行の予定だけが小窓で聞く
+  if (grabbed.repeat !== '' && grabbed.line !== '') {
     moveRepeat(dispatcher, grabbed, dropDate, host);
     return;
   }
@@ -438,17 +441,34 @@ export function dropTaskCard(
     gatedScheduleWrite(dispatcher, [grabbed.lid], SCHEDULE_DROP_FAILED, () => {
       const entryState = dispatcher.getState();
       const was = entryState.entryMetas.get(grabbed.lid)?.date ?? null;
-      // 🔴 前書きに書かれた時刻は、日だけ動かしても残る(外すときは日付ごと消える。依頼 192 / 284)
-      const wasTime = noteTimeFor(entryState.taskScan, grabbed.lid, was);
+      /**
+       * 🔴 **期間・繰り返しのノートは「掴んだ日が落とした日に来る」ように、開始をずらす**(台帳 #344 の残り。行の期間と同じ作法)。
+       * ⚠ 掴んだ日(`grabbed.from`)と開始の差だけ、落とした日から引く ── 3 日目の札を掴んで落とせば全体が同じ日数ずれ、長さは変わらない。
+       *   繰り返しのノートは**規則ごと**動く(各回を別々に持たないので、その回だけは動かせない)。単日のノートは掴んだ日 = 開始で、今までどおり。
+       * ⚠ 掴んだ日が取れない / 日付なしへ外す回は、落とした日そのものを使う(当てずっぽうの日付を書かない)。
+       */
+      const noteWhen = noteWhenFor(entryState.taskScan, grabbed.lid, was);
+      const shifted =
+        date !== null &&
+        was !== null &&
+        grabbed.from !== '' &&
+        (noteWhen.until !== null || noteWhen.repeat !== null)
+          ? addDays(was, daysBetween(grabbed.from, date) ?? 0)
+          : null;
+      const target = shifted ?? date;
+      // 🔴 前書きに書かれた時刻・期間・終日は、日だけ動かしても残る(外すときは日付ごと消える。依頼 192 / 284、台帳 #344 の残り)
+      const beforeSlot = noteSlotOf(entryState.taskScan, grabbed.lid, was);
       const refused = bodyWriteBlockReason(entryState, grabbed.lid) !== null;
-      dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid: grabbed.lid, date });
+      dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid: grabbed.lid, date: target });
       // 🔴 動かしたら「元に戻す」の 1 行(#855)。⚠ 断られた回(編集中など)・日が変わらない回は出さない
       if (!refused && entryState.entryMetas.has(grabbed.lid))
         offerMoveUndo(host, dispatcher, {
           target: { kind: 'entry', lid: grabbed.lid },
-          before: { date: was, time: wasTime, timeEnd: null, until: null, text: '' },
-          after: { date, time: date === null ? null : wasTime, timeEnd: null, until: null, text: '' },
+          before: beforeSlot,
+          after: noteSlotMoved(beforeSlot, target),
           verb: 'moved',
+          // 🔴 繰り返しのノートは規則ごと動く ── 知らせで言う(その回だけは動かせない)
+          ...(noteWhen.repeat !== null && target !== null ? { ruleWord: repeatWord(noteWhen.repeat) } : {}),
         });
     });
     return;

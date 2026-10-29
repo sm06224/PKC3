@@ -132,6 +132,17 @@ export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
     title:
       'PKC3 ごと 1 つの .html にまとめます。ダブルクリックで開いて、そのまま読み書きできます(添付も入ります)',
   },
+  /**
+   * 🔴 **PKC2 のポータブル形式(ノートも編集できる単一 HTML)**(台帳 #1416。user 指示 2026-10-07)。
+   * ⚠ PKC3 の中に PKC2 のアプリは無いので、**手元の PKC2 の HTML を 1 つ選ぶ**(押すと選ぶウィンドウが開く)。その中のデータだけを
+   *   PKC3 のノートに入れ替えて書き出す ── 元にした HTML は変えない。PKC2 に無い記法・PKC3 独自の種類は、字のまま / ノートとして出る。
+   */
+  {
+    action: 'export-pkc2-html',
+    label: 'PKC2 の HTML で書き出す',
+    title:
+      '押すと、元にする PKC2 の HTML(pkc2.html など)を選ぶウィンドウが開きます。その中のデータを PKC3 のノートに入れ替えた、PKC2 で開ける 1 つの .html を作ります(元の HTML は変えません。PKC3 独自の記法・種類は字のまま、またはノートとして出ます)',
+  },
   {
     action: 'export-markdown',
     label: 'Markdown で書き出す',

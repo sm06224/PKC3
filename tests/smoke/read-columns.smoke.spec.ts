@@ -872,6 +872,10 @@ test('🔴 Alt+C で段組みが回り、いま何段で出ているかを言う
   await expect(status).toContainText('本文の段組み: 1 段');
   await expect.poll(async () => (await readGeom(page)).on, { timeout: 5_000 }).toBe(false);
 
+  // 🔴 #522: 中央のバーのボタンでも同じに回る(キーを知らなくても届く)
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="cycle-read-columns"]');
+  await expect(status, 'バーのボタンで段組みが回らない').toContainText('本文の段組み: 2 段');
+
   expect(errors).toEqual([]);
 });
 

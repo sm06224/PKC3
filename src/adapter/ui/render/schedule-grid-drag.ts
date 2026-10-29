@@ -53,7 +53,9 @@ import {
   resizeSlot,
 } from '@features/schedule/day-layout';
 import { pickRepeatMoveInApp } from './app-dialog';
-import { slotOfCard } from '@features/schedule/move-undo';
+import { noteSlotMoved, noteSlotOf, slotOfCard } from '@features/schedule/move-undo';
+import { repeatWord } from '@features/schedule/repeat';
+import { noteWhenFor } from '@features/schedule/task-cards';
 import { offerMoveUndo } from './schedule-undo';
 import { SCHEDULE_DROP_FAILED, gatedScheduleWrite } from './schedule-write-gate';
 import {
@@ -493,14 +495,16 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
         const st0 = dispatcher.getState();
         const wasDate = st0.entryMetas.get(g.task.lid)?.date ?? null;
         const refusedNote = bodyWriteBlockReason(st0, g.task.lid) !== null;
+        const beforeNote = noteSlotOf(st0.taskScan, g.task.lid, wasDate);
+        const noteRepeat = noteWhenFor(st0.taskScan, g.task.lid, wasDate).repeat;
         dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid: g.task.lid, date: r.date, time: newTime });
         if (!refusedNote && wasDate !== null) {
-          const noSlot = { timeEnd: null, until: null, text: '' } as const;
           offerMoveUndo(root, dispatcher, {
             target: { kind: 'entry', lid: g.task.lid },
-            before: { date: wasDate, time: g.time, ...noSlot },
-            after: { date: r.date, time: newTime, ...noSlot },
+            before: { ...beforeNote, time: g.time },
+            after: noteSlotMoved({ ...beforeNote, time: g.time }, r.date, newTime),
             verb: 'moved',
+            ...(noteRepeat === null ? {} : { ruleWord: repeatWord(noteRepeat) }),
           });
         }
       });
@@ -570,7 +574,8 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
           offerMoveUndo(root, dispatcher, {
             target: { kind: 'task', lid: g.task.lid, line },
             before,
-            after: { ...before, date, time, timeEnd },
+            // 🔴 時刻を付けたら `終日` は外れる(書き手 `formatLineDate` と同じ)
+            after: { ...before, date, time, timeEnd, allDay: before.allDay === true && time === null },
             verb: r.kind === 'resize' ? 'changed' : 'moved',
           });
         }

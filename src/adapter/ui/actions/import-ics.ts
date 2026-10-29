@@ -27,6 +27,8 @@ import {
 import type { MarkdownImportDeps } from './import-markdown';
 import { failImport } from './import-failure';
 import { readImportTextInfo, SJIS_GUESS_NOTE } from '@features/import/text-decode';
+import { isOperationCancelled, type CancelToken } from '@features/job-cancel';
+import { IMPORT_CANCELLED_NOTE, importDoneNote } from './job-control';
 
 const ZERO: IcsCounts = {
   cancelled: 0,
@@ -47,6 +49,8 @@ export async function importIcsFiles(
   dispatcher: Dispatcher,
   deps: MarkdownImportDeps,
   files: readonly File[],
+  /** 🔴 やめる印(台帳 #1852 の F2・依頼 253)。省略 = やめられない。 */
+  token?: CancelToken,
 ): Promise<number | null> {
   const fail = (msg: string): null => {
     return failImport(dispatcher, deps, msg);
@@ -60,6 +64,11 @@ export async function importIcsFiles(
     if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}取り込んでください`;
     return null;
   };
+  /** 🔴 読む段でやめた ── まだ 1 件も書いていない。 */
+  const cancelled = (): null => {
+    deps.notify?.(IMPORT_CANCELLED_NOTE);
+    return null;
+  };
   const blocked = gate();
   if (blocked !== null) return fail(blocked);
   if (files.length === 0) return fail('取り込むファイルがありません');
@@ -71,6 +80,7 @@ export async function importIcsFiles(
   try {
     let order = deps.orderBase();
     for (const file of files) {
+      token?.throwIfCancelled();
       if (file.size > ICS_IMPORT_MAX_BYTES) {
         return fail(
           `「${file.name}」は大きすぎて取り込めません(${humanBytes(ICS_IMPORT_MAX_BYTES)} まで。ノートは 1 件も追加されていません)`,
@@ -105,6 +115,7 @@ export async function importIcsFiles(
       });
     }
   } catch (e) {
+    if (isOperationCancelled(e)) return cancelled();
     return fail(
       `カレンダー形式のファイルを読めませんでした(ノートは 1 件も追加されていません): ${errorText(e)}`,
     );
@@ -116,6 +127,7 @@ export async function importIcsFiles(
   // 🔴 読んでいる間に編集が始まったかもしれない ── 書く直前に門をもう一度通す
   const again = gate();
   if (again !== null) return fail(again);
+  if (token?.cancelled === true) return cancelled(); // 書く直前がやめられる最後の区切り
 
   try {
     await deps.bulkUpsertEntries(rows);
@@ -132,6 +144,8 @@ export async function importIcsFiles(
   const why = icsCountNotes(sum);
   notes.push(...why);
   deps.report?.(notes);
-  deps.notify?.(`予定 ${total} 件を取り込みました${why.length > 0 ? `(${why.join('、')})` : ''}`);
+  deps.notify?.(
+    importDoneNote(token, total, `予定 ${total} 件を取り込みました${why.length > 0 ? `(${why.join('、')})` : ''}`),
+  );
   return total;
 }

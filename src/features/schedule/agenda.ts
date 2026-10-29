@@ -76,6 +76,11 @@ export interface AgendaItem {
    */
   readonly until: string | null;
   /**
+   * 🔴 **終日**(`@2026-08-25 終日` / 前書きの `date: 2026-08-25 終日`。台帳 #344 の残り)。
+   * ⚠ 時刻を書いていないだけの予定は `false`(**時刻未定**。区別する ── 札には「終日」と出さない)。省略 = `false`。
+   */
+  readonly allDay?: boolean;
+  /**
    * 🔴 **刻み**(`@2026-08-31 毎週`)。繰り返しでなければ `null`(#344 段②)。
    *
    * ⚠ **束に入った札の `repeat` も `null` にならない** ── 出た 1 枚が
@@ -98,6 +103,7 @@ export function itemOfCard(card: TaskCard): AgendaItem {
     time: card.time,
     timeEnd: card.timeEnd,
     until: card.until,
+    allDay: card.allDay === true,
     repeat: card.repeat,
   };
 }
@@ -106,7 +112,12 @@ export function itemOfCard(card: TaskCard): AgendaItem {
  * ノート 1 件を予定にする(frontmatter の `date:`)。`time` = 前書きに書いた時刻(`HH:MM`。無ければ `null` = 終日)。
  * ⚠ 鍵は `line` の代わりに `note` ── 行の札と**衝突しない**形にする。
  */
-export function itemOfNote(meta: EntryMeta, time: string | null = null): AgendaItem {
+export function itemOfNote(
+  meta: EntryMeta,
+  time: string | null = null,
+  /** 🔴 前書きの `date:` の期間の終わり・刻み・終日(台帳 #344 の残り)。省けば全部「無し」(これまでどおり)。 */
+  extra: { readonly until?: string | null; readonly repeat?: RepeatUnit | null; readonly allDay?: boolean } = {},
+): AgendaItem {
   return {
     key: `${meta.lid} note`,
     lid: meta.lid,
@@ -119,10 +130,11 @@ export function itemOfNote(meta: EntryMeta, time: string | null = null): AgendaI
     time,
     // ⚠ 前書きには時刻の終わりの置き場が無いので、幅は無い
     timeEnd: null,
-    // ⚠ frontmatter には期間の置き場が無い(#344 段②)── 常に `null`
-    until: null,
-    // ⚠ 繰り返しも同じ ── ノート 1 件が丸ごと繰り返す形は作っていない
-    repeat: null,
+    // 🔴 前書きの `date: 2026-10-20..2026-10-22`(台帳 #344 の残り。行の `@a..b` と同じ文法 ── `schedule-when.ts`)
+    until: extra.until ?? null,
+    allDay: extra.allDay === true,
+    // 🔴 前書きの `date: 2026-10-20 毎週`。ノート 1 件の繰り返しは**チェックする行が無い**ので、各回はただ載る
+    repeat: extra.repeat ?? null,
   };
 }
 
@@ -326,7 +338,8 @@ function sortByTime(cards: readonly AgendaItem[]): AgendaItem[] {
      *   (だから上に出す)。⚠ 「いつか今日やる」を後ろへ置く理由とは向きが逆になるが、
      *   同じ理由で決まっている:**その日の読み方に効く順**に並べる。
      */
-    const rank = (c: AgendaItem): number => (c.until !== null ? 0 : c.time === null ? 2 : 1);
+    // 🔴 終日と明示した予定(台帳 #344 の残り)も期間と同じ先頭 ── 「この日は休み」は 10:00 の予定より前提。時刻未定は後ろのまま
+    const rank = (c: AgendaItem): number => (c.until !== null || c.allDay === true ? 0 : c.time === null ? 2 : 1);
     const ra = rank(a);
     const rb = rank(b);
     if (ra !== rb) return ra - rb;

@@ -176,8 +176,8 @@ describe('main.ts の配線(原文 pin)', () => {
     expect(MAIN).toContain('createJobControl({');
     expect(MAIN).toContain('showJobPanel(regions.notices, panel)');
     expect(MAIN).toContain('hideJobPanel(regions.notices)');
-    // 取り込み(importDeps)と書き出し(runExport の deps)の両方が同じ jobs を受ける
-    expect(MAIN.match(/\bjob: jobs,/g)?.length, 'job: jobs が取り込みと書き出しの 2 か所に無い').toBe(2);
+    // 取り込み(importDeps)と書き出し(runExport の deps)と PKC3 入り HTML の書き出し(runExportPortable)が同じ jobs を受ける
+    expect(MAIN.match(/\bjob: jobs,/g)?.length, 'job: jobs が取り込み・書き出し・PKC3 入り HTML の書き出しの 3 か所に無い').toBe(3);
     // やめたときの取り消しは「取り込みを取り消す」と同じ importUndo.undo()
     expect(MAIN).toMatch(/undoImport: \(\) => importUndo\.undo\(\),\s+\/\/ ⚠ 生存 entry だけでは/);
     expect(MAIN).toContain('cancelJob: () => void jobs.cancelCurrent()');

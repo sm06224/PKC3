@@ -244,6 +244,8 @@ const OBJECT_LONE: readonly string[] = [
   // ⚠ `enter-folder` は 2026-10-18(台帳 #1852 束 N2 / 依頼 85-6)にフォルダの概要の「ほか N 件を左のペインで開く」
   //    (`folder-overview.ts`)が 2 つ目の出口になったので外した(1 つ目はパンくず `filer.ts`)
   'insert-entry-link',
+  // 🔴 日付ノートの上の「‹ 前の日 / 次の日 ›」(#1640 項 2)── 出口は題名の下の 1 か所(本文の上の帯はこの 1 本だけ)
+  'open-adjacent-day',
   // ⚠ `move-entry` は #813(2026-09-09)で受け手ごと外した ── プルダウンを消したので
   //    焼く所が 0 件になった(残る口は `move-to-folder` と D&D)
   // ⚠ `navigate-entry-ref` は 2026-09-27(#1044 段4)に章の別ウィンドウの「元のウィンドウで開く」

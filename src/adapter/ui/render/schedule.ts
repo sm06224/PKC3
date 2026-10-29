@@ -55,6 +55,7 @@ import { currentTagColors } from './tag-color';
 import { noteColorVar } from '@features/schedule/item-color';
 import { leadLabel, SCHEDULE_LEAD_OPTIONS } from '@features/schedule/schedule-notify';
 import { appScheduleNotify } from './schedule-notify';
+import { appAlarmEnabled } from './alarm-enabled';
 import { appScheduleWeekStart } from './schedule-week-start';
 import {
   weekdayHeads,
@@ -174,6 +175,8 @@ export class ScheduleRenderer {
      */
     lead: HTMLSelectElement;
     missed: HTMLInputElement;
+    /** 🔴 予定の時刻に音で知らせるか(#1654 項 4。設定の「予定の知らせ」と同じ 1 つの設定を映す) */
+    alarm: HTMLInputElement;
     /** 切替 3 つの行(1 つも出ないときは行ごと隠す ── `[hidden]`。CSS の `:has()` には頼らない、#1467 段 3-d) */
     toggles: HTMLElement;
     groups: HTMLElement;
@@ -347,6 +350,8 @@ export class ScheduleRenderer {
     if (frame.lead.value !== leadValue) frame.lead.value = leadValue;
     const missedOn = appScheduleNotify.missedOn();
     if (frame.missed.checked !== missedOn) frame.missed.checked = missedOn;
+    const alarmOn = appAlarmEnabled.enabled();
+    if (frame.alarm.checked !== alarmOn) frame.alarm.checked = alarmOn;
     /**
      * ⚠ **種類の絞りもこの面に効かせる**(#411)── 効かせないと、札を押した
      *   まま予定タブへ移ったときに**そこだけ全部出る**。user からは
@@ -1221,9 +1226,23 @@ export class ScheduleRenderer {
     missed.setAttribute('data-pkc-action', 'set-schedule-missed');
     missed.title = '閉じている間に始まった、時刻のある予定の件数を、次に開いたときに 1 行で知らせます(終日の予定は数えません)';
     missedLabelEl.append(missed, ' 次に開いたとき、見逃した予定を知らせる');
+    /**
+     * 🔴 **予定の時刻に音で知らせる**(#1654 項 4)。⚠ 設定(システム → 設定 → 通知)にしか無く、予定の画面の
+     *   「知らせ」には音の切替が無かった(「知らせる時間」が音のことに読めた)。同じ 1 つの設定 `set-alarm-enabled` を
+     *   ここからも切り替える(設定を 2 つにしない)。⚠ 入にすると起動のたびに予定を数える ── 説明に書く。
+     */
+    const alarmLabelEl = document.createElement('label');
+    alarmLabelEl.setAttribute('data-pkc-field', 'schedule-option');
+    const alarm = document.createElement('input');
+    alarm.type = 'checkbox';
+    alarm.setAttribute('data-pkc-field', 'schedule-alarm');
+    alarm.setAttribute('data-pkc-action', 'set-alarm-enabled');
+    alarm.title =
+      '本文の行に時刻まで書いた予定の時刻になったら、音とバーで知らせます(押すとそのノートを開きます)。PKC3 を開いている間だけ鳴ります。オンにすると、起動したときに予定を数えます';
+    alarmLabelEl.append(alarm, ' 予定の時刻に音で知らせる');
     const notifyPanel = document.createElement('div');
     notifyPanel.setAttribute('data-pkc-field', 'schedule-notify-panel');
-    notifyPanel.append(leadLabelEl, missedLabelEl);
+    notifyPanel.append(alarmLabelEl, leadLabelEl, missedLabelEl);
     notify.append(notifySummary, notifyPanel);
     const groups = document.createElement('div');
     groups.setAttribute('data-pkc-region', 'schedule-groups');
@@ -1243,7 +1262,7 @@ export class ScheduleRenderer {
     this.monthView.el.hidden = true;
     this.board.el.hidden = true;
     this.region.append(bar, modeRow, quick, grid, note, clearFilter, toggles, exportIcs, notify, this.day.el, this.week.el, this.monthView.el, this.board.el, groups);
-    this.frame = { month, grid, note, clearFilter, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', lead, missed, toggles, groups, modes, quickDate: qDate, weekStart: weekStartSel, owner: ownerSel };
+    this.frame = { month, grid, note, clearFilter, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', lead, missed, alarm, toggles, groups, modes, quickDate: qDate, weekStart: weekStartSel, owner: ownerSel };
     return this.frame;
   }
 }

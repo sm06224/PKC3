@@ -18,6 +18,8 @@ import type { MarkdownImportDeps } from './import-markdown';
 import { failImport } from './import-failure';
 import { IMPORT_TEXT_MAX_BYTES, readImportTextInfo, SJIS_GUESS_NOTE } from '@features/import/text-decode';
 import { humanBytes } from '@features/human-bytes';
+import { isOperationCancelled, type CancelToken } from '@features/job-cancel';
+import { IMPORT_CANCELLED_NOTE, importDoneNote } from './job-control';
 
 /**
  * .vcf を 1 枚ずつノートにする。**失敗は必ず可視**(OP_FAILED)で終える。
@@ -27,6 +29,8 @@ export async function importVcfFiles(
   dispatcher: Dispatcher,
   deps: MarkdownImportDeps,
   files: readonly File[],
+  /** 🔴 やめる印(台帳 #1852 の F2・依頼 253)。省略 = やめられない。 */
+  token?: CancelToken,
 ): Promise<number | null> {
   const fail = (msg: string): null => {
     return failImport(dispatcher, deps, msg);
@@ -47,6 +51,11 @@ export async function importVcfFiles(
     if (state.phase !== 'ready') return `${phaseBlockReason(state.phase)}取り込んでください`;
     return null;
   };
+  /** 🔴 読む段でやめた ── まだ 1 件も書いていない。 */
+  const cancelled = (): null => {
+    deps.notify?.(IMPORT_CANCELLED_NOTE);
+    return null;
+  };
   const blocked = gate();
   if (blocked !== null) return fail(blocked);
   if (files.length === 0) return fail('取り込むファイルがありません');
@@ -58,6 +67,7 @@ export async function importVcfFiles(
     /** 名前の無いカードに振る番号(⚠ 取り込んだ通し番号ではない ── 下の注記)。 */
     let unnamed = 0;
     for (const file of files) {
+      token?.throwIfCancelled();
       // 🔴 読む前に大きさで断る(ics と同じ形。#1087)
       if (file.size > IMPORT_TEXT_MAX_BYTES) {
         return fail(
@@ -113,6 +123,7 @@ export async function importVcfFiles(
       }
     }
   } catch (e) {
+    if (isOperationCancelled(e)) return cancelled();
     return fail(
       `vCard を読めませんでした(ノートは 1 件も追加されていません): ${errorText(e)}`,
     );
@@ -127,6 +138,7 @@ export async function importVcfFiles(
    */
   const again = gate();
   if (again !== null) return fail(again);
+  if (token?.cancelled === true) return cancelled(); // 書く直前がやめられる最後の区切り
 
   try {
     await deps.bulkUpsertEntries(rows);
@@ -162,6 +174,6 @@ export async function importVcfFiles(
     hidden > 0
       ? `取り込み完了: ノート ${rows.length} 件(うち連絡先に並ぶのは ${listed} 件)`
       : `取り込み完了: 連絡先 ${rows.length} 件`;
-  deps.notify?.(notes.length > 0 ? `${head}(注意 ${notes.length} 件)` : head);
+  deps.notify?.(importDoneNote(token, rows.length, notes.length > 0 ? `${head}(注意 ${notes.length} 件)` : head));
   return rows.length;
 }

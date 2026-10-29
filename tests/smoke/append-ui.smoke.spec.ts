@@ -87,6 +87,20 @@ test('🔴 入り先のリストは、見出しが長くなっても幅を変え
     `「追記」が横へ動いた(${shortSend.x} → ${longSend.x})`,
   ).toBeLessThan(2);
 
+  // 🔴 #1443: 入り先のリストは丸いピル。見出しを選ぶと「選んだ」と分かる印が付き、戻すと外れる
+  const look = (): Promise<{ radius: number; chosen: string | null }> =>
+    target.evaluate((el) => ({
+      radius: parseFloat(getComputedStyle(el).borderTopLeftRadius),
+      chosen: el.getAttribute('data-pkc-target-chosen'),
+    }));
+  const first = await look();
+  expect(first.radius, '入り先のリストが丸くない(ピルの規則が届いていない)').toBeGreaterThan(10);
+  expect(first.chosen, '何も選んでいないのに「選んだ」印が付いている').toBeNull();
+  await target.selectOption({ index: 1 });
+  await expect.poll(async () => (await look()).chosen, { message: '見出しを選んだのに印が付かない' }).not.toBeNull();
+  await target.selectOption({ index: 0 });
+  await expect.poll(async () => (await look()).chosen, { message: '末尾へ戻しても印が残る' }).toBeNull();
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

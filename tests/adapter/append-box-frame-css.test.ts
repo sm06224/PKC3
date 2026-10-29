@@ -36,4 +36,13 @@ describe('追記欄の枠 (#1890)', () => {
     expect(body("[data-pkc-field='append-bar']")).toMatch(/flex-wrap:\s*wrap/);
     expect(body("[data-pkc-field='append-actions']")).toMatch(/margin-left:\s*auto/);
   });
+
+  /** 🔴 台帳 #1443 の残り(Gemini 設計の 3): 追記先は丸いバッジ(ピル)で見せ、見出しを選んでいるときだけ色が付く。 */
+  it('追記先は丸いバッジで、見出しを選んでいる間だけ色(アクセント)が付く', () => {
+    const b = body("[data-pkc-field='append-target']");
+    expect(b).toMatch(/border-radius:\s*999px/);
+    expect(body("[data-pkc-field='append-target'][data-pkc-target-chosen]")).toMatch(/border-color:\s*var\(--accent\)/);
+    // 幅の固定(#496)は崩さない
+    expect(b).toMatch(/\bwidth:\s*18em/);
+  });
 });

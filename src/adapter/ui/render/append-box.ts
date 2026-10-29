@@ -171,6 +171,12 @@ export class AppendBoxRenderer {
     this.target.setAttribute('aria-label', '追記先');
     this.target.title = '追記を入れる場所です。既定は本文の末尾で、見出しを選ぶとその節の終わりに入ります';
     /**
+     * 🔴 **追記先は丸いバッジ(ピル)で見せる**(台帳 #1443 の残り。Gemini の設計の 3 =「追記先選択のインテグレート」)。
+     *   見出しを選んでいる間は `data-pkc-target-chosen` を立て、既定(末尾)と見分けが付くようにする(色は情報にだけ使う)。
+     * ⚠ 絵文字(📌)は足さない(書体の図案へ移した方針)── 形と色だけで見せる。
+     */
+    this.target.addEventListener('change', () => this.markTarget());
+    /**
      * 🔴 **足したものを、本文を開かずに外せる**(#395 段①。user 指示 2026-08-23
      * 「**片道の操作を作らない**」)。
      *
@@ -259,6 +265,12 @@ export class AppendBoxRenderer {
   private keepDraft(lid: string, text: string): void {
     if (text === '') this.drafts.delete(lid);
     else this.drafts.set(lid, text);
+  }
+
+  /** 追記先のバッジの印を、いまの選びに合わせる(見出しを選んでいる = 立てる)。 */
+  private markTarget(): void {
+    if (this.target.value === '') this.target.removeAttribute('data-pkc-target-chosen');
+    else this.target.setAttribute('data-pkc-target-chosen', '');
   }
 
   /** 打った行数に合わせて高さを揃える。手で決めた高さがあれば何もしない。 */
@@ -523,6 +535,7 @@ export class AppendBoxRenderer {
       this.target.append(opt);
     }
     if (keep !== '' && heads.some((h) => h.slug === keep)) this.target.value = keep;
+    this.markTarget();
     /**
      * ⚠ **見出しが 1 つも無いノートでは畳む** ── 「末尾」しか無い選択肢は、
      *   押せるのに選ぶ物が無い(業務画面の作法「押しても何も起きないを作らない」)。

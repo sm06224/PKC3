@@ -954,6 +954,17 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   expect(await exportText(), '「なし」でもアラームが入っている').not.toContain('VALARM');
   await leadSel.selectOption('15');
 
+  // 🔴 #1654 項 4: 「予定の時刻に音で知らせる」── 画面から入り切りでき、端末に覚える(既定は切)
+  const alarm = notify.locator('[data-pkc-field="schedule-alarm"]');
+  await expect(alarm, '音の知らせの切り替えが見えない').toBeVisible();
+  await expect(alarm, '既定が切になっていない').not.toBeChecked();
+  await clickReal(page, '[data-pkc-field="schedule-notify"] [data-pkc-field="schedule-alarm"]');
+  await expect(alarm).toBeChecked();
+  expect(await page.evaluate(() => localStorage.getItem('pkc3.alarm')), '入にしたのに覚えていない').toBe('1');
+  await clickReal(page, '[data-pkc-field="schedule-notify"] [data-pkc-field="schedule-alarm"]');
+  await expect(alarm, '切に戻せない').not.toBeChecked();
+  expect(await page.evaluate(() => localStorage.getItem('pkc3.alarm'))).toBe('0');
+
   /**
    * 🔴 **予定の左の縦線とノートごとの出し入れ**(#855 20-A。起動は増やさない ── この道中の続き)。
    * 属性ではなく**計算後の影**で見る(CSS に受け皿が無いと、付けた印が画面で見分けられない)。
@@ -1003,7 +1014,7 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   const yesterday = key(new Date(at.getFullYear(), at.getMonth(), at.getDate() - 1));
   await createEntry(page, 'text');
   await ta.fill(
-    `- [ ] 昨日の会議 @${yesterday} 12:00\n- [x] 済んだ会議 @${yesterday} 13:00\n- [ ] 昨日の終日 @${yesterday}`,
+    `- [ ] 昨日の会議 @${yesterday} 12:00\n- [x] 済んだ会議 @${yesterday} 13:00\n- [ ] 昨日の終日 @${yesterday} 終日`,
   );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   // 保存が済んでから読み直す(読み直しで書きかけを捨てない)

@@ -9,6 +9,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { MISSED_SCAN_FAILED_TEXT, startMissedWatch } from '../../src/adapter/ui/actions/missed-schedule';
 import { appScheduleNotify, ScheduleNotifyStore } from '../../src/adapter/ui/render/schedule-notify';
+import { appAlarmEnabled } from '../../src/adapter/ui/render/alarm-enabled';
 import { ScheduleRenderer } from '../../src/adapter/ui/render/schedule';
 import { taskCardsOf } from '../../src/features/schedule/task-cards';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -476,6 +477,30 @@ describe('画面:知らせの 1 行と、好みの 2 つ', () => {
     view.render(d.getState());
     expect(sel.value).toBe('5');
     expect(box.checked).toBe(true);
+  });
+
+  it('🔴 予定の「知らせ」に、予定の時刻に音で知らせる切替が在り、設定と同じ 1 つを切り替える(#1654 項 4)', () => {
+    const region = document.createElement('div');
+    document.body.append(region);
+    const d = new Dispatcher();
+    const set = vi.fn((on: boolean) => appAlarmEnabled.setEnabled(on));
+    bindActions(document.body, d, { setAlarmEnabled: set });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta()], relations: [] });
+    appAlarmEnabled.setEnabled(false);
+    const view = new ScheduleRenderer(region);
+    view.render(d.getState());
+    const box = region.querySelector<HTMLInputElement>('[data-pkc-field="schedule-alarm"]')!;
+    expect(box.closest('label')?.textContent ?? '').toContain('予定の時刻に音で知らせる');
+    expect(box.checked, '既定は切').toBe(false);
+    box.click();
+    expect(set).toHaveBeenCalledWith(true);
+    expect(appAlarmEnabled.enabled()).toBe(true);
+    // 設定の側で切っても、次の描き直しで映る
+    appAlarmEnabled.setEnabled(false);
+    d.dispatch({ type: 'SET_SCHEDULE_MODE', mode: 'day' });
+    view.render(d.getState());
+    expect(box.checked).toBe(false);
+    appAlarmEnabled.setEnabled(false);
   });
 
   it('🔴 書き出しは選んだ時間のアラームを入れる(なし = 入れない)', async () => {

@@ -1718,6 +1718,16 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
   max-width: 100%;
   min-width: 0;
   text-overflow: ellipsis;
+  /* 🔴 丸いバッジ(ピル)で見せる(台帳 #1443 の残り)。地は無彩色・色は「見出しを選んでいる」ときだけ */
+  border-radius: 999px;
+  padding: 0 var(--s3);
+  background: var(--surface-2, var(--surface));
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='append-target'][data-pkc-target-chosen] {
+  border-color: var(--accent);
+  color: var(--fg);
 }
 [data-pkc-field='append-input'] {
   flex: none;
@@ -1901,6 +1911,19 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
   color: var(--muted);
   font-size: 11px;
   margin: calc(-1 * var(--s2)) 0 var(--s2);
+}
+/* 🔴 日付ノートの「‹ 前の日 / 次の日 ›」(#1640 項 2)── 題名の下の小さな行。地は無彩色 */
+[data-pkc-field='detail-day-nav'] {
+  display: flex;
+  gap: var(--s2);
+  margin: calc(-1 * var(--s2)) 0 var(--s2);
+  font-size: 12px;
+}
+[data-pkc-field='detail-day-nav'][hidden] {
+  display: none;
+}
+[data-pkc-field='detail-day-nav'] button {
+  padding: 0 var(--s2);
 }
 [data-pkc-field='detail-reading-time'] {
   color: var(--muted);
@@ -11386,6 +11409,7 @@ h3[data-pkc-section] {
   .pkc-quick-toc,
   .pkc-reading-time,
   [data-pkc-field='detail-reading-time'],
+  [data-pkc-field='detail-day-nav'],
   .pkc-code-collapse-bar,
   .pkc-code-collapse-top-btn,
   /* ⚠ 表の「行・列を足す / 消す」も紙には要らない(#418 段①)── 画面では
