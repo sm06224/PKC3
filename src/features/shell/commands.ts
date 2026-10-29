@@ -18,7 +18,7 @@ import { fold } from '@features/palette/palette-rows';
 import { collectSubtreeLids, resolveCanonicalParents } from '@features/relation/tree';
 import { planPreview, type PlanOp, type PlanTarget } from '@features/structure/structure-plan';
 import { joinTokens, splitFlags, tokenize, type ShellToken } from './tokenize';
-import { LITERAL, childrenOf, pathOf, resolveFolder, resolveNote, resolveNotes, splitParentTitle } from './resolve';
+import { LITERAL, childrenOf, pathOf, quoteIfNeeded, resolveFolder, resolveNote, resolveNotes, splitParentTitle } from './resolve';
 import type { ArgKind, ShellEffect, ShellEnv, ShellGroup, ShellPlan, ShellSurface, ShellTable } from './types';
 
 interface Ctx {
@@ -605,7 +605,8 @@ export function historyLineOf(line: string, surface: ShellSurface): string {
   if (error !== null || head === undefined) return text;
   const cmd = findCommand(head.text, surface);
   if (cmd === null) return text;
-  const q = (t: ShellToken): string => (/[\s"'「」“”]/u.test(t.text) ? `"${t.text.replace(/(["\\])/gu, '\\$1')}"` : t.text);
+  // 🔴 欄へ入れる形と同じ判定(`quoteIfNeeded`)── 囲んだ旗・番号・`/` を含む題名が、`!!` で同じ意味に戻る
+  const q = (t: ShellToken): string => quoteIfNeeded(t.text);
   if (cmd.name === 'new' || cmd.name === 'append') {
     const first = tokens[1];
     return first === undefined ? head.text : `${head.text} ${q(first)}`;

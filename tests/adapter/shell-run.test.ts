@@ -7,6 +7,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
+import { clipHistoryLine } from '../../src/features/shell/history';
+import { tokenize } from '../../src/features/shell/tokenize';
+import { planLine } from '../../src/features/shell/commands';
 import { runShellLine, type OpResult, type ShellOps } from '../../src/adapter/ui/actions/shell-run';
 import { ShellSession, shellBlockText } from '../../src/adapter/ui/render/cmdshell';
 import { ShellHistoryStore, SHELL_HISTORY_STORAGE_KEY } from '../../src/adapter/ui/render/shell-history-store';
@@ -15,7 +18,7 @@ import type { ShellEnv } from '../../src/features/shell/types';
 function meta(lid: string, title: string, archetype = 'text'): EntryMeta {
   return { lid, title, archetype, createdAt: null, updatedAt: null, entryOrder: 1, status: null, date: null, archived: false, bodyChars: 0 };
 }
-const METAS = [meta('f1', '資料', 'folder'), meta('n1', '議事録'), meta('n2', '設計')];
+const METAS = [meta('f1', '資料', 'folder'), meta('n1', '議事録'), meta('n2', '設計'), meta('x3', '3'), meta('x4', '-n'), meta('x5', 'a/b'), meta('x6', 'a b')];
 
 function memoryStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & { data: Map<string, string> } {
   const data = new Map<string, string>();
@@ -199,6 +202,40 @@ describe('履歴に機密を残さない', () => {
     expect(s.history.join('\n')).not.toMatch(/1,200,000|山田|極秘/);
     await runShellLine(f.ops, s, `find ${'あ'.repeat(500)}`);
     expect(s.history[0]!.length).toBeLessThanOrEqual(200);
+  });
+
+  it('🔴 履歴の形: 囲んだ旗・番号・/ を含む語は !! で同じ意味に戻り、200 字の切れ目は語の境目で、引用符を閉じ忘れない(D)', async () => {
+    const f = fake();
+    const s = session();
+    // 履歴に残る形(本文は落ちるが、対象の指し方は保たれる)
+    await runShellLine(f.ops, s, 'append "3" 本文');
+    await runShellLine(f.ops, s, 'append "-n" 本文');
+    await runShellLine(f.ops, s, 'append "a/b" 本文');
+    await runShellLine(f.ops, s, 'append "a b" 本文');
+    expect(s.history).toEqual(['append "a b"', 'append "a/b"', 'append "-n"', 'append "3"']);
+    // !! / !n で呼び戻すと、同じ対象に解ける(囲みが外れて番号・旗・道に読み替わらない)
+    // `new` の題名は、履歴では本文が落ちて題名だけ残る。!! で呼び戻すと、同じ題名(/ を含む題名)で作られる
+    await runShellLine(f.ops, s, 'new "a/b" 本文');
+    expect(s.history[0]).toBe('new "a/b"');
+    await runShellLine(f.ops, s, '!!');
+    expect(f.calls.filter((c) => c === 'create:a/b')).toHaveLength(2);
+    // 囲みが外れた形なら、別の意味(フォルダ a の中の b)になって断られる ── 囲みを落とさないことの対照群
+    expect(planLine('new a/b 本文', f.ops.env(s)).error).toBeDefined();
+    // 切り詰め: 200 字を超える行は語の境目で切る。閉じない引用符の行を残さない
+    const long = `find ${Array.from({ length: 60 }, (_, i) => `語${String(i)}`).join(' ')}`;
+    const clipped = clipHistoryLine(long, 200);
+    expect(clipped.length).toBeLessThanOrEqual(200);
+    expect(long.startsWith(clipped)).toBe(true);
+    expect(long[clipped.length]).toBe(' ');
+    const quoted = `find ${'あ'.repeat(180)} "いろは にほへと ちりぬるを"`;
+    const cut = clipHistoryLine(quoted, 200);
+    expect(tokenize(cut).error).toBeNull();
+    expect(cut).toBe(`find ${'あ'.repeat(180)}`);
+    // 1 語目が上限を超える行は残さない
+    expect(clipHistoryLine('あ'.repeat(300), 200)).toBe('');
+    // 閉じていない引用符の行は、最後の空白で切る
+    const open = `find ${'あ'.repeat(150)} "${'い'.repeat(100)}`;
+    expect(tokenize(clipHistoryLine(open, 200)).error).toBeNull();
   });
 
   it('🔴 history -c で履歴を消せる(片道にしない)', async () => {

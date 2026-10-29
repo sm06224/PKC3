@@ -10,6 +10,7 @@
  *   ↑ を押した人が、打ちかけを黙って失う。
  * - `!!`(直前の行)`!3`(`history` の一覧の 3 番)で呼び戻す。⚠ 実行する前に展開した行を**結果の上に見せる**(呼び側)。
  */
+import { tokenize } from './tokenize';
 
 export const SHELL_HISTORY_MAX = 200;
 /** 1 行の長さの上限(手違いで巨大な字を端末に残さない)。 */
@@ -18,8 +19,27 @@ export const SHELL_HISTORY_LINE_MAX = 200;
 /** 履歴に積まない行(見るだけ・消すだけ)の先頭の語。 */
 const NOT_KEPT: ReadonlySet<string> = new Set(['history', '履歴', 'clear', '消去', 'help', 'ヘルプ', '?']);
 
+/**
+ * 長い行を**語の境目**で切る(引用符が閉じない行を履歴に残さない ── `!!` で呼び戻すと別の意味になる)。
+ * 1 語目が上限を超えるときは残さない(空)。引用符が閉じていない行は、最後の空白で切る。
+ */
+export function clipHistoryLine(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const { tokens, error } = tokenize(text);
+  if (error !== null) {
+    const cut = text.slice(0, max).search(/\s\S*$/u);
+    return cut <= 0 ? '' : text.slice(0, cut).trimEnd();
+  }
+  let end = 0;
+  for (const t of tokens) {
+    if (t.end > max) break;
+    end = t.end;
+  }
+  return text.slice(0, end);
+}
+
 export function pushShellHistory(list: readonly string[], line: string, max = SHELL_HISTORY_MAX): string[] {
-  const text = line.trim().slice(0, SHELL_HISTORY_LINE_MAX);
+  const text = clipHistoryLine(line.trim(), SHELL_HISTORY_LINE_MAX);
   if (text === '') return [...list];
   const head = text.split(/\s+/u)[0] ?? '';
   if (NOT_KEPT.has(head)) return [...list];

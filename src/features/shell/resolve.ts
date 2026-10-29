@@ -49,6 +49,15 @@ export function readsAsReference(s: string): boolean {
   return NUMBER_REF.test(t) || RANGE_REF.test(t) || RESERVED_WORDS.includes(t);
 }
 
+/**
+ * 題名を欄へ入れる形。空白・引用符のほか、**解く側(`resolve.ts`)が特別扱いする語**も囲む:
+ * 番号・範囲・予約語(`readsAsReference` ── 解く側と同じ判定を引く)、`-` で始まる(旗)、`!` `#` で始まる(履歴・番号)、`/` を含む(フォルダの道)。
+ */
+export const quoteIfNeeded = (s: string): string =>
+  /[\s"'「」“”]/u.test(s) || s === '' || /^[-!#]|\//u.test(s) || readsAsReference(s)
+    ? `"${s.replace(/(["\\])/gu, '\\$1')}"`
+    : s;
+
 const ok = <T>(value: T): Resolved<T> => ({ ok: true, value });
 const fail = <T>(error: string): Resolved<T> => ({ ok: false, error });
 
