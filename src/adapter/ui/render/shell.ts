@@ -546,6 +546,15 @@ export function buildShell(root: HTMLElement): ShellRegions {
   savedSearches.hidden = true;
 
   /**
+   * 🔴 **ピン留めしたノートの固定エリア**(#1377)。一覧(`browse-host`)の**すぐ上**に置く ──
+   * ⚠ タブの外に置く(面を替えても消えない。更新順・絞り込み・フォルダの移動に関わらず常に同じ場所)。
+   * ⚠ 器だけ置く(`hidden`)── 中身は `note-pins.ts` が state と端末の記憶から描く。
+   */
+  const notePins = document.createElement('div');
+  notePins.setAttribute('data-pkc-region', 'note-pins');
+  notePins.hidden = true;
+
+  /**
    * 🔴 **分割ボタンにする**(P10、user 指示 2026-08-05
    * 「プルダウン式の新規作成ボタンは使いにくいからマルチメニューに畳んでください。
    *  ▼ を押下した際に種別を選択して、追加ボタンと ctrl+n の対象を更新、
@@ -915,6 +924,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     savedSearches,
     createBar,
     menu,
+    notePins,
     browseHost,
     commandList,
     collectionBar,
@@ -1105,6 +1115,15 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   const status = document.createElement('footer');
   status.setAttribute('data-pkc-region', 'status');
+  /**
+   * 🔴 **状態バーと、その真上の小さな知らせ(貼付トースト。#1379)の入れ物**。grid の `status` の行はこれが持つ。
+   * ⚠ トーストを `position: fixed` で浮かせて「状態バーの高さ」を値で当てると、バーが折り返して 2 行になったとき・文字サイズを
+   *   大きくしたときに重なる。**入れ物を基準に `bottom: 100%` で置けば、バーがどれだけ伸びても知らせはその真上**に居る(高さを推測しない)。
+   * ⚠ トーストは流れの外(`absolute`)── 出ても消えても本文の領域は動かない。空なら高さ 0。
+   */
+  const statusStack = document.createElement('div');
+  statusStack.setAttribute('data-pkc-region', 'status-stack');
+  statusStack.append(status);
   /**
    * 🔴 **画面下の知らせを、読み上げにも届ける**(#1017 C5 段 a)。⚠ 直す前は何も付いておらず、
    *   「コピーしました」等は**目で見る人にしか届かなかった**(`aria-live` は検索・右クリック・
@@ -1382,7 +1401,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     update,
     draftOffer,
     notices,
-    status,
+    statusStack,
   );
   /**
    * 🔴 **鍵だけで使う人が、列を飛ばして本題へ行ける近道**(#720)。

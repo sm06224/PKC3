@@ -243,6 +243,8 @@ export function rebuildArchiveSource(opts: {
    * 建て直しが「メモリ上のみ / 書き戻し失敗 / 保存先を失った」で終わった日に、色が zip にも画面にも残らない。
    */
   readonly tagColors?: ReadonlyArray<{ tag: string; color: string }>;
+  /** 🔴 捨てる前に読んだノートのピン留め(#1377)。色と同じ理由で安全のための zip にも入れる。 */
+  readonly notePins?: readonly string[];
 }): { readonly source: ArchiveSource; readonly stats: () => RescueStats } {
   const assetPorts = assetArchivePorts(opts.cid, opts.assets);
   const source: ArchiveSource = {
@@ -275,6 +277,9 @@ export function rebuildArchiveSource(opts: {
     ...(opts.tagColors === undefined
       ? {}
       : { listTagColors: async () => opts.tagColors!.map((c) => ({ tag: c.tag, color: c.color })) }),
+    ...(opts.notePins === undefined || opts.notePins.length === 0
+      ? {}
+      : { listNotePins: async () => [...opts.notePins!] }),
   };
   return {
     source,
@@ -362,6 +367,8 @@ export interface RebuildPorts {
    * ⚠ 読めなければ空で返してよい(呼び側が握る)── 色が読めないだけで建て直しは止めない。
    */
   readTagColors(): Promise<Array<{ tag: string; color: string }>>;
+  /** 🔴 捨てる前にノートのピン留めを読む(#1377)。⚠ 省略可 ── 読めなくても建て直しは止めない。 */
+  readNotePins?(): Promise<string[]>;
   /** 🔑 添付の実体(IndexedDB)。⚠ 渡さなければ zip に添付が入らない。 */
   readonly assets?: RescueAssets;
   /** ① zip を手元へ落とす。⚠ **落ちたら例外**(何も消さずに止まる)。 */
@@ -407,6 +414,8 @@ export interface RebuildPorts {
   writeTrash(cid: string, notes: readonly RebuiltTrashNote[]): Promise<{ restored: number }>;
   /** ⑤ 🔴 捨てる前に読んだタグの色を戻す(#1087)。 */
   writeTagColors(cid: string, colors: ReadonlyArray<{ tag: string; color: string }>): Promise<void>;
+  /** ⑤ 🔴 捨てる前に読んだノートのピン留めを戻す(#1377)。⚠ 省略可。 */
+  writeNotePins?(cid: string, lids: readonly string[]): Promise<void>;
   /** 消えたノート由来の物をこの端末から落とす(コピー履歴など)。 */
   forgetLocal(): void;
   /** ⑥ 🔴 **最後に**他のタブへ知らせる。 */
@@ -500,6 +509,8 @@ export async function rebuildContainer(
   const sys = await collectRescued(ports.pickSystem).catch(() => ({ rows: [] as RescuedRow[] }));
   // 🔴 色は sqlite の `settings` 表 ── 捨てる前でないと読めない。読めなければ空(建て直しは止めない)
   const tagColors = await ports.readTagColors().catch(() => []);
+  // 🔴 ピン留めも同じ(#1377)。戻すのは書き戻したノートに在る lid だけ(`writeNotePins` の前に絞る)
+  const notePins = (await ports.readNotePins?.().catch(() => [] as string[])) ?? [];
   const { source, stats } = rebuildArchiveSource({
     cid,
     title,
@@ -509,6 +520,7 @@ export async function rebuildContainer(
     extras,
     truncated: got.truncated,
     tagColors,
+    notePins,
     ...(ports.assets === undefined ? {} : { assets: ports.assets }),
   });
   /**
@@ -638,6 +650,11 @@ export async function rebuildContainer(
       // 🔴 捨てる前に読んだタグの色(#1087)
       await ports.writeTagColors(cid, tagColors);
       tagColorsRestored = tagColors.length;
+      // 🔴 ピン留め(#1377)── 戻したノートに在るものだけ。戻せなくても建て直しは失敗にしない
+      if (notePins.length > 0 && ports.writeNotePins !== undefined) {
+        const have = new Set(entries.map((e) => e.lid));
+        await ports.writeNotePins(cid, notePins.filter((l) => have.has(l))).catch(() => {});
+      }
     } catch (e) {
       ports.forgetLocal();
       ports.announceWiped();

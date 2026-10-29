@@ -302,6 +302,11 @@ import {
   DEFAULT_PASTE_SOURCE,
   isPlainPasteChord,
   pasteConvertedMessage,
+  pasteRevertRange,
+  PASTE_TOAST_ACTION,
+  PASTE_TOAST_CHANGED,
+  PASTE_TOAST_CLOSED,
+  PASTE_TOAST_TEXT,
   PASTE_MESSAGE_COALESCE_MS,
   PLAIN_PASTE_WINDOW_MS,
   type PasteSource,
@@ -312,6 +317,7 @@ import {
   applyFormat,
   autoPairFor,
   DIAGRAM_CHOICES,
+  CALLOUT_CHOICES,
   DIAGRAM_TEMPLATES,
   insertBlock,
   linkifyPastedUrl,
@@ -452,6 +458,13 @@ import {
   withEditReady,
 } from '@features/entry-actions';
 import { currentAppOpenTarget } from '@adapter/ui/render/app-open-target';
+import { isInstalledApp } from '@adapter/platform/installed-app';
+import { appOpenOptions } from '@features/launcher/open-target';
+
+/** 🔴 #884 段③ ── 右クリックの開き方の項目に出す選択肢(アプリとして入れていないと効かない物だけ隠す)。 */
+function appOpenIds(): readonly string[] {
+  return appOpenOptions(isInstalledApp(), currentAppOpenTarget()).map((c) => c.id);
+}
 import { processToolOf } from '@features/capture/capture-process';
 import {
   type MenuItem,
@@ -872,6 +885,7 @@ import {
   pickSnippetInApp,
   pickTemplateNoteInApp,
   pickDiagramInApp,
+  pickCalloutInApp,
   pickBodyIconInApp,
   pickArchiveInApp,
   pickCopyFormatInApp,
@@ -886,6 +900,9 @@ import {
   type ArchivePickRow,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
+import { appPasteToast, showPasteToast } from '@adapter/ui/render/paste-toast';
+import { appNotePins } from '@adapter/platform/note-pin-store';
+import { pinRefusal } from '@features/relation/note-pins';
 
 type ActionHandler = (
   dispatcher: Dispatcher,
@@ -2117,6 +2134,8 @@ export interface BinderServices {
    * ⚠ 切り替えたら**その場で本文を描き直す**(同上)。
    */
   setInlineCodeCopy?(on: boolean): void;
+  /** 🔴 **直して貼ったときの小さな知らせを出すか**(#1379)。⚠ **省略可**。描き直しは要らない(効くのは次の貼り付け)。 */
+  setPasteToast?(on: boolean): void;
   /**
    * 🔴 **打ちながら補完の候補を出すか**(#1449 / #1450)。⚠ **省略可**。
    * ⚠ 切り替えても本文は描き直さない ── 効くのは**次に打つとき**だけ。
@@ -4949,7 +4968,7 @@ const FIND_ATTR = SEARCH_FIND_ATTR;
  * ⚠ 2 ペインの右クリックは**選択を動かさずに**行のメニューを出す(開いただけで
  *   中央が切り替わらないため)。ところが中身を**中央の本文の画面に出す**項目
  *   (「履歴」「このスタックを載せる」)は、2 ペインのままだと状態だけ書き換わって
- *   **画面に何も出ない**(無言の dead click)。「この中に新しいノートを作る」は
+ *   **画面に何も出ない**(無言の dead click)。「中にノートを作る」は
  *   押した瞬間に自分で本文の画面へ移る。
  * 🔑 だから**押したときに**その行を選ぶ(= C9 の前と同じ動き)── メニューを開いた
  *   だけでは移らない。受け手は `run` の 1 か所で、属性を持つ項目にだけ効く。
@@ -6600,6 +6619,30 @@ export function runGlobalCommand(
     if (dry) return true;
     prevent();
     dispatcher.dispatch({ type: 'DESELECT_ENTRY' });
+    return true;
+  }
+  if (cmd === 'pin-note' || cmd === 'unpin-note') {
+    /**
+     * 🔴 **開いているノートをピン留めする / 外す**(#1377。操作を探すから)。⚠ 行の右クリックと同じ対 ──
+     *   済みなら「する」、まだなら「外す」は効かない(`false` を返す = 行が灰色になり、理由が添わる)。
+     * ⚠ 満杯(生きているピン 20 件)は理由を言って断る(右クリックと同じ字)。
+     */
+    const st = dispatcher.getState();
+    const lid = st.selectedLid;
+    if (lid === null || !st.entryMetas.has(lid)) return false;
+    const pinned = appNotePins.has(lid);
+    if (cmd === 'pin-note' ? pinned : !pinned) return false;
+    if (dry) return true;
+    prevent();
+    const exists = (l: string): boolean => st.entryMetas.has(l);
+    if (cmd === 'pin-note') {
+      const why = pinRefusal(appNotePins.list(), lid, exists);
+      if (why !== null) {
+        notify(why, CAUTION);
+        return true;
+      }
+    }
+    appNotePins.toggle(lid, exists);
     return true;
   }
   if (cmd === 'cycle-read-columns') {
@@ -10586,6 +10629,37 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     services.toggleDualBookmark?.(key);
   },
+  /**
+   * 🔴 **ノートをピン留めする / 外す**(#1377)。⚠ 相手は**メニューを開いた瞬間のノート**(`rowLidOrSelected`)。
+   * ⚠ 満杯なら**理由を声に出して断る**。数えるのはこのコレクションの生きているものだけ。
+   * ⚠ 保存は端末の記憶で、固定エリアは記憶の変化を自分で聞いて描き直す(state を動かさない)。
+   */
+  'pin-note': (dispatcher, target) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null || !st.entryMetas.has(lid)) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートが見つかりません' });
+      return;
+    }
+    const exists = (l: string): boolean => st.entryMetas.has(l);
+    const why = pinRefusal(appNotePins.list(), lid, exists);
+    if (why !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+      return;
+    }
+    if (!appNotePins.has(lid)) appNotePins.toggle(lid, exists);
+  },
+  /**
+   * 🔴 **ピン留めを外す**(エリアの各行の「外す」/ 右クリック / 操作を探す)。
+   * ⚠ 相手は**押した行そのもの**(`data-pkc-entry`)── 選択中のノートではない。選んでいるノートが別のノートでも、
+   *   押した行のピンを外す(押した物と効く先を食い違わせない)。属性が無いときだけメニューが運ぶ lid / 選択へ。
+   */
+  'unpin-note': (dispatcher, target) => {
+    const st = dispatcher.getState();
+    const lid = target.getAttribute('data-pkc-entry') ?? rowLidOrSelected(st, target);
+    if (lid === null) return;
+    if (appNotePins.has(lid)) appNotePins.toggle(lid, (l) => st.entryMetas.has(l));
+  },
   'bookmark-note-remove': (dispatcher, target, services) => {
     const st = dispatcher.getState();
     const lid = rowLidOrSelected(st, target);
@@ -11534,6 +11608,35 @@ const ACTIONS: Record<string, ActionHandler> = {
       ta.setSelectionRange(at.start, at.end);
       const sel = { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
       writeBack(ta, insertBlock(sel, tpl.block));
+    });
+  },
+  /**
+   * 🔴 **注意書き ── 押すと 8 種から選んでブロックを入れる**(#425 の「囲い(`:::`)の挿入口」)。
+   *
+   * ⚠ 作りは `insert-diagram` と同じ ── caret を先に控え、器(`pickCalloutInApp`)が返ってから欄を引き直す。
+   * 🔑 選んでいても先に聞く(種類は選んだ字からは決まらない)。入れ方は `applyFormat(sel, 'callout-<種類>')` の 1 本
+   *   (選んでいれば囲み、無ければ空のブロック。もう一度で外れる ── 片道にしない)。
+   */
+  'insert-callout': (_dispatcher, _target, services, root) => {
+    const opened = formatTarget(root);
+    if (opened === null) {
+      sayNoFormatTarget(services);
+      return;
+    }
+    const at = { start: opened.selectionStart, end: opened.selectionEnd };
+    void pickCalloutInApp(
+      root,
+      CALLOUT_CHOICES.map((c) => ({ id: c.role, label: `${c.label}(:::${c.role})` })),
+    ).then((id) => {
+      if (id === null) return;
+      const choice = CALLOUT_CHOICES.find((c) => c.role === id);
+      if (choice === undefined) return;
+      const ta = formatTarget(root);
+      if (ta === null) return;
+      ta.focus();
+      ta.setSelectionRange(at.start, at.end);
+      const sel = { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+      writeBack(ta, applyFormat(sel, `callout-${choice.role}`));
     });
   },
   /**
@@ -17419,6 +17522,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setCodeCollapse?.(target.checked);
   },
+  'set-paste-toast': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setPasteToast?.(target.checked);
+  },
   'set-inline-code-copy': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setInlineCodeCopy?.(target.checked);
@@ -18410,6 +18517,7 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
    *   ⚠ 受け手は画面のボタンそのもの(`insert-date` などと同じ)。選んだ範囲があれば図は囲み、無ければ種類を聞く(ボタンの作り)。
    */
   'insert-diagram': '[data-pkc-action="insert-diagram"]',
+  'insert-callout': '[data-pkc-action="insert-callout"]',
   'insert-icon': '[data-pkc-action="insert-icon"]',
   /**
    * 🔴 **録音・録画の最中と切り出し、検索の帯 7 件 第 4 群**(#582 段③。第 1〜3 群と同じ作法 ── 命令 id = 押しボタンの
@@ -18454,7 +18562,7 @@ const PALETTE_FIELD_FIRST: Readonly<
 > = {
   'add-tag': { field: '[data-pkc-field="tag-add-input"]', pane: 'inspector', say: '足すタグをここに入れてから、「タグを足す」を押してください' },
   'add-relation': { field: '[data-pkc-field="relation-target"]', pane: 'inspector', say: 'つなぐ先の題名をここに入れてから、「つながりを足す」を押してください' },
-  'append-entry': { field: '[data-pkc-field="append-input"]', pane: 'append', say: '追記する字をここに書いてから、「本文に追記する」を押してください' },
+  'append-entry': { field: '[data-pkc-field="append-input"]', pane: 'append', say: '追記する字をここに書いてから、「追記」を押してください' },
   'schedule-quick-add': { field: '[data-pkc-field="schedule-quick-text"]', pane: null, say: '予定の字をここに書いてから、「予定を足す」を押してください' },
   // 第 2 群(#582 段③)── 欄はボタンと同じ親の中に居る
   'replace-all': { field: '[data-pkc-field="replace-find"]', pane: null, say: '探す語をここに入れてから、「すべて置換」を押してください' },
@@ -18489,6 +18597,15 @@ const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
   'format-table': 'table',
   'format-codeblock': 'codeblock',
   'format-math': 'math',
+  // 🔴 #425: 注意書きのブロック 8 種(`CALLOUT_CHOICES` と同じ並び)
+  'format-callout-note': 'callout-note',
+  'format-callout-tip': 'callout-tip',
+  'format-callout-info': 'callout-info',
+  'format-callout-important': 'callout-important',
+  'format-callout-warning': 'callout-warning',
+  'format-callout-caution': 'callout-caution',
+  'format-callout-danger': 'callout-danger',
+  'format-callout-summary': 'callout-summary',
 };
 
 /**
@@ -18832,6 +18949,8 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   'insert-snippet',
   // ⚠ 2026-09-04(#528 案 B): 図の一覧 ── 同じく編集中の本文へ挿す
   'insert-diagram',
+  // ⚠ #425: 注意書きの種類の一覧 ── 同じく編集中の本文へ挿す
+  'insert-callout',
   // ⚠ 2026-09-13(#853 段①): 図案の表 ── 同じく編集中の本文へ挿す
   'insert-icon',
   'renumber-lists',
@@ -20508,6 +20627,13 @@ export function bindActions(
    *
    * @returns 既定の貼付を止めたら `true`
    */
+  /** 貼る前の欄の本文と選択範囲(貼った範囲を求める材料。#1379)。 */
+  type PasteBefore = { readonly value: string; readonly start: number; readonly end: number };
+  const pasteBefore = (el: HTMLTextAreaElement): PasteBefore => ({
+    value: el.value,
+    start: el.selectionStart ?? el.value.length,
+    end: el.selectionEnd ?? el.selectionStart ?? el.value.length,
+  });
   let plainPasteChordAt: number | null = null;
   const onPlainPasteChord = (ev: KeyboardEvent): void => {
     if (isPlainPasteChord(ev)) plainPasteChordAt = Date.now();
@@ -20622,6 +20748,34 @@ export function bindActions(
      * ⚠ 続けて貼ったときは束ねる(`PASTE_MESSAGE_COALESCE_MS` 以内は 1 件)。
      * ⚠ **差し込みに成功した後で呼ぶ**(資産化を待つ間に欄が閉じたら、「貼りました」は嘘になる)。
      */
+    /**
+     * 🔴 **直した字を、1 クリックで書式なしの字へ置き換えるトースト**(#1379)。
+     * ⚠ 置き場は画面下のステータスバーではなく浮き札(`paste-toast.ts`)。文はメッセージにも残る(下の `leaveConverted`)。
+     * ⚠ 置き換えは `insertText`(Ctrl+Z で貼った直後へ戻せる)。貼ったあとに本文が変わっていたら触らず理由を言う。
+     */
+    const offerPlain = (el: HTMLTextAreaElement, before: PasteBefore): void => {
+      if (converted === null || (chosen.attempt.used !== 'html' && chosen.attempt.used !== 'rtf')) return;
+      if (plain === '') return; // 書式なしの字が届いていない ── 置き換え先が無い
+      // 設定で切ってあれば出さない(直したことはメッセージに残る ── `leaveConverted`)
+      if (!appPasteToast.enabled()) return;
+      const afterValue = el.value;
+      if (pasteRevertRange(before, afterValue) === null) return;
+      // 🔴 置き場は状態バーの真上に積む入れ物(`shell.ts` の `status-stack`)。無い画面(殻の無い埋め込み)は root / body
+      const slotRoot = el.closest<HTMLElement>('[data-pkc-slot="root"]');
+      showPasteToast(slotRoot?.querySelector<HTMLElement>('[data-pkc-region="status-stack"]') ?? slotRoot ?? el.ownerDocument.body, {
+        message: PASTE_TOAST_TEXT,
+        actionLabel: PASTE_TOAST_ACTION,
+        onAction: () => {
+          if (!el.isConnected) return PASTE_TOAST_CLOSED;
+          const range = el.value === afterValue ? pasteRevertRange(before, afterValue) : null;
+          if (range === null) return PASTE_TOAST_CHANGED;
+          el.focus();
+          el.setSelectionRange(range.start, range.end);
+          insertText(el, plain);
+          return null;
+        },
+      });
+    };
     const leaveConverted = (): void => {
       if (converted === null || (chosen.attempt.used !== 'html' && chosen.attempt.used !== 'rtf')) return;
       const now = Date.now();
@@ -20637,8 +20791,10 @@ export function bindActions(
     // ⚠ 逃がすものが無い(= 資産にする口が無い環境も含む)ときは、その場で差す
     if (urls.length === 0) {
       // ⚠ 囲みは行頭から差す(行の途中だと柵が柵として読まれない ── #708 段③)
+      const before = pasteBefore(target);
       insertBlockText(target, text);
       leaveConverted();
+      offerPlain(target, before);
       return true;
     }
 
@@ -20658,8 +20814,10 @@ export function bindActions(
         return;
       }
       into.focus();
+      const before = pasteBefore(into);
       insertBlockText(into, r.text);
       leaveConverted();
+      offerPlain(into, before);
       /**
        * 🔴 **断りは 1 本にまとめる**(検算で判明)。`state.error` は **1 枠**なので、
        * 理由(空き容量)を先に出しても、件数の総括で**上書きされて消える**。
@@ -21962,16 +22120,22 @@ export function bindActions(
     const tileKind = tileHit?.getAttribute('data-pkc-tile-kind') ?? '';
     if (tileHit !== null && ![...BUILTIN_KINDS].some((k) => k === tileKind)) {
       const tileLid = tileHit.getAttribute('data-pkc-tile') ?? '';
-      if (tileLid !== '') {
+      // 🔴 出す項目が 0 のとき(絞り込み中 + ブラウザ利用)は空のメニューを開かず、ふつうの右クリックに任せる
+      if (tileLid !== '' && (tileHit.getAttribute('draggable') === 'true' || appOpenIds().length > 0)) {
         ev.preventDefault();
         openContextMenu(
           root,
           { x: ev.clientX, y: ev.clientY },
           // ⚠ 出口も同じメニューに置く(#857 段①b-2)── 入口だけ作らない
           // 🔴 その 1 回だけの開き方(#884 段②)── いまの設定を先頭 2 項目に足す
+          // 🔴 #884 段③: ブラウザで使っている(アプリとして入れていない)人には開き方の 2 項目を出さない
           tileHit.getAttribute('draggable') === 'true'
-            ? tileMenuActions(dispatcher.getState().launcherReorder, currentAppOpenTarget())
-            : tileOpenTargetMenuActions(currentAppOpenTarget()),
+            ? tileMenuActions(
+                dispatcher.getState().launcherReorder,
+                currentAppOpenTarget(),
+                appOpenIds(),
+              )
+            : tileOpenTargetMenuActions(currentAppOpenTarget(), appOpenIds()),
           root.ownerDocument.activeElement,
           { 'data-pkc-tile': tileLid },
         );
@@ -21991,7 +22155,7 @@ export function bindActions(
     if (builtinHit !== null) {
       const tileLid = builtinHit.getAttribute('data-pkc-tile') ?? '';
       const kind = builtinHit.getAttribute('data-pkc-tile-kind') ?? '';
-      if (tileLid !== '' && isViewMode(kind)) {
+      if (tileLid !== '' && isViewMode(kind) && appOpenIds().length > 0) {
         ev.preventDefault();
         openContextMenu(
           root,
@@ -22603,6 +22767,8 @@ export function bindActions(
         archetype: st.entryMetas.get(lid)?.archetype ?? null,
         linkedFile: st.linkedFiles.get(lid) ?? null,
         ...transcriptMenuCtx(st, lid),
+        // 🔴 ピン留め(#1377)── 固定エリアは左の列にあるので、左の列の行のメニューだけが渡す
+        pinned: appNotePins.has(lid),
       }).map(withRowShortcut),
       st.openBody?.lid === lid,
     );

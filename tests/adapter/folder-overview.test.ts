@@ -403,10 +403,10 @@ describe('フォルダの概要の行を押す(binder)', () => {
  * > user の物語:空のフォルダを押した。件数が 0 と出るだけで、**何をすればよいか**が画面に無かった
  * > (作る入口は行の右クリックか Shift+F4 だけ)。
  *
- * ⚠ 押したときの動きは**行の右クリックの「この中に新しいノートを作る」と同じ 1 本**(新しい action を
+ * ⚠ 押したときの動きは**行の右クリックの「中にノートを作る」と同じ 1 本**(新しい action を
  *   作らない)。期待値の綴りは**右クリックの表(`ENTRY_MENU_ACTIONS`)から引く**(手で書かない)。
  */
-describe('空のフォルダの「この中に新しいノートを作る」(#1254 §3 改善 A)', () => {
+describe('空のフォルダの「中にノートを作る」(#1254 §3 改善 A)', () => {
   const CREATE = '[data-pkc-region="folder-overview"] [data-pkc-field="overview-create"]';
   const menuItem = ENTRY_MENU_ACTIONS.find((a) => a.action === 'create-in-folder')!;
 
@@ -433,7 +433,7 @@ describe('空のフォルダの「この中に新しいノートを作る」(#12
     const btn = root.querySelector<HTMLElement>(CREATE);
     expect(btn, '空のフォルダに作る入口が出ていない').not.toBeNull();
     expect(btn!.textContent).toBe(menuItem.label);
-    expect(btn!.textContent).toBe('この中に新しいノートを作る');
+    expect(btn!.textContent).toBe('中にノートを作る');
     expect(btn!.getAttribute('data-pkc-action'), '右クリックと別の action を撃っている').toBe(menuItem.action);
   });
 

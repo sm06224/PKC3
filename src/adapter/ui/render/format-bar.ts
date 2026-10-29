@@ -282,6 +282,30 @@ export function buildFormatBar(): HTMLElement {
   toggleReplace.append(label);
   bar.append(toggleReplace);
   /**
+   * 🔴 **注意書きのブロックを入れる**(#425 の「囲い(`:::`)の挿入口」)。
+   * ⚠ `FORMAT_OPS` の 8 種は帯に出さない(1 つずつ並べると帯が 8 個伸びる)── 帯には**種類を先に聞く 1 つ**だけ置く。
+   *   種類ごとの名前は操作を探すと設定のショートカット画面から呼べる。
+   * ⚠ 置き場は**置換の隣(末尾側)** ── 既に在るボタンを 1 つも右へ動かさない(同じものが常に同じ場所にある)。
+   */
+  const insertCallout = document.createElement('button');
+  insertCallout.type = 'button';
+  insertCallout.setAttribute('data-pkc-action', 'insert-callout');
+  insertCallout.setAttribute(
+    HINT_BASE,
+    '注意書きの種類(メモ / ヒント / 警告など)を選んで、選んだ範囲(無ければ空)をそのブロックにします',
+  );
+  insertCallout.setAttribute(HINT_COMMAND, 'insert-callout');
+  insertCallout.title = hintTitle(
+    '注意書きの種類(メモ / ヒント / 警告など)を選んで、選んだ範囲(無ければ空)をそのブロックにします',
+    'insert-callout',
+  );
+  const insertCalloutLabel = document.createElement('span');
+  insertCalloutLabel.setAttribute('data-pkc-field', 'label');
+  insertCalloutLabel.textContent = '注意書き';
+  insertCallout.append(insertCalloutLabel);
+  bar.append(insertCallout);
+
+  /**
    * 🔴 **この行を計算する**(#766 D-3)。⚠ 書式バーを横に長くしないため、**スマホ用画面の「…」を開いたときだけ**出す
    * (`data-pkc-more-only`。広い画面では CSS が隠す ── 広い画面の入口は **操作を探す** と鍵 `Alt+Shift+C`)。
    * 🔑 押すと**本文の欄へ当てる命令**(`inline-calc`)をそのまま呼ぶ ── 打って `Enter` / 操作を探す / 鍵と同じ 1 か所。

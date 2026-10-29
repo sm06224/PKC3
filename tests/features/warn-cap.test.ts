@@ -65,6 +65,7 @@ describe('注意の畳み方', () => {
       trash: [],
       trashRelations: [],
       trashRevisions: [],
+      notePins: [],
       assetSources: new Map<string, Blob>(),
       warnings: [],
     } as unknown as Parameters<typeof restoreArchive>[0];

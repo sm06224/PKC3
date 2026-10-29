@@ -14,7 +14,11 @@ import { createImportUndo, importPanel } from '../../src/adapter/ui/actions/impo
 import { showNotices } from '../../src/adapter/ui/render/notices';
 import type { TagColorEntry } from '../../src/features/tag-color';
 
-function make(opts: { phase?: AppPhase; removeTagColors?: (c: readonly TagColorEntry[]) => Promise<void> } = {}): {
+function make(opts: {
+  phase?: AppPhase;
+  removeTagColors?: (c: readonly TagColorEntry[]) => Promise<void>;
+  removeNotePins?: (l: readonly string[]) => Promise<void>;
+} = {}): {
   undo: ReturnType<typeof createImportUndo>;
   sent: Dispatchable[];
   said: string[];
@@ -34,6 +38,7 @@ function make(opts: { phase?: AppPhase; removeTagColors?: (c: readonly TagColorE
     phase: () => opts.phase ?? 'ready',
     fail: (m) => failed.push(m),
     ...(opts.removeTagColors === undefined ? {} : { removeTagColors: opts.removeTagColors }),
+    ...(opts.removeNotePins === undefined ? {} : { removeNotePins: opts.removeNotePins }),
   });
   return {
     undo,
@@ -140,6 +145,43 @@ describe('取り込みの戻り道(#535 ②)', () => {
     const g = make();
     g.undo.remember(['a'], { tagColors: true, addedColors: [{ tag: 'x', color: '#112233' }] });
     expect(g.undo.pending()?.title).toContain('取り込んだタグの色は残ります');
+  });
+
+  it('🔴 足したピン留めが分かる取り込みは、取り消しでそのピンだけを外す(#1377。色と同じ形)', async () => {
+    const removed: string[][] = [];
+    const h = make({ removeNotePins: async (l) => void removed.push([...l]) });
+    h.undo.remember(['a', 'b'], { addedPins: ['a'] });
+    expect(h.undo.pending()?.title).toContain('取り込みで足したピン留めも外します');
+    h.undo.undo();
+    await Promise.resolve();
+    expect(removed, '足したピンだけが外す口へ渡る').toEqual([['a']]);
+    expect(h.said.join('')).toContain('取り込みで足したピン留めも外しました');
+    // 2 度押しても 2 度は外さない
+    h.undo.undo();
+    await Promise.resolve();
+    expect(removed).toHaveLength(1);
+  });
+
+  it('対照群: 足したピンが 0 件 / 口が無い配線では、外す口を呼ばない・ピンのことを言わない', async () => {
+    const removed: string[][] = [];
+    const h = make({ removeNotePins: async (l) => void removed.push([...l]) });
+    h.undo.remember(['a'], {});
+    expect(h.undo.pending()?.title).not.toContain('ピン留め');
+    h.undo.undo();
+    await Promise.resolve();
+    expect(removed).toEqual([]);
+    const g = make();
+    g.undo.remember(['a'], { addedPins: ['a'] });
+    expect(g.undo.pending()?.title).not.toContain('ピン留め');
+  });
+
+  it('ピンを外せなかったときも、取り消しは済んだうえで言う', async () => {
+    const h = make({ removeNotePins: async () => Promise.reject(new Error('x')) });
+    h.undo.remember(['a'], { addedPins: ['a'] });
+    h.undo.undo();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.sent).toHaveLength(1);
+    expect(h.said.join('')).toContain('取り込みで足したピン留めを外せませんでした');
   });
 
   it('外せなかったときは、取り消しは済んだうえで言う(黙って食い違わせない)', async () => {

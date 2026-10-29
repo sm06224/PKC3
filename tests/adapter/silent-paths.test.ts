@@ -81,6 +81,7 @@ describe('A: 本文の行が開いていないとき、書式の帯・caret の�
     '[data-pkc-action="insert-snippet"]',
     '[data-pkc-action="insert-diagram"]',
     '[data-pkc-action="insert-icon"]',
+    '[data-pkc-action="insert-callout"]',
     '[data-pkc-format="bold"]',
   ];
 
@@ -95,7 +96,7 @@ describe('A: 本文の行が開いていないとき、書式の帯・caret の�
     return { ...s, said };
   }
 
-  it('1 画面の編集で行を開いていない: 6 つの道具が全部、同じ知らせを注意の種類で出す', async () => {
+  it('1 画面の編集で行を開いていない: 7 つの道具が全部、同じ知らせを注意の種類で出す', async () => {
     const { q, said } = await editing('live');
     expect(q('[data-pkc-field="row-source"]'), '前提: 行が開いていない').toBeNull();
     expect(q('[data-pkc-field="editor-body"]'), '前提: 2 列の欄でもない').toBeNull();

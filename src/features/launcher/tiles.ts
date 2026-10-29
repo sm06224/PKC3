@@ -545,7 +545,8 @@ export function manualTile(): LauncherTile {
     title: 'マニュアル',
     group: BUILTIN_GROUP,
     kind: 'manual',
-    symbol: 'book',
+    // 🔴 #852 案 4(B)── Office の「文書(紙)」と隣どうしで同じ紙ものに見えたので、左の列の下の「ヘルプ」と同じ ? にする
+    symbol: 'help',
   };
 }
 

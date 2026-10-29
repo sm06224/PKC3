@@ -398,7 +398,7 @@ describe('追記欄の控えを戻す(draft-offer)', () => {
     await flush();
     expect(put).toHaveBeenCalledWith('n1', 'パンも買う');
     expect(say).toHaveBeenCalledWith(DRAFT_APPEND_RESTORED_NOTE);
-    expect(DRAFT_APPEND_RESTORED_NOTE).toContain('本文に追記する');
+    expect(DRAFT_APPEND_RESTORED_NOTE).toContain('追記');
     expect(d.getState().selectedLid).toBe('n1');
     // 編集には入らない / disk へは書かない
     expect(d.getState().phase).toBe('ready');

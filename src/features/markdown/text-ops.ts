@@ -934,6 +934,41 @@ export function insertRuby(sel: TextSelection): TextSelection {
   return { text: next, start: caret, end: caret };
 }
 
+
+/**
+ * 🔴 **注意書きのブロック(`:::note` など)の種類**(#425 の「囲い(`:::`)の挿入口」)。
+ *
+ * ⚠ 描き手が色を付ける 8 種(`markdown-render.ts` の `SECTION_KNOWN_ROLES`)と同じ。
+ *   マニュアル「注意書きのブロック」と順序も字も揃える。
+ * 🔑 入口は 3 つ ── 書式バーの「注意書き」(種類を選ぶ)/ 操作を探す(種類ごとの名前)/
+ *   設定のショートカット画面で付ける鍵。**一覧はここ 1 つ**(`FORMAT_OPS`・`KEY_COMMANDS` もここから作る)。
+ */
+export const CALLOUT_CHOICES = [
+  { role: 'note', label: 'メモ' },
+  { role: 'tip', label: 'ヒント' },
+  { role: 'info', label: '情報' },
+  { role: 'important', label: '重要' },
+  { role: 'warning', label: '警告' },
+  { role: 'caution', label: '注意' },
+  { role: 'danger', label: '失敗' },
+  { role: 'summary', label: '要約' },
+] as const;
+
+export type CalloutRole = (typeof CALLOUT_CHOICES)[number]['role'];
+export type CalloutOp = `callout-${CalloutRole}`;
+
+/** 表に出す名前(操作を探す・マニュアルの太字と同じ字)。 */
+export function calloutLabel(label: string): string {
+  return `注意書き(${label})`;
+}
+
+/** 書式の op が注意書きなら、その種類。 */
+export function calloutRoleOf(op: string): CalloutRole | null {
+  if (!op.startsWith('callout-')) return null;
+  const role = op.slice('callout-'.length);
+  return CALLOUT_CHOICES.find((c) => c.role === role)?.role ?? null;
+}
+
 /** 書式パネルが持つ操作。⚠ ここに足す = ボタンが増える(表が正本)。 */
 export type FormatOp =
   | LinePrefix
@@ -954,7 +989,9 @@ export type FormatOp =
   | 'highlight'
   | 'ruby'
   | 'emdot'
-  | 'strike';
+  | 'strike'
+  /** 🔴 注意書きのブロック(`:::note` など。#425 の「囲い」)。8 種は {@link CALLOUT_CHOICES}。 */
+  | CalloutOp;
 
 /**
  * 書式パネルの中身(**並び順もここが正本**)。
@@ -1031,6 +1068,16 @@ export const FORMAT_OPS: readonly {
   { op: 'ruby', label: 'ルビ', hint: '選んだ字にルビを付けます', onBar: false },
   { op: 'emdot', label: '圏点', hint: '選んだ字に圏点を打ちます', onBar: false },
   { op: 'strike', label: '打ち消し', hint: '選んだ範囲に打ち消し線を引きます', onBar: false },
+  /**
+   * 🔴 **注意書きのブロック 8 種**(#425)。帯には出さない(帯の「注意書き」が種類を先に聞く)。
+   * 選んでいれば選んだ範囲を、選んでいなければ空のブロックを入れる(もう一度押すと外れる)。
+   */
+  ...CALLOUT_CHOICES.map((c) => ({
+    op: `callout-${c.role}` as CalloutOp,
+    label: calloutLabel(c.label),
+    hint: `選んだ範囲(無ければ空)を、注意書きのブロック(:::${c.role})にします`,
+    onBar: false as const,
+  })),
 ] as const;
 
 /** 帯に並べるもの。⚠ **絞るのはここ 1 か所**(描く側が自分で絞らない)。 */
@@ -1080,9 +1127,55 @@ function applyBlockOp(sel: TextSelection, op: FormatOp): TextSelection {
   }
 }
 
+/**
+ * 🔴 **カーソルが空の注意書きブロック(`:::note` と `:::` の間が空行だけ)の中にあるとき、そのブロックを外す**(#425)。
+ * ⚠ 種類が同じときだけ(別の種類の中で押したら、入れ子に新しく入れる ── 勝手に別の物を消さない)。
+ * @returns 外せたときだけ新しい選択(外した位置にカーソル)。当てはまらなければ `null`
+ */
+function removeEmptyCallout(sel: TextSelection, role: CalloutRole): TextSelection | null {
+  const lines = sel.text.split('\n');
+  let offset = 0;
+  const starts = lines.map((l) => {
+    const at = offset;
+    offset += l.length + 1;
+    return at;
+  });
+  const caretLine = starts.findIndex((st, i) => sel.start >= st && sel.start <= st + lines[i]!.length);
+  if (caretLine < 0) return null;
+  let open = -1;
+  for (let i = caretLine; i >= 0; i -= 1) {
+    if (new RegExp(`^:::${role}[ \\t]*$`).test(lines[i]!)) {
+      open = i;
+      break;
+    }
+    if (i !== caretLine && lines[i]!.trim() !== '') return null; // 中身がある
+  }
+  if (open < 0) return null;
+  let close = -1;
+  for (let i = open + 1; i < lines.length; i += 1) {
+    if (/^:::[ \t]*$/.test(lines[i]!)) {
+      close = i;
+      break;
+    }
+    if (lines[i]!.trim() !== '') return null; // 中身がある
+  }
+  if (close < 0 || caretLine > close) return null;
+  const from = starts[open]!;
+  // 閉じの行の改行まで含めて消す(最終行なら直前の改行を残す)
+  const to = close + 1 < lines.length ? starts[close + 1]! : sel.text.length;
+  const text = sel.text.slice(0, from) + sel.text.slice(to);
+  return { text, start: from, end: from };
+}
+
 /** 1 つの入口。⚠ 分岐をここに閉じ込める(呼ぶ側に op ごとの知識を漏らさない)。 */
 export function applyFormat(sel: TextSelection, op: FormatOp): TextSelection {
   if (LINE_OPS.has(op)) return toggleLinePrefix(sel, op as LinePrefix);
+  const calloutRole = calloutRoleOf(op);
+  if (calloutRole !== null) {
+    if (sel.start !== sel.end) return wrapAsBlock(sel, `:::${calloutRole}`, ':::');
+    // 🔴 空のブロックの中にカーソルがあるときは、もう一度押すと**外す**(選んだ範囲を包んだときと同じ「置けるなら外せる」)
+    return removeEmptyCallout(sel, calloutRole) ?? insertBlock(sel, template(`:::${calloutRole}\n${CARET}\n:::\n`));
+  }
   switch (op) {
     case 'bold':
       return toggleWrap(sel, '**');

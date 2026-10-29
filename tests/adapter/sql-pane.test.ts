@@ -4250,6 +4250,8 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
     expect(readAssetBytes, '選んだだけで中身を読みに行っている').toHaveBeenCalledTimes(0);
     expect(note(), '開いたことが画面に出ない').toContain('売上.parquet を調べています');
     expect(note()).toContain('表 1 個');
+    // 🔴 #992 ②(案 C): 帯にも表の名前を出す ── 打つ名前を案内文まで探さない
+    expect(note(), '帯に表の名前が出ていない').toContain('表 1 個: parquet / 4.0 KB');
     /**
      * 🔴 **表の名前そのものを見る**(着地前レビューの変異 2)。
      * ⚠ 帯に出るのは**個数だけ**なので、`tables: ['csv']` に潰す変異は
@@ -5758,5 +5760,18 @@ describe('🔴 Parquet で書き出す(#918 段⑥)', () => {
     expect(exportDuckDbParquet, 'engine が替わったのに DuckDB へ頼んでいる').not.toHaveBeenCalled();
     expect(d.getState().sqlPage.running).toBe(false);
     expect(note(), '黙って捨てている').toContain('Parquet は DuckDB で引いた答えだけ書き出せます');
+  });
+});
+
+import { TABLE_NAMES_IN_BAND, tableNamesNote } from '../../src/adapter/ui/render/sql';
+
+describe('帯の表の名前(#992 ②)', () => {
+  it('🔴 先頭 3 つまで出し、それより多ければ「ほか N 個」(境目を両側から)', () => {
+    expect(TABLE_NAMES_IN_BAND).toBe(3);
+    expect(tableNamesNote([])).toBe('');
+    expect(tableNamesNote(['a'])).toBe(': a');
+    expect(tableNamesNote(['a', 'b', 'c'])).toBe(': a, b, c');
+    expect(tableNamesNote(['a', 'b', 'c', 'd'])).toBe(': a, b, c ほか 1 個');
+    expect(tableNamesNote(['a', 'b', 'c', 'd', 'e', 'f'])).toBe(': a, b, c ほか 3 個');
   });
 });

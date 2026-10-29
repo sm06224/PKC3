@@ -17,6 +17,7 @@ import {
   DEFAULT_PASTE_SOURCE,
   isPasteSource,
   PASTE_SOURCES,
+  pasteRevertRange,
   type PasteSource,
 } from '../../src/features/markdown/paste-source';
 
@@ -285,5 +286,20 @@ describe('🔴 大きさで断らない (#492)', () => {
     const empty = run('html-fence', { htmlFence: null }, { html: 100, rtf: 0, plain: 5 });
     expect(why(empty, 'html')).toContain('空');
     expect(empty.called).toContain('htmlFence');
+  });
+});
+
+describe('貼った範囲を書式なしへ置き換える範囲(#1379)', () => {
+  const before = { value: 'あ[選んだ]い', start: 1, end: 6 };
+  it('貼ったあとの本文から、貼った字が占める範囲を求める', () => {
+    expect(pasteRevertRange(before, 'あ## 見出し\n\n本文い')).toEqual({ start: 1, end: 11 });
+  });
+  it('選びなしの貼り付けは、そこから貼った長さ', () => {
+    expect(pasteRevertRange({ value: 'ab', start: 1, end: 1 }, 'aXYZb')).toEqual({ start: 1, end: 4 });
+  });
+  it('貼ったあとに前後が編集されていたら null(無関係な所を書き換えない)', () => {
+    expect(pasteRevertRange(before, 'う## 見出し\n\n本文い')).toBeNull();
+    expect(pasteRevertRange(before, 'あ## 見出し\n\n本文いう')).toBeNull();
+    expect(pasteRevertRange({ value: 'abc', start: 1, end: 2 }, 'a')).toBeNull();
   });
 });

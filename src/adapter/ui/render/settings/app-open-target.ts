@@ -14,7 +14,8 @@
  *   折れる → その項目だけプルダウンへ戻す」のとおり、プルダウンへ戻した。
  * (#1382 で `settings.ts` から移した。中身は変えていない。)
  */
-import { APP_OPEN_TARGETS } from '@features/launcher/open-target';
+import { appOpenOptions } from '@features/launcher/open-target';
+import { isInstalledApp } from '@adapter/platform/installed-app';
 import { currentAppOpenTarget } from '../app-open-target';
 import { buildSettingsNote } from './note';
 import type { SettingsSection } from './section';
@@ -35,7 +36,8 @@ export function createAppOpenTargetSection(region: HTMLElement): SettingsSection
         '別のウィンドウは大きさを指定して開くので、画面より大きいときはブラウザが縮めます。' +
         'ブラウザがウィンドウを止めているときは、止められた理由が画面の下に出ます。' +
         '組み込みのアプリ(予定表・連絡先など)とマニュアルのウィンドウは、ここでは変わりません。';
-      for (const c of APP_OPEN_TARGETS) {
+      // 🔴 #884 段③: アプリとして入れていないと効かない選択肢だけ隠す(いま選んである値は出す)
+      for (const c of appOpenOptions(isInstalledApp(), currentAppOpenTarget())) {
         const opt = document.createElement('option');
         opt.value = c.id;
         opt.textContent = c.label;

@@ -224,6 +224,31 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
   await expect(winOk).toHaveText('選んだ 3 件を取り出す');
 
   /**
+   * 🔴 **#826 の動線 ① ② ** ── 新しい起動は足さない(この道中に載せる)。実ブラウザでしか見えないもの:
+   *   ① 押しても一覧の要素が作り直されない(作り直すと長い zip で押した行が視野の端へ跳ねる)
+   *   ② Tab の止まりが一覧で 1 つ ── 行の上で Tab を 1 回押すと、もう「やめる」(= 一覧の外)へ出る
+   */
+  const readme = win.locator('[data-pkc-field="archive-window-row"]', { hasText: 'readme.txt' });
+  await readme.evaluate((el) => {
+    (el as HTMLElement).dataset['stamp'] = 'kept';
+  });
+  await readme.click();
+  await expect(winOk).toHaveText('選んだ 4 件を取り出す');
+  await expect(readme, '押したら行の要素が作り直された(跳ねる)').toHaveAttribute('data-stamp', 'kept');
+  await readme.click(); // 外す(片道にしない)── 以降は元の 3 件
+  await expect(winOk).toHaveText('選んだ 3 件を取り出す');
+  await expect(
+    win.locator('[data-pkc-field="archive-window-row"][tabindex="0"]'),
+    'Tab で止まる行が 1 つでない(200 件なら 200 回押させる)',
+  ).toHaveCount(1);
+  await readme.focus();
+  await win.keyboard.press('Tab');
+  await expect(
+    win.locator('[data-pkc-field="archive-window-cancel"]'),
+    '一覧の行から Tab 1 回で一覧の外へ出ない',
+  ).toBeFocused();
+
+  /**
    * 🔴 **取り出しでメインが固まらない**(#818 の残件。user 指示 2026-08-03
    * 「重い処理はワーカーへ」)。
    *
@@ -335,6 +360,20 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
   const box = page.locator('[data-pkc-region="app-dialog"]');
   await expect(box, 'この画面を選んだのに器が出ない').toBeVisible();
   await expect(box).toContainText('写真/');
+  /**
+   * 🔴 #826 ①③: その場の器でも、選んだ行は**見分けが付く**(直す前は `aria-pressed` に対応する規則が無く、
+   *   選んだ行が選んでいない行と同じ見た目だった)。押しても行は作り直されない。
+   */
+  const hereRow = box.locator('[data-pkc-field="pick-archive"]', { hasText: 'readme.txt' });
+  const bg = (): Promise<string> => hereRow.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const before = await bg();
+  await hereRow.evaluate((el) => {
+    (el as HTMLElement).dataset['stamp'] = 'kept';
+  });
+  await hereRow.click();
+  await expect(hereRow).toHaveAttribute('aria-pressed', 'true');
+  await expect(hereRow, '押したら行が作り直された').toHaveAttribute('data-stamp', 'kept');
+  expect(await bg(), '選んだ行が選んでいない行と同じ見た目(aria-pressed の規則が無い)').not.toBe(before);
   await clickReal(page, '[data-pkc-field="dialog-cancel"]');
   await expect(box).toBeHidden();
 
@@ -3181,7 +3220,7 @@ test('🔴 添付の HTML が、本文に書いたのと同じ箱で描かれる
     '添付に足した説明が描かれていない(この先は測れない)',
   ).toContainText('留めて確かめる用の説明');
 
-  // 本文(説明)を右クリック →「このノートをスタックに載せる」で横に留める
+  // 本文(説明)を右クリック →「スタックに載せる」で横に留める
   // (`split-frames.smoke.spec.ts` と同じ導線 ── 行ではなく本文から留める)
   await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
   const menu = page.locator('[data-pkc-region="context-menu"]');

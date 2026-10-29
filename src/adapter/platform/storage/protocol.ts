@@ -159,6 +159,18 @@ export type StorageRequest =
    */
   | { op: 'putTagColor'; cid: string; key: string; tag: string; color: string | null }
   /**
+   * 🔴 **ノートのピン留めを留めた順に返す**(#1377)。`settings` 表の `scope = 'note-pin:<cid>'` の行。
+   * ⚠ 器(コレクション)に属するデータ ── 端末の好みではない。ノートの本文・更新日時は一切変えない。
+   *   バックアップ(`container.json` の `notePins`)と別の端末へ運ばれる。
+   */
+  | { op: 'listNotePins'; cid: string }
+  /**
+   * 🔴 **ノートのピン留めを 1 つ付ける / 外す**(#1377)。`prune` = 同じ tx で**消えたノートのピンも掃除する**lid。
+   * ⚠ 1 ノート 1 行の書込なので、別の窓が別のノートをピン留めしても**互いを消さない**。
+   * ⚠ 上限(`MAX_NOTE_PINS_STORED`)は新しい lid だけ断る(外す・掃除は通す)。
+   */
+  | { op: 'putNotePin'; cid: string; lid: string; on: boolean }
+  /**
    * 🔴 **カンバンの札(チェック項目)を集める**(#277 段②)。
    *
    * ⚠ カンバンが**全ノートの本文を読まない**ための門である ── 面を開くたびの
@@ -1253,6 +1265,8 @@ export interface ResultMap {
   appendMessage: null;
   listTagColors: Array<{ tag: string; color: string }>;
   putTagColor: null;
+  listNotePins: string[];
+  putNotePin: null;
   /** カンバンの札(ノートの並び → 行番号 順)。⚠ 切ったときは `truncated`。 */
   taskScan: TaskScan;
   /** 連絡先(題名順は描画側)。⚠ 切ったときは `truncated`。 */

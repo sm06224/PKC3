@@ -19,6 +19,7 @@ import {
   currentAppOpenTarget,
 } from '../../src/adapter/ui/render/app-open-target';
 import { APP_OPEN_TARGETS } from '../../src/features/launcher/open-target';
+import { isInstalledApp } from '../../src/adapter/platform/installed-app';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { initialState } from '../../src/adapter/state/app-state';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -77,6 +78,29 @@ describe('設定画面との配線(#884 段①)', () => {
     settings.render(initialState);
     expect(select()!.value, '組み済みの器へ映していない(古い値が見える)').toBe('tab');
     root.remove();
+  });
+
+  it('🔴 #884 段③ ブラウザで使っていても選択欄は出る(2 つとも効く)/ F11 の全画面を「入れている」と取り違えない', () => {
+    const mm = (modes: string[]): void => {
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        writable: true,
+        value: (q: string) => ({ matches: modes.some((m) => q.includes(m)), media: q }),
+      });
+    };
+    mm([]);
+    const root = document.createElement('div');
+    document.body.append(root);
+    new SettingsRenderer(root, new JobMonitor()).render(initialState);
+    const opts = [...root.querySelectorAll<HTMLOptionElement>(`${FIELD} option`)].map((o) => o.value);
+    expect(opts, 'ブラウザ利用で選択肢が消えた').toEqual(['tab', 'window']);
+    expect(root.querySelector<HTMLElement>(FIELD)!.closest('dd')!.hidden).toBe(false);
+    root.remove();
+    expect(isInstalledApp(), '前提: ブラウザのタブ').toBe(false);
+    mm(['standalone']);
+    expect(isInstalledApp()).toBe(true);
+    mm(['fullscreen']);
+    expect(isInstalledApp(), 'F11 の全画面を PWA と取り違えた').toBe(false);
   });
 
   it('🔴 選べる値が表と 1 対 1(選べるのに効かない / 効くのに選べないを作らない)', () => {

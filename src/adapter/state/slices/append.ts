@@ -38,7 +38,7 @@ export function reduceAppend(state: AppState, action: AppendAction): ReduceResul
      *
      * 🔴 **断るなら声に出す**(#1051)。⚠ 直す前は 1 行目が `phase !== 'ready'`、
      *   2 行目が `writeLock` で、どちらも `{ state, events: [] }` を返して
-     *   **黙って捨てて**いた。🔴 実害の形:①保存の往復が返る前に「本文に追記する」を
+     *   **黙って捨てて**いた。🔴 実害の形:①保存の往復が返る前に「追記」を
      *   押すと、**何も起きず理由も出ない**(`format-bar.smoke.spec.ts` が混んだ回に
      *   踏んだ)②予定の面の「足す」は押した直後に欄を空にするので、
      *   **打った字ごと消えていた**(binder の `schedule-quick-add`)。

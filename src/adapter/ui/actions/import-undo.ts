@@ -54,6 +54,11 @@ export interface ImportUndoDeps {
    * 渡された色のうち、**いまも同じ色が付いている物だけ**を外す(取り込んだ後に user が選び直した色・前から在った色は触らない)。
    */
   removeTagColors?(colors: readonly TagColorEntry[]): Promise<void>;
+  /**
+   * 🔴 **取り込みで足したピン留めを外す**(#1377)。⚠ **省略可**。渡るのは取り込みで足した lid だけ(前から在ったピンは触らない)。
+   * ノートはゴミ箱へ入るが、ピンは(戻すと戻る仕様で)残る ── 取り込みで足した分は取り消しで外す。
+   */
+  removeNotePins?(lids: readonly string[]): Promise<void>;
 }
 
 export interface ImportUndo {
@@ -65,7 +70,12 @@ export interface ImportUndo {
    */
   remember(
     lids: readonly string[],
-    opts?: { readonly tagColors?: boolean; readonly addedColors?: readonly TagColorEntry[] },
+    opts?: {
+      readonly tagColors?: boolean;
+      readonly addedColors?: readonly TagColorEntry[];
+      /** 🔴 足したピン留めの lid(#1377)。 */
+      readonly addedPins?: readonly string[];
+    },
   ): void;
   /** いま出せる操作(無ければ null)。 */
   pending(): NoticeAction | null;
@@ -78,12 +88,15 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
   let colorsKept = false;
   /** 外す色(`removeTagColors` が渡っているときだけ憶える)。 */
   let colorsToRemove: readonly TagColorEntry[] = [];
+  /** 外すピン(`removeNotePins` が渡っているときだけ憶える)。 */
+  let pinsToRemove: readonly string[] = [];
   return {
     remember(next, opts) {
       lids = [...next];
       colorsToRemove = deps.removeTagColors !== undefined ? [...(opts?.addedColors ?? [])] : [];
       // 外せる色が分かっているなら「残る」とは言わない
       colorsKept = opts?.tagColors === true && colorsToRemove.length === 0;
+      pinsToRemove = deps.removeNotePins !== undefined ? [...(opts?.addedPins ?? [])] : [];
     },
     pending() {
       if (lids.length === 0) return null;
@@ -93,7 +106,8 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
         title:
           `いま取り込んだ ${lids.length} 件をゴミ箱へ入れます(ゴミ箱から戻せます)` +
           (colorsKept ? '。取り込んだタグの色は残ります' : '') +
-          (colorsToRemove.length > 0 ? '。取り込みで足したタグの色も外します' : ''),
+          (colorsToRemove.length > 0 ? '。取り込みで足したタグの色も外します' : '') +
+          (pinsToRemove.length > 0 ? '。取り込みで足したピン留めも外します' : ''),
       };
     },
     undo() {
@@ -111,16 +125,25 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
       deps.dispatch({ type: 'DELETE_ENTRIES', lids: [...lids] });
       const removing = colorsToRemove;
       const keptNote = colorsKept;
+      const removingPins = pinsToRemove;
       // ⚠ **先に忘れる** ── 帯や面の更新で例外が出ても、2 度目の取り消しを残さない
       lids = [];
       colorsToRemove = [];
+      pinsToRemove = [];
       colorsKept = false;
       deps.clear();
       deps.notify(
         '取り込んだ分をゴミ箱へ入れました。ゴミ箱から戻せます' +
           (keptNote ? '(取り込んだタグの色は残ります)' : '') +
-          (removing.length > 0 ? '。取り込みで足したタグの色も外しました' : ''),
+          (removing.length > 0 ? '。取り込みで足したタグの色も外しました' : '') +
+          (removingPins.length > 0 ? '。取り込みで足したピン留めも外しました' : ''),
       );
+      // 🔴 足したピンを外す(#1377)。外せなくても取り消しは済んでいる ── 失敗は言う
+      if (removingPins.length > 0 && deps.removeNotePins !== undefined) {
+        deps.removeNotePins(removingPins).catch(() => {
+          deps.notify('取り込みで足したピン留めを外せませんでした(ノートは取り消しました)');
+        });
+      }
       // 🔴 足した色を外す(依頼 119-5 A)。外せなくても取り消しは済んでいる ── 失敗は言う(黙って食い違わせない)
       if (removing.length > 0 && deps.removeTagColors !== undefined) {
         deps.removeTagColors(removing).catch(() => {

@@ -245,6 +245,8 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
       'pkc3.pdf-reader': '1',
       'pkc3.app-group-folded': '["仕事"]',
       'pkc3.filer-flatten': '1',
+      'pkc3.board-layout': 'signal',
+      'pkc3.paste-toast': '0',
     };
     const plan1 = (key: string, value: string, extra?: Record<string, (v: string) => boolean>) =>
       planSettingsImport(file([{ key, value }]), () => null, extra);

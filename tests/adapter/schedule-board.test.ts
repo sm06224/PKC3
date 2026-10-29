@@ -105,7 +105,10 @@ const cardsIn = (root: HTMLElement, status: 'open' | 'done'): HTMLElement[] => [
 ];
 const BODY = '- [ ] 見積を送る @2026-08-23\n- [x] 済んだ件 @2026-08-20\n- [ ] 体裁のチェック\n';
 
-afterEach(() => clearMoveOffer());
+afterEach(() => {
+  clearMoveOffer();
+  localStorage.removeItem('pkc3.board-layout');
+});
 
 describe('予定表のカンバン(#277)', () => {
   it('🔴 広い面には「カンバン」の切替が出て、左の列には出ない', () => {
@@ -202,5 +205,95 @@ describe('予定表のカンバン(#277)', () => {
     fire(col(root, 'done'), 'dragover');
     expect(col(root, 'done').hasAttribute('data-pkc-dropping')).toBe(true);
     expect(col(root, 'open').hasAttribute('data-pkc-dropping')).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **信号機の列**(#1457)。観測点は「列の中身」「落とした後の本文」「切り替えが端末に残ること」
+ * 「状態の列に戻せる(片道にしない)」。
+ */
+describe('カンバンの信号機の列(#1457)', () => {
+  // TODAY = 2026-08-23
+  const SIG =
+    '- [ ] 期限切れ @2026-08-20\n' +
+    '- [ ] 今日の分 @2026-08-23\n' +
+    '- [ ] 先の分 @2026-09-30\n' +
+    '- [ ] 急ぎ #赤 @2026-12-31\n' +
+    '- [x] 済んだ @2026-08-01\n';
+  const colOf = (root: HTMLElement, sig: 'red' | 'yellow' | 'green'): HTMLElement =>
+    root.querySelector<HTMLElement>(`[data-pkc-signal="${sig}"]`)!;
+  const textsIn = (el: HTMLElement): (string | null | undefined)[] =>
+    [...el.querySelectorAll<HTMLElement>('[data-pkc-region="schedule-cards"] > [data-pkc-entry]')].map(
+      (c) => c.querySelector('[data-pkc-field="text"]')?.textContent,
+    );
+  const toSignal = (q: <T extends HTMLElement>(sel: string) => T | null): void => {
+    q('[data-pkc-mode="board"]')!.click();
+    q('[data-pkc-board-layout="signal"]')!.click();
+  };
+
+  it('🔴 既定は今までどおりの 2 列(信号機の列は隠れている)/ 切り替えは広い面のカンバンの中にある', () => {
+    const { q } = setup({ e1: SIG });
+    q('[data-pkc-mode="board"]')!.click();
+    expect(q('[data-pkc-region="schedule-board"]')!.getAttribute('data-pkc-board-columns')).toBe('status');
+    expect(q('[data-pkc-board-layout="status"]')!.getAttribute('aria-pressed')).toBe('true');
+    expect(q('[data-pkc-board-layout="signal"]')!.getAttribute('aria-pressed')).toBe('false');
+    for (const c of ['red', 'yellow', 'green'] as const)
+      expect(q(`[data-pkc-signal="${c}"]`)!.hidden, `${c} の列が既定で出ている`).toBe(true);
+  });
+
+  it('🔴 押すと 赤 / 黄 / 緑 / 完了 の列に、期限とタグで札が並ぶ', () => {
+    const { root, q } = setup({ e1: SIG });
+    toSignal(q);
+    expect(colOf(root, 'red').hidden).toBe(false);
+    expect(root.querySelector<HTMLElement>('[data-pkc-board-status="open"]:not([data-pkc-signal])')!.hidden, '状態の「未完了」列が残っている').toBe(true);
+    expect(textsIn(colOf(root, 'red')).sort(), '赤: 期限切れ + #赤').toEqual(['急ぎ #赤', '期限切れ'].sort());
+    expect(textsIn(colOf(root, 'yellow'))).toEqual(['今日の分']);
+    expect(textsIn(colOf(root, 'green'))).toEqual(['先の分']);
+    expect(cardsIn(root, 'done').map((c) => c.querySelector('[data-pkc-field="text"]')?.textContent)).toEqual(['済んだ']);
+    // 見出しは色の名前だけ。意味(期限・タグ)は説明の行と title に書く(色だけに頼らない・見出しを長くしない)
+    const headOf = (c: 'red' | 'yellow' | 'green'): HTMLElement =>
+      colOf(root, c).querySelector<HTMLElement>('[data-pkc-field="schedule-board-head"]')!;
+    expect(headOf('red').textContent).toMatch(/^赤\(\d+\)$/);
+    expect(headOf('yellow').textContent).toMatch(/^黄\(\d+\)$/);
+    expect(headOf('green').textContent).toMatch(/^緑\(\d+\)$/);
+    expect(headOf('red').title).toContain('期限が今日より前');
+    expect(headOf('red').title).toContain('#赤');
+    expect(q('[data-pkc-field="schedule-board-note"]')!.textContent).toContain('赤は期限切れ');
+    expect(q('[data-pkc-board-layout="signal"]')!.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('🔴 赤の札を完了の列へ落とすと、保存された本文が [x] になる(書換は状態のカンバンと同じ道)', async () => {
+    const { root, q, store } = setup({ e1: SIG });
+    toSignal(q);
+    const card = [...colOf(root, 'red').querySelectorAll<HTMLElement>('[data-pkc-entry]')].find(
+      (c) => c.querySelector('[data-pkc-field="text"]')?.textContent === '期限切れ',
+    )!;
+    dragTo(card, col(root, 'done'));
+    await tick();
+    expect(store['e1']).toContain('- [x] 期限切れ @2026-08-20');
+    expect(currentDoneOffer(), '「元に戻す」が出ない').not.toBeNull();
+    expect(textsIn(colOf(root, 'red')), '赤の列に残っている').toEqual(['急ぎ #赤']);
+  });
+
+  it('🔴 完了の札を赤・黄・緑の列へ落とすと未完了に戻る(列は期日とタグが決める)', async () => {
+    const { root, q, store } = setup({ e1: SIG });
+    toSignal(q);
+    dragTo(cardsIn(root, 'done')[0]!, colOf(root, 'green'));
+    await tick();
+    expect(store['e1']).toContain('- [ ] 済んだ @2026-08-01');
+  });
+
+  it('🔴 切り替えは端末に残り、「状態」で元の 2 列に戻せる(片道にしない)', () => {
+    const a = setup({ e1: SIG });
+    toSignal(a.q);
+    expect(localStorage.getItem('pkc3.board-layout')).toBe('signal');
+    document.body.textContent = '';
+    const b = setup({ e1: SIG });
+    b.q('[data-pkc-mode="board"]')!.click();
+    expect(b.q('[data-pkc-region="schedule-board"]')!.getAttribute('data-pkc-board-columns'), '次に開いたとき戻っている').toBe('signal');
+    b.q('[data-pkc-board-layout="status"]')!.click();
+    expect(b.q('[data-pkc-region="schedule-board"]')!.getAttribute('data-pkc-board-columns')).toBe('status');
+    expect(cardsIn(b.root, 'open').length, '状態の「未完了」が戻っていない').toBe(4);
+    expect(localStorage.getItem('pkc3.board-layout')).toBe('status');
   });
 });

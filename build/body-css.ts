@@ -354,6 +354,7 @@ export const PAPER_TOKENS: readonly string[] = [
   '--accent-dim-fg',
   '--danger',
   '--warn',
+  '--ok',
   '--code-key',
   '--code-lit',
   // 予定の左の縦線(#855)。暗い配色は明るい色を持つので、紙には濃い側へ戻す

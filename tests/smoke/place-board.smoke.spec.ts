@@ -947,7 +947,7 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
     page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-title"]'),
     '追記しただけで、選んでいるノートが付箋の相手に替わった',
   ).toHaveText('板');
-  // 🔴 元に戻せる(片道にしない)── 本文の下の追記欄と同じ「追記を元に戻す」
+  // 🔴 元に戻せる(片道にしない)── 本文の下の追記欄の「元に戻す」
   const undo = page.locator('[data-pkc-action="undo-append"]:visible').first();
   await expect(undo, '追記を元に戻す口が出ない').toBeVisible();
   await undo.click();

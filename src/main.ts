@@ -54,6 +54,11 @@ import { applyColumnRule, initialColumnRule } from '@adapter/ui/render/column-ru
 import { applyTagBadge, initialTagBadge } from '@adapter/ui/render/tag-badge';
 import { watchAppearanceFromOtherWindows } from '@adapter/ui/render/appearance-follow';
 import { applyTagColors, currentTagColors } from '@adapter/ui/render/tag-color';
+import { appNotePins } from '@adapter/platform/note-pin-store';
+import { appPasteToast } from '@adapter/ui/render/paste-toast';
+import { importNotePinsInto } from '@adapter/platform/note-pin-import';
+import { migrateLegacyNotePins } from '@adapter/platform/note-pin-migration';
+import { MAX_NOTE_PINS } from '@features/relation/note-pins';
 import {
   MAX_TAG_COLORS,
   mergeMissingTagColors,
@@ -1496,6 +1501,37 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     .request({ op: 'listTagColors', cid })
     .then((list) => applyTagColors(document, list))
     .catch(() => {});
+  /**
+   * 🔴 **ノートのピン留め**(#1377)── 色と同じく器のデータ(`settings` 表)。端末の好みではないので、バックアップに入り、
+   * 別の端末にも運ばれる。画面の写し(`appNotePins`)は**いつも正本(storage)を読み直して**揃える。
+   */
+  const reloadNotePins = (): Promise<void> =>
+    client
+      .request({ op: 'listNotePins', cid })
+      .then((list) => appNotePins.setAll(list))
+      .catch(() => {});
+  appNotePins.attach(
+    async (lid, on) => {
+      await client.request({ op: 'putNotePin', cid, lid, on });
+    },
+    // 書けなかった ── 画面だけ留まっている状態を残さない(正本を読み直す)
+    () => void reloadNotePins(),
+  );
+  void (async () => {
+    await reloadNotePins();
+    /**
+     * 🔴 **旧い版が端末(localStorage)に残したピン留めを、一度だけ取り込んで移す**(#1377)。
+     * ⚠ この器の分だけ取り込み(他の器の分は、その器を開いたときに)、取り込んだ分は端末の記憶から消す ── 二重に持たない。
+     * ⚠ 書けなかったら端末の記憶は消さない(次の起動でやり直す)。
+     */
+    const moved = await migrateLegacyNotePins(
+      cid,
+      localStorage,
+      (lid) => client.request({ op: 'putNotePin', cid, lid, on: true }).then(() => undefined),
+      (lid) => appNotePins.has(lid),
+    ).catch(() => -1);
+    if (moved !== 0) await reloadNotePins();
+  })();
   const regions = buildShell(root);
   /**
    * 🔴 **長い取り込み・書き出しの「やめる」ボタン**(台帳 #1852 束 F2 / 依頼 253)。結果の欄(`regions.notices`)に、仕事が少し長引いたときだけ出す。
@@ -2832,6 +2868,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       syncReloadQueued = false;
       // ⚠ 色の読み直しも**同じ 300ms の束ね**に乗せる(#1087)── 書込のたびに 1 回ずつ読んでいた
       void reloadTagColors();
+      void reloadNotePins();
       void reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null, settled: () => storeEffects?.settled() });
     }, 300);
   };
@@ -3079,6 +3116,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           getAssetBlob: (key) => blobs.get(cid, key),
           // 🔴 タグの色(#1457)── 全体のバックアップだけが運ぶ(部分の書き出しの源は持たない)
           listTagColors: () => client.request({ op: 'listTagColors', cid }),
+          // 🔴 ノートのピン留めも運ぶ(#1377)。部分の書き出しは `subsetSource` / `singleEntrySource` が含むノートの分に絞る
+          listNotePins: () => client.request({ op: 'listNotePins', cid }),
           listRevisionLids: () =>
             client.request({ op: 'listRevisionLids', cid }),
           // 🔴 ゴミ箱のノートも運ぶ(台帳 #1852 束 F2 / 依頼 105-2・297 A)── 全体のバックアップだけ(部分の書き出しの源は持たない)
@@ -3516,6 +3555,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔴 **取り込みで足したタグの色だけを外す**(台帳 #1852 束 F2 / 依頼 119-5 A)。⚠ **いまも同じ色の物だけ** ──
      * 取り込んだ後に user が選び直した色・前から在った色は触らない。判断は `import-undo.ts`、ここは書く配線だけ。
      */
+    /**
+     * 🔴 **取り込みで足したピン留めだけを外す**(#1377)。取り消しでノートはゴミ箱へ入る ── ピンは(戻すと戻る仕様で)残るので、
+     * 取り込みで足した分はここで外す。前から在ったピンは触らない(足した lid だけが渡る)。
+     */
+    removeNotePins: async (lids) => {
+      for (const lid of lids) await client.request({ op: 'putNotePin', cid, lid, on: false });
+      await reloadNotePins();
+    },
     removeTagColors: async (colors) => {
       const now = await client.request({ op: 'listTagColors', cid });
       let list = now;
@@ -3609,6 +3656,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       },
       importRevisionChains: (chains) =>
         client.request({ op: 'importRevisionChains', cid, chains }),
+      /**
+       * 🔴 **バックアップのピン留めを戻す**(#1377)。⚠ いま留めている物は動かさず、足りない分だけ足す(20 件まで)。
+       */
+      importNotePins: async (lids) => {
+        const r = await importNotePinsInto(lids, {
+          list: () => client.request({ op: 'listNotePins', cid }),
+          put: (lid) => client.request({ op: 'putNotePin', cid, lid, on: true }).then(() => undefined),
+          exists: (l) => dispatcher.getState().entryMetas.has(l),
+          limit: MAX_NOTE_PINS,
+        });
+        await reloadNotePins();
+        return r;
+      },
       /**
        * 🔴 **バックアップのタグの色を戻す**(#1457)。⚠ いま付けている色は動かさず、
        * **付いていないタグの分だけ足す**(取り込みで user の今の選び方を上書きしない)。
@@ -4573,6 +4633,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           client.request({ op: 'rescueRevisions', afterRowid, chunks }),
         // 🔴 色は sqlite の `settings` 表 ── 捨てる前の worker から読む（#1087）
         readTagColors: async () => client.request({ op: 'listTagColors', cid: target }),
+        readNotePins: async () => client.request({ op: 'listNotePins', cid: target }),
         // 🔑 添付は **IndexedDB を直に読む**（sqlite を 1 度も通らない）
         assets: {
           listKeys: (c: string) => blobs.listKeys(c),
@@ -4662,6 +4723,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         writeAssetMetas: async (c: string, metas) => {
           for (const m of metas) {
             await reopened().request({ op: 'putAssetMeta', cid: c, meta: m });
+          }
+        },
+        writeNotePins: async (c: string, lids) => {
+          for (const lid of lids) {
+            await reopened().request({ op: 'putNotePin', cid: c, lid, on: true });
           }
         },
         writeTagColors: async (c: string, colors) => {
@@ -5301,6 +5367,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             assetKey,
             title,
             themeFrom: document.documentElement,
+            // 🔴 #826 ④: 窓を再読み込みすると一覧が消える ── 窓を閉じ、主の画面に理由を 1 行出す
+            onReloaded: () =>
+              showStatus(
+                `「${title}」のウィンドウは再読み込みすると一覧が消えるため閉じました。もう一度「中を見る」を押してください`,
+              ),
           }),
         fail: (text) => showArchiveWindowError(got.win, title, text),
       };
@@ -5735,6 +5806,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appCodeCollapse.setEnabled(on);
       center.invalidateDetail();
       center.render(dispatcher.getState());
+    },
+    setPasteToast: (on) => {
+      // ⚠ 描き直さない ── 効くのは次の貼り付け
+      appPasteToast.setEnabled(on);
     },
     setInlineCodeCopy: (on) => {
       appInlineCodeCopy.setEnabled(on);

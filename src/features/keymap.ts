@@ -19,6 +19,8 @@
  * ⚠ **URL パラメータも作らない**(user 指示 2026-08-07「クエリパラメータを抜け穴にしない」)。
  */
 
+import { CALLOUT_CHOICES, calloutLabel } from './markdown/text-ops';
+
 /** 修飾キーの状態 + 基本キー。⚠ `mod` は **Ctrl と ⌘ の両方**(下の注記)。 */
 export interface Chord {
   /**
@@ -554,7 +556,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'filer-new-in-folder',
-    label: 'この中に新しいノートを作る',
+    label: '中にノートを作る',
     contexts: ['filer'],
     defaults: ['Shift+F4'],
     note: 'フォルダの行で押します(作ってそのまま編集に入ります)',
@@ -679,6 +681,27 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+C'],
     note: '押すたび 1 段 → 2 段 → 3 段 → 4 段 と回ります',
+  },
+  /**
+   * 🔴 **開いているノートをピン留めする / 外す**(#1377)。鍵は付けない(`KEYLESS` ── 操作を探すから呼ぶ)。
+   * ⚠ 相手は**いま開いているノート**。すでにピン留め済みなら「する」は、まだなら「外す」は押せない
+   *   (行の右クリックと同じ対。末尾の「(…のときだけ効きます)」が押せない間の理由になる)。
+   */
+  {
+    id: 'pin-note',
+    label: 'ノートをピン留めする',
+    contexts: ['global'],
+    defaults: [],
+    note: '開いているノートを、左のペインの一覧の上に固定します(ピン留めしていないノートを開いているときだけ効きます)',
+    alias: 'ピン 固定 お気に入り',
+  },
+  {
+    id: 'unpin-note',
+    label: 'ノートのピン留めを外す',
+    contexts: ['global'],
+    defaults: [],
+    note: '開いているノートのピン留めを外します(ノートは消えません。ピン留めしているノートを開いているときだけ効きます)',
+    alias: 'ピン 固定 外す 解除',
   },
   {
     id: 'open-settings',
@@ -924,7 +947,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'append-entry',
-    label: '本文に追記する',
+    label: '追記',
     contexts: ['global'],
     defaults: [],
     note: '追記欄に書いた字を、開いているノートの本文に足します。欄が空なら、その欄へ移ります(追記欄が出ているノートでだけ効きます)',
@@ -1446,6 +1469,14 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     alias: '図 ダイアグラム フローチャート シーケンス mermaid',
   },
   {
+    id: 'insert-callout',
+    label: '注意書き',
+    contexts: ['global'],
+    defaults: [],
+    note: '注意書きの種類(メモ / ヒント / 警告など)を選んで、選んだ範囲(無ければ空)をそのブロックにします(ノートを編集していて、本文の書式バーが出ているときだけ効きます)',
+    alias: '注意書き コールアウト ブロック note warning tip 警告 メモ ヒント :::',
+  },
+  {
     id: 'insert-icon',
     label: 'アイコンを入れる',
     contexts: ['global'],
@@ -1490,7 +1521,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'stack-push',
-    label: 'このノートをスタックに載せる',
+    label: 'スタックに載せる',
     contexts: ['global'],
     // 🔑 S = Stack。小窓の W の隣
     defaults: ['Alt+Shift+S'],
@@ -1755,6 +1786,17 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Alt+Shift+X'],
     note: '選んだ字に取り消し線を引きます(~~ で囲みます)',
   },
+  /**
+   * 🔴 **注意書きのブロック 8 種**(#425 の「囲い(`:::`)の挿入口」)。鍵は付けない(`KEYLESS`)── 操作を探すで種類を名前で呼ぶ。
+   * ⚠ 一覧は `CALLOUT_CHOICES` が正本(ここで打ち直さない)。
+   */
+  ...CALLOUT_CHOICES.map((c) => ({
+    id: `format-callout-${c.role}`,
+    label: calloutLabel(c.label),
+    contexts: ['editor', 'row'] as const,
+    defaults: [] as string[],
+    note: `選んだ範囲(無ければ空)を、注意書きのブロック(:::${c.role})にします。もう一度押すと外れます`,
+  })),
   {
     id: 'format-link',
     label: 'リンク',
@@ -1904,7 +1946,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   // ── 追記の欄
   {
     id: 'append-send',
-    label: '本文に追記する',
+    label: '追記',
     contexts: ['append'],
     defaults: ['Mod+Enter'],
     note: '追記の欄の中だけ',

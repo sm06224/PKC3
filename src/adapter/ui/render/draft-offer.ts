@@ -103,7 +103,7 @@ export const DRAFT_DISCARD_LABEL = '消す';
 export const DRAFT_RESTORE_TITLE = '保存していない編集を開き直します';
 export const DRAFT_DISCARD_TITLE = '保存していない編集を消します(ノートは消えません)';
 /** 追記欄へ戻した直後に 1 度だけ言う(依頼 330)。 */
-export const DRAFT_APPEND_RESTORED_NOTE = '追記欄に戻しました。「本文に追記する」を押すまでノートは変わりません';
+export const DRAFT_APPEND_RESTORED_NOTE = '追記欄に戻しました。「追記」を押すまでノートは変わりません';
 /** 戻した直後に 1 度だけ言う。 */
 export const DRAFT_RESTORED_NOTE = '保存していない編集を戻しました。保存を押すまでノートは変わりません';
 /** 編集に入れなかったとき。控えは残してある。 */
@@ -253,7 +253,7 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
 
   /**
    * 追記欄の控えを戻す(依頼 330)。ノートを選び、本文が届いて欄が出たら字を入れる。**書かない** ──
-   * 「本文に追記する」を押すまで disk は動かない。控えは、入れたあと書き手(`draft-writer.ts`)が自分の控えとして書き直す。
+   * 「追記」を押すまで disk は動かない。控えは、入れたあと書き手(`draft-writer.ts`)が自分の控えとして書き直す。
    */
   const openForAppend = (d: DraftRecord): void => {
     let unsub: (() => void) | null = null;

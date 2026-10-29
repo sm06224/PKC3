@@ -39,6 +39,7 @@
   --accent-dim-fg: #0d3f26;
   --danger: #a3231c;
   --warn: #7a4a00;
+  --ok: #1a7f37; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2` = `pre` の背景)*/
   --code-key: #1f4bb8;
   --code-lit: #0a6b52;
@@ -70,6 +71,7 @@
   --accent-dim-fg: #cfeadb;
   --danger: #f07167;
   --warn: #e0a350;
+  --ok: #56d364; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2` = `pre` の背景)*/
   --code-key: #8ab4f8;
   --code-lit: #7fd1b0;
@@ -102,6 +104,7 @@
   --accent-dim-fg: #0a3069;
   --danger: #cf222e;
   --warn: #9a6700;
+  --ok: #1a7f37; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2` = `pre` の背景)。Primer の keyword / string */
   --code-key: #cf222e;
   --code-lit: #0a3069;
@@ -133,6 +136,7 @@
   --accent-dim-fg: #d1e4ff;
   --danger: #ff7b72;
   --warn: #d29922;
+  --ok: #3fb950; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2`)。Primer dark の keyword / string */
   --code-key: #ff7b72;
   --code-lit: #a5d6ff;
@@ -165,6 +169,7 @@
   --accent-dim-fg: #08303f;
   --danger: #b0261f;
   --warn: #8a6600;
+  --ok: #546a00; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2`)。green/cyan を暗く ── 公式値は地に対して 2.6:1 */
   --code-key: #5f6f00;
   --code-lit: #186a63;
@@ -196,6 +201,7 @@
   --accent-dim-fg: #d3e7f0;
   --danger: #f0736c;
   --warn: #d5a520;
+  --ok: #9ab800; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2`)。green/cyan を明るく ── 公式値は 3.3:1 */
   --code-key: #a5bc22;
   --code-lit: #4fc4ba;
@@ -228,6 +234,7 @@
   --accent-dim-fg: #e6dcff;
   --danger: #ff5555; /* Red */
   --warn: #ffb86c; /* Orange */
+  --ok: #50fa7b; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2`)。Dracula の Pink / Yellow */
   --code-key: #ff79c6;
   --code-lit: #f1fa8c;
@@ -260,6 +267,7 @@
   --accent-dim-fg: #e5f0f5;
   --danger: #e5949d; /* nord11(#bf616a)は地に対して 2.4:1 なので明るく */
   --warn: #ebcb8b; /* nord13 */
+  --ok: #b8d4a0; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2`)。nord9 / nord14 を明るく ── 公式値は 3.2:1 */
   --code-key: #9fc0dd;
   --code-lit: #b5cfa0;
@@ -292,6 +300,7 @@
   --accent-dim-fg: #eaffee;
   --danger: #ff6b6b;
   --warn: #ffaa22;
+  --ok: #33ff66; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2` = `pre` の背景)*/
   --code-key: #7fdc8f;
   --code-lit: #d8c07a;
@@ -325,6 +334,7 @@
   --accent-dim-fg: #fff1d9;
   --danger: #f08a78;
   --warn: #f0b84a;
+  --ok: #7fbf5a; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2`) */
   --code-key: #e8a840;
   --code-lit: #b9cf92;

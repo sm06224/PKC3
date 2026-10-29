@@ -100,7 +100,7 @@ export class AppendBoxRenderer {
   private readonly target: HTMLSelectElement;
   /** 直前の追記を外す(#395 段①)。⚠ 追記が通ったときだけ出す。 */
   private readonly undo: HTMLButtonElement;
-  /** 枠の下段(#1890)。左に追記先の `<select>`、右に「元に戻す」「本文に追記する」。 */
+  /** 枠の下段(#1890)。左に追記先の `<select>`、右に「元に戻す」「追記」。 */
   private readonly bar: HTMLElement;
   /** いま並べている追記先の指紋。⚠ 同じなら触らない(選んだ物が飛ばない)。 */
   private targetSig: string | null = null;
@@ -184,7 +184,7 @@ export class AppendBoxRenderer {
      *   「間違えて足したら本文まで開く」になる ── それは動線を 1 つ失うのと同じ。
      * ⚠ 追記が通ったときだけ出す(何も足していないのに押せる口を出さない)。
      */
-    this.undo = iconButton('undo-append', '追記を元に戻す');
+    this.undo = iconButton('undo-append', '元に戻す');
     /**
      * ⚠ **「追記した」とだけ書かない**(#684 段④ の UX レビュー I3)── ここで消えるのは
      *   追記した字だけでなく、**落として差し込んだ添付の行**と**一覧から落としたリンク**
@@ -207,7 +207,7 @@ export class AppendBoxRenderer {
     this.bar.setAttribute('data-pkc-field', 'append-bar');
     const actions = document.createElement('span');
     actions.setAttribute('data-pkc-field', 'append-actions');
-    actions.append(this.undo, iconButton('append-entry', '本文に追記する'));
+    actions.append(this.undo, iconButton('append-entry', '追記'));
     this.bar.append(this.target, actions);
     this.form.append(this.input, this.bar);
 

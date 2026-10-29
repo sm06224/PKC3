@@ -19,6 +19,7 @@
  *   (= 保存された設定は 1 バイトも変わっておらず、いつもどおり動く)
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { appOpenOptions } from '../../src/features/launcher/open-target';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -56,7 +57,17 @@ let openTileAsCalls: Array<{ lid: string; target: string }>;
 let setAppOpenTargetCalls: string[];
 let detach: () => void;
 
+/** #884 段③: アプリとして入れている / ブラウザで使っている、を matchMedia で作る。 */
+function setInstalled(installed: boolean): void {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (q: string) => ({ matches: installed && q.includes('standalone'), media: q }),
+  });
+}
+
 beforeEach(() => {
+  setInstalled(true); // 既存の段②の検査は「入れているとき」の動線
   localStorage.clear();
   document.body.innerHTML = '';
   root = document.createElement('div');
@@ -237,5 +248,40 @@ describe('その 1 回だけの開き方(#884 段②)', () => {
     ).toBe(2);
     menuItem('window')!.click();
     expect(openTileAsCalls).toEqual([{ lid: 'a1', target: 'window' }]);
+  });
+});
+
+describe('ブラウザで使っていても、ブラウザで効く開き方は出す(#884 段③)', () => {
+  it('🔴 入れていなくても右クリックにタブ / 別のウィンドウの 2 項目が出る(別のウィンドウはブラウザでも効く)', () => {
+    setInstalled(false);
+    rightClick('a1');
+    expect(menuItem('tab'), 'ブラウザ利用でタブの項目が消えた').not.toBeNull();
+    expect(menuItem('window'), 'ブラウザ利用で別のウィンドウの項目が消えた').not.toBeNull();
+    expect(
+      root.querySelector('[data-pkc-region="context-menu"] [data-pkc-action="start-tile-reorder"]'),
+      '並べ替えが消えた',
+    ).not.toBeNull();
+  });
+
+  it('🔴 絞り込み中でも(入れていなくても)開き方の 2 項目が出る', () => {
+    setInstalled(false);
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '電卓' });
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1, clientY: 1 });
+    tileEl('a1').dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(menuItem('window')).not.toBeNull();
+  });
+
+  it('🔴 「アプリとして入れていないと効かない」選択肢だけを隠す(いま選んである値は出す)', () => {
+    const targets = [
+      { id: 'tab', label: 'タブ' },
+      { id: 'window', label: '窓' },
+      { id: 'pwa-only', label: '入れた窓', needsInstalled: true },
+    ];
+    expect(appOpenOptions(false, 'tab', targets).map((t) => t.id)).toEqual(['tab', 'window']);
+    expect(appOpenOptions(true, 'tab', targets).map((t) => t.id)).toEqual(['tab', 'window', 'pwa-only']);
+    expect(appOpenOptions(false, 'pwa-only', targets).map((t) => t.id), '選んである値を隠した(戻せない)').toContain('pwa-only');
+    // 実物の表では、いまは 2 つとも効く ── 入れていなくても全部出る
+    expect(appOpenOptions(false, 'tab').map((t) => t.id)).toEqual(['tab', 'window']);
   });
 });

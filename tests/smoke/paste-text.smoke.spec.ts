@@ -122,6 +122,60 @@ test('🔴 1MB を超えるウェブページでも、平文へ落とさず記�
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
+/**
+ * 🔴 #1379 ── 貼付の知らせ(トースト)が、見えている他の物に**重ならない**ことを矩形で測る。
+ * 対象: 打っている欄 / 追記欄の「追記」ボタンと追記欄 / 中央ペインの下端 / 右ペインの押せる物 / 状態バー。
+ * ⚠ 浮かせて高さを当てる形だと、状態バーが 2 行に折り返す・文字を最大にすると重なる ── 知らせは状態バーと同じ入れ物の中で、
+ *   入れ物(`status-stack`)を基準に `bottom: 100%` でバーの真上に置く(流れの外)。だから場面を変えても(下の 2 場面)バーの上辺と知らせの下辺が接する。
+ * ⚠ 隠れている物(`isVisible` でない)は数えない。
+ */
+/** 中央ペインの本文の矩形(top / height)。⚠ トーストが出ても消えても 1px も動かないことの観測点。 */
+async function centerRect(page: Page): Promise<{ y: number; height: number }> {
+  const b = (await page.locator('[data-pkc-region="center"]').first().boundingBox())!;
+  return { y: b.y, height: b.height };
+}
+
+async function expectToastClear(page: Page, before: { y: number; height: number }): Promise<void> {
+  // 🔴 トーストは流れの外 ── 出ている間も本文の領域(中央ペイン)は 1px も動かない(同じ物が常に同じ場所に在る)
+  const during = await centerRect(page);
+  expect(during, `トーストが出て本文の領域が動いた(前 ${JSON.stringify(before)} → 中 ${JSON.stringify(during)})`).toEqual(before);
+  const tb = (await page.locator('[data-pkc-region="paste-toast"]').boundingBox())!;
+  const hits = (b: { x: number; y: number; width: number; height: number }): boolean =>
+    !(tb.y + tb.height <= b.y || tb.y >= b.y + b.height || tb.x + tb.width <= b.x || tb.x >= b.x + b.width);
+  const sels = [
+    ROW,
+    '[data-pkc-action="append-entry"]',
+    '[data-pkc-region="append"]',
+    '[data-pkc-region="center"]',
+    '[data-pkc-region="inspector"]',
+    '[data-pkc-region="status"]',
+  ];
+  for (const sel of sels) {
+    const loc = page.locator(sel).first();
+    if ((await loc.count()) === 0 || !(await loc.isVisible())) continue;
+    const b = (await loc.boundingBox())!;
+    expect(hits(b), `知らせが ${sel} に重なっている: ${JSON.stringify(b)} / 知らせ ${JSON.stringify(tb)}`).toBe(false);
+  }
+  const inspectorButtons = page.locator('[data-pkc-region="inspector"] button:visible');
+  const inspectorBox = (await page.locator('[data-pkc-region="inspector"]').first().boundingBox())!;
+  for (let i = 0; i < (await inspectorButtons.count()); i++) {
+    const b = (await inspectorButtons.nth(i).boundingBox())!;
+    // ⚠ 右ペインの枠の外へ溢れて(切られて)見えていない物は数えない
+    if (b.y + b.height > inspectorBox.y + inspectorBox.height || b.y < inspectorBox.y) continue;
+    expect(hits(b), `知らせが右ペインのボタン(${i} 番目)に重なっている`).toBe(false);
+  }
+  // 画面の中に収まっている(はみ出して切れない)
+  const vp = page.viewportSize()!;
+  expect(tb.x >= 0 && tb.y >= 0 && tb.x + tb.width <= vp.width + 1 && tb.y + tb.height <= vp.height + 1, '知らせが画面からはみ出している').toBe(true);
+  // 状態バーが出ているなら、知らせはその真上(下辺が上辺に接する)
+  const status = page.locator('[data-pkc-region="status"]');
+  if (await status.isVisible()) {
+    const sb = (await status.boundingBox())!;
+    const gap = sb.y - (tb.y + tb.height);
+    expect(gap >= 0 && gap <= 16, `知らせが状態バーの真上にない(間 ${gap}px)`).toBe(true);
+  }
+}
+
 test('🔴 ウェブページをコピーして貼ると、形のまま入って描かれる', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -130,11 +184,54 @@ test('🔴 ウェブページをコピーして貼ると、形のまま入って
 
   // 🔴 #1852 束 I1(依頼 304)── 行の途中(`メモ: ` の続き)に、表で始まる字を貼ると次の行から始まる
   await page.locator(ROW).fill('メモ: ');
+  const centerBefore1 = await centerRect(page);
   await pasteText(page, ROW, {
     html: '<table><tr><th>名</th><th>数</th></tr><tr><td>あ</td><td>1</td></tr></table>',
     plain: '名 数 あ 1',
   });
   await expect(page.locator(ROW), '表が行の途中に続けて貼られた(次の行から始まらない)').toHaveValue(/^メモ: \n\| 名 \| 数 \|/);
+  // 🔴 #1379 ── 直して貼ったら小さな知らせが出て、1 クリックで書式なしの字に置き換わる。
+  //   ⚠ 新しい起動は足さない(この道中の頭)。実ブラウザでしか見えない 2 つ: ① 知らせが画面に見えていて本文の欄を覆わない
+  //   ② 押した後に欄の選択範囲・本文が書式なしになる(`execCommand` の経路)
+  const toast = page.locator('[data-pkc-region="paste-toast"]');
+  await expect(toast, '直して貼ったのに知らせが出ない').toBeVisible();
+  await expect(toast).toContainText('プレーンテキストに変更');
+  await expectToastClear(page, centerBefore1);
+  await clickReal(page, '[data-pkc-field="paste-toast-action"]');
+  await expect(page.locator(ROW), '押したのに書式なしの字になっていない').toHaveValue('メモ: 名 数 あ 1');
+  await expect(toast, '押した後も知らせが残っている').toBeHidden();
+  await page.locator(ROW).fill('');
+
+  // 🔴 #1379 ⚠4 ── 場面 2: 状態バーが断り書きで複数行(2 行以上)に折り返した状態でも、知らせは重ならない(バーの真上に積む)
+  await page.evaluate(() => {
+    const st = document.querySelector<HTMLElement>('[data-pkc-region="status"]')!;
+    st.hidden = false;
+    const t = st.querySelector<HTMLElement>('[data-pkc-field="status-text"]')!;
+    t.textContent = '断り書きの試験: ' + 'とても長い一文が続いて、状態バーを 2 行に折り返させます。'.repeat(12);
+  });
+  const barH = (await page.locator('[data-pkc-region="status"]').boundingBox())!.height;
+  expect(barH, '前提: 状態バーが 3 行ほどに折り返している(1 行は 20px)').toBeGreaterThan(40);
+  const centerBefore2 = await centerRect(page);
+  await pasteText(page, ROW, { html: '<h2>見出し</h2>', plain: '見出し' });
+  await expect(toast).toBeVisible();
+  // ⚠ 空振り防止 ── 貼った後も状態バーが 2 行のまま見えている(描き直しで畳まれていたら、重なりを測っていない)
+  expect((await page.locator('[data-pkc-region="status"]').boundingBox())?.height ?? 0, '貼った後に状態バーが畳まれた').toBeGreaterThan(40);
+  await expectToastClear(page, centerBefore2);
+  await clickReal(page, '[data-pkc-field="paste-toast-action"]');
+  await page.locator(ROW).fill('');
+
+  // 🔴 #1379 ⚠4 ── 場面 3: 文字の大きさを最大(特大)にしても重ならない(バーの高さを値で当てていないので追随する)
+  await page.evaluate(() => {
+    const st = document.querySelector<HTMLElement>('[data-pkc-region="status"]')!;
+    st.hidden = true;
+    document.documentElement.style.setProperty('--pkc-text-size', '17px');
+    document.documentElement.setAttribute('data-pkc-text-scale', 'xlarge');
+  });
+  const centerBefore3 = await centerRect(page);
+  await pasteText(page, ROW, { html: '<h2>見出し</h2>', plain: '見出し' });
+  await expect(toast).toBeVisible();
+  await expectToastClear(page, centerBefore3);
+  await clickReal(page, '[data-pkc-field="paste-toast-action"]');
   await page.locator(ROW).fill('');
 
   // 🔴 #1852 束 I3(依頼 93-1)── Ctrl+Shift+V の直後の貼付は直さない(こちらが止めず、書式なしの字だけ)。

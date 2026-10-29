@@ -236,7 +236,7 @@ describe('組み込みタイルの合流 (#148)', () => {
       title: 'マニュアル',
       group: BUILTIN_GROUP,
       kind: 'manual',
-      symbol: 'book',
+      symbol: 'help',
     });
     /**
      * 🔴 **自分のパソコンで動かす は最後**(#532 段 B、2026-09-09)。
@@ -433,7 +433,7 @@ describe('組み込みタイルの合流 (#148)', () => {
         ['search', 'search'],
         // 🔑 user 裁定で「仕事」ではなく**「文書」**になった
         ['office', 'page'],
-        ['manual', 'book'],
+        ['manual', 'help'],
         ['selfhost', 'computer'],
         ['sql', 'database'],
         ['captures', 'mic'],

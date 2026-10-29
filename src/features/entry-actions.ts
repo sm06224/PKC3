@@ -65,6 +65,8 @@ export interface EntryAction {
     | 'stack'
     | 'bookmarkable'
     | 'bookmarked'
+    | 'pinnable'
+    | 'pinned'
     | 'attachment'
     | 'kind-changeable'
     | 'transcript';
@@ -161,6 +163,11 @@ export interface EntryMenuContext {
    */
   readonly bookmarked?: boolean;
   /**
+   * 🔴 **ピン留めしているか**(#1377)。⚠ **省く = 出さない**(`undefined`)── 固定エリアは左の列にあるので、
+   *   左の列の行のメニューだけが渡す(2 ペインの行・編集中の行は渡さない)。
+   */
+  readonly pinned?: boolean;
+  /**
    * 🔴 **時刻つきの行(文字起こし)が在るか**(#1447)。⚠ 本文を読むのは呼び側で、**開いているノートのときだけ**渡す
    *   (別の行の本文は右クリックのためだけに読まない)。省く = 出さない。
    */
@@ -183,6 +190,9 @@ const WHEN: Readonly<
   // 🔴 入れる / 外すは**対**(#1377)── どちらか一方だけが出る。`undefined` はどちらも出さない
   bookmarkable: (ctx) => ctx.bookmarked === false,
   bookmarked: (ctx) => ctx.bookmarked === true,
+  // 🔴 ピン留めも**対**(#1377)── どちらか一方だけが出る。`undefined` はどちらも出さない
+  pinnable: (ctx) => ctx.pinned === false,
+  pinned: (ctx) => ctx.pinned === true,
   // 🔴 種類を変えられるのはノートとログだけ(台帳 #1852 I2 / 依頼 157)── 判定は `canChangeKind` 1 本
   'kind-changeable': (ctx) => canChangeKind(ctx.archetype),
   // 🔴 字幕ファイル(#1447)── 時刻つきの行があるノートだけ。`undefined`(本文を知らない)は出さない
@@ -328,7 +338,7 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    * ⚠ スタックの入れ物にだけ出す(`when: 'stack'`)── 他のノートで押しても積む物が無い。
    * ⚠ 開いただけでは横の枠は変わらない(設計 doc §2-8)── 押した瞬間に積まれる。
    */
-  { action: 'stack-load', label: 'このスタックを追加する', group: 'open', when: 'stack' },
+  { action: 'stack-load', label: 'スタックを追加する', group: 'open', when: 'stack' },
   /**
    * 🔴 **`バックアップ(このノート)`**(2026-09-21、#1017 段④b)。
    * ⚠ 直す前の字は「書き出す」で、説明を読まないと何が起きるか分からなかった
@@ -480,7 +490,7 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    * ⚠ 置き場は「フォルダへ移す…」の下・削除の上(既存の並びを動かさない)。
    */
   { action: 'change-entry-kind', label: '種類を変える…', group: 'this-one', when: 'kind-changeable' },
-  { action: 'create-in-folder', label: 'この中に新しいノートを作る', group: 'this-one', when: 'folder' },
+  { action: 'create-in-folder', label: '中にノートを作る', group: 'this-one', when: 'folder' },
   /**
    * 🔴 **ノートをブックマークに入れる / 外す**(#1377。Gemini 裁定を user 委任で採用 =
    *   #1163 のコメント。「ピン留め」という新機能は作らず、既に在るブックマークへノートを入れる)。
@@ -492,6 +502,15 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'bookmark-note-add', label: 'ブックマークに入れる', group: 'this-one', when: 'bookmarkable', menuOnly: true },
   { action: 'bookmark-note-remove', label: 'ブックマークから外す', group: 'this-one', when: 'bookmarked', menuOnly: true },
+  /**
+   * 🔴 **ノートをピン留めする / 外す**(#1377。「既存のブックマークとは別に、一覧の最上段に常時固定する専用エリア」)。
+   *
+   * ⚠ **対で置く**(置けるなら外せる)── ピン留め済みなら「外す」だけ、まだなら「ピン留めする」だけが出る。
+   *   エリアの各行の「外す」も同じ受け手(`unpin-note`)。
+   * ⚠ **右クリックだけ・左の列の行だけ**(`menuOnly` + ctx の `pinned` を渡した面)。
+   */
+  { action: 'pin-note', label: 'ピン留めする', group: 'this-one', when: 'pinnable', menuOnly: true },
+  { action: 'unpin-note', label: 'ピン留めを外す', group: 'this-one', when: 'pinned', menuOnly: true },
   /**
    * 🔴 **ゴミ箱を開く**(#1646 の 1 = B。Gemini 裁定 = #1163 の依頼 40 の推薦どおり C = A + B)。
    *
@@ -542,7 +561,7 @@ export const BODY_MENU_ACTIONS: readonly EntryAction[] = [
    * ⚠ 外す口は**枠の中の `× 外す`** に在る ── 置けるなら外せる
    * (user 指示 2026-08-23)。
    */
-  { action: 'pin-split', label: 'このノートをスタックに載せる' },
+  { action: 'pin-split', label: 'スタックに載せる' },
   /**
    * 🔴 **読んでいるノートを、そのまま隅へ出す**(#685、user 裁定 2026-09-04。
    *   動線レビュー 欠陥 6 / 案 E)。
@@ -599,8 +618,10 @@ const TILE_OPEN_TARGET_VERB: Readonly<Record<AppOpenTarget, string>> = {
 
 export function tileOpenTargetMenuActions(
   current: AppOpenTarget,
+  /** 🔴 #884 段③ ── 出す選択肢の id(アプリとして入れていないと効かない物は呼び側が除く)。省略 = 全部。 */
+  ids: readonly string[] = APP_OPEN_TARGETS.map((t) => t.id),
 ): readonly (EntryAction & { readonly attrs: Readonly<Record<string, string>> })[] {
-  return APP_OPEN_TARGETS.map((t) => ({
+  return APP_OPEN_TARGETS.filter((t) => ids.includes(t.id)).map((t) => ({
     action: 'open-tile-as',
     label: t.id === current ? `${TILE_OPEN_TARGET_VERB[t.id]}(既定)` : TILE_OPEN_TARGET_VERB[t.id],
     attrs: { [TILE_OPEN_TARGET_ATTR]: t.id },
@@ -765,9 +786,13 @@ export function repeatMenuActions(current: RepeatUnit | null): RepeatMenuItem[] 
  *   (別に出すと、同じ右クリックで 2 枚メニューが出せることになり、
  *   閉じ方も 2 通り要る ── §7 と同じ向きの重複)。
  */
-export function tileMenuActions(reordering: boolean, currentOpenTarget: AppOpenTarget): EntryAction[] {
+export function tileMenuActions(
+  reordering: boolean,
+  currentOpenTarget: AppOpenTarget,
+  openTargetIds?: readonly string[],
+): EntryAction[] {
   return [
-    ...tileOpenTargetMenuActions(currentOpenTarget),
+    ...tileOpenTargetMenuActions(currentOpenTarget, openTargetIds),
     ...TILE_MENU_ACTIONS,
     reordering
       ? { action: 'end-tile-reorder', label: '並べ替えを終える' }
@@ -1579,6 +1604,8 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   // 🔴 ブックマーク(#1377)。⚠ 帯の在りかを言う ── 入れた後に「どこへ入ったか」が分かる
   'bookmark-note-add': '2 ペインのブックマークに並べます(そこから押すと、このノートを開けます)',
   'bookmark-note-remove': '2 ペインのブックマークから、このノートを外します(ノートは消えません)',
+  'pin-note': 'このノートを左のペインの一覧の上に固定します(いつでも 1 押しで開けます)',
+  'unpin-note': '一覧の上の固定から、このノートを外します(ノートは消えません)',
   'open-note-window':
     'このノートだけを別のウィンドウで開きます(何枚でも開けます。閉じれば消えます)',
   // 🔴 **左の列の道具 4 つ**(#632 段①)。⚠ 字は `shell.ts` のボタンの `title` と

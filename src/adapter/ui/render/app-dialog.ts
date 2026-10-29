@@ -40,7 +40,14 @@ import { RECENT_COMMANDS_HEADING, splitRecentRows } from '@features/palette/rece
 import type { EntryPickRow } from '@features/entry-ref/entry-pick';
 import type { SnippetChoice } from '@features/snippet/snippet-menu';
 import { moveMark, toggleMark } from '@features/clipboard/scrap';
-import { toggleArchiveMark } from '@features/archive/zip-browse';
+import {
+  ARCHIVE_OK_TITLE,
+  ARCHIVE_PICK_NOTE,
+  EMPTY_FOLDER_NOTE,
+  archiveFocusMove,
+  archiveRowText,
+  toggleArchiveMark,
+} from '@features/archive/zip-browse';
 import type { DiffRow } from '@features/revision/diff-view';
 import {
   type OrphanShadowAnswer,
@@ -763,6 +770,25 @@ export function pickDiagramInApp(
     title: '図を入れる',
     field: 'pick-diagram',
     indexAttr: 'data-pkc-diagram-index',
+    note: '',
+    rows: choices.map((c) => ({ label: c.label, value: c.id })),
+  });
+}
+
+/**
+ * 🔴 **注意書きのブロックの種類を選ぶ**(#425)。器は図の種類と同じ 1 本(`pickRowInApp`)。
+ * ⚠ 何が並ぶかは `features/markdown/text-ops.ts` の `CALLOUT_CHOICES` が正本。
+ *
+ * @returns 選んだ種類(`note` など)。`Escape` / 「やめる」/ 外なら `null`
+ */
+export function pickCalloutInApp(
+  host: HTMLElement,
+  choices: readonly { readonly id: string; readonly label: string }[],
+): Promise<string | null> {
+  return pickRowInApp(host, {
+    title: '注意書き',
+    field: 'pick-callout',
+    indexAttr: 'data-pkc-callout-index',
     note: '',
     rows: choices.map((c) => ({ label: c.label, value: c.id })),
   });
@@ -1977,7 +2003,7 @@ export function pickArchiveInApp(
 
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'pick-archive-note');
-    note.textContent = 'フォルダを押すと、その下のファイルが全部入ります';
+    note.textContent = ARCHIVE_PICK_NOTE;
     f.body.append(note);
 
     const list = document.createElement('div');
@@ -1985,40 +2011,75 @@ export function pickArchiveInApp(
     f.body.append(list);
 
     let marks: string[] = [];
-    let focusPath: string | null = null;
 
-    const paint = (): void => {
-      list.textContent = '';
+    /**
+     * 🔴 **一覧は 1 度だけ組み、押したら印と字だけ直す**(#826 ①)。
+     * ⚠ 直す前は押すたびに一覧を丸ごと作り直していたので、長い zip で下の行を押すと押した行が視野の端へ跳ねた
+     *   (要素が消えて作り直され、スクロール位置と焦点が失われる)。要素を残せば位置は動かない。
+     * 🔴 **Tab の止まりは一覧で 1 つ**(#826 ②)── 200 件の zip でも「取り出す」まで 200 回押させない。
+     *   一覧の中は矢印キー(↑ ↓ Home End)で動く(`archiveFocusMove`)。さらに **Ctrl(⌘)+ Enter で取り出す**。
+     * 🔴 **0 件のフォルダは、押せない理由を行に書き、印を付けない**(#826 ③)。
+     */
+    const emptyDir = (row: ArchivePickRow): boolean => row.isDirectory && countFiles([row.path]) === 0;
+    const buttons: HTMLButtonElement[] = [];
+    const setCurrent = (index: number): void => {
+      for (const [i, b] of buttons.entries()) b.tabIndex = i === index ? 0 : -1;
+    };
+    const sync = (): void => {
       for (const [index, row] of rows.entries()) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.setAttribute('data-pkc-field', 'pick-archive');
-        btn.setAttribute('data-pkc-archive-index', String(index));
-        btn.setAttribute('aria-pressed', marks.includes(row.path) ? 'true' : 'false');
-        // 🔑 階層は**字下げ**で出す(器の中なので、木の線は引かない)
-        btn.style.paddingInlineStart = `${row.depth * 16}px`;
-        /**
-         * ⚠ **フォルダの印は末尾の `/`**(絵文字を UI に置かない ── `icons.test.ts`)。
-         * 🔑 `/` は書庫の中の綴りそのものなので、説明が要らない。
-         */
-        btn.textContent = row.isDirectory ? `${row.name}/` : `${row.name} — ${row.size}`;
-        btn.addEventListener('click', () => {
-          marks = toggleArchiveMark(marks, row.path);
-          focusPath = row.path;
-          paint();
-        });
-        list.append(btn);
+        buttons[index]?.setAttribute('aria-pressed', marks.includes(row.path) ? 'true' : 'false');
       }
       const n = countFiles(marks);
       f.ok.textContent = n === 0 ? '選んだ物を取り出す' : `選んだ ${n} 件を取り出す`;
       // ⚠ **0 件では押せない** ── 押しても何も起きない口を作らない
       f.ok.disabled = n === 0;
-      if (focusPath !== null) {
-        const back = rows.findIndex((r) => r.path === focusPath);
-        list.querySelector<HTMLButtonElement>(`[data-pkc-archive-index="${back}"]`)?.focus();
-      }
     };
-    paint();
+    for (const [index, row] of rows.entries()) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-pkc-field', 'pick-archive');
+      btn.setAttribute('data-pkc-archive-index', String(index));
+      btn.setAttribute('aria-pressed', 'false');
+      // 🔑 階層は**字下げ**で出す(器の中なので、木の線は引かない)
+      btn.style.paddingInlineStart = `${row.depth * 16}px`;
+      /**
+       * ⚠ **フォルダの印は末尾の `/`**(絵文字を UI に置かない ── `icons.test.ts`)。
+       * 🔑 `/` は書庫の中の綴りそのものなので、説明が要らない。
+       */
+      const empty = emptyDir(row);
+      btn.textContent = archiveRowText(row, empty);
+      if (empty) {
+        btn.setAttribute('aria-disabled', 'true');
+        btn.title = EMPTY_FOLDER_NOTE;
+      }
+      btn.addEventListener('click', () => {
+        setCurrent(index);
+        if (empty) return;
+        marks = toggleArchiveMark(marks, row.path);
+        sync();
+      });
+      buttons.push(btn);
+      list.append(btn);
+    }
+    setCurrent(0);
+    sync();
+    const onListKey = (ev: KeyboardEvent): void => {
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+        // 🔴 **選んでいなくても必ず止める** ── 止めないと、焦点の行(ボタン)で Enter の既定の click が走り、
+        //   「取り出す」つもりの Ctrl+Enter で行の選択が入れ替わる(0 件のとき 1 件選んでしまう)
+        ev.preventDefault();
+        if (!f.ok.disabled) f.ok.click();
+        return;
+      }
+      const at = buttons.findIndex((b) => b === f.dialog.ownerDocument.activeElement);
+      if (at < 0) return;
+      const next = archiveFocusMove(ev.key, at, buttons.length);
+      if (next === null) return;
+      ev.preventDefault();
+      setCurrent(next);
+      buttons[next]?.focus();
+    };
+    f.dialog.addEventListener('keydown', onListKey);
 
     const onOutside = (ev: MouseEvent): void => {
       if (clickedOutsideDialog(ev, f.dialog)) f.cancel.click();
@@ -2026,6 +2087,7 @@ export function pickArchiveInApp(
     f.dialog.addEventListener('click', onOutside);
 
     f.ok.removeAttribute('data-pkc-danger');
+    f.ok.title = ARCHIVE_OK_TITLE;
     f.ok.hidden = false;
     f.cancel.textContent = 'やめる';
     f.cancel.hidden = false;
@@ -2034,6 +2096,8 @@ export function pickArchiveInApp(
     list.querySelector<HTMLButtonElement>('[data-pkc-archive-index="0"]')?.focus();
     const answer = await answered;
     f.dialog.removeEventListener('click', onOutside);
+    f.dialog.removeEventListener('keydown', onListKey);
+    f.ok.removeAttribute('title'); // 器は使い回す ── 次の確認に「取り出す」の説明を残さない
     f.ok.disabled = false;
     return answer === 'ok' && countFiles(marks) > 0 ? [...marks] : null;
   });

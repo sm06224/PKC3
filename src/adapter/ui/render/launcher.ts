@@ -584,6 +584,14 @@ export class LauncherRenderer {
       const where = document.createElement('span');
       where.setAttribute('data-pkc-field', 'tile-url');
       where.textContent = hostOf(tile.url);
+      /**
+       * 🔴 **絵を選んでも、外へ出る印 `↗` を行の右端(飛び先の隣)に残す**(#852 案 1。user 裁定の推薦 A)。
+       * ⚠ 左端の `↗` は「絵も絵文字も無いとき」の控えの字で、絵を選ぶと引っ込む ── 一覧のどれが PKC の外へ
+       *   出るのかが選んだ瞬間に読めなくなっていた。引っ込んだ側(絵を持つタイル)だけ、右端に CSS で出す。
+       * ⚠ 字は入れない(`::before`)── ボタン丸ごとの `textContent` を変えない(§10)。
+       */
+      if (tile.iconAssetKey !== undefined || tile.symbol !== undefined || tile.icon !== undefined)
+        where.setAttribute('data-pkc-external', '');
       btn.append(where);
       btn.title = tile.url;
     }

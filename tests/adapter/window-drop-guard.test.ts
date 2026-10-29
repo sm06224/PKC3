@@ -114,6 +114,7 @@ describe('別窓への落としを止める(#1087)', () => {
       countFiles: () => 0,
       toggle: (m) => [...m],
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: () => new Promise<void>(() => undefined),
     });
     expectBlocked(b.document);

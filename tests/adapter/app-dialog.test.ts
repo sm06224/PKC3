@@ -612,6 +612,105 @@ describe('書庫の選び方(#818)', () => {
     expect(await answered).toBeNull();
     expect(okBtn().disabled).toBe(false);
   });
+
+  /** 🔴 #826 ① 押しても一覧を作り直さない(長い zip で押した行が跳ねる)。 */
+  it('🔴 押しても一覧の要素は入れ替わらず、印だけ変わる', async () => {
+    const answered = pickArchiveInApp(document.body, ROWS, count);
+    const before = [...document.querySelectorAll('[data-pkc-archive-index]')];
+    pick(2);
+    const after = [...document.querySelectorAll('[data-pkc-archive-index]')];
+    expect(after).toHaveLength(before.length);
+    after.forEach((el, i) => expect(el === before[i], `${i} 行目が作り直された`).toBe(true));
+    expect(after[2]!.getAttribute('aria-pressed')).toBe('true');
+    expect(after[0]!.getAttribute('aria-pressed')).toBe('false');
+    cancelBtn().click();
+    await answered;
+  });
+
+  /** 🔴 #826 ② Tab の止まりは一覧で 1 つ、矢印で動き、Ctrl+Enter で取り出す。 */
+  it('🔴 Tab の止まりは 1 行だけ。矢印で動き、Ctrl+Enter で取り出せる', async () => {
+    const answered = pickArchiveInApp(document.body, ROWS, count);
+    const btns = (): HTMLButtonElement[] => [
+      ...document.querySelectorAll<HTMLButtonElement>('[data-pkc-archive-index]'),
+    ];
+    expect(btns().filter((b) => b.tabIndex === 0)).toHaveLength(1);
+    const key = (k: string, extra: KeyboardEventInit = {}): void => {
+      (document.activeElement ?? document.body).dispatchEvent(
+        new KeyboardEvent('keydown', { key: k, bubbles: true, ...extra }),
+      );
+    };
+    btns()[0]!.focus();
+    key('ArrowDown');
+    expect(document.activeElement).toBe(btns()[1]);
+    expect(btns()[1]!.tabIndex).toBe(0);
+    expect(btns()[0]!.tabIndex).toBe(-1);
+    key('End');
+    expect(document.activeElement).toBe(btns()[2]);
+    // 何も選んでいない Ctrl+Enter は何もしない
+    key('Enter', { ctrlKey: true });
+    pick(2);
+    key('Enter', { ctrlKey: true });
+    expect(await answered).toEqual(['a.txt']);
+  });
+
+  it('🔴 何も選んでいないときの Ctrl+Enter は、既定の動き(焦点の行の click = 選択の入れ替え)を止める', async () => {
+    const answered = pickArchiveInApp(document.body, ROWS, count);
+    const btns = [...document.querySelectorAll<HTMLButtonElement>('[data-pkc-archive-index]')];
+    btns[0]!.focus();
+    const before = btns.map((b) => b.getAttribute('aria-pressed'));
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true });
+    btns[0]!.dispatchEvent(ev);
+    expect(ev.defaultPrevented, '止めていない(ブラウザが行を押したことにして選択を入れ替える)').toBe(true);
+    expect(btns.map((b) => b.getAttribute('aria-pressed'))).toEqual(before);
+    // 対照群: 修飾キーの無い Enter は止めない(行を押す = 選ぶ、の既定の動きを殺さない)
+    const plain = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    btns[0]!.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(false);
+    cancelBtn().click(); // 器は使い回す ── 開いたままにしない
+    expect(await answered).toBeNull();
+  });
+
+  it('🔴 ↑ と Home で戻れる / 案内と「取り出す」の title に Ctrl+Enter が書いてある', async () => {
+    const answered = pickArchiveInApp(document.body, ROWS, count);
+    const btns = (): HTMLButtonElement[] => [
+      ...document.querySelectorAll<HTMLButtonElement>('[data-pkc-archive-index]'),
+    ];
+    const key = (k: string): void => {
+      (document.activeElement ?? document.body).dispatchEvent(
+        new KeyboardEvent('keydown', { key: k, bubbles: true }),
+      );
+    };
+    btns()[0]!.focus();
+    key('End');
+    expect(document.activeElement).toBe(btns()[2]);
+    key('ArrowUp');
+    expect(document.activeElement, '↑ で戻らない').toBe(btns()[1]);
+    key('Home');
+    expect(document.activeElement, 'Home で先頭へ戻らない').toBe(btns()[0]);
+    expect(q('[data-pkc-field="pick-archive-note"]').textContent).toContain('Ctrl');
+    expect(okBtn().title).toContain('Enter');
+    cancelBtn().click();
+    await answered;
+    expect(okBtn().hasAttribute('title'), '器を使い回すので、title を次の確認へ残してはいけない').toBe(false);
+  });
+
+  /** 🔴 #826 ③ 0 件のフォルダは理由が書かれ、押しても印が付かない。 */
+  it('🔴 0 件のフォルダは理由が行に出て、押しても印が付かない', async () => {
+    const rows = [
+      { path: '空', name: '空', depth: 0, isDirectory: true, size: '' },
+      { path: 'a.txt', name: 'a.txt', depth: 0, isDirectory: false, size: '10 B' },
+    ];
+    const cnt = (m: readonly string[]): number => (m.includes('a.txt') ? 1 : 0);
+    const answered = pickArchiveInApp(document.body, rows, cnt);
+    expect(q('[data-pkc-archive-index="0"]').textContent).toContain('このフォルダにはファイルがありません');
+    pick(0);
+    expect(q('[data-pkc-archive-index="0"]').getAttribute('aria-pressed')).toBe('false');
+    expect(okBtn().disabled).toBe(true);
+    pick(1);
+    expect(okBtn().disabled).toBe(false);
+    cancelBtn().click();
+    await answered;
+  });
 });
 
 /**

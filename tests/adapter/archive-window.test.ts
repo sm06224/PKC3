@@ -137,6 +137,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: never,
     });
     const texts = rowsOf(win).map((b) => b.textContent);
@@ -155,6 +156,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: never,
     });
     expect(okOf(win).disabled, '0 件なのに押せる').toBe(true);
@@ -174,6 +176,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: never,
     });
     rowsOf(win)[2]!.click();
@@ -192,6 +195,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: never,
     });
     win.document
@@ -214,6 +218,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: () =>
         new Promise<void>((r) => {
           closed = r;
@@ -243,6 +248,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: () =>
         new Promise<void>((r) => {
           closed = r;
@@ -279,6 +285,7 @@ describe('書庫の別窓', () => {
         countFiles,
         toggle,
         themeFrom: document.documentElement,
+        onReloaded: () => {},
       });
       win.closed = true; // user が窓の × で閉じた
       await vi.advanceTimersByTimeAsync(2500);
@@ -303,6 +310,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: never,
     });
     expect(win.closed, '前提が崩れた(閉じてしまっている)').toBe(false);
@@ -320,6 +328,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: () => Promise.reject(new Error('x')),
     });
     expect(await answered).toBeNull();
@@ -341,6 +350,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: never,
     });
     rowsOf(win)[2]!.click();
@@ -364,6 +374,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: never,
     });
     const again = grabArchiveWindow('b.zip', 'k2', () => win);
@@ -402,6 +413,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: never,
     });
     win.document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
@@ -420,6 +432,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: never,
     });
     expect(
@@ -443,6 +456,7 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: document.documentElement,
+      onReloaded: () => {},
       waitClose: never,
     });
     expect(await answered).toBeNull();
@@ -468,9 +482,192 @@ describe('書庫の別窓', () => {
       countFiles,
       toggle,
       themeFrom: root,
+      onReloaded: () => {},
       waitClose: never,
     });
     expect(win.document.querySelector('style')?.textContent).toContain('--bg:#123456');
     vi.restoreAllMocks();
+  });
+});
+
+/**
+ * 🔴 **#826 の 4 点**(① 押した行が跳ねる ② Tab 200 回 ③ 0 件フォルダ ④ F5 で白紙)。
+ * 観測点は「要素が作り直されていないこと」「Tab の止まる行の数」「押しても印が付かないこと」
+ * 「再読み込みで窓を閉じて呼び側へ知らせること」。
+ */
+describe('書庫の別窓 ── 動線の 4 点(#826)', () => {
+  const ROWS2: readonly ArchiveWindowRow[] = [
+    ...ROWS,
+    { path: '空', name: '空', depth: 0, isDirectory: true, size: '' },
+  ];
+  const count2 = (marks: readonly string[]): number =>
+    ROWS2.filter(
+      (r) => !r.isDirectory && marks.some((m) => r.path === m || r.path.startsWith(`${m}/`)),
+    ).length;
+  function open2(extra: Partial<Parameters<typeof pickInArchiveWindow>[1]> = {}) {
+    const win = fakeWindow();
+    grabArchiveWindow('a.zip', 'k', () => win);
+    const answered = pickInArchiveWindow(win, {
+      assetKey: 'k',
+      title: 'a.zip',
+      rows: ROWS2,
+      countFiles: count2,
+      toggle,
+      themeFrom: document.documentElement,
+      onReloaded: () => {},
+      waitClose: never,
+      ...extra,
+    });
+    return { win, answered };
+  }
+
+  it('🔴 ① 押しても一覧を作り直さない(同じ要素のまま印だけ変わる)', () => {
+    const { win } = open2();
+    const before = rowsOf(win);
+    before[2]!.click();
+    const after = rowsOf(win);
+    expect(after, '押したら一覧が作り直された(長い zip で押した行が跳ねる)').toHaveLength(before.length);
+    after.forEach((el, i) => expect(el === before[i], `${i} 行目の要素が入れ替わった`).toBe(true));
+    expect(after[2]!.getAttribute('aria-pressed')).toBe('true');
+    expect(after[1]!.getAttribute('aria-pressed'), '押していない行の印が変わった').toBe('false');
+  });
+
+  it('🔴 ② Tab の止まりは一覧で 1 つ、矢印で動き、Ctrl+Enter で取り出す', async () => {
+    const { win, answered } = open2();
+    const stops = (): number => rowsOf(win).filter((b) => b.tabIndex === 0).length;
+    expect(stops(), '一覧に Tab で止まる行が 1 つでない(200 件なら 200 回押させる)').toBe(1);
+    const key = (k: string, extra: KeyboardEventInit = {}): void => {
+      win.document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, ...extra }));
+    };
+    rowsOf(win)[0]!.focus();
+    key('ArrowDown');
+    expect(rowsOf(win)[1]!.tabIndex, '矢印で次の行へ動かない').toBe(0);
+    expect(rowsOf(win)[0]!.tabIndex).toBe(-1);
+    key('End');
+    expect(rowsOf(win)[3]!.tabIndex, 'End で末尾へ動かない').toBe(0);
+    key('ArrowDown'); // 端で止まる
+    expect(rowsOf(win)[3]!.tabIndex).toBe(0);
+    // 0 件(選んでいない)の Ctrl+Enter は何もしない
+    key('Enter', { ctrlKey: true });
+    expect(win.closed, '何も選んでいないのに取り出した').toBe(false);
+    rowsOf(win)[2]!.click();
+    key('Enter', { ctrlKey: true });
+    expect(await answered).toEqual(['memo.txt']);
+  });
+
+  it('🔴 ③ 0 件のフォルダは理由が行に書かれ、押しても印が付かない(対照: 中身のあるフォルダは付く)', () => {
+    const { win } = open2();
+    const empty = rowsOf(win)[3]!;
+    expect(empty.textContent).toContain('このフォルダにはファイルがありません');
+    empty.click();
+    expect(empty.getAttribute('aria-pressed'), '0 件のフォルダに印が付いた(色だけ変わる)').toBe('false');
+    expect(okOf(win).disabled).toBe(true);
+    rowsOf(win)[0]!.click();
+    expect(rowsOf(win)[0]!.getAttribute('aria-pressed')).toBe('true');
+    expect(rowsOf(win)[0]!.textContent, '中身のあるフォルダにまで「ありません」と出た').not.toContain('ありません');
+  });
+
+  it('🔴 ④ 再読み込みで白紙になったら、窓を閉じて呼び側へ知らせ、答えは null', async () => {
+    vi.useFakeTimers();
+    try {
+      const onReloaded = vi.fn();
+      const { win, answered } = open2({ onReloaded, reloadEveryMs: 100 });
+      // 再読み込み = 組んだ印が消えた別の document になる
+      (win as unknown as { document: Document }).document = document.implementation.createHTMLDocument('');
+      await vi.advanceTimersByTimeAsync(300);
+      expect(await answered).toBeNull();
+      expect(onReloaded, '主の画面へ知らせていない').toHaveBeenCalledTimes(1);
+      expect(win.closed, '白紙の窓が残っている').toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('対照群: 再読み込みでないなら知らせない・閉じない', async () => {
+    vi.useFakeTimers();
+    try {
+      const onReloaded = vi.fn();
+      const { win } = open2({ onReloaded, reloadEveryMs: 100 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onReloaded).not.toHaveBeenCalled();
+      expect(win.closed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('書庫の別窓 ── 見張りの後始末とキー(#826 の穴塞ぎ)', () => {
+  it('🔴 答えが出たら再読み込みの見張りの時計を止める(止めないと窓を閉じた後も回り続ける)', async () => {
+    vi.useFakeTimers();
+    try {
+      const win = fakeWindow();
+      grabArchiveWindow('a.zip', 'k', () => win);
+      const before = vi.getTimerCount();
+      const answered = pickInArchiveWindow(win, {
+        assetKey: 'k',
+        title: 'a.zip',
+        rows: ROWS,
+        countFiles,
+        toggle,
+        themeFrom: document.documentElement,
+        onReloaded: () => {},
+        waitClose: () => new Promise<void>(() => undefined),
+      });
+      expect(vi.getTimerCount(), '前提: 見張りの時計が動いている').toBeGreaterThan(before);
+      win.document
+        .querySelector<HTMLButtonElement>('[data-pkc-field="archive-window-cancel"]')!
+        .click();
+      expect(await answered).toBeNull();
+      expect(vi.getTimerCount(), '答えが出た後も時計が残っている').toBe(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('🔴 ↑ と Home で戻れる(↓ End だけだと末尾から戻れない)', () => {
+    const win = fakeWindow();
+    grabArchiveWindow('a.zip', 'k', () => win);
+    void pickInArchiveWindow(win, {
+      assetKey: 'k',
+      title: 'a.zip',
+      rows: ROWS,
+      countFiles,
+      toggle,
+      themeFrom: document.documentElement,
+      onReloaded: () => {},
+      waitClose: never,
+    });
+    const key = (k: string): void => {
+      win.document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+    };
+    const rows = rowsOf(win);
+    rows[0]!.focus();
+    key('End');
+    expect(rows[2]!.tabIndex).toBe(0);
+    key('ArrowUp');
+    expect(rows[1]!.tabIndex, '↑ で 1 つ戻らない').toBe(0);
+    expect(rows[2]!.tabIndex).toBe(-1);
+    key('Home');
+    expect(rows[0]!.tabIndex, 'Home で先頭へ戻らない').toBe(0);
+  });
+
+  it('🔴 案内に ↑ ↓ と Ctrl+Enter が書いてあり、「取り出す」の title にも添えてある', () => {
+    const win = fakeWindow();
+    grabArchiveWindow('a.zip', 'k', () => win);
+    void pickInArchiveWindow(win, {
+      assetKey: 'k',
+      title: 'a.zip',
+      rows: ROWS,
+      countFiles,
+      toggle,
+      themeFrom: document.documentElement,
+      onReloaded: () => {},
+      waitClose: never,
+    });
+    const note = win.document.querySelector('[data-pkc-field="archive-window-note"]')!.textContent ?? '';
+    expect(note).toContain('↑ ↓');
+    expect(note).toContain('Enter');
+    expect(okOf(win).title).toContain('Enter');
   });
 });

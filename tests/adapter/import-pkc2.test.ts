@@ -1492,6 +1492,78 @@ describe('importPkc2File (P6b 実行部)', () => {
   });
 
   /**
+   * 🔴 **ピン留め(#1377)**: バックアップのピンが取り込みの口(`importNotePins`)へ、取り込んだノートに在る物だけ渡り、
+   * 戻せなくても取り込みは失敗にしない。足したピンは取り消しへ渡る(色と同じ形)。
+   */
+  describe('ピン留め', () => {
+    async function archiveWithPins(notePins: unknown): Promise<File> {
+      const { ZipWriter } = await import('../../src/features/export/zip-writer');
+      const w = new ZipWriter();
+      await w.add('manifest.json', ['{"format":"pkc3-archive","version":2}']);
+      await w.add('container.json', [
+        JSON.stringify({
+          meta: {},
+          entries: [
+            { lid: 'n1', title: 'ノート', archetype: 'text', body: 'x', entryOrder: 1,
+              createdAt: null, updatedAt: null, status: null, date: null, archived: false },
+          ],
+          relations: [],
+          revisions: [],
+          assets: [],
+          ...(notePins === undefined ? {} : { notePins }),
+        }),
+      ]);
+      return new File([w.finish()], 'a.pkc3-full.zip');
+    }
+
+    it('ピンが importNotePins へ渡る(取り込んだノートに在る物だけ)', async () => {
+      const { d, deps } = harness();
+      const got: string[] = [];
+      deps.importNotePins = async (lids) => {
+        got.push(...lids);
+        return { added: lids.length, overLimit: 0, addedLids: [...lids] };
+      };
+      expect(await importPkc2File(d, deps, await archiveWithPins(['n1', 'ghost']))).toBe(1);
+      expect(got, '取り込んだノートに無い lid が渡った').toEqual(['n1']);
+    });
+
+    it('ピンが無いバックアップでは呼ばない', async () => {
+      const { d, deps } = harness();
+      let called = 0;
+      deps.importNotePins = async () => {
+        called++;
+        return { added: 0, overLimit: 0 };
+      };
+      expect(await importPkc2File(d, deps, await archiveWithPins(undefined))).toBe(1);
+      expect(called).toBe(0);
+    });
+
+    it('ピンを戻せなくても取り込みは成功し、注意として言う。上限で見送った分は件数つきで言う', async () => {
+      const a = harness();
+      a.deps.importNotePins = async () => {
+        throw new Error('壊れた');
+      };
+      expect(await importPkc2File(a.d, a.deps, await archiveWithPins(['n1']))).toBe(1);
+      expect(a.reportedNotes().join('\n')).toContain('ピン留めを戻せませんでした');
+      const b = harness();
+      b.deps.importNotePins = async () => ({ added: 0, overLimit: 4 });
+      await importPkc2File(b.d, b.deps, await archiveWithPins(['n1']));
+      expect(b.reportedNotes().join('\n')).toContain('上限のため 4 件のピン留めを戻せませんでした');
+    });
+
+    it('🔴 足したピンの lid を取り消しへ渡す(足さなかったら渡さない)', async () => {
+      const h = harness();
+      h.deps.importNotePins = async () => ({ added: 1, overLimit: 0, addedLids: ['n1'] });
+      await importPkc2File(h.d, h.deps, await archiveWithPins(['n1']));
+      expect(h.importedOpts).toEqual([{ tagColors: false, addedPins: ['n1'] }]);
+      const none = harness();
+      none.deps.importNotePins = async () => ({ added: 0, overLimit: 0, addedLids: [] });
+      await importPkc2File(none.d, none.deps, await archiveWithPins(['n1']));
+      expect(none.importedOpts).toEqual([{ tagColors: false }]);
+    });
+  });
+
+  /**
    * 🔴 **判定は末尾ではなく中身**(#1017 段④b)。⚠ ここが「新しい 3 種の末尾を
    *   足したら、判定を末尾で書いてしまった」を捕まえる ── 3 種 + 旧形式を
    *   受けるようにした変更のついでに、`file.name` を見る分岐を紛れ込ませても

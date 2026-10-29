@@ -142,6 +142,32 @@ export function pasteConvertedMessage(mac: boolean = isMac()): string {
   return `Web などの書式つきの字を Markdown に直して貼りました(戻す: ${chordLabel('Mod+Z', mac)} / 書式なしで貼る: ${chordLabel('Mod+Shift+V', mac)})`;
 }
 
+/** 🔴 **貼った直後の小さな知らせ(トースト)の字**(#1379)。⚠ 貼った中身は入れない。 */
+export const PASTE_TOAST_TEXT = '書式つきの字を Markdown に直して貼りました';
+export const PASTE_TOAST_ACTION = 'プレーンテキストに変更';
+export const PASTE_TOAST_CHANGED = '貼ったあとに本文が変わったため、変更できません(戻すには Ctrl+Z を使ってください)';
+export const PASTE_TOAST_CLOSED = '編集欄が閉じたため、変更できません';
+
+/**
+ * 🔴 **貼った範囲を、書式なしの字へ置き換えるときの範囲**(#1379)。
+ *
+ * 貼る前の欄(`before`: 本文と選択範囲)と、貼ったあとの本文から、**貼った字が占めている範囲**を求める。
+ * 貼る前の選択範囲より前と、選択範囲より後ろが 1 字も変わっていなければ範囲を返す(貼ったあとに
+ * 本文を編集していたら `null` ── 無関係な所を書き換えない)。
+ * ⚠ 判定はここ 1 本(トーストの実行側に別の突き合わせを書かない)。
+ */
+export function pasteRevertRange(
+  before: { readonly value: string; readonly start: number; readonly end: number },
+  afterValue: string,
+): { readonly start: number; readonly end: number } | null {
+  const tail = before.value.slice(before.end);
+  const end = afterValue.length - tail.length;
+  if (end < before.start) return null;
+  if (afterValue.slice(0, before.start) !== before.value.slice(0, before.start)) return null;
+  if (!afterValue.endsWith(tail)) return null;
+  return { start: before.start, end };
+}
+
 /**
  * 🔴 **「書式なしで貼る」の鍵か**(Ctrl+Shift+V / Mac は ⌘+Shift+V・⌘+Option+Shift+V。台帳 #1852 / 依頼 93-1。Gemini 回答 = 推薦 A)。
  *

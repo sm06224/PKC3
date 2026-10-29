@@ -36,6 +36,7 @@ import { AlarmEnabledStore } from '@adapter/ui/render/alarm-enabled';
 import { VoiceBoostStore } from '@adapter/ui/render/voice-boost';
 import { MissingLinksStore } from '@adapter/ui/render/missing-links';
 import { CodeCollapseStore } from '@adapter/ui/render/code-collapse';
+import { PasteToastStore } from '@adapter/ui/render/paste-toast';
 import { InlineCodeCopyStore } from '@adapter/ui/render/inline-code-copy';
 import { InlineCompleteStore } from '@adapter/ui/render/inline-complete-setting';
 import { PdfReaderStore } from '@adapter/ui/render/pdf-reader-setting';
@@ -217,6 +218,15 @@ const CASES: readonly {
     name: 'InlineCompleteStore',
     make: (st: StorageLike | null = null) => {
       const s = new InlineCompleteStore(st);
+      return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
+    a: false,
+    b: true,
+  },
+  {
+    name: 'PasteToastStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new PasteToastStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: false,

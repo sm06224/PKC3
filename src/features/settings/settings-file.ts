@@ -211,6 +211,16 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
    *   lid を持たない ── 別の container へ運んでも「居ないノートを指す」が起きない。
    */
   { key: 'pkc3.filer-flatten', label: 'フォルダのタブで下の階層まで全部出すか', valid: isOnOff },
+  /**
+   * ⚠ **人に付く好み**(#1379)── 直して貼ったときの知らせが要るかは端末の事情ではない。既定は**出す**なので、
+   *   運ばれるのは**切にした人の `0`** が主になる。運んだ先に仕組みが無くても害は出ない。
+   */
+  { key: 'pkc3.paste-toast', label: '直して貼ったときの知らせを出すか', valid: isOnOff },
+  /**
+   * ⚠ **人に付く好み**(#1457)── 予定表のカンバンを「状態(未完了 / 完了)」で見たいか「信号機(赤 / 黄 / 緑 / 完了)」で
+   *   見たいかは端末の事情ではない。中身は `status` / `signal` だけで、lid を持たない。
+   */
+  { key: 'pkc3.board-layout', label: '予定表のカンバンの列の組み方', valid: (v) => v === 'status' || v === 'signal' },
 ];
 
 /**
@@ -232,6 +242,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
   {
     key: 'pkc3.schedule-last-open',
     why: 'この端末でコレクションを最後に開いていた時刻(#855 20-C)。コレクションごとの id で持つ端末の事実なので、運ぶと別の端末の「見逃した」を間違えて数える',
+  },
+  {
+    key: 'pkc3.note-pins',
+    why: '旧い版が端末に残したピン留め(#1377)。いまはコレクションのデータで、バックアップに入る。このキーは開いたときに一度だけ取り込んで消す移行用なので、設定として運ぶ物は無い(中身も ID そのもの)',
   },
   {
     key: 'pkc3.split-lids',

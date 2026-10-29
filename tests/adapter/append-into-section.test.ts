@@ -136,7 +136,7 @@ describe('#395 段① 追記先の選択が画面に出る', () => {
     expect([...form.children]).toEqual([input, bar]);
     expect(bar.firstElementChild, '追記先が下段の左に居ない').toBe(target);
     expect(bar.lastElementChild).toBe(actions);
-    // 押す物は右の組。⚠ 「元に戻す」が「本文に追記する」の左
+    // 押す物は右の組。⚠ 「元に戻す」が「追記」の左
     expect([...actions.children]).toEqual([undo, send]);
     // 空振り防止 ── 3 つとも枠の中にある
     for (const el of [target, undo, send]) expect(form.contains(el)).toBe(true);

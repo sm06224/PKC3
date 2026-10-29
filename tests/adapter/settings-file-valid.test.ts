@@ -9,6 +9,7 @@
  *   下見の検査が古い形のまま緑になるのを防ぐ。
  * 🔑 対象は `PORTABLE_KEYS` の**全数**。検査を持たない鍵が 1 つでも在れば落ちる。
  */
+import { chooseBoardLayout } from '../../src/adapter/ui/render/schedule-board';
 import { describe, expect, it } from 'vitest';
 import { KEY_COMMANDS } from '../../src/features/keymap';
 import { PORTABLE_KEYS, planSettingsImport } from '../../src/features/settings/settings-file';
@@ -32,6 +33,7 @@ import { RelativeDaysStore } from '../../src/adapter/ui/render/relative-days';
 import { ColorSwatchStore } from '../../src/adapter/ui/render/color-swatch';
 import { MissingLinksStore } from '../../src/adapter/ui/render/missing-links';
 import { CodeCollapseStore } from '../../src/adapter/ui/render/code-collapse';
+import { PasteToastStore } from '../../src/adapter/ui/render/paste-toast';
 import { InlineCodeCopyStore } from '../../src/adapter/ui/render/inline-code-copy';
 import { InlineCompleteStore } from '../../src/adapter/ui/render/inline-complete-setting';
 import { PdfReaderStore } from '../../src/adapter/ui/render/pdf-reader-setting';
@@ -86,6 +88,7 @@ const toggles: Record<string, (s: ReturnType<typeof fakeStorage>) => { setEnable
   'pkc3.missing-links': (s) => new MissingLinksStore(s),
   'pkc3.code-collapse': (s) => new CodeCollapseStore(s),
   'pkc3.inline-code-copy': (s) => new InlineCodeCopyStore(s),
+  'pkc3.paste-toast': (s) => new PasteToastStore(s),
   'pkc3.inline-complete': (s) => new InlineCompleteStore(s),
   'pkc3.pdf-reader': (s) => new PdfReaderStore(s),
   'pkc3.filer-flatten': (s) => new FilerFlattenStore(s),
@@ -118,6 +121,16 @@ function validSamples(): Record<string, string[]> {
       if (k.addBinding(c.id, 'Ctrl+Alt+Shift+F9') === null) break;
     }
     out['pkc3.keymap'] = [s.dump()['pkc3.keymap']!];
+  }
+  {
+    // 🔴 #1457: 予定表のカンバンの列の組み方 ── 書き手(`chooseBoardLayout`)が実際に書く字を採る
+    localStorage.removeItem('pkc3.board-layout');
+    chooseBoardLayout('signal');
+    const a = localStorage.getItem('pkc3.board-layout')!;
+    chooseBoardLayout('status');
+    const b = localStorage.getItem('pkc3.board-layout')!;
+    localStorage.removeItem('pkc3.board-layout');
+    out['pkc3.board-layout'] = [a, b];
   }
   {
     const s = fakeStorage();

@@ -778,6 +778,78 @@ describe('🔴 つながり・履歴・添付の登録行・色が戻る（#1087
     expect(r.tagColorsRestored).toBe(0);
   });
 
+  /**
+   * 🔴 **ピン留め(#1377)も建て直しで戻る**。観測点: ①捨てる前に読む(捨てた後の DB からは読めない)
+   * ②戻すのは書き戻したノートに在る lid だけ(`have` の絞り込み。無い lid は書かない) ③読めない / 書けないでも建て直しは止めない
+   * ④保険の zip にも入る(zip が先に落ちるので)。
+   */
+  it('🔴 ピンを捨てる前に読み、書き戻したノートに在る物だけを留めた順で戻す', async () => {
+    const h = harness();
+    const wroteLids: string[][] = [];
+    const ports: RebuildPorts = {
+      ...h.ports,
+      readNotePins: async () => {
+        h.calls.push('readNotePins');
+        return ['c3', 'ghost', 'a1'];
+      },
+      writeNotePins: async (_cid, lids) => {
+        h.calls.push('writeNotePins');
+        wroteLids.push([...lids]);
+      },
+    };
+    const r = await rebuildContainer('c-old', 't', ports);
+    expect(r.outcome).toBe('rebuilt');
+    expect(wroteLids, '無い lid(ghost)を書いた / 順が崩れた').toEqual([['c3', 'a1']]);
+    expect(h.calls.indexOf('readNotePins')).toBeLessThan(h.calls.indexOf('wipeStorage'));
+    expect(h.calls.indexOf('writeNotePins')).toBeGreaterThan(h.calls.indexOf('writeEntries:c-old:3'));
+  });
+
+  it('ピンが読めない / 書けなくても、建て直しは止めない。ピンが無ければ書き口を呼ばない', async () => {
+    const h = harness();
+    const broken: RebuildPorts = {
+      ...h.ports,
+      readNotePins: async () => {
+        throw new Error('読めません');
+      },
+      writeNotePins: async () => {
+        throw new Error('書けません');
+      },
+    };
+    expect((await rebuildContainer('c-old', 't', broken)).outcome).toBe('rebuilt');
+    const h2 = harness();
+    const failWrite: RebuildPorts = {
+      ...h2.ports,
+      readNotePins: async () => ['a1'],
+      writeNotePins: async () => {
+        throw new Error('書けません');
+      },
+    };
+    expect((await rebuildContainer('c-old', 't', failWrite)).outcome).toBe('rebuilt');
+    const h3 = harness();
+    let called = 0;
+    const none: RebuildPorts = {
+      ...h3.ports,
+      readNotePins: async () => [],
+      writeNotePins: async () => void (called += 1),
+    };
+    await rebuildContainer('c-old', 't', none);
+    expect(called, 'ピンが 0 件なのに書き口を呼んだ').toBe(0);
+  });
+
+  it('🔴 読んだピンは、保険の zip にも入る(ノートに在る物だけ)', async () => {
+    let blob: Blob | null = null;
+    const h = harness();
+    const ports: RebuildPorts = {
+      ...h.ports,
+      readNotePins: async () => ['b2', 'ghost'],
+      saveArchive: async (source) => {
+        blob = (await writeArchive(source, '2026-10-10T00:00:00.000Z', undefined, 'warn')).blob;
+      },
+    };
+    await rebuildContainer('c-old', 't', ports);
+    expect((await readArchive(blob!)).notePins).toEqual(['b2']);
+  });
+
   it('🔴 つながり・履歴を戻し、件数を字で言う', async () => {
     const h = harness({
       relations: [REL],

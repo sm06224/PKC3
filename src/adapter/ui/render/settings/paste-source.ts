@@ -12,6 +12,8 @@
  */
 import { DEFAULT_PASTE_SOURCE, PASTE_SOURCES } from '@features/markdown/paste-source';
 import type { PasteSourceStore } from '../paste-source';
+import type { PasteToastStore } from '../paste-toast';
+import { buildCheckboxRow, syncCheckbox } from './checkbox';
 import { markDefault } from './default-mark';
 import { buildSettingsNote } from './note';
 import type { SettingsSection } from './section';
@@ -19,6 +21,7 @@ import type { SettingsSection } from './section';
 export function createPasteSourceSection(
   region: HTMLElement,
   store: PasteSourceStore,
+  toastStore: PasteToastStore,
 ): SettingsSection {
   return {
     id: 'paste-source',
@@ -58,6 +61,20 @@ export function createPasteSourceSection(
        */
       dd.append(buildSettingsNote('貼り付けで読み取る形です(崩れるときは切り替えてください)。フラグの「貼り付けたとき、何が届いてどれを使ったかを画面に出す」を入れると、何が届いたかが見えます。'));
       dl.append(dt, dd);
+      /**
+       * 🔴 **直して貼ったときの小さな知らせを出すか**(#1379)。既定は出す。
+       * ⚠ 切っても、直したことはシステムのメッセージに残る(知らせが出なくなるだけ)。
+       */
+      const toastRow = buildCheckboxRow({
+        term: '貼ったときの知らせ',
+        action: 'set-paste-toast',
+        field: 'paste-toast',
+        label: ' 書式を直して貼ったとき、画面の右下に知らせを出す',
+        title:
+          'Web などの書式つきの字を Markdown に直して貼ったあと、「プレーンテキストに変更」を押せる小さな知らせを数秒出します。' +
+          'オフにしても、直したことはシステムのメッセージに残ります。',
+      });
+      dl.append(toastRow.dt, toastRow.dd);
       wrap.append(dl);
       return wrap;
     },
@@ -71,6 +88,7 @@ export function createPasteSourceSection(
       );
       const cur = store.get();
       if (select && select.value !== cur) select.value = cur;
+      syncCheckbox(region, 'paste-toast', () => toastStore.enabled());
     },
   };
 }
