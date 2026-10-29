@@ -4589,6 +4589,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 返るのは**数字だけ**(本文も bytes も境界を越えない)。
      * ⚠ 器が無い(cid が無い)ときは空を返す ── 押しても「調べています…」で止めない。
      */
+    // 🔴 コマンドシェルの `find -b`(本文の全文検索)。書込の後ろへ並んでから引く(保存した直後に古い答えを出さない)
+    searchDetail: async (query: string) => {
+      await storeEffects?.settled();
+      const cid = dispatcher.getState().cid;
+      if (cid === null) return { rows: [], truncated: false };
+      return client.request({ op: 'searchDetail', cid, query });
+    },
     storageProfile: async () => {
       const cid = dispatcher.getState().cid;
       if (cid === null) return { rows: [], totalAssetBytes: 0, orphanBytes: 0 };

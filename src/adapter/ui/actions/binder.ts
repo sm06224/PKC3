@@ -834,7 +834,8 @@ import {
   shellInputOf,
   shellSessionOf,
 } from './shell-input';
-import { splitSnippet } from '@features/filter/search-snippet';
+import { splitSnippet, type SearchDetailRow } from '@features/filter/search-snippet';
+import { askSqlEmbed } from '@adapter/ui/render/sql-embed-hydrate';
 import { completeLine, type CompleteOptions } from '@features/shell/complete';
 import { findCommand as findShellCommand } from '@features/shell/commands';
 import { pathOf as shellPathOf } from '@features/shell/resolve';
@@ -2209,6 +2210,11 @@ export interface BinderServices {
    * ⚠ 無い配線では**押しても何も起きない**ので、器は「調べています…」で止めない。
    */
   storageProfile?(): Promise<StorageProfileResult>;
+  /**
+   * 🔴 **本文の全文検索を、自前の口で引く**(コマンドシェルの `find -b`)。⚠ 「探す」の画面の欄・結果(`searchPage`)を借りない。
+   * 省略可(古い配線では「引けません」と断るだけ)。
+   */
+  searchDetail?(query: string): Promise<{ rows: SearchDetailRow[]; truncated: boolean }>;
   /**
    * 🔴 **ブラウザが言う使用量**(#971 段②)── 空きが尽きる前に言うための材料。
    * ⚠ 読めない端末が在るので optional(読めなければ「読めなかった」と出す)。
@@ -7929,46 +7935,41 @@ export function makeShellOps(h: {
       dispatcher.dispatch({ type: 'DUAL_SELECT_MANY', side, lids });
       return done(`${String(lids.length)} 件を選択しました(mv / cp / rm / tag の対象になります)`);
     },
+    /**
+     * 🔴 **SQL は自前の口で走らせる**(`sqlPage` を借りない)。「SQL で調べる」の画面の入力・履歴・結果を上書きしないし、
+     *   そちらが走っていても自分の答えだけを受け取る。⚠ 相手はこの PKC のノート(sqlite)の**読み取り専用に固定**(DuckDB も取り込んだ
+     *   ファイルも使わない)。実体は本文の ` ```sql embed ` と同じ口(`askSqlEmbed` ── 字の門・上限・直列・断り文が同じ)。
+     */
     runSql: async (sql) => {
-      dispatcher.dispatch({ type: 'SET_SQL_TEXT', sql });
-      dispatcher.dispatch({ type: 'RUN_SQL' });
-      const finished = await waitForState(dispatcher, (s) => !s.sqlPage.running, 50_000);
-      const p = dispatcher.getState().sqlPage;
-      if (!finished) return { columns: [], rows: [], truncated: false, ms: 0, error: 'SQL の完了を待てませんでした(SQL の画面で確かめてください)' };
-      if (p.error !== '') return { columns: [], rows: [], truncated: false, ms: 0, error: p.error };
-      const cut = p.rows.length > SHELL_SQL_ROWS_SHOWN;
-      return {
-        columns: p.columns,
-        rows: cut ? p.rows.slice(0, SHELL_SQL_ROWS_SHOWN) : p.rows,
-        truncated: p.truncated || cut,
-        ms: Math.round(p.ms),
-        error: '',
-      };
-    },
-    search: async (query) => {
-      const page = dispatcher.getState().searchPage;
-      // 同じ語を続けて探しても、結果を取り直す(語が同じだと reducer が何もしない)
-      if (page.query === query) dispatcher.dispatch({ type: 'SET_SEARCH_PAGE_QUERY', query: '' });
-      dispatcher.dispatch({ type: 'SET_SEARCH_PAGE_QUERY', query });
-      const finished = await waitForState(
-        dispatcher,
-        (s) => s.searchPage.query === query && s.searchPage.rowsQuery === query,
-        15_000,
-      );
-      const p = dispatcher.getState().searchPage;
-      if (!finished) return { rows: [], truncated: false, error: '探し終えるのを待てませんでした(「探す」の画面で確かめてください)' };
-      if (p.failed !== false) {
+      const t0 = Date.now();
+      try {
+        const a = await askSqlEmbed(sql);
+        const cut = a.rows.length > SHELL_SQL_ROWS_SHOWN;
         return {
-          rows: [],
-          truncated: false,
-          error: p.failed === 'stale' ? 'このタブの PKC3 が古いままのため、本文を探せません。再読み込みしてください' : '本文を探せませんでした',
+          columns: a.columns,
+          rows: cut ? a.rows.slice(0, SHELL_SQL_ROWS_SHOWN) : a.rows,
+          truncated: a.truncated || cut,
+          ms: Date.now() - t0,
+          error: '',
         };
+      } catch (e) {
+        return { columns: [], rows: [], truncated: false, ms: 0, error: errorText(e) };
       }
-      return {
-        rows: p.rows.map((r) => ({ lid: r.lid, title: r.title, snippet: splitSnippet(r.snippet).map((s) => s.text).join('') })),
-        truncated: p.truncated,
-        error: '',
-      };
+    },
+    /** 🔴 本文の検索も自前の口(`searchPage` を借りない ── 「探す」の画面の語と結果を上書きしない)。 */
+    search: async (query) => {
+      const ask = services.searchDetail;
+      if (ask === undefined) return { rows: [], truncated: false, error: 'このタブの PKC3 が古いままのため、本文を探せません。再読み込みしてください' };
+      try {
+        const r = await ask(query);
+        return {
+          rows: r.rows.map((x) => ({ lid: x.lid, title: x.title, snippet: splitSnippet(x.snippet).map((s) => s.text).join('') })),
+          truncated: r.truncated,
+          error: '',
+        };
+      } catch (e) {
+        return { rows: [], truncated: false, error: `本文を探せませんでした(${errorText(e)})` };
+      }
     },
     operations: (query) => {
       const rows = commandRowsFor(root, dispatcher, appKeymap, query, null);
