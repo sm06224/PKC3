@@ -48,6 +48,8 @@ export interface AsrJob {
   readonly language: string | null;
   /** 16kHz mono の PCM(`-1..1`)。 */
   readonly pcm: Float32Array;
+  /** 🔴 WebGPU を先に試す部品か(`AsrPart.gpu`。#1446 ②)。使えなければ CPU(wasm)へ戻る。 */
+  readonly gpu?: boolean;
 }
 
 /** 認識結果の 1 区切り(#1232 段 a)。⚠ 時刻は**録音の頭からの ms**。 */
@@ -68,6 +70,8 @@ export interface AsrJobResult {
   /** 読み込み(部品の import + 重みの読み + session 生成)。⚠ 読み込み済みなら 0。 */
   readonly loadMs: number;
   readonly runMs: number;
+  /** 実際に使った実行器(`webgpu` を試して戻ったときは `wasm`)。 */
+  readonly device?: 'webgpu' | 'wasm';
 }
 
 type Pipe = ((pcm: Float32Array, opts: Record<string, unknown>) => Promise<unknown>) & {
@@ -94,10 +98,14 @@ export interface AsrRunnerDeps {
   importModule(url: string): Promise<RuntimeModule>;
   createObjectURL(blob: Blob): string;
   now?(): number;
+  /** この場所(ワーカー)で WebGPU を試せるか。省略 = `navigator.gpu` の有無。 */
+  hasWebGpu?(): boolean;
 }
 
 /** 推論の設定。⚠ 段②-0 で測った組み合わせ(wasm CPU / q8)から動かさない。 */
 const PIPELINE_OPTIONS = { device: 'wasm', dtype: 'q8' } as const;
+/** WebGPU を試すときの設定(`AsrPart.gpu` の部品だけ)。⚠ 失敗したら `PIPELINE_OPTIONS` へ戻る。 */
+const GPU_PIPELINE_OPTIONS = { device: 'webgpu', dtype: 'fp16' } as const;
 const RUN_OPTIONS = { chunk_length_s: 30, stride_length_s: 5, task: 'transcribe', return_timestamps: true } as const;
 
 function textOf(out: unknown): string {
@@ -152,7 +160,7 @@ export class AsrRunner {
   private readonly now: () => number;
   private runtime: RuntimeModule | null = null;
   private blobs = new Map<string, Blob>();
-  private loaded: { modelId: string; pipe: Pipe } | null = null;
+  private loaded: { modelId: string; pipe: Pipe; device: 'webgpu' | 'wasm' } | null = null;
 
   constructor(deps: AsrRunnerDeps) {
     this.deps = deps;
@@ -223,8 +231,19 @@ export class AsrRunner {
       await old.dispose?.().catch(() => undefined);
     }
     if (this.loaded === null) {
-      const pipe = await rt.pipeline('automatic-speech-recognition', job.modelId, { ...PIPELINE_OPTIONS });
-      this.loaded = { modelId: job.modelId, pipe };
+      let pipe: Pipe | null = null;
+      let device: 'webgpu' | 'wasm' = 'wasm';
+      const hasGpu = this.deps.hasWebGpu ?? ((): boolean => typeof navigator !== 'undefined' && 'gpu' in navigator);
+      if (job.gpu === true && hasGpu()) {
+        try {
+          pipe = await rt.pipeline('automatic-speech-recognition', job.modelId, { ...GPU_PIPELINE_OPTIONS });
+          device = 'webgpu';
+        } catch {
+          pipe = null; // 実行の部品が WebGPU に対応していない・fp16 の重みが無い、など ── CPU で続ける
+        }
+      }
+      pipe ??= await rt.pipeline('automatic-speech-recognition', job.modelId, { ...PIPELINE_OPTIONS });
+      this.loaded = { modelId: job.modelId, pipe, device };
     }
     const t1 = this.now();
     const out = await this.loaded.pipe(job.pcm, {
@@ -238,6 +257,7 @@ export class AsrRunner {
       ...(segments.length > 0 ? { segments } : {}),
       loadMs: t1 - t0,
       runMs: t2 - t1,
+      device: this.loaded.device,
     };
   }
 }

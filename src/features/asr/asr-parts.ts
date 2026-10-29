@@ -26,7 +26,7 @@
 import { humanBytes } from '../human-bytes';
 
 /** 2 択の id。⚠ 画面の字ではない(画面の字は `label`)。 */
-export type AsrPartId = 'light' | 'accurate';
+export type AsrPartId = 'light' | 'accurate' | 'turbo';
 
 export interface AsrPart {
   readonly id: AsrPartId;
@@ -49,6 +49,18 @@ export interface AsrPart {
    *   ⚠ 出すだけで、ボタンは押せるまま(押して試すことは止めない)。
    */
   readonly needMemoryGb: number;
+  /**
+   * 🔴 **配布元(asr-pack)がまだ置いていないかもしれない部品**(#1446 ③)。目録に載っていなくても、他の部品の取り込みを
+   *   壊さない(目録の検めで落とさず、「まだ配っていません」として選べない形にする)。
+   */
+  readonly optional?: boolean;
+  /**
+   * 🔴 **WebGPU が使えるときだけ現実的な部品**(#1446 ②)。CPU(wasm)で回すと遅すぎるので、推奨は WebGPU が測れて
+   *   使えるときだけ出す。実行は WebGPU を先に試し、使えなければ(実行の部品が対応していない場合も含め)CPU へ戻る。
+   */
+  readonly gpu?: boolean;
+  /** 重みの下限(byte)。省略 = `modelBytes` の半分。⚠ 未測定の見積もりの部品は、実物より大きい見積もりで取り込みを断らないよう明示する。 */
+  readonly floorBytes?: number;
 }
 
 /** 2 択の中身。⚠ **ここだけを差し替える**(実機の日本語の結果を受けて)。 */
@@ -68,6 +80,23 @@ export const ASR_PARTS: readonly AsrPart[] = [
     modelBytes: 288_448_143,
     secondsPerMinute: 60,
     needMemoryGb: 8,
+  },
+  /**
+   * 🔴 **whisper-large-v3-turbo**(#1446 ③)。⚠ **配布元 `sm06224/asr-pack` に置かれるまで選べない**(`optional`)。
+   * 数は**未測定の見積もり**(実物が置かれたら差し替える): 重みは large-v3 の encoder(約 635M 引数)+ 4 層の decoder を q8 にした
+   * 約 0.8GB と見て、CPU(wasm)の時間は encoder が支配する small(60 秒)の約 7 倍。だから CPU では勧めず、
+   * WebGPU が使える端末にだけ勧める(`gpu`)。
+   */
+  {
+    id: 'turbo',
+    label: '高精度',
+    modelId: 'openai/whisper-large-v3-turbo',
+    modelBytes: 800_000_000,
+    secondsPerMinute: 400,
+    needMemoryGb: 8,
+    optional: true,
+    gpu: true,
+    floorBytes: 200_000_000,
   },
 ] as const;
 
@@ -166,20 +195,35 @@ export function asrMemoryNote(part: AsrPart, deviceMemoryGb: number | undefined)
 }
 
 /**
- * 🔴 **この端末に向く 1 つを案内する**(#1446 の残り「端末ごとの推奨表示」)。
+ * 🔴 **この端末に向く 1 つを案内する**(#1446 の「端末ごとの推奨表示」)。
  *
- * 🔑 根拠は `needMemoryGb`(上の `asrMemoryNote` と同じ 1 本)── 大きいほうの必要量を満たす端末なら「正確」、
- *   満たさなければ「軽い」。⚠ `deviceMemory` が読めない端末(Firefox / Safari)には**案内しない**(`null`。言えない)。
- * ⚠ WebGPU の可否は使わない: 推論は wasm(CPU)で走り、WebGPU を使う実行器はまだ配っていないので、
- *   見ても推奨は変わらない(変わらない物を画面に出さない)。実行器を配る日にここへ足す。
- * ⚠ 案内だけで、どちらも押せる(押して試すことは止めない)。
+ * 🔑 根拠は `needMemoryGb`(上の `asrMemoryNote` と同じ 1 本)と **WebGPU の可否**(`gpu` の部品)。
+ *   - メモリを満たす部品のうち、いちばん重い(= 当たりやすい)ものを勧める。
+ *   - `gpu` の部品(高精度)は、**WebGPU が使えると測れた**ときだけ候補に入れる(CPU では遅すぎる)。
+ *     ⚠ 測れていない(`null`)・使えない(`false`)なら候補に入れない ── 嘘の期待を作らない。
+ *   - `unavailable` に在る部品(配布元がまだ置いていない)は候補に入れない。
+ * ⚠ `deviceMemory` が読めない端末(Firefox / Safari)には**案内しない**(`null`。言えない)。
+ * ⚠ 案内だけで、どれも押して試せる(止めない)。
  */
-export function asrRecommendNote(deviceMemoryGb: number | undefined): string | null {
+export function asrRecommendNote(
+  deviceMemoryGb: number | undefined,
+  webgpu: boolean | null = null,
+  unavailable: Readonly<Partial<Record<AsrPartId, string>>> = {},
+): string | null {
   if (typeof deviceMemoryGb !== 'number' || !Number.isFinite(deviceMemoryGb) || deviceMemoryGb <= 0) {
     return null;
   }
-  const best = [...ASR_PARTS].reverse().find((p) => deviceMemoryGb >= p.needMemoryGb) ?? ASR_PARTS[0]!;
-  return `この端末のメモリ(${humanBytes(deviceMemoryGb * 1024 ** 3)})には「${best.label}」がお勧めです`;
+  const best =
+    [...ASR_PARTS]
+      .reverse()
+      .find(
+        (p) =>
+          deviceMemoryGb >= p.needMemoryGb
+          && (p.gpu !== true || webgpu === true)
+          && unavailable[p.id] === undefined,
+      ) ?? ASR_PARTS[0]!;
+  const gpuText = webgpu === null ? '' : webgpu ? '(WebGPU が使えます)' : '(WebGPU は使えません)';
+  return `この端末のメモリ(${humanBytes(deviceMemoryGb * 1024 ** 3)})${gpuText}には「${best.label}」がお勧めです`;
 }
 
 // ── 目録(`pack.json`)を読む ────────────────────────────────────────────
@@ -215,7 +259,7 @@ const RUNTIME_FLOOR: Readonly<Record<string, number>> = {
 
 /** 重みの下限 = 定数の半分(別の model を取り違えた・途中で切れた、の桁を止める)。 */
 export function asrModelFloorBytes(part: AsrPart): number {
-  return Math.floor(part.modelBytes / 2);
+  return part.floorBytes ?? Math.floor(part.modelBytes / 2);
 }
 
 /** pack 内の相対 path として安全か(`..` / 絶対 / backslash を断る)。 */
@@ -243,6 +287,21 @@ function readFiles(v: unknown, where: string): AsrPackFile[] | string {
     out.push({ path, bytes, sha256: sha });
   }
   return out;
+}
+
+/** 1 つの部品の file を検める。⚠ 不備は理由の文字列で返す。 */
+function checkModelFiles(part: AsrPart, mine: unknown): AsrPackFile[] | string {
+  const files = readFiles(mine, `${part.label}のファイル`);
+  if (typeof files === 'string') return files;
+  const dir = asrModelDir(part);
+  if (!files.every((f) => f.path.startsWith(dir))) return `${part.label}のファイルに ${dir} の外の名前があります`;
+  const onnx = files.filter((f) => f.path.endsWith('.onnx'));
+  if (onnx.length === 0) return `${part.label}のファイルに重み(.onnx)がありません`;
+  const total = onnx.reduce((s, f) => s + f.bytes, 0);
+  if (total < asrModelFloorBytes(part)) {
+    return `${part.label}の重みが小さすぎます(別の物か、途中で切れた可能性があります)`;
+  }
+  return files;
 }
 
 /**
@@ -277,21 +336,25 @@ export function readAsrPack(text: string): AsrPackRead {
   for (const part of ASR_PARTS) {
     const mine = (modelsRaw as Record<string, unknown>)[part.id];
     if (mine === undefined) continue; // 配っていない 2 択は無くてよい
-    const files = readFiles(mine, `${part.label}のファイル`);
-    if (typeof files === 'string') return { ok: false, why: files };
-    const dir = asrModelDir(part);
-    if (!files.every((f) => f.path.startsWith(dir))) {
-      return { ok: false, why: `${part.label}のファイルに ${dir} の外の名前があります` };
+    const checked = checkModelFiles(part, mine);
+    if (typeof checked === 'string') {
+      // 🔴 置かれるかわからない部品の不備で、置かれている部品(軽い・正確)の取り込みまで壊さない
+      if (part.optional === true) continue;
+      return { ok: false, why: checked };
     }
-    const onnx = files.filter((f) => f.path.endsWith('.onnx'));
-    if (onnx.length === 0) return { ok: false, why: `${part.label}のファイルに重み(.onnx)がありません` };
-    const total = onnx.reduce((s, f) => s + f.bytes, 0);
-    if (total < asrModelFloorBytes(part)) {
-      return { ok: false, why: `${part.label}の重みが小さすぎます(別の物か、途中で切れた可能性があります)` };
-    }
-    models[part.id] = files;
+    models[part.id] = checked;
   }
   return { ok: true, pack: { version, runtime, models } };
+}
+
+/** 配布元がまだ置いていない部品の理由(目録に無い部品)。画面で「選べない」理由に出す。 */
+export const ASR_UNAVAILABLE_TEXT = '配布元(asr-pack)にまだ置かれていないため、取り込めません';
+
+/** 目録に載っていない部品 → 選べない理由。 */
+export function asrUnavailableParts(pack: AsrPack): Partial<Record<AsrPartId, string>> {
+  const out: Partial<Record<AsrPartId, string>> = {};
+  for (const p of ASR_PARTS) if (pack.models[p.id] === undefined) out[p.id] = ASR_UNAVAILABLE_TEXT;
+  return out;
 }
 
 /** 取り先の file の URL(`base` は末尾が `/` の同一オリジンの絶対 URL)。 */

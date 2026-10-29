@@ -34,6 +34,7 @@ import {
 import { ASR_SECTION_LABEL } from '@features/asr/asr-text';
 import type { AsrInstalled } from '@adapter/platform/asr/asr-pack-store';
 import { humanBytes } from '@features/human-bytes';
+import { webGpuAvailable } from '@adapter/platform/asr/webgpu-probe';
 
 const EMPTY: AsrInstalled = { runtime: null, parts: {} };
 
@@ -46,6 +47,54 @@ export class AsrPackState {
   /** 取り込み中の 1 行(空 = 何もしていない)。 */
   private progressText = '';
   private readonly listeners = new Set<() => void>();
+  /** この端末で WebGPU が使えるか。⚠ `null` = まだ測っていない(推奨に使わない)。 */
+  private webgpuOk: boolean | null = null;
+  /** 配布元がまだ置いていない部品 → 理由(目録から)。⚠ 空 = 分かっていない、または全部ある。 */
+  private unavailableParts: Readonly<Partial<Record<AsrPartId, string>>> = {};
+  /** 配布元の目録を引く口(main が差す)。⚠ 引けなければ `null`(= 分からない。選べない扱いにはしない)。 */
+  private availabilityProbe: (() => Promise<Readonly<Partial<Record<AsrPartId, string>>> | null>) | null = null;
+  private probed = false;
+
+  webgpu(): boolean | null {
+    return this.webgpuOk;
+  }
+
+  setWebgpu(v: boolean): void {
+    if (this.webgpuOk === v) return;
+    this.webgpuOk = v;
+    this.emit();
+  }
+
+  unavailable(): Readonly<Partial<Record<AsrPartId, string>>> {
+    return this.unavailableParts;
+  }
+
+  setUnavailable(v: Readonly<Partial<Record<AsrPartId, string>>>): void {
+    this.unavailableParts = v;
+    this.emit();
+  }
+
+  setAvailabilityProbe(fn: () => Promise<Readonly<Partial<Record<AsrPartId, string>>> | null>): void {
+    this.availabilityProbe = fn;
+  }
+
+  /**
+   * 🔴 **設定の面を開いたときに 1 度だけ**、WebGPU の可否と配布元の目録を測る(#1446 ②③)。
+   * ⚠ 起動では引かない(使わない user の起動に通信を足さない)。目録は小さな JSON で、重みは取らない。
+   * ⚠ 失敗は黙って「分からない」へ(選べない扱いにも、推奨にも使わない)。
+   */
+  async probeOnce(probeGpu: () => Promise<boolean> = webGpuAvailable): Promise<void> {
+    if (this.probed) return;
+    this.probed = true;
+    const gpu = probeGpu().then((v) => this.setWebgpu(v), () => undefined);
+    const avail = (this.availabilityProbe?.() ?? Promise.resolve(null)).then(
+      (v) => {
+        if (v !== null) this.setUnavailable(v);
+      },
+      () => undefined,
+    );
+    await Promise.all([gpu, avail]);
+  }
 
   getInstalled(): AsrInstalled {
     return this.installed;
@@ -139,6 +188,8 @@ export interface AsrPackPanel {
 export interface AsrPackPanelDeps {
   /** 端末のメモリ(GB)。⚠ 読めない端末では `undefined`。test が差し替える。 */
   readonly deviceMemory?: () => number | undefined;
+  /** WebGPU を測る口(test が差し替える)。省略 = 実機を測る。 */
+  readonly webgpu?: () => Promise<boolean>;
 }
 
 function readDeviceMemory(): number | undefined {
@@ -156,6 +207,7 @@ export function buildAsrPackPanel(
   deps: AsrPackPanelDeps = {},
 ): AsrPackPanel {
   const memory = deps.deviceMemory ?? readDeviceMemory;
+  void state.probeOnce(deps.webgpu);
   const root = document.createElement('section');
   root.setAttribute('data-pkc-region', 'settings-asr');
   /** 🔴 見出しは h4(「保存領域」の中の 1 節 ── Office 表示と同じ階)。 */
@@ -230,16 +282,21 @@ export function buildAsrPackPanel(
        * 🔑 実体側にも同じ門が在る(`AsrPackInstaller.isRunning`)── `disabled` は
        *   見た目の親切で、守っているのは実体側(DevTools で外せる)。
        */
-      r.install.disabled = busy;
+      /**
+       * 🔴 **配布元がまだ置いていない部品は、理由を言って選べなくする**(#1446 ③)。⚠ 実体側にも同じ門が在る
+       *   (`AsrPackInstaller.install` が目録に無い部品を断る)。取り込み済みなら消せるよう、`remove` は止めない。
+       */
+      const missing = has ? undefined : state.unavailable()[r.part.id];
+      r.install.disabled = busy || missing !== undefined;
       r.remove.disabled = busy;
-      // 🔴 メモリの案内は**押す前**(= まだ取り込んでいない間)だけ。ボタンは残す
-      const text = has ? null : asrMemoryNote(r.part, memory());
+      // 🔴 メモリの案内は**押す前**(= まだ取り込んでいない間)だけ。ボタンは残す(選べない理由があるときは理由を先に)
+      const text = missing ?? (has ? null : asrMemoryNote(r.part, memory()));
       r.note.hidden = text === null;
       r.note.textContent = text ?? '';
     }
     // 🔑 どれも取り込み済みなら案内は要らない
     const anyHas = rows.some((r) => installedAll.parts[r.part.id] !== undefined);
-    const rec = anyHas ? null : asrRecommendNote(memory());
+    const rec = anyHas ? null : asrRecommendNote(memory(), state.webgpu(), state.unavailable());
     recommend.hidden = rec === null;
     recommend.textContent = rec ?? '';
     progress.hidden = !busy;

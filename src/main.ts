@@ -386,7 +386,8 @@ import { VoiceClient } from '@adapter/platform/voice/voice-client';
 import { VOICE_RATE } from '@features/audio/voice-lab';
 import { AsrPackInstaller } from '@adapter/platform/asr/asr-pack-install';
 import { AsrPackStore } from '@adapter/platform/asr/asr-pack-store';
-import { ASR_PACK_BASE, asrPartOf } from '@features/asr/asr-parts';
+import { ASR_PACK_BASE, asrPartOf, asrUnavailableParts } from '@features/asr/asr-parts';
+import { fetchAsrManifest } from '@adapter/platform/asr/asr-pack-acquire';
 import { appAsrPack, applyAsrResult } from '@adapter/ui/render/asr-pack-panel';
 import { asrReadyFrom, createCaptureTranscriber } from '@adapter/ui/actions/capture-transcribe';
 import { writeBackEntry } from '@adapter/ui/actions/write-back';
@@ -4127,6 +4128,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const asrStore = new AsrPackStore();
   const asrInstaller = new AsrPackInstaller({ store: asrStore, base: ASR_PACK_BASE });
   const asrClient = new AsrClient();
+  // 🔴 配布元の目録を引く口(設定の「音声認識」を開いたとき 1 度だけ使う ── 配布元に無い部品は理由つきで選べなくする。#1446 ③)
+  appAsrPack.setAvailabilityProbe(async () => {
+    try {
+      return asrUnavailableParts(await fetchAsrManifest(ASR_PACK_BASE, (url, init) => fetch(url, init)));
+    } catch {
+      return null; // 引けない(未配布・オフライン)は「分からない」── 選べない扱いにしない
+    }
+  });
   const captureTranscriber = createCaptureTranscriber({
     gate: captureJobGate,
     dispatcher,

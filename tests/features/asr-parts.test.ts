@@ -16,6 +16,8 @@ import { codeOnly } from '../helpers/code-only';
 import {
   ASR_PACK_BASE,
   ASR_PARTS,
+  ASR_UNAVAILABLE_TEXT,
+  asrUnavailableParts,
   ASR_WORKER_IDLE_MS,
   ASR_RUNTIME_FILES,
   ASR_RUNTIME_BYTES,
@@ -64,12 +66,14 @@ function manifest(over: Partial<{ runtime: unknown; models: unknown; version: un
 }
 
 describe('定数は 1 か所(#772 段②)', () => {
-  it('2 択で、id と名前が重ならない', () => {
-    expect(ASR_PARTS).toHaveLength(2);
-    expect(new Set(ASR_PARTS.map((p) => p.id)).size).toBe(2);
-    expect(new Set(ASR_PARTS.map((p) => p.modelId)).size).toBe(2);
+  it('3 択で、id と名前が重ならない', () => {
+    expect(ASR_PARTS).toHaveLength(3);
+    expect(new Set(ASR_PARTS.map((p) => p.id)).size).toBe(3);
+    expect(new Set(ASR_PARTS.map((p) => p.modelId)).size).toBe(3);
+    expect(new Set(ASR_PARTS.map((p) => p.label)).size).toBe(3);
     expect(asrPartOf('light')?.label).toBe('軽い');
     expect(asrPartOf('accurate')?.label).toBe('正確');
+    expect(asrPartOf('turbo')?.modelId).toBe('openai/whisper-large-v3-turbo');
     expect(asrPartOf('nope')).toBeUndefined();
   });
 
@@ -120,13 +124,13 @@ describe('ボタンの字(大きさと 1 行の説明つき)', () => {
       expect(label).toContain(humanBytes(p.modelBytes + ASR_RUNTIME_BYTES));
       expect(label).toContain(`1 分の音に約 ${p.secondsPerMinute} 秒`);
       expect(asrDownloadBytes(p)).toBe(p.modelBytes + ASR_RUNTIME_BYTES);
-      expect(asrModelFloorBytes(p)).toBe(Math.floor(p.modelBytes / 2));
+      expect(asrModelFloorBytes(p)).toBe(p.floorBytes ?? Math.floor(p.modelBytes / 2));
     }
   });
 
   it('2 択の字が互いに違う(同じ字の 2 ボタンを作らない)', () => {
-    const [a, b] = ASR_PARTS.map(asrPartLabel);
-    expect(a).not.toBe(b);
+    const labels = ASR_PARTS.map(asrPartLabel);
+    expect(new Set(labels).size).toBe(labels.length);
   });
 });
 
@@ -305,5 +309,58 @@ describe('🔴 #1446 端末ごとの推奨', () => {
     expect(asrRecommendNote(7.9)).toContain('「軽い」');
     expect(asrRecommendNote(8)).toContain('「正確」');
     for (const v of [undefined, 0, -1, Number.NaN]) expect(asrRecommendNote(v)).toBeNull();
+  });
+
+  it('🔴 WebGPU が使えると測れた端末だけに「高精度」を勧める(測れていない・使えない端末には勧めない)', () => {
+    expect(asrRecommendNote(8, true)).toContain('「高精度」');
+    expect(asrRecommendNote(8, true)).toContain('WebGPU が使えます');
+    expect(asrRecommendNote(8, false), 'WebGPU が無いのに勧めた').toContain('「正確」');
+    expect(asrRecommendNote(8, false)).toContain('WebGPU は使えません');
+    expect(asrRecommendNote(8, null), '測っていないのに勧めた').toContain('「正確」');
+    expect(asrRecommendNote(8, null)).not.toContain('WebGPU');
+    // メモリが足りなければ WebGPU があっても勧めない
+    expect(asrRecommendNote(4, true)).toContain('「軽い」');
+  });
+
+  it('🔴 配布元が置いていない部品は、WebGPU が使えても勧めない', () => {
+    expect(asrRecommendNote(8, true, { turbo: ASR_UNAVAILABLE_TEXT })).toContain('「正確」');
+  });
+});
+
+describe('🔴 #1446 配布元が置いていない部品', () => {
+  it('目録に高精度が無くても、軽い・正確は読め、選べない理由が高精度にだけ付く', () => {
+    const raw = JSON.parse(manifest()) as { models: Record<string, unknown> };
+    delete raw.models['turbo'];
+    const r = readAsrPack(JSON.stringify(raw));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(Object.keys(r.pack.models).sort()).toEqual(['accurate', 'light']);
+    expect(asrUnavailableParts(r.pack)).toEqual({ turbo: ASR_UNAVAILABLE_TEXT });
+  });
+
+  it('対照群:3 つとも載っていれば理由は付かない', () => {
+    const r = readAsrPack(manifest());
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(asrUnavailableParts(r.pack)).toEqual({});
+  });
+
+  it('🔴 高精度の目録が壊れていても(小さすぎる)、他の部品の取り込みは壊さない。対照群:軽いが壊れていれば全体が断られる', () => {
+    const turbo = asrPartOf('turbo')!;
+    const raw = JSON.parse(manifest()) as { models: Record<string, AsrPackFile[]> };
+    raw.models['turbo'] = [file(`${asrModelDir(turbo)}onnx/model.onnx`, 1000)];
+    const r = readAsrPack(JSON.stringify(raw));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.pack.models.turbo).toBeUndefined();
+
+    raw.models['light'] = [file(`${asrModelDir(asrPartOf('light')!)}onnx/model.onnx`, 1000)];
+    expect(readAsrPack(JSON.stringify(raw)).ok).toBe(false);
+  });
+
+  it('見積もりより小さい実物(下限以上)の高精度は通る', () => {
+    const turbo = asrPartOf('turbo')!;
+    const raw = JSON.parse(manifest()) as { models: Record<string, AsrPackFile[]> };
+    raw.models['turbo'] = [file(`${asrModelDir(turbo)}onnx/model.onnx`, turbo.floorBytes! + 1)];
+    const r = readAsrPack(JSON.stringify(raw));
+    expect(r.ok && r.pack.models.turbo !== undefined).toBe(true);
   });
 });

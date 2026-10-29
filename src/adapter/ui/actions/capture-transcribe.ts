@@ -26,6 +26,7 @@ import type { AsrJob, AsrJobResult, AsrSegment } from '@adapter/platform/asr/asr
 import {
   ASR_LANGUAGE,
   ASR_PARTS,
+  ASR_SAMPLE_RATE,
   type AsrPart,
 } from '@features/asr/asr-parts';
 import {
@@ -39,6 +40,7 @@ import {
 import { looksOutOfMemory } from '@features/storage/image-export-limit';
 import { elapsedText } from '@features/elapsed-text';
 import { isNearSilent, pcmRms } from '@features/asr/asr-pcm';
+import { applySilenceCut, planSilenceCut, remapMs } from '@features/asr/asr-silence';
 import { chunkOffsetMs, planAsrChunks, shiftSegments, type AsrChunkOptions } from '@features/asr/asr-chunks';
 import { createWritableQueue } from './writable-queue';
 import { appendUnlessEditedElsewhere, type EditLockPort } from '@adapter/state/edited-elsewhere';
@@ -216,6 +218,12 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
         // 🔴 **音の大きさは渡す前に測る**(transcribe がワーカーへ transfer すると pcm は長さ 0 になり、RMS が 0 に化ける)
         const rms = pcmRms(pcm);
         /**
+         * 🔴 **途中の長い無音は、認識に渡さず切り落とす**(#1446 ①)── 話し声のあいだの無音に幻覚が出ないように。
+         *   切った所は両側に少し残し、結果の時刻は元の録音の時刻へ戻す(`remapMs`)。⚠ 切る物が無ければ何もしない。
+         */
+        const silenceCut = planSilenceCut(pcm, ASR_SAMPLE_RATE);
+        if (silenceCut !== null) pcm = applySilenceCut(pcm, silenceCut);
+        /**
          * 🔴 **長い録音は区切りながら文字にする**(台帳 #1852 O1 / 依頼 149 ③)。20 分までは今までどおり 1 本。
          * ⚠ 渡すたびにワーカーへ transfer されて元の PCM が空になるので、区切りは**写して**渡す(全体は最後まで残る)。
          * ⚠ 途中の 1 本が失敗したら全体を失敗にする(半分だけの文字起こしを「足しました」と言わない)。
@@ -227,6 +235,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
             files: [...ready.files],
             modelId: ready.part.modelId,
             language: ASR_LANGUAGE,
+            ...(ready.part.gpu === true ? { gpu: true } : {}),
             pcm,
           });
         } else {
@@ -242,6 +251,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
               files: [...ready.files],
               modelId: ready.part.modelId,
               language: ASR_LANGUAGE,
+              ...(ready.part.gpu === true ? { gpu: true } : {}),
               pcm: pcm.slice(c.start, c.end),
             });
             texts.push(part.text);
@@ -256,6 +266,16 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
             ...(withSegments && segments.length > 0 ? { segments } : {}),
             loadMs,
             runMs,
+          };
+        }
+        if (silenceCut !== null && out.segments !== undefined) {
+          out = {
+            ...out,
+            segments: out.segments.map((g) => ({
+              ...g,
+              startMs: Math.round(remapMs(g.startMs, silenceCut, ASR_SAMPLE_RATE)),
+              endMs: g.endMs === null ? null : Math.round(remapMs(g.endMs, silenceCut, ASR_SAMPLE_RATE)),
+            })),
           };
         }
         // 時刻つきの行があればそれ、無ければ今までの 1 段落(#1232 段 a)
@@ -317,7 +337,10 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
           }
           // 🔑 波形の目盛り(文字起こしの時刻)は一覧が持つので、足したら集め直す(⚠ ここへ来るのは一覧から押したときだけ)
           deps.dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
-          say(`「${item.name}」に文字起こしを足しました(${took})`);
+          const cutNote = silenceCut === null
+            ? ''
+            : `。途中の長い無音(合計 ${elapsedText(Math.round((silenceCut.cutSamples * 1000) / ASR_SAMPLE_RATE))})は除いて文字にしました`;
+          say(`「${item.name}」に文字起こしを足しました(${took})${cutNote}`);
         };
         /**
          * ⚠ その場で書ける回は**結末まで待ってから抜ける** ── 抜けた後に「足しました」を言うと、

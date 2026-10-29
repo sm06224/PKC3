@@ -686,3 +686,60 @@ describe('長い録音の区切り(台帳 #1852 O1 / 依頼 149 ③)', () => {
     expect(h.appends[0]!.text).toContain('続き2');
   });
 });
+
+/**
+ * 🔴 **途中の長い無音は、認識に渡さず切り、時刻は元の録音へ戻す**(#1446 ①)。
+ * 対照群: 無音の無い録音は PCM を変えない。
+ */
+describe('途中の長い無音の切り落とし(#1446)', () => {
+  const RATE = 16_000;
+  const tone = (sec: number, amp: number): Float32Array => {
+    const a = new Float32Array(sec * RATE);
+    for (let i = 0; i < a.length; i++) a[i] = i % 2 === 0 ? amp : -amp;
+    return a;
+  };
+  const withGap = (): Float32Array => {
+    const parts = [tone(3, 0.2), tone(20, 0), tone(3, 0.2)];
+    const out = new Float32Array(parts.reduce((s, p) => s + p.length, 0));
+    let at = 0;
+    for (const p of parts) {
+      out.set(p, at);
+      at += p.length;
+    }
+    return out;
+  };
+
+  it('認識に渡す PCM は短くなり、後ろの声の時刻は元の録音の時刻(約 23 秒)へ戻る', async () => {
+    const transcribe = vi.fn(async (job: AsrJob): Promise<AsrJobResult> => {
+      void job;
+      return {
+        text: '前 後',
+        segments: [
+          { startMs: 0, endMs: 2000, text: '前' },
+          { startMs: 4000, endMs: 6000, text: '後' }, // 切ったあとの録音で 4.0 秒 = 元では約 23 秒
+        ],
+        loadMs: 0,
+        runMs: 0,
+      };
+    });
+    const h = harness({ decode: vi.fn(async () => withGap()), transcribe });
+    await h.tr.run('a');
+    const sent = transcribe.mock.calls[0]![0].pcm.length;
+    expect(sent, '無音を切っていない').toBeLessThan(11 * RATE);
+    expect(h.appends[0]!.text).toMatch(/^0:00 〜0:02 前$/m);
+    expect(h.appends[0]!.text).toMatch(/^0:2[2-4] 〜0:2[4-6] 後$/m);
+    expect(h.notes.at(-1)).toContain('途中の長い無音');
+  });
+
+  it('対照群:無音の無い録音は PCM をそのまま渡し、無音の知らせも出ない', async () => {
+    const pcm = tone(10, 0.2);
+    const transcribe = vi.fn(async (job: AsrJob): Promise<AsrJobResult> => {
+      void job;
+      return { text: 'こんにちは', loadMs: 0, runMs: 0 };
+    });
+    const h = harness({ decode: vi.fn(async () => pcm), transcribe });
+    await h.tr.run('a');
+    expect(transcribe.mock.calls[0]![0].pcm.length).toBe(10 * RATE);
+    expect(h.notes.at(-1)).not.toContain('途中の長い無音');
+  });
+});

@@ -24,7 +24,7 @@ import { JobMonitor } from '../../src/adapter/platform/job-monitor';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState, viewModeLabel } from '../../src/adapter/state/app-state';
-import { ASR_PARTS, asrMemoryNote, asrPartLabel } from '../../src/features/asr/asr-parts';
+import { ASR_PARTS, ASR_UNAVAILABLE_TEXT, asrMemoryNote, asrPartLabel } from '../../src/features/asr/asr-parts';
 import { ASR_SECTION_LABEL, STORAGE_SECTION_LABEL } from '../../src/features/asr/asr-text';
 import { asrMissingText } from '../../src/adapter/ui/actions/capture-transcribe';
 import type { AsrInstalled } from '../../src/adapter/platform/asr/asr-pack-store';
@@ -45,7 +45,7 @@ const row = (root: HTMLElement, id: string): HTMLElement =>
 const q = <T extends HTMLElement>(el: HTMLElement, field: string): T =>
   el.querySelector<T>(`[data-pkc-field="${field}"]`)!;
 
-describe('部品 2 択の見え方', () => {
+describe('部品 3 択の見え方', () => {
   it('🔴 ① ボタンは 2 つで、字は定数から出る(大きさ・秒つき)', () => {
     const p = buildAsrPackPanel(new AsrPackState(), { deviceMemory: () => undefined });
     expect(p.root.querySelector('h4')?.textContent).toBe(ASR_SECTION_LABEL);
@@ -308,3 +308,58 @@ describe('main.ts の配線(原文 pin。弱い検査だと自覚して使う)',
   });
 });
 
+
+/**
+ * 🔴 #1446 ②③ ── WebGPU の可否と配布元の有無を、設定の「音声認識」に反映する。
+ */
+describe('#1446 高精度(whisper-large-v3-turbo)と WebGPU', () => {
+  const turbo = ASR_PARTS[2]!;
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  };
+
+  it('🔴 配布元に無い部品は、理由を言って選べない(ボタンは押せず、理由が下に出る)。対照群:他の部品は押せる', async () => {
+    const state = new AsrPackState();
+    state.setAvailabilityProbe(async () => ({ turbo: ASR_UNAVAILABLE_TEXT }));
+    const p = buildAsrPackPanel(state, { deviceMemory: () => 16, webgpu: async () => true });
+    await flush();
+    const t = row(p.root, turbo.id);
+    expect(q<HTMLButtonElement>(t, 'asr-install').disabled, '配られていないのに押せる').toBe(true);
+    expect(q(t, 'asr-memory-note').hidden).toBe(false);
+    expect(q(t, 'asr-memory-note').textContent).toBe(ASR_UNAVAILABLE_TEXT);
+    for (const part of [light, accurate]) {
+      expect(q<HTMLButtonElement>(row(p.root, part.id), 'asr-install').disabled, `${part.id} まで塞いだ`).toBe(false);
+    }
+  });
+
+  it('目録が引けなかった(null)ときは「分からない」── 選べない扱いにしない', async () => {
+    const state = new AsrPackState();
+    state.setAvailabilityProbe(async () => null);
+    const p = buildAsrPackPanel(state, { deviceMemory: () => 16, webgpu: async () => false });
+    await flush();
+    expect(q<HTMLButtonElement>(row(p.root, turbo.id), 'asr-install').disabled).toBe(false);
+  });
+
+  it('🔴 WebGPU の可否が推奨の行に反映される(使える→高精度 / 使えない→正確 + 使えない旨)', async () => {
+    const on = new AsrPackState();
+    const pOn = buildAsrPackPanel(on, { deviceMemory: () => 8, webgpu: async () => true });
+    await flush();
+    expect(q(pOn.root, 'asr-recommend').textContent).toContain('「高精度」');
+
+    const off = new AsrPackState();
+    const pOff = buildAsrPackPanel(off, { deviceMemory: () => 8, webgpu: async () => false });
+    await flush();
+    expect(q(pOff.root, 'asr-recommend').textContent).toContain('「正確」');
+    expect(q(pOff.root, 'asr-recommend').textContent).toContain('WebGPU は使えません');
+  });
+
+  it('配布元の目録は設定の面を開いたとき 1 度だけ引く(組み直しで何度も引かない)', async () => {
+    const state = new AsrPackState();
+    const probe = vi.fn(async () => ({}));
+    state.setAvailabilityProbe(probe);
+    buildAsrPackPanel(state, { webgpu: async () => true });
+    buildAsrPackPanel(state, { webgpu: async () => true });
+    await flush();
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+});

@@ -35,8 +35,49 @@ export function transcriptHeading(at: Date): string {
  *   (whisper は 1 続きの文を返す。本文の記法を壊す改行を混ぜない)。
  */
 export function transcriptText(raw: string): string | null {
-  const t = raw.replace(/\s+/g, ' ').trim();
+  const t = collapseRunaway(raw.replace(/\s+/g, ' ').trim());
   return t === '' ? null : t;
+}
+
+/**
+ * 🔴 **暴走したくり返しの除去**(#1446 ①「反復の検出と除去」)。
+ *
+ * whisper は無音・雑音のあたりで、同じ字・同じ語を延々と出す(`ああああああああああああ…` / `you you you …`)。
+ * 生成の設定(`repetition_penalty`)で止めると正しい語まで罰して誤り率が上がる(17.8% → 68.1%。#1446 の測定)ので、
+ * 出たあとで**暴走と言える長さだけ**を畳む:
+ *  - 同じ 1 字が `ASR_LOOP_CHAR_RUN` 回以上続いたら `ASR_LOOP_CHAR_KEEP` 字に(「うわあああ」の伸ばしは残る)
+ *  - 2〜`ASR_LOOP_UNIT_MAX` 字の同じ並びが `ASR_LOOP_UNIT_RUN` 回以上続いたら 1 回に(「はいはいはい」は残る)
+ * ⚠ 閾値は人が普通に言う繰り返し(相槌・伸ばし)より十分長い所に置く。短い繰り返しには触らない。
+ */
+export const ASR_LOOP_CHAR_RUN = 12;
+export const ASR_LOOP_CHAR_KEEP = 3;
+export const ASR_LOOP_UNIT_MAX = 12;
+export const ASR_LOOP_UNIT_RUN = 8;
+/** 同じ内容の区切りがこれ以上つづいたら、最初の 1 つだけ残す。 */
+export const ASR_LOOP_SEGMENT_RUN = 6;
+
+const LOOP_CHAR = new RegExp(`(.)\\1{${String(ASR_LOOP_CHAR_RUN - 1)},}`, 'gsu');
+const LOOP_UNIT = new RegExp(`(.{2,${String(ASR_LOOP_UNIT_MAX)}}?)\\1{${String(ASR_LOOP_UNIT_RUN - 1)},}`, 'gsu');
+
+export function collapseRunaway(text: string): string {
+  return text
+    .replace(LOOP_CHAR, (_m, c: string) => c.repeat(ASR_LOOP_CHAR_KEEP))
+    .replace(LOOP_UNIT, (_m, u: string) => u);
+}
+
+/** 同じ字の区切りが `ASR_LOOP_SEGMENT_RUN` 個以上続いたら、最初の 1 つだけ残す(時刻つきの暴走)。 */
+export function dropLoopedSegments<T extends { readonly text: string }>(segments: readonly T[]): T[] {
+  const out: T[] = [];
+  let i = 0;
+  while (i < segments.length) {
+    const key = segments[i]!.text.replace(/\s+/g, ' ').trim();
+    let j = i + 1;
+    while (j < segments.length && segments[j]!.text.replace(/\s+/g, ' ').trim() === key) j++;
+    out.push(segments[i]!);
+    if (j - i < ASR_LOOP_SEGMENT_RUN) for (let k = i + 1; k < j; k++) out.push(segments[k]!);
+    i = j;
+  }
+  return out;
 }
 
 /**
@@ -46,15 +87,16 @@ export function transcriptText(raw: string): string | null {
  * 🔑 時刻の綴りは `elapsedText`(`0:07` / `12:34` / `1:02:03`)── 割り算を書き足さない。
  * 🔑 終わりの時刻があれば `0:07 〜0:12 こんにちは` の形で持つ(#1447。字幕ファイルの終了に使う。読みは `readElapsedHead` 1 本)。
  * 🔑 行は `\n` で並べる(markdown は `breaks: true` なので 1 段落の中で行ごとに見える)。
- * ⚠ 字の正規化は `transcriptText` と同じ。出た字は**そのまま**(同じ字の繰り返しも畳まない)。
- *   例外は `isQuietRepetition` が真のとき**だけ**で、それは畳むのではなく**出力ごと捨てる**(呼び側が字にしない)。
+ * ⚠ 字の正規化は `transcriptText` と同じ。出た字は**そのまま**(短い繰り返しは畳まない)。
+ *   例外は 2 つ: `isQuietRepetition` が真のとき(出力ごと捨てる)と、**暴走と言える長さ**の繰り返し(`collapseRunaway` /
+ *   `dropLoopedSegments`。閾値は普通の発話より十分長い)。
  */
 export function transcriptLines(
   segments: ReadonlyArray<{ readonly startMs: number; readonly endMs?: number | null; readonly text: string }> | undefined,
 ): string | null {
   if (segments === undefined) return null;
   const lines: string[] = [];
-  for (const seg of segments) {
+  for (const seg of dropLoopedSegments(segments)) {
     const t = transcriptText(seg.text);
     if (t !== null) lines.push(`${elapsedLineHead(seg.startMs, seg.endMs)}${t}`);
   }
