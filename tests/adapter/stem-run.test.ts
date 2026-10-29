@@ -319,8 +319,11 @@ describe('🔴 分けた結果の安全弁(設定違い・別のモデルを、�
 describe('🔴 分離をやめる(口の反対向きの合図)', () => {
   it('塊の合間で「やめる」を受けると cancelled で返り、セッションは手放す。符号化には進まない', async () => {
     const fa = fakeAudio();
-    let port!: { onmessage: ((ev: { data: unknown }) => void) | null; postMessage: (t: string) => void; close: () => void };
-    port = { onmessage: null, postMessage: () => {}, close: () => {} };
+    const port: { onmessage: ((ev: { data: unknown }) => void) | null; postMessage: (t: string) => void; close: () => void } = {
+      onmessage: null,
+      postMessage: () => {},
+      close: () => {},
+    };
     let runs = 0;
     const { ort, log } = fakeOrt({
       run: async (feeds) => {
