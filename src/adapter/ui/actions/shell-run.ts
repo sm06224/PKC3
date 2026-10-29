@@ -3,12 +3,12 @@
  *
  * ## 🔑 ここは段取りだけ。実体は `ShellOps`(binder が既存の実体を渡す)
  *
- * 命令表(`features/shell/commands.ts`)は `ShellPlan` を返すだけで、副作用を持たない。ここは
+ * コマンド表(`features/shell/commands.ts`)は `ShellPlan` を返すだけで、副作用を持たない。ここは
  * `plan → 確認 → effects を順に実行 → 結果を出力へ書く` を担当し、実際の書き込み
  * (移す・コピー・ゴミ箱・追記・タグ・書き出し・SQL・操作の実行)は **`ShellOps` を通して既存の実体**を呼ぶ。
  * DOM を触らないので、偽の `ShellOps` で全部の枝を unit で見られる。
  *
- * ## 🔴 危ない命令
+ * ## 🔴 危ないコマンド
  *
  * `plan.confirm` があれば `ops.confirm` を通し、断られたら**何も実行しない**。実行前に履歴へは積む(打ち直せる)。
  */
@@ -48,7 +48,7 @@ export interface OpResult {
 }
 
 export interface ShellOps {
-  /** いまの state から命令表の環境を作る。 */
+  /** いまの state からコマンド表の環境を作る。 */
   env(session: ShellSession): ShellEnv;
   /** `.` が指す対象が 2 ペインの焦点のペイン / 選んでいるノートかを含め、プロンプトの現在地の字。 */
   promptText(session: ShellSession): string;
@@ -90,7 +90,7 @@ export async function runShellLine(ops: ShellOps, session: ShellSession, raw: st
     session.update(block, { lines: [plan.error], failed: true });
     return block;
   }
-  // 履歴へ積むのは「命令として読めた行」だけ(打ち間違いで ↑ を汚さない)。`!3` は展開した行を積む
+  // 履歴へ積むのは「コマンドとして読めた行」だけ(打ち間違いで ↑ を汚さない)。`!3` は展開した行を積む
   session.remember(historyLineOf(line, env.surface));
   if (plan.cwd !== undefined) session.cwd = plan.cwd;
   if (plan.numbered !== undefined) session.last = [...plan.numbered];
@@ -209,7 +209,7 @@ async function runEffect(ops: ShellOps, session: ShellSession, block: ShellBlock
         return;
       }
       const table: ShellTable = {
-        columns: ['#', '命令'],
+        columns: ['#', 'コマンド'],
         rows: list.map((l, i) => [String(i + 1), l]),
         lids: list.map(() => null),
         recall: list,
@@ -225,7 +225,7 @@ async function runEffect(ops: ShellOps, session: ShellSession, block: ShellBlock
       session.clear();
       return;
     case 'copy-result': {
-      // この命令自身の塊ではなく、直前の結果をコピーする
+      // このコマンド自身の塊ではなく、直前の結果をコピーする
       const idx = session.blocks.indexOf(block);
       const prev = session.blocks
         .slice(0, Math.max(0, idx))

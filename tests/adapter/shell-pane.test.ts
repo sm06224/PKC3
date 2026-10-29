@@ -1,9 +1,9 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **コマンドシェルの画面と、2 ペインの命令行**(#274 / #241)── 実物の binder / 描画器を繋いで、user が打って見えるものを見る。
+ * 🔴 **コマンドシェルの画面と、2 ペインのコマンドライン**(#274 / #241)── 実物の binder / 描画器を繋いで、user が打って見えるものを見る。
  *
  * ①シェルの面がある(ViewMode・タイル・左のタブ・鍵)②打って Enter で結果が出る ③🔴 移す / 作る / 追記 が**保存の経路まで**届く
- * ④↑ で履歴・Tab で補完 ⑤表の行を押すとそのノートが選ばれる ⑥2 ペインの命令行が**同じ命令表**で選んだ行に効く
+ * ④↑ で履歴・Tab で補完 ⑤表の行を押すとそのノートが選ばれる ⑥2 ペインのコマンドラインが**同じコマンド表**で選んだ行に効く
  * ⑦失敗は失敗として出る
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -88,7 +88,7 @@ describe('シェルの入口', () => {
   it('ViewMode・左のタブ・別窓の退避先・タイル・鍵が揃っている', () => {
     expect(isViewMode('shell')).toBe(true);
     expect(isAsidePane('shell')).toBe(true);
-    // ノートを選んでも面が退かない(`.` を相手にする命令の途中で出力が消えない)
+    // ノートを選んでも面が退かない(`.` を相手にするコマンドの途中で出力が消えない)
     expect(leavesOnSelect('shell')).toBe(false);
     expect(viewModeLabel('shell')).toBe('コマンドシェル');
     expect(BROWSE_MODES).toContain('shell');
@@ -189,7 +189,7 @@ describe('シェルの面', () => {
     expect(ctx.parents).toEqual([]);
   });
 
-  it('知らない命令は候補を添えて断る。履歴には積まない', async () => {
+  it('知らないコマンドは候補を添えて断る。履歴には積まない', async () => {
     await run(input, 'mkd');
     expect(log()).toContain('mkdir');
     expect(appShellSession.history).toEqual([]);
@@ -209,7 +209,7 @@ describe('シェルの面', () => {
     expect(input.value).toBe('draft');
   });
 
-  it('Tab で命令を補完し、候補はボタンで押せる(マウスだけで完結)', async () => {
+  it('Tab でコマンドを補完し、候補はボタンで押せる(マウスだけで完結)', async () => {
     typeInto(input, 'mk');
     const tab = press(input, 'Tab');
     expect(tab.defaultPrevented).toBe(true);
@@ -270,7 +270,7 @@ describe('シェルの面', () => {
   });
 });
 
-describe('2 ペインの命令行', () => {
+describe('2 ペインのコマンドライン', () => {
   let ctx: ReturnType<typeof setup>;
   let input: HTMLInputElement;
   const out = (): string => ctx.root.querySelector('[data-pkc-region="dual-cmd-out"]')!.textContent ?? '';
@@ -283,7 +283,7 @@ describe('2 ペインの命令行', () => {
     ctx.root.remove();
   });
 
-  it('命令行が 2 ペインの中にあり、シェルとは別の出力・同じ命令表', () => {
+  it('コマンドラインが 2 ペインの中にあり、シェルとは別の出力・同じコマンド表', () => {
     expect(input).not.toBeNull();
     expect(ctx.root.querySelector('[data-pkc-region="dual-cmdline"][data-pkc-session="dual"]')).not.toBeNull();
   });
@@ -313,8 +313,8 @@ describe('2 ペインの命令行', () => {
     expect(ctx.d.getState().dual.left.selection).toEqual(['n1']);
   });
 
-  it('シェル専用の命令(sql)は 2 ペインでは使えない', async () => {
+  it('シェル専用のコマンド(sql)は 2 ペインでは使えない', async () => {
     await run(input, 'sql SELECT 1');
-    expect(out()).toContain('命令はありません');
+    expect(out()).toContain('コマンドはありません');
   });
 });

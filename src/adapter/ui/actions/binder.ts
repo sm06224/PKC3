@@ -6315,7 +6315,7 @@ export function selectEntryOrExplain(
 
 /**
  * 🔴 **整理案の操作(作る・移す・改名)を適用する実体は 1 本**(#429 段③ / #274)。設定の「整理案を適用する」と、
- * コマンドシェル・2 ペインの命令行の `mkdir` / `rename` が同じここを通る(規則を 2 つ作らない)。
+ * コマンドシェル・2 ペインのコマンドラインの `mkdir` / `rename` が同じここを通る(規則を 2 つ作らない)。
  * ⚠ 呼ぶ前に phase を確かめる(ここでは見ない)。
  * @returns 断られた移動の数
  */
@@ -6360,7 +6360,7 @@ function applyPlanOps(dispatcher: Dispatcher, planOps: readonly PlanOp[]): { ref
 }
 
 /**
- * 🔴 **ノートを別の場所へコピーする実体は 1 本**(#273 段③ / #241)。2 ペインの「コピー」ボタンと、コマンドシェル・2 ペインの命令行の
+ * 🔴 **ノートを別の場所へコピーする実体は 1 本**(#273 段③ / #241)。2 ペインの「コピー」ボタンと、コマンドシェル・2 ペインのコマンドラインの
  * `cp` が同じここを通る(規則を 2 つ作らない)。
  *
  * @param toScope コピー先のフォルダ(`null` = ルート)
@@ -7720,7 +7720,7 @@ export function commandRowsFor(
 }
 
 /**
- * 🔴 **命令の結果を待つ**(コマンドシェル #274)。⚠ 満たさないまま `ms` が過ぎたら `false`(黙って待ち続けない)。
+ * 🔴 **コマンドの結果を待つ**(コマンドシェル #274)。⚠ 満たさないまま `ms` が過ぎたら `false`(黙って待ち続けない)。
  */
 function waitForState(dispatcher: Dispatcher, done: (s: AppState) => boolean, ms: number): Promise<boolean> {
   if (done(dispatcher.getState())) return Promise.resolve(true);
@@ -7743,7 +7743,7 @@ function waitForState(dispatcher: Dispatcher, done: (s: AppState) => boolean, ms
 const SHELL_SQL_ROWS_SHOWN = 500;
 
 /**
- * 🔴 **コマンドシェル / 2 ペインの命令行が、既存の実体を呼ぶ口の束**(#274 / #241)。
+ * 🔴 **コマンドシェル / 2 ペインのコマンドラインが、既存の実体を呼ぶ口の束**(#274 / #241)。
  *
  * ⚠ **ここに新しい書き込みの経路は 1 本も無い**: 移す(`moveEntriesOfferingUndo`)・コピー(`copyEntriesTo`)・ゴミ箱(`deleteFrom`)・
  *   追記(`APPEND_TO_ENTRY`)・タグ(`BULK_TAG`)・整理案(`applyPlanOps`)・書き出し(`services.exportEntryMarkdown`)・
@@ -8016,7 +8016,7 @@ export function makeShellOps(h: {
           : { kind: 'blocked', text: `「${pick.label}」はいま実行できません` },
       );
     },
-    // 🔴 危ない命令は `rm` だけ(命令表の test が 1 件であることを見る)── ボタンには「何が起きるか」を書く
+    // 🔴 危ないコマンドは `rm` だけ(コマンド表の test が 1 件であることを見る)── ボタンには「何が起きるか」を書く
     askConfirm: async (message, danger) =>
       (danger
         ? await confirmInApp(root, message, { danger: true, okLabel: 'ゴミ箱へ入れる' })
@@ -8043,7 +8043,7 @@ function shellCompleteOptions(root: HTMLElement, dispatcher: Dispatcher, line: s
   return { operationLabels: commandRowsFor(root, dispatcher, appKeymap, '', null).map((r) => r.label) };
 }
 
-/** シェル / 2 ペインの命令行を、その場の session で 1 行実行する。 */
+/** シェル / 2 ペインのコマンドラインを、その場の session で 1 行実行する。 */
 function runShellFrom(from: Element, dispatcher: Dispatcher, services: BinderServices, root: HTMLElement): void {
   const input = shellInputOf(from);
   const session = shellSessionOf(from);
@@ -10154,13 +10154,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (reopenLiveRowThen(env, id, memo, exec)) exec();
   },
   /**
-   * 🔴 **コマンドシェルの打つ欄**(#274 / #241)。⚠ 実行は `runShellFrom` ── 命令表(`features/shell/commands.ts`)が決め、
+   * 🔴 **コマンドシェルの打つ欄**(#274 / #241)。⚠ 実行は `runShellFrom` ── コマンド表(`features/shell/commands.ts`)が決め、
    *   既存の実体(移す・コピー・ゴミ箱・追記…)を `makeShellOps` が呼ぶ。ここは**押された事実を渡す**だけ。
    */
   'shell-run': (dispatcher, target, services, root) => {
     runShellFrom(target, dispatcher, services, root);
   },
-  /** 履歴・表の行から、その命令を入力欄へ戻す(実行はしない ── 直してから Enter)。 */
+  /** 履歴・表の行から、そのコマンドを入力欄へ戻す(実行はしない ── 直してから Enter)。 */
   'shell-recall': (_dispatcher, target) => {
     const text = target.closest<HTMLElement>('[data-pkc-text]')?.getAttribute('data-pkc-text');
     const input =

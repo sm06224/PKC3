@@ -1,8 +1,8 @@
 /**
  * コマンドシェルの**実行の段取り**(#274 / #241)── 偽の `ShellOps` で全部の枝を見る。
  *
- * ①危ない命令は確認を通し、断られたら何も実行しない ②`-n` は何も実行しない ③履歴に積むのは読めた行だけ・`!!` `!3`
- * ④番号(`#1`)が次の命令に使える ⑤SQL・全文検索の結果が表になる ⑥断り・失敗は塊に「失敗」として残る
+ * ①危ないコマンドは確認を通し、断られたら何も実行しない ②`-n` は何も実行しない ③履歴に積むのは読めた行だけ・`!!` `!3`
+ * ④番号(`#1`)が次のコマンドに使える ⑤SQL・全文検索の結果が表になる ⑥断り・失敗は塊に「失敗」として残る
  * ⑦履歴は端末の保存に書かれ、読み戻せる(壊れた保存は空)
  */
 import { describe, expect, it } from 'vitest';
@@ -99,7 +99,7 @@ describe('runShellLine', () => {
     expect(await runShellLine(f.ops, s, '   ')).toBeNull();
   });
 
-  it('一覧の番号が次の命令で使える(find → mv #1)。作ったノートは #1 で指せる', async () => {
+  it('一覧の番号が次のコマンドで使える(find → mv #1)。作ったノートは #1 で指せる', async () => {
     const f = fake();
     const s = session();
     await runShellLine(f.ops, s, 'find 設計');
@@ -110,7 +110,7 @@ describe('runShellLine', () => {
     expect(s.last).toEqual(['nx']);
   });
 
-  it('cd で現在地が変わり、プロンプトと次の命令に効く', async () => {
+  it('cd で現在地が変わり、プロンプトと次のコマンドに効く', async () => {
     const f = fake();
     const s = session();
     await runShellLine(f.ops, s, 'cd 資料');
@@ -213,7 +213,7 @@ describe('履歴に機密を残さない', () => {
 });
 
 describe('履歴の保存', () => {
-  it('🔴 シェルと 2 ペインの命令行は同じ履歴を使い、互いの行を潰さない(C)', async () => {
+  it('🔴 シェルと 2 ペインのコマンドラインは同じ履歴を使い、互いの行を潰さない(C)', async () => {
     const store = new ShellHistoryStore(memoryStorage());
     const shell = new ShellSession('shell', store);
     const dual = new ShellSession('dual', store);

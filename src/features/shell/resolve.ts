@@ -5,7 +5,7 @@
  *
  * | 書き方 | 意味 |
  * |---|---|
- * | `#3` / `3` | 直前の一覧の 3 番(「探す → 番号で次の命令」。パイプを持たない代わり) |
+ * | `#3` / `3` | 直前の一覧の 3 番(「探す → 番号で次のコマンド」。パイプを持たない代わり) |
  * | `#2-4` | 直前の一覧の 2〜4 番 |
  * | `.` | いまの対象(シェル = 選んでいるノート / 2 ペイン = 印を付けた行、無ければカーソルの行) |
  * | `*` | いまの場所の中の全部 |
@@ -29,7 +29,7 @@ export type Resolved<T> = { readonly ok: true; readonly value: T } | { readonly 
 
 /**
  * 🔴 **引用符で囲んだ語は「題名そのもの」**(`"3"` `"-n"` `"."` `"*"` は、番号・旗・指し方ではなく題名として探す)。
- * 呼び側(命令表)が囲んだ語の頭に付ける目印。⚠ ここで外すので、画面の字には出ない。
+ * 呼び側(コマンド表)が囲んだ語の頭に付ける目印。⚠ ここで外すので、画面の字には出ない。
  */
 export const LITERAL = '\u0001';
 
@@ -72,7 +72,7 @@ export function resolveNote(
   env: ShellEnv,
   filter: (m: EntryMeta) => boolean = () => true,
   /**
-   * 🔴 **危ない命令(消す)では「いまの場所に 1 件だけならそれ」を使わない**。
+   * 🔴 **危ないコマンド(消す)では「いまの場所に 1 件だけならそれ」を使わない**。
    * ⚠ 使うと、別のフォルダにも同じ題名があるのに、黙って目の前の 1 件を消す。曖昧なら候補を出して止める。
    */
   strict = false,
@@ -171,7 +171,7 @@ export function resolveFolder(ref: string, env: ShellEnv): Resolved<string | nul
     return ok(resolveCanonicalParents(env.metas, env.relations).get(env.cwd) ?? null);
   }
   if (!literal && (text === '反対' || text === 'other')) {
-    if (env.other === undefined) return fail('反対側は 2 ペインの命令行でだけ使えます');
+    if (env.other === undefined) return fail('反対側は 2 ペインのコマンドラインでだけ使えます');
     return ok(env.other);
   }
   const isFolder = (m: EntryMeta): boolean => m.archetype === 'folder';

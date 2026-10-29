@@ -1,14 +1,14 @@
 /**
- * コマンドシェルの**命令表**(#274)── シェルと 2 ペインの命令行(#241)が読む、唯一の表。**pure module**。
+ * コマンドシェルの**コマンド表**(#274)── シェルと 2 ペインのコマンドライン(#241)が読む、唯一の表。**pure module**。
  *
  * ## 🔑 新しい操作の種類を作らない
  *
  * ここにあるのは「既存の実体への**呼び名と引数の書き方**」である。移す・コピー・ゴミ箱・追記・タグ・書き出し・
  * 整理案(mkdir / rename)・SQL・操作の実行は、すべて adapter が既存の実体を呼ぶ(`shell-run.ts`)。
- * 命令表は `ShellPlan` を返すだけで、state も DOM も触らない。
- * 既存の操作(`KEY_COMMANDS`)は `do <名前>` で呼ぶ ── 命令表に写さない(一覧を 2 つにしない)。
+ * コマンド表は `ShellPlan` を返すだけで、state も DOM も触らない。
+ * 既存の操作(`KEY_COMMANDS`)は `do <名前>` で呼ぶ ── コマンド表に写さない(一覧を 2 つにしない)。
  *
- * ## 🔴 危ない命令
+ * ## 🔴 危ないコマンド
  *
  * `dangerous: true`(いまは `rm` / `消す`)は `ShellPlan.confirm` を返し、adapter が既存の確認を通してから実行する。
  * ⚠ 試し実行(`-n`)では何も実行せず、実行したらどうなるかだけを出す。
@@ -26,7 +26,7 @@ interface Ctx {
   /** 旗を除いた引数。 */
   readonly args: readonly ShellToken[];
   readonly flags: ReadonlySet<string>;
-  /** 命令の名前の後ろの生の文字列(SQL・操作の名前・追記する字に使う)。 */
+  /** コマンドの名前の後ろの生の文字列(SQL・操作の名前・追記する字に使う)。 */
   readonly rest: string;
 }
 
@@ -155,7 +155,7 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
     name: 'ls',
     aliases: ['一覧'],
     usage: 'ls [フォルダ]',
-    summary: 'フォルダの中身を一覧にします(番号は次の命令で #1 のように使えます)',
+    summary: 'フォルダの中身を一覧にします(番号は次のコマンドで #1 のように使えます)',
     group: '探す・開く',
     surfaces: BOTH,
     args: ['folder'],
@@ -476,7 +476,7 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
     name: 'history',
     aliases: ['履歴'],
     usage: 'history [-c]',
-    summary: '打った命令の履歴を出します(!3 でその番号を、!! で直前をもう一度。-c で履歴を消します)',
+    summary: '打ったコマンドの履歴を出します(!3 でその番号を、!! で直前をもう一度。-c で履歴を消します)',
     group: 'シェル',
     surfaces: BOTH,
     args: [],
@@ -506,8 +506,8 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
   {
     name: 'help',
     aliases: ['ヘルプ', '?'],
-    usage: 'help [命令]',
-    summary: '命令の一覧と書き方を出します',
+    usage: 'help [コマンド]',
+    summary: 'コマンドの一覧と書き方を出します',
     group: 'シェル',
     surfaces: BOTH,
     args: ['command'],
@@ -515,15 +515,15 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
       const here = SHELL_COMMANDS.filter((c) => c.surfaces.includes(env.surface));
       if (args.length > 0) {
         const c = findCommand(args[0]!.text, env.surface);
-        if (c === null) return err(`「${args[0]!.text}」という命令はありません。help で一覧を出せます`);
+        if (c === null) return err(`「${args[0]!.text}」というコマンドはありません。help で一覧を出せます`);
         const names = [c.name, ...c.aliases].join(' / ');
         return say([`${c.usage}`, `${c.summary}`, `別名: ${names}${c.dangerous === true ? '(確認が出ます)' : ''}`, '-n を付けると、実行せずに何が起きるかだけを出します']);
       }
       const rows = here.map((c) => [c.group, c.usage, c.summary]);
       return say(
         [
-          '命令は英語でも日本語でも打てます(例: mv と 移す)。Tab で補完、↑ ↓ で履歴、-n で試し実行。',
-          '一覧の番号は次の命令で使えます(例: find 議事録 → mv #1 資料)。.  は選んでいるノート、* は場所の中の全部です。',
+          'コマンドは英語でも日本語でも打てます(例: mv と 移す)。Tab で補完、↑ ↓ で履歴、-n で試し実行。',
+          '一覧の番号は次のコマンドで使えます(例: find 議事録 → mv #1 資料)。.  は選んでいるノート、* は場所の中の全部です。',
         ],
         [],
         { table: { columns: ['分類', '書き方', '内容'], rows, lids: rows.map(() => null) } },
@@ -532,7 +532,7 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
   },
 ];
 
-/** 名前か別名で命令を引く(大小・全角半角を区別しない)。2 ペインに無い命令は `null`。 */
+/** 名前か別名でコマンドを引く(大小・全角半角を区別しない)。2 ペインに無いコマンドは `null`。 */
 export function findCommand(word: string, surface: ShellSurface): ShellCommand | null {
   const w = fold(word);
   for (const c of SHELL_COMMANDS) {
@@ -542,13 +542,13 @@ export function findCommand(word: string, surface: ShellSurface): ShellCommand |
   return null;
 }
 
-/** 命令の名前と別名の全部(補完の元)。 */
+/** コマンドの名前と別名の全部(補完の元)。 */
 export function commandWords(surface: ShellSurface): string[] {
   return SHELL_COMMANDS.filter((c) => c.surfaces.includes(surface)).flatMap((c) => [c.name, ...c.aliases]);
 }
 
 /**
- * 1 行を読んで、命令表から `ShellPlan` を作る。**これが命令表の唯一の入口**。
+ * 1 行を読んで、コマンド表から `ShellPlan` を作る。**これがコマンド表の唯一の入口**。
  * ⚠ `-n` / `--dry-run` のときは `effects` を空にして、何が起きるかの文だけを返す。
  */
 export function planLine(line: string, env: ShellEnv): ShellPlan {
@@ -563,11 +563,11 @@ export function planLine(line: string, env: ShellEnv): ShellPlan {
     const w = fold(head.text);
     const near = commandWords(env.surface).filter((n) => fold(n).startsWith(w)).slice(0, 4);
     return err(
-      `「${head.text}」という命令はありません${near.length > 0 ? `(もしかして: ${near.join('、')})` : ''}。help で一覧を出せます`,
+      `「${head.text}」というコマンドはありません${near.length > 0 ? `(もしかして: ${near.join('、')})` : ''}。help で一覧を出せます`,
     );
   }
   const { flags, args } = splitFlags(restTokens);
-  // 試し実行の旗は命令の引数ではない(SQL / 操作の名前など生の残りからも除く)
+  // 試し実行の旗はコマンドの引数ではない(SQL / 操作の名前など生の残りからも除く)
   const dry = flags.has('n') || flags.has('dry-run');
   const rest = dry ? stripDryFlag(text.slice(head.end).trim()) : text.slice(head.end).trim();
   const plan = cmd.run({ env, args, flags, rest });

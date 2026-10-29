@@ -1626,8 +1626,8 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     // ⚠ `Alt+0` の次の数字は無い ── 日本語キーボードで IME の切り替えに使う `Backquote` を避け、`Semicolon` に置く
     defaults: ['Alt+Semicolon', 'Mod+Alt+Semicolon'],
     whileTyping: true,
-    note: '命令を打って、ノートの検索・移動・追記・SQL・操作の呼び出しをする画面です。文字を打っている間に効くのは Ctrl+Alt+;(Mac は ⌘+Alt+;)のほうです',
-    alias: 'シェル コマンド 端末 ターミナル 命令',
+    note: 'コマンドを打って、ノートの検索・移動・追記・SQL・操作の呼び出しをする画面です。文字を打っている間に効くのは Ctrl+Alt+;(Mac は ⌘+Alt+;)のほうです',
+    alias: 'シェル コマンド 端末 ターミナル コマンド',
   },
   {
     id: 'toggle-sidebar',

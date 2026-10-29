@@ -11,9 +11,9 @@
  *
  * ## 構え
  *
- * 現在地 → 出力(命令ごとの塊。表の行を押すとそのノートを開く / 塊ごとにコピー)→ 打つ欄 + 補完の候補。
- * 規則は `features/shell/` の 1 本(命令表)で、ここは描くだけ。実行は `actions/shell-run.ts`。
- * 2 ペインの命令行(#241)も同じ session 型・同じ塊の描き方(`paintShellBlock`)を使う。
+ * 現在地 → 出力(コマンドごとの塊。表の行を押すとそのノートを開く / 塊ごとにコピー)→ 打つ欄 + 補完の候補。
+ * 規則は `features/shell/` の 1 本(コマンド表)で、ここは描くだけ。実行は `actions/shell-run.ts`。
+ * 2 ペインのコマンドライン(#241)も同じ session 型・同じ塊の描き方(`paintShellBlock`)を使う。
  */
 import { pushShellHistory } from '@features/shell/history';
 import type { Completion } from '@features/shell/complete';
@@ -44,7 +44,7 @@ export interface ShellBlock {
 export class ShellSession {
   readonly blocks: ShellBlock[] = [];
   /**
-   * 🔴 **履歴は端末の保存 1 本**(シェルと 2 ペインの命令行で共通)。
+   * 🔴 **履歴は端末の保存 1 本**(シェルと 2 ペインのコマンドラインで共通)。
    * ⚠ session ごとに写しを持つと、片方が保存を上書きして、もう片方の履歴を潰す(先に打った側の行が消える)。
    *   読むたびに保存を引き、積むときも保存の最新に足す。
    */
@@ -172,7 +172,7 @@ function paintTable(table: ShellTable, maxRows: number | null, openAction: strin
     } else if (recall !== null) {
       tr.setAttribute('data-pkc-action', 'shell-recall');
       tr.setAttribute('data-pkc-text', recall);
-      tr.title = '押すと入力欄にこの命令を入れます';
+      tr.title = '押すと入力欄にこのコマンドを入れます';
     }
     for (const cell of r) {
       const td = el('td');
@@ -279,7 +279,7 @@ export function paintHistoryMenu(host: HTMLElement, history: readonly string[]):
   }
 }
 
-/** 打つ欄 + 実行 + 履歴 + 補完の候補。シェルと 2 ペインの命令行で同じ形。 */
+/** 打つ欄 + 実行 + 履歴 + 補完の候補。シェルと 2 ペインのコマンドラインで同じ形。 */
 export function buildShellPrompt(sessionName: 'shell' | 'dual'): HTMLElement {
   const region = document.createElement('div');
   region.setAttribute('data-pkc-region', 'shell-prompt');
@@ -297,9 +297,9 @@ export function buildShellPrompt(sessionName: 'shell' | 'dual'): HTMLElement {
   input.autocomplete = 'off';
   input.spellcheck = false;
   input.setAttribute('autocapitalize', 'off');
-  input.setAttribute('aria-label', sessionName === 'dual' ? '2 ペインの命令' : '命令');
+  input.setAttribute('aria-label', sessionName === 'dual' ? '2 ペインのコマンド' : 'コマンド');
   input.placeholder =
-    sessionName === 'dual' ? '選んだ行への命令(例: mv 資料 / rm / tag add 重要)。help で一覧' : '命令を打つ(help で一覧。Tab で補完、↑ ↓ で履歴)';
+    sessionName === 'dual' ? '選んだ行へのコマンド(例: mv 資料 / rm / tag add 重要)。help で一覧' : 'コマンドを打つ(help で一覧。Tab で補完、↑ ↓ で履歴)';
   const run = el('button', 'shell-run');
   run.type = 'button';
   run.setAttribute('data-pkc-action', 'shell-run');
@@ -309,7 +309,7 @@ export function buildShellPrompt(sessionName: 'shell' | 'dual'): HTMLElement {
   hist.type = 'button';
   hist.setAttribute('data-pkc-action', 'shell-history-menu');
   hist.textContent = '履歴';
-  hist.title = '打った命令の履歴を出します(押すと入力欄に入ります)';
+  hist.title = '打ったコマンドの履歴を出します(押すと入力欄に入ります)';
   const histClear = el('button', 'shell-history-clear');
   histClear.type = 'button';
   histClear.setAttribute('data-pkc-action', 'shell-history-clear');
@@ -357,13 +357,13 @@ export class ShellPaneRenderer {
     const state = this.state;
     if (state === null) return;
     const cwd = this.session.cwd !== null && state.entryMetas.has(this.session.cwd) ? this.session.cwd : null;
-    // 消えたフォルダを現在地に持ち続けない(次の命令がルートで動く)
+    // 消えたフォルダを現在地に持ち続けない(次のコマンドがルートで動く)
     if (cwd !== this.session.cwd) this.session.cwd = cwd;
     const text = `現在地: ${pathOf({ metas: state.entryMetas, relations: state.relations }, cwd)}`;
     if (this.cwdLine.textContent !== text) this.cwdLine.textContent = text;
   }
 
-  /** 非表示の間は購読を外す(隠れた画面を、命令の結果のたびに描き直さない)。 */
+  /** 非表示の間は購読を外す(隠れた画面を、コマンドの結果のたびに描き直さない)。 */
   onHidden(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -383,7 +383,7 @@ export class ShellPaneRenderer {
     this.log.setAttribute('aria-live', 'polite');
     h.append(this.cwdLine, this.log, buildShellPrompt('shell'));
     const intro = el('p', 'shell-intro');
-    intro.textContent = 'help で命令の一覧を出せます。ノートを探す・開く・作る・追記する、移す・コピー・ゴミ箱、SQL、「操作を探す」の操作の呼び出しができます。';
+    intro.textContent = 'help でコマンドの一覧を出せます。ノートを探す・開く・作る・追記する、移す・コピー・ゴミ箱、SQL、「操作を探す」の操作の呼び出しができます。';
     this.log.append(intro);
     this.attach();
   }

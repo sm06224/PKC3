@@ -1,10 +1,10 @@
 /**
- * コマンドシェル(#274)と 2 ペインの命令行(#241)の**命令表**(pure)。
+ * コマンドシェル(#274)と 2 ペインのコマンドライン(#241)の**コマンド表**(pure)。
  *
  * 見るのは user が打つ字と、返る計画:
  * ①語の割り方(引用符・全角の空白・閉じていない引用符は断る)②履歴(↑↓ で打ちかけに戻れる・`!!` `!3`)
- * ③ノートの指し方(番号・`.`・題名の一意性・曖昧は黙って選ばない)④命令ごとの計画(移す・コピー・ゴミ箱・タグ…)
- * ⑤危ない命令は確認つき・`-n` は何も実行しない ⑥シェルと 2 ペインが同じ表を読む ⑦補完
+ * ③ノートの指し方(番号・`.`・題名の一意性・曖昧は黙って選ばない)④コマンドごとの計画(移す・コピー・ゴミ箱・タグ…)
+ * ⑤危ないコマンドは確認つき・`-n` は何も実行しない ⑥シェルと 2 ペインが同じ表を読む ⑦補完
  */
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
@@ -145,7 +145,7 @@ describe('ノート・フォルダの指し方', () => {
   });
 });
 
-describe('命令の計画', () => {
+describe('コマンドの計画', () => {
   it('ls は番号つきの表を返し、次の #n の元になる', () => {
     const p = planLine('ls 資料', env());
     expect(p.table?.rows.map((r) => r[2])).toEqual(['議事録 2026', '議事録 2025']);
@@ -264,7 +264,7 @@ describe('命令の計画', () => {
       { type: 'select', lids: ['n1', 'n2'], mode: 'set' },
     ]);
     expect(planLine('select -c', env({ surface: 'dual', other: null })).effects).toEqual([{ type: 'select', lids: [], mode: 'clear' }]);
-    expect(planLine('select 議事', env()).error).toContain('命令はありません');
+    expect(planLine('select 議事', env()).error).toContain('コマンドはありません');
   });
   it('-n は何も実行せず、何が起きるかだけを返す(SQL の字には影響しない)', () => {
     const p = planLine('mv 買い物メモ 資料 -n', env());
@@ -274,14 +274,14 @@ describe('命令の計画', () => {
     expect(planLine('rm 設計 --dry-run', env())).toMatchObject({ effects: [] });
     expect(planLine('rm 設計 -n', env()).confirm).toBeUndefined();
   });
-  it('知らない命令は近い候補を添えて断る。閉じていない引用符も断る', () => {
+  it('知らないコマンドは近い候補を添えて断る。閉じていない引用符も断る', () => {
     const p = planLine('mkd 資料', env());
     expect(p.error).toContain('mkdir');
     expect(planLine('xyz', env()).error).toContain('help');
     expect(planLine('new "abc', env()).error).toContain('閉じていません');
     expect(planLine('   ', env())).toMatchObject({ lines: [], effects: [] });
   });
-  it('help は命令の全部(2 ペインでは 2 ペイン向けだけ)を表にし、help <命令> は書き方を返す', () => {
+  it('help はコマンドの全部(2 ペインでは 2 ペイン向けだけ)を表にし、help <コマンド> は書き方を返す', () => {
     const shell = planLine('help', env()).table!;
     const dual = planLine('help', env({ surface: 'dual', other: null })).table!;
     expect(shell.rows.map((r) => r[1] ?? '').some((u) => u.startsWith('sql'))).toBe(true);
@@ -291,19 +291,19 @@ describe('命令の計画', () => {
   });
 });
 
-describe('命令表(1 つの表を 2 つの口が読む)', () => {
-  it('名前と別名が全部で一意(同じ語が 2 つの命令を指さない)', () => {
+describe('コマンド表(1 つの表を 2 つの口が読む)', () => {
+  it('名前と別名が全部で一意(同じ語が 2 つのコマンドを指さない)', () => {
     const all = SHELL_COMMANDS.flatMap((c) => [c.name, ...c.aliases]);
     expect(new Set(all).size).toBe(all.length);
     expect(SHELL_COMMANDS.length).toBeGreaterThanOrEqual(20);
   });
-  it('全部の命令に書き方・説明・分類がある', () => {
+  it('全部のコマンドに書き方・説明・分類がある', () => {
     for (const c of SHELL_COMMANDS) {
       expect(c.usage.startsWith(c.name)).toBe(true);
       expect(c.summary.length).toBeGreaterThan(5);
     }
   });
-  it('日本語の別名で同じ命令を引ける', () => {
+  it('日本語の別名で同じコマンドを引ける', () => {
     expect(findCommand('移す', 'shell')?.name).toBe('mv');
     expect(findCommand('ＬＳ', 'shell')?.name).toBe('ls');
     expect(findCommand('select', 'shell')).toBeNull();
@@ -312,7 +312,7 @@ describe('命令表(1 つの表を 2 つの口が読む)', () => {
 });
 
 describe('補完', () => {
-  it('1 語目は命令。空なら本来の名前だけ、打ち始めれば別名も', () => {
+  it('1 語目はコマンド。空なら本来の名前だけ、打ち始めれば別名も', () => {
     const empty = completeLine('', env());
     expect(empty.items.map((i) => i.insert)).toContain('mv');
     expect(empty.items.map((i) => i.insert)).not.toContain('移す');

@@ -393,7 +393,7 @@ export class DualFilerRenderer {
     | { panes: Record<DualSide, PaneFrame>; commands: HTMLElement; switcher: HTMLButtonElement }
     | null = null;
   private lastFocus: DualSide | null = null;
-  /** 🔴 命令行の出力を塗る関数と、その購読(面を出している間だけ持つ ── 隠したら外す)。 */
+  /** 🔴 コマンドラインの出力を塗る関数と、その購読(面を出している間だけ持つ ── 隠したら外す)。 */
   private paintCmdOut: (() => void) | null = null;
   private unsubscribeCmdOut: (() => void) | null = null;
   private lastCommands = '';
@@ -793,11 +793,11 @@ export class DualFilerRenderer {
     switcher.setAttribute('data-pkc-action', 'dual-focus');
     switcher.setAttribute('data-pkc-field', 'dual-switch');
     /**
-     * 🔴 **命令行**(#241。user 指示 2026-08-17「PKC2 にあったコマンド機能は 2 ペインファイラの内部で使う」)。
+     * 🔴 **コマンドライン**(#241。user 指示 2026-08-17「PKC2 にあったコマンド機能は 2 ペインファイラの内部で使う」)。
      *
      * 選んだ行(無ければカーソルの行)を相手に、`mv 資料` `cp` `rm` `tag add 重要` `mkdir 新規` `rename 新しい名前` `select 議事` `export` を打つ。
-     * ⚠ 命令表はコマンドシェル(#274)と**同じ 1 つ**(`features/shell/commands.ts`)で、実行も 2 ペインのボタンと同じ実体
-     *   (`mv` = 「移す」、`cp` = 「コピー」)を通る。PKC2 の動線(場所と対象を指して命令を打ち、先に結果を見せる)は
+     * ⚠ コマンド表はコマンドシェル(#274)と**同じ 1 つ**(`features/shell/commands.ts`)で、実行も 2 ペインのボタンと同じ実体
+     *   (`mv` = 「移す」、`cp` = 「コピー」)を通る。PKC2 の動線(場所と対象を指してコマンドを打ち、先に結果を見せる)は
      *   `-n`(試し実行)と確認つきの `rm` で再現した。
      */
     const cmdline = document.createElement('div');

@@ -1,15 +1,15 @@
 /**
- * コマンドシェル(#274)と 2 ペインの命令行(#241)が共有する**命令表**の型。**pure module**。
+ * コマンドシェル(#274)と 2 ペインのコマンドライン(#241)が共有する**コマンド表**の型。**pure module**。
  *
  * ## 🔑 層は 1 つ、口は 2 つ
  *
- * 命令表(`commands.ts`)は 1 つで、シェル(アプリ。別ウィンドウ + 左のペインのタブ)と
- * 2 ペインの命令行が同じ表を読む。違うのは `ShellEnv.surface` と、「対象」の取り方だけ:
+ * コマンド表(`commands.ts`)は 1 つで、シェル(アプリ。別ウィンドウ + 左のペインのタブ)と
+ * 2 ペインのコマンドラインが同じ表を読む。違うのは `ShellEnv.surface` と、「対象」の取り方だけ:
  * シェルは自分の現在地(`cwd`)と選んでいるノート、2 ペインは焦点のペインの場所と選んだ行。
  *
- * ## 🔑 命令は副作用を持たない
+ * ## 🔑 コマンドは副作用を持たない
  *
- * 命令は `ShellPlan`(出力の行 + 実行してほしい `ShellEffect` の列)を返すだけで、state も DOM も触らない。
+ * コマンドは `ShellPlan`(出力の行 + 実行してほしい `ShellEffect` の列)を返すだけで、state も DOM も触らない。
  * 実行は adapter(`adapter/ui/actions/shell-run.ts`)が**既存の実体**(移す・コピー・ゴミ箱・追記・タグ・
  * 書き出し・操作の実行)を呼ぶ ── 新しい書き込みの経路を作らない。
  * ⚠ 任意の字を実行する口(eval)は構造的に無い(語彙は閉じた表)。
@@ -41,7 +41,7 @@ export interface ShellTable {
   readonly columns: readonly string[];
   readonly rows: readonly (readonly string[])[];
   readonly lids: readonly (string | null)[];
-  /** 行を押したとき入力欄へ戻す命令(履歴の表)。`null` = 戻さない。省略 = 全部 `null`。 */
+  /** 行を押したとき入力欄へ戻すコマンド(履歴の表)。`null` = 戻さない。省略 = 全部 `null`。 */
   readonly recall?: readonly (string | null)[];
 }
 
@@ -76,7 +76,7 @@ export interface ShellPlan {
   readonly table?: ShellTable;
   /** 実行してほしいこと(順に)。 */
   readonly effects: readonly ShellEffect[];
-  /** 危険な命令の確認文。あれば実行の前に確認を通す。 */
+  /** 危険なコマンドの確認文。あれば実行の前に確認を通す。 */
   readonly confirm?: string;
   /** 確認が危険色か(`rm`)。偽ならふつうの確認(`cp` のまとめて複製)。 */
   readonly confirmDanger?: boolean;
