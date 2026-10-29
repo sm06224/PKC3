@@ -27,6 +27,7 @@ import { SqlRenderer } from './sql';
 import { TextLabRenderer } from './textlab';
 import { CalcRenderer } from './calc';
 import { DiffMergeRenderer } from './diffmerge';
+import { ShellPaneRenderer } from './cmdshell';
 import { PcFolderRenderer } from './pc-folder';
 import { LocalFolder } from '@adapter/platform/local-folder';
 import type { MarkdownClient } from '@adapter/platform/render/markdown-client';
@@ -45,6 +46,7 @@ type PaneView =
   | 'textlab'
   | 'calc'
   | 'diff'
+  | 'shell'
   | 'pc'
   | 'settings'
   | 'flags'
@@ -70,6 +72,8 @@ const ASIDE: ReadonlySet<ViewMode> = new Set<ViewMode>([
   'calc',
   // ⚠ 差分マージ(#1231)── 同じ
   'diff',
+  // ⚠ コマンドシェル(#274)── 同じ
+  'shell',
   // ⚠ PC(#300)── 左のタブと同じ中身を別窓でも開く道具
   'pc',
 ]);
@@ -143,6 +147,8 @@ export class CenterRouter {
   private readonly calc: CalcRenderer;
   /** 差分マージ(#1231)。 */
   private readonly diff: DiffMergeRenderer;
+  /** コマンドシェル(#274)。 */
+  private readonly shell: ShellPaneRenderer;
   /** PC(パソコンのフォルダ。#300)。 */
   private readonly pc: PcFolderRenderer;
   private lastPane: PaneView = 'detail';
@@ -248,6 +254,7 @@ export class CenterRouter {
       textlab: pane('textlab'),
       calc: pane('calc'),
       diff: pane('diff'),
+      shell: pane('shell'),
       pc: pane('pc'),
       settings: pane('settings'),
       flags: pane('flags'),
@@ -303,6 +310,7 @@ export class CenterRouter {
     this.textlab = new TextLabRenderer(this.panes.textlab);
     this.calc = new CalcRenderer(this.panes.calc);
     this.diff = new DiffMergeRenderer(this.panes.diff);
+    this.shell = new ShellPaneRenderer(this.panes.shell, 'window');
     // 🔴 別窓の PC(#300)── 題(`pane-title`)を付け、中身は別の箱へ描く(`PcFolderRenderer` は箱を空にして描き直すため)
     const pcTitle = document.createElement('h2');
     pcTitle.setAttribute('data-pkc-field', 'pane-title');
@@ -415,6 +423,7 @@ export class CenterRouter {
        */
       if (this.lastPane === 'textlab') this.textlab.onHidden();
       if (this.lastPane === 'diff') this.diff.onHidden();
+      if (this.lastPane === 'shell') this.shell.onHidden();
       /**
        * 🔴 **編集のまま別の画面へ出たら、持ち越した読む面を捨てる**(#1467 段 5)。
        * ⚠ 持ち越しは「その編集が終わるまで」の物 ── 別の画面を見ている間まで節点を常駐させない
@@ -438,6 +447,7 @@ export class CenterRouter {
     else if (view === 'textlab') this.textlab.render(state);
     else if (view === 'calc') this.calc.render();
     else if (view === 'diff') this.diff.render(state);
+    else if (view === 'shell') this.shell.render(state);
     else if (view === 'pc') this.pc.render();
     else if (view === 'settings') this.settings.render(state);
     else if (view === 'flags') this.flags.render();

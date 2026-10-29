@@ -50,6 +50,7 @@ import { EditorModeStore } from '@adapter/ui/render/editor-mode';
 import { PaneSizeStore } from '@adapter/ui/render/pane-size';
 import { QueryKeyStore } from '@adapter/ui/render/query-key-store';
 import { CalcDraftStore } from '@adapter/ui/render/calc-draft-store';
+import { ShellHistoryStore } from '@adapter/ui/render/shell-history-store';
 import { BrowseModeStore } from '@adapter/ui/render/browse-mode';
 import { PaneVisibilityStore } from '@adapter/ui/render/pane-visibility';
 import { GroupFoldStore } from '@adapter/ui/render/group-fold';
@@ -301,6 +302,16 @@ const CASES: readonly {
     },
     a: '基本単価 = 3200 円\n合計',
     b: '',
+  },
+  {
+    // 🔴 コマンドシェルの履歴(#274)。空の配列は「消す」
+    name: 'ShellHistoryStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new ShellHistoryStore(st);
+      return { write: (v) => s.set(v as string[]), read: () => s.get() };
+    },
+    a: ['mv 資料', 'ls'],
+    b: [],
   },
   {
     name: 'CreateKindStore',

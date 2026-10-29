@@ -343,6 +343,8 @@ export const BROWSE_ICONS: Readonly<Record<string, IconName>> = {
   pc: 'monitor',
   // 🔴 手書き(#1448)── 「画像に描き込む」の口(`draw-on-image`)と同じ図案
   draw: 'palette',
+  // 🔴 コマンドシェル(#274)── タイルと同じ図案
+  shell: 'terminal',
 };
 
 /**

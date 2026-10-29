@@ -67,7 +67,7 @@ export interface PaletteRow {
  * 打っても、「ノート」「sql」と同じ操作が当たる。NFKC で全角英数・半角カナを均し、カタカナはひらがなへ寄せる。
  * ⚠ **探される側(label / note / alias / id)と探す語の両方**を同じ関数で均す ── 片方だけだと食い違う。
  */
-function fold(s: string): string {
+export function fold(s: string): string {
   return s
     .normalize('NFKC')
     .toLowerCase()

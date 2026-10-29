@@ -43,6 +43,8 @@ const PANE_FILES: Readonly<Record<BrowseMode, readonly string[]>> = {
   pc: ['pc-folder.ts'],
   // 🔴 手書き(#1448)── 別ウィンドウが塞がれたときの退避先の面
   draw: ['draw-pane.ts'],
+  // 🔴 コマンドシェル(#274)── 別ウィンドウが塞がれたときの退避先 + 左に置いたまま使う面
+  shell: ['cmdshell.ts'],
 };
 
 const readsKindFilter = (mode: BrowseMode): boolean =>

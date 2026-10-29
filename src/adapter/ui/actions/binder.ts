@@ -507,6 +507,7 @@ import {
   parsePlan,
   planPreview,
   resolvePlanTarget,
+  type PlanOp,
 } from '@features/structure/structure-plan';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
 // 🔴 ▼ で選んだ「作る種類」を端末側に覚える(#1045)
@@ -822,6 +823,31 @@ import { openFolderLid } from './open-folder-lid';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 import { labNoteTitle } from '@features/markdown/text-lab';
 import { sheetNoteTitle, sheetToMarkdown, sheetToText } from '@features/calc/sheet';
+import { runShellLine, type OpResult, type ShellOps } from './shell-run';
+import {
+  closeCompletion,
+  completeHostOf,
+  handleShellInput,
+  handleShellKeydown,
+  replaceRange,
+  setLine,
+  shellInputOf,
+  shellSessionOf,
+} from './shell-input';
+import { splitSnippet } from '@features/filter/search-snippet';
+import { completeLine, type CompleteOptions } from '@features/shell/complete';
+import { findCommand as findShellCommand } from '@features/shell/commands';
+import { pathOf as shellPathOf } from '@features/shell/resolve';
+import { fold as shellFold } from '@features/palette/palette-rows';
+import type { ShellEnv, ShellTable } from '@features/shell/types';
+import {
+  appDualShellSession,
+  paintHistoryMenu,
+  sessionByName,
+  shellBlockText,
+  type ShellSession,
+} from '@adapter/ui/render/cmdshell';
+
 import { shortStamp } from '@features/revision/diff-view';
 import type { MergeSession } from '@features/revision/merge-hunks';
 import {
@@ -6279,6 +6305,215 @@ export function selectEntryOrExplain(
 }
 
 /**
+ * 🔴 **整理案の操作(作る・移す・改名)を適用する実体は 1 本**(#429 段③ / #274)。設定の「整理案を適用する」と、
+ * コマンドシェル・2 ペインの命令行の `mkdir` / `rename` が同じここを通る(規則を 2 つ作らない)。
+ * ⚠ 呼ぶ前に phase を確かめる(ここでは見ない)。
+ * @returns 断られた移動の数
+ */
+function applyPlanOps(dispatcher: Dispatcher, planOps: readonly PlanOp[]): { refusedMoves: number; made: ReadonlyMap<string, string> } {
+    /** この案で作ったフォルダ(`@名前` → いま作った lid)。 */
+    const made = new Map<string, string>();
+    let refusedMoves = 0;
+    for (const op of planOps) {
+      if (op.kind === 'rename') {
+        dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: op.lid, title: op.title });
+        continue;
+      }
+      const parentLid = resolvePlanTarget(op.parent, made);
+      if (op.kind === 'mkdir') {
+        const lid = generateLid();
+        dispatcher.dispatch({
+          type: 'CREATE_ENTRY',
+          archetype: 'folder',
+          lid,
+          title: op.title,
+          parentLid,
+          relationId: generateLid(),
+          // ⚠ **編集に入らない** ── 入ると 2 件目以降が撃てなくなる
+          edit: false,
+        });
+        if (op.alias !== null) made.set(op.alias, lid);
+        continue;
+      }
+      const now = dispatcher.getState();
+      if (alreadyThere(now, op.lid, parentLid)) continue;
+      const before = now.relations;
+      dispatcher.dispatch({
+        type: 'SET_ENTRY_PARENT',
+        lid: op.lid,
+        parentLid,
+        relationId: generateLid(),
+      });
+      // 🔴 断られた移動を数える(#1087)── `moveEntries` と同じ見方。直す前は数えずに全件「適用しました」と言っていた
+      if (dispatcher.getState().relations === before) refusedMoves += 1;
+    }
+    return { refusedMoves, made };
+}
+
+/**
+ * 🔴 **ノートを別の場所へコピーする実体は 1 本**(#273 段③ / #241)。2 ペインの「コピー」ボタンと、コマンドシェル・2 ペインの命令行の
+ * `cp` が同じここを通る(規則を 2 つ作らない)。
+ *
+ * @param toScope コピー先のフォルダ(`null` = ルート)
+ * @param afterDone コピーが**成功した**後始末(2 ペイン = 選択を外す)
+ * @param report 結果の文(シェルの出力に載せる)。失敗は `failed: true`
+ */
+function copyEntriesTo(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  lids: readonly string[],
+  toScope: string | null,
+  afterDone: () => void,
+  report?: (text: string, failed: boolean) => void,
+): void {
+    const st = dispatcher.getState();
+    const read = services.readBodies;
+    if (!read) {
+      const why = 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください';
+      dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+      report?.(why, true);
+      return;
+    }
+    const refusedPlace = notPlaceable(st, toScope);
+    if (refusedPlace !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: refusedPlace });
+      report?.(refusedPlace, true);
+      return;
+    }
+    /**
+     * 🔴 **行き先に同じ題名のノートが既にあるか**(Gemini 裁定 = #1163 への依頼 62 の 5)── 数えるのは選んだ物(中身は数えない)。
+     * ⚠ 止めない(知らせに添えるだけ)。行き先の絞り込みで隠れている物も数える(見えていなくても在る)。
+     */
+    const toScopeLid = toScope;
+    const existing = new Set(
+      (toScopeLid === null
+        ? getRootEntries(st.entryMetas, st.relations)
+        : getStructuralChildren(toScopeLid, st.entryMetas, st.relations)
+      ).map((m) => m.title),
+    );
+    const steps = planCopy(
+      lids,
+      toScope,
+      st.entryMetas,
+      st.relations,
+      generateLid,
+    );
+    // ⚠ 数えるのは**できあがる題名**(同じ場所へのコピーは「のコピー」が付くので、ぶつからない)
+    const picked = new Set(lids);
+    const sameTitle = steps.filter((x) => picked.has(x.sourceLid) && existing.has(x.title)).length;
+    // 🔴 **読む前に、保存の書込が並んでいれば待つ**(#1087)。待たずに読むと、書込が disk に届く前の古い本文で
+    //    コピーが作られる(他の読み ── 本文を disk から読む口 ── は待っている。同じ作法に揃える)。
+    void Promise.resolve(services.settle?.() ?? null)
+      .then(() => read(steps.map((s) => s.sourceLid)))
+      .then(
+      (bodies) => {
+        let missing = 0;
+        /**
+         * 🔴 **一緒にコピーしたノートへのリンクは、コピー先へ付け替える**(台帳 #1852 N1 / 依頼 115-5 A。Gemini 回答 = 推薦どおり)。
+         * ⚠ 直す前は、フォルダごとコピーしても中のノート同士のリンクが**元のノートを指したまま**で、リンクを押すと元が開き、
+         *   元を消すとコピー側のリンクが切れた。コピーしなかったノートへのリンクは元のまま(付け替えは写した組の中だけ)。
+         * 🔑 書き換えは取り込みと同じ 1 本(`remapEntryLids`)── `entry:<lid>` の lid の部分だけを写す。
+         */
+        const copied = new Map(steps.map((x) => [x.sourceLid, x.lid] as const));
+        /**
+         * 🔴 **N 件の作成は 1 回の通知にまとめる**(件数ぶん表を作り直さない)。
+         * 🔑 副作用として、`opened-effects`(最近開いた物)へは**最後に選ばれた 1 件だけ**が入る
+         *   (途中の選びは通知されない)── コピー先で最後に選ばれた 1 件だけが一覧に入るのが自然なので、それでよい。
+         */
+        dispatcher.batch(() => {
+          for (const step of steps) {
+            const raw = bodies.get(step.sourceLid);
+            if (raw === undefined) missing += 1;
+            const body = raw === undefined ? undefined : remapEntryLids(raw, copied);
+            dispatcher.dispatch({
+              type: 'CREATE_ENTRY',
+              archetype: step.archetype,
+              lid: step.lid,
+              title: step.title,
+              parentLid: step.parentLid,
+              relationId: generateLid(),
+              edit: false,
+              ...(body === undefined ? {} : { body }),
+            });
+          }
+        });
+        /**
+         * 🔴 **作れたかを見てから言う**(#1087)。編集中は `CREATE_ENTRY` が黙って捨てられる
+         *   (`app-state.ts`。コピーの読み待ちの間に編集へ入った場合)ので、dispatch の後に
+         *   実在を数える ── 作れていないのに「コピーしました」と言わない。
+         */
+        const madeCount = steps.filter((x) => dispatcher.getState().entryMetas.has(x.lid)).length;
+        if (madeCount < steps.length) {
+          const phase = dispatcher.getState().phase;
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error:
+              phase === 'ready'
+                ? 'コピーできませんでした(ノートを作れませんでした)'
+                : `${phaseBlockReason(phase)}コピーしてください`,
+          });
+          report?.(dispatcher.getState().error ?? 'コピーできませんでした', true);
+          return;
+        }
+        /**
+         * 🔴 **行き先を名乗る**(#671 の着地前の動線レビュー A、2026-09-04)。
+         *
+         * ⚠ 直す前は「N 件を写しました」だけで、**どこへ行ったか 1 文字も
+         *   出ていなかった** ── 隣の「移す」は
+         *   「N 件を『◯◯』へ移しました」と名乗っている(上の `moveEntries`)。
+         *   **隣り合う 2 つのボタンで扱いが違った。**
+         * 🔴 スマホでは相手のペインが**画面に居ない**ので、ここが唯一の
+         *   手がかりである ── 見えない場所へ物が飛び、飛んだ先の名前も
+         *   出ないと、探しに行けない。
+         * ⚠ 呼び名の作り方は `moveEntries` と**同じ規則**にする(2 か所で
+         *   別々の綴りを作らない ── CLAUDE.md §7)。
+         */
+        const where =
+          toScope === null
+            ? 'ルート'
+            : (dispatcher.getState().entryMetas.get(toScope)?.title ?? 'フォルダ');
+        /**
+         * 🔴 **成功はエラーの行に出さない / 件数は選んだ数で言う / 印を外す**(#1087 の見直し 2026-10-13)。
+         * ⚠ 直す前は成功も `OP_FAILED` で出していたので、「エラー: 3 件を…へコピーしました」と出て、メッセージには「問題」で
+         *   積まれていた(隣の「移す」は普通の知らせ)。件数は中身まで数えた数で、選んだ数と合わなかった。印も残ったままで、
+         *   もう一度押すと同じ物がもう 1 組できた(「移す」は成功したら外す)。
+         * ⚠ 本文を読めなかった分があるときだけは、問題として残す(空で作った物がある)。
+         */
+        const count = lids.length;
+        const head =
+          steps.length > count
+            ? `${count} 件(中身を含め ${steps.length} 件)を「${where}」へコピーしました`
+            : `${count} 件を「${where}」へコピーしました`;
+        const notes = [
+          ...(sameTitle > 0 ? [`うち ${String(sameTitle)} 件は、同じ題名のノートが既にあります`] : []),
+          ...(missing > 0 ? [`うち ${String(missing)} 件は本文を読めず、空で作りました`] : []),
+        ];
+        const said = notes.length > 0 ? `${head}(${notes.join(' / ')})` : head;
+        if (missing > 0) {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: said });
+          report?.(said, true);
+        } else {
+          report?.(said, false);
+          /**
+           * 🔴 **コピーの後にも「元に戻す」を出す**(台帳 #1852 N1 / 依頼 97-5 A)── 「移す」と同じ作法。押すと作った複製をゴミ箱へ入れる
+           *   (`undo-dual-move`)。⚠ 出すのは**作れた複製の lid**(中身を含めた全部)。
+           */
+          offerDualCopyUndo(
+            dispatcher,
+            steps.map((x) => x.lid),
+            said,
+          );
+        }
+        afterDone();
+      },
+      () => {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: 'コピーできませんでした(本文を読めません)' });
+        report?.('コピーできませんでした(本文を読めません)', true);
+      },
+    );
+}
+
+/**
  * 🔴 **まとめてゴミ箱へ、の実体は 1 本**(#273 段②)。
  *
  * ⚠ 左の列と 2 ペインで**別々に書かない** ── 断り方・確認・「戻せます」の言い方が
@@ -6791,10 +7026,10 @@ export function runGlobalCommand(
    * ⚠ 左にタブが無い面なので、この 3 行が左の一覧を押して中央が本文へ戻った後の**戻り道**になる(`STAY_ON_SELECT` の
    *   テキスト整形以外は、ノートを選ぶと本文へ退く)。
    */
-  if (cmd === 'view-textlab' || cmd === 'view-calc' || cmd === 'view-diff') {
+  if (cmd === 'view-textlab' || cmd === 'view-calc' || cmd === 'view-diff' || cmd === 'view-shell') {
     if (dry) return true;
     prevent();
-    const mode = cmd === 'view-textlab' ? 'textlab' : cmd === 'view-calc' ? 'calc' : 'diff';
+    const mode = cmd === 'view-textlab' ? 'textlab' : cmd === 'view-calc' ? 'calc' : cmd === 'view-shell' ? 'shell' : 'diff';
     dispatcher.dispatch({
       type: 'SET_VIEW_MODE',
       mode: nextViewMode(dispatcher.getState().viewMode, mode),
@@ -7473,6 +7708,327 @@ export function commandRowsFor(
     needsEditorField,
     target !== null,
   ).filter((r) => r.id !== 'open-palette');
+}
+
+/**
+ * 🔴 **命令の結果を待つ**(コマンドシェル #274)。⚠ 満たさないまま `ms` が過ぎたら `false`(黙って待ち続けない)。
+ */
+function waitForState(dispatcher: Dispatcher, done: (s: AppState) => boolean, ms: number): Promise<boolean> {
+  if (done(dispatcher.getState())) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let off: (() => void) | null = null;
+    const timer = setTimeout(() => {
+      off?.();
+      resolve(false);
+    }, ms);
+    off = dispatcher.onState((s) => {
+      if (!done(s)) return;
+      clearTimeout(timer);
+      off?.();
+      resolve(true);
+    });
+  });
+}
+
+/** 結果の表の上限(巨大な表を何度も出さない)。 */
+const SHELL_SQL_ROWS_SHOWN = 500;
+
+/**
+ * 🔴 **コマンドシェル / 2 ペインの命令行が、既存の実体を呼ぶ口の束**(#274 / #241)。
+ *
+ * ⚠ **ここに新しい書き込みの経路は 1 本も無い**: 移す(`moveEntriesOfferingUndo`)・コピー(`copyEntriesTo`)・ゴミ箱(`deleteFrom`)・
+ *   追記(`APPEND_TO_ENTRY`)・タグ(`BULK_TAG`)・整理案(`applyPlanOps`)・書き出し(`services.exportEntryMarkdown`)・
+ *   SQL(`RUN_SQL`)・操作(`runCommandRow`)は、ボタンやキーが通るのと**同じ関数**で、断り方(編集中・別タブの編集)も同じ。
+ * @param where `window` = 別ウィンドウ(開くは付箋のウィンドウ)/ `pane` = 左のペインのタブ・2 ペイン(開くはこのウィンドウで選ぶ)
+ */
+export function makeShellOps(h: {
+  readonly dispatcher: Dispatcher;
+  readonly services: BinderServices;
+  readonly root: HTMLElement;
+  readonly surface: 'shell' | 'dual';
+  readonly where: 'window' | 'pane';
+}): ShellOps {
+  const { dispatcher, services, root, surface, where } = h;
+  const fail = (text: string): OpResult => ({ text, failed: true });
+  const done = (text: string, lids?: readonly string[]): OpResult => ({ text, failed: false, ...(lids === undefined ? {} : { lids }) });
+  const titleOf = (lid: string): string => `「${dispatcher.getState().entryMetas.get(lid)?.title ?? lid}」`;
+  const stopped = (verb: string): string | null => {
+    const why = phaseBlockReason(dispatcher.getState().phase);
+    return why === null ? null : `${why}${verb}してください`;
+  };
+  const env = (session: ShellSession): ShellEnv => {
+    const st = dispatcher.getState();
+    const base = {
+      metas: st.entryMetas,
+      relations: st.relations,
+      last: session.last,
+      newLid: generateLid,
+      ...(st.tagSuggestions === null ? {} : { tags: st.tagSuggestions }),
+    };
+    if (surface === 'shell') {
+      const cwd = session.cwd !== null && st.entryMetas.get(session.cwd)?.archetype === 'folder' ? session.cwd : null;
+      const sel = st.selectedLid;
+      return { ...base, surface: 'shell', cwd, other: undefined, marked: sel !== null && st.entryMetas.has(sel) ? [sel] : [] };
+    }
+    const side = st.dual.focus;
+    const pane = paneOf(st.dual, side);
+    return {
+      ...base,
+      surface: 'dual',
+      cwd: paneScope(pane),
+      other: paneScope(paneOf(st.dual, otherSide(side))),
+      marked: operationTargets(dualPaneRows(st, side), pane.selection, pane.cursor),
+    };
+  };
+  const ops: ShellOps = {
+    env,
+    promptText: (session) => {
+      const e = env(session);
+      const path = shellPathOf(e, e.cwd);
+      return surface === 'dual' ? `${dispatcher.getState().dual.focus === 'left' ? '左' : '右'} ${path}>` : `${path}>`;
+    },
+    applyPlan: (planOps) => {
+      const stop = stopped('実行');
+      if (stop !== null) return fail(stop);
+      const { refusedMoves, made } = applyPlanOps(dispatcher, planOps);
+      const ok = planOps.length - refusedMoves;
+      return refusedMoves > 0
+        ? fail(`${String(ok)} 件を実行しました。${String(refusedMoves)} 件は移せませんでした(行き先がフォルダではないか、フォルダを自分の中へ入れようとしています)`)
+        : done(`${String(ok)} 件を実行しました`, [...made.values()]);
+    },
+    create: (title, body, parent) => {
+      const stop = stopped('作成');
+      if (stop !== null) return fail(stop);
+      const lid = generateLid();
+      dispatcher.dispatch({
+        type: 'CREATE_ENTRY',
+        archetype: 'text',
+        lid,
+        title,
+        body,
+        parentLid: parent,
+        relationId: generateLid(),
+        edit: false,
+      });
+      return dispatcher.getState().entryMetas.has(lid)
+        ? done(`ノート「${title}」を作りました(#1 で指せます)`, [lid])
+        : fail('作れませんでした(もう一度実行してください)');
+    },
+    append: async (lid, text) => {
+      const st = dispatcher.getState();
+      const meta = st.entryMetas.get(lid);
+      if (meta === undefined) return fail('そのノートは見つかりません');
+      if (!isAppendable(meta.archetype)) return fail(`${titleOf(lid)} は追記できない種類です`);
+      const stop = stopped('追記');
+      if (stop !== null) return fail(stop);
+      if (text.trim() === '') return fail('追記する字が空です');
+      if (!elsewhereCheckNotNeeded(dispatcher, services, lid)) {
+        const why = await editedElsewhereReason(dispatcher, services, lid).catch(
+          (e: unknown) => `追記できませんでした(別のタブの編集を確かめられませんでした: ${errorText(e)})`,
+        );
+        if (why !== null) return fail(why);
+      }
+      dispatcher.dispatch({
+        type: 'APPEND_TO_ENTRY',
+        lid,
+        text,
+        heading: appendHeadingFor(meta.archetype, new Date()),
+        target: null,
+      });
+      // 受け付けられた回は書込の錠が立つ。立たなければ reducer が断った(理由は error に載る)
+      if (dispatcher.getState().writeLock === null) return fail(dispatcher.getState().error || '追記できませんでした');
+      const finished = await waitForState(dispatcher, (s) => s.writeLock === null, 8000);
+      return finished
+        ? done(`${titleOf(lid)} の末尾に追記しました(「追記を元に戻す」で戻せます)`)
+        : fail('追記の完了を確かめられませんでした(ノートを開いて確かめてください)');
+    },
+    move: (lids, to) => {
+      let said = '';
+      const moved = moveEntriesOfferingUndo(dispatcher, lids, to, (t) => {
+        said = t;
+      });
+      if (moved) return done(said === '' ? '移しました' : `${said}(「元に戻す」で戻せます)`);
+      return fail(dispatcher.getState().error || '移せませんでした');
+    },
+    copy: (lids, to) =>
+      new Promise<OpResult>((resolve) => {
+        copyEntriesTo(
+          dispatcher,
+          services,
+          lids,
+          to,
+          () => {},
+          (text, failed) => {
+            resolve(failed ? fail(text) : done(text));
+          },
+        );
+      }),
+    trash: async (lids) => {
+      const st = dispatcher.getState();
+      const rows = lids.map((l) => st.entryMetas.get(l)).filter((m): m is EntryMeta => m !== undefined);
+      deleteFrom(dispatcher, services, root, rows, lids, null, () => {});
+      // 別のタブの編集を確かめる間は非同期になる(`deleteFrom` の注記)── 消えるのを待つ
+      const gone = await waitForState(dispatcher, (s) => lids.every((l) => !s.entryMetas.has(l)), 4000);
+      if (gone) return done(`${String(lids.length)} 件をゴミ箱へ入れました(「元に戻す」で戻せます)`);
+      return fail(dispatcher.getState().error || 'ゴミ箱へ入れられませんでした');
+    },
+    tag: (lids, tags, mode) => {
+      const stop = stopped(mode === 'add' ? 'タグを付け' : 'タグを外し');
+      if (stop !== null) return fail(stop);
+      const long = overlongTagMessage(tags.join(' '));
+      if (long !== null) return fail(long);
+      dispatcher.dispatch({ type: 'CLEAR_REFUSED_TAGS', field: 'bulk-tag' });
+      actUnlessEditedElsewhere(
+        dispatcher,
+        services,
+        lids,
+        'タグを付け外しできませんでした(別のタブの編集を確かめられませんでした)',
+        () => {
+          dispatcher.dispatch({ type: 'BULK_TAG', lids, tags, mode, field: 'bulk-tag' });
+        },
+      );
+      return done(`${String(lids.length)} 件に、タグ「${tags.join(' ')}」を${mode === 'add' ? '付けます' : '外します'}(結果は上のメッセージに出ます)`);
+    },
+    exportNote: (lid, format) => {
+      const why = blockedActionNote(dispatcher.getState().phase);
+      if (why !== null) return fail(`いまは書き出せません: ${why}`);
+      const svc = ROOT_SERVICES.get(root) ?? services;
+      const run = format === 'pdf' ? svc.printNote : svc.exportEntryMarkdown;
+      if (run === undefined) return fail('このタブの PKC3 が古いままのため、書き出せません。再読み込みしてください');
+      run.call(svc, lid);
+      return done(`${titleOf(lid)} を ${format === 'pdf' ? 'PDF' : 'Markdown'} で書き出します`);
+    },
+    open: (lid) => {
+      if (!dispatcher.getState().entryMetas.has(lid)) return fail('そのノートは見つかりません');
+      if (where === 'window' && services.openNoteWindow !== undefined) {
+        services.openNoteWindow(lid);
+        return done(`${titleOf(lid)} を別のウィンドウで開きました`);
+      }
+      return selectEntryOrExplain(dispatcher, lid, 'ノート', root, services)
+        ? done(`${titleOf(lid)} を開きました`)
+        : fail(dispatcher.getState().error || 'いまは開けません');
+    },
+    enter: (scope) => {
+      const side = dispatcher.getState().dual.focus;
+      dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid: scope });
+      return done(`${shellPathOf(env(appDualShellSession), scope)} を開きました`);
+    },
+    select: (lids, mode) => {
+      const side = dispatcher.getState().dual.focus;
+      if (mode === 'clear') {
+        dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side });
+        return done('選択を外しました');
+      }
+      dispatcher.dispatch({ type: 'DUAL_SELECT_MANY', side, lids });
+      return done(`${String(lids.length)} 件を選択しました(mv / cp / rm / tag の対象になります)`);
+    },
+    runSql: async (sql) => {
+      dispatcher.dispatch({ type: 'SET_SQL_TEXT', sql });
+      dispatcher.dispatch({ type: 'RUN_SQL' });
+      const finished = await waitForState(dispatcher, (s) => !s.sqlPage.running, 50_000);
+      const p = dispatcher.getState().sqlPage;
+      if (!finished) return { columns: [], rows: [], truncated: false, ms: 0, error: 'SQL の完了を待てませんでした(SQL の画面で確かめてください)' };
+      if (p.error !== '') return { columns: [], rows: [], truncated: false, ms: 0, error: p.error };
+      const cut = p.rows.length > SHELL_SQL_ROWS_SHOWN;
+      return {
+        columns: p.columns,
+        rows: cut ? p.rows.slice(0, SHELL_SQL_ROWS_SHOWN) : p.rows,
+        truncated: p.truncated || cut,
+        ms: Math.round(p.ms),
+        error: '',
+      };
+    },
+    search: async (query) => {
+      const page = dispatcher.getState().searchPage;
+      // 同じ語を続けて探しても、結果を取り直す(語が同じだと reducer が何もしない)
+      if (page.query === query) dispatcher.dispatch({ type: 'SET_SEARCH_PAGE_QUERY', query: '' });
+      dispatcher.dispatch({ type: 'SET_SEARCH_PAGE_QUERY', query });
+      const finished = await waitForState(
+        dispatcher,
+        (s) => s.searchPage.query === query && s.searchPage.rowsQuery === query,
+        15_000,
+      );
+      const p = dispatcher.getState().searchPage;
+      if (!finished) return { rows: [], truncated: false, error: '探し終えるのを待てませんでした(「探す」の画面で確かめてください)' };
+      if (p.failed !== false) {
+        return {
+          rows: [],
+          truncated: false,
+          error: p.failed === 'stale' ? 'このタブの PKC3 が古いままのため、本文を探せません。再読み込みしてください' : '本文を探せませんでした',
+        };
+      }
+      return {
+        rows: p.rows.map((r) => ({ lid: r.lid, title: r.title, snippet: splitSnippet(r.snippet).map((s) => s.text).join('') })),
+        truncated: p.truncated,
+        error: '',
+      };
+    },
+    operations: (query) => {
+      const rows = commandRowsFor(root, dispatcher, appKeymap, query, null);
+      if (rows.length === 0) return { kind: 'none', text: '当てはまる操作はありません' };
+      return { kind: 'many', text: `${String(rows.length)} 件(do <名前> で実行。押せない操作は理由つきで出ます)`, table: operationTable(rows) };
+    },
+    operation: (query) => {
+      const rows = commandRowsFor(root, dispatcher, appKeymap, query, null);
+      if (rows.length === 0) return Promise.resolve({ kind: 'none', text: `「${query}」に当てはまる操作はありません(ops で一覧)` });
+      const q = shellFold(query);
+      const pick = rows.find((r) => shellFold(r.label) === q) ?? (rows.length === 1 ? rows[0] : undefined);
+      if (pick === undefined) {
+        return Promise.resolve({
+          kind: 'many',
+          text: `${String(rows.length)} 件に当てはまります。名前を絞って、もう一度実行してください`,
+          table: operationTable(rows),
+        });
+      }
+      if (!pick.ready) return Promise.resolve({ kind: 'blocked', text: `「${pick.label}」${pick.why}` });
+      const cenv: CommandEnv = { root, dispatcher, keymap: appKeymap, notify: (t, o) => services.showStatus?.(t, o) };
+      const started = runCommandRow(pick.id, cenv, { onDone: () => appRecentCommands.push(pick.id) });
+      return Promise.resolve(
+        started
+          ? { kind: 'ran', text: `操作「${pick.label}」を実行しました` }
+          : { kind: 'blocked', text: `「${pick.label}」はいま実行できません` },
+      );
+    },
+    // 🔴 危ない命令は `rm` だけ(命令表の test が 1 件であることを見る)── ボタンには「何が起きるか」を書く
+    askConfirm: async (message) => (await confirmInApp(root, message, { danger: true, okLabel: 'ゴミ箱へ入れる' })) === 'ok',
+    copyText: (text) => copyPlainText(text),
+  };
+  return ops;
+}
+
+function operationTable(rows: readonly PaletteRow[]): ShellTable {
+  return {
+    columns: ['操作', '割り当て', '状態'],
+    rows: rows.map((r) => [r.label, r.keys.join(' / '), r.ready ? '実行できる' : r.why]),
+    lids: rows.map(() => null),
+    recall: rows.map((r) => `do ${r.label}`),
+  };
+}
+
+/** 補完に渡す「操作の名前」。`do` / `ops` を打っているときだけ集める(毎回の打鍵で一覧を作らない)。 */
+function shellCompleteOptions(root: HTMLElement, dispatcher: Dispatcher, line: string): CompleteOptions {
+  const head = line.trimStart().split(/\s+/u)[0] ?? '';
+  const cmd = findShellCommand(head, 'shell');
+  if (cmd?.name !== 'do' && cmd?.name !== 'ops') return {};
+  return { operationLabels: commandRowsFor(root, dispatcher, appKeymap, '', null).map((r) => r.label) };
+}
+
+/** シェル / 2 ペインの命令行を、その場の session で 1 行実行する。 */
+function runShellFrom(from: Element, dispatcher: Dispatcher, services: BinderServices, root: HTMLElement): void {
+  const input = shellInputOf(from);
+  const session = shellSessionOf(from);
+  if (input === null || session === null) return;
+  const line = input.value;
+  if (line.trim() === '') return;
+  input.value = '';
+  closeCompletion(input);
+  const surface = session.name;
+  // 別ウィンドウ(中央に出しているシェル)では、開くは付箋のウィンドウ。左のペインのタブ・2 ペインでは、このウィンドウで選ぶ
+  const where = surface === 'shell' && input.closest('[data-pkc-variant="window"]') !== null ? 'window' : 'pane';
+  const ops = makeShellOps({ dispatcher, services, root, surface, where });
+  void runShellLine(ops, session, line).then(() => {
+    input.focus();
+  });
 }
 
 /**
@@ -9568,6 +10124,66 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (reopenLiveRowThen(env, id, memo, exec)) exec();
   },
   /**
+   * 🔴 **コマンドシェルの打つ欄**(#274 / #241)。⚠ 実行は `runShellFrom` ── 命令表(`features/shell/commands.ts`)が決め、
+   *   既存の実体(移す・コピー・ゴミ箱・追記…)を `makeShellOps` が呼ぶ。ここは**押された事実を渡す**だけ。
+   */
+  'shell-run': (dispatcher, target, services, root) => {
+    runShellFrom(target, dispatcher, services, root);
+  },
+  /** 履歴・表の行から、その命令を入力欄へ戻す(実行はしない ── 直してから Enter)。 */
+  'shell-recall': (_dispatcher, target) => {
+    const text = target.closest<HTMLElement>('[data-pkc-text]')?.getAttribute('data-pkc-text');
+    const input =
+      shellInputOf(target) ??
+      target
+        .closest('[data-pkc-region="cmdshell"], [data-pkc-region="dual-cmdline"]')
+        ?.querySelector<HTMLInputElement>('[data-pkc-field="shell-input"]') ??
+      null;
+    if (text === null || text === undefined || input === null) return;
+    setLine(input, text);
+    closeCompletion(input);
+  },
+  /** 補完の候補を押した。 */
+  'shell-pick': (_dispatcher, target) => {
+    const b = target.closest<HTMLElement>('[data-pkc-insert]');
+    const input = shellInputOf(target);
+    if (b === null || input === null) return;
+    const from = Number(b.getAttribute('data-pkc-from'));
+    const to = Number(b.getAttribute('data-pkc-to'));
+    if (!Number.isInteger(from) || !Number.isInteger(to)) return;
+    replaceRange(input, from, to, `${b.getAttribute('data-pkc-insert') ?? ''} `);
+    input.focus();
+    closeCompletion(input);
+  },
+  /** 履歴の一覧を出す / 閉じる(押すと入力欄に入る)。 */
+  'shell-history-menu': (_dispatcher, target) => {
+    const session = shellSessionOf(target);
+    const host = completeHostOf(target);
+    if (session === null || host === null) return;
+    if (!host.hidden && host.querySelector('[data-pkc-action="shell-recall"]') !== null) {
+      closeCompletion(target);
+      return;
+    }
+    paintHistoryMenu(host, session.history);
+  },
+  /** 出力を消す(履歴は残る)。 */
+  'shell-clear': (_dispatcher, target) => {
+    const session = shellSessionOf(target) ?? sessionByName('shell');
+    session?.clear();
+  },
+  /** 結果の 1 塊をコピーする。 */
+  'shell-copy-block': (_dispatcher, target, services) => {
+    const block = target.closest<HTMLElement>('[data-pkc-block]');
+    const id = Number(block?.getAttribute('data-pkc-block'));
+    const host = target.closest<HTMLElement>('[data-pkc-region="cmdshell"], [data-pkc-region="dual-cmdline"]');
+    const session = sessionByName(host?.getAttribute('data-pkc-session') ?? (host?.matches('[data-pkc-region="cmdshell"]') ? 'shell' : null));
+    const found = session?.find(id);
+    if (found === undefined) return;
+    void copyPlainText(shellBlockText(found)).then((ok) => {
+      services.showStatus?.(ok ? '結果をコピーしました' : 'コピーできませんでした(ブラウザに拒否されました)', ok ? undefined : CAUTION);
+    });
+  },
+  /**
    * 🔴 **コピーした物を選ぶ**(#678)── **もう一度コピーする**(その場へ差し込まない)。
    *
    * ⚠ 差し込むには caret が要るが、メニューを開いた時点で欄から焦点が外れる ──
@@ -10731,143 +11347,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    const read = services.readBodies;
-    if (!read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
-      return;
-    }
-    const to = otherSide(side);
-    const refusedPlace = notPlaceable(st, paneScope(paneOf(st.dual, to)));
-    if (refusedPlace !== null) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: refusedPlace });
-      return;
-    }
-    /**
-     * 🔴 **行き先に同じ題名のノートが既にあるか**(Gemini 裁定 = #1163 への依頼 62 の 5)── 数えるのは選んだ物(中身は数えない)。
-     * ⚠ 止めない(知らせに添えるだけ)。行き先の絞り込みで隠れている物も数える(見えていなくても在る)。
-     */
-    const toScopeLid = paneScope(paneOf(st.dual, to));
-    const existing = new Set(
-      (toScopeLid === null
-        ? getRootEntries(st.entryMetas, st.relations)
-        : getStructuralChildren(toScopeLid, st.entryMetas, st.relations)
-      ).map((m) => m.title),
-    );
-    const steps = planCopy(
-      lids,
-      paneScope(paneOf(st.dual, to)),
-      st.entryMetas,
-      st.relations,
-      generateLid,
-    );
-    // ⚠ 数えるのは**できあがる題名**(同じ場所へのコピーは「のコピー」が付くので、ぶつからない)
-    const picked = new Set(lids);
-    const sameTitle = steps.filter((x) => picked.has(x.sourceLid) && existing.has(x.title)).length;
-    // 🔴 **読む前に、保存の書込が並んでいれば待つ**(#1087)。待たずに読むと、書込が disk に届く前の古い本文で
-    //    コピーが作られる(他の読み ── 本文を disk から読む口 ── は待っている。同じ作法に揃える)。
-    void Promise.resolve(services.settle?.() ?? null)
-      .then(() => read(steps.map((s) => s.sourceLid)))
-      .then(
-      (bodies) => {
-        let missing = 0;
-        /**
-         * 🔴 **一緒にコピーしたノートへのリンクは、コピー先へ付け替える**(台帳 #1852 N1 / 依頼 115-5 A。Gemini 回答 = 推薦どおり)。
-         * ⚠ 直す前は、フォルダごとコピーしても中のノート同士のリンクが**元のノートを指したまま**で、リンクを押すと元が開き、
-         *   元を消すとコピー側のリンクが切れた。コピーしなかったノートへのリンクは元のまま(付け替えは写した組の中だけ)。
-         * 🔑 書き換えは取り込みと同じ 1 本(`remapEntryLids`)── `entry:<lid>` の lid の部分だけを写す。
-         */
-        const copied = new Map(steps.map((x) => [x.sourceLid, x.lid] as const));
-        /**
-         * 🔴 **N 件の作成は 1 回の通知にまとめる**(件数ぶん表を作り直さない)。
-         * 🔑 副作用として、`opened-effects`(最近開いた物)へは**最後に選ばれた 1 件だけ**が入る
-         *   (途中の選びは通知されない)── コピー先で最後に選ばれた 1 件だけが一覧に入るのが自然なので、それでよい。
-         */
-        dispatcher.batch(() => {
-          for (const step of steps) {
-            const raw = bodies.get(step.sourceLid);
-            if (raw === undefined) missing += 1;
-            const body = raw === undefined ? undefined : remapEntryLids(raw, copied);
-            dispatcher.dispatch({
-              type: 'CREATE_ENTRY',
-              archetype: step.archetype,
-              lid: step.lid,
-              title: step.title,
-              parentLid: step.parentLid,
-              relationId: generateLid(),
-              edit: false,
-              ...(body === undefined ? {} : { body }),
-            });
-          }
-        });
-        /**
-         * 🔴 **作れたかを見てから言う**(#1087)。編集中は `CREATE_ENTRY` が黙って捨てられる
-         *   (`app-state.ts`。コピーの読み待ちの間に編集へ入った場合)ので、dispatch の後に
-         *   実在を数える ── 作れていないのに「コピーしました」と言わない。
-         */
-        const madeCount = steps.filter((x) => dispatcher.getState().entryMetas.has(x.lid)).length;
-        if (madeCount < steps.length) {
-          const phase = dispatcher.getState().phase;
-          dispatcher.dispatch({
-            type: 'OP_FAILED',
-            error:
-              phase === 'ready'
-                ? 'コピーできませんでした(ノートを作れませんでした)'
-                : `${phaseBlockReason(phase)}コピーしてください`,
-          });
-          return;
-        }
-        /**
-         * 🔴 **行き先を名乗る**(#671 の着地前の動線レビュー A、2026-09-04)。
-         *
-         * ⚠ 直す前は「N 件を写しました」だけで、**どこへ行ったか 1 文字も
-         *   出ていなかった** ── 隣の「移す」は
-         *   「N 件を『◯◯』へ移しました」と名乗っている(上の `moveEntries`)。
-         *   **隣り合う 2 つのボタンで扱いが違った。**
-         * 🔴 スマホでは相手のペインが**画面に居ない**ので、ここが唯一の
-         *   手がかりである ── 見えない場所へ物が飛び、飛んだ先の名前も
-         *   出ないと、探しに行けない。
-         * ⚠ 呼び名の作り方は `moveEntries` と**同じ規則**にする(2 か所で
-         *   別々の綴りを作らない ── CLAUDE.md §7)。
-         */
-        const toScope = paneScope(paneOf(st.dual, to));
-        const where =
-          toScope === null
-            ? 'ルート'
-            : (dispatcher.getState().entryMetas.get(toScope)?.title ?? 'フォルダ');
-        /**
-         * 🔴 **成功はエラーの行に出さない / 件数は選んだ数で言う / 印を外す**(#1087 の見直し 2026-10-13)。
-         * ⚠ 直す前は成功も `OP_FAILED` で出していたので、「エラー: 3 件を…へコピーしました」と出て、メッセージには「問題」で
-         *   積まれていた(隣の「移す」は普通の知らせ)。件数は中身まで数えた数で、選んだ数と合わなかった。印も残ったままで、
-         *   もう一度押すと同じ物がもう 1 組できた(「移す」は成功したら外す)。
-         * ⚠ 本文を読めなかった分があるときだけは、問題として残す(空で作った物がある)。
-         */
-        const count = lids.length;
-        const head =
-          steps.length > count
-            ? `${count} 件(中身を含め ${steps.length} 件)を「${where}」へコピーしました`
-            : `${count} 件を「${where}」へコピーしました`;
-        const notes = [
-          ...(sameTitle > 0 ? [`うち ${String(sameTitle)} 件は、同じ題名のノートが既にあります`] : []),
-          ...(missing > 0 ? [`うち ${String(missing)} 件は本文を読めず、空で作りました`] : []),
-        ];
-        const said = notes.length > 0 ? `${head}(${notes.join(' / ')})` : head;
-        if (missing > 0) {
-          dispatcher.dispatch({ type: 'OP_FAILED', error: said });
-        } else {
-          /**
-           * 🔴 **コピーの後にも「元に戻す」を出す**(台帳 #1852 N1 / 依頼 97-5 A)── 「移す」と同じ作法。押すと作った複製をゴミ箱へ入れる
-           *   (`undo-dual-move`)。⚠ 出すのは**作れた複製の lid**(中身を含めた全部)。
-           */
-          offerDualCopyUndo(
-            dispatcher,
-            steps.map((x) => x.lid),
-            said,
-          );
-        }
-        dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side });
-      },
-      () => dispatcher.dispatch({ type: 'OP_FAILED', error: 'コピーできませんでした(本文を読めません)' }),
-    );
+    copyEntriesTo(dispatcher, services, lids, paneScope(paneOf(st.dual, otherSide(side))), () => {
+      dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side });
+    });
   },
   /** ⚠ 鍵(`Delete`)と**同じ実体**を押しボタンからも呼ぶ(規則を 2 つ作らない)。 */
   'dual-delete': (dispatcher, target, services, root) => {
@@ -15150,42 +15632,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const plan = parsePlan(ta.value, st.entryMetas);
     if (!canApplyPlan(plan)) return;
-    /** この案で作ったフォルダ(`@名前` → いま作った lid)。 */
-    const made = new Map<string, string>();
-    let refusedMoves = 0;
-    for (const op of plan.ops) {
-      if (op.kind === 'rename') {
-        dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: op.lid, title: op.title });
-        continue;
-      }
-      const parentLid = resolvePlanTarget(op.parent, made);
-      if (op.kind === 'mkdir') {
-        const lid = generateLid();
-        dispatcher.dispatch({
-          type: 'CREATE_ENTRY',
-          archetype: 'folder',
-          lid,
-          title: op.title,
-          parentLid,
-          relationId: generateLid(),
-          // ⚠ **編集に入らない** ── 入ると 2 件目以降が撃てなくなる
-          edit: false,
-        });
-        if (op.alias !== null) made.set(op.alias, lid);
-        continue;
-      }
-      const now = dispatcher.getState();
-      if (alreadyThere(now, op.lid, parentLid)) continue;
-      const before = now.relations;
-      dispatcher.dispatch({
-        type: 'SET_ENTRY_PARENT',
-        lid: op.lid,
-        parentLid,
-        relationId: generateLid(),
-      });
-      // 🔴 断られた移動を数える(#1087)── `moveEntries` と同じ見方。直す前は数えずに全件「適用しました」と言っていた
-      if (dispatcher.getState().relations === before) refusedMoves += 1;
-    }
+    const { refusedMoves } = applyPlanOps(dispatcher, plan.ops);
     // 🔑 当てたら欄を空にする ── 残すと「もう一度押せる」ように見える(二重適用)
     ta.value = '';
     paintPlan(root, dispatcher, '');
@@ -19556,6 +20003,15 @@ export function bindActions(
       return;
     }
     const el = ev.target;
+    // 🔴 コマンドシェルの打つ欄(#274 / #241)── 打つたびに補完の候補を出し直す
+    if (el instanceof HTMLInputElement && el.getAttribute('data-pkc-field') === 'shell-input') {
+      const session = shellSessionOf(el);
+      if (session !== null) {
+        const ops = makeShellOps({ dispatcher, services, root, surface: session.name, where: 'pane' });
+        handleShellInput(el, session, (line) => completeLine(line, ops.env(session), shellCompleteOptions(root, dispatcher, line)));
+      }
+      return;
+    }
     // 🔴 置換の帯の「探す語」を打つたびに件数を出し直す(#1646 の 2)
     if (el instanceof HTMLInputElement && el.getAttribute('data-pkc-field') === 'replace-find') {
       paintReplaceCount(root, dispatcher);
@@ -19833,6 +20289,21 @@ export function bindActions(
     // ⚠ **追記欄より先に置く** ── 変換確定の Enter で送ってしまうと、
     // 日本語で書く人は「打ち終わる前に飛ぶ」を毎回踏む
     if (ke.isComposing || ke.keyCode === 229) return;
+    /**
+     * 🔴 **コマンドシェルの打つ欄**(#274 / #241)── Enter = 実行 / ↑ ↓ = 履歴 / Tab = 補完 / Esc = 候補を閉じる。
+     * ⚠ 変換中の Enter は上の IME ガードで弾き済み。
+     */
+    if (field === 'shell-input' && ke.target instanceof HTMLInputElement) {
+      const input = ke.target;
+      const session = shellSessionOf(input);
+      if (session !== null) {
+        const complete = (line: string) =>
+          completeLine(line, makeShellOps({ dispatcher, services, root, surface: session.name, where: 'pane' }).env(session), shellCompleteOptions(root, dispatcher, line));
+        const r = handleShellKeydown(ke, input, session, complete);
+        if (r === 'run') run('shell-run', input);
+        if (r !== null) return;
+      }
+    }
     /**
      * 🔴 **板の付箋の上の欄**(#529 W5)── Enter で確定 / Esc でやめる。
      * ⚠ 追記は **Shift+Enter が改行**。題名は 1 行なので改行は入れない。

@@ -1035,7 +1035,7 @@ describe('ノートでない面から、一覧を押したら中央が戻る', (
    * 「もう 1 つ入れて見比べよう」と添付しても、**選び所と打ちかけの SQL を
    * 画面から消さない**(直す前は `SELECT_ENTRY` が飛んで両方消えていた)。
    */
-  const STAYS = ['sql', 'textlab', 'calc', 'diff'] as const;
+  const STAYS = ['sql', 'textlab', 'calc', 'diff', 'shell'] as const;
 
   for (const view of LEAVES) {
     it(`🔴 ${view} を開いたまま別のノートを押すと detail へ戻る`, () => {

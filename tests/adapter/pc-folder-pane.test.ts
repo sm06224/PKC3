@@ -84,7 +84,7 @@ const q = (p: HTMLElement, sel: string): HTMLElement | null => p.querySelector<H
 
 describe('タブ「PC」', () => {
   it('🔴 6 枚目で、図案が「フォルダ」のタブと違う(7 枚目は関係グラフ ── #281 ①、8 枚目は計った時間 ── #683 ①、9 枚目は描いている間だけ出る手書き ── #1448)', () => {
-    expect(BROWSE_TABS).toHaveLength(9);
+    expect(BROWSE_TABS).toHaveLength(10);
     expect(BROWSE_TABS[5]).toEqual({ mode: 'pc', label: 'PC' });
     expect(BROWSE_ICONS.pc, '図案が無い').toBeTruthy();
     expect(BROWSE_ICONS.pc, 'フォルダのタブと同じ絵').not.toBe(BROWSE_ICONS.filer);

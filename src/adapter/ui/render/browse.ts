@@ -31,6 +31,7 @@ import { GraphRenderer } from './graph';
 import { TimersRenderer } from './timers';
 import { PcFolderRenderer } from './pc-folder';
 import type { FolderSync } from '@adapter/platform/folder-sync';
+import { ShellPaneRenderer } from './cmdshell';
 import { LocalFolder } from '@adapter/platform/local-folder';
 import type { AssetLender } from './detail';
 
@@ -100,6 +101,12 @@ export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
    * 退避先は中央ではなく**左のタブ**(中央の本文を奪わない)。⚠ **描いている間だけ**タブが出る(普段は隠れている)。
    */
   { mode: 'draw', label: '手書き' },
+  /**
+   * 🔴 **コマンドシェル**(#274。user 指示 2026-08-19「同じようにコマンドシェルも必要です」)。別ウィンドウ(アプリの一覧のタイル)が基本で、
+   * このタブは**塞がれたときの退避先 + 左のペインに置いたまま使う入口**(中央の本文を奪わない)。
+   * ⚠ 打った命令の履歴・出力は別ウィンドウ側と同じ session を使う。
+   */
+  { mode: 'shell', label: 'シェル' },
 ] as const;
 
 /**
@@ -170,6 +177,8 @@ export class BrowseRouter {
   private readonly timers: TimersRenderer;
   /** 🔴 パソコンのフォルダ(#215 段①)。⚠ handle は持たない(`LocalFolder` が持ち主)。 */
   private readonly pc: PcFolderRenderer;
+  /** コマンドシェル(#274)。 */
+  private readonly shell: ShellPaneRenderer;
   /** 🔴 手書きのタブ(#1448)。描いている間だけ出す。 */
   private readonly drawTab: HTMLElement | null;
   /**
@@ -274,6 +283,7 @@ export class BrowseRouter {
       timers: pane('timers'),
       pc: pane('pc'),
       draw: pane('draw'),
+      shell: pane('shell'),
     };
     this.drawTab = sidebar.querySelector<HTMLElement>('[data-pkc-browse="draw"]');
     if (this.drawTab !== null) this.drawTab.hidden = true;
@@ -314,6 +324,7 @@ export class BrowseRouter {
     this.graph = new GraphRenderer(this.panes.graph);
     this.timers = new TimersRenderer(this.panes.timers);
     this.pc = new PcFolderRenderer(this.panes.pc, pcFolder, folderSync);
+    this.shell = new ShellPaneRenderer(this.panes.shell, 'pane');
   }
 
   /** 🔴 手書きの面の器(#1448)。道具と台はここへ組む(`openImageDrawInPane`)。 */
@@ -494,6 +505,7 @@ export class BrowseRouter {
     else if (mode === 'graph') this.graph.render(state);
     else if (mode === 'timers') this.timers.render(state);
     else if (mode === 'pc') this.pc.render();
+    else if (mode === 'shell') this.shell.render(state);
     else this.launcher.render(state);
     /*
      * 🔴 **面を描き終えてから理由を添える**(#791 ②)── 「1 件も無い一覧の作る」は

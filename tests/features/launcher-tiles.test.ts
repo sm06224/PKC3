@@ -34,6 +34,7 @@ import {
   TEXTLAB_TILE_LID,
   QUERY_TILE_LID,
   PC_TILE_LID,
+  SHELL_TILE_LID,
   CALC_TILE_LID,
   DIFF_TILE_LID,
   capturesTile,
@@ -325,7 +326,15 @@ describe('組み込みタイルの合流 (#148)', () => {
       kind: 'pc',
       symbol: 'monitor',
     });
-    expect(b, '組み込みが 16 枚ちょうどでない').toHaveLength(16);
+    // ⚠ コマンドシェル(#274)も末尾 ── 同じ理由(位置を動かさない)
+    expect(b[16]).toEqual({
+      lid: SHELL_TILE_LID,
+      title: 'コマンドシェル',
+      group: BUILTIN_GROUP,
+      kind: 'shell',
+      symbol: 'terminal',
+    });
+    expect(b, '組み込みが 17 枚ちょうどでない').toHaveLength(17);
   });
 
   it('🔴 Office が入っていなくても、最初から在るものは出る(位置も動かない)', () => {
@@ -384,6 +393,8 @@ describe('組み込みタイルの合流 (#148)', () => {
       // ⚠ 集計・PC(#300)── 同じく末尾
       'query',
       'pc',
+      // ⚠ コマンドシェル(#274)── 同じく末尾
+      'shell',
     ]);
     // ⚠ Office を入れていない端末でも、面は空にならない
     expect(withBuiltinTiles([], { office: false }).map((t) => t.kind)).toEqual([
@@ -402,6 +413,8 @@ describe('組み込みタイルの合流 (#148)', () => {
       'diff',
       'query',
       'pc',
+      // ⚠ コマンドシェル(#274)── 同じく末尾
+      'shell',
     ]);
   });
 
@@ -444,6 +457,7 @@ describe('組み込みタイルの合流 (#148)', () => {
         ['diff', 'copy'],
         ['query', 'grid'],
         ['pc', 'monitor'],
+        ['shell', 'terminal'],
       ]),
     );
   });
@@ -473,7 +487,7 @@ describe('組み込みタイルの合流 (#148)', () => {
     expect(
       mirrored.map((t) => t.kind),
       '左のタブと対になる組み込みが増減した ── `tiles.ts` の注記とマニュアルも直す',
-    ).toEqual(['schedule', 'contacts', 'captures', 'graph', 'timers', 'pc']);
+    ).toEqual(['schedule', 'contacts', 'captures', 'graph', 'timers', 'pc', 'shell']);
     for (const t of mirrored) {
       const tab = BROWSE_ICONS[t.kind];
       /**

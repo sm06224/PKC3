@@ -460,3 +460,99 @@ test('🔴 集計と PC: アプリの一覧のタイルから別ウィンドウ�
   }
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+test('🔴 コマンドシェル: 打って Enter で結果が出て、移す・作るが本物の保存先へ届き、↑ で履歴が戻り、左のタブでも同じ履歴で使える (#274)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+
+  // ショートカットキー(Ctrl+Alt+;)で開く
+  await page.keyboard.press('Control+Alt+Semicolon');
+  const pane = page.locator('[data-pkc-view-pane="shell"]');
+  await expect(pane, 'コマンドシェルの面が開かない').toBeVisible({ timeout: 15_000 });
+  const input = pane.locator('[data-pkc-field="shell-input"]');
+  const log = pane.locator('[data-pkc-field="shell-log"]');
+
+  await clickReal(page, input);
+  await page.keyboard.type('mkdir 資料');
+  await page.keyboard.press('Enter');
+  await expect(log).toContainText('1 件を実行しました', { timeout: 10_000 });
+  await page.keyboard.type('new 買い物メモ 牛乳');
+  await page.keyboard.press('Enter');
+  await expect(log).toContainText('を作りました', { timeout: 10_000 });
+  await page.keyboard.type('find 買い物');
+  await page.keyboard.press('Enter');
+  await expect(log, '題名で探した結果の表に出ない').toContainText('買い物メモ');
+  await page.keyboard.type('mv #1 資料');
+  await page.keyboard.press('Enter');
+  await expect(log).toContainText('移しました', { timeout: 10_000 });
+  await page.keyboard.type('ls 資料');
+  await page.keyboard.press('Enter');
+  const rows = log.locator('[data-pkc-field="shell-block"]').last().locator('tbody tr');
+  await expect(rows, '移したノートが資料の中に居ない').toHaveCount(1);
+
+  // 新しく作る
+  await page.keyboard.type('new 資料/シェルから作った 本文です');
+  await page.keyboard.press('Enter');
+  await expect(log.locator('[data-pkc-field="shell-block"]').last()).toContainText('を作りました', { timeout: 10_000 });
+
+  // 🔴 ↑ で履歴が戻る・Tab で補完される
+  await page.keyboard.press('ArrowUp');
+  await expect(input).toHaveValue('new 資料/シェルから作った 本文です');
+  await page.keyboard.press('ArrowDown');
+  await expect(input).toHaveValue('');
+  await page.keyboard.type('mk');
+  await page.keyboard.press('Tab');
+  await expect(input).toHaveValue('mkdir ');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+
+  // 🔴 マウスだけでも: 履歴ボタン → 行を押すと入力欄に入る
+  await clickReal(page, pane.locator('[data-pkc-action="shell-history-menu"]'));
+  await clickReal(page, pane.locator('[data-pkc-region="shell-complete"] [data-pkc-action="shell-recall"]').first());
+  await expect(input).toHaveValue('new 資料/シェルから作った 本文です');
+
+  // 履歴は端末に保存されている
+  expect(await page.evaluate(() => localStorage.getItem('pkc3.shell-history'))).toContain('mkdir 資料');
+
+  // 左のペインの「シェル」タブ(別ウィンドウが塞がれたときの退避先)で、同じ履歴を使える
+  await openBrowseTab(page, 'shell');
+  const tab = page.locator('[data-pkc-browse-pane="shell"]');
+  await expect(tab, '左のシェルのタブが開かない').toBeVisible();
+  const tabInput = tab.locator('[data-pkc-field="shell-input"]');
+  await clickReal(page, tabInput);
+  await page.keyboard.press('ArrowUp');
+  await expect(tabInput, '左のタブで履歴が戻らない').not.toHaveValue('');
+  await page.keyboard.press('Escape');
+  await page.keyboard.type('pwd');
+  await page.keyboard.press('Enter');
+  await expect(tab.locator('[data-pkc-field="shell-block"]').last()).toContainText('/');
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 2 ペインの命令行: 命令を打つと結果が命令行の上に出て、同じ命令表の help が読める (#241)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'folder');
+  await createEntry(page, 'text');
+  await page.keyboard.press('Control+Alt+6');
+  const dual = page.locator('[data-pkc-view-pane="dual"]');
+  await expect(dual).toBeVisible({ timeout: 15_000 });
+  const cmd = dual.locator('[data-pkc-region="dual-cmdline"]');
+  await expect(cmd, '2 ペインに命令行が無い').toBeVisible();
+  const input = cmd.locator('[data-pkc-field="shell-input"]');
+  const out = cmd.locator('[data-pkc-region="dual-cmd-out"]');
+
+  await clickReal(page, input);
+  await page.keyboard.type('ls');
+  await page.keyboard.press('Enter');
+  await expect(out, '結果が命令行の上に出ない').toContainText('件');
+  await page.keyboard.type('help');
+  await page.keyboard.press('Enter');
+  await expect(out).toContainText('命令は英語でも日本語でも打てます');
+  await page.keyboard.type('sql SELECT 1');
+  await page.keyboard.press('Enter');
+  await expect(out, '2 ペインでは sql は使えない').toContainText('命令はありません');
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
