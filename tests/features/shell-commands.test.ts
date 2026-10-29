@@ -12,7 +12,7 @@ import { tokenize, splitFlags } from '../../src/features/shell/tokenize';
 import { SHELL_HISTORY_MAX, expandBang, pushShellHistory, stepShellHistory } from '../../src/features/shell/history';
 import { SHELL_COMMANDS, commandWords, findCommand, planLine } from '../../src/features/shell/commands';
 import { resolveFolder, resolveNote, resolveNotes, splitParentTitle } from '../../src/features/shell/resolve';
-import { commonPrefix, completeLine } from '../../src/features/shell/complete';
+import { commonPrefix, completeLine, quoteIfNeeded } from '../../src/features/shell/complete';
 import type { ShellEnv } from '../../src/features/shell/types';
 
 function meta(lid: string, title: string, archetype = 'text', order = 1): EntryMeta {
@@ -342,6 +342,17 @@ describe('補完', () => {
   it('閉じていない引用符の途中でも候補を出せる', () => {
     const c = completeLine('mv "議事', env());
     expect(c.items.length).toBe(2);
+  });
+  it('🔴 旗・番号・指し方に読み間違えられる題名は引用符で囲み、囲んだ語は題名として解く', () => {
+    for (const t of ['-n', '3', '*', '.', '..', '!!', '#1', 'a/b']) expect(quoteIfNeeded(t), t).toBe(`"${t}"`);
+    expect(quoteIfNeeded('議事録')).toBe('議事録');
+    const metas = new Map([...METAS, meta('n7', '3', 'text', 8), meta('n8', '-n', 'text', 9)].map((m) => [m.lid, m]));
+    const e = env({ metas, last: ['n1', 'n2', 'n3'] });
+    // 囲まない 3 は直前の一覧の 3 番(n3)/ 囲めば題名「3」(n7)
+    expect(resolveNote('3', e)).toEqual({ ok: true, value: 'n3' });
+    expect(planLine('append "3" 追記', e).effects).toEqual([{ type: 'append', lid: 'n7', text: '追記' }]);
+    expect(planLine('append 3 追記', e).effects).toEqual([{ type: 'append', lid: 'n3', text: '追記' }]);
+    expect(planLine('append "-n" 追記', e).effects).toEqual([{ type: 'append', lid: 'n8', text: '追記' }]);
   });
   it('共通の頭を返す', () => {
     expect(commonPrefix([{ insert: 'abc', label: '', hint: '' }, { insert: 'abd', label: '', hint: '' }])).toBe('ab');

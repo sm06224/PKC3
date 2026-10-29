@@ -30,7 +30,12 @@ export interface CompletionItem {
 
 export const COMPLETION_MAX = 12;
 
-const quoteIfNeeded = (s: string): string => (/[\s"'「」“”]/u.test(s) || s === '' ? `"${s.replace(/(["\\])/gu, '\\$1')}"` : s);
+/**
+ * 題名を欄へ入れる形。空白・引用符のほか、**語として読み間違えられる題名**も囲む:
+ * `-n`(旗)・数字(`3` は直前の一覧の番号)・`*` `.` `..`(指し方)・`/` を含む(フォルダの道)・`!` `#` で始まる(履歴・番号)。
+ */
+export const quoteIfNeeded = (s: string): string =>
+  /[\s"'「」“”]/u.test(s) || s === '' || /^(-|!|#|\*$|\.{1,2}$|\d+$)|\//u.test(s) ? `"${s.replace(/(["\\])/gu, '\\$1')}"` : s;
 
 function matches(candidate: string, q: string): number | null {
   const c = fold(candidate);

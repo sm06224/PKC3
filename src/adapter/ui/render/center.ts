@@ -424,6 +424,7 @@ export class CenterRouter {
       if (this.lastPane === 'textlab') this.textlab.onHidden();
       if (this.lastPane === 'diff') this.diff.onHidden();
       if (this.lastPane === 'shell') this.shell.onHidden();
+      if (this.lastPane === 'dual') this.dual.onHidden();
       /**
        * 🔴 **編集のまま別の画面へ出たら、持ち越した読む面を捨てる**(#1467 段 5)。
        * ⚠ 持ち越しは「その編集が終わるまで」の物 ── 別の画面を見ている間まで節点を常駐させない

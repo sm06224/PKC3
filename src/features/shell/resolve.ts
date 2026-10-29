@@ -27,6 +27,12 @@ import type { ShellEnv } from './types';
 
 export type Resolved<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: string };
 
+/**
+ * 🔴 **引用符で囲んだ語は「題名そのもの」**(`"3"` `"-n"` `"."` `"*"` は、番号・旗・指し方ではなく題名として探す)。
+ * 呼び側(命令表)が囲んだ語の頭に付ける目印。⚠ ここで外すので、画面の字には出ない。
+ */
+export const LITERAL = '\u0001';
+
 const ok = <T>(value: T): Resolved<T> => ({ ok: true, value });
 const fail = <T>(error: string): Resolved<T> => ({ ok: false, error });
 
@@ -71,9 +77,10 @@ export function resolveNote(
    */
   strict = false,
 ): Resolved<string> {
-  const text = ref.trim();
+  const literal = ref.startsWith(LITERAL);
+  const text = (literal ? ref.slice(LITERAL.length) : ref).trim();
   if (text === '') return fail('ノートの指定が空です');
-  const num = /^#?(\d+)$/u.exec(text);
+  const num = literal ? null : /^#?(\d+)$/u.exec(text);
   if (num !== null && (text.startsWith('#') || env.last.length > 0)) {
     const n = Number(num[1]);
     const lid = env.last[n - 1];
@@ -92,7 +99,7 @@ export function resolveNote(
   }
   const byId = env.metas.get(text);
   if (byId !== undefined) return filter(byId) ? ok(byId.lid) : fail(`${label(env, byId.lid)} はここでは指せない種類です`);
-  if (text === '.') {
+  if (text === '.' && !literal) {
     const only = env.marked.filter((l) => env.metas.has(l));
     if (only.length === 1) return ok(only[0]!);
     return fail(only.length === 0 ? '対象のノートがありません(先に選んでください)' : '対象が複数あります。1 件に絞ってください');
@@ -117,6 +124,12 @@ export function resolveNotes(refs: readonly string[], env: ShellEnv, strict = fa
     if (!out.includes(lid)) out.push(lid);
   };
   for (const ref of refs) {
+    if (ref.startsWith(LITERAL)) {
+      const one = resolveNote(ref, env, () => true, strict);
+      if (!one.ok) return one;
+      push(one.value);
+      continue;
+    }
     if (ref === '.') {
       const live = env.marked.filter((l) => env.metas.has(l));
       if (live.length === 0) return fail('対象のノートがありません(先に選んでください)');
@@ -148,19 +161,21 @@ export function resolveNotes(refs: readonly string[], env: ShellEnv, strict = fa
 
 /** フォルダ 1 つ。`null` = ルート。 */
 export function resolveFolder(ref: string, env: ShellEnv): Resolved<string | null> {
-  const text = ref.trim();
-  if (text === '' || text === '/' || text === 'root' || text === 'ルート') return ok(null);
-  if (text === '.') return ok(env.cwd);
-  if (text === '..') {
+  const literal = ref.startsWith(LITERAL);
+  const text = (literal ? ref.slice(LITERAL.length) : ref).trim();
+  if (!literal && (text === '' || text === '/' || text === 'root' || text === 'ルート')) return ok(null);
+  if (text === '') return fail('フォルダの指定が空です');
+  if (!literal && text === '.') return ok(env.cwd);
+  if (!literal && text === '..') {
     if (env.cwd === null) return ok(null);
     return ok(resolveCanonicalParents(env.metas, env.relations).get(env.cwd) ?? null);
   }
-  if (text === '反対' || text === 'other') {
+  if (!literal && (text === '反対' || text === 'other')) {
     if (env.other === undefined) return fail('反対側は 2 ペインの命令行でだけ使えます');
     return ok(env.other);
   }
   const isFolder = (m: EntryMeta): boolean => m.archetype === 'folder';
-  if (text.includes('/')) {
+  if (!literal && text.includes('/')) {
     const absolute = text.startsWith('/');
     const segs = text.split('/').filter((s) => s !== '');
     let cur: string | null = absolute ? null : env.cwd;
@@ -184,7 +199,7 @@ export function resolveFolder(ref: string, env: ShellEnv): Resolved<string | nul
   const q = fold(text);
   const near = childrenOf(env, env.cwd).filter((m) => isFolder(m) && fold(m.title) === q);
   if (near.length === 1) return ok(near[0]!.lid);
-  const found = resolveNote(text, env, isFolder);
+  const found = resolveNote(literal ? ref : text, env, isFolder);
   if (!found.ok) return found.error.includes('というノート') ? fail(`「${text}」というフォルダはありません`) : found;
   return ok(found.value);
 }

@@ -18,7 +18,7 @@ import { fold } from '@features/palette/palette-rows';
 import { collectSubtreeLids, resolveCanonicalParents } from '@features/relation/tree';
 import { planPreview, type PlanOp, type PlanTarget } from '@features/structure/structure-plan';
 import { joinTokens, splitFlags, tokenize, type ShellToken } from './tokenize';
-import { childrenOf, pathOf, resolveFolder, resolveNote, resolveNotes, splitParentTitle } from './resolve';
+import { LITERAL, childrenOf, pathOf, resolveFolder, resolveNote, resolveNotes, splitParentTitle } from './resolve';
 import type { ArgKind, ShellEffect, ShellEnv, ShellGroup, ShellPlan, ShellSurface, ShellTable } from './types';
 
 interface Ctx {
@@ -63,6 +63,9 @@ const listText = (env: ShellEnv, lids: readonly string[]): string =>
 /** 本文に書く字の `\n` を改行にする(1 行で複数行を書くため)。 */
 const unescapeBody = (s: string): string => s.replace(/\\n/gu, '\n');
 
+/** 引数 1 語を、ノート・フォルダの指し方に渡す形へ(囲んだ語は題名そのもの)。 */
+const refOf = (t: ShellToken): string => (t.quoted ? `${LITERAL}${t.text}` : t.text);
+
 const TABLE_CAP = 200;
 
 /** 指した物と、フォルダの中身を含めた件数(重複は 1 つ)。 */
@@ -93,7 +96,7 @@ function tableOf(env: ShellEnv, metas: readonly { lid: string }[], extra?: (lid:
 /** `mv` / `cp` の引数を「元」と「先」に割る。 */
 function sourcesAndDest(ctx: Ctx, example: string): { lids: string[]; to: string | null } | ShellPlan {
   const { env, args } = ctx;
-  const texts = args.map((a) => a.text);
+  const texts = args.map(refOf);
   let srcRefs: string[];
   let destRef: string | null;
   if (texts.length === 0) {
@@ -157,7 +160,7 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
     surfaces: BOTH,
     args: ['folder'],
     run: ({ env, args }) => {
-      const where = args.length === 0 ? { ok: true as const, value: env.cwd } : resolveFolder(args[0]!.text, env);
+      const where = args.length === 0 ? { ok: true as const, value: env.cwd } : resolveFolder(refOf(args[0]!), env);
       if (!where.ok) return err(where.error);
       const kids = childrenOf(env, where.value);
       const { table, numbered } = tableOf(env, kids);
@@ -184,7 +187,7 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
     surfaces: BOTH,
     args: ['folder'],
     run: ({ env, args }) => {
-      const to = args.length === 0 ? { ok: true as const, value: null } : resolveFolder(args[0]!.text, env);
+      const to = args.length === 0 ? { ok: true as const, value: null } : resolveFolder(refOf(args[0]!), env);
       if (!to.ok) return err(to.error);
       if (to.value !== null && env.metas.get(to.value)?.archetype !== 'folder') {
         return err(`${nameOf(env, to.value)} はフォルダではないので、入れません`);
@@ -227,7 +230,7 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
     surfaces: BOTH,
     args: ['note'],
     run: ({ env, args }) => {
-      const ref = args[0]?.text ?? '.';
+      const ref = args[0] === undefined ? '.' : refOf(args[0]);
       const one = resolveNote(ref, env);
       if (!one.ok) return err(one.error);
       if (env.surface === 'dual' && env.metas.get(one.value)?.archetype === 'folder') {
@@ -283,7 +286,7 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
     args: ['note', 'text'],
     run: ({ env, args }) => {
       if (args.length < 2) return err('足す先と字を書いてください(例: append 議事録 決定事項を足す)');
-      const one = resolveNote(args[0]!.text, env, (m) => m.archetype !== 'folder');
+      const one = resolveNote(refOf(args[0]!), env, (m) => m.archetype !== 'folder');
       if (!one.ok) return err(one.error);
       const text = unescapeBody(joinTokens(args.slice(1)));
       return say([`${nameOf(env, one.value)} の末尾に ${String(text.length)} 字を足します`], [{ type: 'append', lid: one.value, text }]);
@@ -334,7 +337,7 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
     run: ({ env, args }) => {
       if (args.length === 0) return err('新しい題名を書いてください(例: rename 議事録 議事録 2026)');
       const [refTok, ...titleToks] = args;
-      let ref = refTok!.text;
+      let ref = refOf(refTok!);
       let title = joinTokens(titleToks);
       if (titleToks.length === 0) {
         ref = '.';
@@ -357,7 +360,7 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
     args: ['notes'],
     dangerous: true,
     run: ({ env, args }) => {
-      const refs = args.length === 0 ? ['.'] : args.map((a) => a.text);
+      const refs = args.length === 0 ? ['.'] : args.map(refOf);
       // 🔴 題名の曖昧さは「いまの場所に 1 件ならそれ」で救わない(strict)── 別のフォルダの同じ題名を黙って消さない
       const r = resolveNotes(refs, env, true);
       if (!r.ok) return err(r.error);
@@ -381,7 +384,7 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
       if (mode === undefined) return err(`「${args[0]!.text}」は付ける(add)か外す(remove)で書いてください`);
       const tag = args[1]!.text.replace(/^#/u, '');
       if (tag === '') return err('タグの名前が空です');
-      const refs = args.length > 2 ? args.slice(2).map((a) => a.text) : ['.'];
+      const refs = args.length > 2 ? args.slice(2).map(refOf) : ['.'];
       const r = resolveNotes(refs, env);
       if (!r.ok) return err(r.error);
       return say(
@@ -407,7 +410,7 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
         format = f;
         refs.pop();
       }
-      const one = resolveNote(refs[0]?.text ?? '.', env);
+      const one = resolveNote(refs[0] === undefined ? '.' : refOf(refs[0]), env);
       if (!one.ok) return err(one.error);
       return say(
         [`${nameOf(env, one.value)} を ${format === 'md' ? 'Markdown' : 'PDF'} で書き出します`],

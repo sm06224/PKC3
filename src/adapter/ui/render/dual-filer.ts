@@ -393,6 +393,9 @@ export class DualFilerRenderer {
     | { panes: Record<DualSide, PaneFrame>; commands: HTMLElement; switcher: HTMLButtonElement }
     | null = null;
   private lastFocus: DualSide | null = null;
+  /** 🔴 命令行の出力を塗る関数と、その購読(面を出している間だけ持つ ── 隠したら外す)。 */
+  private paintCmdOut: (() => void) | null = null;
+  private unsubscribeCmdOut: (() => void) | null = null;
   private lastCommands = '';
   /** 入力の断面(参照で見る)。⚠ 下の門の材料 ── 増やしたらここにも足す。 */
   private lastDual: AppState['dual'] | null = null;
@@ -497,6 +500,12 @@ export class DualFilerRenderer {
     return sig;
   }
 
+  /** 面を隠したとき ── コマンドラインの出力の購読を外す(隠れた面を、結果のたびに描き直さない)。 */
+  onHidden(): void {
+    this.unsubscribeCmdOut?.();
+    this.unsubscribeCmdOut = null;
+  }
+
   render(state: AppState): void {
     /**
      * ⚠ **端末の保存は毎回読む**(state に居ないので)── 読み値そのものを
@@ -564,6 +573,11 @@ export class DualFilerRenderer {
     this.lastHits = state.searchHits;
     this.lastBookmarks = bookmarks.join(SEP);
     const frame = this.ensureFrame();
+    // 🔴 コマンドラインの出力は、面を出している間だけ購読し、出した直後に 1 回塗る(別の窓で打った結果もここに出る)
+    if (this.unsubscribeCmdOut === null && this.paintCmdOut !== null) {
+      this.unsubscribeCmdOut = appDualShellSession.subscribe(this.paintCmdOut);
+      this.paintCmdOut();
+    }
     for (const side of SIDES) {
       const pane = paneOf(state.dual, side);
       const rows = filerRows(paneScope(pane), state.entryMetas, state.relations, {
@@ -793,13 +807,12 @@ export class DualFilerRenderer {
     out.setAttribute('data-pkc-region', 'dual-cmd-out');
     out.hidden = true;
     cmdline.append(out, buildShellPrompt('dual'));
-    const paintOut = (): void => {
+    this.paintCmdOut = (): void => {
       const last = appDualShellSession.blocks[appDualShellSession.blocks.length - 1];
       out.textContent = '';
       out.hidden = last === undefined;
       if (last !== undefined) out.append(paintShellBlock(last, { maxRows: 8 }));
     };
-    appDualShellSession.subscribe(paintOut);
     this.region.append(title, switcher, body, cmdline, commands);
     this.frame = { panes: { left, right }, commands, switcher };
     return this.frame;
