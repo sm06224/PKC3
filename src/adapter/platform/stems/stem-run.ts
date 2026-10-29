@@ -101,8 +101,17 @@ export interface StemDeps {
 
 const EMPTY = new Float32Array(0);
 
-/** ORT の起動そのものの失敗を示す文(重みの不良ではない)。 */
-const RUNTIME_FAILURE = /no available backend|backend|WebAssembly|dynamically imported|Failed to fetch|wasm/i;
+/**
+ * ORT の起動そのものの失敗を示す文(重みの不良ではない)。🔴 **狭く書く**: 「wasm」「backend」「Failed to fetch」のような一般的な語だけで当てると、
+ * 重みの不良の文(例: `Failed to load model because protobuf parsing failed`、重みの名前に wasm を含む路径)まで「ライブラリを読み込めません」と言ってしまう。
+ * 実物の文(ORT 1.31 / Chromium)の形だけを拾う:
+ *  - `no available backend found. ERR: [wasm] …`(どの実行方法も起動できなかった)
+ *  - `Failed to fetch dynamically imported module`(glue / wasm の取得失敗)
+ *  - `WebAssembly.instantiate(): …` / `CompileError` / `LinkError`(wasm の読み込み・検証の失敗)
+ *  - `both async and sync fetching of the wasm failed`(emscripten の wasm 取得失敗)
+ */
+const RUNTIME_FAILURE =
+  /no available backend found|failed to fetch dynamically imported module|WebAssembly\.(?:instantiate|compile)|\b(?:CompileError|LinkError)\b|fetching of the wasm failed|importing a module script failed/i;
 
 /**
  * 入力の形が `[*, 4, dimF, dimT]` か。問題があれば理由、無ければ `null`。

@@ -293,6 +293,27 @@ describe('🔴 分けた結果の安全弁(設定違い・別のモデルを、�
     const c = await run({ create: async () => Promise.reject(new Error('Invalid model')) });
     expect(c).toMatchObject({ ok: false, reason: 'bad-model' });
   });
+
+  it('🔴 起動の失敗の判定は狭い: 重みの不良の文に wasm / backend / Failed to fetch の語が入っていても bad-model のまま', async () => {
+    for (const msg of [
+      "Can't create a session. ERROR_CODE: 7, ERROR_MESSAGE: Failed to load model because protobuf parsing failed.",
+      'Unsupported model IR version: 12, max supported IR version: 10',
+      "Failed to fetch external data file 'weights.wasm.data' for the model",
+      'model.onnx: backend-specific op "FooBar" is not supported',
+    ]) {
+      const r = await run({ create: async () => Promise.reject(new Error(msg)) });
+      expect(r, msg).toMatchObject({ ok: false, reason: 'bad-model' });
+    }
+    // 対照群: 実物の起動失敗の文は no-runtime
+    for (const msg of [
+      'no available backend found. ERR: [wasm] TypeError: Failed to fetch dynamically imported module: blob:x',
+      'WebAssembly.instantiate(): expected magic word 00 61 73 6d, found 3c 21 64 6f',
+      'both async and sync fetching of the wasm failed',
+    ]) {
+      const r = await run({ create: async () => Promise.reject(new Error(msg)) });
+      expect(r, msg).toMatchObject({ ok: false, reason: 'no-runtime' });
+    }
+  });
 });
 
 describe('🔴 分離をやめる(口の反対向きの合図)', () => {
