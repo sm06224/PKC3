@@ -11,15 +11,18 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  STEM_MAX_INCONSISTENCY,
   STEM_MODELS,
   separateStems,
+  separationProblem,
+  stereoRms,
   stemChunkCount,
   stemHost,
   stemTags,
   toEncoderPcm,
   type StemModel,
 } from '../../src/features/audio/stem-model';
-import { chunkSamples } from '../../src/features/audio/stem-dsp';
+import { Fft, chunkSamples, fromModelOutput, hannWindow, toModelInput } from '../../src/features/audio/stem-dsp';
 import { smoothFactors } from '../../src/features/audio/stem-dsp';
 
 const SMALL: StemModel = {
@@ -177,5 +180,80 @@ describe('符号化器へ渡す形', () => {
     expect(pcm.length).toBe(48_000 * 2);
     expect(pcm[2 * 20_000]).toBeCloseTo(0.5, 2);
     expect(pcm[2 * 20_000 + 1]).toBe(-1);
+  });
+});
+
+/**
+ * 🔴 test A: 別の設定(窓長)で作った STFT をモデルの出力にしたとき、安全弁(`separationProblem`)が断るか通るかを**実測して固定**する。
+ *
+ * 「正しいモデル + 間違った窓長」の再現: 入力(窓 96 の STFT)を音に戻し、**別の窓長**で STFT し直した物をモデルの出力とする。
+ * 実測(このファイルの値):
+ *  - 恒等(窓 96): 通る(一貫性の誤差 0)
+ *  - 窓 72: 🟡 **既存の 3 つの検査(有限性・歌声の大きさ・残りのエネルギー)は通る**。一貫性の誤差 0.64〜0.66 も `STEM_MAX_INCONSISTENCY`(0.7)の内で**通る**
+ *  - 窓 144: 一貫性の誤差 0.89〜0.91 で断る
+ * つまり**窓長の取り違えは、小さければ検出できない**(歌声の相関も 0.97 と高いまま)。だから結果の知らせは「聞いて確かめてください」を残す。
+ */
+describe('設定違いの出力を安全弁が止められるか(実測の固定)', () => {
+  const spec = { nFft: 96, hop: 16, dimF: 49, dimT: 33 };
+  const model: StemModel = { ...SMALL, stft: spec };
+  const n = chunkSamples(spec) * 6 + 50;
+  const mk = (seed: number): Float32Array => {
+    const a = new Float32Array(n);
+    let s = seed;
+    for (let i = 0; i < n; i++) {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      a[i] = 0.3 * Math.sin(i * 0.07 * seed) + 0.2 * Math.sin(i * 0.31) + (s / 2 ** 32 - 0.5) * 0.1;
+    }
+    return a;
+  };
+
+  async function run(wrongNFft: number | null) {
+    const L = mk(2);
+    const R = mk(3);
+    const inRms = stereoRms(L, R);
+    const res = await separateStems(L.slice(), R.slice(), {
+      model,
+      infer: async (input) => {
+        if (wrongNFft === null) return input.slice();
+        const sp = { nFft: wrongNFft, hop: 16, dimF: 49, dimT: 33 };
+        const bL = new Float32Array(chunkSamples(spec));
+        const bR = new Float32Array(chunkSamples(spec));
+        fromModelOutput(new Fft(96), hannWindow(96), spec, input, bL, bR);
+        const o = new Float32Array(4 * spec.dimF * spec.dimT);
+        toModelInput(new Fft(wrongNFft), hannWindow(wrongNFft), sp, bL, 0, bR, 0, 0, o);
+        return o;
+      },
+    });
+    return { res, problem: separationProblem(inRms, res.primary, res.rest, res.consistency) };
+  }
+
+  it('対照群: 恒等のモデルは通り、一貫性の誤差はほぼ 0', async () => {
+    const { res, problem } = await run(null);
+    expect(problem).toBeNull();
+    expect(res.consistency).not.toBeNull();
+    expect(res.consistency!).toBeLessThan(1e-3);
+  });
+
+  it('🟡 窓 72 の取り違えは、安全弁を通ってしまう(実測 0.64〜0.66 < 0.7)。この限界は「聞いて確かめてください」で補う', async () => {
+    const { res, problem } = await run(72);
+    expect(problem, '通らなくなった ── 検出力が上がったなら、この test と stem-model.ts の注記を更新する').toBeNull();
+    expect(res.consistency!).toBeGreaterThan(0.5);
+    expect(res.consistency!).toBeLessThan(STEM_MAX_INCONSISTENCY);
+    // 既存の 3 つの検査だけでも通る(一貫性を渡さなければ)
+    expect(separationProblem(stereoRms(mk(2), mk(3)), res.primary, res.rest)).toBeNull();
+  });
+
+  it('🔴 窓 144 の取り違えは、一貫性の誤差で断る(既存の 3 つの検査だけなら通る ── 検出力を足した分)', async () => {
+    const { res, problem } = await run(144);
+    expect(res.consistency!).toBeGreaterThan(STEM_MAX_INCONSISTENCY);
+    expect(problem).toContain('音として成り立っていません');
+    expect(separationProblem(stereoRms(mk(2), mk(3)), res.primary, res.rest), '前提: 既存の検査では通る').toBeNull();
+  });
+
+  it('無音の塊では測れず null(測れないことを理由に断らない)', async () => {
+    const z = new Float32Array(chunkSamples(spec) * 3);
+    const res = await separateStems(z.slice(), z.slice(), { model, infer: async (x) => x.slice() });
+    expect(res.consistency).toBeNull();
+    expect(separationProblem(1, res.primary, res.rest, res.consistency)).toBeNull();
   });
 });

@@ -240,7 +240,7 @@ export class StemRunner {
         return { ok: false, reason: e instanceof StemModelError ? 'bad-model' : 'infer-failed', detail };
       }
       // 🔴 安全弁: 分けた結果が音として成り立っていること(設定違い・別のモデルを、聞かせる前に止める)
-      const problem2 = separationProblem(inputRms, sep.primary, sep.rest);
+      const problem2 = separationProblem(inputRms, sep.primary, sep.rest, sep.consistency);
       if (problem2 !== null) return { ok: false, reason: 'bad-model', detail: problem2 };
       // ⚠ `rest` は `left` / `right` の中身(上書きして使い回している)── 3 組を同時に持たない
       return await this.encode(model, sep, report);

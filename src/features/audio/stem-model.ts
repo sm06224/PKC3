@@ -148,6 +148,8 @@ export async function separateStems(
 ): Promise<{
   readonly primary: readonly [Float32Array, Float32Array];
   readonly rest: readonly [Float32Array, Float32Array];
+  /** 真ん中の塊で測った、モデルの出力の STFT としての一貫性の誤差(0 = 完全に一貫)。測れなかったら `null`。 */
+  readonly consistency: number | null;
 }> {
   const spec = opts.model.stft;
   const n = Math.min(left.length, right.length);
@@ -165,6 +167,9 @@ export async function separateStems(
   const sliceR = new Float32Array(chunk);
   const pieceL = new Float32Array(chunk);
   const pieceR = new Float32Array(chunk);
+  let consistency: number | null = null;
+  const probeChunk = Math.floor(total / 2);
+  const scratch = new Float32Array(4 * spec.dimF * spec.dimT);
   for (let i = 0; i < total; i++) {
     if (opts.checkpoint) await opts.checkpoint();
     const from = i * gen - trim;
@@ -186,6 +191,7 @@ export async function separateStems(
       if (!Number.isFinite(out[k]!)) throw new StemModelError('モデルの出力に数でない値(NaN / 無限大)が含まれています');
     }
     fromModelOutput(fft, window, spec, out, pieceL, pieceR);
+    if (i === probeChunk) consistency = inconsistencyOf(fft, window, spec, out, pieceL, pieceR, scratch);
     // 取り出した音のうち、両端の `trim` を除いた `gen` が、混合の `[i・gen, i・gen + gen)` に当たる
     const dst = i * gen;
     const len = Math.min(gen, n - dst);
@@ -205,7 +211,7 @@ export async function separateStems(
     left[i] = left[i]! - pl;
     right[i] = right[i]! - pr;
   }
-  return { primary: [outL, outR], rest: [left.subarray(0, n), right.subarray(0, n)] };
+  return { primary: [outL, outR], rest: [left.subarray(0, n), right.subarray(0, n)], consistency };
 }
 
 /**
@@ -225,6 +231,38 @@ export function toEncoderPcm(left: Float32Array, right: Float32Array): Float32Ar
 
 const clamp = (v: number): number => (v > 1 ? 1 : v < -1 ? -1 : v);
 
+/**
+ * 🔴 **モデルの出力が「ひとつの音の STFT」として成り立っているか**(一貫性の誤差)。
+ * 出力 X を逆変換して音に戻し、同じ設定でもう一度分析した X' との差 ‖X − X'‖ / ‖X‖。
+ *  - 設定(窓長など)が合っていれば小さい。恒等写像のモデルで 0。
+ *  - 窓長が違う設定の出力は、ひとつの音の STFT にならないので大きい(実測: 窓長 72 の出力 0.64〜0.66 / 窓長 144 の出力 0.89〜0.91。
+ *    `tests/features/stem-model.test.ts`)。
+ * ⚠ 本物のモデルの出力が普通どれくらい一貫しているかは**未測定**(重みが無い)。だから `STEM_MAX_INCONSISTENCY` は
+ *   「明らかに壊れている」側に置く(0.7)── 窓長の取り違えでも 0.64 台は通る。通るものは、聞いて確かめてもらう。
+ */
+function inconsistencyOf(
+  fft: Fft,
+  window: Float64Array,
+  spec: StftSpec,
+  modelOut: Float32Array,
+  pieceL: Float32Array,
+  pieceR: Float32Array,
+  scratch: Float32Array,
+): number | null {
+  toModelInput(fft, window, spec, pieceL, 0, pieceR, 0, 0, scratch);
+  let diff = 0;
+  let energy = 0;
+  for (let k = 0; k < modelOut.length; k++) {
+    const d = scratch[k]! - modelOut[k]!;
+    diff += d * d;
+    energy += modelOut[k]! * modelOut[k]!;
+  }
+  return energy > 1e-9 ? Math.sqrt(diff / energy) : null;
+}
+
+/** 一貫性の誤差がこれを超えたら断る(上の注記: 明らかに壊れている側。本物のモデルで測り直して詰める)。 */
+export const STEM_MAX_INCONSISTENCY = 0.7;
+
 /** 歌声が元の何倍まで許すか。⚠ 取り出した音は元より大きくならないはず ── 超えるのは設定違い・別のモデルの出力。 */
 export const STEM_MAX_GAIN = 1.5;
 
@@ -239,12 +277,14 @@ const rmsOf2 = (a: Float32Array, b: Float32Array): number => {
  *  - 全標本が有限であること
  *  - 取り出した音(歌声)の RMS が元の `STEM_MAX_GAIN` 倍以下
  *  - 残り(楽器 = 元 − 歌声)のエネルギーが元以下(設定違いだと、引いた結果が元より大きくなる)
+ *  - 出力の STFT としての一貫性の誤差が `STEM_MAX_INCONSISTENCY` 以下(窓長の取り違えを見る。上の実測)
  * ⚠ これは「設定が合っているか」の**十分条件ではない**(合っていなくても通りうる)── 通らないものだけを止める安全弁。
  */
 export function separationProblem(
   inputRms: number,
   primary: readonly [Float32Array, Float32Array],
   rest: readonly [Float32Array, Float32Array],
+  consistency: number | null = null,
 ): string | null {
   for (const arr of [primary[0], primary[1], rest[0], rest[1]]) {
     for (let i = 0; i < arr.length; i++) {
@@ -257,6 +297,9 @@ export function separationProblem(
   }
   const r = rmsOf2(rest[0], rest[1]);
   if (r > inputRms) return '残りの音が元より大きくなりました(別のモデルか、設定が合っていません)';
+  if (consistency !== null && consistency > STEM_MAX_INCONSISTENCY) {
+    return `モデルの出力が音として成り立っていません(一貫性の誤差 ${consistency.toFixed(2)}。窓長などの設定が合っていません)`;
+  }
   return null;
 }
 
