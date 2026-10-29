@@ -3124,7 +3124,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           getAssetBlob: (key) => blobs.get(cid, key),
           // 🔴 タグの色(#1457)── 全体のバックアップだけが運ぶ(部分の書き出しの源は持たない)
           listTagColors: () => client.request({ op: 'listTagColors', cid }),
-          // 🔴 ノートのピン留めも全体のバックアップだけが運ぶ(#1377)
+          // 🔴 ノートのピン留めも運ぶ(#1377)。部分の書き出しは `subsetSource` / `singleEntrySource` が含むノートの分に絞る
           listNotePins: () => client.request({ op: 'listNotePins', cid }),
           listRevisionLids: () =>
             client.request({ op: 'listRevisionLids', cid }),

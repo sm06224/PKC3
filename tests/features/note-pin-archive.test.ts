@@ -3,7 +3,7 @@
  * 🔴 ノートのピン留め(#1377)が**バックアップ → 取り込みで戻る**こと。
  *
  * 守るもの:①書いたピンが `readArchive` → `restoreArchive` で留めた順のまま出る ②1 つも無ければ `notePins` キーを書かない
- * ③書き出すノートに無い lid は書かない ④付け替えた lid へ写る ⑤旧いバックアップ・壊れた要素は空 ⑥部分の書き出しには混ざらない。
+ * ③書き出すノートに無い lid は書かない ④付け替えた lid へ写る ⑤旧いバックアップ・壊れた要素は空 ⑥部分の書き出し(1 ノート / 選んだノート)は含まれるノートの分だけ運ぶ。
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -14,6 +14,7 @@ import {
   writeArchive,
   type ArchiveSource,
 } from '../../src/features/export/pkc3-archive';
+import { subsetSource } from '../../src/features/export/folder-source';
 import { singleEntrySource } from '../../src/features/export/single-entry-source';
 import { ZipWriter } from '../../src/features/export/zip-writer';
 
@@ -111,10 +112,38 @@ describe('ノートのピン留め ── バックアップの往復', () => {
     expect(archive.notePins).toEqual(['n1']);
   });
 
-  it('部分の書き出し(1 ノート)にはピンが混ざらない', async () => {
-    const base = source(['n1']);
-    expect(base.listNotePins, '前提: 源はピンを持っている').toBeDefined();
-    const single = await singleEntrySource(base, 'n1');
-    expect(single.source.listNotePins, '1 ノートの書き出しにピンが混ざる').toBeUndefined();
+  it('🔴 1 ノートの書き出しは、そのノートのピンだけを運ぶ(他のノートのピンが混ざらない)', async () => {
+    const single = await singleEntrySource(source(['n1', 'n2']), 'n1');
+    expect(await single.source.listNotePins?.()).toEqual(['n1']);
+    const out = await writeArchive(single.source, '2026-10-10T00:00:00.000Z');
+    expect((await readArchive(out.blob)).notePins).toEqual(['n1']);
+    // 対照群: ピンしていないノートの書き出しには、ピンが無い
+    const other = await singleEntrySource(source(['n1']), 'n3');
+    expect(other.source.listNotePins, 'ピンしていないノートにピンが付く').toBeUndefined();
+    expect((await readArchive((await writeArchive(other.source, '2026-10-10T00:00:00.000Z')).blob)).notePins).toEqual([]);
+  });
+
+  it('🔴 選んだノート / フォルダの書き出しは、含まれるノートのピンだけを運び、取り込みで戻る', async () => {
+    const base = source(['n3', 'n1', 'n2']);
+    const sub = await subsetSource(base, {
+      rawMetas: await base.listEntryMetas(),
+      rawRelations: [],
+      lids: new Set(['n1', 'n3']),
+      title: 's',
+      danglingWarning: () => '',
+    });
+    expect(await sub.source.listNotePins?.(), 'n2 のピンが混ざった/含まれるピンが落ちた').toEqual(['n3', 'n1']);
+    const archive = await readArchive((await writeArchive(sub.source, '2026-10-10T00:00:00.000Z')).blob);
+    expect(archive.notePins).toEqual(['n3', 'n1']);
+    expect(restoreArchive(archive, opts()).notePins).toEqual(['n3', 'n1']);
+    // 対照群: 含まれるノートにピンが無ければ持たない
+    const none = await subsetSource(source(['n2']), {
+      rawMetas: await base.listEntryMetas(),
+      rawRelations: [],
+      lids: new Set(['n1']),
+      title: 's',
+      danglingWarning: () => '',
+    });
+    expect(none.source.listNotePins).toBeUndefined();
   });
 });

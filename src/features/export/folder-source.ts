@@ -188,6 +188,8 @@ export async function subsetSource(
     }
   }
   const assets = allAssets.filter((a) => used.has(a.key));
+  // 🔑 ピン留め(#1377)は、含まれるノートの分だけ持たせる(他のノートの lid を混ぜない)
+  const notePins = ((await base.listNotePins?.()) ?? []).filter((l) => lids.has(l));
 
   /**
    * 🔴 **両端が中に居る関連だけ残す**(1 ノート書出しとの違い)。
@@ -252,6 +254,7 @@ export async function subsetSource(
       listAssetMetas: async () => assets,
       getAssetBlob: (key) => base.getAssetBlob(key),
       ...(tagColors.length > 0 ? { listTagColors: async () => tagColors } : {}),
+      ...(notePins.length > 0 ? { listNotePins: async () => notePins } : {}),
       listRevisionLids: async () => revisionLids,
       getRevisionChain: (lid) => base.getRevisionChain(lid),
     },
