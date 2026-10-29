@@ -258,7 +258,7 @@ export function reduceBlockOps(state: AppState, action: BlockOpsAction): ReduceR
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       // ⚠ 同じ値なら何もしない(空の書込を投げない)。時刻を添えた回は、同じ日でも時刻が違うことがある(書換が同じ字なら書かない)
-      if ((meta.date ?? null) === action.date && action.time === undefined) return { state, events: [] };
+      if ((meta.date ?? null) === action.date && action.time === undefined && action.raw === undefined) return { state, events: [] };
       return {
         state,
         events: [
@@ -269,7 +269,12 @@ export function reduceBlockOps(state: AppState, action: BlockOpsAction): ReduceR
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
             // 🔴 時刻つきの `date:`(`2026-10-20 14:00`)は日だけ替えて時刻を残す ── 書換は `entry-date` 1 本(依頼 192 / 284)
-            rewrite: { kind: 'entry-date', date: action.date, ...(action.time === undefined ? {} : { time: action.time }) },
+            rewrite: {
+              kind: 'entry-date',
+              date: action.date,
+              ...(action.time === undefined ? {} : { time: action.time }),
+              ...(action.raw === undefined ? {} : { raw: action.raw }),
+            },
           },
         ],
       };

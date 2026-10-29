@@ -183,6 +183,8 @@ export type BodyRewrite =
       kind: 'entry-date';
       date: string | null;
       time?: string | null;
+      /** 🔴 前書きの `date:` に書く生の値(「元に戻す」── 期間・繰り返し・終日をそのまま戻す)。`date` が `null` なら無視。 */
+      raw?: string;
     }
   | {
       /**
@@ -489,6 +491,10 @@ export type BodyRewrite =
        * 渡して `null` なら外す。⚠ `time` が無い・期間のときは書かれない(`formatLineDate` の規則)。
        */
       timeEnd?: string | null;
+      /**
+       * 🔴 **終日**(台帳 #344 の残り)。⚠ 渡さなければ書かれている `終日` を保つ。日付を付け直す(外した予定を戻す)枝でも書く。
+       */
+      allDay?: boolean;
       /**
        * 🔴 **刻み**(#344 段②)。⚠ **渡さなければ元の刻みを保つ** ── 日付だけ
        *   動かしたつもりで `毎週` が黙って消えたら、それは user が頼んでいない変更である。
@@ -1164,7 +1170,9 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     const value =
       rewrite.date === null
         ? undefined
-        : withScheduleDate(typeof cur === 'string' ? cur : '', rewrite.date, rewrite.time);
+        : rewrite.raw !== undefined
+          ? rewrite.raw
+          : withScheduleDate(typeof cur === 'string' ? cur : '', rewrite.date, rewrite.time);
     // ⚠ 変わらない回は同じ本文を返す(= 書かない・言わない)。`null` は「断る」で、同じ日を押し直した回に偽の断りを出さない。
     //   値が同じなら行にも触れない(時刻つきの値は書き直すと引用符が付くので、字を変えない)
     if (typeof cur === 'string' && value === cur) return body;
@@ -1357,6 +1365,7 @@ function rewriteLineDate(
     until?: string | null;
     timeEnd?: string | null;
     repeat?: RepeatUnit | null;
+    allDay?: boolean;
   },
 ): string | null {
   const lines = splitLines(body);
@@ -1421,6 +1430,8 @@ function rewriteLineDate(
         rewrite.repeat,
         // 🔴 幅も一緒に書く(日付を外した予定を「元に戻す」で、時刻の幅ごと戻す ── #855)
         rewrite.timeEnd,
+        // 🔴 終日の語も(外した予定を戻したら `終日` ごと戻る ── 台帳 #344 の残り)
+        rewrite.allDay,
       );
   } else {
     // 日付を差し替える。⚠ **記法の範囲だけ**を入れ替える(前後の字は 1 バイトも動かさない)
@@ -1448,8 +1459,9 @@ function rewriteLineDate(
           : found.time !== null && rewrite.time === found.time
             ? found.timeEnd
             : null,
-        // 🔴 終日の語は、日を動かしても保つ(台帳 #344 の残り。時刻が付く / 期間になるときは書かれない ── `formatLineDate`)
-        found.allDay,
+        // 🔴 終日の語は、日を動かしても保つ(台帳 #344 の残り。時刻が付く / 期間になるときは書かれない ── `formatLineDate`)。
+        //    渡されたらそれに従う(時刻を付けた予定を「元に戻す」で、`終日` が戻る)
+        rewrite.allDay ?? found.allDay,
       ) +
       // 🔴 終わりを**書き直す**ときは、幅として読まれなかった古い終わり(`..02:00`)も一緒に差し替える
       //    (残すと `14:00..15:00..02:00` になる)。⚠ 終わりを渡さない動かし方では 1 バイトも触らない

@@ -27,6 +27,7 @@
 import {
   MOVE_OFFER_MS,
   moveMessage,
+  noteSlotOf,
   sameSlot,
   slotOfCard,
   undoVerdict,
@@ -36,7 +37,6 @@ import type { RepeatUnit } from '@features/schedule/repeat';
 import type { AppState, UserAction } from '@adapter/state/app-state';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { SHOWN_LINE_LOST, shownCardLine } from '@adapter/state/shown-line';
-import { noteTimeFor } from '@features/schedule/task-cards';
 
 export type MoveTarget =
   | { readonly kind: 'task'; readonly lid: string; readonly line: number }
@@ -48,6 +48,11 @@ export interface MoveOffer {
   readonly after: Slot;
   readonly verb: 'moved' | 'changed';
   /**
+   * 🔴 繰り返しのノートを動かしたとき、刻みの言葉(`毎週` など)。あれば知らせに「毎週の規則ごと動かしました」と言う
+   * (ノートには回ごとの行が無く、その回だけは動かせない)。
+   */
+  readonly ruleWord?: string;
+  /**
    * 🔴 **戻し先が札の姿と違うとき**(#1632。繰り返しの予定の × ── 規則ごと外れる)。
    * 繰り返しの札の日は「その回の日」で、戻すのは**規則の行の書き方**(開始日・刻み)である。
    * ⚠ 渡さなければ `before` へ戻す(従来どおり)。
@@ -58,6 +63,8 @@ export interface MoveOffer {
     readonly timeEnd: string | null;
     readonly until: string | null;
     readonly repeat: RepeatUnit;
+    /** 終日(台帳 #344 の残り)。 */
+    readonly allDay?: boolean;
   };
 }
 
@@ -103,10 +110,8 @@ function slotNow(
 ): Slot | undefined {
   if (target.kind === 'entry') {
     const m = state.entryMetas.get(target.lid);
-    // 🔴 前書きの時刻も姿の一部(動かした後の姿との比べ・戻す先)── 依頼 192 / 284
-    return m === undefined
-      ? undefined
-      : { date: m.date ?? null, time: noteTimeFor(state.taskScan, m.lid, m.date ?? null), timeEnd: null, until: null, text: '' };
+    // 🔴 前書きの時刻・期間・終日も姿の一部(動かした後の姿との比べ・戻す先)── 依頼 192 / 284、台帳 #344 の残り
+    return m === undefined ? undefined : noteSlotOf(state.taskScan, m.lid, m.date ?? null);
   }
   const c = state.taskScan?.cards.find((x) => x.lid === target.lid && x.line === target.line);
   return c === undefined ? undefined : slotOfCard(c);
@@ -188,7 +193,7 @@ export function offerMoveUndo(root: HTMLElement, dispatcher: Dispatcher, offer: 
   const p: Pending = {
     offer,
     done: null,
-    message: moveMessage(offer.after, offer.verb),
+    message: moveMessage(offer.after, offer.verb, offer.ruleWord),
     dispatcher,
     doc: root.ownerDocument,
     armed: false,
@@ -298,6 +303,8 @@ export function undoScheduleMove(
         lid: offer.target.lid,
         date: b.date,
         ...(untouched ? {} : { time: b.time }),
+        // 🔴 期間・繰り返し・終日のある `date:` は、元の字をそのまま書き戻す(組み直さない)
+        ...(b.date !== null && offer.before.raw !== undefined ? { raw: offer.before.raw } : {}),
       },
     };
   }
@@ -315,6 +322,8 @@ export function undoScheduleMove(
       time: b.time,
       timeEnd: b.timeEnd,
       until: b.until,
+      // 🔴 終日の語も戻す(台帳 #344 の残り)。時刻を付けた動かしの後でも `終日` が戻る
+      allDay: offer.restore?.allDay ?? b.allDay === true,
       // 🔴 繰り返しの規則ごと外した予定は、刻みも書き戻す(#1632)
       ...(offer.restore === undefined ? {} : { repeat: offer.restore.repeat }),
     },

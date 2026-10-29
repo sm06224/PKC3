@@ -259,7 +259,7 @@ import { TIMER_RUN_CLEAR_ATTR, TIMER_RUN_LINE_ATTR } from '@adapter/ui/render/ti
 import { decodeTaskDrag, dropTaskCard, dropTaskToStatus, encodeTaskDrag, statusTargetOf } from '@adapter/ui/render/schedule-drag';
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
 import { offerDoneUndo, offerMoveUndo, undoScheduleMove } from '@adapter/ui/render/schedule-undo';
-import { slotOfCard } from '@features/schedule/move-undo';
+import { noDateSlot, noteSlotOf, slotOfCard } from '@features/schedule/move-undo';
 import { noteTimeFor } from '@features/schedule/task-cards';
 import { plainTaskTitle } from '@features/schedule/task-title';
 import {
@@ -17523,7 +17523,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () => {
         const now = dispatcher.getState();
         const was = now.entryMetas.get(lid)?.date ?? null;
-        const wasTime = noteTimeFor(now.taskScan, lid, was);
+        // 🔴 期間・繰り返し・終日・生の `date:` の値まで持つ(取り消しで落とさない ── 台帳 #344 の残り)
+        const beforeSlot = noteSlotOf(now.taskScan, lid, was);
         const refused = bodyWriteBlockReason(now, lid) !== null;
         dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
         // 🔴 × にも「元に戻す」(#1632。Gemini 裁定 = #1163 の依頼 35 Q2-A)── 日付なしへ落としたときと同じ口。
@@ -17531,8 +17532,8 @@ const ACTIONS: Record<string, ActionHandler> = {
         if (!refused && now.entryMetas.has(lid))
           offerMoveUndo(root, dispatcher, {
             target: { kind: 'entry', lid },
-            before: { date: was, time: wasTime, timeEnd: null, until: null, text: '' },
-            after: { date: null, time: null, timeEnd: null, until: null, text: '' },
+            before: beforeSlot,
+            after: noDateSlot(),
             verb: 'moved',
           });
       });
@@ -17571,7 +17572,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       offerMoveUndo(root, dispatcher, {
         target: { kind: 'task', lid, line },
         before,
-        after: { date: null, time: null, timeEnd: null, until: null, text: before.text },
+        after: noDateSlot(before.text),
         verb: 'moved',
         ...(rule === null || scanned.repeat === null
           ? {}
@@ -17582,6 +17583,7 @@ const ACTIONS: Record<string, ActionHandler> = {
                 timeEnd: rule.timeEnd,
                 until: rule.until,
                 repeat: scanned.repeat,
+                allDay: rule.allDay,
               },
             }),
       });

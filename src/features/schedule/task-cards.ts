@@ -142,6 +142,11 @@ export interface NoteTime {
   readonly repeat?: RepeatUnit | null;
   /** 🔴 前書きの `date: … 終日`(台帳 #344 の残り)。省略 = 時刻未定。 */
   readonly allDay?: boolean;
+  /**
+   * 🔴 前書きの `date:` の**生の値**(期間・刻み・終日のある形のときだけ)。「元に戻す」が**そのまま書き戻す**ための物
+   * (組み直すと `2026/10/20 毎週` のような書き癖が変わる)。省略 = 素の日付・時刻だけの形。
+   */
+  readonly raw?: string;
 }
 
 /** ノート 1 件の予定の「いつ」(日付以外)。`noteWhenFor` が返す。 */
@@ -150,6 +155,8 @@ export interface NoteWhen {
   readonly until: string | null;
   readonly repeat: RepeatUnit | null;
   readonly allDay: boolean;
+  /** 前書きの `date:` の生の値(期間・刻み・終日のある形のときだけ。`NoteTime.raw`)。 */
+  readonly raw: string | null;
 }
 
 /** 走査の結果。⚠ **切ったかどうかを一緒に運ぶ**(黙って切らない)。 */
@@ -312,6 +319,7 @@ export function noteTimeOf(lid: string, body: string): NoteTime | null {
     ...(until === null ? {} : { until }),
     ...(repeat === null ? {} : { repeat }),
     ...(allDay ? { allDay } : {}),
+    ...(when !== null && when.extended && typeof meta['date'] === 'string' ? { raw: meta['date'] } : {}),
   };
 }
 
@@ -335,11 +343,11 @@ export function noteWhenFor(
   lid: string,
   date: string | null,
 ): NoteWhen {
-  const none: NoteWhen = { time: null, until: null, repeat: null, allDay: false };
+  const none: NoteWhen = { time: null, until: null, repeat: null, allDay: false, raw: null };
   if (scan === null || date === null) return none;
   const n = scan.noteTimes?.find((x) => x.lid === lid);
   if (n === undefined || n.date !== date) return none;
-  return { time: n.time, until: n.until ?? null, repeat: n.repeat ?? null, allDay: n.allDay === true };
+  return { time: n.time, until: n.until ?? null, repeat: n.repeat ?? null, allDay: n.allDay === true, raw: n.raw ?? null };
 }
 
 /**
