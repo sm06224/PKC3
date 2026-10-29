@@ -171,3 +171,30 @@ export function isZipAttachment(mime: string, name: string): boolean {
   if (m === 'application/zip' || m === 'application/x-zip-compressed') return true;
   return /\.zip$/i.test(name.trim());
 }
+
+/**
+ * 🔴 **一覧の 1 行の字**(#826 ③)。中にファイルが 0 件のフォルダは、押せない理由を行そのものに書く
+ * (押すと色だけ変わって何も入らない、を作らない)。⚠ 別窓とその場の器の両方がここを呼ぶ(綴りを 2 か所に持たない)。
+ */
+export const EMPTY_FOLDER_NOTE = 'このフォルダにはファイルがありません';
+export function archiveRowText(
+  row: { readonly name: string; readonly isDirectory: boolean; readonly size: string },
+  empty: boolean,
+): string {
+  if (row.isDirectory) return empty ? `${row.name}/ — ${EMPTY_FOLDER_NOTE}` : `${row.name}/`;
+  return `${row.name} — ${row.size}`;
+}
+
+/**
+ * 🔴 **矢印キーでの移動先**(#826 ②。Tab を一覧の外へ出すための「一覧の中は矢印で動く」)。
+ * 行が 200 件でも Tab 1 回で「取り出す」に届く。端で止まる。
+ * @returns 移動先の添字。動かないキーなら `null`
+ */
+export function archiveFocusMove(key: string, at: number, count: number): number | null {
+  if (count <= 0) return null;
+  if (key === 'ArrowDown') return Math.min(at + 1, count - 1);
+  if (key === 'ArrowUp') return Math.max(at - 1, 0);
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  return null;
+}

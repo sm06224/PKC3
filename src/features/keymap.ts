@@ -19,6 +19,8 @@
  * ⚠ **URL パラメータも作らない**(user 指示 2026-08-07「クエリパラメータを抜け穴にしない」)。
  */
 
+import { CALLOUT_CHOICES, calloutLabel } from './markdown/text-ops';
+
 /** 修飾キーの状態 + 基本キー。⚠ `mod` は **Ctrl と ⌘ の両方**(下の注記)。 */
 export interface Chord {
   /**
@@ -1446,6 +1448,14 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     alias: '図 ダイアグラム フローチャート シーケンス mermaid',
   },
   {
+    id: 'insert-callout',
+    label: '注意書きを入れる',
+    contexts: ['global'],
+    defaults: [],
+    note: '注意書きの種類(メモ / ヒント / 警告など)を選んで、選んだ範囲(無ければ空)をそのブロックにします(ノートを編集していて、本文の書式バーが出ているときだけ効きます)',
+    alias: '注意書き コールアウト ブロック note warning tip 警告 メモ ヒント :::',
+  },
+  {
     id: 'insert-icon',
     label: 'アイコンを入れる',
     contexts: ['global'],
@@ -1755,6 +1765,17 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Alt+Shift+X'],
     note: '選んだ字に取り消し線を引きます(~~ で囲みます)',
   },
+  /**
+   * 🔴 **注意書きのブロック 8 種**(#425 の「囲い(`:::`)の挿入口」)。鍵は付けない(`KEYLESS`)── 操作を探すで種類を名前で呼ぶ。
+   * ⚠ 一覧は `CALLOUT_CHOICES` が正本(ここで打ち直さない)。
+   */
+  ...CALLOUT_CHOICES.map((c) => ({
+    id: `format-callout-${c.role}`,
+    label: calloutLabel(c.label),
+    contexts: ['editor', 'row'] as const,
+    defaults: [] as string[],
+    note: `選んだ範囲(無ければ空)を、注意書きのブロック(:::${c.role})にします。もう一度押すと外れます`,
+  })),
   {
     id: 'format-link',
     label: 'リンク',

@@ -88,7 +88,7 @@ function editing(root: HTMLElement, text: string, start: number, end: number) {
   ta.setAttribute('data-pkc-field', 'editor-body');
   ta.value = text;
   detail.append(ta);
-  for (const id of [...ALL5, 'renumber-lists', 'sort-tasks']) {
+  for (const id of [...ALL5, 'renumber-lists', 'sort-tasks', 'insert-callout']) {
     const b = document.createElement('button');
     b.setAttribute('data-pkc-action', id);
     detail.append(b);
@@ -160,7 +160,10 @@ describe('④ 登記:2 件が一覧に居る(押しボタン = 命令 id、鍵�
     for (const id of ALL5) expect(CARET_TOOLS.has(id), `${id} が CARET_TOOLS に無い`).toBe(true);
     // ⚠ 2026-10-17(#1640 ④): 書式の帯の「添付を入れる」(`insert-attachment`)が CARET_TOOLS に居るので +1(「操作を探す」には登記が無い = 範囲を戻す門に入っても呼ばれない)
     // ⚠ 2026-10-26(#766 D-3): 書式バーの「この行を計算する」(`calc-line`)も caret を読むので +1(同じく登記は無い)
-    expect([...CARET_INSERT_TOOLS].sort()).toEqual([...ALL5, 'insert-attachment', 'calc-line'].sort());
+    // ⚠ 2026-10-29(#425): 書式バーの「注意書きを入れる」(`insert-callout`)は登記済み(操作を探すから呼べる)で caret を読むので +1
+    expect([...CARET_INSERT_TOOLS].sort()).toEqual(
+      [...ALL5, 'insert-attachment', 'calc-line', 'insert-callout'].sort(),
+    );
     for (const id of ['renumber-lists', 'sort-tasks', 'format-text']) {
       expect(CARET_TOOLS.has(id), `前提:${id} は CARET_TOOLS に居る`).toBe(true);
       expect(CARET_INSERT_TOOLS.has(id), `${id} が範囲を戻す門に入っている`).toBe(false);
@@ -233,6 +236,20 @@ describe('① 範囲を戻してから押す(焦点が返る瞬間に選択が 0
     await tick();
     expect(ta.value.startsWith('hello'), '先頭に入っている(範囲を戻していない)').toBe(true);
     expect(ta.value, '図が入っていない').toContain('```mermaid');
+    expect(ta.value.endsWith('world') || ta.value.endsWith('world\n'), '後ろの字が動いた').toBe(true);
+  });
+
+  it('🔴 注意書きを入れる(#425):種類を選ぶと、開いたときの位置へそのブロックが入る', async () => {
+    const { root } = setup();
+    const ta = editing(root, 'hello world', 5, 5);
+    await pickFromPalette(root, ta, 'insert-callout');
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-pkc-field="pick-callout"]')];
+    expect(rows, '注意書きの種類の小窓が開いていない').toHaveLength(8);
+    ta.setSelectionRange(0, 0); // 小窓が開いている間に選択が潰れる
+    rows.find((r) => r.textContent?.startsWith('警告'))!.click();
+    await tick();
+    expect(ta.value.startsWith('hello'), '先頭に入っている(範囲を戻していない)').toBe(true);
+    expect(ta.value).toContain(':::warning');
     expect(ta.value.endsWith('world') || ta.value.endsWith('world\n'), '後ろの字が動いた').toBe(true);
   });
 

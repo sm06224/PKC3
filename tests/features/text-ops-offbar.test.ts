@@ -7,7 +7,7 @@
  *   `markdown-render` が実際に読めなければ、入口を作った意味が無い。
  */
 import { describe, expect, it } from 'vitest';
-import { applyFormat, BAR_FORMAT_OPS, FORMAT_OPS } from '../../src/features/markdown/text-ops';
+import { applyFormat, BAR_FORMAT_OPS, CALLOUT_CHOICES, calloutRoleOf, FORMAT_OPS } from '../../src/features/markdown/text-ops';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 const at = (text: string, start: number, end: number) => ({ text, start, end });
@@ -15,7 +15,9 @@ const at = (text: string, start: number, end: number) => ({ text, start, end });
 describe('帯に出さない記法(#425 段②-a)', () => {
   it('🔴 帯の表と全体の表が違う ── 5 つだけ落ちている(mermaid は #528 案 B で「先に聞く」側へ)', () => {
     const off = FORMAT_OPS.filter((o) => o.onBar === false).map((o) => o.op);
-    expect(off).toEqual(['mermaid', 'highlight', 'ruby', 'emdot', 'strike']);
+    expect(off.slice(0, 5)).toEqual(['mermaid', 'highlight', 'ruby', 'emdot', 'strike']);
+    // 🔴 #425: 注意書きのブロック 8 種も帯には出さない(帯には「注意書きを入れる」1 つ)
+    expect(off.slice(5)).toEqual(CALLOUT_CHOICES.map((c) => `callout-${c.role}`));
     // ⚠ 空振り防止 ── 帯の側にその 5 つが 1 つも居ないこと
     const bar = new Set(BAR_FORMAT_OPS.map((o) => o.op));
     expect(off.filter((o) => bar.has(o)), '帯にも出てしまっている').toEqual([]);
@@ -70,5 +72,37 @@ describe('帯に出さない記法(#425 段②-a)', () => {
     const ruby = applyFormat(at('漢字', 0, 2), 'ruby');
     const filled = ruby.text.slice(0, ruby.start) + 'かんじ' + ruby.text.slice(ruby.start);
     expect(renderMarkdown(filled), 'ルビが描かれない').toMatch(/<ruby\b/);
+  });
+});
+
+describe('注意書きのブロック 8 種(#425 の「囲い」)', () => {
+  it('🔴 選んでいなければ空のブロック、caret は中', () => {
+    const r = applyFormat(at('', 0, 0), 'callout-warning');
+    expect(r.text).toBe(':::warning\n\n:::\n');
+    expect(r.text.slice(0, r.start)).toBe(':::warning\n');
+  });
+
+  it('🔴 選んでいればその範囲を囲み、もう一度で外れる(片道にしない)', () => {
+    const on = applyFormat(at('あいう', 0, 3), 'callout-note');
+    expect(on.text).toBe(':::note\nあいう\n:::');
+    const off = applyFormat(at(on.text, on.start, on.end), 'callout-note');
+    expect(off.text, 'もう一度押しても外れない').toBe('あいう');
+  });
+
+  it('🔴 8 種すべて、入れた字を描き手が注意書きとして描く(綴りの引き写しの検算)', () => {
+    expect(CALLOUT_CHOICES.length).toBe(8);
+    for (const c of CALLOUT_CHOICES) {
+      const html = renderMarkdown(applyFormat(at('あいう', 0, 3), `callout-${c.role}`).text);
+      expect(html, `${c.role} が注意書きとして描かれない`).toMatch(
+        new RegExp(`pkc-section-callout[^"]*pkc-section-${c.role === 'summary' ? 'summary' : c.role}|data-pkc-role="${c.role}"`),
+      );
+      expect(html).toContain('あいう');
+    }
+  });
+
+  it('種類でない op は注意書きとして読まない(対照群)', () => {
+    expect(calloutRoleOf('callout-nothing')).toBeNull();
+    expect(calloutRoleOf('bold')).toBeNull();
+    expect(calloutRoleOf('callout-tip')).toBe('tip');
   });
 });

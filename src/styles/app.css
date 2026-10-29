@@ -10298,6 +10298,55 @@ h3[data-pkc-section] {
   justify-content: flex-end;
   gap: var(--s2);
 }
+/* 🔴 **zip の中を選ぶ一覧**(その場の器。#826)。⚠ 直す前は `aria-pressed` を付けていたのに**規則が無く**、
+ * 選んだ行が見分けられなかった。選んだ行は `--accent` の地(別ウィンドウの一覧と同じ配色)。
+ * 0 件のフォルダ(`aria-disabled`)は共通の灰色(`button[aria-disabled='true']`)に任せる。 */
+[data-pkc-field='pick-archive-list'] {
+  max-height: 50vh;
+  overflow: auto;
+}
+[data-pkc-field='pick-archive'] {
+  display: block;
+  width: 100%;
+  text-align: start;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  padding-block: var(--s1);
+  cursor: pointer;
+}
+[data-pkc-field='pick-archive']:hover {
+  background: var(--surface-2);
+}
+[data-pkc-field='pick-archive'][aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--bg);
+}
+/* 🔴 **貼ったあとの小さな知らせ(トースト)**(#1379)。右下に重ねる浮き札で、本文の領域は奪わない。
+ * 地は無彩色(色は使わない)。数秒で消える(JS)。ボタンの見え方は共通の `button` に任せる。 */
+[data-pkc-region='paste-toast'] {
+  position: fixed;
+  inset-block-end: var(--s4);
+  inset-inline-end: var(--s4);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  max-width: min(32rem, calc(100vw - 2 * var(--s4)));
+  padding: var(--s2) var(--s3);
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
+}
+[data-pkc-field='paste-toast-text'] {
+  overflow-wrap: anywhere;
+}
 /* 🔴 **日付を入れる道具**(2026-08-23)。⚠ 本文の `<p>` の中に置くので、
  * 中身は phrasing content(`<button>` / `<label>` / `<input>`)だけである。 */
 [data-pkc-field='dialog-body'] [data-pkc-field='pick-shortcut'] {

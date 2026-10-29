@@ -29,6 +29,11 @@
  * ⚠ 配色は**写す**(`--bg` / `--fg` / `--muted` / `--accent`)── ここに色の表を持つと、
  *   配色を足した日にこの窓だけ古くなる(`theme.ts` の `syncThemeColor` と同じ作法)。
  */
+import {
+  EMPTY_FOLDER_NOTE,
+  archiveFocusMove,
+  archiveRowText,
+} from '@features/archive/zip-browse';
 import { waitForWindowClose } from './window-close';
 import { blockWindowDrop } from './window-drop-guard';
 
@@ -196,6 +201,14 @@ export interface ArchivePickDeps {
   readonly themeFrom: HTMLElement;
   /** 窓が閉じるのを待つ口。⚠ test が差す(既定は poll)。 */
   readonly waitClose?: (win: Window) => Promise<void>;
+  /**
+   * 🔴 **窓が再読み込み(F5)されて白紙になったとき**(#826 ④)。一覧は opener が組んでいるので、
+   * 再読み込みすると中身が消える。⚠ 白紙のまま残すと「壊れた窓」に見えるので、**窓を閉じて**これを呼ぶ
+   * (呼び側が主の画面に 1 行出す)。⚠ 省略できない ── 渡し忘れた日に黙って閉じるだけになる。
+   */
+  readonly onReloaded: () => void;
+  /** 再読み込みを見張る間隔(ms)。⚠ test が短くする。 */
+  readonly reloadEveryMs?: number;
 }
 
 /** 根から `--bg` などを読んで写す。⚠ 読めなければ既定(OS 追従)に落ちる。 */
@@ -243,6 +256,7 @@ export function pickInArchiveWindow(win: Window, deps: ArchivePickDeps): Promise
     'border-radius:6px}' +
     '[data-pkc-field="archive-window-row"][aria-pressed="true"]{' +
     'background:var(--accent,Highlight);color:var(--bg,Canvas)}' +
+    '[data-pkc-field="archive-window-row"][aria-disabled="true"]{opacity:.45;cursor:not-allowed}' +
     '[data-pkc-field="archive-window-foot"]{display:flex;gap:8px;justify-content:flex-end;' +
     'padding:8px 12px;border-top:1px solid var(--muted,GrayText)}' +
     '[data-pkc-field="archive-window-foot"] button{font:inherit;padding:6px 14px;' +
@@ -273,40 +287,55 @@ export function pickInArchiveWindow(win: Window, deps: ArchivePickDeps): Promise
   foot.append(cancel, ok);
   doc.body.append(head, note, list, foot);
 
+  /**
+   * 🔴 **一覧は 1 度だけ組み、押したら印と字だけ直す**(#826 ①)。
+   * ⚠ 直す前は押すたびに作り直していたので、長い zip で下の行を押すと押した行が視野の端へ跳ねた。
+   * 🔴 **Tab の止まりは一覧で 1 つ**(#826 ②)── 200 件でも「取り出す」まで 200 回押させない。一覧の中は矢印
+   *   (↑ ↓ Home End)で動き、**Ctrl(⌘)+ Enter で取り出す**。
+   * 🔴 **0 件のフォルダは、押せない理由を行に書き、印を付けない**(#826 ③)。
+   */
   let marks: string[] = [];
-  let focusPath: string | null = null;
-
-  const paint = (): void => {
-    list.textContent = '';
+  const buttons: HTMLButtonElement[] = [];
+  const setCurrent = (index: number): void => {
+    for (const [i, b] of buttons.entries()) b.tabIndex = i === index ? 0 : -1;
+  };
+  const sync = (): void => {
     for (const [index, row] of deps.rows.entries()) {
-      const btn = doc.createElement('button');
-      btn.type = 'button';
-      btn.setAttribute('data-pkc-field', 'archive-window-row');
-      btn.setAttribute('data-pkc-archive-index', String(index));
-      btn.setAttribute('aria-pressed', marks.includes(row.path) ? 'true' : 'false');
-      // ⚠ 器(`app-dialog.ts`)は `depth * 16` ── こちらは窓の縁から 8px 内側に置くので
-      //    その分を足す(**同じ規則の別の器**であって、階層の刻みは同じ 16px である)
-      btn.style.paddingInlineStart = `${8 + row.depth * 16}px`;
-      // ⚠ フォルダの印は末尾の `/`(絵文字を UI に置かない ── `icons.test.ts`)
-      btn.textContent = row.isDirectory ? `${row.name}/` : `${row.name} — ${row.size}`;
-      btn.addEventListener('click', () => {
-        marks = deps.toggle(marks, row.path);
-        focusPath = row.path;
-        paint();
-      });
-      list.append(btn);
+      buttons[index]?.setAttribute('aria-pressed', marks.includes(row.path) ? 'true' : 'false');
     }
     const n = deps.countFiles(marks);
     ok.textContent = n === 0 ? '選んだ物を取り出す' : `選んだ ${n} 件を取り出す`;
     // ⚠ **0 件では押せない** ── 押しても何も起きない口を作らない
     ok.disabled = n === 0;
-    if (focusPath !== null) {
-      const back = deps.rows.findIndex((r) => r.path === focusPath);
-      list.querySelector<HTMLButtonElement>(`[data-pkc-archive-index="${back}"]`)?.focus();
-    }
   };
-  paint();
-  list.querySelector<HTMLButtonElement>('[data-pkc-archive-index="0"]')?.focus();
+  for (const [index, row] of deps.rows.entries()) {
+    const btn = doc.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-field', 'archive-window-row');
+    btn.setAttribute('data-pkc-archive-index', String(index));
+    btn.setAttribute('aria-pressed', 'false');
+    // ⚠ 器(`app-dialog.ts`)は `depth * 16` ── こちらは窓の縁から 8px 内側に置くので
+    //    その分を足す(**同じ規則の別の器**であって、階層の刻みは同じ 16px である)
+    btn.style.paddingInlineStart = `${8 + row.depth * 16}px`;
+    // ⚠ フォルダの印は末尾の `/`(絵文字を UI に置かない ── `icons.test.ts`)
+    const empty = row.isDirectory && deps.countFiles([row.path]) === 0;
+    btn.textContent = archiveRowText(row, empty);
+    if (empty) {
+      btn.setAttribute('aria-disabled', 'true');
+      btn.title = EMPTY_FOLDER_NOTE;
+    }
+    btn.addEventListener('click', () => {
+      setCurrent(index);
+      if (empty) return;
+      marks = deps.toggle(marks, row.path);
+      sync();
+    });
+    buttons.push(btn);
+    list.append(btn);
+  }
+  setCurrent(0);
+  sync();
+  buttons[0]?.focus();
   /**
    * 🔴 **組み終えた印**(2 回目に押しても組み直さない ── 印と並びが残る)。
    * ⚠ 付けるのは**組み終えてから** ── 途中で落ちた回に「組んである」と言わない。
@@ -316,12 +345,31 @@ export function pickInArchiveWindow(win: Window, deps: ArchivePickDeps): Promise
   return new Promise<string[] | null>((resolve) => {
     let done = false;
     /**
+     * 🔴 **再読み込みを見張る**(#826 ④)。⚠ 再読み込みすると document が別物になる(組んだ印も消える)。
+     * 白紙の窓を残さず、閉じて呼び側へ知らせる。
+     */
+    const watch = setInterval(() => {
+      if (done) return;
+      try {
+        if (win.closed) return; // 閉じたのは下の waitClose が拾う
+        if (win.document !== doc || win.document.documentElement.getAttribute(ARCHIVE_BUILT_ATTR) !== deps.assetKey) {
+          deps.onReloaded();
+          settle(null);
+        }
+      } catch {
+        // 読めない(別の場所へ移った等)── 閉じて知らせる
+        deps.onReloaded();
+        settle(null);
+      }
+    }, deps.reloadEveryMs ?? 1000);
+    /**
      * ⚠ **答えは 1 度だけ**。⚠ そして**必ず窓を閉じる** ── 閉じないと、
      *   取り出した後も選び手が残って「もう 1 度取り出せる」ように見える。
      */
     const settle = (answer: string[] | null): void => {
       if (done) return;
       done = true;
+      clearInterval(watch);
       resolve(answer);
       try {
         win.close();
@@ -339,8 +387,26 @@ export function pickInArchiveWindow(win: Window, deps: ArchivePickDeps): Promise
      *   選ぶ」が、開く場所によって `Esc` の効き方が変わってはいけない
      *   (マニュアルは `Esc` を**アプリ全体の作法**として教えている)。
      */
-    doc.addEventListener('keydown', (ev) => {
-      if ((ev as KeyboardEvent).key === 'Escape') settle(null);
+    doc.addEventListener('keydown', (e) => {
+      const ev = e as KeyboardEvent;
+      if (ev.key === 'Escape') {
+        settle(null);
+        return;
+      }
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+        if (!ok.disabled) {
+          ev.preventDefault();
+          ok.click();
+        }
+        return;
+      }
+      const at = buttons.findIndex((b) => b === doc.activeElement);
+      if (at < 0) return;
+      const next = archiveFocusMove(ev.key, at, buttons.length);
+      if (next === null) return;
+      ev.preventDefault();
+      setCurrent(next);
+      buttons[next]?.focus();
     });
     // 🔑 窓ごと閉じられた回も答えを返す(呼び側が永久に待たない)
     void waitClose(win).then(

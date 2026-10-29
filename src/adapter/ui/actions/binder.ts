@@ -302,6 +302,11 @@ import {
   DEFAULT_PASTE_SOURCE,
   isPlainPasteChord,
   pasteConvertedMessage,
+  pasteRevertRange,
+  PASTE_TOAST_ACTION,
+  PASTE_TOAST_CHANGED,
+  PASTE_TOAST_CLOSED,
+  PASTE_TOAST_TEXT,
   PASTE_MESSAGE_COALESCE_MS,
   PLAIN_PASTE_WINDOW_MS,
   type PasteSource,
@@ -312,6 +317,7 @@ import {
   applyFormat,
   autoPairFor,
   DIAGRAM_CHOICES,
+  CALLOUT_CHOICES,
   DIAGRAM_TEMPLATES,
   insertBlock,
   linkifyPastedUrl,
@@ -879,6 +885,7 @@ import {
   pickSnippetInApp,
   pickTemplateNoteInApp,
   pickDiagramInApp,
+  pickCalloutInApp,
   pickBodyIconInApp,
   pickArchiveInApp,
   pickCopyFormatInApp,
@@ -893,6 +900,7 @@ import {
   type ArchivePickRow,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
+import { showPasteToast } from '@adapter/ui/render/paste-toast';
 
 type ActionHandler = (
   dispatcher: Dispatcher,
@@ -11544,6 +11552,35 @@ const ACTIONS: Record<string, ActionHandler> = {
     });
   },
   /**
+   * 🔴 **注意書きのブロックを入れる ── 押すと 8 種から選ぶ**(#425 の「囲い(`:::`)の挿入口」)。
+   *
+   * ⚠ 作りは `insert-diagram` と同じ ── caret を先に控え、器(`pickCalloutInApp`)が返ってから欄を引き直す。
+   * 🔑 選んでいても先に聞く(種類は選んだ字からは決まらない)。入れ方は `applyFormat(sel, 'callout-<種類>')` の 1 本
+   *   (選んでいれば囲み、無ければ空のブロック。もう一度で外れる ── 片道にしない)。
+   */
+  'insert-callout': (_dispatcher, _target, services, root) => {
+    const opened = formatTarget(root);
+    if (opened === null) {
+      sayNoFormatTarget(services);
+      return;
+    }
+    const at = { start: opened.selectionStart, end: opened.selectionEnd };
+    void pickCalloutInApp(
+      root,
+      CALLOUT_CHOICES.map((c) => ({ id: c.role, label: `${c.label}(:::${c.role})` })),
+    ).then((id) => {
+      if (id === null) return;
+      const choice = CALLOUT_CHOICES.find((c) => c.role === id);
+      if (choice === undefined) return;
+      const ta = formatTarget(root);
+      if (ta === null) return;
+      ta.focus();
+      ta.setSelectionRange(at.start, at.end);
+      const sel = { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+      writeBack(ta, applyFormat(sel, `callout-${choice.role}`));
+    });
+  },
+  /**
    * 🔴 **図案を本文に入れる**(#853 段①、2026-09-13)。
    *
    * > user 指示 2026-09-12:「**マテリアルデザインのアイコンはユーザーのメモ内でも
@@ -18417,6 +18454,7 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
    *   ⚠ 受け手は画面のボタンそのもの(`insert-date` などと同じ)。選んだ範囲があれば図は囲み、無ければ種類を聞く(ボタンの作り)。
    */
   'insert-diagram': '[data-pkc-action="insert-diagram"]',
+  'insert-callout': '[data-pkc-action="insert-callout"]',
   'insert-icon': '[data-pkc-action="insert-icon"]',
   /**
    * 🔴 **録音・録画の最中と切り出し、検索の帯 7 件 第 4 群**(#582 段③。第 1〜3 群と同じ作法 ── 命令 id = 押しボタンの
@@ -18496,6 +18534,15 @@ const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
   'format-table': 'table',
   'format-codeblock': 'codeblock',
   'format-math': 'math',
+  // 🔴 #425: 注意書きのブロック 8 種(`CALLOUT_CHOICES` と同じ並び)
+  'format-callout-note': 'callout-note',
+  'format-callout-tip': 'callout-tip',
+  'format-callout-info': 'callout-info',
+  'format-callout-important': 'callout-important',
+  'format-callout-warning': 'callout-warning',
+  'format-callout-caution': 'callout-caution',
+  'format-callout-danger': 'callout-danger',
+  'format-callout-summary': 'callout-summary',
 };
 
 /**
@@ -18839,6 +18886,8 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   'insert-snippet',
   // ⚠ 2026-09-04(#528 案 B): 図の一覧 ── 同じく編集中の本文へ挿す
   'insert-diagram',
+  // ⚠ #425: 注意書きの種類の一覧 ── 同じく編集中の本文へ挿す
+  'insert-callout',
   // ⚠ 2026-09-13(#853 段①): 図案の表 ── 同じく編集中の本文へ挿す
   'insert-icon',
   'renumber-lists',
@@ -20515,6 +20564,13 @@ export function bindActions(
    *
    * @returns 既定の貼付を止めたら `true`
    */
+  /** 貼る前の欄の本文と選択範囲(貼った範囲を求める材料。#1379)。 */
+  type PasteBefore = { readonly value: string; readonly start: number; readonly end: number };
+  const pasteBefore = (el: HTMLTextAreaElement): PasteBefore => ({
+    value: el.value,
+    start: el.selectionStart ?? el.value.length,
+    end: el.selectionEnd ?? el.selectionStart ?? el.value.length,
+  });
   let plainPasteChordAt: number | null = null;
   const onPlainPasteChord = (ev: KeyboardEvent): void => {
     if (isPlainPasteChord(ev)) plainPasteChordAt = Date.now();
@@ -20629,6 +20685,30 @@ export function bindActions(
      * ⚠ 続けて貼ったときは束ねる(`PASTE_MESSAGE_COALESCE_MS` 以内は 1 件)。
      * ⚠ **差し込みに成功した後で呼ぶ**(資産化を待つ間に欄が閉じたら、「貼りました」は嘘になる)。
      */
+    /**
+     * 🔴 **直した字を、1 クリックで書式なしの字へ置き換えるトースト**(#1379)。
+     * ⚠ 置き場は画面下のステータスバーではなく浮き札(`paste-toast.ts`)。文はメッセージにも残る(下の `leaveConverted`)。
+     * ⚠ 置き換えは `insertText`(Ctrl+Z で貼った直後へ戻せる)。貼ったあとに本文が変わっていたら触らず理由を言う。
+     */
+    const offerPlain = (el: HTMLTextAreaElement, before: PasteBefore): void => {
+      if (converted === null || (chosen.attempt.used !== 'html' && chosen.attempt.used !== 'rtf')) return;
+      if (plain === '') return; // 書式なしの字が届いていない ── 置き換え先が無い
+      const afterValue = el.value;
+      if (pasteRevertRange(before, afterValue) === null) return;
+      showPasteToast(el.closest<HTMLElement>('[data-pkc-slot="root"]') ?? el.ownerDocument.body, {
+        message: PASTE_TOAST_TEXT,
+        actionLabel: PASTE_TOAST_ACTION,
+        onAction: () => {
+          if (!el.isConnected) return PASTE_TOAST_CLOSED;
+          const range = el.value === afterValue ? pasteRevertRange(before, afterValue) : null;
+          if (range === null) return PASTE_TOAST_CHANGED;
+          el.focus();
+          el.setSelectionRange(range.start, range.end);
+          insertText(el, plain);
+          return null;
+        },
+      });
+    };
     const leaveConverted = (): void => {
       if (converted === null || (chosen.attempt.used !== 'html' && chosen.attempt.used !== 'rtf')) return;
       const now = Date.now();
@@ -20644,8 +20724,10 @@ export function bindActions(
     // ⚠ 逃がすものが無い(= 資産にする口が無い環境も含む)ときは、その場で差す
     if (urls.length === 0) {
       // ⚠ 囲みは行頭から差す(行の途中だと柵が柵として読まれない ── #708 段③)
+      const before = pasteBefore(target);
       insertBlockText(target, text);
       leaveConverted();
+      offerPlain(target, before);
       return true;
     }
 
@@ -20665,8 +20747,10 @@ export function bindActions(
         return;
       }
       into.focus();
+      const before = pasteBefore(into);
       insertBlockText(into, r.text);
       leaveConverted();
+      offerPlain(into, before);
       /**
        * 🔴 **断りは 1 本にまとめる**(検算で判明)。`state.error` は **1 枠**なので、
        * 理由(空き容量)を先に出しても、件数の総括で**上書きされて消える**。

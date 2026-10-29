@@ -30,6 +30,7 @@ import {
   MERMAID_BLOCK,
   applyFormat,
   insertBlock,
+  CALLOUT_CHOICES,
 } from '../../src/features/markdown/text-ops';
 import { BUILTIN_SNIPPET_OPS } from '../../src/features/snippet/snippet-menu';
 import { stubRevisionOps } from '../helpers/revision-stub';
@@ -225,7 +226,7 @@ describe('書式パネル(P8 段⑥)', () => {
     const onBar = new Set(BAR_FORMAT_OPS.map((o) => o.op));
     const byKey = new Set(
       [...readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8').matchAll(
-        /'(format-[a-z]+)': '([a-z]+)',/g,
+        /'(format-[a-z-]+)': '([a-z-]+)',/g,
       )].map((m) => m[2]!),
     );
     expect(byKey.size, '鍵の表を読めていない(空振り)').toBeGreaterThan(2);
@@ -549,6 +550,67 @@ describe('「図」を押すと 5 種から選ぶ(#528 案 B)', () => {
       expect(openDialog(), '空選択なのに一覧が開かない(既存の挙動を壊した)').not.toBeNull();
       expect(ta.value).toBe('まえ\n');
     });
+  });
+});
+
+/**
+ * 🔴 **「注意書きを入れる」を押すと 8 種から選べる**(#425 の「囲い(`:::`)の挿入口」)。
+ * 観測点は textarea の値と画面の状態の両方(後者に届かないと保存した瞬間に消える)。
+ */
+describe('「注意書きを入れる」(#425)', () => {
+  beforeEach(() => {
+    localStorage.setItem('pkc3.editor-mode', 'split');
+  });
+  afterEach(() => {
+    resetAppDialogForTest();
+  });
+  const rows = (): HTMLButtonElement[] => [
+    ...(openDialog()?.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-callout"]') ?? []),
+  ];
+  async function openPicker(body: string, start: number, end: number) {
+    const s = setup([meta('a')], { a: body });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    s.q('[data-pkc-action="start-edit"]')!.click();
+    await tick();
+    const ta = s.q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    ta.setSelectionRange(start, end);
+    s.q('[data-pkc-action="insert-callout"]')!.click();
+    await tick();
+    return { ...s, ta };
+  }
+
+  it('🔴 押すと 8 種の一覧が出る(表のとおり)', async () => {
+    await openPicker('', 0, 0);
+    expect(openDialog(), '一覧が開いていない').not.toBeNull();
+    expect(rows()).toHaveLength(8);
+    expect(rows().map((b) => b.textContent)).toEqual(
+      CALLOUT_CHOICES.map((c) => `${c.label}(:::${c.role})`),
+    );
+  });
+
+  it('🔴 選んでいなければ、選んだ種類の空のブロックが caret の位置に入り、画面の状態も変わる', async () => {
+    const { d, ta } = await openPicker('まえ\n', 3, 3);
+    rows().find((b) => b.textContent?.startsWith('警告'))!.click();
+    await tick();
+    expect(ta.value).toBe('まえ\n:::warning\n\n:::\n');
+    expect(d.getState().openBody?.body, '状態に届いていない(保存すると消える)').toBe(ta.value);
+  });
+
+  it('🔴 選んでいれば、選んだ字を消さずにそのブロックで包む', async () => {
+    const { d, ta } = await openPicker('まえなかあと', 2, 4);
+    rows().find((b) => b.textContent?.startsWith('ヒント'))!.click();
+    await tick();
+    expect(ta.value).toContain(':::tip\nなか\n:::');
+    expect(ta.value.startsWith('まえ')).toBe(true);
+    expect(d.getState().openBody?.body).toBe(ta.value);
+  });
+
+  it('やめるなら本文は 1 バイトも変わらない', async () => {
+    const { ta } = await openPicker('あ', 1, 1);
+    openDialog()!.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-cancel"]')!.click();
+    await tick();
+    expect(ta.value).toBe('あ');
   });
 });
 

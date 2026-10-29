@@ -5301,6 +5301,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             assetKey,
             title,
             themeFrom: document.documentElement,
+            // 🔴 #826 ④: 窓を再読み込みすると一覧が消える ── 窓を閉じ、主の画面に理由を 1 行出す
+            onReloaded: () =>
+              showStatus(
+                `「${title}」のウィンドウは再読み込みすると一覧が消えるため閉じました。もう一度「中を見る」を押してください`,
+              ),
           }),
         fail: (text) => showArchiveWindowError(got.win, title, text),
       };

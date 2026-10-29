@@ -863,3 +863,88 @@ describe('貼付の変換をメッセージに残す', () => {
     expect(ta.value).toBe('## 秘密の見出し\n\n秘密の本文');
   });
 });
+
+/**
+ * 🔴 **直して貼ったあとの小さな知らせ ── 「プレーンテキストに変更」を 1 クリックで**(#1379)。
+ * ⚠ 置き場はステータスバーではなく浮き札(`[data-pkc-region="paste-toast"]`)。観測点は
+ *   ①浮き札が出る ②ボタン 1 回で本文が書式なしの字になる ③画面下の 1 行に出ていない
+ *   ④貼ったあとに本文が変わっていたら触らない ⑤平文・変換しない設定では出ない(対照群)。
+ */
+describe('貼付のトースト(#1379)', () => {
+  const html = { 'text/html': '<h2>見出し</h2><p>本文</p>', 'text/plain': '見出し 本文' };
+  const toast = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>('[data-pkc-region="paste-toast"]');
+  const action = (): HTMLButtonElement =>
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="paste-toast-action"]')!;
+
+  it('🔴 直して貼ると浮き札が出て、ボタン 1 回で書式なしの字になる', () => {
+    const { ta, dispatcher } = setup();
+    const notices: string[] = [];
+    dispatcher.onState((st) => {
+      if (st.notice) notices.push(st.notice);
+    });
+    ta.value = 'まえ。';
+    ta.setSelectionRange(3, 3);
+    ta.dispatchEvent(pasteEvent(html));
+    expect(ta.value, '前提: 変換されている').toContain('## 見出し');
+    expect(toast(), '浮き札が出ていない').not.toBeNull();
+    expect(action().textContent).toBe('プレーンテキストに変更');
+    expect(notices, '画面下の 1 行に出している').toEqual([]);
+    action().click();
+    expect(ta.value, '書式なしの字に置き換わっていない').toBe('まえ。見出し 本文');
+    expect(toast(), '押したのに浮き札が残る').toBeNull();
+  });
+
+  it('🔴 選んだ字を置き換えて貼ったときも、置き換えた範囲だけが書式なしになる', () => {
+    const { ta } = setup();
+    ta.value = 'あ[選んだ]い';
+    ta.setSelectionRange(1, 6);
+    ta.dispatchEvent(pasteEvent(html));
+    action().click();
+    expect(ta.value).toBe('あ見出し 本文い');
+  });
+
+  it('🔴 貼ったあとに本文を変えていたら触らず、理由を言ってボタンを畳む', () => {
+    const { ta } = setup();
+    ta.dispatchEvent(pasteEvent(html));
+    ta.value = `${ta.value}あとから打った`;
+    const before = ta.value;
+    action().click();
+    expect(ta.value, '無関係な編集を書き換えた').toBe(before);
+    expect(toast()?.textContent).toContain('変更できません');
+    expect(action().hidden, '理由を出した後もボタンが残る').toBe(true);
+  });
+
+  it('時間が来ると消える(止まらない時計ではない)', () => {
+    vi.useFakeTimers();
+    try {
+      const { ta } = setup();
+      ta.dispatchEvent(pasteEvent(html));
+      expect(toast()).not.toBeNull();
+      vi.advanceTimersByTime(9000);
+      expect(toast(), '数秒たっても残っている').toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('対照群: 平文の貼付 / 設定「変換しない」/ 平文が届いていない貼付では出ない', () => {
+    const a = setup();
+    a.ta.dispatchEvent(pasteEvent({ 'text/plain': 'ただの文字' }));
+    expect(toast()).toBeNull();
+    const b = setup({ pasteSource: () => 'plain' });
+    b.ta.dispatchEvent(pasteEvent(html));
+    expect(toast()).toBeNull();
+    const c = setup();
+    c.ta.dispatchEvent(pasteEvent({ 'text/html': '<h2>見出し</h2>' }));
+    expect(c.ta.value, '前提: 変換されている').toContain('見出し');
+    expect(toast(), '置き換え先の字が無いのにボタンを出している').toBeNull();
+  });
+
+  it('次の貼り付けで置き換わる(1 度に 1 つ)', () => {
+    const { ta } = setup();
+    ta.dispatchEvent(pasteEvent(html));
+    ta.dispatchEvent(pasteEvent(html));
+    expect(document.querySelectorAll('[data-pkc-region="paste-toast"]')).toHaveLength(1);
+  });
+});
