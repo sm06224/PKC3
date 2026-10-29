@@ -50,8 +50,8 @@ const LICENSE_FILE_NAME = /^(licen[cs]e|notice|copying)(\.|$)/iu;
 export const DEFAULT_HF_MODELS = [
   'openai/whisper-base',
   'openai/whisper-small',
-  'openai/whisper-base',
-  'openai/whisper-small',
+  // 高精度(#1446 ③)── 配布元に置く日のために、ライセンスの宣言を先に集めておく(置かれていなくても害は無い)
+  'openai/whisper-large-v3-turbo',
 ];
 
 /** 全文の印(取れた物が本当に全文かを見る。⚠ 404 の HTML や空を「取れた」と数えない)。 */

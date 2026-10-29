@@ -140,8 +140,13 @@ const DIST = positional[1]
  * (雑音を減らす・声と伴奏を分ける・話者を分ける)のワーカー chunk に、RNNoise の wasm とモデル(`@shiguredo/rnnoise-wasm`。
  * 実測 4827 KB。wasm を base64 で JS に抱える作り)が入る分で、実測 23247 KB。**使うときだけ起きる遅延ワーカー**で、
  * 使わない人の常駐メモリには載らない。⚠ **撤廃はしない**(誤取込 1 本は今も止まる)。
+ *
+ * 🔴 **2026-10-29(#674 / #949)に 24000 → 39000 KB へ引き上げた** ── 通常の増加である(誤取込ではない)。歌声と楽器を分けるニューラルの
+ * 音源分離が使う ONNX Runtime の wasm(`onnxruntime-web` 1.31.1。実測 14,848,852 byte = 14500 KB)と glue(24 KB)、ワーカー本体(約 90 KB)が
+ * 入る分で、実測 38246.7 KB(約 750 KB の余裕)。wasm は**押した人のワーカーが初めて取りに行く**だけで、precache には載せない
+ * (`sw-source.ts` の `ORT_WASM_PRECACHE_SKIP`)。使わない人の install にも常駐メモリにも載らない。⚠ **撤廃はしない**(誤取込 1 本は今も止まる)。
  */
-const SHIPPED_CAP_KB = 24000;
+const SHIPPED_CAP_KB = 39000;
 
 /**
  * 配る量の下限。KB。⚠ **cap だけでは片側しか見ていない** ── entry chunk を

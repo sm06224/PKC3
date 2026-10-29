@@ -207,6 +207,18 @@ const KNOWN_CONSOLE_NOISE: readonly string[] = [
 ];
 
 /**
+ * 🔴 **ブラウザ自身が出す `info`**(アプリの主張ではない)。等値で名指しする。
+ *
+ * Chromium は WebGPU がまだ「実験的」な台(Linux など)で `navigator.gpu.requestAdapter()` を呼ぶと、
+ * 呼んだ側の束から `WebGPU is experimental on this platform. …` を `console.info` で出す。
+ * 設定の「音声認識」を開くと PKC3 は WebGPU の可否を測る(`webgpu-probe.ts`。#1446 ②)ので、その副産物である。
+ * ⚠ 等値なので、文言が変われば(または別の info が増えれば)落ちる。🔑 消せる条件: 台が WebGPU を実験扱いでなくなったとき。
+ */
+const KNOWN_CONSOLE_INFO_NOISE: readonly string[] = [
+  'WebGPU is experimental on this platform. See https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#implementation-status',
+];
+
+/**
  * 🔴 **スマホの幅ではお知らせが画面いっぱいに出る**(user 裁定 2026-09-02
  * 「**全画面でだせばいいじゃん。不要ならみんな設定するでしょ？**」)。
  *
@@ -279,6 +291,7 @@ export function collectPageErrors(page: Page): string[] {
     if (kind !== 'error') {
       if (kind !== 'info' && kind !== 'log') return;
       if (!isAppOrigin(msg.location())) return;
+      if (kind === 'info' && KNOWN_CONSOLE_INFO_NOISE.includes(msg.text())) return;
       errors.push(
         `console.${kind}: ${msg.text()}${consoleOrigin(msg.location())} (+${Date.now() - t0}ms)`,
       );

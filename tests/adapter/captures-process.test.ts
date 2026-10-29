@@ -64,13 +64,13 @@ describe('行の押し所', () => {
 
   it('🔴 VP8 の画面録画には全部の道具(話者を直すを除く)が、表の順(塊ごと)で運ばれる', () => {
     const host = pane({ captureItems: ITEMS() });
-    expect(toolsOf(host, 'b')).toEqual(['fold-still', 'contact-sheet', 'denoise', 'separate', 'balance', 'chapters', 'speakers']);
+    expect(toolsOf(host, 'b')).toEqual(['fold-still', 'contact-sheet', 'denoise', 'separate', 'separate-stems', 'balance', 'chapters', 'speakers']);
   });
 
   it('🔴 音の行・VP9 の動画には映像の道具が運ばれず、鍵の無い行には「仕上げ」自体が出ない', () => {
     const host = pane({ captureItems: ITEMS() });
-    expect(toolsOf(host, 'a')).toEqual(['denoise', 'separate', 'balance', 'chapters', 'speakers']);
-    expect(toolsOf(host, 'd')).toEqual(['denoise', 'separate', 'balance', 'chapters', 'speakers']);
+    expect(toolsOf(host, 'a')).toEqual(['denoise', 'separate', 'separate-stems', 'balance', 'chapters', 'speakers']);
+    expect(toolsOf(host, 'd')).toEqual(['denoise', 'separate', 'separate-stems', 'balance', 'chapters', 'speakers']);
     expect(openers(host, 'c')).toHaveLength(0);
   });
 
@@ -108,7 +108,7 @@ describe('一覧を開いて選ぶ(binder まで)', () => {
     const menu = menuOf(root);
     expect(menu, '一覧が出ない').not.toBeNull();
     const items = [...menu!.querySelectorAll<HTMLButtonElement>('button[data-pkc-action="capture-process"]')];
-    expect(items.map((b) => b.getAttribute('data-pkc-part'))).toEqual(['fold-still', 'contact-sheet', 'denoise', 'separate', 'balance', 'chapters', 'speakers']);
+    expect(items.map((b) => b.getAttribute('data-pkc-part'))).toEqual(['fold-still', 'contact-sheet', 'denoise', 'separate', 'separate-stems', 'balance', 'chapters', 'speakers']);
     for (const b of items) {
       const t = processToolOf(b.getAttribute('data-pkc-part')!)!;
       expect(b.textContent).toBe(t.label);

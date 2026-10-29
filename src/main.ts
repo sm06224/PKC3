@@ -381,8 +381,11 @@ import { openImageDrawInPane, openImageDrawWindow } from '@adapter/platform/imag
 import { AudioClient } from '@adapter/platform/audio/audio-client';
 import { VideoClient } from '@adapter/platform/video/video-client';
 import { AsrClient } from '@adapter/platform/asr/asr-client';
-import { decodeToMono, decodeToMono16k } from '@adapter/platform/asr/asr-decode';
+import { decodeToMono, decodeToMono16k, decodeToStereo } from '@adapter/platform/asr/asr-decode';
+import { STEM_RATE } from '@features/audio/stem-model';
 import { VoiceClient } from '@adapter/platform/voice/voice-client';
+import { StemClient } from '@adapter/platform/stems/stem-client';
+import { fetchStemModel } from '@adapter/platform/stems/stem-fetch';
 import { VOICE_RATE } from '@features/audio/voice-lab';
 import { AsrPackInstaller } from '@adapter/platform/asr/asr-pack-install';
 import { AsrPackStore } from '@adapter/platform/asr/asr-pack-store';
@@ -3955,6 +3958,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const audioClient = new AudioClient();
   // 🔴 声の仕上げ(雑音を減らす・話し声とそれ以外に分ける・話者…)のワーカー。遅延起動・アイドルで畳む(`WorkerLease`)
   const voiceClient = new VoiceClient();
+  // 🔴 歌声と楽器を分ける(ニューラルの音源分離。#674・#949)のワーカー。遅延起動・アイドルで畳む。重みは公開の配布元から取る
+  const stemClient = new StemClient();
   /**
    * 🔴 **動画は別のワーカー**(#683 段②b-1)── 動画の長い仕事で音の切り出しを待たせない。
    * 元の `Blob` は窓で読む(250MB を開かない)。始まりが手前へ戻るなら、切る前に確認する。
@@ -4031,6 +4036,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       decode16k: (blob) => decodeToMono16k(blob),
       decode48k: (blob) => decodeToMono(blob, VOICE_RATE),
       voice: (job) => voiceClient.run(job),
+      decodeStereo44k: (blob) => decodeToStereo(blob, STEM_RATE),
+      fetchStemModel: (model, onProgress) => fetchStemModel(model, undefined, { onProgress }),
+      stems: (req, onProgress) => stemClient.run(req, onProgress),
       now: () => new Date(),
       ask: (opts) => promptInApp(root, opts),
       fixSpeakers: (lid, renames, at) => dispatcher.dispatch({ type: 'FIX_SPEAKERS', lid, renames, at }),

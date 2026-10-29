@@ -110,6 +110,7 @@ export function shouldPrecache(path: string): boolean {
   if (path === 'sw.js') return false; // SW 自身は SW が配らない
   if (path.startsWith(DUCKDB_PRECACHE_SKIP)) return false;
   if (path.startsWith(PDF_PRECACHE_SKIP)) return false;
+  if (ORT_WASM_PRECACHE_SKIP.test(path)) return false;
   return true;
 }
 
@@ -138,6 +139,15 @@ export const DUCKDB_PRECACHE_SKIP = 'duckdb/';
  * ⚠ 綴りの正本は `build/pdf-assets-plugin.ts` の `PDF_DIR`(`tests/adapter/sw-source.test.ts` が突合)。
  */
 export const PDF_PRECACHE_SKIP = 'pdf/lib/';
+
+/**
+ * 🔴 **音源分離の ONNX Runtime の wasm(約 14MB)は precache に載せない**(#674 / #949)。
+ *
+ * 「歌声と楽器に分ける」を押した人のワーカーが初めて取りに行く物で、全員が install で落とす理由が無い(DuckDB・pdf.js と同じ扱い)。
+ * hash 付きの `assets/ort-wasm-simd-threaded-<hash>.wasm`(`stem-worker.ts` の `?url` 取込)だけを外す ── 小さな glue(`.mjs`)は載る。
+ * 🔑 外しても初めて取れた後は、hash 付きの生成物として cache-first で控えられる(電波なしの 2 回目以降も動く)。
+ */
+export const ORT_WASM_PRECACHE_SKIP = /^assets\/ort-wasm[^/]*\.wasm$/;
 
 /** hash 付きの生成物(名前が変われば別 URL)。cache-first にしてよい。 */
 export const HASHED_ASSET = /-[A-Za-z0-9_-]{8}\.(?:js|mjs|cjs|wasm|css)$/;

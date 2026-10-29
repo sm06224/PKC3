@@ -54,3 +54,27 @@ export async function decodeToMono(blob: Blob, sampleRate: number, deps: AsrDeco
     await ctx.close().catch(() => undefined);
   }
 }
+
+/**
+ * 🔴 **任意の標本化率のステレオ PCM へ**(音源分離 #674 / #949 は 44.1kHz の左右)。⚠ 作り方は mono と同じ
+ * (コンテキストを目的の率で作ると `decodeAudioData` がその率へ再標本化する・作ったコンテキストは必ず閉じる)。
+ * 🔑 返す配列は**写し**(`AudioBuffer` の持ち物を譲らせない ── transfer で渡すので、バッファは呼び側のもの)。
+ *   モノラルの音は左を右に写す。3 本以上は先頭の 2 本(左右)だけを使う。
+ */
+export async function decodeToStereo(
+  blob: Blob,
+  sampleRate: number,
+  deps: AsrDecodeDeps = {},
+): Promise<{ readonly left: Float32Array; readonly right: Float32Array }> {
+  const ctx = (deps.create ?? ((): DecodeContext | null => createContext(sampleRate)))();
+  if (ctx === null) throw new Error('このブラウザは音を読み取る仕組みを持っていません');
+  try {
+    const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+    if (decoded.numberOfChannels < 1) return { left: new Float32Array(0), right: new Float32Array(0) };
+    const left = decoded.getChannelData(0).slice();
+    const right = decoded.numberOfChannels >= 2 ? decoded.getChannelData(1).slice() : left.slice();
+    return { left, right };
+  } finally {
+    await ctx.close().catch(() => undefined);
+  }
+}

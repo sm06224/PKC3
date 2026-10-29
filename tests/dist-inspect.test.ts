@@ -1070,3 +1070,35 @@ describe('🔴 PDF を PKC の画面で読む窓の一式(#275 段①)', () => {
     );
   });
 });
+
+describe('🔴 ONNX Runtime の glue が指す既定の wasm 名は、実行時に使われないので許す(#674 / #949)', () => {
+  const SW = 'assets/stem-worker-EEEEEEEE.js';
+  const GLUE = 'assets/ort-wasm-simd-threaded-FFFFFFFF.mjs';
+  const ORT_WASM = 'assets/ort-wasm-simd-threaded-GGGGGGGG.wasm';
+  const withOrt = (glueText: string): Input => {
+    const i = healthy();
+    // wasm は precache に載らない(`ORT_WASM_PRECACHE_SKIP`)── 一覧には glue とワーカーだけ
+    const listed = [...(JSON.parse(i.text.get(LIST) as string) as string[]), `./${SW}`, `./${GLUE}`];
+    i.files.push({ path: SW, bytes: 90_000 }, { path: GLUE, bytes: 24_000 }, { path: ORT_WASM, bytes: 14_000_000 });
+    i.text.set(LIST, JSON.stringify(listed));
+    i.text.set('sw.js', `const PRECACHE = ${JSON.stringify(listed)};\nself.addEventListener("fetch", () => {});`);
+    i.text.set(ENTRY, `${i.text.get(ENTRY)!}\nnew Worker(new URL(\`stem-worker-EEEEEEEE.js\`,import.meta.url));`);
+    i.text.set(SW, `const a=new URL("ort-wasm-simd-threaded-FFFFFFFF.mjs",import.meta.url);const b=new URL("ort-wasm-simd-threaded-GGGGGGGG.wasm",import.meta.url);`);
+    i.text.set(GLUE, glueText);
+    i.capKb = 20_000;
+    return i;
+  };
+
+  it('glue が既定の名前(hash 無し)を指していても通る。実体は wasm の hash 付き 1 本', () => {
+    expect(run(withOrt('new URL("ort-wasm-simd-threaded.wasm",import.meta.url)'))).toEqual([]);
+  });
+
+  it('対照群: 許すのはこの 1 組だけ ── 別の名前・別の参照元の参照切れは今までどおり鳴る', () => {
+    // 同じ glue が、別の名前の wasm を指す
+    expect(run(withOrt('new URL("ort-wasm-simd-threaded-ZZZZZZZZ.wasm",import.meta.url)')).join('\n')).toContain('参照されている生成物が dist に無い');
+    // 別の参照元(ワーカー本体)が既定の名前を指す
+    const i = withOrt('//');
+    i.text.set(SW, `${i.text.get(SW)!}new URL("ort-wasm-simd-threaded.wasm",import.meta.url);`);
+    expect(run(i).join('\n')).toContain('参照されている生成物が dist に無い');
+  });
+});
