@@ -725,6 +725,22 @@ export function buildShell(root: HTMLElement): ShellRegions {
   menuToday.setAttribute(HINT_COMMAND, '');
   menuToday.title = hintTitle(todayHint, '');
   menu.append(menuToday);
+  /**
+   * 🔴 **「今日」で作る種類を選ぶ**(#1640 項 1。推薦 B)。選んだ種類は端末に覚え、次からは「今日」だけでその種類になる。
+   * ⚠ 戻す道(ノート)も並べる ── 片道にしない。既に在る日のノートは種類を問わず開く。
+   */
+  for (const [kindName, label, hint] of [
+    ['textlog', '今日をログで開く', '今日の日付のログ(時刻つきで追記していく記録)を開きます。無ければログで作り、次からは「今日」もログで作ります'],
+    ['text', '今日をノートで開く', '今日の日付のノートを開きます。無ければノートで作り、次からは「今日」もノートで作ります'],
+  ] as const) {
+    const item = iconButton('open-today-as', label);
+    item.setAttribute('role', 'menuitem');
+    item.setAttribute('data-pkc-archetype', kindName);
+    item.setAttribute(HINT_BASE, hint);
+    item.setAttribute(HINT_COMMAND, '');
+    item.title = hintTitle(hint, '');
+    menu.append(item);
+  }
   menu.append(menuSeparator());
 
   const attach = iconButton('attach-file', '添付');

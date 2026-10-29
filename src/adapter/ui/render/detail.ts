@@ -11,6 +11,7 @@
  * innerHTML への流し込みは markdown-render が `html: false`(生 HTML 不通過)で
  * 生成した出力に限る(PKC2 と同じ安全前提)。
  */
+import { DAY_NAV_FIELD, paintDayNav } from './day-nav';
 import { renderMarkdown } from '@features/markdown/markdown-render';
 import { flipTaskInDraft } from '@features/markdown/body-rewrite';
 import {
@@ -566,6 +567,8 @@ export class DetailRenderer {
   private shownPanel: AppState['revisionPanel'] = null;
   /** 外部画像の確認の帯(2026-08-06)。⚠ 本文の器の**外**。 */
   private noticeSlot: HTMLElement | null = null;
+  /** 日付ノートの「‹ 前の日 / 次の日 ›」(#1640 項 2)。⚠ 本文の器の**外**。主の枠だけ。 */
+  private dayNavEl: HTMLElement | null = null;
   /**
    * 🔴 **フォルダの概要の器**(#1222)。⚠ 本文の器の**外**(`applyBlocks` の差分に消されない)。
    * 主の枠だけが持つ(留めた枠は `null` ── スタックのノートには出さない)。
@@ -1111,6 +1114,7 @@ export class DetailRenderer {
     this.barHeightWatch = null;
     this.panelSlot = null;
     this.noticeSlot = null;
+    this.dayNavEl = null;
     this.overviewSlot = null;
     this.overviewFp = null;
     this.bodyHost = null;
@@ -1671,7 +1675,10 @@ export class DetailRenderer {
       this.noticeSlot.setAttribute('data-pkc-field', this.field('detail-notice-slot'));
       this.bodyHost = adopted !== null ? adopted.host : document.createElement('div');
       if (adopted === null) this.bodyHost.setAttribute('data-pkc-field', this.field('detail-body-host'));
-      const head = [this.titleEl, this.readingTimeEl, this.barSlot, this.panelSlot, this.noticeSlot];
+      this.dayNavEl = document.createElement('div');
+      this.dayNavEl.setAttribute('data-pkc-field', DAY_NAV_FIELD);
+      this.dayNavEl.hidden = true;
+      const head = [this.titleEl, this.dayNavEl, this.readingTimeEl, this.barSlot, this.panelSlot, this.noticeSlot];
       // ⚠ 持ち越した器は動かさず、その手前へ差し込む
       if (adopted !== null) this.bodyHost.before(...head);
       else this.region.append(...head, this.bodyHost);
@@ -1729,6 +1736,8 @@ export class DetailRenderer {
     if (this.readingTimeEl) {
       paintReadingTime(this.readingTimeEl, body);
     }
+    // 🔴 日付ノートの前後へ飛ぶ(#1640 項 2)。留めた枠は別のノートを出すので持たない
+    if (this.dayNavEl !== null && this.pinnedLid === null) paintDayNav(this.dayNavEl, state.entryMetas, lid);
 
     if (body === null) {
       /**

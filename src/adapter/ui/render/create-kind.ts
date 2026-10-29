@@ -21,6 +21,12 @@
 
 const KEY = 'pkc3.create-kind';
 
+/**
+ * 「今日」で作る種類(ノート / ログ)を覚える鍵(#1640 項 1)。⚠ `create-kind` と同じ作法 ──
+ * container に入れず、設定の持ち出しにも乗せない(最後の操作の記録)。
+ */
+const TODAY_KEY = 'pkc3.today-kind';
+
 /** 覚える値の上限。⚠ archetype 名は短い ── 長い値は壊れた保存として捨てる。 */
 const MAX_CHARS = 200;
 
@@ -44,13 +50,14 @@ export class CreateKindStore {
       Storage,
       'getItem' | 'setItem' | 'removeItem'
     > | null = readStorage(),
+    private readonly key: string = KEY,
   ) {}
 
   /** ⚠ 壊れた値(空・長すぎ)は `null`。有効な archetype かは呼び側が見る。 */
   get(): string | null {
     try {
       if (this.storage === null || this.saveFailed) return this.fallback;
-      const raw = this.storage.getItem(KEY);
+      const raw = this.storage.getItem(this.key);
       if (raw === null || raw === '' || raw.length > MAX_CHARS) return null;
       return raw;
     } catch {
@@ -66,8 +73,8 @@ export class CreateKindStore {
         : null;
     this.saveFailed = false;
     try {
-      if (this.fallback === null) this.storage?.removeItem(KEY);
-      else this.storage?.setItem(KEY, this.fallback);
+      if (this.fallback === null) this.storage?.removeItem(this.key);
+      else this.storage?.setItem(this.key, this.fallback);
     } catch {
       // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
       this.saveFailed = true;
@@ -78,3 +85,6 @@ export class CreateKindStore {
 
 /** アプリ共有の 1 個。⚠ 読む側は必ずこれを引く。 */
 export const appCreateKind = new CreateKindStore();
+
+/** 「今日」で作る種類を覚える 1 個(`text` | `textlog`。それ以外は呼び側が `text` へ落とす)。 */
+export const appTodayKind = new CreateKindStore(readStorage(), TODAY_KEY);

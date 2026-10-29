@@ -42,6 +42,7 @@ import {
   topPlaceAt,
   type PlaceDrop,
 } from '@features/markdown/place-handles';
+import { editedElsewhereReason, elsewhereCheckNotNeeded, type EditLockPort } from '@adapter/state/edited-elsewhere';
 import { TRANSIENT_ATTR } from './apply-blocks';
 import { intAttr, rectOf } from './place-board';
 import { placeTargetOf } from './place-drag';
@@ -99,7 +100,12 @@ function handleOf(target: EventTarget | null): HTMLElement | null {
  * root へ 1 度だけ配線する(`installPlaceDrag` と同じ作法)。
  * @returns 外す関数。アプリ本体では外さない(同寿命)が、test は外せる必要がある。
  */
-export function installPlaceConnect(root: HTMLElement, dispatcher: Dispatcher): () => void {
+export function installPlaceConnect(
+  root: HTMLElement,
+  dispatcher: Dispatcher,
+  /** 🔴 別のタブの編集を確かめる口(台帳 #1852 Q1)。渡さなければ確かめない(`place-drag.ts` と同じ作法)。 */
+  locks?: EditLockPort,
+): () => void {
   const doc = root.ownerDocument;
   let hover: Hover | null = null;
   let layer: HTMLElement | null = null;
@@ -299,14 +305,27 @@ export function installPlaceConnect(root: HTMLElement, dispatcher: Dispatcher): 
     const from = placeTargetOf(d.block, dispatcher);
     const to = placeTargetOf(over.item, dispatcher);
     if (from === null || to === null || from.lid !== to.lid) return;
-    dispatcher.dispatch({
-      type: 'CONNECT_PLACE',
+    const action = {
+      type: 'CONNECT_PLACE' as const,
       lid: from.lid,
       line: from.line,
       toLine: to.line,
       // 🔑 掴んだ側は ● の位置(`right` / `right@1/4`)、離した側は**離した辺の中央**
       fromAnchor: anchorSpell(d.anchor),
       toAnchor: anchorSpell(anchorOf(nearestEdge(over.rect, p.x, p.y))),
+    };
+    /**
+     * 🔴 **別のタブが編集中のノートには線をつながない**(台帳 #1852 の Q1。付箋を動かす操作 `place-drag.ts` と同じ形)。
+     * ⚠ 確かめが要らない回(口が無い / このタブが自分で編集中)は**同期のまま**撃つ ── 離した直後の手応えを変えない。
+     * 仮の線は掴みを終えた時点で消えている(本文はまだ書いていない)ので、戻す物は無い。
+     */
+    if (locks === undefined || elsewhereCheckNotNeeded(dispatcher, locks, action.lid)) {
+      dispatcher.dispatch(action);
+      return;
+    }
+    void editedElsewhereReason(dispatcher, locks, action.lid).then((why) => {
+      if (why !== null) dispatcher.dispatch({ type: 'OP_FAILED', error: `${why}(線はつないでいません)` });
+      else dispatcher.dispatch(action);
     });
   };
 

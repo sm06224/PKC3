@@ -180,7 +180,7 @@ import {
 import { matchContact, visibleContacts, type ContactCard } from '@features/contact/contact-card';
 import { buildVcf, countUnwritableBirthdays, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isIcsFileName } from '@features/schedule/ics-import';
-import { isMarkdownFileName } from '@features/import/plain-markdown';
+import { isMarkdownFileName, isPlainTextFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, BAR_TILE_ATTR, setActionIcon } from '@adapter/ui/render/icons';
 import { OVERFLOW_ATTR } from '@adapter/ui/render/bar-overflow';
 import { setContainerRepairToggle } from '@adapter/ui/render/commands';
@@ -495,7 +495,7 @@ import {
 } from '@features/structure/structure-plan';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
 // 🔴 ▼ で選んだ「作る種類」を端末側に覚える(#1045)
-import { appCreateKind } from '@adapter/ui/render/create-kind';
+import { appCreateKind, appTodayKind } from '@adapter/ui/render/create-kind';
 import { BODY_HOST_SELECTOR, PAINTED_ATTR } from '@adapter/ui/render/detail';
 import { canNoteFind, closeNoteFind, isNoteFindOpen, openNoteFind } from '@adapter/ui/render/note-find';
 import { openView } from '@adapter/ui/render/open-view';
@@ -3382,6 +3382,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    *   (機械検査は `tests/repo-hygiene.test.ts`)。
    */
   'open-today',
+  // 🔴 「今日」で作る種類を選んで開くのも、無い日は 1 件作る(#1640 項 1)
+  'open-today-as',
   /**
    * 🔴 **テンプレートから作るのも、ノートを 1 件作る**(#1645)── `open-today` と同じ理由で載せる。
    */
@@ -8705,6 +8707,57 @@ function refreshLab(
   syncTextLabButtons(pane, dispatcher.getState());
 }
 
+/** 「今日」の本体(`open-today` / `open-today-as` の共通の 1 本)。`archetype` は無い日に作る種類。 */
+function openToday(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  root: HTMLElement,
+  archetype: 'text' | 'textlog',
+): void {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') return;
+    if (st.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    const title = todayNoteTitle(new Date());
+    const found = findTodayNote(st.entryMetas.values(), title);
+    /**
+     * 🔴 **「今日」を押したあとのカーソル**(#1087 流れ 29)。
+     * - 既に在る → 選んで、本文の下の**追記欄**へ(畳んでいれば一時的に開く ── `append-at-heading` と同じ道)
+     * - まだ無い → 作って、**本文**へ(題名は日付のまま。他の作り方は今までどおり題名へ)
+     * ⚠ 叶えるのは描く側(`append-box.ts` / `detail.ts`)── 本文の到着や編集欄の組み終えを待つため。
+     */
+    if (found) {
+      requestAppendFocus(found.lid);
+      revealAppendPane(root);
+      dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: found.lid });
+      /**
+       * ⚠ 既に今日のノートを開いているとき、`SELECT_ENTRY` は状態を変えない ── 描き直しが来ず、
+       *   描く側(`append-box.ts`)が頼みを引き取る機会が無い。その場合だけここで叶える
+       *   (描き直しが来た回は、描く側が引き取り済みなので `takeAppendFocus` は偽になり二重に当てない)。
+       */
+      const now = dispatcher.getState();
+      if (
+        now.selectedLid === found.lid &&
+        appendModeOf(now).kind === 'ready' &&
+        takeAppendFocus(found.lid) &&
+        !isTouchOnly()
+      )
+        root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')?.focus();
+      return;
+    }
+    const lid = generateLid();
+    requestBodyFocus(lid);
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype,
+      lid,
+      title,
+      parentLid: null,
+      relationId: generateLid(),
+    });
+    // ⚠ `create-entry` と同じ ── 作成 → 即編集の編集権を取る
+    if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
+}
+
 const ACTIONS: Record<string, ActionHandler> = {
   /**
    * 🔴 **本文のリンクで別のノートへ飛ぶ**(2026-08-08。user 裁定「任せます」)。
@@ -9888,48 +9941,35 @@ const ACTIONS: Record<string, ActionHandler> = {
     );
   },
   'open-today': (dispatcher, _target, services, root) => {
+    openToday(dispatcher, services, root, appTodayKind.get() === 'textlog' ? 'textlog' : 'text');
+  },
+  /**
+   * 🔴 **日付ノートの上の「‹ 前の日 / 次の日 ›」**(#1640 項 2)。行き先は「操作を探す」の
+   * 「前の日のノートを開く」と同じ `adjacentDateNote`(ノートがある日だけ飛ぶ。作らない)。
+   * ⚠ 編集中・読み込み中は断る(`blockedActionNote`。ボタンは読む面にしか無いが、押し間違いの二重の門)。
+   */
+  'open-adjacent-day': (dispatcher, target) => {
     const st = dispatcher.getState();
-    if (st.phase !== 'ready') return;
-    if (st.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
-    const title = todayNoteTitle(new Date());
-    const found = findTodayNote(st.entryMetas.values(), title);
-    /**
-     * 🔴 **「今日」を押したあとのカーソル**(#1087 流れ 29)。
-     * - 既に在る → 選んで、本文の下の**追記欄**へ(畳んでいれば一時的に開く ── `append-at-heading` と同じ道)
-     * - まだ無い → 作って、**本文**へ(題名は日付のまま。他の作り方は今までどおり題名へ)
-     * ⚠ 叶えるのは描く側(`append-box.ts` / `detail.ts`)── 本文の到着や編集欄の組み終えを待つため。
-     */
-    if (found) {
-      requestAppendFocus(found.lid);
-      revealAppendPane(root);
-      dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: found.lid });
-      /**
-       * ⚠ 既に今日のノートを開いているとき、`SELECT_ENTRY` は状態を変えない ── 描き直しが来ず、
-       *   描く側(`append-box.ts`)が頼みを引き取る機会が無い。その場合だけここで叶える
-       *   (描き直しが来た回は、描く側が引き取り済みなので `takeAppendFocus` は偽になり二重に当てない)。
-       */
-      const now = dispatcher.getState();
-      if (
-        now.selectedLid === found.lid &&
-        appendModeOf(now).kind === 'ready' &&
-        takeAppendFocus(found.lid) &&
-        !isTouchOnly()
-      )
-        root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')?.focus();
-      return;
-    }
-    const lid = generateLid();
-    requestBodyFocus(lid);
-    dispatcher.dispatch({
-      type: 'CREATE_ENTRY',
-      archetype: 'text',
-      lid,
-      title,
-      parentLid: null,
-      relationId: generateLid(),
-    });
-    // ⚠ `create-entry` と同じ ── 作成 → 即編集の編集権を取る
-    if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
+    if (st.phase !== 'ready' || st.selectedLid === null) return;
+    const cur = st.entryMetas.get(st.selectedLid);
+    if (cur === undefined || !isDateTitle(cur.title)) return;
+    const dir = target.getAttribute('data-pkc-dir') === 'prev' ? 'prev' : 'next';
+    const to = adjacentDateNote(st.entryMetas.values(), cur.title, dir);
+    if (to === null) return;
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: to.lid });
+  },
+  /**
+   * 🔴 **「今日」で作る種類を選んで開く**(#1640 項 1。推薦 B =「▼ に『今日をログで開く』+ 選んだ種類を覚える」)。
+   * ⚠ 直す前は「今日」が常にノートを作り、時刻つきの記録(ログ)を始めるには自分で作るしか無かった。
+   * 🔑 選んだ種類は端末に覚え、次からは「今日」(`open-today`)だけでその種類で作る
+   *   (戻す道は「今日をノートで開く」── 片道にしない)。⚠ 既に在る日のノートは種類を問わず開く(作り直さない)。
+   */
+  'open-today-as': (dispatcher, target, services, root) => {
+    const kind = target.getAttribute('data-pkc-archetype') === 'textlog' ? 'textlog' : 'text';
+    appTodayKind.set(kind);
+    root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]')?.setAttribute('hidden', '');
+    root.querySelector('[data-pkc-field="create-pick"]')?.setAttribute('aria-expanded', 'false');
+    openToday(dispatcher, services, root, kind);
   },
   /**
    * 🔴 **文字起こしの行頭の時刻を押すと、その位置から再生する**(#1232 段 b)。⚠ 本文は書かない(門に載せない)。
@@ -20352,6 +20392,9 @@ export function bindActions(
       files.every(
         (f) =>
           isMarkdownFileName(f.name) ||
+          // 🔴 `.txt` も(台帳 #1852 の F1・依頼 171)── 「取り込む」で選べる `.txt` を窓へ落としたら添付になり、
+          //    「落として入る物」と「選んで入る物」が食い違っていた。添付にしたい人は「添付」ボタンから選ぶ(片道にしない)
+          isPlainTextFileName(f.name) ||
           isVcfFileName(f.name) ||
           isIcsFileName(f.name) ||
           // 🔴 バックアップ(`.pkc3-full.zip` など)も(#1632)── 添付にすると「元に戻したつもりが zip が増えただけ」

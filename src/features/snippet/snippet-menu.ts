@@ -100,21 +100,39 @@ export function snippetMenu(items: readonly SnippetItem[]): readonly SnippetChoi
  * ⚠ 「取れていません」と「まだ 1 件も作っていません」を**混ぜない** ── 混ぜると、
  *   worker が転んだ日に「作れば直る」と読ませてしまう。
  */
+/**
+ * 🔴 **出ていないテンプレートを名前と理由で言う**(#1645 項 5)── 件数だけだと「どれが出ていないのか」が分からない。
+ * ⚠ 名前を運べなかった(古い版の答え)ときは `null`(呼び側が従来の件数の字に落とす)。
+ */
+function skippedNote(scan: SnippetScan): string | null {
+  const named = scan.skipped ?? [];
+  if (named.length === 0) return null;
+  const lost = scan.total - scan.items.length;
+  const why = (r: 'empty' | 'long'): string =>
+    r === 'long' ? `${String(SNIPPET_LIMITS.bodyChars)} 字を超えています` : '中身が空です';
+  const list = named.map((n) => `「${n.title}」(${why(n.reason)})`).join('、');
+  const rest = lost - named.length > 0 ? ` ほか ${String(lost - named.length)} 件` : '';
+  return `${list}${rest} は、この一覧に出していません。`;
+}
+
 export function snippetMenuNote(scan: SnippetScan | null): string {
   // ⚠ `null` は「読み込み前」と「読めなかった」の両方 ── どちらとも取れる字にする
   if (scan === null) return '自分のテンプレートは取れていません。組み込みのテンプレートは使えます。';
   if (scan.truncated)
     return `テンプレートが多いので、${SNIPPET_LIMITS.notes} 件までにしています。`;
   if (scan.items.length === 0 && scan.total > 0)
-    return 'テンプレートのノートはありますが、中身が空か長すぎるので出せません。';
+    return skippedNote(scan) ?? 'テンプレートのノートはありますが、中身が空か長すぎるので出せません。';
   if (scan.items.length === 0)
     return 'まだ自分のテンプレートがありません。左のペインの上の ▼ から「テンプレート」を選ぶと作れます。';
   /**
    * 🔴 **一部だけ載らなかったときも黙らない**(#1087 の見直し 2026-10-13)── 直す前は 0 件のときだけ言っていたので、
    *   本文を書く前のテンプレートが 1 件だけ一覧から消え、「保存したのに無い」に見えた。
    */
-  if (scan.total > scan.items.length)
+  if (scan.total > scan.items.length) {
+    const named = skippedNote(scan);
+    if (named !== null) return named;
     return `${String(scan.total - scan.items.length)} 件のテンプレートは、中身が空か長すぎるので、この一覧に出していません。`;
+  }
   // 🔴 短縮語が注釈(`#`)と区別できず読めなかったテンプレート ── 黙って「短縮語なし」にしない
   if (scan.abbrUnread !== undefined && scan.abbrUnread > 0)
     return `短縮語を読めなかったテンプレートが ${String(scan.abbrUnread)} 件あります(# で始まる短縮語は "" で囲んでください)。`;

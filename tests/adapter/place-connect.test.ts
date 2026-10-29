@@ -21,7 +21,7 @@
  * `applyBodyRewrite`(store-effects が書く当の関数)に通して**本文の字**で見る。
  */
 import { readFileSync } from 'node:fs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DomainEvent } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -67,7 +67,7 @@ afterEach(() => {
   document.body.textContent = '';
 });
 
-function rig(body = TWO) {
+function rig(body = TWO, locks?: Parameters<typeof installPlaceConnect>[2]) {
   document.body.textContent = '';
   const root = document.createElement('div');
   root.setAttribute('data-pkc-slot', 'root');
@@ -87,7 +87,7 @@ function rig(body = TWO) {
   d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
   d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body });
   asks.length = 0;
-  offs.push(installPlaceConnect(root, d));
+  offs.push(installPlaceConnect(root, d, locks));
   // ⚠ 行番号で引かない(frontmatter を足した台でも同じ 2 枚が取れるように、並びで引く)
   const [left, right] = [...host.querySelectorAll<HTMLElement>('.pkc-place')] as [HTMLElement, HTMLElement];
   expect(left, '前提が崩れている: 左の付箋が描かれていない').not.toBeNull();
@@ -579,7 +579,7 @@ describe('掴んでつなぐ印と線の CSS(#530 段③d)', () => {
 describe('配線(main.ts)', () => {
   it('🔴 起動時に掴んでつなぐ配線が呼ばれている', () => {
     const src = stripComments(readFileSync('src/main.ts', 'utf-8')).replace(/\/\/.*$/gm, '');
-    expect(src, '配線が呼ばれていない').toMatch(/installPlaceConnect\(root, dispatcher\)/);
+    expect(src, '配線が呼ばれていない').toMatch(/installPlaceConnect\(root, dispatcher, editLockPort\)/);
     expect(src, '取り込みが無い').toMatch(/from '@adapter\/ui\/render\/place-connect'/);
   });
 });
@@ -630,5 +630,41 @@ describe('回した付箋(rotate=90)につなぐ', () => {
     move(350, 75);
     up(350, 75); // 回す前の四角の外・回した四角の内側(画面の下側 = 付箋の右辺)
     expect(hit.asks[0]).toMatchObject({ rewrite: { kind: 'place-connect', fromAnchor: 'right', toAnchor: 'right' } });
+  });
+});
+
+describe('別のタブが編集中のノートには線をつながない(台帳 #1852 の Q1。付箋を動かす操作と同じ)', () => {
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0));
+  };
+  function drawLine(r: ReturnType<typeof rig>): void {
+    hover(r.left, 96, 30);
+    down(dot(r.host), 100, 30);
+    move(310, 32);
+    up(310, 32);
+  }
+
+  it('🔴 別のタブが握っていたら、書かずに理由を出す', async () => {
+    const lock = { acquireEditLock: vi.fn(async () => 'denied' as const), releaseEditLock: vi.fn() };
+    const r = rig(TWO, lock);
+    drawLine(r);
+    await flush();
+    expect(lock.acquireEditLock, '問い合わせていない').toHaveBeenCalledWith('n1');
+    expect(r.asks, '断られたのに書換を頼んだ').toHaveLength(0);
+    expect(r.d.getState().error ?? '', '理由が出ていない').toContain('線はつないでいません');
+  });
+
+  it('対照群: 錠が取れたら、これまでどおり線を書く', async () => {
+    const lock = { acquireEditLock: vi.fn(async () => 'granted' as const), releaseEditLock: vi.fn() };
+    const r = rig(TWO, lock);
+    drawLine(r);
+    await flush();
+    expect(r.asks).toHaveLength(1);
+  });
+
+  it('対照群: 錠の口を渡さない配線は同期のまま撃つ(離した直後の手応えを変えない)', () => {
+    const r = rig();
+    drawLine(r);
+    expect(r.asks).toHaveLength(1);
   });
 });

@@ -83,6 +83,34 @@ export interface SnippetScan {
   readonly truncated: boolean;
   /** 短縮語を読めなかったテンプレートの数(0 のとき付けない)。⚠ 黙って短縮語なしにしない。 */
   readonly abbrUnread?: number;
+  /**
+   * 🔴 **載せられなかった雛形の名前と理由**(#1645 項 5。上限は `SNIPPET_SKIPPED_NAMES` 件。0 のとき付けない)。
+   * ⚠ 件数だけだと「どれが出ていないのか」が分からない ── 名前と理由(長すぎる / 中身が空)を運ぶ。
+   */
+  readonly skipped?: readonly SnippetSkipped[];
+}
+
+/** 載せられなかった理由。 */
+export type SnippetSkipReason = 'empty' | 'long';
+
+/** 載せられなかった雛形 1 件。 */
+export interface SnippetSkipped {
+  readonly title: string;
+  readonly reason: SnippetSkipReason;
+}
+
+/** 名前を運ぶ件数の上限(一覧の注記に載せる数。残りは「ほか N 件」)。 */
+export const SNIPPET_SKIPPED_NAMES = 5;
+
+/**
+ * 本文が雛形として載らない理由(載せられるなら `null`)。⚠ `snippetItemOf` が使う**同じ 1 本**
+ * (走査と注記で規則が食い違わない)。
+ */
+export function snippetSkipReason(body: string): SnippetSkipReason | null {
+  const text = parseFrontmatter(body).body.replace(/^\n+/, '');
+  if (text === '') return 'empty';
+  if (text.length > SNIPPET_LIMITS.bodyChars) return 'long';
+  return null;
 }
 
 /**
@@ -108,8 +136,7 @@ export function snippetItemOf(lid: string, title: string, body: string): Snippet
   }
   // 🔑 挿すのは**frontmatter を除いた残り** ── `abbr:` まで本文へ挿さない
   const text = parsed.body.replace(/^\n+/, '');
-  if (text === '') return null;
-  if (text.length > SNIPPET_LIMITS.bodyChars) return null;
+  if (snippetSkipReason(body) !== null) return null; // 🔑 載せない理由の規則は 1 本
   return {
     lid,
     title,

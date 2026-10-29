@@ -138,6 +138,8 @@ const BLOCKABLE_FIELDS: readonly string[] = [
    */
   '[data-pkc-region="create-menu"] [data-pkc-action="pick-create-kind"]',
   '[data-pkc-region="create-menu"] [data-pkc-action="open-today"]',
+  // 🔴 「今日」を種類つきで開く(#1640 項 1)── `open-today` と同じ受け手を通る
+  '[data-pkc-region="create-menu"] [data-pkc-action="open-today-as"]',
   // 🔴 テンプレートから作る(#1645。`CREATE_ENTRY` を phase が捨てるので、種類・今日と同じに薄くする)
   '[data-pkc-region="create-menu"] [data-pkc-action="create-from-template"]',
 ];

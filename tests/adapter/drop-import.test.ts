@@ -125,6 +125,21 @@ describe('落とした file の行き先(#535 ①)', () => {
     expect(calls.attach).toHaveLength(0);
   });
 
+  it('🔴 `.txt` も同じ(台帳 #1852 F1・依頼 171。「取り込む」で選べる物は、落としても取り込む)', () => {
+    const { outside, calls } = setup();
+    outside.dispatchEvent(dropEvent([file('メモ.txt', 'text/plain')]));
+    expect(calls.imported, '取込へ行っていない').toHaveLength(1);
+    expect(calls.imported[0]?.[0]?.name).toBe('メモ.txt');
+    expect(calls.attach, 'まだ添付へ回している').toHaveLength(0);
+  });
+
+  it('🔴 `.txt` が画像と混ざっていたら、これまでどおり添付', () => {
+    const { outside, calls } = setup();
+    outside.dispatchEvent(dropEvent([file('メモ.txt'), file('photo.png', 'image/png')]));
+    expect(calls.attach).toHaveLength(1);
+    expect(calls.imported).toHaveLength(0);
+  });
+
   it.each([
     'メモ.pkc3-full.zip',
     'メモ.pkc3-part.zip',

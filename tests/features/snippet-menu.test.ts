@@ -14,7 +14,7 @@ import {
   snippetMenu,
   snippetMenuNote,
 } from '../../src/features/snippet/snippet-menu';
-import { SNIPPET_LIMITS, type SnippetItem } from '../../src/features/snippet/snippet-table';
+import { SNIPPET_LIMITS, type SnippetItem, type SnippetScan } from '../../src/features/snippet/snippet-table';
 
 const item = (lid: string, title: string, abbr: string): SnippetItem => ({
   lid,
@@ -23,8 +23,9 @@ const item = (lid: string, title: string, abbr: string): SnippetItem => ({
   body: '本文',
 });
 
-const scan = (items: readonly SnippetItem[], over: Partial<{ total: number; truncated: boolean }> = {}) => ({
+const scan = (items: readonly SnippetItem[], over: Partial<{ total: number; truncated: boolean; skipped: SnippetScan['skipped'] }> = {}) => ({
   items,
+  ...(over.skipped ? { skipped: over.skipped } : {}),
   total: over.total ?? items.length,
   truncated: over.truncated ?? false,
 });
@@ -106,6 +107,27 @@ describe('一覧の上に出す 1 行 (#196 / B-2 段②-b)', () => {
   it('🔴 一部だけ載らなかったときも、その件数を言う(保存したのに無い、に見せない)', () => {
     const note = snippetMenuNote(scan([item('s1', '住所', 'addr')], { total: 3 }));
     expect(note).toBe('2 件のテンプレートは、中身が空か長すぎるので、この一覧に出していません。');
+  });
+
+  /** 🔴 #1645 項 5: 件数だけでなく、どのテンプレートがなぜ出ないかを名前と理由で言う。 */
+  it('🔴 出ないテンプレートを名前と理由(長すぎる / 中身が空)で言う', () => {
+    const note = snippetMenuNote(
+      scan([item('s1', '住所', 'addr')], {
+        total: 4,
+        skipped: [
+          { title: '長い文書', reason: 'long' },
+          { title: '書きかけ', reason: 'empty' },
+        ],
+      }),
+    );
+    expect(note).toContain('「長い文書」(4000 字を超えています)');
+    expect(note).toContain('「書きかけ」(中身が空です)');
+    expect(note).toContain('ほか 1 件');
+  });
+
+  it('全部出ないときも名前で言う', () => {
+    const note = snippetMenuNote(scan([], { total: 1, skipped: [{ title: '書きかけ', reason: 'empty' }] }));
+    expect(note).toBe('「書きかけ」(中身が空です) は、この一覧に出していません。');
   });
 
   it('普通に 1 件以上あるときは何も出さない(邪魔しない)', () => {

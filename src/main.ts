@@ -1572,7 +1572,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   /** 🔴 板の塊を掴んで動かす配線(#283 P4-b)。⚠ 外さない(アプリと同寿命)。 */
   installPlaceDrag(root, dispatcher, editLockPort);
   /** 🔴 付箋に乗せて ● を掴み、別の付箋へ引いて繋ぐ配線(#530 段③d)。⚠ 外さない(アプリと同寿命)。 */
-  installPlaceConnect(root, dispatcher);
+  installPlaceConnect(root, dispatcher, editLockPort);
   /**
    * 🔴 **予定の札を、指でも掴んで動かせるようにする配線**(#855 決1)。
    * ⚠ マウスは既存の HTML5 drag(`binder.ts`)のまま ── ここは指・ペンだけを

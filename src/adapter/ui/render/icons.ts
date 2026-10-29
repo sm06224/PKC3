@@ -155,6 +155,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
    *   門は `tests/adapter/icons.test.ts`「第 3 引数の鍵は登記に在る」。
    */
   'open-today': 'calendar',
+  'open-today-as': 'calendar',
   'create-from-template': 'snippet',
   'start-timer': 'timer',
   'start-audio-capture': 'mic',
