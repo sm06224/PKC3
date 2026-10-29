@@ -55,6 +55,7 @@ function cancelOnNth(n: number): CancelToken {
   return {
     cancelled: false,
     cancel() {},
+    onCancel() {},
     throwIfCancelled() {
       calls += 1;
       if (calls >= n) throw new OperationCancelled();
@@ -63,7 +64,8 @@ function cancelOnNth(n: number): CancelToken {
 }
 
 /** 区切りでは投げないが、書く直前には立っている印(書く前がやめられる最後の区切り)。 */
-const cancelledBeforeWrite: CancelToken = { cancelled: true, cancel() {}, throwIfCancelled() {} };
+const cancelledBeforeWrite: CancelToken = { cancelled: true, cancel() {},
+    onCancel() {}, throwIfCancelled() {} };
 
 const md = (name: string): File => new File(['# 見出し\n本文'], name, { type: 'text/markdown' });
 const vcf = (name: string): File =>
@@ -255,6 +257,7 @@ describe('PKC3 入り HTML の書き出しも、途中でやめられる', () =>
     const t: CancelToken = {
       cancelled: false,
       cancel() {},
+    onCancel() {},
       throwIfCancelled() {
         n += 1;
         // settle 後・image 前・image 後・template 後(= 4 回)を通し、最初の添付の手前(5 回目)でやめる
@@ -337,6 +340,7 @@ describe('書く直前の確認・スライドの区切り(読み取りの後で
     const token: CancelToken = {
       cancelled: false,
       cancel() {},
+    onCancel() {},
       throwIfCancelled() {
         calls += 1;
         if (calls >= 2) throw new OperationCancelled(); // 1 回目 = ファイルの頭、2 回目 = スライドのループ
@@ -362,6 +366,7 @@ describe('書く直前の確認・スライドの区切り(読み取りの後で
         return flag;
       },
       cancel() {},
+    onCancel() {},
       throwIfCancelled() {},
     };
     const got = await run(d, deps, await files(), token);
