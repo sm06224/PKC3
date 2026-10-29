@@ -135,6 +135,36 @@ describe('配色トークン', () => {
   });
 
   /**
+   * 🔴 **履歴の差分の「字単位の強調」**(`mark[data-pkc-diff-char]`)。字は本文の色(`--fg`)、
+   * 地は行の色(`--ok` / `--danger`)の 24% を表の地に重ねた物(`color-mix(in oklab, <色> 30%, transparent)` = 透明度 0.3 の同じ色 → sRGB の混ぜ合わせ)。
+   * ⚠ 字を行の色(`inherit`)のままにすると、同じ色の下地に載って全テーマで 3:1 前後まで落ちた ── 字を `--fg` にして 4.5:1 を課す(大きな字ではない)。
+   * ⚠ 字の色と割合は app.css から読む(`--fg` / 24 を写さない)── 変えると、ここが鳴る。
+   */
+  it.each(THEMES.map((t) => t.id))('🔴 %s の差分の字単位の強調(足した / 消した)が読める(4.5:1)', (theme) => {
+    const tok = tokensOf(theme);
+    const app = readFileSync(new URL('../../src/styles/app.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const [kind, token] of [['add', '--ok'], ['del', '--danger']] as const) {
+      const rule = app.match(new RegExp(`mark\\[data-pkc-diff-char='${kind}'\\]\\s*\\{[^}]*color-mix\\(in oklab,\\s*var\\(${token}[^)]*\\)\\s*(\\d+)%`));
+      expect(rule, `${kind}: 強調の地の規則が読めない`).not.toBeNull();
+      const a = Number(rule![1]) / 100;
+      expect(a).toBeGreaterThan(0);
+      const base = app.match(/mark\[data-pkc-diff-char\]\s*\{[^}]*?color:\s*var\((--[\w-]+)\)/);
+      expect(base, '強調の字の色(var(--…))が読めない').not.toBeNull();
+      const textTok = base![1]!;
+      const fg = rgb(tok[token]!);
+      for (const bgName of ['--surface', '--surface-2']) {
+        const bg = rgb(tok[bgName]!);
+        const mixed = '#' + fg.map((v, i) => Math.round(v * a + bg[i]! * (1 - a)).toString(16).padStart(2, '0')).join('');
+        const ratio = contrast(tok[textTok]!, mixed);
+        expect(
+          ratio,
+          `${theme}: 差分の強調(${kind})の字 ${textTok}(${tok[textTok]!}) on ${bgName} への ${token} ${a * 100}% 混ぜ(${mixed}) = ${ratio.toFixed(2)}:1(要 4.5:1)`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  /**
    * 🔴 **予定の左の縦線の色**(#855 20-A)── `--note-1` 〜 `--note-8` が、全テーマで地に対して見えること。
    * 明るい地と暗い地で同じ色は使えない(両立する色が無い)ので、テーマごとに明暗の組を持つ。
    * 縦線は UI 部品なので 3:1(WCAG の非文字)。

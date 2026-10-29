@@ -2065,10 +2065,10 @@ export function pickArchiveInApp(
     sync();
     const onListKey = (ev: KeyboardEvent): void => {
       if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
-        if (!f.ok.disabled) {
-          ev.preventDefault();
-          f.ok.click();
-        }
+        // 🔴 **選んでいなくても必ず止める** ── 止めないと、焦点の行(ボタン)で Enter の既定の click が走り、
+        //   「取り出す」つもりの Ctrl+Enter で行の選択が入れ替わる(0 件のとき 1 件選んでしまう)
+        ev.preventDefault();
+        if (!f.ok.disabled) f.ok.click();
         return;
       }
       const at = buttons.findIndex((b) => b === f.dialog.ownerDocument.activeElement);

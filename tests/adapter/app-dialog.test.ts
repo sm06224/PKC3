@@ -653,6 +653,23 @@ describe('書庫の選び方(#818)', () => {
     expect(await answered).toEqual(['a.txt']);
   });
 
+  it('🔴 何も選んでいないときの Ctrl+Enter は、既定の動き(焦点の行の click = 選択の入れ替え)を止める', async () => {
+    const answered = pickArchiveInApp(document.body, ROWS, count);
+    const btns = [...document.querySelectorAll<HTMLButtonElement>('[data-pkc-archive-index]')];
+    btns[0]!.focus();
+    const before = btns.map((b) => b.getAttribute('aria-pressed'));
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true });
+    btns[0]!.dispatchEvent(ev);
+    expect(ev.defaultPrevented, '止めていない(ブラウザが行を押したことにして選択を入れ替える)').toBe(true);
+    expect(btns.map((b) => b.getAttribute('aria-pressed'))).toEqual(before);
+    // 対照群: 修飾キーの無い Enter は止めない(行を押す = 選ぶ、の既定の動きを殺さない)
+    const plain = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    btns[0]!.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(false);
+    cancelBtn().click(); // 器は使い回す ── 開いたままにしない
+    expect(await answered).toBeNull();
+  });
+
   it('🔴 ↑ と Home で戻れる / 案内と「取り出す」の title に Ctrl+Enter が書いてある', async () => {
     const answered = pickArchiveInApp(document.body, ROWS, count);
     const btns = (): HTMLButtonElement[] => [

@@ -8849,16 +8849,18 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   font-weight: 600;
 }
 /* 🔑 **字単位の強調**は、行の色(`--ok` / `--danger`)を**濃い下地**にして読ませる ── 新しい色は作らない。
- * ⚠ 色は補助である(行の頭の + / − が字で置いてある)。 */
+ * ⚠ 色は補助である(行の頭の + / − が字で置いてある)。
+ * 🔴 **字は行の色を引き継がず本文の色(`--fg`)にする** ── 行の色の字を、その同じ色の 3 割の下地に載せると
+ *   全テーマで対比が 3:1 前後まで落ちた(`theme-tokens.test.ts` の「字単位の強調」が 4.5:1 を課す)。 */
 mark[data-pkc-diff-char] {
-  color: inherit;
+  color: var(--fg);
   border-radius: 2px;
 }
 mark[data-pkc-diff-char='add'] {
-  background: color-mix(in oklab, var(--ok, #1a7f37) 30%, transparent);
+  background: color-mix(in oklab, var(--ok, #1a7f37) 24%, transparent);
 }
 mark[data-pkc-diff-char='del'] {
-  background: color-mix(in oklab, var(--danger, #a40e26) 30%, transparent);
+  background: color-mix(in oklab, var(--danger, #a40e26) 24%, transparent);
 }
 
 /* 🔑 **長い題名を畳む規則は 1 か所にまとめる**(P8 段㉒)。

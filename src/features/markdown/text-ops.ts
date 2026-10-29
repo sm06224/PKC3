@@ -940,7 +940,7 @@ export function insertRuby(sel: TextSelection): TextSelection {
  *
  * ⚠ 描き手が色を付ける 8 種(`markdown-render.ts` の `SECTION_KNOWN_ROLES`)と同じ。
  *   マニュアル「注意書きのブロック」と順序も字も揃える。
- * 🔑 入口は 3 つ ── 書式バーの「注意書きを入れる」(種類を選ぶ)/ 操作を探す(種類ごとの名前)/
+ * 🔑 入口は 3 つ ── 書式バーの「注意書き」(種類を選ぶ)/ 操作を探す(種類ごとの名前)/
  *   設定のショートカット画面で付ける鍵。**一覧はここ 1 つ**(`FORMAT_OPS`・`KEY_COMMANDS` もここから作る)。
  */
 export const CALLOUT_CHOICES = [
@@ -1069,7 +1069,7 @@ export const FORMAT_OPS: readonly {
   { op: 'emdot', label: '圏点', hint: '選んだ字に圏点を打ちます', onBar: false },
   { op: 'strike', label: '打ち消し', hint: '選んだ範囲に打ち消し線を引きます', onBar: false },
   /**
-   * 🔴 **注意書きのブロック 8 種**(#425)。帯には出さない(帯の「注意書きを入れる」が種類を先に聞く)。
+   * 🔴 **注意書きのブロック 8 種**(#425)。帯には出さない(帯の「注意書き」が種類を先に聞く)。
    * 選んでいれば選んだ範囲を、選んでいなければ空のブロックを入れる(もう一度押すと外れる)。
    */
   ...CALLOUT_CHOICES.map((c) => ({
