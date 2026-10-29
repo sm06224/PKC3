@@ -8,13 +8,14 @@
  * ①rm: 実の確認ダイアログ(ok / cancel)・件数・「元に戻す」・別のタブの編集 ②cp: 本文ごと複製 ③append: 書込の錠が立ち、終わる
  * ④tag: 付ける / 外すが効果に届く ⑤sql / find -b: 自前の口で、SQL 画面・探す画面の状態を借りない ⑥編集中は書く命令が確認の前に断られ、読む命令は動く
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { KEY_COMMANDS } from '../../src/features/keymap';
 import { makeShellOps, type BinderServices } from '../../src/adapter/ui/actions/binder';
-import { runShellLine } from '../../src/adapter/ui/actions/shell-run';
+import type { ShellEffect } from '../../src/features/shell/types';
+import { EFFECT_WRITES, runShellLine } from '../../src/adapter/ui/actions/shell-run';
 import { ShellSession } from '../../src/adapter/ui/render/cmdshell';
 import { ShellHistoryStore } from '../../src/adapter/ui/render/shell-history-store';
 import { setSqlEmbedRunner } from '../../src/adapter/ui/render/sql-embed-hydrate';
@@ -285,6 +286,46 @@ describe('実物の命令の実行(makeShellOps)', () => {
     expect(ls.failed).toBe(false);
     expect(ls.table!.rows.length).toBeGreaterThan(0);
     expect((await c.run('find 設計'))!.failed).toBe(false);
+  });
+
+  it('🔴 blocked の網羅(A): 確認つきの cp は編集中・保存失敗中・読み込み中に確認の前に断る。書く効果の分類は全部の種類に及ぶ', async () => {
+    const ops = makeShellOps({ dispatcher: c.d, services: c.services, root: c.root, surface: 'shell', where: 'pane' });
+    const writes = Object.entries(EFFECT_WRITES).filter(([, w]) => w).map(([t]) => t);
+    expect(writes.sort()).toEqual(['append', 'copy', 'create', 'move', 'plan', 'tag', 'trash']);
+    const sample = (type: string): ShellEffect => ({ type, lids: ['n3'], to: null, ops: [], title: 't', body: '', parent: null, lid: 'n3', text: 'x', tags: ['t'], mode: 'add', format: 'md', scope: null, sql: 'SELECT 1', query: 'q' }) as unknown as ShellEffect;
+    for (const phase of ['editing', 'error', 'initializing'] as const) {
+      const real = c.d.getState();
+      const spy = vi.spyOn(c.d, 'getState').mockReturnValue({ ...real, phase });
+      try {
+        for (const [type, w] of Object.entries(EFFECT_WRITES)) {
+          const why = ops.blocked([sample(type)]);
+          if (w) expect(why, `${phase}: ${type} が断られていない`).not.toBeNull();
+          else expect(why, `${phase}: 読むだけの ${type} まで断っている`).toBeNull();
+        }
+      } finally {
+        spy.mockRestore();
+      }
+    }
+    // 実際に cp * を(確認が要る形で)打つ: 編集中は確認の前に断る
+    c.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick();
+    c.d.dispatch({ type: 'START_EDIT' });
+    const b = (await c.run('cp * アーカイブ'))!;
+    expect(b.failed).toBe(true);
+    expect(openDialog(), '確認が先に出ている').toBeNull();
+    // 保存に失敗している間(error)・読み込み中(initializing)も、実行を始める前に断る
+    c.d.dispatch({ type: 'CANCEL_EDIT' });
+    for (const phase of ['error', 'initializing'] as const) {
+      const real = c.d.getState();
+      const spy = vi.spyOn(c.d, 'getState').mockReturnValue({ ...real, phase });
+      try {
+        const r = (await c.run('cp * アーカイブ'))!;
+        expect(r.failed, phase).toBe(true);
+        expect(openDialog(), `${phase}: 確認が先に出ている`).toBeNull();
+      } finally {
+        spy.mockRestore();
+      }
+    }
   });
 
   it('🔴 ops / do: 操作の一覧は KEY_COMMANDS(パレットと同じ表)から出る。別の一覧を持たない', async () => {

@@ -21,6 +21,32 @@ import { shellBlockText, type ShellBlock, type ShellSession } from '../render/cm
 /** 履歴を消したときの結果の文(`history -c` と「履歴を消す」ボタンで同じ字)。 */
 export const SHELL_HISTORY_CLEARED_TEXT = 'コマンドの履歴を消しました';
 
+/**
+ * 🔴 **書き込む効果の分類は、全部の種類を数え上げた表**(`Record` ── 効果の種類を足したのに分類を忘れると型エラーになる)。
+ * 書く効果は、編集中・保存に失敗している間・読み込み中に、確認を出す前に断る(`ShellOps.blocked`)。
+ */
+export const EFFECT_WRITES: Readonly<Record<ShellEffect['type'], boolean>> = {
+  plan: true,
+  create: true,
+  append: true,
+  move: true,
+  copy: true,
+  trash: true,
+  tag: true,
+  export: false,
+  open: false,
+  enter: false,
+  select: false,
+  sql: false,
+  search: false,
+  operation: false,
+  operations: false,
+  history: false,
+  'history-clear': false,
+  clear: false,
+  'copy-result': false,
+};
+
 export interface OperationOutcome {
   /** `ran` = 実行した / `many` = 候補が複数 / `none` = 当てはまる操作がない / `blocked` = 当てはまるがいま押せない */
   readonly kind: 'ran' | 'many' | 'none' | 'blocked';

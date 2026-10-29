@@ -547,6 +547,17 @@ test('🔴 コマンドシェル: 打って Enter で結果が出て、移す・
   await expect(tabInput, '閉じたあと入力欄にフォーカスが戻らない').toBeFocused();
   await expect(selected, 'Esc でノートの選択が変わった').toHaveCount(1);
   expect(await selected.first().getAttribute('data-pkc-entry')).toBe(selectedLid);
+  // 🔴 B: 入力が残っている Esc は入力を空にし、空の Esc はフォーカスを外すだけ ── どちらもノートの選択を変えない
+  await page.keyboard.type('mv 資');
+  await page.keyboard.press('Escape');
+  await expect(tabInput, '一覧を閉じる Esc で入力が消えた').toHaveValue('mv 資');
+  await page.keyboard.press('Escape');
+  await expect(tabInput, '入力が残っている Esc で空にならない').toHaveValue('');
+  await expect(selected, '入力を空にする Esc でノートの選択が変わった').toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(tabInput, '空の Esc でフォーカスが外れない').not.toBeFocused();
+  await expect(selected, 'フォーカスを外す Esc でノートの選択が変わった').toHaveCount(1);
+  expect(await selected.first().getAttribute('data-pkc-entry')).toBe(selectedLid);
 
   // 🔴 2 ペインのコマンドライン(#241)── 同じ起動の続きで確かめる(起動を増やさない)。同じコマンド表の help が読め、2 ペインに無いコマンドは断る
   await page.keyboard.press('Control+Alt+6');

@@ -1,7 +1,9 @@
 /**
  * コマンドシェル(#274)と 2 ペインのコマンドライン(#241)の**打つ欄のキー操作**。DOM だけを触る(state は触らない)。
  *
- * - `Enter` = 実行 / `↑` `↓` = 履歴(`↓` で打ちかけに戻る)/ `Tab` = 補完(共通の頭まで入れ、1 件なら確定)/ `Esc` = 候補を閉じる(候補が無ければ欄を空にする)
+ * - `Enter` = 実行 / `↑` `↓` = 履歴(`↓` で打ちかけに戻る)/ `Tab` = 補完(共通の頭まで入れ、1 件なら確定)
+ * - `Esc` = 3 段(候補の一覧が開いていれば一覧を閉じる → 入力が残っていれば空にする → 空ならフォーカスを外すだけ)。
+ *   どの段も全域の Esc(開いているノートを閉じる)には届かせない
  * - 変換中(IME)の Enter・Tab は握らない(呼び側が `isComposing` を先に弾く)
  * - ⚠ マウスだけで完結する: 候補・履歴は全部ボタンで、押すと欄へ入る(`shell-pick` / `shell-recall`)
  */
@@ -102,13 +104,16 @@ export function handleShellKeydown(
       paintCompletion(host, null);
       return 'handled';
     }
+    ke.preventDefault();
+    ke.stopPropagation();
     if (input.value !== '') {
-      ke.preventDefault();
-      ke.stopPropagation();
       input.value = '';
       session.at = -1;
       return 'handled';
     }
+    // 入力が空なら、フォーカスを外すだけ。🔴 全域の Esc(読んでいるノートを閉じる)には届かせない ── 補助の欄の操作が本文側の状態を変えない
+    input.blur();
+    return 'handled';
   }
   return null;
 }

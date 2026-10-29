@@ -823,7 +823,7 @@ import { openFolderLid } from './open-folder-lid';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 import { labNoteTitle } from '@features/markdown/text-lab';
 import { sheetNoteTitle, sheetToMarkdown, sheetToText } from '@features/calc/sheet';
-import { runShellLine, SHELL_HISTORY_CLEARED_TEXT, type OpResult, type ShellOps } from './shell-run';
+import { EFFECT_WRITES, runShellLine, SHELL_HISTORY_CLEARED_TEXT, type OpResult, type ShellOps } from './shell-run';
 import {
   closeCompletion,
   completeHostOf,
@@ -7797,10 +7797,7 @@ export function makeShellOps(h: {
       return surface === 'dual' ? `${dispatcher.getState().dual.focus === 'left' ? '左' : '右'} ${path}>` : `${path}>`;
     },
     blocked: (effects) => {
-      const writes = effects.some((e) =>
-        e.type === 'plan' || e.type === 'create' || e.type === 'append' || e.type === 'move' || e.type === 'copy' || e.type === 'trash' || e.type === 'tag',
-      );
-      return writes ? stopped('実行') : null;
+      return effects.some((e) => EFFECT_WRITES[e.type]) ? stopped('実行') : null;
     },
     applyPlan: (planOps) => {
       const stop = stopped('実行');

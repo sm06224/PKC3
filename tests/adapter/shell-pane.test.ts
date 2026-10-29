@@ -272,6 +272,33 @@ describe('シェルの面', () => {
     expect(ctx.root.querySelector('[data-pkc-view-pane="shell"] [data-pkc-region="shell-complete"] [data-pkc-action="shell-recall"]')).toBeNull();
   });
 
+  it('🔴 Esc(3 段)の間、読んでいるノートの選択は外れない。対照群: 入力欄の外の Esc は外す(B)', async () => {
+    ctx.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick();
+    // 一覧が開いている段
+    typeInto(input, 'mv 議');
+    expect(ctx.root.querySelector('[data-pkc-view-pane="shell"] [data-pkc-region="shell-complete"]')!.hasAttribute('hidden')).toBe(false);
+    input.focus();
+    press(input, 'Escape');
+    expect(ctx.root.querySelector('[data-pkc-view-pane="shell"] [data-pkc-region="shell-complete"]')!.hasAttribute('hidden')).toBe(true);
+    expect(ctx.d.getState().selectedLid, '一覧を閉じる Esc で選択が外れた').toBe('n1');
+    // 入力が残っている段
+    expect(input.value).toBe('mv 議');
+    press(input, 'Escape');
+    expect(input.value).toBe('');
+    expect(ctx.d.getState().selectedLid, '入力を空にする Esc で選択が外れた').toBe('n1');
+    // 空の段(フォーカスを外すだけ)
+    press(input, 'Escape');
+    expect(ctx.d.getState().selectedLid, 'フォーカスを外す Esc で選択が外れた').toBe('n1');
+    expect(ctx.d.getState().viewMode).toBe('shell');
+    // 対照群: シェルの入力欄の外で押した Esc は、これまでどおり開いているノートを閉じる
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    ctx.root.querySelector('[data-pkc-view-pane="shell"] [data-pkc-field="shell-cwd"]')!.dispatchEvent(ev);
+    // 全域の Esc は、補助の面なら先に面を閉じ、次の Esc でノートを閉じる ── どちらかが動けば経路は生きている
+    const after = ctx.d.getState();
+    expect(after.viewMode !== 'shell' || after.selectedLid === null, '対照群が効いていない(Esc の経路が死んでいる)').toBe(true);
+  });
+
   it('コピー・出力を消す', async () => {
     await run(input, 'ls');
     expect(ctx.root.querySelector('[data-pkc-view-pane="shell"] [data-pkc-action="shell-copy-block"]')).not.toBeNull();
