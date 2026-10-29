@@ -153,7 +153,7 @@ describe('元の HTML の差し替え (#1416)', () => {
     expect(before.endsWith('<script id="pkc-data" type="application/json">')).toBe(true);
     expect(after.startsWith('</script>\n<script id="pkc-meta"')).toBe(true);
     const parts = await pkc2DataParts(plan().container, (async function* () {})());
-    const out = before + parts.join('') + after;
+    const out = before + (await new Blob(parts).text()) + after;
     expect(out.startsWith(before)).toBe(true);
     expect(out.endsWith(after)).toBe(true);
     expect(out).not.toContain('"container_id":"old"');
@@ -174,7 +174,7 @@ describe('往復: 書き出した HTML を PKC3 の取り込みで読む (#1416)
       yield { key: p.assetKeys.get('abc123')!, base64: btoa('hello pdf!!') };
     }
     const parts = await pkc2DataParts(p.container, assets());
-    const html = before + parts.join('') + after;
+    const html = before + (await new Blob(parts).text()) + after;
 
     const payload = parsePkc2Html(html);
     const conv = convertPkc2Container(payload.container as never, {
@@ -201,5 +201,62 @@ describe('往復: 書き出した HTML を PKC3 の取り込みで読む (#1416)
     expect(conv.assets, '添付の bytes が戻っていない').toHaveLength(1);
     expect(atob(conv.assets[0]!.base64)).toBe('hello pdf!!');
     expect(conv.relations.filter((r) => r.kind === 'structural')).toHaveLength(1);
+  });
+});
+
+describe('#pkc-data が HTML として閉じる / 添付を文字列で溜めない (#1416 レビュー)', () => {
+  const nasty = (): Pkc2ExportEntry[] => [
+    e({ lid: 'n1', archetype: 'text', title: '<script>alert(1)</script>', body: '前置き <!-- ここから\n<script>x</script> --> 後ろ </SCRIPT>\n' }),
+  ];
+  const build = async (entries: Pkc2ExportEntry[]) => {
+    const { before, after } = splitPkc2Shell(SHELL);
+    const p = planPkc2Container({
+      title: 't',
+      containerId: 'c',
+      entries,
+      relations: [],
+      assets: new Map(),
+      now: NOW,
+      schemaVersion: 1,
+    });
+    const parts = await pkc2DataParts(p.container, (async function* () {})());
+    return before + (await new Blob(parts).text()) + after;
+  };
+
+  it('🔴 本文の `<!--` とタイトルの `<script>` があっても、#pkc-data が閉じて JSON.parse できる', async () => {
+    const html = await build(nasty());
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const data = doc.getElementById('pkc-data');
+    expect(data, '#pkc-data が無い').not.toBeNull();
+    const parsed = JSON.parse(data!.textContent ?? '') as { container: { entries: Array<{ title: string; body: string }> } };
+    expect(parsed.container.entries[0]!.title).toBe('<script>alert(1)</script>');
+    expect(parsed.container.entries[0]!.body).toContain('<!-- ここから');
+    expect(doc.getElementById('pkc-meta')?.textContent).toContain('"app":"pkc2"');
+  });
+
+  it('🔴 #pkc-data の範囲には生の `<` が 1 つも無い(独立した不変量。パーサーの実装に依らない)', async () => {
+    const html = await build(nasty());
+    const { before, after } = splitPkc2Shell(SHELL);
+    const data = html.slice(before.length, html.length - after.length);
+    expect(data).not.toContain('<');
+    expect(data).toContain('\\u003c');
+  });
+
+  it('🔴 添付の base64 は文字列で残らない(部品の中の添付は Blob)', async () => {
+    const p = plan();
+    const big = 'QUJD'.repeat(50_000);
+    async function* assets() {
+      yield { key: 'k1', base64: big };
+      yield { key: 'k2', base64: 'QUJD' };
+    }
+    const parts = await pkc2DataParts(p.container, assets());
+    expect(parts.filter((x) => typeof x !== 'string')).toHaveLength(2);
+    expect(
+      parts.some((x) => typeof x === 'string' && x.includes(big.slice(0, 64))),
+      '巨大な base64 が文字列で残っている',
+    ).toBe(false);
+    const parsed = JSON.parse(await new Blob(parts).text()) as { container: { assets: Record<string, string> } };
+    expect(parsed.container.assets.k1).toBe(big);
+    expect(parsed.container.assets.k2).toBe('QUJD');
   });
 });

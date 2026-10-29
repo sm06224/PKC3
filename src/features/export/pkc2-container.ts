@@ -25,6 +25,7 @@
  */
 import { parseFrontmatter } from '../markdown/frontmatter';
 import { storedInstantIso } from '../datetime/stored-date';
+import { escapeForScriptData } from './pkc3-html';
 import { readTags } from '../flavor/tags';
 import { logDayOfHeading } from '../textlog/log-days';
 import { UNDATED_LOG_HEADING } from '../flavor/textlog-flavor';
@@ -358,23 +359,22 @@ export function planPkc2Container(input: Pkc2ExportInput): Pkc2ExportPlan {
   };
 }
 
-/** `</script` を HTML に埋めても閉じないようにする(PKC2 の書き出しと同じ作法)。 */
-export function escapeScriptClose(json: string): string {
-  return json.replace(/<\/(script)/gi, '<\\/$1');
-}
-
 const ASSETS_TOKEN = '__PKC3_PKC2_ASSETS_SPLIT_POINT__';
 
 /**
- * `#pkc-data` の JSON を、文字列の並び(結合すると JSON)にする。添付は**呼び側が 1 件ずつ**渡す(巨大な base64 を 1 つの
- * 文字列に溜めない ── PKC2 の `serializePkcDataParts` と同じ理由)。
+ * `#pkc-data` の JSON を、部品の並び(結合すると JSON)にする。
+ *
+ * 🔴 **添付の base64 は 1 件ずつ Blob にして、部品には Blob だけを積む**(巨大な base64 を文字列のまま溜めない ──
+ *   呼び側が 1 件渡すたびに文字列は捨てられる)。骨組みの JSON だけが文字列で、`escapeForScriptData`(`<` を全部退避 ──
+ *   `<!--` + `<script` の並びで script data が閉じなくなるのを防ぐ。PKC3 入り HTML と同じ 1 関数)を通す。
+ *   添付の base64 は `[A-Za-z0-9+/=]` だけで `<` を含まない。
  *
  * @param assets 1 件 = `{ key(PKC2 の key), base64 }` を返す非同期の並び
  */
 export async function pkc2DataParts(
   container: Pkc2ContainerOut,
   assets: AsyncIterable<{ key: string; base64: string }>,
-): Promise<string[]> {
+): Promise<Array<string | Blob>> {
   const skeleton = JSON.stringify(
     { container: { ...container, assets: ASSETS_TOKEN }, export_meta: { mode: 'full', mutability: 'editable' } },
     null,
@@ -382,16 +382,15 @@ export async function pkc2DataParts(
   );
   const token = `"${ASSETS_TOKEN}"`;
   const at = skeleton.indexOf(token);
-  const parts: string[] = [escapeScriptClose(skeleton.slice(0, at)), '{'];
+  const parts: Array<string | Blob> = [escapeForScriptData(skeleton.slice(0, at)), '{'];
   let first = true;
   for await (const a of assets) {
-    parts.push(`${first ? '' : ','}\n      ${JSON.stringify(a.key)}: "`);
-    parts.push(a.base64); // base64 の字だけ ── JSON の escape も `</script` の escape も要らない
-    parts.push('"');
+    // key は JSON 文字列(`<` を含みうる)── 骨組みと同じ関数を通す。base64 は escape が要らない
+    parts.push(new Blob([escapeForScriptData(`${first ? '' : ','}\n      ${JSON.stringify(a.key)}: "`), a.base64, '"']));
     first = false;
   }
   parts.push(first ? '}' : '\n    }');
-  parts.push(escapeScriptClose(skeleton.slice(at + token.length)));
+  parts.push(escapeForScriptData(skeleton.slice(at + token.length)));
   return parts;
 }
 
