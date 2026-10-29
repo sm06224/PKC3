@@ -80,6 +80,28 @@ describe('見え方', () => {
   });
 });
 
+describe('入っているモデルの読みは遅らせる(⚠4)', () => {
+  it('🔴 器を作るまで読まない。作ったとき 1 度だけ読み、控えへ写す(組み直しで何度も読まない)', async () => {
+    const s = new StemModelState();
+    const loader = vi.fn(async () => INSTALLED);
+    s.setLoader(loader);
+    expect(loader, '起動(器を作る前)に読んだ').not.toHaveBeenCalled();
+    const p = buildStemModelPanel(s);
+    buildStemModelPanel(s);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(s.isInstalled(model.id)).toBe(true);
+    expect(q(p.root, 'stem-installed').hidden).toBe(false);
+  });
+  it('読めなくても投げず、入っていない側へ倒す', async () => {
+    const s = new StemModelState();
+    s.setLoader(async () => Promise.reject(new Error('idb')));
+    buildStemModelPanel(s);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.getInstalled()).toEqual({});
+  });
+});
+
 describe('③ 押し所が実体まで届く', () => {
   it('🔴 取り込む(モデルの id を運ぶ)/ やめる / 消す(両方向がある)', () => {
     const root = document.createElement('div');
@@ -123,6 +145,7 @@ describe('⑤ main.ts の配線(原文 pin)', () => {
     }
     expect(MAIN).toContain('appStemModel.setProgress(');
     expect(MAIN).toContain('applyStemResult(');
+    expect(MAIN, '入っているモデルは設定の面を開いたときに読む(起動では読まない)').toContain('appStemModel.setLoader(');
     expect(MAIN).toContain('appStemModel.setInstalled(');
     expect(MAIN, '録音から押したときも同じ installer を通る').toContain('stemInstaller.obtain(');
     expect(MAIN, '保存した回は控えへ写す(save の後)').toMatch(/const note = await r\.save\(\);\s+void stemInstaller\.readInstalled\(stemIds\)/);

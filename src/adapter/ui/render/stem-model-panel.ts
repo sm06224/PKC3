@@ -20,6 +20,28 @@ export class StemModelState {
   private progressText = '';
   private readonly listeners = new Set<() => void>();
 
+  private loader: (() => Promise<StemModelInstalled>) | null = null;
+  private loaded = false;
+
+  /** 入っているモデルを読む口(main が差す)。 */
+  setLoader(fn: () => Promise<StemModelInstalled>): void {
+    this.loader = fn;
+  }
+
+  /**
+   * 🔴 **設定の面を開いたときに 1 度だけ**、入っているモデルを読んで控えへ写す(起動では読まない ── 使わない user の起動に IDB の読みを足さない)。
+   * ⚠ 読めなくても黙って「入っていない」側へ倒す。
+   */
+  async loadOnce(): Promise<void> {
+    if (this.loaded || this.loader === null) return;
+    this.loaded = true;
+    try {
+      this.setInstalled(await this.loader());
+    } catch {
+      /* 入っていない側へ */
+    }
+  }
+
   getInstalled(): StemModelInstalled {
     return this.installed;
   }
@@ -141,6 +163,7 @@ export function buildStemModelPanel(state: StemModelState = appStemModel): StemM
   cancel.hidden = true;
   root.append(progress, cancel);
 
+  void state.loadOnce();
   const sync = (): void => {
     const all = state.getInstalled();
     const busy = state.progress() !== '';

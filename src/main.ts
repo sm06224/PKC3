@@ -3966,7 +3966,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // 🔴 取り込んだモデルは端末(IndexedDB)に残す ── 設定の「音源分離」で取り込み / 消す。次からは取りに行かない
   const stemInstaller = new StemModelInstaller({ store: new StemModelStore() });
   const stemIds = STEM_MODELS.map((m) => m.id);
-  void stemInstaller.readInstalled(stemIds).then((v) => appStemModel.setInstalled(v));
+  // 🔴 入っているモデルの読みは**設定の面を開いたとき**に遅らせる(起動では IDB を読まない)
+  appStemModel.setLoader(() => stemInstaller.readInstalled(stemIds));
   /**
    * 🔴 **動画は別のワーカー**(#683 段②b-1)── 動画の長い仕事で音の切り出しを待たせない。
    * 元の `Blob` は窓で読む(250MB を開かない)。始まりが手前へ戻るなら、切る前に確認する。
