@@ -155,7 +155,7 @@ import {
   type AttachmentFold,
 } from '@features/flavor/attachment-edit-fold';
 import { isAppMime } from '@features/launcher/tiles';
-import { buildOfficeEntry, buildOfficeSaveNote, officeEntryOf } from './office-entry-view';
+import { buildOfficeEntry, buildOfficeImageNote, buildOfficeSaveNote, officeEntryOf } from './office-entry-view';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import {
   assetPreviewKind,
@@ -3734,6 +3734,9 @@ export class DetailRenderer {
       if (office) info.append(office);
       const saveNote = buildOfficeSaveNote({ name: meta.name, mime: meta.mime, assetKey: meta.assetKey, lid });
       if (saveNote) info.append(saveNote);
+      // 🔴 Office の窓では外部画像が出ないことを、初回だけ(#88 の user 指示 2026-08-09)
+      const imageNote = buildOfficeImageNote({ name: meta.name, mime: meta.mime, assetKey: meta.assetKey, lid });
+      if (imageNote) info.append(imageNote);
     }
     host.append(info);
 

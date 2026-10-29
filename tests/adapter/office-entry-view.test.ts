@@ -27,10 +27,12 @@ import { attachmentBody } from '../../src/features/flavor/attachment-flavor';
 import {
   appOfficePack,
   buildOfficeEntry,
+  buildOfficeImageNote,
   buildOfficeSaveNote,
   OfficePackState,
   type OfficeAvailabilitySource,
 } from '../../src/adapter/ui/render/office-entry-view';
+import { appOfficeImageNote, OfficeImageNoteStore, OFFICE_IMAGE_NOTE } from '../../src/adapter/ui/render/office-image-note';
 import type { OfficeCapability } from '../../src/features/office/office-entry';
 import type { OfficePackMeta } from '../../src/adapter/platform/office/office-pack';
 
@@ -293,6 +295,68 @@ describe('main.ts の配線(原文 pin)', () => {
     const after = MAIN.slice(at, at + 400);
     expect(after, '控えを更新したのに描き直していない').toContain('invalidateDetail()');
     expect(after, '描き直しを頼んだだけで描いていない').toContain('center.render(');
+  });
+});
+
+/**
+ * 🔴 #88 の user 指示 2026-08-09「外部画像が使用不能になることを注意喚起する / 初回のみ必ず表示」。
+ * 既読にするのは「Office で開く」を押したときだけ(出しただけ・読み飛ばしただけでは既読にしない)。
+ */
+describe('Office の窓では外部画像が出ないことの初回の案内(#88)', () => {
+  const memory = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
+  };
+
+  it('🔴 まだ見せていなければ、開ける入口の隣に出る。字は外部画像が出ないことを言う', () => {
+    const store = new OfficeImageNoteStore(memory());
+    const el = buildOfficeImageNote(DOCX, avail(true), store)!;
+    expect(el, '案内が出ていない').not.toBeNull();
+    expect(el.textContent).toBe(OFFICE_IMAGE_NOTE);
+    expect(el.textContent).toContain('外部の画像は表示されません');
+    expect(el.textContent).toContain('初回だけ');
+  });
+
+  it('🔴 出しただけでは既読にならない(何度描き直しても出続ける)', () => {
+    const store = new OfficeImageNoteStore(memory());
+    for (let i = 0; i < 3; i++) expect(buildOfficeImageNote(DOCX, avail(true), store)).not.toBeNull();
+    expect(store.seen()).toBe(false);
+  });
+
+  it('既読にすると出ない。保存が読めない環境でも落ちず、その session では効く', () => {
+    const store = new OfficeImageNoteStore(memory());
+    store.markSeen();
+    expect(buildOfficeImageNote(DOCX, avail(true), store)).toBeNull();
+    const none = new OfficeImageNoteStore(null);
+    none.markSeen();
+    expect(none.seen()).toBe(true);
+  });
+
+  it('開けないとき(一式が無い)や Office でない添付には出さない(対照群)', () => {
+    const store = new OfficeImageNoteStore(memory());
+    expect(buildOfficeImageNote(DOCX, avail(false), store)).toBeNull();
+    expect(buildOfficeImageNote({ ...DOCX, name: 'a.png', mime: 'image/png' }, avail(true), store)).toBeNull();
+  });
+
+  it('🔴 「Office で開く」を押すと既読になり、その場の案内が消える。押さない限り残る', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    const openOffice = vi.fn();
+    bindActions(root, d, { openOffice } as BinderServices);
+    const wrap = document.createElement('div');
+    const btn = buildOfficeEntry(DOCX, avail(true))!;
+    const note = document.createElement('p');
+    note.setAttribute('data-pkc-field', 'office-image-note');
+    wrap.append(btn, note);
+    root.append(wrap);
+    const before = appOfficeImageNote.seen();
+    // 前提: 他の test が既読にしていたら、この検査は空振りになる
+    expect(before, '前提が崩れている(既に既読)').toBe(false);
+    btn.dispatchEvent(new Event('click', { bubbles: true }));
+    expect(openOffice).toHaveBeenCalledTimes(1);
+    expect(appOfficeImageNote.seen()).toBe(true);
+    expect(wrap.querySelector('[data-pkc-field="office-image-note"]')).toBeNull();
   });
 });
 
