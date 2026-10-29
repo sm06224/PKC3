@@ -56,9 +56,29 @@ describe('× ÷ ー(日本語入力の記号。依頼 78-3・308)', () => {
     expect(explainCalcMiss('300×3=', 6)).toBeNull();
     expect(explainCalcMiss('5÷0=', 4)).toBe('計算できませんでした(0 で割れません)');
   });
-  it('単位の付いた式は今までどおり計算しない(100円*3= / 3個×100=)', () => {
-    expect(answer('100円*3=')).toBeNull();
-    expect(answer('3個×100=')).toBeNull();
+  /** 🔴 台帳 #1852 I2 / 依頼 308 B: 単位は読み飛ばして計算する(打った単位は本文に残り、答えだけが足される)。 */
+  it('単位の付いた式は、単位を読み飛ばして計算する(100円*3= / 3個×100=)', () => {
+    expect(answer('100円*3=')).toBe('300');
+    expect(answer('3個×100=')).toBe('300');
+    expect(answer('牛乳 100円*3+50円=')).toBe('350');
+    expect(answer('2時間*3=')).toBe('6');
+    expect(answer('1.5kg*4=')).toBe('6');
+    expect(answer('$100*3=')).toBe('300');
+    expect(answer('￥1,000*3=')).toBe('3000');
+    expect(answer('- 100円+200円=')).toBe('300');
+    expect(answer('１００円＊３＝')).toBe('300');
+  });
+  it('単位を読み飛ばしても、書き換えるのは全角の数と記号だけ(単位は触らない)', () => {
+    const t = '１００円＊３＝';
+    expect(resolveInlineCalc(t, t.length)!.halfWidth).toEqual({ from: 0, to: t.length, text: '100円*3=' });
+  });
+  it('単位でない字・数を途中で切る形・日付の語は、これまでどおり計算しない', () => {
+    expect(answer('100円=')).toBeNull(); // 計算する所が無い
+    expect(answer('10月3日+2=')).toBeNull(); // 日付を足し算にしない
+    expect(answer('3月5日=')).toBeNull();
+    expect(answer('md5kg*2=')).toBeNull(); // 語にくっついた切れ端
+    expect(answer('円*3=')).toBeNull(); // 数に付いていない単位
+    expect(answer('3円5*2=')).toBe('10'); // 単位の次が数字なら単位と読まない(5*2 だけ)
   });
   it('日付の引き算は長音でも計算しない(2026ー10ー17=)', () => {
     expect(answer('2026ー10ー17=')).toBeNull();
