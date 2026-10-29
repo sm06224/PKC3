@@ -496,9 +496,9 @@ test('🔴 コマンドシェル: 打って Enter で結果が出て、移す・
   await page.keyboard.press('Enter');
   await expect(log.locator('[data-pkc-field="shell-block"]').last()).toContainText('を作りました', { timeout: 10_000 });
 
-  // 🔴 ↑ で履歴が戻る・Tab で補完される
+  // 🔴 ↑ で履歴が戻る(本文は履歴に残さないので、題名までが戻る)・Tab で補完される
   await page.keyboard.press('ArrowUp');
-  await expect(input).toHaveValue('new 資料/シェルから作った 本文です');
+  await expect(input).toHaveValue('new 資料/シェルから作った');
   await page.keyboard.press('ArrowDown');
   await expect(input).toHaveValue('');
   await page.keyboard.type('mk');
@@ -510,7 +510,7 @@ test('🔴 コマンドシェル: 打って Enter で結果が出て、移す・
   // 🔴 マウスだけでも: 履歴ボタン → 行を押すと入力欄に入る
   await clickReal(page, pane.locator('[data-pkc-action="shell-history-menu"]'));
   await clickReal(page, pane.locator('[data-pkc-region="shell-complete"] [data-pkc-action="shell-recall"]').first());
-  await expect(input).toHaveValue('new 資料/シェルから作った 本文です');
+  await expect(input).toHaveValue('new 資料/シェルから作った');
 
   // 履歴は端末に保存されている
   expect(await page.evaluate(() => localStorage.getItem('pkc3.shell-history'))).toContain('mkdir 資料');
