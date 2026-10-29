@@ -1162,7 +1162,10 @@ export function addScheduleItem(
    *   行を消せば済むが、空にしてしまうと**書けていなかった回に打った字を失う**(打ち直しになる)。
    *   だから「分からない」は残す側へ倒し、理由を出す。
    */
-  const r = appendAndSettle(dispatcher, lid, line, null, SCHEDULE_ADD_SETTLE_MS);
+  // 🔴 足し先がログ(textlog)なら、追記欄と同じく日時の見出しの節にする(見出し無しだと直前のログの行の続きに混ざる)。
+  //    節の下の `- [ ] …` も予定として走査される(tests/features/schedule-textlog-target-1163.test.ts)
+  const targetKind = dispatcher.getState().entryMetas.get(lid)?.archetype ?? 'text';
+  const r = appendAndSettle(dispatcher, lid, line, appendHeadingFor(targetKind, new Date()), SCHEDULE_ADD_SETTLE_MS);
   const target = lid;
   return r.then((o) => {
     if (o.ok) {
