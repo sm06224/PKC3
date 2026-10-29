@@ -39,6 +39,7 @@ export type { BrowseMode } from './browse-mode';
 import { DEFAULT_BROWSE_MODE, type BrowseMode } from './browse-mode';
 import { KindBarRenderer } from './kind-bar';
 import { SavedSearchBar } from './saved-searches';
+import { NotePinBar } from './note-pins';
 import { setPrimary } from './icons';
 import { contactsKnownEmpty, markContactsTabEmpty } from './tabs-a11y';
 import { setBlocked } from './shortcut-hint';
@@ -155,6 +156,8 @@ export class BrowseRouter {
   private readonly kindBar: KindBarRenderer;
   /** 🔴 保存した検索の帯(#1038 C1)。器が無い組み方(test)では持たない。 */
   private readonly savedBar: SavedSearchBar | null;
+  /** 🔴 ピン留めの固定エリア(#1377)。面に関係なく描く。 */
+  private readonly pinBar: NotePinBar | null;
   private readonly filer: FilerRenderer;
   private readonly launcher: LauncherRenderer;
   private readonly schedule: ScheduleRenderer;
@@ -300,6 +303,8 @@ export class BrowseRouter {
     this.kindBar = new KindBarRenderer(sidebar);
     const savedHost = sidebar.querySelector<HTMLElement>('[data-pkc-region="saved-searches"]');
     this.savedBar = savedHost === null ? null : new SavedSearchBar(savedHost, 'filter');
+    const pinHost = sidebar.querySelector<HTMLElement>('[data-pkc-region="note-pins"]');
+    this.pinBar = pinHost === null ? null : new NotePinBar(pinHost);
     this.filer = new FilerRenderer(this.panes.filer);
     // 🔴 取り込んだ絵を出すために貸し口を渡す(#856 段②)── 渡さなければ字と図案だけ出る
     this.launcher = new LauncherRenderer(this.panes.launcher, undefined, assets);
@@ -400,6 +405,8 @@ export class BrowseRouter {
     this.kindBar.render(state, mode);
     // 保存した検索の帯も面に関係なく描く(語と札は面をまたいで効いているため。種類の札と同じ理由)
     this.savedBar?.render(state);
+    // ピン留めの固定エリアも面に関係なく描く(どの面を開いていても、いつも同じ場所に居る)
+    this.pinBar?.render(state);
     /**
      * 🔴 **戻る・進むの生死も面に関係なく合わせる**(#190 → #813 段③-a)。
      * ⚠ 選択と連動して動くことが多いが、掃除(`pruneHistory`)だけが動く回もあるので、

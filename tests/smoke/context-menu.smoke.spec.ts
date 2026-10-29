@@ -110,6 +110,35 @@ test('🔴 行を右クリックすると、その行にできることが出る
   await page.keyboard.press('Escape');
   await expect(page.locator(MENU), 'Escape で閉じない').toHaveCount(0);
 
+  /**
+   * 🔴 **ピン留め**(#1377)── 新しい起動は足さない(この道中の続き)。実ブラウザでしか見えないもの:
+   *   ① 固定エリアが一覧の**上**に見えていて、画面の中に収まる(採寸) ② 本物の右クリック →「ピン留めする」で出る
+   *   ③ 別の面(ここでは語で絞って一覧から消した状態)でも居続ける ④ 「外す」で畳む(片道にしない)
+   *   ⑤ 再読み込みしても残る(端末の記憶)
+   */
+  const pins = page.locator('[data-pkc-region="note-pins"]');
+  await expect(pins, '何も留めていないのにエリアが出ている').toBeHidden();
+  await row.click({ button: 'right' });
+  await expect(page.locator(MENU).locator('[data-pkc-action="unpin-note"]'), '留める前に外す口が出ている').toHaveCount(0);
+  await page.locator(MENU).locator('[data-pkc-action="pin-note"]').click();
+  await expect(pins, '留めたのにエリアが出ない').toBeVisible();
+  const pinBox = (await pins.boundingBox())!;
+  const listBox = (await page.locator('[data-pkc-region="browse-host"]').boundingBox())!;
+  expect(pinBox.y + pinBox.height, 'エリアが一覧の上にない').toBeLessThanOrEqual(listBox.y + 1);
+  expect(pinBox.x + pinBox.width, 'エリアが画面の外へはみ出している').toBeLessThanOrEqual(page.viewportSize()!.width + 1);
+  await expect(pins.locator('[data-pkc-field="note-pin-open"]')).toHaveCount(1);
+  // ③ 語で絞って一覧から消しても、エリアには居る
+  await page.locator('[data-pkc-field="entry-filter"]').fill('存在しない語');
+  await expect(pins.locator('[data-pkc-field="note-pin-open"]'), '絞り込みでエリアから消えた').toHaveCount(1);
+  await page.locator('[data-pkc-field="entry-filter"]').fill('');
+  // ⑤ 再読み込みしても残る
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await expect(pins.locator('[data-pkc-field="note-pin-open"]'), '再読み込みで消えた').toHaveCount(1);
+  // ④ 外す
+  await clickReal(page, '[data-pkc-action="unpin-note"]');
+  await expect(pins, '外したのにエリアが残る').toBeHidden();
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

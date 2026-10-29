@@ -211,6 +211,11 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
    *   lid を持たない ── 別の container へ運んでも「居ないノートを指す」が起きない。
    */
   { key: 'pkc3.filer-flatten', label: 'フォルダのタブで下の階層まで全部出すか', valid: isOnOff },
+  /**
+   * ⚠ **人に付く好み**(#1457)── 予定表のカンバンを「状態(未完了 / 完了)」で見たいか「信号機(赤 / 黄 / 緑 / 完了)」で
+   *   見たいかは端末の事情ではない。中身は `status` / `signal` だけで、lid を持たない。
+   */
+  { key: 'pkc3.board-layout', label: '予定表のカンバンの列の組み方', valid: (v) => v === 'status' || v === 'signal' },
 ];
 
 /**
@@ -232,6 +237,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
   {
     key: 'pkc3.schedule-last-open',
     why: 'この端末でコレクションを最後に開いていた時刻(#855 20-C)。コレクションごとの id で持つ端末の事実なので、運ぶと別の端末の「見逃した」を間違えて数える',
+  },
+  {
+    key: 'pkc3.note-pins',
+    why: '中身が ID そのもの(#1377)。ピン留めしたノートの「コレクションの ID とノートの ID」の並びなので、別の端末・別のコレクションへ運ぶとそこにいないノートを指す。並べ方は見る人の道具でもあり、渡した相手に「いつも見ているノート」が並ぶ',
   },
   {
     key: 'pkc3.split-lids',

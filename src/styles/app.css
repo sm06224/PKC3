@@ -1323,6 +1323,49 @@ img[data-pkc-action='view-big']:focus-visible {
   color: var(--muted);
   cursor: pointer;
 }
+/* 🔴 **ピン留めの固定エリア**(#1377)。一覧の上に常に出る(列の中でスクロールしない帯)。
+ *   ⚠ 地は無彩色、色は「いま開いているノート」(`aria-pressed`)にだけ。 */
+[data-pkc-region='note-pins'] {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 3px 4px;
+  font-size: var(--btn-fs-sm);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  max-height: 30vh;
+  overflow: auto;
+}
+[data-pkc-region='note-pins'][hidden] {
+  display: none;
+}
+[data-pkc-field='note-pins-label'] {
+  color: var(--muted);
+}
+[data-pkc-field='note-pin-row'] {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+[data-pkc-field='note-pin-open'] {
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-field='note-pin-remove'] {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: var(--btn-fs-sm);
+  line-height: 1.6;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
 /* 🔴 **保存した検索の帯**(#1038 C1)。⚠ 地は無彩色、色は押されている(= いまの絞りと同じ)検索にだけ。
  *   置き場は左の列の種類の札の下(`saved-searches`)と探す面の欄の下(`search-page-saved`)── 体裁は同じ 1 本。 */
 [data-pkc-region='saved-searches'],
@@ -13024,6 +13067,36 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-field='schedule-board-more'][hidden] {
   display: none;
+}
+/* 🔴 **信号機の列**(#1457)。色は「期限の近さ・user が付けた #赤 #黄 #緑」という情報にだけ使う ──
+ * 見出しの丸 1 つだけ(地・札は無彩色のまま)。色の意味は見出しの字でも言う(色だけに頼らない)。 */
+[data-pkc-field='schedule-board-layout'] {
+  display: flex;
+  gap: 2px;
+}
+[data-pkc-field='schedule-board-column'][hidden] {
+  display: none;
+}
+[data-pkc-region='schedule-board'][data-pkc-board-columns='signal'] [data-pkc-field='schedule-board-columns'] {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+[data-pkc-signal='red'] {
+  --signal: var(--danger);
+}
+[data-pkc-signal='yellow'] {
+  --signal: var(--warn);
+}
+[data-pkc-signal='green'] {
+  --signal: var(--ok);
+}
+[data-pkc-signal] > [data-pkc-field='schedule-board-head']::before {
+  content: '';
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-inline-end: 0.4em;
+  border-radius: 50%;
+  background: var(--signal);
 }
 [data-pkc-drop-status][data-pkc-dropping] {
   outline: 2px solid var(--fg);

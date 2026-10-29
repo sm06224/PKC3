@@ -546,6 +546,15 @@ export function buildShell(root: HTMLElement): ShellRegions {
   savedSearches.hidden = true;
 
   /**
+   * 🔴 **ピン留めしたノートの固定エリア**(#1377)。一覧(`browse-host`)の**すぐ上**に置く ──
+   * ⚠ タブの外に置く(面を替えても消えない。更新順・絞り込み・フォルダの移動に関わらず常に同じ場所)。
+   * ⚠ 器だけ置く(`hidden`)── 中身は `note-pins.ts` が state と端末の記憶から描く。
+   */
+  const notePins = document.createElement('div');
+  notePins.setAttribute('data-pkc-region', 'note-pins');
+  notePins.hidden = true;
+
+  /**
    * 🔴 **分割ボタンにする**(P10、user 指示 2026-08-05
    * 「プルダウン式の新規作成ボタンは使いにくいからマルチメニューに畳んでください。
    *  ▼ を押下した際に種別を選択して、追加ボタンと ctrl+n の対象を更新、
@@ -915,6 +924,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     savedSearches,
     createBar,
     menu,
+    notePins,
     browseHost,
     commandList,
     collectionBar,

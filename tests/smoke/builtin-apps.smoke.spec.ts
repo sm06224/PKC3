@@ -110,7 +110,8 @@ test('🔴 カンバン: 別ウィンドウの予定表で、カードを完了�
   await expect(face, '予定表の面が開かない').toBeVisible();
   await clickReal(page, face.locator('[data-pkc-mode="board"]'));
 
-  const open = face.locator('[data-pkc-drop-status="open"]');
+  // ⚠ #1457: 信号機の 3 列も落とし先は `open` ── 状態の「未完了」だけを名指す
+  const open = face.locator('[data-pkc-drop-status="open"]:not([data-pkc-signal])');
   const done = face.locator('[data-pkc-drop-status="done"]');
   await expect(open.locator('[data-pkc-entry]'), '未完了の列に日付付きのカードが 1 枚').toHaveCount(1);
   await expect(done.locator('[data-pkc-entry]'), '完了の列に済んだカードが 1 枚').toHaveCount(1);
@@ -129,6 +130,44 @@ test('🔴 カンバン: 別ウィンドウの予定表で、カードを完了�
   await done.locator('[data-pkc-entry]', { hasText: '見積を送る' }).dragTo(open);
   await expect(open.locator('[data-pkc-entry]'), '未完了へ戻せない').toHaveCount(1, { timeout: 10_000 });
   await expect(open.locator('[data-pkc-entry]')).toContainText('見積を送る');
+
+  /**
+   * 🔴 **信号機の列**(#1457)── 新しい起動は足さない(この道中の続き)。実ブラウザでしか見えないもの:
+   *   ① 見出しの丸が本当に色を持ち、赤・黄・緑で互いに違う(CSS 変数 `--danger` / `--warn` / `--ok` が解決される)
+   *   ② 4 つの列が横に並んで見え、高さがある(落とせる) ③ 完了の列へ実際にドラッグして動く
+   *   ④ 「状態」で元の 2 列へ戻せる(片道にしない)
+   * ⚠ 札の日付は時計しだい(期限切れ / 3 日以内 / 先)── 「信号の 3 列のどれか 1 つに居る」ことだけ見る(日付の判定は unit)。
+   */
+  await clickReal(page, face.locator('[data-pkc-board-layout="signal"]'));
+  const sig = (c: string) => face.locator(`[data-pkc-signal="${c}"]`);
+  await expect(sig('red'), '信号機の列が出ない').toBeVisible();
+  const dots = await Promise.all(
+    ['red', 'yellow', 'green'].map((c) =>
+      sig(c).locator('[data-pkc-field="schedule-board-head"]').evaluate((el) => getComputedStyle(el, '::before').backgroundColor),
+    ),
+  );
+  for (const d of dots) expect(d, '見出しの丸に色が無い').not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+  expect(new Set(dots).size, '赤・黄・緑の丸が同じ色').toBe(3);
+  const boxes = await Promise.all([sig('red'), sig('yellow'), sig('green'), done].map((l) => l.boundingBox()));
+  expect(
+    boxes.every((b, i) => b !== null && b.height > 40 && (i === 0 || b.x > boxes[i - 1]!.x)),
+    '4 列が左から順に横に並んで見えていない',
+  ).toBe(true);
+  const inSignal = await face
+    .locator('[data-pkc-signal] [data-pkc-region="schedule-cards"] > [data-pkc-entry]')
+    .count();
+  expect(inSignal, '未完了の札が信号の列のどれにも居ない').toBe(1);
+  await expect(done.locator('[data-pkc-entry]'), '完了の札が完了の列に居ない').toHaveCount(1);
+  // ③ 実ブラウザの drag & drop: 信号の列の札を完了の列へ
+  await face
+    .locator('[data-pkc-signal] [data-pkc-region="schedule-cards"] > [data-pkc-entry]')
+    .first()
+    .dragTo(done);
+  await expect(done.locator('[data-pkc-entry]'), '完了の列へ動いていない').toHaveCount(2, { timeout: 10_000 });
+  // ④ 状態に戻す
+  await clickReal(page, face.locator('[data-pkc-board-layout="status"]'));
+  await expect(sig('red')).toBeHidden();
+  await expect(face.locator('[data-pkc-drop-status="open"]:not([data-pkc-signal])'), '状態の未完了の列が戻らない').toBeVisible();
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

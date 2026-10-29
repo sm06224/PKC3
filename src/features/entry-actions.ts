@@ -65,6 +65,8 @@ export interface EntryAction {
     | 'stack'
     | 'bookmarkable'
     | 'bookmarked'
+    | 'pinnable'
+    | 'pinned'
     | 'attachment'
     | 'kind-changeable'
     | 'transcript';
@@ -161,6 +163,11 @@ export interface EntryMenuContext {
    */
   readonly bookmarked?: boolean;
   /**
+   * 🔴 **ピン留めしているか**(#1377)。⚠ **省く = 出さない**(`undefined`)── 固定エリアは左の列にあるので、
+   *   左の列の行のメニューだけが渡す(2 ペインの行・編集中の行は渡さない)。
+   */
+  readonly pinned?: boolean;
+  /**
    * 🔴 **時刻つきの行(文字起こし)が在るか**(#1447)。⚠ 本文を読むのは呼び側で、**開いているノートのときだけ**渡す
    *   (別の行の本文は右クリックのためだけに読まない)。省く = 出さない。
    */
@@ -183,6 +190,9 @@ const WHEN: Readonly<
   // 🔴 入れる / 外すは**対**(#1377)── どちらか一方だけが出る。`undefined` はどちらも出さない
   bookmarkable: (ctx) => ctx.bookmarked === false,
   bookmarked: (ctx) => ctx.bookmarked === true,
+  // 🔴 ピン留めも**対**(#1377)── どちらか一方だけが出る。`undefined` はどちらも出さない
+  pinnable: (ctx) => ctx.pinned === false,
+  pinned: (ctx) => ctx.pinned === true,
   // 🔴 種類を変えられるのはノートとログだけ(台帳 #1852 I2 / 依頼 157)── 判定は `canChangeKind` 1 本
   'kind-changeable': (ctx) => canChangeKind(ctx.archetype),
   // 🔴 字幕ファイル(#1447)── 時刻つきの行があるノートだけ。`undefined`(本文を知らない)は出さない
@@ -492,6 +502,15 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'bookmark-note-add', label: 'ブックマークに入れる', group: 'this-one', when: 'bookmarkable', menuOnly: true },
   { action: 'bookmark-note-remove', label: 'ブックマークから外す', group: 'this-one', when: 'bookmarked', menuOnly: true },
+  /**
+   * 🔴 **ノートをピン留めする / 外す**(#1377。「既存のブックマークとは別に、一覧の最上段に常時固定する専用エリア」)。
+   *
+   * ⚠ **対で置く**(置けるなら外せる)── ピン留め済みなら「外す」だけ、まだなら「ピン留めする」だけが出る。
+   *   エリアの各行の「外す」も同じ受け手(`unpin-note`)。
+   * ⚠ **右クリックだけ・左の列の行だけ**(`menuOnly` + ctx の `pinned` を渡した面)。
+   */
+  { action: 'pin-note', label: 'ピン留めする', group: 'this-one', when: 'pinnable', menuOnly: true },
+  { action: 'unpin-note', label: 'ピン留めを外す', group: 'this-one', when: 'pinned', menuOnly: true },
   /**
    * 🔴 **ゴミ箱を開く**(#1646 の 1 = B。Gemini 裁定 = #1163 の依頼 40 の推薦どおり C = A + B)。
    *
@@ -1586,6 +1605,8 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   // 🔴 ブックマーク(#1377)。⚠ 帯の在りかを言う ── 入れた後に「どこへ入ったか」が分かる
   'bookmark-note-add': '2 ペインのブックマークに並べます(そこから押すと、このノートを開けます)',
   'bookmark-note-remove': '2 ペインのブックマークから、このノートを外します(ノートは消えません)',
+  'pin-note': 'このノートを左のペインの一覧の上に固定します(いつでも 1 押しで開けます)',
+  'unpin-note': '一覧の上の固定から、このノートを外します(ノートは消えません)',
   'open-note-window':
     'このノートだけを別のウィンドウで開きます(何枚でも開けます。閉じれば消えます)',
   // 🔴 **左の列の道具 4 つ**(#632 段①)。⚠ 字は `shell.ts` のボタンの `title` と

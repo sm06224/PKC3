@@ -512,6 +512,7 @@ export class ScheduleRenderer {
         selectedLid: state.selectedLid,
         thisYear: at.getFullYear(),
         settled: state.taskScan !== null,
+        today,
       });
     } else this.board.leave();
     if (dayMode) {

@@ -135,6 +135,21 @@ test('🔴 ウェブページをコピーして貼ると、形のまま入って
     plain: '名 数 あ 1',
   });
   await expect(page.locator(ROW), '表が行の途中に続けて貼られた(次の行から始まらない)').toHaveValue(/^メモ: \n\| 名 \| 数 \|/);
+  // 🔴 #1379 ── 直して貼ったら小さな知らせが出て、1 クリックで書式なしの字に置き換わる。
+  //   ⚠ 新しい起動は足さない(この道中の頭)。実ブラウザでしか見えない 2 つ: ① 知らせが画面に見えていて本文の欄を覆わない
+  //   ② 押した後に欄の選択範囲・本文が書式なしになる(`execCommand` の経路)
+  const toast = page.locator('[data-pkc-region="paste-toast"]');
+  await expect(toast, '直して貼ったのに知らせが出ない').toBeVisible();
+  await expect(toast).toContainText('プレーンテキストに変更');
+  const tb = (await toast.boundingBox())!;
+  const rb = (await page.locator(ROW).boundingBox())!;
+  expect(
+    tb.y + tb.height <= rb.y || tb.x + tb.width <= rb.x || tb.x >= rb.x + rb.width || tb.y >= rb.y + rb.height,
+    '知らせが打っている欄を覆っている(主の作業領域を奪う)',
+  ).toBe(true);
+  await clickReal(page, '[data-pkc-field="paste-toast-action"]');
+  await expect(page.locator(ROW), '押したのに書式なしの字になっていない').toHaveValue('メモ: 名 数 あ 1');
+  await expect(toast, '押した後も知らせが残っている').toBeHidden();
   await page.locator(ROW).fill('');
 
   // 🔴 #1852 束 I3(依頼 93-1)── Ctrl+Shift+V の直後の貼付は直さない(こちらが止めず、書式なしの字だけ)。

@@ -558,6 +558,27 @@ test('🔴 「図」は Esc で入らず ↓ Enter で雛形が入り、「図�
   );
 
   /**
+   * ── ③b 同じ帯の「注意書きを入れる」(#425 の「囲い(`:::`)の挿入口」)。
+   *
+   * 🔴 **新しく起動しない** ── 既に開いている編集の道中に足す。見るのは実ブラウザでしか通らない 2 つ:
+   *   ① 小窓(`showModal()`)が焦点を奪ったあとでも、**選んだ範囲**が囲まれる(unit は手で再現しているだけ)
+   *   ② `↓` `Enter` の鍵だけで種類を選べる。
+   */
+  await ta.fill('まえ\nなかみ\nうしろ');
+  await ta.evaluate((el) => {
+    (el as HTMLTextAreaElement).setSelectionRange(3, 6); // 「なかみ」
+  });
+  await clickReal(page, '[data-pkc-action="insert-callout"]');
+  const calloutRows = page.locator('[data-pkc-field="pick-callout"]');
+  await expect(calloutRows, '注意書きの種類が 8 行出ていない').toHaveCount(8);
+  await expect(calloutRows.first(), '焦点が先頭の行に無い').toBeFocused();
+  await page.keyboard.press('ArrowDown'); // 2 行目 = ヒント
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
+  await expect(ta, '選んだ範囲が :::tip で包まれていない').toHaveValue('まえ\n:::tip\nなかみ\n:::\nうしろ');
+  await ta.fill('');
+
+  /**
    * ── ④ 同じ帯の「図案」(#853 段①、2026-09-13)。
    *
    * 🔴 **新しく起動しない** ── 既に開いている編集の道中に足す(起動 1 つ = 以後すべての

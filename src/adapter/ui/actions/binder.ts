@@ -901,6 +901,8 @@ import {
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
 import { showPasteToast } from '@adapter/ui/render/paste-toast';
+import { appNotePins } from '@adapter/platform/note-pin-store';
+import { livePinLids, notePinKey, pinRefusal } from '@features/relation/note-pins';
 
 type ActionHandler = (
   dispatcher: Dispatcher,
@@ -10600,6 +10602,34 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     services.toggleDualBookmark?.(key);
+  },
+  /**
+   * 🔴 **ノートをピン留めする / 外す**(#1377)。⚠ 相手は**メニューを開いた瞬間のノート**(`rowLidOrSelected`)。
+   * ⚠ 満杯なら**理由を声に出して断る**。数えるのはこのコレクションの生きているものだけ。
+   * ⚠ 保存は端末の記憶で、固定エリアは記憶の変化を自分で聞いて描き直す(state を動かさない)。
+   */
+  'pin-note': (dispatcher, target) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null || st.cid === null || !st.entryMetas.has(lid)) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートが見つかりません' });
+      return;
+    }
+    const key = notePinKey(st.cid, lid);
+    const live = livePinLids(appNotePins.list(), st.cid, (l) => st.entryMetas.has(l)).length;
+    const why = pinRefusal(appNotePins.list(), live, key);
+    if (why !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+      return;
+    }
+    if (!appNotePins.has(key)) appNotePins.toggle(key, live);
+  },
+  'unpin-note': (dispatcher, target) => {
+    const st = dispatcher.getState();
+    const lid = target.getAttribute('data-pkc-entry') ?? rowLidOrSelected(st, target);
+    if (lid === null || st.cid === null) return;
+    const key = notePinKey(st.cid, lid);
+    if (appNotePins.has(key)) appNotePins.toggle(key, 0);
   },
   'bookmark-note-remove': (dispatcher, target, services) => {
     const st = dispatcher.getState();
@@ -22700,6 +22730,8 @@ export function bindActions(
         archetype: st.entryMetas.get(lid)?.archetype ?? null,
         linkedFile: st.linkedFiles.get(lid) ?? null,
         ...transcriptMenuCtx(st, lid),
+        // 🔴 ピン留め(#1377)── 固定エリアは左の列にあるので、左の列の行のメニューだけが渡す
+        ...(st.cid !== null ? { pinned: appNotePins.has(notePinKey(st.cid, lid)) } : {}),
       }).map(withRowShortcut),
       st.openBody?.lid === lid,
     );

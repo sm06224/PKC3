@@ -455,6 +455,9 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 ノートのブックマーク(#1377)── 2 ペインの行のメニューだけ。入れる / 外すは対
       ['bookmark-note-add', '42a11e66'],
       ['bookmark-note-remove', '42b727a8'],
+      // 🔴 ノートのピン留め(#1377)── 左のペインの行のメニューだけ。ピン留めする / 外すは対
+      ['pin-note', '3ba3824a'],
+      ['unpin-note', 'ae809a7c'],
     ];
     const digest = (h: string): string =>
       createHash('sha256').update(h).digest('hex').slice(0, 8);
@@ -491,6 +494,9 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 ブックマークの入れる / 外すは `bookmarked` を渡した文脈でだけ出る(#1377)
       ...entryMenuActions({ ...ALL, bookmarked: false }),
       ...entryMenuActions({ ...ALL, bookmarked: true }),
+      // 🔴 ピン留めの項目は `pinned` を渡した文脈でだけ出る(#1377)
+      ...entryMenuActions({ ...ALL, pinned: false }),
+      ...entryMenuActions({ ...ALL, pinned: true }),
       // 🔴 添付のリンクは添付のノートでだけ出る(2026-10-11)
       ...entryMenuActions({ archetype: 'attachment', linkedFile: null }),
       // 🔴 種類を変える口はノートとログでだけ出る(台帳 #1852 I2 / 依頼 157)
@@ -944,5 +950,32 @@ describe('ノートのブックマーク(#1377)', () => {
         ENTRY_MENU_ACTIONS.find((x) => x.action === a)?.menuOnly,
         `${a} が右の列にも出る`,
       ).toBe(true);
+  });
+});
+
+describe('ノートのピン留め(#1377)', () => {
+  const ids = (ctx: Parameters<typeof entryMenuActions>[0]): string[] =>
+    entryMenuActions(ctx)
+      .map((a) => a.action)
+      .filter((a) => a === 'pin-note' || a === 'unpin-note');
+
+  it('🔴 ピン留めする / 外すは対 ── まだなら「する」だけ、済みなら「外す」だけ', () => {
+    expect(ids({ archetype: 'text', linkedFile: null, pinned: false })).toEqual(['pin-note']);
+    expect(ids({ archetype: 'text', linkedFile: null, pinned: true })).toEqual(['unpin-note']);
+  });
+
+  it('🔴 材料を渡さない面(固定エリアの見えない面)には出さない', () => {
+    expect(ids({ archetype: 'text', linkedFile: null })).toEqual([]);
+  });
+
+  it('字は「ピン留め」で、削除より上・右の列には出さない(menuOnly)', () => {
+    const rows = entryMenuActions({ archetype: 'text', linkedFile: null, pinned: false });
+    expect(rows.find((a) => a.action === 'pin-note')?.label).toBe('ピン留めする');
+    const off = entryMenuActions({ archetype: 'text', linkedFile: null, pinned: true });
+    expect(off.find((a) => a.action === 'unpin-note')?.label).toBe('ピン留めを外す');
+    const order = rows.map((a) => a.action);
+    expect(order.indexOf('pin-note')).toBeLessThan(order.indexOf('delete-entry'));
+    for (const a of ['pin-note', 'unpin-note'])
+      expect(ENTRY_MENU_ACTIONS.find((x) => x.action === a)?.menuOnly, `${a} が右の列にも出る`).toBe(true);
   });
 });
