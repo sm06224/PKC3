@@ -19,6 +19,7 @@ runtime/ort-wasm.mjs            ORT の ort-wasm-simd-threaded.mjs
 runtime/ort-wasm.wasm           ORT の ort-wasm-simd-threaded.wasm(14.3MB)
 models/Xenova/whisper-base/…    軽い(段 2 の出力を置く)
 models/Xenova/whisper-small/…   正確(同上)
+models/<turbo の modelId>/…     高精度(任意。置いた日から目録に載る。置かれていない間、PKC3 の設定では理由つきで選べない)
 LICENSES/                       同梱するライセンス(collect-licenses.mjs)
 bundle-info.json                何を束ねたか(make-pack が build へコピーする)
 ```

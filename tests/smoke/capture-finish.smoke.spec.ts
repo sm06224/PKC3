@@ -1,7 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { gotoApp, clickReal, collectPageErrors, expectImageRendered, pickCaptureTool } from './helpers';
+import { answerAppDialog, gotoApp, clickReal, collectPageErrors, expectImageRendered, pickCaptureTool } from './helpers';
 import { PROCESS_MENU_LABEL, processToolOf } from '../../src/features/capture/capture-process';
+import { STEM_MODELS } from '../../src/features/audio/stem-model';
+import { buildIdentityOnnx } from '../helpers/identity-onnx';
 
 /**
  * 🔴 **録ったものを仕上げる**(#952 A2・A4・A5・B1。着地前レビューの実 Chromium smoke)。
@@ -53,7 +55,7 @@ test('🔴 仕上げ ▾ から:雑音を減らす → 新しい音の添付 / �
   const menu = page.locator('[data-pkc-region="context-menu"]');
   await expect(menu).toBeVisible();
   const ids = await menu.locator('[data-pkc-action="capture-process"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-pkc-part')));
-  expect(ids, '動画の一覧の道具').toEqual(['fold-still', 'contact-sheet', 'denoise', 'separate', 'balance', 'chapters', 'speakers']);
+  expect(ids, '動画の一覧の道具').toEqual(['fold-still', 'contact-sheet', 'denoise', 'separate', 'separate-stems', 'balance', 'chapters', 'speakers']);
   expect(await menu.locator('[data-pkc-action="capture-process"]').first().textContent()).toBe(processToolOf('fold-still')!.label);
   await expect(menu.locator('[data-pkc-group]'), '塊(映像 / 音を作る / ノートに書く)で切れていない').toHaveCount(3);
   // 一覧の外を押すと閉じる(片道にしない)
@@ -74,6 +76,96 @@ test('🔴 仕上げ ▾ から:雑音を減らす → 新しい音の添付 / �
   expect(seconds, '新しい音の長さが元(7 秒)と違う').toBeGreaterThan(6.5);
   expect(seconds).toBeLessThan(7.6);
   await clickReal(page, denoised.locator('[data-pkc-action="capture-stop"]'));
+
+  // ── ②b #674 / #949 歌声と楽器に分ける:モデルは**公開の配布元(ここでは fixture)から**ブラウザが取り、使い捨てのワーカーで本物の ORT(wasm)が走る
+  //    ① 取得できないときは「どこがなぜ駄目か」を言って、何も作らない(2 つの取得元とも huggingface.co)
+  const stemHosts = new Set(STEM_MODELS[0]!.urls.map((u) => new URL(u).host));
+  expect([...stemHosts], '取得元のホストが想定(1 つ)と違う ── 下の route を直すこと').toEqual(['huggingface.co']);
+  await page.route('https://huggingface.co/**', (route) => route.abort('connectionrefused'));
+  await pickCaptureTool(page, audioRow, 'separate-stems');
+  // 🔴 初めて取得するときは確認が出る(大きさ・試験的・録音は外へ出ない)。⚠ まず「やめる」── 取得しに行かず、何も作らない
+  const firstAsk = await answerAppDialog(page, 'cancel');
+  expect(firstAsk).toMatch(/約 \d+(\.\d)? MB/);
+  expect(firstAsk).toContain('試験的');
+  await expect(statusLine(page), 'やめたのに取得に行った').not.toContainText('huggingface.co につながりませんでした');
+  await pickCaptureTool(page, audioRow, 'separate-stems');
+  await answerAppDialog(page, 'ok');
+  await expect(statusLine(page), '取得できない理由を言わない').toContainText('歌声と楽器を分けるモデルを取得できませんでした', { timeout: 30_000 });
+  await expect(statusLine(page)).toContainText('huggingface.co につながりませんでした');
+  await expect(rowOf(page, '声と雑音 (歌声).webm'), '取得できなかったのに添付を作った').toHaveCount(0);
+  await page.unroute('https://huggingface.co/**');
+  //    ② 取得できたら:ワーカーが本物の ONNX Runtime でモデルを読み、左右 2ch の opus を 2 本作る(恒等写像のモデルなので 歌声 = 元 / 楽器 ≈ 無音)
+  const modelBytes = Buffer.from(buildIdentityOnnx([1, 4, STEM_MODELS[0]!.stft.dimF, STEM_MODELS[0]!.stft.dimT], STEM_MODELS[0]!.minBytes + 1_000_000));
+  let modelRequests = 0;
+  await page.route('https://huggingface.co/**', (route) => {
+    modelRequests += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/octet-stream',
+      headers: { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' },
+      body: modelBytes,
+    });
+  });
+  await pickCaptureTool(page, audioRow, 'separate-stems');
+  await answerAppDialog(page, 'ok');
+  await expect(statusLine(page), '歌声と楽器を作ったと言わない').toContainText('歌声と楽器の 2 つの音を作りました', { timeout: 90_000 });
+  expect(modelRequests, 'モデルの取得は 1 本だけ').toBe(1);
+  const vocal = rowOf(page, '声と雑音 (歌声).webm');
+  const rest = rowOf(page, '声と雑音 (楽器).webm');
+  await expect(vocal, '歌声の添付が増えない').toHaveCount(1, { timeout: 15_000 });
+  await expect(rest, '楽器の添付が増えない').toHaveCount(1, { timeout: 15_000 });
+  await expect(audioRow, '元の録音が消えた').toHaveCount(1);
+  //    中身:ブラウザで復号し直して、2ch・約 7 秒・歌声は鳴り(元の声)・楽器はほぼ無音であること
+  const stats = async (row: ReturnType<typeof rowOf>) => {
+    await clickReal(page, row.locator('[data-pkc-field="capture-play"]'));
+    const src = await row.locator('audio').first().evaluate((a: HTMLAudioElement) => a.currentSrc || a.src);
+    return page.evaluate(async (url) => {
+      const buf = await (await fetch(url)).arrayBuffer();
+      const ctx = new AudioContext();
+      const d = await ctx.decodeAudioData(buf);
+      const rms = (c: Float32Array): number => Math.sqrt(c.reduce((s, v) => s + v * v, 0) / c.length);
+      const out = { channels: d.numberOfChannels, seconds: d.duration, rmsL: rms(d.getChannelData(0)), rmsR: rms(d.getChannelData(Math.min(1, d.numberOfChannels - 1))) };
+      await ctx.close();
+      return out;
+    }, src);
+  };
+  const v = await stats(vocal);
+  await clickReal(page, vocal.locator('[data-pkc-action="capture-stop"]'));
+  const r = await stats(rest);
+  await clickReal(page, rest.locator('[data-pkc-action="capture-stop"]'));
+  expect(v.channels, '歌声が 2ch でない').toBe(2);
+  expect(r.channels).toBe(2);
+  expect(v.seconds, '歌声の長さが元(7 秒)と違う').toBeGreaterThan(6.5);
+  expect(v.seconds).toBeLessThan(7.6);
+  expect(v.rmsL, '歌声が鳴っていない(元の声が出ていない)').toBeGreaterThan(0.005);
+  expect(r.rmsL, '楽器に声が残っている(恒等写像なら元 − 歌声 ≈ 0)').toBeLessThan(v.rmsL * 0.2);
+  //    取り込んだモデルは端末に残り、設定の「音源分離」から見え、消せる(片道にしない)。次からは取りに行かない
+  await expect(statusLine(page), '想定の設定で分けたと言わない').toContainText('想定の設定で分けました。聞いて確かめてください');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const stemSection = page.locator('[data-pkc-region="settings-stem"]');
+  await stemSection.scrollIntoViewIfNeeded();
+  await expect(stemSection.locator('[data-pkc-field="stem-installed"]'), '取り込んだのに「取り込み済み」が出ない').toContainText('取り込み済み');
+  await expect(stemSection.locator('[data-pkc-action="install-stem-model"]')).toBeHidden();
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]').catch(async () => {
+    await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="detail"]');
+    await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  });
+  const rowsBefore = await rows(page).count();
+  await pickCaptureTool(page, audioRow, 'separate-stems');
+  await expect(statusLine(page).first()).toContainText('歌声と楽器の 2 つの音を作りました', { timeout: 90_000 });
+  // ⚠ 添付が一覧に増える(= 段取りが終わって次を受けられる)まで待つ。知らせが先に出て、段取りの門はまだ閉じている
+  await expect(rows(page), '2 回目の添付が増えない').toHaveCount(rowsBefore + 2, { timeout: 30_000 });
+  expect(modelRequests, '2 回目なのにモデルを取りに行った(端末に残っているはず)').toBe(1);
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await stemSection.scrollIntoViewIfNeeded();
+  await clickReal(page, stemSection.locator('[data-pkc-action="remove-stem-model"]'));
+  await expect(stemSection.locator('[data-pkc-action="install-stem-model"]'), '消したのに取り込むが出ない(片道)').toBeVisible({ timeout: 15_000 });
+  await expect(stemSection.locator('[data-pkc-field="stem-installed"]')).toBeHidden();
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]').catch(async () => {
+    await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="detail"]');
+    await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  });
+  await page.unroute('https://huggingface.co/**');
 
   // ── ③ A5 コンタクトシート:WebCodecs の復号 + OffscreenCanvas → PNG の添付(画像として描ける)
   await pickCaptureTool(page, videoRow, 'contact-sheet');
@@ -133,5 +225,9 @@ test('🔴 仕上げ ▾ から:雑音を減らす → 新しい音の添付 / �
   expect(dur, 'まとめたのに長さが変わった').toBeGreaterThan(14);
   expect(dur).toBeLessThan(16);
 
-  expect(errors, errors.join('\n')).toEqual([]);
+  // 取得できない道(②b)で 2 つの取得元が断られた分の console.error だけは、道中の期待どおり(他は 0 件)
+  const refused = errors.filter((e) => e.includes('ERR_CONNECTION_REFUSED'));
+  expect(refused, '取得できない道で、2 つの取得元を試していない').toHaveLength(STEM_MODELS[0]!.urls.length);
+  const others = errors.filter((e) => !e.includes('ERR_CONNECTION_REFUSED'));
+  expect(others, others.join('\n')).toEqual([]);
 });

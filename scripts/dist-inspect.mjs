@@ -204,6 +204,27 @@ export const PRECACHE_LIST_FILE = 'precache.json';
  *          files: {path: string, bytes: number}[],
  *          text: Map<string, string>}} input
  */
+/**
+ * 🔴 **使われない既定の参照だけは、「dist に無い」と数えない**(#674 / #949)。
+ *
+ * ONNX Runtime の glue(`assets/ort-wasm-simd-threaded-<hash>.mjs`)は、wasm を `new URL('ort-wasm-simd-threaded.wasm', import.meta.url)`
+ * という**既定の名前**でも指している。PKC3 は `stem-worker.ts` が `wasmPaths` に **hash 付きの実体(`?url`)を明示で渡す**ので、
+ * この既定の参照は実行時に使われない(使われたら外へ出るか 404 になる ── 渡し忘れは `tests/adapter/stem-worker.test.ts` が止める)。
+ * ⚠ 許すのは**この 1 組(参照元の形 × 参照先の名前)だけ**。他の参照切れは今までどおり鳴る(`tests/dist-inspect.test.ts`)。
+ */
+/**
+ * 🔴 **precache に載せない wasm**(音源分離の ONNX Runtime。約 14MB。#674 / #949)。
+ * ⚠ 綴りの正本は `src/adapter/platform/sw/sw-source.ts` の `ORT_WASM_PRECACHE_SKIP`(`tests/adapter/sw-source.test.ts` が突き合わせる)。
+ * 「配る量(cap)」には数える(別立ての予算にはしない)が、precache の一覧には載せない ── 押した人のワーカーが初めて取りに行く物。
+ */
+export const ORT_WASM_NOT_PRECACHED = /^assets\/ort-wasm[^/]*\.wasm$/;
+
+export function isDeadDefaultRef(referrer, target) {
+  return (
+    /^assets\/ort-wasm-simd-threaded[^/]*\.mjs$/.test(referrer) && target === 'assets/ort-wasm-simd-threaded.wasm'
+  );
+}
+
 export function inspectDist({
   kind,
   capKb,
@@ -317,6 +338,7 @@ export function inspectDist({
       return;
     }
     const target = resolveFrom(referrer, ref);
+    if (isDeadDefaultRef(referrer, target)) return;
     // 🔑 別立ての実体(`pdf/lib/`)も「在る」ものとして引く ── 窓の JS(`pdf/reader.js`)が参照するが、
     //    precache の突合(`paths`)には含めない(重い実体を precache と cap の外に置くため)
     if (paths.has(target) || pdfPaths.has(target)) referenced.add(target);
@@ -380,7 +402,9 @@ export function inspectDist({
         errors.push(`sw.js の precache 一覧が読めない: ${e.message}`);
       }
       for (const u of listed) notePlacement('sw.js(precache)', u);
-      const want = shipped.map((f) => f.path).filter((p) => p !== 'sw.js');
+      const want = shipped
+        .map((f) => f.path)
+        .filter((p) => p !== 'sw.js' && !ORT_WASM_NOT_PRECACHED.test(p));
       const have = new Set(listed.map((u) => u.replace(/^\.\//, '')));
       /**
        * 🔴 **両方向を見る**(#225 の教訓)。上の `want` から外しただけだと
@@ -399,6 +423,26 @@ export function inspectDist({
         errors.push(
           `precache に ${PDF_DIR} が ${pdfInPrecache.length} 件載っている ── ` +
             'これは PDF を PKC の画面で読む人が押したときだけ取りに行く物で、install で落とす物ではない',
+        );
+      }
+      /**
+       * 🔴 **正規表現が実在名に当たっていること**(穴 E)── `ORT_WASM_NOT_PRECACHED` / `isDeadDefaultRef` は名前の形で当てるので、
+       * ORT 側の改名(`ort-wasm-simd-threaded` → 別名)や Vite の命名の変化で**どの実ファイルにも当たらなくなっても黙って通る**
+       * (precache の除外も、既定名の許容も、空振りする)。ワーカー(`stem-worker-*`)が出ているのに実在名に当たらなければ落とす。
+       */
+      if (shipped.some((f) => /^assets\/stem-worker-[^/]+\.js$/.test(f.path))) {
+        if (!shipped.some((f) => ORT_WASM_NOT_PRECACHED.test(f.path))) {
+          errors.push('stem-worker が在るのに、ONNX Runtime の wasm(assets/ort-wasm*.wasm)が実在しない ── 除外の正規表現が実在名に当たっていない');
+        }
+        if (!shipped.some((f) => /^assets\/ort-wasm-simd-threaded[^/]*\.mjs$/.test(f.path))) {
+          errors.push('stem-worker が在るのに、ONNX Runtime の glue(assets/ort-wasm-simd-threaded*.mjs)が実在しない ── 既定名の許容の正規表現が実在名に当たっていない');
+        }
+      }
+      const ortInPrecache = [...have].filter((f) => ORT_WASM_NOT_PRECACHED.test(f));
+      if (ortInPrecache.length > 0) {
+        errors.push(
+          `precache に ONNX Runtime の wasm が ${ortInPrecache.length} 件載っている ── ` +
+            'これは「歌声と楽器に分ける」を押した人のワーカーが初めて取りに行く物で、install で 14MB 落とす物ではない',
         );
       }
       if (have.has(PORTABLE_TEMPLATE)) {

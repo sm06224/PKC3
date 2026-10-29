@@ -9,7 +9,7 @@
  */
 import { createCancelToken, type CancelToken } from '@features/job-cancel';
 
-export type JobKind = 'import' | 'export';
+export type JobKind = 'import' | 'export' | 'separate';
 
 /** 画面に出す字。 */
 export const JOB_PANEL: Readonly<Record<JobKind, { title: string; cancel: string; hint: string }>> = {
@@ -22,6 +22,11 @@ export const JOB_PANEL: Readonly<Record<JobKind, { title: string; cancel: string
     title: '書き出し中',
     cancel: '書き出しをやめる',
     hint: '書き出しを途中でやめます。ファイルは作りません',
+  },
+  separate: {
+    title: '歌声と楽器を分けています',
+    cancel: '分離をやめる',
+    hint: '歌声と楽器に分ける作業を途中でやめます。新しい音は作りません(元の録音は変わりません)',
   },
 };
 

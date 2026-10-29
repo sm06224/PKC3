@@ -686,3 +686,145 @@ describe('長い録音の区切り(台帳 #1852 O1 / 依頼 149 ③)', () => {
     expect(h.appends[0]!.text).toContain('続き2');
   });
 });
+
+/**
+ * 🔴 **途中の長い無音は、認識に渡さず切り、時刻は元の録音へ戻す**(#1446 ①)。
+ * 対照群: 無音の無い録音は PCM を変えない。
+ */
+describe('途中の長い無音の切り落とし(#1446)', () => {
+  const RATE = 16_000;
+  const tone = (sec: number, amp: number): Float32Array => {
+    const a = new Float32Array(sec * RATE);
+    for (let i = 0; i < a.length; i++) a[i] = i % 2 === 0 ? amp : -amp;
+    return a;
+  };
+  const withGap = (): Float32Array => {
+    const parts = [tone(3, 0.2), tone(20, 0), tone(3, 0.2)];
+    const out = new Float32Array(parts.reduce((s, p) => s + p.length, 0));
+    let at = 0;
+    for (const p of parts) {
+      out.set(p, at);
+      at += p.length;
+    }
+    return out;
+  };
+
+  it('認識に渡す PCM は短くなり、後ろの声の時刻は元の録音の時刻(約 23 秒)へ戻る', async () => {
+    const transcribe = vi.fn(async (job: AsrJob): Promise<AsrJobResult> => {
+      void job;
+      return {
+        text: '前 後',
+        segments: [
+          { startMs: 0, endMs: 2000, text: '前' },
+          { startMs: 4000, endMs: 6000, text: '後' }, // 切ったあとの録音で 4.0 秒 = 元では約 23 秒
+        ],
+        loadMs: 0,
+        runMs: 0,
+      };
+    });
+    const h = harness({ decode: vi.fn(async () => withGap()), transcribe });
+    await h.tr.run('a');
+    const sent = transcribe.mock.calls[0]![0].pcm.length;
+    expect(sent, '無音を切っていない').toBeLessThan(11 * RATE);
+    expect(h.appends[0]!.text).toMatch(/^0:00 〜0:02 前$/m);
+    expect(h.appends[0]!.text).toMatch(/^0:2[2-4] 〜0:2[4-6] 後$/m);
+    expect(h.notes.at(-1)).toContain('途中の長い無音');
+  });
+
+  it('対照群:無音の無い録音は PCM をそのまま渡し、無音の知らせも出ない', async () => {
+    const pcm = tone(10, 0.2);
+    const transcribe = vi.fn(async (job: AsrJob): Promise<AsrJobResult> => {
+      void job;
+      return { text: 'こんにちは', loadMs: 0, runMs: 0 };
+    });
+    const h = harness({ decode: vi.fn(async () => pcm), transcribe });
+    await h.tr.run('a');
+    expect(transcribe.mock.calls[0]![0].pcm.length).toBe(10 * RATE);
+    expect(h.notes.at(-1)).not.toContain('途中の長い無音');
+  });
+});
+
+/**
+ * 🔴 レビュー指摘: gpu は fp16 の重みがあるときだけ / 実際の実行器を言う / 暴走の除去は小さな入力だけ / 終わりの時刻の変換。
+ */
+describe('高精度(gpu)・暴走の除去・終わりの時刻(レビュー指摘)', () => {
+  const turbo = ASR_PARTS[2]!;
+  const readyWith = (keys: string[]): AsrReady => ({ part: turbo, files: new Map(keys.map((k) => [k, new Blob(['x'])] as const)) });
+  const FP16 = 'models/openai/whisper-large-v3-turbo/onnx/encoder_model_fp16.onnx';
+  const JSEP = ['runtime/ort-wasm-jsep.mjs', 'runtime/ort-wasm-jsep.wasm'];
+  const Q8 = 'models/openai/whisper-large-v3-turbo/onnx/encoder_model_quantized.onnx';
+  const jobs: AsrJob[] = [];
+  const echo = (device?: 'webgpu' | 'wasm') =>
+    vi.fn(async (job: AsrJob): Promise<AsrJobResult> => {
+      jobs.push(job);
+      return { text: 'ok', loadMs: 0, runMs: 0, ...(device === undefined ? {} : { device }) };
+    });
+
+  it('🔴 fp16 の重みがあるときだけ gpu で渡す。無ければ gpu を付けない(毎回 1 度失敗させない)', async () => {
+    jobs.length = 0;
+    const a = harness({ ready: vi.fn(async () => readyWith([FP16, Q8, ...JSEP])), transcribe: echo('webgpu') });
+    await a.tr.run('a');
+    expect(jobs[0]!.gpu).toBe(true);
+    const b = harness({ ready: vi.fn(async () => readyWith([Q8])), transcribe: echo('wasm') });
+    await b.tr.run('a');
+    expect(jobs[1]!.gpu, 'fp16 が無いのに gpu で渡した').toBeUndefined();
+    expect(b.notes.at(-1), 'gpu でないのに実行器を言った').not.toContain('WebGPU');
+    // 🔴 fp16 があっても、実行の部品が WebGPU 非対応(JSEP 版なし)なら gpu で渡さない
+    const c = harness({ ready: vi.fn(async () => readyWith([FP16, Q8])), transcribe: echo('wasm') });
+    await c.tr.run('a');
+    expect(jobs[2]!.gpu, '実行の部品が非対応なのに gpu で渡した').toBeUndefined();
+  });
+
+  it('🔴 終わりの知らせに実際の実行器を言う(WebGPU / CPU に戻った)', async () => {
+    const on = harness({ ready: vi.fn(async () => readyWith([FP16, ...JSEP])), transcribe: echo('webgpu') });
+    await on.tr.run('a');
+    expect(on.notes.at(-1)).toContain('WebGPU で実行しました');
+    const back = harness({ ready: vi.fn(async () => readyWith([FP16, ...JSEP])), transcribe: echo('wasm') });
+    await back.tr.run('a');
+    expect(back.notes.at(-1)).toContain('WebGPU を使えなかったため CPU で実行しました');
+  });
+
+  const LOOP = 'la '.repeat(30);
+  const quietPcm = (): Float32Array => new Float32Array(16_000).fill(0.005); // RMS 5e-3 < 1e-2
+  const loudPcm = (): Float32Array => new Float32Array(16_000).fill(0.2);
+
+  it('🔴 暴走の除去は小さな入力のときだけ: 小さい→畳む / 通常の音量→「la la …」はそのまま残る', async () => {
+    const out = (text: string) => vi.fn(async (): Promise<AsrJobResult> => ({ text: `前 ${text} 後`, loadMs: 0, runMs: 0 }));
+    const quiet = harness({ decode: vi.fn(async () => quietPcm()), transcribe: out(`あ${'ああ'.repeat(30)}`) });
+    await quiet.tr.run('a');
+    expect(quiet.appends[0]?.text, '小さな入力で畳まれていない').toBe('前 あああ 後');
+    const loud = harness({ decode: vi.fn(async () => loudPcm()), transcribe: out(LOOP.trim()) });
+    await loud.tr.run('a');
+    expect(loud.appends[0]?.text, '通常の音量なのに畳んだ').toBe(`前 ${LOOP.trim()} 後`);
+  });
+
+  it('🔴 通常の音量の同じ内容の行 6 連打(はい)は、そのまま残る', async () => {
+    const segs = Array.from({ length: 6 }, (_, i) => ({ startMs: i * 1000, endMs: i * 1000 + 500, text: 'はい' }));
+    const h = harness({ decode: vi.fn(async () => loudPcm()), transcribe: vi.fn(async (): Promise<AsrJobResult> => ({ text: 'はい', segments: segs, loadMs: 0, runMs: 0 })) });
+    await h.tr.run('a');
+    expect(h.appends[0]!.text.split('\n')).toHaveLength(6);
+  });
+
+  it('🔴 切った無音をまたぐ区間の終わりは、前の範囲の末尾へ寄る(無音を丸ごとまたいで長く見えない)', async () => {
+    const RATE = 16_000;
+    const tone = (sec: number, amp: number): Float32Array => {
+      const a = new Float32Array(sec * RATE);
+      for (let i = 0; i < a.length; i++) a[i] = i % 2 === 0 ? amp : -amp;
+      return a;
+    };
+    const parts = [tone(3, 0.2), tone(20, 0), tone(3, 0.2)];
+    const pcm = new Float32Array(parts.reduce((s, p) => s + p.length, 0));
+    let at = 0;
+    for (const p of parts) {
+      pcm.set(p, at);
+      at += p.length;
+    }
+    // 切ったあとの録音で 0 〜 3.5 秒(前の範囲の末尾 = 切り目)の区間
+    const h = harness({
+      decode: vi.fn(async () => pcm),
+      transcribe: vi.fn(async (): Promise<AsrJobResult> => ({ text: '前', segments: [{ startMs: 0, endMs: 3500, text: '前' }], loadMs: 0, runMs: 0 })),
+    });
+    await h.tr.run('a');
+    expect(h.appends[0]!.text).toMatch(/^0:00 〜0:03 前$/m); // 3.5 秒(0:03)。次の範囲の頭(23.5 秒 = 0:23)へは飛ばない
+  });
+});

@@ -34,7 +34,8 @@ export interface AudioApi {
   /** この設定で符号化できるか。 */
   supported(config: { sampleRate: number; numberOfChannels: number; bitrate: number }): Promise<boolean>;
   createEncoder(init: { output: (c: EncodedAudioOut) => void; error: (e: unknown) => void }): AudioEncoderLike;
-  makeData(samples: Float32Array, sampleRate: number, timestampUs: number): AudioDataLike;
+  /** `samples` は `channels` 本を交互に並べた(インターリーブ)物。省略 = 1 本(mono)。 */
+  makeData(samples: Float32Array, sampleRate: number, timestampUs: number, channels?: number): AudioDataLike;
 }
 
 /** この場所(ワーカー)で opus を符号化する道具。無ければ `null`。 */
@@ -76,12 +77,12 @@ export function nativeAudioApi(): AudioApi | null {
         },
       };
     },
-    makeData: (samples, sampleRate, timestampUs) =>
+    makeData: (samples, sampleRate, timestampUs, channels = 1) =>
       new AudioData({
         format: 'f32',
         sampleRate,
-        numberOfFrames: samples.length,
-        numberOfChannels: 1,
+        numberOfFrames: samples.length / channels,
+        numberOfChannels: channels,
         timestamp: timestampUs,
         data: samples as Float32Array<ArrayBuffer>,
       }),
@@ -99,11 +100,18 @@ export type EncodeResult =
   | { readonly ok: true; readonly bytes: Uint8Array; readonly durationMs: number }
   | { readonly ok: false; readonly reason: 'no-encoder' | 'empty' | 'encode-failed' };
 
-/** PCM(48kHz mono)を opus の WebM にする。⚠ 例外は投げず、理由を値で返す。 */
-export async function encodeOpusWebm(pcm: Float32Array, api: AudioApi | null = nativeAudioApi()): Promise<EncodeResult> {
+/**
+ * PCM(48kHz)を opus の WebM にする。⚠ 例外は投げず、理由を値で返す。
+ * `channels` を 2 にすると、`pcm` は左右を交互に並べた物(L0 R0 L1 R1 …)として符号化する(音源分離の出力用。ビットレートも倍にする)。
+ */
+export async function encodeOpusWebm(
+  pcm: Float32Array,
+  api: AudioApi | null = nativeAudioApi(),
+  channels = 1,
+): Promise<EncodeResult> {
   if (api === null) return { ok: false, reason: 'no-encoder' };
   if (pcm.length === 0) return { ok: false, reason: 'empty' };
-  const config = { sampleRate: ENCODE_RATE, numberOfChannels: 1, bitrate: ENCODE_BITRATE };
+  const config = { sampleRate: ENCODE_RATE, numberOfChannels: channels, bitrate: ENCODE_BITRATE * channels };
   if (!(await api.supported(config))) return { ok: false, reason: 'no-encoder' };
   const packets: OpusPacket[] = [];
   let description: Uint8Array | null = null;
@@ -122,11 +130,12 @@ export async function encodeOpusWebm(pcm: Float32Array, api: AudioApi | null = n
   });
   try {
     enc.configure({ codec: 'opus', ...config });
-    for (let at = 0; at < pcm.length && error === null; at += CHUNK_SAMPLES) {
+    const step = CHUNK_SAMPLES * channels;
+    for (let at = 0; at < pcm.length && error === null; at += step) {
       // 待ち行列があふれないように待つ(背景のタブでも進むよう、短い時計で見張る)
       while (enc.encodeQueueSize > MAX_QUEUE && error === null) await new Promise((r) => setTimeout(r, 5));
-      const part = pcm.subarray(at, Math.min(pcm.length, at + CHUNK_SAMPLES));
-      const data = api.makeData(part, ENCODE_RATE, Math.round((at * 1e6) / ENCODE_RATE));
+      const part = pcm.subarray(at, Math.min(pcm.length, at + step));
+      const data = api.makeData(part, ENCODE_RATE, Math.round(((at / channels) * 1e6) / ENCODE_RATE), channels);
       try {
         enc.encode(data);
       } finally {
@@ -145,7 +154,7 @@ export async function encodeOpusWebm(pcm: Float32Array, api: AudioApi | null = n
   }
   if (error !== null || packets.length === 0) return { ok: false, reason: 'encode-failed' };
   const preSkip = (description === null ? null : preSkipOf(description)) ?? 312;
-  const muxed = muxOpusWebm({ packets, channels: 1, preSkip, packetMs: packetUs * 1e-3 });
+  const muxed = muxOpusWebm({ packets, channels, preSkip, packetMs: packetUs * 1e-3 });
   if (!muxed.ok) return { ok: false, reason: 'encode-failed' };
   return { ok: true, bytes: muxed.result.bytes, durationMs: muxed.result.durationMs };
 }

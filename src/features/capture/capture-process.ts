@@ -8,6 +8,9 @@
  */
 import type { CaptureItem } from './capture-item';
 import { canExtractFromVideo, canTrimCapture } from './capture-trim-gate';
+import { humanBytes } from '../human-bytes';
+import { STEM_EXPERIMENTAL_SUFFIX, STEM_MODELS } from '../audio/stem-model';
+import { IS_PORTABLE_BUILD, STEM_PORTABLE_UNAVAILABLE } from '../build-flavor';
 
 export type ProcessTool =
   | 'fold-still'
@@ -15,6 +18,7 @@ export type ProcessTool =
   | 'contact-sheet'
   | 'denoise'
   | 'separate'
+  | 'separate-stems'
   | 'speakers'
   | 'balance'
   | 'fix-speakers';
@@ -79,6 +83,16 @@ export const PROCESS_TOOLS: readonly ProcessToolSpec[] = [
     group: PROCESS_GROUP_AUDIO,
   },
   {
+    id: 'separate-stems',
+    // 🔴 1 枚にまとめた版では使えない ── 押す前に字で分かるようにする(押しても理由つきで断る)
+    label: IS_PORTABLE_BUILD ? `歌声と楽器に分ける${STEM_EXPERIMENTAL_SUFFIX}(このビルドでは使えません)` : `歌声と楽器に分ける${STEM_EXPERIMENTAL_SUFFIX}`,
+    // ⚠ 大きさは目録(`STEM_MODELS`)から出す(手で書くと、モデルを替えた日に食い違う)
+    title: IS_PORTABLE_BUILD ? STEM_PORTABLE_UNAVAILABLE : `${STEM_EXPERIMENTAL_SUFFIX === '' ? '' : '試験的な機能です(結果は聞いて確かめてください)。'}歌声と楽器(伴奏)を別々の新しい音として保存します。分離モデル(約 ${humanBytes(STEM_MODELS[0]!.approxBytes)})を公開の配布元からこのブラウザが取得し、分離は端末の中で行います(録音は外へ出ません。元の録音・録画は残ります)。`,
+    nameTag: null,
+    busyText: '歌声と楽器を分けています…',
+    group: PROCESS_GROUP_AUDIO,
+  },
+  {
     id: 'balance',
     label: '声の大きさをそろえる',
     title: 'マイクから遠い人の声と近い人の声の大きさをそろえた新しい音を保存します(元はそのまま残ります)。',
@@ -137,6 +151,7 @@ export function canProcess(item: CaptureItem, tool: ProcessTool, hasSpeakerSecti
       return item.kind === 'video' ? canTrimCapture(item) || hasUsableAudio(item) : true;
     case 'denoise':
     case 'separate':
+    case 'separate-stems':
     case 'speakers':
     case 'balance':
       return hasUsableAudio(item);

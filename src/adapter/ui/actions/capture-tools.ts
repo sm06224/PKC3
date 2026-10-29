@@ -27,7 +27,15 @@ import {
   readSpeakerTurns,
 } from '@features/capture/speakers';
 import type { VoiceJob, VoiceRefusal, VoiceResult } from '@adapter/platform/voice/voice-run';
-import type { ToolRunner } from './capture-process';
+import type { StemProbeResult, StemRefusal, StemResult } from '@adapter/platform/stems/stem-run';
+import type { StemRequest } from '@adapter/platform/stems/stem-client';
+import type { StemObtainResult } from '@adapter/platform/stems/stem-model-install';
+import { STEM_EXPERIMENTAL, STEM_MAX_MS, STEM_MODELS, STEM_RATE, type StemModel } from '@features/audio/stem-model';
+import { humanBytes } from '@features/human-bytes';
+import { IS_PORTABLE_BUILD, STEM_PORTABLE_UNAVAILABLE } from '@features/build-flavor';
+import type { ProcessOutput, ToolRunner } from './capture-process';
+import type { JobControl } from './job-control';
+import { isOperationCancelled } from '@features/job-cancel';
 
 export interface CaptureToolDeps {
   readonly foldStill: (blob: Blob) => Promise<VideoFoldResult>;
@@ -41,6 +49,37 @@ export interface CaptureToolDeps {
   readonly decode48k: (blob: Blob) => Promise<Float32Array>;
   /** 声の仕上げ(ワーカー)。⚠ `pcm` は譲る(transfer)。断る理由は値で返る。 */
   readonly voice: (job: VoiceJob) => Promise<VoiceResult>;
+  /** 44.1kHz のステレオ(左右の写し)へ(音源分離用)。⚠ 読めなければ例外。 */
+  readonly decodeStereo44k: (blob: Blob) => Promise<{ readonly left: Float32Array; readonly right: Float32Array }>;
+  /**
+   * 分離モデルの重みを取り出す(メインスレッド)。端末に取り込み済みならそれ(取りに行かない)、無ければ公開の配布元から取得して
+   * 端末に残す。⚠ 投げない ── 理由は値で返る。
+   */
+  readonly obtainStemModel: (
+    model: StemModel,
+    onProgress: (got: number, total: number, host: string) => void,
+  ) => Promise<StemObtainResult>;
+  /** 端末にモデルが入っているか(入っていなければ、取得の前に確認を出す)。 */
+  readonly isStemModelStored: (model: StemModel) => Promise<boolean>;
+  /**
+   * 🔴 端末のモデルを捨てる(保存済みのモデルで分離が bad-model になったとき)。
+   */
+  readonly discardStemModel: (model: StemModel) => Promise<void>;
+  /** 確認(はい / いいえ)。⚠ 初めてモデルを取得する前に出す。 */
+  readonly confirmStemFetch: (message: string) => Promise<boolean>;
+  /** 🔴 実行器(ONNX Runtime)が起動できるかを、モデルを取る前に確かめる(ワーカー)。 */
+  readonly probeStems: () => Promise<StemProbeResult>;
+  /** 歌声と楽器に分ける(ワーカー)。⚠ `left` / `right` は譲る(transfer)。断る理由は値で返る。 */
+  readonly stems: (
+    req: StemRequest,
+    onProgress: (text: string) => void,
+    /** 「やめる」の合図を繋ぐ口(渡した関数を、やめるときに呼ぶ)。 */
+    registerCancel?: (fn: () => void) => void,
+  ) => Promise<StemResult>;
+  /** 🔴 長い仕事の「やめる」ボタンの出し入れ(`job-control.ts`。取り込み・書き出しと同じ形)。 */
+  readonly jobs: JobControl;
+  /** 取得中のモデルを止める(やめる印が立ったとき)。 */
+  readonly cancelStemFetch: () => void;
   readonly now: () => Date;
   /** 1 行の字を聞く小窓(`promptInApp`)。やめたら `null`。 */
   readonly ask: (opts: { title: string; label: string; initial: string; okLabel: string }) => Promise<string | null>;
@@ -58,12 +97,36 @@ const VOICE_REFUSAL: Readonly<Record<VoiceRefusal, string>> = {
   'no-engine': '声の仕上げのライブラリを読み込めませんでした。',
 };
 
+/** 音源分離が断る理由 → 画面の字。⚠ `detail` があれば後ろに足す(`stemRefusalText`)。 */
+const STEM_REFUSAL: Readonly<Record<StemRefusal, string>> = {
+  empty: 'この添付には音が入っていませんでした。',
+  silent: 'この添付はほぼ無音で、分ける音がありません。',
+  'too-long': `長すぎる録音は分けられません(${String(STEM_MAX_MS / 60_000)} 分まで)。先に「この範囲で切り出す」で分けてください。`,
+  'unknown-model': '分離モデルの設定が見つかりませんでした。',
+  'no-runtime': '音源分離のライブラリ(ONNX Runtime)を読み込めませんでした。',
+  'bad-model': 'モデルを読み込めませんでした(取得した物が想定のモデルではない可能性があります)。',
+  'infer-failed': '分離の計算に失敗しました(メモリが足りない可能性があります。ほかのタブを閉じて、もう一度お試しください)。',
+  'no-encoder': 'このブラウザは音の書き出し(opus の符号化)に対応していないため、新しい音を作れません。',
+  'encode-failed': '新しい音を書き出せませんでした。',
+  cancelled: '歌声と楽器に分けるのをやめました。',
+};
+
+export function stemRefusalText(reason: StemRefusal, detail?: string): string {
+  const base = STEM_REFUSAL[reason];
+  return detail === undefined || detail === '' ? base : `${base} 詳細: ${detail.slice(0, 160)}`;
+}
+
 /**
  * 🔴 **復号の前に、長すぎる録音を断る**(着地前レビュー ⚠3)。復号してから断ると、断る前にメモリを使い切る。
  * 長さは webm の先頭の `Duration` → 動画なら映像の走査(窓で読むだけ・復号しない)→ 音なら大きさの目安、の順に引く。
  * 引けなければ `null`(動画で長さが分からない形は、復号後の検査に任せる)。
  */
-async function probeTooLong(deps: CaptureToolDeps, item: CaptureItem, blob: Blob): Promise<string | null> {
+async function probeTooLong(
+  deps: CaptureToolDeps,
+  item: CaptureItem,
+  blob: Blob,
+  maxMs: number = VOICE_MAX_MS,
+): Promise<string | null> {
   let durationMs: number | null;
   try {
     durationMs = webmDurationMs(new Uint8Array(await blob.slice(0, 262_144).arrayBuffer()));
@@ -78,10 +141,10 @@ async function probeTooLong(deps: CaptureToolDeps, item: CaptureItem, blob: Blob
       durationMs = null;
     }
   }
-  const tooLong = durationMs !== null ? durationMs > VOICE_MAX_MS : item.kind === 'audio' && blob.size > VOICE_FALLBACK_BYTES;
+  const tooLong = durationMs !== null ? durationMs > maxMs : item.kind === 'audio' && blob.size > VOICE_FALLBACK_BYTES;
   if (!tooLong) return null;
   const length = durationMs !== null ? `(${elapsedText(durationMs)} あります)` : '';
-  return `長すぎる録音は仕上げられません${length}。30 分までです。先に「この範囲で切り出す」で分けてください。`;
+  return `長すぎる録音は仕上げられません${length}。${String(maxMs / 60_000)} 分までです。先に「この範囲で切り出す」で分けてください。`;
 }
 
 /** 声の仕上げの前処理:長さを見て、48kHz の PCM にする。成功すれば PCM、失敗すれば断り文。 */
@@ -230,6 +293,105 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
 
 
   /**
+   * 歌声と楽器に分ける(#674・#949)。ニューラルの音源分離(MDX-Net 系の ONNX)── 元は残し、「歌声」と「楽器」の 2 つの新しい音にする。
+   *
+   * 手順: ① 長さを見て断る(復号の前)② 分離モデルを**公開の配布元から**取る(取れなければ、どこがなぜ駄目かを言って終わる)
+   * ③ 44.1kHz ステレオに復号 ④ 使い捨てのワーカーで分ける(重みはワーカーの依頼ごとに読み、終わったら手放す)。
+   * ⚠ 外へ出るのは重みの取得だけ。録音の音は 1 バイトも送らない。「声 / 声以外」の 2 分割(RNNoise)はそのまま残る。
+   */
+  const separateStemsTool: ToolRunner = async ({ item, blob, progress }) => {
+    // 🔴 1 枚にまとめた版では、何もせず理由を言う(取得も復号もワーカーも始めない)
+    if (IS_PORTABLE_BUILD) return { kind: 'refused', text: STEM_PORTABLE_UNAVAILABLE };
+    const model = STEM_MODELS[0]!;
+    const tooLong = await probeTooLong(deps, item, blob, STEM_MAX_MS);
+    if (tooLong !== null) return { kind: 'refused', text: tooLong };
+    // 🔴 モデルを取る前に、実行器が起動できるかを確かめる(66MB を取ってから「ORT が起動できない」で失敗しない)
+    const probe = await deps.probeStems();
+    if (!probe.ok) return { kind: 'refused', text: stemRefusalText(probe.reason, probe.detail) };
+    // 🔴 初めて取得するときは、確認を出す(大きさ・外から取ること・試験的であること)。入っていれば出さない
+    if (!(await deps.isStemModelStored(model))) {
+      const ok = await deps.confirmStemFetch(
+        `分離モデル(約 ${humanBytes(model.approxBytes)})を公開の配布元から取得します。${STEM_EXPERIMENTAL ? 'この機能は試験的です(結果は聞いて確かめてください)。' : ''}録音は外へ出ません。取得しますか?`,
+      );
+      if (!ok) return { kind: 'refused', text: '取得をやめました(歌声と楽器は分けていません)。' };
+    }
+    // 🔴 ここから先は長い(取得・復号・分離)── 「やめる」を出せる仕事にする(#1852 F2 と同じ形: `JobControl` の印を区切りで見る)。
+    //   少し待っても終わらないときだけボタンが出る。やめた回は失敗にせず「やめました」と言い、何も作らない・何も残さない
+    const token = deps.jobs.start('separate');
+    const cancelledOut: ProcessOutput = {
+      kind: 'cancelled',
+      text: '歌声と楽器に分けるのをやめました(新しい音は作っていません。元の録音は変わりません)',
+    };
+    try {
+      progress(`分離モデル(約 ${humanBytes(model.approxBytes)})を用意しています…`);
+      let lastPct = -1;
+      // 取得は外から止められる(印が立ったら、取得を中断する)
+      token.onCancel(() => deps.cancelStemFetch());
+      const fetched = await deps.obtainStemModel(model, (got, total, host) => {
+        const pct = total > 0 ? Math.min(100, Math.floor((got / total) * 100)) : -1;
+        if (pct === lastPct && pct >= 0) return;
+        lastPct = pct;
+        progress(
+          total > 0
+            ? `分離モデルを ${host} から取得しています… ${String(pct)}%(${humanBytes(got)} / ${humanBytes(total)})`
+            : `分離モデルを ${host} から取得しています… ${humanBytes(got)}`,
+        );
+      });
+      token.throwIfCancelled();
+      if (!fetched.ok) return { kind: 'refused', text: fetched.why };
+      let pcm: { readonly left: Float32Array; readonly right: Float32Array };
+      try {
+        pcm = await deps.decodeStereo44k(blob);
+      } catch {
+        return { kind: 'refused', text: 'この音を読み取れませんでした(このブラウザが対応していない形かもしれません)。' };
+      }
+      token.throwIfCancelled();
+      // 長さが分からなかった形の最後の砦(復号できた分の長さで断る)
+      if ((pcm.left.length * 1000) / STEM_RATE > STEM_MAX_MS) {
+        return { kind: 'refused', text: STEM_REFUSAL['too-long'] };
+      }
+      progress('歌声と楽器を分けています(ワーカーで処理)…');
+      // 分離は塊の合間で止まる(ワーカーへ「やめる」の合図を送る)
+      const r = await deps.stems(
+        { model: fetched.blob, modelId: model.id, left: pcm.left, right: pcm.right },
+        progress,
+        (fn) => token.onCancel(fn),
+      );
+      if (!r.ok && r.reason === 'cancelled') return cancelledOut;
+      token.throwIfCancelled();
+      if (!r.ok) {
+        // 🔴 端末に残っていたモデルで bad-model になったら、そのモデルを捨てる(次も同じ失敗をしない)
+        if (r.reason === 'bad-model' && fetched.fromStore) {
+          await deps.discardStemModel(model);
+          return {
+            kind: 'refused',
+            text: `${stemRefusalText(r.reason, r.detail)} 取り込んだモデルが合わなかったので消しました。もう一度試すと取得し直します。`,
+          };
+        }
+        return { kind: 'refused', text: stemRefusalText(r.reason, r.detail) };
+      }
+      // 🔴 分離が成功し、安全弁を通ったので、ここで初めて端末に残す(取得した回だけ)
+      const saveNote = await fetched.save();
+      return {
+        kind: 'attach',
+        items: r.files.map((f) => ({
+          tag: f.tag,
+          blob: new Blob([f.bytes], { type: 'audio/webm' }),
+          mime: 'audio/webm',
+          ext: 'webm',
+        })),
+        summary: `歌声と楽器の 2 つの音を作りました${STEM_EXPERIMENTAL ? '(試験的)' : ''}。想定の設定で分けました。聞いて確かめてください${saveNote === '' ? '' : `(${saveNote})`}`,
+      };
+    } catch (e) {
+      if (isOperationCancelled(e)) return cancelledOut;
+      throw e;
+    } finally {
+      deps.jobs.finish(token);
+    }
+  };
+
+
+  /**
    * 話者を分ける(B4・#949)。声の区間を見つけて特徴でまとめ、「## 話者」の節(話者が替わる時刻 + 名前)を本文の末尾に足す。
    * そのノートに時刻つきの文字起こしがあれば、話者を添えた「## 話者つき文字起こし」の節も足す。
    * ⚠ 手法は素朴な特徴(MFCC 平均 + 基本周波数)のクラスタリング ── 似た声は 1 人になりうる。あとから「話者を直す」で直せる。
@@ -310,6 +472,7 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
     'contact-sheet': contactSheet,
     denoise,
     separate,
+    'separate-stems': separateStemsTool,
     speakers,
     balance,
     'fix-speakers': fixSpeakersTool,

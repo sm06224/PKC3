@@ -86,6 +86,10 @@ const UNRESOLVED: readonly string[] = [
   'export-selection-portable',
   'install-asr-part',
   'remove-asr-part',
+  // 2026-10-29(#674 / #949): 音源分離のモデルを取り込む / やめる / 消す。押し所は設定の節の `button()` ヘルパーで組む(`install-asr-part` と同じ)
+  'cancel-stem-install',
+  'install-stem-model',
+  'remove-stem-model',
   'choose-office-pack',
   'dual-back',
   'dual-bookmark',

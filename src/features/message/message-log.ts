@@ -130,6 +130,7 @@ export const MESSAGE_SOURCE_LABEL: Readonly<Record<string, string>> = {
   plotly: 'グラフ(plotly)',
   asr: '文字起こし',
   voice: '声の仕上げ',
+  stems: '歌声と楽器の分離',
   asset: '添付',
   wave: '波形',
   audio: '音声',

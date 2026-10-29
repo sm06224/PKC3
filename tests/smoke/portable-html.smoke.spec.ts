@@ -619,6 +619,12 @@ test('🔴 `file://` の可搬 HTML で、「雑音を減らす」が動いて�
   const audio = made.locator('audio').first();
   await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.readyState), { message: '新しい音が読み込めない' }).toBeGreaterThanOrEqual(1);
   expect(await audio.evaluate((a: HTMLAudioElement) => a.duration), '新しい音の長さが元(7 秒)と違う').toBeGreaterThan(6.5);
+  // 🔴 1 枚にまとめた版では「歌声と楽器に分ける」は使えない(ONNX Runtime の wasm 14.5MB を畳まない ── #674 / #949)。
+  //    押すと取得もワーカーも始めず、理由を言う。⚠ 項目の字にも「このビルドでは使えません」が出ている
+  await clickReal(page, row.locator('[data-pkc-action="open-capture-process"]'));
+  await expect(page.locator('[data-pkc-action="capture-process"][data-pkc-part="separate-stems"]'), '項目の字に使えない旨が無い').toContainText('このビルドでは使えません');
+  await clickReal(page, page.locator('[data-pkc-action="capture-process"][data-pkc-part="separate-stems"]'));
+  await expect(page.locator('[data-pkc-region="status"]'), '使えない理由を言わない').toContainText('歌声と楽器に分ける機能は使えません', { timeout: 15_000 });
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

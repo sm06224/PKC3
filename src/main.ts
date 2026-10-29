@@ -381,12 +381,19 @@ import { openImageDrawInPane, openImageDrawWindow } from '@adapter/platform/imag
 import { AudioClient } from '@adapter/platform/audio/audio-client';
 import { VideoClient } from '@adapter/platform/video/video-client';
 import { AsrClient } from '@adapter/platform/asr/asr-client';
-import { decodeToMono, decodeToMono16k } from '@adapter/platform/asr/asr-decode';
+import { decodeToMono, decodeToMono16k, decodeToStereo } from '@adapter/platform/asr/asr-decode';
+import { STEM_RATE } from '@features/audio/stem-model';
 import { VoiceClient } from '@adapter/platform/voice/voice-client';
+import { StemClient } from '@adapter/platform/stems/stem-client';
+import { StemModelStore } from '@adapter/platform/stems/stem-model-store';
+import { StemModelInstaller } from '@adapter/platform/stems/stem-model-install';
+import { STEM_MODELS } from '@features/audio/stem-model';
+import { appStemModel, applyStemResult } from '@adapter/ui/render/stem-model-panel';
 import { VOICE_RATE } from '@features/audio/voice-lab';
 import { AsrPackInstaller } from '@adapter/platform/asr/asr-pack-install';
 import { AsrPackStore } from '@adapter/platform/asr/asr-pack-store';
-import { ASR_PACK_BASE, asrPartOf } from '@features/asr/asr-parts';
+import { ASR_PACK_BASE, asrPartOf, asrPackFacts } from '@features/asr/asr-parts';
+import { fetchAsrManifest } from '@adapter/platform/asr/asr-pack-acquire';
 import { appAsrPack, applyAsrResult } from '@adapter/ui/render/asr-pack-panel';
 import { asrReadyFrom, createCaptureTranscriber } from '@adapter/ui/actions/capture-transcribe';
 import { writeBackEntry } from '@adapter/ui/actions/write-back';
@@ -3954,6 +3961,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const audioClient = new AudioClient();
   // 🔴 声の仕上げ(雑音を減らす・話し声とそれ以外に分ける・話者…)のワーカー。遅延起動・アイドルで畳む(`WorkerLease`)
   const voiceClient = new VoiceClient();
+  // 🔴 歌声と楽器を分ける(ニューラルの音源分離。#674・#949)のワーカー。遅延起動・アイドルで畳む。重みは公開の配布元から取る
+  const stemClient = new StemClient();
+  // 🔴 取り込んだモデルは端末(IndexedDB)に残す ── 設定の「音源分離」で取り込み / 消す。次からは取りに行かない
+  const stemInstaller = new StemModelInstaller({ store: new StemModelStore() });
+  const stemIds = STEM_MODELS.map((m) => m.id);
+  // 🔴 入っているモデルの読みは**設定の面を開いたとき**に遅らせる(起動では IDB を読まない)
+  appStemModel.setLoader(() => stemInstaller.readInstalled(stemIds));
   /**
    * 🔴 **動画は別のワーカー**(#683 段②b-1)── 動画の長い仕事で音の切り出しを待たせない。
    * 元の `Blob` は窓で読む(250MB を開かない)。始まりが手前へ戻るなら、切る前に確認する。
@@ -4030,6 +4044,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       decode16k: (blob) => decodeToMono16k(blob),
       decode48k: (blob) => decodeToMono(blob, VOICE_RATE),
       voice: (job) => voiceClient.run(job),
+      decodeStereo44k: (blob) => decodeToStereo(blob, STEM_RATE),
+      obtainStemModel: async (model, onProgress) => {
+        const r = await stemInstaller.obtain(model, onProgress);
+        if (!r.ok || r.fromStore) return r;
+        // 🔴 保存は分離が成功したあと(`save`)。保存した回は、設定の「音源分離」の控えへ写す(写さないと、入っているのに「取り込む」が出る)
+        return {
+          ...r,
+          save: async () => {
+            const note = await r.save();
+            void stemInstaller.readInstalled(stemIds).then((v) => appStemModel.setInstalled(v));
+            return note;
+          },
+        };
+      },
+      isStemModelStored: (model) => stemInstaller.isStored(model.id),
+      confirmStemFetch: (message) => ask(message, { okLabel: '取得する', cancelLabel: 'やめる' }),
+      discardStemModel: async (model) => {
+        await stemInstaller.discard(model.id);
+        void stemInstaller.readInstalled(stemIds).then((v) => appStemModel.setInstalled(v));
+      },
+      probeStems: () => stemClient.probe(),
+      stems: (req, onProgress, registerCancel) => stemClient.run(req, onProgress, registerCancel),
+      jobs,
+      cancelStemFetch: () => stemInstaller.cancel(),
       now: () => new Date(),
       ask: (opts) => promptInApp(root, opts),
       fixSpeakers: (lid, renames, at) => dispatcher.dispatch({ type: 'FIX_SPEAKERS', lid, renames, at }),
@@ -4127,6 +4165,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const asrStore = new AsrPackStore();
   const asrInstaller = new AsrPackInstaller({ store: asrStore, base: ASR_PACK_BASE });
   const asrClient = new AsrClient();
+  // 🔴 配布元の目録を引く口(設定の「音声認識」を開いたとき 1 度だけ使う ── 配布元に無い部品は理由つきで選べなくする。#1446 ③)
+  appAsrPack.setAvailabilityProbe(async () => {
+    try {
+      return asrPackFacts(await fetchAsrManifest(ASR_PACK_BASE, (url, init) => fetch(url, init)));
+    } catch {
+      return null; // 引けない(未配布・オフライン)は「分からない」── 選べない扱いにしない
+    }
+  });
   const captureTranscriber = createCaptureTranscriber({
     gate: captureJobGate,
     dispatcher,
@@ -4462,6 +4508,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         .then(finishAsrPack);
     },
     cancelAsrInstall: () => asrInstaller.cancel(),
+    // 🔴 音源分離のモデルを取り込む / やめる / 消す(#674 / #949)── 判断も文言も実体が持つ
+    installStemModel: (id) => {
+      void stemInstaller
+        .install(id, (text) => appStemModel.setProgress(text))
+        .then((r) => applyStemResult(appStemModel, r, { notify: showStatus }));
+    },
+    cancelStemInstall: () => stemInstaller.cancel(),
+    removeStemModel: (id) => {
+      void stemInstaller.remove(id).then((r) => applyStemResult(appStemModel, r, { notify: showStatus }));
+    },
     removeAsrPart: (id) => {
       const part = asrPartOf(id);
       if (part === undefined) return;

@@ -28,6 +28,9 @@
  *   worker が死ねば一緒に消える。
  */
 import {
+  ASR_RUNTIME_JSEP_JS,
+  ASR_RUNTIME_JSEP_WASM,
+  runtimeSupportsWebGpu,
   ASR_RUNTIME_JS,
   ASR_RUNTIME_WASM,
   ASR_RUNTIME_WASM_LOADER,
@@ -48,6 +51,8 @@ export interface AsrJob {
   readonly language: string | null;
   /** 16kHz mono の PCM(`-1..1`)。 */
   readonly pcm: Float32Array;
+  /** 🔴 WebGPU を先に試す部品か(`AsrPart.gpu`。#1446 ②)。使えなければ CPU(wasm)へ戻る。 */
+  readonly gpu?: boolean;
 }
 
 /** 認識結果の 1 区切り(#1232 段 a)。⚠ 時刻は**録音の頭からの ms**。 */
@@ -68,6 +73,8 @@ export interface AsrJobResult {
   /** 読み込み(部品の import + 重みの読み + session 生成)。⚠ 読み込み済みなら 0。 */
   readonly loadMs: number;
   readonly runMs: number;
+  /** 実際に使った実行器(`webgpu` を試して戻ったときは `wasm`)。 */
+  readonly device?: 'webgpu' | 'wasm';
 }
 
 type Pipe = ((pcm: Float32Array, opts: Record<string, unknown>) => Promise<unknown>) & {
@@ -94,10 +101,14 @@ export interface AsrRunnerDeps {
   importModule(url: string): Promise<RuntimeModule>;
   createObjectURL(blob: Blob): string;
   now?(): number;
+  /** この場所(ワーカー)で WebGPU を試せるか。省略 = `navigator.gpu` の有無。 */
+  hasWebGpu?(): boolean;
 }
 
 /** 推論の設定。⚠ 段②-0 で測った組み合わせ(wasm CPU / q8)から動かさない。 */
 const PIPELINE_OPTIONS = { device: 'wasm', dtype: 'q8' } as const;
+/** WebGPU を試すときの設定(`AsrPart.gpu` の部品だけ)。⚠ 失敗したら `PIPELINE_OPTIONS` へ戻る。 */
+const GPU_PIPELINE_OPTIONS = { device: 'webgpu', dtype: 'fp16' } as const;
 const RUN_OPTIONS = { chunk_length_s: 30, stride_length_s: 5, task: 'transcribe', return_timestamps: true } as const;
 
 function textOf(out: unknown): string {
@@ -152,7 +163,10 @@ export class AsrRunner {
   private readonly now: () => number;
   private runtime: RuntimeModule | null = null;
   private blobs = new Map<string, Blob>();
-  private loaded: { modelId: string; pipe: Pipe } | null = null;
+  /** CPU(wasm)用 / WebGPU(JSEP)用の置き場。⚠ 作った URL は worker が死ぬまで使う(2 つ目のモデルが同じ wasm をもう一度要る)。 */
+  private pathsNormal: { mjs: string; wasm: string } | null = null;
+  private pathsJsep: { mjs: string; wasm: string } | null = null;
+  private loaded: { modelId: string; pipe: Pipe; device: 'webgpu' | 'wasm' } | null = null;
 
   constructor(deps: AsrRunnerDeps) {
     this.deps = deps;
@@ -184,10 +198,11 @@ export class AsrRunner {
     env.localModelPath = ASR_LOCAL_MODEL_PATH;
     env.useBrowserCache = false;
     env.useWasmCache = false;
-    env.backends.onnx.wasm.wasmPaths = {
+    this.pathsNormal = {
       mjs: this.deps.createObjectURL(typed(loader, 'text/javascript')),
       wasm: this.deps.createObjectURL(typed(wasm, 'application/wasm')),
     };
+    env.backends.onnx.wasm.wasmPaths = this.pathsNormal;
     env.fetch = (input) => this.serve(input);
     this.runtime = rt;
     return rt;
@@ -211,6 +226,36 @@ export class AsrRunner {
     return new Response(null, { status: 404 });
   }
 
+  /** pipeline を作る。`tryGpu` なら WebGPU(fp16)を先に試し、作れなければ CPU(wasm / q8)。 */
+  private async load(
+    rt: RuntimeModule,
+    job: AsrJob,
+    tryGpu: boolean,
+  ): Promise<{ modelId: string; pipe: Pipe; device: 'webgpu' | 'wasm' }> {
+    const hasGpu = this.deps.hasWebGpu ?? ((): boolean => typeof navigator !== 'undefined' && 'gpu' in navigator);
+    // 🔴 実行の部品が WebGPU 対応(JSEP 版あり)のときだけ試す。非 JSEP の wasm 1 本だけなら、試しても必ず失敗する
+    const jsepReady = runtimeSupportsWebGpu(this.blobs.keys());
+    if (tryGpu && hasGpu() && jsepReady) {
+      try {
+        const jsep = this.blobs.get(ASR_RUNTIME_JSEP_JS)!;
+        const jsepWasm = this.blobs.get(ASR_RUNTIME_JSEP_WASM)!;
+        this.pathsJsep ??= {
+          mjs: this.deps.createObjectURL(typed(jsep, 'text/javascript')),
+          wasm: this.deps.createObjectURL(typed(jsepWasm, 'application/wasm')),
+        };
+        rt.env.backends.onnx.wasm.wasmPaths = this.pathsJsep;
+        const pipe = await rt.pipeline('automatic-speech-recognition', job.modelId, { ...GPU_PIPELINE_OPTIONS });
+        return { modelId: job.modelId, pipe, device: 'webgpu' };
+      } catch {
+        // 実行の部品が WebGPU に対応していない・fp16 の重みが無い、など ── CPU で続ける
+      }
+    }
+    // CPU は通常の置き場へ戻す(WebGPU を試して落ちた後も、通常の wasm で作る)
+    if (this.pathsNormal !== null) rt.env.backends.onnx.wasm.wasmPaths = this.pathsNormal;
+    const pipe = await rt.pipeline('automatic-speech-recognition', job.modelId, { ...PIPELINE_OPTIONS });
+    return { modelId: job.modelId, pipe, device: 'wasm' };
+  }
+
   async run(job: AsrJob): Promise<AsrJobResult> {
     const t0 = this.now();
     // 毎回、依頼が持つ Blob の参照へ差し替える(同じ worker で別の重みを頼まれても食い違わない)
@@ -222,15 +267,27 @@ export class AsrRunner {
       this.loaded = null;
       await old.dispose?.().catch(() => undefined);
     }
-    if (this.loaded === null) {
-      const pipe = await rt.pipeline('automatic-speech-recognition', job.modelId, { ...PIPELINE_OPTIONS });
-      this.loaded = { modelId: job.modelId, pipe };
-    }
+    if (this.loaded === null) this.loaded = await this.load(rt, job, job.gpu === true);
     const t1 = this.now();
-    const out = await this.loaded.pipe(job.pcm, {
+    const runOpts = {
       ...RUN_OPTIONS,
       ...(job.language === null ? {} : { language: job.language }),
-    });
+    };
+    let out: unknown;
+    try {
+      out = await this.loaded.pipe(job.pcm, runOpts);
+    } catch (e) {
+      if (this.loaded.device !== 'webgpu') throw e;
+      /**
+       * 🔴 WebGPU で作れても、**推論で落ちる**ことがある(アダプタの制限・fp16 の非対応・デバイスの喪失)。
+       *   壊れた pipe は捨てて(使い回すと以後が全部落ちる)、CPU(wasm / q8)で作り直して同じ依頼をやり直す。
+       */
+      const broken = this.loaded.pipe;
+      this.loaded = null;
+      await broken.dispose?.().catch(() => undefined);
+      this.loaded = await this.load(rt, job, false);
+      out = await this.loaded.pipe(job.pcm, runOpts);
+    }
     const t2 = this.now();
     const segments = segmentsOf(out);
     return {
@@ -238,6 +295,7 @@ export class AsrRunner {
       ...(segments.length > 0 ? { segments } : {}),
       loadMs: t1 - t0,
       runMs: t2 - t1,
+      device: this.loaded.device,
     };
   }
 }

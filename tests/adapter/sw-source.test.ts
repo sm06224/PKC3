@@ -14,6 +14,7 @@ import {
   cacheNameFor,
   isStaleCache,
   shouldPrecache,
+  ORT_WASM_PRECACHE_SKIP,
   swSource,
 } from '../../src/adapter/platform/sw/sw-source';
 
@@ -364,11 +365,25 @@ describe('規則(純関数)', () => {
     ['pdf/doc-lease.js', true],
     ['pdf/text-hits.js', true],
     ['pdf/page-list.js', true],
+    // 🔴 音源分離の ONNX Runtime の wasm(約 14MB)は、押した人のワーカーが初めて取りに行く物(#674 / #949)
+    ['assets/ort-wasm-simd-threaded-qh98TCA_.wasm', false],
+    // 対照群 ── glue(.mjs)・ワーカー本体・sqlite の wasm は載る
+    ['assets/ort-wasm-simd-threaded-DN_1uOdW.mjs', true],
+    ['assets/stem-worker-B9y92X_L.js', true],
+    ['assets/sqlite3-BBBBBBBB.wasm', true],
     // 対照群 ── 名前が似ているだけの物は載る(接頭辞の `pdf/lib/` だけを外す)
     ['assets/pdf-viewer-AAAAAAAA.js', true],
     ['pdf.js', true],
   ])('precache 対象: %s → %s', (path, expected) => {
     expect(shouldPrecache(path)).toBe(expected);
+  });
+});
+
+describe('🔴 ORT の wasm を precache に載せない綴りは、sw-source と dist-inspect で同じ', () => {
+  it('同じ正規表現(片方だけ直すと、検品が「載っていない」「載せた」を取り違える)', async () => {
+    // @ts-expect-error -- 検品規則は素の .mjs(ビルド対象外の CI script 群)
+    const mod = (await import('../../scripts/dist-inspect.mjs')) as { ORT_WASM_NOT_PRECACHED: RegExp };
+    expect(mod.ORT_WASM_NOT_PRECACHED.source).toBe(ORT_WASM_PRECACHE_SKIP.source);
   });
 });
 

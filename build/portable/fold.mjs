@@ -139,6 +139,20 @@ if (leftovers.length > 0)
 
 // ── ② 呼び出し側を classic の blob worker へ差し替える
 let app = readFileSync(join(A, pick(/^index-.*\.js$/)), 'utf-8');
+/**
+ * 🔴 **音源分離の ONNX Runtime は、この版へ畳まない**(#674 / #949。`build/portable.config.ts` の `__PKC_PORTABLE__`)。
+ * ⚠ 畳まない代わりに、**参照が 1 つも残っていないこと**を門にする ── 残ると、1 枚にした後で解けない `ort-wasm-simd-threaded-*.wasm` を
+ *   指したまま「畳んだ」ことになる(押したとき初めて 404 で落ちる)。枝の除去が効かなくなった日(minify の変化・条件の書き換え)に、ここで落ちる。
+ */
+const ORT_REF = /ort-wasm-simd-threaded/;
+const ortHolders = [...workerSrc].filter(([, src]) => ORT_REF.test(src)).map(([name]) => name);
+if (ORT_REF.test(app)) ortHolders.push('(index)');
+if (ortHolders.length > 0) {
+  throw new Error(
+    `ONNX Runtime の参照が残っている(1 枚に畳むと解けない): ${ortHolders.join(', ')} ── ` +
+      '`stem-worker.ts` の __PKC_PORTABLE__ の枝が落ちていない',
+  );
+}
 let swapped = 0;
 for (const [name, src] of workerSrc) {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -78,9 +78,9 @@ describe('道具の表と門(canProcess)', () => {
     const audio = itemsOf('audio/webm;codecs=opus', '録音.webm')![0]!;
     const mp4 = itemsOf('audio/mp4', '録音.m4a')![0]!;
     const ids = (item: typeof vp8): string[] => PROCESS_TOOLS.filter((t) => canProcess(item, t.id)).map((t) => t.id);
-    expect(ids(vp8)).toEqual(['fold-still', 'contact-sheet', 'denoise', 'separate', 'balance', 'chapters', 'speakers']);
-    expect(ids(vp9)).toEqual(['denoise', 'separate', 'balance', 'chapters', 'speakers']); // 映像を触る道具は出ない
-    expect(ids(audio)).toEqual(['denoise', 'separate', 'balance', 'chapters', 'speakers']);
+    expect(ids(vp8)).toEqual(['fold-still', 'contact-sheet', 'denoise', 'separate', 'separate-stems', 'balance', 'chapters', 'speakers']);
+    expect(ids(vp9)).toEqual(['denoise', 'separate', 'separate-stems', 'balance', 'chapters', 'speakers']); // 映像を触る道具は出ない
+    expect(ids(audio)).toEqual(['denoise', 'separate', 'separate-stems', 'balance', 'chapters', 'speakers']);
     expect(ids(mp4), 'mp4 でも聞ける音の分析系は出す(復号はブラウザ)').toContain('denoise');
     expect(canProcess({ ...vp8, assetKey: null }, 'fold-still')).toBe(false);
     // 話者を直すは、本文に話者の一覧があるときだけ

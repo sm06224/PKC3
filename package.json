@@ -54,6 +54,7 @@
     "markdown-it-cjk-friendly": "3.0.0",
     "markdown-it-footnote": "4.0.0",
     "mermaid": "^12.2.0",
+    "onnxruntime-web": "^1.31.1",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "6.4.299",
     "plotly.js-dist-min": "4.1.2",
