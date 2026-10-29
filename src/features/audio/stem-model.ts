@@ -33,6 +33,22 @@ import {
   type StftSpec,
 } from './stem-dsp';
 
+/**
+ * 🔴 **試験的**であることの印(画面の字・取得の確認・設定の欄・マニュアルが、ここから引く)。
+ *
+ * 外す手順(再レビュー指摘。issue への記載は別):
+ *  1. 本物の重み(`STEM_MODELS[].urls` の先)を取得して、実際に歌声と楽器が分かれて聞こえることを確かめる
+ *     (設定値の `nFft` などの照合も、このとき UVR の記録と突き合わせる ── 下の「正直に」の節)。
+ *  2. 確かめた重みの sha256 を `STEM_MODELS[].sha256` に埋める(中身を固定する)。
+ *  3. `STEM_EXPERIMENTAL` を false にする ── 項目の字・確認・設定の欄・結果の知らせの「試験的」が、この 1 か所で消える
+ *     (マニュアルの「試験的」の注記は手で外す)。
+ */
+export const STEM_EXPERIMENTAL = true;
+/** 画面の字に添える語。 */
+export const STEM_EXPERIMENTAL_TAG = STEM_EXPERIMENTAL ? '試験的' : '';
+/** 括弧つき(`(試験的)`)。試験的でなければ空。 */
+export const STEM_EXPERIMENTAL_SUFFIX = STEM_EXPERIMENTAL ? `(${STEM_EXPERIMENTAL_TAG})` : '';
+
 /** モデルの標本化率。 */
 export const STEM_RATE = 44_100;
 /** 出力の opus の標本化率(符号化器が受ける率)。 */
@@ -298,7 +314,7 @@ export function separationProblem(
   const r = rmsOf2(rest[0], rest[1]);
   if (r > inputRms) return '残りの音が元より大きくなりました(別のモデルか、設定が合っていません)';
   if (consistency !== null && consistency > STEM_MAX_INCONSISTENCY) {
-    return `モデルの出力が音として成り立っていません(一貫性の誤差 ${consistency.toFixed(2)}。窓長などの設定が合っていません)`;
+    return `モデルの出力が音として成り立っていません(一貫性の誤差 ${consistency.toFixed(2)}。ウィンドウ長などの設定が合っていません)`;
   }
   return null;
 }

@@ -86,6 +86,7 @@ function harness(opts: {
     stems: vi.fn(async () => ({ ok: false as const, reason: 'no-runtime' as const })),
     probeStems: vi.fn(async () => ({ ok: true as const })),
     isStemModelStored: vi.fn(async () => true),
+    confirmStemFetch: vi.fn(async () => true),
     discardStemModel: vi.fn(async () => {}),
     decode16k: vi.fn(async () => pcmOf([...rep(0.3, 20), ...rep(0.001, 3), ...rep(0.3, 20)])),
     now: () => NOW,
@@ -618,6 +619,49 @@ describe('歌声と楽器に分ける(ニューラルの音源分離。#674 / #9
  *  - 端末に残っていたモデルで bad-model になったら、そのモデルを消す(`readBlob` が null になる)
  * 実体の `StemModelInstaller`(メモリ上の置き場)をそのまま繋いで確かめる。
  */
+describe('初回取得の確認と「試験的」の明示', () => {
+  it('🔴 まだ端末に無いときは、取得の前に確認を出す(大きさ・試験的・録音は外へ出ない)。入っていれば出さない', async () => {
+    const confirmStemFetch = vi.fn(async () => true);
+    const obtain = vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, save: async () => '' }));
+    const h = harness({ tools: { isStemModelStored: vi.fn(async () => false), confirmStemFetch, obtainStemModel: obtain, stems: vi.fn(async () => ({ ok: true as const, files: [{ tag: '歌声', bytes: new ArrayBuffer(2), durationMs: 1 }, { tag: '楽器', bytes: new ArrayBuffer(2), durationMs: 1 }] })) } });
+    h.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
+    await h.run('separate-stems');
+    expect(confirmStemFetch).toHaveBeenCalledTimes(1);
+    const msg = (confirmStemFetch.mock.calls[0] as unknown as [string])[0];
+    expect(msg).toMatch(/約 \d+(\.\d)? MB/);
+    expect(msg).toContain('試験的');
+    expect(msg).toContain('録音は外へ出ません');
+    expect(h.notes.at(-1)).toContain('(試験的)');
+    // 対照群: 入っていれば確認は出ない
+    const c2 = vi.fn(async () => true);
+    const h2 = harness({ tools: { isStemModelStored: vi.fn(async () => true), confirmStemFetch: c2, stems: vi.fn(async () => ({ ok: false as const, reason: 'silent' as const })) } });
+    await h2.run('separate-stems');
+    expect(c2).not.toHaveBeenCalled();
+  });
+
+  it('🔴 確認で「やめる」なら、取得もワーカーも始めず、何も作らない', async () => {
+    const obtain = vi.fn();
+    const stems = vi.fn();
+    const decode = vi.fn();
+    const h = harness({ tools: { isStemModelStored: vi.fn(async () => false), confirmStemFetch: vi.fn(async () => false), obtainStemModel: obtain, stems, decodeStereo44k: decode } });
+    await h.run('separate-stems');
+    expect(obtain).not.toHaveBeenCalled();
+    expect(stems).not.toHaveBeenCalled();
+    expect(decode).not.toHaveBeenCalled();
+    expect(h.deps.attach).not.toHaveBeenCalled();
+    expect(h.dispatcher.getState().error).toContain('取得をやめました');
+  });
+
+  it('項目の字・説明に「試験的」が付く(外す手順は STEM_EXPERIMENTAL の 1 か所)', async () => {
+    const { processToolOf } = await import('../../src/features/capture/capture-process');
+    const { STEM_EXPERIMENTAL } = await import('../../src/features/audio/stem-model');
+    expect(STEM_EXPERIMENTAL).toBe(true);
+    const spec = processToolOf('separate-stems')!;
+    expect(spec.label).toContain('(試験的)');
+    expect(spec.title).toContain('試験的');
+  });
+});
+
 describe('モデルの保存は検証のあと(⚠1)・test B', () => {
   const bytes = new Uint8Array([1, 2]).buffer;
   const okFiles = {
@@ -656,6 +700,7 @@ describe('モデルの保存は検証のあと(⚠1)・test B', () => {
       tools: {
         obtainStemModel: (m, p) => installer.obtain(m, p),
         isStemModelStored: (m) => installer.isStored(m.id),
+        confirmStemFetch: async () => true,
         discardStemModel: async (m) => void (await installer.discard(m.id)),
         stems: vi.fn(async () => stemsResult),
       },
@@ -682,7 +727,7 @@ describe('モデルの保存は検証のあと(⚠1)・test B', () => {
     await w.h.run('separate-stems');
     expect(w.blobs.has('mdx-vocal'), '合わなかったモデルが端末に残った').toBe(false);
     expect(await (w.installer as unknown as { deps: { store: StemModelStorePort } }).deps.store.readBlob('mdx-vocal')).toBeNull();
-    expect(w.h.dispatcher.getState().error).toContain('取り込んだモデルが合わなかったので消しました。もう一度試すと取り直します');
+    expect(w.h.dispatcher.getState().error).toContain('取り込んだモデルが合わなかったので消しました。もう一度試すと取得し直します');
   });
 
   it('対照群: 端末のモデルでも、bad-model 以外の失敗(メモリ不足など)では消さない', async () => {

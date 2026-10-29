@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { gotoApp, clickReal, collectPageErrors, expectImageRendered, pickCaptureTool } from './helpers';
+import { answerAppDialog, gotoApp, clickReal, collectPageErrors, expectImageRendered, pickCaptureTool } from './helpers';
 import { PROCESS_MENU_LABEL, processToolOf } from '../../src/features/capture/capture-process';
 import { STEM_MODELS } from '../../src/features/audio/stem-model';
 import { buildIdentityOnnx } from '../helpers/identity-onnx';
@@ -83,6 +83,13 @@ test('🔴 仕上げ ▾ から:雑音を減らす → 新しい音の添付 / �
   expect([...stemHosts], '取得元のホストが想定(1 つ)と違う ── 下の route を直すこと').toEqual(['huggingface.co']);
   await page.route('https://huggingface.co/**', (route) => route.abort('connectionrefused'));
   await pickCaptureTool(page, audioRow, 'separate-stems');
+  // 🔴 初めて取得するときは確認が出る(大きさ・試験的・録音は外へ出ない)。⚠ まず「やめる」── 取得しに行かず、何も作らない
+  const firstAsk = await answerAppDialog(page, 'cancel');
+  expect(firstAsk).toMatch(/約 \d+(\.\d)? MB/);
+  expect(firstAsk).toContain('試験的');
+  await expect(statusLine(page), 'やめたのに取得に行った').not.toContainText('huggingface.co につながりませんでした');
+  await pickCaptureTool(page, audioRow, 'separate-stems');
+  await answerAppDialog(page, 'ok');
   await expect(statusLine(page), '取得できない理由を言わない').toContainText('歌声と楽器を分けるモデルを取得できませんでした', { timeout: 30_000 });
   await expect(statusLine(page)).toContainText('huggingface.co につながりませんでした');
   await expect(rowOf(page, '声と雑音 (歌声).webm'), '取得できなかったのに添付を作った').toHaveCount(0);
@@ -100,6 +107,7 @@ test('🔴 仕上げ ▾ から:雑音を減らす → 新しい音の添付 / �
     });
   });
   await pickCaptureTool(page, audioRow, 'separate-stems');
+  await answerAppDialog(page, 'ok');
   await expect(statusLine(page), '歌声と楽器を作ったと言わない').toContainText('歌声と楽器の 2 つの音を作りました', { timeout: 90_000 });
   expect(modelRequests, 'モデルの取得は 1 本だけ').toBe(1);
   const vocal = rowOf(page, '声と雑音 (歌声).webm');

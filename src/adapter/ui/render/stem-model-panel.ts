@@ -7,12 +7,12 @@
  *  - 🔴 器は 1 度だけ組み、字と `hidden` だけ差し替える(押している最中のボタンを作り直さない)。
  * 外へ出るのはモデルの取得だけ(公開の配布元から。録音は 1 バイトも送らない)。
  */
-import { STEM_MODELS, stemHost, type StemModel } from '@features/audio/stem-model';
+import { STEM_EXPERIMENTAL_SUFFIX, STEM_MODELS, stemHost, type StemModel } from '@features/audio/stem-model';
 import { humanBytes } from '@features/human-bytes';
 import type { StemModelInstalled } from '@adapter/platform/stems/stem-model-install';
 
 /** 節の見出し。⚠ 案内の字もここから引く。 */
-export const STEM_SECTION_LABEL = '音源分離';
+export const STEM_SECTION_LABEL = `音源分離${STEM_EXPERIMENTAL_SUFFIX}`;
 
 /** モデルの控え。⚠ 設定の面と分離する側が同じ値を見る(`AsrPackState` と同じ理由)。 */
 export class StemModelState {
@@ -104,7 +104,9 @@ export function buildStemModelPanel(state: StemModelState = appStemModel): StemM
   const intro = document.createElement('p');
   intro.setAttribute('data-pkc-field', 'settings-note');
   // 🔑 説明は 1 行 + hover(`settings-notes.test.ts` が 55 字で止める)。詳しくはマニュアル(「歌声と楽器に分ける」)
-  intro.textContent = '歌声と楽器を分けるモデルを、この端末に取り込みます(録音は外へ出ません)。';
+  intro.textContent = STEM_EXPERIMENTAL_SUFFIX === ''
+    ? '歌声と楽器を分けるモデルを取り込みます(録音は外へ出ません)。'
+    : '歌声と楽器を分けるモデルを取り込みます(試験的。録音は外へ出ません)。';
   intro.title =
     'モデルは公開の配布元からこのブラウザが取得します。一度取り込めば次からは取得せず、ここで消せます。録音の「仕上げ ▾」から押したときも、無ければ取り込みます。';
   root.append(intro);
@@ -120,7 +122,7 @@ export function buildStemModelPanel(state: StemModelState = appStemModel): StemM
     const wrap = document.createElement('div');
     wrap.setAttribute('data-pkc-field', 'stem-model');
     wrap.setAttribute('data-pkc-part', model.id);
-    const install = button('install-stem-model', `${model.label}(約 ${humanBytes(model.approxBytes)})を取り込む`, 'stem-install', model.id);
+    const install = button('install-stem-model', `${model.label}${STEM_EXPERIMENTAL_SUFFIX}(約 ${humanBytes(model.approxBytes)})を取り込む`, 'stem-install', model.id);
     install.title = 'この端末にモデルを取り込みます。一度取り込めば、次からは取得しません。';
     const installed = document.createElement('span');
     installed.setAttribute('data-pkc-field', 'stem-installed');

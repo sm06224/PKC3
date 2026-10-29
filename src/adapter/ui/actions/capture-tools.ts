@@ -30,7 +30,7 @@ import type { VoiceJob, VoiceRefusal, VoiceResult } from '@adapter/platform/voic
 import type { StemProbeResult, StemRefusal, StemResult } from '@adapter/platform/stems/stem-run';
 import type { StemRequest } from '@adapter/platform/stems/stem-client';
 import type { StemObtainResult } from '@adapter/platform/stems/stem-model-install';
-import { STEM_MAX_MS, STEM_MODELS, STEM_RATE, type StemModel } from '@features/audio/stem-model';
+import { STEM_EXPERIMENTAL, STEM_MAX_MS, STEM_MODELS, STEM_RATE, type StemModel } from '@features/audio/stem-model';
 import { humanBytes } from '@features/human-bytes';
 import { IS_PORTABLE_BUILD, STEM_PORTABLE_UNAVAILABLE } from '@features/build-flavor';
 import type { ToolRunner } from './capture-process';
@@ -63,6 +63,8 @@ export interface CaptureToolDeps {
    * 🔴 端末のモデルを捨てる(保存済みのモデルで分離が bad-model になったとき)。
    */
   readonly discardStemModel: (model: StemModel) => Promise<void>;
+  /** 確認(はい / いいえ)。⚠ 初めてモデルを取得する前に出す。 */
+  readonly confirmStemFetch: (message: string) => Promise<boolean>;
   /** 🔴 実行器(ONNX Runtime)が起動できるかを、モデルを取る前に確かめる(ワーカー)。 */
   readonly probeStems: () => Promise<StemProbeResult>;
   /** 歌声と楽器に分ける(ワーカー)。⚠ `left` / `right` は譲る(transfer)。断る理由は値で返る。 */
@@ -294,6 +296,13 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
     // 🔴 モデルを取る前に、実行器が起動できるかを確かめる(66MB を取ってから「ORT が起動できない」で失敗しない)
     const probe = await deps.probeStems();
     if (!probe.ok) return { kind: 'refused', text: stemRefusalText(probe.reason, probe.detail) };
+    // 🔴 初めて取得するときは、確認を出す(大きさ・外から取ること・試験的であること)。入っていれば出さない
+    if (!(await deps.isStemModelStored(model))) {
+      const ok = await deps.confirmStemFetch(
+        `分離モデル(約 ${humanBytes(model.approxBytes)})を公開の配布元から取得します。${STEM_EXPERIMENTAL ? 'この機能は試験的です(結果は聞いて確かめてください)。' : ''}録音は外へ出ません。取得しますか?`,
+      );
+      if (!ok) return { kind: 'refused', text: '取得をやめました(歌声と楽器は分けていません)。' };
+    }
     progress(`分離モデル(約 ${humanBytes(model.approxBytes)})を用意しています…`);
     let lastPct = -1;
     const fetched = await deps.obtainStemModel(model, (got, total, host) => {
@@ -325,7 +334,7 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
         await deps.discardStemModel(model);
         return {
           kind: 'refused',
-          text: `${stemRefusalText(r.reason, r.detail)} 取り込んだモデルが合わなかったので消しました。もう一度試すと取り直します。`,
+          text: `${stemRefusalText(r.reason, r.detail)} 取り込んだモデルが合わなかったので消しました。もう一度試すと取得し直します。`,
         };
       }
       return { kind: 'refused', text: stemRefusalText(r.reason, r.detail) };
@@ -340,7 +349,7 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
         mime: 'audio/webm',
         ext: 'webm',
       })),
-      summary: `歌声と楽器の 2 つの音を作りました。想定の設定で分けました。聞いて確かめてください${saveNote === '' ? '' : `(${saveNote})`}`,
+      summary: `歌声と楽器の 2 つの音を作りました${STEM_EXPERIMENTAL ? '(試験的)' : ''}。想定の設定で分けました。聞いて確かめてください${saveNote === '' ? '' : `(${saveNote})`}`,
     };
   };
 

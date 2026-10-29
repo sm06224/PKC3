@@ -30,7 +30,7 @@ describe('版の判定', () => {
       const { flavor, proc } = await load(v);
       expect(flavor.IS_PORTABLE_BUILD).toBe(false);
       const spec = proc.processToolOf('separate-stems')!;
-      expect(spec.label).toBe('歌声と楽器に分ける');
+      expect(spec.label).toBe('歌声と楽器に分ける(試験的)');
       expect(spec.title).not.toContain('使えません');
     }
   });

@@ -4058,6 +4058,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         };
       },
       isStemModelStored: (model) => stemInstaller.isStored(model.id),
+      confirmStemFetch: (message) => ask(message, { okLabel: '取得する', cancelLabel: 'やめる' }),
       discardStemModel: async (model) => {
         await stemInstaller.discard(model.id);
         void stemInstaller.readInstalled(stemIds).then((v) => appStemModel.setInstalled(v));
