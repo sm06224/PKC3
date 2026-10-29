@@ -424,6 +424,25 @@ describe("'changed' の放送", () => {
     expect(seenByHost, '外した色が holder へ届かない').toEqual([null]);
   });
 
+  /** 🔴 **ノートのピン留めの付け外しも他タブへ届く**(#1377)。足し忘れると他タブの固定エリアは次の読み直しまで古いまま。 */
+  it('🔴 ノートのピン留めの付け外しは他タブ(と holder)へ放送される (#1377)', async () => {
+    const { host, follower } = await connectPair();
+    const seenByFollower: Array<string[] | null> = [];
+    const seenByHost: Array<string[] | null> = [];
+    follower.onChanged((_cid, lids) => seenByFollower.push(lids));
+    host.onChanged((_cid, lids) => seenByHost.push(lids));
+    await host.localClient().request({ op: 'putNotePin', cid: 'c1', lid: 'n1', on: true });
+    await drain();
+    expect(seenByFollower, '付けたピンが他タブへ届かない').toEqual([null]);
+    await follower.request({ op: 'putNotePin', cid: 'c1', lid: 'n1', on: false });
+    await drain();
+    expect(seenByHost, '外したピンが holder へ届かない').toEqual([null]);
+    // 対照群: 読み(listNotePins)は放送しない
+    await follower.request({ op: 'listNotePins', cid: 'c1' });
+    await drain();
+    expect(seenByHost).toEqual([null]);
+  });
+
   it('follower の書込 → 他の follower と holder 自身に届く。発信者には届かない', async () => {
     const { hub, host, follower } = await connectPair();
     const f2 = await ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f2' });

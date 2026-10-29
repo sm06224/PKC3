@@ -289,8 +289,6 @@ describe('書き手と正本', () => {
     expect(at).toBeGreaterThan(0);
     const body = main.slice(at, main.indexOf('};', at));
     expect(body, '他タブのピン留めを読み直していない').toContain('reloadNotePins()');
-    const proxy = readFileSync('src/adapter/platform/storage/store-proxy.ts', 'utf-8');
-    expect(proxy, 'putNotePin が放送の対象に入っていない').toMatch(/MUTATING_OPS[\s\S]*'putNotePin'/);
   });
 });
 
