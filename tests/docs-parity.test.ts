@@ -1067,7 +1067,9 @@ describe('確認の画面とマニュアルの突合(#299)', () => {
   function section(): string {
     const at = MANUAL.indexOf('### 確認の画面');
     expect(at, 'マニュアルに「確認の画面」の節が無い').toBeGreaterThan(-1);
-    const next = MANUAL.indexOf('\n### ', at + 1);
+    let next = MANUAL.indexOf('\n### ', at + 1);
+    // 🔴 危険色のボタンの字の一覧は、1 節 800 字の規約(条 9)のため次の節「色の付いた実行ボタンの字を知る」に分けた ── 2 つで 1 組として読む
+    if (next !== -1 && MANUAL.startsWith('\n### 色の付いた実行ボタンの字を知る', next)) next = MANUAL.indexOf('\n### ', next + 1);
     return MANUAL.slice(at, next === -1 ? MANUAL.length : next);
   }
 
