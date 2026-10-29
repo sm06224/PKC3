@@ -531,6 +531,22 @@ test('🔴 コマンドシェル: 打って Enter で結果が出て、移す・
   await page.keyboard.type('pwd');
   await page.keyboard.press('Enter');
   await expect(tab.locator('[data-pkc-field="shell-block"]').last()).toContainText('/資料');
+
+  // 🔴 F: 履歴の一覧を開いて Esc を押すと、一覧だけが閉じる(開いているノートは閉じず、選択も変わらない)
+  await page.keyboard.type('ls');
+  await page.keyboard.press('Enter');
+  await clickReal(page, tab.locator('[data-pkc-field="shell-block"]').last().locator('tbody tr[data-pkc-entry]').first());
+  const selected = page.locator('[data-pkc-region="filer-table"] [data-pkc-selected]');
+  await expect(selected, '表の行を押してもノートが選ばれない').toHaveCount(1);
+  const selectedLid = await selected.first().getAttribute('data-pkc-entry');
+  await clickReal(page, tab.locator('[data-pkc-action="shell-history-menu"]'));
+  const menu = tab.locator('[data-pkc-region="shell-complete"]');
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu, 'Esc で履歴の一覧が閉じない').toBeHidden();
+  await expect(tabInput, '閉じたあと入力欄にフォーカスが戻らない').toBeFocused();
+  await expect(selected, 'Esc でノートの選択が変わった').toHaveCount(1);
+  expect(await selected.first().getAttribute('data-pkc-entry')).toBe(selectedLid);
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

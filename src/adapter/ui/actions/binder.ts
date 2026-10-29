@@ -20313,6 +20313,21 @@ export function bindActions(
      * 🔴 **コマンドシェルの打つ欄**(#274 / #241)── Enter = 実行 / ↑ ↓ = 履歴 / Tab = 補完 / Esc = 候補を閉じる。
      * ⚠ 変換中の Enter は上の IME ガードで弾き済み。
      */
+    /**
+     * 🔴 **履歴・候補の一覧を開いているとき、Esc は一覧だけを閉じる**(入力欄以外 ── 「履歴」ボタンや候補のボタンにフォーカスがある場合)。
+     * ⚠ 一覧を閉じるはずの Esc が下の全域の Esc(開いているノートを閉じる)へ流れると、読んでいたノートまで閉じる。
+     *   閉じたらフォーカスを入力欄へ戻す。
+     */
+    if (ke.key === 'Escape' && ke.target instanceof HTMLElement && !(ke.target instanceof HTMLInputElement)) {
+      const host = completeHostOf(ke.target);
+      if (host !== null && !host.hidden) {
+        ke.preventDefault();
+        ke.stopPropagation();
+        closeCompletion(ke.target);
+        shellInputOf(ke.target)?.focus();
+        return;
+      }
+    }
     if (field === 'shell-input' && ke.target instanceof HTMLInputElement) {
       const input = ke.target;
       const session = shellSessionOf(input);
