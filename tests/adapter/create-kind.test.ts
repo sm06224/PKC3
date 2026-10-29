@@ -221,6 +221,8 @@ describe('▼ の合成メニュー(#1054 段②)', () => {
       'button:create-from-template', // #1645: 種類ではなく、一覧で選んでから作る
       'field:create-menu-separator',
       'button:open-today',
+      'button:open-today-as', // #1640 項 1: 今日をログで開く
+      'button:open-today-as', // #1640 項 1: 今日をノートで開く
       'field:create-menu-separator',
       'button:attach-file',
       'button:start-audio-capture',

@@ -51,11 +51,17 @@ export class OfficeImageNoteStore {
     }
   }
 
+  /** 見せたことにする。 */
   markSeen(): void {
-    this.fallback = true;
+    this.setSeen(true);
+  }
+
+  /** 見たかどうかを書く。⚠ 戻せる(`false`)── 片道の操作にしない(案内をもう一度出したいとき)。 */
+  setSeen(seen: boolean): void {
+    this.fallback = seen;
     this.saveFailed = false;
     try {
-      this.storage?.setItem(KEY, '1');
+      this.storage?.setItem(KEY, seen ? '1' : '0');
     } catch {
       this.saveFailed = true;
     }

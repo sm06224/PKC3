@@ -126,6 +126,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'open-palette': 'search',
   /** このノートの中だけを探す小さな欄(#1163 依頼 163)── 「探す」の虫眼鏡と同じ図案。 */
   'find-in-note': 'search',
+  /** 本文の段組みの切替(#522 の残り。読む面の帯)。段の並びに近い「縦に並ぶ行」の図案。 */
+  'cycle-read-columns': 'list',
   'import-file': 'arrow-in',
   /** 外部の画像を手元へ取り込む(#264 段①)── **入ってくる**向きなので取込と同じ図案。 */
   'adopt-external-images': 'arrow-in',

@@ -267,7 +267,7 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
   },
   {
     key: 'pkc3.office-image-note',
-    why: '好みの設定ではなく「その端末で案内を見たか」の記録である(#88)。Office の窓では外部の画像が出ないことの初回の案内を出したかは、その端末でその人が「Office で開く」を押した事実にすぎない。別の端末へ運ぶと、そこで一度も見ていない案内が出なくなる',
+    why: '好みの設定ではなく「その端末で案内を見たか」の記録である(#88)。Office のウィンドウでは外部の画像が出ないことの初回の案内を出したかは、その端末でその人が「Office で開く」を押した事実にすぎない。別の端末へ運ぶと、そこで一度も見ていない案内が出なくなる',
   },
   {
     key: 'pkc3.today-kind',

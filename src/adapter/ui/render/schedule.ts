@@ -1238,7 +1238,7 @@ export class ScheduleRenderer {
     alarm.setAttribute('data-pkc-field', 'schedule-alarm');
     alarm.setAttribute('data-pkc-action', 'set-alarm-enabled');
     alarm.title =
-      '本文の行に時刻まで書いた予定の時刻になったら、音と帯で知らせます(押すとそのノートを開きます)。PKC3 を開いている間だけ鳴ります。入にすると、起動したときに予定を数えます';
+      '本文の行に時刻まで書いた予定の時刻になったら、音とバーで知らせます(押すとそのノートを開きます)。PKC3 を開いている間だけ鳴ります。オンにすると、起動したときに予定を数えます';
     alarmLabelEl.append(alarm, ' 予定の時刻に音で知らせる');
     const notifyPanel = document.createElement('div');
     notifyPanel.setAttribute('data-pkc-field', 'schedule-notify-panel');
