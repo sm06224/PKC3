@@ -19,6 +19,7 @@
  *   (= 保存された設定は 1 バイトも変わっておらず、いつもどおり動く)
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { appOpenChoicesVisible } from '../../src/features/launcher/open-target';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -56,7 +57,17 @@ let openTileAsCalls: Array<{ lid: string; target: string }>;
 let setAppOpenTargetCalls: string[];
 let detach: () => void;
 
+/** #884 段③: アプリとして入れている / ブラウザで使っている、を matchMedia で作る。 */
+function setInstalled(installed: boolean): void {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (q: string) => ({ matches: installed && q.includes('standalone'), media: q }),
+  });
+}
+
 beforeEach(() => {
+  setInstalled(true); // 既存の段②の検査は「入れているとき」の動線
   localStorage.clear();
   document.body.innerHTML = '';
   root = document.createElement('div');
@@ -237,5 +248,40 @@ describe('その 1 回だけの開き方(#884 段②)', () => {
     ).toBe(2);
     menuItem('window')!.click();
     expect(openTileAsCalls).toEqual([{ lid: 'a1', target: 'window' }]);
+  });
+});
+
+describe('ブラウザで使っているときは開き方を出さない(#884 段③)', () => {
+  it('🔴 入れていない + 既定のまま → 右クリックに開き方の 2 項目が出ない(並べ替えは残る)', () => {
+    setInstalled(false);
+    rightClick('a1');
+    expect(menuItem('tab'), 'ブラウザ利用なのにタブの項目が出ている').toBeNull();
+    expect(menuItem('window'), 'ブラウザ利用なのに窓の項目が出ている').toBeNull();
+    expect(
+      root.querySelector('[data-pkc-region="context-menu"] [data-pkc-action="start-tile-reorder"]'),
+      '開き方を消した拍子に並べ替えまで消えた',
+    ).not.toBeNull();
+  });
+
+  it('🔴 入れていなくても、既定と違う値を選んである人には出す(戻せない片道にしない)', () => {
+    setInstalled(false);
+    chooseAppOpenTarget('window');
+    rightClick('a1');
+    expect(menuItem('tab'), '選んだ値を戻す口が無い').not.toBeNull();
+  });
+
+  it('表: 入れている/既定以外のときだけ true', () => {
+    expect(appOpenChoicesVisible(true, 'tab')).toBe(true);
+    expect(appOpenChoicesVisible(false, 'tab')).toBe(false);
+    expect(appOpenChoicesVisible(false, 'window')).toBe(true);
+  });
+
+  it('絞り込み中 + ブラウザ利用: 空のメニューを開かず、ふつうの右クリックに任せる', () => {
+    setInstalled(false);
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '電卓' });
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1, clientY: 1 });
+    tileEl('a1').dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(false);
+    expect(root.querySelector('[data-pkc-region="context-menu"]')).toBeNull();
   });
 });

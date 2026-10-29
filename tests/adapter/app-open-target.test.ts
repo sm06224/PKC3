@@ -79,6 +79,38 @@ describe('設定画面との配線(#884 段①)', () => {
     root.remove();
   });
 
+  it('🔴 #884 段③ ブラウザで使っていると選択欄の行が隠れ、入れている/既定以外なら出る', () => {
+    const mm = (installed: boolean): void => {
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        writable: true,
+        value: (q: string) => ({ matches: installed && q.includes('standalone'), media: q }),
+      });
+    };
+    const row = (root: HTMLElement): HTMLElement =>
+      root.querySelector<HTMLElement>(FIELD)!.closest('dd') as HTMLElement;
+    const build = (): HTMLElement => {
+      const root = document.createElement('div');
+      document.body.append(root);
+      new SettingsRenderer(root, new JobMonitor()).render(initialState);
+      return root;
+    };
+    mm(false);
+    let root = build();
+    expect(row(root).hidden, 'ブラウザ利用 + 既定なのに選択欄が出ている').toBe(true);
+    expect(row(root).previousElementSibling).toHaveProperty('hidden', true);
+    root.remove();
+    chooseAppOpenTarget('window');
+    root = build();
+    expect(row(root).hidden, '既定以外を選んである人の戻す口が隠れている').toBe(false);
+    root.remove();
+    chooseAppOpenTarget('tab');
+    mm(true);
+    root = build();
+    expect(row(root).hidden, 'アプリとして入れているのに隠れている').toBe(false);
+    root.remove();
+  });
+
   it('🔴 選べる値が表と 1 対 1(選べるのに効かない / 効くのに選べないを作らない)', () => {
     const root = document.createElement('div');
     document.body.append(root);

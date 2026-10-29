@@ -76,3 +76,17 @@ export function appWindowFeatures(target: AppOpenTarget, base: string): string {
   const size = `popup=yes,width=${String(APP_WINDOW_SIZE.width)},height=${String(APP_WINDOW_SIZE.height)}`;
   return base === '' ? size : `${base},${size}`;
 }
+
+/**
+ * 🔴 **アプリの開き方の選択肢を出すか**(#884 段③。本文 ⑤「ブラウザで使っているとき
+ * (アプリとして入れていないとき)は、選択肢そのものを出しません」)。
+ *
+ * - アプリとして入れている → 出す
+ * - 入れていない → 出さない。⚠ **ただし、すでに既定と違う出し先を選んである人には出す**
+ *   (隠すと「選んだ値を自分で戻せない」片道になる ── 置けるなら外せる)。
+ *
+ * ⚠ pure。`installed` は `adapter/platform/installed-app.ts` が決める。
+ */
+export function appOpenChoicesVisible(installed: boolean, current: AppOpenTarget): boolean {
+  return installed || current !== DEFAULT_APP_OPEN_TARGET;
+}

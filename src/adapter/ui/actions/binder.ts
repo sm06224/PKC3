@@ -452,6 +452,13 @@ import {
   withEditReady,
 } from '@features/entry-actions';
 import { currentAppOpenTarget } from '@adapter/ui/render/app-open-target';
+import { isInstalledApp } from '@adapter/platform/installed-app';
+import { appOpenChoicesVisible } from '@features/launcher/open-target';
+
+/** 🔴 #884 段③ ── アプリの開き方の選択肢(右クリックの 2 項目)を出すか。 */
+function appOpenChoicesShown(): boolean {
+  return appOpenChoicesVisible(isInstalledApp(), currentAppOpenTarget());
+}
 import { processToolOf } from '@features/capture/capture-process';
 import {
   type MenuItem,
@@ -21962,16 +21969,22 @@ export function bindActions(
     const tileKind = tileHit?.getAttribute('data-pkc-tile-kind') ?? '';
     if (tileHit !== null && ![...BUILTIN_KINDS].some((k) => k === tileKind)) {
       const tileLid = tileHit.getAttribute('data-pkc-tile') ?? '';
-      if (tileLid !== '') {
+      // 🔴 出す項目が 0 のとき(絞り込み中 + ブラウザ利用)は空のメニューを開かず、ふつうの右クリックに任せる
+      if (tileLid !== '' && (tileHit.getAttribute('draggable') === 'true' || appOpenChoicesShown())) {
         ev.preventDefault();
         openContextMenu(
           root,
           { x: ev.clientX, y: ev.clientY },
           // ⚠ 出口も同じメニューに置く(#857 段①b-2)── 入口だけ作らない
           // 🔴 その 1 回だけの開き方(#884 段②)── いまの設定を先頭 2 項目に足す
+          // 🔴 #884 段③: ブラウザで使っている(アプリとして入れていない)人には開き方の 2 項目を出さない
           tileHit.getAttribute('draggable') === 'true'
-            ? tileMenuActions(dispatcher.getState().launcherReorder, currentAppOpenTarget())
-            : tileOpenTargetMenuActions(currentAppOpenTarget()),
+            ? tileMenuActions(
+                dispatcher.getState().launcherReorder,
+                currentAppOpenTarget(),
+                appOpenChoicesShown(),
+              )
+            : tileOpenTargetMenuActions(currentAppOpenTarget(), appOpenChoicesShown()),
           root.ownerDocument.activeElement,
           { 'data-pkc-tile': tileLid },
         );
@@ -21991,7 +22004,7 @@ export function bindActions(
     if (builtinHit !== null) {
       const tileLid = builtinHit.getAttribute('data-pkc-tile') ?? '';
       const kind = builtinHit.getAttribute('data-pkc-tile-kind') ?? '';
-      if (tileLid !== '' && isViewMode(kind)) {
+      if (tileLid !== '' && isViewMode(kind) && appOpenChoicesShown()) {
         ev.preventDefault();
         openContextMenu(
           root,

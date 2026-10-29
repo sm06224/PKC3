@@ -599,7 +599,10 @@ const TILE_OPEN_TARGET_VERB: Readonly<Record<AppOpenTarget, string>> = {
 
 export function tileOpenTargetMenuActions(
   current: AppOpenTarget,
+  /** 🔴 #884 段③ ── false(ブラウザで使っている)なら開き方の項目は出さない。 */
+  show = true,
 ): readonly (EntryAction & { readonly attrs: Readonly<Record<string, string>> })[] {
+  if (!show) return [];
   return APP_OPEN_TARGETS.map((t) => ({
     action: 'open-tile-as',
     label: t.id === current ? `${TILE_OPEN_TARGET_VERB[t.id]}(既定)` : TILE_OPEN_TARGET_VERB[t.id],
@@ -765,9 +768,13 @@ export function repeatMenuActions(current: RepeatUnit | null): RepeatMenuItem[] 
  *   (別に出すと、同じ右クリックで 2 枚メニューが出せることになり、
  *   閉じ方も 2 通り要る ── §7 と同じ向きの重複)。
  */
-export function tileMenuActions(reordering: boolean, currentOpenTarget: AppOpenTarget): EntryAction[] {
+export function tileMenuActions(
+  reordering: boolean,
+  currentOpenTarget: AppOpenTarget,
+  showOpenTarget = true,
+): EntryAction[] {
   return [
-    ...tileOpenTargetMenuActions(currentOpenTarget),
+    ...tileOpenTargetMenuActions(currentOpenTarget, showOpenTarget),
     ...TILE_MENU_ACTIONS,
     reordering
       ? { action: 'end-tile-reorder', label: '並べ替えを終える' }

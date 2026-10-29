@@ -215,6 +215,12 @@ function pkc2WithTiles(target: string): string {
 }
 
 test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', async ({ page, context, baseURL }) => {
+  // 🔴 #884 段③: ブラウザ利用では開き方の選択肢を出さない ── この道中は「アプリとして入れている」を作って見る
+  await page.addInitScript(() => {
+    const orig = window.matchMedia.bind(window);
+    window.matchMedia = (q: string): MediaQueryList =>
+      q.includes('display-mode: standalone') ? ({ ...orig(q), matches: true } as MediaQueryList) : orig(q);
+  });
   const errors = collectPageErrors(page);
   await gotoApp(page);
 
