@@ -78,6 +78,8 @@ export interface ShellPlan {
   readonly effects: readonly ShellEffect[];
   /** 危険な命令の確認文。あれば実行の前に確認を通す。 */
   readonly confirm?: string;
+  /** 確認が危険色か(`rm`)。偽ならふつうの確認(`cp` のまとめて複製)。 */
+  readonly confirmDanger?: boolean;
   /** 断り。あれば `effects` は空。 */
   readonly error?: string;
   /** シェルの現在地を変える(`cd`)。 */

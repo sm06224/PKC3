@@ -67,7 +67,7 @@ export interface ShellOps {
   search(query: string): Promise<SearchOutcome>;
   operation(query: string): Promise<OperationOutcome>;
   operations(query: string): OperationOutcome;
-  askConfirm(message: string): Promise<boolean>;
+  askConfirm(message: string, danger: boolean): Promise<boolean>;
   copyText(text: string): Promise<boolean>;
 }
 
@@ -98,7 +98,7 @@ export async function runShellLine(ops: ShellOps, session: ShellSession, raw: st
   session.update(block, { lines: [...plan.lines], table: plan.table ?? null, pending: hasEffects });
   if (!hasEffects) return block;
 
-  if (plan.confirm !== undefined && !(await ops.askConfirm(plan.confirm))) {
+  if (plan.confirm !== undefined && !(await ops.askConfirm(plan.confirm, plan.confirmDanger === true))) {
     session.update(block, { lines: [...block.lines, 'やめました(何も実行していません)'], pending: false });
     return block;
   }

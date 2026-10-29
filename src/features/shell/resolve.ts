@@ -65,6 +65,11 @@ export function resolveNote(
   ref: string,
   env: ShellEnv,
   filter: (m: EntryMeta) => boolean = () => true,
+  /**
+   * 🔴 **危ない命令(消す)では「いまの場所に 1 件だけならそれ」を使わない**。
+   * ⚠ 使うと、別のフォルダにも同じ題名があるのに、黙って目の前の 1 件を消す。曖昧なら候補を出して止める。
+   */
+  strict = false,
 ): Resolved<string> {
   const text = ref.trim();
   if (text === '') return fail('ノートの指定が空です');
@@ -98,13 +103,15 @@ export function resolveNote(
   const hits = exact.length > 0 ? exact : pool.filter((m) => fold(m.title).includes(q));
   if (hits.length === 0) return fail(`「${text}」というノートはありません`);
   if (hits.length === 1) return ok(hits[0]!.lid);
-  const here = hits.filter((m) => childrenOf(env, env.cwd).some((c) => c.lid === m.lid));
-  if (here.length === 1) return ok(here[0]!.lid);
+  if (!strict) {
+    const here = hits.filter((m) => childrenOf(env, env.cwd).some((c) => c.lid === m.lid));
+    if (here.length === 1) return ok(here[0]!.lid);
+  }
   return fail(ambiguous(env, text, hits.map((m) => m.lid)));
 }
 
 /** 複数の語を、ノートの ID の並びに解く(`.` `*` `#2-4` を展開する)。重複は 1 つにする。 */
-export function resolveNotes(refs: readonly string[], env: ShellEnv): Resolved<string[]> {
+export function resolveNotes(refs: readonly string[], env: ShellEnv, strict = false): Resolved<string[]> {
   const out: string[] = [];
   const push = (lid: string): void => {
     if (!out.includes(lid)) out.push(lid);
@@ -132,7 +139,7 @@ export function resolveNotes(refs: readonly string[], env: ShellEnv): Resolved<s
       for (let n = from; n <= to; n += 1) push(env.last[n - 1]!);
       continue;
     }
-    const one = resolveNote(ref, env);
+    const one = resolveNote(ref, env, () => true, strict);
     if (!one.ok) return one;
     push(one.value);
   }

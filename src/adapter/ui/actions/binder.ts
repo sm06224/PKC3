@@ -7997,7 +7997,10 @@ export function makeShellOps(h: {
       );
     },
     // 🔴 危ない命令は `rm` だけ(命令表の test が 1 件であることを見る)── ボタンには「何が起きるか」を書く
-    askConfirm: async (message) => (await confirmInApp(root, message, { danger: true, okLabel: 'ゴミ箱へ入れる' })) === 'ok',
+    askConfirm: async (message, danger) =>
+      (danger
+        ? await confirmInApp(root, message, { danger: true, okLabel: 'ゴミ箱へ入れる' })
+        : await confirmInApp(root, message, { okLabel: 'コピーする' })) === 'ok',
     copyText: (text) => copyPlainText(text),
   };
   return ops;

@@ -208,6 +208,33 @@ describe('命令の計画', () => {
     expect(planLine('rm', env()).error).toBeDefined();
     expect(SHELL_COMMANDS.filter((c) => c.dangerous === true).map((c) => c.name)).toEqual(['rm']);
   });
+  it('🔴 rm の確認文に件数が出る。フォルダがあれば中身を含めた件数も出る(B)', () => {
+    expect(planLine('rm 買い物 設計', env()).confirm).toContain('(2 件。あとで戻せます)');
+    const withFolder = planLine('rm 資料', env());
+    // 資料(1)+ 中の 議事録 2026 / 2025(2)= 3 件
+    expect(withFolder.confirm).toContain('(1 件。フォルダの中身を含めて 3 件。あとで戻せます)');
+    expect(withFolder.confirmDanger).toBe(true);
+  });
+  it('🔴 cp を 2 件以上 / フォルダごとまとめて複製するときだけ、件数つきの確認が出る', () => {
+    expect(planLine('cp 設計 アーカイブ', env()).confirm).toBeUndefined();
+    const all = planLine('cp * アーカイブ', env());
+    // * = ルート直下の 4 件(資料 / アーカイブ / 買い物メモ / 設計)。資料の中の 2 件を含めて 6 件
+    expect(all.confirm).toContain('4 件。フォルダの中身を含めて 6 件');
+    expect(all.confirmDanger).toBe(false);
+    expect(planLine('cp 資料 アーカイブ', env()).confirm).toContain('1 件。フォルダの中身を含めて 3 件');
+    expect(planLine('cp * アーカイブ -n', env()).confirm).toBeUndefined();
+  });
+  it('🔴 rm は「いまの場所に 1 件ならそれ」で曖昧さを救わない。mv は救う(G)', () => {
+    const metas = new Map([...METAS, meta('n5', '設計', 'text', 7)].map((m) => [m.lid, m]));
+    const e = env({ metas, relations: [...RELATIONS, rel('f2', 'n5')], cwd: 'f2' });
+    // 同じ題名「設計」がルート(n4)とアーカイブの中(n5)にある。いまの場所はアーカイブ
+    const rm = planLine('rm 設計', e);
+    expect(rm.error).toContain('2 件');
+    expect(rm.effects).toEqual([]);
+    expect(planLine('mv 設計 資料', e).effects).toEqual([{ type: 'move', lids: ['n5'], to: 'f1' }]);
+    // 番号か ID で指せば消せる
+    expect(planLine('rm n5', e).effects).toEqual([{ type: 'trash', lids: ['n5'] }]);
+  });
   it('tag は付ける / 外すを読む', () => {
     expect(planLine('tag add 重要 設計', env()).effects).toEqual([{ type: 'tag', lids: ['n4'], tags: ['重要'], mode: 'add' }]);
     expect(planLine('タグ 外す #重要 設計', env()).effects).toEqual([{ type: 'tag', lids: ['n4'], tags: ['重要'], mode: 'remove' }]);

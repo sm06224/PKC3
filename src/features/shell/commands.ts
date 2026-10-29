@@ -15,7 +15,7 @@
  */
 import { archetypeLabel } from '@features/flavor/archetype-label';
 import { fold } from '@features/palette/palette-rows';
-import { resolveCanonicalParents } from '@features/relation/tree';
+import { collectSubtreeLids, resolveCanonicalParents } from '@features/relation/tree';
 import { planPreview, type PlanOp, type PlanTarget } from '@features/structure/structure-plan';
 import { joinTokens, splitFlags, tokenize, type ShellToken } from './tokenize';
 import { childrenOf, pathOf, resolveFolder, resolveNote, resolveNotes, splitParentTitle } from './resolve';
@@ -64,6 +64,13 @@ const listText = (env: ShellEnv, lids: readonly string[]): string =>
 const unescapeBody = (s: string): string => s.replace(/\\n/gu, '\n');
 
 const TABLE_CAP = 200;
+
+/** 指した物と、フォルダの中身を含めた件数(重複は 1 つ)。 */
+function subtreeCount(env: ShellEnv, lids: readonly string[]): number {
+  const all = new Set<string>();
+  for (const l of lids) for (const x of collectSubtreeLids(l, env.metas, env.relations)) all.add(x);
+  return all.size;
+}
 
 function tableOf(env: ShellEnv, metas: readonly { lid: string }[], extra?: (lid: string) => string): { table: ShellTable; numbered: string[] } {
   const shown = metas.slice(0, TABLE_CAP);
@@ -304,10 +311,12 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
     run: (ctx) => {
       const r = sourcesAndDest(ctx, 'cp 議事録 資料');
       if (isPlan(r)) return r;
-      return say(
-        [`${listText(ctx.env, r.lids)} を ${whereText(ctx.env, r.to)} へコピーします`],
-        [{ type: 'copy', lids: r.lids, to: r.to }],
-      );
+      const total = subtreeCount(ctx.env, r.lids);
+      const line = `${listText(ctx.env, r.lids)} を ${whereText(ctx.env, r.to)} へコピーします`;
+      // 🔴 まとめて複製する(2 件以上 / フォルダは中身ごと)ときは、件数つきで確認する(コピーはゴミ箱に戻せない大量の増殖になりうる)
+      const many = total > 1;
+      const count = total > r.lids.length ? `${String(r.lids.length)} 件。フォルダの中身を含めて ${String(total)} 件` : `${String(r.lids.length)} 件`;
+      return say([line], [{ type: 'copy', lids: r.lids, to: r.to }], many ? { confirm: `${line}(${count})。よろしいですか?`, confirmDanger: false } : {});
     },
   },
   {
@@ -345,10 +354,13 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
     dangerous: true,
     run: ({ env, args }) => {
       const refs = args.length === 0 ? ['.'] : args.map((a) => a.text);
-      const r = resolveNotes(refs, env);
+      // 🔴 題名の曖昧さは「いまの場所に 1 件ならそれ」で救わない(strict)── 別のフォルダの同じ題名を黙って消さない
+      const r = resolveNotes(refs, env, true);
       if (!r.ok) return err(r.error);
-      const line = `${listText(env, r.value)} をゴミ箱へ入れます(${String(r.value.length)} 件。あとで戻せます)`;
-      return say([line], [{ type: 'trash', lids: r.value }], { confirm: `${line}。よろしいですか?` });
+      const total = subtreeCount(env, r.value);
+      const count = total > r.value.length ? `${String(r.value.length)} 件。フォルダの中身を含めて ${String(total)} 件` : `${String(r.value.length)} 件`;
+      const line = `${listText(env, r.value)} をゴミ箱へ入れます(${count}。あとで戻せます)`;
+      return say([line], [{ type: 'trash', lids: r.value }], { confirm: `${line}。よろしいですか?`, confirmDanger: true });
     },
   },
   {
