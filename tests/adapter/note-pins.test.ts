@@ -23,6 +23,7 @@ import { bindActions, runGlobalCommand } from '../../src/adapter/ui/actions/bind
 import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { appNotePins, NotePinStore } from '../../src/adapter/platform/note-pin-store';
+import { migrateLegacyNotePins } from '../../src/adapter/platform/note-pin-migration';
 import { appDualPrefs } from '../../src/adapter/ui/render/dual-prefs';
 import {
   MAX_NOTE_PINS,
@@ -314,10 +315,63 @@ describe('旧い版の端末の記憶からの移行', () => {
     expect(hit!.why.length).toBeGreaterThan(10);
   });
 
-  it('main.ts が移行を配線している(取り込んだら端末の記憶から消す)', () => {
-    const main = readFileSync('src/main.ts', 'utf-8');
-    expect(main).toContain('legacyPinLids(raw, cid)');
-    expect(main).toContain('legacyPinsWithout(raw, cid)');
+  describe('移行の実行(migrateLegacyNotePins)', () => {
+    const KEY = 'pkc3.note-pins';
+    const store = (init: string | null) => {
+      const m = new Map<string, string>(init === null ? [] : [[KEY, init]]);
+      return {
+        getItem: (k: string) => m.get(k) ?? null,
+        setItem: (k: string, v: string) => void m.set(k, v),
+        removeItem: (k: string) => void m.delete(k),
+        m,
+      };
+    };
+
+    it('(a) 全件書けたら、端末の鍵が消える(書いた lid が順に渡る)', async () => {
+      const st = store(JSON.stringify(['c1/a', 'c1/b']));
+      const put: string[] = [];
+      const n = await migrateLegacyNotePins('c1', st, async (l) => void put.push(l), () => false);
+      expect(n).toBe(2);
+      expect(put).toEqual(['a', 'b']);
+      expect(st.m.has(KEY), '移したのに端末の鍵が残っている').toBe(false);
+    });
+
+    it('(b) 途中で書けなかったら、端末の鍵は残る(次の起動でやり直す)', async () => {
+      const raw = JSON.stringify(['c1/a', 'c1/b']);
+      const st = store(raw);
+      let calls = 0;
+      const n = await migrateLegacyNotePins(
+        'c1',
+        st,
+        async () => {
+          calls += 1;
+          if (calls === 2) throw new Error('書けない');
+        },
+        () => false,
+      );
+      expect(n).toBe(-1);
+      expect(calls).toBe(2);
+      expect(st.m.get(KEY), '途中で落ちたのに鍵を消した').toBe(raw);
+    });
+
+    it('(c) 他の器の分は残り、この器の分だけが消える / すでに在るピンは書かない', async () => {
+      const st = store(JSON.stringify(['c1/a', 'c2/x', 'c1/b']));
+      const put: string[] = [];
+      const n = await migrateLegacyNotePins('c1', st, async (l) => void put.push(l), (l) => l === 'a');
+      expect(put, '在るピンを書き直した').toEqual(['b']);
+      expect(n).toBe(1);
+      expect(JSON.parse(st.m.get(KEY)!)).toEqual(['c2/x']);
+    });
+
+    it('対照群: 鍵が無い / この器の分が無いときは何も書かず、鍵も触らない', async () => {
+      const put: string[] = [];
+      expect(await migrateLegacyNotePins('c1', store(null), async (l) => void put.push(l), () => false)).toBe(0);
+      const other = JSON.stringify(['c2/x']);
+      const st = store(other);
+      expect(await migrateLegacyNotePins('c1', st, async (l) => void put.push(l), () => false)).toBe(0);
+      expect(put).toEqual([]);
+      expect(st.m.get(KEY)).toBe(other);
+    });
   });
 });
 

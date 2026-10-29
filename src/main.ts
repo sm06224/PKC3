@@ -56,10 +56,8 @@ import { watchAppearanceFromOtherWindows } from '@adapter/ui/render/appearance-f
 import { applyTagColors, currentTagColors } from '@adapter/ui/render/tag-color';
 import { appNotePins } from '@adapter/platform/note-pin-store';
 import { appPasteToast } from '@adapter/ui/render/paste-toast';
-import { MAX_NOTE_PINS, legacyPinLids, legacyPinsWithout } from '@features/relation/note-pins';
-
-/** 旧い版が端末に残したピン留めの鍵(#1377。取り込んで消す)。 */
-const LEGACY_NOTE_PINS_KEY = 'pkc3.note-pins';
+import { migrateLegacyNotePins } from '@adapter/platform/note-pin-migration';
+import { MAX_NOTE_PINS } from '@features/relation/note-pins';
 import {
   MAX_TAG_COLORS,
   mergeMissingTagColors,
@@ -1525,20 +1523,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ この器の分だけ取り込み(他の器の分は、その器を開いたときに)、取り込んだ分は端末の記憶から消す ── 二重に持たない。
      * ⚠ 書けなかったら端末の記憶は消さない(次の起動でやり直す)。
      */
-    try {
-      const raw = localStorage.getItem(LEGACY_NOTE_PINS_KEY);
-      const legacy = legacyPinLids(raw, cid);
-      if (legacy.length === 0) return;
-      for (const lid of legacy) {
-        if (!appNotePins.has(lid)) await client.request({ op: 'putNotePin', cid, lid, on: true });
-      }
-      const rest = legacyPinsWithout(raw, cid);
-      if (rest === null) localStorage.removeItem(LEGACY_NOTE_PINS_KEY);
-      else localStorage.setItem(LEGACY_NOTE_PINS_KEY, rest);
-      await reloadNotePins();
-    } catch {
-      /* 取り込めなかった ── 端末の記憶はそのまま残す */
-    }
+    const moved = await migrateLegacyNotePins(
+      cid,
+      localStorage,
+      (lid) => client.request({ op: 'putNotePin', cid, lid, on: true }).then(() => undefined),
+      (lid) => appNotePins.has(lid),
+    ).catch(() => -1);
+    if (moved !== 0) await reloadNotePins();
   })();
   const regions = buildShell(root);
   /**
