@@ -18,7 +18,7 @@ import { fold } from '@features/palette/palette-rows';
 import { collectSubtreeLids, resolveCanonicalParents } from '@features/relation/tree';
 import { planPreview, type PlanOp, type PlanTarget } from '@features/structure/structure-plan';
 import { joinTokens, splitFlags, tokenize, type ShellToken } from './tokenize';
-import { LITERAL, childrenOf, pathOf, quoteIfNeeded, resolveFolder, resolveNote, resolveNotes, splitParentTitle } from './resolve';
+import { LITERAL, childrenOf, pathOf, quoteLiteral, resolveFolder, resolveNote, resolveNotes, splitParentTitle } from './resolve';
 import type { ArgKind, ShellEffect, ShellEnv, ShellGroup, ShellPlan, ShellSurface, ShellTable } from './types';
 
 interface Ctx {
@@ -605,8 +605,9 @@ export function historyLineOf(line: string, surface: ShellSurface): string {
   if (error !== null || head === undefined) return text;
   const cmd = findCommand(head.text, surface);
   if (cmd === null) return text;
-  // 🔴 欄へ入れる形と同じ判定(`quoteIfNeeded`)── 囲んだ旗・番号・`/` を含む題名が、`!!` で同じ意味に戻る
-  const q = (t: ShellToken): string => quoteIfNeeded(t.text);
+  // 🔴 **打った形の意味を保つ**: 囲んで打った語は囲み直し(題名そのもの = 旗・番号・`/` を含む題名が `!!` で同じ意味に戻る)、
+  //    囲まずに打った語はそのまま(`資料/メモ` の道・`3` の番号は、囲むと題名に読み替わる)。⚠ 補完が入れる形(`quoteIfNeeded`)とは別の問い
+  const q = (t: ShellToken): string => (t.quoted ? quoteLiteral(t.text) : t.text);
   if (cmd.name === 'new' || cmd.name === 'append') {
     const first = tokens[1];
     return first === undefined ? head.text : `${head.text} ${q(first)}`;

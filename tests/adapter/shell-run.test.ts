@@ -219,6 +219,15 @@ describe('履歴に機密を残さない', () => {
     expect(s.history[0]).toBe('new "a/b"');
     await runShellLine(f.ops, s, '!!');
     expect(f.calls.filter((c) => c === 'create:a/b')).toHaveLength(2);
+    // 囲まずに打った道(資料/メモ)は、囲まずに残る ── 囲み直すと「題名が 資料/メモ のノート」に読み替わってしまう
+    await runShellLine(f.ops, s, 'new 資料/メモ 本文');
+    expect(s.history[0]).toBe('new 資料/メモ');
+    await runShellLine(f.ops, s, '!!');
+    expect(f.calls.filter((c) => c === 'create:メモ')).toHaveLength(2);
+    // 囲まずに打った番号(append 3)も囲まずに残る(番号のまま)
+    await runShellLine(f.ops, s, 'find 設計');
+    await runShellLine(f.ops, s, 'append 1 本文');
+    expect(s.history[0]).toBe('append 1');
     // 囲みが外れた形なら、別の意味(フォルダ a の中の b)になって断られる ── 囲みを落とさないことの対照群
     expect(planLine('new a/b 本文', f.ops.env(s)).error).toBeDefined();
     // 切り詰め: 200 字を超える行は語の境目で切る。閉じない引用符の行を残さない
