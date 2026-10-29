@@ -246,7 +246,9 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
     args: ['text'],
     run: ({ env, args }) => {
       if (args.length === 0) return err('題名を書いてください(例: new 議事録 今日の議題)');
-      const { parent, title } = splitParentTitle(args[0]!.text, env);
+      const split = splitParentTitle(args[0]!.text, env, args[0]!.quoted);
+      if ('error' in split) return err(split.error);
+      const { parent, title } = split;
       const body = unescapeBody(joinTokens(args.slice(1)));
       return say(
         [`${whereText(env, parent)}に、ノート「${title}」を作ります`],
@@ -264,7 +266,9 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
     args: ['text'],
     run: ({ env, args }) => {
       if (args.length === 0) return err('フォルダの題名を書いてください(例: mkdir 資料)');
-      const { parent, title } = splitParentTitle(args[0]!.text, env);
+      const split = splitParentTitle(args[0]!.text, env, args[0]!.quoted);
+      if ('error' in split) return err(split.error);
+      const { parent, title } = split;
       const ops: PlanOp[] = [{ kind: 'mkdir', title, parent: toTarget(parent), alias: null }];
       return say(previewLines(ops, env), [{ type: 'plan', ops }]);
     },

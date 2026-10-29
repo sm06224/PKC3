@@ -138,7 +138,9 @@ describe('ノート・フォルダの指し方', () => {
   });
   it('資料/議事録 は (親, 題名) に割る。解けない道は題名の一部', () => {
     expect(splitParentTitle('資料/メモ', env())).toEqual({ parent: 'f1', title: 'メモ' });
-    expect(splitParentTitle('無い/メモ', env())).toEqual({ parent: null, title: '無い/メモ' });
+    expect(splitParentTitle('無い/メモ', env())).toMatchObject({ error: expect.stringContaining('というフォルダ') });
+    expect(splitParentTitle('資料/', env())).toMatchObject({ error: expect.stringContaining('題名が空') });
+    expect(splitParentTitle('無い/メモ', env(), true)).toEqual({ parent: null, title: '無い/メモ' });
     expect(splitParentTitle('メモ', env({ cwd: 'f2' }))).toEqual({ parent: 'f2', title: 'メモ' });
   });
 });
@@ -173,6 +175,13 @@ describe('命令の計画', () => {
     const m = planLine('mkdir 新規', env({ cwd: 'f2' }));
     expect(m.effects).toEqual([{ type: 'plan', ops: [{ kind: 'mkdir', title: '新規', parent: { at: 'lid', lid: 'f2' }, alias: null }] }]);
     expect(m.lines[0]).toContain('アーカイブ');
+  });
+  it('🔴 / の前のフォルダが解けなければ、黙って現在地に作らず断る。引用符で囲めば / も題名(⚠8)', () => {
+    const bad = planLine('new 無い/メモ 本文', env());
+    expect(bad.error).toContain('というフォルダ');
+    expect(bad.effects).toEqual([]);
+    expect(planLine('mkdir 無い/新規', env()).error).toBeDefined();
+    expect(planLine('new "2026/10/29 メモ"', env()).effects).toEqual([{ type: 'create', title: '2026/10/29 メモ', body: '', parent: null }]);
   });
   it('append はフォルダを相手にできない', () => {
     expect(planLine('append 買い物 牛乳', env()).effects).toEqual([{ type: 'append', lid: 'n3', text: '牛乳' }]);

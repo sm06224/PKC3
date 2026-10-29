@@ -189,13 +189,23 @@ export function resolveFolder(ref: string, env: ShellEnv): Resolved<string | nul
   return ok(found.value);
 }
 
-/** `資料/議事録` のように、題名の前にフォルダの道が付いているとき、(親, 題名) に割る。付いていなければ現在地。 */
-export function splitParentTitle(raw: string, env: ShellEnv): { parent: string | null; title: string } {
+/**
+ * `資料/議事録` のように、題名の前にフォルダの道が付いているとき、(親, 題名) に割る。付いていなければ現在地。
+ *
+ * 🔴 **道が解けなければ断る**(黙って現在地に作らない ── 「資料/メモ」と打ったのに、現在地に「資料/メモ」という題名のノートができる)。
+ * ⚠ `/` を題名の一部にしたいときは引用符で囲む(`literal`)。
+ */
+export function splitParentTitle(
+  raw: string,
+  env: ShellEnv,
+  literal = false,
+): { readonly parent: string | null; readonly title: string } | { readonly error: string } {
   const at = raw.lastIndexOf('/');
-  if (at <= 0 && !(at === 0 && raw.length > 1)) return { parent: env.cwd, title: raw };
+  if (literal || at < 0) return { parent: env.cwd, title: raw };
   const head = raw.slice(0, at);
   const title = raw.slice(at + 1);
-  if (title === '') return { parent: env.cwd, title: raw };
+  if (title === '') return { error: `「${raw}」は題名が空です(末尾の / の後ろに題名を書いてください。/ を題名に含めたいときは "…" で囲んでください)` };
   const folder = resolveFolder(head === '' ? '/' : head, env);
-  return folder.ok ? { parent: folder.value, title } : { parent: env.cwd, title: raw };
+  if (!folder.ok) return { error: `${folder.error}(/ を題名に含めたいときは "…" で囲んでください)` };
+  return { parent: folder.value, title };
 }
