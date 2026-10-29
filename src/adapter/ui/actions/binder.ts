@@ -823,7 +823,7 @@ import { openFolderLid } from './open-folder-lid';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 import { labNoteTitle } from '@features/markdown/text-lab';
 import { sheetNoteTitle, sheetToMarkdown, sheetToText } from '@features/calc/sheet';
-import { runShellLine, type OpResult, type ShellOps } from './shell-run';
+import { runShellLine, SHELL_HISTORY_CLEARED_TEXT, type OpResult, type ShellOps } from './shell-run';
 import {
   closeCompletion,
   completeHostOf,
@@ -10203,13 +10203,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     paintHistoryMenu(host, session.history);
   },
   /** 🔴 履歴を消す(履歴ボタンの対。片道にしない)。端末に保存してある履歴を空にする。 */
-  'shell-history-clear': (_dispatcher, target, services) => {
+  'shell-history-clear': (_dispatcher, target) => {
     const session = shellSessionOf(target);
     if (session === null) return;
     session.history = [];
     session.at = -1;
     closeCompletion(target);
-    services.showStatus?.('コマンドの履歴を消しました');
+    // 🔴 ステータスバーではなく、シェルの出力の塊に書く(`history -c` と同じ文)
+    const block = session.begin('履歴を消す');
+    session.update(block, { lines: [SHELL_HISTORY_CLEARED_TEXT] });
   },
   /** 出力を消す(履歴は残る)。 */
   'shell-clear': (_dispatcher, target) => {

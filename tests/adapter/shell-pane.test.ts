@@ -254,6 +254,24 @@ describe('シェルの面', () => {
     expect(appShellSession.history).toEqual([]);
   });
 
+  it('🔴 「履歴を消す」: 端末の保存のキーが消え、もう一方の session(2 ペイン)も空になり、結果は出力の塊に書く(ステータスバーに出さない)(E)', async () => {
+    await run(input, 'pwd');
+    await run(input, 'ls');
+    expect(localStorage.getItem('pkc3.shell-history')).not.toBeNull();
+    expect(appDualShellSession.history).toEqual(['ls', 'pwd']);
+    ctx.root.querySelector<HTMLElement>('[data-pkc-view-pane="shell"] [data-pkc-action="shell-history-clear"]')!.click();
+    expect(localStorage.getItem('pkc3.shell-history'), '保存のキーが残っている').toBeNull();
+    expect(appDualShellSession.history, '2 ペイン側の履歴が残っている').toEqual([]);
+    expect(appShellSession.history).toEqual([]);
+    // 結果は出力の塊に書く
+    const last = appShellSession.blocks[appShellSession.blocks.length - 1]!;
+    expect(last.lines).toEqual(['コマンドの履歴を消しました']);
+    expect(ctx.root.querySelector('[data-pkc-view-pane="shell"] [data-pkc-field="shell-log"]')!.textContent).toContain('コマンドの履歴を消しました');
+    // 履歴ボタンの一覧は空(開いても何も出ない)
+    ctx.root.querySelector<HTMLElement>('[data-pkc-view-pane="shell"] [data-pkc-action="shell-history-menu"]')!.click();
+    expect(ctx.root.querySelector('[data-pkc-view-pane="shell"] [data-pkc-region="shell-complete"] [data-pkc-action="shell-recall"]')).toBeNull();
+  });
+
   it('コピー・出力を消す', async () => {
     await run(input, 'ls');
     expect(ctx.root.querySelector('[data-pkc-view-pane="shell"] [data-pkc-action="shell-copy-block"]')).not.toBeNull();

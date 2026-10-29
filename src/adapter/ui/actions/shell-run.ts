@@ -18,6 +18,9 @@ import type { PlanOp } from '@features/structure/structure-plan';
 import type { ShellEffect, ShellEnv, ShellTable } from '@features/shell/types';
 import { shellBlockText, type ShellBlock, type ShellSession } from '../render/cmdshell';
 
+/** 履歴を消したときの結果の文(`history -c` と「履歴を消す」ボタンで同じ字)。 */
+export const SHELL_HISTORY_CLEARED_TEXT = 'コマンドの履歴を消しました';
+
 export interface OperationOutcome {
   /** `ran` = 実行した / `many` = 候補が複数 / `none` = 当てはまる操作がない / `blocked` = 当てはまるがいま押せない */
   readonly kind: 'ran' | 'many' | 'none' | 'blocked';
@@ -229,7 +232,7 @@ async function runEffect(ops: ShellOps, session: ShellSession, block: ShellBlock
     }
     case 'history-clear':
       session.history = [];
-      session.say(block, '履歴を消しました');
+      session.say(block, SHELL_HISTORY_CLEARED_TEXT);
       return;
     case 'clear':
       session.clear();
