@@ -39,6 +39,7 @@ import { ADAPTER_SETTING_VALIDATORS } from '../render/settings-validators';
 import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
 import { settleJump } from '../render/long-note';
+import { mountFilerRow } from '../render/filer';
 import { insideCodeOrMath } from '@features/markdown/code-context';
 import {
   chapterLinkLine,
@@ -23632,7 +23633,8 @@ export function bindActions(
   /** 表の中のその行(`data-pkc-entry` は user 由来ではないが、選択子に埋めない)。 */
   // 🔑 属性の値で直接引く(#1087)── 直す前は 1 行探すたびに全行(3,000 件)を配列にして先頭から比べていた
   const rowEl = (lid: string): HTMLElement | null =>
-    root.querySelector<HTMLElement>(`[data-pkc-region="filer-table"] [data-pkc-entry="${CSS.escape(lid)}"]`);
+    root.querySelector<HTMLElement>(`[data-pkc-region="filer-table"] [data-pkc-entry="${CSS.escape(lid)}"]`) ??
+    mountFilerRow(root, lid);
 
   const focusRow = (lid: string): void => rowEl(lid)?.focus();
 
@@ -23647,6 +23649,7 @@ export function bindActions(
    */
   /**
    * 🔴 **PageUp / PageDown で動く行数**(依頼 337)── 画面に見えている行の数(1 行は重ねる)。
+  // 🔴 行が多い一覧は画面に見えている塊だけ行を組む(#1087 台帳④)── 組まれていない行は組んでから引く
    * ⚠ 行の高さと器の高さは画面から読む(行の高さは種類・折り返しで変わる)。測れない(高さ 0 ── 隠れている面・
    *   DOM に高さを持たない環境)ときは 10 行。⚠ 端では止まる(`rowAt` / `dualRowAt` が丸める)。
    */
@@ -24084,8 +24087,7 @@ export function bindActions(
        *   続く `Shift` が効く。⚠ 1 回の dispatch で撃つ(`SELECT_ONLY`。2 回撃つと 1 キーで
        *   2 回描き直す ── #1087 の実測)。
        */
-      dispatcher.dispatch({ type: 'SELECT_ONLY', lid });
-      focusRow(lid);
+      moveToRow(lid, () => dispatcher.dispatch({ type: 'SELECT_ONLY', lid }));
       return true;
     }
     /**
@@ -24105,8 +24107,7 @@ export function bindActions(
             ? (rows[rows.length - 1]?.lid ?? null)
             : rowAt(st, (cmd === 'filer-row-page-down' ? 1 : -1) * pageRows(root.ownerDocument.activeElement));
       if (lid === null) return false;
-      dispatcher.dispatch({ type: 'SELECT_ONLY', lid });
-      focusRow(lid);
+      moveToRow(lid, () => dispatcher.dispatch({ type: 'SELECT_ONLY', lid }));
       return true;
     }
     if (cmd === 'filer-extend-down' || cmd === 'filer-extend-up') {
@@ -24121,8 +24122,7 @@ export function bindActions(
       if (st.selectionAnchor === null && from !== null) {
         dispatcher.dispatch({ type: 'SELECT_ONLY', lid: from });
       }
-      dispatcher.dispatch({ type: 'SELECT_RANGE', lid });
-      focusRow(lid);
+      moveToRow(lid, () => dispatcher.dispatch({ type: 'SELECT_RANGE', lid }));
       return true;
     }
     /**

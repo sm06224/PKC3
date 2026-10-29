@@ -8513,6 +8513,11 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-region='filer-table'][data-pkc-grid] td:last-child {
   padding-top: calc(var(--s1) + 1.5px);
 }
+/* 🔴 **画面の外の塊は、行を組まない**(#1087 台帳④。`filer.ts` の `applyChunks`)── 組んだときと同じ高さの空の塊
+ * (高さは `filer.ts` が行数から入れる)。見張りも要らない(中身が無い)ので `content-visibility` は外す。 */
+[data-pkc-region='filer-table'][data-pkc-grid] tbody[data-pkc-chunk-empty] {
+  content-visibility: visible;
+}
 [data-pkc-region='filer-table'][data-pkc-grid] tbody:first-of-type tr:first-child td:last-child {
   padding-top: var(--s1);
 }

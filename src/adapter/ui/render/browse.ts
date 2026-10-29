@@ -22,7 +22,7 @@
  */
 import { blockedActionNote, canNavBack, canNavForward, type AppState } from '@adapter/state/app-state';
 import { ScrollMemory } from './scroll-memory';
-import { FilerRenderer } from './filer';
+import { FilerRenderer, mountFilerRow } from './filer';
 import { LauncherRenderer } from './launcher';
 import { ScheduleRenderer } from './schedule';
 import { ContactsRenderer } from './contacts';
@@ -475,7 +475,9 @@ export class BrowseRouter {
      */
     for (const el of this.hideWhileCommand) if (el.hidden !== commandMode) el.hidden = commandMode;
     // ⚠ 非 active な面には render を呼ばない(裏で毎 state 仕事をしない)
-    if (mode === 'filer') this.filer.render(state);
+    // 🔴 フォルダの表は、組み直したかを返す。属性だけの回(↑↓で選ぶ等)はスクロール位置を書き戻さない(下の `scroll.use`)
+    let laidOut = true;
+    if (mode === 'filer') laidOut = this.filer.render(state);
     else if (mode === 'schedule') this.schedule.render(state);
     else if (mode === 'contacts') this.contacts.render(state);
     else if (mode === 'captures') this.captures.render(state);
@@ -509,7 +511,9 @@ export class BrowseRouter {
     // ⚠ 面 = 探し方 × 「絞り込み中かどうか」── 絞り込んだ結果は先頭からが正しく、
     //    戻したときに元の位置へ帰るのが欲しい振る舞い
     // ② 🔴 **中身を入れ終わってから**戻す(空の器に書いても丸められる)
-    this.scroll.use(key);
+    // 🔴 `use` は `scrollTop` を読み・書く = 直前に汚した属性のスタイルと配置をその場で払う(1 キーあたり約 1 ms 強。↑↓ の実測)。
+    //   配置が動いていない回(同じ面で、一覧を組み直さなかった)は戻す物が無い ── 面が替わったときだけは必ず通す
+    if (laidOut || !this.scroll.isCurrent(key)) this.scroll.use(key);
     /**
      * 🔴 **開いているノートの行が見えない所にあれば、見える所まで送る**(依頼 277)。
      * ⚠ 位置を戻した**後**にやる(戻した位置が上書きする)。⚠ 行の位置を読むと配置が要るので、
@@ -528,9 +532,11 @@ export class BrowseRouter {
     if (win === null) return;
     win.requestAnimationFrame(() => {
       if (token !== this.revealToken) return;
-      const row = this.panes.filer.querySelector<HTMLElement>(
-        `[data-pkc-region="filer-table"] [data-pkc-entry="${CSS.escape(lid)}"]`,
-      );
+      // 🔴 行が多い一覧は見えている塊だけ組む(#1087 台帳④)── 画面の外の行は、組んでから位置を読む(空の塊と同じ高さなので位置は変わらない)
+      const row =
+        this.panes.filer.querySelector<HTMLElement>(
+          `[data-pkc-region="filer-table"] [data-pkc-entry="${CSS.escape(lid)}"]`,
+        ) ?? mountFilerRow(this.panes.filer, lid);
       if (row === null) return;
       const view = this.host.getBoundingClientRect();
       const r = row.getBoundingClientRect();

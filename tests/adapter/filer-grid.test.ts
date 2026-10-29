@@ -78,7 +78,9 @@ describe('行数が境を越えたら、表が格子になる(#1087)', () => {
 
     render(withMetas(s0, metas(GRID_ROW_THRESHOLD + 1)));
     expect(table(), '表を作り直した(持ち越していない)').toBe(t);
-    expect(t.querySelectorAll('tbody tr').length).toBe(GRID_ROW_THRESHOLD + 1);
+    // 🔴 格子では画面に見えている塊だけ行を組む(位置が読めない happy-dom では先頭の 3 塊 = 150 行)。
+    //    表に出している行の総数は、組んでいない塊の高さ(下の test)と `mountFilerRow` で確かめる
+    expect(t.querySelectorAll('tbody tr').length).toBe(150);
     expect(t.hasAttribute('data-pkc-grid'), '境を越えても格子にならない').toBe(true);
   });
 
@@ -143,37 +145,52 @@ describe('格子のとき、行を 50 行ずつの塊に分ける(#1087)', () =>
   const lidsOf = (t: HTMLElement) =>
     [...t.querySelectorAll('tbody tr')].map((tr) => tr.getAttribute('data-pkc-entry'));
 
-  it('🔴 3,001 行は 61 個の塊に、順番どおり、塊ごとに 50 行まで入る', () => {
+  it('🔴 3,001 行は 61 個の塊に分かれ、組むのは先頭の 3 塊だけ ── 残りは行と同じ高さの空の塊', () => {
     const { render, table } = setup();
     const n = 3001;
     render(booted(metas(n)));
     const t = table();
     const bodies = [...t.querySelectorAll('tbody')];
     expect(bodies.length).toBe(Math.ceil(n / ROW_CHUNK));
-    for (const b of bodies.slice(0, -1)) expect(b.children.length).toBe(ROW_CHUNK);
-    expect(bodies[bodies.length - 1]!.children.length).toBe(n % ROW_CHUNK || ROW_CHUNK);
-    expect(lidsOf(t)).toEqual(metas(n).map((m) => m.lid));
+    // 組んでいる塊: 先頭から 3 つ、50 行ずつ、順番どおり
+    for (const b of bodies.slice(0, 3)) {
+      expect(b.children.length).toBe(ROW_CHUNK);
+      expect(b.hasAttribute('data-pkc-chunk-empty')).toBe(false);
+    }
+    expect(lidsOf(t)).toEqual(metas(150).map((m) => m.lid));
     // 仮の高さは塊の行数ぶん
     expect(bodies[0]!.style.getPropertyValue('contain-intrinsic-size')).toBe(`auto ${ROW_CHUNK * 26}px`);
-    expect(bodies[bodies.length - 1]!.style.getPropertyValue('contain-intrinsic-size')).toBe('auto 26px');
+    expect(bodies[0]!.style.getPropertyValue('height'), '組んだ塊に固定の高さが残っている').toBe('');
+    // 空の塊: 行は 0、高さ = 行数 × 26(+ 最後の塊の下の 0.5px)── スクロールの長さは全部組んだときと同じ
+    const empties = bodies.slice(3);
+    for (const b of empties) {
+      expect(b.children.length).toBe(0);
+      expect(b.hasAttribute('data-pkc-chunk-empty')).toBe(true);
+    }
+    expect(empties[0]!.style.getPropertyValue('height')).toBe(`${ROW_CHUNK * 26}px`);
+    expect(bodies[bodies.length - 1]!.style.getPropertyValue('height')).toBe('26.5px');
+    // 全体の高さ = 3,001 行 × 26 + 表の最初と最後の 0.5px ずつ(組んだ塊 3 つの分は行で数える)
+    const emptyPx = empties.reduce((a, b) => a + Number.parseFloat(b.style.getPropertyValue('height')), 0);
+    expect(emptyPx).toBe((n - 150) * 26 + 0.5);
   });
 
-  it('🔴 並びが塊をまたいで変わっても、行の node を持ち越して正しい塊・順番へ入る', () => {
+  it('🔴 並びが塊をまたいで変わっても、組んでいる行の node を持ち越して正しい塊・順番へ入る', () => {
     const { render, table } = setup();
     const n = 400;
     const s0 = booted(metas(n));
     render(s0);
     const t = table();
-    const before = t.querySelector('tr[data-pkc-entry="n0"]');
-    // 逆順にする(先頭の行が最後の塊へ移る)
-    const reversed = metas(n).map((m) => ({ ...m, entryOrder: n - m.entryOrder }));
-    render(withMetas(s0, reversed));
-    expect(lidsOf(t)).toEqual([...metas(n)].reverse().map((m) => m.lid));
+    const before = t.querySelector('tr[data-pkc-entry="n49"]');
+    expect(before, '前提: n49 が組まれている').not.toBeNull();
+    // n49 を 51 番目(次の塊の先頭)へ動かす: 順序は n0..n48, n50, n49 の形ではなく、n49 を塊の境の向こうへ
+    const moved = metas(n).map((m) => (m.lid === 'n49' ? { ...m, entryOrder: 50.5 } : m));
+    render(withMetas(s0, moved));
+    const expected = moved.slice().sort((a, b) => a.entryOrder - b.entryOrder).map((m) => m.lid).slice(0, 150);
+    expect(lidsOf(t)).toEqual(expected);
     const bodies = [...t.querySelectorAll('tbody')];
     expect(bodies.length).toBe(n / ROW_CHUNK);
-    for (const b of bodies) expect(b.children.length).toBe(ROW_CHUNK);
-    expect(t.querySelector('tr[data-pkc-entry="n0"]'), '行を作り直した').toBe(before);
-    expect(bodies[bodies.length - 1]!.lastElementChild).toBe(before);
+    expect(t.querySelector('tr[data-pkc-entry="n49"]'), '行を作り直した').toBe(before);
+    expect(bodies[1]!.contains(before), 'n49 が次の塊へ入っていない').toBe(true);
   });
 
   it('🔴 境より少なくなったら、塊は 1 つに戻り、仮の高さも外れる ── 空の塊を残さない', () => {

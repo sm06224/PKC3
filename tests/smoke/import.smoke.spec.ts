@@ -899,9 +899,11 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
     buffer: Buffer.from(`# bulk ${i}\n`, 'utf-8'),
   }));
   await page.locator('[data-pkc-field="import-input"]').setInputFiles(bulk);
-  await expect(rows, '320 件足した行が出ない(3 件 + 320 件)').toHaveCount(323, { timeout: 60000 });
   const table = page.locator('[data-pkc-region="filer-table"]');
-  await expect(table, '行が多いのに格子の印が付いていない').toHaveAttribute('data-pkc-grid', '');
+  // 🔴 #1087 台帳④: 格子では見えている塊だけ行を組むので、行の総数は DOM では数えない。格子の印(行が 300 件を超えた)が付き、
+  //   塊が 7 つ(323 行 ÷ 50)になるのを待つ ── 3 件 + 320 件が全部一覧に入ったことの証拠
+  await expect(table, '320 件足した行が出ない(3 件 + 320 件)').toHaveAttribute('data-pkc-grid', '', { timeout: 60000 });
+  await expect(table.locator('tbody'), '323 行が 50 行ずつの塊に分かれていない').toHaveCount(7, { timeout: 60000 });
   const look = await page.evaluate(() => {
     const t = document.querySelector<HTMLElement>('[data-pkc-region="filer-table"]')!;
     const trs = [...t.querySelectorAll<HTMLElement>('tbody tr')];
@@ -935,10 +937,16 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
   expect(Math.abs(look.height - 26), `行の高さが 26px から動いている(${look.height})`).toBeLessThan(0.6);
   expect(Math.abs(look.thX - look.tdX), '見出しと行の「更新日」の列の位置が揃っていない').toBeLessThan(0.6);
   expect(Math.abs(look.thW - look.tdW), '見出しと行の「更新日」の列の幅が揃っていない').toBeLessThan(0.6);
-  // 画面の外の行も DOM に全部ある(ブラウザの検索が見つけられる)
-  expect(look.all).toBe(323);
+  // 見えている塊(と前後)だけ行を組む ── 全部は組まない(組んだ行は 1 つ以上・323 未満)
+  expect(look.all, '行が 1 つも組まれていない').toBeGreaterThan(0);
+  expect(look.all, '全件を組んでいる(見えている行だけにならない)').toBeLessThan(323);
   // 画面の外の行へも、押して届く(スクロールして押す)── 最後の行を選べる
-  const last = rows.last();
+  await page.evaluate(() => {
+    const h = document.querySelector<HTMLElement>('[data-pkc-region="browse-host"]')!;
+    h.scrollTop = h.scrollHeight;
+  });
+  const last = rows.filter({ hasText: 'bulk 319' });
+  await expect(last, '末尾の行が、スクロールしても組まれない').toHaveCount(1);
   await last.scrollIntoViewIfNeeded();
   await last.click();
   await expect(last, '遠くの行を押しても選べない').toHaveAttribute('data-pkc-selected', /.*/);
