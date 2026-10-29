@@ -53,7 +53,12 @@ export class StemClient {
   }
 
   /** 分ける。⚠ `left` / `right` は譲る(transfer)。落ちたら例外(呼び側が文にする)。 */
-  run(req: StemRequest, onProgress: (text: string) => void = () => {}): Promise<StemResult> {
+  run(
+    req: StemRequest,
+    onProgress: (text: string) => void = () => {},
+    /** 「やめる」の合図を繋ぐ口。渡した関数を、やめるときに呼ぶ(ワーカーへ合図を送る)。 */
+    registerCancel?: (fn: () => void) => void,
+  ): Promise<StemResult> {
     if (this.lease === null) {
       return Promise.reject(new Error('この環境では、重い処理を別に動かす仕組みが使えないため、実行できません'));
     }
@@ -61,8 +66,11 @@ export class StemClient {
     if (channel !== null) channel.port1.onmessage = (ev: MessageEvent<unknown>): void => {
       if (typeof ev.data === 'string') onProgress(ev.data);
     };
+    if (channel !== null) registerCancel?.(() => channel.port1.postMessage('cancel'));
     const job: StemJob = { ...req, ...(channel === null ? {} : { progress: channel.port2 }) };
-    const transfer: Transferable[] = [req.left.buffer as ArrayBuffer, req.right.buffer as ArrayBuffer];
+    // 🔴 モノラルは左右が同じ配列(複製しない)── 同じ buffer を 2 度 transfer すると DataCloneError になるので 1 本にする
+    const transfer: Transferable[] = [req.left.buffer as ArrayBuffer];
+    if (req.right.buffer !== req.left.buffer) transfer.push(req.right.buffer as ArrayBuffer);
     if (channel !== null) transfer.push(channel.port2);
     return this.lease.run<StemResult>(job, transfer).finally(() => {
       channel?.port1.close();

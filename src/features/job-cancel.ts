@@ -25,16 +25,28 @@ export interface CancelToken {
   cancel(): void;
   /** 区切りで呼ぶ。立っていれば `OperationCancelled` を投げる。 */
   throwIfCancelled(): void;
+  /**
+   * 印が立ったときに 1 度だけ呼ぶ(すでに立っていれば、その場で呼ぶ)。⚠ 区切りで見られない長い待ち
+   * (取得・別のスレッドの計算)を、外からやめさせるため ── 取得の中断や、ワーカーへの「やめる」の合図を繋ぐ。
+   */
+  onCancel(fn: () => void): void;
 }
 
 export function createCancelToken(): CancelToken {
   let cancelled = false;
+  const listeners: Array<() => void> = [];
   return {
     get cancelled() {
       return cancelled;
     },
     cancel() {
+      if (cancelled) return;
       cancelled = true;
+      for (const fn of listeners.splice(0)) fn();
+    },
+    onCancel(fn) {
+      if (cancelled) fn();
+      else listeners.push(fn);
     },
     throwIfCancelled() {
       if (cancelled) throw new OperationCancelled();

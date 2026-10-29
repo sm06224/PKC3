@@ -4065,7 +4065,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         void stemInstaller.readInstalled(stemIds).then((v) => appStemModel.setInstalled(v));
       },
       probeStems: () => stemClient.probe(),
-      stems: (req, onProgress) => stemClient.run(req, onProgress),
+      stems: (req, onProgress, registerCancel) => stemClient.run(req, onProgress, registerCancel),
+      jobs,
+      cancelStemFetch: () => stemInstaller.cancel(),
       now: () => new Date(),
       ask: (opts) => promptInApp(root, opts),
       fixSpeakers: (lid, renames, at) => dispatcher.dispatch({ type: 'FIX_SPEAKERS', lid, renames, at }),

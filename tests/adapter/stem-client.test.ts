@@ -95,6 +95,35 @@ describe('StemClient', () => {
     await p;
   });
 
+  it('🔴 やめる合図: registerCancel で渡した関数を呼ぶと、ワーカー側の口へ cancel が届く', async () => {
+    const c = client();
+    let fire!: () => void;
+    const p = c.run(req(), () => {}, (fn) => {
+      fire = fn;
+    });
+    const w = FakeWorker.all[0]!;
+    const port = w.seen[0]!.payload['progress'] as MessagePort;
+    const got: unknown[] = [];
+    port.onmessage = (ev: MessageEvent<unknown>): void => void got.push(ev.data);
+    fire();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(got).toEqual(['cancel']);
+    w.respond(w.seen[0]!.id, { ok: false, reason: 'cancelled' });
+    await expect(p).resolves.toEqual({ ok: false, reason: 'cancelled' });
+  });
+
+  it('🔴 モノラル(左右が同じ配列)は複製せず、buffer を 1 度だけ transfer する(2 度渡すと DataCloneError)', async () => {
+    const c = client();
+    const mono = new Float32Array([0.1, 0.2]);
+    const p = c.run({ model: new Blob(['x']), modelId: 'mdx-vocal', left: mono, right: mono });
+    const w = FakeWorker.all[0]!;
+    const t = w.transfers[0]!;
+    expect(t.filter((x) => x === mono.buffer), 'buffer を重ねて渡した').toHaveLength(1);
+    expect(t).toHaveLength(2); // buffer + 進み具合の口
+    w.respond(w.seen[0]!.id, { ok: true, files: [] });
+    await p;
+  });
+
   it('② アイドルで terminate する。飛んでいる間は kill しない', async () => {
     vi.useFakeTimers();
     const c = client();

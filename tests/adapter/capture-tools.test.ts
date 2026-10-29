@@ -8,6 +8,7 @@
  *   ③書けない間は預かり、別のタブが編集中なら足さずに理由を言う
  */
 import { describe, expect, it, vi } from 'vitest';
+import { createJobControl } from '../../src/adapter/ui/actions/job-control';
 import { createCaptureProcessor } from '../../src/adapter/ui/actions/capture-process';
 import { createCaptureTools, type CaptureToolDeps } from '../../src/adapter/ui/actions/capture-tools';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -85,6 +86,8 @@ function harness(opts: {
     obtainStemModel: vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, save: async () => '' })),
     stems: vi.fn(async () => ({ ok: false as const, reason: 'no-runtime' as const })),
     probeStems: vi.fn(async () => ({ ok: true as const })),
+    jobs: createJobControl({ show: () => {}, hide: () => {} }),
+    cancelStemFetch: vi.fn(),
     isStemModelStored: vi.fn(async () => true),
     confirmStemFetch: vi.fn(async () => true),
     discardStemModel: vi.fn(async () => {}),
@@ -742,5 +745,76 @@ describe('モデルの保存は検証のあと(⚠1)・test B', () => {
     await w.h.run('separate-stems');
     expect(w.h.notes.at(-1)).toContain('歌声と楽器の 2 つの音を作りました');
     expect(w.h.notes.at(-1)).not.toContain('取り込みました');
+  });
+});
+
+/**
+ * 🔴 分離の「やめる」(💭。#1852 F2 と同じ形: `JobControl` の印を区切りで見る)。
+ *  - やめた回は失敗にせず「やめました」と言い、何も作らない・何も残さない
+ *  - 取得中ならモデルの取得を止める / 分離中ならワーカーへ「やめる」の合図を送る
+ */
+describe('分離をやめる', () => {
+  const bytes = new Uint8Array([1, 2]).buffer;
+  const files = { ok: true as const, files: [{ tag: '歌声', bytes, durationMs: 1 }, { tag: '楽器', bytes, durationMs: 1 }] };
+
+  function cancelHarness(over: Partial<CaptureToolDeps>) {
+    const panel: Array<{ title: string; cancel: string | null }> = [];
+    const jobs = createJobControl({ show: (p) => panel.push(p), hide: () => panel.push({ title: '(hide)', cancel: null }) }, { delayMs: 5 });
+    const h = harness({ tools: { jobs, ...over } });
+    h.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
+    return { h, jobs, panel };
+  }
+
+  it('🔴 分離中に押すと、ワーカーへ「やめる」を送り、結果は失敗ではなく「やめました」。添付は作らず、モデルも残さない', async () => {
+    const save = vi.fn(async () => '');
+    let finish!: (r: StemResult) => void;
+    const stems = vi.fn(async (_req: StemRequest, _p: (t: string) => void, register?: (fn: () => void) => void) => {
+      register?.(() => {
+        finish({ ok: false, reason: 'cancelled' });
+      });
+      return new Promise<StemResult>((r) => {
+        finish = r;
+      });
+    });
+    const { h, jobs, panel } = cancelHarness({
+      stems,
+      obtainStemModel: vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, save })),
+    });
+    const run = h.run('separate-stems');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(stems).toHaveBeenCalledTimes(1);
+    expect(panel.some((p) => p.cancel === '分離をやめる'), '「やめる」ボタンが出ていない').toBe(true);
+    expect(jobs.cancelCurrent()).toBe(true);
+    await run;
+    expect(h.dispatcher.getState().error, '失敗扱いにした').toBeNull();
+    expect(h.notes.at(-1)).toContain('やめました');
+    expect(h.deps.attach).not.toHaveBeenCalled();
+    expect(save, 'やめた回にモデルを残した').not.toHaveBeenCalled();
+    expect(panel.at(-1)?.title, '仕事が終わっても欄が残った').toBe('(hide)');
+  });
+
+  it('🔴 取得中に押すと、モデルの取得を止める(cancelStemFetch)。分離には進まない', async () => {
+    const cancelStemFetch = vi.fn();
+    let release!: (v: { ok: false; why: string }) => void;
+    const obtain = vi.fn(async () => new Promise<{ ok: false; why: string }>((r) => { release = r; }));
+    const stems = vi.fn();
+    const { h, jobs } = cancelHarness({ cancelStemFetch, obtainStemModel: obtain as never, stems: stems as never });
+    const run = h.run('separate-stems');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(jobs.cancelCurrent()).toBe(true);
+    expect(cancelStemFetch).toHaveBeenCalledTimes(1);
+    release({ ok: false, why: '取得をやめました' });
+    await run;
+    expect(stems).not.toHaveBeenCalled();
+    expect(h.dispatcher.getState().error).toBeNull();
+    expect(h.notes.at(-1)).toContain('やめました');
+  });
+
+  it('対照群: 押さなければ今までどおり作る。仕事は終わったら欄を片づける', async () => {
+    const { h, panel } = cancelHarness({ stems: vi.fn(async () => files) });
+    await h.run('separate-stems');
+    expect(h.deps.attach).toHaveBeenCalledTimes(2);
+    // 一瞬で終わる仕事にはボタンを出さない(点滅させない)
+    expect(panel.some((p) => p.cancel !== null), '一瞬で終わるのにボタンを出した').toBe(false);
   });
 });

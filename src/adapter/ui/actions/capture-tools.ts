@@ -33,7 +33,9 @@ import type { StemObtainResult } from '@adapter/platform/stems/stem-model-instal
 import { STEM_EXPERIMENTAL, STEM_MAX_MS, STEM_MODELS, STEM_RATE, type StemModel } from '@features/audio/stem-model';
 import { humanBytes } from '@features/human-bytes';
 import { IS_PORTABLE_BUILD, STEM_PORTABLE_UNAVAILABLE } from '@features/build-flavor';
-import type { ToolRunner } from './capture-process';
+import type { ProcessOutput, ToolRunner } from './capture-process';
+import type { JobControl } from './job-control';
+import { isOperationCancelled } from '@features/job-cancel';
 
 export interface CaptureToolDeps {
   readonly foldStill: (blob: Blob) => Promise<VideoFoldResult>;
@@ -68,7 +70,16 @@ export interface CaptureToolDeps {
   /** 🔴 実行器(ONNX Runtime)が起動できるかを、モデルを取る前に確かめる(ワーカー)。 */
   readonly probeStems: () => Promise<StemProbeResult>;
   /** 歌声と楽器に分ける(ワーカー)。⚠ `left` / `right` は譲る(transfer)。断る理由は値で返る。 */
-  readonly stems: (req: StemRequest, onProgress: (text: string) => void) => Promise<StemResult>;
+  readonly stems: (
+    req: StemRequest,
+    onProgress: (text: string) => void,
+    /** 「やめる」の合図を繋ぐ口(渡した関数を、やめるときに呼ぶ)。 */
+    registerCancel?: (fn: () => void) => void,
+  ) => Promise<StemResult>;
+  /** 🔴 長い仕事の「やめる」ボタンの出し入れ(`job-control.ts`。取り込み・書き出しと同じ形)。 */
+  readonly jobs: JobControl;
+  /** 取得中のモデルを止める(やめる印が立ったとき)。 */
+  readonly cancelStemFetch: () => void;
   readonly now: () => Date;
   /** 1 行の字を聞く小窓(`promptInApp`)。やめたら `null`。 */
   readonly ask: (opts: { title: string; label: string; initial: string; okLabel: string }) => Promise<string | null>;
@@ -97,6 +108,7 @@ const STEM_REFUSAL: Readonly<Record<StemRefusal, string>> = {
   'infer-failed': '分離の計算に失敗しました(メモリが足りない可能性があります。ほかのタブを閉じて、もう一度お試しください)。',
   'no-encoder': 'このブラウザは音の書き出し(opus の符号化)に対応していないため、新しい音を作れません。',
   'encode-failed': '新しい音を書き出せませんでした。',
+  cancelled: '歌声と楽器に分けるのをやめました。',
 };
 
 export function stemRefusalText(reason: StemRefusal, detail?: string): string {
@@ -303,54 +315,79 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
       );
       if (!ok) return { kind: 'refused', text: '取得をやめました(歌声と楽器は分けていません)。' };
     }
-    progress(`分離モデル(約 ${humanBytes(model.approxBytes)})を用意しています…`);
-    let lastPct = -1;
-    const fetched = await deps.obtainStemModel(model, (got, total, host) => {
-      const pct = total > 0 ? Math.min(100, Math.floor((got / total) * 100)) : -1;
-      if (pct === lastPct && pct >= 0) return;
-      lastPct = pct;
-      progress(
-        total > 0
-          ? `分離モデルを ${host} から取得しています… ${String(pct)}%(${humanBytes(got)} / ${humanBytes(total)})`
-          : `分離モデルを ${host} から取得しています… ${humanBytes(got)}`,
-      );
-    });
-    if (!fetched.ok) return { kind: 'refused', text: fetched.why };
-    let pcm: { readonly left: Float32Array; readonly right: Float32Array };
-    try {
-      pcm = await deps.decodeStereo44k(blob);
-    } catch {
-      return { kind: 'refused', text: 'この音を読み取れませんでした(このブラウザが対応していない形かもしれません)。' };
-    }
-    // 長さが分からなかった形の最後の砦(復号できた分の長さで断る)
-    if ((pcm.left.length * 1000) / STEM_RATE > STEM_MAX_MS) {
-      return { kind: 'refused', text: STEM_REFUSAL['too-long'] };
-    }
-    progress('歌声と楽器を分けています(ワーカーで処理)…');
-    const r = await deps.stems({ model: fetched.blob, modelId: model.id, left: pcm.left, right: pcm.right }, progress);
-    if (!r.ok) {
-      // 🔴 端末に残っていたモデルで bad-model になったら、そのモデルを捨てる(次も同じ失敗をしない)
-      if (r.reason === 'bad-model' && fetched.fromStore) {
-        await deps.discardStemModel(model);
-        return {
-          kind: 'refused',
-          text: `${stemRefusalText(r.reason, r.detail)} 取り込んだモデルが合わなかったので消しました。もう一度試すと取得し直します。`,
-        };
-      }
-      return { kind: 'refused', text: stemRefusalText(r.reason, r.detail) };
-    }
-    // 🔴 分離が成功し、安全弁を通ったので、ここで初めて端末に残す(取得した回だけ)
-    const saveNote = await fetched.save();
-    return {
-      kind: 'attach',
-      items: r.files.map((f) => ({
-        tag: f.tag,
-        blob: new Blob([f.bytes], { type: 'audio/webm' }),
-        mime: 'audio/webm',
-        ext: 'webm',
-      })),
-      summary: `歌声と楽器の 2 つの音を作りました${STEM_EXPERIMENTAL ? '(試験的)' : ''}。想定の設定で分けました。聞いて確かめてください${saveNote === '' ? '' : `(${saveNote})`}`,
+    // 🔴 ここから先は長い(取得・復号・分離)── 「やめる」を出せる仕事にする(#1852 F2 と同じ形: `JobControl` の印を区切りで見る)。
+    //   少し待っても終わらないときだけボタンが出る。やめた回は失敗にせず「やめました」と言い、何も作らない・何も残さない
+    const token = deps.jobs.start('separate');
+    const cancelledOut: ProcessOutput = {
+      kind: 'cancelled',
+      text: '歌声と楽器に分けるのをやめました(新しい音は作っていません。元の録音は変わりません)',
     };
+    try {
+      progress(`分離モデル(約 ${humanBytes(model.approxBytes)})を用意しています…`);
+      let lastPct = -1;
+      // 取得は外から止められる(印が立ったら、取得を中断する)
+      token.onCancel(() => deps.cancelStemFetch());
+      const fetched = await deps.obtainStemModel(model, (got, total, host) => {
+        const pct = total > 0 ? Math.min(100, Math.floor((got / total) * 100)) : -1;
+        if (pct === lastPct && pct >= 0) return;
+        lastPct = pct;
+        progress(
+          total > 0
+            ? `分離モデルを ${host} から取得しています… ${String(pct)}%(${humanBytes(got)} / ${humanBytes(total)})`
+            : `分離モデルを ${host} から取得しています… ${humanBytes(got)}`,
+        );
+      });
+      token.throwIfCancelled();
+      if (!fetched.ok) return { kind: 'refused', text: fetched.why };
+      let pcm: { readonly left: Float32Array; readonly right: Float32Array };
+      try {
+        pcm = await deps.decodeStereo44k(blob);
+      } catch {
+        return { kind: 'refused', text: 'この音を読み取れませんでした(このブラウザが対応していない形かもしれません)。' };
+      }
+      token.throwIfCancelled();
+      // 長さが分からなかった形の最後の砦(復号できた分の長さで断る)
+      if ((pcm.left.length * 1000) / STEM_RATE > STEM_MAX_MS) {
+        return { kind: 'refused', text: STEM_REFUSAL['too-long'] };
+      }
+      progress('歌声と楽器を分けています(ワーカーで処理)…');
+      // 分離は塊の合間で止まる(ワーカーへ「やめる」の合図を送る)
+      const r = await deps.stems(
+        { model: fetched.blob, modelId: model.id, left: pcm.left, right: pcm.right },
+        progress,
+        (fn) => token.onCancel(fn),
+      );
+      if (!r.ok && r.reason === 'cancelled') return cancelledOut;
+      token.throwIfCancelled();
+      if (!r.ok) {
+        // 🔴 端末に残っていたモデルで bad-model になったら、そのモデルを捨てる(次も同じ失敗をしない)
+        if (r.reason === 'bad-model' && fetched.fromStore) {
+          await deps.discardStemModel(model);
+          return {
+            kind: 'refused',
+            text: `${stemRefusalText(r.reason, r.detail)} 取り込んだモデルが合わなかったので消しました。もう一度試すと取得し直します。`,
+          };
+        }
+        return { kind: 'refused', text: stemRefusalText(r.reason, r.detail) };
+      }
+      // 🔴 分離が成功し、安全弁を通ったので、ここで初めて端末に残す(取得した回だけ)
+      const saveNote = await fetched.save();
+      return {
+        kind: 'attach',
+        items: r.files.map((f) => ({
+          tag: f.tag,
+          blob: new Blob([f.bytes], { type: 'audio/webm' }),
+          mime: 'audio/webm',
+          ext: 'webm',
+        })),
+        summary: `歌声と楽器の 2 つの音を作りました${STEM_EXPERIMENTAL ? '(試験的)' : ''}。想定の設定で分けました。聞いて確かめてください${saveNote === '' ? '' : `(${saveNote})`}`,
+      };
+    } catch (e) {
+      if (isOperationCancelled(e)) return cancelledOut;
+      throw e;
+    } finally {
+      deps.jobs.finish(token);
+    }
   };
 
 

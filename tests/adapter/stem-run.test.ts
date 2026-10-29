@@ -295,6 +295,45 @@ describe('🔴 分けた結果の安全弁(設定違い・別のモデルを、�
   });
 });
 
+describe('🔴 分離をやめる(口の反対向きの合図)', () => {
+  it('塊の合間で「やめる」を受けると cancelled で返り、セッションは手放す。符号化には進まない', async () => {
+    const fa = fakeAudio();
+    let port!: { onmessage: ((ev: { data: unknown }) => void) | null; postMessage: (t: string) => void; close: () => void };
+    port = { onmessage: null, postMessage: () => {}, close: () => {} };
+    let runs = 0;
+    const { ort, log } = fakeOrt({
+      run: async (feeds) => {
+        runs += 1;
+        // 1 塊目の推論のあと、利用者が「やめる」を押した
+        if (runs === 1) port.onmessage?.({ data: 'cancel' });
+        return { y: { data: (feeds['x'] as { data: Float32Array }).data.slice(), dims: DIMS } };
+      },
+    });
+    // 塊が 2 つ以上になる長さ(1 塊 = 261120 標本)
+    const n = 261_120 * 2;
+    const left = new Float32Array(n).fill(0.1);
+    const r = await new StemRunner({ loadOrt: async () => ort, audioApi: fa.api }).run(
+      job({ left, right: left.slice(), progress: port as unknown as MessagePort }),
+    );
+    expect(r).toEqual({ ok: false, reason: 'cancelled' });
+    expect(runs, 'やめたあとも推論を続けた').toBe(1);
+    expect(log.released).toBe(1);
+    expect(fa.log.opened, '符号化まで進んだ').toBe(0);
+  });
+
+  it('対照群: 別の合図(cancel 以外)では止まらない', async () => {
+    const port = { onmessage: null as ((ev: { data: unknown }) => void) | null, postMessage: () => {}, close: () => {} };
+    const { ort } = fakeOrt({
+      run: async (feeds) => {
+        port.onmessage?.({ data: 'ping' });
+        return { y: { data: (feeds['x'] as { data: Float32Array }).data.slice(), dims: DIMS } };
+      },
+    });
+    const r = await new StemRunner({ loadOrt: async () => ort, audioApi: fakeAudio().api }).run(job({ progress: port as unknown as MessagePort }));
+    expect(r.ok).toBe(true);
+  });
+});
+
 describe('所有と進み具合', () => {
   it('🔴 依頼の PCM は受けた瞬間に空へ差し替える(使い終わった物を持ち続けない)', async () => {
     const j = job();

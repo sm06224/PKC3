@@ -169,6 +169,11 @@ export async function separateStems(
 }> {
   const spec = opts.model.stft;
   const n = Math.min(left.length, right.length);
+  /**
+   * 🔴 モノラル(左右が同じ配列)は、複製せずに 1 本のまま扱う。
+   * ⚠ 引き算で元の配列を上書きする(下)ので、左右を別々に回すと、2 本目が上書き済みの値から引いてしまう ── 1 本だけ回す。
+   */
+  const mono = left === right;
   const chunk = chunkSamples(spec);
   const trim = spec.nFft / 2;
   const gen = chunk - 2 * trim;
@@ -177,10 +182,10 @@ export async function separateStems(
   const window = hannWindow(spec.nFft);
   const input = new Float32Array(4 * spec.dimF * spec.dimT);
   const outL = new Float32Array(n);
-  const outR = new Float32Array(n);
+  const outR = mono ? outL : new Float32Array(n);
   // 塊の入力 = 混合の `[i・gen − trim, i・gen − trim + chunk)`(外は 0)
   const sliceL = new Float32Array(chunk);
-  const sliceR = new Float32Array(chunk);
+  const sliceR = mono ? sliceL : new Float32Array(chunk);
   const pieceL = new Float32Array(chunk);
   const pieceR = new Float32Array(chunk);
   let consistency: number | null = null;
@@ -190,12 +195,12 @@ export async function separateStems(
     if (opts.checkpoint) await opts.checkpoint();
     const from = i * gen - trim;
     sliceL.fill(0);
-    sliceR.fill(0);
+    if (!mono) sliceR.fill(0);
     const a = Math.max(0, from);
     const b = Math.min(n, from + chunk);
     if (b > a) {
       sliceL.set(left.subarray(a, b), a - from);
-      sliceR.set(right.subarray(a, b), a - from);
+      if (!mono) sliceR.set(right.subarray(a, b), a - from);
     }
     toModelInput(fft, window, spec, sliceL, 0, sliceR, 0, opts.model.zeroBins, input);
     const out = await opts.infer(input);
@@ -213,7 +218,7 @@ export async function separateStems(
     const len = Math.min(gen, n - dst);
     if (len > 0) {
       outL.set(pieceL.subarray(trim, trim + len), dst);
-      outR.set(pieceR.subarray(trim, trim + len), dst);
+      if (!mono) outR.set(pieceR.subarray(trim, trim + len), dst);
     }
     opts.onProgress?.(i + 1, total);
   }
@@ -221,13 +226,15 @@ export async function separateStems(
   const k = opts.model.compensate;
   for (let i = 0; i < n; i++) {
     const pl = outL[i]! * k;
-    const pr = outR[i]! * k;
     outL[i] = pl;
-    outR[i] = pr;
     left[i] = left[i]! - pl;
+    if (mono) continue;
+    const pr = outR[i]! * k;
+    outR[i] = pr;
     right[i] = right[i]! - pr;
   }
-  return { primary: [outL, outR], rest: [left.subarray(0, n), right.subarray(0, n)], consistency };
+  const restL = left.subarray(0, n);
+  return { primary: [outL, outR], rest: [restL, mono ? restL : right.subarray(0, n)], consistency };
 }
 
 /**
@@ -236,7 +243,8 @@ export async function separateStems(
  */
 export function toEncoderPcm(left: Float32Array, right: Float32Array): Float32Array {
   const l = resample(left, STEM_RATE, STEM_OUT_RATE);
-  const r = resample(right, STEM_RATE, STEM_OUT_RATE);
+  // モノラル(左右が同じ配列)は再標本化も 1 回で済ます
+  const r = right === left ? l : resample(right, STEM_RATE, STEM_OUT_RATE);
   const out = new Float32Array(l.length * 2);
   for (let i = 0; i < l.length; i++) {
     out[2 * i] = clamp(l[i]!);

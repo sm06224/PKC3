@@ -72,7 +72,9 @@ export async function decodeToStereo(
     const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
     if (decoded.numberOfChannels < 1) return { left: new Float32Array(0), right: new Float32Array(0) };
     const left = decoded.getChannelData(0).slice();
-    const right = decoded.numberOfChannels >= 2 ? decoded.getChannelData(1).slice() : left.slice();
+    // 🔴 モノラルは左右を**同じ配列で共有する**(複製しない ── 10 分で約 106MB の要らない写しを作らない)。
+    //   ⚠ 受ける側は、左右が同じ配列でも壊れないこと(`separateStems` の mono 経路)
+    const right = decoded.numberOfChannels >= 2 ? decoded.getChannelData(1).slice() : left;
     return { left, right };
   } finally {
     await ctx.close().catch(() => undefined);

@@ -107,6 +107,29 @@ describe('separateStems', () => {
     expect(Math.max(...out.rest[1].map(Math.abs))).toBeGreaterThan(0.2);
   });
 
+  it('🔴 モノラル(左右が同じ配列)は複製せず 1 本で回す: 恒等で 歌声 = 元・楽器 ≈ 0、左右は同じ配列のまま(2 度引かない)', async () => {
+    const m = signal(n, 11);
+    const keep = m.slice();
+    const out = await separateStems(m, m, { model: SMALL, infer: async (x) => x.slice() });
+    expect(out.primary[0]).toBe(out.primary[1]);
+    expect(out.rest[0]).toBe(out.rest[1]);
+    let maxP = 0;
+    let maxRest = 0;
+    for (let i = 0; i < n; i++) {
+      maxP = Math.max(maxP, Math.abs(out.primary[0][i]! - keep[i]!));
+      maxRest = Math.max(maxRest, Math.abs(out.rest[0][i]!));
+    }
+    expect(maxP).toBeLessThan(2e-4);
+    expect(maxRest, '左右を別々に引くと、2 本目が上書き済みの値から引いて壊れる').toBeLessThan(2e-4);
+  });
+
+  it('toEncoderPcm: モノラルは再標本化を 1 回だけ(左右が同じ値で並ぶ)', () => {
+    const m = new Float32Array(44_100).fill(0.5);
+    const pcm = toEncoderPcm(m, m);
+    expect(pcm.length).toBe(48_000 * 2);
+    expect(pcm[2 * 1000]).toBe(pcm[2 * 1000 + 1]);
+  });
+
   it('進み具合が塊の数まで進み、中断(checkpoint が投げる)は握り潰さない', async () => {
     const seen: Array<[number, number]> = [];
     const l = signal(n, 7);

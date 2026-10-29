@@ -54,7 +54,9 @@ export type StemRefusal =
   | 'bad-model'
   | 'infer-failed'
   | 'no-encoder'
-  | 'encode-failed';
+  | 'encode-failed'
+  /** 利用者が「やめる」を押した(失敗ではない)。 */
+  | 'cancelled';
 
 export type StemResult =
   | { readonly ok: true; readonly files: readonly StemFile[] }
@@ -129,6 +131,9 @@ function classifyOrtError(detail: string): StemRefusal {
   return RUNTIME_FAILURE.test(detail) ? 'no-runtime' : 'bad-model';
 }
 
+/** 「やめる」の合図を区切りで見て抜けたこと。⚠ 失敗ではない(`reason: 'cancelled'` で返る)。 */
+class StemCancelled extends Error {}
+
 export class StemRunner {
   private readonly deps: StemDeps;
 
@@ -170,8 +175,20 @@ export class StemRunner {
     job.right = EMPTY;
     const port = job.progress;
     const report = (text: string): void => port?.postMessage(text);
+    // 🔴 「やめる」の合図は同じ口(MessagePort)の反対向きで届く。区切り(塊の合間)で見て、抜ける
+    let cancelled = false;
+    if (port !== undefined) {
+      port.onmessage = (ev: MessageEvent<unknown>): void => {
+        if (ev.data === 'cancel') cancelled = true;
+      };
+    }
+    const checkpoint = async (): Promise<void> => {
+      // 他の依頼・合図を受けられるよう、塊の合間に 1 度だけ手放す
+      await new Promise<void>((r) => setTimeout(r, 0));
+      if (cancelled) throw new StemCancelled();
+    };
     try {
-      return await this.runInner(job, left, right, report);
+      return await this.runInner(job, left, right, report, checkpoint);
     } finally {
       port?.close();
     }
@@ -182,6 +199,7 @@ export class StemRunner {
     left: Float32Array,
     right: Float32Array,
     report: (text: string) => void,
+    checkpoint: () => Promise<void>,
   ): Promise<StemResult> {
     const model = stemModelOf(job.modelId);
     if (model === undefined) return { ok: false, reason: 'unknown-model' };
@@ -233,8 +251,10 @@ export class StemRunner {
           model,
           infer,
           onProgress: (d, t) => report(`歌声と楽器を分けています… ${String(d)} / ${String(t)}`),
+          checkpoint,
         });
       } catch (e) {
+        if (e instanceof StemCancelled) return { ok: false, reason: 'cancelled' };
         const detail = e instanceof Error ? e.message : String(e);
         // 出力の形・有限性の違反は重み・設定の不良(bad-model)。メモリ不足などの計算の失敗は infer-failed
         return { ok: false, reason: e instanceof StemModelError ? 'bad-model' : 'infer-failed', detail };

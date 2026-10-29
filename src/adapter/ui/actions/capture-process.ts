@@ -45,6 +45,8 @@ export type ProcessOutput =
       readonly summary: string;
     }
   | { readonly kind: 'refused'; readonly text: string }
+  /** 利用者が「やめる」を押して途中で抜けた。⚠ 失敗ではない(赤い字にしない)── 知らせの 1 文だけ言い、何も作らない。 */
+  | { readonly kind: 'cancelled'; readonly text: string }
   /** 道具が自分で書き込みまで済ませた(やめた回を含む)。⚠ 知らせは道具の側の書込が出す ── ここでは何も言わない。 */
   | { readonly kind: 'done' };
 
@@ -165,6 +167,10 @@ export function createCaptureProcessor(deps: CaptureProcessDeps): CaptureProcess
           return;
         }
         if (out.kind === 'done') return; // finally が進行中の字を消す
+        if (out.kind === 'cancelled') {
+          say(out.text);
+          return;
+        }
         if (out.kind === 'attach') {
           if (!canWriteBody(deps.dispatcher)) {
             fail(BUSY_BODY_TEXT);
