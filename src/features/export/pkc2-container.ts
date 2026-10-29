@@ -26,6 +26,7 @@
 import { parseFrontmatter } from '../markdown/frontmatter';
 import { storedInstantIso } from '../datetime/stored-date';
 import { escapeForScriptData } from './pkc3-html';
+import { parseScheduleWhen } from '../schedule/schedule-when';
 import { readTags } from '../flavor/tags';
 import { logDayOfHeading } from '../textlog/log-days';
 import { UNDATED_LOG_HEADING } from '../flavor/textlog-flavor';
@@ -267,8 +268,14 @@ export function planPkc2Container(input: Pkc2ExportInput): Pkc2ExportPlan {
       }
       case 'todo': {
         const status = fm.meta['status'] === 'done' ? 'done' : 'open';
-        const date = typeof fm.meta['date'] === 'string' ? fm.meta['date'] : '';
-        const todo: Record<string, unknown> = { status, description: fm.found ? fm.body.replace(/^\n/, '') : e.body };
+        const rawDate = typeof fm.meta['date'] === 'string' ? fm.meta['date'] : '';
+        // 🔴 PKC2 の ToDo の `date` は素の日付だけ読める。期間・繰り返し・終日(PKC3 の拡張)があるときは
+        //   開始の日だけを渡し、規則は説明の頭に字として残す(黙って落とさない)
+        const when = rawDate === '' ? null : parseScheduleWhen(rawDate);
+        const extended = when !== null && when.extended;
+        const date = extended ? when.date : rawDate;
+        const desc = fm.found ? fm.body.replace(/^\n/, '') : e.body;
+        const todo: Record<string, unknown> = { status, description: extended ? `予定: ${rawDate.trim()}\n\n${desc}` : desc };
         if (date !== '') todo['date'] = date;
         if (fm.meta['archived'] === true) todo['archived'] = true;
         body = JSON.stringify(todo);

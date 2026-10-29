@@ -260,3 +260,30 @@ describe('#pkc-data が HTML として閉じる / 添付を文字列で溜めな
     expect(parsed.container.assets.k2).toBe('QUJD');
   });
 });
+
+describe('ToDo の date に PKC3 の拡張があるとき (#1416 レビュー)', () => {
+  const todoOut = (date: string) => {
+    const p = planPkc2Container({
+      title: 't',
+      containerId: 'c',
+      entries: [e({ lid: 'x', archetype: 'todo', title: 'x', body: `---\ndate: ${date}\n---\n本文\n` })],
+      relations: [],
+      assets: new Map(),
+      now: NOW,
+      schemaVersion: 1,
+    });
+    return JSON.parse(p.container.entries[0]!.body) as { date?: string; description: string };
+  };
+  it('🔴 毎週・期間・終日は、PKC2 が読める素の日付だけを渡し、規則は説明の頭に残す', () => {
+    for (const raw of ['2026-10-20 毎週', '2026-10-20..2026-10-22', '2026-10-20 終日']) {
+      const t = todoOut(raw);
+      expect(t.date, raw).toBe('2026-10-20');
+      expect(t.description.startsWith(`予定: ${raw}\n`), raw).toBe(true);
+      expect(t.description).toContain('本文');
+    }
+  });
+  it('素の日付・時刻つきはこれまでどおり(説明は本文のまま)', () => {
+    expect(todoOut('2026-10-20')).toEqual({ status: 'open', description: '本文\n', date: '2026-10-20' });
+    expect(todoOut('2026-10-20 14:00').description).toBe('本文\n');
+  });
+});
