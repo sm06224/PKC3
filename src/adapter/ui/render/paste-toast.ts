@@ -117,7 +117,8 @@ export function showPasteToast(host: HTMLElement, opts: PasteToastOptions): () =
   // 焦点を本文の欄から奪わない(戻すとき、欄の選択範囲を使う)
   btn.addEventListener('mousedown', (ev) => ev.preventDefault());
   box.append(text, btn);
-  host.append(box);
+  // 🔴 入れ物(`status-stack`)の**先頭**へ ── 状態バーの真上に積む(下に回すと、状態バーの下に出る)
+  host.prepend(box);
 
   let timer: unknown = null;
   const dismiss = (): void => {

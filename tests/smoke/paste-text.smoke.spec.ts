@@ -122,6 +122,51 @@ test('🔴 1MB を超えるウェブページでも、平文へ落とさず記�
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
+/**
+ * 🔴 #1379 ── 貼付の知らせ(トースト)が、見えている他の物に**重ならない**ことを矩形で測る。
+ * 対象: 打っている欄 / 追記欄の「追記」ボタンと追記欄 / 中央ペインの下端 / 右ペインの押せる物 / 状態バー。
+ * ⚠ 浮かせて高さを当てる形だと、状態バーが 2 行に折り返す・文字を最大にすると重なる ── 知らせは状態バーと同じ入れ物の中で、
+ *   バーの真上に積む(`status-stack`)。だから場面を変えても(下の 2 場面)バーの上辺と知らせの下辺が接する。
+ * ⚠ 隠れている物(`isVisible` でない)は数えない。
+ */
+async function expectToastClear(page: Page): Promise<void> {
+  const tb = (await page.locator('[data-pkc-region="paste-toast"]').boundingBox())!;
+  const hits = (b: { x: number; y: number; width: number; height: number }): boolean =>
+    !(tb.y + tb.height <= b.y || tb.y >= b.y + b.height || tb.x + tb.width <= b.x || tb.x >= b.x + b.width);
+  const sels = [
+    ROW,
+    '[data-pkc-action="append-entry"]',
+    '[data-pkc-region="append"]',
+    '[data-pkc-region="center"]',
+    '[data-pkc-region="inspector"]',
+    '[data-pkc-region="status"]',
+  ];
+  for (const sel of sels) {
+    const loc = page.locator(sel).first();
+    if ((await loc.count()) === 0 || !(await loc.isVisible())) continue;
+    const b = (await loc.boundingBox())!;
+    expect(hits(b), `知らせが ${sel} に重なっている: ${JSON.stringify(b)} / 知らせ ${JSON.stringify(tb)}`).toBe(false);
+  }
+  const inspectorButtons = page.locator('[data-pkc-region="inspector"] button:visible');
+  const inspectorBox = (await page.locator('[data-pkc-region="inspector"]').first().boundingBox())!;
+  for (let i = 0; i < (await inspectorButtons.count()); i++) {
+    const b = (await inspectorButtons.nth(i).boundingBox())!;
+    // ⚠ 右ペインの枠の外へ溢れて(切られて)見えていない物は数えない
+    if (b.y + b.height > inspectorBox.y + inspectorBox.height || b.y < inspectorBox.y) continue;
+    expect(hits(b), `知らせが右ペインのボタン(${i} 番目)に重なっている`).toBe(false);
+  }
+  // 画面の中に収まっている(はみ出して切れない)
+  const vp = page.viewportSize()!;
+  expect(tb.x >= 0 && tb.y >= 0 && tb.x + tb.width <= vp.width + 1 && tb.y + tb.height <= vp.height + 1, '知らせが画面からはみ出している').toBe(true);
+  // 状態バーが出ているなら、知らせはその真上(下辺が上辺に接する)
+  const status = page.locator('[data-pkc-region="status"]');
+  if (await status.isVisible()) {
+    const sb = (await status.boundingBox())!;
+    const gap = sb.y - (tb.y + tb.height);
+    expect(gap >= 0 && gap <= 16, `知らせが状態バーの真上にない(間 ${gap}px)`).toBe(true);
+  }
+}
+
 test('🔴 ウェブページをコピーして貼ると、形のまま入って描かれる', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -141,36 +186,40 @@ test('🔴 ウェブページをコピーして貼ると、形のまま入って
   const toast = page.locator('[data-pkc-region="paste-toast"]');
   await expect(toast, '直して貼ったのに知らせが出ない').toBeVisible();
   await expect(toast).toContainText('プレーンテキストに変更');
-  const tb = (await toast.boundingBox())!;
-  const rb = (await page.locator(ROW).boundingBox())!;
-  expect(
-    tb.y + tb.height <= rb.y || tb.x + tb.width <= rb.x || tb.x >= rb.x + rb.width || tb.y >= rb.y + rb.height,
-    '知らせが打っている欄を覆っている(主の作業領域を奪う)',
-  ).toBe(true);
-  // ⚠ 知らせは画面の右下に浮く ── 追記欄の「追記」ボタン・追記欄そのもの・中央ペインの下端(スクロールの終わりの行)を覆うと
-  //   「追記」が押せない / 最後の行が読めなくなる。観測点は矩形の交差(見えている物だけ。隠れた物は数えない)
-  const overlaps = async (sel: string): Promise<string | null> => {
-    const loc = page.locator(sel).first();
-    if ((await loc.count()) === 0 || !(await loc.isVisible())) return null;
-    const b = (await loc.boundingBox())!;
-    const hit = !(tb.y + tb.height <= b.y || tb.y >= b.y + b.height || tb.x + tb.width <= b.x || tb.x >= b.x + b.width);
-    return hit ? `${sel} ${JSON.stringify(b)} / toast ${JSON.stringify(tb)}` : null;
-  };
-  expect(await overlaps('[data-pkc-action="append-entry"]'), '知らせが「追記」ボタンを覆っている').toBeNull();
-  expect(await overlaps('[data-pkc-region="append"]'), '知らせが追記欄を覆っている').toBeNull();
-  // 右ペイン(インスペクタ)の中の押せる物・画面下の状態バー(現在の状態を出す場所)も覆わない
-  expect(await overlaps('[data-pkc-region="status"]'), '知らせが状態バーを覆っている').toBeNull();
-  const inspectorButtons = page.locator('[data-pkc-region="inspector"] button:visible');
-  for (let i = 0; i < (await inspectorButtons.count()); i++) {
-    const b = (await inspectorButtons.nth(i).boundingBox())!;
-    expect(
-      tb.y + tb.height <= b.y || tb.y >= b.y + b.height || tb.x + tb.width <= b.x || tb.x >= b.x + b.width,
-      `知らせが右ペインのボタン(${i} 番目)を覆っている`,
-    ).toBe(true);
-  }
+  await expectToastClear(page);
   await clickReal(page, '[data-pkc-field="paste-toast-action"]');
   await expect(page.locator(ROW), '押したのに書式なしの字になっていない').toHaveValue('メモ: 名 数 あ 1');
   await expect(toast, '押した後も知らせが残っている').toBeHidden();
+  await page.locator(ROW).fill('');
+
+  // 🔴 #1379 ⚠4 ── 場面 2: 状態バーが断り書きで複数行(2 行以上)に折り返した状態でも、知らせは重ならない(バーの真上に積む)
+  await page.evaluate(() => {
+    const st = document.querySelector<HTMLElement>('[data-pkc-region="status"]')!;
+    st.hidden = false;
+    const t = st.querySelector<HTMLElement>('[data-pkc-field="status-text"]')!;
+    t.textContent = '断り書きの試験: ' + 'とても長い一文が続いて、状態バーを 2 行に折り返させます。'.repeat(12);
+  });
+  const barH = (await page.locator('[data-pkc-region="status"]').boundingBox())!.height;
+  expect(barH, '前提: 状態バーが 3 行ほどに折り返している(1 行は 20px)').toBeGreaterThan(40);
+  await pasteText(page, ROW, { html: '<h2>見出し</h2>', plain: '見出し' });
+  await expect(toast).toBeVisible();
+  // ⚠ 空振り防止 ── 貼った後も状態バーが 2 行のまま見えている(描き直しで畳まれていたら、重なりを測っていない)
+  expect((await page.locator('[data-pkc-region="status"]').boundingBox())?.height ?? 0, '貼った後に状態バーが畳まれた').toBeGreaterThan(40);
+  await expectToastClear(page);
+  await clickReal(page, '[data-pkc-field="paste-toast-action"]');
+  await page.locator(ROW).fill('');
+
+  // 🔴 #1379 ⚠4 ── 場面 3: 文字の大きさを最大(特大)にしても重ならない(バーの高さを値で当てていないので追随する)
+  await page.evaluate(() => {
+    const st = document.querySelector<HTMLElement>('[data-pkc-region="status"]')!;
+    st.hidden = true;
+    document.documentElement.style.setProperty('--pkc-text-size', '17px');
+    document.documentElement.setAttribute('data-pkc-text-scale', 'xlarge');
+  });
+  await pasteText(page, ROW, { html: '<h2>見出し</h2>', plain: '見出し' });
+  await expect(toast).toBeVisible();
+  await expectToastClear(page);
+  await clickReal(page, '[data-pkc-field="paste-toast-action"]');
   await page.locator(ROW).fill('');
 
   // 🔴 #1852 束 I3(依頼 93-1)── Ctrl+Shift+V の直後の貼付は直さない(こちらが止めず、書式なしの字だけ)。

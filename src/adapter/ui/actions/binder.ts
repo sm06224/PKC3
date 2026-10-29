@@ -20760,7 +20760,9 @@ export function bindActions(
       if (!appPasteToast.enabled()) return;
       const afterValue = el.value;
       if (pasteRevertRange(before, afterValue) === null) return;
-      showPasteToast(el.closest<HTMLElement>('[data-pkc-slot="root"]') ?? el.ownerDocument.body, {
+      // 🔴 置き場は状態バーの真上に積む入れ物(`shell.ts` の `status-stack`)。無い画面(殻の無い埋め込み)は root / body
+      const slotRoot = el.closest<HTMLElement>('[data-pkc-slot="root"]');
+      showPasteToast(slotRoot?.querySelector<HTMLElement>('[data-pkc-region="status-stack"]') ?? slotRoot ?? el.ownerDocument.body, {
         message: PASTE_TOAST_TEXT,
         actionLabel: PASTE_TOAST_ACTION,
         onAction: () => {
