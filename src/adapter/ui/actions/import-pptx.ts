@@ -22,7 +22,7 @@ import { readZipDirectory, readZipText, ZipReadError } from '@features/import/zi
 import type { MarkdownImportDeps } from './import-markdown';
 import { failImport } from './import-failure';
 import { isOperationCancelled, type CancelToken } from '@features/job-cancel';
-import { IMPORT_CANCELLED_NOTE } from './job-control';
+import { IMPORT_CANCELLED_NOTE, importDoneNote } from './job-control';
 
 /** 1 枚のスライド XML の上限(展開後)。普通のスライドは数十 KB。 */
 export const SLIDE_XML_MAX = 8 * 1024 * 1024;
@@ -197,6 +197,6 @@ export async function importPptxFiles(
     ...(rounded > 0 ? [`文字の大きさを丸めた付箋 ${rounded} 枚`] : []),
     ...(simplified > 0 ? [`形を直した付箋 ${simplified} 枚`] : []),
   ];
-  deps.notify?.(tails.length > 0 ? `${head}(${tails.join('、')})` : head);
+  deps.notify?.(importDoneNote(token, rows.length, tails.length > 0 ? `${head}(${tails.join('、')})` : head));
   return rows.length;
 }

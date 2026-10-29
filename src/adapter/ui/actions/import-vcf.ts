@@ -19,7 +19,7 @@ import { failImport } from './import-failure';
 import { IMPORT_TEXT_MAX_BYTES, readImportTextInfo, SJIS_GUESS_NOTE } from '@features/import/text-decode';
 import { humanBytes } from '@features/human-bytes';
 import { isOperationCancelled, type CancelToken } from '@features/job-cancel';
-import { IMPORT_CANCELLED_NOTE } from './job-control';
+import { IMPORT_CANCELLED_NOTE, importDoneNote } from './job-control';
 
 /**
  * .vcf を 1 枚ずつノートにする。**失敗は必ず可視**(OP_FAILED)で終える。
@@ -174,6 +174,6 @@ export async function importVcfFiles(
     hidden > 0
       ? `取り込み完了: ノート ${rows.length} 件(うち連絡先に並ぶのは ${listed} 件)`
       : `取り込み完了: 連絡先 ${rows.length} 件`;
-  deps.notify?.(notes.length > 0 ? `${head}(注意 ${notes.length} 件)` : head);
+  deps.notify?.(importDoneNote(token, rows.length, notes.length > 0 ? `${head}(注意 ${notes.length} 件)` : head));
   return rows.length;
 }

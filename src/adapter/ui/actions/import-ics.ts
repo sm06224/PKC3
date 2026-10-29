@@ -28,7 +28,7 @@ import type { MarkdownImportDeps } from './import-markdown';
 import { failImport } from './import-failure';
 import { readImportTextInfo, SJIS_GUESS_NOTE } from '@features/import/text-decode';
 import { isOperationCancelled, type CancelToken } from '@features/job-cancel';
-import { IMPORT_CANCELLED_NOTE } from './job-control';
+import { IMPORT_CANCELLED_NOTE, importDoneNote } from './job-control';
 
 const ZERO: IcsCounts = {
   cancelled: 0,
@@ -144,6 +144,8 @@ export async function importIcsFiles(
   const why = icsCountNotes(sum);
   notes.push(...why);
   deps.report?.(notes);
-  deps.notify?.(`予定 ${total} 件を取り込みました${why.length > 0 ? `(${why.join('、')})` : ''}`);
+  deps.notify?.(
+    importDoneNote(token, total, `予定 ${total} 件を取り込みました${why.length > 0 ? `(${why.join('、')})` : ''}`),
+  );
   return total;
 }

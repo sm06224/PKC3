@@ -16,7 +16,7 @@ export const JOB_PANEL: Readonly<Record<JobKind, { title: string; cancel: string
   import: {
     title: '取り込み中',
     cancel: '取り込みをやめる',
-    hint: '取り込みを途中でやめます。書き込み前なら何も入りません。入れたノートがあればゴミ箱へ移します(ゴミ箱から戻せます)',
+    hint: '取り込みを途中でやめます。書き込み前なら何も入りません。書き込みが始まった後は止められず、入った件数を知らせます(「取り込みを取り消す」でゴミ箱へ入れられます)',
   },
   export: {
     title: '書き出し中',
@@ -30,6 +30,19 @@ export const JOB_PANEL: Readonly<Record<JobKind, { title: string; cancel: string
  * ⚠ これらは**最後に 1 回だけ書く**ので、やめた時点で書いたノートは無い ── 戻す物が無いことをそのまま言う。
  */
 export const IMPORT_CANCELLED_NOTE = '取り込みをやめました(ノートは 1 件も追加されていません)';
+
+/**
+ * 書き込みが始まった後に「やめる」が押された取り込みの結果。⚠ 書き込みは 1 回の呼び出しで止められないので、入った物は入っている。
+ * 入ったことを件数で言い、戻す道(取り込み直後の「取り込みを取り消す」)を指す ── 「やめました」と言って黙って残さない。
+ */
+export function landedBeforeCancelNote(count: number): string {
+  return `取り込みをやめる前に入りました(${count} 件)。戻すときは「取り込みを取り消す」を押してください`;
+}
+
+/** 取り込みの最後の知らせ。書き込み後にやめる印が立っていたら、完了の文ではなく上の文を言う。 */
+export function importDoneNote(token: CancelToken | undefined, count: number, normal: string): string {
+  return token?.cancelled === true ? landedBeforeCancelNote(count) : normal;
+}
 
 /** やめる印を立てた後の題(ボタンは消える)。 */
 export const JOB_CANCELLING_TITLE = 'やめています…';

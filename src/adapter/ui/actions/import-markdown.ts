@@ -19,7 +19,7 @@ import { IMPORT_TEXT_MAX_BYTES, readImportTextInfo, SJIS_GUESS_NOTE } from '@fea
 import { humanBytes } from '@features/human-bytes';
 import { duplicateNote, findDuplicates, narrowByLength } from '@features/import/duplicate-scan';
 import { isOperationCancelled, type CancelToken } from '@features/job-cancel';
-import { IMPORT_CANCELLED_NOTE } from './job-control';
+import { IMPORT_CANCELLED_NOTE, importDoneNote } from './job-control';
 
 /**
  * ⚠ `ImportDeps`(PKC2 経路)の**部分集合**として書く ── 呼び出し側が
@@ -191,9 +191,11 @@ export async function importMarkdownFiles(
   deps.imported?.(rows.map((r) => r.lid));
   deps.report?.(notes);
   deps.notify?.(
-    notes.length > 0
-      ? `取り込み完了: ${rows.length} 件(注意 ${notes.length} 件)`
-      : `取り込み完了: ${rows.length} 件`,
+    importDoneNote(
+      token,
+      rows.length,
+      notes.length > 0 ? `取り込み完了: ${rows.length} 件(注意 ${notes.length} 件)` : `取り込み完了: ${rows.length} 件`,
+    ),
   );
   return rows.length;
 }

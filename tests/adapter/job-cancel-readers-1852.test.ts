@@ -300,3 +300,76 @@ describe('main.ts の配線(原文 pin)', () => {
 
 // 未使用警告を避ける(vi は他の test で使うため import している)
 void vi;
+
+/**
+ * 🔴 レビュー指摘(#1852 F2): 「書く直前の確認」と「スライドごとの区切り」を、読み取りの後・途中で効く印で殺せるようにする。
+ * pptx は本物の小さな zip(スライドを持つ)を通す ── 4 バイトの偽ファイルは zip の読みで先に断られ、ループに入らない。
+ */
+describe('書く直前の確認・スライドの区切り(読み取りの後で効く印)', () => {
+  async function pptxZip(): Promise<File> {
+    const { buildPptx } = await import('../../src/features/export/pptx');
+    const { ZipWriter } = await import('../../src/features/export/zip-writer');
+    const parts = buildPptx([{ kind: 'p', runs: [{ text: '左' }] }], { title: 'T' }).parts;
+    const z = new ZipWriter();
+    for (const part of parts) await z.add(part.name, [part.text]);
+    return new File([z.finish()], '板.pptx');
+  }
+  const kinds: Array<[string, Runner, () => Promise<File[]>]> = [
+    ['.md', (d, deps, f, t) => importMarkdownFiles(d, deps, f, t), async () => [md('a.md')]],
+    ['連絡先(.vcf)', (d, deps, f, t) => importVcfFiles(d, deps, f, t), async () => [vcf('a.vcf')]],
+    ['予定(.ics)', (d, deps, f, t) => importIcsFiles(d, deps, f, t), async () => [ics('a.ics')]],
+    ['PowerPoint(.pptx)', (d, deps, f, t) => importPptxFiles(d, deps, f, t), async () => [await pptxZip()]],
+  ];
+
+  it.each(kinds)('🔴 %s: 読み終えた後・書く直前にやめても、書かない', async (_l, run, files) => {
+    const d = booted();
+    const { deps, said, written } = importDeps();
+    // 読みの区切り(throwIfCancelled)では投げず、書く直前の `cancelled` の確認だけが効く印
+    expect(await run(d, deps, await files(), cancelledBeforeWrite)).toBeNull();
+    expect(written, '書く直前の確認が効いていない').toHaveLength(0);
+    expect(said).toEqual([IMPORT_CANCELLED_NOTE]);
+  });
+
+  it('🔴 pptx: スライドを読んでいる途中の区切りでやめても、書かない(ファイルの区切りだけでは足りない)', async () => {
+    const d = booted();
+    const { deps, said, written } = importDeps();
+    let calls = 0;
+    const token: CancelToken = {
+      cancelled: false,
+      cancel() {},
+      throwIfCancelled() {
+        calls += 1;
+        if (calls >= 2) throw new OperationCancelled(); // 1 回目 = ファイルの頭、2 回目 = スライドのループ
+      },
+    };
+    expect(await importPptxFiles(d, deps, [await pptxZip()], token)).toBeNull();
+    expect(calls, 'スライドのループに入っていない').toBe(2);
+    expect(written).toHaveLength(0);
+    expect(said).toEqual([IMPORT_CANCELLED_NOTE]);
+  });
+
+  it.each(kinds)('🔴 %s: 書き込みが始まった後に「やめる」が押されたら、入った件数を言う', async (_l, run, files) => {
+    const d = booted();
+    const { deps, said, written } = importDeps();
+    let flag = false;
+    const orig = deps.bulkUpsertEntries;
+    deps.bulkUpsertEntries = async (rows) => {
+      await orig(rows);
+      flag = true; // 書き込みの最中にボタンが押された
+    };
+    const token: CancelToken = {
+      get cancelled() {
+        return flag;
+      },
+      cancel() {},
+      throwIfCancelled() {},
+    };
+    const got = await run(d, deps, await files(), token);
+    expect(got, '書いたのに入った件数を返していない').toBe(1);
+    expect(written).toHaveLength(1);
+    expect(said.at(-1), 'やめる前に入ったことを言っていない').toBe(
+      '取り込みをやめる前に入りました(1 件)。戻すときは「取り込みを取り消す」を押してください',
+    );
+    expect(said.join(), '完了と言ってしまっている').not.toContain('取り込み完了');
+  });
+});
