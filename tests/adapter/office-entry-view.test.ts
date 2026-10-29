@@ -313,7 +313,7 @@ describe('Office の窓では外部画像が出ないことの初回の案内(#8
     const el = buildOfficeImageNote(DOCX, avail(true), store)!;
     expect(el, '案内が出ていない').not.toBeNull();
     expect(el.textContent).toBe(OFFICE_IMAGE_NOTE);
-    expect(el.textContent).toContain('外部の画像は表示されません');
+    expect(el.textContent).toContain('外部の画像が表示されないことがあります');
     expect(el.textContent).toContain('初回だけ');
   });
 
@@ -338,7 +338,7 @@ describe('Office の窓では外部画像が出ないことの初回の案内(#8
     expect(buildOfficeImageNote({ ...DOCX, name: 'a.png', mime: 'image/png' }, avail(true), store)).toBeNull();
   });
 
-  it('🔴 「Office で開く」を押すと既読になり、その場の案内が消える。押さない限り残る', () => {
+  it('🔴 「Office で開く」を押すと、その場の予告が消える。既読にするのは窓を開く合流点(別の test)で、ここでは既読にしない', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const d = new Dispatcher();
@@ -355,7 +355,8 @@ describe('Office の窓では外部画像が出ないことの初回の案内(#8
     expect(before, '前提が崩れている(既に既読)').toBe(false);
     btn.dispatchEvent(new Event('click', { bubbles: true }));
     expect(openOffice).toHaveBeenCalledTimes(1);
-    expect(appOfficeImageNote.seen()).toBe(true);
+    // 既読は `OfficeWindow.open()` の合流点が持つ(tests/adapter/office-image-note-entries-88.test.ts)── ボタンの受け手は持たない
+    expect(appOfficeImageNote.seen()).toBe(false);
     expect(wrap.querySelector('[data-pkc-field="office-image-note"]')).toBeNull();
   });
 });

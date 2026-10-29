@@ -495,7 +495,6 @@ import {
 } from '@features/structure/structure-plan';
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
 // 🔴 ▼ で選んだ「作る種類」を端末側に覚える(#1045)
-import { appOfficeImageNote } from '@adapter/ui/render/office-image-note';
 import { appCreateKind, appTodayKind } from '@adapter/ui/render/create-kind';
 import { BODY_HOST_SELECTOR, PAINTED_ATTR } from '@adapter/ui/render/detail';
 import { canNoteFind, closeNoteFind, isNoteFindOpen, openNoteFind } from '@adapter/ui/render/note-find';
@@ -16129,11 +16128,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   'open-office': (_dispatcher, target, services) => {
     const assetKey = target.getAttribute('data-pkc-asset-key');
     if (!assetKey) return;
-    // 🔴 初回の案内(Office の窓では外部画像が出ない)は、**押したときに既読にする** ── 画面に出しただけ・設定を触っただけでは既読にしない
-    if (!appOfficeImageNote.seen()) {
-      appOfficeImageNote.markSeen();
-      target.parentElement?.querySelector('[data-pkc-field="office-image-note"]')?.remove();
-    }
+    // 🔴 初回の案内(Office の窓では外部画像が出ないことがある)の既読は `OfficeWindow.open()` の合流点が持つ(どの入口でも 1 回)。
+    //    ここでは、押したので画面の予告の 1 行だけ降ろす
+    target.parentElement?.querySelector('[data-pkc-field="office-image-note"]')?.remove();
     services.openOffice?.({
       assetKey,
       name: target.getAttribute('data-pkc-asset-name') ?? '',

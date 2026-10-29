@@ -204,8 +204,8 @@ export function buildOfficeSaveNote(
  * 「Office で開く」の隣に出す、**初回だけ**の案内(Office の窓では外部の画像が出ない。#88 の user 指示 2026-08-09)。
  * **出さないときは `null`**。
  * ⚠ 出すのは押せる入口(`open`)のときだけ ── 開けないときに言う意味が無い。
- * ⚠ 既読にするのは「Office で開く」を押したとき(`binder.ts` の `open-office`)── 画面に出しただけでは既読にしない
- *   (描き直しのたびに消えたり、読み飛ばしただけで二度と出なくなったりしない)。
+ * ⚠ ここは押す前の予告で、**既読にはしない**。既読にして状態の行へ言うのは `OfficeWindow.open()` の合流点
+ *   (`office-image-note.ts` の `announceOfficeImageNote`)── どの入口から開いても 1 回だけ。
  */
 export function buildOfficeImageNote(
   att: OfficeAttachment,

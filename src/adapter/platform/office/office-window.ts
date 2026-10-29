@@ -310,6 +310,13 @@ export interface OfficeWindowDeps {
    *   「切り替えたのに次の窓でも出ない」になる。
    */
   readonly inputLog?: () => boolean;
+  /**
+   * 🔴 **窓を開く(または開いている窓へ頼む)依頼が来るたびに呼ぶ**(#88 の初回の案内)。
+   * ⚠ Office の入口は多い(添付の「Office で開く」/ 組み込みタイル / PC のファイル選択 / 控えの復元 …)が、
+   *   どれも最後は `open()` を通る ── **全入口の合流点はここ 1 つ**。入口ごとに案内を配らない(足すたびに取りこぼす)。
+   * ⚠ 落ちても窓は開く(案内の失敗で Office を開けなくしない)。
+   */
+  readonly onOpen?: () => void;
 }
 
 export class OfficeWindow {
@@ -318,6 +325,7 @@ export class OfficeWindow {
   private readonly now: () => number;
   private readonly baseUrl: string;
   private readonly inputLog: () => boolean;
+  private readonly onOpen: (() => void) | null;
   private lastAliveAt = 0;
   /** 窓を開く指示を出した時刻(O2)。無ければ `null`。 */
   private openedAt: number | null = null;
@@ -387,6 +395,7 @@ export class OfficeWindow {
     // ⚠ **関数で受ける**(値で受けない)── flag はフラグ画面から変わりうるので、
     //   構築時に固めると「切り替えたのに次の窓でも出ない」になる
     this.inputLog = deps.inputLog ?? ((): boolean => false);
+    this.onOpen = deps.onOpen ?? null;
   }
 
   onEvent(fn: (ev: OfficeWindowEvent) => void): () => void {
@@ -414,6 +423,11 @@ export class OfficeWindow {
    * 切れてポップアップ遮断に遭う ── 文書は**窓が準備できてから**放送で渡す作り。
    */
   open(opts: OpenOptions = {}): OpenOutcome {
+    try {
+      this.onOpen?.();
+    } catch {
+      // 案内が出せなくても、窓は開く
+    }
     this.pendingDoc = opts.bytes
       ? { name: opts.name ?? 'document', bytes: opts.bytes, token: '', images: [], refresh: null, fromShadow: false, originSize: null }
       : null;

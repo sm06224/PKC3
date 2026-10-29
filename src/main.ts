@@ -297,6 +297,7 @@ import { isPasteSource } from '@features/markdown/paste-source';
 import { launchTile, openAppWindowEarly } from '@adapter/ui/launch-tile';
 import { collectExistingLids, collectExistingRelationIds } from '@features/import/existing-lids';
 import { appOfficePack } from '@adapter/ui/render/office-entry-view';
+import { announceOfficeImageNote, appOfficeImageNote } from '@adapter/ui/render/office-image-note';
 import { applyPackResult, syncPackStateFromStore } from '@adapter/ui/render/office-pack-panel';
 import { LocalOfficeFiles, provideStagedLocal } from '@adapter/platform/office/local-office-files';
 import {
@@ -1755,6 +1756,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 #433 の計測(flag `office.inputLog`)── 窓を開くたびに読み直す
     //    (フラグ画面で切り替えたら、次に開く窓から効く)
     inputLog: () => appFlags.isOn(FLAG_OFFICE_INPUT_LOG.name),
+    // 🔴 #88: Office の入口は多いが、窓を開く依頼は必ずここを通る ── 初回の案内(外部画像)はこの 1 か所で出す
+    onOpen: () => void announceOfficeImageNote(appOfficeImageNote, (text) => showStatus(text)),
   });
   /**
    * 🔴 **ノート(lid)が「いま」持っている添付の key**(frontmatter が正本)。
