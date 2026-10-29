@@ -27,11 +27,12 @@ import {
   readSpeakerTurns,
 } from '@features/capture/speakers';
 import type { VoiceJob, VoiceRefusal, VoiceResult } from '@adapter/platform/voice/voice-run';
-import type { StemRefusal, StemResult } from '@adapter/platform/stems/stem-run';
+import type { StemProbeResult, StemRefusal, StemResult } from '@adapter/platform/stems/stem-run';
 import type { StemRequest } from '@adapter/platform/stems/stem-client';
-import type { StemFetchResult } from '@adapter/platform/stems/stem-fetch';
+import type { StemObtainResult } from '@adapter/platform/stems/stem-model-install';
 import { STEM_MAX_MS, STEM_MODELS, STEM_RATE, type StemModel } from '@features/audio/stem-model';
 import { humanBytes } from '@features/human-bytes';
+import { IS_PORTABLE_BUILD, STEM_PORTABLE_UNAVAILABLE } from '@features/build-flavor';
 import type { ToolRunner } from './capture-process';
 
 export interface CaptureToolDeps {
@@ -48,11 +49,16 @@ export interface CaptureToolDeps {
   readonly voice: (job: VoiceJob) => Promise<VoiceResult>;
   /** 44.1kHz のステレオ(左右の写し)へ(音源分離用)。⚠ 読めなければ例外。 */
   readonly decodeStereo44k: (blob: Blob) => Promise<{ readonly left: Float32Array; readonly right: Float32Array }>;
-  /** 分離モデルの重みを公開の配布元から取る(メインスレッド)。⚠ 投げない ── 理由は値で返る。 */
-  readonly fetchStemModel: (
+  /**
+   * 分離モデルの重みを取り出す(メインスレッド)。端末に取り込み済みならそれ(取りに行かない)、無ければ公開の配布元から取得して
+   * 端末に残す。⚠ 投げない ── 理由は値で返る。
+   */
+  readonly obtainStemModel: (
     model: StemModel,
     onProgress: (got: number, total: number, host: string) => void,
-  ) => Promise<StemFetchResult>;
+  ) => Promise<StemObtainResult>;
+  /** 🔴 実行器(ONNX Runtime)が起動できるかを、モデルを取る前に確かめる(ワーカー)。 */
+  readonly probeStems: () => Promise<StemProbeResult>;
   /** 歌声と楽器に分ける(ワーカー)。⚠ `left` / `right` は譲る(transfer)。断る理由は値で返る。 */
   readonly stems: (req: StemRequest, onProgress: (text: string) => void) => Promise<StemResult>;
   readonly now: () => Date;
@@ -274,12 +280,17 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
    * ⚠ 外へ出るのは重みの取得だけ。録音の音は 1 バイトも送らない。「声 / 声以外」の 2 分割(RNNoise)はそのまま残る。
    */
   const separateStemsTool: ToolRunner = async ({ item, blob, progress }) => {
+    // 🔴 1 枚にまとめた版では、何もせず理由を言う(取得も復号もワーカーも始めない)
+    if (IS_PORTABLE_BUILD) return { kind: 'refused', text: STEM_PORTABLE_UNAVAILABLE };
     const model = STEM_MODELS[0]!;
     const tooLong = await probeTooLong(deps, item, blob, STEM_MAX_MS);
     if (tooLong !== null) return { kind: 'refused', text: tooLong };
-    progress(`分離モデル(約 ${humanBytes(model.approxBytes)})を取得しています…`);
+    // 🔴 モデルを取る前に、実行器が起動できるかを確かめる(66MB を取ってから「ORT が起動できない」で失敗しない)
+    const probe = await deps.probeStems();
+    if (!probe.ok) return { kind: 'refused', text: stemRefusalText(probe.reason, probe.detail) };
+    progress(`分離モデル(約 ${humanBytes(model.approxBytes)})を用意しています…`);
     let lastPct = -1;
-    const fetched = await deps.fetchStemModel(model, (got, total, host) => {
+    const fetched = await deps.obtainStemModel(model, (got, total, host) => {
       const pct = total > 0 ? Math.min(100, Math.floor((got / total) * 100)) : -1;
       if (pct === lastPct && pct >= 0) return;
       lastPct = pct;
@@ -311,7 +322,7 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
         mime: 'audio/webm',
         ext: 'webm',
       })),
-      summary: '歌声と楽器の 2 つの音を作りました',
+      summary: `歌声と楽器の 2 つの音を作りました。想定の設定で分けました。聞いて確かめてください${fetched.note === '' ? '' : `(${fetched.note})`}`,
     };
   };
 

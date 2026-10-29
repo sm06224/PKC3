@@ -13,6 +13,15 @@
  *   ORT が読んだ入出力の形(`[*, 4, dimF, dimT]`)を検める(取り違え・途中で切れた物を止める)。固定したい日は `sha256` に入れる。
  * - ⚠ STFT の設定(`nFft` など)は**重みごとに決まっている**。モデルを替えるときはここの 1 か所を直す
  *   (設定が違うと出力は音にならない ── 入出力の形が合っても分からないので、実機で聞いて確かめる)。
+ *
+ * ## 🔴 正直に: 設定値は UVR の記録と**照合できていない**
+ * `nFft` 7680 / `hop` 1024 / `dimF` 3072 / `dimT` 256 / `zeroBins` 3 / `compensate` 1.009 は、`Kim_Vocal_2` の UVR の
+ * 設定(model_data.json)の**記憶**から書いた。開発の箱から配布元にも UVR の記録にも届かず、照合していない
+ * (重みも取れていないので、本物の重みで歌声と楽器が分かれることは**未確認**)。
+ *  - 守りは 3 つ: ①ORT が読んだ入力の形が `[*, 4, dimF, dimT]` と一致すること ②出力が有限で、歌声の大きさが元の 1.5 倍以下、
+ *    残りのエネルギーが元以下であること(`separationProblem`)③画面の結果に「想定の設定で分けました。聞いて確かめてください」を出す。
+ *  - `compensate` は歌声(取り出した音)にかける係数で、UVR の記録に確証が無い。外れていても大きさが 1% 動くだけだが、未確認である。
+ *  - 窓・reflect・チャンネルの並び(左の実部・虚部・右の実部・虚部)は `tests/features/stem-dsp.test.ts` の既知値の fixture が固定している。
  */
 import {
   Fft,
@@ -51,6 +60,8 @@ export interface StemModel {
   readonly zeroBins: number;
   /** モデルが返すのはどちらの音か。 */
   readonly primary: 'vocals' | 'instrumental';
+  /** 取り出した音にかける係数(UVR の `compensate`。⚠ 記録に確証が無い ── 上の注記)。 */
+  readonly compensate: number;
 }
 
 /**
@@ -71,6 +82,7 @@ export const STEM_MODELS: readonly StemModel[] = [
     stft: { nFft: 7680, hop: 1024, dimF: 3072, dimT: 256 },
     zeroBins: 3,
     primary: 'vocals',
+    compensate: 1.009,
   },
 ];
 
@@ -92,6 +104,14 @@ export function stemTags(model: StemModel): { readonly primary: string; readonly
   return model.primary === 'vocals'
     ? { primary: '歌声', rest: '楽器' }
     : { primary: '楽器', rest: '歌声' };
+}
+
+/** モデルの出力が想定と違う(形・有限性)。⚠ 計算資源の失敗(`infer-failed`)とは別 ── 重み・設定の不良として断る。 */
+export class StemModelError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StemModelError';
+  }
 }
 
 /** 1 回の推論。入力 `[1, 4, dimF, dimT]` を平らにした物 → 出力(同じ並び)。 */
@@ -159,7 +179,11 @@ export async function separateStems(
     toModelInput(fft, window, spec, sliceL, 0, sliceR, 0, opts.model.zeroBins, input);
     const out = await opts.infer(input);
     if (out.length !== input.length) {
-      throw new Error('モデルの出力の形が想定と違います(別のモデルか、設定が合っていません)');
+      throw new StemModelError('モデルの出力の形が想定と違います(別のモデルか、設定が合っていません)');
+    }
+    // 🔴 出力が有限であること(NaN / Infinity が 1 つでも混ざると、逆変換で全体に広がる)
+    for (let k = 0; k < out.length; k++) {
+      if (!Number.isFinite(out[k]!)) throw new StemModelError('モデルの出力に数でない値(NaN / 無限大)が含まれています');
     }
     fromModelOutput(fft, window, spec, out, pieceL, pieceR);
     // 取り出した音のうち、両端の `trim` を除いた `gen` が、混合の `[i・gen, i・gen + gen)` に当たる
@@ -171,10 +195,15 @@ export async function separateStems(
     }
     opts.onProgress?.(i + 1, total);
   }
-  // 元 − 取り出した音(元の配列を上書きする)
+  // 元 − 取り出した音(元の配列を上書きする)。取り出した音には `compensate` をかけてから引く
+  const k = opts.model.compensate;
   for (let i = 0; i < n; i++) {
-    left[i] = left[i]! - outL[i]!;
-    right[i] = right[i]! - outR[i]!;
+    const pl = outL[i]! * k;
+    const pr = outR[i]! * k;
+    outL[i] = pl;
+    outR[i] = pr;
+    left[i] = left[i]! - pl;
+    right[i] = right[i]! - pr;
   }
   return { primary: [outL, outR], rest: [left.subarray(0, n), right.subarray(0, n)] };
 }
@@ -195,3 +224,43 @@ export function toEncoderPcm(left: Float32Array, right: Float32Array): Float32Ar
 }
 
 const clamp = (v: number): number => (v > 1 ? 1 : v < -1 ? -1 : v);
+
+/** 歌声が元の何倍まで許すか。⚠ 取り出した音は元より大きくならないはず ── 超えるのは設定違い・別のモデルの出力。 */
+export const STEM_MAX_GAIN = 1.5;
+
+const rmsOf2 = (a: Float32Array, b: Float32Array): number => {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += a[i]! * a[i]! + b[i]! * b[i]!;
+  return Math.sqrt(s / Math.max(1, a.length * 2));
+};
+
+/**
+ * 🔴 **分けた結果が音として成り立っているか**(理由の文字列。成り立っていれば `null`)。
+ *  - 全標本が有限であること
+ *  - 取り出した音(歌声)の RMS が元の `STEM_MAX_GAIN` 倍以下
+ *  - 残り(楽器 = 元 − 歌声)のエネルギーが元以下(設定違いだと、引いた結果が元より大きくなる)
+ * ⚠ これは「設定が合っているか」の**十分条件ではない**(合っていなくても通りうる)── 通らないものだけを止める安全弁。
+ */
+export function separationProblem(
+  inputRms: number,
+  primary: readonly [Float32Array, Float32Array],
+  rest: readonly [Float32Array, Float32Array],
+): string | null {
+  for (const arr of [primary[0], primary[1], rest[0], rest[1]]) {
+    for (let i = 0; i < arr.length; i++) {
+      if (!Number.isFinite(arr[i]!)) return '分けた結果に数でない値(NaN / 無限大)が含まれています';
+    }
+  }
+  const p = rmsOf2(primary[0], primary[1]);
+  if (p > inputRms * STEM_MAX_GAIN) {
+    return `取り出した音が元より大きすぎます(元の ${(p / inputRms).toFixed(1)} 倍。別のモデルか、設定が合っていません)`;
+  }
+  const r = rmsOf2(rest[0], rest[1]);
+  if (r > inputRms) return '残りの音が元より大きくなりました(別のモデルか、設定が合っていません)';
+  return null;
+}
+
+/** 左右の RMS(2 本まとめた値)。分ける前に測る(分けると元の配列は上書きされる)。 */
+export function stereoRms(left: Float32Array, right: Float32Array): number {
+  return rmsOf2(left, right);
+}

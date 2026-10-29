@@ -27,6 +27,7 @@ import {
   ASR_PARTS,
   asrMemoryNote,
   asrRecommendNote,
+  type AsrPackFacts,
   asrPartLabel,
   type AsrPart,
   type AsrPartId,
@@ -49,10 +50,10 @@ export class AsrPackState {
   private readonly listeners = new Set<() => void>();
   /** この端末で WebGPU が使えるか。⚠ `null` = まだ測っていない(推奨に使わない)。 */
   private webgpuOk: boolean | null = null;
-  /** 配布元がまだ置いていない部品 → 理由(目録から)。⚠ 空 = 分かっていない、または全部ある。 */
-  private unavailableParts: Readonly<Partial<Record<AsrPartId, string>>> = {};
-  /** 配布元の目録を引く口(main が差す)。⚠ 引けなければ `null`(= 分からない。選べない扱いにはしない)。 */
-  private availabilityProbe: (() => Promise<Readonly<Partial<Record<AsrPartId, string>>> | null>) | null = null;
+  /** 配布元の目録から分かった事実。⚠ `null` = まだ引けていない / 引けなかった(選べない扱いにも、高精度のお勧めにも使わない)。 */
+  private packFacts: AsrPackFacts | null = null;
+  /** 配布元の目録を引く口(main が差す)。⚠ 引けなければ `null`。 */
+  private availabilityProbe: (() => Promise<AsrPackFacts | null>) | null = null;
   private probed = false;
 
   webgpu(): boolean | null {
@@ -65,16 +66,21 @@ export class AsrPackState {
     this.emit();
   }
 
-  unavailable(): Readonly<Partial<Record<AsrPartId, string>>> {
-    return this.unavailableParts;
+  facts(): AsrPackFacts | null {
+    return this.packFacts;
   }
 
-  setUnavailable(v: Readonly<Partial<Record<AsrPartId, string>>>): void {
-    this.unavailableParts = v;
+  /** 選べない理由(目録が引けていなければ空)。 */
+  unavailable(): Readonly<Partial<Record<AsrPartId, string>>> {
+    return this.packFacts?.unavailable ?? {};
+  }
+
+  setFacts(v: AsrPackFacts): void {
+    this.packFacts = v;
     this.emit();
   }
 
-  setAvailabilityProbe(fn: () => Promise<Readonly<Partial<Record<AsrPartId, string>>> | null>): void {
+  setAvailabilityProbe(fn: () => Promise<AsrPackFacts | null>): void {
     this.availabilityProbe = fn;
   }
 
@@ -89,7 +95,7 @@ export class AsrPackState {
     const gpu = probeGpu().then((v) => this.setWebgpu(v), () => undefined);
     const avail = (this.availabilityProbe?.() ?? Promise.resolve(null)).then(
       (v) => {
-        if (v !== null) this.setUnavailable(v);
+        if (v !== null) this.setFacts(v);
       },
       () => undefined,
     );
@@ -296,7 +302,7 @@ export function buildAsrPackPanel(
     }
     // 🔑 どれも取り込み済みなら案内は要らない
     const anyHas = rows.some((r) => installedAll.parts[r.part.id] !== undefined);
-    const rec = anyHas ? null : asrRecommendNote(memory(), state.webgpu(), state.unavailable());
+    const rec = anyHas ? null : asrRecommendNote(memory(), state.webgpu(), state.facts());
     recommend.hidden = rec === null;
     recommend.textContent = rec ?? '';
     progress.hidden = !busy;

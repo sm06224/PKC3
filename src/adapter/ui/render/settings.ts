@@ -42,6 +42,7 @@ import { appNoticeStore, type NoticeStore } from '@adapter/platform/notice-store
 import { appTooNarrowOk, TooNarrowOkStore } from './too-narrow';
 import { buildOfficePackPanel, type OfficePackPanel } from './office-pack-panel';
 import { buildAsrPackPanel, type AsrPackPanel } from './asr-pack-panel';
+import { buildStemModelPanel, type StemModelPanel } from './stem-model-panel';
 import { buildSettingsCommands, buildSettingsFile } from './commands';
 import { buildKeymapPanel, type KeymapPanel } from './keymap-panel';
 import type { SettingsGroup, SettingsSection } from './settings/section';
@@ -91,6 +92,7 @@ export class SettingsRenderer {
   /** Office 一式の節(#88 / O6-a)。⚠ 器と同じ寿命 ── 自分で変化を購読する。 */
   private officePack: OfficePackPanel | null = null;
   private asrPack: AsrPackPanel | null = null;
+  private stemModel: StemModelPanel | null = null;
   /**
    * ショートカットキーの節(#256)。⚠ 器と同じ寿命 ── 自分で割当の変化を購読する。
    * ⚠ 組み直しは 1 度だけ(`built`)なので、購読も capture も 1 組しか生きない。
@@ -498,6 +500,9 @@ export class SettingsRenderer {
      */
     this.asrPack = buildAsrPackPanel();
     storageSection.append(this.asrPack.root);
+    /** 🔴 **音源分離のモデル**(#674 / #949)── 音声認識の部品と同じ「端末に置くかどうか」の判断なので、その隣に置く。 */
+    this.stemModel = buildStemModelPanel();
+    storageSection.append(this.stemModel.root);
     body.append(storageSection);
 
     /**

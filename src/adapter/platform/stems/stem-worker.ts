@@ -11,13 +11,12 @@
  *   (`cdn.jsdelivr.net`)から取りに行く ── PKC の「勝手に外へ出ない」に反するので、`wasmPaths` は必ず明示する。
  *   外へ出るのは重みの取得(`stem-fetch.ts`)の 1 本だけである。
  */
-import ortWasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
-import ortMjsUrl from 'onnxruntime-web/ort-wasm-simd-threaded.mjs?url';
-import { StemRunner, type OrtLike, type StemJob } from './stem-run';
+declare const __PKC_PORTABLE__: boolean | undefined;
+import { StemRunner, type OrtLike, type StemJob, type StemProbeJob } from './stem-run';
 
 interface Incoming {
   id: number;
-  payload: StemJob;
+  payload: StemJob | StemProbeJob;
 }
 
 const ctx = self as unknown as {
@@ -29,6 +28,18 @@ let loaded: Promise<OrtLike> | null = null;
 
 const runner = new StemRunner({
   loadOrt: async (): Promise<OrtLike> => {
+    /**
+     * 🔴 1 枚にまとめた版では、この先(ORT 本体と wasm)を**丸ごと落とす**(ビルド時に枝ごと消える ── `build/portable.config.ts`)。
+     * ⚠ 条件はこの場で直接書く(別 module の定数だと、枝の除去が効かず wasm の参照が残る)。
+     */
+    if (typeof __PKC_PORTABLE__ !== 'undefined' && __PKC_PORTABLE__) {
+      throw new Error('1 枚にまとめた版では ONNX Runtime を同梱していません');
+    }
+    // ⚠ wasm / glue の置き場は PKC3 自身が配る hash 付きの asset(`?url`)。動的 import にして、上の枝と一緒に落とせるようにする
+    const [{ default: ortWasmUrl }, { default: ortMjsUrl }] = await Promise.all([
+      import('onnxruntime-web/ort-wasm-simd-threaded.wasm?url'),
+      import('onnxruntime-web/ort-wasm-simd-threaded.mjs?url'),
+    ]);
     // ⚠ 読み込みは 1 度だけ(失敗したら次の依頼でやり直せるよう、失敗は覚えない)
     loaded ??= import('onnxruntime-web/wasm').then((m) => {
       const ort = m as unknown as OrtLike & {
@@ -50,7 +61,15 @@ const runner = new StemRunner({
 
 ctx.onmessage = (ev: MessageEvent<Incoming>): void => {
   const { id, payload } = ev.data;
-  void runner.run(payload).then(
+  // 実行器の起動確認(モデルを取る前)── 分離の依頼とは別の形
+  if ('op' in payload && payload.op === 'probe') {
+    void runner.probe().then(
+      (result) => ctx.postMessage({ id, ok: true, result }),
+      (e: unknown) => ctx.postMessage({ id, ok: false, error: e instanceof Error ? e.message : String(e) }),
+    );
+    return;
+  }
+  void runner.run(payload as StemJob).then(
     (result) => {
       const transfer: Transferable[] = [];
       if (result.ok) for (const f of result.files) transfer.push(f.bytes);

@@ -12,7 +12,7 @@
  * 生成の確率を触らないので誤り率は動かない。
  *
  * ## 無音の決め方
- * 20 ms の枠ごとの RMS を見て、**いちばん大きい枠の `ASR_CUT_RELATIVE` 倍**と `ASR_CUT_FLOOR` の大きいほうより小さい枠を無音とする
+ * 20 ms の枠ごとの RMS を見て、**上位パーセンタイルの枠(`ASR_CUT_REF_PERCENTILE`)の `ASR_CUT_RELATIVE` 倍**と `ASR_CUT_FLOOR` の大きいほうより小さい枠を無音とし、さらに**切る区間の RMS が `ASR_CUT_ABS_RMS` 未満**のときだけ切る
  * (小さく録れた録音で声まで無音と読まないため ── `silence-trim.ts` と同じ向き)。
  * **`ASR_CUT_MIN_MS` 以上続く無音だけ**を切り(語間・文間の間は切らない)、切った所の両側に `ASR_CUT_KEEP_MS` ずつ残す。
  * 切ったあとの時刻は `remapMs` で元の録音の時刻へ戻す(文字起こしの時刻・字幕は元の録音に合う)。
@@ -22,8 +22,12 @@
 export const ASR_CUT_FRAME_MS = 20;
 /** 無音の下限(RMS。Float32、`-1..1`)。これより小さい枠は、どんなに録音が小さくても無音(−60 dBFS)。 */
 export const ASR_CUT_FLOOR = 1e-3;
-/** 無音のしきい値の、いちばん大きい枠に対する割合(約 −26 dB)。 */
+/** 基準にする枠の順位(0..1)。⚠ 最大(1.0)にしない ── 大きな音 1 回で基準が跳ね上がる。 */
+export const ASR_CUT_REF_PERCENTILE = 0.97;
+/** 無音のしきい値の、基準の枠に対する割合(約 −26 dB)。 */
 export const ASR_CUT_RELATIVE = 0.05;
+/** 切る区間の RMS はこれ未満であること(−50 dBFS)。これ以上の「無音」は声かもしれないので切らない。 */
+export const ASR_CUT_ABS_RMS = 0.00316;
 /** これ以上続いた無音だけを切る(ms)。語間・文間の間(せいぜい 1〜2 秒)は切らない。 */
 export const ASR_CUT_MIN_MS = 4000;
 /** 切った所の両側に残す無音(ms)。語頭・語尾を削らず、「ここで途切れた」という間も残す。 */
@@ -54,22 +58,24 @@ export function planSilenceCut(pcm: Float32Array, rate: number): SilenceCut | nu
   const frame = Math.max(1, Math.round((rate * ASR_CUT_FRAME_MS) / 1000));
   const frames = Math.floor(pcm.length / frame);
   if (frames < 2) return null;
-  const rmsAt = (k: number): number => {
-    let s = 0;
+  const rms = new Float32Array(frames);
+  for (let k = 0; k < frames; k++) {
+    let sum = 0;
     const base = k * frame;
     for (let i = 0; i < frame; i++) {
       const v = pcm[base + i]!;
-      s += v * v;
+      sum += v * v;
     }
-    return Math.sqrt(s / frame);
-  };
-  let loud = 0;
-  for (let k = 0; k < frames; k++) {
-    const r = rmsAt(k);
-    if (r > loud) loud = r;
+    rms[k] = Math.sqrt(sum / frame);
   }
-  const threshold = Math.max(ASR_CUT_FLOOR, loud * ASR_CUT_RELATIVE);
-  if (loud < ASR_CUT_FLOOR) return null; // 全体が無音 ── `isNearSilent` の仕事(ここでは切らない)
+  /**
+   * 🔴 **基準は最大の枠ではなく、上位のパーセンタイル**(`ASR_CUT_REF_PERCENTILE`)。
+   * 最大枠を基準にすると、大きな音が 1 回(拍手・机を叩く音)あっただけで、その 5% より小さい**声そのもの**が無音と読まれて切られる。
+   */
+  const sorted = Float32Array.from(rms).sort();
+  const ref = sorted[Math.min(frames - 1, Math.floor(frames * ASR_CUT_REF_PERCENTILE))]!;
+  const threshold = Math.max(ASR_CUT_FLOOR, ref * ASR_CUT_RELATIVE);
+  if (ref < ASR_CUT_FLOOR) return null; // 全体が無音 ── `isNearSilent` の仕事(ここでは切らない)
   const minFrames = Math.ceil(ASR_CUT_MIN_MS / ASR_CUT_FRAME_MS);
   const keepFrames = Math.round(ASR_CUT_KEEP_MS / ASR_CUT_FRAME_MS);
 
@@ -84,6 +90,10 @@ export function planSilenceCut(pcm: Float32Array, rate: number): SilenceCut | nu
     const len = endFrame - start;
     runStart = -1;
     if (len < minFrames) return;
+    // 🔴 切る区間そのものが小さい音であること(絶対の門)── 相対のしきい値だけでは、基準が高い録音で声を切りうる
+    let energy = 0;
+    for (let k = start; k < endFrame; k++) energy += rms[k]! * rms[k]!;
+    if (Math.sqrt(energy / len) >= ASR_CUT_ABS_RMS) return;
     // 無音の頭と尻を `keepFrames` ずつ残し、真ん中を切る
     const cutFrom = (start + keepFrames) * frame;
     const cutTo = (endFrame - keepFrames) * frame;
@@ -94,7 +104,7 @@ export function planSilenceCut(pcm: Float32Array, rate: number): SilenceCut | nu
     cuts += 1;
   };
   for (let k = 0; k < frames; k++) {
-    if (rmsAt(k) < threshold) {
+    if (rms[k]! < threshold) {
       if (runStart < 0) runStart = k;
     } else {
       closeRun(k);
@@ -130,6 +140,25 @@ export function remapMs(ms: number, cut: SilenceCut, rate: number): number {
     // 最後の範囲は、録音の終わりちょうど(`target === outAt + len`)も受ける
     if (target < outAt + len || i === cut.keep.length - 1) {
       return ((r.start + (target - outAt)) * 1000) / rate;
+    }
+    outAt += len;
+  }
+  return ms;
+}
+
+/**
+ * 区間の**終わり**の時刻(ms)を元の録音の時刻へ戻す。
+ * 🔑 終わりは閉区間(その時刻までが区間)なので、切った所の境目では**前の範囲の末尾へ寄せる**
+ *   (`remapMs` の「次の範囲の頭へ」だと、区間が切り落とした無音を丸ごとまたいで長く見える)。
+ */
+export function remapEndMs(ms: number, cut: SilenceCut, rate: number): number {
+  const target = (ms * rate) / 1000;
+  let outAt = 0;
+  for (let i = 0; i < cut.keep.length; i++) {
+    const r = cut.keep[i]!;
+    const len = r.end - r.start;
+    if (target <= outAt + len || i === cut.keep.length - 1) {
+      return ((r.start + Math.max(0, target - outAt)) * 1000) / rate;
     }
     outAt += len;
   }

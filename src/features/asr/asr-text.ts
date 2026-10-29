@@ -34,9 +34,18 @@ export function transcriptHeading(at: Date): string {
  * ⚠ 前後の空白を落とし、**行の途中の改行・連続する空白は 1 つの空白へ**まとめる
  *   (whisper は 1 続きの文を返す。本文の記法を壊す改行を混ぜない)。
  */
-export function transcriptText(raw: string): string | null {
-  const t = collapseRunaway(raw.replace(/\s+/g, ' ').trim());
+export function transcriptText(raw: string, opts: TranscriptOptions = {}): string | null {
+  const flat = raw.replace(/\s+/g, ' ').trim();
+  const t = opts.collapseRunaway === true ? collapseRunaway(flat) : flat;
   return t === '' ? null : t;
+}
+
+/**
+ * 🔴 **暴走の除去は、入力が小さいときだけ**(`collapseRunaway: true` ── 呼び側が `isQuietInput` で決める)。
+ * 通常の音量の「la la la …」「0000…」「はい」6 連打は、**本当に言った**かもしれないので残す(畳むのは幻覚が出る小さな入力に限る)。
+ */
+export interface TranscriptOptions {
+  readonly collapseRunaway?: boolean;
 }
 
 /**
@@ -93,11 +102,13 @@ export function dropLoopedSegments<T extends { readonly text: string }>(segments
  */
 export function transcriptLines(
   segments: ReadonlyArray<{ readonly startMs: number; readonly endMs?: number | null; readonly text: string }> | undefined,
+  opts: TranscriptOptions = {},
 ): string | null {
   if (segments === undefined) return null;
   const lines: string[] = [];
-  for (const seg of dropLoopedSegments(segments)) {
-    const t = transcriptText(seg.text);
+  const kept = opts.collapseRunaway === true ? dropLoopedSegments(segments) : segments;
+  for (const seg of kept) {
+    const t = transcriptText(seg.text, opts);
     if (t !== null) lines.push(`${elapsedLineHead(seg.startMs, seg.endMs)}${t}`);
   }
   return lines.length === 0 ? null : lines.join('\n');
@@ -120,8 +131,13 @@ export const ASR_REPEAT_MAX_VOCAB = 3;
 /** 空白と、日本語 / ASCII の区切りの記号で語に分ける。ASCII は大文字小文字を区別しない。 */
 const WORD_SPLIT = /[\s、。，．,.!?！？…]+/;
 
+/** 入力が小さいか(幻覚が出うる音量か)。⚠ 暴走の除去と `isQuietRepetition` が同じ縛りを使う ── 判定はここ 1 つ。 */
+export function isQuietInput(rms: number): boolean {
+  return rms < ASR_QUIET_RMS;
+}
+
 export function isQuietRepetition(text: string, rms: number): boolean {
-  if (!(rms < ASR_QUIET_RMS)) return false;
+  if (!isQuietInput(rms)) return false;
   const words = text
     .toLowerCase()
     .split(WORD_SPLIT)

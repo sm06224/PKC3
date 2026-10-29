@@ -131,6 +131,32 @@ test('🔴 仕上げ ▾ から:雑音を減らす → 新しい音の添付 / �
   expect(v.seconds).toBeLessThan(7.6);
   expect(v.rmsL, '歌声が鳴っていない(元の声が出ていない)').toBeGreaterThan(0.005);
   expect(r.rmsL, '楽器に声が残っている(恒等写像なら元 − 歌声 ≈ 0)').toBeLessThan(v.rmsL * 0.2);
+  //    取り込んだモデルは端末に残り、設定の「音源分離」から見え、消せる(片道にしない)。次からは取りに行かない
+  await expect(statusLine(page), '想定の設定で分けたと言わない').toContainText('想定の設定で分けました。聞いて確かめてください');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const stemSection = page.locator('[data-pkc-region="settings-stem"]');
+  await stemSection.scrollIntoViewIfNeeded();
+  await expect(stemSection.locator('[data-pkc-field="stem-installed"]'), '取り込んだのに「取り込み済み」が出ない').toContainText('取り込み済み');
+  await expect(stemSection.locator('[data-pkc-action="install-stem-model"]')).toBeHidden();
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]').catch(async () => {
+    await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="detail"]');
+    await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  });
+  const rowsBefore = await rows(page).count();
+  await pickCaptureTool(page, audioRow, 'separate-stems');
+  await expect(statusLine(page).first()).toContainText('歌声と楽器の 2 つの音を作りました', { timeout: 90_000 });
+  // ⚠ 添付が一覧に増える(= 段取りが終わって次を受けられる)まで待つ。知らせが先に出て、段取りの門はまだ閉じている
+  await expect(rows(page), '2 回目の添付が増えない').toHaveCount(rowsBefore + 2, { timeout: 30_000 });
+  expect(modelRequests, '2 回目なのにモデルを取りに行った(端末に残っているはず)').toBe(1);
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await stemSection.scrollIntoViewIfNeeded();
+  await clickReal(page, stemSection.locator('[data-pkc-action="remove-stem-model"]'));
+  await expect(stemSection.locator('[data-pkc-action="install-stem-model"]'), '消したのに取り込むが出ない(片道)').toBeVisible({ timeout: 15_000 });
+  await expect(stemSection.locator('[data-pkc-field="stem-installed"]')).toBeHidden();
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]').catch(async () => {
+    await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="detail"]');
+    await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  });
   await page.unroute('https://huggingface.co/**');
 
   // ── ③ A5 コンタクトシート:WebCodecs の復号 + OffscreenCanvas → PNG の添付(画像として描ける)

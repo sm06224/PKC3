@@ -16,8 +16,10 @@ import {
   ASR_RUNTIME_WASM_LOADER,
 } from '../../src/features/asr/asr-parts';
 
-function setup(opts: { webgpuWorks: boolean; hasWebGpu: boolean }) {
+function setup(opts: { webgpuWorks: boolean; hasWebGpu: boolean; webgpuRunFails?: boolean }) {
   const devices: unknown[] = [];
+  const dtypes: unknown[] = [];
+  const disposed: unknown[] = [];
   const rt: RuntimeModule = {
     env: {
       allowRemoteModels: true,
@@ -30,8 +32,15 @@ function setup(opts: { webgpuWorks: boolean; hasWebGpu: boolean }) {
     },
     pipeline: (_task, _model, options) => {
       devices.push(options['device']);
+      dtypes.push(options['dtype']);
+      const dev = options['device'];
       if (options['device'] === 'webgpu' && !opts.webgpuWorks) return Promise.reject(new Error('webgpu 非対応'));
-      return Promise.resolve(Object.assign(() => Promise.resolve({ text: 'ok' }), { dispose: () => Promise.resolve() }));
+      return Promise.resolve(
+        Object.assign(
+          () => (dev === 'webgpu' && opts.webgpuRunFails ? Promise.reject(new Error('device lost')) : Promise.resolve({ text: 'ok' })),
+          { dispose: () => { disposed.push(dev); return Promise.resolve(); } },
+        ),
+      );
     },
   };
   const runner = new AsrRunner({
@@ -39,7 +48,7 @@ function setup(opts: { webgpuWorks: boolean; hasWebGpu: boolean }) {
     createObjectURL: () => 'blob:x',
     hasWebGpu: () => opts.hasWebGpu,
   });
-  return { runner, devices };
+  return { runner, devices, dtypes, disposed };
 }
 
 const job = (over: Partial<AsrJob>): AsrJob => ({
@@ -68,6 +77,31 @@ describe('gpu の部品の実行器', () => {
     expect(devices).toEqual(['webgpu', 'wasm']);
     expect(r.device).toBe('wasm');
     expect(r.text).toBe('ok');
+  });
+
+  it('🔴 WebGPU の dtype は fp16、CPU は q8(目録に fp16 が無い重みを WebGPU 用の設定で読まない)', async () => {
+    const { runner, dtypes } = setup({ webgpuWorks: false, hasWebGpu: true });
+    await runner.run(job({ gpu: true }));
+    expect(dtypes).toEqual(['fp16', 'q8']);
+  });
+
+  it('🔴 作れても推論で落ちたら、壊れた pipe を捨てて CPU で作り直し、同じ依頼をやり直す(以後も CPU)', async () => {
+    const { runner, devices, disposed } = setup({ webgpuWorks: true, hasWebGpu: true, webgpuRunFails: true });
+    const r = await runner.run(job({ gpu: true }));
+    expect(r.text).toBe('ok');
+    expect(r.device).toBe('wasm');
+    expect(devices).toEqual(['webgpu', 'wasm']);
+    expect(disposed, '壊れた pipe を捨てていない').toEqual(['webgpu']);
+    const r2 = await runner.run(job({ gpu: true }));
+    expect(r2.device).toBe('wasm');
+    expect(devices, '以後も壊れた WebGPU を試し直した').toEqual(['webgpu', 'wasm']);
+  });
+
+  it('対照群:CPU の推論の失敗は握りつぶさず投げる', async () => {
+    const { runner } = setup({ webgpuWorks: true, hasWebGpu: false });
+    // CPU の pipe が落ちる状況を作る
+    (runner as unknown as { loaded: unknown }).loaded = { modelId: 'm', device: 'wasm', pipe: () => Promise.reject(new Error('boom')) };
+    await expect(runner.run(job({}))).rejects.toThrow('boom');
   });
 
   it('対照群:gpu でない依頼・WebGPU の無い場所では、WebGPU を試さない', async () => {

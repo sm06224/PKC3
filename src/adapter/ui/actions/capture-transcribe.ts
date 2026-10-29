@@ -27,11 +27,13 @@ import {
   ASR_LANGUAGE,
   ASR_PARTS,
   ASR_SAMPLE_RATE,
+  hasFp16Weights,
   type AsrPart,
 } from '@features/asr/asr-parts';
 import {
   ASR_SECTION_LABEL,
   STORAGE_SECTION_LABEL,
+  isQuietInput,
   isQuietRepetition,
   transcriptHeading,
   transcriptLines,
@@ -40,7 +42,7 @@ import {
 import { looksOutOfMemory } from '@features/storage/image-export-limit';
 import { elapsedText } from '@features/elapsed-text';
 import { isNearSilent, pcmRms } from '@features/asr/asr-pcm';
-import { applySilenceCut, planSilenceCut, remapMs } from '@features/asr/asr-silence';
+import { applySilenceCut, planSilenceCut, remapEndMs, remapMs } from '@features/asr/asr-silence';
 import { chunkOffsetMs, planAsrChunks, shiftSegments, type AsrChunkOptions } from '@features/asr/asr-chunks';
 import { createWritableQueue } from './writable-queue';
 import { appendUnlessEditedElsewhere, type EditLockPort } from '@adapter/state/edited-elsewhere';
@@ -228,6 +230,8 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
          * ⚠ 渡すたびにワーカーへ transfer されて元の PCM が空になるので、区切りは**写して**渡す(全体は最後まで残る)。
          * ⚠ 途中の 1 本が失敗したら全体を失敗にする(半分だけの文字起こしを「足しました」と言わない)。
          */
+        // 🔴 WebGPU で動かすのは、取り込んだ重みに fp16 があるときだけ(無いのに試すと毎回 1 度失敗する)
+        const wantGpu = ready.part.gpu === true && hasFp16Weights(ready.files.keys());
         const chunks = planAsrChunks(pcm, deps.chunking);
         let out: AsrJobResult;
         if (chunks.length <= 1) {
@@ -235,7 +239,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
             files: [...ready.files],
             modelId: ready.part.modelId,
             language: ASR_LANGUAGE,
-            ...(ready.part.gpu === true ? { gpu: true } : {}),
+            ...(wantGpu ? { gpu: true } : {}),
             pcm,
           });
         } else {
@@ -244,6 +248,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
           let withSegments = true;
           let loadMs = 0;
           let runMs = 0;
+          let device: 'webgpu' | 'wasm' | undefined;
           for (let i = 0; i < chunks.length; i++) {
             const c = chunks[i]!;
             progress(`。長い録音なので分けながら進めます: ${String(i + 1)} / ${String(chunks.length)}`);
@@ -251,7 +256,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
               files: [...ready.files],
               modelId: ready.part.modelId,
               language: ASR_LANGUAGE,
-              ...(ready.part.gpu === true ? { gpu: true } : {}),
+              ...(wantGpu ? { gpu: true } : {}),
               pcm: pcm.slice(c.start, c.end),
             });
             texts.push(part.text);
@@ -259,6 +264,8 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
             else if (part.text.trim() !== '') withSegments = false;
             loadMs += part.loadMs;
             runMs += part.runMs;
+            // 1 つでも CPU に戻ったら、全体は「CPU に戻った」と言う
+            if (part.device !== undefined && device !== 'wasm') device = part.device;
           }
           out = {
             text: texts.filter((t) => t.trim() !== '').join('\n'),
@@ -266,6 +273,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
             ...(withSegments && segments.length > 0 ? { segments } : {}),
             loadMs,
             runMs,
+            ...(device === undefined ? {} : { device }),
           };
         }
         if (silenceCut !== null && out.segments !== undefined) {
@@ -274,12 +282,14 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
             segments: out.segments.map((g) => ({
               ...g,
               startMs: Math.round(remapMs(g.startMs, silenceCut, ASR_SAMPLE_RATE)),
-              endMs: g.endMs === null ? null : Math.round(remapMs(g.endMs, silenceCut, ASR_SAMPLE_RATE)),
+              endMs: g.endMs === null ? null : Math.round(remapEndMs(g.endMs, silenceCut, ASR_SAMPLE_RATE)),
             })),
           };
         }
         // 時刻つきの行があればそれ、無ければ今までの 1 段落(#1232 段 a)
-        const text = transcriptLines(out.segments) ?? transcriptText(out.text);
+        // 🔴 暴走の除去は小さな入力のときだけ(通常の音量の「la la …」「はい」6 連打は残す)
+        const tOpts = { collapseRunaway: isQuietInput(rms) };
+        const text = transcriptLines(out.segments, tOpts) ?? transcriptText(out.text, tOpts);
         if (text === null) {
           say(`「${item.name}」からは字になりませんでした(声が小さい・無音かもしれません)。ノートは変えていません`);
           return;
@@ -340,7 +350,13 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
           const cutNote = silenceCut === null
             ? ''
             : `。途中の長い無音(合計 ${elapsedText(Math.round((silenceCut.cutSamples * 1000) / ASR_SAMPLE_RATE))})は除いて文字にしました`;
-          say(`「${item.name}」に文字起こしを足しました(${took})${cutNote}`);
+          // 🔴 WebGPU を試した回は、実際に動いた実行器を言う(CPU に戻ったことを黙らない)
+          const deviceNote = !wantGpu || out.device === undefined
+            ? ''
+            : out.device === 'webgpu'
+              ? '。WebGPU で実行しました'
+              : '。WebGPU を使えなかったため CPU で実行しました';
+          say(`「${item.name}」に文字起こしを足しました(${took})${cutNote}${deviceNote}`);
         };
         /**
          * ⚠ その場で書ける回は**結末まで待ってから抜ける** ── 抜けた後に「足しました」を言うと、

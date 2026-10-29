@@ -4,6 +4,7 @@ import {
   ASR_CUT_MIN_MS,
   applySilenceCut,
   planSilenceCut,
+  remapEndMs,
   remapMs,
 } from '../../src/features/asr/asr-silence';
 import {
@@ -73,6 +74,45 @@ describe('途中の長い無音を切る(#1446 ①)', () => {
     const afterCutStart = 3000 + ASR_CUT_KEEP_MS * 2;
     expect(remapMs(afterCutStart, cut, RATE)).toBeCloseTo(afterCutStart + cutMs, 0);
     expect(remapMs(afterCutStart, cut, RATE)).toBeCloseTo(23_000, -1);
+  });
+});
+
+describe('🔴 基準は最大の枠ではない(レビュー指摘 1)', () => {
+  it('大きな音が 1 回あっても、小さな声 40 秒は切らない(最大枠基準だと声が無音に読まれる)', () => {
+    const pcm = cat(tone(1, 0.9), tone(40, 0.02));
+    expect(planSilenceCut(pcm, RATE), '小さな声を無音と読んで切った').toBeNull();
+  });
+
+  it('対照群: 同じ録音でも、声のあいだの本当の無音は切れて、声は 1 標本も欠けない', () => {
+    const pcm = cat(tone(1, 0.9), tone(20, 0.02), tone(10, 0), tone(20, 0.02));
+    const cut = planSilenceCut(pcm, RATE);
+    expect(cut, '本当の無音が切れていない').not.toBeNull();
+    expect(cut!.cuts).toBe(1);
+    const out = applySilenceCut(pcm, cut!);
+    // 先頭の大きな音と 20 秒の声は丸ごと残る
+    expect(out.slice(0, 21 * RATE)).toEqual(pcm.slice(0, 21 * RATE));
+    expect(out.slice(out.length - 20 * RATE)).toEqual(pcm.slice(pcm.length - 20 * RATE));
+  });
+
+  it('絶対の門: 基準が高くても、−50 dBFS 以上の区間(小さな声)は切らない', () => {
+    // 基準 ≈ 0.5(相対しきい値 0.025)。長い 0.01(−40 dBFS)は相対では無音だが、絶対では声の側
+    const pcm = cat(tone(20, 0.5), tone(10, 0.01), tone(20, 0.5));
+    expect(planSilenceCut(pcm, RATE)).toBeNull();
+    // 対照群: 同じ並びで 0.001(−60 dBFS)なら切れる
+    expect(planSilenceCut(cat(tone(20, 0.5), tone(10, 0.001), tone(20, 0.5)), RATE)).not.toBeNull();
+  });
+});
+
+describe('終わりの時刻の変換(レビュー指摘 9)', () => {
+  it('切った所の境目の終わりは、前の範囲の末尾へ寄る(remapMs だと次の範囲の頭へ飛ぶ)', () => {
+    const pcm = cat(tone(3, 0.2), tone(20, 0), tone(3, 0.2));
+    const cut = planSilenceCut(pcm, RATE)!;
+    const boundaryMs = 3000 + ASR_CUT_KEEP_MS; // 切ったあとの録音で、前の範囲の末尾 = 切り目
+    const end = remapEndMs(boundaryMs, cut, RATE);
+    expect(end).toBeCloseTo(boundaryMs, 0);
+    expect(remapMs(boundaryMs, cut, RATE), '前提: 開始側の変換は次の範囲の頭へ進む').toBeGreaterThan(end + 10_000);
+    // 範囲の中なら remapMs と同じ
+    expect(remapEndMs(1000, cut, RATE)).toBeCloseTo(remapMs(1000, cut, RATE), 3);
   });
 });
 

@@ -385,11 +385,14 @@ import { decodeToMono, decodeToMono16k, decodeToStereo } from '@adapter/platform
 import { STEM_RATE } from '@features/audio/stem-model';
 import { VoiceClient } from '@adapter/platform/voice/voice-client';
 import { StemClient } from '@adapter/platform/stems/stem-client';
-import { fetchStemModel } from '@adapter/platform/stems/stem-fetch';
+import { StemModelStore } from '@adapter/platform/stems/stem-model-store';
+import { StemModelInstaller } from '@adapter/platform/stems/stem-model-install';
+import { STEM_MODELS } from '@features/audio/stem-model';
+import { appStemModel, applyStemResult } from '@adapter/ui/render/stem-model-panel';
 import { VOICE_RATE } from '@features/audio/voice-lab';
 import { AsrPackInstaller } from '@adapter/platform/asr/asr-pack-install';
 import { AsrPackStore } from '@adapter/platform/asr/asr-pack-store';
-import { ASR_PACK_BASE, asrPartOf, asrUnavailableParts } from '@features/asr/asr-parts';
+import { ASR_PACK_BASE, asrPartOf, asrPackFacts } from '@features/asr/asr-parts';
 import { fetchAsrManifest } from '@adapter/platform/asr/asr-pack-acquire';
 import { appAsrPack, applyAsrResult } from '@adapter/ui/render/asr-pack-panel';
 import { asrReadyFrom, createCaptureTranscriber } from '@adapter/ui/actions/capture-transcribe';
@@ -3960,6 +3963,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const voiceClient = new VoiceClient();
   // 🔴 歌声と楽器を分ける(ニューラルの音源分離。#674・#949)のワーカー。遅延起動・アイドルで畳む。重みは公開の配布元から取る
   const stemClient = new StemClient();
+  // 🔴 取り込んだモデルは端末(IndexedDB)に残す ── 設定の「音源分離」で取り込み / 消す。次からは取りに行かない
+  const stemInstaller = new StemModelInstaller({ store: new StemModelStore() });
+  const stemIds = STEM_MODELS.map((m) => m.id);
+  void stemInstaller.readInstalled(stemIds).then((v) => appStemModel.setInstalled(v));
   /**
    * 🔴 **動画は別のワーカー**(#683 段②b-1)── 動画の長い仕事で音の切り出しを待たせない。
    * 元の `Blob` は窓で読む(250MB を開かない)。始まりが手前へ戻るなら、切る前に確認する。
@@ -4037,7 +4044,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       decode48k: (blob) => decodeToMono(blob, VOICE_RATE),
       voice: (job) => voiceClient.run(job),
       decodeStereo44k: (blob) => decodeToStereo(blob, STEM_RATE),
-      fetchStemModel: (model, onProgress) => fetchStemModel(model, undefined, { onProgress }),
+      obtainStemModel: async (model, onProgress) => {
+        const r = await stemInstaller.obtain(model, onProgress);
+        // 🔴 録音から押して取り込んだ回も、設定の「音源分離」の控えへ写す(写さないと、入っているのに「取り込む」が出る)
+        if (r.ok && !r.fromStore) void stemInstaller.readInstalled(stemIds).then((v) => appStemModel.setInstalled(v));
+        return r;
+      },
+      probeStems: () => stemClient.probe(),
       stems: (req, onProgress) => stemClient.run(req, onProgress),
       now: () => new Date(),
       ask: (opts) => promptInApp(root, opts),
@@ -4139,7 +4152,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // 🔴 配布元の目録を引く口(設定の「音声認識」を開いたとき 1 度だけ使う ── 配布元に無い部品は理由つきで選べなくする。#1446 ③)
   appAsrPack.setAvailabilityProbe(async () => {
     try {
-      return asrUnavailableParts(await fetchAsrManifest(ASR_PACK_BASE, (url, init) => fetch(url, init)));
+      return asrPackFacts(await fetchAsrManifest(ASR_PACK_BASE, (url, init) => fetch(url, init)));
     } catch {
       return null; // 引けない(未配布・オフライン)は「分からない」── 選べない扱いにしない
     }
@@ -4479,6 +4492,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         .then(finishAsrPack);
     },
     cancelAsrInstall: () => asrInstaller.cancel(),
+    // 🔴 音源分離のモデルを取り込む / やめる / 消す(#674 / #949)── 判断も文言も実体が持つ
+    installStemModel: (id) => {
+      void stemInstaller
+        .install(id, (text) => appStemModel.setProgress(text))
+        .then((r) => applyStemResult(appStemModel, r, { notify: showStatus }));
+    },
+    cancelStemInstall: () => stemInstaller.cancel(),
+    removeStemModel: (id) => {
+      void stemInstaller.remove(id).then((r) => applyStemResult(appStemModel, r, { notify: showStatus }));
+    },
     removeAsrPart: (id) => {
       const part = asrPartOf(id);
       if (part === undefined) return;

@@ -219,6 +219,25 @@ export class AsrRunner {
     return new Response(null, { status: 404 });
   }
 
+  /** pipeline を作る。`tryGpu` なら WebGPU(fp16)を先に試し、作れなければ CPU(wasm / q8)。 */
+  private async load(
+    rt: RuntimeModule,
+    job: AsrJob,
+    tryGpu: boolean,
+  ): Promise<{ modelId: string; pipe: Pipe; device: 'webgpu' | 'wasm' }> {
+    const hasGpu = this.deps.hasWebGpu ?? ((): boolean => typeof navigator !== 'undefined' && 'gpu' in navigator);
+    if (tryGpu && hasGpu()) {
+      try {
+        const pipe = await rt.pipeline('automatic-speech-recognition', job.modelId, { ...GPU_PIPELINE_OPTIONS });
+        return { modelId: job.modelId, pipe, device: 'webgpu' };
+      } catch {
+        // 実行の部品が WebGPU に対応していない・fp16 の重みが無い、など ── CPU で続ける
+      }
+    }
+    const pipe = await rt.pipeline('automatic-speech-recognition', job.modelId, { ...PIPELINE_OPTIONS });
+    return { modelId: job.modelId, pipe, device: 'wasm' };
+  }
+
   async run(job: AsrJob): Promise<AsrJobResult> {
     const t0 = this.now();
     // 毎回、依頼が持つ Blob の参照へ差し替える(同じ worker で別の重みを頼まれても食い違わない)
@@ -230,26 +249,27 @@ export class AsrRunner {
       this.loaded = null;
       await old.dispose?.().catch(() => undefined);
     }
-    if (this.loaded === null) {
-      let pipe: Pipe | null = null;
-      let device: 'webgpu' | 'wasm' = 'wasm';
-      const hasGpu = this.deps.hasWebGpu ?? ((): boolean => typeof navigator !== 'undefined' && 'gpu' in navigator);
-      if (job.gpu === true && hasGpu()) {
-        try {
-          pipe = await rt.pipeline('automatic-speech-recognition', job.modelId, { ...GPU_PIPELINE_OPTIONS });
-          device = 'webgpu';
-        } catch {
-          pipe = null; // 実行の部品が WebGPU に対応していない・fp16 の重みが無い、など ── CPU で続ける
-        }
-      }
-      pipe ??= await rt.pipeline('automatic-speech-recognition', job.modelId, { ...PIPELINE_OPTIONS });
-      this.loaded = { modelId: job.modelId, pipe, device };
-    }
+    if (this.loaded === null) this.loaded = await this.load(rt, job, job.gpu === true);
     const t1 = this.now();
-    const out = await this.loaded.pipe(job.pcm, {
+    const runOpts = {
       ...RUN_OPTIONS,
       ...(job.language === null ? {} : { language: job.language }),
-    });
+    };
+    let out: unknown;
+    try {
+      out = await this.loaded.pipe(job.pcm, runOpts);
+    } catch (e) {
+      if (this.loaded.device !== 'webgpu') throw e;
+      /**
+       * 🔴 WebGPU で作れても、**推論で落ちる**ことがある(アダプタの制限・fp16 の非対応・デバイスの喪失)。
+       *   壊れた pipe は捨てて(使い回すと以後が全部落ちる)、CPU(wasm / q8)で作り直して同じ依頼をやり直す。
+       */
+      const broken = this.loaded.pipe;
+      this.loaded = null;
+      await broken.dispose?.().catch(() => undefined);
+      this.loaded = await this.load(rt, job, false);
+      out = await this.loaded.pipe(job.pcm, runOpts);
+    }
     const t2 = this.now();
     const segments = segmentsOf(out);
     return {

@@ -320,7 +320,7 @@ describe('#1446 高精度(whisper-large-v3-turbo)と WebGPU', () => {
 
   it('🔴 配布元に無い部品は、理由を言って選べない(ボタンは押せず、理由が下に出る)。対照群:他の部品は押せる', async () => {
     const state = new AsrPackState();
-    state.setAvailabilityProbe(async () => ({ turbo: ASR_UNAVAILABLE_TEXT }));
+    state.setAvailabilityProbe(async () => ({ unavailable: { turbo: ASR_UNAVAILABLE_TEXT }, fp16: {} }));
     const p = buildAsrPackPanel(state, { deviceMemory: () => 16, webgpu: async () => true });
     await flush();
     const t = row(p.root, turbo.id);
@@ -340,22 +340,39 @@ describe('#1446 高精度(whisper-large-v3-turbo)と WebGPU', () => {
     expect(q<HTMLButtonElement>(row(p.root, turbo.id), 'asr-install').disabled).toBe(false);
   });
 
-  it('🔴 WebGPU の可否が推奨の行に反映される(使える→高精度 / 使えない→正確 + 使えない旨)', async () => {
+  it('🔴 WebGPU の可否が推奨の行に反映される ── 目録に fp16 の重みがあるときだけ(使える→高精度 / 使えない→正確 + 使えない旨)', async () => {
+    const withFp16 = { unavailable: {}, fp16: { turbo: true } };
     const on = new AsrPackState();
+    on.setAvailabilityProbe(async () => withFp16);
     const pOn = buildAsrPackPanel(on, { deviceMemory: () => 8, webgpu: async () => true });
     await flush();
     expect(q(pOn.root, 'asr-recommend').textContent).toContain('「高精度」');
+    expect(q(pOn.root, 'asr-recommend').textContent).toContain('WebGPU が使えます');
 
     const off = new AsrPackState();
+    off.setAvailabilityProbe(async () => withFp16);
     const pOff = buildAsrPackPanel(off, { deviceMemory: () => 8, webgpu: async () => false });
     await flush();
     expect(q(pOff.root, 'asr-recommend').textContent).toContain('「正確」');
     expect(q(pOff.root, 'asr-recommend').textContent).toContain('WebGPU は使えません');
   });
 
+  it('🔴 目録が引けていない(失敗)/ fp16 の重みが無いときは、WebGPU が使えても高精度を勧めず、WebGPU にも触れない', async () => {
+    for (const probe of [async () => null, async () => ({ unavailable: {}, fp16: { turbo: false } })]) {
+      const st = new AsrPackState();
+      st.setAvailabilityProbe(probe);
+      const p = buildAsrPackPanel(st, { deviceMemory: () => 8, webgpu: async () => true });
+      await flush();
+      const text = q(p.root, 'asr-recommend').textContent;
+      expect(text).toContain('「正確」');
+      expect(text).not.toContain('高精度');
+      expect(text, 'CPU 用の実行器だけなのに WebGPU を言った').not.toContain('WebGPU');
+    }
+  });
+
   it('配布元の目録は設定の面を開いたとき 1 度だけ引く(組み直しで何度も引かない)', async () => {
     const state = new AsrPackState();
-    const probe = vi.fn(async () => ({}));
+    const probe = vi.fn(async () => ({ unavailable: {}, fp16: {} }));
     state.setAvailabilityProbe(probe);
     buildAsrPackPanel(state, { webgpu: async () => true });
     buildAsrPackPanel(state, { webgpu: async () => true });

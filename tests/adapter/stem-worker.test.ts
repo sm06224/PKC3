@@ -91,6 +91,13 @@ describe('stem-worker の配線', () => {
     expect(fakeOrt.env.wasm.proxy).toBe(false);
   });
 
+  it('🔴 1 枚にまとめた版(__PKC_PORTABLE__)では ORT を読まずに断る(wasm の置き場も設定しない)', async () => {
+    vi.stubGlobal('__PKC_PORTABLE__', true);
+    await load();
+    await expect(ctorArgs[0]!.loadOrt()).rejects.toThrow('1 枚にまとめた版');
+    expect(fakeOrt.env.wasm.wasmPaths).toBeUndefined();
+  });
+
   it('④ 読み込みは 1 度だけ(2 回目の依頼で読み直さない)', async () => {
     await load();
     const loadOrt = ctorArgs[0]!.loadOrt;

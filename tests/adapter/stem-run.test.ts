@@ -234,6 +234,51 @@ describe('断る理由', () => {
   });
 });
 
+describe('🔴 分けた結果の安全弁(設定違い・別のモデルを、聞かせる前に止める)', () => {
+  const scaled = (k: number): OrtSession['run'] => async (feeds) => {
+    const d = (feeds['x'] as { data: Float32Array }).data;
+    return { y: { data: d.map((v) => v * k), dims: DIMS } };
+  };
+  const run = (over: Parameters<typeof fakeOrt>[0]) =>
+    new StemRunner({ loadOrt: async () => fakeOrt(over).ort, audioApi: fakeAudio().api }).run(job());
+
+  it('対照群: 恒等(compensate 込み)は通る', async () => {
+    expect((await run({})).ok).toBe(true);
+  });
+
+  it('NaN を含む出力は bad-model(逆変換で全体に広がる前に止める)', async () => {
+    const r = await run({ run: async (feeds) => {
+      const d = (feeds['x'] as { data: Float32Array }).data.slice();
+      d[5] = Number.NaN;
+      return { y: { data: d, dims: DIMS } };
+    } });
+    expect(r).toMatchObject({ ok: false, reason: 'bad-model' });
+    if (!r.ok) expect(r.detail).toContain('数でない値');
+  });
+
+  it('歌声が元の 1.5 倍を超えれば bad-model', async () => {
+    const r = await run({ run: scaled(3) });
+    expect(r).toMatchObject({ ok: false, reason: 'bad-model' });
+    if (!r.ok) expect(r.detail).toContain('元より大きすぎます');
+  });
+
+  it('残りのエネルギーが元より大きければ bad-model(符号が反転した出力)', async () => {
+    const r = await run({ run: scaled(-1) });
+    expect(r).toMatchObject({ ok: false, reason: 'bad-model' });
+    if (!r.ok) expect(r.detail).toContain('残りの音が元より大きく');
+  });
+
+  it('メモリ不足は(読み込みでも推論でも)infer-failed ── 重みの不良ではなくメモリの案内へ', async () => {
+    const a = await run({ create: async () => Promise.reject(new Error('Aborted(OOM). Build with -sASSERTIONS')) });
+    expect(a).toMatchObject({ ok: false, reason: 'infer-failed' });
+    const b = await run({ run: async () => Promise.reject(new RangeError('Array buffer allocation failed')) });
+    expect(b).toMatchObject({ ok: false, reason: 'infer-failed' });
+    // 対照群: 普通の読み込み失敗は bad-model のまま
+    const c = await run({ create: async () => Promise.reject(new Error('Invalid model')) });
+    expect(c).toMatchObject({ ok: false, reason: 'bad-model' });
+  });
+});
+
 describe('所有と進み具合', () => {
   it('🔴 依頼の PCM は受けた瞬間に空へ差し替える(使い終わった物を持ち続けない)', async () => {
     const j = job();
@@ -255,10 +300,12 @@ describe('所有と進み具合', () => {
     expect(closed).toBe(1);
   });
 
-  it('inputShapeProblem: 形が読めない(古い ORT)・可変の次元は通す', () => {
+  it('inputShapeProblem: 形が読めなければ断る・可変の次元は通す', () => {
     const m = STEM_MODELS[0]!;
     const s = (inputMetadata: unknown): OrtSession => ({ inputNames: ['x'], outputNames: ['y'], inputMetadata, run: async () => ({}), release: async () => {} });
-    expect(inputShapeProblem(s(undefined), m)).toBeNull();
+    // 🔴 形が読めないときは素通りさせない(ORT 1.31 は inputMetadata を返す)
+    expect(inputShapeProblem(s(undefined), m)).toContain('読み取れませんでした');
+    expect(inputShapeProblem(s([{ name: 'x' }]), m)).toContain('読み取れませんでした');
     expect(inputShapeProblem(s([{ shape: ['batch', 4, spec.dimF, spec.dimT] }]), m)).toBeNull();
     expect(inputShapeProblem(s([{ shape: [1, 4, 100, spec.dimT] }]), m)).not.toBeNull();
   });

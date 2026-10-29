@@ -18,6 +18,8 @@ import {
   ASR_PARTS,
   ASR_UNAVAILABLE_TEXT,
   asrUnavailableParts,
+  asrPackFacts,
+  hasFp16Weights,
   ASR_WORKER_IDLE_MS,
   ASR_RUNTIME_FILES,
   ASR_RUNTIME_BYTES,
@@ -118,7 +120,7 @@ describe('定数は 1 か所(#772 段②)', () => {
 
 describe('ボタンの字(大きさと 1 行の説明つき)', () => {
   it('🔴 数は定数から出る ── 手で書いた数に満たされない', () => {
-    for (const p of ASR_PARTS) {
+    for (const p of ASR_PARTS.filter((x) => x.estimated !== true)) {
       const label = asrPartLabel(p);
       expect(label.startsWith(p.label)).toBe(true);
       expect(label).toContain(humanBytes(p.modelBytes + ASR_RUNTIME_BYTES));
@@ -126,6 +128,16 @@ describe('ボタンの字(大きさと 1 行の説明つき)', () => {
       expect(asrDownloadBytes(p)).toBe(p.modelBytes + ASR_RUNTIME_BYTES);
       expect(asrModelFloorBytes(p)).toBe(p.floorBytes ?? Math.floor(p.modelBytes / 2));
     }
+  });
+
+  it('🔴 未測定の見積もりの部品(高精度)は、数字を出さず「未測定」と言う', () => {
+    const turbo = asrPartOf('turbo')!;
+    expect(turbo.estimated).toBe(true);
+    const label = asrPartLabel(turbo);
+    expect(label).toContain('未測定');
+    expect(label, '見積もりの数字を事実のように出した').not.toMatch(/[0-9]/);
+    // 対照群: 測った部品は数字つき
+    expect(asrPartLabel(asrPartOf('light')!)).toMatch(/約 \d/);
   });
 
   it('2 択の字が互いに違う(同じ字の 2 ボタンを作らない)', () => {
@@ -311,19 +323,46 @@ describe('🔴 #1446 端末ごとの推奨', () => {
     for (const v of [undefined, 0, -1, Number.NaN]) expect(asrRecommendNote(v)).toBeNull();
   });
 
-  it('🔴 WebGPU が使えると測れた端末だけに「高精度」を勧める(測れていない・使えない端末には勧めない)', () => {
-    expect(asrRecommendNote(8, true)).toContain('「高精度」');
-    expect(asrRecommendNote(8, true)).toContain('WebGPU が使えます');
-    expect(asrRecommendNote(8, false), 'WebGPU が無いのに勧めた').toContain('「正確」');
-    expect(asrRecommendNote(8, false)).toContain('WebGPU は使えません');
-    expect(asrRecommendNote(8, null), '測っていないのに勧めた').toContain('「正確」');
-    expect(asrRecommendNote(8, null)).not.toContain('WebGPU');
+  const FP16 = { unavailable: {}, fp16: { turbo: true } } as const;
+
+  it('🔴 WebGPU が使えると測れ、目録に fp16 の重みがある端末だけに「高精度」を勧める', () => {
+    expect(asrRecommendNote(8, true, FP16)).toContain('「高精度」');
+    expect(asrRecommendNote(8, true, FP16)).toContain('WebGPU が使えます');
+    expect(asrRecommendNote(8, false, FP16), 'WebGPU が無いのに勧めた').toContain('「正確」');
+    expect(asrRecommendNote(8, false, FP16)).toContain('WebGPU は使えません');
+    expect(asrRecommendNote(8, null, FP16), '測っていないのに勧めた').toContain('「正確」');
+    expect(asrRecommendNote(8, null, FP16)).not.toContain('WebGPU');
     // メモリが足りなければ WebGPU があっても勧めない
-    expect(asrRecommendNote(4, true)).toContain('「軽い」');
+    expect(asrRecommendNote(4, true, FP16)).toContain('「軽い」');
   });
 
-  it('🔴 配布元が置いていない部品は、WebGPU が使えても勧めない', () => {
-    expect(asrRecommendNote(8, true, { turbo: ASR_UNAVAILABLE_TEXT })).toContain('「正確」');
+  it('🔴 目録が未取得 / 失敗(null)・fp16 が無い・配布元に無い、のどれでも高精度は勧めない。WebGPU の字も出さない', () => {
+    for (const facts of [null, { unavailable: {}, fp16: { turbo: false } }, { unavailable: { turbo: ASR_UNAVAILABLE_TEXT }, fp16: {} }] as const) {
+      const t = asrRecommendNote(8, true, facts)!;
+      expect(t).toContain('「正確」');
+      expect(t).not.toContain('WebGPU');
+    }
+  });
+});
+
+describe('🔴 fp16 の重みの判定(WebGPU で動かす条件)', () => {
+  it('_fp16.onnx で終わる path があるときだけ true(量子化の q8 や名前が似ただけの物は違う)', () => {
+    expect(hasFp16Weights(['onnx/encoder_model_fp16.onnx', 'config.json'])).toBe(true);
+    expect(hasFp16Weights(['onnx/encoder_model_quantized.onnx', 'onnx/decoder_model_merged_q4f16.onnx'])).toBe(false);
+    expect(hasFp16Weights(['fp16/readme.txt'])).toBe(false);
+    expect(hasFp16Weights([])).toBe(false);
+  });
+  it('目録から事実を引く: 載っていない部品 / fp16 の有無', () => {
+    const turbo = asrPartOf('turbo')!;
+    const raw = JSON.parse(manifest()) as { models: Record<string, AsrPackFile[]> };
+    raw.models['turbo'] = [file(`${asrModelDir(turbo)}onnx/encoder_model_fp16.onnx`, turbo.floorBytes! + 1)];
+    const r = readAsrPack(JSON.stringify(raw));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(asrPackFacts(r.pack)).toEqual({ unavailable: {}, fp16: { light: false, accurate: false, turbo: true } });
+    delete raw.models['turbo'];
+    const r2 = readAsrPack(JSON.stringify(raw));
+    if (r2.ok) expect(asrPackFacts(r2.pack).unavailable).toEqual({ turbo: ASR_UNAVAILABLE_TEXT });
   });
 });
 

@@ -12,7 +12,7 @@
  */
 import { WorkerLease } from '../worker-lease';
 import { appJobMonitor, type JobMonitor } from '../job-monitor';
-import type { StemJob, StemResult } from './stem-run';
+import type { StemJob, StemProbeResult, StemResult } from './stem-run';
 
 /** アイドルで畳むまで。 */
 export const STEM_WORKER_IDLE_MS = 20_000;
@@ -67,6 +67,20 @@ export class StemClient {
     return this.lease.run<StemResult>(job, transfer).finally(() => {
       channel?.port1.close();
     });
+  }
+
+  /**
+   * 🔴 実行器が起動できるかを確かめる(モデルを取る前)。⚠ ワーカーが無い環境は「使えない」を値で返す。
+   */
+  probe(): Promise<StemProbeResult> {
+    if (this.lease === null) {
+      return Promise.resolve({
+        ok: false,
+        reason: 'no-runtime',
+        detail: 'この環境では、重い処理を別に動かす仕組みが使えません',
+      });
+    }
+    return this.lease.run<StemProbeResult>({ op: 'probe' });
   }
 
   dispose(): void {

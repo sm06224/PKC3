@@ -79,8 +79,9 @@ function harness(opts: {
     decode48k: vi.fn(async () => new Float32Array(48_000)),
     voice: vi.fn(async () => ({ ok: false as const, reason: 'no-engine' as const })),
     decodeStereo44k: vi.fn(async () => ({ left: new Float32Array(44_100).fill(0.1), right: new Float32Array(44_100).fill(0.1) })),
-    fetchStemModel: vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), url: 'https://example.test/m.onnx' })),
+    obtainStemModel: vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, note: '' })),
     stems: vi.fn(async () => ({ ok: false as const, reason: 'no-runtime' as const })),
+    probeStems: vi.fn(async () => ({ ok: true as const })),
     decode16k: vi.fn(async () => pcmOf([...rep(0.3, 20), ...rep(0.001, 3), ...rep(0.3, 20)])),
     now: () => NOW,
     ask: vi.fn(async () => null as string | null),
@@ -489,15 +490,15 @@ describe('歌声と楽器に分ける(ニューラルの音源分離。#674 / #9
   it('🔴 モデルを取ってからワーカーに左右を譲り、「歌声」と「楽器」の 2 つの新しい音の添付になる。元は残る', async () => {
     const stems = okStems();
     const order: string[] = [];
-    const fetchStemModel = vi.fn(async () => {
+    const obtainStemModel = vi.fn(async () => {
       order.push('fetch');
-      return { ok: true as const, blob: new Blob([new Uint8Array(8)]), url: 'https://example.test/m.onnx' };
+      return { ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, note: '' };
     });
     const decodeStereo44k = vi.fn(async () => {
       order.push('decode');
       return { left: new Float32Array(44_100).fill(0.1), right: new Float32Array(44_100).fill(0.2) };
     });
-    const h = harness({ name: '曲.webm', tools: { stems, fetchStemModel, decodeStereo44k } });
+    const h = harness({ name: '曲.webm', tools: { stems, obtainStemModel, decodeStereo44k } });
     h.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
     await h.run('separate-stems');
     expect(order, '取得 → 復号の順(読めない音でモデルを無駄に取らないのは長さの検査で済ませている)').toEqual(['fetch', 'decode']);
@@ -517,7 +518,7 @@ describe('歌声と楽器に分ける(ニューラルの音源分離。#674 / #9
     const stems = okStems();
     const decodeStereo44k = vi.fn(async () => ({ left: new Float32Array(1), right: new Float32Array(1) }));
     const why = 'huggingface.co につながりませんでした(ネットワークの断絶)';
-    const h = harness({ tools: { stems, decodeStereo44k, fetchStemModel: vi.fn(async () => ({ ok: false as const, why })) } });
+    const h = harness({ tools: { stems, decodeStereo44k, obtainStemModel: vi.fn(async () => ({ ok: false as const, why })) } });
     await h.run('separate-stems');
     expect(h.dispatcher.getState().error).toContain(why);
     expect(stems).not.toHaveBeenCalled();
@@ -525,14 +526,35 @@ describe('歌声と楽器に分ける(ニューラルの音源分離。#674 / #9
     expect(h.deps.attach).not.toHaveBeenCalled();
   });
 
+  it('🔴 実行器が起動できないときは、モデルを取りに行く前に理由を言って終わる(66MB を取ってから失敗しない)', async () => {
+    const obtain = vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, note: '' }));
+    const decodeStereo44k = vi.fn(async () => ({ left: new Float32Array(1), right: new Float32Array(1) }));
+    const probeStems = vi.fn(async () => ({ ok: false as const, reason: 'no-runtime' as const, detail: 'wasm 404' }));
+    const h = harness({ tools: { obtainStemModel: obtain, probeStems, decodeStereo44k, stems: okStems() } });
+    await h.run('separate-stems');
+    expect(obtain, '起動できないのにモデルを取りに行った').not.toHaveBeenCalled();
+    expect(decodeStereo44k).not.toHaveBeenCalled();
+    expect(h.dispatcher.getState().error).toContain('ONNX Runtime');
+    expect(h.dispatcher.getState().error).toContain('wasm 404');
+  });
+
+  it('🔴 結果の知らせに「想定の設定で分けました。聞いて確かめてください」が出る。モデルを取り込んだ回は、その旨も添える', async () => {
+    const obtain = vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, note: 'モデルを端末に取り込みました' }));
+    const h = harness({ tools: { obtainStemModel: obtain, stems: okStems() } });
+    h.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
+    await h.run('separate-stems');
+    expect(h.notes.at(-1)).toContain('想定の設定で分けました。聞いて確かめてください');
+    expect(h.notes.at(-1)).toContain('モデルを端末に取り込みました');
+  });
+
   it('取得の進み具合は「何%」で出る', async () => {
     const stems = okStems();
-    const fetchStemModel = vi.fn(async (_m: unknown, onProgress: (g: number, t: number, h: string) => void) => {
+    const obtainStemModel = vi.fn(async (_m: unknown, onProgress: (g: number, t: number, h: string) => void) => {
       onProgress(33, 100, 'huggingface.co');
       onProgress(66, 100, 'huggingface.co');
-      return { ok: true as const, blob: new Blob([new Uint8Array(8)]), url: 'u' };
+      return { ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, note: '' };
     });
-    const h = harness({ tools: { stems, fetchStemModel } });
+    const h = harness({ tools: { stems, obtainStemModel } });
     h.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
     await h.run('separate-stems');
     const seen = h.notes;
@@ -563,19 +585,19 @@ describe('歌声と楽器に分ける(ニューラルの音源分離。#674 / #9
       const segment = concatBytes([hexBytes('18538067'), Uint8Array.of(0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff), info]);
       return new Blob([concatBytes([head, segment]) as BlobPart], { type: 'audio/webm' });
     };
-    const fetchStemModel = vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), url: 'u' }));
-    const h = harness({ tools: { fetchStemModel, stems: okStems() } });
+    const obtainStemModel = vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, note: '' }));
+    const h = harness({ tools: { obtainStemModel, stems: okStems() } });
     h.deps.readBlob.mockResolvedValue(webm(11 * 60_000));
     await h.run('separate-stems');
-    expect(fetchStemModel, '長すぎるのに 66MB を取りに行った').not.toHaveBeenCalled();
+    expect(obtainStemModel, '長すぎるのに 66MB を取りに行った').not.toHaveBeenCalled();
     expect(h.dispatcher.getState().error).toContain('11:00 あります');
     expect(h.dispatcher.getState().error).toContain('10 分まで');
 
-    const ok = harness({ tools: { fetchStemModel, stems: okStems() } });
+    const ok = harness({ tools: { obtainStemModel, stems: okStems() } });
     ok.deps.readBlob.mockResolvedValue(webm(9 * 60_000));
     ok.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
     await ok.run('separate-stems');
-    expect(fetchStemModel).toHaveBeenCalledTimes(1);
+    expect(obtainStemModel).toHaveBeenCalledTimes(1);
   });
 
   it('読めない音は理由つきで断る', async () => {

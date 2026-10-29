@@ -59,6 +59,8 @@ export interface AsrPart {
    *   使えるときだけ出す。実行は WebGPU を先に試し、使えなければ(実行の部品が対応していない場合も含め)CPU へ戻る。
    */
   readonly gpu?: boolean;
+  /** 🔴 大きさ・時間が未測定の見積もりか。⚠ 画面には数字を出さず「未測定」と言う(`asrPartLabel`)。 */
+  readonly estimated?: boolean;
   /** 重みの下限(byte)。省略 = `modelBytes` の半分。⚠ 未測定の見積もりの部品は、実物より大きい見積もりで取り込みを断らないよう明示する。 */
   readonly floorBytes?: number;
 }
@@ -96,6 +98,7 @@ export const ASR_PARTS: readonly AsrPart[] = [
     needMemoryGb: 8,
     optional: true,
     gpu: true,
+    estimated: true,
     floorBytes: 200_000_000,
   },
 ] as const;
@@ -175,6 +178,8 @@ export function asrDownloadBytes(part: AsrPart): number {
  * ⚠ 大きさは `humanBytes`(画面の大きさの綴りはあの 1 本 ── `tests/features/human-bytes.test.ts`)。
  */
 export function asrPartLabel(part: AsrPart): string {
+  // 🔴 未測定の見積もりは数字にしない(実物と違う数を、画面が事実のように言わない)
+  if (part.estimated === true) return `${part.label}(大きさ・時間は未測定の目安です)`;
   return `${part.label}(約 ${humanBytes(asrDownloadBytes(part))}、1 分の音に約 ${part.secondsPerMinute} 秒)`;
 }
 
@@ -208,7 +213,7 @@ export function asrMemoryNote(part: AsrPart, deviceMemoryGb: number | undefined)
 export function asrRecommendNote(
   deviceMemoryGb: number | undefined,
   webgpu: boolean | null = null,
-  unavailable: Readonly<Partial<Record<AsrPartId, string>>> = {},
+  facts: AsrPackFacts | null = null,
 ): string | null {
   if (typeof deviceMemoryGb !== 'number' || !Number.isFinite(deviceMemoryGb) || deviceMemoryGb <= 0) {
     return null;
@@ -219,10 +224,13 @@ export function asrRecommendNote(
       .find(
         (p) =>
           deviceMemoryGb >= p.needMemoryGb
-          && (p.gpu !== true || webgpu === true)
-          && unavailable[p.id] === undefined,
+          // 🔴 gpu の部品は、WebGPU が使えると測れ、**目録が引けていて、fp16 の重みがある**ときだけ(未取得・失敗なら勧めない)
+          && (p.gpu !== true || (webgpu === true && facts !== null && facts.fp16[p.id] === true))
+          && facts?.unavailable[p.id] === undefined,
       ) ?? ASR_PARTS[0]!;
-  const gpuText = webgpu === null ? '' : webgpu ? '(WebGPU が使えます)' : '(WebGPU は使えません)';
+  // 🔴 WebGPU に触れるのは、目録に fp16 の重みがある部品があるときだけ(CPU 用の実行器だけなら、可否は推奨に関係しない)
+  const gpuRelevant = facts !== null && ASR_PARTS.some((p) => p.gpu === true && facts.fp16[p.id] === true);
+  const gpuText = !gpuRelevant || webgpu === null ? '' : webgpu ? '(WebGPU が使えます)' : '(WebGPU は使えません)';
   return `この端末のメモリ(${humanBytes(deviceMemoryGb * 1024 ** 3)})${gpuText}には「${best.label}」がお勧めです`;
 }
 
@@ -347,6 +355,15 @@ export function readAsrPack(text: string): AsrPackRead {
   return { ok: true, pack: { version, runtime, models } };
 }
 
+/**
+ * 🔴 **fp16 の重み**があるか(WebGPU で動かせるのはこの形だけ)。`paths` は pack 内の相対 path の列。
+ * 目録(`AsrPack.models[id]`)でも、取り込み済みの file の鍵でも同じ判定を使う(判定はここ 1 つ)。
+ */
+export function hasFp16Weights(paths: Iterable<string>): boolean {
+  for (const p of paths) if (/_fp16\.onnx$/.test(p)) return true;
+  return false;
+}
+
 /** 配布元がまだ置いていない部品の理由(目録に無い部品)。画面で「選べない」理由に出す。 */
 export const ASR_UNAVAILABLE_TEXT = '配布元(asr-pack)にまだ置かれていないため、取り込めません';
 
@@ -355,6 +372,23 @@ export function asrUnavailableParts(pack: AsrPack): Partial<Record<AsrPartId, st
   const out: Partial<Record<AsrPartId, string>> = {};
   for (const p of ASR_PARTS) if (pack.models[p.id] === undefined) out[p.id] = ASR_UNAVAILABLE_TEXT;
   return out;
+}
+
+/** 配布元の目録から分かった事実(画面の「選べない」「お勧め」の根拠)。 */
+export interface AsrPackFacts {
+  /** 目録に載っていない部品 → 理由。 */
+  readonly unavailable: Readonly<Partial<Record<AsrPartId, string>>>;
+  /** 目録に fp16 の重みがある部品。 */
+  readonly fp16: Readonly<Partial<Record<AsrPartId, boolean>>>;
+}
+
+export function asrPackFacts(pack: AsrPack): AsrPackFacts {
+  const fp16: Partial<Record<AsrPartId, boolean>> = {};
+  for (const p of ASR_PARTS) {
+    const files = pack.models[p.id];
+    if (files !== undefined) fp16[p.id] = hasFp16Weights(files.map((f) => f.path));
+  }
+  return { unavailable: asrUnavailableParts(pack), fp16 };
 }
 
 /** 取り先の file の URL(`base` は末尾が `/` の同一オリジンの絶対 URL)。 */

@@ -24,6 +24,7 @@ const model = (over: Partial<StemModel> = {}): StemModel => ({
   stft: { nFft: 96, hop: 16, dimF: 49, dimT: 33 },
   zeroBins: 0,
   primary: 'vocals',
+  compensate: 1,
   ...over,
 });
 

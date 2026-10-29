@@ -425,6 +425,19 @@ export function inspectDist({
             'これは PDF を PKC の画面で読む人が押したときだけ取りに行く物で、install で落とす物ではない',
         );
       }
+      /**
+       * 🔴 **正規表現が実在名に当たっていること**(穴 E)── `ORT_WASM_NOT_PRECACHED` / `isDeadDefaultRef` は名前の形で当てるので、
+       * ORT 側の改名(`ort-wasm-simd-threaded` → 別名)や Vite の命名の変化で**どの実ファイルにも当たらなくなっても黙って通る**
+       * (precache の除外も、既定名の許容も、空振りする)。ワーカー(`stem-worker-*`)が出ているのに実在名に当たらなければ落とす。
+       */
+      if (shipped.some((f) => /^assets\/stem-worker-[^/]+\.js$/.test(f.path))) {
+        if (!shipped.some((f) => ORT_WASM_NOT_PRECACHED.test(f.path))) {
+          errors.push('stem-worker が在るのに、ONNX Runtime の wasm(assets/ort-wasm*.wasm)が実在しない ── 除外の正規表現が実在名に当たっていない');
+        }
+        if (!shipped.some((f) => /^assets\/ort-wasm-simd-threaded[^/]*\.mjs$/.test(f.path))) {
+          errors.push('stem-worker が在るのに、ONNX Runtime の glue(assets/ort-wasm-simd-threaded*.mjs)が実在しない ── 既定名の許容の正規表現が実在名に当たっていない');
+        }
+      }
       const ortInPrecache = [...have].filter((f) => ORT_WASM_NOT_PRECACHED.test(f));
       if (ortInPrecache.length > 0) {
         errors.push(

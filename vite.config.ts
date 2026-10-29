@@ -54,6 +54,8 @@ export default defineConfig({
    */
   define: {
     __PKC_BUILT_AT__: JSON.stringify(Date.now()),
+    // 🔴 「1 枚にまとめた版」(`build/portable.config.ts`)だけ true。音源分離の ONNX Runtime(wasm 14.5MB)はそこへ畳まない(下のコメント参照)
+    __PKC_PORTABLE__: 'false',
     // 🔴 焼いた図のキャッシュの鍵に入れる mermaid の版(#1003)。手書きせず、入れた物から読む
     ...mermaidVersionDefine(),
   },

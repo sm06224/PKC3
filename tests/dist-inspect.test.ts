@@ -1093,6 +1093,21 @@ describe('🔴 ONNX Runtime の glue が指す既定の wasm 名は、実行時�
     expect(run(withOrt('new URL("ort-wasm-simd-threaded.wasm",import.meta.url)'))).toEqual([]);
   });
 
+  it('🔴 穴 E: ワーカーが在るのに wasm / glue が実在名に当たらなければ落ちる(正規表現の空振りを黙って通さない)', () => {
+    const i = withOrt('//');
+    expect(run(i), '健全な形が鳴っている').toEqual([]);
+    // wasm の名前が変わった(例: 別名に改名)── ORT_WASM_NOT_PRECACHED が当たらない
+    const renamed = withOrt('//');
+    renamed.files = renamed.files.map((f) => (f.path === ORT_WASM ? { ...f, path: 'assets/onnx-engine-GGGGGGGG.wasm' } : f));
+    renamed.text.set(SW, (renamed.text.get(SW) as string).replace('ort-wasm-simd-threaded-GGGGGGGG.wasm', 'onnx-engine-GGGGGGGG.wasm'));
+    expect(run(renamed).join('\n')).toContain('assets/ort-wasm*.wasm');
+    // glue の名前が変わった
+    const glueRenamed = withOrt('//');
+    glueRenamed.files = glueRenamed.files.map((f) => (f.path === GLUE ? { ...f, path: 'assets/onnx-glue-FFFFFFFF.mjs' } : f));
+    glueRenamed.text.set(SW, (glueRenamed.text.get(SW) as string).replace('ort-wasm-simd-threaded-FFFFFFFF.mjs', 'onnx-glue-FFFFFFFF.mjs'));
+    expect(run(glueRenamed).join('\n')).toContain('ort-wasm-simd-threaded*.mjs');
+  });
+
   it('対照群: 許すのはこの 1 組だけ ── 別の名前・別の参照元の参照切れは今までどおり鳴る', () => {
     // 同じ glue が、別の名前の wasm を指す
     expect(run(withOrt('new URL("ort-wasm-simd-threaded-ZZZZZZZZ.wasm",import.meta.url)')).join('\n')).toContain('参照されている生成物が dist に無い');

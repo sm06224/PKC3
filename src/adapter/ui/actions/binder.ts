@@ -2070,6 +2070,13 @@ export interface BinderServices {
   cancelAsrInstall?(): void;
   removeAsrPart?(id: string): void;
   /**
+   * 🔴 **音源分離のモデルを取り込む / 取得をやめる / 消す**(#674 / #949)。⚠ 勝手に取りに行かない(押した人にだけ)。
+   * ⚠ 判断も文言も `StemModelInstaller` が持つ(投げてこない)。
+   */
+  installStemModel?(id: string): void;
+  cancelStemInstall?(): void;
+  removeStemModel?(id: string): void;
+  /**
    * 🔴 **タイマー**(#279。user 指示 2026-08-19「…タイマー…は組み込みアプリで
    * リリースしたい」)。⚠ **省略可**(収録と同じ規律)。
    * ⚠ 止める / 捨てるは**どの計測か**を渡す ── 複数同時に走るので、
@@ -16300,6 +16307,17 @@ const ACTIONS: Record<string, ActionHandler> = {
   'install-asr-part': (_dispatcher, target, services) => {
     const id = target.getAttribute('data-pkc-part');
     if (id) services.installAsrPart?.(id);
+  },
+  'install-stem-model': (_dispatcher, target, services) => {
+    const id = target.getAttribute('data-pkc-part');
+    if (id) services.installStemModel?.(id);
+  },
+  'cancel-stem-install': (_dispatcher, _target, services) => {
+    services.cancelStemInstall?.();
+  },
+  'remove-stem-model': (_dispatcher, target, services) => {
+    const id = target.getAttribute('data-pkc-part');
+    if (id) services.removeStemModel?.(id);
   },
   'cancel-asr-install': (_dispatcher, _target, services) => {
     services.cancelAsrInstall?.();

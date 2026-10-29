@@ -15,7 +15,16 @@ import { reactRuntimePlugin } from './react-runtime-plugin.ts';
 
 export default defineConfig({
   // 🔴 焼いた図のキャッシュの鍵に入れる mermaid の版(#1003)── 可搬版も同じ鍵の作りにする
-  define: mermaidVersionDefine(),
+  define: {
+    ...mermaidVersionDefine(),
+    /**
+     * 🔴 **この版では音源分離の ONNX Runtime を畳まない**(#674 / #949)。wasm は 14.5MB で、1 枚へ畳むと base64 で 19.8MB、
+     * しかもワーカーの本体がさらに base64 で包まれるので**約 26MB** になり、**使わない人も常時メモリに持つ**(HTML の文字列として居残る)。
+     * 通常の版(Pages / `/dev/`)なら押した人のワーカーが初めて取りに行くだけで済む。だからここでは枝ごと落とし
+     * (`stem-worker.ts` の `__PKC_PORTABLE__` の枝)、画面は「このビルドでは使えません」と理由を言う。
+     */
+    __PKC_PORTABLE__: 'true',
+  },
   base: './',
   // 🔴 `manual.html` もここで焼く(#648 段③)── `fold.mjs` が 1 枚の中へ焼き込む。
   //    ⚠ 外すと fold が「畳む前にマニュアルの page が焼かれていない」で止まる(黙って落ちない)
