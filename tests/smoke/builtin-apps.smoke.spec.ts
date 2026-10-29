@@ -547,24 +547,17 @@ test('🔴 コマンドシェル: 打って Enter で結果が出て、移す・
   await expect(tabInput, '閉じたあと入力欄にフォーカスが戻らない').toBeFocused();
   await expect(selected, 'Esc でノートの選択が変わった').toHaveCount(1);
   expect(await selected.first().getAttribute('data-pkc-entry')).toBe(selectedLid);
-  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
-});
 
-test('🔴 2 ペインのコマンドライン: コマンドを打つと結果がコマンドラインの上に出て、同じコマンド表の help が読める (#241)', async ({ page }) => {
-  const errors = collectPageErrors(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await gotoApp(page);
-  await createEntry(page, 'folder');
-  await createEntry(page, 'text');
+  // 🔴 2 ペインのコマンドライン(#241)── 同じ起動の続きで確かめる(起動を増やさない)。同じコマンド表の help が読め、2 ペインに無いコマンドは断る
   await page.keyboard.press('Control+Alt+6');
   const dual = page.locator('[data-pkc-view-pane="dual"]');
   await expect(dual).toBeVisible({ timeout: 15_000 });
   const cmd = dual.locator('[data-pkc-region="dual-cmdline"]');
   await expect(cmd, '2 ペインにコマンドラインが無い').toBeVisible();
-  const input = cmd.locator('[data-pkc-field="shell-input"]');
+  const cmdInput = cmd.locator('[data-pkc-field="shell-input"]');
   const out = cmd.locator('[data-pkc-region="dual-cmd-out"]');
 
-  await clickReal(page, input);
+  await clickReal(page, cmdInput);
   await page.keyboard.type('ls');
   await page.keyboard.press('Enter');
   await expect(out, '結果がコマンドラインの上に出ない').toContainText('件');
