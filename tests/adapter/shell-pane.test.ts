@@ -147,6 +147,15 @@ describe('シェルの面', () => {
     expect(log()).toContain('移しました');
   });
 
+  it('🔴 mv の結果の文が出る。すでに入っているのは失敗ではない', async () => {
+    await run(input, 'mv 議事録 アーカイブ');
+    expect(log()).toContain('「アーカイブ」へ移しました');
+    await run(input, 'mv 議事録 アーカイブ');
+    expect(log()).toContain('すでに「アーカイブ」に入っています');
+    const last = [...ctx.root.querySelectorAll('[data-pkc-view-pane="shell"] [data-pkc-field="shell-block"]')].pop()!;
+    expect(last.getAttribute('data-pkc-state')).toBe('done');
+  });
+
   it('🔴 new で作ったノートが保存され、本文は \\n で改行できる', async () => {
     await run(input, 'new 資料/新規メモ 一行目 \\n二行目');
     const made = [...ctx.d.getState().entryMetas.values()].find((m) => m.title === '新規メモ');

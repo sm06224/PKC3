@@ -1723,6 +1723,8 @@ const moveEntriesOfferingUndo = (
   lids: readonly string[],
   parentLid: string | null,
   report?: (text: string) => void,
+  /** 🔴 結果の文を**必ず**受ける口(コマンドシェル #274)。⚠ `report` は「元に戻す」を出す回には呼ばれない(知らせは取り消しの帯が持つ)ので別に持つ。 */
+  capture?: (text: string) => void,
 ): boolean => {
   const st = dispatcher.getState();
   const before = st.relations;
@@ -1746,6 +1748,7 @@ const moveEntriesOfferingUndo = (
   moveEntries(dispatcher, lids, parentLid, (text) => {
     said = text;
   });
+  if (said !== '') capture?.(said);
   if (dispatcher.getState().relations === before) {
     if (said !== '') report?.(said);
     return false;
@@ -7843,12 +7846,16 @@ export function makeShellOps(h: {
         : fail('追記の完了を確かめられませんでした(ノートを開いて確かめてください)');
     },
     move: (lids, to) => {
+      const stop = stopped('移動');
+      if (stop !== null) return fail(stop);
       let said = '';
-      const moved = moveEntriesOfferingUndo(dispatcher, lids, to, (t) => {
+      const moved = moveEntriesOfferingUndo(dispatcher, lids, to, undefined, (t) => {
         said = t;
       });
-      if (moved) return done(said === '' ? '移しました' : `${said}(「元に戻す」で戻せます)`);
-      return fail(dispatcher.getState().error || '移せませんでした');
+      if (moved) return done(said === '' ? '移しました(「元に戻す」で戻せます)' : `${said}(「元に戻す」で戻せます)`);
+      // 🔴 すでにそこに入っているのは失敗ではない(何も動かなかっただけ)。それ以外は断りの理由を出す
+      if (said.startsWith('すでに')) return done(said);
+      return fail(dispatcher.getState().error || said || '移せませんでした');
     },
     copy: (lids, to) =>
       new Promise<OpResult>((resolve) => {
