@@ -52,7 +52,8 @@ export interface SilenceCut {
 
 /**
  * 切り落とす範囲を決める。**切る物が無ければ `null`**(呼び側は元の PCM をそのまま渡す)。
- * ⚠ 枠の RMS を全部持たず、2 回走査する(1 時間の録音で枠 18 万個の `Float32Array` を足さない)。
+ * ⚠ 枠ごとの RMS を `Float32Array` に持つ(パーセンタイルを取るため、並べ替えた写しも 1 本作る)。1 時間の録音で枠 18 万個 = 約 0.7MB ずつで、
+ *   PCM(1 時間 = 約 230MB)に比べて無視できる。使い終わったら関数を抜けて手放される。
  */
 export function planSilenceCut(pcm: Float32Array, rate: number): SilenceCut | null {
   const frame = Math.max(1, Math.round((rate * ASR_CUT_FRAME_MS) / 1000));
