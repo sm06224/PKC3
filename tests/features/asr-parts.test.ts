@@ -20,6 +20,9 @@ import {
   asrUnavailableParts,
   asrPackFacts,
   hasFp16Weights,
+  ASR_RUNTIME_JSEP_JS,
+  ASR_RUNTIME_JSEP_WASM,
+  runtimeSupportsWebGpu,
   ASR_WORKER_IDLE_MS,
   ASR_RUNTIME_FILES,
   ASR_RUNTIME_BYTES,
@@ -323,7 +326,7 @@ describe('🔴 #1446 端末ごとの推奨', () => {
     for (const v of [undefined, 0, -1, Number.NaN]) expect(asrRecommendNote(v)).toBeNull();
   });
 
-  const FP16 = { unavailable: {}, fp16: { turbo: true } } as const;
+  const FP16 = { unavailable: {}, fp16: { turbo: true }, webgpuRuntime: true } as const;
 
   it('🔴 WebGPU が使えると測れ、目録に fp16 の重みがある端末だけに「高精度」を勧める', () => {
     expect(asrRecommendNote(8, true, FP16)).toContain('「高精度」');
@@ -337,11 +340,28 @@ describe('🔴 #1446 端末ごとの推奨', () => {
   });
 
   it('🔴 目録が未取得 / 失敗(null)・fp16 が無い・配布元に無い、のどれでも高精度は勧めない。WebGPU の字も出さない', () => {
-    for (const facts of [null, { unavailable: {}, fp16: { turbo: false } }, { unavailable: { turbo: ASR_UNAVAILABLE_TEXT }, fp16: {} }] as const) {
+    for (const facts of [
+      null,
+      { unavailable: {}, fp16: { turbo: false }, webgpuRuntime: true },
+      { unavailable: { turbo: ASR_UNAVAILABLE_TEXT }, fp16: {}, webgpuRuntime: true },
+      // 🔴 fp16 の重みがあっても、実行の部品が WebGPU 非対応(非 JSEP の wasm 1 本)なら勧めない
+      { unavailable: {}, fp16: { turbo: true }, webgpuRuntime: false },
+    ] as const) {
       const t = asrRecommendNote(8, true, facts)!;
       expect(t).toContain('「正確」');
       expect(t).not.toContain('WebGPU');
     }
+  });
+});
+
+describe('🔴 実行の部品が WebGPU 対応か(JSEP 版)', () => {
+  it('mjs と wasm の両方がそろっているときだけ true(非 JSEP の wasm 1 本だけなら false)', () => {
+    expect(runtimeSupportsWebGpu(['runtime/transformers.mjs', 'runtime/ort-wasm.mjs', 'runtime/ort-wasm.wasm'])).toBe(false);
+    expect(runtimeSupportsWebGpu([ASR_RUNTIME_JSEP_WASM])).toBe(false);
+    expect(runtimeSupportsWebGpu([ASR_RUNTIME_JSEP_JS])).toBe(false);
+    expect(runtimeSupportsWebGpu([ASR_RUNTIME_JSEP_JS, ASR_RUNTIME_JSEP_WASM])).toBe(true);
+    // 必須の一式には入れない(置かれていない配布元でも、取り込みは今までどおり通る)
+    expect(ASR_RUNTIME_FILES).not.toContain(ASR_RUNTIME_JSEP_JS);
   });
 });
 
@@ -359,7 +379,15 @@ describe('🔴 fp16 の重みの判定(WebGPU で動かす条件)', () => {
     const r = readAsrPack(JSON.stringify(raw));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(asrPackFacts(r.pack)).toEqual({ unavailable: {}, fp16: { light: false, accurate: false, turbo: true } });
+    expect(asrPackFacts(r.pack)).toEqual({ unavailable: {}, fp16: { light: false, accurate: false, turbo: true }, webgpuRuntime: false });
+    // 実行の部品に JSEP 版(mjs と wasm の両方)が載ると webgpuRuntime が true になる。片方だけでは false
+    const withJsep = JSON.parse(JSON.stringify(raw)) as { runtime: AsrPackFile[] };
+    withJsep.runtime.push(file(ASR_RUNTIME_JSEP_WASM, 12_000_000));
+    const r1 = readAsrPack(JSON.stringify(withJsep));
+    expect(r1.ok && asrPackFacts(r1.pack).webgpuRuntime, 'wasm だけで対応と言った').toBe(false);
+    withJsep.runtime.push(file(ASR_RUNTIME_JSEP_JS, 30_000));
+    const rJ = readAsrPack(JSON.stringify(withJsep));
+    expect(rJ.ok && asrPackFacts(rJ.pack).webgpuRuntime).toBe(true);
     delete raw.models['turbo'];
     const r2 = readAsrPack(JSON.stringify(raw));
     if (r2.ok) expect(asrPackFacts(r2.pack).unavailable).toEqual({ turbo: ASR_UNAVAILABLE_TEXT });

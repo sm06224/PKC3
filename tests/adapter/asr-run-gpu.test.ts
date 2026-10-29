@@ -12,6 +12,8 @@ import { AsrRunner, type AsrJob, type RuntimeModule } from '../../src/adapter/pl
 import { probeWebGpu } from '../../src/adapter/platform/asr/webgpu-probe';
 import {
   ASR_RUNTIME_JS,
+  ASR_RUNTIME_JSEP_JS,
+  ASR_RUNTIME_JSEP_WASM,
   ASR_RUNTIME_WASM,
   ASR_RUNTIME_WASM_LOADER,
 } from '../../src/features/asr/asr-parts';
@@ -20,6 +22,9 @@ function setup(opts: { webgpuWorks: boolean; hasWebGpu: boolean; webgpuRunFails?
   const devices: unknown[] = [];
   const dtypes: unknown[] = [];
   const disposed: unknown[] = [];
+  const pathsAtPipeline: unknown[] = [];
+  const urlBlob = new Map<string, Blob>();
+  let n = 0;
   const rt: RuntimeModule = {
     env: {
       allowRemoteModels: true,
@@ -32,6 +37,7 @@ function setup(opts: { webgpuWorks: boolean; hasWebGpu: boolean; webgpuRunFails?
     },
     pipeline: (_task, _model, options) => {
       devices.push(options['device']);
+      pathsAtPipeline.push(rt.env.backends.onnx.wasm.wasmPaths);
       dtypes.push(options['dtype']);
       const dev = options['device'];
       if (options['device'] === 'webgpu' && !opts.webgpuWorks) return Promise.reject(new Error('webgpu 非対応'));
@@ -45,17 +51,25 @@ function setup(opts: { webgpuWorks: boolean; hasWebGpu: boolean; webgpuRunFails?
   };
   const runner = new AsrRunner({
     importModule: () => Promise.resolve(rt),
-    createObjectURL: () => 'blob:x',
+    createObjectURL: (b) => {
+      const u = `blob:${(n += 1)}`;
+      urlBlob.set(u, b);
+      return u;
+    },
     hasWebGpu: () => opts.hasWebGpu,
   });
-  return { runner, devices, dtypes, disposed };
+  return { runner, devices, dtypes, disposed, pathsAtPipeline, urlBlob };
 }
 
-const job = (over: Partial<AsrJob>): AsrJob => ({
+const JSEP_JS = new Blob(['jsep-js']);
+const JSEP_WASM = new Blob(['jsep-wasm']);
+/** `jsep` = 実行の部品に WebGPU 対応(JSEP 版)が載っているか。 */
+const job = (over: Partial<AsrJob>, jsep = true): AsrJob => ({
   files: [
     [ASR_RUNTIME_JS, new Blob(['js'])],
     [ASR_RUNTIME_WASM_LOADER, new Blob(['l'])],
     [ASR_RUNTIME_WASM, new Blob(['w'])],
+    ...(jsep ? ([[ASR_RUNTIME_JSEP_JS, JSEP_JS], [ASR_RUNTIME_JSEP_WASM, JSEP_WASM]] as const) : []),
   ],
   modelId: 'm',
   language: null,
@@ -102,6 +116,25 @@ describe('gpu の部品の実行器', () => {
     // CPU の pipe が落ちる状況を作る
     (runner as unknown as { loaded: unknown }).loaded = { modelId: 'm', device: 'wasm', pipe: () => Promise.reject(new Error('boom')) };
     await expect(runner.run(job({}))).rejects.toThrow('boom');
+  });
+
+  it('🔴 ⚠5 実行の部品が WebGPU 非対応(JSEP 版なし = 非 JSEP の wasm 1 本)なら、WebGPU は試さない', async () => {
+    const { runner, devices, dtypes } = setup({ webgpuWorks: true, hasWebGpu: true });
+    const r = await runner.run(job({ gpu: true }, false));
+    expect(devices, '対応していないのに WebGPU を試した').toEqual(['wasm']);
+    expect(dtypes).toEqual(['q8']);
+    expect(r.device).toBe('wasm');
+  });
+
+  it('🔴 WebGPU は JSEP 版の置き場で、CPU は通常の置き場で作る(落ちて戻ったあとも通常へ戻る)', async () => {
+    const { runner, pathsAtPipeline, urlBlob } = setup({ webgpuWorks: false, hasWebGpu: true });
+    await runner.run(job({ gpu: true }));
+    const [first, second] = pathsAtPipeline as Array<{ mjs: string; wasm: string }>;
+    // ⚠ 実体は `typed()` で包み直されるので、Blob の同一性ではなく大きさ(中身の長さ)で見分ける
+    expect(urlBlob.get(first!.wasm)?.size, 'WebGPU を試す置き場が JSEP 版でない').toBe(JSEP_WASM.size);
+    expect(urlBlob.get(first!.mjs)?.size).toBe(JSEP_JS.size);
+    expect(urlBlob.get(second!.wasm)?.size, 'CPU に戻ったのに JSEP 版のまま').toBe(1); // 通常の wasm('w')
+    expect(urlBlob.get(second!.mjs)?.size).toBe(1); // 通常の loader('l')
   });
 
   it('対照群:gpu でない依頼・WebGPU の無い場所では、WebGPU を試さない', async () => {

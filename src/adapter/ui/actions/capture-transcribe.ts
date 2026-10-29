@@ -28,6 +28,7 @@ import {
   ASR_PARTS,
   ASR_SAMPLE_RATE,
   hasFp16Weights,
+  runtimeSupportsWebGpu,
   type AsrPart,
 } from '@features/asr/asr-parts';
 import {
@@ -230,8 +231,8 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
          * ⚠ 渡すたびにワーカーへ transfer されて元の PCM が空になるので、区切りは**写して**渡す(全体は最後まで残る)。
          * ⚠ 途中の 1 本が失敗したら全体を失敗にする(半分だけの文字起こしを「足しました」と言わない)。
          */
-        // 🔴 WebGPU で動かすのは、取り込んだ重みに fp16 があるときだけ(無いのに試すと毎回 1 度失敗する)
-        const wantGpu = ready.part.gpu === true && hasFp16Weights(ready.files.keys());
+        // 🔴 WebGPU で動かすのは、取り込んだ重みに fp16 があり、実行の部品が WebGPU 対応(JSEP 版あり)のときだけ(無いのに試すと毎回 1 度失敗する)
+        const wantGpu = ready.part.gpu === true && hasFp16Weights(ready.files.keys()) && runtimeSupportsWebGpu(ready.files.keys());
         const chunks = planAsrChunks(pcm, deps.chunking);
         let out: AsrJobResult;
         if (chunks.length <= 1) {

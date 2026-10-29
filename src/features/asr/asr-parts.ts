@@ -148,6 +148,20 @@ export const ASR_MANIFEST = 'pack.json';
 export const ASR_RUNTIME_JS = 'runtime/transformers.mjs';
 export const ASR_RUNTIME_WASM_LOADER = 'runtime/ort-wasm.mjs';
 export const ASR_RUNTIME_WASM = 'runtime/ort-wasm.wasm';
+/**
+ * 🔴 **WebGPU 用の実行の部品(JSEP 版の ORT)**。配布元が置いたときだけ目録に載る(**必須ではない** ── `ASR_RUNTIME_FILES` に入れない)。
+ * 両方そろっていなければ、WebGPU は試さない(非 JSEP の wasm 1 本だけの実行の部品では、WebGPU の実行は動かない)。
+ * ⚠ 名前は配布元との取り決め(未確定)。置かれる日に合わせて、この 2 行だけを直す。
+ */
+export const ASR_RUNTIME_JSEP_JS = 'runtime/ort-wasm-jsep.mjs';
+export const ASR_RUNTIME_JSEP_WASM = 'runtime/ort-wasm-jsep.wasm';
+
+/** 実行の部品が WebGPU に対応しているか(目録の runtime でも、取り込み済みの file の鍵でも同じ判定)。 */
+export function runtimeSupportsWebGpu(paths: Iterable<string>): boolean {
+  const have = new Set(paths);
+  return have.has(ASR_RUNTIME_JSEP_JS) && have.has(ASR_RUNTIME_JSEP_WASM);
+}
+
 export const ASR_RUNTIME_FILES: readonly string[] = [
   ASR_RUNTIME_JS,
   ASR_RUNTIME_WASM_LOADER,
@@ -224,12 +238,12 @@ export function asrRecommendNote(
       .find(
         (p) =>
           deviceMemoryGb >= p.needMemoryGb
-          // 🔴 gpu の部品は、WebGPU が使えると測れ、**目録が引けていて、fp16 の重みがある**ときだけ(未取得・失敗なら勧めない)
-          && (p.gpu !== true || (webgpu === true && facts !== null && facts.fp16[p.id] === true))
+          // 🔴 gpu の部品は、WebGPU が使えると測れ、**目録が引けていて、実行の部品が WebGPU 対応(JSEP)で、fp16 の重みがある**ときだけ(未取得・失敗なら勧めない)
+          && (p.gpu !== true || (webgpu === true && facts !== null && facts.webgpuRuntime && facts.fp16[p.id] === true))
           && facts?.unavailable[p.id] === undefined,
       ) ?? ASR_PARTS[0]!;
   // 🔴 WebGPU に触れるのは、目録に fp16 の重みがある部品があるときだけ(CPU 用の実行器だけなら、可否は推奨に関係しない)
-  const gpuRelevant = facts !== null && ASR_PARTS.some((p) => p.gpu === true && facts.fp16[p.id] === true);
+  const gpuRelevant = facts !== null && facts.webgpuRuntime && ASR_PARTS.some((p) => p.gpu === true && facts.fp16[p.id] === true);
   const gpuText = !gpuRelevant || webgpu === null ? '' : webgpu ? '(WebGPU が使えます)' : '(WebGPU は使えません)';
   return `この端末のメモリ(${humanBytes(deviceMemoryGb * 1024 ** 3)})${gpuText}には「${best.label}」がお勧めです`;
 }
@@ -380,6 +394,8 @@ export interface AsrPackFacts {
   readonly unavailable: Readonly<Partial<Record<AsrPartId, string>>>;
   /** 目録に fp16 の重みがある部品。 */
   readonly fp16: Readonly<Partial<Record<AsrPartId, boolean>>>;
+  /** 目録の実行の部品が WebGPU に対応しているか(JSEP 版が載っているか)。 */
+  readonly webgpuRuntime: boolean;
 }
 
 export function asrPackFacts(pack: AsrPack): AsrPackFacts {
@@ -388,7 +404,7 @@ export function asrPackFacts(pack: AsrPack): AsrPackFacts {
     const files = pack.models[p.id];
     if (files !== undefined) fp16[p.id] = hasFp16Weights(files.map((f) => f.path));
   }
-  return { unavailable: asrUnavailableParts(pack), fp16 };
+  return { unavailable: asrUnavailableParts(pack), fp16, webgpuRuntime: runtimeSupportsWebGpu(pack.runtime.map((f) => f.path)) };
 }
 
 /** 取り先の file の URL(`base` は末尾が `/` の同一オリジンの絶対 URL)。 */

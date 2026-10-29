@@ -751,6 +751,7 @@ describe('高精度(gpu)・暴走の除去・終わりの時刻(レビュー指�
   const turbo = ASR_PARTS[2]!;
   const readyWith = (keys: string[]): AsrReady => ({ part: turbo, files: new Map(keys.map((k) => [k, new Blob(['x'])] as const)) });
   const FP16 = 'models/openai/whisper-large-v3-turbo/onnx/encoder_model_fp16.onnx';
+  const JSEP = ['runtime/ort-wasm-jsep.mjs', 'runtime/ort-wasm-jsep.wasm'];
   const Q8 = 'models/openai/whisper-large-v3-turbo/onnx/encoder_model_quantized.onnx';
   const jobs: AsrJob[] = [];
   const echo = (device?: 'webgpu' | 'wasm') =>
@@ -761,20 +762,24 @@ describe('高精度(gpu)・暴走の除去・終わりの時刻(レビュー指�
 
   it('🔴 fp16 の重みがあるときだけ gpu で渡す。無ければ gpu を付けない(毎回 1 度失敗させない)', async () => {
     jobs.length = 0;
-    const a = harness({ ready: vi.fn(async () => readyWith([FP16, Q8])), transcribe: echo('webgpu') });
+    const a = harness({ ready: vi.fn(async () => readyWith([FP16, Q8, ...JSEP])), transcribe: echo('webgpu') });
     await a.tr.run('a');
     expect(jobs[0]!.gpu).toBe(true);
     const b = harness({ ready: vi.fn(async () => readyWith([Q8])), transcribe: echo('wasm') });
     await b.tr.run('a');
     expect(jobs[1]!.gpu, 'fp16 が無いのに gpu で渡した').toBeUndefined();
     expect(b.notes.at(-1), 'gpu でないのに実行器を言った').not.toContain('WebGPU');
+    // 🔴 fp16 があっても、実行の部品が WebGPU 非対応(JSEP 版なし)なら gpu で渡さない
+    const c = harness({ ready: vi.fn(async () => readyWith([FP16, Q8])), transcribe: echo('wasm') });
+    await c.tr.run('a');
+    expect(jobs[2]!.gpu, '実行の部品が非対応なのに gpu で渡した').toBeUndefined();
   });
 
   it('🔴 終わりの知らせに実際の実行器を言う(WebGPU / CPU に戻った)', async () => {
-    const on = harness({ ready: vi.fn(async () => readyWith([FP16])), transcribe: echo('webgpu') });
+    const on = harness({ ready: vi.fn(async () => readyWith([FP16, ...JSEP])), transcribe: echo('webgpu') });
     await on.tr.run('a');
     expect(on.notes.at(-1)).toContain('WebGPU で実行しました');
-    const back = harness({ ready: vi.fn(async () => readyWith([FP16])), transcribe: echo('wasm') });
+    const back = harness({ ready: vi.fn(async () => readyWith([FP16, ...JSEP])), transcribe: echo('wasm') });
     await back.tr.run('a');
     expect(back.notes.at(-1)).toContain('WebGPU を使えなかったため CPU で実行しました');
   });
