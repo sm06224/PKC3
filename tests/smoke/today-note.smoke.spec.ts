@@ -72,5 +72,19 @@ test('🔴 「今日」を押すと今日の日付のノートが開き、2 度�
   const rows = page.locator(`[data-pkc-entry]`, { hasText: today });
   await expect(rows, '押すたびに増えている').toHaveCount(1);
 
+  /**
+   * 🔴 #1640 項 1: ▼ から「今日」の種類を選べ、選んだ種類を覚える(戻す道もある)。
+   * 既に今日のノートが在るので、種類を変えても行は増えない(在る日は種類を問わず開く)。
+   */
+  const menuItems = '[data-pkc-region="create-menu"] [data-pkc-action="open-today-as"]';
+  await clickReal(page, '[data-pkc-action="toggle-create-menu"]');
+  await expect(page.locator(menuItems), '種類つきの「今日」が 2 つ並んでいない').toHaveCount(2);
+  await clickReal(page, `${menuItems}[data-pkc-archetype="textlog"]`);
+  expect(await page.evaluate(() => localStorage.getItem('pkc3.today-kind')), '選んだ種類を覚えていない').toBe('textlog');
+  await expect(rows, '種類を選んだら行が増えた').toHaveCount(1);
+  await clickReal(page, '[data-pkc-action="toggle-create-menu"]');
+  await clickReal(page, `${menuItems}[data-pkc-archetype="text"]`);
+  expect(await page.evaluate(() => localStorage.getItem('pkc3.today-kind')), 'ノートへ戻せない').toBe('text');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

@@ -68,6 +68,12 @@ test('🔴 `=` まで打って Enter を押すと、答えが出て次の行へ�
   await page.keyboard.press('Enter');
   await expect(ta, '日付に答えを書いた').toHaveValue('3958.01+9647.86=13605.87\n2026-10-17=\n');
 
+  // 🔴 #1852 308B: 単位(円)つきの式も計算する(単位は答えに付けない)
+  await ta.fill('');
+  await page.keyboard.type('牛乳 100円*3=');
+  await page.keyboard.press('Enter');
+  await expect(ta, '単位つきの式を計算しない').toHaveValue('牛乳 100円*3=300\n');
+
   /**
    * 🔴 #1852 束 I1(依頼 151 / 136)── 電話番号の形は計算しない(理由が出る)/ 全角は半角にして計算する。
    * 新しい起動は足さず、この道中の続きで見る。

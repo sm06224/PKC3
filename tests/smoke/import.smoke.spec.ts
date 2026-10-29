@@ -1062,6 +1062,23 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
   });
   // 断りはシステムのメッセージへ積まれる(状態の行には出ない)── 設定の「メッセージ」を開いて読む
   expect(await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').count(), 'フォルダの落としでノートが増えた').toBe(before);
+
+  /**
+   * 🔴 #1852 束 F1(依頼 170 / 171): `.txt` を窓へ落とすと、添付ではなくノートとして取り込む。
+   * 本物の OS ドラッグは起こせない ── 実 File を載せた DataTransfer の drop で、binder が読む口を通す。
+   */
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['落とした文字\n'], '落としたメモ.txt', { type: 'text/plain' }));
+    document
+      .querySelector('[data-pkc-region="filer-table"]')!
+      .dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+  });
+  await expect(
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry] [data-pkc-field="title"]').filter({ hasText: '落としたメモ' }),
+    '.txt を落としてもノートにならない',
+  ).toHaveCount(1);
+  expect(await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').count()).toBe(before + 1);
   await page.evaluate(() => {
     // 「画面が隠れた」を合成して、積み待ちのメッセージを流す(5 秒待つより決定的)
     Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
