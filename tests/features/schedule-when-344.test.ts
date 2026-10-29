@@ -64,9 +64,9 @@ describe('抽出列と走査 (#344 の残り)', () => {
 
   it('noteTimeOf: 期間・刻み・終日のどれかがあれば運ぶ。日付だけは運ばない(従来どおり)', () => {
     expect(noteTimeOf('n', fm('2026-10-20'))).toBeNull();
-    expect(noteTimeOf('n', fm('2026-10-20..2026-10-22'))).toEqual({ lid: 'n', date: '2026-10-20', time: null, until: '2026-10-22' });
-    expect(noteTimeOf('n', fm('2026-10-20 14:00 毎週'))).toEqual({ lid: 'n', date: '2026-10-20', time: '14:00', repeat: 'week' });
-    expect(noteTimeOf('n', fm('2026-10-20 終日'))).toEqual({ lid: 'n', date: '2026-10-20', time: null, allDay: true });
+    expect(noteTimeOf('n', fm('2026-10-20..2026-10-22'))).toEqual({ lid: 'n', date: '2026-10-20', time: null, until: '2026-10-22', raw: '2026-10-20..2026-10-22' });
+    expect(noteTimeOf('n', fm('2026-10-20 14:00 毎週'))).toEqual({ lid: 'n', date: '2026-10-20', time: '14:00', repeat: 'week', raw: '2026-10-20 14:00 毎週' });
+    expect(noteTimeOf('n', fm('2026-10-20 終日'))).toEqual({ lid: 'n', date: '2026-10-20', time: null, allDay: true, raw: '2026-10-20 終日' });
     // 担当だけ(従来)は変わらない
     expect(noteTimeOf('n', fm('2026-10-20', 'owner: 山田\n'))).toEqual({ lid: 'n', date: '2026-10-20', time: null, owner: '山田' });
   });
@@ -84,7 +84,7 @@ describe('抽出列と走査 (#344 の残り)', () => {
     const scan = { noteTimes: [{ lid: 'n', date: '2026-10-20', time: null, until: '2026-10-22' }] };
     expect(noteWhenFor(scan, 'n', '2026-10-20').until).toBe('2026-10-22');
     expect(noteWhenFor(scan, 'n', '2026-10-21').until).toBeNull();
-    expect(noteWhenFor(null, 'n', '2026-10-20')).toEqual({ time: null, until: null, repeat: null, allDay: false });
+    expect(noteWhenFor(null, 'n', '2026-10-20')).toEqual({ time: null, until: null, repeat: null, allDay: false, raw: null });
   });
 
   it('アラーム / 見逃しの数え方には、繰り返しと時刻を渡す', () => {

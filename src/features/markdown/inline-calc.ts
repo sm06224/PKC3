@@ -517,8 +517,9 @@ export function detectInlineCalcRequest(
   const beforeRaw = start + lead > 0 ? fullText[start + lead - 1] : undefined;
   const before = beforeRaw === undefined ? undefined : toHalf(beforeRaw);
   if (startsMidToken(before, expression)) return null;
-  // 🔴 単位を読み飛ばした式の手前が日付・時刻の語(`10月3日+2=`)なら計算しない ── 日付を足し算にしない
-  if (skippedUnit && before !== undefined && /[月年日時分秒週]/u.test(before)) return null;
+  // 🔴 単位を読み飛ばした式の手前が字(かな・漢字・英字)なら計算しない ── 数が語の一部(`令和8年+1=` / `第3回+2=` / `10月3日+2=`)で、
+  //    足し算にすると別のものになる。単位を読み飛ばすのは、手前が空白・行頭・記号の「独立した数」のときだけ(`牛乳 100円*3=`)
+  if (skippedUnit && before !== undefined && /\p{L}/u.test(before)) return null;
   if (isDateOrTime(before, expression)) return null;
   if (isPhoneOrUrl(fullText.slice(lineStart(fullText, caretPos), caretPos - 1), expression)) return null;
   if (hasNoOperation(expression)) return null;

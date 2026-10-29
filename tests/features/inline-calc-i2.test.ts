@@ -80,6 +80,15 @@ describe('× ÷ ー(日本語入力の記号。依頼 78-3・308)', () => {
     expect(answer('円*3=')).toBeNull(); // 数に付いていない単位
     expect(answer('3円5*2=')).toBe('10'); // 単位の次が数字なら単位と読まない(5*2 だけ)
   });
+  it('🔴 数が語の一部(手前が字)のとき、単位を読み飛ばして計算しない(令和8年+1= / 第3回+2=)', () => {
+    expect(answer('令和8年+1=')).toBeNull();
+    expect(answer('第3回+2=')).toBeNull();
+    expect(answer('NO3個+2=')).toBeNull();
+    // 対照群: 手前が空白・行頭・記号なら独立した数 ── これまでどおり計算する
+    expect(answer('牛乳 3個+2個=')).toBe('5');
+    expect(answer('3個+2個=')).toBe('5');
+    expect(answer('(3個+2個)*2=')).toBe('10');
+  });
   it('日付の引き算は長音でも計算しない(2026ー10ー17=)', () => {
     expect(answer('2026ー10ー17=')).toBeNull();
   });
