@@ -12,12 +12,14 @@
  */
 
 export const SHELL_HISTORY_MAX = 200;
+/** 1 行の長さの上限(手違いで巨大な字を端末に残さない)。 */
+export const SHELL_HISTORY_LINE_MAX = 200;
 
 /** 履歴に積まない行(見るだけ・消すだけ)の先頭の語。 */
 const NOT_KEPT: ReadonlySet<string> = new Set(['history', '履歴', 'clear', '消去', 'help', 'ヘルプ', '?']);
 
 export function pushShellHistory(list: readonly string[], line: string, max = SHELL_HISTORY_MAX): string[] {
-  const text = line.trim();
+  const text = line.trim().slice(0, SHELL_HISTORY_LINE_MAX);
   if (text === '') return [...list];
   const head = text.split(/\s+/u)[0] ?? '';
   if (NOT_KEPT.has(head)) return [...list];

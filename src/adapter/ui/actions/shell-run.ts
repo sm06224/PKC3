@@ -13,7 +13,7 @@
  * `plan.confirm` があれば `ops.confirm` を通し、断られたら**何も実行しない**。実行前に履歴へは積む(打ち直せる)。
  */
 import { expandBang } from '@features/shell/history';
-import { planLine } from '@features/shell/commands';
+import { historyLineOf, planLine } from '@features/shell/commands';
 import type { PlanOp } from '@features/structure/structure-plan';
 import type { ShellEffect, ShellEnv, ShellTable } from '@features/shell/types';
 import { shellBlockText, type ShellBlock, type ShellSession } from '../render/cmdshell';
@@ -91,7 +91,7 @@ export async function runShellLine(ops: ShellOps, session: ShellSession, raw: st
     return block;
   }
   // 履歴へ積むのは「命令として読めた行」だけ(打ち間違いで ↑ を汚さない)。`!3` は展開した行を積む
-  session.remember(line);
+  session.remember(historyLineOf(line, env.surface));
   if (plan.cwd !== undefined) session.cwd = plan.cwd;
   if (plan.numbered !== undefined) session.last = [...plan.numbered];
   const hasEffects = plan.effects.length > 0;
@@ -217,6 +217,10 @@ async function runEffect(ops: ShellOps, session: ShellSession, block: ShellBlock
       session.update(block, { lines: [...block.lines, `${String(list.length)} 件(!番号 でもう一度、!! で直前)`], table });
       return;
     }
+    case 'history-clear':
+      session.history = [];
+      session.say(block, '履歴を消しました');
+      return;
     case 'clear':
       session.clear();
       return;

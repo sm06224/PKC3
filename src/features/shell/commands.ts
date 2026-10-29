@@ -456,12 +456,13 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
   {
     name: 'history',
     aliases: ['履歴'],
-    usage: 'history',
-    summary: '打った命令の履歴を出します(!3 でその番号を、!! で直前をもう一度)',
+    usage: 'history [-c]',
+    summary: '打った命令の履歴を出します(!3 でその番号を、!! で直前をもう一度。-c で履歴を消します)',
     group: 'シェル',
     surfaces: BOTH,
     args: [],
-    run: () => say([], [{ type: 'history' }]),
+    run: ({ flags }) =>
+      flags.has('c') || flags.has('clear') ? say(['履歴を消します'], [{ type: 'history-clear' }]) : say([], [{ type: 'history' }]),
   },
   {
     name: 'copy-result',
@@ -566,4 +567,33 @@ export function planLine(line: string, env: ShellEnv): ShellPlan {
 
 function stripDryFlag(rest: string): string {
   return rest.replace(/(^|\s)--?(?:n|dry-run)(?=\s|$)/gu, ' ').trim();
+}
+
+/** SQL を履歴に残す長さ(先頭だけ)。 */
+export const SHELL_HISTORY_SQL_CHARS = 24;
+
+/**
+ * 🔴 **履歴に残す形**(機密を残さない)。
+ *
+ * ⚠ `new` / `append` の**本文**と、`sql` の**後ろ**には、金額・個人名・SQL の条件など端末の外へ出したくない字が入りうる。
+ *   残すのはコマンドと対象(題名)まで ── `new` は題名、`append` は追記先、`sql` は先頭 {@link SHELL_HISTORY_SQL_CHARS} 字だけ。
+ *   (`!3` で呼び戻すと本文の無い `new` になる。履歴は「打ち直す手がかり」であって、本文の控えではない)
+ */
+export function historyLineOf(line: string, surface: ShellSurface): string {
+  const text = line.trim();
+  const { tokens, error } = tokenize(text);
+  const head = tokens[0];
+  if (error !== null || head === undefined) return text;
+  const cmd = findCommand(head.text, surface);
+  if (cmd === null) return text;
+  const q = (t: ShellToken): string => (/[\s"'「」“”]/u.test(t.text) ? `"${t.text.replace(/(["\\])/gu, '\\$1')}"` : t.text);
+  if (cmd.name === 'new' || cmd.name === 'append') {
+    const first = tokens[1];
+    return first === undefined ? head.text : `${head.text} ${q(first)}`;
+  }
+  if (cmd.name === 'sql') {
+    const rest = text.slice(head.end).trim();
+    return rest.length <= SHELL_HISTORY_SQL_CHARS ? text : `${head.text} ${rest.slice(0, SHELL_HISTORY_SQL_CHARS)}…`;
+  }
+  return text;
 }

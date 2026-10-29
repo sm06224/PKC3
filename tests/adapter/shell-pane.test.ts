@@ -247,6 +247,13 @@ describe('シェルの面', () => {
     expect(ctx.d.getState().viewMode).toBe('shell');
   });
 
+  it('🔴 「履歴を消す」ボタンで、端末の履歴が空になる', async () => {
+    await run(input, 'pwd');
+    expect(appShellSession.history).toEqual(['pwd']);
+    ctx.root.querySelector<HTMLElement>('[data-pkc-view-pane="shell"] [data-pkc-action="shell-history-clear"]')!.click();
+    expect(appShellSession.history).toEqual([]);
+  });
+
   it('コピー・出力を消す', async () => {
     await run(input, 'ls');
     expect(ctx.root.querySelector('[data-pkc-view-pane="shell"] [data-pkc-action="shell-copy-block"]')).not.toBeNull();

@@ -302,7 +302,12 @@ export function buildShellPrompt(sessionName: 'shell' | 'dual'): HTMLElement {
   hist.setAttribute('data-pkc-action', 'shell-history-menu');
   hist.textContent = '履歴';
   hist.title = '打った命令の履歴を出します(押すと入力欄に入ります)';
-  row.append(ps, input, run, hist);
+  const histClear = el('button', 'shell-history-clear');
+  histClear.type = 'button';
+  histClear.setAttribute('data-pkc-action', 'shell-history-clear');
+  histClear.textContent = '履歴を消す';
+  histClear.title = 'この端末に保存してあるコマンドの履歴を、すべて消します';
+  row.append(ps, input, run, hist, histClear);
   if (sessionName === 'shell') {
     const clear = el('button', 'shell-clear');
     clear.type = 'button';

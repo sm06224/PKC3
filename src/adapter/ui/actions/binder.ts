@@ -10173,6 +10173,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     paintHistoryMenu(host, session.history);
   },
+  /** 🔴 履歴を消す(履歴ボタンの対。片道にしない)。端末に保存してある履歴を空にする。 */
+  'shell-history-clear': (_dispatcher, target, services) => {
+    const session = shellSessionOf(target);
+    if (session === null) return;
+    session.history = [];
+    session.at = -1;
+    closeCompletion(target);
+    services.showStatus?.('コマンドの履歴を消しました');
+  },
   /** 出力を消す(履歴は残る)。 */
   'shell-clear': (_dispatcher, target) => {
     const session = shellSessionOf(target) ?? sessionByName('shell');

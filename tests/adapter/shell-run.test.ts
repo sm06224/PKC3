@@ -185,6 +185,33 @@ describe('runShellLine', () => {
   });
 });
 
+describe('履歴に機密を残さない', () => {
+  it('🔴 new / append の本文は履歴に残らず、sql は先頭だけ。1 行の長さにも上限がある', async () => {
+    const f = fake();
+    const s = session();
+    await runShellLine(f.ops, s, 'new 議事録 取引先Aの請求額は 1,200,000 円');
+    await runShellLine(f.ops, s, 'append 設計 個人名 山田太郎 の連絡先');
+    await runShellLine(f.ops, s, 'sql SELECT title FROM entries WHERE title LIKE \'%極秘プロジェクト%\'');
+    expect(s.history).toEqual(['sql SELECT title FROM entrie…', 'append 設計', 'new 議事録']);
+    // 実行そのものは本文つきで走っている
+    expect(f.calls).toContain('append:n2:個人名 山田太郎 の連絡先');
+    expect(s.history.join('\n')).not.toMatch(/1,200,000|山田|極秘/);
+    await runShellLine(f.ops, s, `find ${'あ'.repeat(500)}`);
+    expect(s.history[0]!.length).toBeLessThanOrEqual(200);
+  });
+
+  it('🔴 history -c で履歴を消せる(片道にしない)', async () => {
+    const f = fake();
+    const s = session();
+    await runShellLine(f.ops, s, 'pwd');
+    await runShellLine(f.ops, s, 'ls');
+    expect(s.history).toHaveLength(2);
+    const b = await runShellLine(f.ops, s, 'history -c');
+    expect(s.history).toEqual([]);
+    expect(b!.lines.join('\n')).toContain('履歴を消しました');
+  });
+});
+
 describe('履歴の保存', () => {
   it('🔴 シェルと 2 ペインの命令行は同じ履歴を使い、互いの行を潰さない(C)', async () => {
     const store = new ShellHistoryStore(memoryStorage());

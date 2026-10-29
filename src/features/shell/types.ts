@@ -66,6 +66,7 @@ export type ShellEffect =
   | { readonly type: 'operation'; readonly query: string }
   | { readonly type: 'operations'; readonly query: string }
   | { readonly type: 'history' }
+  | { readonly type: 'history-clear' }
   | { readonly type: 'clear' }
   | { readonly type: 'copy-result' };
 
