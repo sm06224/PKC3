@@ -21,7 +21,8 @@ import {
   type FrontmatterValue,
 } from './frontmatter';
 import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/line-date';
-import { isScheduleDate, withFrontmatterDate } from '../schedule/schedule-date';
+import { isScheduleDate } from '../schedule/schedule-date';
+import { withScheduleDate } from '../schedule/schedule-when';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
 import { applyChapterRestore, applyChapterSplit } from './chapter-split';
@@ -1163,7 +1164,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     const value =
       rewrite.date === null
         ? undefined
-        : withFrontmatterDate(typeof cur === 'string' ? cur : '', rewrite.date, rewrite.time);
+        : withScheduleDate(typeof cur === 'string' ? cur : '', rewrite.date, rewrite.time);
     // ⚠ 変わらない回は同じ本文を返す(= 書かない・言わない)。`null` は「断る」で、同じ日を押し直した回に偽の断りを出さない。
     //   値が同じなら行にも触れない(時刻つきの値は書き直すと引用符が付くので、字を変えない)
     if (typeof cur === 'string' && value === cur) return body;
@@ -1390,6 +1391,8 @@ function rewriteLineDate(
         undefined,
         // 🔴 書かれている**時刻の幅もそのまま**書き戻す(#855 段 C′)
         found.timeEnd,
+        // 🔴 終日の語もそのまま(台帳 #344 の残り ── 刻みを付け替えただけで `終日` が消えない)
+        found.allDay,
       ) +
       line.slice(found.end);
   } else if (rewrite.date === null) {
@@ -1445,6 +1448,8 @@ function rewriteLineDate(
           : found.time !== null && rewrite.time === found.time
             ? found.timeEnd
             : null,
+        // 🔴 終日の語は、日を動かしても保つ(台帳 #344 の残り。時刻が付く / 期間になるときは書かれない ── `formatLineDate`)
+        found.allDay,
       ) +
       // 🔴 終わりを**書き直す**ときは、幅として読まれなかった古い終わり(`..02:00`)も一緒に差し替える
       //    (残すと `14:00..15:00..02:00` になる)。⚠ 終わりを渡さない動かし方では 1 バイトも触らない
@@ -1518,7 +1523,7 @@ function repeatDoneLine(
   const swapped =
     line.slice(0, found.start) +
     // 🔴 時刻の幅も持ち越す(#855 段 C′。`14:00..15:00 毎週` の回は 14:00〜15:00 の予定)
-    formatLineDate(rewrite.date, found.time, null, null, undefined, found.timeEnd) +
+    formatLineDate(rewrite.date, found.time, null, null, undefined, found.timeEnd, found.allDay) +
     line.slice(found.end);
   /**
    * ⚠ 印の位置は**元の行**で数えてよい ── 記法は必ず `[ ]` より後ろに在るので、
@@ -1581,7 +1586,7 @@ function moveRepeatOccurrence(
   const moved =
     line.slice(0, found.start) +
     // 🔴 時刻の幅も持ち越す(#855 段 C′)
-    formatLineDate(rewrite.to, time, null, null, rewrite.from, timeEnd) +
+    formatLineDate(rewrite.to, time, null, null, rewrite.from, timeEnd, found.allDay) +
     line.slice(found.end);
   if (lines.includes(moved)) return null;
   lines.splice(rewrite.line + 1, 0, moved);

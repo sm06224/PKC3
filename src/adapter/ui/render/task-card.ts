@@ -223,7 +223,9 @@ export function patchTaskCard(
      * 🔴 **時刻の幅は `14:00〜15:00`**(#855 段 C′)。⚠ 字の組み立ては `formatTimeSpan` 1 本
      *   (月の升の札も日ごとの束の札も**この関数を通る**ので、面ごとに綴りが分かれない)。
      */
-    const clock = data.time === null ? null : formatTimeSpan(data.time, data.timeEnd);
+    // 🔴 終日と明示した予定は「終日」と出す(台帳 #344 の残り)。時刻未定(何も書いていない)は何も出さない
+    const clock =
+      data.time === null ? (data.allDay === true && data.until === null ? '終日' : null) : formatTimeSpan(data.time, data.timeEnd);
     const head =
       till !== ''
         ? `${day}${till}`
@@ -254,6 +256,9 @@ export function patchTaskCard(
   else card.removeAttribute('data-pkc-task-time-end');
   if (data.until !== null) card.setAttribute('data-pkc-task-range', data.until);
   else card.removeAttribute('data-pkc-task-range');
+  // 🔴 終日の印(台帳 #344 の残り)── 見た目のためではなく外から見える継ぎ目(smoke と CSS が名指しできる)
+  if (data.allDay === true) card.setAttribute('data-pkc-task-allday', '');
+  else card.removeAttribute('data-pkc-task-allday');
   /**
    * 🔴 **繰り返しの回であることと、「どの回か」を札に焼く**(#344 段②)。
    *

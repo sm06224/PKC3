@@ -33,7 +33,7 @@
 import { listTaskItems, type TaskItem } from '@features/markdown/task-count';
 import { readLineDate, stripLineDate } from '@features/schedule/line-date';
 import { parseFrontmatter } from '@features/markdown/frontmatter';
-import { readScheduleDate, readScheduleOwner, readScheduleTime } from '@features/schedule/schedule-keys';
+import { readScheduleDate, readScheduleOwner, readScheduleTime, readScheduleWhen } from '@features/schedule/schedule-keys';
 import { ownerOfText } from '@features/schedule/owner';
 import type { RepeatUnit } from '@features/schedule/repeat';
 
@@ -65,6 +65,12 @@ export interface TaskCard extends TaskItem {
    * ⚠ 期間に時刻は無い(`time` は必ず `null`)── 理由は `line-date.ts`。
    */
   readonly until: string | null;
+  /**
+   * 🔴 **終日**(`@2026-08-25 終日`。台帳 #344 の残り)。⚠ 時刻を書いていない行は `false`(時刻未定 ── 区別する)。
+   * ⚠ `time` / `until` が在るときは必ず `false`。
+   * ⚠ **省略 = `false`**(旧ビルドのタブが運んだ走査も受ける。`NoteTime` の `allDay` と同じ向き)。
+   */
+  readonly allDay?: boolean;
   /**
    * 🔴 **刻み**(`@2026-08-31 毎週`)。繰り返しでなければ `null`(#344 段②)。
    * ⚠ **札 1 枚が「その日の回」になるのは束ねる側**(`buildAgenda`)である ──
@@ -130,6 +136,20 @@ export interface NoteTime {
   readonly time: string | null;
   /** 🔴 前書きの `owner:`(#283)。省略 = 無い。 */
   readonly owner?: string | null;
+  /** 🔴 前書きの `date: 開始..終わり` の終わり(台帳 #344 の残り)。省略 = 期間でない。 */
+  readonly until?: string | null;
+  /** 🔴 前書きの `date: … 毎週` の刻み(台帳 #344 の残り)。省略 = 繰り返しでない。 */
+  readonly repeat?: RepeatUnit | null;
+  /** 🔴 前書きの `date: … 終日`(台帳 #344 の残り)。省略 = 時刻未定。 */
+  readonly allDay?: boolean;
+}
+
+/** ノート 1 件の予定の「いつ」(日付以外)。`noteWhenFor` が返す。 */
+export interface NoteWhen {
+  readonly time: string | null;
+  readonly until: string | null;
+  readonly repeat: RepeatUnit | null;
+  readonly allDay: boolean;
 }
 
 /** 走査の結果。⚠ **切ったかどうかを一緒に運ぶ**(黙って切らない)。 */
@@ -200,6 +220,7 @@ export function taskCardsOf(lid: string, body: string): TaskCard[] {
       time: when === null ? null : when.time,
       timeEnd: when === null ? null : when.timeEnd,
       until: when === null ? null : when.until,
+      allDay: when === null ? false : when.allDay,
       repeat: when === null ? null : when.repeat,
       substitutes: when === null ? null : when.substitutes,
       // 🔴 行の担当 > ノートの担当(#283)
@@ -274,12 +295,24 @@ export function replaceTaskCards(
  */
 export function noteTimeOf(lid: string, body: string): NoteTime | null {
   const { meta } = parseFrontmatter(body);
-  const date = readScheduleDate(meta);
-  const time = readScheduleTime(meta);
+  const when = readScheduleWhen(meta);
+  const date = when === null ? readScheduleDate(meta) : when.date;
+  const time = when === null ? readScheduleTime(meta) : when.time;
   const owner = readScheduleOwner(meta);
-  // 🔴 時刻か担当のどちらかがあれば載せる(#283)。日付だけのノートは今までどおり載せない
-  if (date === null || (time === null && owner === null)) return null;
-  return owner === null ? { lid, date, time } : { lid, date, time, owner };
+  const until = when?.until ?? null;
+  const repeat = when?.repeat ?? null;
+  const allDay = when?.allDay ?? false;
+  // 🔴 時刻か担当か、期間・刻み・終日(台帳 #344 の残り)のどれかがあれば載せる(#283)。日付だけのノートは今までどおり載せない
+  if (date === null || (time === null && owner === null && until === null && repeat === null && !allDay)) return null;
+  return {
+    lid,
+    date,
+    time,
+    ...(owner === null ? {} : { owner }),
+    ...(until === null ? {} : { until }),
+    ...(repeat === null ? {} : { repeat }),
+    ...(allDay ? { allDay } : {}),
+  };
 }
 
 /**
@@ -291,6 +324,22 @@ export function noteTimeFor(scan: { readonly noteTimes?: readonly NoteTime[] } |
   if (scan === null || date === null) return null;
   const n = scan.noteTimes?.find((x) => x.lid === lid);
   return n !== undefined && n.date === date ? n.time : null;
+}
+
+/**
+ * 🔴 **ノート 1 件の予定の「いつ」(時刻・期間の終わり・刻み・終日)を、走査から引く**(台帳 #344 の残り)。
+ * 引く条件は `noteTimeFor` と同じ(抽出列の日付と食い違う組は使わない)。引く口はここ 1 本(面の描画・動かす・元に戻すが同じ答えを得る)。
+ */
+export function noteWhenFor(
+  scan: { readonly noteTimes?: readonly NoteTime[] } | null,
+  lid: string,
+  date: string | null,
+): NoteWhen {
+  const none: NoteWhen = { time: null, until: null, repeat: null, allDay: false };
+  if (scan === null || date === null) return none;
+  const n = scan.noteTimes?.find((x) => x.lid === lid);
+  if (n === undefined || n.date !== date) return none;
+  return { time: n.time, until: n.until ?? null, repeat: n.repeat ?? null, allDay: n.allDay === true };
 }
 
 /**
@@ -326,8 +375,9 @@ export function noteTimeCards(
       date: n.date,
       time: n.time,
       timeEnd: null,
-      until: null,
-      repeat: null,
+      until: n.until ?? null,
+      allDay: n.allDay === true,
+      repeat: n.repeat ?? null,
       substitutes: null,
     });
   }
@@ -347,7 +397,16 @@ export function replaceNoteTime(
   const now = noteTimeOf(lid, body);
   const old = prev.find((n) => n.lid === lid) ?? null;
   if (old === null && now === null) return list;
-  if (old !== null && now !== null && old.date === now.date && old.time === now.time && (old.owner ?? null) === (now.owner ?? null))
+  if (
+    old !== null &&
+    now !== null &&
+    old.date === now.date &&
+    old.time === now.time &&
+    (old.owner ?? null) === (now.owner ?? null) &&
+    (old.until ?? null) === (now.until ?? null) &&
+    (old.repeat ?? null) === (now.repeat ?? null) &&
+    (old.allDay ?? false) === (now.allDay ?? false)
+  )
     return list;
   const rest = prev.filter((n) => n.lid !== lid);
   return now === null ? rest : [...rest, now];
@@ -380,6 +439,8 @@ function sameCards(a: readonly TaskCard[], b: readonly TaskCard[]): boolean {
       // ⚠ **期間も見る**(#344)── 見ないと、`..` の終わりだけを書き換えたときに
       //    「同じ」と判定され、**画面の期間が古いまま**残る(日付・時刻と同じ穴)
       x.until !== y.until ||
+      // ⚠ **終日も見る**(台帳 #344 の残り)── 見ないと、`終日` を足した / 消した書き換えが「同じ」と判定され、画面の札が古いまま残る
+      (x.allDay ?? false) !== (y.allDay ?? false) ||
       // ⚠ **刻みも見る**(#344 段②)── 見ないと「毎週」を消した瞬間に
       //    **札が繰り返しのまま**残る(消したのに毎週出続ける = 同じ穴)
       x.repeat !== y.repeat ||

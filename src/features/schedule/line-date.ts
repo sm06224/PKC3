@@ -61,8 +61,10 @@ import {
   padClockHour,
 } from './schedule-date';
 import {
+  ALL_DAY_WORD,
   repeatWord,
   SUBSTITUTE_WORD,
+  readAllDayTail,
   readRepeatTail,
   readSubstituteTail,
   type RepeatUnit,
@@ -223,6 +225,12 @@ export interface LineDate {
    */
   readonly repeat: RepeatUnit | null;
   /**
+   * 🔴 **終日**(`@2026-08-25 終日`。台帳 #344 の残り ── 「終日」と「時刻未定」の区別)。
+   * ⚠ 時刻を書いていない行は `false`(時刻未定のまま ── 既存の本文の意味は変わらない)。
+   * ⚠ **時刻・期間とは同時に立たない**(終日に時刻は無く、期間は元から終日)。
+   */
+  readonly allDay: boolean;
+  /**
    * 🔴 **この行が代わりになっている、元の回の日**(`@2026-09-22 振替2026-09-20` の
    * `2026-09-20`)。振替でなければ `null`(#855 決4。user 裁定 2026-09-13)。
    *
@@ -282,6 +290,8 @@ export function readLineDate(line: string): LineDate | null {
         time: null,
         timeEnd: null,
         repeat: tail === null ? null : tail.unit,
+        // ⚠ 期間は元から終日 ── `終日` の語は付けない(読まない。字は札に残る)
+        allDay: false,
         // ⚠ 期間には振替を付けない(上の docstring)── 字は札に残る
         substitutes: null,
         strayEnd: 0,
@@ -338,7 +348,12 @@ export function readLineDate(line: string): LineDate | null {
         : spaced !== null
           ? afterTime + spaced[0].length
           : afterTime + timeSepLen + rawTimeEnd!.length;
-    const tail = readRepeatTail(line.slice(base));
+    /**
+     * 🔴 **終日の語**は、時刻が無いときだけ日付の直後から読む(台帳 #344 の残り)。⚠ 刻みはその後ろ(`@… 終日 毎週`)。
+     */
+    const allDayTail = time === null ? readAllDayTail(line.slice(base)) : null;
+    const baseAfterAllDay = allDayTail === null ? base : base + allDayTail.length;
+    const tail = readRepeatTail(line.slice(baseAfterAllDay));
     /**
      * 🔴 **振替は「刻みが無いとき」だけ読む**(#855 決4)。
      * ⚠ 規則の行(`毎週`)が同時に「誰かの代わり」であることは意味を成さない ──
@@ -353,13 +368,14 @@ export function readLineDate(line: string): LineDate | null {
      *   消さなければ意味は保たれる(CLAUDE.md「これが無いと壊れる、と書く前に
      *   外して壊れるのを見る」── 見たうえで、理由を書いて残している)。
      */
-    const sub = tail === null ? readSubstituteTail(line.slice(base)) : null;
+    const sub = tail === null ? readSubstituteTail(line.slice(baseAfterAllDay)) : null;
     return {
       date,
       until: null,
       time,
       timeEnd,
       repeat: tail === null ? null : tail.unit,
+      allDay: allDayTail !== null,
       substitutes: sub === null ? null : sub.date,
       // 読めた時刻の直後に、幅として読まれなかった終わり(逆順・夜をまたぐ)が付いているときの字数。
       // ⚠ 書きかけ(`20:00..` の終わりが空)も数える ── 縁を引いて終わりを書くと `20:00..21:00..` が残るため。
@@ -372,7 +388,12 @@ export function readLineDate(line: string): LineDate | null {
           ? timeSepLen + rawTimeEnd.length
           : 0,
       start,
-      end: tail !== null ? base + tail.length : sub !== null ? base + sub.length : base,
+      end:
+        tail !== null
+          ? baseAfterAllDay + tail.length
+          : sub !== null
+            ? baseAfterAllDay + sub.length
+            : baseAfterAllDay,
     };
   }
   return null;
@@ -502,6 +523,10 @@ export function formatLineDate(
    * (この file の作法:往復しない字を出力しない)。⚠ 期間には書かない(時刻と同じ)。
    */
   timeEnd?: string | null,
+  /**
+   * 🔴 **終日**(台帳 #344 の残り)。⚠ **読む側が読む形のときだけ書く**(時刻も期間も無いとき)── 読まれない字を書くと往復で食い違う。
+   */
+  allDay?: boolean,
 ): string {
   const hasTime = time !== undefined && time !== null && time !== '';
   const span =
@@ -513,7 +538,9 @@ export function formatLineDate(
       ? `@${date}..${until}`
       : hasTime
         ? `@${date} ${time}${span}`
-        : `@${date}`;
+        : allDay === true
+          ? `@${date} ${ALL_DAY_WORD}`
+          : `@${date}`;
   /**
    * 🔴 **刻みは尻に付ける**(#344 段②)。⚠ 空白を 1 つ空ける ── 読みは
    *   詰めても通る(`repeat.ts` の `REPEAT_TAIL`)が、**書きは整える**
@@ -552,7 +579,9 @@ export function insertionForLineDate(
    * 日付を外した予定を「元に戻す」(#855)で、幅ごと戻すために要る。
    */
   timeEnd?: string | null,
+  /** 🔴 終日(台帳 #344 の残り)。日付を外した予定を「元に戻す」で、終日ごと戻す。 */
+  allDay?: boolean,
 ): string {
-  const text = formatLineDate(date, time, until, repeat, undefined, timeEnd);
+  const text = formatLineDate(date, time, until, repeat, undefined, timeEnd, allDay);
   return /\S$/.test(before) ? ` ${text}` : text;
 }
