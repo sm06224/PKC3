@@ -56,6 +56,7 @@ import { watchAppearanceFromOtherWindows } from '@adapter/ui/render/appearance-f
 import { applyTagColors, currentTagColors } from '@adapter/ui/render/tag-color';
 import { appNotePins } from '@adapter/platform/note-pin-store';
 import { appPasteToast } from '@adapter/ui/render/paste-toast';
+import { importNotePinsInto } from '@adapter/platform/note-pin-import';
 import { migrateLegacyNotePins } from '@adapter/platform/note-pin-migration';
 import { MAX_NOTE_PINS } from '@features/relation/note-pins';
 import {
@@ -3554,6 +3555,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔴 **取り込みで足したタグの色だけを外す**(台帳 #1852 束 F2 / 依頼 119-5 A)。⚠ **いまも同じ色の物だけ** ──
      * 取り込んだ後に user が選び直した色・前から在った色は触らない。判断は `import-undo.ts`、ここは書く配線だけ。
      */
+    /**
+     * 🔴 **取り込みで足したピン留めだけを外す**(#1377)。取り消しでノートはゴミ箱へ入る ── ピンは(戻すと戻る仕様で)残るので、
+     * 取り込みで足した分はここで外す。前から在ったピンは触らない(足した lid だけが渡る)。
+     */
+    removeNotePins: async (lids) => {
+      for (const lid of lids) await client.request({ op: 'putNotePin', cid, lid, on: false });
+      await reloadNotePins();
+    },
     removeTagColors: async (colors) => {
       const now = await client.request({ op: 'listTagColors', cid });
       let list = now;
@@ -3648,31 +3657,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       importRevisionChains: (chains) =>
         client.request({ op: 'importRevisionChains', cid, chains }),
       /**
-       * 🔴 **バックアップのタグの色を戻す**(#1457)。⚠ いま付けている色は動かさず、
-       * **付いていないタグの分だけ足す**(取り込みで user の今の選び方を上書きしない)。
-       */
-      /**
        * 🔴 **バックアップのピン留めを戻す**(#1377)。⚠ いま留めている物は動かさず、足りない分だけ足す(20 件まで)。
        */
       importNotePins: async (lids) => {
-        const now = await client.request({ op: 'listNotePins', cid });
-        const exists = (l: string): boolean => dispatcher.getState().entryMetas.has(l);
-        let live = now.filter(exists).length;
-        let added = 0;
-        let overLimit = 0;
-        for (const lid of lids) {
-          if (now.includes(lid)) continue;
-          if (live >= MAX_NOTE_PINS) {
-            overLimit += 1;
-            continue;
-          }
-          await client.request({ op: 'putNotePin', cid, lid, on: true });
-          live += 1;
-          added += 1;
-        }
+        const r = await importNotePinsInto(lids, {
+          list: () => client.request({ op: 'listNotePins', cid }),
+          put: (lid) => client.request({ op: 'putNotePin', cid, lid, on: true }).then(() => undefined),
+          exists: (l) => dispatcher.getState().entryMetas.has(l),
+          limit: MAX_NOTE_PINS,
+        });
         await reloadNotePins();
-        return { added, overLimit };
+        return r;
       },
+      /**
+       * 🔴 **バックアップのタグの色を戻す**(#1457)。⚠ いま付けている色は動かさず、
+       * **付いていないタグの分だけ足す**(取り込みで user の今の選び方を上書きしない)。
+       */
       importTagColors: async (incoming) => {
         const now = await client.request({ op: 'listTagColors', cid });
         const m = mergeMissingTagColors(now, incoming);

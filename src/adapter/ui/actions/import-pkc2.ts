@@ -150,7 +150,14 @@ export interface ImportDeps {
    * (満杯なら断った数を返す)。戻すのは取り込んだノートに在るものだけ(呼び側が絞ってある)。
    * @returns 足した数 / 上限で見送った数
    */
-  importNotePins?(lids: readonly string[]): Promise<{ added: number; overLimit: number }>;
+  importNotePins?(
+    lids: readonly string[],
+  ): Promise<{
+    added: number;
+    overLimit: number;
+    /** 🔴 足したピンの lid(取り消しが外す対象)。省略可。 */
+    addedLids?: readonly string[];
+  }>;
   importTagColors?(
     incoming: readonly import('@features/tag-color').TagColorEntry[],
   ): Promise<{
@@ -220,6 +227,8 @@ export interface ImportDeps {
       readonly tagColors?: boolean;
       /** 🔴 この取り込みで足した色(依頼 119-5)。取り消しはこれだけを外す(前から在った色は触らない)。 */
       readonly addedColors?: readonly import('@features/tag-color').TagColorEntry[];
+      /** 🔴 この取り込みで足したピン留め(#1377)。取り消しはこれだけを外す。 */
+      readonly addedPins?: readonly string[];
     },
   ): void;
   /**
@@ -511,10 +520,17 @@ async function runImport(
   let colorsAdded = false;
   /** 🔴 足した色そのもの(依頼 119-5。取り消しが外す対象)。 */
   const addedColors: import('@features/tag-color').TagColorEntry[] = [];
+  /** 🔴 足したピン留めの lid(取り消しが外す対象。#1377)。 */
+  const addedPins: string[] = [];
   /** 取り消しに渡す形(`tagColors` は従来どおり、足した色が分かるときだけ `addedColors` を添える)。 */
-  const undoOpts = (): { tagColors: boolean; addedColors?: readonly import('@features/tag-color').TagColorEntry[] } => ({
+  const undoOpts = (): {
+    tagColors: boolean;
+    addedColors?: readonly import('@features/tag-color').TagColorEntry[];
+    addedPins?: readonly string[];
+  } => ({
     tagColors: colorsAdded,
     ...(addedColors.length > 0 ? { addedColors: [...addedColors] } : {}),
+    ...(addedPins.length > 0 ? { addedPins: [...addedPins] } : {}),
   });
   // 書込の到達点。失敗時に「どこまで書けたか」を user に言うために持つ ──
   // 「失敗しました」とだけ言って disk に残すと、素直な再取込が二重取込になる
@@ -1061,6 +1077,7 @@ async function runImport(
       if (pins.length > 0 && deps.importNotePins !== undefined) {
         try {
           const r = await deps.importNotePins(pins);
+          if (r.addedLids !== undefined) addedPins.push(...r.addedLids);
           if (r.overLimit > 0) {
             result.warnings.push(`上限のため ${r.overLimit} 件のピン留めを戻せませんでした(ピン留めは 20 件までです)`);
           }
