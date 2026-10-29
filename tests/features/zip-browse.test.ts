@@ -9,6 +9,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ZipEntry } from '../../src/features/import/zip-reader';
 import {
+  ARCHIVE_OK_TITLE,
+  ARCHIVE_PICK_NOTE,
+  EMPTY_FOLDER_NOTE,
+  archiveFocusMove,
+  archiveRowText,
   archiveRows,
   extractNames,
   isZipAttachment,
@@ -164,5 +169,32 @@ describe('zip の見分け', () => {
     ['', 'a.zip.txt'],
   ])('%s / %s は zip ではない', (mime, name) => {
     expect(isZipAttachment(mime as string, name as string)).toBe(false);
+  });
+});
+
+describe('一覧の移動とキー(#826)', () => {
+  it('🔴 ↑ ↓ Home End の移動先(端で止まる)── ↑ と Home を落とすと別の行へ行く', () => {
+    expect(archiveFocusMove('ArrowDown', 1, 5)).toBe(2);
+    expect(archiveFocusMove('ArrowDown', 4, 5), '末尾の下は末尾').toBe(4);
+    expect(archiveFocusMove('ArrowUp', 3, 5)).toBe(2);
+    expect(archiveFocusMove('ArrowUp', 0, 5), '先頭の上は先頭').toBe(0);
+    expect(archiveFocusMove('Home', 3, 5)).toBe(0);
+    expect(archiveFocusMove('End', 1, 5)).toBe(4);
+    expect(archiveFocusMove('a', 1, 5), '関係ないキーは動かさない').toBeNull();
+    expect(archiveFocusMove('ArrowDown', 0, 0), '行が 0 件').toBeNull();
+  });
+
+  it('0 件のフォルダだけ理由が字に出る(ファイルとフォルダ・対照群)', () => {
+    const dir = { name: '空', isDirectory: true, size: '' };
+    expect(archiveRowText(dir, true)).toBe(`空/ — ${EMPTY_FOLDER_NOTE}`);
+    expect(archiveRowText(dir, false)).toBe('空/');
+    expect(archiveRowText({ name: 'a.txt', isDirectory: false, size: '3 B' }, false)).toBe('a.txt — 3 B');
+  });
+
+  it('🔴 案内に「↑ ↓」と「Ctrl+Enter で取り出す」が書いてあり、取り出すの title にも添える', () => {
+    expect(ARCHIVE_PICK_NOTE).toContain('↑ ↓');
+    expect(ARCHIVE_PICK_NOTE).toContain('Enter で取り出せます');
+    expect(ARCHIVE_PICK_NOTE).toContain('フォルダを押すと');
+    expect(ARCHIVE_OK_TITLE).toContain('Enter');
   });
 });

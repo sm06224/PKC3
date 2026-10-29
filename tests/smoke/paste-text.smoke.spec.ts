@@ -147,6 +147,27 @@ test('🔴 ウェブページをコピーして貼ると、形のまま入って
     tb.y + tb.height <= rb.y || tb.x + tb.width <= rb.x || tb.x >= rb.x + rb.width || tb.y >= rb.y + rb.height,
     '知らせが打っている欄を覆っている(主の作業領域を奪う)',
   ).toBe(true);
+  // ⚠ 知らせは画面の右下に浮く ── 追記欄の「追記」ボタン・追記欄そのもの・中央ペインの下端(スクロールの終わりの行)を覆うと
+  //   「追記」が押せない / 最後の行が読めなくなる。観測点は矩形の交差(見えている物だけ。隠れた物は数えない)
+  const overlaps = async (sel: string): Promise<string | null> => {
+    const loc = page.locator(sel).first();
+    if ((await loc.count()) === 0 || !(await loc.isVisible())) return null;
+    const b = (await loc.boundingBox())!;
+    const hit = !(tb.y + tb.height <= b.y || tb.y >= b.y + b.height || tb.x + tb.width <= b.x || tb.x >= b.x + b.width);
+    return hit ? `${sel} ${JSON.stringify(b)} / toast ${JSON.stringify(tb)}` : null;
+  };
+  expect(await overlaps('[data-pkc-action="append-entry"]'), '知らせが「追記」ボタンを覆っている').toBeNull();
+  expect(await overlaps('[data-pkc-region="append"]'), '知らせが追記欄を覆っている').toBeNull();
+  // 右ペイン(インスペクタ)の中の押せる物・画面下の状態バー(現在の状態を出す場所)も覆わない
+  expect(await overlaps('[data-pkc-region="status"]'), '知らせが状態バーを覆っている').toBeNull();
+  const inspectorButtons = page.locator('[data-pkc-region="inspector"] button:visible');
+  for (let i = 0; i < (await inspectorButtons.count()); i++) {
+    const b = (await inspectorButtons.nth(i).boundingBox())!;
+    expect(
+      tb.y + tb.height <= b.y || tb.y >= b.y + b.height || tb.x + tb.width <= b.x || tb.x >= b.x + b.width,
+      `知らせが右ペインのボタン(${i} 番目)を覆っている`,
+    ).toBe(true);
+  }
   await clickReal(page, '[data-pkc-field="paste-toast-action"]');
   await expect(page.locator(ROW), '押したのに書式なしの字になっていない').toHaveValue('メモ: 名 数 あ 1');
   await expect(toast, '押した後も知らせが残っている').toBeHidden();

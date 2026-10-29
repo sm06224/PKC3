@@ -19,7 +19,7 @@
  *   (= 保存された設定は 1 バイトも変わっておらず、いつもどおり動く)
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { appOpenChoicesVisible } from '../../src/features/launcher/open-target';
+import { appOpenOptions } from '../../src/features/launcher/open-target';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -251,37 +251,37 @@ describe('その 1 回だけの開き方(#884 段②)', () => {
   });
 });
 
-describe('ブラウザで使っているときは開き方を出さない(#884 段③)', () => {
-  it('🔴 入れていない + 既定のまま → 右クリックに開き方の 2 項目が出ない(並べ替えは残る)', () => {
+describe('ブラウザで使っていても、ブラウザで効く開き方は出す(#884 段③)', () => {
+  it('🔴 入れていなくても右クリックにタブ / 別のウィンドウの 2 項目が出る(別のウィンドウはブラウザでも効く)', () => {
     setInstalled(false);
     rightClick('a1');
-    expect(menuItem('tab'), 'ブラウザ利用なのにタブの項目が出ている').toBeNull();
-    expect(menuItem('window'), 'ブラウザ利用なのに窓の項目が出ている').toBeNull();
+    expect(menuItem('tab'), 'ブラウザ利用でタブの項目が消えた').not.toBeNull();
+    expect(menuItem('window'), 'ブラウザ利用で別のウィンドウの項目が消えた').not.toBeNull();
     expect(
       root.querySelector('[data-pkc-region="context-menu"] [data-pkc-action="start-tile-reorder"]'),
-      '開き方を消した拍子に並べ替えまで消えた',
+      '並べ替えが消えた',
     ).not.toBeNull();
   });
 
-  it('🔴 入れていなくても、既定と違う値を選んである人には出す(戻せない片道にしない)', () => {
-    setInstalled(false);
-    chooseAppOpenTarget('window');
-    rightClick('a1');
-    expect(menuItem('tab'), '選んだ値を戻す口が無い').not.toBeNull();
-  });
-
-  it('表: 入れている/既定以外のときだけ true', () => {
-    expect(appOpenChoicesVisible(true, 'tab')).toBe(true);
-    expect(appOpenChoicesVisible(false, 'tab')).toBe(false);
-    expect(appOpenChoicesVisible(false, 'window')).toBe(true);
-  });
-
-  it('絞り込み中 + ブラウザ利用: 空のメニューを開かず、ふつうの右クリックに任せる', () => {
+  it('🔴 絞り込み中でも(入れていなくても)開き方の 2 項目が出る', () => {
     setInstalled(false);
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: '電卓' });
     const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1, clientY: 1 });
     tileEl('a1').dispatchEvent(ev);
-    expect(ev.defaultPrevented).toBe(false);
-    expect(root.querySelector('[data-pkc-region="context-menu"]')).toBeNull();
+    expect(ev.defaultPrevented).toBe(true);
+    expect(menuItem('window')).not.toBeNull();
+  });
+
+  it('🔴 「アプリとして入れていないと効かない」選択肢だけを隠す(いま選んである値は出す)', () => {
+    const targets = [
+      { id: 'tab', label: 'タブ' },
+      { id: 'window', label: '窓' },
+      { id: 'pwa-only', label: '入れた窓', needsInstalled: true },
+    ];
+    expect(appOpenOptions(false, 'tab', targets).map((t) => t.id)).toEqual(['tab', 'window']);
+    expect(appOpenOptions(true, 'tab', targets).map((t) => t.id)).toEqual(['tab', 'window', 'pwa-only']);
+    expect(appOpenOptions(false, 'pwa-only', targets).map((t) => t.id), '選んである値を隠した(戻せない)').toContain('pwa-only');
+    // 実物の表では、いまは 2 つとも効く ── 入れていなくても全部出る
+    expect(appOpenOptions(false, 'tab').map((t) => t.id)).toEqual(['tab', 'window']);
   });
 });

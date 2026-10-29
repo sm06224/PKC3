@@ -355,7 +355,7 @@ describe('3 つの帯のタイルの長押し(#1054 段②)', () => {
     // 🔑 図案も一緒に出る(icons.ts の `data-pkc-symbol` をそのまま写す)
     // ⚠ #852 案 5(B): 「今日」は予定表のカレンダーと重ならないよう時計
     expect(todayItem.querySelector('[data-pkc-icon]')?.getAttribute('data-pkc-symbol')).toBe(
-      'clock',
+      'sunny',
     );
   });
 

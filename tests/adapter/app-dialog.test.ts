@@ -653,6 +653,30 @@ describe('書庫の選び方(#818)', () => {
     expect(await answered).toEqual(['a.txt']);
   });
 
+  it('🔴 ↑ と Home で戻れる / 案内と「取り出す」の title に Ctrl+Enter が書いてある', async () => {
+    const answered = pickArchiveInApp(document.body, ROWS, count);
+    const btns = (): HTMLButtonElement[] => [
+      ...document.querySelectorAll<HTMLButtonElement>('[data-pkc-archive-index]'),
+    ];
+    const key = (k: string): void => {
+      (document.activeElement ?? document.body).dispatchEvent(
+        new KeyboardEvent('keydown', { key: k, bubbles: true }),
+      );
+    };
+    btns()[0]!.focus();
+    key('End');
+    expect(document.activeElement).toBe(btns()[2]);
+    key('ArrowUp');
+    expect(document.activeElement, '↑ で戻らない').toBe(btns()[1]);
+    key('Home');
+    expect(document.activeElement, 'Home で先頭へ戻らない').toBe(btns()[0]);
+    expect(q('[data-pkc-field="pick-archive-note"]').textContent).toContain('Ctrl');
+    expect(okBtn().title).toContain('Enter');
+    cancelBtn().click();
+    await answered;
+    expect(okBtn().hasAttribute('title'), '器を使い回すので、title を次の確認へ残してはいけない').toBe(false);
+  });
+
   /** 🔴 #826 ③ 0 件のフォルダは理由が書かれ、押しても印が付かない。 */
   it('🔴 0 件のフォルダは理由が行に出て、押しても印が付かない', async () => {
     const rows = [

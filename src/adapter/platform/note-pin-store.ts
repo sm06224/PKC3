@@ -1,73 +1,46 @@
 /**
- * ノートのピン留めの置き場(#1377)。**端末ごと**(localStorage)。
+ * ノートのピン留めの手元(#1377)。**開いているコレクションの分だけ**をメモリに持つ。
  *
- * 🔴 **アプリのデータに混ぜない**(`saved-search-store.ts` と同じ判断)── 並べ方は見る人の道具で、
- * container に入れると書き出し・バックアップに同乗して、渡した相手に「いつも見ているノート」が並ぶ。
- * 設定ファイルにも載せない(中身が ID そのもの ── `settings-file.ts` の `SKIPPED_KEYS`)。
+ * 🔴 **正本は storage(コレクションの `settings` 表 ── `listNotePins` / `putNotePin`)**。端末の記憶(localStorage)ではない
+ * ので、バックアップに入り、別の端末にも運ばれる(タグの色と同じ ── `main.ts` が起動と他タブの書込で `setAll` する)。
+ * ここが持つのは、状態が動くたびに描く帯が毎回 storage を読まないための**写し**と、書込の配線だけ。
  *
- * 🔴 **保存できない端末でも、その session の中では効く**。⚠ `?.` で書くと `null` は例外を投げず
- * `catch` の控えが死んだ枝になる ── だから `storage === null` を**先に**見る(CLAUDE.md §7)。
- * 🔑 一覧は**メモリに持つ**(状態が動くたびに描く帯が、毎回 JSON を読まないため)。別のタブが書いたときは
- * `refresh()`(`storage` イベント)で読み直す。
+ * - 付け外しはまず写しを動かして描き直し(押した手応え)、書込は `attach` された書き手へ頼む。
+ *   ⚠ 書込に失敗したら、写しを**書き手が返した正本へ戻す**(`onFail`)── 画面だけ留まって保存されていない、を残さない。
+ * - 🔴 書込は**直列**(前の書込が終わってから次)── 速く 2 回押しても追い越さない(§7 の世代管理)。
  */
-import { decodeNotePins, encodeNotePins, togglePin } from '@features/relation/note-pins';
+import { togglePin } from '@features/relation/note-pins';
 
-export const NOTE_PINS_KEY = 'pkc3.note-pins';
-
-/** 保存の口。⚠ test は偽物を渡して書込の中身まで観測する。 */
-export interface NotePinStorage {
-  get(key: string): string | null;
-  set(key: string, value: string): void;
-}
-
-const browserStorage: NotePinStorage | null = ((): NotePinStorage | null => {
-  try {
-    localStorage.getItem(NOTE_PINS_KEY);
-  } catch {
-    return null;
-  }
-  return {
-    get: (k) => {
-      try {
-        return localStorage.getItem(k);
-      } catch {
-        return null;
-      }
-    },
-    set: (k, v) => {
-      try {
-        localStorage.setItem(k, v);
-      } catch {
-        /* 溢れただけ。控え(メモリ)には積んである */
-      }
-    },
-  };
-})();
+/** 書き手。`prune` = 同じ tx で掃除する、消えたノートの lid。 */
+export type NotePinWriter = (lid: string, on: boolean, prune: string[]) => Promise<void>;
 
 export class NotePinStore {
   private items: string[] = [];
   private readonly listeners = new Set<() => void>();
+  private writer: NotePinWriter | null = null;
+  private onFail: (() => void) | null = null;
+  private chain: Promise<void> = Promise.resolve();
 
-  constructor(private readonly storage: NotePinStorage | null = browserStorage) {
-    this.refresh(false);
-  }
-
-  /** ピン留めした順(他のコレクションの分・消えたノートの分を含む)。 */
+  /** 留めた順(消えたノートの分を、掃除されるまで含む)。 */
   list(): readonly string[] {
     return this.items;
   }
 
-  has(key: string): boolean {
-    return this.items.includes(key);
+  has(lid: string): boolean {
+    return this.items.includes(lid);
   }
 
-  /** 保存を読み直す(別のタブが書いたとき)。変わったときだけ知らせる。 */
-  refresh(notify = true): void {
-    if (this.storage === null) return;
-    const next = decodeNotePins(this.storage.get(NOTE_PINS_KEY));
-    if (JSON.stringify(next) === JSON.stringify(this.items)) return;
-    this.items = next;
-    if (notify) this.emit();
+  /** 書込の配線(`main.ts` が storage へつなぐ)。`onFail` = 書けなかったとき正本を読み直す口。 */
+  attach(writer: NotePinWriter, onFail: () => void): void {
+    this.writer = writer;
+    this.onFail = onFail;
+  }
+
+  /** 正本から読んだ並びを写す(起動 / 他タブの書込)。変わったときだけ知らせる。 */
+  setAll(lids: readonly string[]): void {
+    if (JSON.stringify(lids) === JSON.stringify(this.items)) return;
+    this.items = [...lids];
+    this.emit();
   }
 
   onChange(cb: () => void): () => void {
@@ -75,19 +48,27 @@ export class NotePinStore {
     return () => void this.listeners.delete(cb);
   }
 
-  /** ピン留めする / 外す(`liveCount` = このコレクションで生きているピンの数。満杯なら足さない)。 */
-  toggle(key: string, liveCount: number): void {
-    const next = togglePin(this.items, key, liveCount);
-    if (JSON.stringify(next) === JSON.stringify(this.items)) return;
-    this.items = next;
-    if (this.storage !== null) {
-      try {
-        this.storage.set(NOTE_PINS_KEY, encodeNotePins(next));
-      } catch {
-        /* 書けなかっただけ。控え(メモリ)には積んである */
-      }
+  /**
+   * ピン留めする / 外す(掃除つき)。
+   * @returns 満杯で断ったら `false`
+   */
+  toggle(lid: string, exists: (lid: string) => boolean): boolean {
+    const was = this.items.includes(lid);
+    const r = togglePin(this.items, lid, exists);
+    if (r.refused) return false;
+    const changed = JSON.stringify(r.list) !== JSON.stringify(this.items);
+    this.items = r.list;
+    if (changed) this.emit();
+    const writer = this.writer;
+    if (writer !== null) {
+      const on = !was;
+      this.chain = this.chain
+        .then(() => writer(lid, on, r.prune))
+        .catch(() => {
+          this.onFail?.();
+        });
     }
-    this.emit();
+    return true;
   }
 
   private emit(): void {
@@ -97,9 +78,3 @@ export class NotePinStore {
 
 /** アプリ全体で 1 個。 */
 export const appNotePins = new NotePinStore();
-
-if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-  window.addEventListener('storage', (e) => {
-    if (e.key === NOTE_PINS_KEY || e.key === null) appNotePins.refresh();
-  });
-}

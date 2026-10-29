@@ -618,11 +618,10 @@ const TILE_OPEN_TARGET_VERB: Readonly<Record<AppOpenTarget, string>> = {
 
 export function tileOpenTargetMenuActions(
   current: AppOpenTarget,
-  /** 🔴 #884 段③ ── false(ブラウザで使っている)なら開き方の項目は出さない。 */
-  show = true,
+  /** 🔴 #884 段③ ── 出す選択肢の id(アプリとして入れていないと効かない物は呼び側が除く)。省略 = 全部。 */
+  ids: readonly string[] = APP_OPEN_TARGETS.map((t) => t.id),
 ): readonly (EntryAction & { readonly attrs: Readonly<Record<string, string>> })[] {
-  if (!show) return [];
-  return APP_OPEN_TARGETS.map((t) => ({
+  return APP_OPEN_TARGETS.filter((t) => ids.includes(t.id)).map((t) => ({
     action: 'open-tile-as',
     label: t.id === current ? `${TILE_OPEN_TARGET_VERB[t.id]}(既定)` : TILE_OPEN_TARGET_VERB[t.id],
     attrs: { [TILE_OPEN_TARGET_ATTR]: t.id },
@@ -790,10 +789,10 @@ export function repeatMenuActions(current: RepeatUnit | null): RepeatMenuItem[] 
 export function tileMenuActions(
   reordering: boolean,
   currentOpenTarget: AppOpenTarget,
-  showOpenTarget = true,
+  openTargetIds?: readonly string[],
 ): EntryAction[] {
   return [
-    ...tileOpenTargetMenuActions(currentOpenTarget, showOpenTarget),
+    ...tileOpenTargetMenuActions(currentOpenTarget, openTargetIds),
     ...TILE_MENU_ACTIONS,
     reordering
       ? { action: 'end-tile-reorder', label: '並べ替えを終える' }

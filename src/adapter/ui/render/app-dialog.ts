@@ -41,6 +41,8 @@ import type { EntryPickRow } from '@features/entry-ref/entry-pick';
 import type { SnippetChoice } from '@features/snippet/snippet-menu';
 import { moveMark, toggleMark } from '@features/clipboard/scrap';
 import {
+  ARCHIVE_OK_TITLE,
+  ARCHIVE_PICK_NOTE,
   EMPTY_FOLDER_NOTE,
   archiveFocusMove,
   archiveRowText,
@@ -784,7 +786,7 @@ export function pickCalloutInApp(
   choices: readonly { readonly id: string; readonly label: string }[],
 ): Promise<string | null> {
   return pickRowInApp(host, {
-    title: '注意書きを入れる',
+    title: '注意書き',
     field: 'pick-callout',
     indexAttr: 'data-pkc-callout-index',
     note: '',
@@ -2001,7 +2003,7 @@ export function pickArchiveInApp(
 
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'pick-archive-note');
-    note.textContent = 'フォルダを押すと、その下のファイルが全部入ります';
+    note.textContent = ARCHIVE_PICK_NOTE;
     f.body.append(note);
 
     const list = document.createElement('div');
@@ -2085,6 +2087,7 @@ export function pickArchiveInApp(
     f.dialog.addEventListener('click', onOutside);
 
     f.ok.removeAttribute('data-pkc-danger');
+    f.ok.title = ARCHIVE_OK_TITLE;
     f.ok.hidden = false;
     f.cancel.textContent = 'やめる';
     f.cancel.hidden = false;
@@ -2094,6 +2097,7 @@ export function pickArchiveInApp(
     const answer = await answered;
     f.dialog.removeEventListener('click', onOutside);
     f.dialog.removeEventListener('keydown', onListKey);
+    f.ok.removeAttribute('title'); // 器は使い回す ── 次の確認に「取り出す」の説明を残さない
     f.ok.disabled = false;
     return answer === 'ok' && countFiles(marks) > 0 ? [...marks] : null;
   });

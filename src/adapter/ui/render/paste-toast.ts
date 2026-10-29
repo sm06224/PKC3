@@ -24,6 +24,56 @@
 
 export const PASTE_TOAST_REGION = 'paste-toast';
 
+const KEY = 'pkc3.paste-toast';
+
+function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * **書式つきの字を直して貼ったとき、小さな知らせ(トースト)を出すか**(#1379)。
+ *
+ * ⚠ **既定は出す**。切っても、貼った字を Markdown に直したことはメッセージの一覧に残る(知らせが消えるだけ)。
+ * ⚠ **flag ではない**(正規設定)── 開放先は user で、畳む予定も無い。container に入れない(この端末の読み方)。
+ * ⚠ 保存の値は `0`(切)だけを書く側で意味づける ── 鍵が無い / 読めない端末は「出す」。
+ */
+export class PasteToastStore {
+  private fallback = true;
+  private saveFailed = false;
+
+  constructor(
+    private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
+  ) {}
+
+  /** ⚠ 読むたびに保存を見る(書き手が複数)。🔴 保存が無い環境では控えを読む(`?.` では `catch` に入らない)。 */
+  enabled(): boolean {
+    if (this.storage === null || this.saveFailed) return this.fallback;
+    try {
+      return this.storage.getItem(KEY) !== '0';
+    } catch {
+      return this.fallback;
+    }
+  }
+
+  setEnabled(on: boolean): void {
+    this.fallback = on;
+    this.saveFailed = false;
+    try {
+      this.storage?.setItem(KEY, on ? '1' : '0');
+    } catch {
+      // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
+      this.saveFailed = true;
+    }
+  }
+}
+
+/** アプリ共有の 1 個。⚠ 読む側は必ずこれを引く。 */
+export const appPasteToast = new PasteToastStore();
+
 /** 出しておく時間(ms)。⚠ 1 文 + ボタン 1 つを読んで押せる長さ(結果の知らせの 6 秒より少し長い)。 */
 export const PASTE_TOAST_VISIBLE_MS = 8000;
 

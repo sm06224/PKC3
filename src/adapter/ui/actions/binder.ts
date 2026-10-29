@@ -459,11 +459,11 @@ import {
 } from '@features/entry-actions';
 import { currentAppOpenTarget } from '@adapter/ui/render/app-open-target';
 import { isInstalledApp } from '@adapter/platform/installed-app';
-import { appOpenChoicesVisible } from '@features/launcher/open-target';
+import { appOpenOptions } from '@features/launcher/open-target';
 
-/** 🔴 #884 段③ ── アプリの開き方の選択肢(右クリックの 2 項目)を出すか。 */
-function appOpenChoicesShown(): boolean {
-  return appOpenChoicesVisible(isInstalledApp(), currentAppOpenTarget());
+/** 🔴 #884 段③ ── 右クリックの開き方の項目に出す選択肢(アプリとして入れていないと効かない物だけ隠す)。 */
+function appOpenIds(): readonly string[] {
+  return appOpenOptions(isInstalledApp(), currentAppOpenTarget()).map((c) => c.id);
 }
 import { processToolOf } from '@features/capture/capture-process';
 import {
@@ -900,9 +900,9 @@ import {
   type ArchivePickRow,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
-import { showPasteToast } from '@adapter/ui/render/paste-toast';
+import { appPasteToast, showPasteToast } from '@adapter/ui/render/paste-toast';
 import { appNotePins } from '@adapter/platform/note-pin-store';
-import { livePinLids, notePinKey, pinRefusal } from '@features/relation/note-pins';
+import { pinRefusal } from '@features/relation/note-pins';
 
 type ActionHandler = (
   dispatcher: Dispatcher,
@@ -2134,6 +2134,8 @@ export interface BinderServices {
    * ⚠ 切り替えたら**その場で本文を描き直す**(同上)。
    */
   setInlineCodeCopy?(on: boolean): void;
+  /** 🔴 **直して貼ったときの小さな知らせを出すか**(#1379)。⚠ **省略可**。描き直しは要らない(効くのは次の貼り付け)。 */
+  setPasteToast?(on: boolean): void;
   /**
    * 🔴 **打ちながら補完の候補を出すか**(#1449 / #1450)。⚠ **省略可**。
    * ⚠ 切り替えても本文は描き直さない ── 効くのは**次に打つとき**だけ。
@@ -6619,6 +6621,30 @@ export function runGlobalCommand(
     dispatcher.dispatch({ type: 'DESELECT_ENTRY' });
     return true;
   }
+  if (cmd === 'pin-note' || cmd === 'unpin-note') {
+    /**
+     * 🔴 **開いているノートをピン留めする / 外す**(#1377。操作を探すから)。⚠ 行の右クリックと同じ対 ──
+     *   済みなら「する」、まだなら「外す」は効かない(`false` を返す = 行が灰色になり、理由が添わる)。
+     * ⚠ 満杯(生きているピン 20 件)は理由を言って断る(右クリックと同じ字)。
+     */
+    const st = dispatcher.getState();
+    const lid = st.selectedLid;
+    if (lid === null || !st.entryMetas.has(lid)) return false;
+    const pinned = appNotePins.has(lid);
+    if (cmd === 'pin-note' ? pinned : !pinned) return false;
+    if (dry) return true;
+    prevent();
+    const exists = (l: string): boolean => st.entryMetas.has(l);
+    if (cmd === 'pin-note') {
+      const why = pinRefusal(appNotePins.list(), lid, exists);
+      if (why !== null) {
+        notify(why, CAUTION);
+        return true;
+      }
+    }
+    appNotePins.toggle(lid, exists);
+    return true;
+  }
   if (cmd === 'cycle-read-columns') {
     if (dry) return true;
     prevent();
@@ -10611,25 +10637,28 @@ const ACTIONS: Record<string, ActionHandler> = {
   'pin-note': (dispatcher, target) => {
     const st = dispatcher.getState();
     const lid = rowLidOrSelected(st, target);
-    if (lid === null || st.cid === null || !st.entryMetas.has(lid)) {
+    if (lid === null || !st.entryMetas.has(lid)) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートが見つかりません' });
       return;
     }
-    const key = notePinKey(st.cid, lid);
-    const live = livePinLids(appNotePins.list(), st.cid, (l) => st.entryMetas.has(l)).length;
-    const why = pinRefusal(appNotePins.list(), live, key);
+    const exists = (l: string): boolean => st.entryMetas.has(l);
+    const why = pinRefusal(appNotePins.list(), lid, exists);
     if (why !== null) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: why });
       return;
     }
-    if (!appNotePins.has(key)) appNotePins.toggle(key, live);
+    if (!appNotePins.has(lid)) appNotePins.toggle(lid, exists);
   },
+  /**
+   * 🔴 **ピン留めを外す**(エリアの各行の「外す」/ 右クリック / 操作を探す)。
+   * ⚠ 相手は**押した行そのもの**(`data-pkc-entry`)── 選択中のノートではない。選んでいるノートが別のノートでも、
+   *   押した行のピンを外す(押した物と効く先を食い違わせない)。属性が無いときだけメニューが運ぶ lid / 選択へ。
+   */
   'unpin-note': (dispatcher, target) => {
     const st = dispatcher.getState();
     const lid = target.getAttribute('data-pkc-entry') ?? rowLidOrSelected(st, target);
-    if (lid === null || st.cid === null) return;
-    const key = notePinKey(st.cid, lid);
-    if (appNotePins.has(key)) appNotePins.toggle(key, 0);
+    if (lid === null) return;
+    if (appNotePins.has(lid)) appNotePins.toggle(lid, (l) => st.entryMetas.has(l));
   },
   'bookmark-note-remove': (dispatcher, target, services) => {
     const st = dispatcher.getState();
@@ -17493,6 +17522,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setCodeCollapse?.(target.checked);
   },
+  'set-paste-toast': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setPasteToast?.(target.checked);
+  },
   'set-inline-code-copy': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setInlineCodeCopy?.(target.checked);
@@ -20723,6 +20756,8 @@ export function bindActions(
     const offerPlain = (el: HTMLTextAreaElement, before: PasteBefore): void => {
       if (converted === null || (chosen.attempt.used !== 'html' && chosen.attempt.used !== 'rtf')) return;
       if (plain === '') return; // 書式なしの字が届いていない ── 置き換え先が無い
+      // 設定で切ってあれば出さない(直したことはメッセージに残る ── `leaveConverted`)
+      if (!appPasteToast.enabled()) return;
       const afterValue = el.value;
       if (pasteRevertRange(before, afterValue) === null) return;
       showPasteToast(el.closest<HTMLElement>('[data-pkc-slot="root"]') ?? el.ownerDocument.body, {
@@ -22084,7 +22119,7 @@ export function bindActions(
     if (tileHit !== null && ![...BUILTIN_KINDS].some((k) => k === tileKind)) {
       const tileLid = tileHit.getAttribute('data-pkc-tile') ?? '';
       // 🔴 出す項目が 0 のとき(絞り込み中 + ブラウザ利用)は空のメニューを開かず、ふつうの右クリックに任せる
-      if (tileLid !== '' && (tileHit.getAttribute('draggable') === 'true' || appOpenChoicesShown())) {
+      if (tileLid !== '' && (tileHit.getAttribute('draggable') === 'true' || appOpenIds().length > 0)) {
         ev.preventDefault();
         openContextMenu(
           root,
@@ -22096,9 +22131,9 @@ export function bindActions(
             ? tileMenuActions(
                 dispatcher.getState().launcherReorder,
                 currentAppOpenTarget(),
-                appOpenChoicesShown(),
+                appOpenIds(),
               )
-            : tileOpenTargetMenuActions(currentAppOpenTarget(), appOpenChoicesShown()),
+            : tileOpenTargetMenuActions(currentAppOpenTarget(), appOpenIds()),
           root.ownerDocument.activeElement,
           { 'data-pkc-tile': tileLid },
         );
@@ -22118,7 +22153,7 @@ export function bindActions(
     if (builtinHit !== null) {
       const tileLid = builtinHit.getAttribute('data-pkc-tile') ?? '';
       const kind = builtinHit.getAttribute('data-pkc-tile-kind') ?? '';
-      if (tileLid !== '' && isViewMode(kind) && appOpenChoicesShown()) {
+      if (tileLid !== '' && isViewMode(kind) && appOpenIds().length > 0) {
         ev.preventDefault();
         openContextMenu(
           root,
@@ -22731,7 +22766,7 @@ export function bindActions(
         linkedFile: st.linkedFiles.get(lid) ?? null,
         ...transcriptMenuCtx(st, lid),
         // 🔴 ピン留め(#1377)── 固定エリアは左の列にあるので、左の列の行のメニューだけが渡す
-        ...(st.cid !== null ? { pinned: appNotePins.has(notePinKey(st.cid, lid)) } : {}),
+        pinned: appNotePins.has(lid),
       }).map(withRowShortcut),
       st.openBody?.lid === lid,
     );

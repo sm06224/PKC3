@@ -145,6 +145,12 @@ export interface ImportDeps {
    * 🔴 **バックアップのタグの色を戻す**(#1457)。⚠ **省略可** ── 無い配線では色を戻さない。
    * ⚠ いま付けている色は動かさず、付いていないタグの分だけ足す(`kept` = 見送った数)。
    */
+  /**
+   * 🔴 **バックアップのピン留めを戻す**(#1377)。⚠ **省略可**。いま留めている物は動かさず、足りない分だけ足す
+   * (満杯なら断った数を返す)。戻すのは取り込んだノートに在るものだけ(呼び側が絞ってある)。
+   * @returns 足した数 / 上限で見送った数
+   */
+  importNotePins?(lids: readonly string[]): Promise<{ added: number; overLimit: number }>;
   importTagColors?(
     incoming: readonly import('@features/tag-color').TagColorEntry[],
   ): Promise<{
@@ -700,6 +706,8 @@ async function runImport(
           trash: restored.trash,
           /** 🔴 アーカイブ経路だけが持つ**タグの色**(#1457)。 */
           tagColors: restored.tagColors,
+          /** 🔴 アーカイブ経路だけが持つ**ピン留め**(#1377。付け替えた lid は写し済み)。 */
+          notePins: restored.notePins,
           /** 🔴 アーカイブ経路だけが持つ**付け替えた lid**(本文の `entry:` を写す。下の `remap`)。 */
           lidRemap: restored.lidRemap,
           sourceCid: restored.sourceCid,
@@ -1046,6 +1054,18 @@ async function runImport(
           }
         } catch (e) {
           result.warnings.push(`タグの色を戻せませんでした: ${reason(e)}`);
+        }
+      }
+      // 🔴 ピン留め(#1377)── 色の後。本文ではないので、戻せなくても取込は失敗にしない
+      const pins = 'notePins' in result ? result.notePins : [];
+      if (pins.length > 0 && deps.importNotePins !== undefined) {
+        try {
+          const r = await deps.importNotePins(pins);
+          if (r.overLimit > 0) {
+            result.warnings.push(`上限のため ${r.overLimit} 件のピン留めを戻せませんでした(ピン留めは 20 件までです)`);
+          }
+        } catch (e) {
+          result.warnings.push(`ピン留めを戻せませんでした: ${reason(e)}`);
         }
       }
     } catch (e) {

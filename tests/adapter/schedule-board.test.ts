@@ -250,8 +250,15 @@ describe('カンバンの信号機の列(#1457)', () => {
     expect(textsIn(colOf(root, 'yellow'))).toEqual(['今日の分']);
     expect(textsIn(colOf(root, 'green'))).toEqual(['先の分']);
     expect(cardsIn(root, 'done').map((c) => c.querySelector('[data-pkc-field="text"]')?.textContent)).toEqual(['済んだ']);
-    // 色の意味は字でも言う(色だけに頼らない)
-    expect(colOf(root, 'red').textContent).toContain('期限切れ');
+    // 見出しは色の名前だけ。意味(期限・タグ)は説明の行と title に書く(色だけに頼らない・見出しを長くしない)
+    const headOf = (c: 'red' | 'yellow' | 'green'): HTMLElement =>
+      colOf(root, c).querySelector<HTMLElement>('[data-pkc-field="schedule-board-head"]')!;
+    expect(headOf('red').textContent).toMatch(/^赤\(\d+\)$/);
+    expect(headOf('yellow').textContent).toMatch(/^黄\(\d+\)$/);
+    expect(headOf('green').textContent).toMatch(/^緑\(\d+\)$/);
+    expect(headOf('red').title).toContain('期限が今日より前');
+    expect(headOf('red').title).toContain('#赤');
+    expect(q('[data-pkc-field="schedule-board-note"]')!.textContent).toContain('赤は期限切れ');
     expect(q('[data-pkc-board-layout="signal"]')!.getAttribute('aria-pressed')).toBe('true');
   });
 

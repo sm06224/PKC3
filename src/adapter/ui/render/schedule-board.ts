@@ -79,11 +79,12 @@ export function resetBoardLayoutFallbackForTest(): void {
   layoutSaveFailed = false;
 }
 
-/** 信号機の列の見出し(色の意味を字でも言う ── 色だけに頼らない)。 */
-const SIGNAL_HEADS: Readonly<Record<SignalColor, string>> = {
-  red: '赤(期限切れ・止まっている)',
-  yellow: '黄(3 日以内・進行中)',
-  green: '緑(余裕あり・順調)',
+/** 信号機の列の見出しは色の名前だけ。⚠ 意味(期限・タグ)は説明の行と title に書く(見出しを長くして列を狭くしない)。 */
+const SIGNAL_HEADS: Readonly<Record<SignalColor, string>> = { red: '赤', yellow: '黄', green: '緑' };
+const SIGNAL_MEANINGS: Readonly<Record<SignalColor, string>> = {
+  red: '期限が今日より前のカード、または行に #赤 と書いたカード',
+  yellow: '期限が今日から 3 日以内のカード、または行に #黄 と書いたカード',
+  green: '期限がそれより先のカード、または行に #緑 と書いたカード',
 };
 
 /** 落とし先の列の印。⚠ 綴りはここ 1 か所(落とす側は import する)。 */
@@ -138,7 +139,7 @@ export class ScheduleBoard {
     this.switcher.setAttribute('data-pkc-field', 'schedule-board-layout');
     for (const [id, label, hint] of [
       ['status', '状態', '未完了と完了の 2 列で見ます'],
-      ['signal', '信号機', '赤(期限切れ・止まっている)/ 黄(3 日以内・進行中)/ 緑(余裕あり・順調)/ 完了 の列で見ます'],
+      ['signal', '信号機', '赤・黄・緑・完了の列で見ます(赤は期限切れ、黄は 3 日以内、緑はそれより先。行に #赤 #黄 #緑 と書くと期限より優先します)'],
     ] as const) {
       const b = document.createElement('button');
       b.type = 'button';
@@ -170,6 +171,7 @@ export class ScheduleBoard {
     const head = document.createElement('h3');
     head.setAttribute('data-pkc-field', 'schedule-board-head');
     head.textContent = label;
+    if (signal !== undefined) head.title = SIGNAL_MEANINGS[signal];
     const list = document.createElement('div');
     list.setAttribute('data-pkc-region', 'schedule-cards');
     list.setAttribute('data-pkc-field', 'schedule-board-cards');
@@ -226,7 +228,7 @@ export class ScheduleBoard {
       parts.push('日付付きのチェック項目(- [ ] やること @2026-10-30)がまだありません。書くとカードになって、ここに並びます');
     else if (signal)
       parts.push(
-        '色は期限の近さです(行に #赤 #黄 #緑 と書くと、その色の列に置けます)。カードを完了の列へドラッグすると、本文のチェック([ ] と [x])が切り替わります',
+        '赤は期限切れ、黄は今日から 3 日以内、緑はそれより先です。行に #赤 #黄 #緑 と書くと、期限より優先してその色の列に置けます。カードを完了の列へドラッグすると、本文のチェック([ ] と [x])が切り替わります',
       );
     else parts.push('カードを反対の列へドラッグすると、本文のチェック([ ] と [x])が切り替わります');
     if (skipped > 0)

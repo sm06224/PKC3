@@ -50,6 +50,7 @@ import {
 import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescue';
 import { INTEGRITY_STAMP_KEY, INTEGRITY_STAMP_SCOPE } from '@features/storage/integrity-schedule';
 import { MAX_TAG_COLORS, normalizeTagColor } from '@features/tag-color';
+import { MAX_NOTE_PINS_STORED } from '@features/relation/note-pins';
 import {
   CORRUPT_BLOCKED_OPS,
   CORRUPT_REFUSAL,
@@ -965,6 +966,11 @@ const DERIVE_SCOPE = '__derive__';
 /** タグの色を持つ `settings` の scope(器ごと)。 */
 function tagColorScope(cid: string): string {
   return `tag-color:${cid}`;
+}
+
+/** ノートのピン留めを持つ `settings` の scope(器ごと。#1377)。1 ノート 1 行(`k` = lid、`v` = 留めた順の通し番号)。 */
+function notePinScope(cid: string): string {
+  return `note-pin:${cid}`;
 }
 
 /**
@@ -3400,6 +3406,7 @@ function deleteContainerRows(database: Database, cid: string): void {
     database.exec({ sql: `DELETE FROM ${table} WHERE cid = ?`, bind: [cid] });
   }
   database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [tagColorScope(cid)] });
+  database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [notePinScope(cid)] });
   database.exec({ sql: 'DELETE FROM containers WHERE cid = ?', bind: [cid] });
 }
 
@@ -5924,6 +5931,56 @@ const handlers: Handlers = {
               ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v`,
       bind: [tagColorScope(req.cid), req.key, JSON.stringify({ tag: req.tag, color })],
     });
+    return null;
+  },
+  /**
+   * 🔴 **ノートのピン留め**(#1377)── `settings` 表の 1 ノート 1 行(`k` = lid、`v` = 留めた順の通し番号)。
+   * 表を足さない = 版(`DB_SCHEMA_VERSION`)を上げない。⚠ ノートの本文・更新日時には触れない。
+   */
+  listNotePins: (req) => {
+    const rows = need().selectObjects(
+      'SELECT k, v FROM settings WHERE scope = ?',
+      [notePinScope(req.cid)],
+    ) as Array<{ k: string; v: string | null }>;
+    return rows
+      .map((r) => ({ lid: r.k, at: Number(r.v) }))
+      .filter((r) => r.lid !== '')
+      .sort((a, b) => (Number.isFinite(a.at) ? a.at : 0) - (Number.isFinite(b.at) ? b.at : 0) || a.lid.localeCompare(b.lid))
+      .map((r) => r.lid);
+  },
+  putNotePin: (req) => {
+    const database = need();
+    const scope = notePinScope(req.cid);
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      // 消えたノートのピンの掃除(同じ tx)
+      for (const lid of req.prune ?? []) {
+        database.exec({ sql: 'DELETE FROM settings WHERE scope = ? AND k = ?', bind: [scope, lid] });
+      }
+      if (!req.on) {
+        database.exec({ sql: 'DELETE FROM settings WHERE scope = ? AND k = ?', bind: [scope, req.lid] });
+      } else {
+        if (req.lid === '') throw new Error('ピン留めするノートが指定されていません');
+        const existing = database.selectValue('SELECT 1 FROM settings WHERE scope = ? AND k = ?', [scope, req.lid]);
+        if (existing === undefined || existing === null) {
+          const n = Number(database.selectValue('SELECT count(*) FROM settings WHERE scope = ?', [scope]));
+          if (n >= MAX_NOTE_PINS_STORED) throw new Error('ピン留めの記録がいっぱいです');
+          const max = Number(database.selectValue('SELECT max(CAST(v AS INTEGER)) FROM settings WHERE scope = ?', [scope]));
+          database.exec({
+            sql: 'INSERT INTO settings(scope, k, v) VALUES (?, ?, ?)',
+            bind: [scope, req.lid, String((Number.isFinite(max) ? max : 0) + 1)],
+          });
+        }
+      }
+      database.exec('COMMIT');
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
     return null;
   },
   /**

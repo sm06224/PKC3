@@ -26,6 +26,8 @@ export interface AppOpenTargetSpec {
   readonly id: string;
   /** 設定画面に出る名前。⚠ ここを変えたらマニュアルも直す。 */
   readonly label: string;
+  /** アプリとして入れていないと効かない出し先か(#884 段③)。⚠ 効かない選択肢を、効くように見せない。 */
+  readonly needsInstalled?: boolean;
 }
 
 /**
@@ -78,15 +80,21 @@ export function appWindowFeatures(target: AppOpenTarget, base: string): string {
 }
 
 /**
- * 🔴 **アプリの開き方の選択肢を出すか**(#884 段③。本文 ⑤「ブラウザで使っているとき
- * (アプリとして入れていないとき)は、選択肢そのものを出しません」)。
+ * 🔴 **アプリの開き方の選択肢のうち、いま効くものだけ**(#884 段③)。
  *
- * - アプリとして入れている → 出す
- * - 入れていない → 出さない。⚠ **ただし、すでに既定と違う出し先を選んである人には出す**
- *   (隠すと「選んだ値を自分で戻せない」片道になる ── 置けるなら外せる)。
+ * ⚠ 隠すのは**「アプリとして入れていないと効かない」選択肢だけ**(`needsInstalled`)。ブラウザで実際に効く
+ *   「ブラウザのタブ」「別のウィンドウ」はブラウザで使う人にも出す ── 別のウィンドウは大きさを渡した
+ *   `window.open` で、ブラウザでも独立したウィンドウとして開く。
+ * ⚠ いま選んである値は、隠す側でも**必ず出す**(選んだ値を自分で戻せない片道にしない)。
+ * 🔑 いまのところ `needsInstalled` を持つ選択肢は無い(2 つとも効く)。入れていないと効かない出し先を足す日は、
+ *   その行に `needsInstalled: true` を付けるだけで、設定の選択欄と右クリックの項目が同じ 1 本で絞られる。
  *
  * ⚠ pure。`installed` は `adapter/platform/installed-app.ts` が決める。
  */
-export function appOpenChoicesVisible(installed: boolean, current: AppOpenTarget): boolean {
-  return installed || current !== DEFAULT_APP_OPEN_TARGET;
+export function appOpenOptions(
+  installed: boolean,
+  current: string,
+  targets: readonly AppOpenTargetSpec[] = APP_OPEN_TARGETS,
+): readonly AppOpenTargetSpec[] {
+  return targets.filter((c) => !c.needsInstalled || installed || c.id === current);
 }

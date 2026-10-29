@@ -1127,14 +1127,54 @@ function applyBlockOp(sel: TextSelection, op: FormatOp): TextSelection {
   }
 }
 
+/**
+ * 🔴 **カーソルが空の注意書きブロック(`:::note` と `:::` の間が空行だけ)の中にあるとき、そのブロックを外す**(#425)。
+ * ⚠ 種類が同じときだけ(別の種類の中で押したら、入れ子に新しく入れる ── 勝手に別の物を消さない)。
+ * @returns 外せたときだけ新しい選択(外した位置にカーソル)。当てはまらなければ `null`
+ */
+function removeEmptyCallout(sel: TextSelection, role: CalloutRole): TextSelection | null {
+  const lines = sel.text.split('\n');
+  let offset = 0;
+  const starts = lines.map((l) => {
+    const at = offset;
+    offset += l.length + 1;
+    return at;
+  });
+  const caretLine = starts.findIndex((st, i) => sel.start >= st && sel.start <= st + lines[i]!.length);
+  if (caretLine < 0) return null;
+  let open = -1;
+  for (let i = caretLine; i >= 0; i -= 1) {
+    if (new RegExp(`^:::${role}[ \\t]*$`).test(lines[i]!)) {
+      open = i;
+      break;
+    }
+    if (i !== caretLine && lines[i]!.trim() !== '') return null; // 中身がある
+  }
+  if (open < 0) return null;
+  let close = -1;
+  for (let i = open + 1; i < lines.length; i += 1) {
+    if (/^:::[ \t]*$/.test(lines[i]!)) {
+      close = i;
+      break;
+    }
+    if (lines[i]!.trim() !== '') return null; // 中身がある
+  }
+  if (close < 0 || caretLine > close) return null;
+  const from = starts[open]!;
+  // 閉じの行の改行まで含めて消す(最終行なら直前の改行を残す)
+  const to = close + 1 < lines.length ? starts[close + 1]! : sel.text.length;
+  const text = sel.text.slice(0, from) + sel.text.slice(to);
+  return { text, start: from, end: from };
+}
+
 /** 1 つの入口。⚠ 分岐をここに閉じ込める(呼ぶ側に op ごとの知識を漏らさない)。 */
 export function applyFormat(sel: TextSelection, op: FormatOp): TextSelection {
   if (LINE_OPS.has(op)) return toggleLinePrefix(sel, op as LinePrefix);
   const calloutRole = calloutRoleOf(op);
   if (calloutRole !== null) {
-    return sel.start === sel.end
-      ? insertBlock(sel, template(`:::${calloutRole}\n${CARET}\n:::\n`))
-      : wrapAsBlock(sel, `:::${calloutRole}`, ':::');
+    if (sel.start !== sel.end) return wrapAsBlock(sel, `:::${calloutRole}`, ':::');
+    // 🔴 空のブロックの中にカーソルがあるときは、もう一度押すと**外す**(選んだ範囲を包んだときと同じ「置けるなら外せる」)
+    return removeEmptyCallout(sel, calloutRole) ?? insertBlock(sel, template(`:::${calloutRole}\n${CARET}\n:::\n`));
   }
   switch (op) {
     case 'bold':

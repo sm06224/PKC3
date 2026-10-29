@@ -176,6 +176,10 @@ export function isZipAttachment(mime: string, name: string): boolean {
  * 🔴 **一覧の 1 行の字**(#826 ③)。中にファイルが 0 件のフォルダは、押せない理由を行そのものに書く
  * (押すと色だけ変わって何も入らない、を作らない)。⚠ 別窓とその場の器の両方がここを呼ぶ(綴りを 2 か所に持たない)。
  */
+/** 🔴 一覧の上の案内と「取り出す」の title(#826 ②)。⚠ 別窓とその場の器の両方がここを読む(字を 2 か所に持たない)。 */
+export const ARCHIVE_PICK_NOTE =
+  'フォルダを押すと、その下のファイルが全部入ります。↑ ↓ Home End で行を移り、Ctrl(Mac は ⌘)+ Enter で取り出せます';
+export const ARCHIVE_OK_TITLE = 'Ctrl(Mac は ⌘)+ Enter でも取り出せます';
 export const EMPTY_FOLDER_NOTE = 'このフォルダにはファイルがありません';
 export function archiveRowText(
   row: { readonly name: string; readonly isDirectory: boolean; readonly size: string },

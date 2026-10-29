@@ -1323,6 +1323,10 @@ img[data-pkc-action='view-big']:focus-visible {
   color: var(--muted);
   cursor: pointer;
 }
+/* 🔴 **絵を選んだ外部リンクのタイルは、右端のホスト名の前に `↗`**(#852 案 1)。左端の `↗` は絵が無いときの控え。 */
+[data-pkc-field='tile-url'][data-pkc-external]::before {
+  content: '↗ ';
+}
 /* 🔴 **ピン留めの固定エリア**(#1377)。一覧の上に常に出る(列の中でスクロールしない帯)。
  *   ⚠ 地は無彩色、色は「いま開いているノート」(`aria-pressed`)にだけ。 */
 [data-pkc-region='note-pins'] {
@@ -10372,7 +10376,8 @@ h3[data-pkc-section] {
  * 地は無彩色(色は使わない)。数秒で消える(JS)。ボタンの見え方は共通の `button` に任せる。 */
 [data-pkc-region='paste-toast'] {
   position: fixed;
-  inset-block-end: var(--s4);
+  /* 🔴 **状態バー(最小 20px)の上**に浮かせる(#1379)── 下端いっぱいだと現在の状態の表示にかかる */
+  inset-block-end: calc(var(--s4) + 20px);
   inset-inline-end: var(--s4);
   z-index: 50;
   display: flex;

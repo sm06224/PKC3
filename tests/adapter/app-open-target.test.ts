@@ -19,6 +19,7 @@ import {
   currentAppOpenTarget,
 } from '../../src/adapter/ui/render/app-open-target';
 import { APP_OPEN_TARGETS } from '../../src/features/launcher/open-target';
+import { isInstalledApp } from '../../src/adapter/platform/installed-app';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { initialState } from '../../src/adapter/state/app-state';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -79,36 +80,27 @@ describe('設定画面との配線(#884 段①)', () => {
     root.remove();
   });
 
-  it('🔴 #884 段③ ブラウザで使っていると選択欄の行が隠れ、入れている/既定以外なら出る', () => {
-    const mm = (installed: boolean): void => {
+  it('🔴 #884 段③ ブラウザで使っていても選択欄は出る(2 つとも効く)/ F11 の全画面を「入れている」と取り違えない', () => {
+    const mm = (modes: string[]): void => {
       Object.defineProperty(window, 'matchMedia', {
         configurable: true,
         writable: true,
-        value: (q: string) => ({ matches: installed && q.includes('standalone'), media: q }),
+        value: (q: string) => ({ matches: modes.some((m) => q.includes(m)), media: q }),
       });
     };
-    const row = (root: HTMLElement): HTMLElement =>
-      root.querySelector<HTMLElement>(FIELD)!.closest('dd') as HTMLElement;
-    const build = (): HTMLElement => {
-      const root = document.createElement('div');
-      document.body.append(root);
-      new SettingsRenderer(root, new JobMonitor()).render(initialState);
-      return root;
-    };
-    mm(false);
-    let root = build();
-    expect(row(root).hidden, 'ブラウザ利用 + 既定なのに選択欄が出ている').toBe(true);
-    expect(row(root).previousElementSibling).toHaveProperty('hidden', true);
+    mm([]);
+    const root = document.createElement('div');
+    document.body.append(root);
+    new SettingsRenderer(root, new JobMonitor()).render(initialState);
+    const opts = [...root.querySelectorAll<HTMLOptionElement>(`${FIELD} option`)].map((o) => o.value);
+    expect(opts, 'ブラウザ利用で選択肢が消えた').toEqual(['tab', 'window']);
+    expect(root.querySelector<HTMLElement>(FIELD)!.closest('dd')!.hidden).toBe(false);
     root.remove();
-    chooseAppOpenTarget('window');
-    root = build();
-    expect(row(root).hidden, '既定以外を選んである人の戻す口が隠れている').toBe(false);
-    root.remove();
-    chooseAppOpenTarget('tab');
-    mm(true);
-    root = build();
-    expect(row(root).hidden, 'アプリとして入れているのに隠れている').toBe(false);
-    root.remove();
+    expect(isInstalledApp(), '前提: ブラウザのタブ').toBe(false);
+    mm(['standalone']);
+    expect(isInstalledApp()).toBe(true);
+    mm(['fullscreen']);
+    expect(isInstalledApp(), 'F11 の全画面を PWA と取り違えた').toBe(false);
   });
 
   it('🔴 選べる値が表と 1 対 1(選べるのに効かない / 効くのに選べないを作らない)', () => {

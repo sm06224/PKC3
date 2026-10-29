@@ -70,6 +70,14 @@ const PAIRS: readonly { fg: string; bg: string; min: number; what: string }[] = 
   { fg: '--accent-fg', bg: '--accent', min: 4.5, what: '最上部の帯' },
   { fg: '--accent-dim-fg', bg: '--accent-dim', min: 4.5, what: '選択中の行' },
   { fg: '--danger', bg: '--surface', min: 4, what: '危険な操作' },
+  /**
+   * 🔴 **`--ok`(緑)**(#1457)。2 つの使い手が重なる: ① 信号機の列の見出しの丸(`schedule-board-head::before`、地は `--surface`)
+   *   ② **履歴の差分の「足した行」の字**(`[data-pkc-diff='add']`、地は `--surface` / `--surface-2`)。
+   * ⚠ ② はこれまで `--ok` が**どのテーマにも無く**、`var(--ok, #1a7f37)` の控えの緑(明るい地向け)が全テーマで出ていた。
+   *   トークンを置いたので、暗い地でも読める緑に変わる ── だから字として読む 4.5:1 を全テーマで課す。
+   */
+  { fg: '--ok', bg: '--surface', min: 4.5, what: '緑(差分の足した行・信号機の緑)' },
+  { fg: '--ok', bg: '--surface-2', min: 4.5, what: '緑(帯の上)' },
   { fg: '--accent', bg: '--surface', min: 3, what: 'リンク・強調' },
   /**
    * 🔴 **焦点の輪**(#1388。`outline: 2px solid var(--accent)`)が乗る地は `--surface` だけではない ──

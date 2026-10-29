@@ -40,7 +40,7 @@ export class NotePinBar {
 
   render(state: AppState): void {
     this.lastState = state;
-    const lids = livePinLids(this.store.list(), state.cid, (lid) => state.entryMetas.has(lid));
+    const lids = livePinLids(this.store.list(), (lid) => state.entryMetas.has(lid));
     const print = JSON.stringify([
       lids.map((lid) => [lid, state.entryMetas.get(lid)?.title ?? '', state.selectedLid === lid]),
     ]);

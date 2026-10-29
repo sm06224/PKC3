@@ -215,6 +215,9 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'view-diff': APP,
   'refresh-query': SCREEN,
   'cycle-read-columns': SCREEN,
+  // 🔴 #1377: 開いているノートのピン留め(する / 外す)
+  'pin-note': NOTE,
+  'unpin-note': NOTE,
   'clear-selection': SCREEN,
   'toggle-sidebar': SCREEN,
   'toggle-inspector': SCREEN,

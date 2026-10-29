@@ -1451,8 +1451,8 @@ function zeroHint(sql: string): string {
  * 🔴 **帯に表の名前も出す**(#992 ②。案 C「表 1 個: parquet」)。打つ名前を案内文まで探さなくてよい。
  * ⚠ 表が多い `.sqlite` で帯が溢れないよう、先頭 3 つまで出して残りは「ほか N 個」にする。
  */
-const TABLE_NAMES_IN_BAND = 3;
-function tableNamesNote(tables: readonly string[]): string {
+export const TABLE_NAMES_IN_BAND = 3;
+export function tableNamesNote(tables: readonly string[]): string {
   if (tables.length === 0) return '';
   const shown = tables.slice(0, TABLE_NAMES_IN_BAND).join(', ');
   const rest = tables.length - TABLE_NAMES_IN_BAND;

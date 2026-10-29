@@ -596,3 +596,78 @@ describe('書庫の別窓 ── 動線の 4 点(#826)', () => {
     }
   });
 });
+
+describe('書庫の別窓 ── 見張りの後始末とキー(#826 の穴塞ぎ)', () => {
+  it('🔴 答えが出たら再読み込みの見張りの時計を止める(止めないと窓を閉じた後も回り続ける)', async () => {
+    vi.useFakeTimers();
+    try {
+      const win = fakeWindow();
+      grabArchiveWindow('a.zip', 'k', () => win);
+      const before = vi.getTimerCount();
+      const answered = pickInArchiveWindow(win, {
+        assetKey: 'k',
+        title: 'a.zip',
+        rows: ROWS,
+        countFiles,
+        toggle,
+        themeFrom: document.documentElement,
+        onReloaded: () => {},
+        waitClose: () => new Promise<void>(() => undefined),
+      });
+      expect(vi.getTimerCount(), '前提: 見張りの時計が動いている').toBeGreaterThan(before);
+      win.document
+        .querySelector<HTMLButtonElement>('[data-pkc-field="archive-window-cancel"]')!
+        .click();
+      expect(await answered).toBeNull();
+      expect(vi.getTimerCount(), '答えが出た後も時計が残っている').toBe(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('🔴 ↑ と Home で戻れる(↓ End だけだと末尾から戻れない)', () => {
+    const win = fakeWindow();
+    grabArchiveWindow('a.zip', 'k', () => win);
+    void pickInArchiveWindow(win, {
+      assetKey: 'k',
+      title: 'a.zip',
+      rows: ROWS,
+      countFiles,
+      toggle,
+      themeFrom: document.documentElement,
+      onReloaded: () => {},
+      waitClose: never,
+    });
+    const key = (k: string): void => {
+      win.document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+    };
+    const rows = rowsOf(win);
+    rows[0]!.focus();
+    key('End');
+    expect(rows[2]!.tabIndex).toBe(0);
+    key('ArrowUp');
+    expect(rows[1]!.tabIndex, '↑ で 1 つ戻らない').toBe(0);
+    expect(rows[2]!.tabIndex).toBe(-1);
+    key('Home');
+    expect(rows[0]!.tabIndex, 'Home で先頭へ戻らない').toBe(0);
+  });
+
+  it('🔴 案内に ↑ ↓ と Ctrl+Enter が書いてあり、「取り出す」の title にも添えてある', () => {
+    const win = fakeWindow();
+    grabArchiveWindow('a.zip', 'k', () => win);
+    void pickInArchiveWindow(win, {
+      assetKey: 'k',
+      title: 'a.zip',
+      rows: ROWS,
+      countFiles,
+      toggle,
+      themeFrom: document.documentElement,
+      onReloaded: () => {},
+      waitClose: never,
+    });
+    const note = win.document.querySelector('[data-pkc-field="archive-window-note"]')!.textContent ?? '';
+    expect(note).toContain('↑ ↓');
+    expect(note).toContain('Enter');
+    expect(okOf(win).title).toContain('Enter');
+  });
+});

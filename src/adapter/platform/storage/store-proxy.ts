@@ -113,6 +113,8 @@ export const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   // ⚠ **足し忘れると、他タブのタグの色が古いまま**(#1457)── 受け手は main.ts の `onRemoteChanged`
   //    (`listTagColors` を読み直す)。当たり先の lid は無い(`changedLids` は null)
   'putTagColor',
+  // ⚠ **足し忘れると、他タブのピン留めが古いまま**(#1377)── 受け手は main.ts の `onRemoteChanged`(`listNotePins` を読み直す)
+  'putNotePin',
   // ⚠ **足し忘れると、他タブの本文が古いまま残る**(#1087)── 添付を参照するノートを何件も書き換える。
   //   当たり先は書く前に分からないので `changedLids` は null(全面の読み直し。保存のたびではなく稀)
   'replaceAssetRefs',
@@ -178,6 +180,7 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'listRevisionMetas',
   'listSystemEntries',
   'listTagColors',
+  'listNotePins',
   'listTrash',
   'listTrashHeads',
   'queryScan',

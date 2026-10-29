@@ -27,6 +27,7 @@ import { appVoiceBoost, VoiceBoostStore } from './voice-boost';
 import { appMissingLinks, MissingLinksStore } from './missing-links';
 import { appCodeCollapse, CodeCollapseStore } from './code-collapse';
 import { appInlineCodeCopy, InlineCodeCopyStore } from './inline-code-copy';
+import { appPasteToast, type PasteToastStore } from './paste-toast';
 import { appPdfReader, PdfReaderStore } from './pdf-reader-setting';
 import { appInlineComplete, InlineCompleteStore } from './inline-complete-setting';
 import { appPhoneLinks, PhoneLinksStore } from './phone-links';
@@ -229,6 +230,10 @@ export class SettingsRenderer {
      * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly workspaces: Workspaces = appWorkspaces,
+    /**
+     * 🔴 **直して貼ったときの小さな知らせを出すか**(#1379)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly pasteToast: PasteToastStore = appPasteToast,
   ) {
     /**
      * 🔴 **節の登録表(#1382)── 並びが画面の並びである。** 節を足す = `settings/` に 1 file 足し、
@@ -262,7 +267,7 @@ export class SettingsRenderer {
       createCodeCollapseSection(region, codeCollapse),
       createInlineCodeCopySection(region, inlineCodeCopy),
       createPdfReaderSection(region, pdfReader),
-      createPasteSourceSection(region, pasteSource),
+      createPasteSourceSection(region, pasteSource, pasteToast),
       createAlarmEnabledSection(region, alarmEnabled),
       createVoiceBoostSection(region, voiceBoost),
       createOpenPlaceSection(region),

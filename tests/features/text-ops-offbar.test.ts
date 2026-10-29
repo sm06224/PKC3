@@ -100,6 +100,38 @@ describe('注意書きのブロック 8 種(#425 の「囲い」)', () => {
     }
   });
 
+  it('🔴 空のブロックの中にカーソルがあるとき、もう一度押すと外れる(入れる → 外す の往復)', () => {
+    const on = applyFormat(at('まえ\nうしろ', 3, 3), 'callout-warning');
+    expect(on.text).toBe('まえ\n:::warning\n\n:::\n\nうしろ'); // 後ろに字が続くので閉じの後に空行が入る
+    // caret は中(空行)── そこでもう一度
+    const off = applyFormat(at(on.text, on.start, on.end), 'callout-warning');
+    expect(off.text, '空のブロックが外れない').toBe('まえ\n\nうしろ');
+    // 閉じの行の上にカーソルがあっても外れる / 開きの行でも外れる
+    const closeAt = on.text.indexOf('\n:::\n') + 1;
+    expect(applyFormat(at(on.text, closeAt, closeAt), 'callout-warning').text).toBe('まえ\n\nうしろ');
+    const openAt = on.text.indexOf(':::warning');
+    expect(applyFormat(at(on.text, openAt, openAt), 'callout-warning').text).toBe('まえ\n\nうしろ');
+    // 末尾のブロックでも落ちない
+    const tail = applyFormat(at('', 0, 0), 'callout-note');
+    expect(applyFormat(at(tail.text, tail.start, tail.end), 'callout-note').text).toBe('');
+  });
+
+  it('🔴 外さない場面(対照群): 中身があるブロック / 別の種類のブロックの中 / ブロックの外', () => {
+    // 中身がある ── 消さない(新しく入れ子に入る)
+    const full = ':::note\nあい\n:::\n';
+    expect(applyFormat(at(full, 8, 8), 'callout-note').text, '中身のあるブロックを消した').toContain('あい');
+    // 別の種類の空ブロックの中 ── 勝手に消さず、新しく入れる
+    const other = ':::note\n\n:::\n';
+    const r = applyFormat(at(other, 8, 8), 'callout-warning');
+    expect(r.text, '別の種類の空ブロックを消した').toContain(':::note');
+    expect(r.text).toContain(':::warning');
+    // ブロックの外(後ろの段落)── 外ではなく新しく入る
+    const outside = ':::note\n\n:::\nあと';
+    const o = applyFormat(at(outside, outside.length, outside.length), 'callout-note');
+    expect(o.text, 'ブロックの外で押したのに既存のブロックが消えた').toContain('あと');
+    expect((o.text.match(/:::note/g) ?? []).length).toBe(2);
+  });
+
   it('種類でない op は注意書きとして読まない(対照群)', () => {
     expect(calloutRoleOf('callout-nothing')).toBeNull();
     expect(calloutRoleOf('bold')).toBeNull();

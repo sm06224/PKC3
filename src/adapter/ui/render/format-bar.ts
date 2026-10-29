@@ -301,7 +301,7 @@ export function buildFormatBar(): HTMLElement {
   );
   const insertCalloutLabel = document.createElement('span');
   insertCalloutLabel.setAttribute('data-pkc-field', 'label');
-  insertCalloutLabel.textContent = '注意書きを入れる';
+  insertCalloutLabel.textContent = '注意書き';
   insertCallout.append(insertCalloutLabel);
   bar.append(insertCallout);
 

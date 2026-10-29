@@ -10,6 +10,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
+import { appPasteToast } from '../../src/adapter/ui/render/paste-toast';
 import {
   pasteConvertedMessage,
   PASTE_MESSAGE_COALESCE_MS,
@@ -946,5 +947,47 @@ describe('貼付のトースト(#1379)', () => {
     ta.dispatchEvent(pasteEvent(html));
     ta.dispatchEvent(pasteEvent(html));
     expect(document.querySelectorAll('[data-pkc-region="paste-toast"]')).toHaveLength(1);
+  });
+
+  it('🔴 画像つきの貼付(非同期の経路)でも、差し込めた後に浮き札が出て、押すと書式なしの字になる', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const { ta } = setup({
+      adoptUrls: async (urls) => {
+        await gate;
+        return { adopted: new Map(urls.map((u, i) => [u, `asset:k${i + 1}`])), failures: [] };
+      },
+    });
+    ta.dispatchEvent(
+      pasteEvent({ 'text/html': `<h2>題</h2><img src="${DATA}" alt="ず">`, 'text/plain': '題' }),
+    );
+    expect(toast(), '差し込む前に出している').toBeNull();
+    release();
+    await vi.waitFor(() => expect(ta.value).toContain('![ず](asset:k1)'));
+    expect(toast(), '非同期の経路で浮き札が出ていない').not.toBeNull();
+    action().click();
+    expect(ta.value, '書式なしの字に置き換わっていない').toBe('題');
+    expect(toast()).toBeNull();
+  });
+
+  it('🔴 設定で切ると、同期でも非同期でも出ない(切り戻すと出る)', async () => {
+    appPasteToast.setEnabled(false);
+    try {
+      const a = setup();
+      a.ta.dispatchEvent(pasteEvent(html));
+      expect(a.ta.value, '前提: 変換されている').toContain('## 見出し');
+      expect(toast(), '切ったのに出ている').toBeNull();
+      const b = setup();
+      b.ta.dispatchEvent(
+        pasteEvent({ 'text/html': `<h2>題</h2><img src="${DATA}" alt="ず">`, 'text/plain': '題' }),
+      );
+      await vi.waitFor(() => expect(b.ta.value).toContain('![ず](asset:k1)'));
+      expect(toast(), '非同期の経路が設定を見ていない').toBeNull();
+    } finally {
+      appPasteToast.setEnabled(true);
+    }
+    const c = setup();
+    c.ta.dispatchEvent(pasteEvent(html));
+    expect(toast(), '対照: 入に戻すと出る').not.toBeNull();
   });
 });

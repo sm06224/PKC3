@@ -622,9 +622,17 @@ describe('マニュアルと実装の突合', () => {
     for (const label of ['ゴミ箱へ移す', '履歴を開く']) {
       expect(detail, `「${label}」が本文の上にも残っている`).not.toContain(`, '${label}')`);
     }
-    for (const label of ['ノートを編集する', '編集を保存する', '編集をやめる', '履歴を開く', 'このノートをバックアップ', '追記']) {
+    for (const label of ['ノートを編集する', '編集を保存する', '編集をやめる', '履歴を開く', 'このノートをバックアップ']) {
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }
+    // 🔴 「追記」は短い字で、マニュアルのどこにでも出る(付箋の「追記」・操作を探すの一覧)── 全体で見ると
+    //   追記欄の節から消えても他の節に満たされる(§1.3)。だから**追記欄の節だけ**を切り出して見る。
+    const appendAt = MANUAL.indexOf('\n### 追記\n');
+    expect(appendAt, 'マニュアルに「追記」の節が無い').toBeGreaterThan(-1);
+    const appendEnd = MANUAL.indexOf('\n### ', appendAt + 5);
+    const appendSection = MANUAL.slice(appendAt, appendEnd === -1 ? MANUAL.length : appendEnd);
+    expect(appendSection, '追記欄の節に、ボタン **追記** の説明が無い').toContain('と **追記** が並びます');
+    expect(appendSection, '追記欄の節に **元に戻す** の説明が無い').toContain('**元に戻す**');
   });
 
   it('🔴 書式バーの文言が表と 1 対 1 で、マニュアルにも在る', () => {
@@ -692,7 +700,7 @@ describe('マニュアルと実装の突合', () => {
       'ノート内を探す',
       '置換の欄を開く / 閉じる',
       // 🔴 #425 の「囲い」: 種類を先に聞く 1 つ。既存のボタンが動かないよう置換の隣(末尾側)に足した
-      '注意書きを入れる',
+      '注意書き',
       // 🔴 2026-10-26(#766 D-3): この行を計算する ── 末尾。スマホ用画面の「…」を開いたときだけ見える(広い画面は CSS が隠す)
       'この行を計算する',
     ]);

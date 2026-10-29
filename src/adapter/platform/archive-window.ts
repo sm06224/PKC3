@@ -30,6 +30,8 @@
  *   配色を足した日にこの窓だけ古くなる(`theme.ts` の `syncThemeColor` と同じ作法)。
  */
 import {
+  ARCHIVE_OK_TITLE,
+  ARCHIVE_PICK_NOTE,
   EMPTY_FOLDER_NOTE,
   archiveFocusMove,
   archiveRowText,
@@ -272,7 +274,7 @@ export function pickInArchiveWindow(win: Window, deps: ArchivePickDeps): Promise
   head.textContent = deps.title;
   const note = doc.createElement('p');
   note.setAttribute('data-pkc-field', 'archive-window-note');
-  note.textContent = 'フォルダを押すと、その下のファイルが全部入ります';
+  note.textContent = ARCHIVE_PICK_NOTE;
   const list = doc.createElement('div');
   list.setAttribute('data-pkc-field', 'archive-window-list');
   const foot = doc.createElement('div');
@@ -284,6 +286,7 @@ export function pickInArchiveWindow(win: Window, deps: ArchivePickDeps): Promise
   const ok = doc.createElement('button');
   ok.type = 'button';
   ok.setAttribute('data-pkc-field', 'archive-window-ok');
+  ok.title = ARCHIVE_OK_TITLE;
   foot.append(cancel, ok);
   doc.body.append(head, note, list, foot);
 
