@@ -429,6 +429,7 @@ import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
 import { confirmSavedBack, createOfficeSaveBack, sharedReplaceQuestion, stagedSavedAt } from '@adapter/platform/office/office-save-back';
 import { openStageDir } from '@adapter/platform/office/office-stage';
 import { importFiles } from '@adapter/ui/actions/import-file';
+import { FolderSync, windowSyncLock, windowSyncPicker } from '@adapter/platform/folder-sync';
 import { withFolderHome } from '@adapter/ui/actions/import-folder-home';
 import { openFolderLid } from '@adapter/ui/actions/open-folder-lid';
 import { windowFolderWritePicker, type WritableDirLike } from '@adapter/platform/md-folder-export';
@@ -1662,6 +1663,79 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
     onChange: () => repaintPanes(),
   });
+  /**
+   * 🔴 **パソコンのフォルダとの同期**(#1455 の後半)。⚠ handle の持ち主はこの 1 つだけ(描画と押し口に同じ物を渡す)。
+   * 判断は `features/folder-sync/folder-sync.ts`、読み書きは `platform/folder-sync.ts` ── ここは配線だけ。
+   * ⚠ `importDeps` / `storeEffects` / `showStatus` はこの後で組まれる(押されるのは boot の後 ── 閉包で引く)。
+   */
+  const folderSync = new FolderSync({
+    picker: windowSyncPicker(),
+    // 🔴 別のタブ・ウィンドウが同じフォルダを同期していたら重ならない(`navigator.locks`。無い環境は排他なし)
+    lock: windowSyncLock(),
+    cid: () => cid,
+    notes: () =>
+      [...dispatcher.getState().entryMetas.values()].map((m) => ({
+        lid: m.lid,
+        title: m.title,
+        archetype: m.archetype,
+        updatedAt: m.updatedAt,
+        chars: m.bodyChars,
+      })),
+    isBusy: (lid) => unsavedTypingLidOf(dispatcher.getState()) === lid,
+    ready: () => {
+      const s = dispatcher.getState();
+      return s.phase === 'ready' && s.sectionDraft === null;
+    },
+    settle: async () => {
+      await storeEffects?.settled();
+    },
+    readBody: async (lid) => (await client.request({ op: 'getBody', cid, lid })) ?? null,
+    editedElsewhere: async (lid) => {
+      try {
+        return (await editedElsewhereReason(dispatcher, editLockPort, lid)) !== null;
+      } catch {
+        return true; // 確かめられないときは置き換えない
+      }
+    },
+    replaceBody: (lid, body) =>
+      dispatcher.dispatch({
+        type: 'REIMPORT_BODY',
+        lid,
+        body,
+        notice: '「{title}」の本文を、同期しているフォルダのファイルの内容に置き換えました(前の本文は履歴に残っています)',
+      }),
+    // 🔴 取り込みは既存の 1 本(`importFiles`)。⚠ 同期の途中でノートを開かない・知らせを重ねない(`focus` / `notify` / `report` を外す)
+    adopt: async (files) => {
+      let got: readonly string[] = [];
+      await importFiles(
+        dispatcher,
+        {
+          ...importDeps,
+          focus: () => undefined,
+          notify: () => undefined,
+          report: () => undefined,
+          imported: (lids) => {
+            got = lids;
+          },
+        },
+        files,
+      );
+      return got;
+    },
+    askAdopt: (message) => ask(message, { okLabel: '取り込む', cancelLabel: '取り込まない' }),
+    /**
+     * 🔴 **同期の結果・失敗の知らせは、メッセージ(システムのノート)へ**(CLAUDE.md §2-3)。ステータスバーに出すのは
+     *   状態だけ(`folderSync.statusLine()` ── 「同期しています…」「最終同期 HH:MM」)。⚠ `OP_FAILED` は使わない
+     *   (state.error がステータスバーの errorLine に出てしまう)。
+     */
+    say: (text) => appMessagePost.post({ kind: 'result', source: 'folder-sync', text }),
+    fail: (text) => appMessagePost.post({ kind: 'problem', source: 'folder-sync', text }),
+    // 状態が変わったら、PC タブとステータスバーの両方を描き直す(`paint` は後で組まれる ── 押されるのは boot の後)
+    onChange: () => {
+      repaintPanes();
+      paint();
+    },
+  });
   const browse = new BrowseRouter(
     regions.sidebar,
     regions.browseHost,
@@ -1670,6 +1744,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     assetLender,
     () => repaintPanes(),
     localFolder,
+    folderSync,
   );
   const inspector = new InspectorRenderer(regions.inspector);
   /**
@@ -2063,6 +2138,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       statusBase,
       statusBaseSevere,
       sync,
+      folderSyncLine: folderSync.statusLine(),
       portableAssetNote,
       persistState,
       savingLine: saving.line(),
@@ -4275,6 +4351,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const services: BinderServices = {
     // 🔴 パソコンのフォルダ(#215)── 描画に渡したものと**同じ 1 つ**
     localFolder,
+    // 🔴 フォルダとの同期(#1455 の後半)── 同じく描画に渡したものと**同じ 1 つ**
+    folderSync,
     /** 🔴 章を読むだけの別のウィンドウで(#1044 段4)── 窓は**同期で**掴む。 */
     openChapterWindow: (lid, line) => void chapterWindows.open(lid, line),
     // 🔴 添付のファイルの差し替え(#1163 依頼 212)。確かめ(依頼 211・293)も、書く道も Office の保存と同じ

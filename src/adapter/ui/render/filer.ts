@@ -62,9 +62,29 @@ export const GRID_ROW_THRESHOLD = 300;
  * ⚠ 行ごとに `content-visibility: auto` を付けると、ブラウザは**行の数だけ**見張りを張り、
  *   描くたびに全部を判定する ── 3,000 件で本文を 200 字打つと、その判定だけで約 1.2 秒だった
  *   (実測。一覧を隠すと消え、行の指定を外すと逆に倍になる)。塊ごとに付けると判定は 60 個で済み、
- *   約 25 ms になった(同じ手順の A/B)。行は DOM に全部残る(画面の外の行もページ内検索で見つかる)。
+ *   約 25 ms になった(同じ手順の A/B)。
+ * ⚠ 画面の外の塊は行を組まない(`applyChunks`)。ブラウザ内検索(Ctrl+F)が画面の外の行を見つけられるよう、
+ *   組まない塊には題名だけの軽い行(`hidden="until-found"`)を置き、当たったら `beforematch` でその塊を組む。
+ *   `hidden="until-found"` に対応しないブラウザでは、全部の塊に行を組む(この 50 行の塊 + `content-visibility` のまま)。
  */
 export const ROW_CHUNK = 50;
+/**
+ * 🔴 **見えている範囲の前後にどれだけ組んでおくか**(px)。半塊(25 行)── 速く送っても空の塊が見えにくく、
+ * 組む行は 3 塊(150 行)前後に収まる。
+ */
+export const WINDOW_PAD_PX = 650;
+/** 位置が読めないとき(まだ配置されていない・高さ 0 の面)に先頭から組む塊の数。 */
+const FALLBACK_CHUNKS = 3;
+/**
+ * 🔴 **組まれていない行を、組んでから引く口**(`mountFilerRow`)の事象名と受け渡し。
+ * binder(↑↓・先頭/末尾・頁送り)と「開いている行を見える所へ送る」が使う ── 描画器の中身を知らずに、
+ * 表の要素へ事象を撃つだけで済ませる(binder が描画器を握らない作り)。
+ */
+export const FILER_MOUNT_EVENT = 'pkc-filer-mount';
+export interface FilerMountRequest {
+  lid: string;
+  row: HTMLElement | null;
+}
 /** 格子の行の高さ(CSS の 26px と同じ)── 塊の仮の高さに使う。 */
 const GRID_ROW_PX = 26;
 
@@ -81,6 +101,122 @@ export class FilerRenderer {
   private tbody: HTMLTableSectionElement | null = null;
   /** 行の塊(先頭は `tbody`)。格子でないときは 1 つだけ。 */
   private chunks: HTMLTableSectionElement[] = [];
+  /**
+   * 🔴 **画面に見えている塊だけ、行を組む**(#1087 台帳④ の残り。格子のときだけ)。
+   * 一覧は `list`(順序つきの材料。メモリに全件)と `pos`(lid → 位置。「いま表に出している物」の判定にも使う)を
+   * 持ち、DOM に行を持つのは `mounted` の塊だけ ── 3,000 件でも組む行は 150 行前後で、
+   * 組んでいない塊は**行と同じ高さの空の塊**(`data-pkc-chunk-empty`)で、スクロールの長さを変えない。
+   * ⚠ `this.rows` は「組まれている行」。**「表に出ている物」は `pos`** ── 取り違えると、画面の外の印が
+   *   「出ていない」扱いになって帯の数が嘘をつく。
+   */
+  private list: readonly EntryMeta[] = [];
+  private parentNames: ReadonlyMap<string, string> = new Map();
+  private readonly pos = new Map<string, number>();
+  private mounted = new Set<number>();
+  private chunkSize = 1;
+  private grid = false;
+  /** 直近の描画の state(スクロールで塊を組み足すとき、選択・印・名前の打ち替えを合わせるのに使う)。 */
+  private curState: AppState | null = null;
+  private scroller: HTMLElement | null = null;
+  private scrollPending = false;
+  /** 最後に読んだ「見えている塊の範囲」。 */
+  private hint: [number, number] | null = null;
+  /** 印刷の間は全部の塊を組む(紙には全行が出る)。 */
+  private printAll = false;
+  /**
+   * 🔴 **掴んでいる行**(ドラッグ元)。その塊は外さない ── 掴んだまま下端で自動スクロールして行が DOM から外れると、
+   * ドラッグ元の要素が無くなって `dragend` が届かず、ドラッグが終わらない(印も落とし先の光も残る)。
+   */
+  private dragLid: string | null = null;
+  private readonly onDragStart = (ev: Event): void => {
+    const t = ev.target;
+    this.dragLid = t instanceof Element ? (t.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null) : null;
+  };
+  private readonly onDragEnd = (): void => {
+    if (this.dragLid === null) return;
+    this.dragLid = null;
+    this.syncWindow();
+  };
+  private readonly onBeforePrint = (): void => {
+    this.printAll = true;
+    if (this.grid && this.curState !== null) this.applyChunks(this.wantedChunks(this.curState, false), this.curState);
+  };
+  private readonly onAfterPrint = (): void => {
+    this.printAll = false;
+    this.syncWindow();
+  };
+  /**
+   * ブラウザ内検索が、組んでいない塊の題名に一致した ── その塊を組む。
+   * 🔴 **軽い行は、ここでは外さない**。ブラウザは `beforematch` の後で「一致した場所」へスクロールし、その位置に選択を張る
+   * (軽い行の中の文字)。いま外すと、その一致が消えて、次の「次を検索」が別の場所へ飛ぶ。外すのは、本物の行へ選択を張り直した後
+   * (`settleMatch`。ブラウザのスクロールが済んだ次の描画の前)。
+   */
+  private readonly keepFind = new Set<number>();
+  private readonly onBeforeMatch = (ev: Event): void => {
+    const target = ev.target;
+    if (!(target instanceof Element)) return;
+    const chunk = target.closest('tbody');
+    const at = chunk === null ? -1 : this.chunks.indexOf(chunk as HTMLTableSectionElement);
+    const state = this.curState;
+    if (at < 0 || state === null) return;
+    this.keepFind.add(at);
+    const want = new Set(this.mounted);
+    want.add(at);
+    this.applyChunks(want, state);
+    const win = this.region.ownerDocument.defaultView;
+    if (win === null) this.settleMatch(at);
+    else win.requestAnimationFrame(() => this.settleMatch(at));
+  };
+
+  /**
+   * 検索の一致を、軽い行から本物の行へ移す: 一致した字を含む題名の行を探して見える所へ送り、選択をその字へ張り直してから、
+   * 軽い行を外す。⚠ 選択が取れない・題名が見つからない環境でも、軽い行は外す(場所を取らない・二重に当たらない)。
+   */
+  private settleMatch(at: number): void {
+    const chunk = this.chunks[at];
+    this.keepFind.delete(at);
+    if (chunk === undefined) return;
+    const blob = chunk.querySelector(':scope > tr[data-pkc-chunk-find]');
+    const doc = this.region.ownerDocument;
+    const sel = doc.defaultView?.getSelection?.() ?? null;
+    // ⚠ `Selection.toString()` は描画された字だけ(軽い行は高さ 0 ── 実ブラウザで '' が返る)。範囲の字そのものを読む
+    const q = sel === null || sel.rangeCount === 0 ? '' : sel.getRangeAt(0).toString();
+    if (sel !== null && q.trim() !== '') {
+      for (const td of chunk.querySelectorAll('tr[data-pkc-entry] [data-pkc-field="title"]')) {
+        const node = [...td.childNodes].reverse().find((n): n is Text => n.nodeType === 3);
+        const from = node === undefined ? -1 : node.data.indexOf(q);
+        if (node === undefined || from < 0) continue;
+        const row = td.closest('tr');
+        if (row !== null && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'center' });
+        try {
+          const r = doc.createRange();
+          r.setStart(node, from);
+          r.setEnd(node, from + q.length);
+          sel.removeAllRanges();
+          sel.addRange(r);
+        } catch {
+          /* 選択を張れない環境 ── 行へ送るところまでで足りる */
+        }
+        break;
+      }
+    }
+    blob?.remove();
+  }
+  private readonly onScroll = (): void => {
+    if (!this.grid || this.scrollPending) return;
+    this.scrollPending = true;
+    const win = this.region.ownerDocument.defaultView;
+    const run = (): void => {
+      this.scrollPending = false;
+      this.syncWindow();
+    };
+    if (win === null) run();
+    else win.requestAnimationFrame(run);
+  };
+  private readonly onMountRequest = (ev: Event): void => {
+    const req = (ev as CustomEvent<FilerMountRequest>).detail;
+    req.row = this.mountRow(req.lid);
+  };
   private readonly rowSigs = new Map<string, string>();
   private lastMetas: ReadonlyMap<string, EntryMeta> | null = null;
   /**
@@ -178,6 +314,16 @@ export class FilerRenderer {
      *   ここで直さないと、鍵を変えた直後だけ**古い鍵の綴り**が残る(画面が嘘をつく)。
      */
     this.keymap.onChange(() => this.paintRecentHint());
+    // 🔑 組まれていない行を組んでから引く口(`mountFilerRow`)── 器に付けるので、表を作り直しても外れない
+    this.region.addEventListener(FILER_MOUNT_EVENT, this.onMountRequest);
+    this.region.addEventListener('beforematch', this.onBeforeMatch);
+    this.region.addEventListener('dragstart', this.onDragStart);
+    // 終わりは文書で受ける(落とし先が表の外でも・要素が外れた後でも拾う)
+    this.region.ownerDocument.addEventListener('dragend', this.onDragEnd);
+    this.region.ownerDocument.addEventListener('drop', this.onDragEnd);
+    const win = this.region.ownerDocument.defaultView;
+    win?.addEventListener('beforeprint', this.onBeforePrint);
+    win?.addEventListener('afterprint', this.onAfterPrint);
   }
 
   /**
@@ -453,7 +599,7 @@ export class FilerRenderer {
      * ⚠ 落として入れられるのに外せないと、間違えて入れた物を**本文まで開かないと
      *   戻せない**(動線を 1 つ失う)。⚠ 実体は「条件のタグを本文から消す」である。
      */
-    const marks = state.selection.filter((lid) => this.rows.has(lid));
+    const marks = state.selection.filter((lid) => this.pos.has(lid));
     if (marks.length > 0) {
       const evict = document.createElement('button');
       evict.type = 'button';
@@ -560,7 +706,7 @@ export class FilerRenderer {
      * ⚠ 消す側(`binder` の `delete-selected`)と**同じ規則**である ── 数と対象が
      *    食い違うと、確認の文言が嘘になる。
      */
-    const marks = state.selection.filter((lid) => this.rows.has(lid));
+    const marks = state.selection.filter((lid) => this.pos.has(lid));
     /**
      * 🔴 **1 件を選んでいるときも、タグの欄は出す**(#1087 流れ 29。Gemini 裁定 = #1163 への依頼 29 の Q5)。
      * ⚠ 出すのは**数・タグの欄と付け外し・選択の解除**だけ。ゴミ箱へ移す・フォルダへ移す…は 2 件以上のときだけ
@@ -652,7 +798,7 @@ export class FilerRenderer {
     // 🔴 **いま表に出ている物だけ**(別のフォルダ / 絞りで外れた物を選んだままだと、押すと見えない所が動く。
     //    印の判定 `marks` と同じく `this.rows` で見る)
     const moving =
-      state.selectedLid && this.rows.has(state.selectedLid)
+      state.selectedLid && this.pos.has(state.selectedLid)
         ? (state.entryMetas.get(state.selectedLid) ?? null)
         : null;
     if (!moving) {
@@ -1006,37 +1152,187 @@ export class FilerRenderer {
     state: AppState,
     parentNames: ReadonlyMap<string, string>,
   ): void {
+    this.list = list;
+    this.parentNames = parentNames;
+    this.pos.clear();
+    for (let i = 0; i < list.length; i += 1) this.pos.set(list[i]!.lid, i);
+    this.grid = list.length > GRID_ROW_THRESHOLD;
+    this.chunkSize = this.grid ? ROW_CHUNK : Math.max(1, list.length);
+    if (this.chunks.length === 0) this.chunks.push(tbody);
+    this.applyChunks(this.wantedChunks(state, false), state);
+    if (this.grid) {
+      this.watchScroll();
+      // 配置が済んだ後の位置で、組む塊をもう一度合わせる(位置を戻す・面の大きさが変わる等。変わらなければ何もしない)
+      this.onScroll();
+    }
+  }
+
+  /**
+   * 🔴 **いま組む塊**(#1087 台帳④)。格子でなければ全部(1 塊)。格子なら、画面に見えている範囲の前後
+   * (`WINDOW_PAD_PX`)+ **焦点のある行** + **名前を打ち替えている行**の塊 ── 焦点を持つ node を外すと
+   * 鍵が全部死ぬ(`render` の「焦点を落とさずに組み直す」の注記)ので、焦点の塊は外さない。
+   * ⚠ 位置が読めない(高さ 0・まだ配置されていない)ときは先頭から `FALLBACK_CHUNKS` 塊。
+   */
+  private wantedChunks(state: AppState, live: boolean): Set<number> {
+    const need = Math.max(1, Math.ceil(this.list.length / this.chunkSize));
+    const want = new Set<number>();
+    if (!this.grid) {
+      want.add(0);
+      return want;
+    }
+    // 🔴 全部の塊を組む場合: 印刷の間(紙には全行が出る)/ `hidden="until-found"` に対応しないブラウザ
+    //    (組まない塊をブラウザ内検索が見つけられないので、行を全部残す ── 50 行の塊 + `content-visibility` の作り)
+    if (this.printAll || !('onbeforematch' in this.region.ownerDocument.documentElement)) {
+      for (let c = 0; c < need; c += 1) want.add(c);
+      return want;
+    }
+    const [lo, hi] = this.windowRange(need, live);
+    for (let c = lo; c <= hi; c += 1) want.add(c);
+    // 画面の外へ出た塊のうち、すぐ外(1 塊)は残す ── 行き来で組み直しを繰り返さない
+    for (const c of this.mounted) if (c >= lo - 1 && c <= hi + 1 && c < need) want.add(c);
+    const pin = (lid: string | null | undefined): void => {
+      if (lid === null || lid === undefined || lid === '') return;
+      const at = this.pos.get(lid);
+      if (at !== undefined) want.add(Math.floor(at / this.chunkSize));
+    };
+    pin(state.renamingLid);
+    pin(this.dragLid);
+    const active = this.region.ownerDocument.activeElement;
+    if (active instanceof HTMLElement && this.region.contains(active)) {
+      pin(active.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry'));
+    }
+    return want;
+  }
+
+  /** 見えている範囲に掛かる塊の添字(両端を含む)。読めなければ先頭の数塊。 */
+  private windowRange(need: number, live: boolean): [number, number] {
+    const fallback: [number, number] = [0, Math.min(need, FALLBACK_CHUNKS) - 1];
+    /**
+     * 🔴 **描き直しの途中では位置を読まない**(読むと、直前に書き換えた分の配置をその場で払う ── `scroll-memory.ts` の注記と同じ)。
+     * 前に読んだ範囲(`hint`)を使い、配置が済んだ後の `syncWindow`(`live`)が読み直して合わせる。
+     */
+    if (!live) {
+      const h = this.hint;
+      if (h === null) return fallback;
+      const hi = Math.min(need - 1, h[1]);
+      return hi < h[0] ? fallback : [h[0], hi];
+    }
+    const scroller = this.scroller;
+    const first = this.chunks[0];
+    if (scroller === null || first === undefined || !first.isConnected) return fallback;
+    const view = scroller.clientHeight;
+    if (!(view > 0)) return fallback;
+    // 表の先頭の塊から見て、スクロールの上端がどれだけ下か(負 = 表の上に余白がある)
+    const off = scroller.getBoundingClientRect().top - first.getBoundingClientRect().top;
+    const h = this.chunkSize * GRID_ROW_PX;
+    const lo = Math.max(0, Math.floor((off - WINDOW_PAD_PX) / h));
+    const hi = Math.min(need - 1, Math.floor((off + view + WINDOW_PAD_PX) / h));
+    if (hi < lo) return fallback;
+    this.hint = [lo, hi];
+    return [lo, hi];
+  }
+
+  /** スクロールの受け手を付ける(器が替わったときだけ付け替える)。 */
+  private watchScroll(): void {
+    const scroller = this.region.closest<HTMLElement>('[data-pkc-region="browse-host"]');
+    if (scroller === this.scroller) return;
+    this.scroller?.removeEventListener('scroll', this.onScroll);
+    this.scroller = scroller;
+    scroller?.addEventListener('scroll', this.onScroll, { passive: true });
+  }
+
+  /** スクロール(または位置の変化)のあとに、組む塊を合わせる。変わらなければ何もしない。 */
+  private syncWindow(): void {
+    const state = this.curState;
+    if (!this.grid || state === null || this.table === null || !this.table.isConnected) return;
+    const want = this.wantedChunks(state, true);
+    if (want.size === this.mounted.size && [...want].every((c) => this.mounted.has(c))) return;
+    this.applyChunks(want, state);
+  }
+
+  /**
+   * 🔴 **組まれていない行を組んで、その要素を返す**(`FILER_MOUNT_EVENT` の受け手)。
+   * 表に無い lid なら `null`。⚠ 組んだ塊は次のスクロールで外れうる ── 呼び手は**すぐ**使う(焦点・位置)。
+   */
+  private mountRow(lid: string): HTMLElement | null {
+    const have = this.rows.get(lid);
+    if (have !== undefined) return have;
+    const at = this.pos.get(lid);
+    const state = this.curState;
+    if (at === undefined || state === null) return null;
+    const want = new Set(this.mounted);
+    want.add(Math.floor(at / this.chunkSize));
+    this.applyChunks(want, state);
+    return this.rows.get(lid) ?? null;
+  }
+
+  /**
+   * 🔴 **組まない塊に、題名だけの軽い行を 1 つ置く**(ブラウザ内検索 Ctrl+F が画面の外のノートを見つけるため)。
+   * `hidden="until-found"` の行は描かれないが、検索は当たる。当たると `beforematch` が飛び、その塊を組む(`onBeforeMatch`)。
+   * ⚠ 行の数だけ作らない ── 1 塊に 1 行・1 つの文字列(3,000 件でも 60 個)。中身が同じなら作り直さない。
+   */
+  private paintFindText(chunk: HTMLTableSectionElement, from: number, count: number): void {
+    const titles: string[] = [];
+    for (let i = from; i < from + count; i += 1) titles.push(this.list[i]!.title);
+    const text = titles.join('\n');
+    let tr = chunk.querySelector<HTMLTableRowElement>(':scope > tr[data-pkc-chunk-find]');
+    if (tr === null) {
+      tr = document.createElement('tr');
+      tr.setAttribute('data-pkc-chunk-find', '');
+      tr.setAttribute('hidden', 'until-found');
+      tr.setAttribute('aria-hidden', 'true');
+      tr.append(document.createElement('td'));
+    }
+    // ブラウザは一致を見せるとき `hidden` を外す ── 組まない塊に戻すときに付け直す
+    if (tr.getAttribute('hidden') !== 'until-found') tr.setAttribute('hidden', 'until-found');
+    const td = tr.firstElementChild!;
+    if (td.textContent !== text) td.textContent = text;
+    if (tr.parentNode !== chunk) chunk.append(tr);
+  }
+
+  /**
+   * `want` の塊だけ行を組み、ほかは空の塊(行と同じ高さ)にする。
+   * 🔑 行の node は持ち越す(指紋が同じなら作り直さない)。⚠ 組まない行は**指紋も作らない**
+   * (3,000 件の指紋を毎回作っていた費用が、組む行の数に縮む)。
+   */
+  private applyChunks(want: ReadonlySet<number>, state: AppState): void {
+    const list = this.list;
+    const size = this.chunkSize;
+    const need = Math.max(1, Math.ceil(list.length / size));
     const dayStamp = listDayStamp(new Date());
     const marked = new Set(state.selection);
     const nextRows = new Map<string, HTMLTableRowElement>();
     const nextSigs = new Map<string, string>();
-    const ordered: HTMLTableRowElement[] = [];
-    for (const m of list) {
-      const parentName = parentNames.get(m.lid);
-      const sig = this.rowSignature(m, m.lid === state.renamingLid, parentName, dayStamp);
-      let tr = this.rows.get(m.lid);
-      if (tr !== undefined && this.rowSigs.get(m.lid) === sig) {
-        const sel = m.lid === state.selectedLid;
-        if (tr.hasAttribute('data-pkc-selected') !== sel) {
-          if (sel) tr.setAttribute('data-pkc-selected', '');
-          else tr.removeAttribute('data-pkc-selected');
+    const parts = new Map<number, HTMLTableRowElement[]>();
+    for (let c = 0; c < need; c += 1) {
+      if (!want.has(c)) continue;
+      const part: HTMLTableRowElement[] = [];
+      const to = Math.min(list.length, (c + 1) * size);
+      for (let i = c * size; i < to; i += 1) {
+        const m = list[i]!;
+        const parentName = this.parentNames.get(m.lid);
+        const sig = this.rowSignature(m, m.lid === state.renamingLid, parentName, dayStamp);
+        let tr = this.rows.get(m.lid);
+        if (tr !== undefined && this.rowSigs.get(m.lid) === sig) {
+          const sel = m.lid === state.selectedLid;
+          if (tr.hasAttribute('data-pkc-selected') !== sel) {
+            if (sel) tr.setAttribute('data-pkc-selected', '');
+            else tr.removeAttribute('data-pkc-selected');
+          }
+          const mk = marked.has(m.lid);
+          if (tr.hasAttribute('data-pkc-marked') !== mk) paintRowMark(tr, mk);
+        } else {
+          tr = this.buildRow(m, state, marked, parentName);
         }
-        const mk = marked.has(m.lid);
-        if (tr.hasAttribute('data-pkc-marked') !== mk) paintRowMark(tr, mk);
-      } else {
-        tr = this.buildRow(m, state, marked, parentName);
+        nextRows.set(m.lid, tr);
+        nextSigs.set(m.lid, sig);
+        part.push(tr);
       }
-      nextRows.set(m.lid, tr);
-      nextSigs.set(m.lid, sig);
-      ordered.push(tr);
+      parts.set(c, part);
     }
-    const keep = new Set<Node>(ordered);
+    const keep = new Set<Node>(nextRows.values());
     for (const tr of this.rows.values()) if (!keep.has(tr)) tr.remove();
     const renamingRow = state.renamingLid === null ? undefined : nextRows.get(state.renamingLid);
-    const grid = ordered.length > GRID_ROW_THRESHOLD;
-    const size = grid ? ROW_CHUNK : Math.max(1, ordered.length);
-    const need = Math.max(1, Math.ceil(ordered.length / size));
-    if (this.chunks.length === 0) this.chunks.push(tbody);
     while (this.chunks.length < need) {
       const next = document.createElement('tbody');
       this.chunks[this.chunks.length - 1]!.after(next);
@@ -1044,11 +1340,29 @@ export class FilerRenderer {
     }
     for (let c = 0; c < need; c += 1) {
       const chunk = this.chunks[c]!;
-      const part = ordered.slice(c * size, (c + 1) * size);
-      this.placeRows(chunk, part, renamingRow);
-      // 🔑 まだ描いていない塊の仮の高さ(描いた後はブラウザが実寸を憶える ── `auto`)
-      if (grid) chunk.style.setProperty('contain-intrinsic-size', `auto ${part.length * GRID_ROW_PX}px`);
-      else chunk.style.removeProperty('contain-intrinsic-size');
+      const count = Math.min(list.length, (c + 1) * size) - c * size;
+      const part = parts.get(c);
+      if (part !== undefined) {
+        // 検索の一致の移し替え(`settleMatch`)が済むまでは、軽い行を残す
+        if (!this.keepFind.has(c)) chunk.querySelector(':scope > tr[data-pkc-chunk-find]')?.remove();
+        this.placeRows(chunk, part, renamingRow);
+        chunk.removeAttribute('data-pkc-chunk-empty');
+        chunk.style.removeProperty('height');
+        // 🔑 まだ描いていない塊の仮の高さ(描いた後はブラウザが実寸を憶える ── `auto`)
+        if (this.grid) chunk.style.setProperty('contain-intrinsic-size', `auto ${count * GRID_ROW_PX}px`);
+        else chunk.style.removeProperty('contain-intrinsic-size');
+      } else {
+        /**
+         * 🔴 **組まない塊は、組んだときと同じ高さの空の塊**(スクロールの長さを変えない)。
+         * 高さ = 行数 × 26px + 表の最初の行の上の 0.5px(最初の塊)+ 最後の塊の下の 0.5px
+         * (CSS の `tbody:last-of-type` の padding。`box-sizing: border-box` なので高さに含める)。
+         */
+        chunk.setAttribute('data-pkc-chunk-empty', '');
+        const h = count * GRID_ROW_PX + (c === 0 ? 0.5 : 0) + (c === need - 1 ? 0.5 : 0);
+        chunk.style.setProperty('height', `${h}px`);
+        chunk.style.removeProperty('contain-intrinsic-size');
+        this.paintFindText(chunk, c * size, count);
+      }
     }
     // ⚠ 余った塊は空(残す行は全部どこかの塊へ入れ終えた / 消えた行は上で外した)
     while (this.chunks.length > need) this.chunks.pop()!.remove();
@@ -1056,6 +1370,7 @@ export class FilerRenderer {
     for (const [lid, tr] of nextRows) this.rows.set(lid, tr);
     this.rowSigs.clear();
     for (const [lid, sig] of nextSigs) this.rowSigs.set(lid, sig);
+    this.mounted = new Set(want);
   }
 
   /**
@@ -1087,7 +1402,12 @@ export class FilerRenderer {
     }
   }
 
-  render(state: AppState): void {
+  /**
+   * @returns 一覧(表・周りの帯)を**組み直した**か。`false` = 属性の書き換えだけ(選択・印・日付の字)か何もしなかった回。
+   *   呼び手(`browse.ts`)は、配置が動いていない回にスクロール位置を書き戻さない(書き戻しは配置を強いる ── 1 キーあたり 1 回の配置計算)。
+   */
+  render(state: AppState): boolean {
+    this.curState = state;
     this.metaCount = state.entryMetas.size;
     this.paintRefusedTags(state);
     /**
@@ -1188,7 +1508,7 @@ export class FilerRenderer {
       this.patchDates(state);
       // ⚠ 参照の控えも進める ── 進めないと次の描画で「一覧が変わった」と読まれる
       this.lastMetas = state.entryMetas;
-      return;
+      return false;
     }
 
     if (
@@ -1199,7 +1519,7 @@ export class FilerRenderer {
       !marksChanged &&
       !datesChanged
     )
-      return;
+      return false;
 
     /**
      * 🔴 **現在地は state が持つ**(#240 段①)。直す前はここが
@@ -1224,7 +1544,7 @@ export class FilerRenderer {
       //    行を選び直しても帯は**前に選んでいたものを指したまま**になり、
       //    「移動」を押すと**別のノートが動く**(見えない取り違え)
       this.renderMoveBar(state, scope);
-      return;
+      return false;
     }
 
     /**
@@ -1309,6 +1629,7 @@ export class FilerRenderer {
       this.table = null;
       this.tbody = null;
       this.chunks = [];
+      this.mounted = new Set();
       this.rows.clear();
       this.rowSigs.clear();
     } else {
@@ -1706,7 +2027,7 @@ export class FilerRenderer {
     if (focusedBefore !== null) {
       const sameRow = focusedBefore === '' ? undefined : this.rows.get(focusedBefore);
       const firstRow = scopeChanged
-        ? this.region.querySelector<HTMLElement>('[data-pkc-region="filer-table"] tbody tr')
+        ? this.region.querySelector<HTMLElement>('[data-pkc-region="filer-table"] tbody tr[data-pkc-entry]')
         : null;
       const back =
         sameRow ??
@@ -1736,5 +2057,20 @@ export class FilerRenderer {
         input.select();
       }
     }
+    return true;
   }
+}
+
+/**
+ * 🔴 **左の一覧の行を、組まれていなければ組んでから引く**(#1087 台帳④)。
+ * 格子(行が多い一覧)は画面に見えている塊だけ行を組むので、↑↓・先頭/末尾・頁送り・「開いている行を見える所へ」は
+ * 行の要素を引く前にこれを通す。表が無い・その行が表に出ていないときは `null`。
+ * ⚠ 組んだ塊は次のスクロールで外れうる ── 引いたらすぐ使う(焦点・位置合わせ)。
+ */
+export function mountFilerRow(root: ParentNode, lid: string): HTMLElement | null {
+  const table = root.querySelector<HTMLElement>('[data-pkc-region="filer-table"]');
+  if (table === null) return null;
+  const req: FilerMountRequest = { lid, row: null };
+  table.dispatchEvent(new CustomEvent<FilerMountRequest>(FILER_MOUNT_EVENT, { bubbles: true, detail: req }));
+  return req.row;
 }

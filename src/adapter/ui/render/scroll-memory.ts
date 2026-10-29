@@ -100,6 +100,11 @@ export class ScrollMemory {
     this.el.scrollTop = want;
   }
 
+  /** いまの面の鍵がこれか(`use` を通さなくてよいかの判断に使う)。 */
+  isCurrent(key: string): boolean {
+    return this.key === key;
+  }
+
   /** いま覚えている位置(test の観測点)。 */
   peek(key: string): number | undefined {
     return this.seen.get(key);
