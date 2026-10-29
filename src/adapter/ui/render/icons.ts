@@ -134,6 +134,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'export-archive': 'archive',
   'export-html': 'globe',
   'export-portable': 'archive',
+  /** PKC2 の HTML で書き出す(台帳 #1416)── PKC3 入り HTML と同じ「1 つにまとめる」図案。 */
+  'export-pkc2-html': 'archive',
   'export-markdown': 'page',
   'export-markdown-folder': 'page',
   /** 構成(目次の形)を写す ── 中身ではなく**並び**を渡すので一覧の図案。 */

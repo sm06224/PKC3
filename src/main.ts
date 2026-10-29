@@ -194,6 +194,7 @@ import {
 import { connectPortableWiring } from '@adapter/platform/storage/portable-wiring';
 import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
 import { exportPortable, fetchPortableTemplate } from '@adapter/ui/actions/export-portable';
+import { exportPkc2Html } from '@adapter/ui/actions/export-pkc2-html';
 import { portableClosure } from '@features/export/portable-closure';
 import {
   persistStatusText,
@@ -2968,7 +2969,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       | { entryLid: string; as?: 'archive' | 'html' | 'docx' | 'pptx' | 'folder' | 'markdown' | 'mail' | 'srt' }
       | { mdFolder: WritableDirLike }
       // 🔴 一覧で選んだ N 件だけ(#1038 A1)
-      | { selection: readonly string[]; as: 'archive' | 'html' },
+      | { selection: readonly string[]; as: 'archive' | 'html' }
+      // 🔴 PKC2 のポータブル形式の HTML(台帳 #1416)。値は user が選んだ PKC2 の HTML の中身
+      | { pkc2Html: string },
   ): Promise<void> =>
     withAssetGate(async () => {
       const deps: ExportDeps = {
@@ -3110,7 +3113,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       };
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
-      if (typeof kind === 'object' && 'mdFolder' in kind) {
+      if (typeof kind === 'object' && 'pkc2Html' in kind) {
+        await exportPkc2Html(dispatcher, deps, kind.pkc2Html);
+      } else if (typeof kind === 'object' && 'mdFolder' in kind) {
         await exportMarkdownToFolder(dispatcher, deps, kind.mdFolder);
       } else if (typeof kind === 'object' && 'selection' in kind) {
         await exportSelection(dispatcher, deps, kind.selection, kind.as);
@@ -5841,6 +5846,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     pasteInspect: () => appFlags.isOn(FLAG_PASTE_INSPECT.name),
     leaveMessage: (m) => appMessagePost.post(m),
     exportPortable: () => void runExportPortable(),
+    // 🔴 選ばれた PKC2 の HTML を読んで、その `#pkc-data` を PKC3 のノートで入れ替えて書き出す(台帳 #1416)
+    exportPkc2Html: (file) =>
+      void file
+        .text()
+        .then((html) => runExport({ pkc2Html: html }))
+        .catch((e: unknown) =>
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `選んだファイルを読めませんでした: ${errorText(e)}` }),
+        ),
     // 🔴 一覧で選んだ N 件(と参照先・添付・祖先フォルダ)だけの PKC3 入り HTML(#1038 A2)
     exportSelectionPortable: (lids) => void runExportPortable(lids),
     exportEntry: (lid) => void runExport({ entryLid: lid }),

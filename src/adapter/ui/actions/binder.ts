@@ -2567,6 +2567,11 @@ export interface BinderServices {
    */
   exportPortable?(): void;
   /**
+   * 🔴 **PKC2 のポータブル形式の HTML で書き出す**(台帳 #1416)。選んだ PKC2 の HTML(`file`)の `#pkc-data` を PKC3 のノートで入れ替える。
+   * ⚠ 判断と変換は `export-pkc2-html.ts` / `features/export/pkc2-container.ts`。ここは選ばれた file を渡すだけ。
+   */
+  exportPkc2Html?(file: File): void;
+  /**
    * 🔴 **貼付でどの形を読むか**(user 指示 2026-08-25)── 設定の 4 択。
    * ⚠ 渡されなければ `auto`(いままでどおり)。
    */
@@ -17444,6 +17449,28 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'export-portable': (_dispatcher, _target, services) => {
     services.exportPortable?.();
+  },
+  /**
+   * 🔴 **PKC2 の HTML で書き出す**(台帳 #1416)。押すと「元にする PKC2 の HTML」を選ぶウィンドウが開く(PKC3 の中に PKC2 のアプリは無い)。
+   * ⚠ 選び口(`<input type=file>`)は押した同じ手の中で `click()` する(user gesture を切らない)。器は root に 1 つだけ作り、使い回す。
+   * ⚠ 同じファイルをもう一度選べるよう、選んだ後は値を空に戻す。
+   */
+  'export-pkc2-html': (_dispatcher, _target, services, root) => {
+    let input = root.querySelector<HTMLInputElement>('[data-pkc-field="pkc2-html-input"]');
+    if (input === null) {
+      input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.html,.htm,text/html';
+      input.hidden = true;
+      input.setAttribute('data-pkc-field', 'pkc2-html-input');
+      input.addEventListener('change', () => {
+        const file = input!.files?.[0];
+        input!.value = '';
+        if (file !== undefined) services.exportPkc2Html?.(file);
+      });
+      root.append(input);
+    }
+    input.click();
   },
   'export-entry-pdf': (dispatcher, target, services) => {
     // 🔴 解決規則は `rowLidOrSelected` の 1 本(#877)── 隣の 2 つと揃える
