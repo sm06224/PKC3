@@ -20,7 +20,8 @@
  * ⚠ happy-dom は配置を持たないので、スクロール器の高さと塊の位置は test が差し込む
  *   (`clientHeight` と `getBoundingClientRect` だけ ── 描画器が読む 2 つ)。
  */
-import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { supportUntilFound } from '../helpers/until-found';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -49,6 +50,9 @@ const meta = (i: number): EntryMeta =>
     bodyChars: null,
   }) as EntryMeta;
 const tick = (ms = 30) => new Promise<void>((r) => setTimeout(r, ms));
+
+// 3,000 行を組む test が並ぶ ── 全量を並列で回すと 5 秒を超えることがあるので、この file は長めに待つ
+vi.setConfig({ testTimeout: 30_000 });
 
 const N = 3000;
 const VIEW = 600;
@@ -245,16 +249,73 @@ describe('⑥ ブラウザ内検索(Ctrl+F)が、組んでいない行を見つ�
     expect(s.table().querySelectorAll('tbody tr').length - s.rowLids().length).toBe(finds.length);
   });
 
-  it('🔴 beforematch が来たら、その塊を組む(軽い行は外れ、本物の行が出る)', async () => {
+  it('🔴 beforematch: 塊は組むが、軽い行はまだ外さない(ブラウザが一致へスクロールし終えるまで)── その後、選択を本物の行へ張り直して外す', async () => {
     const s = screen();
     await tick();
     expect(s.table().querySelector('[data-pkc-entry="n2900"]')).toBeNull();
     const find = [...s.table().querySelectorAll<HTMLElement>('tr[data-pkc-chunk-find]')].find((f) =>
       (f.textContent ?? '').includes('t2900'),
     )!;
-    find.dispatchEvent(new Event('beforematch', { bubbles: true }));
-    expect(s.table().querySelector('[data-pkc-entry="n2900"]'), '検索が当たっても塊が組まれない').not.toBeNull();
-    expect(find.isConnected, '軽い行が残っている').toBe(false);
+    // ブラウザの動きの写し: 一致した字(選択)が軽い行の中に在る
+    const added: Range[] = [];
+    const sel = {
+      // 実ブラウザでは Selection.toString() は軽い行(高さ 0)の字を返さない ── 範囲の字を読むこと
+      toString: () => '',
+      rangeCount: 1,
+      getRangeAt: () => ({ toString: () => 't2900' }),
+      removeAllRanges: () => {},
+      addRange: (r: Range) => void added.push(r),
+    };
+    const spy = vi.spyOn(window, 'getSelection').mockReturnValue(sel as unknown as Selection);
+    const scrolled: Element[] = [];
+    const orig = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      find.dispatchEvent(new Event('beforematch', { bubbles: true }));
+      const row = s.table().querySelector('[data-pkc-entry="n2900"]');
+      expect(row, '検索が一致しても塊が組まれない').not.toBeNull();
+      // 同じ描画の中ではまだ外さない(外すと、ブラウザが張った一致が消える)
+      expect(find.isConnected, '一致を移す前に軽い行を外した').toBe(true);
+      await tick(40);
+      // 本物の行へ送り、選択をその字へ張り直した
+      expect(scrolled.map((e) => e.getAttribute('data-pkc-entry'))).toContain('n2900');
+      expect(added.length, '選択を本物の行へ張り直していない').toBe(1);
+      expect(row!.contains(added[0]!.startContainer), '選択が本物の行の中に無い').toBe(true);
+      expect(added[0]!.toString()).toBe('t2900');
+      expect(find.isConnected, '移した後も軽い行が残っている').toBe(false);
+    } finally {
+      Element.prototype.scrollIntoView = orig;
+      spy.mockRestore();
+    }
+  });
+
+  it('🔴 選択が取れない環境でも、軽い行は外れ、塊は組まれたまま', async () => {
+    const s = screen();
+    await tick();
+    const find = [...s.table().querySelectorAll<HTMLElement>('tr[data-pkc-chunk-find]')].find((f) =>
+      (f.textContent ?? '').includes('t2800'),
+    )!;
+    const spy = vi.spyOn(window, 'getSelection').mockReturnValue(null);
+    try {
+      find.dispatchEvent(new Event('beforematch', { bubbles: true }));
+      await tick(40);
+      expect(find.isConnected).toBe(false);
+      expect(s.table().querySelector('[data-pkc-entry="n2800"]')).not.toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('🔴 ブラウザが hidden を外した軽い行は、場所を取らない(CSS)', () => {
+    const css = readFileSync('src/styles/app.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const m = /\[data-pkc-region='filer-table'\]\[data-pkc-grid\] tbody > tr\[data-pkc-chunk-find\]\s*\{([^}]*)\}/.exec(css);
+    expect(m, '規則が読めない').not.toBeNull();
+    expect(m![1]).toMatch(/height:\s*0\s*!important/);
+    expect(m![1]).toMatch(/overflow:\s*hidden/);
+    // 組んだあとの塊(`data-pkc-chunk-empty` が付いていない)でも効く ── 空の塊に限らない
+    expect(m![0]).not.toContain('data-pkc-chunk-empty');
   });
 
   it('🔴 印刷の間は全部の塊を組む(紙には全行が出る)── 終われば窓に戻る', async () => {

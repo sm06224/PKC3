@@ -36,6 +36,7 @@ import {
   SYNC_MANIFEST_NAME,
   describeSync,
   emptyManifest,
+  foldName,
   isMarkdownName,
   planSync,
   readManifest as readManifestText,
@@ -54,6 +55,8 @@ import { slugForTitle } from '@features/export/pkc3-markdown-zip';
 
 /** 記録をこの件数ごとに保存する。 */
 export const SYNC_SAVE_EVERY = 100;
+/** 記録を、前の保存からこの時間(ms)が過ぎたら保存する(件数が少なくても、タブを閉じる・落ちるに備える)。 */
+export const SYNC_SAVE_EVERY_MS = 2000;
 
 /** `FileSystemWritableFileStream`(必要な部分だけ)。 */
 interface WritableLike {
@@ -100,6 +103,8 @@ export function windowSyncLock(nav: object = navigator): SyncLock | null {
   const request = (locks.request as (n: string, o: object, cb: (l: unknown) => Promise<void>) => Promise<void>).bind(locks);
   return async (key, fn) => {
     let ran = false;
+    // ⚠ 不透明な origin・file:// などでは request 自身が SecurityError で reject する ── 呼び手が「排他なしで動かす」へ落とせるよう、
+    //   動かす前の reject はそのまま投げる(`FolderSync.runLocked` が受ける)。動かした後の例外は握らない
     await request(key, { ifAvailable: true }, async (lock) => {
       if (lock === null) return;
       ran = true;
@@ -172,6 +177,8 @@ export interface FolderSyncDeps {
   /** テスト用の差し替え口。 */
   hash?(bytes: ArrayBuffer): Promise<string>;
   now?(): Date;
+  /** 経過時間を測る時計(ms)。省くと `Date.now()`。 */
+  nowMs?(): number;
   setTimer?(fn: () => void, ms: number): unknown;
   clearTimer?(handle: unknown): void;
 }
@@ -221,7 +228,11 @@ export class FolderSync {
   private current: Promise<void> | null = null;
   private runningGen = -1;
   /** UTF-8 で読めない / 大きすぎて取り込まなかったファイル(同じ知らせを毎回出さない)。 */
-  private readonly skipped = new Set<string>();
+  private readonly skipped = new Map<string, { size: number; mtime: number }>();
+  /** 知らせの重複を省く: この回に出した字と、前の回に出した字(タイマーの回で同じ字を繰り返さない)。 */
+  private roundMsgs = new Set<string>();
+  private prevMsgs = new Set<string>();
+  private manualRound = true;
   /** 前回のハッシュ(名前 → 大きさ・更新日時・ハッシュ)。同じなら読み直さない。 */
   private readonly hashed = new Map<string, { size: number; mtime: number; hash: string }>();
   /** 「フォルダで消えたノート」への答え。次の同期で計画に渡す。 */
@@ -255,6 +266,45 @@ export class FolderSync {
   /** いま持っている handle(検査用 ── 「やめる」で捨てたかを見る)。 */
   heldHandle(): SyncDirLike | null {
     return this.dir;
+  }
+
+  /**
+   * 知らせの出し口(2 つ)。🔴 **前の回と同じ字は、タイマーの回では黙る**(「消えたノート N 件」や「大きすぎる」を回のたびに繰り返さない)。
+   * ⚠ 押した回(`manual`)は必ず出す。字が変わった(件数が変わった等)ときも出る。
+   */
+  private say(text: string): void {
+    if (this.emit(text)) this.deps.say(text);
+  }
+
+  private fail(text: string): void {
+    if (this.emit(text)) this.deps.fail(text);
+  }
+
+  private emit(text: string): boolean {
+    const again = this.prevMsgs.has(text);
+    this.roundMsgs.add(text);
+    return this.manualRound || !again;
+  }
+
+  private rotateMessages(manual: boolean): void {
+    this.prevMsgs = this.roundMsgs;
+    this.roundMsgs = new Set();
+    this.manualRound = manual;
+  }
+
+  private nowMs(): number {
+    return this.deps.nowMs?.() ?? Date.now();
+  }
+
+  /**
+   * ステータスバーに出す「いまの状態」(知らせではない ── 結果・失敗は `say` / `fail` でメッセージへ)。
+   * 動いている間は「同期しています…」、つながっている間は「最終同期 HH:MM」、止まっていれば「同期が止まっています」。
+   */
+  statusLine(): string {
+    if (this.phase === 'running') return '同期しています…';
+    if (this.phase === 'lost' || this.phase === 'stopped') return '同期が止まっています';
+    if (this.phase === 'idle' && this.lastAt !== null) return `最終同期 ${this.lastAt}`;
+    return '';
   }
 
   private changed(): void {
@@ -304,7 +354,7 @@ export class FolderSync {
       dir = await picker({ mode: 'readwrite' });
     } catch (e) {
       if (errName(e) === 'AbortError') return;
-      this.deps.fail(`同期するフォルダを開けませんでした: ${errorText(e)}`);
+      this.fail(`同期するフォルダを開けませんでした: ${errorText(e)}`);
       return;
     }
     this.resetSession();
@@ -354,12 +404,12 @@ export class FolderSync {
     if (dir === null) return;
     if (this.runningGen === this.generation) return;
     if (this.phase === 'lost' || this.phase === 'stopped') {
-      if (manual) this.deps.fail(this.message ?? 'フォルダを選び直してください');
+      if (manual) this.fail(this.message ?? 'フォルダを選び直してください');
       return;
     }
     if (!this.deps.ready()) {
       // 編集中などは次の回へ(タイマーの回は黙る)
-      if (manual) this.deps.say('いまは同期できません(編集を終えると同期できます)');
+      if (manual) this.say('いまは同期できません(編集を終えると同期できます)');
       this.setTimer();
       return;
     }
@@ -373,7 +423,14 @@ export class FolderSync {
       if (before !== null) await before.catch(() => undefined);
       if (gen !== this.generation) return;
       await this.runLocked(dir, gen, manual);
-    })();
+    })().catch((e: unknown) => {
+      // 🔴 保険: 想定外の例外で「同期しています…」のまま固まらない(待つ側が無いので、握って idle へ戻し、次の回を張る)
+      if (gen !== this.generation) return;
+      this.fail(`フォルダとの同期が止まりました: ${errorText(e)}`);
+      this.phase = 'idle';
+      this.changed();
+      this.setTimer();
+    });
     this.current = task;
     try {
       await task;
@@ -384,6 +441,7 @@ export class FolderSync {
 
   private async runLocked(dir: SyncDirLike, gen: number, manual: boolean): Promise<void> {
     const run = async (): Promise<void> => {
+      this.rotateMessages(manual);
       try {
         if (dir.queryPermission !== undefined && (await dir.queryPermission({ mode: 'readwrite' })) !== 'granted') {
           this.halt(gen, 'lost', '許可が切れたので同期を止めました。PC タブでもう一度フォルダを選んでください');
@@ -395,7 +453,7 @@ export class FolderSync {
         this.lastText = text;
         this.lastAt = this.clock();
         if (manual || counts.written + counts.pulled + counts.adopted + counts.conflicts + counts.failed + counts.gone > 0) {
-          this.deps.say(`フォルダと同期しました: ${text}`);
+          this.say(`フォルダと同期しました: ${text}`);
         }
         this.phase = 'idle';
         this.changed();
@@ -406,7 +464,7 @@ export class FolderSync {
           this.halt(gen, 'lost', '許可が切れたので同期を止めました。PC タブでもう一度フォルダを選んでください');
         } else {
           // 一時的な失敗かもしれない(ファイルが使われている等)── 理由を言い、次の回でやり直す
-          this.deps.fail(`フォルダとの同期に失敗しました: ${errorText(e)}`);
+          this.fail(`フォルダとの同期に失敗しました: ${errorText(e)}`);
           this.phase = 'idle';
           this.lastText = `失敗しました(${errorText(e)})`;
           this.lastAt = this.clock();
@@ -421,9 +479,22 @@ export class FolderSync {
       return;
     }
     // 🔴 別のタブ・ウィンドウが同じフォルダを同期していたら、重ならない(取れなければ次の回へ)
-    const got = await lock(`pkc3-folder-sync:${this.deps.cid()}:${dir.name}`, run);
+    //   ⚠ `navigator.locks.request` が動かす前に reject する環境(不透明な origin・file:// の SecurityError)では、
+    //   排他なしで動かす ── 同期が `running` のまま固まらない。動かした後の例外は握らない(二重に走らせない)
+    let ran = false;
+    let got: boolean;
+    try {
+      got = await lock(`pkc3-folder-sync:${this.deps.cid()}:${dir.name}`, async () => {
+        ran = true;
+        await run();
+      });
+    } catch {
+      if (ran) return;
+      await run();
+      return;
+    }
     if (!got && gen === this.generation) {
-      if (manual) this.deps.say(SYNC_OTHER_TAB_NOTE);
+      if (manual) this.say(SYNC_OTHER_TAB_NOTE);
       this.phase = 'idle';
       this.changed();
       this.setTimer();
@@ -441,7 +512,7 @@ export class FolderSync {
     this.clearTimer();
     this.phase = phase;
     this.message = message;
-    this.deps.fail(message);
+    this.fail(message);
     this.changed();
   }
 
@@ -506,6 +577,14 @@ export class FolderSync {
     }
   }
 
+  /** 読めなかったファイルを、同じ状態(大きさ・更新日時)のあいだは 1 度だけ言う。直されたら(状態が変われば)また言える。 */
+  private warnSkipped(name: string, file: File, text: string): void {
+    const sk = this.skipped.get(name);
+    if (sk !== undefined && sk.size === file.size && sk.mtime === file.lastModified) return;
+    this.skipped.set(name, { size: file.size, mtime: file.lastModified });
+    this.fail(text);
+  }
+
   /**
    * フォルダ直下の .md を列挙してハッシュを引く。
    * 🔴 記録にある名前は `.md` でなくても・`_` で始まっていても数える(`watched`)。大きすぎて読めない物は `unreadable`。
@@ -519,16 +598,16 @@ export class FolderSync {
     const seen = new Set<string>();
     for await (const e of dir.values()) {
       if (e.kind !== 'file') continue;
-      const isWatched = watched.has(e.name.normalize('NFC').toLowerCase());
+      const isWatched = watched.has(foldName(e.name));
       if (!isWatched && !isMarkdownName(e.name)) continue;
-      if (!isWatched && this.skipped.has(e.name)) {
-        seen.add(e.name);
-        continue;
-      }
       try {
         const fh = await dir.getFileHandle(e.name);
         const file = await fh.getFile();
         seen.add(e.name);
+        // 🔴 読めなかった印は「名前」ではなく「名前 + 大きさ + 更新日時」に付ける ── 直されたら外して読み直す
+        const sk = this.skipped.get(e.name);
+        if (sk !== undefined && (sk.size !== file.size || sk.mtime !== file.lastModified)) this.skipped.delete(e.name);
+        if (!isWatched && this.skipped.has(e.name)) continue;
         const prev = this.hashed.get(e.name);
         if (prev !== undefined && prev.size === file.size && prev.mtime === file.lastModified) {
           files.push({ name: e.name, hash: prev.hash });
@@ -536,12 +615,11 @@ export class FolderSync {
         }
         if (file.size > IMPORT_TEXT_MAX_BYTES) {
           // 🔴 大きすぎるファイルは読めない: 取り込まず・書き換えず(記録にある物は `unreadable` で渡す)。知らせは 1 度だけ
-          if (!this.skipped.has(e.name)) {
-            this.skipped.add(e.name);
-            this.deps.fail(
-              `「${e.name}」は大きすぎて同期できません(${humanBytes(IMPORT_TEXT_MAX_BYTES)} まで。ファイルもノートもそのままにします)`,
-            );
-          }
+          this.warnSkipped(
+            e.name,
+            file,
+            `「${e.name}」は大きすぎて同期できません(${humanBytes(IMPORT_TEXT_MAX_BYTES)} まで。ファイルもノートもそのままにします)`,
+          );
           if (isWatched) files.push({ name: e.name, hash: '', unreadable: true });
           failed += 1;
           continue;
@@ -590,42 +668,59 @@ export class FolderSync {
     // ── 記録の保存: 動かす前に決めた「いつ保存するか」。書けた分は必ず保存する(`finally`)
     let dirty = false;
     let sinceSave = 0;
+    let lastSaveAt = this.nowMs();
     const save = async (): Promise<void> => {
       if (!dirty) return;
       await this.writeManifest(dir, manifest);
       dirty = false;
       sinceSave = 0;
+      lastSaveAt = this.nowMs();
     };
+    // 🔴 件数(100 件)でも時間(約 2 秒)でも保存する ── タブを閉じる・落ちるで、最大 99 件ぶんの記録が残らず重複するのを防ぐ
     const touched = async (): Promise<void> => {
       dirty = true;
       sinceSave += 1;
-      if (sinceSave >= SYNC_SAVE_EVERY) await save();
+      if (sinceSave >= SYNC_SAVE_EVERY || this.nowMs() - lastSaveAt >= SYNC_SAVE_EVERY_MS) await save();
     };
 
     try {
-      // 「同期に戻す」を反映する(外していた印と「消した」の印を外す ── 新しい名前で書き直す)
-      for (const lid of this.attachReq) {
+      // 「同期に戻す」: 外していた印を外す(「消した」の印は、フォルダを見てから決める ── 下)
+      const attaching = [...this.attachReq];
+      this.attachReq.clear();
+      for (const lid of attaching) {
         if (manifest.detached?.[lid] === true) {
           delete manifest.detached[lid];
+          dirty = true;
+        }
+      }
+
+      const allNotes = this.deps.notes();
+      const locals: LocalNote[] = allNotes.map((n) => ({ ...n, busy: this.deps.isBusy(n.lid) }));
+      // 記録にある名前(`.md` でなくても・`_` で始まっていても)+ 「消した」ノートの前のファイル名を数える
+      const watched = new Set(Object.values(manifest.entries).map((r) => foldName(r.file)));
+      for (const [k, r] of Object.entries(manifest.removed)) if (!k.startsWith('ignored:') && !k.startsWith('stale:')) watched.add(foldName(r.file));
+      const { files: externals, failed } = await this.listExternals(dir, watched);
+      counts.failed += failed;
+      if (gen !== this.generation) return null;
+
+      // 「同期に戻す」の続き: 前のファイルが復活していれば、新しいファイルを作らず前の記録へ紐づける(重複させない)。無ければ新しい名前で書く
+      const present = new Set(externals.map((e) => foldName(e.name)));
+      for (const lid of attaching) {
+        const r = manifest.removed[lid];
+        if (r !== undefined && !present.has(foldName(r.file))) {
           delete manifest.removed[lid];
           dirty = true;
         }
       }
-      this.attachReq.clear();
-
-      const allNotes = this.deps.notes();
-      const locals: LocalNote[] = allNotes.map((n) => ({ ...n, busy: this.deps.isBusy(n.lid) }));
-      // 🔴 ゴミ箱から戻ったノートは、前のファイル名のまま記録へ戻す(2 つのファイルにしない)
+      // 🔴 ゴミ箱から戻ったノート(と、いま紐づけ直すノート)は、前のファイル名のまま記録へ戻す(2 つのファイルにしない)
       const detachedNow = manifest.detached ?? {};
       const returnable = locals.filter((l) => detachedNow[l.lid] !== true);
       if (reinstateReturned(manifest, returnable) > 0) dirty = true;
 
-      const watched = new Set(Object.values(manifest.entries).map((r) => r.file.normalize('NFC').toLowerCase()));
-      const { files: externals, failed } = await this.listExternals(dir, watched);
-      counts.failed += failed;
-      if (gen !== this.generation) return null;
       const plan = planSync(manifest, locals, externals, this.decisions);
-      const hashOf = new Map(externals.map((e) => [e.name, e.hash]));
+      // 名前は大文字小文字・NFC を同一視して引く(ファイラが綴りを変えても同じファイル)
+      const hashMap = new Map(externals.map((e) => [foldName(e.name), e.hash]));
+      const hashOf = (name: string): string | undefined => hashMap.get(foldName(name));
 
       // 最初の接続で、フォルダに在る Markdown を取り込むかを聞く(断られたら「見た」として記録だけ残す)
       let allowAdopt = true;
@@ -637,7 +732,7 @@ export class FolderSync {
         );
         if (gen !== this.generation) return null;
         if (!allowAdopt) {
-          for (const f of adoptNames) manifest.removed[`ignored:${f}`] = { file: f, hash: hashOf.get(f) ?? '' };
+          for (const f of adoptNames) manifest.removed[`ignored:${f}`] = { file: f, hash: hashOf(f) ?? '' };
           dirty = true;
         }
       }
@@ -648,12 +743,15 @@ export class FolderSync {
       };
       const adopts: string[] = [];
       const goneNow: { lid: string; file: string }[] = [];
+      // 触れなかったノート(編集中)への「書き戻す」の答えは、次の回まで持ち越す
+      const keepDecisions = new Set<string>();
 
       for (const a of plan.actions) {
         if (gen !== this.generation) return null;
         try {
           if (a.kind === 'defer') {
             counts.deferred += 1;
+            keepDecisions.add(a.lid);
           } else if (a.kind === 'unreadable') {
             counts.deferred += 1;
           } else if (a.kind === 'gone') {
@@ -676,7 +774,7 @@ export class FolderSync {
           } else if (a.kind === 'adopt') {
             if (allowAdopt) adopts.push(a.file);
           } else if (a.kind === 'pull') {
-            if (await this.pull(dir, manifest, a.lid, a.file, hashOf.get(a.file) ?? '', stampOf)) {
+            if (await this.pull(dir, manifest, a.lid, a.file, hashOf(a.file) ?? '', stampOf)) {
               counts.pulled += 1;
               await touched();
             } else counts.deferred += 1;
@@ -686,14 +784,19 @@ export class FolderSync {
             else if (r === 'conflict') {
               counts.written += 1;
               counts.conflicts += 1;
-            } else if (r === 'deferred') counts.deferred += 1;
-            this.decisions.delete(a.lid);
-            if (r !== 'deferred') await touched();
+            } else if (r === 'deferred') {
+              counts.deferred += 1;
+              keepDecisions.add(a.lid);
+            }
+            if (r !== 'deferred') {
+              this.decisions.delete(a.lid);
+              await touched();
+            }
           }
         } catch (e) {
           if (errName(e) === 'NotAllowedError' || errName(e) === 'SecurityError') throw e;
           counts.failed += 1;
-          this.deps.fail(
+          this.fail(
             `フォルダとの同期で『${a.kind === 'adopt' || a.kind === 'pull' || a.kind === 'write' || a.kind === 'gone' || a.kind === 'unreadable' ? a.file : a.lid}』を処理できませんでした: ${errorText(e)}`,
           );
         }
@@ -706,7 +809,9 @@ export class FolderSync {
         });
       }
       // 答えを受けて動かした分は終わり(まだ「消えている」物の答えだけ残す)
-      for (const lid of [...this.decisions.keys()]) if (!goneNow.some((g) => g.lid === lid)) this.decisions.delete(lid);
+      for (const lid of [...this.decisions.keys()]) {
+        if (!keepDecisions.has(lid) && !goneNow.some((g) => g.lid === lid)) this.decisions.delete(lid);
+      }
       if (gen === this.generation) {
         this.gone = goneNow;
         this.detachedLids = Object.keys(manifest.detached ?? {});
@@ -717,7 +822,7 @@ export class FolderSync {
       try {
         await save();
       } catch (e) {
-        this.deps.fail(
+        this.fail(
           `同期の記録を書けませんでした(${errorText(e)})。次の回に、取り込んだファイルをもう一度取り込むことがあります`,
         );
       }
@@ -729,7 +834,7 @@ export class FolderSync {
     dir: SyncDirLike,
     manifest: SyncManifest,
     a: WriteAction,
-    hashOf: ReadonlyMap<string, string>,
+    hashOf: (name: string) => string | undefined,
     stampOf: (lid: string) => { updatedAt: string | null; chars: number | null } | null,
     counts: SyncCounts,
   ): Promise<'wrote' | 'conflict' | 'deferred' | 'skipped'> {
@@ -746,7 +851,7 @@ export class FolderSync {
     const prev = manifest.entries[a.lid];
     const record = { file: a.file, hash, title: meta.title, updatedAt: stamp.updatedAt, chars: stamp.chars };
     // ファイルの中身がもう同じなら書かない(フォルダから取り込んだ直後の世代の更新など)
-    if (a.reason === 'local' && a.prevFile === null && prev !== undefined && hashOf.get(a.file) === hash) {
+    if (a.reason === 'local' && a.prevFile === null && prev !== undefined && hashOf(a.file) === hash) {
       manifest.entries[a.lid] = record;
       return 'skipped';
     }
@@ -754,7 +859,7 @@ export class FolderSync {
      * 🔴 **上書きの直前にハッシュを取り直す**。計画を立ててから書くまでに外で直されていたら、上書きせず競合に倒す
      * (フォルダ側の版を `_conflicts/` へコピーしてから書く)。新しい名前・書き戻しのファイルが、その間に作られていた場合も同じ。
      */
-    const expected = a.reason === 'new' || a.reason === 'missing' ? null : (hashOf.get(a.file) ?? null);
+    const expected = a.reason === 'new' || a.reason === 'missing' ? null : (hashOf(a.file) ?? null);
     const cur = await this.currentHash(dir, a.file);
     let conflict = false;
     if (cur !== null && (a.reason === 'conflict' || cur !== expected)) {
@@ -765,7 +870,7 @@ export class FolderSync {
     const written = await (await dir.getFileHandle(a.file)).getFile();
     this.hashed.set(a.file, { size: written.size, mtime: written.lastModified, hash });
     manifest.entries[a.lid] = record;
-    if (a.prevFile !== null && a.prevFile !== a.file) {
+    if (a.prevFile !== null && foldName(a.prevFile) !== foldName(a.file)) {
       await this.removePrevious(dir, manifest, a.prevFile, prev?.hash ?? null, counts);
     }
     return conflict ? 'conflict' : 'wrote';
@@ -793,7 +898,7 @@ export class FolderSync {
     } catch (e) {
       manifest.removed[`stale:${prevFile}`] = { file: prevFile, hash: cur };
       counts.failed += 1;
-      this.deps.fail(`改題した前のファイル『${prevFile}』を消せませんでした(残したまま、取り込み直しません): ${errorText(e)}`);
+      this.fail(`改題した前のファイル『${prevFile}』を消せませんでした(残したまま、取り込み直しません): ${errorText(e)}`);
     }
   }
 
@@ -842,10 +947,7 @@ export class FolderSync {
     if ((await this.hashOf(bytes)) !== hash) return false;
     const text = decodeUtf8(bytes);
     if (text === null) {
-      if (!this.skipped.has(file)) {
-        this.skipped.add(file);
-        this.deps.fail(`「${file}」は UTF-8 として読めないので、ノートに取り込みませんでした(ノートはそのままです)`);
-      }
+      this.warnSkipped(file, f, `「${file}」は UTF-8 として読めないので、ノートに取り込みませんでした(ノートはそのままです)`);
       return false;
     }
     if (this.deps.editedElsewhere !== undefined && (await this.deps.editedElsewhere(lid))) return false;
@@ -879,10 +981,7 @@ export class FolderSync {
           const file = await (await dir.getFileHandle(name)).getFile();
           const bytes = await file.arrayBuffer();
           if (decodeUtf8(bytes) === null) {
-            if (!this.skipped.has(name)) {
-              this.skipped.add(name);
-              this.deps.fail(`「${name}」は UTF-8 として読めないので、ノートに取り込みませんでした`);
-            }
+            this.warnSkipped(name, file, `「${name}」は UTF-8 として読めないので、ノートに取り込みませんでした`);
             counts.failed += 1;
             continue;
           }
@@ -911,7 +1010,7 @@ export class FolderSync {
       } catch (e) {
         if (errName(e) === 'NotAllowedError' || errName(e) === 'SecurityError') throw e;
         counts.failed += 1;
-        this.deps.fail(`フォルダのファイルをノートにできませんでした: ${errorText(e)}`);
+        this.fail(`フォルダのファイルをノートにできませんでした: ${errorText(e)}`);
       }
     }
     return adopted;

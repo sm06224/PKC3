@@ -1723,9 +1723,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return got;
     },
     askAdopt: (message) => ask(message, { okLabel: '取り込む', cancelLabel: '取り込まない' }),
-    say: (text) => showStatus(text),
-    fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
-    onChange: () => repaintPanes(),
+    /**
+     * 🔴 **同期の結果・失敗の知らせは、メッセージ(システムのノート)へ**(CLAUDE.md §2-3)。ステータスバーに出すのは
+     *   状態だけ(`folderSync.statusLine()` ── 「同期しています…」「最終同期 HH:MM」)。⚠ `OP_FAILED` は使わない
+     *   (state.error がステータスバーの errorLine に出てしまう)。
+     */
+    say: (text) => appMessagePost.post({ kind: 'result', source: 'folder-sync', text }),
+    fail: (text) => appMessagePost.post({ kind: 'problem', source: 'folder-sync', text }),
+    // 状態が変わったら、PC タブとステータスバーの両方を描き直す(`paint` は後で組まれる ── 押されるのは boot の後)
+    onChange: () => {
+      repaintPanes();
+      paint();
+    },
   });
   const browse = new BrowseRouter(
     regions.sidebar,
@@ -2129,6 +2138,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       statusBase,
       statusBaseSevere,
       sync,
+      folderSyncLine: folderSync.statusLine(),
       portableAssetNote,
       persistState,
       savingLine: saving.line(),

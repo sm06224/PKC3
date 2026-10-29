@@ -102,6 +102,12 @@ export function readManifest(text: string): ManifestRead {
     }
     const m = v as SyncManifest;
     if (typeof m.detached !== 'object' || m.detached === null) m.detached = {};
+    // 🔴 「消した」と「外した」の印は形を検査し、壊れた要素は捨てる(形の違う要素が 1 つあっても、計画の途中で落とさない)
+    for (const [k, r] of Object.entries(m.removed)) {
+      const x = r as Partial<{ file: string; hash: string }> | null;
+      if (x === null || typeof x !== 'object' || typeof x.file !== 'string' || typeof x.hash !== 'string') delete m.removed[k];
+    }
+    for (const [k, r] of Object.entries(m.detached)) if (r !== true) delete m.detached[k];
     return { ok: true, manifest: m };
   } catch {
     return { ok: false, reason: 'broken' };
@@ -157,7 +163,8 @@ export type SyncAction =
 export type GoneDecision = 'restore' | 'detach';
 
 /** 大文字小文字と正規化(NFC)を同一視する(macOS / Windows は同じファイルとして扱う)。 */
-const fold = (s: string): string => s.normalize('NFC').toLowerCase();
+export const foldName = (s: string): string => s.normalize('NFC').toLowerCase();
+const fold = foldName;
 
 /** 取り込める拡張子。⚠ 取り込みの入口の判定 ── 記録にあるファイルの照合には使わない(`_` や `.` で始まる名前も記録にある)。 */
 export function isMarkdownName(name: string): boolean {
@@ -281,7 +288,8 @@ export function planSync(
       if (rec.title !== '' && n.title !== rec.title) {
         used.delete(fold(rec.file));
         file = claimName(used, n.title);
-        prevFile = rec.file === file ? null : rec.file;
+        // 🔴 大文字小文字・NFC だけの改題は同じファイル(大文字小文字を区別しない FS で、書いたばかりのファイルを消さない)
+        prevFile = fold(rec.file) === fold(file) ? null : rec.file;
       }
       names.set(n.lid, file);
       actions.push({ kind: 'write', lid: n.lid, file, prevFile, reason: 'local' });

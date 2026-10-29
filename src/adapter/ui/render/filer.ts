@@ -145,7 +145,13 @@ export class FilerRenderer {
     this.printAll = false;
     this.syncWindow();
   };
-  /** ブラウザ内検索が、組んでいない塊の題名に当たった ── その塊を組む(行は検索が当たった所に出る)。 */
+  /**
+   * ブラウザ内検索が、組んでいない塊の題名に一致した ── その塊を組む。
+   * 🔴 **軽い行は、ここでは外さない**。ブラウザは `beforematch` の後で「一致した場所」へスクロールし、その位置に選択を張る
+   * (軽い行の中の文字)。いま外すと、その一致が消えて、次の「次を検索」が別の場所へ飛ぶ。外すのは、本物の行へ選択を張り直した後
+   * (`settleMatch`。ブラウザのスクロールが済んだ次の描画の前)。
+   */
+  private readonly keepFind = new Set<number>();
   private readonly onBeforeMatch = (ev: Event): void => {
     const target = ev.target;
     if (!(target instanceof Element)) return;
@@ -153,10 +159,49 @@ export class FilerRenderer {
     const at = chunk === null ? -1 : this.chunks.indexOf(chunk as HTMLTableSectionElement);
     const state = this.curState;
     if (at < 0 || state === null) return;
+    this.keepFind.add(at);
     const want = new Set(this.mounted);
     want.add(at);
     this.applyChunks(want, state);
+    const win = this.region.ownerDocument.defaultView;
+    if (win === null) this.settleMatch(at);
+    else win.requestAnimationFrame(() => this.settleMatch(at));
   };
+
+  /**
+   * 検索の一致を、軽い行から本物の行へ移す: 一致した字を含む題名の行を探して見える所へ送り、選択をその字へ張り直してから、
+   * 軽い行を外す。⚠ 選択が取れない・題名が見つからない環境でも、軽い行は外す(場所を取らない・二重に当たらない)。
+   */
+  private settleMatch(at: number): void {
+    const chunk = this.chunks[at];
+    this.keepFind.delete(at);
+    if (chunk === undefined) return;
+    const blob = chunk.querySelector(':scope > tr[data-pkc-chunk-find]');
+    const doc = this.region.ownerDocument;
+    const sel = doc.defaultView?.getSelection?.() ?? null;
+    // ⚠ `Selection.toString()` は描画された字だけ(軽い行は高さ 0 ── 実ブラウザで '' が返る)。範囲の字そのものを読む
+    const q = sel === null || sel.rangeCount === 0 ? '' : sel.getRangeAt(0).toString();
+    if (sel !== null && q.trim() !== '') {
+      for (const td of chunk.querySelectorAll('tr[data-pkc-entry] [data-pkc-field="title"]')) {
+        const node = [...td.childNodes].reverse().find((n): n is Text => n.nodeType === 3);
+        const from = node === undefined ? -1 : node.data.indexOf(q);
+        if (node === undefined || from < 0) continue;
+        const row = td.closest('tr');
+        if (row !== null && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'center' });
+        try {
+          const r = doc.createRange();
+          r.setStart(node, from);
+          r.setEnd(node, from + q.length);
+          sel.removeAllRanges();
+          sel.addRange(r);
+        } catch {
+          /* 選択を張れない環境 ── 行へ送るところまでで足りる */
+        }
+        break;
+      }
+    }
+    blob?.remove();
+  }
   private readonly onScroll = (): void => {
     if (!this.grid || this.scrollPending) return;
     this.scrollPending = true;
@@ -1238,6 +1283,8 @@ export class FilerRenderer {
       tr.setAttribute('aria-hidden', 'true');
       tr.append(document.createElement('td'));
     }
+    // ブラウザは一致を見せるとき `hidden` を外す ── 組まない塊に戻すときに付け直す
+    if (tr.getAttribute('hidden') !== 'until-found') tr.setAttribute('hidden', 'until-found');
     const td = tr.firstElementChild!;
     if (td.textContent !== text) td.textContent = text;
     if (tr.parentNode !== chunk) chunk.append(tr);
@@ -1296,7 +1343,8 @@ export class FilerRenderer {
       const count = Math.min(list.length, (c + 1) * size) - c * size;
       const part = parts.get(c);
       if (part !== undefined) {
-        chunk.querySelector(':scope > tr[data-pkc-chunk-find]')?.remove();
+        // 検索の一致の移し替え(`settleMatch`)が済むまでは、軽い行を残す
+        if (!this.keepFind.has(c)) chunk.querySelector(':scope > tr[data-pkc-chunk-find]')?.remove();
         this.placeRows(chunk, part, renamingRow);
         chunk.removeAttribute('data-pkc-chunk-empty');
         chunk.style.removeProperty('height');

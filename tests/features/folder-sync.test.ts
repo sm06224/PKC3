@@ -236,6 +236,23 @@ describe('補助', () => {
     const r = readManifest(JSON.stringify(old));
     expect(r.ok && r.manifest.detached).toEqual({});
   });
+  it('🔴 readManifest: 「消した」「外した」の印の壊れた要素は捨てる(落とさない)', () => {
+    const m = manifest({ a: rec('a.md') }) as unknown as { removed: Record<string, unknown>; detached: Record<string, unknown> };
+    m.removed['ok'] = { file: 'x.md', hash: 'h' };
+    m.removed['n'] = null;
+    m.removed['num'] = 5;
+    m.removed['nofile'] = { hash: 'h' };
+    m.detached['yes'] = true;
+    m.detached['str'] = 'true';
+    const r = readManifest(JSON.stringify(m));
+    expect(r.ok && Object.keys(r.manifest.removed)).toEqual(['ok']);
+    expect(r.ok && r.manifest.detached).toEqual({ yes: true });
+  });
+  it('🔴 大文字小文字・NFC だけの改題は、前のファイルを持たない(prevFile=null)', () => {
+    const m = manifest({ a: rec('readme.md', { title: 'readme' }) });
+    const p = planSync(m, [note('a', { title: 'Readme', chars: 99 })], [ext('readme.md')]);
+    expect(p.actions).toEqual([{ kind: 'write', lid: 'a', file: 'Readme.md', prevFile: null, reason: 'local' }]);
+  });
   it('間隔の選択肢は昇順で 1 分以上', () => {
     expect([...SYNC_INTERVAL_MINUTES]).toEqual([...SYNC_INTERVAL_MINUTES].sort((a, b) => a - b));
     expect(SYNC_INTERVAL_MINUTES[0]).toBeGreaterThanOrEqual(1);

@@ -8552,11 +8552,13 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   content-visibility: visible;
 }
 /* 題名だけの軽い行は場所を取らない(塊の高さは `filer.ts` が行数から入れる) */
-[data-pkc-region='filer-table'][data-pkc-grid] tbody[data-pkc-chunk-empty] > tr[data-pkc-chunk-find] {
+/* ⚠ ブラウザの検索が当たると `hidden` が外れる(塊を組んだあとも、選択を本物の行へ移すまで残る)── 外れても場所を取らない */
+[data-pkc-region='filer-table'][data-pkc-grid] tbody > tr[data-pkc-chunk-find] {
   display: block;
   height: 0 !important;
   min-height: 0;
   padding: 0 !important;
+  border: 0;
   overflow: hidden;
 }
 /* 罫線が畳まれる表では、最初の行の上と最後の行の下に罫線の半分(0.5px)が足されていた。

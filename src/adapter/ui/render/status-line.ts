@@ -67,6 +67,11 @@ export interface StatusLineParts {
   readonly statusBaseSevere?: boolean;
   /** 複数タブ / follower のバッジ。 */
   readonly sync: string;
+  /**
+   * 🔴 **フォルダとの同期の「いまの状態」**(「同期しています…」「最終同期 HH:MM」「同期が止まっています」。#1455)。
+   * ⚠ 状態だけ ── 結果・失敗・消えたノートの知らせはメッセージ(システムのノート)へ送る(CLAUDE.md §2-3)。空 = 出さない。
+   */
+  readonly folderSyncLine?: string;
   readonly portableAssetNote: string;
   readonly persistState: string;
   /** `SavingIndicator.line()`。 */
@@ -98,6 +103,7 @@ export function composeStatusLine(parts: StatusLineParts): string {
     parts.fileDragLine ?? '',
     parts.statusBase,
     parts.sync,
+    parts.folderSyncLine ?? '',
     parts.portableAssetNote,
     parts.persistState,
     parts.savingLine,

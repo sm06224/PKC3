@@ -79,6 +79,51 @@ test('🔴 3,000 件の左の一覧: 組む行は数百行以内・スクロー�
     .poll(async () => page.evaluate(() => document.activeElement?.closest('[data-pkc-entry]')?.querySelector('[data-pkc-field="title"]')?.textContent ?? ''))
     .toContain('n2999');
 
+  // ⑦ ブラウザ内検索(Ctrl+F)── 軽い行(hidden=until-found)に一致したときの動きを、実ブラウザの配置で見る。
+  //   ⚠ `window.find()` は hidden=until-found の中を探さず beforematch も飛ばさない(実測: Chromium で、単純な頁でも false)。
+  //   Ctrl+F の検索そのものは自動化できないので、ブラウザがすることを写す:
+  //   beforematch を飛ばす → hidden を外す(ブラウザは一致を見せるとき外す)→ 軽い行の中の字を選択。
+  //   見るのは「塊が組まれ、選択が本物の行の中へ移り、行が見える所にあり、軽い行が残らず、配置が動かない」。
+  await page.evaluate((host) => ((document.querySelector(host) as HTMLElement).scrollTop = 0), HOST);
+  await expect(page.locator(ROW).first()).toBeVisible();
+  await expect(page.locator(ROW).filter({ hasText: 'n2500' }), '前提: n2500 は組まれていない').toHaveCount(0);
+  const heightBefore = await page.evaluate((host) => (document.querySelector(host) as HTMLElement).scrollHeight, HOST);
+  const mimicked = await page.evaluate(() => {
+    const blob = [...document.querySelectorAll('tr[data-pkc-chunk-find]')].find((b) => (b.textContent ?? '').includes('n2500'));
+    if (blob === undefined) return null;
+    // ブラウザの順: beforematch → hidden を外す → 一致した字を選択してスクロール
+    blob.dispatchEvent(new Event('beforematch', { bubbles: true }));
+    blob.removeAttribute('hidden');
+    const text = blob.firstElementChild!.firstChild as Text;
+    const at = text.data.indexOf('n2500');
+    const r = document.createRange();
+    r.setStart(text, at);
+    r.setEnd(text, at + 5);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(r);
+    return { onbeforematch: 'onbeforematch' in document.documentElement, blobConnected: blob.isConnected };
+  });
+  expect(mimicked, 'n2500 を含む軽い行が無い').not.toBeNull();
+  expect(mimicked!.onbeforematch, 'until-found に対応していない').toBe(true);
+  expect(mimicked!.blobConnected, '一致を移す前に軽い行を外した').toBe(true);
+  await expect(page.locator(ROW).filter({ hasText: 'n2500' }), '一致した塊が組まれない').toHaveCount(1);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const sel = window.getSelection();
+        const n = sel?.anchorNode ?? null;
+        const el = n === null ? null : n.nodeType === 1 ? (n as Element) : n.parentElement;
+        return el?.closest('tr[data-pkc-entry]') && sel!.rangeCount > 0 ? sel!.getRangeAt(0).toString() : null;
+      }),
+    { message: '一致の後、選択が本物の行の中に無い' })
+    .toBe('n2500');
+  await expect(page.locator(ROW).filter({ hasText: 'n2500' })).toBeInViewport();
+  expect(await page.locator('tr[data-pkc-chunk-find]').filter({ hasText: 'n2500' }).count(), '軽い行が残っている').toBe(0);
+  // 軽い行(hidden を外されても)が場所を取らない: 組んだ分だけ高さが増えない
+  const heightAfter = await page.evaluate((host) => (document.querySelector(host) as HTMLElement).scrollHeight, HOST);
+  expect(Math.abs(heightAfter - heightBefore), 'スクロールの長さが動いた').toBeLessThanOrEqual(1);
+
   // ⑥ 掴んだまま遠くへ送る(下端の自動スクロール相当)── 掴んだ行は外れず、dragend が届く
   //   (掴んだ行が DOM から外れると dragend が来ず、ドラッグが終わらない)
   await page.evaluate((host) => ((document.querySelector(host) as HTMLElement).scrollTop = 0), HOST);

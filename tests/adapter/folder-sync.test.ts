@@ -25,13 +25,24 @@ class FakeDir implements SyncDirLike {
   /** 書き込みを失敗させる名前。 */
   failWrite = new Set<string>();
   writes: string[] = [];
+  /** 同期の記録を書くたびの中身(途中の保存を見る)。 */
+  manifestSnaps: string[] = [];
   permission = 'granted';
+  /** 大文字小文字・NFC を区別しない FS(macOS / Windows)。名前は最初に作った綴りのまま残る。 */
+  ci = false;
   constructor(readonly name = 'sync') {}
+  private resolve(name: string): string {
+    if (!this.ci) return name;
+    const f = (x: string): string => x.normalize('NFC').toLowerCase();
+    for (const k of this.files.keys()) if (f(k) === f(name)) return k;
+    return name;
+  }
   async *values() {
     for (const n of this.files.keys()) yield { kind: 'file', name: n };
     for (const n of this.dirs.keys()) yield { kind: 'directory', name: n };
   }
-  async getFileHandle(name: string, o?: { create?: boolean }): Promise<SyncFileHandleLike> {
+  async getFileHandle(rawName: string, o?: { create?: boolean }): Promise<SyncFileHandleLike> {
+    const name = this.resolve(rawName);
     if (!this.files.has(name)) {
       if (o?.create !== true) throw Object.assign(new Error('nf'), { name: 'NotFoundError' });
       this.files.set(name, { bytes: new Uint8Array(), mtime: this.clock++ });
@@ -39,6 +50,7 @@ class FakeDir implements SyncDirLike {
     const files = this.files;
     const bump = (): number => this.clock++;
     const writes = this.writes;
+    const snaps = this.manifestSnaps;
     const failWrite = this.failWrite;
     return {
       kind: 'file',
@@ -61,6 +73,7 @@ class FakeDir implements SyncDirLike {
           async close() {
             files.set(name, { bytes: acc, mtime: bump() });
             writes.push(name);
+            if (name === SYNC_MANIFEST_NAME) snaps.push(new TextDecoder().decode(acc));
           },
         };
       },
@@ -78,7 +91,7 @@ class FakeDir implements SyncDirLike {
   removeFail = new Set<string>();
   async removeEntry(name: string) {
     if (this.removeFail.has(name)) throw new Error('locked');
-    this.files.delete(name);
+    this.files.delete(this.resolve(name));
   }
   async queryPermission() {
     return this.permission;
@@ -106,12 +119,16 @@ interface Hooks {
   /** n 回目(1 始まり)の adopt を失敗させる。 */
   adoptFail?: (call: number) => boolean;
   lock?: SyncLock | null;
+  /** 経過時間の時計(記録の時間保存を見る)。 */
+  nowMs?: () => number;
+  ci?: boolean;
 }
 
 function setup(initial: Note[], opts: { cid?: string; picker?: boolean; confirm?: boolean; hooks?: Hooks } = {}) {
   const hooks = opts.hooks ?? {};
   let adoptCalls = 0;
   const dir = new FakeDir();
+  dir.ci = hooks.ci === true;
   const notes = new Map(initial.map((n) => [n.lid, { ...n }]));
   const busy = new Set<string>();
   const said: string[] = [];
@@ -136,6 +153,7 @@ function setup(initial: Note[], opts: { cid?: string; picker?: boolean; confirm?
       await hooks.settle?.();
     },
     lock: hooks.lock ?? null,
+    ...(hooks.nowMs === undefined ? {} : { nowMs: hooks.nowMs }),
     readBody: async (lid) => {
       await hooks.readBody?.(lid);
       return notes.get(lid)?.body ?? null;
@@ -783,5 +801,221 @@ describe('記録の版', () => {
     expect(t.sync.view().message).toContain('別のバージョン');
     expect(t.sync.view().message).not.toContain('読めない');
     expect(t.dir.text('あ.md')).toBeNull();
+  });
+});
+
+describe('⚠1 排他の口が reject しても固まらない', () => {
+  it('🔴 navigator.locks が SecurityError で reject(不透明な origin・file://)── 排他なしで動き、idle に戻ってタイマーが張られる', async () => {
+    const t = setup([note('a', 'あ', '1')], {
+      hooks: {
+        lock: async () => {
+          throw Object.assign(new Error('opaque origin'), { name: 'SecurityError' });
+        },
+      },
+    });
+    await t.sync.pick();
+    expect(t.dir.text('あ.md'), '排他なしで同期していない').toBe('1');
+    expect(t.sync.view().phase, '「同期しています」のまま固まった').toBe('idle');
+    expect(t.timers.length).toBeGreaterThan(0);
+    // 続けて同期できる(動いている印が残っていない)
+    t.edit('a', '2');
+    await t.sync.syncNow(true);
+    expect(t.dir.text('あ.md')).toBe('2');
+  });
+
+  it('🔴 許可の確認が想定外の例外を投げても idle に戻り、タイマーを張る', async () => {
+    const t = setup([note('a', 'あ', '1')]);
+    await t.sync.pick();
+    const before = t.timers.length;
+    const dir = t.sync.heldHandle()!;
+    dir.queryPermission = async () => {
+      throw new Error('boom');
+    };
+    await t.sync.syncNow(true);
+    expect(t.sync.view().phase).toBe('idle');
+    expect(t.timers.length).toBeGreaterThan(before);
+  });
+});
+
+describe('⚠2 記録は時間でも保存する', () => {
+  it('🔴 途中の保存の時点で、そこまでに書いた分の記録が入っている(件数が少なくても)', async () => {
+    let clock = 0;
+    const t = setup([note('a', 'あ', '1'), note('b', 'い', '2'), note('c', 'う', '3')], {
+      hooks: { nowMs: () => (clock += 3000) },
+    });
+    await t.sync.pick();
+    const snaps = t.dir.manifestSnaps.map((x) => Object.keys(JSON.parse(x).entries as object));
+    // 最後だけでなく、途中(1 件書いた時点・2 件書いた時点)の保存がある
+    expect(snaps.length, '途中で保存していない').toBeGreaterThanOrEqual(3);
+    expect(snaps[0]).toEqual(['a']);
+    expect(snaps[1]).toEqual(['a', 'b']);
+    expect(snaps.at(-1)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('対照群: 時間が進まず件数も少なければ、最後に 1 回だけ保存する', async () => {
+    const t = setup([note('a', 'あ', '1'), note('b', 'い', '2')], { hooks: { nowMs: () => 0 } });
+    await t.sync.pick();
+    expect(t.dir.manifestSnaps.length).toBe(1);
+  });
+});
+
+describe('⚠3 大文字小文字・NFC だけの改題', () => {
+  it('🔴 readme → Readme: 書いたばかりのファイルを消さず、_conflicts も作らない(大文字小文字を区別しない FS)', async () => {
+    const t = setup([note('a', 'readme', '本文')], { hooks: { ci: true } });
+    await t.sync.pick();
+    t.notes.get('a')!.title = 'Readme';
+    t.edit('a', '本文 2');
+    await t.sync.syncNow(true);
+    const md = [...t.dir.files.keys()].filter((k) => k.endsWith('.md'));
+    expect(md.length, 'ファイルが消えた / 増えた').toBe(1);
+    expect(t.dir.text(md[0]!)).toBe('本文 2');
+    expect(t.dir.dirs.get(SYNC_CONFLICT_DIR), '偽の競合が起きた').toBeUndefined();
+    expect(t.failed).toEqual([]);
+    expect(manifestOf(t.dir).entries['a']!.file.toLowerCase()).toBe('readme.md');
+    // 続けて同期しても変わらない
+    t.dir.writes.length = 0;
+    await t.sync.syncNow(true);
+    expect(t.dir.writes.filter((w) => w !== SYNC_MANIFEST_NAME)).toEqual([]);
+  });
+
+  it('🔴 NFC → NFD の改題でも、ファイルが残り、_conflicts は作らない', async () => {
+    const nfc = '\u304c'; // が
+    const nfd = '\u304b\u3099'; // か + 濁点
+    const t = setup([note('a', nfc, '本文')], { hooks: { ci: true } });
+    await t.sync.pick();
+    t.notes.get('a')!.title = nfd;
+    t.edit('a', '本文 2');
+    await t.sync.syncNow(true);
+    const md = [...t.dir.files.keys()].filter((k) => k.endsWith('.md'));
+    expect(md.length).toBe(1);
+    expect(t.dir.text(md[0]!)).toBe('本文 2');
+    expect(t.dir.dirs.get(SYNC_CONFLICT_DIR)).toBeUndefined();
+  });
+});
+
+describe('⚠4 同じ知らせをタイマーの回ごとに繰り返さない', () => {
+  it('🔴 消えたノートの知らせは、前の回と同じならタイマーの回では黙る。件数が変われば言う。押した回は必ず言う', async () => {
+    const t = setup([note('a', 'あ', '1'), note('b', 'い', '2')]);
+    await t.sync.pick();
+    t.dir.files.delete('あ.md');
+    const gone = (): number => t.said.filter((m) => m.includes('フォルダでファイルが消えています')).length;
+    await t.sync.syncNow(false);
+    expect(gone()).toBe(1);
+    await t.sync.syncNow(false);
+    await t.sync.syncNow(false);
+    expect(gone(), 'タイマーの回ごとに繰り返した').toBe(1);
+    t.dir.files.delete('い.md');
+    await t.sync.syncNow(false);
+    expect(gone(), '件数が変わったのに黙った').toBe(2);
+    await t.sync.syncNow(true);
+    expect(gone(), '押した回は言う').toBe(3);
+  });
+
+  it('🔴 失敗の知らせも同じ(同じ失敗が続くあいだ、タイマーの回では繰り返さない)', async () => {
+    const t = setup([note('a', 'あ', '1')]);
+    t.dir.failWrite.add('あ.md');
+    await t.sync.pick();
+    const n = t.failed.length;
+    expect(n).toBeGreaterThan(0);
+    await t.sync.syncNow(false);
+    await t.sync.syncNow(false);
+    expect(t.failed.length, '同じ失敗を回ごとに繰り返した').toBe(n);
+  });
+});
+
+describe('⚠5 読めなかった印は、名前ではなく状態(大きさ・更新日時)に付く', () => {
+  it('🔴 UTF-8 で読めず取り込めなかった新しいファイルが、直されたら取り込まれる', async () => {
+    const t = setup([], { confirm: true });
+    t.dir.put('x.md', new Uint8Array([0x82, 0xa0, 0x82, 0xa2]));
+    await t.sync.pick();
+    expect(t.notes.size).toBe(0);
+    expect(t.failed.join('')).toContain('UTF-8');
+    const n = t.failed.length;
+    await t.sync.syncNow(true);
+    expect(t.failed.length, '同じ状態のファイルで同じ知らせを繰り返した').toBe(n);
+    t.dir.put('x.md', 'UTF-8 に直した');
+    await t.sync.syncNow(true);
+    expect([...t.notes.values()].map((x) => x.body), '直されたのに読み直さない').toEqual(['UTF-8 に直した']);
+  });
+
+  it('🔴 大きすぎたファイルが小さく直されたら、読めるようになる(もう一度知らせることもできる)', async () => {
+    const t = setup([note('a', 'あ', '1')]);
+    await t.sync.pick();
+    t.dir.put('あ.md', new Uint8Array(8 * 1024 * 1024 + 1).fill(97));
+    await t.sync.syncNow(true);
+    expect(t.failed.join('')).toContain('大きすぎて');
+    t.dir.put('あ.md', '小さく直した');
+    await t.sync.syncNow(true);
+    expect(t.replaced).toEqual(['a']);
+    expect(t.notes.get('a')!.body).toBe('小さく直した');
+  });
+});
+
+describe('ステータスバーには状態だけ', () => {
+  it('🔴 statusLine: 動いている間は「同期しています…」、終われば「最終同期 HH:MM」、止まれば「同期が止まっています」。つなぐ前は空', async () => {
+    const t = setup([note('a', 'あ', '1')]);
+    expect(t.sync.statusLine()).toBe('');
+    let during = '';
+    const orig = t.dir.queryPermission.bind(t.dir);
+    t.dir.queryPermission = async () => {
+      during = t.sync.statusLine();
+      return orig();
+    };
+    await t.sync.pick();
+    expect(during).toBe('同期しています…');
+    expect(t.sync.statusLine()).toBe('最終同期 13:05');
+    t.dir.permission = 'prompt';
+    t.dir.queryPermission = orig;
+    await t.sync.syncNow(true);
+    expect(t.sync.statusLine()).toBe('同期が止まっています');
+    t.sync.stop();
+    expect(t.sync.statusLine()).toBe('');
+  });
+});
+
+describe('持ち越し・復活', () => {
+  it('🔴 「書き戻す」を選んだノートが編集中で deferred になったら、答えを次の回まで持ち越す', async () => {
+    const t = setup([note('a', 'あ', '1')]);
+    await t.sync.pick();
+    t.dir.files.delete('あ.md');
+    await t.sync.syncNow(true);
+    expect(t.sync.view().gone.length).toBe(1);
+    t.busy.add('a');
+    await t.sync.resolveGone('a', 'restore');
+    expect(t.dir.text('あ.md')).toBeNull();
+    t.busy.clear();
+    await t.sync.syncNow(false);
+    expect(t.dir.text('あ.md'), '答えが消えて、書き戻されない').toBe('1');
+  });
+
+  it('🔴 「同期に戻す」の時点で前のファイルが復活していたら、重複させず前の記録へ紐づける', async () => {
+    const t = setup([note('a', 'あ', '1')]);
+    await t.sync.pick();
+    t.dir.files.delete('あ.md');
+    await t.sync.syncNow(true);
+    await t.sync.resolveGone('a', 'detach');
+    expect(t.sync.view().detached.length).toBe(1);
+    // 外している間に、ユーザーが同じ名前のファイルを戻した
+    t.dir.put('あ.md', '1');
+    await t.sync.attach('a');
+    expect([...t.dir.files.keys()].filter((k) => k.endsWith('.md'))).toEqual(['あ.md']);
+    expect(t.notes.size, '復活したファイルを新しいノートにした').toBe(1);
+    expect(manifestOf(t.dir).entries['a']!.file).toBe('あ.md');
+    expect(t.sync.view().detached).toEqual([]);
+  });
+
+  it('記録の「消した」印に壊れた要素があっても落ちない(捨てて続ける)', async () => {
+    const t = setup([note('a', 'あ', '1')]);
+    await t.sync.pick();
+    const m = manifestOf(t.dir) as unknown as { removed: Record<string, unknown>; detached: Record<string, unknown> };
+    m.removed['bad'] = 5;
+    m.removed['bad2'] = { file: 1 };
+    m.detached['x'] = 'yes';
+    t.dir.put(SYNC_MANIFEST_NAME, JSON.stringify(m));
+    await t.sync.syncNow(true);
+    expect(t.sync.view().phase).toBe('idle');
+    const after = manifestOf(t.dir);
+    expect(after.removed['bad']).toBeUndefined();
+    expect(after.removed['bad2']).toBeUndefined();
   });
 });
