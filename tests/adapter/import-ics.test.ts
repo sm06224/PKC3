@@ -126,7 +126,7 @@ describe('importIcsFiles ── 実行部', () => {
     expect(said).toContain('1 件は取り消された予定なので入れていません');
     expect(said).toContain('1 件は日付を読めず入れていません');
     // 回数指定の予定は 1 回目として入っている
-    expect(h.written[0]!.body).toContain('- [ ] @2026-09-01 回数指定');
+    expect(h.written[0]!.body).toContain('- [ ] @2026-09-01 終日 回数指定');
   });
 
   it('複数 file は file ごとに 1 ノート', async () => {
