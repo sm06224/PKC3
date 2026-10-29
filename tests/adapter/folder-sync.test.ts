@@ -7,7 +7,12 @@ import {
   type SyncDirLike,
   type SyncFileHandleLike,
 } from '../../src/adapter/platform/folder-sync';
-import { SYNC_CONFLICT_DIR, SYNC_MANIFEST_NAME } from '../../src/features/folder-sync/folder-sync';
+import {
+  SYNC_CONFLICT_DIR,
+  SYNC_MANIFEST_NAME,
+  readManifest,
+} from '../../src/features/folder-sync/folder-sync';
+import { SYNC_OTHER_TAB_NOTE, SYNC_SAVE_EVERY, windowSyncLock, type SyncLock } from '../../src/adapter/platform/folder-sync';
 
 /**
  * 🔴 PC のフォルダとの同期(#1455 の後半)── 本物の判断(`planSync`)+ 本物のハッシュ(`crypto.subtle`)+
@@ -70,7 +75,9 @@ class FakeDir implements SyncDirLike {
     }
     return d;
   }
+  removeFail = new Set<string>();
   async removeEntry(name: string) {
+    if (this.removeFail.has(name)) throw new Error('locked');
     this.files.delete(name);
   }
   async queryPermission() {
@@ -93,7 +100,17 @@ interface Note {
   rev: number;
 }
 
-function setup(initial: Note[], opts: { cid?: string; picker?: boolean; confirm?: boolean } = {}) {
+interface Hooks {
+  settle?: () => Promise<void> | void;
+  readBody?: (lid: string) => Promise<void> | void;
+  /** n 回目(1 始まり)の adopt を失敗させる。 */
+  adoptFail?: (call: number) => boolean;
+  lock?: SyncLock | null;
+}
+
+function setup(initial: Note[], opts: { cid?: string; picker?: boolean; confirm?: boolean; hooks?: Hooks } = {}) {
+  const hooks = opts.hooks ?? {};
+  let adoptCalls = 0;
   const dir = new FakeDir();
   const notes = new Map(initial.map((n) => [n.lid, { ...n }]));
   const busy = new Set<string>();
@@ -115,8 +132,14 @@ function setup(initial: Note[], opts: { cid?: string; picker?: boolean; confirm?
     notes: () => [...notes.values()].map((n) => ({ lid: n.lid, title: n.title, archetype: n.archetype, ...stamp(n) })),
     isBusy: (lid) => busy.has(lid),
     ready: () => ready,
-    settle: async () => {},
-    readBody: async (lid) => notes.get(lid)?.body ?? null,
+    settle: async () => {
+      await hooks.settle?.();
+    },
+    lock: hooks.lock ?? null,
+    readBody: async (lid) => {
+      await hooks.readBody?.(lid);
+      return notes.get(lid)?.body ?? null;
+    },
     replaceBody: (lid, body) => {
       replaced.push(lid);
       const n = notes.get(lid)!;
@@ -124,6 +147,8 @@ function setup(initial: Note[], opts: { cid?: string; picker?: boolean; confirm?
       n.rev += 1;
     },
     adopt: async (files) => {
+      adoptCalls += 1;
+      if (hooks.adoptFail?.(adoptCalls) === true) throw new Error('adopt failed');
       const lids: string[] = [];
       for (const f of files) {
         const lid = `L${nextLid++}`;
@@ -273,14 +298,6 @@ describe('変更の行き来(世代とハッシュ)', () => {
     await t.sync.syncNow(true);
     expect(t.dir.text('メモ.md')).toBe('外の版');
     expect(t.failed.join('')).toContain('処理できませんでした');
-  });
-
-  it('🔴 ファイルが消えていたら書き戻す(正本は PKC3)', async () => {
-    const t = setup([note('a', 'メモ', '本文')]);
-    await t.sync.pick();
-    t.dir.files.delete('メモ.md');
-    await t.sync.syncNow(true);
-    expect(t.dir.text('メモ.md')).toBe('本文');
   });
 
   it('🔴 改題すると新しい名前で書き、前のファイルは外れる', async () => {
@@ -436,5 +453,335 @@ describe('間隔とタイマー', () => {
     late();
     await new Promise((r) => setTimeout(r, 20));
     expect(t.dir.text('メモ.md')).toBe('本文 2');
+  });
+});
+
+const manifestOf = (dir: FakeDir) => {
+  const r = readManifest(dir.text(SYNC_MANIFEST_NAME) ?? '');
+  if (!r.ok) throw new Error('記録が読めない');
+  return r.manifest;
+};
+
+describe('穴 A: 記録は、書けた分を必ず保存する(次の回に重複ノートを出さない)', () => {
+  it('🔴 同期の途中で「やめる」(世代が変わる)── 書けた分の記録が残り、選び直しても書き直さない', async () => {
+    let t!: ReturnType<typeof setup>;
+    // eslint-disable-next-line prefer-const -- フックの中から参照する
+    t = setup([note('a', 'あ', '1'), note('b', 'い', '2'), note('c', 'う', '3')], {
+      hooks: {
+        readBody: (lid) => {
+          if (lid === 'b') t.sync.stop();
+        },
+      },
+    });
+    await t.sync.pick();
+    // 1 件目は書けている ── 記録も残っている(最後にしか保存しない実装では 0 件)
+    expect(t.dir.text('あ.md')).toBe('1');
+    // 止めた時点で書き終えていた分(1 件目と、止めた瞬間に書いていた 2 件目)は記録にある。3 件目は書いていない
+    expect(Object.keys(manifestOf(t.dir).entries)).toEqual(['a', 'b']);
+    expect(t.dir.text('う.md')).toBeNull();
+    t.dir.writes.length = 0;
+    await t.sync.pick();
+    expect(t.dir.text('う.md')).toBe('3');
+    expect(t.dir.writes.filter((w) => w === 'あ.md' || w === 'い.md'), '書いた物を書き直した').toEqual([]);
+    expect([...t.dir.files.keys()].filter((k) => k.endsWith('.md')).sort()).toEqual(['あ.md', 'い.md', 'う.md']);
+  });
+
+  it('🔴 許可が切れて途中で止まっても、書けた分の記録は残る', async () => {
+    const t = setup([note('a', 'あ', '1'), note('b', 'い', '2')]);
+    const orig = t.dir.getFileHandle.bind(t.dir);
+    t.dir.getFileHandle = async (name: string, o?: { create?: boolean }) => {
+      if (name === 'い.md') throw Object.assign(new Error('perm'), { name: 'NotAllowedError' });
+      return orig(name, o);
+    };
+    await t.sync.pick();
+    expect(t.sync.view().phase).toBe('lost');
+    expect(Object.keys(manifestOf(t.dir).entries)).toEqual(['a']);
+  });
+
+  it('🔴 取り込みが途中で失敗しても、取り込めた分は記録に入る ── 次の回は残りだけを取り込む(重複なし)', async () => {
+    const t = setup([], { confirm: true, hooks: { adoptFail: (n) => n === 2 } });
+    for (let i = 0; i < 60; i += 1) t.dir.put(`f${String(i).padStart(2, '0')}.md`, `本文 ${i}`);
+    await t.sync.pick();
+    expect(t.notes.size).toBe(50);
+    expect(Object.keys(manifestOf(t.dir).entries).length).toBe(50);
+    expect(t.sync.view().lastText).toContain('失敗');
+    await t.sync.syncNow(true);
+    expect(t.notes.size, '取り込み済みのファイルをもう一度取り込んだ').toBe(60);
+  });
+
+  it('🔴 件数が多いときは途中でも保存する(SYNC_SAVE_EVERY ごと)', async () => {
+    const n = SYNC_SAVE_EVERY + 20;
+    const t = setup(Array.from({ length: n }, (_, i) => note(`n${i}`, `題${String(i).padStart(3, '0')}`, `本文${i}`)));
+    await t.sync.pick();
+    const saves = t.dir.writes.filter((w) => w === SYNC_MANIFEST_NAME).length;
+    expect(saves, '途中で保存していない').toBeGreaterThanOrEqual(2);
+    expect(Object.keys(manifestOf(t.dir).entries).length).toBe(n);
+  });
+});
+
+describe('穴 B: 読めない(大きすぎる)ファイル', () => {
+  it('🔴 記録にある 8 MB 超のファイルは、ノートが変わっても上書きしない・取り込まない。新しい大きいファイルも取り込まない', async () => {
+    const t = setup([note('a', 'あ', '1')]);
+    await t.sync.pick();
+    const big = new Uint8Array(8 * 1024 * 1024 + 1).fill(97);
+    t.dir.put('あ.md', big);
+    t.dir.put('huge.md', big);
+    t.edit('a', '2');
+    await t.sync.syncNow(true);
+    expect(t.dir.files.get('あ.md')!.bytes.length, '大きいファイルを上書きした').toBe(big.length);
+    expect(t.replaced).toEqual([]);
+    expect(t.notes.size).toBe(1);
+    expect(t.failed.join('')).toContain('大きすぎて同期できません');
+    expect(t.dir.dirs.get(SYNC_CONFLICT_DIR)).toBeUndefined();
+  });
+});
+
+describe('穴 C: `_` で始まる題名', () => {
+  it('🔴 書いたファイルが次の回に「無い」と読まれない(名前は `_` で始まらない)', async () => {
+    const t = setup([note('a', '_秘密', '本文')]);
+    await t.sync.pick();
+    expect(t.dir.text('秘密.md')).toBe('本文');
+    t.dir.writes.length = 0;
+    await t.sync.syncNow(true);
+    expect(t.dir.writes.filter((w) => w !== SYNC_MANIFEST_NAME)).toEqual([]);
+    expect(t.sync.view().gone).toEqual([]);
+  });
+
+  it('🔴 記録が `_x.md` を指している(旧い記録)ときも、在るファイルとして照合する', async () => {
+    const t = setup([note('a', 'あ', '本文')]);
+    await t.sync.pick();
+    // 記録を `_x.md` に付け替え、ファイルも同名にする
+    const m = manifestOf(t.dir);
+    const rec = m.entries['a']!;
+    m.entries['a'] = { ...rec, file: '_x.md' };
+    t.dir.files.set('_x.md', t.dir.files.get('あ.md')!);
+    t.dir.files.delete('あ.md');
+    t.dir.put(SYNC_MANIFEST_NAME, JSON.stringify(m));
+    t.dir.writes.length = 0;
+    await t.sync.syncNow(true);
+    expect(t.dir.writes.filter((w) => w !== SYNC_MANIFEST_NAME)).toEqual([]);
+    expect(t.sync.view().gone).toEqual([]);
+  });
+});
+
+describe('⚠4 上書き・削除の直前にハッシュを取り直す', () => {
+  it('🔴 計画の後・書く前にフォルダ側が直された: 上書きせず、競合として退避してから書く', async () => {
+    let t!: ReturnType<typeof setup>;
+    let armed = false;
+    // eslint-disable-next-line prefer-const -- フックの中から参照する
+    t = setup([note('a', 'メモ', '本文')], {
+      hooks: {
+        settle: () => {
+          if (armed) t.dir.put('メモ.md', '計画の後に外で直した');
+        },
+      },
+    });
+    await t.sync.pick();
+    armed = true;
+    t.edit('a', 'PKC3 で直した');
+    await t.sync.syncNow(true);
+    expect(t.dir.text('メモ.md')).toBe('PKC3 で直した');
+    const sub = t.dir.dirs.get(SYNC_CONFLICT_DIR)!;
+    expect(sub, '退避していない').toBeDefined();
+    expect([...sub.files.keys()].map((k) => sub.text(k))).toEqual(['計画の後に外で直した']);
+  });
+
+  it('🔴 新しい名前のつもりが、計画の後に同じ名前のファイルが作られていた: 上書きせず退避する', async () => {
+    let t!: ReturnType<typeof setup>;
+    // eslint-disable-next-line prefer-const -- フックの中から参照する
+    t = setup([note('a', 'メモ', '本文')], {
+      hooks: {
+        settle: () => {
+          t.dir.put('メモ.md', '先に作られた');
+        },
+      },
+    });
+    await t.sync.pick();
+    const sub = t.dir.dirs.get(SYNC_CONFLICT_DIR)!;
+    expect([...sub.files.keys()].map((k) => sub.text(k))).toEqual(['先に作られた']);
+    expect(t.dir.text('メモ.md')).toBe('本文');
+  });
+
+  it('🔴 改題で前のファイルを消す直前に外で直されていたら、コピーを残してから消す', async () => {
+    let t!: ReturnType<typeof setup>;
+    let armed = false;
+    // eslint-disable-next-line prefer-const -- フックの中から参照する
+    t = setup([note('a', '旧', '本文')], {
+      hooks: {
+        readBody: () => {
+          if (armed) t.dir.put('旧.md', '外で直した前のファイル');
+        },
+      },
+    });
+    await t.sync.pick();
+    armed = true;
+    t.notes.get('a')!.title = '新';
+    t.edit('a', '本文 2');
+    await t.sync.syncNow(true);
+    const sub = t.dir.dirs.get(SYNC_CONFLICT_DIR)!;
+    expect([...sub.files.keys()].map((k) => sub.text(k))).toEqual(['外で直した前のファイル']);
+    expect(t.dir.text('旧.md')).toBeNull();
+    expect(t.dir.text('新.md')).toBe('本文 2');
+  });
+});
+
+describe('⚠5 やめる → すぐ選び直す', () => {
+  it('🔴 古い同期が走っている間にやめて選び直しても、新しい同期は始まり、終わると次も走れる', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let first = true;
+    const t = setup([note('a', 'あ', '1')], {
+      hooks: {
+        readBody: async () => {
+          if (first) {
+            first = false;
+            await gate;
+          }
+        },
+      },
+    });
+    const p1 = t.sync.pick();
+    await new Promise((r) => setTimeout(r, 10));
+    t.sync.stop();
+    const p2 = t.sync.pick();
+    release();
+    await Promise.all([p1, p2]);
+    expect(t.sync.view().phase).toBe('idle');
+    expect(t.dir.text('あ.md')).toBe('1');
+    // 古い同期の終わりが、新しい世代の「動いている」印を倒していない ── 続けて押せて、重ならずに走る
+    t.edit('a', '2');
+    await t.sync.syncNow(true);
+    expect(t.dir.text('あ.md')).toBe('2');
+  });
+});
+
+describe('⚠6 別のタブ・ウィンドウとの排他', () => {
+  it('🔴 ほかが同期している(ロックが取れない)ときは何も書かず、言って、次の回へ回す', async () => {
+    const t = setup([note('a', 'あ', '1')], { hooks: { lock: async () => false } });
+    await t.sync.pick();
+    expect(t.dir.text('あ.md')).toBeNull();
+    expect(t.said.join('')).toContain(SYNC_OTHER_TAB_NOTE);
+    expect(t.timers.length).toBeGreaterThan(0);
+    expect(t.sync.view().phase).toBe('idle');
+  });
+
+  it('🔴 ロックが取れれば動く。鍵はフォルダごと', async () => {
+    const keys: string[] = [];
+    const t = setup([note('a', 'あ', '1')], {
+      hooks: {
+        lock: async (k, fn) => {
+          keys.push(k);
+          await fn();
+          return true;
+        },
+      },
+    });
+    await t.sync.pick();
+    expect(t.dir.text('あ.md')).toBe('1');
+    expect(keys).toEqual(['pkc3-folder-sync:c1:sync']);
+  });
+
+  it('windowSyncLock: navigator.locks が無ければ null / ifAvailable で取れなければ false', async () => {
+    expect(windowSyncLock({})).toBeNull();
+    let held = false;
+    const nav = {
+      locks: {
+        request: async (_n: string, o: { ifAvailable?: boolean }, cb: (l: unknown) => Promise<void>) => {
+          if (held && o.ifAvailable === true) return cb(null);
+          held = true;
+          try {
+            await cb({});
+          } finally {
+            held = false;
+          }
+        },
+      },
+    };
+    const lock = windowSyncLock(nav)!;
+    let ran = 0;
+    const inner: boolean[] = [];
+    await lock('k', async () => {
+      ran += 1;
+      inner.push(await lock('k', async () => void (ran += 10)));
+    });
+    expect(ran).toBe(1);
+    expect(inner).toEqual([false]);
+  });
+});
+
+describe('⚠10 改題で前のファイルを消せなかったとき', () => {
+  it('🔴 失敗に数え、次の回に新しいノートとして取り込まない', async () => {
+    const t = setup([note('a', '旧', '本文')]);
+    await t.sync.pick();
+    t.dir.removeFail.add('旧.md');
+    t.notes.get('a')!.title = '新';
+    t.edit('a', '本文 2');
+    await t.sync.syncNow(true);
+    expect(t.sync.view().lastText).toContain('失敗');
+    expect(t.failed.join('')).toContain('旧.md');
+    await t.sync.syncNow(true);
+    await t.sync.syncNow(true);
+    expect(t.notes.size, '残った前のファイルを取り込んだ').toBe(1);
+  });
+});
+
+describe('ゴミ箱から戻したノート', () => {
+  it('🔴 同じファイル名を使い続ける(2 つのファイルにならない)', async () => {
+    const t = setup([note('a', 'メモ', '本文')]);
+    await t.sync.pick();
+    const saved = t.notes.get('a')!;
+    t.notes.delete('a');
+    await t.sync.syncNow(true);
+    expect(t.dir.text('メモ.md')).toBe('本文');
+    t.notes.set('a', saved);
+    await t.sync.syncNow(true);
+    await t.sync.syncNow(true);
+    expect([...t.dir.files.keys()].filter((k) => k.endsWith('.md'))).toEqual(['メモ.md']);
+    expect(t.notes.size).toBe(1);
+  });
+});
+
+describe('フォルダで消えたノート', () => {
+  it('🔴 黙って書き戻さず、画面に出す。「書き戻す」で書き、「同期から外す」で外し、「同期に戻す」で戻る', async () => {
+    const t = setup([note('a', 'あ', '1'), note('b', 'い', '2')]);
+    await t.sync.pick();
+    t.dir.files.delete('あ.md');
+    t.dir.files.delete('い.md');
+    await t.sync.syncNow(true);
+    expect(t.dir.text('あ.md'), '黙って書き戻した').toBeNull();
+    expect(t.sync.view().gone.map((g) => g.title)).toEqual(['あ', 'い']);
+    expect(t.sync.view().lastText).toContain('2 件はフォルダでファイルが消えています');
+    // タイマーの回でも同じ(選ぶまで何もしない)
+    await t.sync.syncNow(false);
+    expect(t.dir.text('あ.md')).toBeNull();
+
+    await t.sync.resolveGone('a', 'restore');
+    expect(t.dir.text('あ.md')).toBe('1');
+    expect(t.sync.view().gone.map((g) => g.lid)).toEqual(['b']);
+
+    await t.sync.resolveGone('b', 'detach');
+    expect(t.sync.view().gone).toEqual([]);
+    expect(t.sync.view().detached.map((d) => d.lid)).toEqual(['b']);
+    expect(t.dir.text('い.md')).toBeNull();
+    await t.sync.syncNow(true);
+    expect(t.dir.text('い.md'), '外したノートを書いた').toBeNull();
+    expect(manifestOf(t.dir).detached).toEqual({ b: true });
+
+    // 片道にしない: 同期に戻すと、新しいファイルとして書く
+    await t.sync.attach('b');
+    expect(t.dir.text('い.md')).toBe('2');
+    expect(t.sync.view().detached).toEqual([]);
+  });
+});
+
+describe('記録の版', () => {
+  it('🔴 別の版の記録は「壊れている」ではなく「別の版」と言って止める(何も書かない)', async () => {
+    const t = setup([note('a', 'あ', '1')]);
+    t.dir.put(SYNC_MANIFEST_NAME, JSON.stringify({ format: 'pkc3-folder-sync', version: 2, cid: 'c1', entries: {}, removed: {} }));
+    await t.sync.pick();
+    expect(t.sync.view().phase).toBe('stopped');
+    expect(t.sync.view().message).toContain('別のバージョン');
+    expect(t.sync.view().message).not.toContain('読めない');
+    expect(t.dir.text('あ.md')).toBeNull();
   });
 });

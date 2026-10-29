@@ -7,6 +7,8 @@ import {
   isSyncable,
   parseManifest,
   planSync,
+  readManifest,
+  reinstateReturned,
   SYNC_CONFLICT_DIR,
   SYNC_INTERVAL_MINUTES,
   SYNC_MANIFEST_NAME,
@@ -77,11 +79,64 @@ describe('planSync: ノートとファイルの突き合わせ', () => {
     expect(p.actions).toEqual([{ kind: 'write', lid: 'a', file: 'a.md', prevFile: null, reason: 'conflict' }]);
   });
 
-  it('🔴 ファイルが消えていたら書き戻す(正本は PKC3)', () => {
+  it('🔴 ファイルが消えていたら黙って書き戻さない(gone)。「書き戻す」を選んだときだけ書く / 「外す」で記録から外す', () => {
     const m = manifest({ a: rec('a.md', { title: 'Ta' }) });
-    expect(planSync(m, [note('a')], []).actions).toEqual([
+    expect(planSync(m, [note('a')], []).actions).toEqual([{ kind: 'gone', lid: 'a', file: 'a.md' }]);
+    // ノート側が変わっていても同じ(選ぶまでは何も書かない)
+    expect(planSync(m, [note('a', { chars: 99 })], []).actions).toEqual([{ kind: 'gone', lid: 'a', file: 'a.md' }]);
+    expect(planSync(m, [note('a')], [], new Map([['a', 'restore' as const]])).actions).toEqual([
       { kind: 'write', lid: 'a', file: 'a.md', prevFile: null, reason: 'missing' },
     ]);
+    expect(planSync(m, [note('a')], [], new Map([['a', 'detach' as const]])).actions).toEqual([{ kind: 'detach', lid: 'a' }]);
+  });
+
+  it('🔴 同期から外したノートは、書かず・取り込まず・forget もしない', () => {
+    const m = { ...manifest({}, { a: { file: 'a.md', hash: 'h-a.md' } }), detached: { a: true as const } };
+    expect(planSync(m, [note('a')], [ext('a.md')]).actions).toEqual([]);
+  });
+
+  it('🔴 読めない(大きすぎる)ファイルは、書かず・取り込まず(unreadable)。新しいファイルなら取り込まない', () => {
+    const m = manifest({ a: rec('a.md', { title: 'Ta' }) });
+    const big = { name: 'a.md', hash: '', unreadable: true };
+    // ノート側が変わっていても上書きしない
+    expect(planSync(m, [note('a', { chars: 99 })], [big]).actions).toEqual([{ kind: 'unreadable', lid: 'a', file: 'a.md' }]);
+    expect(planSync(emptyManifest('c1'), [], [{ name: 'huge.md', hash: '', unreadable: true }]).actions).toEqual([]);
+  });
+
+  it('🔴 `_` や `.` で始まる題名のファイルも、記録にあれば照合できる(毎回書き直さない)。名前は `_` で始まらない', () => {
+    const used = new Set<string>();
+    expect(claimName(used, '_メモ')).toBe('メモ.md');
+    expect(claimName(used, '.hidden')).toBe('hidden.md');
+    expect(claimName(used, '__')).toBe('ノート.md');
+    // 古い記録が `_x.md` を指していても、ファイルが在れば「在る」と読む(isMarkdownName を通さない)
+    const m = manifest({ a: rec('_x.md', { title: 'Ta' }) });
+    expect(planSync(m, [note('a')], [ext('_x.md')]).actions).toEqual([]);
+  });
+
+  it('🔴 ゴミ箱から戻ったノートは、前のファイル名のまま記録へ戻る(2 つのファイルにしない)', () => {
+    const m = manifest({}, { a: { file: 'メモ.md', hash: 'h' } });
+    const locals = [note('a', { title: 'メモ' })];
+    expect(reinstateReturned(m, locals)).toBe(1);
+    expect(m.entries['a']).toMatchObject({ file: 'メモ.md', hash: 'h', title: '', updatedAt: null });
+    expect(m.removed['a']).toBeUndefined();
+    // 戻したあとの計画: 新しい名前で書かない(ノート側が変わった扱いで、同じ名前へ)
+    const p = planSync(m, locals, [ext('メモ.md', 'h')]);
+    expect(p.actions).toEqual([{ kind: 'write', lid: 'a', file: 'メモ.md', prevFile: null, reason: 'local' }]);
+    // 対象外の種類・既に記録がある物は触らない
+    expect(reinstateReturned(manifest({}, { f: { file: 'f.md', hash: 'h' } }), [note('f', { archetype: 'folder' })])).toBe(0);
+  });
+
+  it('同じファイルを指す 2 つの記録(壊れた記録)── 後の記録のノートは新しい名前で書く', () => {
+    const m = manifest({ a: rec('x.md', { title: 'Ta' }), b: rec('x.md', { title: 'Tb' }) });
+    const p = planSync(m, [note('a'), note('b')], [ext('x.md')]);
+    expect(p.actions.filter((x) => x.kind === 'write')).toEqual([
+      { kind: 'write', lid: 'b', file: 'Tb.md', prevFile: null, reason: 'new' },
+    ]);
+  });
+
+  it('大文字小文字の違うファイル名でも同じファイルとして照合する', () => {
+    const m = manifest({ a: rec('Memo.md', { title: 'Ta' }) });
+    expect(planSync(m, [note('a')], [ext('memo.md', 'h-Memo.md')]).actions).toEqual([]);
   });
 
   it('🔴 改題したら新しい名前で書き、前のファイルを渡す(外で触られていないときだけ)', () => {
@@ -159,11 +214,27 @@ describe('補助', () => {
     expect(parseManifest(JSON.stringify({ ...m, entries: { a: { file: 1 } } }))).toBeNull();
   });
   it('describeSync: 0 件は言わない / 全部 0 は「変更はありませんでした」', () => {
-    const zero = { written: 0, pulled: 0, adopted: 0, conflicts: 0, deferred: 0, failed: 0 };
+    const zero = { written: 0, pulled: 0, adopted: 0, conflicts: 0, deferred: 0, gone: 0, failed: 0 };
     expect(describeSync(zero)).toBe('変更はありませんでした');
     expect(describeSync({ ...zero, written: 2, conflicts: 1 })).toContain('2 件をフォルダへ書きました');
     expect(describeSync({ ...zero, written: 2, conflicts: 1 })).toContain(SYNC_CONFLICT_DIR);
     expect(describeSync({ ...zero, written: 2 })).not.toContain('取り込み');
+  });
+  it('describeSync: フォルダで消えたノートの件数を言う', () => {
+    const zero = { written: 0, pulled: 0, adopted: 0, conflicts: 0, deferred: 0, gone: 0, failed: 0 };
+    expect(describeSync({ ...zero, gone: 2 })).toContain('2 件はフォルダでファイルが消えています');
+  });
+  it('🔴 readManifest: 別の版は「壊れている」ではなく version と読む。形が違えば broken', () => {
+    const m = manifest({ a: rec('a.md') });
+    expect(readManifest(JSON.stringify(m))).toMatchObject({ ok: true });
+    expect(readManifest(JSON.stringify({ ...m, version: 2 }))).toEqual({ ok: false, reason: 'version' });
+    expect(readManifest(JSON.stringify({ ...m, version: 'x' }))).toEqual({ ok: false, reason: 'broken' });
+    expect(readManifest('{')).toEqual({ ok: false, reason: 'broken' });
+    // 旧い記録(detached が無い)は空として読む
+    const { detached: _d, ...old } = m;
+    void _d;
+    const r = readManifest(JSON.stringify(old));
+    expect(r.ok && r.manifest.detached).toEqual({});
   });
   it('間隔の選択肢は昇順で 1 分以上', () => {
     expect([...SYNC_INTERVAL_MINUTES]).toEqual([...SYNC_INTERVAL_MINUTES].sort((a, b) => a - b));

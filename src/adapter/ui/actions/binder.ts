@@ -2728,7 +2728,7 @@ export interface BinderServices {
    * 🔴 **パソコンのフォルダとの同期**(#1455 の後半)。⚠ handle は `FolderSync` が持つ ── binder は「押された」を伝えるだけ。
    * 判断は `features/folder-sync/folder-sync.ts`、読み書きは `platform/folder-sync.ts`。
    */
-  folderSync?: Pick<FolderSync, 'pick' | 'syncNow' | 'stop' | 'setMinutes'>;
+  folderSync?: Pick<FolderSync, 'pick' | 'syncNow' | 'stop' | 'setMinutes' | 'resolveGone' | 'attach'>;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   /** 取込(PKC2 の書出し / 素の Markdown)。振り分けは import-file.ts が持つ。 */
   importFiles?(files: File[]): void;
@@ -18076,6 +18076,19 @@ const ACTIONS: Record<string, ActionHandler> = {
   'pc-sync-pick': (_dispatcher, _target, services) => void services.folderSync?.pick(),
   'pc-sync-now': (_dispatcher, _target, services) => void services.folderSync?.syncNow(true),
   'pc-sync-stop': (_dispatcher, _target, services) => services.folderSync?.stop(),
+  // 🔴 フォルダで消えたノート: 行ごとに「書き戻す」か「同期から外す」(外したノートは「同期に戻す」で戻る ── 片道にしない)
+  'pc-sync-restore': (_dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-sync-lid');
+    if (lid !== null) void services.folderSync?.resolveGone(lid, 'restore');
+  },
+  'pc-sync-detach': (_dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-sync-lid');
+    if (lid !== null) void services.folderSync?.resolveGone(lid, 'detach');
+  },
+  'pc-sync-attach': (_dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-sync-lid');
+    if (lid !== null) void services.folderSync?.attach(lid);
+  },
   'pc-sync-interval': (_dispatcher, target, services) => {
     if (target instanceof HTMLSelectElement) services.folderSync?.setMinutes(Number(target.value));
   },

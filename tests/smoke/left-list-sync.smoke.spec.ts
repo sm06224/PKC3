@@ -26,7 +26,9 @@ test('🔴 3,000 件の左の一覧: 組む行は数百行以内・スクロー�
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('取り込み完了: 3000 件', { timeout: 25_000 });
   await expect(page.locator(ROW).first()).toBeVisible();
 
-  // ① 全件を組んでいない(空振り防止の対照: 件数は 3,000 在る = 末尾まで送れる)
+  // ① 全件を組んでいない(⚠ 窓は hidden="until-found" に対応するブラウザだけ ── 対応しなければ全部組む作りに戻るので、まずそれを確かめる)
+  expect(await page.evaluate(() => 'onbeforematch' in document.documentElement), 'until-found に対応していない').toBe(true);
+  await expect(page.locator('tbody[data-pkc-chunk-empty] > tr[data-pkc-chunk-find]').first()).toHaveAttribute('hidden', 'until-found');
   const mounted = await page.locator(ROW).count();
   expect(mounted, '行が 1 つも組まれていない').toBeGreaterThan(0);
   expect(mounted, '全件を組んでいる(見えている行だけにならない)').toBeLessThanOrEqual(400);
@@ -76,6 +78,33 @@ test('🔴 3,000 件の左の一覧: 組む行は数百行以内・スクロー�
   await expect
     .poll(async () => page.evaluate(() => document.activeElement?.closest('[data-pkc-entry]')?.querySelector('[data-pkc-field="title"]')?.textContent ?? ''))
     .toContain('n2999');
+
+  // ⑥ 掴んだまま遠くへ送る(下端の自動スクロール相当)── 掴んだ行は外れず、dragend が届く
+  //   (掴んだ行が DOM から外れると dragend が来ず、ドラッグが終わらない)
+  await page.evaluate((host) => ((document.querySelector(host) as HTMLElement).scrollTop = 0), HOST);
+  await expect(page.locator(ROW).first()).toBeVisible();
+  await page.evaluate(() => {
+    const w = window as unknown as { __dragend: number };
+    w.__dragend = 0;
+    document.addEventListener('dragend', () => (w.__dragend += 1));
+  });
+  const src = page.locator(ROW).first();
+  const srcLid = await src.getAttribute('data-pkc-entry');
+  const sb = (await src.boundingBox())!;
+  await page.mouse.move(sb.x + 30, sb.y + sb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sb.x + 40, sb.y + sb.height / 2 + 30, { steps: 5 });
+  await page.evaluate((host) => ((document.querySelector(host) as HTMLElement).scrollTop = 60000), HOST);
+  await page.waitForTimeout(300);
+  await expect(page.locator(`${ROW}[data-pkc-entry="${srcLid}"]`), '掴んだ行が、遠くへ送ると外れた').toHaveCount(1);
+  expect(await page.locator(ROW).count(), '全件を組んでいる').toBeLessThanOrEqual(450);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect
+    .poll(async () => page.evaluate(() => (window as unknown as { __dragend: number }).__dragend), {
+      message: 'dragend が届かない(掴んだ行が外れた)',
+    })
+    .toBeGreaterThan(0);
   expect(errors).toEqual([]);
 });
 
@@ -135,6 +164,32 @@ test('🔴 PC のフォルダと同期する: 書き出し → フォルダ側�
   await clickReal(page, '[data-pkc-action="pc-sync-now"]');
   await expect(page.locator('[data-pkc-field="pc-sync-last"]')).toContainText('変更はありませんでした');
   expect((await list())['alpha.md']).toContain('外で直した本文');
+
+  // フォルダでファイルが消えたら、黙って書き戻さず画面に出す。「書き戻す」で戻る
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('pkc-sync-out');
+    await dir.removeEntry('beta.md');
+  });
+  await clickReal(page, '[data-pkc-action="pc-sync-now"]');
+  await expect(page.locator('[data-pkc-field="pc-sync-gone"]')).toContainText('beta');
+  expect((await list())['beta.md'], '黙って書き戻した').toBeUndefined();
+  await clickReal(page, '[data-pkc-action="pc-sync-restore"]');
+  await expect(page.locator('[data-pkc-field="pc-sync-gone"]')).toHaveCount(0);
+  expect((await list())['beta.md']).toContain('betaの本文');
+
+  // フォルダでファイルが消えたら、黙って書き戻さず画面に出す。「書き戻す」で戻る
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('pkc-sync-out');
+    await dir.removeEntry('beta.md');
+  });
+  await clickReal(page, '[data-pkc-action="pc-sync-now"]');
+  await expect(page.locator('[data-pkc-field="pc-sync-gone"]')).toContainText('beta');
+  expect((await list())['beta.md'], '黙って書き戻した').toBeUndefined();
+  await clickReal(page, '[data-pkc-action="pc-sync-restore"]');
+  await expect(page.locator('[data-pkc-field="pc-sync-gone"]')).toHaveCount(0);
+  expect((await list())['beta.md']).toContain('betaの本文');
 
   // やめる(片道にしない): 欄が最初の形に戻り、選び直せる
   await clickReal(page, '[data-pkc-action="pc-sync-stop"]');

@@ -6405,6 +6405,38 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   padding-top: var(--s2);
   border-top: 1px solid var(--border);
 }
+/* 箱を挟んでも並び(縦積み・間隔)を変えない */
+[data-pkc-field='pc-folder-box'],
+[data-pkc-field='pc-sync-top'],
+[data-pkc-field='pc-sync-bottom'] {
+  display: contents;
+}
+[data-pkc-field='pc-sync-gone'],
+[data-pkc-field='pc-sync-detached'] {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  gap: var(--s1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+[data-pkc-field='pc-sync-gone'] > li,
+[data-pkc-field='pc-sync-detached'] > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  padding-bottom: var(--s1);
+  border-bottom: 1px solid var(--border);
+}
+[data-pkc-field='pc-sync-note-title'] {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 [data-pkc-field='pc-sync-title'] {
   font-weight: 600;
 }
@@ -8485,8 +8517,9 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  * Layout + PrePaint + Paint が 1 回に約 290ms)。
  * ⚠ `content-visibility` は `<tr>`(table-row)に効かないので、行数が多いとき
  *   (`data-pkc-grid`。`filer.ts` の `GRID_ROW_THRESHOLD`)だけ表を**格子**で組む
- *   (`display: grid`)── 見た目は同じ(列の幅・行の高さ 26px・罫線)。行は DOM に全部残る
- *   (ブラウザの Ctrl+F は画面の外の行も見つける)。
+ *   (`display: grid`)── 見た目は同じ(列の幅・行の高さ 26px・罫線)。画面の外の塊は行を組まず、題名だけの
+ *   軽い行(`hidden="until-found"`)を置く ── ブラウザの Ctrl+F は画面の外の行も見つけ、当たったら塊を組む
+ *   (`filer.ts` の `paintFindText` / `onBeforeMatch`)。対応しないブラウザでは行を全部組む。
  * ⚠ 少ないときは今までの表のまま ── 罫線が畳まれる表の 0.5px 単位の位置は、格子では
  *   再現しきれない(小数の位置の行で、文字が 1px ずれる)。少ない行は組む費用が小さい。
  * ⚠ 行の高さは**固定の 26px**(`--row-h` + 罫線)── 外れると、スクロールの長さが読み込みの
@@ -8517,6 +8550,14 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  * (高さは `filer.ts` が行数から入れる)。見張りも要らない(中身が無い)ので `content-visibility` は外す。 */
 [data-pkc-region='filer-table'][data-pkc-grid] tbody[data-pkc-chunk-empty] {
   content-visibility: visible;
+}
+/* 題名だけの軽い行は場所を取らない(塊の高さは `filer.ts` が行数から入れる) */
+[data-pkc-region='filer-table'][data-pkc-grid] tbody[data-pkc-chunk-empty] > tr[data-pkc-chunk-find] {
+  display: block;
+  height: 0 !important;
+  min-height: 0;
+  padding: 0 !important;
+  overflow: hidden;
 }
 /* 罫線が畳まれる表では、最初の行の上と最後の行の下に罫線の半分(0.5px)が足されていた。
  * ⚠ 塊に分けても、足すのは**表全体の**最初と最後だけ(塊ごとに足すと 0.5px ずつ伸びる) */

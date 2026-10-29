@@ -429,7 +429,7 @@ import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
 import { confirmSavedBack, createOfficeSaveBack, sharedReplaceQuestion, stagedSavedAt } from '@adapter/platform/office/office-save-back';
 import { openStageDir } from '@adapter/platform/office/office-stage';
 import { importFiles } from '@adapter/ui/actions/import-file';
-import { FolderSync, windowSyncPicker } from '@adapter/platform/folder-sync';
+import { FolderSync, windowSyncLock, windowSyncPicker } from '@adapter/platform/folder-sync';
 import { withFolderHome } from '@adapter/ui/actions/import-folder-home';
 import { openFolderLid } from '@adapter/ui/actions/open-folder-lid';
 import { windowFolderWritePicker, type WritableDirLike } from '@adapter/platform/md-folder-export';
@@ -1670,6 +1670,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const folderSync = new FolderSync({
     picker: windowSyncPicker(),
+    // 🔴 別のタブ・ウィンドウが同じフォルダを同期していたら重ならない(`navigator.locks`。無い環境は排他なし)
+    lock: windowSyncLock(),
     cid: () => cid,
     notes: () =>
       [...dispatcher.getState().entryMetas.values()].map((m) => ({

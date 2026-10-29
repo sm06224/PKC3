@@ -72,29 +72,48 @@ function para(name: string, text: string): HTMLParagraphElement {
 }
 
 export class PcFolderRenderer {
+  /** フォルダの一覧を描く箱(以下の `renderFolder` 系はここへ描く)。 */
   private readonly host: HTMLElement;
   private readonly folder: LocalFolder;
+  private readonly sync: FolderSync | null;
   /** 直前に描いた版。⚠ 同じなら触らない(押している最中に作り直さない)。 */
   private last = -1;
-
-  private readonly sync: FolderSync | null;
+  private lastSync = -1;
+  /**
+   * 同期の欄。🔴 **間隔の `<select>` は作り直さない**(開いている最中に同期が走って欄を描き直すと、開いた一覧が閉じる)。
+   * 欄の外枠と `<select>` は 1 度だけ作り、前後の部分(`dynTop` / `dynBottom`)だけ描き直す。
+   */
+  private syncSec: HTMLElement | null = null;
+  private syncTop: HTMLElement | null = null;
+  private syncBottom: HTMLElement | null = null;
+  private syncSelect: HTMLSelectElement | null = null;
 
   constructor(host: HTMLElement, folder: LocalFolder, sync: FolderSync | null = null) {
-    this.host = host;
+    // 箱を 2 つに分ける: フォルダの一覧(フォルダの版で描き直す)と、同期の欄(同期の版で描き直す)。
+    // ⚠ `display: contents`(CSS)── 箱を挟んでも、並び(縦積み・間隔)は変わらない
+    const folderBox = document.createElement('div');
+    field(folderBox, 'pc-folder-box');
+    host.append(folderBox);
+    this.host = folderBox;
+    this.outer = host;
     this.folder = folder;
     this.sync = sync;
   }
 
+  private readonly outer: HTMLElement;
+
   render(): void {
     const view = this.folder.view();
+    if (view.version !== this.last) {
+      this.last = view.version;
+      this.host.textContent = '';
+      this.renderFolder(view);
+    }
     const syncView = this.sync?.view() ?? null;
-    // 🔑 指紋は 2 つの版の組(どちらが変わっても描き直す。同じなら触らない ── 押している最中に作り直さない)
-    const key = view.version * 1_000_003 + (syncView?.version ?? 0);
-    if (key === this.last) return;
-    this.last = key;
-    this.host.textContent = '';
-    this.renderFolder(view);
-    if (syncView !== null) this.host.append(this.syncSection(syncView));
+    if (syncView !== null && syncView.version !== this.lastSync) {
+      this.lastSync = syncView.version;
+      this.renderSync(syncView);
+    }
   }
 
   /**
@@ -102,19 +121,50 @@ export class PcFolderRenderer {
    * 一定の間隔で同期する(正本は PKC3)。上の「取り込んで開く」とは別の仕事なので、見出しで分ける。
    * ⚠ 選べないブラウザでは**理由を言う**(押せないボタンを置かない)。⚠ 同期をやめる口を必ず置く(片道にしない)。
    */
-  private syncSection(v: FolderSyncView): HTMLElement {
-    const sec = document.createElement('section');
-    field(sec, 'pc-sync');
-    const title = document.createElement('div');
-    field(title, 'pc-sync-title');
-    title.textContent = 'フォルダと同期';
-    sec.append(title);
+  private renderSync(v: FolderSyncView): void {
+    if (this.syncSec === null) {
+      const sec = document.createElement('section');
+      field(sec, 'pc-sync');
+      const title = document.createElement('div');
+      field(title, 'pc-sync-title');
+      title.textContent = 'フォルダと同期';
+      const top = document.createElement('div');
+      field(top, 'pc-sync-top');
+      const sel = document.createElement('select');
+      sel.setAttribute('data-pkc-action', 'pc-sync-interval');
+      field(sel, 'pc-sync-interval');
+      sel.setAttribute('aria-label', '同期の間隔');
+      for (const m of SYNC_INTERVAL_MINUTES) {
+        const o = document.createElement('option');
+        o.value = String(m);
+        o.textContent = m === 60 ? '1 時間ごと' : `${m} 分ごと`;
+        sel.append(o);
+      }
+      const bottom = document.createElement('div');
+      field(bottom, 'pc-sync-bottom');
+      sec.append(title, top, sel, bottom);
+      this.outer.append(sec);
+      this.syncSec = sec;
+      this.syncTop = top;
+      this.syncBottom = bottom;
+      this.syncSelect = sel;
+    }
+    const top = this.syncTop!;
+    const bottom = this.syncBottom!;
+    const sel = this.syncSelect!;
+    top.textContent = '';
+    bottom.textContent = '';
+    const connected = v.phase === 'idle' || v.phase === 'running';
+    // 間隔は、つながっている間だけ出す(1 つの要素を出し入れするだけ ── 作り直さない)
+    if (sel.hidden === connected) sel.hidden = !connected;
+    if (connected && sel.value !== String(v.minutes) && sel.ownerDocument.activeElement !== sel) sel.value = String(v.minutes);
+
     if (v.phase === 'unsupported') {
-      sec.append(para('pc-sync-note', v.message ?? ''));
-      return sec;
+      top.append(para('pc-sync-note', v.message ?? ''));
+      return;
     }
     if (v.phase === 'none') {
-      sec.append(
+      top.append(
         para(
           'pc-sync-note',
           'ノートを、パソコンのフォルダの Markdown(.md)と定期的に同期します。正本は PKC3 です。フォルダで直した内容は PKC3 に取り込み、PKC3 で直した内容はフォルダに書きます。',
@@ -126,45 +176,73 @@ export class PcFolderRenderer {
           'フォルダを選ぶと、すぐ 1 回同期します。開き直すと同期は止まります(フォルダは保存しません)',
         ),
       );
-      return sec;
+      return;
     }
     const name = document.createElement('div');
     field(name, 'pc-sync-folder');
     name.textContent = `同期先: ${v.folderName ?? ''}`;
     name.title = v.folderName ?? '';
-    sec.append(name);
+    top.append(name);
     if (v.phase === 'lost' || v.phase === 'stopped') {
-      sec.append(
+      bottom.append(
         para('pc-sync-note', v.message ?? '同期を止めました'),
         button('pc-sync-pick', 'pc-sync-pick', 'フォルダを選び直す…', '別のフォルダ(または同じフォルダ)を選んで、もう一度同期を始めます'),
         button('pc-sync-stop', 'pc-sync-stop', '同期をやめる', '同期をやめます(フォルダのファイルとノートには何もしません)'),
       );
-      return sec;
+      return;
     }
-    const sel = document.createElement('select');
-    sel.setAttribute('data-pkc-action', 'pc-sync-interval');
-    field(sel, 'pc-sync-interval');
-    sel.setAttribute('aria-label', '同期の間隔');
-    for (const m of SYNC_INTERVAL_MINUTES) {
-      const o = document.createElement('option');
-      o.value = String(m);
-      o.textContent = m === 60 ? '1 時間ごと' : `${m} 分ごと`;
-      o.selected = m === v.minutes;
-      sel.append(o);
-    }
-    sec.append(sel);
     if (v.phase === 'running') {
-      sec.append(para('pc-sync-note', '同期しています…'));
+      bottom.append(para('pc-sync-note', '同期しています…'));
     } else {
-      sec.append(
+      bottom.append(
         button('pc-sync-now', 'pc-sync-now', '今すぐ同期', 'いま 1 回同期します'),
         button('pc-sync-stop', 'pc-sync-stop', '同期をやめる', '同期をやめます(フォルダのファイルとノートには何もしません)'),
       );
     }
-    if (v.lastText !== null) {
-      sec.append(para('pc-sync-last', `${v.lastAt ?? ''} ${v.lastText}`.trim()));
+    if (v.lastText !== null) bottom.append(para('pc-sync-last', `${v.lastAt ?? ''} ${v.lastText}`.trim()));
+    // 🔴 フォルダでファイルが消えたノート: 黙って書き戻さず、行ごとに選んでもらう
+    if (v.gone.length > 0) {
+      bottom.append(
+        para('pc-sync-note', `フォルダで消えたノート ${v.gone.length} 件(どうするか選んでください。選ぶまでは、そのままです)`),
+        this.noteList('pc-sync-gone', v.gone, (lid, title) => [
+          this.syncRowButton('pc-sync-restore', lid, '書き戻す', `「${title}」をフォルダに書き直します`),
+          this.syncRowButton('pc-sync-detach', lid, '同期から外す', `「${title}」をこれ以後の同期の対象から外します(ノートは消えません。あとで「同期に戻す」で戻せます)`),
+        ]),
+      );
     }
-    return sec;
+    if (v.detached.length > 0) {
+      bottom.append(
+        para('pc-sync-note', `同期から外したノート ${v.detached.length} 件`),
+        this.noteList('pc-sync-detached', v.detached, (lid, title) => [
+          this.syncRowButton('pc-sync-attach', lid, '同期に戻す', `「${title}」を同期の対象に戻します(フォルダには新しいファイルとして書きます)`),
+        ]),
+      );
+    }
+  }
+
+  private syncRowButton(action: string, lid: string, text: string, title: string): HTMLButtonElement {
+    const b = button(action, action, text, title);
+    b.setAttribute('data-pkc-sync-lid', lid);
+    return b;
+  }
+
+  private noteList(
+    name: string,
+    rows: readonly { lid: string; title: string }[],
+    buttons: (lid: string, title: string) => HTMLButtonElement[],
+  ): HTMLUListElement {
+    const ul = document.createElement('ul');
+    field(ul, name);
+    for (const r of rows) {
+      const li = document.createElement('li');
+      const t = document.createElement('span');
+      field(t, 'pc-sync-note-title');
+      t.textContent = r.title === '' ? '(無題)' : r.title;
+      t.title = r.title;
+      li.append(t, ...buttons(r.lid, r.title));
+      ul.append(li);
+    }
+    return ul;
   }
 
   private renderFolder(view: LocalFolderView): void {

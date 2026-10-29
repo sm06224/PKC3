@@ -906,7 +906,7 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
   await expect(table.locator('tbody'), '323 行が 50 行ずつの塊に分かれていない').toHaveCount(7, { timeout: 60000 });
   const look = await page.evaluate(() => {
     const t = document.querySelector<HTMLElement>('[data-pkc-region="filer-table"]')!;
-    const trs = [...t.querySelectorAll<HTMLElement>('tbody tr')];
+    const trs = [...t.querySelectorAll<HTMLElement>('tbody tr[data-pkc-entry]')];
     const body = trs[3]!;
     const th2 = t.querySelector<HTMLElement>('thead th:last-child')!.getBoundingClientRect();
     const td2 = body.querySelector<HTMLElement>('td:last-child')!.getBoundingClientRect();

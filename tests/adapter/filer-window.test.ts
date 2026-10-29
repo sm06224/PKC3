@@ -20,7 +20,8 @@
  * ⚠ happy-dom は配置を持たないので、スクロール器の高さと塊の位置は test が差し込む
  *   (`clientHeight` と `getBoundingClientRect` だけ ── 描画器が読む 2 つ)。
  */
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { supportUntilFound } from '../helpers/until-found';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -51,6 +52,9 @@ const tick = (ms = 30) => new Promise<void>((r) => setTimeout(r, ms));
 
 const N = 3000;
 const VIEW = 600;
+
+beforeEach(() => supportUntilFound(true));
+afterEach(() => supportUntilFound(false));
 
 function screen(n = N) {
   document.body.innerHTML = '';
@@ -88,7 +92,7 @@ function screen(n = N) {
     host.dispatchEvent(new Event('scroll'));
     await tick(40);
   };
-  const rowLids = () => [...table().querySelectorAll('tbody tr')].map((r) => r.getAttribute('data-pkc-entry')!);
+  const rowLids = () => [...table().querySelectorAll('tbody tr[data-pkc-entry]')].map((r) => r.getAttribute('data-pkc-entry')!);
   const mountedChunks = () =>
     [...table().querySelectorAll('tbody')].flatMap((b, i) => (b.children.length > 0 ? [i] : []));
   return { root, d, host, table, scrollTo, rowLids, mountedChunks, regions };
@@ -220,5 +224,62 @@ describe('⑤ キーで画面の外の行へ送る', () => {
     const next = 'n' + (Number(lastMounted.slice(1)) + 1);
     expect(s.d.getState().selection).toEqual([next]);
     expect((document.activeElement as HTMLElement).getAttribute('data-pkc-entry')).toBe(next);
+  });
+});
+
+describe('⑥ ブラウザ内検索(Ctrl+F)が、組んでいない行を見つけられる', () => {
+  it('🔴 組まない塊に題名だけの軽い行(hidden=until-found)が 1 塊 1 つ置かれ、全題名が文字として入っている', async () => {
+    const s = screen();
+    await tick();
+    const finds = [...s.table().querySelectorAll<HTMLElement>('tbody[data-pkc-chunk-empty] > tr[data-pkc-chunk-find]')];
+    const bodies = [...s.table().querySelectorAll('tbody')];
+    const empty = bodies.filter((b) => b.hasAttribute('data-pkc-chunk-empty'));
+    expect(empty.length, '空の塊が無い(前提)').toBeGreaterThan(0);
+    expect(finds.length, '空の塊ごとに 1 つ').toBe(empty.length);
+    for (const f of finds) expect(f.getAttribute('hidden')).toBe('until-found');
+    // 組んでいない行の題名が、検索に当たる文字として在る(対照群: 組んでいる塊の題名は行の中に在る)
+    const all = finds.map((f) => f.textContent ?? '').join('\n');
+    expect(all).toContain('t2999');
+    expect(all).not.toContain('t0\n');
+    // 軽い: 行の数だけ作らない(3,000 件でも 1 塊 1 行)
+    expect(s.table().querySelectorAll('tbody tr').length - s.rowLids().length).toBe(finds.length);
+  });
+
+  it('🔴 beforematch が来たら、その塊を組む(軽い行は外れ、本物の行が出る)', async () => {
+    const s = screen();
+    await tick();
+    expect(s.table().querySelector('[data-pkc-entry="n2900"]')).toBeNull();
+    const find = [...s.table().querySelectorAll<HTMLElement>('tr[data-pkc-chunk-find]')].find((f) =>
+      (f.textContent ?? '').includes('t2900'),
+    )!;
+    find.dispatchEvent(new Event('beforematch', { bubbles: true }));
+    expect(s.table().querySelector('[data-pkc-entry="n2900"]'), '検索が当たっても塊が組まれない').not.toBeNull();
+    expect(find.isConnected, '軽い行が残っている').toBe(false);
+  });
+
+  it('🔴 印刷の間は全部の塊を組む(紙には全行が出る)── 終われば窓に戻る', async () => {
+    const s = screen();
+    await tick();
+    window.dispatchEvent(new Event('beforeprint'));
+    expect(s.table().querySelectorAll('tbody tr[data-pkc-entry]').length).toBe(N);
+    expect(s.table().querySelectorAll('[data-pkc-chunk-empty]').length).toBe(0);
+    window.dispatchEvent(new Event('afterprint'));
+    await tick(40);
+    expect(s.table().querySelectorAll('tbody tr[data-pkc-entry]').length).toBeLessThanOrEqual(400);
+  }, 60_000);
+});
+
+describe('⑦ 掴んでいる行は、自動スクロールで外れない', () => {
+  it('🔴 dragstart した行の塊は遠くへ送っても残り、dragend の後で外れる', async () => {
+    const s = screen();
+    await tick();
+    const row = s.table().querySelector<HTMLElement>('[data-pkc-entry="n3"]')!;
+    row.dispatchEvent(new Event('dragstart', { bubbles: true }));
+    await s.scrollTo(2000 * 26);
+    expect(s.table().querySelector('[data-pkc-entry="n3"]'), '掴んだ行が外れた(dragend が届かなくなる)').toBe(row);
+    row.dispatchEvent(new Event('dragend', { bubbles: true }));
+    await tick(40);
+    await s.scrollTo(2500 * 26);
+    expect(s.table().querySelector('[data-pkc-entry="n3"]')).toBeNull();
   });
 });

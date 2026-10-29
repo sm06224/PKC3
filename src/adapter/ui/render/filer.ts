@@ -62,7 +62,10 @@ export const GRID_ROW_THRESHOLD = 300;
  * ⚠ 行ごとに `content-visibility: auto` を付けると、ブラウザは**行の数だけ**見張りを張り、
  *   描くたびに全部を判定する ── 3,000 件で本文を 200 字打つと、その判定だけで約 1.2 秒だった
  *   (実測。一覧を隠すと消え、行の指定を外すと逆に倍になる)。塊ごとに付けると判定は 60 個で済み、
- *   約 25 ms になった(同じ手順の A/B)。行は DOM に全部残る(画面の外の行もページ内検索で見つかる)。
+ *   約 25 ms になった(同じ手順の A/B)。
+ * ⚠ 画面の外の塊は行を組まない(`applyChunks`)。ブラウザ内検索(Ctrl+F)が画面の外の行を見つけられるよう、
+ *   組まない塊には題名だけの軽い行(`hidden="until-found"`)を置き、当たったら `beforematch` でその塊を組む。
+ *   `hidden="until-found"` に対応しないブラウザでは、全部の塊に行を組む(この 50 行の塊 + `content-visibility` のまま)。
  */
 export const ROW_CHUNK = 50;
 /**
@@ -118,6 +121,42 @@ export class FilerRenderer {
   private scrollPending = false;
   /** 最後に読んだ「見えている塊の範囲」。 */
   private hint: [number, number] | null = null;
+  /** 印刷の間は全部の塊を組む(紙には全行が出る)。 */
+  private printAll = false;
+  /**
+   * 🔴 **掴んでいる行**(ドラッグ元)。その塊は外さない ── 掴んだまま下端で自動スクロールして行が DOM から外れると、
+   * ドラッグ元の要素が無くなって `dragend` が届かず、ドラッグが終わらない(印も落とし先の光も残る)。
+   */
+  private dragLid: string | null = null;
+  private readonly onDragStart = (ev: Event): void => {
+    const t = ev.target;
+    this.dragLid = t instanceof Element ? (t.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null) : null;
+  };
+  private readonly onDragEnd = (): void => {
+    if (this.dragLid === null) return;
+    this.dragLid = null;
+    this.syncWindow();
+  };
+  private readonly onBeforePrint = (): void => {
+    this.printAll = true;
+    if (this.grid && this.curState !== null) this.applyChunks(this.wantedChunks(this.curState, false), this.curState);
+  };
+  private readonly onAfterPrint = (): void => {
+    this.printAll = false;
+    this.syncWindow();
+  };
+  /** ブラウザ内検索が、組んでいない塊の題名に当たった ── その塊を組む(行は検索が当たった所に出る)。 */
+  private readonly onBeforeMatch = (ev: Event): void => {
+    const target = ev.target;
+    if (!(target instanceof Element)) return;
+    const chunk = target.closest('tbody');
+    const at = chunk === null ? -1 : this.chunks.indexOf(chunk as HTMLTableSectionElement);
+    const state = this.curState;
+    if (at < 0 || state === null) return;
+    const want = new Set(this.mounted);
+    want.add(at);
+    this.applyChunks(want, state);
+  };
   private readonly onScroll = (): void => {
     if (!this.grid || this.scrollPending) return;
     this.scrollPending = true;
@@ -232,6 +271,14 @@ export class FilerRenderer {
     this.keymap.onChange(() => this.paintRecentHint());
     // 🔑 組まれていない行を組んでから引く口(`mountFilerRow`)── 器に付けるので、表を作り直しても外れない
     this.region.addEventListener(FILER_MOUNT_EVENT, this.onMountRequest);
+    this.region.addEventListener('beforematch', this.onBeforeMatch);
+    this.region.addEventListener('dragstart', this.onDragStart);
+    // 終わりは文書で受ける(落とし先が表の外でも・要素が外れた後でも拾う)
+    this.region.ownerDocument.addEventListener('dragend', this.onDragEnd);
+    this.region.ownerDocument.addEventListener('drop', this.onDragEnd);
+    const win = this.region.ownerDocument.defaultView;
+    win?.addEventListener('beforeprint', this.onBeforePrint);
+    win?.addEventListener('afterprint', this.onAfterPrint);
   }
 
   /**
@@ -1088,6 +1135,12 @@ export class FilerRenderer {
       want.add(0);
       return want;
     }
+    // 🔴 全部の塊を組む場合: 印刷の間(紙には全行が出る)/ `hidden="until-found"` に対応しないブラウザ
+    //    (組まない塊をブラウザ内検索が見つけられないので、行を全部残す ── 50 行の塊 + `content-visibility` の作り)
+    if (this.printAll || !('onbeforematch' in this.region.ownerDocument.documentElement)) {
+      for (let c = 0; c < need; c += 1) want.add(c);
+      return want;
+    }
     const [lo, hi] = this.windowRange(need, live);
     for (let c = lo; c <= hi; c += 1) want.add(c);
     // 画面の外へ出た塊のうち、すぐ外(1 塊)は残す ── 行き来で組み直しを繰り返さない
@@ -1098,6 +1151,7 @@ export class FilerRenderer {
       if (at !== undefined) want.add(Math.floor(at / this.chunkSize));
     };
     pin(state.renamingLid);
+    pin(this.dragLid);
     const active = this.region.ownerDocument.activeElement;
     if (active instanceof HTMLElement && this.region.contains(active)) {
       pin(active.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry'));
@@ -1168,6 +1222,28 @@ export class FilerRenderer {
   }
 
   /**
+   * 🔴 **組まない塊に、題名だけの軽い行を 1 つ置く**(ブラウザ内検索 Ctrl+F が画面の外のノートを見つけるため)。
+   * `hidden="until-found"` の行は描かれないが、検索は当たる。当たると `beforematch` が飛び、その塊を組む(`onBeforeMatch`)。
+   * ⚠ 行の数だけ作らない ── 1 塊に 1 行・1 つの文字列(3,000 件でも 60 個)。中身が同じなら作り直さない。
+   */
+  private paintFindText(chunk: HTMLTableSectionElement, from: number, count: number): void {
+    const titles: string[] = [];
+    for (let i = from; i < from + count; i += 1) titles.push(this.list[i]!.title);
+    const text = titles.join('\n');
+    let tr = chunk.querySelector<HTMLTableRowElement>(':scope > tr[data-pkc-chunk-find]');
+    if (tr === null) {
+      tr = document.createElement('tr');
+      tr.setAttribute('data-pkc-chunk-find', '');
+      tr.setAttribute('hidden', 'until-found');
+      tr.setAttribute('aria-hidden', 'true');
+      tr.append(document.createElement('td'));
+    }
+    const td = tr.firstElementChild!;
+    if (td.textContent !== text) td.textContent = text;
+    if (tr.parentNode !== chunk) chunk.append(tr);
+  }
+
+  /**
    * `want` の塊だけ行を組み、ほかは空の塊(行と同じ高さ)にする。
    * 🔑 行の node は持ち越す(指紋が同じなら作り直さない)。⚠ 組まない行は**指紋も作らない**
    * (3,000 件の指紋を毎回作っていた費用が、組む行の数に縮む)。
@@ -1220,6 +1296,7 @@ export class FilerRenderer {
       const count = Math.min(list.length, (c + 1) * size) - c * size;
       const part = parts.get(c);
       if (part !== undefined) {
+        chunk.querySelector(':scope > tr[data-pkc-chunk-find]')?.remove();
         this.placeRows(chunk, part, renamingRow);
         chunk.removeAttribute('data-pkc-chunk-empty');
         chunk.style.removeProperty('height');
@@ -1236,6 +1313,7 @@ export class FilerRenderer {
         const h = count * GRID_ROW_PX + (c === 0 ? 0.5 : 0) + (c === need - 1 ? 0.5 : 0);
         chunk.style.setProperty('height', `${h}px`);
         chunk.style.removeProperty('contain-intrinsic-size');
+        this.paintFindText(chunk, c * size, count);
       }
     }
     // ⚠ 余った塊は空(残す行は全部どこかの塊へ入れ終えた / 消えた行は上で外した)
@@ -1901,7 +1979,7 @@ export class FilerRenderer {
     if (focusedBefore !== null) {
       const sameRow = focusedBefore === '' ? undefined : this.rows.get(focusedBefore);
       const firstRow = scopeChanged
-        ? this.region.querySelector<HTMLElement>('[data-pkc-region="filer-table"] tbody tr')
+        ? this.region.querySelector<HTMLElement>('[data-pkc-region="filer-table"] tbody tr[data-pkc-entry]')
         : null;
       const back =
         sameRow ??

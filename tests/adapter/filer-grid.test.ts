@@ -16,11 +16,14 @@
  *   毎回合わせる ── 表は作り直さない `reconcileRows` の側にある)
  * - ② CSS の 3 点:行ごとの `content-visibility: auto` / 行の高さの固定 / 格子が
  *   `data-pkc-grid` の下でだけ効く(少ない行の見た目を変えない)
+ * 🔴 #1087 台帳④: 行が多い一覧は、見えている塊だけ行を組む(`filer-window.test.ts`)。`hidden="until-found"` に対応する
+ *   ブラウザでだけ ── このファイルの窓の test は `onbeforematch` を差し込んで対応ブラウザにしている(対応しない側は下の最後の describe)。
  * ⚠ 見た目の画素(列の幅・行の高さ・文字の位置)は実ブラウザの検査 ── happy-dom は
  *   layout を持たないので、ここでは見ない。
  */
 import { readFileSync } from 'node:fs';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { supportUntilFound } from '../helpers/until-found';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -63,7 +66,10 @@ function setup() {
 
 beforeEach(() => {
   document.body.textContent = '';
+  // 窓の test は `hidden="until-found"` に対応するブラウザで見る(対応しない側は末尾の describe)
+  supportUntilFound(true);
 });
+afterEach(() => supportUntilFound(false));
 
 describe('行数が境を越えたら、表が格子になる(#1087)', () => {
   it('🔴 境ちょうどは今までの表、1 行超えたら格子 ── 同じ表のまま印だけ変わる', () => {
@@ -71,7 +77,7 @@ describe('行数が境を越えたら、表が格子になる(#1087)', () => {
     const s0 = booted(metas(GRID_ROW_THRESHOLD));
     render(s0);
     const t = table();
-    expect(t.querySelectorAll('tbody tr').length, '前提が崩れている(行が境ちょうどで出ていない)').toBe(
+    expect(t.querySelectorAll('tbody tr[data-pkc-entry]').length, '前提が崩れている(行が境ちょうどで出ていない)').toBe(
       GRID_ROW_THRESHOLD,
     );
     expect(t.hasAttribute('data-pkc-grid'), '境ちょうどで格子になっている').toBe(false);
@@ -80,7 +86,7 @@ describe('行数が境を越えたら、表が格子になる(#1087)', () => {
     expect(table(), '表を作り直した(持ち越していない)').toBe(t);
     // 🔴 格子では画面に見えている塊だけ行を組む(位置が読めない happy-dom では先頭の 3 塊 = 150 行)。
     //    表に出している行の総数は、組んでいない塊の高さ(下の test)と `mountFilerRow` で確かめる
-    expect(t.querySelectorAll('tbody tr').length).toBe(150);
+    expect(t.querySelectorAll('tbody tr[data-pkc-entry]').length).toBe(150);
     expect(t.hasAttribute('data-pkc-grid'), '境を越えても格子にならない').toBe(true);
   });
 
@@ -90,7 +96,7 @@ describe('行数が境を越えたら、表が格子になる(#1087)', () => {
     render(s0);
     expect(table().hasAttribute('data-pkc-grid'), '前提が崩れている(格子になっていない)').toBe(true);
     render(withMetas(s0, metas(3)));
-    expect(table().querySelectorAll('tbody tr').length).toBe(3);
+    expect(table().querySelectorAll('tbody tr[data-pkc-entry]').length).toBe(3);
     expect(table().hasAttribute('data-pkc-grid'), '少ない行になっても格子のまま').toBe(false);
   });
 });
@@ -143,7 +149,7 @@ describe('格子の CSS(#1087)', () => {
 
 describe('格子のとき、行を 50 行ずつの塊に分ける(#1087)', () => {
   const lidsOf = (t: HTMLElement) =>
-    [...t.querySelectorAll('tbody tr')].map((tr) => tr.getAttribute('data-pkc-entry'));
+    [...t.querySelectorAll('tbody tr[data-pkc-entry]')].map((tr) => tr.getAttribute('data-pkc-entry'));
 
   it('🔴 3,001 行は 61 個の塊に分かれ、組むのは先頭の 3 塊だけ ── 残りは行と同じ高さの空の塊', () => {
     const { render, table } = setup();
@@ -164,7 +170,10 @@ describe('格子のとき、行を 50 行ずつの塊に分ける(#1087)', () =>
     // 空の塊: 行は 0、高さ = 行数 × 26(+ 最後の塊の下の 0.5px)── スクロールの長さは全部組んだときと同じ
     const empties = bodies.slice(3);
     for (const b of empties) {
-      expect(b.children.length).toBe(0);
+      // 行は 0 ── あるのは題名だけの軽い行(ブラウザ内検索用)1 つ
+      expect(b.querySelectorAll('[data-pkc-entry]').length).toBe(0);
+      expect(b.children.length).toBe(1);
+      expect(b.firstElementChild!.hasAttribute('data-pkc-chunk-find')).toBe(true);
       expect(b.hasAttribute('data-pkc-chunk-empty')).toBe(true);
     }
     expect(empties[0]!.style.getPropertyValue('height')).toBe(`${ROW_CHUNK * 26}px`);
@@ -225,7 +234,7 @@ describe('#1087 一覧の指紋を作り直さない', () => {
         render(s);
       }
       expect(s.filterQuery, '前提: 絞りの字が state に入っていない').toBe('t12');
-      expect(table().querySelectorAll('tbody tr').length, '前提: 絞っても行が減っていない(描き直していない)').toBeLessThan(500);
+      expect(table().querySelectorAll('tbody tr[data-pkc-entry]').length, '前提: 絞っても行が減っていない(描き直していない)').toBeLessThan(500);
       expect(spy, '絞りの字だけで指紋を作り直した').not.toHaveBeenCalled();
       const changed = metas(500).map((m) => (m.lid === 'n1' ? { ...m, title: '新しい名前' } : m));
       render(withMetas(s, changed));
@@ -233,5 +242,24 @@ describe('#1087 一覧の指紋を作り直さない', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe('hidden="until-found" に対応しないブラウザでは、行を全部組む(#1087 台帳④ ── ブラウザ内検索が画面の外の行を見つけられるように)', () => {
+  it('🔴 対応しない: 3,001 行が 50 行ずつの塊に全部入り、空の塊は無い / 対応する: 同じ一覧で組む行が減る(対照群)', () => {
+    supportUntilFound(false);
+    const { render, table } = setup();
+    render(booted(metas(3001)));
+    const bodies = [...table().querySelectorAll('tbody')];
+    expect(bodies.length).toBe(61);
+    expect(table().querySelectorAll('tbody tr[data-pkc-entry]').length).toBe(3001);
+    expect(table().querySelectorAll('[data-pkc-chunk-empty]').length).toBe(0);
+    expect(table().querySelectorAll('[data-pkc-chunk-find]').length).toBe(0);
+    // 対照群: 対応するブラウザでは窓になる
+    supportUntilFound(true);
+    document.body.textContent = '';
+    const w = setup();
+    w.render(booted(metas(3001)));
+    expect(w.table().querySelectorAll('tbody tr[data-pkc-entry]').length).toBe(150);
   });
 });
