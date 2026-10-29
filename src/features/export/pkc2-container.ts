@@ -18,12 +18,13 @@
  * | ToDo(`todo`)/ フォーム(`form`) | JSON | 前書きの他のキーは落ちる(言う) |
  * | 添付(`attachment`) | JSON + 添付の bytes(base64) | |
  * | 表・スタック・スマートフォルダ・雛形 など PKC3 独自 | **ノート(`text`)**として本文を出す | 件数を言う |
- * | `:::` の囲み・板・本文の `@日付` など | PKC2 には無い記法 | **字のまま**出る(言う) |
+ * | `:::` のブロック・板・本文の `@日付` など | PKC2 には無い記法 | **字のまま**出る(言う) |
  * | 履歴 | 出さない(現在の版だけ) | 言う |
  *
  * 🔑 pure module。DOM も DB も知らない(ブラウザの部分は `adapter/ui/actions/export-pkc2-html.ts`)。
  */
 import { parseFrontmatter } from '../markdown/frontmatter';
+import { storedInstantIso } from '../datetime/stored-date';
 import { readTags } from '../flavor/tags';
 import { logDayOfHeading } from '../textlog/log-days';
 import { UNDATED_LOG_HEADING } from '../flavor/textlog-flavor';
@@ -114,16 +115,22 @@ const pad2 = (n: number): string => String(n).padStart(2, '0');
 /** 保存された時刻(`YYYY-MM-DD HH:MM:SS` UTC / ISO)→ ISO。読めなければ `fallback`。 */
 export function toIsoStamp(value: string | null, fallback: string): string {
   if (value === null || value === '') return fallback;
-  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})?$/.exec(value.trim());
-  const d = new Date(m === null ? value : `${m[1]}T${m[2]}${m[3] ?? 'Z'}`);
+  // 🔑 日時の読みは `stored-date.ts` の 1 本(時差の印が無い値は UTC)── ここで日付の切り方を持たない
+  const iso = storedInstantIso(value.trim());
+  if (iso !== null) return iso;
+  const d = new Date(value);
   return Number.isNaN(d.getTime()) ? fallback : d.toISOString();
 }
 
 /** ログの見出し(`2026-10-10 12:30:05 ★`)→ ISO(端末のローカル時刻として読む ── 見出しはローカル時刻で書かれている)。 */
 function logHeadingToIso(text: string): { iso: string; important: boolean } | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(text.trim());
-  if (m === null) return null;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6] ?? '0'));
+  // 🔑 日の読みは `logDayOfHeading` 1 本(実在する日だけ)。ここが読むのは時刻の部分だけ
+  const day = logDayOfHeading(text);
+  if (day === null) return null;
+  const t = /[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(text.trim());
+  if (t === null) return null;
+  const [y, mo, da] = day.split('-').map(Number) as [number, number, number];
+  const d = new Date(y, mo - 1, da, Number(t[1]), Number(t[2]), Number(t[3] ?? '0'));
   if (Number.isNaN(d.getTime())) return null;
   return { iso: d.toISOString(), important: /★\s*$/u.test(text) };
 }
@@ -330,7 +337,7 @@ export function planPkc2Container(input: Pkc2ExportInput): Pkc2ExportPlan {
   if (droppedFm > 0) warnings.push(`${droppedFm} 件の前書き(ToDo・フォーム・ログ・添付の設定)のうち PKC2 に無い項目は渡せませんでした`);
   if (unparsedLogs > 0) warnings.push(`ログ ${unparsedLogs} 件は中身が空のため、PKC2 でも空のログになります`);
   if (droppedRel > 0) warnings.push(`PKC2 に渡せないつながり ${droppedRel} 件は出していません`);
-  warnings.push('PKC3 の囲み(:::)・板・本文の @日付 など、PKC2 に無い記法は字のまま出ます。履歴は出していません(現在の版だけ)');
+  warnings.push('PKC3 のブロック(:::)・板・本文の @日付 など、PKC2 に無い記法は字のまま出ます。履歴は出していません(現在の版だけ)');
 
   return {
     container: {

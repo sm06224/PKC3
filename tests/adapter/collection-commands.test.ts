@@ -37,6 +37,8 @@ const ALL_ACTIONS = [
   'export-markdown',
   // 🔴 PC のフォルダへ 1 度だけ(#1455 (b))── Markdown の隣。ブラウザに窓が無いと右の列には出ない
   'export-markdown-folder',
+  // 🔴 PKC2 のポータブル形式の HTML(台帳 #1416)── 元にする PKC2 の HTML を選んで書き出す
+  'export-pkc2-html',
   // 🔴 可搬単一 HTML(#400 段④)── 「閲覧用 HTML」とは別の口である
   'export-portable',
   // 🔴 構成をテキストでコピー(#429 段①)── AI に整理を頼むための材料
