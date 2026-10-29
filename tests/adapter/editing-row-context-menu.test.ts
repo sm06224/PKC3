@@ -168,7 +168,7 @@ describe('編集中の行の右クリック(#690 ④ A′)', () => {
     const s = setup({ ...editingState(), phase: 'ready' });
     s.rightClick('other');
     expect(s.actions()).toEqual(
-      entryMenuActions({ archetype: 'text', linkedFile: null }).map((a) => a.action),
+      entryMenuActions({ archetype: 'text', linkedFile: null, pinned: false }).map((a) => a.action),
     );
     expect(s.actions().length, '前提が崩れた(全項目が 1 行しか無い)').toBeGreaterThan(1);
     expect(s.d.getState().selectedLid, '編集中でないのに行が選ばれない').toBe('other');

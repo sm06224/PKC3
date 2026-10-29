@@ -14,6 +14,7 @@
  *
  * ⚠ **pure module**(DOM も時計も持たない)。上限で切ったら `more` が数を返す ── 面が必ず言う(黙って切らない)。
  */
+import { addDays } from '../datetime/date-math';
 import { tagFoldKey } from '../flavor/tags';
 import type { AgendaItem } from './agenda';
 import { inlineTagsOf } from './item-color';
@@ -119,16 +120,6 @@ export function signalTagOf(text: string): SignalColor | null {
     if (c !== undefined) return c;
   }
   return null;
-}
-
-/** `YYYY-MM-DD` に日数を足す(暦の計算は UTC で ── 夏時間や時刻の影響を受けない)。読めなければ `null`。 */
-function addDays(date: string, days: number): string | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (m === null) return null;
-  const t = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) + days * 86_400_000;
-  const d = new Date(t);
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
 /** 未完了の札の信号(上の表の 2〜5)。`today` は `YYYY-MM-DD`。 */
