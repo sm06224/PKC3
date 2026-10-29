@@ -37,6 +37,8 @@ export interface ShellBlock {
   failed: boolean;
   /** 非同期の結果待ち(SQL・全文検索)。 */
   pending: boolean;
+  /** 🔴 この塊へのひとこと(「コピーしました」など)。⚠ 結果ではないので、コピーする字には入れない。 */
+  note: string;
 }
 
 export class ShellSession {
@@ -82,7 +84,7 @@ export class ShellSession {
   }
 
   begin(prompt: string): ShellBlock {
-    const block: ShellBlock = { id: this.nextId, rev: 0, prompt, lines: [], table: null, failed: false, pending: false };
+    const block: ShellBlock = { id: this.nextId, rev: 0, prompt, lines: [], table: null, failed: false, pending: false, note: '' };
     this.nextId += 1;
     this.blocks.push(block);
     while (this.blocks.length > SHELL_BLOCK_MAX) this.blocks.shift();
@@ -90,7 +92,7 @@ export class ShellSession {
     return block;
   }
 
-  update(block: ShellBlock, patch: Partial<Pick<ShellBlock, 'lines' | 'table' | 'failed' | 'pending'>>): void {
+  update(block: ShellBlock, patch: Partial<Pick<ShellBlock, 'lines' | 'table' | 'failed' | 'pending' | 'note'>>): void {
     Object.assign(block, patch);
     block.rev += 1;
     this.notify();
@@ -209,6 +211,12 @@ export function paintShellBlock(block: ShellBlock, opts: { maxRows?: number; ope
     head.append(copy);
   }
   root.append(head);
+  if (block.note !== '') {
+    const note = el('p', 'shell-note');
+    note.setAttribute('role', 'status');
+    note.textContent = block.note;
+    root.append(note);
+  }
   for (const line of block.lines) {
     const p = el('p', 'shell-line');
     p.textContent = line;

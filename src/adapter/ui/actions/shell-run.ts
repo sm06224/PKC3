@@ -58,7 +58,7 @@ export interface ShellOps {
   move(lids: readonly string[], to: string | null): OpResult;
   copy(lids: readonly string[], to: string | null): Promise<OpResult>;
   trash(lids: readonly string[]): Promise<OpResult>;
-  tag(lids: readonly string[], tags: readonly string[], mode: 'add' | 'remove'): OpResult;
+  tag(lids: readonly string[], tags: readonly string[], mode: 'add' | 'remove'): Promise<OpResult>;
   exportNote(lid: string, format: 'md' | 'pdf'): OpResult;
   open(lid: string): OpResult;
   enter(scope: string | null): OpResult;
@@ -136,7 +136,7 @@ async function runEffect(ops: ShellOps, session: ShellSession, block: ShellBlock
       note(session, block, await ops.trash(e.lids));
       return;
     case 'tag':
-      note(session, block, ops.tag(e.lids, e.tags, e.mode));
+      note(session, block, await ops.tag(e.lids, e.tags, e.mode));
       return;
     case 'export':
       note(session, block, ops.exportNote(e.lid, e.format));

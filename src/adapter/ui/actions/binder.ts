@@ -7877,30 +7877,49 @@ export function makeShellOps(h: {
         );
       }),
     trash: async (lids) => {
+      // 🔴 即座に断れる場合(編集中など)は、待たずに断る
+      const stop = stopped('ゴミ箱へ移');
+      if (stop !== null) return fail(stop);
       const st = dispatcher.getState();
+      const errBefore = st.error;
       const rows = lids.map((l) => st.entryMetas.get(l)).filter((m): m is EntryMeta => m !== undefined);
       deleteFrom(dispatcher, services, root, rows, lids, null, () => {});
-      // 別のタブの編集を確かめる間は非同期になる(`deleteFrom` の注記)── 消えるのを待つ
-      const gone = await waitForState(dispatcher, (s) => lids.every((l) => !s.entryMetas.has(l)), 4000);
-      if (gone) return done(`${String(lids.length)} 件をゴミ箱へ入れました(「元に戻す」で戻せます)`);
-      return fail(dispatcher.getState().error || 'ゴミ箱へ入れられませんでした');
+      // 別のタブの編集を確かめる間は非同期になる(`deleteFrom` の注記)── 消えるか、断りの理由が出るのを待つ
+      await waitForState(
+        dispatcher,
+        (s) => lids.every((l) => !s.entryMetas.has(l)) || (s.error !== errBefore && s.error !== null && s.error !== ''),
+        4000,
+      );
+      const now = dispatcher.getState();
+      if (lids.every((l) => !now.entryMetas.has(l))) return done(`${String(lids.length)} 件をゴミ箱へ入れました(「元に戻す」で戻せます)`);
+      // 断りの理由が出ていれば失敗。出ていなければ、待ち時間を超えただけで失敗とは言えない
+      if (now.error !== errBefore && now.error !== null && now.error !== '') return fail(now.error);
+      return done('ゴミ箱へ入れる処理は、まだ終わっていません(別のタブの編集を確かめています)。一覧で確かめてください');
     },
-    tag: (lids, tags, mode) => {
+    tag: async (lids, tags, mode) => {
       const stop = stopped(mode === 'add' ? 'タグを付け' : 'タグを外し');
       if (stop !== null) return fail(stop);
       const long = overlongTagMessage(tags.join(' '));
       if (long !== null) return fail(long);
+      // 別のタブが編集中のノートが 1 件でもあれば撃たない(ボタンと同じ門)
+      for (const l of lids) {
+        if (elsewhereCheckNotNeeded(dispatcher, services, l)) continue;
+        const why = await editedElsewhereReason(dispatcher, services, l).catch(
+          (e: unknown) => `タグを付け外しできませんでした(別のタブの編集を確かめられませんでした: ${errorText(e)})`,
+        );
+        if (why !== null) return fail(why);
+      }
+      const before = dispatcher.getState().notice;
       dispatcher.dispatch({ type: 'CLEAR_REFUSED_TAGS', field: 'bulk-tag' });
-      actUnlessEditedElsewhere(
-        dispatcher,
-        services,
-        lids,
-        'タグを付け外しできませんでした(別のタブの編集を確かめられませんでした)',
-        () => {
-          dispatcher.dispatch({ type: 'BULK_TAG', lids, tags, mode, field: 'bulk-tag' });
-        },
+      dispatcher.dispatch({ type: 'BULK_TAG', lids, tags, mode, field: 'bulk-tag' });
+      // 🔴 書き終えるのを待ってから結果を書く(書く経路は積まれた列で動く。`settle` はその列の終わりまで待つ)
+      await Promise.resolve(services.settle?.() ?? null);
+      const notice = dispatcher.getState().notice;
+      return done(
+        notice !== null && notice !== before
+          ? notice
+          : `${String(lids.length)} 件に、タグ「${tags.join(' ')}」を${mode === 'add' ? '付ける' : '外す'}処理を終えました`,
       );
-      return done(`${String(lids.length)} 件に、タグ「${tags.join(' ')}」を${mode === 'add' ? '付けます' : '外します'}(結果は上のメッセージに出ます)`);
     },
     exportNote: (lid, format) => {
       const why = blockedActionNote(dispatcher.getState().phase);
@@ -10192,15 +10211,16 @@ const ACTIONS: Record<string, ActionHandler> = {
     session?.clear();
   },
   /** 結果の 1 塊をコピーする。 */
-  'shell-copy-block': (_dispatcher, target, services) => {
+  'shell-copy-block': (_dispatcher, target) => {
     const block = target.closest<HTMLElement>('[data-pkc-block]');
     const id = Number(block?.getAttribute('data-pkc-block'));
     const host = target.closest<HTMLElement>('[data-pkc-region="cmdshell"], [data-pkc-region="dual-cmdline"]');
     const session = sessionByName(host?.getAttribute('data-pkc-session') ?? (host?.matches('[data-pkc-region="cmdshell"]') ? 'shell' : null));
     const found = session?.find(id);
     if (found === undefined) return;
+    // 🔴 ステータスバーではなく、押した塊に書く(一時のメッセージの置き場にしない)
     void copyPlainText(shellBlockText(found)).then((ok) => {
-      services.showStatus?.(ok ? '結果をコピーしました' : 'コピーできませんでした(ブラウザに拒否されました)', ok ? undefined : CAUTION);
+      session?.update(found, { note: ok ? 'この結果をコピーしました' : 'コピーできませんでした(ブラウザに拒否されました)' });
     });
   },
   /**
