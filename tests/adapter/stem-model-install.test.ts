@@ -42,37 +42,56 @@ const okFetch = (size = 8) =>
   });
 
 describe('取り出し(obtain)', () => {
-  it('🔴 ① 入っていれば取得を 1 本も呼ばない。② 無ければ取得して残し、次からは取らない', async () => {
+  it('🔴 ① 入っていれば取得を 1 本も呼ばない。② 無ければ取得するが、save() を呼ぶまで保存しない(検証前に残さない)', async () => {
     const w = memoryStore();
     const fetchModel = okFetch();
     const inst = new StemModelInstaller({ store: w.store, fetchModel, persist: async () => true, now: () => 42 });
     const first = await inst.obtain(model);
     expect(first).toMatchObject({ ok: true, fromStore: false });
     expect(fetchModel).toHaveBeenCalledTimes(1);
+    expect(w.metas.size + w.blobs.size, '保存前なのに端末へ書いた').toBe(0);
+    expect(await inst.isStored(model.id)).toBe(false);
+    // 検証後に save() ── ここで初めて残る
+    const note = first.ok ? await first.save() : '';
+    expect(note).toContain('端末に取り込みました');
     expect(w.metas.get(model.id)).toEqual({ bytes: 8, url: 'https://huggingface.co/x/m.onnx', installedAt: 42 });
-    expect(first.ok && first.note).toContain('端末に取り込みました');
+    expect(await inst.isStored(model.id)).toBe(true);
     const second = await inst.obtain(model);
-    expect(second).toMatchObject({ ok: true, fromStore: true, note: '' });
+    expect(second).toMatchObject({ ok: true, fromStore: true });
+    expect(second.ok && (await second.save())).toBe('');
     expect(fetchModel, '2 回目に取りに行った').toHaveBeenCalledTimes(1);
   });
 
   it('保存を許されなかった回は、その旨を添える(黙って消えうることを黙らない)', async () => {
     const inst = new StemModelInstaller({ store: memoryStore().store, fetchModel: okFetch(), persist: async () => false });
     const r = await inst.obtain(model);
-    expect(r.ok && r.note).toContain('消さずに残す');
+    expect(r.ok && (await r.save())).toContain('消さずに残す');
   });
 
-  it('🔴 保存に失敗しても(容量)、この 1 回は取れた Blob で動かす。理由は言う。入ったとは言わない', async () => {
+  it('🔴 保存に失敗しても(容量)投げず、理由を返す。入ったとは言わない', async () => {
     const w = memoryStore({ failPut: true });
     const inst = new StemModelInstaller({ store: w.store, fetchModel: okFetch(), persist: async () => true });
     const r = await inst.obtain(model);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.blob.size).toBe(8);
-      expect(r.note).toContain('空き容量が足りません');
-      expect(r.note).toContain('保存せずに分離');
+      const note = await r.save();
+      expect(note).toContain('空き容量が足りません');
+      expect(note).toContain('取得し直します');
     }
     expect(w.metas.size).toBe(0);
+  });
+
+  it('🔴 discard: 端末のモデルを捨てる(読み直しても無い)。元から無ければ false', async () => {
+    const w = memoryStore();
+    const inst = new StemModelInstaller({ store: w.store, fetchModel: okFetch(), persist: async () => true });
+    expect(await inst.discard(model.id)).toBe(false);
+    const r = await inst.obtain(model);
+    if (r.ok) await r.save();
+    expect(await inst.isStored(model.id)).toBe(true);
+    expect(await inst.discard(model.id)).toBe(true);
+    expect(await inst.isStored(model.id)).toBe(false);
+    expect(await w.store.readBlob(model.id)).toBeNull();
   });
 
   it('④ 取れなかったときは理由を返し、何も書かない', async () => {

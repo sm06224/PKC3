@@ -57,6 +57,12 @@ export interface CaptureToolDeps {
     model: StemModel,
     onProgress: (got: number, total: number, host: string) => void,
   ) => Promise<StemObtainResult>;
+  /** 端末にモデルが入っているか(入っていなければ、取得の前に確認を出す)。 */
+  readonly isStemModelStored: (model: StemModel) => Promise<boolean>;
+  /**
+   * 🔴 端末のモデルを捨てる(保存済みのモデルで分離が bad-model になったとき)。
+   */
+  readonly discardStemModel: (model: StemModel) => Promise<void>;
   /** 🔴 実行器(ONNX Runtime)が起動できるかを、モデルを取る前に確かめる(ワーカー)。 */
   readonly probeStems: () => Promise<StemProbeResult>;
   /** 歌声と楽器に分ける(ワーカー)。⚠ `left` / `right` は譲る(transfer)。断る理由は値で返る。 */
@@ -313,7 +319,19 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
     }
     progress('歌声と楽器を分けています(ワーカーで処理)…');
     const r = await deps.stems({ model: fetched.blob, modelId: model.id, left: pcm.left, right: pcm.right }, progress);
-    if (!r.ok) return { kind: 'refused', text: stemRefusalText(r.reason, r.detail) };
+    if (!r.ok) {
+      // 🔴 端末に残っていたモデルで bad-model になったら、そのモデルを捨てる(次も同じ失敗をしない)
+      if (r.reason === 'bad-model' && fetched.fromStore) {
+        await deps.discardStemModel(model);
+        return {
+          kind: 'refused',
+          text: `${stemRefusalText(r.reason, r.detail)} 取り込んだモデルが合わなかったので消しました。もう一度試すと取り直します。`,
+        };
+      }
+      return { kind: 'refused', text: stemRefusalText(r.reason, r.detail) };
+    }
+    // 🔴 分離が成功し、安全弁を通ったので、ここで初めて端末に残す(取得した回だけ)
+    const saveNote = await fetched.save();
     return {
       kind: 'attach',
       items: r.files.map((f) => ({
@@ -322,7 +340,7 @@ export function createCaptureTools(deps: CaptureToolDeps): Partial<Record<Proces
         mime: 'audio/webm',
         ext: 'webm',
       })),
-      summary: `歌声と楽器の 2 つの音を作りました。想定の設定で分けました。聞いて確かめてください${fetched.note === '' ? '' : `(${fetched.note})`}`,
+      summary: `歌声と楽器の 2 つの音を作りました。想定の設定で分けました。聞いて確かめてください${saveNote === '' ? '' : `(${saveNote})`}`,
     };
   };
 

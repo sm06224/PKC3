@@ -17,6 +17,9 @@ import type { AttachItem, AttachedOne } from '../../src/adapter/ui/actions/attac
 import { asciiBytes, concatBytes, element, float64Bytes, hexBytes, uintBytes } from '../../src/features/audio/ebml';
 import type { VoiceJob } from '../../src/adapter/platform/voice/voice-run';
 import type { StemRequest } from '../../src/adapter/platform/stems/stem-client';
+import type { StemResult } from '../../src/adapter/platform/stems/stem-run';
+import { StemModelInstaller } from '../../src/adapter/platform/stems/stem-model-install';
+import type { StemModelMeta, StemModelStorePort } from '../../src/adapter/platform/stems/stem-model-store';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { chaptersHeading } from '../../src/features/capture/chapters';
 
@@ -79,9 +82,11 @@ function harness(opts: {
     decode48k: vi.fn(async () => new Float32Array(48_000)),
     voice: vi.fn(async () => ({ ok: false as const, reason: 'no-engine' as const })),
     decodeStereo44k: vi.fn(async () => ({ left: new Float32Array(44_100).fill(0.1), right: new Float32Array(44_100).fill(0.1) })),
-    obtainStemModel: vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, note: '' })),
+    obtainStemModel: vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, save: async () => '' })),
     stems: vi.fn(async () => ({ ok: false as const, reason: 'no-runtime' as const })),
     probeStems: vi.fn(async () => ({ ok: true as const })),
+    isStemModelStored: vi.fn(async () => true),
+    discardStemModel: vi.fn(async () => {}),
     decode16k: vi.fn(async () => pcmOf([...rep(0.3, 20), ...rep(0.001, 3), ...rep(0.3, 20)])),
     now: () => NOW,
     ask: vi.fn(async () => null as string | null),
@@ -492,7 +497,7 @@ describe('歌声と楽器に分ける(ニューラルの音源分離。#674 / #9
     const order: string[] = [];
     const obtainStemModel = vi.fn(async () => {
       order.push('fetch');
-      return { ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, note: '' };
+      return { ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, save: async () => '' };
     });
     const decodeStereo44k = vi.fn(async () => {
       order.push('decode');
@@ -527,7 +532,7 @@ describe('歌声と楽器に分ける(ニューラルの音源分離。#674 / #9
   });
 
   it('🔴 実行器が起動できないときは、モデルを取りに行く前に理由を言って終わる(66MB を取ってから失敗しない)', async () => {
-    const obtain = vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, note: '' }));
+    const obtain = vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, save: async () => '' }));
     const decodeStereo44k = vi.fn(async () => ({ left: new Float32Array(1), right: new Float32Array(1) }));
     const probeStems = vi.fn(async () => ({ ok: false as const, reason: 'no-runtime' as const, detail: 'wasm 404' }));
     const h = harness({ tools: { obtainStemModel: obtain, probeStems, decodeStereo44k, stems: okStems() } });
@@ -539,7 +544,7 @@ describe('歌声と楽器に分ける(ニューラルの音源分離。#674 / #9
   });
 
   it('🔴 結果の知らせに「想定の設定で分けました。聞いて確かめてください」が出る。モデルを取り込んだ回は、その旨も添える', async () => {
-    const obtain = vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, note: 'モデルを端末に取り込みました' }));
+    const obtain = vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, save: async () => 'モデルを端末に取り込みました' }));
     const h = harness({ tools: { obtainStemModel: obtain, stems: okStems() } });
     h.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
     await h.run('separate-stems');
@@ -552,7 +557,7 @@ describe('歌声と楽器に分ける(ニューラルの音源分離。#674 / #9
     const obtainStemModel = vi.fn(async (_m: unknown, onProgress: (g: number, t: number, h: string) => void) => {
       onProgress(33, 100, 'huggingface.co');
       onProgress(66, 100, 'huggingface.co');
-      return { ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, note: '' };
+      return { ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, save: async () => '' };
     });
     const h = harness({ tools: { stems, obtainStemModel } });
     h.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
@@ -585,7 +590,7 @@ describe('歌声と楽器に分ける(ニューラルの音源分離。#674 / #9
       const segment = concatBytes([hexBytes('18538067'), Uint8Array.of(0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff), info]);
       return new Blob([concatBytes([head, segment]) as BlobPart], { type: 'audio/webm' });
     };
-    const obtainStemModel = vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, note: '' }));
+    const obtainStemModel = vi.fn(async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), fromStore: false, save: async () => '' }));
     const h = harness({ tools: { obtainStemModel, stems: okStems() } });
     h.deps.readBlob.mockResolvedValue(webm(11 * 60_000));
     await h.run('separate-stems');
@@ -604,5 +609,93 @@ describe('歌声と楽器に分ける(ニューラルの音源分離。#674 / #9
     const h = harness({ tools: { stems: okStems(), decodeStereo44k: vi.fn(async () => { throw new Error('x'); }) } });
     await h.run('separate-stems');
     expect(h.dispatcher.getState().error).toContain('読み取れませんでした');
+  });
+});
+
+/**
+ * 🔴 検証前の IDB 保存(再レビュー ⚠1)と test B:
+ *  - 取得した回は、分離が成功して安全弁を通ったときだけ端末に残す(失敗した回は残さない)
+ *  - 端末に残っていたモデルで bad-model になったら、そのモデルを消す(`readBlob` が null になる)
+ * 実体の `StemModelInstaller`(メモリ上の置き場)をそのまま繋いで確かめる。
+ */
+describe('モデルの保存は検証のあと(⚠1)・test B', () => {
+  const bytes = new Uint8Array([1, 2]).buffer;
+  const okFiles = {
+    ok: true as const,
+    files: [
+      { tag: '歌声', bytes, durationMs: 1000 },
+      { tag: '楽器', bytes, durationMs: 1000 },
+    ],
+  };
+
+  function wired(stemsResult: StemResult | Promise<StemResult>, preStored = false) {
+    const metas = new Map<string, StemModelMeta>();
+    const blobs = new Map<string, Blob>();
+    const store: StemModelStorePort = {
+      readMeta: async (id) => (metas.has(id) && blobs.has(id) ? metas.get(id)! : null),
+      readBlob: async (id) => blobs.get(id) ?? null,
+      put: async (id, b, m) => {
+        blobs.set(id, b);
+        metas.set(id, m);
+      },
+      remove: async (id) => {
+        blobs.delete(id);
+        metas.delete(id);
+      },
+    };
+    const installer = new StemModelInstaller({
+      store,
+      persist: async () => true,
+      fetchModel: async () => ({ ok: true as const, blob: new Blob([new Uint8Array(8)]), url: 'https://huggingface.co/x/m.onnx' }),
+    });
+    if (preStored) {
+      blobs.set('mdx-vocal', new Blob([new Uint8Array(8)]));
+      metas.set('mdx-vocal', { bytes: 8, url: 'https://huggingface.co/x/m.onnx', installedAt: 1 });
+    }
+    const h = harness({
+      tools: {
+        obtainStemModel: (m, p) => installer.obtain(m, p),
+        isStemModelStored: (m) => installer.isStored(m.id),
+        discardStemModel: async (m) => void (await installer.discard(m.id)),
+        stems: vi.fn(async () => stemsResult),
+      },
+    });
+    h.deps.attach.mockImplementation(async (item) => ({ lid: 'n', assetKey: 'k2', mime: item.type, hash: 'h' }));
+    return { h, blobs, installer };
+  }
+
+  it('🔴 取得した回: 分離が成功して初めて端末に残り、知らせにその旨が出る。失敗(bad-model)した回は残さない', async () => {
+    const ok = wired(okFiles);
+    await ok.h.run('separate-stems');
+    expect(ok.blobs.has('mdx-vocal'), '成功したのに残していない').toBe(true);
+    expect(ok.h.notes.at(-1)).toContain('端末に取り込みました');
+
+    const bad = wired({ ok: false, reason: 'bad-model', detail: '別のモデル' });
+    await bad.h.run('separate-stems');
+    expect(bad.blobs.size, '検証前(失敗した回)に端末へ残した').toBe(0);
+    expect(bad.h.dispatcher.getState().error).not.toContain('消しました');
+  });
+
+  it('🔴 test B: 端末に残っていたモデルで bad-model になったら、そのモデルを消す(readBlob が null)。次は取り直す', async () => {
+    const w = wired({ ok: false, reason: 'bad-model', detail: '出力の形が想定と違います' }, true);
+    expect(await w.installer.isStored('mdx-vocal'), '前提: 入っている').toBe(true);
+    await w.h.run('separate-stems');
+    expect(w.blobs.has('mdx-vocal'), '合わなかったモデルが端末に残った').toBe(false);
+    expect(await (w.installer as unknown as { deps: { store: StemModelStorePort } }).deps.store.readBlob('mdx-vocal')).toBeNull();
+    expect(w.h.dispatcher.getState().error).toContain('取り込んだモデルが合わなかったので消しました。もう一度試すと取り直します');
+  });
+
+  it('対照群: 端末のモデルでも、bad-model 以外の失敗(メモリ不足など)では消さない', async () => {
+    const w = wired({ ok: false, reason: 'infer-failed', detail: 'OOM' }, true);
+    await w.h.run('separate-stems');
+    expect(w.blobs.has('mdx-vocal'), 'メモリ不足でモデルを消した').toBe(true);
+    expect(w.h.dispatcher.getState().error).not.toContain('消しました');
+  });
+
+  it('対照群: 端末のモデルで成功したときは、取得も保存もしない(save は何もしない)', async () => {
+    const w = wired(okFiles, true);
+    await w.h.run('separate-stems');
+    expect(w.h.notes.at(-1)).toContain('歌声と楽器の 2 つの音を作りました');
+    expect(w.h.notes.at(-1)).not.toContain('取り込みました');
   });
 });

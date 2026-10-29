@@ -4046,9 +4046,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       decodeStereo44k: (blob) => decodeToStereo(blob, STEM_RATE),
       obtainStemModel: async (model, onProgress) => {
         const r = await stemInstaller.obtain(model, onProgress);
-        // 🔴 録音から押して取り込んだ回も、設定の「音源分離」の控えへ写す(写さないと、入っているのに「取り込む」が出る)
-        if (r.ok && !r.fromStore) void stemInstaller.readInstalled(stemIds).then((v) => appStemModel.setInstalled(v));
-        return r;
+        if (!r.ok || r.fromStore) return r;
+        // 🔴 保存は分離が成功したあと(`save`)。保存した回は、設定の「音源分離」の控えへ写す(写さないと、入っているのに「取り込む」が出る)
+        return {
+          ...r,
+          save: async () => {
+            const note = await r.save();
+            void stemInstaller.readInstalled(stemIds).then((v) => appStemModel.setInstalled(v));
+            return note;
+          },
+        };
+      },
+      isStemModelStored: (model) => stemInstaller.isStored(model.id),
+      discardStemModel: async (model) => {
+        await stemInstaller.discard(model.id);
+        void stemInstaller.readInstalled(stemIds).then((v) => appStemModel.setInstalled(v));
       },
       probeStems: () => stemClient.probe(),
       stems: (req, onProgress) => stemClient.run(req, onProgress),

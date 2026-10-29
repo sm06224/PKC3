@@ -25,7 +25,18 @@ export type StemInstallResult =
   | { readonly ok: false; readonly message: string };
 
 export type StemObtainResult =
-  | { readonly ok: true; readonly blob: Blob; readonly fromStore: boolean; readonly note: string }
+  | {
+      readonly ok: true;
+      readonly blob: Blob;
+      /** 端末に入っていた物か(true なら取得していない)。 */
+      readonly fromStore: boolean;
+      /**
+       * 🔴 **端末へ保存する**(取得した回だけ意味がある。入っていた物には何もしない)。
+       * 呼ぶのは**分離が成功して安全弁を通ったあと**だけ ── 検証前に残すと、別のモデルや壊れた物を「入っている」ことにして、
+       * 次からも取りに行かず同じ失敗を繰り返す。返すのは知らせの 1 文(保存できなかった理由も含む)。投げない。
+       */
+      readonly save: () => Promise<string>;
+    }
   | { readonly ok: false; readonly why: string };
 
 export interface StemModelInstallDeps {
@@ -87,8 +98,14 @@ export class StemModelInstaller {
     return out;
   }
 
+  /** 端末に入っているか(取得の確認を出すかどうかの判断に使う)。 */
+  async isStored(id: string): Promise<boolean> {
+    return (await this.deps.store.readMeta(id).catch(() => null)) !== null;
+  }
+
   /**
-   * 使うための重みを取り出す。入っていればそれ(取りに行かない)、無ければ取得して保存してから返す。
+   * 使うための重みを取り出す。入っていればそれ(取りに行かない)、無ければ取得して返す。
+   * 🔴 **ここでは保存しない** ── 保存は返す `save()`(分離が成功して安全弁を通ったあと)。
    * @param onProgress 取得の進み(入っているときは呼ばない)
    */
   async obtain(
@@ -97,7 +114,7 @@ export class StemModelInstaller {
   ): Promise<StemObtainResult> {
     try {
       const stored = await this.deps.store.readBlob(model.id).catch(() => null);
-      if (stored !== null) return { ok: true, blob: stored, fromStore: true, note: '' };
+      if (stored !== null) return { ok: true, blob: stored, fromStore: true, save: async () => '' };
     } catch {
       /* 読めなければ取り直す */
     }
@@ -111,25 +128,38 @@ export class StemModelInstaller {
         onProgress,
       });
       if (!fetched.ok) return { ok: false, why: fetched.why };
-      let note = '';
-      try {
-        const persisted = await (this.deps.persist ?? requestPersist)();
-        await this.deps.store.put(model.id, fetched.blob, {
-          bytes: fetched.blob.size,
-          url: fetched.url,
-          installedAt: (this.deps.now ?? Date.now)(),
-        });
-        if (!persisted) note = 'モデルを端末に取り込みました(ブラウザが「消さずに残す」を許していないため、空き容量が減ると消されることがあります)';
-        else note = 'モデルを端末に取り込みました(次からは取得しません。設定の「音源分離」で消せます)';
-      } catch (e) {
-        // 保存に失敗しても、この 1 回は取れた Blob で動かす
-        note = `${messageOf(e, 'モデルの保存')}(この回は保存せずに分離します)`;
-      }
-      return { ok: true, blob: fetched.blob, fromStore: false, note };
+      const save = async (): Promise<string> => {
+        try {
+          const persisted = await (this.deps.persist ?? requestPersist)();
+          await this.deps.store.put(model.id, fetched.blob, {
+            bytes: fetched.blob.size,
+            url: fetched.url,
+            installedAt: (this.deps.now ?? Date.now)(),
+          });
+          return persisted
+            ? 'モデルを端末に取り込みました(次からは取得しません。設定の「音源分離」で消せます)'
+            : 'モデルを端末に取り込みました(ブラウザが「消さずに残す」を許していないため、空き容量が減ると消されることがあります)';
+        } catch (e) {
+          // 保存に失敗しても、分離の結果は出ている
+          return `${messageOf(e, 'モデルの保存')}(次回は取得し直します)`;
+        }
+      };
+      return { ok: true, blob: fetched.blob, fromStore: false, save };
     } finally {
       this.running = false;
       this.abort = null;
     }
+  }
+
+  /**
+   * 🔴 **端末のモデルを捨てる**(保存済みのモデルで分離が bad-model になったとき)── 合わない物を残すと、次も同じ失敗をする。
+   * @returns 消したか(元から無ければ false)
+   */
+  async discard(id: string): Promise<boolean> {
+    const had = await this.isStored(id);
+    if (!had) return false;
+    await this.deps.store.remove(id).catch(() => undefined);
+    return !(await this.isStored(id));
   }
 
   /** 設定から取り込む(`obtain` と同じ道。入っていれば何もしない)。 */
@@ -143,12 +173,14 @@ export class StemModelInstaller {
     const r = await this.obtain(model, (g, t, h) => onProgress(stemProgressText(g, t, h)));
     onProgress('');
     if (!r.ok) return { ok: false, message: r.why };
+    // 設定からの取り込みは user の明示操作 ── 分離を通さずにそのまま保存する(合わなければ、使ったときに捨てる)
+    const note = await r.save();
     const after = await this.readInstalled([id]);
     if (after[id] === undefined) {
       // 保存が通らなかった(note に理由が入っている)── 入ったとは言わない
-      return { ok: false, message: r.note !== '' ? r.note : 'モデルを保存できませんでした。' };
+      return { ok: false, message: note !== '' ? note : 'モデルを保存できませんでした。' };
     }
-    return { ok: true, installed: after, message: r.note !== '' ? r.note : `「${model.label}」のモデルを取り込みました` };
+    return { ok: true, installed: after, message: note !== '' ? note : `「${model.label}」のモデルを取り込みました` };
   }
 
   /** 消す。⚠ 消えたことを確かめてから成功と言う。 */

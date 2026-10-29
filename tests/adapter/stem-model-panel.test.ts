@@ -125,6 +125,7 @@ describe('⑤ main.ts の配線(原文 pin)', () => {
     expect(MAIN).toContain('applyStemResult(');
     expect(MAIN).toContain('appStemModel.setInstalled(');
     expect(MAIN, '録音から押したときも同じ installer を通る').toContain('stemInstaller.obtain(');
-    expect(MAIN, '録音から取り込んだ回も控えへ写す').toMatch(/!r\.fromStore\) void stemInstaller\.readInstalled\(stemIds\)/);
+    expect(MAIN, '保存した回は控えへ写す(save の後)').toMatch(/const note = await r\.save\(\);\s+void stemInstaller\.readInstalled\(stemIds\)/);
+    expect(MAIN, '合わなかったモデルを捨てる口が配線されている').toContain('discardStemModel:');
   });
 });
