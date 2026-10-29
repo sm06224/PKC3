@@ -14,6 +14,8 @@ import { SHELL_COMMANDS, commandWords, findCommand, planLine } from '../../src/f
 import { resolveFolder, resolveNote, resolveNotes, splitParentTitle } from '../../src/features/shell/resolve';
 import { commonPrefix, completeLine, quoteIfNeeded } from '../../src/features/shell/complete';
 import type { ShellEnv } from '../../src/features/shell/types';
+import { KEY_COMMANDS } from '../../src/features/keymap';
+import { fold } from '../../src/features/palette/palette-rows';
 
 function meta(lid: string, title: string, archetype = 'text', order = 1): EntryMeta {
   return { lid, title, archetype, createdAt: null, updatedAt: '2026-10-01T00:00:00Z', entryOrder: order, status: null, date: null, archived: false, bodyChars: 0 };
@@ -296,6 +298,18 @@ describe('コマンド表(1 つの表を 2 つの口が読む)', () => {
     const all = SHELL_COMMANDS.flatMap((c) => [c.name, ...c.aliases]);
     expect(new Set(all).size).toBe(all.length);
     expect(SHELL_COMMANDS.length).toBeGreaterThanOrEqual(20);
+  });
+  it('🔴 操作の語彙の正本は KEY_COMMANDS 1 本。SHELL_COMMANDS は同じ操作を重複して持たない(do から呼ぶ)', () => {
+    const keyWords = new Set(KEY_COMMANDS.flatMap((k) => [fold(k.id), fold(k.label)]));
+    const shellWords = SHELL_COMMANDS.flatMap((c) => [c.name, ...c.aliases]);
+    expect(KEY_COMMANDS.length, '空振り(KEY_COMMANDS が空)').toBeGreaterThan(50);
+    // コマンドの名前・別名が、操作の id・名前と同じ字になっていない(同じ操作を 2 つの表に持たない)
+    expect(shellWords.filter((w) => keyWords.has(fold(w)))).toEqual([]);
+    // 引数を取るコマンドは操作とは別の種類 ── 操作を名前で呼ぶ口は `do` / `ops` の 1 組だけ
+    const callers = SHELL_COMMANDS.filter((c) => c.args.includes('operation')).map((c) => c.name);
+    expect(callers).toEqual(['do', 'ops']);
+    // do は操作の名前を実行の頼みにするだけで、操作の中身を持たない
+    expect(planLine('do ヘルプを開く', env()).effects).toEqual([{ type: 'operation', query: 'ヘルプを開く' }]);
   });
   it('全部のコマンドに書き方・説明・分類がある', () => {
     for (const c of SHELL_COMMANDS) {

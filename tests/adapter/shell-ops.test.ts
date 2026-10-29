@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
+import { KEY_COMMANDS } from '../../src/features/keymap';
 import { makeShellOps, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { runShellLine } from '../../src/adapter/ui/actions/shell-run';
 import { ShellSession } from '../../src/adapter/ui/render/cmdshell';
@@ -284,6 +285,28 @@ describe('実物の命令の実行(makeShellOps)', () => {
     expect(ls.failed).toBe(false);
     expect(ls.table!.rows.length).toBeGreaterThan(0);
     expect((await c.run('find 設計'))!.failed).toBe(false);
+  });
+
+  it('🔴 ops / do: 操作の一覧は KEY_COMMANDS(パレットと同じ表)から出る。別の一覧を持たない', async () => {
+    const b = (await c.run('ops'))!;
+    const labels = new Set(KEY_COMMANDS.map((k) => k.label));
+    expect(b.table!.rows.length).toBeGreaterThan(20);
+    expect(b.table!.rows.every((r) => labels.has(r[0]!))).toBe(true);
+    // 一致が 1 つに決まらない名前は実行せず候補を出す(do の重複を防ぐ)
+    const many = (await c.run('do 開く'))!;
+    expect(many.table!.rows.length).toBeGreaterThan(1);
+    expect(many.lines.join('\n')).toContain('名前を絞って');
+  });
+
+  it('🔴 ops / do: 操作の一覧は KEY_COMMANDS(パレットと同じ表)から出る。別の一覧を持たない', async () => {
+    const b = (await c.run('ops'))!;
+    const labels = new Set(KEY_COMMANDS.map((k) => k.label));
+    expect(b.table!.rows.length).toBeGreaterThan(20);
+    expect(b.table!.rows.every((r) => labels.has(r[0]!))).toBe(true);
+    // 一致が 1 つに決まらない名前は実行せず候補を出す(do の重複を防ぐ)
+    const many = (await c.run('do 開く'))!;
+    expect(many.table!.rows.length).toBeGreaterThan(1);
+    expect(many.lines.join('\n')).toContain('名前を絞って');
   });
 
   it('mv: 結果の文が出る', async () => {
