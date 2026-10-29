@@ -186,6 +186,19 @@ describe('runShellLine', () => {
 });
 
 describe('履歴の保存', () => {
+  it('🔴 シェルと 2 ペインの命令行は同じ履歴を使い、互いの行を潰さない(C)', async () => {
+    const store = new ShellHistoryStore(memoryStorage());
+    const shell = new ShellSession('shell', store);
+    const dual = new ShellSession('dual', store);
+    const f = fake();
+    await runShellLine(f.ops, shell, 'pwd');
+    await runShellLine(f.ops, dual, 'ls');
+    await runShellLine(f.ops, shell, 'find 設計');
+    // どの順に打っても、3 行とも残る(先に打った側の行を後から打った側が上書きしない)
+    expect(shell.history).toEqual(['find 設計', 'ls', 'pwd']);
+    expect(dual.history).toEqual(['find 設計', 'ls', 'pwd']);
+  });
+
   it('端末の保存に書かれ、新しい session で読み戻せる', async () => {
     const st = memoryStorage();
     const f = fake();

@@ -41,7 +41,17 @@ export interface ShellBlock {
 
 export class ShellSession {
   readonly blocks: ShellBlock[] = [];
-  history: string[];
+  /**
+   * 🔴 **履歴は端末の保存 1 本**(シェルと 2 ペインの命令行で共通)。
+   * ⚠ session ごとに写しを持つと、片方が保存を上書きして、もう片方の履歴を潰す(先に打った側の行が消える)。
+   *   読むたびに保存を引き、積むときも保存の最新に足す。
+   */
+  get history(): string[] {
+    return this.store.get();
+  }
+  set history(list: string[]) {
+    this.store.set(list);
+  }
   /** シェルの現在地(`null` = ルート)。2 ペインでは使わない(焦点のペインの場所を使う)。 */
   cwd: string | null = null;
   /** 直前の一覧の ID(`#3` で引く)。 */
@@ -58,7 +68,6 @@ export class ShellSession {
     readonly name: 'shell' | 'dual',
     private readonly store: ShellHistoryStore = appShellHistory,
   ) {
-    this.history = store.get();
   }
 
   subscribe(fn: () => void): () => void {
@@ -104,8 +113,7 @@ export class ShellSession {
 
   /** 履歴に積む(端末に保存)。 */
   remember(line: string): void {
-    this.history = pushShellHistory(this.history, line);
-    this.store.set(this.history);
+    this.store.set(pushShellHistory(this.store.get(), line));
     this.at = -1;
     this.draft = '';
   }
