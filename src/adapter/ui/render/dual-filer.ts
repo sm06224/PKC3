@@ -23,6 +23,7 @@
  * (2026-08-07 に情報ペイン・ファイラ・本文の 3 面で踏んだ形)。
  * 表だけは指紋が変わったときに組み直し、**印は属性の付け替え**で塗る。
  */
+import { appDualShellSession, buildShellPrompt, paintShellBlock } from './cmdshell';
 import type { EntryMeta } from '@core/model/entry-meta';
 import type { AppState } from '@adapter/state/app-state';
 import { dualListViewOptions } from '@adapter/state/list-view-options';
@@ -777,7 +778,29 @@ export class DualFilerRenderer {
     switcher.setAttribute('data-pkc-region', 'dual-switch');
     switcher.setAttribute('data-pkc-action', 'dual-focus');
     switcher.setAttribute('data-pkc-field', 'dual-switch');
-    this.region.append(title, switcher, body, commands);
+    /**
+     * 🔴 **命令行**(#241。user 指示 2026-08-17「PKC2 にあったコマンド機能は 2 ペインファイラの内部で使う」)。
+     *
+     * 選んだ行(無ければカーソルの行)を相手に、`mv 資料` `cp` `rm` `tag add 重要` `mkdir 新規` `rename 新しい名前` `select 議事` `export` を打つ。
+     * ⚠ 命令表はコマンドシェル(#274)と**同じ 1 つ**(`features/shell/commands.ts`)で、実行も 2 ペインのボタンと同じ実体
+     *   (`mv` = 「移す」、`cp` = 「コピー」)を通る。PKC2 の動線(場所と対象を指して命令を打ち、先に結果を見せる)は
+     *   `-n`(試し実行)と確認つきの `rm` で再現した。
+     */
+    const cmdline = document.createElement('div');
+    cmdline.setAttribute('data-pkc-region', 'dual-cmdline');
+    cmdline.setAttribute('data-pkc-session', 'dual');
+    const out = document.createElement('div');
+    out.setAttribute('data-pkc-region', 'dual-cmd-out');
+    out.hidden = true;
+    cmdline.append(out, buildShellPrompt('dual'));
+    const paintOut = (): void => {
+      const last = appDualShellSession.blocks[appDualShellSession.blocks.length - 1];
+      out.textContent = '';
+      out.hidden = last === undefined;
+      if (last !== undefined) out.append(paintShellBlock(last, { maxRows: 8 }));
+    };
+    appDualShellSession.subscribe(paintOut);
+    this.region.append(title, switcher, body, cmdline, commands);
     this.frame = { panes: { left, right }, commands, switcher };
     return this.frame;
   }
