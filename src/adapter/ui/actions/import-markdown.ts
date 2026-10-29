@@ -18,6 +18,8 @@ import { extractMeta } from '@features/flavor';
 import { IMPORT_TEXT_MAX_BYTES, readImportTextInfo, SJIS_GUESS_NOTE } from '@features/import/text-decode';
 import { humanBytes } from '@features/human-bytes';
 import { duplicateNote, findDuplicates, narrowByLength } from '@features/import/duplicate-scan';
+import { isOperationCancelled, type CancelToken } from '@features/job-cancel';
+import { IMPORT_CANCELLED_NOTE } from './job-control';
 
 /**
  * ⚠ `ImportDeps`(PKC2 経路)の**部分集合**として書く ── 呼び出し側が
@@ -70,6 +72,8 @@ export async function importMarkdownFiles(
   dispatcher: Dispatcher,
   deps: MarkdownImportDeps,
   files: readonly File[],
+  /** 🔴 やめる印(台帳 #1852 の F2・依頼 253)。省略 = やめられない(従来どおり)。区切り(ファイル 1 本ごと・書く直前)で見る。 */
+  token?: CancelToken,
 ): Promise<number | null> {
   const fail = (msg: string): null => {
     return failImport(dispatcher, deps, msg);
@@ -94,6 +98,11 @@ export async function importMarkdownFiles(
     if (state.phase !== 'ready') return `${phaseBlockReason(state.phase)}取り込んでください`;
     return null;
   };
+  /** 🔴 読む段でやめた ── まだ 1 件も書いていないので、戻す物は無い。 */
+  const cancelled = (): null => {
+    deps.notify?.(IMPORT_CANCELLED_NOTE);
+    return null;
+  };
   const blocked = gate();
   if (blocked !== null) return fail(blocked);
   if (files.length === 0) return fail('取り込むファイルがありません');
@@ -103,6 +112,7 @@ export async function importMarkdownFiles(
   try {
     let order = deps.orderBase();
     for (const file of files) {
+      token?.throwIfCancelled();
       // 🔴 読む前に大きさで断る(ics と同じ形。#1087)── 手違いの巨大な file を全部文字列にしない
       if (file.size > IMPORT_TEXT_MAX_BYTES) {
         return fail(
@@ -130,6 +140,7 @@ export async function importMarkdownFiles(
       });
     }
   } catch (e) {
+    if (isOperationCancelled(e)) return cancelled();
     // 読めた分を書かずに終える ── 部分的に書くと「どこまで入ったか」が
     // user に分からないまま disk に残る(PKC2 経路は書込中の失敗なので事情が違う)
     return fail(
@@ -160,6 +171,8 @@ export async function importMarkdownFiles(
    */
   const again = gate();
   if (again !== null) return fail(again);
+  // 🔴 書く直前がやめられる最後の区切り(書き込みは 1 回で、途中で割り込まない ── 半端なノートを作らない)
+  if (token?.cancelled === true) return cancelled();
 
   try {
     await deps.bulkUpsertEntries(rows);

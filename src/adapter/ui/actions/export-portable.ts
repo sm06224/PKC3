@@ -25,6 +25,8 @@ import { dayStamp } from '@features/datetime/date-math';
 import { writePortableBundle } from '@features/export/portable-bundle';
 import type { PortableBundle } from '@features/portable/bundle';
 import { EmptyClosureError, type PortableClosure } from '@features/export/portable-closure';
+import { isOperationCancelled } from '@features/job-cancel';
+import type { JobControl } from './job-control';
 
 /**
  * 🔴 **PKC3 入り HTML の中からは書き出せない理由**(台帳 #1852 束 L2。依頼 84-4 B)。
@@ -61,6 +63,11 @@ export interface PortableExportDeps {
   insideBundle(): boolean;
   now?(): Date;
   mintId?(): string;
+  /**
+   * 🔴 **途中でやめる**(台帳 #1852 の F2・依頼 253 の残り。バックアップの書き出しと同じ `job-control.ts`)。⚠ **省略可** ──
+   * 無い配線は「やめる」ボタンを出さない(従来どおり最後まで走る)。区切り(読み出し・添付 1 件ごと・ダウンロードの直前)で印を見る。
+   */
+  job?: JobControl;
 }
 
 /**
@@ -126,9 +133,11 @@ export async function exportPortable(
 
   deps.notify('PKC3 入り HTML を書き出しています…');
   progressShown = true;
+  const token = deps.job?.start('export') ?? null;
   try {
     // 🔴 直前の保存が disk に着いてから読む
     await deps.settle();
+    token?.throwIfCancelled();
     let closure: PortableClosure | null = null;
     if (selection !== undefined) {
       if (deps.closure === undefined) return fail('書き出しに失敗しました: 選んだノートの範囲を決められません');
@@ -139,12 +148,15 @@ export async function exportPortable(
         throw e;
       }
     }
+    token?.throwIfCancelled();
     const image = await deps.exportImage(
       closure === null ? undefined : { lids: closure.lids, assetKeys: closure.assetKeys },
     );
+    token?.throwIfCancelled();
     if (image.byteLength === 0) return fail('中身がまだ空です(書き出すものがありません)');
 
     const template = await deps.fetchTemplate();
+    token?.throwIfCancelled();
     const allMetas = await deps.listAssets();
     // 🔑 選んだ分のときは、閉包の添付だけを焼く(画像の目録と焼く bytes を揃える)
     const keep = closure === null ? null : new Set(closure.assetKeys);
@@ -163,6 +175,7 @@ export async function exportPortable(
      */
     async function* assets(): AsyncGenerator<{ key: string; mime: string; blob: Blob }> {
       for (const m of metas) {
+        token?.throwIfCancelled(); // 添付 1 件ごとが区切り
         const blob = await deps.getAsset(m.key);
         if (blob === null) {
           // 🔴 **黙って落とさない** ── 欠けたことを user に言う
@@ -175,6 +188,8 @@ export async function exportPortable(
 
     const out = await writePortableBundle({ template, bundle, image, assets: assets() });
     const now = deps.now?.() ?? new Date();
+    // 🔴 組み終えた後にやめられても、ダウンロードは始めない
+    token?.throwIfCancelled();
     deps.download(`${safeName(closure?.title ?? deps.title)}-${stamp(now)}.pkc3.html`, out.blob);
 
     const missing =
@@ -196,6 +211,14 @@ export async function exportPortable(
     );
     return out.assets;
   } catch (e) {
+    if (isOperationCancelled(e)) {
+      // 🔴 やめた ── 失敗ではない(`OP_FAILED` は出さない)。ファイルは作っていない
+      progressShown = false; // 次の知らせが進行中の欄を空にする
+      deps.notify('書き出しをやめました(ファイルは作っていません)');
+      return null;
+    }
     return fail(`書き出しに失敗しました: ${errorText(e)}`);
+  } finally {
+    if (token !== null) deps.job?.finish(token);
   }
 }

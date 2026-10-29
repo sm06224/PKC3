@@ -21,6 +21,8 @@ import { readPptxSlide, pptxSlideNamesInOrder } from '@features/import/pptx-boar
 import { readZipDirectory, readZipText, ZipReadError } from '@features/import/zip-reader';
 import type { MarkdownImportDeps } from './import-markdown';
 import { failImport } from './import-failure';
+import { isOperationCancelled, type CancelToken } from '@features/job-cancel';
+import { IMPORT_CANCELLED_NOTE } from './job-control';
 
 /** 1 枚のスライド XML の上限(展開後)。普通のスライドは数十 KB。 */
 export const SLIDE_XML_MAX = 8 * 1024 * 1024;
@@ -37,9 +39,16 @@ export async function importPptxFiles(
   dispatcher: Dispatcher,
   deps: MarkdownImportDeps,
   files: readonly File[],
+  /** 🔴 やめる印(台帳 #1852 の F2・依頼 253)。省略 = やめられない。 */
+  token?: CancelToken,
 ): Promise<number | null> {
   const fail = (msg: string): null => {
     return failImport(dispatcher, deps, msg);
+  };
+  /** 🔴 読む段でやめた ── まだ 1 件も書いていない。 */
+  const cancelled = (): null => {
+    deps.notify?.(IMPORT_CANCELLED_NOTE);
+    return null;
   };
   const state = dispatcher.getState();
   // ⚠ 門は md / vCard 経路と同じ(§7)
@@ -65,6 +74,7 @@ export async function importPptxFiles(
   try {
     let order = deps.orderBase();
     for (const file of files) {
+      token?.throwIfCancelled();
       let dir;
       try {
         dir = await readZipDirectory(file);
@@ -101,6 +111,7 @@ export async function importPptxFiles(
       skippedSlides += slideNames.length - used.length;
       let n = 0;
       for (const name of used) {
+        token?.throwIfCancelled(); // スライド 1 枚ごとも区切り
         n += 1;
         const entry = byName.get(name)!;
         if (entry.uncompressedSize > SLIDE_XML_MAX) {
@@ -137,6 +148,7 @@ export async function importPptxFiles(
       }
     }
   } catch (e) {
+    if (isOperationCancelled(e)) return cancelled();
     return fail(
       `PowerPoint を読めませんでした(ノートは 1 件も追加されていません): ${errorText(e)}`,
     );
@@ -157,6 +169,8 @@ export async function importPptxFiles(
   if (again.phase !== 'ready') {
     return fail(`${phaseBlockReason(again.phase)}取り込んでください`);
   }
+
+  if (token?.cancelled === true) return cancelled(); // 書く直前がやめられる最後の区切り
 
   try {
     await deps.bulkUpsertEntries(rows);

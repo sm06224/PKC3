@@ -2955,6 +2955,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             await storeEffects?.settled();
           },
           insideBundle: () => portable !== null,
+          // 🔴 PKC3 入り HTML の書き出しも途中でやめられる(台帳 #1852 の F2・依頼 253。バックアップの書き出しと同じ印と欄)
+          job: jobs,
         },
         selection,
       );

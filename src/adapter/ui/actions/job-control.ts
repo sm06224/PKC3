@@ -16,7 +16,7 @@ export const JOB_PANEL: Readonly<Record<JobKind, { title: string; cancel: string
   import: {
     title: '取り込み中',
     cancel: '取り込みをやめる',
-    hint: '取り込みを途中でやめます。ここまでに入れたノートはゴミ箱へ移します(ゴミ箱から戻せます)',
+    hint: '取り込みを途中でやめます。書き込み前なら何も入りません。入れたノートがあればゴミ箱へ移します(ゴミ箱から戻せます)',
   },
   export: {
     title: '書き出し中',
@@ -24,6 +24,12 @@ export const JOB_PANEL: Readonly<Record<JobKind, { title: string; cancel: string
     hint: '書き出しを途中でやめます。ファイルは作りません',
   },
 };
+
+/**
+ * 読み込みの段でやめた取り込みの結果(.md / 連絡先 / 予定 / pptx。台帳 #1852 の F2・依頼 253)。
+ * ⚠ これらは**最後に 1 回だけ書く**ので、やめた時点で書いたノートは無い ── 戻す物が無いことをそのまま言う。
+ */
+export const IMPORT_CANCELLED_NOTE = '取り込みをやめました(ノートは 1 件も追加されていません)';
 
 /** やめる印を立てた後の題(ボタンは消える)。 */
 export const JOB_CANCELLING_TITLE = 'やめています…';
