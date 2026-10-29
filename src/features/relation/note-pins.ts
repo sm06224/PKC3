@@ -17,8 +17,9 @@
  *   旧い版が端末に残した `<コレクションの id>/<lid>` の並び({@link legacyPinLids})は、開いたときに一度だけ取り込んで移す。
  * - 🔴 **置けるなら外せる**(user 指示 2026-08-23)── ピン留めする口(行の右クリック・操作を探す)と外す口
  *   (右クリックの「ピン留めを外す」・操作を探す・エリアの各行の「外す」)は必ず対で置く。
- * - 🔴 **消えたノートのピンは、付け外しのたびに掃除する**({@link deadPinLids})。満杯の判定は**生きているピンだけ**で数える。
- *   (ゴミ箱へ移したノートは一覧に無いので、ピンは外れる。戻したら留め直す。)
+ * - 🔴 **消えたノートのピンの掃除は worker が 1 か所でやる**(付け外しの tx の中で、`entries` にもゴミ箱にも無い lid だけ)。
+ *   ゴミ箱のノートのピンは残す(戻したらピンも戻る)。画面側は掃除の判定を持たない ── 古い写しで誤って消さないため。
+ *   満杯の判定は**生きているピン(いま一覧に在るノート)だけ**で数える。
  *
  * ⚠ **pure module**。browser API も dispatch も触らない。
  */
@@ -46,25 +47,18 @@ export function livePinLids(list: readonly string[], exists: (lid: string) => bo
   return list.filter((lid) => exists(lid));
 }
 
-/** 掃除する(ノートが無くなった)ピン。 */
-export function deadPinLids(list: readonly string[], exists: (lid: string) => boolean): string[] {
-  return list.filter((lid) => !exists(lid));
-}
-
 /**
- * 留める / 外すを 1 本で決める(掃除つき)。
- * @returns 新しい並びと、保存側へ頼む掃除の lid。満杯で断ったとき(生きている数で判定)は並びは変わらない。
+ * 留める / 外すを 1 本で決める。⚠ 写しの中の他の lid は動かさない(掃除は worker の仕事 ── ゴミ箱のノートのピンを巻き込まない)。
+ * @returns 新しい並び。満杯で断ったとき(生きている数で判定)は並びは変わらない。
  */
 export function togglePin(
   list: readonly string[],
   lid: string,
   exists: (lid: string) => boolean,
-): { list: string[]; prune: string[]; refused: boolean } {
-  const prune = deadPinLids(list, exists);
-  const kept = list.filter((x) => !prune.includes(x));
-  if (kept.includes(lid)) return { list: kept.filter((x) => x !== lid), prune, refused: false };
-  if (kept.length >= MAX_NOTE_PINS) return { list: kept, prune, refused: true };
-  return { list: [...kept, lid], prune, refused: false };
+): { list: string[]; refused: boolean } {
+  if (list.includes(lid)) return { list: list.filter((x) => x !== lid), refused: false };
+  if (livePinLids(list, exists).length >= MAX_NOTE_PINS) return { list: [...list], refused: true };
+  return { list: [...list, lid], refused: false };
 }
 
 /** 足せない理由(足せるなら `null`)。⚠ 数えるのは生きているピンだけ。 */

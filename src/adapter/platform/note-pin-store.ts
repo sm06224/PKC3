@@ -11,8 +11,8 @@
  */
 import { togglePin } from '@features/relation/note-pins';
 
-/** 書き手。`prune` = 同じ tx で掃除する、消えたノートの lid。 */
-export type NotePinWriter = (lid: string, on: boolean, prune: string[]) => Promise<void>;
+/** 書き手。⚠ 消えたノートのピンの掃除は worker が同じ tx でやる(ここは付け外しの 1 件だけ渡す)。 */
+export type NotePinWriter = (lid: string, on: boolean) => Promise<void>;
 
 export class NotePinStore {
   private items: string[] = [];
@@ -21,7 +21,7 @@ export class NotePinStore {
   private onFail: (() => void) | null = null;
   private chain: Promise<void> = Promise.resolve();
 
-  /** 留めた順(消えたノートの分を、掃除されるまで含む)。 */
+  /** 留めた順(消えた・ゴミ箱のノートの分も含む ── 描く側が `livePinLids` で絞る)。 */
   list(): readonly string[] {
     return this.items;
   }
@@ -49,7 +49,7 @@ export class NotePinStore {
   }
 
   /**
-   * ピン留めする / 外す(掃除つき)。
+   * ピン留めする / 外す。
    * @returns 満杯で断ったら `false`
    */
   toggle(lid: string, exists: (lid: string) => boolean): boolean {
@@ -63,7 +63,7 @@ export class NotePinStore {
     if (writer !== null) {
       const on = !was;
       this.chain = this.chain
-        .then(() => writer(lid, on, r.prune))
+        .then(() => writer(lid, on))
         .catch(() => {
           this.onFail?.();
         });

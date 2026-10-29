@@ -26,7 +26,6 @@ import { appNotePins, NotePinStore } from '../../src/adapter/platform/note-pin-s
 import { appDualPrefs } from '../../src/adapter/ui/render/dual-prefs';
 import {
   MAX_NOTE_PINS,
-  deadPinLids,
   legacyPinLids,
   legacyPinsWithout,
   livePinLids,
@@ -60,7 +59,7 @@ const flush = async (): Promise<void> => {
 };
 
 /** 書き手の呼び出し記録。 */
-let writes: Array<{ lid: string; on: boolean; prune: string[] }> = [];
+let writes: Array<{ lid: string; on: boolean }> = [];
 
 function rightClick(el: Element): void {
   el.dispatchEvent(
@@ -74,8 +73,8 @@ beforeEach(() => {
   appNotePins.setAll([]);
   writes = [];
   appNotePins.attach(
-    async (lid, on, prune) => {
-      writes.push({ lid, on, prune });
+    async (lid, on) => {
+      writes.push({ lid, on });
     },
     () => {},
   );
@@ -195,21 +194,19 @@ describe('固定エリア', () => {
 });
 
 describe('掃除と満杯の数え方', () => {
-  it('🔴 付け外しのたびに、消えたノートのピンを掃除する(書き手へ prune として渡る)', async () => {
+  it('🔴 付け外しは 1 件だけを書き手へ渡し、写しの他の lid(ゴミ箱のノートのピン)を動かさない', async () => {
     const t = setup();
-    appNotePins.setAll(['gone1', 'n1', 'gone2']);
+    appNotePins.setAll(['trashed', 'n1']);
     rightClick(t.listRow('n2'));
     t.press('pin-note');
-    expect(appNotePins.list(), '消えたノートが残っている').toEqual(['n1', 'n2']);
+    expect(appNotePins.list(), 'ゴミ箱のノートのピンを写しから落とした').toEqual(['trashed', 'n1', 'n2']);
     await flush();
-    expect(writes).toEqual([{ lid: 'n2', on: true, prune: ['gone1', 'gone2'] }]);
-    // 外すときも掃除する
-    appNotePins.setAll(['gone3', 'n1', 'n2']);
+    expect(writes).toEqual([{ lid: 'n2', on: true }]);
     writes = [];
     t.area().querySelector<HTMLElement>('[data-pkc-action="unpin-note"]')!.click();
     await flush();
-    expect(writes[0]).toMatchObject({ on: false, prune: ['gone3'] });
-    expect(appNotePins.list()).toEqual(['n2']);
+    expect(writes).toHaveLength(1);
+    expect(appNotePins.list()).toEqual(['trashed', 'n2']);
   });
 
   it('🔴 満杯の判定は生きているピンだけで数える(消えたピンが枠を食わない)', () => {
@@ -220,20 +217,19 @@ describe('掃除と満杯の数え方', () => {
     rightClick(t.listRow(`m${MAX_NOTE_PINS - 1}`));
     t.press('pin-note');
     expect(t.d.getState().error ?? '', '消えたピンを数えて断った').toBe('');
-    expect(appNotePins.list()).toHaveLength(MAX_NOTE_PINS);
+    expect(appNotePins.list().filter((l) => l.startsWith('m')), '押したのに留まっていない').toHaveLength(MAX_NOTE_PINS);
     // 本当に生きているのが満杯のときは理由を言って断る
     rightClick(t.listRow(`m${MAX_NOTE_PINS}`));
     t.press('pin-note');
-    expect(appNotePins.list()).toHaveLength(MAX_NOTE_PINS);
+    expect(appNotePins.list().filter((l) => l.startsWith('m'))).toHaveLength(MAX_NOTE_PINS);
     expect(t.d.getState().error ?? '').toContain(`${MAX_NOTE_PINS} 件まで`);
   });
 
   it('純関数: togglePin / pinRefusal / 掃除の境目', () => {
     const exists = (l: string): boolean => l.startsWith('n');
-    expect(deadPinLids(['n1', 'x', 'n2'], exists)).toEqual(['x']);
     expect(livePinLids(['n1', 'x', 'n2'], exists)).toEqual(['n1', 'n2']);
-    expect(togglePin(['n1'], 'n1', exists)).toEqual({ list: [], prune: [], refused: false });
-    expect(togglePin(['n1', 'x'], 'n2', exists)).toEqual({ list: ['n1', 'n2'], prune: ['x'], refused: false });
+    expect(togglePin(['n1'], 'n1', exists)).toEqual({ list: [], refused: false });
+    expect(togglePin(['n1', 'x'], 'n2', exists)).toEqual({ list: ['n1', 'x', 'n2'], refused: false });
     const full = Array.from({ length: MAX_NOTE_PINS }, (_, i) => `n${i}`);
     expect(togglePin(full, 'n99', exists).refused, '生きている満杯は断る').toBe(true);
     expect(togglePin(full, 'n0', exists).refused, '外すのは満杯でも通る').toBe(false);
@@ -341,7 +337,7 @@ describe('操作を探すから(開いているノート)', () => {
     expect(run(t, 'pin-note').ran).toBe(true);
     expect(appNotePins.list()).toEqual(['n2']);
     await flush();
-    expect(writes).toEqual([{ lid: 'n2', on: true, prune: [] }]);
+    expect(writes).toEqual([{ lid: 'n2', on: true }]);
     expect(run(t, 'pin-note', true).ran, '済みなのに「する」が押せる').toBe(false);
     expect(run(t, 'unpin-note').ran).toBe(true);
     expect(appNotePins.list()).toEqual([]);

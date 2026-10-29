@@ -5953,10 +5953,18 @@ const handlers: Handlers = {
     const scope = notePinScope(req.cid);
     database.exec('BEGIN IMMEDIATE');
     try {
-      // 消えたノートのピンの掃除(同じ tx)
-      for (const lid of req.prune ?? []) {
-        database.exec({ sql: 'DELETE FROM settings WHERE scope = ? AND k = ?', bind: [scope, lid] });
-      }
+      /**
+       * 🔴 **消えたノートのピンの掃除は、ここ 1 か所**。消えた = `entries` にもゴミ箱(版だけ残るノート)にも無い lid
+       * (永久削除・存在しない lid)。ゴミ箱のノートのピンは残す ── 戻したらピンも戻る。
+       * ⚠ 呼び側が掃除の lid を渡す形にしない(別タブの古い写しから誤って消す経路になる)。
+       */
+      database.exec({
+        sql: `DELETE FROM settings
+               WHERE scope = ?1
+                 AND NOT EXISTS (SELECT 1 FROM entries e WHERE e.cid = ?2 AND e.lid = settings.k)
+                 AND NOT EXISTS (SELECT 1 FROM revisions r WHERE r.cid = ?2 AND r.entry_lid = settings.k)`,
+        bind: [scope, req.cid],
+      });
       if (!req.on) {
         database.exec({ sql: 'DELETE FROM settings WHERE scope = ? AND k = ?', bind: [scope, req.lid] });
       } else {

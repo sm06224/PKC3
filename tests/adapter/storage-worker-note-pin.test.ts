@@ -2,7 +2,8 @@
  * 🔴 **worker の `listNotePins` / `putNotePin`**(#1377)。
  *
  * 守るもの:①付けたピンが留めた順に読み戻せる ②外すと消え、他は動かない ③付け直しは順を変えない
- * ④prune で消えたノートのピンを同じ呼びで掃除する ⑤器ごとに分かれる ⑥上限(100)で新しい lid だけ断り、外す・掃除は通す。
+ * ④付け外しの tx の中で、entries にもゴミ箱にも無い lid のピンだけを worker が掃除する(ゴミ箱のノートのピンは残り、戻すと戻る)
+ * ⑤器ごとに分かれる ⑥上限(100)で新しい lid だけ断り、外すのは通る。
  * 守っていないもの:多重タブでの同時書込(1 タグ 1 行の UPSERT であることをコードで確認しただけ)。
  */
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -35,6 +36,14 @@ function request<O extends Op>(
 const CID = 'c-notepin';
 const OTHER = 'c-other';
 
+const upsert = (cid: string, lid: string) =>
+  request({
+    op: 'upsertEntry',
+    cid,
+    entry: { lid, title: lid, archetype: 'text', body: 'x', entryOrder: 1, status: null, date: null, archived: false },
+    checkpoint: false,
+  });
+
 beforeAll(async () => {
   (globalThis as unknown as Record<string, unknown>).self = workerSelf;
   (globalThis as unknown as Record<string, unknown>).postMessage = (msg: StorageResponse) => {
@@ -51,6 +60,7 @@ beforeAll(async () => {
 
 describe('ノートのピン留め(worker)', () => {
   it('留めた順に読み戻せ、付け直しても順は変わらず、外すと消える', async () => {
+    for (const l of ['a', 'b', 'c']) await upsert(CID, l);
     await request({ op: 'putNotePin', cid: CID, lid: 'b', on: true });
     await request({ op: 'putNotePin', cid: CID, lid: 'a', on: true });
     await request({ op: 'putNotePin', cid: CID, lid: 'c', on: true });
@@ -59,32 +69,61 @@ describe('ノートのピン留め(worker)', () => {
     expect(await request({ op: 'listNotePins', cid: CID })).toEqual(['b', 'a', 'c']);
     await request({ op: 'putNotePin', cid: CID, lid: 'a', on: false });
     expect(await request({ op: 'listNotePins', cid: CID })).toEqual(['b', 'c']);
+    for (const l of ['b', 'c']) await request({ op: 'putNotePin', cid: CID, lid: l, on: false });
   });
 
-  it('prune で、消えたノートのピンを同じ呼びで掃除する(付けると同時・外すと同時)', async () => {
-    await request({ op: 'putNotePin', cid: CID, lid: 'd', on: true, prune: ['b'] });
-    expect(await request({ op: 'listNotePins', cid: CID })).toEqual(['c', 'd']);
-    await request({ op: 'putNotePin', cid: CID, lid: 'd', on: false, prune: ['c'] });
-    expect(await request({ op: 'listNotePins', cid: CID })).toEqual([]);
+  it('🔴 永久削除・存在しない lid のピンだけを、付け外しのたびに worker が掃除する(ゴミ箱のノートは残す)', async () => {
+    await upsert(CID, 'live');
+    await upsert(CID, 'goner');
+    await request({ op: 'putNotePin', cid: CID, lid: 'live', on: true });
+    await request({ op: 'putNotePin', cid: CID, lid: 'goner', on: true });
+    // 存在しない lid(以前の端末の残り・永久削除済み)のピンを直接作る = 存在しない lid へ留める
+    await request({ op: 'putNotePin', cid: CID, lid: 'ghost', on: true });
+    await request({ op: 'deleteEntry', cid: CID, lid: 'goner' }); // ゴミ箱へ(版が残る)
+    await request({ op: 'purgeTrash', cid: CID, lid: 'goner' }); // 永久削除
+    await request({ op: 'putNotePin', cid: CID, lid: 'live', on: true }); // 付け直し = 掃除のきっかけ
+    expect(await request({ op: 'listNotePins', cid: CID }), 'ghost / 永久削除したノートのピンが残っている').toEqual(['live']);
+    await request({ op: 'putNotePin', cid: CID, lid: 'live', on: false });
   });
 
-  it('器ごとに分かれる', async () => {
+  it('🔴 A をピン → A をゴミ箱へ → B をピン → A を戻す → A のピンが残っている', async () => {
+    await upsert(CID, 'A');
+    await upsert(CID, 'B');
+    await request({ op: 'putNotePin', cid: CID, lid: 'A', on: true });
+    await request({ op: 'deleteEntry', cid: CID, lid: 'A' });
+    await request({ op: 'putNotePin', cid: CID, lid: 'B', on: true }); // ← ここで掃除が走る。A はゴミ箱なので残る
+    expect(await request({ op: 'listNotePins', cid: CID }), 'ゴミ箱のノートのピンを掃除した').toEqual(['A', 'B']);
+    await upsert(CID, 'A'); // ゴミ箱から戻す
+    expect(await request({ op: 'listNotePins', cid: CID })).toEqual(['A', 'B']);
+    for (const l of ['A', 'B']) await request({ op: 'putNotePin', cid: CID, lid: l, on: false });
+  });
+
+  it('器ごとに分かれる(別の器の同じ lid の実在も見ない)', async () => {
+    await upsert(CID, 'x');
+    await upsert(OTHER, 'y');
     await request({ op: 'putNotePin', cid: CID, lid: 'x', on: true });
     expect(await request({ op: 'listNotePins', cid: OTHER })).toEqual([]);
+    await request({ op: 'putNotePin', cid: OTHER, lid: 'y', on: true });
+    expect(await request({ op: 'listNotePins', cid: CID })).toEqual(['x']);
+    // OTHER に x は無い ── CID の x のピンは OTHER の付け外しでは消えない
     await request({ op: 'putNotePin', cid: OTHER, lid: 'y', on: true });
     expect(await request({ op: 'listNotePins', cid: CID })).toEqual(['x']);
     await request({ op: 'putNotePin', cid: CID, lid: 'x', on: false });
     await request({ op: 'putNotePin', cid: OTHER, lid: 'y', on: false });
   });
 
-  it('上限(100)では新しい lid だけ断り、外す・掃除は通る', async () => {
-    for (let i = 0; i < 100; i += 1) await request({ op: 'putNotePin', cid: CID, lid: `p${i}`, on: true });
+  it('上限(100)では新しい lid だけ断り、外すのは通る', async () => {
+    for (let i = 0; i < 100; i += 1) {
+      await upsert(CID, `p${i}`);
+      await request({ op: 'putNotePin', cid: CID, lid: `p${i}`, on: true });
+    }
     await expect(request({ op: 'putNotePin', cid: CID, lid: 'over', on: true })).rejects.toThrow();
     expect((await request({ op: 'listNotePins', cid: CID })).includes('over')).toBe(false);
-    // 掃除つきで外せる / 掃除つきなら足せる(掃除した分が空く)
-    await request({ op: 'putNotePin', cid: CID, lid: 'over', on: true, prune: ['p0', 'p1'] });
+    await request({ op: 'putNotePin', cid: CID, lid: 'p0', on: false });
+    await upsert(CID, 'over');
+    await request({ op: 'putNotePin', cid: CID, lid: 'over', on: true });
     const now = await request({ op: 'listNotePins', cid: CID });
-    expect(now).toHaveLength(99);
+    expect(now).toHaveLength(100);
     expect(now[now.length - 1]).toBe('over');
   });
 });

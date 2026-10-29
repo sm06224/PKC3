@@ -169,7 +169,7 @@ export type StorageRequest =
    * ⚠ 1 ノート 1 行の書込なので、別の窓が別のノートをピン留めしても**互いを消さない**。
    * ⚠ 上限(`MAX_NOTE_PINS_STORED`)は新しい lid だけ断る(外す・掃除は通す)。
    */
-  | { op: 'putNotePin'; cid: string; lid: string; on: boolean; prune?: string[] }
+  | { op: 'putNotePin'; cid: string; lid: string; on: boolean }
   /**
    * 🔴 **カンバンの札(チェック項目)を集める**(#277 段②)。
    *

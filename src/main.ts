@@ -1512,8 +1512,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       .then((list) => appNotePins.setAll(list))
       .catch(() => {});
   appNotePins.attach(
-    async (lid, on, prune) => {
-      await client.request({ op: 'putNotePin', cid, lid, on, prune });
+    async (lid, on) => {
+      await client.request({ op: 'putNotePin', cid, lid, on });
     },
     // 書けなかった ── 画面だけ留まっている状態を残さない(正本を読み直す)
     () => void reloadNotePins(),
