@@ -8,7 +8,7 @@
  */
 import { fold } from '@features/palette/palette-rows';
 import { SHELL_COMMANDS, commandWords, findCommand } from './commands';
-import { childrenOf } from './resolve';
+import { childrenOf, readsAsReference } from './resolve';
 import { tokenize, type ShellToken } from './tokenize';
 import type { ArgKind, ShellEnv } from './types';
 
@@ -31,11 +31,13 @@ export interface CompletionItem {
 export const COMPLETION_MAX = 12;
 
 /**
- * 題名を欄へ入れる形。空白・引用符のほか、**語として読み間違えられる題名**も囲む:
- * `-n`(旗)・数字(`3` は直前の一覧の番号)・`*` `.` `..`(指し方)・`/` を含む(フォルダの道)・`!` `#` で始まる(履歴・番号)。
+ * 題名を欄へ入れる形。空白・引用符のほか、**解く側(`resolve.ts`)が特別扱いする語**も囲む:
+ * 番号・範囲・予約語(`readsAsReference` ── 解く側と同じ判定を引く)、`-` で始まる(旗)、`!` `#` で始まる(履歴・番号)、`/` を含む(フォルダの道)。
  */
 export const quoteIfNeeded = (s: string): string =>
-  /[\s"'「」“”]/u.test(s) || s === '' || /^(-|!|#|\*$|\.{1,2}$|\d+$)|\//u.test(s) ? `"${s.replace(/(["\\])/gu, '\\$1')}"` : s;
+  /[\s"'「」“”]/u.test(s) || s === '' || /^[-!#]|\//u.test(s) || readsAsReference(s)
+    ? `"${s.replace(/(["\\])/gu, '\\$1')}"`
+    : s;
 
 function matches(candidate: string, q: string): number | null {
   const c = fold(candidate);

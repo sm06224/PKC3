@@ -33,6 +33,22 @@ export type Resolved<T> = { readonly ok: true; readonly value: T } | { readonly 
  */
 export const LITERAL = '\u0001';
 
+/**
+ * 🔴 **解く側が特別扱いする語は、ここ 1 か所**(補完が題名を欄へ入れるとき囲むかどうかも、これを引く ── 解く側と入れる側を非対称にしない)。
+ *
+ * - 番号 `3` / `#3`、範囲 `2-4` / `#2-4`(直前の一覧の指し方)
+ * - 予約語: ノートの `.`(選んでいるノート)`*`(場所の全部)/ フォルダの `/` `root` `ルート` `.` `..` `反対` `other`
+ */
+export const NUMBER_REF = /^#?(\d+)$/u;
+export const RANGE_REF = /^#?(\d+)-(\d+)$/u;
+export const RESERVED_WORDS: readonly string[] = ['.', '..', '*', '/', 'root', 'ルート', '反対', 'other'];
+
+/** この字を囲まずに欄へ入れると、題名ではなく指し方・予約語として読まれるか。 */
+export function readsAsReference(s: string): boolean {
+  const t = s.trim();
+  return NUMBER_REF.test(t) || RANGE_REF.test(t) || RESERVED_WORDS.includes(t);
+}
+
 const ok = <T>(value: T): Resolved<T> => ({ ok: true, value });
 const fail = <T>(error: string): Resolved<T> => ({ ok: false, error });
 
@@ -80,7 +96,7 @@ export function resolveNote(
   const literal = ref.startsWith(LITERAL);
   const text = (literal ? ref.slice(LITERAL.length) : ref).trim();
   if (text === '') return fail('ノートの指定が空です');
-  const num = literal ? null : /^#?(\d+)$/u.exec(text);
+  const num = literal ? null : NUMBER_REF.exec(text);
   if (num !== null && (text.startsWith('#') || env.last.length > 0)) {
     const n = Number(num[1]);
     const lid = env.last[n - 1];
@@ -142,7 +158,7 @@ export function resolveNotes(refs: readonly string[], env: ShellEnv, strict = fa
       kids.forEach((m) => push(m.lid));
       continue;
     }
-    const range = /^#?(\d+)-(\d+)$/u.exec(ref);
+    const range = RANGE_REF.exec(ref);
     if (range !== null) {
       const from = Number(range[1]);
       const to = Number(range[2]);
@@ -163,14 +179,14 @@ export function resolveNotes(refs: readonly string[], env: ShellEnv, strict = fa
 export function resolveFolder(ref: string, env: ShellEnv): Resolved<string | null> {
   const literal = ref.startsWith(LITERAL);
   const text = (literal ? ref.slice(LITERAL.length) : ref).trim();
-  if (!literal && (text === '' || text === '/' || text === 'root' || text === 'ルート')) return ok(null);
+  if (!literal && (text === '' || text === '/' || text === 'root' || text === 'ルート')) return ok(null); // RESERVED_WORDS
   if (text === '') return fail('フォルダの指定が空です');
   if (!literal && text === '.') return ok(env.cwd);
   if (!literal && text === '..') {
     if (env.cwd === null) return ok(null);
     return ok(resolveCanonicalParents(env.metas, env.relations).get(env.cwd) ?? null);
   }
-  if (!literal && (text === '反対' || text === 'other')) {
+  if (!literal && (text === '反対' || text === 'other')) { // RESERVED_WORDS
     if (env.other === undefined) return fail('反対側は 2 ペインのコマンドラインでだけ使えます');
     return ok(env.other);
   }

@@ -368,6 +368,34 @@ describe('補完', () => {
     expect(planLine('append 3 追記', e).effects).toEqual([{ type: 'append', lid: 'n3', text: '追記' }]);
     expect(planLine('append "-n" 追記', e).effects).toEqual([{ type: 'append', lid: 'n8', text: '追記' }]);
   });
+  it('🔴 補完で入れた題名は、解くと元のノート / フォルダに戻る(往復)(C)', () => {
+    const titles = ['10-29', '#2-4', '-n', '3', '*', '.', '..', 'root', 'ルート', '反対', 'other', 'a"b', '資料/x', '!!', 'a b'];
+    const notes = titles.map((t, i) => meta(`t${String(i)}`, t, 'text', 100 + i));
+    const folders = titles.map((t, i) => meta(`g${String(i)}`, t, 'folder', 200 + i));
+    const metas = new Map([...METAS, ...notes, ...folders].map((m) => [m.lid, m]));
+    // 解く側が特別扱いする語が空振りしていない(番号が使える一覧・反対側もある環境で往復させる)
+    const e = env({ metas, last: ['n1', 'n2', 'n3'], other: 'f2', cwd: null, surface: 'dual', marked: ['n4'] });
+    for (const [i, title] of titles.entries()) {
+      // ノート: append <入れた字> を解く
+      // 欄へ打つのは題名の途中(先頭の - は旗として読まれるので、その次から打つ)
+      const typed = /\s/u.test(title) ? `"${title}` : title.replace(/^-/u, '');
+      const c = completeLine(`append ${typed}`, e);
+      // 指し方の候補(`.` `*` `..` `/` `反対`)とは別の、題名そのものの候補
+      const special = new Set(['選んでいるノート', 'いまの場所の全部', '1 つ上', 'ルート', '反対側の場所']);
+      const note = c.items.find((it) => it.label === title && !special.has(it.hint));
+      expect(note, `${title}: 候補に出ていない`).toBeDefined();
+      const plan = planLine(`append ${note!.insert} x`, e);
+      const hit = plan.effects[0];
+      expect(hit?.type, `${title}: ${plan.error ?? ''}`).toBe('append');
+      expect((hit as { lid: string }).lid.startsWith('t'), `${title}: ノート以外に解けた`).toBe(true);
+      expect((hit as { lid: string }).lid, `${title}: 元のノートに戻らない`).toBe(`t${String(i)}`);
+      // フォルダ: mv 設計 <入れた字> を解く(フォルダだけが候補)
+      const f = completeLine(`mv 設計 ${typed}`, e).items.find((it) => it.label === title && !special.has(it.hint));
+      expect(f, `${title}: フォルダの候補に出ていない`).toBeDefined();
+      const mv = planLine(`mv 設計 ${f!.insert}`, e);
+      expect(mv.effects[0], `${title}: ${mv.error ?? ''}`).toEqual({ type: 'move', lids: ['n4'], to: `g${String(i)}` });
+    }
+  });
   it('共通の頭を返す', () => {
     expect(commonPrefix([{ insert: 'abc', label: '', hint: '' }, { insert: 'abd', label: '', hint: '' }])).toBe('ab');
     expect(commonPrefix([])).toBe('');
