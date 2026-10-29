@@ -86,4 +86,24 @@ describe('日付ノートの前後へ飛ぶ (#1640 項 2)', () => {
     shell.detail.querySelector<HTMLElement>('[data-pkc-dir="prev"]')!.click();
     expect(d.getState().selectedLid).toBe('b');
   });
+
+  it('🔴 編集中に押されたら、黙って返さず理由を言い、選択は動かさない(blockedActionNote)', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const d = new Dispatcher();
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'b', body: '本文' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提: 編集中').toBe('editing');
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'open-adjacent-day');
+    btn.setAttribute('data-pkc-dir', 'next');
+    root.append(btn);
+    btn.click();
+    expect(d.getState().selectedLid).toBe('b');
+    expect(d.getState().error ?? '').toContain('いまは前後の日へ移れません');
+    expect(d.getState().error ?? '').toContain('編集中は使えません');
+  });
 });

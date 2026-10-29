@@ -9955,7 +9955,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'open-adjacent-day': (dispatcher, target) => {
     const st = dispatcher.getState();
-    if (st.phase !== 'ready' || st.selectedLid === null) return;
+    // 🔴 断りの理由も判定も `blockedActionNote` の 1 か所から(§7)── 黙って返さず、理由を出す
+    const why = blockedActionNote(st.phase);
+    if (why !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `いまは前後の日へ移れません: ${why}` });
+      return;
+    }
+    if (st.selectedLid === null) return;
     const cur = st.entryMetas.get(st.selectedLid);
     if (cur === undefined || !isDateTitle(cur.title)) return;
     const dir = target.getAttribute('data-pkc-dir') === 'prev' ? 'prev' : 'next';
