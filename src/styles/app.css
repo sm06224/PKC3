@@ -1718,6 +1718,16 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
   max-width: 100%;
   min-width: 0;
   text-overflow: ellipsis;
+  /* 🔴 丸いバッジ(ピル)で見せる(台帳 #1443 の残り)。地は無彩色・色は「見出しを選んでいる」ときだけ */
+  border-radius: 999px;
+  padding: 0 var(--s3);
+  background: var(--surface-2, var(--surface));
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='append-target'][data-pkc-target-chosen] {
+  border-color: var(--accent);
+  color: var(--fg);
 }
 [data-pkc-field='append-input'] {
   flex: none;
