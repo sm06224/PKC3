@@ -1116,10 +1116,10 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const status = document.createElement('footer');
   status.setAttribute('data-pkc-region', 'status');
   /**
-   * 🔴 **状態バーと、その真上の小さな知らせ(貼付トースト。#1379)を縦に積む入れ物**。grid の `status` の行はこれが持つ。
+   * 🔴 **状態バーと、その真上の小さな知らせ(貼付トースト。#1379)の入れ物**。grid の `status` の行はこれが持つ。
    * ⚠ トーストを `position: fixed` で浮かせて「状態バーの高さ」を値で当てると、バーが折り返して 2 行になったとき・文字サイズを
-   *   大きくしたときに重なる。**入れ物の中で縦に積めば、バーがどれだけ伸びても知らせはその真上**に居る(高さを推測しない)。
-   * ⚠ 知らせが出ている間だけ、その分の高さを下から取る(本文の欄や追記欄には重ならない)。空なら高さ 0。
+   *   大きくしたときに重なる。**入れ物を基準に `bottom: 100%` で置けば、バーがどれだけ伸びても知らせはその真上**に居る(高さを推測しない)。
+   * ⚠ トーストは流れの外(`absolute`)── 出ても消えても本文の領域は動かない。空なら高さ 0。
    */
   const statusStack = document.createElement('div');
   statusStack.setAttribute('data-pkc-region', 'status-stack');

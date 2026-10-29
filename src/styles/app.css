@@ -504,8 +504,8 @@ button[data-pkc-glyph]:disabled {
 }
 [data-pkc-region='status-stack'] {
   grid-area: status;
-  display: flex;
-  flex-direction: column;
+  /* 🔴 トースト(`paste-toast`)の置き位置の基準。⚠ 高さは状態バーだけが決める(トーストは流れの外) */
+  position: relative;
   min-width: 0;
 }
 
@@ -10377,13 +10377,17 @@ h3[data-pkc-section] {
   background: var(--accent);
   color: var(--bg);
 }
-/* 🔴 **貼ったあとの小さな知らせ(トースト)**(#1379)。状態バーの真上に積む(`status-stack` の中 ── 入れ物は `shell.ts`)。
- * ⚠ 浮かせない(`position: fixed` + 高さの当て推量は、バーが 2 行に折り返す・文字を大きくすると重なった)。
- *   積むので、追記欄・本文の欄・右ペインには重ならない(その分だけ数秒、本文の領域が下から縮む)。
+/* 🔴 **貼ったあとの小さな知らせ(トースト)**(#1379)。状態バーの真上に置く(`status-stack` の中 ── 入れ物は `shell.ts`)。
+ * ⚠ `position: fixed` + 高さの当て推量にしない(バーが折り返す・文字を大きくすると重なった)。入れ物を基準に
+ *   `bottom: 100%` で置くので、バーの高さが変わっても常にバーの真上に出る。
+ * ⚠ 流れの外(`absolute`)なので、出ても消えても本文の領域は 1px も動かない(同じ物が常に同じ場所に在る)。
  * 地は無彩色(色は使わない)。数秒で消える(JS)。ボタンの見え方は共通の `button` に任せる。 */
 [data-pkc-region='paste-toast'] {
-  align-self: flex-end;
-  margin: var(--s2) var(--s4);
+  position: absolute;
+  inset-block-end: 100%;
+  inset-inline-end: var(--s4);
+  margin-block-end: var(--s2);
+  z-index: 50;
   display: flex;
   align-items: center;
   gap: var(--s3);

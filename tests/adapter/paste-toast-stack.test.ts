@@ -1,7 +1,7 @@
 /** @vitest-environment happy-dom */
 /**
  * 🔴 貼付トースト(#1379)の置き場 ── **状態バーと同じ入れ物(`status-stack`)の中で、状態バーの真上**。
- * 浮かせて高さを当てる形だと、バーが 2 行に折り返す / 文字を大きくすると重なった。積めば重ならない(実測は paste-text の smoke)。
+ * 浮かせて高さを当てる形だと、バーが 2 行に折り返す / 文字を大きくすると重なった。入れ物を基準に bottom: 100% で置けば重ならず、流れの外なので本文の領域も動かない(実測は paste-text の smoke)。
  * 観測点: ①トーストの親が grid の `status` の行を持つ入れ物 ②状態バーより前(真上) ③入れ物が shell の直下で、状態バーは入れ物の中
  * ④浮かせる規則(`position: fixed`)が CSS に残っていない。
  */
@@ -19,7 +19,7 @@ function pasteEvent(data: Record<string, string>): Event {
   return e;
 }
 
-describe('貼付トーストの置き場(状態バーの真上に積む)', () => {
+describe('貼付トーストの置き場(状態バーの真上に置く)', () => {
   it('🔴 トーストは status-stack の先頭 = 状態バーの真上に出て、状態バーも同じ入れ物の中にある', () => {
     document.body.textContent = '';
     const root = document.createElement('div');
@@ -38,15 +38,18 @@ describe('貼付トーストの置き場(状態バーの真上に積む)', () =>
     expect(stack, '入れ物が無い').not.toBeNull();
     expect(toast!.parentElement, 'トーストが入れ物の外にある').toBe(stack);
     expect(regions.status.parentElement, '状態バーが入れ物の中にない').toBe(stack);
-    expect(toast!.nextElementSibling, 'トーストが状態バーの真上でない').toBe(regions.status);
+    expect(toast!.nextElementSibling, 'トーストが状態バーの直前(真上)でない').toBe(regions.status);
     expect(stack.parentElement?.getAttribute('data-pkc-region'), '入れ物は shell の直下').toBe('shell');
   });
 
-  it('CSS: 入れ物が grid の status の行を持ち、トーストは浮かせない', () => {
+  it('CSS: 入れ物が grid の status の行を持ち基準になり、トーストは流れの外で真上に置く', () => {
     const css = readFileSync('src/styles/app.css', 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
     expect(css).toMatch(/\[data-pkc-region='status-stack'\]\s*\{\s*grid-area:\s*status;/);
     const toast = css.match(/\[data-pkc-region='paste-toast'\]\s*\{[^}]*\}/)![0];
     expect(toast, '浮かせる規則が残っている').not.toMatch(/position:\s*fixed/);
-    expect(toast).toMatch(/align-self:\s*flex-end/);
+    expect(toast, '入れ物の真上(bottom: 100%)に置いていない').toMatch(/position:\s*absolute/);
+    expect(toast).toMatch(/inset-block-end:\s*100%/);
+    const stack = css.match(/\[data-pkc-region='status-stack'\]\s*\{[^}]*\}/)![0];
+    expect(stack, '入れ物が基準(relative)になっていない').toMatch(/position:\s*relative/);
   });
 });
