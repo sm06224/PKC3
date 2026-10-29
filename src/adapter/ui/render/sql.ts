@@ -1392,7 +1392,7 @@ function noteLineCore(p: AppState['sqlPage']): string {
               ? ''
               : `(表 ${String(1 + p.extraGuests.length)} 個)`
           }${truncNote}`
-        : `${p.guest.name} を調べています(表 ${String(p.guest.tables.length)} 個 / ${humanBytes(p.guest.bytes)})${truncNote}${sjisNote}`;
+        : `${p.guest.name} を調べています(表 ${String(p.guest.tables.length)} 個${tableNamesNote(p.guest.tables)} / ${humanBytes(p.guest.bytes)})${truncNote}${sjisNote}`;
 
   const took = `(${String(p.ms)} ミリ秒)`;
   /**
@@ -1445,4 +1445,16 @@ function zeroHint(sql: string): string {
   return /[％＿]/.test(sql)
     ? '(打った字に全角の ％ か ＿ が入っています、LIKE の記号は半角の % と _ です)'
     : '';
+}
+
+/**
+ * 🔴 **帯に表の名前も出す**(#992 ②。案 C「表 1 個: parquet」)。打つ名前を案内文まで探さなくてよい。
+ * ⚠ 表が多い `.sqlite` で帯が溢れないよう、先頭 3 つまで出して残りは「ほか N 個」にする。
+ */
+const TABLE_NAMES_IN_BAND = 3;
+function tableNamesNote(tables: readonly string[]): string {
+  if (tables.length === 0) return '';
+  const shown = tables.slice(0, TABLE_NAMES_IN_BAND).join(', ');
+  const rest = tables.length - TABLE_NAMES_IN_BAND;
+  return `: ${shown}${rest > 0 ? ` ほか ${String(rest)} 個` : ''}`;
 }

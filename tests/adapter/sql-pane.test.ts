@@ -4250,6 +4250,8 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
     expect(readAssetBytes, '選んだだけで中身を読みに行っている').toHaveBeenCalledTimes(0);
     expect(note(), '開いたことが画面に出ない').toContain('売上.parquet を調べています');
     expect(note()).toContain('表 1 個');
+    // 🔴 #992 ②(案 C): 帯にも表の名前を出す ── 打つ名前を案内文まで探さない
+    expect(note(), '帯に表の名前が出ていない').toContain('表 1 個: parquet / 4.0 KB');
     /**
      * 🔴 **表の名前そのものを見る**(着地前レビューの変異 2)。
      * ⚠ 帯に出るのは**個数だけ**なので、`tables: ['csv']` に潰す変異は
