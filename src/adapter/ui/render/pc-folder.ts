@@ -23,6 +23,8 @@
  *   (描画器は state を読まず、DOM から状態を引かない)。
  */
 import type { LocalFolder, LocalFolderRow, LocalFolderView } from '@adapter/platform/local-folder';
+import type { FolderSync, FolderSyncView } from '@adapter/platform/folder-sync';
+import { SYNC_INTERVAL_MINUTES } from '@features/folder-sync/folder-sync';
 import {
   FOLDER_PAGE,
   PC_CONTACT_NOTE,
@@ -75,16 +77,97 @@ export class PcFolderRenderer {
   /** 直前に描いた版。⚠ 同じなら触らない(押している最中に作り直さない)。 */
   private last = -1;
 
-  constructor(host: HTMLElement, folder: LocalFolder) {
+  private readonly sync: FolderSync | null;
+
+  constructor(host: HTMLElement, folder: LocalFolder, sync: FolderSync | null = null) {
     this.host = host;
     this.folder = folder;
+    this.sync = sync;
   }
 
   render(): void {
     const view = this.folder.view();
-    if (view.version === this.last) return;
-    this.last = view.version;
+    const syncView = this.sync?.view() ?? null;
+    // 🔑 指紋は 2 つの版の組(どちらが変わっても描き直す。同じなら触らない ── 押している最中に作り直さない)
+    const key = view.version * 1_000_003 + (syncView?.version ?? 0);
+    if (key === this.last) return;
+    this.last = key;
     this.host.textContent = '';
+    this.renderFolder(view);
+    if (syncView !== null) this.host.append(this.syncSection(syncView));
+  }
+
+  /**
+   * 🔴 **フォルダとの同期**(#1455 の後半)── PC タブの下に置く。ノートを選んだフォルダの Markdown と、
+   * 一定の間隔で同期する(正本は PKC3)。上の「取り込んで開く」とは別の仕事なので、見出しで分ける。
+   * ⚠ 選べないブラウザでは**理由を言う**(押せないボタンを置かない)。⚠ 同期をやめる口を必ず置く(片道にしない)。
+   */
+  private syncSection(v: FolderSyncView): HTMLElement {
+    const sec = document.createElement('section');
+    field(sec, 'pc-sync');
+    const title = document.createElement('div');
+    field(title, 'pc-sync-title');
+    title.textContent = 'フォルダと同期';
+    sec.append(title);
+    if (v.phase === 'unsupported') {
+      sec.append(para('pc-sync-note', v.message ?? ''));
+      return sec;
+    }
+    if (v.phase === 'none') {
+      sec.append(
+        para(
+          'pc-sync-note',
+          'ノートを、パソコンのフォルダの Markdown(.md)と定期的に同期します。正本は PKC3 です。フォルダで直した内容は PKC3 に取り込み、PKC3 で直した内容はフォルダに書きます。',
+        ),
+        button(
+          'pc-sync-pick',
+          'pc-sync-pick',
+          'フォルダを選んで同期…',
+          'フォルダを選ぶと、すぐ 1 回同期します。開き直すと同期は止まります(フォルダは保存しません)',
+        ),
+      );
+      return sec;
+    }
+    const name = document.createElement('div');
+    field(name, 'pc-sync-folder');
+    name.textContent = `同期先: ${v.folderName ?? ''}`;
+    name.title = v.folderName ?? '';
+    sec.append(name);
+    if (v.phase === 'lost' || v.phase === 'stopped') {
+      sec.append(
+        para('pc-sync-note', v.message ?? '同期を止めました'),
+        button('pc-sync-pick', 'pc-sync-pick', 'フォルダを選び直す…', '別のフォルダ(または同じフォルダ)を選んで、もう一度同期を始めます'),
+        button('pc-sync-stop', 'pc-sync-stop', '同期をやめる', '同期をやめます(フォルダのファイルとノートには何もしません)'),
+      );
+      return sec;
+    }
+    const sel = document.createElement('select');
+    sel.setAttribute('data-pkc-action', 'pc-sync-interval');
+    field(sel, 'pc-sync-interval');
+    sel.setAttribute('aria-label', '同期の間隔');
+    for (const m of SYNC_INTERVAL_MINUTES) {
+      const o = document.createElement('option');
+      o.value = String(m);
+      o.textContent = m === 60 ? '1 時間ごと' : `${m} 分ごと`;
+      o.selected = m === v.minutes;
+      sel.append(o);
+    }
+    sec.append(sel);
+    if (v.phase === 'running') {
+      sec.append(para('pc-sync-note', '同期しています…'));
+    } else {
+      sec.append(
+        button('pc-sync-now', 'pc-sync-now', '今すぐ同期', 'いま 1 回同期します'),
+        button('pc-sync-stop', 'pc-sync-stop', '同期をやめる', '同期をやめます(フォルダのファイルとノートには何もしません)'),
+      );
+    }
+    if (v.lastText !== null) {
+      sec.append(para('pc-sync-last', `${v.lastAt ?? ''} ${v.lastText}`.trim()));
+    }
+    return sec;
+  }
+
+  private renderFolder(view: LocalFolderView): void {
     switch (view.phase) {
       case 'unsupported':
         // ⚠ タブは出したまま、使えない理由と行き先を言う(押せないボタンは置かない)

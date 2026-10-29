@@ -115,6 +115,10 @@ const UNRESOLVED: readonly string[] = [
   'pc-open-office-file',
   // ⚠ 2026-10-11(#582 段③ 第 2 群): `pc-pick-folder` は「操作を探す」の受け手(`SHORTCUT_BUTTON`)に字で書かれたので、出口を静的に追えるようになり、この表から抜けた。
   'pc-refresh-folder',
+  // ⚠ 2026-10-29(#1455 の後半)で 3 件増えた ── フォルダとの同期(選ぶ / 今すぐ / やめる。間隔の選択は字で書いてあるので追える)。`pc-folder.ts` が `button(action, …)` の変数で組む
+  'pc-sync-now',
+  'pc-sync-pick',
+  'pc-sync-stop',
   'remove-office-pack',
   'reset-office-profile',
   'set-app-group',

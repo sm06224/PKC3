@@ -145,6 +145,7 @@ import { isMovableTile } from '@features/launcher/tile-order';
 import { filerFlattenNow, filerRowOptions, dualListViewOptions } from '@adapter/state/list-view-options';
 import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { LocalFolder } from '@adapter/platform/local-folder';
+import type { FolderSync } from '@adapter/platform/folder-sync';
 import type { LinkedFileTooLarge } from '@adapter/platform/launched-files';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
 import { appSavedSearches } from '@adapter/platform/saved-search-store';
@@ -2723,6 +2724,11 @@ export interface BinderServices {
    *   ⚠ **消す・改名・移動の口は持たない**(パソコンのファイルは取り消せない)。
    */
   localFolder?: Pick<LocalFolder, 'pick' | 'cut' | 'more' | 'open' | 'refresh' | 'enter' | 'goTo' | 'pickFile'>;
+  /**
+   * 🔴 **パソコンのフォルダとの同期**(#1455 の後半)。⚠ handle は `FolderSync` が持つ ── binder は「押された」を伝えるだけ。
+   * 判断は `features/folder-sync/folder-sync.ts`、読み書きは `platform/folder-sync.ts`。
+   */
+  folderSync?: Pick<FolderSync, 'pick' | 'syncNow' | 'stop' | 'setMinutes'>;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   /** 取込(PKC2 の書出し / 素の Markdown)。振り分けは import-file.ts が持つ。 */
   importFiles?(files: File[]): void;
@@ -18063,6 +18069,16 @@ const ACTIONS: Record<string, ActionHandler> = {
   // 🔴 「更新」(#1264 §2 欠陥 4-a)── 同じ handle で一覧を読み直す。名前と種類だけ(`getFile()` は呼ばない)
   'pc-refresh-folder': (_dispatcher, _target, services) => void services.localFolder?.refresh(),
   'pc-more': (_dispatcher, _target, services) => void services.localFolder?.more(),
+  /**
+   * 🔴 **フォルダとの同期**(#1455 の後半)。⚠ 「選ぶ」は user の操作の流れの中で呼ぶ(`await` を挟まない)。
+   * 「やめる」で handle を捨てる(置いたファイルとノートには何もしない)── 片道の操作にしない。
+   */
+  'pc-sync-pick': (_dispatcher, _target, services) => void services.folderSync?.pick(),
+  'pc-sync-now': (_dispatcher, _target, services) => void services.folderSync?.syncNow(true),
+  'pc-sync-stop': (_dispatcher, _target, services) => services.folderSync?.stop(),
+  'pc-sync-interval': (_dispatcher, target, services) => {
+    if (target instanceof HTMLSelectElement) services.folderSync?.setMinutes(Number(target.value));
+  },
   // 🔴 サブフォルダの行 = 中へ入る / パンくず = 上の階層へ戻る(#215)。名前と種類だけ読む(`getFile()` は呼ばない)
   'pc-enter-dir': (_dispatcher, target, services) => {
     const raw = target.getAttribute('data-pkc-pc-index');
@@ -23632,11 +23648,44 @@ export function bindActions(
 
   /** 表の中のその行(`data-pkc-entry` は user 由来ではないが、選択子に埋めない)。 */
   // 🔑 属性の値で直接引く(#1087)── 直す前は 1 行探すたびに全行(3,000 件)を配列にして先頭から比べていた
+  // 🔴 行が多い一覧は画面に見えている塊だけ行を組む(#1087 台帳④)── 組まれていない行は組んでから引く
   const rowEl = (lid: string): HTMLElement | null =>
     root.querySelector<HTMLElement>(`[data-pkc-region="filer-table"] [data-pkc-entry="${CSS.escape(lid)}"]`) ??
     mountFilerRow(root, lid);
 
   const focusRow = (lid: string): void => rowEl(lid)?.focus();
+
+  /**
+   * 🔴 **行を送る(↑↓・先頭/末尾・頁・範囲)── 焦点を先に移し、選択の書き換えはその後、位置合わせは描画の前に 1 回**
+   * (#1087 台帳④。直す前は「選択を書き換える → `focus()`」で、`focus()` が書き換えた直後の属性のスタイル計算と
+   * 配置を**その場で**強いていた ── 実測で 1 キーあたり約 4.7 回のスタイル計算・2 回の配置)。
+   *
+   * - 🔑 焦点は**先に**移す(`preventScroll`)。後回しにしない ── 速く押したとき、打鍵が前の行へ届く危険があるため
+   *   (同期のまま。変わるのは順番だけ)。
+   * - 🔑 位置合わせ(`scrollIntoView({ block: 'nearest' })`)は描画の前に 1 回へ束ねる。続けて押しても 1 フレーム 1 回。
+   *   ⚠ ブラウザ標準の `focus()` は見えない行を**真ん中**へ送る。ここは**必要なぶんだけ**送る(OS のファイラと同じ。連続した ↓ で
+   *   行が一気に跳ばない)。
+   * - ⚠ 選択の書き換えで焦点が外れた(行が作り直された)ときは、従来どおり `focus()` で取り戻す。
+   * - ⚠ 行が表に無いときは何もしない(`rowEl` は組まれていない行を組んでから引く)。
+   */
+  let keepToken = 0;
+  const moveToRow = (lid: string, commit: () => void): void => {
+    const el = rowEl(lid);
+    el?.focus({ preventScroll: true });
+    commit();
+    const now = rowEl(lid);
+    if (now === null) return;
+    if (root.ownerDocument.activeElement !== now) now.focus({ preventScroll: true });
+    const token = ++keepToken;
+    const win = root.ownerDocument.defaultView;
+    const keep = (): void => {
+      if (token !== keepToken) return;
+      const row = rowEl(lid);
+      if (row !== null && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' });
+    };
+    if (win === null) keep();
+    else win.requestAnimationFrame(keep);
+  };
 
   /**
    * 🔴 **行送りの行き先**(user 裁定 2026-08-18「行送りに上下キーを使う」)。
@@ -23649,7 +23698,6 @@ export function bindActions(
    */
   /**
    * 🔴 **PageUp / PageDown で動く行数**(依頼 337)── 画面に見えている行の数(1 行は重ねる)。
-  // 🔴 行が多い一覧は画面に見えている塊だけ行を組む(#1087 台帳④)── 組まれていない行は組んでから引く
    * ⚠ 行の高さと器の高さは画面から読む(行の高さは種類・折り返しで変わる)。測れない(高さ 0 ── 隠れている面・
    *   DOM に高さを持たない環境)ときは 10 行。⚠ 端では止まる(`rowAt` / `dualRowAt` が丸める)。
    */

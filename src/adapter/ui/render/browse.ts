@@ -30,6 +30,7 @@ import { CapturesRenderer } from './captures';
 import { GraphRenderer } from './graph';
 import { TimersRenderer } from './timers';
 import { PcFolderRenderer } from './pc-folder';
+import type { FolderSync } from '@adapter/platform/folder-sync';
 import { LocalFolder } from '@adapter/platform/local-folder';
 import type { AssetLender } from './detail';
 
@@ -237,6 +238,8 @@ export class BrowseRouter {
       fail: () => {},
       onChange: () => {},
     }),
+    /** 🔴 フォルダとの同期(#1455 の後半)。⚠ 持ち主は `main.ts`(押し口と同じ 1 つ)。省略 = 同期の欄を出さない(test 用)。 */
+    folderSync: FolderSync | null = null,
   ) {
     this.last = initial;
     this.host = host;
@@ -305,7 +308,7 @@ export class BrowseRouter {
     this.captures = new CapturesRenderer(this.panes.captures, assets, onCaptureReady);
     this.graph = new GraphRenderer(this.panes.graph);
     this.timers = new TimersRenderer(this.panes.timers);
-    this.pc = new PcFolderRenderer(this.panes.pc, pcFolder);
+    this.pc = new PcFolderRenderer(this.panes.pc, pcFolder, folderSync);
   }
 
   /** 🔴 手書きの面の器(#1448)。道具と台はここへ組む(`openImageDrawInPane`)。 */

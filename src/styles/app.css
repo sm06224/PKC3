@@ -6394,6 +6394,32 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='pc-more'] {
   align-self: flex-start;
 }
+/* 🔴 フォルダとの同期(#1455 の後半)── PC タブの下。上の「取り込んで開く」とは別の仕事なので、罫線で分ける。
+ *   地は無彩色(色は情報にだけ ── 止まったときの理由は字で言う)。押し口は左寄せ(列いっぱいに伸ばさない)。 */
+[data-pkc-field='pc-sync'] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s2);
+  margin-top: var(--s3);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--border);
+}
+[data-pkc-field='pc-sync-title'] {
+  font-weight: 600;
+}
+[data-pkc-field='pc-sync-folder'] {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-field='pc-sync-note'],
+[data-pkc-field='pc-sync-last'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
 [data-pkc-field='pc-band'] {
   display: flex;
   flex-wrap: wrap;
@@ -8487,6 +8513,11 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-region='filer-table'][data-pkc-grid] tbody tr {
   contain: layout paint style;
 }
+/* 🔴 **画面の外の塊は、行を組まない**(#1087 台帳④。`filer.ts` の `applyChunks`)── 組んだときと同じ高さの空の塊
+ * (高さは `filer.ts` が行数から入れる)。見張りも要らない(中身が無い)ので `content-visibility` は外す。 */
+[data-pkc-region='filer-table'][data-pkc-grid] tbody[data-pkc-chunk-empty] {
+  content-visibility: visible;
+}
 /* 罫線が畳まれる表では、最初の行の上と最後の行の下に罫線の半分(0.5px)が足されていた。
  * ⚠ 塊に分けても、足すのは**表全体の**最初と最後だけ(塊ごとに足すと 0.5px ずつ伸びる) */
 [data-pkc-region='filer-table'][data-pkc-grid] tbody:first-of-type tr:first-child {
@@ -8512,11 +8543,6 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-region='filer-table'][data-pkc-grid] td:last-child {
   padding-top: calc(var(--s1) + 1.5px);
-}
-/* 🔴 **画面の外の塊は、行を組まない**(#1087 台帳④。`filer.ts` の `applyChunks`)── 組んだときと同じ高さの空の塊
- * (高さは `filer.ts` が行数から入れる)。見張りも要らない(中身が無い)ので `content-visibility` は外す。 */
-[data-pkc-region='filer-table'][data-pkc-grid] tbody[data-pkc-chunk-empty] {
-  content-visibility: visible;
 }
 [data-pkc-region='filer-table'][data-pkc-grid] tbody:first-of-type tr:first-child td:last-child {
   padding-top: var(--s1);

@@ -231,7 +231,9 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   const pane = page.locator('[data-pkc-browse-pane="pc"]');
   await expect(pane).toBeVisible();
   // 「フォルダを選ぶ…」と「Office のファイルを開く…」(#432。showOpenFilePicker がある Chromium)
-  await expect(pane.locator('button')).toHaveCount(2);
+  // + 下の「フォルダを選んで同期…」(#1455 の後半。showDirectoryPicker がある Chromium)
+  await expect(pane.locator('button')).toHaveCount(3);
+  await expect(pane.locator('[data-pkc-action="pc-sync-pick"]')).toHaveText('フォルダを選んで同期…');
   await expect(pane.locator('[data-pkc-action="pc-open-office-file"]')).toHaveText('Office のファイルを開く…');
 
   // ② 選ぶ → 直下が並ぶ(フォルダ・名前順)。読むだけの許可で選ばせている
