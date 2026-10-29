@@ -158,8 +158,9 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
    * 🔑 だから鍵の側に登記する ── 呼び側は第 3 引数を書かない(`iconButton(action, label)`)。
    *   門は `tests/adapter/icons.test.ts`「第 3 引数の鍵は登記に在る」。
    */
-  'open-today': 'calendar',
-  'open-today-as': 'calendar',
+  // 🔴 #852 案 5(B)── 下のアプリの一覧の「予定表」(カレンダー)と同じ絵が並ぶので、「いま」の話だと分かる時計にする
+  'open-today': 'clock',
+  'open-today-as': 'clock',
   'create-from-template': 'snippet',
   'start-timer': 'timer',
   'start-audio-capture': 'mic',

@@ -578,7 +578,7 @@ describe('マニュアルと実装の突合', () => {
     // 追記は編集画面を通らない別の器が持つ(`append-box.ts`)
     expect(detail, '追記が本文の上に戻っている').not.toContain(", '追記')");
     const box = readFileSync('src/adapter/ui/render/append-box.ts', 'utf-8');
-    expect(box, '追記の導線が消えた').toContain("'本文に追記する'");
+    expect(box, '追記の導線が消えた').toContain("'追記'");
     // ⚠ ロックの出口も pin する ── 無くなると「永久に追記できない」が作れる
     // 🔴 字は中央の帯と同じ「保存 / キャンセル」(#716 ── 直す前は「保存して解放 / 編集を破棄」)
     for (const label of ['編集を保存する', '編集をやめる', '書き込みを打ち切る']) {
@@ -622,7 +622,7 @@ describe('マニュアルと実装の突合', () => {
     for (const label of ['ゴミ箱へ移す', '履歴を開く']) {
       expect(detail, `「${label}」が本文の上にも残っている`).not.toContain(`, '${label}')`);
     }
-    for (const label of ['ノートを編集する', '編集を保存する', '編集をやめる', '履歴を開く', 'このノートをバックアップ', '本文に追記する']) {
+    for (const label of ['ノートを編集する', '編集を保存する', '編集をやめる', '履歴を開く', 'このノートをバックアップ', '追記']) {
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }
   });

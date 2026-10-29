@@ -629,7 +629,7 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   await expect(overview, 'フォルダを押しても概要が出ない').toBeVisible();
   const summary = overview.locator('[data-pkc-field="overview-summary"]');
   await expect(summary).toHaveText('この中: ノート 1 件 / フォルダ 0 件');
-  // 🔴 1 件でも入っていれば「この中に新しいノートを作る」は出ない(空のフォルダだけ。#1254 §3 改善 A)
+  // 🔴 1 件でも入っていれば「中にノートを作る」は出ない(空のフォルダだけ。#1254 §3 改善 A)
   await expect(
     overview.locator('[data-pkc-field="overview-create"]'),
     '1 件入っているフォルダに作る入口が出ている',
@@ -717,7 +717,7 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   await expect(rows, 'ルートに戻っていない').toHaveCount(2);
 
   /**
-   * 🔴 **空のフォルダには「この中に新しいノートを作る」が出る**(#1254 §3 改善 A。Gemini 裁定 = a)。
+   * 🔴 **空のフォルダには「中にノートを作る」が出る**(#1254 §3 改善 A。Gemini 裁定 = a)。
    * ⚠ 道中に載せる(新しい起動は足さない)── 上でノートをルートへ出したので、フォルダはいま空。
    * 押すと、**行の右クリックの同じ名前の操作と同じ動き**(その中にノートができて編集に入る)で、
    * 概要は編集に入ると外れる(編集中は出さない)。
@@ -727,7 +727,7 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   await expect(summary).toHaveText('この中: ノート 0 件 / フォルダ 0 件');
   const createIn = overview.locator('[data-pkc-field="overview-create"]');
   await expect(createIn, '空のフォルダに作る入口が出ない').toBeVisible();
-  await expect(createIn).toHaveText('この中に新しいノートを作る');
+  await expect(createIn).toHaveText('中にノートを作る');
   await clickReal(page, '[data-pkc-region="folder-overview"] [data-pkc-field="overview-create"]');
   await expect(overview, '作る入口を押しても編集に入らない(概要が残っている)').toHaveCount(0);
   await expect(

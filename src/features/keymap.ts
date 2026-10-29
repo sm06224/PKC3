@@ -554,7 +554,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'filer-new-in-folder',
-    label: 'この中に新しいノートを作る',
+    label: '中にノートを作る',
     contexts: ['filer'],
     defaults: ['Shift+F4'],
     note: 'フォルダの行で押します(作ってそのまま編集に入ります)',
@@ -924,7 +924,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'append-entry',
-    label: '本文に追記する',
+    label: '追記',
     contexts: ['global'],
     defaults: [],
     note: '追記欄に書いた字を、開いているノートの本文に足します。欄が空なら、その欄へ移ります(追記欄が出ているノートでだけ効きます)',
@@ -1490,7 +1490,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'stack-push',
-    label: 'このノートをスタックに載せる',
+    label: 'スタックに載せる',
     contexts: ['global'],
     // 🔑 S = Stack。小窓の W の隣
     defaults: ['Alt+Shift+S'],
@@ -1904,7 +1904,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   // ── 追記の欄
   {
     id: 'append-send',
-    label: '本文に追記する',
+    label: '追記',
     contexts: ['append'],
     defaults: ['Mod+Enter'],
     note: '追記の欄の中だけ',

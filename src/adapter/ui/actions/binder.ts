@@ -4956,7 +4956,7 @@ const FIND_ATTR = SEARCH_FIND_ATTR;
  * ⚠ 2 ペインの右クリックは**選択を動かさずに**行のメニューを出す(開いただけで
  *   中央が切り替わらないため)。ところが中身を**中央の本文の画面に出す**項目
  *   (「履歴」「このスタックを載せる」)は、2 ペインのままだと状態だけ書き換わって
- *   **画面に何も出ない**(無言の dead click)。「この中に新しいノートを作る」は
+ *   **画面に何も出ない**(無言の dead click)。「中にノートを作る」は
  *   押した瞬間に自分で本文の画面へ移る。
  * 🔑 だから**押したときに**その行を選ぶ(= C9 の前と同じ動き)── メニューを開いた
  *   だけでは移らない。受け手は `run` の 1 か所で、属性を持つ項目にだけ効く。
@@ -18461,7 +18461,7 @@ const PALETTE_FIELD_FIRST: Readonly<
 > = {
   'add-tag': { field: '[data-pkc-field="tag-add-input"]', pane: 'inspector', say: '足すタグをここに入れてから、「タグを足す」を押してください' },
   'add-relation': { field: '[data-pkc-field="relation-target"]', pane: 'inspector', say: 'つなぐ先の題名をここに入れてから、「つながりを足す」を押してください' },
-  'append-entry': { field: '[data-pkc-field="append-input"]', pane: 'append', say: '追記する字をここに書いてから、「本文に追記する」を押してください' },
+  'append-entry': { field: '[data-pkc-field="append-input"]', pane: 'append', say: '追記する字をここに書いてから、「追記」を押してください' },
   'schedule-quick-add': { field: '[data-pkc-field="schedule-quick-text"]', pane: null, say: '予定の字をここに書いてから、「予定を足す」を押してください' },
   // 第 2 群(#582 段③)── 欄はボタンと同じ親の中に居る
   'replace-all': { field: '[data-pkc-field="replace-find"]', pane: null, say: '探す語をここに入れてから、「すべて置換」を押してください' },

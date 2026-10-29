@@ -126,7 +126,7 @@ test('🔴 入り先のリストは、枠の中の下段(打つ欄の下)に出�
   const sendBox = (await page.locator('[data-pkc-action="append-entry"]').boundingBox())!;
   for (const [name, b] of [
     ['追記先', sel],
-    ['本文に追記する', sendBox],
+    ['追記', sendBox],
   ] as const) {
     expect(b.x, `${name}が枠の左にはみ出た`).toBeGreaterThanOrEqual(frame.x - 1);
     expect(b.x + b.width, `${name}が枠の右にはみ出た`).toBeLessThanOrEqual(frame.x + frame.width + 1);

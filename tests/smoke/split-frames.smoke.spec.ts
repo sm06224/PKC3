@@ -88,7 +88,7 @@ test('🔴 本文を右クリックして横に留めると、2 つの枠が並�
   // ⚠ 日付も 1 つ(#1169 ── 主を編集している間に留めた枠の `@日付` を押すと、理由が出る)
   await writeBody(page, `# 資料 B\n\n- [ ] 牛乳\n\n締切は @2026-10-15 です\n\n${LONG}`);
 
-  // ③ 本文を右クリック → 「このノートをスタックに載せる」(字は #633 段① で揃えた)
+  // ③ 本文を右クリック → 「スタックに載せる」(字は #633 段① で揃えた)
   // ⚠ **段落の上で押す**(器の中央は余白に当たる ── context-menu smoke と同じ作法)
   await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
   const menu = page.locator(MENU);
@@ -558,7 +558,7 @@ test('🔴 帯の「保存…」で星つきの入れ物ができ、載せ直す
   await expect(row, '保存した入れ物が一覧に無い').toHaveCount(1);
   await expect(row.locator('[data-pkc-chip="stack"]'), 'スタックのチップが付いていない').toHaveCount(1);
 
-  // 全部降ろしてから、入れ物を開いて「このスタックを追加する」→ 同じ順で戻る
+  // 全部降ろしてから、入れ物を開いて「スタックを追加する」→ 同じ順で戻る
   await page.keyboard.press('Alt+Shift+D');
   await expect(page.locator('[data-pkc-region="stack-bar"]')).toHaveCount(0);
   /**

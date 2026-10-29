@@ -262,7 +262,7 @@ describe('2 ペインの表の行を右クリックしても、2 ペインを抜
    * ⚠ 1 稿目はこの 3 つも選択を動かさずに撃っていた ── 「履歴」は一覧が届いても
    *   `REVISION_LIST_LOADED` が「いま選んでいるノートと違う」で捨て、「このスタックを
    *   載せる」は 2 ペインの裏で状態だけ変わり、どちらも**画面に何も出なかった**。
-   *   「この中に新しいノートを作る」は押すと自分で本文の画面へ移っていた。
+   *   「中にノートを作る」は押すと自分で本文の画面へ移っていた。
    * 🔑 メニューを**開いただけ**では移らない(上の test)── 押した項目が本文の画面を
    *   要るときだけ、C9 の前と同じく**その行を選んで**移る。
    */
@@ -279,7 +279,7 @@ describe('2 ペインの表の行を右クリックしても、2 ペインを抜
     expect(t.d.getState().revisionPanel?.lid, '押した行の履歴が出ていない(一覧が捨てられた)').toBe('n1');
   });
 
-  it('🔴 「このスタックを追加する」は、押したときに押した行を選んでから載せる', async () => {
+  it('🔴 「スタックを追加する」は、押したときに押した行を選んでから載せる', async () => {
     const t = setupDual();
     t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
     t.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' });
@@ -290,7 +290,7 @@ describe('2 ペインの表の行を右クリックしても、2 ペインを抜
     expect(t.d.getState().viewMode, '載せた帯が出る画面へ移っていない').toBe('detail');
   });
 
-  it('🔴 「この中に新しいノートを作る」は、押した行(フォルダ)の中に作る', async () => {
+  it('🔴 「中にノートを作る」は、押した行(フォルダ)の中に作る', async () => {
     const t = setupDual();
     t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
     t.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' });

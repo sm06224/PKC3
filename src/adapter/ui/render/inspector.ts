@@ -1364,7 +1364,7 @@ export class InspectorRenderer {
         folderBtn.parentElement.hidden = folderBtn.hidden;
       }
     }
-    // 🔴 「この中に新しいノートを作る」も同じ門(#215)── 入れ物でなければ畳む
+    // 🔴 「中にノートを作る」も同じ門(#215)── 入れ物でなければ畳む
     const inFolderBtn = this.buttons.get('create-in-folder');
     if (inFolderBtn) inFolderBtn.hidden = meta.archetype !== 'folder';
     // 🔴 種類を変える口はノートとログにだけ(台帳 #1852 I2 / 依頼 157)── 判定は `canChangeKind` 1 本

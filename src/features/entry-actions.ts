@@ -328,7 +328,7 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    * ⚠ スタックの入れ物にだけ出す(`when: 'stack'`)── 他のノートで押しても積む物が無い。
    * ⚠ 開いただけでは横の枠は変わらない(設計 doc §2-8)── 押した瞬間に積まれる。
    */
-  { action: 'stack-load', label: 'このスタックを追加する', group: 'open', when: 'stack' },
+  { action: 'stack-load', label: 'スタックを追加する', group: 'open', when: 'stack' },
   /**
    * 🔴 **`バックアップ(このノート)`**(2026-09-21、#1017 段④b)。
    * ⚠ 直す前の字は「書き出す」で、説明を読まないと何が起きるか分からなかった
@@ -480,7 +480,7 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    * ⚠ 置き場は「フォルダへ移す…」の下・削除の上(既存の並びを動かさない)。
    */
   { action: 'change-entry-kind', label: '種類を変える…', group: 'this-one', when: 'kind-changeable' },
-  { action: 'create-in-folder', label: 'この中に新しいノートを作る', group: 'this-one', when: 'folder' },
+  { action: 'create-in-folder', label: '中にノートを作る', group: 'this-one', when: 'folder' },
   /**
    * 🔴 **ノートをブックマークに入れる / 外す**(#1377。Gemini 裁定を user 委任で採用 =
    *   #1163 のコメント。「ピン留め」という新機能は作らず、既に在るブックマークへノートを入れる)。
@@ -542,7 +542,7 @@ export const BODY_MENU_ACTIONS: readonly EntryAction[] = [
    * ⚠ 外す口は**枠の中の `× 外す`** に在る ── 置けるなら外せる
    * (user 指示 2026-08-23)。
    */
-  { action: 'pin-split', label: 'このノートをスタックに載せる' },
+  { action: 'pin-split', label: 'スタックに載せる' },
   /**
    * 🔴 **読んでいるノートを、そのまま隅へ出す**(#685、user 裁定 2026-09-04。
    *   動線レビュー 欠陥 6 / 案 E)。

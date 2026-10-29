@@ -671,7 +671,7 @@ describe('行の右クリックからの整理(#215)', () => {
     }
   });
 
-  it('🔴 「この中に新しいノートを作る」はフォルダのときだけ(ノートの中には作れない)', () => {
+  it('🔴 「中にノートを作る」はフォルダのときだけ(ノートの中には作れない)', () => {
     expect(acts({ archetype: 'folder', linkedFile: null })).toContain('create-in-folder');
     expect(acts({ archetype: 'text', linkedFile: null })).not.toContain('create-in-folder');
     // ⚠ 種類が分からないときは**出さない側**へ倒す(`export-folder` と同じ)
@@ -699,7 +699,7 @@ describe('行の右クリックからの整理(#215)', () => {
   it('字は画面で起きることで書いてある', () => {
     expect(ENTRY_ACTION_LABELS['rename-entry-begin']).toBe('名前を変える');
     expect(ENTRY_ACTION_LABELS['move-to-folder']).toBe('フォルダへ移す…');
-    expect(ENTRY_ACTION_LABELS['create-in-folder']).toBe('この中に新しいノートを作る');
+    expect(ENTRY_ACTION_LABELS['create-in-folder']).toBe('中にノートを作る');
   });
 });
 
@@ -713,9 +713,9 @@ describe('行の右クリックからの整理(#215)', () => {
  * 🔑 押す字とマニュアルの字を**同じ文字列**で pin する(片方だけ直る日を作らない)。
  */
 describe('スタックの字(#633 段①)', () => {
-  it('🔴 本文のメニューの字は「このノートをスタックに載せる」で、マニュアルも同じ字を使う', () => {
+  it('🔴 本文のメニューの字は「スタックに載せる」で、マニュアルも同じ字を使う', () => {
     const label = BODY_MENU_ACTIONS.find((a) => a.action === 'pin-split')?.label;
-    expect(label).toBe('このノートをスタックに載せる');
+    expect(label).toBe('スタックに載せる');
     const manual = readFileSync('docs/manual.md', 'utf-8');
     expect(manual, 'マニュアルに押す字が無い').toContain(`**${label}**`);
     // ⚠ 古い字が 1 つでも残ると、同じ節に 2 つの名前が並ぶ(直す前の姿)
@@ -829,7 +829,7 @@ describe('繰り返しの一覧(#855 段 0)', () => {
  *   「2 段以上増えるなら見出しをやめて名前を作り直す」に当たるので、**見出しを出さず、
  *   名前は動詞を持ったまま**にした。
  * ⚠ だから**上限の門は外してある** ── 動詞を含む名前は 12 桁に収まらない
- *   (「この中に新しいノートを作る」は 26 桁)。⚠ この節を消さないこと:
+ *   (「中にノートを作る」は 26 桁)。⚠ この節を消さないこと:
  *   消すと、次に読む人が**上限の門をもう一度足して、同じ実測をやり直す**。
  * 🔑 いま幅のでこぼこを受けているのは**下限の段 2 つ**(すぐ下)である。
  */

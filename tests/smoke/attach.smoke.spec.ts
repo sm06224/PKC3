@@ -3181,7 +3181,7 @@ test('🔴 添付の HTML が、本文に書いたのと同じ箱で描かれる
     '添付に足した説明が描かれていない(この先は測れない)',
   ).toContainText('留めて確かめる用の説明');
 
-  // 本文(説明)を右クリック →「このノートをスタックに載せる」で横に留める
+  // 本文(説明)を右クリック →「スタックに載せる」で横に留める
   // (`split-frames.smoke.spec.ts` と同じ導線 ── 行ではなく本文から留める)
   await page.locator('[data-pkc-field="detail-body"] p').first().click({ button: 'right' });
   const menu = page.locator('[data-pkc-region="context-menu"]');

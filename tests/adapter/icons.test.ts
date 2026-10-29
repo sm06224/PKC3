@@ -573,3 +573,10 @@ describe('🔴 action ごとの tone(レビュー指摘の pin)', () => {
     expect(toneOf('delete-entry', '削除')).toBe('danger');
   });
 });
+
+describe("「今日」の絵は予定表のカレンダーと重ならない(#852 案 5)", () => {
+  it("open-today は時計(予定表の schedule = calendar と別)", () => {
+    expect(ACTION_ICONS["open-today"]).toBe("clock");
+    expect(ACTION_ICONS["open-today"]).not.toBe(ACTION_ICONS["schedule"]);
+  });
+});
