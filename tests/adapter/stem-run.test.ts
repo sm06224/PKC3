@@ -135,6 +135,22 @@ describe('本物の ORT で動く(恒等写像の重み)', () => {
     expect(f.log.opened, '形が違うのに符号化まで進んだ').toBe(0);
   });
 
+  it('🔴 test D: 別の形の ONNX は、推論を 1 度も呼ばずに(実行前に inputMetadata で)断る', async () => {
+    const calls: string[] = [];
+    const { ort, log } = fakeOrt({
+      shape: [1, 2, 64, 64],
+      run: async () => {
+        calls.push('run');
+        return { y: { data: new Float32Array(1), dims: [1] } };
+      },
+    });
+    const r = await new StemRunner({ loadOrt: async () => ort, audioApi: fakeAudio().api }).run(job());
+    expect(r).toMatchObject({ ok: false, reason: 'bad-model' });
+    expect(calls, '形が違うのに推論を呼んだ').toEqual([]);
+    expect(log.tensors.length).toBe(0);
+    expect(log.released, 'セッションは手放す').toBe(1);
+  });
+
   it('ONNX ではない bytes は bad-model(ORT の読み込みの失敗を値で返す)', async () => {
     const runner = new StemRunner({ loadOrt: realOrt, audioApi: fakeAudio().api });
     const r = await runner.run(job({ model: new Blob([new Uint8Array(64).fill(7)]) }));

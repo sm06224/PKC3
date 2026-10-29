@@ -145,6 +145,35 @@ describe('中断', () => {
   });
 });
 
+describe('🔴 test D: 取れた物の検め(HTML・空・別の形の ONNX)', () => {
+  const one = (bytes: Uint8Array) => fetchStemModel(model({ urls: ['https://a.example/m.onnx'] }), async () => respond(bytes));
+
+  it('空のファイルは「小さすぎます」で断る(ONNX かどうかを見る前に)', async () => {
+    const r = await one(new Uint8Array(0));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.why).toContain('小さすぎます');
+  });
+
+  it('十分な大きさの HTML(エラーの画面・ログイン画面)は「ONNX ではありません」で断る', async () => {
+    const html = new TextEncoder().encode(`<!doctype html><html><body>${'x'.repeat(3000)}</body></html>`);
+    const r = await one(html);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.why).toContain('モデルの形式(ONNX)ではありません');
+  });
+
+  it('十分な大きさの JSON(エラー応答)も断る', async () => {
+    const r = await one(new TextEncoder().encode(JSON.stringify({ error: 'x'.repeat(3000) })));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.why).toContain('モデルの形式(ONNX)ではありません');
+  });
+
+  it('🟡 別の形の ONNX は、取得の段では通る(ONNX としては正しい)── 実行の前に ORT が読んだ inputMetadata で断る(stem-run.test.ts)', async () => {
+    const other = buildIdentityOnnx([1, 2, 64, 64], 2000);
+    const r = await one(other);
+    expect(r.ok, '取得の段では形を見ない ── 形の検査は ORT が読んだ後').toBe(true);
+  });
+});
+
 describe('looksLikeOnnx', () => {
   it('先頭が ir_version の tag(0x08)で、十分な長さ。HTML・JSON・短すぎる物は違う', async () => {
     expect(await looksLikeOnnx(new Blob([good() as BlobPart]))).toBe(true);
