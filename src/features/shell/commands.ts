@@ -278,7 +278,7 @@ export const SHELL_COMMANDS: readonly ShellCommand[] = [
   },
   {
     name: 'append',
-    aliases: ['追記'],
+    aliases: ['追記する'],
     usage: 'append <ノート> <字…>',
     summary: 'ノートの末尾に字を足します(「元に戻す」で戻せます。\\n は改行)',
     group: '作る・書く',
