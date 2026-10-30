@@ -77,6 +77,7 @@ export interface LauncherTile {
     | 'textlab'
     | 'calc'
     | 'diff'
+    | 'shell'
     | 'query'
     | 'pc'
     | 'manual'
@@ -488,6 +489,25 @@ export function diffTile(): LauncherTile {
 }
 
 /**
+ * 🔴 **コマンドシェルの組み込みタイル**(#274。user 指示 2026-08-19「同じようにコマンドシェルも必要です」)。
+ *
+ * ⚠ 打つ欄 + 結果 + 履歴を持つ組み込みアプリ。基本は別ウィンドウで、塞がれたときの退避先は中央ではなく**左のペインのタブ「シェル」**
+ *   (補助的なものが主の作業領域を奪わない)。閉じて失うのは出力の画面だけで、ノートは 1 件も消えない ── アプリで正しい。
+ * 🔑 `kind` は `ViewMode` の綴り(`shell`)── `launch-tile.ts` がそれを見て別窓へ渡す。
+ */
+export const SHELL_TILE_LID = 'builtin:shell';
+
+export function shellTile(): LauncherTile {
+  return {
+    lid: SHELL_TILE_LID,
+    title: 'コマンドシェル',
+    group: BUILTIN_GROUP,
+    kind: 'shell',
+    symbol: 'terminal',
+  };
+}
+
+/**
  * 🔴 **集計の組み込みタイル**(#300。user 指示 2026-10-26「全部やるのです」)。
  *
  * ⚠ 集計(#184)は中央の面としてだけ在り、別ウィンドウで開く入口が無かった(#300 の洗い出しで残った 1 つ)。
@@ -653,6 +673,8 @@ export function withBuiltinTiles(
   // ⚠ 集計・PC(#300)も末尾 ── 同じ理由(位置を動かさない)
   builtin.push(queryTile());
   builtin.push(pcTile());
+  // ⚠ コマンドシェル(#274)も末尾 ── 同じ理由(位置を動かさない)
+  builtin.push(shellTile());
   /**
    * 🔴 **組み込みは末尾へ「収納」する**(#531 段② / #281。user 指示 2026-08-28
    * 「組み込みアプリをグループに**収納して**整理する」)。
@@ -699,6 +721,7 @@ export const BUILTIN_KINDS: ReadonlySet<LauncherTile['kind']> = new Set([
   'textlab',
   'calc',
   'diff',
+  'shell',
   'query',
   'pc',
   'manual',

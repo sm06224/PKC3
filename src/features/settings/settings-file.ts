@@ -356,6 +356,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: '計算スクラッチパッドの打ちかけ(#1230)。金額など端末の外へ出したくない字が入りうる作業中の下書きなので、設定ファイルには載せない(ノートにすれば保存される)',
   },
   {
+    key: 'pkc3.shell-history',
+    why: 'コマンドシェルの履歴(#274)。題名や SQL の字が入りうる作業の記録なので、設定ファイルには載せない(この端末だけに保存する)',
+  },
+  {
     key: 'pkc3.tab-id',
     why: '設定ではない(依頼 240)。このタブを見分ける番号(sessionStorage)。タブを閉じれば消える一時の事実で、運ぶ物は無い',
   },

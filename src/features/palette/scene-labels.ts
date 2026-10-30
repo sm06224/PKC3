@@ -213,6 +213,7 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'view-textlab': APP,
   'view-calc': APP,
   'view-diff': APP,
+  'view-shell': APP,
   'refresh-query': SCREEN,
   'cycle-read-columns': SCREEN,
   // 🔴 #1377: 開いているノートのピン留め(する / 外す)

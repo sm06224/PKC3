@@ -743,6 +743,7 @@ const TAB_ALL_SHOWN_FROM = 1920;
 
 test('🔴 どの幅でも探し方のタブの語が隣に重ならない', async ({ page }) => {
   const seen: { w: number; rows: number; worst: number }[] = [];
+  let shellFolded = 0;
   for (const w of TAB_SWEEP) {
     await page.setViewportSize({ width: w, height: 800 });
     await gotoApp(page);
@@ -815,7 +816,25 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
       rows: m.tabs.filter((t) => t.folded).length > 0 ? 2 : 1,
       worst: Math.max(...m.tabs.map((t) => t.outside)),
     });
+
+    // ⚠ スマホ幅(720px)は 1 枚ずつ出す配置で、タブの帯が別の形になる(`layout` の別の test が見る)── ここは 860px 以上
+    if (w >= 860) {
+      // ⑦ 🔴 **最後尾の「シェル」(別ウィンドウが塞がれたときの退避先)は、畳まれていても「⋯」から名前つきで開ける**(#274)。
+      //    畳まれていない幅ではそのまま押せる。⚠ 状態を変えるので、他の検査のあとに置く(同じ起動に載せる ── 起動を増やさない)
+      const shellTab = page.locator('[data-pkc-region="browse-tabs"] [data-pkc-browse="shell"]');
+      if (m.tabs.some((t) => t.label === 'シェル' && t.folded)) {
+        shellFolded += 1;
+        await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-field="bar-more"]');
+        await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="set-browse"][data-pkc-browse="shell"]');
+      } else {
+        await clickReal(page, shellTab);
+      }
+      await expect(page.locator('[data-pkc-browse-pane="shell"]'), `w=${w}: シェルのタブが開かない`).toBeVisible();
+      // 探し方は端末に覚えられる(次の幅の起動で「いま開いているタブ」は畳まれないので、シェルのままだと別のタブが畳まれる)── フォルダへ戻しておく
+      await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+    }
   }
+  expect(shellFolded, '「シェル」が畳まれた幅を 1 つも見ていない(掃く幅が広すぎる)').toBeGreaterThan(0);
 
   // ⑤ 🔴 **空振り防止 ── これが旧稿に無かったもの。**
   //    掃いた範囲が「1 段の姿」と「折り返した姿」の**両方**をまたいでいること。
@@ -833,9 +852,10 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
     `折り返した幅を 1 つも見ていない(掃いた範囲が狭すぎる): ${JSON.stringify(seen)}`,
   ).toBeGreaterThan(0);
 
-  // ⑥ 表ごと空にする変異を素通りさせない(2026-10-25 時点で 8 枚)
-  expect(BROWSE_TABS.length, 'タブの表が縮んでいる').toBeGreaterThanOrEqual(8);
+  // ⑥ 表ごと空にする変異を素通りさせない(2026-10-29 時点で 10 枚 ── 手書きは描いている間だけ出る)
+  expect(BROWSE_TABS.length, 'タブの表が縮んでいる').toBeGreaterThanOrEqual(10);
 });
+
 
 /**
  * P8: **畳まない**(user 指示 2026-08-03「シンプルかつ高機能さ」)。

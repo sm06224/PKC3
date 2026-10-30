@@ -44,6 +44,8 @@ export const BROWSE_MODES = [
   //   描いている間だけタブが出る(`BrowseRouter.setDrawTab`)。⚠ **憶えない**(`main.ts` の `setBrowse`)── 次の起動で
   //   描いていない手書きの面を開かない
   'draw',
+  // 🔴 **コマンドシェル**(#274)── 組み込みアプリの左のタブ(別ウィンドウが塞がれたときの退避先も、中央ではなくここ)。⚠ これも末尾
+  'shell',
 ] as const;
 
 export type BrowseMode = (typeof BROWSE_MODES)[number];
@@ -99,6 +101,8 @@ const HOME_TAB: Readonly<Partial<Record<ViewMode, BrowseMode>>> = {
   timers: 'timers',
   // 🔴 PC(#300)も同じ ── 別窓が塞がれたら左の「PC」タブへ送る
   pc: 'pc',
+  // 🔴 コマンドシェル(#274)も同じ ── 別窓が塞がれたら左の「シェル」タブへ送る
+  shell: 'shell',
 };
 
 export function homeTabOf(view: ViewMode): BrowseMode | null {

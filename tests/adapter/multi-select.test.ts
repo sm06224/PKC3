@@ -357,7 +357,7 @@ describe('探し方の既定と記憶(#240 段⑤)', () => {
     const tabs = [...root.querySelectorAll('[data-pkc-action="set-browse"]')].map((b) =>
       b.getAttribute('data-pkc-browse'),
     );
-    expect(tabs).toEqual(['filer', 'launcher', 'schedule', 'contacts', 'captures', 'pc', 'graph', 'timers', 'draw']);
+    expect(tabs).toEqual(['filer', 'launcher', 'schedule', 'contacts', 'captures', 'pc', 'graph', 'timers', 'draw', 'shell']);
     expect(regions.browseHost.querySelector('[data-pkc-region="entry-list"]'), '一覧の器が残っている').toBeNull();
   });
 

@@ -13477,3 +13477,171 @@ h6:hover > .pkc-heading-anchor,
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
+
+/* ══ コマンドシェルと 2 ペインの命令行(#274 / #241、2026-10-29)═══════
+ * 地は無彩色。色は**失敗した結果**(`data-pkc-state='failed'`)にだけ使う(業務画面の作法)。
+ * 別ウィンドウ(中央)と左のペインのタブは同じ部品で、高さは入れ物に従う。 */
+/* ⚠ `display` を書く規則は UA の `[hidden]` に勝つ ── 隠れている面を必ず畳む(畳まないと、押したいボタンの上に重なる) */
+[data-pkc-view-pane='shell'][hidden],
+[data-pkc-browse-pane='shell'][hidden],
+[data-pkc-region='cmdshell'][hidden] {
+  display: none;
+}
+[data-pkc-view-pane='shell'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  height: 100%;
+  box-sizing: border-box;
+}
+[data-pkc-region='cmdshell'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-height: 0;
+  flex: 1 1 auto;
+}
+[data-pkc-region='cmdshell'] [data-pkc-field='pane-title'] {
+  margin: 0;
+  font-size: 14px;
+}
+[data-pkc-field='shell-cwd'] {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+[data-pkc-field='shell-log'] {
+  flex: 1 1 auto;
+  min-height: 8em;
+  overflow: auto;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: var(--s2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+[data-pkc-browse-pane='shell'] [data-pkc-field='shell-log'] {
+  min-height: 12em;
+  max-height: 60vh;
+}
+[data-pkc-field='shell-intro'],
+[data-pkc-field='shell-line'],
+[data-pkc-field='shell-more'] {
+  margin: 2px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[data-pkc-field='shell-intro'],
+[data-pkc-field='shell-more'] {
+  color: var(--muted);
+}
+[data-pkc-field='shell-block'] {
+  margin: 0 0 var(--s2);
+}
+[data-pkc-field='shell-block'][data-pkc-state='failed'] [data-pkc-field='shell-line'] {
+  color: var(--danger, #b3261e);
+}
+[data-pkc-field='shell-prompt-line'] {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+}
+[data-pkc-field='shell-echo'] {
+  flex: 1 1 auto;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+[data-pkc-field='shell-copy-block'] {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 0 6px;
+}
+[data-pkc-field='shell-table-wrap'] {
+  overflow: auto;
+  max-width: 100%;
+}
+[data-pkc-field='shell-table'] {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+[data-pkc-field='shell-table'] th,
+[data-pkc-field='shell-table'] td {
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  text-align: left;
+  white-space: pre;
+  max-width: 28em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-pkc-field='shell-table'] th {
+  background: var(--surface);
+}
+[data-pkc-field='shell-table'] tr[data-pkc-action] {
+  cursor: pointer;
+}
+[data-pkc-field='shell-table'] tr[data-pkc-action]:hover {
+  background: var(--surface);
+}
+[data-pkc-region='shell-prompt'] {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+[data-pkc-region='shell-input-row'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='shell-ps'] {
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+/* ⚠ 入力欄を 0 幅まで縮めない(左のペインは細く、ボタンが 4 つ並ぶ ── 縮むと caret が 0 に戻って打った字が逆順になる)。
+ *   ボタンは折り返して次の行へ回す。 */
+[data-pkc-field='shell-input'] {
+  flex: 1 1 12em;
+  min-width: 8em;
+  font-family: var(--font-mono);
+}
+[data-pkc-region='shell-complete'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-height: 9em;
+  overflow: auto;
+}
+[data-pkc-region='shell-complete'][hidden] {
+  display: none;
+}
+[data-pkc-field='shell-candidate'] {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 12px;
+  padding: 1px 6px;
+}
+[data-pkc-field='shell-candidate-hint'] {
+  color: var(--muted);
+}
+[data-pkc-region='dual-cmdline'] {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--s2);
+  border-top: 1px solid var(--border);
+  padding-top: 2px;
+}
+[data-pkc-region='dual-cmd-out'] {
+  max-height: 12em;
+  overflow: auto;
+  background: var(--surface-2);
+  padding: 2px var(--s2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+[data-pkc-region='dual-cmd-out'][hidden] {
+  display: none;
+}

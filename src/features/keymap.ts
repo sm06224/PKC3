@@ -1620,6 +1620,16 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     alias: '比較 差分 マージ くらべる',
   },
   {
+    id: 'view-shell',
+    label: 'コマンドシェルへ移る',
+    contexts: ['global'],
+    // ⚠ `Alt+0` の次の数字は無い ── 日本語キーボードで IME の切り替えに使う `Backquote` を避け、`Semicolon` に置く
+    defaults: ['Alt+Semicolon', 'Mod+Alt+Semicolon'],
+    whileTyping: true,
+    note: 'コマンドを打って、ノートの検索・移動・追記・SQL・操作の呼び出しをする画面です。文字を打っている間に効くのは Ctrl+Alt+;(Mac は ⌘+Alt+;)のほうです',
+    alias: 'シェル コマンド 端末 ターミナル コマンド',
+  },
+  {
     id: 'toggle-sidebar',
     label: '一覧のペインを折りたたむ / 戻す',
     alias: '畳む 列',

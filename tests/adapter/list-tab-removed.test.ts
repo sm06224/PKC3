@@ -44,7 +44,7 @@ const code = (src: string): string =>
 
 describe('「一覧」タブは外してある(#813 段③)', () => {
   it('🔴 タブは 9 枚で、「一覧」が無い(6 枚目は「PC」── #215 段①、7 枚目は「グラフ」── #281 ①、8 枚目は「時間」── #683 ①、9 枚目は描いている間だけ出る「手書き」── #1448)', () => {
-    expect(BROWSE_TABS.map((t) => t.mode)).toEqual(['filer', 'launcher', 'schedule', 'contacts', 'captures', 'pc', 'graph', 'timers', 'draw']);
+    expect(BROWSE_TABS.map((t) => t.mode)).toEqual(['filer', 'launcher', 'schedule', 'contacts', 'captures', 'pc', 'graph', 'timers', 'draw', 'shell']);
     expect(BROWSE_TABS.map((t) => t.label)).not.toContain('一覧');
     // 型・判定・図案・種類の札の面が、表と同じ数で揃っている(1 つだけ残ると、押せないタブか知らない面になる)
     expect([...BROWSE_MODES].sort()).toEqual(BROWSE_TABS.map((t) => t.mode).sort());
