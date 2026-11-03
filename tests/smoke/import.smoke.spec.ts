@@ -694,6 +694,10 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   });
 
   const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
+  // ⚠ 取り込みの終わりはアプリ自身の印で待つ(行の数を 5 秒だけ待つと、負荷の高い回に「数が違う」に見える ── 下の 2 本目と同じ)
+  await expect(page.locator('[data-pkc-region="status"]'), '取り込みが終わらない').toContainText('取り込み完了: 7 件', {
+    timeout: 30_000,
+  });
   // 最上位は 2 件(階層が効いている)。folder 5 件 + 本体 2 件の 7 件が全部取り込まれていることは、
   // 「中まで全部出す」で平らに数える(かつては「一覧」タブが全件を出していた ── #813 段③)
   await expect(rows).toHaveCount(2);
@@ -780,6 +784,17 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   const bigRow = page
     .locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]')
     .filter({ hasText: '大量フォルダ' });
+  /**
+   * 🔴 **取り込みが終わったことを、アプリ自身の印で待ってから居場所を見る**(2026-11-03)。
+   * ⚠ 直す前は行の数を既定の 5 秒だけ待っていた ── 102 件(フォルダ 1 + ノート 101、どれも内側の zip)の取り込みは、
+   *   全量の負荷では 5 秒を越えることがあり、「中に出ない」(= 居場所の不具合)に見える赤になった(35 回中 1 回)。
+   * 🔑 「取り込み完了: 102 件」は読み直し(`reload`)の**後**に出る字なので、これが出た時点で一覧は取り込み後である。
+   *   ⚠ 件数まで名指しする(1 本目の取り込みの「取り込み完了」で満たされない)。
+   */
+  await expect(page.locator('[data-pkc-region="status"]'), '2 本目の取り込みが終わらない').toContainText(
+    '取り込み完了: 102 件',
+    { timeout: 30_000 },
+  );
   await expect(bigRow, '取り込んだ大量のフォルダが、開いているフォルダ(「2026」)の中に出ない').toHaveCount(1);
   await clickReal(page, bigRow);
   const more = page.locator('[data-pkc-region="folder-overview"] [data-pkc-field="overview-more"]');
@@ -789,6 +804,26 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   await expect(page.locator('[data-pkc-region="filer-breadcrumb"]'), '前提:押す前は左の一覧はルート').not.toContainText(
     '大量フォルダ',
   );
+  /**
+   * 🔴 **送って見せた「ほか N 件」が、描いた後に跳ねない**(2026-11-03、全量の負荷で 10 回中 9〜10 回落ちた原因)。
+   *
+   * ⚠ 概要の行は `content-visibility: auto` で、まだ描いていない行の高さを**見積もり**で置く。見積もりは
+   *   長らく `24px` だったが、行(= ボタン)の実寸は `--row-h`(26px)── 送った先で行が描かれるたびに 2px ずつ伸び、
+   *   実測で `scrollIntoViewIfNeeded` の 2 フレーム後に本文の高さが 2666 → 2750、ボタンが 432 → 516 へ落ちて
+   *   **本文ペインの下端(466)の外**へ出た。そこはお知らせの帯の上で、`clickReal` は「H3 に覆われている」と言った。
+   *   静かな箱では押すほうがフレームより先に済むので通っていた(= 負荷でだけ見える**製品の跳ね**)。
+   *   キーボードで焦点を移した人にも同じことが起きる(焦点の輪が画面の外へ逃げる)。
+   * 🔑 見るのは「送った直後」と「3 フレーム描いた後」の位置が同じこと。⚠ 送るのも読むのも**同じ evaluate の中**で
+   *   続けてやる(送ってから読むまでに 1 フレーム挟まると、直す前でも跳ねた後の位置どうしを比べて通ってしまう)。
+   */
+  const jump = await more.evaluate(async (el) => {
+    const top = (): number => Math.round(el.getBoundingClientRect().top);
+    el.scrollIntoView({ block: 'nearest' });
+    const at0 = top();
+    for (let f = 0; f < 3; f++) await new Promise((r) => requestAnimationFrame(r));
+    return { at0, at3: top() };
+  });
+  expect(jump.at3, `送って見せた「ほか N 件」が、行を描いたら動いた(${jump.at0} → ${jump.at3})`).toBe(jump.at0);
   await clickReal(page, more);
   await expect(
     page.locator('[data-pkc-region="filer-breadcrumb"]'),

@@ -9,6 +9,7 @@ import {
   expectReachable,
   gotoApp,
   useSplitEditor,
+  writesLanded,
 } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -1157,6 +1158,15 @@ test('🔴 面の境界が 1 本になっている(2 重線を作らない)', as
  * **計器が自分でスクロールを潰す**(この罠で 1 度誤診した)。操作は面の外から。
  */
 test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを往復しても位置が残る', async ({ page }) => {
+  /**
+   * ⚠ **per-test の 30 秒では、全量の負荷に耐えない長さの筋書きである**(SKILL「長い筋書きの中の timeout」)。
+   * 🔑 新しい起動を足さずに ④〜⑦ を同じ道中へ積んできた結果、**33 件を画面の手順で作る**ことを含む
+   *   長い筋書きになった。実測(2026-11-03、同じ箱、`--workers=4 --repeat-each=5`):並走が引いた回 13.8 秒 / 並走中 27.5〜30.3 秒
+   *   (5 回中 2 回が 30 秒の壁で、assert ではなく**時間切れ**で落ちた ── 落ちた行は毎回違う)。
+   * ⚠ 待ちは全部「状態」を見ている(固定の sleep は無い)ので、伸ばすのは per-test の枠だけである。
+   *   門(assert)は 1 つも緩めていない。
+   */
+  test.setTimeout(75_000);
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 700 });
   await gotoApp(page);
@@ -2537,6 +2547,12 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
     page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${createdLid}"] td:nth-child(2)`),
     '作ったノートの ack が返っていない',
   ).not.toHaveText('');
+  /**
+   * 🔴 **読み直す前に、飛んでいる書込が disk へ届くのを待つ**(`writesLanded`。#828 / #1066 と同じ穴)。
+   * ⚠ 上の ack は**作成の書込**が返ったことしか言わない ── ほかに飛んでいる書込があるかは `data-pkc-saving` が言う。
+   *   待たずに読み直すと、全量の負荷では届く前に document ごと捨てて、読み直しの観測が**別の原因**で崩れうる。
+   */
+  await writesLanded(page);
   await gotoApp(page);
   await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
   /**
@@ -2546,17 +2562,30 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
    * ⚠ 旧い期待(ルートから始まる)は成り立たない ── ルートへ出て、入れたノートが居ないこと(対照群)と、
    *   2 クリックで入り直せること(入り口の動線)は残す。
    */
-  expect(await lidsOf(), '読み込み直したら、開いていたフォルダの中に居ない(居場所が失われた)').toEqual([
-    noteLid,
-    createdLid,
-  ]);
+  /**
+   * ⚠ **一覧は「待って」読む**(`expect.poll`)── 直す前は押した直後に 1 度だけ読んでいた。
+   *   タブを押してから行が並ぶまでは描画を 1 回挟むので、負荷の高い回は**並ぶ前の表**を読みうる。
+   *   🔑 壊れていれば待っても揃わない(居場所が disk に無ければ、いつまでも [noteLid, createdLid] にならない)。
+   * 🔑 落ちたときに切り分けられるよう、**押した直後の 1 読み**と、憶えている場所(`pkc3.list-place`)を字に残す。
+   */
+  const firstRead = await lidsOf();
+  const remembered = await page.evaluate(() => localStorage.getItem('pkc3.list-place'));
+  await expect
+    .poll(lidsOf, {
+      message:
+        `読み込み直したら、開いていたフォルダの中に居ない(居場所が失われた)` +
+        ` ── 押した直後の一覧 ${JSON.stringify(firstRead)} / 憶えている場所 ${remembered ?? 'null'}` +
+        ` / フォルダ ${folderLid}`,
+    })
+    .toEqual([noteLid, createdLid]);
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
-  // ルートには**入れたノートが居ない**
+  // ルートには**入れたノートが居ない**(⚠ ルートの行が並んだのを待ってから見る ── 並ぶ前の表は何でも「居ない」)
+  await expect.poll(lidsOf, { message: 'ルートへ出られない' }).toContain(folderLid);
   expect(await lidsOf(), 'ルートに残っている').not.toContain(noteLid);
   // ⚠ 入るのは**2 クリック**(#240 段①)。`locator.dblclick()` は安定するまで待つ ──
   //    座標を先に採ると、採ってから押すまでの再描画で 2 回が別ノードに落ちる
   await page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${folderLid}"]`).dblclick();
-  expect(await lidsOf(), '入り直したら居場所が失われた').toEqual([noteLid, createdLid]);
+  await expect.poll(lidsOf, { message: '入り直したら居場所が失われた' }).toEqual([noteLid, createdLid]);
 
   expect(errors).toEqual([]);
 });

@@ -2017,11 +2017,14 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
 /* 🔴 **画面の外の行は組まない**(#1222 の応答の実測)── 直下 2,000 件のフォルダでは概要が 100 行
  * (約 500 節点)を足し、**強制レイアウトが約 13ms**かかっていた(行を押した回の long task が
  * 3 回中 3 回 50ms を超えた)。`content-visibility: auto` で画面の外の行の配置を飛ばすと
- * 約 1.5ms になり、同じ操作で long task は 0 件になった。⚠ 行の高さは約 24px
- * (`contain-intrinsic-block-size` はその見積もり ── 一度見えた行は実寸を憶える `auto`)。 */
+ * 約 1.5ms になり、同じ操作で long task は 0 件になった。
+ * 🔴 **見積もりは行の実寸そのもの(`--row-h`)にする**(2026-11-03)。行は `button` で、高さは全ボタン共通の
+ * `--row-h`(既定 26px / タッチ 34px)に固定されている。⚠ 以前は `24px` と書いてあり、描くたびに 1 行 2px ずつ
+ * 伸びた ── 「ほか N 件」へ送ると、送った先の行が描かれて本文が 84px 伸び、ボタンが本文ペインの外へ逃げた
+ * (`import.smoke.spec.ts` の folder-export が測る)。一度見えた行は実寸を憶える(`auto`)。 */
 [data-pkc-region='folder-overview'] [data-pkc-field='overview-list'] > li {
   content-visibility: auto;
-  contain-intrinsic-block-size: auto 24px;
+  contain-intrinsic-block-size: auto var(--row-h);
 }
 [data-pkc-region='folder-overview'] [data-pkc-action='select-entry'] {
   display: flex;
