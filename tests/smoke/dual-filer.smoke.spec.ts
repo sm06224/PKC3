@@ -739,6 +739,25 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
   const rows = page.locator(ROWS('left'));
   const before = await rows.count();
   expect(before, '前提が崩れている(行が無い)').toBeGreaterThan(1);
+  /** 状態の行の「元に戻す」を、位置が 250ms 続けて動かなくなってから押す(上の ① の注記)。 */
+  const undoWhenStill = async (): Promise<void> => {
+    const undo = page.locator('[data-pkc-field="status-undo"]');
+    await expect(undo, '「元に戻す」が出ていない').toBeVisible();
+    let last = '';
+    await expect
+      .poll(
+        async () => {
+          const b = await undo.boundingBox();
+          const now = b === null ? '' : `${Math.round(b.x)},${Math.round(b.y)}`;
+          const still = now !== '' && now === last;
+          last = now;
+          return still;
+        },
+        { message: '「元に戻す」の位置が落ち着かない', intervals: [250] },
+      )
+      .toBe(true);
+    await clickReal(page, undo);
+  };
   await rows.first().click();
 
   /**
@@ -758,8 +777,10 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
    * ⚠ **「元に戻す」は 7 秒で消える**(`trash-undo.ts` の `TRASH_OFFER_MS`)── 直す前はここで ↓ の確認を挟んでから押しており、
    *   負荷で 7 秒を越えた回に、期限が切れる瞬間の「元に戻す」を押して何も起きなかった(全量・並列で実際に落ちた)。
    *   🔑 消したらすぐ戻す。「消したあとも ↓ が効く」は最後(④)に、同じ Delete の道で見る。
+   * ⚠ それでも押しが届かない回が残った(押した後も「元に戻す」が出たまま)── ゴミ箱の知らせは字が後から伸びる
+   *   (「ほかのノートからリンクされているかもしれません」)ので、状態の行の「元に戻す」が押す直前に動く。位置が落ち着いてから押す。
    */
-  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await undoWhenStill();
   await expect(rows, '元に戻しても行が戻らない').toHaveCount(before);
 
   // ── ② もう一度消す ── 戻したあとも、行を選べば同じ鍵で消える(戻した行は選ばれていない)
@@ -771,7 +792,7 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
    * ── ③ 右クリックの「ゴミ箱へ移す」でも、消した後にカーソルが立ち、焦点が行にある(#1087 D1)。
    * 行が 2 件以上残る形に戻してから押す(↓ で動けるように)。
    */
-  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await undoWhenStill();
   await expect(rows, '前提が崩れている(戻していない)').toHaveCount(before);
   await rows.first().click({ button: 'right' });
   await page

@@ -537,24 +537,6 @@ async function reachableOnce(
       .toBe(false);
   }
   await el.scrollIntoViewIfNeeded(); // fold 下の要素を「覆われている」と誤診しない
-  /**
-   * 🔑 **押す口は、描画 1 回をまたいで箱が動いていないことを確かめてから押す**(Playwright の click の「stable」と同じ考え)。
-   * ⚠ 直す前は箱を測った瞬間の当たりだけを見ていた ── 面が動いている最中(下の帯の出入りで行や状態の行がずれる)に押すと、
-   *   当たりは通るのに、実際の押下は別の物に落ちる(全量・並列の smoke で「元に戻す」が届かず、押した後も残っていた)。
-   *   動いていたら作り直しと同じ合図で、やり直す(`withRerenderRetry`)。⚠ 当たりの検査そのものは下で毎回やる(検出力は下げない)。
-   */
-  if (opts.press === true) {
-    const before = await el.boundingBox();
-    await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
-    const after = await el.boundingBox();
-    if (
-      before !== null &&
-      after !== null &&
-      (Math.abs(before.x - after.x) > 1 || Math.abs(before.y - after.y) > 1 || Math.abs(before.width - after.width) > 1 || Math.abs(before.height - after.height) > 1)
-    ) {
-      throw new Error(`${name}: 描画をまたいで動いた element is not stable`);
-    }
-  }
   const box = await el.boundingBox();
   expect(box, `${name} に boundingBox が無い(画面に出ていない)`).not.toBeNull();
   const x = box!.x + box!.width / 2;
