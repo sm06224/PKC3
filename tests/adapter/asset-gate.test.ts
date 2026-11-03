@@ -18,6 +18,25 @@ const boot = (): Dispatcher => {
 };
 
 describe('createAssetGate', () => {
+  it('🔑 塞がった / 空いたを onBusy で知らせる(待っている物が残る間は空かない)', async () => {
+    const d = boot();
+    const seen: boolean[] = [];
+    const gate = createAssetGate(d, (b) => seen.push(b));
+    let release1!: () => void;
+    const first = gate.queued(() => new Promise<void>((r) => (release1 = r)));
+    let release2!: () => void;
+    const second = gate.queued(() => new Promise<void>((r) => (release2 = r)));
+    expect(seen, '1 本目で塞がったと言っていない').toEqual([true]);
+    await new Promise((r) => setTimeout(r, 0));
+    release1();
+    await first;
+    expect(seen, '待っている 2 本目が残るのに空いたと言った').toEqual([true]);
+    await new Promise((r) => setTimeout(r, 0));
+    release2();
+    await second;
+    expect(seen, '全部済んだのに空いたと言わない').toEqual([true, false]);
+  });
+
   it('実行中の 2 本目は**走らせずに**可視で断る', async () => {
     const d = boot();
     const gate = createAssetGate(d);

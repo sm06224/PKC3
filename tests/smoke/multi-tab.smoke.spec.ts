@@ -85,7 +85,13 @@ test('2 枚目のタブが本体経由で開き、別ノートは編集でき、
    * ⚠ 直す前は帯が本体のタブにしか出ず、いま見ているタブ(B)には何も出なかった。
    * 🔑 次の分の予定を書き、「予定の知らせ」を入にする(鳴るのは入にした後の時刻から)。観測点は B の帯と、閉じた後の両方の帯。
    */
-  const soon = new Date(Date.now() + 60_000); // 次の分。⚠ 実時間で待たない(30s の timeout は緩めない)── 本体のタブの時計だけ進める
+  /**
+   * ⚠ **予定は 2 分先の分**(以前は「いま + 60 秒」の分)── 知らせは「入にした後の時刻」の予定だけを鳴らす。+60 秒だと、
+   *   始めた秒によっては予定の分の頭が**数秒先**にしかなく(例: 14:57:59 に始めると 14:58:00)、負荷で「入にする」までに
+   *   数秒かかった回は予定が入にした時刻より前になって鳴らなかった(全量・並列で実際に落ちた)。+120 秒なら頭は 60 秒以上先。
+   * ⚠ 実時間で待たない(30s の timeout は緩めない)── 本体のタブの時計だけ進める
+   */
+  const soon = new Date(Date.now() + 120_000);
   const p2 = (n: number): string => String(n).padStart(2, '0');
   const soonDate = `${soon.getFullYear()}-${p2(soon.getMonth() + 1)}-${p2(soon.getDate())}`;
   await createEntry(page, 'text');
@@ -94,27 +100,10 @@ test('2 枚目のタブが本体経由で開き、別ノートは編集でき、
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-field="alarm-enabled"]');
   await expect(page.locator('[data-pkc-field="alarm-enabled"]'), '予定の知らせが入にならない(前提)').toBeChecked();
-  await page.clock.runFor("01:30"); // 知らせの刻み(30 秒)を回す;
+  await page.clock.runFor('02:30'); // 予定の分(最大 2 分先)と、知らせの刻み(30 秒)を回す
   const barA = page.locator('[data-pkc-region="alarm-bar"] [data-pkc-field="alarm-list"] > li');
   const barB = pageB.locator('[data-pkc-region="alarm-bar"] [data-pkc-field="alarm-list"] > li');
-  /**
-   * ⚠ 入にすると予定の走査(ワーカー)を頼む ── 走査の結果が届く前に上の 90 秒を回し終えると、知らせは次の刻み(30 秒後)まで
-   *   鳴らない(刻みの作りどおり)。この時計は `runFor` でしか進まないので、負荷で走査が遅れた回は帯が出ないまま落ちた(全量・並列)。
-   * 🔑 だから帯が出るまで **30 秒ずつ回して待つ**(上限 4 刻み = 2 分 ── 予定は次の分なので、走査が届けば最初の刻みで鳴る)。
-   */
-  let ticks = 0;
-  await expect
-    .poll(
-      async () => {
-        if ((await barA.count()) === 0 && ticks < 4) {
-          ticks += 1;
-          await page.clock.runFor('00:30');
-        }
-        return barA.count();
-      },
-      { message: '本体のタブに知らせの帯が出ない(前提)', timeout: 15_000, intervals: [500] },
-    )
-    .toBe(1);
+  await expect(barA, '本体のタブに知らせの帯が出ない(前提)').toHaveCount(1, { timeout: 10_000 });
   await expect(barB, 'メインでないタブに知らせの帯が出ない').toHaveCount(1, { timeout: 10_000 });
   await expect(barB).toContainText('打ち合わせ');
   // B で閉じると、本体(A)でも消える

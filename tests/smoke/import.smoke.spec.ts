@@ -15,7 +15,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, expectImageRendered, useSplitEditor,
-  gotoCollectionPane, expectReachable, writesLanded,
+  gotoCollectionPane, expectReachable, writesLanded, assetGateIdle,
 } from './helpers';
 import { withStateOnFail } from './state-dump';
 import { chromiumLaunch } from './playwright.config';
@@ -1205,6 +1205,8 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   const droppedConfirm = await answerAppDialog(page, 'cancel', { timeout: 15_000 });
   expect(droppedConfirm, '落としたバックアップに取り込みの確認が出ない').toMatch(/ノート \d+ 件/);
   await expect(rows, '「やめる」を押したのに件数が増えた').toHaveCount(2);
+  // ⚠ やめた取り込みの後始末が済むまで待つ ── 済む前に渡すと、門が「どれかが動いています」と断る(作りどおり。全量・並列で落ちた)
+  await assetGateIdle(page);
 
   // 🔴 取り込み直す ── **自分の書出しを自分で読み戻せる**ことがバックアップの条件
   await page.setInputFiles('[data-pkc-field="import-input"]', {

@@ -367,6 +367,22 @@ export async function writesLanded(page: Page): Promise<void> {
 }
 
 /**
+ * 🔑 **取り込み・書き出し・添付の整理の門が空くまで待つ**(`asset-gate.ts` の `onBusy` → `main.ts` が起動の印に
+ *   `data-pkc-asset-busy`)。⚠ 門は塞がっている間の次の 1 本を理由つきで断る ── 前の回(やめた取り込み・書き出し)の
+ *   後始末が負荷で遅れると、続けて渡したファイルが断られる(全量・並列の smoke で実際に落ちた)。
+ */
+export async function assetGateIdle(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('[data-pkc-boot]');
+      return el !== null && !el.hasAttribute('data-pkc-asset-busy');
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+}
+
+/**
  * 🔴 **再描画で node が差し替わるのは正常**(2026-08-05、CI と full run で実際に落ちた)。
  *
  * 情報ペインもファイラのパンくずも、値が変わると作り直される。保存の直後は worker から
@@ -521,6 +537,24 @@ async function reachableOnce(
       .toBe(false);
   }
   await el.scrollIntoViewIfNeeded(); // fold 下の要素を「覆われている」と誤診しない
+  /**
+   * 🔑 **押す口は、描画 1 回をまたいで箱が動いていないことを確かめてから押す**(Playwright の click の「stable」と同じ考え)。
+   * ⚠ 直す前は箱を測った瞬間の当たりだけを見ていた ── 面が動いている最中(下の帯の出入りで行や状態の行がずれる)に押すと、
+   *   当たりは通るのに、実際の押下は別の物に落ちる(全量・並列の smoke で「元に戻す」が届かず、押した後も残っていた)。
+   *   動いていたら作り直しと同じ合図で、やり直す(`withRerenderRetry`)。⚠ 当たりの検査そのものは下で毎回やる(検出力は下げない)。
+   */
+  if (opts.press === true) {
+    const before = await el.boundingBox();
+    await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+    const after = await el.boundingBox();
+    if (
+      before !== null &&
+      after !== null &&
+      (Math.abs(before.x - after.x) > 1 || Math.abs(before.y - after.y) > 1 || Math.abs(before.width - after.width) > 1 || Math.abs(before.height - after.height) > 1)
+    ) {
+      throw new Error(`${name}: 描画をまたいで動いた element is not stable`);
+    }
+  }
   const box = await el.boundingBox();
   expect(box, `${name} に boundingBox が無い(画面に出ていない)`).not.toBeNull();
   const x = box!.x + box!.width / 2;
