@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { clickReal, collectPageErrors, gotoApp } from './helpers';
 
 /**
@@ -8,6 +8,30 @@ import { clickReal, collectPageErrors, gotoApp } from './helpers';
  */
 const ROW = '[data-pkc-region="filer-table"] tbody [data-pkc-entry]';
 const HOST = '[data-pkc-region="browse-host"]';
+
+/**
+ * 🔴 **先頭へ戻して、先頭の塊が組み直されるのを待つ**(全量・並列の smoke で 2 回落ちた観測点の直し)。
+ *
+ * ⚠ 塊の組み直しは `scroll` の**次の描画(rAF)**で走る(`filer.ts` の `onScroll`)。戻した直後は、直前まで
+ *   組まれていた**遠くの塊の行**がまだ DOM に居るので、`ROW.first()` の `toBeVisible()` はその行で満たされる
+ *   (Playwright の可視は「箱がある」であって「画面の中」ではない)── 負荷で rAF が遅れると、その行を
+ *   掴んだ直後に塊ごと外れ、`boundingBox()` が `null` になる / 画面の外の座標を押して別の物を掴む。
+ * 🔑 だから「**先頭の行(n0001)が先頭に組まれ、画面の中に在る**」まで待つ(組み直しは 1 回の
+ *   `applyChunks` で外す・組むを同時に済ませるので、n0001 が先頭に来た時点で遠くの塊は外れ終えている)。
+ */
+async function backToTop(page: Page): Promise<void> {
+  /**
+   * ⚠ **先に、前の操作が積んだ描画を済ませる**(2 回の rAF)── ↑↓ / End で行を送ると、一覧は**次の描画**で
+   *   その行を見える所へ送る(`binder.ts` の `moveToRow` が rAF で `scrollIntoView`)。負荷で描画が遅れると、その送りが
+   *   ここで先頭へ戻した**後**に走って一覧を下へ戻し、先頭の塊が組まれない(全量・並列で実際に落ちた: 先頭が n2951)。
+   *   user が 1 フレームの内に送り返すことは無いので、製品の不具合ではなく観測の順番の問題である。
+   */
+  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  await page.evaluate((host) => ((document.querySelector(host) as HTMLElement).scrollTop = 0), HOST);
+  const first = page.locator(ROW).first();
+  await expect(first.locator('[data-pkc-field="title"]'), '先頭へ戻しても、先頭の塊が組み直されない').toContainText('n0001');
+  await expect(first).toBeInViewport();
+}
 
 const mdFiles = (n: number) =>
   Array.from({ length: n }, (_, i) => ({
@@ -58,8 +82,7 @@ test('🔴 3,000 件の左の一覧: 組む行は数百行以内・スクロー�
   expect(await page.locator(ROW).count()).toBeLessThanOrEqual(400);
 
   // ④ 戻すと先頭が再び組まれる
-  await page.evaluate((host) => ((document.querySelector(host) as HTMLElement).scrollTop = 0), HOST);
-  await expect(page.locator(`${ROW}[data-pkc-entry]`).first()).toBeVisible();
+  await backToTop(page);
 
   // ⑤ キー: 1 行目を押して End → 最後の行へ焦点が届き、見える所にある。↑ で 1 つ前へ
   await clickReal(page, ROW);
@@ -84,8 +107,7 @@ test('🔴 3,000 件の左の一覧: 組む行は数百行以内・スクロー�
   //   Ctrl+F の検索そのものは自動化できないので、ブラウザがすることを写す:
   //   beforematch を飛ばす → hidden を外す(ブラウザは一致を見せるとき外す)→ 軽い行の中の字を選択。
   //   見るのは「塊が組まれ、選択が本物の行の中へ移り、行が見える所にあり、軽い行が残らず、配置が動かない」。
-  await page.evaluate((host) => ((document.querySelector(host) as HTMLElement).scrollTop = 0), HOST);
-  await expect(page.locator(ROW).first()).toBeVisible();
+  await backToTop(page);
   await expect(page.locator(ROW).filter({ hasText: 'n2500' }), '前提: n2500 は組まれていない').toHaveCount(0);
   const heightBefore = await page.evaluate((host) => (document.querySelector(host) as HTMLElement).scrollHeight, HOST);
   const mimicked = await page.evaluate(() => {
@@ -126,12 +148,16 @@ test('🔴 3,000 件の左の一覧: 組む行は数百行以内・スクロー�
 
   // ⑥ 掴んだまま遠くへ送る(下端の自動スクロール相当)── 掴んだ行は外れず、dragend が届く
   //   (掴んだ行が DOM から外れると dragend が来ず、ドラッグが終わらない)
-  await page.evaluate((host) => ((document.querySelector(host) as HTMLElement).scrollTop = 0), HOST);
-  await expect(page.locator(ROW).first()).toBeVisible();
+  await backToTop(page);
   await page.evaluate(() => {
-    const w = window as unknown as { __dragend: number };
+    const w = window as unknown as { __dragend: number; __dragFrom: string[] };
     w.__dragend = 0;
+    w.__dragFrom = [];
     document.addEventListener('dragend', () => (w.__dragend += 1));
+    document.addEventListener('dragstart', (ev) => {
+      const t = ev.target;
+      w.__dragFrom.push(t instanceof Element ? (t.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? '') : '');
+    });
   });
   const src = page.locator(ROW).first();
   const srcLid = await src.getAttribute('data-pkc-entry');
@@ -139,8 +165,32 @@ test('🔴 3,000 件の左の一覧: 組む行は数百行以内・スクロー�
   await page.mouse.move(sb.x + 30, sb.y + sb.height / 2);
   await page.mouse.down();
   await page.mouse.move(sb.x + 40, sb.y + sb.height / 2 + 30, { steps: 5 });
+  /**
+   * ⚠ **掴んだ(dragstart が届いた)ことを見てから送る** ── 一覧は dragstart で掴んだ行を覚えて、その塊を外さない
+   *   (`filer.ts` の `dragLid`)。届く前に送ると、まだ「掴んでいない」行を外すのは正しい動きである。
+   * 🔑 掴んだのが**押した行**であることも見る(画面の外の座標を押して別の物を掴んでいない)。
+   */
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __dragFrom: string[] }).__dragFrom), {
+      message: '行を掴めていない(dragstart が届かない / 別の物を掴んだ)',
+    })
+    .toEqual([srcLid]);
   await page.evaluate((host) => ((document.querySelector(host) as HTMLElement).scrollTop = 60000), HOST);
-  await page.waitForTimeout(300);
+  /**
+   * ⚠ 固定の 300ms を待たない(負荷で rAF が遅れると、組み直しの**前**に見て素通りする)。
+   * 🔑 「送った先が組まれた」= 組み直しが済んだ、を待ってから掴んだ行を数える。
+   */
+  await expect
+    .poll(async () =>
+      page.evaluate((host) => {
+        const el = document.querySelector(host) as HTMLElement;
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return hit?.closest('[data-pkc-region="filer-table"] [data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+      }, HOST),
+      { message: '遠くへ送った先に行が組まれない' },
+    )
+    .not.toBeNull();
   await expect(page.locator(`${ROW}[data-pkc-entry="${srcLid}"]`), '掴んだ行が、遠くへ送ると外れた').toHaveCount(1);
   expect(await page.locator(ROW).count(), '全件を組んでいる').toBeLessThanOrEqual(450);
   await page.keyboard.press('Escape');

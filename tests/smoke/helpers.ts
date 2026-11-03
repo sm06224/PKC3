@@ -534,8 +534,23 @@ async function reachableOnce(page: Page, target: Target): Promise<{ x: number; y
     (node, { px, py }) => {
       const at = document.elementFromPoint(px, py);
       const r = (node as Element).getBoundingClientRect();
+      /**
+       * 🔑 **中心が、送れる箱(祖先の `overflow` が visible でない箱)の見えている範囲の外か**。
+       * ⚠ `scrollIntoViewIfNeeded` の**後**に面の高さが変わる(下の帯が出る・取り込みの注意が出る)と、
+       *   さっき見える所へ送った要素が送れる箱の下端の外へ押し出される。そのとき中心に在るのは**箱の外の物**
+       *   (帯の見出しなど)で、覆われているのではなく**見えている所から外れた**のである
+       *   (全量・並列の smoke で `import.smoke.spec.ts` の「ほか N 件」が「H3 に覆われた」と落ちた実体)。
+       */
+      let clipped = px < 0 || py < 0 || px >= innerWidth || py >= innerHeight;
+      for (let a = (node as Element).parentElement; a !== null && !clipped; a = a.parentElement) {
+        const ov = getComputedStyle(a);
+        if (ov.overflowX === 'visible' && ov.overflowY === 'visible') continue;
+        const ar = a.getBoundingClientRect();
+        if (px < ar.left || px >= ar.right || py < ar.top || py >= ar.bottom) clipped = true;
+      }
       return {
         hit: !!(at && (at === node || node.contains(at))),
+        clipped,
         box: { x: r.x, y: r.y, w: r.width, h: r.height },
         at: at === null ? '(無し)' : `${at.tagName}${at.getAttribute('data-pkc-field') ?? ''}`,
       };
@@ -552,6 +567,17 @@ async function reachableOnce(page: Page, target: Target): Promise<{ x: number; y
     Math.abs(probe.box.y - box!.y) > 1 ||
     Math.abs(probe.box.w - box!.width) > 1 ||
     Math.abs(probe.box.h - box!.height) > 1;
+  /**
+   * ⚠ **見えている所から外れた**(`clipped`)も、作り直しと同じく**送り直してやり直す**合図にする
+   *   (やり直しは `scrollIntoViewIfNeeded` から ── 送り直せば見える所へ戻る)。
+   *   ⚠ 検出力は下げていない:見える所に在るのに別の物が上に被っている(本物の occlusion)は `clipped` が偽なので
+   *   これまでどおり落ちる。送り直しても外れ続ける(= 送っても届かない)なら、3 回で落ちる。
+   */
+  if (!probe.hit && probe.clipped) {
+    throw new Error(
+      `${name}: 測った後に element is not stable(送れる箱の見えている所から外れた ── 中心に在るのは ${probe.at})`,
+    );
+  }
   if (!probe.hit && moved) {
     // ⚠ 文言は `isRerenderRace` が拾う形にする(retry の合図)
     throw new Error(
@@ -780,6 +806,13 @@ export interface MainGapSample {
    *   0 件は「採れたが長い塊は無かった(= 欠測は別の理由)」を言う。
    */
   readonly longtasks?: readonly { at: number; dur: number }[] | null;
+  /**
+   * 🔴 **門はこちらを見る** ── 操作の窓の中で、このページのメインスレッドが**1 つの仕事に使った CPU 時間**の最大
+   *   (`traceMainCpu` / `MainCpuTrace.window`)。理由は `traceMainCpu` の注記。
+   */
+  readonly cpu: MainCpuSample;
+  /** 🔑 対照群の窓の同じ値(何もしていない間の床)。 */
+  readonly baseCpu: MainCpuSample;
 }
 
 export function expectMainGapUnderBudget(label: string, m: MainGapSample): void {
@@ -791,21 +824,164 @@ export function expectMainGapUnderBudget(label: string, m: MainGapSample): void 
       ` top=[${m.top.join(',')}] baseTop=[${m.baseTop.join(',')}]` +
       // 🔑 いつ起きたか / 長い塊だったか(#878 ①)── 1 行のまま(`grep '\[#878\]'` で拾える)
       ` topAt=[${(m.topAt ?? []).join(',')}]` +
-      ` longtask=${m.longtasks == null ? 'n/a' : `[${m.longtasks.map((t) => `${t.at}+${t.dur}`).join(',')}]`}`,
+      ` longtask=${m.longtasks == null ? 'n/a' : `[${m.longtasks.map((t) => `${t.at}+${t.dur}`).join(',')}]`}` +
+      // 🔑 門が見る値(CPU)と、その仕事の壁時計(奪われた分だけ長い)を同じ行に並べる
+      ` cpu=${m.cpu.longest} cpuWall=${m.cpu.longestWall} cpuTop=[${m.cpu.top.join(',')}] tasks=${m.cpu.tasks} untimed=${m.cpu.untimed}/${m.cpu.untimedMaxWall}ms` +
+      ` baseCpu=${m.baseCpu.longest} baseTasks=${m.baseCpu.tasks}`,
   );
   // 🔑 通った回も落ちた回も、測った値を報告(annotations)に残す(#878 ①)。
   //    ⚠ 門ではない ── 分布を全量の報告から読むための記録で、判定は下の expect が正本
   test.info().annotations.push({
     type: 'main-thread-gap',
-    description: `${label}: maxGap=${m.maxGap}ms control=${m.base}ms budget=${MAIN_GAP_BUDGET_MS}ms`,
+    description:
+      `${label}: cpu=${m.cpu.longest}ms(wall ${m.cpu.longestWall}ms) control=${m.baseCpu.longest}ms` +
+      ` heartbeat maxGap=${m.maxGap}ms control=${m.base}ms budget=${MAIN_GAP_BUDGET_MS}ms`,
   });
   // ⚠ 空振り防止 ── 心拍が回っていなければ最大欠測は 0 になり、門は常に通る
   expect(m.ticks, `${label}: 心拍が取れていない(計器が死んでいる)`).toBeGreaterThan(5);
   expect(m.baseTicks, `${label}: 対照群の心拍が取れていない(比べる相手が無い)`).toBeGreaterThan(5);
+  // ⚠ 空振り防止 ── 仕事を 1 つも数えていなければ CPU の最大は 0 になり、門は常に通る
+  //   (心拍の setInterval だけで窓の中に数百の仕事が在るはずである)
+  expect(m.cpu.tasks, `${label}: メインスレッドの仕事を数えられていない(計器が死んでいる)`).toBeGreaterThan(5);
+  expect(m.baseCpu.tasks, `${label}: 対照群の仕事を数えられていない(比べる相手が無い)`).toBeGreaterThan(5);
+  /**
+   * 🔴 **門は CPU 時間で見る**(壁時計の心拍は上の log と annotations に残す ── 診断)。
+   * ⚠ 予算(80ms)も「対照群からの増分」という形も変えていない ── 変えたのは**何を測るか**だけである。
+   *   箱が静かなら CPU ≒ 壁時計なので門の強さは同じで、`--workers=4` の奪い合いで壁時計だけが伸びた回
+   *   (CPU 30ms の仕事が 110〜150ms に見える)を、製品の停止と取り違えない。
+   */
   expect(
-    m.maxGap,
-    `${label}: メインスレッドが ${m.maxGap}ms 止まった(何もしていない間は ${m.base}ms)`,
-  ).toBeLessThan(m.base + MAIN_GAP_BUDGET_MS);
+    m.cpu.longest,
+    `${label}: メインスレッドの 1 つの仕事が CPU を ${m.cpu.longest}ms 使った` +
+      `(壁時計 ${m.cpu.longestWall}ms / 心拍の最大欠測 ${m.maxGap}ms。何もしていない間は CPU ${m.baseCpu.longest}ms)`,
+  ).toBeLessThan(m.baseCpu.longest + MAIN_GAP_BUDGET_MS);
+}
+
+/**
+ * 🔴 **メインスレッドが「自分で」止まった長さを、CPU 時間で測る**(#878 ①、全量・並列の smoke で落ちた回の直し)。
+ *
+ * ## なぜ壁時計の心拍だけで門を張らないか
+ *
+ * 心拍(`setInterval(4ms)`)の欠測は**壁時計**である。全量を `--workers=4` で回すと 4 つのブラウザが 4 コアを
+ * 奪い合い、**CPU で 30ms の仕事が壁時計では 110〜150ms に伸びる**(取り分が 1/4〜1/3 になる)。
+ * ⚠ 対照群(何もしていない間)は CPU をほとんど使わないので**奪い合いに負けず**、床が上がらない ──
+ *   落ちた回の対照群は 4〜35ms だった。つまり「同じ計器の対照群と比べる」では、この伸びを打ち消せない
+ *   (`attach` 117ms / 予算 84ms、`dual-filer` 109ms / 予算 107ms はこの形)。
+ *
+ * 🔑 だから門は **このページのメインスレッドで走った 1 つの仕事(task)が使った CPU 時間** で見る ──
+ *   trace の `RunTask` の `tdur`(スレッドの CPU 時間)。CPU を待っている間は `tdur` に入らないので、
+ *   **製品が止めた分だけ**が残る。⚠ 箱が静かなら `tdur` ≒ 壁時計なので、門の強さは変わらない。
+ * ⚠ 守る壊れ方(#878 が名指しした 500〜726ms の同期の仕事)は CPU を使う仕事なので、負荷と関係なく落ちる。
+ *
+ * どの窓・どのスレッドを見るか: 窓の両端に `performance.mark(cpuMark(名前, 'begin' | 'end'))` を打つ
+ * (ページの中のコードからでも、`markCpu` からでもよい)。印が出た pid / tid(= このページの描画プロセスの
+ * メインスレッド)の、印と印のあいだに始まった `RunTask` だけを数える(別窓・他のページの仕事を混ぜない)。
+ * ⚠ 1 つのブラウザで同時に 2 本の trace は取れない ── 1 本止めてから次を始める。
+ */
+interface TraceEvent {
+  readonly name?: string;
+  readonly ph?: string;
+  readonly pid?: number;
+  readonly tid?: number;
+  readonly ts?: number;
+  readonly dur?: number;
+  readonly tdur?: number;
+}
+
+export interface MainCpuSample {
+  /** 窓の中で、このページのメインスレッドの 1 つの仕事が使った CPU 時間の最大(ms)── **門はこれを見る** */
+  readonly longest: number;
+  /** その仕事の壁時計の長さ(ms)── CPU を奪われた分だけ `longest` より長い(診断) */
+  readonly longestWall: number;
+  /** 窓の中で数えた仕事の数(0 なら計器が死んでいる) */
+  readonly tasks: number;
+  /** CPU 時間の上位 5 件(ms) */
+  readonly top: readonly number[];
+  /** `tdur` を持たず、壁時計を上限として数えた仕事の数(診断) */
+  readonly untimed: number;
+  /** そのうち壁時計がいちばん長い仕事(ms) */
+  readonly untimedMaxWall: number;
+}
+
+export interface MainCpuTrace {
+  /** `cpuMark(name, 'begin')` と `cpuMark(name, 'end')` のあいだの仕事を数える。 */
+  window(name: string): MainCpuSample;
+}
+
+/** 窓の端の印の名前(ページの中のコードは、この綴りで `performance.mark` を打つ)。 */
+export const cpuMark = (name: string, edge: 'begin' | 'end'): string => `pkc-cpu:${name}:${edge}`;
+
+/** 窓の端の印を打つ(ページの外から)。 */
+export async function markCpu(page: Page, name: string, edge: 'begin' | 'end'): Promise<void> {
+  await page.evaluate((m) => void performance.mark(m), cpuMark(name, edge));
+}
+
+/** Chromium の trace で、メッセージループの 1 周(= 1 つの仕事)を表す名前。版で綴りが違う。 */
+const RUN_TASK_NAMES = new Set(['RunTask', 'ThreadControllerImpl::RunTask']);
+
+/**
+ * trace を取り始める。返る関数を呼ぶと止めて、印で切った窓を数えられる形で返す。
+ * ⚠ 取る分類は `toplevel`(仕事)と `blink.user_timing`(印)だけ ── 取る物を増やすと、測る側が重くなる。
+ */
+export async function traceMainCpu(page: Page): Promise<() => Promise<MainCpuTrace>> {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Tracing.start', {
+    transferMode: 'ReturnAsStream',
+    traceConfig: { includedCategories: ['toplevel', 'blink.user_timing'], excludedCategories: ['*'] },
+  });
+  return async () => {
+    const complete = new Promise<{ stream?: string }>((res) => cdp.once('Tracing.tracingComplete', res));
+    await cdp.send('Tracing.end');
+    const { stream } = await complete;
+    expect(stream, 'trace の流れが返らない(計器が死んでいる)').toBeTruthy();
+    const parts: string[] = [];
+    for (;;) {
+      const chunk = await cdp.send('IO.read', { handle: stream!, size: 1 << 20 });
+      parts.push(chunk.base64Encoded === true ? Buffer.from(chunk.data, 'base64').toString('utf8') : chunk.data);
+      if (chunk.eof) break;
+    }
+    await cdp.send('IO.close', { handle: stream! });
+    await cdp.detach();
+    const parsed = JSON.parse(parts.join('')) as TraceEvent[] | { traceEvents?: TraceEvent[] };
+    const events = Array.isArray(parsed) ? parsed : (parsed.traceEvents ?? []);
+    return { window: (name) => mainCpuOf(events, name) };
+  };
+}
+
+/** trace から「印を打ったスレッドの、印と印のあいだに始まった仕事」を数える。 */
+function mainCpuOf(events: readonly TraceEvent[], name: string): MainCpuSample {
+  const begin = events.find((e) => e.name === cpuMark(name, 'begin'));
+  const end = events.find((e) => e.name === cpuMark(name, 'end'));
+  expect(begin, `trace に「${name}」の始まりの印が無い(どのスレッドを見るか決められない)`).toBeTruthy();
+  expect(end, `trace に「${name}」の終わりの印が無い`).toBeTruthy();
+  expect(end!.pid === begin!.pid && end!.tid === begin!.tid, `「${name}」の両端の印が別のスレッドに出た`).toBe(true);
+  const tasks = events.filter(
+    (e) =>
+      e.ph === 'X' &&
+      RUN_TASK_NAMES.has(e.name ?? '') &&
+      e.pid === begin!.pid &&
+      e.tid === begin!.tid &&
+      (e.ts ?? -1) >= begin!.ts! &&
+      (e.ts ?? Infinity) <= end!.ts!,
+  );
+  /**
+   * ⚠ CPU 時間(`tdur`)が 1 件も採れない環境では門が空振りする ── 落とす。
+   * ⚠ 一部の仕事だけ `tdur` を持たない回がある(実測: 取り出しの窓で数件)── その仕事は**壁時計(`dur`)を
+   *   CPU 時間の上限として使う**(`tdur ≤ dur` なので、門を緩める向きには倒れない)。
+   */
+  const timed = tasks.filter((e) => typeof e.tdur === 'number').length;
+  expect(timed, `「${name}」の仕事に CPU 時間(tdur)が 1 件も無い(この計器では測れない)`).toBeGreaterThan(0);
+  const cpuOf = (e: TraceEvent): number => (typeof e.tdur === 'number' ? e.tdur : (e.dur ?? 0));
+  const byCpu = [...tasks].sort((a, b) => cpuOf(b) - cpuOf(a));
+  const ms = (us: number | undefined): number => Math.round((us ?? 0) / 1000);
+  return {
+    longest: ms(byCpu[0] === undefined ? 0 : cpuOf(byCpu[0])),
+    longestWall: ms(byCpu[0]?.dur),
+    tasks: tasks.length,
+    top: byCpu.slice(0, 5).map((e) => ms(cpuOf(e))),
+    untimed: tasks.length - timed,
+    untimedMaxWall: ms(Math.max(0, ...tasks.filter((e) => typeof e.tdur !== 'number').map((e) => e.dur ?? 0))),
+  };
 }
 
 /**

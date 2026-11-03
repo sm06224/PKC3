@@ -370,3 +370,24 @@ for (let i = 0; i < 8; i += 1) {
 }
 expect(seen, `取り消しで打った字へ戻れない: ${JSON.stringify(seen)}`).toContain('打った字');
 ```
+
+## 負荷でだけ落ちる観測点の型 ── 「次の描画で起きること」を待たずに次へ進む(2026-11-03)
+
+全量を `--workers=4` で回すと描画(rAF)とイベントの配達が数百 ms 遅れる。単独で緑・全量で赤の多くは、
+**製品が次の描画で起こすこと**より先に test が次の手を打っていた形だった。どれも `waitForTimeout` を伸ばしても直らない。
+
+| 型 | 実例 | 待つもの |
+|---|---|---|
+| 仮想化された一覧を送った直後に `ROW.first()` | `left-list-sync`:遠くの塊の行を掴み、直後に塊ごと外れて `boundingBox()` が `null` | 先頭の行が**先頭に組まれて画面の中**(`toContainText('n0001')` + `toBeInViewport()`) |
+| ↑↓ / End の後すぐ `scrollTop` を書く | `left-list-sync`:`moveToRow` の rAF が後から `scrollIntoView` して下へ戻す | rAF を 2 回 |
+| `scrollTop` を書いた直後に面を替える | `layout`:位置の記憶(`scroll-memory.ts`)は `scroll` イベントで覚える。届く前に替えると古い位置へ飛ぶ | その `scroll` イベント |
+| ドラッグを始めてすぐ送る | `left-list-sync`:掴んだ行を覚えるのは `dragstart` | `dragstart` が届き、押した行を掴んだこと |
+| 押した直後に欄の値を 1 回読む | `schedule`:日付の窓は閉じた**後**の `then` で欄へ書く | `expect(欄).not.toHaveValue(前の値)` |
+| `clickReal` で disabled のボタンを押す | `schedule`:本文を読み直す間「編集」は disabled。pointer 系は届き click は出ない | `toBeEnabled()` |
+| `scrollIntoViewIfNeeded` の後に面の高さが変わる | `import`:下の帯が出て、送った要素が送れる箱の外へ押し出され「H3 に覆われた」と出た | `clickReal` が「見えている所から外れた」をやり直しの合図にする(`helpers.ts`) |
+| 心拍の欠測(壁時計)で門を張る | `attach` / `dual-filer`:CPU 30ms の仕事が奪い合いで 110〜150ms に伸びる。対照群は CPU を使わないので床が上がらない | 門は trace の `RunTask` の CPU 時間(`traceMainCpu`)。壁時計は記録に残す |
+
+🔑 落ちた画面(error-context)と、押した瞬間の `pointerdown` / `pointerup` / `click` の記録を突き合わせると、
+「押したが届いていない」と「届いたが断られた」を分けられる(disabled は前者で、click だけが出ない)。
+⚠ 製品の穴だったのは 2 つ:2 クリックの判定がハンドラの時刻で測っていた(`pressedAtOf`)/ 図の合わせ直しが
+ブラウザのスクロールアンカーの送りを「他人の送り」と読んで止まっていた(`read-anchor.ts`)。

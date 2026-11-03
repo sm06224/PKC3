@@ -5,6 +5,8 @@ import {
   createEntry,
   expectMainGapUnderBudget,
   gotoApp,
+  markCpu,
+  traceMainCpu,
   openViewPane,
   useSplitEditor,
 } from './helpers';
@@ -278,15 +280,16 @@ test('🔴 F2 で名前を打ち替えられる (#273)', async ({ page }) => {
    *   右クリックしても印は崩れない(押した行が印の中なら印を保つ)。
    */
   const marks = page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`);
-  // 行が足りなければ、この場にノートを作って 2 行以上にする(Shift + F4。起動は増やさない)
-  await page.locator(ROWS('left')).first().click();
-  while ((await page.locator(ROWS('left')).count()) < 2) {
-    const n = await page.locator(ROWS('left')).count();
-    await page.keyboard.press('Shift+F4');
-    await expect(page.locator(ROWS('left')), '前提が崩れている(ノートが作れない)').toHaveCount(n + 1);
-  }
-  await page.locator(ROWS('left')).first().click();
-  await page.locator(ROWS('left')).nth(1).click({ modifiers: ['Control'] });
+  /**
+   * ⚠ **同じ行を素で 2 回続けて押さない** ── 500ms 以内の 2 回は「2 クリック」で、フォルダなら中へ入る
+   *   (`binder.ts` の `maybeDoubleOpen`。製品の約束どおり)。直す前はここで 1 行目(フォルダ)を素で 2 回押しており、
+   *   2 回の間隔が 500ms を切った回に左のペインがフォルダの中(0 件)へ入って、2 行目が無くなっていた
+   *   (全量・並列の smoke で実際に落ちた。落ちた画面は「› あたらしい名前 / ここには何もありません」)。
+   * 🔑 行は 2 行(はこ・ふた)在るので作り足さない。素で押すのは 2 行目、印を足すのは 1 行目(Ctrl)。
+   */
+  await expect(page.locator(ROWS('left')), '前提が崩れている(2 行ない)').toHaveCount(2);
+  await page.locator(ROWS('left')).nth(1).click();
+  await page.locator(ROWS('left')).first().click({ modifiers: ['Control'] });
   await expect(marks, '前提が崩れている(印が 2 件にならない)').toHaveCount(2);
   await page.keyboard.press('F2');
   await expect(input, '印が複数なのに名前の入力欄が出た').toHaveCount(0);
@@ -1152,12 +1155,18 @@ test('🔴 30 件を一度に移して全件が先に並び、元に戻すで全
     '前提: 30 件が選ばれている',
   ).toHaveCount(N);
 
-  // 対照群(何もしていない 600ms)
+  // 🔑 門は CPU 時間で見る(`traceMainCpu` の注記)── 3 つの窓を印で切って、同じ trace で採る
+  const stopCpuTrace = await traceMainCpu(page);
+
+  // 対照群(何もしていない 600ms)── ⚠ 窓の長さを決める待ちであって、状態を待つ待ちではない
+  await markCpu(page, 'base', 'begin');
   await startHeartbeat(page);
   await page.waitForTimeout(600);
   const base = await stopHeartbeat(page);
+  await markCpu(page, 'base', 'end');
 
   // ① 移す
+  await markCpu(page, 'move', 'begin');
   await startHeartbeat(page);
   await clickReal(page, '[data-pkc-field="dual-move"]');
   await expect(page.locator(ROWS('right')), '右に全件が並んでいない').toHaveCount(N);
@@ -1167,18 +1176,26 @@ test('🔴 30 件を一度に移して全件が先に並び、元に戻すで全
   ).toHaveCount(N);
   await expect(page.locator(ROWS('left')), '左に残っている').toHaveCount(1);
   const moved = await stopHeartbeat(page);
-  expectMainGapUnderBudget('30 件を移す', {
-    maxGap: moved.max, base: base.max, ticks: moved.ticks, baseTicks: base.ticks, top: moved.top, baseTop: base.top,
-  });
+  await markCpu(page, 'move', 'end');
 
   // ② 元に戻す
+  await markCpu(page, 'undo', 'begin');
   await startHeartbeat(page);
   await clickReal(page, '[data-pkc-field="status-undo"]');
   await expect(page.locator(ROWS('left')), '元に戻しても全件が戻らない').toHaveCount(N + 1);
   await expect(page.locator(ROWS('right')), '元に戻しても先に残っている').toHaveCount(0);
   const undone = await stopHeartbeat(page);
+  await markCpu(page, 'undo', 'end');
+
+  const cpuTrace = await stopCpuTrace();
+  const baseCpu = cpuTrace.window('base');
+  expectMainGapUnderBudget('30 件を移す', {
+    maxGap: moved.max, base: base.max, ticks: moved.ticks, baseTicks: base.ticks, top: moved.top, baseTop: base.top,
+    cpu: cpuTrace.window('move'), baseCpu,
+  });
   expectMainGapUnderBudget('30 件を元に戻す', {
     maxGap: undone.max, base: base.max, ticks: undone.ticks, baseTicks: base.ticks, top: undone.top, baseTop: base.top,
+    cpu: cpuTrace.window('undo'), baseCpu,
   });
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

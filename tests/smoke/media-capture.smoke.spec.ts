@@ -1497,6 +1497,24 @@ async function recordScreenForTrim(page: Page) {
     }
   }
   if (!Number.isFinite(startSec)) throw new Error(`切り出しの範囲を決められる区切りが録れていない(区切り ${keys.join(',')} / 長さ ${durNum})`);
+  /**
+   * 🔴 **押す所を、フレームの区間の真ん中へ寄せる**(全量・並列の smoke で「最初のフレームが押した所でない」と落ちた回の直し)。
+   * ⚠ 落ちた回はどれも、押した所が隣のフレームとの境目から **1〜3ms** しか離れていなかった(実測: 押した所 505ms・
+   *   フレーム 504ms / 押した所 500ms・次のフレーム 503ms)。境目のそのごく近くでは、再生機が止めて見せる絵と
+   *   「時刻が押した所以下で最後のフレーム」(製品の規則・下の計画と同じ)が食い違い、比べる絵(前後 ±3 枚)の側が 1 枚ずれる。
+   *   負荷で録画のフレーム間隔が不揃いになるほど、区切り + 0.5 秒が境目に寄る回が増える(静かな箱では 50ms 刻みで境目ちょうど)。
+   * 🔑 だから押す所は**フレームの区間(20ms 以上)の真ん中**にする ── user が押せる精度(数十 ms)の中で、どの絵が出ているかが
+   *   一意に決まる所である。⚠ 区切り(キーフレーム)の区間は選ばない(作り直しの道を通さないと、検査したい道を通らない)。
+   */
+  const vblocks = scanned.scan.blocks.filter((b) => b.track === scanned.scan.videoTrack);
+  const atMs = startSec * 1000;
+  let j = -1;
+  for (let i = 0; i < vblocks.length; i += 1) if (vblocks[i]!.ms <= atMs) j = i;
+  while (j >= 0 && j + 1 < vblocks.length && (vblocks[j]!.key || vblocks[j + 1]!.ms - vblocks[j]!.ms < 20)) j += 1;
+  if (j < 0 || j + 1 >= vblocks.length || (vblocks[j + 1]!.ms + vblocks[j]!.ms) / 2000 >= endSec - 0.5) {
+    throw new Error(`押す所をフレームの区間の真ん中に置けない(${startSec} 秒の後に 20ms 以上の区間が無い)`);
+  }
+  startSec = (vblocks[j]!.ms + vblocks[j + 1]!.ms) / 2000;
   test.info().annotations.push({ type: '録れた動画の区切り(ミリ秒)/ 切り出す範囲(秒)', description: `${keys.join(',')} / ${startSec}〜${endSec}` });
   return { screenRow, screenMedia, durNum, seekVideo, startSec, endSec, srcScan: scanned.scan };
 }

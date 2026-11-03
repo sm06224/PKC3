@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, expectMainGapUnderBudget,
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, expectMainGapUnderBudget, traceMainCpu, markCpu, cpuMark,
   gotoCollectionPane,
 } from './helpers';
 // ⚠ 段⑤(xlsx を SQL で調べる)の bytes は Node 側でこの 1 本から組む(#854 段③)。
@@ -258,6 +258,11 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
    * 🔑 取り出しは `Blob.stream()` を舐めながら CRC を取る作りなので、
    *   **塊ごとに手が空く**はずである ── ここはその**後条件**である。
    */
+  /**
+   * 🔑 門は CPU 時間で見る(`traceMainCpu` の注記)── 対照群と取り出しの窓を、印で切って同じ trace で採る。
+   */
+  const stopCpuTrace = await traceMainCpu(page);
+  await markCpu(page, 'base', 'begin');
   const base = await page.evaluate(async () => {
     const gaps: number[] = [];
     let last = performance.now();
@@ -271,6 +276,7 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     gaps.sort((a, b) => b - a);
     return { max: Math.round(gaps[0] ?? 0), ticks: gaps.length, top: gaps.slice(0, 5).map((n) => Math.round(n)) };
   });
+  await markCpu(page, 'base', 'end');
   // ⚠ **下の `expectMainGapUnderBudget` も同じことを見るが、ここは残す** ──
   //    対照群が死んでいるなら、**20 秒かかる取り出しを始める前に**落としたい
   expect(base.ticks, '対照群の心拍が取れていない(比べる相手が無い)').toBeGreaterThan(5);
@@ -289,6 +295,7 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
       w.__gaps.push({ at: last - w.__t0, gap: now - last });
       last = now;
     }, 4);
+    performance.mark('pkc-cpu:load:begin'); // ⚠ `cpuMark('load', 'begin')` と同じ綴り(ページの中では呼べない)
     // 🔑 診断(#878 ①)── long task も同じ窓で採る。⚠ 無いブラウザは `null`(0 件と別物)
     w.__lt = null;
     try {
@@ -298,7 +305,14 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
       w.__lt = null;
     }
   });
-  await winOk.click();
+  /**
+   * ⚠ **押すと窓が閉じるので、click の応答が返らないことがある**(全量・並列の smoke で
+   *   `locator.click: Target page, context or browser has been closed` で落ちた。負荷で応答より先に窓が閉じた回)。
+   *   `launcher.smoke.spec.ts` の「閉じる」と同じ作法 ── 「閉じた」以外の失敗はそのまま投げ、押せた証拠は次の行(閉じたこと)。
+   */
+  await winOk.click().catch((e: unknown) => {
+    if (!String(e).includes('closed')) throw e;
+  });
   // ⚠ **選んだら窓は閉じる**(取り出した後も選び手が残らない)
   await expect
     .poll(() => win.isClosed(), { message: '選んだのに別の窓が残っている' })
@@ -308,6 +322,8 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]'),
     '取り出した物が添付になっていない',
   ).toHaveCount(6, { timeout: 20_000 });
+  await markCpu(page, 'load', 'end');
+  const cpuTrace = await stopCpuTrace();
   const load = await page.evaluate(() => {
     const w = window as unknown as {
       __gaps: { at: number; gap: number }[];
@@ -342,7 +358,10 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     baseTop: base.top,
     topAt: load.topAt,
     longtasks: load.longtasks,
+    cpu: cpuTrace.window('load'),
+    baseCpu: cpuTrace.window('base'),
   });
+  expect(cpuMark('load', 'begin'), 'ページの中で打った印の綴りが `cpuMark` とずれた').toBe('pkc-cpu:load:begin');
   await expect(page.locator('[data-pkc-region="filer-table"]')).toContainText('海.jpg');
   await expect(page.locator('[data-pkc-region="filer-table"]')).toContainText('山.jpg');
 
@@ -745,7 +764,13 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
   await gotoApp(page);
 
   const SIZE_MB = 32;
-  const m = await page.evaluate(async (sizeMb) => {
+  // 🔑 門は CPU 時間で見る(`traceMainCpu` の注記)── 窓の端の印はページの中の `beat` が打つ
+  const stopCpuTrace = await traceMainCpu(page);
+  const marks = {
+    idle: [cpuMark('idle', 'begin'), cpuMark('idle', 'end')] as const,
+    run: [cpuMark('run', 'begin'), cpuMark('run', 'end')] as const,
+  };
+  const m = await page.evaluate(async ({ sizeMb, marks }) => {
     // ⚠ bytes の生成は**計測の外**(計器自身のコストを混ぜない ── 段⑮ で
     //    playwright のファイル注入を app の freeze と読み違えた前例がある)
     const bytes = new Uint8Array(sizeMb * 1024 * 1024);
@@ -757,7 +782,7 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
      * **対照群**にする(CLAUDE.md 計測規律「対照群は『何もしない』ではなく
      * 『測りたい操作以外を全部同じにしたもの』」)。
      */
-    const beat = (): {
+    const beat = (edges: readonly [string, string]): {
       stop: () => {
         max: number;
         ticks: number;
@@ -767,6 +792,7 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
       };
     } => {
       const gaps: { at: number; gap: number }[] = [];
+      performance.mark(edges[0]);
       const t0 = performance.now();
       let last = t0;
       const hb = setInterval(() => {
@@ -785,6 +811,7 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
       return {
         stop: () => {
           clearInterval(hb);
+          performance.mark(edges[1]);
           gaps.sort((a, b) => b.gap - a.gap);
           const longtasks = lt
             ? lt
@@ -807,11 +834,11 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
 
     // ⚠ **対照群 ── 何もしていない間の欠測**。この箱がどれだけ忙しいかを、
     //    測りたい操作と**同じ計器**で先に採る
-    const idle = beat();
+    const idle = beat(marks.idle);
     await new Promise<void>((r) => setTimeout(r, 800));
     const base = idle.stop();
 
-    const run = beat();
+    const run = beat(marks.run);
     const rows = (): number =>
       document.querySelectorAll('[data-pkc-region="filer-table"] [data-pkc-entry]').length;
     const before = rows();
@@ -845,7 +872,8 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
       topAt: load.topAt,
       longtasks: load.longtasks,
     };
-  }, SIZE_MB);
+  }, { sizeMb: SIZE_MB, marks });
+  const cpuTrace = await stopCpuTrace();
 
   // ① 🔴 **実際に添付された**(空振り防止 ── 何も起きなければ当然止まらない)
   expect(m.added, '添付が作られていない(この次元を測れていない)').toBe(1);
@@ -862,8 +890,10 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
    *   箱が忙しければ床が上がるぶんだけ門も上がる。
    * ⚠ 守る力は落ちない:壊れたときのメインは **500〜726ms**(ワーカーは 10〜14ms)
    *   なので、床が 100ms 級に上がっても**余裕をもって落ちる**。
+   * 🔴 それでも全量・並列(`--workers=4`)では落ちた ── 対照群は CPU を使わないので奪い合いに負けず床が上がらない
+   *   のに、貼る側の CPU の仕事だけが壁時計で伸びる。🔑 門は CPU 時間で見る(`traceMainCpu` の注記)。
    */
-  expectMainGapUnderBudget('大きい添付を貼る', m);
+  expectMainGapUnderBudget('大きい添付を貼る', { ...m, cpu: cpuTrace.window('run'), baseCpu: cpuTrace.window('idle') });
 
   expect(errors).toEqual([]);
 });
