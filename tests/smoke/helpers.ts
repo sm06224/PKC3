@@ -795,6 +795,11 @@ if (process.env['PKC3_SMOKE_COVERAGE'] === '1') {
  *   上げた瞬間に**何も守らなくなる**。
  */
 export const MAIN_GAP_BUDGET_MS = 80;
+/**
+ * 壁時計の安全網の倍率(`expectMainGapUnderBudget`)。⚠ 4 = `--workers=4` で CPU の取り分が 1/4 まで落ちる分 ──
+ *   予算を緩める数ではなく、**CPU の予算を壁時計へ換算する**数である(CPU の門は 80ms のまま)。
+ */
+export const MAIN_GAP_WALL_FACTOR = 4;
 
 export interface MainGapSample {
   /** 測りたい操作の間の、いちばん長い欠測(ms) */
@@ -883,6 +888,19 @@ export function expectMainGapUnderBudget(label: string, m: MainGapSample): void 
     `${label}: メインスレッドの 1 つの仕事が CPU を ${m.cpu.longest}ms 使った` +
       `(壁時計 ${m.cpu.longestWall}ms / 心拍の最大欠測 ${m.maxGap}ms。何もしていない間は CPU ${m.baseCpu.longest}ms)`,
   ).toBeLessThan(m.baseCpu.longest + MAIN_GAP_BUDGET_MS);
+  /**
+   * 🔴 **壁時計の安全網**(#1932 の着地前レビュー)── CPU の門は「**CPU を使わずに**固まる」停止
+   *   (同期の IPC 待ち・ロック待ち・同期 IO)を見ない。⚠ それを心拍で拾う。
+   * 🔑 上限は「対照群 + 予算 × `MAIN_GAP_WALL_FACTOR`」── `--workers=4` の奪い合いでは CPU の取り分が 1/4 まで
+   *   落ちる(CPU 30ms → 壁時計 110〜150ms を実測)ので、**予算 80ms の仕事が奪い合いで伸びうる上限**を
+   *   壁時計の側の予算とする。⚠ 負荷下の実測の最大は 158ms(12 spec × 5 の 20 回)で、#878 が名指しした
+   *   500〜726ms の停止はこの網でも落ちる。
+   */
+  expect(
+    m.maxGap,
+    `${label}: 心拍が ${m.maxGap}ms 止まった(CPU は ${m.cpu.longest}ms ── CPU を使わずに固まった疑い。` +
+      `何もしていない間は ${m.base}ms)`,
+  ).toBeLessThan(m.base + MAIN_GAP_BUDGET_MS * MAIN_GAP_WALL_FACTOR);
 }
 
 /**

@@ -7,14 +7,14 @@
  * 🔑 どの it も「直す前の実装に戻すと落ちる」形で書いてある(カーソルは先頭の行ではなく、
  *   途中の行を使う ── 先頭の行は「立てない」実装でも偶然合う)。
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DualFilerRenderer } from '../../src/adapter/ui/render/dual-filer';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
-import { paneOf } from '../../src/features/relation/dual-pane';
+import { paneOf, paneScope } from '../../src/features/relation/dual-pane';
 
 function meta(lid: string, order: number, archetype = 'text', title = 't-' + lid): EntryMeta {
   return {
@@ -241,5 +241,45 @@ describe('2 ペインの直し(#1087)', () => {
     t.key(t.row('left', 'b'), 'Delete');
     await tick();
     expect(t.cursor()).toBe('c');
+  });
+});
+
+describe('2 ペインの 2 クリック(#240 と同じ規則)', () => {
+  it('🔴 素早く 2 回押せば、2 回目のハンドラが遅れて走ってもフォルダへ入る(押した時刻で測る)', () => {
+    /**
+     * ⚠ 直す前は 2 回目のハンドラが走った時の `Date.now()` で測っていた ── 1 回目の描き直しでメインが塞がると、
+     *   素早い 2 回目でも 500ms を越えて入らなかった(`folder-organize.test.ts` の左の列と同じ形)。
+     * 🔑 ハンドラの時計を 2 秒進め、押した時刻(`Event.timeStamp`)は 120ms 差で撃つ。
+     */
+    const now = vi.spyOn(Date, 'now');
+    try {
+      const t = setup();
+      const clickAt = (el: HTMLElement, at: number): void => {
+        const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, 'timeStamp', { value: at - performance.timeOrigin });
+        el.dispatchEvent(ev);
+      };
+      const t0 = performance.timeOrigin + 3_000_000;
+      now.mockReturnValue(t0);
+      clickAt(t.row('right', 'f2'), t0);
+      now.mockReturnValue(t0 + 2_000); // 1 回目の後、メインが 2 秒塞がった
+      clickAt(t.row('right', 'f2'), t0 + 120);
+      expect(paneScope(paneOf(t.d.getState().dual, 'right')), '素早く 2 回押したのに入らない').toBe('f2');
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('対照群: 押した時刻が 5 秒離れていれば入らない', () => {
+    const t = setup();
+    const clickAt = (el: HTMLElement, at: number): void => {
+      const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, 'timeStamp', { value: at - performance.timeOrigin });
+      el.dispatchEvent(ev);
+    };
+    const t0 = performance.timeOrigin + 4_000_000;
+    clickAt(t.row('right', 'f2'), t0);
+    clickAt(t.row('right', 'f2'), t0 + 5_000);
+    expect(paneScope(paneOf(t.d.getState().dual, 'right')), '5 秒空いたのに入った').toBeNull();
   });
 });
