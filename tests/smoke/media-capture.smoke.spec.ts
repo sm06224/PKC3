@@ -1510,13 +1510,23 @@ async function recordScreenForTrim(page: Page) {
   const atMs = startSec * 1000;
   let j = -1;
   for (let i = 0; i < vblocks.length; i += 1) if (vblocks[i]!.ms <= atMs) j = i;
-  while (j >= 0 && j + 1 < vblocks.length && (vblocks[j]!.key || vblocks[j + 1]!.ms - vblocks[j]!.ms < 20)) j += 1;
-  if (j < 0 || j + 1 >= vblocks.length || (vblocks[j + 1]!.ms + vblocks[j]!.ms) / 2000 >= endSec - 0.5) {
+  /**
+   * 🔑 候補を数個並べる(先頭が既定の押す所)── 負荷で作り物の画面の描画が止まった区間では、押した所の前後 ±3 枚が
+   *   全部同じ絵になり「見分けられない台」になる(全量・並列で実際に出た)。そのときは次の候補へ移す(下の test)。
+   */
+  const startCandidates: number[] = [];
+  for (; j >= 0 && j + 1 < vblocks.length && startCandidates.length < 8; j += 1) {
+    if (vblocks[j]!.key || vblocks[j + 1]!.ms - vblocks[j]!.ms < 20) continue;
+    const mid = (vblocks[j]!.ms + vblocks[j + 1]!.ms) / 2000;
+    if (mid >= endSec - 0.5) break;
+    startCandidates.push(mid);
+  }
+  if (startCandidates.length === 0) {
     throw new Error(`押す所をフレームの区間の真ん中に置けない(${startSec} 秒の後に 20ms 以上の区間が無い)`);
   }
-  startSec = (vblocks[j]!.ms + vblocks[j + 1]!.ms) / 2000;
+  startSec = startCandidates[0]!;
   test.info().annotations.push({ type: '録れた動画の区切り(ミリ秒)/ 切り出す範囲(秒)', description: `${keys.join(',')} / ${startSec}〜${endSec}` });
-  return { screenRow, screenMedia, durNum, seekVideo, startSec, endSec, srcScan: scanned.scan };
+  return { screenRow, screenMedia, durNum, seekVideo, startSec, startCandidates, endSec, srcScan: scanned.scan };
 }
 
 /**
@@ -1663,7 +1673,7 @@ test('🔴 画面録画を押した所ぴったりに切り出せる:確認が�
   // 録画 9 秒 + 前後 7 枚の撮影 + 切り出し + 検めで、負荷のある環境では既定の 30 秒を超える(#1851)
   test.setTimeout(90_000);
   const errors = collectPageErrors(page);
-  const { screenRow, screenMedia, seekVideo, startSec, endSec, srcScan } = await recordScreenForTrim(page);
+  const { screenRow, screenMedia, seekVideo, startCandidates, endSec, srcScan } = await recordScreenForTrim(page);
   const rowsNow = await page.locator('[data-pkc-capture]').count();
   const dialog = page.locator('[data-pkc-region="app-dialog"]');
 
@@ -1675,8 +1685,19 @@ test('🔴 画面録画を押した所ぴったりに切り出せる:確認が�
    * ⚠ **切り出す前に撮る** ── 切り出した動画を開くと、元の動画の再生機は消える。
    */
   const STEP = 0.06;
-  const around: number[][] = [];
-  for (let k = -3; k <= 3; k += 1) around.push(await frameAt(screenMedia, seekVideo, startSec + k * STEP));
+  const SAME = 0.05;
+  /**
+   * ⚠ 前後 ±3 枚がすべて押した所と同じ絵なら、その押す所では見分けられない(負荷で作り物の画面の描画が止まった区間)──
+   *   次の候補(フレームの区間の真ん中。`recordScreenForTrim`)へ移す。どの候補でも見分けられなければ、下の空振り防止で落ちる。
+   */
+  let startSec = startCandidates[0]!;
+  let around: number[][] = [];
+  for (const cand of startCandidates) {
+    startSec = cand;
+    around = [];
+    for (let k = -3; k <= 3; k += 1) around.push(await frameAt(screenMedia, seekVideo, startSec + k * STEP));
+    if (around.some((f) => frameDistance(f, around[3]!) > SAME)) break;
+  }
   const vStart = await seekVideo(startSec);
   await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-start"]'));
   const vEnd = await seekVideo(endSec);
@@ -1737,7 +1758,6 @@ test('🔴 画面録画を押した所ぴったりに切り出せる:確認が�
    *   元の「別のフレームとの比が 1.5 倍以上」は、再エンコードの粗さと隣との違いが同じ大きさになる負荷の下で
    *   1.02 まで落ちる(実測)ので、**別の絵のほうが 1.5 倍以上はっきり近い**ときだけ落とす形に緩める。
    */
-  const SAME = 0.05;
   const sameAsPressed = around.map((f) => frameDistance(f, around[3]!) <= SAME);
   expect(
     sameAsPressed.some((same) => !same),

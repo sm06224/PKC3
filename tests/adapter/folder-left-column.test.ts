@@ -203,19 +203,23 @@ describe('🔴 ノートの行を 2 回続けて押すと、別のウィンド�
   });
 
   it('⚠ 間が空いたら「2 回押した」と数えない(席を立って戻ったら開く、を作らない)', () => {
-    // ⚠ 観測点は `Date.now` ── unit の 2 回のクリックは同一ミリ秒で走るので、
-    //   差し替えないと 500ms の窓を 1 度も通らない(通らない経路は守れない)
-    const now = vi.spyOn(Date, 'now');
-    now.mockReturnValue(1_000);
+    /**
+     * ⚠ 観測点は**押した時刻**(`Event.timeStamp`。`binder.ts` の `pressedAtOf`)── ハンドラが走った時刻では
+     *   ない(1 回目の描き直しでメインが塞がると、素早い 2 回目が窓を越えていた)。unit の 2 回のクリックは
+     *   同じミリ秒に撃たれるので、押した時刻を差し込まないと 500ms の窓を 1 度も通らない。
+     */
+    const clickAt = (el: HTMLElement, at: number): void => {
+      const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, 'timeStamp', { value: at - performance.timeOrigin });
+      el.dispatchEvent(ev);
+    };
     const { row, openedWindows } = setupBound([meta('a', 1, '買い物メモ')]);
-    row('a').click();
-    now.mockReturnValue(6_000); // 5 秒後
-    row('a').click();
+    const t0 = performance.timeOrigin + 1_000_000;
+    clickAt(row('a'), t0);
+    clickAt(row('a'), t0 + 5_000); // 5 秒後
     expect(openedWindows, '5 秒空いたのに「続けて押した」と数えた').toEqual([]);
-    now.mockReturnValue(6_200); // 続けて押した
-    row('a').click();
+    clickAt(row('a'), t0 + 5_200); // 続けて押した
     expect(openedWindows, '続けて押しても開かない').toEqual(['a']);
-    now.mockRestore();
   });
 
   it('⚠ 対照群: フォルダの行を 2 回続けて押すと、別窓ではなく中へ入る', () => {

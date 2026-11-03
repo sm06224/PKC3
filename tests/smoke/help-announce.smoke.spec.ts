@@ -785,7 +785,13 @@ test('🔴 マニュアルの中を探して、押すとその節まで送られ
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
 
   const host = page.locator('[data-pkc-region="help-manual"]');
-  await expect(host.locator('h1,h2,h3').first()).toBeVisible();
+  /**
+   * ⚠ **描き上がった見出しを、同じ file の 1 本目と同じ長さ(15 秒)待つ**(全量・並列の smoke で、既定の 5 秒では
+   *   「マニュアルを読み込んでいます…」のまま落ちた)。マニュアルは開いたときにワーカーで丸ごと描く(`help.ts` の
+   *   `drawManual`)── 負荷でワーカーの立ち上げと描画が遅れる。1 本目(目次の行)は元から 15 秒待っていた。
+   *   ⚠ 見るのは見出し(描けずに素の原文へ落ちた回は見出しが 0 本なので、ここで落ちる)。
+   */
+  await expect(host.locator('h1,h2,h3').first(), 'マニュアルの見出しが描かれない').toBeVisible({ timeout: 15_000 });
 
   // ⚠ 空振り防止 ── 打つ前の字数を控える(畳んでいないことを後で見る)
   const before = ((await host.textContent()) ?? '').length;
