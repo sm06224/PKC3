@@ -522,7 +522,7 @@ import {
   type CloseViewWindowResult,
 } from '@adapter/platform/view-window';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
-import { flashCopied, handleCopyMdBlock } from './copy-md-block';
+import { flashCopied, handleCopyMdBlock, MENU_FROM_ATTR } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
 import { formatTarget } from './format-target';
 import { installLongPress, LONG_PRESS_TARGET, LONG_PRESS_TARGETS } from './long-press';
@@ -561,7 +561,7 @@ import { copyLabel } from '@features/clipboard/history';
  * ⚠ 畳んだ(`hidden`)ボタンは出さない。押せない(`disabled`)ボタンは押せない項目で残す(理由は説明欄が出す)。
  * 🔑 字は `[data-pkc-field=label]`(`iconButton` が作る)、説明は `title`。
  */
-function exportMenuItemsFrom(src: Element | null, grouped = false): MenuItem[] {
+function exportMenuItemsFrom(src: Element | null, opener: string, grouped = false): MenuItem[] {
   if (src === null) return [];
   const items: MenuItem[] = [];
   for (const b of src.querySelectorAll<HTMLButtonElement>('button[data-pkc-action]')) {
@@ -573,6 +573,8 @@ function exportMenuItemsFrom(src: Element | null, grouped = false): MenuItem[] {
       label,
       hint: b.title,
       disabled: b.disabled,
+      // 🔑 コピー系の合図は、閉じてしまう一覧の項目ではなく「書き出す ▾」のボタンに出す(`flashCopied` が読む)
+      attrs: { [MENU_FROM_ATTR]: opener },
       // 🔑 塊は右クリックと同じ正本(`ENTRY_ACTION_GROUPS`)から ── 「バックアップ(ノート)」と「(フォルダ)」の間が空く
       ...(grouped && ENTRY_ACTION_GROUPS[b.getAttribute('data-pkc-action') ?? ''] !== undefined
         ? { group: ENTRY_ACTION_GROUPS[b.getAttribute('data-pkc-action') ?? '']! }
@@ -18350,14 +18352,6 @@ const ACTIONS: Record<string, ActionHandler> = {
     );
   },
   /**
-   * 🔴 **一覧で選んだ N 件だけの書き出し**(#1038 A1)。相手は `delete-selected` と**同じ規則**
-   *   (左の列の見えている行に在る印)── 数と対象が食い違うと、帯の「N 件」が嘘になる。
-   */
-  /**
-   * 🔴 **選択バーの「書き出す ▾」** ── 閲覧用 HTML / バックアップ / PKC3 入り HTML の 3 つを 1 つのボタンに畳む(バーが 1 行ぶん伸びて、
-   *   低い窓で貼り付かなくなった退行の直し)。⚠ `MENU_OPENERS` に載せてある。項目は上の 2 受け手のただのボタン。
-   */
-  /**
    * 🔴 **右の列の「書き出す ▾」**(#1029 / #501。user 裁定 2026-11-03)。ノート 1 件の書き出し系の一覧。
    * 🔑 項目は隠した元のボタン(`inspector-export-source`)から読む ── 字・説明・押せない / 畳むの状態は
    *   `inspector.ts` の `render` が元のボタンに書いたもの(2 本目の判定を持たない)。押す先は**既存の action**そのまま。
@@ -18368,7 +18362,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-entry');
     if (!lid) return;
     const src = target.closest('[data-pkc-field="inspector-actions"]')?.querySelector('[data-pkc-field="inspector-export-source"]');
-    const items = exportMenuItemsFrom(src ?? null, true);
+    const items = exportMenuItemsFrom(src ?? null, 'open-export-menu', true);
     if (items.length === 0) return;
     const r = target.getBoundingClientRect();
     openContextMenu(root, { x: r.left, y: r.bottom }, items, target, { 'data-pkc-entry': lid });
@@ -18376,11 +18370,19 @@ const ACTIONS: Record<string, ActionHandler> = {
   /** 🔴 **右の列(何も選んでいないとき)の「書き出す ▾」**(#1029 / #501)。コレクション全体の書き出しの一覧。 */
   'open-collection-export-menu': (_dispatcher, target, _services, root) => {
     const src = target.closest('[data-pkc-field="collection-commands"]')?.querySelector('[data-pkc-field="collection-export-source"]');
-    const items = exportMenuItemsFrom(src ?? null);
+    const items = exportMenuItemsFrom(src ?? null, 'open-collection-export-menu');
     if (items.length === 0) return;
     const r = target.getBoundingClientRect();
     openContextMenu(root, { x: r.left, y: r.bottom }, items, target);
   },
+  /**
+   * 🔴 **一覧で選んだ N 件だけの書き出し**(#1038 A1)。相手は `delete-selected` と**同じ規則**
+   *   (左の列の見えている行に在る印)── 数と対象が食い違うと、帯の「N 件」が嘘になる。
+   */
+  /**
+   * 🔴 **選択バーの「書き出す ▾」** ── 閲覧用 HTML / バックアップ / PKC3 入り HTML の 3 つを 1 つのボタンに畳む(バーが 1 行ぶん伸びて、
+   *   低い窓で貼り付かなくなった退行の直し)。⚠ `MENU_OPENERS` に載せてある。項目は上の 2 受け手のただのボタン。
+   */
   'open-selection-export': (dispatcher, target, _services, root) => {
     const lids = selectedExportLids(dispatcher);
     if (lids.length === 0) return;
