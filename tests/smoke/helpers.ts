@@ -410,7 +410,7 @@ async function withRerenderRetry<T>(page: Page, run: () => Promise<T>): Promise<
  */
 export async function clickReal(page: Page, target: Target): Promise<void> {
   await withRerenderRetry(page, async () => {
-    const { x, y } = await reachableOnce(page, target);
+    const { x, y } = await reachableOnce(page, target, { press: true });
     await page.mouse.click(x, y);
   });
 }
@@ -441,7 +441,7 @@ export async function openTile(page: Page, target: Target): Promise<void> {
  */
 export async function modClickReal(page: Page, target: Target): Promise<void> {
   await withRerenderRetry(page, async () => {
-    const { x, y } = await reachableOnce(page, target);
+    const { x, y } = await reachableOnce(page, target, { press: true });
     await page.keyboard.down('ControlOrMeta');
     try {
       await page.mouse.click(x, y);
@@ -454,7 +454,7 @@ export async function modClickReal(page: Page, target: Target): Promise<void> {
 /** 🔴 **追記の入り先を指すクリック = Alt+クリック**(#495)。 */
 export async function altClickReal(page: Page, target: Target): Promise<void> {
   await withRerenderRetry(page, async () => {
-    const { x, y } = await reachableOnce(page, target);
+    const { x, y } = await reachableOnce(page, target, { press: true });
     await page.keyboard.down('Alt');
     try {
       await page.mouse.click(x, y);
@@ -496,10 +496,30 @@ const asLocator = (page: Page, t: Target): Locator =>
 
 const nameOf = (t: Target): string => (typeof t === 'string' ? t : String(t));
 
-async function reachableOnce(page: Page, target: Target): Promise<{ x: number; y: number }> {
+async function reachableOnce(
+  page: Page,
+  target: Target,
+  opts: { readonly press?: boolean } = {},
+): Promise<{ x: number; y: number }> {
   const el = asLocator(page, target);
   const name = nameOf(target);
   await expect(el).toBeVisible();
+  /**
+   * 🔴 **押す口は、ネイティブに `disabled` でなくなるまで待つ**(全量・並列の smoke で 2 本が同じ形で落ちた:
+   *   `schedule` の札を押した後 / `keymap` で別のノートを選んだ後の「ノートを編集する」)。
+   * ⚠ 本文を読み込んでいる間、帯の「編集」は `disabled`(理由は title。`detail.ts` の `renderBar` ── 製品の作りどおり)。
+   *   Chromium は disabled のボタンにも pointer 系は届けるが **click を出さない** ので、押したのに何も起きず、
+   *   次の assert が「編集に入っていない」と落ちる(実測: pointerdown / pointerup は届き click だけが出ない)。
+   * ⚠ 見るのは `:disabled` だけ ── `aria-disabled` は「押せるが理由を出す」口に使っている(`format-bar.ts` 等)ので待たない
+   *   (Playwright の `toBeEnabled` は aria-disabled も数えるので使わない)。⚠ わざと disabled を押す spec は 0 件(2026-11-03 に数えた)。
+   */
+  if (opts.press === true) {
+    await expect
+      .poll(() => el.evaluate((node) => (node as Element).matches(':disabled')), {
+        message: `${name} が押せない(disabled)まま`,
+      })
+      .toBe(false);
+  }
   await el.scrollIntoViewIfNeeded(); // fold 下の要素を「覆われている」と誤診しない
   const box = await el.boundingBox();
   expect(box, `${name} に boundingBox が無い(画面に出ていない)`).not.toBeNull();

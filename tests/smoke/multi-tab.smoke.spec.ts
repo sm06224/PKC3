@@ -93,10 +93,28 @@ test('2 枚目のタブが本体経由で開き、別ノートは編集でき、
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-field="alarm-enabled"]');
+  await expect(page.locator('[data-pkc-field="alarm-enabled"]'), '予定の知らせが入にならない(前提)').toBeChecked();
   await page.clock.runFor("01:30"); // 知らせの刻み(30 秒)を回す;
   const barA = page.locator('[data-pkc-region="alarm-bar"] [data-pkc-field="alarm-list"] > li');
   const barB = pageB.locator('[data-pkc-region="alarm-bar"] [data-pkc-field="alarm-list"] > li');
-  await expect(barA, '本体のタブに知らせの帯が出ない(前提)').toHaveCount(1, { timeout: 10_000 });
+  /**
+   * ⚠ 入にすると予定の走査(ワーカー)を頼む ── 走査の結果が届く前に上の 90 秒を回し終えると、知らせは次の刻み(30 秒後)まで
+   *   鳴らない(刻みの作りどおり)。この時計は `runFor` でしか進まないので、負荷で走査が遅れた回は帯が出ないまま落ちた(全量・並列)。
+   * 🔑 だから帯が出るまで **30 秒ずつ回して待つ**(上限 4 刻み = 2 分 ── 予定は次の分なので、走査が届けば最初の刻みで鳴る)。
+   */
+  let ticks = 0;
+  await expect
+    .poll(
+      async () => {
+        if ((await barA.count()) === 0 && ticks < 4) {
+          ticks += 1;
+          await page.clock.runFor('00:30');
+        }
+        return barA.count();
+      },
+      { message: '本体のタブに知らせの帯が出ない(前提)', timeout: 15_000, intervals: [500] },
+    )
+    .toBe(1);
   await expect(barB, 'メインでないタブに知らせの帯が出ない').toHaveCount(1, { timeout: 10_000 });
   await expect(barB).toContainText('打ち合わせ');
   // B で閉じると、本体(A)でも消える

@@ -1936,6 +1936,11 @@ test('🔴 フォルダ面は行の頭に種別、右端に更新日を出す', 
     hasText: 'フォルダ面で見る',
   });
   await expect(row).toBeVisible();
+  /**
+   * ⚠ 更新日は保存の応答(ack)で入る ── 作った直後は空のことがある。負荷で応答が遅れた回に、空の欄を 1 回だけ読んで
+   *   落ちた(全量・並列)。入るまで待ってから測る(字の形は下の ③ が見る)。
+   */
+  await expect(row.locator('td').last(), '作ったノートの更新日が入らない(保存の応答が届かない)').not.toHaveText('');
 
   const m = await row.evaluate((tr) => {
     const cells = [...tr.querySelectorAll('td')];

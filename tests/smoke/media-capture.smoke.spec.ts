@@ -1498,13 +1498,13 @@ async function recordScreenForTrim(page: Page) {
   }
   if (!Number.isFinite(startSec)) throw new Error(`切り出しの範囲を決められる区切りが録れていない(区切り ${keys.join(',')} / 長さ ${durNum})`);
   /**
-   * 🔴 **押す所を、フレームの区間の真ん中へ寄せる**(全量・並列の smoke で「最初のフレームが押した所でない」と落ちた回の直し)。
+   * 🔴 **押す所を、フレームの区間の始まりのすぐ後へ寄せる**(全量・並列の smoke で「最初のフレームが押した所でない」と落ちた回の直し)。
    * ⚠ 落ちた回はどれも、押した所が隣のフレームとの境目から **1〜3ms** しか離れていなかった(実測: 押した所 505ms・
    *   フレーム 504ms / 押した所 500ms・次のフレーム 503ms)。境目のそのごく近くでは、再生機が止めて見せる絵と
    *   「時刻が押した所以下で最後のフレーム」(製品の規則・下の計画と同じ)が食い違い、比べる絵(前後 ±3 枚)の側が 1 枚ずれる。
    *   負荷で録画のフレーム間隔が不揃いになるほど、区切り + 0.5 秒が境目に寄る回が増える(静かな箱では 50ms 刻みで境目ちょうど)。
-   * 🔑 だから押す所は**フレームの区間(20ms 以上)の真ん中**にする ── user が押せる精度(数十 ms)の中で、どの絵が出ているかが
-   *   一意に決まる所である。⚠ 区切り(キーフレーム)の区間は選ばない(作り直しの道を通さないと、検査したい道を通らない)。
+   * 🔑 だから押す所は**フレームの区間(20ms 以上)の始まりから 10〜15ms 後**にする ── user が押せる精度(数十 ms)の中で、
+   *   どの絵が出ているかが一意に決まる所である。⚠ 区切り(キーフレーム)の区間は選ばない(作り直しの道を通さないと、検査したい道を通らない)。
    */
   const vblocks = scanned.scan.blocks.filter((b) => b.track === scanned.scan.videoTrack);
   const atMs = startSec * 1000;
@@ -1517,12 +1517,17 @@ async function recordScreenForTrim(page: Page) {
   const startCandidates: number[] = [];
   for (; j >= 0 && j + 1 < vblocks.length && startCandidates.length < 8; j += 1) {
     if (vblocks[j]!.key || vblocks[j + 1]!.ms - vblocks[j]!.ms < 20) continue;
-    const mid = (vblocks[j]!.ms + vblocks[j + 1]!.ms) / 2000;
-    if (mid >= endSec - 0.5) break;
-    startCandidates.push(mid);
+    /**
+     * ⚠ 区間の**真ん中ではなく、始まりのすぐ後**(10〜15ms 後)── 負荷で間隔が空いた区間(数百 ms)では、Chromium は
+     *   止めた時刻が「前のフレーム + 平均の間隔」を過ぎると**次のフレームを先に見せる**(実測: 504ms のフレームの次が 805ms のとき、
+     *   0.565 秒で 805ms の絵が出た)。始まりのすぐ後なら、どちらの規則でもそのフレームの絵になる。
+     */
+    const at = (vblocks[j]!.ms + Math.min(15, (vblocks[j + 1]!.ms - vblocks[j]!.ms) / 2)) / 1000;
+    if (at >= endSec - 0.5) break;
+    startCandidates.push(at);
   }
   if (startCandidates.length === 0) {
-    throw new Error(`押す所をフレームの区間の真ん中に置けない(${startSec} 秒の後に 20ms 以上の区間が無い)`);
+    throw new Error(`押す所をフレームの区間の始まりのすぐ後に置けない(${startSec} 秒の後に 20ms 以上の区間が無い)`);
   }
   startSec = startCandidates[0]!;
   test.info().annotations.push({ type: '録れた動画の区切り(ミリ秒)/ 切り出す範囲(秒)', description: `${keys.join(',')} / ${startSec}〜${endSec}` });
@@ -1688,7 +1693,7 @@ test('🔴 画面録画を押した所ぴったりに切り出せる:確認が�
   const SAME = 0.05;
   /**
    * ⚠ 前後 ±3 枚がすべて押した所と同じ絵なら、その押す所では見分けられない(負荷で作り物の画面の描画が止まった区間)──
-   *   次の候補(フレームの区間の真ん中。`recordScreenForTrim`)へ移す。どの候補でも見分けられなければ、下の空振り防止で落ちる。
+   *   次の候補(フレームの区間の始まりのすぐ後。`recordScreenForTrim`)へ移す。どの候補でも見分けられなければ、下の空振り防止で落ちる。
    */
   let startSec = startCandidates[0]!;
   let around: number[][] = [];

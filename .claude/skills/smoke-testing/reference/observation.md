@@ -383,14 +383,16 @@ expect(seen, `取り消しで打った字へ戻れない: ${JSON.stringify(seen)
 | `scrollTop` を書いた直後に面を替える | `layout`:位置の記憶(`scroll-memory.ts`)は `scroll` イベントで覚える。届く前に替えると古い位置へ飛ぶ | その `scroll` イベント |
 | ドラッグを始めてすぐ送る | `left-list-sync`:掴んだ行を覚えるのは `dragstart` | `dragstart` が届き、押した行を掴んだこと |
 | 押した直後に欄の値を 1 回読む | `schedule`:日付の窓は閉じた**後**の `then` で欄へ書く | `expect(欄).not.toHaveValue(前の値)` |
-| `clickReal` で disabled のボタンを押す | `schedule`:本文を読み直す間「編集」は disabled。pointer 系は届き click は出ない | `toBeEnabled()` |
+| `clickReal` で disabled のボタンを押す | `schedule` / `keymap`:別のノートを選んで本文を読み直す間「編集」は disabled。pointer 系は届き click は出ない | `clickReal` 系が `:disabled` でなくなるまで待つ(`helpers.ts`。`aria-disabled` は待たない) |
+| 保存の応答で後から入る字を 1 回だけ読む | `layout`:作った直後の更新日の欄が空 | `not.toHaveText('')` |
+| 偽の時計(`page.clock`)を回してから、非同期の走査の結果を待つ | `multi-tab`:予定の走査(ワーカー)が届く前に 90 秒を回し終え、刻み(30 秒)が来ない | 帯が出るまで 30 秒ずつ回す(上限つき) |
 | `scrollIntoViewIfNeeded` の後に面の高さが変わる | `import`:下の帯が出て、送った要素が送れる箱の外へ押し出され「H3 に覆われた」と出た | `clickReal` が「見えている所から外れた」をやり直しの合図にする(`helpers.ts`) |
 | 心拍の欠測(壁時計)で門を張る | `attach` / `dual-filer`:CPU 30ms の仕事が奪い合いで 110〜150ms に伸びる。対照群は CPU を使わないので床が上がらない | 門は trace の `RunTask` の CPU 時間(`traceMainCpu`)。壁時計は記録に残す |
 
 🔑 落ちた画面(error-context)と、押した瞬間の `pointerdown` / `pointerup` / `click` の記録を突き合わせると、
 「押したが届いていない」と「届いたが断られた」を分けられる(disabled は前者で、click だけが出ない)。
 | `locator.dblclick()` で 2 回押しを見る | `import`:2 回を同じフレームに撃つので、1 回目の描画(選んだ印・下端に貼り付くバー)が間に入らない | 同じ座標を `page.mouse.click` で 2 回、間に描画 1 回(user の速さ) |
-| 再生機を止めて「その時刻の絵」を撮る | `media-capture`:フレームの境目から数 ms の所・間隔の空いた区間では、Chromium の見せる絵が「時刻以下で最後のフレーム」とずれる | 押す所はフレームの始まりのすぐ後(区間 20ms 以上の真ん中) |
+| 再生機を止めて「その時刻の絵」を撮る | `media-capture`:フレームの境目から数 ms の所・間隔の空いた区間では、Chromium の見せる絵が「時刻以下で最後のフレーム」とずれる | 押す所は 20ms 以上あるフレームの区間の、始まりから 10〜15ms 後 |
 
 ⚠ 製品の穴だったのは 3 つ:2 クリックの判定がハンドラの時刻で測っていた(`pressedAtOf`)/ 図の合わせ直しが
 ブラウザのスクロールアンカーの送りを「他人の送り」と読んで止まっていた(`read-anchor.ts`)/ 選んだ瞬間に下端へ貼り付くバーが
