@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, collectPageErrors, useSplitEditor, answerAppDialog, writesLanded } from './helpers';
+import { gotoApp, clickReal, collectPageErrors, useSplitEditor, answerAppDialog } from './helpers';
 
 /**
  * ショートカットキーと、その割り当て直し(#256。user 指示 2026-08-18)。
@@ -314,13 +314,6 @@ test('🔴 帯に無い記法が、鍵で本文に入る (#425)', async ({ page 
   await expect(noteRows, '前提が崩れている(2 件)').toHaveCount(2);
   await clickReal(page, noteRows.nth(0));
   await clickReal(page, noteRows.nth(1));
-  /**
-   * 🔴 **選んだ書込が済んでから「編集」を押す**(アプリ自身の合図 = `data-pkc-saving` が外れるのを待つ)。
-   * ⚠ 選ぶと選択の書込が飛び(保存中の印が付く)、終わると詳細の描き直しが続く。負荷が高い回(フル走行で約 1%)は
-   *   その描き直しが「編集」の押下の最中に入り、押した節が差し替わって**押しが消えて**編集に入らなかった
-   *   (編集に入っていない)。人が押すより速い連打が作る隙間で、書込が済んだ後なら起きない。
-   */
-  await writesLanded(page);
   await clickReal(page, '[data-pkc-action="start-edit"]');
   const body = page.locator('[data-pkc-field="editor-body"]');
   await expect(body, '編集に入っていない').toBeVisible({ timeout: 15_000 });

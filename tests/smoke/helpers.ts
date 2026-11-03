@@ -405,11 +405,29 @@ async function withRerenderRetry<T>(page: Page, run: () => Promise<T>): Promise<
 }
 
 /**
+ * 🔴 **押せない(`disabled`)部品は、押せるようになるまで待つ**(`keymap` の「編集に入っていない」の根本原因)。
+ *
+ * ⚠ 直す前は `disabled` のボタンの真ん中へ**そのまま `mouse.click` していた** ── 見えていて最前面なので
+ *   `reachableOnce` を通るが、`disabled` のボタンは **click イベントを発火しない**(エラーも出ない = 無言の空振り)。
+ *   ノートを選ぶと本文が届くまで「編集」は `disabled`(title「本文を読み込んでいます…」)で、負荷が高いと
+ *   その窓が長い(実測 約 480ms)。そこへ押すと押しが消え、「編集に入っていない」で落ちていた(フル走行で約 1%)。
+ * 🔑 製品は正しい(押せない間は押せない見た目 + 理由を出している)。人は有効になってから押すので、
+ *   smoke も Playwright 標準の `click()` と同じく**有効になるのを待つ**(固定時間の待ちではなく、アプリの状態を待つ)。
+ * ⚠ `disabled` を押して**何も起きない**ことを見たい spec は、ここを通さず `expectReachable` + 属性の検査を使う。
+ */
+async function waitUntilEnabled(page: Page, target: Target): Promise<void> {
+  await expect(asLocator(page, target), `${nameOf(target)} が押せない(disabled)まま`).toBeEnabled({
+    timeout: 15_000,
+  });
+}
+
+/**
  * 実クリック: 中心座標の最前面要素が target(またはその子孫)であることを
  * 確認してから page.mouse.click。dead click / occlusion / zero-height を検出する。
  */
 export async function clickReal(page: Page, target: Target): Promise<void> {
   await withRerenderRetry(page, async () => {
+    await waitUntilEnabled(page, target);
     const { x, y } = await reachableOnce(page, target);
     await page.mouse.click(x, y);
   });
@@ -441,6 +459,7 @@ export async function openTile(page: Page, target: Target): Promise<void> {
  */
 export async function modClickReal(page: Page, target: Target): Promise<void> {
   await withRerenderRetry(page, async () => {
+    await waitUntilEnabled(page, target);
     const { x, y } = await reachableOnce(page, target);
     await page.keyboard.down('ControlOrMeta');
     try {
@@ -454,6 +473,7 @@ export async function modClickReal(page: Page, target: Target): Promise<void> {
 /** 🔴 **追記の入り先を指すクリック = Alt+クリック**(#495)。 */
 export async function altClickReal(page: Page, target: Target): Promise<void> {
   await withRerenderRetry(page, async () => {
+    await waitUntilEnabled(page, target);
     const { x, y } = await reachableOnce(page, target);
     await page.keyboard.down('Alt');
     try {

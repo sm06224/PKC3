@@ -214,7 +214,9 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
    *   戻していなければ**全部が本文の先頭に入る**。`hello world` の 5 字目(`hello` と `world` の間)に caret を置いて呼ぶ。
    *   見るのは 5 つ:日付 / アイコン / 図(caret)/ ノートリンク(前から登記済みで同じ穴を持っていた)と、図(選んだ範囲)。
    */
-  await createEntry(page, 'text');
+  // 🔴 ここで `createEntry` は呼ばない ── 今日のノートが編集中のまま続いており、作成メニューは
+  //   「編集中は使えません」で `disabled`。押しても何も起きず(押しが消える)、実際は今日のノートで続けていた。
+  //   `clickReal` が `disabled` を待つようになり、この無言の空振りが表に出た。
   await clickReal(page, '[data-pkc-region="editor-live"]');
   const liveRow = page.locator('[data-pkc-field="row-source"]');
   await expect(liveRow, '1 面の行が開かない(前提)').toBeVisible();
