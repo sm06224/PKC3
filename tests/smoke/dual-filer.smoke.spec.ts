@@ -373,6 +373,12 @@ test('🔴 Shift + F4 で、いまの場所にノートを作る(面から出な
     '前提: 右が「新しいフォルダ」の中に入っていない',
   ).toContainText('新しいフォルダ');
   await page.locator(ROWS('left')).filter({ hasText: '新しいフォルダ' }).click();
+  // ⚠ 左の行に印が付いたのを見てから押す ── 「ゴミ箱へ」は印の付いた行に効く。直前まで右のペインを押していたので、
+  //   負荷で左の印が付く前に押すと何も移らない(全量の smoke で実際に落ちた)
+  await expect(
+    page.locator(`${ROWS('left')}[data-pkc-marked]`).filter({ hasText: '新しいフォルダ' }),
+    '前提: 左の「新しいフォルダ」に印が付いていない',
+  ).toHaveCount(1);
   await clickReal(page, '[data-pkc-field="dual-delete"]');
   await expect(
     page.locator(ROWS('left')).filter({ hasText: '新しいフォルダ' }),
