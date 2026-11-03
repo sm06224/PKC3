@@ -409,17 +409,6 @@ async function withRerenderRetry<T>(page: Page, run: () => Promise<T>): Promise<
  * 確認してから page.mouse.click。dead click / occlusion / zero-height を検出する。
  */
 export async function clickReal(page: Page, target: Target): Promise<void> {
-  /**
-   * 🔴 **書き出し系は「書き出す ▾」の一覧の中に在る**(#1029 / #501。2026-11-03)。
-   * ⚠ 平置きだった頃の spec は `[data-pkc-action="export-…"]` を直に押しに行く ── 畳んだ元のボタンは隠れているので、
-   *   **user と同じ手順**(「書き出す ▾」を実マウスで開いて、一覧の項目を押す)に直してから押す。規則はここ 1 本。
-   */
-  const route = await exportMenuRoute(page, target);
-  if (route !== null) {
-    await clickReal(page, route.opener);
-    await clickReal(page, `[data-pkc-region="context-menu"] [data-pkc-action="${route.action}"]`);
-    return;
-  }
   await withRerenderRetry(page, async () => {
     const { x, y } = await reachableOnce(page, target);
     await page.mouse.click(x, y);
@@ -982,35 +971,33 @@ export async function pickCaptureTool(page: Page, row: Locator, tool: string): P
 }
 
 /**
- * 🔴 **この押し先は、「書き出す ▾」の一覧の項目の元(隠した器)に在る物か**(#1029 / #501)。
- * 在れば、先に押すボタン(ノート 1 件 / コレクション)と一覧の項目の action を返す。
- * ⚠ 右クリックの一覧(`context-menu`)を名指ししている押し先・Locator は対象外(そのまま押す)。
+ * 🔴 **コレクション全体の書き出し(何も選んでいないときの「書き出す ▾」の一覧)の項目**(#1029 / #501)。
+ * ⚠ ノート 1 件の書き出し(`export-entry-*` など)とは別の一覧 ── 名前で明示する(DOM を見て推測しない)。
  */
-async function exportMenuRoute(
-  page: Page,
-  target: Target,
-): Promise<{ opener: string; action: string } | null> {
-  if (typeof target !== 'string' || target.includes('context-menu')) return null;
-  const action = /\[data-pkc-action=["']([^"']+)["']\]/.exec(target)?.[1];
-  if (action === undefined) return null;
-  const kind = await page.evaluate((a) => {
-    const sel = `[data-pkc-action="${a}"]`;
-    if (document.querySelector(`[data-pkc-field="inspector-export-source"] ${sel}`) !== null) return 'entry';
-    if (document.querySelector(`[data-pkc-field="collection-export-source"] ${sel}`) !== null) return 'collection';
-    return null;
-  }, action);
-  if (kind === null) return null;
-  return {
-    action,
-    opener:
-      kind === 'entry'
-        ? '[data-pkc-region="inspector"] [data-pkc-action="open-export-menu"]'
-        : '[data-pkc-region="inspector"] [data-pkc-action="open-collection-export-menu"]',
-  };
+const COLLECTION_EXPORT_ACTIONS: ReadonlySet<string> = new Set([
+  'export-html',
+  'export-portable',
+  'export-pkc2-html',
+  'export-markdown',
+  'export-markdown-folder',
+  'export-structure',
+]);
+
+/**
+ * 🔴 **書き出しを一覧から押す = user と同じ手順**(#1029 / #501)。「書き出す ▾」を実マウスで開き、一覧の項目を実マウスで押す。
+ * ⚠ `clickReal` に黙って変換させない ── 書き出しを押す spec がこの関数を**名指しで**呼ぶ。
+ */
+export async function clickExportMenuItem(page: Page, action: string): Promise<void> {
+  const menu = await openExportMenu(page, COLLECTION_EXPORT_ACTIONS.has(action) ? 'collection' : 'entry');
+  await expect(menu.locator(`[data-pkc-action="${action}"]`), `${action} が「書き出す ▾」の一覧に無い`).toBeVisible();
+  await clickReal(page, `[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`);
 }
 
 /** 「書き出す ▾」を実マウスで開き、一覧(右クリックと同じ器)を返す。 */
 export async function openExportMenu(page: Page, kind: 'entry' | 'collection' = 'entry'): Promise<Locator> {
+  // 🔴 直前の保存の ack(右の列の描き直し)が、開いた一覧の外のスクロール通知で一覧を閉じないよう、書込の着地を待ってから開く
+  //   (全量の負荷のときだけ、一覧が開いた直後に消えて落ちた ── 製品の不具合ではなく開く時機の問題)
+  await writesLanded(page);
   await clickReal(
     page,
     `[data-pkc-region="inspector"] [data-pkc-action="${kind === 'entry' ? 'open-export-menu' : 'open-collection-export-menu'}"]`,

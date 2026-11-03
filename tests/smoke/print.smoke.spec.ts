@@ -34,8 +34,7 @@ import {
   dismissAnnounce,
   useSplitEditor,
   gotoCollectionPane,
-  openExportMenu,
-} from './helpers';
+  openExportMenu, clickExportMenuItem } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -162,7 +161,7 @@ test('🔴 画面から印刷すると全文が紙に乗り、+++ で改頁す�
   const dl = page.waitForEvent('download');
   // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
   await gotoCollectionPane(page);
-  await clickReal(page, '[data-pkc-action="export-html"]');
+  await clickExportMenuItem(page, 'export-html');
   const download = await dl;
   const file = join(tmpdir(), `pkc3-print-${process.pid}.html`);
   await download.saveAs(file);
@@ -556,7 +555,7 @@ test('🔴 暗い配色で刷ると、地は白・字は濃く、リンクは白
       };
     });
   });
-  await clickReal(page, '[data-pkc-action="export-entry-pdf"]');
+  await clickExportMenuItem(page, 'export-entry-pdf');
   await expect
     .poll(() => page.evaluate(() => (globalThis as unknown as Record<string, number>).__printedK1))
     .toBeGreaterThan(0);

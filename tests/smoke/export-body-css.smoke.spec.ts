@@ -26,8 +26,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor,
-  gotoCollectionPane,
-} from './helpers';
+  gotoCollectionPane, clickExportMenuItem } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -216,7 +215,7 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
   const dl = page.waitForEvent('download');
   // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
   await gotoCollectionPane(page);
-  await clickReal(page, '[data-pkc-action="export-html"]');
+  await clickExportMenuItem(page, 'export-html');
   const file = join(tmpdir(), `pkc3-bodycss-${process.pid}.html`);
   await (await dl).saveAs(file);
 
@@ -336,7 +335,7 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
   await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('二つ目の本文');
   await gotoCollectionPane(page);
   const dl2 = page.waitForEvent('download');
-  await clickReal(page, '[data-pkc-action="export-html"]');
+  await clickExportMenuItem(page, 'export-html');
   const file2 = join(tmpdir(), `pkc3-bodycss-nav-${process.pid}.html`);
   await (await dl2).saveAs(file2);
   const nav = await page.context().newPage();

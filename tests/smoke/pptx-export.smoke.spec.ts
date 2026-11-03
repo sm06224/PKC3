@@ -14,7 +14,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, gotoCollectionPane } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, gotoCollectionPane, clickExportMenuItem } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   // ⚠ 本文を入れる道具として全文 textarea を使うので、設定で split を明示する
@@ -87,7 +87,7 @@ test('🔴 情報ペインの PowerPoint で .pptx が落ちてきて、見出�
 
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-pptx"]'),
+    clickExportMenuItem(page, 'export-entry-pptx'),
   ]);
   // ⚠ 名前は**アプリが決めた値**で見る(この headless は非 ASCII の download 名を
   //    捨てるので、`suggestedFilename` は観測点にしない ── CLAUDE.md §4)
@@ -215,7 +215,7 @@ test('🔴 mermaid の図が PowerPoint にベクタで入る(原文が出ない
 
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-pptx"]'),
+    clickExportMenuItem(page, 'export-entry-pptx'),
   ]);
   const path = await download.path();
   expect(path, 'file が落ちてきていない').not.toBeNull();

@@ -7,8 +7,7 @@ import { join, resolve } from 'node:path';
 import { answerAppDialog, clickReal, createEntry,
   gotoCollectionPane,
   pickCaptureTool,
-  useSplitEditor,
-} from './helpers';
+  useSplitEditor, clickExportMenuItem } from './helpers';
 
 /**
  * 🔴 **可搬単一 HTML が `file://` で起動する**(#400 段①②)。
@@ -318,7 +317,7 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
 
   await gotoCollectionPane(page);
 
-  await clickReal(page, '[data-pkc-action="export-portable"]');
+  await clickExportMenuItem(page, 'export-portable');
   const out = join(mkdtempSync(join(tmpdir(), 'pkc3-out-')), 'carried.html');
   await (await dl).saveAs(out);
 

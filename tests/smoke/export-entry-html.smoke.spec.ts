@@ -24,8 +24,7 @@ import {
   createEntry,
   collectPageErrors,
   useSplitEditor,
-  openExportMenu,
-} from './helpers';
+  openExportMenu, clickExportMenuItem } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   // ⚠ 行の在り処と編集の道具は `context-menu.smoke.spec.ts` と同じにする
@@ -68,7 +67,7 @@ test('🔴 情報ペインの「閲覧用 HTML」で、そのノートだけの 
 
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-html"]'),
+    clickExportMenuItem(page, 'export-entry-html'),
   ]);
   const path = await download.path();
   expect(path, 'file が落ちてきていない').not.toBeNull();
@@ -254,7 +253,7 @@ test('🔴 右クリックのメニューにも「閲覧用 HTML」が並ぶ (#4
   // 🔴 右の列の同じ口でも、同じ file が落ちる(2026-10-11。利用者は右クリックを知らなくても見つけられる)
   const [paneDownload] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-markdown"]'),
+    clickExportMenuItem(page, 'export-entry-markdown'),
   ]);
   const panePath = await paneDownload.path();
   expect(panePath, '右の列から file が落ちてきていない').not.toBeNull();
@@ -306,7 +305,7 @@ test('🔴 章を集めた報告書は、閲覧用 HTML にも メール下書�
   // ── 閲覧用 HTML: 章の中身が入り、次の章は入らない
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-html"]'),
+    clickExportMenuItem(page, 'export-entry-html'),
   ]);
   const path = await download.path();
   expect(path, 'file が落ちてきていない').not.toBeNull();
@@ -316,7 +315,7 @@ test('🔴 章を集めた報告書は、閲覧用 HTML にも メール下書�
   await expect(page.locator('[data-pkc-region="status"]'), '展開した件数を言わない').toContainText('別のノートの章 1 件を展開');
 
   // ── メール下書き: 件名つき・記号なし・章が展開される
-  await clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="copy-entry-mail"]');
+  await clickExportMenuItem(page, 'copy-entry-mail');
   await expect(page.locator('[data-pkc-region="status"]'), 'コピーの合図が出ない').toContainText('メール下書きをコピーしました');
   const mail = await page.evaluate(() => navigator.clipboard.readText());
   expect(mail.split('\n')[0], '1 行目が件名でない').toBe('件名: weekly');
