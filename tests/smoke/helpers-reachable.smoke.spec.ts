@@ -89,3 +89,19 @@ test('⚠ 何も邪魔が無ければ押せる', async ({ page }) => {
   await clickReal(page, '#target');
   await expect(page.locator('#log')).toHaveText('pressed');
 });
+
+test('🔴 disabled の部品は、有効になるのを待ってから押す(無言の空振りにしない)', async ({ page }) => {
+  /**
+   * 「編集」は本文が届くまで `disabled`。`disabled` のボタンは click を発火しないので、
+   * 待たずに押すと押しが消える(keymap「編集に入っていない」の根本原因)。
+   * 🔑 的は `setTimeout` で有効になる ── 有効になる前に押す形を決定的に作る。
+   */
+  await page.setContent(PAGE);
+  await page.evaluate(() => {
+    const t = document.getElementById('target') as HTMLButtonElement;
+    t.disabled = true;
+    setTimeout(() => (t.disabled = false), 400);
+  });
+  await clickReal(page, '#target');
+  await expect(page.locator('#log'), 'disabled の間に押して、押しが消えた').toHaveText('pressed');
+});
