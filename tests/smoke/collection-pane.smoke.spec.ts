@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, gotoApp } from './helpers';
+import { clickReal, collectPageErrors, createEntry, gotoApp, openExportMenu } from './helpers';
 
 /**
  * 🔴 **何も選んでいない = コレクションを選んでいる**(#1017 段④a)。
@@ -49,13 +49,24 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
 
   // ② 4 つの書き出しが、実際に見えて押せる形で在る(畳まれていない)
   //    ⚠ 見える説明(`title` の 1 行)まで見る ── 押した後どうなるか読めること
+  // 🔴 2026-11-03(#1029 / #501): 書き出し系は「書き出す ▾」1 つに畳んだ ── 実マウスで開き、一覧の項目と説明を見る
   const actions = ['export-html', 'export-portable', 'export-pkc2-html', 'export-markdown', 'export-structure'];
+  await expect(
+    pane.locator('[data-pkc-action="open-collection-export-menu"]'),
+    '「書き出す ▾」が見えていない',
+  ).toBeVisible();
+  const menu = await openExportMenu(page, 'collection');
   for (const action of actions) {
-    const btn = pane.locator(`[data-pkc-action="${action}"]`);
-    await expect(btn, `${action} が見えていない`).toBeVisible();
-    const note = pane.locator(`[data-pkc-field="${action}-note"]`);
-    await expect(note, `${action} の見える説明が無い`).toBeVisible();
+    const item = menu.locator(`[data-pkc-action="${action}"]`);
+    await expect(item, `${action} が一覧に無い`).toBeVisible();
+    await expect(item, `${action} の説明が無い`).toHaveAttribute('data-pkc-hint', /.+/);
   }
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-pkc-region="context-menu"]'), 'Esc で一覧が閉じない').toHaveCount(0);
+  await expect(
+    page.locator('[data-pkc-action="open-collection-export-menu"]'),
+    'Esc の後、焦点が「書き出す ▾」へ戻らない',
+  ).toBeFocused();
   await expect(pane.locator('details'), '畳まれている').toHaveCount(0);
 
   /**

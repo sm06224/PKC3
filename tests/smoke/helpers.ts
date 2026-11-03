@@ -409,6 +409,17 @@ async function withRerenderRetry<T>(page: Page, run: () => Promise<T>): Promise<
  * 確認してから page.mouse.click。dead click / occlusion / zero-height を検出する。
  */
 export async function clickReal(page: Page, target: Target): Promise<void> {
+  /**
+   * 🔴 **書き出し系は「書き出す ▾」の一覧の中に在る**(#1029 / #501。2026-11-03)。
+   * ⚠ 平置きだった頃の spec は `[data-pkc-action="export-…"]` を直に押しに行く ── 畳んだ元のボタンは隠れているので、
+   *   **user と同じ手順**(「書き出す ▾」を実マウスで開いて、一覧の項目を押す)に直してから押す。規則はここ 1 本。
+   */
+  const route = await exportMenuRoute(page, target);
+  if (route !== null) {
+    await clickReal(page, route.opener);
+    await clickReal(page, `[data-pkc-region="context-menu"] [data-pkc-action="${route.action}"]`);
+    return;
+  }
   await withRerenderRetry(page, async () => {
     const { x, y } = await reachableOnce(page, target);
     await page.mouse.click(x, y);
@@ -968,4 +979,43 @@ export async function pickCaptureTool(page: Page, row: Locator, tool: string): P
   await expect(menu, '「仕上げ ▾」を押しても一覧が出ない').toBeVisible();
   await clickReal(page, menu.locator(`[data-pkc-action="capture-process"][data-pkc-part="${tool}"]`));
   await expect(menu, '選んだのに一覧が閉じない').toBeHidden();
+}
+
+/**
+ * 🔴 **この押し先は、「書き出す ▾」の一覧の項目の元(隠した器)に在る物か**(#1029 / #501)。
+ * 在れば、先に押すボタン(ノート 1 件 / コレクション)と一覧の項目の action を返す。
+ * ⚠ 右クリックの一覧(`context-menu`)を名指ししている押し先・Locator は対象外(そのまま押す)。
+ */
+async function exportMenuRoute(
+  page: Page,
+  target: Target,
+): Promise<{ opener: string; action: string } | null> {
+  if (typeof target !== 'string' || target.includes('context-menu')) return null;
+  const action = /\[data-pkc-action=["']([^"']+)["']\]/.exec(target)?.[1];
+  if (action === undefined) return null;
+  const kind = await page.evaluate((a) => {
+    const sel = `[data-pkc-action="${a}"]`;
+    if (document.querySelector(`[data-pkc-field="inspector-export-source"] ${sel}`) !== null) return 'entry';
+    if (document.querySelector(`[data-pkc-field="collection-export-source"] ${sel}`) !== null) return 'collection';
+    return null;
+  }, action);
+  if (kind === null) return null;
+  return {
+    action,
+    opener:
+      kind === 'entry'
+        ? '[data-pkc-region="inspector"] [data-pkc-action="open-export-menu"]'
+        : '[data-pkc-region="inspector"] [data-pkc-action="open-collection-export-menu"]',
+  };
+}
+
+/** 「書き出す ▾」を実マウスで開き、一覧(右クリックと同じ器)を返す。 */
+export async function openExportMenu(page: Page, kind: 'entry' | 'collection' = 'entry'): Promise<Locator> {
+  await clickReal(
+    page,
+    `[data-pkc-region="inspector"] [data-pkc-action="${kind === 'entry' ? 'open-export-menu' : 'open-collection-export-menu'}"]`,
+  );
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '「書き出す ▾」を押しても一覧が出ない').toBeVisible();
+  return menu;
 }

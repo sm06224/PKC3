@@ -891,6 +891,12 @@ test('🔴 主要な導線が畳まれず、その場で押せる', async ({ pag
    * 「コレクションの操作は右の列に出す」。起動直後は何も選んでいないので、
    * 遷移せずにそのまま見える。
    */
+  // 🔴 2026-11-03(#1029 / #501): 書き出し系は「書き出す ▾」1 つに畳んだ。ボタンが見え、押すと 4 つとも一覧に並ぶ
+  await expect(
+    page.locator('[data-pkc-field="collection-pane"] [data-pkc-action="open-collection-export-menu"]'),
+    '「書き出す ▾」が右の列で見えていない',
+  ).toBeVisible();
+  await clickReal(page, '[data-pkc-field="collection-pane"] [data-pkc-action="open-collection-export-menu"]');
   for (const action of [
     'export-html',
     'export-portable',
@@ -898,10 +904,12 @@ test('🔴 主要な導線が畳まれず、その場で押せる', async ({ pag
     'export-structure',
   ]) {
     await expect(
-      page.locator(`[data-pkc-field="collection-pane"] [data-pkc-action="${action}"]`),
-      `${action} が右の列でも見えていない`,
+      page.locator(`[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`),
+      `${action} が「書き出す ▾」の一覧に無い`,
     ).toBeVisible();
   }
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-pkc-region="context-menu"]')).toHaveCount(0);
   /**
    * 🔴 **移した先でも「畳んでいない」**(#239、user 指示 2026-08-17)。
    *
@@ -1407,7 +1415,8 @@ test('🔴 狭い画面でも「書き出す / 履歴 / 削除」に手が届く
   await page.locator('[data-pkc-field="editor-title"]').fill('狭い画面');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
-  const ACTIONS = ['export-entry', 'show-history', 'delete-entry'];
+  // 🔴 書き出し系は「書き出す ▾」に畳んだ(#1029 / #501)── 手が届く対象はそのボタン
+  const ACTIONS = ['open-export-menu', 'show-history', 'delete-entry'];
   for (const width of [1440, 1024, 900, 700]) {
     await page.setViewportSize({ width, height: 800 });
     await page.waitForTimeout(120);
@@ -1491,7 +1500,7 @@ for (const [w, h] of [
     expect(Math.abs(info.width - center.width), '情報の幅が本文と違う').toBeLessThan(2);
     expect(info.height / h, '情報が画面の半分も無い(30vh の帯のまま)').toBeGreaterThan(0.5);
     // 情報の中の操作に手が届く(押せる場所に居る)
-    await expect(page.locator('[data-pkc-region="inspector"] [data-pkc-action="export-entry"]')).toBeVisible();
+    await expect(page.locator('[data-pkc-region="inspector"] [data-pkc-action="open-export-menu"]')).toBeVisible();
 
     // ③ もう一度で閉じる ── 「情報」は出したまま(居る場所へ行くボタンではなく、閉じる口)
     await clickReal(page, '[data-pkc-field="phone-info"]');
@@ -1619,7 +1628,8 @@ test('🔴 編集中は「書き出す / 履歴 / 削除」が押せない(見�
   await page.locator('[data-pkc-field="editor-title"]').fill('編集中の面');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
-  const ACTIONS = ['export-entry', 'show-history', 'delete-entry'];
+  // 🔴 書き出し系は「書き出す ▾」に畳んだ(#1029 / #501)── 手が届く対象はそのボタン
+  const ACTIONS = ['open-export-menu', 'show-history', 'delete-entry'];
   // ① 確定済みなら押せる(空振り防止 ── 常時 disabled でも通る形にしない)
   for (const a of ACTIONS) {
     await expect(

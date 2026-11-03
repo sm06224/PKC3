@@ -1557,8 +1557,9 @@ test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る
    * (中身が空の file を書いても名前は揃う)。
    */
   // ⚠ 右の列(コレクションの面)は上の zip を押した所から開いたまま ── 読み込み直さない
+  // 🔴 「書き出す ▾」の一覧に出ること(#1029 / #501)── 押す手は下の clickReal が(一覧を開いて)行う
   const folderBtn = page.locator('[data-pkc-field="collection-pane"] [data-pkc-action="export-markdown-folder"]');
-  await expect(folderBtn, 'PC のフォルダへ書き出すボタンが出ていない').toBeVisible();
+  await expect(folderBtn, 'PC のフォルダへ書き出す項目が元の器に無い').toBeAttached();
   await clickReal(page, '[data-pkc-field="collection-pane"] [data-pkc-action="export-markdown-folder"]');
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('件のノートを『');
   const written = await page.evaluate(async () => {

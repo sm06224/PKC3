@@ -44,7 +44,7 @@ import { hasTranscriptCues } from '@features/asr/srt';
 import { archetypeLabel } from '@features/flavor/archetype-label';
 import { candidateText, countTitles } from '@features/relation/target-label';
 import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
-import { iconButton } from './icons';
+import { iconButton, INSPECTOR_ICON_ACTIONS } from './icons';
 import { setTagKey, tagColorControls } from './tag-color';
 import { COLLECTION_PANE_COMMANDS } from './commands';
 import { readBundle } from '@adapter/platform/portable-boot';
@@ -98,6 +98,7 @@ import {
   ENTRY_ACTION_WIDTH_ATTR,
   entryActionHint,
   FOLDER_EXPORT_BLOCKED_ACTIONS,
+  INSPECTOR_EXPORT_MENU_ACTIONS,
   entryActionWidthTier,
 } from '@features/entry-actions';
 import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
@@ -137,6 +138,14 @@ function withBlockedNote(base: string, note: string): string {
 
 /** 編集中、打鍵が止まってからこの面の本文走査をやり直すまでの待ち(ms)。 */
 const SCAN_DEBOUNCE_MS = 250;
+
+/**
+ * 🔴 **「書き出す ▾」の字と説明**(#1029 / #501)。⚠ 字は filer の選択バーの「書き出す ▾」と同じ形。
+ * 説明は押す前に「何が入っているか」を言う(一覧の中身は選んだノートで変わる)。
+ */
+export const EXPORT_MENU_LABEL = '書き出す ▾';
+const COLLECTION_EXPORT_MENU_HINT = 'コレクション全体の書き出し方(閲覧用 HTML / PKC3 入り HTML / PKC2 の HTML / Markdown / 構成のコピー)を選ぶ一覧を出します';
+const EXPORT_MENU_HINT = 'このノートの書き出し方(バックアップ / 閲覧用 HTML / Word / PowerPoint / PDF / Markdown など)を選ぶ一覧を出します';
 
 export class InspectorRenderer {
   /** 「居場所」の祖先の題名(#1087)。鍵は選択 lid と `entryMetas` / `relations` の参照。 */
@@ -182,6 +191,8 @@ export class InspectorRenderer {
   private shape: Shape | null = null;
   private rows: Rows = new Map();
   private buttons: Buttons = new Map();
+  /** 「書き出す ▾」(#1029 / #501)。⚠ 一覧の項目の元(`buttons` の書き出し系)は隠した器に残し、押したときに binder が読む。 */
+  private exportMenuBtn: HTMLButtonElement | null = null;
   /** 相手の候補(#185)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
   private candidates: HTMLDataListElement | null = null;
   /** 相手の候補の元(#1087)。欄に焦点が当たったとき `fillCandidates` が読む。 */
@@ -1360,7 +1371,10 @@ export class InspectorRenderer {
        *   (`gap`)が二重に空く(§1「これが無いと壊れると書いたら…」の逆 ──
        *   ここは「無くても壊れない」ではなく「**在ると余計な間が空く**」)。
        */
-      if (folderBtn.parentElement instanceof HTMLElement) {
+      if (
+        folderBtn.parentElement instanceof HTMLElement &&
+        folderBtn.parentElement.getAttribute('data-pkc-field') === 'inspector-action-group'
+      ) {
         folderBtn.parentElement.hidden = folderBtn.hidden;
       }
     }
@@ -1415,6 +1429,17 @@ export class InspectorRenderer {
       if (b.disabled !== (editing || folderBlocked)) b.disabled = editing || folderBlocked;
       const shown = editing ? withBlockedNote(title, blockedNote) : title;
       if (b.title !== shown) b.title = shown;
+    }
+    /**
+     * 🔴 **「書き出す ▾」も同じ門を通す**(#1029 / #501)。一覧の項目は押した瞬間に隠した元のボタンから読む
+     *   (`disabled` / `title` / `hidden` は上の loop が書いたもの)── 編集中は一覧そのものを開けない。
+     */
+    const exportMenu = this.exportMenuBtn;
+    if (exportMenu) {
+      setAttr(exportMenu, 'data-pkc-entry', meta.lid);
+      if (exportMenu.disabled !== editing) exportMenu.disabled = editing;
+      const menuTitle = editing ? withBlockedNote(EXPORT_MENU_HINT, blockedNote) : EXPORT_MENU_HINT;
+      if (exportMenu.title !== menuTitle) exportMenu.title = menuTitle;
     }
     /**
      * 🔴 **押せない理由を、帯の直上に字で出す**(#715)。
@@ -1720,6 +1745,7 @@ export class InspectorRenderer {
     this.region.textContent = '';
     this.rows = new Map();
     this.buttons = new Map();
+    this.exportMenuBtn = null;
     this.relAdd = null;
     this.relDd = null;
     this.editingNote = null;
@@ -2003,9 +2029,17 @@ export class InspectorRenderer {
       bucket = g;
       bucketGroup = name;
     };
-    const btn = (action: string, label: string): void => {
-      const b = iconButton(action, label, null);
-      (bucket ?? actions).append(b);
+    /**
+     * 🔴 **書き出し系は隠した器に置く**(#1029 / #501。user 裁定 2026-11-03)。⚠ 画面には「書き出す ▾」1 つだけ出し、
+     *   押すと binder の `open-export-menu` が**この器のボタンを読んで**一覧にする(字・説明・押せない / 畳むの状態は
+     *   下の `render` が元のボタンへ書く ── 判定を 2 本に分けない。`open-bar-more` と同じ作法)。
+     */
+    const exportSource = document.createElement('div');
+    exportSource.setAttribute('data-pkc-field', 'inspector-export-source');
+    exportSource.hidden = true;
+    const btn = (action: string, label: string, icon: string | null = null): void => {
+      const b = iconButton(action, label, icon);
+      (INSPECTOR_EXPORT_MENU_ACTIONS.includes(action) ? exportSource : (bucket ?? actions)).append(b);
       this.buttons.set(action, b);
     };
     /**
@@ -2023,10 +2057,12 @@ export class InspectorRenderer {
      *   持たないので、正本から引いても得るものが無い。
      */
     const entryBtn = (action: string): void => {
+      const inMenu = INSPECTOR_EXPORT_MENU_ACTIONS.includes(action);
       const g = ENTRY_ACTION_GROUPS[action];
-      if (g !== undefined && g !== bucketGroup) group(g);
+      if (!inMenu && g !== undefined && g !== bucketGroup) group(g);
       const label = ENTRY_ACTION_LABELS[action]!;
-      btn(action, label);
+      // 🔴 常設の代表ボタンにだけ図案を戻す(#1029 / #501)── 表は `INSPECTOR_ICON_ACTIONS`(`icons.ts`)
+      btn(action, label, INSPECTOR_ICON_ACTIONS.has(action) ? action : null);
       /**
        * 🔴 **幅は「段」で受ける**(#1029 段 C 手 2)── 段の値そのものは CSS が持つ
        *   (`min-width: max(<段>, max-content)`)。ここは**どちらの段か**だけを書く。
@@ -2090,6 +2126,16 @@ export class InspectorRenderer {
      */
     group('take-in');
     btn('adopt-external-images', ADOPT_IMAGES_LABEL);
+    /**
+     * 🔴 **「書き出す ▾」**(#1029 / #501。user 裁定 2026-11-03)── 書き出し系 10 件(下の `entryBtn`)を 1 つに畳む。
+     * ⚠ 位置は畳む前の `export-entry` と同じ(参照・リンク・開くの次)。押すと一覧(`open-export-menu` → `openContextMenu`)。
+     */
+    group('export');
+    const exportMenu = iconButton('open-export-menu', EXPORT_MENU_LABEL, 'open-export-menu');
+    exportMenu.setAttribute('aria-haspopup', 'menu');
+    exportMenu.title = EXPORT_MENU_HINT;
+    (bucket ?? actions).append(exportMenu);
+    this.exportMenuBtn = exportMenu;
     entryBtn('export-entry');
     /**
      * 🔴 **相手に渡せる 1 枚**(#491)。
@@ -2160,6 +2206,7 @@ export class InspectorRenderer {
     note.setAttribute('data-pkc-field', 'inspector-editing-note');
     note.hidden = true;
     this.editingNote = note;
+    actions.append(exportSource);
     this.region.append(note, actions);
   }
 
@@ -2194,6 +2241,22 @@ export class InspectorRenderer {
     const cmds = document.createElement('div');
     cmds.setAttribute('data-pkc-field', 'collection-commands');
     const canWriteFolder = windowFolderWritePicker() !== null;
+    /**
+     * 🔴 **書き出し系は「書き出す ▾」1 つに畳む**(#1029 / #501。user 裁定 2026-11-03)。
+     * ⚠ 元のボタンと説明は隠した器に残す ── 押すと binder の `open-export-menu` がここを読んで一覧にする
+     *   (字・説明・押せない状態は 1 か所のまま。説明は一覧の下の欄に出る)。「整理案を適用」は書き出しではないので常設のまま。
+     */
+    const menuBtn = iconButton('open-collection-export-menu', EXPORT_MENU_LABEL, 'open-collection-export-menu');
+    menuBtn.setAttribute('aria-haspopup', 'menu');
+    menuBtn.title = COLLECTION_EXPORT_MENU_HINT;
+    const menuItem = document.createElement('div');
+    menuItem.setAttribute('data-pkc-field', 'collection-command-item');
+    menuItem.append(menuBtn);
+    cmds.append(menuItem);
+    const exportSource = document.createElement('div');
+    exportSource.setAttribute('data-pkc-field', 'collection-export-source');
+    exportSource.hidden = true;
+    cmds.append(exportSource);
     for (const { action, label, title, needs } of COLLECTION_PANE_COMMANDS) {
       // 🔴 ブラウザに無い機能のボタンは出さない(dead click を作らない)
       if (needs === 'folder-write' && !canWriteFolder) continue;
@@ -2220,7 +2283,7 @@ export class InspectorRenderer {
       note.className = 'settings-note';
       note.textContent = why;
       item.append(note);
-      cmds.append(item);
+      exportSource.append(item);
     }
     // 🔴 **「構成をコピー」のすぐ隣(下)**(#1017 段④b)── 案を出すのと
     //   当てるのは同じ 1 つの用事の前半と後半である(入口を 2 か所に散らさない)。

@@ -34,6 +34,7 @@ import {
   dismissAnnounce,
   useSplitEditor,
   gotoCollectionPane,
+  openExportMenu,
 } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -291,12 +292,13 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
     });
   });
 
-  const pdf = page.locator('[data-pkc-action="export-entry-pdf"]');
+  // 🔴 2026-11-03(#1029 / #501): 「書き出す ▾」の一覧の中の項目
+  const pdf = (await openExportMenu(page)).locator('[data-pkc-action="export-entry-pdf"]');
   await expect(pdf, '紙に出す口が画面に無い').toBeVisible();
   // ⚠ 説明は「起きること」で書く(user 指示 2026-08-21)── file は落ちない
-  await expect(pdf).toHaveAttribute('title', /印刷画面/);
+  await expect(pdf).toHaveAttribute('data-pkc-hint', /印刷画面/);
 
-  await clickReal(page, '[data-pkc-action="export-entry-pdf"]');
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="export-entry-pdf"]');
   await expect
     .poll(async () => page.evaluate(() => (globalThis as unknown as Record<string, number>).__printed))
     .toBeGreaterThan(0);

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { clickReal, createEntry, collectPageErrors, gotoApp, useSplitEditor,
   gotoCollectionPane,
+  openExportMenu,
 } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -32,7 +33,12 @@ test.beforeEach(async ({ page }) => {
  *   700ms だけ付く。⚠ 短いので**押す前に**観測を仕掛ける(後から探すと取りこぼす)。
  */
 async function copyAndWait(page: Page, action: string): Promise<void> {
-  const sel = `[data-pkc-action="${action}"]`;
+  // 🔴 構成のコピーは「書き出す ▾」の一覧の中(#1029 / #501)── user と同じく実マウスで開いてから、一覧の項目を押す
+  const viaMenu = action === 'export-structure';
+  if (viaMenu) await openExportMenu(page, 'collection');
+  const sel = viaMenu
+    ? `[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`
+    : `[data-pkc-action="${action}"]`;
   /**
    * 🔴 **仕掛ける前に「押し所が在る」ことを確かめる**(#878 ②、2026-09-13)。
    *

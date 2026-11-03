@@ -38,6 +38,7 @@ import {
   ENTRY_ACTION_WIDTH_ATTR,
   ENTRY_MENU_ACTIONS,
   entryActionWidthTier,
+  INSPECTOR_EXPORT_MENU_ACTIONS,
 } from '../../src/features/entry-actions';
 
 const meta = (lid: string, title: string, archetype: EntryMeta['archetype']): EntryMeta => ({
@@ -100,16 +101,12 @@ describe('右の列の操作は塊に分かれている(#1029 段 B / 段 C)', (
      *   `export-folder` の塊を `export` へ戻したら(= 衝突が再発したら)ここが
      *   6 要素に縮んで落ちる。逆に塊をもっと割ったら 8 要素を超えて落ちる。
      */
-    expect(groups).toEqual([
-      'copy',
-      'open',
-      'take-in',
-      'export',
-      'this-folder',
-      'export',
-      'this-one',
-      'remove',
-    ]);
+    /**
+     * 🔴 **2026-11-03(#1029 / #501)に 6 つへ縮んだ** ── 書き出し系 10 件は「書き出す ▾」1 つ(`export` の塊)に畳み、
+     *   元のボタンは隠した器(`inspector-export-source`)へ移した。`this-folder` の塊と 2 つ目の `export` は
+     *   一覧(`context-menu`)の側の見出しになった。
+     */
+    expect(groups).toEqual(['copy', 'open', 'take-in', 'export', 'this-one', 'remove']);
   });
 
   it('🔴 操作のボタンは 1 つ残らず塊の中に在る(帯へ直に足したら落ちる)', () => {
@@ -121,6 +118,8 @@ describe('右の列の操作は塊に分かれている(#1029 段 B / 段 C)', (
     expect(all.length, '操作のボタンを 1 つも描けていない(空振り)').toBeGreaterThan(5);
     const loose = all
       .filter((b) => b.closest('[data-pkc-field="inspector-action-group"]') === null)
+      // 🔴 書き出し系は隠した器(一覧の項目の元)── 平置きではない(`inspector-export-menu.test.ts` が見る)
+      .filter((b) => b.closest('[data-pkc-field="inspector-export-source"]') === null)
       .map((b) => b.getAttribute('data-pkc-action'));
     expect(loose, '塊の外に出ているボタンが在る ── 足すときは group() の後に置く').toEqual([]);
   });
@@ -217,7 +216,8 @@ describe('情報ペインの塊は正本(entry-actions.ts)から来る(#1029 段
      *   ことが分かっている物を見ても「無い」以外の結果が出ない(§1 の空振り)。
      */
     const withGroup = ENTRY_MENU_ACTIONS.filter(
-      (a) => a.group !== undefined && a.menuOnly !== true,
+      (a) =>
+        a.group !== undefined && a.menuOnly !== true && !INSPECTOR_EXPORT_MENU_ACTIONS.includes(a.action),
     );
     // ⚠ 空振り防止 ── 塊を持つ物が 0 件なら、下のループは何も見ない
     expect(withGroup.length, '塊を持つ操作が 0 件(空振り)').toBeGreaterThan(10);
@@ -233,23 +233,34 @@ describe('情報ペインの塊は正本(entry-actions.ts)から来る(#1029 段
     }
   });
 
-  it('⚠ export-entry と export-folder は別の塊(バックアップの字が同じでも区別できる)', () => {
+  it('🔴 書き出し系は隠した器に在り、「書き出す ▾」は export の塊の中に在る', () => {
     const root = renderFolderWithLink();
-    const entryGroup = root
-      .querySelector('[data-pkc-action="export-entry"]')
-      ?.closest('[data-pkc-group]')
-      ?.getAttribute('data-pkc-group');
-    const folderGroup = root
-      .querySelector('[data-pkc-action="export-folder"]')
-      ?.closest('[data-pkc-group]')
-      ?.getAttribute('data-pkc-group');
-    expect(entryGroup, 'export-entry の塊が読めていない(空振り)').not.toBeUndefined();
-    expect(folderGroup, 'export-folder の塊が読めていない(空振り)').not.toBeUndefined();
-    expect(folderGroup, '同じ塊に入っている(見出しでの区別ができない)').not.toBe(entryGroup);
+    const src = root.querySelector<HTMLElement>('[data-pkc-field="inspector-export-source"]');
+    expect(src, '一覧の項目の元の器が無い(空振り)').not.toBeNull();
+    expect(src!.hidden).toBe(true);
+    for (const a of INSPECTOR_EXPORT_MENU_ACTIONS) {
+      expect(src!.querySelector(`[data-pkc-action="${a}"]`), `${a} が元の器に無い`).not.toBeNull();
+    }
+    expect(
+      root
+        .querySelector('[data-pkc-action="open-export-menu"]')
+        ?.closest('[data-pkc-group]')
+        ?.getAttribute('data-pkc-group'),
+    ).toBe('export');
   });
 
-  it('🔴 export-folder だけの塊は、畳むとき塊の器ごと畳む(空の塊が余計な間を作らない)', () => {
-    // ⚠ ノート(フォルダではない)で描く ── export-folder が hidden になる場面
+  it('🔴 フォルダを選んでも、元の器は隠れたまま(export-folder を出す処理が器ごと出さない)', () => {
+    const root = renderFolderWithLink();
+    const folderBtn = root.querySelector<HTMLButtonElement>('[data-pkc-action="export-folder"]');
+    expect(folderBtn, 'export-folder のボタンが描かれていない(空振り)').not.toBeNull();
+    expect(folderBtn!.hidden, 'フォルダなのに export-folder が畳まれている').toBe(false);
+    expect(
+      root.querySelector<HTMLElement>('[data-pkc-field="inspector-export-source"]')!.hidden,
+      '元の器が出てしまった(書き出し系が平置きに戻る)',
+    ).toBe(true);
+  });
+
+  it('🔴 ノートでは export-folder が畳まれる(一覧に出ない)', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const inspector = new InspectorRenderer(buildShell(root).inspector);
@@ -262,15 +273,7 @@ describe('情報ペインの塊は正本(entry-actions.ts)から来る(#1029 段
     inspector.render(reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state);
     const folderBtn = root.querySelector('[data-pkc-action="export-folder"]');
     expect(folderBtn, 'export-folder のボタンが描かれていない(空振り)').not.toBeNull();
-    expect((folderBtn as HTMLButtonElement).hidden, 'ノートなのに export-folder が出ている').toBe(
-      true,
-    );
-    const groupEl = folderBtn!.closest('[data-pkc-group]');
-    expect(groupEl, 'export-folder を包む塊が無い(空振り)').not.toBeNull();
-    expect(
-      (groupEl as HTMLElement).hidden,
-      '塊(export-folder だけの器)が畳まれていない(余計な間が残る)',
-    ).toBe(true);
+    expect((folderBtn as HTMLButtonElement).hidden, 'ノートなのに export-folder が出ている').toBe(true);
   });
 
   it('🔴 描かれたボタンの幅の段が、正本(entryActionWidthTier)と一致する', () => {

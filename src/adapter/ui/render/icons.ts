@@ -191,6 +191,17 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'export-entry-markdown': 'page',
   'copy-entry-mail': 'mail',
   'export-entry-srt': 'page',
+  /**
+   * 🔴 **右の列の常設ボタンの図案**(#1029 / #501。user 裁定 2026-11-03)── 段 D-2 で全部外した図案のうち、
+   *   毎日使う代表だけを戻す(`INSPECTOR_ICON_ACTIONS`)。⚠ **互いに別の絵**にする(履歴の時計と、今日の太陽に重ならない)。
+   *   新しい絵は焼き足していない(既存の書体の中から選んだ)。
+   */
+  'copy-entry-ref': 'copy',
+  'copy-entry-link': 'link',
+  'copy-plain-markdown': 'code',
+  'open-note-window': 'move',
+  'open-export-menu': 'arrow-out',
+  'open-collection-export-menu': 'arrow-out',
   'show-history': 'clock',
   'delete-entry': 'trash',
   'open-trash': 'trash',
@@ -254,6 +265,21 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
    * (帯の見た目は `app.css` の `[data-pkc-region='pane-grip']::after`)。
    */
 };
+
+/**
+ * 🔴 **右の列(情報ペイン)で図案を付ける常設ボタン**(#1029 / #501)。⚠ これ以外の右の列のボタンは字だけ
+ *   (一覧の中の各形式も字だけ)。判定の読み手は `inspector.ts` の `btn`、等値 pin は `tests/adapter/inspector-export-menu.test.ts`。
+ */
+export const INSPECTOR_ICON_ACTIONS: ReadonlySet<string> = new Set([
+  'copy-entry-ref',
+  'copy-entry-link',
+  'copy-plain-markdown',
+  'open-note-window',
+  'open-export-menu',
+  'show-history',
+  'delete-entry',
+  'open-collection-export-menu',
+]);
 
 /**
  * 🔴 **tone は action が決める。絵(glyph)ではない**(#1054 段①-2、2026-09-25)。

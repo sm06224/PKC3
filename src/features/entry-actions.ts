@@ -1534,6 +1534,17 @@ export const ENTRY_ACTION_LABELS: Readonly<Record<string, string>> = Object.from
 );
 
 /**
+ * 🔴 **右の列で「書き出す ▾」の一覧に畳む書き出し系**(#1029 / #501。user 裁定 2026-11-03)。
+ *
+ * ⚠ 並びは右クリック(`ENTRY_MENU_ACTIONS`)の書き出し群の並びと同じ(その順に抜き出す ── 2 本目の並びを手で書かない)。
+ * ⚠ 毎日使う主要操作(参照・リンク・Markdown のコピー / 別のウィンドウ / 履歴 / ゴミ箱)は含めない ── 1 クリックの常設ボタンのまま。
+ * 🔑 `this-folder`(フォルダのバックアップ)は group が違うが書き出し系なので含める。
+ */
+export const INSPECTOR_EXPORT_MENU_ACTIONS: readonly string[] = ENTRY_MENU_ACTIONS.filter(
+  (a) => (a.group === 'export' || a.group === 'this-folder') && a.menuOnly !== true,
+).map((a) => a.action);
+
+/**
  * 🔴 **綴り → 塊の綴り**(#1029 段 C)。⚠ **情報ペイン(`inspector.ts`)はこちらを引く**
  * ── `group('copy')` のように塊の名前を直書きしない(この file が字の正本になる。§7)。
  * `entryMenuActions()` の返り値にも同じ `group` が乗るので、右クリックの見出しは
