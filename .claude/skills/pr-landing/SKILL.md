@@ -33,6 +33,7 @@ description: PKC3 の PR 作成から CI green 確認 → 自己監査 → squas
    VITE_PKC_KIND=dev npm run build && node scripts/check-dist.mjs dev
    ```
    （※ テストファイルだけを直した後でも必ず `npm run typecheck` と `npm run lint` 全量を通す）
+   （※ 共有の `node_modules` は古いことがある。`Cannot find module 'onnxruntime-web'` 等が出たら `rm -rf node_modules && npm ci --ignore-scripts` で入れ直す）
 
 ## 3. PR 本文に書くこと
 
@@ -54,8 +55,16 @@ description: PKC3 の PR 作成から CI green 確認 → 自己監査 → squas
    ```
    - `--prune` に `origin main` のような refspec を付けない（消えた `origin/<branch>` が残って次の push が `(stale info)` で拒否されるのを防ぐ）。
    - push 時は必ず `git push -u origin <branch>` とブランチ名を明示する。
+   - merge 後は remote のブランチが自動で消える。detached HEAD から押すときは `git push -u origin HEAD:refs/heads/<branch>` と完全名で書く。
+4. **check run が 0 件のまま**: PR の `mergeable_state` を見る。`dirty`（衝突）だと CI は起動しない。base を merge して解き、push し直す。
 
-## 5. 止めて user の裁定を仰ぐ条件（これ以外は自走して merge する）
+## 5. 本番リリース（user の明示の許可を得てから）
+
+1. 版上げ PR（`package.json` / `package-lock.json` / `src/runtime/release-meta.ts` / README の現況）を通常どおり merge する。
+2. `release.yml` を `workflow_dispatch`（`version: X.Y.Z`、`v` なし、ref `main`）で起動する。tag もこの workflow が打つ。
+3. 観測点は API で取る: `releases/latest` の `tag_name`、`git ls-remote --tags origin vX.Y.Z`、続いて自動で起きる `pages.yml` の run が `success`。※ `github.io` はこの箱から届かない（proxy 403）ので、画面の版は user に見てもらう。
+
+## 6. 止めて user の裁定を仰ぐ条件（これ以外は自走して merge する）
 
 - **後方互換の破壊**（既存データ形式・書き出し形式・URL の破壊的変更）
 - **不可逆操作**・**本番リリース**（`v*` tag の push / `release.yml` の実行は必ず user の示唆を待つ）
