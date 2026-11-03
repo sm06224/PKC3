@@ -199,7 +199,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'copy-entry-ref': 'copy',
   'copy-entry-link': 'link',
   'copy-plain-markdown': 'code',
-  'open-note-window': 'move',
+  // 🔴 「別のウィンドウで開く」── 2 ペインの「移す」(`dual-move` = `move`)と取り違えない。候補と選んだ理由は commit 本文
+  'open-note-window': 'flight',
   'open-export-menu': 'arrow-out',
   'open-collection-export-menu': 'arrow-out',
   'show-history': 'clock',
