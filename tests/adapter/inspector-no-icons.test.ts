@@ -10,6 +10,12 @@
  * 無地のほうが弱く見える。#1029 の裁定(2026-10-01、Gemini が A = 外す)で、
  * **右の列だけ**絵を全部外した。
  *
+ * ## 🔴 2026-11-03(#1029 / #501 の user 裁定)で、常設の代表ボタンにだけ絵を戻した
+ *
+ * 毎日使う 7 つ(コピー 3 / 別のウィンドウ / 書き出す ▾ ×2 面 / 履歴 / ゴミ箱。`INSPECTOR_ICON_ACTIONS`)だけが絵を持つ。
+ * ⚠ **それ以外**(関係・タグ・整理案・日付・一覧の中の各形式)は字だけのまま ── 下の検査は「絵を持つ要素が、この表の action のボタンの中に居ること」を見る。
+ * 絵の重なりの検査は `inspector-export-menu.test.ts`。
+ *
  * ## ⚠ 守る範囲は「右の列」だけ
  *
  * 左の列・画面下の帯・書式の帯・右クリックのメニューの絵は**別の面の決め事**
@@ -27,6 +33,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { buildShell, paintCaptureBar } from '../../src/adapter/ui/render/shell';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
+import { INSPECTOR_ICON_ACTIONS } from '../../src/adapter/ui/render/icons';
 
 const meta = (lid: string, title: string, archetype: EntryMeta['archetype']): EntryMeta => ({
   lid,
@@ -43,7 +50,6 @@ const meta = (lid: string, title: string, archetype: EntryMeta['archetype']): En
 
 /** 絵の器が持つ属性の**全部**(`icons.ts` の `iconSpan` / `setIcon` / `setActionIcon`)。 */
 const ICON_ATTRS = ['data-pkc-icon', 'data-pkc-symbol', 'data-pkc-chip', 'data-pkc-tone'] as const;
-const ICON_SELECTOR = ICON_ATTRS.map((a) => `[${a}]`).join(',');
 
 beforeEach(() => {
   document.body.textContent = '';
@@ -83,6 +89,13 @@ function folderState(): AppState {
 }
 
 /** 右の列の押しボタンを、描いた物から全部拾う(action を持つ物 = 押せる物)。 */
+/** 絵の器のうち、許された常設ボタンの中に居ない物(= 字だけのはずのボタンに絵が付いた)。 */
+const strayIcons = (root: HTMLElement): string[] =>
+  [...root.querySelectorAll('[data-pkc-region="inspector"] *')]
+    .filter((el) => ICON_ATTRS.some((a) => el.hasAttribute(a)))
+    .filter((el) => !INSPECTOR_ICON_ACTIONS.has(el.closest('button[data-pkc-action]')?.getAttribute('data-pkc-action') ?? ''))
+    .map((el) => `${el.tagName}:${el.closest('button')?.getAttribute('data-pkc-action') ?? '(ボタンの外)'}`);
+
 const buttonsOf = (root: HTMLElement): HTMLButtonElement[] => [
   ...root.querySelectorAll<HTMLButtonElement>(
     '[data-pkc-region="inspector"] button[data-pkc-action]',
@@ -90,7 +103,7 @@ const buttonsOf = (root: HTMLElement): HTMLButtonElement[] => [
 ];
 
 describe('右の列の操作ボタンは絵を持たない(#1029 段 D-2)', () => {
-  it('🔴 ノートを選んだ右の列に、絵の属性を持つ要素が 1 つも無い(操作 / タグ / 関係)', () => {
+  it('🔴 ノートを選んだ右の列で、絵を持つのは常設の代表だけ(操作 / タグ / 関係)', () => {
     const { root, inspector } = mount();
     inspector.render(noteState());
     const actions = buttonsOf(root).map((b) => b.getAttribute('data-pkc-action'));
@@ -100,30 +113,29 @@ describe('右の列の操作ボタンは絵を持たない(#1029 段 D-2)', () =
       expect(actions, `台が ${a} を描けていない(空振り)`).toContain(a);
     }
     expect(buttonsOf(root).length, '操作のボタンが少なすぎる(空振り)').toBeGreaterThan(10);
-    const withIcon = [...root.querySelectorAll('[data-pkc-region="inspector"] *')]
-      .filter((el) => ICON_ATTRS.some((a) => el.hasAttribute(a)))
-      .map((el) => `${el.tagName}:${ICON_ATTRS.filter((a) => el.hasAttribute(a)).join('+')}`);
-    expect(withIcon, '右の列に絵の属性が在る(字だけにする)').toEqual([]);
+    expect(strayIcons(root), '常設の代表以外に絵が在る(字だけにする)').toEqual([]);
+    // 対照群: 常設の代表には絵が在る(全部消した変異で緑にならない)
+    expect(root.querySelectorAll('[data-pkc-region="inspector"] [data-pkc-icon]').length, '代表の絵が無い').toBeGreaterThanOrEqual(7);
   });
 
-  it('🔴 フォルダを選んだ右の列にも無い(フォルダの操作 = this-folder)', () => {
+  it('🔴 フォルダを選んだ右の列も同じ(フォルダの操作 = this-folder)', () => {
     const { root, inspector } = mount();
     inspector.render(folderState());
     expect(
       buttonsOf(root).map((b) => b.getAttribute('data-pkc-action')),
       '台がフォルダの操作を描けていない(空振り)',
     ).toContain('export-folder');
-    expect(root.querySelectorAll(`[data-pkc-region="inspector"] :is(${ICON_SELECTOR})`)).toHaveLength(0);
+    expect(strayIcons(root)).toEqual([]);
   });
 
-  it('🔴 何も選んでいない右の列(コレクション + 整理案を適用)にも無い', () => {
+  it('🔴 何も選んでいない右の列(コレクション + 整理案を適用)も同じ', () => {
     const { root, inspector } = mount();
     inspector.render(initialState);
     expect(
       buttonsOf(root).map((b) => b.getAttribute('data-pkc-action')),
       '台がコレクションの操作を描けていない(空振り)',
     ).toContain('toggle-plan-apply');
-    expect(root.querySelectorAll(`[data-pkc-region="inspector"] :is(${ICON_SELECTOR})`)).toHaveLength(0);
+    expect(strayIcons(root)).toEqual([]);
   });
 
   it('🔴 字は 1 つも変わっていない ── 名前つきのボタンは、丸ごとの textContent が名前だけ(絵の字が前に付かない)', () => {

@@ -408,6 +408,49 @@ export function closeContextMenu(root: HTMLElement): void {
   if (mine && back instanceof HTMLElement && back.isConnected) back.focus();
 }
 
+/**
+ * 🔴 **開いてから user が「送る」入力をしたメニュー**(#1029 / #501)。
+ *
+ * ## なぜ要るか(実測で分かった筋)
+ *
+ * 保存の直後に右ペインの「書き出す ▾」を押すと、**一覧が勝手に消える**ことがあった。
+ * 実ブラウザ(headless_shell・負荷あり)で、閉じた原因を捕まえた:
+ * `ev=scroll` ── 押した器(右ペインの `aside`)の `scrollTop` が 168 → 148 に**ブラウザの都合で**動いた
+ * (`scrollTop` を書いた者は居ない ── 保存のあとに行の高さが変わって、位置が丸められた / 寄せられた)。
+ * 一覧を開く前に済んだ送り(#875)とは別で、**開いた後の、user が送っていない動き**である。
+ *
+ * 🔑 だから「位置が動いたか」(`scrollUnchangedSinceOpen`)に加えて、**user が送る入力をしたか**を見る:
+ *   ホイール / 指の移動 / キーでの送り / 器の外でのポインタ押下(スクロールバーの掴みを含む)。
+ *   ⚠ 描き直しやレイアウトの都合で動いたスクロールでは閉じない(閉じるのは user が送ったとき)。
+ * ⚠ 一覧の**要素ごと**に覚える(一覧は開くたびに新しい要素 ── 前の一覧の入力が次へ持ち越されない)。
+ */
+const userInputSeen = new WeakSet<Element>();
+
+/** user が送りうる入力を受けたら呼ぶ(binder が `wheel` / `touchmove` / `keydown` / `pointerdown` から)。 */
+export function noteMenuUserInput(root: HTMLElement, ev: Event): void {
+  const menu = menuOf(root);
+  if (menu === null) return;
+  const t = ev.target;
+  // 一覧の中の操作(項目への ↑↓ や、一覧自身の送り)は「背面を送る」入力ではない
+  if (t instanceof Node && menu.contains(t)) return;
+  if (ev.type === 'keydown') {
+    const k = (ev as KeyboardEvent).key;
+    if (!['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' '].includes(k)) return;
+  }
+  userInputSeen.add(menu);
+}
+
+/**
+ * 🔑 **この `scroll` で一覧を閉じるか**(判定は 1 か所。右クリックの一覧もボタンで開く一覧も同じに効く)。
+ * 閉じない: 一覧の中の送り / 開いた時点から動いていない(#875)/ 開いてから user が送る入力をしていない。
+ */
+export function scrollClosesMenu(root: HTMLElement, target: EventTarget | null): boolean {
+  if (scrollInsideMenu(root, target)) return false;
+  if (scrollUnchangedSinceOpen(root, target)) return false;
+  const menu = menuOf(root);
+  return menu !== null && userInputSeen.has(menu);
+}
+
 /** その `scroll` の発生源が、出ているメニューの中か(中で送っているだけなら閉じない)。 */
 export function scrollInsideMenu(root: HTMLElement, target: EventTarget | null): boolean {
   const menu = menuOf(root);

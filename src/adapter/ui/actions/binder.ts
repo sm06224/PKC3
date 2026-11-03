@@ -432,6 +432,7 @@ import {
   type EntryMenuContext,
   editingRowMenuActions,
   entryMenuActions,
+  ENTRY_ACTION_GROUPS,
   headingMenuActions,
   dateMenuActions,
   menuShortcutFor,
@@ -469,8 +470,8 @@ import { processToolOf } from '@features/capture/capture-process';
 import {
   type MenuItem,
   closeContextMenu,
-  scrollInsideMenu,
-  scrollUnchangedSinceOpen,
+  noteMenuUserInput,
+  scrollClosesMenu,
   contextMenuOpen,
   openContextMenu,
 } from '../render/context-menu';
@@ -521,7 +522,7 @@ import {
   type CloseViewWindowResult,
 } from '@adapter/platform/view-window';
 import { parseLinkTarget } from '@features/entry-ref/link-target';
-import { flashCopied, handleCopyMdBlock } from './copy-md-block';
+import { flashCopied, handleCopyMdBlock, MENU_FROM_ATTR } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
 import { formatTarget } from './format-target';
 import { installLongPress, LONG_PRESS_TARGET, LONG_PRESS_TARGETS } from './long-press';
@@ -554,6 +555,34 @@ import {
   copyHistoryMenu,
 } from '@adapter/ui/actions/copy-history-menu';
 import { copyLabel } from '@features/clipboard/history';
+
+/**
+ * 🔴 **隠した元のボタンの並びを、そのまま一覧の項目にする**(#1029 / #501。右の列の「書き出す ▾」)。
+ * ⚠ 畳んだ(`hidden`)ボタンは出さない。押せない(`disabled`)ボタンは押せない項目で残す(理由は説明欄が出す)。
+ * 🔑 字は `[data-pkc-field=label]`(`iconButton` が作る)、説明は `title`。
+ */
+function exportMenuItemsFrom(src: Element | null, opener: string, grouped = false): MenuItem[] {
+  if (src === null) return [];
+  const items: MenuItem[] = [];
+  for (const b of src.querySelectorAll<HTMLButtonElement>('button[data-pkc-action]')) {
+    if (b.hidden) continue;
+    const label = b.querySelector('[data-pkc-field="label"]')?.textContent ?? b.textContent ?? '';
+    if (label === '') continue;
+    items.push({
+      action: b.getAttribute('data-pkc-action') ?? '',
+      label,
+      hint: b.title,
+      disabled: b.disabled,
+      // 🔑 コピー系の合図は、閉じてしまう一覧の項目ではなく「書き出す ▾」のボタンに出す(`flashCopied` が読む)
+      attrs: { [MENU_FROM_ATTR]: opener },
+      // 🔑 塊は右クリックと同じ正本(`ENTRY_ACTION_GROUPS`)から ── 「バックアップ(ノート)」と「(フォルダ)」の間が空く
+      ...(grouped && ENTRY_ACTION_GROUPS[b.getAttribute('data-pkc-action') ?? ''] !== undefined
+        ? { group: ENTRY_ACTION_GROUPS[b.getAttribute('data-pkc-action') ?? '']! }
+        : {}),
+    });
+  }
+  return items;
+}
 
 /**
  * 🔴 **「コピーした物」を出す口は 1 つ**(#678)。鍵(`Mod+Shift+V` / パレット)と
@@ -5054,6 +5083,9 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   'open-capture-process',
   // 🔑 #1038 A1 ── 一覧の選択バーの「書き出す ▾」(選んだ N 件の書き出し方の一覧)
   'open-selection-export',
+  // 🔑 #1029 / #501 ── 右の列の「書き出す ▾」(ノート 1 件 / コレクション全体)
+  'open-export-menu',
+  'open-collection-export-menu',
 ]);
 
 /**
@@ -18320,6 +18352,30 @@ const ACTIONS: Record<string, ActionHandler> = {
     );
   },
   /**
+   * 🔴 **右の列の「書き出す ▾」**(#1029 / #501。user 裁定 2026-11-03)。ノート 1 件の書き出し系の一覧。
+   * 🔑 項目は隠した元のボタン(`inspector-export-source`)から読む ── 字・説明・押せない / 畳むの状態は
+   *   `inspector.ts` の `render` が元のボタンに書いたもの(2 本目の判定を持たない)。押す先は**既存の action**そのまま。
+   * ⚠ **対象のノートは押したボタンの `data-pkc-entry`**(選択中のノートから採らない)── 一覧の器は root の直下に出るので、
+   *   全項目へ写す(`carry`)。⚠ `MENU_OPENERS` に載せてある。
+   */
+  'open-export-menu': (_dispatcher, target, _services, root) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (!lid) return;
+    const src = target.closest('[data-pkc-field="inspector-actions"]')?.querySelector('[data-pkc-field="inspector-export-source"]');
+    const items = exportMenuItemsFrom(src ?? null, 'open-export-menu', true);
+    if (items.length === 0) return;
+    const r = target.getBoundingClientRect();
+    openContextMenu(root, { x: r.left, y: r.bottom }, items, target, { 'data-pkc-entry': lid });
+  },
+  /** 🔴 **右の列(何も選んでいないとき)の「書き出す ▾」**(#1029 / #501)。コレクション全体の書き出しの一覧。 */
+  'open-collection-export-menu': (_dispatcher, target, _services, root) => {
+    const src = target.closest('[data-pkc-field="collection-commands"]')?.querySelector('[data-pkc-field="collection-export-source"]');
+    const items = exportMenuItemsFrom(src ?? null, 'open-collection-export-menu');
+    if (items.length === 0) return;
+    const r = target.getBoundingClientRect();
+    openContextMenu(root, { x: r.left, y: r.bottom }, items, target);
+  },
+  /**
    * 🔴 **一覧で選んだ N 件だけの書き出し**(#1038 A1)。相手は `delete-selected` と**同じ規則**
    *   (左の列の見えている行に在る印)── 数と対象が食い違うと、帯の「N 件」が嘘になる。
    */
@@ -23770,12 +23826,19 @@ export function bindActions(
    *   (見出しのときだけ焦点を止める形にすると、**タイル側が残る** ── §7)。
    */
   const onScrollCloseMenu = (ev: Event): void => {
-    // 🔑 メニューの中で送っているだけ(背の低い画面で下の項目へ届かせる)なら閉じない
-    if (scrollInsideMenu(root, ev.target)) return;
-    if (scrollUnchangedSinceOpen(root, ev.target)) return;
+    // 🔑 判定は `context-menu.ts` の 1 か所(一覧の中の送り / 開く前に済んだ送り / user が送っていない動き は閉じない)
+    if (!scrollClosesMenu(root, ev.target)) return;
     closeContextMenu(root);
   };
   listen(root, 'scroll', onScrollCloseMenu, true);
+  /**
+   * 🔴 **user が送る入力を一覧に伝える**(#1029 / #501)。⚠ これが無いと、ブラウザの都合で動いたスクロール
+   *   (保存のあとの行の高さの変化など)でも一覧が消える。受け口は `context-menu.ts` の `noteMenuUserInput`。
+   */
+  const onMenuUserInput = (ev: Event): void => noteMenuUserInput(root, ev);
+  for (const type of ['wheel', 'touchmove', 'keydown', 'pointerdown'] as const) {
+    listen(root.ownerDocument, type, onMenuUserInput, true);
+  }
   listen(root.ownerDocument, 'keydown', onMenuKey);
   listen(root, 'keydown', onPlainPasteChord, true);
   listen(root, 'paste', onPaste);

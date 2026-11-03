@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor } from './helpers';
+import { clickReal, collectPageErrors, createEntry, gotoApp, openExportMenu, useSplitEditor } from './helpers';
 
 /**
  * 🔴 **「操作を探す」から「マニュアルを別のウィンドウで開く」**(#1452 案 1)。
@@ -801,8 +801,9 @@ test('🔴 パレットを外から閉じた後でも、編集を保存できる
   expect(srtText).toContain('さようなら');
 
   // 🔴 #1447 の残り ── 右の列に「字幕ファイル(.srt)で書き出す」が出て(時刻つきの行があるノートだけ)、押すと落ちる
-  const srtBtn = page.locator('[data-pkc-region="inspector"] [data-pkc-action="export-entry-srt"]');
-  await expect(srtBtn, '時刻つきの行があるノートなのに、右の列に字幕のボタンが出ていない').toBeVisible();
+  // 🔴 2026-11-03(#1029 / #501): 「書き出す ▾」の一覧の中の項目
+  const srtBtn = (await openExportMenu(page)).locator('[data-pkc-action="export-entry-srt"]');
+  await expect(srtBtn, '時刻つきの行があるノートなのに、右の列の書き出しの一覧に字幕が出ていない').toBeVisible();
   const srtDl2 = page.waitForEvent('download');
   await srtBtn.click();
   expect(readFileSync(await (await srtDl2).path(), 'utf8'), '右の列から落とした字幕が違う').toContain(

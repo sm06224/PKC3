@@ -969,3 +969,37 @@ export async function pickCaptureTool(page: Page, row: Locator, tool: string): P
   await clickReal(page, menu.locator(`[data-pkc-action="capture-process"][data-pkc-part="${tool}"]`));
   await expect(menu, '選んだのに一覧が閉じない').toBeHidden();
 }
+
+/**
+ * 🔴 **コレクション全体の書き出し(何も選んでいないときの「書き出す ▾」の一覧)の項目**(#1029 / #501)。
+ * ⚠ ノート 1 件の書き出し(`export-entry-*` など)とは別の一覧 ── 名前で明示する(DOM を見て推測しない)。
+ */
+const COLLECTION_EXPORT_ACTIONS: ReadonlySet<string> = new Set([
+  'export-html',
+  'export-portable',
+  'export-pkc2-html',
+  'export-markdown',
+  'export-markdown-folder',
+  'export-structure',
+]);
+
+/**
+ * 🔴 **書き出しを一覧から押す = user と同じ手順**(#1029 / #501)。「書き出す ▾」を実マウスで開き、一覧の項目を実マウスで押す。
+ * ⚠ `clickReal` に黙って変換させない ── 書き出しを押す spec がこの関数を**名指しで**呼ぶ。
+ */
+export async function clickExportMenuItem(page: Page, action: string): Promise<void> {
+  const menu = await openExportMenu(page, COLLECTION_EXPORT_ACTIONS.has(action) ? 'collection' : 'entry');
+  await expect(menu.locator(`[data-pkc-action="${action}"]`), `${action} が「書き出す ▾」の一覧に無い`).toBeVisible();
+  await clickReal(page, `[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`);
+}
+
+/** 「書き出す ▾」を実マウスで開き、一覧(右クリックと同じ器)を返す。 */
+export async function openExportMenu(page: Page, kind: 'entry' | 'collection' = 'entry'): Promise<Locator> {
+  await clickReal(
+    page,
+    `[data-pkc-region="inspector"] [data-pkc-action="${kind === 'entry' ? 'open-export-menu' : 'open-collection-export-menu'}"]`,
+  );
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '「書き出す ▾」を押しても一覧が出ない').toBeVisible();
+  return menu;
+}
