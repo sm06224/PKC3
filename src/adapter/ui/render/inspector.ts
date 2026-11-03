@@ -144,7 +144,8 @@ const SCAN_DEBOUNCE_MS = 250;
  * 説明は押す前に「何が入っているか」を言う(一覧の中身は選んだノートで変わる)。
  */
 export const EXPORT_MENU_LABEL = '書き出す ▾';
-const COLLECTION_EXPORT_MENU_HINT = 'コレクション全体の書き出し方(閲覧用 HTML / PKC3 入り HTML / PKC2 の HTML / Markdown / 構成のコピー)を選ぶ一覧を出します';
+const COLLECTION_EXPORT_MENU_HINT =
+  'コレクション全体の書き出し方(閲覧用 HTML / PKC3 入り HTML / PKC2 の HTML / Markdown / Markdown を PC のフォルダに書き出す(Chrome / Edge のみ)/ 構成のコピー)を選ぶ一覧を出します';
 const EXPORT_MENU_HINT = 'このノートの書き出し方(バックアップ / 閲覧用 HTML / Word / PowerPoint / PDF / Markdown など)を選ぶ一覧を出します';
 
 export class InspectorRenderer {
