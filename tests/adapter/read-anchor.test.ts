@@ -202,6 +202,32 @@ describe('戻した後の合わせ直し(#1525)', () => {
     expect(t.scroller.scrollTop).toBe(1060);
   });
 
+  it('🔴 ブラウザの調整で既に目印の位置に居た回も、その後に届く送りを「他人の送り」と読まない', () => {
+    /**
+     * ⚠ 直す前:高さが変わってブラウザのスクロールアンカーが**たまたま目印の位置へ**送った回は、合わせ直しが
+     *   「書かなくてよい」で終わり、**自分が置いた位置(`lastSet`)を古いまま**にしていた。その送りの `scroll` は
+     *   次のフレームで届き、高さはもう変わらないので「自分が書いていない送り」と読まれて**合わせ直しが止まる** ──
+     *   以後に焼けた図はもう合わせ直されず、戻ると別の行が出た(全量・並列の smoke で 761 行 → 835 行)。
+     */
+    const t = setup();
+    let sh = 5000;
+    Object.defineProperty(t.scroller, 'scrollHeight', { get: () => sh, configurable: true });
+    // ① 上の塊が焼けて高くなり、ブラウザが目印の位置(1160)へ送った ── 書く必要は無い
+    t.setHeights([200, ...Array(9).fill(100), 100, ...Array(9).fill(100)]);
+    sh = 6000;
+    t.scroller.scrollTop = 1160;
+    t.fire();
+    expect(t.scroller.scrollTop, '前提: 目印の位置に居る').toBe(1160);
+    // その送りの scroll は次のフレームで届く(高さはもう変わっていない)
+    t.scroller.dispatchEvent(new Event('scroll'));
+    // ② さらに上が焼けて、ブラウザは別の塊を保って送った ── 目印(1260)へ引き直すはず
+    t.setHeights([300, ...Array(9).fill(100), 100, ...Array(9).fill(100)]);
+    sh = 7000;
+    t.scroller.scrollTop = 1300;
+    t.fire();
+    expect(t.scroller.scrollTop, 'ブラウザの調整の送りを「他人の送り」と読んで、合わせ直しが止まった').toBe(1260);
+  });
+
   it('時間が過ぎたら止まる(高さが変わらなくても。常駐させない)', () => {
     vi.useFakeTimers();
     const t = setup();

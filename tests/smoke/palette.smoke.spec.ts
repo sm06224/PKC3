@@ -214,6 +214,16 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
    *   戻していなければ**全部が本文の先頭に入る**。`hello world` の 5 字目(`hello` と `world` の間)に caret を置いて呼ぶ。
    *   見るのは 5 つ:日付 / アイコン / 図(caret)/ ノートリンク(前から登記済みで同じ穴を持っていた)と、図(選んだ範囲)。
    */
+  /**
+   * ⚠ **今日のノートは作られて編集中で開く** ── そのまま「作る」を押しても、編集中は種類が disabled で押せない
+   *   (`browse.ts` の `BLOCKABLE_FIELDS`)。直す前の `clickReal` は disabled の項目を押して何も起きず、以下は
+   *   **新しいノートではなく今日のノートの中で**見ていた(`clickReal` が disabled を待つようにして表に出た)。
+   *   今日のノートの編集を確定してから、新しいノートを作る。
+   */
+  const commitToday = page.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(commitToday, '前提: 今日のノートが編集中で開いていない').toBeVisible();
+  await clickReal(page, commitToday);
+  await expect(commitToday).toHaveCount(0);
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-region="editor-live"]');
   const liveRow = page.locator('[data-pkc-field="row-source"]');

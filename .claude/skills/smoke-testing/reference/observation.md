@@ -370,3 +370,34 @@ for (let i = 0; i < 8; i += 1) {
 }
 expect(seen, `取り消しで打った字へ戻れない: ${JSON.stringify(seen)}`).toContain('打った字');
 ```
+
+## 負荷でだけ落ちる観測点の型 ── 「次の描画で起きること」を待たずに次へ進む(2026-11-03)
+
+全量を `--workers=4` で回すと描画(rAF)とイベントの配達が数百 ms 遅れる。単独で緑・全量で赤の多くは、
+**製品が次の描画で起こすこと**より先に test が次の手を打っていた形だった。どれも `waitForTimeout` を伸ばしても直らない。
+
+| 型 | 実例 | 待つもの |
+|---|---|---|
+| 仮想化された一覧を送った直後に `ROW.first()` | `left-list-sync`:遠くの塊の行を掴み、直後に塊ごと外れて `boundingBox()` が `null` | 先頭の行が**先頭に組まれて画面の中**(`toContainText('n0001')` + `toBeInViewport()`) |
+| ↑↓ / End の後すぐ `scrollTop` を書く | `left-list-sync`:`moveToRow` の rAF が後から `scrollIntoView` して下へ戻す | rAF を 2 回 |
+| `scrollTop` を書いた直後に面を替える | `layout`:位置の記憶(`scroll-memory.ts`)は `scroll` イベントで覚える。届く前に替えると古い位置へ飛ぶ | その `scroll` イベント |
+| ドラッグを始めてすぐ送る | `left-list-sync`:掴んだ行を覚えるのは `dragstart` | `dragstart` が届き、押した行を掴んだこと |
+| 押した直後に欄の値を 1 回読む | `schedule`:日付の窓は閉じた**後**の `then` で欄へ書く | `expect(欄).not.toHaveValue(前の値)` |
+| `clickReal` で disabled のボタンを押す | `schedule` / `keymap`:別のノートを選んで本文を読み直す間「編集」は disabled。pointer 系は届き click は出ない | `clickReal` 系が `:disabled` でなくなるまで待つ(`helpers.ts`。`aria-disabled` は待たない) |
+| 保存の応答で後から入る字を 1 回だけ読む | `layout`:作った直後の更新日の欄が空 | `not.toHaveText('')` |
+| `scrollIntoViewIfNeeded` の後に面の高さが変わる | `import`:下の帯が出て、送った要素が送れる箱の外へ押し出され「H3 に覆われた」と出た | `clickReal` は当たらなければ 1 回送り直してから測り直す(`helpers.ts` の `reachableOnce`、#1931) |
+| 心拍の欠測(壁時計)で門を張る | `attach` / `dual-filer`:CPU 30ms の仕事が奪い合いで 110〜150ms に伸びる。対照群は CPU を使わないので床が上がらない | 門は trace の `RunTask` の CPU 時間(`traceMainCpu`)。壁時計は記録に残す |
+
+| `locator.dblclick()` で 2 回押しを見る | `import`:2 回を同じフレームに撃つので、1 回目の描画(選んだ印・下端に貼り付くバー)が間に入らない | 同じ座標を `page.mouse.click` で 2 回、間に描画 1 回(user の速さ) |
+| 再生機を止めて「その時刻の絵」を撮る | `media-capture`:負荷で間隔が不揃いな録画では、止めた時刻にどの絵を見せるかが Chromium 任せ(境目の数 ms・空いた区間で前にも後ろにもずれる)。押す所をずらしても直らなかった | 比べる絵はブロックを WebCodecs で直に復号して作る(`decodeVp8`)。「押した所のフレーム」は時刻で決める |
+| 期限つきの押し口(7 秒で消える「元に戻す」)の前に確認を挟む | `dual-filer`:負荷で確認が延び、期限が切れる瞬間に押していた | 出たらすぐ押す。確認は後に回す |
+| 字が後から伸びる知らせの隣のボタンを押す | `dual-filer`:ゴミ箱の知らせが伸びて「元に戻す」が動き、押しが届かない | 位置が 250ms 続けて動かなくなってから押す |
+| 理由を出して断る門(取り込み・書き出し)へ続けて渡す | `import`:やめた取り込みの後始末が済む前に次を渡し「どれかが動いています」 | `assetGateIdle`(起動の印の `data-pkc-asset-busy` が外れる) |
+| 偽の時計で「入にした後」の予定を鳴らす | `multi-tab`:予定を「いま + 60 秒」の分にすると、分の頭が数秒先しか無い回に、入にするのが遅れて予定が過去になる | 予定は 2 分先の分。時計はそこまで回す |
+
+🔑 落ちた画面(error-context)と、押した瞬間の `pointerdown` / `pointerup` / `click` の記録を突き合わせると、
+「押したが届いていない」と「届いたが断られた」を分けられる(disabled は前者で、click だけが出ない)。
+
+⚠ 製品の穴だったのは 3 つ:2 クリックの判定がハンドラの時刻で測っていた(`pressedAtOf`)/ 図の合わせ直しが
+ブラウザのスクロールアンカーの送りを「他人の送り」と読んで止まっていた(`read-anchor.ts`)/ 選んだ瞬間に下端へ貼り付くバーが
+選んだ行を覆い、2 回目のクリックがバーに落ちていた(`bar-stick.ts` の `barCoversMarked`)。

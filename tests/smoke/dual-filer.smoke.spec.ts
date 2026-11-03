@@ -5,6 +5,8 @@ import {
   createEntry,
   expectMainGapUnderBudget,
   gotoApp,
+  markCpu,
+  traceMainCpu,
   openViewPane,
   useSplitEditor,
 } from './helpers';
@@ -278,15 +280,16 @@ test('🔴 F2 で名前を打ち替えられる (#273)', async ({ page }) => {
    *   右クリックしても印は崩れない(押した行が印の中なら印を保つ)。
    */
   const marks = page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`);
-  // 行が足りなければ、この場にノートを作って 2 行以上にする(Shift + F4。起動は増やさない)
-  await page.locator(ROWS('left')).first().click();
-  while ((await page.locator(ROWS('left')).count()) < 2) {
-    const n = await page.locator(ROWS('left')).count();
-    await page.keyboard.press('Shift+F4');
-    await expect(page.locator(ROWS('left')), '前提が崩れている(ノートが作れない)').toHaveCount(n + 1);
-  }
-  await page.locator(ROWS('left')).first().click();
-  await page.locator(ROWS('left')).nth(1).click({ modifiers: ['Control'] });
+  /**
+   * ⚠ **同じ行を素で 2 回続けて押さない** ── 500ms 以内の 2 回は「2 クリック」で、フォルダなら中へ入る
+   *   (`binder.ts` の `maybeDoubleOpen`。製品の約束どおり)。直す前はここで 1 行目(フォルダ)を素で 2 回押しており、
+   *   2 回の間隔が 500ms を切った回に左のペインがフォルダの中(0 件)へ入って、2 行目が無くなっていた
+   *   (全量・並列の smoke で実際に落ちた。落ちた画面は「› あたらしい名前 / ここには何もありません」)。
+   * 🔑 行は 2 行(はこ・ふた)在るので作り足さない。素で押すのは 2 行目、印を足すのは 1 行目(Ctrl)。
+   */
+  await expect(page.locator(ROWS('left')), '前提が崩れている(2 行ない)').toHaveCount(2);
+  await page.locator(ROWS('left')).nth(1).click();
+  await page.locator(ROWS('left')).first().click({ modifiers: ['Control'] });
   await expect(marks, '前提が崩れている(印が 2 件にならない)').toHaveCount(2);
   await page.keyboard.press('F2');
   await expect(input, '印が複数なのに名前の入力欄が出た').toHaveCount(0);
@@ -370,6 +373,12 @@ test('🔴 Shift + F4 で、いまの場所にノートを作る(面から出な
     '前提: 右が「新しいフォルダ」の中に入っていない',
   ).toContainText('新しいフォルダ');
   await page.locator(ROWS('left')).filter({ hasText: '新しいフォルダ' }).click();
+  // ⚠ 左の行に印が付いたのを見てから押す ── 「ゴミ箱へ」は印の付いた行に効く。直前まで右のペインを押していたので、
+  //   負荷で左の印が付く前に押すと何も移らない(全量の smoke で実際に落ちた)
+  await expect(
+    page.locator(`${ROWS('left')}[data-pkc-marked]`).filter({ hasText: '新しいフォルダ' }),
+    '前提: 左の「新しいフォルダ」に印が付いていない',
+  ).toHaveCount(1);
   await clickReal(page, '[data-pkc-field="dual-delete"]');
   await expect(
     page.locator(ROWS('left')).filter({ hasText: '新しいフォルダ' }),
@@ -724,7 +733,8 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
-  for (const t of ['け', 'こ', 'さ']) {
+  // ⚠ 4 件(最後に Delete で消した後も ↓ で動ける 2 件が残るように ── 下の ④)
+  for (const t of ['け', 'こ', 'さ', 'し']) {
     await createEntry(page, 'text');
     const title = page.locator('[data-pkc-field="editor-title"]');
     if (await title.count()) await title.fill(t);
@@ -735,6 +745,25 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
   const rows = page.locator(ROWS('left'));
   const before = await rows.count();
   expect(before, '前提が崩れている(行が無い)').toBeGreaterThan(1);
+  /** 状態の行の「元に戻す」を、位置が 250ms 続けて動かなくなってから押す(上の ① の注記)。 */
+  const undoWhenStill = async (): Promise<void> => {
+    const undo = page.locator('[data-pkc-field="status-undo"]');
+    await expect(undo, '「元に戻す」が出ていない').toBeVisible();
+    let last = '';
+    await expect
+      .poll(
+        async () => {
+          const b = await undo.boundingBox();
+          const now = b === null ? '' : `${Math.round(b.x)},${Math.round(b.y)}`;
+          const still = now !== '' && now === last;
+          last = now;
+          return still;
+        },
+        { message: '「元に戻す」の位置が落ち着かない', intervals: [250] },
+      )
+      .toBe(true);
+    await clickReal(page, undo);
+  };
   await rows.first().click();
 
   /**
@@ -744,20 +773,20 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
   await page.keyboard.press('Delete');
   await expect(page.locator('[data-pkc-region="app-dialog"][open]'), '確認が出ている').toHaveCount(0);
   await expect(rows, '押したのに消えていない').toHaveCount(before - 1);
-
-  // 消したあともキーボードが生きている(マウスを挟まず ↓ でカーソルが動く)
-  const cursorRow = page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-cursor]`);
-  // 🔴 消した直後からカーソルが在る(#1087。入れ替わりに来た行)── 1 回目の ↓ で別の行へ動く
-  await expect(cursorRow, '消した直後にカーソルが無い(↓ が先頭付近から始まる)').toHaveCount(1);
-  const cursorBefore = await cursorRow.first().getAttribute('data-pkc-entry');
-  await page.keyboard.press('ArrowDown');
-  await expect
-    .poll(() => cursorRow.first().getAttribute('data-pkc-entry'), '消したあと ↓ でカーソルが動かない')
-    .not.toBe(cursorBefore);
   await expect(page.locator('[data-pkc-region="status"]'), '移したことを言っていない').toContainText(
     'ゴミ箱へ移しました',
   );
-  await clickReal(page, '[data-pkc-field="status-undo"]');
+  const cursorRow = page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-cursor]`);
+  // 🔴 消した直後からカーソルが在る(#1087。入れ替わりに来た行)
+  await expect(cursorRow, '消した直後にカーソルが無い(↓ が先頭付近から始まる)').toHaveCount(1);
+  /**
+   * ⚠ **「元に戻す」は 7 秒で消える**(`trash-undo.ts` の `TRASH_OFFER_MS`)── 直す前はここで ↓ の確認を挟んでから押しており、
+   *   負荷で 7 秒を越えた回に、期限が切れる瞬間の「元に戻す」を押して何も起きなかった(全量・並列で実際に落ちた)。
+   *   🔑 消したらすぐ戻す。「消したあとも ↓ が効く」は最後(④)に、同じ Delete の道で見る。
+   * ⚠ それでも押しが届かない回が残った(押した後も「元に戻す」が出たまま)── ゴミ箱の知らせは字が後から伸びる
+   *   (「ほかのノートからリンクされているかもしれません」)ので、状態の行の「元に戻す」が押す直前に動く。位置が落ち着いてから押す。
+   */
+  await undoWhenStill();
   await expect(rows, '元に戻しても行が戻らない').toHaveCount(before);
 
   // ── ② もう一度消す ── 戻したあとも、行を選べば同じ鍵で消える(戻した行は選ばれていない)
@@ -769,7 +798,7 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
    * ── ③ 右クリックの「ゴミ箱へ移す」でも、消した後にカーソルが立ち、焦点が行にある(#1087 D1)。
    * 行が 2 件以上残る形に戻してから押す(↓ で動けるように)。
    */
-  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await undoWhenStill();
   await expect(rows, '前提が崩れている(戻していない)').toHaveCount(before);
   await rows.first().click({ button: 'right' });
   await page
@@ -785,6 +814,18 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
       '右クリックで消した後、焦点が行に無く ↓ が効かない',
     )
     .not.toBe(rcBefore);
+
+  // ── ④ Delete で消したあともキーボードが生きている(マウスを挟まず ↓ でカーソルが動く)
+  const left = await rows.count();
+  await rows.first().click();
+  await page.keyboard.press('Delete');
+  await expect(rows, 'Delete で消えていない').toHaveCount(left - 1);
+  await expect(cursorRow, '消した直後にカーソルが無い').toHaveCount(1);
+  const cursorBefore = await cursorRow.first().getAttribute('data-pkc-entry');
+  await page.keyboard.press('ArrowDown');
+  await expect
+    .poll(() => cursorRow.first().getAttribute('data-pkc-entry'), '消したあと ↓ でカーソルが動かない')
+    .not.toBe(cursorBefore);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
@@ -1152,12 +1193,18 @@ test('🔴 30 件を一度に移して全件が先に並び、元に戻すで全
     '前提: 30 件が選ばれている',
   ).toHaveCount(N);
 
-  // 対照群(何もしていない 600ms)
+  // 🔑 門は CPU 時間で見る(`traceMainCpu` の注記)── 3 つの窓を印で切って、同じ trace で採る
+  const stopCpuTrace = await traceMainCpu(page);
+
+  // 対照群(何もしていない 600ms)── ⚠ 窓の長さを決める待ちであって、状態を待つ待ちではない
+  await markCpu(page, 'base', 'begin');
   await startHeartbeat(page);
   await page.waitForTimeout(600);
   const base = await stopHeartbeat(page);
+  await markCpu(page, 'base', 'end');
 
   // ① 移す
+  await markCpu(page, 'move', 'begin');
   await startHeartbeat(page);
   await clickReal(page, '[data-pkc-field="dual-move"]');
   await expect(page.locator(ROWS('right')), '右に全件が並んでいない').toHaveCount(N);
@@ -1167,18 +1214,26 @@ test('🔴 30 件を一度に移して全件が先に並び、元に戻すで全
   ).toHaveCount(N);
   await expect(page.locator(ROWS('left')), '左に残っている').toHaveCount(1);
   const moved = await stopHeartbeat(page);
-  expectMainGapUnderBudget('30 件を移す', {
-    maxGap: moved.max, base: base.max, ticks: moved.ticks, baseTicks: base.ticks, top: moved.top, baseTop: base.top,
-  });
+  await markCpu(page, 'move', 'end');
 
   // ② 元に戻す
+  await markCpu(page, 'undo', 'begin');
   await startHeartbeat(page);
   await clickReal(page, '[data-pkc-field="status-undo"]');
   await expect(page.locator(ROWS('left')), '元に戻しても全件が戻らない').toHaveCount(N + 1);
   await expect(page.locator(ROWS('right')), '元に戻しても先に残っている').toHaveCount(0);
   const undone = await stopHeartbeat(page);
+  await markCpu(page, 'undo', 'end');
+
+  const cpuTrace = await stopCpuTrace();
+  const baseCpu = cpuTrace.window('base');
+  expectMainGapUnderBudget('30 件を移す', {
+    maxGap: moved.max, base: base.max, ticks: moved.ticks, baseTicks: base.ticks, top: moved.top, baseTop: base.top,
+    cpu: cpuTrace.window('move'), baseCpu,
+  });
   expectMainGapUnderBudget('30 件を元に戻す', {
     maxGap: undone.max, base: base.max, ticks: undone.ticks, baseTicks: base.ticks, top: undone.top, baseTop: base.top,
+    cpu: cpuTrace.window('undo'), baseCpu,
   });
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

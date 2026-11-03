@@ -15,7 +15,8 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, expectImageRendered, useSplitEditor,
-  gotoCollectionPane, clickExportMenuItem } from './helpers';
+  gotoCollectionPane, expectReachable, writesLanded, assetGateIdle, clickExportMenuItem,
+} from './helpers';
 import { withStateOnFail } from './state-dump';
 import { chromiumLaunch } from './playwright.config';
 
@@ -99,8 +100,31 @@ async function enterFolderRow(page: Page, selector: string): Promise<void> {
    * 2 回のクリックが別のノードに落ちて `dblclick` が出ない
    * (再描画で node が差し替わるのは正常 ── `helpers.ts` の `withRerenderRetry` と同じ話)。
    * locator 側は「安定するまで待ってから押す」ので、その窓が消える。
+   *
+   * 🔴 **送ってから、その送りが届くまで待ってから押す**(全量・並列の smoke で「フォルダを開き直してもノートが見えない」
+   *   と落ちた回の直し。落ちた画面はルートのまま、一覧は途中まで送られていた)。
+   * ⚠ 一覧の位置は `scroll` イベントで覚える(`scroll-memory.ts`)。`dblclick()` が行を見える所へ送った直後に、
+   *   その前の操作(パンくずでルートへ戻る)の描き直しが来ると、届いていない送りを古い位置へ書き戻し、2 回のクリックが
+   *   別の行へ落ちる。user の手の送りは `scroll` を出し続けるので、この順番にはならない ── 観測の順番の問題である。
+   * 🔑 だから ①積まれた描画を済ませる → ②行を送る → ③その送りの `scroll` が届く(描画 2 回)→ 押す。
+   *
+   * 🔴 **押すのは user と同じ形 ── 同じ所を 2 回、間に描画が入る**(`locator.dblclick()` は 2 回を同じフレームに撃つので、
+   *   1 回目の描画が 2 回目より前に入らない)。⚠ 直す前は、画面の下のほうの行を 2 回押すと、1 回目で選んだ瞬間に
+   *   「N 件を選んでいます」の帯が一覧の下端に貼り付いてその行を覆い、2 回目が帯に落ちて入れなかった
+   *   (`bar-stick.ts` の `barCoversMarked`。この file の P7 段②で、フォルダの行が一覧の最後の行だった回に落ちた)。
+   *   座標は 1 回だけ採る(人は 2 回目の前に狙い直さない)。
    */
-  await page.locator(selector).first().dblclick();
+  const frames = (): Promise<void> =>
+    page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  const row = page.locator(selector).first();
+  await frames();
+  await row.scrollIntoViewIfNeeded();
+  await frames();
+  const at = await expectReachable(page, row);
+  await page.mouse.click(at.x, at.y);
+  // 1 回ぶんの描画を挟む(rAF の後の描画が済むまで)── ⚠ 2 回の間は 500ms の窓の内に収める(rAF 2 回は負荷で窓を越えうる)
+  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0))));
+  await page.mouse.click(at.x, at.y);
 }
 
 test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画される', async ({ page }) => {
@@ -799,6 +823,24 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   await expect(page.locator('[data-pkc-region="filer-breadcrumb"]'), '前提:押す前は左の一覧はルート').not.toContainText(
     '大量フォルダ',
   );
+  /**
+   * ⚠ **取り込みの書き込みが済み、押し口の位置が落ち着いてから押す**(全量・並列の smoke で 2 通りに落ちた:
+   *   「H3 に覆われた」/ 押せたのに中へ移らない)。取り込みの後に「取り込み時の注意」の帯が遅れて出ると、面が縮んで
+   *   押し口が動く ── 押す直前に動けば、クリックは別の物に落ちる。user から見ても押す前に動く物は押さない。
+   */
+  await writesLanded(page);
+  let lastY = Number.NaN;
+  await expect
+    .poll(
+      async () => {
+        const y = (await more.boundingBox())?.y ?? Number.NaN;
+        const still = y === lastY;
+        lastY = y;
+        return still;
+      },
+      { message: '「ほか N 件」の位置が落ち着かない', intervals: [250] },
+    )
+    .toBe(true);
   await clickReal(page, more);
   await expect(
     page.locator('[data-pkc-region="filer-breadcrumb"]'),
@@ -1171,9 +1213,11 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
     target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
     target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
   }, zipBytes);
-  const droppedConfirm = await answerAppDialog(page, 'cancel');
+  const droppedConfirm = await answerAppDialog(page, 'cancel', { timeout: 15_000 });
   expect(droppedConfirm, '落としたバックアップに取り込みの確認が出ない').toMatch(/ノート \d+ 件/);
   await expect(rows, '「やめる」を押したのに件数が増えた').toHaveCount(2);
+  // ⚠ やめた取り込みの後始末が済むまで待つ ── 済む前に渡すと、門が「どれかが動いています」と断る(作りどおり。全量・並列で落ちた)
+  await assetGateIdle(page);
 
   // 🔴 取り込み直す ── **自分の書出しを自分で読み戻せる**ことがバックアップの条件
   await page.setInputFiles('[data-pkc-field="import-input"]', {
@@ -1183,7 +1227,8 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   });
   // 🔴 #1017 段④b 追補: PKC3 のバックアップは取込前に中身を確認する ──
   // ノート・添付・つながり・履歴の表が出て、「取り込む」を押すまで進まない
-  const confirmText = await answerAppDialog(page, 'ok');
+  // ⚠ 表は zip の中身を読んでから出す ── 負荷で 5 秒を越えて落ちた(全量・並列)。速さはこの test の主張ではないので 15 秒待つ
+  const confirmText = await answerAppDialog(page, 'ok', { timeout: 15_000 });
   expect(confirmText).toMatch(/ノート \d+ 件/);
   // 🔴 #1852 束 F2: 確認の表に、ゴミ箱のノートが「ゴミ箱に入った状態で戻ります」と出る(`archive-preview.ts`)
   expect(confirmText, '確認にゴミ箱のノートが出ない').toContain('ゴミ箱のノート 1 件(ゴミ箱に入った状態で戻ります)');

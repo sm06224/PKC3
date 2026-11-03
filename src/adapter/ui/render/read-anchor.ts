@@ -151,10 +151,21 @@ export function installReadAnchorHold(
   }
   function realign(): void {
     if (done) return;
-    const to = realignTarget(resolveReadAnchor(host, scroller, anchor), scroller.scrollTop);
+    const want = resolveReadAnchor(host, scroller, anchor);
+    const to = realignTarget(want, scroller.scrollTop);
     if (to !== null) {
       scroller.scrollTop = to;
       lastSet = scroller.scrollTop; // ⚠ 書いた値ではなく、丸められた後の値
+    } else if (want !== null) {
+      /**
+       * 🔴 **既に目印の位置に居るなら、いまの位置を「自分の位置」として受け取る**。
+       * ⚠ 直す前はここで何もしなかった ── 高さが変わってブラウザのスクロールアンカーが**たまたま目印の位置へ**送った回は
+       *   `lastSet` が古いまま残り、その送りの `scroll`(次のフレームで届く。高さはもう変わっていない)を
+       *   ②「自分が書いていない送り」と読んで**合わせ直しを止めていた**。以後に焼けた図は合わせ直されず、
+       *   戻ると別の行が出た(全量・並列の smoke で、図 40 枚のノートが 761 行 → 835 行)。
+       * ⚠ 目印が取れないとき(`want === null`)は受け取らない ── どこが正しいか分からない位置を自分の物にしない。
+       */
+      lastSet = scroller.scrollTop;
     }
     lastHeight = scroller.scrollHeight;
   }
