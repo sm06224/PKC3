@@ -9,6 +9,7 @@ import {
   expectReachable,
   gotoApp,
   useSplitEditor,
+  writesLanded,
 } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -1204,9 +1205,27 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
       }),
   );
 
-  // 溢れの真ん中あたりへ置く(端だと「戻った」と「動いていない」が区別できない)
-  await host.evaluate((el) => (el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2)));
-  const parked = await host.evaluate((el) => el.scrollTop);
+  /**
+   * 溢れの真ん中あたりへ置く(端だと「戻った」と「動いていない」が区別できない)。
+   * ⚠ **置いた位置の `scroll` が届くまで待つ** ── 一覧は位置を `scroll` イベントで覚える(`scroll-memory.ts`。
+   *   描き直しの中で `scrollTop` を読まない作り)。`scroll` は次の描画で届くので、置いた直後に絞り込むと、
+   *   負荷で描画が遅れた回は**覚える前**に面が替わり、戻したときに古い位置へ飛ぶ(全量・並列で実際に落ちた: 308px)。
+   *   user の手の送りは `scroll` を出し続けるので、この順番にはならない ── 観測の順番の問題である。
+   */
+  const parkMiddle = (): Promise<number> =>
+    host.evaluate(
+      (el) =>
+        new Promise<number>((resolve) => {
+          const to = Math.floor((el.scrollHeight - el.clientHeight) / 2);
+          if (el.scrollTop === to) {
+            resolve(el.scrollTop);
+            return;
+          }
+          el.addEventListener('scroll', () => resolve(el.scrollTop), { once: true });
+          el.scrollTop = to;
+        }),
+    );
+  const parked = await parkMiddle();
   // ⚠ 端に張り付いていないこと(0 でも最下端でもない = 記憶する意味がある位置)
   expect(parked, 'park した位置が先頭のまま(観測の前提が崩れている)').toBeGreaterThan(20);
   expect(
@@ -1249,8 +1268,7 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
   //    ── 直す前は全行を作り直していた(5,700 件で 2.7 秒・約 +185〜190 MB)。起動を増やさず、同じ道中に足す。
   await page.locator('[data-pkc-field="entry-filter"]').fill('');
   await expect(rows).toHaveCount(32);
-  await host.evaluate((el) => (el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2)));
-  const parked2 = await host.evaluate((el) => el.scrollTop);
+  const parked2 = await parkMiddle();
   expect(parked2, 'park した位置が先頭のまま(観測の前提が崩れている)').toBeGreaterThan(20);
   // 行の node に目印を付けて、足した後も同じ node かを見る(作り直されると目印が消える)
   await rows.nth(10).evaluate((el) => el.setAttribute('data-probe-kept', '1'));
@@ -1928,6 +1946,11 @@ test('🔴 フォルダ面は行の頭に種別、右端に更新日を出す', 
     hasText: 'フォルダ面で見る',
   });
   await expect(row).toBeVisible();
+  /**
+   * ⚠ 更新日は保存の応答(ack)で入る ── 作った直後は空のことがある。負荷で応答が遅れた回に、空の欄を 1 回だけ読んで
+   *   落ちた(全量・並列)。入るまで待ってから測る(字の形は下の ③ が見る)。
+   */
+  await expect(row.locator('td').last(), '作ったノートの更新日が入らない(保存の応答が届かない)').not.toHaveText('');
 
   const m = await row.evaluate((tr) => {
     const cells = [...tr.querySelectorAll('td')];
@@ -2547,6 +2570,14 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
     page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${createdLid}"] td:nth-child(2)`),
     '作ったノートの ack が返っていない',
   ).not.toHaveText('');
+  /**
+   * 🔴 **飛んでいる書込が disk へ届いてから読み直す**(全量・並列の smoke で「中に居ない」と落ちた回の直し)。
+   * ⚠ 作ったノートの ack(上)は**作成の 1 本**の到着でしかない ── 題名は本文の見出しから**後で**書き換わる
+   *   (`RENAME_ENTRY_TITLE` は画面が先・disk が後。`writesLanded` の注記)。届く前に読み直すと題名だけ既定へ戻り、
+   *   題名順の一覧で**並びが入れ替わって**「居場所が失われた」に見える。「保存直後に読み直しても消えない」は
+   *   #828 の主張であって、この test の主張(居場所が disk から読み戻る)ではない。
+   */
+  await writesLanded(page);
   await gotoApp(page);
   await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
   /**
@@ -2556,17 +2587,18 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
    * ⚠ 旧い期待(ルートから始まる)は成り立たない ── ルートへ出て、入れたノートが居ないこと(対照群)と、
    *   2 クリックで入り直せること(入り口の動線)は残す。
    */
-  expect(await lidsOf(), '読み込み直したら、開いていたフォルダの中に居ない(居場所が失われた)').toEqual([
-    noteLid,
-    createdLid,
-  ]);
+  // ⚠ 一覧は読み直した後に組み上がる ── その瞬間の 1 回だけ読まず、届くまで待つ(`expect.poll`)
+  await expect
+    .poll(lidsOf, { message: '読み込み直したら、開いていたフォルダの中に居ない(居場所が失われた)' })
+    .toEqual([noteLid, createdLid]);
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
-  // ルートには**入れたノートが居ない**
+  // ルートには**入れたノートが居ない**(⚠ 押した後の描き直しを待つ ── 先に「フォルダが在る」ルートの姿を待つ)
+  await expect.poll(lidsOf, { message: 'パンくずで出たのにルートの一覧にならない' }).toContain(folderLid);
   expect(await lidsOf(), 'ルートに残っている').not.toContain(noteLid);
   // ⚠ 入るのは**2 クリック**(#240 段①)。`locator.dblclick()` は安定するまで待つ ──
   //    座標を先に採ると、採ってから押すまでの再描画で 2 回が別ノードに落ちる
   await page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${folderLid}"]`).dblclick();
-  expect(await lidsOf(), '入り直したら居場所が失われた').toEqual([noteLid, createdLid]);
+  await expect.poll(lidsOf, { message: '入り直したら居場所が失われた' }).toEqual([noteLid, createdLid]);
 
   expect(errors).toEqual([]);
 });

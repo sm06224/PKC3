@@ -184,8 +184,9 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
    */
   const manual = page.locator('[data-pkc-region="help-manual"]');
   await expect(manual).toBeVisible();
+  // ⚠ マニュアルはワーカーで丸ごと描く ── 負荷で遅れる。待つ長さは 1 本目(目次の行)と同じ 15 秒に揃える
   await expect(manual.locator('h2', { hasText: '画面を組み替える' })).toBeVisible({
-    timeout: 10_000,
+    timeout: 15_000,
   });
 
   /**
@@ -260,9 +261,10 @@ test('🔴 マニュアルを開いても、本文の #リンクは本文へ着�
 
   // マニュアルを描かせる(ここで初めて help 側の id が生える)
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+  // ⚠ マニュアルはワーカーで丸ごと描く ── 負荷で遅れる(全量・並列で 10 秒を越えて落ちた)。1 本目と同じ 15 秒に揃える
   await expect(
     page.locator('[data-pkc-region="help-manual"] h2', { hasText: '画面を組み替える' }),
-  ).toBeVisible({ timeout: 10_000 });
+  ).toBeVisible({ timeout: 15_000 });
 
   const r = await page.evaluate(() => {
     const paneOf = (el: Element | null): string | null =>
@@ -785,7 +787,13 @@ test('🔴 マニュアルの中を探して、押すとその節まで送られ
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
 
   const host = page.locator('[data-pkc-region="help-manual"]');
-  await expect(host.locator('h1,h2,h3').first()).toBeVisible();
+  /**
+   * ⚠ **描き上がった見出しを、同じ file の 1 本目と同じ長さ(15 秒)待つ**(全量・並列の smoke で、既定の 5 秒では
+   *   「マニュアルを読み込んでいます…」のまま落ちた)。マニュアルは開いたときにワーカーで丸ごと描く(`help.ts` の
+   *   `drawManual`)── 負荷でワーカーの立ち上げと描画が遅れる。1 本目(目次の行)は元から 15 秒待っていた。
+   *   ⚠ 見るのは見出し(描けずに素の原文へ落ちた回は見出しが 0 本なので、ここで落ちる)。
+   */
+  await expect(host.locator('h1,h2,h3').first(), 'マニュアルの見出しが描かれない').toBeVisible({ timeout: 15_000 });
 
   // ⚠ 空振り防止 ── 打つ前の字数を控える(畳んでいないことを後で見る)
   const before = ((await host.textContent()) ?? '').length;

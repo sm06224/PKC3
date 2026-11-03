@@ -297,3 +297,42 @@ describe('並べ替えモード(#857 段①b-2)', () => {
     expect(opened).toEqual([]);
   });
 });
+
+describe('タイルの 2 回押し ── 押した時刻で測る', () => {
+  const clickAt = (lid: string, at: number): void => {
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'timeStamp', { value: at - performance.timeOrigin });
+    tileEl(lid).dispatchEvent(ev);
+  };
+
+  it('🔴 素早く 2 回押せば、2 回目のハンドラが遅れて走っても開く', () => {
+    /**
+     * ⚠ 直す前は `pressedTileAgain` がハンドラの走った時の `Date.now()` で測っていた ── 1 回目の描き直しで
+     *   メインが塞がると、素早い 2 回目でも窓を越えて開かなかった。🔑 ハンドラの時計を 2 秒進め、押した時刻は 120ms 差。
+     */
+    const now = vi.spyOn(Date, 'now');
+    try {
+      const t0 = performance.timeOrigin + 5_000_000;
+      now.mockReturnValue(t0);
+      clickAt('a1', t0);
+      now.mockReturnValue(t0 + 2_000);
+      clickAt('a1', t0 + 120);
+      expect(opened, '素早く 2 回押したのに開かない').toEqual(['a1']);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('対照群: 押した時刻が 5 秒離れていれば開かない(ハンドラの時計が同じでも)', () => {
+    const now = vi.spyOn(Date, 'now');
+    try {
+      const t0 = performance.timeOrigin + 6_000_000;
+      now.mockReturnValue(t0);
+      clickAt('a1', t0);
+      clickAt('a1', t0 + 5_000);
+      expect(opened, '5 秒空いたのに開いた').toEqual([]);
+    } finally {
+      now.mockRestore();
+    }
+  });
+});

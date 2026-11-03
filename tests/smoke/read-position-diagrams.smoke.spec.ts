@@ -46,27 +46,67 @@ async function makeNote(page: Page, body: string): Promise<void> {
   await expect(page.locator('[data-pkc-field="append-input"]')).toBeVisible();
 }
 
+/** 本文の図 40 枚がすべて焼けた(`data-pkc-mermaid-state="ready"`)。 */
+async function allDiagramsReady(page: Page): Promise<void> {
+  await expect
+    .poll(() => page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-state="ready"]').count(), {
+      message: '図 40 枚が焼け終わらない',
+      timeout: 60_000,
+    })
+    .toBe(40);
+}
+
+/** 描画を 2 周待つ(1 周目で配置、2 周目でその結果の後始末が済む)。 */
+async function nextFrames(page: Page): Promise<void> {
+  await page.evaluate(
+    () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
+  );
+}
+
+/**
+ * 本文の高さ(`scrollHeight`)が落ち着いた ── 250ms あけて 2 回続けて同じ値。
+ * ⚠ 焼けた絵は `<img>` の decode の後に高さを持つので、`ready` の印だけでは高さはまだ動きうる。
+ */
+async function heightSettled(page: Page): Promise<void> {
+  let prev = -1;
+  await expect
+    .poll(
+      async () => {
+        const sh = (await firstVisible(page)).sh;
+        const same = sh === prev;
+        prev = sh;
+        return same;
+      },
+      { message: '本文の高さが落ち着かない', timeout: 30_000, intervals: [250] },
+    )
+    .toBe(true);
+}
+
 for (const diagrams of [true, false]) {
   test(`🔴 別のノートを選んで戻ると、読んでいた塊が戻る(図${diagrams ? 'あり' : 'なし'}) (#1525)`, async ({ page }) => {
+    /**
+     * ⚠ **この筋書きは 30 秒に収まらない**(全量・並列の smoke で時間切れになった)── 図 40 枚を焼く待ち(下の `poll` は
+     *   元から 60 秒を名乗っていたが、per-test の 30 秒で先に切れていた)と、戻した後の「合わせ直しの上限」
+     *   (`read-anchor.ts` の `HOLD_MS` = 8 秒)を跨いで見る時系列の採り方が、どちらも製品の時間そのものだからである。
+     * 🔑 縮めたのは**状態で待てる所**(図の焼き上がり・高さの落ち着き・描画の 1 周)で、時系列の採り方(200ms〜8 秒)は
+     *   主張そのもの(上限が過ぎた後も塊が同じ所にある)なので変えない。
+     */
+    test.setTimeout(diagrams ? 120_000 : 60_000);
     const errors = collectPageErrors(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await gotoApp(page);
     await dismissAnnounce(page);
     await makeNote(page, longBody(diagrams));
-    if (diagrams) {
-      await expect
-        .poll(() => page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-state="ready"]').count(), {
-          timeout: 60_000,
-        })
-        .toBe(40);
-    }
-    await page.waitForTimeout(1500);
+    if (diagrams) await allDiagramsReady(page);
+    // ⚠ 固定の 1.5 秒ではなく「本文の高さが落ち着いた」を待つ(焼けた絵の decode で高さが後から動く)
+    await heightSettled(page);
     const sh0 = (await firstVisible(page)).sh;
     expect(sh0, '送れる本文でない').toBeGreaterThan(5000);
     await page.evaluate((y) => {
       document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!.scrollTop = y;
     }, Math.round(sh0 / 2));
-    await page.waitForTimeout(800);
+    // 送った後の 2 回の描画を待つ(送りの後始末 ── 位置を読むのは配置が済んでから)
+    await nextFrames(page);
     const before = await firstVisible(page);
     expect(before.line, '目印の塊が拾えない').toBeGreaterThan(0);
 
@@ -107,7 +147,12 @@ for (const diagrams of [true, false]) {
       .poll(async () => (await firstVisible(page)).top, { timeout: 2000, intervals: [20] })
       .toBeGreaterThan(back.top + 2000);
     const wheeled = await firstVisible(page);
-    await page.waitForTimeout(3000);
+    /**
+     * ⚠ 固定の 3 秒ではなく、「焼き上がった(図あり)/ 高さが落ち着いた」を待つ ── 負荷で焼きが 3 秒を越えると、
+     *   焼け切る前の位置を「落ち着いた後」と読んでいた(下の空振り防止 `sh` の差もそこで割れる)。
+     */
+    if (diagrams) await allDiagramsReady(page);
+    await heightSettled(page);
     const settled = await firstVisible(page);
     console.log(`PROBE2 diagrams=${diagrams} back=${JSON.stringify(back)} wheeled=${JSON.stringify(wheeled)} settled=${JSON.stringify(settled)}`);
     if (diagrams) {

@@ -1223,21 +1223,47 @@ describe('「もう一度押す」の窓(#240 段①)', () => {
     document.body.textContent = '';
   });
 
+  /**
+   * 押した時刻(`Event.timeStamp`)を指定してクリックを撃つ。
+   * ⚠ 「続けて押したか」は**押した時刻**で測る(`pressedAtOf`)── ハンドラが走った時刻(`Date.now()`)ではない。
+   *   unit の 2 回のクリックは同じミリ秒に撃たれるので、時刻を差し替えないと 500ms の窓を 1 度も通らない。
+   */
+  const clickAt = (el: HTMLElement, at: number): void => {
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'timeStamp', { value: at - performance.timeOrigin });
+    el.dispatchEvent(ev);
+  };
+
   it('🔴 間が空いたら「2 回押した」と数えない(席を立って戻ったら入る、を作らない)', () => {
-    // ⚠ 観測点は `Date.now` ── unit の 2 回のクリックは**同一ミリ秒**で走るので、
-    //   差し替えないと 500ms の窓を 1 度も通らない(通らない経路は守れない)
-    const now = vi.spyOn(Date, 'now');
-    now.mockReturnValue(1_000);
     const { q, d } = setup([meta('f1', 1, 'folder'), meta('n1', 2)], []);
     const row = () => q<HTMLElement>('tbody [data-pkc-entry="f1"]')!;
-    row().click();
-    now.mockReturnValue(6_000); // 5 秒後
-    row().click();
+    const t0 = performance.timeOrigin + 1_000_000;
+    clickAt(row(), t0);
+    clickAt(row(), t0 + 5_000); // 5 秒後
     expect(d.getState().scopeLid, '5 秒空いたのに「続けて押した」と数えた').toBeNull();
-    now.mockReturnValue(6_200); // 続けて押した
-    row().click();
+    clickAt(row(), t0 + 5_200); // 続けて押した
     expect(d.getState().scopeLid, '続けて押しても入らない').toBe('f1');
-    now.mockRestore();
+  });
+
+  it('🔴 素早く 2 回押せば、2 回目のハンドラが遅れて走っても入る(押した時刻で測る)', () => {
+    /**
+     * ⚠ 直す前はハンドラが走った時の `Date.now()` で測っていた ── 1 回目の押しの描き直しでメインが塞がると、
+     *   素早い 2 回目でも 500ms を越えて「続けて押した」にならなかった(全量・並列の smoke で実際に落ちた)。
+     * 🔑 ここでは**ハンドラの時計を 2 秒進めて**(メインが塞がった後)、**押した時刻は 120ms 差**の 2 回を撃つ。
+     */
+    const now = vi.spyOn(Date, 'now');
+    try {
+      const { q, d } = setup([meta('f1', 1, 'folder'), meta('n1', 2)], []);
+      const row = () => q<HTMLElement>('tbody [data-pkc-entry="f1"]')!;
+      const t0 = performance.timeOrigin + 2_000_000;
+      now.mockReturnValue(t0);
+      clickAt(row(), t0);
+      now.mockReturnValue(t0 + 2_000); // 1 回目の後、メインが 2 秒塞がった
+      clickAt(row(), t0 + 120); // 押したのは 120ms 後
+      expect(d.getState().scopeLid, '素早く 2 回押したのに、ハンドラが遅れたせいで入らない').toBe('f1');
+    } finally {
+      now.mockRestore();
+    }
   });
 });
 

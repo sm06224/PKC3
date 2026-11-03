@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, writesLanded } from './helpers';
 import { chromiumLaunch } from './playwright.config';
 // ⚠ 手で書き写さない ── `[data-pkc-field="capture-trim"]` の textContent は
 //   `trimMarkText()` の戻り値そのもの(`captures.ts`)。字を直した日に
@@ -212,6 +212,12 @@ test('🔴 録音を止めると本文に入り、その場で聞ける (#413 �
   // 🔴 知らせの隣に「開く」が出る(片道の操作を作らない)── 押すと録り始めたノート A に着く
   await expect(openA, '知らせの隣に「開く」が出ていない(録音の入れ先の知らせに行き先の押し口が付いていない)').toBeVisible();
   await expect(openA).toContainText('開く');
+  /**
+   * ⚠ **録音を本文へ入れる書き込みが届いてから押す**(全量・並列の smoke で「止めたら別の物が開いている」と 2 回落ちた)。
+   *   状態の行の押し口は、その書き込みの応答で書き換わる(実測: 押す直前は「移動を元に戻す」、押した後は「追記を元に戻す」)──
+   *   書き換わる最中に押すと、押した所に押し口が無い回がある。
+   */
+  await writesLanded(page);
   await clickReal(page, '[data-pkc-field="status-open"]');
 
   // ③ 🔴 **「開く」で A に着く**(添付が奪った選択が戻っているのと同じ見え方)
@@ -1498,7 +1504,7 @@ async function recordScreenForTrim(page: Page) {
   }
   if (!Number.isFinite(startSec)) throw new Error(`切り出しの範囲を決められる区切りが録れていない(区切り ${keys.join(',')} / 長さ ${durNum})`);
   test.info().annotations.push({ type: '録れた動画の区切り(ミリ秒)/ 切り出す範囲(秒)', description: `${keys.join(',')} / ${startSec}〜${endSec}` });
-  return { screenRow, screenMedia, durNum, seekVideo, startSec, endSec, srcScan: scanned.scan };
+  return { screenRow, screenMedia, durNum, seekVideo, startSec, endSec, srcScan: scanned.scan, srcBytes };
 }
 
 /**
@@ -1582,6 +1588,59 @@ async function frameAt(
   return cur;
 }
 
+/**
+ * 🔑 VP8 のブロックを WebCodecs で直に復号し、`grabFrame` と同じ大きさ・同じ明るさの式で絵にする(再生機の見せ方に依存しない)。
+ * ⚠ 渡すのは区切り(キーフレーム)から始まる並び。返るのは復号できたフレームの時刻と絵。
+ */
+async function decodeVp8(
+  page: Page,
+  width: number,
+  height: number,
+  chunks: readonly { data: string; key: boolean; ms: number }[],
+): Promise<{ ms: number; px: number[] }[]> {
+  return page.evaluate(
+    async ({ width, height, chunks }) => {
+      const W = 64;
+      const H = 36;
+      const c = document.createElement('canvas');
+      c.width = W;
+      c.height = H;
+      const g = c.getContext('2d', { willReadFrequently: true })!;
+      const out: { ms: number; px: number[] }[] = [];
+      let failed: unknown = null;
+      const dec = new VideoDecoder({
+        output: (f) => {
+          const ms = Math.round(f.timestamp / 1000);
+          g.drawImage(f, 0, 0, W, H);
+          f.close();
+          const d = g.getImageData(0, 0, W, H).data;
+          const px: number[] = [];
+          for (let i = 0; i < W * H; i += 1) px.push(0.3 * d[i * 4]! + 0.59 * d[i * 4 + 1]! + 0.11 * d[i * 4 + 2]!);
+          out.push({ ms, px });
+        },
+        error: (e) => {
+          failed = e;
+        },
+      });
+      dec.configure({ codec: 'vp8', codedWidth: width, codedHeight: height });
+      for (const ch of chunks) {
+        dec.decode(
+          new EncodedVideoChunk({
+            type: ch.key ? 'key' : 'delta',
+            timestamp: ch.ms * 1000,
+            data: Uint8Array.from(atob(ch.data), (x) => x.charCodeAt(0)),
+          }),
+        );
+      }
+      await dec.flush();
+      dec.close();
+      if (failed !== null) throw new Error(`復号できない: ${String(failed)}`);
+      return out;
+    },
+    { width, height, chunks },
+  );
+}
+
 /** 切り出した動画そのものを別の `<video>` に読み込んで検める(画面の器の読み込み具合ではない)。 */
 async function probeCutFile(cutMedia: Locator) {
   const cutBytes = await readMediaBytes(cutMedia, '切り出した動画');
@@ -1645,20 +1704,51 @@ test('🔴 画面録画を押した所ぴったりに切り出せる:確認が�
   // 録画 9 秒 + 前後 7 枚の撮影 + 切り出し + 検めで、負荷のある環境では既定の 30 秒を超える(#1851)
   test.setTimeout(90_000);
   const errors = collectPageErrors(page);
-  const { screenRow, screenMedia, seekVideo, startSec, endSec, srcScan } = await recordScreenForTrim(page);
+  const { screenRow, seekVideo, startSec: firstStart, endSec, srcScan, srcBytes } = await recordScreenForTrim(page);
+  let startSec = firstStart;
   const rowsNow = await page.locator('[data-pkc-capture]').count();
   const dialog = page.locator('[data-pkc-region="app-dialog"]');
 
   const vNote = screenRow.locator('[data-pkc-field="capture-trim"]');
   await expect(vNote, '動画の行に切り出しの案内が出ていない').toHaveText(trimMarkText(null, null, 'video'));
   /**
-   * 🔑 元の動画を、押す所(始まり)とその前後(0.06 秒ごと ±3)で止めて、そのとき映っているフレームを撮っておく
-   *   (0.06 秒 = フレームの間隔 0.05 秒より少し長い ── 隣どうしが同じフレームにならない)。
-   * ⚠ **切り出す前に撮る** ── 切り出した動画を開くと、元の動画の再生機は消える。
+   * 🔴 **比べる絵は、再生機に映った絵ではなく、ブロックを直に復号した絵**(全量・並列の smoke で、前後どちらにもずれて落ちた回の直し)。
+   * ⚠ 直す前は元の動画を「押す所 ± 0.06 秒」で止めて、再生機に映った絵を撮っていた。負荷で録画のフレーム間隔が不揃いになると、
+   *   止めた時刻にどの絵を見せるかは Chromium 任せになる(境目から数 ms の所・間隔の空いた区間で、前にも後ろにもずれた。
+   *   実測: 押した所 505ms・フレーム 504ms で前の絵 / 504ms の次が 805ms で 0.565 秒に 805ms の絵)── 製品の切り出しは正しかった。
+   * 🔑 だから「押した所のフレーム」を**時刻で決め**(時刻が押した所以下で最後 ── 下の #1851 B の計画と同じ、製品とは独立の規則)、
+   *   その前後 ±3 ブロックと、切り出した動画の先頭ブロックを、同じ WebCodecs の復号で絵にして比べる。
    */
-  const STEP = 0.06;
-  const around: number[][] = [];
-  for (let k = -3; k <= 3; k += 1) around.push(await frameAt(screenMedia, seekVideo, startSec + k * STEP));
+  const SAME = 0.05;
+  /**
+   * ⚠ 作り物の画面の描画が負荷で止まった区間では、前後 ±3 ブロックが全部同じ絵になる(見分けられない台 ── 実際に出た)。
+   *   押す前に元の動画を復号し、前後に違う絵があるブロックまで押す所を進める(終わりの 0.5 秒手前まで)。
+   */
+  const srcVideoPick = srcScan.blocks.filter((b) => b.track === srcScan.videoTrack);
+  let pick = -1;
+  for (let i = 0; i < srcVideoPick.length; i += 1) if (srcVideoPick[i]!.ms <= startSec * 1000) pick = i;
+  let pk0 = pick;
+  while (pk0 > 0 && !srcVideoPick[pk0]!.key) pk0 -= 1;
+  const pickEnd = srcVideoPick.findIndex((b) => b.ms >= (endSec - 0.5) * 1000);
+  const pickFrames = await decodeVp8(
+    page,
+    srcScan.width,
+    srcScan.height,
+    srcVideoPick
+      .slice(Math.max(0, pk0), pickEnd < 0 ? srcVideoPick.length : Math.min(srcVideoPick.length, pickEnd + 4))
+      .map((b) => ({ data: srcBytes.subarray(b.dataStart, b.dataEnd).toString('base64'), key: b.key, ms: b.ms })),
+  );
+  const pxOf = (i: number): number[] | undefined => pickFrames.find((f) => f.ms === srcVideoPick[i]?.ms)?.px;
+  for (let i = pick; i >= 0 && i + 1 < srcVideoPick.length && srcVideoPick[i]!.ms < (endSec - 0.5) * 1000; i += 1) {
+    const me = pxOf(i);
+    if (srcVideoPick[i]!.key || me === undefined) continue;
+    const near = [-3, -2, -1, 1, 2, 3].map((d) => pxOf(i + d)).filter((f): f is number[] => f !== undefined);
+    if (near.some((f) => frameDistance(f, me) > SAME)) {
+      // 押す所はそのブロックの始まりの少し後(次のブロックとの間の内側)
+      startSec = (srcVideoPick[i]!.ms + Math.min(10, (srcVideoPick[i + 1]!.ms - srcVideoPick[i]!.ms) / 2)) / 1000;
+      break;
+    }
+  }
   const vStart = await seekVideo(startSec);
   await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-start"]'));
   const vEnd = await seekVideo(endSec);
@@ -1719,33 +1809,57 @@ test('🔴 画面録画を押した所ぴったりに切り出せる:確認が�
    *   元の「別のフレームとの比が 1.5 倍以上」は、再エンコードの粗さと隣との違いが同じ大きさになる負荷の下で
    *   1.02 まで落ちる(実測)ので、**別の絵のほうが 1.5 倍以上はっきり近い**ときだけ落とす形に緩める。
    */
-  const SAME = 0.05;
-  const sameAsPressed = around.map((f) => frameDistance(f, around[3]!) <= SAME);
+  // 押した所のフレーム(時刻が押した所以下で最後のブロック)と前後 ±3 ブロックを、区切りから順に復号して絵にする
+  const srcVideoA = srcScan.blocks.filter((b) => b.track === srcScan.videoTrack);
+  const sMsA = Math.round(vStart * 1000);
+  let h = -1;
+  for (let i = 0; i < srcVideoA.length; i += 1) if (srcVideoA[i]!.ms <= sMsA) h = i;
+  expect(h, '押した所に表示されているフレームが元の動画に無い').toBeGreaterThanOrEqual(0);
+  let k0 = -1;
+  for (let i = Math.max(0, h - 3); i >= 0; i -= 1) {
+    if (srcVideoA[i]!.key) {
+      k0 = i;
+      break;
+    }
+  }
+  if (k0 < 0) for (let i = h; i >= 0 && k0 < 0; i -= 1) if (srcVideoA[i]!.key) k0 = i;
+  const last = Math.min(srcVideoA.length - 1, h + 3);
+  const chunkOf = (bytes: Buffer, b: { dataStart: number; dataEnd: number; key: boolean; ms: number }) => ({
+    data: bytes.subarray(b.dataStart, b.dataEnd).toString('base64'),
+    key: b.key,
+    ms: b.ms,
+  });
+  const srcFrames = await decodeVp8(
+    page,
+    srcScan.width,
+    srcScan.height,
+    srcVideoA.slice(k0, last + 1).map((b) => chunkOf(srcBytes, b)),
+  );
+  const lo = Math.max(k0, h - 3);
+  const around = srcVideoA.slice(lo, last + 1).map((b) => srcFrames.find((f) => f.ms === b.ms)!.px);
+  const pressedAt = h - lo;
+  const cutScanA = await scanWebmVideo(
+    { size: cutProbe.cutBytes.length, read: async (a, b) => new Uint8Array(cutProbe.cutBytes.subarray(a, b)) },
+    1e9,
+  );
+  if (!cutScanA.ok) throw new Error(`切り出した動画を走査できない: ${cutScanA.reason}`);
+  const cutHead = cutScanA.scan.blocks.find((b) => b.track === cutScanA.scan.videoTrack)!;
+  expect(cutHead.key, '切り出した動画の先頭が区切り(キーフレーム)でない').toBe(true);
+  const firstFrame = (await decodeVp8(page, cutScanA.scan.width, cutScanA.scan.height, [chunkOf(cutProbe.cutBytes, cutHead)]))[0]!.px;
+  const sameAsPressed = around.map((f) => frameDistance(f, around[pressedAt]!) <= SAME);
   expect(
     sameAsPressed.some((same) => !same),
     '空振り防止:前後 ±3 枚がすべて押した所と同じ絵(見分けられない台)',
   ).toBe(true);
-  let dists: number[] = [];
-  let bestK = -1;
-  let pressedBest = Number.NaN;
-  let otherBest = Number.NaN;
-  let attempts = 0;
-  for (; attempts < 3; attempts += 1) {
-    const firstFrame = await frameAt(cutMedia, (to) => seekThere(cutMedia, to), 0);
-    dists = around.map((f) => frameDistance(firstFrame, f));
-    bestK = dists.indexOf(Math.min(...dists));
-    pressedBest = Math.min(...dists.filter((_, k) => sameAsPressed[k]));
-    otherBest = Math.min(...dists.filter((_, k) => !sameAsPressed[k]));
-    if (sameAsPressed[bestK] === true) break;
-    // 先頭から離れて、撮り直す
-    await seekThere(cutMedia, 0.3);
-  }
-  const nearest = bestK - 3;
-  const adjacent = frameDistance(around[3]!, around[4]!);
+  const dists = around.map((f) => frameDistance(firstFrame, f));
+  const bestK = dists.indexOf(Math.min(...dists));
+  const pressedBest = Math.min(...dists.filter((_, k) => sameAsPressed[k]));
+  const otherBest = Math.min(...dists.filter((_, k) => !sameAsPressed[k]));
+  const nearest = bestK - pressedAt;
   const ratio = otherBest / pressedBest;
   test.info().annotations.push({
-    type: '最初のフレームと、押した所の前後(-3〜+3)の絵の違い / いちばん近い位置 / 隣どうしの違い / 別の絵との比 / 撮った回数',
-    description: `${dists.map((d) => d.toFixed(2)).join(' ')} / ${nearest} / ${adjacent.toFixed(2)} / ${ratio.toFixed(2)} / ${attempts + 1}`,
+    type: '最初のフレームと、押した所の前後のブロックの絵の違い / いちばん近い位置 / 別の絵との比',
+    description: `${dists.map((d) => d.toFixed(2)).join(' ')} / ${nearest} / ${ratio.toFixed(2)}`,
   });
   expect(
     sameAsPressed[bestK],

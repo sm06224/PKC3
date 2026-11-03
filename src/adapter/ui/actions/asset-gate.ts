@@ -27,7 +27,16 @@ export interface AssetGate {
   readonly busy: boolean;
 }
 
-export function createAssetGate(dispatcher: Dispatcher): AssetGate {
+export function createAssetGate(
+  dispatcher: Dispatcher,
+  /**
+   * 🔑 門が塞がった / 空いたときに呼ぶ(待っている物も含めて 1 本でも在れば塞がっている)。`main.ts` が起動の印に
+   *   `data-pkc-asset-busy` を立てる ── `data-pkc-saving` と同じ「検査のための契約」で、画面の見え方は変えない。
+   *   ⚠ 門は理由を出して断る(下の文言)ので、smoke は「やめた取り込みの後始末が済んだか」をこの印で待つ
+   *   (全量・並列の smoke で、やめた直後に次のファイルを渡して断られた)。
+   */
+  onBusy?: (busy: boolean) => void,
+): AssetGate {
   let busy = false;
   /**
    * 鎖に並んでいて**まだ終わっていない**数。⚠ `busy` だけを見てはいけない ──
@@ -41,6 +50,7 @@ export function createAssetGate(dispatcher: Dispatcher): AssetGate {
 
   const enqueue = (run: () => Promise<void>): Promise<void> => {
     outstanding++;
+    if (outstanding === 1) onBusy?.(true);
     const next = tail.then(async () => {
       busy = true;
       try {
@@ -48,6 +58,7 @@ export function createAssetGate(dispatcher: Dispatcher): AssetGate {
       } finally {
         busy = false;
         outstanding--;
+        if (outstanding === 0) onBusy?.(false);
       }
     });
     // ⚠ 失敗を鎖に残さない(1 件の失敗で以降が全部落ちる)

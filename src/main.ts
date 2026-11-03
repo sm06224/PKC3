@@ -2970,7 +2970,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   }
 
   // 🔒 attach / import と purge の排他 gate(review F1)。実体と pin は asset-gate.ts
-  const withAssetGate = createAssetGate(dispatcher);
+  // 🔑 門が塞がっている間だけ印を立てる(`data-pkc-saving` と同じ検査のための契約。asset-gate.ts の `onBusy`)
+  const withAssetGate = createAssetGate(dispatcher, (busy) => root.toggleAttribute('data-pkc-asset-busy', busy));
   /**
    * 🔴 **他のタブが編集中か**(#253)。整理(未参照 GC)の門で使う。
    * ⚠ 3 値をそのまま文言へ落とす ── `unknown` を「編集中」と言わない。

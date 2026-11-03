@@ -1191,6 +1191,11 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   await clickReal(page, '[data-pkc-shortcut="tomorrow"]');
   await clickReal(page, '[data-pkc-field="dialog-ok"]');
   await expect(pickDialog).toBeHidden();
+  /**
+   * ⚠ 欄へ書くのは窓が閉じた**後**(`pickDateInApp(...).then(...)`)── 閉じた瞬間に 1 回だけ読むと、
+   *   負荷で `then` が遅れた回に「今日のまま」を掴む(全量・並列で実際に落ちた)。変わるまで待ってから読む。
+   */
+  await expect(date, '「明日」を選んだのに今日のまま').not.toHaveValue(value);
   const tomorrow = await date.inputValue();
   expect(tomorrow, '「明日」を選んでも欄が変わらない').toMatch(/^\d{4}-\d{2}-\d{2}$/);
   expect(tomorrow, '「明日」を選んだのに今日のまま').not.toBe(value);
@@ -1529,6 +1534,13 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   ).toHaveText('23:00〜翌03:00');
   // 札を押して、そのノートを開いてから本文を見る(掴んだだけでは選ばれない)
   await nightCard.locator('[data-pkc-field="text"]').click();
+  /**
+   * ⚠ **「編集」が押せるようになってから押す**(全量・並列の smoke で「23:00..03:00 になっていない」と落ちた回の直し)。
+   *   札を押すとそのノートが選ばれて本文を読み直し、読み終えるまで「ノートを編集する」は `disabled`(理由は title。
+   *   `detail.ts` の `renderBar`)── 製品の作りどおりである。`clickReal` は「見えていて最前面か」しか見ないので、
+   *   負荷で読み直しが遅れた回は disabled のボタンを押していた(実測: pointerdown / pointerup は届き、click が出ない)。
+   */
+  await expect(page.locator('[data-pkc-action="start-edit"]'), '本文を読み終えても「編集」が押せるようにならない').toBeEnabled();
   await clickReal(page, '[data-pkc-action="start-edit"]');
   await expect(ta, '動かした本文が 23:00..03:00 になっていない').toHaveValue(/@\d{4}-\d{2}-\d{2} 23:00\.\.03:00/);
   await clickReal(page, '[data-pkc-action="cancel-edit"]');

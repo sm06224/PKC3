@@ -3823,8 +3823,29 @@ function moveOrder(
  */
 const TILE_DOUBLE_MS = 500;
 const lastTilePress = new WeakMap<Element, { lid: string; at: number }>();
+
+/**
+ * 🔴 **「続けて押したか」は、押した時刻で測る**(ハンドラが走った時刻ではなく)。
+ *
+ * ⚠ 直す前は 2 回目の `click` のハンドラが走った時の `Date.now()` で測っていた。1 回目の押しは選択・本文の
+ *   描き直しを起こすので、遅い機械(や CPU を奪い合っている箱)ではメインがその間塞がり、**素早く 2 回押しても
+ *   2 回目のハンドラが 500ms より後に走る** ── user から見ると「ダブルクリックしたのに入らない」になる
+ *   (全量・並列の smoke で `import.smoke.spec.ts` の「フォルダを開き直してもノートが見えない」が実際に落ちた。
+ *   CPU を奪った箱で測ると、2 回目のハンドラは押した時刻から最大 80ms 遅れて走った)。
+ * 🔑 `Event.timeStamp` は**入力が起きた時刻**(ブラウザが入力を受け取った時)なので、メインの遅れに左右されない。
+ *   `Date.now()` と同じ基準にするため `performance.timeOrigin` を足す(取れない環境では今までどおり `Date.now()`)。
+ */
+export function pressedAtOf(ev: Event): number {
+  const ts = ev.timeStamp;
+  const origin = typeof performance === 'undefined' ? NaN : performance.timeOrigin;
+  return Number.isFinite(ts) && ts > 0 && Number.isFinite(origin) ? origin + ts : Date.now();
+}
+
+/** いま処理している押しの時刻(器ごと)── `onClick` が handler を呼ぶ前に置く(`open-tile` は event を受け取らない)。 */
+const pressAtByRoot = new WeakMap<Element, number>();
+
 function pressedTileAgain(root: Element, lid: string): boolean {
-  const now = Date.now();
+  const now = pressAtByRoot.get(root) ?? Date.now();
   const last = lastTilePress.get(root) ?? { lid: '', at: 0 };
   const again = last.lid === lid && now - last.at <= TILE_DOUBLE_MS;
   lastTilePress.set(root, again ? { lid: '', at: 0 } : { lid, at: now });
@@ -20062,16 +20083,22 @@ export function bindActions(
     //    inspector の `select-entry` まで拾うと、見えていない判定が誤って走る)
     if (inFiler && action === 'select-entry') {
       const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
-      if (lid !== null) maybeDoubleOpen(lid);
+      if (lid !== null) maybeDoubleOpen(lid, null, pressedAtOf(ev));
     }
     // ⚠ 2 ペインも**同じ 2 クリック**でフォルダへ入る・ノートを別窓へ開く
     //   (規則は 1 本 ── ただし入る先はそのペインなので、撃つ action だけが違う)
     if (action === 'dual-row') {
       const side = dualSide(el);
       const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
-      if (side !== null && lid !== null) maybeDoubleOpen(lid, side);
+      if (side !== null && lid !== null) maybeDoubleOpen(lid, side, pressedAtOf(ev));
     }
-    run(action, el);
+    // 🔑 タイルの「続けて押したか」(`pressedTileAgain`)も押した時刻で測る ── handler は event を受け取らないので器に置く
+    pressAtByRoot.set(root, pressedAtOf(ev));
+    try {
+      run(action, el);
+    } finally {
+      pressAtByRoot.delete(root);
+    }
   };
   /**
    * ⚠ 書式パネルのボタンは **focus を奪わない**。奪うと押すたびに編集欄が
@@ -22559,9 +22586,9 @@ export function bindActions(
    *   左で選んで右で選ぶと、印を付けたかっただけの右が中へ入る。
    */
   let lastRowClick: { key: string; at: number } = { key: '', at: 0 };
-  const maybeDoubleOpen = (lid: string, dual: DualSide | null = null): void => {
+  /** @param now 押した時刻(`pressedAtOf(ev)`。ハンドラが走った時刻ではない ── 理由はそちらの注記) */
+  const maybeDoubleOpen = (lid: string, dual: DualSide | null, now: number): void => {
     const key = `${dual ?? 'filer'}:${lid}`;
-    const now = Date.now();
     const again = lastRowClick.key === key && now - lastRowClick.at <= DOUBLE_MS;
     lastRowClick = { key, at: now };
     if (!again) return;

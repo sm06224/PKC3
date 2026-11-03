@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { createAssetGate } from '../../src/adapter/ui/actions/asset-gate';
+import { codeOnly } from '../helpers/code-only';
 
 const boot = (): Dispatcher => {
   const d = new Dispatcher();
@@ -18,6 +19,25 @@ const boot = (): Dispatcher => {
 };
 
 describe('createAssetGate', () => {
+  it('🔑 塞がった / 空いたを onBusy で知らせる(待っている物が残る間は空かない)', async () => {
+    const d = boot();
+    const seen: boolean[] = [];
+    const gate = createAssetGate(d, (b) => seen.push(b));
+    let release1!: () => void;
+    const first = gate.queued(() => new Promise<void>((r) => (release1 = r)));
+    let release2!: () => void;
+    const second = gate.queued(() => new Promise<void>((r) => (release2 = r)));
+    expect(seen, '1 本目で塞がったと言っていない').toEqual([true]);
+    await new Promise((r) => setTimeout(r, 0));
+    release1();
+    await first;
+    expect(seen, '待っている 2 本目が残るのに空いたと言った').toEqual([true]);
+    await new Promise((r) => setTimeout(r, 0));
+    release2();
+    await second;
+    expect(seen, '全部済んだのに空いたと言わない').toEqual([true, false]);
+  });
+
   it('実行中の 2 本目は**走らせずに**可視で断る', async () => {
     const d = boot();
     const gate = createAssetGate(d);
@@ -122,5 +142,31 @@ describe('asset を書く経路は gate の内側(原文 pin)', () => {
     // 空振り防止 ── 口の名前が変わって 0 件になったら「全部通った」と言わない
     expect(sites.length, '書く口が 1 つも見つからない(名前が変わった?)').toBeGreaterThanOrEqual(4);
     expect(naked, 'gate の外で asset を書いている').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **「門が空いた」の印が、smoke の待ち(`assetGateIdle`)と同じ要素・同じ名前で立つ**(#1932 の着地前レビュー)。
+ *
+ * ⚠ `assetGateIdle` は「印が**無い**」を待つ ── `main.ts` の配線が消えても、名前がずれても、**常に緑**になる。
+ * ⚠ `main.ts` はどの test からも実行されないので、ここは原文 pin で妥協する(上の節と同じ)。
+ */
+describe('門の印の配線(原文 pin)', () => {
+  it('🔴 main.ts が onBusy で起動の要素に data-pkc-asset-busy を立て下ろしする', () => {
+    const main = codeOnly(readFileSync('src/main.ts', 'utf-8'));
+    expect(main, 'onBusy の配線が消えた(smoke の待ちが空振りする)').toMatch(
+      /createAssetGate\(dispatcher,\s*\(busy\)\s*=>\s*root\.toggleAttribute\('data-pkc-asset-busy',\s*busy\)\)/,
+    );
+    // ⚠ 同じ `root` に `data-pkc-boot` が立つ(smoke はそちらで要素を引く)
+    expect(main, '印を立てる要素と起動の印の要素が別になった').toMatch(/root\.setAttribute\('data-pkc-boot', 'ready'\)/);
+  });
+
+  it('🔴 smoke の待ちが、同じ名前の印を起動の要素で見ている', () => {
+    const helpers = codeOnly(readFileSync('tests/smoke/helpers.ts', 'utf-8'));
+    const at = helpers.indexOf('export async function assetGateIdle(');
+    expect(at, 'assetGateIdle が無い').toBeGreaterThan(-1);
+    const body = helpers.slice(at, helpers.indexOf('\n}', at));
+    expect(body).toContain("querySelector('[data-pkc-boot]')");
+    expect(body).toContain("hasAttribute('data-pkc-asset-busy')");
   });
 });
