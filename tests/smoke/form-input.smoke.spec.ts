@@ -10,7 +10,7 @@
  * 3. **表への追加が、描いた表の升に出る**(原文の splice が描画まで届く)
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, createEntry, clickReal, useSplitEditor } from './helpers';
+import { gotoApp, collectPageErrors, createEntry, clickReal, useSplitEditor, writesLanded } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
@@ -62,6 +62,8 @@ test('🔴 入力欄に打って保存すると設定欄へ入り、表に追加
   await clickReal(page, `${FORM} [data-pkc-action="form-save"]`);
 
   // ── 開き直しても残る(disk まで届いた証拠)
+  // ⚠ 書き込みが届いてから読み直す(届く前に reload すると、保存した値が消えて見える ── `writesLanded` の注記)
+  await writesLanded(page);
   await page.reload();
   await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
   await expect(page.locator(field('氏名')), '保存した値が欄に戻らない').toHaveValue('山田', { timeout: 15_000 });
