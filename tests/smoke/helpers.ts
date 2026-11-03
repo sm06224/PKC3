@@ -995,9 +995,6 @@ export async function clickExportMenuItem(page: Page, action: string): Promise<v
 
 /** 「書き出す ▾」を実マウスで開き、一覧(右クリックと同じ器)を返す。 */
 export async function openExportMenu(page: Page, kind: 'entry' | 'collection' = 'entry'): Promise<Locator> {
-  // 🔴 直前の保存の ack(右の列の描き直し)が、開いた一覧の外のスクロール通知で一覧を閉じないよう、書込の着地を待ってから開く
-  //   (全量の負荷のときだけ、一覧が開いた直後に消えて落ちた ── 製品の不具合ではなく開く時機の問題)
-  await writesLanded(page);
   await clickReal(
     page,
     `[data-pkc-region="inspector"] [data-pkc-action="${kind === 'entry' ? 'open-export-menu' : 'open-collection-export-menu'}"]`,
