@@ -16,6 +16,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { openContextMenu, scrollClosesMenu, noteMenuUserInput } from '../../src/adapter/ui/render/context-menu';
 import { ACTION_ICONS, INSPECTOR_ICON_ACTIONS } from '../../src/adapter/ui/render/icons';
 import { ARCHETYPE_ICONS, BROWSE_ICONS } from '../../src/adapter/ui/render/icons';
 import {
@@ -361,5 +362,83 @@ describe('一覧から押したコピーの合図(#1029 / #501)', () => {
     expect(s.menu(), '押したら閉じる').toBeNull();
     expect(opener.getAttribute('data-pkc-flash'), '合図が「書き出す ▾」に出ていない').toBe('true');
     expect(item.getAttribute('data-pkc-flash'), '閉じた項目に合図が出ている(誰にも見えない)').toBeNull();
+  });
+});
+
+/**
+ * 🔴 **保存の直後に「書き出す ▾」を押しても、一覧が勝手に消えない**(#1029 / #501)。
+ *
+ * 実ブラウザで閉じた原因を捕まえた: 開いた後に、右ペイン(`aside`)の `scrollTop` が**ブラウザの都合で**
+ * 168 → 148 に動き(`scrollTop` を書いた者は居ない)、その `scroll` で `onScrollCloseMenu` が閉じていた。
+ * 位置は動いているので #875 の「開く前に済んだ送り」の判定では守れない。→ user が送る入力が無ければ閉じない。
+ */
+describe('一覧は、user が送っていないスクロールでは閉じない(#1029 / #501)', () => {
+  const aside = (root: HTMLElement) => root.querySelector<HTMLElement>('[data-pkc-region="inspector"]')!;
+  const scrollTo = (el: HTMLElement, top: number): void => {
+    el.scrollTop = top;
+    el.dispatchEvent(new Event('scroll'));
+  };
+
+  it('開いたあと、保存の ack と同じ描き直しとスクロールが起きても、一覧は開いたまま。user がホイールで送ったら閉じる', () => {
+    const s = mounted();
+    aside(s.root).scrollTop = 168; // 開く前に済んだ送り(クリックの焦点)
+    s.q('[data-pkc-action="open-export-menu"]').click();
+    expect(s.menu(), '前提: 開いていない').not.toBeNull();
+
+    // 保存の ack と同じ再描画(本文・題名の更新)── 器の中の値が差し替わる
+    s.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文が変わった\n見出し\n' });
+    // ブラウザの都合で位置が動く(丸め・アンカー)
+    scrollTo(aside(s.root), 148);
+    expect(s.menu(), '送っていないスクロールで一覧が消えた').not.toBeNull();
+
+    // 対照群: user が送ったら閉じる(緩めすぎていない)
+    aside(s.root).dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 40 }));
+    scrollTo(aside(s.root), 100);
+    expect(s.menu(), 'user が送ったのに閉じない').toBeNull();
+  });
+
+  it('ホイール・指・スクロールバーの掴み・送りのキーのどれでも「送った」になる。一覧の中の操作は数えない', () => {
+    const open = (): ReturnType<typeof mounted> => {
+      const s = mounted();
+      s.q('[data-pkc-action="open-export-menu"]').click();
+      return s;
+    };
+    const cases: Array<[string, (a: HTMLElement) => Event]> = [
+      ['wheel', () => new WheelEvent('wheel', { bubbles: true })],
+      ['touchmove', () => new Event('touchmove', { bubbles: true })],
+      ['pointerdown', () => new Event('pointerdown', { bubbles: true })],
+      ['PageDown', () => new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true })],
+    ];
+    for (const [name, make] of cases) {
+      const s = open();
+      aside(s.root).dispatchEvent(make(aside(s.root)));
+      scrollTo(aside(s.root), 60);
+      expect(s.menu(), `${name} のあとのスクロールで閉じない`).toBeNull();
+    }
+    // 一覧の中の ↓ は「背面を送る」入力ではない
+    const s = open();
+    s.menu()!.querySelector('button')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    scrollTo(aside(s.root), 60);
+    expect(s.menu(), '一覧の中の操作が「送った」に数えられている').not.toBeNull();
+  });
+
+  it('判定は 1 か所: 右クリックの一覧(openContextMenu)も、一覧ごとに入力を覚え、次の一覧へ持ち越さない', () => {
+    const root = document.createElement('div');
+    const scroller = document.createElement('div');
+    const btn = document.createElement('button');
+    scroller.append(btn);
+    root.append(scroller);
+    document.body.append(root);
+    const items = [{ action: 'x', label: 'x' }];
+    openContextMenu(root, { x: 0, y: 0 }, items, btn, {});
+    scroller.scrollTop = 50;
+    expect(scrollClosesMenu(root, scroller), '送っていないのに閉じる側').toBe(false);
+    noteMenuUserInput(root, new WheelEvent('wheel', { bubbles: true }));
+    expect(scrollClosesMenu(root, scroller), '送ったのに閉じない側').toBe(true);
+    // 開き直した一覧は入力を持ち越さない
+    openContextMenu(root, { x: 0, y: 0 }, items, btn, {});
+    scroller.scrollTop = 80;
+    expect(scrollClosesMenu(root, scroller), '前の一覧の入力が持ち越されている').toBe(false);
+    root.remove();
   });
 });

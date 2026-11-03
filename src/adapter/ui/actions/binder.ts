@@ -470,8 +470,8 @@ import { processToolOf } from '@features/capture/capture-process';
 import {
   type MenuItem,
   closeContextMenu,
-  scrollInsideMenu,
-  scrollUnchangedSinceOpen,
+  noteMenuUserInput,
+  scrollClosesMenu,
   contextMenuOpen,
   openContextMenu,
 } from '../render/context-menu';
@@ -23826,12 +23826,19 @@ export function bindActions(
    *   (見出しのときだけ焦点を止める形にすると、**タイル側が残る** ── §7)。
    */
   const onScrollCloseMenu = (ev: Event): void => {
-    // 🔑 メニューの中で送っているだけ(背の低い画面で下の項目へ届かせる)なら閉じない
-    if (scrollInsideMenu(root, ev.target)) return;
-    if (scrollUnchangedSinceOpen(root, ev.target)) return;
+    // 🔑 判定は `context-menu.ts` の 1 か所(一覧の中の送り / 開く前に済んだ送り / user が送っていない動き は閉じない)
+    if (!scrollClosesMenu(root, ev.target)) return;
     closeContextMenu(root);
   };
   listen(root, 'scroll', onScrollCloseMenu, true);
+  /**
+   * 🔴 **user が送る入力を一覧に伝える**(#1029 / #501)。⚠ これが無いと、ブラウザの都合で動いたスクロール
+   *   (保存のあとの行の高さの変化など)でも一覧が消える。受け口は `context-menu.ts` の `noteMenuUserInput`。
+   */
+  const onMenuUserInput = (ev: Event): void => noteMenuUserInput(root, ev);
+  for (const type of ['wheel', 'touchmove', 'keydown', 'pointerdown'] as const) {
+    listen(root.ownerDocument, type, onMenuUserInput, true);
+  }
   listen(root.ownerDocument, 'keydown', onMenuKey);
   listen(root, 'keydown', onPlainPasteChord, true);
   listen(root, 'paste', onPaste);
