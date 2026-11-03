@@ -17,7 +17,12 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { ACTION_ICONS, INSPECTOR_ICON_ACTIONS } from '../../src/adapter/ui/render/icons';
-import { ENTRY_MENU_ACTIONS, INSPECTOR_EXPORT_MENU_ACTIONS } from '../../src/features/entry-actions';
+import { ARCHETYPE_ICONS, BROWSE_ICONS } from '../../src/adapter/ui/render/icons';
+import {
+  ENTRY_MENU_ACTIONS,
+  FOLDER_EXPORT_NOTE,
+  INSPECTOR_EXPORT_MENU_ACTIONS,
+} from '../../src/features/entry-actions';
 
 function meta(lid: string, archetype: EntryMeta['archetype'] = 'text'): EntryMeta {
   return {
@@ -38,7 +43,7 @@ beforeEach(() => {
   document.body.textContent = '';
 });
 
-function mounted(opts: { select?: string | null; folder?: boolean } = {}) {
+function mounted(opts: { select?: string | null; folder?: boolean; linked?: boolean } = {}) {
   const root = document.createElement('div');
   root.setAttribute('data-pkc-slot', 'root');
   document.body.append(root);
@@ -61,6 +66,7 @@ function mounted(opts: { select?: string | null; folder?: boolean } = {}) {
   if (opts.select !== null) {
     d.dispatch({ type: 'SELECT_ENTRY', lid: opts.select ?? 'n1' });
     d.dispatch({ type: 'BODY_LOADED', lid: opts.select ?? 'n1', body: '本文\n' });
+    if (opts.linked) d.dispatch({ type: 'FILE_LINKED', lid: opts.select ?? 'n1', name: 'memo.md' });
   }
   const q = <T extends HTMLElement>(sel: string): T => root.querySelector<T>(sel)!;
   const menu = (): HTMLElement | null => root.querySelector<HTMLElement>('[data-pkc-region="context-menu"]');
@@ -107,11 +113,18 @@ describe('右の列の「書き出す ▾」(#1029 / #501)', () => {
     expect(s.q<HTMLButtonElement>('[data-pkc-action="open-export-menu"]').getAttribute('aria-haspopup')).toBe('menu');
   });
 
-  it('項目を押すと、押したボタンの対象ノートで既存の書き出しが呼ばれる(選択中ではない)', () => {
+  it('選択を n1 から n2 へ切り替えると、「書き出す ▾」の対象も n2 に追従し、項目が n2 を書き出す', () => {
     const s = mounted();
-    // 押したボタンが指すノートと選択中のノートがずれた状態を作る
-    s.q('[data-pkc-action="open-export-menu"]').setAttribute('data-pkc-entry', 'n2');
-    s.q('[data-pkc-action="open-export-menu"]').click();
+    const btn = s.q<HTMLButtonElement>('[data-pkc-action="open-export-menu"]');
+    expect(btn.getAttribute('data-pkc-entry')).toBe('n1');
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    s.d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '本文2\n' });
+    expect(s.d.getState().selectedLid).toBe('n2');
+    // 追従しないと、一覧の項目が前のノート(n1)を書き出す
+    expect(btn.getAttribute('data-pkc-entry'), '選択を替えたのに、対象が前のノートのまま').toBe('n2');
+    btn.click();
+    for (const el of s.menu()!.querySelectorAll('button[data-pkc-action]'))
+      expect(el.getAttribute('data-pkc-entry'), '項目の対象が n2 でない').toBe('n2');
     (s.menu()!.querySelector('[data-pkc-action="export-entry-docx"]') as HTMLButtonElement).click();
     expect(s.calls).toEqual(['docx:n2']);
     expect(s.menu(), '押したら閉じる').toBeNull();
@@ -194,5 +207,159 @@ describe('コレクション(何も選んでいないとき)の「書き出す �
     }
     // 書き出しではない「整理案を適用」は平置きのまま
     expect(s.q('[data-pkc-action="toggle-plan-apply"]').closest('[hidden]')).toBeNull();
+  });
+});
+
+describe('一覧の項目の状態(#1029 / #501)', () => {
+  const items = (m: HTMLElement) =>
+    Object.fromEntries(
+      [...m.querySelectorAll<HTMLButtonElement>('button[data-pkc-action]')].map((b) => [
+        b.getAttribute('data-pkc-action')!,
+        {
+          disabled: b.disabled,
+          hint: b.getAttribute('data-pkc-hint') ?? '',
+          group: b.closest('[data-pkc-field="context-menu-group"]')?.getAttribute('data-pkc-group') ?? null,
+        },
+      ]),
+    );
+
+  it('A2: フォルダを選んでも、書き出し系 10 件は隠した器の中(平置きに戻らない)', () => {
+    const s = mounted({ folder: true, linked: true });
+    expect(INSPECTOR_EXPORT_MENU_ACTIONS.length).toBe(10);
+    for (const a of INSPECTOR_EXPORT_MENU_ACTIONS) {
+      const b = s.q(`[data-pkc-field="inspector-actions"] [data-pkc-action="${a}"]`);
+      expect(b, `${a} が描かれていない`).not.toBeNull();
+      expect(b.closest('[hidden]'), `${a} が平置きに戻っている`).not.toBeNull();
+    }
+    // 対照群: 常設の「書き出す ▾」は隠れていない
+    expect(s.q('[data-pkc-action="open-export-menu"]').closest('[hidden]')).toBeNull();
+  });
+
+  it('B(通常時): 説明が入り、押せて、塊は右クリックと同じ', () => {
+    const s = mounted();
+    s.q('[data-pkc-action="open-export-menu"]').click();
+    const it = items(s.menu()!);
+    expect(Object.keys(it).length).toBeGreaterThanOrEqual(7);
+    for (const [a, v] of Object.entries(it)) {
+      expect(v.disabled, `${a} が押せない`).toBe(false);
+      expect(v.hint, `${a} の説明が空`).not.toBe('');
+      expect(v.group, `${a} の塊が違う`).toBe(ENTRY_MENU_ACTIONS.find((x) => x.action === a)!.group);
+    }
+  });
+
+  it('B(フォルダ選択時): 書き出し 5 つは押せず理由が説明に出る。フォルダのバックアップだけ押せて、別の塊', () => {
+    const s = mounted({ folder: true });
+    s.q('[data-pkc-action="open-export-menu"]').click();
+    const it = items(s.menu()!);
+    for (const a of ['export-entry-html', 'export-entry-docx', 'export-entry-pptx', 'export-entry-pdf', 'export-entry-markdown']) {
+      expect(it[a], `${a} が一覧に無い`).toBeDefined();
+      expect(it[a]!.disabled, `${a} が押せる`).toBe(true);
+      expect(it[a]!.hint, `${a} の理由が出ていない`).toContain(FOLDER_EXPORT_NOTE);
+    }
+    expect(it['export-folder']!.disabled).toBe(false);
+    expect(it['export-entry']!.disabled).toBe(false);
+    // B2: 2 つのバックアップは別の塊(見出しの間で区別できる)
+    expect(it['export-folder']!.group).toBe('this-folder');
+    expect(it['export-entry']!.group).toBe('export');
+  });
+
+  it('B(編集中): 画面からは開けず、古い DOM から開かれても全項目が押せず理由が出る', () => {
+    const s = mounted();
+    s.d.dispatch({ type: 'START_EDIT' });
+    const btn = s.q<HTMLButtonElement>('[data-pkc-action="open-export-menu"]');
+    expect(btn.disabled).toBe(true);
+    // 古い(描き直される前の)DOM から撃たれた回を再現する
+    btn.disabled = false;
+    btn.click();
+    expect(s.menu(), '一覧が開かない').not.toBeNull();
+    const it = items(s.menu()!);
+    expect(Object.keys(it).length).toBeGreaterThanOrEqual(7);
+    for (const [a, v] of Object.entries(it)) {
+      expect(v.disabled, `編集中なのに ${a} が押せる`).toBe(true);
+      expect(v.hint, `${a} の理由が出ていない`).toContain('編集中は使えません');
+    }
+  });
+
+  it('C: PKC3 入り HTML の中では、コレクション側の export-portable は一覧で押せず理由が出る(対照群: ほかは押せる)', () => {
+    const tag = document.createElement('script');
+    tag.setAttribute('type', 'application/json');
+    tag.setAttribute('data-pkc-bundle', '');
+    tag.textContent = JSON.stringify({ id: 'pkcb-2b1f9c04d7', exportedAt: 5 });
+    document.head.append(tag);
+    try {
+      const s = mounted({ select: null });
+      s.q('[data-pkc-action="open-collection-export-menu"]').click();
+      const it = items(s.menu()!);
+      expect(it['export-portable'], 'export-portable が一覧に無い').toBeDefined();
+      expect(it['export-portable']!.disabled).toBe(true);
+      expect(it['export-portable']!.hint).not.toBe('');
+      expect(it['export-html']!.disabled, '対照群: 閲覧用 HTML まで押せなくなっている').toBe(false);
+    } finally {
+      tag.remove();
+    }
+  });
+});
+
+describe('常設ボタンの並びと、図案を共有しないこと(#1029 / #501)', () => {
+  it('並びは コピー群 → 別ウィンドウ → 書き出す ▾ → 履歴 → ゴミ箱へ移す', () => {
+    const s = mounted();
+    const order = [...s.root.querySelectorAll('[data-pkc-field="inspector-actions"] button[data-pkc-action]')]
+      .map((b) => b.getAttribute('data-pkc-action')!)
+      .filter((a) =>
+        ['copy-entry-ref', 'copy-entry-link', 'copy-plain-markdown', 'open-note-window', 'open-export-menu', 'show-history', 'delete-entry'].includes(a),
+      );
+    expect(order).toEqual([
+      'copy-entry-ref',
+      'copy-entry-link',
+      'copy-plain-markdown',
+      'open-note-window',
+      'open-export-menu',
+      'show-history',
+      'delete-entry',
+    ]);
+  });
+
+  it('常設のアイコンは、意味の違う別の action・種別・タブと同じ図案を共有しない', () => {
+    // 同じ意味の仲間として共有してよい相手(ここに無い共有は落ちる ── 増やすなら理由を書く)
+    const SAME_MEANING: Record<string, readonly string[]> = {
+      'copy-entry-ref': ['dual-copy'], // 同じ「コピー」
+      'copy-entry-link': ['browse:graph'], // つながり(リンク)の絵
+      'open-export-menu': ['export-entry', 'write-back-file'], // 同じ「外へ出す」
+      'delete-entry': ['delete-selected', 'discard-capture', 'discard-timer', 'open-trash', 'dual-delete'], // 同じ「ゴミ箱」
+    };
+    const users = (glyph: string, self: string): string[] => [
+      ...Object.entries(ACTION_ICONS).filter(([k, v]) => v === glyph && k !== self).map(([k]) => k),
+      ...Object.entries(ARCHETYPE_ICONS).filter(([, v]) => v === glyph).map(([k]) => `archetype:${k}`),
+      ...Object.entries(BROWSE_ICONS).filter(([, v]) => v === glyph).map(([k]) => `browse:${k}`),
+    ];
+    let checked = 0;
+    for (const a of INSPECTOR_ICON_ACTIONS) {
+      if (a === 'open-collection-export-menu') continue;
+      const glyph = ACTION_ICONS[a]!;
+      // 2 つの「書き出す ▾」は同じ絵(同じ意味)── 数える相手から外す
+      const others = users(glyph, a).filter((k) => k !== 'open-collection-export-menu' && k !== 'open-export-menu');
+      expect(others.sort(), `${a}(${glyph})が、許した相手以外とも図案を共有している`).toEqual(
+        [...(SAME_MEANING[a] ?? [])].sort(),
+      );
+      checked += 1;
+    }
+    expect(checked).toBe(7);
+    // 取り違えが指摘された組(別のウィンドウ ↔ 2 ペインの「移す」)は、はっきり別の絵
+    expect(ACTION_ICONS['open-note-window']).not.toBe(ACTION_ICONS['dual-move']);
+  });
+});
+
+describe('一覧から押したコピーの合図(#1029 / #501)', () => {
+  it('「構成をコピー」を一覧から押すと、閉じた項目ではなく「書き出す ▾」のボタンが光る', () => {
+    const s = mounted({ select: null });
+    s.d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1'), meta('n2')], relations: [] });
+    const opener = s.q<HTMLButtonElement>('[data-pkc-action="open-collection-export-menu"]');
+    opener.click();
+    const item = s.menu()!.querySelector<HTMLButtonElement>('[data-pkc-action="export-structure"]')!;
+    expect(item.getAttribute('data-pkc-flash')).toBeNull();
+    item.click();
+    expect(s.menu(), '押したら閉じる').toBeNull();
+    expect(opener.getAttribute('data-pkc-flash'), '合図が「書き出す ▾」に出ていない').toBe('true');
+    expect(item.getAttribute('data-pkc-flash'), '閉じた項目に合図が出ている(誰にも見えない)').toBeNull();
   });
 });
