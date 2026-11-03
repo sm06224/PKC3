@@ -34,7 +34,7 @@ import {
   dismissAnnounce,
   useSplitEditor,
   gotoCollectionPane,
-} from './helpers';
+  openExportMenu, clickExportMenuItem } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -161,7 +161,7 @@ test('🔴 画面から印刷すると全文が紙に乗り、+++ で改頁す�
   const dl = page.waitForEvent('download');
   // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
   await gotoCollectionPane(page);
-  await clickReal(page, '[data-pkc-action="export-html"]');
+  await clickExportMenuItem(page, 'export-html');
   const download = await dl;
   const file = join(tmpdir(), `pkc3-print-${process.pid}.html`);
   await download.saveAs(file);
@@ -291,12 +291,13 @@ test('🔴 情報ペインの「PDF」を押すと印刷が始まる', async ({ 
     });
   });
 
-  const pdf = page.locator('[data-pkc-action="export-entry-pdf"]');
+  // 🔴 2026-11-03(#1029 / #501): 「書き出す ▾」の一覧の中の項目
+  const pdf = (await openExportMenu(page)).locator('[data-pkc-action="export-entry-pdf"]');
   await expect(pdf, '紙に出す口が画面に無い').toBeVisible();
   // ⚠ 説明は「起きること」で書く(user 指示 2026-08-21)── file は落ちない
-  await expect(pdf).toHaveAttribute('title', /印刷画面/);
+  await expect(pdf).toHaveAttribute('data-pkc-hint', /印刷画面/);
 
-  await clickReal(page, '[data-pkc-action="export-entry-pdf"]');
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="export-entry-pdf"]');
   await expect
     .poll(async () => page.evaluate(() => (globalThis as unknown as Record<string, number>).__printed))
     .toBeGreaterThan(0);
@@ -554,7 +555,7 @@ test('🔴 暗い配色で刷ると、地は白・字は濃く、リンクは白
       };
     });
   });
-  await clickReal(page, '[data-pkc-action="export-entry-pdf"]');
+  await clickExportMenuItem(page, 'export-entry-pdf');
   await expect
     .poll(() => page.evaluate(() => (globalThis as unknown as Record<string, number>).__printedK1))
     .toBeGreaterThan(0);

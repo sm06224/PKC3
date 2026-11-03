@@ -14,7 +14,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, clickExportMenuItem } from './helpers';
 
 const PNG_1X1 = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -71,7 +71,7 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
 
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-docx"]'),
+    clickExportMenuItem(page, 'export-entry-docx'),
   ]);
   // ⚠ 名前は**アプリが決めた値**で見る(この headless は非 ASCII の download 名を
   //    捨てるので、`suggestedFilename` は観測点にしない ── CLAUDE.md §4)
@@ -170,7 +170,7 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
   await page.waitForSelector('[data-pkc-action="start-edit"]');
   const [download2] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-docx"]'),
+    clickExportMenuItem(page, 'export-entry-docx'),
   ]);
   const path2 = await download2.path();
   expect(path2, '2 回目の file が落ちてきていない').not.toBeNull();
@@ -201,7 +201,7 @@ test('🔴 情報ペインの Word で .docx が落ちてきて、本文が中�
   page.on('download', () => {
     downloaded = true;
   });
-  await clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-docx"]');
+  await clickExportMenuItem(page, 'export-entry-docx');
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '🔴 本文が空のノートが断られていない',
@@ -241,7 +241,7 @@ test('🔴 mermaid の図が Word にベクタで入る(原文が出ない)(#187
 
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-docx"]'),
+    clickExportMenuItem(page, 'export-entry-docx'),
   ]);
   const path = await download.path();
   expect(path, 'file が落ちてきていない').not.toBeNull();

@@ -24,8 +24,7 @@ import {
   collectPageErrors,
   createEntry,
   gotoApp,
-  useSplitEditor,
-} from './helpers';
+  useSplitEditor, clickExportMenuItem } from './helpers';
 
 // ⚠ `editor-body`(欄で編集)は既定の live 編集では出ない ── split へ切り替える
 // (`useSplitEditor` は `page.goto` の前に効かせる必要があるので `gotoApp` の前に呼ぶ)
@@ -69,7 +68,7 @@ test('🔴 左下の「バックアップ」は .pkc3-full.zip、情報ペイン
   //   両方のボタンが同じ末尾を落としていても①だけで緑になる
   const [notes] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry"]'),
+    clickExportMenuItem(page, 'export-entry'),
   ]);
   expect(
     notes.suggestedFilename(),

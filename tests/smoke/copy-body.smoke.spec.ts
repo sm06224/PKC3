@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { clickReal, createEntry, collectPageErrors, gotoApp, useSplitEditor,
   gotoCollectionPane,
+  openExportMenu,
 } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -32,7 +33,14 @@ test.beforeEach(async ({ page }) => {
  *   700ms だけ付く。⚠ 短いので**押す前に**観測を仕掛ける(後から探すと取りこぼす)。
  */
 async function copyAndWait(page: Page, action: string): Promise<void> {
-  const sel = `[data-pkc-action="${action}"]`;
+  // 🔴 構成のコピーは「書き出す ▾」の一覧の中(#1029 / #501)── user と同じく実マウスで開いてから、一覧の項目を押す
+  const viaMenu = action === 'export-structure';
+  if (viaMenu) await openExportMenu(page, 'collection');
+  const sel = viaMenu
+    ? `[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`
+    : `[data-pkc-action="${action}"]`;
+  // 🔴 一覧の項目は押すと閉じる ── 合図は「書き出す ▾」のボタンに出る(項目に出ても誰にも見えない)
+  const flashSel = viaMenu ? '[data-pkc-action="open-collection-export-menu"]' : sel;
   /**
    * 🔴 **仕掛ける前に「押し所が在る」ことを確かめる**(#878 ②、2026-09-13)。
    *
@@ -63,8 +71,8 @@ async function copyAndWait(page: Page, action: string): Promise<void> {
     `${action}: 押し所が画面に無い(面が開いていないか、出し分けが壊れている)`,
   ).toBeAttached({ timeout: 2_000 });
   // 押す前に仕掛ける ── 700ms で消える属性を後から探すと落ちる
-  await page.evaluate((s) => {
-    const el = document.querySelector(s);
+  await page.evaluate(({ s, flashSel }) => {
+    const el = document.querySelector(flashSel);
     if (el === null) {
       // 診断(#878 ②)── 隠さず、何が在ったかを文言に載せて次の失敗を読めるようにする
       const regions = [...document.querySelectorAll('[data-pkc-region]')]
@@ -88,7 +96,7 @@ async function copyAndWait(page: Page, action: string): Promise<void> {
       }
     });
     mo.observe(el, { attributes: true, attributeFilter: ['data-pkc-flash'] });
-  }, sel);
+  }, { s: sel, flashSel });
   await clickReal(page, sel);
   await expect
     .poll(

@@ -128,8 +128,14 @@ export function statusBarWithFileDrag(
   parts: StatusLineParts,
   ctx: { readonly hasTooNarrow: boolean; readonly hasUnreadMessages: boolean },
 ): { text: string; hide: boolean; floating: string } {
-  const line = parts.fileDragLine ?? '';
-  const base = composeStatusLine({ ...parts, fileDragLine: '' });
+  /**
+   * 🔴 **「保存中…」も同じ作法で出す**(混んだ保存で、押そうとしたボタンが 20px ずれる不具合の根治)。
+   * ⚠ 保存が `SAVING_DELAY_MS` を超えると、畳まれていたバーが**現れて左・中央・右が 20px 縮む** ──
+   *   user が狙っていたボタンが、押す直前にずれる(smoke の `docx-export:222` が 1 割強の頻度で踏んだ)。
+   *   「保存中…」は一時の状態の字なので、バーが畳まれているなら畳んだまま、別のラベルに出す。
+   */
+  const line = [parts.fileDragLine ?? '', parts.savingLine].filter((t) => t !== '').join(' — ');
+  const base = composeStatusLine({ ...parts, fileDragLine: '', savingLine: '' });
   const hide = shouldHideStatusBar({ text: base, ...ctx });
   if (line === '') return { text: base, hide, floating: '' };
   if (hide) return { text: base, hide: true, floating: line };

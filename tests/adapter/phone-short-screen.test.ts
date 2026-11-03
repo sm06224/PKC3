@@ -55,7 +55,12 @@ describe('背の低い画面のメニュー', () => {
     const outer = document.createElement('div');
     root.append(outer);
     outer.dispatchEvent(new Event('scroll'));
-    expect(contextMenuOpen(root), '外の scroll で閉じなくなった').toBe(false);
+    // 🔴 2026-11-03(#1029 / #501): user が送っていない外の scroll(レイアウトの都合)では閉じない
+    expect(contextMenuOpen(root), 'user が送っていない外の scroll で閉じた').toBe(true);
+    // user が送った(ホイール)あとの外の scroll は、従来どおり閉じる(緩めすぎていない)
+    outer.dispatchEvent(new WheelEvent('wheel', { bubbles: true }));
+    outer.dispatchEvent(new Event('scroll'));
+    expect(contextMenuOpen(root), 'user が送った外の scroll で閉じなくなった').toBe(false);
   });
 });
 

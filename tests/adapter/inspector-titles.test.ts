@@ -78,6 +78,19 @@ const EXPECTED_ACTIONS: readonly string[] = [
   // 🔴 保存したスタックを載せる(#633 段③)── スタックの入れ物のときだけ出る(他では hidden)
   'stack-load',
   'adopt-external-images',
+  // 🔴 「書き出す ▾」(#1029 / #501)── 書き出し系は下の隠した器へ移った
+  'open-export-menu',
+  'show-history',
+  // 🔴 左の列の整理 3 つ(#215)── 右クリックと同じ並び(履歴の下・削除の上)
+  'rename-entry-begin',
+  'move-to-folder',
+  // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── ノートとログだけ見える(他では hidden)
+  'change-entry-kind',
+  'create-in-folder',
+  // 🔴 ゴミ箱を開く(#1646 の 1)── 削除の隣(開く → 移す)
+  'open-trash',
+  'delete-entry',
+  // 🔴 以下は一覧の項目の元(隠した器 `inspector-export-source`。並びは右クリックの書き出し群と同じ)
   'export-entry',
   'export-entry-html',
   'export-folder',
@@ -90,16 +103,6 @@ const EXPECTED_ACTIONS: readonly string[] = [
   'copy-entry-mail',
   // 🔴 文字起こしの字幕ファイル(#1447)── 時刻つきの行があるノートだけ見える
   'export-entry-srt',
-  'show-history',
-  // 🔴 左の列の整理 3 つ(#215)── 右クリックと同じ並び(履歴の下・削除の上)
-  'rename-entry-begin',
-  'move-to-folder',
-  // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── ノートとログだけ見える(他では hidden)
-  'change-entry-kind',
-  'create-in-folder',
-  // 🔴 ゴミ箱を開く(#1646 の 1)── 削除の隣(開く → 移す)
-  'open-trash',
-  'delete-entry',
 ];
 
 describe('情報ペインの操作の帯の説明(2026-08-29)', () => {

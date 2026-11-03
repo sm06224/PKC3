@@ -2213,7 +2213,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 見つからないノートの知らせの隣の「ゴミ箱を開く」(#1648)── 判断は `status-open.ts`
     paintStatusTrash(regions.statusTrash, text);
     // ⚠ 状態の 1 語だけを別の器に入れる(`status-line.ts` の `paintStatusText`)── 字は同じ
-    paintStatusText(regions.statusText, floating === '' ? parts : { ...parts, fileDragLine: '' });
+    paintStatusText(
+      regions.statusText,
+      floating === '' ? parts : { ...parts, fileDragLine: '', savingLine: '' },
+    );
     regions.status.hidden = hide;
   };
   /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */

@@ -536,97 +536,81 @@ async function reachableOnce(
       })
       .toBe(false);
   }
-  await el.scrollIntoViewIfNeeded(); // fold 下の要素を「覆われている」と誤診しない
-  const box = await el.boundingBox();
-  expect(box, `${name} に boundingBox が無い(画面に出ていない)`).not.toBeNull();
-  const x = box!.x + box!.width / 2;
-  const y = box!.y + box!.height / 2;
-  // 判定は「target 自身か、その子孫がヒット」のみ。祖先ヒットを許すと
-  // pointer-events:none 等の dead click が素通りする(binder は ev.target から
-  // closest するため、祖先ヒットでは target のハンドラに届かない ── review #2)
   /**
-   * ⚠ **要素そのものを渡す**(`document.querySelector(sel)` で引き直さない)。
-   *   引き直すと ①選択子の組み立てが壊れる相手を扱えない ②`.last()` を測ったのに
-   *   **`querySelector` は先頭を返す**ので、**別の要素で当たり判定していた**
-   *   (箱は最後の行・判定は最初の行、という食い違いが原理的に起こりうる)。
+   * 🔴 **覆われていたら、1 回だけ送り直してから測り直す**(`--repeat-each 24 --workers 8` で `import:685` が落ちた)。
+   * ⚠ 送った(`scrollIntoViewIfNeeded`)あとに、帯(取り込み時の注意・ステータスバー・お知らせ)が差し込まれて
+   *   ペインが縮むと、ボタンは**ペインの下へはみ出す**。箱を測るのはその後なので `moved` は偽になり、
+   *   「覆われている」と読んで落ちていた(実測: 送り直すと 86px 動いて届く)。
+   * ⚠ **検出力は落とさない** ── 送り直しても当たらない物(本物の occlusion / dead click)は、これまでどおり落ちる。
    */
-  /**
-   * 🔴 **箱を測った後に面が作り直されると、古い座標で当て判定してしまう**
-   * (2026-08-28、#494 のフル smoke で実際に踏んだ)。
-   *
-   * ⚠ `boundingBox()` と `evaluate()` は**別々に locator を解決する** ── その間に
-   *   情報ペインが作り直されると(保存の直後に worker から更新時刻が遅れて届く
-   *   ── この file の `isRerenderRace` が書いているとおり)、`node` は**新しい要素**
-   *   なのに `x, y` は**古い箱**のものになる。すると
-   *   `elementFromPoint` は別の物を返し、**「覆われている」という嘘の診断**が出る。
-   * 🔑 だから `evaluate` の中で**その node 自身の箱も一緒に採る**。ずれていたら
-   *   「覆われている」ではなく**作り直された**と読み、`withRerenderRetry` に回す。
-   * ⚠ **検出力は 1 ミリも下げない** ── 箱が動いていないのに当たらない場合は、
-   *   これまでどおり落ちる(本物の occlusion / dead click はそちら)。
-   * ⚠ `boundingBox()` のほうを捨てて `getBoundingClientRect` 一本にはしない ──
-   *   あちらは iframe の中の要素でも**頁の座標**を返す(`evaluate` は frame の座標)。
-   */
-  const probe = await el.evaluate(
-    (node, { px, py }) => {
-      const at = document.elementFromPoint(px, py);
-      const r = (node as Element).getBoundingClientRect();
-      /**
-       * 🔑 **中心が、送れる箱(祖先の `overflow` が visible でない箱)の見えている範囲の外か**。
-       * ⚠ `scrollIntoViewIfNeeded` の**後**に面の高さが変わる(下の帯が出る・取り込みの注意が出る)と、
-       *   さっき見える所へ送った要素が送れる箱の下端の外へ押し出される。そのとき中心に在るのは**箱の外の物**
-       *   (帯の見出しなど)で、覆われているのではなく**見えている所から外れた**のである
-       *   (全量・並列の smoke で `import.smoke.spec.ts` の「ほか N 件」が「H3 に覆われた」と落ちた実体)。
-       */
-      let clipped = px < 0 || py < 0 || px >= innerWidth || py >= innerHeight;
-      for (let a = (node as Element).parentElement; a !== null && !clipped; a = a.parentElement) {
-        const ov = getComputedStyle(a);
-        if (ov.overflowX === 'visible' && ov.overflowY === 'visible') continue;
-        const ar = a.getBoundingClientRect();
-        if (px < ar.left || px >= ar.right || py < ar.top || py >= ar.bottom) clipped = true;
-      }
-      return {
-        hit: !!(at && (at === node || node.contains(at))),
-        clipped,
-        box: { x: r.x, y: r.y, w: r.width, h: r.height },
-        at: at === null ? '(無し)' : `${at.tagName}${at.getAttribute('data-pkc-field') ?? ''}`,
-      };
-    },
-    { px: x, py: y },
-  );
-  /**
-   * ⚠ **大きさだけでなく位置も見る** ── 作り直しでいちばん多いのは
-   *   「同じ大きさの物が**隣へずれる**」形である(札が 1 枚増減しただけで起きる)。
-   *   大きさだけ比べると、その回を**本物の occlusion として落としてしまう**。
-   */
-  const moved =
-    Math.abs(probe.box.x - box!.x) > 1 ||
-    Math.abs(probe.box.y - box!.y) > 1 ||
-    Math.abs(probe.box.w - box!.width) > 1 ||
-    Math.abs(probe.box.h - box!.height) > 1;
-  /**
-   * ⚠ **見えている所から外れた**(`clipped`)も、作り直しと同じく**送り直してやり直す**合図にする
-   *   (やり直しは `scrollIntoViewIfNeeded` から ── 送り直せば見える所へ戻る)。
-   *   ⚠ 検出力は下げていない:見える所に在るのに別の物が上に被っている(本物の occlusion)は `clipped` が偽なので
-   *   これまでどおり落ちる。送り直しても外れ続ける(= 送っても届かない)なら、3 回で落ちる。
-   */
-  if (!probe.hit && probe.clipped) {
-    throw new Error(
-      `${name}: 測った後に element is not stable(送れる箱の見えている所から外れた ── 中心に在るのは ${probe.at})`,
+  for (let attempt = 1; ; attempt += 1) {
+    await el.scrollIntoViewIfNeeded(); // fold 下の要素を「覆われている」と誤診しない
+    const box = await el.boundingBox();
+    expect(box, `${name} に boundingBox が無い(画面に出ていない)`).not.toBeNull();
+    const x = box!.x + box!.width / 2;
+    const y = box!.y + box!.height / 2;
+    // 判定は「target 自身か、その子孫がヒット」のみ。祖先ヒットを許すと
+    // pointer-events:none 等の dead click が素通りする(binder は ev.target から
+    // closest するため、祖先ヒットでは target のハンドラに届かない ── review #2)
+    /**
+     * ⚠ **要素そのものを渡す**(`document.querySelector(sel)` で引き直さない)。
+     *   引き直すと ①選択子の組み立てが壊れる相手を扱えない ②`.last()` を測ったのに
+     *   **`querySelector` は先頭を返す**ので、**別の要素で当たり判定していた**
+     *   (箱は最後の行・判定は最初の行、という食い違いが原理的に起こりうる)。
+     */
+    /**
+     * 🔴 **箱を測った後に面が作り直されると、古い座標で当て判定してしまう**
+     * (2026-08-28、#494 のフル smoke で実際に踏んだ)。
+     *
+     * ⚠ `boundingBox()` と `evaluate()` は**別々に locator を解決する** ── その間に
+     *   情報ペインが作り直されると(保存の直後に worker から更新時刻が遅れて届く
+     *   ── この file の `isRerenderRace` が書いているとおり)、`node` は**新しい要素**
+     *   なのに `x, y` は**古い箱**のものになる。すると
+     *   `elementFromPoint` は別の物を返し、**「覆われている」という嘘の診断**が出る。
+     * 🔑 だから `evaluate` の中で**その node 自身の箱も一緒に採る**。ずれていたら
+     *   「覆われている」ではなく**作り直された**と読み、`withRerenderRetry` に回す。
+     * ⚠ **検出力は 1 ミリも下げない** ── 箱が動いていないのに当たらない場合は、
+     *   これまでどおり落ちる(本物の occlusion / dead click はそちら)。
+     * ⚠ `boundingBox()` のほうを捨てて `getBoundingClientRect` 一本にはしない ──
+     *   あちらは iframe の中の要素でも**頁の座標**を返す(`evaluate` は frame の座標)。
+     */
+    const probe = await el.evaluate(
+      (node, { px, py }) => {
+        const at = document.elementFromPoint(px, py);
+        const r = (node as Element).getBoundingClientRect();
+        return {
+          hit: !!(at && (at === node || node.contains(at))),
+          box: { x: r.x, y: r.y, w: r.width, h: r.height },
+          at: at === null ? '(無し)' : `${at.tagName}${at.getAttribute('data-pkc-field') ?? ''}`,
+        };
+      },
+      { px: x, py: y },
     );
+    /**
+     * ⚠ **大きさだけでなく位置も見る** ── 作り直しでいちばん多いのは
+     *   「同じ大きさの物が**隣へずれる**」形である(札が 1 枚増減しただけで起きる)。
+     *   大きさだけ比べると、その回を**本物の occlusion として落としてしまう**。
+     */
+    const moved =
+      Math.abs(probe.box.x - box!.x) > 1 ||
+      Math.abs(probe.box.y - box!.y) > 1 ||
+      Math.abs(probe.box.w - box!.width) > 1 ||
+      Math.abs(probe.box.h - box!.height) > 1;
+    if (!probe.hit && moved) {
+      // ⚠ 文言は `isRerenderRace` が拾う形にする(retry の合図)
+      throw new Error(
+        `${name}: 測った後に element is not stable` +
+          `(${box!.x},${box!.y} ${box!.width}x${box!.height} → ` +
+          `${probe.box.x},${probe.box.y} ${probe.box.w}x${probe.box.h})`,
+      );
+    }
+    if (!probe.hit && attempt === 1) continue;
+    expect(
+      probe.hit,
+      `${name} の中心 (${x},${y}) が別要素に覆われている / 届かない(そこに在るのは ${probe.at})`,
+    ).toBe(true);
+    return { x, y };
   }
-  if (!probe.hit && moved) {
-    // ⚠ 文言は `isRerenderRace` が拾う形にする(retry の合図)
-    throw new Error(
-      `${name}: 測った後に element is not stable` +
-        `(${box!.x},${box!.y} ${box!.width}x${box!.height} → ` +
-        `${probe.box.x},${probe.box.y} ${probe.box.w}x${probe.box.h})`,
-    );
-  }
-  expect(
-    probe.hit,
-    `${name} の中心 (${x},${y}) が別要素に覆われている / 届かない(そこに在るのは ${probe.at})`,
-  ).toBe(true);
-  return { x, y };
 }
 
 /**
@@ -1188,4 +1172,38 @@ export async function pickCaptureTool(page: Page, row: Locator, tool: string): P
   await expect(menu, '「仕上げ ▾」を押しても一覧が出ない').toBeVisible();
   await clickReal(page, menu.locator(`[data-pkc-action="capture-process"][data-pkc-part="${tool}"]`));
   await expect(menu, '選んだのに一覧が閉じない').toBeHidden();
+}
+
+/**
+ * 🔴 **コレクション全体の書き出し(何も選んでいないときの「書き出す ▾」の一覧)の項目**(#1029 / #501)。
+ * ⚠ ノート 1 件の書き出し(`export-entry-*` など)とは別の一覧 ── 名前で明示する(DOM を見て推測しない)。
+ */
+const COLLECTION_EXPORT_ACTIONS: ReadonlySet<string> = new Set([
+  'export-html',
+  'export-portable',
+  'export-pkc2-html',
+  'export-markdown',
+  'export-markdown-folder',
+  'export-structure',
+]);
+
+/**
+ * 🔴 **書き出しを一覧から押す = user と同じ手順**(#1029 / #501)。「書き出す ▾」を実マウスで開き、一覧の項目を実マウスで押す。
+ * ⚠ `clickReal` に黙って変換させない ── 書き出しを押す spec がこの関数を**名指しで**呼ぶ。
+ */
+export async function clickExportMenuItem(page: Page, action: string): Promise<void> {
+  const menu = await openExportMenu(page, COLLECTION_EXPORT_ACTIONS.has(action) ? 'collection' : 'entry');
+  await expect(menu.locator(`[data-pkc-action="${action}"]`), `${action} が「書き出す ▾」の一覧に無い`).toBeVisible();
+  await clickReal(page, `[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`);
+}
+
+/** 「書き出す ▾」を実マウスで開き、一覧(右クリックと同じ器)を返す。 */
+export async function openExportMenu(page: Page, kind: 'entry' | 'collection' = 'entry'): Promise<Locator> {
+  await clickReal(
+    page,
+    `[data-pkc-region="inspector"] [data-pkc-action="${kind === 'entry' ? 'open-export-menu' : 'open-collection-export-menu'}"]`,
+  );
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '「書き出す ▾」を押しても一覧が出ない').toBeVisible();
+  return menu;
 }

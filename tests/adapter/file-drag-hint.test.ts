@@ -224,6 +224,25 @@ describe('出し先: ステータスバーが見えていればそこ、畳ま�
     });
   });
 
+  it('🔴 「保存中…」も畳まれたバーを出さない(出すと全体が 20px ずれて、押す直前のボタンが動く)', () => {
+    const saving = { ...base, fileDragLine: '', savingLine: '⏳ 保存中…' };
+    expect(statusBarWithFileDrag(saving, ctx)).toEqual({ text: '', hide: true, floating: '⏳ 保存中…' });
+  });
+
+  it('保存中とドラッグが重なれば、ラベルに 2 つとも出す(バーは畳んだまま)', () => {
+    const both = { ...base, savingLine: '⏳ 保存中…' };
+    expect(statusBarWithFileDrag(both, ctx)).toEqual({
+      text: '',
+      hide: true,
+      floating: `${DROP_LINE_ATTACH} — ⏳ 保存中…`,
+    });
+  });
+
+  it('バーが見えている(編集中)ときの保存中は、今までどおりバーに載せる', () => {
+    const r = statusBarWithFileDrag({ ...base, phase: 'editing', fileDragLine: '', savingLine: '⏳ 保存中…' }, ctx);
+    expect(r).toEqual({ text: '編集中 — ⏳ 保存中…', hide: false, floating: '' });
+  });
+
   it('ラベル: 出す・消す・同じ要素を使い続ける。左の一覧の下端に合わせる', () => {
     document.body.textContent = '';
     const root = document.createElement('div');
@@ -257,6 +276,7 @@ describe('🔴 配線と CSS の原文 pin(#1380)', () => {
     expect(src).toContain('fileDragLine: fileDragHintLine(root)');
     expect(src).toContain('paintFileDragLabel(root, floating)');
     expect(src).toContain('statusBarWithFileDrag(parts');
+    expect(src).toContain("{ ...parts, fileDragLine: '', savingLine: '' }");
     const binder = noComments(readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8'));
     expect(binder).toContain('setupFileDragHint(root, {');
     expect(binder).toContain('partitionDrop(files, inBody, isImageFile)');

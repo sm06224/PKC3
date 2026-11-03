@@ -97,20 +97,17 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
    *   assert を置く。⚠ unit(`tests/adapter/inspector-action-groups.test.ts`)は
    *   happy-dom で同じ主張を見るが、**実際に両方が見えて押せる**ことは見ていない。
    */
-  const entryBackup = page.locator(
-    '[data-pkc-field="inspector-actions"] [data-pkc-action="export-entry"]',
-  );
-  const folderBackup = page.locator(
-    '[data-pkc-field="inspector-actions"] [data-pkc-action="export-folder"]',
-  );
-  await expect(entryBackup, 'ノートのバックアップが出ていない').toBeVisible();
-  await expect(folderBackup, 'フォルダのバックアップが出ていない(畳まれている)').toBeVisible();
+  // 🔴 2026-11-03(#1029 / #501): 書き出し系は「書き出す ▾」1 つに畳んだ ── 実マウスで開き、一覧の項目で見る
+  const exportBtn = page.locator('[data-pkc-field="inspector-actions"] [data-pkc-action="open-export-menu"]');
+  await expect(exportBtn, '「書き出す ▾」が出ていない').toBeVisible();
+  await clickReal(page, '[data-pkc-field="inspector-actions"] [data-pkc-action="open-export-menu"]');
+  const menuItem = (action: string) => page.locator(`[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`);
+  const entryBackup = menuItem('export-entry');
+  const folderBackup = menuItem('export-folder');
+  await expect(entryBackup, 'ノートのバックアップが一覧に無い').toBeVisible();
+  await expect(folderBackup, 'フォルダのバックアップが一覧に無い(畳まれている)').toBeVisible();
   const groupOf = async (l: typeof entryBackup): Promise<string | null> =>
-    l.evaluate(
-      (el) =>
-        el.closest('[data-pkc-field="inspector-action-group"]')?.getAttribute('data-pkc-group') ??
-        null,
-    );
+    l.evaluate((el) => el.closest('[data-pkc-field="context-menu-group"]')?.getAttribute('data-pkc-group') ?? null);
   const [gEntry, gFolder] = [await groupOf(entryBackup), await groupOf(folderBackup)];
   // ⚠ 空振り防止 ── どちらも塊の外(null)なら「違う」は成り立ってしまう
   expect(gEntry, 'ノートのバックアップが塊の外に在る').not.toBeNull();
@@ -118,7 +115,7 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
   expect(gFolder, `2 つのバックアップが同じ塊に在る(${String(gEntry)})`).not.toBe(gEntry);
 
   /**
-   * 🔴 **フォルダを選ぶと、書き出し 5 つは押せず、理由が title に出る。フォルダのバックアップだけ押せる**
+   * 🔴 **フォルダを選ぶと、書き出し 5 つは押せず、理由が説明に出る。フォルダのバックアップだけ押せる**
    *   (束 K2 / #1163 依頼 53-1)。新しい起動は足さず、いまフォルダを選んだこの道中で見る。
    */
   const exportActions = [
@@ -129,15 +126,17 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
     'export-entry-markdown',
   ];
   for (const action of exportActions) {
-    const btn = page.locator(`[data-pkc-field="inspector-actions"] [data-pkc-action="${action}"]`);
-    await expect(btn, `前提:${action} がフォルダの情報ペインに出ている`).toHaveCount(1);
-    await expect(btn, `🔴 フォルダなのに ${action} が押せる`).toBeDisabled();
-    await expect(btn, `🔴 ${action} の理由が title に出ていない`).toHaveAttribute(
-      'title',
+    const item = menuItem(action);
+    await expect(item, `前提:${action} がフォルダの一覧に出ている`).toHaveCount(1);
+    await expect(item, `🔴 フォルダなのに ${action} が押せる`).toBeDisabled();
+    await expect(item, `🔴 ${action} の理由が説明に出ていない`).toHaveAttribute(
+      'data-pkc-hint',
       /フォルダの中のノートは入りません/,
     );
   }
   await expect(folderBackup, '🔴 「このフォルダをバックアップ」が押せない').toBeEnabled();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-pkc-region="context-menu"]'), 'Esc で一覧が閉じない').toHaveCount(0);
 
   /**
    * ③ 2 クリックで入る。
@@ -147,12 +146,11 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
    */
   await clickReal(page, noteRow);
   // ノートを選ぶと、書き出し 5 つは押せる(束 K2。フォルダでだけ塞がっている対照群)
+  await clickReal(page, '[data-pkc-field="inspector-actions"] [data-pkc-action="open-export-menu"]');
   for (const action of exportActions) {
-    await expect(
-      page.locator(`[data-pkc-field="inspector-actions"] [data-pkc-action="${action}"]`),
-      `🔴 ノートなのに ${action} が押せない`,
-    ).toBeEnabled();
+    await expect(menuItem(action), `🔴 ノートなのに ${action} が押せない`).toBeEnabled();
   }
+  await page.keyboard.press('Escape');
   await doubleClickReal(page, folderRow);
   await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
   await expect(rows, 'フォルダに入れていない').toHaveCount(0);

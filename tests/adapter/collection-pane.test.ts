@@ -51,13 +51,22 @@ describe('右の列(何も選んでいない = コレクション。#1017 段④
      * には無い ── 貼り付け欄つきの器なので一律のボタン + 説明の形に収まらない
      * (`inspector.ts` の `buildPlanApplyItem`)。
      */
+    /**
+     * 🔴 **書き出し系は「書き出す ▾」1 つに畳んだ**(#1029 / #501。user 裁定 2026-11-03)。元のボタンは隠した器
+     *   (`collection-export-source`)に残り、押すと一覧になる(一覧の側は `inspector-export-menu.test.ts`)。
+     */
     expect(actions).toEqual([
+      'open-collection-export-menu',
       // 🔴 `needs` つき(PC のフォルダへ書く窓が要る物)は、happy-dom に窓が無いので出ない
       //   (出る側は `md-folder-export.test.ts`)
       ...COLLECTION_PANE_COMMANDS.filter((c) => c.needs === undefined).map((c) => c.action),
       'toggle-plan-apply',
       'apply-plan',
     ]);
+    const source = pane!.querySelector('[data-pkc-field="collection-export-source"]')!;
+    expect([...source.querySelectorAll('button[data-pkc-action]')].map((b) => b.getAttribute('data-pkc-action'))).toEqual(
+      COLLECTION_PANE_COMMANDS.filter((c) => c.needs === undefined).map((c) => c.action),
+    );
 
     // ⚠ 畳んでいないこと(user 指示 2026-08-03「主要な導線を畳まない」)
     expect(pane!.querySelectorAll('details')).toHaveLength(0);
@@ -67,7 +76,7 @@ describe('右の列(何も選んでいない = コレクション。#1017 段④
      */
     for (const el of pane!.querySelectorAll<HTMLElement>('button[data-pkc-action]')) {
       const action = el.getAttribute('data-pkc-action');
-      if (action === 'apply-plan') continue;
+      if (action === 'apply-plan' || source.contains(el)) continue;
       expect(el.closest('[hidden]'), `${action} が隠れている`).toBeNull();
     }
     expect(

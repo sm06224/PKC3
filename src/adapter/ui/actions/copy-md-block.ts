@@ -167,11 +167,22 @@ export function extractMdBlockPlainText(inner: HTMLElement): string {
 const flashTimers = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
 
 /**
+ * 🔴 **一覧の項目から押したコピーは、一覧を開いたボタンを光らせる**(#1029 / #501)。
+ * ⚠ 項目を押すと一覧は閉じる ── 項目に付けた合図は誰にも見えない。項目が「どのボタンから開いたか」
+ *   (`open-export-menu` など)をこの属性に持ち、合図はそのボタンへ出す。
+ */
+export const MENU_FROM_ATTR = 'data-pkc-menu-from';
+
+/**
  * 押した結果を短く光らせる(コピー系のボタン共通の合図)。
  * 2026-08-08 に読む面のコピー(`copy-source.ts`)と共用にした ── 合図の形を
  * 2 つ作ると、user は「光る方だけ成功」と読む。
+ * 一覧の項目から押したときは、一覧を開いたボタンに出す(上の {@link MENU_FROM_ATTR})。
  */
-export function flashCopied(target: HTMLElement): void {
+export function flashCopied(clicked: HTMLElement): void {
+  const from = clicked.getAttribute(MENU_FROM_ATTR);
+  const opener = from === null ? null : clicked.ownerDocument.querySelector<HTMLElement>(`[data-pkc-action="${from}"]`);
+  const target = opener ?? clicked;
   target.setAttribute('data-pkc-flash', 'true');
   const prev = flashTimers.get(target);
   if (prev !== undefined) clearTimeout(prev);

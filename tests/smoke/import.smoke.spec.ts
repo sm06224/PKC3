@@ -15,7 +15,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, expectImageRendered, useSplitEditor,
-  gotoCollectionPane, expectReachable, writesLanded, assetGateIdle,
+  gotoCollectionPane, expectReachable, writesLanded, assetGateIdle, clickExportMenuItem,
 } from './helpers';
 import { withStateOnFail } from './state-dump';
 import { chromiumLaunch } from './playwright.config';
@@ -800,6 +800,17 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   });
   // 取り込んだ後は、いまの階層(「2026」の中)のまま ── 束 F1 以降、開いているフォルダへ入るので、ルートへ戻さず
   // その場で大量のフォルダの行を押す(以前は取り込み先がルートだった)
+  /**
+   * 🔴 **書き終わりを先に待つ**(混んだ機械で 24 回中 21 回落ちた ── `--repeat-each 24 --workers 8`)。
+   * ⚠ 101 件の書込は、並列で混むと既定の 5 秒を超える。書いている間は「取り込み中」の帯が出ていて、
+   *   終わると「取り込み時の注意」の帯とステータスバーが**差し込まれ**、中央のペインが縮む。
+   *   待たずに「ほか 1 件」を押しに行くと、①行がまだ無い ②押す直前に帯が出て、ボタンがペインの下へはみ出す、のどちらかで落ちる。
+   * 🔑 帯は製品の正しい動き(取り込みの結果を言う)。**待つ相手はアプリ自身の完了の合図**(固定の待ちではない)。
+   */
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '2 本目の取り込み(102 件)が書き終わらない',
+  ).toContainText('取り込み完了: 102 件', { timeout: 30_000 });
   const bigRow = page
     .locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="folder"]')
     .filter({ hasText: '大量フォルダ' });
@@ -1327,7 +1338,7 @@ test('🔴 このノートを書き出す ── 消す前の導線が実際に�
   // 履歴を持つノートを開く ── 書き出しは履歴ごと出る
   await clickReal(page, '[data-pkc-entry="z1"]');
   const dl = page.waitForEvent('download');
-  await clickReal(page, '[data-pkc-action="export-entry"]');
+  await clickExportMenuItem(page, 'export-entry');
   const download = await dl;
   // ファイル名は**ノートの題名**(コンテナ名ではない)
   // ⚠ ファイル名は `download.suggestedFilename()` では見ない ── **この headless
@@ -1381,7 +1392,7 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   const dl = page.waitForEvent('download');
   // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
   await gotoCollectionPane(page);
-  await clickReal(page, '[data-pkc-action="export-html"]');
+  await clickExportMenuItem(page, 'export-html');
   const download = await dl;
   expect(download.suggestedFilename()).toMatch(/\.html$/);
   // ⚠ `download.path()` は**拡張子の無い**一時ファイルを指す ── `file://` で開くと
@@ -1575,7 +1586,7 @@ test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る
   const dl = page.waitForEvent('download');
   // ⚠ #1017 段④a でこの操作は右の列(何も選んでいないとき)へ移った ── 先に出す
   await gotoCollectionPane(page);
-  await clickReal(page, '[data-pkc-action="export-markdown"]');
+  await clickExportMenuItem(page, 'export-markdown');
   const download = await dl;
   expect(download.suggestedFilename()).toMatch(/\.md\.zip$/);
 
@@ -1601,9 +1612,8 @@ test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る
    * (中身が空の file を書いても名前は揃う)。
    */
   // ⚠ 右の列(コレクションの面)は上の zip を押した所から開いたまま ── 読み込み直さない
-  const folderBtn = page.locator('[data-pkc-field="collection-pane"] [data-pkc-action="export-markdown-folder"]');
-  await expect(folderBtn, 'PC のフォルダへ書き出すボタンが出ていない').toBeVisible();
-  await clickReal(page, '[data-pkc-field="collection-pane"] [data-pkc-action="export-markdown-folder"]');
+  // 🔴 「書き出す ▾」を開いて、一覧に項目が見える(`toBeVisible`)ことを確かめてから押す(#1029 / #501。`clickExportMenuItem` がやる)
+  await clickExportMenuItem(page, 'export-markdown-folder');
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('件のノートを『');
   const written = await page.evaluate(async () => {
     const root = await navigator.storage.getDirectory();

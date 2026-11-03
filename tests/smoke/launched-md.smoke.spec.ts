@@ -13,7 +13,7 @@
  * (`isSameEntry` は同じファイルにだけ true / `createWritable` は書いた文字を貯める)。
  */
 import { test, expect } from '@playwright/test';
-import { answerAppDialog, gotoApp, clickReal, collectPageErrors, useSplitEditor } from './helpers';
+import { answerAppDialog, gotoApp, clickReal, collectPageErrors, useSplitEditor, clickExportMenuItem, openExportMenu } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -99,7 +99,7 @@ test('🔴 OS から開いた md が画面に出て、直して元ファイル�
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
   // ④ **元ファイルへ書き戻す**(確認は出る ── user のファイルを上書きするので)
-  await clickReal(page, '[data-pkc-action="write-back-file"]');
+  await clickExportMenuItem(page, 'write-back-file');
   // 🔴 #1231 段②: 確認の小窓に**ファイルとのちがい**が出る(− が消える行、+ が書かれる行)。
   //    ⚠ 色は**画面の計算後の色**で見る(印の字だけでは「見分けられる」を言えない)
   const addRow = page.locator('[data-pkc-field="dialog-diff-rows"] [data-pkc-diff="add"]');
@@ -123,7 +123,7 @@ test('🔴 OS から開いた md が画面に出て、直して元ファイル�
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
   await page.fill('[data-pkc-field="editor-body"]', '  \n\n');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-action="write-back-file"]');
+  await clickExportMenuItem(page, 'write-back-file');
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '空の本文なのに、書かない理由を言っていない(無言の dead click)',
@@ -341,7 +341,9 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
     '押した 1 件だけ読むはず',
   ).toEqual(['メモ.md']);
   await expect(page.locator('[data-pkc-field="inspector-linked-file"]')).toHaveText('メモ.md');
-  await expect(page.locator('[data-pkc-action="write-back-file"]').first()).toBeVisible();
+  // 🔴 2026-11-03(#1029 / #501): 書き戻しは「書き出す ▾」の一覧にある ── 開いて見えることを確かめる
+  await expect((await openExportMenu(page)).locator('[data-pkc-action="write-back-file"]')).toBeVisible();
+  await page.keyboard.press('Escape');
   // ④ 🔴 開いても、左の列は「PC」のまま(別の場所を守る)
   await expect(tab).toHaveAttribute('aria-selected', 'true');
   await expect(pane).toBeVisible();
