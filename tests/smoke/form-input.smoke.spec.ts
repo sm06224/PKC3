@@ -10,10 +10,21 @@
  * 3. **表への追加が、描いた表の升に出る**(原文の splice が描画まで届く)
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, createEntry, clickReal, useSplitEditor } from './helpers';
+import {
+  gotoApp,
+  collectPageErrors,
+  createEntry,
+  clickReal,
+  useSplitEditor,
+  recordStoreOps,
+  resetStoreOps,
+  waitForStoreOp,
+  writesLanded,
+} from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
+  await recordStoreOps(page);
 });
 
 const BODY = [
@@ -59,9 +70,19 @@ test('🔴 入力欄に打って保存すると設定欄へ入り、表に追加
   // ── 打って保存する
   await page.fill(field('氏名'), '山田');
   await page.fill(field('件数'), '12');
+  await resetStoreOps(page);
   await clickReal(page, `${FORM} [data-pkc-action="form-save"]`);
 
   // ── 開き直しても残る(disk まで届いた証拠)
+  /**
+   * 🔴 **書き込みが disk へ届いてから読み直す**(アプリ自身の合図を待つ)。
+   * ⚠ 直す前は押してすぐ `page.reload()` していた ── 書込は押した後で飛び(`data-pkc-saving`)、
+   *   読み直しが先に着くと**書く前に頁が閉じ**、値が戻らない(負荷が高い回だけ。2/24 回)。
+   *   製品はこのとき「離れますか」の確認を出す(`unload-guard`)が、Playwright の `reload()` はそれを素通りする。
+   * 🔑 待つのは「押した後に頼んだ本文の書込が返った」+「飛んでいる書込が 0」の 2 つ。
+   */
+  await waitForStoreOp(page, 'upsertEntry', 1);
+  await writesLanded(page);
   await page.reload();
   await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
   await expect(page.locator(field('氏名')), '保存した値が欄に戻らない').toHaveValue('山田', { timeout: 15_000 });
