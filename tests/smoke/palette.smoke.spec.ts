@@ -207,6 +207,16 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await expect
     .poll(() => listed.count(), { message: '今日のノートが作られていない' })
     .toBe(listedBefore + 1);
+  /**
+   * ⚠ **今日のノートは編集中で開く** ── このままでは「作る」のメニューが全部押せない(`disabled`)。
+   *   2026-11-03 まで、下の `createEntry` は押せない項目を押して**何も起きずに素通り**し、⑩ は新しいノートではなく
+   *   **今日のノート**を編集していた(`clickReal` が押せない間は待つようにして見つかった)。保存してから作る。
+   */
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(
+    page.locator('[data-pkc-region="create-menu"] [data-pkc-archetype="text"]').first(),
+    '今日のノートを保存しても「作る」が押せるようにならない',
+  ).toBeEnabled();
 
   /**
    * ⑩ 🔴 **打っている場所に入れる操作(#582 段③ 第 3 群)が、1 面のライブ編集で「打っていた場所」に入る**。
