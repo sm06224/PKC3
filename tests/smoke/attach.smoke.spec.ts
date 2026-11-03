@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, expectMainGapUnderBudget,
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, expectMainGapUnderBudget, recordMainGap, startMainTaskTrace, expectMainTaskCpuUnderBudget,
   gotoCollectionPane,
 } from './helpers';
 // ⚠ 段⑤(xlsx を SQL で調べる)の bytes は Node 側でこの 1 本から組む(#854 段③)。
@@ -280,6 +280,7 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
       __hb: number;
       __t0: number;
       __lt: PerformanceObserver | null;
+      __ltSeen: PerformanceEntry[];
     };
     w.__gaps = [];
     w.__t0 = performance.now();
@@ -291,13 +292,25 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     }, 4);
     // 🔑 診断(#878 ①)── long task も同じ窓で採る。⚠ 無いブラウザは `null`(0 件と別物)
     w.__lt = null;
+    w.__ltSeen = [];
     try {
-      w.__lt = new PerformanceObserver(() => {});
+      /**
+       * ⚠ **届いた記録は callback で拾う**(2026-11-03 に直した)── 直す前は callback が空(`() => {}`)で、
+       *   記録は callback へ渡された時点で捨てられ、最後の `takeRecords()` には**まだ渡していない分しか残らない**。
+       *   「long task 0 件」と出ていたのは計器の欠陥で、長い task が無かった証拠ではなかった。
+       */
+      w.__lt = new PerformanceObserver((list) => w.__ltSeen.push(...list.getEntries()));
       w.__lt.observe({ type: 'longtask', buffered: true });
     } catch {
       w.__lt = null;
     }
   });
+  /**
+   * 🔴 **門は task の CPU 時間で掛ける**(`expectMainTaskCpuUnderBudget`。2026-11-03)── 下の心拍の欠測は記録だけにする。
+   * ⚠ 欠測は壁時計なので、全量の負荷(4 つのブラウザが 4 コアを奪い合う)では、製品が CPU 25〜30ms で済ませた
+   *   task が 117〜167ms に伸びて門を越えていた(負荷なしでは 35〜45ms で、門の手前)。予算の値(80ms)は変えていない。
+   */
+  const cpu = await startMainTaskTrace(page);
   await winOk.click();
   // ⚠ **選んだら窓は閉じる**(取り出した後も選び手が残らない)
   await expect
@@ -308,18 +321,19 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]'),
     '取り出した物が添付になっていない',
   ).toHaveCount(6, { timeout: 20_000 });
+  const tasks = await cpu.stop();
   const load = await page.evaluate(() => {
     const w = window as unknown as {
       __gaps: { at: number; gap: number }[];
       __hb: number;
       __t0: number;
       __lt: PerformanceObserver | null;
+      __ltSeen: PerformanceEntry[];
     };
     clearInterval(w.__hb);
     const g = [...w.__gaps].sort((a, b) => b.gap - a.gap);
     const longtasks = w.__lt
-      ? w.__lt
-          .takeRecords()
+      ? [...w.__ltSeen, ...w.__lt.takeRecords()]
           .filter((e) => e.startTime >= w.__t0)
           .map((e) => ({ at: Math.round(e.startTime - w.__t0), dur: Math.round(e.duration) }))
       : null;
@@ -332,8 +346,8 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
       longtasks,
     };
   });
-  // 🔑 **値は毎回 log に残る**(#878 ①)── 門も予算も `expectMainGapUnderBudget` が正本
-  expectMainGapUnderBudget('取り出し', {
+  // 🔑 **値は毎回 log に残る**(#878 ①)── 欠測は記録だけ。門は下の CPU 時間(予算は同じ `MAIN_GAP_BUDGET_MS`)
+  recordMainGap('取り出し', {
     maxGap: load.max,
     base: base.max,
     ticks: load.ticks,
@@ -343,6 +357,7 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     topAt: load.topAt,
     longtasks: load.longtasks,
   });
+  expectMainTaskCpuUnderBudget('取り出し', tasks);
   await expect(page.locator('[data-pkc-region="filer-table"]')).toContainText('海.jpg');
   await expect(page.locator('[data-pkc-region="filer-table"]')).toContainText('山.jpg');
 
@@ -776,8 +791,10 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
       }, 4);
       // 🔑 診断(#878 ①)── long task も同じ窓で採る。⚠ 無いブラウザは `null`(0 件と別物)
       let lt: PerformanceObserver | null = null;
+      // ⚠ 届いた記録は callback で拾う(空の callback は記録を捨てる ── 「取り出し」の注記)
+      const ltSeen: PerformanceEntry[] = [];
       try {
-        lt = new PerformanceObserver(() => {});
+        lt = new PerformanceObserver((list) => ltSeen.push(...list.getEntries()));
         lt.observe({ type: 'longtask', buffered: true });
       } catch {
         lt = null;
@@ -787,8 +804,7 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
           clearInterval(hb);
           gaps.sort((a, b) => b.gap - a.gap);
           const longtasks = lt
-            ? lt
-                .takeRecords()
+            ? [...ltSeen, ...lt.takeRecords()]
                 .filter((e) => e.startTime >= t0)
                 .map((e) => ({ at: Math.round(e.startTime - t0), dur: Math.round(e.duration) }))
             : null;

@@ -500,6 +500,22 @@ async function reachableOnce(page: Page, target: Target): Promise<{ x: number; y
   const el = asLocator(page, target);
   const name = nameOf(target);
   await expect(el).toBeVisible();
+  /**
+   * 🔴 **押せない(`:disabled`)間は押さない ── 押せるようになるまで待ち、ならなければ名指しで落ちる**(2026-11-03)。
+   *
+   * ⚠ ここは座標で押すので、Playwright の `locator.click()` が持つ「押せるまで待つ」を**通らない**。
+   *   `disabled` のボタンを実マウスで押すと**何も起きずに素通り**し、落ちるのは後の別の行になる ──
+   *   keymap の smoke が全量の負荷で「編集に入っていない」で落ちたのは、行を選んだ直後の「編集」
+   *   (本文が届くまで `disabled`、題「本文を読み込んでいます…」)を押していたからだった(製品は正しい)。
+   * 🔑 待つのは**ネイティブの `:disabled` だけ**(`aria-disabled` は押すと理由を言う作りがあるので見ない)。
+   *   最初から押せる物は 1 往復で抜ける。⚠ 検出力は下げない ── 押せないまま終わるなら、ここで落ちる。
+   */
+  await expect
+    .poll(() => el.evaluate((n) => n.matches(':disabled')), {
+      message: `${name} が押せない(disabled)まま ── 押しても何も起きない`,
+      timeout: 15_000,
+    })
+    .toBe(false);
   await el.scrollIntoViewIfNeeded(); // fold 下の要素を「覆われている」と誤診しない
   const box = await el.boundingBox();
   expect(box, `${name} に boundingBox が無い(画面に出ていない)`).not.toBeNull();
@@ -783,6 +799,18 @@ export interface MainGapSample {
 }
 
 export function expectMainGapUnderBudget(label: string, m: MainGapSample): void {
+  recordMainGap(label, m);
+  expect(
+    m.maxGap,
+    `${label}: メインスレッドが ${m.maxGap}ms 止まった(何もしていない間は ${m.base}ms)`,
+  ).toBeLessThan(m.base + MAIN_GAP_BUDGET_MS);
+}
+
+/**
+ * 🔑 **壁時計の欠測を記録だけする**(門は掛けない)── 門を `expectMainTaskCpuUnderBudget`(CPU 時間)で掛ける窓でも、
+ *   欠測の分布は今までどおり `grep '\[#878\] gap'` で拾えるようにする。⚠ 計器が死んでいないことだけは見る。
+ */
+export function recordMainGap(label: string, m: MainGapSample): void {
   // ⚠ 機械で拾える 1 行にする(全量の log から `grep '\[#878\] gap'` で分布が出る)
   console.log(
     `[#878] gap ${label} maxGap=${m.maxGap} base=${m.base} over=${m.maxGap - m.base}` +
@@ -802,10 +830,107 @@ export function expectMainGapUnderBudget(label: string, m: MainGapSample): void 
   // ⚠ 空振り防止 ── 心拍が回っていなければ最大欠測は 0 になり、門は常に通る
   expect(m.ticks, `${label}: 心拍が取れていない(計器が死んでいる)`).toBeGreaterThan(5);
   expect(m.baseTicks, `${label}: 対照群の心拍が取れていない(比べる相手が無い)`).toBeGreaterThan(5);
+}
+
+/**
+ * 🔴 **メインスレッドの task 1 つの CPU 時間で「固まらない」を見る**(#818 / #878 ①、2026-11-03)。
+ *
+ * ## なぜ壁時計の欠測(`expectMainGapUnderBudget`)だけでは足りないか
+ *
+ * ⚠ 欠測は**壁時計**である ── 全量の smoke は 4 つのブラウザが 4 コアを奪い合うので、製品が 25〜30ms の
+ *   CPU で済ませた task でも、その間に CPU を取り上げられると壁時計では 50〜70ms、波が重なると 150ms に伸びる。
+ *   実測(2026-11-03、`attach` の取り出し、CPU を焼く 4 本 + `--workers=4`):上位の task は
+ *   **壁時計 35〜69ms / CPU 24〜30ms**(中身は「添付 1 件ごとの dispatch → 画面の再描画」と「2MB の塊ごとの CRC」)。
+ *   「何もしていない間」の欠測は操作の**前**に採るので、操作の**最中**の取り合いを差し引けない。
+ * ⚠ メインの外(Worker)の心拍で同じ瞬間の床を採る案も試したが**効かなかった** ── 眠っては起きる心拍は
+ *   スケジューラにすぐ拾われるので遅れず(落ちた回でも 58〜87ms)、伸びるのは**CPU を使い続ける task だけ**である。
+ * 🔑 だから**同じ予算(`MAIN_GAP_BUDGET_MS`)を、task の CPU 時間(trace の `tdur`)に当てる** ──
+ *   箱が混んでも伸びないのは CPU 時間のほうで、製品がメインを塞いだ量そのものである。
+ *   壊れたとき(CRC を同期で全量 = 数百 ms)は 1 つの task がそのまま CPU を数百 ms 使うので、ここで落ちる。
+ * ⚠ trace は Chromium の CDP でしか採れない(smoke は Chromium だけ)。
+ * ⚠ **trace を始めた直後の task は数えない** ── 始める操作そのものが 300ms 級の GC を 1 回起こす(実測)。
+ *   窓は `startMainTaskTrace` が打つ印から `stopMainTaskTrace` が打つ印まで。
+ */
+export interface MainTaskTrace {
+  readonly stop: () => Promise<MainTaskCpu>;
+}
+
+export interface MainTaskCpu {
+  /** 窓の中の task の数(0 なら計器が死んでいる)。 */
+  readonly tasks: number;
+  /** 窓の中で CPU 時間がいちばん長かった task の CPU 時間(ms)。 */
+  readonly maxCpu: number;
+  /** CPU 時間の上位 5 件(`cpu/wall` の ms)── 壁時計と並べると、箱の取り合いで伸びた量が読める。 */
+  readonly top: readonly string[];
+}
+
+const TRACE_START_MARK = 'pkc-smoke-trace-start';
+const TRACE_STOP_MARK = 'pkc-smoke-trace-stop';
+
+export async function startMainTaskTrace(page: Page): Promise<MainTaskTrace> {
+  const cdp = await page.context().newCDPSession(page);
+  const events: Array<Record<string, unknown>> = [];
+  cdp.on('Tracing.dataCollected', (e) => events.push(...(e.value as Array<Record<string, unknown>>)));
+  await cdp.send('Tracing.start', {
+    categories: 'toplevel,blink.user_timing',
+    transferMode: 'ReportEvents',
+  });
+  // ⚠ 始める操作が起こす重い GC を窓の外へ出す(2 フレーム回してから印を打つ)
+  await page.evaluate(
+    () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
+  );
+  await page.evaluate((m) => performance.mark(m), TRACE_START_MARK);
+  return {
+    stop: async () => {
+      await page.evaluate((m) => performance.mark(m), TRACE_STOP_MARK);
+      const done = new Promise<void>((r) => cdp.once('Tracing.tracingComplete', () => r()));
+      await cdp.send('Tracing.end');
+      await done;
+      await cdp.detach();
+      const markOf = (name: string): Record<string, unknown> | undefined =>
+        events.find((e) => e['name'] === name);
+      const a = markOf(TRACE_START_MARK);
+      const b = markOf(TRACE_STOP_MARK);
+      if (a === undefined || b === undefined) throw new Error('trace に印が無い(どの thread がメインか分からない)');
+      const thread = `${String(a['pid'])}:${String(a['tid'])}`;
+      const t0 = a['ts'] as number;
+      const t1 = b['ts'] as number;
+      const tasks = events
+        .filter(
+          (e) =>
+            `${String(e['pid'])}:${String(e['tid'])}` === thread &&
+            e['ph'] === 'X' &&
+            (e['name'] === 'ThreadControllerImpl::RunTask' || e['name'] === 'RunTask') &&
+            typeof e['tdur'] === 'number' &&
+            (e['ts'] as number) >= t0 &&
+            (e['ts'] as number) <= t1,
+        )
+        .map((e) => ({ cpu: (e['tdur'] as number) / 1000, wall: (e['dur'] as number) / 1000 }))
+        .sort((x, y) => y.cpu - x.cpu);
+      return {
+        tasks: tasks.length,
+        maxCpu: Math.round(tasks[0]?.cpu ?? 0),
+        top: tasks.slice(0, 5).map((t) => `${Math.round(t.cpu)}/${Math.round(t.wall)}`),
+      };
+    },
+  };
+}
+
+export function expectMainTaskCpuUnderBudget(label: string, m: MainTaskCpu): void {
+  // ⚠ 記録は assert より前(`expectMainGapUnderBudget` と同じ ── 欲しいのは落ちた回の値)
+  console.log(
+    `[#878] cpu ${label} maxCpu=${m.maxCpu} budget=${MAIN_GAP_BUDGET_MS} tasks=${m.tasks} top(cpu/wall)=[${m.top.join(',')}]`,
+  );
+  test.info().annotations.push({
+    type: 'main-thread-cpu',
+    description: `${label}: maxCpu=${m.maxCpu}ms budget=${MAIN_GAP_BUDGET_MS}ms`,
+  });
+  // ⚠ 空振り防止 ── task が 1 つも採れていなければ最大は 0 になり、門は常に通る
+  expect(m.tasks, `${label}: メインスレッドの task が 1 つも採れていない(計器が死んでいる)`).toBeGreaterThan(5);
   expect(
-    m.maxGap,
-    `${label}: メインスレッドが ${m.maxGap}ms 止まった(何もしていない間は ${m.base}ms)`,
-  ).toBeLessThan(m.base + MAIN_GAP_BUDGET_MS);
+    m.maxCpu,
+    `${label}: メインスレッドの task が 1 つで CPU を ${m.maxCpu}ms 使った(上位 cpu/wall: ${m.top.join(', ')})`,
+  ).toBeLessThan(MAIN_GAP_BUDGET_MS);
 }
 
 /**
