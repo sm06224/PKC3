@@ -727,7 +727,8 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
-  for (const t of ['け', 'こ', 'さ']) {
+  // ⚠ 4 件(最後に Delete で消した後も ↓ で動ける 2 件が残るように ── 下の ④)
+  for (const t of ['け', 'こ', 'さ', 'し']) {
     await createEntry(page, 'text');
     const title = page.locator('[data-pkc-field="editor-title"]');
     if (await title.count()) await title.fill(t);
@@ -747,19 +748,17 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
   await page.keyboard.press('Delete');
   await expect(page.locator('[data-pkc-region="app-dialog"][open]'), '確認が出ている').toHaveCount(0);
   await expect(rows, '押したのに消えていない').toHaveCount(before - 1);
-
-  // 消したあともキーボードが生きている(マウスを挟まず ↓ でカーソルが動く)
-  const cursorRow = page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-cursor]`);
-  // 🔴 消した直後からカーソルが在る(#1087。入れ替わりに来た行)── 1 回目の ↓ で別の行へ動く
-  await expect(cursorRow, '消した直後にカーソルが無い(↓ が先頭付近から始まる)').toHaveCount(1);
-  const cursorBefore = await cursorRow.first().getAttribute('data-pkc-entry');
-  await page.keyboard.press('ArrowDown');
-  await expect
-    .poll(() => cursorRow.first().getAttribute('data-pkc-entry'), '消したあと ↓ でカーソルが動かない')
-    .not.toBe(cursorBefore);
   await expect(page.locator('[data-pkc-region="status"]'), '移したことを言っていない').toContainText(
     'ゴミ箱へ移しました',
   );
+  const cursorRow = page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-cursor]`);
+  // 🔴 消した直後からカーソルが在る(#1087。入れ替わりに来た行)
+  await expect(cursorRow, '消した直後にカーソルが無い(↓ が先頭付近から始まる)').toHaveCount(1);
+  /**
+   * ⚠ **「元に戻す」は 7 秒で消える**(`trash-undo.ts` の `TRASH_OFFER_MS`)── 直す前はここで ↓ の確認を挟んでから押しており、
+   *   負荷で 7 秒を越えた回に、期限が切れる瞬間の「元に戻す」を押して何も起きなかった(全量・並列で実際に落ちた)。
+   *   🔑 消したらすぐ戻す。「消したあとも ↓ が効く」は最後(④)に、同じ Delete の道で見る。
+   */
   await clickReal(page, '[data-pkc-field="status-undo"]');
   await expect(rows, '元に戻しても行が戻らない').toHaveCount(before);
 
@@ -788,6 +787,18 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
       '右クリックで消した後、焦点が行に無く ↓ が効かない',
     )
     .not.toBe(rcBefore);
+
+  // ── ④ Delete で消したあともキーボードが生きている(マウスを挟まず ↓ でカーソルが動く)
+  const left = await rows.count();
+  await rows.first().click();
+  await page.keyboard.press('Delete');
+  await expect(rows, 'Delete で消えていない').toHaveCount(left - 1);
+  await expect(cursorRow, '消した直後にカーソルが無い').toHaveCount(1);
+  const cursorBefore = await cursorRow.first().getAttribute('data-pkc-entry');
+  await page.keyboard.press('ArrowDown');
+  await expect
+    .poll(() => cursorRow.first().getAttribute('data-pkc-entry'), '消したあと ↓ でカーソルが動かない')
+    .not.toBe(cursorBefore);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

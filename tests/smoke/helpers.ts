@@ -649,9 +649,17 @@ export async function expectImageRendered(page: Page, selector: string): Promise
  *
  * @returns 確認に出ていた文言(件数などを突き合わせるため)
  */
-export async function answerAppDialog(page: Page, answer: 'ok' | 'cancel'): Promise<string> {
+export async function answerAppDialog(
+  page: Page,
+  answer: 'ok' | 'cancel',
+  /**
+   * 出るまで待つ長さ(既定は expect の 5 秒)。⚠ 中身を読んでから出す確認(バックアップの取り込み前の表など)は、
+   *   負荷で読むのが遅れる ── そこだけ呼び手が名指しで延ばす(既定は変えない)。
+   */
+  opts: { readonly timeout?: number } = {},
+): Promise<string> {
   const body = page.locator('[data-pkc-field="dialog-body"]');
-  await expect(body, '確認のダイアログが出ていない').toBeVisible();
+  await expect(body, '確認のダイアログが出ていない').toBeVisible(opts.timeout === undefined ? {} : { timeout: opts.timeout });
   const message = (await body.textContent()) ?? '';
   await clickReal(page, `[data-pkc-field="dialog-${answer === 'ok' ? 'ok' : 'cancel'}"]`);
   await expect(body, 'ダイアログが閉じていない').toBeHidden();

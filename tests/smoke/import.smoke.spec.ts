@@ -15,7 +15,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, expectImageRendered, useSplitEditor,
-  gotoCollectionPane, expectReachable,
+  gotoCollectionPane, expectReachable, writesLanded,
 } from './helpers';
 import { withStateOnFail } from './state-dump';
 import { chromiumLaunch } from './playwright.config';
@@ -812,6 +812,24 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
   await expect(page.locator('[data-pkc-region="filer-breadcrumb"]'), '前提:押す前は左の一覧はルート').not.toContainText(
     '大量フォルダ',
   );
+  /**
+   * ⚠ **取り込みの書き込みが済み、押し口の位置が落ち着いてから押す**(全量・並列の smoke で 2 通りに落ちた:
+   *   「H3 に覆われた」/ 押せたのに中へ移らない)。取り込みの後に「取り込み時の注意」の帯が遅れて出ると、面が縮んで
+   *   押し口が動く ── 押す直前に動けば、クリックは別の物に落ちる。user から見ても押す前に動く物は押さない。
+   */
+  await writesLanded(page);
+  let lastY = Number.NaN;
+  await expect
+    .poll(
+      async () => {
+        const y = (await more.boundingBox())?.y ?? Number.NaN;
+        const still = y === lastY;
+        lastY = y;
+        return still;
+      },
+      { message: '「ほか N 件」の位置が落ち着かない', intervals: [250] },
+    )
+    .toBe(true);
   await clickReal(page, more);
   await expect(
     page.locator('[data-pkc-region="filer-breadcrumb"]'),
@@ -1184,7 +1202,7 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
     target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
     target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
   }, zipBytes);
-  const droppedConfirm = await answerAppDialog(page, 'cancel');
+  const droppedConfirm = await answerAppDialog(page, 'cancel', { timeout: 15_000 });
   expect(droppedConfirm, '落としたバックアップに取り込みの確認が出ない').toMatch(/ノート \d+ 件/);
   await expect(rows, '「やめる」を押したのに件数が増えた').toHaveCount(2);
 
@@ -1196,7 +1214,8 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   });
   // 🔴 #1017 段④b 追補: PKC3 のバックアップは取込前に中身を確認する ──
   // ノート・添付・つながり・履歴の表が出て、「取り込む」を押すまで進まない
-  const confirmText = await answerAppDialog(page, 'ok');
+  // ⚠ 表は zip の中身を読んでから出す ── 負荷で 5 秒を越えて落ちた(全量・並列)。速さはこの test の主張ではないので 15 秒待つ
+  const confirmText = await answerAppDialog(page, 'ok', { timeout: 15_000 });
   expect(confirmText).toMatch(/ノート \d+ 件/);
   // 🔴 #1852 束 F2: 確認の表に、ゴミ箱のノートが「ゴミ箱に入った状態で戻ります」と出る(`archive-preview.ts`)
   expect(confirmText, '確認にゴミ箱のノートが出ない').toContain('ゴミ箱のノート 1 件(ゴミ箱に入った状態で戻ります)');
