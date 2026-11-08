@@ -24,9 +24,13 @@ export declare function resolveListFace(
   faces?: readonly string[],
 ): Promise<ListFace>;
 
-/** 面を解いて、行が出そろうのを待つ。 */
+/**
+ * 面を解いて、全件が state に載り、見えている塊の行が組み上がって落ち着くのを待つ
+ * (#1924 で一覧が塊ごとの仮想化になったので、DOM の行の数で全件は待てない ── #1928)。
+ */
 export declare function waitForRows(
   page: unknown,
   rows: number,
   timeout?: number,
-): Promise<ListFace>;
+  opts?: { readonly mustShow?: string },
+): Promise<ListFace & { readonly stateCount: number; readonly renderedRows: number }>;

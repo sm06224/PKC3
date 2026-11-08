@@ -98,20 +98,60 @@ export async function listRowsSelector(page, archetype) {
 }
 
 /**
- * 面を解いて、そこに行が出そろうのを待つ。
+ * 面を解いて、**全件が state に載り、見えている塊の行が組み上がって落ち着く**のを待つ。
  * ⚠ **どの面で測ったかを必ず印字する** ── 既定が入れ替わったとき、
  *   数字だけ見て「同じものを測り続けている」と誤読しないため。
+ *
+ * 🔴 **DOM の行の数で全件を待たない**(2026-11-08、#1928)。#1924(2026-10-30)で一覧は
+ *   `ROW_CHUNK`(50 行)ずつの塊に分かれ、**見えている前後の塊だけ**行を組むようになった
+ *   (`src/adapter/ui/render/filer.ts`)。15,000 行を DOM で待つ旧い形は二度と満たされず、
+ *   probe 3 本(sidebar / editor / schedule)が 60 秒待って毎晩赤だった。
+ * 🔑 だから見るものを 2 つに分ける:
+ *   ① 件数 ── **state**(`entryMetas.size`)が `rows` 件に達したこと
+ *   ② 描画 ── 見えている面に行が組まれ(`mustShow` の行を含む)、**組まれた行の数が 400ms 動かない**こと
+ *     (塊を組むのは配置の後なので、組み上がる途中で行を握ると、後の同一性の比較が「数が違う」で空振りする)
+ * ⚠ 組まれた行の数が `rows` 以上なら、**塊に分ける仕組みが効いていない**(全部組んでいる)── 落とす。
+ *   ここを黙って通すと、仮想化が外れた退行を probe が見逃す。
  * @param {import('@playwright/test').Page} page
- * @param {number} rows 期待する最小の行数
+ * @param {number} rows 期待する件数(state に載る件数)
  * @param {number} timeout ms
+ * @param {{ mustShow?: string }} [opts] 組まれているべき行の lid(先頭の塊に居るはずのもの)
+ * @returns {Promise<{ region: string, selector: string, stateCount: number, renderedRows: number }>}
  */
-export async function waitForRows(page, rows, timeout = 60_000) {
+export async function waitForRows(page, rows, timeout = 60_000, opts = {}) {
   const face = await resolveListFace(page);
-  console.log(`[probe] 一覧の面: ${face.region}(${rows} 行を待つ)`);
+  console.log(`[probe] 一覧の面: ${face.region}(state に ${rows} 件、見えている塊の行を待つ)`);
   await page.waitForFunction(
-    ([sel, n]) => document.querySelectorAll(`${sel} [data-pkc-entry]`).length >= n,
-    [face.selector, rows],
+    (n) => (window.__APP__?.dispatcher.getState().entryMetas?.size ?? 0) >= n,
+    rows,
     { timeout },
   );
-  return face;
+  const handle = await page.waitForFunction(
+    ([sel, lid]) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      const n = el.querySelectorAll('[data-pkc-entry]').length;
+      if (n === 0) return false;
+      if (lid && !el.querySelector(`[data-pkc-entry="${lid}"]`)) return false;
+      const now = performance.now();
+      const w = /** @type {any} */ (window);
+      if (w.__PROBE_ROWS_N__ !== n) {
+        w.__PROBE_ROWS_N__ = n;
+        w.__PROBE_ROWS_AT__ = now;
+        return false;
+      }
+      return now - w.__PROBE_ROWS_AT__ >= 400 ? n : false;
+    },
+    [face.selector, opts.mustShow ?? null],
+    { timeout, polling: 100 },
+  );
+  const renderedRows = /** @type {number} */ (await handle.jsonValue());
+  const stateCount = await page.evaluate(() => window.__APP__.dispatcher.getState().entryMetas.size);
+  console.log(`[probe] state ${stateCount} 件 / 組まれた行 ${renderedRows}`);
+  if (renderedRows >= rows) {
+    throw new Error(
+      `組まれた行が ${renderedRows}(全 ${rows} 件以上)── 塊に分けて画面の外を組まない仕組み(#1924)が効いていない`,
+    );
+  }
+  return { ...face, stateCount, renderedRows };
 }
