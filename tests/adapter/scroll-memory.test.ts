@@ -27,6 +27,9 @@ function container() {
     },
     configurable: true,
   });
+  // 🔑 指せる上限 = scrollHeight - clientHeight = content(上の丸めと同じ値)
+  Object.defineProperty(el, 'clientHeight', { get: () => 100, configurable: true });
+  Object.defineProperty(el, 'scrollHeight', { get: () => content + 100, configurable: true });
   return {
     el,
     /** 中身の高さ(= 指せる上限)を変える。 */
@@ -135,6 +138,33 @@ describe('スクロール位置の記憶', () => {
     c.setContent(1000);
     m.use('list');
     expect(c.el.scrollTop, '丸められた分を戻していない').toBe(62);
+  });
+
+  /**
+   * 🔴 **上へ送った直後(`scroll` イベントの前)に同じ面が描き直されても、送った分を巻き戻さない**(#1937)。
+   * ⚠ 直す前は `cur < want` を「丸められた」と読んで、覚えた古い位置(下)へ書き戻した。
+   * 対照群: 0(一瞬空になった)と末尾(中身が縮んで上限に張り付いた)は、従来どおり丸めとして扱う。
+   */
+  it('🔴 scroll イベントの前に同じ面を描き直しても、上へ送った位置を保つ(0 と末尾の間)', () => {
+    const c = container();
+    const m = new ScrollMemory(c.el);
+    m.use('list');
+    c.el.scrollTop = 500;
+    scrolled(c.el); // 覚えた = 500
+    c.el.scrollTop = 200; // 上へ送った(scroll イベントはまだ届いていない)
+    m.use('list'); // 描き直し
+    expect(c.el.scrollTop, '上へ送った位置が古い値へ巻き戻った').toBe(200);
+    expect(m.peek('list'), '送った位置を覚えていない').toBe(200);
+    // 対照群①: 一瞬空になって 0 に丸められた → 覚えた値へ戻す
+    c.setContent(0);
+    c.setContent(1000);
+    m.use('list');
+    expect(c.el.scrollTop, '0 に丸められた分を戻していない').toBe(200);
+    // 対照群②: 中身が縮んで末尾に張り付いた → 覚えた値を書く(上限で丸められる)
+    c.setContent(150);
+    m.use('list');
+    expect(c.el.scrollTop, '末尾に張り付いた値を「送った」と読んだ').toBe(150);
+    expect(m.peek('list'), '縮んで張り付いた値で、覚えた位置を上書きした').toBe(200);
   });
 
   it('🔴 同じ面を描き直しただけでも戻す(ログのように作り直す面)', () => {

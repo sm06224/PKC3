@@ -938,9 +938,15 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
    * Esc で窓が閉じる。⚠ **`press` ではなく `down`** ── 窓は keydown で閉じるので、
    *   `press`(down + up)は up を送る前に相手が消えて「page closed」で落ちる
    *   (1 稿目で踏んだ。閉じる作りのほうは正しい)。
+   * ⚠ **`down` でも同じ競合が残る**(2026-11-08、フル smoke で 1 回・単独 5 回中 1 回)── keydown の応答が
+   *   playwright へ返る前に窓が閉じると、`down` 自体が「page closed」で落ちる。
+   * 🔑 だから `down` の失敗は**窓が本当に閉じたときだけ**受ける(閉じていないのに落ちたなら、そのまま赤)。
+   *   閉じたことは `closed` で必ず確かめる ── 窓が閉じない退行は、ここで時間切れになって落ちる。
    */
   const closed = chapterWin.waitForEvent('close');
-  await chapterWin.keyboard.down('Escape');
+  await chapterWin.keyboard.down('Escape').catch((e: unknown) => {
+    if (!chapterWin.isClosed()) throw e;
+  });
   await closed;
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

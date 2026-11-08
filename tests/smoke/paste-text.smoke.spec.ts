@@ -267,8 +267,15 @@ test('🔴 ウェブページをコピーして貼ると、形のまま入って
   // ② 🔴 **取り消せる**(`execCommand` の経路を通っている証拠 ── unit では測れない)
   await page.keyboard.press('Control+z');
   await expect(row, '取り消しで戻っていない').not.toHaveValue(/## 見出し/);
+  /**
+   * 🔴 **取り消しは貼り付けだけを戻し、やり直しは 1 行目まで戻す**(#1934)。
+   * ⚠ 直前に `fill('')` で欄を消しているので、Chromium は「消す」と「貼る」を 1 つの塊にまとめていた ──
+   *   Ctrl+Z は消す前の字(「見出し」)まで戻り、Ctrl+Y は**見出しの行を落として**残りだけを戻した。
+   *   貼る口(`insertBlockText`)が塊を閉じるので、貼る前の空の欄へ戻る。
+   */
+  await expect(row, '取り消しが、貼り付けより前の操作まで巻き戻した').toHaveValue('');
   await page.keyboard.press('Control+y');
-  await expect(row).toHaveValue(/## 見出し/);
+  await expect(row, 'やり直しで、貼った見出しの行が戻らない').toHaveValue(/^## 見出し\n/);
 
   // ③ 🔴 **確定すると本当にその形で描かれる**(字が入っただけで終わらせない)
   await page.keyboard.press('Tab');

@@ -8,7 +8,7 @@
  *    アプリの束から出たものだけ。理由は `collectPageErrors` の中に書いた)
  */
 import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
-import { consoleOrigin, firstAppFrame, isAppOrigin, rawFrame } from './page-errors';
+import { consoleOrigin, firstAppFrame, isAppOrigin, isBrowserInternalOrigin, rawFrame } from './page-errors';
 
 export async function gotoApp(page: Page): Promise<void> {
   await page.goto('/');
@@ -297,6 +297,8 @@ export function collectPageErrors(page: Page): string[] {
       );
       return;
     }
+    // 🔴 ブラウザ内蔵の拡張・`chrome://` の資源が出す赤はアプリの主張ではない(#1935 ── 出所の scheme で絞る)
+    if (isBrowserInternalOrigin(msg.location())) return;
     const line = `console.error: ${msg.text()}`;
     // ⚠ **等値**で外す(部分一致にしない)── 部分一致にすると、同じ前置きを持つ
     //    別のエラーまで黙って消える
@@ -895,6 +897,12 @@ export function expectMainGapUnderBudget(label: string, m: MainGapSample): void 
    *   落ちる(CPU 30ms → 壁時計 110〜150ms を実測)ので、**予算 80ms の仕事が奪い合いで伸びうる上限**を
    *   壁時計の側の予算とする。⚠ 負荷下の実測の最大は 158ms(12 spec × 5 の 20 回)で、#878 が名指しした
    *   500〜726ms の停止はこの網でも落ちる。
+   * 🔑 **変異で確かめた**(#1938、2026-11-08)── CPU を使わない同期の停止は「遅く応答する URL への**同期 XHR**」で
+   *   作れる(`page.route` で 400ms 待たせてから返す。`Atomics.wait` はメインで使えないが、同期 XHR は使える)。
+   *   `attach` の「大きい添付を貼る」の窓に 1 本撃つと、CPU の門は **cpu=24ms で通り**、この網が
+   *   **maxGap=411ms で落とした**(KILLED)。変異なしの同じ回は maxGap=38ms / cpu=26ms で緑。
+   *   ⚠ そのとき long task の計器は**空**だった(`longtask=[]`)── 同期 XHR の待ちは long task に数えられない。
+   *   CPU の門と long task のどちらでも拾えない停止を、この網だけが拾う。
    */
   expect(
     m.maxGap,
