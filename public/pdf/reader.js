@@ -2776,7 +2776,9 @@ nativeBtn.addEventListener('click', () => {
   if (navigator.pdfViewerEnabled === false) {
     const a = document.createElement('a');
     a.href = nativeUrl;
-    a.download = docName !== '' ? docName : 'document.pdf';
+    // ⚠ 名前に `.pdf` が無い添付でも、保存した物が PDF として開けるように拡張子を足す(着地前レビュー)
+    const base = docName !== '' ? docName : 'document';
+    a.download = /\.pdf$/i.test(base) ? base : `${base}.pdf`;
     a.click();
     setStatus('このブラウザには PDF の表示が無いため、ファイルとして保存しました(PDF を開けるアプリで開けます)');
     return;
