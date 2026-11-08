@@ -73,7 +73,10 @@ try {
   }, ARM);
   await page.goto(`http://localhost:${PORT}/tests/probe/sidebar-probe.html`);
   await page.waitForFunction(() => window.__APP__, null, { timeout: 120_000 });
-  LIST = (await waitForRows(page, 15000)).selector;
+  // 🔴 一覧は塊ごとの仮想化(#1924)── 15,000 件は **state** で待ち、DOM は見えている塊の行
+  //    (先頭の塊に居る e42 を含む)が組み上がるのを待つ(`browse-face.mjs` の注記、#1928)
+  const face = await waitForRows(page, 15000, undefined, { mustShow: 'e42' });
+  LIST = face.selector;
 
   await page.evaluate((list) => {
     // 空振り防止 ── 器が無いのに「0 行が同一だった」で緑にしない
@@ -266,6 +269,8 @@ try {
       : result.stateUntouchedWhileTyping === true && committedByRowCommit === true;
   const ok =
     !result.error &&
+    face.stateCount === 15000 &&
+    face.renderedRows > 0 &&
     armOk &&
     result.sameNodeAfterSmall &&
     result.sameNodeAfterLarge &&
@@ -275,7 +280,7 @@ try {
     post.phase === 'ready' &&
     post.storageVfs === 'opfs-sahpool';
   console.log(
-    JSON.stringify({ ok, arm: ARM, typing: result, committedByRowCommit, commitToViewMs, post }, null, 2),
+    JSON.stringify({ ok, arm: ARM, list: { stateCount: face.stateCount, renderedRows: face.renderedRows }, typing: result, committedByRowCommit, commitToViewMs, post }, null, 2),
   );
   process.exitCode = ok ? 0 : 1;
 } finally {

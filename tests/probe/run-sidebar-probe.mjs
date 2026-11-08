@@ -46,7 +46,10 @@ try {
   page.on('pageerror', (e) => console.error('[pageerror]', e.message));
   await page.goto(`http://localhost:${PORT}/tests/probe/sidebar-probe.html`);
   await page.waitForFunction(() => window.__APP__, null, { timeout: 120_000 });
-  LIST = (await waitForRows(page, 15000)).selector;
+  // 🔴 一覧は塊ごとの仮想化(#1924)── 15,000 件は **state** で待ち、DOM は見えている塊の行
+  //    (先頭の塊に居る e42 を含む)が組み上がるのを待つ(`browse-face.mjs` の注記、#1928)
+  const face = await waitForRows(page, 15000, undefined, { mustShow: 'e42' });
+  LIST = face.selector;
 
   const steps = await page.evaluate(async (list) => {
     const t0 = window.__BOOT_T0__;
@@ -76,6 +79,7 @@ try {
     obs.observe(el, { childList: true }); // ⚠ subtree は見ない(行の中の文字は対象外)
     return { rowCount: rows.length, bootToRowsMs };
   }, LIST);
+  steps.stateCount = face.stateCount;
 
   // 実クリックで選択(binder 経路を通す)
   // ⚠ **一覧の中の行**を押す ── `page.click` は最初の一致を採り、それが不可視だと
@@ -152,7 +156,10 @@ try {
   }, LIST);
 
   const ok =
-    steps.rowCount === 15000 &&
+    // 🔑 件数は state、行は見えている塊だけ(#1924 の仮想化。全部組んでいたら waitForRows が落とす)
+    steps.stateCount === 15000 &&
+    steps.rowCount > 0 &&
+    steps.rowCount < 15000 &&
     result.rowsIdenticalThroughEditCycle &&
     // 🔑 2026-08-17 に **0 を実測**したので後条件へ昇格させた(同一性だけでは
     //    「外して同じ順に入れ直す」= move を弁別できない)
