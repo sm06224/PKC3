@@ -2,7 +2,7 @@
 
 > この doc は **Gemini が単独で読んで動けるように自己完結**させてある(Claude 用の資産
 > `CLAUDE.md` / `.claude/` を前提にしない)。台帳と対話の場は **issue #1163**。
-> 相方(Claude)向けの doc は `docs/development/session-handoff-2026-10-01-claude.md`。
+> 相方(Claude)向けの doc は `docs/development/archived/session-handoff-2026-10-01-claude.md`。
 
 ## 🔴 最初の仕事: **あり ── PKC3 を触って読んで、提案を issue に起票する**
 

@@ -33,6 +33,8 @@ description: セッションを次のセッションへ引き継ぐ手順。引�
 1. **状態を実測する**: `git log --oneline -5`、open PR、CI の状態、未 push の有無を確認する。
 2. **知見の整理（必要な場合のみ）**: 新しい技術的罠があった場合のみ `.claude/skills/knowledge-reflection/SKILL.md` の上限規律に従って簡潔に反映する（反省文の追記はしない）。
 3. **引き継ぎ doc を書く**: `docs/development/session-handoff-YYYY-MM-DD.md` を作成し、PR 本文からリンクする。
+   - `docs/development/` に置く引き継ぎは**直近の 2 本まで**(user 指示 2026-11-08)。3 本目を足したら、いちばん古い 1 本を
+     `docs/development/archived/` へ `git mv` し、他の doc からの参照の path(`` `archived/session-handoff-…` ``)を直す。
 4. **導線の検算**:
    doc や PR 本文に書いた `.claude/...` パスや `#NNN` が実在するか確かめる:
    ```bash

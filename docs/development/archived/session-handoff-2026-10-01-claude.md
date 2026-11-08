@@ -1,7 +1,7 @@
 # セッション引き継ぎ 2026-10-01 ── Claude 向け(Gemini の提案を着陸させる)
 
 > ⚠ **この doc は要約とポインタである。** 罠と規律の正本は `CLAUDE.md` と `.claude/` に在る。
-> 相方(Gemini)向けの doc は `docs/development/session-handoff-2026-10-01-gemini.md`、
+> 相方(Gemini)向けの doc は `docs/development/archived/session-handoff-2026-10-01-gemini.md`、
 > 対話の場と台帳は **issue #1163**。前回の引き継ぎは `session-handoff-2026-09-29.md`(#1154 / #1155)。
 
 ## 🔴 最初の仕事: **あり ── `[Gemini 提案]` の issue を着陸させる**
