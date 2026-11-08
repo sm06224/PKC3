@@ -841,6 +841,24 @@ test('folder-export 取込 → filer で階層が実際にたどれる', async (
       { message: '「ほか N 件」の位置が落ち着かない', intervals: [250] },
     )
     .toBe(true);
+  /**
+   * 🔴 **送って見せた「ほか N 件」が、描いた後に跳ねない**(#1929 から切り出し。全量の負荷で 10 回中 9〜10 回落ちた原因)。
+   *
+   * ⚠ 概要の行は `content-visibility: auto` で、まだ描いていない行の高さを**見積もり**で置く。見積もりは
+   *   長らく `24px` だったが、行(= ボタン)の実寸は `--row-h`(26px)── 送った先で行が描かれるたびに 2px ずつ伸び、
+   *   ボタンが**本文ペインの下端の外**へ落ちた。静かな箱では押すほうがフレームより先に済むので通っていた
+   *   (= 負荷でだけ見える**製品の跳ね**)。キーボードで焦点を移した人にも同じことが起きる。
+   * 🔑 見るのは「送った直後」と「3 フレーム描いた後」の位置が同じこと。⚠ 送るのも読むのも**同じ evaluate の中**で
+   *   続けてやる(送ってから読むまでに 1 フレーム挟まると、直す前でも跳ねた後の位置どうしを比べて通ってしまう)。
+   */
+  const jump = await more.evaluate(async (el) => {
+    const top = (): number => Math.round(el.getBoundingClientRect().top);
+    el.scrollIntoView({ block: 'nearest' });
+    const at0 = top();
+    for (let f = 0; f < 3; f++) await new Promise((r) => requestAnimationFrame(r));
+    return { at0, at3: top() };
+  });
+  expect(jump.at3, `送って見せた「ほか N 件」が、行を描いたら動いた(${jump.at0} → ${jump.at3})`).toBe(jump.at0);
   await clickReal(page, more);
   await expect(
     page.locator('[data-pkc-region="filer-breadcrumb"]'),
