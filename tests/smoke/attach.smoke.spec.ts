@@ -285,6 +285,7 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
       __hb: number;
       __t0: number;
       __lt: PerformanceObserver | null;
+      __ltSeen: PerformanceEntry[];
     };
     w.__gaps = [];
     w.__t0 = performance.now();
@@ -297,8 +298,14 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     performance.mark('pkc-cpu:load:begin'); // ⚠ `cpuMark('load', 'begin')` と同じ綴り(ページの中では呼べない)
     // 🔑 診断(#878 ①)── long task も同じ窓で採る。⚠ 無いブラウザは `null`(0 件と別物)
     w.__lt = null;
+    w.__ltSeen = [];
     try {
-      w.__lt = new PerformanceObserver(() => {});
+      /**
+       * ⚠ **届いた記録は callback で拾う**(#1938 の変異で見つけた)── 空の callback(`() => {}`)は、渡された記録を
+       *   そのまま捨てる。最後の `takeRecords()` にはまだ渡していない分しか残らないので、636ms 止めた変異でも
+       *   `longtask=[]` と出た(長い仕事が無かった証拠ではなく、計器の欠陥だった)。
+       */
+      w.__lt = new PerformanceObserver((list) => w.__ltSeen.push(...list.getEntries()));
       w.__lt.observe({ type: 'longtask', buffered: true });
     } catch {
       w.__lt = null;
@@ -329,12 +336,12 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
       __hb: number;
       __t0: number;
       __lt: PerformanceObserver | null;
+      __ltSeen: PerformanceEntry[];
     };
     clearInterval(w.__hb);
     const g = [...w.__gaps].sort((a, b) => b.gap - a.gap);
     const longtasks = w.__lt
-      ? w.__lt
-          .takeRecords()
+      ? [...w.__ltSeen, ...w.__lt.takeRecords()]
           .filter((e) => e.startTime >= w.__t0)
           .map((e) => ({ at: Math.round(e.startTime - w.__t0), dur: Math.round(e.duration) }))
       : null;
@@ -801,8 +808,10 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
       }, 4);
       // 🔑 診断(#878 ①)── long task も同じ窓で採る。⚠ 無いブラウザは `null`(0 件と別物)
       let lt: PerformanceObserver | null = null;
+      // ⚠ 届いた記録は callback で拾う(空の callback は記録を捨てる ──「取り出し」の注記)
+      const ltSeen: PerformanceEntry[] = [];
       try {
-        lt = new PerformanceObserver(() => {});
+        lt = new PerformanceObserver((list) => ltSeen.push(...list.getEntries()));
         lt.observe({ type: 'longtask', buffered: true });
       } catch {
         lt = null;
@@ -813,8 +822,7 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
           performance.mark(edges[1]);
           gaps.sort((a, b) => b.gap - a.gap);
           const longtasks = lt
-            ? lt
-                .takeRecords()
+            ? [...ltSeen, ...lt.takeRecords()]
                 .filter((e) => e.startTime >= t0)
                 .map((e) => ({ at: Math.round(e.startTime - t0), dur: Math.round(e.duration) }))
             : null;
