@@ -2765,6 +2765,22 @@ nativeBtn.addEventListener('click', () => {
   if (blob === null) return;
   // 🔑 URL は 1 つだけ作って使い回す。⚠ 返すのは窓を閉じるとき(`pagehide`)── 開いた先のタブが読み終えるまで要る
   if (nativeUrl === null) nativeUrl = URL.createObjectURL(blob);
+  /**
+   * 🔴 **ブラウザに PDF の表示が無いときは、ファイルとして保存する**(#1947)。
+   * ⚠ 直す前は、表示が無いブラウザ(`navigator.pdfViewerEnabled === false` ── 内蔵の表示を持たない台や、
+   *   Chrome の「PDF をダウンロードする」設定)でも新しいタブを開いていた。実測(headless_shell 1243)では、
+   *   タブは空のまま何も起きず、保存もされなかった(押して無反応)。
+   * 🔑 表示が無い人には、保存して PDF を開けるアプリへ渡すのが「ブラウザの表示」の代わりになる。
+   *   `undefined`(古いブラウザ)は今までどおりタブで開く ── 無いと言い切れるときだけ保存する。
+   */
+  if (navigator.pdfViewerEnabled === false) {
+    const a = document.createElement('a');
+    a.href = nativeUrl;
+    a.download = docName !== '' ? docName : 'document.pdf';
+    a.click();
+    setStatus('このブラウザには PDF の表示が無いため、ファイルとして保存しました(PDF を開けるアプリで開けます)');
+    return;
+  }
   const w = window.open(nativeUrl, '_blank');
   if (w === null) setStatus('ブラウザの表示を開けませんでした。ブラウザのポップアップを許可してから、もう一度押してください');
 });

@@ -43,6 +43,7 @@
  * ⚠ fixture は**自作**(下の `buildPdf`)── 頁ごとに字が違う(`marker<頁>`)ので、どの頁を引いたかが字で分かる。
  */
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { clickReal, collectPageErrors, gotoApp } from './helpers';
 
 /**
@@ -356,12 +357,29 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(item(2)).toHaveAttribute('tabindex', '-1');
   // 🔴 「ブラウザの表示で開く」── 押すと新しいタブが blob: の URL で開く(窓は開いたまま)
   await expect(win.locator('#open-native'), '読めたのに「ブラウザの表示で開く」が押せない').toBeEnabled();
-  const [native] = await Promise.all([
-    context.waitForEvent('page', { timeout: 15_000 }),
-    clickReal(win, '#open-native'),
-  ]);
-  await expect.poll(() => native.url(), { message: '「ブラウザの表示で開く」の新しいタブが blob: の URL でない', timeout: 15_000 }).toMatch(/^blob:/);
-  await native.close();
+  /**
+   * 🔴 **ブラウザに PDF の表示が無いときは、ファイルとして保存する**(#1947)── どちらの道かはブラウザが決める。
+   * ⚠ 直す前は、表示が無い `headless_shell`(CI と同じバイナリ)でも空のタブを開き、何も起きずにここで落ちた。
+   * 🔑 フルの Chromium は「タブで開く」の道を、`headless_shell` は「保存する」の道を通る(両方で通して、両方の道を見る)。
+   *   保存の道は、保存された中身が PDF であることまで見る(名前は見ない ── `headless_shell` は日本語の名前を捨てる。SKILL §4)。
+   */
+  const hasViewer = await win.evaluate(() => navigator.pdfViewerEnabled);
+  if (hasViewer === false) {
+    const [saved] = await Promise.all([
+      win.waitForEvent('download', { timeout: 15_000 }),
+      clickReal(win, '#open-native'),
+    ]);
+    const head = readFileSync((await saved.path())!).subarray(0, 5).toString('latin1');
+    expect(head, 'PDF の表示が無いブラウザで保存した物が PDF でない').toBe('%PDF-');
+    await expect(win.locator('#status'), '保存したことを言っていない(押して無反応に見える)').toContainText('ファイルとして保存しました');
+  } else {
+    const [native] = await Promise.all([
+      context.waitForEvent('page', { timeout: 15_000 }),
+      clickReal(win, '#open-native'),
+    ]);
+    await expect.poll(() => native.url(), { message: '「ブラウザの表示で開く」の新しいタブが blob: の URL でない', timeout: 15_000 }).toMatch(/^blob:/);
+    await native.close();
+  }
   expect(win.isClosed(), '「ブラウザの表示で開く」で PDF のウィンドウが閉じた').toBe(false);
   await win.focus('#hit-next');
   // 上のバーで押せるのは「PDF を足す」(#275 結合)と「注釈をページに書き込んで保存」(#1163 依頼 31。何も変えていなくても押せる)と「付箋」「ペン」(#275。字を選ばなくても押せる)だけ ── 次の Tab で一覧へ入る
