@@ -933,8 +933,18 @@ listEl.addEventListener('keyup', (ev) => {
   if (ev.key === ' ' && (ev.ctrlKey || ev.metaKey)) ev.preventDefault();
 });
 listEl.addEventListener('click', (ev) => {
-  // ドラッグを離した直後のクリックは、押したことにしない
-  if (Date.now() - dragEndedAt < 80) return;
+  /**
+   * ドラッグを離したときにブラウザが続けて出す「押した」は、押したことにしない。
+   * 🔴 **時間の窓では見分けない**(2026-11-08)。以前は「離してから 80ms 以内のクリックは捨てる」だったので、
+   *   離した直後に**別の物を新しく押した**クリックまで捨てていた(実測: 離して 77ms 後に ↑ を押すと、並びが変わらない。
+   *   smoke の pdf-reader で 4 回中 4 回 ── 速い手順ほど窓に入る)。
+   * 🔑 新しく押したなら必ず `pointerdown` が先に来る ── そこで印を消すので、捨てるのは
+   *   「離した後、次に押すまでに来たクリック」だけになる(離した操作そのものが出すクリック)。
+   */
+  if (swallowDragClick) {
+    swallowDragClick = false;
+    return;
+  }
   // キーで選びを切り替えた直後に、同じキーから来る「押した」は数えない(マウスの押下は `detail` が 1 以上)
   if (ev.detail === 0 && Date.now() - keyPickedAt < 500) return;
   const t = ev.target instanceof Element ? ev.target : null;
@@ -997,7 +1007,8 @@ let editVerdict = null;
 let editLease = null;
 let saving = false;
 let editTimer = null;
-let dragEndedAt = 0;
+/** ドラッグを離した後、次に押すまで ── 離した操作が出すクリックを 1 回だけ捨てる印(上の click の注記)。 */
+let swallowDragClick = false;
 let keyPickedAt = 0;
 
 const PREPARING = 'ページの編集を準備しています…';
@@ -1814,6 +1825,8 @@ function endDrag() {
 }
 
 listEl.addEventListener('pointerdown', (ev) => {
+  // 新しく押した ── 前のドラッグの後始末の印は、ここで役目を終える(このクリックは捨てない)
+  swallowDragClick = false;
   if (ev.button !== 0 || !ready || saving || !(ev.target instanceof Element)) return;
   if (ev.target.closest('.thumb-act') !== null) return;
   const cell = ev.target.closest('.thumb-cell');
@@ -1851,7 +1864,7 @@ listEl.addEventListener('pointerup', (ev) => {
   const slot = d.active ? dropSlot(ev.clientY) : -1;
   endDrag();
   if (!d.active) return;
-  dragEndedAt = Date.now();
+  swallowDragClick = true;
   void editMove(d.page, slot, false);
 });
 listEl.addEventListener('pointercancel', () => {

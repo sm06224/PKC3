@@ -1835,7 +1835,26 @@ export function insertBlockText(ta: HTMLTextAreaElement, text: string): void {
   const isBlock = startsAsBlock(text);
   const at = ta.selectionStart ?? ta.value.length;
   const atLineStart = at === 0 || ta.value[at - 1] === '\n';
+  closeTypingRun(ta);
   insertText(ta, isBlock && !atLineStart ? `\n${text}` : text);
+}
+
+/**
+ * 🔴 **貼り付けを、直前の打鍵・削除とは別の「取り消しの 1 段」にする**(#1934、2026-11-08)。
+ *
+ * ⚠ Chromium は、続けて来た `insertText` / 削除を **1 つの打鍵の塊**にまとめる。欄を全部選んで消した直後に
+ *   複数行を `insertText` で貼ると、Ctrl+Z は「消す前」まで一気に戻り、続く Ctrl+Y(やり直し)は
+ *   **1 行目を落として**残りだけを戻す(実測: Chromium 153 / 1243。素の `<textarea>` でも同じ ── 欄の作りではなく
+ *   ブラウザの塊のまとめ方)。user から見ると「貼って、取り消して、やり直したら見出しが消えた」になる。
+ * 🔑 選択範囲を一度置き直すと、その塊は閉じる(同じ位置でもよい)── 貼り付けは自分だけの 1 段になり、
+ *   Ctrl+Z は貼り付けだけを戻し、Ctrl+Y は全部を戻す(上と同じ手順で実測)。
+ * ⚠ 置き直すのは**元と同じ範囲**(caret の位置も選択も変えない)。
+ */
+function closeTypingRun(ta: HTMLTextAreaElement): void {
+  const { selectionStart: s, selectionEnd: e, selectionDirection: d } = ta;
+  if (s === null || e === null) return;
+  ta.setSelectionRange(s, s);
+  ta.setSelectionRange(s, e, d ?? undefined);
 }
 
 export function insertText(ta: HTMLTextAreaElement, text: string): void {

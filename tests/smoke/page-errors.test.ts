@@ -5,7 +5,7 @@
  *   実ブラウザでしか確かめられないと、間欠の赤でしか直せなくなる。
  */
 import { describe, expect, it } from 'vitest';
-import { consoleOrigin, firstAppFrame, isAppOrigin, rawFrame } from './page-errors';
+import { consoleOrigin, firstAppFrame, isAppOrigin, isBrowserInternalOrigin, rawFrame } from './page-errors';
 
 /** 実 Chromium の stack(#387 の 2 度目の観測から形を写した)。 */
 const REAL = [
@@ -160,5 +160,24 @@ describe('🔴 console の行が「アプリの束から出たか」 (#710)', ()
     expect(isAppOrigin({})).toBe(false);
     expect(isAppOrigin(null)).toBe(false);
     expect(isAppOrigin(undefined)).toBe(false);
+  });
+});
+
+describe('isBrowserInternalOrigin(#1935)', () => {
+  it('🔴 内蔵の PDF ビューア拡張と chrome:// の資源は、ブラウザ自身の物', () => {
+    expect(isBrowserInternalOrigin({ url: 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.css' })).toBe(true);
+    expect(isBrowserInternalOrigin({ url: 'chrome://resources/css/text_defaults_md.css' })).toBe(true);
+  });
+
+  it('⚠ アプリの出所・出所の無い行・箱の中は捨てない(アプリの赤かもしれない)', () => {
+    expect(isBrowserInternalOrigin({ url: 'http://localhost:45732/assets/index-abc.js' })).toBe(false);
+    expect(isBrowserInternalOrigin({ url: 'https://example.test/pdf/reader.js' })).toBe(false);
+    expect(isBrowserInternalOrigin({ url: 'about:srcdoc' })).toBe(false);
+    expect(isBrowserInternalOrigin({ url: 'blob:http://localhost:45732/1-2-3' })).toBe(false);
+    expect(isBrowserInternalOrigin({ url: '' })).toBe(false);
+    expect(isBrowserInternalOrigin({})).toBe(false);
+    expect(isBrowserInternalOrigin(null)).toBe(false);
+    // ⚠ 文言や path に `chrome-extension` を含むだけのアプリの URL は捨てない(scheme だけを見る)
+    expect(isBrowserInternalOrigin({ url: 'http://localhost:45732/chrome-extension://x.js' })).toBe(false);
   });
 });

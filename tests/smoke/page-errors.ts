@@ -149,3 +149,20 @@ export function isAppOrigin(loc: { url?: string } | null | undefined): boolean {
   if (url === undefined || url === '') return false;
   return /^https?:/i.test(url);
 }
+
+/**
+ * 🔴 **ブラウザ自身の内部の物(内蔵の拡張・`chrome://` の資源)から出た行か**(#1935、2026-11-08)。
+ *
+ * ⚠ PDF を「ブラウザ標準で開く」と、Chromium は内蔵の PDF ビューア拡張(`chrome-extension://mhjfbm…/`)と
+ *   `chrome://resources/…` を読み込む。作業箱は外へ出られないので、それが
+ *   `Failed to load resource: net::ERR_INTERNET_DISCONNECTED` を `console.error` で毎回出し、
+ *   `collectPageErrors` が**アプリの赤**として数えていた(pdf-reader:117 が毎回落ちた)。
+ * 🔑 **出所の URL の scheme で絞る**(文言の部分一致では捨てない ── 同じ文言はアプリの資源の読み込み失敗でも出る)。
+ *   `chrome-extension:` と `chrome:` だけ。⚠ 出所の無い行・`about:` / `blob:` / `data:` はここでは捨てない
+ *   (アプリの赤かもしれない ── `console.error` は出所が読めなくても数える)。
+ */
+export function isBrowserInternalOrigin(loc: { url?: string } | null | undefined): boolean {
+  const url = loc?.url;
+  if (url === undefined || url === '') return false;
+  return /^(chrome-extension|chrome):\/\//i.test(url);
+}
