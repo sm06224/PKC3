@@ -457,6 +457,19 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   //    観測点は窓の中の worker の実在(`page.workers()`)── 窓の中の変数ではなく、ブラウザが持つ worker そのもの
   const workers = (): number => win.workers().length;
   expect(workers(), '頁を描いているのに worker が居ない(観測が空振り)').toBeGreaterThan(0);
+  /**
+   * 🔴 **飛んでいる依頼が 0 になってから、絵の集合を控えて時計を進める**(#1949)。
+   * ⚠ 畳む予約(60 秒)は依頼が 0 になった**時点**で張られる。直す前は待たずに時計を進めていたので、並列の負荷で
+   *   描画が遅れた回(実測: 進める瞬間に依頼 3 件、12 回中 1 回)は、進めた**後**に予約が張られて畳まれず
+   *   (「畳まれない」)、または飛んでいた描画が途中で終わって絵の集合が変わった(「絵まで消えている」)。
+   * 🔑 印は窓の文書の `data-pkc-pdf-busy`(依頼の数。0 で消える ── `doc-lease.js` の `onBusy`、予約を張った後に消す)。
+   */
+  await expect
+    .poll(() => win.evaluate(() => document.body.getAttribute('data-pkc-pdf-busy')), {
+      message: '描画の依頼が終わらない(飛んでいる依頼の数の印が消えない)',
+      timeout: 20_000,
+    })
+    .toBeNull();
   const keptBefore = await livePages();
   expect(keptBefore.length, '絵が 1 枚も無い(観測が空振り)').toBeGreaterThan(0);
   // 🔴 畳むのは「飛んでいる依頼が無いまま 60 秒」── 59 秒では畳まれない(対照群 = 早すぎる kill をしない)
@@ -1260,6 +1273,12 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
     buffer: buildPdf(2, { box: [300, 400], prefix: 'extra' }),
   });
   await expect(mgThumbs, '足した 2 ページが一覧に並ばない').toHaveCount(5, { timeout: 15_000 });
+  /**
+   * ⚠ **「足しました」は 5 秒で消える一言**(`reader.js` の `STATUS_HIDE_MS`)── 足し終えた直後に読む(#1949 の調べで判明)。
+   *   直す前は、下の「足したページを押して中央に大きく出るのを待つ(最大 20 秒)」の**後**に読んでいたので、
+   *   並列の負荷で中央の描画が 5 秒を越えた回は、字がもう消えていた(`Received string: ""`)。
+   */
+  await expect(mg.locator('#status')).toContainText('「足す.pdf」の 2 ページを後ろに足しました');
   await expect(mgHeads.locator('.src-head-label'), '見出しが「名前(N ページ)」でない').toHaveText('足す.pdf(2 ページ)');
   // 中央で読める(Q3): 足したページの絵を押すと、元のページと同じに大きく出る(保存前)
   await clickReal(mg, '[data-pkc-field="pdf-page-thumb"][data-thumb="4"]');
@@ -1268,7 +1287,6 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(mgBig).toBeInViewport();
   await expect(mg.locator('#pageno'), '中央の頁の番号が足したページでない').toHaveValue('4');
   expect((await mgBig.boundingBox())?.width ?? 0, '足したページの絵が小さすぎる(サムネイルのまま)').toBeGreaterThan(200);
-  await expect(mg.locator('#status')).toContainText('「足す.pdf」の 2 ページを後ろに足しました');
   await expect(mg.locator('#edit-save'), '足したのに保存ボタンが出ない').toBeVisible();
   await expect(mg.locator('#edit-note')).toContainText('編集中(5 / 5 ページ)');
   await expect

@@ -30,6 +30,7 @@ interface Api {
     idleMs?: number;
     setTimer?: (fn: () => void, ms: number) => unknown;
     clearTimer?: (h: unknown) => void;
+    onBusy?: (busy: number) => void;
   }) => Lease;
   IDLE_MS: number;
 }
@@ -277,5 +278,47 @@ describe('🔴 畳むとき(dispose)── 待っている依頼を必ず reject
     expect(lease.busy, '失敗した依頼を飛んでいると数え続けている').toBe(0);
     fail = false;
     expect(await lease.use((d) => d.id)).toBe(2);
+  });
+});
+
+/**
+ * 🔴 **飛んでいる依頼の数を知らせる口**(#1949)── 窓の文書の印(`data-pkc-pdf-busy`)の元。
+ * ⚠ smoke は「印が消えた(= 0 を知らされた)」を見てから偽の時計を進める。だから **0 を知らせる時点で、畳む予約は
+ *   もう張られていなければならない** ── 先に知らせて後で張ると、その隙に時計を進めた側は予約を待てない(落ちた形そのもの)。
+ */
+describe('飛んでいる依頼の数を知らせる(#1949)', () => {
+  it('🔴 増えるたび・減るたびに数を知らせ、0 を知らせた時点で畳む予約は張られている', async () => {
+    const { DocLease } = load();
+    const clk = clock();
+    const seen: Array<{ busy: number; pending: number }> = [];
+    let closed = 0;
+    const lease = new DocLease({
+      open: () => Promise.resolve({ id: 1 }),
+      close: () => {
+        closed += 1;
+      },
+      idleMs: IDLE,
+      setTimer: clk.setTimer,
+      clearTimer: clk.clearTimer,
+      onBusy: (busy) => seen.push({ busy, pending: clk.pending() }),
+    });
+    let release!: () => void;
+    const slow = lease.use(() => new Promise<void>((r) => (release = r)));
+    const fast = lease.use(() => undefined);
+    await flush();
+    release();
+    await Promise.all([slow, fast]);
+    expect(seen.map((x) => x.busy), '数の知らせが増減を写していない').toEqual([1, 2, 1, 0]);
+    expect(seen[seen.length - 1]!.pending, '0 を知らせた時点で、畳む予約がまだ張られていない').toBe(1);
+    // 対照群: 知らせを受けてから時計を進めれば、確かに畳まれる
+    clk.tick(IDLE);
+    expect(closed).toBe(1);
+  });
+
+  it('知らせる口が無くても今までどおり動く', async () => {
+    const { lease, clk, log } = make();
+    await lease.use(() => undefined);
+    clk.tick(IDLE);
+    expect(log.closed).toEqual([1]);
   });
 });

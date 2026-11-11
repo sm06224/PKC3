@@ -41,6 +41,7 @@
    * @param {number} [opts.idleMs]
    * @param {(fn: () => void, ms: number) => any} [opts.setTimer]  test が差し替える(実時間を待たない)
    * @param {(h: any) => void} [opts.clearTimer]
+   * @param {(busy: number) => void} [opts.onBusy]  飛んでいる依頼の数が変わるたびに呼ぶ(検査のための契約 ── #1949)
    */
   function DocLease(opts) {
     this.openDoc = opts.open;
@@ -62,6 +63,7 @@
     /** 飛んでいる依頼の数(0 = アイドル)。 */
     this.busy = 0;
     this.timer = null;
+    this.onBusy = opts.onBusy || null;
     this.disposed = false;
     /** 開いた回数(test と計測の観測点)。 */
     this.opened = 0;
@@ -150,11 +152,14 @@
   DocLease.prototype.use = function (fn) {
     var self = this;
     this.busy += 1;
+    if (this.onBusy) this.onBusy(this.busy);
     // アイドル kill の予約は**投函した時点で**畳む
     this.cancelIdle();
     var done = function () {
       self.busy -= 1;
       if (self.busy === 0) self.armIdle();
+      // ⚠ 予約を張った**後**に知らせる ── 0 を見た側がすぐ時計を進めても、予約はもう在る
+      if (self.onBusy) self.onBusy(self.busy);
     };
     return this.ensure().then(
       function (doc) {
