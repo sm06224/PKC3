@@ -315,6 +315,35 @@ describe('飛んでいる依頼の数を知らせる(#1949)', () => {
     expect(closed).toBe(1);
   });
 
+  it('開けなかった依頼も、増えた分を戻して 0 を知らせる / 知らせる側が投げても数は狂わない', async () => {
+    const { DocLease } = load();
+    const clk = clock();
+    const seen: number[] = [];
+    const failing = new DocLease({
+      open: () => Promise.reject(new Error('開けない')),
+      close: () => undefined,
+      idleMs: IDLE,
+      setTimer: clk.setTimer,
+      clearTimer: clk.clearTimer,
+      onBusy: (n) => seen.push(n),
+    });
+    await expect(failing.use(() => 1)).rejects.toThrow('開けない');
+    expect(seen, '開けなかった依頼の分が戻っていない(印が立ったままになる)').toEqual([1, 0]);
+    expect(failing.busy).toBe(0);
+    const throwing = new DocLease({
+      open: () => Promise.resolve({ id: 1 }),
+      close: () => undefined,
+      idleMs: IDLE,
+      setTimer: clk.setTimer,
+      clearTimer: clk.clearTimer,
+      onBusy: () => {
+        throw new Error('知らせ先の失敗');
+      },
+    });
+    await expect(throwing.use((d) => d.id), '知らせ先の例外で依頼の結果が狂った').resolves.toBe(1);
+    expect(throwing.busy, '知らせ先の例外で数が狂った').toBe(0);
+  });
+
   it('知らせる口が無くても今までどおり動く', async () => {
     const { lease, clk, log } = make();
     await lease.use(() => undefined);

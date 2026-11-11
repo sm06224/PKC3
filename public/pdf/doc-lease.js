@@ -76,6 +76,16 @@
     },
   });
 
+  /** 飛んでいる依頼の数を知らせる。⚠ 知らせる側の例外で、数や依頼の結果を狂わせない(握りつぶす)。 */
+  DocLease.prototype.tellBusy = function () {
+    if (!this.onBusy) return;
+    try {
+      this.onBusy(this.busy);
+    } catch (e) {
+      // 知らせは検査のための印 ── 貸し出しそのものは止めない
+    }
+  };
+
   DocLease.prototype.cancelIdle = function () {
     if (this.timer !== null) {
       this.clearTimer(this.timer);
@@ -152,14 +162,14 @@
   DocLease.prototype.use = function (fn) {
     var self = this;
     this.busy += 1;
-    if (this.onBusy) this.onBusy(this.busy);
+    this.tellBusy();
     // アイドル kill の予約は**投函した時点で**畳む
     this.cancelIdle();
     var done = function () {
       self.busy -= 1;
       if (self.busy === 0) self.armIdle();
       // ⚠ 予約を張った**後**に知らせる ── 0 を見た側がすぐ時計を進めても、予約はもう在る
-      if (self.onBusy) self.onBusy(self.busy);
+      self.tellBusy();
     };
     return this.ensure().then(
       function (doc) {

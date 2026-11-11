@@ -189,6 +189,25 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   // 🔑 ④′(使われない間の worker の kill)のために、時計を差し替える ── 60 秒を実時間では待てない。
   //    差し替えても時間は実時間どおり流れる(`fastForward` で進めたときだけ、予約が早く来る)
   await context.clock.install();
+  /**
+   * 🔑 **飛んでいる依頼の印(`data-pkc-pdf-busy`)が立った回数を、窓の中で数える**(#1949、④′ が使う)。
+   * ⚠ 印は依頼が 0 になると消えるので、「消えている」だけでは配線が無い(一度も立たない)のと区別できない ──
+   *   立った回数を数えて、①一度は立ったこと(空振り防止)②時計を進めている間に新しい依頼が立たなかったこと を見る。
+   * ⚠ MutationObserver の知らせは microtask なので、差し替えた時計(timer)に止められない。
+   */
+  await context.addInitScript(() => {
+    const w = window as unknown as { __pdfBusyRises: number; __pdfIdleAt: number | null };
+    w.__pdfBusyRises = 0;
+    w.__pdfIdleAt = null;
+    new MutationObserver((recs) => {
+      for (const r of recs) {
+        const now = (r.target as Element).hasAttribute('data-pkc-pdf-busy');
+        if (r.oldValue === null && now) w.__pdfBusyRises += 1;
+        // 🔑 依頼が 0 になった(= 畳む予約が張られた)時刻を、差し替えた時計で控える(④′ が 59 秒を正確に数える)
+        if (r.oldValue !== null && !now) w.__pdfIdleAt = Date.now();
+      }
+    }).observe(document, { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-pkc-pdf-busy'] });
+  });
 
   // ── ③ もう一度押す ── 別窓が PKC3 の PDF ビューアで開く ──
   const [win] = await Promise.all([
@@ -464,21 +483,54 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
    *   (「畳まれない」)、または飛んでいた描画が途中で終わって絵の集合が変わった(「絵まで消えている」)。
    * 🔑 印は窓の文書の `data-pkc-pdf-busy`(依頼の数。0 で消える ── `doc-lease.js` の `onBusy`、予約を張った後に消す)。
    */
-  await expect
-    .poll(() => win.evaluate(() => document.body.getAttribute('data-pkc-pdf-busy')), {
-      message: '描画の依頼が終わらない(飛んでいる依頼の数の印が消えない)',
-      timeout: 20_000,
-    })
-    .toBeNull();
+  const busyRises = (): Promise<number> =>
+    win.evaluate(() => (window as unknown as { __pdfBusyRises: number }).__pdfBusyRises);
+  // ⚠ 空振り防止 ── ここまでに頁を描いているので、印は一度は立っている(立たないなら reader の配線が無い)
+  expect(await busyRises(), '描いたのに、飛んでいる依頼の印が一度も立っていない(印の配線が無い)').toBeGreaterThan(0);
+  /**
+   * 🔴 **時計を止めてから、「依頼が 0 になった時刻 + 59 秒」へ正確に進める**(#1949、着地前レビュー)。
+   * ⚠ 時計は差し替えても実時間で流れる ── 止めないと、依頼 0 を見てから進めるまでの実時間(負荷で数百 ms〜)が
+   *   予約へ漏れ、余白 1 秒(59 / 60)を食う。⚠ 一覧の絵は 1 枚ごとに `sleep`(差し替えた時計の予約)を挟むので、
+   *   止めた時計を小刻みに進めて、待っている予約を出し切る(新しい依頼が立たなくなるまで)。
+   * 🔑 59 秒は「最後に依頼が 0 になった時刻」(= 畳む予約を張った時刻。窓の中の監視が控える)から数える。
+   */
+  const waitIdle = (): Promise<void> =>
+    expect
+      .poll(() => win.evaluate(() => document.body.getAttribute('data-pkc-pdf-busy')), {
+        message: '描画の依頼が終わらない(飛んでいる依頼の数の印が消えない)',
+        timeout: 20_000,
+      })
+      .toBeNull();
+  await waitIdle();
+  // ⚠ 止める時刻には余白を持たせる ── 読んでから止めるまでに実時間が進むと「過去へは進めない」で落ちる(負荷で 10ms は足りなかった)。
+  //    少し先へ跳ぶぶん、待っている予約(一覧の絵の `sleep`)が先に来るが、下の小刻みの前進でどのみち出し切る
+  await win.clock.pauseAt((await win.evaluate(() => Date.now())) + 2_000);
+  let quiet = false;
+  for (let step = 0; step < 20 && !quiet; step += 1) {
+    const risesBefore = await busyRises();
+    await win.clock.runFor(200);
+    await waitIdle();
+    quiet = (await busyRises()) === risesBefore;
+  }
+  expect(quiet, '時計を進めるたびに新しい描画の依頼が始まる(依頼の無い間を作れない)').toBe(true);
   const keptBefore = await livePages();
   expect(keptBefore.length, '絵が 1 枚も無い(観測が空振り)').toBeGreaterThan(0);
+  const idleAt = await win.evaluate(() => (window as unknown as { __pdfIdleAt: number | null }).__pdfIdleAt);
+  expect(idleAt, '依頼が 0 になった時刻を控えていない(監視の空振り)').not.toBeNull();
+  const pausedNow = await win.evaluate(() => Date.now());
+  const toFiftyNine = idleAt! + 59_000 - pausedNow;
+  expect(toFiftyNine, '止めた時点で、もう 59 秒を過ぎている(前提が崩れた)').toBeGreaterThan(0);
+  const risesBeforeWait = await busyRises();
   // 🔴 畳むのは「飛んでいる依頼が無いまま 60 秒」── 59 秒では畳まれない(対照群 = 早すぎる kill をしない)
-  await win.clock.fastForward(59_000);
+  await win.clock.fastForward(toFiftyNine);
+  expect(await busyRises(), '59 秒を進める間に新しい依頼が始まった(対照群が何も見ていない)').toBe(risesBeforeWait);
   expect(workers(), '60 秒より前に worker を畳んでいる').toBeGreaterThan(0);
   await win.clock.fastForward(2_000);
   await expect
     .poll(workers, { message: '使われないのに worker が畳まれない(常駐メモリが返らない)', timeout: 10_000 })
     .toBe(0);
+  // ⚠ 止めた時計を戻す(以後の描画は、差し替えた時計の予約を実時間で回してよい)
+  await win.clock.resume();
   expect(await livePages(), '畳んだら描いた頁の絵まで消えている').toEqual(keptBefore);
   await expect(img.first(), '畳んだ後に絵が壊れている').toBeAttached();
   // 使い直す: まだ描いていない頁(いまは先頭の頁が絵 = 末尾の頁は絵になっていない)を描くとき、黙って開き直す
