@@ -237,6 +237,16 @@ async function openPdf() {
     pdfjs = await import('./lib/pdf.min.mjs');
     pdfjs.GlobalWorkerOptions.workerSrc = new URL('./lib/pdf.worker.min.mjs', import.meta.url).href;
     lease = new DocLease({
+      /**
+       * 🔑 **飛んでいる依頼の数を文書の印に出す**(#1949。`data-pkc-boot` / `data-pkc-saving` と同じ「検査のための契約」)。
+       * ⚠ 畳む予約(60 秒)は依頼が 0 になった時点で張られる ── 偽の時計で「60 秒で畳む」を確かめる smoke は、
+       *   この印が消えてから時計を進めないと、進めた後に張られた予約を待つことになる(並列の負荷でだけ落ちた)。
+       * ⚠ 指すのは**この本体の文書の依頼だけ**(足した PDF の貸し出し `a.lease`・編集の `editLease` は数えない)。
+       */
+      onBusy: (n) => {
+        if (n > 0) document.body.setAttribute('data-pkc-pdf-busy', String(n));
+        else document.body.removeAttribute('data-pkc-pdf-busy');
+      },
       open: openDoc,
       // 🔑 解析 worker を terminate する(常駐メモリを返す)。⚠ `destroy()` は文書(`PDFDocumentProxy`)ではなく
       //    **読み込みの課題(`loadingTask`)**に在る ── 文書に `destroy` は無く、呼ぶと TypeError になる
