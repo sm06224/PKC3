@@ -109,6 +109,20 @@ describe('音・動画の添付の説明(#1232 段 b)', () => {
    * 🔴 **再生機の居ない添付では押せる字にしない** ── 押しても何も起きない dead click になる。
    * ⚠ 空振り防止に、同じ説明で音なら出ることを上の 2 本が見ている。
    */
+  /** 🔴 #1163 依頼 373(推薦 C): 実物の詳細で、再生機が長さを読むと、長さを超える時刻は押せる字でなくなる。 */
+  it('🔴 再生機が長さ(0:18)を読むと、超える時刻(0:20)は押せる字でなくなる(字は残る)', async () => {
+    const { root } = await open('audio/webm', 'rec.webm');
+    const audio = root.querySelector<HTMLAudioElement>('audio[data-pkc-field="attachment-media"]');
+    expect(audio, '前提: 再生機が差さっていない').not.toBeNull();
+    expect(root.querySelectorAll('[data-pkc-action="seek-media"]'), '前提: 長さを読む前は 2 つ').toHaveLength(2);
+    Object.defineProperty(audio!, 'duration', { value: 18, configurable: true });
+    audio!.dispatchEvent(new Event('loadedmetadata'));
+    const left = root.querySelectorAll('[data-pkc-action="seek-media"]');
+    expect(left, '長さを超える時刻が押せるまま').toHaveLength(1);
+    expect(left[0]!.getAttribute('data-pkc-seek-ms')).toBe('15000');
+    expect(root.textContent).toContain('0:20 つぎに');
+  });
+
   it('🔴 PDF の添付の説明に `0:15 …` と書いても、押せる字にしない(字は残る)', async () => {
     const { root } = await open('application/pdf', 'doc.pdf');
     expect(root.querySelector('[data-pkc-action="seek-media"]'), '再生機の無い所で押せる字になっている').toBeNull();
