@@ -652,3 +652,73 @@ export function evaluateFormula(
     return { text: '#ERR!', why: '式として読めません' };
   }
 }
+
+/**
+ * 🔴 **表の行・列を足す / 消したとき、式の中の升の名前をずらす**(#1163 依頼 371、案 A)。
+ *
+ * 例: 2 行目の下に行を足すと、`=A3+B4` は `=A4+B5` になる(足した行より下を指していた名前が 1 つずれる)。
+ * 🔑 升の名前を読む規則は `tokenize` と同じ(`parseCellRef` ── 英字 + 数字の 1 語)。字の中(`"…"`)は触らない。
+ * ⚠ 消した行・列そのものを指していた名前は `#REF!` にする(表計算ソフトと同じ ── 黙って隣の升を指させない)。
+ *   範囲(`A1:A5`)は端が消えたら内側へ縮める。範囲が丸ごと消えたら `#REF!`。
+ * ⚠ 変わらない名前は元の綴りのまま(小文字も)── 触っていない所の字を 1 バイトも動かさない。
+ *
+ * @param at 足した行・列の位置(新しい物の 0 始まりの番号)/ 消した行・列の番号
+ */
+export function shiftFormulaRefs(formula: string, axis: 'row' | 'col', at: number, delta: 1 | -1): string {
+  let out = '';
+  let i = 0;
+  while (i < formula.length) {
+    const q = formula.indexOf('"', i);
+    const end = q === -1 ? formula.length : q;
+    out += shiftRefsInCode(formula.slice(i, end), axis, at, delta);
+    if (q === -1) break;
+    // 字(`"…"`、`""` は字の中の `"`)はそのまま写す
+    let j = q + 1;
+    while (j < formula.length) {
+      if (formula[j] === '"') {
+        if (formula[j + 1] === '"') j += 2;
+        else break;
+      } else j += 1;
+    }
+    out += formula.slice(q, Math.min(j + 1, formula.length));
+    i = j + 1;
+  }
+  return out;
+}
+
+const REF_OR_RANGE = /(?<![A-Za-z0-9_.])([A-Za-z]+[0-9]+)(?:(\s*:\s*)([A-Za-z]+[0-9]+))?(?![A-Za-z0-9_])/g;
+
+function shiftRefsInCode(code: string, axis: 'row' | 'col', at: number, delta: 1 | -1): string {
+  return code.replace(REF_OR_RANGE, (whole, a: string, sep: string | undefined, b: string | undefined) => {
+    const ra = parseCellRef(a);
+    const rb = b === undefined ? null : parseCellRef(b);
+    if (ra === null || (b !== undefined && rb === null)) return whole;
+    const pick = (r: { row: number; col: number }): number => (axis === 'row' ? r.row : r.col);
+    const put = (r: { row: number; col: number }, v: number) =>
+      axis === 'row' ? { row: v, col: r.col } : { row: r.row, col: v };
+    const name = (orig: string, r: { row: number; col: number }, v: number): string =>
+      v === pick(r) ? orig : cellName(put(r, v).row, put(r, v).col);
+    if (rb === null) {
+      const v = pick(ra);
+      if (delta === 1) return name(a, ra, v >= at ? v + 1 : v);
+      if (v === at) return '#REF!';
+      return name(a, ra, v > at ? v - 1 : v);
+    }
+    let s = pick(ra);
+    let e = pick(rb);
+    const flipped = s > e;
+    if (flipped) [s, e] = [e, s];
+    let ns: number;
+    let ne: number;
+    if (delta === 1) {
+      ns = s >= at ? s + 1 : s;
+      ne = e >= at ? e + 1 : e;
+    } else {
+      if (s === at && e === at) return '#REF!';
+      ns = s > at ? s - 1 : s;
+      ne = e >= at ? e - 1 : e;
+    }
+    const [va, vb] = flipped ? [ne, ns] : [ns, ne];
+    return `${name(a, ra, va)}${sep ?? ':'}${name(b!, rb, vb)}`;
+  });
+}
