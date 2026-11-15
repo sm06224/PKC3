@@ -22,6 +22,9 @@
  * 理由は `data-pkc-math-error` に載せる(押し所ではないので画面には出さない)。
  */
 import { WorkerLease } from '../../platform/worker-lease';
+
+/** 🔴 数式を描く仕組みが立ち上がらなかったときの字(#1163 依頼 101-1)── 図の「この端末では図を描けませんでした」と揃える。 */
+export const MATH_DEVICE_FAILED = 'この端末では数式を描けませんでした';
 import type { MathJob, MathResult } from '../../platform/render/math-worker';
 
 /** 1 度に画面へ流し込む数(⚠ 1000 式を一息で入れると長い仕事になる)。 */
@@ -133,16 +136,28 @@ export function hydrateMath(root: ParentNode | readonly ParentNode[]): MathScope
     host.append(note);
   };
 
+  /** 🔴 端末の都合で描けなかった印(#1163 依頼 101-1)。⚠ 字は `MATH_DEVICE_FAILED`。二重に付けない。 */
+  const noteDevice = (host: HTMLElement): void => {
+    if (host.querySelector('.pkc-math-error') !== null) return;
+    const note = host.ownerDocument.createElement('span');
+    note.className = 'pkc-math-error';
+    note.setAttribute('data-pkc-math-device', '');
+    note.textContent = MATH_DEVICE_FAILED;
+    host.append(note);
+  };
+
   /** ⚠ 失敗の印は**その場で**付ける(次の描き直しで無限に試させない)。 */
   const markFailed = (why: string): void => {
     for (const h of hosts) {
       h.setAttribute('data-pkc-math-state', 'failed');
       h.setAttribute('data-pkc-math-error', why.slice(0, 120));
       /**
-       * ⚠ **ここでは画面に出さない** ── ワーカーが立たない / KaTeX が読めないのは
-       *   **式のせいではない**(user には直しようが無い)。「式が読めません」と
-       *   出すと、正しい式を書いた人に嘘をつくことになる。
+       * ⚠ **「式が読めません」とは言わない** ── ワーカーが立たない / KaTeX が読めないのは
+       *   **式のせいではない**(user には直しようが無い)。
+       * 🔴 **ただし黙らない**(#1163 依頼 101-1、推薦 A)── 何の印も無いと「数式として読まれていない」と読み違える。
+       *   図・グラフと同じく「この端末では数式を描けませんでした」をその場に出す。
        */
+      noteDevice(h);
     }
     done = true;
   };
