@@ -95,7 +95,7 @@ import { locateCodeFence } from '@features/markdown/code-fence-edit';
 import { listAppendTargets, sectionRange } from '@features/markdown/append-target';
 import { RowSwap, ROW_WHOLE_ATTR, replaceChanged } from './row-swap';
 import { takeBodyFocus } from './focus-request';
-import { followScroll, followScrollTop } from './scroll-ratio';
+import { followScroll, refollowScroll } from './scroll-ratio';
 import { watchSeekRange } from './seek-range';
 import { isTouchOnly } from './touch-device';
 import { DIFF_FILE_TOO_LARGE_NOTE, diffSummary, shortStamp } from '@features/revision/diff-view';
@@ -2814,8 +2814,9 @@ export class DetailRenderer {
         if (!preview.isConnected) return;
         const applied = applyBlocks(preview, html, shown);
         shown = applied.view;
-        // 🔴 描き直しで右の高さが変わったら、左の割合へ合わせ直す(#1163 依頼 249 の着地前レビュー ⚠6)
-        preview.scrollTop = followScrollTop(ta, preview);
+        // 🔴 描き直しで右の高さが変わったら、左の割合へ合わせ直す(#1163 依頼 249 の着地前レビュー ⚠6)。
+        //    ⚠ 右を自分で送って読んでいる間は動かさない(打つたびに引き戻さない ── `refollowScroll`)
+        refollowScroll(ta, preview);
         /**
          * 🔴 **プレビューにも文書 globals を当てる**(2026-08-06)。
          * 直す前は `applyDocumentGlobals` の呼び出しが読む面の 1 か所だけで、

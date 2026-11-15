@@ -1,7 +1,7 @@
 /** @vitest-environment happy-dom */
 /** #1163 依頼 249(案 A): 2 列の書き方で、右の表示を左のスクロールの割合に合わせて送る。 */
 import { describe, expect, it } from 'vitest';
-import { followScroll, followScrollTop, scrollRatio } from '../../src/adapter/ui/render/scroll-ratio';
+import { followScroll, followScrollTop, refollowScroll, scrollRatio } from '../../src/adapter/ui/render/scroll-ratio';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -82,6 +82,64 @@ describe('右の表示を左の割合に合わせる(依頼 249)', () => {
     left.dispatchEvent(new Event('scroll'));
     await new Promise((r) => setTimeout(r, 30));
     expect(right.scrollTop, '外したのに動いた').toBe(1250);
+  });
+});
+
+/**
+ * 🔴 **描き直しの合わせ直しは、右が付いて行っている間だけ**(フル smoke `preview.smoke.spec.ts:171` で見つけた退行)。
+ * ⚠ 直す前は描き直しのたびに右を左の割合へ置いたので、右を自分で送って読んでいた人が 1 字打つたびに引き戻された。
+ */
+describe('描き直しの合わせ直し(依頼 249 の退行の直し)', () => {
+  function pair(rightHeight: number) {
+    const left = document.createElement('textarea');
+    const right = document.createElement('div');
+    document.body.append(left, right);
+    Object.defineProperty(left, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(left, 'clientHeight', { value: 200, configurable: true });
+    let h = rightHeight;
+    Object.defineProperty(right, 'scrollHeight', { get: () => h, configurable: true });
+    Object.defineProperty(right, 'clientHeight', { value: 500, configurable: true });
+    return { left, right, grow: (n: number) => (h = n) };
+  }
+
+  it('🔴 付いて行っている間は、右が伸びたら同じ割合へ合わせ直す', async () => {
+    const { left, right, grow } = pair(3000);
+    followScroll(left, right);
+    left.scrollTop = 400;
+    left.dispatchEvent(new Event('scroll'));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(right.scrollTop).toBe(1250);
+    grow(5500); // 描き直しで右が伸びた
+    refollowScroll(left, right);
+    expect(right.scrollTop, '付いて行っているのに合わせ直さない').toBe(2500);
+  });
+
+  it('🔴 右を自分で送っていたら、描き直しても引き戻さない', async () => {
+    const { left, right, grow } = pair(3000);
+    followScroll(left, right);
+    left.scrollTop = 800; // 左は末尾(打っている所)
+    left.dispatchEvent(new Event('scroll'));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(right.scrollTop).toBe(2500);
+    right.scrollTop = 800; // 右を自分で上へ送って読んでいる
+    grow(3200);
+    refollowScroll(left, right);
+    expect(right.scrollTop, '自分で送った右を、打つたびに左の位置へ引き戻した').toBe(800);
+    // 🔑 左を送れば、また付いて行く
+    left.scrollTop = 400;
+    left.dispatchEvent(new Event('scroll'));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(right.scrollTop).toBe(1350);
+    grow(5500);
+    refollowScroll(left, right);
+    expect(right.scrollTop, '付いて行き直したのに合わせ直さない').toBe(2500);
+  });
+
+  it('⚠ まだ一度も置いていない右(先頭のまま)は、左の割合へ置く', () => {
+    const { left, right } = pair(3000);
+    left.scrollTop = 400;
+    refollowScroll(left, right);
+    expect(right.scrollTop).toBe(1250);
   });
 });
 
