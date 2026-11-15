@@ -49,3 +49,26 @@ describe('🔴 SQL_DUCK_LOADING(#682)', () => {
     expect(state.sqlPage.duckLoading).toBe(false);
   });
 });
+
+/** 🔴 作った表が時間で消えていた回(#1163 依頼 370)の状態の側。画面側は `sql-pane.test.ts`。 */
+describe('🔴 duckHeldExpired(依頼 370)', () => {
+  it('答えが運んだら立ち、次の答えでは下りる(1 行で済ませる)', () => {
+    const { state } = reduce(running(3), {
+      type: 'SET_SQL_RESULT', token: 3, sql: 'SELECT 1', columns: ['a'], rows: [[1]], truncated: false, ms: 1,
+      heldExpired: true,
+    });
+    expect(state.sqlPage.duckHeldExpired).toBe(true);
+    const again = { ...state, sqlPage: { ...state.sqlPage, running: true, runToken: 4 } };
+    const next = reduce(again, {
+      type: 'SET_SQL_RESULT', token: 4, sql: 'SELECT 1', columns: ['a'], rows: [[1]], truncated: false, ms: 1,
+    }).state;
+    expect(next.sqlPage.duckHeldExpired, '次の回にも残っている').toBe(false);
+  });
+
+  it('落ちた回も運ぶ(消えた表を引いて落ちた回こそ理由が要る)', () => {
+    const { state } = reduce(running(3), { type: 'SQL_RUN_FAILED', token: 3, sql: 'x', error: 'e', heldExpired: true });
+    expect(state.sqlPage.duckHeldExpired).toBe(true);
+    const plain = reduce(running(3), { type: 'SQL_RUN_FAILED', token: 3, sql: 'x', error: 'e' }).state;
+    expect(plain.sqlPage.duckHeldExpired).toBe(false);
+  });
+});

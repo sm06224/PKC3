@@ -23,7 +23,11 @@
  *   面を閉じて戻っても消えない。
  */
 import { schemaRouteOf, type AppState, type SqlPageState } from '@adapter/state/app-state';
-import { DEFAULT_IDLE_SEC } from '@adapter/platform/duckdb/duckdb-lease';
+import {
+  DEFAULT_HOLD_IDLE_MIN,
+  DEFAULT_IDLE_SEC,
+  duckHeldExpiredNote,
+} from '@adapter/platform/duckdb/duckdb-lease';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
 import { sqlLineHtml } from '@features/query/sql-lines';
 import { chordLabel } from '@features/keymap';
@@ -988,6 +992,8 @@ export class SqlRenderer {
       p.guestError,
       // 🔴 写せなかった表・全列を文字で写した表も、帯の字が変わる ── 答えが同じ回に言い直す(#682 段④d の着地後レビュー)
       duckCopyNote(p),
+      // 🔴 作った表が時間で消えていた回も、上の行が変わる(#1163 依頼 370)
+      String(p.duckHeldExpired),
     ].join(' ');
     if (fingerprint === this.last) return;
     this.last = fingerprint;
@@ -1320,6 +1326,18 @@ function erCopyLine(p: AppState['sqlPage']): string {
 }
 
 function noteLine(p: AppState['sqlPage']): string {
+  const line = noteLineBody(p);
+  /**
+   * 🔴 **作った表が時間で消えていた回は、いちばん前で 1 行言う**(#1163 依頼 370、推薦 B)。
+   * ⚠ 分は `DEFAULT_HOLD_IDLE_MIN` から導く(直書きすると、間隔を変えた日に字が嘘になる)。
+   * ⚠ 走っている最中は言わない(前の回の話を、次の回の進捗に混ぜない)。
+   */
+  if (!p.duckHeldExpired || p.running) return line;
+  const gone = duckHeldExpiredNote(DEFAULT_HOLD_IDLE_MIN);
+  return line === '' ? gone : `${gone} / ${line}`;
+}
+
+function noteLineBody(p: AppState['sqlPage']): string {
   const core = noteLineCore(p);
   /**
    * 🔴 **断り・開けなかった・走っている最中には言い足さない**(断りの字は、写せなかった表の理由を**もう含んでいる**

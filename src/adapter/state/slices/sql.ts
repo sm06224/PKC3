@@ -517,6 +517,7 @@ export function reduceSql(state: AppState, action: SqlAction): ReduceResult {
             duckLoading: false,
             error: '',
             duckCopy: action.copy ?? p.duckCopy,
+            duckHeldExpired: action.heldExpired === true,
             ...(redraw === null ? {} : { er: redraw.er }),
           },
         },
@@ -618,6 +619,7 @@ export function reduceSql(state: AppState, action: SqlAction): ReduceResult {
             error: '',
             saved: '',
             duckCopy: null,
+            duckHeldExpired: false,
             duckLoading: false,
             er: er.er,
           },
@@ -780,7 +782,15 @@ export function reduceSql(state: AppState, action: SqlAction): ReduceResult {
         return {
           state: {
             ...state,
-            sqlPage: { ...p, running: false, duckLoading: false, error: action.error, ...(redraw === null ? {} : { er: redraw.er }) },
+            sqlPage: {
+              ...p,
+              running: false,
+              duckLoading: false,
+              error: action.error,
+              // 🔴 作った表が時間で消えていた回は、断りの上で言う(#1163 依頼 370)
+              duckHeldExpired: action.heldExpired === true,
+              ...(redraw === null ? {} : { er: redraw.er }),
+            },
           },
           events: redraw === null ? [] : redraw.events,
         };

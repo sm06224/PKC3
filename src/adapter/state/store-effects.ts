@@ -11,6 +11,7 @@ import type { EntryStamps, EntryUpsert } from '@adapter/platform/storage/schema'
 import { extractMeta, type FlavorExtract } from '@features/flavor';
 import { appMessagePost } from '@adapter/platform/message-post';
 import { messageKindFilter } from '@adapter/platform/message-filter';
+import { duckHeldExpiredOf } from '@adapter/platform/duckdb/duckdb-lease';
 import { filterMessageBody, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import { PersistOnce, type PersistState } from '@adapter/platform/storage-persist';
 // 🔴 追記の楽観検査(#178)── 「読んだ本文」を worker と突き合わせるための指紋
@@ -686,6 +687,8 @@ export function connectStoreEffects(
       ms: number;
       /** 🔴 いまの器へ写した報告(写せなかった表・ビュー / 全列を文字で写した表)。⚠ 省けば「言うことが無い」扱い。 */
       copy?: DuckDbCopyReport;
+      /** 🔴 作った表が時間で消えていた回(#1163 依頼 370)。⚠ 落ちた回は例外の印(`duckHeldExpiredOf`)で運ぶ。 */
+      heldExpired?: boolean;
     }>;
     /**
      * 🔴 **DuckDB の答えを Parquet の bytes にする口**(#918 段⑥)。⚠ `runDuckDbSql` と**同じ器**を使う。
@@ -1630,7 +1633,7 @@ export function connectStoreEffects(
               dispatcher.dispatch({ type: 'SQL_DUCK_LOADING', token });
             },
           }).then(
-            ({ columns, rows, truncated, ms, copy }) => {
+            ({ columns, rows, truncated, ms, copy, heldExpired }) => {
               if (disposed) return;
               dispatcher.dispatch({
                 type: 'SET_SQL_RESULT',
@@ -1642,6 +1645,8 @@ export function connectStoreEffects(
                 ms,
                 // 🔴 DuckDB の答えだけ、写した報告を運ぶ(帯が「写せなかった表」を言う)
                 ...(copy === undefined ? {} : { copy }),
+                // 🔴 作った表が時間で消えていた回(#1163 依頼 370)
+                ...(heldExpired === true ? { heldExpired: true } : {}),
               });
             },
             (e: unknown) => {
@@ -1652,6 +1657,8 @@ export function connectStoreEffects(
                 sql,
                 // 🔴 DuckDB の英語は、よく出る 3 つだけ日本語にする(元の文は括弧に残す)
                 error: duckRunFailureText(errorText(e)),
+                // 🔴 消えた表を引いて落ちた回こそ、理由が要る(#1163 依頼 370)
+                ...(duckHeldExpiredOf(e) ? { heldExpired: true } : {}),
               });
             },
           );

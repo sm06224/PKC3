@@ -38,6 +38,10 @@ import {
   viewModeLabel,
 } from '../../src/adapter/state/app-state';
 import {
+  DEFAULT_HOLD_IDLE_MIN,
+  duckHeldExpiredNote,
+} from '../../src/adapter/platform/duckdb/duckdb-lease';
+import {
   duckdbWarmupNote,
   fitSqlInput,
   SQL_SOURCE_GROUP_ADD,
@@ -157,7 +161,14 @@ function setup(
         readBytes: () => Promise<Uint8Array | null>;
       }[];
       onLoad: () => void;
-    }) => {
+    }): Promise<{
+      columns: string[];
+      rows: Array<Array<string | number | null>>;
+      truncated: boolean;
+      ms: number;
+      /** 🔴 作った表が時間で消えていた回(#1163 依頼 370)。 */
+      heldExpired?: boolean;
+    }> => {
       const read = await Promise.all(input.sources.map((s) => s.readBytes()));
       const first = input.sources[0];
       if (first === undefined) throw new Error('相手が空で呼ばれた');
@@ -3956,6 +3967,39 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
     expect(rules()).toContain('FROM');
   });
 
+  /**
+   * 🔴 **作った表が時間で消えていた回は、上の行で 1 回だけ言う**(#1163 依頼 370、推薦 B)。
+   * 🔑 分は定数から(`DEFAULT_HOLD_IDLE_MIN`)。落ちた回(消えた表を引いた)にも言う。対照群 = 次の回は言わない。
+   */
+  it('🔴 作った表が時間で消えていた回は「N 分使わなかったので消えました」を 1 回だけ言う', async () => {
+    const gone = duckHeldExpiredNote(DEFAULT_HOLD_IDLE_MIN);
+    expect(gone).toContain(`${String(DEFAULT_HOLD_IDLE_MIN)} 分使わなかったので消えました`);
+    const { pick, pickEngine, type, runBtn, note, runDuckDbSql } = setup();
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    // ① 消えた表を引いて落ちた回
+    runDuckDbSql.mockRejectedValueOnce(
+      Object.assign(new Error('Catalog Error: Table with name 集計 does not exist!'), { duckHeldExpired: true }),
+    );
+    type('SELECT * FROM 集計');
+    runBtn.click();
+    await settle();
+    expect(note(), '落ちた回に、消えた理由を言っていない').toContain(gone);
+    expect(note(), '断りそのものが消えた').toContain('集計');
+    // ② 答えが出た回(運ばれた印で言う)
+    runDuckDbSql.mockResolvedValueOnce({ columns: ['a'], rows: [[1]], truncated: false, ms: 1, heldExpired: true });
+    type('SELECT 1 AS a');
+    runBtn.click();
+    await settle();
+    expect(note(), '答えの回に、消えた理由を言っていない').toContain(gone);
+    // ③ 対照群: 次の回は言わない
+    type('SELECT 2 AS a');
+    runBtn.click();
+    await settle();
+    expect(note(), '2 回目も言っている(1 行で済まない)').not.toContain(gone);
+  });
+
   it('DuckDB の断りは、そのまま画面に出る(黙って消さない)', async () => {
     const { pick, pickEngine, type, runBtn, note, runDuckDbSql } = setup();
     runDuckDbSql.mockRejectedValueOnce(new Error('DuckDB の一式を取得できませんでした'));
@@ -3975,7 +4019,7 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
  * ## user の物語(ここを見る)
  *
  * ①取り込んだ `.csv` を選び ②エンジンを DuckDB にし ③`CREATE TABLE …` を打って走らせる
- * ④「◯ 行が変更されました ── 作った表はウィンドウを閉じると消えます」と出る
+ * ④「◯ 行が変更されました ── 作った表は、ウィンドウを閉じるか、10 分使わないと消えます」と出る
  * ⑤`SELECT` で作った表を引ける ⑥**内蔵の sqlite のまま同じ字を打つと、今までどおり断られる**。
  *
  * ⚠ ここが見るのは**画面と配線**で、engine が実際に実行できるかは
@@ -4003,7 +4047,7 @@ describe('🔴 DuckDB では表を作れる / sqlite では断る(#918 段⑧)',
     expect(runReadOnlySql, 'sqlite も叩いている').toHaveBeenCalledTimes(0);
     void duckSeen;
     expect(note(), '件数を言っていない').toContain('3 行が変更されました');
-    expect(note(), '作った表の寿命を言っていない').toContain('作った表はウィンドウを閉じると消えます');
+    expect(note(), '作った表の寿命を言っていない').toContain('作った表は、ウィンドウを閉じるか、10 分使わないと消えます');
     // 🔴 「条件に当たるものがありませんでした」と読める字を出さない
     expect(note()).not.toContain('条件に一致');
     // 🔑 `Count` の 1 升だけの表を出さない(同じことを 2 回言わない)
@@ -4071,7 +4115,7 @@ describe('🔴 DuckDB では表を作れる / sqlite では断る(#918 段⑧)',
     type('CREATE TABLE t AS SELECT 1');
     runBtn.click();
     await settle();
-    expect(note()).toContain('作った表はウィンドウを閉じると消えます');
+    expect(note()).toContain('作った表は、ウィンドウを閉じるか、10 分使わないと消えます');
     type('SELECT * FROM t');
     runBtn.click();
     await settle();
@@ -4181,7 +4225,7 @@ describe('🔴 DuckDB では表を作れる / sqlite では断る(#918 段⑧)',
     await settle();
     expect(rules(), 'DuckDB なのに「読むだけ」と言っている(嘘になる)').not.toContain('読むだけ');
     expect(rules(), '表を作れることを言っていない').toContain('CREATE TABLE');
-    expect(rules(), '作った表の寿命を、打つ前に言っていない').toContain('作った表はウィンドウを閉じると消えます');
+    expect(rules(), '作った表の寿命を、打つ前に言っていない').toContain('作った表は、ウィンドウを閉じるか、10 分使わないと消えます');
     expect(rules(), '別の file を選び直すと消えることを言っていない').toContain('別のファイルを選び直した');
     expect(rules(), '元の file を触らないことを言っていない').toContain('元のファイルは書き換わりません');
   });
@@ -4952,7 +4996,7 @@ describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
     s.type('CREATE TABLE t AS SELECT 1');
     s.runBtn.click();
     await settle();
-    expect(s.note()).toContain('作った表はウィンドウを閉じると消えます');
+    expect(s.note()).toContain('作った表は、ウィンドウを閉じるか、10 分使わないと消えます');
     expect(s.note()).toContain('増やしたり減らしたりすると、作った表は消えます');
   });
 

@@ -124,6 +124,7 @@ export function withSqlSourceSet(
         saved: '',
         // 🔴 組が変われば、写した報告も別の話になる(次に写すまで空)
         duckCopy: null,
+        duckHeldExpired: false,
         duckLoading: false,
         er: er.er,
       },
@@ -434,6 +435,11 @@ export interface SqlPageState {
    *   「写せなかった表」が出る(名札は新しいのに中身は前の組 ── いちばん気づけない外し方)。
    */
   readonly duckCopy: DuckDbCopyReport | null;
+  /**
+   * 🔴 **いまの答え(または断り)の回、作った表が時間で消えていた**(#1163 依頼 370、推薦 B)。
+   * ⚠ `SET_SQL_RESULT` / `SQL_RUN_FAILED` が毎回書き直す(次の回には残さない ── 1 行で済ませる)。
+   */
+  readonly duckHeldExpired: boolean;
   /**
    * 🔴 **いまの回が、DuckDB の器へ表を読み込んでいる最中か**(#682 の最後の 1 件)。
    * ⚠ 「走っている」(`running`)とは別 ── 器が起きていて読み込み済みなら、DuckDB の回でも**読み込まない**ので、
@@ -2436,6 +2442,7 @@ export const initialState: AppState = {
     guestChosen: '',
     runToken: 0,
     duckCopy: null,
+    duckHeldExpired: false,
     duckLoading: false,
     er: {
       open: false,
@@ -2734,8 +2741,10 @@ export type UserAction =
        *   (報告は動かさない)。
        */
       copy?: DuckDbCopyReport;
+      /** 🔴 作った表が時間で消えていた回(#1163 依頼 370)。省略 = 消えていない。 */
+      heldExpired?: boolean;
     }
-  | { type: 'SQL_RUN_FAILED'; token: number; sql: string; error: string }
+  | { type: 'SQL_RUN_FAILED'; token: number; sql: string; error: string; heldExpired?: boolean }
   /** 🔴 DuckDB の器が表の読み込みを始めた(#682)。⚠ `token` = どの回か(古い回の合図は捨てる)。 */
   | { type: 'SQL_DUCK_LOADING'; token: number }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
