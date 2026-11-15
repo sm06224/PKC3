@@ -4547,31 +4547,55 @@ const handlers: Handlers = {
     }
     const plan = searchPlanOf(req.query, 'plain');
     if (plan.kind === 'none') return { lids: [], truncated: false };
-    // 🔴 題名の検索は system 領域のノートを出さない(設計 doc §1.1、段①)
-    let rows: Array<{ lid: string }>;
-    if (plan.kind === 'fts') {
-      rows = need().selectObjects(
-        `SELECT e.lid AS lid FROM entries_fts f
-           JOIN entries e ON e.rowid = f.rowid
-          WHERE f.entries_fts MATCH ? AND e.cid = ? AND e.${USER_REALM_SQL}
-          ORDER BY e.entry_order, e.lid LIMIT ?`,
-        [plan.match, req.cid, limit + 1],
-      ) as Array<{ lid: string }>;
-    } else {
+    /**
+     * 🔴 題名の検索は system 領域のノートを出さない(設計 doc §1.1、段①)。
+     * @param within 🔴 渡したら、その lid の中だけを引く(依頼 336。`json_each` で 1 本の bind にする)
+     */
+    const pick = (within: readonly string[] | null): Array<{ lid: string }> => {
+      if (plan.kind === 'fts') {
+        const bind: (string | number)[] = [plan.match, req.cid];
+        let inWithin = '';
+        if (within !== null) {
+          bind.push(JSON.stringify(within));
+          inWithin = ` AND e.lid IN (SELECT value FROM json_each(?${bind.length}))`;
+        }
+        bind.push(limit + 1);
+        return need().selectObjects(
+          `SELECT e.lid AS lid FROM entries_fts f
+             JOIN entries e ON e.rowid = f.rowid
+            WHERE f.entries_fts MATCH ?1 AND e.cid = ?2 AND e.${USER_REALM_SQL}${inWithin}
+            ORDER BY e.entry_order, e.lid LIMIT ?${bind.length}`,
+          bind,
+        ) as Array<{ lid: string }>;
+      }
       // 2 文字以下(または 3 字未満の語が混じる)は trigram が当たらないので LIKE(実測)。⚠ ESCAPE を宣言する
       const bind: (string | number)[] = [req.cid];
       const conds = likeWhere(plan, bind, true);
+      if (within !== null) {
+        bind.push(JSON.stringify(within));
+        conds.push(`lid IN (SELECT value FROM json_each(?${bind.length}))`);
+      }
       bind.push(limit + 1);
-      rows = need().selectObjects(
+      return need().selectObjects(
         `SELECT lid FROM entries
           WHERE cid = ?1 AND ${USER_REALM_SQL} AND ${conds.join(' AND ')}
           ORDER BY entry_order, lid LIMIT ?${bind.length}`,
         bind,
       ) as Array<{ lid: string }>;
-    }
+    };
+    const rows = pick(null);
     // 🔑 **1 件多く取って切れたか判る**(件数を数え直す 2 回目の問い合わせを避ける)
-    const truncated = rows.length > limit;
-    return { lids: rows.slice(0, limit).map((r) => r.lid), truncated };
+    const lids = rows.slice(0, limit).map((r) => r.lid);
+    if (req.within === undefined) return { lids, truncated: rows.length > limit };
+    /**
+     * 🔴 **フォルダの中は、中だけで引き直す**(依頼 336)。⚠ 全体が切れていなければ、全体の当たりにフォルダの中の当たりは
+     *   全部入っている(引き直さない)。返すのは**全体 ∪ 中**で、切れたかは**中**で言う。
+     */
+    if (rows.length <= limit) return { lids, truncated: false };
+    const scoped = pick(req.within);
+    const out = new Set(lids);
+    for (const r of scoped.slice(0, limit)) out.add(r.lid);
+    return { lids: [...out], truncated: scoped.length > limit };
   },
   /**
    * 🔴 **探す面のための検索**(#680)── 題名・抜粋・関連度を返す。

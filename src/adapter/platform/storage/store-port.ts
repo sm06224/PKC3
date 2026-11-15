@@ -73,7 +73,10 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      *   `truncated`(200 件で切った)を**ここで捨てていた**。左の列が「ほかにも
      *   あります」と言えなかった唯一の理由がこの 1 行である。
      */
-    searchEntries: (query) => client.request({ op: 'searchEntries', cid, query }),
+    searchEntries: (query, within) =>
+      client.request(
+        within === undefined ? { op: 'searchEntries', cid, query } : { op: 'searchEntries', cid, query, within },
+      ),
     /**
      * 探す面の検索(#680)。⚠ ここも**渡すだけ** ── 抜粋の作り方と並びは worker、
      * 印の綴りは `features/filter/search-snippet.ts` が持つ。
