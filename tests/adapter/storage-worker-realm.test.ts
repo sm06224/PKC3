@@ -319,6 +319,17 @@ describe('system 領域のノートは user 向けの読み手から漏れない
     expect(Number(lid![nn]), 'entries.lid の NOT NULL が消えた').toBe(1);
   });
 
+  /** 🔴 #1163 依頼 221: 列の全部が素直な数の列は、数として並ぶ(`9` が `100` より前に来ない)。`007` の混ざる列は字のまま。 */
+  it('本文の csv: 数の列は数として並び、007 の混ざる列は字のまま', async () => {
+    const fence = ['```csv name=金額表', '品,金額,番号', 'a,9,007', 'b,100,12', 'c,25,3', '```', ''].join('\n');
+    await put('csv-221', fence);
+    const sql = (q: string) => request({ op: 'runReadOnlySql', sql: q, maxRows: 100, maxSteps: 1_000_000, maxMs: 60_000 });
+    const byAmount = await sql('SELECT 品 FROM 金額表 ORDER BY 金額 DESC');
+    expect(byAmount.rows.map((r) => r[0]), '金額を字として並べた(9 が 100 より前)').toEqual(['b', 'c', 'a']);
+    const byNo = await sql('SELECT 番号 FROM 金額表 ORDER BY 番号');
+    expect(byNo.rows.map((r) => r[0]), '007 の混ざる列が数になった(字が変わる)').toEqual(['007', '12', '3']);
+  });
+
   it('本文の csv(runReadOnlySql 経由): system の本文は表にならない / user は表になる', async () => {
     const fence = (info: string, lines: readonly string[]): string =>
       ['```' + info, ...lines, '```', ''].join('\n');
@@ -331,9 +342,8 @@ describe('system 領域のノートは user 向けの読み手から漏れない
       maxSteps: 1_000_000,
       maxMs: 60_000,
     });
-    expect(userRows.rows, 'user の csv 表が引けない(検査が空振りしている)').toEqual([
-      ['1', '2'],
-    ]);
+    // ⚠ 列の全部が素直な数なので数の列になる(#1163 依頼 221)
+    expect(userRows.rows, 'user の csv 表が引けない(検査が空振りしている)').toEqual([[1, 2]]);
     await expect(
       request({
         op: 'runReadOnlySql',
