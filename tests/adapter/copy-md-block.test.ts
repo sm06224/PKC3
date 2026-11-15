@@ -461,6 +461,23 @@ describe('形を選ぶ口(▾)', () => {
   });
 
   /**
+   * 🔴 **式に見える値は、値を変えずに数だけ言う**(#1163 依頼 134、推薦 B)。
+   * ⚠ 先頭に `'` を足すと、PKC へ読み戻したときに字が変わる ── だから書き換えない。
+   */
+  it('🔴 .csv で保存: = などで始まる値は変えずに、数を言う', async () => {
+    const sink: { name?: string; blob?: Blob; said?: string[] } = {};
+    const block = blockOf('| 式 | 数 | 名 |\n|---|---|---|\n| =1+1 | -5 | @x |\n| a | +7 | -y |\n');
+    handleCopyMdBlock(menuBtn(block), deps('csv-file', sink));
+    await flush();
+    const text = await sink.blob!.text();
+    expect(text.slice(1), '値を書き換えている').toBe('式,数,名\n=1+1,-5,@x\na,+7,-y');
+    expect(sink.said).toHaveLength(1);
+    expect(sink.said![0], '式に見える値の数(3 個。ただの数は数えない)を言っていない').toContain(
+      '= などで始まる値が 3 個あります',
+    );
+  });
+
+  /**
    * 🔴 **題名の無いノートでも、読める名前で落とす**(2026-09-05、着地前レビュー M3)。
    * ⚠ 直す前はこの枝を 1 度も通っておらず、逃がし(「表」)を消しても緑だった ──
    *   消すと `pkc3-2026-09-05.csv` になり、**何の表か名前から読めなくなる**。

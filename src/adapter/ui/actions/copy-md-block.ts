@@ -20,6 +20,7 @@ import {
   type TableCopyFormat,
   type TableCopyRow,
 } from '@features/markdown/table-copy';
+import { countFormulaLike, formulaLikeNote } from '@features/markdown/csv-table';
 import { safeName } from '@features/export/file-name';
 import { dayStamp } from '@features/datetime/date-math';
 
@@ -316,7 +317,9 @@ async function putTable(
       const name = csvFileName(deps.noteTitle());
       deps.download(name, new Blob([CSV_BOM + tableToCsv(rows)], { type: 'text/csv;charset=utf-8' }));
       // ⚠ 名前を持っているのはここだけ ── 呼び側で組み直さない(§7)
-      deps.saved(`「${name}」を保存しました`);
+      // 🔴 #1163 依頼 134: 値は変えず、表計算ソフトで式として動きうる値の数を言う
+      const formulaLike = formulaLikeNote(countFormulaLike(rows.map((r) => r.cells)));
+      deps.saved(`「${name}」を保存しました${formulaLike === '' ? '' : `。${formulaLike}`}`);
       return true;
     }
   }

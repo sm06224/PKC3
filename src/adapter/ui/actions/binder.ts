@@ -848,6 +848,7 @@ let rebuildingContainer = false;
 import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { countCappedCells } from '@features/query/sql-cell';
+import { countFormulaLike } from '@features/markdown/csv-table';
 import { openFolderLid } from './open-folder-lid';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 import { labNoteTitle } from '@features/markdown/text-lab';
@@ -17398,7 +17399,14 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ この面は**別の窓**なので、落ちた file は窓の中に 1 ドットも出ない ──
      *   言わないと「押せなかった」に見える。
      */
-    dispatcher.dispatch({ type: 'SQL_SAVED', title: name, kind: 'file', capped: countCappedCells(p.rows) });
+    dispatcher.dispatch({
+      type: 'SQL_SAVED',
+      title: name,
+      kind: 'file',
+      capped: countCappedCells(p.rows),
+      // 🔴 #1163 依頼 134: 値は変えず、式として動きうる値の数を言う(JSON は表計算ソフトが式として読まない)
+      formulaLike: kind === 'json' ? 0 : countFormulaLike([p.columns, ...p.rows]),
+    });
   },
   'sql-history-pick': (dispatcher, target) => {
     const at = Number(target.getAttribute('data-pkc-sql-history-at') ?? '');

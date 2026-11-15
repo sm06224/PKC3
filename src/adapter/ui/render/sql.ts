@@ -62,6 +62,7 @@ import { duckDbWriteKind, duckDbWriteNote } from '@features/query/duckdb-write';
 import { copyBandNote, refusedLine } from '@features/query/duckdb-copy-report';
 import { erSubjectOf } from '@features/query/er-connect';
 import { cappedCellsNote } from '@features/query/sql-cell';
+import { formulaLikeNote } from '@features/markdown/csv-table';
 import { SJIS_GUESS_NOTE } from '@features/import/text-decode';
 import {
   SQL_ENGINE_LABEL,
@@ -1369,7 +1370,7 @@ function noteLineCore(p: AppState['sqlPage']): string {
   if (p.saved !== '')
     return p.savedKind === 'file'
       ? // ⚠ **落ちた先は言えない** ── ブラウザの設定(既定の保存先 / 毎回聞く)で変わる
-        `「${p.saved}」というファイルに書き出しました(ブラウザの保存先をご覧ください)${cappedTail(p.savedCapped)}${where}`
+        `「${p.saved}」というファイルに書き出しました(ブラウザの保存先をご覧ください)${cappedTail(p.savedCapped)}${formulaLikeTail(p.savedFormulaLike)}${where}`
       : `「${p.saved}」というノートに書き出しました(左の一覧に出ています)${cappedTail(p.savedCapped)}${where}`;
   /**
    * 🔴 **どちらを調べているかを、打つ前から言う**(#681 段③ の 2 つ目)。
@@ -1425,6 +1426,11 @@ function noteLineCore(p: AppState['sqlPage']): string {
  */
 function cappedTail(n: number): string {
   return n > 0 ? `。${cappedCellsNote(n)}` : '';
+}
+
+/** 🔴 式に見える値の数(#1163 依頼 134)。⚠ ファイルへの書き出しにだけ付ける(ノートは表計算ソフトで開かない)。 */
+function formulaLikeTail(n: number): string {
+  return n > 0 ? `。${formulaLikeNote(n)}` : '';
 }
 
 function windowNote(rows: number): string {

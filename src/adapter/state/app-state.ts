@@ -310,6 +310,11 @@ export interface SqlPageState {
    */
   readonly savedCapped: number;
   /**
+   * 🔴 **書き出した CSV / TSV の中で、表計算ソフトで式として動きうる値の数**(#1163 依頼 134、推薦 B)。
+   * ⚠ 値は変えずに数えて言うだけ。`saved` と一緒に `SQL_SAVED` が書く。0 のときは何も言わない。
+   */
+  readonly savedFormulaLike: number;
+  /**
    * 🔴 **前に打った字**(#918 段②a。user 要望 2026-09-14「打つ所がお粗末」)。
    * ⚠ **新しいものが先頭**。⚠ **この窓の中だけ**(読み直したら消える)──
    *   打った SQL は user のデータではなく、その場の手なので憶えない。
@@ -2413,6 +2418,7 @@ export const initialState: AppState = {
     saved: '',
     savedKind: 'note',
     savedCapped: 0,
+    savedFormulaLike: 0,
     history: [],
     historyAt: -1,
     historyDraft: '',
@@ -2661,7 +2667,7 @@ export type UserAction =
    * ⚠ `kind` は**必須**にしてある ── optional にすると、次に書き出す口を足した人が
    *   黙って落とし、**ノートを作っていないのに「ノートに書き出しました」と出る**。
    */
-  | { type: 'SQL_SAVED'; title: string; kind: 'note' | 'file'; capped?: number }
+  | { type: 'SQL_SAVED'; title: string; kind: 'note' | 'file'; capped?: number; formulaLike?: number }
   /**
    * 🔴 **書き出せなかった理由**(#681 の着地前レビュー F1)。
    * ⚠ 直す前は編集中に押すと**画面が 1 ドットも動かなかった** ── `CREATE_ENTRY` は

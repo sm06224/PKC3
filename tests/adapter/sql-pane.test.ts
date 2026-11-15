@@ -2637,6 +2637,41 @@ describe('打つ所(#918 段②a)', () => {
     expect(said, '畳んだ升の数(2 個)を言っていない').toContain('長い値 2 個は先頭 2000 字で切ってあります');
   });
 
+  /**
+   * 🔴 **式に見える値は、値を変えずに数だけ言う**(#1163 依頼 134、推薦 B)。
+   * 🔑 CSV / TSV だけ ── JSON は表計算ソフトが式として読まないので言わない(対照群)。
+   */
+  it('🔴 ファイルへ ── = などで始まる値の数を言う(JSON では言わない)', async () => {
+    const run = async (pick: number): Promise<string> => {
+      const { pane, root, type, runBtn } = setup(async () =>
+        answer(['名前', '式'], [['りんご', '=1+1'], ['みかん', '-3'], ['@x', '-y']]),
+      );
+      type('select 1');
+      runBtn.click();
+      await settle();
+      const btn = pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-file"]')!;
+      const make = vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:fake');
+      const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+      try {
+        btn.click();
+        const items = root.querySelectorAll<HTMLElement>('[data-pkc-region="context-menu"] button');
+        items[pick]!.click();
+      } finally {
+        make.mockRestore();
+        revoke.mockRestore();
+        click.mockRestore();
+      }
+      return pane.querySelector('[data-pkc-field="sql-note"]')?.textContent ?? '';
+    };
+    const csv = await run(0);
+    expect(csv).toContain('.csv」というファイルに書き出しました');
+    expect(csv, '式に見える値の数(3 個)を言っていない').toContain('= などで始まる値が 3 個あります');
+    const json = await run(2);
+    expect(json).toContain('.json」というファイルに書き出しました');
+    expect(json, 'JSON なのに式の話をしている').not.toContain('= などで始まる値');
+  });
+
   it('⚠ 履歴が空なら、↑ を押しても何も起きない', () => {
     const { d, type, key, box } = setup();
     type('打ちかけ');
