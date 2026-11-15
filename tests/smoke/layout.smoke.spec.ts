@@ -851,18 +851,30 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
         }, mode);
         const pane = page.locator(`[data-pkc-browse-pane="${mode}"]`);
         await expect(pane, `w=${w}: 「${mode}」のペインが開かない`).toBeVisible();
-        const over = await pane.evaluate((el) => {
+        // ⚠ 中身が描かれる前に測らない(空のペインは「はみ出し 0」で緑になる)── 予定表は直す前にはみ出していた欄そのものを待つ
+        if (mode === 'schedule')
+          await expect(pane.locator('[data-pkc-field="schedule-week-start"]'), `w=${w}: 週の始まりの欄が描かれていない`).toBeVisible();
+        const m8 = await pane.evaluate((el) => {
           const box = (el.closest('[data-pkc-region="browse-host"]') ?? el).getBoundingClientRect();
           const out: string[] = [];
+          let seen = 0;
           for (const child of el.querySelectorAll<HTMLElement>('*')) {
             const r = child.getBoundingClientRect();
             if (r.width === 0 || r.height === 0 || getComputedStyle(child).visibility === 'hidden') continue;
+            seen += 1;
             if (r.right > box.right + 0.5 || r.left < box.left - 0.5)
               out.push(child.getAttribute('data-pkc-field') ?? child.getAttribute('data-pkc-action') ?? child.tagName);
           }
-          return [...new Set(out)];
+          return { over: [...new Set(out)], seen };
         });
-        expect(over, `w=${w}: 「${mode}」でペインの外へはみ出している`).toEqual([]);
+        // ⚠ 見た要素が 0 個なら「はみ出し 0」は空振り(着地前レビュー ⚠1)
+        expect(m8.seen, `w=${w}: 「${mode}」の中身を 1 つも測れていない(空振り)`).toBeGreaterThan(0);
+        expect(m8.over, `w=${w}: 「${mode}」でペインの外へはみ出している`).toEqual([]);
+        // 🔴 予定表の見せ方のボタンの角は、関係グラフの選ぶボタンと同じ段(直す前はここだけ丸い札)
+        if (mode === 'schedule') {
+          const r = await pane.locator('[data-pkc-field="schedule-modes"] button').first().evaluate((b) => getComputedStyle(b).borderTopLeftRadius);
+          expect(r, `w=${w}: 予定表の見せ方のボタンが丸い札のまま`).toBe('3px');
+        }
       }
       /**
        * ⑨ 🔴 **ランチャーの端が揃う**(#1442)。⚠ 1440px で見る ── 1024px ではペインが狭く、欄の既定の幅がたまたま一覧の
@@ -883,6 +895,11 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
         const urlRight = await lp.locator('[data-pkc-field="launcher-add-url"]').evaluate((e) => e.getBoundingClientRect().right);
         const rowRight = await lp.locator('[data-pkc-action="open-tile"]').first().evaluate((e) => e.getBoundingClientRect().right);
         expect(Math.abs(urlRight - rowRight), `リンクを足す欄の右端(${urlRight})が一覧の右端(${rowRight})と揃っていない`).toBeLessThan(6);
+        // 「リンクを足す」は欄の右端に寄る / 説明の上下の間は余白の段(直す前は p の既定 ≒ 13px)
+        const goRight = await lp.locator('[data-pkc-field="launcher-add-go"]').evaluate((e) => e.getBoundingClientRect().right);
+        expect(Math.abs(goRight - urlRight), `「リンクを足す」が右端に寄っていない(${goRight} / ${urlRight})`).toBeLessThan(2);
+        const leadTop = await lp.locator('[data-pkc-field="launcher-lead"]').evaluate((e) => parseFloat(getComputedStyle(e).marginTop));
+        expect(leadTop, `説明の上の間が余白の段でない(${leadTop}px)`).toBeLessThanOrEqual(8);
       }
       // 次の幅の起動で覚えたタブが残らないように、フォルダへ戻しておく(上の⑦と同じ理由)
       await page.evaluate(() => {

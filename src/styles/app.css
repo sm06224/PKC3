@@ -7610,10 +7610,6 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border-radius: var(--radius);
   cursor: pointer;
 }
-[data-pkc-field='schedule-week-start'] {
-  min-width: 0;
-  max-width: 100%;
-}
 [data-pkc-region='schedule-day'] {
   display: flex;
   flex-direction: column;
