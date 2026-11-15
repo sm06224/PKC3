@@ -142,6 +142,17 @@ const AUTOSIZE_ATTR = 'data-pkc-autosize';
  *   欄ごとに「その行より上の本文(frontmatter を外した側。最後は改行)」を返す。無い欄は空。
  */
 const ROW_ABOVE = new WeakMap<HTMLTextAreaElement, () => string>();
+/**
+ * 🔴 **開いている行の欄 → 「いま打っている字で確定したら、本文はどうなるか」**(#1163 依頼 248、案どおり)。
+ * ⚠ 1 面の書き方は、行を確定するまで打った字が state に無い ── 控え(`draft-writer`)が読む本文に入らず、
+ *   打ちかけのままタブを閉じると消えていた。継ぎ足しの規則は確定と同じ(`spliceLines` + `restoreEol`)。
+ */
+const ROW_BODY = new WeakMap<HTMLTextAreaElement, () => string>();
+
+/** 開いている行の欄の字を継ぎ足した本文(欄が行の欄でなければ `null`)。 */
+export function rowDraftBody(ta: HTMLTextAreaElement): string | null {
+  return ROW_BODY.get(ta)?.() ?? null;
+}
 export function rowTextAbove(ta: HTMLTextAreaElement): string {
   return ROW_ABOVE.get(ta)?.() ?? '';
 }
@@ -1174,6 +1185,13 @@ export class RowSwap {
     ROW_ABOVE.set(ta, () => {
       const above = this.body.split('\n').slice(0, o.startLine);
       return above.length === 0 ? '' : `${above.join('\n')}\n`;
+    });
+    ROW_BODY.set(ta, () => {
+      // ⚠ 確定(`commitActive`)と同じ継ぎ足し ── 改行コードも元に戻す
+      const typed = normalizeEol(ta.value);
+      if (typed === o.source) return this.body;
+      const text = restoreEol(typed, o.crs, this.body.split('\n').length - 1 === o.endLine);
+      return spliceLines(this.body, o.startLine, o.endLine, text);
     });
 
     this.active = {

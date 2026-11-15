@@ -43,6 +43,7 @@ import { connectListPlaceMemory } from '@adapter/platform/list-place-effects';
 import { appOpenedStore } from '@adapter/platform/opened-store';
 import { isRegisteredApp, tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
+import { rowDraftBody } from '@adapter/ui/render/row-swap';
 import {
   applyTextScale,
   chosenTextScale,
@@ -6815,6 +6816,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       isPartInput: (el) =>
         el.getAttribute('data-pkc-field') === SECTION_BOX_INPUT_FIELD ||
         el.getAttribute('data-pkc-field') === CODE_BOX_INPUT_FIELD,
+      // 🔴 1 面の書き方の行の打ちかけも控える(#1163 依頼 248)。⚠ 探すのは 1 面の編集の面(`editor-live`)の中だけ
+      readRowBody: () => {
+        const ta = document.querySelector<HTMLTextAreaElement>(
+          '[data-pkc-region="editor-live"] textarea[data-pkc-field="row-source"]',
+        );
+        return ta === null ? null : rowDraftBody(ta);
+      },
+      isRowInput: (el) => el.getAttribute('data-pkc-field') === 'row-source',
       isRestoring: (lid) => draftOfferRef?.isRestoring(lid) === true,
       // 追記欄に打っている字も控える(依頼 330)。欄の字は state に無いので欄から読む
       readAppendText: () =>

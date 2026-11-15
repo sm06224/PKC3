@@ -49,6 +49,13 @@ export interface DraftWriterDeps {
    * 欄そのものから読む。欄が無ければ `null`。省略 = 欄の控えは取らない。
    */
   readPartText?(): string | null;
+  /**
+   * 🔴 **1 面の書き方で開いている行の欄の打ちかけを継ぎ足した本文**(#1163 依頼 248)。⚠ 行の欄の字は確定まで state に無い。
+   *   行の欄が開いていなければ `null`(state の本文を使う)。省略 = 行の打ちかけは控えない。
+   */
+  readRowBody?(): string | null;
+  /** `input` の対象が 1 面の書き方の行の欄か。 */
+  isRowInput?(el: Element): boolean;
   /** `input` の対象が章の欄 / コード枠の欄か。 */
   isPartInput?(el: Element): boolean;
   /**
@@ -220,7 +227,8 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
     const lid = session.lid;
     // 🔴 答えていない控えが在るノートは触らない(古い控えを残す)
     if (deps.isPending?.(lid) === true) return;
-    const body = st.openBody.body;
+    // 🔴 行の欄に打ちかけがあれば、それを継ぎ足した本文を控える(#1163 依頼 248)
+    const body = deps.readRowBody?.() ?? st.openBody.body;
     const title = deps.readTitle() ?? session.lastTitle;
     session.lastTitle = title;
     const unchanged = body === st.openBody.baseline && title === session.startTitle;
@@ -405,6 +413,11 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
     }
     if (partSession !== null && t !== null && deps.isPartInput?.(t) === true) {
       partSession.lastText = deps.readPartText?.() ?? partSession.lastText;
+      throttle.touch();
+      return;
+    }
+    // 🔴 1 面の書き方の行の欄 ── 打つたびに控えの時計を進める(#1163 依頼 248)
+    if (session !== null && t !== null && deps.isRowInput?.(t) === true) {
       throttle.touch();
       return;
     }

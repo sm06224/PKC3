@@ -38,7 +38,7 @@ vi.mock('../../src/features/markdown/source-blocks', async (importOriginal) => {
     },
   };
 });
-import {
+import { rowDraftBody,
   RowSwap,
   ROW_REOPEN_EVENT,
   blockWithSubSlot,
@@ -2538,5 +2538,26 @@ describe('RowSwap — 大きな本文への連続入力で、開放終端の走�
     ta.value = '```js';
     ta.dispatchEvent(new Event('input'));
     expect(slot.getAttribute('data-pkc-open-end')).toBe('fence');
+  });
+});
+
+/** 🔴 #1163 依頼 248: 開いている行の打ちかけを継ぎ足した本文(控えが読む)。確定と同じ継ぎ足し。 */
+describe('rowDraftBody ── 打ちかけの行を継ぎ足した本文(依頼 248)', () => {
+  it('🔴 開いた行に打った字が、確定前でも本文の形で読める(確定と同じ結果)', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    const ta = r.host.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    expect(ta, '前提: 行の欄が開いていない').not.toBeNull();
+    expect(rowDraftBody(ta), '打つ前は本文そのまま').toBe(DOC);
+    ta.value = '書きかけの段落。';
+    const draft = rowDraftBody(ta);
+    expect(draft).toBe(DOC.replace('最初の段落。', '書きかけの段落。'));
+    // 🔑 確定した結果と同じ(控えから戻した本文が、確定していた場合と食い違わない)
+    r.swap.commitActive(true);
+    expect(r.body()).toBe(draft);
+  });
+
+  it('⚠ 行の欄でなければ null', () => {
+    expect(rowDraftBody(document.createElement('textarea'))).toBeNull();
   });
 });
