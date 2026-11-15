@@ -682,6 +682,8 @@ export class SettingsRenderer {
       }
     };
     find.addEventListener('input', refilter);
+    // ⚠ 欄の × / Escape で空にしたときも戻す(`type=search` は `search` も撃つ)
+    find.addEventListener('search', refilter);
     this.refilter = () => {
       if (find.value !== '') refilter();
     };

@@ -8,7 +8,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
-import { SETTINGS_FILTERED_ATTR } from '../../src/adapter/ui/render/settings-filter';
+import { SETTINGS_FILTERED_ATTR, applySettingsFilter } from '../../src/adapter/ui/render/settings-filter';
 import { initialState } from '../../src/adapter/state/app-state';
 import { JobMonitor } from '../../src/adapter/platform/job-monitor';
 import { matchesSettingsQuery, settingsQueryWords } from '../../src/features/settings/settings-query';
@@ -127,5 +127,81 @@ describe('システムの画面で絞る', () => {
     dl.append(dt, dd);
     settings.render(initialState);
     expect(shownDt(), '映し直しの後、絞りが外れた行が出ている').toEqual(before);
+  });
+});
+
+describe('着地前レビューの指摘', () => {
+  it('🔴 節の名前と項目の名前を混ぜて打っても当たる(「表示 配色」)', () => {
+    const { type, shownDt } = mount();
+    type('表示 配色');
+    const hit = shownDt();
+    expect(hit, '見出しと行に分かれた語で当たらない').toContain('配色');
+    expect(hit, '「配色」を含まない行まで残っている').not.toContain('文字の大きさ');
+  });
+
+  it('🔴 h3 の見出しの語(「許可」)で、その節は丸ごと残る', () => {
+    const { type, root } = mount();
+    type('許可');
+    const perm = root.querySelector('[data-pkc-region="settings-permissions"]')!;
+    expect(perm.hasAttribute(SETTINGS_FILTERED_ATTR), '見出しに当たった節が隠れた').toBe(false);
+    const cfg = root.querySelector('[data-pkc-region="settings-user"]')!;
+    expect(cfg.hasAttribute(SETTINGS_FILTERED_ATTR), '当たらない「表示」の節が残っている').toBe(true);
+  });
+
+  it('⚠ 語を消すと、目次のボタンの印も全部外れる', () => {
+    const { type, root } = mount();
+    type('文字の大きさ');
+    const toc = root.querySelector('[data-pkc-region="settings-toc"]')!;
+    expect(toc.querySelectorAll(`[${SETTINGS_FILTERED_ATTR}]`).length, '前提: 目次が絞られていない').toBeGreaterThan(0);
+    type('');
+    expect(toc.querySelectorAll(`[${SETTINGS_FILTERED_ATTR}]`).length, '目次のボタンが隠れたまま').toBe(0);
+  });
+});
+
+describe('件数(手で組んだ画面で数える)', () => {
+  function fixture(): HTMLElement {
+    const body = document.createElement('div');
+    body.innerHTML = `
+      <p>先頭の案内 りんご</p>
+      <section><h3>果物</h3>
+        <dl>
+          <dt>りんご</dt><dd>赤い</dd>
+          <dt>みかん</dt><dd>りんごではない</dd>
+          <dt hidden>りんご(節が隠した)</dt><dd>りんご</dd>
+          <dt>ぶどう</dt><dd><button>りんごを割り当てる</button></dd>
+        </dl>
+        <section><h4>一覧</h4><p>りんごの表</p></section>
+        <section><h4>別</h4><p>なし</p></section>
+      </section>
+      <section><h3>野菜</h3><dl><dt>なす</dt><dd>紫</dd></dl></section>`;
+    document.body.append(body);
+    return body;
+  }
+
+  it('🔴 行 2 + 葉の節 1 + 節の外 1 = 4 件(隠れた行・ボタンの字は数えない)', () => {
+    const body = fixture();
+    expect(applySettingsFilter(body, 'りんご')).toBe(4);
+    const shown = [...body.querySelectorAll('dt')]
+      .filter((dt) => dt.closest(`[${SETTINGS_FILTERED_ATTR}]`) === null && !dt.hidden)
+      .map((dt) => dt.textContent);
+    expect(shown).toEqual(['りんご', 'みかん']);
+    // ボタンの字だけで当たる「ぶどう」は隠れる
+    const grape = [...body.querySelectorAll('dt')].find((dt) => dt.textContent === 'ぶどう')!;
+    expect(grape.hasAttribute(SETTINGS_FILTERED_ATTR)).toBe(true);
+    // 当たりの無い「野菜」の節と「別」の節は隠れる
+    const secs = [...body.querySelectorAll('section')];
+    expect(secs.filter((s) => s.hasAttribute(SETTINGS_FILTERED_ATTR)).map((s) => s.firstElementChild!.textContent)).toEqual([
+      '別',
+      '野菜',
+    ]);
+    expect(applySettingsFilter(body, '')).toBeNull();
+    expect(body.querySelectorAll(`[${SETTINGS_FILTERED_ATTR}]`).length).toBe(0);
+  });
+
+  it('⚠ 節が隠した行だけが当たる節は、見出しごと隠す(見えない物で節を残さない)', () => {
+    const body = document.createElement('div');
+    body.innerHTML = `<section><h3>甲</h3><dl><dt hidden>みつけた</dt><dd></dd><dt>ほか</dt><dd></dd></dl></section>`;
+    expect(applySettingsFilter(body, 'みつけた')).toBe(0);
+    expect(body.querySelector('section')!.hasAttribute(SETTINGS_FILTERED_ATTR)).toBe(true);
   });
 });
