@@ -493,6 +493,15 @@ export function assertCsvWidthWithinBudget(columnCount: number, budget: number):
 }
 
 /**
+ * 🔴 **入れる値**(#1163 依頼 221 の着地前レビュー 🔴1)── 数の列の空の升は `NULL` にする。
+ * ⚠ 字の `''` のまま数の列に入れると、SQLite では字が数より大きいので、`max()` が空・`> 50` に空の行が混ざる・
+ *   大きい順の先頭が空になる。字の列はそのまま(空は空の字)。
+ */
+export function rowForInsert(row: readonly (string | null)[], numeric: readonly boolean[]): (string | null)[] {
+  return row.map((v, i) => (numeric[i] === true && (v === '' || v === undefined) ? null : (v ?? null)));
+}
+
+/**
  * 🔴 **数の列にしてよい列か**(#1163 依頼 221)── 空でない升が 1 つ以上あり、空でない升が全部「数にして字へ戻しても同じ字」。
  * ⚠ 空の升(`''` / `null`)は判定から外す(空のセルを含む数の列はよくある)。
  * @returns 列ごとに `true`(数の列)/ `false`(字の列)
@@ -501,7 +510,9 @@ export function numericColumns(
   columns: readonly string[],
   rows: readonly (readonly (string | null)[])[],
 ): boolean[] {
-  return columns.map((_, c) => {
+  return columns.map((name, c) => {
+    // ⚠ 出所の列(`_note` / `_lid` / 枚の名前)はいつも字 ── 題名が `2026` のノートで数にしない(着地前レビュー ⚠2)
+    if (name.startsWith('_')) return false;
     let seen = false;
     for (const row of rows) {
       const v = row[c];
@@ -516,6 +527,8 @@ export function numericColumns(
 /** 数にして字へ戻しても同じ字になる素直な 10 進数か(`007` / `1.50` / `+3` / `1e3` / 前後の空白は違う)。 */
 export function isCanonicalNumber(v: string): boolean {
   if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(v)) return false;
+  // ⚠ 有効数字 15 桁まで(着地前レビュー ⚠3)── それより長い字は SQLite の数の書き戻し(`json_quote` など)で字が変わる
+  if (v.replace(/^-/, '').replace('.', '').replace(/^0+/, '').length > 15) return false;
   const n = Number(v);
   return Number.isFinite(n) && String(n) === v;
 }

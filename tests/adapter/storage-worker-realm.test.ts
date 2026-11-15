@@ -330,6 +330,18 @@ describe('system 領域のノートは user 向けの読み手から漏れない
     expect(byNo.rows.map((r) => r[0]), '007 の混ざる列が数になった(字が変わる)').toEqual(['007', '12', '3']);
   });
 
+  /** 🔴 着地前レビュー 🔴1: 数の列の空の升は NULL ── 字の '' のままだと max が空・> 50 に混ざる・大きい順の先頭が空。 */
+  it('本文の csv: 空の升を含む数の列でも、max・比較・大きい順が数として正しい', async () => {
+    const fence = ['```csv name=空あり', '品,金額,題', 'a,9,x', 'b,,y', 'c,100,z', '```', ''].join('\n');
+    await put('csv-221b', fence);
+    const sql = (q: string) => request({ op: 'runReadOnlySql', sql: q, maxRows: 100, maxSteps: 1_000_000, maxMs: 60_000 });
+    expect((await sql('SELECT max(金額) FROM 空あり')).rows, 'max が空の升になった').toEqual([[100]]);
+    expect((await sql('SELECT 品 FROM 空あり WHERE 金額 > 50')).rows.map((r) => r[0]), '空の行が 50 超に混ざった').toEqual(['c']);
+    expect((await sql('SELECT 品 FROM 空あり ORDER BY 金額 DESC NULLS LAST')).rows.map((r) => r[0])).toEqual(['c', 'a', 'b']);
+    // ⚠ 出所の列は字のまま(題名が数字でも)
+    expect((await sql("SELECT typeof(_note) FROM 空あり LIMIT 1")).rows[0]![0]).toBe('text');
+  });
+
   it('本文の csv(runReadOnlySql 経由): system の本文は表にならない / user は表になる', async () => {
     const fence = (info: string, lines: readonly string[]): string =>
       ['```' + info, ...lines, '```', ''].join('\n');

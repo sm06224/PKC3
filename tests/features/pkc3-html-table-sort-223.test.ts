@@ -83,4 +83,14 @@ describe('書き出した HTML の表の並べ替え(依頼 223)', () => {
     // 対照: 読む面で数にならない字(部品番号)は、閲覧側でも字として並ぶ
     expect(parseComparable('12E5').isNum).toBe(false);
   });
+
+  it('⚠ 全体の印刷(#pkc-all)の表には並べ替えを付けない(紙に印が出ない)', async () => {
+    await open((await writePortableHtml(source([{ lid: 'n1', title: '表', body: TABLE }, { lid: 'n2', title: '二', body: TABLE }]), NOW, (t) => Promise.resolve(renderMarkdown(t)))).blob);
+    document.getElementById('pkc-printall')!.click();
+    await new Promise((r) => setTimeout(r, 0));
+    const allTh = document.querySelectorAll('#pkc-all thead th');
+    expect(allTh.length, '前提: 全体の印刷に表が出ていない').toBeGreaterThan(0);
+    expect(document.querySelectorAll('#pkc-all th[data-pkc-sort-direction]'), '全体の印刷に並べ替えが付いた').toHaveLength(0);
+    expect(document.querySelectorAll('#pkc-body th[data-pkc-sort-direction]').length, '対照: 本文には付く').toBeGreaterThan(0);
+  });
 });

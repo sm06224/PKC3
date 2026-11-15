@@ -34,6 +34,11 @@ export function watchSeekRange(host: HTMLElement, desc: ParentNode): () => void 
     if (!(media instanceof HTMLMediaElement)) return;
     limitSeekLinks(desc, media.duration * 1000);
   };
+  // 🔑 `durationchange` も聞く ── 録音したての webm は長さが `Infinity` で始まり、後で確定する(着地前レビュー ⚠6)
   host.addEventListener('loadedmetadata', on, true);
-  return () => host.removeEventListener('loadedmetadata', on, true);
+  host.addEventListener('durationchange', on, true);
+  return () => {
+    host.removeEventListener('loadedmetadata', on, true);
+    host.removeEventListener('durationchange', on, true);
+  };
 }

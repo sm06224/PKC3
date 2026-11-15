@@ -45,4 +45,19 @@ describe('録音の長さを超える時刻(依頼 373)', () => {
     media.dispatchEvent(new Event('loadedmetadata'));
     expect(links(desc)).toEqual(['0:15', '9:30']);
   });
+
+  it('🔴 長さが後から確定する(durationchange)ときも絞る', () => {
+    const host = document.createElement('div');
+    const desc = rendered();
+    const media = document.createElement('audio');
+    host.append(media);
+    document.body.append(host, desc);
+    watchSeekRange(host, desc);
+    Object.defineProperty(media, 'duration', { value: Infinity, configurable: true });
+    media.dispatchEvent(new Event('loadedmetadata'));
+    expect(links(desc), '長さが分からないのに絞った').toHaveLength(3);
+    Object.defineProperty(media, 'duration', { value: 600, configurable: true });
+    media.dispatchEvent(new Event('durationchange'));
+    expect(links(desc)).toEqual(['0:15', '9:30']);
+  });
 });

@@ -123,6 +123,19 @@ describe('音・動画の添付の説明(#1232 段 b)', () => {
     expect(root.textContent).toContain('0:20 つぎに');
   });
 
+  /** ⚠ 見張りは再生機の器に付ける(着地前レビュー ⚠5)── 本文の器(描き直しても残る)に付けると、描くたびに積もる。 */
+  it('⚠ 長さの見張りは再生機の器(attachment-preview)に付き、本文の器には付かない', async () => {
+    const { root } = await open('audio/webm', 'rec.webm');
+    const preview = root.querySelector('[data-pkc-field="attachment-preview"]');
+    expect(preview, '前提: 再生機の器が無い').not.toBeNull();
+    // 再生機の器の**外**(本文の器の中)で長さの合図が起きても、絞らない ── 見張りが本文の器に付いていれば絞ってしまう
+    const stray = document.createElement('audio');
+    Object.defineProperty(stray, 'duration', { value: 18, configurable: true });
+    preview!.parentElement!.append(stray);
+    stray.dispatchEvent(new Event('loadedmetadata'));
+    expect(root.querySelectorAll('[data-pkc-action="seek-media"]'), '本文の器で見張っている(描くたびに積もる)').toHaveLength(2);
+  });
+
   it('🔴 PDF の添付の説明に `0:15 …` と書いても、押せる字にしない(字は残る)', async () => {
     const { root } = await open('application/pdf', 'doc.pdf');
     expect(root.querySelector('[data-pkc-action="seek-media"]'), '再生機の無い所で押せる字になっている').toBeNull();
