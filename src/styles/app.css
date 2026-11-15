@@ -13683,3 +13683,24 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-region='dual-cmd-out'][hidden] {
   display: none;
 }
+
+/* 🔴 **設定を探す欄**(#1966 3-1)── 絞り込みで外れた行・節・目次のボタンを隠す。
+ * ⚠ `hidden` は使わない(各節が自分の都合で付け外ししている ── 語を消したとき、節が隠していた物まで出てしまう)。 */
+[data-pkc-settings-filtered] {
+  display: none !important;
+}
+[data-pkc-field='settings-filter-row'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-bottom: var(--s2);
+}
+[data-pkc-field='settings-filter'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 24rem;
+}
+[data-pkc-field='settings-filter-count'] {
+  color: var(--muted);
+  font-size: var(--btn-fs-sm);
+}

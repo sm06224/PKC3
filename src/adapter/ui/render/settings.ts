@@ -46,6 +46,7 @@ import { buildStemModelPanel, type StemModelPanel } from './stem-model-panel';
 import { buildSettingsCommands, buildSettingsFile } from './commands';
 import { buildKeymapPanel, type KeymapPanel } from './keymap-panel';
 import type { SettingsGroup, SettingsSection } from './settings/section';
+import { applySettingsFilter, SETTINGS_FILTERED_ATTR } from './settings-filter';
 import { createMessagesSection } from './settings/messages';
 import { createThemeSection } from './settings/theme';
 import { createPageFormatSection } from './settings/page-format';
@@ -89,6 +90,8 @@ import { createNoticesSection, createNoticeListSection } from './settings/notice
 
 export class SettingsRenderer {
   private built = false;
+  /** 🔴 設定を探す欄の語で絞り直す(#1966 3-1)。目次を組むまでは無い。 */
+  private refilter: (() => void) | null = null;
   /** Office 一式の節(#88 / O6-a)。⚠ 器と同じ寿命 ── 自分で変化を購読する。 */
   private officePack: OfficePackPanel | null = null;
   private asrPack: AsrPackPanel | null = null;
@@ -326,6 +329,8 @@ export class SettingsRenderer {
     if (this.built) {
       // 🔴 未読・許可・件数などは毎 state で変わりうる ── 登録表の全部を映す。
       this.syncSections(state);
+      // 🔴 映し直しで行が作り直された節もあるので、語が入っていれば絞り直す(#1966 3-1)
+      this.refilter?.();
       // 🔴 開いている間に大きさが動きうる ── 測り直す(間隔は係が持つ)
       this.vacuum.refresh();
       return;
@@ -645,9 +650,41 @@ export class SettingsRenderer {
   private buildToc(body: HTMLElement): HTMLElement {
     const nav = document.createElement('nav');
     nav.setAttribute('data-pkc-region', 'settings-toc');
+    /**
+     * 🔴 **設定を探す欄**(#1966 3-1)── 40 ほどの設定を、項目の名前・説明の語で絞る(判定は `settings-filter.ts`)。
+     * ⚠ 目次の上に置く(目次で節へ飛ぶ道と、語で探す道を同じ場所に並べる)。⚠ 絞っても目次は消さない ──
+     *   当たりの無い節の目次だけを隠す。
+     */
+    const findRow = document.createElement('div');
+    findRow.setAttribute('data-pkc-field', 'settings-filter-row');
+    const find = document.createElement('input');
+    find.type = 'search';
+    find.setAttribute('data-pkc-field', 'settings-filter');
+    find.setAttribute('aria-label', '設定を探す');
+    find.placeholder = '設定を探す(例: 文字の大きさ)';
+    const findCount = document.createElement('span');
+    findCount.setAttribute('data-pkc-field', 'settings-filter-count');
+    findCount.setAttribute('role', 'status');
+    findRow.append(find, findCount);
+    nav.append(findRow);
     const row = document.createElement('div');
     row.setAttribute('data-pkc-field', 'settings-toc-row');
     nav.append(row);
+    const refilter = (): void => {
+      const n = applySettingsFilter(body, find.value);
+      findCount.textContent = n === null ? '' : n === 0 ? 'この語を含む設定はありません' : `${n} 件`;
+      // 目次: 当たりの無い節へ飛ぶボタンは隠す(押しても何も見えない所へ飛ばさない)
+      for (const link of Array.from(row.querySelectorAll<HTMLElement>('[data-pkc-action="system-jump"]'))) {
+        const id = link.getAttribute('data-pkc-target') ?? '';
+        const sec = body.querySelector(`[data-pkc-section="${id}"]`)?.closest('section') ?? null;
+        if (n !== null && sec !== null && sec.hasAttribute(SETTINGS_FILTERED_ATTR)) link.setAttribute(SETTINGS_FILTERED_ATTR, '');
+        else link.removeAttribute(SETTINGS_FILTERED_ATTR);
+      }
+    };
+    find.addEventListener('input', refilter);
+    this.refilter = () => {
+      if (find.value !== '') refilter();
+    };
     const heads = Array.from(body.querySelectorAll<HTMLHeadingElement>('h3'));
     heads.forEach((h, i) => {
       const id = `settings-h3-${i}`;

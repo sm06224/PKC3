@@ -547,8 +547,9 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
    * ⚠ 2026-11-15(#1163)に `2026-11-15-duplicate-scope-boot-backup` を先頭へ足したので、ここも 1 段新しい題名へ直した。
    * ⚠ 2026-11-15(#1442)に `2026-11-15-builtin-apps-layout` を先頭へ足したので、ここも 1 段新しい題名へ直した。
    * ⚠ 2026-11-15(#1966)に `2026-11-15-now-stamp-keys` を先頭へ足したので、ここも 1 段新しい題名へ直した。
+   * ⚠ 2026-11-15(#1966)に `2026-11-15-settings-filter` を先頭へ足したので、ここも 1 段新しい題名へ直した。
    */
-  ).toContain('いまの時刻・日時をキー 1 つで入れられるようにしました');
+  ).toContain('システムの画面に「設定を探す」欄を足しました');
   await dismissAnnounce(page);
 
   // 「システム」を開く
@@ -729,6 +730,21 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
     readFileSync(saved!, 'utf8'),
     '書き出した file に、変えた設定(見た目)が入っていない',
   ).toContain('"pkc3.theme"');
+
+  /**
+   * ⑨ 🔴 **設定を探す**(#1966 3-1)── 実際の CSS で、当たらない行が画面から消え、語を消すと戻る(同じ起動に載せる)。
+   * ⚠ happy-dom は CSS の `display: none !important` を描かないので、「見えない」はここでしか見えない。
+   */
+  const settingsFind = page.locator('[data-pkc-field="settings-filter"]');
+  await expect(settingsFind, '設定を探す欄が無い').toBeVisible();
+  const dtNamed = (t: string) => page.locator('[data-pkc-region="settings-body"] dt', { hasText: t }).first();
+  await expect(dtNamed('配色'), '前提が崩れている(配色の行が見えない)').toBeVisible();
+  await settingsFind.fill('文字の大きさ');
+  await expect(dtNamed('文字の大きさ'), '当たった行が見えない').toBeVisible();
+  await expect(dtNamed('配色'), '当たらない行が画面に残っている').toBeHidden();
+  await expect(page.locator('[data-pkc-field="settings-filter-count"]')).toHaveText(/^\d+ 件$/);
+  await settingsFind.fill('');
+  await expect(dtNamed('配色'), '語を消しても行が戻らない').toBeVisible();
 
   // ⑤ 🔴 ここまでの一連の操作で hash は 1 度も変わっていない(ディープリンク専用)
   const hashAfter = await page.evaluate(() => location.hash);
