@@ -46,7 +46,13 @@ function place(from: ScrollBox, to: HTMLElement): void {
  * 右を自分で送っていたら、そのままにする(上の `placed` の注記)。
  */
 export function refollowScroll(from: ScrollBox, to: HTMLElement): void {
-  if (Math.abs(to.scrollTop - (placed.get(to) ?? 0)) > SAME_SPOT_PX) return;
+  /**
+   * ⚠ 右が縮むと、ブラウザは scrollTop を送れる幅の端へ寄せる(人が動かしたのではない)── 置いた値を
+   *   いまの端で丸めてから比べる(丸めないと、縮めた瞬間から付いて行かなくなる。着地前レビュー 🔴1)。
+   */
+  const end = Math.max(0, to.scrollHeight - to.clientHeight);
+  const expected = Math.min(placed.get(to) ?? 0, end);
+  if (Math.abs(to.scrollTop - expected) > SAME_SPOT_PX) return;
   place(from, to);
 }
 
