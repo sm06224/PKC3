@@ -20077,9 +20077,13 @@ export function bindActions(
       const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
       if (lid !== null) {
         ev.preventDefault();
-        // 🔴 編集中は reducer が黙って落とす(素のクリックは `selectEntryOrExplain` が理由を出す)── 同じく理由を出す
+        /**
+         * 🔴 **編集中でも印は付けられる**(#1163 依頼 215、案 B ── 2 ペインと同じ)。⚠ 印を付けても開いているノートは
+         *   動かない(編集は続く)。印の付いた物を消す・移すときは、それぞれの入口(`deleteFrom` / `move-to-folder` …)が
+         *   理由を出して止める。⚠ 起動中・壊れた状態では印も付けない(reducer の門 `canMark`)。
+         */
         const phaseNow = dispatcher.getState().phase;
-        if (phaseNow !== 'ready') {
+        if (phaseNow !== 'ready' && phaseNow !== 'editing') {
           dispatcher.dispatch({
             type: 'OP_FAILED',
             error: `${phaseBlockReason(phaseNow)}フォルダの操作をしてください`,

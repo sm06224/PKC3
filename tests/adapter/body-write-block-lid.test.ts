@@ -528,7 +528,7 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
   });
 
   /**
-   * 🔴 **残り 35 件は今回の対象外**(#1087 で起動タイルのグループの 3 件が理由を出すようになり 35 → 32、メッセージの読み直し ⑧ を足して 33、スマートフォルダの条件の追従 ⑨ を足して 34、2 ペインの並び順 ⑩ を足して 35)。理由は 4 つに分かれる:
+   * 🔴 **残り 33 件は今回の対象外**(#1087 で起動タイルのグループの 3 件が理由を出すようになり 35 → 32、メッセージの読み直し ⑧ を足して 33、スマートフォルダの条件の追従 ⑨ を足して 34、2 ペインの並び順 ⑩ を足して 35、#1163 依頼 215 案 B で `TOGGLE_SELECT` / `SELECT_RANGE` が編集中も印を付けるようになり 33)。理由は 4 つに分かれる:
    * ① **lid で 1 件に絞れない**(複数の lid・全件・app 全体に効く ──
    *    選択 / フィルタ / 一覧の並び替え / タイル・グループの並び替え 等)
    * ② **本文の書換ではない**(削除・関係・タグ・履歴・ゴミ箱・スマート集計・
@@ -548,7 +548,7 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
    * ⑥ 🔴 **`UNDO_TRASH`(#1087 流れ 29)は「ゴミ箱へ移した直後の元に戻す」** ── ②の `RESTORE_TRASH` と同じ側
    *    (ゴミ箱の復元。lid は移した全部で 1 件に絞れない)。⚠ `phase !== 'ready'` の黙りは reducer だけで、
    *    押し口(`undo-trash`)が先に理由を出す(`restore-trash` と同じ作り)ので dead click にならない
-   * ⑦ 🔴 **`SELECT_ONLY`(#1087)は `TOGGLE_SELECT` / `SELECT_RANGE` と同じ側**(一覧の印を付け替えるだけで本文を
+   * ⑦ 🔴 **`SELECT_ONLY`(#1087)は一覧の印を付け替えるだけ**(本文を
    *    書き換えない)。押し口(一覧の ↑↓)は編集中だと先に理由を出して止まるので、reducer の黙りは dead click にならない
    * ⑧ 🔴 **`MESSAGES_BODY_REFRESH`(#1087)は押し口を持たない system command** ── メッセージが書かれた合図で、
    *    開いているメッセージの本文を読み直すだけ(user の操作ではないので理由を出す相手が居ない)。
@@ -561,7 +561,7 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
    * ⚠ このリストが増減したら、それは①C6 の対象を増やした ②既存の case を
    *   書き換えた、のどちらかである ── どちらでもここを書き直す。
    */
-  it('残り 35 件は変わっていない(増減があれば、この一覧を見直す)', () => {
+  it('残り 33 件は変わっていない(増減があれば、この一覧を見直す)', () => {
     const silent = silentPhaseOnlyCases(STATE);
     const known = [
       'ADD_RELATION',
@@ -587,7 +587,6 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
       'SEARCH_JUMP_START',
       'SELECT_ALL',
       'SELECT_ONLY',
-      'SELECT_RANGE',
       'SET_ENTRY_ORDER',
       'SET_ENTRY_PARENT',
       'SET_REVISION_COMPARE',
@@ -597,7 +596,6 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
       'SMART_FIELD',
       'SMART_TAGS',
       'START_EDIT',
-      'TOGGLE_SELECT',
       'UNDO_TRASH',
     ].sort();
     expect([...silent].sort()).toEqual(known);
