@@ -23,6 +23,45 @@ describe('右の表示を左の割合に合わせる(依頼 249)', () => {
     expect(followScrollTop(box(400, 1000, 200), box(0, 300, 500)), '右に送る幅が無い').toBe(0);
   });
 
+  it('🔴 scroll が何度来ても、右を書くのは 1 描画に 1 回(最後の位置で)', async () => {
+    const left = document.createElement('textarea');
+    const right = document.createElement('div');
+    document.body.append(left, right);
+    for (const [el, h, c] of [[left, 1000, 200], [right, 3000, 500]] as const) {
+      Object.defineProperty(el, 'scrollHeight', { value: h, configurable: true });
+      Object.defineProperty(el, 'clientHeight', { value: c, configurable: true });
+    }
+    let writes = 0;
+    let top = 0;
+    Object.defineProperty(right, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        writes += 1;
+        top = v;
+      },
+    });
+    followScroll(left, right);
+    for (const t of [100, 200, 400]) {
+      left.scrollTop = t;
+      left.dispatchEvent(new Event('scroll'));
+    }
+    await new Promise((r) => setTimeout(r, 30));
+    expect(writes, '来るたびに右を書いている').toBe(1);
+    expect(top).toBe(1250);
+    // ⚠ 右が外れた(編集を抜けた)後は書かない
+    right.remove();
+    left.scrollTop = 0;
+    left.dispatchEvent(new Event('scroll'));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(writes, '外れた右を書いた').toBe(1);
+  });
+
+  it('割り切れない割合は丸める / 範囲の外は 0〜1 に丸める', () => {
+    expect(followScrollTop(box(1, 4, 1), box(0, 11, 1))).toBe(3);
+    expect(followScrollTop(box(-5, 1000, 200), box(0, 3000, 500))).toBe(0);
+  });
+
   it('🔴 左の scroll で右が付いて行く(1 描画に 1 回)/ 外すと動かない', async () => {
     const left = document.createElement('textarea');
     const right = document.createElement('div');

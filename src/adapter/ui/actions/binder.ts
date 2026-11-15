@@ -850,6 +850,7 @@ import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { countCappedCells } from '@features/query/sql-cell';
 import { countFormulaLike } from '@features/markdown/csv-table';
 import { PIPE_CELL_HINT } from '@features/markdown/table-copy';
+import { canMark } from '@adapter/state/slices/selection';
 import { openFolderLid } from './open-folder-lid';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteKeptRows, sqlNoteTitle } from '@features/query/sql-to-note';
 import { labNoteTitle } from '@features/markdown/text-lab';
@@ -20083,7 +20084,8 @@ export function bindActions(
          *   理由を出して止める。⚠ 起動中・壊れた状態では印も付けない(reducer の門 `canMark`)。
          */
         const phaseNow = dispatcher.getState().phase;
-        if (phaseNow !== 'ready' && phaseNow !== 'editing') {
+        // ⚠ 門は reducer と同じ 1 本(`canMark`)── 2 か所に書くと片方だけ変わる(着地前レビュー ⚠8)
+        if (!canMark({ phase: phaseNow })) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
             error: `${phaseBlockReason(phaseNow)}フォルダの操作をしてください`,
@@ -21191,7 +21193,11 @@ export function bindActions(
        */
       const now = into.ownerDocument.activeElement;
       const movedAway = now !== null && now !== into.ownerDocument.body && now !== into && now !== from && now.isConnected;
-      if (movedAway) {
+      /**
+       * ⚠ 控えた位置は **`from` の中の位置** ── 待つ間に欄が作り直されて別の欄へ引き直した(`into !== from`)ときは、
+       *   その位置を別の欄に当てない(着地前レビュー 🔴2 ── 別の行の途中に入る)。そのときは今までどおり caret の位置へ。
+       */
+      if (movedAway && into === from) {
         insertAtPastedPlace(into, pastedAt, refs.map((ref) => `${ref}\n`).join(''));
         return;
       }

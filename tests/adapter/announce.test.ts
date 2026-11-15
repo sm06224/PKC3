@@ -908,7 +908,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
    */
   const KNOWN: readonly [id: string, digest: string][] = [
     /** ⚠ **#1163 で足した**(2026-11-15)。枠が満杯だったので、いちばん古い 1 件(`2026-10-18-export-replace-attach`)を落とした ── 原本は `CHANGELOG.md`(2026-10-18 の節)。 */
-    ['2026-11-15-sql-realm-paste-scroll-marks', '20696329'],
+    ['2026-11-15-sql-realm-paste-scroll-marks', '28f4b4ba'],
     /** ⚠ **#1163 で足した**(2026-11-15)。枠が満杯だったので、いちばん古い 1 件(`2026-10-17-messages-notices`)を落とした ── 原本は `CHANGELOG.md`(2026-10-17 の節)。 */
     ['2026-11-15-edit-focus-list-append', '569ed8ea'],
     /** ⚠ **#1163 で足した**(2026-11-15)。枠が満杯だったので、いちばん古い 1 件(`2026-10-17-undo-trash`)を落とした ── 原本は `CHANGELOG.md`(2026-10-17 の節)。 */

@@ -2973,24 +2973,41 @@ const CSV_INSERT_CHUNK = 500;
  *   **temp → main** の順に探すので、user の `SELECT … FROM entries` はそのまま user 領域だけを見る(打つ字を書き換えない)。
  * ⚠ 除外の口は `USER_REALM_SQL` の 1 本(§1.1「領域の判定は 1 か所」)── `realm = 'user'` を書き写さない。
  * ⚠ `main.entries` と修飾して打てば全部が見える(開発・不具合の報告の逃げ道。画面からは辿らない)。
- * ⚠ 本文の csv で同じ名前の表を作っていたら、そちらを優先する(user が名前を付けた表を覆わない)── 作れなかった view は飛ばす。
+ * ⚠ 本文の csv はこれらの名前を取れない(`CSV_TABLE_RESERVED`)── だから覆いを作れないのは異常で、そのときは止める(fail-closed)。
  *
  * @param views 作った view の名前を積む先(`finally` で必ず落とす)
  */
 function shadowSystemRealm(database: Database, views: string[]): void {
   const userLids = `SELECT lid FROM main.entries WHERE ${USER_REALM_SQL}`;
+  const userRowids = `SELECT rowid FROM main.entries WHERE ${USER_REALM_SQL}`;
+  /**
+   * ⚠ **本文検索の表も覆う**(着地前レビュー 🔴1)── `entries_fts` / その内容の view(`FTS_SOURCE_VIEW`)は main の
+   *   `entries` を直に読むので、`entries` を覆っても**そこから system の本文が丸見え**だった。
+   *   仮想表は view で覆う(行は user の rowid だけ)── `MATCH` は view には効かないので、打てば断られる(漏れるより断る)。
+   *   影の表(`_data` / `_idx` / `_docsize` / `_config` / `_content`)は索引の断片なので、行を 1 つも出さない。
+   */
   const defs: ReadonlyArray<readonly [string, string]> = [
     ['entries', `SELECT * FROM main.entries WHERE ${USER_REALM_SQL}`],
     ['relations', `SELECT * FROM main.relations WHERE from_lid IN (${userLids}) AND to_lid IN (${userLids})`],
     ['revisions', `SELECT * FROM main.revisions WHERE entry_lid IN (${userLids})`],
+    [FTS_SOURCE_VIEW, `SELECT * FROM main."${FTS_SOURCE_VIEW}" WHERE rid IN (${userRowids})`],
+    ['entries_fts', `SELECT rowid, title, body FROM main.entries_fts WHERE rowid IN (${userRowids})`],
+    ...['_data', '_idx', '_docsize', '_config', '_content'].map(
+      (suffix) => [`entries_fts${suffix}`, `SELECT * FROM main."entries_fts${suffix}" WHERE 0`] as const,
+    ),
   ];
+  // ⚠ main に在る物だけを覆う(無い物を指す view は作れない ── 古い形の DB には `FTS_SOURCE_VIEW` / `_content` の片方が無い)
+  const present = new Set(
+    (database.selectValues(`SELECT name FROM main.sqlite_master WHERE type IN ('table', 'view')`) as unknown[]).map(String),
+  );
   for (const [name, select] of defs) {
-    try {
-      database.exec({ sql: `CREATE TEMP VIEW "${name}" AS ${select}` });
-      views.push(name);
-    } catch {
-      // 同じ名前の temp の表(本文の csv)が在る ── user が付けた名前を優先する
-    }
+    if (!present.has(name)) continue;
+    /**
+     * 🔴 **作れなければ止める**(着地前レビュー ⚠4 ── 黙って飲むと、覆いの無いまま system の中身を見せる)。
+     * ⚠ 本文の csv が同じ名前を取ることは無い(`CSV_TABLE_RESERVED` がこれらの名前を断る)ので、ここで失敗するのは異常だけ。
+     */
+    database.exec({ sql: `CREATE TEMP VIEW "${name}" AS ${select}` });
+    views.push(name);
   }
 }
 

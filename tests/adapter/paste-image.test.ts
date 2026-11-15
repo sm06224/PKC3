@@ -232,6 +232,34 @@ describe('スクショの貼付(#250)', () => {
     expect(inputs.length, 'input を撃っていない(保存に入らない)').toBe(1);
   });
 
+  /** 🔴 待つ間に欄が作り直されたら、控えた位置(元の欄の中の位置)を別の欄に当てない(着地前レビュー 🔴2)。 */
+  it('🔴 待つ間に欄が作り直され、別の欄へ移っていたら、控えた位置は使わず新しい欄の caret に入れる', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { ta, outside } = setup({
+      pasteImages: async (files) => {
+        await gate;
+        return files.map((_, i) => `![ず](asset:k${i + 1})`);
+      },
+    });
+    ta.value = 'まえ|うしろ';
+    ta.focus();
+    ta.selectionStart = 2;
+    ta.selectionEnd = 2;
+    ta.dispatchEvent(pasteEvent([{ kind: 'file', type: 'image/png', file: png() }]));
+    // ⚠ 行が確定して欄が作り直された(別の行の欄)。題名の欄へ移っている
+    const fresh = document.createElement('textarea');
+    fresh.setAttribute('data-pkc-field', 'row-source');
+    fresh.value = 'べつのぎょう';
+    ta.replaceWith(fresh);
+    fresh.selectionStart = fresh.value.length;
+    fresh.selectionEnd = fresh.value.length;
+    outside.focus();
+    release();
+    await vi.waitFor(() => expect(fresh.value).toContain('asset:k1'));
+    expect(fresh.value, '元の欄の位置(2)を別の欄に当てた').not.toBe('べつ![ず](asset:k1)\nのぎょう');
+  });
+
   it('⚠ 対照群 ── 本文に居たままなら、今までどおり caret の位置に入る', async () => {
     const { ta } = setup();
     ta.value = 'まえ|うしろ';

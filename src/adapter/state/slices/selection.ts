@@ -17,7 +17,7 @@ export type SelectionAction = Extract<Dispatchable, { type: 'TOGGLE_SELECT' | 'S
  * 🔴 **一覧の印を付けられるか**(#1163 依頼 215、案 B)── 編集中も付けられる(2 ペインと同じ)。
  * ⚠ 印を付けるだけで、消す・移すなどの実行はそれぞれの入口が `phase` を見て理由を出して止める。
  */
-function canMark(state: AppState): boolean {
+export function canMark(state: Pick<AppState, 'phase'>): boolean {
   return state.phase === 'ready' || state.phase === 'editing';
 }
 
