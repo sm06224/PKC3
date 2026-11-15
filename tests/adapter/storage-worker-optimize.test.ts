@@ -144,7 +144,7 @@ describe('optimizeIndexes(#999 段③)', () => {
     // ⚠ 最後に置く ── 索引の表を落とすので、以降の test は索引を持たない
     await request({
       op: 'runReadOnlySql',
-      sql: 'PRAGMA query_only = 0; DROP TABLE entries_fts',
+      sql: 'PRAGMA query_only = 0; DROP TABLE main.entries_fts',
       maxRows: 1,
       maxSteps: 1_000_000,
       maxMs: 10_000,

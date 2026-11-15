@@ -108,15 +108,32 @@ describe('編集中の Ctrl / Shift クリックは理由を言う', () => {
   it.each([
     ['ctrlKey', { ctrlKey: true }],
     ['shiftKey', { shiftKey: true }],
-  ])('%s: editing では黙らない / ready では印が動く', (_n, mod) => {
+  ])('%s: editing でも印が付き(#1163 依頼 215 案 B)、編集は続く / ready でも印が動く', (_n, mod) => {
     const s0 = withSearch();
     const { root, d } = mount({ ...s0, phase: 'editing', editingLid: 'a' } as AppState);
     filerRow(root, 'b').dispatchEvent(new MouseEvent('click', { bubbles: true, ...mod }));
-    expect(d.getState().error ?? '', '理由が出ていない').toContain('フォルダの操作をしてください');
+    // 🔴 案 B: 2 ペインと同じく、編集中でも印は付けられる(断らない)。消す・移すの入口が理由を出して止める
+    expect(d.getState().error, '編集中なのに印を断った(案 A のまま)').toBeNull();
+    expect(d.getState().selection, '編集中に印が付いていない').toContain('b');
+    expect(d.getState().phase, '印を付けただけで編集が終わった').toBe('editing');
 
     const ready = mount(s0);
     filerRow(ready.root, 'b').dispatchEvent(new MouseEvent('click', { bubbles: true, ...mod }));
     expect(ready.d.getState().error, '対照群: ready で理由が出た').toBeNull();
     expect(ready.d.getState().selection.length, '対照群: ready で印が動いていない').toBeGreaterThan(0);
+  });
+
+  it('🔴 編集中に付けた印でも、「ゴミ箱へ移す」は理由を出して止まる(#1163 依頼 215 案 B)', () => {
+    const s0 = withSearch();
+    const { root, d } = mount({ ...s0, phase: 'editing', editingLid: 'a' } as AppState);
+    filerRow(root, 'b').dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+    expect(d.getState().selection, '前提: 印が付いていない').toContain('b');
+    const del = document.createElement('button');
+    del.setAttribute('data-pkc-action', 'delete-selected');
+    root.append(del);
+    del.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(d.getState().error ?? '', '編集中に消そうとして理由が出ない').toContain('ゴミ箱へ移してください');
+    expect(d.getState().entryMetas.has('b'), '編集中に消した').toBe(true);
+    expect(d.getState().phase).toBe('editing');
   });
 });

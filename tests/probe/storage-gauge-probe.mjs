@@ -244,9 +244,9 @@ try {
     const queries = await G('queries', BASE);
     const fpBefore = await G('fingerprint', queries);
     const g0 = await G('gauge');
-    const opt1 = await G('raw', "INSERT INTO entries_fts(entries_fts) VALUES ('optimize')");
+    const opt1 = await G('raw', "INSERT INTO main.entries_fts(entries_fts) VALUES ('optimize')");
     const g1 = await G('gauge');
-    const opt2 = await G('raw', "INSERT INTO entries_fts(entries_fts) VALUES ('optimize')");
+    const opt2 = await G('raw', "INSERT INTO main.entries_fts(entries_fts) VALUES ('optimize')");
     const g2 = await G('gauge');
     // 続けて VACUUM(optimize が出した空きを返すか。⚠ file が縮むのはここだけ)
     const vac = await G('raw', 'VACUUM');
@@ -341,7 +341,7 @@ try {
         entry.rowidAggAfter = fpAfter.rowidAgg;
         entry.quickCheck = (await G('quickCheck')).rows;
         // ② FTS の optimize(縮まないが空きが増える)→ ③ もう一度 VACUUM(optimize で出た空きを返すか)
-        const opt = await G('raw', "INSERT INTO entries_fts(entries_fts) VALUES ('optimize')");
+        const opt = await G('raw', "INSERT INTO main.entries_fts(entries_fts) VALUES ('optimize')");
         const afterOpt = await G('gauge');
         const v2 = await withPss(() => G('vacuumTimed'));
         const afterV2 = await G('gauge');
@@ -556,7 +556,7 @@ try {
           const qc = (await G('quickCheck')).rows;
           // 全文検索の索引も見る(`invalid fts5 file format` はここで出る)
           try {
-            await G('raw', "INSERT INTO entries_fts(entries_fts) VALUES ('integrity-check')");
+            await G('raw', "INSERT INTO main.entries_fts(entries_fts) VALUES ('integrity-check')");
             k.quickCheck = qc;
           } catch (err) {
             k.quickCheck = [...qc, 'fts: ' + String(err).slice(0, 120)];

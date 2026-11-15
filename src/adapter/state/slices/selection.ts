@@ -13,10 +13,18 @@ import { filerRows, rangeInRows } from '@features/relation/filer-list';
 
 export type SelectionAction = Extract<Dispatchable, { type: 'TOGGLE_SELECT' | 'SELECT_RANGE' | 'SELECT_ALL' | 'SELECT_ONLY' | 'CLEAR_SELECTION' | 'SET_SCOPE' | 'SET_FILER_FLATTEN' | 'DESELECT_ENTRY' }>;
 
+/**
+ * 🔴 **一覧の印を付けられるか**(#1163 依頼 215、案 B)── 編集中も付けられる(2 ペインと同じ)。
+ * ⚠ 印を付けるだけで、消す・移すなどの実行はそれぞれの入口が `phase` を見て理由を出して止める。
+ */
+export function canMark(state: Pick<AppState, 'phase'>): boolean {
+  return state.phase === 'ready' || state.phase === 'editing';
+}
+
 export function reduceSelection(state: AppState, action: SelectionAction): ReduceResult {
   switch (action.type) {
     case 'TOGGLE_SELECT': {
-      if (state.phase !== 'ready') return { state, events: [] };
+      if (!canMark(state)) return { state, events: [] };
       if (!state.entryMetas.has(action.lid)) return { state, events: [] };
       const has = state.selection.includes(action.lid);
       const selection = has
@@ -34,7 +42,7 @@ export function reduceSelection(state: AppState, action: SelectionAction): Reduc
       };
     }
     case 'SELECT_RANGE': {
-      if (state.phase !== 'ready') return { state, events: [] };
+      if (!canMark(state)) return { state, events: [] };
       if (!state.entryMetas.has(action.lid)) return { state, events: [] };
       /**
        * 🔴 **表示順で採る**(#240 段②)。⚠ データの順(`order`)で採ると、

@@ -2966,6 +2966,51 @@ function updateEntryColumn(
  */
 const CSV_INSERT_CHUNK = 500;
 
+/**
+ * 🔴 **この PKC3 を SQL で調べるとき、アプリのノート(system 領域)を除いて見せる**(#1163 依頼 226、案どおり)。
+ *
+ * 🔑 同じ名前の **temp の view** で `entries` / `relations` / `revisions` を覆う ── SQLite は修飾の無い名前を
+ *   **temp → main** の順に探すので、user の `SELECT … FROM entries` はそのまま user 領域だけを見る(打つ字を書き換えない)。
+ * ⚠ 除外の口は `USER_REALM_SQL` の 1 本(§1.1「領域の判定は 1 か所」)── `realm = 'user'` を書き写さない。
+ * ⚠ `main.entries` と修飾して打てば全部が見える(開発・不具合の報告の逃げ道。画面からは辿らない)。
+ * ⚠ 本文の csv はこれらの名前を取れない(`CSV_TABLE_RESERVED`)── だから覆いを作れないのは異常で、そのときは止める(fail-closed)。
+ *
+ * @param views 作った view の名前を積む先(`finally` で必ず落とす)
+ */
+function shadowSystemRealm(database: Database, views: string[]): void {
+  const userLids = `SELECT lid FROM main.entries WHERE ${USER_REALM_SQL}`;
+  const userRowids = `SELECT rowid FROM main.entries WHERE ${USER_REALM_SQL}`;
+  /**
+   * ⚠ **本文検索の表も覆う**(着地前レビュー 🔴1)── `entries_fts` / その内容の view(`FTS_SOURCE_VIEW`)は main の
+   *   `entries` を直に読むので、`entries` を覆っても**そこから system の本文が丸見え**だった。
+   *   仮想表は view で覆う(行は user の rowid だけ)── `MATCH` は view には効かないので、打てば断られる(漏れるより断る)。
+   *   影の表(`_data` / `_idx` / `_docsize` / `_config` / `_content`)は索引の断片なので、行を 1 つも出さない。
+   */
+  const defs: ReadonlyArray<readonly [string, string]> = [
+    ['entries', `SELECT * FROM main.entries WHERE ${USER_REALM_SQL}`],
+    ['relations', `SELECT * FROM main.relations WHERE from_lid IN (${userLids}) AND to_lid IN (${userLids})`],
+    ['revisions', `SELECT * FROM main.revisions WHERE entry_lid IN (${userLids})`],
+    [FTS_SOURCE_VIEW, `SELECT * FROM main."${FTS_SOURCE_VIEW}" WHERE rid IN (${userRowids})`],
+    ['entries_fts', `SELECT rowid, title, body FROM main.entries_fts WHERE rowid IN (${userRowids})`],
+    ...['_data', '_idx', '_docsize', '_config', '_content'].map(
+      (suffix) => [`entries_fts${suffix}`, `SELECT * FROM main."entries_fts${suffix}" WHERE 0`] as const,
+    ),
+  ];
+  // ⚠ main に在る物だけを覆う(無い物を指す view は作れない ── 古い形の DB には `FTS_SOURCE_VIEW` / `_content` の片方が無い)
+  const present = new Set(
+    (database.selectValues(`SELECT name FROM main.sqlite_master WHERE type IN ('table', 'view')`) as unknown[]).map(String),
+  );
+  for (const [name, select] of defs) {
+    if (!present.has(name)) continue;
+    /**
+     * 🔴 **作れなければ止める**(着地前レビュー ⚠4 ── 黙って飲むと、覆いの無いまま system の中身を見せる)。
+     * ⚠ 本文の csv が同じ名前を取ることは無い(`CSV_TABLE_RESERVED` がこれらの名前を断る)ので、ここで失敗するのは異常だけ。
+     */
+    database.exec({ sql: `CREATE TEMP VIEW "${name}" AS ${select}` });
+    views.push(name);
+  }
+}
+
 function buildCsvTables(database: Database, sql: string, made: string[]): void {
   /**
    * ⚠ **粗く絞ってから正しく読む** ── `name=` は本文のどこにでも書けるので、
@@ -3793,6 +3838,8 @@ const handlers: Handlers = {
      *   大きな表で実際に残った)。積む先を渡せば、投げても `finally` が拾う。
      */
     const made: string[] = [];
+    /** 🔴 system 領域を覆う temp の view(#1163 依頼 226)。⚠ `made` と同じく `finally` で必ず落とす。 */
+    const views: string[] = [];
     try {
       /**
        * 🔴 **`query_only` を掛ける前に組み立てる**(#681 段③)── temp の表を
@@ -3805,6 +3852,8 @@ const handlers: Handlers = {
        *   別の器なので、そこへノートの表を混ぜると「どちらの話か」が消える。
        */
       if (!guest) buildCsvTables(database, req.sql, made);
+      // 🔴 アプリのノートを除いて見せる(#1163 依頼 226)── 客の DB には PKC3 の領域が無いので覆わない
+      if (!guest) shadowSystemRealm(database, views);
       database.exec({ sql: 'PRAGMA query_only = 1' });
       setProgress(pointer, PROGRESS_EVERY, fn, 0);
       if (setLimit !== undefined) oldLength = setLimit(pointer, SQLITE_LIMIT_LENGTH, SQL_MAX_VALUE_BYTES);
@@ -3896,6 +3945,13 @@ const handlers: Handlers = {
               database.exec({ sql: `DROP TABLE IF EXISTS temp."${name}"` });
             } catch {
               // 落とせなくても、次の回が作り直す前に落とす
+            }
+          }
+          for (const name of views) {
+            try {
+              database.exec({ sql: `DROP VIEW IF EXISTS temp."${name}"` });
+            } catch {
+              // 落とせなくても、次の回の CREATE が失敗して飛ばすだけ(覆いが古い中身を返すことは無い ── view は都度読む)
             }
           }
         }

@@ -850,6 +850,7 @@ import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { countCappedCells } from '@features/query/sql-cell';
 import { countFormulaLike } from '@features/markdown/csv-table';
 import { PIPE_CELL_HINT } from '@features/markdown/table-copy';
+import { canMark } from '@adapter/state/slices/selection';
 import { openFolderLid } from './open-folder-lid';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteKeptRows, sqlNoteTitle } from '@features/query/sql-to-note';
 import { labNoteTitle } from '@features/markdown/text-lab';
@@ -20077,9 +20078,14 @@ export function bindActions(
       const lid = el.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
       if (lid !== null) {
         ev.preventDefault();
-        // 🔴 編集中は reducer が黙って落とす(素のクリックは `selectEntryOrExplain` が理由を出す)── 同じく理由を出す
+        /**
+         * 🔴 **編集中でも印は付けられる**(#1163 依頼 215、案 B ── 2 ペインと同じ)。⚠ 印を付けても開いているノートは
+         *   動かない(編集は続く)。印の付いた物を消す・移すときは、それぞれの入口(`deleteFrom` / `move-to-folder` …)が
+         *   理由を出して止める。⚠ 起動中・壊れた状態では印も付けない(reducer の門 `canMark`)。
+         */
         const phaseNow = dispatcher.getState().phase;
-        if (phaseNow !== 'ready') {
+        // ⚠ 門は reducer と同じ 1 本(`canMark`)── 2 か所に書くと片方だけ変わる(着地前レビュー ⚠8)
+        if (!canMark({ phase: phaseNow })) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
             error: `${phaseBlockReason(phaseNow)}フォルダの操作をしてください`,
@@ -21098,6 +21104,22 @@ export function bindActions(
   };
 
   /**
+   * 🔴 **焦点を動かさずに、貼り付けた時点の位置へ字を入れる**(#1163 依頼 250)。
+   * ⚠ 位置は待つ間に本文の長さが変わっていても欄の外へ出ないよう丸める。⚠ 欄の選択(caret)は動かさない。
+   */
+  const insertAtPastedPlace = (
+    ta: HTMLTextAreaElement,
+    at: { readonly start: number; readonly end: number },
+    text: string,
+  ): void => {
+    const len = ta.value.length;
+    const start = Math.min(Math.max(0, at.start), len);
+    const end = Math.min(Math.max(start, at.end), len);
+    ta.setRangeText(text, start, end, 'preserve');
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  /**
    * 🔴 **待ったあとの差し先**(#250 / #251 で共用)。⚠ 待っている間に
    * ① 編集欄が作り直される(live の面は行を組み直す)② 取り消して別のノートを
    * 開き直す ── のどちらも起きるので、**掴んだままの textarea へ差さない**。
@@ -21119,6 +21141,11 @@ export function bindActions(
     //   待っている間に取り消して別のノートを開き直すと、`formatTarget` は
     //   **新しい編集欄**を返す = 取り消したはずの貼付が別のノートに現れる。
     const openedLid = dispatcher.getState().openBody?.lid ?? null;
+    /**
+     * 🔴 **貼り付けた時点の位置を控える**(#1163 依頼 250、案どおり)── 待つ間に user が題名の欄などへ移っていたら、
+     *   本文へ焦点を戻さず、画像はこの位置に入れる(いまの caret の位置ではない)。
+     */
+    const pastedAt = { start: from.selectionStart ?? from.value.length, end: from.selectionEnd ?? from.value.length };
     void services.pasteImages!(files).then((refs) => {
       // 🔴 **待っている間に編集欄が作り直されることがある**(live の面は行を組み直す)。
       //   掴んだままの textarea へ差すと、**画面に出ていない所へ字を書く** ──
@@ -21156,6 +21183,22 @@ export function bindActions(
             error: '編集欄が閉じたため貼り付けられませんでした。もう一度貼ってください',
           });
         }
+        return;
+      }
+      /**
+       * 🔴 **待つ間にほかの欄へ移っていたら、焦点を奪わない**(#1163 依頼 250)── 打っている題名の字が
+       *   本文へ飛ぶ / 選んでいた欄から追い出される。画像は**貼り付けた時点の位置**に入れる。
+       * ⚠ そのときは `execCommand` が使えない(焦点の無い欄には効かない)ので `setRangeText` + `input` で書く
+       *   (`UPDATE_OPEN_BODY` を通すため ── 撃たないと保存に入らない)。
+       */
+      const now = into.ownerDocument.activeElement;
+      const movedAway = now !== null && now !== into.ownerDocument.body && now !== into && now !== from && now.isConnected;
+      /**
+       * ⚠ 控えた位置は **`from` の中の位置** ── 待つ間に欄が作り直されて別の欄へ引き直した(`into !== from`)ときは、
+       *   その位置を別の欄に当てない(着地前レビュー 🔴2 ── 別の行の途中に入る)。そのときは今までどおり caret の位置へ。
+       */
+      if (movedAway && into === from) {
+        insertAtPastedPlace(into, pastedAt, refs.map((ref) => `${ref}\n`).join(''));
         return;
       }
       // ⚠ `execCommand` は**焦点のある要素**に効く ── 待っている間に焦点が

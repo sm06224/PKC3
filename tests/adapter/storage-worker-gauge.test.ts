@@ -141,17 +141,17 @@ describe('storageGauge(#999 段①)', () => {
     //    ⚠ 本文は大きめ(300 KB)にする ── 1 段が**複数の葉**を持つ形でないと、段を数える代わりに
     //    葉の数(`count(*)`)を数える間違いが同じ値になって見分けられない
     await put('keeper', bodyOf(99, 300));
-    await rawWrite(`INSERT INTO entries_fts(entries_fts) VALUES ('optimize')`);
+    await rawWrite(`INSERT INTO main.entries_fts(entries_fts) VALUES ('optimize')`);
     const base = (await request({ op: 'storageGauge' })).ftsSegments;
     expect(base, '前提: 畳んだ直後は 1 段(葉は複数)').toBe(1);
     const leaves = Number(
-      (await request({ op: 'runReadOnlySql', sql: 'SELECT count(*) FROM entries_fts_idx', maxRows: 1, maxSteps: 1_000_000, maxMs: 10_000 })).rows[0]?.[0],
+      (await request({ op: 'runReadOnlySql', sql: 'SELECT count(*) FROM main.entries_fts_idx', maxRows: 1, maxSteps: 1_000_000, maxMs: 10_000 })).rows[0]?.[0],
     );
     expect(leaves, '前提: 1 段が複数の葉を持つ(でないと段と葉を区別できない)').toBeGreaterThan(1);
     for (let i = 0; i < 3; i++) await put(`s${i}`, bodyOf(100 + i, 1));
     const grown = (await request({ op: 'storageGauge' })).ftsSegments;
     expect(grown, '3 回別々に書いたのに段が増えていない').toBeGreaterThanOrEqual(3);
-    await rawWrite(`INSERT INTO entries_fts(entries_fts) VALUES ('optimize')`);
+    await rawWrite(`INSERT INTO main.entries_fts(entries_fts) VALUES ('optimize')`);
     const merged = (await request({ op: 'storageGauge' })).ftsSegments;
     expect(merged, 'optimize で 1 段に畳まれていない').toBe(1);
   });
@@ -169,7 +169,7 @@ describe('storageGauge(#999 段①)', () => {
 
   it('🔴 索引の表が無ければ null(0 と嘘を言わない)。他の数は返す', async () => {
     // ⚠ 最後に置く ── 索引の表を落とすので、以降の test は索引を持たない
-    await rawWrite('DROP TABLE entries_fts');
+    await rawWrite('DROP TABLE main.entries_fts');
     const g = await request({ op: 'storageGauge' });
     expect(g.ftsSegments).toBeNull();
     expect(g.pageCount).toBeGreaterThan(0);

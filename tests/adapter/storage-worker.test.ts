@@ -3111,7 +3111,9 @@ describe('読むだけの SQL(#681 段②)', () => {
 
   it('🔴 書き込みは engine が断る(字の門を抜けても書けない)', async () => {
     await expect(run('CREATE TABLE danger (a)')).rejects.toThrow(/readonly/i);
-    await expect(run("INSERT INTO entries (lid) VALUES ('x')")).rejects.toThrow(/readonly/i);
+    await expect(run("INSERT INTO main.entries (lid) VALUES ('x')")).rejects.toThrow(/readonly/i);
+    // 🔑 修飾しない `entries` は #1163 依頼 226 で user 領域の view が覆うので、そちらでも書けない(view は書き換えられない)
+    await expect(run("INSERT INTO entries (lid) VALUES ('x')")).rejects.toThrow();
   });
 
   /**

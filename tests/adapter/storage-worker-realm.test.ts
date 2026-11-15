@@ -221,6 +221,104 @@ describe('system 領域のノートは user 向けの読み手から漏れない
    * ⚠ user 向けの読み手ではあるが、`cid` を持たない op(`runReadOnlySql`)なので
    * 別枠 ── system のノートに csv 風の中身を持たせ、表に出ないことを見る。
    */
+  /**
+   * 🔴 **SQL の画面で調べると、アプリのノート(system 領域)は出ない**(#1163 依頼 226、案どおり)。
+   * ⚠ 打つ字はそのまま(`FROM entries`)── 覆いは temp の view。終わったら落ちる(保存の口へ残らない)。
+   */
+  it('runReadOnlySql: FROM entries に system のノートが出ない / user は出る / 終わると覆いは消える', async () => {
+    await put('u-226', 'ユーザーの本文');
+    await put('s-226', 'アプリの本文', { realm: 'system' });
+    const r = await request({
+      op: 'runReadOnlySql',
+      sql: `SELECT lid FROM entries WHERE lid IN ('u-226', 's-226') ORDER BY lid`,
+      maxRows: 100,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+    });
+    expect(r.rows.map((row) => row[0]), 'user のノートが引けない(空振り)/ system のノートが出た').toEqual(['u-226']);
+    // 🔑 逃げ道: 修飾すれば元の表(開発・不具合の報告用)
+    const raw = await request({
+      op: 'runReadOnlySql',
+      sql: `SELECT lid FROM main.entries WHERE lid IN ('u-226', 's-226') ORDER BY lid`,
+      maxRows: 100,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+    });
+    expect(raw.rows.map((row) => row[0])).toEqual(['s-226', 'u-226']);
+    // ⚠ 覆いは残らない(temp の view が 0 個)
+    const left = await request({
+      op: 'runReadOnlySql',
+      sql: `SELECT count(*) FROM temp.sqlite_master WHERE type = 'view' AND name IN ('entries', 'relations', 'revisions')`,
+      maxRows: 10,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+    });
+    // この問い合わせの間は覆っているので 3、終わった後は 0 ── 間に見えるのは 3 であることだけを確かめる
+    expect(left.rows[0]![0], '覆いが 3 つ揃っていない').toBe(3);
+    // 🔴 終わった後は覆いが無い ── 残っていると、次の保存(`entries` への書き込み)が view に当たって落ちる
+    await put('u-226b', '後から保存');
+    const after = await request({
+      op: 'runReadOnlySql',
+      sql: `SELECT lid FROM main.entries WHERE lid = 'u-226b'`,
+      maxRows: 10,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+    });
+    expect(after.rows.map((row) => row[0]), '覆いが残って保存が落ちた').toEqual(['u-226b']);
+  });
+
+  /**
+   * 🔴 **覆いは 3 つの表と本文検索の全部に効く**(着地前レビュー 🔴1 / ⚠5)── 1 本でも外れると、そこから system の中身が見える。
+   */
+  it('runReadOnlySql: relations / revisions / 本文検索(entries_fts・内容の view・影の表)も system を出さない', async () => {
+    const sql = (q: string) => request({ op: 'runReadOnlySql', sql: q, maxRows: 100, maxSteps: 1_000_000, maxMs: 60_000 });
+    // ⚠ 履歴は「上書きした前の版」が積まれる ── 2 度書く
+    for (const body of ['ゆーざーの前', 'ゆーざーのひみつ']) {
+      await request({ op: 'upsertEntry', cid: CID, entry: entryOf('u-rv', body), checkpoint: true });
+    }
+    for (const body of ['しすてむの前', 'しすてむのひみつ']) {
+      await request({ op: 'upsertEntry', cid: CID, entry: entryOf('s-rv', body, { realm: 'system' }), checkpoint: true });
+    }
+    await request({
+      op: 'bulkUpsertRelations',
+      cid: CID,
+      relations: [
+        { id: 'rel-uu', fromLid: 'u-rv', toLid: 'u-226', kind: 'semantic' },
+        { id: 'rel-us', fromLid: 'u-rv', toLid: 's-rv', kind: 'semantic' },
+      ],
+    });
+    // 前提: 元の表には両方が在る(空振り防止)
+    const rawRev = await sql(`SELECT entry_lid FROM main.revisions WHERE entry_lid IN ('u-rv','s-rv') ORDER BY entry_lid`);
+    expect(new Set(rawRev.rows.map((r) => r[0])), '前提: 履歴が両方に無い').toEqual(new Set(['s-rv', 'u-rv']));
+    const rev = await sql(`SELECT DISTINCT entry_lid FROM revisions WHERE entry_lid IN ('u-rv','s-rv')`);
+    expect(rev.rows.map((r) => r[0]), 'revisions に system の履歴が出た').toEqual(['u-rv']);
+    const rel = await sql(`SELECT id FROM relations WHERE id IN ('rel-uu','rel-us') ORDER BY id`);
+    expect(rel.rows.map((r) => r[0]), 'relations に system を端に持つ関係が出た').toEqual(['rel-uu']);
+    const rawRel = await sql(`SELECT id FROM main.relations WHERE id IN ('rel-uu','rel-us') ORDER BY id`);
+    expect(rawRel.rows.map((r) => r[0]), '前提: 関係が両方無い').toEqual(['rel-us', 'rel-uu']);
+    // 本文検索の表・内容の view・影の表
+    const src = await sql(`SELECT body FROM entries_fts_src WHERE body LIKE '%のひみつ%'`);
+    expect(src.rows.map((r) => r[0]), '本文検索の内容の view から system の本文が見えた').toEqual(['ゆーざーのひみつ']);
+    const fts = await sql(`SELECT body FROM entries_fts WHERE body LIKE '%のひみつ%'`);
+    expect(fts.rows.map((r) => r[0]).filter((b) => String(b).includes('しすてむ')), '本文検索の表から system の本文が見えた').toEqual([]);
+    const shadow = await sql(`SELECT count(*) FROM entries_fts_data`);
+    expect(shadow.rows[0]![0], '索引の断片(影の表)が見えた').toBe(0);
+    // ⚠ MATCH は view には効かないので断られる(漏れるより断る)
+    await expect(sql(`SELECT body FROM entries_fts WHERE entries_fts MATCH 'ひみつ'`)).rejects.toThrow();
+  });
+
+  /** 🔴 構造(主キー・NOT NULL)は覆いの view ではなく元の表から採る(着地前レビュー ⚠3)。 */
+  it('構造を見る: entries の主キー・NOT NULL が残る(覆いの view の列に化けない)', async () => {
+    const { SCHEMA_COLUMNS_SQL } = await import('../../src/features/query/schema-digest');
+    const r = await request({ op: 'runReadOnlySql', sql: SCHEMA_COLUMNS_SQL, maxRows: 10_000, maxSteps: 10_000_000, maxMs: 60_000 });
+    const lid = r.rows.find((row) => row[1] === 'entries' && row[3] === 'lid');
+    expect(lid, '前提: entries.lid が出ていない').toBeDefined();
+    const pk = r.columns.indexOf('pk');
+    const nn = r.columns.indexOf('nn');
+    expect(Number(lid![pk]), 'entries.lid の主キーが消えた').toBeGreaterThan(0);
+    expect(Number(lid![nn]), 'entries.lid の NOT NULL が消えた').toBe(1);
+  });
+
   it('本文の csv(runReadOnlySql 経由): system の本文は表にならない / user は表になる', async () => {
     const fence = (info: string, lines: readonly string[]): string =>
       ['```' + info, ...lines, '```', ''].join('\n');
@@ -269,7 +367,9 @@ describe('互換は双方向(CLAUDE.md 不変条件 5)── realm を知らな�
     //   §1「主張そのものが成り立たない」を踏みうる(前提を assert する)
     const r = await request({
       op: 'runReadOnlySql',
-      sql: `SELECT lid, title FROM entries WHERE cid = '${CID}' ORDER BY entry_order`,
+      // ⚠ 旧ビルドは表を直に読む ── SQL の画面は #1163 依頼 226 で `entries` を user 領域の view で覆うので、
+      //   旧ビルドの読み方は `main.entries`(覆いの無い元の表)で再現する
+      sql: `SELECT lid, title FROM main.entries WHERE cid = '${CID}' ORDER BY entry_order`,
       maxRows: 100,
       maxSteps: 1_000_000,
       maxMs: 60_000,

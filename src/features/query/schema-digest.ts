@@ -95,7 +95,9 @@ export const NOT_SQLITE_INTERNAL_SQL = "m.name not like 'sqlite\\_%' escape '\\'
 export const SCHEMA_COLUMNS_SQL = [
   'select m.type as kind, m.name as tbl, p.cid as cid, p.name as col,',
   '       p.type as typ, p."notnull" as nn, p.pk as pk',
-  '  from sqlite_master m join pragma_table_info(m.name) p',
+  // ⚠ `'main'` を渡す ── 修飾しない pragma は **temp を先に解決する**ので、SQL の画面が system 領域を覆う temp の view(#1163 依頼 226)
+  //   の列(主キー・NOT NULL を持たない)を返してしまう
+  "  from sqlite_master m join pragma_table_info(m.name, 'main') p",
   ` where m.type in ('table','view') and ${NOT_SQLITE_INTERNAL_SQL}`,
   NOT_FTS_BACKSTAGE,
   ' order by m.type, m.name, p.cid',
@@ -104,7 +106,7 @@ export const SCHEMA_COLUMNS_SQL = [
 /** 表どうしの繋がり(外部キー)。⚠ 無い DB では 0 行が返る(それでよい)。 */
 export const SCHEMA_FK_SQL = [
   'select m.name as tbl, f."table" as ref, f."from" as col, f."to" as refcol',
-  '  from sqlite_master m join pragma_foreign_key_list(m.name) f',
+  "  from sqlite_master m join pragma_foreign_key_list(m.name, 'main') f",
   ` where m.type = 'table' and ${NOT_SQLITE_INTERNAL_SQL}`,
   ' order by m.name, f.id, f.seq',
 ].join('\n');
