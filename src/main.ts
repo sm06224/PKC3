@@ -240,6 +240,7 @@ import {
 import { fitSidebarBars } from '@adapter/ui/render/bar-overflow';
 import { buildShell, paintAlarmBar, paintMissedLine, paintCaptureBar, paintTimerBar, showRootText } from '@adapter/ui/render/shell';
 import { showBootFailure, showBootProgress } from '@adapter/ui/render/boot-screen';
+import { BOOT_RESCUE_WORKING, bootRescueBackup, type BootRescueStore } from '@adapter/ui/actions/boot-rescue';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { installPhoneBack } from '@adapter/ui/actions/phone-back';
 import { showNotices, clearNotices, showJobPanel, hideJobPanel } from '@adapter/ui/render/notices';
@@ -708,6 +709,40 @@ async function latestPortable(portable: PortableStart | null): Promise<PortableS
  * ── だがそれは「起動に失敗しました」の画面を見ている user そのものである。
  */
 let bootLease: { release(): void } | null = null;
+/**
+ * 🔴 **持ち歩ける 1 枚の HTML で起動したか**(#1163 依頼 208)。起動に失敗した画面の「バックアップ」は出さない
+ *   (ファイルそのものが控えであり、開き直す保存領域も無い)。⚠ 分かる前に失敗したら `null`(出す側に倒す)。
+ */
+let bootWasPortable: boolean | null = null;
+
+/**
+ * 🔴 **起動に失敗した画面の「バックアップ」の口**(#1163 依頼 208)。保存領域を開き直して、拾い出しの口を返す。
+ * ⚠ 判断(何を集めてどう束ねるか)は `boot-rescue.ts` ── この file はどの test からも実行されない(CLAUDE.md §2)。
+ * ⚠ メモリへ落ちた(別のタブが保存領域を握っている等)は「開けなかった」と読む ── 空の器から拾っても 0 件である。
+ */
+async function openStoreForRescue(): Promise<BootRescueStore> {
+  const c = new StoreClient();
+  try {
+    const init = await c.request({ op: 'init', dbName: DB_NAME });
+    if (init.vfs === 'memory') throw new Error('保存領域を開けませんでした(メモリへ落ちた)');
+    let cid: string | null = null;
+    try {
+      cid = (await c.request({ op: 'resolveContainer', title: CONTAINER_TITLE })).cid;
+    } catch {
+      cid = null;
+    }
+    return {
+      cid,
+      pick: (after, chunks) => c.request({ op: 'rescueEntries', afterRowid: after, chunks }),
+      pickRelations: (after, chunks) => c.request({ op: 'rescueRelations', afterRowid: after, chunks }),
+      pickRevisions: (after, chunks) => c.request({ op: 'rescueRevisions', afterRowid: after, chunks }),
+      close: () => c.terminate(),
+    };
+  } catch (e) {
+    c.terminate();
+    throw e;
+  }
+}
 
 /**
  * 🔴 **この窓が「アプリの窓」である間だけ真になる**(#300 段③ の直し、2026-08-22)。
@@ -936,6 +971,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 素の PKC3 では `null` ── 以下の既定値がそのまま効き、経路は変わらない。
    */
   const portable = await resolvePortableStart(document);
+  bootWasPortable = portable !== null;
   const lease = acquireWriterLease(
     portable ? bundleLockName(portable.bundle.id) : undefined,
   );
@@ -7430,7 +7466,27 @@ function bootstrap(): void {
           ? '\n(ファイルから開いた場合、そのファイルはまだ渡されていません。原因を直して再読み込みすると開きます)'
           : '';
       // 🔑 原因が分かる物は日本語で言う(判断は main.ts に置かない ── test から実行されないため)
-      showBootFailure(root, bootFailureText(message), handoff);
+      /**
+       * 🔴 **「バックアップ」も出す**(#1163 依頼 208)── 起動に失敗すると左下のバックアップは画面に無く、ノートを取り出す道が
+       *   1 つも無かった。押すと保存領域を開き直して、読める範囲を `.pkc3-part.zip` で保存する(`boot-rescue.ts`)。
+       */
+      const blobs = new AssetBlobStore();
+      showBootFailure(
+        root,
+        bootFailureText(message),
+        handoff,
+        undefined,
+        bootWasPortable === true
+          ? undefined
+          : () =>
+              bootRescueBackup({
+                open: openStoreForRescue,
+                assets: { listKeys: (c) => blobs.listKeys(c), get: (c, key) => blobs.get(c, key) },
+                title: CONTAINER_TITLE,
+                download: downloadBlob,
+              }),
+        BOOT_RESCUE_WORKING,
+      );
       // ⚠ boot が失敗しても登録はする ── 次回この人がオフラインで開けるかは
       // 登録が済んでいるかで決まる(段⑤ の意図。競合を避けて失敗側にも置いた)
       /**
