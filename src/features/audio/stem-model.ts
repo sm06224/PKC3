@@ -14,13 +14,18 @@
  * - ⚠ STFT の設定(`nFft` など)は**重みごとに決まっている**。モデルを替えるときはここの 1 か所を直す
  *   (設定が違うと出力は音にならない ── 入出力の形が合っても分からないので、実機で聞いて確かめる)。
  *
- * ## 🔴 正直に: 設定値は UVR の記録と**照合できていない**
- * `nFft` 7680 / `hop` 1024 / `dimF` 3072 / `dimT` 256 / `zeroBins` 3 / `compensate` 1.009 は、`Kim_Vocal_2` の UVR の
- * 設定(model_data.json)の**記憶**から書いた。開発の箱から配布元にも UVR の記録にも届かず、照合していない
- * (重みも取れていないので、本物の重みで歌声と楽器が分かれることは**未確認**)。
+ * ## 🔴 設定値は UVR の記録と照合した(#1953、2026-11-15)── 重みそのものとの紐付けだけが未確認
+ * UVR の設定表 `model_data.json`(TRvlvr/application_data `3826b05b` の `mdx_model_data/model_data.json`、
+ * Anjok07/ultimatevocalremovergui `a5f88453` の `models/MDX_Net_Models/model_data/model_data.json`。両者とも同じ値)と、
+ * UVR の実装 `separate.py`(同 `a5f88453`)を読んで突き合わせた:
+ *  - `nFft` 7680 = `mdx_n_fft_scale_set` / `dimF` 3072 = `mdx_dim_f_set` / `dimT` 256 = `2**mdx_dim_t_set`(表の値は 8)
+ *  - `hop` 1024 = `separate.py` の MDX の固定値(`self.hop = 1024`)/ `zeroBins` 3 = `spek[:, :, :3, :] *= 0`
+ *  - `compensate` 1.009 = 取り出した音に掛ける(`source*self.compensate`)。もう一方は `raw_mix − source`(ここの `元 − 歌声` と同じ)
+ *  - n_fft 7680 で `primary_stem: Vocals` かつ `compensate: 1.009` の項目は表に **1 つだけ**(key `970b3f9492014d18fefeedfe4773cb42`)
+ * ⚠ **未確認は 1 点**: 配布元の `Kim_Vocal_2.onnx` がその項目の重みであること。UVR の key は「ファイルの末尾 10,240,000 byte の md5」で、
+ *   確かめるには重みが要る(開発の箱からは huggingface.co に届かない)。確かめ方は #1953 に記録した。
  *  - 守りは 3 つ: ①ORT が読んだ入力の形が `[*, 4, dimF, dimT]` と一致すること ②出力が有限で、歌声の大きさが元の 1.5 倍以下、
  *    残りのエネルギーが元以下であること(`separationProblem`)③画面の結果に「想定の設定で分けました。聞いて確かめてください」を出す。
- *  - `compensate` は歌声(取り出した音)にかける係数で、UVR の記録に確証が無い。外れていても大きさが 1% 動くだけだが、未確認である。
  *  - 窓・reflect・チャンネルの並び(左の実部・虚部・右の実部・虚部)は `tests/features/stem-dsp.test.ts` の既知値の fixture が固定している。
  */
 import {
@@ -37,8 +42,9 @@ import {
  * 🔴 **試験的**であることの印(画面の字・取得の確認・設定の欄・マニュアルが、ここから引く)。
  *
  * 外す手順(再レビュー指摘。issue への記載は別):
- *  1. 本物の重み(`STEM_MODELS[].urls` の先)を取得して、実際に歌声と楽器が分かれて聞こえることを確かめる
- *     (設定値の `nFft` などの照合も、このとき UVR の記録と突き合わせる ── 下の「正直に」の節)。
+ *  1. 本物の重み(`STEM_MODELS[].urls` の先)を取得して、末尾 10,240,000 byte の md5 が UVR の key
+ *     `970b3f9492014d18fefeedfe4773cb42` と一致すること、実際に歌声と楽器が分かれて聞こえることを確かめる
+ *     (設定値は UVR の記録と照合済み ── 上の節。手順は #1953)。
  *  2. 確かめた重みの sha256 を `STEM_MODELS[].sha256` に埋める(中身を固定する)。
  *  3. `STEM_EXPERIMENTAL` を false にする ── 項目の字・確認・設定の欄・結果の知らせの「試験的」が、この 1 か所で消える
  *     (マニュアルの「試験的」の注記は手で外す)。
@@ -76,7 +82,7 @@ export interface StemModel {
   readonly zeroBins: number;
   /** モデルが返すのはどちらの音か。 */
   readonly primary: 'vocals' | 'instrumental';
-  /** 取り出した音にかける係数(UVR の `compensate`。⚠ 記録に確証が無い ── 上の注記)。 */
+  /** 取り出した音にかける係数(UVR の `compensate`。`model_data.json` と照合済み ── 上の注記)。 */
   readonly compensate: number;
 }
 
