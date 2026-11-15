@@ -96,6 +96,7 @@ import { listAppendTargets, sectionRange } from '@features/markdown/append-targe
 import { RowSwap, ROW_WHOLE_ATTR, replaceChanged } from './row-swap';
 import { takeBodyFocus } from './focus-request';
 import { followScroll, followScrollTop } from './scroll-ratio';
+import { watchSeekRange } from './seek-range';
 import { isTouchOnly } from './touch-device';
 import { DIFF_FILE_TOO_LARGE_NOTE, diffSummary, shortStamp } from '@features/revision/diff-view';
 import { formatStoredStamp } from '@features/datetime/stored-date';
@@ -3952,6 +3953,11 @@ export class DetailRenderer {
        */
       applyDocumentGlobals(desc, extractDocumentGlobals(rawBody));
       host.append(desc);
+      // 🔴 録音の長さを超える時刻は再生の字にしない(#1163 依頼 373)── 長さは再生機が読んだときに分かる
+      // ⚠ 見張るのは再生機の器(`previewHost`、描くたびに作り直す)── 本文の器(`host`)は描き直しても残るので、付けると積もる
+      if (playable) watchSeekRange(previewHost, desc);
+      // 🔴 添付の説明の表も、見出しを押して並べ替えられる(#1163 依頼 223。本文と同じ 1 本)
+      applyTableSort(desc);
       void this.hydrateAssetRefs(desc, this.hydrateToken, {
         allowExternalImages: this.externalImages.allows(lid),
         currentContainerId,

@@ -930,26 +930,36 @@ ${(e as Error).message}`,
    * 🔴 #1232 段 b: 行頭の時刻を押すと、**同じ詳細の再生機**がその位置へ動く(`<audio>` の `currentTime` を読む)。
    * ⚠ 押せる字は本文の描画物なので、unit(happy-dom)は再生機を**模して**しか動かせない ──
    *   実ブラウザで、実際に差された `<audio>` が実際に動くことをここで見る。
-   * ⚠ 偽の部品の区切りは `0:00` と `1:05`(録音は数秒)── 録音の長さを超える `1:05` を押す =
-   *   **末尾へ寄せられる**はずで、`0:00` の字は「先頭」なので動きを見るには使えない。
+   * 🔴 #1163 依頼 373(推薦 C): 偽の部品の区切りは `0:00` と `1:05`(録音は数秒)── **録音の長さを超える `1:05` は、
+   *   再生機が長さを読んだ時点で押せる字でなくなる**(字は残る)。押せるのは `0:00` だけ。
+   *   動きは、再生機を末尾近くへ置いてから `0:00` を押し、先頭へ戻ることで見る。
    */
   const seekPlayer = body.locator('audio[data-pkc-field="attachment-media"]');
   await expect
     .poll(() => seekPlayer.evaluate((a: HTMLAudioElement) => a.readyState), { message: '再生機が読み込めていない' })
     .toBeGreaterThanOrEqual(1);
-  const seekLink = body.locator('[data-pkc-action="seek-media"][data-pkc-seek-ms="65000"]');
-  await expect(seekLink, '行頭の 1:05 が押せる字になっていない').toHaveText('1:05');
-  expect(await seekPlayer.evaluate((a: HTMLAudioElement) => a.currentTime), '前提: 再生機が先頭に居ない').toBeLessThan(1);
+  // 🔴 長さを超える 1:05 は押せる字でなくなる(字は残る)
+  await expect(
+    body.locator('[data-pkc-action="seek-media"][data-pkc-seek-ms="65000"]'),
+    '録音の長さを超える 1:05 が押せる字のまま',
+  ).toHaveCount(0);
+  await expect(body, '1:05 の字まで消えた').toContainText(`1:05 ${FAKE_TEXT}:`);
+  await expect(body.locator('[data-pkc-action="seek-media"]'), '長さの内側の時刻(0:00)だけが押せる字').toHaveCount(1);
+  const seekLink = body.locator('[data-pkc-action="seek-media"][data-pkc-seek-ms="0"]');
+  await expect(seekLink, '行頭の 0:00 が押せる字になっていない').toHaveText('0:00');
+  await seekPlayer.evaluate((a: HTMLAudioElement) => {
+    a.currentTime = Math.max(0, (Number.isFinite(a.duration) ? a.duration : 3) - 0.5);
+  });
+  await expect
+    .poll(() => seekPlayer.evaluate((a: HTMLAudioElement) => a.currentTime), { message: '前提: 再生機を末尾近くへ置けない' })
+    .toBeGreaterThan(1);
   await clickReal(page, seekLink);
   await expect
     .poll(() => seekPlayer.evaluate((a: HTMLAudioElement) => a.currentTime), {
-      // ⚠ 時間を短く切る ── 位置を動かさず**先頭から鳴らしただけ**でも、数秒待てば 1 を超える。押した直後に末尾近くへ居ることを見る
       timeout: 1500,
-      message: '時刻を押しても再生機が末尾へ動かない(1:05 は録音より後ろ)',
+      message: '0:00 を押しても再生機が先頭へ動かない',
     })
-    .toBeGreaterThanOrEqual(2);
-  // 🔑 押せる字は行頭の 2 つだけ(区切りの数と同じ)
-  await expect(body.locator('[data-pkc-action="seek-media"]'), '行頭の時刻が行の数だけ出ていない').toHaveCount(2);
+    .toBeLessThan(1);
   /**
    * 🔴 #1232: **再生している間、いま話されている行が光る**。位置は録音の中(数秒)── `0:00` の行は位置以前、`1:05` の行は位置より後なので、
    *   光るのは `0:00` の行だけ。⚠ 実ブラウザの `timeupdate` / `seeked` が実際に届くこと、光った行の地が実際に塗られること(CSS の受け皿)を見る。

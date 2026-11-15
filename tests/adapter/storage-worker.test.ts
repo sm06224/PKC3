@@ -3315,8 +3315,8 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
     const r = await run('SELECT 品名, 数 FROM 売上 ORDER BY 品名');
     expect(r.columns).toEqual(['品名', '数']);
     expect(r.rows).toEqual([
-      ['みかん', '5'],
-      ['りんご', '3'],
+      ['みかん', 5],
+      ['りんご', 3],
     ]);
   });
 
@@ -3359,9 +3359,10 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
       fence('csv', ['品名,数', 'ぶどう,1']) + fence('csv name=有名', ['x', '1']),
     );
     // ⚠ 空振り防止 ── この本文は実際に読まれている(名前つきの方は引ける)
-    expect((await run('SELECT x FROM 有名')).rows).toEqual([['1']]);
+    expect((await run('SELECT x FROM 有名')).rows).toEqual([[1]]);
+    // ⚠ 数の列は数で返る(#1163 依頼 221 ── 列の全部が素直な数の列は NUMERIC)
     const r = await run('SELECT _note, 品名, 数 FROM csv');
-    expect(r.rows).toEqual([[expect.any(String), 'ぶどう', '1']]);
+    expect(r.rows).toEqual([[expect.any(String), 'ぶどう', 1]]);
     // 名前つきの囲みは csv に混ざらない(対照群)
     expect((await run('SELECT count(*) FROM csv')).rows).toEqual([[1]]);
     // 目録にも出る(csv を引いた回)
@@ -3618,13 +3619,13 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
   it('⚠ tsv / psv も同じ規則で引ける', async () => {
     await write('tsv-1', fence('tsv name=タブ', ['a\tb', '1\t2']));
     await write('psv-1', fence('psv name=棒', ['a|b', '3|4']));
-    expect((await run('SELECT b FROM タブ')).rows).toEqual([['2']]);
-    expect((await run('SELECT b FROM 棒')).rows).toEqual([['4']]);
+    expect((await run('SELECT b FROM タブ')).rows).toEqual([[2]]);
+    expect((await run('SELECT b FROM 棒')).rows).toEqual([[4]]);
   });
 
   it('⚠ 引用(>)の中の囲みも引ける(読み手と同じ所まで降りる)', async () => {
     await write('csv-q', ['> ```csv name=引用表', '> a,b', '> 9,8', '> ```', ''].join('\n'));
-    expect((await run('SELECT a, b FROM 引用表')).rows).toEqual([['9', '8']]);
+    expect((await run('SELECT a, b FROM 引用表')).rows).toEqual([[9, 8]]);
   });
 
   /**
@@ -3872,8 +3873,8 @@ describe('添付の .csv / .tsv を客の DB として開く(#854 段①)', () =
     expect(opened.truncated, '小さい file なのに切ったことにしている').toBe(false);
     const r = await runGuest('SELECT _note, _lid, name, age FROM csv ORDER BY age');
     expect(r.rows).toEqual([
-      ['売上.csv', 'att-1', '太郎', '20'],
-      ['売上.csv', 'att-1', '花子', '30'],
+      ['売上.csv', 'att-1', '太郎', 20],
+      ['売上.csv', 'att-1', '花子', 30],
     ]);
     await request({ op: 'closeSqlGuest', guest: W });
   });
@@ -3886,7 +3887,7 @@ describe('添付の .csv / .tsv を客の DB として開く(#854 段①)', () =
       source: { kind: 'csv', lang: 'tsv', lid: 'att-2', name: '客.tsv' },
     });
     expect(opened.tables).toEqual(['csv']);
-    expect((await runGuest('SELECT a, b FROM csv')).rows).toEqual([['1', '2']]);
+    expect((await runGuest('SELECT a, b FROM csv')).rows).toEqual([[1, 2]]);
     await request({ op: 'closeSqlGuest', guest: W });
   });
 
@@ -3979,7 +3980,7 @@ describe('添付の .xlsx を客の DB として開く(#854 段③)', () => {
     ]);
     expect(opened.truncated, '小さい本なのに切ったことにしている').toBe(false);
     expect((await runGuest('SELECT _note, _lid, _sheet, 品, 額 FROM sheet1')).rows).toEqual([
-      ['台帳.xlsx', 'att-x1', '売上', 'りんご', '100'],
+      ['台帳.xlsx', 'att-x1', '売上', 'りんご', 100],
     ]);
     // 🔑 user が書ける形 ── 枚の名前で絞れる(名前を捨てていない)
     expect((await runGuest("SELECT 費目 FROM sheet2 WHERE _sheet = '経費'")).rows).toEqual([
@@ -4490,7 +4491,7 @@ describe('SQL で調べる画面の直し(#1087)── 運ぶ量の天井と文�
       maxMs: 60_000,
       guest: W,
     });
-    expect(r.rows, '文字化けしている').toEqual([['太郎', '20']]);
+    expect(r.rows, '文字化けしている').toEqual([['太郎', 20]]);
     await request({ op: 'closeSqlGuest', guest: W });
   });
 
@@ -4541,7 +4542,7 @@ describe('SQL で調べる画面の直し(#1087)── 運ぶ量の天井と文�
       maxMs: 60_000,
       guest: W,
     });
-    expect(r.rows).toEqual([['1', '2']]);
+    expect(r.rows).toEqual([[1, 2]]);
     await request({ op: 'closeSqlGuest', guest: W });
   });
 });

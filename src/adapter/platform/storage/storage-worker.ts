@@ -132,6 +132,8 @@ import {
   CSV_DEFAULT_TABLE,
   csvCellsOverBudget,
   mergeCsvTables,
+  numericColumns,
+  rowForInsert,
   csvTablesMentioned,
   CSV_TABLE_CELLS_MAX,
   type CsvTable,
@@ -3135,14 +3137,25 @@ function buildCsvTables(database: Database, sql: string, made: string[]): void {
   for (const t of build) createCsvTable(database, t, fresh);
 }
 
+/**
+ * 🔴 **列の宣言**(#1163 依頼 221)── 数の列は `NUMERIC`、他は `TEXT`。
+ * ⚠ `NUMERIC` の列は SQLite が入れた字を数へ直す ── 判定が「字へ戻しても同じ字」に絞ってあるので、見える字は変わらない。
+ */
+function columnDefs(columns: readonly string[], numeric: readonly boolean[]): string {
+  return columns.map((c, i) => `"${c}" ${numeric[i] === true ? 'NUMERIC' : 'TEXT'}`).join(', ');
+}
+
 /** 1 つの表を temp に作って中身を入れる。⚠ 名前と列は `csv-tables.ts` が検めた物だけが来る。 */
 function createCsvTable(database: Database, t: CsvTable, fresh: (name: string) => void): void {
   fresh(t.name);
-  const cols = t.columns.map((c) => `"${c}" TEXT`).join(', ');
+  // 🔴 列の全部が素直な数の列だけ数の列にする(#1163 依頼 221。判定は `numericColumns` の 1 本)
+  const numeric = numericColumns(t.columns, t.rows);
+  const cols = columnDefs(t.columns, numeric);
   database.exec({ sql: `CREATE TEMP TABLE "${t.name}" (${cols})` });
   const marks = t.columns.map(() => '?').join(', ');
   const insert = `INSERT INTO temp."${t.name}" VALUES (${marks})`;
-  for (const row of t.rows) database.exec({ sql: insert, bind: [...row] });
+  // ⚠ 数の列の空の升は NULL(`rowForInsert`)
+  for (const row of t.rows) database.exec({ sql: insert, bind: rowForInsert(row, numeric) });
 }
 
 /**
@@ -3166,11 +3179,13 @@ interface GuestTable {
  *   「いつ落とすか」が 2 つの異なる寿命で混線する。
  */
 function createGuestTable(database: Database, t: GuestTable): void {
-  const cols = t.columns.map((c) => `"${c}" TEXT`).join(', ');
+  // 🔴 本文の表と同じ規則(#1163 依頼 221)
+  const numeric = numericColumns(t.columns, t.rows);
+  const cols = columnDefs(t.columns, numeric);
   database.exec({ sql: `CREATE TABLE "${t.name}" (${cols})` });
   const marks = t.columns.map(() => '?').join(', ');
   const insert = `INSERT INTO "${t.name}" VALUES (${marks})`;
-  for (const row of t.rows) database.exec({ sql: insert, bind: [...row] });
+  for (const row of t.rows) database.exec({ sql: insert, bind: rowForInsert(row, numeric) });
 }
 
 /**

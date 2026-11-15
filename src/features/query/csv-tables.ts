@@ -29,11 +29,14 @@
  * ⚠ 列が食い違う囲みは**和集合**にし、無い所は `NULL` にする ── 列を落とすと
  *   「書いたのに引けない」になり、**その方が気づけない**。
  *
- * ## 値は全部 TEXT
+ * ## 値は字。ただし「列の全部が素直な数」の列だけは数の列にする
  *
  * ⚠ csv の升は字である ── 数に見えるものを勝手に数へ直すと、`007` が `7` になり、
- *   `1-2` が日付になる端末差まで背負う。数えたい人は `CAST(x AS INTEGER)` と書く
- *   (それは SQL を打つ人の語彙の中に在る)。
+ *   `1-2` が日付になる端末差まで背負う。
+ * 🔴 **例外は 1 つだけ**(#1163 依頼 221。user 裁定 2026-11-15 = 原文の中身)── 列の**全部の**升が、数にして字へ戻しても
+ *   **同じ字になる**素直な数(`120` / `-3.5` / `0`)のときだけ、その列を数の列にする。字のままだと「金額」を大きい順に
+ *   並べると `9` が `100` より前に来る。⚠ `007` / `1.50` / `+3` / `1e3` / `1,200` が 1 つでも混ざる列は字のまま
+ *   (数にすると見える字が変わる ── 表示を変えないことを優先する)。判定は {@link numericColumns} の 1 本。
  */
 import { fenceInfo, quoteLead, type FenceSpan } from '@features/markdown/source-blocks';
 import { fencesBelowFrontmatter } from '@features/markdown/table-convert';
@@ -488,3 +491,45 @@ export function assertCsvWidthWithinBudget(columnCount: number, budget: number):
     );
   }
 }
+
+/**
+ * 🔴 **入れる値**(#1163 依頼 221 の着地前レビュー 🔴1)── 数の列の空の升は `NULL` にする。
+ * ⚠ 字の `''` のまま数の列に入れると、SQLite では字が数より大きいので、`max()` が空・`> 50` に空の行が混ざる・
+ *   大きい順の先頭が空になる。字の列はそのまま(空は空の字)。
+ */
+export function rowForInsert(row: readonly (string | null)[], numeric: readonly boolean[]): (string | null)[] {
+  return row.map((v, i) => (numeric[i] === true && (v === '' || v === undefined) ? null : (v ?? null)));
+}
+
+/**
+ * 🔴 **数の列にしてよい列か**(#1163 依頼 221)── 空でない升が 1 つ以上あり、空でない升が全部「数にして字へ戻しても同じ字」。
+ * ⚠ 空の升(`''` / `null`)は判定から外す(空のセルを含む数の列はよくある)。
+ * @returns 列ごとに `true`(数の列)/ `false`(字の列)
+ */
+export function numericColumns(
+  columns: readonly string[],
+  rows: readonly (readonly (string | null)[])[],
+): boolean[] {
+  return columns.map((name, c) => {
+    // ⚠ 出所の列(`_note` / `_lid` / 枚の名前)はいつも字 ── 題名が `2026` のノートで数にしない(着地前レビュー ⚠2)
+    if (name.startsWith('_')) return false;
+    let seen = false;
+    for (const row of rows) {
+      const v = row[c];
+      if (v === null || v === undefined || v === '') continue;
+      if (!isCanonicalNumber(v)) return false;
+      seen = true;
+    }
+    return seen;
+  });
+}
+
+/** 数にして字へ戻しても同じ字になる素直な 10 進数か(`007` / `1.50` / `+3` / `1e3` / 前後の空白は違う)。 */
+export function isCanonicalNumber(v: string): boolean {
+  if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(v)) return false;
+  // ⚠ 有効数字 15 桁まで(着地前レビュー ⚠3)── それより長い字は SQLite の数の書き戻し(`json_quote` など)で字が変わる
+  if (v.replace(/^-/, '').replace('.', '').replace(/^0+/, '').length > 15) return false;
+  const n = Number(v);
+  return Number.isFinite(n) && String(n) === v;
+}
+
