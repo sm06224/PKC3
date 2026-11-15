@@ -27,7 +27,7 @@ describe('置換の規則(純関数)', () => {
   });
 
   it('🔴 置換語が検索語を含んでも暴走しない', () => {
-    expect(replaceAll('aaa', 'a', 'aa')).toEqual({ body: 'aaaaaa', count: 3 });
+    expect(replaceAll('aaa', 'a', 'aa')).toEqual({ body: 'aaaaaa', count: 3, inCode: 0 });
   });
 
   it('🔴 大小無視でも原文の他の部分は変わらない', () => {
@@ -46,12 +46,13 @@ describe('置換の規則(純関数)', () => {
     expect(replaceAll('Log log', 'log', 'x', { caseSensitive: true })).toEqual({
       body: 'Log x',
       count: 1,
+      inCode: 0,
     });
   });
 
   it('🔴 空の検索語では何もしない(本文が埋まらない)', () => {
     expect(countMatches('abc', '')).toBe(0);
-    expect(replaceAll('abc', '', 'X')).toEqual({ body: 'abc', count: 0 });
+    expect(replaceAll('abc', '', 'X')).toEqual({ body: 'abc', count: 0, inCode: 0 });
   });
 
   it('日本語も数えられる', () => {
@@ -60,7 +61,7 @@ describe('置換の規則(純関数)', () => {
 
   it('見つからなければ本文を返す(同じ文字列)', () => {
     const body = '## 2026-08-15 10:00:00\n\n作業した\n';
-    expect(replaceAll(body, '存在しない', 'x')).toEqual({ body, count: 0 });
+    expect(replaceAll(body, '存在しない', 'x')).toEqual({ body, count: 0, inCode: 0 });
   });
 });
 
@@ -141,6 +142,31 @@ describe('置換の配線', () => {
     fill(root, 'ログ', '記録');
     press(root, 'replace-all');
     expect(d.getState().notice).toContain('2 件');
+  });
+
+  /**
+   * 🔴 **内訳を出す**(#1163 依頼 161、推薦 ③)── 範囲はそのまま(コードの中も置換する)で、コードの中の数を添える。
+   */
+  it('🔴 コードの中も置き換えたら、知らせに内訳を出す', () => {
+    const { root, d } = editing('ログ `ログ`\n\n```\nログ\n```\n');
+    d.dispatch({ type: 'START_EDIT' });
+    fill(root, 'ログ', '記録');
+    press(root, 'replace-all');
+    expect(d.getState().openBody?.body, '範囲を変えた(コードの中を置換していない)').toBe('記録 `記録`\n\n```\n記録\n```\n');
+    expect(d.getState().notice).toBe('3 件を置き換えました(うちコードの中 2)');
+  });
+
+  it('⚠ 対照群 ── コードの中に当たりが無ければ、内訳は付けない', () => {
+    const { root, d } = editing('ログ ログ\n\n```\nほか\n```\n');
+    d.dispatch({ type: 'START_EDIT' });
+    fill(root, 'ログ', '記録');
+    press(root, 'replace-all');
+    expect(d.getState().notice).toBe('2 件を置き換えました');
+  });
+
+  it('replaceAll はコードの中の数を返す(フェンス・行内コード)', () => {
+    expect(replaceAll('a `a` a', 'a', 'b')).toEqual({ body: 'b `b` b', count: 3, inCode: 1 });
+    expect(replaceAll('a', 'x', 'b').inCode).toBe(0);
   });
 
   it('🔴 置き換えた知らせはエラーの行に入れない(「エラー: 2 件を置き換えました」にしない)', () => {
@@ -472,17 +498,17 @@ describe('🔴 置換の結果が編集欄へ映る(#1579)', () => {
  */
 describe('大小無視の置換と、長さが変わる字', () => {
   it('🔴 `İ` の後ろの語を、ずれずに置き換える', () => {
-    expect(replaceAll('İstanbul ve Ankara', 'ankara', 'X')).toEqual({ body: 'İstanbul ve X', count: 1 });
+    expect(replaceAll('İstanbul ve Ankara', 'ankara', 'X')).toEqual({ body: 'İstanbul ve X', count: 1, inCode: 0 });
   });
 
   it('🔴 `İ` が何個あっても、ずれが積み重ならない', () => {
     const r = replaceAll('İİİ abc İ ABC', 'abc', 'x');
-    expect(r).toEqual({ body: 'İİİ x İ x', count: 2 });
+    expect(r).toEqual({ body: 'İİİ x İ x', count: 2, inCode: 0 });
     expect(countMatches('İİİ abc İ ABC', 'abc'), '件数と置換が食い違う').toBe(2);
   });
 
   it('対照群: 長さが変わらない本文は今までどおり', () => {
-    expect(replaceAll('Ankara ankara', 'ANKARA', 'X')).toEqual({ body: 'X X', count: 2 });
+    expect(replaceAll('Ankara ankara', 'ANKARA', 'X')).toEqual({ body: 'X X', count: 2, inCode: 0 });
   });
 });
 
@@ -517,13 +543,13 @@ describe('置換の外に置く範囲(リンクの宛先 / 参照の語 / 前書
     expect(r.body).toBe('---\ndate: day 2026\ntags: [a]\n---\n本文 day\n');
     expect(r.count).toBe(2);
     // 囲みの行そのものも対象外
-    expect(replaceAll(body, '---', '+++')).toEqual({ body, count: 0 });
+    expect(replaceAll(body, '---', '+++')).toEqual({ body, count: 0, inCode: 0 });
   });
 
   it('🔴 長さが変わる字(`İ`)を含む本文でも、範囲の外に置く(原文の位置で比べる経路)', () => {
     const body = 'İ [docs](https://x.example/docs) docs';
     const r = replaceAll(body, 'docs', 'manual');
-    expect(r).toEqual({ body: 'İ [manual](https://x.example/docs) manual', count: 2 });
+    expect(r).toEqual({ body: 'İ [manual](https://x.example/docs) manual', count: 2, inCode: 0 });
     expect(countMatches(body, 'docs')).toBe(2);
   });
 
@@ -537,9 +563,9 @@ describe('置換の外に置く範囲(リンクの宛先 / 参照の語 / 前書
   it('検索語が保護の範囲にかかる当たりは、半端に書き換えない(対照群: 範囲の外は置換する)', () => {
     const body = '[x](entry:abc) と entry: の語';
     // 「y:ab」は参照の語の途中にかかる
-    expect(replaceAll(body, 'y:ab', 'Z')).toEqual({ body, count: 0 });
+    expect(replaceAll(body, 'y:ab', 'Z')).toEqual({ body, count: 0, inCode: 0 });
     // 「(entry」は範囲の外で始まり、中で終わる ── 当たりの長さ全体で見る
-    expect(replaceAll(body, '(entry', 'Z')).toEqual({ body, count: 0 });
+    expect(replaceAll(body, '(entry', 'Z')).toEqual({ body, count: 0, inCode: 0 });
     // 「entry: 」(後ろに何も続かない)は参照ではないので置換する
     expect(replaceAll(body, 'entry: ', 'E ').body).toBe('[x](entry:abc) と E の語');
   });

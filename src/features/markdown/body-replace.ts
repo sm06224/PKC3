@@ -158,8 +158,8 @@ export function replaceAll(
   find: string,
   replace: string,
   opts: ReplaceOptions = {},
-): { body: string; count: number } {
-  if (find === '') return { body, count: 0 };
+): { body: string; count: number; inCode: number } {
+  if (find === '') return { body, count: 0, inCode: 0 };
   let out = '';
   let at = 0;
   const hits = findHits(body, find, opts.caseSensitive === true);
@@ -167,5 +167,22 @@ export function replaceAll(
     out += body.slice(at, h.at) + replace;
     at = h.at + h.len;
   }
-  return { body: out + body.slice(at), count: hits.length };
+  return { body: out + body.slice(at), count: hits.length, inCode: countInCode(body, hits) };
+}
+
+/**
+ * 🔴 **当たりのうち、コードの中にあった数**(#1163 依頼 161、推薦 ③)── 置換の範囲は変えず、知らせに内訳を出す
+ *   (コードの中は今どおり置換する。思わぬ所が変わったことに気づけるようにするため)。
+ * ⚠ 範囲は `scanLinks` の `code`(フェンス / 行内コード)── 置換の外に置く範囲と同じ規則の 1 本から引く。
+ */
+function countInCode(body: string, hits: ReadonlyArray<{ at: number; len: number }>): number {
+  if (hits.length === 0) return 0;
+  const code = scanLinks(body).code;
+  if (code.length === 0) return 0;
+  return hits.filter((h) => code.some(([a, b]) => h.at >= a && h.at < b)).length;
+}
+
+/** 置き換えた知らせの字(#1163 依頼 161)。⚠ 画面の字なので `ui-terms` の門を通る。 */
+export function replacedNotice(count: number, inCode: number): string {
+  return inCode > 0 ? `${count} 件を置き換えました(うちコードの中 ${inCode})` : `${count} 件を置き換えました`;
 }
