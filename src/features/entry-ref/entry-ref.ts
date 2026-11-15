@@ -109,12 +109,18 @@ export function parseEntryRef(raw: string, opts: ParseEntryRefOptions = {}): Par
   }
   const rest = raw.slice(SCHEME.length);
   const hashIdx = rest.indexOf('#');
-  const lid = hashIdx === -1 ? rest : rest.slice(0, hashIdx);
+  const head = hashIdx === -1 ? rest : rest.slice(0, hashIdx);
   const frag = hashIdx === -1 ? null : rest.slice(hashIdx + 1);
+  /**
+   * 🔴 **末尾の余分な `/` と `#` は無視して、そのノートを開く**(#1163 依頼 179、案 1)。
+   * ⚠ コピーや手打ちで `entry:xxx/` / `entry:xxx#` になったリンクは、直す前は「書き方が読めません」と断っていた。
+   *   付いているのは**行き先の無い印だけ**なので、ノートそのものを指していると読む。
+   * ⚠ `/` を落とすのは**断片の無いときだけ**(`entry:xxx/#h/…` のような形は今までどおり断る ── 意図が読めない)。
+   */
+  const lid = frag === null ? head.replace(/\/+$/, '') : head;
 
   if (!TOKEN_RE.test(lid)) return invalid(raw);
-  if (frag === null) return { kind: 'entry', lid };
-  if (frag === '') return invalid(raw);
+  if (frag === null || frag === '') return { kind: 'entry', lid };
 
   // h/<見出しの id>(#579)
   if (frag.startsWith(SECTION_PREFIX)) {

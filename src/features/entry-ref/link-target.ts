@@ -97,7 +97,8 @@ export function parseLinkTarget(raw: string, selfContainerId = ''): LinkTarget {
   return {
     kind: 'entry',
     lid: p.lid,
-    fragment: hash === -1 ? '' : raw.slice(hash),
+    // ⚠ 中身の無い `#` は断片にしない(#1163 依頼 179 ── `entry:xxx#` はノートそのものを開く)
+    fragment: hash === -1 || p.kind === 'entry' ? '' : raw.slice(hash),
     section: p.kind === 'section' ? p.id : null,
     foreign: false,
   };
