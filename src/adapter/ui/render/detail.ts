@@ -95,6 +95,7 @@ import { locateCodeFence } from '@features/markdown/code-fence-edit';
 import { listAppendTargets, sectionRange } from '@features/markdown/append-target';
 import { RowSwap, ROW_WHOLE_ATTR, replaceChanged } from './row-swap';
 import { takeBodyFocus } from './focus-request';
+import { followScroll } from './scroll-ratio';
 import { isTouchOnly } from './touch-device';
 import { DIFF_FILE_TOO_LARGE_NOTE, diffSummary, shortStamp } from '@features/revision/diff-view';
 import { formatStoredStamp } from '@features/datetime/stored-date';
@@ -2773,6 +2774,11 @@ export class DetailRenderer {
     split.append(ta, preview);
     if (folded !== null) this.region.append(foldNote());
     this.region.append(split);
+    /**
+     * 🔴 **右の表示を、左のスクロールの割合に合わせて送る**(#1163 依頼 249、案 A)。
+     * ⚠ 外す手は持たない ── 欄ごと捨てるので listener も一緒に消える(`followScroll` は `isConnected` を見る)。
+     */
+    followScroll(ta, preview);
     /**
      * 🔴 **2 ペインでも「ここから」を守る**(#596 C)。
      *
