@@ -674,6 +674,8 @@ async function initStorage(
       );
     },
   });
+  // 🔴 起動に失敗したら閉じる相手(依頼 208 ── 握ったままだと「バックアップ」が保存領域を開き直せない)
+  bootStoreClient = client;
   /**
    * 🔴 **画像のあとに、画像へ入っていない書込を流し直す**(#1589 の根治)。
    * ⚠ 失敗しても起動は止めない(画像だけで開く)── 数えて `console.error` に残す。
@@ -714,6 +716,12 @@ let bootLease: { release(): void } | null = null;
  *   (ファイルそのものが控えであり、開き直す保存領域も無い)。⚠ 分かる前に失敗したら `null`(出す側に倒す)。
  */
 let bootWasPortable: boolean | null = null;
+/**
+ * 🔴 **起動が開いた保存領域の口**(#1163 依頼 208 の着地前レビュー)。起動に失敗したら閉じる ── 閉じないと、失敗した起動の
+ *   worker が保存領域を握ったままで、「バックアップ」の開き直しがメモリへ落ち、「開けなかった」としか言えない。
+ *   ⚠ 閉じれば他のタブも保存領域を取れる(書込 lease を返すのと同じ向き)。
+ */
+let bootStoreClient: StoreClient | null = null;
 
 /**
  * 🔴 **起動に失敗した画面の「バックアップ」の口**(#1163 依頼 208)。保存領域を開き直して、拾い出しの口を返す。
@@ -7452,6 +7460,8 @@ function bootstrap(): void {
        */
       bootLease?.release();
       bootLease = null;
+      bootStoreClient?.terminate();
+      bootStoreClient = null;
       const message = e instanceof Error ? e.message : String(e);
       /**
        * 🔴 **OS から渡されたファイルを黙って消さない**(同 2-14)。

@@ -14,6 +14,7 @@ import type { StorageRequest } from '../../src/adapter/platform/storage/protocol
 import { searchWithin } from '../../src/adapter/state/store-effects';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
+import { EMPTY_SMART } from '../../src/features/smart/smart-spec';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -156,6 +157,28 @@ describe('開いているフォルダの中身を渡す(依頼 336)', () => {
       query: 'りんご',
       again: true,
     });
+  });
+
+  it('🔴 スマートフォルダでは、条件で集めた物を渡し、集め終わったら探し直す(入った直後はまだ集まっていない)', () => {
+    const base = reduce(booted(), {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [...booted().entryMetas.values(), meta('s1', 'smart')],
+      relations: [...booted().relations],
+    }).state;
+    const typed = reduce(base, { type: 'SET_ENTRY_FILTER', query: 'りんご' }).state;
+    const entered = reduce(typed, { type: 'SET_SCOPE', lid: 's1' }).state;
+    // 集め終わった(条件に当たったのは a と c)
+    const r = reduce(entered, { type: 'SMART_SCANNED', lid: 's1', lids: ['a', 'c'], total: 2, spec: EMPTY_SMART });
+    expect(r.events, '集め終わっても探し直していない(空の中身で引いたまま)').toContainEqual({
+      type: 'REQUEST_SEARCH',
+      query: 'りんご',
+      again: true,
+    });
+    expect(searchWithin(r.state), '集めた物を中身にしていない').toEqual(['a', 'c']);
+    // ⚠ 開いていない別のスマートフォルダの集め直しでは探さない
+    const other = reduce(entered, { type: 'SMART_SCANNED', lid: 'zz', lids: [], total: 0, spec: EMPTY_SMART });
+    expect(other.events.some((e) => e.type === 'REQUEST_SEARCH')).toBe(false);
   });
 
   it('⚠ 語が空なら、フォルダを移っても探さない', () => {

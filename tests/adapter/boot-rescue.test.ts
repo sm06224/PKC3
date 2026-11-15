@@ -107,3 +107,22 @@ describe('起動に失敗した画面の「バックアップ」(依頼 208)', (
     expect(asked, 'id が無いのに添付を探した').toBe(0);
   });
 });
+
+describe('開き直しが返らないとき(依頼 208 の着地前レビュー)', () => {
+  it('⚠ 上限を過ぎたら「開けなかった」と言い、遅れて開いた口は閉じる', async () => {
+    const s = store();
+    let release!: (x: BootRescueStore) => void;
+    const saved: string[] = [];
+    const said = await bootRescueBackup({
+      open: () => new Promise<BootRescueStore>((r) => (release = r)),
+      title: 'PKC3',
+      download: (n) => saved.push(n),
+      openTimeoutMs: 20,
+    });
+    expect(said).toBe(BOOT_RESCUE_OPEN_FAILED);
+    expect(saved).toEqual([]);
+    release(s);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.closed, '遅れて開いた口を握ったまま').toBe(1);
+  });
+});

@@ -7,7 +7,7 @@
  * ⚠ 履歴・2 ペインの掃除・バックリンクは `reduceWithHistory` の 1 か所で見る(ここでは見ない)。
  */
 
-import { type AppState, type Dispatchable, type ReduceResult, smartScanFor } from '../app-state';
+import { type AppState, type Dispatchable, type ReduceResult, filterSearchAgain, smartScanFor } from '../app-state';
 import { EMPTY_SMART, SMART_ARCHETYPE } from '@features/smart/smart-spec';
 
 export type SmartAction = Extract<Dispatchable, { type: 'SMART_SCANNED' | 'SMART_SCAN_FAILED' | 'SMART_TAGS' | 'SMART_COND' | 'SMART_FIELD' | 'SMART_RESCAN' }>;
@@ -28,7 +28,9 @@ export function reduceSmart(state: AppState, action: SmartAction): ReduceResult 
         spec: action.spec,
         ...(action.unreadable !== undefined && action.unreadable > 0 ? { unreadable: action.unreadable } : {}),
       });
-      return { state: { ...state, smartHits: next }, events: [] };
+      const st = { ...state, smartHits: next };
+      // 🔴 開いているスマートフォルダの当たりが変わったら、語の本文検索を中で引き直す(依頼 336 ── `searchWithin` が読む集合が変わった)
+      return { state: st, events: action.lid === state.scopeLid ? filterSearchAgain(st) : [] };
     }
     /**
      * ⚠ **黙って空にしない** ── 「集められない」と「0 件」は別の話である
@@ -43,7 +45,8 @@ export function reduceSmart(state: AppState, action: SmartAction): ReduceResult 
         failed: true,
         spec: state.smartHits.get(action.lid)?.spec ?? EMPTY_SMART,
       });
-      return { state: { ...state, smartHits: next }, events: [] };
+      const st = { ...state, smartHits: next };
+      return { state: st, events: action.lid === state.scopeLid ? filterSearchAgain(st) : [] };
     }
     /**
      * 🔴 **落としたら条件のタグが付く / 外すと外れる**(#421 段①)。

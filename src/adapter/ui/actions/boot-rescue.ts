@@ -8,8 +8,9 @@
  *
  * 🔑 束ね方は保存領域に問題があるときの自動の倒れ先(`export-archive.ts` の `fallbackToRescueArchive`)と同じ 1 本
  *   (`rescueArchiveSource` + `writeArchive`)── 取り込めば戻せる形である。
- * ⚠ うまく動いていない保存領域にもう一度触ることになる(#1163 の設問で断った点)── 読むだけで、書き換えない
- *   (入れ物の id を引くのも、起動と同じ `resolveContainer`)。開けなかった / 1 件も読めなかったときは、そう言う。
+ * ⚠ うまく動いていない保存領域にもう一度触ることになる(#1163 の設問で断った点)── 開き直しは起動と同じ `init` /
+ *   `resolveContainer` を通り、拾い出しそのものは読むだけ。開けなかった / 1 件も読めなかったときは、そう言う。
+ * ⚠ 起動に失敗したときは、起動が開いた口を先に閉じておく(main.ts の `bootStoreClient`)── 握ったままだと開き直せない。
  * ⚠ 開き直した口は**必ず閉じる**(閉じないと、再読み込みした後の起動が保存領域を取れない)。
  *
  * ⚠ main.ts はどの test からも実行されないので、判断はここに置き、main.ts は口を繋ぐだけにする(CLAUDE.md §2)。
@@ -47,6 +48,11 @@ export interface BootRescueDeps {
   readonly title: string;
   download(name: string, blob: Blob): void;
   readonly now?: () => Date;
+  /**
+   * 開き直しを待つ上限(ms。既定 30 秒)。⚠ 別のタブが保存領域を握っていると、開き直しが返らないことがある ──
+   *   待ち続けると「集めています…」のまま押せなくなるので、過ぎたら「開けなかった」と言う。
+   */
+  readonly openTimeoutMs?: number;
 }
 
 /** 開けなかったとき。 */
@@ -63,7 +69,19 @@ export const BOOT_RESCUE_WORKING = '読める分を集めています…';
 export async function bootRescueBackup(deps: BootRescueDeps): Promise<string> {
   let store: BootRescueStore;
   try {
-    store = await deps.open();
+    const opening = deps.open();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<null>((r) => {
+      timer = setTimeout(() => r(null), deps.openTimeoutMs ?? 30_000);
+    });
+    const got = await Promise.race([opening, late]);
+    clearTimeout(timer);
+    if (got === null) {
+      // ⚠ 遅れて開いた口は閉じる(握ったままにしない)
+      void opening.then((s) => s.close(), () => undefined);
+      return BOOT_RESCUE_OPEN_FAILED;
+    }
+    store = got;
   } catch {
     return BOOT_RESCUE_OPEN_FAILED;
   }
