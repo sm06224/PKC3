@@ -73,11 +73,21 @@ const WRITE_HEADS: readonly DuckDbWriteKind[] = ['create', 'insert', 'update', '
 export const DUCKDB_WRITE_FORMS = 'CREATE TABLE / INSERT INTO / UPDATE / DELETE FROM / DROP TABLE';
 
 /**
+ * 🔴 **作った表を持つ DuckDB の器を畳むまでの間隔(分)**(#1163 依頼 370、推薦 B)。
+ * ⚠ 正本はここ 1 か所 ── 畳む側(`duckdb-lease.ts` の `DEFAULT_HOLD_IDLE_MIN`)と画面の字(`DUCKDB_TABLE_LIFETIME`)が
+ *   同じ数を読む(字へ直書きすると、間隔を変えた日に字が嘘になる)。
+ */
+export const DUCKDB_HOLD_IDLE_MIN = 10;
+
+/**
  * 🔴 **作った表の寿命**(画面に出す字)。
  * ⚠ **字を 1 か所で持つ** ── 案内文と、`CREATE TABLE` が通った直後の知らせの
  *   両方が同じ字を言う(2 か所に書くと、片方だけ直した日に食い違う。§7)。
  */
-export const DUCKDB_TABLE_LIFETIME = '作った表はウィンドウを閉じると消えます';
+export function duckdbTableLifetimeText(min: number): string {
+  return `作った表は、ウィンドウを閉じるか、${String(min)} 分使わないと消えます`;
+}
+export const DUCKDB_TABLE_LIFETIME = duckdbTableLifetimeText(DUCKDB_HOLD_IDLE_MIN);
 
 /**
  * 🔴 **調べる相手の集合が変わったときの寿命**(#918 段⑦。Gemini 裁定 2026-10-01 = 確認は出さず字で言う)。

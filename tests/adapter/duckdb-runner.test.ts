@@ -23,6 +23,7 @@ import {
   type DuckDbOpenUrls,
   type DuckDbRunnerDeps,
 } from '../../src/adapter/platform/duckdb/duckdb-runner';
+import { duckHeldExpiredOf } from '../../src/adapter/platform/duckdb/duckdb-lease';
 import { guestTableNameOf } from '../../src/features/query/sql-guest-source';
 
 /** 実測の byte 数(2026-09-15 = 器 / 2026-09-16 = 拡張)。floor を満たす。 */
@@ -74,6 +75,7 @@ function make(
     pack?: string;
     lendInstalled?: DuckDbRunnerDeps['lendInstalled'];
     idleMs?: number;
+    holdIdleMs?: number;
   } = {},
 ) {
   const answer = opts.answer ?? { columns: ['n'], types: ['Int32'], rows: [[1]] };
@@ -93,6 +95,7 @@ function make(
     //   実害は無いが、既存 test の deps 形をそのまま保つ
     ...(opts.lendInstalled === undefined ? {} : { lendInstalled: opts.lendInstalled }),
     ...(opts.idleMs === undefined ? {} : { idleMs: opts.idleMs }),
+    ...(opts.holdIdleMs === undefined ? {} : { holdIdleMs: opts.holdIdleMs }),
   });
   return { runner, open, fetchText, readBytes, made };
 }
@@ -505,5 +508,68 @@ describe('🔴 書き込みの字を打つと、器を持ち続ける(#918 段�
       expect(runner.awake, `${sql} の後に畳んでいる`).toBe(true);
       await runner.release();
     }
+  });
+
+  /**
+   * 🔴 **作った表も、長く使わなければ畳む。消えたことは次の 1 回だけ言う**(#1163 依頼 370、推薦 B)。
+   * 🔑 間隔は test で縮める(`holdIdleMs`)── 製品の既定は 10 分。
+   */
+  it('🔴 作った表を持つ器も holdIdleMs で畳み、次の 1 回の答えだけが「消えた」を運ぶ', async () => {
+    const { runner, made, readBytes } = make({ idleMs: 5, holdIdleMs: 20 });
+    const first = await runner.run({ sql: 'CREATE TABLE t (a INT)', sources: [{ source: SRC, readBytes }] });
+    expect(first.heldExpired).toBe(false);
+    await wait(80);
+    expect(runner.awake, '作った表を持ったまま、いつまでも畳まない(メモリが返らない)').toBe(false);
+    expect(made[0]?.steps).toContain('terminate');
+    const next = await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
+    expect(next.heldExpired, '作った表が消えたことを運んでいない').toBe(true);
+    const after = await runner.run({ sql: 'SELECT 2', sources: [{ source: SRC, readBytes }] });
+    expect(after.heldExpired, '2 回目も運んでいる(1 行で済まない)').toBe(false);
+  });
+
+  it('🔴 相手を替えた後の最初の回には「消えた」を運ばない(前の相手の話になる。着地前レビュー ⚠4)', async () => {
+    const { runner, readBytes } = make({ idleMs: 5, holdIdleMs: 20 });
+    await runner.run({ sql: 'CREATE TABLE t (a INT)', sources: [{ source: SRC, readBytes }] });
+    await wait(80);
+    expect(runner.awake).toBe(false);
+    const other = await runner.run({ sql: 'SELECT 1', sources: [{ source: PARQUET, readBytes }] });
+    expect(other.heldExpired, '別の相手の回に、前の相手の表が消えた話を運んでいる').toBe(false);
+  });
+
+  it('🔴 消えた表を引いて落ちた回も、断りに「消えた」の印が付く', async () => {
+    const { runner, open, readBytes } = make({ idleMs: 5, holdIdleMs: 20 });
+    await runner.run({ sql: 'CREATE TABLE t (a INT)', sources: [{ source: SRC, readBytes }] });
+    await wait(80);
+    expect(runner.awake).toBe(false);
+    open.mockImplementationOnce(() => {
+      const f = fakeHandle({ columns: ['n'], types: ['Int32'], rows: [[1]] });
+      const ask = f.h.query.bind(f.h);
+      f.h.query = (sql, maxRows) =>
+        sql === 'SELECT * FROM t'
+          ? Promise.reject(new Error('Catalog Error: Table with name t does not exist!'))
+          : ask(sql, maxRows);
+      return Promise.resolve(f.h);
+    });
+    const failed = await runner
+      .run({ sql: 'SELECT * FROM t', sources: [{ source: SRC, readBytes }] })
+      .then(() => null, (e: unknown) => e);
+    expect(failed, '前提: 落ちていない').not.toBeNull();
+    expect(duckHeldExpiredOf(failed), '断りに「消えた」の印が無い').toBe(true);
+  });
+
+  it('⚠ 対照群 ── 消えていない回の断りには印が付かない', async () => {
+    const { runner, open, readBytes } = make({ idleMs: 5 });
+    open.mockImplementationOnce(() => {
+      const f = fakeHandle({ columns: ['n'], types: ['Int32'], rows: [[1]] });
+      const ask = f.h.query.bind(f.h);
+      f.h.query = (sql, maxRows) =>
+        sql === 'SELECT * FROM t' ? Promise.reject(new Error('Catalog Error')) : ask(sql, maxRows);
+      return Promise.resolve(f.h);
+    });
+    const failed = await runner
+      .run({ sql: 'SELECT * FROM t', sources: [{ source: SRC, readBytes }] })
+      .then(() => null, (e: unknown) => e);
+    expect(failed).not.toBeNull();
+    expect(duckHeldExpiredOf(failed)).toBe(false);
   });
 });

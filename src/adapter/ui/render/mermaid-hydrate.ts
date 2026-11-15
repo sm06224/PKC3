@@ -16,6 +16,7 @@
 import {
   cacheKey,
   DeviceRenderError,
+  DiagramTooLargeError,
   renderToPng,
   readPalette,
   type Raster,
@@ -478,6 +479,9 @@ export function hydrateDiagrams(
       // 🔴 端末の都合で描けなかったときは別の印を付ける(画面の字を「書き方を確かめて」にしない)
       if (e instanceof DeviceRenderError) p.host.setAttribute(`data-pkc-${kind.name}-device`, '');
       else p.host.removeAttribute(`data-pkc-${kind.name}-device`);
+      // 🔴 大きすぎて描けなかったときも別の印(#1163 依頼 369)── 画面の字は理由(上限の数)そのもの
+      if (e instanceof DiagramTooLargeError) p.host.setAttribute(`data-pkc-${kind.name}-too-large`, '');
+      else p.host.removeAttribute(`data-pkc-${kind.name}-too-large`);
       p.host.setAttribute(`data-pkc-${kind.name}-error`, why.length > 120 ? `${why.slice(0, 119)}…` : why);
     } finally {
       if (inFlightKey.get(p.host) === currentKey) inFlightKey.delete(p.host);

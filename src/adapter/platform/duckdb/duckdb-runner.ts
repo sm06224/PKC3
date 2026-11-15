@@ -92,7 +92,7 @@ import {
   duckDbAssetUrl,
   readDuckDbPack,
 } from '@features/query/duckdb-pack';
-import { DuckDbLease, type DuckDbHandle } from './duckdb-lease';
+import { DuckDbLease, type DuckDbHandle, type DuckHeldExpiredMark } from './duckdb-lease';
 import { resolveDuckDbBase } from './duckdb-pack-acquire';
 
 /** 配る一式の置き場(`build/duckdb-assets-plugin.ts` の `DUCKDB_DIR` と同じ)。 */
@@ -164,6 +164,8 @@ export interface DuckDbRunnerDeps {
    */
   packBase?: string;
   idleMs?: number;
+  /** 🔴 作った表を持つ器のアイドル間隔(ms。#1163 依頼 370)。⚠ 製品からは差さない(既定の 10 分)── test が縮めるための口。 */
+  holdIdleMs?: number;
   /**
    * 🔴 **端末に入っている一式を貸す口**(#682 段③b。任意 ── 省けば今までどおり
    *   同一オリジンへ fetch する)。
@@ -235,6 +237,11 @@ export interface DuckDbRunResult {
    * ⚠ 必須の field(省ける形にすると、返す側が書き忘れても tsc が黙る ── 書き忘れは「写せなかった表が画面に出ない」側へ倒れる)。
    */
   readonly copy: DuckDbCopyReport;
+  /**
+   * 🔴 **作った表を、時間がたったので器ごと畳んでいた**(#1163 依頼 370)。⚠ 次の 1 回だけ `true`(画面が 1 行で言う)。
+   * ⚠ 必須(書き忘れると、表が消えた理由が画面に出ない側へ倒れる)。
+   */
+  readonly heldExpired: boolean;
 }
 
 /**
@@ -443,6 +450,7 @@ export class DuckDbRunner {
         }
       },
       ...(deps.idleMs === undefined ? {} : { idleMs: deps.idleMs }),
+      ...(deps.holdIdleMs === undefined ? {} : { holdIdleMs: deps.holdIdleMs }),
     });
   }
 
@@ -584,6 +592,13 @@ export class DuckDbRunner {
     const started = Date.now();
     if (input.sources.length === 0) throw new Error('調べる対象がありません');
     const multi = input.sources.length > 1;
+    /**
+     * 🔴 **打つ前に読む**(#1163 依頼 370)── 作った表が時間で消えていたら、この回の答え(または断り)に添えて
+     *   1 行で言う。⚠ 打った後では器が起こし直されていて区別が付かない。
+     */
+    const data = this.dataOf(input.sources, input.onLoad);
+    // ⚠ 鍵を渡す ── 相手を替えた後の最初の回に、前の相手で作った表の話を出さない(着地前レビュー ⚠4)
+    const heldExpired = this.lease.takeHeldExpired(data.key);
     const raw = await this.lease.run({
       sql: input.sql,
       maxMs: DUCKDB_MAX_MS,
@@ -593,14 +608,17 @@ export class DuckDbRunner {
       /**
        * 🔴 **書き込みが通ったら、アイドルで畳まない**(#918 段⑧)。
        * ⚠ 作った表は器の中にしか無い ── 30 秒で畳むと、user が作った表が
-       *   「ウィンドウを閉じると消えます」と言いながら**黙って**消える。
+       *   「ウィンドウを閉じるか、10 分使わないと消えます」と言いながら**黙って**消える(#1163 依頼 370 で 10 分に)。
        * 🔑 判定は字の門と**同じ 1 本**(`duckDbWriteKind`)。
        */
       hold: duckDbWriteKind(input.sql) !== null,
-      data: this.dataOf(input.sources, input.onLoad),
+      data,
     }).catch((e: unknown) => {
       // 🔴 引いた回が落ちたときは、**どの失敗にも**写せなかった表の理由を添える(`withRefused`)
-      throw this.withRefused(e, multi);
+      const err = this.withRefused(e, multi);
+      // 🔴 作った表が時間で消えていたことも運ぶ(消えた表を引いて落ちた回こそ、理由が要る)
+      if (heldExpired) (err as DuckHeldExpiredMark).duckHeldExpired = true;
+      throw err;
     });
     const table = duckDbTable(raw);
     const truncated = table.rows.length > DUCKDB_MAX_ROWS;
@@ -610,6 +628,7 @@ export class DuckDbRunner {
       truncated,
       ms: Date.now() - started,
       copy: this.report(),
+      heldExpired,
     };
   }
 

@@ -38,6 +38,10 @@ import {
   viewModeLabel,
 } from '../../src/adapter/state/app-state';
 import {
+  DEFAULT_HOLD_IDLE_MIN,
+  duckHeldExpiredNote,
+} from '../../src/adapter/platform/duckdb/duckdb-lease';
+import {
   duckdbWarmupNote,
   fitSqlInput,
   SQL_SOURCE_GROUP_ADD,
@@ -157,7 +161,14 @@ function setup(
         readBytes: () => Promise<Uint8Array | null>;
       }[];
       onLoad: () => void;
-    }) => {
+    }): Promise<{
+      columns: string[];
+      rows: Array<Array<string | number | null>>;
+      truncated: boolean;
+      ms: number;
+      /** 🔴 作った表が時間で消えていた回(#1163 依頼 370)。 */
+      heldExpired?: boolean;
+    }> => {
       const read = await Promise.all(input.sources.map((s) => s.readBytes()));
       const first = input.sources[0];
       if (first === undefined) throw new Error('相手が空で呼ばれた');
@@ -934,6 +945,55 @@ describe('答えをノートへ書き出す(#681 段③ の 3 つ目)', () => {
       expect(note().includes(said), '画面の言い分が合っていない').toBe(expected === 1);
     }
   });
+
+  /**
+   * 🔴 **ノートへ入るのはセル 200,000 個まで**(#1163 依頼 133、推薦 C)。⚠ 本文は disk へ渡った物で見る。
+   * 🔑 2 列 → 上限 100,000 行(描くのは見えている分だけなので、行が多くても重くない)。
+   *   対照群 = ちょうど上限の回は何も言わない。
+   */
+  it('🔴 ノートへ ── セルの上限を超える行は入れず、本文と画面で言う', async () => {
+    const cols = ['k', 'v'];
+    const limit = 100_000;
+    for (const cut of [3, 0]) {
+      const rows = Array.from({ length: limit + cut }, (_, r) => [`r${String(r)}`, 'x']);
+      const { d, type, runBtn, saveBtn, persisted, note } = setup(async () => answer(cols, rows));
+      type('SELECT 1');
+      runBtn.click();
+      await settle();
+      saveBtn.click();
+      await settle();
+      const made = [...d.getState().entryMetas.values()].find((m) => m.title.startsWith('SQL の結果'));
+      const body = persisted.find((e) => e.lid === made?.lid)?.body ?? '';
+      expect(body, '本文が disk へ渡っていない').toContain('SELECT 1');
+      expect(body, '上限の内側の最後の行が無い').toContain(`\nr${String(limit - 1)},x\n`);
+      expect(body.includes(`\nr${String(limit)},x\n`), '上限を超えた行が入っている').toBe(false);
+      const said = `${String(cut)} 行はノートに入れていません`;
+      expect(body.includes(said), '本文の言い分が合っていない').toBe(cut > 0);
+      expect(note().includes(said), '画面の言い分が合っていない').toBe(cut > 0);
+    }
+  }, 60_000);
+
+  /**
+   * 🔴 **切った升の数は、ノートに入った行だけで数える**(着地前レビュー ⚠2)。
+   * ⚠ 入らなかった行にだけ長い値があるとき、「長い値 N 個は切ってあります」と言うと、ノートに無い升の話になる。
+   */
+  it('🔴 ノートへ ── 入らなかった行の長い値は、切った升として数えない', async () => {
+    const cols = ['k', 'v'];
+    const limit = 100_000;
+    const long = `${'あ'.repeat(2000)}…(全 3000 字)`;
+    const rows = Array.from({ length: limit + 2 }, (_, r) => [`r${String(r)}`, r === limit + 1 ? long : 'x']);
+    const { d, type, runBtn, saveBtn, persisted, note } = setup(async () => answer(cols, rows));
+    type('SELECT 1');
+    runBtn.click();
+    await settle();
+    saveBtn.click();
+    await settle();
+    const made = [...d.getState().entryMetas.values()].find((m) => m.title.startsWith('SQL の結果'));
+    const body = persisted.find((e) => e.lid === made?.lid)?.body ?? '';
+    expect(body, '前提: 上限で切っていない').toContain('2 行はノートに入れていません');
+    expect(body, '入らなかった行の長い値を、本文で数えている').not.toContain('先頭 2000 字で切ってあります');
+    expect(note(), '入らなかった行の長い値を、画面で数えている').not.toContain('先頭 2000 字で切ってあります');
+  }, 60_000);
 
   it('🔴 書き出したことを画面が言う(別の窓なので、言わないと押せなかったように見える)', async () => {
     const { type, runBtn, saveBtn, note } = setup(async () => answer(['a'], [[1]]));
@@ -2637,6 +2697,45 @@ describe('打つ所(#918 段②a)', () => {
     expect(said, '畳んだ升の数(2 個)を言っていない').toContain('長い値 2 個は先頭 2000 字で切ってあります');
   });
 
+  /**
+   * 🔴 **式に見える値は、値を変えずに数だけ言う**(#1163 依頼 134、推薦 B)。
+   * 🔑 CSV / TSV だけ ── JSON は表計算ソフトが式として読まないので言わない(対照群)。
+   */
+  it('🔴 ファイルへ ── = などで始まる値の数を言う(JSON では言わない)', async () => {
+    const run = async (pick: number): Promise<string> => {
+      const { pane, root, type, runBtn } = setup(async () =>
+        // 🔑 見出しも数える(CSV の 1 行目に出る ── `=` で始まる別名は式として動く。着地前レビュー ⚠3)
+        answer(['名前', '=式'], [['りんご', '=1+1'], ['みかん', '-3'], ['@x', '-y']]),
+      );
+      type('select 1');
+      runBtn.click();
+      await settle();
+      const btn = pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-file"]')!;
+      const make = vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:fake');
+      const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+      try {
+        btn.click();
+        const items = root.querySelectorAll<HTMLElement>('[data-pkc-region="context-menu"] button');
+        items[pick]!.click();
+      } finally {
+        make.mockRestore();
+        revoke.mockRestore();
+        click.mockRestore();
+      }
+      return pane.querySelector('[data-pkc-field="sql-note"]')?.textContent ?? '';
+    };
+    const csv = await run(0);
+    expect(csv).toContain('.csv」というファイルに書き出しました');
+    expect(csv, '式に見える値の数(見出し 1 + 値 3 = 4 個)を言っていない').toContain('= などで始まる値が 4 個あります');
+    const tsv = await run(1);
+    expect(tsv).toContain('.tsv」というファイルに書き出しました');
+    expect(tsv, 'TSV で式に見える値の数を言っていない').toContain('= などで始まる値が 4 個あります');
+    const json = await run(2);
+    expect(json).toContain('.json」というファイルに書き出しました');
+    expect(json, 'JSON なのに式の話をしている').not.toContain('= などで始まる値');
+  });
+
   it('⚠ 履歴が空なら、↑ を押しても何も起きない', () => {
     const { d, type, key, box } = setup();
     type('打ちかけ');
@@ -3894,6 +3993,45 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
     expect(rules()).toContain('FROM');
   });
 
+  /**
+   * 🔴 **作った表が時間で消えていた回は、上の行で 1 回だけ言う**(#1163 依頼 370、推薦 B)。
+   * 🔑 分は定数から(`DEFAULT_HOLD_IDLE_MIN`)。落ちた回(消えた表を引いた)にも言う。対照群 = 次の回は言わない。
+   */
+  it('🔴 作った表が時間で消えていた回は「N 分使わなかったので消えました」を 1 回だけ言う', async () => {
+    const gone = duckHeldExpiredNote(DEFAULT_HOLD_IDLE_MIN);
+    expect(gone).toContain(`${String(DEFAULT_HOLD_IDLE_MIN)} 分使わなかったので消えました`);
+    const { pick, pickEngine, type, runBtn, note, runDuckDbSql } = setup();
+    pick('db4');
+    await settle();
+    pickEngine('duckdb');
+    // ① 消えた表を引いて落ちた回
+    runDuckDbSql.mockRejectedValueOnce(
+      Object.assign(new Error('Catalog Error: Table with name 集計 does not exist!'), { duckHeldExpired: true }),
+    );
+    type('SELECT * FROM 集計');
+    runBtn.click();
+    await settle();
+    expect(note(), '落ちた回に、消えた理由を言っていない').toContain(gone);
+    expect(note(), '断りそのものが消えた').toContain('集計');
+    // ② 答えが出た回(運ばれた印で言う)
+    runDuckDbSql.mockResolvedValueOnce({ columns: ['a'], rows: [[1]], truncated: false, ms: 1, heldExpired: true });
+    type('SELECT 1 AS a');
+    runBtn.click();
+    await settle();
+    expect(note(), '答えの回に、消えた理由を言っていない').toContain(gone);
+    // ③ 次の回: 走っている最中は前の回の話を混ぜない / 終わっても言わない(1 行で済ませる)
+    let finish!: (v: { columns: string[]; rows: Array<Array<string | number | null>>; truncated: boolean; ms: number }) => void;
+    runDuckDbSql.mockImplementationOnce(() => new Promise((r) => (finish = r)));
+    type('SELECT 2 AS a');
+    runBtn.click();
+    await settle();
+    expect(note(), '前提: 走っている最中の字になっていない').toContain('実行しています');
+    expect(note(), '走っている最中に、前の回の「消えました」を混ぜている').not.toContain(gone);
+    finish({ columns: ['a'], rows: [[2]], truncated: false, ms: 1 });
+    await settle();
+    expect(note(), '2 回目も言っている(1 行で済まない)').not.toContain(gone);
+  });
+
   it('DuckDB の断りは、そのまま画面に出る(黙って消さない)', async () => {
     const { pick, pickEngine, type, runBtn, note, runDuckDbSql } = setup();
     runDuckDbSql.mockRejectedValueOnce(new Error('DuckDB の一式を取得できませんでした'));
@@ -3913,7 +4051,7 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
  * ## user の物語(ここを見る)
  *
  * ①取り込んだ `.csv` を選び ②エンジンを DuckDB にし ③`CREATE TABLE …` を打って走らせる
- * ④「◯ 行が変更されました ── 作った表はウィンドウを閉じると消えます」と出る
+ * ④「◯ 行が変更されました ── 作った表は、ウィンドウを閉じるか、10 分使わないと消えます」と出る
  * ⑤`SELECT` で作った表を引ける ⑥**内蔵の sqlite のまま同じ字を打つと、今までどおり断られる**。
  *
  * ⚠ ここが見るのは**画面と配線**で、engine が実際に実行できるかは
@@ -3941,7 +4079,7 @@ describe('🔴 DuckDB では表を作れる / sqlite では断る(#918 段⑧)',
     expect(runReadOnlySql, 'sqlite も叩いている').toHaveBeenCalledTimes(0);
     void duckSeen;
     expect(note(), '件数を言っていない').toContain('3 行が変更されました');
-    expect(note(), '作った表の寿命を言っていない').toContain('作った表はウィンドウを閉じると消えます');
+    expect(note(), '作った表の寿命を言っていない').toContain('作った表は、ウィンドウを閉じるか、10 分使わないと消えます');
     // 🔴 「条件に当たるものがありませんでした」と読める字を出さない
     expect(note()).not.toContain('条件に一致');
     // 🔑 `Count` の 1 升だけの表を出さない(同じことを 2 回言わない)
@@ -4009,7 +4147,7 @@ describe('🔴 DuckDB では表を作れる / sqlite では断る(#918 段⑧)',
     type('CREATE TABLE t AS SELECT 1');
     runBtn.click();
     await settle();
-    expect(note()).toContain('作った表はウィンドウを閉じると消えます');
+    expect(note()).toContain('作った表は、ウィンドウを閉じるか、10 分使わないと消えます');
     type('SELECT * FROM t');
     runBtn.click();
     await settle();
@@ -4119,7 +4257,7 @@ describe('🔴 DuckDB では表を作れる / sqlite では断る(#918 段⑧)',
     await settle();
     expect(rules(), 'DuckDB なのに「読むだけ」と言っている(嘘になる)').not.toContain('読むだけ');
     expect(rules(), '表を作れることを言っていない').toContain('CREATE TABLE');
-    expect(rules(), '作った表の寿命を、打つ前に言っていない').toContain('作った表はウィンドウを閉じると消えます');
+    expect(rules(), '作った表の寿命を、打つ前に言っていない').toContain('作った表は、ウィンドウを閉じるか、10 分使わないと消えます');
     expect(rules(), '別の file を選び直すと消えることを言っていない').toContain('別のファイルを選び直した');
     expect(rules(), '元の file を触らないことを言っていない').toContain('元のファイルは書き換わりません');
   });
@@ -4890,7 +5028,7 @@ describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
     s.type('CREATE TABLE t AS SELECT 1');
     s.runBtn.click();
     await settle();
-    expect(s.note()).toContain('作った表はウィンドウを閉じると消えます');
+    expect(s.note()).toContain('作った表は、ウィンドウを閉じるか、10 分使わないと消えます');
     expect(s.note()).toContain('増やしたり減らしたりすると、作った表は消えます');
   });
 

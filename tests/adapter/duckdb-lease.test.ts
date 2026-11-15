@@ -7,31 +7,48 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
+  DEFAULT_HOLD_IDLE_MIN,
+  DEFAULT_HOLD_IDLE_MS,
+  DEFAULT_IDLE_MS,
+  duckHeldExpiredNote,
   DuckDbLease,
   DUCKDB_LOAD_TOO_LONG,
   DUCKDB_TOO_LONG,
   type DuckDbHandle,
 } from '../../src/adapter/platform/duckdb/duckdb-lease';
 import type { DuckDbRaw } from '../../src/features/query/duckdb-rows';
+import {
+  DUCKDB_HOLD_IDLE_MIN,
+  DUCKDB_TABLE_LIFETIME,
+  duckdbTableLifetimeText,
+} from '../../src/features/query/duckdb-write';
 
 /** 手で進められる時計。⚠ 実時間を待たない(30 秒の既定を待つ test は書けない)。 */
 function fakeTimers() {
   let next = 1;
   const pending = new Map<number, () => void>();
+  const msOf = new Map<number, number>();
   return {
-    setTimer: (fn: () => void) => {
+    setTimer: (fn: () => void, ms: number) => {
       const id = next;
       next += 1;
       pending.set(id, fn);
+      msOf.set(id, ms);
       return id;
     },
     clearTimer: (h: unknown) => {
       pending.delete(h as number);
+      msOf.delete(h as number);
+    },
+    /** 張ってある時計の間隔(ms)。🔑 30 秒の時計か、作った表を持つ 10 分の時計かを見分ける(#1163 依頼 370)。 */
+    get armedMs(): number[] {
+      return [...pending.keys()].map((id) => msOf.get(id) ?? -1);
     },
     /** 張ってある時計を全部撃つ。 */
     fire: () => {
       const fns = [...pending.values()];
       pending.clear();
+      msOf.clear();
       for (const fn of fns) fn();
     },
     get armed(): number {
@@ -356,18 +373,20 @@ describe('🔴 時間で切る(#682 段②)', () => {
  * - 畳まれるのは「明示の `release()` / 相手の入れ替え / 時間の門」だけで、
  *   🔴 **畳んだら `held` を必ず下ろす**(下ろし忘れると、以後ずっと畳まれない)
  */
-describe('🔴 書き込みで作った物は、アイドルで畳まない(#918 段⑧)', () => {
-  it('🔴 書き込みが通った後は、畳む時計を張らない ── 読むだけを挟んでも張らない', async () => {
+describe('🔴 書き込みで作った物は、30 秒では畳まない(#918 段⑧ → #1163 依頼 370 で 10 分に)', () => {
+  /**
+   * 🔴 #1163 依頼 370(推薦 B)で変えた:**`hold` 中は 30 秒ではなく 10 分の時計**を張る
+   *   (以前は時計を張らず、ページを読み込み直すまで残った)。
+   */
+  it('🔴 書き込みが通った後は、30 秒ではなく 10 分の時計を張る ── 読むだけを挟んでも 10 分のまま', async () => {
     const h = handle();
     const t = fakeTimers();
     const lease = new DuckDbLease({ open: () => Promise.resolve(h), ...t });
     await lease.run({ sql: 'create table t (a int)', hold: true });
-    expect(t.armed, '作った表があるのに、畳む時計が張られている').toBe(0);
-    // 🔑 その後の読むだけの回も張らない(作った表を持ったまま)
+    expect(t.armedMs, '作った表があるのに、30 秒で畳む時計が張られている').toEqual([DEFAULT_HOLD_IDLE_MS]);
+    // 🔑 その後の読むだけの回も 10 分(作った表を持ったまま)
     await lease.run({ sql: 'select * from t' });
-    expect(t.armed, '読むだけの回が、作った表ごと畳む時計を張っている').toBe(0);
-    t.fire();
-    await Promise.resolve();
+    expect(t.armedMs, '読むだけの回が、作った表ごと 30 秒で畳む時計を張っている').toEqual([DEFAULT_HOLD_IDLE_MS]);
     expect(h.terminated, '作った表ごと畳んだ').toBe(0);
     expect(lease.awake).toBe(true);
   });
@@ -394,7 +413,7 @@ describe('🔴 書き込みで作った物は、アイドルで畳まない(#918
     await lease.run({ sql: 'select 1' });
     expect(t.armed, '前提:読むだけの回で時計が張られている').toBe(1);
     await lease.run({ sql: 'create table t (a int)', hold: true });
-    expect(t.armed, '張ってあった時計が残っている(作った表ごと畳まれる)').toBe(0);
+    expect(t.armedMs, '張ってあった 30 秒の時計が残っている(作った表ごと畳まれる)').toEqual([DEFAULT_HOLD_IDLE_MS]);
   });
 
   it('🔴 落ちた書き込みは「作った」と数えない ── 時計は張る', async () => {
@@ -424,11 +443,11 @@ describe('🔴 書き込みで作った物は、アイドルで畳まない(#918
     const lease = new DuckDbLease({ open: () => Promise.resolve(hs.shift() as DuckDbHandle), ...t });
     const load = vi.fn(() => Promise.resolve());
     await lease.run({ sql: 'create table t (a int)', hold: true, data: { key: 'a', load } });
-    expect(t.armed).toBe(0);
+    expect(t.armedMs).toEqual([DEFAULT_HOLD_IDLE_MS]);
     await lease.run({ sql: 'select 1', data: { key: 'b', load } });
     // 🔑 前の器(作った表ごと)は畳まれ、新しい器は読むだけなので畳む時計が張られる
     expect(first.terminated, '相手を替えたのに前の器が残っている').toBe(1);
-    expect(t.armed, '新しい器にまで held が引き継がれている').toBe(1);
+    expect(t.armedMs, '新しい器にまで held が引き継がれている').toEqual([DEFAULT_IDLE_MS]);
   });
 
   it('🔴 時間の門で畳まれたら、held も下ろす', async () => {
@@ -577,5 +596,90 @@ describe('🔴 器へ写す所の時間の門(R5)', () => {
     ).rejects.toThrow('コピーできません');
     // 門の時計は外れ、畳む時計だけが張ってある
     expect(t.armed, '落ちた回の門の時計が残っている').toBe(1);
+  });
+});
+
+/**
+ * 🔴 **作った表も、10 分使わなければ畳む。消えたことは次の 1 回だけ言う**(#1163 依頼 370、推薦 B)。
+ */
+describe('🔴 作った表を持つ器の 10 分の畳み(依頼 370)', () => {
+  it('間隔は分の定数から作る(10 分)', () => {
+    expect(DEFAULT_HOLD_IDLE_MIN).toBe(10);
+    expect(DEFAULT_HOLD_IDLE_MS).toBe(10 * 60 * 1000);
+  });
+
+  it('🔴 「消えました」の字は分を引数から組む(直書きしない)', () => {
+    expect(duckHeldExpiredNote(7)).toContain('7 分使わなかったので消えました');
+    expect(duckHeldExpiredNote(DEFAULT_HOLD_IDLE_MIN)).toContain('10 分使わなかったので消えました');
+  });
+
+  it('🔴 作った表の寿命の字も、同じ分の定数から組む', () => {
+    expect(DUCKDB_TABLE_LIFETIME).toContain(`${String(DEFAULT_HOLD_IDLE_MIN)} 分使わないと消えます`);
+    // 🔑 分は引数から組む(直書きの変異は、定数と同じ値だと見分けられない ── 別の分で見る)
+    expect(duckdbTableLifetimeText(7)).toContain('7 分使わないと消えます');
+    expect(DUCKDB_HOLD_IDLE_MIN).toBe(DEFAULT_HOLD_IDLE_MIN);
+  });
+
+  it('🔴 10 分の時計が鳴ると畳み、次の 1 回だけ「時間で消えた」を返す', async () => {
+    const h = handle();
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(h), ...t });
+    await lease.run({ sql: 'create table t (a int)', hold: true });
+    expect(lease.takeHeldExpired(), '畳む前に消えたと言っている').toBe(false);
+    t.fire();
+    await Promise.resolve();
+    expect(h.terminated, '10 分たっても畳んでいない(メモリが返らない)').toBe(1);
+    expect(lease.awake).toBe(false);
+    expect(lease.takeHeldExpired(), '作った表が消えたことを言っていない').toBe(true);
+    expect(lease.takeHeldExpired(), '2 回目も言っている(1 行で済まない)').toBe(false);
+  });
+
+  it('⚠ 対照群 ── 読むだけの器が 30 秒で畳まれても「作った表が消えた」とは言わない', async () => {
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(handle()), ...t });
+    await lease.run({ sql: 'select 1' });
+    t.fire();
+    await Promise.resolve();
+    expect(lease.awake).toBe(false);
+    expect(lease.takeHeldExpired()).toBe(false);
+  });
+
+  it('⚠ 明示に畳んだ(面を閉じた)回は、時間で消えたとは言わない ── 前の印も下ろす', async () => {
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(handle()), ...t });
+    await lease.run({ sql: 'create table t (a int)', hold: true });
+    t.fire();
+    await Promise.resolve();
+    await lease.release();
+    expect(lease.takeHeldExpired(), '面を閉じたのに、時間で消えたと言っている').toBe(false);
+  });
+
+  it('🔴 相手を替えた後の最初の回には「消えた」を言わない(前の相手の話になる。着地前レビュー ⚠4)', async () => {
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(handle()), ...t });
+    const load = vi.fn(() => Promise.resolve());
+    await lease.run({ sql: 'create table t (a int)', hold: true, data: { key: 'a', load } });
+    t.fire();
+    await Promise.resolve();
+    expect(lease.takeHeldExpired('b'), '別の相手の回に、前の相手の表が消えた話をしている').toBe(false);
+    // 🔑 読んだら下りる(同じ相手へ戻っても、もう言わない)
+    expect(lease.takeHeldExpired('a')).toBe(false);
+  });
+
+  it('⚠ 対照群 ── 同じ相手の回には言う', async () => {
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(handle()), ...t });
+    const load = vi.fn(() => Promise.resolve());
+    await lease.run({ sql: 'create table t (a int)', hold: true, data: { key: 'a', load } });
+    t.fire();
+    await Promise.resolve();
+    expect(lease.takeHeldExpired('a')).toBe(true);
+  });
+
+  it('🔴 holdIdleMs を渡せばその間隔で張る(既定は 10 分)', async () => {
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(handle()), holdIdleMs: 1234, ...t });
+    await lease.run({ sql: 'create table t (a int)', hold: true });
+    expect(t.armedMs).toEqual([1234]);
   });
 });

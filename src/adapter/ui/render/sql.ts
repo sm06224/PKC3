@@ -23,7 +23,11 @@
  *   面を閉じて戻っても消えない。
  */
 import { schemaRouteOf, type AppState, type SqlPageState } from '@adapter/state/app-state';
-import { DEFAULT_IDLE_SEC } from '@adapter/platform/duckdb/duckdb-lease';
+import {
+  DEFAULT_HOLD_IDLE_MIN,
+  DEFAULT_IDLE_SEC,
+  duckHeldExpiredNote,
+} from '@adapter/platform/duckdb/duckdb-lease';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
 import { sqlLineHtml } from '@features/query/sql-lines';
 import { chordLabel } from '@features/keymap';
@@ -62,6 +66,8 @@ import { duckDbWriteKind, duckDbWriteNote } from '@features/query/duckdb-write';
 import { copyBandNote, refusedLine } from '@features/query/duckdb-copy-report';
 import { erSubjectOf } from '@features/query/er-connect';
 import { cappedCellsNote } from '@features/query/sql-cell';
+import { formulaLikeNote } from '@features/markdown/csv-table';
+import { sqlNoteCutNote } from '@features/query/sql-to-note';
 import { SJIS_GUESS_NOTE } from '@features/import/text-decode';
 import {
   SQL_ENGINE_LABEL,
@@ -986,6 +992,8 @@ export class SqlRenderer {
       p.guestError,
       // 🔴 写せなかった表・全列を文字で写した表も、帯の字が変わる ── 答えが同じ回に言い直す(#682 段④d の着地後レビュー)
       duckCopyNote(p),
+      // 🔴 作った表が時間で消えていた回も、上の行が変わる(#1163 依頼 370)
+      String(p.duckHeldExpired),
     ].join(' ');
     if (fingerprint === this.last) return;
     this.last = fingerprint;
@@ -1318,6 +1326,18 @@ function erCopyLine(p: AppState['sqlPage']): string {
 }
 
 function noteLine(p: AppState['sqlPage']): string {
+  const line = noteLineBody(p);
+  /**
+   * 🔴 **作った表が時間で消えていた回は、いちばん前で 1 行言う**(#1163 依頼 370、推薦 B)。
+   * ⚠ 分は `DEFAULT_HOLD_IDLE_MIN` から導く(直書きすると、間隔を変えた日に字が嘘になる)。
+   * ⚠ 走っている最中は言わない(前の回の話を、次の回の進捗に混ぜない)。
+   */
+  if (!p.duckHeldExpired || p.running) return line;
+  const gone = duckHeldExpiredNote(DEFAULT_HOLD_IDLE_MIN);
+  return line === '' ? gone : `${gone} / ${line}`;
+}
+
+function noteLineBody(p: AppState['sqlPage']): string {
   const core = noteLineCore(p);
   /**
    * 🔴 **断り・開けなかった・走っている最中には言い足さない**(断りの字は、写せなかった表の理由を**もう含んでいる**
@@ -1369,8 +1389,8 @@ function noteLineCore(p: AppState['sqlPage']): string {
   if (p.saved !== '')
     return p.savedKind === 'file'
       ? // ⚠ **落ちた先は言えない** ── ブラウザの設定(既定の保存先 / 毎回聞く)で変わる
-        `「${p.saved}」というファイルに書き出しました(ブラウザの保存先をご覧ください)${cappedTail(p.savedCapped)}${where}`
-      : `「${p.saved}」というノートに書き出しました(左の一覧に出ています)${cappedTail(p.savedCapped)}${where}`;
+        `「${p.saved}」というファイルに書き出しました(ブラウザの保存先をご覧ください)${cappedTail(p.savedCapped)}${formulaLikeTail(p.savedFormulaLike)}${where}`
+      : `「${p.saved}」というノートに書き出しました(左の一覧に出ています)${cutRowsTail(p.savedCutRows)}${cappedTail(p.savedCapped)}${where}`;
   /**
    * 🔴 **どちらを調べているかを、打つ前から言う**(#681 段③ の 2 つ目)。
    * ⚠ 言わないと「ノートを数えたつもりで、よその DB を数えていた」に気づけない。
@@ -1425,6 +1445,16 @@ function noteLineCore(p: AppState['sqlPage']): string {
  */
 function cappedTail(n: number): string {
   return n > 0 ? `。${cappedCellsNote(n)}` : '';
+}
+
+/** 🔴 ノートに入れなかった行の数(#1163 依頼 133)。 */
+function cutRowsTail(n: number): string {
+  return n > 0 ? `。${sqlNoteCutNote(n)}` : '';
+}
+
+/** 🔴 式に見える値の数(#1163 依頼 134)。⚠ ファイルへの書き出しにだけ付ける(ノートは表計算ソフトで開かない)。 */
+function formulaLikeTail(n: number): string {
+  return n > 0 ? `。${formulaLikeNote(n)}` : '';
 }
 
 function windowNote(rows: number): string {

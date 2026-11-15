@@ -84,6 +84,15 @@ export interface SearchTerms {
   exclude: string[];
 }
 
+/**
+ * 🔴 **全角の引用符・全角のマイナスも、半角と同じに読む**(#1163 依頼 135、推薦 A)。
+ * ⚠ 日本語入力のまま打つと `“会議 メモ”` や `－メモ` になる ── 直す前はただの字として探し、
+ *   語句は 0 件、除外は「－メモ」という字を探していた。
+ * ⚠ 帰結: 全角の記号そのものは、探す面ではこの書き方の記号として読まれる(推薦 A の承知の上)。
+ */
+const QUOTE_CHARS = new Set(['"', '\u201C', '\u201D', '\uFF02']); // " “ ” ＂
+const MINUS_CHARS = new Set(['-', '\uFF0D', '\u2212']); // - － −
+
 export function parseSearchTerms(query: string): SearchTerms {
   const include: string[] = [];
   const exclude: string[] = [];
@@ -98,7 +107,7 @@ export function parseSearchTerms(query: string): SearchTerms {
     atStart = true;
   };
   for (const ch of query) {
-    if (ch === '"') {
+    if (QUOTE_CHARS.has(ch)) {
       quoted = !quoted;
       atStart = false;
       continue;
@@ -107,7 +116,7 @@ export function parseSearchTerms(query: string): SearchTerms {
       flush();
       continue;
     }
-    if (atStart && ch === '-') {
+    if (atStart && MINUS_CHARS.has(ch)) {
       neg = true;
       atStart = false;
       continue;

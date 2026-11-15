@@ -129,6 +129,37 @@ export function csvEscapeField(field: string, delimiter: string): string {
   return field;
 }
 
+/**
+ * 🔴 **表計算ソフトで開くと式として動きうる値か**(#1163 依頼 134、推薦 B)。
+ *
+ * 🔑 **値は変えない** ── 先頭に `'` を足す等の書き換えは、PKC へ読み戻したときに字が変わる。
+ *   だから書き出す側は数えて**知らせるだけ**にする。
+ * ⚠ `=` / `@` / 先頭のタブ・改行は常に数える。`+` / `-` は**ただの数**(`-12` / `+3.5e2`)なら数えない
+ *   (負の数ばかりの表で毎回注意が出ると、注意が読まれなくなる)。
+ */
+const PLAIN_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+export function isFormulaLikeValue(v: unknown): boolean {
+  if (typeof v !== 'string' || v === '') return false;
+  const c = v[0];
+  if (c === '=' || c === '@' || c === '\t' || c === '\r') return true;
+  if (c === '+' || c === '-') return !PLAIN_NUMBER.test(v);
+  return false;
+}
+
+/** 行の並びの中で、式として動きうる値の数(依頼 134)。 */
+export function countFormulaLike(rows: readonly (readonly unknown[])[]): number {
+  let n = 0;
+  for (const r of rows) for (const v of r) if (isFormulaLikeValue(v)) n += 1;
+  return n;
+}
+
+/** 式に見える値の数を user に言う 1 文(0 のときは空)。⚠ 画面の字なので `ui-terms` の門を通る。 */
+export function formulaLikeNote(n: number): string {
+  return n > 0
+    ? `= などで始まる値が ${String(n)} 個あります(表計算ソフトで開くと式として動くことがあります。値はそのまま書き出しました)`
+    : '';
+}
+
 export function parseCsv(
   src: string,
   delimiter: string,

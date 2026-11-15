@@ -51,6 +51,7 @@ export interface DuckDbHandle {
 }
 
 import type { DuckDbRaw } from '@features/query/duckdb-rows';
+import { DUCKDB_HOLD_IDLE_MIN } from '@features/query/duckdb-write';
 
 /**
  * 🔴 **時間の門に掛かったときの断り**(#682 段②)。
@@ -111,11 +112,14 @@ export interface DuckDbJob {
    *
    * ⚠ 書き込み(`CREATE TABLE` / `INSERT` …)で**作った表は器の中にしか無い** ──
    *   しばらく使わないからと畳むと、**user が作った表が黙って消える**
-   *   (画面は「ウィンドウを閉じると消えます」と言っているのに、30 秒で消える)。
+   *   (画面は「ウィンドウを閉じるか、10 分使わないと消えます」と言っているのに、30 秒で消える)。
    * 🔑 だから `hold` が立った回が通った後は**アイドルで畳まない**。畳まれるのは
    *   ①ウィンドウを閉じたとき(プロセスごと)②相手を替えたとき(器を作り直す)
    *   ③時間の門に掛かったとき ④明示の `release()` のどれかだけである。
    * ⚠ 読むだけの回は今までどおり 30 秒で畳む(常駐メモリを返す規律は変えない)。
+   * 🔴 **ただし `hold` 中も、長く使わなければ畳む**(#1163 依頼 370、推薦 B)── 間隔は
+   *   `DEFAULT_HOLD_IDLE_MIN` 分。畳んだことは `takeHeldExpired()` が次の 1 回だけ返し、画面が 1 行で言う
+   *   (黙って消すと「作った表が無い」が理由なしに出る)。
    */
   readonly hold?: boolean;
 }
@@ -129,6 +133,11 @@ export interface DuckDbLeaseOptions {
    * (起こすのに実測 1.28 秒かかる)。
    */
   idleMs?: number;
+  /**
+   * 🔴 **書き込みで作った表を持っている間(`hold`)のアイドル間隔**(ms)。既定 `DEFAULT_HOLD_IDLE_MS`(10 分)。
+   * ⚠ 普段どおり使い続けている間は表が残り、放っておけばメモリ(約 180MB)が返る(#1163 依頼 370)。
+   */
+  holdIdleMs?: number;
   /** タイマー(test が差し替える ── 実時間を待たないため)。 */
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (h: unknown) => void;
@@ -142,6 +151,29 @@ export interface DuckDbLeaseOptions {
  */
 export const DEFAULT_IDLE_SEC = 30;
 export const DEFAULT_IDLE_MS = DEFAULT_IDLE_SEC * 1000;
+/**
+ * 🔴 **作った表を持っている器を畳むまでの間隔(分)**(#1163 依頼 370、推薦 B)。
+ * ⚠ 画面の字(「N 分使わなかったので…」)はこの定数から導く(`DEFAULT_IDLE_SEC` と同じ理由)。
+ *   **分を正本にして、ミリ秒はそこから作る**。
+ */
+export const DEFAULT_HOLD_IDLE_MIN = DUCKDB_HOLD_IDLE_MIN;
+export const DEFAULT_HOLD_IDLE_MS = DEFAULT_HOLD_IDLE_MIN * 60 * 1000;
+
+/** 🔴 落ちた回にも「作った表は時間で消えた」を運ぶ印(#1163 依頼 370)。⚠ 呼び側は `duckHeldExpiredOf` で読む。 */
+export interface DuckHeldExpiredMark {
+  duckHeldExpired?: boolean;
+}
+export function duckHeldExpiredOf(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as DuckHeldExpiredMark).duckHeldExpired === true;
+}
+
+/**
+ * 🔴 **作った表が時間で消えたことを言う 1 行**(#1163 依頼 370)。⚠ 分は**引数**で受ける ── 呼び側は
+ *   `DEFAULT_HOLD_IDLE_MIN` を渡す(test が別の分を渡して「字が間隔に従う」を見られる。`duckdbWarmupNote` と同じ作法)。
+ */
+export function duckHeldExpiredNote(min: number): string {
+  return `作った表は、${String(min)} 分使わなかったので消えました(メモリを返すため。要るときは作り直してください)`;
+}
 
 export class DuckDbLease {
   private handle: DuckDbHandle | null = null;
@@ -150,14 +182,23 @@ export class DuckDbLease {
   private loadedKey: string | null = null;
   /** 🔴 書き込みが通った後は `true`(アイドルで畳まない。⚠ 畳んだら必ず `false` へ戻す)。 */
   private held = false;
+  /** 🔴 `hold` 中にアイドルで畳んだ(作った表が消えた)。⚠ `takeHeldExpired()` が 1 度だけ返して下ろす。 */
+  private heldExpired = false;
+  /**
+   * 🔴 **時間で畳んだときに入っていた相手**(着地前レビュー ⚠4)。⚠ 相手を替えた後の最初の回に、
+   *   前の相手で作った表の話を出さない ── `takeHeldExpired(key)` が鍵を比べる。
+   */
+  private heldExpiredKey: string | null = null;
   private flying = 0;
   private timer: unknown = null;
   private readonly idleMs: number;
+  private readonly holdIdleMs: number;
   private readonly setTimer: (fn: () => void, ms: number) => unknown;
   private readonly clearTimer: (h: unknown) => void;
 
   constructor(private readonly opts: DuckDbLeaseOptions) {
     this.idleMs = opts.idleMs ?? DEFAULT_IDLE_MS;
+    this.holdIdleMs = opts.holdIdleMs ?? DEFAULT_HOLD_IDLE_MS;
     this.setTimer = opts.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
     this.clearTimer = opts.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
   }
@@ -165,6 +206,17 @@ export class DuckDbLease {
   /** いま起きているか。⚠ **test と計測のための観測点**(製品の分岐には使わない)。 */
   get awake(): boolean {
     return this.handle !== null;
+  }
+
+  /**
+   * 🔴 **作った表を、時間がたったので畳んだか**(#1163 依頼 370)。⚠ **読むと下ろす**(次の 1 回だけ言う)。
+   * 🔑 呼び側(`DuckDbRunner.run`)は打つ**前に**読む ── 器を起こし直した後では区別が付かない。
+   */
+  takeHeldExpired(key?: string): boolean {
+    const v = this.heldExpired && (key === undefined || key === this.heldExpiredKey);
+    this.heldExpired = false;
+    this.heldExpiredKey = null;
+    return v;
   }
 
   /**
@@ -265,9 +317,10 @@ export class DuckDbLease {
       this.flying -= 1;
       /**
        * ⚠ **飛んでいる間は畳まない** ── 0 になった回だけ時計を張り直す。
-       * 🔴 **書き込みで作った物を持っている間は、時計そのものを張らない**(`hold`)。
+       * 🔴 **書き込みで作った物を持っている間は、長い時計を張る**(`hold`。#1163 依頼 370 ──
+       *   以前は張らず、ページを読み込み直すまで約 180MB が残り続けた)。
        */
-      if (this.flying === 0 && !this.held) this.armIdle();
+      if (this.flying === 0) this.armIdle(this.held ? this.holdIdleMs : this.idleMs);
     }
   }
 
@@ -336,6 +389,8 @@ export class DuckDbLease {
     // ⚠ 畳んだら**差し込んだ物も消える** ── 起こし直した器は空である
     this.loadedKey = null;
     this.held = false;
+    // ⚠ 明示に畳んだ回(面を閉じた)は「時間で消えた」ではない ── 前の印も下ろす
+    this.heldExpired = false;
     if (h === null) return;
     /**
      * ⚠ 畳む側の例外は**飲む** ── ここで投げると、呼び側は「畳めなかった」と
@@ -367,12 +422,22 @@ export class DuckDbLease {
     return p;
   }
 
-  private armIdle(): void {
+  private armIdle(ms: number): void {
     this.cancelIdle();
     this.timer = this.setTimer(() => {
       this.timer = null;
+      // 🔴 作った表を持ったまま時間で畳む回だけ、印を立てる(`release` が `held` を下ろす前に読む)
+      const expired = this.held && this.handle !== null && this.flying === 0;
+      // ⚠ `release` が `loadedKey` を捨てる前に控える
+      const key = this.loadedKey;
+      // ⚠ `release` は控えを**同期に**捨ててから畳む(`await` はその後)── 印はその直後に立てる
+      //   (畳み終わりを待つと、その間に来た次の 1 回が印を読み損ねる)
       void this.release();
-    }, this.idleMs);
+      if (expired) {
+        this.heldExpired = true;
+        this.heldExpiredKey = key;
+      }
+    }, ms);
   }
 
   private cancelIdle(): void {

@@ -124,6 +124,7 @@ export function withSqlSourceSet(
         saved: '',
         // 🔴 組が変われば、写した報告も別の話になる(次に写すまで空)
         duckCopy: null,
+        duckHeldExpired: false,
         duckLoading: false,
         er: er.er,
       },
@@ -310,6 +311,16 @@ export interface SqlPageState {
    */
   readonly savedCapped: number;
   /**
+   * 🔴 **書き出した CSV / TSV の中で、表計算ソフトで式として動きうる値の数**(#1163 依頼 134、推薦 B)。
+   * ⚠ 値は変えずに数えて言うだけ。`saved` と一緒に `SQL_SAVED` が書く。0 のときは何も言わない。
+   */
+  readonly savedFormulaLike: number;
+  /**
+   * 🔴 **ノートへ書き出したとき、セルの上限で入れなかった行の数**(#1163 依頼 133、推薦 C)。
+   * ⚠ `saved` と一緒に `SQL_SAVED` が書く。0 のときは何も言わない。
+   */
+  readonly savedCutRows: number;
+  /**
    * 🔴 **前に打った字**(#918 段②a。user 要望 2026-09-14「打つ所がお粗末」)。
    * ⚠ **新しいものが先頭**。⚠ **この窓の中だけ**(読み直したら消える)──
    *   打った SQL は user のデータではなく、その場の手なので憶えない。
@@ -424,6 +435,11 @@ export interface SqlPageState {
    *   「写せなかった表」が出る(名札は新しいのに中身は前の組 ── いちばん気づけない外し方)。
    */
   readonly duckCopy: DuckDbCopyReport | null;
+  /**
+   * 🔴 **いまの答え(または断り)の回、作った表が時間で消えていた**(#1163 依頼 370、推薦 B)。
+   * ⚠ `SET_SQL_RESULT` / `SQL_RUN_FAILED` が毎回書き直す(次の回には残さない ── 1 行で済ませる)。
+   */
+  readonly duckHeldExpired: boolean;
   /**
    * 🔴 **いまの回が、DuckDB の器へ表を読み込んでいる最中か**(#682 の最後の 1 件)。
    * ⚠ 「走っている」(`running`)とは別 ── 器が起きていて読み込み済みなら、DuckDB の回でも**読み込まない**ので、
@@ -2413,6 +2429,8 @@ export const initialState: AppState = {
     saved: '',
     savedKind: 'note',
     savedCapped: 0,
+    savedFormulaLike: 0,
+    savedCutRows: 0,
     history: [],
     historyAt: -1,
     historyDraft: '',
@@ -2424,6 +2442,7 @@ export const initialState: AppState = {
     guestChosen: '',
     runToken: 0,
     duckCopy: null,
+    duckHeldExpired: false,
     duckLoading: false,
     er: {
       open: false,
@@ -2661,7 +2680,7 @@ export type UserAction =
    * ⚠ `kind` は**必須**にしてある ── optional にすると、次に書き出す口を足した人が
    *   黙って落とし、**ノートを作っていないのに「ノートに書き出しました」と出る**。
    */
-  | { type: 'SQL_SAVED'; title: string; kind: 'note' | 'file'; capped?: number }
+  | { type: 'SQL_SAVED'; title: string; kind: 'note' | 'file'; capped?: number; formulaLike?: number; cutRows?: number }
   /**
    * 🔴 **書き出せなかった理由**(#681 の着地前レビュー F1)。
    * ⚠ 直す前は編集中に押すと**画面が 1 ドットも動かなかった** ── `CREATE_ENTRY` は
@@ -2722,8 +2741,10 @@ export type UserAction =
        *   (報告は動かさない)。
        */
       copy?: DuckDbCopyReport;
+      /** 🔴 作った表が時間で消えていた回(#1163 依頼 370)。省略 = 消えていない。 */
+      heldExpired?: boolean;
     }
-  | { type: 'SQL_RUN_FAILED'; token: number; sql: string; error: string }
+  | { type: 'SQL_RUN_FAILED'; token: number; sql: string; error: string; heldExpired?: boolean }
   /** 🔴 DuckDB の器が表の読み込みを始めた(#682)。⚠ `token` = どの回か(古い回の合図は捨てる)。 */
   | { type: 'SQL_DUCK_LOADING'; token: number }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
