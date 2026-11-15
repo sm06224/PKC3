@@ -122,3 +122,27 @@ describe('対照群: 左の列の欄(toFtsMatch / 既定の planSearch)', () => 
     expect(planSearch('')).toEqual({ kind: 'none' });
   });
 });
+
+/**
+ * 🔴 **全角の引用符・全角のマイナスも、半角と同じ「語句」「除外」として読む**(#1163 依頼 135、推薦 A)。
+ * ⚠ 日本語入力のまま打つと `“会議 メモ”` や `－メモ` になる。直す前は引用符もマイナスもただの字として探され、
+ *   `“会議 メモ”` は 0 件、`－メモ` は「－メモ」という字を探していた(除外にならない)。
+ */
+describe('探す面の書き方: 全角の引用符とマイナス(依頼 135)', () => {
+  it('全角の二重引用符(“ ” ＂)で囲むと語句になる', () => {
+    expect(parseSearchTerms('“会議 メモ”')).toEqual({ include: ['会議 メモ'], exclude: [] });
+    expect(parseSearchTerms('＂会議 メモ＂')).toEqual({ include: ['会議 メモ'], exclude: [] });
+    // 開きと閉じが混ざっていても語句として読む(打ち方の揺れ)
+    expect(parseSearchTerms('"会議 メモ”')).toEqual({ include: ['会議 メモ'], exclude: [] });
+  });
+  it('語の頭の全角のマイナス(－ −)は除外になる', () => {
+    expect(parseSearchTerms('議事録　－メモ')).toEqual({ include: ['議事録'], exclude: ['メモ'] });
+    expect(parseSearchTerms('議事録 −メモ')).toEqual({ include: ['議事録'], exclude: ['メモ'] });
+  });
+  it('語の途中の全角のマイナスは字のまま(半角と同じ規則)', () => {
+    expect(parseSearchTerms('A－B')).toEqual({ include: ['A－B'], exclude: [] });
+  });
+  it('対照群: 半角は今までどおり', () => {
+    expect(parseSearchTerms('"会議 メモ" -下書き')).toEqual({ include: ['会議 メモ'], exclude: ['下書き'] });
+  });
+});
