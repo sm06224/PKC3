@@ -25,8 +25,20 @@ describe('cellNumber(升の字を数として読む)', () => {
       expect(cellNumber(s), s).toBeNull();
     }
   });
-  it('¥ 円 % の付いた升・空・語は、これまでどおり読まない', () => {
-    for (const s of ['¥300', '1,200円', '50%', '', '   ', 'あ', '１２３円', '$5']) {
+  /**
+   * 🔴 **先頭の `¥` は数として読む**(#1163 依頼 222。user 裁定 2026-11-15 で依頼 307 の「読まない」を置き換えた)。
+   * ⚠ もとの test は「通貨の読み方は表によって違うので `¥` も読まない」を pin していた ── 後ろに付く単位(`円` `%`)は
+   *   その理由が今も当たるので読まないまま。頭に付く `¥` だけを読む(表の並べ替えと同じ読み方)。
+   */
+  it('🔴 先頭の ¥(全角も)は落として読む / 符号の前後どちらでも', () => {
+    expect(cellNumber('¥300')).toBe(300);
+    expect(cellNumber('￥1,200')).toBe(1200);
+    expect(cellNumber('-¥300')).toBe(-300);
+    expect(cellNumber('¥-300')).toBe(-300);
+    expect(cellNumber('¥１２３')).toBe(123);
+  });
+  it('円 % $ の付いた升・途中の ¥・空・語は、これまでどおり読まない', () => {
+    for (const s of ['1,200円', '50%', '', '   ', 'あ', '１２３円', '$5', '3¥', '¥', '¥あ']) {
       expect(cellNumber(s), s).toBeNull();
     }
   });
@@ -34,16 +46,19 @@ describe('cellNumber(升の字を数として読む)', () => {
 
 describe('式の中の升', () => {
   const row = [['1,200', '１２３', '¥300', '50%', '1,200円']];
-  it('🔴 SUM は 1,200 と １２３ を足す(読めない 3 升は今までどおり飛ばす)', () => {
-    expect(evaluateFormula('=SUM(A1:E1)', row).text).toBe('1323');
-    expect(evaluateFormula('=COUNT(A1:E1)', row).text).toBe('2');
+  it('🔴 SUM は 1,200 と １２３ と ¥300 を足す(円 % の 2 升は今までどおり飛ばす)', () => {
+    expect(evaluateFormula('=SUM(A1:E1)', row).text).toBe('1623');
+    expect(evaluateFormula('=COUNT(A1:E1)', row).text).toBe('3');
   });
   it('🔴 =A1+1 は 1201、全角も', () => {
     expect(evaluateFormula('=A1+1', row).text).toBe('1201');
     expect(evaluateFormula('=B1*2', row).text).toBe('246');
   });
-  it('対照群:¥ 円 % の升を足すと、これまでどおり「数として読めません」', () => {
-    for (const ref of ['C1', 'D1', 'E1']) {
+  it('🔴 =C1+1 は 301(¥300 を数として読む。依頼 222)', () => {
+    expect(evaluateFormula('=C1+1', row).text).toBe('301');
+  });
+  it('対照群:円 % の升を足すと、これまでどおり「数として読めません」', () => {
+    for (const ref of ['D1', 'E1']) {
       const r = evaluateFormula(`=${ref}+1`, row);
       expect(r.text, ref).toBe('#ERR!');
       expect(r.why ?? '', ref).toContain('数として読めません');
