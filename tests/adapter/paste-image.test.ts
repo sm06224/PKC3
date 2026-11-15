@@ -202,6 +202,48 @@ describe('スクショの貼付(#250)', () => {
     expect(calls.attach, '編集中なのに添付へ回した').toHaveLength(0);
   });
 
+  /**
+   * 🔴 **待つ間にほかの欄へ移っていたら、焦点を奪わず、貼った時点の位置に入れる**(#1163 依頼 250、案どおり)。
+   */
+  it('🔴 待つ間に別の欄へ移っていたら、焦点を戻さず、貼った時点の位置に入れる', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { ta, outside } = setup({
+      pasteImages: async (files) => {
+        await gate;
+        return files.map((_, i) => `![ず](asset:k${i + 1})`);
+      },
+    });
+    ta.value = 'まえ|うしろ';
+    ta.focus();
+    ta.selectionStart = 2;
+    ta.selectionEnd = 2;
+    ta.dispatchEvent(pasteEvent([{ kind: 'file', type: 'image/png', file: png() }]));
+    // ⚠ 待つ間に、題名の欄(ここでは外の欄)へ移り、本文の caret も末尾へ動いた
+    outside.focus();
+    ta.selectionStart = ta.value.length;
+    ta.selectionEnd = ta.value.length;
+    const inputs: string[] = [];
+    ta.addEventListener('input', () => inputs.push(ta.value));
+    release();
+    await vi.waitFor(() => expect(ta.value).toContain('asset:k1'));
+    expect(ta.value, '貼った時点の位置ではない(いまの caret に入った)').toBe('まえ![ず](asset:k1)\n|うしろ');
+    expect(document.activeElement, '本文へ焦点を戻した(移った先から追い出した)').toBe(outside);
+    expect(inputs.length, 'input を撃っていない(保存に入らない)').toBe(1);
+  });
+
+  it('⚠ 対照群 ── 本文に居たままなら、今までどおり caret の位置に入る', async () => {
+    const { ta } = setup();
+    ta.value = 'まえ|うしろ';
+    ta.focus();
+    ta.selectionStart = 2;
+    ta.selectionEnd = 2;
+    ta.dispatchEvent(pasteEvent([{ kind: 'file', type: 'image/png', file: png() }]));
+    await vi.waitFor(() => expect(ta.value).toContain('asset:k1'));
+    expect(ta.value).toBe('まえ![ず](asset:k1)\n|うしろ');
+    expect(document.activeElement).toBe(ta);
+  });
+
   it('🔑 クリップボードの画像を**全部**拾う(PKC2 は先頭 1 枚だけだった)', async () => {
     const { ta, calls } = setup();
     // ⚠ **本文の途中に caret を置く** ── 末尾だと、差し込みが caret を進めなくても

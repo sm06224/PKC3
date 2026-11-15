@@ -21098,6 +21098,22 @@ export function bindActions(
   };
 
   /**
+   * 🔴 **焦点を動かさずに、貼り付けた時点の位置へ字を入れる**(#1163 依頼 250)。
+   * ⚠ 位置は待つ間に本文の長さが変わっていても欄の外へ出ないよう丸める。⚠ 欄の選択(caret)は動かさない。
+   */
+  const insertAtPastedPlace = (
+    ta: HTMLTextAreaElement,
+    at: { readonly start: number; readonly end: number },
+    text: string,
+  ): void => {
+    const len = ta.value.length;
+    const start = Math.min(Math.max(0, at.start), len);
+    const end = Math.min(Math.max(start, at.end), len);
+    ta.setRangeText(text, start, end, 'preserve');
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  /**
    * 🔴 **待ったあとの差し先**(#250 / #251 で共用)。⚠ 待っている間に
    * ① 編集欄が作り直される(live の面は行を組み直す)② 取り消して別のノートを
    * 開き直す ── のどちらも起きるので、**掴んだままの textarea へ差さない**。
@@ -21119,6 +21135,11 @@ export function bindActions(
     //   待っている間に取り消して別のノートを開き直すと、`formatTarget` は
     //   **新しい編集欄**を返す = 取り消したはずの貼付が別のノートに現れる。
     const openedLid = dispatcher.getState().openBody?.lid ?? null;
+    /**
+     * 🔴 **貼り付けた時点の位置を控える**(#1163 依頼 250、案どおり)── 待つ間に user が題名の欄などへ移っていたら、
+     *   本文へ焦点を戻さず、画像はこの位置に入れる(いまの caret の位置ではない)。
+     */
+    const pastedAt = { start: from.selectionStart ?? from.value.length, end: from.selectionEnd ?? from.value.length };
     void services.pasteImages!(files).then((refs) => {
       // 🔴 **待っている間に編集欄が作り直されることがある**(live の面は行を組み直す)。
       //   掴んだままの textarea へ差すと、**画面に出ていない所へ字を書く** ──
@@ -21156,6 +21177,18 @@ export function bindActions(
             error: '編集欄が閉じたため貼り付けられませんでした。もう一度貼ってください',
           });
         }
+        return;
+      }
+      /**
+       * 🔴 **待つ間にほかの欄へ移っていたら、焦点を奪わない**(#1163 依頼 250)── 打っている題名の字が
+       *   本文へ飛ぶ / 選んでいた欄から追い出される。画像は**貼り付けた時点の位置**に入れる。
+       * ⚠ そのときは `execCommand` が使えない(焦点の無い欄には効かない)ので `setRangeText` + `input` で書く
+       *   (`UPDATE_OPEN_BODY` を通すため ── 撃たないと保存に入らない)。
+       */
+      const now = into.ownerDocument.activeElement;
+      const movedAway = now !== null && now !== into.ownerDocument.body && now !== into && now !== from && now.isConnected;
+      if (movedAway) {
+        insertAtPastedPlace(into, pastedAt, refs.map((ref) => `${ref}\n`).join(''));
         return;
       }
       // ⚠ `execCommand` は**焦点のある要素**に効く ── 待っている間に焦点が
