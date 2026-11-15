@@ -6273,10 +6273,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           const svg = await renderToSvg(source, readPalette());
           // ⚠ mermaid は `<?xml?>` を付けない ── 素の `<svg>` でも image/svg+xml で
           // ブラウザは開ける。ここで宣言を足すと二重宣言の壊れた形になりうる
-          downloadBlob(
-            diagramFileName(title, index),
-            new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }),
-          );
+          const name = diagramFileName(title, index);
+          downloadBlob(name, new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+          // 🔴 落とした名前を返す ── 押した側が「保存しました」と言う(#1163 依頼 101-3)
+          return name;
         } catch (e) {
           // 黙って何も起きないのが一番悪い ── 失敗も可視で終える
           dispatcher.dispatch({

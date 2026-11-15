@@ -2776,7 +2776,11 @@ export interface BinderServices {
    * @param lid 図の載っているノート(⚠ 省略すると本体で選んでいるノート ── 章の別ウィンドウや
    *   留めた枠の図は、押した所から引いた lid を渡す)
    */
-  exportDiagram?(source: string, index: number, lid?: string): void | Promise<void>;
+  /**
+   * 図を SVG で書き出す。⚠ 書き出せたら**落とした file の名前**で解決する(#1163 依頼 101-3 ── 押した側が「保存しました」と言う)。
+   *   失敗は受け手が `OP_FAILED` で言うので、名前の無い解決(`undefined`)になる。
+   */
+  exportDiagram?(source: string, index: number, lid?: string): void | Promise<void | string>;
   /** 文字列をクリップボードへ(P8 段⑱)。⚠ 失敗も可視で終える。 */
   /**
    * clipboard へ写す。
@@ -14056,7 +14060,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 「何枚目か」は**描いた側の並び**から数える ── 器に番号を焼き込むと、
    * 図を 1 個消したときに番号が飛ぶ
    */
-  'export-diagram': (_dispatcher, target, services, root) => {
+  'export-diagram': (dispatcher, target, services, root) => {
     const host = target.closest<HTMLElement>('[data-pkc-mermaid-src]');
     const source = host?.getAttribute('data-pkc-mermaid-src');
     if (!host || !source) return;
@@ -14093,7 +14097,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     //    そのまま流すので、service が reject すると**未処理の rejection**になる
     //    (実際に test の stderr で出た。この repo は stderr 0 行を保つ規律)。
     //    失敗の**報告**は service 側が持つ ── ここは見た目を戻すだけ
-    void done.then(reset, reset);
+    void done.then((name) => {
+      reset();
+      // 🔴 **終わったら言う**(#1163 依頼 101-3、推薦 A)── 表の「.csv で保存」と同じ字。ブラウザのダウンロード表示に
+      //   気づかない人には、押したのに何も起きなかったように見える
+      if (typeof name === 'string' && name !== '') dispatcher.dispatch({ type: 'OP_NOTICE', message: `「${name}」を保存しました` });
+    }, reset);
   },
   /**
    * 🔴 **番号付きリストの番号を振り直す**(#396)。
