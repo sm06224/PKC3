@@ -2966,6 +2966,34 @@ function updateEntryColumn(
  */
 const CSV_INSERT_CHUNK = 500;
 
+/**
+ * 🔴 **この PKC3 を SQL で調べるとき、アプリのノート(system 領域)を除いて見せる**(#1163 依頼 226、案どおり)。
+ *
+ * 🔑 同じ名前の **temp の view** で `entries` / `relations` / `revisions` を覆う ── SQLite は修飾の無い名前を
+ *   **temp → main** の順に探すので、user の `SELECT … FROM entries` はそのまま user 領域だけを見る(打つ字を書き換えない)。
+ * ⚠ 除外の口は `USER_REALM_SQL` の 1 本(§1.1「領域の判定は 1 か所」)── `realm = 'user'` を書き写さない。
+ * ⚠ `main.entries` と修飾して打てば全部が見える(開発・不具合の報告の逃げ道。画面からは辿らない)。
+ * ⚠ 本文の csv で同じ名前の表を作っていたら、そちらを優先する(user が名前を付けた表を覆わない)── 作れなかった view は飛ばす。
+ *
+ * @param views 作った view の名前を積む先(`finally` で必ず落とす)
+ */
+function shadowSystemRealm(database: Database, views: string[]): void {
+  const userLids = `SELECT lid FROM main.entries WHERE ${USER_REALM_SQL}`;
+  const defs: ReadonlyArray<readonly [string, string]> = [
+    ['entries', `SELECT * FROM main.entries WHERE ${USER_REALM_SQL}`],
+    ['relations', `SELECT * FROM main.relations WHERE from_lid IN (${userLids}) AND to_lid IN (${userLids})`],
+    ['revisions', `SELECT * FROM main.revisions WHERE entry_lid IN (${userLids})`],
+  ];
+  for (const [name, select] of defs) {
+    try {
+      database.exec({ sql: `CREATE TEMP VIEW "${name}" AS ${select}` });
+      views.push(name);
+    } catch {
+      // 同じ名前の temp の表(本文の csv)が在る ── user が付けた名前を優先する
+    }
+  }
+}
+
 function buildCsvTables(database: Database, sql: string, made: string[]): void {
   /**
    * ⚠ **粗く絞ってから正しく読む** ── `name=` は本文のどこにでも書けるので、
@@ -3793,6 +3821,8 @@ const handlers: Handlers = {
      *   大きな表で実際に残った)。積む先を渡せば、投げても `finally` が拾う。
      */
     const made: string[] = [];
+    /** 🔴 system 領域を覆う temp の view(#1163 依頼 226)。⚠ `made` と同じく `finally` で必ず落とす。 */
+    const views: string[] = [];
     try {
       /**
        * 🔴 **`query_only` を掛ける前に組み立てる**(#681 段③)── temp の表を
@@ -3805,6 +3835,8 @@ const handlers: Handlers = {
        *   別の器なので、そこへノートの表を混ぜると「どちらの話か」が消える。
        */
       if (!guest) buildCsvTables(database, req.sql, made);
+      // 🔴 アプリのノートを除いて見せる(#1163 依頼 226)── 客の DB には PKC3 の領域が無いので覆わない
+      if (!guest) shadowSystemRealm(database, views);
       database.exec({ sql: 'PRAGMA query_only = 1' });
       setProgress(pointer, PROGRESS_EVERY, fn, 0);
       if (setLimit !== undefined) oldLength = setLimit(pointer, SQLITE_LIMIT_LENGTH, SQL_MAX_VALUE_BYTES);
@@ -3896,6 +3928,13 @@ const handlers: Handlers = {
               database.exec({ sql: `DROP TABLE IF EXISTS temp."${name}"` });
             } catch {
               // 落とせなくても、次の回が作り直す前に落とす
+            }
+          }
+          for (const name of views) {
+            try {
+              database.exec({ sql: `DROP VIEW IF EXISTS temp."${name}"` });
+            } catch {
+              // 落とせなくても、次の回の CREATE が失敗して飛ばすだけ(覆いが古い中身を返すことは無い ── view は都度読む)
             }
           }
         }

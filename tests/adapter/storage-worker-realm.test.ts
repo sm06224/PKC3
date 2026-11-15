@@ -221,6 +221,52 @@ describe('system 領域のノートは user 向けの読み手から漏れない
    * ⚠ user 向けの読み手ではあるが、`cid` を持たない op(`runReadOnlySql`)なので
    * 別枠 ── system のノートに csv 風の中身を持たせ、表に出ないことを見る。
    */
+  /**
+   * 🔴 **SQL の画面で調べると、アプリのノート(system 領域)は出ない**(#1163 依頼 226、案どおり)。
+   * ⚠ 打つ字はそのまま(`FROM entries`)── 覆いは temp の view。終わったら落ちる(保存の口へ残らない)。
+   */
+  it('runReadOnlySql: FROM entries に system のノートが出ない / user は出る / 終わると覆いは消える', async () => {
+    await put('u-226', 'ユーザーの本文');
+    await put('s-226', 'アプリの本文', { realm: 'system' });
+    const r = await request({
+      op: 'runReadOnlySql',
+      sql: `SELECT lid FROM entries WHERE lid IN ('u-226', 's-226') ORDER BY lid`,
+      maxRows: 100,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+    });
+    expect(r.rows.map((row) => row[0]), 'user のノートが引けない(空振り)/ system のノートが出た').toEqual(['u-226']);
+    // 🔑 逃げ道: 修飾すれば元の表(開発・不具合の報告用)
+    const raw = await request({
+      op: 'runReadOnlySql',
+      sql: `SELECT lid FROM main.entries WHERE lid IN ('u-226', 's-226') ORDER BY lid`,
+      maxRows: 100,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+    });
+    expect(raw.rows.map((row) => row[0])).toEqual(['s-226', 'u-226']);
+    // ⚠ 覆いは残らない(temp の view が 0 個)
+    const left = await request({
+      op: 'runReadOnlySql',
+      sql: `SELECT count(*) FROM temp.sqlite_master WHERE type = 'view' AND name IN ('entries', 'relations', 'revisions')`,
+      maxRows: 10,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+    });
+    // この問い合わせの間は覆っているので 3、終わった後は 0 ── 間に見えるのは 3 であることだけを確かめる
+    expect(left.rows[0]![0], '覆いが 3 つ揃っていない').toBe(3);
+    // 🔴 終わった後は覆いが無い ── 残っていると、次の保存(`entries` への書き込み)が view に当たって落ちる
+    await put('u-226b', '後から保存');
+    const after = await request({
+      op: 'runReadOnlySql',
+      sql: `SELECT lid FROM main.entries WHERE lid = 'u-226b'`,
+      maxRows: 10,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+    });
+    expect(after.rows.map((row) => row[0]), '覆いが残って保存が落ちた').toEqual(['u-226b']);
+  });
+
   it('本文の csv(runReadOnlySql 経由): system の本文は表にならない / user は表になる', async () => {
     const fence = (info: string, lines: readonly string[]): string =>
       ['```' + info, ...lines, '```', ''].join('\n');
@@ -269,7 +315,9 @@ describe('互換は双方向(CLAUDE.md 不変条件 5)── realm を知らな�
     //   §1「主張そのものが成り立たない」を踏みうる(前提を assert する)
     const r = await request({
       op: 'runReadOnlySql',
-      sql: `SELECT lid, title FROM entries WHERE cid = '${CID}' ORDER BY entry_order`,
+      // ⚠ 旧ビルドは表を直に読む ── SQL の画面は #1163 依頼 226 で `entries` を user 領域の view で覆うので、
+      //   旧ビルドの読み方は `main.entries`(覆いの無い元の表)で再現する
+      sql: `SELECT lid, title FROM main.entries WHERE cid = '${CID}' ORDER BY entry_order`,
       maxRows: 100,
       maxSteps: 1_000_000,
       maxMs: 60_000,
