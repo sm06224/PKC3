@@ -541,6 +541,8 @@ export function reduceSql(state: AppState, action: SqlAction): ReduceResult {
             savedCapped: action.capped ?? 0,
             savedFormulaLike: action.formulaLike ?? 0,
             savedCutRows: action.cutRows ?? 0,
+            // ⚠ 書き出しの知らせに、前の回の「作った表が消えました」を並べない(着地前レビュー 💭)
+            duckHeldExpired: false,
           },
         },
         events: [],

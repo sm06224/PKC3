@@ -973,6 +973,28 @@ describe('答えをノートへ書き出す(#681 段③ の 3 つ目)', () => {
     }
   }, 60_000);
 
+  /**
+   * 🔴 **切った升の数は、ノートに入った行だけで数える**(着地前レビュー ⚠2)。
+   * ⚠ 入らなかった行にだけ長い値があるとき、「長い値 N 個は切ってあります」と言うと、ノートに無い升の話になる。
+   */
+  it('🔴 ノートへ ── 入らなかった行の長い値は、切った升として数えない', async () => {
+    const cols = ['k', 'v'];
+    const limit = 100_000;
+    const long = `${'あ'.repeat(2000)}…(全 3000 字)`;
+    const rows = Array.from({ length: limit + 2 }, (_, r) => [`r${String(r)}`, r === limit + 1 ? long : 'x']);
+    const { d, type, runBtn, saveBtn, persisted, note } = setup(async () => answer(cols, rows));
+    type('SELECT 1');
+    runBtn.click();
+    await settle();
+    saveBtn.click();
+    await settle();
+    const made = [...d.getState().entryMetas.values()].find((m) => m.title.startsWith('SQL の結果'));
+    const body = persisted.find((e) => e.lid === made?.lid)?.body ?? '';
+    expect(body, '前提: 上限で切っていない').toContain('2 行はノートに入れていません');
+    expect(body, '入らなかった行の長い値を、本文で数えている').not.toContain('先頭 2000 字で切ってあります');
+    expect(note(), '入らなかった行の長い値を、画面で数えている').not.toContain('先頭 2000 字で切ってあります');
+  }, 60_000);
+
   it('🔴 書き出したことを画面が言う(別の窓なので、言わないと押せなかったように見える)', async () => {
     const { type, runBtn, saveBtn, note } = setup(async () => answer(['a'], [[1]]));
     type('SELECT 1 AS a');
@@ -2682,7 +2704,8 @@ describe('打つ所(#918 段②a)', () => {
   it('🔴 ファイルへ ── = などで始まる値の数を言う(JSON では言わない)', async () => {
     const run = async (pick: number): Promise<string> => {
       const { pane, root, type, runBtn } = setup(async () =>
-        answer(['名前', '式'], [['りんご', '=1+1'], ['みかん', '-3'], ['@x', '-y']]),
+        // 🔑 見出しも数える(CSV の 1 行目に出る ── `=` で始まる別名は式として動く。着地前レビュー ⚠3)
+        answer(['名前', '=式'], [['りんご', '=1+1'], ['みかん', '-3'], ['@x', '-y']]),
       );
       type('select 1');
       runBtn.click();
@@ -2704,7 +2727,10 @@ describe('打つ所(#918 段②a)', () => {
     };
     const csv = await run(0);
     expect(csv).toContain('.csv」というファイルに書き出しました');
-    expect(csv, '式に見える値の数(3 個)を言っていない').toContain('= などで始まる値が 3 個あります');
+    expect(csv, '式に見える値の数(見出し 1 + 値 3 = 4 個)を言っていない').toContain('= などで始まる値が 4 個あります');
+    const tsv = await run(1);
+    expect(tsv).toContain('.tsv」というファイルに書き出しました');
+    expect(tsv, 'TSV で式に見える値の数を言っていない').toContain('= などで始まる値が 4 個あります');
     const json = await run(2);
     expect(json).toContain('.json」というファイルに書き出しました');
     expect(json, 'JSON なのに式の話をしている').not.toContain('= などで始まる値');

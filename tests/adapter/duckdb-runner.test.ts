@@ -527,6 +527,15 @@ describe('🔴 書き込みの字を打つと、器を持ち続ける(#918 段�
     expect(after.heldExpired, '2 回目も運んでいる(1 行で済まない)').toBe(false);
   });
 
+  it('🔴 相手を替えた後の最初の回には「消えた」を運ばない(前の相手の話になる。着地前レビュー ⚠4)', async () => {
+    const { runner, readBytes } = make({ idleMs: 5, holdIdleMs: 20 });
+    await runner.run({ sql: 'CREATE TABLE t (a INT)', sources: [{ source: SRC, readBytes }] });
+    await wait(80);
+    expect(runner.awake).toBe(false);
+    const other = await runner.run({ sql: 'SELECT 1', sources: [{ source: PARQUET, readBytes }] });
+    expect(other.heldExpired, '別の相手の回に、前の相手の表が消えた話を運んでいる').toBe(false);
+  });
+
   it('🔴 消えた表を引いて落ちた回も、断りに「消えた」の印が付く', async () => {
     const { runner, open, readBytes } = make({ idleMs: 5, holdIdleMs: 20 });
     await runner.run({ sql: 'CREATE TABLE t (a INT)', sources: [{ source: SRC, readBytes }] });

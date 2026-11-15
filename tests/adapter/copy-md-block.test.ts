@@ -466,14 +466,15 @@ describe('形を選ぶ口(▾)', () => {
    */
   it('🔴 .csv で保存: = などで始まる値は変えずに、数を言う', async () => {
     const sink: { name?: string; blob?: Blob; said?: string[] } = {};
-    const block = blockOf('| 式 | 数 | 名 |\n|---|---|---|\n| =1+1 | -5 | @x |\n| a | +7 | -y |\n');
+    // 🔑 見出しも数える(着地前レビュー ⚠3)
+    const block = blockOf('| =式 | 数 | 名 |\n|---|---|---|\n| =1+1 | -5 | @x |\n| a | +7 | -y |\n');
     handleCopyMdBlock(menuBtn(block), deps('csv-file', sink));
     await flush();
     const text = await sink.blob!.text();
-    expect(text.slice(1), '値を書き換えている').toBe('式,数,名\n=1+1,-5,@x\na,+7,-y');
+    expect(text.slice(1), '値を書き換えている').toBe('=式,数,名\n=1+1,-5,@x\na,+7,-y');
     expect(sink.said).toHaveLength(1);
-    expect(sink.said![0], '式に見える値の数(3 個。ただの数は数えない)を言っていない').toContain(
-      '= などで始まる値が 3 個あります',
+    expect(sink.said![0], '式に見える値の数(見出し 1 + 値 3 = 4 個。ただの数は数えない)を言っていない').toContain(
+      '= などで始まる値が 4 個あります',
     );
   });
 

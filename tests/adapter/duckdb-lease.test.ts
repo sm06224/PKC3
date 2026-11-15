@@ -654,6 +654,28 @@ describe('🔴 作った表を持つ器の 10 分の畳み(依頼 370)', () => {
     expect(lease.takeHeldExpired(), '面を閉じたのに、時間で消えたと言っている').toBe(false);
   });
 
+  it('🔴 相手を替えた後の最初の回には「消えた」を言わない(前の相手の話になる。着地前レビュー ⚠4)', async () => {
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(handle()), ...t });
+    const load = vi.fn(() => Promise.resolve());
+    await lease.run({ sql: 'create table t (a int)', hold: true, data: { key: 'a', load } });
+    t.fire();
+    await Promise.resolve();
+    expect(lease.takeHeldExpired('b'), '別の相手の回に、前の相手の表が消えた話をしている').toBe(false);
+    // 🔑 読んだら下りる(同じ相手へ戻っても、もう言わない)
+    expect(lease.takeHeldExpired('a')).toBe(false);
+  });
+
+  it('⚠ 対照群 ── 同じ相手の回には言う', async () => {
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(handle()), ...t });
+    const load = vi.fn(() => Promise.resolve());
+    await lease.run({ sql: 'create table t (a int)', hold: true, data: { key: 'a', load } });
+    t.fire();
+    await Promise.resolve();
+    expect(lease.takeHeldExpired('a')).toBe(true);
+  });
+
   it('🔴 holdIdleMs を渡せばその間隔で張る(既定は 10 分)', async () => {
     const t = fakeTimers();
     const lease = new DuckDbLease({ open: () => Promise.resolve(handle()), holdIdleMs: 1234, ...t });

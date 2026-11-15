@@ -184,6 +184,11 @@ export class DuckDbLease {
   private held = false;
   /** 🔴 `hold` 中にアイドルで畳んだ(作った表が消えた)。⚠ `takeHeldExpired()` が 1 度だけ返して下ろす。 */
   private heldExpired = false;
+  /**
+   * 🔴 **時間で畳んだときに入っていた相手**(着地前レビュー ⚠4)。⚠ 相手を替えた後の最初の回に、
+   *   前の相手で作った表の話を出さない ── `takeHeldExpired(key)` が鍵を比べる。
+   */
+  private heldExpiredKey: string | null = null;
   private flying = 0;
   private timer: unknown = null;
   private readonly idleMs: number;
@@ -207,9 +212,10 @@ export class DuckDbLease {
    * 🔴 **作った表を、時間がたったので畳んだか**(#1163 依頼 370)。⚠ **読むと下ろす**(次の 1 回だけ言う)。
    * 🔑 呼び側(`DuckDbRunner.run`)は打つ**前に**読む ── 器を起こし直した後では区別が付かない。
    */
-  takeHeldExpired(): boolean {
-    const v = this.heldExpired;
+  takeHeldExpired(key?: string): boolean {
+    const v = this.heldExpired && (key === undefined || key === this.heldExpiredKey);
     this.heldExpired = false;
+    this.heldExpiredKey = null;
     return v;
   }
 
@@ -422,10 +428,15 @@ export class DuckDbLease {
       this.timer = null;
       // 🔴 作った表を持ったまま時間で畳む回だけ、印を立てる(`release` が `held` を下ろす前に読む)
       const expired = this.held && this.handle !== null && this.flying === 0;
+      // ⚠ `release` が `loadedKey` を捨てる前に控える
+      const key = this.loadedKey;
       // ⚠ `release` は控えを**同期に**捨ててから畳む(`await` はその後)── 印はその直後に立てる
       //   (畳み終わりを待つと、その間に来た次の 1 回が印を読み損ねる)
       void this.release();
-      if (expired) this.heldExpired = true;
+      if (expired) {
+        this.heldExpired = true;
+        this.heldExpiredKey = key;
+      }
     }, ms);
   }
 

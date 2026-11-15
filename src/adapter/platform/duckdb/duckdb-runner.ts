@@ -596,7 +596,9 @@ export class DuckDbRunner {
      * 🔴 **打つ前に読む**(#1163 依頼 370)── 作った表が時間で消えていたら、この回の答え(または断り)に添えて
      *   1 行で言う。⚠ 打った後では器が起こし直されていて区別が付かない。
      */
-    const heldExpired = this.lease.takeHeldExpired();
+    const data = this.dataOf(input.sources, input.onLoad);
+    // ⚠ 鍵を渡す ── 相手を替えた後の最初の回に、前の相手で作った表の話を出さない(着地前レビュー ⚠4)
+    const heldExpired = this.lease.takeHeldExpired(data.key);
     const raw = await this.lease.run({
       sql: input.sql,
       maxMs: DUCKDB_MAX_MS,
@@ -610,7 +612,7 @@ export class DuckDbRunner {
        * 🔑 判定は字の門と**同じ 1 本**(`duckDbWriteKind`)。
        */
       hold: duckDbWriteKind(input.sql) !== null,
-      data: this.dataOf(input.sources, input.onLoad),
+      data,
     }).catch((e: unknown) => {
       // 🔴 引いた回が落ちたときは、**どの失敗にも**写せなかった表の理由を添える(`withRefused`)
       const err = this.withRefused(e, multi);

@@ -71,6 +71,19 @@ export function sqlNoteRowLimit(columnCount: number, budget = CSV_TABLE_CELLS_MA
   return Math.max(1, Math.floor(budget / Math.max(1, columnCount)));
 }
 
+/**
+ * 🔴 **ノートへ入れる行と、入れなかった行の数**(依頼 133)。⚠ 切り方はここ 1 か所 ── 本文(`sqlNoteBody`)と
+ *   画面の知らせ(binder の `SQL_SAVED.cutRows` / 切った升の数)が同じ行を数える(2 か所で切ると食い違う。§7)。
+ */
+export function sqlNoteKeptRows<R>(
+  columns: readonly unknown[],
+  rows: readonly R[],
+): { readonly kept: readonly R[]; readonly cut: number } {
+  const limit = sqlNoteRowLimit(columns.length);
+  const kept = rows.length > limit ? rows.slice(0, limit) : rows;
+  return { kept, cut: rows.length - kept.length };
+}
+
 /** 上限で入れなかった行を言う 1 文(0 なら空)。⚠ 画面の字なので `ui-terms` の門を通る。 */
 export function sqlNoteCutNote(cutRows: number, budget = CSV_TABLE_CELLS_MAX): string {
   return cutRows > 0
@@ -107,9 +120,7 @@ export function sqlNoteBody(p: {
   readonly capped?: number;
 }): string {
   // 🔴 #1163 依頼 133: セルの上限で切る(SQL の画面から引き直せる大きさに揃える)
-  const limit = sqlNoteRowLimit(p.columns.length);
-  const kept = p.rows.length > limit ? p.rows.slice(0, limit) : p.rows;
-  const cut = p.rows.length - kept.length;
+  const { kept, cut } = sqlNoteKeptRows(p.columns, p.rows);
   const table = [p.columns.map((c) => csvEscapeField(c, ',')).join(','), ...kept.map((r) => r.map(cell).join(','))].join(
     '\n',
   );

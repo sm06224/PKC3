@@ -850,7 +850,7 @@ import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { countCappedCells } from '@features/query/sql-cell';
 import { countFormulaLike } from '@features/markdown/csv-table';
 import { openFolderLid } from './open-folder-lid';
-import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteRowLimit, sqlNoteTitle } from '@features/query/sql-to-note';
+import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteKeptRows, sqlNoteTitle } from '@features/query/sql-to-note';
 import { labNoteTitle } from '@features/markdown/text-lab';
 import { sheetNoteTitle, sheetToMarkdown, sheetToText } from '@features/calc/sheet';
 import { EFFECT_WRITES, runShellLine, SHELL_HISTORY_CLEARED_TEXT, type OpResult, type ShellOps } from './shell-run';
@@ -17460,8 +17460,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const title = sqlNoteTitle(new Date(), where);
     const lid = generateLid();
     // 🔴 #1163 依頼 133: ノートに入るのはセルの上限まで ── 切った升の数も、入った行だけで数える
-    const keptRows = p.rows.slice(0, sqlNoteRowLimit(p.columns.length));
-    const cutRows = p.rows.length - keptRows.length;
+    const { kept: keptRows, cut: cutRows } = sqlNoteKeptRows(p.columns, p.rows);
     dispatcher.dispatch({
       type: 'CREATE_ENTRY',
       archetype: 'text',
