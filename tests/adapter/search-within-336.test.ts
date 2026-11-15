@@ -189,7 +189,7 @@ describe('配線: 開いているフォルダの中身が worker へ届く(依�
       },
     });
     const st = booted();
-    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [...st.entryMetas.values()], relations: st.relations });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [...st.entryMetas.values()], relations: [...st.relations] });
     d.dispatch({ type: 'SET_SCOPE', lid: 'f1' });
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'りんご' });
     await new Promise((r) => setTimeout(r, 10));
