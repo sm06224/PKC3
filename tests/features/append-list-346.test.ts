@@ -36,3 +36,24 @@ describe('箇条書きの続きに空行を挟まない(依頼 346)', () => {
     expect(appendIntoSection(base, '作業', null, '- 夜')).toBe('# 作業\n\n朝の段落\n\n- 夜\n\n# メモ\n');
   });
 });
+
+/** 着地前レビュー ⚠2 / ⚠3 で足した対照群。 */
+describe('箇条書きの続き ── 境目の形(依頼 346)', () => {
+  it('⚠ 節への追記でも、見出しを付ける回は空行を挟む', () => {
+    const base = '# 作業\n\n- 朝\n\n# メモ\n';
+    expect(appendIntoSection(base, '作業', '## 10:00', '- 夜')).toBe('# 作業\n\n- 朝\n\n## 10:00\n\n- 夜\n\n# メモ\n');
+  });
+
+  it('🔴 CRLF の本文でも、節の箇条書きに続ける(改行は CRLF のまま)', () => {
+    const base = '# 作業\r\n\r\n- 朝\r\n\r\n# メモ\r\n';
+    expect(appendIntoSection(base, '作業', null, '- 夜')).toBe('# 作業\r\n\r\n- 朝\r\n- 夜\r\n\r\n# メモ\r\n');
+    expect(continuesList('- 朝\r', '- 夜')).toBe(true);
+  });
+
+  it('⚠ 引用の中の箇条書き・表の行・水平線は箇条書きと読まない(空行を挟む)', () => {
+    expect(appendBlock('> - 引用\n', null, '- 足す')).toBe('> - 引用\n\n- 足す\n');
+    expect(appendBlock('| - | a |\n', null, '- 足す')).toBe('| - | a |\n\n- 足す\n');
+    expect(appendBlock('* * *\n', null, '- 足す'), '水平線を箇条書きと読んだ').toBe('* * *\n\n- 足す\n');
+    expect(continuesList('- 項目', '- - -'), '足す側の水平線を箇条書きと読んだ').toBe(false);
+  });
+});

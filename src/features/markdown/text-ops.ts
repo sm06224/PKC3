@@ -22,7 +22,7 @@ import { parseCsv } from './csv-table';
 import { escapeLinkLabel, formatMarkdownLink } from './link-format';
 import { lineStart } from './line-start';
 import { TASK_LINE } from './task-line';
-import { LIST_LEAD } from './list-renumber';
+import { LIST_LEAD, THEMATIC_BREAK } from './list-renumber';
 import { tableToMarkdown } from './table-copy';
 
 /** 改行コードの判定は leaf の `line-eol.ts` が正本(#1384)。ここからも使える。 */
@@ -932,7 +932,12 @@ export function appendBlock(base: string, heading: string | null, text: string):
 export function continuesList(before: string, added: string): boolean {
   const prevLine = before.slice(lineStart(before, before.length)).replace(/\r$/, '');
   const firstLine = added.split(/\r?\n/, 1)[0] ?? '';
-  return prevLine.trim() !== '' && LIST_LEAD.test(prevLine) && LIST_LEAD.test(firstLine);
+  return isItem(prevLine) && isItem(firstLine);
+}
+
+/** 箇条書きの項目の行か。⚠ 水平線(`- - -` / `* * *`)は除く(`line-swap.ts` の `isItemLine` と同じ読み方)。 */
+function isItem(line: string): boolean {
+  return line.trim() !== '' && LIST_LEAD.test(line) && !THEMATIC_BREAK.test(line);
 }
 
 /**

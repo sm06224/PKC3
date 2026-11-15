@@ -76,4 +76,18 @@ describe('編集を抜けたら「ノートを編集する」へ位置を戻す(
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文 2\n' });
     expect(document.activeElement, '編集していないのに位置を動かした').not.toBe(editBtn(root));
   });
+
+  it('⚠ 抜けた後の次の描画には持ち越さない(後で選び直しても奪わない。着地前レビュー ⚠1)', () => {
+    const { root, d } = mount();
+    enterEditing(root, d);
+    const elsewhere = document.createElement('input');
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    expect(document.activeElement, '前提: 別の所にいた').toBe(elsewhere);
+    elsewhere.remove();
+    expect(document.activeElement === document.body || document.activeElement === null, '前提: 位置が無い').toBe(true);
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文 3\n' });
+    expect(document.activeElement, '抜けた後の別の描画で位置を奪った').not.toBe(editBtn(root));
+  });
 });

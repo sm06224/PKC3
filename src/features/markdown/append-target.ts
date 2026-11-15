@@ -349,11 +349,10 @@ export function appendIntoSection(
    *   くっつかないように。
    */
   // 🔴 箇条書きの続きには空行を挟まない(#1163 依頼 346 ── 挟むと既存の項目の行間まで広がる)
+  //    ⚠ 後ろは見ない ── 挟む位置は「節の実のある最後の行の次」なので、次は空行か次の見出しで、箇条書きにはならない
   const listBefore = heading === null && at > 0 && continuesList(lines[at - 1]!, body);
-  const lastAdded = body.split(/\r?\n/).pop() ?? '';
-  const listAfter = heading === null && at < lines.length && continuesList(lastAdded, lines[at]!);
   const before = at > 0 && lines[at - 1]!.trim() !== '' && !listBefore ? [cr] : [];
-  const after = at < lines.length && lines[at]!.trim() !== '' && !listAfter ? [cr] : [];
+  const after = at < lines.length && lines[at]!.trim() !== '' ? [cr] : [];
   return [...lines.slice(0, at), ...before, ...block, ...after, ...lines.slice(at)].join('\n');
 }
 

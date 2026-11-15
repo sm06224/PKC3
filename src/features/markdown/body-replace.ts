@@ -179,7 +179,17 @@ function countInCode(body: string, hits: ReadonlyArray<{ at: number; len: number
   if (hits.length === 0) return 0;
   const code = scanLinks(body).code;
   if (code.length === 0) return 0;
-  return hits.filter((h) => code.some(([a, b]) => h.at >= a && h.at < b)).length;
+  /**
+   * ⚠ **2 本の指で 1 度だけ歩く**(着地前レビュー ⚠4)── 当たりも範囲も位置の昇順なので、当たり × 範囲の総当たり
+   *   (`some`)にしない(行内コードの多い大きな本文で 10^8 回の比較になる)。
+   */
+  let n = 0;
+  let k = 0;
+  for (const h of hits) {
+    while (k < code.length && code[k]![1] <= h.at) k += 1;
+    if (k < code.length && h.at >= code[k]![0]) n += 1;
+  }
+  return n;
 }
 
 /** 置き換えた知らせの字(#1163 依頼 161)。⚠ 画面の字なので `ui-terms` の門を通る。 */

@@ -169,6 +169,14 @@ describe('置換の配線', () => {
     expect(replaceAll('a', 'x', 'b').inCode).toBe(0);
   });
 
+  it('🔴 コードの中の数は、範囲が何個でも当たりごとに正しく数える(閉じていないフェンスも中)', () => {
+    expect(replaceAll('`a` a `a` a `x` a', 'a', 'b').inCode).toBe(2);
+    expect(replaceAll('a\n```\na\na', 'a', 'b').inCode, '閉じていないフェンスの中を数えていない').toBe(2);
+    expect(replaceAll('`a``a`', 'a', 'b').inCode).toBe(2);
+    // ⚠ 範囲の終わり(閉じの直後)の当たりはコードの外
+    expect(replaceAll('`x`a', 'a', 'b').inCode, '閉じの直後をコードの中と数えた').toBe(0);
+  });
+
   it('🔴 置き換えた知らせはエラーの行に入れない(「エラー: 2 件を置き換えました」にしない)', () => {
     const { root, d } = editing('ログ ログ\n');
     d.dispatch({ type: 'START_EDIT' });
