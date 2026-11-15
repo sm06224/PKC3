@@ -142,6 +142,20 @@ const AUTOSIZE_ATTR = 'data-pkc-autosize';
  *   欄ごとに「その行より上の本文(frontmatter を外した側。最後は改行)」を返す。無い欄は空。
  */
 const ROW_ABOVE = new WeakMap<HTMLTextAreaElement, () => string>();
+/**
+ * 🔴 **開いている行の欄 → 「いま打っている字で確定したら、本文はどうなるか」**(#1163 依頼 248、案どおり)。
+ * ⚠ 1 面の書き方は、行を確定するまで打った字が state に無い ── 控え(`draft-writer`)が読む本文に入らず、
+ *   打ちかけのままタブを閉じると消えていた。継ぎ足しの規則は確定と同じ(`spliceLines` + `restoreEol`)。
+ */
+const ROW_BODY = new WeakMap<HTMLTextAreaElement, () => string | null>();
+
+/** 1 画面の書き方の行の欄の印(`data-pkc-field`)。⚠ 控える側(`main.ts`)と同じ字を使う(§7)。 */
+export const ROW_SOURCE_FIELD = 'row-source';
+
+/** 開いている行の欄の字を継ぎ足した本文(欄が行の欄でない / まだ打っていなければ `null`)。 */
+export function rowDraftBody(ta: HTMLTextAreaElement): string | null {
+  return ROW_BODY.get(ta)?.() ?? null;
+}
 export function rowTextAbove(ta: HTMLTextAreaElement): string {
   return ROW_ABOVE.get(ta)?.() ?? '';
 }
@@ -1162,7 +1176,7 @@ export class RowSwap {
     if (o.prose) slot.setAttribute(PROSE_ROW_ATTR, '');
 
     const ta = document.createElement('textarea');
-    ta.setAttribute('data-pkc-field', 'row-source');
+    ta.setAttribute('data-pkc-field', 'row-source'); // ⚠ 字は ROW_SOURCE_FIELD と同じ(読み上げの検査が字面で探す)
     // 🔑 開き直す先の行(#582)。⚠ 描き直しで塊の添字は変わるので、行番号を欄が運ぶ
     ta.setAttribute('data-pkc-row-line', String(o.startLine));
     if (wholeNote) ta.setAttribute(ROW_WHOLE_ATTR, '1');
@@ -1174,6 +1188,15 @@ export class RowSwap {
     ROW_ABOVE.set(ta, () => {
       const above = this.body.split('\n').slice(0, o.startLine);
       return above.length === 0 ? '' : `${above.join('\n')}\n`;
+    });
+    ROW_BODY.set(ta, () => {
+      // ⚠ 確定(`commitActive`)と同じ継ぎ足し ── 改行コードも元に戻す
+      const typed = normalizeEol(ta.value);
+      // ⚠ 打っていなければ `null`(着地前レビュー ⚠2)── 自前の写し(`this.body`)は state より古いことがあり、
+      //   返すと他の経路(章の欄など)で変わった本文を控えから消してしまう。控える側は state の本文を使う
+      if (typed === o.source) return null;
+      const text = restoreEol(typed, o.crs, this.body.split('\n').length - 1 === o.endLine);
+      return spliceLines(this.body, o.startLine, o.endLine, text);
     });
 
     this.active = {

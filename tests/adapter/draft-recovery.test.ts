@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectDraftWriter } from '../../src/adapter/platform/draft-writer';
+import { ROW_SOURCE_FIELD } from '../../src/adapter/ui/render/row-swap';
 import { MemoryDraftStore, mayRemove } from '../../src/adapter/platform/draft-store';
 import {
   DRAFT_DISCARD_TITLE,
@@ -281,6 +282,32 @@ describe('draft-writer(控える側)', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await settle(f, w);
     expect(store.map.get(`${CID}\u0000n1`)).toMatchObject({ title: '買い物リスト', body: DISK });
+  });
+
+  /** 🔴 #1163 依頼 248: 1 面の書き方の行の打ちかけ(確定前で state に無い)も控える。 */
+  it('🔴 1 面の行の欄に打っただけ(確定前)でも、打ちかけを継ぎ足した本文を控える', async () => {
+    const d = boot();
+    const store = new MemoryDraftStore();
+    const f = fakeClock();
+    let rowBody: string | null = null;
+    const w = connectDraftWriter({
+      dispatcher: d, store, cid: CID, tab: 'A', clock: f.clock, readTitle: () => null,
+      readRowBody: () => rowBody,
+      isRowInput: (el) => el.getAttribute('data-pkc-field') === ROW_SOURCE_FIELD,
+    });
+    d.dispatch({ type: 'START_EDIT' });
+    const row = document.createElement('textarea');
+    row.setAttribute('data-pkc-field', ROW_SOURCE_FIELD);
+    document.body.append(row);
+    rowBody = DISK + '打ちかけの行\n';
+    row.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle(f, w);
+    expect(store.map.get(`${CID}\u0000n1`), '行の打ちかけを控えていない').toMatchObject({ body: DISK + '打ちかけの行\n' });
+    // ⚠ 行の欄が閉じた(確定した)後は state の本文を読む
+    rowBody = null;
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: DISK + '確定した行\n' });
+    await settle(f, w);
+    expect(store.map.get(`${CID}\u0000n1`)).toMatchObject({ body: DISK + '確定した行\n' });
   });
 
   it('編集の欄でない input では控えない(対照群)', async () => {

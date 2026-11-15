@@ -62,6 +62,7 @@ import { tagsMetaKey } from '../flavor/tag-words';
 import { attachmentFileName } from '../flavor/attachment-flavor';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
+import { isFormula, shiftFormulaRefs } from './csv-formula';
 import { parseRenderableFence } from './markdown-render';
 import { containerAtLine, quoteLead, quotePrefix, splitLines } from './source-blocks';
 import { TASK_LINE } from './task-line';
@@ -1975,6 +1976,51 @@ export function bodyRewriteRefusal(body: string, rewrite: BodyRewrite): string |
 }
 
 /** `rewriteCsvShape` の中身。書けたら新しい本文、断ったら理由、当たらなければ `null`。 */
+/**
+ * 🔴 **表の中の式の升を、行・列の足し引きに合わせて書き換える**(#1163 依頼 371)。
+ * ⚠ 式の行番号は「表の中身の何行目か」── 1 行が 1 本の行でない表(升の中に改行がある)は、行の番号と
+ *   表の行がずれるので**ずらさない**(読めない物を当て推量で書き換えない)。
+ * ⚠ 書き換えるのは名前が変わった式の升だけ ── 他の升の字は 1 バイトも動かさない。
+ */
+function shiftTableFormulas(
+  lines: string[],
+  rows: readonly number[],
+  textOf: (at: number) => string | null,
+  lead: (at: number) => number,
+  delimiter: string,
+  axis: 'row' | 'col',
+  at: number,
+  delta: 1 | -1,
+): void {
+  const texts = rows.map((r) => textOf(r) ?? '');
+  /**
+   * ⚠ 1 行 = 1 本の行でなければ止める(升の中の改行)。
+   * 🔴 **末尾の空行は数えない**(着地前レビュー 🔴1)── `parseCsv` は末尾の空行を捨てるが、`rows` は空行も数える(#780)。
+   *   数えると、末尾に空行がある表で**いつも食い違って**、式が黙ってずれなかった。
+   */
+  let trailing = 0;
+  while (trailing < texts.length && texts[texts.length - 1 - trailing]!.trim() === '') trailing += 1;
+  if ((parseCsv(texts.join('\n'), delimiter) ?? []).length !== rows.length - trailing) return;
+  rows.forEach((lineNo, i) => {
+    const text = texts[i]!;
+    if (!text.includes('=')) return;
+    const spans = csvRowSpans(text, delimiter);
+    if (spans === null) return;
+    let next = text;
+    // 右から当てる(左の位置がずれない)
+    for (let k = spans.length - 1; k >= 0; k -= 1) {
+      const { start, end } = spans[k]!;
+      const raw = text.slice(start, end);
+      const value = parseCsv(raw, delimiter)?.[0]?.[0] ?? raw;
+      if (!isFormula(value)) continue;
+      const shifted = shiftFormulaRefs(value, axis, at, delta);
+      if (shifted === value) continue;
+      next = next.slice(0, start) + csvEscapeField(shifted, delimiter) + next.slice(end);
+    }
+    if (next !== text) lines[lineNo] = lines[lineNo]!.slice(0, lead(lineNo)) + next;
+  });
+}
+
 function csvShapeResult(
   body: string,
   rewrite: { line: number; openLine: string; col: number; what: 'row' | 'col'; mode: 'add' | 'remove' },
@@ -2021,6 +2067,16 @@ function csvShapeResult(
   if (!rows.includes(rewrite.line)) return null;
   /** 前置きの字数(⚠ `rows` に居る行だけに使う = 剥がせた行なので `null` にならない)。 */
   const lead = (at: number): number => quoteLead(lines[at]!, table.quote)!;
+  /**
+   * 🔴 **式の升の名前を、足す / 消す行・列に合わせてずらす**(#1163 依頼 371、案 A)── 先に当てる
+   *   (行の数は変わらないので、下の行・列の座標はそのまま使える)。
+   */
+  if (!(rewrite.mode === 'remove' && ((rewrite.what === 'row' && rows.length <= 1) || (rewrite.what === 'col' && csvTableWidth(lines, table) <= 1)))) {
+    const rowIndex = rows.indexOf(rewrite.line);
+    const axis = rewrite.what;
+    const at = rewrite.mode === 'add' ? (axis === 'row' ? rowIndex + 1 : rewrite.col + 1) : axis === 'row' ? rowIndex : rewrite.col;
+    shiftTableFormulas(lines, rows, textOf, lead, table.delimiter, axis, at, rewrite.mode === 'add' ? 1 : -1);
+  }
 
   if (rewrite.what === 'row') {
     if (rewrite.mode === 'remove') {
