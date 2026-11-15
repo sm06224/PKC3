@@ -6862,7 +6862,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   align-items: center;
   gap: var(--s1);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   padding: 0 var(--s1) 0 var(--s2);
 }
 [data-pkc-field='sql-extra'] button {
@@ -6897,14 +6897,14 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   height: 30vh;
   min-height: 80px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   padding: var(--s2);
 }
 /* 「高さ」ボタン(#918 Q2)。図の右下。 */
 [data-pkc-field='sql-er-height'] {
   align-self: flex-end;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--bg);
   color: inherit;
   font: inherit;
@@ -6930,7 +6930,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--bg);
   overflow: hidden;
 }
@@ -7008,7 +7008,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='sql-er-connect'] {
   align-self: flex-start;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--bg);
   color: inherit;
   font: inherit;
@@ -7592,6 +7592,10 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  * 地は無彩色。色は「押している側」(`data-pkc-choice-btn`)と「今日」にだけ使う。 */
 [data-pkc-field='schedule-modes'] {
   display: flex;
+  /* 🔴 狭い左のペインでは折り返す(#1442)── 直す前は「週の始まり」の選択欄がペインの右端を越えて切れていた
+   *   (実測: 1440px で 3px、1024px で 37px はみ出す)*/
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--s2);
 }
 [data-pkc-field='schedule-modes'] button {
@@ -7602,7 +7606,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   color: var(--muted);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  /* 🔴 角は他の選ぶボタン(関係グラフの「全体 / 1 手…」など)と同じ段(#1442)── 直す前はここだけ丸い札だった */
+  border-radius: var(--radius);
   cursor: pointer;
 }
 [data-pkc-region='schedule-day'] {
@@ -8219,6 +8224,9 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='launcher-group'] button {
   display: flex;
   align-items: center;
+  /* 🔴 左に寄せる(#1442)── 一般の button の `justify-content: center` を継いで、見出しだけが中央に浮いていた
+   *   (下の一覧の行も「すべて折りたたむ」も左右の端に揃っているのに、群の名前だけが真ん中)*/
+  justify-content: flex-start;
   gap: var(--s2);
   width: 100%;
   padding: 0;
@@ -8244,6 +8252,27 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-region='launcher-grid'] {
   display: flex;
   flex-direction: column;
+}
+/* 🔴 **リンクを足す欄は一覧の幅に揃える**(#1442)。⚠ 直す前は欄が既定の幅(220px)のままで、下の一覧の行
+ *   (ペインの右端まで)と右端が揃っていなかった。名前・アドレスは幅いっぱい、押すボタンは右端に寄せる。 */
+[data-pkc-region='launcher-add'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  padding: 0 var(--s2);
+}
+[data-pkc-field='launcher-add-name'],
+[data-pkc-field='launcher-add-url'] {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+[data-pkc-field='launcher-add-go'] {
+  margin-inline-start: auto;
+}
+/* 🔴 「アプリは 2 回続けて押すと開きます」の上下の間を余白の段に揃える(#1442)── 直す前は p の既定(1em ≒ 13px)が
+ *   上下に付いて、欄と見出しの間だけが広く空いていた */
+[data-pkc-field='launcher-lead'] {
+  margin: var(--s3) var(--s2);
 }
 /* ⚠ button の既定装飾から降ろす ── 枠も角丸も地色も持たせない
  * (押せることは hover / focus-visible とカーソルで足りている) */
