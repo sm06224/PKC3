@@ -26,6 +26,37 @@ export function followScrollTop(from: ScrollBox, to: ScrollBox): number {
 }
 
 /**
+ * 🔴 **右を最後にこちらが置いた位置**(フル smoke の preview.smoke.spec.ts:171 で見つけた退行)。
+ * ⚠ 描き直しのたびに右を左の割合へ合わせ直すと、**右を自分で送って読んでいた人**が、1 字打つたびに左の位置へ
+ *   引き戻される(「打っても画面が飛ばない」── user 指示 2026-08-03 ── を破る)。だから、右がこちらの置いた位置の
+ *   ままのとき(= 付いて行っている間)だけ合わせ直す。左を送れば、また付いて行く(`followScroll`)。
+ */
+const placed = new WeakMap<HTMLElement, number>();
+/** この幅までのずれは「置いたまま」と読む(端数の丸め・ブラウザの寄せ)。 */
+const SAME_SPOT_PX = 2;
+
+function place(from: ScrollBox, to: HTMLElement): void {
+  to.scrollTop = followScrollTop(from, to);
+  // ⚠ 置けた値を控える(送れる幅を超えた値はブラウザが丸める)
+  placed.set(to, to.scrollTop);
+}
+
+/**
+ * 描き直しで右の高さが変わったとき、左の割合へ合わせ直す ── ただし**右が付いて行っている間だけ**。
+ * 右を自分で送っていたら、そのままにする(上の `placed` の注記)。
+ */
+export function refollowScroll(from: ScrollBox, to: HTMLElement): void {
+  /**
+   * ⚠ 右が縮むと、ブラウザは scrollTop を送れる幅の端へ寄せる(人が動かしたのではない)── 置いた値を
+   *   いまの端で丸めてから比べる(丸めないと、縮めた瞬間から付いて行かなくなる。着地前レビュー 🔴1)。
+   */
+  const end = Math.max(0, to.scrollHeight - to.clientHeight);
+  const expected = Math.min(placed.get(to) ?? 0, end);
+  if (Math.abs(to.scrollTop - expected) > SAME_SPOT_PX) return;
+  place(from, to);
+}
+
+/**
  * 左の欄の送りに右を付いて行かせる。⚠ 1 描画に 1 回だけ動かす(`requestAnimationFrame` で畳む)── scroll は 1 描画に
  *   何度も来るので、来るたびに右を書くと版面の計算が重なる。
  * @returns 外す手(編集を抜けたとき)
@@ -40,7 +71,7 @@ export function followScroll(from: HTMLElement, to: HTMLElement): () => void {
     raf(() => {
       queued = false;
       if (!from.isConnected || !to.isConnected) return;
-      to.scrollTop = followScrollTop(from, to);
+      place(from, to);
     });
   };
   from.addEventListener('scroll', onScroll, { passive: true });
