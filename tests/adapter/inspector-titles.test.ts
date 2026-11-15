@@ -84,6 +84,8 @@ const EXPECTED_ACTIONS: readonly string[] = [
   // 🔴 左の列の整理 3 つ(#215)── 右クリックと同じ並び(履歴の下・削除の上)
   'rename-entry-begin',
   'move-to-folder',
+  // 🔴 ノートを複製する(#1163 依頼 169)── 移すの下
+  'duplicate-entry',
   // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── ノートとログだけ見える(他では hidden)
   'change-entry-kind',
   'create-in-folder',

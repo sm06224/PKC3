@@ -82,6 +82,7 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'copy-selection-md': NOTE,
   'export-note-markdown': NOTE,
   'export-note-pdf': NOTE,
+  'duplicate-entry': NOTE,
   'export-transcript-srt': NOTE,
   'embed-transcript-srt': NOTE,
   'append-send': NOTE,

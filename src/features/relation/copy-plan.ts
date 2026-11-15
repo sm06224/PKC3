@@ -24,6 +24,15 @@
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { resolveCanonicalParents } from './tree';
 
+/**
+ * 🔴 **同じ場所へ写したとき(= 複製)の題名**(#1163 依頼 169。user 回答「題名は『元の題名 (コピー)』」)。
+ * ⚠ 2 ペインの「コピー」で同じフォルダへ写したときも同じ字 ── 同じ操作に 2 つの名付けを作らない
+ *   (直す前は「X のコピー」だった)。
+ */
+export function copyTitle(title: string): string {
+  return `${title} (コピー)`;
+}
+
 /** 写す 1 件ぶんの指示。⚠ 呼び側はこの順に作る(親が先に居る)。 */
 export interface CopyStep {
   /** 元の lid(本文を読む相手)。 */
@@ -131,7 +140,7 @@ export function planCopy(
     /**
      * ⚠ **名前を変えるのは、同じ場所へ写すときだけ**。別の場所なら変えない ──
      * 場所で区別が付くのに名前が勝手に変わるほうが驚く(FD も変えない)。
-     * 🔑 子は**常に元の名前**(親だけが「のコピー」になる ── 中身の名前まで
+     * 🔑 子は**常に元の名前**(親だけが「(コピー)」になる ── 中身の名前まで
      *    変えると、写した先で本文の参照と見た目が食い違う)。
      */
     const isRoot = origParent === null || !inSet.has(origParent);
@@ -139,7 +148,7 @@ export function planCopy(
     steps.push({
       sourceLid: src,
       lid,
-      title: sameSpot ? `${meta.title} のコピー` : meta.title,
+      title: sameSpot ? copyTitle(meta.title) : meta.title,
       archetype: meta.archetype,
       parentLid,
     });

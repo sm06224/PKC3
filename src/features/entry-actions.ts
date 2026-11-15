@@ -485,6 +485,11 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'rename-entry-begin', label: '名前を変える', group: 'this-one' },
   { action: 'move-to-folder', label: 'フォルダへ移す…', group: 'this-one' },
   /**
+   * 🔴 **複製する**(#1163 依頼 169。user 回答 = 要る)── 同じフォルダに「元の題名 (コピー)」を作る。
+   * ⚠ 置き場は「フォルダへ移す…」の下・削除の上(既存の並びを動かさない)。受け手は 2 ペインのコピーと同じ実体。
+   */
+  { action: 'duplicate-entry', label: 'ノートを複製する', group: 'this-one' },
+  /**
    * 🔴 **種類を変える**(台帳 #1852 I2 / 依頼 157。Gemini 回答 = 推薦 ②)。ノート ⇄ ログだけ(`when: 'kind-changeable'`)。
    * 本文は変わらず、見せ方と追記のしかただけが変わる ── 戻すにはもう一度押す。
    * ⚠ 置き場は「フォルダへ移す…」の下・削除の上(既存の並びを動かさない)。
@@ -1722,6 +1727,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   //    (user 指示 2026-08-21)── 「改名モードへ遷移」ではなく「入力欄が出る」
   'rename-entry-begin': '行の題名の所に入力欄が出ます。Enter で確定、Esc でやめます',
   'move-to-folder': 'フォルダの一覧から移動先を選びます。選択が複数あれば、その全部を移します',
+  'duplicate-entry': '同じフォルダに「題名 (コピー)」を作ります。本文・タグ・添付は引き継ぎ、つながりと履歴は引き継ぎません',
   'create-in-folder': 'このフォルダの中に新しいノートを作って、そのまま編集に入ります',
   // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)。⚠ 本文が変わらないことと、戻し方を先に言う
   'change-entry-kind':

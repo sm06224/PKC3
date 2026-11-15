@@ -449,6 +449,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 **左の列の行からの整理 3 つ**(#215、2026-09-05)
       ['rename-entry-begin', 'c951ee45'],
       ['move-to-folder', '26f9aeac'],
+      // 🔴 ノートを複製する(#1163 依頼 169)── 同じフォルダに「題名 (コピー)」
+      ['duplicate-entry', '5986139d'],
       ['create-in-folder', '80e07ad8'],
       // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── ノートとログだけ
       ['change-entry-kind', '99eca686'],
@@ -697,6 +699,8 @@ describe('行の右クリックからの整理(#215)', () => {
     expect(a.slice(a.indexOf('rename-entry-begin'), a.indexOf('delete-entry'))).toEqual([
       'rename-entry-begin',
       'move-to-folder',
+      // #1163 依頼 169: 「ノートを複製する」は移すの下(既存の 3 つの並びは動かさない)
+      'duplicate-entry',
       'create-in-folder',
       'open-trash',
     ]);
