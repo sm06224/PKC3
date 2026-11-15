@@ -88,6 +88,11 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'append-send': NOTE,
   // 編集 ── 本文の欄の中の操作
   'insert-date': EDIT,
+  'insert-now-time': EDIT,
+  'insert-now-datetime': EDIT,
+  'insert-now-date-weekday': EDIT,
+  'insert-now-datetime-weekday': EDIT,
+  'insert-now-iso': EDIT,
   'inline-calc': EDIT,
   'insert-entry-link': EDIT,
   'insert-snippet': EDIT,

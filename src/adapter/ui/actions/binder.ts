@@ -373,6 +373,7 @@ import { appDualPrefs } from '@adapter/ui/render/dual-prefs';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { tagQueryText } from '@features/filter/tag-query';
 import { planCopy } from '@features/relation/copy-plan';
+import { NOW_STAMP_COMMANDS } from '@features/datetime/datetime-format';
 import {
   otherSide,
   paneFilterOptions,
@@ -19292,6 +19293,18 @@ const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
  */
 const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: string) => void) => void>> = {
   /**
+   * 🔴 **いまの日時を 1 打鍵で入れる**(#1966 2-C)。字の形は `NOW_STAMP_COMMANDS` 1 か所。
+   * ⚠ 挿すのは `insertText` ── `Ctrl + Z` で戻せる形にする(選んでいた字があれば置き換わる。打つのと同じ)。
+   */
+  ...Object.fromEntries(
+    Object.entries(NOW_STAMP_COMMANDS).map(([id, fmt]) => [
+      id,
+      (ta: HTMLTextAreaElement) => {
+        insertText(ta, fmt(new Date()));
+      },
+    ]),
+  ),
+  /**
    * 🔴 **いまカーソルの在る行を計算して、行の終わりに答えを入れる**(#766 D-2)。
    * ⚠ 規則は打っているときと**同じ 1 か所**(`calcLineAction`)── 別の判定を作ると、
    *   `Enter` で計算できる式とパレットで計算できる式が食い違う。
@@ -20919,6 +20932,8 @@ export function bindActions(
       if (
         rowCmd === 'align-table' ||
         rowCmd === 'inline-calc' ||
+        // 🔴 いまの日時を入れる 5 つ(#1966 2-C)── 1 面の行の欄でも同じ口
+        (rowCmd !== null && NOW_STAMP_COMMANDS[rowCmd] !== undefined) ||
         (rowCmd !== null && TIDY_COMMANDS.has(rowCmd))
       ) {
         ke.preventDefault();

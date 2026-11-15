@@ -1227,6 +1227,12 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
       'find-in-note',
       // ⚠ 2026-08-23 に足した(日付の道具 ── 編集中の本文へ挿す)
       'insert-date',
+      // ⚠ 2026-11-15 に足した(#1966 2-C ── いまの日時を 1 打鍵で挿す 5 つ。打っている最中に押す道具)
+      'insert-now-time',
+      'insert-now-datetime',
+      'insert-now-date-weekday',
+      'insert-now-datetime-weekday',
+      'insert-now-iso',
       /**
        * ⚠ 2026-09-08 に足した(#766 D-2 ── 「操作を探す」から行を計算する)。
        * 🔑 **打鍵中に効く必要がある** ── 打っている途中で「あ、これ計算したい」と
