@@ -84,7 +84,10 @@ export const DUCKDB_HOLD_IDLE_MIN = 10;
  * ⚠ **字を 1 か所で持つ** ── 案内文と、`CREATE TABLE` が通った直後の知らせの
  *   両方が同じ字を言う(2 か所に書くと、片方だけ直した日に食い違う。§7)。
  */
-export const DUCKDB_TABLE_LIFETIME = `作った表は、ウィンドウを閉じるか、${String(DUCKDB_HOLD_IDLE_MIN)} 分使わないと消えます`;
+export function duckdbTableLifetimeText(min: number): string {
+  return `作った表は、ウィンドウを閉じるか、${String(min)} 分使わないと消えます`;
+}
+export const DUCKDB_TABLE_LIFETIME = duckdbTableLifetimeText(DUCKDB_HOLD_IDLE_MIN);
 
 /**
  * 🔴 **調べる相手の集合が変わったときの寿命**(#918 段⑦。Gemini 裁定 2026-10-01 = 確認は出さず字で言う)。

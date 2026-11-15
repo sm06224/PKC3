@@ -17,7 +17,11 @@ import {
   type DuckDbHandle,
 } from '../../src/adapter/platform/duckdb/duckdb-lease';
 import type { DuckDbRaw } from '../../src/features/query/duckdb-rows';
-import { DUCKDB_HOLD_IDLE_MIN, DUCKDB_TABLE_LIFETIME } from '../../src/features/query/duckdb-write';
+import {
+  DUCKDB_HOLD_IDLE_MIN,
+  DUCKDB_TABLE_LIFETIME,
+  duckdbTableLifetimeText,
+} from '../../src/features/query/duckdb-write';
 
 /** 手で進められる時計。⚠ 実時間を待たない(30 秒の既定を待つ test は書けない)。 */
 function fakeTimers() {
@@ -611,6 +615,8 @@ describe('🔴 作った表を持つ器の 10 分の畳み(依頼 370)', () => {
 
   it('🔴 作った表の寿命の字も、同じ分の定数から組む', () => {
     expect(DUCKDB_TABLE_LIFETIME).toContain(`${String(DEFAULT_HOLD_IDLE_MIN)} 分使わないと消えます`);
+    // 🔑 分は引数から組む(直書きの変異は、定数と同じ値だと見分けられない ── 別の分で見る)
+    expect(duckdbTableLifetimeText(7)).toContain('7 分使わないと消えます');
     expect(DUCKDB_HOLD_IDLE_MIN).toBe(DEFAULT_HOLD_IDLE_MIN);
   });
 

@@ -3993,9 +3993,15 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
     runBtn.click();
     await settle();
     expect(note(), '答えの回に、消えた理由を言っていない').toContain(gone);
-    // ③ 対照群: 次の回は言わない
+    // ③ 次の回: 走っている最中は前の回の話を混ぜない / 終わっても言わない(1 行で済ませる)
+    let finish!: (v: { columns: string[]; rows: Array<Array<string | number | null>>; truncated: boolean; ms: number }) => void;
+    runDuckDbSql.mockImplementationOnce(() => new Promise((r) => (finish = r)));
     type('SELECT 2 AS a');
     runBtn.click();
+    await settle();
+    expect(note(), '前提: 走っている最中の字になっていない').toContain('実行しています');
+    expect(note(), '走っている最中に、前の回の「消えました」を混ぜている').not.toContain(gone);
+    finish({ columns: ['a'], rows: [[2]], truncated: false, ms: 1 });
     await settle();
     expect(note(), '2 回目も言っている(1 行で済まない)').not.toContain(gone);
   });
