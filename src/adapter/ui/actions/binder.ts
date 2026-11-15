@@ -848,7 +848,7 @@ let rebuildingContainer = false;
 import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { countCappedCells } from '@features/query/sql-cell';
-import { countFormulaLike } from '@features/markdown/csv-table';
+import { countFormulaLike, FORMULA_WHY_ATTR } from '@features/markdown/csv-table';
 import { PIPE_CELL_HINT } from '@features/markdown/table-copy';
 import { canMark } from '@adapter/state/slices/selection';
 import { openFolderLid } from './open-folder-lid';
@@ -12801,6 +12801,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     const line = Number(target.getAttribute('data-pkc-cell-line'));
     const col = Number(target.getAttribute('data-pkc-cell-col'));
     if (!Number.isInteger(line) || line < 0 || !Number.isInteger(col) || col < 0) return;
+    /**
+     * 🔴 **式が読めなかった升を押したら、理由を画面の下に 1 行出す**(#1163 依頼 101-2、推薦 A)。
+     * ⚠ 指で触る端末には吹き出し(`title`)が無く、`#ERR!` の記号だけでは何が駄目か読めない。
+     * ⚠ 欄を開く**前**に出す(開いた後に state を動かすと、描き直しが欄を巻き込みうる)。断られる回は、後の断りが上書きする。
+     */
+    const formulaWhy = target.getAttribute(FORMULA_WHY_ATTR);
+    if (formulaWhy !== null && formulaWhy !== '') {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: `このセルの式: ${formulaWhy}` });
+    }
     const st = dispatcher.getState();
     /**
      * ⚠ **どのノートのセルかは、押した所から引く**(`toggle-task` と同じ理由)──

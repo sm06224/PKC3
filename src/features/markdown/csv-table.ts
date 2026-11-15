@@ -105,6 +105,9 @@ export interface CsvPositions {
   unterminated?: boolean;
 }
 
+/** 🔴 式が読めなかった升の理由(#1163 依頼 101-2)。押したときに画面の下へ出す。 */
+export const FORMULA_WHY_ATTR = 'data-pkc-formula-why';
+
 const FENCE_LOOKALIKE = /^\s{0,3}(?:`{3,}|~{3,})/;
 
 /**
@@ -420,7 +423,9 @@ export function rowsToHtml(
     const r = renderCell(cell);
     return {
       body: r.html,
-      title: r.why === undefined ? '' : ` title="${escapeHtml(r.why)}"`,
+      // 🔴 理由は `data-pkc-formula-why` にも置く(#1163 依頼 101-2)── 指で触る端末には吹き出し(title)が無いので、
+      //   升を押したときに画面の下へ 1 行出す(binder の `edit-cell`)。⚠ 誤りのないときは 1 バイトも足さない
+      title: r.why === undefined ? '' : ` title="${escapeHtml(r.why)}" ${FORMULA_WHY_ATTR}="${escapeHtml(r.why)}"`,
     };
   };
 

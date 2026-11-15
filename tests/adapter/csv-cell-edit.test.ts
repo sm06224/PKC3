@@ -8,6 +8,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { PIPE_CELL_HINT } from '../../src/features/markdown/table-copy';
+import { FORMULA_WHY_ATTR, renderCsvFence } from '../../src/features/markdown/csv-table';
 import { resetCellChains, SHOWN_LINE_LOST } from '../../src/adapter/state/shown-line';
 import { EDIT_ELSEWHERE_ERROR } from '../../src/features/message/caution-events';
 import type { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -496,5 +497,31 @@ describe('｜ の表の欄に \\| の案内を出す(依頼 225)', () => {
     cell.click();
     expect(input(cell), '前提: 欄が開いていない').not.toBeNull();
     expect(input(cell)!.title).toBe('');
+  });
+});
+
+/** 🔴 #1163 依頼 101-2(推薦 A): 式が読めなかった升を押すと、理由を画面の下に 1 行出す(指で触る端末には吹き出しが無い)。 */
+describe('式が読めなかった升の理由(依頼 101-2)', () => {
+  it('🔴 理由のある升を押すと、理由の 1 行が出る', () => {
+    const { root, cell } = cellRoot('=FOO(1)', '#NAME?');
+    cell.setAttribute(FORMULA_WHY_ATTR, '使えない関数です: FOO');
+    const f = fake();
+    bindActions(root, f.dispatcher, {});
+    cell.click();
+    expect(f.dispatched, '理由を出していない').toContainEqual({ type: 'OP_NOTICE', message: 'このセルの式: 使えない関数です: FOO' });
+  });
+
+  it('⚠ 対照群 ── 理由の無い升では何も言わない', () => {
+    const { root, cell } = cellRoot();
+    const f = fake();
+    bindActions(root, f.dispatcher, {});
+    cell.click();
+    expect(f.dispatched.some((a) => a.type === 'OP_NOTICE')).toBe(false);
+  });
+
+  it('🔴 描く側は、式が読めなかった升にだけ理由の属性を焼く', () => {
+    const html = renderCsvFence('a,b\n=FOO(1),2\n', 'csv') ?? '';
+    expect(html).toContain(`${FORMULA_WHY_ATTR}="`);
+    expect(renderCsvFence('a,b\n=1+1,2\n', 'csv') ?? '').not.toContain(FORMULA_WHY_ATTR);
   });
 });
