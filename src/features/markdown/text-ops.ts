@@ -22,6 +22,7 @@ import { parseCsv } from './csv-table';
 import { escapeLinkLabel, formatMarkdownLink } from './link-format';
 import { lineStart } from './line-start';
 import { TASK_LINE } from './task-line';
+import { LIST_LEAD } from './list-renumber';
 import { tableToMarkdown } from './table-copy';
 
 /** 改行コードの判定は leaf の `line-eol.ts` が正本(#1384)。ここからも使える。 */
@@ -914,7 +915,24 @@ export function appendAt(text: string, heading: string | null): TextSelection {
 export function appendBlock(base: string, heading: string | null, text: string): string {
   const body = text.replace(/\s+$/, '');
   if (body === '') return base;
+  /**
+   * 🔴 **箇条書きの続きには空行を挟まない**(#1163 依頼 346、推薦 A)── 挟むと、markdown では
+   *   箇条書き全体が「間の空いた形」に変わり、**足しただけで既存の項目の行間が広がる**。
+   */
+  const trimmed = base.replace(/\s+$/, '');
+  if (heading === null && continuesList(trimmed, body)) return `${trimmed}\n${body}\n`;
   return `${appendAt(base, heading).text}${body}\n`;
+}
+
+/**
+ * 🔴 **前の最後の行も、足す最初の行も箇条書きか**(#1163 依頼 346)。⚠ 判定はここ 1 か所 ──
+ *   末尾への追記(`appendBlock`)と節への追記(`appendIntoSection`)が同じ規則で空行を省く(§7)。
+ * ⚠ 行頭の印は `LIST_LEAD`(番号を振り直す側と同じ)── `- ` / `* ` / `+ ` / `1. ` / `1) `、チェック項目も含む。
+ */
+export function continuesList(before: string, added: string): boolean {
+  const prevLine = before.slice(lineStart(before, before.length)).replace(/\r$/, '');
+  const firstLine = added.split(/\r?\n/, 1)[0] ?? '';
+  return prevLine.trim() !== '' && LIST_LEAD.test(prevLine) && LIST_LEAD.test(firstLine);
 }
 
 /**

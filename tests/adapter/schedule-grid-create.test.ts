@@ -214,7 +214,7 @@ describe('入力欄の Enter / Esc / 空', () => {
     s.input()!.value = '打ち合わせ';
     key(s.input()!, 'Enter');
     await tick();
-    expect(s.store['e1']).toBe(`${BODY}\n- [ ] 打ち合わせ @2026-08-23 10:00..11:30\n`);
+    expect(s.store['e1']).toBe(`${BODY}- [ ] 打ち合わせ @2026-08-23 10:00..11:30\n`);
     expect(s.qa(BOX), '書けたのに欄が残っている').toHaveLength(0);
     s.detach();
   });
@@ -480,7 +480,7 @@ describe('「週」: 押した列の日に作る', () => {
     s.input()!.value = '週の予定';
     key(s.input()!, 'Enter');
     await tick();
-    expect(s.store['e1']).toBe(`${BODY}\n- [ ] 週の予定 @2026-08-26 09:00..10:00\n`);
+    expect(s.store['e1']).toBe(`${BODY}- [ ] 週の予定 @2026-08-26 09:00..10:00\n`);
     s.detach();
   });
 });
@@ -492,12 +492,12 @@ describe('書き口は予定の面の「足す」と同じ 1 本', () => {
     (s.root.querySelector('[data-pkc-field="schedule-quick-date"]') as HTMLInputElement).value = '2026-08-24';
     (s.root.querySelector('[data-pkc-action="schedule-quick-add"]') as HTMLElement).click();
     await tick();
-    expect(s.store['e1']).toBe(`${BODY}\n- [ ] 電話 @2026-08-24\n`);
+    expect(s.store['e1']).toBe(`${BODY}- [ ] 電話 @2026-08-24\n`);
     dragEmpty(s.lanes()[0]!, minPx(600), minPx(690));
     s.input()!.value = '会食';
     key(s.input()!, 'Enter');
     await tick();
-    expect(s.store['e1']).toBe(`${BODY}\n- [ ] 電話 @2026-08-24\n\n- [ ] 会食 @2026-08-23 10:00..11:30\n`);
+    expect(s.store['e1']).toBe(`${BODY}- [ ] 電話 @2026-08-24\n- [ ] 会食 @2026-08-23 10:00..11:30\n`);
     expect(appends(s)).toHaveLength(2);
     s.detach();
   });
@@ -545,7 +545,7 @@ describe('日・週を切り替えても、打ちかけの字を静かに失わ�
     // 戻した枠から書ける
     key(s.input()!, 'Enter');
     await tick();
-    expect(s.store['e1']).toBe(`${BODY}\n- [ ] 打ちかけ @2026-08-23 10:00..11:30\n`);
+    expect(s.store['e1']).toBe(`${BODY}- [ ] 打ちかけ @2026-08-23 10:00..11:30\n`);
     s.detach();
   });
 

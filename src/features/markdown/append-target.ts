@@ -33,6 +33,7 @@ import { expandVarsInText } from './var-expand';
 import { fenceStep } from './list-renumber';
 import { stripComments, preprocessHeadingNumbers } from './markdown-render';
 import { detectEol } from './line-eol';
+import { continuesList } from './text-ops';
 
 /** 追記の入り先 1 つ。 */
 export interface AppendTarget {
@@ -347,8 +348,12 @@ export function appendIntoSection(
    * ⚠ **後ろにも 1 行空ける**(次が在って空行でなければ)── 次の見出しと
    *   くっつかないように。
    */
-  const before = at > 0 && lines[at - 1]!.trim() !== '' ? [cr] : [];
-  const after = at < lines.length && lines[at]!.trim() !== '' ? [cr] : [];
+  // 🔴 箇条書きの続きには空行を挟まない(#1163 依頼 346 ── 挟むと既存の項目の行間まで広がる)
+  const listBefore = heading === null && at > 0 && continuesList(lines[at - 1]!, body);
+  const lastAdded = body.split(/\r?\n/).pop() ?? '';
+  const listAfter = heading === null && at < lines.length && continuesList(lastAdded, lines[at]!);
+  const before = at > 0 && lines[at - 1]!.trim() !== '' && !listBefore ? [cr] : [];
+  const after = at < lines.length && lines[at]!.trim() !== '' && !listAfter ? [cr] : [];
   return [...lines.slice(0, at), ...before, ...block, ...after, ...lines.slice(at)].join('\n');
 }
 
