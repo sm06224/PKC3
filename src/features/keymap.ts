@@ -362,13 +362,15 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    * - 時刻 `Ctrl + :` ── 日本語配列の `:` のキー(位置は `Quote`。US 配列では `Ctrl + '`)
    * - 日時 `Ctrl + Shift + ;`(US 配列の `Ctrl + :` もこれになる ── PKC2 と同じ)
    * - 曜日つき `Ctrl + D` / `Ctrl + Shift + D` / ISO 8601 `Ctrl + Shift + Alt + D`
-   * ⚠ 文脈は本文の欄だけ(`editor` / `row`)── 編集していないときの `Ctrl + D`(ブラウザのブックマーク)は奪わない。
+   * ⚠ 文脈は本文の欄・追記の欄・章の欄だけ(`editor` / `row` / `append`)── 編集していないときの `Ctrl + D`(ブラウザのブックマーク)は奪わない。
+   * ⚠ 日本語配列の `Ctrl + Shift + ;` は `Ctrl + +`(拡大)と同じ打鍵なので、日時の別名は足さない(拡大を奪わない)。
+   *   日本語配列で日時を入れるのは `Ctrl + Shift + D`(曜日つき)か、操作を探す。
    * ⚠ `Ctrl + ;`(日付を入れる)は予定に載る `@日付` を小さなウィンドウで選ぶ別の命令。こちらは選ばずにその場の時刻を入れる。
    */
   {
     id: 'insert-now-time',
     label: 'いまの時刻を入れる',
-    contexts: ['editor', 'row'],
+    contexts: ['editor', 'row', 'append'],
     defaults: ['Mod+Quote'],
     whileTyping: true,
     note: 'カーソルの位置に 14:05:30 の形で入れます',
@@ -377,7 +379,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'insert-now-datetime',
     label: 'いまの日時を入れる',
-    contexts: ['editor', 'row'],
+    contexts: ['editor', 'row', 'append'],
     defaults: ['Mod+Shift+Semicolon'],
     whileTyping: true,
     note: 'カーソルの位置に 2026/11/15 14:05:30 の形で入れます',
@@ -386,7 +388,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'insert-now-date-weekday',
     label: '曜日つきの日付を入れる',
-    contexts: ['editor', 'row'],
+    contexts: ['editor', 'row', 'append'],
     defaults: ['Mod+D'],
     whileTyping: true,
     note: 'カーソルの位置に 26/11/15 日 の形で入れます(今日の日付と曜日)',
@@ -395,7 +397,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'insert-now-datetime-weekday',
     label: '曜日つきの日時を入れる',
-    contexts: ['editor', 'row'],
+    contexts: ['editor', 'row', 'append'],
     defaults: ['Mod+Shift+D'],
     whileTyping: true,
     note: 'カーソルの位置に 26/11/15 日 14:05:30 の形で入れます',
@@ -404,7 +406,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'insert-now-iso',
     label: 'いまの日時を ISO 8601 で入れる',
-    contexts: ['editor', 'row'],
+    contexts: ['editor', 'row', 'append'],
     defaults: ['Mod+Alt+Shift+D'],
     whileTyping: true,
     note: 'カーソルの位置に 2026-11-15T14:05:30+09:00 の形で入れます(時差つき)',

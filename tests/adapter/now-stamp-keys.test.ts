@@ -21,6 +21,7 @@ import {
   formatTime,
 } from '../../src/features/datetime/datetime-format';
 import { KEY_COMMANDS } from '../../src/features/keymap';
+import { SECTION_BOX_INPUT_FIELD } from '../../src/adapter/ui/render/section-box';
 
 // 2026-11-15(日)14:05:30(端末の時刻)
 const NOW = new Date(2026, 10, 15, 14, 5, 30);
@@ -129,12 +130,30 @@ describe('鍵で入れる(本文の欄)', () => {
     expect(ta.value).toMatch(/^2026-11-15T14:05:30[+-]\d\d:\d\d$/);
   });
 
-  it('🔴 1 面の行の欄(row-source)でも同じ口で入る', () => {
+  // 🔴 本文の欄の外の 3 つの欄でも、5 つ全部が同じ口で入る(着地前レビュー: 1 本だけでは他の 4 つが死んでも緑)
+  for (const name of ['row-source', 'append-input', SECTION_BOX_INPUT_FIELD]) {
+    for (const [label, keys, want] of cases) {
+      it(`🔴 ${name} で ${label} → 「${want}」`, () => {
+        const { root } = setup();
+        const ta = field(root, name, '- ');
+        const ev = press(ta, keys);
+        expect(ev.defaultPrevented, `${name} で鍵が素通りした`).toBe(true);
+        expect(ta.value).toBe(`- ${want}`);
+      });
+    }
+  }
+
+  /**
+   * ⚠ **日本語配列の `Ctrl + Shift + ;` は奪わない**(着地前レビュー 🔴1 を受けた判断)。
+   * 日本語配列では `;` のキーに Shift を足すと `+` になり、`Ctrl + +` はブラウザの拡大である ── 日時の別名にすると、
+   * 編集中に拡大できなくなる。日本語配列で日時を入れるのは `Ctrl + Shift + D`(曜日つき)か、操作を探す。
+   */
+  it('⚠ 対照群: 日本語配列の Ctrl + Shift + ;(= Ctrl + + の拡大)は奪わない', () => {
     const { root } = setup();
-    const row = field(root, 'row-source', '- ');
-    const ev = press(row, { key: 'd', code: 'KeyD' });
-    expect(ev.defaultPrevented).toBe(true);
-    expect(row.value).toBe('- 26/11/15 日');
+    const ta = field(root, 'editor-body', 'メモ ');
+    const ev = press(ta, { key: '+', code: 'Semicolon', shift: true });
+    expect(ev.defaultPrevented, '拡大の鍵を奪った').toBe(false);
+    expect(ta.value).toBe('メモ ');
   });
 
   it('🔑 選んでいた字は置き換わる(打つのと同じ)', () => {
