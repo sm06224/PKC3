@@ -49,13 +49,18 @@ export function unpackRowHeights(value: unknown): number[] | null {
   return out;
 }
 
-/** 前書きに書ける大きさか(読み手の上限 = 前書きの総バイト・1 つの値のバイト)。 */
+/**
+ * 前書きに書ける大きさか(読み手の上限 = 前書きの総バイト・**全部の**字の値のバイト・**全部の**並びの数)。
+ * ⚠ 行の高さだけを見ない(着地前レビュー ⚠4)── グラフ・列の書式の字が上限を超えるときも読めなくなる。
+ */
 function frontmatterFits(meta: Record<string, FrontmatterValue>): boolean {
-  const text = serializeFrontmatter(meta);
-  const bytes = new TextEncoder().encode(text).length;
-  if (bytes > resolveCap('frontmatter', 'bytes')) return false;
-  const rh = meta['sheet.rowHeights'];
-  return typeof rh !== 'string' || new TextEncoder().encode(rh).length <= resolveCap('frontmatter', 'stringValueBytes');
+  const enc = new TextEncoder();
+  if (enc.encode(serializeFrontmatter(meta)).length > resolveCap('frontmatter', 'bytes')) return false;
+  for (const v of Object.values(meta)) {
+    if (typeof v === 'string' && enc.encode(v).length > resolveCap('frontmatter', 'stringValueBytes')) return false;
+    if (Array.isArray(v) && v.length > resolveCap('frontmatter', 'arrayItems')) return false;
+  }
+  return true;
 }
 
 /**
@@ -64,7 +69,8 @@ function frontmatterFits(meta: Record<string, FrontmatterValue>): boolean {
 export function pkc2SheetRowHeightsDropped(body: string): boolean {
   const sheet = parsePkc2Spreadsheet(body);
   if (!sheet.rowHeights || sheet.rowHeights.length === 0) return false;
-  return !frontmatterFits(sheetMeta(sheet, true));
+  // ⚠ 行の高さを外して収まるときだけ「行の高さのせい」と言う(他の項目で溢れる表を行の高さのせいにしない)
+  return !frontmatterFits(sheetMeta(sheet, true)) && frontmatterFits(sheetMeta(sheet, false));
 }
 
 /** 表の設定を前書きの項目にする。`withRows` = 行の高さも入れるか。 */

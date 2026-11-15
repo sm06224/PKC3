@@ -49,9 +49,16 @@ describe('表の行・列の ＋ × で式がずれる(依頼 371)', () => {
   });
 
   it('⚠ 升の中に改行がある表は、行の番号と表の行がずれるので式をずらさない(読めない物を当て推量で書き換えない)', () => {
-    const body = '```csv\na,b\n"x\ny",1\n2,=B2\n```\n';
-    const out = shape(body, 4, 0, 'row', 'add');
+    const body = '```csv\na,b\n"x\ny",1\n2,=B3\n```\n';
+    // 見出しの下に行を足す ── ずらせば `=B3` が `=B4` になってしまう形
+    const out = shape(body, 1, 0, 'row', 'add');
     expect(out, '前提: 行は足せる').not.toBeNull();
-    expect(out!).toContain('2,=B2');
+    // 🔑 全文で見る(`toContain` だと、ずらしても通る)
+    expect(out!).toBe('```csv\na,b\n,\n"x\ny",1\n2,=B3\n```\n');
+  });
+
+  it('🔴 表の最後に空行があっても、式はずれる(着地前レビュー 🔴1)', () => {
+    const body = '```csv\na,1\nb,2\n計,=SUM(B1:B2)\n\n```\n';
+    expect(shape(body, 1, 0, 'row', 'add')).toBe('```csv\na,1\n,\nb,2\n計,=SUM(B1:B3)\n\n```\n');
   });
 });

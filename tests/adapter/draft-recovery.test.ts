@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectDraftWriter } from '../../src/adapter/platform/draft-writer';
+import { ROW_SOURCE_FIELD } from '../../src/adapter/ui/render/row-swap';
 import { MemoryDraftStore, mayRemove } from '../../src/adapter/platform/draft-store';
 import {
   DRAFT_DISCARD_TITLE,
@@ -292,11 +293,11 @@ describe('draft-writer(控える側)', () => {
     const w = connectDraftWriter({
       dispatcher: d, store, cid: CID, tab: 'A', clock: f.clock, readTitle: () => null,
       readRowBody: () => rowBody,
-      isRowInput: (el) => el.getAttribute('data-pkc-field') === 'row-source',
+      isRowInput: (el) => el.getAttribute('data-pkc-field') === ROW_SOURCE_FIELD,
     });
     d.dispatch({ type: 'START_EDIT' });
     const row = document.createElement('textarea');
-    row.setAttribute('data-pkc-field', 'row-source');
+    row.setAttribute('data-pkc-field', ROW_SOURCE_FIELD);
     document.body.append(row);
     rowBody = DISK + '打ちかけの行\n';
     row.dispatchEvent(new Event('input', { bubbles: true }));

@@ -47,4 +47,13 @@ describe('行の高さをまとめて書く(依頼 357)', () => {
     expect(frontmatterProblem(md)?.kind ?? 'ok').not.toBe('unreadable');
     expect(pkc2SheetRowHeightsDropped(sheet(8000, h))).toBe(true);
   });
+
+  it('⚠ 他の項目(グラフの字)が大きすぎる表を、行の高さのせいにしない(着地前レビュー ⚠4)', () => {
+    const body = JSON.stringify({
+      rows: [['a', '1']],
+      rowHeights: Array(600).fill(24),
+      charts: [{ id: 'c', title: 'x'.repeat(5000) }],
+    });
+    expect(pkc2SheetRowHeightsDropped(body)).toBe(false);
+  });
 });

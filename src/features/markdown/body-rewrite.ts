@@ -1993,8 +1993,14 @@ function shiftTableFormulas(
   delta: 1 | -1,
 ): void {
   const texts = rows.map((r) => textOf(r) ?? '');
-  // ⚠ 1 行 = 1 本の行でなければ止める(升の中の改行)
-  if ((parseCsv(texts.join('\n'), delimiter) ?? []).length !== rows.length) return;
+  /**
+   * ⚠ 1 行 = 1 本の行でなければ止める(升の中の改行)。
+   * 🔴 **末尾の空行は数えない**(着地前レビュー 🔴1)── `parseCsv` は末尾の空行を捨てるが、`rows` は空行も数える(#780)。
+   *   数えると、末尾に空行がある表で**いつも食い違って**、式が黙ってずれなかった。
+   */
+  let trailing = 0;
+  while (trailing < texts.length && texts[texts.length - 1 - trailing]!.trim() === '') trailing += 1;
+  if ((parseCsv(texts.join('\n'), delimiter) ?? []).length !== rows.length - trailing) return;
   rows.forEach((lineNo, i) => {
     const text = texts[i]!;
     if (!text.includes('=')) return;
