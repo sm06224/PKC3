@@ -849,6 +849,7 @@ import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { countCappedCells } from '@features/query/sql-cell';
 import { countFormulaLike } from '@features/markdown/csv-table';
+import { PIPE_CELL_HINT } from '@features/markdown/table-copy';
 import { openFolderLid } from './open-folder-lid';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteKeptRows, sqlNoteTitle } from '@features/query/sql-to-note';
 import { labNoteTitle } from '@features/markdown/text-lab';
@@ -12869,6 +12870,12 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     input.size = 1;
     input.setAttribute('aria-label', '表のセル');
+    /**
+     * 🔴 **`｜` の表では、縦線を字として入れる書き方を案内する**(#1163 依頼 225)。
+     * ⚠ 字は書き換えない(依頼 224 = いまのまま ── `a|b` は markdown の決まりどおり升が 2 つに分かれる)。
+     *   だから `\|` と打つことを、欄に触れた時点で読める所(title)に置く。csv の表は `|` がただの字なので出さない。
+     */
+    if (target.closest('[data-pkc-md-block-kind="table"]') !== null) input.title = PIPE_CELL_HINT;
     /**
      * ⚠ **確定は 1 回だけ**(`Enter` のあとに `blur` も来る)── 二重に撃つと、
      *   2 回目は「同じ字」で `null` になって黙って落ちるだけだが、

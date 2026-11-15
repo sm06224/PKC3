@@ -7,6 +7,7 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it, beforeEach } from 'vitest';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { PIPE_CELL_HINT } from '../../src/features/markdown/table-copy';
 import { resetCellChains, SHOWN_LINE_LOST } from '../../src/adapter/state/shown-line';
 import { EDIT_ELSEWHERE_ERROR } from '../../src/features/message/caution-events';
 import type { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -468,5 +469,32 @@ describe('升の原文は、描いた側から受け取る(#418 段①)', () => 
     root.querySelector('td')!.click();
     expect(root.querySelector('[data-pkc-field="cell-input"]')).toBeNull();
     expect(dispatched).toEqual([]);
+  });
+});
+
+/** 🔴 #1163 依頼 225: `｜` の表の欄には、縦線を字として入れる書き方(`\|`)を案内する。csv の表には出さない。 */
+describe('｜ の表の欄に \\| の案内を出す(依頼 225)', () => {
+  const input = (cell: HTMLElement): HTMLInputElement | null =>
+    cell.querySelector('[data-pkc-field="cell-input"]');
+
+  it('🔴 ｜ の表(markdown の表)の欄は、title に案内を持つ', () => {
+    const { root, cell } = cellRoot();
+    const wrap = document.createElement('div');
+    wrap.setAttribute('data-pkc-md-block-kind', 'table');
+    root.querySelector('table')!.replaceWith(wrap);
+    wrap.append(cell.closest('table')!);
+    bindActions(root, fake().dispatcher, {});
+    cell.click();
+    expect(input(cell), '前提: 欄が開いていない').not.toBeNull();
+    expect(input(cell)!.title).toBe(PIPE_CELL_HINT);
+    expect(PIPE_CELL_HINT).toContain('\\|');
+  });
+
+  it('⚠ 対照群 ── csv の表の欄には出さない(| がただの字)', () => {
+    const { root, cell } = cellRoot();
+    bindActions(root, fake().dispatcher, {});
+    cell.click();
+    expect(input(cell), '前提: 欄が開いていない').not.toBeNull();
+    expect(input(cell)!.title).toBe('');
   });
 });

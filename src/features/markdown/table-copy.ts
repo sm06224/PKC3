@@ -83,3 +83,9 @@ export function tableToCsv(rows: readonly TableCopyRow[]): string {
 export function tableToMarkdown(rows: readonly TableCopyRow[]): string | null {
   return gfmTable(rows.map((r) => ({ cells: r.cells.map(gfmCellText), head: r.head })));
 }
+
+/**
+ * 🔴 **`｜` の表の升に縦線を字として入れる書き方の案内**(#1163 依頼 225)。⚠ 画面の字なので `ui-terms` の門を通る。
+ *   マニュアル「入力欄に出る字と、markdown の表の扱いを知る」と同じ字を言う。
+ */
+export const PIPE_CELL_HINT = 'セルの中に縦線 | を字として入れるときは \\| と打ちます(| のままだとセルが 2 つに分かれます)';
