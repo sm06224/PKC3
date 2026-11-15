@@ -834,6 +834,61 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
       // 探し方は端末に覚えられる(次の幅の起動で「いま開いているタブ」は畳まれないので、シェルのままだと別のタブが畳まれる)── フォルダへ戻しておく
       await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
     }
+    /**
+     * ⑧ 🔴 **左のペインの組み込みアプリが、ペインの外へはみ出さない**(#1442)。同じ起動に載せる(起動を増やさない)。
+     * ⚠ 直す前の実測:「予定」の「週の始まり」の選択欄が 1440px で 3px、1024px で 37px ペインの右端を越えて切れていた。
+     * 🔑 全部のタブを開いて数える(タブを足した日もここが見る)。畳まれたタブは「⋯」を介さず押し所を直に押す
+     *   (見るのは開いた後の版面で、「⋯」から開けることは上の⑦が見ている)。
+     */
+    if (w === 1440 || w === 1024) {
+      const modes = await page
+        .locator('[data-pkc-region="browse-tabs"] [data-pkc-browse]')
+        .evaluateAll((els) => els.filter((e) => !(e as HTMLElement).hidden).map((e) => e.getAttribute('data-pkc-browse') ?? ''));
+      expect(modes.length, `w=${w}: 左のタブを読めていない(空振り)`).toBeGreaterThan(5);
+      for (const mode of modes) {
+        await page.evaluate((m) => {
+          (document.querySelector(`[data-pkc-region="browse-tabs"] [data-pkc-browse="${m}"]`) as HTMLElement).click();
+        }, mode);
+        const pane = page.locator(`[data-pkc-browse-pane="${mode}"]`);
+        await expect(pane, `w=${w}: 「${mode}」のペインが開かない`).toBeVisible();
+        const over = await pane.evaluate((el) => {
+          const box = (el.closest('[data-pkc-region="browse-host"]') ?? el).getBoundingClientRect();
+          const out: string[] = [];
+          for (const child of el.querySelectorAll<HTMLElement>('*')) {
+            const r = child.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0 || getComputedStyle(child).visibility === 'hidden') continue;
+            if (r.right > box.right + 0.5 || r.left < box.left - 0.5)
+              out.push(child.getAttribute('data-pkc-field') ?? child.getAttribute('data-pkc-action') ?? child.tagName);
+          }
+          return [...new Set(out)];
+        });
+        expect(over, `w=${w}: 「${mode}」でペインの外へはみ出している`).toEqual([]);
+      }
+      /**
+       * ⑨ 🔴 **ランチャーの端が揃う**(#1442)。⚠ 1440px で見る ── 1024px ではペインが狭く、欄の既定の幅がたまたま一覧の
+       *   右端の近くに来る(直す前でも揃って見える)。
+       */
+      if (w === 1440) {
+        await page.evaluate(() => {
+          (document.querySelector('[data-pkc-region="browse-tabs"] [data-pkc-browse="launcher"]') as HTMLElement).click();
+        });
+        const lp = page.locator('[data-pkc-browse-pane="launcher"]');
+        const g = await lp.locator('[data-pkc-field="launcher-group"] button').first().evaluate((b) => {
+          const r = b.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(b);
+          return { left: r.left, textLeft: range.getBoundingClientRect().left };
+        });
+        expect(g.textLeft - g.left, '群の見出しが左に寄っていない(中央に浮いている)').toBeLessThan(16);
+        const urlRight = await lp.locator('[data-pkc-field="launcher-add-url"]').evaluate((e) => e.getBoundingClientRect().right);
+        const rowRight = await lp.locator('[data-pkc-action="open-tile"]').first().evaluate((e) => e.getBoundingClientRect().right);
+        expect(Math.abs(urlRight - rowRight), `リンクを足す欄の右端(${urlRight})が一覧の右端(${rowRight})と揃っていない`).toBeLessThan(6);
+      }
+      // 次の幅の起動で覚えたタブが残らないように、フォルダへ戻しておく(上の⑦と同じ理由)
+      await page.evaluate(() => {
+        (document.querySelector('[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]') as HTMLElement).click();
+      });
+    }
   }
   expect(shellFolded, '「シェル」が畳まれた幅を 1 つも見ていない(掃く幅が広すぎる)').toBeGreaterThan(0);
 
