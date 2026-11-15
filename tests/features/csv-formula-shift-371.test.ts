@@ -22,7 +22,7 @@ describe('shiftFormulaRefs(依頼 371)', () => {
     expect(shiftFormulaRefs('=SUM(A1:A2)', 'row', 1, -1)).toBe('=SUM(A1:A1)');
     expect(shiftFormulaRefs('=SUM(B1:B3)', 'col', 1, -1)).toBe('=SUM(#REF!)');
   });
-  it('⚠ 字の中(\"…\")・関数の名前・変わらない名前の綴りは触らない', () => {
+  it('⚠ 字の中("…")・関数の名前・変わらない名前の綴りは触らない', () => {
     expect(shiftFormulaRefs('=IF(A3>0,"A3",a1)', 'row', 1, 1)).toBe('=IF(A4>0,"A3",a1)');
     expect(shiftFormulaRefs('=SUM(a3)', 'row', 0, 1)).toBe('=SUM(A4)');
   });
