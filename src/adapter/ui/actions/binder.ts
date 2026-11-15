@@ -850,7 +850,7 @@ import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { countCappedCells } from '@features/query/sql-cell';
 import { countFormulaLike } from '@features/markdown/csv-table';
 import { openFolderLid } from './open-folder-lid';
-import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
+import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteRowLimit, sqlNoteTitle } from '@features/query/sql-to-note';
 import { labNoteTitle } from '@features/markdown/text-lab';
 import { sheetNoteTitle, sheetToMarkdown, sheetToText } from '@features/calc/sheet';
 import { EFFECT_WRITES, runShellLine, SHELL_HISTORY_CLEARED_TEXT, type OpResult, type ShellOps } from './shell-run';
@@ -17459,6 +17459,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     const where = p.guest?.name ?? null;
     const title = sqlNoteTitle(new Date(), where);
     const lid = generateLid();
+    // 🔴 #1163 依頼 133: ノートに入るのはセルの上限まで ── 切った升の数も、入った行だけで数える
+    const keptRows = p.rows.slice(0, sqlNoteRowLimit(p.columns.length));
+    const cutRows = p.rows.length - keptRows.length;
     dispatcher.dispatch({
       type: 'CREATE_ENTRY',
       archetype: 'text',
@@ -17471,7 +17474,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         truncated: p.truncated,
         where,
         // 🔴 切ってある升の数(`sqlNoteBody` が末尾で言う)
-        capped: countCappedCells(p.rows),
+        capped: countCappedCells(keptRows),
       }),
       // 🔴 いま左の一覧で開いているフォルダの中に作る(「+ ノート」と同じ置き場。依頼 91-2)
       parentLid: openFolderLid(state),
@@ -17490,7 +17493,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    dispatcher.dispatch({ type: 'SQL_SAVED', title, kind: 'note', capped: countCappedCells(p.rows) });
+    dispatcher.dispatch({ type: 'SQL_SAVED', title, kind: 'note', capped: countCappedCells(keptRows), cutRows });
   },
   /**
    * 🔴 **テキスト整形の面**(#1233)。⚠ 整え方・入力・結果は**面の DOM が持つ**(state に写さない ──

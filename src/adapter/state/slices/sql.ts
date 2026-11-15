@@ -539,6 +539,7 @@ export function reduceSql(state: AppState, action: SqlAction): ReduceResult {
             savedKind: action.kind,
             savedCapped: action.capped ?? 0,
             savedFormulaLike: action.formulaLike ?? 0,
+            savedCutRows: action.cutRows ?? 0,
           },
         },
         events: [],

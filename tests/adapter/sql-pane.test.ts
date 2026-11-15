@@ -935,6 +935,33 @@ describe('答えをノートへ書き出す(#681 段③ の 3 つ目)', () => {
     }
   });
 
+  /**
+   * 🔴 **ノートへ入るのはセル 200,000 個まで**(#1163 依頼 133、推薦 C)。⚠ 本文は disk へ渡った物で見る。
+   * 🔑 2 列 → 上限 100,000 行(描くのは見えている分だけなので、行が多くても重くない)。
+   *   対照群 = ちょうど上限の回は何も言わない。
+   */
+  it('🔴 ノートへ ── セルの上限を超える行は入れず、本文と画面で言う', async () => {
+    const cols = ['k', 'v'];
+    const limit = 100_000;
+    for (const cut of [3, 0]) {
+      const rows = Array.from({ length: limit + cut }, (_, r) => [`r${String(r)}`, 'x']);
+      const { d, type, runBtn, saveBtn, persisted, note } = setup(async () => answer(cols, rows));
+      type('SELECT 1');
+      runBtn.click();
+      await settle();
+      saveBtn.click();
+      await settle();
+      const made = [...d.getState().entryMetas.values()].find((m) => m.title.startsWith('SQL の結果'));
+      const body = persisted.find((e) => e.lid === made?.lid)?.body ?? '';
+      expect(body, '本文が disk へ渡っていない').toContain('SELECT 1');
+      expect(body, '上限の内側の最後の行が無い').toContain(`\nr${String(limit - 1)},x\n`);
+      expect(body.includes(`\nr${String(limit)},x\n`), '上限を超えた行が入っている').toBe(false);
+      const said = `${String(cut)} 行はノートに入れていません`;
+      expect(body.includes(said), '本文の言い分が合っていない').toBe(cut > 0);
+      expect(note().includes(said), '画面の言い分が合っていない').toBe(cut > 0);
+    }
+  }, 60_000);
+
   it('🔴 書き出したことを画面が言う(別の窓なので、言わないと押せなかったように見える)', async () => {
     const { type, runBtn, saveBtn, note } = setup(async () => answer(['a'], [[1]]));
     type('SELECT 1 AS a');

@@ -25,6 +25,7 @@ import { csvEscapeField } from '@features/markdown/csv-table';
 import { sqlCellText } from '@features/markdown/sql-embed';
 import { tableToTsv } from '@features/markdown/table-copy';
 import { cappedCellsNote } from './sql-cell';
+import { CSV_TABLE_CELLS_MAX } from './csv-tables';
 
 /** 表に書き出す値(worker から来る形)。 */
 export type SqlCell = string | number | null;
@@ -58,6 +59,25 @@ export function sqlNoteTitle(now: Date, where: string | null = null): string {
     : `SQL の結果 ${stamp}(${where})`;
 }
 
+/**
+ * 🔴 **ノートへ入れる行の上限**(#1163 依頼 133、推薦 C)。
+ *
+ * 🔑 上限は**セル 200,000 個**(`CSV_TABLE_CELLS_MAX`)── 書き出したノートを SQL の画面から
+ *   名前で引き直せる大きさに揃える(上限の理由が 1 つで済む)。数え方も `csvCellsOverBudget` と同じ
+ *   「行 × 列」(見出しは数えない)。
+ * ⚠ 列が上限より多いときも 1 行は入れる(0 行のノートは何の答えか読めない)。
+ */
+export function sqlNoteRowLimit(columnCount: number, budget = CSV_TABLE_CELLS_MAX): number {
+  return Math.max(1, Math.floor(budget / Math.max(1, columnCount)));
+}
+
+/** 上限で入れなかった行を言う 1 文(0 なら空)。⚠ 画面の字なので `ui-terms` の門を通る。 */
+export function sqlNoteCutNote(cutRows: number, budget = CSV_TABLE_CELLS_MAX): string {
+  return cutRows > 0
+    ? `セル ${String(budget)} 個を超える ${String(cutRows)} 行はノートに入れていません(全部は「ファイルへ書き出す」で書き出せます)`
+    : '';
+}
+
 /** 升 1 つを csv の字へ。⚠ `null` は**空の升**にする(`null` という字にしない)。 */
 function cell(v: SqlCell): string {
   return csvEscapeField(v === null ? '' : String(v), ',');
@@ -86,7 +106,11 @@ export function sqlNoteBody(p: {
   /** 🔴 先頭 2000 字に切ってある升の数(#1087 の見直し)。0 / 省略なら何も言わない。 */
   readonly capped?: number;
 }): string {
-  const table = [p.columns.map((c) => csvEscapeField(c, ',')).join(','), ...p.rows.map((r) => r.map(cell).join(','))].join(
+  // 🔴 #1163 依頼 133: セルの上限で切る(SQL の画面から引き直せる大きさに揃える)
+  const limit = sqlNoteRowLimit(p.columns.length);
+  const kept = p.rows.length > limit ? p.rows.slice(0, limit) : p.rows;
+  const cut = p.rows.length - kept.length;
+  const table = [p.columns.map((c) => csvEscapeField(c, ',')).join(','), ...kept.map((r) => r.map(cell).join(','))].join(
     '\n',
   );
   const sqlMark = fenceMarkFor(p.sql);
@@ -107,6 +131,10 @@ export function sqlNoteBody(p: {
         : p.where
     } を調べました)。`,
   ];
+  if (cut > 0) {
+    lines.push('>');
+    lines.push(`> 先頭 ${String(kept.length)} 行だけです。${sqlNoteCutNote(cut)}。`);
+  }
   if (p.truncated) {
     lines.push('>');
     lines.push('> ⚠ 上限で切っています。全部を出すには、LIMIT や条件で絞ってから実行し直してください。');
