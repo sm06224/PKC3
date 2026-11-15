@@ -256,6 +256,42 @@ describe('中身は条件で決まる(#421 段①)', () => {
   });
 
   /**
+   * 🔴 **欄を押した直後(まだ空)に帯が組み直っても、焦点が落ちない**(#1955)。
+   *
+   * ⚠ 直す前は「字が在る欄だけ」運んでいたので、空のまま焦点を持つ欄は組み直しで `body` へ落ちた。
+   *   フル smoke(並列)で `fill` が間欠で空振り(押す → 保存の返事で帯が組み直る → 打った字が行き場を失う)し、
+   *   「入れ物が集めていない」で落ちた。実測:欄を押してから打つまでの間に帯が 3 回組み直った。
+   * ⚠ **時間ではなく順番**で見る(押す → 組み直し → 打つ)。
+   */
+  it('🔴 空の欄に焦点があるまま帯が組み直っても、焦点が残り、打った字が入る (#1955)', () => {
+    const r = mount();
+    let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
+    r.render(s);
+    const field = (): HTMLInputElement =>
+      region.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]')!;
+    const before = field();
+    before.focus(); // 欄を押しただけ(まだ 1 字も打っていない)
+    expect(document.activeElement, '前提: 欄に焦点が在る').toBe(before);
+    // ここで初回の走査が返って、帯が組み直る
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, spec: EMPTY_SMART }).state;
+    r.render(s);
+    expect(field(), '前提: 欄が作り直された').not.toBe(before);
+    expect(document.activeElement, '空の欄の焦点が落ちた(このあと打つ字の行き場が無い)').toBe(field());
+  });
+
+  it('⚠ 焦点が別の所に在るなら、組み直しで欄が焦点を奪わない (#1955)', () => {
+    const r = mount();
+    let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
+    r.render(s);
+    const other = document.createElement('button');
+    document.body.append(other);
+    other.focus();
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, spec: EMPTY_SMART }).state;
+    r.render(s);
+    expect(document.activeElement, '焦点を奪った').toBe(other);
+  });
+
+  /**
    * ⚠ **同じ穴は「まとめて付けるタグ」の欄にも在る** ── 直しは帯ぜんぶに
    *   掛けたので、こちらも守られていることを見る(§7 の「1 か所で直した」の裏取り)。
    */

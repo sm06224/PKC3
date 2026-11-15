@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor } from './helpers';
+import { clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor, writesLanded } from './helpers';
 
 /**
  * 🔴 **スマートフォルダ**(#421 段①。user 要望 2026-08-26)。
@@ -450,6 +450,12 @@ test('🔴 ノートから「どの入れ物に集まっているか」が分か
   const chips = page.locator('[data-pkc-field="inspector-smart-hit"]');
   await expect(chips, '集まり先の札が出ていない').toHaveCount(1);
   await expect(chips.first()).toHaveText('請求ぜんぶ');
+  /**
+   * 🔴 **書込の返事が出そろってから押す**(#1955)。⚠ 札を数えただけでは、保存の返事(時刻・件数)が
+   *   遅れて届くたびに右の列が組み直り、**札の位置が動く** ── `clickReal` が座標を確かめてから押すまでの間に動くと、
+   *   隣のタグのボタンを押して「飛ばない」で落ちる(並列の smoke でだけ。画面が壊れているのではなく、状態を待っていなかった)。
+   */
+  await writesLanded(page);
 
   // 🔴 押すと、その入れ物が開く(札が飛べること自体が動線である)
   await clickReal(page, '[data-pkc-field="inspector-smart-hit"]');

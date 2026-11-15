@@ -57,7 +57,8 @@ import { tableFormatDropsInfo } from '@features/markdown/table-convert';
 import { placeUndoNotice } from '@features/markdown/place-undo-notice';
 import { cutLines, insertLines } from '@features/markdown/line-move';
 import { clipPreview } from '@features/relation/dual-pane';
-import { splitRestoredEdges } from '@features/relation/tree';
+import { collectSubtreeLids, splitRestoredEdges } from '@features/relation/tree';
+import { smartLidsOf } from '@features/relation/filer-list';
 import {
   EMPTY_SMART,
   isSmartEmpty,
@@ -122,7 +123,7 @@ import type { SearchDetailRow } from '@features/filter/search-snippet';
 import { tagQueryOf } from '@features/filter/tag-query';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
-import type { TagInputField, TagUndoGroup } from './app-state';
+import type { AppState, TagInputField, TagUndoGroup } from './app-state';
 import {
   sectionSaveFailureNote,
   codeSaveFailureNote,
@@ -161,7 +162,8 @@ export interface StorePort {
    *   返しているのに、直す前はここで `.lids` だけ取って**黙って落としていた**。
    *   user から見ると「201 件目からは無い」に読める(§1「無言の欠落」)。
    */
-  searchEntries?(query: string): Promise<{ lids: string[]; truncated: boolean }>;
+  /** @param within 🔴 開いているフォルダの中身(依頼 336)── 渡すと、その中の当たりも 200 件まで返す */
+  searchEntries?(query: string, within?: readonly string[]): Promise<{ lids: string[]; truncated: boolean }>;
   /**
    * 探す面の検索(#680)── 題名 + 抜粋 + 関連度。⚠ **省略可**(古い worker が
    * service worker のキャッシュに残っている端末では未知の op になる ── そのとき
@@ -600,6 +602,26 @@ export function typedCellNote(rewrite: { kind: string; value?: string }): string
   const v = rewrite.value.replace(/\s+/g, ' ');
   const head = v.length <= CELL_NOTE_CHARS ? v : `${v.slice(0, CELL_NOTE_CHARS)}…`;
   return `(入力した『${head}』は反映されていません)`;
+}
+
+/**
+ * 🔴 **左の列の検索を、開いているフォルダの中でも取りこぼさない**(#1163 依頼 336 A「200 件で切れる件も直す」)。
+ *
+ * ⚠ 直す前は全体で先に 200 件集めてから、フォルダの表が中身だけに絞っていた ── 一致が多いと、フォルダの中の一致が
+ *   1 件も出ないことがあった(「無い」と読まれる)。🔑 worker へ中身の lid を渡すと、全体の 200 件に**加えて**
+ *   中の 200 件も返る(全体の当たりを読む 2 ペイン・種類の札は今までどおり)。
+ * - ルート = 渡さない(全体がそのまま中身)
+ * - フォルダ = 配下の全部(語を打っている間の表は配下を平らに出す ── `filerRows` と同じ集合)
+ * - スマートフォルダ = 条件で当たった物(`smartLidsOf`。表の中身と同じ 1 本)
+ */
+export function searchWithin(state: AppState): readonly string[] | undefined {
+  const scope = state.scopeLid;
+  if (scope === null || !state.entryMetas.has(scope)) return undefined;
+  const smart = smartLidsOf(scope, state.smartHits);
+  if (smart !== null) return smart;
+  const all = collectSubtreeLids(scope, state.entryMetas, state.relations);
+  all.delete(scope);
+  return [...all];
 }
 
 export function connectStoreEffects(
@@ -1220,9 +1242,10 @@ export function connectStoreEffects(
           };
           // 同期に投げられても飛行中の印を残さない(Promise の中で呼ぶ)
           const ask = searchOf(query);
+          const within = searchWithin(dispatcher.getState());
           void new Promise<{ lids: string[]; truncated: boolean }>((r, rej) => {
             if (ask === undefined) rej(new Error('search unavailable'));
-            else r(ask(query));
+            else r(within === undefined ? ask(query) : ask(query, within));
           }).then(
             ({ lids, truncated }) => {
               if (!disposed)

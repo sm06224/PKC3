@@ -12,7 +12,7 @@
  *   ── そちらは `tests/smoke/math.smoke.spec.ts`。
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { hydrateMath, setMathWorkerSpawn } from '../../src/adapter/ui/render/math-hydrate';
+import { hydrateMath, MATH_DEVICE_FAILED, setMathWorkerSpawn } from '../../src/adapter/ui/render/math-hydrate';
 import type { MathJob, MathResult } from '../../src/adapter/platform/render/math-worker';
 
 /** 受けた依頼を控えて、こちらの好きな結果を返す偽のワーカー。 */
@@ -133,11 +133,12 @@ describe('数式の器を埋める(#707)', () => {
     await settle();
     const el = root.querySelector('[data-pkc-math-src]')!;
     expect(el.getAttribute('data-pkc-math-state'), '失敗の印が付いていない(空振り)').toBe('failed');
-    expect(
-      el.querySelector('.pkc-math-error'),
-      '式のせいではないのに「式が読めません」と出している',
-    ).toBeNull();
-    expect(el.textContent, '打った字が消えた').toBe('$a$');
+    // 🔴 #1163 依頼 101-1(推薦 A): 黙らず「この端末では数式を描けませんでした」と出す(式のせいにはしない)
+    const note = el.querySelector('.pkc-math-error');
+    expect(note, '端末の都合で描けなかったことを黙っている').not.toBeNull();
+    expect(note!.textContent).toBe(MATH_DEVICE_FAILED);
+    expect(note!.textContent, '式のせいではないのに「式が読めません」と出している').not.toContain('式が読めません');
+    expect(el.textContent, '打った字が消えた').toContain('$a$');
   });
 
   it('⚠ 結果が足りなくても、その器だけが失敗になる', async () => {

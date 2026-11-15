@@ -309,6 +309,7 @@ describe('🔴 押せない理由の文(#1087 の見直し 2026-10-14)', () => {
       'nav-forward': '進む先がありません',
       'open-note-window': 'ノートを選んでいるときだけ効きます',
       'copy-entry-link': 'ノートを選んでいるときだけ効きます',
+      'duplicate-entry': 'ノートを選んでいるときだけ効きます',
       'view-detail': 'いま本文を開いています',
       'export-note-markdown': 'ノートを開いているときだけ効きます',
       'export-note-pdf': 'ノートを開いているときだけ効きます',
@@ -332,6 +333,8 @@ describe('🔴 押せない理由の文(#1087 の見直し 2026-10-14)', () => {
     expect(withWhyNot).toEqual(
       [
         'copy-entry-link',
+        // #1163 依頼 169: 複製は選んでいるノートが要る(受け手は情報ペインのボタン)
+        'duplicate-entry',
         'export-note-markdown',
         'export-note-pdf',
         'embed-transcript-srt',

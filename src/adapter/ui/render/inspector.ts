@@ -2194,6 +2194,8 @@ export class InspectorRenderer {
      */
     entryBtn('rename-entry-begin');
     entryBtn('move-to-folder');
+    // 🔴 複製する(依頼 169)── 右クリックと同じ並び(移すの下)
+    entryBtn('duplicate-entry');
     // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── ノートとログだけ(`render` で畳む。`create-in-folder` と同じ作法)
     entryBtn('change-entry-kind');
     entryBtn('create-in-folder');

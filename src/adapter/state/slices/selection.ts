@@ -7,7 +7,7 @@
  * ⚠ 履歴・2 ペインの掃除・バックリンクは `reduceWithHistory` の 1 か所で見る(ここでは見ない)。
  */
 
-import { type AppState, type Dispatchable, type ReduceResult, smartScanFor } from '../app-state';
+import { type AppState, type Dispatchable, type ReduceResult, filterSearchAgain, smartScanFor } from '../app-state';
 import { filerRowOptions } from '../list-view-options';
 import { filerRows, rangeInRows } from '@features/relation/filer-list';
 
@@ -104,10 +104,18 @@ export function reduceSelection(state: AppState, action: SelectionAction): Reduc
        * ⚠ 起点(`selectionAnchor`)も一緒に外す ── 別の場所の行を起点に
        * `Shift` の範囲を採ると、見た範囲と違う集合が選ばれる。
        */
+      const next = { ...state, scopeLid: action.lid, selection: [], selectionAnchor: null };
       return {
-        state: { ...state, scopeLid: action.lid, selection: [], selectionAnchor: null },
-        // 🔑 入った先がスマートフォルダなら集め直す(判定は `smartScanFor` 1 か所)
-        events: smartScanFor(state, action.lid),
+        state: next,
+        events: [
+          // 🔑 入った先がスマートフォルダなら集め直す(判定は `smartScanFor` 1 か所)
+          ...smartScanFor(state, action.lid),
+          /**
+           * 🔴 **語を打ったまま別のフォルダへ移ったら、本文を探し直す**(依頼 336)── 本文の当たりは
+           *   「開いているフォルダの中」も含めて引くので、場所が変わると取りこぼしうる(`searchWithin`)。
+           */
+          ...filterSearchAgain(next),
+        ],
       };
     }
     case 'SET_FILER_FLATTEN': {

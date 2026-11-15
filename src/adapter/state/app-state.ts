@@ -6108,6 +6108,16 @@ export function keepLinks(
 }
 
 /**
+ * 🔴 **左の絞り込みの語で、本文をもう一度探す**(書込の後 / 開いているフォルダが変わった後 ── 依頼 336)。
+ * ⚠ 語が空 / `>` で始まる欄は撃たない(`SET_ENTRY_FILTER` と同じ条件)。前の当たりは消さない(ちらつかない)。
+ */
+export function filterSearchAgain(state: AppState): Array<{ type: 'REQUEST_SEARCH'; query: string; again: true }> {
+  return normalizeQuery(state.filterQuery) !== '' && commandQueryOf(state.filterQuery) === null
+    ? [{ type: 'REQUEST_SEARCH', query: state.filterQuery, again: true }]
+    : [];
+}
+
+/**
  * 🔴 **書込・取込の後に撃ち直す検索**(#1087)。左の絞り込みの語(`filterQuery`)と、探す画面の語
  * (`searchPage.query`)の 2 つが在る。⚠ 判定はここ 1 か所(`SET_ENTRY_FILTER` と同じ条件:
  * 語が空 / `>` で始まる欄は撃たない)。前の当たりは消さない ── 返るまで一覧がちらつかない。
@@ -6115,9 +6125,9 @@ export function keepLinks(
 export function searchRefreshEvents(
   state: AppState,
 ): Array<{ type: 'REQUEST_SEARCH'; query: string; again?: true } | { type: 'REQUEST_SEARCH_DETAIL'; query: string }> {
-  const out: Array<{ type: 'REQUEST_SEARCH'; query: string; again?: true } | { type: 'REQUEST_SEARCH_DETAIL'; query: string }> = [];
-  if (normalizeQuery(state.filterQuery) !== '' && commandQueryOf(state.filterQuery) === null)
-    out.push({ type: 'REQUEST_SEARCH', query: state.filterQuery, again: true });
+  const out: Array<{ type: 'REQUEST_SEARCH'; query: string; again?: true } | { type: 'REQUEST_SEARCH_DETAIL'; query: string }> = [
+    ...filterSearchAgain(state),
+  ];
   if (state.searchPage.query.trim() !== '')
     out.push({ type: 'REQUEST_SEARCH_DETAIL', query: state.searchPage.query });
   return out;

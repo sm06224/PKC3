@@ -909,6 +909,19 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    *   (`binder.ts` の `SHORTCUT_BUTTON`)。本文に貼る「参照をコピー」とは別の物(説明で言い分ける)。
    * ⚠ 鍵は付けない(`defaults: []`。`KEYLESS` に足すこと)── 名前で呼ぶだけの操作。
    */
+  /**
+   * 🔴 **このノートを複製する**(#1163 依頼 169)。字は右クリック・右の列と同じ(`entry-actions.ts` の `duplicate-entry`)。
+   * 受け手は情報ペインのボタン(`binder.ts` の `SHORTCUT_BUTTON`)。⚠ 鍵は付けない(`defaults: []`。`KEYLESS` に足すこと)。
+   */
+  {
+    id: 'duplicate-entry',
+    label: 'ノートを複製する', // ⚠ 字の正本は `entry-actions.ts`
+    contexts: ['global'],
+    defaults: [],
+    note: '選んでいるノートを、同じフォルダに「題名 (コピー)」として複製します(本文・タグ・添付を引き継ぎます)',
+    whyNot: 'ノートを選んでいるときだけ効きます',
+    alias: 'コピー 複写 duplicate 同じノート',
+  },
   {
     id: 'copy-entry-link',
     label: 'リンクをコピー', // ⚠ 字の正本は `entry-actions.ts`(同じ字であることを test が見る)

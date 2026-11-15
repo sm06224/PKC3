@@ -848,7 +848,7 @@ let rebuildingContainer = false;
 import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
 import { countCappedCells } from '@features/query/sql-cell';
-import { countFormulaLike } from '@features/markdown/csv-table';
+import { countFormulaLike, FORMULA_WHY_ATTR } from '@features/markdown/csv-table';
 import { PIPE_CELL_HINT } from '@features/markdown/table-copy';
 import { canMark } from '@adapter/state/slices/selection';
 import { openFolderLid } from './open-folder-lid';
@@ -2776,7 +2776,11 @@ export interface BinderServices {
    * @param lid 図の載っているノート(⚠ 省略すると本体で選んでいるノート ── 章の別ウィンドウや
    *   留めた枠の図は、押した所から引いた lid を渡す)
    */
-  exportDiagram?(source: string, index: number, lid?: string): void | Promise<void>;
+  /**
+   * 図を SVG で書き出す。⚠ 書き出せたら**落とした file の名前**で解決する(#1163 依頼 101-3 ── 押した側が「保存しました」と言う)。
+   *   失敗は受け手が `OP_FAILED` で言うので、名前の無い解決(`undefined`)になる。
+   */
+  exportDiagram?(source: string, index: number, lid?: string): void | Promise<void | string>;
   /** 文字列をクリップボードへ(P8 段⑱)。⚠ 失敗も可視で終える。 */
   /**
    * clipboard へ写す。
@@ -3615,6 +3619,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    *   いちばん起きやすい形。CLAUDE.md「片側を直したら対称の反対側を疑う」)。
    */
   'move-to-folder',
+  // 🔴 ノートを複製する(依頼 169)── ノートを作る書込なので、取込・書出しの最中は断る(2 ペインのコピーと同じ門)
+  'duplicate-entry',
   // ⚠ user の**ファイル**を上書きする ── 取込・書出しの最中に走らせない
   'write-back-file',
   // 🔴 パソコンのフォルダの行を押すと取り込む(`CREATE_ENTRY` / 取込)── 取込・書出しの最中は断る(#215 段②)
@@ -6422,6 +6428,8 @@ function applyPlanOps(dispatcher: Dispatcher, planOps: readonly PlanOp[]): { ref
  * @param toScope コピー先のフォルダ(`null` = ルート)
  * @param afterDone コピーが**成功した**後始末(2 ペイン = 選択を外す)
  * @param report 結果の文(シェルの出力に載せる)。失敗は `failed: true`
+ * @param duplicate 🔴 **複製**(#1163 依頼 169)── 同じ場所への 1 件のコピー。知らせを「『X (コピー)』を作りました」にし、
+ *   できた複製を選ぶ(続けて直せる)。⚠ 段取り・本文の読み・失敗の扱いはコピーと同じ 1 本(口を 2 つにしない)
  */
 function copyEntriesTo(
   dispatcher: Dispatcher,
@@ -6430,6 +6438,7 @@ function copyEntriesTo(
   toScope: string | null,
   afterDone: () => void,
   report?: (text: string, failed: boolean) => void,
+  duplicate = false,
 ): void {
     const st = dispatcher.getState();
     const read = services.readBodies;
@@ -6545,8 +6554,11 @@ function copyEntriesTo(
          * ⚠ 本文を読めなかった分があるときだけは、問題として残す(空で作った物がある)。
          */
         const count = lids.length;
-        const head =
-          steps.length > count
+        const head = duplicate
+          ? steps.length > 1
+            ? `「${steps[0]?.title ?? ''}」を作りました(中身を含め ${steps.length} 件)`
+            : `「${steps[0]?.title ?? ''}」を作りました`
+          : steps.length > count
             ? `${count} 件(中身を含め ${steps.length} 件)を「${where}」へコピーしました`
             : `${count} 件を「${where}」へコピーしました`;
         const notes = [
@@ -6568,6 +6580,11 @@ function copyEntriesTo(
             steps.map((x) => x.lid),
             said,
           );
+        }
+        // 🔴 複製(依頼 169)は、できた複製を開く ── 作った物が画面のどこにあるか探させない
+        const first = steps[0];
+        if (duplicate && first !== undefined && missing === 0) {
+          dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: first.lid });
         }
         afterDone();
       },
@@ -12797,6 +12814,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     const line = Number(target.getAttribute('data-pkc-cell-line'));
     const col = Number(target.getAttribute('data-pkc-cell-col'));
     if (!Number.isInteger(line) || line < 0 || !Number.isInteger(col) || col < 0) return;
+    /**
+     * 🔴 **式が読めなかった升を押したら、理由を画面の下に 1 行出す**(#1163 依頼 101-2、推薦 A)。
+     * ⚠ 指で触る端末には吹き出し(`title`)が無く、`#ERR!` の記号だけでは何が駄目か読めない。
+     * ⚠ 欄を開く**前**に出す(開いた後に state を動かすと、描き直しが欄を巻き込みうる)。断られる回は、後の断りが上書きする。
+     */
+    const formulaWhy = target.getAttribute(FORMULA_WHY_ATTR);
+    if (formulaWhy !== null && formulaWhy !== '') {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: `このセルの式: ${formulaWhy}` });
+    }
     const st = dispatcher.getState();
     /**
      * ⚠ **どのノートのセルかは、押した所から引く**(`toggle-task` と同じ理由)──
@@ -13879,6 +13905,32 @@ const ACTIONS: Record<string, ActionHandler> = {
     });
   },
   /**
+   * 🔴 **ノートを複製する**(#1163 依頼 169。user 回答 = 要る)。行の右クリック / 右の列 / 「操作を探す」。
+   *
+   * 引き継ぐのは本文・タグ・添付(本文の中の添付への参照 ── 添付そのものは同じ物を指す)。つながりと履歴は引き継がない
+   * (新しいノートとして作るので、履歴は空・つながりは本文のリンク以外に作らない)。置き場は元と同じフォルダ、題名は
+   * 「元の題名 (コピー)」(`copyTitle`)。
+   * 🔑 実体は 2 ペインの「コピー」と同じ `copyEntriesTo` ── 同じ場所へのコピーと複製は同じ操作である(規則を 2 本にしない)。
+   * ⚠ 相手は押した行の 1 件だけ(印の全部ではない)── 「この 1 件を複製する」という名前どおりにする。
+   */
+  'duplicate-entry': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null || !st.entryMetas.has(lid)) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '複製するノートを選んでください(行を押すと選べます)',
+      });
+      return;
+    }
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}複製してください` });
+      return;
+    }
+    const parent = resolveCanonicalParents(st.entryMetas, st.relations).get(lid) ?? null;
+    copyEntriesTo(dispatcher, services, [lid], parent, () => {}, undefined, true);
+  },
+  /**
    * 🔴 **並べ替え**(2026-08-06。user 報告 2-10)。⚠ 動かす当人は帯が持つ
    * (`move-entry` と同じ理由 ── 押した瞬間に選択が変わっていても取り違えない)。
    */
@@ -14056,7 +14108,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 「何枚目か」は**描いた側の並び**から数える ── 器に番号を焼き込むと、
    * 図を 1 個消したときに番号が飛ぶ
    */
-  'export-diagram': (_dispatcher, target, services, root) => {
+  'export-diagram': (dispatcher, target, services, root) => {
     const host = target.closest<HTMLElement>('[data-pkc-mermaid-src]');
     const source = host?.getAttribute('data-pkc-mermaid-src');
     if (!host || !source) return;
@@ -14093,7 +14145,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     //    そのまま流すので、service が reject すると**未処理の rejection**になる
     //    (実際に test の stderr で出た。この repo は stderr 0 行を保つ規律)。
     //    失敗の**報告**は service 側が持つ ── ここは見た目を戻すだけ
-    void done.then(reset, reset);
+    void done.then((name) => {
+      reset();
+      // 🔴 **終わったら言う**(#1163 依頼 101-3、推薦 A)── 表の「.csv で保存」と同じ字。ブラウザのダウンロード表示に
+      //   気づかない人には、押したのに何も起きなかったように見える
+      if (typeof name === 'string' && name !== '') dispatcher.dispatch({ type: 'OP_NOTICE', message: `「${name}」を保存しました` });
+    }, reset);
   },
   /**
    * 🔴 **番号付きリストの番号を振り直す**(#396)。
@@ -19043,6 +19100,8 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'open-note-window': '[data-pkc-field="inspector-actions"] [data-pkc-action="open-note-window"]',
   // 🔴 外から開けるリンク(2026-10-11)── 情報ペインのボタンに限る(`open-note-window` と同じ理由)
   'copy-entry-link': '[data-pkc-field="inspector-actions"] [data-pkc-action="copy-entry-link"]',
+  // 🔴 複製する(依頼 169)── 情報ペインのボタンに限る(行の右クリックの同名は押した行の lid を持つ。`open-note-window` と同じ理由)
+  'duplicate-entry': '[data-pkc-field="inspector-actions"] [data-pkc-action="duplicate-entry"]',
   'open-settings': '[data-pkc-action="set-view"][data-pkc-view="settings"]',
   'open-flags': '[data-pkc-action="set-view"][data-pkc-view="flags"]',
   'open-help': '[data-pkc-action="set-view"][data-pkc-view="help"]',

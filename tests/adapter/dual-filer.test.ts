@@ -2002,7 +2002,7 @@ describe('2 ペインの写す(#273 段③)', () => {
     );
     await new Promise((r) => setTimeout(r, 0));
     const st = d.getState();
-    const copy = [...st.entryMetas.values()].find((m) => m.title === 'はこ1 のコピー')!;
+    const copy = [...st.entryMetas.values()].find((m) => m.title === 'はこ1 (コピー)')!;
     expect(copy, 'フォルダの写しが無い').toBeTruthy();
     const kids = st.relations.filter((r) => r.kind === 'structural' && r.fromLid === copy.lid);
     expect(kids.length, '中身が付いてきていない(空のフォルダだけ増えた)').toBe(2);

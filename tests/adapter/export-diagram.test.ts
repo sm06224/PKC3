@@ -261,3 +261,37 @@ describe('書き出し中の見え方(P8 段⑬)', () => {
     root.remove();
   });
 });
+
+/** 🔴 #1163 依頼 101-3(推薦 A): 図を保存し終えたら「『…』を保存しました」と言う(表の .csv で保存と同じ字)。 */
+describe('図を保存し終えたら言う(依頼 101-3)', () => {
+  function rig(result: Promise<void | string>): { btn: HTMLButtonElement; d: Dispatcher; root: HTMLElement } {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-region', 'detail');
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-mermaid-src', 'graph TD\n A-->B');
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'export-diagram');
+    host.append(btn);
+    root.append(host);
+    document.body.append(root);
+    const d = new Dispatcher();
+    bindActions(root, d, { exportDiagram: () => result });
+    return { btn, d, root };
+  }
+
+  it('🔴 書き出せたら、落とした名前で「保存しました」と出る', async () => {
+    const { btn, d, root } = rig(Promise.resolve('ノート-図1.svg'));
+    btn.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(d.getState().notice, '保存したのに何も言わない').toBe('「ノート-図1.svg」を保存しました');
+    root.remove();
+  });
+
+  it('⚠ 失敗した回(名前の無い解決)は「保存しました」と言わない(理由は受け手が OP_FAILED で言う)', async () => {
+    const { btn, d, root } = rig(Promise.resolve(undefined));
+    btn.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(d.getState().notice ?? '').not.toContain('保存しました');
+    root.remove();
+  });
+});

@@ -635,14 +635,19 @@ export class FilerRenderer {
     let caret: number | null = null;
     for (const el of host.querySelectorAll<HTMLInputElement>('input[data-pkc-field]')) {
       const name = el.getAttribute('data-pkc-field') ?? '';
-      if (name === '' || el.value === '') continue;
-      values.set(name, el.value);
+      if (name === '') continue;
+      /**
+       * 🔴 **字が空でも、焦点は運ぶ**(#1955)。⚠ 空の欄を飛ばすと、欄を押した直後(まだ 1 字も打っていない)に
+       *   帯が組み直ると焦点が `body` へ落ち、**そのあと打った字がどこにも入らない**(保存の返事が遅れる負荷時だけ起きる)。
+       * ⚠ 値は空でないときだけ運ぶ(新しい空の器に対しても呼ばれるので、空で上書きしない)。
+       */
+      if (el.value !== '') values.set(name, el.value);
       if (el.ownerDocument.activeElement === el) {
         focused = name;
         caret = el.selectionStart;
       }
     }
-    if (values.size > 0) this.keptBar = { values, focused, caret };
+    if (values.size > 0 || focused !== null) this.keptBar = { values, focused, caret };
   }
 
   /**
@@ -657,8 +662,7 @@ export class FilerRenderer {
     if (kept === null) return;
     for (const el of host.querySelectorAll<HTMLInputElement>('input[data-pkc-field]')) {
       const was = kept.values.get(el.getAttribute('data-pkc-field') ?? '');
-      if (was === undefined) continue;
-      el.value = was;
+      if (was !== undefined) el.value = was;
       if (el.getAttribute('data-pkc-field') === kept.focused) {
         el.focus();
         if (kept.caret !== null) el.setSelectionRange(kept.caret, kept.caret);
@@ -2036,7 +2040,10 @@ export class FilerRenderer {
       // 🔑 持ち越した行に焦点が在るままなら触らない(`focus()` は見える位置へ動かす ── #1087)
       //    ⚠ 「行の中の欄」(名前の打ち替え)に焦点が在るときも同じ ── 行へ焦点を奪い返さない
       const active = this.region.ownerDocument.activeElement;
-      if (back !== null && !(active instanceof Node && back.contains(active))) back.focus();
+      // 🔴 帯の欄(条件・まとめて付けるタグ)へ `restoreBarInputs` が焦点を戻した回も同じ(#1955)── 表へ奪い返すと、
+      //    空の欄を押した直後の組み直しで、そのあと打つ字が表の鍵(行の移動)に化ける
+      const inBar = active instanceof Node && this.moveBar !== null && this.moveBar.contains(active);
+      if (back !== null && !inBar && !(active instanceof Node && back.contains(active))) back.focus();
     }
     /**
      * ⚠ **描いた直後に焦点と全選択**(#215。2 ペインの `renderRows` と同じ)── これが無いと、

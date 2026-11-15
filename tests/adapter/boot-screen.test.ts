@@ -4,6 +4,7 @@ import {
   BOOT_PROGRESS_SLOW_MS,
   BOOT_PROGRESS_SLOW_TEXT,
   BOOT_PROGRESS_TEXT,
+  BOOT_BACKUP_LABEL,
   showBootFailure,
   showBootProgress,
 } from '../../src/adapter/ui/render/boot-screen';
@@ -66,5 +67,42 @@ describe('起動に失敗した画面(依頼 73-2)', () => {
     expect(root.querySelector('details')).toBeNull();
     expect(root.textContent).toContain('起動に失敗しました: x');
     expect(root.textContent).toContain('(ファイルは未送です)');
+  });
+});
+
+describe('起動に失敗した画面の「バックアップ」(#1163 依頼 208)', () => {
+  it('🔴 「読み込み直す」と並んで「バックアップ」が出て、押すと集めている字 → 結果の 1 行が出る', async () => {
+    let finish!: (s: string) => void;
+    const backup = vi.fn(() => new Promise<string>((r) => (finish = r)));
+    showBootFailure(root, bootFailureText('x'), '', vi.fn(), backup, '集めています…');
+    expect(root.querySelector('[data-pkc-boot-reload]'), '再読み込みが消えた').not.toBeNull();
+    const b = root.querySelector<HTMLButtonElement>('[data-pkc-boot-backup]');
+    expect(b, 'バックアップのボタンが無い').not.toBeNull();
+    expect(b!.textContent).toBe(BOOT_BACKUP_LABEL);
+    const status = root.querySelector<HTMLElement>('[data-pkc-boot-backup-status]')!;
+    expect(status.hidden, '押す前から結果の行が見えている').toBe(true);
+    b!.click();
+    expect(backup).toHaveBeenCalledTimes(1);
+    expect(status.hidden).toBe(false);
+    expect(status.textContent).toBe('集めています…');
+    // ⚠ 集めている間に 2 回目を押させない(同じ保存領域を 2 本で開き直さない)
+    b!.click();
+    expect(backup, '集めている間にもう一度開き直した').toHaveBeenCalledTimes(1);
+    finish('「PKC3-20261115.pkc3-part.zip」を保存しました');
+    await vi.runAllTimersAsync();
+    expect(status.textContent).toBe('「PKC3-20261115.pkc3-part.zip」を保存しました');
+    expect(b!.disabled, '終わっても押せないまま').toBe(false);
+  });
+
+  it('⚠ 失敗しても黙らない(投げても 1 行出す)', async () => {
+    showBootFailure(root, bootFailureText('x'), '', vi.fn(), () => Promise.reject(new Error('x')));
+    root.querySelector<HTMLButtonElement>('[data-pkc-boot-backup]')!.click();
+    await vi.runAllTimersAsync();
+    expect(root.querySelector('[data-pkc-boot-backup-status]')!.textContent).toBe('読めた分を書き出せませんでした');
+  });
+
+  it('⚠ 口を渡さなければ出さない(持ち歩ける 1 枚の HTML)', () => {
+    showBootFailure(root, bootFailureText('x'), '', vi.fn());
+    expect(root.querySelector('[data-pkc-boot-backup]')).toBeNull();
   });
 });

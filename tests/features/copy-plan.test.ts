@@ -100,14 +100,14 @@ describe('写す段取り', () => {
 
   it('🔴 同じ場所へ写すときだけ、名前に印を付ける', () => {
     const steps = planCopy(['a'], null, METAS, RELS, counter()); // a はルートに居る
-    expect(steps[0]?.title).toBe('あ のコピー');
+    expect(steps[0]?.title).toBe('あ (コピー)');
   });
 
   /** ⚠ 中身の名前まで変えない(変えると本文の参照と見た目が食い違う)。 */
   it('🔴 印が付くのは選んだ物だけで、中身は元の名前', () => {
     const steps = planCopy(['f1'], null, METAS, RELS, counter());
     const byId = new Map(steps.map((s) => [s.sourceLid, s]));
-    expect(byId.get('f1')!.title).toBe('はこ1 のコピー');
+    expect(byId.get('f1')!.title).toBe('はこ1 (コピー)');
     expect(byId.get('x')!.title, '中身の名前まで変えた').toBe('えっくす');
   });
 
