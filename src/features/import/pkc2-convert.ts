@@ -17,7 +17,7 @@
  */
 import { errorText } from '@features/error-text';
 import { getFlavor } from '../flavor';
-import { pkc2SheetHasHiddenLayout } from '@features/flavor/spreadsheet-flavor';
+import { pkc2SheetHasHiddenLayout, pkc2SheetRowHeightsDropped } from '@features/flavor/spreadsheet-flavor';
 import { RELATION_KINDS } from '@features/relation/kinds';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { MAX_TAGS, MAX_TAG_CHARS, normalizeTag, readTags, sameTag } from '@features/flavor/tags';
@@ -439,6 +439,18 @@ export function convertPkc2Container(
   if (sheetsWithLayout > 0) {
     warnings.push(
       `${sheetsWithLayout} 件の表に付いていた列の幅・行の高さ・グラフ・列の書式は、PKC3 では表示されません(値は保存されています)`,
+    );
+  }
+  /**
+   * 🔴 **行の高さを書けなかった表**(#1163 依頼 357)── まとめても前書きの上限に収まらず、行の高さだけを外した。
+   * ⚠ 言わないと、上の「値は保存されています」がその表については嘘になる。
+   */
+  const sheetsRowsDropped = users.filter(
+    (u) => u.archetype === 'spreadsheet' && pkc2SheetRowHeightsDropped(u.body),
+  ).length;
+  if (sheetsRowsDropped > 0) {
+    warnings.push(
+      `${sheetsRowsDropped} 件の大きな表は、行の高さが多すぎて保存できませんでした(表の中身・列の幅・日付などは取り込みました)`,
     );
   }
 

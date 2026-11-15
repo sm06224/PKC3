@@ -11,6 +11,73 @@ import { serializeFrontmatter, type FrontmatterValue } from '../markdown/frontma
 import { csvEscapeField } from '../markdown/csv-table';
 import { type FlavorSpec } from './flavor-spec';
 import { extractSchedule } from '../schedule/schedule-keys';
+import { resolveCap } from '../notation/caps';
+
+/**
+ * 🔴 **行の高さを、同じ高さが続くところはまとめて書く**(#1163 依頼 357、案 A)。
+ *
+ * ⚠ PKC2 の表計算は行の高さを**全部の行ぶん**持つ ── そのまま前書きに書くと、目安 4,000 行を超える表で
+ *   前書きの上限(16KB)を超え、**列の幅・日付・状態・タグまで全部読めなくなっていた**。
+ * 🔑 書き方: 「高さ*続く行数」を空白で区切った 1 つの字(`24*6000 30 24*12`)。1 行だけの高さは数だけ(`30`)。
+ *   短い表(配列の上限 `arrayItems` 以内)は今までどおり数の並びで書く(読み手を増やさない)。
+ */
+export function packRowHeights(heights: readonly number[]): readonly number[] | string {
+  if (heights.length <= resolveCap('frontmatter', 'arrayItems')) return heights;
+  const runs: string[] = [];
+  for (let i = 0; i < heights.length; ) {
+    let j = i + 1;
+    while (j < heights.length && heights[j] === heights[i]) j += 1;
+    const n = j - i;
+    runs.push(n === 1 ? String(heights[i]) : `${String(heights[i])}*${String(n)}`);
+    i = j;
+  }
+  return runs.join(' ');
+}
+
+/** {@link packRowHeights} の逆(数の並びはそのまま)。読めない字が混ざれば `null`。 */
+export function unpackRowHeights(value: unknown): number[] | null {
+  if (Array.isArray(value)) return value.every((v) => typeof v === 'number') ? (value as number[]) : null;
+  if (typeof value !== 'string') return null;
+  const out: number[] = [];
+  for (const run of value.trim().split(/\s+/)) {
+    const m = /^(\d+(?:\.\d+)?)(?:\*(\d+))?$/.exec(run);
+    if (m === null) return null;
+    const h = Number(m[1]);
+    const n = m[2] === undefined ? 1 : Number(m[2]);
+    for (let k = 0; k < n; k += 1) out.push(h);
+  }
+  return out;
+}
+
+/** 前書きに書ける大きさか(読み手の上限 = 前書きの総バイト・1 つの値のバイト)。 */
+function frontmatterFits(meta: Record<string, FrontmatterValue>): boolean {
+  const text = serializeFrontmatter(meta);
+  const bytes = new TextEncoder().encode(text).length;
+  if (bytes > resolveCap('frontmatter', 'bytes')) return false;
+  const rh = meta['sheet.rowHeights'];
+  return typeof rh !== 'string' || new TextEncoder().encode(rh).length <= resolveCap('frontmatter', 'stringValueBytes');
+}
+
+/**
+ * 🔴 **まとめても前書きに収まらず、行の高さを書かなかった表か**(#1163 依頼 357)── 取り込みの報告に 1 行足すための問い。
+ */
+export function pkc2SheetRowHeightsDropped(body: string): boolean {
+  const sheet = parsePkc2Spreadsheet(body);
+  if (!sheet.rowHeights || sheet.rowHeights.length === 0) return false;
+  return !frontmatterFits(sheetMeta(sheet, true));
+}
+
+/** 表の設定を前書きの項目にする。`withRows` = 行の高さも入れるか。 */
+function sheetMeta(sheet: ReturnType<typeof parsePkc2Spreadsheet>, withRows: boolean): Record<string, FrontmatterValue> {
+  const meta: Record<string, FrontmatterValue> = {};
+  if (sheet.colWidths) meta['sheet.colWidths'] = sheet.colWidths;
+  if (withRows && sheet.rowHeights) meta['sheet.rowHeights'] = packRowHeights(sheet.rowHeights) as FrontmatterValue;
+  // charts / columnFormats は object 配列 ── flat YAML に載らないため
+  // JSON 文字列で保持(quoted scalar round-trip)。grid editor(P3-7)が解釈する
+  if (sheet.charts) meta['sheet.charts'] = JSON.stringify(sheet.charts);
+  if (sheet.columnFormats) meta['sheet.columnFormats'] = JSON.stringify(sheet.columnFormats);
+  return meta;
+}
 
 interface Pkc2Spreadsheet {
   rows: string[][];
@@ -89,14 +156,12 @@ export const spreadsheetFlavor: FlavorSpec = {
   extract: (body) => ({ ...extractSchedule(body), archived: false }),
   fromPkc2(body) {
     const sheet = parsePkc2Spreadsheet(body);
-    const meta: Record<string, FrontmatterValue> = {};
-    if (sheet.colWidths) meta['sheet.colWidths'] = sheet.colWidths;
-    if (sheet.rowHeights) meta['sheet.rowHeights'] = sheet.rowHeights;
-    // charts / columnFormats は object 配列 ── flat YAML に載らないため
-    // JSON 文字列で保持(quoted scalar round-trip)。grid editor(P3-7)が解釈する
-    if (sheet.charts) meta['sheet.charts'] = JSON.stringify(sheet.charts);
-    if (sheet.columnFormats)
-      meta['sheet.columnFormats'] = JSON.stringify(sheet.columnFormats);
+    /**
+     * 🔴 **まとめても前書きに収まらなければ、行の高さだけを書かない**(#1163 依頼 357)── 書くと前書きごと読めなくなり、
+     *   列の幅・日付・状態・タグまで失う。書かなかったことは取り込みの報告が言う(`pkc2SheetRowHeightsDropped`)。
+     */
+    const full = sheetMeta(sheet, true);
+    const meta = frontmatterFits(full) ? full : sheetMeta(sheet, false);
 
     // `csv-render` = レンダリング面のみ(ソーストグル無し)── シートは表が本体。
     // noheader は csv fence の既存オプション規約(csv-table.ts)をそのまま使う

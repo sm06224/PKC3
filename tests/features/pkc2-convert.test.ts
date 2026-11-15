@@ -595,6 +595,22 @@ describe('表の見た目の設定は PKC3 で表示されないことを、取�
     expect(r.warnings.filter((w) => w.includes('列の幅'))).toEqual([]);
   });
 
+  it('🔴 行の高さが多すぎて書けなかった表は、別の 1 行で言う(#1163 依頼 357)/ まとめて収まる表は言わない', () => {
+    const big = (n: number, uneven: boolean) =>
+      sheet({ rowHeights: Array.from({ length: n }, (_, i) => (uneven ? 20 + (i % 7) : 24)) });
+    const r = convertPkc2Container(
+      {
+        entries: [
+          { lid: 'u', title: 'まとめられない', archetype: 'spreadsheet', body: big(8000, true) },
+          { lid: 's', title: 'まとめられる', archetype: 'spreadsheet', body: big(8000, false) },
+        ],
+      },
+      opts(),
+    );
+    expect(r.warnings).toContain('1 件の大きな表は、行の高さが多すぎて保存できませんでした(表の中身・列の幅・日付などは取り込みました)');
+    expect(r.entries.find((e) => e.title === 'まとめられる')!.body).toContain('24*8000');
+  });
+
   it('値そのものは保存される(「消えた」のではなく「表示されない」)', () => {
     const r = convertPkc2Container(
       { entries: [{ lid: 'w', title: '幅', archetype: 'spreadsheet', body: sheet({ colWidths: [80, 120] }) }] },
