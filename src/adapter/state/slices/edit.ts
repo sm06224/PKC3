@@ -27,7 +27,7 @@ import {
 import { seedBodyFor } from '@features/flavor';
 import { foldAttachmentHead, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
 import { sectionAt, sectionRange } from '@features/markdown/append-target';
-import { replaceAll } from '@features/markdown/body-replace';
+import { replaceAll, replacedNotice } from '@features/markdown/body-replace';
 import { applyBodyRewrite } from '@features/markdown/body-rewrite';
 import { openCodeFenceAt } from '@features/markdown/code-fence-edit';
 import { frontmatterLineCount } from '@features/markdown/frontmatter';
@@ -146,7 +146,8 @@ export function reduceEdit(state: AppState, action: EditAction): ReduceResult {
           events: [],
         };
       return {
-        state: { ...state, notice: `${count} 件を置き換えました`, noticeOpen: null, noticeCreate: null, openBody: { ...state.openBody, body } },
+        // 🔴 内訳を出す(コードの中も置換したことに気づけるように。#1163 依頼 161)
+        state: { ...state, notice: replacedNotice(count, done.inCode), noticeOpen: null, noticeCreate: null, openBody: { ...state.openBody, body } },
         events: [],
       };
     }

@@ -554,6 +554,14 @@ export class DetailRenderer {
   private barShape: BarShape | null = null;
   private barButton: HTMLButtonElement | null = null;
   /**
+   * 🔴 **直前の描画で編集していたノート**(#1163 依頼 361、推薦 A)。⚠ 編集を抜けた(保存 / やめる)最初の描画で、
+   *   キーボードの位置がどこにも無ければ、そのノートの「ノートを編集する」へ戻す ── 戻さないと Tab がページの
+   *   先頭から進み、キーボードだけで使う人がさっきのノートまで辿り直すことになる。
+   */
+  private editedLid: string | null = null;
+  /** 🔴 **この描画で編集を抜けたノート**(入口で決め、この描画の中だけ使う)。 */
+  private justLeftLid: string | null = null;
+  /**
    * 読む面のコピー(2026-08-08。user 裁定「markdown のテキストとしてのコピーと
    * HTML 書式ありのコピーの両方」)。⚠ 器と同じ寿命 ── `dropBarState` で忘れる。
    */
@@ -1430,6 +1438,14 @@ export class DetailRenderer {
 
   private renderCore(state: AppState): void {
     /**
+     * 🔴 **編集を抜けたかは、描画の入口で 1 度だけ決める**(#1163 依頼 361 の着地前レビュー ⚠1)。
+     * ⚠ 下には早期 return が何本も在る ── 控え(`editedLid`)を下で消すと、抜けた最初の描画が早期 return に当たった回に
+     *   **控えが残り**、後で同じノートを選び直した描画で位置を奪う。だから入口で「この描画で抜けた」を確定して控えを捨て、
+     *   次の描画へは持ち越さない。
+     */
+    this.justLeftLid = state.phase !== 'editing' ? this.editedLid : null;
+    if (state.phase !== 'editing') this.editedLid = null;
+    /**
      * 🔴 **`entryMetas` が変わったら、本文は描き直さず印だけ当て直す**(#1174 段①)。
      * ⚠ **一番上に置く** ── 下には早期 return が何本も在り、ゴミ箱から戻した回は
      *   本文の指紋が同じなので必ずそこで止まる(= 印が消えない)。
@@ -1476,6 +1492,8 @@ export class DetailRenderer {
     }
     const editing = state.phase === 'editing' && state.openBody !== null;
     if (editing) {
+      // 🔴 編集していたノートを控える(抜けた最初の描画で「ノートを編集する」へ位置を戻す。#1163 依頼 361)
+      this.editedLid = state.openBody!.lid;
       // 入力中の再描画はカーソル / IME を壊す ── 同一 entry の編集中は何もしない
       if (this.mode === 'editor' && this.lastSelected === state.openBody!.lid) {
         /**
@@ -1790,6 +1808,7 @@ export class DetailRenderer {
     }
 
     this.renderBar(state, true, lid);
+    this.restoreFocusAfterEdit(state, lid);
     this.renderPanel(state, lid);
 
     /**
@@ -2272,6 +2291,21 @@ export class DetailRenderer {
    *
    * 🔑 器を組み直すのは**形が変わるときだけ**(編集 / 再保存 / 無し の 3 形)。
    */
+  /**
+   * 🔴 **編集を抜けたら「ノートを編集する」へキーボードの位置を戻す**(#1163 依頼 361、推薦 A)。
+   * 🔑 ここ 1 か所で受ける ── 保存 / やめるは、ボタン・ショートカット・確認の窓と入口が多い(どれを通っても描画はここを通る)。
+   * ⚠ **位置がどこにも無いときだけ**(押したボタンや欄が描き直しで消え、`body` へ落ちたとき)── user が既に
+   *   別の所(一覧・探す欄)へ移っていたら奪わない。
+   */
+  private restoreFocusAfterEdit(state: AppState, lid: string): void {
+    const left = this.justLeftLid === lid;
+    this.justLeftLid = null;
+    if (!left || state.phase !== 'ready' || this.barButton === null) return;
+    const now = document.activeElement;
+    const lost = now === null || now === document.body || !now.isConnected;
+    if (lost && this.barButton.isConnected && !this.barButton.disabled) this.barButton.focus({ preventScroll: true });
+  }
+
   private renderBar(state: AppState, bodyReady: boolean, lid: string): void {
     /**
      * 🔴 **留めた枠には出さない**(#505 段②)。

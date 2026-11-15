@@ -156,7 +156,8 @@ describe('🔴 断るときは理由を出す', () => {
   it('🔴 リンクの綴りが壊れているとき', () => {
     const { dispatcher, lastError } = makeDispatcher();
     stop = bindActions(root, dispatcher);
-    entryLink('entry:abc#').click();
+    // ⚠ `entry:abc#` は #1163 依頼 179 で「そのノートを開く」に変えた ── 壊れた綴りは断片の中身が読めない形で見る
+    entryLink('entry:abc#log/').click();
     expect(lastError(), '無言で断った').toContain('読めません');
   });
 

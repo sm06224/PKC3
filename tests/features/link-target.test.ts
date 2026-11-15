@@ -25,7 +25,11 @@ const CASES: readonly (readonly [string, string | null, string])[] = [
   ['entry:c-log#2026-07-01-090000', 'c-log', '#2026-07-01-090000'],
   // ⚠ 断る形
   ['entry:abc#day/2026-02-30', null, ''], // 実在しない日
-  ['entry:abc#', null, ''],
+  // 🔴 #1163 依頼 179(案 1): 末尾の余分な `#` / `/` は無視して、そのノートを開く
+  ['entry:abc#', 'abc', ''],
+  ['entry:abc/', 'abc', ''],
+  ['entry:abc//', 'abc', ''],
+  ['entry:abc/#h/x', null, ''], // 断片つきの `/` は意図が読めないので断る
   ['entry:abc#log/', null, ''],
   ['entry:a.b', null, ''],
   ['entry:abc#見出し', null, ''], // TOKEN_RE が ASCII のみ
