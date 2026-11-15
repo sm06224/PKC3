@@ -349,6 +349,42 @@ export async function withCache<T>(run: (d: IDBDatabase) => Promise<T>, fallback
  */
 export class DeviceRenderError extends Error {}
 
+/**
+ * 🔴 **図が大きすぎて描けない**(#1163 依頼 369、推薦 A)。
+ *
+ * mermaid は線の本数・原文の字数に上限を持ち、超えると描くのを止める。書き方は正しいので、
+ * 「書き方を確かめてください」を出すと user は無い間違いを探す ── 印を分けて、上限を言う。
+ * 🔑 上限は**ここの定数 1 か所**から `configFor` へ渡し、画面の字もここから組む(数がずれない)。
+ */
+export const MERMAID_MAX_EDGES = 500;
+export const MERMAID_MAX_TEXT = 50_000;
+export class DiagramTooLargeError extends Error {}
+
+/** 上限を言う画面の 1 文。⚠ 数は定数から組む。 */
+export function diagramTooLargeText(): string {
+  return `図が大きすぎて描けません(線は ${String(MERMAID_MAX_EDGES)} 本、原文は ${manChars(MERMAID_MAX_TEXT)}字まで)`;
+}
+
+/** 50000 → 「5 万」/ 1200 → 「1200 」(画面の字を数から組む)。 */
+function manChars(n: number): string {
+  return n >= 10_000 && n % 10_000 === 0 ? `${String(n / 10_000)} 万` : `${String(n)} `;
+}
+
+/**
+ * mermaid が上限で止めたかを見分ける。
+ * - 線の上限: `Edge limit exceeded.` で投げる(12.x)。
+ * - 字の上限: **投げずに**「Maximum text size in diagram exceeded」という代わりの図を描く ──
+ *   そのまま焼くと英語の赤い箱が出るので、原文が上限を超えていて代わりの図が返ったときに止める。
+ */
+const EDGE_LIMIT_MESSAGE = /^Edge limit exceeded\b/;
+const TEXT_LIMIT_SVG = 'Maximum text size in diagram exceeded';
+export function isEdgeLimitError(e: unknown): boolean {
+  return e instanceof Error && EDGE_LIMIT_MESSAGE.test(e.message);
+}
+export function isTextLimitSvg(source: string, svg: string): boolean {
+  return source.length > MERMAID_MAX_TEXT && svg.includes(TEXT_LIMIT_SVG);
+}
+
 /** mermaid 本体は**必要になるまで読まない**(初期ロードに載せない)。 */
 /**
  * 🔴 読み込みに失敗(オフライン / 配り直しで古くなった chunk)したら**覚えない**(#1087)── 覚えると
@@ -384,6 +420,9 @@ export function configFor(p: DiagramPalette): Parameters<
      * 失敗の文言は呼び出し側が平易な字で出す。
      */
     suppressErrorRendering: true,
+    // 🔴 上限は定数から渡す(画面の字 `diagramTooLargeText` と同じ数にする。#1163 依頼 369)
+    maxEdges: MERMAID_MAX_EDGES,
+    maxTextSize: MERMAID_MAX_TEXT,
     /**
      * 🔴 **`htmlLabels` を切る**(実測で踏んだ)。既定の mermaid はラベルを
      * `<foreignObject>` で描くが、**`foreignObject` を含む SVG を canvas に
@@ -468,10 +507,12 @@ async function renderWith(id: string, source: string, p: DiagramPalette): Promis
   m.initialize(configFor(p));
   try {
     const { svg } = await m.render(id, source);
+    if (isTextLimitSvg(source, svg)) throw new DiagramTooLargeError(diagramTooLargeText());
     return svg;
   } catch (e) {
     // 🔴 失敗した描画の作業用要素(`d<id>`)は mermaid が片付けない版がある ── 念のため自分で消す
     removeTempElements(id);
+    if (isEdgeLimitError(e)) throw new DiagramTooLargeError(diagramTooLargeText());
     throw e;
   }
 }

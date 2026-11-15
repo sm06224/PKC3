@@ -11,7 +11,11 @@
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { hydrateAllNow, hydrateMermaid, type MermaidScope } from '../../src/adapter/ui/render/mermaid-hydrate';
-import { DeviceRenderError, renderToPng } from '../../src/adapter/ui/render/mermaid-raster';
+import {
+  DeviceRenderError,
+  DiagramTooLargeError,
+  renderToPng,
+} from '../../src/adapter/ui/render/mermaid-raster';
 import {
   noteTyping,
   resetTyping,
@@ -28,6 +32,7 @@ vi.mock('../../src/adapter/ui/render/mermaid-raster', async (importOriginal) => 
   return {
     cacheKey: real.cacheKey,
     DeviceRenderError: real.DeviceRenderError,
+    DiagramTooLargeError: real.DiagramTooLargeError,
     renderToPng: vi.fn(async () => ({
       png: new Blob(['png'], { type: 'image/png' }),
       cssWidth: 320,
@@ -234,6 +239,40 @@ describe('配色を変えたときの焼き直し(P8 段⑬)', () => {
     await settle();
     expect(host2.getAttribute('data-pkc-mermaid-state')).toBe('failed');
     expect(host2.hasAttribute('data-pkc-mermaid-device')).toBe(true);
+    scope2.dispose();
+    b2.remove();
+  });
+
+  /** 🔴 大きすぎて描けなかったときは too-large の印と、理由そのものの字(#1163 依頼 369)。 */
+  it('🔴 大きすぎる図は too-large の印が付き、理由が属性に入る(書き方の間違いには付かない)', async () => {
+    const b = block('graph TD\n E-->F');
+    document.body.append(b);
+    const scope = hydrateMermaid(b);
+    const host = b.querySelector('[data-pkc-mermaid-src]')!;
+    vi.mocked(renderToPng).mockImplementationOnce(async () => {
+      throw new DiagramTooLargeError('図が大きすぎて描けません(線は 500 本、原文は 5 万字まで)');
+    });
+    fire!([observed[observed.length - 1]!]);
+    await settle();
+    expect(host.getAttribute('data-pkc-mermaid-state')).toBe('failed');
+    expect(host.hasAttribute('data-pkc-mermaid-too-large'), '大きすぎる印が付いていない').toBe(true);
+    expect(host.hasAttribute('data-pkc-mermaid-device')).toBe(false);
+    expect(host.getAttribute('data-pkc-mermaid-error')).toBe('図が大きすぎて描けません(線は 500 本、原文は 5 万字まで)');
+    scope.dispose();
+    b.remove();
+
+    // 対照群: ふつうの書き方の間違いには付かない
+    const b2 = block('graph TD\n G-->H');
+    document.body.append(b2);
+    const scope2 = hydrateMermaid(b2);
+    const host2 = b2.querySelector('[data-pkc-mermaid-src]')!;
+    vi.mocked(renderToPng).mockImplementationOnce(async () => {
+      throw new Error('Parse error on line 1');
+    });
+    fire!([observed[observed.length - 1]!]);
+    await settle();
+    expect(host2.getAttribute('data-pkc-mermaid-state')).toBe('failed');
+    expect(host2.hasAttribute('data-pkc-mermaid-too-large')).toBe(false);
     scope2.dispose();
     b2.remove();
   });

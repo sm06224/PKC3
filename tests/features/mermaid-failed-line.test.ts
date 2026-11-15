@@ -47,6 +47,19 @@ describe('図が描けないときの 1 行', () => {
     expect(body!, '書き方の字が混ざっている').not.toContain('書き方');
   });
 
+  it('🔴 大きすぎて描けなかったときは理由(上限の数)をそのまま出す(#1163 依頼 369)', () => {
+    const body = ruleBody(
+      css,
+      ".pkc-md-rendered [data-pkc-mermaid-state='failed'][data-pkc-mermaid-too-large]::before",
+    );
+    expect(body, '大きすぎる図の規則が無い').not.toBeNull();
+    expect(body!).toContain('content: attr(data-pkc-mermaid-error)');
+    // ⚠ device の規則より後ろに置く(両方付くことは無いが、同じ詳細度なので順で決まる)
+    expect(css.indexOf('[data-pkc-mermaid-too-large]::before')).toBeGreaterThan(
+      css.indexOf("[data-pkc-mermaid-device]::before"),
+    );
+  });
+
   it('🔴 グラフ: 理由は属性の字そのまま(前置きは adapter が付ける)/ 取りこぼしの 1 行は ready のときだけ', () => {
     const failed = ruleBody(css, ".pkc-md-rendered [data-pkc-chart-state='failed']::before");
     expect(failed).not.toBeNull();

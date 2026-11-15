@@ -4077,6 +4077,10 @@ li[data-pkc-row-slot] {
 .pkc-md-rendered [data-pkc-mermaid-state='failed'][data-pkc-mermaid-device]::before {
   content: 'この端末では図を描けませんでした';
 }
+/* 図が大きすぎて描けなかったとき(#1163 依頼 369)。字は上限の数を含む理由そのもの(TS の定数から組んだ字) */
+.pkc-md-rendered [data-pkc-mermaid-state='failed'][data-pkc-mermaid-too-large]::before {
+  content: attr(data-pkc-mermaid-error);
+}
 
 /**
  * 🔴 **本文の `@2026-10-15`(押すとその日のノートを開く)**(#1169)。
