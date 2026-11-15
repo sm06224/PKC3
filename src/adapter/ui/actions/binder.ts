@@ -373,6 +373,7 @@ import { appDualPrefs } from '@adapter/ui/render/dual-prefs';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { tagQueryText } from '@features/filter/tag-query';
 import { planCopy } from '@features/relation/copy-plan';
+import { NOW_STAMP_COMMANDS } from '@features/datetime/datetime-format';
 import {
   otherSide,
   paneFilterOptions,
@@ -19292,6 +19293,18 @@ const FORMAT_OF: Readonly<Record<string, FormatOp>> = {
  */
 const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: string) => void) => void>> = {
   /**
+   * 🔴 **いまの日時を 1 打鍵で入れる**(#1966 2-C)。字の形は `NOW_STAMP_COMMANDS` 1 か所。
+   * ⚠ 挿すのは `insertText` ── `Ctrl + Z` で戻せる形にする(選んでいた字があれば置き換わる。打つのと同じ)。
+   */
+  ...Object.fromEntries(
+    Object.entries(NOW_STAMP_COMMANDS).map(([id, fmt]) => [
+      id,
+      (ta: HTMLTextAreaElement) => {
+        insertText(ta, fmt(new Date()));
+      },
+    ]),
+  ),
+  /**
    * 🔴 **いまカーソルの在る行を計算して、行の終わりに答えを入れる**(#766 D-2)。
    * ⚠ 規則は打っているときと**同じ 1 か所**(`calcLineAction`)── 別の判定を作ると、
    *   `Enter` で計算できる式とパレットで計算できる式が食い違う。
@@ -20855,9 +20868,16 @@ export function bindActions(
     }
     // 追記欄: 既定は Ctrl/Cmd+Enter(欄の中だけ ── 画面全体の近道にしない)
     if (field === 'append-input') {
-      if (keymap.match(ke, 'append') === 'append-send') {
+      const appendCmd = keymap.match(ke, 'append');
+      if (appendCmd === 'append-send') {
         ke.preventDefault();
         run('append-entry', ke.target as HTMLElement);
+        return;
+      }
+      // 🔴 いまの日時を入れる 5 つ(#1966 2-C)── 作業ログを足す欄こそ使う所(本文の欄と同じ口 `EDITOR_RUN`)
+      if (appendCmd !== null && NOW_STAMP_COMMANDS[appendCmd] !== undefined) {
+        ke.preventDefault();
+        EDITOR_RUN[appendCmd]!(ke.target as HTMLTextAreaElement, (t) => services.showStatus?.(t));
         return;
       }
       /**
@@ -20919,6 +20939,8 @@ export function bindActions(
       if (
         rowCmd === 'align-table' ||
         rowCmd === 'inline-calc' ||
+        // 🔴 いまの日時を入れる 5 つ(#1966 2-C)── 1 面の行の欄でも同じ口
+        (rowCmd !== null && NOW_STAMP_COMMANDS[rowCmd] !== undefined) ||
         (rowCmd !== null && TIDY_COMMANDS.has(rowCmd))
       ) {
         ke.preventDefault();
@@ -20992,6 +21014,12 @@ export function bindActions(
     // 🔴 `Tab` だけは下の本文と同じ表・テンプレート・字下げの門へ通す(#1163 依頼 150)。⚠ 当たらなければ素通し(焦点は今までどおり出ていく)
     if (field === SECTION_BOX_INPUT_FIELD && ke.key !== 'Tab') {
       const sectionCmd = keymap.match(ke, 'row');
+      // 🔴 いまの日時を入れる 5 つ(#1966 2-C)── 章だけを編集する欄でも同じ口
+      if (sectionCmd !== null && NOW_STAMP_COMMANDS[sectionCmd] !== undefined) {
+        ke.preventDefault();
+        EDITOR_RUN[sectionCmd]!(ke.target as HTMLTextAreaElement, (t) => services.showStatus?.(t));
+        return;
+      }
       if (sectionCmd === null || FORMAT_OF[sectionCmd] === undefined) return;
       ke.preventDefault();
       applyFormatTo(ke.target as HTMLTextAreaElement, sectionCmd, undefined, (t) =>

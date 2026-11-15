@@ -357,6 +357,62 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     note: '編集中だけ効きます(本文のカーソルの位置に入ります)',
   },
   /**
+   * 🔴 **いまの日時を 1 打鍵で入れる 5 つ**(#1966 2-C。PKC2 の作業ログの近道を戻す)。
+   * 字の形は `NOW_STAMP_COMMANDS`(`features/datetime/datetime-format.ts`)1 か所。鍵は PKC2 と同じ位置:
+   * - 時刻 `Ctrl + :` ── 日本語配列の `:` のキー(位置は `Quote`。US 配列では `Ctrl + '`)
+   * - 日時 `Ctrl + Shift + ;`(US 配列の `Ctrl + :` もこれになる ── PKC2 と同じ)
+   * - 曜日つき `Ctrl + D` / `Ctrl + Shift + D` / ISO 8601 `Ctrl + Shift + Alt + D`
+   * ⚠ 文脈は本文の欄・追記の欄・章の欄だけ(`editor` / `row` / `append`)── 編集していないときの `Ctrl + D`(ブラウザのブックマーク)は奪わない。
+   * ⚠ 日本語配列の `Ctrl + Shift + ;` は `Ctrl + +`(拡大)と同じ打鍵なので、日時の別名は足さない(拡大を奪わない)。
+   *   日本語配列で日時を入れるのは `Ctrl + Shift + D`(曜日つき)か、操作を探す。
+   * ⚠ `Ctrl + ;`(日付を入れる)は予定に載る `@日付` を小さなウィンドウで選ぶ別の命令。こちらは選ばずにその場の時刻を入れる。
+   */
+  {
+    id: 'insert-now-time',
+    label: 'いまの時刻を入れる',
+    contexts: ['editor', 'row', 'append'],
+    defaults: ['Mod+Quote'],
+    whileTyping: true,
+    note: 'カーソルの位置に 14:05:30 の形で入れます',
+    alias: 'じこく 時間 タイム time',
+  },
+  {
+    id: 'insert-now-datetime',
+    label: 'いまの日時を入れる',
+    contexts: ['editor', 'row', 'append'],
+    defaults: ['Mod+Shift+Semicolon'],
+    whileTyping: true,
+    note: 'カーソルの位置に 2026/11/15 14:05:30 の形で入れます',
+    alias: 'にちじ 日付 時刻 datetime',
+  },
+  {
+    id: 'insert-now-date-weekday',
+    label: '曜日つきの日付を入れる',
+    contexts: ['editor', 'row', 'append'],
+    defaults: ['Mod+D'],
+    whileTyping: true,
+    note: 'カーソルの位置に 26/11/15 日 の形で入れます(今日の日付と曜日)',
+    alias: 'ようび 日付 date',
+  },
+  {
+    id: 'insert-now-datetime-weekday',
+    label: '曜日つきの日時を入れる',
+    contexts: ['editor', 'row', 'append'],
+    defaults: ['Mod+Shift+D'],
+    whileTyping: true,
+    note: 'カーソルの位置に 26/11/15 日 14:05:30 の形で入れます',
+    alias: 'ようび にちじ 日付 時刻',
+  },
+  {
+    id: 'insert-now-iso',
+    label: 'いまの日時を ISO 8601 で入れる',
+    contexts: ['editor', 'row', 'append'],
+    defaults: ['Mod+Alt+Shift+D'],
+    whileTyping: true,
+    note: 'カーソルの位置に 2026-11-15T14:05:30+09:00 の形で入れます(時差つき)',
+    alias: 'あいえすおー 日時 iso8601 timestamp',
+  },
+  /**
    * 🔴 **その場で計算する**(#766 D-2、2026-09-08)。
    *
    * ⚠ 入口が**本文に打つことだけ**だった ── 「操作を探す」で「計算」と打っても

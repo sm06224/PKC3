@@ -38,3 +38,49 @@ export function formatBuildStamp(d: Date): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
+
+/** HH:mm:ss */
+export function formatTime(d: Date): string {
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+/** yyyy/MM/dd HH:mm:ss */
+export function formatDateTime(d: Date): string {
+  return `${formatDate(d)} ${formatTime(d)}`;
+}
+
+/** 曜日の短い字(日本語: `日` `月` … `土`)。⚠ 画面の言葉は日本語なので `ja` で組む。 */
+function weekdayShort(d: Date): string {
+  return new Intl.DateTimeFormat('ja', { weekday: 'short' }).format(d);
+}
+
+/** yy/MM/dd ddd(例: `26/11/15 日`) */
+export function formatShortDate(d: Date): string {
+  return `${pad2(d.getFullYear() % 100)}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${weekdayShort(d)}`;
+}
+
+/** yy/MM/dd ddd HH:mm:ss */
+export function formatShortDateTime(d: Date): string {
+  return `${formatShortDate(d)} ${formatTime(d)}`;
+}
+
+/** ISO 8601(端末の時差つき): yyyy-MM-ddTHH:mm:ss±HH:mm */
+export function formatISO8601(d: Date): string {
+  const offset = -d.getTimezoneOffset();
+  const sign = offset >= 0 ? '+' : '-';
+  const abs = Math.abs(offset);
+  return `${pad4(d.getFullYear())}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${formatTime(d)}${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
+}
+
+/**
+ * 🔴 **いまの日時を 1 打鍵で入れる命令と、入れる字の形**(#1966 2-C。PKC2 の `Ctrl+:` / `Ctrl+Shift+;` / `Ctrl+D` などと同じ形)。
+ * ⚠ 命令の綴り → 字の組み立ての表は**ここ 1 か所**(鍵・操作を探す・1 面の行の欄が同じ表を引く)。
+ * ⚠ `Ctrl+;`(日付を入れる)は小さなウィンドウで選ぶ別の命令(予定に載る `@日付` を入れる)── ここには入れない。
+ */
+export const NOW_STAMP_COMMANDS: Readonly<Record<string, (d: Date) => string>> = {
+  'insert-now-time': formatTime,
+  'insert-now-datetime': formatDateTime,
+  'insert-now-date-weekday': formatShortDate,
+  'insert-now-datetime-weekday': formatShortDateTime,
+  'insert-now-iso': formatISO8601,
+};

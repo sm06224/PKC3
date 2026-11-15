@@ -338,6 +338,20 @@ test('🔴 帯に無い記法が、鍵で本文に入る (#425)', async ({ page 
   await expect(body, 'Alt+Shift+X で打ち消しが入らない').toHaveValue('~~あいう~~');
 
   /**
+   * 🔴 **いまの日時を 1 打鍵で入れる**(#1966 2-C)── 実機の打鍵で欄に入り、ブラウザの既定(Ctrl+D のブックマーク)が走らない。
+   * ⚠ 字は時刻で変わるので形で見る(`yy/MM/dd 曜` / `yyyy/MM/dd HH:mm:ss`)。
+   */
+  await body.fill('');
+  await body.focus();
+  await page.keyboard.press('Control+d');
+  await expect(body, 'Ctrl+D で曜日つきの日付が入らない').toHaveValue(/^\d\d\/\d\d\/\d\d [日月火水木金土]$/);
+  await body.fill('');
+  await body.focus();
+  await page.keyboard.press('Control+Shift+Semicolon');
+  await expect(body, 'Ctrl+Shift+; で日時が入らない').toHaveValue(/^\d{4}\/\d\d\/\d\d \d\d:\d\d:\d\d$/);
+  await body.fill('~~あいう~~');
+
+  /**
    * ⚠ **帯には出ていない**こと ── 出したら「横に長くしない」という前提が崩れる。
    * 🔑 空振り防止に、帯そのものは在ることを先に見る。
    */
