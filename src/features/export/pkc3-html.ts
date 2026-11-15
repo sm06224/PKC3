@@ -60,6 +60,7 @@ import {
 import { DEFAULT_PROSE_ALIGN, proseAlignCss, type ProseAlign } from '../prose-align';
 import type { ArchiveSource } from './pkc3-archive';
 import { insertPlacedNoteTitles } from './placed-note-title';
+import { MINUS_LIKE, PLAIN_DECIMAL } from '../markdown/table-sort-key';
 
 export const HTML_FORMAT = 'pkc3-portable';
 export const HTML_VERSION = 1;
@@ -565,6 +566,50 @@ try{
     if(!f)return;
     f.style.height=Math.max(0,Math.min(5000,d.height))+'px';
   });
+  /* 🔴 表の並べ替え(#1163 依頼 223)。⚠ 規則は table-sort-key.ts の正規表現を埋めた物 ── 書き写さない */
+  var SORT_NUM=new RegExp(${JSON.stringify(PLAIN_DECIMAL.source)});
+  var SORT_MINUS=new RegExp(${JSON.stringify(MINUS_LIKE.source)},'g');
+  function sortKey(raw){
+    var s=String(raw||'').trim();
+    if(s==='')return{n:NaN,ok:false,s:''};
+    var h=(s.normalize?s.normalize('NFKC'):s).replace(SORT_MINUS,'-');
+    var m=SORT_NUM.exec(h);
+    var n=m?Number((m[1]||m[2]||'')+String(m[3]||'').replace(/,/g,'')):NaN;
+    return{n:n,ok:!!m&&isFinite(n),s:s};
+  }
+  function sortTables(box){
+    Array.prototype.forEach.call(box.querySelectorAll('table'),function(table){
+      var tbody=table.querySelector('tbody');if(!tbody)return;
+      var head=table.querySelector('thead')||table;
+      var ths=head.querySelectorAll('tr:first-child th');if(!ths.length)return;
+      Array.prototype.forEach.call(tbody.querySelectorAll('tr'),function(tr,i){tr.setAttribute('data-pkc-orig-index',String(i))});
+      Array.prototype.forEach.call(ths,function(th,col){
+        th.setAttribute('data-pkc-sort-direction','none');th.setAttribute('aria-sort','none');
+        th.setAttribute('role','button');th.setAttribute('tabindex','0');th.title='クリックで並び替え';
+        var ic=document.createElement('span');ic.className='pkc-table-sort-icon';ic.setAttribute('aria-hidden','true');th.appendChild(ic);
+        function go(){
+          var cur=th.getAttribute('data-pkc-sort-direction')||'none';
+          var nx=cur==='none'?'asc':cur==='asc'?'desc':'none';
+          Array.prototype.forEach.call(ths,function(o){o.setAttribute('data-pkc-sort-direction','none');o.setAttribute('aria-sort','none')});
+          th.setAttribute('data-pkc-sort-direction',nx);
+          th.setAttribute('aria-sort',nx==='asc'?'ascending':nx==='desc'?'descending':'none');
+          var rows=Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+          var oi=function(r){return Number(r.getAttribute('data-pkc-orig-index')||0)};
+          rows.sort(function(a,b){
+            if(nx==='none')return oi(a)-oi(b);
+            var ca=a.children[col],cb=b.children[col];
+            var x=sortKey(ca?ca.textContent:''),y=sortKey(cb?cb.textContent:'');
+            var d=x.ok&&y.ok?x.n-y.n:x.s.localeCompare(y.s,undefined,{numeric:true,sensitivity:'base'});
+            if(d===0)return oi(a)-oi(b);
+            return nx==='desc'?-d:d;
+          });
+          for(var i=0;i<rows.length;i++)tbody.appendChild(rows[i]);
+        }
+        th.addEventListener('click',function(ev){var t=ev.target;if(t&&t.tagName==='A')return;go()});
+        th.addEventListener('keydown',function(ev){if(ev.target!==th)return;if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();go()}});
+      });
+    });
+  }
   function hydrate(box,e,sink,idp){
     // 🔑 本文は**書出し側で描いた HTML**(P8 段⑲)。かつてここは本文を素のまま
     // pre で出しており、見出しも表も箇条書きも**記号のまま**だった ──
@@ -622,6 +667,9 @@ try{
     Array.prototype.forEach.call(box.querySelectorAll('[data-pkc-action="copy-md-block"]'),function(el){
       if(el.parentNode)el.parentNode.removeChild(el);
     });
+    // 🔴 **表は見出しを押して並べ替えられる**(#1163 依頼 223 ── 読む面と同じ: 昇順 → 降順 → 元の順)。
+    //    ⚠ 「数として読むか」の規則は読む面と同じ 1 本(table-sort-key.ts の正規表現をそのまま埋める)
+    sortTables(box);
     // 🔴 **自分宛の添付リンク(pkc://自分/asset/…)も効かせる**(#1087)。直す前は書き換わらずに残り、
     //    押しても何も起きなかった。このファイルに添付が入っていれば他の添付リンクと同じく保存 / 開くリンクに、
     //    入っていなければ字だけにする(押せる顔で動かない物を残さない)

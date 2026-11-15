@@ -35,6 +35,7 @@
  * ⚠ **pure DOM**(state も dispatch も知らない)── 判断は `chapter-windows.ts`。
  */
 import BODY_CSS from 'virtual:pkc-body-css';
+import { applyTableSort } from '@adapter/ui/render/table-sort';
 import type { HeadingRef } from '@features/markdown/append-target';
 import { blockWindowDrop } from './window-drop-guard';
 
@@ -388,6 +389,8 @@ export function paintChapterWindow(
   host.append(...parts.content.blocks);
   prepareChapterBody(host);
   doc.body.append(host);
+  // 🔴 章の別ウィンドウの表も、見出しを押して並べ替えられる(#1163 依頼 223。本文と同じ 1 本)
+  applyTableSort(host);
   return host;
 }
 

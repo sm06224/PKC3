@@ -60,6 +60,19 @@ function paint(win: Window, html: string): HTMLElement | null {
 }
 
 describe('窓を組む', () => {
+  /** 🔴 #1163 依頼 223: 章の別ウィンドウの表も、見出しを押して並べ替えられる(本文と同じ 1 本)。 */
+  it('🔴 章の表の見出しを押すと、数として昇順に並ぶ', () => {
+    const win = fakeWindow();
+    const host = paint(
+      win,
+      '<h2 id="sho">章</h2><table><thead><tr><th>品</th><th>金額</th></tr></thead><tbody><tr><td>あ</td><td>100</td></tr><tr><td>い</td><td>9</td></tr></tbody></table>',
+    );
+    const th = host!.querySelectorAll<HTMLElement>('thead th');
+    th[1]!.click();
+    const col = Array.from(host!.querySelectorAll('tbody tr')).map((tr) => tr.children[1]?.textContent);
+    expect(col, '章の窓の表が並べ替えられない').toEqual(['9', '100']);
+  });
+
   it('🔴 題名・頭の帯・本文の器が出て、組んだ印が刻まれる', () => {
     const win = fakeWindow();
     const host = paint(win, '<h2 id="sho">章</h2><p>中身</p>');
