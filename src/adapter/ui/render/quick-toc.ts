@@ -105,10 +105,10 @@ export function installQuickToc(
    *   走らない。閉じている間は 1 度も呼ばれない(下の `startTracking` / `stopTracking`)。
    * 🔑 畳んだ章・段組みの扱いは `pickActiveHeading`(`active-heading-dom.ts`)の注記を参照。
    */
-  const refreshActive = (reveal: boolean): void => {
+  const refreshActive = (reveal: boolean, frameStamp?: number): void => {
     if (scroller === undefined) return;
     // 🔑 判定は右のペインの目次と同じ 1 本(`active-heading-dom.ts`)
-    const next = pickActiveHeading(headingEls, bodyHost, scroller);
+    const next = pickActiveHeading(headingEls, bodyHost, scroller, frameStamp);
     for (let i = 0; i < itemEls.length; i++) {
       const li = itemEls[i] as HTMLElement;
       const link = li.firstElementChild;
@@ -152,9 +152,9 @@ export function installQuickToc(
       : (id: number) => clearTimeout(id);
   const onScroll = (): void => {
     if (rafId !== null) return;
-    rafId = requestFrame(() => {
+    rafId = requestFrame((t?: number) => {
       rafId = null;
-      refreshActive(false);
+      refreshActive(false, t);
     });
   };
   const startTracking = (): void => {

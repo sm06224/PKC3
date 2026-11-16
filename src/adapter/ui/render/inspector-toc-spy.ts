@@ -33,17 +33,21 @@ const CONTENT_SELECTOR =
 const HEADING_SELECTOR = 'h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]';
 
 export interface InspectorTocSpy {
-  /** 描き直し(本文・目次)の後に、1 フレーム後で印を付け直す。 */
-  refresh: () => void;
+  /**
+   * 描き直し(本文・目次)の後に、1 フレーム後で印を付け直す。
+   * @param reveal 光った行を目次の枠の中へ寄せ直すか。⚠ **目次を作り直したときだけ** `true` ──
+   *   プレビューの描き直し(1 打鍵ごと)で寄せると、目次を手で送って別の章を探している最中に引き戻す(着地前レビュー ⚠3)。
+   */
+  refresh: (reveal?: boolean) => void;
   dispose: () => void;
 }
 
 /** 入れた spy(1 画面に 1 つ)。描き直しの側は `requestInspectorTocSpy()` だけを呼ぶ。 */
 let installed: InspectorTocSpy | null = null;
 
-/** 本文・目次を描き直したときに呼ぶ(spy が居なければ何もしない)。 */
-export function requestInspectorTocSpy(): void {
-  installed?.refresh();
+/** 本文・目次を描き直したときに呼ぶ(spy が居なければ何もしない)。`reveal` は `InspectorTocSpy.refresh` を参照。 */
+export function requestInspectorTocSpy(reveal = false): void {
+  installed?.refresh(reveal);
 }
 
 interface Frame {
@@ -68,8 +72,11 @@ function frameOf(target: EventTarget | null, detail: HTMLElement | null): Frame 
 function defaultFrame(root: HTMLElement): Frame | null {
   const content = root.querySelector<HTMLElement>(CONTENT_SELECTOR);
   if (content === null) return null;
-  // 2 ペインのプレビューは自分で送る(左の欄に合わせて送られる)
-  if (content.matches('[data-pkc-region="editor-preview"]')) return { content, scroller: content };
+  /**
+   * 2 ペインのプレビュー・1 ペインの編集は**自分で送る**(実ブラウザで実測: 1 ペインの編集で送りを持つのは
+   *   `editor-live` 自身で、外の `detail` は送らない)。
+   */
+  if (content.matches('[data-pkc-region="editor-preview"], [data-pkc-region="editor-live"]')) return { content, scroller: content };
   const scroller =
     content.closest<HTMLElement>('[data-pkc-region="split-frame"]') ??
     content.closest<HTMLElement>('[data-pkc-region="detail"]') ??
@@ -79,10 +86,10 @@ function defaultFrame(root: HTMLElement): Frame | null {
 
 export function installInspectorTocSpy(
   root: HTMLElement,
-  raf: (cb: () => void) => number = (cb) =>
+  raf: (cb: (stamp?: number) => void) => number = (cb) =>
     typeof requestAnimationFrame === 'function'
       ? requestAnimationFrame(cb)
-      : (setTimeout(cb, 0) as unknown as number),
+      : (setTimeout(() => cb(), 0) as unknown as number),
   caf: (id: number) => void = (id) =>
     typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame(id) : clearTimeout(id),
 ): InspectorTocSpy {
@@ -92,7 +99,7 @@ export function installInspectorTocSpy(
   let activeSlug: string | null = null;
   let reveal = false;
 
-  const paint = (): void => {
+  const paint = (stamp?: number): void => {
     rafId = null;
     const box = root.querySelector<HTMLElement>('[data-pkc-field="inspector-toc"]');
     if (box === null || box.hidden) return;
@@ -112,15 +119,21 @@ export function installInspectorTocSpy(
       seen.add(h.id);
       headings.push(h);
     }
-    const idx = pickActiveHeading(headings, frame.content, frame.scroller);
+    const idx = pickActiveHeading(headings, frame.content, frame.scroller, stamp);
     const slug = idx < 0 ? null : headings[idx]!.id;
     const link = slug === null ? undefined : links.find((l) => l.getAttribute('data-pkc-toc-slug') === slug);
-    let delta = 0;
+    /**
+     * ⚠ 送り先(`nextTop`)も**読む段で確定する**(着地前レビュー ⚠1)── 書く段で `box.scrollTop += …` と書くと、
+     *   印の付け替え(太字)の後に `scrollTop` を読むことになり、強制レイアウトが 1 回挟まる。
+     */
+    let nextTop: number | null = null;
     if (link !== undefined && (reveal || slug !== activeSlug) && box.scrollHeight > box.clientHeight) {
       const b = box.getBoundingClientRect();
       const r = (link.parentElement ?? link).getBoundingClientRect();
+      let delta = 0;
       if (r.top < b.top) delta = r.top - b.top;
       else if (r.bottom > b.bottom) delta = Math.min(r.bottom - b.bottom, r.top - b.top);
+      if (delta !== 0) nextTop = box.scrollTop + delta;
     }
 
     // ── 書く(印と、目次の枠の送りだけ)──
@@ -136,7 +149,7 @@ export function installInspectorTocSpy(
       }
     }
     // ⚠ `scrollIntoView` は使わない(本文の送りまで動かす)── 目次の枠の `scrollTop` だけ
-    if (delta !== 0) box.scrollTop += delta;
+    if (nextTop !== null) box.scrollTop = nextTop;
     activeSlug = slug;
     reveal = false;
   };
@@ -157,8 +170,13 @@ export function installInspectorTocSpy(
   doc.addEventListener('scroll', onScroll, { capture: true, passive: true });
 
   const spy: InspectorTocSpy = {
-    refresh: () => {
-      reveal = true;
+    refresh: (rev = false) => {
+      if (rev) reveal = true;
+      /**
+       * ⚠ 描き直しの後は**控えた送りの器を捨てる**(着地前レビュー ⚠4)── 並べ表示を解いた直後などは、控えた器が
+       *   画面には繋がったまま送られない器になり、送りの無い器で判定し続ける。次の送りが来れば、また控え直す。
+       */
+      last = null;
       schedule();
     },
     dispose: () => {
@@ -170,6 +188,6 @@ export function installInspectorTocSpy(
   };
   installed?.dispose();
   installed = spy;
-  spy.refresh();
+  spy.refresh(true);
   return spy;
 }

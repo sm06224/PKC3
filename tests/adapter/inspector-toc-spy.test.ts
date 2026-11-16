@@ -16,6 +16,7 @@ import {
   requestInspectorTocSpy,
   type InspectorTocSpy,
 } from '../../src/adapter/ui/render/inspector-toc-spy';
+import { pickActiveHeading } from '../../src/adapter/ui/render/active-heading-dom';
 
 const TOPS = [100, 900, 1700, 2500];
 const SLUGS = ['a', 'b', 'c', 'd'];
@@ -212,5 +213,100 @@ describe('描き直しの後', () => {
     scrollTo(detail, 900);
     requestInspectorTocSpy();
     expect(flush()).toBe(0);
+  });
+});
+
+describe('着地前レビューの指摘', () => {
+  it('⚠3 目次を作り直したとき(reveal)だけ光った行へ寄せ直す ── プレビューの描き直し(1 打鍵ごと)では引き戻さない', () => {
+    const { detail, box, scrollTo } = setup();
+    scrollTo(detail, 1650);
+    flush();
+    expect(box.scrollTop).toBe(ROW_H);
+    box.scrollTop = 0; // user が目次を手で送った
+    requestInspectorTocSpy(); // プレビューの描き直し
+    flush();
+    expect(box.scrollTop, '1 打鍵ごとの描き直しで目次を引き戻した').toBe(0);
+    requestInspectorTocSpy(true); // 目次を作り直した
+    flush();
+    expect(box.scrollTop, '目次を作り直した後、光った行へ寄せ直していない').toBe(ROW_H);
+  });
+
+  it('⚠ 同じ id の見出しが本文に 2 つ在っても、目次の行に対応するのは最初の 1 つ(後ろの同名で印が飛ばない)', () => {
+    const { root, detail, scrollTo } = setup();
+    const body = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]')!;
+    const dup = document.createElement('h2');
+    dup.id = 'b';
+    dup.getBoundingClientRect = () => rect(2900 - detail.scrollTop, 30);
+    body.append(dup);
+    scrollTo(detail, 2500);
+    flush();
+    expect(active(root), '後ろの同名の見出しで b が光った').toEqual(['d']);
+  });
+
+  it('⚠4 送りの器は、実際に送られた器を使う(外の器が送るスマホの形)', () => {
+    const { root, detail, scrollTo } = setup();
+    // 外の器が面ごと送る形: 外の器の高さ 1000(線は 200)、本文の器は送らない
+    const outer = document.createElement('div');
+    root.parentElement!.append(outer);
+    outer.append(root);
+    Object.defineProperty(outer, 'clientHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(outer, 'scrollHeight', { configurable: true, value: 4000 });
+    outer.getBoundingClientRect = () => rect(0, 1000);
+    root.querySelectorAll<HTMLElement>('[data-pkc-field="detail-body"] h2').forEach((h, i) => {
+      h.getBoundingClientRect = () => rect(TOPS[i]! - detail.scrollTop - outer.scrollTop, 30);
+    });
+    scrollTo(outer, 2350); // d は 150 ── 外の器の線(200)は越え、本文の器の線(100)は越えない
+    flush();
+    expect(active(root), '送られた外の器ではなく、送られていない本文の器で判定した').toEqual(['d']);
+  });
+});
+
+describe('⚠2 同じ描画フレームの採寸は共有する(クイック目次と右の目次が同時に動くとき)', () => {
+  it('同じ rAF の時刻で 2 回呼んでも、見出しの採寸は 1 回 / 時刻が変われば採り直す', () => {
+    const host = document.createElement('div');
+    const scroller = document.createElement('div');
+    scroller.append(host);
+    document.body.append(scroller);
+    let reads = 0;
+    const hs = [0, 1, 2].map((i) => {
+      const h = document.createElement('h2');
+      h.getBoundingClientRect = () => {
+        reads += 1;
+        return rect(i * 300, 30);
+      };
+      host.append(h);
+      return h;
+    });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 500 });
+    expect(pickActiveHeading(hs, host, scroller, 1000)).toBe(0);
+    expect(pickActiveHeading(hs.slice(0, 2), host, scroller, 1000)).toBe(0);
+    expect(reads, '同じフレームで見出しを 2 度採寸した').toBe(3);
+    pickActiveHeading(hs, host, scroller, 1016);
+    expect(reads, '次のフレームで採り直していない(古い位置を使い続ける)').toBe(6);
+    pickActiveHeading(hs, host, scroller);
+    pickActiveHeading(hs, host, scroller);
+    expect(reads, '時刻の無い呼び出しは毎回採寸する').toBe(12);
+  });
+});
+
+describe('送りが無いとき(描き直しの直後)の器', () => {
+  it('⚠ 1 ペインの編集(editor-live)は自分で送る ── 外の detail ではなく editor-live の送りで判定する', () => {
+    const { root, detail } = setup();
+    const live = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]')!;
+    live.removeAttribute('data-pkc-field');
+    live.setAttribute('data-pkc-region', 'editor-live');
+    // editor-live 自身が送る: 高さ 500、見出しは editor-live の送りで動く(外の detail は 0 のまま)
+    Object.defineProperty(live, 'clientHeight', { configurable: true, value: VIEW_H });
+    // 末尾まで送り切った形(最後の章 d は線に届かないが、末尾なので d が光る ── 末尾の判定は送る器の送り量で見る)
+    Object.defineProperty(live, 'scrollHeight', { configurable: true, value: 2550 });
+    live.getBoundingClientRect = () => rect(0, VIEW_H);
+    live.querySelectorAll<HTMLElement>('h2').forEach((h, i) => {
+      h.getBoundingClientRect = () => rect(TOPS[i]! - live.scrollTop, 30);
+    });
+    live.scrollTop = 2050;
+    expect(detail.scrollTop).toBe(0);
+    requestInspectorTocSpy(true); // 送りの event 無しに描き直した
+    flush();
+    expect(active(root), '送っていない外の detail で判定した(末尾にいるのに最後の章が光らない)').toEqual(['d']);
   });
 });

@@ -268,6 +268,26 @@ test('🔴 見出しのあるノートで目次が出て、押すとそこまで
   });
   await expect.poll(inspectorActive, '編集中のプレビューを送っても右のペインの目次が追従しない').toEqual([9]);
 
+  /**
+   * 🔴 **1 ペインの編集(既定の編集の形)でも追従する** ── 実測で、送りを持つのは `editor-live` 自身(外の detail は送らない)。
+   * ⚠ 設定は次に編集を始めたときに読まれる(読み込み直さずに切り替える)。
+   */
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await page.evaluate(() => localStorage.setItem('pkc3.editor-mode', 'live'));
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await expect(live.locator('h2[id]'), '前提: 1 ペインの編集に見出しが描かれていない').toHaveCount(40);
+  await live.locator('h2[id]', { hasText: '章 20' }).first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await expect.poll(inspectorActive, '1 ペインの編集を送っても右のペインの目次が追従しない').toEqual([19]);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+
+  // 🔴 スマホの幅でも、本文の送り(送りを持つのは detail。ページ全体は送らない ── 実測)で目次の印が動く
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.locator('[data-pkc-field="detail-body"] h2[id]', { hasText: '章 35' }).first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await expect.poll(inspectorActive, 'スマホの幅で本文を送っても右のペインの目次が追従しない').toEqual([34]);
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

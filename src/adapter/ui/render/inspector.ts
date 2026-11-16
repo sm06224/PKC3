@@ -637,7 +637,7 @@ export class InspectorRenderer {
         }
         while (items.length > headings.length) items[items.length - 1]!.remove();
         // 🔴 作り直した行には現在地の印が無い ── 次のフレームで付け直す(#1966 2-B)
-        requestInspectorTocSpy();
+        requestInspectorTocSpy(true);
       }
     }
     /**

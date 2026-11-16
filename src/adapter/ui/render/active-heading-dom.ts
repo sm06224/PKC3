@@ -26,24 +26,45 @@ const COLUMN_STRIDE = 100_000;
 const END_SLACK = 2;
 
 /**
+ * 🔴 **同じ描画フレームの採寸を共有する**(着地前レビュー ⚠2)── クイック目次を開いている間は、クイック目次と
+ *   右のペインの目次が**同じフレームに**同じ見出しを採寸する。rAF の時刻(同じフレームの callback は同じ値を受ける)を
+ *   鍵に、見出しと器の矩形を 1 フレームだけ控えて、2 つ目の呼び出しは採寸しない。
+ * ⚠ 鍵が無い呼び出し(開いた直後・描き直しの直後)は控えを使わない(配置が変わった後かもしれない)。
+ */
+let stampCache: { stamp: number; rects: WeakMap<Element, DOMRect> } | null = null;
+
+function rectOf(el: Element, stamp: number | undefined): DOMRect {
+  if (stamp === undefined) return el.getBoundingClientRect();
+  if (stampCache === null || stampCache.stamp !== stamp) stampCache = { stamp, rects: new WeakMap() };
+  let r = stampCache.rects.get(el);
+  if (r === undefined) {
+    r = el.getBoundingClientRect();
+    stampCache.rects.set(el, r);
+  }
+  return r;
+}
+
+/**
  * @param headingEls 見出し(文書の並び順)
  * @param bodyHost 本文の器(段組みの横送りの持ち主。末尾の判定に下端を使う)
  * @param scroller 縦に送る器。⚠ `bodyHost` と同じ物でもよい(編集のプレビューは自分で送る)
+ * @param frameStamp rAF の時刻(同じフレームの採寸を共有する鍵)。省くと毎回採寸する
  * @returns `headingEls` の添字。どれも線を越えていなければ `-1`
  */
 export function pickActiveHeading(
   headingEls: readonly HTMLElement[],
   bodyHost: HTMLElement,
   scroller: HTMLElement,
+  frameStamp?: number,
 ): number {
   const columns = bodyHost.closest(COLUMNS_ON_SELECTOR) !== null;
   const frame = columns ? bodyHost : scroller;
-  const fr = frame.getBoundingClientRect();
+  const fr = rectOf(frame, frameStamp);
   const idxs: number[] = [];
   const keys: number[] = [];
   let prev = Number.NEGATIVE_INFINITY;
   for (let i = 0; i < headingEls.length; i++) {
-    const r = (headingEls[i] as HTMLElement).getBoundingClientRect();
+    const r = rectOf(headingEls[i] as HTMLElement, frameStamp);
     if (r.width === 0 && r.height === 0) continue;
     let key = columns ? Math.round(r.left - fr.left) * COLUMN_STRIDE + (r.top - fr.top) : r.top - fr.top;
     // 昇順を保証する(二分探索の前提)── 浮動や字下げで逆転しても前の値で止める
@@ -74,7 +95,7 @@ export function pickActiveHeading(
       ? room > END_SLACK && pos >= room - END_SLACK
       : bodyHost === frame
         ? room > END_SLACK && pos >= room - END_SLACK
-        : pos > END_SLACK && bodyHost.getBoundingClientRect().bottom <= fr.top + frame.clientHeight + END_SLACK;
+        : pos > END_SLACK && rectOf(bodyHost, frameStamp).bottom <= fr.top + frame.clientHeight + END_SLACK;
     if (atEnd) hit = keys.length - 1;
     else if (room > END_SLACK && pos <= END_SLACK && hit < 0) hit = 0;
   }
