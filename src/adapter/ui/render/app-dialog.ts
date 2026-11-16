@@ -1612,6 +1612,8 @@ export function pickCommandInApp(
     let chosen: string | null = null;
     /** いま並んでいる**押せる**行(Enter が拾う先)。 */
     let firstReady: HTMLButtonElement | null = null;
+    /** いま「最近使った操作」の節を出しているか(空欄の Enter が実行してよいかを決める)。 */
+    let showingRecent = false;
 
     const draw = (): void => {
       list.textContent = '';
@@ -1626,6 +1628,7 @@ export function pickCommandInApp(
         return;
       }
       const { recent, rest } = splitRecentRows(input.value, found, recentIds());
+      showingRecent = recent.length > 0;
       if (recent.length > 0) {
         const heading = document.createElement('p');
         heading.setAttribute('data-pkc-field', 'palette-recent-heading');
@@ -1707,6 +1710,17 @@ export function pickCommandInApp(
         return;
       }
       ev.preventDefault();
+      /**
+       * 🔴 **空欄の Enter が実行するのは「最近使った操作」だけ**(#1966 3-2 の着地前レビュー 🔴1)。
+       * ⚠ 一覧は空欄でも「いまの場面の操作」を上に寄せるので、最近使った操作が無いと先頭は「ノートを閉じる」
+       *   「画面を閉じる」「いまの時刻を入れる」などになる ── 開いて Enter を押しただけで、選んでもいない操作が走る。
+       * 🔑 最近使った操作が無い空欄では、先頭の行へ焦点を移すだけにする(左の `>` の一覧と同じ作法)。
+       *   名前を 1 字でも打ったら今までどおり先頭を実行する(絞り込んで即実行の速さは残す)。
+       */
+      if (input.value.trim() === '' && !showingRecent) {
+        firstReady.focus();
+        return;
+      }
       firstReady.click();
     });
     draw();

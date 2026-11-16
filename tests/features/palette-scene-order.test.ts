@@ -14,6 +14,7 @@ import { bindActions, commandRowsFor, paletteScene } from '../../src/adapter/ui/
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import { buildShell } from '../../src/adapter/ui/render/shell';
+import { pickCommandInApp, resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
 import { SECTION_BOX_INPUT_FIELD } from '../../src/adapter/ui/render/section-box';
 
@@ -97,6 +98,12 @@ describe('場面の決め方(paletteScene)', () => {
     expect([...paletteScene(null, { ...booted, selectedLid: 'n1' })]).toEqual(['reading']);
     expect([...paletteScene(null, booted)]).toEqual([]);
   });
+
+  it('⚠ 別の画面を開いたまま編集中なら、編集(live)が先(判定の順を pin する ── 着地前レビュー 4a)', () => {
+    expect([...paletteScene(null, { ...booted, phase: 'editing', viewMode: 'settings' as typeof booted.viewMode })]).toEqual([
+      'live',
+    ]);
+  });
 });
 
 describe('🔴 実際の一覧(`commandRowsFor`)に場面が届く', () => {
@@ -115,5 +122,55 @@ describe('🔴 実際の一覧(`commandRowsFor`)に場面が届く', () => {
     const r = commandRowsFor(root, d, keymap, '', null);
     expect(r.find((x) => x.id === 'deselect-entry')?.ready, '前提: 読んでいるのに「ノートを閉じる」が押せない').toBe(true);
     expect(r[0]!.id, '場面が一覧に届いていない').toBe('deselect-entry');
+    // 🔴 本文の欄から開いた経路にも届く(欄を無視すると読んでいる場面に戻る ── 着地前レビュー 4b)
+    const ta = document.createElement('textarea');
+    ta.setAttribute('data-pkc-field', 'editor-body');
+    root.append(ta);
+    const fromField = commandRowsFor(root, d, keymap, '', ta);
+    expect(ctxOf(fromField[0]!.id), '本文の欄から開いたのに、欄の操作が先頭に来ない').toContain('editor');
+  });
+});
+
+describe('🔴 空欄の Enter(着地前レビュー 🔴1)', () => {
+  const ROWS = (q: string) => rows(q, ['reading']);
+  const enter = (input: HTMLInputElement): void => {
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  };
+  async function open(recent: readonly string[]) {
+    document.body.innerHTML = '';
+    resetAppDialogForTest();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const picked = pickCommandInApp(host, ROWS, () => recent);
+    for (let i = 0; i < 5 && document.querySelector('[data-pkc-field="palette-filter"]') === null; i++)
+      await new Promise((r) => setTimeout(r, 0));
+    const input = document.querySelector<HTMLInputElement>('[data-pkc-field="palette-filter"]')!;
+    return { host, input, picked };
+  }
+
+  it('最近使った操作が無い空欄では、先頭の場面の操作(「ノートを閉じる」)を実行せず、焦点を移すだけ', async () => {
+    const { input, picked } = await open([]);
+    const first = document.querySelector<HTMLButtonElement>('[data-pkc-field="palette-row"]:not([disabled])')!;
+    expect(first.getAttribute('data-pkc-command'), '前提: 先頭が場面の操作でない').toBe('deselect-entry');
+    let done = false;
+    void picked.then(() => (done = true));
+    enter(input);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(done, '空欄の Enter で、選んでいない操作が走った').toBe(false);
+    expect(document.activeElement, '先頭の行へ焦点が移っていない').toBe(first);
+  });
+
+  it('対照群: 最近使った操作が在れば、空欄の Enter はそれを実行する', async () => {
+    const { input, picked } = await open(['create-entry']);
+    enter(input);
+    expect(await picked).toBe('create-entry');
+  });
+
+  it('対照群: 名前を打ったら、Enter は先頭の押せる行を実行する(絞り込んで即実行)', async () => {
+    const { input, picked } = await open([]);
+    input.value = '画面を閉じる';
+    input.dispatchEvent(new Event('input'));
+    enter(input);
+    expect(await picked).toBe('close-pane');
   });
 });

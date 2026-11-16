@@ -7802,6 +7802,8 @@ export function commandRowsFor(
  * - 集計・システム・ヘルプなど中央に別の画面を開いている → `window`
  * - ノートを読んでいる → `reading`
  * ⚠ 欄の名前は打つ側(`SECTION_BOX_INPUT_FIELD` などの章の欄)も追記と同じ扱い(追記・章の欄で効く操作は `append` に載る)。
+ * ⚠ `filer` / `dual`(一覧の行・2 ペインのペイン)は返さない ── いまの一覧ではその操作は押せない(`commandRowsFor` の門が
+ *   全域 / 読む / 別の画面の操作だけを聞く)ので、寄せても並びが変わらない。一覧から押せるようにする日には、ここも足すこと。
  */
 export function paletteScene(target: HTMLTextAreaElement | null, st: AppState): ReadonlySet<KeyContext> {
   const field = target?.getAttribute('data-pkc-field') ?? '';
