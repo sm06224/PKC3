@@ -6,9 +6,12 @@
  * | 種類 | 何を数えるか |
  * |---|---|
  * | 指定したタグ | 書き出すノートに、確かめるタグ(初期値 `private, 社外秘`)が付いている(文書タグ・本文のタグ) |
- * | リンク切れ | 本文のノートへのリンクのうち、①ノートが見つからない ②書き出しに入らない(書き出した先では開けない) |
+ * | リンク切れ | 本文のノートへのリンクのうち、ノートが見つからない(消した・ゴミ箱へ入れた)物 |
  * | 同梱されない添付 | 本文の添付へのリンク(画像でない物は運べない。Markdown 1 件のように画像も運ばない形では画像も) |
  *
+ * ⚠ **在るノートへのリンクは数えない**(書き出しに入らなくても)── 普通のリンクを書いたノートを 1 件書き出すたびに
+ *   確認が出ると、確認が意味を失う。「書き出した先では開けない」は書き出した後の知らせ(`note-link-notice.ts` /
+ *   閲覧用 HTML の注意)が今までどおり言う。
  * 🔑 読み方は既存の正本を使う: タグ `collectEntryTags` / リンク `bodyLinkTargets` / 添付 `assetRefsOf`
  *   (コード・隠しメモの中の字は数えない)。
  * 🔑 pure module。本文の読み出しと確認の画面は adapter(`binder.ts`)が持つ。
@@ -66,8 +69,6 @@ export interface ExportCheckInput {
   readonly notes: readonly ExportCheckNote[];
   /** ノートが(ゴミ箱の外に)在るか。 */
   readonly exists: (lid: string) => boolean;
-  /** 書き出しに入るか(1 件の書き出しならそのノートだけ)。 */
-  readonly included: (lid: string) => boolean;
   readonly watchTags: readonly string[];
   readonly carry: ExportCarry;
   /** いまの容れ物の id(`pkc://<cid>/entry/…` のリンクも数える)。 */
@@ -79,20 +80,17 @@ export interface ExportFindings {
   readonly tagged: ReadonlyArray<{ readonly tag: string; readonly titles: readonly string[] }>;
   /** 見つからないノートへのリンクの数と、それを持つノートの題名。 */
   readonly missingLinks: { readonly count: number; readonly titles: readonly string[] };
-  /** 書き出しに入らないノートへのリンク。 */
-  readonly outsideLinks: { readonly count: number; readonly titles: readonly string[] };
   /** 書き出した先では開けない添付へのリンク。 */
   readonly assets: { readonly count: number; readonly titles: readonly string[] };
 }
 
 export function hasExportFindings(f: ExportFindings): boolean {
-  return f.tagged.length > 0 || f.missingLinks.count > 0 || f.outsideLinks.count > 0 || f.assets.count > 0;
+  return f.tagged.length > 0 || f.missingLinks.count > 0 || f.assets.count > 0;
 }
 
 export function exportFindings(input: ExportCheckInput): ExportFindings {
   const tagged = new Map<string, string[]>();
   const missing = { count: 0, titles: [] as string[] };
-  const outside = { count: 0, titles: [] as string[] };
   const assets = { count: 0, titles: [] as string[] };
   const title = (n: ExportCheckNote): string => (n.title.trim() === '' ? '(無題)' : n.title);
   for (const n of input.notes) {
@@ -106,18 +104,10 @@ export function exportFindings(input: ExportCheckInput): ExportFindings {
       }
     }
     let m = 0;
-    let o = 0;
-    for (const lid of bodyLinkTargets(n.body, input.cid ?? null)) {
-      if (!input.exists(lid)) m += 1;
-      else if (!input.included(lid)) o += 1;
-    }
+    for (const lid of bodyLinkTargets(n.body, input.cid ?? null)) if (!input.exists(lid)) m += 1;
     if (m > 0) {
       missing.count += m;
       missing.titles.push(title(n));
-    }
-    if (o > 0) {
-      outside.count += o;
-      outside.titles.push(title(n));
     }
     const refs = assetRefsOf(n.body);
     const a = refs.others + (input.carry === 'nothing' ? refs.images.length : 0);
@@ -129,7 +119,6 @@ export function exportFindings(input: ExportCheckInput): ExportFindings {
   return {
     tagged: input.watchTags.filter((w) => tagged.has(w)).map((w) => ({ tag: w, titles: tagged.get(w)! })),
     missingLinks: missing,
-    outsideLinks: outside,
     assets,
   };
 }
@@ -146,8 +135,6 @@ export function exportFindingLines(f: ExportFindings): string[] {
   for (const t of f.tagged) lines.push(`タグ「${t.tag}」が付いたノート: ${namesOf(t.titles)}`);
   if (f.missingLinks.count > 0)
     lines.push(`見つからないノートへのリンク ${f.missingLinks.count} か所: ${namesOf(f.missingLinks.titles)}`);
-  if (f.outsideLinks.count > 0)
-    lines.push(`書き出しに入らないノートへのリンク ${f.outsideLinks.count} か所(書き出した先では開けません): ${namesOf(f.outsideLinks.titles)}`);
   if (f.assets.count > 0)
     lines.push(`書き出した先では開けない添付へのリンク ${f.assets.count} か所: ${namesOf(f.assets.titles)}`);
   return lines;

@@ -9660,7 +9660,6 @@ async function guardExport(
     return;
   }
   const lids = scope === 'all' ? [...st.entryMetas.keys()] : scope;
-  const inSet = scope === 'all' ? null : new Set(scope);
   const notes: ExportCheckNote[] = [];
   let findings: ExportFindings | null = null;
   const watchTags = appExportWatchTags.tags();
@@ -9673,7 +9672,6 @@ async function guardExport(
             ...b.tagged.filter((t) => !a.tagged.some((x) => x.tag === t.tag)),
           ],
           missingLinks: { count: a.missingLinks.count + b.missingLinks.count, titles: [...a.missingLinks.titles, ...b.missingLinks.titles] },
-          outsideLinks: { count: a.outsideLinks.count + b.outsideLinks.count, titles: [...a.outsideLinks.titles, ...b.outsideLinks.titles] },
           assets: { count: a.assets.count + b.assets.count, titles: [...a.assets.titles, ...b.assets.titles] },
         };
   try {
@@ -9691,7 +9689,6 @@ async function guardExport(
         exportFindings({
           notes,
           exists: (lid) => st.entryMetas.has(lid),
-          included: (lid) => inSet === null || inSet.has(lid),
           watchTags,
           carry,
           cid: st.cid,

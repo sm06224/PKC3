@@ -161,7 +161,15 @@ describe('全件の書き出し', () => {
     expect(t.dialog()?.textContent ?? '', '後ろの塊のタグが一覧に出ない').toContain(`タグ「private」が付いたノート: 「題-n${EXPORT_CHECK_CHUNK + 3}」`);
   });
 
-  it('⚠ 全部書き出すときは、在るノートへのリンクは問題にしない', async () => {
+  it('⚠ 在るノートへのリンクは問題にしない(1 件の書き出しでも)', async () => {
+    const one = setup({ n1: '[a](entry:n2)', n2: 'b' });
+    one.press('export-entry-html', 'n1');
+    await tick();
+    expect(one.dialog(), '普通のリンクで確認を出した').toBeNull();
+    expect(one.exported).toEqual(['html:n1']);
+  });
+
+  it('⚠ 全部書き出すときも、在るノートへのリンクは問題にしない', async () => {
     const t = setup({ n1: '[a](entry:n2)', n2: 'b' });
     t.press('export-html');
     await tick();

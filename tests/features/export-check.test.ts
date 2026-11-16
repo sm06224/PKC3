@@ -17,7 +17,6 @@ const FENCE = '```';
 const base = (over: Partial<ExportCheckInput> = {}): ExportCheckInput => ({
   notes: [],
   exists: (lid) => ['n1', 'n2', 'n3'].includes(lid),
-  included: (lid) => lid === 'n1',
   watchTags: [...EXPORT_WATCH_TAGS_DEFAULT],
   carry: 'images',
   ...over,
@@ -44,7 +43,6 @@ describe('確かめるタグ', () => {
     const f = exportFindings(
       base({
         notes: [note('---\ntags: [Private]\n---\n本文'), note('本文\n\n#社外秘', 'n2', '議事')],
-        included: () => true,
       }),
     );
     expect(f.tagged).toEqual([
@@ -59,19 +57,17 @@ describe('確かめるタグ', () => {
 });
 
 describe('リンク切れ', () => {
-  it('🔴 見つからないノートへのリンクと、書き出しに入らないノートへのリンクを分けて数える(自分は書き出しに入るので数えない)', () => {
+  it('🔴 見つからないノートへのリンクだけを数える(在るノート・自分へのリンクは数えない)', () => {
     const f = exportFindings(
       base({
-        notes: [note('[a](entry:gone) [b](entry:n2) [c](entry:n3) [自分](entry:n1)')],
+        notes: [note('[a](entry:gone) [b](entry:n2) [c](entry:n3) [自分](entry:n1) [d](entry:gone2)')],
       }),
     );
-    expect(f.missingLinks).toEqual({ count: 1, titles: ['メモ'] });
-    expect(f.outsideLinks).toEqual({ count: 2, titles: ['メモ'] });
+    expect(f.missingLinks).toEqual({ count: 2, titles: ['メモ'] });
   });
 
-  it('⚠ 全部書き出すなら、在るノートへのリンクは問題にしない', () => {
-    const f = exportFindings(base({ notes: [note('[b](entry:n2)')], included: () => true }));
-    expect(f.outsideLinks.count).toBe(0);
+  it('⚠ 在るノートへのリンクは、書き出しに入らなくても問題にしない(書き出した後の知らせが言う ── 毎回の確認にしない)', () => {
+    const f = exportFindings(base({ notes: [note('[b](entry:n2)')] }));
     expect(hasExportFindings(f)).toBe(false);
   });
 
