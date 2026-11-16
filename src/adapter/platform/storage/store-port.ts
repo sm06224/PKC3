@@ -126,6 +126,10 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      * 探し方(`entry:<lid>` を LIKE で当てる)の規則は worker が 1 か所で持つ。
      */
     findBacklinks: (lid) => client.request({ op: 'findBacklinks', cid, lid }),
+    findUnlinkedMentions: (lid) => client.request({ op: 'findUnlinkedMentions', cid, lid }),
+    /** 🔴 言及をリンクに変える(#1966 4-1)。走査も書込も worker の 1 tx。 */
+    linkMentions: (lid, sourceLid) =>
+      client.request({ op: 'linkMentions', cid, lid, sourceLid, keepLatest: REVISION_KEEP_LATEST }),
     /**
      * 集計(#184)。⚠ ここも**渡すだけ** ── 束ね方(並び・上限)の規則は
      * `features/query/group-by.ts` が 1 か所で持つ(PKC2 は描画関数の中に

@@ -26,7 +26,7 @@ import { STRUCTURAL } from '@features/relation/kinds';
 import { reorderSibling, structuralParentsLookup, wouldMakeCycle } from '@features/relation/tree';
 import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 
-export type EntriesAction = Extract<Dispatchable, { type: 'CREATE_ENTRY' | 'DELETE_ENTRY' | 'DELETE_ENTRIES' | 'RENAME_ENTRY_TITLE' | 'SET_ENTRY_ARCHETYPE' | 'SET_ENTRY_PARENT' | 'SET_ENTRY_ORDER' | 'MOVE_ENTRY_ORDER' | 'ADD_RELATION' | 'SET_ENTRY_ARCHETYPE_ROLLBACK' | 'ROLLBACK_ENTRY_PARENT' | 'ROLLBACK_RELATION' | 'REMOVE_RELATION' | 'BULK_TAG' | 'RENAME_SMART_TAG' }>;
+export type EntriesAction = Extract<Dispatchable, { type: 'CREATE_ENTRY' | 'DELETE_ENTRY' | 'DELETE_ENTRIES' | 'RENAME_ENTRY_TITLE' | 'SET_ENTRY_ARCHETYPE' | 'SET_ENTRY_PARENT' | 'SET_ENTRY_ORDER' | 'MOVE_ENTRY_ORDER' | 'ADD_RELATION' | 'SET_ENTRY_ARCHETYPE_ROLLBACK' | 'ROLLBACK_ENTRY_PARENT' | 'ROLLBACK_RELATION' | 'REMOVE_RELATION' | 'BULK_TAG' | 'RENAME_SMART_TAG' | 'LINK_MENTIONS' }>;
 
 export function reduceEntries(state: AppState, action: EntriesAction): ReduceResult {
   switch (action.type) {
@@ -594,6 +594,15 @@ export function reduceEntries(state: AppState, action: EntriesAction): ReduceRes
         .map((m) => ({ lid: m.lid, title: m.title, archetype: m.archetype, entryOrder: m.entryOrder }));
       if (targets.length === 0) return { state, events: [] };
       return { state, events: [{ type: 'REQUEST_SMART_TAG_RENAME', from, to, targets }] };
+    }
+    /**
+     * 🔴 **リンクのない言及をリンクに変える**(#1966 4-1)。⚠ 編集中は撃たない(本文を書き換えるので、
+     *   編集中の字と食い違う ── 断りの字は撃つ側 `binder.ts` が出す)。相手が一覧に居なければ何もしない。
+     */
+    case 'LINK_MENTIONS': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (action.lid === action.sourceLid || !state.entryMetas.has(action.sourceLid)) return { state, events: [] };
+      return { state, events: [{ type: 'REQUEST_LINK_MENTIONS', lid: action.lid, sourceLid: action.sourceLid }] };
     }
   }
 }

@@ -220,6 +220,13 @@ export interface StorePort {
    * service worker のキャッシュに残っている端末では未知の op になる。
    */
   findBacklinks?(lid: string): Promise<{ lids: string[]; truncated: boolean }>;
+  /** 🔴 リンクのない言及(#1966 4-1)。⚠ **optional**(古い worker・test の fake では行ごと出さない)。 */
+  findUnlinkedMentions?(lid: string): Promise<{ items: Array<{ lid: string; count: number }>; truncated: boolean }>;
+  /** 🔴 言及をリンクに変える(#1966 4-1)。⚠ **optional**。 */
+  linkMentions?(
+    lid: string,
+    sourceLid: string,
+  ): Promise<{ wrote: { lid: string; body: string; stamps: EntryStamps } | null; links: number }>;
   /**
    * 集計(#184)。⚠ **省略可** ── 持たない環境(test の fake / 旧い配線)では
    * 面が「この版では数えられません」と断るだけで、他は壊れない。
@@ -998,6 +1005,46 @@ export function connectStoreEffects(
       if (againScans.delete(key)) scanAfterWrites(key, op);
     });
   };
+  /** 🔴 参照元(と、相乗りする言及)を引く(#348 / #1966 4-1)。`REQUEST_BACKLINKS` と、言及を包んだ後の引き直しが呼ぶ。 */
+  const requestBacklinks = (lid: string): void => {
+    const ask = store.findBacklinks;
+    // 🔴 古い worker(未知の op)でも**「調べています…」のまま固めない**(#1087)。
+    //    調べられなかったと言う(選び直せば、もう一度調べる)
+    if (!ask) {
+      dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, lids: [], truncated: false, failed: true });
+      return;
+    }
+    /**
+     * 🔴 **書込の後ろで走らせる**(2026-09-05、着地前レビュー ①-A)。
+     * ⚠ 直す前は列の外で撃っていたので、**保存の直後に別のノートを選ぶと、
+     *   いま書いた `[[…]]` が参照元に出なかった** ── しかも撃ち直しは
+     *   「選びが動いたとき」しか来ないので、**選び直すまで戻らない**。
+     * 🔑 畳み込みの鍵に lid を含める(A→B→A と押しても、A の 1 本は残す)。
+     */
+    scanAfterWrites(`backlinks:${lid}`, async () => {
+      if (disposed) return;
+      try {
+        const r = await ask(lid);
+        if (!disposed) dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, ...r });
+      } catch {
+        /* ⚠ 操作は止めない(付随情報)。ただし**「調べています…」を残さない**(#1087) */
+        if (!disposed)
+          dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, lids: [], truncated: false, failed: true });
+      }
+      /**
+       * 🔴 **リンクのない言及も同じ回に引く**(#1966 4-1)── 引き直す契機(選択・ノートの増減・改名・別タブの書込)は
+       *   参照元と同じなので、口を増やさずに相乗りする。⚠ 引けない版・失敗は行を出さない(付随情報。断り文は出さない)。
+       */
+      const mentionsOf = store.findUnlinkedMentions;
+      if (mentionsOf === undefined || disposed) return;
+      try {
+        const m = await mentionsOf(lid);
+        if (!disposed) dispatcher.dispatch({ type: 'MENTIONS_LOADED', lid, ...m });
+      } catch {
+        /* 付随情報 ── 行を出さないまま */
+      }
+    });
+  };
 
   /**
    * 🔑 **書込が返した時刻を state へ流す**(P9 段①)。
@@ -1758,35 +1805,9 @@ export function connectStoreEffects(
        *   載せると保存・本文読込がその後ろに詰まる。
        * ⚠ 遅れて返った答えは reducer が `lid` で捨てるので、順序保証は要らない。
        */
-      case 'REQUEST_BACKLINKS': {
-        const ask = store.findBacklinks;
-        const lid = ev.lid;
-        // 🔴 古い worker(未知の op)でも**「調べています…」のまま固めない**(#1087)。
-        //    調べられなかったと言う(選び直せば、もう一度調べる)
-        if (!ask) {
-          dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, lids: [], truncated: false, failed: true });
-          break;
-        }
-        /**
-         * 🔴 **書込の後ろで走らせる**(2026-09-05、着地前レビュー ①-A)。
-         * ⚠ 直す前は列の外で撃っていたので、**保存の直後に別のノートを選ぶと、
-         *   いま書いた `[[…]]` が参照元に出なかった** ── しかも撃ち直しは
-         *   「選びが動いたとき」しか来ないので、**選び直すまで戻らない**。
-         * 🔑 畳み込みの鍵に lid を含める(A→B→A と押しても、A の 1 本は残す)。
-         */
-        scanAfterWrites(`backlinks:${lid}`, async () => {
-          if (disposed) return;
-          try {
-            const r = await ask(lid);
-            if (!disposed) dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, ...r });
-          } catch {
-            /* ⚠ 操作は止めない(付随情報)。ただし**「調べています…」を残さない**(#1087) */
-            if (!disposed)
-              dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, lids: [], truncated: false, failed: true });
-          }
-        });
+      case 'REQUEST_BACKLINKS':
+        requestBacklinks(ev.lid);
         break;
-      }
       /**
        * 🔴 **スマートフォルダの中身を集める**(#421 段①)。
        *
@@ -3392,6 +3413,42 @@ export function connectStoreEffects(
        * ⚠ 前書きが読めないものは書かない(タグ付けと同じ門)。1 件ずつ `expectHash` で守る。
        * 🔑 知らせは**前の知らせ(外す・付ける)に続けて**言う ── 上書きすると外せなかった件数が消える。
        */
+      /**
+       * 🔴 **言及をリンクに変える**(#1966 4-1)。⚠ 走査も書込も worker の 1 tx(読んでから書くまでの隙間を作らない)。
+       * ⚠ 書込の列(`enqueue`)に並べる ── 並んでいる保存を追い越して、保存前の本文を包まない。
+       * 終わったら、開いている本文を差し替え、参照元と言及を引き直す(包んだノートが参照元へ移る)。
+       */
+      case 'REQUEST_LINK_MENTIONS': {
+        if (store.linkMentions === undefined) {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: 'このバージョンではリンクにできません(再読み込みすると使えます)' });
+          break;
+        }
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const r = await store.linkMentions?.(ev.lid, ev.sourceLid);
+            if (disposed || r === undefined) return;
+            if (r.wrote !== null) {
+              const w = r.wrote;
+              dispatcher.batch(() => {
+                stamp(w.lid, w.stamps);
+                dispatcher.dispatch({ type: 'ENTRY_BODY_REFRESHED', lid: w.lid, body: w.body });
+              });
+            }
+            const title = dispatcher.getState().entryMetas.get(ev.sourceLid)?.title ?? '';
+            dispatcher.dispatch(
+              r.links > 0
+                ? { type: 'OP_NOTICE', message: `「${title}」の ${r.links} か所をリンクにしました(履歴から元に戻せます)` }
+                : { type: 'OP_NOTICE', message: `「${title}」には、リンクにできる言及がもうありません` },
+            );
+          } catch (e) {
+            if (!disposed) dispatcher.dispatch({ type: 'OP_FAILED', error: `リンクにできませんでした: ${errorText(e)}` });
+          }
+          if (!disposed && dispatcher.getState().selectedLid === ev.lid)
+            requestBacklinks(ev.lid);
+        });
+        break;
+      }
       case 'REQUEST_SMART_TAG_RENAME':
         enqueue(async () => {
           if (disposed) return;

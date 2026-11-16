@@ -16,7 +16,7 @@ import {
   syncShownBodies,
 } from '../app-state';
 
-export type PersistedAction = Extract<Dispatchable, { type: 'BODY_PERSISTED' | 'REMOTE_BODY_CHANGED' | 'BACKLINKS_LOADED' | 'PERSIST_STATE' | 'ENTRY_STAMPED' }>;
+export type PersistedAction = Extract<Dispatchable, { type: 'BODY_PERSISTED' | 'REMOTE_BODY_CHANGED' | 'BACKLINKS_LOADED' | 'MENTIONS_LOADED' | 'PERSIST_STATE' | 'ENTRY_STAMPED' }>;
 
 export function reducePersisted(state: AppState, action: PersistedAction): ReduceResult {
   switch (action.type) {
@@ -91,6 +91,14 @@ export function reducePersisted(state: AppState, action: PersistedAction): Reduc
                 ...(action.failed ? { failed: true as const } : {}),
               },
             },
+            events: [],
+          };
+    /** 🔴 リンクのない言及が届いた(#1966 4-1)。⚠ 別のノートの分は捨てる(`BACKLINKS_LOADED` と同じ)。 */
+    case 'MENTIONS_LOADED':
+      return action.lid !== state.selectedLid
+        ? { state, events: [] }
+        : {
+            state: { ...state, mentions: { lid: action.lid, items: action.items, truncated: action.truncated } },
             events: [],
           };
     case 'PERSIST_STATE':

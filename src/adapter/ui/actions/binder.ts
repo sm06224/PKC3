@@ -9817,6 +9817,23 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 だから**畳んでいたら開く** ── 押した人が見たいのは「そのタグのノート」であって、
    *   閉じたままの列ではない。⚠ 開いているときは何もしない(勝手に畳まない)。
    */
+  /**
+   * 🔴 **リンクのない言及をリンクにする**(#1966 4-1)── 右の列の「リンクのない言及」の行の「リンクにする」。
+   * ⚠ 包む先(題名のノート)は**いま選んでいるノート**(行はそのノートの言及を並べている)。押した行の相手の本文を書き換える。
+   * ⚠ 編集中は断る(本文を書き換えるので、編集中の字と食い違う)── 黙ると押しても何も起きない dead click になる。
+   */
+  'link-mentions': (dispatcher, target) => {
+    const sourceLid = target.getAttribute('data-pkc-entry');
+    const state = dispatcher.getState();
+    const lid = state.selectedLid;
+    if (!sourceLid || lid === null) return;
+    const why = phaseBlockReason(state.phase);
+    if (why !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${why}リンクにしてください` });
+      return;
+    }
+    dispatcher.dispatch({ type: 'LINK_MENTIONS', lid, sourceLid });
+  },
   'filter-by-tag': (dispatcher, target) => {
     const tag = target.getAttribute('data-pkc-tag');
     if (!tag) return;
