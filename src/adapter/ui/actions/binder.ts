@@ -409,6 +409,7 @@ import {
   typesCharacter,
   KEY_COMMANDS,
   type KeyCommand,
+  type KeyContext,
 } from '@features/keymap';
 import { paletteRows, type PaletteRow } from '@features/palette/palette-rows';
 import { commandQueryOf } from '@features/palette/command-query';
@@ -7790,7 +7791,26 @@ export function commandRowsFor(
     blockedReason,
     needsEditorField,
     target !== null,
+    paletteScene(target, dispatcher.getState()),
   ).filter((r) => r.id !== 'open-palette');
+}
+
+/**
+ * 🔴 **「操作を探す」を開いた場面**(#1966 3-2。🟣 Gemini の裁定 = 案 A)── 並びで上へ寄せる文脈を決める 1 か所。
+ * - 本文などの欄から開いた → その欄の文脈(追記の欄 `append` / 1 画面の行の欄 `row` / 2 ペインの編集の欄 `editor`)
+ * - 1 画面で編集している(欄の外から開いた)→ `live`
+ * - 集計・システム・ヘルプなど中央に別の画面を開いている → `window`
+ * - ノートを読んでいる → `reading`
+ * ⚠ 欄の名前は打つ側(`SECTION_BOX_INPUT_FIELD` などの章の欄)も追記と同じ扱い(追記・章の欄で効く操作は `append` に載る)。
+ */
+export function paletteScene(target: HTMLTextAreaElement | null, st: AppState): ReadonlySet<KeyContext> {
+  const field = target?.getAttribute('data-pkc-field') ?? '';
+  if (field === 'append-input' || field === SECTION_BOX_INPUT_FIELD) return new Set<KeyContext>(['append']);
+  if (field === 'row-source') return new Set<KeyContext>(['row']);
+  if (target !== null) return new Set<KeyContext>(['editor']);
+  if (st.phase === 'editing') return new Set<KeyContext>(['live']);
+  if (st.viewMode !== 'detail') return new Set<KeyContext>(['window']);
+  return new Set<KeyContext>(st.selectedLid === null ? [] : ['reading']);
 }
 
 /**

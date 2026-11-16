@@ -29,6 +29,7 @@ import {
   chordLabel,
   onlyWhenSentence,
   type KeyCommand,
+  type KeyContext,
   type KeymapBindings,
 } from '@features/keymap';
 import { sceneOf } from './scene-labels';
@@ -190,6 +191,15 @@ export function paletteRows(
   needsEditorField?: (id: string) => boolean,
   /** 🔴 本文の欄などに居るまま開いたか(#1087 の見直し 2026-10-14)。欄の中の操作の理由が「その場で押すキー」になる。 */
   fromField = false,
+  /**
+   * 🔴 **いまの場面**(#1966 3-2。🟣 Gemini の裁定 = 案 A)── 開いた瞬間に効いている文脈(本文の欄 / 追記の欄 / 読んでいる /
+   *   別の画面 …)。押せる行のうち、この文脈で効く操作(`contexts` に含む)を上へ寄せる。
+   * ⚠ **見出しの節は作らない**(#582 段③の裁定)── 並び順だけを変える。
+   * ⚠ **名前の当たり方より後に効かせる**(字を打って探した結果を崩さない)── 同じ当たり方の中でだけ場面の操作が先に来る。
+   *   空欄では当たり方が全部同じなので、場面の操作がそのまま上に並ぶ。
+   * ⚠ `global`(どこでも効く)は場面の操作に数えない(全部が場面の操作になって、寄せる意味が無くなる)。
+   */
+  scene: ReadonlySet<KeyContext> = new Set(),
 ): readonly PaletteRow[] {
   const q = fold(query.trim());
   const editorHintText = (): string => {
@@ -201,7 +211,7 @@ export function paletteRows(
     if (chord === '') return '本文の欄で『操作を探す』を開くと呼べます';
     return `本文の欄で ${chord} の『操作を探す』から呼べます`;
   };
-  const hits: { row: PaletteRow; rank: number; order: number }[] = [];
+  const hits: { row: PaletteRow; rank: number; order: number; here: boolean }[] = [];
   for (const [order, cmd] of KEY_COMMANDS.entries()) {
     const rank = rankOf(cmd, q);
     if (rank === null) continue;
@@ -209,6 +219,7 @@ export function paletteRows(
     hits.push({
       rank,
       order,
+      here: cmd.contexts.some((c) => c !== 'global' && scene.has(c)),
       row: {
         id: cmd.id,
         label: cmd.label,
@@ -227,7 +238,10 @@ export function paletteRows(
   }
   hits.sort(
     (a, b) =>
-      Number(b.row.ready) - Number(a.row.ready) || a.rank - b.rank || a.order - b.order,
+      Number(b.row.ready) - Number(a.row.ready) ||
+      a.rank - b.rank ||
+      Number(b.here) - Number(a.here) ||
+      a.order - b.order,
   );
   return hits.map((h) => h.row);
 }
