@@ -87,6 +87,7 @@ import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
 import { bodyLinkNeedles, bodyLinksTo } from '@features/entry-ref/body-links';
 import { isWritableLinkTitle, renameLinkTexts, renameTitleLinks } from '@features/entry-ref/link-text-rename';
 import { findUnlinkedMentions, isMentionableTitle, linkMentions } from '@features/entry-ref/unlinked-mention';
+import { carryOverTasks } from '@features/schedule/carry-over';
 import { scanTitleLinks } from '@features/markdown/title-link';
 import {
   SNIPPET_ARCHETYPE,
@@ -4868,6 +4869,70 @@ const handlers: Handlers = {
       );
       database.exec('COMMIT');
       return { wrote: { lid: r.lid, body: res.body, stamps: w.stamps }, links: res.count };
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+  },
+  /**
+   * 🔴 **前の日の未完了を引き継ぐ**(#1966 4-4)。⚠ 2 冊の走査と書込を同じ `BEGIN IMMEDIATE` に閉じ込める ──
+   *   今日へ写せたのに前の日から外せなかった(同じ未完了が 2 日に残る)/ その逆、を作らない。
+   * ⚠ 両方に履歴を 1 版積む(`checkpoint`)── 引き継ぐ前へ戻せる。題名・並びは disk の値を保つ。
+   * ⚠ system 領域のノート・同じノートどうしは触らない。
+   */
+  carryOverTasks: (req) => {
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      const rowOf = (lid: string) =>
+        (
+          database.selectObjects(
+            `SELECT lid, title, archetype, body, entry_order FROM entries WHERE cid = ?1 AND lid = ?2 AND ${USER_REALM_SQL}`,
+            [req.cid, lid],
+          ) as Array<{ lid: string; title: string; archetype: string; body: string; entry_order: number }>
+        )[0];
+      const to = rowOf(req.lid);
+      const from = rowOf(req.sourceLid);
+      const res =
+        to === undefined || from === undefined || req.lid === req.sourceLid
+          ? null
+          : carryOverTasks({
+              from: { lid: from.lid, title: from.title, body: from.body },
+              to: { lid: to.lid, title: to.title, body: to.body },
+            });
+      if (res === null || res.count === 0 || to === undefined || from === undefined) {
+        database.exec('COMMIT');
+        return { wrote: [], moved: 0 };
+      }
+      const wrote: Array<{ lid: string; body: string; stamps: EntryStamps }> = [];
+      for (const [r, body] of [
+        [from, res.fromBody],
+        [to, res.toBody],
+      ] as const) {
+        const ext = extractMeta(r.archetype, body);
+        const w = writeEntryRow(
+          database,
+          req.cid,
+          {
+            lid: r.lid,
+            title: r.title,
+            archetype: r.archetype,
+            body,
+            entryOrder: r.entry_order,
+            status: ext.status,
+            date: ext.date,
+            archived: ext.archived,
+          },
+          { checkpoint: true, ...(req.keepLatest === undefined ? {} : { keepLatest: req.keepLatest }) },
+        );
+        wrote.push({ lid: r.lid, body, stamps: w.stamps });
+      }
+      database.exec('COMMIT');
+      return { wrote, moved: res.count };
     } catch (err) {
       try {
         database.exec('ROLLBACK');

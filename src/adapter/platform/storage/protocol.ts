@@ -274,6 +274,12 @@ export type StorageRequest =
    */
   | { op: 'linkMentions'; cid: string; lid: string; sourceLid: string; keepLatest?: number }
   /**
+   * 🔴 **前の日の未完了を引き継ぐ**(#1966 4-4)── `sourceLid`(前の日)の未完了を `lid`(今日)の末尾へ写し、
+   *   前の日の行は引き継いだ印に変える。⚠ 2 冊の走査と書込を worker の 1 tx に閉じ込める(片方だけ書けた、を作らない)。
+   *   どちらにも履歴を 1 版積む。
+   */
+  | { op: 'carryOverTasks'; cid: string; lid: string; sourceLid: string; keepLatest?: number }
+  /**
    * 🔴 **frontmatter で束ねる**(#184 ── 集計の面)。
    *
    * ⚠ **本文を主スレッドへ運ばない**。束ねるには本文が要るが、`getBodies` で全件を
@@ -1320,6 +1326,8 @@ export interface ResultMap {
   findUnlinkedMentions: { items: Array<{ lid: string; count: number }>; truncated: boolean };
   /** ⚠ 書いていなければ `wrote: null`(相手が消えた / もう言及が無い)。 */
   linkMentions: { wrote: { lid: string; body: string; stamps: EntryStamps } | null; links: number };
+  /** ⚠ 写す物が無ければ `wrote: []`・`moved: 0`。 */
+  carryOverTasks: { wrote: Array<{ lid: string; body: string; stamps: EntryStamps }>; moved: number };
   /**
    * 集計(#184)── **1 回の走査で目録と表を同時に返す**。
    * ⚠ **捨てた数を返す**(`omittedKeys` / `omittedGroups`)── 黙って切ると

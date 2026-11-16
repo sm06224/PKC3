@@ -3582,6 +3582,11 @@ export type UserAction =
    * ⚠ `lid` は撃つ側が解決する(押した後に選択が動いても、押した物に効く)。
    */
   | { type: 'LINK_MENTIONS'; lid: string; sourceLid: string }
+  /**
+   * 🔴 **前の日の未完了を引き継ぐ**(#1966 4-4)── `sourceLid`(前の日)の未完了を `lid`(開いている日付のノート)へ写し、
+   *   前の日から外す。⚠ 2 冊とも撃つ側が解決する(押した後に選択が動いても、押した物に効く)。
+   */
+  | { type: 'CARRY_OVER_TASKS'; lid: string; sourceLid: string }
   | {
       type: 'RENAME_SMART_TAG';
       from: string;
@@ -4662,6 +4667,8 @@ export type DomainEvent =
   /** 関係の永続化(#185)。⚠ 1 件ずつ ── 作る操作も消す操作も 1 度に 1 つである。 */
   /** 🔴 言及をリンクに変える(`LINK_MENTIONS`。#1966 4-1)。 */
   | { type: 'REQUEST_LINK_MENTIONS'; lid: string; sourceLid: string }
+  /** 🔴 前の日の未完了を引き継ぐ(`CARRY_OVER_TASKS`。#1966 4-4)。 */
+  | { type: 'REQUEST_CARRY_OVER_TASKS'; lid: string; sourceLid: string }
   | {
       /** 🔴 タグの名前の変更に、スマートフォルダの条件を合わせる(`RENAME_SMART_TAG`)。 */
       type: 'REQUEST_SMART_TAG_RENAME';
@@ -5548,6 +5555,7 @@ function reduceCore(
     case 'BULK_TAG':
     case 'RENAME_SMART_TAG':
     case 'LINK_MENTIONS':
+    case 'CARRY_OVER_TASKS':
       return reduceEntries(state, action);
     case 'SHOW_HISTORY':
     case 'PREVIEW_REVISION':

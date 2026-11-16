@@ -1975,6 +1975,13 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
 [data-pkc-field='detail-day-nav'] button {
   padding: 0 var(--s2);
 }
+/* 🔴 「前の日の未完了を引き継ぐ」(#1966 4-4)は移る 2 つと意味が違うので右へ離す。狭い画面では折り返す */
+[data-pkc-field='detail-day-nav'] {
+  flex-wrap: wrap;
+}
+[data-pkc-field='detail-day-nav'] [data-pkc-action='carry-over-tasks'] {
+  margin-inline-start: auto;
+}
 [data-pkc-field='detail-reading-time'] {
   color: var(--muted);
   font-size: 11px;
