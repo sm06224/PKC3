@@ -8,7 +8,7 @@
  * - 編集中・日付でないノート・前の日が無いときは理由を言って止まる(「操作を探す」と同じ判定 1 本)
  */
 import { describe, expect, it } from 'vitest';
-import { stubStamps } from '../helpers/store-stamps';
+import { STUB_STAMP, stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -16,7 +16,8 @@ import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
-import { bindActions, carryOverPlan } from '../../src/adapter/ui/actions/binder';
+import { bindActions, carryOverPlan, runGlobalCommand } from '../../src/adapter/ui/actions/binder';
+import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 
 function meta(lid: string, title: string): EntryMeta {
   return {
@@ -84,7 +85,11 @@ describe('流れ', () => {
       setEntryParent: async () => {},
       carryOverTasks: async (lid: string, sourceLid: string) => {
         calls.push([lid, sourceLid]);
-        return { wrote: result.wrote.map((w) => ({ ...w, stamps: stubStamps() })), moved: result.moved };
+        // ⚠ 冊ごとに違う時刻を返す(どの冊にどの時刻を刻んだかを見分ける)
+        return {
+          wrote: result.wrote.map((w, i) => ({ ...w, stamps: { createdAt: STUB_STAMP, updatedAt: `2026-11-16 0${i}:00:00` } })),
+          moved: result.moved,
+        };
       },
     } as unknown as Parameters<typeof connectStoreEffects>[1]);
     const root = document.createElement('div');
@@ -94,10 +99,12 @@ describe('流れ', () => {
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
     d.dispatch({ type: 'BODY_LOADED', lid: 'b', body: '本文' });
-    const refreshed: string[] = [];
+    const refreshed: Array<[string, string]> = [];
+    const stamped: Array<[string, string | null]> = [];
     const orig = d.dispatch.bind(d);
     d.dispatch = ((a: Parameters<typeof d.dispatch>[0]) => {
-      if (a.type === 'ENTRY_BODY_REFRESHED') refreshed.push(`${a.lid}:${a.body}`);
+      if (a.type === 'ENTRY_BODY_REFRESHED') refreshed.push([a.lid, a.body]);
+      if (a.type === 'ENTRY_STAMPED') stamped.push([a.lid, a.updatedAt]);
       return orig(a);
     }) as typeof d.dispatch;
     const press = (): void => {
@@ -106,21 +113,32 @@ describe('流れ', () => {
       root.append(b);
       b.click();
     };
-    return { d, calls, refreshed, press };
+    return { d, calls, refreshed, stamped, press, root };
   }
 
-  it('🔴 押すと 2 冊を引き継ぎ、開いている本文を差し替え、件数を知らせる', async () => {
-    const { d, calls, refreshed, press } = wire({
+  it('🔴 押すと 2 冊を引き継ぎ、それぞれの本文と時刻を差し替え、件数を知らせる', async () => {
+    const FROM = '- ~~x~~ → [2026-10-12](entry:b)';
+    const TO = '本文\n\n前の日から引き継ぎ: [2026-10-10](entry:a)\n- [ ] x';
+    const { d, calls, refreshed, stamped, press } = wire({
       wrote: [
-        { lid: 'a', body: '- ~~x~~ → [2026-10-12](entry:b)' },
-        { lid: 'b', body: '本文\n\n前の日から引き継ぎ: [2026-10-10](entry:a)\n- [ ] x' },
+        { lid: 'a', body: FROM },
+        { lid: 'b', body: TO },
       ],
       moved: 1,
     });
     press();
     await settle();
     expect(calls).toEqual([['b', 'a']]);
-    expect(refreshed.map((r) => r.split(':')[0])).toEqual(['a', 'b']);
+    // ⚠ 冊と本文の組を取り違えると、開いている今日のノートに前の日の本文が出る
+    expect(refreshed).toEqual([
+      ['a', FROM],
+      ['b', TO],
+    ]);
+    expect(stamped).toEqual([
+      ['a', '2026-11-16 00:00:00'],
+      ['b', '2026-11-16 01:00:00'],
+    ]);
+    expect(d.getState().entryMetas.get('b')?.updatedAt).toBe('2026-11-16 01:00:00');
     expect(d.getState().notice ?? '').toContain('2026-10-10 の未完了 1 件を引き継ぎました');
   });
 
@@ -139,5 +157,34 @@ describe('流れ', () => {
     await settle();
     expect(calls).toEqual([]);
     expect(d.getState().error ?? '').toContain('いまは引き継げません');
+  });
+});
+
+describe('「操作を探す」からの入口', () => {
+  it('🔴 ボタンと同じ判定 1 本: 押せない日は一覧で押せるふりをせず、押せる日は同じ受け手で引き継ぐ', () => {
+    const noop = (): void => {};
+    const keymap = new KeymapStore();
+    const root = document.createElement('div');
+    const at = (lid: string, editing = false): Dispatcher => {
+      const d = new Dispatcher();
+      d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
+      d.dispatch({ type: 'SELECT_ENTRY', lid });
+      d.dispatch({ type: 'BODY_LOADED', lid, body: '本文' });
+      if (editing) d.dispatch({ type: 'START_EDIT' });
+      return d;
+    };
+    expect(runGlobalCommand('carry-over-tasks', root, at('a'), keymap, noop, noop, true), '前の日が無いのに押せる').toBe(false);
+    expect(runGlobalCommand('carry-over-tasks', root, at('x'), keymap, noop, noop, true), '日付でないのに押せる').toBe(false);
+    expect(runGlobalCommand('carry-over-tasks', root, at('b', true), keymap, noop, noop, true), '編集中なのに押せる').toBe(false);
+    const d = at('b');
+    expect(runGlobalCommand('carry-over-tasks', root, d, keymap, noop, noop, true)).toBe(true);
+    const sent: unknown[] = [];
+    const orig = d.dispatch.bind(d);
+    d.dispatch = ((a: Parameters<typeof d.dispatch>[0]) => {
+      if (a.type === 'CARRY_OVER_TASKS') sent.push(a);
+      return orig(a);
+    }) as typeof d.dispatch;
+    expect(runGlobalCommand('carry-over-tasks', root, d, keymap, noop, noop, false)).toBe(true);
+    expect(sent).toEqual([{ type: 'CARRY_OVER_TASKS', lid: 'b', sourceLid: 'a' }]);
   });
 });

@@ -67,3 +67,28 @@ describe('写して、前の日から外す', () => {
     expect(twice.count).toBe(0);
   });
 });
+
+describe('着地前レビューの指摘', () => {
+  it('⚠ 隠しメモ・数式の中のチェックは送らない', () => {
+    const r = run('%%%\n- [ ] 隠しメモの中\n%%%\n$$\n- [ ] 数式の中\n$$\n- [ ] 本物\n');
+    expect(r.count).toBe(1);
+    expect(r.toBody).toBe(`${CARRY_OVER_LEAD}[2026-11-15](entry:d15)\n- [ ] 本物\n`);
+    expect(r.fromBody).toContain('- [ ] 隠しメモの中');
+    expect(r.fromBody).toContain('- [ ] 数式の中');
+  });
+
+  it('⚠ 今日のノートの末尾の空行が何行あっても、空行 1 つを挟んで足す(空行を積もらせない)', () => {
+    expect(run('- [ ] a\n', '朝\n\n\n\n').toBody).toBe(`朝\n\n${CARRY_OVER_LEAD}[2026-11-15](entry:d15)\n- [ ] a\n`);
+  });
+
+  it('⚠ 中身の前後の空白は落とす(`~~x ~~` は取り消し線にならない)', () => {
+    const r = run('- [ ]   a  \n');
+    expect(r.fromBody).toBe('- ~~a~~ → [2026-11-16](entry:d16)\n');
+    expect(r.toBody).toBe(`${CARRY_OVER_LEAD}[2026-11-15](entry:d15)\n- [ ] a\n`);
+  });
+
+  it('⚠ 引用の入れ子の中のチェックも前置きを保つ', () => {
+    expect(run('> > - [ ] 深い\n').fromBody).toBe('> > - ~~深い~~ → [2026-11-16](entry:d16)\n');
+  });
+});
+

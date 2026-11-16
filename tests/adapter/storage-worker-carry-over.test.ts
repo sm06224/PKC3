@@ -81,6 +81,9 @@ describe('carryOverTasks(worker の 1 tx)', () => {
     for (const lid of ['d15', 'd16']) {
       const revs = await request({ op: 'listRevisionMetas', cid: CID, entryLid: lid });
       expect(revs.length, `${lid} の引き継ぐ前の版が履歴に無い`).toBeGreaterThanOrEqual(1);
+      // ⚠ 件数だけでは「引き継ぐ前」か「後」かを見分けられない ── 版の中身を突き合わせる
+      const bodies = await Promise.all(revs.map((m) => request({ op: 'getRevision', cid: CID, id: m.id }).then((b) => b?.body)));
+      expect(bodies, `${lid} の履歴に引き継ぐ前の本文が無い`).toContain(lid === 'd15' ? PREV : '朝のメモ\n');
     }
   });
 
