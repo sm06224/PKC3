@@ -30,6 +30,12 @@ import {
  * 切ると user は「無い」と読む。上限そのものは「一覧に出して意味がある量」で決めた。
  */
 const SEARCH_LIMIT = 200;
+/**
+ * 🔴 **リンクのない言及を 1 回で読む上限**(#1966 4-1、着地前レビュー ⚠8)── 候補の行数と字数。
+ * ⚠ 見立て: 1MB の本文で走査が約 1 秒(レビューの実測)なので、1 回の選択で数百 ms に収まる量にする。
+ */
+export const MENTION_SCAN_MAX_ROWS = 300;
+export const MENTION_SCAN_MAX_CHARS = 2_000_000;
 import type { EntryStamps, EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
 import { fixReservedLock, type ReservedLockOutcome, type ReservedLockSqlite } from './reserved-lock';
@@ -4779,9 +4785,13 @@ const handlers: Handlers = {
     return { lids: hit, truncated };
   },
   /**
-   * 🔴 **リンクのない言及**(#1966 4-1)。候補は LIKE で削り(大小を区別しない)、合否は `findUnlinkedMentions`
+   * 🔴 **リンクのない言及**(#1966 4-1)。候補は LIKE で削り、合否は `findUnlinkedMentions`
    *   (文法 1 本 ── コード・リンクの中は数えない)。⚠ SQL では件数を切らない(`findBacklinks` と同じ理由)。
+   * ⚠ LIKE の大小無視は ASCII だけ ── `É` と `é` のような ASCII の外の大小違いは候補に入らない(見落とす向き。包み違いは起きない)。
    * ⚠ system 領域・片付けたノート・自分自身は出さない。
+   * 🔴 **読む量に上限を置く**(着地前レビュー ⚠8)── 選ぶたびに走り、この worker は保存・本文読込と同じ列なので、
+   *   短くてよく出る題名で全ノートを舐めると定常の応答が落ちる。候補の行数か字数が上限に達したら止め、`truncated` で
+   *   「ほかにもあります」と言う(黙って切らない)。
    */
   findUnlinkedMentions: (req) => {
     const limit = Math.max(1, Math.min(req.limit ?? SEARCH_LIMIT, SEARCH_LIMIT));
@@ -4798,7 +4808,15 @@ const handlers: Handlers = {
     ) as Array<{ lid: string; body: string }>;
     const items: Array<{ lid: string; count: number }> = [];
     let truncated = false;
+    let scanned = 0;
+    let chars = 0;
     for (const r of rows) {
+      if (scanned >= MENTION_SCAN_MAX_ROWS || chars >= MENTION_SCAN_MAX_CHARS) {
+        truncated = true;
+        break;
+      }
+      scanned += 1;
+      chars += r.body.length;
       const count = findUnlinkedMentions(r.body, title).length;
       if (count === 0) continue;
       if (items.length >= limit) {

@@ -93,6 +93,27 @@ describe('findUnlinkedMentions', () => {
   });
 });
 
+describe('🔴 読む量の上限(着地前レビュー ⚠8)', () => {
+  it('候補の字数が上限に達したら止めて「ほかにもある」と言う(黙って切らない)', async () => {
+    const { MENTION_SCAN_MAX_CHARS } = await import('../../src/adapter/platform/storage/storage-worker');
+    await put('cap', '的\n', { title: '上限の題名', entryOrder: 30 });
+    await put('big', `上限の題名 ${'あ'.repeat(MENTION_SCAN_MAX_CHARS)}`, { entryOrder: 31 });
+    await put('after', '上限の題名 の続き\n', { entryOrder: 32 });
+    const r = await request({ op: 'findUnlinkedMentions', cid: CID, lid: 'cap' });
+    expect(r.items, '上限の後ろまで読んだ').toEqual([{ lid: 'big', count: 1 }]);
+    expect(r.truncated, '切ったのに「ほかにもある」と言わない').toBe(true);
+  });
+
+  it('⚠ 対照群: 上限に達しなければ全部読み、切ったとは言わない', async () => {
+    await put('cap2', '的\n', { title: '小さい題名', entryOrder: 40 });
+    await put('s1', '小さい題名 1\n', { entryOrder: 41 });
+    await put('s2', '小さい題名 2\n', { entryOrder: 42 });
+    const r = await request({ op: 'findUnlinkedMentions', cid: CID, lid: 'cap2' });
+    expect(r.items.map((x) => x.lid)).toEqual(['s1', 's2']);
+    expect(r.truncated).toBe(false);
+  });
+});
+
 describe('linkMentions(worker の 1 tx)', () => {
   it('🔴 1 冊の言及を全部包む ── コード・既存のリンクは 1 byte も変えない', async () => {
     const r = await request({ op: 'linkMentions', cid: CID, lid: 'target', sourceLid: 'mixed' });

@@ -70,6 +70,29 @@ describe('🔴 境界: 書き換えない所(user 指示)', () => {
     ['参照形式の使う側の字の途中', `[今日の${T}資料][r1]`],
     ['参照形式の定義行の名前の途中', `[今日の${T}資料]: https://example.com`],
     ['[[題名]] の途中', `[[第2回${T}の件]]`],
+    // 🔴 着地前レビューで、包むと記法が壊れることを実際に再現した形(🔴1〜5・⚠6・⚠7)
+    ['リストの中の字下げコード', `- a\n\n      ${T}`],
+    ['リストの中の字下げコード(3 字の印)', `-   a\n\n        ${T}`],
+    ['属性が行をまたぐ HTML のタグ', `<div\n  title="${T}"\n  class="x">`],
+    ['行をまたぐ img の alt', `<img\nalt="${T}"\nsrc=x>`],
+    ['<pre> の中', `<pre>\n${T}\n</pre>`],
+    ['<style> の中', `<style>\na::after { content: "${T}" }\n</style>`],
+    ['<script> の中', `<script>var a = "${T}";</script>`],
+    ['閉じない HTML のコメント', `<!-- ${T}`],
+    ['行内の記法の属性', `:span:[x]{title="${T}"}`],
+    ['囲みの開きの属性', `:::figure{#fig caption="${T}"}\n本文\n:::`],
+    ['囲みの開きの属性(引用符なし)', `:::note{title=${T}}\n本文\n:::`],
+    ['差し込みの名前', `{{vars.${T}}}`],
+    ['計算の式', `={${T}}`],
+    ['見出しの id', `段落 {#${T}}`],
+    ['直前の \\ でエスケープ', `C:\\Docs\\${T}`],
+    ['脚注の名前の途中', `本文[^a${T}b]`],
+    ['www. の URL', `www.example.com/${T}`],
+    ['メールの宛先', `${T}@example.com`],
+    ['\\( \\) の数式', `\\(${T}\\)`],
+    ['見出しの行', `## ${T} の進め方`],
+    ['下線の見出し', `${T} の進め方\n===`],
+    ['下線の見出し(---)', `${T} の進め方\n---`],
   ];
   for (const [name, body] of untouched) {
     it(`${name} は書き換えない`, () => {
@@ -99,6 +122,20 @@ describe('🔴 境界: 書き換えない所(user 指示)', () => {
     expect(conv(`İstanbul と ${T}`)).toBe(`İstanbul と ${link(T)}`);
   });
 
+  it('⚠ 守る範囲の外の言及は包む(守りすぎて、ふつうの本文まで止めない)', () => {
+    expect(conv(`- ${T} の件\n    - 入れ子の ${T}`), 'リストの印で始まる深い行まで守った').toBe(
+      `- ${link(T)} の件\n    - 入れ子の ${link(T)}`,
+    );
+    expect(conv(`<b>${T}</b>`), 'タグの間の字まで守った').toBe(`<b>${link(T)}</b>`);
+    expect(conv(`見出しの下の ${T}\n\n## 章\n\n${T}`)).toBe(`見出しの下の ${link(T)}\n\n## 章\n\n${link(T)}`);
+    expect(conv(`\\\\${T}`), '偶数個の \\ はエスケープではない').toBe(`\\\\${link(T)}`);
+  });
+
+  it('⚠ 角括弧の左右の守りは片方ずつ効く(片方だけ消しても落ちる ── 変異試験の穴)', () => {
+    expect(count(`[${T} の資料]`), '左の [ に接している').toBe(0);
+    expect(count(`[資料の ${T}]`), '右の ] に接している').toBe(0);
+  });
+
   it('⚠ 先頭の設定行の後ろの本文は包む(設定行だけを守る)', () => {
     expect(conv(`---\ntitle: x\n---\n${T}`)).toBe(`---\ntitle: x\n---\n${link(T)}`);
   });
@@ -113,5 +150,21 @@ describe('探す題名', () => {
     expect(isMentionableTitle('会議')).toBe(true);
     expect(isMentionableTitle('11月の会議')).toBe(true);
     expect(count('2026-11-16 の記録', '2026-11-16')).toBe(0);
+  });
+});
+
+describe('⚠ 大きな本文でも止まらない(着地前レビュー ⚠8)', () => {
+  it('🔴 `@` の無い 1MB の 1 行でも線形に終わる(メールの正規表現が位置ごとに行末まで読むと止まる ── 実測)', () => {
+    const body = `${'あ'.repeat(1_000_000)} ${T}`;
+    const t0 = performance.now();
+    expect(count(body)).toBe(1);
+    expect(performance.now() - t0, '1MB の 1 行に時間がかかりすぎる').toBeLessThan(1500);
+  });
+
+  it('記法の多い 1MB の本文でも 1.5 秒以内', () => {
+    const body = `[a](x) \`c\` ${T} $ `.repeat(40_000);
+    const t0 = performance.now();
+    expect(count(body)).toBeGreaterThan(0);
+    expect(performance.now() - t0).toBeLessThan(1500);
   });
 });

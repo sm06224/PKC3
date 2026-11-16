@@ -7,7 +7,9 @@
  * - コード(フェンス・行内コード・4 字下げ)── `scanLinks` の `code` と `indentedCodeRanges`(リンクの規則 1 本)
  * - リンク(字も宛先も丸ごと)・参照形式の使う側 `[字][名]` と定義行 `[名]: 宛先`・`[[題名]]`
  * - 自動リンク `<…>`・括弧なしの URL・`entry:` / `asset:` / `pkc://` の語(置換と同じ正規表現 ── `body-replace.ts`)
- * - HTML のタグとコメント・数式 `$…$`・先頭の設定行(前書き)
+ * - HTML のタグとコメント・中を読まない HTML のブロック(`<pre>` など)・数式(`$…$` / `\\(…\\)`)・先頭の設定行(前書き)
+ * - 見出しの行・脚注 `[^名]`・属性や差し込みの `{…}`・囲みの開きの行・`www.` の URL とメール・深く字下げした行
+ * - 直前が `\\` でエスケープされた字
  * ⚠ 当たりのすぐ前が `[`、すぐ後ろが `]` の物も包まない(`[[題名](entry:…)]` は `[[` の記法と紛れる)。
  *
  * ## 題名の当て方
@@ -36,9 +38,73 @@ export function isMentionableTitle(title: string): boolean {
   return !/^[\d\s\p{P}\p{S}]+$/u.test(t);
 }
 
-const HTML_TAG = /<!--[\s\S]*?-->|<\/?[A-Za-z][^<>\n]*>/g;
+/**
+ * ⚠ 着地前レビューで、包むと記法が壊れる形が実際に出た物(🔴2〜4・⚠6・⚠7)。どれも**守りすぎる向き**に倒す
+ *   (守りすぎても、その言及がリンクにならないだけ ── 包んで壊すより害が小さい)。
+ */
+/** HTML のタグ(属性が行をまたいでもよい。⚠ 閉じない `<` を遠くまで読まない上限つき)と、コメント(閉じなければ末尾まで)。 */
+const HTML_TAG = /<!--[\s\S]*?(?:-->|$)|<\/?[A-Za-z][^<>]{0,2000}>/g;
+/** 中を markdown として読まない HTML のブロック(閉じなければ末尾まで)。 */
+const RAW_HTML_BLOCK = /<(pre|script|style|textarea)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
 const REF_USE = /\[[^\]\n]*\]\[[^\]\n]*\]/g;
+/** 脚注 `[^名]`。 */
+const FOOTNOTE = /\[\^[^\]\n]*\]/g;
+/** 属性・差し込み・計算の `{…}`(`:span:[x]{title=…}` / `{{vars.名}}` / `={式}` / `# 見出し {#id}`)。 */
+const BRACES = /\{[^{}\n]*\}/g;
+/** 囲みの開きの行(`:::figure{caption=…}` / `:::note{title=…}`)── 行ごと守る。 */
+const DIRECTIVE_LINE = /^[ \t]*:{3,}.*$/gm;
+/**
+ * `www.` で始まる URL とメールの宛先(画面ではリンクになる)。
+ * ⚠ メールは**語の頭からだけ**読む(後ろ読みで頭を留める)── 留めないと、`@` の無い長い行で位置ごとに行末まで読み、
+ *   2MB の 1 行で O(n²) になって worker が止まった(実測)。
+ */
+const WWW_OR_MAIL = /(?<![A-Za-z0-9_])www\.[^\s<>"')\]]+|(?<![^\s<>()[\]"'])[^\s<>()[\]"']+@[^\s<>()[\]"']+/gi;
+/** `\(…\)` / `\[…\]` の数式。 */
+const TEX_MATH = /\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]/g;
+/**
+ * 見出しの行(`#` で始まる行 / 下線の `===` `---` の 1 つ上の行)。🔑 見出しは包まない ── 見出しの字はノートの章の
+ *   名前で、リンクにすると目次・見出しの見た目が変わる(着地前レビューの「裁定が要る点」を、守る向きに倒した)。
+ */
+const ATX_HEADING = /^[ ]{0,3}#{1,6}(?:[ \t].*)?$/gm;
+const SETEXT_HEADING = /^[ ]{0,3}\S.*(?:\r\n|\r|\n)[ ]{0,3}(?:=+|-+)[ \t]*$/gm;
 const WORD = /[A-Za-z0-9_]/;
+/** リストの印(`- ` / `* ` / `+ ` / `1. ` / `1) `)で始まるか。 */
+const LIST_MARK = /^(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
+
+/**
+ * 🔴 **字下げが深い行は守る**(着地前レビュー 🔴1)── リストの中の字下げコード(`- a` の後の空行の後の 6 字下げ)は、
+ *   `indentedCodeRanges`(トップの 4 字下げ)では拾えない。⚠ リストの字下げを数えて正しく判定する代わりに、
+ *   「4 桁以上字下げした行で、リストの印で始まらない行」を丸ごと守る(守りすぎの向き ── 入れ子のリストの続きの
+ *   段落の言及がリンクにならないだけ)。
+ */
+function deepIndentRanges(body: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let pos = 0;
+  while (pos <= body.length) {
+    const nl = body.indexOf('\n', pos);
+    const end = nl < 0 ? body.length : nl;
+    const line = body.slice(pos, end);
+    let cols = 0;
+    let k = 0;
+    for (; k < line.length; k++) {
+      const ch = line[k];
+      if (ch === ' ') cols += 1;
+      else if (ch === '\t') cols += 4 - (cols % 4);
+      else break;
+    }
+    if (cols >= 4 && !LIST_MARK.test(line.slice(k))) out.push([pos, end]);
+    if (nl < 0) break;
+    pos = nl + 1;
+  }
+  return out;
+}
+
+/** 直前の `\` が奇数個か(その字はエスケープされている ── 包むと `\[` になってリンクにならない)。 */
+function escapedAt(body: string, at: number): boolean {
+  let n = 0;
+  for (let k = at - 1; k >= 0 && body[k] === '\\'; k--) n += 1;
+  return n % 2 === 1;
+}
 
 /** 書き換えの外に置く範囲(昇順・重ならない)。 */
 function protectedRanges(body: string): Array<[number, number]> {
@@ -46,10 +112,25 @@ function protectedRanges(body: string): Array<[number, number]> {
   const scan = scanLinks(body);
   for (const r of scan.code) raw.push([r[0], r[1]]);
   for (const r of indentedCodeRanges(body)) raw.push([r[0], r[1]]);
+  for (const r of deepIndentRanges(body)) raw.push(r);
   // リンクは字も宛先も丸ごと(参照形式の定義行 `[名]: 宛先` は `scanLinks` が行の頭から拾う)
   for (const site of scan.sites) raw.push([site.labelStart >= 0 ? site.labelStart : site.start, site.end]);
   for (const t of scanTitleLinks(body)) raw.push([t.start, t.end]);
-  for (const re of [AUTOLINK, REF_WORD, BARE_URL, HTML_TAG, REF_USE]) {
+  for (const re of [
+    AUTOLINK,
+    REF_WORD,
+    BARE_URL,
+    HTML_TAG,
+    RAW_HTML_BLOCK,
+    REF_USE,
+    FOOTNOTE,
+    BRACES,
+    DIRECTIVE_LINE,
+    WWW_OR_MAIL,
+    TEX_MATH,
+    ATX_HEADING,
+    SETEXT_HEADING,
+  ]) {
     re.lastIndex = 0;
     for (let m = re.exec(body); m; m = re.exec(body)) {
       raw.push([m.index, m.index + m[0].length]);
@@ -130,6 +211,7 @@ export function findUnlinkedMentions(body: string, title: string): MentionHit[] 
       !(tailWord && WORD.test(after)) &&
       before !== '[' &&
       after !== ']' &&
+      !escapedAt(body, at) &&
       !overlaps(ranges, at, key.length);
     if (ok) {
       out.push({ at, len: key.length });
