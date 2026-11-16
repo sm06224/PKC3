@@ -3046,13 +3046,32 @@ li[data-pkc-row-slot] {
  * ⚠ 右の列は狭いので、長い見出しは**折り返す**(切ると何の見出しか分からない)。
  */
 [data-pkc-field='inspector-toc-item'] {
-  padding-left: 0;
+  padding-left: var(--s2);
 }
 [data-pkc-field='inspector-toc-item'][data-pkc-toc-level='2'] {
-  padding-left: var(--s3);
+  padding-left: calc(var(--s2) + var(--s3));
 }
 [data-pkc-field='inspector-toc-item'][data-pkc-toc-level='3'] {
-  padding-left: var(--s5);
+  padding-left: calc(var(--s2) + var(--s5));
+}
+/**
+ * 🔴 **目次の高さに上限を付け、枠の中だけで送る**(#1966 2-B 案 2)。⚠ 直す前は 40 見出しで目次が約 700px になり、
+ *   右のペインの残り(タグ・つながり・添付)が画面の外へ押し出されていた。
+ * ⚠ `overscroll-behavior: contain` ── 目次の端まで送った勢いで、右のペイン全体まで送らない。
+ * 🔑 行の左の余白(`--s2`)は現在地の線の置き場 ── 線が字に被らない。
+ */
+dd[data-pkc-field='inspector-toc'] {
+  max-height: min(50vh, 24rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* 🔴 **いま読んでいる章**(#1966 2-B 案 1)── クイック目次(#1168)と同じ「太字 + 左の細い線」。
+   ⚠ 線は `inset box-shadow`(枠だと字が右へずれ、章が変わるたびに目次が揺れる)。 */
+[data-pkc-field='inspector-toc-item'][data-pkc-active] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+[data-pkc-field='inspector-toc-item'][data-pkc-active] > [data-pkc-field='inspector-toc-link'] {
+  font-weight: 700;
 }
 /* ⚠ 札ではなく**行**として読ませる ── 枠を持たせると目次が箱の列に見える */
 [data-pkc-field='inspector-toc-link'],

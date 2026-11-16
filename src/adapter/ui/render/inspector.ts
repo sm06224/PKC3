@@ -61,6 +61,7 @@ import { sameTag } from '@features/flavor/tags';
 import { foldText } from '@features/filter/fold-text';
 import { collectEntryTags } from '@features/flavor/entry-tags';
 import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
+import { requestInspectorTocSpy } from './inspector-toc-spy';
 import { stripComments, preprocessHeadingNumbers } from '@features/markdown/markdown-render';
 import { extractHeadingNumberConfig } from '@features/markdown/document-globals';
 import { countDrawnTasks } from '@features/markdown/task-drawn';
@@ -635,6 +636,8 @@ export class InspectorRenderer {
           setText(go, h.text);
         }
         while (items.length > headings.length) items[items.length - 1]!.remove();
+        // 🔴 作り直した行には現在地の印が無い ── 次のフレームで付け直す(#1966 2-B)
+        requestInspectorTocSpy();
       }
     }
     /**
