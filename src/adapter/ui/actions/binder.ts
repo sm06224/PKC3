@@ -417,6 +417,7 @@ import {
   exportFindingLines,
   exportFindings,
   hasExportFindings,
+  mergeExportFindings,
   type ExportCarry,
   type ExportCheckNote,
   type ExportFindings,
@@ -7395,7 +7396,8 @@ export function runGlobalCommand(
     }
     if (dry) return true;
     prevent();
-    run(lid);
+    // 🔴 右クリックの同じ書き出しと同じ点検を通す(#1966 4-5 の着地前レビュー 🔴1 ── 口ごとに点検の有無が違う、を作らない)
+    void guardExport(dispatcher, svc!, root, [lid], cmd === 'export-note-pdf' ? 'images' : 'nothing', () => run.call(svc, lid));
     return true;
   }
   /**
@@ -8063,8 +8065,9 @@ export function makeShellOps(h: {
       const svc = ROOT_SERVICES.get(root) ?? services;
       const run = format === 'pdf' ? svc.printNote : svc.exportEntryMarkdown;
       if (run === undefined) return fail('このタブの PKC3 が古いままのため、書き出せません。再読み込みしてください');
-      run.call(svc, lid);
-      return done(`${titleOf(lid)} を ${format === 'pdf' ? 'PDF' : 'Markdown'} で書き出します`);
+      // 🔴 ボタン・操作を探すと同じ点検を通す(#1966 4-5 の着地前レビュー 🔴1)
+      void guardExport(dispatcher, svc, root, [lid], format === 'pdf' ? 'images' : 'nothing', () => run.call(svc, lid));
+      return done(`${titleOf(lid)} を ${format === 'pdf' ? 'PDF' : 'Markdown'} で書き出します(点検で確かめる物があれば、一覧が出ます)`);
     },
     open: (lid) => {
       if (!dispatcher.getState().entryMetas.has(lid)) return fail('そのノートは見つかりません');
@@ -9645,69 +9648,83 @@ function openToday(
  * ⚠ 全件の書き出しは 200 件ずつ読む(全部の本文を一度に持たない ── 不可侵指示 2026-07-27)。
  */
 export const EXPORT_CHECK_CHUNK = 200;
-async function guardExport(
+/**
+ * ⚠ 点検に時間がかかったとき、押した操作の効き目(ブラウザの「いま押した」)が切れる書き出しがある ── フォルダを選ぶ窓
+ *   (`showDirectoryPicker`)は押してから約 5 秒しか開けない。点検が長引いたら、問題が無くても 1 度聞いて押し直してもらう。
+ */
+export const EXPORT_GESTURE_MS = 3000;
+/** 🔴 点検の最中か(二度押しで確認が 2 枚出る / 書き出しが 2 回走る、を作らない ── 着地前レビュー ⚠8)。 */
+let exportChecking = false;
+export function resetExportCheckForTest(): void {
+  exportChecking = false;
+}
+export async function guardExport(
   dispatcher: Dispatcher,
   services: BinderServices,
   root: HTMLElement,
   scope: readonly string[] | 'all',
   carry: ExportCarry,
   go: () => void,
+  opts: { readonly needsGesture?: boolean } = {},
 ): Promise<void> {
-  const st = dispatcher.getState();
   const read = services.readBodies;
   if (read === undefined) {
     go();
     return;
   }
-  const lids = scope === 'all' ? [...st.entryMetas.keys()] : scope;
-  const notes: ExportCheckNote[] = [];
-  let findings: ExportFindings | null = null;
-  const watchTags = appExportWatchTags.tags();
-  const merge = (a: ExportFindings | null, b: ExportFindings): ExportFindings =>
-    a === null
-      ? b
-      : {
-          tagged: [
-            ...a.tagged.map((t) => ({ tag: t.tag, titles: [...t.titles, ...(b.tagged.find((x) => x.tag === t.tag)?.titles ?? [])] })),
-            ...b.tagged.filter((t) => !a.tagged.some((x) => x.tag === t.tag)),
-          ],
-          missingLinks: { count: a.missingLinks.count + b.missingLinks.count, titles: [...a.missingLinks.titles, ...b.missingLinks.titles] },
-          assets: { count: a.assets.count + b.assets.count, titles: [...a.assets.titles, ...b.assets.titles] },
-        };
+  // ⚠ フォルダ 1 件の書き出しは、書き出す側が理由を言って断る(中身はノートの本文ではない)── 点検の確認を先に出さない(着地前レビュー 🔴4)
+  if (scope !== 'all' && scope.length === 1 && dispatcher.getState().entryMetas.get(scope[0]!)?.archetype === 'folder') {
+    go();
+    return;
+  }
+  if (exportChecking) return;
+  exportChecking = true;
+  const started = Date.now();
   try {
-    for (let i = 0; i < lids.length; i += EXPORT_CHECK_CHUNK) {
-      const part = lids.slice(i, i + EXPORT_CHECK_CHUNK);
-      const bodies = await read(part);
-      notes.length = 0;
-      for (const lid of part) {
-        const body = bodies.get(lid);
-        if (body === undefined) continue;
-        notes.push({ lid, title: st.entryMetas.get(lid)?.title ?? '', body });
+    const lids = scope === 'all' ? [...dispatcher.getState().entryMetas.keys()] : scope;
+    let findings: ExportFindings | null = null;
+    const watchTags = appExportWatchTags.tags();
+    try {
+      for (let i = 0; i < lids.length; i += EXPORT_CHECK_CHUNK) {
+        const part = lids.slice(i, i + EXPORT_CHECK_CHUNK);
+        const bodies = await read(part);
+        // ⚠ 状態は塊ごとに読み直す(読んでいる間にノートが消えた・改名された分を取り込む ── 着地前レビュー ⚠7)
+        const st = dispatcher.getState();
+        const notes: ExportCheckNote[] = [];
+        for (const lid of part) {
+          const body = bodies.get(lid);
+          if (body === undefined) continue;
+          notes.push({ lid, title: st.entryMetas.get(lid)?.title ?? '', body });
+        }
+        findings = mergeExportFindings(
+          findings,
+          exportFindings({ notes, exists: (lid) => st.entryMetas.has(lid), watchTags, carry, cid: st.cid }),
+        );
       }
-      findings = merge(
-        findings,
-        exportFindings({
-          notes,
-          exists: (lid) => st.entryMetas.has(lid),
-          watchTags,
-          carry,
-          cid: st.cid,
-        }),
-      );
+    } catch {
+      go();
+      return;
     }
-  } catch {
-    go();
-    return;
+    if (findings === null || !hasExportFindings(findings)) {
+      if (opts.needsGesture === true && Date.now() - started > EXPORT_GESTURE_MS) {
+        const again = await confirmInApp(root, '書き出す前の点検が終わりました(確かめる物はありませんでした)。書き出しますか', {
+          okLabel: '書き出す',
+          cancelLabel: 'やめる',
+        });
+        if (again === 'ok') go();
+        return;
+      }
+      go();
+      return;
+    }
+    const answer = await confirmListInApp(root, EXPORT_CHECK_LEAD, exportFindingLines(findings), {
+      okLabel: 'このまま書き出す',
+      cancelLabel: 'やめる',
+    });
+    if (answer === 'ok') go();
+  } finally {
+    exportChecking = false;
   }
-  if (findings === null || !hasExportFindings(findings)) {
-    go();
-    return;
-  }
-  const answer = await confirmListInApp(root, EXPORT_CHECK_LEAD, exportFindingLines(findings), {
-    okLabel: 'このまま書き出す',
-    cancelLabel: 'やめる',
-  });
-  if (answer === 'ok') go();
 }
 
 const ACTIONS: Record<string, ActionHandler> = {
@@ -18489,7 +18506,11 @@ const ACTIONS: Record<string, ActionHandler> = {
   'export-archive': (_dispatcher, _target, services) => {
     services.exportArchive?.();
   },
-  // 🔴 外へ渡す書き出しは、書き出す前に点検する(#1966 4-5。`guardExport`)── バックアップ(`export-archive`)は自分用なので点検しない
+  /**
+   * 🔴 外へ渡す書き出しは、書き出す前に点検する(#1966 4-5。`guardExport`)。⚠ 点検しないもの(理由):
+   *   バックアップ(`export-archive` / 選択・フォルダのバックアップ)= 自分用 / PKC2 の HTML(`export-pkc2-html`)= 移行用で自分用 /
+   *   字幕(`export-entry-srt`)= 時刻つきの行の字だけで、リンク・添付・タグは運ばない。
+   */
   'export-html': (dispatcher, _target, services, root) => {
     if (services.exportHtml) void guardExport(dispatcher, services, root, 'all', 'images', () => services.exportHtml?.());
   },
@@ -18497,8 +18518,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (services.exportMarkdown) void guardExport(dispatcher, services, root, 'all', 'images', () => services.exportMarkdown?.());
   },
   'export-markdown-folder': (dispatcher, _target, services, root) => {
+    // ⚠ フォルダを選ぶ窓は「押した直後」しか開けない ── 点検が長引いたら 1 度聞く(`needsGesture`)
     if (services.exportMarkdownFolder)
-      void guardExport(dispatcher, services, root, 'all', 'images', () => services.exportMarkdownFolder?.());
+      void guardExport(dispatcher, services, root, 'all', 'images', () => services.exportMarkdownFolder?.(), { needsGesture: true });
   },
   'export-portable': (dispatcher, _target, services, root) => {
     if (services.exportPortable) void guardExport(dispatcher, services, root, 'all', 'images', () => services.exportPortable?.());

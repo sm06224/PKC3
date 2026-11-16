@@ -123,6 +123,27 @@ export function exportFindings(input: ExportCheckInput): ExportFindings {
   };
 }
 
+/**
+ * 塊ごとに数えた結果を足し合わせる(全件の書き出しは 200 件ずつ読む)。`a` が `null` なら `b`。
+ * ⚠ 同じタグが前後の塊の両方に在れば、題名をつなぐ(後ろの塊の題名を落とさない)。タグの順は先に見つかった順。
+ */
+export function mergeExportFindings(a: ExportFindings | null, b: ExportFindings): ExportFindings {
+  if (a === null) return b;
+  const tagged = a.tagged.map((t) => ({
+    tag: t.tag,
+    titles: [...t.titles, ...(b.tagged.find((x) => sameTag(x.tag, t.tag))?.titles ?? [])],
+  }));
+  for (const t of b.tagged) if (!a.tagged.some((x) => sameTag(x.tag, t.tag))) tagged.push({ tag: t.tag, titles: [...t.titles] });
+  return {
+    tagged,
+    missingLinks: {
+      count: a.missingLinks.count + b.missingLinks.count,
+      titles: [...a.missingLinks.titles, ...b.missingLinks.titles],
+    },
+    assets: { count: a.assets.count + b.assets.count, titles: [...a.assets.titles, ...b.assets.titles] },
+  };
+}
+
 /** 題名を並べる(多いときは先頭だけ + 件数)。 */
 function namesOf(titles: readonly string[], max = 3): string {
   const head = titles.slice(0, max).map((t) => `「${t}」`).join('・');
