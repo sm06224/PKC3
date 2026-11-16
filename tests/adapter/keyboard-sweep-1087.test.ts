@@ -167,6 +167,9 @@ describe('② 確認の小窓: 変換確定の Enter(keyCode 229)で決めない
     const row = { id: 'x', label: 'えっくす', keys: [], ready: true, why: '' };
     const t = track(pickCommandInApp(host(), () => [row] as never));
     const input = q<HTMLInputElement>('[data-pkc-field="palette-filter"]');
+    // ⚠ 名前を打ってから押す ── 空欄の Enter は最近使った操作が無いと実行しない(#1966 3-2 の着地前レビュー 🔴1)
+    input.value = 'え';
+    input.dispatchEvent(new Event('input'));
     input.dispatchEvent(imeEnter());
     await settle();
     expect(t.done(), '変換確定の Enter で実行してしまった').toBe(false);
