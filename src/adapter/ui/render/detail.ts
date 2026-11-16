@@ -63,6 +63,7 @@ import { buildMessageBar, syncMessageBar } from './message-bar';
 import { installBackToTop, type BackToTopHandle } from './back-to-top';
 import { installReadingProgress, type ReadingProgressHandle } from './reading-progress';
 import { installQuickToc, type QuickTocHandle } from './quick-toc';
+import { requestInspectorTocSpy } from './inspector-toc-spy';
 import {
   clearHitHighlights,
   collectHitRanges,
@@ -2015,6 +2016,8 @@ export class DetailRenderer {
         this.paintedBody = body;
         this.paintedKey = key;
         this.quickTocHandle?.update();
+        // 🔴 右のペインの目次の現在地も付け直す(#1966 2-B)── 主の枠だけ(留めた枠は別のノート)
+        if (this.pinnedLid === null) requestInspectorTocSpy();
         this.syncSearchJump();
         return;
       }
@@ -2187,6 +2190,8 @@ export class DetailRenderer {
         this.paintedBody = body;
         this.paintedKey = key;
         this.quickTocHandle?.update();
+        // 🔴 右のペインの目次の現在地も付け直す(#1966 2-B)── 主の枠だけ(留めた枠は別のノート)
+        if (this.pinnedLid === null) requestInspectorTocSpy();
         // 🔴 描き終わったので、「探す」の塗りを当て直す(#1102 段①)── 塊が差し替わると Range が
         //   消えた節点を指す。⚠ 送るのは世代が変わったときだけ(`jumpSentGen`)
         this.syncSearchJump();
@@ -2817,6 +2822,7 @@ export class DetailRenderer {
         // 🔴 描き直しで右の高さが変わったら、左の割合へ合わせ直す(#1163 依頼 249 の着地前レビュー ⚠6)。
         //    ⚠ 右を自分で送って読んでいる間は動かさない(打つたびに引き戻さない ── `refollowScroll`)
         refollowScroll(ta, preview);
+        requestInspectorTocSpy();
         /**
          * 🔴 **プレビューにも文書 globals を当てる**(2026-08-06)。
          * 直す前は `applyDocumentGlobals` の呼び出しが読む面の 1 か所だけで、

@@ -193,6 +193,101 @@ test('🔴 見出しのあるノートで目次が出て、押すとそこまで
   });
   await expect.poll(activeRows, '末尾まで送っても最後の章が光らない').toEqual([2]);
 
+  /**
+   * 🔴 **右のペインの目次にも現在地が光る**(#1966 2-B 案 1)── クイック目次と同じ判定・同じ見た目。
+   * ⚠ 起動は増やさない(この道中に足す)。クイック目次を閉じてから見る(開いていなくても光る)。
+   */
+  await page.keyboard.press('Escape');
+  const IITEM = '[data-pkc-region="inspector"] [data-pkc-field="inspector-toc-item"]';
+  const inspectorActive = async (): Promise<number[]> =>
+    page.locator(IITEM).evaluateAll((els) => els.flatMap((el, i) => (el.hasAttribute('data-pkc-active') ? [i] : [])));
+  await expect.poll(inspectorActive, '末尾にいるのに右のペインの目次で最後の章が光らない').toEqual([2]);
+  await scroller.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await expect.poll(inspectorActive, '先頭へ戻しても右のペインの目次の印が動かない').toEqual([0]);
+  await target.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await expect.poll(inspectorActive, '途中の節へ送っても右のペインの目次の印が動かない').toEqual([1]);
+  const ilook = await page.locator(`${IITEM}[data-pkc-active]`).evaluate((el) => ({
+    weight: Number(getComputedStyle(el.firstElementChild as Element).fontWeight),
+    shadow: getComputedStyle(el).boxShadow,
+    current: el.firstElementChild?.getAttribute('aria-current'),
+  }));
+  expect(ilook.weight, '右のペインの目次で光った行が太字でない').toBeGreaterThanOrEqual(700);
+  expect(ilook.shadow, '右のペインの目次で光った行に左の線が無い').toMatch(/rgb.*\b2px\b.*inset/);
+  expect(ilook.current, '光った行に aria-current が無い').toBe('location');
+
+  /**
+   * 🔴 **見出しの多いノートでは、目次の高さに上限があり枠の中だけ送る**(#1966 2-B 案 2)。
+   * 🔴 光った行は**目次の枠の中だけ**を送って見せ、**本文の送りには触らない**(user 指示 2026-11-16)。
+   * ⚠ 観測点: ①枠の高さが上限内で、中身はそれより長い ②後ろの章へ送ると枠の scrollTop が増え、光った行が枠の内側に在る
+   *   ③本文の scrollTop は送った値のまま(数フレーム待っても)④右のペイン全体の送りも動かない。
+   */
+  const MANY = Array.from({ length: 40 }, (_, i) => [`## 章 ${i + 1}`, ...Array.from({ length: 12 }, (_, j) => `本文 ${i}-${j}`)].join('\n')).join('\n');
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '見出しの多いノート');
+  await page.fill('[data-pkc-field="editor-body"]', MANY);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await expect(page.locator(IITEM), '前提: 目次が 40 行でない').toHaveCount(40);
+  const tocBox = page.locator('[data-pkc-region="inspector"] dd[data-pkc-field="inspector-toc"]');
+  const dims = await tocBox.evaluate((el) => ({ h: el.clientHeight, sh: el.scrollHeight, oy: getComputedStyle(el).overflowY }));
+  expect(dims.oy, '目次の枠が自分で送らない').toBe('auto');
+  expect(dims.h, `目次の枠が高すぎる(${dims.h}px / 画面 ${viewportH}px)`).toBeLessThanOrEqual(viewportH / 2 + 1);
+  expect(dims.sh, '前提: 40 行が枠に収まってしまっている(枠の中を送る形にならない)').toBeGreaterThan(dims.h);
+  const inspectorRegion = page.locator('[data-pkc-region="inspector"]');
+  const inspTop0 = await inspectorRegion.evaluate((el) => el.scrollTop);
+  const ch30 = page.locator('[data-pkc-region="detail"] h2[id]', { hasText: '章 30' }).first();
+  // ⚠ 送った直後の値は**同じ評価の中で**読む ── 往復を分けると間に描画フレームが挟まり、追従が本文を動かしていても
+  //   動いた後の値を基準に取ってしまう(変異試験で実際に見逃した)
+  const bodyTop = await ch30.evaluate((el) => {
+    el.scrollIntoView({ block: 'start' });
+    return (el.closest('[data-pkc-region="detail"]') as HTMLElement).scrollTop;
+  });
+  expect(bodyTop, '前提: 本文が送れていない').toBeGreaterThan(1000);
+  await expect.poll(inspectorActive, '章 30 へ送っても右のペインの目次で光らない').toEqual([29]);
+  await expect.poll(() => tocBox.evaluate((el) => el.scrollTop), '目次の枠が光った行へ寄っていない').toBeGreaterThan(0);
+  const vis = await page.locator(`${IITEM}[data-pkc-active]`).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const b = (el.parentElement as HTMLElement).getBoundingClientRect();
+    return { top: r.top - b.top, bottom: b.bottom - r.bottom };
+  });
+  expect(vis.top, '光った行が目次の枠の上に隠れている').toBeGreaterThanOrEqual(-1);
+  expect(vis.bottom, '光った行が目次の枠の下に隠れている').toBeGreaterThanOrEqual(-1);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
+  expect(await scroller.evaluate((el) => el.scrollTop), '目次の追従で本文の送りが動いた').toBe(bodyTop);
+  expect(await inspectorRegion.evaluate((el) => el.scrollTop), '目次の追従で右のペイン全体が送られた').toBe(inspTop0);
+
+  // 🔴 編集中(2 ペインのプレビュー)でも、プレビューの送りに合わせて光る ── 実測で目次は編集中も出ていた(#1966 2-B ③)
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  const preview = page.locator('[data-pkc-region="editor-preview"]');
+  await expect(preview.locator('h2[id]'), '前提: プレビューに見出しが描かれていない').toHaveCount(40);
+  await preview.locator('h2[id]', { hasText: '章 10' }).first().evaluate((el) => {
+    const pv = el.closest('[data-pkc-region="editor-preview"]') as HTMLElement;
+    pv.scrollTop += el.getBoundingClientRect().top - pv.getBoundingClientRect().top;
+  });
+  await expect.poll(inspectorActive, '編集中のプレビューを送っても右のペインの目次が追従しない').toEqual([9]);
+
+  /**
+   * 🔴 **1 ペインの編集(既定の編集の形)でも追従する** ── 実測で、送りを持つのは `editor-live` 自身(外の detail は送らない)。
+   * ⚠ 設定は次に編集を始めたときに読まれる(読み込み直さずに切り替える)。
+   */
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await page.evaluate(() => localStorage.setItem('pkc3.editor-mode', 'live'));
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await expect(live.locator('h2[id]'), '前提: 1 ペインの編集に見出しが描かれていない').toHaveCount(40);
+  await live.locator('h2[id]', { hasText: '章 20' }).first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await expect.poll(inspectorActive, '1 ペインの編集を送っても右のペインの目次が追従しない').toEqual([19]);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+
+  // 🔴 スマホの幅でも、本文の送り(送りを持つのは detail。ページ全体は送らない ── 実測)で目次の印が動く
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.locator('[data-pkc-field="detail-body"] h2[id]', { hasText: '章 35' }).first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await expect.poll(inspectorActive, 'スマホの幅で本文を送っても右のペインの目次が追従しない').toEqual([34]);
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

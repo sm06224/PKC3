@@ -351,6 +351,7 @@ import { reloadOnPrebootSwap, type PrebootTarget } from '@adapter/platform/sw/pr
 import { applyIsolationReload } from '@adapter/platform/sw/coi-reload';
 import { applyBootRecovery } from '@adapter/platform/sw/boot-recovery';
 import { InspectorRenderer } from '@adapter/ui/render/inspector';
+import { installInspectorTocSpy } from '@adapter/ui/render/inspector-toc-spy';
 import { BrowseRouter, type BrowseMode } from '@adapter/ui/render/browse';
 // 🔴 探し方のタブの印(見た目 + 読み上げ)は 1 か所へ寄せた(#720)
 import { markBrowseTabs } from '@adapter/ui/render/tabs-a11y';
@@ -1835,6 +1836,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     folderSync,
   );
   const inspector = new InspectorRenderer(regions.inspector);
+  // 🔴 右のペインの目次で、いま読んでいる見出しを光らせる(#1966 2-B)。送りは 1 フレームに 1 回まで採寸する
+  installInspectorTocSpy(root);
   /**
    * 右の列の「本文で使う添付」で、説明文の空の添付に**元の file 名**を出す(#1207 I4)。
    * 名前は添付ノートの frontmatter にあるので、持ち主の逆引き(`findAssetOwner`)から取る。
