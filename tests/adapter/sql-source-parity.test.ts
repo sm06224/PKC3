@@ -153,12 +153,26 @@ describe('数え上げ ── 一覧を組む口を足したら、選び所へ�
     expect(found.has(AGG), '束ねる口が見つからない').toBe(true);
     expect(codeOf('src/adapter/ui/render/sql.ts'), '選び所が束ねる口を呼んでいない').toContain(`${AGG}(state.entryMetas.values())`);
     const agg = codeOf('src/features/query/attached-sql-sources.ts');
-    const missing = [...found].filter((n) => n !== AGG && !agg.includes(`${n}(all)`));
+    // ⚠ 束ねた配列へ**広げている**こと(`...名前(all)`)まで見る ── 呼んで捨てる行(`const _ = 名前(all)`)でも満たされない(着地前レビュー)
+    const missing = [...found].filter((n) => n !== AGG && !agg.includes(`...${n}(all)`));
     expect(
       missing,
       `一覧を組む口が選び所に繋がっていない(足したのに並ばない): ${missing.join(' / ')}`,
     ).toEqual([]);
     // ⚠ 手で並べた LISTERS も同じ数だけ持っていること(この test 自身の腐り止め。束ねる口は数えない)
     expect(LISTERS.length, 'この test の LISTERS が実装に追いついていない').toBe(found.size - 1);
+  });
+});
+
+describe('束ねる口(#1966 3-3)', () => {
+  it('🔴 並びは .sqlite → .csv / .tsv → .xlsx → DuckDB でしか読めない相手(選び所の見た目を変えない)', async () => {
+    const { attachedSqlSourcesOf, sqlSourceOfNote } = await import('../../src/features/query/attached-sql-sources');
+    const a = (lid: string, title: string) => ({ lid, title, archetype: 'attachment' });
+    const got = attachedSqlSourcesOf([a('x', '表.xlsx'), a('p', '大.parquet'), a('c', '客.csv'), a('s', '売上.sqlite'), a('n', '絵.png')]);
+    expect(got.map((g) => g.name)).toEqual(['売上.sqlite', '客.csv', '表.xlsx', '大.parquet']);
+    // 「SQL で開く」も同じ 1 本 ── DuckDB でしか読めない相手も開ける / 表でない添付は開けない
+    expect(sqlSourceOfNote(a('p', '大.parquet'))).toEqual({ lid: 'p', name: '大.parquet' });
+    expect(sqlSourceOfNote(a('n', '絵.png'))).toBeNull();
+    expect(sqlSourceOfNote({ lid: 't', title: '客.csv', archetype: 'text' }), '添付でないノートを SQL で開けると言った').toBeNull();
   });
 });

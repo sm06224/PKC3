@@ -5209,11 +5209,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       })),
     requestLinkedFiles: () => linkShare.request(),
     /** 🔴 取り込みの途中経過を捨てて相手を選び直すか聞く(差分マージ ⚠6)。 */
-    confirmDiscardMerge: async () =>
+    confirmDiscardMerge: async (why = 'pick') =>
       (await confirmInApp(
         root,
-        '取り込んだ変更は、まだ保存していません。相手を選び直すと、その取り込みは破棄されます(ノートはまだ書き換わっていません)。',
-        { okLabel: '選び直す', cancelLabel: 'やめる' },
+        why === 'history'
+          ? '取り込んだ変更は、まだ保存していません。履歴と比べる形に置き換えると、その取り込みは破棄されます(ノートはまだ書き換わっていません)。'
+          : why === 'leave'
+            ? '取り込んだ変更は、まだ保存していません。差分マージを離れると、その取り込みは破棄されます(ノートはまだ書き換わっていません)。'
+            : '取り込んだ変更は、まだ保存していません。相手を選び直すと、その取り込みは破棄されます(ノートはまだ書き換わっていません)。',
+        { okLabel: why === 'history' ? '置き換える' : why === 'leave' ? '離れる' : '選び直す', cancelLabel: 'やめる' },
       )) === 'ok',
     diffReadRevision: async (revId: string) =>
       (await client.request({ op: 'getRevision', cid, id: revId }))?.body ?? null,

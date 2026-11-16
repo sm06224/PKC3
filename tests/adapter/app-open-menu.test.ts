@@ -43,11 +43,19 @@ function meta(lid: string, title: string, archetype = 'text'): EntryMeta {
     bodyChars: null,
   };
 }
-const METAS = [meta('n1', 'メモ'), meta('n2', '別のメモ'), meta('c1', '売上.csv', 'attachment')];
+const METAS = [meta('n1', 'メモ'), meta('n2', '別のメモ'), meta('c1', '売上.csv', 'attachment'), meta('f1', '箱', 'folder'), meta('p1', '写真.png', 'attachment')];
 const NOW = '序\nいまの字\n末\n';
 const OLD = '序\n前の字\n末\n';
 
-function setup(opts: { confirm?: boolean; revs?: boolean } = {}) {
+function setup(
+  opts: {
+    confirm?: boolean;
+    revs?: boolean | 'none-api';
+    revBodies?: Record<string, string>;
+    holdRevs?: Promise<void>;
+    holdRevBody?: Promise<void>;
+  } = {},
+) {
   document.body.textContent = '';
   const root = document.createElement('div');
   root.setAttribute('data-pkc-slot', 'root');
@@ -73,14 +81,23 @@ function setup(opts: { confirm?: boolean; revs?: boolean } = {}) {
     {
       readBodies: async (lids: readonly string[]) =>
         new Map(lids.map((l) => [l, l === 'n2' ? 'まったく別\n' : NOW] as const)),
-      diffListRevisions: async () =>
-        opts.revs === false
-          ? []
-          : [
-              { id: 'r-old', revOrder: 1, createdAt: null, title: null },
-              { id: 'r-prev', revOrder: 2, createdAt: null, title: null },
-            ],
-      diffReadRevision: async (id: string) => (id === 'r-prev' ? OLD : 'もっと前\n'),
+      ...(opts.revs === 'none-api'
+        ? {}
+        : {
+            diffListRevisions: async () => {
+              await opts.holdRevs;
+              return opts.revs === false
+                ? []
+                : [
+                    { id: 'r-old', revOrder: 1, createdAt: null, title: null },
+                    { id: 'r-prev', revOrder: 2, createdAt: null, title: null },
+                  ];
+            },
+          }),
+      diffReadRevision: async (id: string) => {
+        await opts.holdRevBody;
+        return opts.revBodies?.[id] ?? (id === 'r-prev' ? OLD : 'もっと前\n');
+      },
       ...(opts.confirm === undefined
         ? {}
         : {
@@ -115,6 +132,9 @@ describe('判定(appOpenPlan ── 2 つの口の 1 本)', () => {
     expect('why' in appOpenPlan(booted, 'n1', 'sql')).toBe(true);
     expect(appOpenPlan(booted, 'c1', 'sql')).toEqual({ lid: 'c1', source: { lid: 'c1', name: '売上.csv' } });
   });
+  it('🔴 添付・フォルダは差分マージの相手にならない(差分マージの選び所と同じ規則 ── 着地前レビュー 🔴1)', () => {
+    for (const lid of ['c1', 'f1', 'p1']) expect('why' in appOpenPlan(booted, lid, 'diff'), lid).toBe(true);
+  });
   it('⚠ ノートを開いていない / 編集中は理由を言う', () => {
     expect(appOpenPlan(booted, null, 'diff')).toEqual({ why: 'ノートを開いてから呼んでください' });
     const editing = { ...booted, phase: 'editing' as const };
@@ -144,7 +164,8 @@ describe('右の列の「アプリで開く ▾」', () => {
       btn.click();
       const menu = root.querySelector('[data-pkc-region="context-menu"]')!;
       const acts = [...menu.querySelectorAll('[data-pkc-action]')].map((b) => b.getAttribute('data-pkc-action'));
-      expect(acts).toContain('diff-with-history');
+      // 差分マージはノートの本文だけ(添付は出さない ── 着地前レビュー 🔴1)/ SQL は表データの添付だけ
+      expect(acts.includes('diff-with-history'), `${lid} の「差分マージで履歴と比べる」の出る / 出ない`).toBe(!sql);
       expect(acts.includes('open-in-sql'), `${lid} の「SQL で開く」の出る / 出ない`).toBe(sql);
     }
   });
@@ -234,5 +255,105 @@ describe('SQL で開く / 操作を探す', () => {
     runGlobalCommand('diff-with-history', root, d, keymap, noop, noop, false);
     await tick();
     expect(d.getState().viewMode).toBe('diff');
+  });
+});
+
+describe('着地前レビューの指摘', () => {
+  it('⚠ 開けるアプリが 1 つも無いノート(フォルダ・表でない添付)は、空の一覧を出さずに理由を言う', () => {
+    for (const lid of ['f1', 'p1']) {
+      const { root, d, press } = setup();
+      press('open-app-menu', lid);
+      expect(root.querySelector('[data-pkc-region="context-menu"]'), `${lid} で空の一覧が開いた`).toBeNull();
+      expect(d.getState().error ?? '').toContain('このノートを開けるアプリがありません');
+    }
+  });
+
+  it('🔴 差分マージで取り込みの途中に「SQL で開く」を押すと聞く。「やめる」なら差分マージに留まり、取り込みも残る', async () => {
+    const t = setup({ confirm: false });
+    t.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'diff' });
+    const pick = (side: 'left' | 'right', value: string): void => {
+      const el = t.pane.querySelector<HTMLSelectElement>(`[data-pkc-field="diff-side"][data-pkc-side="${side}"] [data-pkc-pick="note"]`)!;
+      el.value = value;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    pick('left', 'n1');
+    pick('right', 'n2');
+    await tick();
+    t.pane.querySelector<HTMLElement>('[data-pkc-action="diff-take"][data-pkc-hunk="0"][data-pkc-from="b"]')!.click();
+    t.press('open-in-sql', 'c1');
+    await tick();
+    expect(t.asked, '取り込みの途中なのに聞かずに離れた').toHaveLength(1);
+    expect(t.d.getState().viewMode, 'やめたのに SQL の画面へ移った').toBe('diff');
+    expect(diffSession(t.pane).merge?.canUndo).toBe(true);
+  });
+
+  it('⚠ 対照群: 取り込みが無ければ聞かずに SQL の画面へ移る', async () => {
+    const t = setup({ confirm: false });
+    t.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'diff' });
+    t.press('open-in-sql', 'c1');
+    await tick();
+    expect(t.asked).toHaveLength(0);
+    expect(t.d.getState().viewMode).toBe('sql');
+  });
+
+  it('🔴 いちばん新しい版がいまの本文と同じなら、次の版を左に置く(ゴミ箱から戻した直後など ── 着地前レビュー ⚠3)', async () => {
+    const { pane, press } = setup({ revBodies: { 'r-prev': NOW, 'r-old': OLD } });
+    press('diff-with-history', 'n1');
+    await tick(60);
+    expect(diffSession(pane).left.revId, '同じ字の版のまま(ちがい 0 か所)').toBe('r-old');
+    expect(diffSession(pane).left.text).toBe(OLD);
+  });
+
+  it('⚠ どの版もいまの本文と同じなら、そう言う', async () => {
+    const { pane, press } = setup({ revBodies: { 'r-prev': NOW, 'r-old': NOW } });
+    press('diff-with-history', 'n1');
+    await tick(60);
+    expect(diffSession(pane).left.note).toBe('どの版も、いまの本文と同じです');
+  });
+
+  it('⚠ 版の一覧を読めない版では、その理由を「版がまだありません」で上書きしない(着地前レビュー ⚠4)', async () => {
+    const { pane, press } = setup({ revs: 'none-api' });
+    press('diff-with-history', 'n1');
+    await tick();
+    expect(diffSession(pane).left.note).toBe('このバージョンでは版の一覧を読めません');
+  });
+
+  it('⚠ 版を読み込んでいる間に左の相手を選び直したら、後から着いた版で上書きしない(競合)', async () => {
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    const { pane, press } = setup({ holdRevs: hold });
+    press('diff-with-history', 'n1');
+    await tick();
+    const kind = pane.querySelector<HTMLSelectElement>('[data-pkc-field="diff-side"][data-pkc-side="left"] [data-pkc-pick="kind"]')!;
+    kind.value = 'note';
+    kind.dispatchEvent(new Event('change', { bubbles: true }));
+    const note = pane.querySelector<HTMLSelectElement>('[data-pkc-field="diff-side"][data-pkc-side="left"] [data-pkc-pick="note"]')!;
+    note.value = 'n2';
+    note.dispatchEvent(new Event('change', { bubbles: true }));
+    release();
+    await tick(60);
+    const left = diffSession(pane).left;
+    expect([left.kind, left.lid, left.revId], '選び直した相手が、後から着いた版で上書きされた').toEqual(['note', 'n2', null]);
+    expect(left.note, '選び直した相手に、履歴の一言が書かれた').toBe('');
+    expect(left.text).toBe('まったく別\n');
+  });
+
+  it('⚠ 版の字を読んでいる間に左を選び直したら(いまと同じ字のノートでも)、次の版へ進めて上書きしない(競合)', async () => {
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    const { pane, press } = setup({ revBodies: { 'r-prev': NOW, 'r-old': OLD }, holdRevBody: hold });
+    press('diff-with-history', 'n1');
+    await tick();
+    expect(diffSession(pane).left.revId, '前提: 版の字を読み始めていない').toBe('r-prev');
+    const kind = pane.querySelector<HTMLSelectElement>('[data-pkc-field="diff-side"][data-pkc-side="left"] [data-pkc-pick="kind"]')!;
+    kind.value = 'note';
+    kind.dispatchEvent(new Event('change', { bubbles: true }));
+    const note = pane.querySelector<HTMLSelectElement>('[data-pkc-field="diff-side"][data-pkc-side="left"] [data-pkc-pick="note"]')!;
+    note.value = 'n1';
+    note.dispatchEvent(new Event('change', { bubbles: true }));
+    release();
+    await tick(60);
+    const left = diffSession(pane).left;
+    expect([left.kind, left.lid, left.revId], '選び直したノートに、次の版を書き込んだ').toEqual(['note', 'n1', null]);
   });
 });
