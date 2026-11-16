@@ -145,6 +145,12 @@ const SCAN_DEBOUNCE_MS = 250;
  * 説明は押す前に「何が入っているか」を言う(一覧の中身は選んだノートで変わる)。
  */
 export const EXPORT_MENU_LABEL = '書き出す ▾';
+/**
+ * 🔴 **「アプリで開く ▾」**(#1966 3-3。🟣 Gemini の裁定 = 案 B)── 開いているノートを、組み込みのアプリへ渡して開く一覧。
+ * 中身は「差分マージで履歴と比べる」と、表データの添付のときだけ「SQL で開く」(組むのは binder の `open-app-menu`)。
+ */
+export const APP_MENU_LABEL = 'アプリで開く ▾';
+export const APP_MENU_HINT = 'このノートを、差分マージや SQL などのアプリで開きます';
 const COLLECTION_EXPORT_MENU_HINT =
   'コレクション全体の書き出し方(閲覧用 HTML / PKC3 入り HTML / PKC2 の HTML / Markdown / Markdown を PC のフォルダに書き出す(Chrome / Edge のみ)/ 構成のコピー)を選ぶ一覧を出します';
 const EXPORT_MENU_HINT = 'このノートの書き出し方(バックアップ / 閲覧用 HTML / Word / PowerPoint / PDF / Markdown など)を選ぶ一覧を出します';
@@ -195,6 +201,8 @@ export class InspectorRenderer {
   private buttons: Buttons = new Map();
   /** 「書き出す ▾」(#1029 / #501)。⚠ 一覧の項目の元(`buttons` の書き出し系)は隠した器に残し、押したときに binder が読む。 */
   private exportMenuBtn: HTMLButtonElement | null = null;
+  /** 「アプリで開く ▾」(#1966 3-3)。 */
+  private appMenuBtn: HTMLButtonElement | null = null;
   /** 相手の候補(#185)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
   private candidates: HTMLDataListElement | null = null;
   /** 相手の候補の元(#1087)。欄に焦点が当たったとき `fillCandidates` が読む。 */
@@ -1480,6 +1488,14 @@ export class InspectorRenderer {
      * 🔴 **「書き出す ▾」も同じ門を通す**(#1029 / #501)。一覧の項目は押した瞬間に隠した元のボタンから読む
      *   (`disabled` / `title` / `hidden` は上の loop が書いたもの)── 編集中は一覧そのものを開けない。
      */
+    // 🔴 「アプリで開く ▾」も同じ門(#1966 3-3)── 編集中は開けない(理由は帯の直上の字と title)
+    const appMenu = this.appMenuBtn;
+    if (appMenu) {
+      setAttr(appMenu, 'data-pkc-entry', meta.lid);
+      if (appMenu.disabled !== editing) appMenu.disabled = editing;
+      const appTitle = editing ? withBlockedNote(APP_MENU_HINT, blockedNote) : APP_MENU_HINT;
+      if (appMenu.title !== appTitle) appMenu.title = appTitle;
+    }
     const exportMenu = this.exportMenuBtn;
     if (exportMenu) {
       setAttr(exportMenu, 'data-pkc-entry', meta.lid);
@@ -1792,6 +1808,7 @@ export class InspectorRenderer {
     this.rows = new Map();
     this.buttons = new Map();
     this.exportMenuBtn = null;
+    this.appMenuBtn = null;
     this.relAdd = null;
     this.relDd = null;
     this.editingNote = null;
@@ -2188,6 +2205,12 @@ export class InspectorRenderer {
     exportMenu.title = EXPORT_MENU_HINT;
     (bucket ?? actions).append(exportMenu);
     this.exportMenuBtn = exportMenu;
+    // 🔴 「アプリで開く ▾」(#1966 3-3)── 「書き出す ▾」の隣(渡す系の並び)。押すと一覧(`open-app-menu` → `openContextMenu`)
+    const appMenu = iconButton('open-app-menu', APP_MENU_LABEL, null);
+    appMenu.setAttribute('aria-haspopup', 'menu');
+    appMenu.title = APP_MENU_HINT;
+    (bucket ?? actions).append(appMenu);
+    this.appMenuBtn = appMenu;
     entryBtn('export-entry');
     /**
      * 🔴 **相手に渡せる 1 枚**(#491)。

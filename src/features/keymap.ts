@@ -1688,6 +1688,28 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     note: '2 つのノートや履歴の版を見比べ、ちがいを 1 か所ずつ取り込む画面です。文字を打っている間に効くのは Ctrl+Alt+0(Mac は ⌘+Alt+0)のほうです',
     alias: '比較 差分 マージ くらべる',
   },
+  /**
+   * 🔴 **開いているノートをアプリで開く**(#1966 3-3。🟣 Gemini の裁定 = 案 B)── 右の列の「アプリで開く ▾」と同じ 2 つ。
+   * ⚠ 鍵は付けない(`defaults: []`。`KEYLESS` に足すこと)。字は `binder.ts` の `DIFF_WITH_HISTORY_LABEL` / `OPEN_IN_SQL_LABEL` と同じ。
+   */
+  {
+    id: 'diff-with-history',
+    label: '差分マージで履歴と比べる',
+    contexts: ['global'],
+    defaults: [],
+    note: '開いているノートを、左に 1 つ前の版、右にいまのノートを入れて差分マージで開きます(取り込みの途中なら、捨ててよいか聞きます)',
+    whyNot: 'ノートを開いているときだけ効きます',
+    alias: '差分 比較 履歴 版 くらべる マージ',
+  },
+  {
+    id: 'open-in-sql',
+    label: 'SQL で開く',
+    contexts: ['global'],
+    defaults: [],
+    note: '開いている表データの添付(.csv / .tsv / .xlsx / .sqlite など)を選んだ状態で、SQL の画面を開きます',
+    whyNot: '表データの添付(.csv / .tsv / .xlsx / .sqlite / .parquet など)を開いているときだけ効きます',
+    alias: 'SQL 表 CSV クエリ 調べる',
+  },
   {
     id: 'view-shell',
     label: 'コマンドシェルへ移る',

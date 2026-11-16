@@ -80,6 +80,8 @@ const EXPECTED_ACTIONS: readonly string[] = [
   'adopt-external-images',
   // 🔴 「書き出す ▾」(#1029 / #501)── 書き出し系は下の隠した器へ移った
   'open-export-menu',
+  // 🔴 「アプリで開く ▾」(#1966 3-3)── 書き出すの隣
+  'open-app-menu',
   'show-history',
   // 🔴 左の列の整理 3 つ(#215)── 右クリックと同じ並び(履歴の下・削除の上)
   'rename-entry-begin',
