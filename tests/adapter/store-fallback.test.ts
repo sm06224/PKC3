@@ -35,6 +35,7 @@ import { OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { AlarmEnabledStore } from '@adapter/ui/render/alarm-enabled';
 import { VoiceBoostStore } from '@adapter/ui/render/voice-boost';
 import { MissingLinksStore } from '@adapter/ui/render/missing-links';
+import { ExportWatchTagsStore } from '@adapter/ui/render/export-watch-tags';
 import { CodeCollapseStore } from '@adapter/ui/render/code-collapse';
 import { PasteToastStore } from '@adapter/ui/render/paste-toast';
 import { InlineCodeCopyStore } from '@adapter/ui/render/inline-code-copy';
@@ -203,6 +204,16 @@ const CASES: readonly {
     },
     a: false,
     b: true,
+  },
+  {
+    // ⚠ 既定が「private, 社外秘」の store(#1966 4-5)── a を空(確かめない)にして、控えが死んで既定へ戻る実装を捕まえる
+    name: 'ExportWatchTagsStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new ExportWatchTagsStore(st);
+      return { write: (v) => void s.set(v as string), read: () => s.text() };
+    },
+    a: '',
+    b: '社外秘, 下書き',
   },
   {
     // ⚠ 既定が「入」の store(#1087)── a を切(false)にして、控えが死んでいて既定へ戻る実装を捕まえる

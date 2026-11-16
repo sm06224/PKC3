@@ -215,6 +215,7 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
       'pkc3.prose-align': 'center',
       'pkc3.text-scale': 'xlarge',
       'pkc3.tag-badge': 'chip',
+      'pkc3.export-watch-tags': '["社外秘"]',
       'pkc3.paste-source': PASTE_SOURCES[0]!.id,
       'pkc3.open-place': OPEN_PLACES[0]!.id,
       'pkc3.app-open-target': 'tab',

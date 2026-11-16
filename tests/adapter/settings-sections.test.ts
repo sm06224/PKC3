@@ -135,6 +135,7 @@ const ALL_IDS = [
   'column-rule',
   'tag-badge',
   'tag-color-list',
+  'export-watch-tags',
   'editor-mode',
   'open-in-edit',
   'inline-complete',
@@ -177,6 +178,7 @@ const DT_ORDER: Record<string, string[]> = {
     '段の境界線',
     '本文のタグの見せ方',
     '色を付けたタグ', // #1645
+    '書き出す前に確かめるタグ', // #1966 4-5
   ],
   'settings-edit': [
     '編集の仕方',

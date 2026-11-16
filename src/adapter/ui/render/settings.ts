@@ -63,6 +63,8 @@ import { createDateLinksSection } from './settings/date-links';
 import { createRelativeDaysSection } from './settings/relative-days';
 import { createColorSwatchSection } from './settings/color-swatch';
 import { createMissingLinksSection } from './settings/missing-links';
+import { createExportWatchTagsSection } from './settings/export-watch-tags';
+import { appExportWatchTags } from './export-watch-tags';
 import { createCodeCollapseSection } from './settings/code-collapse';
 import { createInlineCodeCopySection } from './settings/inline-code-copy';
 import { createPdfReaderSection } from './settings/pdf-reader';
@@ -261,6 +263,8 @@ export class SettingsRenderer {
       createColumnRuleSection(region),
       createTagBadgeSection(region),
       createTagColorListSection(region),
+      // 🔴 書き出す前に確かめるタグ(#1966 4-5)── タグの節の下
+      createExportWatchTagsSection(region, appExportWatchTags),
       createEditorModeSection(region, editorMode),
       createOpenInEditSection(region, openInEdit),
       createInlineCompleteSection(region, inlineComplete),
