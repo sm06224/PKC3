@@ -140,17 +140,25 @@ describe('数え上げ ── 一覧を組む口を足したら、選び所へ�
     }
     expect(found.size, '`…SourcesOf` を 1 つも見つけていない(走査が空振り)').toBeGreaterThan(0);
     // ⚠ 見るのは**実行する行**(注釈に名前を書いても満たされない)
-    const sql = readFileSync(join(ROOT, 'src/adapter/ui/render/sql.ts'), 'utf8');
-    const code = sql
-      .split('\n')
-      .filter((l) => !l.trimStart().startsWith('*') && !l.trimStart().startsWith('//'))
-      .join('\n');
-    const missing = [...found].filter((n) => !code.includes(`${n}(state.entryMetas.values())`));
+    const codeOf = (path: string): string =>
+      readFileSync(join(ROOT, path), 'utf8')
+        .split('\n')
+        .filter((l) => !l.trimStart().startsWith('*') && !l.trimStart().startsWith('//'))
+        .join('\n');
+    /**
+     * 🔴 **束ねる口は 1 本**(#1966 3-3)── 選び所(`sql.ts`)と「SQL で開く」が同じ一覧を見るよう、個々の口は
+     *   `attachedSqlSourcesOf` に集め、選び所はそれを呼ぶ。⚠ 個々の口が束ねる口に入っていないと、選び所に並ばない。
+     */
+    const AGG = 'attachedSqlSourcesOf';
+    expect(found.has(AGG), '束ねる口が見つからない').toBe(true);
+    expect(codeOf('src/adapter/ui/render/sql.ts'), '選び所が束ねる口を呼んでいない').toContain(`${AGG}(state.entryMetas.values())`);
+    const agg = codeOf('src/features/query/attached-sql-sources.ts');
+    const missing = [...found].filter((n) => n !== AGG && !agg.includes(`${n}(all)`));
     expect(
       missing,
       `一覧を組む口が選び所に繋がっていない(足したのに並ばない): ${missing.join(' / ')}`,
     ).toEqual([]);
-    // ⚠ 手で並べた LISTERS も同じ数だけ持っていること(この test 自身の腐り止め)
-    expect(LISTERS.length, 'この test の LISTERS が実装に追いついていない').toBe(found.size);
+    // ⚠ 手で並べた LISTERS も同じ数だけ持っていること(この test 自身の腐り止め。束ねる口は数えない)
+    expect(LISTERS.length, 'この test の LISTERS が実装に追いついていない').toBe(found.size - 1);
   });
 });

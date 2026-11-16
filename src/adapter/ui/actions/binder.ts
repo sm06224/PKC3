@@ -411,6 +411,7 @@ import {
   type KeyCommand,
   type KeyContext,
 } from '@features/keymap';
+import { sqlSourceOfNote } from '@features/query/attached-sql-sources';
 import { paletteRows, type PaletteRow } from '@features/palette/palette-rows';
 import { commandQueryOf } from '@features/palette/command-query';
 import { normalizeFindQuery } from '@features/filter/search-hits';
@@ -5102,6 +5103,8 @@ const DUAL_MENU_SELECT_FIRST: ReadonlySet<string> = new Set([
  */
 const MENU_OPENERS: ReadonlySet<string> = new Set([
   'phone-menu',
+  // 🔑 #1966 3-3 ── 右の列の「アプリで開く ▾」
+  'open-app-menu',
   // 🔑 #1621 ── 左の列の帯に入りきらない操作の一覧(「⋯」)
   'open-bar-more',
   'open-repeat-menu',
@@ -7326,6 +7329,25 @@ export function runGlobalCommand(
     return true;
   }
   /**
+   * 🔴 **差分マージで履歴と比べる / SQL で開く**(#1966 3-3)── 右の列の「アプリで開く ▾」と同じ `appOpenPlan` の 1 本で決め、
+   *   同じ受け手(`ACTIONS`)を呼ぶ。⚠ 断りは `dry` では偽(= 一覧は理由を言って押せるふりをしない)。
+   */
+  if (cmd === 'diff-with-history' || cmd === 'open-in-sql') {
+    const plan = appOpenPlan(dispatcher.getState(), null, cmd === 'diff-with-history' ? 'diff' : 'sql');
+    if ('why' in plan) {
+      if (dry) return false;
+      prevent();
+      notify(plan.why, CAUTION);
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-entry', plan.lid);
+    ACTIONS[cmd]!(dispatcher, btn, ROOT_SERVICES.get(root) ?? {}, root);
+    return true;
+  }
+  /**
    * 🔴 **このノートを Markdown で書き出す**(#1440)── 押しボタンを持たないので特例で直に呼ぶ。
    * 実体は右クリックの `export-entry-markdown` と同じ `services.exportEntryMarkdown`(`ROOT_SERVICES` から引く)。
    * ⚠ 断りは 3 段で、どれも `dry` では偽(= 一覧は「いまは押せません ── <理由>」で押せるふりをしない):
@@ -7765,7 +7787,7 @@ export function commandRowsFor(
     // ⚠ 「メッセージを開く」は押しボタンを持たない(左の列の同名は別の口)── 理由は
     //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
     //   「字幕ファイル(.srt)で書き出す」(#1447)も同じ(押しボタンを持たない)── 時刻つきの行が無い理由は `note` が言う
-    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'embed-transcript-srt' || id === 'export-note-markdown' || id === 'export-note-pdf' || id === 'open-prev-day-note' || id === 'open-next-day-note') return blockedActionNote(dispatcher.getState().phase);
+    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'embed-transcript-srt' || id === 'export-note-markdown' || id === 'export-note-pdf' || id === 'open-prev-day-note' || id === 'open-next-day-note' || id === 'diff-with-history' || id === 'open-in-sql') return blockedActionNote(dispatcher.getState().phase);
     // 「選択範囲をコピー」── 控えが無いときの理由(押しボタンを持たない)。左の `>` の一覧では選択が残らないので、呼べる道を言う
     if (id === 'copy-selection-md')
       return inPalette ? SELECTION_FIRST : `${SELECTION_FIRST}(選択してから「操作を探す」を開いてください)`;
@@ -9183,6 +9205,69 @@ function calcToNote(dispatcher: Dispatcher, target: HTMLElement, form: 'table' |
       ? `新しいノート「${title}」を作りました`
       : '作れませんでした(もう一度押してください)',
   );
+}
+
+/** 「アプリで開く ▾」の項目の字(#1966 3-3)。⚠ 「操作を探す」の同じ操作(`keymap.ts`)と同じ字(test が突き合わせる)。 */
+export const DIFF_WITH_HISTORY_LABEL = '差分マージで履歴と比べる';
+export const OPEN_IN_SQL_LABEL = 'SQL で開く';
+
+/**
+ * 🔴 **開いているノートをアプリへ渡す相手を決める**(#1966 3-3。🟣 Gemini の裁定 = 案 B)── 右の列の「アプリで開く ▾」と
+ *   「操作を探す」の 2 つの口が呼ぶ 1 本(§7)。`lid` は押したボタンの `data-pkc-entry`(無ければ選んでいるノート)。
+ */
+export function appOpenPlan(
+  st: AppState,
+  lid: string | null,
+  app: 'diff' | 'sql',
+): { lid: string; source?: { lid: string; name: string } } | { why: string } {
+  const blocked = blockedActionNote(st.phase);
+  if (blocked !== null) return { why: `いまはアプリで開けません: ${blocked}` };
+  const target = lid ?? st.selectedLid;
+  const meta = target === null ? undefined : st.entryMetas.get(target);
+  if (meta === undefined) return { why: 'ノートを開いてから呼んでください' };
+  if (app === 'diff') return { lid: meta.lid };
+  const source = sqlSourceOfNote(meta);
+  if (source === null)
+    return { why: 'SQL で開けるのは、表データの添付(.csv / .tsv / .xlsx / .sqlite / .parquet など)を開いているときだけです' };
+  return { lid: meta.lid, source };
+}
+
+/**
+ * 🔴 **差分マージで履歴と比べる**(#1966 3-3)── 中央の差分マージを開き、左に 1 つ前の版、右にいまのノートを入れる。
+ * 🔴 **作業途中の取り込みを黙って捨てない**(user 指示 2026-11-16)── 取り込んだ変更があれば、相手を選び直すときと同じ
+ *   `guardDiscard` で聞き、やめたら何も変えない。
+ * ⚠ 版がまだ無いノートは、左の一言で「版がまだありません」と言う(黙って空にしない)。
+ */
+function openDiffWithHistory(dispatcher: Dispatcher, services: BinderServices, root: HTMLElement, lid: string): void {
+  const st = dispatcher.getState();
+  if (st.viewMode !== 'diff') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'diff' });
+  const pane = root.querySelector<HTMLElement>('[data-pkc-view-pane="diff"]');
+  if (pane === null) return;
+  guardDiscard(pane, services, () => {
+    const s = diffSession(pane);
+    s.left.kind = 'rev';
+    s.left.lid = lid;
+    s.left.revId = null;
+    s.left.revs = null;
+    s.right.kind = 'note';
+    s.right.lid = lid;
+    s.right.revId = null;
+    s.right.revs = null;
+    void diffLoadSide(pane, 'right', services);
+    void (async () => {
+      await diffLoadRevs(pane, 'left', services);
+      const left = diffSession(pane).left;
+      if (left.lid !== lid || left.kind !== 'rev') return; // 待っている間に選び直された
+      const first = left.revs?.[0];
+      if (first === undefined) {
+        if (left.load !== 'failed') left.note = 'このノートには、比べる履歴の版がまだありません';
+        repaintDiff(pane);
+        return;
+      }
+      left.revId = first.id;
+      await diffLoadSide(pane, 'left', services);
+    })();
+  });
 }
 
 function diffPane(from: Element): HTMLElement | null {
@@ -17776,6 +17861,39 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (unchanged) return;
     // 🔴 取り込んだ変更があるときは、捨てる前に聞く(⚠6)。やめたら選び所を元の値に戻す
     guardDiscard(pane, services, () => diffPick(pane, side, which, value, services));
+  },
+  /**
+   * 🔴 **右の列の「アプリで開く ▾」**(#1966 3-3。🟣 Gemini の裁定 = 案 B)── 「差分マージで履歴と比べる」と、表データの
+   *   添付のときだけ「SQL で開く」。⚠ 出すかどうかは `appOpenPlan` の 1 本(「操作を探す」と同じ判定)。⚠ `MENU_OPENERS` に載せてある。
+   */
+  'open-app-menu': (dispatcher, target, _services, root) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (!lid) return;
+    const st = dispatcher.getState();
+    const items: MenuItem[] = [
+      { action: 'diff-with-history', label: DIFF_WITH_HISTORY_LABEL, hint: '左に 1 つ前の版、右にいまのノートを入れて差分マージを開きます' },
+    ];
+    if (!('why' in appOpenPlan(st, lid, 'sql')))
+      items.push({ action: 'open-in-sql', label: OPEN_IN_SQL_LABEL, hint: 'この表データを選んだ状態で SQL の画面を開きます' });
+    const r = target.getBoundingClientRect();
+    openContextMenu(root, { x: r.left, y: r.bottom }, items, target, { 'data-pkc-entry': lid });
+  },
+  'diff-with-history': (dispatcher, target, services, root) => {
+    const plan = appOpenPlan(dispatcher.getState(), target.getAttribute('data-pkc-entry'), 'diff');
+    if ('why' in plan) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: plan.why });
+      return;
+    }
+    openDiffWithHistory(dispatcher, services, root, plan.lid);
+  },
+  'open-in-sql': (dispatcher, target) => {
+    const plan = appOpenPlan(dispatcher.getState(), target.getAttribute('data-pkc-entry'), 'sql');
+    if ('why' in plan) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: plan.why });
+      return;
+    }
+    dispatcher.dispatch({ type: 'SET_SQL_SOURCE', lid: plan.source!.lid, name: plan.source!.name });
+    if (dispatcher.getState().viewMode !== 'sql') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'sql' });
   },
   'diff-use-open': (dispatcher, target, services) => {
     const pane = diffPane(target);

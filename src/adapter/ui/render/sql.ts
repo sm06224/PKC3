@@ -28,12 +28,11 @@ import {
   DEFAULT_IDLE_SEC,
   duckHeldExpiredNote,
 } from '@adapter/platform/duckdb/duckdb-lease';
-import { sqlSourcesOf } from '@features/query/sqlite-attachment';
+import { attachedSqlSourcesOf } from '@features/query/attached-sql-sources';
 import { sqlLineHtml } from '@features/query/sql-lines';
 import { chordLabel } from '@features/keymap';
 import { erArrowTarget, paintSqlEr, type ErSizeMemory } from './sql-er';
 import {
-  duckDbOnlySourcesOf,
   isDuckDbReadableSource,
   sqlGuestSourceOf,
   SQL_GUEST_EXTS,
@@ -43,9 +42,6 @@ import {
   duckDbTableNamesOfNames,
   SQL_MAX_SOURCES,
 } from '@features/query/sql-multi-source';
-// 🔴 添付の .csv / .tsv / .xlsx も同じ選び所へ並べる(#854 段① / 段③)
-import { csvAttachmentSourcesOf } from '@features/query/csv-attachment';
-import { xlsxAttachmentSourcesOf } from '@features/query/xlsx-attachment';
 // 🔴 手持ちのファイルを開く(#854 段②)
 import {
   isSqlLocalFileLid,
@@ -593,13 +589,8 @@ export class SqlRenderer {
   private paintSource(state: AppState): void {
     const sel = this.source;
     if (sel === null) return;
-    const attached = [
-      ...sqlSourcesOf(state.entryMetas.values()),
-      ...csvAttachmentSourcesOf(state.entryMetas.values()),
-      ...xlsxAttachmentSourcesOf(state.entryMetas.values()),
-      // 🔴 DuckDB でしか読めない相手(`.parquet` / `.json` / `.ndjson` / `.jsonl`。#682 段④c)
-      ...duckDbOnlySourcesOf(state.entryMetas.values()),
-    ];
+    // 🔑 並べる相手は「SQL で開く」(#1966 3-3)と同じ 1 本(`attachedSqlSourcesOf`)。DuckDB でしか読めない相手も含む(#682 段④c)
+    const attached = attachedSqlSourcesOf(state.entryMetas.values());
     /**
      * 🔴 **いま開いている手持ちのファイルも一覧へ足す**(#854 段②)。
      * ⚠ 足さないと、開いた file を表す `<option>` が一覧に無いまま `want` だけ

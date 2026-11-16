@@ -1151,6 +1151,12 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        *   ノートを開いていないときは左の探す欄(`focus-search`)へ回す分岐を持つので、ボタンを撃たずに `openNoteFind` を直に呼ぶ特例。
        */
       'find-in-note',
+      /**
+       * ⚠ 2026-11-16 に足した(#1966 3-3)── アプリで開く 2 つ。押しボタンは右の列の「アプリで開く ▾」の一覧の中にしか無いので、
+       *   判定(`appOpenPlan`)を直に呼んでから同じ受け手(`ACTIONS`)を呼ぶ特例。
+       */
+      'diff-with-history',
+      'open-in-sql',
     ];
     for (const id of special) {
       expect(src, `${id} の特例が消えた`).toContain(`cmd === '${id}'`);
