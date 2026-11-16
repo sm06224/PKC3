@@ -9,6 +9,7 @@
  *   下見の検査が古い形のまま緑になるのを防ぐ。
  * 🔑 対象は `PORTABLE_KEYS` の**全数**。検査を持たない鍵が 1 つでも在れば落ちる。
  */
+import { ExportWatchTagsStore } from '../../src/adapter/ui/render/export-watch-tags';
 import { chooseBoardLayout } from '../../src/adapter/ui/render/schedule-board';
 import { describe, expect, it } from 'vitest';
 import { KEY_COMMANDS } from '../../src/features/keymap';
@@ -183,6 +184,12 @@ function validSamples(): Record<string, string[]> {
   out['pkc3.open-place'] = OPEN_PLACES.map((m) => m.id);
   out['pkc3.app-open-target'] = APP_OPEN_TARGETS.map((m) => m.id);
   out['pkc3.messages.cap'] = MESSAGE_CAP_OPTIONS.map(String);
+  // 書き出す前に確かめるタグ(#1966 4-5)── 書き手(`ExportWatchTagsStore.set`)が書く形
+  {
+    const m = new Map<string, string>();
+    new ExportWatchTagsStore({ getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v) }).set('社外秘, 下書き');
+    out['pkc3.export-watch-tags'] = [m.get('pkc3.export-watch-tags')!, '[]'];
+  }
   return out;
 }
 

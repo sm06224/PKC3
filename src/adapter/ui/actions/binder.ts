@@ -412,6 +412,16 @@ import {
   type KeyContext,
 } from '@features/keymap';
 import { sqlSourceOfNote } from '@features/query/attached-sql-sources';
+import {
+  EXPORT_CHECK_LEAD,
+  exportFindingLines,
+  exportFindings,
+  hasExportFindings,
+  type ExportCarry,
+  type ExportCheckNote,
+  type ExportFindings,
+} from '@features/export/export-check';
+import { appExportWatchTags } from '@adapter/ui/render/export-watch-tags';
 import { paletteRows, type PaletteRow } from '@features/palette/palette-rows';
 import { commandQueryOf } from '@features/palette/command-query';
 import { normalizeFindQuery } from '@features/filter/search-hits';
@@ -941,6 +951,7 @@ import { sqlEngineOf } from '@features/query/sql-engine';
 import {
   alertInApp,
   confirmInApp,
+  confirmListInApp,
   pickDateInApp,
   pickCommandInApp,
   pickEntryInApp,
@@ -9624,6 +9635,82 @@ function openToday(
     });
     // ⚠ `create-entry` と同じ ── 作成 → 即編集の編集権を取る
     if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
+}
+
+/**
+ * 🔴 **外へ書き出す前の点検**(#1966 4-5。🟣 Gemini の裁定 = 案 ①)── 書き出すノートの本文を読み、指定したタグ・
+ *   リンク切れ・同梱されない添付を数える。**見つかったときだけ**一覧と「このまま書き出す / やめる」を出し、
+ *   何も無ければそのまま書き出す(`go`)。数え方は `features/export/export-check.ts` の 1 本。
+ * ⚠ 本文を読めない版・読めなかったときは、点検せずに書き出す(点検のせいで書き出せない、を作らない)。
+ * ⚠ 全件の書き出しは 200 件ずつ読む(全部の本文を一度に持たない ── 不可侵指示 2026-07-27)。
+ */
+export const EXPORT_CHECK_CHUNK = 200;
+async function guardExport(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  root: HTMLElement,
+  scope: readonly string[] | 'all',
+  carry: ExportCarry,
+  go: () => void,
+): Promise<void> {
+  const st = dispatcher.getState();
+  const read = services.readBodies;
+  if (read === undefined) {
+    go();
+    return;
+  }
+  const lids = scope === 'all' ? [...st.entryMetas.keys()] : scope;
+  const inSet = scope === 'all' ? null : new Set(scope);
+  const notes: ExportCheckNote[] = [];
+  let findings: ExportFindings | null = null;
+  const watchTags = appExportWatchTags.tags();
+  const merge = (a: ExportFindings | null, b: ExportFindings): ExportFindings =>
+    a === null
+      ? b
+      : {
+          tagged: [
+            ...a.tagged.map((t) => ({ tag: t.tag, titles: [...t.titles, ...(b.tagged.find((x) => x.tag === t.tag)?.titles ?? [])] })),
+            ...b.tagged.filter((t) => !a.tagged.some((x) => x.tag === t.tag)),
+          ],
+          missingLinks: { count: a.missingLinks.count + b.missingLinks.count, titles: [...a.missingLinks.titles, ...b.missingLinks.titles] },
+          outsideLinks: { count: a.outsideLinks.count + b.outsideLinks.count, titles: [...a.outsideLinks.titles, ...b.outsideLinks.titles] },
+          assets: { count: a.assets.count + b.assets.count, titles: [...a.assets.titles, ...b.assets.titles] },
+        };
+  try {
+    for (let i = 0; i < lids.length; i += EXPORT_CHECK_CHUNK) {
+      const part = lids.slice(i, i + EXPORT_CHECK_CHUNK);
+      const bodies = await read(part);
+      notes.length = 0;
+      for (const lid of part) {
+        const body = bodies.get(lid);
+        if (body === undefined) continue;
+        notes.push({ lid, title: st.entryMetas.get(lid)?.title ?? '', body });
+      }
+      findings = merge(
+        findings,
+        exportFindings({
+          notes,
+          exists: (lid) => st.entryMetas.has(lid),
+          included: (lid) => inSet === null || inSet.has(lid),
+          watchTags,
+          carry,
+          cid: st.cid,
+        }),
+      );
+    }
+  } catch {
+    go();
+    return;
+  }
+  if (findings === null || !hasExportFindings(findings)) {
+    go();
+    return;
+  }
+  const answer = await confirmListInApp(root, EXPORT_CHECK_LEAD, exportFindingLines(findings), {
+    okLabel: 'このまま書き出す',
+    cancelLabel: 'やめる',
+  });
+  if (answer === 'ok') go();
 }
 
 const ACTIONS: Record<string, ActionHandler> = {
@@ -18405,17 +18492,19 @@ const ACTIONS: Record<string, ActionHandler> = {
   'export-archive': (_dispatcher, _target, services) => {
     services.exportArchive?.();
   },
-  'export-html': (_dispatcher, _target, services) => {
-    services.exportHtml?.();
+  // 🔴 外へ渡す書き出しは、書き出す前に点検する(#1966 4-5。`guardExport`)── バックアップ(`export-archive`)は自分用なので点検しない
+  'export-html': (dispatcher, _target, services, root) => {
+    if (services.exportHtml) void guardExport(dispatcher, services, root, 'all', 'images', () => services.exportHtml?.());
   },
-  'export-markdown': (_dispatcher, _target, services) => {
-    services.exportMarkdown?.();
+  'export-markdown': (dispatcher, _target, services, root) => {
+    if (services.exportMarkdown) void guardExport(dispatcher, services, root, 'all', 'images', () => services.exportMarkdown?.());
   },
-  'export-markdown-folder': (_dispatcher, _target, services) => {
-    services.exportMarkdownFolder?.();
+  'export-markdown-folder': (dispatcher, _target, services, root) => {
+    if (services.exportMarkdownFolder)
+      void guardExport(dispatcher, services, root, 'all', 'images', () => services.exportMarkdownFolder?.());
   },
-  'export-portable': (_dispatcher, _target, services) => {
-    services.exportPortable?.();
+  'export-portable': (dispatcher, _target, services, root) => {
+    if (services.exportPortable) void guardExport(dispatcher, services, root, 'all', 'images', () => services.exportPortable?.());
   },
   /**
    * 🔴 **PKC2 の HTML で書き出す**(台帳 #1416)。押すと「元にする PKC2 の HTML」を選ぶウィンドウが開く(PKC3 の中に PKC2 のアプリは無い)。
@@ -18439,22 +18528,24 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     input.click();
   },
-  'export-entry-pdf': (dispatcher, target, services) => {
+  'export-entry-pdf': (dispatcher, target, services, root) => {
     // 🔴 解決規則は `rowLidOrSelected` の 1 本(#877)── 隣の 2 つと揃える
     //   (片方だけ `selectedLid` 固定だと「A を刷って B を消す」が成立する)
     const lid = rowLidOrSelected(dispatcher.getState(), target);
-    if (lid) services.printNote?.(lid);
+    if (lid && services.printNote) void guardExport(dispatcher, services, root, [lid], 'images', () => services.printNote?.(lid));
   },
-  'export-entry-docx': (dispatcher, target, services) => {
+  'export-entry-docx': (dispatcher, target, services, root) => {
     // 🔴 解決規則は `export-entry` と**同じ**(#877。隣に並ぶボタンなので、
     //   片方だけ `selectedLid` 固定だと「A を Word にして B を消す」が成立する)
     const lid = rowLidOrSelected(dispatcher.getState(), target);
-    if (lid) services.exportEntryDocx?.(lid);
+    if (lid && services.exportEntryDocx)
+      void guardExport(dispatcher, services, root, [lid], 'images', () => services.exportEntryDocx?.(lid));
   },
-  'export-entry-pptx': (dispatcher, target, services) => {
+  'export-entry-pptx': (dispatcher, target, services, root) => {
     // 🔴 解決規則は隣の 3 つ(`export-entry` / `-docx` / `-pdf`)と**同じ**(#877)
     const lid = rowLidOrSelected(dispatcher.getState(), target);
-    if (lid) services.exportEntryPptx?.(lid);
+    if (lid && services.exportEntryPptx)
+      void guardExport(dispatcher, services, root, [lid], 'images', () => services.exportEntryPptx?.(lid));
   },
   'export-entry': (dispatcher, target, services) => {
     // 🔴 解決規則は `delete-entry` と**同じ**(review M-3 / #877)── 隣に並べる
@@ -18715,38 +18806,44 @@ const ACTIONS: Record<string, ActionHandler> = {
       target,
     );
   },
-  'export-selection-html': (dispatcher, _target, services) => {
+  'export-selection-html': (dispatcher, _target, services, root) => {
     const lids = selectedExportLids(dispatcher);
-    if (lids.length > 0) services.exportSelectionHtml?.(lids);
+    if (lids.length > 0 && services.exportSelectionHtml)
+      void guardExport(dispatcher, services, root, lids, 'images', () => services.exportSelectionHtml?.(lids));
   },
-  'export-selection-portable': (dispatcher, _target, services) => {
+  'export-selection-portable': (dispatcher, _target, services, root) => {
     const lids = selectedExportLids(dispatcher);
-    if (lids.length > 0) services.exportSelectionPortable?.(lids);
+    if (lids.length > 0 && services.exportSelectionPortable)
+      void guardExport(dispatcher, services, root, lids, 'images', () => services.exportSelectionPortable?.(lids));
   },
   'export-selection-archive': (dispatcher, _target, services) => {
     const lids = selectedExportLids(dispatcher);
     if (lids.length > 0) services.exportSelectionArchive?.(lids);
   },
-  'export-entry-html': (dispatcher, target, services) => {
+  'export-entry-html': (dispatcher, target, services, root) => {
     // 🔴 解決規則は隣の `export-entry` / `delete-entry` と**同じ**(#877)── 揃えないと
     //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
     const lid = rowLidOrSelected(dispatcher.getState(), target);
-    if (lid) services.exportEntryHtml?.(lid);
+    if (lid && services.exportEntryHtml)
+      void guardExport(dispatcher, services, root, [lid], 'images', () => services.exportEntryHtml?.(lid));
   },
-  'copy-entry-mail': (dispatcher, target, services) => {
+  'copy-entry-mail': (dispatcher, target, services, root) => {
     // 🔴 解決規則は隣の `export-entry-markdown` と**同じ**(#877)
     const lid = rowLidOrSelected(dispatcher.getState(), target);
-    if (lid) services.copyEntryMail?.(lid);
+    if (lid && services.copyEntryMail)
+      void guardExport(dispatcher, services, root, [lid], 'nothing', () => services.copyEntryMail?.(lid));
   },
   'export-entry-srt': (dispatcher, target, services) => {
     // 🔴 解決規則は隣の `export-entry-markdown` と**同じ**(#877)
     const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.exportEntrySrt?.(lid);
   },
-  'export-entry-markdown': (dispatcher, target, services) => {
+  'export-entry-markdown': (dispatcher, target, services, root) => {
     // 🔴 解決規則は隣の `export-entry-html` と**同じ**(#877)── 揃えないと「A を書き出して B を削除する」が成立する
     const lid = rowLidOrSelected(dispatcher.getState(), target);
-    if (lid) services.exportEntryMarkdown?.(lid);
+    // ⚠ ノート 1 件の `.md` は添付(画像も)を運ばない形
+    if (lid && services.exportEntryMarkdown)
+      void guardExport(dispatcher, services, root, [lid], 'nothing', () => services.exportEntryMarkdown?.(lid));
   },
   /**
    * 🔴 **このノートを別の窓で開く**(#685 段②)。

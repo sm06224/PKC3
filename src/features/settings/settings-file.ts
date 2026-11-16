@@ -39,6 +39,7 @@ import { isReadColumns } from '@features/read-columns';
 import { SCHEDULE_LEAD_OPTIONS } from '@features/schedule/schedule-notify';
 import { isTagBadge } from '@features/tag-badge';
 import { isTextScale } from '@features/text-scale';
+import { isWatchTagsJson } from '@features/export/export-check';
 
 /** 1 件の設定。⚠ 値は保存されている**生の文字列**のまま運ぶ(解釈しない)。 */
 export interface SettingsEntry {
@@ -113,6 +114,8 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
   //    見分けにくいと感じる濃さは**人に付く**(文字の大きさと同じ考え方)
   { key: 'pkc3.column-rule', label: '段の境界線', valid: (v) => isColumnRule(v) },
   { key: 'pkc3.tag-badge', label: '本文のタグの見せ方', valid: (v) => isTagBadge(v) },
+  // 🔴 書き出す前に確かめるタグ(#1966 4-5)── 空も正しい値(確かめない)
+  { key: 'pkc3.export-watch-tags', label: '書き出す前に確かめるタグ', valid: isWatchTagsJson },
   { key: 'pkc3.keymap', label: 'ショートカットキーの割り当て', valid: isKeymapJson },
   { key: 'pkc3.browse', label: '探し方のタブ' },
   { key: 'pkc3.dual-preview', label: '2 ペインのプレビュー', valid: isOnOff },

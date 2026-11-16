@@ -316,6 +316,39 @@ export function confirmInApp(
 }
 
 /**
+ * 🔴 **確認に、見つかった物の一覧を添える**(#1966 4-5 ── 書き出す前の点検)。器・列・取り消しは `confirmInApp` と同じ。
+ * ⚠ 一覧の行は `textContent` で出す(題名を HTML にしない)。
+ */
+export function confirmListInApp(
+  host: HTMLElement,
+  lead: string,
+  items: readonly string[],
+  opts: ConfirmOptions = {},
+): Promise<DialogAnswer> {
+  return enqueue(() => {
+    const f = ensureFrame(host);
+    f.title.textContent = '確認';
+    f.body.textContent = '';
+    const p = document.createElement('p');
+    p.textContent = lead;
+    const ul = document.createElement('ul');
+    ul.setAttribute('data-pkc-field', 'dialog-list');
+    for (const it of items) {
+      const li = document.createElement('li');
+      li.textContent = it;
+      ul.append(li);
+    }
+    f.body.append(p, ul);
+    f.ok.textContent = opts.okLabel ?? 'はい';
+    f.cancel.textContent = opts.cancelLabel ?? 'やめる';
+    if (opts.danger === true) f.ok.setAttribute('data-pkc-danger', '');
+    else f.ok.removeAttribute('data-pkc-danger');
+    f.cancel.hidden = false;
+    return open(f, 'cancel');
+  });
+}
+
+/**
  * 確認を出して、答えと**チェック欄の入れ具合**を返す(#1652 3 ── 「残りも同じにする」)。
  *
  * ⚠ 器・列・取り消しの扱いは `confirmInApp` と**同じ**(`Escape` / 「やめる」= `cancel`)。
