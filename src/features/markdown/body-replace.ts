@@ -32,16 +32,16 @@ function fold(s: string, caseSensitive: boolean): string {
 }
 
 /** 自動リンク `<scheme:…>` / `<a@b>`。 */
-const AUTOLINK = /<(?:[A-Za-z][A-Za-z0-9+.-]*:[^\s<>]*|[^\s<>@]+@[^\s<>]+)>/g;
+export const AUTOLINK = /<(?:[A-Za-z][A-Za-z0-9+.-]*:[^\s<>]*|[^\s<>@]+@[^\s<>]+)>/g;
 /** `entry:` / `asset:` / `pkc://` で始まる参照の語。 */
-const REF_WORD = /(?<![A-Za-z0-9_])(?:(?:entry|asset):|pkc:\/\/)[^\s)\]>"'<]+/g;
+export const REF_WORD = /(?<![A-Za-z0-9_])(?:(?:entry|asset):|pkc:\/\/)[^\s)\]>"'<]+/g;
 
 /**
  * 括弧なしでそのまま書いた URL(画面ではリンクになる)。🔴 #1163 依頼 320(Gemini の裁定 A):
  * 画面でリンクとして押す物は、リンクの形で書いた物と同じ扱いにそろえて置換の外に置く。
  * ⚠ 末尾の `)` `]` は URL に含めない(括弧で囲んだ書き方の閉じ)。広めに守る向き ── 守りすぎても URL の一部が置換されないだけ。
  */
-const BARE_URL = /(?<![A-Za-z0-9_])https?:\/\/[^\s<>"')\]]+/gi;
+export const BARE_URL = /(?<![A-Za-z0-9_])https?:\/\/[^\s<>"')\]]+/gi;
 
 /**
  * 置換の外に置く範囲 `[start, end)`(昇順・重ならない)。⚠ 本文に検索語が当たったときだけ作る。

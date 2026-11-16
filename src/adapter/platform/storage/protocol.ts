@@ -264,6 +264,16 @@ export type StorageRequest =
    */
   | { op: 'findBacklinks'; cid: string; lid: string; limit?: number }
   /**
+   * 🔴 **リンクのない言及**(#1966 4-1)── このノートの題名が、ほかのノートの本文に**ただの字として**出ている所。
+   * 合否は `findUnlinkedMentions`(コード・リンクの中は数えない)。返すのはノートと箇所の数だけ(本文は返さない)。
+   */
+  | { op: 'findUnlinkedMentions'; cid: string; lid: string; limit?: number }
+  /**
+   * 🔴 **言及をリンクに変える**(#1966 4-1)── `sourceLid` の本文の言及を `[字](entry:<lid>)` に包む。
+   * ⚠ 走査も書込も worker の 1 tx(`renameLinkTexts` と同じ理由)。履歴に 1 版積む(包む前へ戻せる)。
+   */
+  | { op: 'linkMentions'; cid: string; lid: string; sourceLid: string; keepLatest?: number }
+  /**
    * 🔴 **frontmatter で束ねる**(#184 ── 集計の面)。
    *
    * ⚠ **本文を主スレッドへ運ばない**。束ねるには本文が要るが、`getBodies` で全件を
@@ -1307,6 +1317,9 @@ export interface ResultMap {
    */
   searchDetail: { rows: SearchDetailRow[]; truncated: boolean };
   findBacklinks: { lids: string[]; truncated: boolean };
+  findUnlinkedMentions: { items: Array<{ lid: string; count: number }>; truncated: boolean };
+  /** ⚠ 書いていなければ `wrote: null`(相手が消えた / もう言及が無い)。 */
+  linkMentions: { wrote: { lid: string; body: string; stamps: EntryStamps } | null; links: number };
   /**
    * 集計(#184)── **1 回の走査で目録と表を同時に返す**。
    * ⚠ **捨てた数を返す**(`omittedKeys` / `omittedGroups`)── 黙って切ると

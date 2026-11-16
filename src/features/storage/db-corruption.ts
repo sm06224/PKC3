@@ -76,6 +76,7 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   'deleteAssetMeta',
   'replaceAssetRefs',
   'renameLinkTexts',
+  'linkMentions',
   'importRevisionChains',
   'restoreRevisionChains',
   'restoreTrashNotes',

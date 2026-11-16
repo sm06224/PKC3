@@ -131,6 +131,8 @@ describe('止める op の仕分け(#971)', () => {
     'searchEntries',
     'searchDetail',
     'findBacklinks',
+    // リンクのない言及(#1966 4-1)── 読むだけ(包む `linkMentions` は止める側)
+    'findUnlinkedMentions',
     'findAssetOwner',
     'assetShareProbe',
     'listRelations',

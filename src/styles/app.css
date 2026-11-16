@@ -3101,6 +3101,24 @@ dd[data-pkc-field='inspector-toc'] {
  * ⚠ 地は無彩色のまま(user 指示 2026-08-03「色は情報にだけ使う」)── 札であることは
  *   **並びと隙間**で分かる。
  */
+/**
+ * 🔴 **リンクのない言及の行**(#1966 4-1)── ノートの名前・箇所の数・「リンクにする」を 1 行に並べる。
+ * ⚠ 狭い右の列では折り返す(名前を切らない)。箇所の数は補助なので薄い字。
+ */
+[data-pkc-field='inspector-mention'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+}
+[data-pkc-field='inspector-mention-count'] {
+  color: var(--muted);
+  font-size: max(12px, calc(var(--pkc-text-size, 13px) * 12 / 13));
+}
+[data-pkc-field='inspector-mention-link'] {
+  margin-inline-start: auto;
+}
+
 [data-pkc-region='inspector'] dd[data-pkc-field='inspector-tags'] {
   display: flex;
   flex-wrap: wrap;

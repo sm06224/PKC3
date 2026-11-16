@@ -180,5 +180,45 @@ test('🔴 本文のリンクが「参照元」に出て、押すと移れる', 
    *   楽観で外すので、取り直しに頼らない。「元に戻す」は復元が選択を A へ動かすので、取り直しの分岐を通らない。
    *   🔑 取り直しだけが効く場面は、選択を動かさずにリンク元が増える経路(別窓の書込など)で、実ブラウザの単窓では作れない。
    */
+
+  /**
+   * 🔴 **リンクのない言及**(#1966 4-1)── 題名がただの字として出ているノートが右の列に並び、「リンクにする」で包まれ、
+   *   参照元へ移る。⚠ 上の道中の続きに載せる(新しく起動しない)。worker(sqlite)を通るのは実ブラウザだけである。
+   * ⚠ 観測点: ①行に相手と箇所の数が出る ②押すと知らせ・行が消え・参照元に出る ③相手の本文は字がリンクになり、
+   *   コードの囲みの中の字は**ただの字のまま**(user 指示: コードブロック内を誤って書き換えない)。
+   */
+  await clickReal(page, '[data-pkc-action="hide-trash"]');
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '週次の定例会');
+  await page.locator('[data-pkc-field="editor-body"]').fill('定例の的\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // ⚠ 一覧の並びは作った順ではない ── 題名で行を採る(先頭の行は別のノートだった ── 実測)
+  const lidM = await page
+    .locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '週次の定例会' })
+    .first()
+    .getAttribute('data-pkc-entry');
+  expect(lidM, '前提: 言及される的の lid が取れない').toBeTruthy();
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '議事のメモ');
+  await page.locator('[data-pkc-field="editor-body"]').fill('今日の週次の定例会で決めた\n\n```\n週次の定例会\n```\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, `[data-pkc-region="filer-table"] [data-pkc-entry="${lidM}"]`);
+  const menRow = page.locator('[data-pkc-field="inspector-mentions"]');
+  await expect(menRow, '「リンクのない言及」の行が出ない(worker から届いていない)').toBeVisible();
+  await expect(menRow.locator('[data-pkc-field="inspector-mention-note"]')).toHaveText(['議事のメモ']);
+  await expect(menRow.locator('[data-pkc-field="inspector-mention-count"]'), 'コードの中まで数えた').toHaveText(['1 か所']);
+  await clickReal(page, '[data-pkc-field="inspector-mentions"] [data-pkc-action="link-mentions"]');
+  await expect(page.locator('[data-pkc-region="status"]'), '包んだ知らせが出ない').toContainText(
+    '「議事のメモ」の 1 か所をリンクにしました',
+  );
+  await expect(menRow, '包んだのに「リンクのない言及」の行が残っている').toBeHidden();
+  await expect(box.locator('[data-pkc-field="inspector-backlink"]'), '包んだノートが参照元に出ない').toHaveText(['議事のメモ']);
+  await clickReal(page, box.locator('[data-pkc-field="inspector-backlink"]'));
+  const memo = page.locator('[data-pkc-field="detail-body"]');
+  await expect(memo.locator('[data-pkc-action="navigate-entry-ref"]'), '相手の本文の字がリンクになっていない').toHaveText(
+    '週次の定例会',
+  );
+  await expect(memo.locator('pre'), 'コードの囲みの中の字が変わった').toHaveText(/^週次の定例会\s*$/);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

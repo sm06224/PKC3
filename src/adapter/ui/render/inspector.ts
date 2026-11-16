@@ -1059,6 +1059,48 @@ export class InspectorRenderer {
         }
       }
     }
+    const menBox = this.rows.get('inspector-mentions');
+    const men = state.mentions;
+    const menDeps = [men, state.entryMetas, meta.lid];
+    if (menBox && !this.rowSame('mentions', menDeps)) {
+      this.rowDeps.set('mentions', menDeps);
+      menBox.textContent = '';
+      const items = men !== null && men !== undefined && men.lid === meta.lid ? men.items : [];
+      // ⚠ 一覧に居ないノート(消えた・system 領域)は出さない ── 押しても開けない
+      const shown = items.filter((it) => state.entryMetas.has(it.lid));
+      const empty = shown.length === 0;
+      if (menBox.hidden !== empty) menBox.hidden = empty;
+      const dt = menBox.previousElementSibling;
+      if (dt instanceof HTMLElement && dt.hidden !== empty) dt.hidden = empty;
+      for (const it of shown) {
+        const line = document.createElement('div');
+        line.setAttribute('data-pkc-field', 'inspector-mention');
+        const go = document.createElement('button');
+        go.type = 'button';
+        go.setAttribute('data-pkc-action', 'select-entry');
+        go.setAttribute('data-pkc-entry', it.lid);
+        go.setAttribute('data-pkc-field', 'inspector-mention-note');
+        go.textContent = state.entryMetas.get(it.lid)!.title;
+        const n = document.createElement('span');
+        n.setAttribute('data-pkc-field', 'inspector-mention-count');
+        n.textContent = `${it.count} か所`;
+        const make = document.createElement('button');
+        make.type = 'button';
+        make.setAttribute('data-pkc-action', 'link-mentions');
+        make.setAttribute('data-pkc-entry', it.lid);
+        make.setAttribute('data-pkc-field', 'inspector-mention-link');
+        make.textContent = 'リンクにする';
+        make.title = `「${go.textContent}」の本文の ${it.count} か所を、このノートへのリンクにします(コードとリンクの中は変えません)`;
+        line.append(go, n, make);
+        menBox.append(line);
+      }
+      if (!empty && men!.truncated) {
+        const more = document.createElement('span');
+        more.setAttribute('data-pkc-field', 'inspector-mentions-more');
+        more.textContent = `ほかにもあります(${shown.length} 件まで出しています)`;
+        menBox.append(more);
+      }
+    }
     /**
      * 🔴 **つながりの図**(#186)。関係(4 種)に加えて、**本文が張っているリンク**も
      * 出す(段③)。
@@ -1943,6 +1985,12 @@ export class InspectorRenderer {
      *   (`browse.ts` の表:右 = 選んでいるもの)。
      */
     row('参照元', 'inspector-backlinks');
+    /**
+     * 🔴 **リンクのない言及**(#1966 4-1)── このノートの題名が、ほかのノートの本文に**ただの字として**出ている所。
+     *   「リンクにする」を押すと、そのノートの言及を全部 `[題名](entry:…)` に包む(包んだノートは上の「参照元」へ移る)。
+     * ⚠ 0 件・まだ引いていない・引けない版では**行ごと出さない**(右の列は混んでいる ── #500)。
+     */
+    row('リンクのない言及', 'inspector-mentions');
     /**
      * 🔴 **つながりの図**(#186 / 台帳 #180 の A-6)。
      *

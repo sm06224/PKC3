@@ -120,6 +120,8 @@ export const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   'replaceAssetRefs',
   // ⚠ **足し忘れると、他タブの本文が古いリンクの字のまま残る**(#1163 依頼 177)── 書き換えた先は書く前に分からない
   'renameLinkTexts',
+  // ⚠ **足し忘れると、他タブの本文が包む前の字のまま残る**(#1966 4-1)── 言及をリンクに包んだノートを書き換える
+  'linkMentions',
 ]);
 
 /**
@@ -167,6 +169,7 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'findAssetOwner',
   'assetShareProbe',
   'findBacklinks',
+  'findUnlinkedMentions',
   'getBodies',
   'getBody',
   'getRevision',
@@ -215,6 +218,9 @@ function changedLids(req: StorageRequest): string[] | null {
       return [req.lid];
     case 'bulkUpsertEntries':
       return req.entries.map((e) => e.lid);
+    // 言及をリンクに包むのは、包んだ 1 冊の本文だけ(#1966 4-1)
+    case 'linkMentions':
+      return [req.sourceLid];
     default:
       return null;
   }

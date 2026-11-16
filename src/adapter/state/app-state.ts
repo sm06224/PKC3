@@ -2139,6 +2139,11 @@ export interface AppState {
    */
   backlinks: { lid: string; lids: string[]; truncated: boolean; failed?: true } | null;
   /**
+   * 🔴 **リンクのない言及**(#1966 4-1)── このノートの題名がただの字として出ているノートと、その箇所の数。
+   * ⚠ `null` = まだ引いていない(行を出さない)。`backlinks` と同じく、選択が動いたらその場で捨てる。
+   */
+  mentions: { lid: string; items: Array<{ lid: string; count: number }>; truncated: boolean } | null;
+  /**
    * ランチャーのタイル(P7b 段⑩)。⚠ `null` = **まだ読んでいない**。
    * 元データは attachment の frontmatter で**常駐していない**ので、
    * ランチャーを開いたときに要求して還流させる(履歴一覧と同じ流儀)。
@@ -2479,6 +2484,7 @@ export const initialState: AppState = {
   snippetScan: null,
   persistState: 'unknown',
   backlinks: null,
+  mentions: null,
   launcherTiles: null,
   appGroupIcons: {},
   appGroupOrders: {},
@@ -3571,6 +3577,11 @@ export type UserAction =
    * ⚠ 直す前は条件が旧い名前のまま残り、変えた後に集まるノートが変わった(旧い名前を持つノートが
    *   もう無いので、スマートフォルダが空になる)。相手は**スマートフォルダ全部**(いま画面に出ている物とは限らない)。
    */
+  /**
+   * 🔴 **リンクのない言及をリンクに変える**(#1966 4-1)── `sourceLid` の本文の中の、`lid` の題名の言及を全部包む。
+   * ⚠ `lid` は撃つ側が解決する(押した後に選択が動いても、押した物に効く)。
+   */
+  | { type: 'LINK_MENTIONS'; lid: string; sourceLid: string }
   | {
       type: 'RENAME_SMART_TAG';
       from: string;
@@ -3890,6 +3901,8 @@ export type SystemCommand =
    * 分からないままのときは撃たない(state の初期値がそれである)。
    */
   | { type: 'PERSIST_STATE'; state: PersistState }
+  /** 🔴 リンクのない言及が届いた(#1966 4-1)。⚠ **どのノートの分か**を一緒に運ぶ(`BACKLINKS_LOADED` と同じ)。 */
+  | { type: 'MENTIONS_LOADED'; lid: string; items: Array<{ lid: string; count: number }>; truncated: boolean }
   /** 🔴 バックリンクが届いた(#348)。⚠ **どのノートの分か**を一緒に運ぶ。 */
   | {
       type: 'BACKLINKS_LOADED';
@@ -4647,6 +4660,8 @@ export type DomainEvent =
       entries: Array<{ lid: string; title: string; archetype: string; entryOrder: number }>;
     }
   /** 関係の永続化(#185)。⚠ 1 件ずつ ── 作る操作も消す操作も 1 度に 1 つである。 */
+  /** 🔴 言及をリンクに変える(`LINK_MENTIONS`。#1966 4-1)。 */
+  | { type: 'REQUEST_LINK_MENTIONS'; lid: string; sourceLid: string }
   | {
       /** 🔴 タグの名前の変更に、スマートフォルダの条件を合わせる(`RENAME_SMART_TAG`)。 */
       type: 'REQUEST_SMART_TAG_RENAME';
@@ -4844,6 +4859,7 @@ const SYSTEM_COMMAND_TYPES: Record<SystemCommand['type'], true> = {
   ENTRY_STAMPED: true,
   PERSIST_STATE: true,
   BACKLINKS_LOADED: true,
+  MENTIONS_LOADED: true,
   BODY_REWRITTEN: true,
   OP_FAILED: true,
   SYS_ERROR: true,
@@ -5211,9 +5227,11 @@ function reduceWithHistory(state: AppState, action: Dispatchable): ReduceResult 
    *   新しいノートの下に**前のノートのバックリンク**が数百 ms 出る。
    */
   let backlinks = result.state.backlinks;
+  let mentions = result.state.mentions;
   let events = result.events;
   if (result.state.selectedLid !== state.selectedLid) {
     backlinks = null;
+    mentions = null;
     if (result.state.selectedLid !== null)
       events = [...events, { type: 'REQUEST_BACKLINKS', lid: result.state.selectedLid }];
   }
@@ -5237,6 +5255,7 @@ function reduceWithHistory(state: AppState, action: Dispatchable): ReduceResult 
     history === result.state.selectionHistory &&
     dual === result.state.dual &&
     backlinks === result.state.backlinks &&
+    mentions === result.state.mentions &&
     fellBackNotice === null
   )
     return { state: result.state, events };
@@ -5246,6 +5265,7 @@ function reduceWithHistory(state: AppState, action: Dispatchable): ReduceResult 
       selectionHistory: history,
       dual,
       backlinks,
+      mentions,
       // ⚠ 別の知らせがこの回に出ていたら上書きしない(ゴミ箱へ移した直後の知らせは、自分で同じ一文を載せる)
       ...(fellBackNotice !== null && result.state.notice === state.notice
         ? { notice: fellBackNotice, noticeOpen: null, noticeCreate: null }
@@ -5499,6 +5519,7 @@ function reduceCore(
     case 'BODY_PERSISTED':
     case 'REMOTE_BODY_CHANGED':
     case 'BACKLINKS_LOADED':
+    case 'MENTIONS_LOADED':
     case 'PERSIST_STATE':
     case 'ENTRY_STAMPED':
       return reducePersisted(state, action);
@@ -5526,6 +5547,7 @@ function reduceCore(
     case 'REMOVE_RELATION':
     case 'BULK_TAG':
     case 'RENAME_SMART_TAG':
+    case 'LINK_MENTIONS':
       return reduceEntries(state, action);
     case 'SHOW_HISTORY':
     case 'PREVIEW_REVISION':
