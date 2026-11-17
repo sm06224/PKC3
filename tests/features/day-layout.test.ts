@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { itemOfCard, type AgendaItem } from '../../src/features/schedule/agenda';
 import {
+  scrollTopForMinutes,
   DAY_MINUTES,
   createSlot,
   dayHeading,
@@ -318,3 +319,13 @@ describe('空いた所をドラッグして作る計算(#855 段 B-2)', () => {
     expect(doubleClickSlot(-10, H)).toEqual({ startMin: 0, endMin: 30 });
   });
 });
+
+describe('最初に送る位置(#1966 3-4)', () => {
+  it('⚠ その時刻の線より 8px 上へ送る(目盛りの字の上半分を縁で切らない)。0:00 と端では負にしない', () => {
+    // 1 日 = 960px なら 1 時間 = 40px。8:00 の線は 320px
+    expect(scrollTopForMinutes(960, 8 * 60)).toBe(312);
+    expect(scrollTopForMinutes(960, 0)).toBe(0);
+    expect(scrollTopForMinutes(960, 5)).toBe(0);
+  });
+});
+

@@ -264,6 +264,20 @@ export function formatTimeRange(startMin: number, endMin: number): string {
 }
 
 /**
+ * 🔴 **時刻の字の上に空ける px**(#1966 3-4)── 目盛りの字は線の上へ半分ずらして置くので、
+ *   その時刻ちょうどへ送ると字の上半分が縁で切れていた(「8:00」が「8.UU」に見えた。390px 実測)。
+ */
+export const HOUR_LABEL_ROOM_PX = 8;
+
+/**
+ * その分の位置へ送るときの `scrollTop`(「日」と「週」で同じ 1 本)。0:00 は字を切らないので空けない。
+ */
+export function scrollTopForMinutes(scrollHeight: number, minutes: number): number {
+  if (minutes <= 0) return 0;
+  return Math.max(0, (scrollHeight * minutes) / DAY_MINUTES - HOUR_LABEL_ROOM_PX);
+}
+
+/**
  * 開いたとき最初に見せる位置(分)。
  * 最初の予定の 1 時間前 / 予定がなければ 8:00。
  */

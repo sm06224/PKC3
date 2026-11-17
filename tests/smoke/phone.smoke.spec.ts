@@ -1788,7 +1788,8 @@ test('🔴 スマホでは、表の升が押せることが字で出る (#750 I2
   await page.locator('[data-pkc-field="editor-title"]').fill('表');
   await page
     .locator('[data-pkc-field="editor-body"]')
-    .fill('| 品 | 数 |\n|---|---|\n| りんご | 3 |\n');
+    // ⚠ 見出しは目次の押しを出すため(下の #1966 3-4 の検査)
+    .fill('# 見出し\n\n| 品 | 数 |\n|---|---|\n| りんご | 3 |\n');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
   const table = page.locator('[data-pkc-field="detail-body"] table').first();
@@ -1831,6 +1832,30 @@ test('🔴 スマホでは、表の升が押せることが字で出る (#750 I2
     `合図が画面の右へはみ出している(right=${box.right} / 窓 ${box.vw})`,
   ).toBeLessThanOrEqual(box.vw);
   expect(box.overlaps, '升と縦に重なっている(押し所を削る)').toBe(false);
+
+  /**
+   * 🔴 **目次の押しが操作の帯のボタンに被さらない**(#1966 3-4。起動は増やさない)。
+   * ⚠ スマホ幅では帯が 3 段に折れる(実測 170px ほど)── 直す前は目次の押しが帯の上から 42px に
+   *   決め打ちで浮いており、「書式付きでコピー」の上に被さって押せなかった(390px 実測)。
+   * 🔑 観測点は**矩形の重なり**(目次の押しと帯の各ボタン)。⚠ `elementFromPoint` で中心だけを見ると、
+   *   端が数 px 被さる形(393px の実測で 2px)を通してしまう ── 端を押した指は目次に取られる。
+   */
+  await expect(page.locator('.pkc-quick-toc-btn'), '目次の押しが出ていない(検査の空振り)').toBeVisible();
+  const covered = await page.evaluate(() => {
+    const toc = document.querySelector('.pkc-quick-toc-btn')!.getBoundingClientRect();
+    const bar = document.querySelector('[data-pkc-region="detail"] [data-pkc-field="detail-bar-slot"]');
+    const buttons = bar ? [...bar.querySelectorAll('button')] : [];
+    const out: string[] = [];
+    for (const b of buttons) {
+      const r = b.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      const hit = toc.left < r.right && r.left < toc.right && toc.top < r.bottom && r.top < toc.bottom;
+      if (hit) out.push(`${(b.textContent ?? '').trim()} (${Math.round(r.top)}〜${Math.round(r.bottom)} / 目次 ${Math.round(toc.top)}〜)`);
+    }
+    return { n: buttons.length, out };
+  });
+  expect(covered.n, '帯のボタンが採れない(検査の空振り)').toBeGreaterThan(2);
+  expect(covered.out, '目次の押しが帯のボタンに被さっている').toEqual([]);
 
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });

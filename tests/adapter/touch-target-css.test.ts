@@ -60,10 +60,14 @@ describe('指の端末の押し所は 24px 以上(#706)', () => {
     ).toEqual([]);
   });
 
-  it('🔴 24px 未満だった押し所(月送り・2 ペインの ◀ ▶ ☆・割り当ての ×・目次の行・全文を開く)を下限へ上げている', () => {
+  it('🔴 24px 未満だった押し所(月送り・2 ペインの ◀ ▶ ☆・割り当ての ×・目次の行・全文を開く)・日送り・予定から外す × を下限へ上げている', () => {
     const list = rules(touch());
     const sels = [
       "[data-pkc-action='schedule-nav']",
+      // #1966 3-4(390px の実測で 13〜17px 幅): 日送り・週送り / 予定から外す × / 月の升の日付
+      "[data-pkc-action='schedule-day-go']",
+      "[data-pkc-field='task-unschedule']",
+      "[data-pkc-field='schedule-monthview-num']",
       "[data-pkc-action='dual-back']",
       "[data-pkc-action='dual-forward']",
       "[data-pkc-action='dual-bookmark']",

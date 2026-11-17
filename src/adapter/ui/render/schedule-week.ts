@@ -29,8 +29,8 @@
  */
 import type { AgendaItem } from '@features/schedule/agenda';
 import {
-  DAY_MINUTES,
   initialScrollMinutes,
+  scrollTopForMinutes,
   placeColumns,
   splitDay,
   weekColumnLabel,
@@ -304,7 +304,7 @@ export class ScheduleWeek {
   private applyScroll(settled: boolean = this.settledNow): void {
     this.settledNow = settled;
     if (this.pendingMin === null || this.scroller.clientHeight === 0) return;
-    this.scroller.scrollTop = (this.scroller.scrollHeight * this.pendingMin) / DAY_MINUTES;
+    this.scroller.scrollTop = scrollTopForMinutes(this.scroller.scrollHeight, this.pendingMin);
     this.lastSetTop = this.scroller.scrollTop;
     if (settled) this.pendingMin = null;
   }
