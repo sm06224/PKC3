@@ -318,8 +318,17 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   await expect(dayNext, '次の日のボタンが無い').toBeVisible();
   await expect(dayPrev, '前の日が無いのに押せる').toBeDisabled();
   await expect(dayNext, '次の日があるのに押せない').toBeEnabled();
+  // 🔴 #1966 4-4: 「前の日の未完了を引き継ぐ」── 前の日付のノートが無い日は押せない
+  const carry = page.locator('[data-pkc-field="detail-day-nav"] [data-pkc-action="carry-over-tasks"]');
+  await expect(carry, '前の日が無いのに引き継ぐボタンが押せる').toBeDisabled();
   await clickReal(page, '[data-pkc-field="detail-day-nav"] [data-pkc-action="open-adjacent-day"][data-pkc-dir="next"]');
   await expect(page.locator('[data-pkc-field="detail-title"]'), '次の日へ移らない').toContainText('2026-10-16');
+  // 前の日(2026-10-15)に未完了は無い ── 押すと worker を通って「ありません」と言う(黙らない。本文は変えない)
+  await expect(carry, '前の日があるのに引き継ぐボタンが押せない').toBeEnabled();
+  await clickReal(page, '[data-pkc-field="detail-day-nav"] [data-pkc-action="carry-over-tasks"]');
+  await expect(page.locator('[data-pkc-region="status"]'), '未完了が無いのに何も言わない').toContainText(
+    '2026-10-15 に引き継ぐ未完了はありません',
+  );
   await clickReal(page, '[data-pkc-field="detail-day-nav"] [data-pkc-action="open-adjacent-day"][data-pkc-dir="prev"]');
   await expect(page.locator('[data-pkc-field="detail-title"]'), '前の日へ戻れない').toContainText('2026-10-15');
   // ⚠ 右の列は開いた直後に「参照元」(worker から届く)で後から伸びる ── 実測で

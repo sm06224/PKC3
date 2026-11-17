@@ -403,7 +403,9 @@ describe('② 書込のたびに state の meta が更新される', () => {
       // ⚠ 改名のときのリンクの字の書き換えも、ほかのノートの行を 1 往復で N 件書く(#1648 / 依頼 177)── 刻みは同じく 1 か所
       [...src.matchAll(/await store\.renameLinkTexts\(/g)].length +
       // ⚠ 言及をリンクに包むのも、相手の 1 行を worker の 1 tx で書く(#1966 4-1)── 刻みは返ってきた行で 1 か所
-      [...src.matchAll(/await store\.linkMentions\?\.\(/g)].length;
+      [...src.matchAll(/await store\.linkMentions\?\.\(/g)].length +
+      // ⚠ 前の日の未完了の引き継ぎも、2 冊を worker の 1 tx で書く(#1966 4-4)── 刻みは返ってきた行を回して 1 か所
+      [...src.matchAll(/await store\.carryOverTasks\?\.\(/g)].length;
     const stamps = [...src.matchAll(/^\s*stamp\(/gm)].length;
     expect(writes, '書込経路が 1 つも見つからない(scan が壊れている)').toBeGreaterThanOrEqual(7);
     expect(

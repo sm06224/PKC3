@@ -7364,6 +7364,23 @@ export function runGlobalCommand(
     return true;
   }
   /**
+   * 🔴 **前の日の未完了を引き継ぐ**(#1966 4-4)── 日付ノートの上のボタンと同じ `carryOverPlan` の 1 本で決める。
+   * ⚠ 断りは `dry` では偽(= 一覧は理由を言って押せるふりをしない)。
+   */
+  if (cmd === 'carry-over-tasks') {
+    const plan = carryOverPlan(dispatcher.getState());
+    if ('why' in plan) {
+      if (dry) return false;
+      prevent();
+      notify(plan.why, CAUTION);
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    dispatcher.dispatch({ type: 'CARRY_OVER_TASKS', lid: plan.lid, sourceLid: plan.sourceLid });
+    return true;
+  }
+  /**
    * 🔴 **このノートを Markdown で書き出す**(#1440)── 押しボタンを持たないので特例で直に呼ぶ。
    * 実体は右クリックの `export-entry-markdown` と同じ `services.exportEntryMarkdown`(`ROOT_SERVICES` から引く)。
    * ⚠ 断りは 3 段で、どれも `dry` では偽(= 一覧は「いまは押せません ── <理由>」で押せるふりをしない):
@@ -7804,7 +7821,7 @@ export function commandRowsFor(
     // ⚠ 「メッセージを開く」は押しボタンを持たない(左の列の同名は別の口)── 理由は
     //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
     //   「字幕ファイル(.srt)で書き出す」(#1447)も同じ(押しボタンを持たない)── 時刻つきの行が無い理由は `note` が言う
-    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'embed-transcript-srt' || id === 'export-note-markdown' || id === 'export-note-pdf' || id === 'open-prev-day-note' || id === 'open-next-day-note' || id === 'diff-with-history' || id === 'open-in-sql') return blockedActionNote(dispatcher.getState().phase);
+    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'embed-transcript-srt' || id === 'export-note-markdown' || id === 'export-note-pdf' || id === 'open-prev-day-note' || id === 'open-next-day-note' || id === 'diff-with-history' || id === 'open-in-sql' || id === 'carry-over-tasks') return blockedActionNote(dispatcher.getState().phase);
     // 「選択範囲をコピー」── 控えが無いときの理由(押しボタンを持たない)。左の `>` の一覧では選択が残らないので、呼べる道を言う
     if (id === 'copy-selection-md')
       return inPalette ? SELECTION_FIRST : `${SELECTION_FIRST}(選択してから「操作を探す」を開いてください)`;
@@ -9590,6 +9607,21 @@ function refreshLab(
 }
 
 /** 「今日」の本体(`open-today` / `open-today-as` の共通の 1 本)。`archetype` は無い日に作る種類。 */
+/**
+ * 🔴 **前の日の未完了を引き継ぐ相手を決める**(#1966 4-4)── 日付ノートの上のボタンと「操作を探す」の 2 つの口が呼ぶ 1 本(§7)。
+ * 写す先は開いている日付のノート、写す元は `adjacentDateNote` の前の日(「‹ 前の日」と同じ行き先)。
+ */
+export function carryOverPlan(st: AppState): { lid: string; sourceLid: string } | { why: string } {
+  const blocked = blockedActionNote(st.phase);
+  if (blocked !== null) return { why: `いまは引き継げません: ${blocked}` };
+  const cur = st.selectedLid === null ? undefined : st.entryMetas.get(st.selectedLid);
+  if (cur === undefined || !isDateTitle(cur.title))
+    return { why: '題名が日付(2026-10-15 の形)のノートを開いてから呼んでください' };
+  const prev = adjacentDateNote(st.entryMetas.values(), cur.title, 'prev');
+  if (prev === null) return { why: 'これより前の日付のノートはありません' };
+  return { lid: cur.lid, sourceLid: prev.lid };
+}
+
 function openToday(
   dispatcher: Dispatcher,
   services: BinderServices,
@@ -11021,6 +11053,18 @@ const ACTIONS: Record<string, ActionHandler> = {
     const to = adjacentDateNote(st.entryMetas.values(), cur.title, dir);
     if (to === null) return;
     dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: to.lid });
+  },
+  /**
+   * 🔴 **日付ノートの上の「前の日の未完了を引き継ぐ」**(#1966 4-4)。判定は「操作を探す」と同じ `carryOverPlan` の 1 本。
+   * ⚠ 断るときは理由を出す(黙ると押しても何も起きない dead click になる)。
+   */
+  'carry-over-tasks': (dispatcher) => {
+    const plan = carryOverPlan(dispatcher.getState());
+    if ('why' in plan) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: plan.why });
+      return;
+    }
+    dispatcher.dispatch({ type: 'CARRY_OVER_TASKS', lid: plan.lid, sourceLid: plan.sourceLid });
   },
   /**
    * 🔴 **「今日」で作る種類を選んで開く**(#1640 項 1。推薦 B =「▼ に『今日をログで開く』+ 選んだ種類を覚える」)。

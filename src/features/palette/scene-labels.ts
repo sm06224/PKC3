@@ -73,6 +73,7 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'open-next-day-note': NOTE,
   'diff-with-history': APP,
   'open-in-sql': APP,
+  'carry-over-tasks': NOTE,
   'open-recent': NOTE,
   'open-copy-history': NOTE,
   'open-note-window': NOTE,

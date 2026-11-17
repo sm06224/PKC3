@@ -26,7 +26,7 @@ import { STRUCTURAL } from '@features/relation/kinds';
 import { reorderSibling, structuralParentsLookup, wouldMakeCycle } from '@features/relation/tree';
 import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 
-export type EntriesAction = Extract<Dispatchable, { type: 'CREATE_ENTRY' | 'DELETE_ENTRY' | 'DELETE_ENTRIES' | 'RENAME_ENTRY_TITLE' | 'SET_ENTRY_ARCHETYPE' | 'SET_ENTRY_PARENT' | 'SET_ENTRY_ORDER' | 'MOVE_ENTRY_ORDER' | 'ADD_RELATION' | 'SET_ENTRY_ARCHETYPE_ROLLBACK' | 'ROLLBACK_ENTRY_PARENT' | 'ROLLBACK_RELATION' | 'REMOVE_RELATION' | 'BULK_TAG' | 'RENAME_SMART_TAG' | 'LINK_MENTIONS' }>;
+export type EntriesAction = Extract<Dispatchable, { type: 'CREATE_ENTRY' | 'DELETE_ENTRY' | 'DELETE_ENTRIES' | 'RENAME_ENTRY_TITLE' | 'SET_ENTRY_ARCHETYPE' | 'SET_ENTRY_PARENT' | 'SET_ENTRY_ORDER' | 'MOVE_ENTRY_ORDER' | 'ADD_RELATION' | 'SET_ENTRY_ARCHETYPE_ROLLBACK' | 'ROLLBACK_ENTRY_PARENT' | 'ROLLBACK_RELATION' | 'REMOVE_RELATION' | 'BULK_TAG' | 'RENAME_SMART_TAG' | 'LINK_MENTIONS' | 'CARRY_OVER_TASKS' }>;
 
 export function reduceEntries(state: AppState, action: EntriesAction): ReduceResult {
   switch (action.type) {
@@ -603,6 +603,16 @@ export function reduceEntries(state: AppState, action: EntriesAction): ReduceRes
       if (state.phase !== 'ready') return { state, events: [] };
       if (action.lid === action.sourceLid || !state.entryMetas.has(action.sourceLid)) return { state, events: [] };
       return { state, events: [{ type: 'REQUEST_LINK_MENTIONS', lid: action.lid, sourceLid: action.sourceLid }] };
+    }
+    /**
+     * 🔴 **前の日の未完了を引き継ぐ**(#1966 4-4)。⚠ 編集中は撃たない(2 冊の本文を書き換えるので、編集中の字と食い違う
+     *   ── 断りの字は撃つ側 `binder.ts` が出す)。どちらかが一覧に居なければ何もしない。
+     */
+    case 'CARRY_OVER_TASKS': {
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (action.lid === action.sourceLid || !state.entryMetas.has(action.lid) || !state.entryMetas.has(action.sourceLid))
+        return { state, events: [] };
+      return { state, events: [{ type: 'REQUEST_CARRY_OVER_TASKS', lid: action.lid, sourceLid: action.sourceLid }] };
     }
   }
 }

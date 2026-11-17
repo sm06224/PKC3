@@ -130,6 +130,9 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
     /** 🔴 言及をリンクに変える(#1966 4-1)。走査も書込も worker の 1 tx。 */
     linkMentions: (lid, sourceLid) =>
       client.request({ op: 'linkMentions', cid, lid, sourceLid, keepLatest: REVISION_KEEP_LATEST }),
+    /** 🔴 前の日の未完了を引き継ぐ(#1966 4-4)。2 冊の走査も書込も worker の 1 tx。 */
+    carryOverTasks: (lid, sourceLid) =>
+      client.request({ op: 'carryOverTasks', cid, lid, sourceLid, keepLatest: REVISION_KEEP_LATEST }),
     /**
      * 集計(#184)。⚠ ここも**渡すだけ** ── 束ね方(並び・上限)の規則は
      * `features/query/group-by.ts` が 1 か所で持つ(PKC2 は描画関数の中に

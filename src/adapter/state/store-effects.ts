@@ -222,6 +222,11 @@ export interface StorePort {
   findBacklinks?(lid: string): Promise<{ lids: string[]; truncated: boolean }>;
   /** 🔴 リンクのない言及(#1966 4-1)。⚠ **optional**(古い worker・test の fake では行ごと出さない)。 */
   findUnlinkedMentions?(lid: string): Promise<{ items: Array<{ lid: string; count: number }>; truncated: boolean }>;
+  /** 🔴 前の日の未完了を引き継ぐ(#1966 4-4)。⚠ **optional**。 */
+  carryOverTasks?(
+    lid: string,
+    sourceLid: string,
+  ): Promise<{ wrote: Array<{ lid: string; body: string; stamps: EntryStamps }>; moved: number }>;
   /** 🔴 言及をリンクに変える(#1966 4-1)。⚠ **optional**。 */
   linkMentions?(
     lid: string,
@@ -3446,6 +3451,38 @@ export function connectStoreEffects(
           }
           if (!disposed && dispatcher.getState().selectedLid === ev.lid)
             requestBacklinks(ev.lid);
+        });
+        break;
+      }
+      /**
+       * 🔴 **前の日の未完了を引き継ぐ**(#1966 4-4)。⚠ 2 冊の走査と書込は worker の 1 tx。書込の列(`enqueue`)に並べる
+       *   (並んでいる保存を追い越して、保存前の本文から写さない)。終わったら開いている本文を差し替え、知らせる。
+       */
+      case 'REQUEST_CARRY_OVER_TASKS': {
+        if (store.carryOverTasks === undefined) {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: 'このバージョンでは引き継げません(再読み込みすると使えます)' });
+          break;
+        }
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const r = await store.carryOverTasks?.(ev.lid, ev.sourceLid);
+            if (disposed || r === undefined) return;
+            dispatcher.batch(() => {
+              for (const w of r.wrote) {
+                stamp(w.lid, w.stamps);
+                dispatcher.dispatch({ type: 'ENTRY_BODY_REFRESHED', lid: w.lid, body: w.body });
+              }
+            });
+            const from = dispatcher.getState().entryMetas.get(ev.sourceLid)?.title ?? '';
+            dispatcher.dispatch(
+              r.moved > 0
+                ? { type: 'OP_NOTICE', message: `${from} の未完了 ${r.moved} 件を引き継ぎました(履歴から元に戻せます)` }
+                : { type: 'OP_NOTICE', message: `${from} に引き継ぐ未完了はありません` },
+            );
+          } catch (e) {
+            if (!disposed) dispatcher.dispatch({ type: 'OP_FAILED', error: `引き継げませんでした: ${errorText(e)}` });
+          }
         });
         break;
       }

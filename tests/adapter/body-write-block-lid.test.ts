@@ -561,15 +561,18 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
    * ⑪ 🔴 **`LINK_MENTIONS`(#1966 4-1)は押し口が先に理由を出す** ── 右の列の「リンクにする」は、編集中なら
    *    `phaseBlockReason` の字で断ってから止まる(`binder.ts` の `link-mentions`)。書き換えるのは**選んでいる
    *    ノートではない**相手の本文で、走査と書込は worker の 1 tx が持つ。reducer の黙りは dead click にならない
+   * ⑫ 🔴 **`CARRY_OVER_TASKS`(#1966 4-4)は `LINK_MENTIONS` と同じ側** ── 日付ノートの上のボタンと「操作を探す」は、
+   *    編集中なら `carryOverPlan` の理由(`blockedActionNote`)で断ってから止まる。2 冊の走査と書込は worker の 1 tx
    * ⚠ このリストが増減したら、それは①C6 の対象を増やした ②既存の case を
    *   書き換えた、のどちらかである ── どちらでもここを書き直す。
    */
-  it('残り 34 件は変わっていない(増減があれば、この一覧を見直す)', () => {
+  it('残り 35 件は変わっていない(増減があれば、この一覧を見直す)', () => {
     const silent = silentPhaseOnlyCases(STATE);
     const known = [
       'ADD_RELATION',
       'ASK_TAG_SUGGESTIONS',
       'BULK_TAG',
+      'CARRY_OVER_TASKS',
       'DELETE_ENTRIES',
       'DELETE_ENTRY',
       'DESELECT_ENTRY',

@@ -42,4 +42,21 @@ export function paintDayNav(
     }
     host.append(b);
   }
+  /**
+   * 🔴 **前の日の未完了を引き継ぐ**(#1966 4-4)── 「‹ 前の日」と同じ行き先(いちばん近い前の日付のノート)から写す。
+   * ⚠ 前の日付のノートが無いときは押せない形で出す。⚠ 未完了の有無は本文を読まないと分からないので、ここでは見ない
+   *   (押して 0 件なら「引き継ぐ未完了はありません」と言う ── 黙らない)。
+   */
+  const prev = adjacentDateNote(metas.values(), title, 'prev');
+  const carry = document.createElement('button');
+  carry.type = 'button';
+  carry.setAttribute('data-pkc-action', 'carry-over-tasks');
+  carry.textContent = '前の日の未完了を引き継ぐ';
+  if (prev === null) {
+    carry.disabled = true;
+    carry.title = 'これより前の日付のノートはありません';
+  } else {
+    carry.title = `${prev.title} の未完了のチェック項目をこのノートの末尾に加え、${prev.title} の行は取り消し線とこのノートへのリンクに変えます`;
+  }
+  host.append(carry);
 }

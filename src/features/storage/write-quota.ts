@@ -82,6 +82,8 @@ export const QUOTA_BLOCKED_OPS: readonly string[] = [
   'renameLinkTexts',
   // 言及をリンクに包む(#1966 4-1)── 本文を書き換え、履歴に 1 版積む(増える側)。断られたら字が旧いまま残る
   'linkMentions',
+  // 前の日の未完了を引き継ぐ(#1966 4-4)── 2 冊の本文を書き換え、履歴に 1 版ずつ積む(増える側)
+  'carryOverTasks',
   'importRevisionChains',
   'restoreRevisionChains',
   'restoreTrashNotes',

@@ -122,6 +122,8 @@ export const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   'renameLinkTexts',
   // ⚠ **足し忘れると、他タブの本文が包む前の字のまま残る**(#1966 4-1)── 言及をリンクに包んだノートを書き換える
   'linkMentions',
+  // ⚠ **足し忘れると、他タブの本文が引き継ぐ前のまま残る**(#1966 4-4)── 前の日と今日の 2 冊を書き換える
+  'carryOverTasks',
 ]);
 
 /**
@@ -221,6 +223,9 @@ function changedLids(req: StorageRequest): string[] | null {
     // 言及をリンクに包むのは、包んだ 1 冊の本文だけ(#1966 4-1)
     case 'linkMentions':
       return [req.sourceLid];
+    // 前の日の未完了の引き継ぎは、前の日と今日の 2 冊(#1966 4-4)
+    case 'carryOverTasks':
+      return [req.sourceLid, req.lid];
     default:
       return null;
   }

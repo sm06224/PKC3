@@ -77,6 +77,7 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   'replaceAssetRefs',
   'renameLinkTexts',
   'linkMentions',
+  'carryOverTasks',
   'importRevisionChains',
   'restoreRevisionChains',
   'restoreTrashNotes',
