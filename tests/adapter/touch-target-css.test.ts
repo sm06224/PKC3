@@ -64,10 +64,10 @@ describe('指の端末の押し所は 24px 以上(#706)', () => {
     const list = rules(touch());
     const sels = [
       "[data-pkc-action='schedule-nav']",
-      // #1966 3-4(390px の実測で 13〜17px 幅): 日送り・週送り / 予定から外す × / 月の週番号
+      // #1966 3-4(390px の実測で 13〜17px 幅): 日送り・週送り / 予定から外す × / 月の升の日付
       "[data-pkc-action='schedule-day-go']",
       "[data-pkc-field='task-unschedule']",
-      "[data-pkc-action='schedule-week-pick']",
+      "[data-pkc-field='schedule-monthview-num']",
       "[data-pkc-action='dual-back']",
       "[data-pkc-action='dual-forward']",
       "[data-pkc-action='dual-bookmark']",

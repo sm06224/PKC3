@@ -2044,7 +2044,12 @@ test('🔴 予定の「月」: 左の列から別ウィンドウで開き、題�
       ? [...scroll.querySelectorAll('[data-pkc-field="schedule-weekview-hour"] > span')].map((s) => s.getBoundingClientRect())
       : [];
     const firstShown = labels.find((r) => r.bottom > top);
+    const line = cell?.querySelector('[data-pkc-field="line"]');
+    const box = cell?.querySelector('input');
     return {
+      clamp: text ? getComputedStyle(text).webkitLineClamp : null,
+      // 列が細いときは字が 2 段目(印の下)
+      lineBelowBox: line && box ? line.getBoundingClientRect().top >= box.getBoundingClientRect().bottom - 1 : null,
       cardW: Math.round(cell?.getBoundingClientRect().width ?? 0),
       textW: Math.round(text?.getBoundingClientRect().width ?? 0),
       menuShown: menu ? getComputedStyle(menu).display !== 'none' : null,
@@ -2057,7 +2062,23 @@ test('🔴 予定の「月」: 左の列から別ウィンドウで開き、題�
   expect(narrow.menuShown, '週の升に「⋯」が出ている(週・月の升には置かない)').toBe(false);
   expect(narrow.scrolled, `目盛りが送られていない(検査の空振り): ${JSON.stringify(narrow)}`).toBeGreaterThan(0);
   expect(narrow.labelCut, `最初に見える時刻の字が上の縁で切れている: ${JSON.stringify(narrow)}`).toBeLessThanOrEqual(0);
-  await win.setViewportSize({ width: 1100, height: 800 });
+  expect(narrow.clamp, '終日の札の字を 3 行で切っていない(長い題名で札が伸び続ける)').toBe('3');
+  expect(narrow.lineBelowBox, `細い列で字が 2 段目に下りていない: ${JSON.stringify(narrow)}`).toBe(true);
+  await win.setViewportSize({ width: 1920, height: 800 });
+  // ⚠ 対照群: 広い列(1 日 150px 以上)では今までどおり 1 行 ── 札の背を倍にしない(着地前レビュー)
+  const wide = await win.evaluate(() => {
+    const cell = document.querySelector(
+      '[data-pkc-view-pane="schedule"] [data-pkc-field="schedule-weekview-allday-cell"] > [data-pkc-entry]',
+    );
+    const line = cell?.querySelector('[data-pkc-field="line"]');
+    const box = cell?.querySelector('input');
+    return {
+      colW: Math.round(cell?.parentElement?.getBoundingClientRect().width ?? 0),
+      sameRow: line && box ? line.getBoundingClientRect().top < box.getBoundingClientRect().bottom : null,
+    };
+  });
+  expect(wide.colW, `広い列になっていない(対照群の空振り): ${JSON.stringify(wide)}`).toBeGreaterThan(140);
+  expect(wide.sameRow, `広い列なのに字が 2 段目へ下りている: ${JSON.stringify(wide)}`).toBe(true);
 
   /**
    * 🔴 **本体で別のノートを保存しても、別ウィンドウの予定表は空表(「予定を集めています…」)へ戻らない**(#1087。起動は増やさない)。

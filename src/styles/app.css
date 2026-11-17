@@ -7865,20 +7865,18 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   min-width: 0;
   border-left: 1px solid var(--border);
 }
-/* 🔴 **週の終日の札は字に幅を渡す**(#1966 3-4)── 1 日の列は 80px ほどしかなく、一覧と同じ 1 行の格子
+/* 🔴 **週の終日の札は字に幅を渡す**(#1966 3-4)── 1 日の列は細い窓では 80px ほどしかなく、一覧と同じ 1 行の格子
  *   (印・字・×・⋯)のままだと、字の列が 1 字ぶんまで潰れて「と / て / も …」と 1 字ずつ縦に折れていた
  *   (390px の別ウィンドウ・800px の別ウィンドウの両方で実測)。
- * 🔑 1 段目に印と ×、2 段目に字を列の幅いっぱいに置き、字は 3 行で切る。
+ * 🔑 **列が細いときだけ**(`@container` で列の幅を見る)1 段目に印と ×、2 段目に字を列の幅いっぱいに置く。
+ *   広い列では今までどおり 1 行(札の背を倍にしない ── 着地前レビュー)。字はどちらも 3 行で切る。
  * ⚠ 「⋯」は出さない ── `task-card.ts` の注釈どおり週・月の升には置かない(長押しのメニューは従来どおり)。
  *   出どころのノート名も出さない(時刻のある札 `schedule-weekview-lane` と同じ扱い)。 */
+[data-pkc-field='schedule-weekview-allday-cell'] {
+  container: pkc-week-allday / inline-size;
+}
 [data-pkc-field='schedule-weekview-allday-cell'] > [data-pkc-entry] {
   grid-template-columns: auto 1fr auto;
-}
-[data-pkc-field='schedule-weekview-allday-cell'] > [data-pkc-entry] > [data-pkc-field='line'] {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  flex-wrap: wrap;
-  gap: 0 var(--s1);
 }
 [data-pkc-field='schedule-weekview-allday-cell'] [data-pkc-field='text'] {
   display: -webkit-box;
@@ -7891,6 +7889,14 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='schedule-weekview-allday-cell'] [data-pkc-field='task-menu'],
 [data-pkc-field='schedule-weekview-allday-cell'] [data-pkc-field='note'] {
   display: none;
+}
+@container pkc-week-allday (max-width: 140px) {
+  [data-pkc-field='schedule-weekview-allday-cell'] > [data-pkc-entry] > [data-pkc-field='line'] {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    flex-wrap: wrap;
+    gap: 0 var(--s1);
+  }
 }
 [data-pkc-field='schedule-weekview-scroll'] {
   max-height: 22rem;
@@ -11410,10 +11416,11 @@ h3[data-pkc-section] {
   /* ⑦ **月送り ‹ › / 2 ペインの ◀ ▶ ☆ / 割り当ての × / ヘルプの目次の行 / 「全文を開く」**
    *    (#1087 の実機確認)。素の寸法が 24px 未満だった押し所を 24px の下限へ。 */
   [data-pkc-action='schedule-nav'],
-  /* ⑧ **予定の日送り・週送り ‹ › / 予定から外す × / 月の週番号**(#1966 3-4。390px の実測で 13〜17px 幅) */
+  /* ⑧ **予定の日送り・週送り ‹ › / 予定から外す × / 月の升の日付**(#1966 3-4。390px の実測で 13〜17px 幅)。
+   *    ⚠ 時刻の目盛りの上の札の × は下で 0 へ戻す(札の背が 20px ほどで、24px にすると字と × が欠ける) */
   [data-pkc-action='schedule-day-go'],
   [data-pkc-field='task-unschedule'],
-  [data-pkc-action='schedule-week-pick'],
+  [data-pkc-field='schedule-monthview-num'],
   [data-pkc-action='dual-back'],
   [data-pkc-action='dual-forward'],
   [data-pkc-action='dual-bookmark'],
@@ -11423,6 +11430,15 @@ h3[data-pkc-section] {
   [data-pkc-oss] summary {
     min-width: 24px;
     min-height: 24px;
+  }
+  /* ⚠ 時刻の目盛りの上の札は背が 20px ほど(30 分)── 高さの下限は外す(× が欠ける)。
+   *    週の列は 1 日が 50px ほどなので幅の下限も外す(字の列を削らない ── 着地前レビュー)。日の列は広いので幅は 24px のまま */
+  [data-pkc-field='schedule-day-lane'] [data-pkc-field='task-unschedule'],
+  [data-pkc-field='schedule-weekview-lane'] [data-pkc-field='task-unschedule'] {
+    min-height: 0;
+  }
+  [data-pkc-field='schedule-weekview-lane'] [data-pkc-field='task-unschedule'] {
+    min-width: 0;
   }
 }
 
