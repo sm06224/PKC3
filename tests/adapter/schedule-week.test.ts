@@ -409,7 +409,7 @@ describe('「週」の最初に見せる位置', () => {
     Object.defineProperty(scroller, 'scrollHeight', { value: 960, configurable: true });
     showWeek();
     // 予定が無いので 8:00(まだ確定していない)
-    expect(scroller.scrollTop).toBe(320);
+    expect(scroller.scrollTop).toBe(320 - 8); // ⚠ 時刻の字の上に 8px 空ける(#1966 3-4)
     scroller.scrollTop = 77;
     scroller.dispatchEvent(new Event('scroll'));
     scan();
@@ -425,12 +425,12 @@ describe('「週」の最初に見せる位置', () => {
     Object.defineProperty(scroller, 'clientHeight', { value: 300, configurable: true });
     Object.defineProperty(scroller, 'scrollHeight', { value: 960, configurable: true });
     showWeek();
-    expect(scroller.scrollTop).toBe(320);
+    expect(scroller.scrollTop).toBe(320 - 8); // ⚠ 時刻の字の上に 8px 空ける(#1966 3-4)
     scan();
     // 14:00 の 1 時間前 = 13:00 → 960 * 780 / 1440
-    expect(scroller.scrollTop).toBe(520);
+    expect(scroller.scrollTop).toBe(520 - 8);
     press('[data-pkc-field="schedule-weekview-next"]');
-    expect(scroller.scrollTop, '週を変えたのに最初の位置を当て直していない').toBe(320);
+    expect(scroller.scrollTop, '週を変えたのに最初の位置を当て直していない').toBe(320 - 8); // ⚠ 時刻の字の上に 8px 空ける(#1966 3-4)
   });
 });
 

@@ -2027,6 +2027,39 @@ test('🔴 予定の「月」: 左の列から別ウィンドウで開き、題�
   expect(w.pageHeight as number, `週が A4 縦(約 1120px)に収まらない: ${JSON.stringify(w)}`).toBeLessThanOrEqual(1120);
 
   /**
+   * 🔴 **細い別ウィンドウ(420px)の「週」で、終日の札の字が潰れない / 目盛りの字が縁で切れない**(#1966 3-4。起動は増やさない)。
+   * ⚠ 直す前は 1 日の列(80px)に印・字・×・⋯ が 1 行に並び、字の列が 1 字ぶんまで潰れて「と / て / も」と
+   *   1 字ずつ縦に折れていた。目盛りは 8:00 の線ちょうどへ送るので、「8:00」の上半分が縁で切れていた。
+   */
+  await win.setViewportSize({ width: 420, height: 720 });
+  const narrow = await win.evaluate(() => {
+    const cell = document.querySelector(
+      '[data-pkc-view-pane="schedule"] [data-pkc-field="schedule-weekview-allday-cell"] > [data-pkc-entry]',
+    );
+    const text = cell?.querySelector('[data-pkc-field="text"]');
+    const menu = cell?.querySelector('[data-pkc-field="task-menu"]');
+    const scroll = document.querySelector('[data-pkc-view-pane="schedule"] [data-pkc-field="schedule-weekview-scroll"]');
+    const top = scroll?.getBoundingClientRect().top ?? NaN;
+    const labels = scroll
+      ? [...scroll.querySelectorAll('[data-pkc-field="schedule-weekview-hour"] > span')].map((s) => s.getBoundingClientRect())
+      : [];
+    const firstShown = labels.find((r) => r.bottom > top);
+    return {
+      cardW: Math.round(cell?.getBoundingClientRect().width ?? 0),
+      textW: Math.round(text?.getBoundingClientRect().width ?? 0),
+      menuShown: menu ? getComputedStyle(menu).display !== 'none' : null,
+      scrolled: scroll?.scrollTop ?? 0,
+      labelCut: firstShown ? Math.round(top - firstShown.top) : null,
+    };
+  });
+  expect(narrow.cardW, `終日の札が採れない(検査の空振り): ${JSON.stringify(narrow)}`).toBeGreaterThan(0);
+  expect(narrow.textW, `終日の札の字の幅が潰れている: ${JSON.stringify(narrow)}`).toBeGreaterThan(narrow.cardW * 0.6);
+  expect(narrow.menuShown, '週の升に「⋯」が出ている(週・月の升には置かない)').toBe(false);
+  expect(narrow.scrolled, `目盛りが送られていない(検査の空振り): ${JSON.stringify(narrow)}`).toBeGreaterThan(0);
+  expect(narrow.labelCut, `最初に見える時刻の字が上の縁で切れている: ${JSON.stringify(narrow)}`).toBeLessThanOrEqual(0);
+  await win.setViewportSize({ width: 1100, height: 800 });
+
+  /**
    * 🔴 **本体で別のノートを保存しても、別ウィンドウの予定表は空表(「予定を集めています…」)へ戻らない**(#1087。起動は増やさない)。
    *   ⚠ 直す前は本体の保存のたびに窓の予定が一度捨てられる ── 最後に集め直されて元へ戻るので、
    *   終わりの姿では見分けられない。**途中の姿**を見張りで拾う(窓の中の MutationObserver)。

@@ -387,7 +387,7 @@ describe('予定の面の「一覧 / 日」', () => {
     Object.defineProperty(scroller, 'scrollHeight', { value: 960, configurable: true });
     showDay();
     // 予定が無いので 8:00(まだ確定していない)
-    expect(scroller.scrollTop).toBe(320);
+    expect(scroller.scrollTop).toBe(320 - 8); // ⚠ 時刻の字の上に 8px 空ける(#1966 3-4)
     scroller.scrollTop = 77;
     scroller.dispatchEvent(new Event('scroll'));
     scan();
@@ -402,12 +402,12 @@ describe('予定の面の「一覧 / 日」', () => {
     Object.defineProperty(scroller, 'scrollHeight', { value: 960, configurable: true });
     showDay();
     // 14:00 の 1 時間前 = 13:00 → 960 * 780 / 1440
-    expect(scroller.scrollTop).toBe(520);
+    expect(scroller.scrollTop).toBe(520 - 8);
     scroller.scrollTop = 77;
     d.dispatch({ type: 'TOGGLE_SHOW_DONE_TASKS' });
     expect(scroller.scrollTop, '無関係な描き直しで位置が戻された').toBe(77);
     // 日を変えたら、その日の最初の位置へ(予定の無い日は 8:00)
     d.dispatch({ type: 'SET_SCHEDULE_DAY', date: '2026-08-24' });
-    expect(scroller.scrollTop).toBe(320);
+    expect(scroller.scrollTop).toBe(320 - 8); // ⚠ 時刻の字の上に 8px 空ける(#1966 3-4)
   });
 });

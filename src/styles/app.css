@@ -7865,6 +7865,33 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   min-width: 0;
   border-left: 1px solid var(--border);
 }
+/* 🔴 **週の終日の札は字に幅を渡す**(#1966 3-4)── 1 日の列は 80px ほどしかなく、一覧と同じ 1 行の格子
+ *   (印・字・×・⋯)のままだと、字の列が 1 字ぶんまで潰れて「と / て / も …」と 1 字ずつ縦に折れていた
+ *   (390px の別ウィンドウ・800px の別ウィンドウの両方で実測)。
+ * 🔑 1 段目に印と ×、2 段目に字を列の幅いっぱいに置き、字は 3 行で切る。
+ * ⚠ 「⋯」は出さない ── `task-card.ts` の注釈どおり週・月の升には置かない(長押しのメニューは従来どおり)。
+ *   出どころのノート名も出さない(時刻のある札 `schedule-weekview-lane` と同じ扱い)。 */
+[data-pkc-field='schedule-weekview-allday-cell'] > [data-pkc-entry] {
+  grid-template-columns: auto 1fr auto;
+}
+[data-pkc-field='schedule-weekview-allday-cell'] > [data-pkc-entry] > [data-pkc-field='line'] {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  flex-wrap: wrap;
+  gap: 0 var(--s1);
+}
+[data-pkc-field='schedule-weekview-allday-cell'] [data-pkc-field='text'] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+[data-pkc-field='schedule-weekview-allday-cell'] [data-pkc-field='task-menu'],
+[data-pkc-field='schedule-weekview-allday-cell'] [data-pkc-field='note'] {
+  display: none;
+}
 [data-pkc-field='schedule-weekview-scroll'] {
   max-height: 22rem;
   overflow-y: auto;
@@ -11383,6 +11410,10 @@ h3[data-pkc-section] {
   /* ⑦ **月送り ‹ › / 2 ペインの ◀ ▶ ☆ / 割り当ての × / ヘルプの目次の行 / 「全文を開く」**
    *    (#1087 の実機確認)。素の寸法が 24px 未満だった押し所を 24px の下限へ。 */
   [data-pkc-action='schedule-nav'],
+  /* ⑧ **予定の日送り・週送り ‹ › / 予定から外す × / 月の週番号**(#1966 3-4。390px の実測で 13〜17px 幅) */
+  [data-pkc-action='schedule-day-go'],
+  [data-pkc-field='task-unschedule'],
+  [data-pkc-action='schedule-week-pick'],
   [data-pkc-action='dual-back'],
   [data-pkc-action='dual-forward'],
   [data-pkc-action='dual-bookmark'],
@@ -12506,7 +12537,10 @@ h6:hover > .pkc-heading-anchor,
  *   右端に重なる。⚠ 高さ 0 なので本文の行を 1 px も押し下げない。 */
 .pkc-quick-toc {
   position: sticky;
-  top: 42px;
+  /* 🔴 帯の実際の高さ + 8px(#1966 3-4)── スマホ幅では帯が 3 段に折れて 170px ほどになり、
+   *   決め打ちの 42px だと目次の押しが帯の「書式付きでコピー」の上に被さって押せなかった(390px 実測)。
+   *   測る前・測れない環境は 34px + 8px = 42px(今までと同じ)。 */
+  top: calc(var(--pkc-detail-bar-h, 34px) + 8px);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -12525,7 +12559,8 @@ h6:hover > .pkc-heading-anchor,
  * ⚠ 地は無彩色、色は**当たりの塗りにだけ**使う(帯は他の押しと同じ配色)。 */
 .pkc-search-jump {
   position: sticky;
-  top: 42px;
+  /* ⚠ 目次と同じ段(#1966 3-4)── 帯が折れても帯の下に出す */
+  top: calc(var(--pkc-detail-bar-h, 34px) + 8px);
   display: flex;
   justify-content: flex-end;
   align-items: flex-start;
