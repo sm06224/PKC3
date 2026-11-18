@@ -11,12 +11,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
+import { bindActions, runChapterWindowAction, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { attachmentBody } from '../../src/features/flavor/attachment-flavor';
 import {
   closeInlinePlayer,
   INLINE_PLAYER_BEYOND,
-  INLINE_PLAYER_GONE,
+  INLINE_PLAYER_NOT_MEDIA,
 } from '../../src/adapter/ui/render/inline-player';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
@@ -67,7 +67,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function setup(opts: { mime?: string; services?: boolean } = {}) {
+function setup(opts: { mime?: string; services?: boolean; blobType?: string } = {}) {
   const root = document.createElement('div');
   document.body.append(root);
   buildShell(root);
@@ -78,9 +78,9 @@ function setup(opts: { mime?: string; services?: boolean } = {}) {
       ? {}
       : {
           readNoteBody: async (lid) => (lid === 'rec' ? recBody : null),
-          readAssetBlob: async (key) => (key === 'ast-1' ? new Blob(['x'], { type: 'audio/webm' }) : null),
+          readAssetBlob: async (key) => (key === 'ast-1' ? new Blob(['x'], { type: opts.blobType ?? 'audio/webm' }) : null),
         };
-  bindActions(root, d, services);
+  const unbind = bindActions(root, d, services);
   d.dispatch({
     type: 'SYS_BOOTED',
     cid: 'c1',
@@ -105,7 +105,7 @@ function setup(opts: { mime?: string; services?: boolean } = {}) {
     Object.defineProperty(m, 'duration', { value: duration, configurable: true });
     m.dispatchEvent(new Event('loadedmetadata'));
   };
-  return { root, d, a, quote, box, media, loaded };
+  return { root, d, a, quote, box, media, loaded, unbind, services, detail };
 }
 
 describe('その場で鳴らす', () => {
@@ -207,13 +207,83 @@ describe('その場で鳴らす', () => {
     expect(box()!.textContent).toContain(INLINE_PLAYER_BEYOND);
   });
 
-  it('⚠ 音・動画でない添付は鳴らさずに言う(借りない)', async () => {
+  it('⚠ 音・動画でない添付は鳴らさずに、そう言う(借りない)', async () => {
     const { a, box, media } = setup({ mime: 'application/pdf' });
     a.click();
     await settle();
     expect(media()).toBeNull();
-    expect(box()!.textContent).toContain(INLINE_PLAYER_GONE);
+    expect(box()!.textContent).toContain(INLINE_PLAYER_NOT_MEDIA);
     expect(created).toEqual([]);
+  });
+
+  it('⚠ 保存した種類が汎用(octet-stream)でも、実体が音なら鳴らす / 実体も音でなければ言う', async () => {
+    const ok = setup({ mime: 'application/octet-stream', blobType: 'audio/ogg' });
+    ok.a.click();
+    await settle();
+    expect(ok.media()?.tagName).toBe('AUDIO');
+    closeInlinePlayer();
+    document.body.textContent = '';
+    const ng = setup({ mime: 'application/octet-stream', blobType: 'application/zip' });
+    ng.a.click();
+    await settle();
+    expect(ng.media()).toBeNull();
+    expect(ng.box()!.textContent).toContain(INLINE_PLAYER_NOT_MEDIA);
+    expect(revoked, '借りた物を返していない').toEqual(created.slice(0, 1));
+  });
+
+  it('🔴 動画の録音は <video> で出す', async () => {
+    const { a, media } = setup({ mime: 'video/webm' });
+    a.click();
+    await settle();
+    expect(media()?.tagName).toBe('VIDEO');
+  });
+
+  it('🔴 閉じるときは再生機を止めて src を外す(鳴りっぱなしにしない)', async () => {
+    const { a, media } = setup();
+    a.click();
+    await settle();
+    const m = media()!;
+    const paused = vi.spyOn(m, 'pause');
+    closeInlinePlayer();
+    expect(paused).toHaveBeenCalled();
+    expect(m.getAttribute('src')).toBeNull();
+  });
+
+  it('🔴 横に留めた別のノートの枠で押しても、開いているノートが変わらない間は閉じない', async () => {
+    const { d, a, box, detail } = setup();
+    const frame = document.createElement('div');
+    frame.setAttribute('data-pkc-split-lid', 'other');
+    detail.append(frame);
+    frame.append(a.closest('blockquote')!);
+    a.click();
+    await settle();
+    expect(box()).not.toBeNull();
+    // 別の状態の変化(開いているノートは meet のまま)
+    d.dispatch({ type: 'BODY_LOADED', lid: 'meet', body: '> [0:15](entry:rec#t=15) 字\n' });
+    expect(box(), '開いているノートは同じなのに閉じた').not.toBeNull();
+  });
+
+  it('🔴 畳むとき(unbind)に閉じて返す', async () => {
+    const { a, box, unbind } = setup();
+    a.click();
+    await settle();
+    (unbind as () => void)();
+    expect(box()).toBeNull();
+    expect(revoked).toEqual(['blob:x0']);
+  });
+
+  it('⚠ 章の別ウィンドウで押したリンクは、今までどおり本体で録音を開く(窓の中にプレーヤーを出さない)', async () => {
+    const { d, root, services } = setup();
+    const other = document.implementation.createHTMLDocument('窓');
+    const a = other.createElement('a');
+    a.setAttribute('data-pkc-action', 'navigate-entry-ref');
+    a.setAttribute('data-pkc-entry-ref', 'entry:rec#t=15');
+    other.body.append(a);
+    expect(runChapterWindowAction(d, a, services, root)).toBe(true);
+    await settle();
+    expect(other.querySelector('[data-pkc-field="inline-player"]')).toBeNull();
+    expect(root.querySelector('[data-pkc-field="inline-player"]')).toBeNull();
+    expect(d.getState().selectedLid).toBe('rec');
   });
 });
 

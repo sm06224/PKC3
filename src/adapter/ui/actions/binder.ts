@@ -337,7 +337,13 @@ import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { appendAndSettle } from '@adapter/state/append-settle';
 import { formatTranscriptQuote, resolveTranscriptQuoteTarget } from '@features/transcript-quote';
 import { appTranscriptFollow } from '../render/transcript-follow';
-import { closeInlinePlayer, inlinePlayerBox, inlinePlayerOwner, openInlinePlayer } from '../render/inline-player';
+import {
+  closeInlinePlayer,
+  INLINE_PLAYER_NOT_MEDIA,
+  inlinePlayerBox,
+  inlinePlayerOwner,
+  openInlinePlayer,
+} from '../render/inline-player';
 // 🔑 別のタブが編集中かの問い合わせは 1 本(#529 W5-d ── 板の付箋・本文の下の追記欄・PDF・AI が同じ口を通る)
 import {
   editedElsewhereReason,
@@ -3986,7 +3992,7 @@ function navigateToLink(
    * ⚠ 録音のノート自身の中のリンク(自分の説明に書いた引用)は今までどおり ── 同じ画面に再生機が在る。
    * ⚠ 読む口が無い配線・録音が見つからない(消した)ときは今までどおり開く道へ(開けない理由もそちらが言う)。
    */
-  if (t.seekMs !== null && tryInlinePlayer(dispatcher, target, services, t.lid, t.seekMs)) return;
+  if (t.seekMs !== null && tryInlinePlayer(dispatcher, root, target, services, t.lid, t.seekMs)) return;
   if (!selectEntryOrExplain(dispatcher, t.lid, 'リンク先のノート', root, services)) return;
   /**
    * 🔴 **`#t=<秒>` が付いていれば、開いた録音・動画をその時刻から鳴らす**(#1966 4-3 ①)── 文字起こしの
@@ -4034,6 +4040,7 @@ function navigateToLink(
  */
 function tryInlinePlayer(
   dispatcher: Dispatcher,
+  root: HTMLElement,
   target: HTMLElement,
   services: BinderServices,
   lid: string,
@@ -4042,6 +4049,11 @@ function tryInlinePlayer(
   const readBody = services.readNoteBody;
   const readBlob = services.readAssetBlob;
   if (readBody === undefined || readBlob === undefined) return false;
+  /**
+   * ⚠ **章の別ウィンドウで押したリンクは、今までどおり本体で録音を開く**(着地前レビュー)── 窓は読むだけの面で、
+   *   窓の中の押し口(×・「録音のノートを開く」)は本体へ転送されず、窓を閉じても借りた URL が残る。
+   */
+  if (target.ownerDocument !== root.ownerDocument) return false;
   const st = dispatcher.getState();
   const meta = st.entryMetas.get(lid);
   if (meta === undefined || meta.archetype !== 'attachment') return false;
@@ -4057,11 +4069,17 @@ function tryInlinePlayer(
       const body = await readBody(lid);
       if (body === null) return null;
       const att = readAttachmentMeta(body);
-      if (att.assetKey === null || !/^(audio|video)\//.test(att.mime)) return null;
+      if (att.assetKey === null) return null;
+      const media = (m: string): boolean => /^(audio|video)\//.test(m);
+      // ⚠ 保存した種類が汎用(`application/octet-stream` 等)でも、実体の種類が音・動画なら鳴らす
+      if (!media(att.mime) && att.mime !== 'application/octet-stream' && att.mime !== '')
+        throw new Error(INLINE_PLAYER_NOT_MEDIA);
       const blob = await readBlob(att.assetKey);
       if (blob === null) return null;
+      const mime = media(att.mime) ? att.mime : blob.type;
+      if (!media(mime)) throw new Error(INLINE_PLAYER_NOT_MEDIA);
       const url = URL.createObjectURL(blob);
-      return { url, dispose: () => URL.revokeObjectURL(url), mime: att.mime, name: att.name || meta.title };
+      return { url, dispose: () => URL.revokeObjectURL(url), mime, name: att.name || meta.title };
     },
   });
   return true;

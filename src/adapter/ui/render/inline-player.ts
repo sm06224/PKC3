@@ -78,6 +78,7 @@ function clock(ms: number): string {
 
 export const INLINE_PLAYER_BEYOND = 'この時刻は録音の長さを超えています';
 export const INLINE_PLAYER_GONE = '録音が見つかりません(消したか、まだ読み込めていません)';
+export const INLINE_PLAYER_NOT_MEDIA = 'このリンク先は再生できる音・動画ではありません';
 
 /**
  * 押したリンクの段落の下にプレーヤーを出して、その時刻から鳴らす。
@@ -141,10 +142,13 @@ export async function openInlinePlayer(args: {
     note.hidden = false;
   };
   let src: InlinePlayerSource | null;
+  let why = INLINE_PLAYER_GONE;
   try {
     src = await args.load();
-  } catch {
+  } catch (e) {
+    // 🔑 読み手が理由を言えるときはその字(音・動画でない、など)。言えないときは「見つかりません」
     src = null;
+    if (e instanceof Error && e.message !== '') why = e.message;
   }
   // 借りている間に閉じられた / 別のプレーヤーに替わった → 借りた物はすぐ返す
   if (current !== entry) {
@@ -152,7 +156,7 @@ export async function openInlinePlayer(args: {
     return box;
   }
   if (src === null) {
-    say(INLINE_PLAYER_GONE);
+    say(why);
     return box;
   }
   entry.dispose = src.dispose;
