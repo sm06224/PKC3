@@ -391,6 +391,12 @@ const OBJECT_LONE: readonly string[] = [
    */
   'timer-run-delete',
   'timer-run-rename',
+  /**
+   * 🔴 **2026-11-18 に 1 件増えた**(#1966 4-3 ②)── その場の小さなプレーヤーの「録音のノートを開く」。
+   *   押し所はプレーヤーに 1 か所(`render/inline-player.ts`)。対象(録音と時刻)は押した口の
+   *   `data-pkc-entry` / `data-pkc-seek-ms` が運ぶ。🔑 片道ではない ── 開いた後は「戻る」で元のノートへ戻れる。
+   */
+  'inline-player-open-note',
 ];
 
 describe('操作 → 出口の対応表(#582)', () => {

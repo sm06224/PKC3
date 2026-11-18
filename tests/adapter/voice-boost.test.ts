@@ -236,7 +236,8 @@ describe('再生機を作る面は、全部つなぎに通している(全数)',
   });
 
   it('⚠ いま在る面の名前を pin する(面が増えた日に、繋いだかを問う)', () => {
-    expect(players()).toEqual(['captures.ts', 'detail.ts']);
+    // ⚠ 2026-11-18(#1966 4-3 ②): その場の小さなプレーヤー(`inline-player.ts`)が増えた ── 整える鎖へ通している
+    expect(players()).toEqual(['captures.ts', 'detail.ts', 'inline-player.ts']);
   });
 });
 

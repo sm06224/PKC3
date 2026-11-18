@@ -4234,6 +4234,45 @@ dd[data-pkc-field='inspector-toc'] {
 [data-pkc-prose] .pkc-seek-quote:hover {
   color: var(--fg);
 }
+/* 🔴 **その場の小さなプレーヤー**(#1966 4-3 ②)── 引用のリンクの段落のすぐ下に 1 枚。地は無彩色、枠は細い線 */
+[data-pkc-field='inline-player'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  margin: var(--s1) 0 var(--s2);
+  padding: var(--s1) var(--s2);
+  max-width: 32rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+[data-pkc-field='inline-player-head'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 12px;
+}
+[data-pkc-field='inline-player-label'] {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+[data-pkc-field='inline-player-head'] button {
+  font-size: var(--btn-fs-bar);
+  padding: 0 var(--s2);
+}
+[data-pkc-field='inline-player-media'] {
+  width: 100%;
+  max-height: 14rem;
+}
+[data-pkc-field='inline-player-note'] {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
 /* 🔴 送った行が貼り付いた帯と再生機の裏に潜らない(#1966 4-3 ① 着地前レビュー)── `scrollIntoView` は `scroll-margin` を見る */
 [data-pkc-prose] [data-pkc-seek-line] {
   scroll-margin-top: calc(var(--pkc-detail-bar-h, 34px) + var(--pkc-sticky-player-h, 0px) + 8px);
@@ -11980,7 +12019,8 @@ h3[data-pkc-section] {
   }
   /* ⚠ 「ノートへ引用」と「再生に合わせて送る」も紙には要らない(押せない) */
   [data-pkc-prose] .pkc-seek-quote,
-  [data-pkc-field='transcript-follow'] {
+  [data-pkc-field='transcript-follow'],
+  [data-pkc-field='inline-player'] {
     display: none;
   }
 }

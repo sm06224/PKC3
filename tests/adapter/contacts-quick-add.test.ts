@@ -14,7 +14,7 @@
  * ⚠ `tests/adapter/schedule-quick-add.test.ts` の写し ── 作法を揃える。
  */
 import { stubStamps } from '../helpers/store-stamps';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -320,8 +320,9 @@ describe('#1087 連絡先の足す欄の Enter', () => {
       type(s, { name: '佐藤花子', tel: '03-0000-0000', email: 'h@example.com', org: '社' });
       const el = s.q<HTMLInputElement>(`[data-pkc-field="contacts-quick-${f}"]`)!;
       el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-      await tick();
-      expect(s.persisted, 'Enter で足されていない').toHaveLength(1);
+      // ⚠ 書込は非同期(store の列)── 決め打ちの 20ms では負荷の高い全量の回で間に合わないことがあった(main でも 8 回に 1 回)。
+      //   着くまで待つ(着かなければ 2 秒で落ちる ── 検査は緩めていない)
+      await vi.waitFor(() => expect(s.persisted, 'Enter で足されていない').toHaveLength(1), { timeout: 2000 });
       expect(s.persisted[0]!.title).toBe('佐藤花子');
     });
   }

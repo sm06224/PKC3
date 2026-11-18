@@ -337,6 +337,13 @@ import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { appendAndSettle } from '@adapter/state/append-settle';
 import { formatTranscriptQuote, resolveTranscriptQuoteTarget } from '@features/transcript-quote';
 import { appTranscriptFollow } from '../render/transcript-follow';
+import {
+  closeInlinePlayer,
+  INLINE_PLAYER_NOT_MEDIA,
+  inlinePlayerBox,
+  inlinePlayerOwner,
+  openInlinePlayer,
+} from '../render/inline-player';
 // 🔑 別のタブが編集中かの問い合わせは 1 本(#529 W5-d ── 板の付箋・本文の下の追記欄・PDF・AI が同じ口を通る)
 import {
   editedElsewhereReason,
@@ -2109,6 +2116,11 @@ export interface BinderServices {
    * @returns 実体。⚠ 無ければ `null`(消えた添付を掴んだまま進まない)
    */
   readAssetBlob?(assetKey: string): Promise<Blob | null>;
+  /**
+   * 🔴 **ノートの本文を 1 件読む**(#1966 4-3 ②)── 引用のリンクから録音を「その場の小さなプレーヤー」で鳴らすとき、
+   *   録音(添付)のノートの本文から添付の鍵を引く。⚠ 省略可 ── 無い配線では今までどおり録音のノートを開いて鳴らす。
+   */
+  readNoteBody?(lid: string): Promise<string | null>;
   /**
    * 🔴 **録音・画面収録**(#413。user 要望 2026-07-16「録音と画面収録を…
    * これで、会議メモをうまく残せるはず」)。
@@ -3975,6 +3987,12 @@ function navigateToLink(
     });
     return;
   }
+  /**
+   * 🔴 **別のノートに書いた時刻つきの引用は、ノートを移らずにその場で鳴らす**(#1966 4-3 ②)。
+   * ⚠ 録音のノート自身の中のリンク(自分の説明に書いた引用)は今までどおり ── 同じ画面に再生機が在る。
+   * ⚠ 読む口が無い配線・録音が見つからない(消した)ときは今までどおり開く道へ(開けない理由もそちらが言う)。
+   */
+  if (t.seekMs !== null && tryInlinePlayer(dispatcher, root, target, services, t.lid, t.seekMs)) return;
   if (!selectEntryOrExplain(dispatcher, t.lid, 'リンク先のノート', root, services)) return;
   /**
    * 🔴 **`#t=<秒>` が付いていれば、開いた録音・動画をその時刻から鳴らす**(#1966 4-3 ①)── 文字起こしの
@@ -4014,6 +4032,57 @@ function navigateToLink(
     void tocJump(dispatcher, root, decodeURIComponentSafe(t.fragment.slice(1)), undefined, false, true);
   }
   void target;
+}
+
+/**
+ * 🔴 **その場の小さなプレーヤーで鳴らす**(#1966 4-3 ②)。出せたら `true`(呼び手はノートを移らない)。
+ * 録音の本文 → 添付の鍵 → 実体を借りて ObjectURL にし、閉じるときに返す(`inline-player.ts` が寿命を持つ)。
+ */
+function tryInlinePlayer(
+  dispatcher: Dispatcher,
+  root: HTMLElement,
+  target: HTMLElement,
+  services: BinderServices,
+  lid: string,
+  ms: number,
+): boolean {
+  const readBody = services.readNoteBody;
+  const readBlob = services.readAssetBlob;
+  if (readBody === undefined || readBlob === undefined) return false;
+  /**
+   * ⚠ **章の別ウィンドウで押したリンクは、今までどおり本体で録音を開く**(着地前レビュー)── 窓は読むだけの面で、
+   *   窓の中の押し口(×・「録音のノートを開く」)は本体へ転送されず、窓を閉じても借りた URL が残る。
+   */
+  if (target.ownerDocument !== root.ownerDocument) return false;
+  const st = dispatcher.getState();
+  const meta = st.entryMetas.get(lid);
+  if (meta === undefined || meta.archetype !== 'attachment') return false;
+  const owner = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
+  // ⚠ 録音のノートの中で押した引用は、同じ画面の再生機で鳴らす(開く道 = `playOpenedRecording`)
+  if (owner === lid) return false;
+  void openInlinePlayer({
+    anchor: target,
+    lid,
+    ms,
+    owner: st.selectedLid,
+    load: async () => {
+      const body = await readBody(lid);
+      if (body === null) return null;
+      const att = readAttachmentMeta(body);
+      if (att.assetKey === null) return null;
+      const media = (m: string): boolean => /^(audio|video)\//.test(m);
+      // ⚠ 保存した種類が汎用(`application/octet-stream` 等)でも、実体の種類が音・動画なら鳴らす
+      if (!media(att.mime) && att.mime !== 'application/octet-stream' && att.mime !== '')
+        throw new Error(INLINE_PLAYER_NOT_MEDIA);
+      const blob = await readBlob(att.assetKey);
+      if (blob === null) return null;
+      const mime = media(att.mime) ? att.mime : blob.type;
+      if (!media(mime)) throw new Error(INLINE_PLAYER_NOT_MEDIA);
+      const url = URL.createObjectURL(blob);
+      return { url, dispose: () => URL.revokeObjectURL(url), mime, name: att.name || meta.title };
+    },
+  });
+  return true;
 }
 
 /** 開いた録音の再生機を待つ上限(ms)。⚠ 再生機は添付の中身を借りてから差すので、描けた後にも少し遅れる。 */
@@ -11230,6 +11299,19 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'seek-media': (dispatcher, target) => {
     seekMedia(dispatcher, target);
+  },
+  /** 🔴 **その場の小さなプレーヤーから、録音のノートを開いてその時刻から鳴らす**(#1966 4-3 ②)。 */
+  'inline-player-open-note': (dispatcher, target, services, root) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    const ms = Number(target.getAttribute('data-pkc-seek-ms'));
+    if (lid === null || !Number.isFinite(ms)) return;
+    closeInlinePlayer();
+    if (!selectEntryOrExplain(dispatcher, lid, '録音のノート', root, services)) return;
+    void playOpenedRecording(dispatcher, root, lid, ms);
+  },
+  /** 🔴 **その場の小さなプレーヤーを閉じる**(#1966 4-3 ②)── 借りた URL も返す。 */
+  'inline-player-close': () => {
+    closeInlinePlayer();
   },
   /** 🔴 **文字起こしの行の「ノートへ引用」**(#1966 4-3 ①)。⚠ 読むだけの面の口(本文の下書きには触れない)。 */
   'quote-transcript-line': (dispatcher, target, services) => {
@@ -24350,6 +24432,18 @@ export function bindActions(
   };
 
   listen(root, 'contextmenu', onContextMenu);
+  /**
+   * 🔴 **ノートを移ったら、その場の小さなプレーヤーを閉じる**(#1966 4-3 ②)── 借りた URL を返す。
+   * ⚠ 畳むときも閉じる(鳴りっぱなしの器を残さない)。
+   */
+  if (typeof dispatcher.onState === 'function' && typeof dispatcher.getState === 'function') {
+    undo.push(
+      dispatcher.onState((s) => {
+        if (inlinePlayerBox() !== null && s.selectedLid !== inlinePlayerOwner()) closeInlinePlayer();
+      }),
+    );
+  }
+  undo.push(closeInlinePlayer);
   /**
    * 🔴 **打ちながら出る補完の小窓**(#1449 行頭の `/` = 記法 / #1450 `@` = ノートリンクと日付)。
    *
