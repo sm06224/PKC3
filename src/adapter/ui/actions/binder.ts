@@ -335,6 +335,8 @@ import { atChoices, slashChoices } from '@features/markdown/inline-complete';
 import { snippetMenu, snippetMenuNote, type SnippetChoice } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { appendAndSettle } from '@adapter/state/append-settle';
+import { formatTranscriptQuote, resolveTranscriptQuoteTarget } from '@features/transcript-quote';
+import { appTranscriptFollow } from '../render/transcript-follow';
 // 🔑 別のタブが編集中かの問い合わせは 1 本(#529 W5-d ── 板の付箋・本文の下の追記欄・PDF・AI が同じ口を通る)
 import {
   editedElsewhereReason,
@@ -3975,6 +3977,14 @@ function navigateToLink(
   }
   if (!selectEntryOrExplain(dispatcher, t.lid, 'リンク先のノート', root, services)) return;
   /**
+   * 🔴 **`#t=<秒>` が付いていれば、開いた録音・動画をその時刻から鳴らす**(#1966 4-3 ①)── 文字起こしの
+   *   「ノートへ引用」が書く `[0:15](entry:<録音>#t=15)`。
+   */
+  if (t.seekMs !== null) {
+    void playOpenedRecording(dispatcher, root, t.lid, t.seekMs);
+    return;
+  }
+  /**
    * 🔴 **`#h/<見出しの id>` が付いていれば、開いた後にその見出しへ飛ぶ**(#579)。
    *
    * 🔑 飛ぶ機構は目次と**同じ 1 本**(`tocJump`)── 描き直しを待って id で探し、畳んで
@@ -4004,6 +4014,91 @@ function navigateToLink(
     void tocJump(dispatcher, root, decodeURIComponentSafe(t.fragment.slice(1)), undefined, false, true);
   }
   void target;
+}
+
+/** 開いた録音の再生機を待つ上限(ms)。⚠ 再生機は添付の中身を借りてから差すので、描けた後にも少し遅れる。 */
+const RECORDING_PLAYER_WAIT_MS = 3000;
+const RECORDING_NO_PLAYER = 'このノートには再生できる音・動画がありません';
+
+/**
+ * 🔴 **リンクで開いた録音を、その時刻から鳴らす**(#1966 4-3 ①)。⚠ 探すのは主の枠の詳細の中だけ
+ *   (別の添付の再生機を動かさない)。待っている間に別のノートへ移ったら何もしない。
+ */
+async function playOpenedRecording(dispatcher: Dispatcher, root: HTMLElement, lid: string, ms: number): Promise<void> {
+  const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
+  await waitPainted(detail, lid);
+  // ⚠ その録音の器の再生機だけ(描き直しの途中に残っている前の録音の再生機を掴まない)
+  const own = `[data-pkc-field="attachment-preview"][data-pkc-preview-lid="${lid}"]`;
+  const find = (): HTMLMediaElement | null =>
+    detail?.querySelector<HTMLMediaElement>(
+      `${own} audio[data-pkc-field="attachment-media"], ${own} video[data-pkc-field="attachment-media"]`,
+    ) ?? null;
+  const started = Date.now();
+  let media = find();
+  while (media === null && Date.now() - started < RECORDING_PLAYER_WAIT_MS) {
+    await new Promise((r) => setTimeout(r, 50));
+    if (dispatcher.getState().selectedLid !== lid) return;
+    media = find();
+  }
+  if (dispatcher.getState().selectedLid !== lid) return;
+  if (media === null) {
+    dispatcher.dispatch({ type: 'OP_NOTICE', message: RECORDING_NO_PLAYER });
+    return;
+  }
+  playMediaAt(dispatcher, media, ms);
+}
+
+/**
+ * 🔴 **文字起こしの行を、時刻つきの引用としてノートへ入れる**(#1966 4-3 ①)。
+ *
+ * 入れ先の決め方・1 行の形は `features/transcript-quote.ts`。書くのは**本文の下の追記欄と同じ 1 本**
+ * (`APPEND_TO_ENTRY` ── 結末まで待つ。状態の行に「元に戻す」と「開く」が出る)。
+ * ⚠ 別のタブ・ウィンドウが編集中のノートへは入れない(理由を言って止まる)。
+ */
+async function quoteTranscriptLine(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  services: BinderServices,
+): Promise<void> {
+  const line = target.closest('[data-pkc-seek-line]');
+  const time = line?.querySelector<HTMLElement>('[data-pkc-seek-ms]');
+  const st = dispatcher.getState();
+  const recording = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
+  if (line === null || line === undefined || time === null || time === undefined || recording === null) return;
+  const label = (time.textContent ?? '').trim();
+  // 時刻の字の後ろ(`〜0:12` の終わりの時刻は字に含めない)
+  const rest = (line.textContent ?? '').trim().slice(label.length).replace(/^\s*〜\s*\d+(?::\d{2}){1,2}/, '');
+  const text = formatTranscriptQuote(recording, Number(time.getAttribute('data-pkc-seek-ms')), label, rest);
+  if (text === null) {
+    dispatcher.dispatch({ type: 'OP_NOTICE', message: 'この行には引用する字がありません' });
+    return;
+  }
+  const into = resolveTranscriptQuoteTarget({
+    recordingLid: recording,
+    splitLids: st.splitLids,
+    past: st.selectionHistory.past,
+    future: st.selectionHistory.future,
+    metas: st.entryMetas,
+    relations: st.relations,
+  });
+  const title = st.entryMetas.get(into)?.title ?? '';
+  const elsewhere = await editedElsewhereReason(dispatcher, services, into);
+  if (elsewhere !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: elsewhere });
+    return;
+  }
+  const r = await appendAndSettle(dispatcher, into, text, null, 10000);
+  if (r.ok) {
+    dispatcher.dispatch({ type: 'OP_NOTICE', message: `『${title}』の末尾へ ${label} の行を引用しました`, open: into });
+    return;
+  }
+  dispatcher.dispatch({
+    type: 'OP_FAILED',
+    error:
+      r.reason === 'timeout'
+        ? 'ノートに入ったか確かめられませんでした。ノートを開いて確かめてください'
+        : (r.error ?? '引用できませんでした(いま保存中か、編集中です。少し待ってもう一度お試しください)'),
+  });
 }
 
 function decodeURIComponentSafe(s: string): string {
@@ -9049,6 +9144,25 @@ const pendingSeek = new WeakMap<HTMLMediaElement, number>();
  */
 const activeSeekLine = new WeakMap<Element, Element | null>();
 /**
+ * 🔴 **自分で送っている最中は、追いかけて引き戻さない**(#1966 4-3 ① 着地前レビュー)── 手で動かしてから
+ *   {@link FOLLOW_PAUSE_MS} の間は送らない(読み返している所を、行が変わるたびに引き戻さない)。
+ * ⚠ 見るのは手の操作(回す・なぞる・送りのキー)だけ ── 送った結果の `scroll` は数えない(自分で送るたびに止まる)。
+ */
+const FOLLOW_PAUSE_MS = 4000;
+let lastUserScrollAt = -Infinity;
+function userScrolledRecently(): boolean {
+  return Date.now() - lastUserScrollAt < FOLLOW_PAUSE_MS;
+}
+/** test 用 ── 手で送った時刻を忘れる。 */
+export function resetTranscriptFollowPauseForTest(): void {
+  lastUserScrollAt = -Infinity;
+}
+/** 手で送った印を付ける(`bindActions` が文書の聞き耳で呼ぶ ── 畳むときに外れる `listen` を通す)。 */
+function markUserScroll(e: Event): void {
+  if (e instanceof KeyboardEvent && !['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' '].includes(e.key)) return;
+  lastUserScrollAt = Date.now();
+}
+/**
  * 説明ごとの時刻の行の控え(行の要素と ms)。⚠ `timeupdate` は 1 秒に数回来る ── 毎回 DOM を引き直さない。
  * 説明が描き直されると要素が差し替わる(先頭と末尾が DOM から外れる)ので、そのときだけ作り直す。
  */
@@ -9103,6 +9217,14 @@ function markActiveSeekLine(media: HTMLMediaElement): void {
   for (const old of prose.querySelectorAll('[data-pkc-seek-active]')) old.removeAttribute('data-pkc-seek-active');
   active?.setAttribute('data-pkc-seek-active', '');
   activeSeekLine.set(prose, active);
+  /**
+   * 🔴 **再生に合わせて文字起こしを送る**(#1966 4-3 ①。入 / 切は再生機の下の「再生に合わせて送る」)。
+   * ⚠ 行が**見えているときは動かさない**(`block: 'nearest'` ── 読んでいる所を勝手に動かさない)。
+   * ⚠ 止まっているとき(押して移っただけ)は送らない ── 鳴っている間だけ。
+   */
+  if (active !== null && !media.paused && appTranscriptFollow.enabled() && !userScrolledRecently()) {
+    (active as HTMLElement).scrollIntoView?.({ block: 'nearest' });
+  }
 }
 function seekMedia(dispatcher: Dispatcher, target: HTMLElement): void {
   const raw = target.getAttribute('data-pkc-seek-ms');
@@ -9120,6 +9242,17 @@ function seekMedia(dispatcher: Dispatcher, target: HTMLElement): void {
     notice(SEEK_NO_PLAYER);
     return;
   }
+  playMediaAt(dispatcher, media, ms);
+}
+
+/**
+ * 再生機をその位置から鳴らす(文字起こしの時刻を押したとき・`entry:<録音>#t=<秒>` のリンクから来たとき。#1966 4-3 ①)。
+ * ⚠ 読み込み前でも位置を書いて再生まで指示する(上の `seekMedia` の注記)── 判断はこの 1 本。
+ */
+function playMediaAt(dispatcher: Dispatcher, media: HTMLMediaElement, ms: number): void {
+  const notice = (message: string): void => {
+    dispatcher.dispatch({ type: 'OP_NOTICE', message });
+  };
   const at = msToSeconds(ms);
   const loaded = media.readyState >= 1;
   // ⚠ 位置は `play()` の**前**に書く ── 後に書くと、先頭から鳴り始めた直後に飛ぶ(1 瞬だけ先頭の音が出る)
@@ -11097,6 +11230,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'seek-media': (dispatcher, target) => {
     seekMedia(dispatcher, target);
+  },
+  /** 🔴 **文字起こしの行の「ノートへ引用」**(#1966 4-3 ①)。⚠ 読むだけの面の口(本文の下書きには触れない)。 */
+  'quote-transcript-line': (dispatcher, target, services) => {
+    void quoteTranscriptLine(dispatcher, target, services);
+  },
+  /** 🔴 **再生に合わせて文字起こしを送る / 送らない**(#1966 4-3 ①)。⚠ 端末ごとの好み(本文に書かない)。 */
+  'toggle-transcript-follow': (_dispatcher, target) => {
+    const on = target instanceof HTMLInputElement ? target.checked : !appTranscriptFollow.enabled();
+    appTranscriptFollow.set(on);
   },
   /**
    * 🔴 **本文の `@2026-10-15` を押すと、その日のノートを開く**(#1169)。
@@ -24424,6 +24566,10 @@ export function bindActions(
     if (ev.target instanceof HTMLMediaElement) markActiveSeekLine(ev.target);
   };
   listen(root, 'timeupdate', onMediaMoved, true);
+  // 🔴 手で送った直後は文字起こしを追いかけない(#1966 4-3 ①)── 回す・なぞる・送りのキー
+  listen(root.ownerDocument, 'wheel', markUserScroll, true);
+  listen(root.ownerDocument, 'touchmove', markUserScroll, true);
+  listen(root.ownerDocument, 'keydown', markUserScroll, true);
   listen(root, 'seeked', onMediaMoved, true);
   // 🔴 本文を打ったり、置換を撃ったりして本文が動いたときも、件数を出し直す(#1646 の 2。同じ字なら DOM に触れない)
   //   ⚠ 配線を組む時点で購読するのはここだけ ── 一部しか持たない仮の dispatcher(test)でも組めるよう、口が在るときだけ繋ぐ

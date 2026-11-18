@@ -17,6 +17,8 @@ export function limitSeekLinks(root: ParentNode, durationMs: number): number {
   for (const el of Array.from(root.querySelectorAll<HTMLElement>(LINK))) {
     const at = Number(el.getAttribute('data-pkc-seek-ms'));
     if (!Number.isFinite(at) || at <= durationMs) continue;
+    // 🔴 同じ行の「ノートへ引用」(#1966 4-3 ①)も外す ── 押せない時刻の行に、押しても何も起きない口を残さない
+    el.closest('[data-pkc-seek-line]')?.querySelector('.pkc-seek-quote')?.remove();
     el.replaceWith(el.ownerDocument.createTextNode(el.textContent ?? ''));
     n += 1;
   }

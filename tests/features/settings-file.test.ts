@@ -237,6 +237,7 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
       'pkc3.voice-crossfeed': '0',
       'pkc3.phone-links': '1',
       'pkc3.date-links': '0',
+      'pkc3.transcript-follow': '0',
       'pkc3.relative-days': '0',
       'pkc3.color-swatch': '0',
       'pkc3.missing-links': '0',

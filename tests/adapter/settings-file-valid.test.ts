@@ -9,6 +9,7 @@
  *   下見の検査が古い形のまま緑になるのを防ぐ。
  * 🔑 対象は `PORTABLE_KEYS` の**全数**。検査を持たない鍵が 1 つでも在れば落ちる。
  */
+import { TranscriptFollowStore } from '../../src/adapter/ui/render/transcript-follow';
 import { ExportWatchTagsStore } from '../../src/adapter/ui/render/export-watch-tags';
 import { chooseBoardLayout } from '../../src/adapter/ui/render/schedule-board';
 import { describe, expect, it } from 'vitest';
@@ -84,6 +85,7 @@ const toggles: Record<string, (s: ReturnType<typeof fakeStorage>) => { setEnable
   'pkc3.voice-crossfeed': (s) => ({ setEnabled: (on) => new VoiceBoostStore(s).setCrossfeedEnabled(on) }),
   'pkc3.phone-links': (s) => new PhoneLinksStore(s),
   'pkc3.date-links': (s) => new DateLinksStore(s),
+  'pkc3.transcript-follow': (s) => ({ setEnabled: (on) => new TranscriptFollowStore(s).set(on) }),
   'pkc3.relative-days': (s) => new RelativeDaysStore(s),
   'pkc3.color-swatch': (s) => new ColorSwatchStore(s),
   'pkc3.missing-links': (s) => new MissingLinksStore(s),

@@ -1078,6 +1078,50 @@ ${(e as Error).message}`,
   expect(stick.title, '時刻に「から再生」の案内が付いていない').toMatch(/^\d+:\d{2}(?::\d{2})? から再生$/);
   expect(stick.label, '読み上げの字が案内と違う').toBe(stick.title);
 
+  /**
+   * 🔴 **文字起こしの行を時刻つきでノートへ引用 → 引用のリンクから鳴らす**(#1966 4-3 ①)。⚠ 起動は増やさない(この道中の続き)。
+   * 実ブラウザで見るのは unit(happy-dom)が持てない 3 つ:
+   * ① 行の末尾の「❝ 引用」が**見えて押せる**(CSS の `::before` が字を出している)・「再生に合わせて送る」は既定で入
+   * ② 押すと**本物の書込**(worker の追記)が直前に開いていたノートの末尾へ着き、知らせの「開く」で移れる
+   * ③ そのノートに描かれた `0:00` のリンクを押すと、録音のノートが開いて**本物の再生機が鳴り出す**
+   */
+  await expect(
+    body.locator('[data-pkc-field="transcript-follow"] input[type="checkbox"]'),
+    '「再生に合わせて文字起こしを送る」が無い / 既定が入でない',
+  ).toBeChecked();
+  const quoteBtn = body.locator('[data-pkc-seek-line]').first().locator('[data-pkc-action="quote-transcript-line"]');
+  await expect(quoteBtn, '行の末尾に「引用」が無い').toBeVisible();
+  expect(
+    await quoteBtn.evaluate((el) => getComputedStyle(el, '::before').content),
+    '「引用」の絵(::before)が出ていない',
+  ).toContain('引用');
+  const recordingTitle = ((await page.locator('[data-pkc-field="detail-title"]').textContent()) ?? '').trim();
+  // 議事録を書いてから、「戻る」で録音へ戻ってきて聞く形(追記先 = 離れたばかりの議事録)
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('議事録');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-action="nav-back"]');
+  await expect(page.locator('[data-pkc-field="detail-title"]'), '「戻る」で録音へ戻れない').toHaveText(recordingTitle);
+  await clickReal(page, quoteBtn);
+  await expect(statusLine, '引用したと言っていない(書込が着いていない)').toContainText('『議事録』の末尾へ 0:00 の行を引用しました', {
+    timeout: 15_000,
+  });
+  await clickReal(page, '[data-pkc-field="status-open"]');
+  await expect(page.locator('[data-pkc-field="detail-title"]'), '「開く」で追記先へ移れない').toHaveText('議事録');
+  const quoted = page.locator('[data-pkc-view-pane="detail"] blockquote a[data-pkc-entry-ref$="#t=0"]');
+  await expect(quoted, '追記先に時刻つきの引用が描かれていない').toHaveText('0:00', { timeout: 15_000 });
+  await expect(page.locator('[data-pkc-view-pane="detail"] blockquote')).toContainText('一行目の偽の字');
+  await clickReal(page, quoted);
+  await expect(page.locator('[data-pkc-field="detail-title"]'), '引用の時刻を押しても録音が開かない').toHaveText(recordingTitle);
+  const reopened = page.locator('[data-pkc-view-pane="detail"] audio[data-pkc-field="attachment-media"]');
+  await expect
+    .poll(() => reopened.evaluate((a: HTMLAudioElement) => (a.paused ? 'paused' : 'playing')), {
+      timeout: 10_000,
+      message: '引用の時刻を押しても録音が鳴り出さない',
+    })
+    .toBe('playing');
+  await reopened.evaluate((a: HTMLAudioElement) => a.pause());
+
   // ⑤ 消す → 取り込むボタンが戻り(双方向)、「文字にする」は再び案内になる
   await clickReal(page, settingsTab);
   await clickReal(page, asrSection.locator('[data-pkc-action="remove-asr-part"][data-pkc-part="light"]'));
