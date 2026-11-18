@@ -9157,19 +9157,10 @@ function userScrolledRecently(): boolean {
 export function resetTranscriptFollowPauseForTest(): void {
   lastUserScrollAt = -Infinity;
 }
-if (typeof document !== 'undefined') {
-  const mark = (): void => {
-    lastUserScrollAt = Date.now();
-  };
-  document.addEventListener('wheel', mark, { capture: true, passive: true });
-  document.addEventListener('touchmove', mark, { capture: true, passive: true });
-  document.addEventListener(
-    'keydown',
-    (e) => {
-      if (['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' '].includes(e.key)) mark();
-    },
-    { capture: true, passive: true },
-  );
+/** 手で送った印を付ける(`bindActions` が文書の聞き耳で呼ぶ ── 畳むときに外れる `listen` を通す)。 */
+function markUserScroll(e: Event): void {
+  if (e instanceof KeyboardEvent && !['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' '].includes(e.key)) return;
+  lastUserScrollAt = Date.now();
 }
 /**
  * 説明ごとの時刻の行の控え(行の要素と ms)。⚠ `timeupdate` は 1 秒に数回来る ── 毎回 DOM を引き直さない。
@@ -24575,6 +24566,10 @@ export function bindActions(
     if (ev.target instanceof HTMLMediaElement) markActiveSeekLine(ev.target);
   };
   listen(root, 'timeupdate', onMediaMoved, true);
+  // 🔴 手で送った直後は文字起こしを追いかけない(#1966 4-3 ①)── 回す・なぞる・送りのキー
+  listen(root.ownerDocument, 'wheel', markUserScroll, true);
+  listen(root.ownerDocument, 'touchmove', markUserScroll, true);
+  listen(root.ownerDocument, 'keydown', markUserScroll, true);
   listen(root, 'seeked', onMediaMoved, true);
   // 🔴 本文を打ったり、置換を撃ったりして本文が動いたときも、件数を出し直す(#1646 の 2。同じ字なら DOM に触れない)
   //   ⚠ 配線を組む時点で購読するのはここだけ ── 一部しか持たない仮の dispatcher(test)でも組めるよう、口が在るときだけ繋ぐ
