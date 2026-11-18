@@ -4027,9 +4027,11 @@ const RECORDING_NO_PLAYER = 'このノートには再生できる音・動画が
 async function playOpenedRecording(dispatcher: Dispatcher, root: HTMLElement, lid: string, ms: number): Promise<void> {
   const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
   await waitPainted(detail, lid);
+  // ⚠ その録音の器の再生機だけ(描き直しの途中に残っている前の録音の再生機を掴まない)
+  const own = `[data-pkc-field="attachment-preview"][data-pkc-preview-lid="${lid}"]`;
   const find = (): HTMLMediaElement | null =>
     detail?.querySelector<HTMLMediaElement>(
-      'audio[data-pkc-field="attachment-media"], video[data-pkc-field="attachment-media"]',
+      `${own} audio[data-pkc-field="attachment-media"], ${own} video[data-pkc-field="attachment-media"]`,
     ) ?? null;
   const started = Date.now();
   let media = find();
@@ -9142,6 +9144,34 @@ const pendingSeek = new WeakMap<HTMLMediaElement, number>();
  */
 const activeSeekLine = new WeakMap<Element, Element | null>();
 /**
+ * 🔴 **自分で送っている最中は、追いかけて引き戻さない**(#1966 4-3 ① 着地前レビュー)── 手で動かしてから
+ *   {@link FOLLOW_PAUSE_MS} の間は送らない(読み返している所を、行が変わるたびに引き戻さない)。
+ * ⚠ 見るのは手の操作(回す・なぞる・送りのキー)だけ ── 送った結果の `scroll` は数えない(自分で送るたびに止まる)。
+ */
+const FOLLOW_PAUSE_MS = 4000;
+let lastUserScrollAt = -Infinity;
+function userScrolledRecently(): boolean {
+  return Date.now() - lastUserScrollAt < FOLLOW_PAUSE_MS;
+}
+/** test 用 ── 手で送った時刻を忘れる。 */
+export function resetTranscriptFollowPauseForTest(): void {
+  lastUserScrollAt = -Infinity;
+}
+if (typeof document !== 'undefined') {
+  const mark = (): void => {
+    lastUserScrollAt = Date.now();
+  };
+  document.addEventListener('wheel', mark, { capture: true, passive: true });
+  document.addEventListener('touchmove', mark, { capture: true, passive: true });
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' '].includes(e.key)) mark();
+    },
+    { capture: true, passive: true },
+  );
+}
+/**
  * 説明ごとの時刻の行の控え(行の要素と ms)。⚠ `timeupdate` は 1 秒に数回来る ── 毎回 DOM を引き直さない。
  * 説明が描き直されると要素が差し替わる(先頭と末尾が DOM から外れる)ので、そのときだけ作り直す。
  */
@@ -9201,7 +9231,7 @@ function markActiveSeekLine(media: HTMLMediaElement): void {
    * ⚠ 行が**見えているときは動かさない**(`block: 'nearest'` ── 読んでいる所を勝手に動かさない)。
    * ⚠ 止まっているとき(押して移っただけ)は送らない ── 鳴っている間だけ。
    */
-  if (active !== null && !media.paused && appTranscriptFollow.enabled()) {
+  if (active !== null && !media.paused && appTranscriptFollow.enabled() && !userScrolledRecently()) {
     (active as HTMLElement).scrollIntoView?.({ block: 'nearest' });
   }
 }

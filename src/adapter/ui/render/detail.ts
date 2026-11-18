@@ -3908,6 +3908,9 @@ export class DetailRenderer {
 
     const previewHost = document.createElement('div');
     previewHost.setAttribute('data-pkc-field', 'attachment-preview');
+    // 🔴 どの添付の再生機の器か(#1966 4-3 ①)── リンクで開いた録音を鳴らすとき、描き直しの前に残っていた
+    //   **前の録音の再生機**を掴まない(`playOpenedRecording` がこの印で照合する)
+    previewHost.setAttribute('data-pkc-preview-lid', lid);
     host.append(previewHost);
     if (this.assets && meta.assetKey) {
       void this.hydratePreview(previewHost, meta.assetKey, meta.mime, meta.name, this.hydrateToken);

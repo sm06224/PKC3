@@ -119,6 +119,8 @@ describe('音・動画の添付の説明(#1232 段 b)', () => {
     audio!.dispatchEvent(new Event('loadedmetadata'));
     const left = root.querySelectorAll('[data-pkc-action="seek-media"]');
     expect(left, '長さを超える時刻が押せるまま').toHaveLength(1);
+    // 🔴 #1966 4-3 ①: 押せなくなった行の「ノートへ引用」も消える(押しても何も起きない口を残さない)
+    expect(root.querySelectorAll('[data-pkc-action="quote-transcript-line"]'), '押せない行に引用の口が残った').toHaveLength(1);
     expect(left[0]!.getAttribute('data-pkc-seek-ms')).toBe('15000');
     expect(root.textContent).toContain('0:20 つぎに');
   });
@@ -145,6 +147,8 @@ describe('音・動画の添付の説明(#1232 段 b)', () => {
     expect(root.querySelectorAll('[data-pkc-action="quote-transcript-line"]'), '行ごとの引用の口が無い').toHaveLength(2);
     // ⚠ 欄は再生機と説明の間(説明の器の外 ── 本文の字に混ざらない)
     expect(follow!.closest('[data-pkc-prose]')).toBeNull();
+    // 🔴 再生機の器はどの録音の物かを持つ(リンクで開いた録音を鳴らすとき、前の録音の再生機を掴まない)
+    expect(root.querySelector('[data-pkc-field="attachment-preview"]')!.getAttribute('data-pkc-preview-lid')).toBe('a1');
     document.body.textContent = '';
     const pdf = await open('application/pdf', 'doc.pdf');
     expect(pdf.root.querySelector('[data-pkc-field="transcript-follow"]'), 'PDF に入 / 切の欄が出た').toBeNull();

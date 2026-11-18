@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { bindActions, resetTranscriptFollowPauseForTest } from '../../src/adapter/ui/actions/binder';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { appTranscriptFollow } from '../../src/adapter/ui/render/transcript-follow';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -81,6 +81,7 @@ function setup() {
   prose.innerHTML = renderMarkdown('0:15 見積は来週\n0:30 **次**の件\n', { interactiveSeek: true });
   const preview = document.createElement('div');
   preview.setAttribute('data-pkc-field', 'attachment-preview');
+  preview.setAttribute('data-pkc-preview-lid', 'rec');
   host.append(preview, prose);
   detail.append(host);
   const quote = (i: number): HTMLButtonElement =>
@@ -104,6 +105,7 @@ function setup() {
 afterEach(() => {
   document.body.textContent = '';
   appTranscriptFollow.set(true);
+  resetTranscriptFollowPauseForTest();
   vi.useRealTimers();
 });
 
@@ -187,6 +189,32 @@ describe('引用のリンクから鳴らす', () => {
     expect(m.play).toHaveBeenCalledTimes(1);
   });
 
+  it('🔴 描き直しの途中に残っている前の録音の再生機は掴まない(その録音の器の再生機だけ)', async () => {
+    const { root, d, preview } = setup();
+    preview.textContent = '';
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'meet' });
+    // 前の録音(other)の器と再生機が、まだ詳細に残っている
+    const stale = document.createElement('div');
+    stale.setAttribute('data-pkc-field', 'attachment-preview');
+    stale.setAttribute('data-pkc-preview-lid', 'other');
+    const old = fakeAudio(true);
+    stale.append(old.el);
+    root.querySelector('[data-pkc-region="detail"]')!.prepend(stale);
+    const a = document.createElement('a');
+    a.setAttribute('data-pkc-action', 'navigate-entry-ref');
+    a.setAttribute('data-pkc-entry-ref', 'entry:rec#t=15');
+    root.append(a);
+    a.click();
+    await new Promise((r) => setTimeout(r, 30));
+    // 遅れて、その録音の再生機が差さる
+    const mine = fakeAudio(true);
+    preview.append(mine.el);
+    await new Promise((r) => setTimeout(r, 120));
+    expect(old.play, '前の録音が鳴った').not.toHaveBeenCalled();
+    expect(old.time()).toBe(0);
+    expect(mine.time(), 'その録音の再生機が動いていない').toBe(15);
+  });
+
   it('⚠ 再生機が来なければ黙らずに言う', async () => {
     const { root, d, preview } = setup();
     preview.textContent = '';
@@ -220,12 +248,31 @@ describe('再生に合わせて送る', () => {
     return { ...s, move, scrolled };
   }
 
-  it('🔴 鳴っている間、光る行が変わるたびにその行へ送る(既定は入)', () => {
-    const { move, scrolled } = playing(false);
+  it('🔴 鳴っている間、光る行が変わるたびにその行へ送る(既定は入)。送り方は「見えていれば動かさない」', () => {
+    const { move, scrolled, prose } = playing(false);
+    const args: unknown[] = [];
+    const first = prose.querySelector<HTMLElement>('[data-pkc-seek-line]')!;
+    const orig = first.scrollIntoView;
+    first.scrollIntoView = (o?: unknown) => {
+      args.push(o);
+      (orig as (o?: unknown) => void).call(first, o);
+    };
     move(16);
     move(17);
     move(31);
     expect(scrolled).toEqual(['0:15 見積は来週', '0:30 次の件']);
+    expect(args, '送り方が nearest でない(見えている行でも動かす)').toEqual([{ block: 'nearest' }]);
+  });
+
+  it('🔴 手で送った直後(4 秒)は追いかけない ── 読み返している所を引き戻さない', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { move, scrolled } = playing(false);
+    document.dispatchEvent(new Event('wheel'));
+    move(16);
+    expect(scrolled, '手で送った直後に引き戻した').toEqual([]);
+    vi.advanceTimersByTime(4100);
+    move(31);
+    expect(scrolled).toEqual(['0:30 次の件']);
   });
 
   it('🔴 「再生に合わせて送る」を切ると送らない / 止まっているときも送らない', () => {

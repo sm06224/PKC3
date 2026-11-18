@@ -4234,6 +4234,10 @@ dd[data-pkc-field='inspector-toc'] {
 [data-pkc-prose] .pkc-seek-quote:hover {
   color: var(--fg);
 }
+/* 🔴 送った行が貼り付いた帯と再生機の裏に潜らない(#1966 4-3 ① 着地前レビュー)── `scrollIntoView` は `scroll-margin` を見る */
+[data-pkc-prose] [data-pkc-seek-line] {
+  scroll-margin-top: calc(var(--pkc-detail-bar-h, 34px) + var(--pkc-sticky-player-h, 0px) + 8px);
+}
 /* 🔴 「再生に合わせて文字起こしを送る」(#1966 4-3 ①)── 再生機の下の 1 行。小さく・薄く */
 [data-pkc-field='transcript-follow'] {
   display: inline-flex;
