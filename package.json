@@ -36,10 +36,10 @@
     "@phosphor-icons/web": "^2.1.2",
     "@playwright/test": "^1.65.0",
     "@types/node": "^26.6.6",
-    "eslint": "^10.14.0",
+    "eslint": "^10.15.0",
     "happy-dom": "21.0.4",
     "typescript": "^6.0.0",
-    "typescript-eslint": "^8.72.1",
+    "typescript-eslint": "^8.73.0",
     "vite": "^8.3.6",
     "vitest": "^5.1.0"
   },
@@ -60,7 +60,7 @@
     "plotly.js-dist-min": "4.2.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "sucrase": "3.35.0"
+    "sucrase": "3.35.1"
   },
   "overrides": {
     "lodash-es": "^4.18.1"
