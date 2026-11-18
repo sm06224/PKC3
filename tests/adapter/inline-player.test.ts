@@ -116,7 +116,7 @@ describe('その場で鳴らす', () => {
     expect(d.getState().selectedLid, 'ノートを移った(その場で鳴らしていない)').toBe('meet');
     expect(box(), 'プレーヤーが出ない').not.toBeNull();
     expect(quote.nextElementSibling, '引用の段落の直後に出ていない').toBe(box());
-    expect(box()!.textContent).toContain('会議.webm ── 0:15 から');
+    expect(box()!.textContent).toContain('会議.webm・0:15 から');
     expect(media()!.getAttribute('src')).toBe('blob:x0');
     loaded(600);
     expect(media()!.currentTime).toBe(15);

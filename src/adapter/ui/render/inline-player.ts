@@ -20,7 +20,8 @@
  *
  * 🔑 何を鳴らすか(録音の本文 → 添付の鍵 → 実体)は呼び手が `load` で渡す ── ここは器と寿命だけを持つ。
  */
-import { msToSeconds } from '@features/elapsed-text';
+import { elapsedText, msToSeconds } from '@features/elapsed-text';
+import { appVoiceBoostRouter } from './voice-boost';
 
 export const INLINE_PLAYER_FIELD = 'inline-player';
 
@@ -66,16 +67,6 @@ export function closeInlinePlayer(): void {
   c.box.remove();
 }
 
-/** 時刻の綴り(`0:15` / `1:02:03`)。 */
-function clock(ms: number): string {
-  const total = Math.floor(ms / 1000);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const ss = String(s).padStart(2, '0');
-  return h > 0 ? `${String(h)}:${String(m).padStart(2, '0')}:${ss}` : `${String(m)}:${ss}`;
-}
-
 export const INLINE_PLAYER_BEYOND = 'この時刻は録音の長さを超えています';
 export const INLINE_PLAYER_GONE = '録音が見つかりません(消したか、まだ読み込めていません)';
 export const INLINE_PLAYER_NOT_MEDIA = 'このリンク先は再生できる音・動画ではありません';
@@ -107,7 +98,7 @@ export async function openInlinePlayer(args: {
   head.setAttribute('data-pkc-field', 'inline-player-head');
   const label = doc.createElement('span');
   label.setAttribute('data-pkc-field', 'inline-player-label');
-  label.textContent = `${clock(args.ms)} から`;
+  label.textContent = `${elapsedText(args.ms)} から`;
   const open = doc.createElement('button');
   open.type = 'button';
   open.setAttribute('data-pkc-action', 'inline-player-open-note');
@@ -160,11 +151,13 @@ export async function openInlinePlayer(args: {
     return box;
   }
   entry.dispose = src.dispose;
-  label.textContent = `${src.name} ── ${clock(args.ms)} から`;
+  label.textContent = `${src.name}・${elapsedText(args.ms)} から`;
   const media = doc.createElement(src.mime.startsWith('video/') ? 'video' : 'audio');
   media.controls = true;
   media.preload = 'metadata';
   media.setAttribute('data-pkc-field', 'inline-player-media');
+  // 🔑 本文・録ったものの再生機と同じ扱い(音を聞きやすくする設定がここでも効く ── `voice-boost.ts`)
+  appVoiceBoostRouter.watch(media);
   const at = msToSeconds(args.ms);
   media.addEventListener(
     'loadedmetadata',
