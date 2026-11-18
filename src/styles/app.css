@@ -2436,6 +2436,27 @@ button[data-pkc-primary] [data-pkc-icon] {
   font-size: var(--btn-fs-bar);
   padding: 0 var(--s2);
 }
+/* 🔴 **既製の表(` ```embed `)の上の 1 行**(#1966 4-2)── 名前と、右に「更新」。地は無彩色、色は使わない。
+ * ⚠ 器が空(答えを描かない面)のときは名前の行も無い(器の中身として描くので場所を取らない)。 */
+.pkc-embed-view [data-pkc-sql-embed]:not(:empty) {
+  margin-top: 0;
+}
+[data-pkc-sql-embed] [data-pkc-field='embed-view-head'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s1);
+  font-weight: 600;
+}
+[data-pkc-sql-embed] [data-pkc-field='embed-view-head'] > span {
+  flex: 1;
+  min-width: 0;
+}
+[data-pkc-sql-embed] [data-pkc-field='embed-view-refresh'] {
+  font-weight: normal;
+  font-size: var(--btn-fs-bar);
+  padding: 0 var(--s2);
+}
 
 /* ── 入力欄(` ```yaml form `。#1456)──────────────────────────
  * 🔴 本文の規則(`.pkc-md-rendered` 起点)なので、書き出した HTML・章の別ウィンドウにも焼かれる。

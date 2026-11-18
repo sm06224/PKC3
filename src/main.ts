@@ -488,7 +488,8 @@ import { preparePrintBody } from '@adapter/ui/render/print-prepare';
 import { PRINT_PALETTE, PRINT_THEME } from '@adapter/ui/render/diagram-print';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { PLOTLY_KIND } from '@adapter/ui/render/plotly-raster';
-import { askSqlEmbed, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
+import { askSqlEmbed, markEmbedViewsStale, setEmbedViewRunner, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
+import { createEmbedViewRunner } from '@adapter/ui/render/embed-view-runner';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
 import { appExtensionGrants } from '@adapter/platform/extension-grants';
 import { appExtLinks } from '@adapter/platform/extension-links';
@@ -6569,6 +6570,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     if (!ask) throw new Error('このタブの PKC3 が古いままのため、SQL を実行できません。再読み込みしてください');
     return ask(sql, limits);
   });
+  /**
+   * 🔴 **既製の表(` ```embed `)を作る口**(#1966 4-2)。材料は予定表・スマートフォルダの面と同じ走査と、
+   *   主スレッドのノートの一覧。⚠ 集める前に書込の後ろへ並ぶ(`settled`)。
+   */
+  setEmbedViewRunner(
+    createEmbedViewRunner({
+      settled: async () => {
+        await storeEffects?.settled();
+      },
+      metas: () => dispatcher.getState().entryMetas,
+      taskScan: storePort.taskScan,
+      getBody: (lid) => storePort.getBody(lid),
+      smartScan: storePort.smartScan,
+      weekStart: () => appScheduleWeekStart.get(),
+      now: () => Date.now(),
+    }),
+  );
   storeEffects = connectStoreEffects(dispatcher, storePort, {
     // #148 組み込みタイル ── 一式が入っている端末にだけ Office のタイルを出す。
     // 控えは起動時と設置/削除の直後に setMeta で合っている(officeOpener と同じ値)
@@ -6585,6 +6603,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   実行されない(CLAUDE.md §2)ので、ここは**渡すだけ**にする。
      */
     onWriting: (writing) => {
+      // 🔴 書き終わったら、開いている既製の表(` ```embed `)を少し待ってから作り直す(#1966 4-2)
+      if (!writing) markEmbedViewsStale();
       root.toggleAttribute('data-pkc-saving', writing);
       saving.setWriting(writing);
       unloadGuard.setWriting(writing);

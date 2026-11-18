@@ -28,6 +28,9 @@
  */
 import { checkReadOnlySql, sqlRunFailureText } from '@features/query/sql-guard';
 import {
+  EMBED_VIEW_REFRESH_FIELD,
+  embedViewHeadHtml,
+  isEmbedViewSource,
   SQL_EMBED_ATTR,
   SQL_EMBED_FETCH_ROWS,
   SQL_EMBED_MAX_MS,
@@ -43,6 +46,7 @@ import {
   type SqlEmbedAnswer,
 } from '@features/markdown/sql-embed';
 import { copyButtonHtml } from '@features/markdown/markdown-render';
+import { embedViewTextOf, embedViewTitle, parseEmbedView } from '@features/markdown/embed-view';
 import { watchVisible, type VisibleWatch } from './visible-watch';
 import { chordHint } from './shortcut-hint';
 
@@ -70,6 +74,18 @@ export function setSqlEmbedRunner(fn: SqlEmbedRunner | null): void {
   runner = fn;
 }
 
+/**
+ * 🔴 **既製の表(` ```embed `)を作る口**(#1966 4-2)。受け取るのは見出しの `embed` の後ろの字。
+ * ⚠ 断り(表の名前の打ち間違い・スマートフォルダが無い等)は `Error` の字をそのまま画面に出す。
+ */
+export type EmbedViewRunner = (text: string) => Promise<SqlEmbedAnswer>;
+let viewRunner: EmbedViewRunner | null = null;
+
+/** 既製の表を作る口を差す(`main.ts` が 1 度、test が自分の物を)。 */
+export function setEmbedViewRunner(fn: EmbedViewRunner | null): void {
+  viewRunner = fn;
+}
+
 /** 走る前に止められた(別のノートへ移った等)。⚠ 画面には出さない。 */
 export class SqlEmbedCancelled extends Error {
   constructor() {
@@ -92,6 +108,18 @@ let chain: Promise<unknown> = Promise.resolve();
 export function askSqlEmbed(src: string, alive: () => boolean = () => true): Promise<SqlEmbedAnswer> {
   const job = async (): Promise<SqlEmbedAnswer> => {
     if (!alive()) throw new SqlEmbedCancelled();
+    /**
+     * 🔴 **既製の表**(#1966 4-2)── 器は同じ・列も同じ(直列 1 本)で、作るのは SQL ではなく既製の表。
+     * ⚠ 字の門(`checkReadOnlySql`)へは通さない(SQL ではない ── `@` で始まる字は門が断る)。
+     */
+    const viewText = embedViewTextOf(src);
+    if (viewText !== null) {
+      const parsed = parseEmbedView(viewText);
+      if (!parsed.ok) throw new Error(parsed.why);
+      const make = viewRunner;
+      if (make === null) throw new Error('このタブの PKC3 が古いままのため、表を作れません。再読み込みしてください');
+      return { ...(await make(viewText)), title: embedViewTitle(parsed.spec) };
+    }
     // ⚠ 断り文は SQL を打つ面と同じ(`checkReadOnlySql` の `why`)
     const check = checkReadOnlySql(src);
     if (!check.ok) throw new Error(check.why);
@@ -115,6 +143,42 @@ export function askSqlEmbed(src: string, alive: () => boolean = () => true): Pro
     () => undefined,
   );
   return p;
+}
+
+/**
+ * 🔴 **ほかのノートを保存したら、既製の表を作り直す**(#1966 4-2。user 裁定「更新ボタン + 他のノートを保存したときの
+ *   自動再取得(デバウンス付き)」)。
+ *
+ * ⚠ 保存のたびに走らせない ── 書き終わってから {@link EMBED_VIEW_STALE_MS} 何も書かれなかったら 1 回だけ
+ *   (続けて打っている間に何度も集めない。集めるのは保存と同じ worker の列の後ろ)。
+ * ⚠ 作り直すのは**既製の表だけ**(` ```sql embed ` は今までどおり、本文を開いた / 保存したときの答え ── #1223 Q2 = B)。
+ * ⚠ 前の表は新しい答えが来るまで見せたまま(下の本文を上下に揺らさない)。
+ */
+export const EMBED_VIEW_STALE_MS = 1000;
+const liveHydrators = new Set<SqlEmbedHydrator>();
+let staleTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 書き終わった合図(`main.ts` の `onWriting(false)`)。⚠ 何度呼んでも、止まってから 1 回。 */
+export function markEmbedViewsStale(): void {
+  if (staleTimer !== null) clearTimeout(staleTimer);
+  staleTimer = setTimeout(() => {
+    staleTimer = null;
+    for (const h of liveHydrators) h.refreshViews();
+  }, EMBED_VIEW_STALE_MS);
+}
+
+/** test 用 ── 待っている作り直しを捨てる。 */
+export function resetEmbedViewStaleForTest(): void {
+  if (staleTimer !== null) clearTimeout(staleTimer);
+  staleTimer = null;
+  liveHydrators.clear();
+}
+
+/** 既製の表の名前(読めなければ汎用の名前 ── 断りの 1 行の上にも「更新」を置くため)。 */
+function viewTitleOf(src: string): string {
+  const text = embedViewTextOf(src);
+  const parsed = text === null ? null : parseEmbedView(text);
+  return parsed?.ok === true ? embedViewTitle(parsed.spec) : '表';
 }
 
 /**
@@ -151,6 +215,8 @@ export class SqlEmbedHydrator {
   private readonly typing = new WeakSet<HTMLElement>();
   /** 器 → 「引いています」の 1 行を書いた世代。⚠ 手放した後も居座らせないための印。 */
   private readonly pendingLine = new WeakMap<HTMLElement, number>();
+  /** 🔴 既製の表の器のうち、一度でも引いた物(作り直しの対象 ── まだ見えていない器は見えたときに引く)。 */
+  private readonly viewHosts = new Set<HTMLElement>();
 
   /**
    * `root` の中の器を面倒みる。**描くたびに呼んでよい**(冪等)。
@@ -161,6 +227,7 @@ export class SqlEmbedHydrator {
    *   ⚠ 下見の鍵は**編集に入った時点の保存済みの本文**なので、打っている最中の SQL の答えではない。
    */
   sync(root: Element, epoch: string, savedNote = false, typing = savedNote): void {
+    liveHydrators.add(this);
     if (epoch !== this.epoch) {
       this.epoch = epoch;
       this.gen += 1;
@@ -190,8 +257,32 @@ export class SqlEmbedHydrator {
     this.watch = null;
     this.watching.clear();
     this.cache.clear();
+    this.viewHosts.clear();
+    liveHydrators.delete(this);
     this.epoch = null;
     this.gen += 1;
+  }
+
+  /**
+   * 🔴 **既製の表を作り直す**(「更新」ボタン / ほかのノートの保存)。⚠ 引いたことのある器だけ ──
+   *   見えていない器は、見えたときに(控えを捨てたので)新しく作る。
+   */
+  refreshViews(): void {
+    if (this.epoch === null) return;
+    for (const src of [...this.cache.keys()]) if (isEmbedViewSource(src)) this.cache.delete(src);
+    for (const host of [...this.viewHosts]) {
+      if (!host.isConnected) {
+        this.viewHosts.delete(host);
+        continue;
+      }
+      this.run(host);
+    }
+  }
+
+  /** 1 つの器だけ作り直す(その器の「更新」)。 */
+  private refreshOne(host: HTMLElement): void {
+    this.cache.delete(host.getAttribute(SQL_EMBED_SRC_ATTR) ?? '');
+    this.run(host);
   }
 
   private observe(host: HTMLElement): void {
@@ -238,7 +329,7 @@ export class SqlEmbedHydrator {
   private showPending(host: HTMLElement, at: number): void {
     host.setAttribute('data-pkc-sql-embed-state', 'pending');
     if (this.pendingLine.has(host) || !host.hasChildNodes()) {
-      host.innerHTML = sqlEmbedPendingHtml();
+      host.innerHTML = sqlEmbedPendingHtml(isEmbedViewSource(host.getAttribute(SQL_EMBED_SRC_ATTR) ?? ''));
       this.pendingLine.set(host, at);
     }
   }
@@ -248,6 +339,11 @@ export class SqlEmbedHydrator {
     const at = this.gen;
     const stale = (): boolean => at !== this.gen;
     const sql = host.getAttribute(SQL_EMBED_SRC_ATTR) ?? '';
+    const view = isEmbedViewSource(sql);
+    if (view) {
+      this.viewHosts.add(host);
+      this.bind(host);
+    }
     let answer = this.cache.get(sql);
     if (answer === undefined) {
       answer = askSqlEmbed(sql, () => !stale());
@@ -277,7 +373,11 @@ export class SqlEmbedHydrator {
           return;
         }
         this.pendingLine.delete(host);
-        host.innerHTML = sqlEmbedFailureHtml(e instanceof Error ? e.message : String(e), true, chordHint('view-sql'));
+        const why = e instanceof Error ? e.message : String(e);
+        // ⚠ 既製の表は断りの上にも名前と「更新」を置く(直したら押して作り直せる)
+        host.innerHTML = view
+          ? embedViewHeadHtml(viewTitleOf(sql), true) + sqlEmbedFailureHtml(why, true, null, true)
+          : sqlEmbedFailureHtml(why, true, chordHint('view-sql'));
         host.setAttribute('data-pkc-sql-embed-state', 'failed');
       },
     );
@@ -334,7 +434,12 @@ export class SqlEmbedHydrator {
     this.bound.add(host);
     host.addEventListener('click', (ev) => {
       const t = ev.target;
-      if (!(t instanceof Element) || t.closest(`[data-pkc-field="${SQL_EMBED_MORE_FIELD}"]`) === null) {
+      if (!(t instanceof Element)) return;
+      if (t.closest(`[data-pkc-field="${EMBED_VIEW_REFRESH_FIELD}"]`) !== null) {
+        this.refreshOne(host);
+        return;
+      }
+      if (t.closest(`[data-pkc-field="${SQL_EMBED_MORE_FIELD}"]`) === null) {
         return;
       }
       this.shown.set(host, (this.shown.get(host) ?? SQL_EMBED_PAGE_ROWS) + SQL_EMBED_PAGE_ROWS);

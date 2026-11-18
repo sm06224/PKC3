@@ -18,6 +18,7 @@ import { partitionDrop, setupFileDragHint } from './file-drag-hint';
 import { bindWaveDrag } from './wave-drag';
 import { renameAttachmentAndFile, renameEntryFromRow, restoreRenamedTitle } from './attachment-rename';
 import { lidOfNode } from './lid-of-node';
+import { EMBED_VIEW_FIND_ATTR } from '@features/markdown/sql-embed';
 import { cellName } from '@features/markdown/csv-formula';
 import { isEditableColor } from '@features/markdown/color-code';
 import type { DroppedAt } from './asset-into-note';
@@ -9774,7 +9775,17 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   あるので、いまは lid まで開く(`link-target.ts` に理由)。
    */
   'navigate-entry-ref': (dispatcher, target, services, root) => {
-    navigateToLink(dispatcher, target, target.getAttribute('data-pkc-entry-ref'), root, services);
+    const ref = target.getAttribute('data-pkc-entry-ref');
+    navigateToLink(dispatcher, target, ref, root, services);
+    /**
+     * 🔴 **既製の表(` ```embed open-tasks `)の項目から来たら、その字を塗って送る**(#1966 4-2)。
+     * ⚠ 塗る口は「探す」から来たときと同じ 1 本(`SEARCH_JUMP_START` ── 編集中・別のノートが開いている等の
+     *   断りもそちらが持つ)。開けなかった(選びが動かなかった)ときは何もしない。
+     */
+    const find = target.getAttribute(EMBED_VIEW_FIND_ATTR);
+    const lid = ref?.startsWith('entry:') ? ref.slice('entry:'.length).split('#')[0] : undefined;
+    if (find !== null && find !== '' && lid !== undefined && dispatcher.getState().selectedLid === lid)
+      dispatcher.dispatch({ type: 'SEARCH_JUMP_START', lid, query: find });
   },
   /**
    * `@[card](…)` の placeholder。⚠ **解決器は `entry:` と同じ 1 本**
