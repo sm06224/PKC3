@@ -264,6 +264,8 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-date-warn': 'src/features/markdown/markdown-render.ts',
   // 🔴 文字起こしの行頭の時刻(#1232 段 b)。`pkc-date-link` と同じ ── `interactiveSeek` を渡した面だけに出る
   'pkc-seek-link': 'src/features/markdown/markdown-render.ts',
+  // 🔴 文字起こしの行の「ノートへ引用」(#1966 4-3 ①)── 押せる面(`interactiveSeek`)だけで出す
+  'pkc-seek-quote': 'src/features/markdown/markdown-render.ts',
   /**
    * 色コードの左の見本(#1224)。⚠ これも**本文の描画物である**が、出るのは `colorSwatches` を渡した面だけ
    *   (= 設定に従う読む面だけ)なので、既定で描く走査には現れない。

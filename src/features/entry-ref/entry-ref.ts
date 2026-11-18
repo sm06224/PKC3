@@ -10,6 +10,7 @@
  *   entry:<lid>#day/<yyyy-mm-dd>
  *   entry:<lid>#log/<id>/<slug>
  *   entry:<lid>#h/<heading-id>        (#579 ── 本文の見出し。id は描画が刻む物と同じ)
+ *   entry:<lid>#t=<秒>                (#1966 4-3 ── 録音・動画のその時刻。小数可)
  *   entry:<lid>#<legacy-log-id>       (legacy, accepted but not emitted)
  *
  * Invariants:
@@ -38,6 +39,11 @@ export type ParsedEntryRef =
    * 出力)そのままで、**日本語を含みうる** ── textlog 用の `heading`(ASCII の slug)とは別の形。
    */
   | { kind: 'section'; lid: string; id: string }
+  /**
+   * 🔴 **録音・動画のその時刻を指す**(#1966 4-3)── 文字起こしの「ノートへ引用」が書く
+   * `[0:15](entry:<録音>#t=15)`。`ms` はミリ秒(秒の小数を丸めて持つ)。
+   */
+  | { kind: 'time'; lid: string; ms: number }
   | { kind: 'legacy'; lid: string; logId: string }
   | { kind: 'invalid'; raw: string };
 
@@ -46,6 +52,17 @@ export const SCHEME = 'entry:';
 const TOKEN_RE = /^[A-Za-z0-9_-]+$/;
 const SLUG_RE = /^[A-Za-z0-9-]+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** 時刻を指す断片(#1966 4-3)。⚠ 秒(小数可)だけを受ける ── `1:02` のような綴りは受けない(書くのは引用の口だけ)。 */
+const TIME_FRAGMENT_RE = /^t=(\d+(?:\.\d+)?)$/;
+
+/** 時刻の断片を解く(`t=15` → 15000)。読めなければ `null`。 */
+export function parseTimeFragment(frag: string): number | null {
+  const m = TIME_FRAGMENT_RE.exec(frag.startsWith('#') ? frag.slice(1) : frag);
+  if (m === null) return null;
+  const ms = Math.round(Number(m[1]) * 1000);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 /** 見出しを指す断片の頭(#579)。⚠ `log/` / `day/` と同じ作法で 1 語で見分ける。 */
 const SECTION_PREFIX = 'h/';
 
@@ -163,6 +180,12 @@ export function parseEntryRef(raw: string, opts: ParseEntryRefOptions = {}): Par
     return { kind: 'log', lid, logId: after };
   }
 
+  // t=<秒>(#1966 4-3)
+  if (frag.startsWith('t=')) {
+    const ms = parseTimeFragment(frag);
+    return ms === null ? invalid(raw) : { kind: 'time', lid, ms };
+  }
+
   // legacy form: bare opaque id after '#'
   if (TOKEN_RE.test(frag)) {
     return { kind: 'legacy', lid, logId: frag };
@@ -244,6 +267,9 @@ export function formatEntryRef(ref: ParsedEntryRef): string {
     //    URL へ載るときは markdown-it が percent-encode し、読む側が decode する(往復する)
     case 'section':
       return `${SCHEME}${ref.lid}#${SECTION_PREFIX}${ref.id}`;
+    // ⚠ 秒で書く(整数の秒は小数点を付けない ── `#t=15`)
+    case 'time':
+      return `${SCHEME}${ref.lid}#t=${String(ref.ms / 1000)}`;
     case 'legacy':
       return `${SCHEME}${ref.lid}#${ref.logId}`;
     case 'invalid':

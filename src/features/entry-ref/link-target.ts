@@ -32,7 +32,7 @@
  *
  * ⚠ **pure module**。DOM も dispatch も触らない。
  */
-import { parseEntryRef, parseSectionFragment } from './entry-ref';
+import { parseEntryRef, parseSectionFragment, parseTimeFragment } from './entry-ref';
 import { parsePortablePkcReference } from '@features/link/permalink';
 
 /** リンクが指す先。⚠ **fragment は「解けた文字列」ではなく生のまま**運ぶ。 */
@@ -47,6 +47,11 @@ export type LinkTarget =
        * ⚠ 解くのは `parseSectionFragment` 1 か所(`entry:` と `pkc://` で 2 本にしない)。
        */
       readonly section: string | null;
+      /**
+       * 🔴 **録音・動画の時刻(ミリ秒)**(#1966 4-3)── `#t=<秒>` のときだけ。他の形は `null`。
+       * ⚠ 解くのは `parseTimeFragment` 1 か所(`entry:` と `pkc://` で 2 本にしない)。
+       */
+      readonly seekMs: number | null;
       /** 別のコンテナを指している(このアプリでは開けない)。 */
       readonly foreign: boolean;
     }
@@ -77,6 +82,7 @@ export function parseLinkTarget(raw: string, selfContainerId = ''): LinkTarget {
       lid: p.targetId,
       fragment: p.fragment ?? '',
       section: parseSectionFragment(p.fragment ?? ''),
+      seekMs: parseTimeFragment(p.fragment ?? ''),
       // ⚠ 自分のコンテナ id を渡されていないときは**外と見なさない**
       //   (既定で断ると全部断ることになる)。
       // 🔑 描画側は Issue #100 段① で cid を受け取ったので、
@@ -100,6 +106,7 @@ export function parseLinkTarget(raw: string, selfContainerId = ''): LinkTarget {
     // ⚠ 中身の無い `#` は断片にしない(#1163 依頼 179 ── `entry:xxx#` はノートそのものを開く)
     fragment: hash === -1 || p.kind === 'entry' ? '' : raw.slice(hash),
     section: p.kind === 'section' ? p.id : null,
+    seekMs: p.kind === 'time' ? p.ms : null,
     foreign: false,
   };
 }

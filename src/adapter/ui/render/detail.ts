@@ -11,6 +11,7 @@
  * innerHTML への流し込みは markdown-render が `html: false`(生 HTML 不通過)で
  * 生成した出力に限る(PKC2 と同じ安全前提)。
  */
+import { appTranscriptFollow } from './transcript-follow';
 import { DAY_NAV_FIELD, paintDayNav } from './day-nav';
 import { renderMarkdown } from '@features/markdown/markdown-render';
 import { flipTaskInDraft } from '@features/markdown/body-rewrite';
@@ -3963,6 +3964,20 @@ export class DetailRenderer {
       // 🔴 録音の長さを超える時刻は再生の字にしない(#1163 依頼 373)── 長さは再生機が読んだときに分かる
       // ⚠ 見張るのは再生機の器(`previewHost`、描くたびに作り直す)── 本文の器(`host`)は描き直しても残るので、付けると積もる
       if (playable) watchSeekRange(previewHost, desc);
+      /**
+       * 🔴 **「再生に合わせて送る」の入 / 切**(#1966 4-3 ①)── 時刻の行が在る音・動画のノートだけ。
+       * ⚠ 置くのは再生機と説明の**間**(説明を読み始める所。再生機の器は貼り付くので、その下に流れる)。
+       */
+      if (playable && desc.querySelector('[data-pkc-seek-line]') !== null) {
+        const follow = document.createElement('label');
+        follow.setAttribute('data-pkc-field', 'transcript-follow');
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.setAttribute('data-pkc-action', 'toggle-transcript-follow');
+        box.checked = appTranscriptFollow.enabled();
+        follow.append(box, document.createTextNode('再生に合わせて文字起こしを送る'));
+        desc.before(follow);
+      }
       // 🔴 添付の説明の表も、見出しを押して並べ替えられる(#1163 依頼 223。本文と同じ 1 本)
       applyTableSort(desc);
       void this.hydrateAssetRefs(desc, this.hydrateToken, {

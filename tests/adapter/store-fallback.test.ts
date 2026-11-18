@@ -42,6 +42,7 @@ import { InlineCodeCopyStore } from '@adapter/ui/render/inline-code-copy';
 import { InlineCompleteStore } from '@adapter/ui/render/inline-complete-setting';
 import { PdfReaderStore } from '@adapter/ui/render/pdf-reader-setting';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
+import { TranscriptFollowStore } from '@adapter/ui/render/transcript-follow';
 import { DateLinksStore } from '@adapter/ui/render/date-links';
 import { RelativeDaysStore } from '@adapter/ui/render/relative-days';
 import { ScheduleWeekStartStore } from '@adapter/ui/render/schedule-week-start';
@@ -152,6 +153,16 @@ const CASES: readonly {
     },
     a: true,
     b: false,
+  },
+  {
+    name: 'TranscriptFollowStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new TranscriptFollowStore(st);
+      return { write: (v) => s.set(v as boolean), read: () => s.enabled() };
+    },
+    // ⚠ 既定が入なので、最初に書くのは切(`DateLinksStore` と同じ理由)
+    a: false,
+    b: true,
   },
   {
     name: 'DateLinksStore',

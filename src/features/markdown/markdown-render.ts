@@ -3265,6 +3265,8 @@ md.inline.ruler.after('link', 'pkc_title_link', function titleLinkRule(state, si
  *   `text` は表示の綴り(`m[1]` そのまま。`0:15` / `1:02:03`)。
  */
 const seekLinkTitle = (text: string): string => `${text} から再生`;
+/** 文字起こしの行の「ノートへ引用」の名前(#1966 4-3 ①)。 */
+export const TRANSCRIPT_QUOTE_LABEL = 'この行をノートへ引用';
 md.core.ruler.after('inline', 'pkc-seek-link', function (state) {
   if ((state.env as { interactiveSeek?: boolean }).interactiveSeek !== true) return true;
   for (const token of state.tokens) {
@@ -3281,8 +3283,15 @@ md.core.ruler.after('inline', 'pkc-seek-link', function (state) {
      */
     let lineOpen = false;
     const closeLine = (): void => {
+      /**
+       * 🔴 **行の末尾に「ノートへ引用」**(#1966 4-3 ①)── 押すと `> [0:15](entry:<録音>#t=15) 字` をノートへ入れる
+       *   (受け手 `quote-transcript-line`)。⚠ 絵は CSS の `::before` ── 字を持たないので、行の `textContent`
+       *   (引用する字・コピー・読み上げ)を汚さない。押せる面(`interactiveSeek`)だけに出る。
+       */
       const close = new state.Token('html_inline', '', 0);
-      close.content = '</span>';
+      close.content =
+        `<button type="button" class="pkc-seek-quote" data-pkc-action="quote-transcript-line" ` +
+        `title="${TRANSCRIPT_QUOTE_LABEL}" aria-label="${TRANSCRIPT_QUOTE_LABEL}"></button></span>`;
       out.push(close);
       lineOpen = false;
     };

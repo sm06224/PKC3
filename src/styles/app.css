@@ -4208,6 +4208,42 @@ dd[data-pkc-field='inspector-toc'] {
   text-underline-offset: 2px;
   cursor: pointer;
 }
+/**
+ * 🔴 **文字起こしの行の「ノートへ引用」**(#1966 4-3 ①)── 行の末尾の小さなボタン。絵は `::before`(字を持たない)。
+ * ⚠ 薄いが**見える**(隠さない ── マウスを載せるまで見えない物は、触る画面では存在しない)。行に載せると濃くなる。
+ */
+[data-pkc-prose] .pkc-seek-quote {
+  margin-left: var(--s1);
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.85em;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.45;
+  vertical-align: baseline;
+}
+[data-pkc-prose] .pkc-seek-quote::before {
+  content: '\275D 引用';
+}
+[data-pkc-prose] [data-pkc-seek-line]:hover .pkc-seek-quote,
+[data-pkc-prose] .pkc-seek-quote:focus-visible {
+  opacity: 1;
+}
+[data-pkc-prose] .pkc-seek-quote:hover {
+  color: var(--fg);
+}
+/* 🔴 「再生に合わせて文字起こしを送る」(#1966 4-3 ①)── 再生機の下の 1 行。小さく・薄く */
+[data-pkc-field='transcript-follow'] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  margin: var(--s1) 0;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
 
 /**
  * 🔴 **日付の右に添える「あと3日」「5日前」**(#1225)。
@@ -11937,6 +11973,11 @@ h3[data-pkc-section] {
   [data-pkc-seek-line][data-pkc-seek-active] {
     background: none;
     color: inherit;
+  }
+  /* ⚠ 「ノートへ引用」と「再生に合わせて送る」も紙には要らない(押せない) */
+  [data-pkc-prose] .pkc-seek-quote,
+  [data-pkc-field='transcript-follow'] {
+    display: none;
   }
 }
 

@@ -136,6 +136,21 @@ describe('音・動画の添付の説明(#1232 段 b)', () => {
     expect(root.querySelectorAll('[data-pkc-action="seek-media"]'), '本文の器で見張っている(描くたびに積もる)').toHaveLength(2);
   });
 
+  /** 🔴 #1966 4-3 ①: 時刻の行が在る音・動画のノートにだけ「再生に合わせて送る」と、行ごとの「ノートへ引用」が出る。 */
+  it('🔴 音の添付には「再生に合わせて文字起こしを送る」(既定は入)と、行ごとの「ノートへ引用」が出る / PDF には出ない', async () => {
+    const { root } = await open('audio/webm', 'rec.webm');
+    const follow = root.querySelector<HTMLInputElement>('[data-pkc-field="transcript-follow"] input[type="checkbox"]');
+    expect(follow, '入 / 切の欄が無い').not.toBeNull();
+    expect(follow!.checked, '既定が入でない').toBe(true);
+    expect(root.querySelectorAll('[data-pkc-action="quote-transcript-line"]'), '行ごとの引用の口が無い').toHaveLength(2);
+    // ⚠ 欄は再生機と説明の間(説明の器の外 ── 本文の字に混ざらない)
+    expect(follow!.closest('[data-pkc-prose]')).toBeNull();
+    document.body.textContent = '';
+    const pdf = await open('application/pdf', 'doc.pdf');
+    expect(pdf.root.querySelector('[data-pkc-field="transcript-follow"]'), 'PDF に入 / 切の欄が出た').toBeNull();
+    expect(pdf.root.querySelectorAll('[data-pkc-action="quote-transcript-line"]')).toHaveLength(0);
+  });
+
   it('🔴 PDF の添付の説明に `0:15 …` と書いても、押せる字にしない(字は残る)', async () => {
     const { root } = await open('application/pdf', 'doc.pdf');
     expect(root.querySelector('[data-pkc-action="seek-media"]'), '再生機の無い所で押せる字になっている').toBeNull();
