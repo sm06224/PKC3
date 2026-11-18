@@ -167,6 +167,32 @@ export function markEmbedViewsStale(): void {
   }, EMBED_VIEW_STALE_MS);
 }
 
+/** test 用 ── 生きている係の数(手放した係は数えない)。 */
+export function liveEmbedHydratorCountForTest(): number {
+  return liveHydrators.size;
+}
+
+/**
+ * 🔴 **「ほかのノートを保存した」を、ノートの一覧(`entryMetas`)が差し替わったことで知る**(着地前レビュー)。
+ *
+ * ⚠ 1 稿目は store の列の「書いている」合図(`onWriting`)で知っていた ── ところがその合図は**読むだけの依頼**
+ *   (本文を開く・履歴の一覧など)でも鳴るので、**ノートを 1 つ開くたびに表を 2 回作っていた**。
+ * 🔑 一覧が新しい Map になるのは、書いた刻みが届いたとき(`ENTRY_STAMPED`)・作る・消す・名前を変える…
+ *   **書いたときだけ**である(選ぶ・開くでは差し替わらない)。
+ * @returns 見張りを外す関数
+ */
+export function connectEmbedViewStale(d: {
+  getState(): { readonly entryMetas: unknown };
+  onState(listener: (s: { readonly entryMetas: unknown }) => void): () => void;
+}): () => void {
+  let last = d.getState().entryMetas;
+  return d.onState((s) => {
+    if (s.entryMetas === last) return;
+    last = s.entryMetas;
+    markEmbedViewsStale();
+  });
+}
+
 /** test 用 ── 待っている作り直しを捨てる。 */
 export function resetEmbedViewStaleForTest(): void {
   if (staleTimer !== null) clearTimeout(staleTimer);
@@ -217,6 +243,8 @@ export class SqlEmbedHydrator {
   private readonly pendingLine = new WeakMap<HTMLElement, number>();
   /** 🔴 既製の表の器のうち、一度でも引いた物(作り直しの対象 ── まだ見えていない器は見えたときに引く)。 */
   private readonly viewHosts = new Set<HTMLElement>();
+  /** 🔴 作り直しのとき、「さらに N 行」で広げた行数を保つ器(着地前レビュー ── 読んでいる最中に縮めない)。 */
+  private readonly keepShown = new WeakSet<HTMLElement>();
 
   /**
    * `root` の中の器を面倒みる。**描くたびに呼んでよい**(冪等)。
@@ -275,14 +303,26 @@ export class SqlEmbedHydrator {
         this.viewHosts.delete(host);
         continue;
       }
-      this.run(host);
+      this.keepShown.add(host);
+      /**
+       * ⚠ **いま画面に出ていない器は引かない**(着地前レビュー)── 本文が畳まれた面(`display: none`)で保存のたびに
+       *   走査しない。見えたときに引くよう観測へ戻す(控えは捨ててあるので、見えたら新しい答えを作る)。
+       */
+      if (host.getClientRects().length === 0) this.observe(host);
+      else this.run(host);
     }
   }
 
   /** 1 つの器だけ作り直す(その器の「更新」)。 */
   private refreshOne(host: HTMLElement): void {
     this.cache.delete(host.getAttribute(SQL_EMBED_SRC_ATTR) ?? '');
+    this.keepShown.add(host);
     this.run(host);
+  }
+
+  /** test 用 ── いま作り直しの対象として生きている器の数(手放したら 0)。 */
+  get viewHostCountForTest(): number {
+    return this.viewHosts.size;
   }
 
   private observe(host: HTMLElement): void {
@@ -363,7 +403,9 @@ export class SqlEmbedHydrator {
           return;
         }
         this.answers.set(host, a);
-        this.shown.set(host, SQL_EMBED_PAGE_ROWS);
+        const kept = this.keepShown.has(host) ? this.shown.get(host) : undefined;
+        this.keepShown.delete(host);
+        this.shown.set(host, kept ?? SQL_EMBED_PAGE_ROWS);
         this.bind(host);
         this.draw(host);
       },
@@ -388,7 +430,8 @@ export class SqlEmbedHydrator {
     if (a === undefined) return;
     this.pendingLine.delete(host);
     host.innerHTML = sqlEmbedAnswerHtml(a, this.shown.get(host) ?? SQL_EMBED_PAGE_ROWS, true);
-    if (this.savedNote.has(host)) {
+    // ⚠ 既製の表は作るたびに最新なので「保存したときの結果」とは言わない(着地前レビュー)
+    if (this.savedNote.has(host) && !isEmbedViewSource(host.getAttribute(SQL_EMBED_SRC_ATTR) ?? '')) {
       const note = host.ownerDocument.createElement('p');
       note.setAttribute('data-pkc-field', SQL_EMBED_SAVED_FIELD);
       note.textContent = SQL_EMBED_SAVED_TEXT;

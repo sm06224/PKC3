@@ -160,6 +160,23 @@ function cap(rows: string[][], links: Array<readonly SqlEmbedRowLink[]>): { rows
 }
 
 /**
+ * 🔴 **押したときに塗る字**(着地前レビュー)── 項目の字(`text`)は日付を抜いて継いだ字・200 字で切った字・
+ *   記法つきの字なので、**原文の行の部分ではない**ことがある(`- [ ] 会議 @2026-11-20 資料` → 「会議 資料」)。
+ *   そのまま「探す」へ渡すと 0 件で、塗りも帯も出ない。
+ * 🔑 字がそのまま原文の行に在ればそれを、無ければ**原文の行に在る、いちばん長い切れ端**を使う
+ *   (空白・記法の字・切った印 `…` で切る)。⚠ 1 つも無ければ `undefined`(塗らずに開くだけ)。
+ */
+export function findTermOf(text: string, rawLine: string): string | undefined {
+  const t = text.trim();
+  // ⚠ 記法の字は塗る相手(描いた本文)に出ないので、記法を含む字はそのまま使わない
+  const MARK = /[\s*_~`[\]()…]+/;
+  if (t !== '' && !/[*_~`[\]()…]/.test(t) && rawLine.includes(t)) return t;
+  let best = '';
+  for (const piece of t.split(MARK)) if (piece.length > best.length && rawLine.includes(piece)) best = piece;
+  return best === '' ? undefined : best;
+}
+
+/**
  * 🔴 **未完了のチェック項目**(`open-tasks`)。読み方は予定表と同じ(`buildAgenda` ── 期間・繰り返し・済んだ回の扱い)。
  *
  * - `today` … 期日が今日まで(過ぎた物を含む)
@@ -181,6 +198,7 @@ export function openTasksAnswer(input: {
   const groups = buildAgenda(open, today, range === 'all', { skip: materializedDates(cards) });
   const week = weekOf(today, input.weekStart);
   const end = range === 'today' ? today : range === 'week' ? (week?.[6] ?? today) : null;
+  const raw = new Map(cards.map((c) => [`${c.lid} ${String(c.line)}`, c.rawLine]));
   const seen = new Set<string>();
   const rows: string[][] = [];
   const links: Array<readonly SqlEmbedRowLink[]> = [];
@@ -198,10 +216,8 @@ export function openTasksAnswer(input: {
         if ((c.until ?? c.date ?? g.date) < today) when += '(過ぎています)';
       }
       rows.push([when, c.text, title]);
-      links.push([
-        { col: 1, lid: c.lid, find: c.text },
-        { col: 2, lid: c.lid },
-      ]);
+      const find = findTermOf(c.text, raw.get(id) ?? '');
+      links.push([find === undefined ? { col: 1, lid: c.lid } : { col: 1, lid: c.lid, find }, { col: 2, lid: c.lid }]);
     }
   }
   return { columns: ['期日', '項目', 'ノート'], ...cap(rows, links) };

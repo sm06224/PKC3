@@ -16,7 +16,9 @@ import {
   SQL_EMBED_ATTR,
 } from '../../src/features/markdown/sql-embed';
 import {
+  connectEmbedViewStale,
   EMBED_VIEW_STALE_MS,
+  liveEmbedHydratorCountForTest,
   markEmbedViewsStale,
   resetEmbedViewStaleForTest,
   setEmbedViewRunner,
@@ -195,6 +197,118 @@ describe('器・鮮度', () => {
     expect(sqls, 'sql embed まで作り直した').toHaveLength(1);
   });
 
+  it('🔴 「ほかのノートを保存した」= ノートの一覧が差し替わったとき。選ぶ・開くだけでは作り直さない(着地前レビュー)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const views: string[] = [];
+    setEmbedViewRunner(async (text) => {
+      views.push(text);
+      return { columns: ['n'], rows: [[views.length]], truncated: false };
+    });
+    const d = new Dispatcher();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('home', 'ホーム'), meta('n1', '仕事')], relations: [] });
+    const off = connectEmbedViewStale(d);
+    mount('```embed recent\n```\n');
+    const h = new SqlEmbedHydrator();
+    h.sync(root, 'body-1');
+    await settle();
+    expect(views).toHaveLength(1);
+    // 開く・本文を読むだけ(一覧は差し替わらない)
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: 'x' });
+    vi.advanceTimersByTime(EMBED_VIEW_STALE_MS * 2);
+    await settle();
+    expect(views, '開いただけで作り直した').toHaveLength(1);
+    // 書いた刻みが届く(= 保存した)
+    d.dispatch({ type: 'ENTRY_STAMPED', lid: 'n1', createdAt: '2026-11-18 00:00:00', updatedAt: '2026-11-18 01:00:00' });
+    vi.advanceTimersByTime(EMBED_VIEW_STALE_MS);
+    await settle();
+    expect(views, '保存したのに作り直さない').toHaveLength(2);
+    off();
+    d.dispatch({ type: 'ENTRY_STAMPED', lid: 'n1', createdAt: '2026-11-18 00:00:00', updatedAt: '2026-11-18 02:00:00' });
+    vi.advanceTimersByTime(EMBED_VIEW_STALE_MS);
+    await settle();
+    expect(views, '見張りを外したのに作り直した').toHaveLength(2);
+  });
+
+  it('⚠ 作り直しでは「さらに N 行」で広げた行数を保つ / sql embed の控えは捨てない(着地前レビュー)', async () => {
+    let views = 0;
+    const sqls: string[] = [];
+    setEmbedViewRunner(async () => {
+      views += 1;
+      return { columns: ['n'], rows: Array.from({ length: 450 }, (_, i) => [i]), truncated: false };
+    });
+    setSqlEmbedRunner(async (sql) => {
+      sqls.push(sql);
+      return { columns: ['x'], rows: [[1]], truncated: false, ms: 0 };
+    });
+    mount('```embed recent\n```\n\n```sql embed\nSELECT 1\n```\n');
+    const h = new SqlEmbedHydrator();
+    h.sync(root, 'body-1');
+    await settle();
+    host(0).querySelector<HTMLButtonElement>('[data-pkc-field="sql-embed-more"]')!.click();
+    expect(host(0).querySelectorAll('tbody tr')).toHaveLength(400);
+    h.refreshViews();
+    await settle();
+    expect(views).toBe(2);
+    expect(host(0).querySelectorAll('tbody tr'), '作り直したら 200 行へ縮んだ').toHaveLength(400);
+    // 同じ本文の別の面に同じ SQL の器を置いても、控えから出す(引き直さない)
+    const again = document.createElement('div');
+    again.innerHTML = renderMarkdown('```sql embed\nSELECT 1\n```\n');
+    root.append(again);
+    h.sync(root, 'body-1');
+    await settle();
+    expect(sqls, '作り直しで sql embed の控えまで捨てた').toHaveLength(1);
+  });
+
+  it('⚠ いま画面に出ていない器は作り直さず、見えたときに作る(着地前レビュー)', async () => {
+    const seen: Array<() => void> = [];
+    class FakeIO {
+      private readonly targets = new Set<Element>();
+      constructor(private readonly cb: (e: Array<{ isIntersecting: boolean; target: Element }>) => void) {
+        seen.push(() => this.cb([...this.targets].map((target) => ({ isIntersecting: true, target }))));
+      }
+      observe(el: Element): void {
+        this.targets.add(el);
+      }
+      unobserve(el: Element): void {
+        this.targets.delete(el);
+      }
+      disconnect(): void {
+        this.targets.clear();
+      }
+    }
+    vi.stubGlobal('IntersectionObserver', FakeIO);
+    let views = 0;
+    setEmbedViewRunner(async () => {
+      views += 1;
+      return { columns: ['n'], rows: [[views]], truncated: false };
+    });
+    mount('```embed recent\n```\n');
+    const h = new SqlEmbedHydrator();
+    h.sync(root, 'body-1');
+    for (const s of seen) s();
+    await settle();
+    expect(views).toBe(1);
+    // ⚠ happy-dom は箱を組まないので、隠れた器(display: none)の姿を手で作る
+    Object.defineProperty(host(), 'getClientRects', { value: () => [], configurable: true });
+    h.refreshViews();
+    await settle();
+    expect(views, '隠れた器を作り直した').toBe(1);
+    for (const s of seen) s();
+    await settle();
+    expect(views, '見えたのに作り直さない').toBe(2);
+  });
+
+  it('⚠ 2 列の下見でも、既製の表には「保存したときの結果」を添えない(作るたびに最新)', async () => {
+    setEmbedViewRunner(async () => ({ columns: ['n'], rows: [[1]], truncated: false }));
+    setSqlEmbedRunner(async () => ({ columns: ['x'], rows: [[1]], truncated: false, ms: 0 }));
+    mount('```embed recent\n```\n\n```sql embed\nSELECT 1\n```\n');
+    new SqlEmbedHydrator().sync(root, 'body-1', true, false);
+    await settle();
+    expect(host(0).querySelector('[data-pkc-field="sql-embed-saved"]'), '既製の表に添えた').toBeNull();
+    expect(host(1).querySelector('[data-pkc-field="sql-embed-saved"]'), '対照群: sql embed に添えていない').not.toBeNull();
+  });
+
   it('⚠ 手放した面(別のノートへ移った)は作り直さない', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const views: string[] = [];
@@ -206,7 +320,11 @@ describe('器・鮮度', () => {
     const h = new SqlEmbedHydrator();
     h.sync(root, 'body-1');
     await settle();
+    expect(liveEmbedHydratorCountForTest()).toBe(1);
+    expect(h.viewHostCountForTest).toBe(1);
     h.release();
+    expect(liveEmbedHydratorCountForTest(), '手放した係が作り直しの名簿に残った').toBe(0);
+    expect(h.viewHostCountForTest, '手放した器を持ち続けている').toBe(0);
     markEmbedViewsStale();
     vi.advanceTimersByTime(EMBED_VIEW_STALE_MS);
     await settle();
@@ -265,5 +383,12 @@ describe('行から開く', () => {
     press('n2', null);
     expect(d.getState().selectedLid).toBe('n2');
     expect(d.getState().searchJump ?? null, 'ノートの升で塗りが残った / 付いた').toBeNull();
+    // ⚠ 編集中は開けない ── 塗りも付かない(判定は SEARCH_JUMP_START の受け手 1 か所)
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '本文' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '編集に入れていない(この検査の前提)').toBe('editing');
+    press('n1', '見積を送る');
+    expect(d.getState().selectedLid).toBe('n2');
+    expect(d.getState().searchJump ?? null, '編集中なのに塗りが付いた').toBeNull();
   });
 });

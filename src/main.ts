@@ -488,7 +488,7 @@ import { preparePrintBody } from '@adapter/ui/render/print-prepare';
 import { PRINT_PALETTE, PRINT_THEME } from '@adapter/ui/render/diagram-print';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { PLOTLY_KIND } from '@adapter/ui/render/plotly-raster';
-import { askSqlEmbed, markEmbedViewsStale, setEmbedViewRunner, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
+import { askSqlEmbed, connectEmbedViewStale, setEmbedViewRunner, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
 import { createEmbedViewRunner } from '@adapter/ui/render/embed-view-runner';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
 import { appExtensionGrants } from '@adapter/platform/extension-grants';
@@ -6574,6 +6574,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔴 **既製の表(` ```embed `)を作る口**(#1966 4-2)。材料は予定表・スマートフォルダの面と同じ走査と、
    *   主スレッドのノートの一覧。⚠ 集める前に書込の後ろへ並ぶ(`settled`)。
    */
+  // 🔴 ほかのノートを保存したら(ノートの一覧が差し替わったら)、開いている既製の表を少し待ってから作り直す
+  connectEmbedViewStale(dispatcher);
   setEmbedViewRunner(
     createEmbedViewRunner({
       settled: async () => {
@@ -6603,8 +6605,6 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   実行されない(CLAUDE.md §2)ので、ここは**渡すだけ**にする。
      */
     onWriting: (writing) => {
-      // 🔴 書き終わったら、開いている既製の表(` ```embed `)を少し待ってから作り直す(#1966 4-2)
-      if (!writing) markEmbedViewsStale();
       root.toggleAttribute('data-pkc-saving', writing);
       saving.setWriting(writing);
       unloadGuard.setWriting(writing);

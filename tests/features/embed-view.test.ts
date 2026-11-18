@@ -10,6 +10,7 @@ import {
   embedViewTextOf,
   embedViewTitle,
   findSmartFolder,
+  findTermOf,
   isEmbedViewInfo,
   openTasksAnswer,
   parseEmbedView,
@@ -159,6 +160,16 @@ describe('open-tasks(未完了)', () => {
     div.innerHTML = sqlEmbedAnswerHtml(a, 200, false);
     expect(div.querySelector(`[${EMBED_VIEW_FIND_ATTR}]`)).toBeNull();
     expect(div.querySelector('tbody a')!.getAttribute('href')).toBe('entry:n1');
+  });
+
+  it('⚠ 塗る字は原文の行に在る字(行の途中の日付・記法・切った印で、項目の字が原文と食い違うとき)', () => {
+    const mid = taskCardsOf('n1', '- [ ] 会議 @2026-11-18 資料をまとめる\n- [ ] **見積** @2026-11-18\n');
+    const a = openTasksAnswer({ cards: mid, titleOf, today: TODAY, weekStart: 0, range: 'today' });
+    expect(a.rows.map((r) => r[1])).toEqual(['会議 資料をまとめる', '**見積**']);
+    expect(a.links?.map((l) => l[0]?.find)).toEqual(['資料をまとめる', '見積']);
+    expect(findTermOf('会議 資料', '- [ ] 会議 資料')).toBe('会議 資料');
+    expect(findTermOf('長い字…', '- [ ] 長い字のつづき')).toBe('長い字');
+    expect(findTermOf('無い', '- [ ] 別')).toBeUndefined();
   });
 
   it('⚠ 未完了が 0 件なら「該当する行はありません」(黙って空にしない)', () => {

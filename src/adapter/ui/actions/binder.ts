@@ -9782,9 +9782,10 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ 塗る口は「探す」から来たときと同じ 1 本(`SEARCH_JUMP_START` ── 編集中・別のノートが開いている等の
      *   断りもそちらが持つ)。開けなかった(選びが動かなかった)ときは何もしない。
      */
+    // ⚠ 開けたか(選びが動いたか・読む画面か)の判定は `SEARCH_JUMP_START` の受け手 1 か所(ここで重ねて見ない)
     const find = target.getAttribute(EMBED_VIEW_FIND_ATTR);
     const lid = ref?.startsWith('entry:') ? ref.slice('entry:'.length).split('#')[0] : undefined;
-    if (find !== null && find !== '' && lid !== undefined && dispatcher.getState().selectedLid === lid)
+    if (find !== null && find !== '' && lid !== undefined && lid !== '')
       dispatcher.dispatch({ type: 'SEARCH_JUMP_START', lid, query: find });
   },
   /**
