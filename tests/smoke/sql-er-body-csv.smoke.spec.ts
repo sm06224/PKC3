@@ -476,5 +476,71 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
    */
   await expect(sqlTable, '受けられた名前まで「理由あり」に混ざっている').not.toContainText('棚卸');
 
+  /**
+   * 🔴 **本文に既製の表を置く ── ` ```embed `**(#1966 4-2)。⚠ 新しい起動を増やさない ── `sql embed` と同じ器なので、
+   *   この道中の続きで見る。実ブラウザで見るのは unit が持てない 4 つ:
+   * ① 見えたときに本物の走査(予定表と同じ worker の `taskScan`・ノートの一覧)で表が出る(コード枠は出ない)
+   * ② 打ち間違いは表の言葉で断り、名前の行と「更新」が出る / 「更新」を押しても表は消えない
+   * ③ 項目を押すとそのノートが開き、項目の字が塗られて「1/1 件」の帯が出る
+   * ④ ホームを開いたまま別のノートの項目にチェックを付けると、表が自動で作り直されて消える(書き終わりの合図)
+   */
+  await page.evaluate(() => {
+    location.hash = '';
+  });
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('仕事');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`- [ ] 見積を送る @${today}\n- [x] 済んだこと @${today}\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('ホーム');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill('```embed open-tasks range=today\n```\n\n```embed recent days=1\n```\n\n```embed todo\n```\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const views = page.locator('[data-pkc-field="detail-body"] .pkc-embed-view [data-pkc-sql-embed]');
+  await expect(views, '既製の表の器が 3 つ無い').toHaveCount(3);
+  await expect(page.locator('[data-pkc-field="detail-body"] .pkc-embed-view pre'), '既製の表にコード枠が出た').toHaveCount(0);
+  const tasks = views.nth(0);
+  await expect(tasks.locator('tbody tr'), '未完了の表が出ない(済んだ項目まで出た / 出ない)').toHaveCount(1, {
+    timeout: 15_000,
+  });
+  await expect(tasks.locator('tbody td').nth(1)).toHaveText('見積を送る');
+  await expect(tasks.locator('tbody td').nth(2)).toHaveText('仕事');
+  await expect(tasks.locator('[data-pkc-field="embed-view-head"]')).toContainText('今日までの未完了');
+  // 最近の更新 = この道中で作った 3 冊(棚卸の csv のノート・仕事・ホーム)
+  await expect(views.nth(1).locator('tbody tr'), '最近の更新の表が出ない').toHaveCount(3, { timeout: 15_000 });
+  await expect(views.nth(2), '打ち間違いを表の言葉で断っていない').toContainText('「todo」という表はありません', {
+    timeout: 15_000,
+  });
+  await expect(views.nth(2)).not.toContainText('SQL');
+  await expect(views.nth(2).locator('[data-pkc-field="embed-view-refresh"]'), '断りの上に「更新」が無い').toBeVisible();
+  await clickReal(page, tasks.locator('[data-pkc-field="embed-view-refresh"]'));
+  await expect(tasks.locator('tbody td').nth(1), '「更新」で表が消えた').toHaveText('見積を送る', { timeout: 15_000 });
+
+  // ③ 項目を押す → 仕事が開き、その字が塗られる
+  await clickReal(page, tasks.locator('tbody td').nth(1).locator('a'));
+  await expect(page.locator('[data-pkc-field="detail-title"]'), '項目を押してもノートが開かない').toHaveText('仕事');
+  await expect(page.locator('[data-pkc-field="search-jump-count"]'), '項目の字が塗られていない').toHaveText('1/1 件', {
+    timeout: 10_000,
+  });
+
+  // ④ ホームを開いたまま、左の「予定」タブから別のノート(仕事)の項目にチェックを付ける →
+  //    ほかのノートの保存なので、ホームの表が少し待ってから作り直されて消える(`main.ts` の書き終わりの合図)
+  await clickReal(page, '[data-pkc-action="nav-back"]');
+  await expect(page.locator('[data-pkc-field="detail-title"]')).toHaveText('ホーム');
+  await expect(tasks.locator('tbody td').nth(1)).toHaveText('見積を送る', { timeout: 15_000 });
+  await clickReal(page, '[data-pkc-browse="schedule"]');
+  const card = page
+    .locator('[data-pkc-browse-pane="schedule"] [data-pkc-entry]')
+    .filter({ hasText: '見積を送る' })
+    .first();
+  await clickReal(page, card.locator('input.pkc-task-checkbox'));
+  await expect(page.locator('[data-pkc-field="detail-title"]'), 'ホームから離れた(この検査の前提が崩れた)').toHaveText('ホーム');
+  await expect(views.nth(0), 'ほかのノートを保存しても表が作り直されない').toContainText('該当する行はありません', {
+    timeout: 15_000,
+  });
+
   expect(errors, `想定外の console/pageerror が出た: ${JSON.stringify(errors)}`).toEqual([]);
 });

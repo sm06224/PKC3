@@ -32,7 +32,7 @@ const WITH_ZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
  * 時刻を持つ値を **瞬間**(`Date`)にする。時刻が無い / 読めない値は `null`。
  * 🔑 時差の印が無い値は sqlite の `datetime('now')` = **UTC** なので `Z` を付けて読む。
  */
-function storedInstant(value: string): Date | null {
+export function storedInstant(value: string): Date | null {
   if (!WITH_TIME.test(value)) return null;
   const iso = value.replace(' ', 'T');
   const d = new Date(WITH_ZONE.test(iso) ? iso : `${iso}Z`);

@@ -95,12 +95,24 @@ describe('描く側(renderMarkdown)', () => {
     expect(embedded.replace(sqlEmbedHostHtml(sql + '\n'), '')).toBe(plain);
   });
 
-  it.each(['sql:embed', 'sql-embed', 'embed sql', 'sql-render embed', 'sql-norender embed', 'sqlite embed'])(
+  it.each(['sql:embed', 'sql-embed', 'sql-render embed', 'sql-norender embed', 'sqlite embed'])(
     '🔴 見出し %j は器を置かない',
     (info) => {
       expect(renderMarkdown(fence(info, 'SELECT 1'))).not.toContain(SQL_EMBED_ATTR);
     },
   );
+
+  /**
+   * 🔴 **`embed sql` は SQL の埋め込みではない**(語順は動かさない)。⚠ #1966 4-2 から先頭語が `embed` の見出しは
+   *   既製の表(` ```embed `)なので器は置くが、中の字は**既製の表の綴り**(`@pkc-view …`)で SQL ではない
+   *   ── 引く口は「「sql」という表はありません」と断り、SQL は 1 度も走らない(`embed-view-flow.test.ts`)。
+   */
+  it('🔴 見出し "embed sql" は SQL を器に入れない(既製の表の綴りになる)', () => {
+    const div = document.createElement('div');
+    div.innerHTML = renderMarkdown(fence('embed sql', 'SELECT 1'));
+    const srcs = [...div.querySelectorAll(`[${SQL_EMBED_ATTR}]`)].map((h) => h.getAttribute('data-pkc-sql-embed-src'));
+    expect(srcs).toEqual(['@pkc-view sql SELECT 1']);
+  });
 
   it('大小・空白の揺れ(`SQL EMBED` / `sql   embed`)でも置く', () => {
     expect(hostsOf(renderMarkdown(fence('SQL EMBED', 'SELECT 1')))).toHaveLength(1);

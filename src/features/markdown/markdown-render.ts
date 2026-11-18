@@ -43,7 +43,7 @@ import { expandVarsInText, fenceTransition, VAR_OPEN, VAR_SEP, type FenceState }
 import { foldIdeographicIndent } from './fullwidth-indent';
 import { highlightCode, isHighlightable } from './code-highlight';
 import { cellEditButtonHtml, detectCsvLang, renderCsvFence, shapeButtonHtml } from './csv-table';
-import { isSqlEmbedInfo, sqlEmbedHostHtml } from './sql-embed';
+import { embedViewSource, isEmbedViewInfo, isSqlEmbedInfo, sqlEmbedHostHtml } from './sql-embed';
 import { formHtml, isFormInfo } from './form-def';
 import { buildHtmlSandboxIframe } from './html-sandbox';
 import {
@@ -759,6 +759,18 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
       fenceEditable(env, token),
       sqlEmbedHostHtml(content),
     );
+  }
+  /**
+   * 🔴 **` ```embed ` は既製の表の器だけを置く**(#1966 4-2)。器は `sql embed` と同じ物(`sqlEmbedHostHtml`)で、
+   *   中の字が `@pkc-view …` ── 引く口(`askSqlEmbed`)が見分けて、SQL ではなく既製の表を作る。
+   * ⚠ コード枠は出さない(書いた字は表の名前と条件だけで、読む人に要るのは表)。答えを描かない面
+   *   (1 画面編集・クリップボード等)では空の器になり、何も出ない。
+   * 🔑 条件は見出しの後ろ(` ```embed open-tasks range=week `)にも、中身の行にも書ける(両方つなげて読む)。
+   */
+  if (fenceAsset.kind === 'none' && isEmbedViewInfo(info)) {
+    const rest = info.trim().replace(/^\S+\s*/, '');
+    const text = `${rest} ${content.replace(/\s+/g, ' ')}`.trim();
+    return `<div class="pkc-embed-view"${sourceLineAttrs}>${sqlEmbedHostHtml(embedViewSource(text))}</div>\n`;
   }
   /**
    * 🔴 **` ```yaml form ` は入力欄にする**(#1456)。定義は囲みの中身(YAML)で、値は本文の `vars`(先頭の設定欄の

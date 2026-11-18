@@ -83,13 +83,63 @@ export const SQL_EMBED_MAX_MS = 2000;
  */
 export const SQL_EMBED_MAX_STEPS = 20_000;
 
+/**
+ * 🔴 **升をノートへのリンクにする印**(#1966 4-2 ── 既製の表 ` ```embed ` の行から、そのノートへ行く)。
+ * `col` 列目の字を `entry:<lid>` のリンクにする。`find` があれば、開いたノートでその字を塗って送る
+ * (「探す」から来たときと同じ帯 ── 未完了の項目の行へ行ける)。
+ */
+export interface SqlEmbedRowLink {
+  readonly col: number;
+  readonly lid: string;
+  readonly find?: string;
+}
+
 /** 答え。⚠ `runReadOnlySql` が返す形のうち、表に要る所だけ(`ms` は使わない)。 */
 export interface SqlEmbedAnswer {
   readonly columns: readonly string[];
   readonly rows: ReadonlyArray<ReadonlyArray<string | number | null>>;
   /** 受け取る天井(`SQL_EMBED_FETCH_ROWS`)で切ったか。 */
   readonly truncated: boolean;
+  /** 行ごとのリンク(既製の表だけ。SQL の答えには無い)。⚠ `rows` と同じ並び。 */
+  readonly links?: ReadonlyArray<ReadonlyArray<SqlEmbedRowLink>>;
+  /** 表の上に出す名前(既製の表だけ)。⚠ 在れば表の上に名前の行を置く(画面では「更新」も)。 */
+  readonly title?: string;
 }
+
+/**
+ * 🔴 **既製の表(` ```embed `)の器の字の頭**(#1966 4-2)。器は `sql embed` と同じ物で、中の字がこれで始まれば
+ * SQL ではなく既製の表を作る。⚠ `@` で始まる字は SQL の字の門が通さない ── `sql embed` の枠と取り違えない。
+ * 読み方は `embed-view.ts`。
+ */
+export const EMBED_VIEW_PREFIX = '@pkc-view ';
+
+/** 器の字が既製の表か。 */
+export function isEmbedViewSource(src: string): boolean {
+  return src.startsWith(EMBED_VIEW_PREFIX);
+}
+
+/**
+ * ` ```embed ` の見出しか(先頭語が `embed`。大小は問わない)。
+ * ⚠ `sql embed` とは**語順が逆**なので重ならない(あちらは先頭語が `sql`)。
+ * ⚠ 描く側(`markdown-render.ts`)が読むので、予定表の読み方を持つ `embed-view.ts` ではなくここに置く
+ *   (描画の束へ予定表の規則を持ち込まない)。
+ */
+export function isEmbedViewInfo(info: string | null | undefined): boolean {
+  if (!info) return false;
+  return info.trim().split(/\s+/)[0]?.toLowerCase() === 'embed';
+}
+
+/** 器に入れる字(見出しの `embed` の後ろをそのまま運ぶ ── 読むのは引く側の `parseEmbedView` 1 本)。 */
+export function embedViewSource(infoAfterEmbed: string): string {
+  return `${EMBED_VIEW_PREFIX}${infoAfterEmbed.trim()}`;
+}
+
+/** 既製の表の上の名前の行の `data-pkc-field`(#1966 4-2)。 */
+export const EMBED_VIEW_HEAD_FIELD = 'embed-view-head';
+/** 既製の表の「更新」ボタンの `data-pkc-field`(#1966 4-2)。 */
+export const EMBED_VIEW_REFRESH_FIELD = 'embed-view-refresh';
+/** 開いたノートで塗る字(行のリンクが運ぶ)。 */
+export const EMBED_VIEW_FIND_ATTR = 'data-pkc-embed-find';
 
 /**
  * ` ```sql embed ` の見出しか。
@@ -123,6 +173,16 @@ export function unescapeSqlEmbedHtml(s: string): string {
     .replace(/&amp;/g, '&');
 }
 
+/**
+ * 🔴 **既製の表の上の 1 行**(名前 + 画面では「更新」)。⚠ 書き出しには「更新」を出さない(受け手が無い)。
+ */
+export function embedViewHeadHtml(title: string, interactive: boolean): string {
+  const btn = interactive
+    ? `<button type="button" data-pkc-field="${EMBED_VIEW_REFRESH_FIELD}" title="この表をいまの内容で作り直します">更新</button>`
+    : '';
+  return `<div data-pkc-field="${EMBED_VIEW_HEAD_FIELD}"><span>${escapeSqlEmbedHtml(title)}</span>${btn}</div>`;
+}
+
 /** 表の値を字にする。⚠ `null` と空文字を**見分けられる**ようにする(SQL を打つ面と同じ)。 */
 export function sqlCellText(v: string | number | null): string {
   return v === null ? '(なし)' : String(v);
@@ -152,18 +212,33 @@ export function sqlEmbedAnswerHtml(
 ): string {
   const note = (text: string): string =>
     `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(text)}</p>`;
+  const top = answer.title === undefined ? '' : embedViewHeadHtml(answer.title, interactive);
   if (answer.rows.length === 0) {
-    return note('該当する行はありません');
+    return top + note('該当する行はありません');
   }
   const head = answer.columns.map((c) => `<th>${escapeSqlEmbedHtml(c)}</th>`).join('');
+  /**
+   * 🔑 リンクは本文の `[字](entry:<lid>)` と**同じ形**(`navigate-entry-ref` + `data-pkc-entry-ref`)──
+   *   開く受け手・書き出しの書き換え(`entry:` のリンク)を 2 つ作らない。
+   */
+  const cell = (v: string | number | null, link: SqlEmbedRowLink | undefined): string => {
+    const text = escapeSqlEmbedHtml(sqlCellText(v));
+    if (link === undefined) return text;
+    const ref = escapeSqlEmbedHtml(`entry:${link.lid}`);
+    const find =
+      interactive && link.find !== undefined && link.find !== ''
+        ? ` ${EMBED_VIEW_FIND_ATTR}="${escapeSqlEmbedHtml(link.find)}"`
+        : '';
+    return `<a href="${ref}" data-pkc-action="navigate-entry-ref" data-pkc-entry-ref="${ref}"${find}>${text}</a>`;
+  };
   const rows = answer.rows
     .slice(0, shown)
-    .map(
-      (r) =>
-        `<tr>${r.map((v) => `<td>${escapeSqlEmbedHtml(sqlCellText(v))}</td>`).join('')}</tr>`,
-    )
+    .map((r, i) => {
+      const links = answer.links?.[i] ?? [];
+      return `<tr>${r.map((v, c) => `<td>${cell(v, links.find((l) => l.col === c))}</td>`).join('')}</tr>`;
+    })
     .join('');
-  let out = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+  let out = `${top}<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
   const remaining = answer.rows.length - shown;
   if (remaining > 0) {
     if (interactive) {
@@ -190,15 +265,25 @@ export function sqlEmbedAnswerHtml(
  * (`sql-embed-note`)── 見た目の規則を 2 つ持たない。
  */
 export const SQL_EMBED_PENDING_TEXT = 'SQL を実行しています…';
-export function sqlEmbedPendingHtml(): string {
-  return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(SQL_EMBED_PENDING_TEXT)}</p>`;
+/** 既製の表(` ```embed `)を集めている間の 1 行(#1966 4-2)。 */
+export const EMBED_VIEW_PENDING_TEXT = '表を作っています…';
+export function sqlEmbedPendingHtml(view = false): string {
+  return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(view ? EMBED_VIEW_PENDING_TEXT : SQL_EMBED_PENDING_TEXT)}</p>`;
 }
 
 /**
  * 引けなかったときの 1 行(原文のコード枠はそのまま残る)。
  * @param interactive 画面のとき `true`(試せる場所を添える)。書き出しは `false`(その画面が無い)
  */
-export function sqlEmbedFailureHtml(why: string, interactive = false, viewKeyHint: string | null = null): string {
+export function sqlEmbedFailureHtml(
+  why: string,
+  interactive = false,
+  viewKeyHint: string | null = null,
+  view = false,
+): string {
+  // ⚠ 既製の表(` ```embed `)は SQL ではない ── 「SQL を実行できませんでした」とも「SQL で調べる画面で試せます」とも言わない
+  if (view)
+    return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(`表を作れませんでした: ${why}`)}</p>`;
   const hint = interactive ? sqlEmbedFailedHint(viewKeyHint) : '';
   return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(`SQL を実行できませんでした: ${why}${hint}`)}</p>`;
 }
@@ -237,7 +322,7 @@ export async function bakeSqlEmbeds(
       const a = await ask(sql);
       answers.set(sql, sqlEmbedAnswerHtml(a, SQL_EMBED_PAGE_ROWS, false));
     } catch (e) {
-      answers.set(sql, sqlEmbedFailureHtml(e instanceof Error ? e.message : String(e)));
+      answers.set(sql, sqlEmbedFailureHtml(e instanceof Error ? e.message : String(e), false, null, isEmbedViewSource(sql)));
     }
   }
   return html.replace(HOST_RE, (whole, src: string) => {
