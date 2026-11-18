@@ -5238,6 +5238,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   借りた URL は返し忘れると残る(2026-07-27 の不可侵指示)。
      */
     readAssetBlob: (assetKey) => blobs.get(cid, assetKey),
+    /**
+     * 🔴 **ノートの本文を 1 件読む**(#1966 4-3 ②)── 引用のリンクから録音をその場で鳴らすとき、添付の鍵を引く。
+     * ⚠ 書込の後ろへ並んでから読む(保存した直後に古い本文を読まない)。
+     */
+    readNoteBody: async (lid) => {
+      await storeEffects?.settled();
+      return storePort.getBody(lid);
+    },
     downloadAsset: async (assetKey, name) => {
       try {
         const lent = await blobs.lendObjectUrl(cid, assetKey);

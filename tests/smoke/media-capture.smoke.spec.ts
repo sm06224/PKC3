@@ -1083,7 +1083,8 @@ ${(e as Error).message}`,
    * 実ブラウザで見るのは unit(happy-dom)が持てない 3 つ:
    * ① 行の末尾の「❝ 引用」が**見えて押せる**(CSS の `::before` が字を出している)・「再生に合わせて送る」は既定で入
    * ② 押すと**本物の書込**(worker の追記)が直前に開いていたノートの末尾へ着き、知らせの「開く」で移れる
-   * ③ そのノートに描かれた `0:00` のリンクを押すと、録音のノートが開いて**本物の再生機が鳴り出す**
+   * ③ そのノートに描かれた `0:00` のリンクを押すと、**その場の小さなプレーヤー**が本物の録音で鳴り出し(4-3 ②)、
+   *   「録音のノートを開く」で録音のノートが開いて**本物の再生機が鳴り出す**
    */
   await expect(
     body.locator('[data-pkc-field="transcript-follow"] input[type="checkbox"]'),
@@ -1111,8 +1112,27 @@ ${(e as Error).message}`,
   const quoted = page.locator('[data-pkc-view-pane="detail"] blockquote a[data-pkc-entry-ref$="#t=0"]');
   await expect(quoted, '追記先に時刻つきの引用が描かれていない').toHaveText('0:00', { timeout: 15_000 });
   await expect(page.locator('[data-pkc-view-pane="detail"] blockquote')).toContainText('一行目の偽の字');
+  /**
+   * 🔴 **#1966 4-3 ②: 引用の時刻を押すと、議事録を移らずに、その場の小さなプレーヤーで鳴る**。
+   *   本物の録音の実体を借りて(ObjectURL)、本物の再生機が鳴り出すことを見る。
+   */
   await clickReal(page, quoted);
-  await expect(page.locator('[data-pkc-field="detail-title"]'), '引用の時刻を押しても録音が開かない').toHaveText(recordingTitle);
+  const inline = page.locator('[data-pkc-view-pane="detail"] [data-pkc-field="inline-player"]');
+  await expect(inline, '引用の時刻を押してもその場のプレーヤーが出ない').toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-pkc-field="detail-title"]'), 'その場で鳴らすはずが、ノートを移った').toHaveText('議事録');
+  await expect
+    .poll(
+      () =>
+        inline
+          .locator('[data-pkc-field="inline-player-media"]')
+          .evaluate((a: HTMLMediaElement) => (a.paused ? 'paused' : 'playing')),
+      { timeout: 10_000, message: 'その場のプレーヤーが鳴り出さない' },
+    )
+    .toBe('playing');
+  // 「録音のノートを開く」で録音へ移り、そこでも鳴る(4-3 ① の道)。その場のプレーヤーは閉じる
+  await clickReal(page, inline.locator('[data-pkc-action="inline-player-open-note"]'));
+  await expect(inline, '録音へ移ったのにその場のプレーヤーが残った').toHaveCount(0);
+  await expect(page.locator('[data-pkc-field="detail-title"]'), '「録音のノートを開く」で録音が開かない').toHaveText(recordingTitle);
   const reopened = page.locator('[data-pkc-view-pane="detail"] audio[data-pkc-field="attachment-media"]');
   await expect
     .poll(() => reopened.evaluate((a: HTMLAudioElement) => (a.paused ? 'paused' : 'playing')), {
