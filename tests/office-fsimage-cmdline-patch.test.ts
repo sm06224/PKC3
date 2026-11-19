@@ -107,20 +107,6 @@ describe('patch-lo-fsimage-cmdline.py(#591 の直し)', () => {
       const list = entries.join(' ');
       // ⚠ 前提を assert する ── 短い一覧で「通った」と読まないため
       expect(list.length, '台の一覧が実測より小さい(空振り)').toBeGreaterThan(limit);
-      /**
-       * 🔴 **この箱が 1 つの引数の長さを断るかを、その場で確かめる**(対照群)。
-       * ⚠ 2026-11-19 に CI の runner でだけ「make 側の展開なのに通った」と落ちた ── 頁は 4 KiB(`getconf` で確認)で、
-       *   それでも 128 KiB を越える 1 引数が通る箱があった(手元では断られる)。上限は箱の事情で、決め打てない。
-       * 🔑 だから**同じ長さの 1 引数を `sh -c` に渡して**断られるかを見て、make 側の展開はそれと**同じ結果**になることを見る
-       *   (断る箱では make 側も落ちる = 直しが要る理由がその箱で成り立つ)。⚠ 直した側(shell が argv を組む)は**どの箱でも**通る。
-       */
-      let longArgRefused: boolean;
-      try {
-        execFileSync('/bin/sh', ['-c', `: ${list}`], { stdio: 'pipe' });
-        longArgRefused = false;
-      } catch {
-        longArgRefused = true;
-      }
       writeFileSync(join(dir, 'filelist'), list, 'utf-8');
 
       const run = (recipe: string): number => {
@@ -132,16 +118,28 @@ describe('patch-lo-fsimage-cmdline.py(#591 の直し)', () => {
           return (e as { status?: number }).status ?? 1;
         }
       };
-      // 直す前 ── make が行に並べる = sh -c の 1 引数が肥大する。⚠ 落ちるかは、この箱が長い 1 引数を断るか(上)と同じ
+      /**
+       * 🔴 **この箱の make が、長い 1 行を断るかを先に確かめる**(対照群)。
+       * ⚠ 2026-11-19 に CI の runner でだけ「make 側の展開なのに通った」と落ちた ── 頁は 4 KiB で、node から
+       *   `sh -c` に同じ長さの 1 引数を渡すと断られるのに、**その runner の make は長い行を通した**(make の側の事情)。
+       *   上限は箱しだいで、決め打てない。
+       * 🔑 だから比べる相手は **make 自身**:直す前の形とは無関係の最小の行(`: xxxx…`、同じ長さ)を make に渡し、
+       *   断られるかを見る。直す前の形の結果はそれと**同じ**であること(断る箱では落ちる = 直しが要る理由がその箱で成り立つ)。
+       * ⚠ 直した形(shell が argv を組む)は**どの箱でも**通ること・中身が欠けないことを見る(下)。
+       */
+      const makeRefusesLongLine = run(`: ${'x'.repeat(list.length)}`) !== 0;
+      // 直す前 ── make が行に並べる = sh -c の 1 引数が肥大する。⚠ 落ちるかは、この箱の make が長い 1 行を断るか(上)と同じ
       expect(
         run('/bin/echo -n $(shell cat filelist) > out') !== 0,
-        `make 側の展開の結果が、この箱の 1 引数の上限と食い違った(長い 1 引数を${longArgRefused ? '断る' : '通す'}箱 / 一覧 ${String(list.length)} byte)`,
-      ).toBe(longArgRefused);
+        `make 側の展開の結果が、この箱の make の 1 行の上限と食い違った(長い 1 行を${makeRefusesLongLine ? '断る' : '通す'} make / 一覧 ${String(list.length)} byte)`,
+      ).toBe(makeRefusesLongLine);
       // 直した後 ── shell が argv を組むので通る
       expect(
         run('/bin/echo -n $$(cat filelist) > out'),
         'shell 側の展開でも落ちた ── 直しが効いていない',
       ).toBe(0);
+      // ⚠ 通っただけでなく、一覧が 1 字も欠けずに渡っている(途中で切れて「通った」に見える形を通さない)
+      expect(readFileSync(join(dir, 'out'), 'utf-8'), '直した側で一覧が欠けた').toBe(list);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
