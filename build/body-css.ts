@@ -393,6 +393,16 @@ export function extractBodyCss(
   const tokens = readTokens(tokensCss);
   const vars = new Set<string>();
   for (const r of kept) for (const v of varsIn(r.body)) vars.add(v);
+  /**
+   * 🔴 **本文アイコンの規則が使うトークンも焼く**(#1982 段 0)。⚠ アイコンの規則は本文の規則とは別に
+   *   後ろへ足すので、ここで数えないと**トークンだけ焼かれない**(段 0 で字の大きさを
+   *   `var(--fs-xl)` にした日に `auditBodyCss` が「定義の無い var」で鳴った)。
+   */
+  const ic = icons !== undefined ? iconCss(appCss, icons) : undefined;
+  // ⚠ トークンだけを数える ── アイコンの規則は要素ごとに置く変数(`--pkc-icon-line` など、既定値つき)も使う
+  if (ic !== undefined) {
+    for (const v of varsIn(ic.css)) if (tokens.invariant.has(v) || tokens.light.has(v)) vars.add(v);
+  }
   vars.delete('--pkc-blank-count');
   /**
    * 🔴 **板の色・線の色と太さも、描く側が inline style で置く**(#530 段④)── `--pkc-blank-count` と
@@ -444,8 +454,7 @@ export function extractBodyCss(
   }
   // 🔴 本文アイコン(#853)。⚠ 本文の規則ではない(`.pkc-md-rendered` 起点でない)ので audit の本文規則数には数えない
   let iconRuleCount = 0;
-  if (icons !== undefined) {
-    const ic = iconCss(appCss, icons);
+  if (ic !== undefined) {
     iconRuleCount = ic.count;
     parts.push(ic.css);
   }

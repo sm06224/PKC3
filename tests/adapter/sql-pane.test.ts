@@ -2912,7 +2912,7 @@ describe('打つ欄の色分けと行番号(#918 段②c/②d)', () => {
     ].join(' ');
     expect(input, '欄の規則が引けていない(この検査は空振り)').toContain('background: transparent');
     for (const decl of [
-      'font-size: 13px',
+      'font-size: var(--fs-md)', // 13px(#1982 段 0 で段へ)
       'line-height: 1.6',
       'white-space: pre-wrap',
       'overflow-wrap: break-word',

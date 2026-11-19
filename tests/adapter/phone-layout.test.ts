@@ -1575,7 +1575,7 @@ describe('CSS(構文で読む)', () => {
   it('🔴 もう片方の印の知らせは、情報行と同じ大きさと色で出る', () => {
     const css = withoutMedia(bare());
     const note = blocksFor(css, `[data-pkc-field='dual-other-marks']`).join(' ');
-    expect(note, '規則が無い').toMatch(decl('font-size', '11px'));
+    expect(note, '規則が無い').toMatch(decl('font-size', 'var\\(--fs-xs\\)')); // 11px(#1982 段 0 で段へ)
     expect(note, '色が情報と同じでない').toMatch(decl('color', 'var\\(--muted\\)'));
   });
 
