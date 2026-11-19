@@ -494,20 +494,29 @@ export function iconButton(
 }
 
 /**
- * 🔴 **その面の「主の操作」の印**(#722 P2-10。user 裁定 2026-09-06 = 案 A)。
+ * 🔴 **ボタンの型の印**(#722 P2-10 → #1982 段 1 で 4 型へ。user 裁定 2026-11-19)。
  *
- * cowork 実測 2026-09-05:「1440px の 1 画面に押せるボタンが **50 個**、うち
- * **23 個が完全に同じ見た目**。濃い地を持つのは『いま選んでいるタブ』の 1 個だけ」──
- * つまり **どれを押せば話が進むのかが、画面から読めない**。
+ * 型は `data-pkc-variant` の**値 1 つ**で決める(標準 = 属性なし):
+ *   `primary`(主。テーマの `--accent` 地)/ 標準 / `ghost`(枠も地も無い)/
+ *   `danger`(消える操作。赤)。
  *
- * 🔑 **色ではなく濃さで段を作る**(user 指示 2026-08-03「地は無彩色、色は情報にだけ」)。
- *   地を `--fg`、字を `--surface` に**反転**するだけなので、色相は 1 つも増えない。
- * ⚠ **1 つの面に 1 つだけ**。⚠ ここを増やすと段が消える(全部が主なら主は無い)ので、
+ * 🔑 主は 1 画面に 1 つ。⚠ 増やすと段が消える(全部が主なら主は無い)ので、
  *   `tests/adapter/primary-action.test.ts` が**面ごとに 1 個以下**を全数で見る。
- * ⚠ 印を付けるのは**この関数だけ** ── 属性を直に書くと、上の全数検査が数え落とす
+ * ⚠ 旧い「色ではなく濃さ / `--accent` は使わない」は #1982 で**改めた**:主は
+ *   アクセント色を使う。現在地・選択は色ではなく**形**で示す(段 2)ので、
+ *   「緑 / 青の意味が重なる」問題は形の側で解く。
+ * ⚠ 印を付けるのは**この節の関数だけ** ── 属性を直に書くと、上の全数検査が数え落とす
  *   (`tests/repo-hygiene.test.ts` が直書きを止める)。
  */
-export const PRIMARY_ATTR = 'data-pkc-primary';
+export const VARIANT_ATTR = 'data-pkc-variant';
+
+export type ButtonVariant = 'primary' | 'ghost' | 'danger';
+
+/** 型の印を付ける。⚠ 返り値を使わなくてよい(その場で印が付く)。 */
+export function markVariant(btn: HTMLButtonElement, v: ButtonVariant): HTMLButtonElement {
+  btn.setAttribute(VARIANT_ATTR, v);
+  return btn;
+}
 
 /** 主の操作にする。⚠ 返り値を使わなくてよい(その場で印が付く)。 */
 export function markPrimary(btn: HTMLButtonElement): HTMLButtonElement {
@@ -531,7 +540,7 @@ export function markBarTile(btn: HTMLButtonElement): HTMLButtonElement {
 }
 
 /**
- * 印を**付け外し**する(状態で変わる面はこちらを使う)。
+ * 主の印を**付け外し**する(状態で変わる面はこちらを使う)。
  *
  * 🔴 **押しても何も起きないボタンを、いちばん濃くしない**(着地前レビュー・動線 1、
  * 2026-09-06)。⚠ 「+ ノート」は `CREATE_ENTRY` が `phase !== 'ready'` を
@@ -542,7 +551,7 @@ export function markBarTile(btn: HTMLButtonElement): HTMLButtonElement {
  *   ここで直すのは**見え方**だけである。
  */
 export function setPrimary(btn: HTMLElement, on: boolean): HTMLButtonElement {
-  if (on) btn.setAttribute(PRIMARY_ATTR, '');
-  else btn.removeAttribute(PRIMARY_ATTR);
+  if (on) btn.setAttribute(VARIANT_ATTR, 'primary');
+  else if (btn.getAttribute(VARIANT_ATTR) === 'primary') btn.removeAttribute(VARIANT_ATTR);
   return btn as HTMLButtonElement;
 }

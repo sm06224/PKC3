@@ -106,7 +106,11 @@ describe('右の列の操作は塊に分かれている(#1029 段 B / 段 C)', (
      *   元のボタンは隠した器(`inspector-export-source`)へ移した。`this-folder` の塊と 2 つ目の `export` は
      *   一覧(`context-menu`)の側の見出しになった。
      */
-    expect(groups).toEqual(['copy', 'open', 'take-in', 'export', 'this-one', 'remove']);
+    /**
+     * 🔴 **2026-11-19(#1982 段 1)に先頭へ `primary` が増えた** ── 常用 4 つ(編集 / リンク / 別のウィンドウ / その他 ▾)の塊。
+     *   残りは隠した元(`inspector-more-source`)の中で、今までの塊のまま並ぶ。
+     */
+    expect(groups).toEqual(['primary', 'copy', 'open', 'take-in', 'export', 'this-one', 'remove']);
   });
 
   it('🔴 操作のボタンは 1 つ残らず塊の中に在る(帯へ直に足したら落ちる)', () => {
@@ -215,10 +219,21 @@ describe('情報ペインの塊は正本(entry-actions.ts)から来る(#1029 段
      *   2 か所に置かない)。ここは**描かれている物**を見る検査なので、描かれない
      *   ことが分かっている物を見ても「無い」以外の結果が出ない(§1 の空振り)。
      */
+    // 🔴 常用の 2 つ(`copy-entry-link` / `open-note-window`)は `primary` の塊に出る(#1982 段 1)── 下で別に見る
+    const VISIBLE = ['copy-entry-link', 'open-note-window'];
     const withGroup = ENTRY_MENU_ACTIONS.filter(
       (a) =>
-        a.group !== undefined && a.menuOnly !== true && !INSPECTOR_EXPORT_MENU_ACTIONS.includes(a.action),
+        a.group !== undefined &&
+        a.menuOnly !== true &&
+        !INSPECTOR_EXPORT_MENU_ACTIONS.includes(a.action) &&
+        !VISIBLE.includes(a.action),
     );
+    for (const action of VISIBLE) {
+      expect(
+        root.querySelector(`[data-pkc-action="${action}"]`)?.closest('[data-pkc-group]')?.getAttribute('data-pkc-group'),
+        `${action} は常用の塊(primary)に居る`,
+      ).toBe('primary');
+    }
     // ⚠ 空振り防止 ── 塊を持つ物が 0 件なら、下のループは何も見ない
     expect(withGroup.length, '塊を持つ操作が 0 件(空振り)').toBeGreaterThan(10);
     for (const a of withGroup) {

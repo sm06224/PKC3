@@ -15,7 +15,8 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
-import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { bindActions, runGlobalCommand } from '../../src/adapter/ui/actions/binder';
+import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import { openContextMenu, scrollClosesMenu, noteMenuUserInput } from '../../src/adapter/ui/render/context-menu';
 import { ACTION_ICONS, INSPECTOR_ICON_ACTIONS } from '../../src/adapter/ui/render/icons';
 import { ARCHETYPE_ICONS, BROWSE_ICONS } from '../../src/adapter/ui/render/icons';
@@ -88,10 +89,15 @@ describe('右の列の「書き出す ▾」(#1029 / #501)', () => {
     for (const a of INSPECTOR_EXPORT_MENU_ACTIONS) {
       expect(visible(a), `${a} が平置きのまま`).toBe(false);
     }
-    expect(visible('open-export-menu')).toBe(true);
-    // 対照群: 常設の主要操作は押せる位置に居る
-    for (const a of ['copy-entry-ref', 'copy-entry-link', 'copy-plain-markdown', 'open-note-window', 'show-history', 'delete-entry']) {
+    // 🔴 #1982 段 1: 「書き出す ▾」自体も「その他 ▾」の中へ入った(画面には常用 4 つだけ)
+    expect(visible('open-export-menu'), '「書き出す ▾」は「その他 ▾」の中(隠した元)').toBe(false);
+    expect(s.q('[data-pkc-field="inspector-more-source"] [data-pkc-action="open-export-menu"]')).not.toBeNull();
+    // 対照群: 常用の 4 つは押せる位置に居る / 一覧へ畳んだ物は平置きでない
+    for (const a of ['start-edit', 'copy-entry-link', 'open-note-window', 'open-inspector-more']) {
       expect(visible(a), `${a} が隠れている`).toBe(true);
+    }
+    for (const a of ['copy-entry-ref', 'copy-plain-markdown', 'show-history', 'delete-entry']) {
+      expect(visible(a), `${a} が平置きのまま`).toBe(false);
     }
   });
 
@@ -193,6 +199,94 @@ describe('右の列の「書き出す ▾」(#1029 / #501)', () => {
   });
 });
 
+describe('右の列の「その他 ▾」(#1982 段 1)', () => {
+  const key = (el: Element, k: string): void => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  };
+
+  it('押すと一覧が開き、元の並び・塊のまま並ぶ。ゴミ箱へ移すだけが危険の型で、説明が付く', () => {
+    const s = mounted();
+    s.q('[data-pkc-action="open-inspector-more"]').click();
+    const m = s.menu();
+    expect(m, '一覧が開かない').not.toBeNull();
+    const shown = menuActions(m);
+    // 空振り防止: 一覧が空でないこと。常用の 4 つは一覧に重ねて出さない
+    expect(shown.length).toBeGreaterThan(5);
+    for (const a of ['start-edit', 'copy-entry-link', 'open-note-window', 'open-inspector-more'])
+      expect(shown, `${a} が一覧にも出ている`).not.toContain(a);
+    const order = ['copy-entry-ref', 'copy-plain-markdown', 'open-export-menu', 'open-app-menu', 'show-history', 'rename-entry-begin', 'move-to-folder', 'duplicate-entry', 'open-trash', 'delete-entry'];
+    expect(shown.filter((a) => order.includes(a))).toEqual(order);
+    const variants = [...m!.querySelectorAll('button[data-pkc-action]')]
+      .filter((b) => b.getAttribute('data-pkc-variant') !== null)
+      .map((b) => `${b.getAttribute('data-pkc-action')}:${b.getAttribute('data-pkc-variant')}`);
+    expect(variants, '危険の型は delete-entry だけ').toEqual(['delete-entry:danger']);
+    for (const b of m!.querySelectorAll('button[data-pkc-action]'))
+      expect(b.getAttribute('data-pkc-hint'), `${b.getAttribute('data-pkc-action')} の説明`).toBeTruthy();
+    expect(m!.hasAttribute('data-pkc-with-groups'), '塊の区切りが無い').toBe(true);
+  });
+
+  it('一覧の「書き出す ▾」を押すと 2 枚目の一覧が開き、Esc でその他 ▾ へ焦点が戻る', () => {
+    const s = mounted();
+    const more = s.q<HTMLButtonElement>('[data-pkc-action="open-inspector-more"]');
+    more.focus();
+    more.click();
+    s.menu()!.querySelector<HTMLButtonElement>('[data-pkc-action="open-export-menu"]')!.click();
+    const m = s.menu();
+    expect(m, '2 枚目の一覧が開かない(その場で閉じた)').not.toBeNull();
+    expect(menuActions(m)).toContain('export-entry-docx');
+    expect(menuActions(m), '1 枚目の一覧のままになっている').not.toContain('show-history');
+    key(document.activeElement!, 'Escape');
+    expect(s.menu()).toBeNull();
+    expect(document.activeElement, '焦点がその他 ▾ に戻らない').toBe(more);
+  });
+
+  it('↑↓ で移れ、ゴミ箱へ移すを押すと実行されて閉じる', () => {
+    const s = mounted();
+    s.q('[data-pkc-action="open-inspector-more"]').click();
+    const items = [...s.menu()!.querySelectorAll<HTMLButtonElement>('button[data-pkc-action]')];
+    expect(items[0]).toBe(document.activeElement);
+    key(items[0]!, 'ArrowDown');
+    expect(document.activeElement).toBe(items[1]);
+    items.find((b) => b.getAttribute('data-pkc-action') === 'delete-entry')!.click();
+    expect(s.menu(), '押したら閉じる').toBeNull();
+    expect(s.d.getState().entryMetas.has('n1'), 'ゴミ箱へ移っていない').toBe(false);
+  });
+
+  it('ノートを編集する: 本文が届くまで・編集中は押せず、届けば押せる(中央の帯と同じ条件)', () => {
+    const s = mounted({ select: null });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    const edit = (): HTMLButtonElement => s.q<HTMLButtonElement>('[data-pkc-region="inspector"] [data-pkc-action="start-edit"]');
+    expect(edit().disabled, '本文が無いのに押せる').toBe(true);
+    expect(edit().title).toContain('読み込んでいます');
+    s.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文\n' });
+    expect(edit().disabled).toBe(false);
+    expect(edit().hasAttribute('data-pkc-variant'), '右の「編集」は標準の型').toBe(false);
+    edit().click();
+    expect(s.d.getState().phase).toBe('editing');
+    expect(edit().disabled, '編集中に押せる').toBe(true);
+    expect(s.q<HTMLButtonElement>('[data-pkc-action="open-inspector-more"]').disabled).toBe(true);
+  });
+});
+
+describe('「その他 ▾」の中の操作を「操作を探す」から呼ぶ(#1982 段 1 の着地前レビュー)', () => {
+  /**
+   * 🔴 元のボタンは閉じた一覧の中(`hidden` の元)に在る ── 「隠れている = 効かない」と読むと、
+   *   「ノートを複製する」が「いまは押せません」になり、押しても何も起きなかった。
+   * 🔑 対照群: ボタン自身を隠せば(= その操作が出ない状態)今までどおり効かない。
+   */
+  it('🔴 「ノートを複製する」は効く(ボタン自身が隠れているときは効かない)', () => {
+    const { root, d } = mounted();
+    const keymap = new KeymapStore();
+    const noop = (): void => {};
+    const src = root.querySelector('[data-pkc-field="inspector-more-source"]');
+    expect(src?.hasAttribute('hidden'), '前提: 元が閉じた一覧として隠れていない').toBe(true);
+    expect(src?.querySelector('[data-pkc-action="duplicate-entry"]'), '前提: 複製の元のボタンが元に無い').not.toBeNull();
+    expect(runGlobalCommand('duplicate-entry', root, d, keymap, noop, noop, true), '閉じた一覧の中だから押せないと言った').toBe(true);
+    src!.querySelector<HTMLElement>('[data-pkc-action="duplicate-entry"]')!.hidden = true;
+    expect(runGlobalCommand('duplicate-entry', root, d, keymap, noop, noop, true), 'ボタン自身が隠れているのに押せると言った').toBe(false);
+  });
+});
+
 describe('コレクション(何も選んでいないとき)の「書き出す ▾」', () => {
   it('平置きの書き出しは無く、一覧に 5 件以上の書き出しが並ぶ。項目は既存の action', () => {
     const s = mounted({ select: null });
@@ -232,8 +326,8 @@ describe('一覧の項目の状態(#1029 / #501)', () => {
       expect(b, `${a} が描かれていない`).not.toBeNull();
       expect(b.closest('[hidden]'), `${a} が平置きに戻っている`).not.toBeNull();
     }
-    // 対照群: 常設の「書き出す ▾」は隠れていない
-    expect(s.q('[data-pkc-action="open-export-menu"]').closest('[hidden]')).toBeNull();
+    // 対照群: 常設の「その他 ▾」は隠れていない(「書き出す ▾」はその一覧の中)
+    expect(s.q('[data-pkc-action="open-inspector-more"]').closest('[hidden]')).toBeNull();
   });
 
   it('B(通常時): 説明が入り、押せて、塊は右クリックと同じ', () => {
@@ -302,22 +396,19 @@ describe('一覧の項目の状態(#1029 / #501)', () => {
 });
 
 describe('常設ボタンの並びと、図案を共有しないこと(#1029 / #501)', () => {
-  it('並びは コピー群 → 別ウィンドウ → 書き出す ▾ → 履歴 → ゴミ箱へ移す', () => {
+  it('並びは 常用 4 つ(編集 → リンク → 別ウィンドウ → その他 ▾)の後ろに、一覧の元が 参照 → Markdown → 書き出す ▾ → 履歴 → ゴミ箱へ移す の順(#1982 段 1)', () => {
     const s = mounted();
-    const order = [...s.root.querySelectorAll('[data-pkc-field="inspector-actions"] button[data-pkc-action]')]
-      .map((b) => b.getAttribute('data-pkc-action')!)
-      .filter((a) =>
-        ['copy-entry-ref', 'copy-entry-link', 'copy-plain-markdown', 'open-note-window', 'open-export-menu', 'show-history', 'delete-entry'].includes(a),
-      );
-    expect(order).toEqual([
-      'copy-entry-ref',
-      'copy-entry-link',
-      'copy-plain-markdown',
-      'open-note-window',
-      'open-export-menu',
-      'show-history',
-      'delete-entry',
-    ]);
+    const names = (sel: string): string[] =>
+      [...s.root.querySelectorAll(`[data-pkc-field="inspector-actions"] ${sel} button[data-pkc-action]`)].map((b) => b.getAttribute('data-pkc-action')!);
+    expect(
+      [...s.root.querySelectorAll('[data-pkc-field="inspector-actions"] > [data-pkc-field="inspector-action-group"] > button[data-pkc-action]')].map((b) =>
+        b.getAttribute('data-pkc-action'),
+      ),
+    ).toEqual(['start-edit', 'copy-entry-link', 'open-note-window', 'open-inspector-more']);
+    const inMore = names('[data-pkc-field="inspector-more-source"]').filter((a) =>
+      ['copy-entry-ref', 'copy-plain-markdown', 'open-export-menu', 'show-history', 'delete-entry'].includes(a),
+    );
+    expect(inMore).toEqual(['copy-entry-ref', 'copy-plain-markdown', 'open-export-menu', 'show-history', 'delete-entry']);
   });
 
   it('常設のアイコンは、意味の違う別の action・種別・タブと同じ図案を共有しない', () => {

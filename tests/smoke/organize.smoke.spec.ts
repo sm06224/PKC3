@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, answerAppDialog } from './helpers';
+import { openExportMenu, clickInspectorMoreItem, gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, answerAppDialog } from './helpers';
 
 /**
  * 整理の面(#240 段①〜⑤。user 指示 2026-08-17
@@ -98,9 +98,8 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
    *   happy-dom で同じ主張を見るが、**実際に両方が見えて押せる**ことは見ていない。
    */
   // 🔴 2026-11-03(#1029 / #501): 書き出し系は「書き出す ▾」1 つに畳んだ ── 実マウスで開き、一覧の項目で見る
-  const exportBtn = page.locator('[data-pkc-field="inspector-actions"] [data-pkc-action="open-export-menu"]');
-  await expect(exportBtn, '「書き出す ▾」が出ていない').toBeVisible();
-  await clickReal(page, '[data-pkc-field="inspector-actions"] [data-pkc-action="open-export-menu"]');
+  // 🔴 2026-11-19(#1982 段 1): 「書き出す ▾」は「その他 ▾」の中 ── `openExportMenu` が「その他 ▾」→「書き出す ▾」の順に実マウスで開く
+  await openExportMenu(page);
   const menuItem = (action: string) => page.locator(`[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`);
   const entryBackup = menuItem('export-entry');
   const folderBackup = menuItem('export-folder');
@@ -146,7 +145,7 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
    */
   await clickReal(page, noteRow);
   // ノートを選ぶと、書き出し 5 つは押せる(束 K2。フォルダでだけ塞がっている対照群)
-  await clickReal(page, '[data-pkc-field="inspector-actions"] [data-pkc-action="open-export-menu"]');
+  await openExportMenu(page);
   for (const action of exportActions) {
     await expect(menuItem(action), `🔴 ノートなのに ${action} が押せない`).toBeEnabled();
   }
@@ -372,7 +371,7 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
   expect(updatedBefore, '前提: 更新日時が読めない').toBeTruthy();
   // ⚠ 右の列は選んだ直後に「参照元」などで後から伸びる ── 押せる位置が落ち着くまで撃ち直す(届かない回は押す前に落ちるので二重には消えない)
   await expect(async () => {
-    await clickReal(page, '[data-pkc-action="delete-entry"]');
+    await clickInspectorMoreItem(page, 'delete-entry');
   }).toPass({ timeout: 10_000 });
   await expect(rows, '2 番目が消えていない').toHaveCount(3);
   if (await page.locator('[data-pkc-action="show-trash"]:not([hidden])').count())
@@ -409,7 +408,7 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
   await expect(chip, 'もとから付いていた ノート4 のタグまで外れた').toHaveCount(1);
   // ③ ゴミ箱を空にする → 件数と容量の空け方
   await rows.nth(3).click();
-  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await clickInspectorMoreItem(page, 'delete-entry');
   await expect(rows).toHaveCount(3);
   if (await page.locator('[data-pkc-action="show-trash"]:not([hidden])').count())
     await clickReal(page, '[data-pkc-action="show-trash"]');

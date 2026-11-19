@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { clickReal, createEntry, collectPageErrors, gotoApp, useSplitEditor,
   gotoCollectionPane,
   openExportMenu,
+  openInspectorMore,
 } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -34,13 +35,21 @@ test.beforeEach(async ({ page }) => {
  */
 async function copyAndWait(page: Page, action: string): Promise<void> {
   // 🔴 構成のコピーは「書き出す ▾」の一覧の中(#1029 / #501)── user と同じく実マウスで開いてから、一覧の項目を押す
-  const viaMenu = action === 'export-structure';
-  if (viaMenu) await openExportMenu(page, 'collection');
+  const viaExport = action === 'export-structure';
+  // 🔴 ノートの参照のコピーは「その他 ▾」の一覧の中(#1982 段 1)
+  const viaMore = action === 'copy-entry-ref';
+  const viaMenu = viaExport || viaMore;
+  if (viaExport) await openExportMenu(page, 'collection');
+  if (viaMore) await openInspectorMore(page);
   const sel = viaMenu
     ? `[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`
     : `[data-pkc-action="${action}"]`;
-  // 🔴 一覧の項目は押すと閉じる ── 合図は「書き出す ▾」のボタンに出る(項目に出ても誰にも見えない)
-  const flashSel = viaMenu ? '[data-pkc-action="open-collection-export-menu"]' : sel;
+  // 🔴 一覧の項目は押すと閉じる ── 合図は一覧を開いたボタンに出る(項目に出ても誰にも見えない)
+  const flashSel = viaExport
+    ? '[data-pkc-action="open-collection-export-menu"]'
+    : viaMore
+      ? '[data-pkc-action="open-inspector-more"]'
+      : sel;
   /**
    * 🔴 **仕掛ける前に「押し所が在る」ことを確かめる**(#878 ②、2026-09-13)。
    *

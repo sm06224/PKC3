@@ -39,7 +39,7 @@ import { normalizeQuery } from '@features/filter/title-filter';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(情報列・一覧の行と共有)。
 //    ここに 3 つ目の parse を置いていたので寄せた(規則は 1 つ ── CLAUDE.md)
 import { formatListUpdated, listDayStamp, formatStoredDate, formatStoredStamp } from '@features/datetime/stored-date';
-import { ARCHETYPE_ICONS, iconButton, iconSpan } from './icons';
+import { ARCHETYPE_ICONS, iconButton, iconSpan, markVariant } from './icons';
 // 🔑 空のときの「次の一手」の部品(#722 P2-13。かつては一覧タブと 2 か所で組まない形で共有していた)
 import { emptyStartActions } from './empty-start';
 import { paintRowMark } from './selection-mark';
@@ -1975,6 +1975,7 @@ export class FilerRenderer {
         purge.type = 'button';
         purge.setAttribute('data-pkc-action', 'purge-trash');
         purge.textContent = 'ゴミ箱を空にする';
+        markVariant(purge, 'danger');
         head.append(purge);
       }
       trashBar.append(head);
@@ -2007,6 +2008,7 @@ export class FilerRenderer {
         purgeOne.setAttribute('data-pkc-action', 'purge-trash');
         purgeOne.setAttribute('data-pkc-trash-lid', t.entryLid);
         purgeOne.textContent = '完全に消す';
+        markVariant(purgeOne, 'danger');
         li.append(text, restore, purgeOne);
         ul.append(li);
       }

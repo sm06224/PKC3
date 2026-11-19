@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor, writesLanded } from './helpers';
+import { clickInspectorMoreItem, clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor, writesLanded } from './helpers';
 
 /**
  * 🔴 **スマートフォルダ**(#421 段①。user 要望 2026-08-26)。
@@ -201,7 +201,7 @@ test('🔴 中でタグを外すと、集め直しを待たずに行が消える
    *   (行だけ消えて数が古いままだと、帯が嘘になる)。
    */
   await page.locator(ROWS).first().click();
-  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await clickInspectorMoreItem(page, 'delete-entry');
   await expect(page.locator(ROWS), '消したのに行が残っている').toHaveCount(2);
   await expect(page.locator(WHY), '消したのに件数が減っていない').toContainText('2 件');
 

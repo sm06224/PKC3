@@ -44,7 +44,7 @@ import { hasTranscriptCues } from '@features/asr/srt';
 import { archetypeLabel } from '@features/flavor/archetype-label';
 import { candidateText, countTitles } from '@features/relation/target-label';
 import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
-import { iconButton, INSPECTOR_ICON_ACTIONS } from './icons';
+import { iconButton, INSPECTOR_ICON_ACTIONS, markVariant } from './icons';
 import { setTagKey, tagColorControls } from './tag-color';
 import { COLLECTION_PANE_COMMANDS } from './commands';
 import { readBundle } from '@adapter/platform/portable-boot';
@@ -145,6 +145,9 @@ const SCAN_DEBOUNCE_MS = 250;
  * 説明は押す前に「何が入っているか」を言う(一覧の中身は選んだノートで変わる)。
  */
 export const EXPORT_MENU_LABEL = '書き出す ▾';
+/** 🔴 右の列の常用 4 つ目「その他 ▾」(#1982 段 1)。残りの操作を 1 つの一覧に畳む。 */
+export const INSPECTOR_MORE_LABEL = 'その他 ▾';
+const INSPECTOR_MORE_HINT = 'このノートのそのほかの操作(参照のコピー・書き出し・履歴・名前の変更・フォルダへ移す・複製・ゴミ箱へ移すなど)を選ぶ一覧を出します';
 /**
  * 🔴 **「アプリで開く ▾」**(#1966 3-3。🟣 Gemini の裁定 = 案 B)── 開いているノートを、組み込みのアプリへ渡して開く一覧。
  * 中身は「差分マージで履歴と比べる」と、表データの添付のときだけ「SQL で開く」(組むのは binder の `open-app-menu`)。
@@ -203,6 +206,7 @@ export class InspectorRenderer {
   private exportMenuBtn: HTMLButtonElement | null = null;
   /** 「アプリで開く ▾」(#1966 3-3)。 */
   private appMenuBtn: HTMLButtonElement | null = null;
+  private moreMenuBtn: HTMLButtonElement | null = null;
   /** 相手の候補(#185)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
   private candidates: HTMLDataListElement | null = null;
   /** 相手の候補の元(#1087)。欄に焦点が当たったとき `fillCandidates` が読む。 */
@@ -1496,6 +1500,20 @@ export class InspectorRenderer {
       const appTitle = editing ? withBlockedNote(APP_MENU_HINT, blockedNote) : APP_MENU_HINT;
       if (appMenu.title !== appTitle) appMenu.title = appTitle;
     }
+    // 🔴 「ノートを編集する」は中央の帯と**同じ条件**(`detail.ts` の `disabled = !bodyReady`。判定の正本は `withEditReady`)。
+    //   編集中は上の loop が既に押せなくしている ── ここは「本文がまだ届いていない」を足すだけ
+    const editBtn = this.buttons.get('start-edit');
+    if (editBtn && !editing && state.openBody?.lid !== meta.lid) {
+      editBtn.disabled = true;
+      editBtn.title = '本文を読み込んでいます…';
+    }
+    const moreMenu = this.moreMenuBtn;
+    if (moreMenu) {
+      setAttr(moreMenu, 'data-pkc-entry', meta.lid);
+      if (moreMenu.disabled !== editing) moreMenu.disabled = editing;
+      const moreTitle = editing ? withBlockedNote(INSPECTOR_MORE_HINT, blockedNote) : INSPECTOR_MORE_HINT;
+      if (moreMenu.title !== moreTitle) moreMenu.title = moreTitle;
+    }
     const exportMenu = this.exportMenuBtn;
     if (exportMenu) {
       setAttr(exportMenu, 'data-pkc-entry', meta.lid);
@@ -1809,6 +1827,7 @@ export class InspectorRenderer {
     this.buttons = new Map();
     this.exportMenuBtn = null;
     this.appMenuBtn = null;
+    this.moreMenuBtn = null;
     this.relAdd = null;
     this.relDd = null;
     this.editingNote = null;
@@ -2088,13 +2107,38 @@ export class InspectorRenderer {
      * ⚠ 塊は**それ自身も折り返す**(CSS の `flex-wrap`)── 折り返せないと、
      *   狭い列で塊ごと溢れて「入り切らないから見えない」が起きる。
      */
+    /**
+     * 🔴 **右の列の操作は「常用 4 つ + その他 ▾」**(#1982 段 1。user 裁定 2026-11-19 = 決定 3)。
+     *
+     * ⚠ 画面に出すのは「ノートを編集する」「リンクをコピー」「別のウィンドウで開く」「その他 ▾」の 4 つだけ。
+     *   残り(参照のコピー・履歴・名前変更・移動・複製・種類・ゴミ箱 …)は**隠した元**(`inspector-more-source`)に
+     *   **今までの並びと塊のまま**置き、押すと binder の `open-inspector-more` が**この元のボタンを読んで**一覧にする。
+     * 🔑 字・説明・畳む / 押せないの状態は下の `render` が**元のボタンへ**書く(判定を 2 本に分けない)。
+     *   「書き出す ▾」と同じ作法(`inspector-export-source` + `exportMenuItemsFrom`)である。
+     */
+    const primaryGroup = document.createElement('div');
+    primaryGroup.setAttribute('data-pkc-field', 'inspector-action-group');
+    primaryGroup.setAttribute('data-pkc-group', 'primary');
+    actions.append(primaryGroup);
+    const moreSource = document.createElement('div');
+    moreSource.setAttribute('data-pkc-field', 'inspector-more-source');
+    moreSource.hidden = true;
+    /** 常用の 4 つ(画面に出す)を作る。⚠ 元のボタンと同じく `this.buttons` に入れる(`render` が 1 か所で書く) */
+    const visible = (action: string): void => {
+      const label = ENTRY_ACTION_LABELS[action]!;
+      const b = iconButton(action, label, INSPECTOR_ICON_ACTIONS.has(action) ? action : null);
+      b.setAttribute(ENTRY_ACTION_WIDTH_ATTR, entryActionWidthTier(label));
+      primaryGroup.append(b);
+      this.buttons.set(action, b);
+    };
     let bucket: HTMLElement | null = null;
     let bucketGroup: string | undefined;
     const group = (name: string): void => {
       const g = document.createElement('div');
       g.setAttribute('data-pkc-field', 'inspector-action-group');
       g.setAttribute('data-pkc-group', name);
-      actions.append(g);
+      // 🔴 塊は隠した「その他 ▾」の元(`moreSource`)の中に積む(下の注記)
+      moreSource.append(g);
       bucket = g;
       bucketGroup = name;
     };
@@ -2108,7 +2152,7 @@ export class InspectorRenderer {
     exportSource.hidden = true;
     const btn = (action: string, label: string, icon: string | null = null): void => {
       const b = iconButton(action, label, icon);
-      (INSPECTOR_EXPORT_MENU_ACTIONS.includes(action) ? exportSource : (bucket ?? actions)).append(b);
+      (INSPECTOR_EXPORT_MENU_ACTIONS.includes(action) ? exportSource : (bucket ?? moreSource)).append(b);
       this.buttons.set(action, b);
     };
     /**
@@ -2160,9 +2204,11 @@ export class InspectorRenderer {
      */
     // ⚠ **並びは右クリックと揃える**(user 裁定 2026-09-04)── 毎日使う
     //    「参照」を動かさない(1 稿目は付箋を先頭に置いて全部を 1 つ下げた)
+    // 🔴 常用 4 つの先頭は「ノートを編集する」(中央の帯の主ボタンと同じ受け手 `start-edit`。こちらは標準の型)
+    visible('start-edit');
     entryBtn('copy-entry-ref');
-    // 🔴 外から開けるリンク(2026-10-11)── 「参照」の真横。字・説明は `ENTRY_MENU_ACTIONS` の 1 か所
-    entryBtn('copy-entry-link');
+    // 🔴 外から開けるリンク(2026-10-11)── 常用(画面に出す)。字・説明は `ENTRY_MENU_ACTIONS` の 1 か所
+    visible('copy-entry-link');
     /**
      * 🔴 **素の Markdown で写す**(#396)。
      *
@@ -2179,7 +2225,7 @@ export class InspectorRenderer {
      *   在り、右クリックとは並びが違っていた。
      */
     entryBtn('copy-plain-markdown');
-    entryBtn('open-note-window');
+    visible('open-note-window');
     /**
      * 🔴 **保存したスタックを載せる**(#633 段③)。⚠ スタックの入れ物のときだけ出す
      *   (`render` で `hidden` を付け外し ── `export-folder` と同じ作法)。
@@ -2203,13 +2249,13 @@ export class InspectorRenderer {
     const exportMenu = iconButton('open-export-menu', EXPORT_MENU_LABEL, 'open-export-menu');
     exportMenu.setAttribute('aria-haspopup', 'menu');
     exportMenu.title = EXPORT_MENU_HINT;
-    (bucket ?? actions).append(exportMenu);
+    (bucket ?? moreSource).append(exportMenu);
     this.exportMenuBtn = exportMenu;
     // 🔴 「アプリで開く ▾」(#1966 3-3)── 「書き出す ▾」の隣(渡す系の並び)。押すと一覧(`open-app-menu` → `openContextMenu`)
     const appMenu = iconButton('open-app-menu', APP_MENU_LABEL, null);
     appMenu.setAttribute('aria-haspopup', 'menu');
     appMenu.title = APP_MENU_HINT;
-    (bucket ?? actions).append(appMenu);
+    (bucket ?? moreSource).append(appMenu);
     this.appMenuBtn = appMenu;
     entryBtn('export-entry');
     /**
@@ -2275,6 +2321,17 @@ export class InspectorRenderer {
     entryBtn('create-in-folder');
     entryBtn('open-trash');
     entryBtn('delete-entry');
+    // 🔴 消す操作は危険の型(「その他 ▾」の一覧では赤。`exportMenuItemsFrom` が型を項目へ写す)
+    markVariant(this.buttons.get('delete-entry')!, 'danger');
+    /**
+     * 🔴 **「その他 ▾」**(常用の 4 つ目)。押すと一覧(`open-inspector-more` → `openContextMenu`)。
+     * ⚠ 元の並びを動かさない ── 一覧の並びは `moreSource` の DOM 順そのもの。
+     */
+    const moreMenu = iconButton('open-inspector-more', INSPECTOR_MORE_LABEL, null);
+    moreMenu.setAttribute('aria-haspopup', 'menu');
+    moreMenu.title = INSPECTOR_MORE_HINT;
+    primaryGroup.append(moreMenu);
+    this.moreMenuBtn = moreMenu;
     /**
      * 🔴 **編集中だけ出る 1 行**(#715)── 操作の帯の**直上**に置く(帯と離すと
      *   何の理由か読めない)。字と出し入れは `render` が phase から決める。
@@ -2283,7 +2340,7 @@ export class InspectorRenderer {
     note.setAttribute('data-pkc-field', 'inspector-editing-note');
     note.hidden = true;
     this.editingNote = note;
-    actions.append(exportSource);
+    actions.append(moreSource, exportSource);
     this.region.append(note, actions);
   }
 

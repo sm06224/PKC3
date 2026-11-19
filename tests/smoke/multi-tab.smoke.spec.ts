@@ -207,7 +207,7 @@ test('🔴 タブ A が編集中は、タブ B からの「使われていない
   await gotoApp(page);
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await expect(page.locator('[data-pkc-action="start-edit"]')).toBeVisible();
+  await expect(page.locator('[data-pkc-region="detail"] [data-pkc-action="start-edit"]')).toBeVisible();
 
   const pageB: Page = await context.newPage();
   const errorsB = collectPageErrors(pageB);

@@ -68,13 +68,16 @@ function actionButtons(root: HTMLElement): HTMLButtonElement[] {
  *   ノートで描くとその 1 つを**一度も見ない**(未実行の経路になる)。
  */
 const EXPECTED_ACTIONS: readonly string[] = [
-  // 🔴 写す 2 つを隣に、その次に小窓(#690 I2、2026-09-04)── 右クリックと同じ並び
-  'copy-entry-ref',
-  // 🔴 外から開けるリンク(2026-10-11)── 参照の隣
+  // 🔴 常用の 4 つ(#1982 段 1。user 裁定 2026-11-19 = 決定 3)── 画面に見えるのはここまで。残りは「その他 ▾」の元
+  'start-edit',
+  // 🔴 外から開けるリンク(2026-10-11)
   'copy-entry-link',
-  'copy-plain-markdown',
   // 🔴 付箋(#685 段②、2026-09-04)── ⋯ と情報ペインの両方に出す
   'open-note-window',
+  'open-inspector-more',
+  // 🔴 ここから「その他 ▾」の元(隠した器 `inspector-more-source`。今までの並びのまま)
+  'copy-entry-ref',
+  'copy-plain-markdown',
   // 🔴 保存したスタックを載せる(#633 段③)── スタックの入れ物のときだけ出る(他では hidden)
   'stack-load',
   'adopt-external-images',
@@ -191,7 +194,10 @@ describe('情報ペインの操作の帯の説明(2026-08-29)', () => {
       metas: [meta('n1', '議事録', 'folder')],
       relations: [],
     }).state;
-    inspector.render(reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state);
+    // 🔴 本文が届いた状態で突き合わせる(#1982 段 1: 「ノートを編集する」は本文が届くまで「読み込んでいます…」に替わる ──
+    //   右クリックも `withEditReady` で同じ字へ替わる。届いた後の字は 1 本 = 正本の説明)
+    const selected = reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state;
+    inspector.render(reduce(selected, { type: 'BODY_LOADED', lid: 'n1', body: '本文\n' }).state);
 
     const hints = new Map(
       entryMenuActions({ archetype: 'folder', linkedFile: null }).map((a) => [a.action, a.hint]),

@@ -184,7 +184,7 @@ import { matchContact, visibleContacts, type ContactCard } from '@features/conta
 import { buildVcf, countUnwritableBirthdays, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isIcsFileName } from '@features/schedule/ics-import';
 import { isMarkdownFileName, isPlainTextFileName } from '@features/import/plain-markdown';
-import { ARCHETYPE_ICONS, BAR_TILE_ATTR, setActionIcon } from '@adapter/ui/render/icons';
+import { ARCHETYPE_ICONS, BAR_TILE_ATTR, setActionIcon, VARIANT_ATTR } from '@adapter/ui/render/icons';
 import { OVERFLOW_ATTR } from '@adapter/ui/render/bar-overflow';
 import { setContainerRepairToggle } from '@adapter/ui/render/commands';
 import { isIconName } from '@features/icon/symbols';
@@ -588,6 +588,11 @@ import { copyLabel } from '@features/clipboard/history';
 function exportMenuItemsFrom(src: Element | null, opener: string, grouped = false): MenuItem[] {
   if (src === null) return [];
   const items: MenuItem[] = [];
+  // 🔴 塊は右クリックと同じ正本(`ENTRY_ACTION_GROUPS`)。表に無いボタン(書き出す ▾ / 取り込み)は置かれた塊(親の `data-pkc-group`)から引く
+  const groupOf = (b: HTMLElement): string | undefined =>
+    ENTRY_ACTION_GROUPS[b.getAttribute('data-pkc-action') ?? ''] ??
+    b.parentElement?.getAttribute('data-pkc-group') ??
+    undefined;
   for (const b of src.querySelectorAll<HTMLButtonElement>('button[data-pkc-action]')) {
     if (b.hidden) continue;
     const label = b.querySelector('[data-pkc-field="label"]')?.textContent ?? b.textContent ?? '';
@@ -597,15 +602,34 @@ function exportMenuItemsFrom(src: Element | null, opener: string, grouped = fals
       label,
       hint: b.title,
       disabled: b.disabled,
-      // 🔑 コピー系の合図は、閉じてしまう一覧の項目ではなく「書き出す ▾」のボタンに出す(`flashCopied` が読む)
-      attrs: { [MENU_FROM_ATTR]: opener },
+      // 🔑 コピー系の合図は、閉じてしまう一覧の項目ではなく「書き出す ▾」のボタンに出す(`flashCopied` が読む)。
+      //   型(危険 = 赤)は元のボタンの `data-pkc-variant` をそのまま写す(#1982)
+      attrs: {
+        [MENU_FROM_ATTR]: opener,
+        ...(b.getAttribute(VARIANT_ATTR) !== null ? { [VARIANT_ATTR]: b.getAttribute(VARIANT_ATTR)! } : {}),
+      },
       // 🔑 塊は右クリックと同じ正本(`ENTRY_ACTION_GROUPS`)から ── 「バックアップ(ノート)」と「(フォルダ)」の間が空く
-      ...(grouped && ENTRY_ACTION_GROUPS[b.getAttribute('data-pkc-action') ?? ''] !== undefined
-        ? { group: ENTRY_ACTION_GROUPS[b.getAttribute('data-pkc-action') ?? '']! }
-        : {}),
+      ...(grouped && groupOf(b) !== undefined ? { group: groupOf(b)! } : {}),
     });
   }
   return items;
+}
+
+/** 右の列の操作の帯(`root` から引く)。⚠ 画面に 1 つだけ。 */
+function inspectorActionsOf(root: HTMLElement): Element | null {
+  return root.querySelector('[data-pkc-region="inspector"] [data-pkc-field="inspector-actions"]');
+}
+
+/**
+ * 🔴 **右の列の一覧(書き出す ▾ / アプリで開く ▾)を出す基準の位置**(#1982 段 1)。
+ * ⚠ 押した物が帯の中に居れば**それ**。「その他 ▾」の一覧の項目から来たとき(一覧は root の直下に出るので帯の外)は、
+ *   一覧を出した**「その他 ▾」のボタン**を基準にする(隠した元のボタンは大きさが 0 で、閉じたあとの焦点の戻り先にもならない)。
+ */
+function inspectorMenuAnchor(target: HTMLElement, root: HTMLElement): HTMLElement {
+  if (target.closest('[data-pkc-field="inspector-actions"]') !== null) return target;
+  return (
+    inspectorActionsOf(root)?.querySelector<HTMLElement>('button[data-pkc-action="open-inspector-more"]') ?? target
+  );
 }
 
 /**
@@ -5302,6 +5326,8 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   // 🔑 #1029 / #501 ── 右の列の「書き出す ▾」(ノート 1 件 / コレクション全体)
   'open-export-menu',
   'open-collection-export-menu',
+  // 🔑 #1982 段 1 ── 右の列の「その他 ▾」(中の「書き出す ▾」「アプリで開く ▾」は一覧の項目から 2 枚目を開く)
+  'open-inspector-more',
 ]);
 
 /**
@@ -7729,7 +7755,7 @@ export function runGlobalCommand(
   const btn = root.querySelector<HTMLElement>(sel);
   if (btn === null) return false;
   // 🔴 行ごと隠してある間は「効かない」(#582 段③。`PALETTE_HIDDEN_OK` の注釈)
-  if (!PALETTE_HIDDEN_OK.has(cmd) && btn.closest('[hidden]') !== null) return false;
+  if (!PALETTE_HIDDEN_OK.has(cmd) && !inClosedMenuSource(btn) && btn.closest('[hidden]') !== null) return false;
   /**
    * 🔴 **「押せるか」は `disabled` まで見る**(#425 段①)。
    *
@@ -18298,8 +18324,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    const r = target.getBoundingClientRect();
-    openContextMenu(root, { x: r.left, y: r.bottom }, items, target, { 'data-pkc-entry': lid });
+    const anchor = inspectorMenuAnchor(target, root);
+    const r = anchor.getBoundingClientRect();
+    openContextMenu(root, { x: r.left, y: r.bottom }, items, anchor, { 'data-pkc-entry': lid });
   },
   'diff-with-history': (dispatcher, target, services, root) => {
     const plan = appOpenPlan(dispatcher.getState(), target.getAttribute('data-pkc-entry'), 'diff');
@@ -19056,8 +19083,30 @@ const ACTIONS: Record<string, ActionHandler> = {
   'open-export-menu': (_dispatcher, target, _services, root) => {
     const lid = target.getAttribute('data-pkc-entry');
     if (!lid) return;
-    const src = target.closest('[data-pkc-field="inspector-actions"]')?.querySelector('[data-pkc-field="inspector-export-source"]');
-    const items = exportMenuItemsFrom(src ?? null, 'open-export-menu', true);
+    // 🔴 「その他 ▾」の一覧の項目から来たときは、押した物が一覧の中に居る(隠した元のボタンでも、画面の「書き出す ▾」でもない)
+    //   ── 元と置き場所は root から引き直す(`inspectorMenuAnchor`)
+    const actions = target.closest('[data-pkc-field="inspector-actions"]') ?? inspectorActionsOf(root);
+    const src = actions?.querySelector('[data-pkc-field="inspector-export-source"]');
+    // 🔑 コピー系の合図は**画面に居るボタン**へ出す(「その他 ▾」から来たなら、そのボタン。隠した元は見えない)
+    const opener = target.closest('[data-pkc-field="inspector-actions"]') !== null ? 'open-export-menu' : 'open-inspector-more';
+    const items = exportMenuItemsFrom(src ?? null, opener, true);
+    if (items.length === 0) return;
+    const anchor = inspectorMenuAnchor(target, root);
+    const r = anchor.getBoundingClientRect();
+    openContextMenu(root, { x: r.left, y: r.bottom }, items, anchor, { 'data-pkc-entry': lid });
+  },
+  /**
+   * 🔴 **右の列の「その他 ▾」**(#1982 段 1。user 裁定 2026-11-19 = 決定 3)。常用 4 つに入らなかった操作の一覧。
+   * 🔑 項目は隠した元のボタン(`inspector-more-source`)から読む ── 字・説明・押せない / 畳む / 型(危険 = 赤)の状態は
+   *   `inspector.ts` の `render` / `build` が元のボタンに書いたもの(2 本目の判定を持たない)。押す先は**既存の action**そのまま。
+   *   「書き出す ▾」「アプリで開く ▾」の項目は押すと 2 枚目の一覧を開く(`MENU_OPENERS` に載せてある)。
+   * ⚠ **対象のノートは押したボタンの `data-pkc-entry`**(`carry` で全項目へ写す)。
+   */
+  'open-inspector-more': (_dispatcher, target, _services, root) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (!lid) return;
+    const src = target.closest('[data-pkc-field="inspector-actions"]')?.querySelector('[data-pkc-field="inspector-more-source"]');
+    const items = exportMenuItemsFrom(src ?? null, 'open-inspector-more', true);
     if (items.length === 0) return;
     const r = target.getBoundingClientRect();
     openContextMenu(root, { x: r.left, y: r.bottom }, items, target, { 'data-pkc-entry': lid });
@@ -19816,6 +19865,21 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
  *   `hidden` の中の物が先に当たっても撃てる(メニューは開かなくてよい)。
  */
 const PALETTE_HIDDEN_OK: ReadonlySet<string> = new Set(['attach-file', 'open-today']);
+
+/**
+ * 🔴 **閉じた一覧の元のボタンは「効く」**(#1982 段 1 の着地前レビュー)。
+ *
+ * 右ペインの「その他 ▾」は、一覧に出す操作を**隠した元のボタン**(`inspector-more-source`)に持つ ──
+ *   `hidden` なのは「一覧が閉じている」だけで、「いまは効かない」ではない(添付 / 今日のノートと同じ形)。
+ * ⚠ 直す前は「操作を探す」の「ノートを複製する」が**押しても何も起きず**、一覧では「いまは押せません」と出ていた。
+ * 🔑 効かない物は今までどおり断る ── 元の中でも、ボタン自身や塊が `hidden`(フォルダでない、など)なら、
+ *   最も近い `hidden` は元そのものではなくなるので、ここは `false` を返す。
+ */
+const CLOSED_MENU_SOURCES = '[data-pkc-field="inspector-more-source"], [data-pkc-field="inspector-export-source"]';
+function inClosedMenuSource(btn: HTMLElement): boolean {
+  const nearest = btn.closest('[hidden]');
+  return nearest !== null && nearest.matches(CLOSED_MENU_SOURCES);
+}
 
 /**
  * 🔴 **先に欄へ字を入れる操作は、欄が空なら「欄へ移る」** (#582 段③)。

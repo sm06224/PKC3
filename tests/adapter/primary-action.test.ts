@@ -35,7 +35,7 @@ import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { bindActions, runGlobalCommand } from '../../src/adapter/ui/actions/binder';
 import { appKeymap } from '../../src/adapter/ui/render/keymap';
-import { blocksFor, decl, mediaBlock, stripComments } from '../helpers/css-blocks';
+import { blocksFor, decl, mediaBlock, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { applyShortcutHints } from '../../src/adapter/ui/render/shortcut-hint';
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -106,7 +106,7 @@ function mount(metas: EntryMeta[] = [meta('n1', 'あ')]): { root: HTMLElement; d
 function primariesIn(root: HTMLElement, region: string): string[] {
   const host = root.querySelector(`[data-pkc-region="${region}"]`);
   if (host === null) throw new Error(`前提が崩れている: 面 ${region} が無い`);
-  return [...host.querySelectorAll<HTMLButtonElement>('button[data-pkc-primary]')]
+  return [...host.querySelectorAll<HTMLButtonElement>('button[data-pkc-variant=primary]')]
     .filter((b) => b.closest('[hidden],[inert]') === null)
     .map((b) => b.getAttribute('data-pkc-action') ?? '');
 }
@@ -115,7 +115,7 @@ function primariesIn(root: HTMLElement, region: string): string[] {
 function plainCount(root: HTMLElement, region: string): number {
   const host = root.querySelector(`[data-pkc-region="${region}"]`);
   if (host === null) throw new Error(`前提が崩れている: 面 ${region} が無い`);
-  return [...host.querySelectorAll<HTMLButtonElement>('button:not([data-pkc-primary])')].filter(
+  return [...host.querySelectorAll<HTMLButtonElement>('button:not([data-pkc-variant=primary])')].filter(
     (b) => b.closest('[hidden],[inert]') === null,
   ).length;
 }
@@ -186,7 +186,7 @@ describe('主の操作は面ごとに 1 つ(#722 P2-10)', () => {
 
   it('🔴 画面ぜんぶで、主の操作は 2 つを超えない(左の列 + 中央)', () => {
     const { root, d } = mount();
-    const count = (): number => root.querySelectorAll('button[data-pkc-primary]').length;
+    const count = (): number => root.querySelectorAll('button[data-pkc-variant=primary]').length;
     expect(count(), '読んでいるとき、主が多すぎる').toBe(2);
     d.dispatch({ type: 'START_EDIT' });
     // 編集中は中央の「保存」だけ(左の「+ ノート」は押せないので濃さを外す)
@@ -218,14 +218,52 @@ describe('主の操作は面ごとに 1 つ(#722 P2-10)', () => {
       const text = readFileSync(file, 'utf-8');
       // ⚠ コメントの中の言及は拾わない ── 実行する行だけを見る
       const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-      if (code.includes('data-pkc-primary')) bad.push(file);
+      if (/data-pkc-variant['"`]?\s*[,:=]\s*['"`]?primary/.test(code)) bad.push(file);
     }
     expect(bad, '印を直に書いている file がある(全数検査が数え落とす)').toEqual([]);
     // ⚠ 空振り防止 ── icons.ts の側には在ること
     expect(
       readFileSync('src/adapter/ui/render/icons.ts', 'utf-8'),
       '印の定義が icons.ts から消えた',
-    ).toContain('data-pkc-primary');
+    ).toContain("'data-pkc-variant'");
+  });
+});
+
+/**
+ * 🔴 **ボタンの 4 型の見た目の定義**(#1982 段 1)。happy-dom は CSS を組まないので、原文を構文で読む
+ * (実ブラウザで測る側は `tests/smoke/primary-action.smoke.spec.ts`)。
+ */
+describe('ボタンの 4 型(data-pkc-variant)の CSS', () => {
+  const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+  const one = (sel: string): string => {
+    const hit = blocksFor(css, sel);
+    expect(hit.length, `${sel} の規則が無い`).toBe(1);
+    return hit[0]!;
+  };
+
+  it('🔴 主は --accent 地 + --accent-fg 字(--fg 反転へ戻っていない)。図案の色相も --accent-fg と混ぜる', () => {
+    const base = one("button[data-pkc-variant='primary']");
+    expect(base).toMatch(decl('background', 'var\\(--accent\\)'));
+    expect(base).toMatch(decl('color', 'var\\(--accent-fg\\)'));
+    expect(one("button[data-pkc-variant='primary']:hover:not(:disabled)")).toMatch(decl('color', 'var\\(--accent-fg\\)'));
+    expect(one("button[data-pkc-variant='primary'] [data-pkc-icon]")).toContain('var(--accent-fg)');
+  });
+
+  it('🔴 危険は --danger の字 + 薄い赤の地、乗せると --danger 地 + --surface 字。ゴースト = 透明', () => {
+    expect(one("button[data-pkc-variant='danger']")).toMatch(decl('color', 'var\\(--danger\\)'));
+    expect(one("button[data-pkc-variant='danger']")).toContain('color-mix(in srgb, var(--danger) 10%, transparent)');
+    const hover = one("button[data-pkc-variant='danger']:hover:not(:disabled)");
+    expect(hover).toMatch(decl('background', 'var\\(--danger\\)'));
+    expect(hover).toMatch(decl('color', 'var\\(--surface\\)'));
+    expect(one("button[data-pkc-variant='ghost']")).toMatch(decl('background', 'transparent'));
+  });
+
+  it('🔴 標準は枠の無い薄い地 + 地と字の遷移(--dur-fast)', () => {
+    const b = blocksFor(css, 'button').find((x) => x.includes('--row-h'))!;
+    expect(b, '標準の button の規則が見つからない').toBeDefined();
+    expect(b).toContain('color-mix(in srgb, var(--fg) 6%, transparent)');
+    expect(b).toMatch(/border:\s*1px solid transparent/);
+    expect(b).toContain('var(--dur-fast)');
   });
 });
 /**

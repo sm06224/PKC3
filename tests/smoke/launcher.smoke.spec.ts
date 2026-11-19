@@ -3,6 +3,7 @@ import { gzipSync } from 'node:zlib';
 import { TILE_MENU_ACTIONS } from '../../src/features/entry-actions';
 import { STORAGE_FALLBACK_LINE } from '../../src/features/storage/storage-notice';
 import {
+  clickInspectorMoreItem,
   answerAppDialog,
   gotoApp,
   clickReal,
@@ -1997,7 +1998,7 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
 
   await clickReal(page, '[data-pkc-browse="filer"]');
   await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().click();
-  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await clickInspectorMoreItem(page, 'delete-entry');
   // 確認は出さない(#1087 流れ 29)── 押したらそのまま移る
   await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(0);
   expect(await appKeys(), '戻せる削除でアプリのデータまで消している').toBeGreaterThan(0);
@@ -2013,7 +2014,7 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   // 🔴 **ゴミ箱を空にすると消える**(唯一の不可逆点)。
   //    ここで消さないと、消したノートのデータが origin に永久に残る
   await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().click();
-  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await clickInspectorMoreItem(page, 'delete-entry');
   await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(0);
   await clickReal(page, '[data-pkc-browse="filer"]');
   await clickReal(page, '[data-pkc-action="show-trash"]');

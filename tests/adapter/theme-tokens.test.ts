@@ -67,9 +67,12 @@ const PAIRS: readonly { fg: string; bg: string; min: number; what: string }[] = 
   { fg: '--fg', bg: '--surface-2', min: 4.5, what: '本文(見出し帯)' },
   { fg: '--muted', bg: '--surface', min: 4.5, what: '補助文' },
   { fg: '--muted', bg: '--surface-2', min: 4.5, what: '補助文(見出し帯)' },
-  { fg: '--accent-fg', bg: '--accent', min: 4.5, what: '最上部の帯' },
+  // 🔴 この対は**主のボタン**(`button[data-pkc-variant='primary']`。#1982 段 1)の字と地でもある ── 最上部の帯と同じ 4.5:1 を全テーマで課す
+  { fg: '--accent-fg', bg: '--accent', min: 4.5, what: '最上部の帯・主のボタン' },
   { fg: '--accent-dim-fg', bg: '--accent-dim', min: 4.5, what: '選択中の行' },
   { fg: '--danger', bg: '--surface', min: 4, what: '危険な操作' },
+  // 🔴 危険のボタン(#1982 段 1)の乗せた状態 ── 地が `--danger`、字が `--surface`(`app.css` の `button[data-pkc-variant='danger']:hover`)
+  { fg: '--surface', bg: '--danger', min: 4, what: '危険のボタン(乗せたとき)' },
   /**
    * 🔴 **`--ok`(緑)**(#1457)。2 つの使い手が重なる: ① 信号機の列の見出しの丸(`schedule-board-head::before`、地は `--surface`)
    *   ② **履歴の差分の「足した行」の字**(`[data-pkc-diff='add']`、地は `--surface` / `--surface-2`)。

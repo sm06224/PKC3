@@ -15,7 +15,7 @@
  *   在らず、unit は寸法を測れない)。
  */
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor } from './helpers';
+import { openInspectorMore, clickInspectorMoreItem, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -276,16 +276,18 @@ test('🔴 押すと外の画像が手元の添付になり、同意なしで絵
   await writeNote(page, `![外の絵](${url})`);
 
   // ① ボタンが出て、枚数が出ている(押す前に規模が分かる)
-  const btn = page.locator('[data-pkc-action="adopt-external-images"]');
+  // 🔴 #1982 段 1: 「その他 ▾」の一覧の中(押す前に開いて枚数を読み、閉じる)
+  const btn = (await openInspectorMore(page)).locator('[data-pkc-action="adopt-external-images"]');
   await expect(btn).toBeVisible();
   await expect(btn).toContainText('1 枚');
+  await page.keyboard.press('Escape');
 
   // ⚠ この時点ではまだ外を指している(空振り防止 ── 元から `asset:` ではない)
   const img = page.locator('[data-pkc-field="detail-body"] img.pkc-external-img');
   await expect(img).toBeAttached();
   expect(await img.getAttribute('data-pkc-external-src')).toBe(url);
 
-  await clickReal(page, '[data-pkc-action="adopt-external-images"]');
+  await clickInspectorMoreItem(page, 'adopt-external-images');
 
   /**
    * ② 本文が `asset:` へ書き換わり、**絵として出る**。
@@ -303,7 +305,11 @@ test('🔴 押すと外の画像が手元の添付になり、同意なしで絵
     .toBe(true);
 
   // ③ 取り込む物が無くなったので、ボタンは畳まれる(押しても何も起きない物を残さない)
-  await expect(btn).toBeHidden();
+  //   ⚠ 一覧の項目は押すたびに作り直される ── 開き直して「一覧に無い」を見る(前に取った locator は閉じた一覧を指して常に偽になる)
+  const menuAfter = await openInspectorMore(page);
+  await expect(menuAfter.locator('[data-pkc-action="show-history"]'), '前提: 一覧が出ていない').toBeVisible();
+  await expect(menuAfter.locator('[data-pkc-action="adopt-external-images"]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
   // ④ 確認の帯も要らなくなる(「外」ではなくなったので聞くことが無い)
   await expect(page.locator('[data-pkc-field="external-image-bar"]')).toHaveCount(0);
 
@@ -340,7 +346,7 @@ test('🔴 画像でなければ「画像ではありません」と言う(読�
   const url = new URL('/pkc3-not-an-image-264', page.url()).href;
 
   await writeNote(page, `![外の絵](${url})`);
-  await clickReal(page, '[data-pkc-action="adopt-external-images"]');
+  await clickInspectorMoreItem(page, 'adopt-external-images');
 
   const status = page.locator('[data-pkc-region="status"]');
   await expect(status).toContainText('画像ではありません', { timeout: 10_000 });

@@ -14,7 +14,8 @@ import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, expectImageRendered, useSplitEditor,
+import {
+  clickInspectorMoreItem, answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, expectImageRendered, useSplitEditor,
   gotoCollectionPane, expectReachable, writesLanded, assetGateIdle, clickExportMenuItem,
 } from './helpers';
 import { withStateOnFail } from './state-dump';
@@ -497,7 +498,7 @@ test('.pkc2.zip 取込 → entry 出現 → 生バイナリ添付が blob: で�
 
   // 履歴も HTML 経路と同じ鎖へ入っている(実 sqlite の逆パッチ経路を通る)
   await clickReal(page, '[data-pkc-entry="z1"]');
-  await clickReal(page, '[data-pkc-action="show-history"]');
+  await clickInspectorMoreItem(page, 'show-history');
   await expect(page.locator('[data-pkc-rev-order]')).toHaveCount(2);
 
   expect(errors).toEqual([]);
@@ -1268,7 +1269,7 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   const restoredNote = rows.filter({ hasText: 'ZIP のノート' }).last();
   await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:nth-child(3)');
   await expect(restoredNote).toBeVisible();
-  await clickReal(page, '[data-pkc-action="show-history"]');
+  await clickInspectorMoreItem(page, 'show-history');
   await expect(page.locator('[data-pkc-rev-order]')).toHaveCount(2);
   // ⚠ 件数だけでは「別の状態列が入った」を見逃す ── **本文**まで見る。
   // 一番古い版を開いて、元の一番古い本文が戻ることを確かめる
@@ -1389,7 +1390,7 @@ test('🔴 このノートを書き出す ── 消す前の導線が実際に�
 
   // 履歴も一緒に戻っている
   await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:last-child');
-  await clickReal(page, '[data-pkc-action="show-history"]');
+  await clickInspectorMoreItem(page, 'show-history');
   await expect(page.locator('[data-pkc-rev-order]')).toHaveCount(2);
 
   expect(errors).toEqual([]);

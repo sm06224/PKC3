@@ -853,7 +853,7 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   await clickReal(page, '[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-fold-button"]');
   await expect(doneBox, '「出すもの」を押してもチェックが開かない').toBeVisible();
   // 🔴 押しても読んでいるノートは閉じない(左の列の「何も無い所を押すとノートを閉じる」に巻き込まれない)
-  const openNote = page.locator('[data-pkc-action="start-edit"]');
+  const openNote = page.locator('[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
   await expect(openNote, '「出すもの」を押したらノートが閉じた').toBeVisible();
   // 字(ラベル)を実際に押す ── 旗がちょうど 1 回反転して、枠は開いたまま
   await fold.locator('[data-pkc-field="schedule-option"]').filter({ hasText: '済み' }).locator('span').click();
@@ -1018,7 +1018,7 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   // 保存が済んでから読み直す(読み直しで書きかけを捨てない)
-  await expect(page.locator('[data-pkc-action="start-edit"]'), '保存が済んでいない').toBeVisible();
+  await expect(page.locator('[data-pkc-region="detail"] [data-pkc-action="start-edit"]'), '保存が済んでいない').toBeVisible();
   // 🔴 画面に出ても disk へ届いたとは限らない(本文の書込は画面が先・disk が後)── 届く前に読み直すと、
   //   起動時の全走査がこの新しいノートを見ず、見逃しの件数が 1 件少なくなる(実測: 6 回に 1 回)
   await writesLanded(page);
@@ -1540,7 +1540,7 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
    *   `detail.ts` の `renderBar`)── 製品の作りどおりである。`clickReal` は「見えていて最前面か」しか見ないので、
    *   負荷で読み直しが遅れた回は disabled のボタンを押していた(実測: pointerdown / pointerup は届き、click が出ない)。
    */
-  await expect(page.locator('[data-pkc-action="start-edit"]'), '本文を読み終えても「編集」が押せるようにならない').toBeEnabled();
+  await expect(page.locator('[data-pkc-region="detail"] [data-pkc-action="start-edit"]'), '本文を読み終えても「編集」が押せるようにならない').toBeEnabled();
   await clickReal(page, '[data-pkc-action="start-edit"]');
   await expect(ta, '動かした本文が 23:00..03:00 になっていない').toHaveValue(/@\d{4}-\d{2}-\d{2} 23:00\.\.03:00/);
   await clickReal(page, '[data-pkc-action="cancel-edit"]');

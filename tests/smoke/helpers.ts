@@ -1223,12 +1223,33 @@ export async function clickExportMenuItem(page: Page, action: string): Promise<v
   await clickReal(page, `[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`);
 }
 
+/**
+ * 🔴 **右の列の「その他 ▾」を実マウスで開き、一覧(右クリックと同じ器)を返す**(#1982 段 1)。
+ * ⚠ 履歴・名前の変更・移動・複製・ゴミ箱 … はここから押す(画面に出ているのは常用 4 つだけ)。
+ */
+export async function openInspectorMore(page: Page): Promise<Locator> {
+  await clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="open-inspector-more"]');
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '「その他 ▾」を押しても一覧が出ない').toBeVisible();
+  return menu;
+}
+
+/** 「その他 ▾」の一覧の項目を、user と同じ手順(開く → 押す)で押す。⚠ spec が隠れた元のボタンを直に押さないための 1 本。 */
+export async function clickInspectorMoreItem(page: Page, action: string): Promise<void> {
+  const menu = await openInspectorMore(page);
+  await expect(menu.locator(`[data-pkc-action="${action}"]`), `${action} が「その他 ▾」の一覧に無い`).toBeVisible();
+  await clickReal(page, `[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`);
+}
+
 /** 「書き出す ▾」を実マウスで開き、一覧(右クリックと同じ器)を返す。 */
 export async function openExportMenu(page: Page, kind: 'entry' | 'collection' = 'entry'): Promise<Locator> {
-  await clickReal(
-    page,
-    `[data-pkc-region="inspector"] [data-pkc-action="${kind === 'entry' ? 'open-export-menu' : 'open-collection-export-menu'}"]`,
-  );
+  // 🔴 ノート 1 件の「書き出す ▾」は「その他 ▾」の中(#1982 段 1)── 開いて項目を押すと 2 枚目の一覧が出る
+  if (kind === 'entry') {
+    await openInspectorMore(page);
+    await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="open-export-menu"]');
+  } else {
+    await clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="open-collection-export-menu"]');
+  }
   const menu = page.locator('[data-pkc-region="context-menu"]');
   await expect(menu, '「書き出す ▾」を押しても一覧が出ない').toBeVisible();
   return menu;
