@@ -410,6 +410,8 @@ body {
   overflow-y: auto;
 }
 [data-pkc-region='collapsed-edge'] button {
+  /* ⚠ 輪で区切る帯(#1054)は段 2 で背景の段差へ移すまで、ボタンの地を帯の地(`--surface`)のまま保つ(#1982 段 1) */
+  background: var(--surface);
   border: none;
   border-radius: 0;
   flex: none;
@@ -988,6 +990,8 @@ img[data-pkc-action='view-big']:focus-visible {
   border-bottom: 1px solid var(--border);
 }
 [data-pkc-region='browse-tabs'] button {
+  /* ⚠ 輪で区切る帯(#1054)は段 2 で背景の段差へ移すまで、ボタンの地を帯の地(`--surface`)のまま保つ(#1982 段 1) */
+  background: var(--surface);
   /* 🔴 **語より細くしない**(2026-08-27)。以前は `flex: 1; min-width: 0` ──
    * 器が語より細くなり、`overflow: visible` なので**語が箱の外へ出て隣に重なった**。
    * ⚠ 隠れるのではなく**重なる**ので、狭いほど読めなくなる。
@@ -1160,6 +1164,8 @@ img[data-pkc-action='view-big']:focus-visible {
  *   の `flex-wrap: wrap` はそのまま。
  */
 [data-pkc-region='collection-bar'] button {
+  /* ⚠ 輪で区切る帯(#1054)は段 2 で背景の段差へ移すまで、ボタンの地を帯の地(`--surface`)のまま保つ(#1982 段 1) */
+  background: var(--surface);
   /* ⚠ **輪で区切る**(他の折り返す帯と同じ作法。CLAUDE.md §7 の逆 ──
    *   `border` を残すと隣のタイルと二重線になる。区切りは共有の
    *   `outline: 1px solid var(--border)` が受け持つ ── 下の連結セレクタを見よ)。
@@ -1290,6 +1296,8 @@ img[data-pkc-action='view-big']:focus-visible {
 [data-pkc-region='find-bar'] input,
 [data-pkc-region='create-bar'] select,
 [data-pkc-region='create-bar'] button {
+  /* ⚠ 輪で区切る帯(#1054)は段 2 で背景の段差へ移すまで、ボタンの地を帯の地(`--surface`)のまま保つ(#1982 段 1) */
+  background: var(--surface);
   border: none;
   border-radius: 0;
 }
@@ -1523,6 +1531,8 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
   background: var(--border);
 }
 [data-pkc-region='create-menu'] button {
+  /* ⚠ 輪で区切る帯(#1054)は段 2 で背景の段差へ移すまで、ボタンの地を帯の地(`--surface`)のまま保つ(#1982 段 1) */
+  background: var(--surface);
   flex: 1 1 auto;
   border: none;
   border-radius: 0;
@@ -2572,6 +2582,8 @@ button[data-pkc-variant='danger']:hover:not(:disabled),
   margin-bottom: 0;
 }
 [data-pkc-region='format-bar'] button {
+  /* ⚠ 輪で区切る帯(#1054)は段 2 で背景の段差へ移すまで、ボタンの地を帯の地(`--surface`)のまま保つ(#1982 段 1) */
+  background: var(--surface);
   border: none;
   border-radius: 0;
   padding: 0 var(--s2);
@@ -9829,6 +9841,8 @@ mark[data-pkc-diff-char='del'] {
   margin-top: var(--s2);
 }
 [data-pkc-region='dual-commands'] button {
+  /* ⚠ 輪で区切る帯(#1054)は段 2 で背景の段差へ移すまで、ボタンの地を帯の地(`--surface`)のまま保つ(#1982 段 1) */
+  background: var(--surface);
   /* ⚠ **輪で区切る**(他の折り返す帯と同じ作法)── `border` を残すと隣の
    *   タイルと二重線になる。寸法は `[data-pkc-bar-tile]` が持つ。 */
   border: none;

@@ -376,14 +376,30 @@ test('🔴 畳んだ章の中の見出しへ、目次から開いて飛べる (#
   await expect(bodyP.filter({ visible: true }), '前提が崩れている(最初は 4 件とも見える)').toHaveCount(4);
   // ⚠ 触れている間の色(:hover)に満たされない ── マウスを外してから測る
   await page.mouse.move(0, 0);
-  const openColor = await days.nth(0).evaluate((el) => getComputedStyle(el).color);
+  /**
+   * ⚠ ボタンの字の色は遷移(`--dur-fast`、#1982 段 1)で移る ── 途中の色を読まないよう、
+   *   2 回続けて同じ色が読めるまで待ってから採る(乗せた色から戻る途中を「開いているときの色」にしない)。
+   */
+  const settledColor = async (): Promise<string> => {
+    let prev = '';
+    await expect
+      .poll(async () => {
+        const now = await days.nth(0).evaluate((el) => getComputedStyle(el).color);
+        const same = now === prev;
+        prev = now;
+        return same;
+      })
+      .toBe(true);
+    return prev;
+  };
+  const openColor = await settledColor();
 
   await days.nth(0).click();
   await expect(days.nth(0)).toHaveAttribute('aria-expanded', 'false');
   await expect(bodyP.filter({ visible: true })).toHaveText(['二日目の一件目', '二日目の二件目']);
   await expect(days.nth(1), '次の日の行まで隠れた').toBeVisible();
   await page.mouse.move(0, 0);
-  const foldedColor = await days.nth(0).evaluate((el) => getComputedStyle(el).color);
+  const foldedColor = await settledColor();
   expect(foldedColor, '畳んだ印に見た目の規則が無い(開いているときと同じ色)').not.toBe(openColor);
 
   await days.nth(0).click();

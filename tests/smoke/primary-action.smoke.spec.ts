@@ -43,6 +43,12 @@ test('🔴 主の操作だけテーマのアクセント色で見える (#722 P2
    *   (hover 側の `color` に救われていた ── CLAUDE.md §1「救い手が変わっただけ」)。
    */
   await page.mouse.move(0, 0);
+  /**
+   * ⚠ **2 フレーム待ってから測る**(#1982 段 1、フル smoke で 2 回に 1 回赤)── reduced-motion でも遷移は
+   *   0.01ms 残る(`app.css` 末尾)ので、鼠を退かした同じフレームで読むと、乗せた色から戻る**途中の色**
+   *   (Chromium は遷移の途中を `oklab(…)` で返す)が出る。フレームが進めば遷移は終わっている。
+   */
+  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 
   const paint = async (sel: string): Promise<{ bg: string; fg: string }> =>
     page.evaluate((s) => {

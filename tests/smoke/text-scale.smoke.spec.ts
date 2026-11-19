@@ -105,8 +105,9 @@ test('🔴 文字の大きさを変えると本文の字が実際に変わり、
   );
   // 🔴 濃さの見た目そのものが、押した先へ移っている(色は 2 択の入れ替わりなので、
   //   前後の色をそのまま比べれば「移った」ことが言える)
-  expect(await bg(largeBtn), '押した先の下地が濃く動いていない').toBe(beforeStandardBg);
-  expect(await bg(standardBtn), '前に選んでいた側の下地がまだ濃いまま').toBe(beforeLargeBg);
+  // ⚠ ボタンの地は色の遷移(`--dur-fast`、#1982 段 1)で移るので、落ち着くまで待って比べる(途中の色を読まない)
+  await expect.poll(() => bg(largeBtn), { message: '押した先の下地が濃く動いていない' }).toBe(beforeStandardBg);
+  await expect.poll(() => bg(standardBtn), { message: '前に選んでいた側の下地がまだ濃いまま' }).toBe(beforeLargeBg);
 
   /**
    * ② 本文へ戻って測る ── **その場で効いている**(読み込み直し不要)。
