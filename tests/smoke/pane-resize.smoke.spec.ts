@@ -629,7 +629,7 @@ test('🔴 追記欄も鍵で畳めて、戻せる (#609)', async ({ page }) => 
   await live.locator('[data-pkc-field="row-source"]').fill('本文');
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
-  await expect(page.locator('[data-pkc-action="start-edit"]'), '編集を終えていない(前提が崩れた)').toBeVisible();
+  await expect(page.locator('[data-pkc-region="detail"] [data-pkc-action="start-edit"]'), '編集を終えていない(前提が崩れた)').toBeVisible();
   await expect(append.locator('[data-pkc-field="append-lock"]'), '前提: 編集を終えたのに出口の帯が残っている').toBeHidden();
   await expect(append, '帯が消えたのに出口の印が残る(畳んでも器が消えない)').not.toHaveAttribute('data-pkc-lock-open', '');
 

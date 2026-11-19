@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, gotoApp, openExportMenu, clickExportMenuItem } from './helpers';
+import { clickInspectorMoreItem, clickReal, collectPageErrors, createEntry, gotoApp, openExportMenu, clickExportMenuItem } from './helpers';
 
 /**
  * 🔴 **何も選んでいない = コレクションを選んでいる**(#1017 段④a)。
@@ -159,7 +159,7 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
   // ⑥ 消しても戻る(双方向のもう片側 ── 後継が無いときの経路)
   await clickReal(page, '[data-pkc-region="filer-table"] tbody tr');
   await expect(page.locator('[data-pkc-field="inspector-title"]')).toBeVisible();
-  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await clickInspectorMoreItem(page, 'delete-entry');
   await expect(
     page.locator('[data-pkc-field="collection-pane"]'),
     'コレクション面へ戻っていない',

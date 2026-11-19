@@ -45,7 +45,7 @@ describe('押せないボタンの見た目(#715)', () => {
     const hover = blocksFor(CSS, 'button:hover:not(:disabled)');
     expect(hover.length, '汎用の hover そのものが消えた').toBeGreaterThan(0);
     // 空振り防止 ── hover の規則が中身を持っている(選択子だけ残して宣言を消していない)
-    expect(decl('background', 'var\\(--surface-2\\)').test(hover.join(';'))).toBe(true);
+    expect(decl('background', 'color-mix\\(in srgb, var\\(--fg\\) 12%, transparent\\)').test(hover.join(';'))).toBe(true);
   });
 
   it('⚠ 汎用と同じ値の名指し(order-nudge)は畳んである ── 2 か所に同じ値を持たない', () => {

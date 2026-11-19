@@ -243,11 +243,11 @@ test('🔴 右クリックのメニューにも「閲覧用 HTML」が並ぶ (#4
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-pkc-region="context-menu"]'), 'Esc で一覧が閉じない').toHaveCount(0);
   await expect(
-    page.locator('[data-pkc-region="inspector"] [data-pkc-action="open-export-menu"]'),
+    page.locator('[data-pkc-region="inspector"] [data-pkc-action="open-inspector-more"]'),
     'Esc の後、焦点が「書き出す ▾」へ戻らない',
   ).toBeFocused();
   await expect(
-    page.locator('[data-pkc-region="inspector"] [data-pkc-action="open-export-menu"]'),
+    page.locator('[data-pkc-region="inspector"] [data-pkc-action="open-inspector-more"]'),
     'Esc でノートの選択まで外れた',
   ).toBeVisible();
   // 🔴 右の列の同じ口でも、同じ file が落ちる(2026-10-11。利用者は右クリックを知らなくても見つけられる)

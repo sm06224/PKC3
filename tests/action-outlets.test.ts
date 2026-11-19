@@ -241,6 +241,8 @@ const OBJECT_LONE: readonly string[] = [
   'open-capture-process',
   // #1029 / #501 右の列の「書き出す ▾」── 出口は右の列の 1 か所のまま(平置きだった書き出しを畳んだ。画面の出口は増やしていない)。対象は押したボタンの data-pkc-entry
   'open-export-menu',
+  // 🔴 #1982 段 1 ── 右の列の「その他 ▾」(押すと一覧が開く受け手。`open-export-menu` と同じ顔ぶれ)
+  'open-inspector-more',
   'clear-entry-date',
   // ⚠ 2026-10-26(#283): ノートの担当を付ける / 外す。出口は情報ペインの「担当」の行 1 か所だけ(`clear-entry-date` と
   //   同じ形 ── 日付の隣の同じ作り。効く先は選んでいるノート)。⚠ 「#582 の増やさない」に触れていない理由も同じ:

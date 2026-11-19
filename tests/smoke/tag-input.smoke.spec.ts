@@ -14,7 +14,7 @@
  * | 実キーボードの Enter(IME を通らない素の確定) | 合成 event ではない |
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, writesLanded } from './helpers';
+import { clickInspectorMoreItem, gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, writesLanded } from './helpers';
 
 const INPUT = '[data-pkc-field="tag-add-input"]';
 const CHIPS = '[data-pkc-region="inspector"] [data-pkc-field="inspector-tag"]';
@@ -218,7 +218,7 @@ test('🔴 札の × で外れ、本文からも消える (#494)', async ({ page
    * ⚠ 直す前は「(見つかりません)」で、壊れたつながりに見えた。起動は増やさない(上で作った 2 件の関連を使う)。
    */
   await pick('長いタグ');
-  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await clickInspectorMoreItem(page, 'delete-entry');
   await writesLanded(page);
   // つながり自体は disk に残る(相手を戻せるように)── 読み込み直すと、相手の居ないつながりとして読まれる
   await page.reload();

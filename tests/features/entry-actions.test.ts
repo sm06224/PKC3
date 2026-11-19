@@ -146,7 +146,9 @@ describe('右クリックに出す操作', () => {
     for (const a of ENTRY_MENU_ACTIONS.filter((a) => a.menuOnly !== true)) {
       const fromTable =
         inspector.includes(`ENTRY_ACTION_LABELS['${a.action}']`) ||
-        inspector.includes(`entryBtn('${a.action}')`);
+        inspector.includes(`entryBtn('${a.action}')`) ||
+        // 🔴 常用の 2 つ(リンクをコピー / 別のウィンドウで開く)は `visible()` が表から字を引く(#1982 段 1)
+        inspector.includes(`visible('${a.action}')`);
       expect(
         fromTable,
         `情報ペインが「${a.label}」の字を自前で持っている(表から引いていない)`,

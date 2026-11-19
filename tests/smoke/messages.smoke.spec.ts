@@ -112,7 +112,8 @@ test('🔴 メッセージ: 一覧に出ない / 開くと中央に出る / 編�
 
   await clickReal(page, chip('注意'));
   await expect(chip('注意')).toHaveAttribute('aria-pressed', 'true');
-  expect(await bg('注意'), '「注意」を押したのに見た目が変わらない').toBe(pressedBg);
+  // 🔴 #1982 段 1: ボタンの地は 120ms かけて変わる(`--dur-fast`)── 途中の値を読まないよう、落ち着くまで待つ
+  await expect.poll(() => bg('注意'), { message: '「注意」を押したのに見た目が変わらない' }).toBe(pressedBg);
   await expect(detailPane, '「注意」に絞ったのに、結果(起動の要約)が残っている').not.toContainText('起動しました');
   await clickReal(page, chip('すべて'));
   await expect(detailPane, '「すべて」に戻っても本文が戻らない').toContainText('起動しました');

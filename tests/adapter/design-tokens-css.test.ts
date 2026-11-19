@@ -92,6 +92,12 @@ describe('🔴 見た目の段はトークンから選ぶ(#1982 段 0)', () => {
     }
   });
 
+  it('🔴 動きのトークンは app.css で実際に使われている(使い手が無いと reduced-motion の検査は何も守らない)', () => {
+    // ⚠ #1982 段 1 が最初の使い手(標準のボタンの地・字の色)。コメントは剥がしてある(`APP`)
+    expect(APP).toMatch(/transition:[^;]*var\(--dur-fast\)/);
+    expect(APP).toMatch(/transition:[^;]*var\(--ease\)/);
+  });
+
   it('🔴 動きのトークンは reduced-motion で 0 になる', () => {
     expect(TOKENS).toMatch(/--dur:\s*180ms;/);
     const { body } = mediaBlock(APP, '(prefers-reduced-motion: reduce)');

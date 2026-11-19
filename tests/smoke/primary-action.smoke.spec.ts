@@ -12,9 +12,9 @@ test.beforeEach(async ({ page }) => {
  * user 裁定 2026-09-06 = 案 A)。
  *
  * ⚠ **unit では原理的に届かない** ── happy-dom は CSS を組まないので、印
- * (`data-pkc-primary`)が付いているかしか見られない。**本当に濃く見えるか**は
+ * (`data-pkc-variant=primary`)が付いているかしか見られない。**本当に濃く見えるか**は
  * ここでしか分からない。⚠ しかも規則は**詳細度で外れやすい**
- * (`button:hover:not(:disabled)` は `button[data-pkc-primary]` より強い)ので、
+ * (`button:hover:not(:disabled)` は `button[data-pkc-variant=primary]` より強い)ので、
  * **乗せたときも濃いまま**を見る。
  *
  * 観測点は 3 つ:
@@ -23,8 +23,11 @@ test.beforeEach(async ({ page }) => {
  * ③ 🔴 **乗せても濃いまま**(詳細度の罠を落とす)
  * ⚠ 空振り防止:同じ面の普通のボタンの地と**違う**ことを見る(同じなら反転していない)。
  */
-test('🔴 主の操作だけ地と字が反転して見える (#722 P2-10)', async ({ page }) => {
+test('🔴 主の操作だけテーマのアクセント色で見える (#722 P2-10 → #1982 段 1)', async ({ page }) => {
   const errors = collectPageErrors(page);
+  // 🔴 動きを 0 にして測る(#1982 段 1)── 標準のボタンは地を 120ms かけて変える(`--dur-fast`)ので、
+  //   乗せた直後の computed が途中の値になる。reduced-motion では `--dur-fast` が 0 になる(`tokens.css`)。
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await createEntry(page, 'text');
@@ -50,19 +53,58 @@ test('🔴 主の操作だけ地と字が反転して見える (#722 P2-10)', as
     }, sel);
 
   // 読む面の主 =「編集」
-  const primary = await paint('[data-pkc-region="detail"] button[data-pkc-primary]');
+  const primary = await paint('[data-pkc-region="detail"] button[data-pkc-variant=primary]');
   // 同じ面の普通のボタン(コピーの帯)
   const plain = await paint(
     '[data-pkc-region="detail"] button[data-pkc-action="copy-note-md"]',
   );
 
-  // ⚠ 空振り防止 ── 反転していなければ、以下の 2 つは自明に成り立つ
-  expect(primary.bg, `主のボタンの地が普通のボタンと同じ(${primary.bg})── 濃くなっていない`).not.toBe(
+  // ⚠ 空振り防止 ── 標準のボタンと同じ地なら、主として区別されていない
+  expect(primary.bg, `主のボタンの地が普通のボタンと同じ(${primary.bg})── 区別されていない`).not.toBe(
     plain.bg,
   );
-  // ① 主の地 = 普通の字 / ② 主の字 = 普通の地
-  expect(primary.bg, `地が入れ替わっていない(主 ${primary.bg} / 普通の字 ${plain.fg})`).toBe(plain.fg);
-  expect(primary.fg, `字が入れ替わっていない(主 ${primary.fg} / 普通の地 ${plain.bg})`).toBe(plain.bg);
+  /**
+   * ① 🔴 **主の地 = テーマの `--accent`、字 = `--accent-fg`**(#1982 段 1。旧い「`--fg` 反転」から改めた)。
+   * ⚠ 期待値は**値を書かず、同じ変数を実ブラウザで解決させて**取る(テーマを変えても追従する)。
+   *   空の `div` に `background: var(--accent)` を当てて computed を読む ── 解決後の表記が揃う。
+   */
+  const resolved = await page.evaluate(() => {
+    const probe = document.createElement('div');
+    probe.style.background = 'var(--accent)';
+    probe.style.color = 'var(--accent-fg)';
+    document.body.append(probe);
+    const cs = getComputedStyle(probe);
+    const out = { bg: cs.backgroundColor, fg: cs.color };
+    probe.remove();
+    return out;
+  });
+  expect(primary.bg, `主の地が --accent でない(主 ${primary.bg} / --accent ${resolved.bg})`).toBe(resolved.bg);
+  expect(primary.fg, `主の字が --accent-fg でない(主 ${primary.fg} / --accent-fg ${resolved.fg})`).toBe(resolved.fg);
+
+  /**
+   * ① 🔴 **右の列に見えているボタンは、ちょうど 4 つ**(#1982 段 1。user 裁定 = 決定 3)。
+   * ⚠ 隠した元のボタン(`inspector-more-source` / `inspector-export-source`)は数えない ── 画面で見えるものだけ。
+   */
+  const visibleActions = await page
+    .locator('[data-pkc-region="inspector"] [data-pkc-field="inspector-actions"] button[data-pkc-action]')
+    .evaluateAll((els) =>
+      els
+        .filter((el) => (el as HTMLElement).getClientRects().length > 0)
+        .map((el) => el.getAttribute('data-pkc-action')),
+    );
+  expect(visibleActions, '右の列に見えているボタンが「編集 / リンクをコピー / 別のウィンドウ / その他」の 4 つでない').toEqual([
+    'start-edit',
+    'copy-entry-link',
+    'open-note-window',
+    'open-inspector-more',
+  ]);
+  // 🔴 中央の主は残る。右の「編集」は標準の型(主は 1 画面に 1 つ)
+  expect(
+    await page
+      .locator('[data-pkc-region="inspector"] [data-pkc-action="start-edit"]')
+      .getAttribute('data-pkc-variant'),
+    '右の列の「編集」が主になっている(主は中央の 1 つだけ)',
+  ).toBeNull();
 
   /**
    * ③ 🔴 **一覧の主も濃い**(着地前レビュー・実装 3)。
@@ -70,19 +112,21 @@ test('🔴 主の操作だけ地と字が反転して見える (#722 P2-10)', as
    *   包む変異(詳細度の喧嘩に確実に勝つ、ありそうな直し方)で
    *   **「+ ノート」だけ黙って死ぬ**のに全部緑になる ── 面ごとに**色を測る**。
    */
-  const sideP = await paint('[data-pkc-region="sidebar"] button[data-pkc-primary]');
+  const sideP = await paint('[data-pkc-region="sidebar"] button[data-pkc-variant=primary]');
   const sidePlain = await paint('[data-pkc-field="open-today"]');
-  expect(sideP.bg, `一覧の主が濃くなっていない(${sideP.bg} / 普通の字 ${sidePlain.fg})`).toBe(
-    sidePlain.fg,
-  );
-  expect(sideP.fg, `一覧の主の字が反転していない(${sideP.fg} / 普通の地 ${sidePlain.bg})`).toBe(
-    sidePlain.bg,
-  );
+  expect(sideP.bg, `一覧の主が --accent でない(${sideP.bg} / --accent ${resolved.bg})`).toBe(resolved.bg);
+  expect(sideP.fg, `一覧の主の字が --accent-fg でない(${sideP.fg} / --accent-fg ${resolved.fg})`).toBe(resolved.fg);
+  expect(sideP.bg, `一覧の主が普通のボタンと同じ地(${sideP.bg} / ${sidePlain.bg})`).not.toBe(sidePlain.bg);
 
   // ④ 🔴 乗せても濃いまま(`button:hover` のほうが詳細度が高い ── 書き足さないと外れる)
-  await page.locator('[data-pkc-region="detail"] button[data-pkc-primary]').hover();
-  const hovered = await paint('[data-pkc-region="detail"] button[data-pkc-primary]');
-  expect(hovered.bg, `乗せたら地が普通のボタンへ戻った(${hovered.bg})`).toBe(primary.bg);
+  await page.locator('[data-pkc-region="detail"] button[data-pkc-variant=primary]').hover();
+  const hovered = await paint('[data-pkc-region="detail"] button[data-pkc-variant=primary]');
+  // 🔴 乗せると少し暗くなる(85% の --accent + 15% の --fg)。⚠ **普通のボタンの乗せた色へ戻っていない**ことを見る
+  await page.locator('[data-pkc-region="detail"] button[data-pkc-action="copy-note-md"]').hover();
+  const plainHover = await paint('[data-pkc-region="detail"] button[data-pkc-action="copy-note-md"]');
+  await page.locator('[data-pkc-region="detail"] button[data-pkc-variant=primary]').hover();
+  expect(hovered.bg, `乗せたら地が普通のボタンの乗せた色へ戻った(${hovered.bg})`).not.toBe(plainHover.bg);
+  expect(hovered.bg, `乗せても主の地が変わらない(${hovered.bg})── 乗せた手応えが無い`).not.toBe(primary.bg);
   // ⚠ **字も見る**(着地前レビュー・実装 2)── 地だけ見ていると、帯の hover が当てる
   //    `--accent-dim-fg` が残って**濃い地に濃い字**になる変異が生き延びる
   expect(hovered.fg, `乗せたら字の色が変わった(${hovered.fg})── 濃い地に濃い字になる`).toBe(
@@ -98,12 +142,13 @@ test('🔴 主の操作だけ地と字が反転して見える (#722 P2-10)', as
    */
   const opacityNow = async (): Promise<string> =>
     page.evaluate(() => {
-      const el = document.querySelector('[data-pkc-region="detail"] button[data-pkc-primary]');
+      const el = document.querySelector('[data-pkc-region="detail"] button[data-pkc-variant=primary]');
       if (el === null) throw new Error('前提が崩れている: 主のボタンが無い');
-      return getComputedStyle(el).opacity;
+      // 🔴 #1982 段 1: 手応えは不透明度ではなく**地の混ぜ具合**(--accent に --fg を 15% / 30%)で出す
+      return getComputedStyle(el).backgroundColor;
     });
   const primBox = (await page
-    .locator('[data-pkc-region="detail"] button[data-pkc-primary]')
+    .locator('[data-pkc-region="detail"] button[data-pkc-variant=primary]')
     .boundingBox())!;
   await page.mouse.move(primBox.x + primBox.width / 2, primBox.y + primBox.height / 2);
   const onHover = await opacityNow();
@@ -114,8 +159,8 @@ test('🔴 主の操作だけ地と字が反転して見える (#722 P2-10)', as
   await page.mouse.move(0, 0);
   await page.mouse.up();
   // ⚠ 空振り防止 ── 乗せた状態が素(1)のままなら、この比較は何も見ていない
-  expect(onHover, `乗せても何も変わっていない(opacity ${onHover})`).not.toBe('1');
-  expect(onPress, `押しても乗せているときと同じ(opacity ${onPress})── 手応えが返らない`).not.toBe(
+  expect(onHover, `乗せても何も変わっていない(地 ${onHover})`).not.toBe(primary.bg);
+  expect(onPress, `押しても乗せているときと同じ(地 ${onPress})── 手応えが返らない`).not.toBe(
     onHover,
   );
 
@@ -138,11 +183,11 @@ test('🔴 主の操作だけ地と字が反転して見える (#722 P2-10)', as
    *   当たっていなければ、この段は**素の見え方をもう一度測っているだけ**である。
    */
   const focusVisible = await page.evaluate(() => {
-    const el = document.querySelector('[data-pkc-region="detail"] button[data-pkc-primary]');
+    const el = document.querySelector('[data-pkc-region="detail"] button[data-pkc-variant=primary]');
     return el !== null && el.matches(':focus-visible');
   });
   expect(focusVisible, '焦点の輪が出ていない ── :focus-visible を 1 度も見ていない').toBe(true);
-  const focused = await paint('[data-pkc-region="detail"] button[data-pkc-primary]');
+  const focused = await paint('[data-pkc-region="detail"] button[data-pkc-variant=primary]');
   expect(focused.bg, `焦点を当てたら地が変わった(${focused.bg})`).toBe(primary.bg);
   expect(focused.fg, `焦点を当てたら字の色が変わった(${focused.fg})`).toBe(primary.fg);
 
@@ -153,7 +198,7 @@ test('🔴 主の操作だけ地と字が反転して見える (#722 P2-10)', as
   const counts = await page.evaluate(() =>
     ['sidebar', 'detail', 'append', 'inspector'].map((r) => ({
       r,
-      n: document.querySelectorAll(`[data-pkc-region="${r}"] button[data-pkc-primary]`).length,
+      n: document.querySelectorAll(`[data-pkc-region="${r}"] button[data-pkc-variant=primary]`).length,
     })),
   );
   for (const { r, n } of counts) {
@@ -177,13 +222,13 @@ test('🔴 主の操作だけ地と字が反転して見える (#722 P2-10)', as
   await expect
     .poll(
       async () =>
-        page.locator('[data-pkc-region="sidebar"] button[data-pkc-primary]').count(),
+        page.locator('[data-pkc-region="sidebar"] button[data-pkc-variant=primary]').count(),
       { timeout: 5000 },
     )
     .toBe(0);
   // ⚠ 対照群 ── 中央の「保存」は濃い(そちらまで消えていたら判定になっていない)
   expect(
-    await page.locator('[data-pkc-region="detail"] button[data-pkc-primary]').count(),
+    await page.locator('[data-pkc-region="detail"] button[data-pkc-variant=primary]').count(),
     '編集中に中央の主まで消えた',
   ).toBe(1);
 
@@ -198,9 +243,9 @@ test('🔴 主の操作だけ地と字が反転して見える (#722 P2-10)', as
  *    属性が付いていることしか見られない。薄さの出どころは `app.css` の
  *    `button:disabled { opacity: .45 }` **1 本だけ**である。
  *    ⚠ 🔴 **註記を直した**(2026-09-08、着地前レビュー)── 直す前ここには
- *    「主の印(`button[data-pkc-primary]`)を外し忘れると濃いままになる /
+ *    「主の印(`button[data-pkc-variant=primary]`)を外し忘れると濃いままになる /
  *    その対が効いているかはここでしか分からない」と書いてあったが、**嘘だった**:
- *    `[data-pkc-primary]` は `background` / `color` / `border-color` しか書かず、
+ *    `[data-pkc-variant=primary]` は `background` / `color` / `border-color` しか書かず、
  *    `opacity` を書く 2 本は `:hover:not(:disabled)` と `:active:not(:disabled)` で
  *    **`:disabled` には当たらない**。つまり `setPrimary` を落としても薄さは 0.45 の
  *    まま = この検査は通る。**対が効いていることは unit が見ている**
@@ -244,7 +289,7 @@ test('🔴 編集中は「+ ノート」が薄くなり、鍵で撃つと理由�
   );
   // ⚠ 薄さとは**別の主張** ── 印を外し忘れても薄さは変わらないので、ここで直に見る
   expect(
-    await create.getAttribute('data-pkc-primary'),
+    await create.getAttribute('data-pkc-variant'),
     '編集中なのに主の印が残っている(地が反転したままになる)',
   ).toBeNull();
 

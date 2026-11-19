@@ -1505,8 +1505,8 @@ test('🔴 狭い画面でも「書き出す / 履歴 / 削除」に手が届く
   await page.locator('[data-pkc-field="editor-title"]').fill('狭い画面');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
-  // 🔴 書き出し系は「書き出す ▾」に畳んだ(#1029 / #501)── 手が届く対象はそのボタン
-  const ACTIONS = ['open-export-menu', 'show-history', 'delete-entry'];
+  // 🔴 右の列は常用 4 つ + 「その他 ▾」(#1982 段 1)── 手が届く対象はその 4 つ
+  const ACTIONS = ['start-edit', 'copy-entry-link', 'open-note-window', 'open-inspector-more'];
   for (const width of [1440, 1024, 900, 700]) {
     await page.setViewportSize({ width, height: 800 });
     await page.waitForTimeout(120);
@@ -1526,7 +1526,7 @@ test('🔴 狭い画面でも「書き出す / 履歴 / 削除」に手が届く
     if (width <= 1100 && !(await page.locator('[data-pkc-region="inspector"]').isVisible()))
       await clickReal(page, '[data-pkc-field="phone-info"]');
     for (const a of ACTIONS) {
-      const el = page.locator(`[data-pkc-action="${a}"]`).first();
+      const el = page.locator(`[data-pkc-region="inspector"] [data-pkc-action="${a}"]`).first();
       await expect(el, `${width}px で ${a} が画面から消えた`).toBeVisible();
       // ⚠ **押せる場所に居る**ことまで見る(0 幅・画面外だと押せない)
       const box = await el.boundingBox();
@@ -1590,7 +1590,7 @@ for (const [w, h] of [
     expect(Math.abs(info.width - center.width), '情報の幅が本文と違う').toBeLessThan(2);
     expect(info.height / h, '情報が画面の半分も無い(30vh の帯のまま)').toBeGreaterThan(0.5);
     // 情報の中の操作に手が届く(押せる場所に居る)
-    await expect(page.locator('[data-pkc-region="inspector"] [data-pkc-action="open-export-menu"]')).toBeVisible();
+    await expect(page.locator('[data-pkc-region="inspector"] [data-pkc-action="open-inspector-more"]')).toBeVisible();
 
     // ③ もう一度で閉じる ── 「情報」は出したまま(居る場所へ行くボタンではなく、閉じる口)
     await clickReal(page, '[data-pkc-field="phone-info"]');
@@ -1718,8 +1718,8 @@ test('🔴 編集中は「書き出す / 履歴 / 削除」が押せない(見�
   await page.locator('[data-pkc-field="editor-title"]').fill('編集中の面');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
-  // 🔴 書き出し系は「書き出す ▾」に畳んだ(#1029 / #501)── 手が届く対象はそのボタン
-  const ACTIONS = ['open-export-menu', 'show-history', 'delete-entry'];
+  // 🔴 右の列は常用 4 つ + 「その他 ▾」(#1982 段 1)── 押せなくなる対象はその 4 つ(一覧の中身は元のボタンが同じ門を通る)
+  const ACTIONS = ['start-edit', 'copy-entry-link', 'open-note-window', 'open-inspector-more'];
   // ① 確定済みなら押せる(空振り防止 ── 常時 disabled でも通る形にしない)
   for (const a of ACTIONS) {
     await expect(
@@ -1745,15 +1745,15 @@ test('🔴 編集中は「書き出す / 履歴 / 削除」が押せない(見�
    *   (`button-disabled-css.test.ts`)── **実際に薄いか**はここでしか見えない。
    * ⚠ 観測点は computed style(`opacity` / `cursor`)と、帯の直上の 1 行の可視。
    */
-  const del = page.locator('[data-pkc-region="inspector"] [data-pkc-action="delete-entry"]');
+  const del = page.locator('[data-pkc-region="inspector"] [data-pkc-action="open-inspector-more"]');
   const look = () =>
     del.evaluate((el) => {
       const s = getComputedStyle(el);
       return { opacity: Number(s.opacity), cursor: s.cursor };
     });
   const dim = await look();
-  expect(dim.opacity, `編集中の「削除」が薄くなっていない(opacity ${dim.opacity})`).toBeLessThan(1);
-  expect(dim.cursor, '編集中の「削除」の cursor が not-allowed でない').toBe('not-allowed');
+  expect(dim.opacity, `編集中の「その他 ▾」が薄くなっていない(opacity ${dim.opacity})`).toBeLessThan(1);
+  expect(dim.cursor, '編集中の「その他 ▾」の cursor が not-allowed でない').toBe('not-allowed');
   const note = page.locator('[data-pkc-field="inspector-editing-note"]');
   await expect(note, '押せない理由の 1 行が出ていない').toBeVisible();
   await expect(note).toHaveText(/「編集を保存する」か「編集をやめる」を押すと戻ります/);
@@ -1768,7 +1768,7 @@ test('🔴 編集中は「書き出す / 履歴 / 削除」が押せない(見�
   }
   // ⚠ 見た目も戻る(片道にしない)── 薄いまま残ると「押せるのに押せなさそう」になる
   const back = await look();
-  expect(back.opacity, `編集をやめても「削除」が薄いまま(opacity ${back.opacity})`).toBe(1);
+  expect(back.opacity, `編集をやめても「その他 ▾」が薄いまま(opacity ${back.opacity})`).toBe(1);
   expect(back.cursor).not.toBe('not-allowed');
   await expect(note, '編集をやめても理由の 1 行が残っている').toBeHidden();
 
@@ -2707,7 +2707,7 @@ test('🔴 長いノートを深く送っても、操作の帯が画面に残る
 
   for (const top of [client + 50, client * 2, max]) {
     await detail.evaluate((el, v) => (el.scrollTop = v), top);
-    const box = await page.locator('[data-pkc-action="start-edit"]').boundingBox();
+    const box = await page.locator('[data-pkc-region="detail"] [data-pkc-action="start-edit"]').boundingBox();
     expect(box, `scrollTop=${top} で「編集」が消えた`).not.toBeNull();
     /**
      * 🔑 観測点は **`y >= 0`**(= 画面の上に隠れていない)。

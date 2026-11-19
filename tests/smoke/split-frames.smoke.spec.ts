@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
+  clickInspectorMoreItem,
   gotoApp,
   clickReal,
   createEntry,
@@ -211,7 +212,7 @@ test('🔴 本文を右クリックして横に留めると、2 つの枠が並�
     page.locator('[data-pkc-split-lid] [data-pkc-field="split-body"] h1').first(),
     '前提が崩れている(書き換えが留めた枠へ届いていない)',
   ).toContainText('書き換え後');
-  await clickReal(page, '[data-pkc-action="show-history"]');
+  await clickInspectorMoreItem(page, 'show-history');
   await expect(page.locator('[data-pkc-field="history-panel"]')).toBeVisible();
   await clickReal(page, '[data-pkc-action="restore-revision"]');
   await expect(
@@ -584,7 +585,7 @@ test('🔴 帯の「保存…」で星つきの入れ物ができ、載せ直す
   await clickReal(page, rowsLi.nth(0).locator('[data-pkc-action="stack-link-down"]'));
   await expect(links.nth(1), '↓ で [重要] の行が元に戻らない').toContainText('[重要]');
 
-  await clickReal(page, '[data-pkc-field="inspector-actions"] [data-pkc-action="stack-load"]');
+  await clickInspectorMoreItem(page, 'stack-load');
   await expect(cards).toHaveText([titleA, titleB]);
 
   expect(errors, 'ページ例外 0 件').toEqual([]);
