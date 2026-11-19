@@ -96,13 +96,29 @@ describe('patch-lo-fsimage-cmdline.py(#591 の直し)', () => {
       // ⚠ 1 稿目は 2,030 件にしたが **123,829 byte** にしかならず、前提の assert が
       //    落ちて教えてくれた(1 件 61 byte だった ── 実物の平均 65 より短い)。
       //    🔑 だから件数ではなく**byte で足りるまで**積む。
-      const entries = Array.from(
-        { length: 2300 },
-        (_, i) => `instdir/share/config/soffice.cfg/modules/mod${String(i).padStart(4, '0')}/ui/d${String(i).padStart(4, '0')}.ui`,
-      );
+      /**
+       * 🔴 **1 つの引数の上限は、走らせる箱の頁の大きさで変わる**(Linux の `MAX_ARG_STRLEN` = 32 頁)。
+       *   4 KiB 頁なら 128 KiB だが、16 / 64 KiB 頁の箱では 512 KiB / 2 MiB まで通る ── 2026-11-19 に CI の
+       *   runner でだけ「make 側の展開なのに通った」と落ちた(手元の 4 KiB 頁では落ちない)。
+       * 🔑 だから**この箱の上限を越えるまで**積む(実物の 132,359 byte も必ず越える)。
+       */
+      let page = 4096;
+      try {
+        page = Number(execFileSync('getconf', ['PAGESIZE'], { encoding: 'utf-8' }).trim()) || 4096;
+      } catch {
+        // getconf が無い箱 ── 4 KiB 頁として積む
+      }
+      const limit = Math.max(132_359, page * 32);
+      const entries: string[] = [];
+      let bytes = 0;
+      for (let i = 0; bytes <= limit + 4096; i += 1) {
+        const e = `instdir/share/config/soffice.cfg/modules/mod${String(i).padStart(5, '0')}/ui/d${String(i).padStart(5, '0')}.ui`;
+        entries.push(e);
+        bytes += e.length + 1;
+      }
       const list = entries.join(' ');
       // ⚠ 前提を assert する ── 短い一覧で「通った」と読まないため
-      expect(list.length, '台の一覧が実測より小さい(空振り)').toBeGreaterThan(132_359);
+      expect(list.length, `台の一覧がこの箱の上限(${String(limit)} byte)より小さい(空振り)`).toBeGreaterThan(limit);
       writeFileSync(join(dir, 'filelist'), list, 'utf-8');
 
       const run = (recipe: string): number => {
@@ -117,7 +133,7 @@ describe('patch-lo-fsimage-cmdline.py(#591 の直し)', () => {
       // 直す前 ── make が行に並べる = sh -c の 1 引数が肥大して落ちる
       expect(
         run('/bin/echo -n $(shell cat filelist) > out'),
-        'make 側の展開なのに通った ── 台の規模が足りないか、上限が変わった',
+        `make 側の展開なのに通った ── 台の規模が足りないか、上限が変わった(頁 ${String(page)} byte / 一覧 ${String(list.length)} byte)`,
       ).not.toBe(0);
       // 直した後 ── shell が argv を組むので通る
       expect(
