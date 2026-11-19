@@ -89,7 +89,7 @@ describe('図案は書体の 1 文字である(#770 段①)', () => {
     const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
     const blocks = blocksFor(css, '[data-pkc-icon]');
     expect(blocks.length, '図案の枠の規則が読めていない(空振り)').toBe(1);
-    expect(blocks[0], '大きさが器の字に載っている(帯で潰れる)').toMatch(/font-size:\s*\d+px/);
+    expect(blocks[0], '大きさが器の字に載っている(帯で潰れる)').toMatch(/font-size:\s*(?:\d+px|var\(--fs-[\w-]+\))/); // 段のトークンも px(#1982 段 0)
   });
 
   /**

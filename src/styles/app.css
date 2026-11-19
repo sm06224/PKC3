@@ -2,13 +2,24 @@
  * PKC3 の見た目(P8)。**1 枚で完結させる**(色は `tokens.css`)。
  *
  * 🔑 **目指すのは業務画面**(user 指示 2026-08-03「シンプルかつ高機能さ」)。
- * 具体的には次の 6 つで、これが以下の規則すべての理由である:
- *   ① **地は無彩色、色は情報にだけ**(帯・選択・種別チップの 3 か所)
- *   ② **隠さない** ── 主要な導線は畳まずに並べる(畳むと探す手間が増える)
+ * ⚠ **表現の規則は 2026-11-19 に改めた**(#1982。user 裁定 = 推薦どおり)── 旧い規則
+ *   (地は無彩色で色は 3 か所だけ / 境界線を共有して 1px の格子 / 区切りは枠 / 隠さない /
+ *   主ボタンは反転で色を使わない)が、格子のような平板さ・ボタンの強弱の無さ・過密を生んでいた。
+ *   段 1〜3 で規則を順に移す(移し終えるまで、旧い形の規則が残っている所がある)。
+ * 次の 7 つが以下の規則すべての理由である:
+ *   ① **色は意味にだけ使う**。地は無彩色に近い色で、背景の段(`--bg` / `--surface` /
+ *      `--surface-2`)で分ける。意味の色 = アクセント 1 色(主の操作・フォーカス。各テーマの
+ *      `--accent`)+ 状態の 4 色(`--ok` / `--warn` / `--danger` / `--info`)。
+ *      **現在地・選んでいるものは形**(左端の線・太字)で示す
+ *   ② **常用は出す、副次は 1 段奥**(「その他 ▾」・行の hover)── 何を出すかは使う頻度と
+ *      取り消せるかで決める。⚠ 出す物の**配置は固定**する(③)
  *   ③ **同じものが常に同じ場所にある** ── モードが変わっても配置が動かない
- *   ④ **1 画面で完結** ── 一覧・本文・付随情報が同時に見えている
- *   ⑤ **区切りは枠**。一覧にフル幅の横線を引かない ── 線だけが目立って中身が散る
- *   ⑥ **操作は対象の隣**(ペインの右上 / 行の右端)。共通ツールバーに集約しない
+ *   ④ **1 画面で完結** ── 一覧・本文・付随情報が同時に見えている(過密は見出しの段と余白で解く)
+ *   ⑤ **区切りは背景の段差と余白**。枠は入力欄・浮いた物(メニュー・ダイアログ)・表のセルだけ
+ *   ⑥ **操作は対象の隣**(ペインの右上 / 行の右端)。ボタンは 4 型(主 / 標準 / ゴースト / 危険)で、
+ *      1 つの画面に主の操作は 1 つ
+ *   ⑦ **字の大きさ・角丸・影・動きは `tokens.css` の段から選ぶ**(素の値を書かない ──
+ *      `tests/adapter/design-tokens-css.test.ts`)
  *
  * 🔴 **機能セレクタは `data-pkc-*` のみ**(PKC2 から継承した規約)。
  * class 名で引っかけると minify や renderer の書き換えで静かに外れる ──
@@ -342,7 +353,7 @@ body {
    *   1 本落として気づいた)。
    */
   overflow-x: clip;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   line-height: 1;
   writing-mode: vertical-rl;
 }
@@ -589,7 +600,7 @@ button {
   line-height: 1;
   /* ⚠ **器の字の大きさに載せない** ── 帯のボタンは 12px なので、載せると枠の字が
    * 12.6px(12 × 1.05)= 描く絵は **14.5px**(さらに 1.15em)まで縮む。16px で固定する。 */
-  font-size: 16px;
+  font-size: var(--fs-xl);
   /* ⚠ 絵文字は書体で行送りが伸びる ── 枠の高さも固定して押し出させない */
   height: 1.15em;
   display: inline-flex;
@@ -894,7 +905,7 @@ img[data-pkc-action='view-big']:focus-visible {
   margin-top: 2px;
   padding: 4px 6px 3px;
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.4;
   color: var(--muted);
   white-space: normal;
@@ -1524,7 +1535,7 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
   margin: 0;
   padding: var(--s2);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-selected] {
   background: var(--accent-dim) !important;
@@ -1563,7 +1574,7 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 /* 行の更新日(P9 段②)。⚠ **行の高さを増やさない** ── 題名の右端に細字で置く。
@@ -1571,7 +1582,7 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
 [data-pkc-entry] [data-pkc-field='when'] {
   flex: 0 0 auto;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1773,7 +1784,7 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
   padding: 0 var(--s3);
   background: var(--surface-2, var(--surface));
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='append-target'][data-pkc-target-chosen] {
   border-color: var(--accent);
@@ -1810,7 +1821,7 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
   flex: 0 1 auto;
   min-width: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-region='detail'] > [data-pkc-view-pane] {
   flex: 1;
@@ -1959,7 +1970,7 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
 /* 🔴 長文ノートの読了目安時間・文字数バッジ(#1137) */
 .pkc-reading-time {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   margin: calc(-1 * var(--s2)) 0 var(--s2);
 }
 /* 🔴 日付ノートの「‹ 前の日 / 次の日 ›」(#1640 項 2)── 題名の下の小さな行。地は無彩色 */
@@ -1967,7 +1978,7 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
   display: flex;
   gap: var(--s2);
   margin: calc(-1 * var(--s2)) 0 var(--s2);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='detail-day-nav'][hidden] {
   display: none;
@@ -1984,7 +1995,7 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
 }
 [data-pkc-field='detail-reading-time'] {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   margin: calc(-1 * var(--s2)) 0 var(--s2);
 }
 /* 🔴 **フォルダの概要**(#1222)── 説明(本文)の下に置く。⚠ 地は無彩色・色は図案だけ
@@ -1998,7 +2009,7 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
 [data-pkc-region='folder-overview'] [data-pkc-field='overview-more'] {
   margin: 0 0 var(--s2);
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 [data-pkc-region='folder-overview'] [data-pkc-field='overview-more'] {
   margin: var(--s2) 0 0;
@@ -2273,7 +2284,7 @@ button[data-pkc-primary] [data-pkc-icon] {
 [data-pkc-region='jobs'] h3,
 [data-pkc-region='jobs'] h4 {
   margin: 0 0 var(--s2);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 [data-pkc-region='jobs'] h4 {
   margin-top: var(--s3);
@@ -2282,7 +2293,7 @@ button[data-pkc-primary] [data-pkc-icon] {
   width: 100%;
   border-collapse: collapse;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='job-lanes'] th,
 [data-pkc-field='job-lanes'] td {
@@ -2429,7 +2440,7 @@ button[data-pkc-primary] [data-pkc-icon] {
 [data-pkc-sql-embed] [data-pkc-field='sql-embed-saved'] {
   margin: var(--s2) 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-sql-embed] [data-pkc-field='sql-embed-more'] {
   margin-top: var(--s2);
@@ -2487,7 +2498,7 @@ button[data-pkc-primary] [data-pkc-icon] {
 }
 .pkc-md-rendered .pkc-form-label {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .pkc-md-rendered .pkc-form-required {
   margin-left: 2px;
@@ -2522,7 +2533,7 @@ button[data-pkc-primary] [data-pkc-icon] {
   display: inline-flex;
   gap: 4px;
   align-items: center;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 .pkc-md-rendered .pkc-form-rowno input {
@@ -2532,19 +2543,19 @@ button[data-pkc-primary] [data-pkc-icon] {
 .pkc-md-rendered .pkc-form-hint {
   margin: var(--s2) 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .pkc-md-rendered .pkc-form-error {
   margin: var(--s1, 4px) 0;
   color: var(--danger, #b3261e);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .pkc-md-rendered .pkc-form-empty {
   color: var(--muted);
 }
 .pkc-md-rendered .pkc-form-source {
   margin-top: var(--s2);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .pkc-md-rendered .pkc-form-source summary {
   color: var(--muted);
@@ -2992,7 +3003,7 @@ li[data-pkc-row-slot] {
   padding: 0 var(--s3);
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--muted);
   letter-spacing: 0.04em;
@@ -3179,7 +3190,7 @@ dd[data-pkc-field='inspector-toc'] {
 [data-pkc-field='tag-add-input'] {
   min-width: 0;
   width: 6rem;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /**
@@ -3200,11 +3211,11 @@ dd[data-pkc-field='inspector-toc'] {
 [data-pkc-field='relation-target'] {
   min-width: 0;
   width: 6rem;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='relation-kind'] {
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /**
@@ -3236,7 +3247,7 @@ dd[data-pkc-field='inspector-toc'] {
 }
 [data-pkc-field='inspector-tag-color'],
 [data-pkc-field='inspector-tag-color-clear'] {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: 0 4px;
 }
 [data-pkc-field='inspector-body-tag-where'] {
@@ -3853,7 +3864,7 @@ dd[data-pkc-field='inspector-toc'] {
   background: var(--surface);
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 18px;
   cursor: pointer;
   opacity: 0;
@@ -3966,7 +3977,7 @@ dd[data-pkc-field='inspector-toc'] {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1;
   cursor: pointer;
   z-index: 2;
@@ -4069,7 +4080,7 @@ dd[data-pkc-field='inspector-toc'] {
   content: attr(data-pkc-chart-error);
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin-bottom: 4px;
 }
 /* 描けたが一部を描いていないとき(系列が多い・点が多い・数が読めない系列)は、絵の上に理由を 1 行 */
@@ -4077,7 +4088,7 @@ dd[data-pkc-field='inspector-toc'] {
   content: '一部を描いていません: ' attr(data-pkc-chart-note);
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin-bottom: 4px;
 }
 /* グラフ(plotly。#528 ①)。⚠ chart と**同じ扱い** ── 原文は焼けなかったときの受け皿として残す */
@@ -4093,7 +4104,7 @@ dd[data-pkc-field='inspector-toc'] {
   content: attr(data-pkc-plotly-error);
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin-bottom: 4px;
 }
 /* 描けたが一部を描いていないとき(系列が多い・点が多い・数が読めない系列)は、絵の上に理由を 1 行 */
@@ -4101,7 +4112,7 @@ dd[data-pkc-field='inspector-toc'] {
   content: '一部を描いていません: ' attr(data-pkc-plotly-note);
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin-bottom: 4px;
 }
 /* React(JSX。#528 ②)。⚠ 器は sandbox の箱を置く入れ物 ── 原文は箱を置けなかったときの受け皿として残す。
@@ -4123,7 +4134,7 @@ dd[data-pkc-field='inspector-toc'] {
   content: attr(data-pkc-react-error);
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin-bottom: 4px;
 }
 /**
@@ -4135,7 +4146,7 @@ dd[data-pkc-field='inspector-toc'] {
   content: '図を描けません(書き方を確かめてください)';
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin-bottom: 4px;
 }
 /* 端末の都合で描けなかったとき(画像にできない / 描く場所が作れない)は、書き方のせいにしない */
@@ -4250,7 +4261,7 @@ dd[data-pkc-field='inspector-toc'] {
   display: flex;
   align-items: center;
   gap: var(--s2);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='inline-player-label'] {
   flex: 1;
@@ -4270,7 +4281,7 @@ dd[data-pkc-field='inspector-toc'] {
 }
 [data-pkc-field='inline-player-note'] {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 /* 🔴 送った行が貼り付いた帯と再生機の裏に潜らない(#1966 4-3 ① 着地前レビュー)── `scrollIntoView` は `scroll-margin` を見る */
@@ -4283,7 +4294,7 @@ dd[data-pkc-field='inspector-toc'] {
   align-items: center;
   gap: var(--s1);
   margin: var(--s1) 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
   cursor: pointer;
 }
@@ -4343,7 +4354,7 @@ dd[data-pkc-field='inspector-toc'] {
   border: 1px dashed var(--border);
   border-radius: var(--radius);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* 🔴 本文の中に展開した「別のノートの見出しの節」(#1459 ①)── 読み取り専用の引用。
@@ -4987,7 +4998,7 @@ dd[data-pkc-field='inspector-toc'] {
 }
 .pkc-place > [data-pkc-field='place-size']::before {
   content: '◢';
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   line-height: 16px;
 }
 .pkc-place > [data-pkc-field='place-size']:hover,
@@ -5334,7 +5345,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 .pkc-md-rendered .pkc-fig > figcaption {
   margin-top: var(--s2);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /* 種別ごと。⚠ **見た目に差が要る**ものだけ書く ── 差の無い種別に空の規則を
  *    置くと「規則が在る」検査を形だけ満たしてしまう */
@@ -5437,7 +5448,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border-radius: 3px;
   background: var(--surface);
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   line-height: 1.3;
   pointer-events: none;
 }
@@ -5498,7 +5509,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border-radius: 3px;
   background: var(--surface);
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.4;
   cursor: pointer;
 }
@@ -5588,7 +5599,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   margin: 0;
   padding-left: var(--s5);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .pkc-md-rendered .footnote-item > p {
   margin: 0.2em 0;
@@ -5617,7 +5628,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 .pkc-md-rendered .pkc-toc-label {
   display: block;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.04em;
   margin-bottom: var(--s2);
 }
@@ -5686,7 +5697,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 /* 図表の見出しと参照 */
 .pkc-md-rendered .pkc-fig-caption {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   text-align: center;
   margin-top: var(--s2);
 }
@@ -5702,7 +5713,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   display: block;
   margin-top: var(--s2);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   text-align: right;
 }
 
@@ -5735,7 +5746,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 .pkc-md-rendered .pkc-align-hint {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 /* 🔴 **未定義の変数は目立たせる** ── 地の文に紛れると、埋め忘れが出荷される */
@@ -5807,7 +5818,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 /* ── 添付 ───────────────────────────────────────── */
 [data-pkc-field='attachment-info'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin-bottom: var(--s3);
 }
 /* 🔴 **改名欄の左の「名前」と、下の薄い 1 行**(#1264 欠陥 7-b)。⚠ 欄だけだと、どちらが何の名前か
@@ -5823,12 +5834,12 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='attachment-rename-label'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   flex: none;
 }
 [data-pkc-field='attachment-rename-hint'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin: var(--s1) 0 var(--s3);
 }
 [data-pkc-field='attachment-media'] {
@@ -5922,7 +5933,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  * 「出せない + 次にどうするか」なので、危険色ではなく地の弱い色で置く */
 [data-pkc-field='attachment-no-preview'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin: 0;
 }
 /* Office の入口の断り書き(#88 / O3-c)── 「使えない」「まだ入っていない」の
@@ -5930,7 +5941,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  * いないだけ)。⚠ 行に並ぶボタンとは別に、次の行へ落とす */
 [data-pkc-field='office-note'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin: var(--s2) 0 0;
 }
 
@@ -5973,19 +5984,19 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-region='pane-bar'] [data-pkc-field='pane-title'] {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 [data-pkc-region='query-bar'] label {
   display: flex;
   align-items: center;
   gap: var(--s2);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 [data-pkc-field='query-note'] {
   margin: var(--s2) 0 var(--s3);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 [data-pkc-field='filer-filter-line'] {
@@ -5993,7 +6004,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   align-items: center;
   gap: var(--s2);
   margin: 0 0 var(--s2);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 [data-pkc-field='filer-filter-word'] {
@@ -6010,7 +6021,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='query-row-hint'] {
   margin: 0 0 var(--s2);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 [data-pkc-region='query-group'] {
@@ -6025,7 +6036,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   gap: var(--s3);
   padding: var(--s2) var(--s3);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='query-group-count'] {
   color: var(--muted);
@@ -6049,7 +6060,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   padding: var(--s2) var(--s3);
   border-top: 1px solid var(--border);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-region='query-rows'] > li[data-pkc-selected] {
   background: var(--accent-dim);
@@ -6057,7 +6068,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='query-empty'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* ── かんばん(#277 段②-b。札 1 枚 = 本文のチェック項目)/ カレンダー ── */
@@ -6069,7 +6080,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='kanban-note'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /* 🔴 **戻し道は畳んだ物のそばに置く**(2026-08-23)── 日付のない項目を既定で
  * 出さないので、戻す口が無いと user は「無くなった」と読む。
@@ -6078,7 +6089,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   align-self: flex-start;
   padding: 0;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
   background: none;
   border: none;
@@ -6108,7 +6119,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-region='kanban-column'] > h3 {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
@@ -6168,7 +6179,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 /* 🔑 日付は**情報**なので色を使わず、字面を詰めて出す(地は無彩色) */
 [data-pkc-region='kanban-cards'] [data-pkc-field='when'] {
   flex: none;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -6176,7 +6187,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-region='kanban-cards'] [data-pkc-field='note'] {
   grid-column: 2;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 /* 済んだ札は**色ではなく線**で示す(地は無彩色、色は情報にだけ) */
 [data-pkc-region='kanban-cards'] [data-pkc-task-done] [data-pkc-field='text'] {
@@ -6356,7 +6367,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='contacts-note'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='contacts-list'] {
   display: flex;
@@ -6391,7 +6402,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /* ⚠ 押せる宛先と、押せない字を**見た目で分ける** ── 分けないと
  * 「押したのに何も起きない」に見える(押せないほうは色を落とす)。 */
@@ -6451,7 +6462,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='captures-note'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='captures-list'] {
   display: flex;
@@ -6490,7 +6501,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   align-items: center;
   padding: 0 var(--s2);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   pointer-events: none;
 }
 [data-pkc-field='capture-wave-status'][hidden] {
@@ -6524,7 +6535,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   padding: 0 4px;
   background: var(--surface);
   color: var(--fg);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   pointer-events: none;
 }
 [data-pkc-field='capture-wave-tick'] {
@@ -6551,7 +6562,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='capture-about'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /* ⚠ 押し所は**左寄せの小さいボタン**(行いっぱいにすると名前と的が競合する)。 */
 [data-pkc-field='capture-play'],
@@ -6591,7 +6602,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='pc-note'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='pc-pick'],
 [data-pkc-field='pc-more'] {
@@ -6653,7 +6664,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='pc-sync-last'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='pc-band'] {
   display: flex;
@@ -6742,12 +6753,12 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='pc-meta'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='pc-link-note'],
 [data-pkc-field='pc-contact-note'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* ══ 探す面(#680、2026-09-05)═════════════════════════════════════
@@ -6768,7 +6779,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='search-page-head'] [data-pkc-field='pane-title'] {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-lg);
 }
 [data-pkc-field='search-page-input'] {
   flex: 1;
@@ -6778,7 +6789,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='search-page-excluded'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='search-page-excluded'][hidden] {
   display: none;
@@ -6815,11 +6826,11 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 /* 🔴 片付けたノート(依頼 87-1)。色は付けない(地は無彩色)── 薄い字で添える */
 [data-pkc-field='search-row-archived'] {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 [data-pkc-field='search-row-snippet'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   overflow-wrap: anywhere;
 }
 /* 当たった語 ── 色はここにだけ(UA の黄色い `mark` はテーマの地と喧嘩する) */
@@ -6847,7 +6858,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='sql-head'] [data-pkc-field='pane-title'] {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-lg);
 }
 /* ⚠ 打つ欄は**等幅** ── SQL は桁を数える字である(記号の見分けもつく) */
 /**
@@ -6868,7 +6879,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   max-height: min(40vh, 22em);
   overflow-y: auto;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-md);
   resize: vertical;
 }
 /**
@@ -6899,7 +6910,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border: 1px solid transparent;
   padding: var(--s3);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-md);
   line-height: 1.6;
   display: grid;
   grid-template-columns: var(--sql-gutter) 1fr;
@@ -7052,7 +7063,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   background: var(--bg);
   color: inherit;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   padding: 2px 10px;
   cursor: pointer;
 }
@@ -7100,7 +7111,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   background: color-mix(in srgb, var(--fg) 6%, transparent);
 }
 [data-pkc-field='sql-er-column'] {
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /**
  * 🔴 **焦点の輪は四角の内側に引く**(#918 段⑤d)。⚠ 既定(`button:focus-visible`)は外側に 1px 離して引くが、
@@ -7118,7 +7129,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='sql-er-more'] {
   padding: 2px 6px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 /**
  * 🔴 **線は「押せる札」で押す** ── `<line>` は太さ 1px ぶんしか当たり判定が無く、
@@ -7132,7 +7143,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   background: var(--bg);
   color: inherit;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: 1px 8px;
   cursor: pointer;
   white-space: nowrap;
@@ -7143,7 +7154,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='sql-er-dropped'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /**
  * 🔴 **「繋ぐ」の帯**(#918 段⑤d-1)。⚠ 押されている札は枠と地の両方で示す
@@ -7156,7 +7167,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   background: var(--bg);
   color: inherit;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   padding: 2px 10px;
   cursor: pointer;
 }
@@ -7168,7 +7179,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='sql-er-connect-hint'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /* ⚠ 繋ぎ始めた列 ── 枠で示す(色だけにしない) */
 [data-pkc-field='sql-er-column'][aria-pressed='true'] {
@@ -7190,7 +7201,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border-radius: 999px;
   padding: 0 4px;
   margin-inline-end: 4px;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--muted);
 }
 [data-pkc-field='sql-tip'],
@@ -7201,7 +7212,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='sql-note'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /**
  * 🔴 **消えない手本は、打つ字と同じ形で出す**(#837 K1、2026-09-09)。
@@ -7249,7 +7260,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='sql-table'] {
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   white-space: pre;
 }
 /**
@@ -7340,7 +7351,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='schedule-month'] {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 /* 🔑 **曜日の列は等幅**(表が中身なりに伸びると、月として読めない) */
@@ -7351,7 +7362,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='schedule-week'] > span {
   text-align: center;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--muted);
   line-height: 1.6;
 }
@@ -7414,7 +7425,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='schedule-note'] {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.6;
   color: var(--muted);
 }
@@ -7485,7 +7496,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   display: flex;
   align-items: center;
   gap: var(--s2);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--fg);
   white-space: nowrap;
   cursor: pointer;
@@ -7513,7 +7524,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   display: none;
 }
 [data-pkc-field='schedule-notes-head'] {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--muted);
 }
 [data-pkc-field='schedule-note-swatch'] {
@@ -7528,7 +7539,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   max-width: 16em;
 }
 [data-pkc-field='schedule-fold-note'] {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.6;
   color: var(--muted);
 }
@@ -7575,7 +7586,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='schedule-group-label'] {
   margin: 0 0 var(--s1);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--muted);
 }
@@ -7617,7 +7628,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   display: flex;
   gap: var(--s2);
   align-items: baseline;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-region='schedule-cards'] [data-pkc-field='text'] {
   min-width: 0;
@@ -7633,7 +7644,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-region='schedule-cards'] [data-pkc-field='note'] {
   grid-column: 2;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
 }
 /* 🔴 **予定の左の縦線**(#855。Gemini 裁定 = #1163 の依頼 20-A)。色は情報にだけ使う ── 地は無彩色のまま、
  *   縦線だけに色を置く。色は `item-color.ts` が決めて `--pkc-item-color` に入れる(行のタグの色 > ノートの色)。
@@ -7768,7 +7779,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='schedule-day-label'] {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7799,7 +7810,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border-bottom: 1px solid var(--border);
 }
 [data-pkc-field='schedule-day-allday-label'] {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--muted);
 }
 /* 目盛りは箱の中で縦に動く(1 日 24 時間ぶんの高さを、左の列に丸ごと広げない) */
@@ -7826,7 +7837,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   width: 2.25rem;
   padding-right: var(--s2);
   text-align: right;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   line-height: 1;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -7891,7 +7902,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='schedule-weekview-label'] {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7955,7 +7966,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border-bottom: 1px solid var(--border);
 }
 [data-pkc-field='schedule-weekview-allday-label'] {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--muted);
 }
 [data-pkc-field='schedule-weekview-allday-cell'] {
@@ -8021,7 +8032,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   width: 2.25rem;
   padding-right: var(--s2);
   text-align: right;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   line-height: 1;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -8115,7 +8126,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   padding: 1px var(--s2);
   border: 1px dashed var(--fg);
   background: var(--surface);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
@@ -8146,7 +8157,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   padding: 1px var(--s2);
   border: 1px dashed var(--fg);
   background: var(--surface);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
@@ -8214,7 +8225,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  * ⚠ 余った幅を全部食わせて右端へ寄せる ── 操作子と混ざらない。 */
 [data-pkc-field='calendar-target'] {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -8263,7 +8274,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-region='calendar-grid'] th {
   background: var(--surface-2);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   height: 1px; /* 見出しは中身なり ── 残りを日のセルへ配る */
 }
@@ -8306,7 +8317,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   top: var(--s2);
   right: var(--s2);
   line-height: var(--day-band);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -8339,7 +8350,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   background: color-mix(in srgb, var(--surface-2) 55%, transparent);
 }
 [data-pkc-field='day-number'] {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   /* ⚠ 帯の高さは**器の上端と対**である(#303)── 上の `--day-band` から出す。
    *   噛み合っているかは smoke が実寸で見る(数字の下端 == 器の上端)。
@@ -8356,7 +8367,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-region='calendar-grid'] [data-pkc-entry] {
   display: block;
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   margin-top: 2px;
   padding: 1px var(--s1);
   border-radius: 3px;
@@ -8387,7 +8398,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='launcher-group'] {
   margin: var(--s4) 0 0;
   padding: 0 var(--s2);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--muted);
   letter-spacing: 0.04em;
@@ -8524,7 +8535,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 /* 🔴 **並べ替えモードの 1 行**(#857 段①b-2)── タイル + 「上へ」「下へ」。
@@ -8553,7 +8564,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border-left: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -8610,7 +8621,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='launcher-empty'] {
   margin: var(--s2);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.6;
 }
 
@@ -8689,7 +8700,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='app-icon-pick'] > summary {
   cursor: pointer;
   padding: var(--s1) 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 [data-pkc-field='app-icon-pick'] > summary:hover {
@@ -8703,7 +8714,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   gap: var(--s1);
   flex-wrap: wrap;
   margin-bottom: var(--s3);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /* 🔴 **「中まで全部出す」は帯の右端へ**(#813 段②)。⚠ 色は共有の
  * `[data-pkc-choice-btn][aria-pressed='true']` が持つ(ここで濃さを足さない) */
@@ -8736,7 +8747,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
    * 一覧と同じ 1 本に寄せる(「一覧が省略するものはフォルダでも省略される」) */
   table-layout: fixed;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-region='filer-table'] td:first-child {
   overflow: hidden;
@@ -8767,7 +8778,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-region='filer-table'] th {
   background: var(--surface-2);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   font-weight: 600;
 }
@@ -8877,7 +8888,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   margin-bottom: var(--s3);
   padding-bottom: var(--s2);
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /* 🔴 **選んでいる間は、一覧の下端に貼り付く**(依頼 82-1)。置き場所(一覧の下)は変えない ──
  * 数十件を超える一覧で、選んだ直後に帯が画面の外にあって「選べたか」が見えなかった。
@@ -8951,7 +8962,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   display: flex;
   align-items: center;
   gap: var(--s2);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* ── 予定: その日に足す(#402 ②)───────────────────────
@@ -9019,7 +9030,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='revision-diff'] ul {
   /* ⚠ 差分は**等幅**で読む(桁が揃わないと足し引きが追えない) */
-  font-family: var(--mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   gap: 0;
   max-height: 40vh;
   overflow: auto;
@@ -9206,7 +9217,7 @@ mark[data-pkc-diff-char='del'] {
 }
 [data-pkc-region='announce'] h3 {
   margin: var(--s3) 0 var(--s1);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 [data-pkc-region='announce'] ul {
   margin: 0;
@@ -9238,7 +9249,7 @@ mark[data-pkc-diff-char='del'] {
 [data-pkc-field='announce-where'] {
   margin: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 /* 🔴 **収録中だけ出る帯**(#413)。⚠ 地は無彩色のまま ── 色は情報にだけ使う
  * (user 指示 2026-08-03)。「録っている」ことは**字と場所**で分かる。 */
@@ -9248,7 +9259,7 @@ mark[data-pkc-diff-char='del'] {
   gap: var(--s2);
   padding: 2px var(--s3);
   background: var(--surface);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /* 🔴 **タイマーの帯**(#279)。⚠ 収録の帯と**同じ見た目**にする ──
  * どちらも「いま走っている物と、その止め方」を出す行なので、
@@ -9259,7 +9270,7 @@ mark[data-pkc-diff-char='del'] {
   gap: var(--s2);
   padding: 2px var(--s3);
   background: var(--surface);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /**
  * ⚠ **横に並べる** ── 入る限りは 1 行に収める(縦に積むと、3 本計った瞬間に
@@ -9322,7 +9333,7 @@ mark[data-pkc-diff-char='del'] {
   gap: var(--s2);
   padding: 2px var(--s3);
   background: var(--surface);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /* ⚠ タイマーの帯と**同じ形**にする(上の注記どおり、入りきらなければ折る)。 */
 [data-pkc-field='alarm-list'] {
@@ -9540,7 +9551,7 @@ mark[data-pkc-diff-char='del'] {
   align-items: center;
   border: 1px solid transparent;
   border-radius: 3px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-region='dual-tab'][data-pkc-active] {
   background: var(--surface);
@@ -9554,7 +9565,7 @@ mark[data-pkc-diff-char='del'] {
   flex-wrap: wrap;
   align-items: center;
   padding: var(--s1) var(--s2);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 [data-pkc-region='dual-crumbs'] [data-pkc-action='dual-crumb'] {
@@ -9612,7 +9623,7 @@ mark[data-pkc-diff-char='del'] {
   flex: none;
   width: 8rem;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   padding: 0 var(--s1);
   line-height: 20px;
   border: 1px solid var(--border);
@@ -9627,7 +9638,7 @@ mark[data-pkc-diff-char='del'] {
   align-items: center;
   gap: var(--s1);
   padding: 0 var(--s2) var(--s1);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-region='dual-bookmark'] {
   display: inline-flex;
@@ -9664,7 +9675,7 @@ mark[data-pkc-diff-char='del'] {
   padding: var(--s1) var(--s2);
   border-top: 1px solid var(--border);
   background: var(--surface-2);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -9681,7 +9692,7 @@ mark[data-pkc-diff-char='del'] {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /* 🔴 **列見出し**(2026-08-19)── 直す前は `<thead>` が 1 つも無く、
  *   並べ替えができない / 列の意味も読めなかった。
@@ -9695,7 +9706,7 @@ mark[data-pkc-diff-char='del'] {
   border-bottom: 1px solid var(--border);
   padding: var(--s1) var(--s2);
   text-align: left;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--muted);
   white-space: nowrap;
@@ -9793,13 +9804,13 @@ mark[data-pkc-diff-char='del'] {
 }
 [data-pkc-field='dual-empty'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   padding: var(--s2);
 }
 /* 情報行。⚠ 「N 件中 M 件を選択」を**対で**出す(古典 4 つとも同じ形)。 */
 [data-pkc-field='dual-count'] {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: var(--s1) var(--s2);
   border-top: 1px solid var(--border);
   white-space: nowrap;
@@ -9811,7 +9822,7 @@ mark[data-pkc-diff-char='del'] {
  *   ⚠ こちらは折り返す ── 「動きません」まで読めないと知らせの意味が無い。 */
 [data-pkc-field='dual-other-marks'] {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: var(--s1) var(--s2);
   border-top: 1px solid var(--border);
 }
@@ -9874,7 +9885,7 @@ mark[data-pkc-diff-char='del'] {
  *   ⚠ `@media` は最後に置く規約(announce.test の CSS 検査が最初の `@media` で切る)。 */
 @media (max-width: 1079px) {
   [data-pkc-region='browse-tabs'] button {
-    font-size: 11px;
+    font-size: var(--fs-xs);
   }
 }
 @media (pointer: coarse) {
@@ -10038,7 +10049,7 @@ mark[data-pkc-diff-char='del'] {
 [data-pkc-field='office-pack-progress'] {
   margin: var(--s2) 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='office-pack-actions'] {
   display: flex;
@@ -10063,21 +10074,21 @@ mark[data-pkc-diff-char='del'] {
   flex-basis: 100%;
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='asr-recommend'] {
   margin: var(--s2) 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='asr-progress'] {
   margin: var(--s2) 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='asr-installed'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* 設定へ逃がした操作の並び(#239、user 指示 2026-08-17)。
@@ -10109,7 +10120,7 @@ mark[data-pkc-diff-char='del'] {
 }
 [data-pkc-field='settings-back-to-top'],
 [data-pkc-field='settings-back-to-help'] {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 /* 見出しの隣に寄せる(「目次へ戻る」は右端のまま) */
@@ -10189,7 +10200,7 @@ h3[data-pkc-section] {
 }
 [data-pkc-field='filer-bulk-count'] {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 /* ── ショートカットキーの割当(#256、user 指示 2026-08-18)────────────
@@ -10204,7 +10215,7 @@ h3[data-pkc-section] {
 [data-pkc-field='keymap-group'] {
   margin-top: var(--s4);
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 [data-pkc-field='keymap-row'] {
   display: flex;
@@ -10230,7 +10241,7 @@ h3[data-pkc-section] {
 }
 [data-pkc-field='keymap-chord'] kbd {
   font: inherit;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 [data-pkc-field='keymap-drop'] {
   border: 0;
@@ -10241,7 +10252,7 @@ h3[data-pkc-section] {
 }
 [data-pkc-field='keymap-none'] {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 /* 捕まえている最中 ── 「いまキーを待っている」が一目で分かるように。 */
 [data-pkc-field='keymap-assign'][data-pkc-capturing] {
@@ -10261,7 +10272,7 @@ h3[data-pkc-section] {
   border-bottom: 1px solid var(--border);
   color: var(--fg);
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='help-key-group-note'] {
   display: none;
@@ -10332,7 +10343,7 @@ h3[data-pkc-section] {
   display: block;
 }
 [data-pkc-region='help-find-hits'] [data-pkc-field='help-find-excerpt'] {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
   font-weight: 400;
   overflow: hidden;
@@ -10447,7 +10458,7 @@ h3[data-pkc-section] {
 }
 [data-pkc-region='help-notices'] > details > summary {
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 [data-pkc-region='help-notices'] section {
@@ -10455,7 +10466,7 @@ h3[data-pkc-section] {
 }
 [data-pkc-region='help-notices'] h4 {
   margin: 0 0 var(--s2);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 [data-pkc-region='help-notices'] ul {
   margin: 0;
@@ -10510,14 +10521,14 @@ h3[data-pkc-section] {
 }
 [data-pkc-field='dialog-title'] {
   margin: 0 0 var(--s2);
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--muted);
 }
 /* ⚠ 本文は**折り返す** ── 題名を含む長い断りが 1 行で溢れると読めない */
 [data-pkc-field='dialog-body'] {
   margin: 0 0 var(--s4);
-  font-size: 13px;
+  font-size: var(--fs-md);
   line-height: 1.7;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -10537,8 +10548,8 @@ h3[data-pkc-section] {
 }
 [data-pkc-field='dialog-diff-rows'] {
   /* ⚠ 差分は**等幅**で読む(桁が揃わないと足し引きが追えない) */
-  font-family: var(--mono, ui-monospace, monospace);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
   line-height: 1.5;
   margin: 0;
   padding: var(--s2);
@@ -10577,7 +10588,7 @@ h3[data-pkc-section] {
   width: 100%;
   text-align: start;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: inherit;
   background: none;
   border: 0;
@@ -10608,7 +10619,7 @@ h3[data-pkc-section] {
   gap: var(--s3);
   max-width: min(32rem, calc(100vw - 2 * var(--s4)));
   padding: var(--s2) var(--s3);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg);
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -10624,7 +10635,7 @@ h3[data-pkc-section] {
   margin: 0 var(--s2) var(--s3) 0;
   padding: var(--s1) var(--s3);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: inherit;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -10642,12 +10653,12 @@ h3[data-pkc-section] {
 [data-pkc-field='dialog-body'] label {
   display: inline-block;
   margin-right: var(--s3);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 [data-pkc-field='dialog-body'] input {
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--fg);
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -10663,7 +10674,7 @@ h3[data-pkc-section] {
 }
 [data-pkc-field='dialog-body'] [data-pkc-field='place-rect-error'] {
   margin: var(--s2) 0 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--fg);
 }
@@ -10674,7 +10685,7 @@ h3[data-pkc-section] {
   align-items: center;
   gap: var(--s2);
   margin: var(--s1) 0 0;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--fg);
 }
 [data-pkc-field='dialog-body'] [data-pkc-field='place-group-check'] {
@@ -10684,7 +10695,7 @@ h3[data-pkc-section] {
 [data-pkc-field='dialog-body'] [data-pkc-field='place-group-note'],
 [data-pkc-field='dialog-body'] [data-pkc-field='place-group-error'] {
   display: block;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='dialog-body'] [data-pkc-field='place-group-error'] {
   margin-top: var(--s2);
@@ -10734,7 +10745,7 @@ h3[data-pkc-section] {
 [data-pkc-field='command-keys'] {
   margin-inline-start: auto;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   white-space: nowrap;
 }
 /* 場面の名前(「ノート」「予定」…)は行の右端に薄く 1 語。割当が在れば割当の右、無ければ名前の直後から右端へ寄せる。
@@ -10742,7 +10753,7 @@ h3[data-pkc-section] {
 [data-pkc-field='palette-scene'],
 [data-pkc-field='command-scene'] {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   white-space: nowrap;
 }
 [data-pkc-field='palette-label'] + [data-pkc-field='palette-scene'],
@@ -10754,7 +10765,7 @@ h3[data-pkc-section] {
 [data-pkc-field='entry-pick-kind'] {
   flex-basis: 100%;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 /* 🔑 `>` だけのとき・「操作を探す」を開いたとき、一覧の先頭に出る「最近使った操作」の見出し(#274)── 1 行だけ。
  * 色は**既存の控えめな字**(`--muted`)、寸法は行の左右の余白に揃える(新しい色・寸法は足さない)。 */
@@ -10763,7 +10774,7 @@ h3[data-pkc-section] {
   margin: 0;
   padding: var(--s2) var(--s3) var(--s1);
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 /* 🔴 **一覧だけを縦に流す**(器ごと流さない)。
  * ⚠ 器ごと流していたので、下の行を見に行くと**探す欄が画面から出て**いた
@@ -11304,7 +11315,7 @@ h3[data-pkc-section] {
   display: none;
   margin: 0;
   padding: 2px 4px 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.4;
   color: var(--muted);
 }
@@ -12167,7 +12178,7 @@ h3[data-pkc-section] {
   background: none;
   color: var(--muted, inherit);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   line-height: 1.6;
   text-align: center;
   cursor: grab;
@@ -12276,7 +12287,7 @@ h3[data-pkc-section] {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 /* 🔑 **いま横に出ている物には印** ── 押しても画面が変わらない札との差が読める */
 [data-pkc-field='stack-card'][data-pkc-shown] {
@@ -12321,7 +12332,7 @@ h3[data-pkc-section] {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: var(--s2) var(--s3);
-  font-size: 13px;
+  font-size: var(--fs-md);
   line-height: 1.4;
   color: var(--fg);
   pointer-events: auto;
@@ -12334,7 +12345,7 @@ h3[data-pkc-section] {
   align-items: center;
   gap: var(--s2);
   margin-bottom: var(--s1);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 
@@ -12345,7 +12356,7 @@ h3[data-pkc-section] {
   background: var(--surface-2);
   color: var(--fg);
   text-transform: uppercase;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
 }
 
 .pkc-link-preview-date,
@@ -12355,7 +12366,7 @@ h3[data-pkc-section] {
 
 .pkc-link-preview-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-lg);
   margin-bottom: var(--s1);
   color: var(--fg);
   word-break: break-word;
@@ -12363,7 +12374,7 @@ h3[data-pkc-section] {
 
 .pkc-link-preview-body {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   max-height: 120px;
   overflow: hidden;
   word-break: break-word;
@@ -12383,13 +12394,13 @@ h3[data-pkc-section] {
 
 .pkc-link-preview-not-found {
   color: var(--danger, #d73a49);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   padding: var(--s1) 0;
 }
 
 .pkc-link-preview-foreign-desc {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   padding: var(--s1) 0;
 }
 
@@ -12401,7 +12412,7 @@ h3[data-pkc-section] {
 
 .pkc-link-preview-url {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   word-break: break-all;
   margin-bottom: var(--s1);
   max-height: 3.6em;
@@ -12410,7 +12421,7 @@ h3[data-pkc-section] {
 }
 
 .pkc-link-preview-safe-hint {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   border-top: 1px solid var(--border);
   padding-top: var(--s1);
@@ -12459,7 +12470,7 @@ h3[data-pkc-section] {
   padding: var(--s1) var(--s2);
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .pkc-lightbox-title {
@@ -12487,7 +12498,7 @@ h3[data-pkc-section] {
   border: none;
   border-radius: var(--radius);
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--fs-lg);
   cursor: pointer;
 }
 
@@ -12497,11 +12508,11 @@ h3[data-pkc-section] {
 }
 
 .pkc-lightbox-open-win-btn {
-  font-size: 14px;
+  font-size: var(--fs-lg);
 }
 
 .pkc-lightbox-close-btn {
-  font-size: 16px;
+  font-size: var(--fs-xl);
 }
 
 .pkc-lightbox-content {
@@ -12566,7 +12577,7 @@ h3[data-pkc-section] {
 }
 
 .pkc-back-to-top-icon {
-  font-size: 18px;
+  font-size: var(--fs-2xl);
   font-weight: bold;
   line-height: 1;
 }
@@ -12618,7 +12629,7 @@ h6:hover > .pkc-heading-anchor,
 
 .pkc-heading-anchor.pkc-copied::before {
   content: '✓';
-  color: var(--success, #28a745);
+  color: var(--ok);
 }
 
 /* 🔴 **読書進捗バー（Reading Progress Indicator）**(#1125)── 本文スクロール進行度をリアルタイム表示 */
@@ -13034,7 +13045,7 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-field='schedule-monthview-label'] {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 [data-pkc-field='schedule-monthview-head'] button {
@@ -13057,7 +13068,7 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-field='schedule-monthview-weekdays'] > span {
   text-align: center;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--muted);
   line-height: 1.6;
 }
@@ -13146,7 +13157,7 @@ h6:hover > .pkc-heading-anchor,
   padding: 0 var(--s1);
 }
 [data-pkc-field='schedule-monthview-cards'] [data-pkc-field='line'] {
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 [data-pkc-field='schedule-monthview-cards'] [data-pkc-field='text'] {
   white-space: nowrap;
@@ -13161,7 +13172,7 @@ h6:hover > .pkc-heading-anchor,
   align-self: flex-start;
   padding: 0 var(--s1);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   background: none;
   border: 0;
@@ -13195,6 +13206,11 @@ h6:hover > .pkc-heading-anchor,
     animation-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* 動きのトークン(`tokens.css`)も 0 にする ── 規則が `var(--dur)` を使う所はこれで止まる */
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+  }
 }
 
 /* 設定の「色を付けたタグ」の一覧(#1645)── 色の見本・名前・「色を外す」を 1 行に。見本の色は JS が当てる */
@@ -13209,7 +13225,7 @@ h6:hover > .pkc-heading-anchor,
   width: 14px;
   height: 14px;
   border-radius: 3px;
-  border: 1px solid var(--pkc-border, rgba(128, 128, 128, 0.5));
+  border: 1px solid var(--border);
 }
 [data-pkc-field='tag-color-list-name'] {
   flex: 1;
@@ -13239,7 +13255,7 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-field='graph-legend'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='graph-body'] {
   display: flex;
@@ -13280,7 +13296,7 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-field='schedule-board-note'] {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.6;
   color: var(--muted);
 }
@@ -13303,7 +13319,7 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-field='schedule-board-head'] {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--muted);
 }
@@ -13315,7 +13331,7 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-field='schedule-board-more'] {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 [data-pkc-field='schedule-board-more'][hidden] {
@@ -13371,7 +13387,7 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-field='timers-note'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='timers-body'] {
   display: flex;
@@ -13381,7 +13397,7 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-field='timers-day-head'] {
   margin: 0 0 var(--s1);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--muted);
 }
@@ -13439,13 +13455,13 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-view-pane='textlab'] [data-pkc-field='pane-title'] {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-lg);
 }
 [data-pkc-field='textlab-note'],
 [data-pkc-field='textlab-summary'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='textlab-ops'],
 [data-pkc-field='textlab-tables'],
@@ -13468,7 +13484,7 @@ h6:hover > .pkc-heading-anchor,
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 [data-pkc-field='textlab-regex'] label:nth-child(-n + 2) {
@@ -13499,7 +13515,7 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-field='textlab-left'] h3,
 [data-pkc-field='textlab-right'] h3 {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 [data-pkc-field='textlab-input'],
@@ -13507,7 +13523,7 @@ h6:hover > .pkc-heading-anchor,
   width: 100%;
   min-height: 14em;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-md);
   resize: vertical;
 }
 
@@ -13527,13 +13543,13 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-view-pane='calc'] [data-pkc-field='pane-title'] {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-lg);
 }
 [data-pkc-field='calc-note'],
 [data-pkc-field='calc-status'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='calc-status']:empty {
   display: none;
@@ -13557,7 +13573,7 @@ h6:hover > .pkc-heading-anchor,
   margin: 0;
   padding: var(--s2);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-md);
   line-height: var(--calc-lh);
   white-space: pre;
 }
@@ -13587,7 +13603,7 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-calc-row='error'] {
   color: var(--danger, #b3261e);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* ══ 差分マージの面(#1231、2026-10-26)══════════════════════════════
@@ -13604,7 +13620,7 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-view-pane='diff'] [data-pkc-field='pane-title'] {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-lg);
 }
 [data-pkc-field='diff-note'],
 [data-pkc-field='diff-summary'],
@@ -13612,7 +13628,7 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-field='diff-more'] {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='diff-sides'] {
   display: grid;
@@ -13627,7 +13643,7 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-field='diff-side'] h3 {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 [data-pkc-field='diff-side'] select {
@@ -13668,14 +13684,14 @@ h6:hover > .pkc-heading-anchor,
   list-style: none;
   /* ⚠ 差分は**等幅**で読む(桁が揃わないと足し引きが追えない) */
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 /* 塊の中の 1 行(対)だけを取り込む小さなボタン(レビュー ⚠5)。升の右端に寄せ、字の邪魔にならない大きさにする */
 [data-pkc-field='diff-pair-take'] {
   float: right;
   margin: 0 0 0 var(--s2);
   padding: 0 var(--s1);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.4;
   font-family: inherit;
 }
@@ -13703,7 +13719,7 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-field='diff-hunk-bar'] > span {
   margin-right: auto;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* ══ 再生中の文字起こしの行(#1232、2026-10-26)══════════════════════
@@ -13744,11 +13760,11 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-region='cmdshell'] [data-pkc-field='pane-title'] {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-lg);
 }
 [data-pkc-field='shell-cwd'] {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-family: var(--font-mono);
 }
 [data-pkc-field='shell-log'] {
@@ -13759,7 +13775,7 @@ h6:hover > .pkc-heading-anchor,
   background: var(--surface-2);
   padding: var(--s2);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-browse-pane='shell'] [data-pkc-field='shell-log'] {
   min-height: 12em;
@@ -13794,7 +13810,7 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-field='shell-copy-block'] {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: 0 6px;
 }
 [data-pkc-field='shell-table-wrap'] {
@@ -13803,7 +13819,7 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-field='shell-table'] {
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-field='shell-table'] th,
 [data-pkc-field='shell-table'] td {
@@ -13859,7 +13875,7 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-field='shell-candidate'] {
   display: inline-flex;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   padding: 1px 6px;
 }
 [data-pkc-field='shell-candidate-hint'] {
@@ -13879,7 +13895,7 @@ h6:hover > .pkc-heading-anchor,
   background: var(--surface-2);
   padding: 2px var(--s2);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 [data-pkc-region='dual-cmd-out'][hidden] {
   display: none;

@@ -74,7 +74,7 @@ function tokenPx(name: string): string {
 /** 🔴 **トークンを使わなくてよい所**(理由つきで、身元で pin する)。 */
 const LITERAL_OK: ReadonlyMap<string, string> = new Map([
   // 幅 8px の縦帯に `⋮` を収める ── 11px では印が帯からはみ出す
-  ["[data-pkc-region='pane-grip']", '10px'],
+  ["[data-pkc-region='pane-grip']", 'var(--fs-2xs)'],
   // 🔑 「札と同じ大きさ」が意図である ── 段を 1 つ増やすのではなく、器に追従させる
   ["[data-pkc-field='stack-card'] button", 'inherit'],
 ]);
@@ -108,7 +108,8 @@ describe('🔴 ボタンの字の大きさは 3 段だけ(#722 P2-10)', () => {
       '11px',
     ]);
     // ⚠ 例外は 2 件だけ(増えたらここに理由ごと足す)
-    expect([...LITERAL_OK.values()]).toEqual(['10px', 'inherit']);
+    // ⚠ 10px は字の大きさの段 `--fs-2xs`(#1982 段 0)── ボタンの 3 段とは別の段
+    expect([...LITERAL_OK.values()]).toEqual(['var(--fs-2xs)', 'inherit']);
   });
 
   /**

@@ -577,7 +577,8 @@ describe('🔴 印刷は白地に濃い字(#1387)', () => {
       for (const v of m[2]!.matchAll(/(--[\w-]+):/g)) out.add(v[1]!);
     }
     expect(blocks, '暗い配色が 6 つ未満(この検査は空振り)').toBeGreaterThanOrEqual(6);
-    for (const skip of ['--shadow', '--sandbox-bg']) out.delete(skip);
+    // 影は 3 段とも同じ理由で除く(#1982 段 0 で `--shadow-sm` / `--shadow-lg` を足した)
+    for (const skip of ['--shadow', '--shadow-sm', '--shadow-lg', '--sandbox-bg']) out.delete(skip);
     return out;
   };
 
