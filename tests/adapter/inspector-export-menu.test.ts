@@ -15,7 +15,8 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
-import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { bindActions, runGlobalCommand } from '../../src/adapter/ui/actions/binder';
+import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import { openContextMenu, scrollClosesMenu, noteMenuUserInput } from '../../src/adapter/ui/render/context-menu';
 import { ACTION_ICONS, INSPECTOR_ICON_ACTIONS } from '../../src/adapter/ui/render/icons';
 import { ARCHETYPE_ICONS, BROWSE_ICONS } from '../../src/adapter/ui/render/icons';
@@ -264,6 +265,25 @@ describe('右の列の「その他 ▾」(#1982 段 1)', () => {
     expect(s.d.getState().phase).toBe('editing');
     expect(edit().disabled, '編集中に押せる').toBe(true);
     expect(s.q<HTMLButtonElement>('[data-pkc-action="open-inspector-more"]').disabled).toBe(true);
+  });
+});
+
+describe('「その他 ▾」の中の操作を「操作を探す」から呼ぶ(#1982 段 1 の着地前レビュー)', () => {
+  /**
+   * 🔴 元のボタンは閉じた一覧の中(`hidden` の元)に在る ── 「隠れている = 効かない」と読むと、
+   *   「ノートを複製する」が「いまは押せません」になり、押しても何も起きなかった。
+   * 🔑 対照群: ボタン自身を隠せば(= その操作が出ない状態)今までどおり効かない。
+   */
+  it('🔴 「ノートを複製する」は効く(ボタン自身が隠れているときは効かない)', () => {
+    const { root, d } = mounted();
+    const keymap = new KeymapStore();
+    const noop = (): void => {};
+    const src = root.querySelector('[data-pkc-field="inspector-more-source"]');
+    expect(src?.hasAttribute('hidden'), '前提: 元が閉じた一覧として隠れていない').toBe(true);
+    expect(src?.querySelector('[data-pkc-action="duplicate-entry"]'), '前提: 複製の元のボタンが元に無い').not.toBeNull();
+    expect(runGlobalCommand('duplicate-entry', root, d, keymap, noop, noop, true), '閉じた一覧の中だから押せないと言った').toBe(true);
+    src!.querySelector<HTMLElement>('[data-pkc-action="duplicate-entry"]')!.hidden = true;
+    expect(runGlobalCommand('duplicate-entry', root, d, keymap, noop, noop, true), 'ボタン自身が隠れているのに押せると言った').toBe(false);
   });
 });
 

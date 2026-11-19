@@ -262,6 +262,24 @@ describe('条件つきの操作(#500 案 C)', () => {
     expect(acts(NOTE), '開いていないのに上書きの口を出している').not.toContain('write-back-file');
   });
 
+  /**
+   * 🔴 **どの一覧でも「ゴミ箱へ移す」は危険の型**(#1982 段 1 の着地前レビュー)── 右クリック・`⋯`・2 ペインの行は
+   *   すべてこの表から作るので、配られた側(`entryMenuActions` の返り値)に型が載っていることを見る。
+   * ⚠ 直す前は CSS が action 名で赤くしていたので、型へ畳んだ日に一覧の項目だけ無彩色へ戻った(test は緑のまま)。
+   */
+  it('🔴 「ゴミ箱へ移す」は危険の型で配られ、他の項目は型を持たない', () => {
+    for (const ctx of [NOTE, { archetype: 'folder', linkedFile: null }]) {
+      const items = entryMenuActions(ctx);
+      const del = items.find((a) => a.action === 'delete-entry');
+      expect(del?.attrs?.['data-pkc-variant'], '「ゴミ箱へ移す」に危険の型が無い').toBe('danger');
+      const others = items.filter((a) => a.action !== 'delete-entry' && a.attrs?.['data-pkc-variant'] !== undefined);
+      expect(others.map((a) => a.action), '危険でない項目まで型を持っている').toEqual([]);
+    }
+    // 🔑 一覧の項目の赤は CSS の型の規則が持つ(action 名の規則はもう無い)
+    const css = readFileSync('src/styles/app.css', 'utf-8');
+    expect(css).toMatch(/\[data-pkc-region='context-menu'\] button\[data-pkc-variant='danger'\]/);
+  });
+
   it('⚠ 条件つきの物を外しても、並びは動かない(削除はいつでも最後)', () => {
     for (const ctx of [
       NOTE,

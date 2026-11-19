@@ -7755,7 +7755,7 @@ export function runGlobalCommand(
   const btn = root.querySelector<HTMLElement>(sel);
   if (btn === null) return false;
   // 🔴 行ごと隠してある間は「効かない」(#582 段③。`PALETTE_HIDDEN_OK` の注釈)
-  if (!PALETTE_HIDDEN_OK.has(cmd) && btn.closest('[hidden]') !== null) return false;
+  if (!PALETTE_HIDDEN_OK.has(cmd) && !inClosedMenuSource(btn) && btn.closest('[hidden]') !== null) return false;
   /**
    * 🔴 **「押せるか」は `disabled` まで見る**(#425 段①)。
    *
@@ -19865,6 +19865,21 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
  *   `hidden` の中の物が先に当たっても撃てる(メニューは開かなくてよい)。
  */
 const PALETTE_HIDDEN_OK: ReadonlySet<string> = new Set(['attach-file', 'open-today']);
+
+/**
+ * 🔴 **閉じた一覧の元のボタンは「効く」**(#1982 段 1 の着地前レビュー)。
+ *
+ * 右ペインの「その他 ▾」は、一覧に出す操作を**隠した元のボタン**(`inspector-more-source`)に持つ ──
+ *   `hidden` なのは「一覧が閉じている」だけで、「いまは効かない」ではない(添付 / 今日のノートと同じ形)。
+ * ⚠ 直す前は「操作を探す」の「ノートを複製する」が**押しても何も起きず**、一覧では「いまは押せません」と出ていた。
+ * 🔑 効かない物は今までどおり断る ── 元の中でも、ボタン自身や塊が `hidden`(フォルダでない、など)なら、
+ *   最も近い `hidden` は元そのものではなくなるので、ここは `false` を返す。
+ */
+const CLOSED_MENU_SOURCES = '[data-pkc-field="inspector-more-source"], [data-pkc-field="inspector-export-source"]';
+function inClosedMenuSource(btn: HTMLElement): boolean {
+  const nearest = btn.closest('[hidden]');
+  return nearest !== null && nearest.matches(CLOSED_MENU_SOURCES);
+}
 
 /**
  * 🔴 **先に欄へ字を入れる操作は、欄が空なら「欄へ移る」** (#582 段③)。

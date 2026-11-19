@@ -525,7 +525,12 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   (`TRAILING_ACTIONS` が削除を常に末尾へ回す ── 隣り合う 2 つが「移す」と「開く」で並ぶ)。
    */
   { action: 'open-trash', label: 'ゴミ箱を開く', group: 'remove' },
-  { action: 'delete-entry', label: 'ゴミ箱へ移す', group: 'remove' },
+  /**
+   * 🔴 **危険の型で出す**(#1982 段 1 の着地前レビュー)── 右クリック・`⋯`・2 ペインの行の一覧は、どれもこの表から
+   *   項目を作るので、ここに型を載せれば全部の一覧で赤くなる(右ペインの「その他 ▾」と同じ見え方)。
+   * ⚠ 直す前は CSS が action 名で赤くしていた ── 段 1 で型へ畳んだとき、一覧の項目だけ型が付かず無彩色に戻っていた。
+   */
+  { action: 'delete-entry', label: 'ゴミ箱へ移す', group: 'remove', attrs: { 'data-pkc-variant': 'danger' } },
 ];
 
 /**
