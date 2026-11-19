@@ -96,19 +96,7 @@ describe('patch-lo-fsimage-cmdline.py(#591 の直し)', () => {
       // ⚠ 1 稿目は 2,030 件にしたが **123,829 byte** にしかならず、前提の assert が
       //    落ちて教えてくれた(1 件 61 byte だった ── 実物の平均 65 より短い)。
       //    🔑 だから件数ではなく**byte で足りるまで**積む。
-      /**
-       * 🔴 **1 つの引数の上限は、走らせる箱の頁の大きさで変わる**(Linux の `MAX_ARG_STRLEN` = 32 頁)。
-       *   4 KiB 頁なら 128 KiB だが、16 / 64 KiB 頁の箱では 512 KiB / 2 MiB まで通る ── 2026-11-19 に CI の
-       *   runner でだけ「make 側の展開なのに通った」と落ちた(手元の 4 KiB 頁では落ちない)。
-       * 🔑 だから**この箱の上限を越えるまで**積む(実物の 132,359 byte も必ず越える)。
-       */
-      let page = 4096;
-      try {
-        page = Number(execFileSync('getconf', ['PAGESIZE'], { encoding: 'utf-8' }).trim()) || 4096;
-      } catch {
-        // getconf が無い箱 ── 4 KiB 頁として積む
-      }
-      const limit = Math.max(132_359, page * 32);
+      const limit = 132_359;
       const entries: string[] = [];
       let bytes = 0;
       for (let i = 0; bytes <= limit + 4096; i += 1) {
@@ -118,7 +106,21 @@ describe('patch-lo-fsimage-cmdline.py(#591 の直し)', () => {
       }
       const list = entries.join(' ');
       // ⚠ 前提を assert する ── 短い一覧で「通った」と読まないため
-      expect(list.length, `台の一覧がこの箱の上限(${String(limit)} byte)より小さい(空振り)`).toBeGreaterThan(limit);
+      expect(list.length, '台の一覧が実測より小さい(空振り)').toBeGreaterThan(limit);
+      /**
+       * 🔴 **この箱が 1 つの引数の長さを断るかを、その場で確かめる**(対照群)。
+       * ⚠ 2026-11-19 に CI の runner でだけ「make 側の展開なのに通った」と落ちた ── 頁は 4 KiB(`getconf` で確認)で、
+       *   それでも 128 KiB を越える 1 引数が通る箱があった(手元では断られる)。上限は箱の事情で、決め打てない。
+       * 🔑 だから**同じ長さの 1 引数を `sh -c` に渡して**断られるかを見て、make 側の展開はそれと**同じ結果**になることを見る
+       *   (断る箱では make 側も落ちる = 直しが要る理由がその箱で成り立つ)。⚠ 直した側(shell が argv を組む)は**どの箱でも**通る。
+       */
+      let longArgRefused: boolean;
+      try {
+        execFileSync('/bin/sh', ['-c', `: ${list}`], { stdio: 'pipe' });
+        longArgRefused = false;
+      } catch {
+        longArgRefused = true;
+      }
       writeFileSync(join(dir, 'filelist'), list, 'utf-8');
 
       const run = (recipe: string): number => {
@@ -130,11 +132,11 @@ describe('patch-lo-fsimage-cmdline.py(#591 の直し)', () => {
           return (e as { status?: number }).status ?? 1;
         }
       };
-      // 直す前 ── make が行に並べる = sh -c の 1 引数が肥大して落ちる
+      // 直す前 ── make が行に並べる = sh -c の 1 引数が肥大する。⚠ 落ちるかは、この箱が長い 1 引数を断るか(上)と同じ
       expect(
-        run('/bin/echo -n $(shell cat filelist) > out'),
-        `make 側の展開なのに通った ── 台の規模が足りないか、上限が変わった(頁 ${String(page)} byte / 一覧 ${String(list.length)} byte)`,
-      ).not.toBe(0);
+        run('/bin/echo -n $(shell cat filelist) > out') !== 0,
+        `make 側の展開の結果が、この箱の 1 引数の上限と食い違った(長い 1 引数を${longArgRefused ? '断る' : '通す'}箱 / 一覧 ${String(list.length)} byte)`,
+      ).toBe(longArgRefused);
       // 直した後 ── shell が argv を組むので通る
       expect(
         run('/bin/echo -n $$(cat filelist) > out'),
