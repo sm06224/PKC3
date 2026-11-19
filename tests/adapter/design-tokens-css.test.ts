@@ -29,7 +29,15 @@ function tsSources(dir: string): string[] {
   }
   return out;
 }
-const TS = tsSources('src').join('\n');
+/**
+ * ⚠ **コメントを剥がしてから**名前を探す(着地前レビュー)── 剥がさないと、TS の注釈に名前が
+ *   在るだけで「定義済み」になる(`tokens.css` から `--fs-lg` を消しても、注釈に救われて緑だった)。
+ *   ⚠ `//` は `:` / 引用符の直後(URL・文字列の中)では剥がさない。
+ */
+const TS = tsSources('src')
+  .join('\n')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
 
 /** TS が名前を組み立てて入れるトークン(`pane-size.ts` の `--pkc-pane-${id}`)。 */
 const DYNAMIC_PREFIXES: readonly string[] = ['--pkc-pane-'];
@@ -70,9 +78,17 @@ describe('🔴 見た目の段はトークンから選ぶ(#1982 段 0)', () => {
     const themes = [...TOKENS.matchAll(/:root\[data-pkc-theme='([\w-]+)'\]\s*\{([^}]*)\}/g)];
     expect(themes.length, 'テーマを引けない(走査が壊れている)').toBe(10);
     for (const [, name, body] of themes) {
-      for (const t of ['--shadow-sm', '--shadow', '--shadow-lg']) {
-        expect(body, `${name} に ${t} が無い`).toMatch(new RegExp(`${t}:\\s*0 `));
-      }
+      /**
+       * 🔴 **濃さは 小 < 中 < 大** で並ぶ(着地前レビュー)── 名前だけ見ると、暗いテーマの大を
+       *   明るいテーマの値(薄すぎて見えない)へ取り違えても緑になる。
+       */
+      const alpha = (t: string): number => {
+        const m = body!.match(new RegExp(`${t}:\\s*0 [^;]*/ (\\d+)%\\);`));
+        expect(m, `${name} に ${t} が無い(または形が違う)`).not.toBeNull();
+        return Number(m![1]);
+      };
+      const [sm, md, lg] = [alpha('--shadow-sm'), alpha('--shadow'), alpha('--shadow-lg')];
+      expect(sm < md && md < lg, `${name} の影の濃さが 小 ${sm} < 中 ${md} < 大 ${lg} になっていない`).toBe(true);
     }
   });
 
