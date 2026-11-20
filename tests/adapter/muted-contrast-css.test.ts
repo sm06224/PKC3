@@ -76,19 +76,68 @@ describe('依頼 244 / 245:薄い字の対比', () => {
     }
   });
 
-  it('244:選んだ行の字は、どのテーマでも地に対して 4.5 以上(薄い字をこの色にする)', () => {
+  /**
+   * 🔴 **#1982 段 2 で選んだ行の地が変わった** ── `--accent-dim` の緑の地をやめ、`--fg` を透かす中立の地
+   *   (`--pkc-selected-bg`)+ 左端の線 + 太字になった(現在地は形で示す)。⚠ 244 の旧い検算(`accent-dim-fg` と
+   *   `accent-dim`)は、もう画面に無い組を守っていた(着地前レビュー)── 今の組へ付け替える。
+   * 🔑 透かしの地は **srgb で地に重ねた色**(`color-mix(in srgb, X p%, transparent)` を地の上に描いた結果)。
+   */
+  const srgbOver = (fg: Rgb, ground: Rgb, a: number): Rgb => ground.map((g, i) => g * (1 - a) + fg[i]! * a) as Rgb;
+  const pctOf = (name: string): number => {
+    const m = new RegExp(`${name}:\\s*color-mix\\(in srgb,\\s*var\\(--fg\\)\\s*(\\d+)%,\\s*transparent\\)`).exec(
+      tokens.replace(/\/\*[\s\S]*?\*\//g, ''),
+    );
+    expect(m, `${name} が --fg の透かしでない`).not.toBeNull();
+    return Number(m![1]) / 100;
+  };
+  const GROUNDS = ['bg', 'surface', 'surface-2'] as const;
+
+  it('244(#1982 段 2):選んだ行の地は --fg の薄い透かし(18% 未満)で、字(--fg)も薄い字(印の色)も全テーマ × 3 つの地で 4.5 以上', () => {
+    const pct = pctOf('--pkc-selected-bg');
+    expect(pct, '選んだ行の地が濃すぎる(字が埋もれる)').toBeLessThan(0.18);
+    expect(pct, '選んだ行の地が薄すぎる(hover と見分けが付かない)').toBeGreaterThan(pctOf('--surface-hover'));
     for (const [name, v] of Object.entries(themes)) {
-      const r = ratio(hex(v['accent-dim-fg']!), hex(v['accent-dim']!));
-      expect(r, `${name}: ${r.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+      for (const g of GROUNDS) {
+        expect(v[g], `${name} の --${g} が読めない`).toBeDefined();
+        const ground = srgbOver(hex(v['fg']!), hex(v[g]!), pct);
+        const fg = ratio(hex(v['fg']!), ground);
+        const quiet = ratio(mix(hex(v['fg']!), hex(v['muted']!), 0.6), ground);
+        expect(fg, `${name} / --${g}: 字 ${fg.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+        expect(quiet, `${name} / --${g}: 薄い字 ${quiet.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+      }
     }
   });
 
-  it('244 の対照群:直す前の薄い字(--muted)は、選んだ行の地で目安に届かないテーマがある', () => {
-    // 「直した」と言える根拠 ── 直す前の値が目安を割っていなければ、この直しは何も守っていない
-    const below = Object.entries(themes).filter(([, v]) => ratio(hex(v['muted']!), hex(v['accent-dim']!)) < 4.5);
-    expect(below.map(([n]) => n)).toEqual(expect.arrayContaining(['terminal', 'retro', 'github-dark', 'solarized-dark', 'nord']));
-    const terminal = themes['terminal']!;
-    expect(ratio(hex(terminal['muted']!), hex(terminal['accent-dim']!))).toBeLessThan(2.2);
+  it('244 の対照群:素の --muted は、選んだ行の地で 4.5 に届かないテーマがある(差し替えが要る根拠)', () => {
+    const pct = pctOf('--pkc-selected-bg');
+    const below = Object.entries(themes).filter(([, v]) =>
+      GROUNDS.some((g) => ratio(hex(v['muted']!), srgbOver(hex(v['fg']!), hex(v[g]!), pct)) < 4.5),
+    );
+    expect(below.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('🔴 hover(#1982 段 2 の着地前レビュー):hover の地の上の薄い字(印の色)は、全テーマ × 3 つの地で 4.5 以上', () => {
+    const pct = pctOf('--surface-hover');
+    for (const [name, v] of Object.entries(themes)) {
+      for (const g of GROUNDS) {
+        const ground = srgbOver(hex(v['fg']!), hex(v[g]!), pct);
+        const r = ratio(mix(hex(v['fg']!), hex(v['muted']!), 0.6), ground);
+        expect(r, `${name} / --${g}: ${r.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it('🔴 hover の対照群と配線:素の --muted は hover の地で 4.5 を割るテーマがあり、hover を当てる規則は全部 --muted を差し替える', () => {
+    const pct = pctOf('--surface-hover');
+    const below = Object.entries(themes).filter(([, v]) =>
+      GROUNDS.some((g) => ratio(hex(v['muted']!), srgbOver(hex(v['fg']!), hex(v[g]!), pct)) < 4.5),
+    );
+    expect(below.length, '前提: 素の --muted でも足りている(差し替えが何も守っていない)').toBeGreaterThanOrEqual(3);
+    const code = app.replace(/\/\*[\s\S]*?\*\//g, '');
+    const rules = [...code.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((m) => /background:\s*var\(--surface-hover\)/.test(m[2]!));
+    expect(rules.length, 'hover の規則を 1 つも引けない(空振り)').toBeGreaterThan(10);
+    const bad = rules.filter((m) => !m[2]!.includes('--muted: var(--pkc-muted-on-mark);')).map((m) => m[1]!.trim());
+    expect(bad, 'hover の地なのに薄い字を差し替えていない規則').toEqual([]);
   });
 
   it('245:印の薄い字(fg を 6 割寄せた muted)は、どのテーマでも印の地に対して 4.5 以上', () => {

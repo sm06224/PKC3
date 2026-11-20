@@ -474,6 +474,8 @@
    * ⚠ 印を付けた行(`--pkc-mark-bg` = 18%)より薄く保つ(乗せただけの行が印に見えない)。
    *   値の下限・上限は `tests/adapter/dual-hover-css.test.ts` が全テーマの対比で見る。
    */
+  /* ⚠ hover の地の上では `--muted` が 4.5 を割るテーマがある(solarized-dark ほか 5 つ。#1982 段 2 の着地前レビュー)──
+     hover を当てる規則は、選んだ行と同じく `--muted` を `--pkc-muted-on-mark` へ差し替える(`tests/adapter/muted-contrast-css.test.ts`) */
   --surface-hover: color-mix(in srgb, var(--fg) 8%, transparent);
   --pkc-tag-bg: color-mix(in srgb, var(--fg) 9%, transparent);
   --pkc-tag-bg-hover: color-mix(in srgb, var(--fg) 16%, transparent);

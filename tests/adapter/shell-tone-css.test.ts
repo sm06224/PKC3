@@ -51,6 +51,16 @@ describe('机と紙(#1982 段 2)', () => {
       const surface = /(?:^|;)\s*--surface:\s*(#[0-9a-f]{6})/i.exec(decls)?.[1]?.toLowerCase();
       expect(bg, `${t.id}: --bg が読めない`).toBeTruthy();
       expect(bg, `${t.id}: 机と紙が同じ色(段差が消える)`).not.toBe(surface);
+      // 🔴 **段差の大きさの床**(着地前レビュー)── ≠ だけでは、ほぼ同じ色(対比 1.0x)へ寄せる変異が通る。
+      //   最も小さい terminal が 1.045 なので、床はその手前の 1.04
+      const lum = (h: string): number =>
+        [1, 3, 5]
+          .map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+          .map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+          .reduce((acc, c, i) => acc + c * [0.2126, 0.7152, 0.0722][i]!, 0);
+      const [a, b] = [lum(bg!), lum(surface!)];
+      const r = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      expect(r, `${t.id}: 机と紙の段差が小さすぎる(${r.toFixed(3)})`).toBeGreaterThanOrEqual(1.04);
     }
   });
 

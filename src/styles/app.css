@@ -425,6 +425,7 @@ body {
 [data-pkc-region='pane-grip']:hover,
 [data-pkc-region='pane-grip']:focus-visible {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
   color: var(--fg);
 }
 /**
@@ -459,6 +460,7 @@ button[data-pkc-glyph] {
 button[data-pkc-glyph]:hover:not(:disabled),
 button[data-pkc-glyph]:focus-visible {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
   color: var(--fg);
 }
 /* ⚠ 汎用の `button:disabled`(.45、#715)より薄い ── 枠の無い 1 文字なので、
@@ -1215,21 +1217,12 @@ img[data-pkc-action='view-big']:focus-visible {
   background: var(--bg);
 }
 /**
- * 🔴 **「探す」欄だけは下地を線色のままにする**(#951)。
+ * 🔴 **「探す」欄**(#951)── 入力欄と選び所が並ぶ行。
  *
- * ⚠ ここに並ぶのは**ボタンではなく入力欄と選び所**なので、帯の共有規則
- *   (`… button:not(:focus-visible)` の 1px の輪)が**当たらない** ──
- *   下地を地の色にすると、入力欄と選び所の間の区切りが 1 本消える。
- *
- * 🔴 **⚠ 訂正(2026-09-16、実ブラウザの検算)。** 1 稿目はここに
- *   「**余りが出ない** ── `entry-filter` が `flex: 1` で行を埋め切るから」と
- *   書いたが、**測ったら 72/72 で余りが出た**(2 段に折れ、並び順の選び所だけの
- *   2 段目に 68px〜129px 残る)。🔑 **理由のほうが間違っていた。**
- * 🔑 **正しい理由は 1 つ:余りは出るが、下地が線色なので見えない**
- *   (余りと下地が同じ色である)。
- * 🔴 **だから、ここの下地を地の色へ移すときは、余りの始末も一緒に要る。**
- *   ⚠ 「余りが出ないから安全」と読んで下地だけ替えると、**そこで灰色が出る**
- *   ── CLAUDE.md「『これが無いと壊れる』と書いたら、外して壊れるのを 1 度は見る」。
+ * ⚠ #1982 段 2 で、下地を線色にして区切りに見せる作り(と、帯のボタンの 1px の輪)をやめた ──
+ *   区切りは `gap` の間と、入力欄・選び所それぞれの枠(入力欄は枠を持つ ── 規則 ⑤)が担う。
+ * ⚠ 2 段に折れたときの余り(68px〜129px。2026-09-16 に実測)は、下地が机の地なので
+ *   地と同じ色に見える ── 線色の下地だった頃の「余りが灰色に出る」問題は起きない。
  */
 [data-pkc-region='find-bar'] {
   display: flex;
@@ -2499,9 +2492,9 @@ button[data-pkc-variant='danger']:hover:not(:disabled),
 }
 
 /* ── 書式パネル(P8 段⑥)──────────────────────────
- * 🔑 **編集欄のすぐ上**に、共有の 1 本線で貼り付ける(段④ の規約:境界線は共有、
- * ギャップは置かない)。14 個入るので狭いときは折り返す ── 畳まない
- * (user 指示「主要な導線を畳まない」)。 */
+ * 🔑 **編集欄のすぐ上**に置く。外枠は編集欄の枠とつながる 1px(入力欄の枠 ── 規則 ⑤)、
+ * ボタンの間は `gap`(#1982 段 2 で「境界線を共有してギャップを置かない」作りをやめた)。
+ * 14 個入るので狭いときは折り返す ── 畳まない(user 指示「主要な導線を畳まない」)。 */
 /* ⚠ 並べ方・下地・区切りは本文の帯と共有(`[data-pkc-field='detail-toolbar']` の規則)。
  *    ここは書式パネルだけの枠 ── 下は編集欄の枠が担うので `border-bottom` を持たない */
 [data-pkc-region='format-bar'] {
@@ -3308,8 +3301,8 @@ dd[data-pkc-field='inspector-toc'] {
  * **本文ブロック(兄弟)にだけ**当てる(この selector の器の側は「絞り込み」であって
  * 器に max-width を置いているのではない)。紙面フォーマットが `--read-w` の値だけを
  * 差し替える設計なのも同じ理由である(`tokens.css` の紙面フォーマットの節)。
- * ⚠ 単位に `em` を使わない ── 見出しは `1.35em` などで拡大するので、
- * `em` 指定だと見出しだけ上限が広がる(h1 で 1.35 倍)。
+ * ⚠ 単位に `em` を使わない ── 見出しは `em` で拡大する(#1982 段 2 で h1 1.6em / h2 1.35em …)ので、
+ * `em` 指定だと見出しだけ上限が広がる(h1 で 1.6 倍)。
  * ⚠ 表・図・コード・iframe・添付は**上限の対象外**(横に広いほど読める)。
  *   ここは allow-list 方式にしてある ── 新しいブロックが増えたとき、
  *   「上限が掛からない」側に倒れる(= 焼き直しも崩れも起きない安全な向き)。
@@ -3477,6 +3470,7 @@ dd[data-pkc-field='inspector-toc'] {
 }
 .pkc-md-rendered code[data-pkc-inline-code]:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
   border-color: var(--accent);
 }
 .pkc-md-rendered pre {
@@ -3575,6 +3569,7 @@ dd[data-pkc-field='inspector-toc'] {
 }
 .pkc-md-rendered table tbody tr:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 /* 🔴 **Markdown プレビュー内のテーブル列ソート**(#1150)。
  * ⚠ 表ヘッダーをクリック可能にし、ソート方向に応じたインジケータ（↕ / ▲ / ▼）を表示。
@@ -3585,6 +3580,7 @@ dd[data-pkc-field='inspector-toc'] {
 }
 .pkc-md-rendered table th[data-pkc-sort-direction]:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 .pkc-md-rendered .pkc-table-sort-icon {
   display: inline-block;
@@ -3892,6 +3888,7 @@ dd[data-pkc-field='inspector-toc'] {
 }
 .pkc-md-rendered .pkc-code-collapse-btn:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
   border-color: var(--accent);
 }
 .pkc-md-rendered .pkc-code-collapse-top-btn {
@@ -6644,6 +6641,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='pc-open']:hover,
 [data-pkc-field='pc-enter']:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 /* パンくず(#215)── 上の階層は押せる字、いまの階層は太字。長い名前は折り返す */
 [data-pkc-field='pc-crumbs'] {
@@ -6749,6 +6747,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='search-row']:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 [data-pkc-field='search-row-title'] {
   font-weight: 600;
@@ -7311,6 +7310,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='schedule-week'] > button:hover:not(:disabled) {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 /* 🔑 **今日は線で示す**(地は無彩色、色は情報にだけ) */
 [data-pkc-field='schedule-week'] > button[data-pkc-today] {
@@ -7552,6 +7552,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-region='schedule-cards'] > [data-pkc-entry]:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 [data-pkc-region='schedule-cards'] [data-pkc-field='line'] {
   min-width: 0;
@@ -7884,6 +7885,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='schedule-weekview-heads'] > button:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 /* 🔑 今日は線と太さで示す(地は無彩色、色は情報にだけ) */
 [data-pkc-field='schedule-weekview-heads'] > button[data-pkc-today] {
@@ -8255,6 +8257,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  *   画面から読めなかった)。⚠ 高さは変えない(ずれると狙えない)。 */
 [data-pkc-region='calendar-grid'] td[data-pkc-date]:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
   cursor: pointer;
 }
 /* 🔴 **今日**(2026-08-20)── カレンダーで最初に探すものが無かった。
@@ -8416,6 +8419,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-region='launcher-grid'] [data-pkc-tile]:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 /* ⚠ リングは**内側**へ描く(1px の隙間を食って隣の行に載るのを避ける) */
 [data-pkc-region='launcher-grid'] [data-pkc-tile]:focus-visible {
@@ -8717,6 +8721,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  *   反対側**で、dual だけ直すと「1 面のファイラでは乗せた行が印に見える」が残る。 */
 [data-pkc-region='filer-table'] tbody tr:hover:not([data-pkc-marked]) td {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 /* 🔴 **見えない行は組まない**(#1087。平置き 3,000 件で「選ぶ」が 237〜250ms だった実体は、
  * 画面の外の行まで毎回 style / layout / paint に載ること ── 実測 UpdateLayoutTree +
@@ -9650,6 +9655,7 @@ mark[data-pkc-diff-char='del'] {
 }
 [data-pkc-region='dual-table'] th[data-pkc-action='dual-sort']:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
   color: var(--fg);
 }
 [data-pkc-region='dual-table'] th[data-pkc-sorted] {
@@ -9714,6 +9720,7 @@ mark[data-pkc-diff-char='del'] {
 }
 [data-pkc-region='dual-table'] tbody tr:hover:not([data-pkc-marked]) td {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 [data-pkc-region='dual-table'] tbody tr[data-pkc-cursor] {
   outline: 1px solid var(--muted);
@@ -10301,6 +10308,7 @@ h3[data-pkc-section] {
 }
 [data-pkc-region='help-toc'] [data-pkc-field='help-toc-row']:hover:not(:disabled) {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 /* 🔴 **段付けは行の名前ごと名指しする**(着地前レビュー 2 巡目・[中] 4)。
    ⚠ 1 稿目は `[data-pkc-level='2']` だけで、行の規則の `padding: 2px var(--s2)`
@@ -10518,6 +10526,7 @@ h3[data-pkc-section] {
 }
 [data-pkc-field='pick-archive']:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 [data-pkc-field='pick-archive'][aria-pressed='true'] {
   background: var(--accent);
@@ -12423,6 +12432,7 @@ h3[data-pkc-section] {
 
 .pkc-lightbox-btn:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
   color: var(--fg);
 }
 
@@ -12910,6 +12920,7 @@ h6:hover > .pkc-heading-anchor,
 
 .pkc-quick-toc-link:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
   color: var(--accent);
 }
 
@@ -13048,6 +13059,7 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-field='schedule-monthview-num']:hover {
   background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 /* 🔑 今日は線で示す(小さな月・「週」と同じ作法) */
 [data-pkc-field='schedule-monthview-cell'][data-pkc-today] > [data-pkc-field='schedule-monthview-cell-head'] > [data-pkc-field='schedule-monthview-num'] {

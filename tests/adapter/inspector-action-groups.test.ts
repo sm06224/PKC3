@@ -178,8 +178,10 @@ describe('右の列の操作は塊に分かれている(#1029 段 B / 段 C)', (
       "[data-pkc-region='collection-bar'] [data-pkc-field='collection-app-group']",
     );
     expect(group.length, 'アプリ全体の操作の器が読めていない(空振り)').toBe(1);
+    // 🔑 #1982 段 2: 塊の中の間は `--s1`(2px)── 器の外側の余白は**それに足される**ので、切れ目は塊の中の倍の間になる。
+    //   ⚠ `--s2` 以上にすると、左の列の下限 242px に 7 枚の 32px タイルが 1 段で入らなくなる(上の注記「詰め込みなさい」)
     expect(group[0], '切れ目の間(器の外側の余白)を出していない').toMatch(
-      /margin-inline-start:\s*var\(--s[2-6]\)/,
+      /margin-inline-start:\s*var\(--s[1-6]\)/,
     );
     // 🔴 #1982 段 2: 切れ目は縦線ではなく**間**で出す(線を戻さない)
     expect(group[0], '切れ目の線が戻っている ── 区切りは間と背景の段差').not.toContain('border-inline-start');
