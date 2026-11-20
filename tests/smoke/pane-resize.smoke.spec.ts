@@ -116,7 +116,8 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
       .querySelector<HTMLElement>('[data-pkc-region="pane-grip"][data-pkc-pane="sidebar"]')!
       .getBoundingClientRect();
     const btns = [...el.querySelectorAll<HTMLElement>('button')];
-    const bg = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(getComputedStyle(el).backgroundColor);
+    // 🔴 #1982 段 2: 縁は机の地(左の列と同じ色)で、線色や強調色を塗らない
+    const deskBg = getComputedStyle(document.querySelector('[data-pkc-region="shell"]')!).backgroundColor;
     return {
       cell: Math.round(g.right - r.left),
       overlap: Math.round((r.right - g.left) * 10) / 10,
@@ -129,7 +130,7 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
         '[data-pkc-region="collection-bar"] button:not([data-pkc-field="bar-more"])',
       ).length,
       named: btns.filter((b) => (b.getAttribute('aria-label') ?? '') !== '' && b.title !== '').length,
-      grey: bg !== null && bg[1] === bg[2] && bg[2] === bg[3],
+      grey: getComputedStyle(el).backgroundColor === deskBg,
     };
   }, EDGE);
   expect(edge.want, '一覧の下の帯が空(台の空振り)').toBeGreaterThan(5);
@@ -137,7 +138,7 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
   expect(edge.overlap, `縁が掴む帯に ${edge.overlap}px 重なっている`).toBeLessThanOrEqual(0.5);
   expect(edge.visible, '縁のボタンが全部は見えていない / 帯の数と違う').toBe(edge.want);
   expect(edge.named, '名前(aria-label)か説明(title)が無い縁のボタンがある').toBe(edge.want);
-  expect(edge.grey, '縁の地が無彩色でない').toBe(true);
+  expect(edge.grey, '縁の地が机の地(shell と同じ色)でない').toBe(true);
   // 🔴 **押せる**(見えているだけで押せない縁を作らない)── 実物の座標で押して、システムが開く
   await clickReal(page, `${EDGE} [data-pkc-action="set-view"][data-pkc-view="settings"]`);
   await expect(

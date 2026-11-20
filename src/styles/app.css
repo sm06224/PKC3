@@ -1128,10 +1128,12 @@ img[data-pkc-action='view-big']:focus-visible {
 [data-pkc-region='collection-bar'] {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--s2);
+  gap: var(--s1);
   /* 🔴 下地は塗らない(机の地)。上端の線も引かない ── 一覧との間は余白で切る(#1982 段 2)。
-   * ⚠ 埋め草の `::after` は無い ── 折れて段が増えても余りが灰色にならない(#951 の教訓) */
-  padding: var(--s2) var(--s2) var(--s1);
+   * ⚠ 埋め草の `::after` は無い ── 折れて段が増えても余りが灰色にならない(#951 の教訓)
+   * ⚠ 隙間は `--s1`、左右の余白も `--s1`:左の列の下限(242px)に 7 枚の 32px タイルが
+   *   **1 段で収まる**ぎりぎりの寸法(`--s2` だと 2 枚が「⋯」へ畳まれる ── #1621) */
+  padding: var(--s2) var(--s1) var(--s1);
   flex: none;
 }
 /**
@@ -1194,9 +1196,9 @@ img[data-pkc-action='view-big']:focus-visible {
 [data-pkc-region='collection-bar'] [data-pkc-field='collection-app-group'] {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--s2);
+  gap: var(--s1);
   /* 塊の切れ目は縦線ではなく**間**(#1982 段 2。「ここから別の役割」は余白で読ませる) */
-  margin-inline-start: var(--s2);
+  margin-inline-start: var(--s1);
 }
 [data-pkc-field='app-settings'][data-pkc-active] {
   /* 現在地は形(#1982 段 2)── 下線 + 太字 */
