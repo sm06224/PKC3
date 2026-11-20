@@ -1562,7 +1562,7 @@ tr[data-pkc-note-label] td:first-child {
   background: var(--pkc-note-label-color, transparent);
   vertical-align: -0.1em;
 }
-[data-pkc-action='filter-label']::before {
+[data-pkc-action='toggle-label-filter']::before {
   content: '';
   display: inline-block;
   width: 0.7em;
@@ -1572,21 +1572,21 @@ tr[data-pkc-note-label] td:first-child {
   background: var(--pkc-note-label-color, transparent);
 }
 [data-pkc-action='note-label-pick'][data-pkc-note-label-value='1'],
-[data-pkc-action='filter-label'][data-pkc-note-label-value='1'] { --pkc-note-label-color: var(--note-1); }
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='1'] { --pkc-note-label-color: var(--note-1); }
 [data-pkc-action='note-label-pick'][data-pkc-note-label-value='2'],
-[data-pkc-action='filter-label'][data-pkc-note-label-value='2'] { --pkc-note-label-color: var(--note-2); }
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='2'] { --pkc-note-label-color: var(--note-2); }
 [data-pkc-action='note-label-pick'][data-pkc-note-label-value='3'],
-[data-pkc-action='filter-label'][data-pkc-note-label-value='3'] { --pkc-note-label-color: var(--note-3); }
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='3'] { --pkc-note-label-color: var(--note-3); }
 [data-pkc-action='note-label-pick'][data-pkc-note-label-value='4'],
-[data-pkc-action='filter-label'][data-pkc-note-label-value='4'] { --pkc-note-label-color: var(--note-4); }
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='4'] { --pkc-note-label-color: var(--note-4); }
 [data-pkc-action='note-label-pick'][data-pkc-note-label-value='5'],
-[data-pkc-action='filter-label'][data-pkc-note-label-value='5'] { --pkc-note-label-color: var(--note-5); }
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='5'] { --pkc-note-label-color: var(--note-5); }
 [data-pkc-action='note-label-pick'][data-pkc-note-label-value='6'],
-[data-pkc-action='filter-label'][data-pkc-note-label-value='6'] { --pkc-note-label-color: var(--note-6); }
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='6'] { --pkc-note-label-color: var(--note-6); }
 [data-pkc-action='note-label-pick'][data-pkc-note-label-value='7'],
-[data-pkc-action='filter-label'][data-pkc-note-label-value='7'] { --pkc-note-label-color: var(--note-7); }
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='7'] { --pkc-note-label-color: var(--note-7); }
 [data-pkc-action='note-label-pick'][data-pkc-note-label-value='8'],
-[data-pkc-action='filter-label'][data-pkc-note-label-value='8'] { --pkc-note-label-color: var(--note-8); }
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='8'] { --pkc-note-label-color: var(--note-8); }
 [data-pkc-entry] [data-pkc-field='title'] {
   overflow: hidden;
   text-overflow: ellipsis;
