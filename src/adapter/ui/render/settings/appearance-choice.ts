@@ -54,7 +54,7 @@ export function createFontSection(region: HTMLElement): SettingsSection {
         }),
       );
       dd.append(
-        buildSettingsNote('画面の字体を選びます。字体は同梱せず、この端末に入っているものを使います(無ければ標準の字体になります)。書き出した HTML は標準のままです。'),
+        buildSettingsNote('字体は同梱せず、この端末にあるものを使います(無ければ標準)。'),
       );
       return [dt, dd];
     },

@@ -89,6 +89,8 @@ const UNRESOLVED: readonly string[] = [
   // 2026-10-29(#674 / #949): 音源分離のモデルを取り込む / やめる / 消す。押し所は設定の節の `button()` ヘルパーで組む(`install-asr-part` と同じ)
   'cancel-stem-install',
   'install-stem-model',
+  // 🔴 色ラベルの一覧の項目(#1982 段 4)── `note-label-set` が開く 2 枚目の一覧。色は項目の属性が運ぶ
+  'note-label-pick',
   'remove-stem-model',
   'choose-office-pack',
   'dual-back',

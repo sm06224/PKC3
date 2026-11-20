@@ -62,6 +62,8 @@ function stateOf(metas: EntryMeta[], over: Partial<AppState> = {}): AppState {
     filterQuery: '',
     // #411: 種類の絞り。⚠ 上と同じ理由で**明示で置く**(空 = 絞らない)
     kindFilter: NO_KINDS,
+    noteLabels: new Map<string, number>(),
+    labelFilter: null,
     // #240 段②: 印(複数選択)。⚠ `as unknown as AppState` で作っているので
     //    足りない field は**実行時に落ちる**まで気づけない ── 明示で置く
     scopeLid: null,

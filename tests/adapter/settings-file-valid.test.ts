@@ -42,6 +42,7 @@ import { PdfReaderStore } from '../../src/adapter/ui/render/pdf-reader-setting';
 import { GroupFoldStore } from '../../src/adapter/ui/render/group-fold';
 import { FilerFlattenStore } from '../../src/adapter/ui/render/filer-flatten';
 import { THEMES } from '../../src/adapter/ui/render/theme';
+import { ACCENTS, FONTS } from '../../src/features/appearance-choice';
 import { PAGE_FORMATS } from '../../src/features/page-format';
 import { PROSE_ALIGNS } from '../../src/features/prose-align';
 import { READ_COLUMN_CHOICES } from '../../src/features/read-columns';
@@ -180,6 +181,9 @@ function validSamples(): Record<string, string[]> {
   out['pkc3.page-format'] = PAGE_FORMATS.map((m) => m.id);
   out['pkc3.prose-align'] = PROSE_ALIGNS.map((m) => m.id);
   out['pkc3.text-scale'] = TEXT_SCALES.map((m) => m.id);
+  // 🔴 アクセントの色・字体(#1982 段 4)。既定('theme' / 'standard')は鍵ごと消えるので、見本には選べる値を並べる
+  out['pkc3.accent'] = ACCENTS.map((m) => m.id);
+  out['pkc3.font'] = FONTS.map((m) => m.id);
   out['pkc3.read-columns'] = READ_COLUMN_CHOICES.map((m) => m.id);
   out['pkc3.column-rule'] = COLUMN_RULES.map((m) => m.id);
   out['pkc3.tag-badge'] = TAG_BADGES.map((m) => m.id);

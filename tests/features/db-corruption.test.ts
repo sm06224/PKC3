@@ -118,6 +118,7 @@ describe('止める op の仕分け(#971)', () => {
     // タグの色(#1457)── 読むだけ(書く `putTagColor` は CORRUPT_BLOCKED_OPS 側)
     'listTagColors',
     'listNotePins',
+    'listNoteLabels',
     'listBodies',
     'getBody',
     'getBodies',

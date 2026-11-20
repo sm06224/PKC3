@@ -191,7 +191,7 @@ export const NO_NOTE_LABELS: ReadonlyMap<string, number> = new Map<string, numbe
 
 /** 🔴 いまの色の絞りを `EntryFilter` へ渡す形にする唯一の口(#1982 段 4)。 */
 export function labelFilterOf(state: Pick<AppState, 'noteLabels' | 'labelFilter'>): LabelFilter | null {
-  return state.labelFilter === null ? null : { color: state.labelFilter, labels: state.noteLabels };
+  return state.labelFilter == null ? null : { color: state.labelFilter, labels: state.noteLabels };
 }
 import { commandQueryOf } from '@features/palette/command-query';
 import { foldCase, jumpTerms, normalizeFindQuery } from '@features/filter/search-hits';
