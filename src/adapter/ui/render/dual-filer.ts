@@ -1146,6 +1146,8 @@ export class DualFilerRenderer {
           m.archetype,
           // ⚠ **画面に出る形**で入れる(生の値だと、丸めて同じに見える回で作り直す)
           formatBodyChars(m.bodyChars),
+          // 🔴 色ラベルも指紋(#1982 段 4)── 入れないと、色を付け外ししても 2 ペインの行が描き直らない
+          String(state.noteLabels.get(m.lid) ?? ''),
         ].join(SEP),
       ),
     ].join(SEP);
