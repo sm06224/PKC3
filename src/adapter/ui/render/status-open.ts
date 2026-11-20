@@ -31,6 +31,7 @@
  *   **出す条件そのもの**から取る。字の一致を別の場所で書き直さない(判定が 2 か所に生えない)。
  */
 
+import { recoveryLine } from '@features/capture/capture-journal';
 import { isCorruptRefusalLine } from '@features/storage/db-corruption';
 import { PDF_SAVED_NOTICE_TAIL } from '@features/pdf/pdf-attachments';
 
@@ -128,6 +129,18 @@ export const MISSING_NOTE_LINE_HINT = 'ゴミ箱にあれば戻せます';
 export function paintStatusTrash(btn: HTMLElement, text: string): void {
   const show = text.includes(MISSING_NOTE_LINE_HINT);
   if (btn.hidden !== !show) btn.hidden = !show;
+}
+
+/**
+ * 🔴 **途中で終わった録音・録画への入口を出し入れする**(#1985 項目 2。静かな 1 行)。
+ * 復元できる区間が 1 件以上あるときだけ出す(0 件なら字も空にする ── 畳んだ物の字が状態の行を見る検査に拾われない)。
+ * 🔑 押した先は `open-capture-recovery` の受け手(`binder.ts`)。ここが書くのは `hidden` と字だけ。
+ */
+export function paintStatusCaptureRecovery(btn: HTMLElement, count: number): void {
+  const label = recoveryLine(count);
+  const hide = count <= 0;
+  if (btn.hidden !== hide) btn.hidden = hide;
+  if (btn.textContent !== label) btn.textContent = label;
 }
 
 export interface StatusUndoState {

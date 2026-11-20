@@ -22,6 +22,8 @@ export type JournalKind = 'audio' | 'screen';
 export interface JournalMeta {
   readonly id: string;
   readonly kind: JournalKind;
+  /** どの保存先(container)の収録か。⚠ 別の保存先の同じ lid へ入れない。省略 = 絞らない。 */
+  readonly cid?: string;
   /** 録り始めたときに開いていたノート(`null` = 何も開いていなかった)。 */
   readonly startedLid: string | null;
   /** 始めた時刻(ms)。名前の時刻になる(分かれた本は同じ時刻 + 連番)。 */

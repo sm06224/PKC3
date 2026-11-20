@@ -23,6 +23,8 @@ import type { CaptureService } from './capture';
 
 export interface CaptureRecoveryDeps {
   readonly store: JournalStore;
+  /** いまの保存先。⚠ 別の保存先の収録は出さない・触らない(同じ lid が別のノートを指すため)。 */
+  readonly cid?: string;
   /** いま別のタブが録っている収録の id(その収録は「途中で終わった」ではない)。 */
   readonly liveIds: () => Promise<ReadonlySet<string>>;
   readonly service: Pick<CaptureService, 'deliverRecovered'>;
@@ -97,7 +99,13 @@ export function createCaptureRecovery(deps: CaptureRecoveryDeps): CaptureRecover
           deps.store.listChunkInfos(),
           deps.liveIds(),
         ]);
-        const plan = planRecovery(metas, infos, (id) => live.has(id));
+        const mine = metas.filter((m) => deps.cid === undefined || m.cid === undefined || m.cid === deps.cid);
+        const ids = new Set(mine.map((m) => m.id));
+        const plan = planRecovery(
+          mine,
+          infos.filter((c) => ids.has(c.rec)),
+          (id) => live.has(id),
+        );
         // 掃除: 復元できない断片・断片の無い身元(書き手が落ちた跡)
         for (const u of plan.unrestorable) await deps.store.dropSegment(u.rec, u.seg).catch(() => undefined);
         for (const id of plan.emptyRecs) await deps.store.dropRec(id).catch(() => undefined);

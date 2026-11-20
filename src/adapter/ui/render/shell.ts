@@ -95,6 +95,8 @@ export interface ShellRegions {
    *   未読が 1 件以上あるときだけ `hidden` を外す(`main.ts` が state を見て書く)。
    */
   statusMessages: HTMLElement;
+  /** 途中で終わった録音・録画への入口(#1985。残っている間だけ出る)。 */
+  statusCaptureRecovery: HTMLElement;
   /** 🔴 **狭すぎる端末への断り書き**(#671)。中身は `too-narrow.ts` が出し入れする。 */
   tooNarrow: HTMLElement;
   /** その断り書きの字を置く所。 */
@@ -1263,6 +1265,15 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusMessages.setAttribute('data-pkc-message-lid', SYSTEM_MESSAGE_LID);
   statusMessages.hidden = true;
   /**
+   * 🔴 **途中で終わった録音・録画への入口**(#1985 項目 2)。⚠ 「未読のメッセージ」と同じ作法 ── 常設で置いて、
+   *   復元できる物が残っている間だけ出す(`paintStatusCaptureRecovery`)。押すと「復元する / 捨てる」を聞く。
+   */
+  const statusCaptureRecovery = document.createElement('button');
+  statusCaptureRecovery.type = 'button';
+  statusCaptureRecovery.setAttribute('data-pkc-field', 'status-capture-recovery');
+  statusCaptureRecovery.setAttribute('data-pkc-action', 'open-capture-recovery');
+  statusCaptureRecovery.hidden = true;
+  /**
    * 🔴 **狭すぎる端末への断り書き**(user 裁定 2026-09-04、#671)。
    * ⚠ **器は 1 度だけ組む**(`too-narrow.ts` は `hidden` の付け外しだけ)──
    *   作り直すと、押そうとした OK が指の下から消える(収録の帯と同じ理由)。
@@ -1281,7 +1292,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   tooNarrowOk.type = 'button';
   tooNarrowOk.setAttribute('data-pkc-field', 'too-narrow-ok');
   tooNarrow.append(tooNarrowText, tooNarrowOk);
-  status.append(statusText, statusOpen, statusCopyRef, statusUndo, statusCreate, statusRescue, statusBackup, statusTrash, statusMessages, tooNarrow);
+  status.append(statusText, statusOpen, statusCopyRef, statusUndo, statusCreate, statusRescue, statusBackup, statusTrash, statusMessages, statusCaptureRecovery, tooNarrow);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -1455,6 +1466,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     statusTrash,
     statusCopyRef,
     statusMessages,
+    statusCaptureRecovery,
     tooNarrow,
     tooNarrowText,
     tooNarrowOk,
