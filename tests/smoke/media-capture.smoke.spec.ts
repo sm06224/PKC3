@@ -1305,14 +1305,32 @@ ${(e as Error).message}`,
    */
   await page.evaluate(() => {
     const w = window as unknown as {
-      __mixSpy: { recAudio: number[]; tracks: MediaStreamTrack[] };
+      __mixSpy: { recAudio: number[]; tracks: MediaStreamTrack[]; sources: number };
     };
-    w.__mixSpy = { recAudio: [], tracks: [] };
+    w.__mixSpy = { recAudio: [], tracks: [], sources: 0 };
+    // 🔑 混ぜ場へ入る音源の数を数える(混ぜる回は共有 + マイクの 2 本)。⚠ 数えるだけで挙動は変えない
+    const protoCtx = AudioContext.prototype;
+    const origSrc = protoCtx.createMediaStreamSource;
+    protoCtx.createMediaStreamSource = function (this: AudioContext, s: MediaStream) {
+      w.__mixSpy.sources += 1;
+      return origSrc.call(this, s);
+    };
     const md = navigator.mediaDevices;
     for (const name of ['getUserMedia', 'getDisplayMedia'] as const) {
       const orig = md[name].bind(md);
       md[name] = (async (c?: MediaStreamConstraints) => {
         const st = await orig(c);
+        // 🔑 偽の共有画面には音が無いので、発振器の音を 1 本足す ── 「共有の音 + マイク」の混ぜる道を通すため
+        //   (発振器は createMediaStreamSource を使わないので、上の数には入らない)
+        if (name === 'getDisplayMedia' && st.getAudioTracks().length === 0) {
+          const oc = new AudioContext();
+          const osc = oc.createOscillator();
+          const dst = oc.createMediaStreamDestination();
+          osc.connect(dst);
+          osc.start();
+          for (const t of dst.stream.getAudioTracks()) st.addTrack(t);
+          w.__mixSpy.tracks.push(...dst.stream.getAudioTracks());
+        }
         w.__mixSpy.tracks.push(...st.getTracks());
         return st;
       }) as never;
@@ -1337,8 +1355,9 @@ ${(e as Error).message}`,
   await clickReal(page, '[data-pkc-field="stop-capture"]');
   await expect(bar, '画面録画を止めたのに帯が残っている').toBeHidden();
   const mixSpy = await page.evaluate(() => {
-    const w = window as unknown as { __mixSpy: { recAudio: number[]; tracks: MediaStreamTrack[] } };
+    const w = window as unknown as { __mixSpy: { recAudio: number[]; tracks: MediaStreamTrack[]; sources: number } };
     return {
+      sources: w.__mixSpy.sources,
       recAudio: w.__mixSpy.recAudio,
       tracks: w.__mixSpy.tracks.length,
       live: w.__mixSpy.tracks.filter((t) => t.readyState === 'live').length,
@@ -1346,6 +1365,9 @@ ${(e as Error).message}`,
   });
   expect(mixSpy.recAudio.length, '画面録画の器が作られていない').toBeGreaterThan(0);
   expect(mixSpy.recAudio[0], '画面録画に音(マイク)が入っていない').toBeGreaterThanOrEqual(1);
+  // 🔴 共有に音(発振器)があるので、混ぜる道を通る: 共有 + マイクの 2 本が混ぜ場へ入り、器へは混ぜた 1 本が渡る
+  expect(mixSpy.sources, '共有の音とマイクが混ぜ場へ入っていない(混ぜる道を通っていない)').toBe(2);
+  expect(mixSpy.recAudio[0], '混ぜた音が 1 本で器へ渡っていない').toBe(1);
   expect(mixSpy.tracks, '共有とマイクの track を取れていない').toBeGreaterThanOrEqual(2);
   expect(mixSpy.live, '止めたのに生きている track が残っている(マイクの表示が残る)').toBe(0);
   /**
