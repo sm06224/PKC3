@@ -39,12 +39,21 @@ class FStream {
   }
 }
 
-type FCtx = { closed: number; sources: FStream[]; destTrack: FTrack };
+type FCtx = { closed: number; sources: FStream[]; destTrack: FTrack; state: string; resumed: number };
+type CtxOpt = { initial?: 'running' | 'suspended'; resume?: 'ok' | 'stay' | 'reject' };
 
-function fakeAudioContext(): { AC: typeof AudioContext; made: () => FCtx[] } {
+function fakeAudioContext(o: CtxOpt = {}): { AC: typeof AudioContext; made: () => FCtx[] } {
   const made: FCtx[] = [];
   class FCtx {
     closed = 0;
+    resumed = 0;
+    state: string = o.initial ?? 'running';
+    resume(): Promise<void> {
+      this.resumed += 1;
+      if (o.resume === 'reject') return Promise.reject(new Error('blocked'));
+      if (o.resume !== 'stay') this.state = 'running';
+      return Promise.resolve();
+    }
     sources: FStream[] = [];
     destTrack = track('audio');
     close(): Promise<void> {
@@ -100,13 +109,16 @@ function setup(over: {
   mic?: 'ok' | 'denied' | 'missing' | 'none';
   noAC?: boolean;
   noMS?: boolean;
+  ctx?: CtxOpt;
+  /** マイクの許可の確認の返し方(既定: すぐ返す)。 */
+  micGate?: Promise<void>;
 }) {
   const dv = track('video');
   const da = track('audio');
   const display = new FStream(over.displayAudio === false ? [dv] : [dv, da]);
   const micTrack = track('audio');
   const mic = new FStream([micTrack]);
-  const ac = fakeAudioContext();
+  const ac = fakeAudioContext(over.ctx);
   const rec = recorder();
   const calls: { display: unknown[]; mic: unknown[] } = { display: [], mic: [] };
   const mode = over.mic ?? 'ok';
@@ -120,6 +132,7 @@ function setup(over: {
       : {
           getUserMedia: async (c) => {
             calls.mic.push(c);
+            if (over.micGate !== undefined) await over.micGate;
             if (mode === 'denied') throw Object.assign(new Error('x'), { name: 'NotAllowedError' });
             if (mode === 'missing') throw Object.assign(new Error('x'), { name: 'NotFoundError' });
             return mic as unknown as MediaStream;
