@@ -265,6 +265,9 @@ export class FilerRenderer {
   /** ⚠ 絞り込みも指紋の一部(review M-3 ── 絞り込み中にファイラだけ全件出ていた)。 */
   private lastFilter: string | null = null;
   private lastKinds: ReadonlySet<string> | null = null;
+  /** 🔴 色ラベルの絞りと表の写し(#1982 段 4)。指紋に入れないと、色を付けても絞っても描き直さない。 */
+  private lastLabelFilter: number | null = null;
+  private lastLabels: ReadonlyMap<string, number> | null = null;
   /** ⚠ 並び順と本文検索の当たりも指紋(着地前レビュー 3 ── 入れないと死んだ操作子になる)。 */
   private lastSort: AppState['entrySort'] | null = null;
   /** 「最近開いた順」の材料の写し(依頼 274 / 334)。変わったときだけ並べ直す。 */
@@ -1039,9 +1042,12 @@ export class FilerRenderer {
     renaming: boolean,
     parentName: string | undefined,
     dayStamp: number,
+    label: number | undefined,
   ): string {
     return [
       m.title,
+      // 🔴 色ラベル(#1982 段 4)── 行の左の線に出す材料なので指紋に入れる(`buildRow` が読む物と同じ)
+      label === undefined ? '' : String(label),
       m.archetype,
       this.listDate(m.updatedAt, dayStamp),
       renaming ? 'r' : '',
@@ -1083,6 +1089,9 @@ export class FilerRenderer {
      *   **条件のタグが本文に付く**)ので、同じ印にすると受け手が見分けられない。
      */
     else if (m.archetype === SMART_ARCHETYPE) tr.setAttribute('data-pkc-drop', 'smart');
+    // 🔴 色ラベル(#1982 段 4)── 行の左端の線(CSS が `--note-N` で引く)。選択の線とは別の辺(右の端)で出す
+    const noteLabel = state.noteLabels.get(m.lid);
+    if (noteLabel !== undefined) tr.setAttribute('data-pkc-note-label', String(noteLabel));
     if (m.lid === state.selectedLid) tr.setAttribute('data-pkc-selected', '');
     // ⚠ **開いている**(`selected`)と**印を付けた**(`marked`)は別の印である
     paintRowMark(tr, marked.has(m.lid));
@@ -1315,7 +1324,7 @@ export class FilerRenderer {
       for (let i = c * size; i < to; i += 1) {
         const m = list[i]!;
         const parentName = this.parentNames.get(m.lid);
-        const sig = this.rowSignature(m, m.lid === state.renamingLid, parentName, dayStamp);
+        const sig = this.rowSignature(m, m.lid === state.renamingLid, parentName, dayStamp, state.noteLabels.get(m.lid));
         let tr = this.rows.get(m.lid);
         if (tr !== undefined && this.rowSigs.get(m.lid) === sig) {
           const sel = m.lid === state.selectedLid;
@@ -1455,6 +1464,8 @@ export class FilerRenderer {
       // 🔴 **種類の絞りも指紋**(#411)── 入れないと**札を押しても描き直さない**
       //    (`filerRows` へ渡しているのに指紋に入れ忘れた、の再演。実ブラウザが拾った)
       state.kindFilter !== this.lastKinds ||
+      state.labelFilter !== this.lastLabelFilter ||
+      state.noteLabels !== this.lastLabels ||
       state.entrySort !== this.lastSort ||
       state.entrySortDesc !== this.lastSortDesc ||
       // 🔴 並べ直しの時機は reducer が決める(`settleOpenedOrder`)── 開いただけでは変わらない
@@ -1565,6 +1576,8 @@ export class FilerRenderer {
     this.lastTrash = state.trashPanel;
     this.lastFilter = state.filterQuery;
     this.lastKinds = state.kindFilter;
+    this.lastLabelFilter = state.labelFilter;
+    this.lastLabels = state.noteLabels;
     this.lastSort = state.entrySort;
     this.lastSortDesc = state.entrySortDesc;
     this.lastOpenedShown = state.openedAtShown;
@@ -1886,7 +1899,7 @@ export class FilerRenderer {
       empty.setAttribute('data-pkc-field', 'filer-empty');
       // ⚠ 「空」と「絞り込みで消えた」を混ぜない(ランチャーと同じ理由)
       // ⚠ 種類の札だけで 0 件のときも「絞り込み」と言う(「空です」では外す口と食い違う)
-      const filtering = q !== '' || state.kindFilter.size > 0;
+      const filtering = q !== '' || state.kindFilter.size > 0 || state.labelFilter !== null;
       /**
        * 🔴 **本文の結果がまだ / 失敗のときは「無い」と言い切らない**(#1087)── 題名に当たらない語は、
        *   本文の結果が返るまで 0 件に見える。失敗したときは、題名だけで探したことを言う。

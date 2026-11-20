@@ -417,6 +417,8 @@ export class DualFilerRenderer {
   private lastRelations: AppState['relations'] | null = null;
   private lastFilter: string | null = null;
   private lastKinds: ReadonlySet<string> | null = null;
+  /** 🔴 色ラベルの写し(#1982 段 4)── 行の左の線を描くので、変わったら表を組み直す。 */
+  private lastLabels: ReadonlyMap<string, number> | null = null;
   private lastSort: AppState['entrySort'] | null = null;
   private lastOpenedShown: AppState['openedAtShown'] | null = null;
   /**
@@ -545,6 +547,7 @@ export class DualFilerRenderer {
       state.filterQuery === this.lastFilter &&
       // 🔴 **種類の絞りも指紋**(#411)── 上と同じ理由
       state.kindFilter === this.lastKinds &&
+      state.noteLabels === this.lastLabels &&
       state.entrySort === this.lastSort &&
       state.entrySortDesc === this.lastSortDesc &&
       // 🔴 「最近開いた順」の材料の写し(依頼 274 / 334)
@@ -567,6 +570,7 @@ export class DualFilerRenderer {
     this.lastRelations = state.relations;
     this.lastFilter = state.filterQuery;
     this.lastKinds = state.kindFilter;
+    this.lastLabels = state.noteLabels;
     this.lastSort = state.entrySort;
     this.lastSortDesc = state.entrySortDesc;
     this.lastOpenedShown = state.openedAtShown;
@@ -1188,7 +1192,7 @@ export class DualFilerRenderer {
        *   入力欄は古い題名で作り直される。組み直す直前に、同じ行の入力欄の字とキャレットを採り、後で戻す。
        */
       const typed = this.readRenameInput(frame, renaming);
-      this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc, smartText);
+      this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc, smartText, state.noteLabels);
       if (typed !== null) {
         const input = frame.table.querySelector<HTMLInputElement>('[data-pkc-field="dual-rename"]');
         if (input !== null) {
@@ -1459,6 +1463,7 @@ export class DualFilerRenderer {
     sortDesc: boolean,
     /** スマートフォルダが 0 行のときに言う字(`null` = ふつうの空の字)。 */
     smartText: string | null,
+    noteLabels: ReadonlyMap<string, number>,
   ): void {
     const dayStamp = listDayStamp(new Date());
     frame.rows.clear();
@@ -1536,6 +1541,9 @@ export class DualFilerRenderer {
     for (const m of rows) {
       const tr = document.createElement('tr');
       tr.setAttribute('data-pkc-entry', m.lid);
+      // 🔴 色ラベル(#1982 段 4)── 左の列の行と同じ印
+      const noteLabel = noteLabels.get(m.lid);
+      if (noteLabel !== undefined) tr.setAttribute('data-pkc-note-label', String(noteLabel));
       tr.setAttribute('data-pkc-side', side);
       tr.setAttribute('data-pkc-action', 'dual-row');
       /**
