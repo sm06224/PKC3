@@ -3767,11 +3767,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        * 🔴 **バックアップのピン留めを戻す**(#1377)。⚠ いま留めている物は動かさず、足りない分だけ足す(20 件まで)。
        */
       /** 🔴 **バックアップの色ラベルを戻す**(#1982 段 4)。⚠ いま付いている色は動かさず、付いていないノートの分だけ足す。 */
-      importNoteLabels: async (incoming) => {
+      importNoteLabels: async (incoming, alsoLids) => {
         const r = await importNoteLabelsInto(incoming, {
           listLids: async () => (await client.request({ op: 'listNoteLabels', cid })).map((e) => e.lid),
           put: (lid, color) => client.request({ op: 'putNoteLabel', cid, lid, color }).then(() => undefined),
-          exists: (l) => dispatcher.getState().entryMetas.has(l),
+          exists: (l) => dispatcher.getState().entryMetas.has(l) || alsoLids?.has(l) === true,
         });
         await reloadNoteLabels();
         return r;

@@ -150,7 +150,11 @@ export interface ImportDeps {
    * (満杯なら断った数を返す)。戻すのは取り込んだノートに在るものだけ(呼び側が絞ってある)。
    * @returns 足した数 / 上限で見送った数
    */
-  importNoteLabels?(entries: ReadonlyArray<{ lid: string; color: number }>): Promise<{ added: number }>;
+  /** ⚠ `alsoLids` = 今回ゴミ箱へ戻したノートの lid(一覧には出ないが、色は戻す)。 */
+  importNoteLabels?(
+    entries: ReadonlyArray<{ lid: string; color: number }>,
+    alsoLids?: ReadonlySet<string>,
+  ): Promise<{ added: number }>;
   importNotePins?(
     lids: readonly string[],
   ): Promise<{
@@ -1030,6 +1034,7 @@ async function runImport(
       }
       // 🔴 ゴミ箱のノート(台帳 #1852 束 F2 / 依頼 105-2・297 A)── 生きたノート・つながり・履歴の後。ゴミ箱の中へ積むだけで、一覧には出ない
       const trashNotes = 'trash' in result ? result.trash : [];
+      const restoredTrashLids = new Set<string>();
       if (trashNotes.length > 0) {
         stage = 'ゴミ箱のノート';
         if (deps.restoreTrashNotes === undefined) {
@@ -1057,6 +1062,8 @@ async function runImport(
             for (const lid of r.skippedEntries) {
               result.warnings.push(`ゴミ箱のノート「${titleOf.get(lid) ?? '(無題)'}」は戻せませんでした`);
             }
+            const skipped = new Set(r.skippedEntries);
+            for (const b of batch) if (!skipped.has(b.entryLid)) restoredTrashLids.add(b.entryLid);
           }
         }
       }
@@ -1092,7 +1099,7 @@ async function runImport(
       const labels = 'noteLabels' in result ? result.noteLabels : [];
       if (labels.length > 0 && deps.importNoteLabels !== undefined) {
         try {
-          await deps.importNoteLabels(labels);
+          await deps.importNoteLabels(labels, restoredTrashLids);
         } catch (e) {
           result.warnings.push(`色ラベルを戻せませんでした: ${reason(e)}`);
         }

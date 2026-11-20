@@ -1293,7 +1293,7 @@ describe('importPkc2File (P6b 実行部)', () => {
    * 「生きたノートは entries へ、ゴミ箱のノートは `restoreTrashNotes` へ」分けることを見る。
    */
   describe('ゴミ箱のノート', () => {
-    async function backupWithTrash(): Promise<File> {
+    async function backupWithTrash(labels: Array<{ lid: string; color: number }> = []): Promise<File> {
       const live = [{ lid: 'live1', body: '本文 entry:trash1 から' }];
       const src: ArchiveSource = {
         cid: 'c1',
@@ -1314,6 +1314,7 @@ describe('importPkc2File (P6b 実行部)', () => {
           { revOrder: 2, createdAt: '2026-03-01 00:00:00', title: '捨てた', archetype: 'text', kind: 'full', snapshot: '捨てた本文', contentHash: null },
           { revOrder: 1, createdAt: '2026-02-01 00:00:00', title: null, archetype: null, kind: 'full', snapshot: '昔', contentHash: null },
         ],
+        ...(labels.length > 0 ? { listNoteLabels: async () => labels } : {}),
         listTrashHeads: async () => [
           { lid: 'trash1', title: '捨てた', archetype: 'text', created_at: '2026-01-03 00:00:00',
             updated_at: '2026-02-20 00:00:00', entry_order: 4, trashed_at: '2026-03-01 00:00:00' },
@@ -1366,6 +1367,30 @@ describe('importPkc2File (P6b 実行部)', () => {
       expect(got[0]!.remap?.lids).toEqual([['trash1', fresh]]);
       expect(h.written[0]!.body, '生きたノートのリンクが付け替え先を指さない').toContain(`entry:${fresh}`);
       expect(h.relations[0]!.toLid).toBe(fresh);
+    });
+
+    it('🔴 ゴミ箱のノートの色ラベルも importNoteLabels へ渡り、戻したゴミ箱の lid を alsoLids で伝える(戻せなかった分は伝えない)(#1982 段 4)', async () => {
+      const labels = [{ lid: 'live1', color: 2 }, { lid: 'trash1', color: 5 }];
+      const run = async (skipped: string[]) => {
+        const h = harness();
+        h.deps.restoreTrashNotes = async (notes) => ({
+          added: notes.length - skipped.length,
+          skippedEntries: skipped,
+          brokenChains: [],
+        });
+        let seen: { entries: unknown; also: ReadonlySet<string> | undefined } | null = null;
+        h.deps.importNoteLabels = async (entries, also) => {
+          seen = { entries, also };
+          return { added: entries.length };
+        };
+        await importPkc2File(h.d, h.deps, await backupWithTrash(labels));
+        return seen as { entries: unknown; also: ReadonlySet<string> | undefined } | null;
+      };
+      const ok = await run([]);
+      expect(ok?.entries).toEqual(labels);
+      expect([...(ok?.also ?? [])]).toEqual(['trash1']);
+      const skipped = await run(['trash1']);
+      expect([...(skipped?.also ?? [])]).toEqual([]);
     });
 
     it('戻せなかったノートは題名で言う(内部の ID を出さない)。取り込み自体は成功する', async () => {

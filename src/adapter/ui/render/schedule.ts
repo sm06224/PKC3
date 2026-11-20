@@ -208,6 +208,8 @@ export class ScheduleRenderer {
     order: AppState['order'];
     filter: string;
     kindFilter: AppState['kindFilter'];
+    labelFilter: AppState['labelFilter'];
+    noteLabels: AppState['noteLabels'];
     hits: AppState['searchHits'];
     showArchived: boolean;
     showDone: boolean;

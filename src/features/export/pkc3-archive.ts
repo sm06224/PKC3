@@ -478,8 +478,9 @@ export async function writeArchive(
   // 🔴 ピン留め(#1377)── 書き出すノートに在るものだけ。1 つも無ければキーごと書かない
   const notePins = ((await src.listNotePins?.()) ?? []).filter((l) => exportedLids.has(l));
   parts.push(notePins.length > 0 ? `,"notePins":${j(notePins)}` : '');
-  // 🔴 色ラベル(#1982 段 4)── 書き出すノートに在るものだけ。1 つも無ければキーごと書かない
-  const noteLabels = labelsFor((await src.listNoteLabels?.()) ?? [], exportedLids);
+  // 🔴 色ラベル(#1982 段 4)── 書き出すノート + 書いたゴミ箱のノートに在るものだけ(部分の書き出しはゴミ箱を書かない)。
+  //   ゴミ箱のノートの色を落とすと、バックアップから戻したあとゴミ箱から戻したノートの色が消える。1 つも無ければキーごと書かない
+  const noteLabels = labelsFor((await src.listNoteLabels?.()) ?? [], new Set([...exportedLids, ...trashParts.lids]));
   parts.push(noteLabels.length > 0 ? `,"noteLabels":${j(noteLabels)}}` : '}');
 
   const w = new ZipWriter();
@@ -571,11 +572,13 @@ async function writeTrashParts(
   relations: string[];
   revisions: Blob[];
   blobChars: number;
+  /** 書いたゴミ箱のノートの lid(色ラベルの書き出しが使う)。 */
+  lids: ReadonlySet<string>;
 }> {
-  const out = { count: 0, notes: [] as Blob[], relations: [] as string[], revisions: [] as Blob[], blobChars: 0 };
+  const trashLids = new Set<string>();
+  const out = { count: 0, notes: [] as Blob[], relations: [] as string[], revisions: [] as Blob[], blobChars: 0, lids: trashLids };
   if (src.listTrashHeads === undefined) return out;
   const heads = await src.listTrashHeads();
-  const trashLids = new Set<string>();
   let revCount = 0;
   for (const h of heads) {
     // 生きているノートと同じ lid は書かない(画面が古い。生きている側が正)
@@ -1060,12 +1063,14 @@ export function restoreArchive(
   const lidRemap: Array<readonly [string, string]> = [];
   for (const [from, to] of lidMap) if (from !== to) lidRemap.push([from, to]);
   // 🔴 ピン留め(#1377)── 取り込むノート(付け替え後の lid)に在るものだけ
+  // ⚠ ゴミ箱のノートの lid も含める(戻した後に、ゴミ箱から戻すと色が付いている)
   const importedLids = new Set(entries.map((e) => e.lid));
+  const importedWithTrash = new Set([...importedLids, ...trash.map((t) => t.lid)]);
   const notePins = archive.notePins
     .map((l) => lidMap.get(l) ?? l)
     .filter((l, i, a) => importedLids.has(l) && a.indexOf(l) === i);
   const noteLabels = archive.noteLabels
     .map((e) => ({ lid: lidMap.get(e.lid) ?? e.lid, color: e.color }))
-    .filter((e, i, a) => importedLids.has(e.lid) && a.findIndex((x) => x.lid === e.lid) === i);
+    .filter((e, i, a) => importedWithTrash.has(e.lid) && a.findIndex((x) => x.lid === e.lid) === i);
   return { entries, relations, assets, trash, revisionChains, tagColors: archive.tagColors, notePins, noteLabels, lidRemap, sourceCid: archive.manifest.cid ?? '', warnings };
 }
