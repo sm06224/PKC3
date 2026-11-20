@@ -9,7 +9,8 @@
  * 🔑 だからここへ寄せる。⚠ **絞り込みの語は含めない** ── 2 ペインは面ごとに
  * 別の語を持つ(`paneFilterOptions`)ので、ここに混ぜると使えなくなる。
  */
-import type { AppState } from './app-state';
+import { labelFilterOf, type AppState } from './app-state';
+import type { LabelFilter } from '@features/filter/title-filter';
 import type { EntrySort } from '@features/filter/entry-sort';
 import { smartLidsOf, type FilerRowsOptions } from '@features/relation/filer-list';
 import { normalizeQuery } from '@features/filter/title-filter';
@@ -18,6 +19,8 @@ export interface ListViewOptions {
   readonly sort: EntrySort;
   readonly sortDesc: boolean;
   readonly kinds: ReadonlySet<string>;
+  /** 🔴 色ラベルの絞り(#1982 段 4)。 */
+  readonly label: LabelFilter | null;
   readonly openedAt: ReadonlyMap<string, number>;
 }
 
@@ -27,6 +30,7 @@ export function listViewOptions(state: AppState): ListViewOptions {
     sort: state.entrySort,
     sortDesc: state.entrySortDesc,
     kinds: state.kindFilter,
+    label: labelFilterOf(state),
     // 🔴 開いた直後の記録ではなく「一覧が最後に並べ直した時点の写し」(依頼 274 / 334)
     openedAt: state.openedAtShown,
   };
@@ -42,7 +46,7 @@ const NO_KINDS: ReadonlySet<string> = new Set<string>();
  *   目で見た範囲と動く範囲が食い違う(§7)。並び順と「最近開いた順」の材料は左の列と同じ。
  */
 export function dualListViewOptions(state: AppState): ListViewOptions {
-  return { ...listViewOptions(state), kinds: NO_KINDS };
+  return { ...listViewOptions(state), kinds: NO_KINDS, label: null };
 }
 
 /**
@@ -57,7 +61,7 @@ export function dualListViewOptions(state: AppState): ListViewOptions {
  *   見る(1 つでも `filerFlatten` を直に読むと、目で見た範囲と動く範囲が食い違う ── §7)。
  */
 export function filerFlattenNow(state: AppState): boolean {
-  return state.filerFlatten || normalizeQuery(state.filterQuery) !== '' || state.kindFilter.size > 0;
+  return state.filerFlatten || normalizeQuery(state.filterQuery) !== '' || state.kindFilter.size > 0 || state.labelFilter !== null;
 }
 
 /**

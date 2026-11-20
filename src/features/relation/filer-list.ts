@@ -17,7 +17,7 @@ import {
   getStructuralChildren,
   resolveCanonicalParents,
 } from './tree';
-import { entryFilterOf, matchesEntry } from '@features/filter/title-filter';
+import { entryFilterOf, matchesEntry, type LabelFilter } from '@features/filter/title-filter';
 import { sortOrder, type EntrySort } from '@features/filter/entry-sort';
 import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 
@@ -45,6 +45,8 @@ export interface FilerListOptions {
    *   絞りが黙って外れ、「面を変えたら全部出た」という形で user に届く。
    */
   readonly kinds: ReadonlySet<string>;
+  /** 🔴 色ラベルの絞り(#1982 段 4)。`null` = 絞らない。⚠ 省略可にしない(渡し忘れた面だけ絞りが外れる)。 */
+  readonly label?: LabelFilter | null;
   /**
    * 🔴 **スマートフォルダの当たり**(#421 段①)。`undefined` / `null` = まだ届いていない。
    *
@@ -109,7 +111,7 @@ export function filerRows(
         : scopeLid === null
           ? getRootEntries(entryMetas, relations)
           : getStructuralChildren(scopeLid, entryMetas, relations);
-  const filter = entryFilterOf(opts.filterQuery, opts.searchHits, opts.kinds);
+  const filter = entryFilterOf(opts.filterQuery, opts.searchHits, opts.kinds, opts.label);
   const shown = base.filter((m) => matchesEntry(m, filter));
   // ⚠ 並べ替えは lid の列で行う(規則は `sortOrder` 1 か所)── ここで比較を書き直さない
   const byLid = new Map(shown.map((m) => [m.lid, m]));

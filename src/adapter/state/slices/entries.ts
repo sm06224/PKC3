@@ -14,6 +14,7 @@ import {
   EMPTY_TITLE_NOTE,
   type ReduceResult,
   hasSameRelation,
+  labelFilterOf,
   phaseBlockReason,
   removeEntryFromState,
   successorInShownRows,
@@ -215,7 +216,7 @@ export function reduceEntries(state: AppState, action: EntriesAction): ReduceRes
         const before = visibleOrder(
           state.order,
           (l) => state.entryMetas.get(l),
-          entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter),
+          entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter, labelFilterOf(state)),
         );
         const vIdx = before.indexOf(state.selectedLid!);
         // 🔴 まず左の列に出ている行から選ぶ(#1087。1 件ずつ消す側と同じ規則)。居なければ従来どおり

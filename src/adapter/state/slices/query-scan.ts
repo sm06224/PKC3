@@ -15,7 +15,7 @@ import { commandQueryOf } from '@features/palette/command-query';
 import { clampGraphDepth } from '@features/relation/graph-view';
 import { relabelWorkLine } from '@features/timer/work-log';
 
-export type QueryScanAction = Extract<Dispatchable, { type: 'SET_ENTRY_FILTER' | 'TOGGLE_KIND_FILTER' | 'CLEAR_KIND_FILTER' | 'SET_OPENED_AT' | 'SET_ENTRY_SORT' | 'SET_QUERY_KEY' | 'REFRESH_QUERY' | 'SET_QUERY_SCAN' | 'QUERY_FAILED' | 'SET_TASK_SCAN' | 'TASK_SCAN_FAILED' | 'SET_CONTACT_SCAN' | 'CONTACT_SCAN_FAILED' | 'SET_WORK_LOG_SCAN' | 'WORK_LOG_SCAN_FAILED' | 'SET_WORK_LOG_LABEL' | 'DELETE_WORK_LOG' | 'SET_CAPTURE_ITEMS' | 'CAPTURE_SCAN_FAILED' | 'SET_CAPTURE_PLAYING' | 'SET_CAPTURE_TRIM_MARK' | 'CLEAR_CAPTURE_TRIM' | 'SET_CAPTURE_TRIM_BUSY' | 'SET_CAPTURE_TRANSCRIBE' | 'SET_GRAPH_VIEW' | 'SET_SNIPPET_SCAN' | 'SET_SEARCH_HITS' | 'SET_SEARCH_PAGE_QUERY' }>;
+export type QueryScanAction = Extract<Dispatchable, { type: 'SET_ENTRY_FILTER' | 'TOGGLE_KIND_FILTER' | 'CLEAR_KIND_FILTER' | 'SET_NOTE_LABELS' | 'SET_LABEL_FILTER' | 'SET_OPENED_AT' | 'SET_ENTRY_SORT' | 'SET_QUERY_KEY' | 'REFRESH_QUERY' | 'SET_QUERY_SCAN' | 'QUERY_FAILED' | 'SET_TASK_SCAN' | 'TASK_SCAN_FAILED' | 'SET_CONTACT_SCAN' | 'CONTACT_SCAN_FAILED' | 'SET_WORK_LOG_SCAN' | 'WORK_LOG_SCAN_FAILED' | 'SET_WORK_LOG_LABEL' | 'DELETE_WORK_LOG' | 'SET_CAPTURE_ITEMS' | 'CAPTURE_SCAN_FAILED' | 'SET_CAPTURE_PLAYING' | 'SET_CAPTURE_TRIM_MARK' | 'CLEAR_CAPTURE_TRIM' | 'SET_CAPTURE_TRIM_BUSY' | 'SET_CAPTURE_TRANSCRIBE' | 'SET_GRAPH_VIEW' | 'SET_SNIPPET_SCAN' | 'SET_SEARCH_HITS' | 'SET_SEARCH_PAGE_QUERY' }>;
 
 export function reduceQueryScan(state: AppState, action: QueryScanAction): ReduceResult {
   switch (action.type) {
@@ -69,6 +69,18 @@ export function reduceQueryScan(state: AppState, action: QueryScanAction): Reduc
       const kinds = toggleKind(state.kindFilter, action.archetype);
       return { state: { ...state, kindFilter: kinds }, events: [] };
     }
+    case 'SET_NOTE_LABELS': {
+      // ⚠ 同じ中身なら新しい参照を作らない(指紋が変わって一覧が描き直されるのを避ける)
+      const a = state.noteLabels;
+      const b = action.labels;
+      if (a.size === b.size && [...b].every(([k, v]) => a.get(k) === v)) return { state, events: [] };
+      // 絞っている色が 1 つも無くなったら絞りを解く(空の一覧で解き方が分からなくならない)
+      const stale = state.labelFilter !== null && ![...b.values()].includes(state.labelFilter);
+      return { state: { ...state, noteLabels: b, labelFilter: stale ? null : state.labelFilter }, events: [] };
+    }
+    case 'SET_LABEL_FILTER':
+      if (state.labelFilter === action.color) return { state, events: [] };
+      return { state: { ...state, labelFilter: action.color }, events: [] };
     case 'CLEAR_KIND_FILTER':
       if (state.kindFilter.size === 0) return { state, events: [] };
       return { state: { ...state, kindFilter: NO_KINDS }, events: [] };
