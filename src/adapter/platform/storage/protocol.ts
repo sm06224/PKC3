@@ -171,6 +171,13 @@ export type StorageRequest =
    */
   | { op: 'putNotePin'; cid: string; lid: string; on: boolean }
   /**
+   * 🔴 **ノートの色ラベル**(#1982 段 4)。`settings` 表の `scope = 'note-label:<cid>'`(1 ノート 1 行。`k` = lid、`v` = 色の番号 1〜8)。
+   * ⚠ 器に属するデータ(ピン留めと同じ)── 本文・更新日時・履歴には触れず、バックアップ(`container.json` の `noteLabels`)と一緒に運ばれる。
+   */
+  | { op: 'listNoteLabels'; cid: string }
+  /** 色ラベルを付ける / 外す(`color: null` = 外す)。1 ノート 1 行の書込なので、別の窓の別ノートを互いに消さない。 */
+  | { op: 'putNoteLabel'; cid: string; lid: string; color: number | null }
+  /**
    * 🔴 **カンバンの札(チェック項目)を集める**(#277 段②)。
    *
    * ⚠ カンバンが**全ノートの本文を読まない**ための門である ── 面を開くたびの
@@ -1290,6 +1297,8 @@ export interface ResultMap {
   putTagColor: null;
   listNotePins: string[];
   putNotePin: null;
+  listNoteLabels: Array<{ lid: string; color: number }>;
+  putNoteLabel: null;
   /** カンバンの札(ノートの並び → 行番号 順)。⚠ 切ったときは `truncated`。 */
   taskScan: TaskScan;
   /** 連絡先(題名順は描画側)。⚠ 切ったときは `truncated`。 */

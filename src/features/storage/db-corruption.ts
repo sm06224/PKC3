@@ -87,6 +87,8 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   'putTagColor',
   // 🔴 ノートのピン留め(#1377)── `settings` の行を書く。壊れた DB には打たない
   'putNotePin',
+  // 🔴 色ラベル(#1982 段 4)── `settings` の行を書く。壊れた DB には打たない
+  'putNoteLabel',
   // 🔴 メッセージの追記(設計 doc §7、段②a)── 書き込みなので止める。
   //    断られた分は adapter 側の控え(IndexedDB)へ積み、書けるようになった時点で流し込む。
   'appendMessage',
