@@ -1529,6 +1529,64 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
 [data-pkc-region='filer-table'] tbody tr[data-pkc-selected] td:first-child {
   box-shadow: inset 3px 0 0 var(--accent);
 }
+/**
+ * 🔴 **ノートの色ラベル**(#1982 段 4)── 行の**いちばん左**に 3px の線(`--note-N`。配色ごとに地へ 3:1 以上)。
+ * ⚠ 選んでいる行の現在地の線(`--accent`)と**同居する**: 色ラベルが左端 0〜3px、現在地の線がその内側 3〜6px
+ *   (影を 2 枚重ねる)。どちらも `box-shadow: inset` なので行の幅・高さは動かない。
+ * ⚠ `<tr>` には影が描けない(border-collapse の表)ので、先頭のセルへ当てる(現在地の線と同じ作法)。
+ */
+[data-pkc-note-label='1'] { --pkc-note-label-color: var(--note-1); }
+[data-pkc-note-label='2'] { --pkc-note-label-color: var(--note-2); }
+[data-pkc-note-label='3'] { --pkc-note-label-color: var(--note-3); }
+[data-pkc-note-label='4'] { --pkc-note-label-color: var(--note-4); }
+[data-pkc-note-label='5'] { --pkc-note-label-color: var(--note-5); }
+[data-pkc-note-label='6'] { --pkc-note-label-color: var(--note-6); }
+[data-pkc-note-label='7'] { --pkc-note-label-color: var(--note-7); }
+[data-pkc-note-label='8'] { --pkc-note-label-color: var(--note-8); }
+tr[data-pkc-note-label] td:first-child {
+  box-shadow: inset 3px 0 0 var(--pkc-note-label-color);
+}
+[data-pkc-region='filer-table'] tbody tr[data-pkc-selected][data-pkc-note-label] td:first-child {
+  box-shadow:
+    inset 3px 0 0 var(--pkc-note-label-color),
+    inset 6px 0 0 var(--accent);
+}
+/* 色ラベルの選択肢(「色ラベルを付ける…」の一覧)と、色で絞る札の見本の四角。値は `data-pkc-note-label-value`(1〜8) */
+[data-pkc-action='note-label-pick']::before {
+  content: '';
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-inline-end: var(--s3);
+  border-radius: var(--radius-sm);
+  background: var(--pkc-note-label-color, transparent);
+  vertical-align: -0.1em;
+}
+[data-pkc-action='filter-label']::before {
+  content: '';
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-inline-end: var(--s2);
+  border-radius: var(--radius-pill);
+  background: var(--pkc-note-label-color, transparent);
+}
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='1'],
+[data-pkc-action='filter-label'][data-pkc-note-label-value='1'] { --pkc-note-label-color: var(--note-1); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='2'],
+[data-pkc-action='filter-label'][data-pkc-note-label-value='2'] { --pkc-note-label-color: var(--note-2); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='3'],
+[data-pkc-action='filter-label'][data-pkc-note-label-value='3'] { --pkc-note-label-color: var(--note-3); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='4'],
+[data-pkc-action='filter-label'][data-pkc-note-label-value='4'] { --pkc-note-label-color: var(--note-4); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='5'],
+[data-pkc-action='filter-label'][data-pkc-note-label-value='5'] { --pkc-note-label-color: var(--note-5); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='6'],
+[data-pkc-action='filter-label'][data-pkc-note-label-value='6'] { --pkc-note-label-color: var(--note-6); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='7'],
+[data-pkc-action='filter-label'][data-pkc-note-label-value='7'] { --pkc-note-label-color: var(--note-7); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='8'],
+[data-pkc-action='filter-label'][data-pkc-note-label-value='8'] { --pkc-note-label-color: var(--note-8); }
 [data-pkc-entry] [data-pkc-field='title'] {
   overflow: hidden;
   text-overflow: ellipsis;
