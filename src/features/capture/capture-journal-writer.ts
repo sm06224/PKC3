@@ -26,9 +26,11 @@ export interface JournalWritePort {
 
 export interface JournalWriterOptions {
   readonly capBytes?: number;
-  /** 空き(bytes)を聞く口。`null` = 分からない(止めない)。区間の最初の断片の前にだけ聞く。 */
+  /** 空き(bytes)を聞く口。`null` = 分からない(止めない)。区間の最初の断片の前と、書いた量が `freeRecheckBytes` 増えるごとに聞く。 */
   readonly freeBytes?: () => Promise<number | null>;
   readonly freeFloorBytes?: number;
+  /** 空きを聞き直す間隔(書いた量)。既定 8MB。⚠ 長い収録の途中で空きが尽きても気づけるように。 */
+  readonly freeRecheckBytes?: number;
   /** 状態が変わったとき(`active` から外れたとき)。 */
   readonly onState?: (state: JournalState) => void;
   /** 収録が済んで控えが空になった / 捨てた(別のタブへ「録っている最中」を言う印を外す)。 */
@@ -56,6 +58,9 @@ export function createJournalWriter(
 ): JournalWriter {
   const cap = opts.capBytes ?? CAPTURE_JOURNAL_CAP_BYTES;
   const floor = opts.freeFloorBytes ?? CAPTURE_JOURNAL_FREE_FLOOR_BYTES;
+  const recheck = opts.freeRecheckBytes ?? 8 * 1024 * 1024;
+  /** 最後に空きを聞いてから書いた量。 */
+  let sinceFreeCheck = 0;
   let state: JournalState = 'active';
   let tail: Promise<void> = Promise.resolve();
   let metaWritten = false;
@@ -108,14 +113,17 @@ export function createJournalWriter(
         // 待っている間に止まった / この区間の見出しが書けなかった
         if (broken || headless.has(seg)) return;
         try {
-          if (idx === 0 && opts.freeBytes !== undefined) {
+          if (opts.freeBytes !== undefined && (idx === 0 || sinceFreeCheck >= recheck)) {
+            sinceFreeCheck = 0;
             const free = await opts.freeBytes();
             if (free !== null && free < floor) {
-              headless.add(seg);
+              // ⚠ 区間の途中で尽きたときも、これ以後は書かない(収録は続く。守られていないと言う)
+              if (idx === 0) headless.add(seg);
               turnOff('off-space');
               return;
             }
           }
+          sinceFreeCheck += blob.size;
           if (!metaWritten) {
             await port.putMeta(meta);
             metaWritten = true;

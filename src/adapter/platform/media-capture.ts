@@ -470,12 +470,18 @@ export async function startCapture(
     segBytes += ev.data.size;
     total += ev.data.size;
     // 🔴 途中保存へ(`part` は切るたびに増えるが、増えるのは**最後の断片が届いた後**なので、ここで読む値は本の番号に等しい)
-    opts.onChunk?.({
-      segment: part,
-      index: segChunkNo++,
-      elapsedMs: Math.max(0, now() - segStartedAt),
-      blob: ev.data,
-    });
+    // ⚠ 見張りが投げても、下の 12 時間 / 切り分けの判定を飛ばさない(収録そのものを守る)
+    const chunkIndex = segChunkNo++;
+    try {
+      opts.onChunk?.({
+        segment: part,
+        index: chunkIndex,
+        elapsedMs: Math.max(0, now() - segStartedAt),
+        blob: ev.data,
+      });
+    } catch {
+      // 途中保存の失敗は収録を止めない
+    }
     /**
      * 🔴 **12 時間で止める**(user 指示 2026-09-07「最大時間を１２時間にして」)。
      * ⚠ **切るより先に見る** ── 同じ断片で両方に当たったら、止めるほうが勝つ

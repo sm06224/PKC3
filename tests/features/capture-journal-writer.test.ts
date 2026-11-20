@@ -88,6 +88,22 @@ describe('上限と空き', () => {
     expect(store.chunks.size).toBe(0);
   });
 
+  it('🔴 区間の途中で空きが床を割ったら、以後は書かない(収録は続く = off-space)', async () => {
+    const store = new MemoryJournalStore();
+    let free = 1000;
+    const w = createJournalWriter(store, meta, { freeBytes: async () => free, freeFloorBytes: 100, freeRecheckBytes: 10 });
+    w.chunk(0, 0, 1000, blob(6));
+    w.chunk(0, 1, 2000, blob(6));
+    await w.settled();
+    expect(w.state()).toBe('active');
+    free = 10;
+    w.chunk(0, 2, 3000, blob(6)); // 12 bytes 書いた後 → 聞き直す
+    w.chunk(0, 3, 4000, blob(6));
+    await w.settled();
+    expect(w.state()).toBe('off-space');
+    expect([...store.chunks.values()].map((c) => c.idx)).toEqual([0, 1]);
+  });
+
   it('空きが分からなければ(null)止めない', async () => {
     const store = new MemoryJournalStore();
     const w = createJournalWriter(store, meta, { freeBytes: async () => null, freeFloorBytes: 100 });

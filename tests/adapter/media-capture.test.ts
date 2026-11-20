@@ -927,4 +927,22 @@ describe('🔴 断片が届くたびに途中保存へ渡す(#1985 項目 2)', (
     // 本 1 の始まりは切った時刻(3_000)── 本 0 の経過を引きずらない
     expect(seen[2]!.elapsedMs).toBe(1_000);
   });
+
+  it('🔴 見張り(onChunk)が投げても、12 時間の停止と切り分けの判定は飛ばない', async () => {
+    let t = 1_000;
+    const ends: CaptureEnd[] = [];
+    const { d, rec } = deps({ now: () => t });
+    const h = await startCapture('audio', d, {
+      partBytes: 1_000_000,
+      maxMs: 10_000,
+      onChunk: () => {
+        throw new Error('observer');
+      },
+      onEnd: (r) => ends.push(r),
+    });
+    t = 20_000; // 上限を超えている
+    expect(() => rec.last().push(5)).not.toThrow();
+    expect(ends).toEqual(['too-long']);
+    await h.stop();
+  });
 });

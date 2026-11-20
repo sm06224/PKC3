@@ -87,6 +87,10 @@ describe('文言', () => {
     expect(recoveryLine(0)).toBe('');
     expect(recoveryLine(2)).toContain('2 件');
   });
+  it('🔴 メッセージも収録の件数で言う(確認の窓「N 件(M 区間)」と同じ単位)', () => {
+    expect(recoveryMessage(2)).toContain('2 件');
+    expect(recoveryMessage(2)).not.toContain('区間');
+  });
   it('メッセージは題名・ノート名を含まず、入口を言う', () => {
     expect(recoveryMessage(1)).toContain('復元する');
     expect(recoveryMessage(1)).toContain('破棄する');

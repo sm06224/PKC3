@@ -4051,6 +4051,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       paintOpen();
     },
     withDuration: withRecordedDuration,
+    // 🔴 起動のたびに同じメッセージを積まない(組が変わったときだけ残す。保存先ごと)
+    seen: {
+      get: () => {
+        try {
+          return localStorage.getItem(`pkc3:capture-recovery-seen:${cid}`);
+        } catch {
+          return null;
+        }
+      },
+      set: (sig) => {
+        try {
+          localStorage.setItem(`pkc3:capture-recovery-seen:${cid}`, sig);
+        } catch {
+          // 置けなくても、積む回数が増えるだけ
+        }
+      },
+    },
   });
   void captureRecovery.scan();
 

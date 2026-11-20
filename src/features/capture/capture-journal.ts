@@ -165,7 +165,7 @@ export function recoveryLine(count: number): string {
 
 /** システムのメッセージに残す文(中身の題名・ノート名を入れない)。 */
 export function recoveryMessage(count: number): string {
-  return `前回、録音・録画が途中で終わりました(${count} 区間)。画面下の「途中で終わった録音・録画」を押すと、復元する・破棄するを選べます`;
+  return `前回、録音・録画が途中で終わりました(${count} 件)。画面下の「途中で終わった録音・録画」を押すと、復元する・破棄するを選べます`;
 }
 
 /** 復元の確認の文。 */

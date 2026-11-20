@@ -40,6 +40,11 @@ export interface CaptureRecoveryDeps {
   readonly onChange: (count: number) => void;
   /** `withRecordedDuration`(test は差し替える)。 */
   readonly withDuration: (blob: Blob, ms: number) => Promise<Blob>;
+  /**
+   * 🔴 **前回メッセージを残した「復元できる収録」の組の目印**(起動のたびに同じ知らせを積まないため)。
+   * ⚠ 省略 = 目印を持たない(この実体の中でだけ 1 度に絞る)。組が変わったとき(増えた / 別の収録)だけ、また残す。
+   */
+  readonly seen?: { get(): string | null; set(sig: string): void };
 }
 
 export interface CaptureRecovery {
@@ -53,16 +58,27 @@ export interface CaptureRecovery {
 export function createCaptureRecovery(deps: CaptureRecoveryDeps): CaptureRecovery {
   let pending: RecoverableSegment[] = [];
   let busy = false;
+  /**
+   * 🔴 **復元に入った区間**(`rec:seg`)。⚠ 編集中は `held`(預かり)で、控えは**入るまで**消えない ──
+   *   その間に「復元する」をもう 1 度押されても、同じ区間を 2 度添付にしない。控えが消えたら外す。
+   */
+  const inflight = new Set<string>();
+  const keyOf = (s: { rec: string; seg: number }): string => `${s.rec}:${s.seg}`;
+  let lastSig: string | null = null;
+
+  /** 件数は**収録**で数える(確認の窓と同じ単位。区間で数えると「1 件」と「2 区間」が食い違う)。 */
+  const recCount = (): number => new Set(pending.map((p) => p.rec)).size;
 
   const set = (next: RecoverableSegment[]): void => {
     pending = next;
-    deps.onChange(pending.length);
+    deps.onChange(recCount());
   };
 
   /** 区間の控えを消し、その収録の区間がもう無ければ身元も消す。 */
   const drop = async (seg: RecoverableSegment): Promise<void> => {
     try {
       await deps.store.dropSegment(seg.rec, seg.seg);
+      inflight.delete(keyOf(seg));
       set(pending.filter((p) => !(p.rec === seg.rec && p.seg === seg.seg)));
       if (!pending.some((p) => p.rec === seg.rec)) await deps.store.dropRec(seg.rec);
     } catch {
@@ -70,9 +86,9 @@ export function createCaptureRecovery(deps: CaptureRecoveryDeps): CaptureRecover
     }
   };
 
-  const restoreOne = async (seg: RecoverableSegment): Promise<boolean> => {
+  const restoreOne = async (seg: RecoverableSegment): Promise<'in' | 'held' | 'failed'> => {
     const chunks = (await deps.store.readSegment(seg.rec, seg.seg)).filter((c) => c.idx < seg.chunks);
-    if (chunks.length !== seg.chunks) return false; // 読んでいる間に変わった ── 触らない
+    if (chunks.length !== seg.chunks) return 'failed'; // 読んでいる間に変わった ── 触らない
     // ⚠ 断片の Blob をそのままつなぐ(写さない)
     const joined = new Blob(
       chunks.map((c) => c.blob),
@@ -87,11 +103,11 @@ export function createCaptureRecovery(deps: CaptureRecoveryDeps): CaptureRecover
       seg.startedLid,
       () => void drop(seg),
     );
-    return r !== 'failed';
+    return r;
   };
 
   return {
-    count: () => pending.length,
+    count: recCount,
     scan: async () => {
       try {
         const [metas, infos, live] = await Promise.all([
@@ -110,8 +126,18 @@ export function createCaptureRecovery(deps: CaptureRecoveryDeps): CaptureRecover
         for (const u of plan.unrestorable) await deps.store.dropSegment(u.rec, u.seg).catch(() => undefined);
         for (const id of plan.emptyRecs) await deps.store.dropRec(id).catch(() => undefined);
         set([...plan.segments]);
-        if (plan.segments.length > 0) deps.post(recoveryMessage(plan.segments.length));
-        return plan.segments.length;
+        const recs = new Set(plan.segments.map((p) => p.rec)).size;
+        if (recs > 0) {
+          // 🔴 同じ組なら 2 度目の起動では積まない(復元されないまま残る間、毎回増えない)
+          const sig = plan.segments.map((p) => `${keyOf(p)}/${p.chunks}`).join(',');
+          const before = deps.seen?.get() ?? lastSig;
+          if (before !== sig) {
+            deps.post(recoveryMessage(recs));
+            deps.seen?.set(sig);
+            lastSig = sig;
+          }
+        }
+        return recs;
       } catch {
         // 置き場が開けない(私用ウィンドウなど)── 復元は出さない
         set([]);
@@ -122,7 +148,12 @@ export function createCaptureRecovery(deps: CaptureRecoveryDeps): CaptureRecover
       if (busy || pending.length === 0) return;
       busy = true;
       try {
-        const targets = [...pending];
+        // 🔴 復元に入っている区間は対象にしない(2 度押しで添付が増えない)
+        const targets = pending.filter((p) => !inflight.has(keyOf(p)));
+        if (targets.length === 0) {
+          deps.notify('復元は進んでいます。編集中のノートには、編集を終えると入ります');
+          return;
+        }
         const restore = await deps.confirm(recoveryAsk(targets), {
           okLabel: '復元する',
           cancelLabel: '復元しない',
@@ -130,18 +161,28 @@ export function createCaptureRecovery(deps: CaptureRecoveryDeps): CaptureRecover
         });
         if (restore) {
           let ok = 0;
+          let held = 0;
           for (const seg of targets) {
+            const k = keyOf(seg);
+            if (inflight.has(k)) continue;
+            inflight.add(k);
+            let r: 'in' | 'held' | 'failed' = 'failed';
             try {
-              if (await restoreOne(seg)) ok++;
+              r = await restoreOne(seg);
             } catch {
               // この区間は残す(次の機会に復元できる)
             }
+            if (r === 'failed') inflight.delete(k);
+            else if (r === 'held') held++;
+            else ok++;
           }
-          const rest = targets.length - ok;
+          const rest = targets.length - ok - held;
+          const parts = [
+            ...(held > 0 ? [`${held} 区間は編集を終えると入ります`] : []),
+            ...(rest > 0 ? [`${rest} 区間は取り込めなかったので残しています`] : []),
+          ];
           deps.notify(
-            rest === 0
-              ? `途中で終わった収録を ${ok} 区間、復元しました`
-              : `途中で終わった収録を ${ok} 区間、復元しました(${rest} 区間は取り込めなかったので残しています)`,
+            `途中で終わった収録を ${ok} 区間、復元しました${parts.length === 0 ? '' : `(${parts.join('、')})`}`,
           );
           return;
         }

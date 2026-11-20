@@ -20,7 +20,8 @@ async function seed(store: MemoryJournalStore, rec = 'r1', over: { startedLid?: 
   }
 }
 
-function rig(store: MemoryJournalStore, o: { answers?: boolean[]; deliver?: 'in' | 'held' | 'failed'; live?: string[]; cid?: string } = {}) {
+function rig(store: MemoryJournalStore, o: { answers?: boolean[]; deliver?: 'in' | 'held' | 'failed'; live?: string[]; cid?: string; seen?: { get(): string | null; set(s: string): void } } = {}) {
+  const heldDone: Array<() => void> = [];
   const posts: string[] = [];
   const counts: number[] = [];
   const notices: string[] = [];
@@ -36,7 +37,8 @@ function rig(store: MemoryJournalStore, o: { answers?: boolean[]; deliver?: 'in'
       deliverRecovered: async (blob, _kind, part, at, home, done) => {
         delivered.push({ blob, part, home, at });
         const r = o.deliver ?? 'in';
-        if (r !== 'failed') done();
+        if (r === 'held') heldDone.push(done);
+        else if (r !== 'failed') done();
         return r;
       },
     },
@@ -47,12 +49,13 @@ function rig(store: MemoryJournalStore, o: { answers?: boolean[]; deliver?: 'in'
     },
     notify: (t) => notices.push(t),
     onChange: (n) => counts.push(n),
+    ...(o.seen === undefined ? {} : { seen: o.seen }),
     withDuration: async (b, ms) => {
       withDur.push(ms);
       return b;
     },
   });
-  return { rec, posts, counts, notices, asked, delivered, withDur };
+  return { rec, posts, counts, notices, asked, delivered, withDur, heldDone };
 }
 
 const settle = (): Promise<unknown> => new Promise((r) => setTimeout(r, 0));
@@ -100,6 +103,76 @@ describe('起動の調べ', () => {
     expect(await t.rec.scan()).toBe(0);
     expect(store.chunks.size).toBe(0);
     expect(store.metas.has('empty')).toBe(false);
+  });
+});
+
+describe('🔴 2 度押し・重複の防止', () => {
+  it('編集中(held)に「復元する」を 2 度押しても、添付は 1 件(預かり中の区間は対象にしない)', async () => {
+    const store = new MemoryJournalStore();
+    await seed(store);
+    const t = rig(store, { answers: [true, true], deliver: 'held' });
+    await t.rec.scan();
+    await t.rec.open();
+    expect(t.notices.at(-1)).toContain('編集を終えると入ります');
+    expect(t.notices.at(-1)).not.toContain('残しています');
+    await t.rec.open();
+    expect(t.delivered).toHaveLength(1);
+    expect(t.asked, '2 度目は確認も出さない').toHaveLength(1);
+    // 編集が終わって入ったら控えが消える
+    t.heldDone[0]!();
+    await settle();
+    expect(store.chunks.size).toBe(0);
+    expect(t.rec.count()).toBe(0);
+  });
+
+  it('対照群: 入れられなかった(failed)区間は、もう 1 度押せば再び試せる', async () => {
+    const store = new MemoryJournalStore();
+    await seed(store);
+    const t = rig(store, { answers: [true, true], deliver: 'failed' });
+    await t.rec.scan();
+    await t.rec.open();
+    await t.rec.open();
+    expect(t.delivered).toHaveLength(2);
+  });
+});
+
+describe('🔴 起動のたびに同じ知らせを積まない / 件数の単位', () => {
+  it('同じ組が残ったままの 2 回目の起動(別の実体・同じ目印の置き場)では、メッセージを積まない', async () => {
+    const store = new MemoryJournalStore();
+    await seed(store);
+    let saved: string | null = null;
+    const seen = { get: () => saved, set: (s: string) => void (saved = s) };
+    const a = rig(store, { seen });
+    await a.rec.scan();
+    const b = rig(store, { seen });
+    await b.rec.scan();
+    expect(a.posts).toHaveLength(1);
+    expect(b.posts).toHaveLength(0);
+    expect(b.counts.at(-1)).toBe(1); // 状態の行は出る
+    // 組が増えたら、また残す
+    await seed(store, 'r2');
+    const c = rig(store, { seen });
+    await c.rec.scan();
+    expect(c.posts).toHaveLength(1);
+  });
+
+  it('同じ実体で 2 度 scan しても 1 件', async () => {
+    const store = new MemoryJournalStore();
+    await seed(store);
+    const t = rig(store);
+    await t.rec.scan();
+    await t.rec.scan();
+    expect(t.posts).toHaveLength(1);
+  });
+
+  it('🔴 状態の行の数は収録の件数(区間が 2 つあっても 1 件)', async () => {
+    const store = new MemoryJournalStore();
+    await seed(store);
+    for (let i = 0; i < 2; i++) await store.putChunk({ rec: 'r1', seg: 1, idx: i, elapsedMs: 1000, blob: new Blob(['ab']) });
+    const t = rig(store);
+    expect(await t.rec.scan()).toBe(1);
+    expect(t.counts.at(-1)).toBe(1);
+    expect(t.rec.count()).toBe(1);
   });
 });
 
