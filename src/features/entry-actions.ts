@@ -1639,7 +1639,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   'bookmark-note-remove': '2 ペインのブックマークから、このノートを外します(ノートは消えません)',
   'pin-note': 'このノートを左のペインの一覧の上に固定します(いつでも 1 押しで開けます)',
   'unpin-note': '一覧の上の固定から、このノートを外します(ノートは消えません)',
-  'note-label-set': '8 色からこのノートの色ラベルを選びます(左の列の行の左端に線が出ます)',
+  'note-label-set': '8 色からこのノートの色ラベルを選びます(左のペインの行の左端に線が出ます)',
   'note-label-clear': 'このノートの色ラベルを外します(ノートは消えません)',
   'open-note-window':
     'このノートだけを別のウィンドウで開きます(何枚でも開けます。閉じれば消えます)',

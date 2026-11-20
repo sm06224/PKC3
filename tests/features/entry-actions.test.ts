@@ -480,6 +480,9 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 ノートのピン留め(#1377)── 左のペインの行のメニューだけ。ピン留めする / 外すは対
       ['pin-note', '3ba3824a'],
       ['unpin-note', 'ae809a7c'],
+      // 🔴 ノートの色ラベル(#1982 段 4)── 付ける… は常に / 外すは付いているときの右クリックだけ
+      ['note-label-set', 'f2d18fd6'],
+      ['note-label-clear', '0f758553'],
     ];
     const digest = (h: string): string =>
       createHash('sha256').update(h).digest('hex').slice(0, 8);
@@ -519,6 +522,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 ピン留めの項目は `pinned` を渡した文脈でだけ出る(#1377)
       ...entryMenuActions({ ...ALL, pinned: false }),
       ...entryMenuActions({ ...ALL, pinned: true }),
+      // 🔴 色ラベルを外す項目は `labelled: true` の文脈でだけ出る(#1982 段 4)
+      ...entryMenuActions({ ...ALL, labelled: true }),
       // 🔴 添付のリンクは添付のノートでだけ出る(2026-10-11)
       ...entryMenuActions({ archetype: 'attachment', linkedFile: null }),
       // 🔴 種類を変える口はノートとログでだけ出る(台帳 #1852 I2 / 依頼 157)
@@ -722,6 +727,8 @@ describe('行の右クリックからの整理(#215)', () => {
       // #1163 依頼 169: 「ノートを複製する」は移すの下(既存の 3 つの並びは動かさない)
       'duplicate-entry',
       'create-in-folder',
+      // #1982 段 4: 色ラベルは移す・作るの並びを動かさず、その後ろに入る
+      'note-label-set',
       'open-trash',
     ]);
   });
