@@ -17,7 +17,7 @@
  *  ③ **欄が消えていたら押さない**(組み直された別の欄の先頭へ入れない)。
  *  ④ **押せないときは灰色 + 理由**・字は画面のボタンの字と同じ・鍵なし。
  */
-import { readFileSync } from 'node:fs';
+import { buildFormatBar } from '../../src/adapter/ui/render/format-bar';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
@@ -127,7 +127,6 @@ beforeEach(() => {
 });
 
 describe('④ 登記:2 件が一覧に居る(押しボタン = 命令 id、鍵なし、字は画面と同じ)', () => {
-  const FORMAT_BAR = 'src/adapter/ui/render/format-bar.ts';
 
   it('KEY_COMMANDS に在り、鍵を持たず、受け手は押しボタン(id = data-pkc-action)', () => {
     for (const id of NEW2) {
@@ -141,18 +140,14 @@ describe('④ 登記:2 件が一覧に居る(押しボタン = 命令 id、鍵�
     expect(new Set(KEY_COMMANDS.map((c) => c.id)).size).toBe(KEY_COMMANDS.length);
   });
 
-  it('字は、帯のボタンを組んでいる所の近くの字と同じ(source から引く ── 手で書いた期待値にしない)', () => {
-    const src = readFileSync(FORMAT_BAR, 'utf-8');
+  it('字は、描いた帯のボタンの字と同じ(帯を組んで読む ── 手で書いた期待値にしない)', () => {
+    // 🔴 #1982 段 3: 帯のボタンは表から組む(`setAttribute` の並びを source で追えない)ので、**描いた DOM** の字と突き合わせる
+    const bar = buildFormatBar();
     for (const id of NEW2) {
       const label = findCommand(id)?.label ?? '';
-      // ⚠ 範囲は「ボタンを組む 1 呼び出し」だけ:`data-pkc-action` を置いてから、次の `data-pkc-action` が出る前の `textContent = '字'`
-      //   (別のボタンの字や、title の説明文に満たされない)
-      const built = new RegExp(
-        `setAttribute\\('data-pkc-action',\\s*'${id}'\\)(?:(?!data-pkc-action)[\\s\\S]){0,700}?textContent\\s*=\\s*'${label}'`,
-        'u',
-      );
-      const near = built.test(src);
-      expect(near, `${id}: ボタンを組む所の近くに「${label}」が無い(画面の字と違う)`).toBe(true);
+      const btn = bar.querySelector(`[data-pkc-action="${id}"]`);
+      expect(btn, `${id}: 帯にボタンが無い`).not.toBeNull();
+      expect(btn!.querySelector('[data-pkc-field="label"]')?.textContent, `${id}: 帯の字と違う`).toBe(label);
     }
   });
 

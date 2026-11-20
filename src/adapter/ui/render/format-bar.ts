@@ -13,6 +13,7 @@
  * ちらつく ── 選択位置そのものは focus を失っても残るので、壊れはしない。
  */
 import { BAR_FORMAT_OPS, WRAPS_SELECTION_OPS, type FormatOp } from '@features/markdown/text-ops';
+import { FORMAT_BAR_GROUPS, FORMAT_BAR_MORE_GROUPS, type BarItem } from '@features/markdown/format-bar-layout';
 import { findCommand } from '@features/keymap';
 import { WRAPS_SELECTION_ATTR } from './format-wrap-hint';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
@@ -30,7 +31,8 @@ function markWraps(btn: HTMLElement, op: FormatOp): void {
  * 🔴 **狭い画面で、1 段に残す書式のボタン**(台帳 #1852、#1163 依頼 237 = A)。
  * 横向きや縦の短いスマホ(`data-pkc-layout='phone'`)で帯が 2〜5 段になり、書く欄が 1 行ぶんしか残らなかった。
  * 残りは「…」(`FORMAT_MORE_FIELD`)で開く。⚠ 狭くない画面は 1 px も変わらない(CSS が phone のときだけ畳む)。
- * 🔑 選んだのは、スマホで続けて押す書式(太字 / 斜体 / 箇条書き / チェック / リンク)。見出しや表などは「…」の中。
+ * 🔑 選んだのは、スマホで続けて押す書式(太字 / 斜体 / 箇条書き / チェック / リンク)。見出しや表などは「…」の中
+ *   (開くと直接出す塊が全部と「その他 ▾」が並ぶ。「その他 ▾」の一覧は広い画面と同じ)。
  */
 export const COMPACT_BAR_OPS: ReadonlySet<string> = new Set(['bold', 'italic', 'ul', 'task', 'link']);
 /** 「…」ボタンの `data-pkc-field`。⚠ `data-pkc-action` は持たない(開閉は帯の中で完結する ── 直接配線)。 */
@@ -41,285 +43,192 @@ export const FORMAT_MORE_ITEM_ATTR = 'data-pkc-format-more-item';
 export const FORMAT_MORE_OPEN_ATTR = 'data-pkc-more-open';
 const FORMAT_MORE_TITLE = '書式のボタンを、残りも含めてすべて出します / しまいます';
 
-/** 書式パネルを組む。⚠ 押した所は `data-pkc-format` で分かる(binder が読む)。 */
+const RENUMBER_TITLE = '番号付きリストの番号を、上から順に振り直します';
+const SORT_TASKS_TITLE =
+  'カーソルのあるチェックリストで、完了した項目をリストの末尾へ移動して整理します。リストの外にカーソルがあるときは、すべてのリストを整理します';
+
+/** 「その他 ▾」(帯の最後の直接ボタン)の `data-pkc-action`。押すと binder が隠した元(`FORMAT_MORE_SOURCE_FIELD`)を読んで一覧にする。 */
+export const FORMAT_MORE_MENU_ACTION = 'open-format-more';
+export const FORMAT_MORE_MENU_LABEL = 'その他 ▾';
+const FORMAT_MORE_MENU_HINT = '図・コードブロック・数式・日付・テンプレートなど、ふだん使わない書式や道具の一覧を開きます';
+/** 隠した元のボタンを積む器(`hidden`)。⚠ 一覧の項目・並び・塊はここが正本(`exportMenuItemsFrom` が読む)。 */
+export const FORMAT_MORE_SOURCE_FIELD = 'format-more-source';
+/** 直接出すボタンの塊の器。 */
+export const FORMAT_GROUP_FIELD = 'format-group';
+
+/** 道具(書式の表に載らないボタン)の字・説明。⚠ 説明の鍵(`command`)を持つものは `hintTitle` で割当を併記する。 */
+interface ToolSpec {
+  readonly action: string;
+  readonly label: string;
+  readonly hint: string;
+  /** 鍵の命令 id(`KEY_COMMANDS`)。無ければ素の説明。 */
+  readonly command?: string;
+  /** 押すと囲む側へ倒れるボタン(#950 ①)の op。 */
+  readonly wraps?: FormatOp;
+  /** 押す前から持つ `aria-expanded`。 */
+  readonly expanded?: boolean;
+}
+
+const TOOL_SPECS: readonly ToolSpec[] = [
+  /** ⚠ 「先に聞く」道具は `FORMAT_OPS` に入れない(あちらは**その場で字を変える**表)。 */
+  {
+    action: 'insert-entry-link',
+    label: 'ノートリンクを入れる',
+    hint: '別のノートを題名で探して、そこへのリンクを打っている場所に入れます',
+    command: 'insert-entry-link',
+  },
+  {
+    action: 'insert-attachment',
+    label: '添付を入れる',
+    hint: '添付を題名で探して、打っている場所に入れます。画像は画像として、ほかのファイルはリンクとして入ります',
+  },
+  {
+    action: 'insert-diagram',
+    label: '図を入れる',
+    // 🔴 #950 着地前レビュー ④: 選んでいるときは一覧を出さず囲む ── 両方の場合を書く
+    hint:
+      '選んでいれば、選んだ範囲を ```mermaid で囲みます。' +
+      '選んでいなければ、フローチャート / クラス図 / シーケンス図 / 状態遷移図 / ER 図 から選べます',
+    // ⚠ 押すと囲む側は `mermaid`(op は別)
+    wraps: 'mermaid',
+  },
+  {
+    action: 'insert-callout',
+    label: '注意書き',
+    hint: '注意書きの種類(メモ / ヒント / 警告など)を選んで、選んだ範囲(無ければ空)をそのブロックにします',
+    command: 'insert-callout',
+  },
+  {
+    action: 'insert-date',
+    label: '日付を入れる',
+    hint: '日付を選んで、打っている場所に入れます',
+    command: 'insert-date',
+  },
+  {
+    action: 'insert-snippet',
+    label: 'テンプレートを入れる',
+    hint: 'テンプレートを一覧から選んで、打っている場所に入れます',
+    command: 'insert-snippet',
+  },
+  {
+    action: 'insert-icon',
+    label: 'アイコンを入れる',
+    hint: 'アイコンを入れます。押すとアイコンの一覧が出て、選ぶと打っている場所に入ります',
+  },
+  /**
+   * 🔴 字は「番号を振り直す」(#717)。⚠ 「番号」(番号付きリストにする)と同じ字を並べない。
+   *   押したときだけ全文に効く(ライブエディタは行ごとに欄を出すので、打つたびに全文を書き換えない ── #396)。
+   */
+  { action: 'renumber-lists', label: '番号を振り直す', hint: RENUMBER_TITLE },
+  { action: 'sort-tasks', label: '完了項目を末尾へ', hint: SORT_TASKS_TITLE },
+  // 🔴 #766 D-3 ── 押すと本文の欄へ当てる命令(`inline-calc`)をそのまま呼ぶ
+  { action: 'calc-line', label: 'この行を計算する', hint: '打っている行の式(2+3= など)を計算して、行の終わりに答えを入れます' },
+  // 🔴 読む面の帯の「探す」と同じ口(`find-in-note`)。編集中は 2 ペインのプレビュー / ライブエディタの描かれた本文を探す
+  {
+    action: 'find-in-note',
+    label: 'ノート内を探す',
+    hint: 'このノートの本文の中だけを探す小さな欄を開きます',
+    command: 'find-in-note',
+  },
+  // ⚠ 置換が効くのは編集中の本文なので、閲覧中の帯には置かない(押しても効かない導線を作らない)。欄そのものは shell 側
+  {
+    action: 'toggle-replace',
+    label: '置換の欄を開く / 閉じる',
+    hint: '編集中のノートの本文で、探す語を全部置き換える欄を開きます / 閉じます',
+    command: 'toggle-replace',
+    expanded: false,
+  },
+];
+
+/** 道具の字(行頭の `/` の一覧も帯と同じ字を引く)。⚠ 登録の無い action は `undefined`。 */
+export function formatToolLabel(action: string): string | undefined {
+  return TOOL_SPECS.find((t) => t.action === action)?.label;
+}
+
+/** 説明(`title`)と、割当の併記に要る属性を付ける。⚠ 鍵を持つものは `HINT_*` を名乗る(割当が変わったら `applyShortcutHints` が書き直す)。 */
+function applyHint(btn: HTMLElement, hint: string, command: string | undefined): void {
+  if (command !== undefined && findCommand(command) !== null) {
+    btn.setAttribute(HINT_BASE, hint);
+    btn.setAttribute(HINT_COMMAND, command);
+    btn.title = hintTitle(hint, command);
+  } else {
+    btn.title = hint;
+  }
+}
+
+function labelSpan(text: string): HTMLSpanElement {
+  // ⚠ 文字は `label` span に入れる(段④ の規約 ── 文言の突合がここを読む)
+  const span = document.createElement('span');
+  span.setAttribute('data-pkc-field', 'label');
+  span.textContent = text;
+  return span;
+}
+
+/** 書式(`FORMAT_OPS` の op)のボタン。説明は表の `hint`、鍵が割り当たる op は割当を併記(#717)。 */
+function formatButton(op: FormatOp): HTMLButtonElement {
+  const entry = BAR_FORMAT_OPS.find((f) => f.op === op);
+  if (entry === undefined) throw new Error(`format-bar: ${op} は書式バーに出す書式ではありません`);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-pkc-action', 'format-text');
+  btn.setAttribute('data-pkc-format', op);
+  markWraps(btn, op);
+  applyHint(btn, entry.hint, `format-${op}`);
+  btn.append(labelSpan(entry.label));
+  return btn;
+}
+
+/** 道具のボタン(先に聞く / 全文に効く / 探す)。 */
+function toolButton(action: string): HTMLButtonElement {
+  const spec = TOOL_SPECS.find((t) => t.action === action);
+  if (spec === undefined) throw new Error(`format-bar: ${action} の字と説明が登録されていません`);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-pkc-action', action);
+  if (spec.wraps !== undefined) markWraps(btn, spec.wraps);
+  if (spec.expanded !== undefined) btn.setAttribute('aria-expanded', spec.expanded ? 'true' : 'false');
+  applyHint(btn, spec.hint, spec.command);
+  btn.append(labelSpan(spec.label));
+  return btn;
+}
+
+function buttonFor(item: BarItem): HTMLButtonElement {
+  return 'op' in item ? formatButton(item.op) : toolButton(item.action);
+}
+
+/**
+ * 書式パネルを組む。⚠ 押した所は `data-pkc-format` で分かる(binder が読む)。
+ *
+ * 🔴 **並びと「その他 ▾」の中身は `format-bar-layout.ts` が正本**(#1982 段 3)。直接出すのは普段使いの 4 塊だけで、
+ *   残りは隠した元(`format-more-source`)に**同じボタン**(同じ action / 説明 / 押せない状態)のまま置き、
+ *   「その他 ▾」を押すと binder がそれを読んで一覧にする(右の列の「その他 ▾」と同じ作法 ── 判定を 2 本に分けない)。
+ */
 export function buildFormatBar(): HTMLElement {
   const bar = document.createElement('div');
   bar.setAttribute('data-pkc-region', 'format-bar');
-  /**
-   * ⚠ **帯に出すものだけ**(#425 段②-a)── 絞る規則は `BAR_FORMAT_OPS` が持つ。
-   *   ここで `filter` を書くと、表と描き手の 2 か所に規則が生える(§7)。
-   */
-  for (const { op, label, hint } of BAR_FORMAT_OPS) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.setAttribute('data-pkc-action', 'format-text');
-    btn.setAttribute('data-pkc-format', op);
-    markWraps(btn, op);
-    /**
-     * 🔴 **説明(`title`)を付ける**(#717)。⚠ 直す前は 14 個とも無く、「表」「番号」の
-     *   1 語で何が起きるか読めなかった。字は表(`FORMAT_OPS.hint`)から引く。
-     * 🔑 鍵が割り当たっている op(`format-<op>` が `KEY_COMMANDS` に在る ── 太字 / 斜体 /
-     *   リンク)は `hintTitle` で**いまの割当**を併記し、`HINT_*` を名乗って
-     *   割当が変わったら `applyShortcutHints` が書き直す(下の「置換」と同じ作法)。
-     *   無い op は素の説明だけ ── 空の `()` を出さない。
-     */
-    const command = `format-${op}`;
-    if (findCommand(command) !== null) {
-      btn.setAttribute(HINT_BASE, hint);
-      btn.setAttribute(HINT_COMMAND, command);
-      btn.title = hintTitle(hint, command);
-    } else {
-      btn.title = hint;
-    }
-    // ⚠ 文字は `label` span に入れる(段④ の規約 ── 文言の突合がここを読む)
-    const text = document.createElement('span');
-    text.setAttribute('data-pkc-field', 'label');
-    text.textContent = label;
-    btn.append(text);
-    bar.append(btn);
-    /**
-     * 🔴 **「図」は表の隣 ── これまでと同じ場所**(#528 案 B。user 裁定 2026-09-04)。
-     *
-     * ⚠ `FORMAT_OPS` の帯からは外した(`onBar: false`)── 押すと**先に聞く**
-     *   (フローチャート / クラス図 / シーケンス図 / 状態遷移図 / ER 図 の一覧)ので、
-     *   「その場で字を変える」表の並びには居られない(日付 / 雛形と同じ理由)。
-     * ⚠ ただし**置き場は変えない** ── 下の道具の列(日付 …)へ移すと、
-     *   表とコードブロックの間に在ったボタンが 1 つ右へ飛ぶ(業務画面の作法
-     *   「同じものが常に同じ場所にある」)。だから表の直後に差す。
-     */
-    if (op === 'table') {
-      const diagram = diagramButton();
-      // ⚠ 「図」の押すと囲む側は `mermaid`(表の隣に差すだけで、op は別)
-      markWraps(diagram, 'mermaid');
-      bar.append(diagram);
-    }
+  for (const items of FORMAT_BAR_GROUPS) {
+    const group = document.createElement('div');
+    group.setAttribute('data-pkc-field', FORMAT_GROUP_FIELD);
+    for (const item of items) group.append(buttonFor(item));
+    bar.append(group);
   }
-  /**
-   * 🔴 **置換の切替はここ**(2026-08-15、user 指示「中央の上を潰しすぎ /
-   * ボタンがボタンすぎる」)。⚠ 置換が効くのは**編集中の本文**なので、
-   * 閲覧中の帯に置くと「押しても効かない導線」になる ── 効く場所にだけ置く。
-   * ⚠ 欄そのもの(`replace-bar`)は shell 側に在る ── ここは切替だけ。
-   *   打鍵のたびに描き直される面へ欄を入れると、打ちかけの語が消える。
-   */
-  /**
-   * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
-   *
-   * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
-   * > ついてくるツールとか用意されてもいいかも**」
-   *
-   * ⚠ ここに置く理由は 2 つ ── ① **本文を打っている場所**に在る(道具を探しに
-   *   行かせない)② **押せる形**なので、マウスだけで完結する(不可侵指示
-   *   「マウスだけで完結し、キーボードは近道」)。
-   * ⚠ `FORMAT_OPS` には入れない ── あちらは**その場で字を変える**純関数の表で、
-   *   こちらは**先に聞く**(ダイアログが挟まる)。同じ表に混ぜると
-   *   「押したら何が起きるか」が表から読めなくなる。
-   */
-  const insertDate = document.createElement('button');
-  insertDate.type = 'button';
-  insertDate.setAttribute('data-pkc-action', 'insert-date');
-  insertDate.setAttribute(HINT_BASE, '日付を選んで、打っている場所に入れます');
-  insertDate.setAttribute(HINT_COMMAND, 'insert-date');
-  insertDate.title = hintTitle('日付を選んで、打っている場所に入れます', 'insert-date');
-  const insertDateLabel = document.createElement('span');
-  insertDateLabel.setAttribute('data-pkc-field', 'label');
-  insertDateLabel.textContent = '日付を入れる';
-  insertDate.append(insertDateLabel);
-  bar.append(insertDate);
-
-  /**
-   * 🔴 **ノートへのリンクを入れる**(#427 段②)。
-   *
-   * ⚠ 段① の「参照をコピー」は**相手を開きに行ってから戻る**ので、書いている手が
-   *   止まる。ここに在れば、打っている場所から題名で選べる。
-   * ⚠ `[[` で出す形は採らない ── 理由は `features/entry-ref/entry-pick.ts` の冒頭
-   *   (`insert-date` が `@` を、`insert-snippet` が `/` を退けたのと同じ芯)。
-   * ⚠ `FORMAT_OPS` には入れない ── こちらは**先に聞く**(日付・雛形と同じ理由)。
-   */
-  const insertEntryLink = document.createElement('button');
-  insertEntryLink.type = 'button';
-  insertEntryLink.setAttribute('data-pkc-action', 'insert-entry-link');
-  insertEntryLink.setAttribute(HINT_BASE, '別のノートを題名で探して、そこへのリンクを打っている場所に入れます');
-  insertEntryLink.setAttribute(HINT_COMMAND, 'insert-entry-link');
-  insertEntryLink.title = hintTitle('別のノートを題名で探して、そこへのリンクを打っている場所に入れます', 'insert-entry-link');
-  const insertEntryLinkLabel = document.createElement('span');
-  insertEntryLinkLabel.setAttribute('data-pkc-field', 'label');
-  insertEntryLinkLabel.textContent = 'ノートリンクを入れる';
-  insertEntryLink.append(insertEntryLinkLabel);
-  bar.append(insertEntryLink);
-
-  /**
-   * 🔴 **添付を本文に入れる**(#1640 ④。🟣 Gemini 依頼 37 の答え「A」)。
-   *
-   * ⚠ 直す前は、別のノートで使い直すのに「添付の画面を開く → 参照をコピー → 戻って貼る」が要り、
-   *   「ノートリンクを入れる」で添付を選ぶと入るのは**リンク**で画像にならなかった。
-   * 🔑 題名で探して選ぶと、画像は画像の行・ほかはリンクの行が打っている場所に入る(組み立ては「参照をコピー」と同じ 1 本)。
-   * ⚠ `FORMAT_OPS` には入れない ── こちらは**先に聞く**(日付・ノートリンクと同じ理由)。鍵は付けない。
-   */
-  const insertAttachment = document.createElement('button');
-  insertAttachment.type = 'button';
-  insertAttachment.setAttribute('data-pkc-action', 'insert-attachment');
-  insertAttachment.title =
-    '添付を題名で探して、打っている場所に入れます。画像は画像として、ほかのファイルはリンクとして入ります';
-  const insertAttachmentLabel = document.createElement('span');
-  insertAttachmentLabel.setAttribute('data-pkc-field', 'label');
-  insertAttachmentLabel.textContent = '添付を入れる';
-  insertAttachment.append(insertAttachmentLabel);
-  bar.append(insertAttachment);
-
-  /**
-   * 🔴 **雛形を一覧から入れる**(#196 / B-2 段②-b)。
-   *
-   * ⚠ 短縮語 + `Tab` は**覚えている人の近道**であって、入口ではない ── 覚えて
-   *   いない人には、これが無いと**自分で作った雛形を呼ぶ道が 1 つも無い**。
-   * ⚠ 日付と同じくここに置く(本文を打っている場所に在る / 押せる形)。
-   *   ⚠ `FORMAT_OPS` には入れない ── あちらは**その場で字を変える**表で、
-   *     こちらは**先に聞く**(日付ボタンと同じ理由)。
-   */
-  const insertSnippet = document.createElement('button');
-  insertSnippet.type = 'button';
-  insertSnippet.setAttribute('data-pkc-action', 'insert-snippet');
-  insertSnippet.setAttribute(HINT_BASE, 'テンプレートを一覧から選んで、打っている場所に入れます');
-  insertSnippet.setAttribute(HINT_COMMAND, 'insert-snippet');
-  insertSnippet.title = hintTitle('テンプレートを一覧から選んで、打っている場所に入れます', 'insert-snippet');
-  const insertSnippetLabel = document.createElement('span');
-  insertSnippetLabel.setAttribute('data-pkc-field', 'label');
-  insertSnippetLabel.textContent = 'テンプレートを入れる';
-  insertSnippet.append(insertSnippetLabel);
-  bar.append(insertSnippet);
-
-  /**
-   * 🔴 **図案を本文に入れる**(#853 段①、2026-09-13)。
-   *
-   * > user 指示 2026-09-12:「**マテリアルデザインのアイコンはユーザーのメモ内でも
-   * > 使用できるように動線を追加して欲しい**」
-   *
-   * ⚠ 直す前、図案が使えるのは **PKC が描く所**(ボタン / タブ / 一覧の行の頭 /
-   *   アプリのタイル)だけで、**本文に置く道が 1 つも無かった**。
-   * 🔑 ここに置く理由は日付・雛形と同じ ── ①**本文を打っている場所**に在る
-   *   ②**押せる形**なので、打つ字を覚えなくてもマウスだけで完結する。
-   * ⚠ `FORMAT_OPS` には入れない ── あちらは**その場で字を変える**表で、
-   *   こちらは**先に聞く**(日付・ノート・雛形と同じ)。
-   * ⚠ 鍵は付けない ── 「図」と同じく、これまで鍵を持っていなかったので増やさない。
-   */
-  const insertIcon = document.createElement('button');
-  insertIcon.type = 'button';
-  insertIcon.setAttribute('data-pkc-action', 'insert-icon');
-  // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-  insertIcon.title = 'アイコンを入れます。押すとアイコンの一覧が出て、選ぶと打っている場所に入ります';
-  const insertIconLabel = document.createElement('span');
-  insertIconLabel.setAttribute('data-pkc-field', 'label');
-  insertIconLabel.textContent = 'アイコンを入れる';
-  insertIcon.append(insertIconLabel);
-  bar.append(insertIcon);
-
-  /**
-   * 🔴 **番号を振り直す**(#396)。
-   *
-   * ⚠ PKC2 は frontmatter で**常時かかる設定**にしていたが、PKC3 は
-   *   **押したときだけ**にする ── ライブエディタは行ごとに欄を出すので、
-   *   1 行打つたびに全文の番号を書き換えると**触っていない行が勝手に変わる**
-   *   (しかも別の窓が書いていたら、それを踏む)。
-   */
-  const renumber = document.createElement('button');
-  renumber.type = 'button';
-  renumber.setAttribute('data-pkc-action', 'renumber-lists');
-  // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-  renumber.title = RENUMBER_TITLE;
-  const renumberLabel = document.createElement('span');
-  renumberLabel.setAttribute('data-pkc-field', 'label');
-  /**
-   * 🔴 字は「番号を振り直す」(#717)。⚠ 直す前は「番号」で、同じ帯の左に在る
-   *   「番号」(番号付きリストにする)と**同じ字が 2 つ並んでいた** ── どちらを押すと
-   *   何が起きるか、押すまで分からない。⚠ 「番号」の側は変えない(表の記法の名前)。
-   */
-  renumberLabel.textContent = '番号を振り直す';
-  renumber.append(renumberLabel);
-  bar.append(renumber);
-
-  /**
-   * 🔴 **完了項目を末尾へ**(#1108)。
-   *
-   * チェックリストの完了した項目（- [x]）を各リストブロックの末尾へ移動し、
-   * 未完了タスクを見やすく整理する。
-   */
-  const sortTasks = document.createElement('button');
-  sortTasks.type = 'button';
-  sortTasks.setAttribute('data-pkc-action', 'sort-tasks');
-  // ⚠ 文言は起きることで書く(user 指示 2026-08-21)
-  sortTasks.title = SORT_TASKS_TITLE;
-  const sortTasksLabel = document.createElement('span');
-  sortTasksLabel.setAttribute('data-pkc-field', 'label');
-  sortTasksLabel.textContent = '完了項目を末尾へ';
-  sortTasks.append(sortTasksLabel);
-  bar.append(sortTasks);
-
-  /**
-   * 🔴 **このノートの中を探す小さな欄を出す**(#1163 依頼 163)。⚠ 読む面の帯の「探す」と**同じ口**(`find-in-note`)。
-   * 編集中は 2 ペインのプレビュー / ライブエディタの描かれた本文を探す。
-   */
-  const findInNote = document.createElement('button');
-  findInNote.type = 'button';
-  findInNote.setAttribute('data-pkc-action', 'find-in-note');
-  findInNote.setAttribute(HINT_BASE, 'このノートの本文の中だけを探す小さな欄を開きます');
-  findInNote.setAttribute(HINT_COMMAND, 'find-in-note');
-  findInNote.title = hintTitle('このノートの本文の中だけを探す小さな欄を開きます', 'find-in-note');
-  const findLabel = document.createElement('span');
-  findLabel.setAttribute('data-pkc-field', 'label');
-  findLabel.textContent = 'ノート内を探す';
-  findInNote.append(findLabel);
-  bar.append(findInNote);
-
-  const toggleReplace = document.createElement('button');
-  toggleReplace.type = 'button';
-  toggleReplace.setAttribute('data-pkc-action', 'toggle-replace');
-  toggleReplace.setAttribute('aria-expanded', 'false');
-  toggleReplace.setAttribute(HINT_BASE, '編集中のノートの本文で、探す語を全部置き換える欄を開きます / 閉じます');
-  toggleReplace.setAttribute(HINT_COMMAND, 'toggle-replace');
-  toggleReplace.title = hintTitle('編集中のノートの本文で、探す語を全部置き換える欄を開きます / 閉じます', 'toggle-replace');
-  const label = document.createElement('span');
-  label.setAttribute('data-pkc-field', 'label');
-  label.textContent = '置換の欄を開く / 閉じる';
-  toggleReplace.append(label);
-  bar.append(toggleReplace);
-  /**
-   * 🔴 **注意書きのブロックを入れる**(#425 の「囲い(`:::`)の挿入口」)。
-   * ⚠ `FORMAT_OPS` の 8 種は帯に出さない(1 つずつ並べると帯が 8 個伸びる)── 帯には**種類を先に聞く 1 つ**だけ置く。
-   *   種類ごとの名前は操作を探すと設定のショートカット画面から呼べる。
-   * ⚠ 置き場は**置換の隣(末尾側)** ── 既に在るボタンを 1 つも右へ動かさない(同じものが常に同じ場所にある)。
-   */
-  const insertCallout = document.createElement('button');
-  insertCallout.type = 'button';
-  insertCallout.setAttribute('data-pkc-action', 'insert-callout');
-  insertCallout.setAttribute(
-    HINT_BASE,
-    '注意書きの種類(メモ / ヒント / 警告など)を選んで、選んだ範囲(無ければ空)をそのブロックにします',
-  );
-  insertCallout.setAttribute(HINT_COMMAND, 'insert-callout');
-  insertCallout.title = hintTitle(
-    '注意書きの種類(メモ / ヒント / 警告など)を選んで、選んだ範囲(無ければ空)をそのブロックにします',
-    'insert-callout',
-  );
-  const insertCalloutLabel = document.createElement('span');
-  insertCalloutLabel.setAttribute('data-pkc-field', 'label');
-  insertCalloutLabel.textContent = '注意書き';
-  insertCallout.append(insertCalloutLabel);
-  bar.append(insertCallout);
-
-  /**
-   * 🔴 **この行を計算する**(#766 D-3)。⚠ 書式バーを横に長くしないため、**スマホ用画面の「…」を開いたときだけ**出す
-   * (`data-pkc-more-only`。広い画面では CSS が隠す ── 広い画面の入口は **操作を探す** と鍵 `Alt+Shift+C`)。
-   * 🔑 押すと**本文の欄へ当てる命令**(`inline-calc`)をそのまま呼ぶ ── 打って `Enter` / 操作を探す / 鍵と同じ 1 か所。
-   */
-  const calcLine = document.createElement('button');
-  calcLine.type = 'button';
-  calcLine.setAttribute('data-pkc-action', 'calc-line');
-  calcLine.setAttribute('data-pkc-more-only', '');
-  calcLine.title = '打っている行の式(2+3= など)を計算して、行の終わりに答えを入れます';
-  const calcLineLabel = document.createElement('span');
-  calcLineLabel.setAttribute('data-pkc-field', 'label');
-  calcLineLabel.textContent = 'この行を計算する';
-  calcLine.append(calcLineLabel);
-  bar.append(calcLine);
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.setAttribute('data-pkc-action', 'open-format-more');
+  more.setAttribute('aria-haspopup', 'menu');
+  more.title = FORMAT_MORE_MENU_HINT;
+  more.append(labelSpan(FORMAT_MORE_MENU_LABEL));
+  bar.append(more);
+  const source = document.createElement('div');
+  source.setAttribute('data-pkc-field', FORMAT_MORE_SOURCE_FIELD);
+  source.hidden = true;
+  for (const g of FORMAT_BAR_MORE_GROUPS) {
+    const box = document.createElement('div');
+    box.setAttribute('data-pkc-group', g.group);
+    for (const item of g.items) box.append(buttonFor(item));
+    source.append(box);
+  }
+  bar.append(source);
   addMoreToggle(bar);
   return bar;
 }
@@ -331,7 +240,9 @@ export function buildFormatBar(): HTMLElement {
  *   押しても本文の欄から焦点を奪わない(`mousedown` を止める ── 他の書式ボタンと同じ作法)。
  */
 function addMoreToggle(bar: HTMLElement): void {
+  // ⚠ 隠した元(`format-more-source`)の中のボタンには付けない(一覧の項目であって、帯に並ばない)
   for (const btn of Array.from(bar.querySelectorAll<HTMLElement>('button'))) {
+    if (btn.closest(`[data-pkc-field="${FORMAT_MORE_SOURCE_FIELD}"]`) !== null) continue;
     const op = btn.getAttribute('data-pkc-format');
     if (op !== null && COMPACT_BAR_OPS.has(op)) continue;
     btn.setAttribute(FORMAT_MORE_ITEM_ATTR, '');
@@ -355,31 +266,6 @@ function addMoreToggle(bar: HTMLElement): void {
   });
   // ⚠ 並びの最後に置く。狭い画面では「しまう」ボタンが消えるので、1 段の末尾に「…」だけが残る
   bar.append(more);
-}
-
-/**
- * 🔴 **図を入れる ── 押すと 5 種から選ぶ**(#528 案 B)。
- *
- * ⚠ 鍵は付けない ── 帯の他の道具(日付 / 雛形)は既定の鍵を 1 つずつ食っている。
- *   「図」はこれまで鍵を持っていなかったので、増やさない(15 枠の規律と同じ向き)。
- * ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)。
- * 🔴 **#950 着地前レビュー ④**: 「選んでいれば一覧を出さず直接 ```mermaid で
- *   囲む」(binder.ts の `insert-diagram`)に直したのに、この字は「押すと
- *   一覧が出て雛形を差し込みます」のまま残っていた ── 選んでいるときは
- *   一覧が出ないので、字が事実と食い違っていた。両方の場合を書く。
- */
-function diagramButton(): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.setAttribute('data-pkc-action', 'insert-diagram');
-  btn.title =
-    '選んでいれば、選んだ範囲を ```mermaid で囲みます。' +
-    '選んでいなければ、フローチャート / クラス図 / シーケンス図 / 状態遷移図 / ER 図 から選べます';
-  const text = document.createElement('span');
-  text.setAttribute('data-pkc-field', 'label');
-  text.textContent = '図を入れる';
-  btn.append(text);
-  return btn;
 }
 
 /**
@@ -409,10 +295,6 @@ export function syncWholeNoteTools(bar: ParentNode, live: boolean): void {
 
 /** 灰色のときに出す理由。⚠ 「全文を編集」は画面のボタンの字(`detail.ts`)と同じ。 */
 export const WHOLE_NOTE_REASON = '1 行ずつ打つ編集では使えません。「全文を編集」に切り替えると使えます';
-
-const RENUMBER_TITLE = '番号付きリストの番号を、上から順に振り直します';
-const SORT_TASKS_TITLE =
-  'カーソルのあるチェックリストで、完了した項目をリストの末尾へ移動して整理します。リストの外にカーソルがあるときは、すべてのリストを整理します';
 
 /**
  * 灰色にするボタンと、元の説明。

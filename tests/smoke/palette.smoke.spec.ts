@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, gotoApp, openExportMenu, useSplitEditor } from './helpers';
+import { clickReal, collectPageErrors, createEntry, gotoApp, openExportMenu, useSplitEditor, clickBarMoreItem } from './helpers';
 
 /**
  * 🔴 **「操作を探す」から「マニュアルを別のウィンドウで開く」**(#1452 案 1)。
@@ -704,7 +704,7 @@ test('🔴 選んでからパレットで記法を入れると、選んだ範囲
    */
   const before = 'りんごとみかんとりんご';
   await ta.fill(before);
-  await clickReal(page, '[data-pkc-action="toggle-replace"]');
+  await clickBarMoreItem(page, '[data-pkc-action="toggle-replace"]');
   await page.locator('[data-pkc-field="replace-find"]').fill('りんご');
   await page.locator('[data-pkc-field="replace-with"]').fill('もも');
   await page.keyboard.press('Control+Shift+P');

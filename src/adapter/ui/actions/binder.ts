@@ -331,7 +331,7 @@ import {
 } from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
 import { abbrBeforeCaret, type SnippetItem } from '@features/snippet/snippet-table';
-import { atChoices, slashChoices } from '@features/markdown/inline-complete';
+import { atChoices, slashChoices, slashToolChoices } from '@features/markdown/inline-complete';
 import { snippetMenu, snippetMenuNote, type SnippetChoice } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { appendAndSettle } from '@adapter/state/append-settle';
@@ -606,6 +606,10 @@ function exportMenuItemsFrom(src: Element | null, opener: string, grouped = fals
       //   型(危険 = 赤)は元のボタンの `data-pkc-variant` をそのまま写す(#1982)
       attrs: {
         [MENU_FROM_ATTR]: opener,
+        // 🔑 書式の帯の「その他 ▾」(#1982 段 3)── `format-text` は押した物の `data-pkc-format` が要る
+        ...(b.getAttribute('data-pkc-format') !== null ? { 'data-pkc-format': b.getAttribute('data-pkc-format')! } : {}),
+        // 🔑 灰色(押せるが理由を出す口。1 行ずつ打つ編集の「番号を振り直す」など)は一覧の項目にも写す
+        ...(b.getAttribute('aria-disabled') === 'true' ? { 'aria-disabled': 'true' } : {}),
         ...(b.getAttribute(VARIANT_ATTR) !== null ? { [VARIANT_ATTR]: b.getAttribute(VARIANT_ATTR)! } : {}),
       },
       // 🔑 塊は右クリックと同じ正本(`ENTRY_ACTION_GROUPS`)から ── 「バックアップ(ノート)」と「(フォルダ)」の間が空く
@@ -5328,6 +5332,8 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   'open-collection-export-menu',
   // 🔑 #1982 段 1 ── 右の列の「その他 ▾」(中の「書き出す ▾」「アプリで開く ▾」は一覧の項目から 2 枚目を開く)
   'open-inspector-more',
+  // 🔑 #1982 段 3 ── 書式の帯の「その他 ▾」
+  'open-format-more',
 ]);
 
 /**
@@ -19111,6 +19117,31 @@ const ACTIONS: Record<string, ActionHandler> = {
     const r = target.getBoundingClientRect();
     openContextMenu(root, { x: r.left, y: r.bottom }, items, target, { 'data-pkc-entry': lid });
   },
+  /**
+   * 🔴 **書式の帯の「その他 ▾」**(#1982 段 3)。常用に入らなかった書式・道具の一覧。
+   * 🔑 項目は隠した元(`format-more-source`)から読む ── 字・説明・押せない / 灰色の状態は帯の元のボタンのもの(2 本目の判定を持たない)。
+   *   押す先は**既存の action**そのまま(`format-text` は `data-pkc-format` を写してある)。
+   * ⚠ **本文の欄に居たまま開く**(`keepFocus`)── 焦点が外れると 1 行ずつ打つ編集の行が確定して閉じ、書き込む先が消える。
+   *   そのぶん矢印キーでは選べないので、次に打った 1 打鍵で一覧を閉じる(打鍵は本文へ届く)。
+   */
+  'open-format-more': (_dispatcher, target, _services, root) => {
+    const src = target.closest('[data-pkc-region="format-bar"]')?.querySelector('[data-pkc-field="format-more-source"]');
+    const items = exportMenuItemsFrom(src ?? null, 'open-format-more', true);
+    if (items.length === 0) return;
+    const doc = root.ownerDocument;
+    const keep = formatTargetOf(doc.activeElement);
+    const r = target.getBoundingClientRect();
+    const opened = openContextMenu(root, { x: r.left, y: r.bottom }, items, keep ?? target, {}, { keepFocus: keep !== null });
+    if (keep !== null && opened !== null) {
+      // ⚠ 自分が開いた一覧が残っているときだけ閉じる(先に項目を選んで閉じていたら、あとから開いた別の一覧を巻き込まない)
+      // ⚠ `Esc` は閉じる側(`onMenuKey`)に任せる ── ここで先に閉じると、同じ `Esc` が編集を終える側へ流れる
+      const closeOnKey = (ev: KeyboardEvent): void => {
+        if (ev.key !== 'Escape' && opened.el.isConnected) closeContextMenu(root);
+      };
+      // ⚠ 張る先は**本文の欄**(1 回で外れる ── 欄が消えても聞き耳は残らない。`root` / 文書へは直に張らない: #876)
+      keep.addEventListener('keydown', closeOnKey, { once: true });
+    }
+  },
   /** 🔴 **右の列(何も選んでいないとき)の「書き出す ▾」**(#1029 / #501)。コレクション全体の書き出しの一覧。 */
   'open-collection-export-menu': (_dispatcher, target, _services, root) => {
     const src = target.closest('[data-pkc-field="collection-commands"]')?.querySelector('[data-pkc-field="collection-export-source"]');
@@ -19875,7 +19906,9 @@ const PALETTE_HIDDEN_OK: ReadonlySet<string> = new Set(['attach-file', 'open-tod
  * 🔑 効かない物は今までどおり断る ── 元の中でも、ボタン自身や塊が `hidden`(フォルダでない、など)なら、
  *   最も近い `hidden` は元そのものではなくなるので、ここは `false` を返す。
  */
-const CLOSED_MENU_SOURCES = '[data-pkc-field="inspector-more-source"], [data-pkc-field="inspector-export-source"]';
+// ⚠ 書式の帯の「その他 ▾」の元(`format-more-source`。#1982 段 3)も同じ ── 「置換」「日付」などの鍵・操作を探すが効く
+const CLOSED_MENU_SOURCES =
+  '[data-pkc-field="inspector-more-source"], [data-pkc-field="inspector-export-source"], [data-pkc-field="format-more-source"]';
 function inClosedMenuSource(btn: HTMLElement): boolean {
   const nearest = btn.closest('[hidden]');
   return nearest !== null && nearest.matches(CLOSED_MENU_SOURCES);
@@ -20876,6 +20909,8 @@ export function bindActions(
      *   本文の欄に居るときだけ押せる記法・計算が灰色になる。押したあとの焦点は器が決める(閉じるとき、開いたときの欄へ返す)。
      */
     if (act === 'open-palette') ev.preventDefault();
+    // 🔴 書式の帯の「その他 ▾」も(#1982 段 3)。奪うと、1 行ずつ打つ編集の行が確定して閉じ、項目の書き込み先が消える
+    if (act === 'open-format-more') ev.preventDefault();
   };
   const onInput = (ev: Event) => {
     if (isEditorBody(ev.target)) {
@@ -21798,7 +21833,9 @@ export function bindActions(
       applyFormatTo(ke.target as HTMLTextAreaElement, cmd, undefined, (t) =>
         services.showStatus?.(t),
       );
-    } else if (cmd === 'cancel-edit') {
+    } else if (cmd === 'cancel-edit' && !contextMenuOpen(root)) {
+      // 🔴 一覧(書式バーの「その他 ▾」は本文の欄に焦点を残したまま開く)が出ている間の Esc は、一覧を閉じるだけ
+      //   (閉じるのは `onMenuKey`。1 回の Esc で 1 段だけ ── 編集まで終わらせない)
       ke.preventDefault();
       cancelFromEditor(dispatcher, root);
     }
@@ -24543,7 +24580,22 @@ export function bindActions(
         const st = dispatcher.getState();
         if (trigger.kind === 'slash') {
           const snippets = st.snippetScan?.items ?? [];
-          return slashChoices(snippets, trigger.query).map((c): CompleteItem => ({
+          // 🔴 #1982 段 3: 語を打ったときは、先に聞く挿入の道具(日付 / ノートリンク / 添付 / アイコン)も候補に出す。
+          //   選ぶと `/語` を消してから、帯のボタンと**同じ受け手**(`ACTIONS[action]`)を呼ぶ(挿す仕事の規則を 2 つにしない)
+          const tools = slashToolChoices(trigger.query).map((t): CompleteItem => ({
+            title: t.label,
+            sub: '挿入',
+            accept: (ta, tr) => {
+              const caret = ta.selectionEnd;
+              writeBack(ta, {
+                text: ta.value.slice(0, tr.start) + ta.value.slice(caret),
+                start: tr.start,
+                end: tr.start,
+              });
+              ACTIONS[t.action]?.(dispatcher, ta, services, root);
+            },
+          }));
+          const formats = slashChoices(snippets, trigger.query).map((c): CompleteItem => ({
             title: c.title,
             sub: c.kind === 'snippet' ? 'テンプレート' : c.kind === 'format' ? '書式' : '図',
             accept: (ta, tr) => {
@@ -24557,6 +24609,7 @@ export function bindActions(
               if (c.kind === 'format' && isLineOp(c.op)) ta.setSelectionRange(ta.selectionEnd, ta.selectionEnd);
             },
           }));
+          return [...formats, ...tools];
         }
         return atChoices(trigger.query, new Date(), st.entryMetas, st.order, st.selectedLid).map(
           (c): CompleteItem =>

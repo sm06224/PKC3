@@ -276,14 +276,13 @@ test('🔴 追記欄を畳んでいても、編集中は追記欄側の「保存
 
   await clickReal(page, '[data-pkc-action="start-edit"]');
   await expect(page.locator('[data-pkc-region="editor-live"]')).toBeVisible();
-  // 🔴 畳んでいても出口は見える ── 打つ欄は出ない
-  const exit = region.locator('[data-pkc-action="commit-edit"]');
-  await expect(exit, '畳んだせいで追記欄側の「保存」が消えた').toBeVisible();
-  await expect(region.locator('[data-pkc-action="cancel-edit"]'), '追記欄側の「キャンセル」が消えた').toBeVisible();
+  // 🔴 畳んでいても理由の 1 行は見える ── 打つ欄は出ない。⚠ #1982 段 3: 保存 / やめるは上の帯の 1 か所(下には置かない)
+  await expect(region.locator('[data-pkc-field="append-lock-reason"]'), '畳んだせいで下の理由が消えた').toBeVisible();
+  await expect(region.locator('[data-pkc-action="commit-edit"]'), '下に保存が戻っている').toHaveCount(0);
   await expect(input, '編集中に打つ欄まで出た').toBeHidden();
 
-  // 🔑 その出口で編集を終えられる ── 終えたら畳んだ状態に戻る(器ごと消える)
-  await clickReal(page, '[data-pkc-region="append"] [data-pkc-action="commit-edit"]');
+  // 🔑 上の帯の出口で編集を終えられる ── 終えたら畳んだ状態に戻る(器ごと消える)
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-region="editor-live"]')).toBeHidden();
   await expect(region, '編集を終えたのに畳みに戻らない').toBeHidden();
   expect(await page.evaluate(() => localStorage.getItem('pkc3.panes')), '記録が動いた').toContain(

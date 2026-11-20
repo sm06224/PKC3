@@ -13,6 +13,7 @@
  * 届いていない」実装が緑で通り、**保存すると書式が消える**。
  */
 import { readFileSync } from 'node:fs';
+import { visibleBarItems, moreBarItems } from '../../src/features/markdown/format-bar-layout';
 import { stubStamps } from '../helpers/store-stamps';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -205,11 +206,16 @@ describe('書式パネル(P8 段⑥)', () => {
      * 🔑 出さない 4 つが**どこからも引けない**まま増えないことは、
      *   下の「鍵から必ず引ける」が守る。
      */
-    expect(buttons.map((b) => b.getAttribute('data-pkc-format'))).toEqual(
-      BAR_FORMAT_OPS.map((o) => o.op),
+    // 🔴 #1982 段 3: 並びは `format-bar-layout.ts`(直接出す塊 → 「その他 ▾」の元)── 集合は表と同じ(1 つも落ちない・増えない)
+    const placed = buttons.map((b) => b.getAttribute('data-pkc-format'));
+    expect([...placed].sort()).toEqual(BAR_FORMAT_OPS.map((o) => o.op).sort());
+    expect(placed).toEqual(
+      [...visibleBarItems(), ...moreBarItems()].flatMap((i) => ('op' in i ? [i.op] : [])),
     );
+    const labelOf = (op: string): string | undefined =>
+      BAR_FORMAT_OPS.find((o) => o.op === op)?.label;
     expect(buttons.map((b) => b.querySelector('[data-pkc-field="label"]')?.textContent)).toEqual(
-      BAR_FORMAT_OPS.map((o) => o.label),
+      placed.map((p) => labelOf(p!)),
     );
   });
 
@@ -336,18 +342,16 @@ describe('「図」を押すと 5 種から選ぶ(#528 案 B)', () => {
    * ⚠ 位置ごと pin する ── 末尾へ足す実装だと、表とコードブロックの間に在った
    *   ボタンが右へ飛ぶ(「同じものが常に同じ場所にある」)。
    */
-  it('🔴 帯の「図」は表の隣に在り、一覧を開くボタンになっている', async () => {
+  it('🔴 「図を入れる」は「その他 ▾」の元に在り、一覧を開くボタンになっている(#1982 段 3)', async () => {
     const { d, q, root } = setup([meta('a')], { a: 'x' });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await tick();
     q('[data-pkc-action="start-edit"]')!.click();
-    const buttons = [...root.querySelectorAll('[data-pkc-region="format-bar"] button')];
-    const labels = buttons.map((b) => b.querySelector('[data-pkc-field="label"]')?.textContent);
-    const at = labels.indexOf('図を入れる');
-    expect(at, '帯に「図を入れる」が無い').toBeGreaterThan(0);
-    expect(labels[at - 1], '「図を入れる」が表の隣に居ない').toBe('表');
-    expect(buttons[at]!.getAttribute('data-pkc-action')).toBe('insert-diagram');
-    expect(buttons[at]!.hasAttribute('data-pkc-format'), 'まだ format-text の口が残っている').toBe(false);
+    const btn = root.querySelector<HTMLElement>('[data-pkc-region="format-bar"] [data-pkc-action="insert-diagram"]');
+    expect(btn, '帯に「図を入れる」が無い').not.toBeNull();
+    expect(btn!.closest('[data-pkc-field="format-more-source"]'), '「その他 ▾」の元の中に居ない').not.toBeNull();
+    expect(btn!.querySelector('[data-pkc-field="label"]')?.textContent).toBe('図を入れる');
+    expect(btn!.hasAttribute('data-pkc-format'), 'まだ format-text の口が残っている').toBe(false);
     // ⚠ 対照群 ── `format-text` の側には `mermaid` のボタンが**居ない**
     expect(root.querySelector('[data-pkc-format="mermaid"]')).toBeNull();
   });

@@ -195,15 +195,19 @@ describe('237 = A: 狭い画面の編集で、書式のボタンを 1 段にま�
 
   it('🔴 1 段に残すのは太字 / 斜体 / 箇条書き / チェック / リンクの 5 つ。ほかの全部は「しまう」印を持つ', () => {
     expect([...COMPACT_BAR_OPS].sort()).toEqual(['bold', 'italic', 'link', 'task', 'ul']);
-    const kept = buttons.filter((b) => b !== more && !b.hasAttribute(FORMAT_MORE_ITEM_ATTR));
+    // 🔴 #1982 段 3: 隠した元(「その他 ▾」の一覧の項目)は帯に並ばない ── 数えるのは直接出すボタンだけ
+    const inSource = (b: Element): boolean => b.closest('[data-pkc-field="format-more-source"]') !== null;
+    const shown = buttons.filter((b) => b !== more && !inSource(b));
+    const kept = shown.filter((b) => !b.hasAttribute(FORMAT_MORE_ITEM_ATTR));
     expect(kept.map((b) => b.getAttribute('data-pkc-format')).sort()).toEqual(['bold', 'italic', 'link', 'task', 'ul']);
-    // 道を減らしていない: しまうボタンも「…」を開けば全部出る(数は帯の全ボタン − 1 つ目の 5 つ − 「…」)
-    const stowed = buttons.filter((b) => b.hasAttribute(FORMAT_MORE_ITEM_ATTR));
-    expect(stowed.length + kept.length + 1).toBe(buttons.length);
-    expect(stowed.length, '何もしまっていない(空振り)').toBeGreaterThan(10);
-    // 日付・テンプレート・置換など、先に聞く道具も「…」の中にある(消えていない)
+    // 道を減らしていない: しまうボタン(「その他 ▾」を含む)も「…」を開けば出る
+    const stowed = shown.filter((b) => b.hasAttribute(FORMAT_MORE_ITEM_ATTR));
+    expect(stowed.length + kept.length).toBe(shown.length);
+    expect(stowed.length, '何もしまっていない(空振り)').toBeGreaterThanOrEqual(9);
+    expect(bar.querySelector('[data-pkc-action="open-format-more"]')?.hasAttribute(FORMAT_MORE_ITEM_ATTR)).toBe(true);
+    // 日付・テンプレート・置換など、先に聞く道具は「その他 ▾」の一覧の元にある(消えていない。スマホも「…」→「その他 ▾」で届く)
     for (const a of ['insert-date', 'insert-snippet', 'toggle-replace', 'insert-diagram']) {
-      expect(bar.querySelector(`[data-pkc-action="${a}"]`)?.hasAttribute(FORMAT_MORE_ITEM_ATTR), `${a} が「…」の中に無い`).toBe(true);
+      expect(inSource(bar.querySelector(`[data-pkc-action="${a}"]`)!), `${a} が「その他 ▾」の元に無い`).toBe(true);
     }
   });
 

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, clickBarMoreItem } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -42,6 +42,49 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   await expect(bar.locator('[data-pkc-field="format-more"]'), '広い画面に「…」が出ている').toBeHidden();
   expect(heights.length).toBeGreaterThan(10);
   expect([...new Set(heights)], `ボタンの高さがばらついている: ${heights.join(',')}`).toHaveLength(1);
+
+  /**
+   * 🔴 #1982 段 3: 直接出すのは普段使いの 4 塊だけ(見出し | 太字・斜体・コード・リンク | 箇条書き・番号・チェック・引用 | 表・ノートリンク・添付)+「その他 ▾」。
+   * ⚠ 1440px で 1 行に収まる(折り返して 2 段にならない)/ 塊の間は余白で切れている(塊の中より広い)/ 副次の操作は「その他 ▾」の一覧にある。
+   */
+  const shown = await bar.locator('button').evaluateAll((els) =>
+    els
+      .filter((e) => e.checkVisibility())
+      .map((e) => {
+        const r = e.getBoundingClientRect();
+        return {
+          label: e.querySelector('[data-pkc-field="label"]')?.textContent ?? '',
+          top: Math.round(r.top),
+          left: r.left,
+          right: r.right,
+        };
+      }),
+  );
+  expect(shown.map((b) => b.label)).toEqual([
+    '見出し1', '見出し2', '見出し3',
+    '太字', '斜体', 'コード', 'リンク',
+    '箇条書き', '番号', 'チェック', '引用',
+    '表', 'ノートリンクを入れる', '添付を入れる',
+    'その他 ▾',
+  ]);
+  expect(new Set(shown.map((b) => b.top)).size, `1440px で帯が複数段に折り返している: ${shown.map((b) => b.top).join(',')}`).toBe(1);
+  const gaps = shown.slice(1).map((b, i) => Math.round(b.left - shown[i]!.right));
+  const inner = [0, 1, 3, 4, 5, 7, 8, 9, 11, 12].map((i) => gaps[i]!); // 塊の中の隙間
+  const between = [2, 6, 10, 13].map((i) => gaps[i]!); // 塊の間の隙間(見出し|太字 / リンク|箇条書き / 引用|表 / 添付|その他)
+  expect(Math.min(...between), `塊の間が塊の中より広くない(inner=${inner.join(',')} between=${between.join(',')})`).toBeGreaterThan(
+    Math.max(...inner) + 4,
+  );
+  await clickReal(page, '[data-pkc-region="format-bar"] [data-pkc-action="open-format-more"]');
+  const moreMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(moreMenu, '「その他 ▾」を押しても一覧が出ない').toBeVisible();
+  const moreLabels = await moreMenu.locator('button').allTextContents();
+  expect(moreLabels, '「その他 ▾」の一覧の顔ぶれと並び').toEqual([
+    '図を入れる', 'コードブロック', '数式', '注意書き', '日付を入れる', 'テンプレートを入れる', 'アイコンを入れる',
+    '番号を振り直す', '完了項目を末尾へ', 'この行を計算する',
+    'ノート内を探す', '置換の欄を開く / 閉じる',
+  ]);
+  await page.keyboard.press('Escape');
+  await expect(moreMenu, 'Esc で一覧が閉じない').toBeHidden();
 
   // ② 🔴 パネルが**編集欄の上に接している**(離れていると「何に効くか」が読めない)
   const barBox = (await bar.boundingBox())!;
@@ -298,10 +341,11 @@ test('🔴 編集中は追記できず、理由と出口が画面に出る(競�
   // 欄ではなくロックの帯が出る ── **押せないだけ**にしない
   await expect(page.locator('[data-pkc-field="append-form"]')).toBeHidden();
   await expect(page.locator('[data-pkc-field="append-lock-reason"]')).toContainText('編集中');
-  // ⚠ 失わない出口が在る(帯の中の「保存」── #716 まで「保存して解放」)
-  const resolve = page.locator('[data-pkc-field="append-lock"] [data-pkc-action="commit-edit"]');
+  // 🔴 #1982 段 3: 出口(保存 / やめる)は上の帯の 1 か所。下の帯は理由だけで、保存のボタンは持たない
+  await expect(page.locator('[data-pkc-field="append-lock"] [data-pkc-action="commit-edit"]')).toHaveCount(0);
+  const resolve = page.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await expect(resolve).toBeVisible();
-  await clickReal(page, '[data-pkc-field="append-lock"] [data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   // 解けて追記できる
   await expect(page.locator('[data-pkc-field="append-input"]')).toBeVisible();
 
@@ -447,7 +491,7 @@ test('🔴 日付の道具が実機で開き、選んだ日付が本文に入る
     t.setSelectionRange(t.value.length, t.value.length);
   });
 
-  await clickReal(page, '[data-pkc-action="insert-date"]');
+  await clickBarMoreItem(page, '[data-pkc-action="insert-date"]');
   const dialog = page.locator('[data-pkc-region="app-dialog"]');
   await expect(dialog, '日付の窓が開かない').toBeVisible();
 
@@ -531,7 +575,7 @@ test('🔴 「図」は Esc で入らず ↓ Enter で雛形が入り、「図�
   });
 
   // ① 押すと一覧(5 行)。先頭がフローチャート
-  await clickReal(page, '[data-pkc-action="insert-diagram"]');
+  await clickBarMoreItem(page, '[data-pkc-action="insert-diagram"]');
   const rows = page.locator('[data-pkc-field="pick-diagram"]');
   await expect(rows, '図の一覧が 5 行出ていない').toHaveCount(5);
   await expect(rows.first()).toHaveText('フローチャート');
@@ -543,7 +587,7 @@ test('🔴 「図」は Esc で入らず ↓ Enter で雛形が入り、「図�
   await expect(ta, 'Esc で閉じたのに何か入った').toHaveValue('まえ\nうしろ');
 
   // ③ もう一度開き、↓ で 2 行目(クラス図)へ移って Enter ── 鍵だけで選ぶ
-  await clickReal(page, '[data-pkc-action="insert-diagram"]');
+  await clickBarMoreItem(page, '[data-pkc-action="insert-diagram"]');
   await expect(rows.first()).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(rows.nth(1), '↓ で焦点が 2 行目へ移らない').toBeFocused();
@@ -568,7 +612,7 @@ test('🔴 「図」は Esc で入らず ↓ Enter で雛形が入り、「図�
   await ta.evaluate((el) => {
     (el as HTMLTextAreaElement).setSelectionRange(3, 6); // 「なかみ」
   });
-  await clickReal(page, '[data-pkc-action="insert-callout"]');
+  await clickBarMoreItem(page, '[data-pkc-action="insert-callout"]');
   const calloutRows = page.locator('[data-pkc-field="pick-callout"]');
   await expect(calloutRows, '注意書きの種類が 8 行出ていない').toHaveCount(8);
   await expect(calloutRows.first(), '焦点が先頭の行に無い').toBeFocused();
@@ -592,7 +636,7 @@ test('🔴 「図」は Esc で入らず ↓ Enter で雛形が入り、「図�
     t.setSelectionRange(t.value.length, t.value.length);
   });
 
-  await clickReal(page, '[data-pkc-action="insert-icon"]');
+  await clickBarMoreItem(page, '[data-pkc-action="insert-icon"]');
   const picks = page.locator('[data-pkc-field="pick-body-icon"] button');
   // ⚠ 数を名指しで pin しない(絵は増える)── **「なし」が無いこと**が主張である
   await expect(picks, '絵の表が出ていない').not.toHaveCount(0);
@@ -608,7 +652,7 @@ test('🔴 「図」は Esc で入らず ↓ Enter で雛形が入り、「図�
   await expect(ta, 'Esc で閉じたのに何か入った').toHaveValue('きょうは ');
 
   // もう一度開いて、家の絵を押す ── caret の位置に `:home:` が入る
-  await clickReal(page, '[data-pkc-action="insert-icon"]');
+  await clickBarMoreItem(page, '[data-pkc-action="insert-icon"]');
   await clickReal(page, '[data-pkc-field="pick-body-icon"] button[data-pkc-icon-name="home"]');
   await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
   await expect(ta, '選んだ絵の字が caret の位置に入っていない').toHaveValue('きょうは :home:');

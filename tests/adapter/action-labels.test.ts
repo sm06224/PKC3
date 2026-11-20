@@ -29,6 +29,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { AppendBoxRenderer } from '../../src/adapter/ui/render/append-box';
 import { EDITING_STATE_WORD } from '../../src/adapter/ui/render/status-line';
+import { EDITING_LOCK_REASON } from '../../src/adapter/ui/render/append-box';
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -113,7 +114,7 @@ beforeEach(() => {
   document.body.textContent = '';
 });
 
-describe('編集中の出口 2 か所(#716)', () => {
+describe('編集中の出口は上の帯だけ(#716 → #1982 段 3)', () => {
   function editing() {
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
@@ -139,14 +140,13 @@ describe('編集中の出口 2 か所(#716)', () => {
   }
 
   for (const action of ['commit-edit', 'cancel-edit']) {
-    it(`🔴 ${action} は中央と追記欄の 2 か所に出て、字も説明も 1 種類で空でない`, () => {
+    it(`🔴 ${action} は中央の帯の 1 か所だけに出て、字も説明も空でない(#1982 段 3)`, () => {
       const root = editing();
       const all = [...root.querySelectorAll<HTMLButtonElement>(`button[data-pkc-action="${action}"]`)];
-      // ⚠ 出口が 2 つ在ることは #655 ④ の約束 ── 1 つに減ったら「揃っている」は自明になる
-      expect(all.length, `${action} が 2 か所に出ていない(前提が崩れている)`).toBe(2);
-      const inDetail = all.some((b) => b.closest('[data-pkc-region="detail"]') !== null);
-      const inAppend = all.some((b) => b.closest('[data-pkc-region="append"]') !== null);
-      expect(inDetail && inAppend, '中央と追記欄の両方に出ていない').toBe(true);
+      // 🔴 #1982 段 3: 出口は中央の帯の 1 か所だけ(追記欄の下の帯には置かない)
+      expect(all.length, `${action} が中央の帯の 1 か所に出ていない`).toBe(1);
+      expect(all[0]!.closest('[data-pkc-region="detail"]'), '中央の帯に出ていない').not.toBeNull();
+      expect(all[0]!.closest('[data-pkc-region="append"]'), '追記欄に戻っている').toBeNull();
       const labels = new Set(
         all.map((b) => b.querySelector('[data-pkc-field="label"]')?.textContent ?? ''),
       );
@@ -165,10 +165,12 @@ describe('編集中の出口 2 か所(#716)', () => {
    * その状態を長い文で言い直さない。⚠ 主張は「同じ定数と等値」(設計 doc §1
    * P3 の test②)── 文字列を手で書くと、どちらかだけ直した日に緑のまま食い違う。
    */
-  it('🔴 追記欄の断り文は「編集中」の 1 語(ステータスバーと同じ定数)', () => {
+  it('🔴 追記欄の断り文は状態語(ステータスバーと同じ定数)で始まる 1 行で、出口は上と言う', () => {
     const root = editing();
     const reason = root.querySelector('[data-pkc-field="append-lock-reason"]')!.textContent ?? '';
-    expect(reason).toBe(EDITING_STATE_WORD);
+    expect(reason).toBe(EDITING_LOCK_REASON);
+    expect(reason.startsWith(EDITING_STATE_WORD)).toBe(true);
+    expect(reason).toContain('上のボタン');
   });
 
   /**
@@ -177,10 +179,11 @@ describe('編集中の出口 2 か所(#716)', () => {
    * ⚠ 上の describe の 2 つの it が「2 か所に出て、字が空でない」までは見ているので、
    *   ここは**追記欄の中で**両方が見えることだけを見る(重複させない)。
    */
-  it('🔴 追記欄の断り文の隣に、保存 / キャンセルのボタンがそのまま在る', () => {
+  it('🔴 下の帯に保存 / キャンセルのボタンは無い(出口は上の帯の 1 か所 ── #1982 段 3)', () => {
     const root = editing();
     const lockBar = root.querySelector('[data-pkc-field="append-lock"]')!;
-    expect(lockBar.querySelector('button[data-pkc-action="commit-edit"]'), '保存の出口が無い').not.toBeNull();
-    expect(lockBar.querySelector('button[data-pkc-action="cancel-edit"]'), 'キャンセルの出口が無い').not.toBeNull();
+    expect(lockBar.querySelector('button[data-pkc-action="commit-edit"]'), '下に保存が戻っている').toBeNull();
+    expect(lockBar.querySelector('button[data-pkc-action="cancel-edit"]'), '下にやめるが戻っている').toBeNull();
+    expect(root.querySelector('[data-pkc-region="detail"] button[data-pkc-action="commit-edit"]'), '上の保存が無い').not.toBeNull();
   });
 });

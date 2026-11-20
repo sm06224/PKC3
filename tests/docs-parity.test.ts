@@ -53,7 +53,8 @@ import { THEMES } from '../src/adapter/ui/render/theme';
 import { PAGE_FORMATS } from '../src/features/page-format';
 import { EDITOR_MODES } from '../src/features/editor-mode';
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '../src/features/sealed';
-import { buildFormatBar } from '../src/adapter/ui/render/format-bar';
+import { buildFormatBar, formatToolLabel, FORMAT_MORE_MENU_LABEL } from '../src/adapter/ui/render/format-bar';
+import { visibleBarItems, moreBarItems, type BarItem } from '../src/features/markdown/format-bar-layout';
 import { BAR_FORMAT_OPS, FORMAT_OPS } from '../src/features/markdown/text-ops';
 import { APPENDABLE_ARCHETYPES } from '../src/features/flavor/append-spec';
 import { buildOfficePackPanel } from '../src/adapter/ui/render/office-pack-panel';
@@ -583,10 +584,13 @@ describe('マニュアルと実装の突合', () => {
     expect(box, '追記の導線が消えた').toContain("'追記'");
     // ⚠ ロックの出口も pin する ── 無くなると「永久に追記できない」が作れる
     // 🔴 字は中央の帯と同じ「保存 / キャンセル」(#716 ── 直す前は「保存して解放 / 編集を破棄」)
-    for (const label of ['編集を保存する', '編集をやめる', '書き込みを打ち切る']) {
-      expect(box, `ロックの出口「${label}」が消えた`).toContain(`'${label}'`);
+    // 🔴 #1982 段 3: 保存 / やめるは中央の帯(題名の隣)の 1 か所だけ ── 追記欄の下の帯には置かない(強制解放だけ残る)
+    for (const label of ['編集を保存する', '編集をやめる']) {
+      expect(box, `追記欄に「${label}」が戻っている(出口は上の帯の 1 か所)`).not.toContain(`'${label}'`);
       expect(MANUAL, `マニュアルに「${label}」が無い`).toContain(`**${label}**`);
     }
+    expect(box, 'ロックの出口「書き込みを打ち切る」が消えた').toContain("'書き込みを打ち切る'");
+    expect(MANUAL, 'マニュアルに「書き込みを打ち切る」が無い').toContain('**書き込みを打ち切る**');
     expect(detail, '復元が消えた').toContain("textContent = 'この版に戻す'");
     const inspector = readFileSync('src/adapter/ui/render/inspector.ts', 'utf-8');
     /**
@@ -679,33 +683,21 @@ describe('マニュアルと実装の突合', () => {
      *   末尾へ足す形だと、表とコードブロックの間に在ったボタンが 1 つ右へ飛ぶ
      *   (「同じものが常に同じ場所にある」を黙って崩す)。
      */
-    const barLabels = BAR_FORMAT_OPS.map((o) => o.label);
-    const tableAt = barLabels.indexOf('表');
-    expect(tableAt, '帯に「表」が無い(前提が崩れている)').toBeGreaterThanOrEqual(0);
-    barLabels.splice(tableAt + 1, 0, '図を入れる');
+    /**
+     * 🔴 #1982 段 3: 並びと「その他 ▾」の中身は `format-bar-layout.ts` が正本。**帯の並びは、直接出す塊 → 「その他 ▾」→ 隠した元(一覧の項目)**。
+     * ⚠ 字は表(`BAR_FORMAT_OPS`)と道具の登録(`formatToolLabel`)から引き直し、描いた帯と等値で突き合わせる(書き写さない)。
+     */
+    const labelOfItem = (i: BarItem): string =>
+      'op' in i ? BAR_FORMAT_OPS.find((o) => o.op === i.op)!.label : formatToolLabel(i.action)!;
     expect(labels).toEqual([
-      ...barLabels,
-      '日付を入れる',
-      'ノートリンクを入れる',
-      // 🔴 2026-10-17(#1640 ④): 添付を入れる ── ノートリンクの隣(同じ「題名で探して選ぶ」道具)
-      '添付を入れる',
-      'テンプレートを入れる',
-      // 🔴 2026-09-13(#853 段①): アイコン(旧「図案」)── 押すと絵の表が出て、選ぶと `:home:` が入る
-      //   ⚠ **入れる道具の並びの末尾**に置く(日付 / ノート / テンプレート と同じ側)。
-      //     番号・置換の左に差すので、既に在る 3 つは 1px も動かない。
-      'アイコンを入れる',
-      // 🔴 #717 で「番号」→「番号を振り直す」── 左の「番号」(記法)と同じ字が 2 つ並んでいた
-      '番号を振り直す',
-      // 🔴 #1108 チェックリスト完了項目整理
-      '完了項目を末尾へ',
-      // 🔴 2026-10-18(#1163 依頼 163 ③): ノート内を探す ── 置換の隣(「探す」の仲間)
-      'ノート内を探す',
-      '置換の欄を開く / 閉じる',
-      // 🔴 #425 の「囲い」: 種類を先に聞く 1 つ。既存のボタンが動かないよう置換の隣(末尾側)に足した
-      '注意書き',
-      // 🔴 2026-10-26(#766 D-3): この行を計算する ── 末尾。スマホ用画面の「…」を開いたときだけ見える(広い画面は CSS が隠す)
-      'この行を計算する',
+      ...visibleBarItems().map(labelOfItem),
+      FORMAT_MORE_MENU_LABEL,
+      ...moreBarItems().map(labelOfItem),
     ]);
+    // 帯の「図」「日付」「置換」など、これまで直接出していた道具が 1 つも落ちていない(一覧の側へ移っただけ)
+    for (const l of ['図を入れる', '日付を入れる', 'ノートリンクを入れる', '添付を入れる', 'テンプレートを入れる', 'アイコンを入れる', '番号を振り直す', '完了項目を末尾へ', 'ノート内を探す', '置換の欄を開く / 閉じる', '注意書き', 'この行を計算する']) {
+      expect(labels, `「${l}」が帯(その他 ▾ の元を含む)から消えた`).toContain(l);
+    }
     expect(labels.length).toBeGreaterThan(0);
     for (const label of labels) {
       expect(MANUAL, `マニュアルに書式「${label}」の説明が無い`).toContain(`**${label}**`);
@@ -2498,6 +2490,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-11-20(1982)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:CHANGELOG.md の 2026-10-25 の節に原本
+     */
+    '本文のタグの集約・書き出しのアイコン・SQL の COPY',
     /**
      * ⚠ **2026-11-20(1982)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:CHANGELOG.md の 2026-10-19 の節に原本

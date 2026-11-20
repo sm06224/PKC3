@@ -145,7 +145,7 @@ describe('主の操作は面ごとに 1 つ(#722 P2-10)', () => {
     expect(primariesIn(root, 'detail')).toEqual(['commit-edit']);
   });
 
-  it('🔴 追記欄の「保存」には印を付けない(同じ action でも 2 つ濃くしない)', () => {
+  it('🔴 追記欄には「保存」を置かない(主は 1 つ)', () => {
     const { root, d } = mount();
     d.dispatch({ type: 'START_EDIT' });
     // 前提:追記欄が編集中の出口を出している(#716 の約束)
@@ -154,11 +154,8 @@ describe('主の操作は面ごとに 1 つ(#722 P2-10)', () => {
       '前提が崩れている: 追記欄が編集中の帯を出していない',
     ).toBe(false);
     expect(primariesIn(root, 'append')).toEqual([]);
-    // ⚠ 対照群 ── 追記欄にも `commit-edit` は在る(在るのに印だけ無い、を見る)
-    expect(
-      root.querySelector('[data-pkc-region="append"] button[data-pkc-action="commit-edit"]'),
-      '前提が崩れている: 追記欄に保存が無い',
-    ).not.toBeNull();
+    // 🔴 #1982 段 3: 追記欄には保存そのものを置かない(主は中央の 1 つだけ)
+    expect(root.querySelector('[data-pkc-region="append"] button[data-pkc-action="commit-edit"]')).toBeNull();
   });
 
   /**

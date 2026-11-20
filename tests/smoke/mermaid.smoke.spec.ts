@@ -6,6 +6,7 @@ import {
   collectPageErrors,
   useSplitEditor,
   openBigWindowViaLightbox,
+  clickBarMoreItem,
 } from './helpers';
 import { MERMAID_FORMS } from '../fixtures/mermaid-forms';
 
@@ -608,7 +609,7 @@ test('🔴 一覧から選んだ UML の雛形は、そのまま図になる(#52
   await body.click();
 
   // 一覧を開く(帯の「雛形」)。⚠ 押し所は帯 ── 鍵に頼ると割り当て次第で空振りする
-  await clickReal(page, '[data-pkc-action="insert-snippet"]');
+  await clickBarMoreItem(page, '[data-pkc-action="insert-snippet"]');
   const rows = page.locator('[data-pkc-field="pick-snippet"]');
   await expect(rows.first()).toBeVisible();
 
@@ -627,7 +628,7 @@ test('🔴 一覧から選んだ UML の雛形は、そのまま図になる(#52
   //    帯を押すだけでよい
   for (const [i, label] of ['クラス図', 'シーケンス図', '状態遷移図', 'ER 図'].entries()) {
     if (i > 0) {
-      await clickReal(page, '[data-pkc-action="insert-snippet"]');
+      await clickBarMoreItem(page, '[data-pkc-action="insert-snippet"]');
       await expect(page.locator('[data-pkc-field="pick-snippet"]').first()).toBeVisible();
     }
     await page.locator(`[data-pkc-field="pick-snippet"]`, { hasText: label }).first().click();

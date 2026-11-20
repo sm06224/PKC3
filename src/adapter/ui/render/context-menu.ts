@@ -100,6 +100,7 @@ export interface OpenMenu {
  * @param items 出す物。⚠ **空なら開かない**(空の箱を出さない)
  * @param restoreTo 閉じたときに焦点を返す先
  * @param carry 押した物の身元(全ボタンへ属性として写す)。{@link OpenMenu} の説明を読む
+ * @param opts `keepFocus`: 開いても焦点を動かさない(本文の欄に居たまま項目を選ばせる)
  */
 /** 説明の欄の印(`data-pkc-field`)。⚠ smoke / unit はこの印で見る。 */
 export const MENU_HINT_FIELD = 'context-menu-hint';
@@ -163,6 +164,7 @@ export function openContextMenu(
   items: readonly MenuItem[],
   restoreTo: Element | null,
   carry: Readonly<Record<string, string>> = {},
+  opts: { readonly keepFocus?: boolean } = {},
 ): OpenMenu | null {
   if (items.length === 0) return null;
   // ⚠ 置き換えるときは焦点を返さない(直後に新しいメニューが先頭へ取る)
@@ -332,7 +334,9 @@ export function openContextMenu(
   const first = el.querySelector('button');
   // 🔑 開いた直後の欄は、この `focus()` が同期で出す `focusin` が先頭の説明で埋める
   //    (明示の呼びは no-op だった ── 変異試験 H4 が SURVIVED で教えた。2 か所に書かない)
-  if (first instanceof HTMLElement) first.focus();
+  // 🔴 `keepFocus` のときは焦点を動かさない(#1982 段 3 ── 書式の帯の「その他 ▾」。本文の欄から焦点が外れると、
+  //   1 行ずつ打つ編集では行が確定して閉じ、項目を選んでも書き込む先が無くなる。項目は押しても焦点を奪わない作り)
+  if (first instanceof HTMLElement && opts.keepFocus !== true) first.focus();
 
   /**
    * 🔴 **開いた時点の巻き位置を控える**(#875)── 上の docstring のとおり、

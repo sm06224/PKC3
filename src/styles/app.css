@@ -2502,6 +2502,17 @@ button[data-pkc-variant='danger']:hover:not(:disabled),
   border-bottom: none;
   margin-bottom: 0;
 }
+/* 🔴 書式の帯は 4 つの塊 + 「その他 ▾」(#1982 段 3)。塊の間は線ではなく**余白**で切る(塊の中は従来の間隔)。
+ * ⚠ 隠した元(`format-more-source`)は `hidden` なので、ここで `display` を書く器(`format-group`)とは別の名前にしてある */
+[data-pkc-region='format-bar'] {
+  column-gap: var(--s5);
+  align-items: center;
+}
+[data-pkc-region='format-bar'] [data-pkc-field='format-group'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
 [data-pkc-region='format-bar'] button {
   /* ゴースト(地なし。hover で薄い地)── 紙の上の道具は静かに(#1982 段 2) */
   background: transparent;
@@ -10953,13 +10964,7 @@ h3[data-pkc-section] {
 [data-pkc-field='format-more'] {
   display: none;
 }
-/* 🔴 「この行を計算する」(#766 D-3)は、書式バーを広い画面で長くしない ── 「…」を開いたスマホ用画面でだけ出す */
-[data-pkc-region='format-bar'] [data-pkc-more-only] {
-  display: none;
-}
-[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'][data-pkc-more-open] [data-pkc-more-only] {
-  display: inline-flex;
-}
+/* 🔴 「この行を計算する」(#766 D-3)は「その他 ▾」の一覧に入れた(#1982 段 3)── 帯には出さない */
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'] [data-pkc-field='format-more'] {
   display: inline-flex;
   align-items: center;
@@ -10973,6 +10978,13 @@ h3[data-pkc-section] {
 }
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'] button {
   flex: 0 0 auto;
+}
+/* 塊は箱を作らない(狭い画面は 1 段に流し、塊の間の空きも詰める) */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'] [data-pkc-field='format-group'] {
+  display: contents;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar'] {
+  column-gap: var(--s2);
 }
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='format-bar']:not([data-pkc-more-open]) [data-pkc-format-more-item] {
   display: none;
