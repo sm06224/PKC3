@@ -235,6 +235,7 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
       'pkc3.voice-boost': '1',
       'pkc3.voice-level': '1',
       'pkc3.voice-crossfeed': '0',
+      'pkc3.capture-mic-mix': '0',
       'pkc3.phone-links': '1',
       'pkc3.date-links': '0',
       'pkc3.transcript-follow': '0',

@@ -146,6 +146,15 @@ const CASES: readonly {
     b: false,
   },
   {
+    name: 'VoiceBoostStore(画面録画にマイクも混ぜる。既定は入)',
+    make: (st: StorageLike | null = null) => {
+      const s = new VoiceBoostStore(st);
+      return { write: (v) => s.setMicMixEnabled(v as boolean), read: () => s.micMixEnabled() };
+    },
+    a: true,
+    b: false,
+  },
+  {
     name: 'PhoneLinksStore',
     make: (st: StorageLike | null = null) => {
       const s = new PhoneLinksStore(st);

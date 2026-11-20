@@ -83,6 +83,7 @@ const toggles: Record<string, (s: ReturnType<typeof fakeStorage>) => { setEnable
   'pkc3.voice-boost': (s) => new VoiceBoostStore(s),
   'pkc3.voice-level': (s) => ({ setEnabled: (on) => new VoiceBoostStore(s).setLevelEnabled(on) }),
   'pkc3.voice-crossfeed': (s) => ({ setEnabled: (on) => new VoiceBoostStore(s).setCrossfeedEnabled(on) }),
+  'pkc3.capture-mic-mix': (s) => ({ setEnabled: (on) => new VoiceBoostStore(s).setMicMixEnabled(on) }),
   'pkc3.phone-links': (s) => new PhoneLinksStore(s),
   'pkc3.date-links': (s) => new DateLinksStore(s),
   'pkc3.transcript-follow': (s) => ({ setEnabled: (on) => new TranscriptFollowStore(s).set(on) }),
