@@ -433,6 +433,64 @@
   color-scheme: dark;
 }
 
+/* アクセントの色の選択(#1982 段 4)。配色とは独立に --accent 系の 4 トークンだけを差し替える。
+   明るい地向け / 暗い地向けの 2 組(`data-pkc-tone` は applyTheme が立てる)。全配色 × 全色のコントラストは tests/adapter/accent-matrix.test.ts */
+:root[data-pkc-tone='light'][data-pkc-accent='green'] {
+  --accent: #14663c;
+  --accent-fg: #ffffff;
+  --accent-dim: #dcebe2;
+  --accent-dim-fg: #0d3f26;
+}
+
+:root[data-pkc-tone='light'][data-pkc-accent='blue'] {
+  --accent: #0b5cad;
+  --accent-fg: #ffffff;
+  --accent-dim: #dbe8f6;
+  --accent-dim-fg: #0a2f57;
+}
+
+:root[data-pkc-tone='light'][data-pkc-accent='brown'] {
+  --accent: #8b4513;
+  --accent-fg: #ffffff;
+  --accent-dim: #ecdfd0;
+  --accent-dim-fg: #3b1d08;
+}
+
+:root[data-pkc-tone='light'][data-pkc-accent='purple'] {
+  --accent: #6b3fa0;
+  --accent-fg: #ffffff;
+  --accent-dim: #e8dff3;
+  --accent-dim-fg: #2f1750;
+}
+
+:root[data-pkc-tone='dark'][data-pkc-accent='green'] {
+  --accent: #4cba7d;
+  --accent-fg: #04140b;
+  --accent-dim: #1e3a2a;
+  --accent-dim-fg: #cfeadb;
+}
+
+:root[data-pkc-tone='dark'][data-pkc-accent='blue'] {
+  --accent: #5aa2ff;
+  --accent-fg: #04101f;
+  --accent-dim: #1c3556;
+  --accent-dim-fg: #d6e6ff;
+}
+
+:root[data-pkc-tone='dark'][data-pkc-accent='brown'] {
+  --accent: #d9a066;
+  --accent-fg: #1a0f05;
+  --accent-dim: #4a3220;
+  --accent-dim-fg: #f5e6d0;
+}
+
+:root[data-pkc-tone='dark'][data-pkc-accent='purple'] {
+  --accent: #b794f4;
+  --accent-fg: #12062a;
+  --accent-dim: #3b2a5c;
+  --accent-dim-fg: #e9ddff;
+}
+
 /* 幾何とフォント ── **テーマで変えない**(配色ではないので) */
 :root {
   --radius: 3px;

@@ -39,6 +39,7 @@ import { isReadColumns } from '@features/read-columns';
 import { SCHEDULE_LEAD_OPTIONS } from '@features/schedule/schedule-notify';
 import { isTagBadge } from '@features/tag-badge';
 import { isTextScale } from '@features/text-scale';
+import { isAccentChoice, isFontChoice } from '@features/appearance-choice';
 import { isWatchTagsJson } from '@features/export/export-check';
 
 /** 1 件の設定。⚠ 値は保存されている**生の文字列**のまま運ぶ(解釈しない)。 */
@@ -109,6 +110,8 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
   { key: 'pkc3.prose-align', label: '本文の置き場所', valid: (v) => isProseAlign(v) },
   // ⚠ 別の端末でも**同じ意味**になる(見づらいと感じる大きさは人に付く)── 移す
   { key: 'pkc3.text-scale', label: '文字の大きさ', valid: (v) => isTextScale(v) },
+  { key: 'pkc3.accent', label: 'アクセントの色', valid: (v) => isAccentChoice(v) },
+  { key: 'pkc3.font', label: '字体', valid: (v) => isFontChoice(v) },
   { key: 'pkc3.read-columns', label: '本文の段組み', valid: (v) => isReadColumns(v) },
   // ⚠ 段組みと**対**(#525)── 片方だけ運ぶと「段組みは移ったのに線は既定」になる。
   //    見分けにくいと感じる濃さは**人に付く**(文字の大きさと同じ考え方)

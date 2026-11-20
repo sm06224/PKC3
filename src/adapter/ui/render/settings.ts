@@ -52,6 +52,7 @@ import { createThemeSection } from './settings/theme';
 import { createPageFormatSection } from './settings/page-format';
 import { createProseAlignSection } from './settings/prose-align';
 import { createTextScaleSection } from './settings/text-scale';
+import { createAccentSection, createFontSection } from './settings/appearance-choice';
 import { createReadColumnsSection } from './settings/read-columns';
 import { createColumnRuleSection } from './settings/column-rule';
 import { createTagBadgeSection } from './settings/tag-badge';
@@ -257,6 +258,8 @@ export class SettingsRenderer {
       // 🔴 読みにくいときにまず触る「文字の大きさ」を 2 番目へ(依頼 77-1。Gemini 裁定 = 推薦 B)。
       //   幅は「本文の置き場所」と並べて見たいので、ページ設定 → 本文の置き場所は続ける
       createTextScaleSection(region),
+      createAccentSection(region),
+      createFontSection(region),
       createPageFormatSection(region),
       createProseAlignSection(region),
       createReadColumnsSection(region),

@@ -51,6 +51,13 @@ import {
   watchTextScaleFromOtherWindows,
 } from '@adapter/ui/render/text-scale';
 import { textScaleSpec } from '@features/text-scale';
+import {
+  applyAccent,
+  applyFont,
+  initialAccent,
+  initialFont,
+  watchAppearanceChoiceFromOtherWindows,
+} from '@adapter/ui/render/appearance-choice';
 import { applyColumnRule, initialColumnRule } from '@adapter/ui/render/column-rule';
 import { applyTagBadge, initialTagBadge } from '@adapter/ui/render/tag-badge';
 import { watchAppearanceFromOtherWindows } from '@adapter/ui/render/appearance-follow';
@@ -1540,6 +1547,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   applyTextScale(document.documentElement, initialTextScale());
   watchTextScaleFromOtherWindows(document.documentElement, window);
+  // 🎨 アクセントの色・字体も枠より先(#1982 段 4。保存しない = 当てるだけ)
+  applyAccent(document.documentElement, initialAccent());
+  applyFont(document.documentElement, initialFont());
+  watchAppearanceChoiceFromOtherWindows(document.documentElement, window);
   /**
    * 🔴 **段組みも枠より先**(#505 段①。理由は上と同じ)。
    * ⚠ **保存しない**(当てるだけ)── 保存は user が選んだときだけ。

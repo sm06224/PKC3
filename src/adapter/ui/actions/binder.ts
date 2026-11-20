@@ -220,6 +220,8 @@ import { typedCellNote } from '@adapter/state/store-effects';
 import { openCodeFenceAt, locateCodeFence } from '@features/markdown/code-fence-edit';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
+import { isAccentChoice, isFontChoice } from '@features/appearance-choice';
+import { chooseAccent, chooseFont } from '@adapter/ui/render/appearance-choice';
 import { isReadColumns, readColumnsSpec } from '@features/read-columns';
 import { isPageFormat, pageFormatSpec } from '@features/page-format';
 import { isProseAlign, proseAlignSpec } from '@features/prose-align';
@@ -18597,6 +18599,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   (`<select>` でもボタンでも通す)── 3 本目の作法を作らない。
    * 🔑 当てるのは `documentElement`(`applyPageFormat` と同じ先)。
    */
+  /** 🔴 アクセントの色・字体(#1982 段 4)。`set-text-scale` と同じ受け方・同じ当て先。 */
+  'set-accent': (_dispatcher, target) => {
+    const v = target.getAttribute('data-pkc-accent-value');
+    if (v !== null && isAccentChoice(v)) chooseAccent(document.documentElement, v);
+  },
+  'set-font': (_dispatcher, target) => {
+    const v = target.getAttribute('data-pkc-font-value');
+    if (v !== null && isFontChoice(v)) chooseFont(document.documentElement, v);
+  },
   'set-text-scale': (_dispatcher, target) => {
     const v =
       target instanceof HTMLSelectElement

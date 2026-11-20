@@ -150,6 +150,8 @@ export function otherTheme(theme: Theme): Theme {
  */
 export function applyTheme(target: HTMLElement, theme: Theme): void {
   target.setAttribute('data-pkc-theme', theme);
+  // 🔑 アクセントの色の明暗(`tokens.css` の `[data-pkc-tone]`)。THEMES の `dark` から引く(2 本目の表を持たない)
+  target.setAttribute('data-pkc-tone', THEMES.find((t) => t.id === theme)?.dark === true ? 'dark' : 'light');
   syncThemeColor(target);
 }
 
