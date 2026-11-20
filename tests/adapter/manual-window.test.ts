@@ -511,6 +511,28 @@ describe('マニュアルの窓 — 見え方の当て直し(I1 / I3 / I5)', () 
     expect(win.document.documentElement.style.getPropertyValue('--pkc-text-size')).toBe('');
   });
 
+  it('🔴 アクセントの明暗と選んだ色も窓へ当てる / 配色どおりへ戻したら外す(片道ではない)(#1982 段 4)', async () => {
+    const win = fakeWin();
+    (win as unknown as { focus: () => void }).focus = () => {};
+    win.document.body.setAttribute('data-pkc-manual-version', manualBuildTag(parts.version, TEXT));
+    const root = win.document.documentElement;
+    await openManualWindow({
+      ...parts,
+      appearance: { ...dark, tone: 'dark', accent: 'purple' },
+      render: async () => HTML,
+      open: () => win,
+    });
+    expect(root.getAttribute('data-pkc-tone')).toBe('dark');
+    expect(root.getAttribute('data-pkc-accent')).toBe('purple');
+    await openManualWindow({
+      ...parts,
+      appearance: { ...dark, tone: 'dark', accent: null },
+      render: async () => HTML,
+      open: () => win,
+    });
+    expect(root.hasAttribute('data-pkc-accent')).toBe(false);
+  });
+
   it('🔴 古い印の窓を入れ替えた回は swapped(呼び側が「入れ替えた」と言える)── 初回は false', async () => {
     const win = fakeWin();
     (win as unknown as { focus: () => void }).focus = () => {};

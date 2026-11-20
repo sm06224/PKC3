@@ -220,6 +220,8 @@ import { typedCellNote } from '@adapter/state/store-effects';
 import { openCodeFenceAt, locateCodeFence } from '@features/markdown/code-fence-edit';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
+import { isAccentChoice, isFontChoice } from '@features/appearance-choice';
+import { chooseAccent, chooseFont } from '@adapter/ui/render/appearance-choice';
 import { isReadColumns, readColumnsSpec } from '@features/read-columns';
 import { isPageFormat, pageFormatSpec } from '@features/page-format';
 import { isProseAlign, proseAlignSpec } from '@features/prose-align';
@@ -1013,6 +1015,8 @@ import {
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
 import { appPasteToast, showPasteToast } from '@adapter/ui/render/paste-toast';
+import { appNoteLabels } from '@adapter/platform/note-label-store';
+import { isNoteLabelColor, NOTE_LABEL_NAMES } from '@features/note-label';
 import { appNotePins } from '@adapter/platform/note-pin-store';
 import { pinRefusal } from '@features/relation/note-pins';
 
@@ -5341,6 +5345,8 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   'open-inspector-more',
   // 🔑 #1982 段 3 ── 書式の帯の「その他 ▾」
   'open-format-more',
+  // 🔑 #1982 段 4 ── 色ラベルの一覧(1 枚目の一覧の項目から 2 枚目を開く)
+  'note-label-set',
 ]);
 
 /**
@@ -10943,6 +10949,58 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'clear-kind-filter': (dispatcher) => {
     dispatcher.dispatch({ type: 'CLEAR_KIND_FILTER' });
+  },
+  /**
+   * 🔴 **色ラベルで絞る札 / 外す**(#1982 段 4)。もう一度押すと外れる(= 種類の札と同じ)。
+   * ⚠ 色は札が持っている(`data-pkc-note-label-value`)── 推測しない。絞りの規則は `matchesEntry` の 1 か所。
+   */
+  'toggle-label-filter': (dispatcher, target) => {
+    const v = Number(target.closest('[data-pkc-note-label-value]')?.getAttribute('data-pkc-note-label-value'));
+    if (!isNoteLabelColor(v)) return;
+    dispatcher.dispatch({ type: 'SET_LABEL_FILTER', color: dispatcher.getState().labelFilter === v ? null : v });
+  },
+  'clear-label-filter': (dispatcher) => {
+    dispatcher.dispatch({ type: 'SET_LABEL_FILTER', color: null });
+  },
+  /**
+   * 🔴 **ノートに色ラベルを付ける**(#1982 段 4)── 8 色の一覧(2 枚目)を開く。右クリックと右の列の「その他 ▾」が同じ受け手。
+   * ⚠ 対象は**メニューを開いた瞬間のノート**(`rowLidOrSelected`)。一覧の最後の「色ラベルを外す」で外せる(付けられるなら外せる)。
+   * ⚠ 本文は書かない(器のデータ)ので、編集中でも通す。
+   */
+  'note-label-set': (dispatcher, target, _services, root) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null || !st.entryMetas.has(lid)) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '色ラベルを付けるノートを選んでください(行を押すと選べます)' });
+      return;
+    }
+    const cur = appNoteLabels.get(lid);
+    const items: MenuItem[] = [
+      ...NOTE_LABEL_NAMES.map(
+        (name, i): MenuItem => ({
+          action: 'note-label-pick',
+          label: name,
+          checked: cur === i + 1,
+          attrs: { 'data-pkc-note-label-value': String(i + 1) },
+        }),
+      ),
+      { action: 'note-label-clear', label: '色ラベルを外す', disabled: cur === null },
+    ];
+    const r = (target.isConnected ? target : root).getBoundingClientRect();
+    openContextMenu(root, { x: r.right, y: r.top }, items, target.isConnected ? target : null, { 'data-pkc-entry': lid });
+  },
+  'note-label-pick': (dispatcher, target) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    const color = Number(target.getAttribute('data-pkc-note-label-value'));
+    if (lid === null || !st.entryMetas.has(lid) || !isNoteLabelColor(color)) return;
+    appNoteLabels.set(lid, color);
+  },
+  /** 🔴 色ラベルを外す(右クリック・色の一覧の最後から)。⚠ 相手は押した行 / メニューを開いた瞬間のノート。 */
+  'note-label-clear': (dispatcher, target) => {
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
+    if (lid === null) return;
+    appNoteLabels.set(lid, null);
   },
   'set-entry-sort': (dispatcher, target) => {
     const v = (target as HTMLSelectElement).value;
@@ -18597,6 +18655,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   (`<select>` でもボタンでも通す)── 3 本目の作法を作らない。
    * 🔑 当てるのは `documentElement`(`applyPageFormat` と同じ先)。
    */
+  /** 🔴 アクセントの色・字体(#1982 段 4)。`set-text-scale` と同じ受け方・同じ当て先。 */
+  'set-accent': (_dispatcher, target) => {
+    const v = target.getAttribute('data-pkc-accent-value');
+    if (v !== null && isAccentChoice(v)) chooseAccent(document.documentElement, v);
+  },
+  'set-font': (_dispatcher, target) => {
+    const v = target.getAttribute('data-pkc-font-value');
+    if (v !== null && isFontChoice(v)) chooseFont(document.documentElement, v);
+  },
   'set-text-scale': (_dispatcher, target) => {
     const v =
       target instanceof HTMLSelectElement
@@ -18651,6 +18718,8 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
     dispatcher.dispatch({ type: 'CLEAR_KIND_FILTER' });
+    // 色ラベルの絞りも解く(これだけ残ると、語も種類も無いのに 0 件のまま解き方が見えない)
+    dispatcher.dispatch({ type: 'SET_LABEL_FILTER', color: null });
   },
   /**
    * 🔴 **タグに色を付ける**(#1457)── 色を選ぶ窓は付箋・線と同じ 1 つ(`openColorPicker`)。
@@ -24275,6 +24344,8 @@ export function bindActions(
         ...transcriptMenuCtx(st, lid),
         // 🔴 ピン留め(#1377)── 固定エリアは左の列にあるので、左の列の行のメニューだけが渡す
         pinned: appNotePins.has(lid),
+        // 🔴 色ラベル(#1982 段 4)── 付いているときだけ「色ラベルを外す」を出す
+        labelled: appNoteLabels.get(lid) !== null,
       }).map(withRowShortcut),
       st.openBody?.lid === lid,
     );

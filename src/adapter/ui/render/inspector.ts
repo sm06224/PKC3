@@ -2316,6 +2316,8 @@ export class InspectorRenderer {
     entryBtn('move-to-folder');
     // 🔴 複製する(依頼 169)── 右クリックと同じ並び(移すの下)
     entryBtn('duplicate-entry');
+    // 🔴 色ラベル(#1982 段 4)── 右クリックと同じ受け手。外す口は色の一覧の最後(`note-label-set`)
+    entryBtn('note-label-set');
     // 🔴 種類を変える(台帳 #1852 I2 / 依頼 157)── ノートとログだけ(`render` で畳む。`create-in-folder` と同じ作法)
     entryBtn('change-entry-kind');
     entryBtn('create-in-folder');

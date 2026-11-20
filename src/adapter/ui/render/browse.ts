@@ -381,7 +381,7 @@ export class BrowseRouter {
     //    戻したときに元の位置へ帰るのが欲しい振る舞い
     // ⚠ **種類の絞りも「絞り込み中」に数える**(#411)── 数えないと、札を押した
     //    ときだけスクロールが前の位置のまま残る(語で絞ったときと振る舞いが違う)
-    const filtering = state.filterQuery !== '' || state.kindFilter.size > 0;
+    const filtering = state.filterQuery !== '' || state.kindFilter.size > 0 || state.labelFilter !== null;
     // 🔴 フォルダ面は**入っているフォルダごと**に位置を覚える(#1087)。鍵に現在地が無いと、
     //    フォルダへ入ったときルートの深さで開き、戻ったときにルートの位置も失っていた。
     const scopeKey = mode === 'filer' ? (state.scopeLid ?? '') : '';

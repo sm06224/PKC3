@@ -273,3 +273,36 @@ describe('取り込み前の確認でゴミ箱のノートを言う', () => {
     expect(formatArchivePreviewMessage(without!)).not.toContain('ゴミ箱');
   });
 });
+
+describe('ゴミ箱のノートの色ラベル(#1982 段 4)', () => {
+  const labels = [
+    { lid: 'live1', color: 2 },
+    { lid: 'trash1', color: 5 },
+    { lid: 'purged', color: 7 },
+  ];
+
+  it('🔴 全量の書き出しはゴミ箱のノートの色も運び、取り込みで付け替え後の lid へ写る(消えた lid の色は書かない)', async () => {
+    const out = await writeArchive(source({ listNoteLabels: async () => labels }), NOW);
+    const archive = await readArchive(out.blob);
+    expect(archive.noteLabels).toEqual([
+      { lid: 'live1', color: 2 },
+      { lid: 'trash1', color: 5 },
+    ]);
+    expect(restoreArchive(archive, opts()).noteLabels).toEqual([
+      { lid: 'live1', color: 2 },
+      { lid: 'trash1', color: 5 },
+    ]);
+    // 付け替えが起きても、ゴミ箱のノートの色は付け替え後の lid に写る
+    const moved = restoreArchive(archive, opts(['trash1']));
+    const to = moved.trash[0]!.lid;
+    expect(to).not.toBe('trash1');
+    expect(moved.noteLabels).toContainEqual({ lid: to, color: 5 });
+  });
+
+  it('ゴミ箱を運ばない源(部分の書き出し)では、ゴミ箱のノートの色は書かない', async () => {
+    const { listTrashHeads, ...noTrash } = source({ listNoteLabels: async () => labels });
+    void listTrashHeads;
+    const out = await writeArchive(noTrash as ArchiveSource, NOW);
+    expect((await readArchive(out.blob)).noteLabels).toEqual([{ lid: 'live1', color: 2 }]);
+  });
+});

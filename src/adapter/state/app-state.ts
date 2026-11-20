@@ -184,7 +184,15 @@ import type {
   GroupResult as QueryGroups,
   KeyResult as QueryKeys,
 } from '@features/query/group-by';
-import { NO_KINDS, entryFilterOf, normalizeQuery, visibleOrder } from '@features/filter/title-filter';
+import { NO_KINDS, entryFilterOf, normalizeQuery, visibleOrder, type LabelFilter } from '@features/filter/title-filter';
+
+/** 色ラベルが 1 つも無い状態(参照を共有する。毎回 `new Map()` を作らない)。 */
+export const NO_NOTE_LABELS: ReadonlyMap<string, number> = new Map<string, number>();
+
+/** 🔴 いまの色の絞りを `EntryFilter` へ渡す形にする唯一の口(#1982 段 4)。 */
+export function labelFilterOf(state: Pick<AppState, 'noteLabels' | 'labelFilter'>): LabelFilter | null {
+  return state.labelFilter == null ? null : { color: state.labelFilter, labels: state.noteLabels };
+}
 import { commandQueryOf } from '@features/palette/command-query';
 import { foldCase, jumpTerms, normalizeFindQuery } from '@features/filter/search-hits';
 import { DIRECTIONLESS_KINDS, STRUCTURAL, type RelationKind } from '@features/relation/kinds';
@@ -1898,6 +1906,13 @@ export interface AppState {
    */
   kindFilter: ReadonlySet<string>;
   /**
+   * 🔴 **ノートの色ラベル(#1982 段 4)**。lid → 色の番号(1〜8)。正本は storage(`settings` 表)で、
+   * 写しを `SET_NOTE_LABELS` で入れる(行の左の線を描く面と、色の絞りが同じ表を読む)。
+   */
+  noteLabels: ReadonlyMap<string, number>;
+  /** 🔴 色ラベルの絞り(#1982 段 4)。`null` = 絞らない。⚠ `kindFilter` と別に持つ。 */
+  labelFilter: number | null;
+  /**
    * 🔴 **本文が当たった lid**(#181 全文検索)。⚠ `null` = **まだ返っていない**
    * であって「0 件」ではない ── 打った直後は題名の結果だけが出て、SQL が返ると
    * **増える**(減る向きに倒すと、打鍵のたびに行が消えてちらつく)。
@@ -2410,6 +2425,8 @@ export const initialState: AppState = {
   viewMode: 'detail',
   filterQuery: '',
   kindFilter: NO_KINDS,
+  noteLabels: NO_NOTE_LABELS,
+  labelFilter: null,
   searchHits: null,
   selectionHistory: EMPTY_HISTORY,
   entrySort: DEFAULT_ENTRY_SORT,
@@ -3769,6 +3786,9 @@ export type UserAction =
   /** 🔴 **このペインだけの絞り込み**(#273 残件)。 */
   | { type: 'TOGGLE_KIND_FILTER'; archetype: string }
   | { type: 'CLEAR_KIND_FILTER' }
+  /** 🔴 色ラベルの写しを入れ替える / 色で絞る(`null` = 解く)(#1982 段 4)。 */
+  | { type: 'SET_NOTE_LABELS'; labels: ReadonlyMap<string, number> }
+  | { type: 'SET_LABEL_FILTER'; color: number | null }
   | { type: 'DUAL_SET_FILTER'; side: DualSide; filter: string }
   /** 🔴 **1 つ前 / 次の場所へ**(#273 残件。タブごとの履歴)。 */
   | { type: 'DUAL_BACK'; side: DualSide }
@@ -5073,6 +5093,8 @@ function settleOpenedOrder(prev: AppState, result: ReduceResult): ReduceResult {
     s.scopeLid !== prev.scopeLid ||
     s.filterQuery !== prev.filterQuery ||
     s.kindFilter !== prev.kindFilter ||
+    s.labelFilter !== prev.labelFilter ||
+    s.noteLabels !== prev.noteLabels ||
     s.entrySort !== prev.entrySort ||
     s.entrySortDesc !== prev.entrySortDesc ||
     s.filerFlatten !== prev.filerFlatten ||
@@ -5100,7 +5122,7 @@ function followSelectionScope(prev: AppState, result: ReduceResult): ReduceResul
   const st = result.state;
   if (st.selectedLid === null || st.selectedLid === prev.selectedLid) return result;
   if (st.scopeLid !== prev.scopeLid) return result;
-  if (normalizeQuery(st.filterQuery) !== '' || st.kindFilter.size > 0) return result;
+  if (normalizeQuery(st.filterQuery) !== '' || st.kindFilter.size > 0 || st.labelFilter !== null) return result;
   const lid = st.selectedLid;
   if (!st.entryMetas.has(lid)) return result;
   // ⚠ いま居るフォルダ自身を選んだ(パンくずの最後の段を押した)ときは場所を動かさない(#1254 §1)
@@ -5368,6 +5390,8 @@ function reduceCore(
     case 'SET_ENTRY_FILTER':
     case 'TOGGLE_KIND_FILTER':
     case 'CLEAR_KIND_FILTER':
+    case 'SET_NOTE_LABELS':
+    case 'SET_LABEL_FILTER':
     case 'SET_OPENED_AT':
     case 'SET_ENTRY_SORT':
     case 'SET_QUERY_KEY':
@@ -5965,7 +5989,7 @@ export function removeEntryFromState(
       const before = visibleOrder(
         state.order,
         (l) => state.entryMetas.get(l),
-        entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter),
+        entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter, labelFilterOf(state)),
       );
       const vIdx = before.indexOf(lid);
       const after = before.filter((l) => l !== lid);

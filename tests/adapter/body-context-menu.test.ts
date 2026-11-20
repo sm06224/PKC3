@@ -2124,7 +2124,7 @@ describe('行の右クリックの「編集」(#1038 台帳③ C1)', () => {
     // 台帳 #1852 I2 / 依頼 157: ノートとログには「種類を変える…」が「フォルダへ移す…」の下に並ぶ
     // #1377: 左のペインの行にはピン留め(材料 `pinned` を渡した面)も並ぶ
     // #1163 依頼 169: 「ノートを複製する」が「フォルダへ移す…」の下に並ぶ
-    ).toEqual(['start-edit', 'show-history', 'rename-entry-begin', 'move-to-folder', 'duplicate-entry', 'change-entry-kind', 'pin-note']);
+    ).toEqual(['start-edit', 'show-history', 'rename-entry-begin', 'move-to-folder', 'duplicate-entry', 'change-entry-kind', 'pin-note', 'note-label-set']);
     // ⚠ 塊どうしの間が空く印(CSS は app.css 側の test が見る)
     expect(menu.hasAttribute('data-pkc-with-groups'), '塊の間を空ける印が付いていない').toBe(true);
   });

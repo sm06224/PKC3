@@ -150,6 +150,11 @@ export interface ImportDeps {
    * (満杯なら断った数を返す)。戻すのは取り込んだノートに在るものだけ(呼び側が絞ってある)。
    * @returns 足した数 / 上限で見送った数
    */
+  /** ⚠ `alsoLids` = 今回ゴミ箱へ戻したノートの lid(一覧には出ないが、色は戻す)。 */
+  importNoteLabels?(
+    entries: ReadonlyArray<{ lid: string; color: number }>,
+    alsoLids?: ReadonlySet<string>,
+  ): Promise<{ added: number }>;
   importNotePins?(
     lids: readonly string[],
   ): Promise<{
@@ -724,6 +729,8 @@ async function runImport(
           tagColors: restored.tagColors,
           /** 🔴 アーカイブ経路だけが持つ**ピン留め**(#1377。付け替えた lid は写し済み)。 */
           notePins: restored.notePins,
+          /** 🔴 アーカイブ経路だけが持つ**色ラベル**(#1982 段 4。付け替えた lid は写し済み)。 */
+          noteLabels: restored.noteLabels,
           /** 🔴 アーカイブ経路だけが持つ**付け替えた lid**(本文の `entry:` を写す。下の `remap`)。 */
           lidRemap: restored.lidRemap,
           sourceCid: restored.sourceCid,
@@ -1027,6 +1034,7 @@ async function runImport(
       }
       // 🔴 ゴミ箱のノート(台帳 #1852 束 F2 / 依頼 105-2・297 A)── 生きたノート・つながり・履歴の後。ゴミ箱の中へ積むだけで、一覧には出ない
       const trashNotes = 'trash' in result ? result.trash : [];
+      const restoredTrashLids = new Set<string>();
       if (trashNotes.length > 0) {
         stage = 'ゴミ箱のノート';
         if (deps.restoreTrashNotes === undefined) {
@@ -1054,6 +1062,8 @@ async function runImport(
             for (const lid of r.skippedEntries) {
               result.warnings.push(`ゴミ箱のノート「${titleOf.get(lid) ?? '(無題)'}」は戻せませんでした`);
             }
+            const skipped = new Set(r.skippedEntries);
+            for (const b of batch) if (!skipped.has(b.entryLid)) restoredTrashLids.add(b.entryLid);
           }
         }
       }
@@ -1083,6 +1093,15 @@ async function runImport(
           }
         } catch (e) {
           result.warnings.push(`ピン留めを戻せませんでした: ${reason(e)}`);
+        }
+      }
+      // 🔴 色ラベル(#1982 段 4)── ピン留めの後。本文ではないので、戻せなくても取込は失敗にしない
+      const labels = 'noteLabels' in result ? result.noteLabels : [];
+      if (labels.length > 0 && deps.importNoteLabels !== undefined) {
+        try {
+          await deps.importNoteLabels(labels, restoredTrashLids);
+        } catch (e) {
+          result.warnings.push(`色ラベルを戻せませんでした: ${reason(e)}`);
         }
       }
     } catch (e) {

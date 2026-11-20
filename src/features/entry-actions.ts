@@ -67,6 +67,7 @@ export interface EntryAction {
     | 'bookmarked'
     | 'pinnable'
     | 'pinned'
+    | 'labelled'
     | 'attachment'
     | 'kind-changeable'
     | 'transcript';
@@ -167,6 +168,8 @@ export interface EntryMenuContext {
    *   左の列の行のメニューだけが渡す(2 ペインの行・編集中の行は渡さない)。
    */
   readonly pinned?: boolean;
+  /** 🔴 **色ラベルが付いているか**(#1982 段 4)。`true` のときだけ「色ラベルを外す」を出す(`undefined` = 出さない)。 */
+  readonly labelled?: boolean;
   /**
    * 🔴 **時刻つきの行(文字起こし)が在るか**(#1447)。⚠ 本文を読むのは呼び側で、**開いているノートのときだけ**渡す
    *   (別の行の本文は右クリックのためだけに読まない)。省く = 出さない。
@@ -193,6 +196,7 @@ const WHEN: Readonly<
   // 🔴 ピン留めも**対**(#1377)── どちらか一方だけが出る。`undefined` はどちらも出さない
   pinnable: (ctx) => ctx.pinned === false,
   pinned: (ctx) => ctx.pinned === true,
+  labelled: (ctx) => ctx.labelled === true,
   // 🔴 種類を変えられるのはノートとログだけ(台帳 #1852 I2 / 依頼 157)── 判定は `canChangeKind` 1 本
   'kind-changeable': (ctx) => canChangeKind(ctx.archetype),
   // 🔴 字幕ファイル(#1447)── 時刻つきの行があるノートだけ。`undefined`(本文を知らない)は出さない
@@ -516,6 +520,14 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'pin-note', label: 'ピン留めする', group: 'this-one', when: 'pinnable', menuOnly: true },
   { action: 'unpin-note', label: 'ピン留めを外す', group: 'this-one', when: 'pinned', menuOnly: true },
+  /**
+   * 🔴 **ノートに色ラベルを付ける / 外す**(#1982 段 4)。8 色から 1 つ ── 左の列の行の左端に線が出て、一覧を色で絞れる。
+   *
+   * ⚠ **対で置く**(置けるなら外せる)── 「付ける…」は常に出し(右の列の「その他 ▾」にも出る)、押すと色の一覧が開く。
+   *   一覧の最後の「色ラベルを外す」と、付いているときだけ右クリックに出る「色ラベルを外す」が外す口。
+   */
+  { action: 'note-label-set', label: '色ラベルを付ける…', group: 'this-one' },
+  { action: 'note-label-clear', label: '色ラベルを外す', group: 'this-one', when: 'labelled', menuOnly: true },
   /**
    * 🔴 **ゴミ箱を開く**(#1646 の 1 = B。Gemini 裁定 = #1163 の依頼 40 の推薦どおり C = A + B)。
    *
@@ -1627,6 +1639,8 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   'bookmark-note-remove': '2 ペインのブックマークから、このノートを外します(ノートは消えません)',
   'pin-note': 'このノートを左のペインの一覧の上に固定します(いつでも 1 押しで開けます)',
   'unpin-note': '一覧の上の固定から、このノートを外します(ノートは消えません)',
+  'note-label-set': '8 色からこのノートの色ラベルを選びます(左のペインの行の左端に線が出ます)',
+  'note-label-clear': 'このノートの色ラベルを外します(ノートは消えません)',
   'open-note-window':
     'このノートだけを別のウィンドウで開きます(何枚でも開けます。閉じれば消えます)',
   // 🔴 **左の列の道具 4 つ**(#632 段①)。⚠ 字は `shell.ts` のボタンの `title` と

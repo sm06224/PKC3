@@ -57,6 +57,7 @@ import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescu
 import { INTEGRITY_STAMP_KEY, INTEGRITY_STAMP_SCOPE } from '@features/storage/integrity-schedule';
 import { MAX_TAG_COLORS, normalizeTagColor } from '@features/tag-color';
 import { MAX_NOTE_PINS_STORED } from '@features/relation/note-pins';
+import { isNoteLabelColor, MAX_NOTE_LABELS } from '@features/note-label';
 import {
   CORRUPT_BLOCKED_OPS,
   CORRUPT_REFUSAL,
@@ -981,6 +982,11 @@ function tagColorScope(cid: string): string {
 /** ノートのピン留めを持つ `settings` の scope(器ごと。#1377)。1 ノート 1 行(`k` = lid、`v` = 留めた順の通し番号)。 */
 function notePinScope(cid: string): string {
   return `note-pin:${cid}`;
+}
+
+/** ノートの色ラベルを持つ `settings` の scope(器ごと。#1982 段 4)。1 ノート 1 行(`k` = lid、`v` = 色の番号)。 */
+function noteLabelScope(cid: string): string {
+  return `note-label:${cid}`;
 }
 
 /**
@@ -3475,6 +3481,7 @@ function deleteContainerRows(database: Database, cid: string): void {
   }
   database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [tagColorScope(cid)] });
   database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [notePinScope(cid)] });
+  database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [noteLabelScope(cid)] });
   database.exec({ sql: 'DELETE FROM containers WHERE cid = ?', bind: [cid] });
 }
 
@@ -6239,6 +6246,56 @@ const handlers: Handlers = {
             bind: [scope, req.lid, String((Number.isFinite(max) ? max : 0) + 1)],
           });
         }
+      }
+      database.exec('COMMIT');
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+    return null;
+  },
+  /** 🔴 **ノートの色ラベル**(#1982 段 4)── `settings` 表の 1 ノート 1 行。表を足さない = 版を上げない。 */
+  listNoteLabels: (req) => {
+    const rows = need().selectObjects('SELECT k, v FROM settings WHERE scope = ?', [noteLabelScope(req.cid)]) as Array<{
+      k: string;
+      v: string | null;
+    }>;
+    return rows
+      .map((r) => ({ lid: r.k, color: Number(r.v) }))
+      .filter((r) => r.lid !== '' && isNoteLabelColor(r.color))
+      .sort((a, b) => a.lid.localeCompare(b.lid));
+  },
+  putNoteLabel: (req) => {
+    const database = need();
+    const scope = noteLabelScope(req.cid);
+    if (req.lid === '') throw new Error('色を付けるノートが指定されていません');
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      // 消えたノート(`entries` にもゴミ箱にも無い)の行の掃除はここ 1 か所(ピン留めと同じ)
+      database.exec({
+        sql: `DELETE FROM settings
+               WHERE scope = ?1
+                 AND NOT EXISTS (SELECT 1 FROM entries e WHERE e.cid = ?2 AND e.lid = settings.k)
+                 AND NOT EXISTS (SELECT 1 FROM revisions r WHERE r.cid = ?2 AND r.entry_lid = settings.k)`,
+        bind: [scope, req.cid],
+      });
+      if (req.color === null) {
+        database.exec({ sql: 'DELETE FROM settings WHERE scope = ? AND k = ?', bind: [scope, req.lid] });
+      } else {
+        if (!isNoteLabelColor(req.color)) throw new Error('色の番号が正しくありません');
+        const existing = database.selectValue('SELECT 1 FROM settings WHERE scope = ? AND k = ?', [scope, req.lid]);
+        if (existing === undefined || existing === null) {
+          const n = Number(database.selectValue('SELECT count(*) FROM settings WHERE scope = ?', [scope]));
+          if (n >= MAX_NOTE_LABELS) throw new Error('色ラベルの記録がいっぱいです');
+        }
+        database.exec({
+          sql: 'INSERT INTO settings(scope, k, v) VALUES (?, ?, ?) ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v',
+          bind: [scope, req.lid, String(req.color)],
+        });
       }
       database.exec('COMMIT');
     } catch (err) {

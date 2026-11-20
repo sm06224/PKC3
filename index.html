@@ -30,6 +30,8 @@
           'solarized-dark',
           'dracula',
           'nord',
+          'paper',
+          'paper-dark',
           'terminal',
           'retro',
         ];
@@ -44,6 +46,18 @@
           } catch (e) {}
         }
         document.documentElement.setAttribute('data-pkc-theme', t);
+        // 🔴 アクセントの明暗(`theme.ts` の `data-pkc-tone`)と選んだ色(`pkc3.accent`)も先に立てる ──
+        //   起動後に当てると、既定のアクセントが 1 コマ出る。⚠ 暗い配色の id は `theme.ts` の `dark: true` の写し
+        //   (`tests/repo-hygiene.test.ts` が突き合わせる)。アクセントの id は `appearance-choice.ts` の写し。
+        var dk = ['dark', 'github-dark', 'solarized-dark', 'dracula', 'nord', 'paper-dark', 'terminal', 'retro'];
+        document.documentElement.setAttribute('data-pkc-tone', dk.indexOf(t) >= 0 ? 'dark' : 'light');
+        var ac = null;
+        try {
+          ac = localStorage.getItem('pkc3.accent');
+        } catch (e) {}
+        if (['green', 'blue', 'brown', 'purple'].indexOf(ac) >= 0) {
+          document.documentElement.setAttribute('data-pkc-accent', ac);
+        }
       })();
     </script>
     <link rel="manifest" href="./manifest.webmanifest" />

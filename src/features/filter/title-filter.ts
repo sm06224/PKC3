@@ -76,6 +76,17 @@ export interface EntryFilter {
    *   user は**壊れたと読む**(そして解き方が画面のどこにも出ていない)。
    */
   readonly kinds: ReadonlySet<string>;
+  /**
+   * 🔴 **色ラベルの絞り(#1982 段 4)。`null` = 絞らない。**
+   * ⚠ 絞りの規則は `matchesEntry` の 1 か所(面ごとに書かない)。lid → 色の表は呼び手が持つ(state の `noteLabels`)。
+   */
+  readonly label?: LabelFilter | null;
+}
+
+/** 色ラベルで絞る条件(`features/note-label.ts` の番号)。 */
+export interface LabelFilter {
+  readonly color: number;
+  readonly labels: ReadonlyMap<string, number>;
 }
 
 /** 種類で絞っていない状態。⚠ 呼び手ごとに `new Set()` を書かない(毎描画の確保になる)。 */
@@ -90,7 +101,8 @@ export const entryFilterOf = (
   rawQuery: string,
   bodyHits: ReadonlySet<string> | null,
   kinds: ReadonlySet<string>,
-): EntryFilter => ({ query: normalizeQuery(rawQuery), bodyHits, kinds });
+  label: LabelFilter | null = null,
+): EntryFilter => ({ query: normalizeQuery(rawQuery), bodyHits, kinds, label });
 
 /**
  * 🔴 **題名 + 本文 + 種類**で見る(#181 / #411)。本文の当たりは SQL 側から来た
@@ -106,6 +118,8 @@ export const entryFilterOf = (
  */
 export function matchesEntry(target: FilterTarget, filter: EntryFilter): boolean {
   if (filter.kinds.size > 0 && !filter.kinds.has(target.archetype)) return false;
+  // 🔴 色ラベル(#1982 段 4)── 種類と同じく、語が空でも効く
+  if (filter.label != null && filter.label.labels.get(target.lid) !== filter.label.color) return false;
   if (filter.query === '') return true;
   /**
    * 🔴 **`#タグ` の問い合わせは、そのタグが付いたノートだけ**(依頼 317)。題名では当てない ──

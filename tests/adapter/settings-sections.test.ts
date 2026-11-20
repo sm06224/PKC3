@@ -129,6 +129,8 @@ const ALL_IDS = [
   'theme',
   // 依頼 77-1:読みにくいときにまず触る「文字の大きさ」を配色の次へ(幅の 2 つは続ける)
   'text-scale',
+  'accent',
+  'font',
   'page-format',
   'prose-align',
   'read-columns',
@@ -172,6 +174,8 @@ const DT_ORDER: Record<string, string[]> = {
   'settings-user': [
     '配色',
     '文字の大きさ', // 依頼 77-1
+    'アクセントの色',
+    '字体',
     'ページ設定',
     '本文の置き場所',
     '本文の段組み',

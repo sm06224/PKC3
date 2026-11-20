@@ -224,6 +224,8 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
       'pkc3.panes': PANES[0]!,
       'pkc3.pane-sizes': `${SIZED_PANES[0]!}:300`,
       'pkc3.open-in-edit': '1',
+      'pkc3.accent': 'blue',
+      'pkc3.font': 'mincho',
       'pkc3.read-columns': '2',
       'pkc3.column-rule': 'none',
       'pkc3.keymap': '{}',

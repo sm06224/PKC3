@@ -43,6 +43,7 @@ function archive(over: Partial<Pkc3Archive> = {}): Pkc3Archive {
     assets: [],
     tagColors: [],
     notePins: [],
+    noteLabels: [],
     trash: [],
     trashRelations: [],
     trashRevisions: [],

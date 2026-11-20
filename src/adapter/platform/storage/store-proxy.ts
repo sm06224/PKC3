@@ -115,6 +115,8 @@ export const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   'putTagColor',
   // ⚠ **足し忘れると、他タブのピン留めが古いまま**(#1377)── 受け手は main.ts の `onRemoteChanged`(`listNotePins` を読み直す)
   'putNotePin',
+  // ⚠ **足し忘れると、他タブの色ラベルが古いまま**(#1982 段 4)── 受け手は main.ts の `reloadNoteLabels`
+  'putNoteLabel',
   // ⚠ **足し忘れると、他タブの本文が古いまま残る**(#1087)── 添付を参照するノートを何件も書き換える。
   //   当たり先は書く前に分からないので `changedLids` は null(全面の読み直し。保存のたびではなく稀)
   'replaceAssetRefs',
@@ -186,6 +188,7 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'listSystemEntries',
   'listTagColors',
   'listNotePins',
+  'listNoteLabels',
   'listTrash',
   'listTrashHeads',
   'queryScan',

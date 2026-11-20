@@ -76,7 +76,7 @@ describe('🔴 見た目の段はトークンから選ぶ(#1982 段 0)', () => {
 
   it('🔴 影の 3 段は全テーマが持つ', () => {
     const themes = [...TOKENS.matchAll(/:root\[data-pkc-theme='([\w-]+)'\]\s*\{([^}]*)\}/g)];
-    expect(themes.length, 'テーマを引けない(走査が壊れている)').toBe(10);
+    expect(themes.length, 'テーマを引けない(走査が壊れている)').toBe(12);
     for (const [, name, body] of themes) {
       /**
        * 🔴 **濃さは 小 < 中 < 大** で並ぶ(着地前レビュー)── 名前だけ見ると、暗いテーマの大を

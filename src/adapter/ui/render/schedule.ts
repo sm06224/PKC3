@@ -28,7 +28,7 @@
  * **日ごと**(`features/schedule/agenda.ts`)。⚠ 「今週」で束ねると、落としたときに
  * **どの日か決まらない** ── 束 = 落とし先なので、束ね方が操作を決めてしまう。
  */
-import type { AppState } from '@adapter/state/app-state';
+import { labelFilterOf, type AppState } from '@adapter/state/app-state';
 import {
   buildAgenda,
   type AgendaGroup,
@@ -208,6 +208,8 @@ export class ScheduleRenderer {
     order: AppState['order'];
     filter: string;
     kindFilter: AppState['kindFilter'];
+    labelFilter: AppState['labelFilter'];
+    noteLabels: AppState['noteLabels'];
     hits: AppState['searchHits'];
     showArchived: boolean;
     showDone: boolean;
@@ -315,6 +317,9 @@ export class ScheduleRenderer {
       // ⚠ 鍵は `kindFilter`(`filerRows` へ渡す `kinds:` と**綴りを分ける**)──
       //   同じ綴りだと、指紋を見張る test が options の行に満たされる
       kindFilter: state.kindFilter,
+      // 🔴 色の絞りと色の表も指紋(入れないと色を押しても予定表が描き直らない)
+      labelFilter: state.labelFilter,
+      noteLabels: state.noteLabels,
       hits: state.searchHits,
       showArchived: state.showArchived,
       showDone: state.showDoneTasks,
@@ -358,7 +363,7 @@ export class ScheduleRenderer {
      *   「絞りが勝手に解けた」としか見えない(CLAUDE.md §7)。
      * 🔑 札の相手は**行が載っているノート**である(予定の行そのものに種類は無い)。
      */
-    const filter = entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter);
+    const filter = entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter, labelFilterOf(state));
     /**
      * 🔑 **何を出すかは `scheduleItemsOf` 1 か所**(`.ics` の書き出しも同じ口を呼ぶ ── §7)。
      * 絞り込み・片付けた・済んだ行の規則と、ノート 1 件が丸ごと予定のもの(frontmatter の `date:`、段④)もそこにある。
@@ -405,7 +410,7 @@ export class ScheduleRenderer {
       groups.length,
       hiddenByNote,
     );
-    const filterOn = state.filterQuery.trim() !== '' || state.kindFilter.size > 0;
+    const filterOn = state.filterQuery.trim() !== '' || state.kindFilter.size > 0 || state.labelFilter !== null;
     const showClear = groups.length === 0 && filterOn;
     if (frame.clearFilter.hidden === showClear) frame.clearFilter.hidden = !showClear;
     const undatedCount = this.paintUndatedToggle(frame.undated, state, visible.length - dated.length);

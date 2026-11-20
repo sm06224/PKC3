@@ -986,6 +986,8 @@ img[data-pkc-action='view-big']:focus-visible {
    * ⚠ 折り返しは**最後の手段**である ── 下の `min-width: max-content` と対で
    *   読む:語が入るうちは 1 段のまま伸び、入らなくなった時だけ段が増える。 */
   flex-wrap: wrap;
+  /* ⚠ 間(gap)は 0 のまま ── 8 枚が 1 段に収まる幅はぎりぎりで、2px 足すだけで 1280px で先頭が畳まれる
+   *   (`layout.smoke.spec.ts`)。語どうしの切れ目は、幅を取らない短い縦の目印で付ける(下の `button + button`) */
   gap: 0;
   /* 下地は机のまま。🔑 線は引かない ── 選んでいるタブの下線(下の `[data-pkc-active]`)が
    *   現在地を示し、一覧との間は余白で切る(#1982 段 2) */
@@ -1003,6 +1005,8 @@ img[data-pkc-action='view-big']:focus-visible {
    * 🔑 `max-content` を下限にすると、器は語を割らない ── 余りが無ければ折り返す。 */
   flex: 1 1 auto;
   min-width: max-content;
+  /* 切れ目の目印(`button + button::before`)の基準 */
+  position: relative;
   /* ⚠ 詰めるのは**下限**であって見た目ではない ── `flex: 1 1 auto` で伸びるので、
    *   余りが有る幅では左右に余白が付く。効くのは「あと少しで折り返す」幅だけで、
    *   実測ではここが 2px か 8px かで **1024px が 1 段か 2 段か**を分けた。
@@ -1017,6 +1021,22 @@ img[data-pkc-action='view-big']:focus-visible {
   /* ⚠ 標準のボタンは 1px の透明の枠を持つ ── タブは**語より細くしない**ので、枠ぶん(8 枚で 16px)も詰める */
   border: none;
   justify-content: center;
+}
+/**
+ * 🔴 **タブとタブの切れ目**(#1982 段 4 の確認で見つけた段 2 の退行)。⚠ 段 2 で 1px の輪をやめたら、
+ *   幅が詰まったときに語どうしが**くっついて 1 続きの字**に見えた(「フォルダアプリ予定…」)。
+ * 🔑 幅を取らない(絶対配置の `::before`)、高さ半分の薄い縦の目印。背景に描くと、タブの地(`background`)の一括指定が
+ *   重ねた画像を消して、選択中・hover のタブで目印が消えた。間を足すと 1 段に収まらなくなる(上の `gap: 0`)。
+ */
+[data-pkc-region='browse-tabs'] button + button::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 25%;
+  height: 50%;
+  width: 1px;
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+  pointer-events: none;
 }
 /**
  * 🔴 **図案は出さない**(2026-08-27。以前は 900px 以下だけで落としていた)。
@@ -1529,6 +1549,64 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
 [data-pkc-region='filer-table'] tbody tr[data-pkc-selected] td:first-child {
   box-shadow: inset 3px 0 0 var(--accent);
 }
+/**
+ * 🔴 **ノートの色ラベル**(#1982 段 4)── 行の**いちばん左**に 3px の線(`--note-N`。配色ごとに地へ 3:1 以上)。
+ * ⚠ 選んでいる行の現在地の線(`--accent`)と**同居する**: 色ラベルが左端 0〜3px、現在地の線がその内側 3〜6px
+ *   (影を 2 枚重ねる)。どちらも `box-shadow: inset` なので行の幅・高さは動かない。
+ * ⚠ `<tr>` には影が描けない(border-collapse の表)ので、先頭のセルへ当てる(現在地の線と同じ作法)。
+ */
+[data-pkc-note-label='1'] { --pkc-note-label-color: var(--note-1); }
+[data-pkc-note-label='2'] { --pkc-note-label-color: var(--note-2); }
+[data-pkc-note-label='3'] { --pkc-note-label-color: var(--note-3); }
+[data-pkc-note-label='4'] { --pkc-note-label-color: var(--note-4); }
+[data-pkc-note-label='5'] { --pkc-note-label-color: var(--note-5); }
+[data-pkc-note-label='6'] { --pkc-note-label-color: var(--note-6); }
+[data-pkc-note-label='7'] { --pkc-note-label-color: var(--note-7); }
+[data-pkc-note-label='8'] { --pkc-note-label-color: var(--note-8); }
+tr[data-pkc-note-label] td:first-child {
+  box-shadow: inset 3px 0 0 var(--pkc-note-label-color);
+}
+[data-pkc-region='filer-table'] tbody tr[data-pkc-selected][data-pkc-note-label] td:first-child {
+  box-shadow:
+    inset 3px 0 0 var(--pkc-note-label-color),
+    inset 6px 0 0 var(--accent);
+}
+/* 色ラベルの選択肢(「色ラベルを付ける…」の一覧)と、色で絞る札の見本の四角。値は `data-pkc-note-label-value`(1〜8) */
+[data-pkc-action='note-label-pick']::before {
+  content: '';
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-inline-end: var(--s3);
+  border-radius: var(--radius-sm);
+  background: var(--pkc-note-label-color, transparent);
+  vertical-align: -0.1em;
+}
+[data-pkc-action='toggle-label-filter']::before {
+  content: '';
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-inline-end: var(--s2);
+  border-radius: var(--radius-pill);
+  background: var(--pkc-note-label-color, transparent);
+}
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='1'],
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='1'] { --pkc-note-label-color: var(--note-1); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='2'],
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='2'] { --pkc-note-label-color: var(--note-2); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='3'],
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='3'] { --pkc-note-label-color: var(--note-3); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='4'],
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='4'] { --pkc-note-label-color: var(--note-4); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='5'],
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='5'] { --pkc-note-label-color: var(--note-5); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='6'],
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='6'] { --pkc-note-label-color: var(--note-6); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='7'],
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='7'] { --pkc-note-label-color: var(--note-7); }
+[data-pkc-action='note-label-pick'][data-pkc-note-label-value='8'],
+[data-pkc-action='toggle-label-filter'][data-pkc-note-label-value='8'] { --pkc-note-label-color: var(--note-8); }
 [data-pkc-entry] [data-pkc-field='title'] {
   overflow: hidden;
   text-overflow: ellipsis;

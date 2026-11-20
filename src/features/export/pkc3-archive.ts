@@ -34,6 +34,7 @@ import { relabeledInFileWarning, relabeledWarning } from '../import/relabel-warn
 import { archiveTooBigRefusal, MAX_EMBED_TEXT_CHARS, notImportableArchiveMessage } from '../storage/image-export-limit';
 import { parseTagColorList, type TagColorEntry } from '../tag-color';
 import { normalizePinLids } from '../relation/note-pins';
+import { labelsFor, normalizeNoteLabels, type NoteLabelEntry } from '../note-label';
 import { safeName } from './file-name';
 
 export const ARCHIVE_FORMAT = 'pkc3-archive';
@@ -217,6 +218,8 @@ export interface ArchiveSource {
    * 留めた順の lid が `container.json` の `notePins` に入る(書き出すノートに在るものだけ)。旧ビルドは知らないキーとして読み飛ばす。
    */
   listNotePins?(): Promise<string[]>;
+  /** 🔴 **ノートの色ラベル**(#1982 段 4)。⚠ 任意。`container.json` の `noteLabels`(書き出すノートに在る分だけ)。 */
+  listNoteLabels?(): Promise<NoteLabelEntry[]>;
   listRevisionLids(): Promise<string[]>;
   /**
    * 鎖を**保存形のまま**取り出す(P6e、新しい → 古い)。
@@ -474,7 +477,11 @@ export async function writeArchive(
   parts.push(tagColors.length > 0 ? `,"tagColors":${j(tagColors)}` : '');
   // 🔴 ピン留め(#1377)── 書き出すノートに在るものだけ。1 つも無ければキーごと書かない
   const notePins = ((await src.listNotePins?.()) ?? []).filter((l) => exportedLids.has(l));
-  parts.push(notePins.length > 0 ? `,"notePins":${j(notePins)}}` : '}');
+  parts.push(notePins.length > 0 ? `,"notePins":${j(notePins)}` : '');
+  // 🔴 色ラベル(#1982 段 4)── 書き出すノート + 書いたゴミ箱のノートに在るものだけ(部分の書き出しはゴミ箱を書かない)。
+  //   ゴミ箱のノートの色を落とすと、バックアップから戻したあとゴミ箱から戻したノートの色が消える。1 つも無ければキーごと書かない
+  const noteLabels = labelsFor((await src.listNoteLabels?.()) ?? [], new Set([...exportedLids, ...trashParts.lids]));
+  parts.push(noteLabels.length > 0 ? `,"noteLabels":${j(noteLabels)}}` : '}');
 
   const w = new ZipWriter();
   await w.add(
@@ -565,11 +572,13 @@ async function writeTrashParts(
   relations: string[];
   revisions: Blob[];
   blobChars: number;
+  /** 書いたゴミ箱のノートの lid(色ラベルの書き出しが使う)。 */
+  lids: ReadonlySet<string>;
 }> {
-  const out = { count: 0, notes: [] as Blob[], relations: [] as string[], revisions: [] as Blob[], blobChars: 0 };
+  const trashLids = new Set<string>();
+  const out = { count: 0, notes: [] as Blob[], relations: [] as string[], revisions: [] as Blob[], blobChars: 0, lids: trashLids };
   if (src.listTrashHeads === undefined) return out;
   const heads = await src.listTrashHeads();
-  const trashLids = new Set<string>();
   let revCount = 0;
   for (const h of heads) {
     // 生きているノートと同じ lid は書かない(画面が古い。生きている側が正)
@@ -623,6 +632,8 @@ export interface Pkc3Archive {
   tagColors: TagColorEntry[];
   /** ノートのピン留め(#1377)。留めた順の lid。無いバックアップ・読めない要素は空。 */
   notePins: string[];
+  /** ノートの色ラベル(#1982 段 4)。無いバックアップ・読めない行は空 / 落とす。 */
+  noteLabels: NoteLabelEntry[];
   /** 🔴 ゴミ箱のノート(台帳 #1852 束 F2)。無いバックアップ(旧い版が書いた物・ゴミ箱が空だった物)は空。 */
   trash: ArchiveTrashNote[];
   /** ゴミ箱のノートに触るつながり。 */
@@ -720,6 +731,7 @@ export interface ArchiveContainerJson {
   tagColors?: unknown;
   /** ノートのピン留め(#1377)。lid の並び。 */
   notePins?: unknown;
+  noteLabels?: unknown;
   /** 🔴 ゴミ箱のノート(台帳 #1852 束 F2)。旧い版が書いた物には無い。 */
   trash?: ArchiveTrashNote[];
   trashRelations?: ArchiveRelation[];
@@ -791,6 +803,7 @@ export function assembleArchive(
     manifest,
     tagColors: colors.list,
     notePins: normalizePinLids(c.notePins),
+    noteLabels: normalizeNoteLabels(c.noteLabels),
     trash: Array.isArray(c.trash) ? c.trash : [],
     trashRelations: Array.isArray(c.trashRelations) ? c.trashRelations : [],
     trashRevisions: Array.isArray(c.trashRevisions) ? c.trashRevisions : [],
@@ -879,6 +892,8 @@ export function restoreArchive(
   tagColors: TagColorEntry[];
   /** 取り込むピン留め(#1377)。⚠ 付け替えた lid は写し済み(`lidRemap` と同じ表)。取込側は足りない分だけ足す。 */
   notePins: string[];
+  /** 取り込む色ラベル(#1982 段 4)。⚠ 付け替えた lid は写し済み。取込側は足りない分だけ足す。 */
+  noteLabels: NoteLabelEntry[];
   /**
    * 🔴 **付け替えた lid**(旧 → 新。変わった組だけ)。本文の `entry:<lid>` は**ここでは書き換えない** ──
    *   取込側が添付の key と一緒に `remapImportedBody` 1 本で当てる(履歴の鎖にも同じ規則を当てるため。
@@ -1048,9 +1063,14 @@ export function restoreArchive(
   const lidRemap: Array<readonly [string, string]> = [];
   for (const [from, to] of lidMap) if (from !== to) lidRemap.push([from, to]);
   // 🔴 ピン留め(#1377)── 取り込むノート(付け替え後の lid)に在るものだけ
+  // ⚠ ゴミ箱のノートの lid も含める(戻した後に、ゴミ箱から戻すと色が付いている)
   const importedLids = new Set(entries.map((e) => e.lid));
+  const importedWithTrash = new Set([...importedLids, ...trash.map((t) => t.lid)]);
   const notePins = archive.notePins
     .map((l) => lidMap.get(l) ?? l)
     .filter((l, i, a) => importedLids.has(l) && a.indexOf(l) === i);
-  return { entries, relations, assets, trash, revisionChains, tagColors: archive.tagColors, notePins, lidRemap, sourceCid: archive.manifest.cid ?? '', warnings };
+  const noteLabels = archive.noteLabels
+    .map((e) => ({ lid: lidMap.get(e.lid) ?? e.lid, color: e.color }))
+    .filter((e, i, a) => importedWithTrash.has(e.lid) && a.findIndex((x) => x.lid === e.lid) === i);
+  return { entries, relations, assets, trash, revisionChains, tagColors: archive.tagColors, notePins, noteLabels, lidRemap, sourceCid: archive.manifest.cid ?? '', warnings };
 }

@@ -27,7 +27,7 @@
  * 🔑 この file の下の規律(「押しても何も変わらない札は dead click」)を、
  *   **面の違いにも当てる**。
  */
-import type { AppState } from '@adapter/state/app-state';
+import { labelFilterOf, type AppState } from '@adapter/state/app-state';
 import {
   NO_KINDS,
   entryFilterOf,
@@ -41,6 +41,16 @@ import { stampChanges } from '@features/relation/meta-stamps';
 import { filerRowOptions } from '@adapter/state/list-view-options';
 import { kindFilterApplies, type BrowseMode } from './browse-mode';
 import { buildPressedButton } from './choice-buttons';
+import { noteLabelName } from '@features/note-label';
+
+/** 使っている色ラベルと件数(いま在るノートだけ。色の番号順)。 */
+function labelCounts(state: AppState): { color: number; count: number }[] {
+  const n = new Map<number, number>();
+  for (const [lid, color] of state.noteLabels) {
+    if (state.entryMetas.has(lid)) n.set(color, (n.get(color) ?? 0) + 1);
+  }
+  return [...n].sort((a, b) => a[0] - b[0]).map(([color, count]) => ({ color, count }));
+}
 
 export class KindBarRenderer {
   private readonly kindBar: HTMLElement | null;
@@ -66,6 +76,9 @@ export class KindBarRenderer {
     scope: AppState['scopeLid'];
     relations: AppState['relations'];
     smartHits: AppState['smartHits'];
+    /** 🔴 色の絞りでも数が変わる(種類の数は色で絞った後を数える)。 */
+    labelFilter: AppState['labelFilter'];
+    noteLabels: AppState['noteLabels'];
     kinds: ReturnType<typeof kindCounts>;
   } | null = null;
 
@@ -80,6 +93,8 @@ export class KindBarRenderer {
       m.scope === state.scopeLid &&
       m.relations === state.relations &&
       m.smartHits === state.smartHits &&
+      m.labelFilter === state.labelFilter &&
+      m.noteLabels === state.noteLabels &&
       /**
        * 🔑 **一覧の参照が違っても、違うのが時刻だけなら数え直さない**(#1087)。数えるのは
        *   「どの行がどの種類か」で、時刻は使わない(並べ替えの鍵には使うが、数は並びに依らない)。
@@ -106,7 +121,7 @@ export class KindBarRenderer {
         flatten: true,
       });
     } else {
-      const counted = entryFilterOf(state.filterQuery, state.searchHits, NO_KINDS);
+      const counted = entryFilterOf(state.filterQuery, state.searchHits, NO_KINDS, labelFilterOf(state));
       present = [];
       for (const lid of state.order) {
         const meta = state.entryMetas.get(lid);
@@ -123,6 +138,8 @@ export class KindBarRenderer {
       scope: state.scopeLid,
       relations: state.relations,
       smartHits: state.smartHits,
+      labelFilter: state.labelFilter,
+      noteLabels: state.noteLabels,
       kinds,
     };
     return kinds;
@@ -171,10 +188,12 @@ export class KindBarRenderer {
      * 🔴 **`>` を打っている間は札を出さない**(#274 段①)── 一覧が操作に替わっているので、
      *   ノートの種類で絞る札は**押しても見えている物が変わらない**(dead click)。
      */
+    // 🔴 色ラベルの札(#1982 段 4)── 使っている色だけ。種類の札と同じ帯に置く(同じ「絞る」の動線)
+    const labels = labelCounts(state);
     const show =
       commandQueryOf(state.filterQuery) === null &&
       kindFilterApplies(mode) &&
-      (kinds.length > 1 || state.kindFilter.size > 0);
+      (kinds.length > 1 || state.kindFilter.size > 0 || labels.length > 0 || state.labelFilter !== null);
     /**
      * 🔴 **効いているのは「畳んだときの指紋を別にしてある」ほう**である
      *   (2026-08-27、変異試験 K3 が SURVIVED で教えた)。
@@ -189,7 +208,8 @@ export class KindBarRenderer {
      *   (CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
      */
     const shape = show
-      ? `${mode}|${kinds.map((k) => `${k.archetype}:${k.count}`).join('|')}#${[...state.kindFilter].sort().join(',')}`
+      ? `${mode}|${kinds.map((k) => `${k.archetype}:${k.count}`).join('|')}#${[...state.kindFilter].sort().join(',')}` +
+        `@${labels.map((l) => `${l.color}:${l.count}`).join('|')}#${state.labelFilter ?? ''}`
       : `${mode}|off`;
     if (shape === this.lastKindShape) return; // 姿が同じ ── DOM に触れない
     this.lastKindShape = shape;
@@ -197,6 +217,30 @@ export class KindBarRenderer {
     bar.textContent = '';
     if (!show) return;
     for (const k of kinds) bar.append(this.kindChip(k, state.kindFilter.has(k.archetype)));
+    for (const l of labels) {
+      bar.append(
+        buildPressedButton({
+          action: 'toggle-label-filter',
+          dataAttr: 'data-pkc-note-label-value',
+          value: String(l.color),
+          label: `${noteLabelName(l.color)} ${l.count}`,
+          pressed: state.labelFilter === l.color,
+          title:
+            state.labelFilter === l.color
+              ? `色ラベル「${noteLabelName(l.color)}」の絞りを外します`
+              : `色ラベルが「${noteLabelName(l.color)}」のノートだけにします(${l.count} 件)`,
+        }),
+      );
+    }
+    if (state.labelFilter !== null) {
+      const off = document.createElement('button');
+      off.type = 'button';
+      off.setAttribute('data-pkc-action', 'clear-label-filter');
+      off.setAttribute('data-pkc-field', 'label-clear');
+      off.textContent = '色の絞りを外す';
+      off.title = '色ラベルの絞りを外して全部出します';
+      bar.append(off);
+    }
     if (state.kindFilter.size > 0) {
       const off = document.createElement('button');
       off.type = 'button';

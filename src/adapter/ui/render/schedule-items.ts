@@ -6,7 +6,7 @@
  * 絞りの規則は 3 つ:片付けたノート(`showArchived`)/ 済んだ行(`showDoneTasks`)/
  * 検索・種類の絞り(`matchesEntry`)。
  */
-import type { AppState } from '@adapter/state/app-state';
+import { labelFilterOf, type AppState } from '@adapter/state/app-state';
 import { noteOwnerFor, noteWhenFor, type TaskCard } from '@features/schedule/task-cards';
 import { ownerChoices, passesOwnerFilter } from '@features/schedule/owner';
 import { itemOfCard, itemOfNote, type AgendaItem } from '@features/schedule/agenda';
@@ -38,7 +38,7 @@ export interface ScheduleItems {
 }
 
 export function scheduleItemsOf(state: AppState): ScheduleItems {
-  const filter = entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter);
+  const filter = entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter, labelFilterOf(state));
   const all = state.taskScan?.cards ?? [];
   const hiddenNotes = new Set(state.scheduleHiddenNotes);
   // ⚠ ノートを隠す前の札(他の絞りは掛けてある)── 「出すもの」のノートの一覧と、隠した数がここから出る

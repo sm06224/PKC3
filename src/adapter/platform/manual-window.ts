@@ -104,6 +104,10 @@ export interface OpenManualWindowDeps {
 export interface ManualAppearance {
   /** `data-pkc-theme` の値(無ければ触らない)。 */
   readonly theme: string | null;
+  /** `data-pkc-tone`(アクセントの明暗)。省略 / `null` = 触らない。 */
+  readonly tone?: string | null;
+  /** `data-pkc-accent`(選んだアクセント)。省略 = 触らない / `null` = 外す(配色どおり)。 */
+  readonly accent?: string | null;
   /**
    * user が**選んだ**大きさ(`text-scale.ts` の `chosenTextScale` を px にしたもの)。
    * ⚠ `null` = 選んでいない → 外して CSS の既定へ戻す(焼いた page の boot script と同じ門。
@@ -153,6 +157,9 @@ function applyAppearance(win: Window, a: ManualAppearance | undefined): void {
     const root = win.document.documentElement;
     const keep = readingAnchor(win.document);
     if (a.theme !== null) root.setAttribute('data-pkc-theme', a.theme);
+    if (a.tone !== undefined && a.tone !== null) root.setAttribute('data-pkc-tone', a.tone);
+    if (a.accent === null) root.removeAttribute('data-pkc-accent');
+    else if (a.accent !== undefined) root.setAttribute('data-pkc-accent', a.accent);
     if (a.textSize !== null) root.style.setProperty('--pkc-text-size', a.textSize);
     else root.style.removeProperty('--pkc-text-size');
     keep?.();

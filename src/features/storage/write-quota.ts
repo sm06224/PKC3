@@ -121,6 +121,8 @@ export const QUOTA_ALLOWED_WRITES: readonly string[] = [
   'putTagColor',
   // ノートのピン留め(#1377)── `settings` の 1 行(外す・掃除するときは減る)。空きが無くても付け外しできる
   'putNotePin',
+  // 色ラベル(#1982 段 4)── `settings` の 1 行(外すときは減る)。空きが無くても付け外しできる
+  'putNoteLabel',
   // ワークスペース(#1455)── 切り替え・改名は 1 行を上書きするだけ。削除は減らす側。空きが無くても通す
   'switchWorkspace',
   'renameWorkspace',

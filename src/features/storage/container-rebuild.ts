@@ -245,6 +245,8 @@ export function rebuildArchiveSource(opts: {
   readonly tagColors?: ReadonlyArray<{ tag: string; color: string }>;
   /** 🔴 捨てる前に読んだノートのピン留め(#1377)。色と同じ理由で安全のための zip にも入れる。 */
   readonly notePins?: readonly string[];
+  /** 🔴 捨てる前に読んだ色ラベル(#1982 段 4)。 */
+  readonly noteLabels?: ReadonlyArray<{ lid: string; color: number }>;
 }): { readonly source: ArchiveSource; readonly stats: () => RescueStats } {
   const assetPorts = assetArchivePorts(opts.cid, opts.assets);
   const source: ArchiveSource = {
@@ -280,6 +282,9 @@ export function rebuildArchiveSource(opts: {
     ...(opts.notePins === undefined || opts.notePins.length === 0
       ? {}
       : { listNotePins: async () => [...opts.notePins!] }),
+    ...(opts.noteLabels === undefined || opts.noteLabels.length === 0
+      ? {}
+      : { listNoteLabels: async () => opts.noteLabels!.map((e) => ({ lid: e.lid, color: e.color })) }),
   };
   return {
     source,
@@ -369,6 +374,8 @@ export interface RebuildPorts {
   readTagColors(): Promise<Array<{ tag: string; color: string }>>;
   /** 🔴 捨てる前にノートのピン留めを読む(#1377)。⚠ 省略可 ── 読めなくても建て直しは止めない。 */
   readNotePins?(): Promise<string[]>;
+  /** 🔴 色ラベル(#1982 段 4)。ピン留めと同じ扱い(読めなければ空)。 */
+  readNoteLabels?(): Promise<Array<{ lid: string; color: number }>>;
   /** 🔑 添付の実体(IndexedDB)。⚠ 渡さなければ zip に添付が入らない。 */
   readonly assets?: RescueAssets;
   /** ① zip を手元へ落とす。⚠ **落ちたら例外**(何も消さずに止まる)。 */
@@ -416,6 +423,7 @@ export interface RebuildPorts {
   writeTagColors(cid: string, colors: ReadonlyArray<{ tag: string; color: string }>): Promise<void>;
   /** ⑤ 🔴 捨てる前に読んだノートのピン留めを戻す(#1377)。⚠ 省略可。 */
   writeNotePins?(cid: string, lids: readonly string[]): Promise<void>;
+  writeNoteLabels?(cid: string, entries: ReadonlyArray<{ lid: string; color: number }>): Promise<void>;
   /** 消えたノート由来の物をこの端末から落とす(コピー履歴など)。 */
   forgetLocal(): void;
   /** ⑥ 🔴 **最後に**他のタブへ知らせる。 */
@@ -511,6 +519,7 @@ export async function rebuildContainer(
   const tagColors = await ports.readTagColors().catch(() => []);
   // 🔴 ピン留めも同じ(#1377)。戻すのは書き戻したノートに在る lid だけ(`writeNotePins` の前に絞る)
   const notePins = (await ports.readNotePins?.().catch(() => [] as string[])) ?? [];
+  const noteLabels = (await ports.readNoteLabels?.().catch(() => [])) ?? [];
   const { source, stats } = rebuildArchiveSource({
     cid,
     title,
@@ -521,6 +530,7 @@ export async function rebuildContainer(
     truncated: got.truncated,
     tagColors,
     notePins,
+    noteLabels,
     ...(ports.assets === undefined ? {} : { assets: ports.assets }),
   });
   /**
@@ -654,6 +664,11 @@ export async function rebuildContainer(
       if (notePins.length > 0 && ports.writeNotePins !== undefined) {
         const have = new Set(entries.map((e) => e.lid));
         await ports.writeNotePins(cid, notePins.filter((l) => have.has(l))).catch(() => {});
+      }
+      // 🔴 色ラベル(#1982 段 4)── 戻したノートに在るものだけ。戻せなくても建て直しは失敗にしない
+      if (noteLabels.length > 0 && ports.writeNoteLabels !== undefined) {
+        const have = new Set(entries.map((e) => e.lid));
+        await ports.writeNoteLabels(cid, noteLabels.filter((e) => have.has(e.lid))).catch(() => {});
       }
     } catch (e) {
       ports.forgetLocal();
