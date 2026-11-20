@@ -66,9 +66,9 @@ for (const m of tokens.matchAll(/:root(?:,\s*:root)?\[data-pkc-theme='([a-z-]+)'
 }
 
 describe('依頼 244 / 245:薄い字の対比', () => {
-  it('前提:10 テーマ全部を読めている(読めていないテーマを素通りしない)', () => {
+  it('前提:12 テーマ全部を読めている(読めていないテーマを素通りしない)', () => {
     expect(Object.keys(themes).sort()).toEqual(
-      ['dark', 'dracula', 'github', 'github-dark', 'light', 'nord', 'retro', 'solarized', 'solarized-dark', 'terminal'].sort(),
+      ['dark', 'dracula', 'github', 'github-dark', 'light', 'nord', 'paper', 'paper-dark', 'retro', 'solarized', 'solarized-dark', 'terminal'].sort(),
     );
     for (const [name, v] of Object.entries(themes)) {
       for (const k of ['fg', 'surface', 'muted', 'accent-dim', 'accent-dim-fg'])

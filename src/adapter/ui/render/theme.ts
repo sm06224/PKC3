@@ -30,6 +30,8 @@ export const THEMES = [
   { id: 'solarized-dark', label: 'Solarized ダーク', dark: true },
   { id: 'dracula', label: 'Dracula', dark: true },
   { id: 'nord', label: 'Nord', dark: true },
+  { id: 'paper', label: '紙(生成りと茶)', dark: false },
+  { id: 'paper-dark', label: '紙ダーク(セピア)', dark: true },
   { id: 'terminal', label: 'ターミナル(端末風)', dark: true },
   { id: 'retro', label: 'レトロ(茶とオレンジ)', dark: true },
 ] as const;

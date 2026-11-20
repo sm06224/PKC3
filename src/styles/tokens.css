@@ -363,6 +363,76 @@
   color-scheme: dark;
 }
 
+/* 紙(原典の PKC の「紙とインク」の温かさを、段差で区切る作りに移した物。#1982 段 4)
+   地(机 --bg)は紙(--surface)より 1 段暗い生成り。アクセントは鞍茶(saddle brown)。
+   色は意味にだけ ── 茶は主の操作・フォーカスにしか使わない */
+:root[data-pkc-theme='paper'] {
+  --bg: #e9e6df;
+  --surface: #f7f6f3;
+  --surface-2: #eeece8;
+  --fg: #1a1a1a;
+  --muted: #66635e;
+  --border: #bcbab6;
+  --accent: #8b4513;
+  --accent-fg: #ffffff;
+  --accent-dim: #e8e2d8;
+  --accent-dim-fg: #3b1d08;
+  --danger: #a3231c;
+  --warn: #7a4a00;
+  --ok: #16692e; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
+  /* コードの色(地は `--surface-2` = `pre` の背景)*/
+  --code-key: #1d4ed8;
+  --code-lit: #0a6b52;
+  /* 予定の左の縦線(ノートごとの自動の色)。地(--surface / --surface-2)に対して 3:1 以上 */
+  --note-1: #c2410c;
+  --note-2: #a16207;
+  --note-3: #15803d;
+  --note-4: #0e7490;
+  --note-5: #1d4ed8;
+  --note-6: #7e22ce;
+  --note-7: #be185d;
+  --note-8: #64748b;
+  --shadow: 0 2px 6px rgb(40 30 20 / 13%);
+  --shadow-sm: 0 1px 2px rgb(40 30 20 / 8%);
+  --shadow-lg: 0 8px 24px rgb(40 30 20 / 20%);
+  --sandbox-bg: #ffffff;
+  color-scheme: light;
+}
+
+/* 紙(ダーク)── 夜の机に置いたセピアの紙。琥珀色のアクセント */
+:root[data-pkc-theme='paper-dark'] {
+  --bg: #15110d;
+  --surface: #1f1913;
+  --surface-2: #2a2219;
+  --fg: #e8e0d2;
+  --muted: #a89c8a;
+  --border: #443829;
+  --accent: #d9a066;
+  --accent-fg: #1a0f05;
+  --accent-dim: #4a3220;
+  --accent-dim-fg: #f5e6d0;
+  --danger: #f08a78;
+  --warn: #e0a350;
+  --ok: #7fbf5a; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
+  /* コードの色(地は `--surface-2`) */
+  --code-key: #e7b26b;
+  --code-lit: #a9c98a;
+  /* 予定の左の縦線(ノートごとの自動の色)。地(--surface / --surface-2)に対して 3:1 以上 */
+  --note-1: #fb923c;
+  --note-2: #facc15;
+  --note-3: #4ade80;
+  --note-4: #22d3ee;
+  --note-5: #60a5fa;
+  --note-6: #c084fc;
+  --note-7: #f472b6;
+  --note-8: #94a3b8;
+  --shadow: 0 2px 6px rgb(0 0 0 / 50%);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow-lg: 0 8px 24px rgb(0 0 0 / 70%);
+  --sandbox-bg: #ffffff;
+  color-scheme: dark;
+}
+
 /* 幾何とフォント ── **テーマで変えない**(配色ではないので) */
 :root {
   --radius: 3px;
