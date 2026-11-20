@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { atChoices, detectTrigger, slashChoices } from '../../src/features/markdown/inline-complete';
+import { atChoices, detectTrigger, slashChoices, slashToolChoices, SLASH_TOOLS } from '../../src/features/markdown/inline-complete';
 
 const meta = (lid: string, title: string, i: number) =>
   ({ lid, title, archetype: 'text', createdAt: null, updatedAt: null, entryOrder: i, status: null, date: null, archived: false }) as never;
@@ -74,5 +74,27 @@ describe('コードの中・表の行では出ない(着地前レビュー)', ()
     expect(at('| 項目 | @議事')).toBeNull();
     expect(at('  | a | b | @x')).toBeNull();
     expect(at('項目 @議事')).toMatchObject({ kind: 'at' });
+  });
+});
+
+describe('slashToolChoices(#1982 段 3)── 先に聞く挿入の道具', () => {
+  it('空の / には出さない(今までの 8 件の顔ぶれを道具が奪わない)', () => {
+    expect(slashToolChoices('')).toEqual([]);
+  });
+  it('字(含む)でも綴り(前方一致)でも絞れる', () => {
+    expect(slashToolChoices('日付').map((t) => t.action)).toEqual(['insert-date']);
+    expect(slashToolChoices('date').map((t) => t.action)).toEqual(['insert-date']);
+    expect(slashToolChoices('ATT').map((t) => t.action)).toEqual(['insert-attachment']);
+    expect(slashToolChoices('notelink').map((t) => t.action)).toEqual(['insert-entry-link']);
+    expect(slashToolChoices('icon').map((t) => t.action)).toEqual(['insert-icon']);
+  });
+  it('当たらない語・文中の字では出ない / 全道具が空でない字と綴りを持つ', () => {
+    expect(slashToolChoices('zzzz-no-such')).toEqual([]);
+    expect(slashToolChoices('usr/bin')).toEqual([]);
+    expect(SLASH_TOOLS.length).toBeGreaterThanOrEqual(4);
+    for (const t of SLASH_TOOLS) {
+      expect(t.label, t.action).not.toBe('');
+      expect(t.keys.length, t.action).toBeGreaterThan(0);
+    }
   });
 });

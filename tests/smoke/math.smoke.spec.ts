@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, clickBarMoreItem } from './helpers';
 
 /**
  * 🔴 **数式が本当に数式の形で出る**(#707。user 裁定 2026-09-06「入れる」)。
@@ -156,7 +156,7 @@ test('🔴 書式パネルの「数式」を押すと $$ の囲みが入る (#70
   await editor.fill('前の行\n');
   await editor.click();
   await page.keyboard.press('Control+End');
-  await clickReal(page, '[data-pkc-format="math"]');
+  await clickBarMoreItem(page, '[data-pkc-action="format-text"][data-pkc-format="math"]');
   const text = await editor.inputValue();
   expect(text, '$$ の囲みが入っていない').toContain('$$\n\n$$');
   // ⚠ **打ち始められる所に caret が来る**(囲みの中)── 来ないと、押した直後に

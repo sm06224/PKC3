@@ -1241,6 +1241,20 @@ export async function clickInspectorMoreItem(page: Page, action: string): Promis
   await clickReal(page, `[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`);
 }
 
+/**
+ * 🔴 **書式の帯の「その他 ▾」を開いて、一覧の項目を押す**(#1982 段 3)。
+ * ⚠ 図・コードブロック・数式・日付・テンプレート・アイコン・注意書き・番号を振り直す・完了項目を末尾へ・探す・置換は、
+ *   帯に直接は出ていない(隠した元のボタンを spec が直に押さないための 1 本)。
+ * @param itemSelector 一覧の中の項目の選択子(例: `[data-pkc-action="insert-date"]` / `[data-pkc-action="format-text"][data-pkc-format="math"]`)
+ */
+export async function clickBarMoreItem(page: Page, itemSelector: string): Promise<void> {
+  await clickReal(page, '[data-pkc-region="format-bar"] [data-pkc-action="open-format-more"]');
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '帯の「その他 ▾」を押しても一覧が出ない').toBeVisible();
+  await expect(menu.locator(itemSelector), `${itemSelector} が「その他 ▾」の一覧に無い`).toBeVisible();
+  await clickReal(page, `[data-pkc-region="context-menu"] ${itemSelector}`);
+}
+
 /** 「書き出す ▾」を実マウスで開き、一覧(右クリックと同じ器)を返す。 */
 export async function openExportMenu(page: Page, kind: 'entry' | 'collection' = 'entry'): Promise<Locator> {
   // 🔴 ノート 1 件の「書き出す ▾」は「その他 ▾」の中(#1982 段 1)── 開いて項目を押すと 2 枚目の一覧が出る

@@ -77,6 +77,23 @@ test('🔴 行頭の / と @ で候補が caret の下に出て、Tab で入る(
   await expect(menu, '設定を戻しても候補が出ない').toBeVisible();
   await page.keyboard.press('Escape');
 
+  // 🔴 #1982 段 3: 行頭の / → 候補 → Enter で、その行が見出しになる(`/語` は消える)
+  await page.keyboard.press('Control+A');
+  await page.keyboard.type('/見出し3');
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(menu).toHaveCount(0);
+  await expect(ta, 'Enter で見出し3 に置き換わらない').toHaveValue('### ');
+  // 🔴 先に聞く挿入の道具も呼べる: /date → 「日付を入れる」→ Enter で `/date` が消え、日付の選びが開く
+  await page.keyboard.press('Control+A');
+  await page.keyboard.type('/date');
+  await expect(menu.locator('[data-pkc-field="inline-complete-item"]').first()).toContainText('日付を入れる');
+  await page.keyboard.press('Enter');
+  await expect(ta, '/date が消えていない').toHaveValue('');
+  await expect(page.locator('[data-pkc-region="app-dialog"]').first(), '日付の選びが開かない').toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-pkc-region="app-dialog"]').first()).toBeHidden();
+
   await dismissAnnounce(page).catch(() => undefined);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

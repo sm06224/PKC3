@@ -101,6 +101,32 @@ export function slashChoices(items: readonly SnippetItem[], query: string): Snip
   return all.filter(hit).slice(0, COMPLETE_LIMIT);
 }
 
+/**
+ * 🔴 **`/` で呼べる「先に聞く」挿入の道具**(#1982 段 3)。帯の「その他 ▾」・直接出すボタンと**同じ action**(押すと既存の受け手が動く)。
+ * ⚠ 字は帯のボタンの字と同じ(`tests/adapter/inline-complete.test.ts` が描いた帯と突き合わせる)。
+ * ⚠ 語を打ったときだけ出す(空の `/` の一覧は今までの顔ぶれのまま ── 8 件の枠を道具が奪わない)。
+ */
+export interface SlashTool {
+  readonly action: string;
+  readonly label: string;
+  /** 打ち分け用の短い綴り(小文字のローマ字・英語)。字でも絞れる。 */
+  readonly keys: readonly string[];
+}
+
+export const SLASH_TOOLS: readonly SlashTool[] = [
+  { action: 'insert-date', label: '日付を入れる', keys: ['date', 'today', 'hizuke'] },
+  { action: 'insert-entry-link', label: 'ノートリンクを入れる', keys: ['notelink', 'link', 'wikilink'] },
+  { action: 'insert-attachment', label: '添付を入れる', keys: ['attach', 'attachment', 'file', 'image', 'tenpu'] },
+  { action: 'insert-icon', label: 'アイコンを入れる', keys: ['icon'] },
+];
+
+/** `/` の語に当たる道具。⚠ 語が空なら 0 件(上の注記)。字は含む・綴りは前方一致。 */
+export function slashToolChoices(query: string): SlashTool[] {
+  const q = fold(query);
+  if (q === '') return [];
+  return SLASH_TOOLS.filter((t) => fold(t.label).includes(q) || t.keys.some((k) => k.startsWith(q)));
+}
+
 export type AtChoice =
   | { readonly kind: 'date'; readonly id: DateShortcut; readonly title: string; readonly date: string }
   | { readonly kind: 'note'; readonly lid: string; readonly title: string; readonly sub: string };

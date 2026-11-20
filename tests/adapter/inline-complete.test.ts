@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { initialState } from '../../src/adapter/state/app-state';
+import { buildFormatBar } from '../../src/adapter/ui/render/format-bar';
+import { SLASH_TOOLS } from '../../src/features/markdown/inline-complete';
 
 const REGION = '[data-pkc-region="inline-complete"]';
 
@@ -280,5 +282,32 @@ describe('着地前レビューの指摘', () => {
       else s.root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
       expect(s.menu(), `${how}: 孤児の小窓が残った`).toBeNull();
     }
+  });
+});
+
+describe('/ から先に聞く挿入の道具を呼ぶ(#1982 段 3)', () => {
+  it('字は帯のボタンの字と同じ(帯を描いて読む ── 書き写した字と食い違わない)', () => {
+    const bar = buildFormatBar();
+    for (const t of SLASH_TOOLS) {
+      const btn = bar.querySelector(`[data-pkc-action="${t.action}"]`);
+      expect(btn, `${t.action} が帯に無い`).not.toBeNull();
+      expect(btn!.querySelector('[data-pkc-field="label"]')?.textContent, t.action).toBe(t.label);
+    }
+  });
+
+  it('/日付 → 「日付を入れる」が出て、Tab で `/日付` が消え、帯と同じ受け手(日付の選び)が開く', () => {
+    const { type, key, menu, rows, ta } = setup();
+    type('前の行\n/日付');
+    expect(menu(), '小窓が出ない').not.toBeNull();
+    expect(rows()).toContain('日付を入れる');
+    key('Tab');
+    expect(ta.value, '/日付 が残っている').toBe('前の行\n');
+    expect(document.querySelector('dialog'), '日付の選びが開かない(受け手が呼ばれていない)').not.toBeNull();
+  });
+
+  it('文中の /日付 では出ない(行頭だけ)', () => {
+    const { type, menu } = setup();
+    type('今日は /日付');
+    expect(menu()).toBeNull();
   });
 });

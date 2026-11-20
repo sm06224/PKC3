@@ -69,41 +69,42 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
   await clickReal(page, '[data-pkc-action="start-edit"]');
   // 🔴 C4:状態語が戻る(保存で消え、次の編集開始でまた出ることを見る)
   await expect(statusText, '2 回目の編集で「編集中」が戻っていない').toContainText('編集中');
-  // 🔴 C4:追記欄の断り文も「編集中」の 1 語(§1 P3 test②「同じ定数と等値」)。
-  //   保存 / キャンセルの出口はそのまま残っていることも見る(出口を削っていない)。
+  // 🔴 #1982 段 3: 追記欄の下の帯は「編集中。保存・編集をやめるは、上のボタンから」の 1 行だけ。
+  //   保存 / やめるのボタンは**上の帯(題名の隣)の 1 か所**で、下には置かない(同じ操作の入口を 2 つにしない)
   await expect(
     page.locator('[data-pkc-field="append-lock-reason"]'),
-    '追記欄の断り文が「編集中」の 1 語になっていない',
-  ).toHaveText('編集中');
+    '追記欄の断り文が「編集中。…上のボタンから」になっていない',
+  ).toHaveText(/^編集中。保存・編集をやめるは、上のボタンから$/);
   await expect(
     page.locator('[data-pkc-field="append-lock"] button[data-pkc-action="commit-edit"]'),
-    '追記欄に保存の出口が無い',
-  ).toBeVisible();
+    '追記欄に保存のボタンが戻っている(保存は上の 1 か所)',
+  ).toHaveCount(0);
   await expect(
     page.locator('[data-pkc-field="append-lock"] button[data-pkc-action="cancel-edit"]'),
-    '追記欄にキャンセルの出口が無い',
+    '追記欄にやめるのボタンが戻っている(やめるは上の 1 か所)',
+  ).toHaveCount(0);
+  await expect(
+    page.locator('[data-pkc-region="detail"] button[data-pkc-action="commit-edit"]'),
+    '上の帯に保存が無い',
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-pkc-region="detail"] button[data-pkc-action="cancel-edit"]'),
+    '上の帯にやめるが無い',
   ).toBeVisible();
   /**
-   * 🔴 **出口は「編集中」のすぐ隣に在る**(#1038 台帳③ C4 の着地前レビュー)。
-   * ⚠ 1 稿目は理由の字が残りの幅を全部吸い(`flex: 1`)、1 語になった後ろに帯の半分近い
-   *   空白が出て、保存が右端へ離れていた。🔑 字の右端と保存の左端の間を実寸で測る。
-   * ⚠ **測るのは字の範囲(Range)であって、器の箱ではない** ── `flex: 1` の器は保存の
-   *   直前まで伸びるので、箱の右端で測ると 1 稿目の形でも「隣」に見える(変異試験で
-   *   `flex: 1` へ戻しても緑だった)。
+   * 🔴 **下の理由は静かな 1 行**(折り返さない・帯を取らない)。
+   * ⚠ 測るのは字の範囲(Range)の高さ ── 器の箱で測ると、余白で 1 行に見えてしまう。
    */
-  const gap = await page.evaluate(() => {
+  const reasonLines = await page.evaluate(() => {
     const reason = document.querySelector('[data-pkc-field="append-lock-reason"]');
-    const save = document.querySelector('[data-pkc-field="append-lock"] button[data-pkc-action="commit-edit"]');
-    if (reason === null || save === null) return null;
+    if (reason === null) return null;
     const range = document.createRange();
     range.selectNodeContents(reason);
-    const r = range.getBoundingClientRect();
-    const b = save.getBoundingClientRect();
-    return { gap: b.left - r.right, sameRow: Math.abs(b.top - r.top) < r.height + b.height };
+    const rects = range.getClientRects();
+    return { lines: new Set([...rects].map((r) => Math.round(r.top))).size, height: range.getBoundingClientRect().height };
   });
-  expect(gap, '追記欄の理由か保存が見つからない').not.toBeNull();
-  expect(gap!.sameRow, '前提: 理由と保存が同じ行に並んでいない').toBe(true);
-  expect(gap!.gap, `「編集中」と保存の間が空きすぎている(${gap!.gap}px)`).toBeLessThan(24);
+  expect(reasonLines, '追記欄の理由が見つからない').not.toBeNull();
+  expect(reasonLines!.lines, '下の理由が複数行に折り返している').toBe(1);
   await ta.fill('# 二稿');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toContainText('二稿');

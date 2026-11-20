@@ -476,8 +476,11 @@ describe('🔴 競合ロック(P8 段⑧、user 指示 2026-08-03)', () => {
     expect(s.q('[data-pkc-field="append-form"]')!.hidden).toBe(true);
     expect(s.q('[data-pkc-field="append-lock"]')!.hidden).toBe(false);
     expect(s.q('[data-pkc-field="append-lock-reason"]')!.textContent).toContain('編集中');
-    // ⚠ **失わない出口が先**(追記欄側の「保存」)── キャンセルしか無い形にしない
-    expect(s.q('[data-pkc-action="commit-edit"]')).not.toBeNull();
+    // 🔴 #1982 段 3: 保存 / やめるは上の帯(題名の隣)だけ ── 下の帯には置かない(出口は 1 か所)
+    expect(s.q('[data-pkc-field="append-lock"] [data-pkc-action="commit-edit"]'), '下の帯に保存が戻っている').toBeNull();
+    expect(s.q('[data-pkc-field="append-lock"] [data-pkc-action="cancel-edit"]'), '下の帯にやめるが戻っている').toBeNull();
+    expect(s.q('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]'), '上の帯の保存が無い').not.toBeNull();
+    expect(s.q('[data-pkc-field="append-lock-reason"]')!.textContent).toContain('上のボタン');
 
     // backstop: 直に投げても通らない
     s.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'log', text: 'x', heading: null, target: null });
@@ -990,8 +993,9 @@ describe('🔴 章・コード枠の欄を開いている間の追記欄の場�
     expect(lockText(q)).toBe('章を編集中');
     expect(q('[data-pkc-field="append-form"]')!.hidden, '打つ欄が出ている').toBe(true);
     // ボタンは出さない(出口は章の欄の「保存 / やめる」)
-    for (const action of ['commit-edit', 'cancel-edit', 'force-release']) {
-      expect(q(`[data-pkc-field="append-lock"] [data-pkc-action="${action}"]`)!.hidden, action).toBe(true);
+    expect(q('[data-pkc-field="append-lock"] [data-pkc-action="force-release"]')!.hidden).toBe(true);
+    for (const action of ['commit-edit', 'cancel-edit']) {
+      expect(q(`[data-pkc-field="append-lock"] [data-pkc-action="${action}"]`), action).toBeNull();
     }
     d.dispatch({ type: 'CANCEL_SECTION_DRAFT' });
     await tick();
@@ -1015,6 +1019,7 @@ describe('🔴 章・コード枠の欄を開いている間の追記欄の場�
     d.dispatch({ type: 'START_EDIT' });
     await tick();
     expect(lockText(q)).not.toBe('章を編集中');
-    expect(q('[data-pkc-field="append-lock"] [data-pkc-action="commit-edit"]')!.hidden).toBe(false);
+    expect(q('[data-pkc-field="append-lock"] [data-pkc-action="commit-edit"]'), '下の帯に保存が出ている').toBeNull();
+    expect(lockText(q)).toContain('編集中');
   });
 });

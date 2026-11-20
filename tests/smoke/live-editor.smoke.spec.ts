@@ -5,6 +5,7 @@ import {
   createEntry,
   collectPageErrors,
   gotoApp,
+  clickBarMoreItem,
 } from './helpers';
 
 /**
@@ -248,7 +249,7 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   // 🔴 #1852 依頼 87-2 ── 開いた行(1 ブロック)の中で「完了項目を末尾へ」を押すと、その欄のリストが並べ替わる
   //   (直す前は「全文を編集に切り替えてください」と断るだけで欄は動かなかった)。確かめたら Escape で捨てる
   await row.fill('- [x] 牛乳\n- [ ] 卵');
-  await clickReal(page, '[data-pkc-action="sort-tasks"]');
+  await clickBarMoreItem(page, '[data-pkc-action="sort-tasks"]');
   await expect(row, '🔴 1 ブロックの欄で「完了項目を末尾へ」が効かない').toHaveValue('- [ ] 卵\n- [x] 牛乳');
   await row.fill('- [x] 牛乳'); // 検証用に足した行を戻してから閉じる(下の全文の中身を変えない)
   await row.press('Escape');
@@ -279,7 +280,7 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   }
   await expect(whole).toHaveValue(/- \[x\] 牛乳\n- \[ \] 卵/);
   // 🔴 灰色が外れるだけでなく、**押すと本当に効く**(直す前は外れず、押すと「全文を編集に切り替えて」と案内するだけだった)
-  await clickReal(page, '[data-pkc-action="sort-tasks"]');
+  await clickBarMoreItem(page, '[data-pkc-action="sort-tasks"]');
   await expect(whole, '全文を編集のまま「完了項目を末尾へ」を押しても効かない').toHaveValue(/- \[ \] 卵\n- \[x\] 牛乳/);
 
   // 🔴 #1852 依頼 114-3 ── 完了の行に「番号」を押すと `1. [x] 牛乳`(完了の印が残る)。もう一度押すと `- [x] 牛乳` へ戻る
@@ -640,7 +641,7 @@ test('🔴 塊を跨ぐ Ctrl+Z が実機で効く(行の中は OS の取り消�
     await page.locator('[data-pkc-field="replace-with"]').fill(to);
     await clickReal(page, '[data-pkc-action="replace-all"]');
   };
-  await clickReal(page, '[data-pkc-action="toggle-replace"]');
+  await clickBarMoreItem(page, '[data-pkc-action="toggle-replace"]');
   /**
    * 🔴 **探す語を打つと、置換の帯に「N 件」が出る**(#1646 の 2。新しく起動せず、この道中に足す)。
    * 当たる語は 1 件以上、当たらない語は「0 件」、空に戻すと何も出ない(まだ何も探していない)。
@@ -1624,9 +1625,8 @@ test('🔴 インライン編集中に「雛形を入れる」を押すと、行
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row, '前提: 行が開いていない(この検査は何も見ていない)').toBeVisible();
 
-  const btn = page.locator('[data-pkc-action="insert-snippet"]');
-  await expect(btn, '前提: 「雛形を入れる」が画面に無い').toBeVisible();
-  await btn.click();
+  // 🔴 #1982 段 3: 「テンプレートを入れる」は帯の「その他 ▾」の一覧 ── 本文の行に居たまま開き、項目を選んでも行は閉じない
+  await clickBarMoreItem(page, '[data-pkc-action="insert-snippet"]');
 
   /**
    * 🔴 **行が生きたままであること**が肝 ── 直す前はここで `row-source` が
@@ -1666,7 +1666,7 @@ test('🔴 インライン編集中に「雛形を入れる」を押すと、行
   await expect(live.locator('[data-pkc-field="row-source"]'), '前提: 本文の行が開いていない').toBeVisible();
   const pickRows = page.locator('[data-pkc-field="pick-snippet"]');
   await expect(async () => {
-    await clickReal(page, '[data-pkc-action="insert-snippet"]');
+    await clickBarMoreItem(page, '[data-pkc-action="insert-snippet"]');
     await expect(pickRows.first()).toBeVisible();
     const hit = await pickRows.filter({ hasText: 'addr' }).count();
     await page.keyboard.press('Escape');

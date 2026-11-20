@@ -8,6 +8,7 @@ import {
   recordStoreOps,
   resetStoreOps,
   waitForStoreOp,
+  clickBarMoreItem,
 } from './helpers';
 
 /**
@@ -30,7 +31,7 @@ import {
 async function waitForSnippetIndexed(page: Page, abbr: string): Promise<void> {
   const rows = page.locator('[data-pkc-field="pick-snippet"]');
   await expect(async () => {
-    await clickReal(page, '[data-pkc-action="insert-snippet"]');
+    await clickBarMoreItem(page, '[data-pkc-action="insert-snippet"]');
     await expect(rows.first()).toBeVisible();
     const hit = await rows.filter({ hasText: abbr }).count();
     await page.keyboard.press('Escape');
@@ -218,7 +219,7 @@ test('🔴 雛形を一覧から選ぶと、caret の位置に入る (#196)', as
   });
 
   // ③ 帯の「雛形」を押す(マウスだけの道)
-  await clickReal(page, '[data-pkc-action="insert-snippet"]');
+  await clickBarMoreItem(page, '[data-pkc-action="insert-snippet"]');
   const rows = page.locator('[data-pkc-field="pick-snippet"]');
   await expect(rows.first(), '雛形の一覧が出ていない').toBeVisible();
   // 🔑 短縮語も一緒に出る(ここで覚えれば、次からは Tab で呼べる)

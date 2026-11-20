@@ -20,7 +20,7 @@ import type { EntryMeta } from '@core/model/entry-meta';
 import { bodyLockOf, isCodeDraft } from '@adapter/state/app-state';
 import { isAppendable } from '@features/flavor/append-spec';
 import { listAppendTargets } from '@features/markdown/append-target';
-import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton } from './icons';
+import { iconButton } from './icons';
 import { takeAppendFocus } from './focus-request';
 import { refoldPeeked } from './pane-visibility';
 import { sizeTextareaToContent } from './row-swap';
@@ -28,6 +28,9 @@ import { hintTitle } from './shortcut-hint';
 import { EDITING_STATE_WORD } from './status-line';
 // 🔑 指で触るだけの端末かの判定は 1 か所(#722 P2-12)── 各面で `matchMedia` を書かない
 import { isTouchOnly } from './touch-device';
+
+/** 編集中に下の帯が言う 1 行。⚠ 先頭は状態語(ステータスバーと同じ)。保存 / やめるは上のボタン。 */
+export const EDITING_LOCK_REASON = `${EDITING_STATE_WORD}。保存・編集をやめるは、上のボタンから`;
 
 /**
  * 打つ欄が中身に合わせて伸びる上限(行)と、何も打っていないときの行数(#1443)。
@@ -108,8 +111,6 @@ export class AppendBoxRenderer {
   private targetBody: string | null = null;
   private readonly lockBar: HTMLElement;
   private readonly lockText: HTMLElement;
-  private readonly resolve: HTMLElement;
-  private readonly discard: HTMLElement;
   private readonly release: HTMLElement;
   private last: AppendMode['kind'] | 'section' | null = null;
   private lastLid: string | null = null;
@@ -216,20 +217,13 @@ export class AppendBoxRenderer {
     this.lockText = document.createElement('span');
     this.lockText.setAttribute('data-pkc-field', 'append-lock-reason');
     /**
-     * 編集が握っているとき ── **失わない出口を先に出す**。
-     * 🔴 **字は中央の帯と同じ「保存 / キャンセル」**(#716)。⚠ 直す前は
-     *   「保存して解放 / 編集を破棄」で、同じ action なのに上下で字が違った ──
-     *   user は「別の操作か」と読む(押した結果は 1 バイトも違わない)。
-     *   説明(`title`)も中央と同じ字にする ── 正本は `detail.ts` と 2 か所だが、
-     *   `tests/adapter/action-labels.test.ts` が「同じ action は 1 種類の字」で縛る。
+     * 🔴 **編集中は、保存 / やめるを下に置かない**(#1982 段 3。「保存は 1 か所」)。
+     * ⚠ 直す前は上の帯と同じ「編集を保存する / 編集をやめる」がここにも並び、同じ操作の入口が 2 つあった。
+     *   出口は題名の隣(上)だけ ── 下は理由を 1 行で言うだけにする(`EDITING_LOCK_REASON`)。
      */
-    this.resolve = iconButton('commit-edit', '編集を保存する');
-    this.resolve.title = COMMIT_EDIT_HINT;
-    this.discard = iconButton('cancel-edit', '編集をやめる');
-    this.discard.title = CANCEL_EDIT_HINT;
     // 書込が返らないとき ── 最後の出口
     this.release = iconButton('force-release', '書き込みを打ち切る');
-    this.lockBar.append(this.lockText, this.resolve, this.discard, this.release);
+    this.lockBar.append(this.lockText, this.release);
 
     this.region.append(this.lockBar, this.form);
   }
@@ -434,18 +428,13 @@ export class AppendBoxRenderer {
     this.region.toggleAttribute('data-pkc-lock-open', !this.lockBar.hidden);
     // 🔴 編集中かどうかの印(台帳 #1852、依頼 237 = A)。スマホの画面では、編集中は中央の帯の保存 / やめるだけにする(CSS が読む)
     this.region.toggleAttribute('data-pkc-lock-editing', mode.kind === 'editing');
-    this.resolve.hidden = mode.kind !== 'editing';
-    this.discard.hidden = mode.kind !== 'editing';
     this.release.hidden = mode.kind !== 'writing';
     if (mode.kind === 'editing') {
       /**
-       * 🔴 **1 語だけにする**(C4 / #1038 段 D)。⚠ 直す前は「このノートは編集中
-       * です。「編集を保存する」か「編集をやめる」を押すと追記できます。」という
-       * 文だったが、「編集中」は画面の下の 1 行(`status-line.ts`)も言うように
-       * なったので、同じ状態を 2 通りの言葉で言わない。保存 / キャンセルの出口
-       * (`resolve` / `discard`)は隣に出したままなので、押すものは減らない。
+       * 🔴 **状態語 + 出口の場所を 1 行で**(#1982 段 3)。保存 / やめるのボタンは上の帯だけ。
+       * ⚠ ショートカットの綴りは書かない(割当を変えられ、mac では ⌘ になる ── 嘘になる)。
        */
-      this.lockText.textContent = EDITING_STATE_WORD;
+      this.lockText.textContent = EDITING_LOCK_REASON;
     } else if (mode.kind === 'writing') {
       this.lockText.textContent = '追記を書き込んでいます…(返ってこないときは「書き込みを打ち切る」)';
     }

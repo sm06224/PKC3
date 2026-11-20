@@ -258,7 +258,8 @@ const OBJECT_LONE: readonly string[] = [
   //    2 つ目の出口になったので外した(csv の表は `csv-table.ts`)
   // ⚠ `enter-folder` は 2026-10-18(台帳 #1852 束 N2 / 依頼 85-6)にフォルダの概要の「ほか N 件を左のペインで開く」
   //    (`folder-overview.ts`)が 2 つ目の出口になったので外した(1 つ目はパンくず `filer.ts`)
-  'insert-entry-link',
+  // ⚠ `insert-entry-link` は 2026-11-20(#1982 段 3)に行頭の `/` の候補(`inline-complete.ts` の `SLASH_TOOLS`)が
+  //    2 つ目の出口になったので外した(1 つ目は書式バーのボタン)
   // ⚠ 2026-11-16(#1966 4-1): 右の列の「リンクのない言及」の行の「リンクにする」。出口は行の中の 1 か所だけ
   //   (`capture-play` と同じ ── 押した行の相手の lid が要る。相手は行ごとに違うので、名前で呼べる 1 つの命令にならない)。
   'link-mentions',

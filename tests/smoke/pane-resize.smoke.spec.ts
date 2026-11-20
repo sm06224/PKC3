@@ -611,8 +611,10 @@ test('🔴 追記欄も鍵で畳めて、戻せる (#609)', async ({ page }) => 
     lock,
     '編集中に畳んだら出口の帯まで消えた(追記欄側の保存 / キャンセルが押せない)',
   ).toBeVisible();
-  await expect(append.locator('[data-pkc-action="commit-edit"]')).toBeVisible();
-  await expect(append.locator('[data-pkc-action="cancel-edit"]')).toBeVisible();
+  // 🔴 #1982 段 3: 下の帯は理由の 1 行(保存 / やめるのボタンは上の帯の 1 か所。下には置かない)
+  await expect(append.locator('[data-pkc-field="append-lock-reason"]'), '畳んだら理由まで消えた').toBeVisible();
+  await expect(append.locator('[data-pkc-action="commit-edit"]')).toHaveCount(0);
+  await expect(page.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]'), '上の保存が無い').toBeVisible();
 
   // 🔴 **片道の操作を作らない**(2026-08-23)── 同じ鍵で戻る(編集中でも記録は動く。見え方は同じ)
   await page.keyboard.press('Alt+Backslash');
