@@ -46,5 +46,9 @@ describe('planScreenAudio', () => {
     expect(screenShareGuide(true)).toContain('タブ');
     expect(screenShareGuide(true)).toContain('マイク');
     expect(screenShareGuide(false)).not.toContain('マイク');
+    // 🔴 言い過ぎない: 音声共有が使えるのは Chrome / Edge のタブ共有だけ(Firefox / Safari は不可)
+    expect(screenShareGuide(true)).toContain('Chrome / Edge');
+    expect(screenShareGuide(true)).toContain('Firefox / Safari');
+    expect(screenShareGuide(true)).not.toContain('確実');
   });
 });
