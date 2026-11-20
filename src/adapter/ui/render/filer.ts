@@ -48,6 +48,7 @@ import { chordHint } from './shortcut-hint';
 import { watchBarStick } from './bar-stick';
 import { appKeymap, type KeymapStore } from './keymap';
 import { commandQueryOf } from '@features/palette/command-query';
+import { noteLabelHint } from '@features/note-label';
 import { SMART_COLLECTING, SMART_FAILED } from './smart-status';
 
 /**
@@ -1135,6 +1136,11 @@ export class FilerRenderer {
         name.append(hint);
         name.title = `${m.title}(${parentName} の中)`;
       }
+    }
+    // 🔴 色ラベルは色だけの手がかりにしない(#1982 段 4)── 題名の hover / 読み上げに「色ラベル: 緑」を添える
+    if (noteLabel !== undefined && m.lid !== state.renamingLid) {
+      const hint = noteLabelHint(noteLabel);
+      if (hint !== '') name.title = `${name.title || m.title}(${hint})`;
     }
     const updated = document.createElement('td');
     // ⚠ 目印を付ける ── 日付だけの変化はここを差し替えて済ませる(#270)

@@ -26,6 +26,15 @@ export function noteLabelName(color: number): string {
   return NOTE_LABEL_NAMES[color - 1] ?? '';
 }
 
+/**
+ * 色の名前を、行の hover / 読み上げ(`title`)に足す字にする ── 色だけの手がかりにしない(色の見分けにくい人にも届く)。
+ * 例: `色ラベル: 緑`。範囲外は空文字。
+ */
+export function noteLabelHint(color: number): string {
+  const name = noteLabelName(color);
+  return name === '' ? '' : `色ラベル: ${name}`;
+}
+
 /** 色を表す CSS(`var(--note-N)`)。⚠ 値は tokens.css が正本。 */
 export function noteLabelVar(color: number): string {
   return `var(--note-${color})`;

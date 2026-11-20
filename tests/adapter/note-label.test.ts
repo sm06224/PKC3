@@ -117,6 +117,10 @@ describe('行の左の線と札', () => {
     t.render(s);
     expect(t.row('a')!.getAttribute('data-pkc-note-label')).toBe('4');
     expect(t.row('b')!.hasAttribute('data-pkc-note-label')).toBe(false);
+    // 🔴 色だけの手がかりにしない: 題名のセルが色の名前を持ち(青 = 5 ではなく 4 = 青緑)、付いていない行には添えない
+    const titleOf = (lid: string): string => t.row(lid)!.querySelector<HTMLElement>('td')!.title;
+    expect(titleOf('a')).toContain('色ラベル: 青緑');
+    expect(titleOf('b')).not.toContain('色ラベル');
     s = reduce(s, { type: 'SET_NOTE_LABELS', labels: new Map() }).state;
     t.render(s);
     expect(t.row('a')!.hasAttribute('data-pkc-note-label')).toBe(false);

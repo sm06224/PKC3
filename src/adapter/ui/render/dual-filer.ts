@@ -48,6 +48,7 @@ import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 // 🔴 スマートフォルダの「いまの状態」の字は左のペインと同じ 1 本(台帳 #1852 N1 / 依頼 322 A)
 import { smartEmptyText, smartTruncatedText } from './smart-status';
 import { normalizeQuery } from '@features/filter/title-filter';
+import { noteLabelHint } from '@features/note-label';
 import { getAncestorFolders } from '@features/relation/tree';
 import { formatListUpdated, listDayStamp, formatStoredDate } from '@features/datetime/stored-date';
 import { chordLabel, findCommand } from '@features/keymap';
@@ -1586,6 +1587,9 @@ export class DualFilerRenderer {
           kindIcon(m.archetype),
           document.createTextNode(m.title),
         );
+        // 🔴 色ラベルは色だけの手がかりにしない(#1982 段 4)── 題名の hover / 読み上げに「色ラベル: 緑」を添える
+        const hint = noteLabel === undefined ? '' : noteLabelHint(noteLabel);
+        if (hint !== '') name.title = `${m.title}(${hint})`;
       }
       /**
        * 🔴 **種類の列は持たない**(2026-08-19 の作り直し)。⚠ 直す前は
