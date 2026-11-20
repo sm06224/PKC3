@@ -302,7 +302,7 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
     expect(seen.iconW, `${name}: 絵に幅が無い`).toBeGreaterThan(4);
     expect(seen.dy, `${name}: 絵と名前の中心がずれている`).toBeLessThan(3);
   }
-  // 🔴 普通の一覧(#1272)── 下地は透明(余りが灰色のベタにならない)/ 各行に下罫線 / フォルダの行と他の行で文字の左端が同じ
+  // 🔴 普通の一覧(#1272)── 下地は透明(余りが灰色のベタにならない)/ 行の間は隙間(#1982 段 2)/ フォルダの行と他の行で文字の左端が同じ
   const look = await pane.locator('[data-pkc-field="pc-list"]').evaluate((ul) => {
     const lis = [...ul.querySelectorAll<HTMLElement>(':scope > li')];
     const left = (li: HTMLElement) =>
@@ -316,8 +316,9 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
     };
   });
   expect(look.bg, '一覧の下地が塗られている(余りがベタになる)').toBe('rgba(0, 0, 0, 0)');
-  expect(look.gap, '行の間を gap で空けている(下地が透ける)').toBe('normal');
-  expect(look.borders, '各行の下罫線').toEqual(['1px', '1px', '1px', '1px']);
+  // 🔴 #1982 段 2: 行の間は罫線ではなく隙間(下地は透明なので、隙間から線色が透けることはない ── 上の 1 行)
+  expect(look.gap, '行の間に隙間が無い(または 1px の透かしへ戻った)').toMatch(/^(2|4|8)px$/);
+  expect(look.borders, '各行に罫線が残っている(区切りは隙間と hover の地 ── #1982 段 2)').toEqual(['0px', '0px', '0px', '0px']);
   expect(Math.max(...look.lefts) - Math.min(...look.lefts), '行頭の絵の左端が行ごとにずれている').toBeLessThan(1);
   // 🔴 サブフォルダの行を押すと中へ入り(#215)、パンくずの上の階層で戻る。左のタブは PC のまま・getFile は呼ばない
   await clickReal(page, row('下の階層').locator('button'));

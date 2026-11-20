@@ -264,14 +264,15 @@ describe('選んでいるタブの下線(#720 ②)', () => {
   const css = (): string =>
     withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
 
-  it('🔴 下線は字の色(--fg)── 色だけの手がかりにしない', () => {
+  it('🔴 現在地は形(下線 + 太字)── 色だけの手がかりにしない(下線は字の色 --fg = #720 ②。#1982 段 2 で地は塗らない)', () => {
     const b = blocksFor(css(), "[data-pkc-region='browse-tabs'] [data-pkc-active]");
     expect(b.length, '選んでいるタブの規則が無い(空振り)').toBe(1);
     const dec = b[0]!;
     expect(dec, '下線が引かれていない').toContain('inset 0 -2px 0');
-    expect(dec, '下線が字の色になっていない').toContain('inset 0 -2px 0 var(--fg)');
-    // ⚠ **対照群** ── 地と太字は残っている(手がかりを増やしたのであって、置き換えていない)
-    expect(dec, 'タブの地が消えた').toContain('var(--accent-dim)');
+    // 🔴 #720 ②(user 裁定 2026-09-06): 下線は本文の字の色 ── 色が見分けにくい人にも届く(#1982 段 2 でも維持)
+    expect(dec, '下線が字の色(--fg)でない').toContain('inset 0 -2px 0 var(--fg)');
+    // ⚠ **対照群** ── 太字は残る。緑の地は塗らない(現在地に色相の地を使わない)
+    expect(dec, '地を塗っている(現在地は形で示す)').not.toContain('var(--accent-dim)');
     expect(dec, '太字が消えた').toContain('font-weight: 600');
   });
 });

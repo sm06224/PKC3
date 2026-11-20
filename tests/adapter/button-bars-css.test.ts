@@ -1,44 +1,21 @@
 /**
- * 🔴 **折り返す帯の下地は地の色、区切りは各ボタンの輪**(#705 ② → #951)── CSS を構文で pin。
+ * 🔴 **折り返す帯は、線(輪)ではなく隙間で区切る**(#1982 段 2。旧い #705 ② / #951 の
+ * 「各ボタンの外側 1px の輪を `gap: 1px` に重ねて 1 本線にする」作りを、背景の段差と余白へ移した)
+ * ── CSS を構文で pin。
  *
- * ## なぜこの形なのか
+ * ## なぜ見るのか
  *
- * 旧い作りは `gap: 1px` + 下地 `--border` で線を作り、余りを `::after` で地の色に塗っていた。
- * ⚠ `::after` は**最後の段にしか居ない**ので、2 段以上に折れると上の段の余りが
- * **線色のベタ塗り**になる。
+ * - 旧い作りは画面を升目にしていた(#1982 §1 (a))。区切りは**ボタンの型(段 1)と隙間**で持つ。
+ * - ⚠ #951 の教訓は生きている ── 名指しだけの検査は新しい帯が書き忘れても素通りするので、
+ *   **「折り返す帯」を構文で全数拾い**、新しく帯を足した人が輪や線色の下地を書いたら落ちる形にする。
  *
- * ## 🔴 この test が 2 本しか見ていなかったせいで、4 本が 1 か月残った(#951)
- *
- * #705② の test は対象を **`detail-toolbar` と `format-bar` の 2 つに名指し**していた。
- * ⚠ だから残る 4 本は unit も smoke も **1 本も見ておらず**、user に
- * 「**操作ボタンの配置部分のグレー背景がずれて見える**」と報告されるまで気づけなかった。
- *
- * 🔑 だから**名指しをやめた** ── 「折り返す帯」を**構文で全数拾い**、
- * 新しく帯を足した人が**書き忘れても落ちる**形にする。
- *
- * ⚠ 実ブラウザの画素は別に測る(2026-09-16 実測: 新しい作り **0/72** /
- * 旧い作り `collection-bar` **72/72**・`create-bar` **72/72**・
- * `inspector-actions` 可視だった **36/36**。9 テーマ × 4 DPR × 2 幅)。
+ * ⚠ 見るのは**実行する規則**だけ(注釈は剥ぐ・`@media` の中は見ない)。
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { blocksFor, decl, stripComments, withoutMedia } from '../helpers/css-blocks';
 
 const css = (): string => withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
-
-/**
- * 🔴 **下地に線色を使ってよい「折り返す器」の既知リスト**(等値で pin)。
- *
- * ⚠ **足すときは理由を 1 行書く。** ⚠ そして理由は「**余りが出ない**」でなければ
- *   ならない ── 「たぶん大丈夫」は理由ではない(#951 はそれで 4 本残した)。
- * 🔑 `KNOWN_DEAD` と同じ作法:直したら**ここから消さないと落ちる**ので、忘れられない。
- */
-const ALLOWED_BORDER_BACKED: readonly (readonly [sel: string, why: string])[] = [
-  [
-    "[data-pkc-region='find-bar']",
-    '並ぶのが入力欄と選び所なので button の輪が当たらない。余りは entry-filter が flex:1 で埋め切る',
-  ],
-];
 
 /** `選択子 { 宣言 }` を全部読む。⚠ 選択子リストは `,` で割って**丸ごと一致**で見る。 */
 function rules(text: string): { sels: string[]; body: string }[] {
@@ -48,74 +25,74 @@ function rules(text: string): { sels: string[]; body: string }[] {
   }));
 }
 
-/**
- * 🔑 **「折り返す帯」を構文で拾う** ── `display:flex` かつ `flex-wrap:wrap` かつ `gap:1px`。
- * ⚠ 名前(`*-bar`)では拾わない ── `inspector-actions` のように**帯と名乗らない帯**が在る。
- */
+/** 🔑 「折り返す帯」を構文で拾う ── `display:flex` かつ `flex-wrap:wrap`。名前(`*-bar`)では拾わない。 */
 function wrappingBars(text: string): { sel: string; body: string }[] {
   const out: { sel: string; body: string }[] = [];
   for (const r of rules(text)) {
-    const flex = decl('display', 'flex').test(r.body);
-    const wrap = decl('flex-wrap', 'wrap').test(r.body);
-    const gap1 = decl('gap', '1px').test(r.body);
-    if (flex && wrap && gap1) for (const sel of r.sels) out.push({ sel, body: r.body });
+    if (decl('display', 'flex').test(r.body) && decl('flex-wrap', 'wrap').test(r.body)) {
+      for (const sel of r.sels) out.push({ sel, body: r.body });
+    }
   }
   return out;
 }
 
-describe('折り返す帯の下地と区切り(#705 ② / #951)', () => {
-  it('🔴 空振り防止 ── 折り返す帯が 6 本以上見つかる', () => {
-    const bars = wrappingBars(css());
-    // ⚠ 走査が壊れて 0 件になったら、下の全数検査は**何も見ずに緑**になる
-    expect(bars.length, '折り返す帯の走査が壊れている(名前を変えた?)').toBeGreaterThanOrEqual(6);
+/** 区切りを隙間(トークン)で持つ帯。 */
+const BARS = [
+  "[data-pkc-field='detail-toolbar']",
+  "[data-pkc-region='format-bar']",
+  "[data-pkc-region='collection-bar']",
+  "[data-pkc-region='create-bar']",
+  "[data-pkc-region='find-bar']",
+  "[data-pkc-region='create-menu']",
+  "[data-pkc-region='dual-commands']",
+  "[data-pkc-region='inspector'] [data-pkc-field='inspector-actions']",
+  "[data-pkc-region='inspector'] [data-pkc-field='inspector-action-group']",
+];
+
+describe('折り返す帯の区切りは隙間(#1982 段 2)', () => {
+  it('🔴 空振り防止 ── 折り返す帯が 8 本以上見つかり、名指しの 9 本の規則も拾える', () => {
+    const text = css();
+    expect(wrappingBars(text).length, '折り返す帯の走査が壊れている').toBeGreaterThanOrEqual(8);
+    for (const sel of BARS) {
+      expect(blocksFor(text, sel).length, `${sel} の規則が拾えない(名前を変えた?)`).toBeGreaterThan(0);
+    }
   });
 
   it('🔴 折り返す帯の下地に線色を使わない ── 最後の段以外の余りがベタ塗りになる', () => {
-    const allowed = new Set(ALLOWED_BORDER_BACKED.map(([s]) => s));
+    const bad = wrappingBars(css())
+      .filter(({ body }) => decl('background', 'var\\(--border\\)').test(body))
+      .map((b) => b.sel);
+    expect(bad, `下地が線色の帯が残っている: ${bad.join(' / ')}`).toEqual([]);
+  });
+
+  it('🔴 帯の区切りは `gap: 1px` ではなく隙間(`--s*`)── 1px の透かしの格子へ戻さない', () => {
+    const text = css();
     const bad: string[] = [];
-    for (const { sel, body } of wrappingBars(css())) {
-      if (allowed.has(sel)) continue;
-      if (decl('background', 'var\\(--border\\)').test(body)) bad.push(sel);
-    }
-    expect(bad, `下地が線色の帯が残っている(2 段以上に折れると余りが灰色になる): ${bad.join(' / ')}`).toEqual([]);
-  });
-
-  it('🔴 既知リストは等値 ── 直したのに残っていたら落ちる', () => {
-    const text = css();
-    for (const [sel] of ALLOWED_BORDER_BACKED) {
+    for (const sel of BARS) {
       const joined = blocksFor(text, sel).join('\n');
-      expect(joined.length, `${sel} の規則が無い(既知リストが腐っている)`).toBeGreaterThan(0);
-      expect(joined, `${sel} は既に直っている ── 既知リストから消すこと`).toMatch(
-        decl('background', 'var\\(--border\\)'),
-      );
+      if (decl('gap', '1px').test(joined)) bad.push(sel);
+      expect(joined, `${sel}: 隙間(gap)が無い`).toMatch(/gap:\s*var\(--s[1-6]\)/);
     }
+    expect(bad, `1px の gap に戻っている帯: ${bad.join(' / ')}`).toEqual([]);
   });
 
-  it('🔴 埋め草の `::after` を残さない ── 「最後の段だけ地の色」の名残', () => {
-    const text = css();
-    for (const { sel } of wrappingBars(text)) {
-      const after = blocksFor(text, `${sel}::after`);
-      const filler = after.filter((b) => /flex:\s*1 1 auto/.test(b) && decl('background', 'var\\(--surface\\)').test(b));
-      expect(filler, `${sel}::after の埋め草が残っている(最後の段しか塗らない)`).toEqual([]);
-    }
+  it('🔴 輪(`outline: 1px solid var(--border)`)で区切る規則が 1 つも無い', () => {
+    const ring = rules(css()).filter((r) => decl('outline', '1px solid var\\(--border\\)').test(r.body));
+    expect(
+      ring.map((r) => r.sels.join(' , ')),
+      '区切りの輪が戻っている',
+    ).toEqual([]);
   });
 
-  it('🔴 区切りは各ボタンの 1px の輪 ── 焦点の輪(:focus-visible)は殺さない', () => {
+  it('🔴 帯の中のボタンの地を `--surface` で塗りつぶさず、角を落とさない ── 型(標準 / ゴースト)が見た目を持つ', () => {
     const text = css();
-    const ring = rules(text).find((r) =>
-      r.sels.includes("[data-pkc-field='detail-toolbar'] button:not(:focus-visible)"),
-    );
-    expect(ring, '区切りの輪の規則が無い(ボタンがくっついて 1 枚に見える)').toBeDefined();
-    expect(ring?.body ?? '', '輪が 1px の線色でない').toMatch(decl('outline', '1px solid var\\(--border\\)'));
-
-    // 🔑 **下地を地の色にした帯は、全部この 1 つの規則に乗る**(片方だけ直る日を作らない)
-    const allowed = new Set(ALLOWED_BORDER_BACKED.map(([s]) => s));
-    const missing: string[] = [];
-    for (const { sel } of wrappingBars(text)) {
-      if (allowed.has(sel)) continue;
-      if (!(ring?.sels ?? []).some((s) => s === `${sel} button:not(:focus-visible)`)) missing.push(sel);
+    const bad: string[] = [];
+    for (const sel of BARS) {
+      const joined = blocksFor(text, `${sel} button`).join('\n');
+      if (decl('background', 'var\\(--surface\\)').test(joined)) bad.push(`${sel}(地)`);
+      if (decl('border-radius', '0').test(joined)) bad.push(`${sel}(角丸 0)`);
     }
-    expect(missing, `輪の規則に乗っていない帯がある(区切りが 1 本も出ない): ${missing.join(' / ')}`).toEqual([]);
+    expect(bad, `ボタンの見た目を帯が上書きしている: ${bad.join(' / ')}`).toEqual([]);
   });
 
   it('⚠ 素の `button` に outline を書かない(共通の焦点の輪 2px を上書きする)', () => {

@@ -39,6 +39,9 @@ import type { ManualSection } from './manual-find';
 import { DEFAULT_TEXT_SCALE, TEXT_SCALES, textScaleSpec } from '../text-scale';
 
 /** 焼く file の名前。⚠ `dist/` 直下(`index.html` の隣)。SW の precache に載る。 */
+/** マニュアルの本文を送る器(下の版面の CSS と、boot script の読んでいた所の保持が読む)。 */
+const MANUAL_MAIN_SEL = '[data-pkc-region="manual-window-main"]';
+
 export const MANUAL_PAGE_FILE = 'manual.html';
 
 /**
@@ -282,13 +285,26 @@ export function themeBootScript(
   return (
     '(function(){var ok=' +
     JSON.stringify([...themeIds]) +
-    ';function ap(w){var t=null;try{t=localStorage.getItem(' +
+    /**
+     * 🔴 **字の大きさが変わっても読んでいた所に居続ける**(#1982 段 2。`manual-window.ts` の `readingAnchor` と同じ手順)。
+     * ⚠ 別のウィンドウで変えた回(`w`)は、この script が当て直す ── ブラウザの scroll anchoring に任せると、
+     *   見出しの上の余白(`em` の段)を跨いだ時に留める塊を取り違え、前の節へ流れた(フル smoke で実測)。
+     * 🔑 画面の頭にある塊を覚え、当て直した後に同じ高さへ戻す。その間だけ anchoring を止め、2 フレーム後に戻す。
+     */
+    ';function kp(){var m=document.querySelector(' +
+    JSON.stringify(MANUAL_MAIN_SEL) +
+    ');if(!m||m.scrollTop<=0)return null;var top=m.getBoundingClientRect().top,b=m.querySelectorAll("h1,h2,h3,h4,h5,h6,p,li,td,th,pre"),a=null;' +
+    'for(var i=0;i<b.length;i++){if(b[i].getBoundingClientRect().top>=top-2){a=b[i];break}}if(!a)return null;' +
+    'var off=a.getBoundingClientRect().top-top,o=m.style.overflowAnchor;m.style.overflowAnchor="none";' +
+    'return function(){m.scrollTop+=a.getBoundingClientRect().top-m.getBoundingClientRect().top-off;' +
+    'requestAnimationFrame(function(){requestAnimationFrame(function(){m.style.overflowAnchor=o})})}}' +
+    'function ap(w){var back=w?kp():null;var t=null;try{t=localStorage.getItem(' +
     JSON.stringify(storageKey) +
     ')}catch(e){}if(ok.indexOf(t)<0){t=document.documentElement.getAttribute("data-pkc-theme");' +
     'if(ok.indexOf(t)<0){t="light";try{if(matchMedia("(prefers-color-scheme: dark)").matches)t="dark"}catch(e){}}}' +
     'document.documentElement.setAttribute("data-pkc-theme",t);' +
     size +
-    '}ap(0);' +
+    'if(back)back()}ap(0);' +
     /**
      * 🔴 **開いたままのマニュアルも、別のウィンドウで選んだ配色・文字の大きさに付いていく**(#1087)。
      * ⚠ `storage` event は書いた側以外にだけ届く。`key === null` は全消し ── 既定へ戻るので当て直す。

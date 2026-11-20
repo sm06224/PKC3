@@ -136,9 +136,10 @@ describe('右の列の操作は塊に分かれている(#1029 段 B / 段 C)', (
     );
     expect(bar.length, '操作の帯の規則が読めていない(空振り)').toBe(1);
     const gap = /gap:\s*([^;]+);/.exec(bar[0]!)?.[1]?.trim();
-    // ⚠ 2 つ書いてあること自体を見る(縦 1px / 横は間)── 1 つだと塊の間が詰まる
+    // ⚠ 2 つ書いてあること自体を見る(縦は隙間 / 横は塊の間)── 1 つだと塊の間が詰まる
+    //   (#1982 段 2: 縦も 1px ではなく隙間のトークン)
     expect(gap, '帯の gap が「縦 横」の 2 値でない ── 塊の間が空かない').toMatch(
-      /^1px\s+var\(--s[3-6]\)$/,
+      /^var\(--s[2-6]\)\s+var\(--s[3-6]\)$/,
     );
 
     const group = blocksFor(
@@ -147,7 +148,7 @@ describe('右の列の操作は塊に分かれている(#1029 段 B / 段 C)', (
     );
     expect(group.length, '塊の規則が読めていない(空振り)').toBe(1);
     expect(group[0], '塊が折り返せない ── 狭い列で塊ごと溢れる').toContain('flex-wrap: wrap');
-    expect(group[0], '塊の中の間が 1px でない').toMatch(/gap:\s*1px;/);
+    expect(group[0], '塊の中の間がトークンの隙間でない(1px の透かしへ戻っている)').toMatch(/gap:\s*var\(--s[1-3]\);/);
   });
 
   /**
@@ -177,10 +178,13 @@ describe('右の列の操作は塊に分かれている(#1029 段 B / 段 C)', (
       "[data-pkc-region='collection-bar'] [data-pkc-field='collection-app-group']",
     );
     expect(group.length, 'アプリ全体の操作の器が読めていない(空振り)').toBe(1);
-    expect(group[0], '切れ目の間(器の内側の余白)を出していない').toContain(
-      'padding-inline-start: var(--s3)',
+    // 🔑 #1982 段 2: 塊の中の間は `--s1`(2px)── 器の外側の余白は**それに足される**ので、切れ目は塊の中の倍の間になる。
+    //   ⚠ `--s2` 以上にすると、左の列の下限 242px に 7 枚の 32px タイルが 1 段で入らなくなる(上の注記「詰め込みなさい」)
+    expect(group[0], '切れ目の間(器の外側の余白)を出していない').toMatch(
+      /margin-inline-start:\s*var\(--s[1-6]\)/,
     );
-    expect(group[0], '切れ目の線を出していない').toContain('border-inline-start: 1px solid');
+    // 🔴 #1982 段 2: 切れ目は縦線ではなく**間**で出す(線を戻さない)
+    expect(group[0], '切れ目の線が戻っている ── 区切りは間と背景の段差').not.toContain('border-inline-start');
     // 🔑 F9(#1054 段②-2)── 強制改行(`flex: 1 0 100%`)は撤去した(7 個を 1 行に詰める)
     expect(group[0], '強制改行が戻っている ── 7 個が入る幅でも必ず 2 行になる').not.toContain(
       'flex: 1 0 100%',

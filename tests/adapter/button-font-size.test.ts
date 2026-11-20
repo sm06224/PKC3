@@ -154,7 +154,7 @@ describe('🔴 ボタンの字の大きさは 3 段だけ(#722 P2-10)', () => {
     const h1 = blocksFor(APP, '.pkc-md-rendered h1');
     expect(h1.length, '見出しの規則が引けない(走査が壊れている)').toBeGreaterThan(0);
     expect(
-      h1.filter((b) => /(?:^|;)\s*font-size:\s*1\.35em/.test(b)).length,
+      h1.filter((b) => /(?:^|;)\s*font-size:\s*1\.6em/.test(b)).length,
       '見出しが em をやめた(畳みの追従が切れる)',
     ).toBe(1);
     const fold = blocksFor(APP, "[data-pkc-field='heading-fold']");

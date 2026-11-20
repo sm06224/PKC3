@@ -1189,7 +1189,7 @@ test('🔴 図案つきボタンの高さが揃っている', async ({ page }) =
  * P8 段④: **境界線は共有し、余白は置かない**(user 指示 2026-08-03)。
  * ⚠ 面ごとに border を持たせると、隣り合わせで **2px の線**になる。
  */
-test('🔴 面の境界が 1 本になっている(2 重線を作らない)', async ({ page }) => {
+test('🔴 面の境界は線でなく地の段差(隙間 0・帯 8px・面は枠を持たず、机と紙の色が違う)(#1982 段 2)', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
   const gap = await page.evaluate(() => {
@@ -1204,6 +1204,8 @@ test('🔴 面の境界が 1 本になっている(2 重線を作らない)', as
       grip: Math.round(g.width),
       fromGrip: Math.round(d.left - g.right),
       border: cs.borderRightWidth,
+      desk: cs.backgroundColor,
+      paper: getComputedStyle(document.querySelector('[data-pkc-region="detail"]')!).backgroundColor,
     };
   });
   /**
@@ -1213,8 +1215,10 @@ test('🔴 面の境界が 1 本になっている(2 重線を作らない)', as
    * 守る中身は同じである(隣り合う要素のあいだが 1px を超えない = 2 重線を作らない)。
    * ⚠ 帯の幅も pin する ── 黙って太る帯にしない。
    */
-  expect(gap.toGrip, `左の面と帯の間が ${gap.toGrip}px`).toBe(1);
-  expect(gap.fromGrip, `帯と本文の間が ${gap.fromGrip}px`).toBe(1);
+  // 🔴 #1982 段 2: 1px の線の隙間はやめた。面と帯は隙間なく接し、区切りは地の段差(机 ≠ 紙)
+  expect(gap.toGrip, `左の面と帯の間が ${gap.toGrip}px`).toBe(0);
+  expect(gap.fromGrip, `帯と本文の間が ${gap.fromGrip}px`).toBe(0);
+  expect(gap.desk, '机と紙が同じ色(段差が無い)').not.toBe(gap.paper);
   expect(gap.grip, `掴む帯が ${gap.grip}px(太りすぎ)`).toBe(8);
   // 面そのものは border を持たない(持つと 1px + 1px = 2px になる)
   expect(gap.border, 'サイドバーが自前の境界線を持っている').toBe('0px');

@@ -533,12 +533,20 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
     probe.style.color = 'var(--muted)';
     row.append(probe);
     const muted = getComputedStyle(probe).color;
+    // 🔑 #1982 段 2: 選んでいる行の薄い字は「印の薄い字」(`--pkc-muted-on-mark` = `--fg` を 6 割寄せた色。4.5 以上を全テーマで検算)
+    probe.style.color = 'var(--pkc-muted-on-mark)';
+    const markMuted = getComputedStyle(probe).color;
+    document.body.append(probe);
+    probe.style.color = 'var(--muted)';
+    const plainMuted = getComputedStyle(probe).color;
     probe.remove();
     const cs = getComputedStyle(h);
     return {
       selected: row.hasAttribute('data-pkc-selected'),
       color: cs.color,
       muted,
+      markMuted,
+      plainMuted,
       titleColor: getComputedStyle(title).color,
       size: parseFloat(cs.fontSize),
       titleSize: parseFloat(getComputedStyle(title).fontSize),
@@ -549,9 +557,12 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   }, noteRow);
   expect(look.color, '親の名前が共通の薄い色(--muted)でない').toBe(look.muted);
   if (look.selected) {
-    // 🔴 束 N2(依頼 244): ターミナルの配色で、選んでいる行の薄い字(親の名前・更新日)は行の字と同じ色(読める濃さ)
-    expect(look.color, '選んでいる行の親の名前が、行の字と同じ色でない').toBe(look.titleColor);
-    expect(look.muted, '選んでいる行の中で、薄い字の色(--muted)が行の字と同じ色になっていない').toBe(look.titleColor);
+    // 🔴 束 N2(依頼 244): ターミナルの配色で、選んでいる行の薄い字(親の名前・更新日)は読める濃さ。
+    //   #1982 段 2 で選んだ行の地が中立の透かしになり、薄い字は「印の薄い字」へ差し替える形になった
+    //   (行の字と同じ色ではなく `--fg` へ 6 割寄せた色。対比 4.5 以上は muted-contrast-css.test.ts が全テーマで見る)
+    expect(look.color, '選んでいる行の親の名前が、印の薄い字の色でない').toBe(look.markMuted);
+    expect(look.muted, '選んでいる行の中で、薄い字の色(--muted)が差し替わっていない').toBe(look.markMuted);
+    expect(look.muted, '対照群: 行の外の素の --muted と同じ(差し替えが効いていない)').not.toBe(look.plainMuted);
   } else {
     expect(look.color, '親の名前が題名と同じ濃さ').not.toBe(look.titleColor);
   }
