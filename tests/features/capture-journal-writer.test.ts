@@ -213,4 +213,14 @@ describe('segmentIntact(区間が欠けず書けているか。#1985 項目 1 �
     expect(w2.state()).toBe('off-cap');
     expect(await w2.segmentIntact(0), '上限で受けなかった断片がある').toBe(false);
   });
+
+  it('🔴 断片の番号が飛んだ区間は false(収録側で渡す途中に落ちた断片 ── 着地前レビュー)', async () => {
+    const w = createJournalWriter(new MemoryJournalStore(), meta);
+    w.chunk(0, 0, 1000, blob(5));
+    w.chunk(0, 2, 3000, blob(5)); // 1 番が届いていない
+    w.chunk(1, 0, 1000, blob(5)); // 次の区間は 0 から(対照群)
+    w.chunk(1, 1, 2000, blob(5));
+    expect(await w.segmentIntact(0), '真ん中が抜けた区間を「全部書けた」と読んだ').toBe(false);
+    expect(await w.segmentIntact(1), '対照群: 抜けの無い区間').toBe(true);
+  });
 });

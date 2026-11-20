@@ -80,6 +80,12 @@ export function createJournalWriter(
   const headless = new Set<number>();
   /** 1 つでも書けなかった断片が在る区間(控えだけからは作れない)。 */
   const lost = new Set<number>();
+  /**
+   * 🔴 **区間ごとの次に来るはずの断片の番号**(#1985 項目 1 の着地前レビュー)。
+   * ⚠ 収録側で断片を渡す途中に例外が出ると、その断片は**ここへ届かない**(`lost` にも載らない)── 番号が飛んだら
+   *   その区間は欠けていると数える。そうしないと、真ん中が抜けた控えを「全部書けた」と読んでメモリを手放す。
+   */
+  const nextIdx = new Map<number, number>();
   const total = (): number => {
     let n = 0;
     for (const v of segBytes.values()) n += v;
@@ -113,6 +119,8 @@ export function createJournalWriter(
   return {
     chunk(seg, idx, elapsedMs, blob) {
       if (closed) return;
+      if (idx !== (nextIdx.get(seg) ?? 0)) lost.add(seg);
+      nextIdx.set(seg, idx + 1);
       if (state !== 'active') {
         lost.add(seg);
         return;
@@ -161,6 +169,7 @@ export function createJournalWriter(
       segBytes.delete(seg);
       headless.delete(seg);
       lost.delete(seg);
+      nextIdx.delete(seg);
       enqueue(async () => {
         try {
           await port.dropSegment(meta.id, seg);
