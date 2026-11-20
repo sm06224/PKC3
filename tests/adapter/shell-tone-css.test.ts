@@ -100,7 +100,8 @@ describe('現在地は形(#1982 段 2)', () => {
 
   it('🔴 選んでいるタブ(左のタブ / 2 ペインのタブ)= 下線 + 太字で、地を塗らない', () => {
     const tab = one("[data-pkc-region='browse-tabs'] [data-pkc-active]");
-    expect(tab).toMatch(decl('box-shadow', 'inset 0 -2px 0 var\\(--accent\\)'));
+    // 🔴 左のタブの下線は字の色(#720 ② の user 裁定)── 2 ペインのタブは以前から --accent
+    expect(tab).toMatch(decl('box-shadow', 'inset 0 -2px 0 var\\(--fg\\)'));
     expect(tab).toMatch(decl('font-weight', '600'));
     expect(tab).toMatch(decl('background', 'transparent'));
     const dual = one("[data-pkc-region='dual-tab'][data-pkc-active]");
