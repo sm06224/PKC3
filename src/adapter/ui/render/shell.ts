@@ -17,7 +17,7 @@ import { installSidebarBarOverflow } from './bar-overflow';
 import { appCreateKind } from './create-kind';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
 import { missedLabel } from '@features/schedule/schedule-notify';
-import { BROWSE_ICONS, iconButton, iconSpan, markBarTile, markPrimary } from './icons';
+import { BROWSE_ICONS, iconButton, iconSpan, markBarTile, markPrimary, markVariant } from './icons';
 import { COLUMN_PANES, PANE_LABELS } from '@features/pane-visibility';
 import { PHONE_BAR_REGION, PHONE_RETURN_REGION } from './phone-layout';
 import { BROWSE_TABS } from './browse';
@@ -186,12 +186,17 @@ export function paintSearchHistory(root: HTMLElement): void {
  * ⚠ 器が無ければ**何もしない** ── `buildShell` より先に呼ばれても落ちない
  *   (器を作る側と描く側は別の file なので、順番はここでは保証できない)。
  */
-export function paintCaptureBar(root: HTMLElement, line: string | null): void {
+export function paintCaptureBar(root: HTMLElement, line: string | null, detail?: string | null): void {
   const bar = root.querySelector<HTMLElement>('[data-pkc-region="capture-bar"]');
   if (bar === null) return;
   bar.hidden = line === null;
   const text = bar.querySelector<HTMLElement>('[data-pkc-field="capture-status"]');
-  if (text !== null) text.textContent = line ?? '';
+  if (text !== null) {
+    text.textContent = line ?? '';
+    // 🔑 量・残り・途中保存の理由は title(1 行を静かに保つ。字は 1 つ ── 2 つ目の欄を作らない)
+    if (detail === undefined || detail === null) text.removeAttribute('title');
+    else text.title = detail;
+  }
 }
 
 /**
@@ -1308,15 +1313,28 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const capture = document.createElement('section');
   capture.setAttribute('data-pkc-region', 'capture-bar');
   capture.hidden = true;
+  /**
+   * 🔴 **小さな 1 行**(#1985 項目 1。user 裁定 案 A)── `● 録音中 0:07  [止める] [残さずにやめる]`。
+   * ⚠ 録っている間もほかのノートを見る・書くので、本文を奪わない低さにする(別ウィンドウにはしない)。
+   *   赤い ● だけが色(状態色)。量・残り・途中保存の理由は字の title へ(`paintCaptureBar`)。
+   * ⚠ 「残さずにやめる」はゴースト(片道にしない・押し間違えにくい)。全文は title が言う。
+   */
+  const captureDot = document.createElement('span');
+  captureDot.setAttribute('data-pkc-field', 'capture-dot');
+  captureDot.setAttribute('aria-hidden', 'true');
+  captureDot.textContent = '●';
   const captureText = document.createElement('span');
   captureText.setAttribute('data-pkc-field', 'capture-status');
-  const stopBtn = iconButton('stop-capture', '録音・録画を止める');
+  const stopBtn = iconButton('stop-capture', '止める');
   stopBtn.setAttribute('data-pkc-field', 'stop-capture');
   stopBtn.title = '録音・画面録画を止めて、録り始めたノートに入れます';
-  const dropBtn = iconButton('discard-capture', '録音・録画を残さずにやめる');
+  stopBtn.setAttribute('aria-label', '録音・録画を止める');
+  const dropBtn = iconButton('discard-capture', '残さずにやめる');
   dropBtn.setAttribute('data-pkc-field', 'discard-capture');
   dropBtn.title = '録音・録画を残さずにやめます';
-  capture.append(captureText, stopBtn, dropBtn);
+  dropBtn.setAttribute('aria-label', '録音・録画を残さずにやめる');
+  markVariant(dropBtn, 'ghost');
+  capture.append(captureDot, captureText, stopBtn, dropBtn);
 
   /**
    * 🔴 **タイマーの帯**(#279)。⚠ 収録の帯(上)と**同じ場所・同じ形**にする。

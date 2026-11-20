@@ -4004,7 +4004,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     landed: async () => {
       await storeEffects?.settled();
     },
-    onChange: (line) => paintCaptureBar(root, line),
+    onChange: (line, detail) => paintCaptureBar(root, line, detail),
     notify: showStatus,
     notifyOpen: (text, lid) => dispatcher.dispatch({ type: 'OP_NOTICE', message: text, open: lid }),
     /**

@@ -85,6 +85,16 @@ export function captureBarLine(
 }
 
 /**
+ * 🔴 **帯の字(1 行・短い形)**(#1985 項目 1。`録音中 1:05・2 本目`)。⚠ 量・残りは入れない ──
+ *   帯は「録っている」と経過だけを静かに言う小さな 1 行で、量・残りは `captureBarLine`(= 帯の title)が言う。
+ * ⚠ 1 本目は出さない(`captureBarLine` と同じ理由)。
+ */
+export function captureBarShort(kind: CaptureTextKind, elapsedMs: number, partNo: number): string {
+  const nth = partNo > 1 ? `・${partNo} 本目` : '';
+  return `${CAPTURE_LABEL[kind]}中 ${elapsedText(elapsedMs)}${nth}`;
+}
+
+/**
  * 録った長さを文で言う形(`1 分 5 秒` / `1 時間 2 分 3 秒`)。破棄の確認に使う。
  * ⚠ 帯の `1:02:03` とは別の形 ── 帯は時計の見た目、こちらは文の中の長さ(タイマーの帯と同じ言い方)。
  * ⚠ 秒は切り捨て(61.9 秒は `1 分 1 秒`)。0 の位は出さない(ちょうど 2 分は `2 分`)。

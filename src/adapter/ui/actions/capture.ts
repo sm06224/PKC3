@@ -24,7 +24,7 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import type { StatusOptions } from '@adapter/ui/render/status-notice';
 import { humanBytes } from '@features/human-bytes';
-import { captureBarLine, captureFileName, capturedLengthText, CAPTURE_LABEL } from '@features/asset/capture-text';
+import { captureBarLine, captureBarShort, captureFileName, capturedLengthText, CAPTURE_LABEL } from '@features/asset/capture-text';
 import { elapsedText } from '@features/elapsed-text';
 import { noteToPutInto, putAssetIntoNote } from './asset-into-note';
 import type { EditLockPort } from '@adapter/state/edited-elsewhere';
@@ -76,7 +76,7 @@ export interface CaptureServiceDeps {
    */
   readonly landed?: () => Promise<void>;
   /** 帯を描き直す合図。⚠ `null` = 収録していない(帯を畳む)。 */
-  readonly onChange: (line: string | null) => void;
+  readonly onChange: (line: string | null, detail?: string | null) => void;
   /** 一時の知らせ(エラーの行とは別)。 */
   readonly notify: (text: string, opts?: StatusOptions) => void;
   /**
@@ -149,8 +149,10 @@ export interface CaptureService {
    * ⚠ 1 分を超えていたら確認を挟む ── 答えを待つので `Promise`(聞かない回は即終わる)。
    */
   discard(): Promise<void>;
-  /** 帯に出す 1 行(収録していなければ `null`)。 */
+  /** 帯に出す 1 行(短い形。収録していなければ `null`)。 */
   line(): string | null;
+  /** 帯の title に出す詳しい形(量・残り。収録していなければ `null`)。 */
+  detail(): string | null;
   /**
    * 🔴 **前回の途中で終わった収録の 1 区間を、いまの収録と同じ道で取り込む**(#1985 項目 2。復元)。
    * ⚠ 編集中は預かる(`hold`)。`done` は**添付になった後**に 1 度だけ呼ぶ(控えを消す)。
@@ -233,7 +235,18 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     return note === '' ? '' : `・${note}`;
   };
 
+  /** 🔴 帯の 1 行は短い形(`録音中 1:05`)。⚠ 量・残りは `detail`(title)へ回した(#1985 項目 1)。 */
   const line = (): string | null =>
+    handle === null
+      ? null
+      : captureBarShort(
+          handle.kind,
+          handle.elapsedMs(),
+          // 🔑 `parts()` は**渡し終えた本数**なので、いま録っているのは +1 本目
+          handle.parts() + 1,
+        ) + unprotectedNote();
+
+  const detail = (): string | null =>
     handle === null
       ? null
       : captureBarLine(
@@ -246,11 +259,10 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
            *   同じ」と教えたので、**同じ判定を 2 か所に置くのをやめた**(§7)。
            */
           maxMs - handle.elapsedMs(),
-          // 🔑 `parts()` は**渡し終えた本数**なので、いま録っているのは +1 本目
           handle.parts() + 1,
         ) + unprotectedNote();
 
-  const paint = (): void => deps.onChange(line());
+  const paint = (): void => deps.onChange(line(), detail());
 
   /** 帯と刻みを畳む。⚠ **どの終わり方でも必ず通る**(帯が残ると「録り続けている」に見える)。 */
   const close = (): void => {
@@ -576,6 +588,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
 
   return {
     line,
+    detail,
     deliverRecovered: (blob, kind, part, at, home, done) =>
       deliver(blob, kind, '途中で終わった収録を復元しました。', part, at, null, home, done),
     start: async (kind) => {
