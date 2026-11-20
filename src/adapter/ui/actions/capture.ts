@@ -64,6 +64,12 @@ export const CAPTURE_PART_BYTES = 250 * 1024 * 1024;
  */
 export const MAX_CAPTURE_MS = 12 * 60 * 60 * 1000;
 
+/** 控えの区間(`jr` の `seg`)。⚠ 控えから読み戻せる預かりの印。 */
+interface JournalSource {
+  readonly jr: JournalWriter;
+  readonly seg: number;
+}
+
 export interface CaptureServiceDeps {
   readonly dispatcher: Dispatcher;
   /** bytes を添付にする口。⚠ **`attachOne` を通す**(2 つ目の取込口を作らない)。 */
@@ -102,7 +108,8 @@ export interface CaptureServiceDeps {
   readonly maxMs?: number;
   /**
    * 🔴 **まだ disk に着いていない収録が在るか**(#1087)。⚠ 変わったときだけ呼ぶ。
-   * 収録中 / 取り込みの最中 / 編集が終わるまで預かっている間は `true`。
+   * 収録中 / 取り込みの最中 / 編集が終わるまでメモリで預かっている間は `true`。
+   * 🔑 **途中保存の控えに全部書けている収録を預けている間は数えない**(#1985 項目 1 の継ぎ目)── 閉じても次の起動の復元に出る。
    * 🔑 ここが `true` の間にタブを閉じると、メモリ上の収録が消える ── 呼び先(`main.ts`)は
    *   これを「離れますか」の確認(`unload-guard.ts`)へ渡す。判断はこちらが持ち、
    *   ブラウザの口(`beforeunload`)には触れない(この file を test から動かせるように)。
@@ -129,6 +136,12 @@ export interface CaptureServiceDeps {
    * `onState` は状態が「守られていない」に変わったときに呼ぶ(帯の字と 1 度きりの知らせはこちらが出す)。
    */
   readonly journal?: (meta: JournalMeta, onState: () => void) => JournalWriter;
+  /**
+   * 🔴 **途中保存の控えから区間を 1 本の収録に読み戻す口**(#1985 項目 1 の継ぎ目)。`null` = 読めない。
+   * ⚠ 編集中に止めた収録は、控えに全部書けていればメモリに持たず(`Blob` を手放し)、編集が終わってからここで読み戻して取り込む。
+   *   省略 = 読み戻せない → これまでどおりメモリで預かる。
+   */
+  readonly readJournal?: (rec: string, seg: number) => Promise<Blob | null>;
   /**
    * 🔴 **画面録画にマイクも混ぜるか**(#1985 項目 3。設定 `pkc3.capture-mic-mix`、既定 入)。録り始めのたびに読む。
    * ⚠ 省略 = 混ぜない(これまでどおり)。
@@ -433,9 +446,15 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
    * 🔴 **編集が終わるまで預かる**(捨てない)。
    * ⚠ 見張りは**1 本だけ**張って、取り込んだら外す ── 張りっぱなしにすると
    *   以後の全 dispatch でここを通る(常駐を作らない)。
+   *
+   * 🔴 **控えに全部書けている収録は、メモリに持たない**(#1985 項目 1 の継ぎ目。`src` = 控えの区間)。
+   *   `Blob` を手放し、編集が終わったときに控えから読み戻して取り込む。取り込みが着地するまで控えは消さない(`done`)。
+   *   ⚠ 預かりを「メモリ上にだけ在る」に数えない ── 閉じても次の起動の復元に出るので、離れる確認(#1087)の対象外。
+   * ⚠ 控えが欠けている(上限・空き不足・失敗)/ 読み戻せない口なら、これまでどおりメモリで預かる(その旨を言う)。
    */
   const hold = (
-    blob: Blob,
+    blob: Blob | null,
+    src: JournalSource | null,
     kind: CaptureKind,
     why: string,
     part: number | null,
@@ -444,19 +463,50 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     home: string | null,
     done: () => void,
   ): void => {
-    // 🔴 預かっている間は閉じると消える(#1087)── 取り込みが終わるまで数える
+    const intoWhere = home === null ? '開いているノート' : `${CAPTURE_LABEL[kind]}を始めたノート`;
+    if (blob === null && src !== null) {
+      // 🔴 控えから読み戻す預かり(メモリには持たない)
+      queue.push(async () => {
+        const read = deps.readJournal;
+        let back: Blob | null = null;
+        try {
+          back = read === undefined ? null : await read(src.jr.id, src.seg);
+        } catch {
+          back = null;
+        }
+        if (back === null || back.size === 0) {
+          // 控えは消さない(次の起動の復元に出る)
+          deps.notify(`${why}${CAPTURE_LABEL[kind]}を途中保存から読み出せませんでした。次に開いたとき、復元できます`, { kind: 'caution' });
+          return;
+        }
+        // 🔴 読み戻した間だけメモリに在る ── 取り込みの最中は閉じると消えるので数える(控えも残っているが、念のため)
+        unsettled++;
+        syncActive();
+        try {
+          if (!(await ingest(back, kind, why, part, at, tag, home, done)) && part !== null) stopNoRoom(kind);
+        } finally {
+          unsettled--;
+          syncActive();
+        }
+      });
+      deps.notify(`${why}${CAPTURE_LABEL[kind]}ファイルは、編集中なのでまだ入れていません。途中保存に残してあるので、編集を終えると${intoWhere}に入れます(閉じても、次に開いたとき復元できます)`);
+      return;
+    }
+    // 🔴 メモリで預かる間は閉じると消える(#1087)── 取り込みが終わるまで数える
     unsettled++;
     syncActive();
     queue.push(async () => {
       try {
         // 🔴 預かった 1 本も、入らなければ録るのをやめる(下の `stopNoRoom` と同じ理由)
-        if (!(await ingest(blob, kind, why, part, at, tag, home, done)) && part !== null) stopNoRoom(kind);
+        if (!(await ingest(blob!, kind, why, part, at, tag, home, done)) && part !== null) stopNoRoom(kind);
       } finally {
         unsettled--;
         syncActive();
       }
     });
-    deps.notify(`${why}${CAPTURE_LABEL[kind]}ファイルは、編集中なのでまだ入れていません。編集を終えると、${home === null ? '開いているノート' : `${CAPTURE_LABEL[kind]}を始めたノート`}に入れます`);
+    deps.notify(
+      `${why}${CAPTURE_LABEL[kind]}ファイルは、編集中なのでまだ入れていません。編集を終えると、${intoWhere}に入れます${src !== null ? '(途中保存が欠けているので、このまま閉じると失われます)' : ''}`,
+    );
   };
 
   /**
@@ -473,11 +523,17 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     tag: string | null,
     home: string | null,
     done: () => void,
+    src: JournalSource | null = null,
   ): Promise<'in' | 'held' | 'failed'> => {
     // 🔴 **編集中は添付が作れない** ── 捨てずに預かる
     if (deps.dispatcher.getState().phase !== 'ready') {
-      hold(blob, kind, why, part, at, tag, home, done);
-      return 'held';
+      // 🔴 控えに全部書けている区間は、メモリの `Blob` を手放して控えから取り込む(書けていなければメモリで預かる)
+      const intact = src !== null && deps.readJournal !== undefined && (await src.jr.segmentIntact(src.seg));
+      // ⚠ 待っている間に編集が終わっていたら、そのまま取り込む(預からない)
+      if (deps.dispatcher.getState().phase !== 'ready') {
+        hold(intact ? null : blob, src, kind, why, part, at, tag, home, done);
+        return 'held';
+      }
     }
     // 🔴 取り込みの最中も、着くまでは閉じると消える(#1087)
     unsettled++;
@@ -583,7 +639,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       fail(`${why}${CAPTURE_LABEL[kind]}できませんでした(1 バイトも録れていません)`);
       return;
     }
-    await deliver(blob, kind, why, before === 0 ? null : before + 1, at, tag, home, () => jr?.segmentDone(before));
+    await deliver(blob, kind, why, before === 0 ? null : before + 1, at, tag, home, () => jr?.segmentDone(before), jr === null ? null : { jr, seg: before });
   };
 
   return {
@@ -649,7 +705,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
            *   まだ終わっていないので、言うことは「入れた」だけである。
            */
           onPart: (blob, part) => {
-            void deliver(blob, kind, '', part, at, tag, home, () => jr?.segmentDone(part - 1)).then((r) => {
+            void deliver(blob, kind, '', part, at, tag, home, () => jr?.segmentDone(part - 1), jr === null ? null : { jr, seg: part - 1 }).then((r) => {
               // 🔴 入らなかったら録り続けない(次の 1 本も入らない)
               if (r === 'failed') stopNoRoom(kind);
             });
