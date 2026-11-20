@@ -210,20 +210,50 @@ async function askDisplay(
   }
 }
 
-/** マイクを頼む。⚠ 取れなくても録画は続けるので、理由は状態で返す(投げない)。 */
+/** 🔴 マイクの許可の確認を待つ上限(これを過ぎたら「使えない」として画面と共有の音だけで始める)。 */
+export const MIC_WAIT_MS = 15_000;
+
+function stopTracks(s: MediaStream): void {
+  for (const t of s.getTracks()) t.stop();
+}
+
+/**
+ * マイクを頼む。⚠ 取れなくても録画は続けるので、理由は状態で返す(投げない)。
+ * 🔴 **待つのは `MIC_WAIT_MS` まで**(許可の確認を放置されても、共有が生きたまま帯が出ない状態にしない)。
+ *   ⚠ 時間切れの後で届いたマイクは**その場で止める**(表示を残さない)。
+ */
 async function askMic(
   deps: CaptureDeps,
 ): Promise<{ state: MicState; stream: MediaStream | null }> {
   const md = (globalThis as { navigator?: { mediaDevices?: MediaDevices } }).navigator?.mediaDevices;
   const fn = deps.getUserMedia ?? md?.getUserMedia?.bind(md);
   if (fn === undefined) return { state: 'unavailable', stream: null };
+  let gaveUp = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const got = (async (): Promise<{ state: MicState; stream: MediaStream | null }> => {
+    try {
+      // 🔑 相手の声がスピーカーから回り込むので、エコー除去とノイズ抑制を頼む
+      const s = await fn({ audio: { echoCancellation: true, noiseSuppression: true } });
+      if (gaveUp) {
+        stopTracks(s);
+        return { state: 'denied', stream: null };
+      }
+      return { state: 'ok', stream: s };
+    } catch (e) {
+      const name = (e as { name?: string } | null)?.name ?? '';
+      return { state: name === 'NotAllowedError' || name === 'SecurityError' ? 'denied' : 'unavailable', stream: null };
+    }
+  })();
+  const timeout = new Promise<{ state: MicState; stream: MediaStream | null }>((resolve) => {
+    timer = setTimeout(() => {
+      gaveUp = true;
+      resolve({ state: 'denied', stream: null });
+    }, MIC_WAIT_MS);
+  });
   try {
-    // 🔑 相手の声がスピーカーから回り込むので、エコー除去とノイズ抑制を頼む
-    const s = await fn({ audio: { echoCancellation: true, noiseSuppression: true } });
-    return { state: 'ok', stream: s };
-  } catch (e) {
-    const name = (e as { name?: string } | null)?.name ?? '';
-    return { state: name === 'NotAllowedError' || name === 'SecurityError' ? 'denied' : 'unavailable', stream: null };
+    return await Promise.race([got, timeout]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -347,6 +377,18 @@ export async function startCapture(
   const shared = stream;
   const held: MediaStream[] = [shared];
   let ctx: AudioContext | null = null;
+  /**
+   * 🔴 **共有の終わりは、マイクの許可を待つ前から見る**。⚠ 後から張ると、許可の確認中に「共有を停止」された回の
+   *   `ended` を取り逃し、死んだ映像のまま録り始めてマイクも点いたままになる。
+   */
+  let sharedEnded = false;
+  let onSharedEnd: (() => void) | null = null;
+  for (const t of shared.getTracks()) {
+    t.addEventListener('ended', () => {
+      sharedEnded = true;
+      onSharedEnd?.();
+    });
+  }
   /** 器へ渡す stream(音を混ぜない回は共有そのまま)。 */
   let recStream: MediaStream = shared;
   if (kind === 'screen' && opts.mixMic === true) {
@@ -363,10 +405,21 @@ export async function startCapture(
     let mixFailed = false;
     try {
       if (plan.use === 'mix' && AC !== undefined && MS !== undefined && mic.stream !== null) {
-        ctx = new AC();
-        const dest = ctx.createMediaStreamDestination();
-        ctx.createMediaStreamSource(shared).connect(dest);
-        ctx.createMediaStreamSource(mic.stream).connect(dest);
+        const c = new AC();
+        ctx = c;
+        // 🔴 自動再生の制限で `suspended` のまま作られることがある ── 動かない混ぜ場は無音を録るので、
+        //   動かせなければ混ぜない(共有の音のまま録る)
+        if (c.state !== 'running') {
+          try {
+            await c.resume();
+          } catch {
+            // 下で state を見て退避する
+          }
+          if (c.state !== 'running') throw new Error('audio context is not running');
+        }
+        const dest = c.createMediaStreamDestination();
+        c.createMediaStreamSource(shared).connect(dest);
+        c.createMediaStreamSource(mic.stream).connect(dest);
         recStream = new MS([...shared.getVideoTracks(), ...dest.stream.getAudioTracks()]);
       } else if (plan.use === 'mic' && MS !== undefined && mic.stream !== null) {
         recStream = new MS([...shared.getVideoTracks(), ...mic.stream.getAudioTracks()]);
@@ -374,7 +427,6 @@ export async function startCapture(
     } catch {
       // 混ぜ場を作れなかった ── 共有のまま録る。使わなかったマイクと混ぜ場は**いま**止める(表示を残さない)
       recStream = shared;
-      if (mic.stream !== null) for (const t of mic.stream.getTracks()) t.stop();
       try {
         void Promise.resolve(ctx?.close()).catch(() => undefined);
       } catch {
@@ -383,6 +435,8 @@ export async function startCapture(
       ctx = null;
       mixFailed = true;
     }
+    // 🔴 使わなかったマイクは**いま**止める(表示を残さない)
+    if (mic.stream !== null && (mixFailed || (plan.use !== 'mix' && plan.use !== 'mic'))) stopTracks(mic.stream);
     const notice = mixFailed ? NO_MIX_NOTICE : plan.notice;
     if (notice !== null) opts.onNotice?.(notice);
     if (recStream !== shared) held.push(recStream);
@@ -423,7 +477,7 @@ export async function startCapture(
    */
   const releaseStream = (): void => {
     // 🔴 共有・マイク・混ぜた物の track を**全部**止め、混ぜ場も閉じる(ブラウザのマイク表示を残さない)
-    for (const s of held) for (const t of s.getTracks()) t.stop();
+    for (const s of held) stopTracks(s);
     const c = ctx;
     ctx = null;
     if (c !== null) {
@@ -434,6 +488,11 @@ export async function startCapture(
       }
     }
   };
+  // 🔴 マイクの許可・混ぜ場の準備を待つ間に共有が止められていたら、死んだ映像で録り始めない
+  if (sharedEnded || shared.getTracks().some((t) => t.readyState === 'ended')) {
+    releaseStream();
+    throw new CaptureRefused('共有が止められたので、録画を始めませんでした。もう一度押してください');
+  }
   let rec: MediaRecorder;
   try {
     rec = newRecorder(Recorder, recStream, kind);
@@ -633,7 +692,7 @@ export async function startCapture(
   arm();
   // 🔴 ブラウザ側の「共有を停止」
   // ⚠ 見るのは**共有(音声の収録ではマイク)**の track だけ ── 画面録画中にマイクだけが抜けても、録画は続ける
-  for (const t of shared.getTracks()) t.addEventListener('ended', () => finish('shared-ended'));
+  onSharedEnd = () => finish('shared-ended');
 
   // ⚠ 1 秒ごとに切る ── 切らないと `ondataavailable` が最後に 1 回しか来ず、
   //    切り所の見張りも帯の大きさも**動かない**

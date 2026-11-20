@@ -34,7 +34,7 @@ export interface AudioPlan {
 export function screenShareGuide(micOn: boolean): string {
   return (
     '相手の声も録るには、共有を選ぶ画面で「音声を共有」(タブの音声・システム音声)にチェックを入れてください。' +
-    'ブラウザで開いた会議(Teams など)は、そのタブを共有すると確実に録れます。' +
+    'Chrome / Edge でブラウザのタブとして開いた会議(Teams など)は、そのタブを共有すると音声も共有できます(Firefox / Safari では音声を共有できません)。' +
     (micOn ? 'あなたの声(マイク)は自動で一緒に録ります。' : '')
   );
 }
