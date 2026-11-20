@@ -1607,6 +1607,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     () => void reloadNoteLabels(),
   );
+  // 写しが動いたら state へ(行の左の線・色の絞りは state を読んで描く)。⚠ 読み込みより先に張る
+  appNoteLabels.onChange(() => dispatcher.dispatch({ type: 'SET_NOTE_LABELS', labels: appNoteLabels.all() }));
   void reloadNoteLabels();
   void (async () => {
     await reloadNotePins();
