@@ -986,6 +986,8 @@ img[data-pkc-action='view-big']:focus-visible {
    * ⚠ 折り返しは**最後の手段**である ── 下の `min-width: max-content` と対で
    *   読む:語が入るうちは 1 段のまま伸び、入らなくなった時だけ段が増える。 */
   flex-wrap: wrap;
+  /* ⚠ 間(gap)は 0 のまま ── 8 枚が 1 段に収まる幅はぎりぎりで、2px 足すだけで 1280px で先頭が畳まれる
+   *   (`layout.smoke.spec.ts`)。語どうしの切れ目は、幅を取らない短い縦の目印で付ける(下の `button + button`) */
   gap: 0;
   /* 下地は机のまま。🔑 線は引かない ── 選んでいるタブの下線(下の `[data-pkc-active]`)が
    *   現在地を示し、一覧との間は余白で切る(#1982 段 2) */
@@ -1017,6 +1019,17 @@ img[data-pkc-action='view-big']:focus-visible {
   /* ⚠ 標準のボタンは 1px の透明の枠を持つ ── タブは**語より細くしない**ので、枠ぶん(8 枚で 16px)も詰める */
   border: none;
   justify-content: center;
+}
+/**
+ * 🔴 **タブとタブの切れ目**(#1982 段 4 の確認で見つけた段 2 の退行)。⚠ 段 2 で 1px の輪をやめたら、
+ *   幅が詰まったときに語どうしが**くっついて 1 続きの字**に見えた(「フォルダアプリ予定…」)。
+ * 🔑 幅を取らない(背景に描く)、高さ半分の薄い縦の目印。間を足すと 1 段に収まらなくなる(上の `gap: 0`)。
+ */
+[data-pkc-region='browse-tabs'] button + button {
+  background-image: linear-gradient(color-mix(in srgb, var(--fg) 22%, transparent), color-mix(in srgb, var(--fg) 22%, transparent));
+  background-size: 1px 50%;
+  background-position: left center;
+  background-repeat: no-repeat;
 }
 /**
  * 🔴 **図案は出さない**(2026-08-27。以前は 900px 以下だけで落としていた)。
