@@ -1567,10 +1567,10 @@ test('🔴 本文ページで題名は帯にだけ出る(本文の上には出�
  *   線色のベタ塗り**になった。
  * 🔑 観測点は**画素**である(`page.screenshot` を `scale: 'css'` で撮り、PNG を自前で読む)。
  *   CSS の字面は `tests/adapter/button-bars-css.test.ts` が持つ ── ここは user が見る色だけ。
- *   ⚠ 参照値は同じ画像から採る(ボタンの地 = 面の地 / ボタンの間 = 線)── 色の綴りを
- *   test に貼らない(テーマで変わる)。
+ *   ⚠ 参照値は同じ画像から採る(ボタンの地 = 紙の地)── 色の綴りを test に貼らない(テーマで変わる)。
+ * 🔴 #1982 段 2 で不変条件を替えた: 区切りは「1px の輪」ではなく**隙間**なので、ボタンの間も紙の色。
  */
-test('🔴 書式バーが 2 段以上に折れても、上の段の余りは地の色 ── 区切りの線は残る (#705 ②)', async ({
+test('🔴 書式バーが 2 段以上に折れても、上の段の余りもボタンの間も紙の色 ── 輪を引かない (#705 ② → #1982 段 2)', async ({
   page,
 }) => {
   await gotoApp(page);
@@ -1625,11 +1625,14 @@ test('🔴 書式バーが 2 段以上に折れても、上の段の余りは地
     scale: 'css',
   });
   const at = (x: number, y: number): string => rgbAt(png, Math.floor(x - geo.box.x), Math.floor(y - geo.box.y)).join(',');
-  const ground = at(row.firstLeft + 2, row.mid); // ボタンの地(左の余白 ── 図案に当たらない)
-  const line = at(row.gapX!, row.mid); // ボタンとボタンの間の 1px = 区切りの線
+  // 🔴 #1982 段 2: 書式バーは紙の上の**ゴースト**のボタンの列 ── 区切りは線(輪)ではなく隙間。
+  //   だから「ボタンの地 / ボタンの間 / 段の余り」は**同じ紙の色**でなければならない
+  //   (間に線色が出る = 輪が戻った / 余りが違う = 線色のベタ塗りが戻った)
+  const ground = at(row.firstLeft + 2, row.mid); // ゴーストのボタンの地(= 帯の紙。図案に当たらない左の余白)
+  const between = at(row.gapX!, row.mid); // ボタンとボタンの間の隙間
   const rest = at(row.lastRight + 4, row.mid); // 段の余り
-  expect(line, '区切りの線が消えている(ボタンがくっついて 1 枚に見える)').not.toBe(ground);
-  expect(rest, `上の段の余り(${rest})がボタンの地(${ground})と違う ── 線色のベタ塗りが残っている`).toBe(ground);
+  expect(between, `ボタンの間(${between})が紙の色(${ground})と違う ── 区切りの輪 / 線色の透かしが戻っている`).toBe(ground);
+  expect(rest, `上の段の余り(${rest})が紙の色(${ground})と違う ── 線色のベタ塗りが残っている`).toBe(ground);
 });
 
 /**

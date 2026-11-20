@@ -344,7 +344,6 @@ export const PAPER_TOKENS: readonly string[] = [
   '--bg',
   '--surface',
   '--surface-2',
-  '--surface-hover',
   '--fg',
   '--muted',
   '--border',

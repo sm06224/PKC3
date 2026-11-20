@@ -31,14 +31,19 @@ describe('PC タブの一覧の作り(#1272)', () => {
     }
   });
 
-  it('🔴 一覧の下地に線色を使わない・gap で線を透かさない', () => {
+  it('🔴 一覧の下地に線色を使わない・行の間は線ではなく隙間(#1982 段 2)', () => {
     const body = blocksFor(css(), LIST).join('\n');
-    expect(body, '下地が線色(余りが灰色のベタになる)').not.toMatch(decl('background', '.*'));
-    expect(body, 'gap で線を透かしている').not.toMatch(decl('gap', '.*'));
+    expect(body, '下地を塗っている(机の地のまま。余りが灰色のベタになる)').not.toMatch(decl('background', '.*'));
+    expect(body, '行の間が 1px の透かしへ戻っている').not.toMatch(decl('gap', '1px'));
+    expect(body, '行の間(隙間)が無い').toMatch(decl('gap', 'var\\(--s[1-3]\\)'));
   });
 
-  it('🔴 各行に 1px の下罫線', () => {
-    expect(blocksFor(css(), ROW).join('\n')).toMatch(decl('border-bottom', '1px solid var\\(--border\\)'));
+  it('🔴 各行に罫線を引かない ── 区切りは隙間と hover の地(#1982 段 2)', () => {
+    const row = blocksFor(css(), ROW).join('\n');
+    expect(row).not.toMatch(decl('border-bottom', '.*'));
+    expect(row, '行の下地を塗っている').not.toMatch(decl('background', '.*'));
+    // 🔑 hover は見える地(--surface-hover。全テーマで検算 = shell-tone-css.test.ts)
+    expect(blocksFor(css(), `${OPEN}:hover`).join('\n')).toMatch(decl('background', 'var\\(--surface-hover\\)'));
   });
 
   it('🔴 ファイルの行とフォルダの行(どちらも押せる)は、同じ規則の中で余白・行間・寄せを持つ', () => {

@@ -27,20 +27,6 @@ import { THEMES } from '../../src/adapter/ui/render/theme';
 
 const TOKENS = stripComments(readFileSync('src/styles/tokens.css', 'utf-8'));
 
-/** テーマ 1 つぶんの配色トークンを読む。無ければ undefined(呼び手が落とす)。 */
-function token(theme: string, name: string): string | undefined {
-  const decls = blocksFor(TOKENS, `:root[data-pkc-theme='${theme}']`).join(';');
-  // ⚠ CSS は**後勝ち** ── 同名の宣言が重複したら、実行時に効くのは最後の 1 本。
-  //   最初の一致を読むと「先頭は正しく、末尾で上書き」の変異が素通りする
-  //   (着地前レビュー ⚠-2)
-  const hits = [
-    ...decls.matchAll(new RegExp(`(?:^|;)\\s*${name}:\\s*(#[0-9a-f]{6})\\s*(?:;|$)`, 'gi')),
-  ];
-  return hits.at(-1)?.[1];
-}
-
-const rgb = (hex: string): number[] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-
 describe('2 ペインの行: hover と印(marked)の色(#312 ①)', () => {
   // ⚠ 空振り防止 ── テーマの数え上げは選択画面の一覧(THEMES)と突き合わせる。
   //   tokens.css を数え直すと「両方から消えた」を見逃す(docs-parity が 1 対 1 を守る)
@@ -48,41 +34,27 @@ describe('2 ペインの行: hover と印(marked)の色(#312 ①)', () => {
     expect(THEMES.length).toBe(10);
   });
 
-  it('🔴 --surface-hover が全テーマに定義されている(欠けたテーマだけ hover が消える)', () => {
+  /**
+   * 🔴 #1982 段 2 で hover の定義を替えた: 旧い per-theme の hex(`--surface` と `--surface-2` の間 ──
+   *   `#fafbfc` on `#fff` で乗せても見えなかった)から、**素の `:root` の 1 本**
+   *   `color-mix(in srgb, var(--fg) N%, transparent)` へ。どの地の上でも同じ強さで見え、
+   *   全テーマが同じ定義を読む(欠けるテーマが無い)。見える濃さの検算は `shell-tone-css.test.ts`。
+   */
+  it('🔴 --surface-hover は素の :root の 1 本の定義で、どのテーマも上書きしない(欠けたテーマだけ hover が消えない)', () => {
+    const base = blocksFor(TOKENS, ':root').filter((b) => b.includes('--surface-hover:'));
+    expect(base.length, '素の :root に --surface-hover が 1 本だけ在る').toBe(1);
+    expect(base[0]).toMatch(/--surface-hover:\s*color-mix\(in srgb,\s*var\(--fg\)\s*\d+%,\s*transparent\)/);
     for (const t of THEMES) {
-      expect(token(t.id, '--surface-hover'), `${t.id}: --surface-hover が無い`).toBeTruthy();
+      const own = blocksFor(TOKENS, `:root[data-pkc-theme='${t.id}']`).join(';');
+      expect(own, `${t.id}: --surface-hover を上書きしている`).not.toContain('--surface-hover');
     }
   });
 
-  it('🔴 どのテーマでも hover ≠ marked(乗せただけの行が、印を付けた行に見えない)', () => {
-    for (const t of THEMES) {
-      const hover = token(t.id, '--surface-hover')!;
-      const marked = token(t.id, '--surface-2')!;
-      // ⚠ 文字列で比べない ── `#23282D` と `#23282d` は別の文字列だが**同じ色**である
-      //   (着地前レビュー ⚠-1。文字列比較だと大文字 hex の同値が素通りする)
-      expect(rgb(hover), `${t.id}: hover と印が同じ色(2026-08-19 に直り損ねた症状)`).not.toEqual(
-        rgb(marked),
-      );
-    }
-  });
-
-  it('🔴 hover の明度は --surface と --surface-2 の間(「もっと薄い地」)', () => {
-    for (const t of THEMES) {
-      const s = rgb(token(t.id, '--surface')!);
-      const s2 = rgb(token(t.id, '--surface-2')!);
-      const h = rgb(token(t.id, '--surface-hover')!);
-      // ⚠ 明るいテーマは surface > surface-2、暗いテーマは逆 ── 向きに依らず
-      //   「各成分が両端の間」で見る(間なら明度も必ず間にある)
-      for (let c = 0; c < 3; c++) {
-        const lo = Math.min(s[c]!, s2[c]!);
-        const hi = Math.max(s[c]!, s2[c]!);
-        expect(
-          h[c]! >= lo && h[c]! <= hi,
-          `${t.id}: hover の成分 ${c} が --surface と --surface-2 の間に無い`,
-        ).toBe(true);
-      }
-      expect(h, `${t.id}: hover が --surface と同じ(乗せても何も見えない)`).not.toEqual(s);
-    }
+  it('🔴 hover ≠ marked: hover の割合は印(--pkc-mark-bg の 18%)より薄い(乗せただけの行が、印を付けた行に見えない)', () => {
+    const hover = /--surface-hover:[^;]*?(\d+)%/.exec(TOKENS)![1]!;
+    const mark = /--pkc-mark-bg:\s*color-mix\(in oklab,\s*var\(--fg\)\s*(\d+)%/.exec(TOKENS)![1]!;
+    expect(Number(hover), 'hover が印より濃い / 同じ').toBeLessThan(Number(mark));
+    expect(Number(hover), 'hover が薄すぎて見えない').toBeGreaterThanOrEqual(6);
   });
 });
 

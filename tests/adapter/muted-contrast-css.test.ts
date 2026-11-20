@@ -111,7 +111,7 @@ describe('依頼 244 / 245:薄い字の対比', () => {
   it('CSS:選んだ行は --muted を行の字に差し替える / トークンの 6 割は tokens.css と一致', () => {
     const sel = /\n\[data-pkc-selected\] \{([^}]*)\}/.exec(app);
     expect(sel, '[data-pkc-selected] の規則が見つからない').not.toBeNull();
-    expect(sel![1]!.replace(/\/\*[\s\S]*?\*\//g, '')).toContain('--muted: var(--accent-dim-fg);');
+    expect(sel![1]!.replace(/\/\*[\s\S]*?\*\//g, '')).toContain('--muted: var(--pkc-muted-on-mark);');
     expect(tokens.replace(/\/\*[\s\S]*?\*\//g, '')).toContain(
       '--pkc-muted-on-mark: color-mix(in oklab, var(--fg) 60%, var(--muted));',
     );
