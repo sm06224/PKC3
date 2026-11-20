@@ -44,7 +44,7 @@ test('🔴 紙の配色を選ぶと、地の色がトークンのとおりにな
   expect(r.tone).toBe('light');
   expect(r.body).toBe(r.want);
   expect(r.want, '紙の机の色(#e9e6df)').toBe('rgb(233, 230, 223)');
-  expect(errors()).toEqual([]);
+  expect(errors).toEqual([]);
 });
 
 test('🔴 色ラベルを付ける → 行の左端に線 → 色で絞る → 外す', async ({ page }) => {
@@ -80,6 +80,11 @@ test('🔴 色ラベルを付ける → 行の左端に線 → 色で絞る → 
   const shadow = await target.locator('td').first().evaluate((el) => getComputedStyle(el).boxShadow);
   expect(shadow, `先頭のセルの左端の線が --note-5(${want})でない`).toContain(want);
 
+  // 🔴 storage へ届いている(読み直しても残る)── 画面の写しだけが動いて保存されていない、を許さない
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await expect(page.locator(`${ROWS}[data-pkc-entry="${lid}"]`), '読み直すと色ラベルが消えた').toHaveAttribute('data-pkc-note-label', '5');
+
   // 絞り込みのボタンの列に、使っている色の札が出る
   const chip = page.locator('[data-pkc-region="kind-bar"] [data-pkc-action="toggle-label-filter"]');
   await expect(chip).toHaveCount(1);
@@ -94,5 +99,5 @@ test('🔴 色ラベルを付ける → 行の左端に線 → 色で絞る → 
   await page.locator(`${MENU} [data-pkc-action="note-label-clear"]`).click();
   await expect(target, '色ラベルが外れない').not.toHaveAttribute('data-pkc-note-label', /.+/);
   await expect(chip, '外したあとも色の札が残る').toHaveCount(0);
-  expect(errors()).toEqual([]);
+  expect(errors).toEqual([]);
 });
