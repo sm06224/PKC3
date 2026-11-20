@@ -901,6 +901,8 @@ function currentAppearance(): ManualAppearance {
   const chosen = chosenTextScale();
   return {
     theme: root.getAttribute('data-pkc-theme'),
+    tone: root.getAttribute('data-pkc-tone'),
+    accent: root.getAttribute('data-pkc-accent'),
     textSize: chosen === null ? null : textScaleSpec(chosen).size,
     bg: nonEmpty(computed.getPropertyValue('--bg')),
     fg: nonEmpty(computed.getPropertyValue('--fg')),
