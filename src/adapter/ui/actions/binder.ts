@@ -19135,11 +19135,17 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (keep !== null && opened !== null) {
       // ⚠ 自分が開いた一覧が残っているときだけ閉じる(先に項目を選んで閉じていたら、あとから開いた別の一覧を巻き込まない)
       // ⚠ `Esc` は閉じる側(`onMenuKey`)に任せる ── ここで先に閉じると、同じ `Esc` が編集を終える側へ流れる
+      /**
+       * ⚠ **修飾キーだけ・変換中のキーでは閉じない**(着地前レビュー)── Shift を押しただけで一覧が消えていた。
+       *   それ以外の 1 打鍵で外す(閉じたあとに聞き耳を残さない)。
+       */
       const closeOnKey = (ev: KeyboardEvent): void => {
+        if (ev.isComposing || ev.keyCode === 229 || MODIFIER_KEYS.has(ev.key)) return;
+        keep.removeEventListener('keydown', closeOnKey);
         if (ev.key !== 'Escape' && opened.el.isConnected) closeContextMenu(root);
       };
-      // ⚠ 張る先は**本文の欄**(1 回で外れる ── 欄が消えても聞き耳は残らない。`root` / 文書へは直に張らない: #876)
-      keep.addEventListener('keydown', closeOnKey, { once: true });
+      // ⚠ 張る先は**本文の欄**(欄が消えれば聞き耳も一緒に消える。`root` / 文書へは直に張らない: #876)
+      keep.addEventListener('keydown', closeOnKey);
     }
   },
   /** 🔴 **右の列(何も選んでいないとき)の「書き出す ▾」**(#1029 / #501)。コレクション全体の書き出しの一覧。 */
@@ -19895,6 +19901,9 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
  * ⚠ 例外 = 添付 / 今日のノート:同じボタンを**閉じたメニューの中にも**持つ(`shell.ts`)ので、
  *   `hidden` の中の物が先に当たっても撃てる(メニューは開かなくてよい)。
  */
+/** 単独では「打った」と数えないキー(書式の「その他 ▾」を閉じない)。 */
+const MODIFIER_KEYS: ReadonlySet<string> = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock']);
+
 const PALETTE_HIDDEN_OK: ReadonlySet<string> = new Set(['attach-file', 'open-today']);
 
 /**

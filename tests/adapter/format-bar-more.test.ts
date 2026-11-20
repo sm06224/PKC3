@@ -147,6 +147,10 @@ describe('「その他 ▾」を押す', () => {
     opener.click();
     expect(menu()).not.toBeNull();
     expect(document.activeElement, '焦点が一覧へ移った(行が確定して閉じる原因)').toBe(ta);
+    // ⚠ 修飾キーだけ・変換中のキーでは閉じない(着地前レビュー: Shift を押しただけで消えていた)
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }));
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Process', keyCode: 229, bubbles: true }));
+    expect(menu(), '修飾キー / 変換中のキーで閉じた').not.toBeNull();
     ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
     expect(menu(), '打鍵で閉じない').toBeNull();
     // Esc: 一覧は閉じるが、編集は終わらない

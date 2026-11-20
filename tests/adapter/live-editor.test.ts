@@ -19,6 +19,7 @@ import { initialState, reduce, type AppState } from '../../src/adapter/state/app
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { MarkdownClient } from '../../src/adapter/platform/render/markdown-client';
+import { closeContextMenu, openContextMenu } from '../../src/adapter/ui/render/context-menu';
 import { frontmatterLineCount } from '../../src/features/markdown/frontmatter';
 
 function meta(lid: string): EntryMeta {
@@ -176,6 +177,37 @@ describe('ライブエディタ(1 面)の配線', () => {
       card?.querySelector('[data-pkc-field="fm-summary"]')?.textContent ?? '',
       '札に中身が出ていない',
     ).toContain('tags: 買い物');
+  });
+
+  /**
+   * 🔴 **一覧が開いている間の Esc は、行の編集をやめない**(#1982 段 3 の着地前レビュー)。
+   * ⚠ 書式の「その他 ▾」は焦点を行の欄に残したまま開く ── Esc はまず行の欄に届くので、ここで行をやめると
+   *   一覧を閉じたかっただけなのに書いていた行が元に戻った。🔑 対照群: 一覧が無ければ Esc は今までどおり行をやめる。
+   */
+  it('🔴 一覧が開いている間の Esc は行をやめない(一覧が無ければやめる)', async () => {
+    setLive(true);
+    const r = rig(DOC);
+    r.root.setAttribute('data-pkc-slot', 'root');
+    await settle();
+    const live = r.root.querySelector('[data-pkc-region="editor-live"]')!;
+    const open = (): HTMLTextAreaElement => {
+      const p = [...live.querySelectorAll('p')].find((e) => e.textContent === '最初の段落。')!;
+      p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
+      return live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    };
+    const ta = open();
+    expect(ta, '前提: 行の欄が開かない').not.toBeNull();
+    const anchor = document.createElement('button');
+    r.root.append(anchor);
+    openContextMenu(r.root, { x: 0, y: 0 }, [{ action: 'noop', label: '項目' }], anchor, {}, { keepFocus: true });
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    ta.dispatchEvent(esc);
+    expect(esc.defaultPrevented, '一覧が開いているのに行の側が Esc を取った').toBe(false);
+    expect(live.querySelector('[data-pkc-field="row-source"]'), '一覧が開いている間の Esc で行が閉じた').not.toBeNull();
+    closeContextMenu(r.root);
+    // 対照群: 一覧が無ければ、Esc は行をやめる
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(live.querySelector('[data-pkc-field="row-source"]'), '一覧が無いのに Esc で行が閉じない').toBeNull();
   });
 
   it('③ 🔴 行を書き換えて確定すると、継ぎ足した本文が外へ出る', async () => {

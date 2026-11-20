@@ -33,6 +33,7 @@
  */
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
 import { confirmInApp, isAppDialogOpen } from '@adapter/ui/render/app-dialog';
+import { contextMenuOpen } from './context-menu';
 import { splitTopLevelBlocks } from '@features/markdown/html-blocks';
 import {
   buildBlockPartition,
@@ -1332,6 +1333,14 @@ export class RowSwap {
       if (ke.isComposing || ke.keyCode === 229) return;
       const cmd = this.keymap.match(ke, 'row');
       if (cmd === 'row-cancel') {
+        /**
+         * 🔴 **一覧(書式の「その他 ▾」など)が開いている間の Esc は、一覧を閉じるだけ**(#1982 段 3 の着地前レビュー)。
+         * ⚠ 一覧は焦点を行の欄に残したまま開く(`keepFocus`)ので、この Esc はまず行の欄に届く ── ここで行の編集を
+         *   やめると、閉じたかっただけの一覧と一緒に**書いていた行が元に戻る**(打っていれば「捨てますか」まで出る)。
+         * 🔑 判定は 2 ペインの `cancel-edit` と同じ 1 本(`contextMenuOpen`)。閉じる側(`onMenuKey`)へ素通しする。
+         */
+        const appRoot = ta.closest<HTMLElement>('[data-pkc-slot="root"]');
+        if (appRoot !== null && contextMenuOpen(appRoot)) return;
         ev.preventDefault();
         this.cancelActive();
         return;
