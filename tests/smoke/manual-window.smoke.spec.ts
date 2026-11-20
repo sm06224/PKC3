@@ -409,8 +409,14 @@ test('🔴 設定で配色と文字の大きさを変えて、もう一度押す
       // ⚠ 短い塊(目次の 1 行・短い見出し)は見分けの材料にならないので飛ばす(2026-10-13)──
       //   マニュアルに「## 音と動画を扱う」(7 字)を足したら、それが頭に来て下の空振り防止に当たった。
       //   この test が見たいのは「読んでいた所が同じか」であって、どの塊かではない
+      /**
+       * ⚠ **画面の上での位置で見る**(#1982 段 2)── 旧い形は `offsetTop`(body から測る)と `scrollTop`(器の中で測る)を
+       *   比べており、器の上の高さぶん**画面より上の帯**を「画面の頭」として読んでいた(字の大きさで帯の中身が変わる)。
+       *   製品の側(`manual-window.ts` の `readingAnchor` / boot script)と同じく、器の上端より下に頭がある塊で見る。
+       */
+      const mainTop = el.getBoundingClientRect().top;
       const first = kids.find(
-        (k) => (k as HTMLElement).offsetTop >= top - 2 && (k.textContent ?? '').trim().length > 10,
+        (k) => k.getBoundingClientRect().top >= mainTop - 2 && (k.textContent ?? '').trim().length > 10,
       );
       return { scrollTop: top, text: (first?.textContent ?? '').trim().slice(0, 50) };
     });

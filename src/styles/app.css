@@ -1034,13 +1034,13 @@ img[data-pkc-action='view-big']:focus-visible {
 /**
  * 🔴 **選んでいるタブは「下線 + 太字」**(#1982 段 2。旧い「緑の地 + `--fg` の下線」は地の色で
  * 示していた)。現在地は**形**で示し、地は塗らない ── アクセント色は主の操作とフォーカスのもの。
- * ⚠ 線は `--accent`(各テーマの強調色。地との対比 3:1 以上を `theme-tokens.test.ts` が検算)。
- * ⚠ 太字だけでも手がかりになる(色が見分けにくい人にも届く。#720 ②)。
+ * ⚠ 線は**本文の字の色**(`--fg`)のまま ── user 裁定 #720 ②(2026-09-06)「色が見分けにくい人にも届く手がかり」。
+ *   #1982 の「現在地は形で示す」とも合う(下線と太字が形)。`tests/smoke/organize.smoke.spec.ts` が見る。
  */
 [data-pkc-region='browse-tabs'] [data-pkc-active] {
   background: transparent;
   color: var(--fg);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  box-shadow: inset 0 -2px 0 var(--fg);
   font-weight: 600;
 }
 /* 🔴 掴んだまま止めているタブ(依頼 79-4)── 0.6 秒後に切り替わることを先に見せる薄い枠。 */

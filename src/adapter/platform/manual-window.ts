@@ -151,12 +151,57 @@ function applyAppearance(win: Window, a: ManualAppearance | undefined): void {
   if (a === undefined) return;
   try {
     const root = win.document.documentElement;
+    const keep = readingAnchor(win.document);
     if (a.theme !== null) root.setAttribute('data-pkc-theme', a.theme);
     if (a.textSize !== null) root.style.setProperty('--pkc-text-size', a.textSize);
     else root.style.removeProperty('--pkc-text-size');
+    keep?.();
   } catch {
     // 触れない窓 ── 当て直せない
   }
+}
+
+/** マニュアルの本文を送る器(`manual-page.ts` の版面)。 */
+export const MANUAL_MAIN_SELECTOR = '[data-pkc-region="manual-window-main"]';
+
+/**
+ * 🔴 **字の大きさを変えても、読んでいた所に居続ける**(#645 I1。#1982 段 2 で見出しの上の余白を
+ *   `em` の段にしたら、フル smoke で読む所が前の節へ流れた)。
+ *
+ * ⚠ ブラウザの scroll anchoring に任せていたが、留める塊は**ブラウザが選ぶ**(画面の頭に背の高い塊や
+ *   余白が跨がると、その塊が留まって読んでいた段落が流れる)。🔑 だから**画面のいちばん上に頭がある塊**を
+ *   自分で覚え、当て直した後にその塊の頭を同じ高さへ戻す(ずれた分だけ送る)。
+ * @returns 当て直した後に呼ぶ戻し口。送っていない(先頭)・器が無いときは `null`
+ */
+export function readingAnchor(doc: Document): (() => void) | null {
+  const main = doc.querySelector<HTMLElement>(MANUAL_MAIN_SELECTOR);
+  if (main === null || main.scrollTop <= 0) return null;
+  const top = main.getBoundingClientRect().top;
+  const blocks = main.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6,p,li,td,th,pre');
+  let anchor: HTMLElement | null = null;
+  for (const el of blocks) {
+    if (el.getBoundingClientRect().top >= top - 2) {
+      anchor = el;
+      break;
+    }
+  }
+  if (anchor === null) return null;
+  const offset = anchor.getBoundingClientRect().top - top;
+  const target = anchor;
+  // ⚠ ブラウザの scroll anchoring は**次のフレームで**自分の調整を足す ── こちらで戻した後にもう一度動かされると
+  //   二重に送られる。当て直す間だけ止め、次のフレームで元へ戻す(画像の読み込みなど他の場面では効かせたい)
+  const before = main.style.overflowAnchor;
+  main.style.overflowAnchor = 'none';
+  return () => {
+    const now = target.getBoundingClientRect().top - main.getBoundingClientRect().top;
+    main.scrollTop += now - offset;
+    const view = doc.defaultView;
+    const restore = (): void => {
+      main.style.overflowAnchor = before;
+    };
+    if (view !== null && typeof view.requestAnimationFrame === 'function') view.requestAnimationFrame(() => view.requestAnimationFrame(restore));
+    else restore();
+  };
 }
 
 /**
