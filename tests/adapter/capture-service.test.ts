@@ -157,6 +157,10 @@ function bench(
     confirm?: (message: string, o: { okLabel: string; cancelLabel: string; danger: boolean }) => Promise<boolean>;
     /** 取り込めなかった収録を、ファイルとして端末へ保存する口(台帳 #1852 O1 / 依頼 239)。省略 = 申し出ない。 */
     saveFile?: (name: string, blob: Blob) => void;
+    /** 🔴 画面録画にマイクも混ぜる設定(#1985 項目 3)。 */
+    micMix?: () => boolean;
+    /** 始める口が呼ばれた時点までに出た知らせの数を控える先。 */
+    onStartCalled?: (notices: string[], o: { mixMic?: boolean; onNotice?: (t: string) => void }) => void;
   } = {},
 ): Bench {
   const d = new Dispatcher();
@@ -257,6 +261,7 @@ function bench(
     ...(opts.lock === undefined ? {} : { lock: opts.lock }),
     ...(opts.confirm === undefined ? {} : { confirm: opts.confirm }),
     ...(opts.saveFile === undefined ? {} : { saveFile: opts.saveFile }),
+    ...(opts.micMix === undefined ? {} : { micMix: opts.micMix }),
     now: () => opts.clock?.at ?? new Date(2026, 7, 27, 3, 1, 2),
     tick: (fn) => {
       beats.push(fn);
@@ -265,6 +270,7 @@ function bench(
       };
     },
     start: (kind, _capture, o) => {
+      opts.onStartCalled?.([...notices], o);
       if (opts.refuse !== undefined) return Promise.reject(new CaptureRefused(opts.refuse));
       live = fakeCapture(
         kind,
@@ -1134,5 +1140,43 @@ describe('🔴 別のタブ・窓が編集中のノート(#1087)', () => {
     expect(appends(b.events).map((a) => a.lid), '錠が取れたのに入っていない').toEqual(['a']);
     expect(b.notices.some((n) => n.includes('本文のいちばん下に入れました'))).toBe(true);
     expect(released, '取った錠を手放していない').toEqual(['a']);
+  });
+});
+
+describe('画面録画の音(#1985 項目 3)', () => {
+  it('🔴 共有を選ぶ前に案内を出す(音声を共有 / タブ共有)。⚠ 録音では出さない', async () => {
+    let seen: string[] = [];
+    const b = bench({ onStartCalled: (n) => (seen = n) });
+    await b.service.start('screen');
+    expect(seen.length, '共有を頼む前に案内が出ていない').toBe(1);
+    expect(seen[0]).toContain('音声を共有');
+    expect(seen[0]).toContain('タブ');
+    const a = bench({ onStartCalled: (n) => (seen = n) });
+    await a.service.start('audio');
+    expect(seen, '録音では案内しない').toEqual([]);
+  });
+
+  it('🔴 設定(入 / 切 / 未配線)が録る側へ渡る。⚠ 録音には渡さない。案内の字も設定で変わる', async () => {
+    const got: Array<boolean | undefined> = [];
+    const texts: string[] = [];
+    for (const micMix of [() => true, () => false, undefined]) {
+      const b = bench({ ...(micMix === undefined ? {} : { micMix }), onStartCalled: (n, o) => (got.push(o.mixMic), texts.push(...n)) });
+      await b.service.start('screen');
+    }
+    expect(got).toEqual([true, false, false]);
+    expect(texts[0]).toContain('マイク');
+    expect(texts[1]).not.toContain('マイク');
+    let audioMix: boolean | undefined = true;
+    const a = bench({ micMix: () => true, onStartCalled: (_n, o) => (audioMix = o.mixMic) });
+    await a.service.start('audio');
+    expect(audioMix).toBe(false);
+  });
+
+  it('録る側の知らせ(マイクが使えない等)は、その 1 行がそのまま出る', async () => {
+    let cb: ((t: string) => void) | undefined;
+    const b = bench({ micMix: () => true, onStartCalled: (_n, o) => (cb = o.onNotice) });
+    await b.service.start('screen');
+    cb!('マイクが使えないので、画面と共有された音だけを録ります');
+    expect(b.notices.filter((n) => n.includes('マイクが使えない')).length).toBe(1);
   });
 });
