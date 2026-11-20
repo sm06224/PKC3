@@ -52,12 +52,23 @@ export function createVoiceBoostSection(
           '左右が極端に分かれた録音を、ヘッドホンで聞きやすくします(録った音そのものは変わりません)。',
         ],
       });
-      return [row.dt, row.dd, level.dt, level.dd, cross.dt, cross.dd];
+      // 🔴 録るときの設定(#1985 項目 3)。⚠ 再生の 3 つとは逆に**既定は入**で、切ると共有された音だけを録る
+      const mic = buildCheckboxRow({
+        term: '画面録画にマイクも混ぜる',
+        action: 'set-capture-mic-mix',
+        field: 'capture-mic-mix',
+        label: ' 画面録画のとき、共有された音と一緒にマイクの声も録る',
+        notes: [
+          '会議の相手の声(共有された音)とあなたの声を 1 本に録ります。切ると共有された音だけを録ります。',
+        ],
+      });
+      return [row.dt, row.dd, level.dt, level.dd, cross.dt, cross.dd, mic.dt, mic.dd];
     },
     sync(): void {
       syncCheckbox(region, 'voice-boost', () => store.enabled());
       syncCheckbox(region, 'voice-level', () => store.levelEnabled());
       syncCheckbox(region, 'voice-crossfeed', () => store.crossfeedEnabled());
+      syncCheckbox(region, 'capture-mic-mix', () => store.micMixEnabled());
     },
   };
 }

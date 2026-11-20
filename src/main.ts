@@ -4020,6 +4020,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     confirm: (message, o) => ask(message, o),
     // 🔴 取り込めなかった録音・録画を、ファイルとして端末へ保存する(台帳 #1852 O1 / 依頼 239)
     saveFile: (name, blob) => downloadBlob(name, blob),
+    // 🔴 画面録画にマイクも混ぜるか(#1985 項目 3。録り始めのたびに読む)
+    micMix: () => appVoiceBoost.micMixEnabled(),
     /**
      * 🔴 **途中保存**(#1985 項目 2)── 1 秒ごとの断片を収録専用の IndexedDB へ足す。判断は `capture-journal-writer.ts`、
      *   ここは**繋ぐだけ**。⚠ 収録中は Web Locks で「いま録っている」を他のタブへ知らせる(起動時の復元が取り違えない)。
@@ -4675,6 +4677,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appVoiceBoost.setLevelEnabled(on);
       appVoiceBoostRouter.refresh();
     },
+    setCaptureMicMix: (on) => appVoiceBoost.setMicMixEnabled(on),
     setVoiceCrossfeed: (on) => {
       appVoiceBoost.setCrossfeedEnabled(on);
       appVoiceBoostRouter.refresh();

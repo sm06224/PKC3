@@ -137,6 +137,8 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
   // ⚠ 同じ節の切り替え 2 つ(#952 B2・B3)。聞く人の耳に付く好みなので、`pkc3.voice-boost` と同じく運ぶ
   { key: 'pkc3.voice-level', label: '音量をそろえるか', valid: isOnOff },
   { key: 'pkc3.voice-crossfeed', label: '頭の中で鳴る感じを和らげるか', valid: isOnOff },
+  // ⚠ 録るときの好み(#1985 項目 3。既定 入)。人に付く設定で、別の端末でも同じ意味になる
+  { key: 'pkc3.capture-mic-mix', label: '画面録画にマイクも混ぜるか', valid: isOnOff },
   /**
    * ⚠ 別の端末でも**同じ意味**になる(#826)── 「本文を見ながら選びたい」かどうかは
    *   **人に付く**好みである。⚠ 端末側の事情(ポップアップを止めている)で効かない回は

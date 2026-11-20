@@ -43,6 +43,7 @@
  */
 
 import { insertMissingDuration } from '@features/audio/webm-opus';
+import { NO_MIX_NOTICE, planScreenAudio, type MicState } from '@features/capture/audio-mix';
 
 /** どちらを録るか。 */
 export type CaptureKind = 'audio' | 'screen';
@@ -86,6 +87,9 @@ export interface CaptureDeps {
   readonly getDisplayMedia?: (c: MediaStreamConstraints) => Promise<MediaStream>;
   /** ⚠ `MediaRecorder` そのもの(test は fake を渡す)。 */
   readonly Recorder?: typeof MediaRecorder;
+  /** 🔴 画面録画の音を混ぜる口(#1985 項目 3)。⚠ test は fake を渡す。省略 = ブラウザのもの(無ければ混ぜない)。 */
+  readonly AudioContext?: typeof AudioContext;
+  readonly MediaStream?: typeof MediaStream;
   readonly now?: () => number;
 }
 
@@ -115,6 +119,13 @@ export interface CaptureOptions {
    * `elapsedMs` = その本の始まりからの経過。⚠ `blob` は受け取ったまま(写さない)。
    */
   readonly onChunk?: (c: { segment: number; index: number; elapsedMs: number; blob: Blob }) => void;
+  /**
+   * 🔴 **画面録画にマイクも混ぜるか**(#1985 項目 3。user 裁定 2026-11-20 案 A)。⚠ 省略 = 混ぜない(従来どおり)。
+   * 製品は設定(既定 入)を渡す。音だけの録音では見ない。
+   */
+  readonly mixMic?: boolean;
+  /** 🔴 録り始めに 1 度だけ出す知らせ(マイクが使えず共有の音だけにした、など)。 */
+  readonly onNotice?: (text: string) => void;
 }
 
 /**
@@ -181,6 +192,69 @@ export function pickClock(host: { performance?: { now(): number } }): () => numb
   const perf = host.performance;
   if (perf === undefined || typeof perf.now !== 'function') return () => Date.now();
   return () => perf.now();
+}
+
+/**
+ * 🔴 **画面の共有を頼む**(#1985 項目 3)。⚠ `systemAudio: 'include'` はシステム音声の共有を勧める指定。
+ *   知らない辞書メンバは普通は無視されるが、型で断る実装(`TypeError`)なら**指定なしでやり直す**
+ *   (許可の拒否などは `TypeError` ではないので、やり直さずそのまま断る)。
+ */
+async function askDisplay(
+  ask: (c: MediaStreamConstraints) => Promise<MediaStream>,
+): Promise<MediaStream> {
+  try {
+    return await ask({ video: true, audio: true, systemAudio: 'include' } as MediaStreamConstraints);
+  } catch (e) {
+    if (!(e instanceof TypeError)) throw e;
+    return ask({ video: true, audio: true });
+  }
+}
+
+/** 🔴 マイクの許可の確認を待つ上限(これを過ぎたら「使えない」として画面と共有の音だけで始める)。 */
+export const MIC_WAIT_MS = 15_000;
+
+function stopTracks(s: MediaStream): void {
+  for (const t of s.getTracks()) t.stop();
+}
+
+/**
+ * マイクを頼む。⚠ 取れなくても録画は続けるので、理由は状態で返す(投げない)。
+ * 🔴 **待つのは `MIC_WAIT_MS` まで**(許可の確認を放置されても、共有が生きたまま帯が出ない状態にしない)。
+ *   ⚠ 時間切れの後で届いたマイクは**その場で止める**(表示を残さない)。
+ */
+async function askMic(
+  deps: CaptureDeps,
+): Promise<{ state: MicState; stream: MediaStream | null }> {
+  const md = (globalThis as { navigator?: { mediaDevices?: MediaDevices } }).navigator?.mediaDevices;
+  const fn = deps.getUserMedia ?? md?.getUserMedia?.bind(md);
+  if (fn === undefined) return { state: 'unavailable', stream: null };
+  let gaveUp = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const got = (async (): Promise<{ state: MicState; stream: MediaStream | null }> => {
+    try {
+      // 🔑 相手の声がスピーカーから回り込むので、エコー除去とノイズ抑制を頼む
+      const s = await fn({ audio: { echoCancellation: true, noiseSuppression: true } });
+      if (gaveUp) {
+        stopTracks(s);
+        return { state: 'denied', stream: null };
+      }
+      return { state: 'ok', stream: s };
+    } catch (e) {
+      const name = (e as { name?: string } | null)?.name ?? '';
+      return { state: name === 'NotAllowedError' || name === 'SecurityError' ? 'denied' : 'unavailable', stream: null };
+    }
+  })();
+  const timeout = new Promise<{ state: MicState; stream: MediaStream | null }>((resolve) => {
+    timer = setTimeout(() => {
+      gaveUp = true;
+      resolve({ state: 'denied', stream: null });
+    }, MIC_WAIT_MS);
+  });
+  try {
+    return await Promise.race([got, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function pick(deps: CaptureDeps, kind: CaptureKind): (c: MediaStreamConstraints) => Promise<MediaStream> {
@@ -289,10 +363,83 @@ export async function startCapture(
   let stream: MediaStream;
   try {
     // ⚠ 画面録画でも**音を一緒に**頼む(会議メモは音が要る)
-    stream = await ask(kind === 'audio' ? { audio: true } : { video: true, audio: true });
+    stream = await (kind === 'audio' ? ask({ audio: true }) : askDisplay(ask));
   } catch (e) {
     const name = (e as { name?: string } | null)?.name ?? '';
     throw new CaptureRefused(captureStartFailedText(kind, name, (e as Error | null)?.message ?? ''));
+  }
+
+  /**
+   * 🔴 **画面録画の音の組み立て**(#1985 項目 3)。録る器へ渡す stream は、映像 + (混ぜた音 | 共有の音 | マイク)。
+   * ⚠ 組んだ stream は**収録 1 回で 1 つ**(切って次の器を起こすときも同じ物を渡す ── `AudioContext` を作り直さない)。
+   * ⚠ 取った物(共有 / マイク / 混ぜ場)は**全部ここに控え**、`releaseStream` が 1 か所で止める。
+   */
+  const shared = stream;
+  const held: MediaStream[] = [shared];
+  let ctx: AudioContext | null = null;
+  /**
+   * 🔴 **共有の終わりは、マイクの許可を待つ前から見る**。⚠ 後から張ると、許可の確認中に「共有を停止」された回の
+   *   `ended` を取り逃し、死んだ映像のまま録り始めてマイクも点いたままになる。
+   */
+  let sharedEnded = false;
+  let onSharedEnd: (() => void) | null = null;
+  for (const t of shared.getTracks()) {
+    t.addEventListener('ended', () => {
+      sharedEnded = true;
+      onSharedEnd?.();
+    });
+  }
+  /** 器へ渡す stream(音を混ぜない回は共有そのまま)。 */
+  let recStream: MediaStream = shared;
+  if (kind === 'screen' && opts.mixMic === true) {
+    const mic = await askMic(deps);
+    if (mic.stream !== null) held.push(mic.stream);
+    const AC = deps.AudioContext ?? (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
+    const MS = deps.MediaStream ?? (globalThis as { MediaStream?: typeof MediaStream }).MediaStream;
+    const plan = planScreenAudio({
+      displayAudio: shared.getAudioTracks().length > 0,
+      mic: mic.state,
+      hasContext: AC !== undefined,
+      hasStream: MS !== undefined,
+    });
+    let mixFailed = false;
+    try {
+      if (plan.use === 'mix' && AC !== undefined && MS !== undefined && mic.stream !== null) {
+        const c = new AC();
+        ctx = c;
+        // 🔴 自動再生の制限で `suspended` のまま作られることがある ── 動かない混ぜ場は無音を録るので、
+        //   動かせなければ混ぜない(共有の音のまま録る)
+        if (c.state !== 'running') {
+          try {
+            await c.resume();
+          } catch {
+            // 下で state を見て退避する
+          }
+          if ((c.state as string) !== 'running') throw new Error('audio context is not running');
+        }
+        const dest = c.createMediaStreamDestination();
+        c.createMediaStreamSource(shared).connect(dest);
+        c.createMediaStreamSource(mic.stream).connect(dest);
+        recStream = new MS([...shared.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+      } else if (plan.use === 'mic' && MS !== undefined && mic.stream !== null) {
+        recStream = new MS([...shared.getVideoTracks(), ...mic.stream.getAudioTracks()]);
+      }
+    } catch {
+      // 混ぜ場を作れなかった ── 共有のまま録る。使わなかったマイクと混ぜ場は**いま**止める(表示を残さない)
+      recStream = shared;
+      try {
+        void Promise.resolve(ctx?.close()).catch(() => undefined);
+      } catch {
+        // 閉じられなくても続ける
+      }
+      ctx = null;
+      mixFailed = true;
+    }
+    // 🔴 使わなかったマイクは**いま**止める(表示を残さない)
+    if (mic.stream !== null && (mixFailed || (plan.use !== 'mix' && plan.use !== 'mic'))) stopTracks(mic.stream);
+    const notice = mixFailed ? NO_MIX_NOTICE : plan.notice;
+    if (notice !== null) opts.onNotice?.(notice);
+    if (recStream !== shared) held.push(recStream);
   }
 
   const chunks: Blob[] = [];
@@ -329,11 +476,26 @@ export async function startCapture(
    *   ここで投げると **track が生きたまま**(マイクの表示が点いたまま)になる。
    */
   const releaseStream = (): void => {
-    for (const t of stream.getTracks()) t.stop();
+    // 🔴 共有・マイク・混ぜた物の track を**全部**止め、混ぜ場も閉じる(ブラウザのマイク表示を残さない)
+    for (const s of held) stopTracks(s);
+    const c = ctx;
+    ctx = null;
+    if (c !== null) {
+      try {
+        void Promise.resolve(c.close()).catch(() => undefined);
+      } catch {
+        // 閉じられなくても止める手は止めない
+      }
+    }
   };
+  // 🔴 マイクの許可・混ぜ場の準備を待つ間に共有が止められていたら、死んだ映像で録り始めない
+  if (sharedEnded || shared.getTracks().some((t) => t.readyState === 'ended')) {
+    releaseStream();
+    throw new CaptureRefused('共有が止められたので、録画を始めませんでした。もう一度押してください');
+  }
   let rec: MediaRecorder;
   try {
-    rec = newRecorder(Recorder, stream, kind);
+    rec = newRecorder(Recorder, recStream, kind);
   } catch {
     releaseStream();
     throw new CaptureRefused(CAPTURE_START_UNSUPPORTED);
@@ -409,7 +571,7 @@ export async function startCapture(
         emit(); // 既に止まっている ── 落とさない・待たせない
       }
     }
-    for (const t of stream.getTracks()) t.stop();
+    releaseStream();
   }
 
   /**
@@ -445,7 +607,7 @@ export async function startCapture(
      *   ができる。⚠ 順番を変えると、録音そのものが欠ける側の欠陥になる。
      */
     try {
-      rec = newRecorder(Recorder, stream, kind);
+      rec = newRecorder(Recorder, recStream, kind);
       arm();
       rec.start(SLICE_MS);
     } catch {
@@ -529,7 +691,8 @@ export async function startCapture(
 
   arm();
   // 🔴 ブラウザ側の「共有を停止」
-  for (const t of stream.getTracks()) t.addEventListener('ended', () => finish('shared-ended'));
+  // ⚠ 見るのは**共有(音声の収録ではマイク)**の track だけ ── 画面録画中にマイクだけが抜けても、録画は続ける
+  onSharedEnd = () => finish('shared-ended');
 
   // ⚠ 1 秒ごとに切る ── 切らないと `ondataavailable` が最後に 1 回しか来ず、
   //    切り所の見張りも帯の大きさも**動かない**
