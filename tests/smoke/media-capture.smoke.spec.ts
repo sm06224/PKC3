@@ -2190,7 +2190,13 @@ test('🔴 録音の途中でタブが落ちても、開き直すと復元でき
     .toBeGreaterThanOrEqual(1);
   await expect.poll(async () => await journal(next), { message: '復元したのに控えが残っている' }).toEqual({ chunks: 0, metas: 0 });
 
-  // 対照群: 普通に止めた録音は、控えが残らない
+  // 対照群: 普通に止めた録音は、控えが残らない(⚠ 録るにはノートを開いておく)
+  await createEntry(next, 'text');
+  await clickReal(next, '[data-pkc-region="editor-live"]');
+  await next.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]').fill('# 対照');
+  await next.keyboard.press('Tab');
+  await clickReal(next, '[data-pkc-action="commit-edit"]');
+  await clickReal(next, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
   await clickReal(next, '[data-pkc-field="start-audio-capture"]');
   await expect(next.locator('[data-pkc-field="capture-status"]')).toContainText(/約 [1-9]/, { timeout: 15_000 });
   await clickReal(next, '[data-pkc-field="stop-capture"]');
