@@ -2333,6 +2333,7 @@ test('🔴 編集中に止めた録音は、編集を終えると途中保存か
   await expect(bar).toBeVisible();
   await expect.poll(journal, { message: '途中保存が溜まらない', timeout: 15_000 }).toBeGreaterThanOrEqual(2);
   // 編集中にする(書き終えない)
+  await clickReal(page, '[data-pkc-action="start-edit"]');
   await clickReal(page, '[data-pkc-region="editor-live"]');
   await page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]').fill('# 録り始めたノート\n\n編集中の追記');
   await clickReal(page, '[data-pkc-field="stop-capture"]');
