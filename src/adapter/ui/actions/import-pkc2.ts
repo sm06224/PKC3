@@ -150,6 +150,7 @@ export interface ImportDeps {
    * (満杯なら断った数を返す)。戻すのは取り込んだノートに在るものだけ(呼び側が絞ってある)。
    * @returns 足した数 / 上限で見送った数
    */
+  importNoteLabels?(entries: ReadonlyArray<{ lid: string; color: number }>): Promise<{ added: number }>;
   importNotePins?(
     lids: readonly string[],
   ): Promise<{
@@ -724,6 +725,8 @@ async function runImport(
           tagColors: restored.tagColors,
           /** 🔴 アーカイブ経路だけが持つ**ピン留め**(#1377。付け替えた lid は写し済み)。 */
           notePins: restored.notePins,
+          /** 🔴 アーカイブ経路だけが持つ**色ラベル**(#1982 段 4。付け替えた lid は写し済み)。 */
+          noteLabels: restored.noteLabels,
           /** 🔴 アーカイブ経路だけが持つ**付け替えた lid**(本文の `entry:` を写す。下の `remap`)。 */
           lidRemap: restored.lidRemap,
           sourceCid: restored.sourceCid,
@@ -1083,6 +1086,15 @@ async function runImport(
           }
         } catch (e) {
           result.warnings.push(`ピン留めを戻せませんでした: ${reason(e)}`);
+        }
+      }
+      // 🔴 色ラベル(#1982 段 4)── ピン留めの後。本文ではないので、戻せなくても取込は失敗にしない
+      const labels = 'noteLabels' in result ? result.noteLabels : [];
+      if (labels.length > 0 && deps.importNoteLabels !== undefined) {
+        try {
+          await deps.importNoteLabels(labels);
+        } catch (e) {
+          result.warnings.push(`色ラベルを戻せませんでした: ${reason(e)}`);
         }
       }
     } catch (e) {

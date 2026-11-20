@@ -63,6 +63,7 @@ import { applyTagBadge, initialTagBadge } from '@adapter/ui/render/tag-badge';
 import { watchAppearanceFromOtherWindows } from '@adapter/ui/render/appearance-follow';
 import { applyTagColors, currentTagColors } from '@adapter/ui/render/tag-color';
 import { appNotePins } from '@adapter/platform/note-pin-store';
+import { appNoteLabels } from '@adapter/platform/note-label-store';
 import { appPasteToast } from '@adapter/ui/render/paste-toast';
 import { importNotePinsInto } from '@adapter/platform/note-pin-import';
 import { migrateLegacyNotePins } from '@adapter/platform/note-pin-migration';
@@ -1592,6 +1593,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 書けなかった ── 画面だけ留まっている状態を残さない(正本を読み直す)
     () => void reloadNotePins(),
   );
+  /**
+   * 🔴 **ノートの色ラベル**(#1982 段 4)── ピン留めと同じく器のデータ。画面の写し(`appNoteLabels`)は正本(storage)を読み直して揃える。
+   */
+  const reloadNoteLabels = (): Promise<void> =>
+    client
+      .request({ op: 'listNoteLabels', cid })
+      .then((list) => appNoteLabels.setAll(list))
+      .catch(() => {});
+  appNoteLabels.attach(
+    async (lid, color) => {
+      await client.request({ op: 'putNoteLabel', cid, lid, color });
+    },
+    () => void reloadNoteLabels(),
+  );
+  void reloadNoteLabels();
   void (async () => {
     await reloadNotePins();
     /**
@@ -2953,6 +2969,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // ⚠ 色の読み直しも**同じ 300ms の束ね**に乗せる(#1087)── 書込のたびに 1 回ずつ読んでいた
       void reloadTagColors();
       void reloadNotePins();
+      void reloadNoteLabels();
       void reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null, settled: () => storeEffects?.settled() });
     }, 300);
   };
@@ -3203,6 +3220,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           listTagColors: () => client.request({ op: 'listTagColors', cid }),
           // 🔴 ノートのピン留めも運ぶ(#1377)。部分の書き出しは `subsetSource` / `singleEntrySource` が含むノートの分に絞る
           listNotePins: () => client.request({ op: 'listNotePins', cid }),
+          // 🔴 色ラベルも運ぶ(#1982 段 4)。部分の書き出しは含むノートの分に絞る
+          listNoteLabels: () => client.request({ op: 'listNoteLabels', cid }),
           listRevisionLids: () =>
             client.request({ op: 'listRevisionLids', cid }),
           // 🔴 ゴミ箱のノートも運ぶ(台帳 #1852 束 F2 / 依頼 105-2・297 A)── 全体のバックアップだけ(部分の書き出しの源は持たない)
@@ -3744,6 +3763,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       /**
        * 🔴 **バックアップのピン留めを戻す**(#1377)。⚠ いま留めている物は動かさず、足りない分だけ足す(20 件まで)。
        */
+      /** 🔴 **バックアップの色ラベルを戻す**(#1982 段 4)。⚠ いま付いている色は動かさず、付いていないノートの分だけ足す。 */
+      importNoteLabels: async (incoming) => {
+        const now = new Set((await client.request({ op: 'listNoteLabels', cid })).map((e) => e.lid));
+        let added = 0;
+        for (const e of incoming) {
+          if (now.has(e.lid) || !dispatcher.getState().entryMetas.has(e.lid)) continue;
+          await client.request({ op: 'putNoteLabel', cid, lid: e.lid, color: e.color });
+          added += 1;
+        }
+        await reloadNoteLabels();
+        return { added };
+      },
       importNotePins: async (lids) => {
         const r = await importNotePinsInto(lids, {
           list: () => client.request({ op: 'listNotePins', cid }),
@@ -4844,6 +4875,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // 🔴 色は sqlite の `settings` 表 ── 捨てる前の worker から読む（#1087）
         readTagColors: async () => client.request({ op: 'listTagColors', cid: target }),
         readNotePins: async () => client.request({ op: 'listNotePins', cid: target }),
+        readNoteLabels: async () => client.request({ op: 'listNoteLabels', cid: target }),
         // 🔑 添付は **IndexedDB を直に読む**（sqlite を 1 度も通らない）
         assets: {
           listKeys: (c: string) => blobs.listKeys(c),
@@ -4933,6 +4965,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         writeAssetMetas: async (c: string, metas) => {
           for (const m of metas) {
             await reopened().request({ op: 'putAssetMeta', cid: c, meta: m });
+          }
+        },
+        writeNoteLabels: async (c: string, entries) => {
+          for (const e of entries) {
+            await reopened().request({ op: 'putNoteLabel', cid: c, lid: e.lid, color: e.color });
           }
         },
         writeNotePins: async (c: string, lids) => {

@@ -101,6 +101,8 @@ export async function singleEntrySource(
   const tagColors = tagColorsUsedBy((await base.listTagColors?.()) ?? [], usedTagKeys);
   // 🔑 このノートのピン留め(#1377)だけ持たせる(他のノートの lid を混ぜない)
   const pinned = ((await base.listNotePins?.()) ?? []).includes(lid);
+  // 🔑 このノートの色ラベル(#1982 段 4)だけ
+  const labelled = ((await base.listNoteLabels?.()) ?? []).filter((e) => e.lid === lid);
 
   return {
     warnings,
@@ -116,6 +118,7 @@ export async function singleEntrySource(
       getAssetBlob: (key) => base.getAssetBlob(key),
       ...(tagColors.length > 0 ? { listTagColors: async () => tagColors } : {}),
       ...(pinned ? { listNotePins: async () => [lid] } : {}),
+      ...(labelled.length > 0 ? { listNoteLabels: async () => labelled } : {}),
       listRevisionLids: async () => (chain.length > 0 ? [lid] : []),
       getRevisionChain: async () => chain,
     },
