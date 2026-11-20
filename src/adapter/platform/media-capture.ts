@@ -415,7 +415,7 @@ export async function startCapture(
           } catch {
             // 下で state を見て退避する
           }
-          if (c.state !== 'running') throw new Error('audio context is not running');
+          if ((c.state as string) !== 'running') throw new Error('audio context is not running');
         }
         const dest = c.createMediaStreamDestination();
         c.createMediaStreamSource(shared).connect(dest);
