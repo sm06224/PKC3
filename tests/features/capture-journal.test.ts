@@ -89,7 +89,7 @@ describe('文言', () => {
   });
   it('メッセージは題名・ノート名を含まず、入口を言う', () => {
     expect(recoveryMessage(1)).toContain('復元する');
-    expect(recoveryMessage(1)).toContain('捨てる');
+    expect(recoveryMessage(1)).toContain('破棄する');
   });
   it('守られていない状態だけ帯に字が出る', () => {
     expect(journalBarNote('active')).toBe('');

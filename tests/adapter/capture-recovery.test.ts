@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 途中で終わった録音・録画の復元(#1985 項目 2)。起動の調べ → メッセージ + 状態の行 → 復元する / 捨てる。
+ * 🔴 途中で終わった録音・録画の復元(#1985 項目 2)。起動の調べ → メッセージ + 状態の行 → 復元する / 破棄する。
  */
 import { describe, expect, it } from 'vitest';
 import { createCaptureRecovery } from '../../src/adapter/ui/actions/capture-recovery';
@@ -103,7 +103,7 @@ describe('起動の調べ', () => {
   });
 });
 
-describe('復元する / 捨てる', () => {
+describe('復元する / 破棄する', () => {
   it('🔴 復元する: 断片が順につながり、長さを書いて、録り始めたノートへ渡し、控えが空になる', async () => {
     const store = new MemoryJournalStore();
     await seed(store);
@@ -145,7 +145,7 @@ describe('復元する / 捨てる', () => {
     expect(t.notices.at(-1)).toContain('残しています');
   });
 
-  it('捨てる: 「復元しない」→「捨てる」で全部消える / 取り消せないと確認する', async () => {
+  it('破棄する: 「復元しない」→「破棄する」で全部消える / 取り消せないと確認する', async () => {
     const store = new MemoryJournalStore();
     await seed(store);
     const t = rig(store, { answers: [false, true] });
@@ -158,7 +158,7 @@ describe('復元する / 捨てる', () => {
     expect(t.counts.at(-1)).toBe(0);
   });
 
-  it('捨てるを選ばなければ(残しておく)何も消えない', async () => {
+  it('破棄するを選ばなければ(残しておく)何も消えない', async () => {
     const store = new MemoryJournalStore();
     await seed(store);
     const t = rig(store, { answers: [false, false] });

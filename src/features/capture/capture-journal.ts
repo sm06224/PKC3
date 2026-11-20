@@ -3,7 +3,7 @@
  *
  * 収録の bytes はメモリ上にだけ在り、タブが落ちる(クラッシュ・電源断)と 250MB の区切り以後が消える。
  * そこで 1 秒ごとの断片(MediaRecorder の chunk)を**収録専用の IndexedDB**へ足していき、
- * 次の起動で「復元する / 捨てる」を出す。
+ * 次の起動で「復元する / 破棄する」を出す。
  *
  * ⚠ `features/` 層 = browser API を持たない。IndexedDB は `@adapter/platform/capture-journal-store.ts`。
  * ⚠ 置き場はアプリのデータ(container)に混ぜない(書き出し・バックアップへ同乗させない。`draft-store.ts` と同じ判断)。
@@ -165,7 +165,7 @@ export function recoveryLine(count: number): string {
 
 /** システムのメッセージに残す文(中身の題名・ノート名を入れない)。 */
 export function recoveryMessage(count: number): string {
-  return `前回、録音・録画が途中で終わりました(${count} 区間)。画面下の「途中で終わった録音・録画」を押すと、復元する・捨てるを選べます`;
+  return `前回、録音・録画が途中で終わりました(${count} 区間)。画面下の「途中で終わった録音・録画」を押すと、復元する・破棄するを選べます`;
 }
 
 /** 復元の確認の文。 */

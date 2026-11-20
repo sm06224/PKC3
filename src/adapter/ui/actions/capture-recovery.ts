@@ -2,14 +2,14 @@
  * 🔴 **途中で終わった録音・録画の復元**(#1985 項目 2。user 裁定 2026-11-20)。
  *
  * 起動のとき(`scan`)に控え(`capture-journal-store.ts`)を調べ、復元できる区間があれば
- * ①システムのメッセージに 1 件残し ②ステータスバーに静かな 1 行(押すと `open` = 復元する / 捨てる)を出す。
+ * ①システムのメッセージに 1 件残し ②ステータスバーに静かな 1 行(押すと `open` = 復元する / 破棄する)を出す。
  * 判断(どの区間が復元できるか・並び・名前の連番)は `@features/capture/capture-journal.ts` の `planRecovery`。
  *
  * - 復元 = 区間の断片を 0 番から順につなぐ → `withRecordedDuration` で長さを書く → **録り始めたノート**へ
  *   添付として入れる(いまの収録と同じ道 `deliverRecovered`。編集中は預かる)。
  *   ⚠ そのノートが無ければ、添付だけを作って「見つからなかった」と言う(ノートは作らない ── 勝手にノートを増やさない)。
  * - 区間が添付になった時点で、その区間の控えを消す(`done`)。入れられなかった区間は控えを残す(次の機会に復元できる)。
- * - 捨てる = 控えを全部消す。
+ * - 破棄する = 控えを全部消す。
  */
 import type { JournalStore } from '@adapter/platform/capture-journal-store';
 import {
@@ -46,7 +46,7 @@ export interface CaptureRecovery {
   /** 起動のとき 1 度。復元できる区間の数を返す。 */
   scan(): Promise<number>;
   count(): number;
-  /** 状態の行を押したとき: 復元する / 捨てる を聞く。 */
+  /** 状態の行を押したとき: 復元する / 破棄する を聞く。 */
   open(): Promise<void>;
 }
 
@@ -146,13 +146,13 @@ export function createCaptureRecovery(deps: CaptureRecoveryDeps): CaptureRecover
           return;
         }
         const discard = await deps.confirm(
-          `途中で終わった${CAPTURE_LABEL.audio}・${CAPTURE_LABEL.screen}を捨てますか。捨てると取り消せません。`,
-          { okLabel: '捨てる', cancelLabel: '残しておく', danger: true },
+          `途中で終わった${CAPTURE_LABEL.audio}・${CAPTURE_LABEL.screen}を破棄しますか。破棄すると取り消せません。`,
+          { okLabel: '破棄する', cancelLabel: '残しておく', danger: true },
         );
         if (!discard) return;
         for (const rec of new Set(targets.map((t) => t.rec))) await deps.store.dropRec(rec).catch(() => undefined);
         set([]);
-        deps.notify('途中で終わった収録を捨てました');
+        deps.notify('途中で終わった収録を破棄しました');
       } finally {
         busy = false;
       }
