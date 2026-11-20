@@ -29,6 +29,8 @@ export class MemoryJournalStore implements JournalStore {
   readonly chunks = new Map<string, { rec: string; seg: number; idx: number; elapsedMs: number; blob: Blob }>();
   /** test から書き込みを失敗させる。 */
   failPut: Error | null = null;
+  /** test から、断片だけ(身元は通す)書き込みを失敗させる。 */
+  failChunk: Error | null = null;
   /** test から書き込みを保留する(最初の断片の待ち合わせを見る)。 */
   gate: Promise<void> | null = null;
   /** 書き込みを始めた順。 */
@@ -47,6 +49,7 @@ export class MemoryJournalStore implements JournalStore {
     this.log.push(`put:${c.seg}/${c.idx}`);
     if (this.gate !== null) await this.gate;
     if (this.failPut !== null) throw this.failPut;
+    if (this.failChunk !== null) throw this.failChunk;
     this.chunks.set(this.key(c.rec, c.seg, c.idx), c);
   }
   async dropSegment(rec: string, seg: number): Promise<void> {

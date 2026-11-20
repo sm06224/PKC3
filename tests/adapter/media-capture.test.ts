@@ -899,3 +899,32 @@ describe('🔴 切った後に次の器を作れなかった回(#1087)', () => {
     expect(track.stopped()).toBe(true);
   });
 });
+
+describe('🔴 断片が届くたびに途中保存へ渡す(#1985 項目 2)', () => {
+  it('本の番号と本の中の番号・経過が付き、切ると本の中の番号が 0 に戻る', async () => {
+    let t = 1_000;
+    const seen: Array<{ segment: number; index: number; elapsedMs: number; size: number }> = [];
+    const { d, rec } = deps({ now: () => t });
+    const h = await startCapture('audio', d, {
+      partBytes: 25,
+      maxMs: HOURS12,
+      onChunk: (c) => seen.push({ segment: c.segment, index: c.index, elapsedMs: c.elapsedMs, size: c.blob.size }),
+    });
+    t = 2_000;
+    rec.last().push(10); // 本 0 の 0 番
+    t = 3_000;
+    rec.last().push(20); // 本 0 の 1 番 → 30 >= 25 で切る
+    t = 4_000;
+    rec.last().push(7); // 本 1 の 0 番
+    await h.stop();
+    expect(seen.map((s) => [s.segment, s.index, s.size])).toEqual([
+      [0, 0, 10],
+      [0, 1, 20],
+      [1, 0, 7],
+    ]);
+    expect(seen[0]!.elapsedMs).toBe(1_000);
+    expect(seen[1]!.elapsedMs).toBe(2_000);
+    // 本 1 の始まりは切った時刻(3_000)── 本 0 の経過を引きずらない
+    expect(seen[2]!.elapsedMs).toBe(1_000);
+  });
+});

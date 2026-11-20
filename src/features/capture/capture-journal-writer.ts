@@ -70,9 +70,12 @@ export function createJournalWriter(
     for (const v of segBytes.values()) n += v;
     return n;
   };
+  /** 書けなくなった(失敗 / 空き不足)。⚠ 上限(`off-cap`)は含めない ── 上限は**新しい断片を受けない**だけで、受けた分は書き切る。 */
+  let broken = false;
   const turnOff = (why: Exclude<JournalState, 'active'>): void => {
     if (state !== 'active') return;
     state = why;
+    if (why !== 'off-cap') broken = true;
     opts.onState?.(why);
   };
   const enqueue = (run: () => Promise<void>): void => {
@@ -103,7 +106,7 @@ export function createJournalWriter(
       segBytes.set(seg, (segBytes.get(seg) ?? 0) + blob.size);
       enqueue(async () => {
         // 待っている間に止まった / この区間の見出しが書けなかった
-        if (state !== 'active' || headless.has(seg)) return;
+        if (broken || headless.has(seg)) return;
         try {
           if (idx === 0 && opts.freeBytes !== undefined) {
             const free = await opts.freeBytes();
