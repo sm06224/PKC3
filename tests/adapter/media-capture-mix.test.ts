@@ -39,6 +39,8 @@ class FStream {
   }
 }
 
+type FCtx = { closed: number; sources: FStream[]; destTrack: FTrack };
+
 function fakeAudioContext(): { AC: typeof AudioContext; made: () => FCtx[] } {
   const made: FCtx[] = [];
   class FCtx {
@@ -65,7 +67,7 @@ function fakeAudioContext(): { AC: typeof AudioContext; made: () => FCtx[] } {
 
 function recorder(): { Recorder: typeof MediaRecorder; streams: FStream[]; push: (n: number) => void } {
   const streams: FStream[] = [];
-  let cur: { ondataavailable: ((e: BlobEvent) => void) | null } | null = null;
+  let emit: ((e: BlobEvent) => void) | null = null;
   class R {
     state = 'inactive';
     mimeType = 'video/webm';
@@ -74,7 +76,7 @@ function recorder(): { Recorder: typeof MediaRecorder; streams: FStream[]; push:
     onerror: (() => void) | null = null;
     constructor(s: FStream) {
       streams.push(s);
-      cur = this;
+      emit = (e) => this.ondataavailable?.(e);
     }
     start(): void {
       this.state = 'recording';
@@ -87,7 +89,7 @@ function recorder(): { Recorder: typeof MediaRecorder; streams: FStream[]; push:
   return {
     Recorder: R as unknown as typeof MediaRecorder,
     streams,
-    push: (n) => cur!.ondataavailable?.({ data: new Blob(['x'.repeat(n)]) } as BlobEvent),
+    push: (n) => emit?.({ data: new Blob(['x'.repeat(n)]) } as BlobEvent),
   };
 }
 
@@ -252,6 +254,15 @@ describe('退避', () => {
     expect(notices[0]).toContain('音声を共有');
     await h.stop();
     expect(s.micTrack.stopped()).toBe(true);
+  });
+
+  it('マイクだけを録る回も、マイクが抜けただけでは録画を止めない(共有の終了では止まる)', async () => {
+    const s = setup({ displayAudio: false });
+    const { ends } = await start(s);
+    s.micTrack.fire();
+    expect(ends).toEqual([]);
+    s.dv.fire();
+    expect(ends).toEqual(['shared-ended']);
   });
 
   it('共有に音が無く、マイクも使えない: 映像だけ(従来どおり)', async () => {
