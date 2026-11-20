@@ -37,6 +37,7 @@ import {
 } from '@adapter/platform/media-capture';
 import type { AttachItem, AttachedOne } from './attach';
 import { createWritableQueue } from './writable-queue';
+import { screenShareGuide } from '@features/capture/audio-mix';
 import { journalBarNote, journalOffNotice, type JournalMeta } from '@features/capture/capture-journal';
 import type { JournalWriter } from '@features/capture/capture-journal-writer';
 
@@ -128,6 +129,11 @@ export interface CaptureServiceDeps {
    * `onState` は状態が「守られていない」に変わったときに呼ぶ(帯の字と 1 度きりの知らせはこちらが出す)。
    */
   readonly journal?: (meta: JournalMeta, onState: () => void) => JournalWriter;
+  /**
+   * 🔴 **画面録画にマイクも混ぜるか**(#1985 項目 3。設定 `pkc3.capture-mic-mix`、既定 入)。録り始めのたびに読む。
+   * ⚠ 省略 = 混ぜない(これまでどおり)。
+   */
+  readonly micMix?: () => boolean;
 }
 
 /** これを超えて録った物を捨てるときは確認する(60 秒ちょうどは聞かない)。 */
@@ -580,6 +586,12 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       }
       starting = true;
       const at = now();
+      const mixMic = kind === 'screen' && deps.micMix?.() === true;
+      /**
+       * 🔴 **共有を選ぶ前の案内**(#1985 項目 3)。⚠ 共有の選択で「音声を共有」に印を付けないと相手の声は録れない ──
+       *   選ぶ画面はブラウザのもので書き換えられないので、その直前に出す。毎回のことなので、システムのメッセージには積まない。
+       */
+      if (kind === 'screen') deps.notify(screenShareGuide(mixMic), { post: false });
       /**
        * 🔴 **録り始めたときに開いていたノート**(#1163 依頼 90-1)。⚠ 許可を待つ間(`await`)に
        *   選び直されても、押した時点のものを覚える。
@@ -613,6 +625,9 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
             );
       try {
         handle = await start(kind, deps.capture ?? {}, {
+          mixMic,
+          // 🔴 マイクが使えず共有の音だけにした、などは 1 度だけ言う(録画は続ける)
+          onNotice: (text) => deps.notify(text, { kind: 'caution' }),
           onChunk: (c) => jr?.chunk(c.segment, c.index, c.elapsedMs, c.blob),
           partBytes,
           maxMs,

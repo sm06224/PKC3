@@ -2231,6 +2231,8 @@ export interface BinderServices {
   setVoiceLevel?(on: boolean): void;
   /** 🔴 「頭の中で鳴る感じを和らげる」(#952 B3)。⚠ 同じく、その場で繋ぎ替える。 */
   setVoiceCrossfeed?(on: boolean): void;
+  /** 🔴 画面録画にマイクも混ぜるか(#1985 項目 3)。 */
+  setCaptureMicMix?(on: boolean): void;
   /**
    * 🔴 **本文の素の電話番号を押せる字にするか**(#278 段②)。⚠ **省略可**。
    * ⚠ 切り替えたら**その場で本文を描き直す** ── 保存しただけでは、
@@ -18761,6 +18763,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'set-voice-level': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setVoiceLevel?.(target.checked);
+  },
+  'set-capture-mic-mix': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setCaptureMicMix?.(target.checked);
   },
   'set-voice-crossfeed': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

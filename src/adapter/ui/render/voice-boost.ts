@@ -35,6 +35,11 @@ const KEY = 'pkc3.voice-boost';
 export const LEVEL_KEY = 'pkc3.voice-level';
 /** 🔴 「頭の中で鳴る感じを和らげる」(#952 B3)。⚠ 同じく独立。 */
 export const CROSSFEED_KEY = 'pkc3.voice-crossfeed';
+/**
+ * 🔴 「画面録画にマイクも混ぜる」(#1985 項目 3)。⚠ **既定は入**(他の 3 つと逆 ── 会議の画面録画は自分の声も要る)。
+ *   書くのは `'1'` / `'0'` だけで、読み手は `'0'` のときだけ切と読む(保存が無ければ入)。
+ */
+export const CAPTURE_MIC_MIX_KEY = 'pkc3.capture-mic-mix';
 
 type Backing = Pick<Storage, 'getItem' | 'setItem'>;
 
@@ -57,14 +62,19 @@ class OnOffCell {
   constructor(
     private readonly storage: Backing | null,
     private readonly key: string,
-  ) {}
+    /** 保存が無いときの値(既定 切)。 */
+    private readonly initial = false,
+  ) {
+    this.fallback = initial;
+  }
 
   /** ⚠ **読むたびに保存を見る**(`AlarmEnabledStore` と同じ理由 ── 書き手が複数)。 */
   get(): boolean {
     // 🔴 **保存が無い環境では控えを読む**(#278 段② の test が教えた)
     if (this.storage === null || this.saveFailed) return this.fallback;
     try {
-      return this.storage.getItem(this.key) === '1';
+      const v = this.storage.getItem(this.key);
+      return this.initial ? v !== '0' : v === '1';
     } catch {
       return this.fallback;
     }
@@ -86,11 +96,13 @@ export class VoiceBoostStore {
   private readonly voice: OnOffCell;
   private readonly level: OnOffCell;
   private readonly cross: OnOffCell;
+  private readonly micMix: OnOffCell;
 
   constructor(storage: Backing | null = readStorage()) {
     this.voice = new OnOffCell(storage, KEY);
     this.level = new OnOffCell(storage, LEVEL_KEY);
     this.cross = new OnOffCell(storage, CROSSFEED_KEY);
+    this.micMix = new OnOffCell(storage, CAPTURE_MIC_MIX_KEY, true);
   }
 
   /** 「音を聞きやすくする」。 */
@@ -109,6 +121,15 @@ export class VoiceBoostStore {
 
   setLevelEnabled(on: boolean): void {
     this.level.set(on);
+  }
+
+  /** 「画面録画にマイクも混ぜる」(#1985 項目 3。既定 入)。 */
+  micMixEnabled(): boolean {
+    return this.micMix.get();
+  }
+
+  setMicMixEnabled(on: boolean): void {
+    this.micMix.set(on);
   }
 
   /** 「頭の中で鳴る感じを和らげる」(#952 B3)。 */
