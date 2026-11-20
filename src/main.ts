@@ -4000,6 +4000,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       });
       return out;
     },
+    // 🔴 途中保存の控えは、ノート + 添付の書込が着地してから消す(#1985 項目 2)
+    landed: async () => {
+      await storeEffects?.settled();
+    },
     onChange: (line) => paintCaptureBar(root, line),
     notify: showStatus,
     notifyOpen: (text, lid) => dispatcher.dispatch({ type: 'OP_NOTICE', message: text, open: lid }),

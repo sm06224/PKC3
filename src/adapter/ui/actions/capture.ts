@@ -67,6 +67,13 @@ export interface CaptureServiceDeps {
   readonly dispatcher: Dispatcher;
   /** bytes を添付にする口。⚠ **`attachOne` を通す**(2 つ目の取込口を作らない)。 */
   readonly attach: (item: AttachItem) => Promise<AttachedOne | null>;
+  /**
+   * 🔴 **ノートと添付の書込が保存先へ着地するまで待つ口**(#1985 項目 2。`connectStoreEffects().settled()`)。
+   * ⚠ `attach` が返った時点では `CREATE_ENTRY` を撃っただけで、保存先(sqlite)への書込は飛んでいる ──
+   *   その前に途中保存の控えを消すと、落ちたときに収録が**どこにも残らない**。着地を待ってから消す。
+   * ⚠ 省略 = 待たない。待ちが失敗したら控えは消さない(次の起動で復元に出る)。
+   */
+  readonly landed?: () => Promise<void>;
   /** 帯を描き直す合図。⚠ `null` = 収録していない(帯を畳む)。 */
   readonly onChange: (line: string | null) => void;
   /** 一時の知らせ(エラーの行とは別)。 */
@@ -352,8 +359,14 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       // 🔴 始めたノートへ入れた回は、いま見ているノートへ画面を返す(開き直さない)
       ...(away ? { selectBack: st.selectedLid, intoTitle: homeMeta.title } : {}),
     });
-    // 🔴 添付になった ── この区間の途中保存はもう要らない(消えるのは書き手の待ち行列の最後)
-    done();
+    // 🔴 添付になった ── この区間の途中保存はもう要らない(消えるのは書き手の待ち行列の最後)。
+    //    ⚠ **書込が着地してから**消す(`landed`)。着地を確かめられないなら消さない
+    try {
+      await deps.landed?.();
+      done();
+    } catch {
+      // 控えを残す ── 次の起動で「復元できます」に出る
+    }
     /**
      * 🔑 **録ったものの一覧を集め直す**(2026-10-13 の見直し)── 一覧はタブを開いたときに 1 度集めるだけなので、
      *   開いたまま録ると、いま録った物が出なかった(`capture-trim.ts` と同じ形)。

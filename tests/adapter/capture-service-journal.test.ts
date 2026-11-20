@@ -28,7 +28,7 @@ const meta = (lid: string): EntryMeta => ({
   bodyChars: null,
 });
 
-function rig(o: { attachFails?: boolean; failChunk?: boolean } = {}) {
+function rig(o: { attachFails?: boolean; failChunk?: boolean; landed?: () => Promise<void> } = {}) {
   const d = new Dispatcher();
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
   d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
@@ -56,6 +56,7 @@ function rig(o: { attachFails?: boolean; failChunk?: boolean } = {}) {
       d.dispatch({ type: 'CREATE_ENTRY', archetype: 'attachment', lid, title: item.name, body: '#\n', edit: false });
       return { lid, assetKey: 'k' + item.name, mime: item.type, hash: null };
     },
+    ...(o.landed === undefined ? {} : { landed: o.landed }),
     onChange: (l) => lines.push(l),
     notify: (t) => notices.push(t),
     notifyOpen: (t) => notices.push(t),
@@ -175,6 +176,34 @@ describe('途中保存と取り込み', () => {
     r.d.dispatch({ type: 'CANCEL_EDIT' });
     await r.flush();
     expect(r.store.chunks.size).toBe(0);
+  });
+});
+
+describe('控えを消す順序(書込の着地)', () => {
+  it('🔴 ノート + 添付の書込が着地するまで控えは残り、着地したら消える', async () => {
+    let land!: () => void;
+    const gate = new Promise<void>((res) => (land = res));
+    const r = rig({ landed: () => gate });
+    await r.svc.start('audio');
+    r.chunk(0, 0);
+    r.svc.stop();
+    await r.flush();
+    expect(r.d.getState().entryMetas.size, '添付はもうできている').toBeGreaterThan(1);
+    expect(r.store.chunks.size, '着地前は控えが要る').toBe(1);
+    expect(r.store.metas.size).toBe(1);
+    land();
+    await r.flush();
+    expect(r.store.chunks.size).toBe(0);
+    expect(r.store.metas.size).toBe(0);
+  });
+
+  it('🔴 着地を待つのが失敗したら控えは残す(次の起動で復元できる)', async () => {
+    const r = rig({ landed: () => Promise.reject(new Error('io')) });
+    await r.svc.start('audio');
+    r.chunk(0, 0);
+    r.svc.stop();
+    await r.flush();
+    expect(r.store.chunks.size).toBe(1);
   });
 });
 
