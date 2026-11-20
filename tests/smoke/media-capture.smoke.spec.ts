@@ -151,10 +151,26 @@ test('🔴 録音を止めると本文に入り、その場で聞ける (#413 �
    *   **量の先頭が 0 以外の数字であること**だけ。`humanBytes` は 1024 未満を
    *   `n B` と書くので、`0.5 KB` のような形は原理的に出ない。
    */
-  await expect(status, '1 バイトも積んでいない(断片が届いていない)').toContainText(
-    /約 [1-9]/,
-    { timeout: 15_000 },
-  );
+  // 🔑 量は小さな 1 行には出さず、字の title が言う(#1985 項目 1)
+  await expect(status, '1 バイトも積んでいない(断片が届いていない)').toHaveAttribute('title', /約 [1-9]/, {
+    timeout: 15_000,
+  });
+
+  /**
+   * 🔴 **帯は小さな 1 行で、本文に重ならない**(#1985 項目 1。user 裁定 案 A)。
+   * ⚠ 高さは実測の箱で見る(1 行 = 32px 以下)/ 本文(`detail`)の箱と上下が重ならない。
+   */
+  const barBox = await bar.boundingBox();
+  const bodyBox = await page.locator('[data-pkc-region="center"]').boundingBox();
+  expect(barBox, '帯の箱が測れない').not.toBeNull();
+  expect(bodyBox, '本文の箱が測れない').not.toBeNull();
+  expect(barBox!.height, `帯が 1 行(32px 以下)に収まっていない: ${barBox!.height}px`).toBeLessThanOrEqual(32);
+  expect(barBox!.height, '帯が潰れている').toBeGreaterThan(8);
+  expect(
+    barBox!.y,
+    `帯が本文に重なっている(帯 y=${barBox!.y} / 本文の下端=${bodyBox!.y + bodyBox!.height})`,
+  ).toBeGreaterThanOrEqual(bodyBox!.y + bodyBox!.height - 1);
+  await expect(bar.locator('[data-pkc-field="capture-dot"]'), '録っている印の ● が無い').toHaveText('●');
 
   /**
    * 🔴 **4 秒まで録る**(#683 段②a のため)。
@@ -174,10 +190,10 @@ test('🔴 録音を止めると本文に入り、その場で聞ける (#413 �
    * ⚠ 否定だけだと綴りがずれた日に黙って真になるので、ボタンの字(肯定)と対で見る。見えている字だけを読む。
    */
   await expect(bar.locator('[data-pkc-field="stop-capture"]'), '止めるボタンの字が違う').toContainText(
-    '録音・録画を止める',
+    '止める',
   );
   await expect(bar.locator('[data-pkc-field="discard-capture"]'), 'やめるボタンの字が違う').toContainText(
-    '録音・録画を残さずにやめる',
+    '残さずにやめる',
   );
   await expect(page.locator('body'), '録音中の画面に「収録」の字が残っている').not.toContainText('収録', {
     useInnerText: true,
@@ -1498,7 +1514,7 @@ test('🔴 1 分を超えた録音は、残さずにやめる前に確かめる(
   await skew(0);
   await expect(capStatus, '続けたあとも録音が進んでいない').toContainText('録音中');
   // ⚠ 1 バイトも積まないうちに止めると「録れていません」になる ── 断片が届いてから止める(上の 1 本と同じ門)
-  await expect(capStatus, '1 バイトも積んでいない(断片が届いていない)').toContainText(/約 [1-9]/, { timeout: 15_000 });
+  await expect(capStatus, '1 バイトも積んでいない(断片が届いていない)').toHaveAttribute('title', /約 [1-9]/, { timeout: 15_000 });
   await clickReal(page, '[data-pkc-field="stop-capture"]');
   await expect(bar, '止めたのに帯が残っている').toBeHidden();
   await expect(assetRows, '続けて止めた録音が添付にならなかった').toHaveCount(rowsBefore + 1, {
@@ -2264,9 +2280,72 @@ test('🔴 録音の途中でタブが落ちても、開き直すと復元でき
   await clickReal(next, '[data-pkc-action="commit-edit"]');
   await clickReal(next, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
   await clickReal(next, '[data-pkc-field="start-audio-capture"]');
-  await expect(next.locator('[data-pkc-field="capture-status"]')).toContainText(/約 [1-9]/, { timeout: 15_000 });
+  await expect(next.locator('[data-pkc-field="capture-status"]')).toHaveAttribute('title', /約 [1-9]/, { timeout: 15_000 });
   await clickReal(next, '[data-pkc-field="stop-capture"]');
   await expect(rows).toHaveCount(2, { timeout: 15_000 });
   await expect.poll(async () => await journal(next), { message: '止めて取り込んだのに控えが残っている' }).toEqual({ chunks: 0, metas: 0 });
   expect(nextErrors, `page error: ${nextErrors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **ノートを編集している間に止めた録音は、メモリに持たず途中保存から取り込まれる**(#1985 項目 1 の継ぎ目)。
+ *
+ * ① 録る(断片が控えへ溜まる)→ 別ノートを編集中のまま「止める」→ 本文にはまだ入らず、控えは残っている
+ * ② 編集を保存で終える → 録音が録り始めたノートの本文に入り、控えが空になる
+ */
+test('🔴 編集中に止めた録音は、編集を終えると途中保存から入る(控えは着地後に消える)', async ({ page }) => {
+  test.setTimeout(90_000);
+  const errors = collectPageErrors(page);
+  const journal = (): Promise<number> =>
+    page.evaluate(
+      () =>
+        new Promise<number>((resolve) => {
+          const req = indexedDB.open('pkc3-capture-journal');
+          req.onerror = () => resolve(-1);
+          req.onupgradeneeded = () => {
+            req.transaction?.abort();
+            resolve(0);
+          };
+          req.onsuccess = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains('chunks')) {
+              db.close();
+              resolve(0);
+              return;
+            }
+            const c = db.transaction(['chunks'], 'readonly').objectStore('chunks').count();
+            c.onsuccess = () => {
+              db.close();
+              resolve(c.result);
+            };
+          };
+        }),
+    );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]').fill('# 録り始めたノート');
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-field="start-audio-capture"]');
+  const bar = page.locator('[data-pkc-region="capture-bar"]');
+  await expect(bar).toBeVisible();
+  await expect.poll(journal, { message: '途中保存が溜まらない', timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+  // 編集中にする(書き終えない)
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]').fill('# 録り始めたノート\n\n編集中の追記');
+  await clickReal(page, '[data-pkc-field="stop-capture"]');
+  await expect(bar, '止めたのに帯が残っている').toBeHidden();
+  await expect(page.locator('[data-pkc-region="status"]'), '預かりの知らせが出ない').toContainText('途中保存に残してある', {
+    timeout: 15_000,
+  });
+  expect(await journal(), '預かっている間に控えが消えた').toBeGreaterThanOrEqual(1);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(
+    page.locator('[data-pkc-view-pane="detail"] a[data-pkc-asset-key]', { hasText: '録音' }),
+    '編集を終えても録音が本文に入らない',
+  ).toHaveCount(1, { timeout: 20_000 });
+  await expect.poll(journal, { message: '取り込んだのに控えが残っている', timeout: 15_000 }).toBe(0);
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
