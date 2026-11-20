@@ -315,6 +315,9 @@ export class ScheduleRenderer {
       // ⚠ 鍵は `kindFilter`(`filerRows` へ渡す `kinds:` と**綴りを分ける**)──
       //   同じ綴りだと、指紋を見張る test が options の行に満たされる
       kindFilter: state.kindFilter,
+      // 🔴 色の絞りと色の表も指紋(入れないと色を押しても予定表が描き直らない)
+      labelFilter: state.labelFilter,
+      noteLabels: state.noteLabels,
       hits: state.searchHits,
       showArchived: state.showArchived,
       showDone: state.showDoneTasks,
@@ -405,7 +408,7 @@ export class ScheduleRenderer {
       groups.length,
       hiddenByNote,
     );
-    const filterOn = state.filterQuery.trim() !== '' || state.kindFilter.size > 0;
+    const filterOn = state.filterQuery.trim() !== '' || state.kindFilter.size > 0 || state.labelFilter !== null;
     const showClear = groups.length === 0 && filterOn;
     if (frame.clearFilter.hidden === showClear) frame.clearFilter.hidden = !showClear;
     const undatedCount = this.paintUndatedToggle(frame.undated, state, visible.length - dated.length);

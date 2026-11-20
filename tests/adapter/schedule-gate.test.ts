@@ -71,7 +71,7 @@ function setup(narrow: boolean) {
     Object.assign(state, { entryMetas, order });
     view.render({ ...state });
   };
-  return { state, arm, rebuilt, renderWith, renderAll };
+  return { host, state, arm, rebuilt, renderWith, renderAll };
 }
 
 describe.each([
@@ -129,6 +129,27 @@ describe.each([
     t.renderWith('e3', {}); // 絞りを入れた版を一度描いて基準にする
     t.arm();
     t.renderWith('e2', { archetype: 'todo' });
+    expect(t.rebuilt()).toBe(true);
+  });
+
+  it('🔴 色の絞りが変わると組み直し、空になれば「絞りを解除」が出る(#1982 段 4)', () => {
+    const t = setup(narrow);
+    t.arm();
+    // 色が付いたノートは 1 件も無い → 緑で絞ると全部消える
+    t.state.noteLabels = new Map([['e3', 2]]);
+    t.state.labelFilter = 2;
+    t.renderWith('e3', {}, { noteLabels: new Map([['e3', 2]]), labelFilter: 2 });
+    expect(t.rebuilt()).toBe(true);
+    const clear = t.host.querySelector<HTMLElement>('[data-pkc-field="schedule-clear-filter"]');
+    expect(clear, '前提: 解除ボタンが見つからない').not.toBeNull();
+    expect(clear!.hidden).toBe(false);
+  });
+
+  it('🔴 色の表だけが変わっても組み直す', () => {
+    const t = setup(narrow);
+    t.renderWith('e3', {}, { noteLabels: new Map([['e3', 2]]), labelFilter: 2 });
+    t.arm();
+    t.renderWith('e3', {}, { noteLabels: new Map([['e3', 3]]) });
     expect(t.rebuilt()).toBe(true);
   });
 

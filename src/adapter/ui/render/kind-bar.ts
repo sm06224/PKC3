@@ -27,7 +27,7 @@
  * 🔑 この file の下の規律(「押しても何も変わらない札は dead click」)を、
  *   **面の違いにも当てる**。
  */
-import type { AppState } from '@adapter/state/app-state';
+import { labelFilterOf, type AppState } from '@adapter/state/app-state';
 import {
   NO_KINDS,
   entryFilterOf,
@@ -76,6 +76,9 @@ export class KindBarRenderer {
     scope: AppState['scopeLid'];
     relations: AppState['relations'];
     smartHits: AppState['smartHits'];
+    /** 🔴 色の絞りでも数が変わる(種類の数は色で絞った後を数える)。 */
+    labelFilter: AppState['labelFilter'];
+    noteLabels: AppState['noteLabels'];
     kinds: ReturnType<typeof kindCounts>;
   } | null = null;
 
@@ -90,6 +93,8 @@ export class KindBarRenderer {
       m.scope === state.scopeLid &&
       m.relations === state.relations &&
       m.smartHits === state.smartHits &&
+      m.labelFilter === state.labelFilter &&
+      m.noteLabels === state.noteLabels &&
       /**
        * 🔑 **一覧の参照が違っても、違うのが時刻だけなら数え直さない**(#1087)。数えるのは
        *   「どの行がどの種類か」で、時刻は使わない(並べ替えの鍵には使うが、数は並びに依らない)。
@@ -116,7 +121,7 @@ export class KindBarRenderer {
         flatten: true,
       });
     } else {
-      const counted = entryFilterOf(state.filterQuery, state.searchHits, NO_KINDS);
+      const counted = entryFilterOf(state.filterQuery, state.searchHits, NO_KINDS, labelFilterOf(state));
       present = [];
       for (const lid of state.order) {
         const meta = state.entryMetas.get(lid);
@@ -133,6 +138,8 @@ export class KindBarRenderer {
       scope: state.scopeLid,
       relations: state.relations,
       smartHits: state.smartHits,
+      labelFilter: state.labelFilter,
+      noteLabels: state.noteLabels,
       kinds,
     };
     return kinds;

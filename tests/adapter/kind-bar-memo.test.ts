@@ -131,6 +131,22 @@ describe('種類の札の数え直し(#1087)', () => {
     expect(chips()).not.toEqual(before);
   });
 
+  it.each(['filer', 'schedule'] as const)(
+    '🔴 色の絞りで数が狭まり、絞りが変わると数え直す(%s ── #1982 段 4)',
+    (mode) => {
+      const { bar, chips } = mount();
+      const s = boot();
+      const labels = new Map([['a', 2]]);
+      bar.render({ ...s, noteLabels: labels }, mode);
+      const all = chips();
+      countSpy.mockClear();
+      bar.render({ ...s, noteLabels: labels, labelFilter: 2 }, mode);
+      expect(countSpy, '色の絞りが鍵に無いと数え直さない').toHaveBeenCalledTimes(1);
+      // 緑は a(text)だけ ── 種類の札は 1 つに減る(戻す口は別に残る)
+      expect(chips().length).toBeLessThan(all.length);
+    },
+  );
+
   it('🔴 並び(order)だけが変わっても数え直す(一覧から外れたノートは数えない)', () => {
     const { bar } = mount();
     const s = boot();
