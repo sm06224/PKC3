@@ -4004,12 +4004,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     landed: async () => {
       await storeEffects?.settled();
     },
-    onChange: (line) => paintCaptureBar(root, line),
+    onChange: (line, detail) => paintCaptureBar(root, line, detail),
     notify: showStatus,
     notifyOpen: (text, lid) => dispatcher.dispatch({ type: 'OP_NOTICE', message: text, open: lid }),
     /**
      * 🔴 **録っている間・預かっている間にタブを閉じる・読み直すと「離れますか」**(#1087)。
      *   収録の bytes はメモリ上にだけ在り、閉じると 250MB ごとの区切り以後が消える。
+     *   ⚠ 途中保存の控えに全部書けている収録を編集中に預けている間は、メモリ上にだけ在るのではないので数えない(復元に出る)。
      *   ⚠ 判断は `capture.ts`、確認は `unload-guard.ts` ── ここは**繋ぐだけ**。
      *   ⚠ 保存領域への書込・可搬の未保存とは別の持ち主 ── `'capture'` の名前で数える。
      */
@@ -4026,6 +4027,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔴 **途中保存**(#1985 項目 2)── 1 秒ごとの断片を収録専用の IndexedDB へ足す。判断は `capture-journal-writer.ts`、
      *   ここは**繋ぐだけ**。⚠ 収録中は Web Locks で「いま録っている」を他のタブへ知らせる(起動時の復元が取り違えない)。
      */
+    /**
+     * 🔴 編集中に止めた収録は、控えに全部書けていればメモリに持たず、編集が終わってからここで読み戻す(#1985 項目 1 の継ぎ目)。
+     *   断片の Blob をそのままつなぎ(写さない)、復元と同じ `withRecordedDuration` で長さを書く。
+     */
+    readJournal: async (rec, seg) => {
+      const chunks = await journalStore.readSegment(rec, seg);
+      if (chunks.length === 0) return null;
+      const joined = new Blob(chunks.map((c) => c.blob), { type: chunks[0]!.blob.type });
+      return withRecordedDuration(joined, chunks[chunks.length - 1]!.elapsedMs);
+    },
     journal: (meta, onState) => {
       const release = holdRecordingLock(meta.id);
       return createJournalWriter(journalStore, { ...meta, cid }, {

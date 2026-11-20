@@ -119,6 +119,8 @@ interface Bench {
   readonly notices: string[];
   readonly opens: Array<string | null>;
   readonly lines: Array<string | null>;
+  /** 帯の title(量・残り)。`lines` と同じ並び。 */
+  readonly details: Array<string | null | undefined>;
   /** `onActive` に来た値(変わったときだけ呼ばれる約束)。 */
   readonly actives: boolean[];
   readonly attached: Array<{ name: string; type: string; size: number }>;
@@ -212,6 +214,7 @@ function bench(
   const notices: string[] = [];
   const opens: Array<string | null> = [];
   const lines: Array<string | null> = [];
+  const details: Array<string | null | undefined> = [];
   const actives: boolean[] = [];
   const attached: Array<{ name: string; type: string; size: number }> = [];
   let beats: Array<() => void> = [];
@@ -248,7 +251,10 @@ function bench(
       if (!d.getState().entryMetas.has(lid)) return null;
       return { lid, assetKey: 'ast-k' + String(attached.length), mime: item.type, hash: null };
     },
-    onChange: (line) => lines.push(line),
+    onChange: (line, detail) => {
+      lines.push(line);
+      details.push(detail);
+    },
     notify: (t) => {
       notices.push(t);
       opens.push(null);
@@ -287,6 +293,7 @@ function bench(
     notices,
     opens,
     lines,
+    details,
     actives,
     attached,
     service: createCaptureService(deps),
@@ -354,9 +361,9 @@ describe('録音を止めると、開いていたノートに入る(#413)', () =
     b.live()!.advance(65_000);
     b.live()!.grow(2048);
     b.beat();
-    expect(b.lines.at(-1), '1 秒ごとに書き替わっていない').toBe(
-      '録音中 1:05(約 2.0 KB・残り 11:58:55)',
-    );
+    expect(b.lines.at(-1), '1 秒ごとに書き替わっていない').toBe('録音中 1:05');
+    // 🔴 量・残りは 1 行に出さず、title(detail)へ回した(#1985 項目 1)
+    expect(b.details.at(-1), '量・残りが title に出ていない').toBe('録音中 1:05(約 2.0 KB・残り 11:58:55)');
     b.service.stop();
     await tick();
     expect(b.service.line(), '止めたのに帯が残っている').toBeNull();
@@ -1007,7 +1014,8 @@ describe('🔴 長い収録は分けて入れる(#771)', () => {
     await b.service.start('audio');
     b.live()!.advance(5_000);
     b.beat();
-    expect(b.lines.at(-1), '残りが出ていない').toMatch(/残り 11:59:55/);
+    expect(b.details.at(-1), '残りが出ていない').toMatch(/残り 11:59:55/);
+    expect(b.lines.at(-1), '1 行に量・残りを出している(小さな 1 行にする)').not.toMatch(/残り|約/);
     expect(b.lines.at(-1), '1 本目に「本目」を出している').not.toMatch(/本目/);
     b.live()!.cut(new Blob(['a']));
     await tick();

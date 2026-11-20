@@ -186,3 +186,41 @@ describe('控えの片付け', () => {
     expect(closed).toBe(1);
   });
 });
+
+describe('segmentIntact(区間が欠けず書けているか。#1985 項目 1 の継ぎ目)', () => {
+  it('全部書けた区間は true / 断片の無い区間・消した区間は false', async () => {
+    const store = new MemoryJournalStore();
+    const w = createJournalWriter(store, meta);
+    w.chunk(0, 0, 1000, blob(5));
+    w.chunk(0, 1, 2000, blob(5));
+    expect(w.id).toBe('r1');
+    expect(await w.segmentIntact(0)).toBe(true);
+    expect(await w.segmentIntact(7), '断片が無い区間').toBe(false);
+    w.segmentDone(0);
+    expect(await w.segmentIntact(0), '消した区間').toBe(false);
+  });
+
+  it('🔴 書けなかった断片が 1 つでもあれば false(失敗 / 上限で受けなかった分)', async () => {
+    const failing = new MemoryJournalStore();
+    failing.failChunk = new Error('quota');
+    const w1 = createJournalWriter(failing, meta);
+    w1.chunk(0, 0, 1000, blob(5));
+    expect(await w1.segmentIntact(0), '書けなかった').toBe(false);
+
+    const w2 = createJournalWriter(new MemoryJournalStore(), meta, { capBytes: 8 });
+    w2.chunk(0, 0, 1000, blob(5));
+    w2.chunk(0, 1, 2000, blob(5)); // 上限で受けない
+    expect(w2.state()).toBe('off-cap');
+    expect(await w2.segmentIntact(0), '上限で受けなかった断片がある').toBe(false);
+  });
+
+  it('🔴 断片の番号が飛んだ区間は false(収録側で渡す途中に落ちた断片 ── 着地前レビュー)', async () => {
+    const w = createJournalWriter(new MemoryJournalStore(), meta);
+    w.chunk(0, 0, 1000, blob(5));
+    w.chunk(0, 2, 3000, blob(5)); // 1 番が届いていない
+    w.chunk(1, 0, 1000, blob(5)); // 次の区間は 0 から(対照群)
+    w.chunk(1, 1, 2000, blob(5));
+    expect(await w.segmentIntact(0), '真ん中が抜けた区間を「全部書けた」と読んだ').toBe(false);
+    expect(await w.segmentIntact(1), '対照群: 抜けの無い区間').toBe(true);
+  });
+});

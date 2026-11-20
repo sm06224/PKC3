@@ -9207,6 +9207,21 @@ mark[data-pkc-diff-char='del'] {
   background: var(--surface);
   font-size: var(--fs-sm);
 }
+/* 🔴 **小さな 1 行**(#1985 項目 1。案 A)── 録っている間もほかのノートを見る・書くので、本文を奪わない低さにする。
+ * ⚠ 行は**折らない**(`flex-wrap` を足さない)。字の長さは `capture-status` が省略記号で受ける。
+ * ⚠ 色は赤い ● だけ(状態色 `--danger`)。字・ボタンは無彩色のまま。 */
+[data-pkc-region='capture-bar'] button {
+  min-height: 0;
+  padding: 1px var(--s3);
+  font-size: var(--btn-fs-sm);
+  line-height: 1.4;
+}
+[data-pkc-field='capture-dot'] {
+  flex: none;
+  color: var(--danger);
+  font-size: var(--fs-xs);
+  line-height: 1;
+}
 /* 🔴 **タイマーの帯**(#279)。⚠ 収録の帯と**同じ見た目**にする ──
  * どちらも「いま走っている物と、その止め方」を出す行なので、
  * 別々の見た目にすると user は 2 種類の物として覚え直すことになる。 */

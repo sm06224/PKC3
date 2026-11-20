@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CAPTURE_LABEL,
   captureBarLine,
+  captureBarShort,
   captureFileName,
   capturedLengthText,
 } from '../../src/features/asset/capture-text';
@@ -111,5 +112,12 @@ describe('録った長さの言い方(#1163 依頼 50-3。破棄の確認に使�
 
   it('呼び名に「収録」が残っていない(画面録画 / 録音)', () => {
     expect(Object.values(CAPTURE_LABEL)).toEqual(['録音', '画面録画']);
+  });
+});
+
+describe('captureBarShort(帯の短い 1 行。#1985 項目 1)', () => {
+  it('種類 + 経過だけ(量・残りは入れない)/ 2 本目以降だけ本数', () => {
+    expect(captureBarShort('audio', 65_000, 1)).toBe('録音中 1:05');
+    expect(captureBarShort('screen', 3_723_000, 3)).toBe('画面録画中 1:02:03・3 本目');
   });
 });

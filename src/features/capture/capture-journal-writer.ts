@@ -47,6 +47,14 @@ export interface JournalWriter {
   /** 捨てた。控えを全部消す。 */
   discard(): void;
   state(): JournalState;
+  /** この収録の身元(`JournalMeta.id`)。控えから区間を読み戻すときの鍵。 */
+  readonly id: string;
+  /**
+   * 🔴 **区間が欠けずに控えへ書けているか**(#1985 項目 1 の継ぎ目)。待ち行列が空になるのを待ってから答える。
+   * `true` = 受け取った断片が全部書けた(控えだけから区間を作れる)。`false` = 上限・空き不足・失敗で 1 つでも書けていない / 断片が無い。
+   * ⚠ `true` のときだけ、メモリ上の収録を手放して控えから取り込んでよい(`false` ならメモリに持ち続ける)。
+   */
+  segmentIntact(seg: number): Promise<boolean>;
   /** 待ち行列が空になるまで(test と、閉じる前の待ち合わせ用)。 */
   settled(): Promise<void>;
 }
@@ -70,6 +78,14 @@ export function createJournalWriter(
   const segBytes = new Map<number, number>();
   /** 見出しが書けなかった区間(後ろの断片を書かない)。 */
   const headless = new Set<number>();
+  /** 1 つでも書けなかった断片が在る区間(控えだけからは作れない)。 */
+  const lost = new Set<number>();
+  /**
+   * 🔴 **区間ごとの次に来るはずの断片の番号**(#1985 項目 1 の着地前レビュー)。
+   * ⚠ 収録側で断片を渡す途中に例外が出ると、その断片は**ここへ届かない**(`lost` にも載らない)── 番号が飛んだら
+   *   その区間は欠けていると数える。そうしないと、真ん中が抜けた控えを「全部書けた」と読んでメモリを手放す。
+   */
+  const nextIdx = new Map<number, number>();
   const total = (): number => {
     let n = 0;
     for (const v of segBytes.values()) n += v;
@@ -102,16 +118,26 @@ export function createJournalWriter(
 
   return {
     chunk(seg, idx, elapsedMs, blob) {
-      if (closed || state !== 'active') return;
+      if (closed) return;
+      if (idx !== (nextIdx.get(seg) ?? 0)) lost.add(seg);
+      nextIdx.set(seg, idx + 1);
+      if (state !== 'active') {
+        lost.add(seg);
+        return;
+      }
       // 上限は受け取った時点で見る(書く順を待たずに止める)
       if (total() + blob.size > cap) {
+        lost.add(seg);
         turnOff('off-cap');
         return;
       }
       segBytes.set(seg, (segBytes.get(seg) ?? 0) + blob.size);
       enqueue(async () => {
         // 待っている間に止まった / この区間の見出しが書けなかった
-        if (broken || headless.has(seg)) return;
+        if (broken || headless.has(seg)) {
+          lost.add(seg);
+          return;
+        }
         try {
           if (opts.freeBytes !== undefined && (idx === 0 || sinceFreeCheck >= recheck)) {
             sinceFreeCheck = 0;
@@ -119,6 +145,7 @@ export function createJournalWriter(
             if (free !== null && free < floor) {
               // ⚠ 区間の途中で尽きたときも、これ以後は書かない(収録は続く。守られていないと言う)
               if (idx === 0) headless.add(seg);
+              lost.add(seg);
               turnOff('off-space');
               return;
             }
@@ -132,6 +159,7 @@ export function createJournalWriter(
         } catch {
           // 🔴 書けなかった: 録るのは止めない。ここから先は守れないと言う
           if (idx === 0) headless.add(seg);
+          lost.add(seg);
           turnOff('off-error');
         }
       });
@@ -140,6 +168,8 @@ export function createJournalWriter(
       if (closed) return;
       segBytes.delete(seg);
       headless.delete(seg);
+      lost.delete(seg);
+      nextIdx.delete(seg);
       enqueue(async () => {
         try {
           await port.dropSegment(meta.id, seg);
@@ -168,6 +198,11 @@ export function createJournalWriter(
       });
     },
     state: () => state,
+    id: meta.id,
+    segmentIntact: async (seg) => {
+      await tail;
+      return !closed && segBytes.has(seg) && !lost.has(seg);
+    },
     settled: () => tail,
   };
 }

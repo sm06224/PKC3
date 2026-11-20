@@ -28,7 +28,7 @@ const meta = (lid: string): EntryMeta => ({
   bodyChars: null,
 });
 
-function rig(o: { attachFails?: boolean; failChunk?: boolean; landed?: () => Promise<void> } = {}) {
+function rig(o: { attachFails?: boolean; failChunk?: boolean; landed?: () => Promise<void>; noRead?: boolean; active?: boolean[] } = {}) {
   const d = new Dispatcher();
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
   d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
@@ -44,6 +44,7 @@ function rig(o: { attachFails?: boolean; failChunk?: boolean; landed?: () => Pro
   const lines: Array<string | null> = [];
   const notices: string[] = [];
   const writers: JournalWriter[] = [];
+  const attachedSizes: number[] = [];
   let opts!: CaptureOptions;
   let parts = 0;
   let endCb: (r: CaptureEnd) => void = () => undefined;
@@ -52,6 +53,7 @@ function rig(o: { attachFails?: boolean; failChunk?: boolean; landed?: () => Pro
     dispatcher: d,
     attach: async (item) => {
       if (o.attachFails === true) return null;
+      attachedSizes.push(item.size);
       const lid = 'att' + item.name;
       d.dispatch({ type: 'CREATE_ENTRY', archetype: 'attachment', lid, title: item.name, body: '#\n', edit: false });
       return { lid, assetKey: 'k' + item.name, mime: item.type, hash: null };
@@ -62,6 +64,16 @@ function rig(o: { attachFails?: boolean; failChunk?: boolean; landed?: () => Pro
     notifyOpen: (t) => notices.push(t),
     now: () => new Date(2026, 10, 20, 1, 2, 3),
     tick: () => () => undefined,
+    ...(o.active === undefined ? {} : { onActive: (a: boolean) => o.active!.push(a) }),
+    // 🔴 控えから読み戻す口(main.ts と同じ: 断片をつなぐ)
+    ...(o.noRead === true
+      ? {}
+      : {
+          readJournal: async (rec: string, seg: number) => {
+            const cs = await store.readSegment(rec, seg);
+            return cs.length === 0 ? null : new Blob(cs.map((c) => c.blob), { type: 'audio/webm' });
+          },
+        }),
     journal: (m, onState) => {
       const w = createJournalWriter(store, m, { onState: () => onState() });
       writers.push(w);
@@ -87,7 +99,7 @@ function rig(o: { attachFails?: boolean; failChunk?: boolean; landed?: () => Pro
   const chunk = (segment: number, index: number, size = 3): void =>
     opts.onChunk?.({ segment, index, elapsedMs: (index + 1) * 1000, blob: new Blob(['x'.repeat(size)]) });
   return {
-    d, svc, store, lines, notices, writers, chunk,
+    d, svc, store, attachedSizes, lines, notices, writers, chunk,
     cut: (b: Blob) => {
       parts += 1;
       opts.onPart?.(b, parts);
@@ -173,6 +185,125 @@ describe('途中保存と取り込み', () => {
     await r.flush();
     expect(r.d.getState().phase).toBe('editing');
     expect(r.store.chunks.size, '預かっている間は控えが要る').toBe(1);
+    r.d.dispatch({ type: 'CANCEL_EDIT' });
+    await r.flush();
+    expect(r.store.chunks.size).toBe(0);
+  });
+});
+
+describe('編集中に止めた収録は、控えに書けていればメモリに持たない(#1985 項目 1 の継ぎ目)', () => {
+  const startEditing = (r: ReturnType<typeof rig>): void => {
+    r.d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '本文' });
+    r.d.dispatch({ type: 'START_EDIT' });
+  };
+
+  it('🔴 手放して控えから取り込む: 預かり中は「メモリ上にだけ」に数えず、編集後に添付になる', async () => {
+    const active: boolean[] = [];
+    const r = rig({ active });
+    await r.svc.start('audio');
+    expect(active).toEqual([true]);
+    r.chunk(0, 0);
+    r.chunk(0, 1);
+    startEditing(r);
+    // 預かるのはメモリの Blob(`finalBlob`)ではなく控え ── 止めた Blob を空にしても控えから入る
+    r.setFinal(new Blob(['MEM']));
+    r.svc.stop();
+    await r.flush();
+    expect(active.at(-1), '控えに在るのに「メモリ上にだけ在る」に数えている').toBe(false);
+    expect(r.notices.join('\n')).toContain('途中保存に残してある');
+    expect(r.store.chunks.size, '預かっている間は控えを消さない').toBe(2);
+    r.d.dispatch({ type: 'CANCEL_EDIT' });
+    await r.flush();
+    const att = [...r.d.getState().entryMetas.values()].filter((m) => m.archetype === 'attachment');
+    expect(att.length, '編集が終わっても添付にならない').toBe(1);
+    expect(r.store.chunks.size, '着地後に控えが消えていない').toBe(0);
+  });
+
+  it('🔴 控えから入れる中身は、控えの断片をつないだもの(メモリの Blob ではない)', async () => {
+    const r = rig();
+    await r.svc.start('audio');
+    r.chunk(0, 0, 4);
+    r.chunk(0, 1, 5);
+    startEditing(r);
+    r.setFinal(new Blob(['X']));
+    r.svc.stop();
+    await r.flush();
+    r.d.dispatch({ type: 'CANCEL_EDIT' });
+    await r.flush();
+    expect(r.attachedSizes, '控えの 4 + 5 バイトのはず(メモリの 1 バイトではない)').toEqual([9]);
+  });
+
+  it('🔴 控えが欠けた収録は、これまでどおりメモリで預かる(数える・一言)', async () => {
+    const active: boolean[] = [];
+    const r = rig({ failChunk: true, active });
+    await r.svc.start('audio');
+    r.chunk(0, 0);
+    r.chunk(0, 1);
+    await r.flush();
+    startEditing(r);
+    r.svc.stop();
+    await r.flush();
+    expect(active.at(-1), '欠けた控えなのにメモリの預かりを数えていない').toBe(true);
+    expect(r.notices.join('\n')).toContain('途中保存が欠けている');
+    r.d.dispatch({ type: 'CANCEL_EDIT' });
+    await r.flush();
+    const att = [...r.d.getState().entryMetas.values()].filter((m) => m.archetype === 'attachment');
+    expect(att.length, 'メモリの預かりが入っていない').toBe(1);
+    expect(active.at(-1)).toBe(false);
+  });
+
+  it('🔴 読み戻す口が無ければ、メモリで預かる', async () => {
+    const active: boolean[] = [];
+    const r = rig({ noRead: true, active });
+    await r.svc.start('audio');
+    r.chunk(0, 0);
+    startEditing(r);
+    r.svc.stop();
+    await r.flush();
+    expect(active.at(-1)).toBe(true);
+  });
+
+  it('🔴 控えから読み出せなかったら控えを残し、言う(次の起動で復元できる)', async () => {
+    const r = rig();
+    await r.svc.start('audio');
+    r.chunk(0, 0);
+    await r.flush();
+    startEditing(r);
+    r.svc.stop();
+    await r.flush();
+    r.store.chunks.clear(); // 読み戻す前に控えが消えた
+    r.d.dispatch({ type: 'CANCEL_EDIT' });
+    await r.flush();
+    expect(r.notices.join('\n')).toContain('途中保存から読み出せませんでした');
+    expect([...r.d.getState().entryMetas.values()].filter((m) => m.archetype === 'attachment').length).toBe(0);
+  });
+
+  it('🔴 着地前に控えを消さない(編集後の取り込みも landed を待つ)', async () => {
+    let land!: () => void;
+    const gate = new Promise<void>((res) => (land = res));
+    const r = rig({ landed: () => gate });
+    await r.svc.start('audio');
+    r.chunk(0, 0);
+    startEditing(r);
+    r.svc.stop();
+    await r.flush();
+    r.d.dispatch({ type: 'CANCEL_EDIT' });
+    await r.flush();
+    expect([...r.d.getState().entryMetas.values()].filter((m) => m.archetype === 'attachment').length).toBe(1);
+    expect(r.store.chunks.size, '着地前に控えが消えた').toBe(1);
+    land();
+    await r.flush();
+    expect(r.store.chunks.size).toBe(0);
+  });
+
+  it('🔴 区切り(onPart)の区間も、編集中は控えから預かる', async () => {
+    const r = rig();
+    await r.svc.start('audio');
+    r.chunk(0, 0);
+    startEditing(r);
+    r.cut(new Blob(['seg0']));
+    await r.flush();
+    expect(r.store.chunks.size, '区間 0 の控えを消している').toBe(1);
     r.d.dispatch({ type: 'CANCEL_EDIT' });
     await r.flush();
     expect(r.store.chunks.size).toBe(0);
