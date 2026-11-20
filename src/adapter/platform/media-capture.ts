@@ -109,6 +109,12 @@ export interface CaptureOptions {
   readonly onPart?: (blob: Blob, part: number) => void;
   /** 終わったときに呼ぶ(自動で止まった場合も来る)。 */
   readonly onEnd?: (reason: CaptureEnd) => void;
+  /**
+   * 🔴 **断片が 1 つ届くたびに呼ぶ**(#1985 項目 2。途中保存の入口)。⚠ 待たない(同期に呼んで戻る)。
+   * `segment` = 何本目か(0 始まり。`onPart` の `part - 1`、最後の 1 本は `parts()`)/ `index` = その本の中の番号(0 始まり)/
+   * `elapsedMs` = その本の始まりからの経過。⚠ `blob` は受け取ったまま(写さない)。
+   */
+  readonly onChunk?: (c: { segment: number; index: number; elapsedMs: number; blob: Blob }) => void;
 }
 
 /**
@@ -141,7 +147,7 @@ const DURATION_HEADER_PREFIX_BYTES = 65536;
  * ⚠ **先頭だけ読む**(`blob.slice` は写さない ── ゼロコピー)。書けなかった
  *   ときは元の `blob` をそのまま返す(この機能が録音そのものを壊してはいけない)。
  */
-async function withRecordedDuration(blob: Blob, durationMs: number): Promise<Blob> {
+export async function withRecordedDuration(blob: Blob, durationMs: number): Promise<Blob> {
   try {
     const prefix = new Uint8Array(await blob.slice(0, DURATION_HEADER_PREFIX_BYTES).arrayBuffer());
     const patched = insertMissingDuration(prefix, durationMs);
@@ -292,6 +298,8 @@ export async function startCapture(
   const chunks: Blob[] = [];
   /** 切ってからここまでに積んだ量(**次の切り所**を測る)。 */
   let segBytes = 0;
+  /** いまの本の中で、何個目の断片か(切るたびに 0 へ戻す。途中保存の鍵)。 */
+  let segChunkNo = 0;
   /** 始めてからの総量(帯に出す)。⚠ 切っても戻さない。 */
   let total = 0;
   /** 🔴 **切って渡した本数**(#771)。⚠ **最後の 1 本は含まない**(`stop()` が返す)。 */
@@ -419,6 +427,7 @@ export async function startCapture(
     // 🔑 **先に取り出す**(次の器の壁時計と混ざらないように、リセットの前に読む)
     const seg = takeRawSegment();
     segBytes = 0;
+    segChunkNo = 0;
     phase = 'recording';
     /**
      * 🔴 **本数は、失敗しうる手(次の器)より前に数える**(#1087)── 後ろだと、次の器が
@@ -460,6 +469,19 @@ export async function startCapture(
     chunks.push(ev.data);
     segBytes += ev.data.size;
     total += ev.data.size;
+    // 🔴 途中保存へ(`part` は切るたびに増えるが、増えるのは**最後の断片が届いた後**なので、ここで読む値は本の番号に等しい)
+    // ⚠ 見張りが投げても、下の 12 時間 / 切り分けの判定を飛ばさない(収録そのものを守る)
+    const chunkIndex = segChunkNo++;
+    try {
+      opts.onChunk?.({
+        segment: part,
+        index: chunkIndex,
+        elapsedMs: Math.max(0, now() - segStartedAt),
+        blob: ev.data,
+      });
+    } catch {
+      // 途中保存の失敗は収録を止めない
+    }
     /**
      * 🔴 **12 時間で止める**(user 指示 2026-09-07「最大時間を１２時間にして」)。
      * ⚠ **切るより先に見る** ── 同じ断片で両方に当たったら、止めるほうが勝つ

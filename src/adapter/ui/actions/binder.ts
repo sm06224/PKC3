@@ -2162,6 +2162,11 @@ export interface BinderServices {
   stopCapture?(): void;
   discardCapture?(): void;
   /**
+   * 🔴 **途中で終わった録音・録画の復元 / 破棄を聞く**(#1985 項目 2)。押す口はステータスバーの 1 行
+   * (途中で終わった収録が残っている間だけ出る)。⚠ 省略可。段取りは `capture-recovery.ts`。
+   */
+  openCaptureRecovery?(): void;
+  /**
    * 🔴 **録った音の前後を削る**(#683 段②a。user 裁定 2026-09-14)。
    *
    * ⚠ **省略可** ── 無い配線では「この版では切り出せません」と断るだけで、
@@ -14574,6 +14579,8 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'stop-capture': (_dispatcher, _target, services) => services.stopCapture?.(),
   'discard-capture': (_dispatcher, _target, services) => services.discardCapture?.(),
+  // 🔴 途中で終わった収録を「復元する / 捨てる」(#1985 項目 2。収録と同じ理由で本文の書込の門には載せない ── 聞くだけ)
+  'open-capture-recovery': (_dispatcher, _target, services) => services.openCaptureRecovery?.(),
   /**
    * 🔴 **タイマー**(#279)。
    * ⚠ **`BODY_WRITE_ACTIONS` には載せない**(収録と同じ理由)── 忙しい間に

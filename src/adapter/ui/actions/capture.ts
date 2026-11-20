@@ -37,6 +37,8 @@ import {
 } from '@adapter/platform/media-capture';
 import type { AttachItem, AttachedOne } from './attach';
 import { createWritableQueue } from './writable-queue';
+import { journalBarNote, journalOffNotice, type JournalMeta } from '@features/capture/capture-journal';
+import type { JournalWriter } from '@features/capture/capture-journal-writer';
 
 /**
  * 🔴 **1 本がここまで育ったら、切って次を始める**(#771)。⚠ **止めない**。
@@ -65,6 +67,13 @@ export interface CaptureServiceDeps {
   readonly dispatcher: Dispatcher;
   /** bytes を添付にする口。⚠ **`attachOne` を通す**(2 つ目の取込口を作らない)。 */
   readonly attach: (item: AttachItem) => Promise<AttachedOne | null>;
+  /**
+   * 🔴 **ノートと添付の書込が保存先へ着地するまで待つ口**(#1985 項目 2。`connectStoreEffects().settled()`)。
+   * ⚠ `attach` が返った時点では `CREATE_ENTRY` を撃っただけで、保存先(sqlite)への書込は飛んでいる ──
+   *   その前に途中保存の控えを消すと、落ちたときに収録が**どこにも残らない**。着地を待ってから消す。
+   * ⚠ 省略 = 待たない。待ちが失敗したら控えは消さない(次の起動で復元に出る)。
+   */
+  readonly landed?: () => Promise<void>;
   /** 帯を描き直す合図。⚠ `null` = 収録していない(帯を畳む)。 */
   readonly onChange: (line: string | null) => void;
   /** 一時の知らせ(エラーの行とは別)。 */
@@ -113,6 +122,12 @@ export interface CaptureServiceDeps {
    * ⚠ 省略 = 申し出ない(これまでどおり)。呼ぶのは user が「録った音をファイルに保存する」を押した後だけ。
    */
   readonly saveFile?: (name: string, blob: Blob) => void;
+  /**
+   * 🔴 **途中保存の書き手を作る口**(#1985 項目 2)。収録 1 回につき 1 つ。⚠ 省略 = 途中保存しない(これまでどおり)。
+   * 判断(順序・上限・失敗)は `@features/capture/capture-journal-writer.ts`、置き場は `capture-journal-store.ts`。
+   * `onState` は状態が「守られていない」に変わったときに呼ぶ(帯の字と 1 度きりの知らせはこちらが出す)。
+   */
+  readonly journal?: (meta: JournalMeta, onState: () => void) => JournalWriter;
 }
 
 /** これを超えて録った物を捨てるときは確認する(60 秒ちょうどは聞かない)。 */
@@ -130,6 +145,19 @@ export interface CaptureService {
   discard(): Promise<void>;
   /** 帯に出す 1 行(収録していなければ `null`)。 */
   line(): string | null;
+  /**
+   * 🔴 **前回の途中で終わった収録の 1 区間を、いまの収録と同じ道で取り込む**(#1985 項目 2。復元)。
+   * ⚠ 編集中は預かる(`hold`)。`done` は**添付になった後**に 1 度だけ呼ぶ(控えを消す)。
+   * 入り先は `home`(録り始めたノート。無ければ「そのノートが見つからない」と言って、開いているノートか添付だけ)。
+   */
+  deliverRecovered(
+    blob: Blob,
+    kind: CaptureKind,
+    part: number | null,
+    at: Date,
+    home: string | null,
+    done: () => void,
+  ): Promise<'in' | 'held' | 'failed'>;
 }
 
 /** 既定の 1 秒刻み。⚠ 収録していない間は**張らない**(常駐を作らない)。 */
@@ -192,6 +220,13 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
 
   const fail = (error: string): void => deps.dispatcher.dispatch({ type: 'OP_FAILED', error });
 
+  /** 🔴 この収録の途中保存(`null` = していない / 終わった)。 */
+  let journal: JournalWriter | null = null;
+  const unprotectedNote = (): string => {
+    const note = journal === null ? '' : journalBarNote(journal.state());
+    return note === '' ? '' : `・${note}`;
+  };
+
   const line = (): string | null =>
     handle === null
       ? null
@@ -207,7 +242,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
           maxMs - handle.elapsedMs(),
           // 🔑 `parts()` は**渡し終えた本数**なので、いま録っているのは +1 本目
           handle.parts() + 1,
-        );
+        ) + unprotectedNote();
 
   const paint = (): void => deps.onChange(line());
 
@@ -221,6 +256,9 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     startedAt = null;
     startedLid = null;
     batch = null;
+    // 🔴 途中保存は**終わったと伝えるだけ**(控えは区間が添付になった時点で、書き手が消す)
+    journal?.end();
+    journal = null;
     paint();
     syncActive();
   };
@@ -272,6 +310,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     at: Date,
     tag: string | null,
     home: string | null,
+    done: () => void,
   ): Promise<boolean> => {
     /**
      * 🔴 **入れ先は「録り始めたノート」**(#1163 依頼 90-1 / 148 ② / 353 A)。
@@ -320,6 +359,14 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       // 🔴 始めたノートへ入れた回は、いま見ているノートへ画面を返す(開き直さない)
       ...(away ? { selectBack: st.selectedLid, intoTitle: homeMeta.title } : {}),
     });
+    // 🔴 添付になった ── この区間の途中保存はもう要らない(消えるのは書き手の待ち行列の最後)。
+    //    ⚠ **書込が着地してから**消す(`landed`)。着地を確かめられないなら消さない
+    try {
+      await deps.landed?.();
+      done();
+    } catch {
+      // 控えを残す ── 次の起動で「復元できます」に出る
+    }
     /**
      * 🔑 **録ったものの一覧を集め直す**(2026-10-13 の見直し)── 一覧はタブを開いたときに 1 度集めるだけなので、
      *   開いたまま録ると、いま録った物が出なかった(`capture-trim.ts` と同じ形)。
@@ -377,6 +424,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     at: Date,
     tag: string | null,
     home: string | null,
+    done: () => void,
   ): void => {
     // 🔴 預かっている間は閉じると消える(#1087)── 取り込みが終わるまで数える
     unsettled++;
@@ -384,7 +432,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     queue.push(async () => {
       try {
         // 🔴 預かった 1 本も、入らなければ録るのをやめる(下の `stopNoRoom` と同じ理由)
-        if (!(await ingest(blob, kind, why, part, at, tag, home)) && part !== null) stopNoRoom(kind);
+        if (!(await ingest(blob, kind, why, part, at, tag, home, done)) && part !== null) stopNoRoom(kind);
       } finally {
         unsettled--;
         syncActive();
@@ -406,17 +454,18 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     at: Date,
     tag: string | null,
     home: string | null,
+    done: () => void,
   ): Promise<'in' | 'held' | 'failed'> => {
     // 🔴 **編集中は添付が作れない** ── 捨てずに預かる
     if (deps.dispatcher.getState().phase !== 'ready') {
-      hold(blob, kind, why, part, at, tag, home);
+      hold(blob, kind, why, part, at, tag, home, done);
       return 'held';
     }
     // 🔴 取り込みの最中も、着くまでは閉じると消える(#1087)
     unsettled++;
     syncActive();
     try {
-      return (await ingest(blob, kind, why, part, at, tag, home)) ? 'in' : 'failed';
+      return (await ingest(blob, kind, why, part, at, tag, home, done)) ? 'in' : 'failed';
     } finally {
       unsettled--;
       syncActive();
@@ -473,6 +522,8 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     const before = h.parts();
     const at = startedAt ?? now();
     const home = startedLid;
+    // ⚠ `close()` が書き手を手放すので、先に控える(最後の区間の控えを、添付になった後に消すため)
+    const jr = journal;
     // 🔑 印は**分かれた回だけ** ── 1 本なら「元に戻す」は元から 1 回である
     const tag = before === 0 ? null : batch;
     /**
@@ -481,7 +532,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
      */
     unsettled++;
     try {
-      await finishIn(h, why, kind, before, at, tag, home);
+      await finishIn(h, why, kind, before, at, tag, home, jr);
     } finally {
       unsettled--;
       syncActive();
@@ -496,6 +547,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     at: Date,
     tag: string | null,
     home: string | null,
+    jr: JournalWriter | null,
   ): Promise<void> => {
     const blob = await h.stop();
     close();
@@ -513,11 +565,13 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       fail(`${why}${CAPTURE_LABEL[kind]}できませんでした(1 バイトも録れていません)`);
       return;
     }
-    await deliver(blob, kind, why, before === 0 ? null : before + 1, at, tag, home);
+    await deliver(blob, kind, why, before === 0 ? null : before + 1, at, tag, home, () => jr?.segmentDone(before));
   };
 
   return {
     line,
+    deliverRecovered: (blob, kind, part, at, home, done) =>
+      deliver(blob, kind, '途中で終わった収録を復元しました。', part, at, null, home, done),
     start: async (kind) => {
       // ⚠ **同時に 1 本だけ**(2 本目は理由を出して断る)
       if (handle !== null || starting) {
@@ -536,8 +590,30 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
        *   「元に戻す」がまとまらない(#668 C の印は 1 回ぶんの取り込みを指す)。
        */
       const tag = `cap-${at.getTime()}`;
+      /**
+       * 🔴 **途中保存の書き手**(#1985 項目 2)。⚠ 書き込みは最初の断片が届いたときに始まる(許可が取れなかった回は何も残さない)。
+       *   身元には「録り始めたノート」を入れる(復元の入り先)。
+       */
+      const jr =
+        deps.journal === undefined
+          ? null
+          : deps.journal(
+              {
+                id: `${tag}-${Math.random().toString(36).slice(2, 8)}`,
+                kind,
+                startedLid: home,
+                startedAt: at.getTime(),
+              },
+              () => {
+                // 守られなくなったとき: 帯の字を直ちに描き直し、理由は 1 度だけ言う
+                paint();
+                const why = jr === null ? '' : journalOffNotice(jr.state());
+                if (why !== '') deps.notify(why, { kind: 'caution' });
+              },
+            );
       try {
         handle = await start(kind, deps.capture ?? {}, {
+          onChunk: (c) => jr?.chunk(c.segment, c.index, c.elapsedMs, c.blob),
           partBytes,
           maxMs,
           /**
@@ -545,7 +621,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
            *   まだ終わっていないので、言うことは「入れた」だけである。
            */
           onPart: (blob, part) => {
-            void deliver(blob, kind, '', part, at, tag, home).then((r) => {
+            void deliver(blob, kind, '', part, at, tag, home, () => jr?.segmentDone(part - 1)).then((r) => {
               // 🔴 入らなかったら録り続けない(次の 1 本も入らない)
               if (r === 'failed') stopNoRoom(kind);
             });
@@ -565,6 +641,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       startedAt = at;
       startedLid = home;
       batch = tag;
+      journal = jr;
       untick = tick(paint);
       paint();
       syncActive();
@@ -608,6 +685,8 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
        *   (変異試験 N3 が SURVIVED で教えた ── CLAUDE.md §1「救い手が変わっただけ」)。
        */
       h.discard();
+      // 🔴 捨てた収録の途中保存も残さない(`close()` の `end()` より先に)
+      journal?.discard();
       close();
       deps.notify(`${CAPTURE_LABEL[h.kind]}を残さずにやめました`);
     },

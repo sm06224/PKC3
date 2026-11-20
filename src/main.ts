@@ -80,6 +80,7 @@ import { isTouchOnly } from '@adapter/ui/render/touch-device';
 import { scheduleNumberFormatWarmup } from '@adapter/ui/render/locale-warmup';
 import {
   paintStatusBackup,
+  paintStatusCaptureRecovery,
   paintStatusCopyRef,
   paintStatusCreate,
   paintStatusMessages,
@@ -372,6 +373,15 @@ import {
 } from '@adapter/ui/actions/binder';
 import { ChapterWindows } from '@adapter/ui/chapter-windows';
 import { createCaptureService } from '@adapter/ui/actions/capture';
+import { createCaptureRecovery } from '@adapter/ui/actions/capture-recovery';
+import { createJournalWriter } from '@features/capture/capture-journal-writer';
+import {
+  holdRecordingLock,
+  IdbJournalStore,
+  liveRecordingIds,
+  storageFreeBytes,
+} from '@adapter/platform/capture-journal-store';
+import { withRecordedDuration } from '@adapter/platform/media-capture';
 import { createCaptureTrimmer } from '@adapter/ui/actions/capture-trim';
 import { createCaptureExtractor } from '@adapter/ui/actions/capture-extract';
 import { createWiredCaptureProcessor } from '@adapter/ui/actions/capture-process-wiring';
@@ -2193,6 +2203,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * **エラー > 一時の知らせ > 常設(保存先の警告)**。
    */
   let errorLine = '';
+  /** 🔴 復元できる途中で終わった録音・録画の区間数(#1985。`captureRecovery` が更新する)。 */
+  let captureRecoveryCount = 0;
   /**
    * 🔴 **知らせ(結果)と進行中は別の欄**(#1017 C5)── 持ち主は `createStatusNotices`(下)。
    * ⚠ `noticeLine` / `progressLine` は**そこから読む**(ここに変数を置き直さない)。
@@ -2245,7 +2257,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   なるのと同じで、user は消し方を持たない。
      * 🔑 器を畳むかどうかを決めるのは**この 1 か所**である ── 判断は `status-line.ts` が持つ。
      */
-    const hasUnreadMessages = dispatcher.getState().messagesUnread > 0;
+    // 🔴 途中で終わった録音・録画の入口(#1985)も、未読のメッセージと同じく「押す口が在る間は畳まない」
+    const hasUnreadMessages = dispatcher.getState().messagesUnread > 0 || captureRecoveryCount > 0;
     const { text, hide, floating } = statusBarWithFileDrag(parts, {
       hasTooNarrow: !regions.tooNarrow.hidden,
       hasUnreadMessages,
@@ -2356,6 +2369,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     // ⚠ 字の組み方は `status-open.ts`(test が届く所)── ここは渡すだけ
     paintStatusMessages(regions.statusMessages, dispatcher.getState().messagesUnread);
+    paintStatusCaptureRecovery(regions.statusCaptureRecovery, captureRecoveryCount);
     // 🔴 いま押す口を持つ知らせか(持つなら自動で消さない ── `status-lifetime.ts`)
     return open || undo || create || copyRef;
   };
@@ -3975,6 +3989,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 取り込みは **`queued`**(断る側ではない)── 収録は**取り直せない**ので、
    *   整理(未参照 GC)と重なったら**待たせる**(Office の保存と同じ判断)。
    */
+  const journalStore = new IdbJournalStore();
   const captureService = createCaptureService({
     dispatcher,
     attach: async (item) => {
@@ -3984,6 +3999,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         out = await attachOne(dispatcher, attachDeps, item, undefined, undefined, true);
       });
       return out;
+    },
+    // 🔴 途中保存の控えは、ノート + 添付の書込が着地してから消す(#1985 項目 2)
+    landed: async () => {
+      await storeEffects?.settled();
     },
     onChange: (line) => paintCaptureBar(root, line),
     notify: showStatus,
@@ -4001,7 +4020,56 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     confirm: (message, o) => ask(message, o),
     // 🔴 取り込めなかった録音・録画を、ファイルとして端末へ保存する(台帳 #1852 O1 / 依頼 239)
     saveFile: (name, blob) => downloadBlob(name, blob),
+    /**
+     * 🔴 **途中保存**(#1985 項目 2)── 1 秒ごとの断片を収録専用の IndexedDB へ足す。判断は `capture-journal-writer.ts`、
+     *   ここは**繋ぐだけ**。⚠ 収録中は Web Locks で「いま録っている」を他のタブへ知らせる(起動時の復元が取り違えない)。
+     */
+    journal: (meta, onState) => {
+      const release = holdRecordingLock(meta.id);
+      return createJournalWriter(journalStore, { ...meta, cid }, {
+        freeBytes: storageFreeBytes,
+        onState: () => onState(),
+        onClosed: release,
+      });
+    },
   });
+  /**
+   * 🔴 **前回途中で終わった録音・録画の復元**(#1985 項目 2)── 起動のとき 1 度調べ、あればシステムのメッセージへ 1 件残して、
+   *   ステータスバーに静かな 1 行を出す(押すと「復元する / 捨てる」)。判断は `capture-recovery.ts` / `capture-journal.ts`。
+   */
+  const captureRecovery = createCaptureRecovery({
+    store: journalStore,
+    cid,
+    liveIds: liveRecordingIds,
+    service: captureService,
+    post: (text) => appMessagePost.post({ kind: 'caution', source: 'capture-journal', text }),
+    confirm: (message, o) => ask(message, o),
+    notify: showStatus,
+    onChange: (n) => {
+      captureRecoveryCount = n;
+      repaintStatus();
+      paintOpen();
+    },
+    withDuration: withRecordedDuration,
+    // 🔴 起動のたびに同じメッセージを積まない(組が変わったときだけ残す。保存先ごと)
+    seen: {
+      get: () => {
+        try {
+          return localStorage.getItem(`pkc3:capture-recovery-seen:${cid}`);
+        } catch {
+          return null;
+        }
+      },
+      set: (sig) => {
+        try {
+          localStorage.setItem(`pkc3:capture-recovery-seen:${cid}`, sig);
+        } catch {
+          // 置けなくても、積む回数が増えるだけ
+        }
+      },
+    },
+  });
+  void captureRecovery.scan();
 
   /**
    * 🔴 **録った音の前後を削る**(#683 段②a)。段取りは `capture-trim.ts` が持ち、
@@ -4542,6 +4610,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     startCapture: (kind) => void captureService.start(kind),
     stopCapture: () => captureService.stop(),
     discardCapture: () => void captureService.discard(),
+    openCaptureRecovery: () => void captureRecovery.open(),
     trimCapture: (lid, startMs, endMs) => void captureTrimmer.run(lid, startMs, endMs),
     // 🔴 録った音を文字にする(#772 段②)── 押す口は「音/動画」の行に在る
     transcribeCapture: (lid) => void captureTranscriber.run(lid),

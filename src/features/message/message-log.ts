@@ -116,6 +116,7 @@ export const MESSAGE_SOURCE_LABEL: Readonly<Record<string, string>> = {
   notice: 'お知らせ',
   schedule: '予定',
   draft: '保存していない編集',
+  'capture-journal': '録音・録画の途中保存',
   'portable-boot': 'PKC3 入り HTML の起動',
   'office-profile': 'Office',
   'db-rescue-rebuild': 'ノートの保存データの作り直し',

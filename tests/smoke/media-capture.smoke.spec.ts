@@ -2096,3 +2096,111 @@ test('🔴 細かく切れない環境(WebCodecs 無し)は裁定の文言で確
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **録っている途中でタブが落ちても、録った分を復元できる**(#1985 項目 2)。
+ *
+ * ① 録っている間、1 秒ごとの断片が収録専用の IndexedDB(`pkc3-capture-journal`)に溜まる
+ * ② 止めずにタブを閉じる(= 落ちる)→ 同じ origin で開き直す
+ * ③ ステータスバーに静かな 1 行が出て、システムのメッセージに 1 件残っている
+ * ④ 押して「復元する」→ 添付になって再生でき、控えは空になる
+ * ⚠ 止めて普通に取り込んだ回は、控えが残らない(下の対照群)。
+ */
+test('🔴 録音の途中でタブが落ちても、開き直すと復元できる(途中保存)', async ({ page, context }) => {
+  test.setTimeout(90_000);
+  const journal = (p: Page): Promise<{ chunks: number; metas: number }> =>
+    p.evaluate(
+      () =>
+        new Promise<{ chunks: number; metas: number }>((resolve) => {
+          const req = indexedDB.open('pkc3-capture-journal');
+          req.onerror = () => resolve({ chunks: -1, metas: -1 });
+          req.onupgradeneeded = () => {
+            // 無かった(まだ作られていない)── 作らずに 0 件として返す
+            req.transaction?.abort();
+            resolve({ chunks: 0, metas: 0 });
+          };
+          req.onsuccess = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains('chunks')) {
+              db.close();
+              resolve({ chunks: 0, metas: 0 });
+              return;
+            }
+            const t = db.transaction(['chunks', 'meta'], 'readonly');
+            const c = t.objectStore('chunks').count();
+            const m = t.objectStore('meta').count();
+            t.oncomplete = () => {
+              db.close();
+              resolve({ chunks: c.result, metas: m.result });
+            };
+          };
+        }),
+    );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]').fill('# 途中保存');
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  // 対照群: 起動しただけでは、復元の入口は出ていない
+  const entry = page.locator('[data-pkc-region="status"] [data-pkc-field="status-capture-recovery"]');
+  await expect(entry, '録っていないのに復元の入口が出ている').toBeHidden();
+
+  // ① 録る → 断片が溜まる
+  await clickReal(page, '[data-pkc-field="start-audio-capture"]');
+  await expect(page.locator('[data-pkc-field="capture-status"]')).toContainText('録音中');
+  await expect
+    .poll(async () => (await journal(page)).chunks, { message: '録っているのに途中保存が溜まらない', timeout: 15_000 })
+    .toBeGreaterThanOrEqual(2);
+  await expect(page.locator('[data-pkc-field="capture-status"]'), '書けているのに帯に「途中保存できていません」').not.toContainText('途中保存できていません');
+
+  // ② 止めずに落ちる
+  await page.close({ runBeforeUnload: false });
+  const next = await context.newPage();
+  const nextErrors = collectPageErrors(next);
+  await next.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(next);
+
+  // ③ 静かな 1 行 + システムのメッセージ
+  const entry2 = next.locator('[data-pkc-region="status"] [data-pkc-field="status-capture-recovery"]');
+  await expect(entry2, '開き直しても復元の入口が出ない').toBeVisible({ timeout: 15_000 });
+  await expect(entry2).toContainText('途中で終わった録音・録画');
+  await expect(
+    next.locator('[data-pkc-region="status"] [data-pkc-field="status-messages"]'),
+    'システムのメッセージに残っていない(未読)',
+  ).toBeVisible();
+
+  // ④ 復元する
+  await clickReal(next, '[data-pkc-field="status-capture-recovery"]');
+  const dialog = next.locator('[data-pkc-region="app-dialog"]');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('[data-pkc-field="dialog-ok"]')).toHaveText('復元する');
+  await clickReal(next, '[data-pkc-field="dialog-ok"]');
+  await expect(entry2, '復元したのに入口が残っている').toBeHidden({ timeout: 15_000 });
+  await clickReal(next, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  const rows = next.locator('[data-pkc-capture]');
+  await expect(rows, '復元した録音が一覧に出ていない').toHaveCount(1, { timeout: 15_000 });
+  await clickReal(next, '[data-pkc-field="capture-play"]');
+  const player = next.locator('[data-pkc-capture] [data-pkc-field="capture-media"]');
+  await expect(player).toHaveCount(1);
+  await expect
+    .poll(() => player.evaluate((el: HTMLMediaElement) => el.readyState), { message: '復元した録音が読めない' })
+    .toBeGreaterThanOrEqual(1);
+  await expect.poll(async () => await journal(next), { message: '復元したのに控えが残っている' }).toEqual({ chunks: 0, metas: 0 });
+
+  // 対照群: 普通に止めた録音は、控えが残らない(⚠ 録るにはノートを開いておく)
+  await createEntry(next, 'text');
+  await clickReal(next, '[data-pkc-region="editor-live"]');
+  await next.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]').fill('# 対照');
+  await next.keyboard.press('Tab');
+  await clickReal(next, '[data-pkc-action="commit-edit"]');
+  await clickReal(next, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await clickReal(next, '[data-pkc-field="start-audio-capture"]');
+  await expect(next.locator('[data-pkc-field="capture-status"]')).toContainText(/約 [1-9]/, { timeout: 15_000 });
+  await clickReal(next, '[data-pkc-field="stop-capture"]');
+  await expect(rows).toHaveCount(2, { timeout: 15_000 });
+  await expect.poll(async () => await journal(next), { message: '止めて取り込んだのに控えが残っている' }).toEqual({ chunks: 0, metas: 0 });
+  expect(nextErrors, `page error: ${nextErrors.join(' / ')}`).toEqual([]);
+});
