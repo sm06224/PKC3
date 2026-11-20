@@ -56,7 +56,7 @@ export const CAPTURE_JOURNAL_FREE_FLOOR_BYTES = 64 * 1024 * 1024;
 /** 途中保存の状態。`active` 以外は「守られていない」。 */
 export type JournalState = 'active' | 'off-cap' | 'off-error' | 'off-space';
 
-/** 収録の帯に足す字(`active` なら空)。⚠ 1 か所(帯・知らせで綴りを分けない)。 */
+/** 収録のバーに足す字(`active` なら空)。⚠ 1 か所(帯・知らせで綴りを分けない)。 */
 export function journalBarNote(state: JournalState): string {
   return state === 'active' ? '' : '途中保存できていません';
 }
