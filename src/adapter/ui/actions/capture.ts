@@ -468,7 +468,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       // 🔴 控えから読み戻す預かり(メモリには持たない)
       queue.push(async () => {
         const read = deps.readJournal;
-        let back: Blob | null = null;
+        let back: Blob | null;
         try {
           back = read === undefined ? null : await read(src.jr.id, src.seg);
         } catch {
