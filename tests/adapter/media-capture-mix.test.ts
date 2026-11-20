@@ -9,8 +9,8 @@
  * 4. 250MB の切り分けでも**同じ混ぜた stream**を使い、`AudioContext` を作り直さない
  */
 /** @vitest-environment happy-dom */
-import { describe, expect, it } from 'vitest';
-import { startCapture, type CaptureDeps } from '../../src/adapter/platform/media-capture';
+import { describe, expect, it, vi } from 'vitest';
+import { MIC_WAIT_MS, startCapture, type CaptureDeps } from '../../src/adapter/platform/media-capture';
 
 type FTrack = MediaStreamTrack & { fire: () => void; stopped: () => boolean };
 function track(kind: 'audio' | 'video'): FTrack {
@@ -351,5 +351,110 @@ describe('退避', () => {
     };
     await expect(start(s2)).rejects.toThrow();
     expect(n).toBe(1);
+  });
+});
+
+describe('🔴 AudioContext が suspended で作られる', () => {
+  it('resume で動けば混ぜる(resume を呼ぶ)', async () => {
+    const s = setup({ ctx: { initial: 'suspended', resume: 'ok' } });
+    await start(s);
+    expect(s.ac.made()[0]!.resumed).toBe(1);
+    expect(s.rec.streams[0]!.getAudioTracks()).toEqual([s.ac.made()[0]!.destTrack]);
+  });
+
+  it('resume が動かさない / 拒否: 混ぜず共有の音のまま録り、マイクと混ぜ場は止め、知らせ 1 度', async () => {
+    for (const resume of ['stay', 'reject'] as const) {
+      const s = setup({ ctx: { initial: 'suspended', resume } });
+      const { h, notices } = await start(s);
+      expect(s.rec.streams[0]).toBe(s.display);
+      expect(s.ac.made()[0]!.closed).toBe(1);
+      expect(s.micTrack.stopped()).toBe(true);
+      expect(notices.length).toBe(1);
+      await h.stop();
+    }
+  });
+
+  it('共有に音が無ければ混ぜ場を使わないので、suspended でもマイクを直接録る', async () => {
+    const s = setup({ displayAudio: false, ctx: { initial: 'suspended', resume: 'reject' } });
+    await start(s);
+    expect(s.rec.streams[0]!.getAudioTracks()).toEqual([s.micTrack]);
+  });
+});
+
+describe('🔴 マイクの許可を待つ間に共有が止められた', () => {
+  it('待つ間に ended が来た: 録り始めず、マイク・共有を全部止めて断る', async () => {
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const s = setup({ micGate: gate });
+    const p = start(s);
+    const settled = expect(p).rejects.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+    s.dv.fire(); // 許可の確認中に「共有を停止」
+    open();
+    await settled;
+    expect(s.rec.streams.length).toBe(0);
+    for (const t of [s.dv, s.da, s.micTrack]) expect(t.stopped()).toBe(true);
+  });
+
+  it('ended の通知は無いが readyState が ended: 同じく断る', async () => {
+    const s = setup({});
+    (s.dv as unknown as { readyState: string }).readyState = 'ended';
+    await expect(start(s)).rejects.toThrow();
+    expect(s.rec.streams.length).toBe(0);
+    for (const t of [s.dv, s.da, s.micTrack]) expect(t.stopped()).toBe(true);
+  });
+});
+
+describe('⚠ 使わないマイクはその場で止める', () => {
+  it('マイクを使わない計画(display)の回: マイクは録画中でも止まっている', async () => {
+    // 共有に音あり + AudioContext 無し → plan は display(マイクは使わない)
+    const s = setup({ noAC: true });
+    const { h } = await start(s);
+    expect(s.micTrack.stopped()).toBe(true);
+    await h.stop();
+  });
+  it('混ぜる回のマイクは録画中は止めない', async () => {
+    const s = setup({});
+    const { h } = await start(s);
+    expect(s.micTrack.stopped()).toBe(false);
+    await h.stop();
+  });
+});
+
+describe('⚠ マイクの許可の確認は 15 秒まで', () => {
+  it('放置されたら使えない扱い: 共有の音だけで始め、知らせ 1 度。遅れて届いたマイクは止める', async () => {
+    vi.useFakeTimers();
+    try {
+      let open!: () => void;
+      const gate = new Promise<void>((r) => (open = r));
+      const s = setup({ micGate: gate });
+      const p = start(s);
+      await vi.advanceTimersByTimeAsync(MIC_WAIT_MS + 1);
+      const { h, notices } = await p;
+      expect(s.rec.streams[0]).toBe(s.display);
+      expect(notices.length).toBe(1);
+      expect(notices[0]).toContain('マイクが使えない');
+      expect(s.micTrack.stopped()).toBe(false);
+      open(); // 遅れて許可された
+      await vi.advanceTimersByTimeAsync(0);
+      expect(s.micTrack.stopped()).toBe(true);
+      await h.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('期限内に返れば普通に混ぜる', async () => {
+    vi.useFakeTimers();
+    try {
+      const s = setup({});
+      const p = start(s);
+      await vi.advanceTimersByTimeAsync(0);
+      await p;
+      expect(s.rec.streams[0]!.getAudioTracks()).toEqual([s.ac.made()[0]!.destTrack]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
