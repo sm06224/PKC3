@@ -13,6 +13,8 @@ import { join, resolve } from 'node:path';
 import { codeOnly as stripComments } from './helpers/code-only';
 // ⚠ 配色の正本(#718)── `index.html` の inline script が持つ写しを突き合わせる
 import { THEMES, THEME_STORAGE_KEY, initialTheme, resolveTheme } from '../src/adapter/ui/render/theme';
+import { ACCENTS } from '../src/features/appearance-choice';
+import { ACCENT_STORAGE_KEY } from '../src/adapter/ui/render/appearance-choice';
 import { readReducerSource } from './helpers/reducer-source';
 
 /**
@@ -1720,6 +1722,35 @@ describe('\u{1f534} 起動より前に配色を当てる(#718)', () => {
       expect(run('nosuchtheme', prefersDark)).toBe(initialTheme(prefersDark));
       expect(run('auto', prefersDark)).toBe(resolveTheme('auto', prefersDark));
     }
+  });
+
+  /**
+   * 🔴 **明暗(`data-pkc-tone`)とアクセント(`data-pkc-accent`)も先に立てる**(#1982 段 4)── 起動後に当てると、
+   *   選んだアクセントの人にだけ既定色が 1 コマ出る。暗い配色の一覧とアクセントの id は `theme.ts` /
+   *   `appearance-choice.ts` の写しなので、全配色・全アクセントを**走らせて**実装と突き合わせる。
+   */
+  it('🔴 走らせた tone / accent が applyTheme / applyAccent と一致する(全配色・全アクセント・壊れた値)', () => {
+    const run = (theme: string, accent: string | null): Map<string, string> => {
+      const attrs = new Map<string, string>();
+      const doc = { documentElement: { setAttribute: (k: string, v: string) => void attrs.set(k, v) } };
+      const store = new Map<string, string>([[THEME_STORAGE_KEY, theme]]);
+      if (accent !== null) store.set(ACCENT_STORAGE_KEY, accent);
+      new Function('localStorage', 'matchMedia', 'document', bootScript())(
+        { getItem: (k: string) => store.get(k) ?? null },
+        () => ({ matches: false }),
+        doc,
+      );
+      return attrs;
+    };
+    expect(THEMES.some((t) => t.dark === true), '前提: 暗い配色が無い').toBe(true);
+    for (const t of THEMES) {
+      expect(run(t.id, null).get('data-pkc-tone'), `${t.id} の tone`).toBe(t.dark === true ? 'dark' : 'light');
+    }
+    const accents = ACCENTS.filter((a) => a.id !== 'theme');
+    expect(accents.length, '前提: アクセントが無い').toBeGreaterThan(0);
+    for (const a of accents) expect(run('light', a.id).get('data-pkc-accent'), `${a.id} の accent`).toBe(a.id);
+    // 既定(配色どおり)・壊れた値・保存なしでは属性を立てない
+    for (const none of ['theme', 'nosuch', null]) expect(run('light', none).has('data-pkc-accent')).toBe(false);
   });
 });
 
