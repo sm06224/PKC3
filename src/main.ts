@@ -66,6 +66,7 @@ import { appNotePins } from '@adapter/platform/note-pin-store';
 import { appNoteLabels } from '@adapter/platform/note-label-store';
 import { appPasteToast } from '@adapter/ui/render/paste-toast';
 import { importNotePinsInto } from '@adapter/platform/note-pin-import';
+import { importNoteLabelsInto } from '@adapter/platform/note-label-import';
 import { migrateLegacyNotePins } from '@adapter/platform/note-pin-migration';
 import { MAX_NOTE_PINS } from '@features/relation/note-pins';
 import {
@@ -3767,15 +3768,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        */
       /** 🔴 **バックアップの色ラベルを戻す**(#1982 段 4)。⚠ いま付いている色は動かさず、付いていないノートの分だけ足す。 */
       importNoteLabels: async (incoming) => {
-        const now = new Set((await client.request({ op: 'listNoteLabels', cid })).map((e) => e.lid));
-        let added = 0;
-        for (const e of incoming) {
-          if (now.has(e.lid) || !dispatcher.getState().entryMetas.has(e.lid)) continue;
-          await client.request({ op: 'putNoteLabel', cid, lid: e.lid, color: e.color });
-          added += 1;
-        }
+        const r = await importNoteLabelsInto(incoming, {
+          listLids: async () => (await client.request({ op: 'listNoteLabels', cid })).map((e) => e.lid),
+          put: (lid, color) => client.request({ op: 'putNoteLabel', cid, lid, color }).then(() => undefined),
+          exists: (l) => dispatcher.getState().entryMetas.has(l),
+        });
         await reloadNoteLabels();
-        return { added };
+        return r;
       },
       importNotePins: async (lids) => {
         const r = await importNotePinsInto(lids, {
