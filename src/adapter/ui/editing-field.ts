@@ -42,13 +42,15 @@ export type EditingFeature =
   /** 括弧の自動補完(`autoPairFor`)。⚠ 1 画面の行は `row-swap.ts` が持つ。追記の欄は打ち込みの補助を持たない。 */
   | 'autoPair'
   /** 書式のバー(ボタンの帯)が付く欄。⚠ 追記の欄はバーを持たず、キーだけ(user 裁定 2026-11-21)。 */
-  | 'formatBar';
+  | 'formatBar'
+  /** 字を選んで括弧・引用符・`*` `_` を打つと囲む(`wrapSelection`。#2001 段 3)。⚠ 追記の欄も持つ(補完は持たないが囲むのは持つ)。 */
+  | 'wrapSelection';
 
 export const EDITING_FIELD_FEATURES: Readonly<Record<EditingFieldKind, Readonly<Record<EditingFeature, boolean>>>> = {
-  editor: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true },
-  row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: true },
-  section: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: false },
-  append: { enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: false },
+  editor: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true },
+  row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: true, wrapSelection: true },
+  section: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: false, wrapSelection: true },
+  append: { enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: false, wrapSelection: true },
 };
 
 /** 欄の名前 → 種類。本文を書く欄でなければ `null`。 */

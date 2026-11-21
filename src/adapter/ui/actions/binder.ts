@@ -102,6 +102,8 @@ import { alignMdTable } from '@features/markdown/table-align';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { indentLines } from '@features/markdown/indent-assist';
 import { swapLines } from '@features/markdown/line-swap';
+import { cycleHeading, deleteLines, duplicateLines } from '@features/markdown/line-edit';
+import { wrapSelection } from '@features/markdown/wrap-selection';
 import { TIDY_NOTES, tidySelection, type TidyOp } from '@features/markdown/text-tidy';
 import { tableOnTab } from '@features/markdown/table-assist';
 import { hasNumberedItems, renumberLists } from '@features/markdown/list-renumber';
@@ -20447,6 +20449,19 @@ const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: 
   'move-line-down': (ta, notify) => {
     if (!runSwap(ta, 1)) notify(swapRefusedNote(ta));
   },
+  /** 🔴 行の複製・削除・見出しの段の巡回(#2001 段 3)── 当て方は `runLineEdit` 1 か所。 */
+  'duplicate-line-up': (ta) => {
+    runLineEdit(ta, duplicateLines(sel3(ta), -1));
+  },
+  'duplicate-line-down': (ta) => {
+    runLineEdit(ta, duplicateLines(sel3(ta), 1));
+  },
+  'delete-line': (ta, notify) => {
+    if (!runLineEdit(ta, deleteLines(sel3(ta)))) notify('消す行がありません');
+  },
+  'cycle-heading': (ta) => {
+    runLineEdit(ta, cycleHeading(sel3(ta)));
+  },
   /**
    * 🔴 **カーソルの在る表の列幅を揃える**(#1171)。
    * ⚠ 書くのは `insertText`(取り消しの履歴を切らない ── #765)。表の行だけを
@@ -20554,6 +20569,26 @@ function runIndent(ta: HTMLTextAreaElement, dir: 1 | -1, explicit: boolean): boo
   return true;
 }
 
+function sel3(ta: HTMLTextAreaElement): { text: string; start: number; end: number } {
+  return { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+}
+
+/**
+ * 🔴 **行の複製・削除・見出しの段の巡回を欄へ当てる、唯一の口**(#2001 段 3)。
+ * ⚠ 書くのは `insertText`(= `execCommand`)で**変わる行の範囲だけ** ── `Ctrl+Z` で戻る(`runSwap` と同じ作法)。
+ * @returns 何か書いたら `true`(`null` = 消す行が無い)
+ */
+function runLineEdit(
+  ta: HTMLTextAreaElement,
+  res: { from: number; to: number; insert: string; start: number; end: number } | null,
+): boolean {
+  if (res === null) return false;
+  ta.setSelectionRange(res.from, res.to);
+  insertText(ta, res.insert);
+  ta.setSelectionRange(res.start, res.end);
+  return true;
+}
+
 /**
  * 🔴 **行の入れ替えを欄へ当てる、唯一の口**(#1213)── 鍵(`Alt+↑` / `Alt+↓`)・
  * 「操作を探す」の両方が同じ関数を通る(§7)。
@@ -20591,7 +20626,15 @@ const INDENT_COMMANDS: ReadonlyMap<string, 1 | -1> = new Map([
 ]);
 
 /** 行の入れ替えの 2 命令(#1213)。字下げと同じく、1 面の行の欄はこの 2 つも `EDITOR_RUN` を通す。 */
-const SWAP_COMMANDS: ReadonlySet<string> = new Set(['move-line-up', 'move-line-down']);
+const SWAP_COMMANDS: ReadonlySet<string> = new Set([
+  'move-line-up',
+  'move-line-down',
+  // 🔴 #2001 段 3: 行の複製・削除・見出しの段の巡回も、1 画面の行の欄で同じ門を通る
+  'duplicate-line-up',
+  'duplicate-line-down',
+  'delete-line',
+  'cycle-heading',
+]);
 
 /** 🔑 画面のボタンの字(「全文を編集」)を引いて書く ── `detail.ts` の編集ボタンと同じ字。 */
 const ALIGN_TABLE_LIVE_NOTE = '表の列幅を揃えるには、「全文を編集」に切り替えてください';
@@ -22028,6 +22071,28 @@ export function bindActions(
       // 🔴 書式・行の入れ替え・字下げの鍵・日時・計算・整える操作は本文の欄と同じ口(#2001 段 2)
       if (fieldHas(field, 'keys') && ke.target instanceof HTMLTextAreaElement && runEditingKey(ke, ke.target, appendCmd, (t) => services.showStatus?.(t))) {
         return;
+      }
+      /**
+       * 🔴 **字を選んで括弧・引用符・`*` `_` を打つと囲む**(#2001 段 3)。追記の欄は括弧の自動補完(`autoPair`)を持たないので、
+       *   囲む操作だけをここで受ける(本文・章の欄は `pairOnKeydown`、1 画面の行は `row-swap.ts` が同じ `wrapSelection` を通る)。
+       * ⚠ 変換中は上の `isComposing` の門で弾き済み。`Ctrl` / `Cmd` 付きは字ではない(`Alt` 併用は AltGr の字)。
+       */
+      if (
+        fieldHas(field, 'wrapSelection') &&
+        ke.target instanceof HTMLTextAreaElement &&
+        ke.key.length === 1 &&
+        !((ke.ctrlKey || ke.metaKey) && !ke.altKey)
+      ) {
+        const w = wrapSelection(
+          { text: ke.target.value, start: ke.target.selectionStart, end: ke.target.selectionEnd },
+          ke.key,
+        );
+        if (w !== null) {
+          ke.preventDefault();
+          insertText(ke.target, w.insert);
+          ke.target.setSelectionRange(w.start, w.end);
+          return;
+        }
       }
       /**
        * 🔴 **追記欄の `Tab` はリストの行・複数行の選択のときだけ字下げ**(#2001 段 2 = user 裁定 4)。
