@@ -126,6 +126,9 @@ export const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   'linkMentions',
   // ⚠ **足し忘れると、他タブの本文が引き継ぐ前のまま残る**(#1966 4-4)── 前の日と今日の 2 冊を書き換える
   'carryOverTasks',
+  // ⚠ **足し忘れると、他タブの一覧が古いまま残る**(#2000 段 2)── 差分の取り込みと取り消しは何件ものノートを書き換える(当たり先は null = 全面の読み直し)
+  'syncApply',
+  'syncUndo',
 ]);
 
 /**
@@ -147,6 +150,11 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'deleteWorkspace',
   // システムのメッセージはノートの一覧に出ない。知らせのたびに他タブを読み直させない
   'appendMessage',
+  // 端末間の同期(#2000 段 2)── 入 / 切を worker に教えるだけ・現在の指紋を読むだけ・書き出し前に連番を進めるだけ(ノートは動かない)
+  'syncConfigure',
+  'syncSnapshot',
+  'syncCommitExport',
+  'syncSeed',
   // 中身を消す操作は、他タブへは onContainerWiped で知らせる
   'wipeStorage',
   // 中身を変えない保守(救出の読み出し / 詰め直し / 索引の作り直し / 検査の記録)

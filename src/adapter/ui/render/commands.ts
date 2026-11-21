@@ -53,7 +53,7 @@ export interface CollectionCommand {
    * 🔴 ブラウザにこの機能が無いときは、**ボタンごと出さない**(押しても何も起きない物を置かない)。
    * 今は `'folder-write'`(`showDirectoryPicker` ── Chrome / Edge だけ。Firefox / Safari は無い)。
    */
-  readonly needs?: 'folder-write';
+  readonly needs?: 'folder-write' | 'sync';
 }
 
 /**
@@ -166,6 +166,24 @@ export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
     title:
       '押すとフォルダを選ぶウィンドウが開きます。選んだフォルダの中に新しいフォルダを作り、1 ノート = 1 つの .md で並べます(添付は assets に入ります)。もとからあるファイルは書き換えません。自動では同期されません',
     needs: 'folder-write',
+  },
+  /**
+   * 🔴 **端末間の同期(#2000 段 2)── 設定「端末間の同期」が入のときだけ出す**(`needs: 'sync'`)。「書き出す ▾」の中(副次の操作)。
+   * ⚠ 切のときはボタンごと出さない(入口が無い。取り込みは断り、設定の場所を言う)。
+   */
+  {
+    action: 'export-sync-diff',
+    label: '差分を書き出す',
+    title:
+      '別の端末と同期するための差分ファイル(.pkc3-diff.zip)を書き出します。前回の同期から変わったノート・削除・添付だけが入ります(通信はしません)',
+    needs: 'sync',
+  },
+  {
+    action: 'export-sync-diff-all',
+    label: '差分を書き出す(全件)',
+    title:
+      '全部のノートを入れた差分ファイル(.pkc3-diff.zip)を書き出します。初めて同期する端末や、しばらく同期していない端末へ渡すときに使います',
+    needs: 'sync',
   },
   /**
    * 🔴 **構成をテキストでコピー**(#429 段①)── AI に整理を頼むための材料。

@@ -114,6 +114,7 @@ export const MESSAGE_SOURCE_LABEL: Readonly<Record<string, string>> = {
   quota: '保存領域の空き',
   storage: '保存先',
   notice: 'お知らせ',
+  sync: '端末間の同期',
   schedule: '予定',
   draft: '保存していない編集',
   'capture-journal': '録音・録画の途中保存',

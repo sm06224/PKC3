@@ -234,6 +234,8 @@ import type { StartupIntegrityOutcome } from '@features/storage/integrity-schedu
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口は 1 個(設計 doc §7、段②a。CLAUDE.md §7)
 import { appMessagePost, READ_AT_KEY } from '@adapter/platform/message-post';
+import { appSyncEnabled } from '@adapter/ui/render/sync-enabled';
+import { backupSyncSeed, exportSyncDiff, importSyncDiff, seedSyncFromBackup, type SyncDeps } from '@adapter/ui/actions/sync-diff';
 import { connectMessageSync, MESSAGES_CHANNEL } from '@adapter/platform/message-sync';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
 import { appWorkspaces } from '@adapter/platform/storage/workspace-run';
@@ -1387,6 +1389,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     cid,
     appendMessage: (req) => client.request({ op: 'appendMessage', ...req }),
   });
+  /**
+   * 🔴 **端末間の同期(#2000 段 2)の入 / 切を worker に教える**。⚠ 入のときだけ、ノートを消すと削除の記録を残す
+   * (切の間は同期の行を 1 本も書かない)。起動時・切り替え時・メインのタブに昇格して新しい worker になったときに送る。
+   */
+  const configureSync = (): void => {
+    void client.request({ op: 'syncConfigure', enabled: appSyncEnabled.enabled() }).catch(() => {});
+  };
+  configureSync();
   /**
    * 🔴 **job の束ねを、閉じる前に必ず流す**(設計 doc §7、段②b)。
    * ⚠ `beforeunload` だけに頼らない ── モバイルでは飛ばないことがある。
@@ -3062,6 +3072,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           writerHolder = true;
           // 🔴 昇格の間に届いた Office の保存を拾う(#1087)── 届いたときは本体でなく黙って見送られ、棚に残っている
           void officeSaveBack.drainAll().catch(() => 0);
+          // 🔴 新しい worker は端末間の同期の入 / 切を知らない(#2000 段 2)── 教え直す
+          configureSync();
           // 🔴 メインになったので、ブラウザの AI へ道具を渡す(flag がオンのときだけ。#1407)
           agentRegistration.sync(true);
           /**
@@ -3250,6 +3262,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           listNotePins: () => client.request({ op: 'listNotePins', cid }),
           // 🔴 色ラベルも運ぶ(#1982 段 4)。部分の書き出しは含むノートの分に絞る
           listNoteLabels: () => client.request({ op: 'listNoteLabels', cid }),
+          // 🔴 同期の種の指紋(#2000 段 2)── 設定がオンのときの全体のバックアップだけ。書き出す時点の指紋
+          syncSeed: async () => backupSyncSeed({ cid, enabled: () => appSyncEnabled.enabled(), request: (req) => client.request(req) }),
           listRevisionLids: () =>
             client.request({ op: 'listRevisionLids', cid }),
           // 🔴 ゴミ箱のノートも運ぶ(台帳 #1852 束 F2 / 依頼 105-2・297 A)── 全体のバックアップだけ(部分の書き出しの源は持たない)
@@ -3718,9 +3732,51 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
   });
 
+  /**
+   * 🔴 **端末間の同期(#2000 段 2)の書き出し・取り込みの配線**。判断は `sync-diff.ts` と `features/sync/`、ここは口を渡すだけ。
+   * ⚠ ワークスペースの題名は DB に問う(差分ファイルの対応づけと確認の文に出す)。
+   */
+  const syncDeps = async (): Promise<SyncDeps> => {
+    const ws = await client.request({ op: 'listWorkspaces' }).catch(() => null);
+    const wsTitle = ws?.workspaces.find((w) => w.cid === cid)?.title ?? CONTAINER_TITLE;
+    return {
+      cid,
+      title: () => wsTitle,
+      enabled: () => appSyncEnabled.enabled(),
+      request: (req) => client.request(req),
+      settle: async () => {
+        await storeEffects?.settled();
+      },
+      getAssetBlob: (key) => blobs.get(cid, key),
+      listStoredBlobKeys: async () => new Set(await blobs.listKeys(cid)),
+      putBlob: (key, blob) => blobs.put(cid, key, blob),
+      putAssetMeta: async (m) => {
+        await client.request({ op: 'putAssetMeta', cid, meta: m });
+      },
+      download: downloadBlob,
+      notify: (message) => showStatus(message),
+      report: (notes) => {
+        const panel = importPanel(notes, importUndo.pending());
+        showNotices(regions.notices, panel.title, notes, panel.action);
+      },
+      reportProblem: (message) => showNotices(regions.notices, '端末間の同期の注意', [message]),
+      // 🔴 書き出しの結果に、前の取り込みの「取り込みを取り消す」を出さない(別の回の操作を巻き込まない)
+      reportExport: (notes) => showNotices(regions.notices, '差分の書き出し', notes),
+      reload: () => reloadSnapshot(dispatcher, cid, loadSnapshot),
+      confirmAction: (message) => ask(message, { okLabel: '取り込む', cancelLabel: 'やめる' }),
+      genLid: generateLid,
+      rememberUndo: (info) => importUndo.rememberCustom(info),
+      postMessage: (m) => appMessagePost.post(m),
+    };
+  };
+
   const importDeps: ImportDeps = {
       // 🔴 取り込みの最中にタブを閉じる・読み直すときに「離れますか」を出す(書込は保存の効果層を通らない)
       onWriting: (writing) => unloadGuard.setWriting(writing, 'import'),
+      // 🔴 端末間の同期の差分ファイル(#2000 段 2)── 設定が切のときの断りも実体側が言う
+      importSyncDiff: async (file) => importSyncDiff(await syncDeps(), file, file.name),
+      // 🔴 バックアップに添えられた同期の種(#2000 段 2)── 設定がオンのときだけ記録にする
+      seedSync: async (seed, keptLids) => seedSyncFromBackup({ cid, enabled: () => appSyncEnabled.enabled(), request: (req) => client.request(req) }, seed, keptLids),
       // 🔴 バックアップの取り込みを途中でやめる(依頼 253)── 印と欄は `job-control.ts`。やめたときの取り消しは取り込みの取り消しと同じ道
       job: jobs,
       undoImport: () => importUndo.undo(),
@@ -4769,6 +4825,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appVoiceBoost.setCrossfeedEnabled(on);
       appVoiceBoostRouter.refresh();
     },
+    setSyncEnabled: (on) => {
+      appSyncEnabled.setEnabled(on);
+      configureSync();
+      showStatus(on ? '端末間の同期をオンにしました。コレクションの「書き出す ▾」に「差分を書き出す」が出ます' : '端末間の同期をオフにしました');
+    },
+    exportSyncDiff: (all) => void withAssetGate(async () => exportSyncDiff(await syncDeps(), { all })),
     setAlarmEnabled: (on) => {
       appAlarmEnabled.setEnabled(on);
       // 🔴 切入の直後に 1 度見る(#1087)── 入にした時刻から見る / 切にしたら見た位置を忘れる。次の刻み(最大 30 秒)を待たない

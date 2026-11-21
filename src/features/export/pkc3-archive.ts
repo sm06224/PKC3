@@ -36,6 +36,7 @@ import { parseTagColorList, type TagColorEntry } from '../tag-color';
 import { normalizePinLids } from '../relation/note-pins';
 import { labelsFor, normalizeNoteLabels, type NoteLabelEntry } from '../note-label';
 import { safeName } from './file-name';
+import { parseSyncSeed, type SyncSeed } from '../sync/sync-seed';
 
 export const ARCHIVE_FORMAT = 'pkc3-archive';
 /**
@@ -218,6 +219,11 @@ export interface ArchiveSource {
    * 留めた順の lid が `container.json` の `notePins` に入る(書き出すノートに在るものだけ)。旧ビルドは知らないキーとして読み飛ばす。
    */
   listNotePins?(): Promise<string[]>;
+  /**
+   * 🔴 **同期の種の指紋**(#2000 段 2。設計 doc §12.1 の約束 2)。⚠ 任意 ── 設定「端末間の同期」がオンのときの**全体のバックアップ**だけが渡す
+   * (無い源・オフのときは `null` / 省略 = 1 バイトも変えない)。`container.json` の `syncSeed`。書き出す**時点**の指紋であること。
+   */
+  syncSeed?(): Promise<SyncSeed | null>;
   /** 🔴 **ノートの色ラベル**(#1982 段 4)。⚠ 任意。`container.json` の `noteLabels`(書き出すノートに在る分だけ)。 */
   listNoteLabels?(): Promise<NoteLabelEntry[]>;
   listRevisionLids(): Promise<string[]>;
@@ -481,7 +487,9 @@ export async function writeArchive(
   // 🔴 色ラベル(#1982 段 4)── 書き出すノート + 書いたゴミ箱のノートに在るものだけ(部分の書き出しはゴミ箱を書かない)。
   //   ゴミ箱のノートの色を落とすと、バックアップから戻したあとゴミ箱から戻したノートの色が消える。1 つも無ければキーごと書かない
   const noteLabels = labelsFor((await src.listNoteLabels?.()) ?? [], new Set([...exportedLids, ...trashParts.lids]));
-  parts.push(noteLabels.length > 0 ? `,"noteLabels":${j(noteLabels)}}` : '}');
+  // 🔴 同期の種(#2000 段 2)── 無ければキーごと書かない(今までと 1 バイトも変えない)
+  const seed = (await src.syncSeed?.()) ?? null;
+  parts.push((noteLabels.length > 0 ? `,"noteLabels":${j(noteLabels)}` : '') + (seed !== null ? `,"syncSeed":${j(seed)}` : '') + '}');
 
   const w = new ZipWriter();
   await w.add(
@@ -634,6 +642,8 @@ export interface Pkc3Archive {
   notePins: string[];
   /** ノートの色ラベル(#1982 段 4)。無いバックアップ・読めない行は空 / 落とす。 */
   noteLabels: NoteLabelEntry[];
+  /** 同期の種の指紋(#2000 段 2)。無いバックアップ・読めない物は `null`。⚠ 任意(PKC3 入り HTML の取り込みは持たない)。 */
+  syncSeed?: SyncSeed | null;
   /** 🔴 ゴミ箱のノート(台帳 #1852 束 F2)。無いバックアップ(旧い版が書いた物・ゴミ箱が空だった物)は空。 */
   trash: ArchiveTrashNote[];
   /** ゴミ箱のノートに触るつながり。 */
@@ -732,6 +742,8 @@ export interface ArchiveContainerJson {
   /** ノートのピン留め(#1377)。lid の並び。 */
   notePins?: unknown;
   noteLabels?: unknown;
+  /** 同期の種(#2000 段 2)。 */
+  syncSeed?: unknown;
   /** 🔴 ゴミ箱のノート(台帳 #1852 束 F2)。旧い版が書いた物には無い。 */
   trash?: ArchiveTrashNote[];
   trashRelations?: ArchiveRelation[];
@@ -804,6 +816,7 @@ export function assembleArchive(
     tagColors: colors.list,
     notePins: normalizePinLids(c.notePins),
     noteLabels: normalizeNoteLabels(c.noteLabels),
+    syncSeed: parseSyncSeed(c.syncSeed),
     trash: Array.isArray(c.trash) ? c.trash : [],
     trashRelations: Array.isArray(c.trashRelations) ? c.trashRelations : [],
     trashRevisions: Array.isArray(c.trashRevisions) ? c.trashRevisions : [],
@@ -894,6 +907,8 @@ export function restoreArchive(
   notePins: string[];
   /** 取り込む色ラベル(#1982 段 4)。⚠ 付け替えた lid は写し済み。取込側は足りない分だけ足す。 */
   noteLabels: NoteLabelEntry[];
+  /** 同期の種(#2000 段 2)。取り込み側が `seedFromBackup` で記録にする(付け替えた lid は除く)。 */
+  syncSeed: SyncSeed | null;
   /**
    * 🔴 **付け替えた lid**(旧 → 新。変わった組だけ)。本文の `entry:<lid>` は**ここでは書き換えない** ──
    *   取込側が添付の key と一緒に `remapImportedBody` 1 本で当てる(履歴の鎖にも同じ規則を当てるため。
@@ -1072,5 +1087,5 @@ export function restoreArchive(
   const noteLabels = archive.noteLabels
     .map((e) => ({ lid: lidMap.get(e.lid) ?? e.lid, color: e.color }))
     .filter((e, i, a) => importedWithTrash.has(e.lid) && a.findIndex((x) => x.lid === e.lid) === i);
-  return { entries, relations, assets, trash, revisionChains, tagColors: archive.tagColors, notePins, noteLabels, lidRemap, sourceCid: archive.manifest.cid ?? '', warnings };
+  return { entries, relations, assets, trash, revisionChains, tagColors: archive.tagColors, notePins, noteLabels, syncSeed: archive.syncSeed ?? null, lidRemap, sourceCid: archive.manifest.cid ?? '', warnings };
 }

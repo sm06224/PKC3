@@ -89,6 +89,13 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   'putNotePin',
   // 🔴 色ラベル(#1982 段 4)── `settings` の行を書く。壊れた DB には打たない
   'putNoteLabel',
+  // 🔴 端末間の同期(#2000 段 2)── ノートと同期の記録を書く。壊れた DB には打たない
+  'syncApply',
+  'syncUndo',
+  'syncCommitExport',
+  'syncSeed',
+  // 🔴 現在の指紋を読む(端末 id が無ければ 1 行作る)。問題のある DB から同期の材料を作らない
+  'syncSnapshot',
   // 🔴 メッセージの追記(設計 doc §7、段②a)── 書き込みなので止める。
   //    断られた分は adapter 側の控え(IndexedDB)へ積み、書けるようになった時点で流し込む。
   'appendMessage',

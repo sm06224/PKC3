@@ -56,7 +56,35 @@ import {
 import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescue';
 import { INTEGRITY_STAMP_KEY, INTEGRITY_STAMP_SCOPE } from '@features/storage/integrity-schedule';
 import { MAX_TAG_COLORS, normalizeTagColor } from '@features/tag-color';
-import { SYNC_SCOPE, syncScope } from '@features/sync/sync-state';
+import {
+  advanceSeq,
+  dropRevived,
+  isDeviceId,
+  SYNC_KEY_BASE_PREFIX,
+  SYNC_KEY_DEVICE,
+  SYNC_KEY_PAIR_PREFIX,
+  SYNC_KEY_TOMB_PREFIX,
+  SYNC_SCOPE,
+  syncScope,
+} from '@features/sync/sync-state';
+import {
+  deleteSetting,
+  discardPeerRecords,
+  ensureDevice,
+  getSetting,
+  measureStates,
+  putSetting,
+  readBases,
+  readOuts,
+  readPairs,
+  readSeq,
+  readTombstones,
+  recordDeletion,
+  writeBase,
+  writeOut,
+  writeSeq,
+  type RowRecorder,
+} from './sync-rows';
 import { MAX_NOTE_PINS_STORED } from '@features/relation/note-pins';
 import { isNoteLabelColor, MAX_NOTE_LABELS } from '@features/note-label';
 import {
@@ -183,6 +211,9 @@ import {
   type EncodedChainInput,
   type TrashNoteInput,
   type StorageGauge,
+  type SyncApplyInput,
+  type SyncApplyResult,
+  type SyncUndoToken,
 } from './protocol';
 
 let db: Database | null = null;
@@ -3740,6 +3771,332 @@ function rescueScan(
   };
 }
 
+/**
+ * 🔴 **ノート 1 件をゴミ箱へ移す(tx は呼び側が張る)**。`deleteEntry` と同期の取り込み(`syncApply`)が同じ 1 本を通る。
+ * entry の削除は relations(両向き)を**同 tx**で掃除する(storage
+ * review #8 ── orphan relation を作らない)。revisions は P5 から**消さない**:
+ * 削除直前の行から trash snapshot を同 tx で積み、「entries に居ない
+ * entry_lid の revisions」= ゴミ箱、が復元経路になる(掃除は purgeTrash)。
+ * assets の掃除は body 参照ベースなので asset GC(P4b)
+ */
+function deleteEntryInTx(
+  database: Database,
+  req: { cid: string; lid: string; untouched?: boolean; keepLatest?: number },
+): void {
+  const row = database.selectObjects(
+    'SELECT title, archetype, body, created_at, updated_at, entry_order FROM entries WHERE cid = ? AND lid = ?',
+    [req.cid, req.lid],
+  )[0] as
+    | {
+        title: string;
+        archetype: string;
+        body: string;
+        created_at: string | null;
+        updated_at: string | null;
+        entry_order: number | null;
+      }
+    | undefined;
+  if (row && req.untouched === true) {
+    /**
+     * 🔴 **何も書かれていない作りたてのノートは、ゴミ箱を経由せず行ごと消す**(#1087)。
+     * ⚠ 戻す先の無い物なので、履歴(作成時に積まれた版があれば)も居場所の辺も**同じ tx で**掃除する。
+     *   版を残すと「entries に居ない entry_lid の revisions」= ゴミ箱になり、空のノートが一覧に現れる。
+     */
+    database.exec({
+      sql: 'DELETE FROM revisions WHERE cid = ? AND entry_lid = ?',
+      bind: [req.cid, req.lid],
+    });
+    database.exec({
+      sql: 'DELETE FROM relations WHERE cid = ? AND (from_lid = ? OR to_lid = ?)',
+      bind: [req.cid, req.lid, req.lid],
+    });
+  } else if (row) {
+    // 削除で tip(entries.body)が消えるので、鎖の base を**全文で確定**する。
+    // 頭が既に同内容を記録していれば、その行を全文化するだけでよい
+    // (行 id / content_hash は保つ ── change ID の安定)
+    const hash = contentHash64Hex(row.body);
+    const head = headRevision(database, req.cid, req.lid);
+    if (head && head.content_hash === hash) {
+      // 🔴 **題名と種類も今の値にする**(#1087、ゴミ箱の見直し)── 本文を変えずに改名してから消すと、
+      //   頭の版は**改名前の題名**のままで、ゴミ箱の一覧にも、戻したノートにもその題名が出ていた
+      //   (戻すときの題名はこの行から読む)。改名は本文に触らない口(`renameEntry`)なので、ここで拾う
+      database.exec({
+        sql: `UPDATE revisions SET snapshot = ?, kind = 'full', title = ?, archetype = ?, entry_created_at = ?,
+                     entry_order = ?, entry_updated_at = ? WHERE cid = ? AND id = ?`,
+        bind: [
+          row.body,
+          row.title,
+          row.archetype,
+          row.created_at,
+          row.entry_order === null ? null : String(row.entry_order),
+          row.updated_at,
+          req.cid,
+          head.id,
+        ],
+      });
+    } else {
+      database.exec({
+        sql: `INSERT INTO revisions
+                (cid, id, entry_lid, created_at, rev_order, snapshot,
+                 title, archetype, content_hash, kind, entry_created_at, entry_order, entry_updated_at)
+              VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, 'full', ?, ?, ?)`,
+        bind: [
+          req.cid,
+          `rev-${crypto.randomUUID()}`,
+          req.lid,
+          (head?.rev_order ?? 0) + 1,
+          row.body,
+          row.title,
+          row.archetype,
+          hash,
+          row.created_at,
+          row.entry_order === null ? null : String(row.entry_order),
+          row.updated_at,
+        ],
+      });
+      // 🔴 ゴミ箱へ移すときに足す行の後も刈る(#1087)── 刈らないと「移す → 戻す → 保存」の
+      //   繰り返しで 1 ノートの履歴が上限を超えて育つ。頭(今足した全文)は消えない
+      pruneChain(database, req.cid, req.lid, req.keepLatest ?? DEFAULT_REVISION_KEEP);
+    }
+  }
+  // 🔴 **relations は消さない**(2026-08-05、user 報告の調査で判明)。
+  //
+  // 直す前はここで `from_lid` / `to_lid` の両側を消していた。すると
+  // **ゴミ箱から戻しても居場所が戻らない** ── 子を消して復元すると root へ出て、
+  // フォルダを消して復元すると中身が空になる(実測)。ゴミ箱は「戻せる」ための
+  // 機構なのに、戻すと必ず階層から外れていた。
+  //
+  // ⚠ 残しても**木は壊れない**:`resolveCanonicalParents` は
+  //    「親が metas に実在する folder」でなければ辺を無視するので、
+  //    ゴミ箱の間は子が root に出る(= 従来どおりの見え方)。
+  //    戻せば親が metas に戻り、辺がそのまま効く。
+  // ⚠ 本当に消えるのは `purgeTrash`(そこで参照の切れた行を掃除する)。
+  database.exec({
+    sql: 'DELETE FROM entries WHERE cid = ? AND lid = ?',
+    bind: [req.cid, req.lid],
+  });
+}
+
+/**
+ * 🔴 **端末間の同期(#2000 段 2)── worker 側の反映と取り消し**。
+ *
+ * 設定「端末間の同期」が入のときだけ `syncEnabled` が立つ(`syncConfigure`)。切のとき、ここの書く経路は 1 本も動かない。
+ * 反映(`applySync`)は **1 つの `BEGIN IMMEDIATE` ... `COMMIT`**。途中で 1 件でも落ちたら `ROLLBACK` で何も書かない。
+ * 本文の書き換えは `writeEntryRow` の `checkpoint: true`(前の本文が履歴に残る ── `REIMPORT_BODY` と同じ作法)。
+ * ゴミ箱へ移すのは `deleteEntryInTx`(`deleteEntry` と同じ 1 本。削除の記録も残す)。
+ */
+let syncEnabled = false;
+
+function newStructuralId(): string {
+  return `rel-${crypto.randomUUID()}`;
+}
+
+function structuralParentsOf(database: Database, cid: string, lid: string): Array<{ id: string; from: string }> {
+  return (
+    database.selectObjects("SELECT id, from_lid FROM relations WHERE cid = ? AND to_lid = ? AND kind = 'structural' ORDER BY id", [cid, lid]) as Array<{
+      id: string;
+      from_lid: string;
+    }>
+  ).map((r) => ({ id: r.id, from: r.from_lid }));
+}
+
+type LiveRow = { title: string; archetype: string; body: string; entry_order: number; created_at: string | null };
+
+function liveRow(database: Database, cid: string, lid: string): LiveRow | undefined {
+  return database.selectObjects(`SELECT title, archetype, body, entry_order, created_at FROM entries WHERE cid = ? AND lid = ? AND ${USER_REALM_SQL}`, [cid, lid])[0] as
+    | LiveRow
+    | undefined;
+}
+
+function upsertOf(lid: string, title: string, archetype: string, body: string, entryOrder: number, createdAt: string | null = null): EntryUpsert {
+  const ext = extractMeta(archetype, body);
+  return { lid, title, archetype, body, entryOrder, status: ext.status, date: ext.date, archived: ext.archived, createdAt, updatedAt: null };
+}
+
+function applySync(database: Database, cid: string, input: SyncApplyInput): SyncApplyResult {
+  const prevRows = new Map<string, { scope: string; k: string; prev: string | null }>();
+  const rec: RowRecorder = (scope, k) => {
+    const id = JSON.stringify([scope, k]);
+    if (!prevRows.has(id)) prevRows.set(id, { scope, k, prev: getSetting(database, scope, k) });
+  };
+  const undoEntries: SyncUndoToken['entries'] = [];
+  const noted = new Set<string>();
+  const note = (lid: string, appliedHash: string | null): void => {
+    if (noted.has(lid)) return;
+    noted.add(lid);
+    const row = liveRow(database, cid, lid);
+    undoEntries.push({
+      lid,
+      prior: row
+        ? { title: row.title, archetype: row.archetype, body: row.body, entryOrder: row.entry_order, createdAt: row.created_at, live: true, parents: structuralParentsOf(database, cid, lid) }
+        : headRevision(database, cid, lid)
+          ? { title: '', archetype: '', body: '', entryOrder: 0, createdAt: null, live: false, parents: [] }
+          : null,
+      appliedHash,
+    });
+  };
+  const result = { written: 0, trashed: 0, relationsAdded: 0, relationsRemoved: 0, placedAtRoot: 0 };
+  const relAdded: string[] = [];
+  const relRemoved: SyncUndoToken['relationsRemoved'] = [];
+  database.exec('BEGIN IMMEDIATE');
+  try {
+    // ── 端末 id の重複(設計 doc §12.1 約束 4): 自分の id を作り直し、同期の記録を捨てて始め直す
+    if (input.regenerateDevice !== undefined) {
+      discardPeerRecords(database, rec);
+      rec(SYNC_SCOPE, SYNC_KEY_DEVICE);
+      putSetting(database, SYNC_SCOPE, SYNC_KEY_DEVICE, input.regenerateDevice);
+      writeSeq(database, 0, rec);
+    } else {
+      ensureDevice(database, rec);
+    }
+    let maxOrder = Number(database.selectValue('SELECT coalesce(max(entry_order), 0) FROM entries WHERE cid = ?', [cid]) ?? 0);
+    // ── 1 周目: 内容(題名・種別・本文)。前の本文は履歴へ残る
+    for (const u of input.upserts) {
+      if (u.content === undefined) {
+        // 親フォルダだけ変える(内容は触らない)。取り消しのため前の姿だけ控える
+        const cur = liveRow(database, cid, u.lid);
+        if (cur) note(u.lid, contentHash64Hex(cur.body));
+        continue;
+      }
+      const c = u.content;
+      note(u.lid, contentHash64Hex(c.body));
+      const existing = liveRow(database, cid, u.lid);
+      if (!existing) {
+        // ゴミ箱に居る lid を戻すとき: 鎖の頭(ゴミ箱へ移した時点の全文)を先に戻し、その上に新しい本文を積む(鎖が頭からつながる)
+        const head = headRevision(database, cid, u.lid);
+        if (head !== null && isFull(head) && head.snapshot !== c.body) {
+          const hrow = database.selectObjects('SELECT title, archetype, entry_order FROM revisions WHERE cid = ? AND id = ?', [cid, head.id])[0] as
+            | { title: string | null; archetype: string | null; entry_order: string | number | null }
+            | undefined;
+          const order = hrow?.entry_order === null || hrow?.entry_order === undefined ? ++maxOrder : Number(hrow.entry_order);
+          writeEntryRow(database, cid, upsertOf(u.lid, hrow?.title ?? c.title, hrow?.archetype ?? c.archetype, head.snapshot, Number.isFinite(order) ? order : ++maxOrder), {});
+        }
+      }
+      const order = liveRow(database, cid, u.lid)?.entry_order ?? ++maxOrder;
+      writeEntryRow(database, cid, upsertOf(u.lid, c.title, c.archetype, c.body, order), { checkpoint: true });
+      result.written++;
+      // 戻ってきたノートの削除の記録は外す(次の同期で消されない)
+      rec(syncScope(cid), SYNC_KEY_TOMB_PREFIX + u.lid);
+      deleteSetting(database, syncScope(cid), SYNC_KEY_TOMB_PREFIX + u.lid);
+    }
+    // ── 2 周目: 親フォルダ(宛先が無い・輪になるときはルートへ置く)
+    for (const u of input.upserts) {
+      if (u.place === undefined || !liveRow(database, cid, u.lid)) continue;
+      note(u.lid, null);
+      const wanted = u.place.parentLid;
+      const parent = wanted !== null && liveRow(database, cid, wanted) ? wanted : null;
+      if (wanted !== null && parent === null) result.placedAtRoot++;
+      try {
+        writeParent(database, cid, u.lid, parent, newStructuralId());
+      } catch {
+        writeParent(database, cid, u.lid, null, newStructuralId());
+        result.placedAtRoot++;
+      }
+      if (u.content === undefined) result.written++;
+    }
+    // ── ゴミ箱へ(削除の記録も残す)
+    for (const lid of input.trash) {
+      if (!liveRow(database, cid, lid)) continue;
+      note(lid, null);
+      recordDeletion(database, cid, lid, false, rec);
+      deleteEntryInTx(database, { cid, lid });
+      result.trashed++;
+    }
+    // ── つながり
+    for (const r of input.relationAdds) {
+      if (!liveRow(database, cid, r.from) || !liveRow(database, cid, r.to)) continue;
+      const dup = database.selectValue('SELECT 1 FROM relations WHERE cid = ? AND from_lid = ? AND to_lid = ? AND kind = ?', [cid, r.from, r.to, r.kind]);
+      if (dup !== undefined && dup !== null) continue;
+      const id = `rel-${crypto.randomUUID()}`;
+      database.exec({ sql: `INSERT INTO relations (cid, id, from_lid, to_lid, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`, bind: [cid, id, r.from, r.to, r.kind] });
+      relAdded.push(id);
+      result.relationsAdded++;
+    }
+    for (const r of input.relationRemoves) {
+      const found = database.selectObjects("SELECT id, from_lid, to_lid, kind FROM relations WHERE cid = ? AND from_lid = ? AND to_lid = ? AND kind = ? AND kind != 'structural'", [
+        cid,
+        r.from,
+        r.to,
+        r.kind,
+      ]) as Array<{ id: string; from_lid: string; to_lid: string; kind: string }>;
+      for (const f of found) {
+        relRemoved.push({ id: f.id, from: f.from_lid, to: f.to_lid, kind: f.kind });
+        database.exec({ sql: 'DELETE FROM relations WHERE cid = ? AND id = ?', bind: [cid, f.id] });
+        result.relationsRemoved++;
+      }
+    }
+    // ── 同期の記録(相手との対応・前回の合意・連番)
+    rec(syncScope(cid), SYNC_KEY_PAIR_PREFIX + input.peer);
+    putSetting(database, syncScope(cid), SYNC_KEY_PAIR_PREFIX + input.peer, input.peerCid);
+    writeBase(database, cid, input.peer, input.baseline, input.nowIso, rec);
+    writeSeq(database, advanceSeq(readSeq(database), input.peerSeq), rec);
+    database.exec('COMMIT');
+  } catch (err) {
+    try {
+      database.exec('ROLLBACK');
+    } catch {
+      /* rollback 失敗は元エラーを優先 */
+    }
+    throw err;
+  }
+  return { ...result, undo: { entries: undoEntries, relationsAdded: relAdded, relationsRemoved: relRemoved, rows: [...prevRows.values()] } };
+}
+
+function undoSync(database: Database, cid: string, token: SyncUndoToken): { restored: number; skipped: number } {
+  let restored = 0;
+  let skipped = 0;
+  database.exec('BEGIN IMMEDIATE');
+  try {
+    for (const e of [...token.entries].reverse()) {
+      const cur = liveRow(database, cid, e.lid);
+      const p = e.prior;
+      if (p === null || !p.live) {
+        // 取り込みで新しく入った / ゴミ箱から戻した → ゴミ箱へ(削除の記録は残さない = 相手へ「消した」と伝えない)。その後に編集していたら触らない
+        if (cur && (e.appliedHash === null || contentHash64Hex(cur.body) === e.appliedHash)) {
+          deleteEntryInTx(database, { cid, lid: e.lid });
+          restored++;
+        } else skipped++;
+        continue;
+      }
+      if (cur) {
+        if (e.appliedHash !== null && contentHash64Hex(cur.body) !== e.appliedHash) {
+          skipped++;
+          continue;
+        }
+        writeEntryRow(database, cid, upsertOf(e.lid, p.title, p.archetype, p.body, cur.entry_order, p.createdAt), { checkpoint: true });
+      } else if (e.appliedHash === null) {
+        // 取り込みでゴミ箱へ移した → 戻す(その間に user が戻していれば cur がある側へ入る)
+        writeEntryRow(database, cid, upsertOf(e.lid, p.title, p.archetype, p.body, p.entryOrder, p.createdAt), {});
+      } else {
+        skipped++;
+        continue;
+      }
+      database.exec({ sql: "DELETE FROM relations WHERE cid = ? AND to_lid = ? AND kind = 'structural'", bind: [cid, e.lid] });
+      for (const par of p.parents) {
+        database.exec({ sql: `INSERT OR IGNORE INTO relations (cid, id, from_lid, to_lid, kind, created_at, updated_at) VALUES (?, ?, ?, ?, 'structural', datetime('now'), datetime('now'))`, bind: [cid, par.id, par.from, e.lid] });
+      }
+      restored++;
+    }
+    for (const id of token.relationsAdded) database.exec({ sql: 'DELETE FROM relations WHERE cid = ? AND id = ?', bind: [cid, id] });
+    for (const r of token.relationsRemoved) {
+      database.exec({ sql: `INSERT OR IGNORE INTO relations (cid, id, from_lid, to_lid, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`, bind: [cid, r.id, r.from, r.to, r.kind] });
+    }
+    for (const r of token.rows) {
+      if (r.prev === null) deleteSetting(database, r.scope, r.k);
+      else putSetting(database, r.scope, r.k, r.prev);
+    }
+    database.exec('COMMIT');
+  } catch (err) {
+    try {
+      database.exec('ROLLBACK');
+    } catch {
+      /* rollback 失敗は元エラーを優先 */
+    }
+    throw err;
+  }
+  return { restored, skipped };
+}
+
 const handlers: Handlers = {
   init: (req) => init(req.dbName, req.journalMode, { memory: req.memory, image: req.image }),
   /**
@@ -5313,98 +5670,9 @@ const handlers: Handlers = {
     const database = need();
     database.exec('BEGIN IMMEDIATE');
     try {
-      const row = database.selectObjects(
-        'SELECT title, archetype, body, created_at, updated_at, entry_order FROM entries WHERE cid = ? AND lid = ?',
-        [req.cid, req.lid],
-      )[0] as
-        | {
-            title: string;
-            archetype: string;
-            body: string;
-            created_at: string | null;
-            updated_at: string | null;
-            entry_order: number | null;
-          }
-        | undefined;
-      if (row && req.untouched === true) {
-        /**
-         * 🔴 **何も書かれていない作りたてのノートは、ゴミ箱を経由せず行ごと消す**(#1087)。
-         * ⚠ 戻す先の無い物なので、履歴(作成時に積まれた版があれば)も居場所の辺も**同じ tx で**掃除する。
-         *   版を残すと「entries に居ない entry_lid の revisions」= ゴミ箱になり、空のノートが一覧に現れる。
-         */
-        database.exec({
-          sql: 'DELETE FROM revisions WHERE cid = ? AND entry_lid = ?',
-          bind: [req.cid, req.lid],
-        });
-        database.exec({
-          sql: 'DELETE FROM relations WHERE cid = ? AND (from_lid = ? OR to_lid = ?)',
-          bind: [req.cid, req.lid, req.lid],
-        });
-      } else if (row) {
-        // 削除で tip(entries.body)が消えるので、鎖の base を**全文で確定**する。
-        // 頭が既に同内容を記録していれば、その行を全文化するだけでよい
-        // (行 id / content_hash は保つ ── change ID の安定)
-        const hash = contentHash64Hex(row.body);
-        const head = headRevision(database, req.cid, req.lid);
-        if (head && head.content_hash === hash) {
-          // 🔴 **題名と種類も今の値にする**(#1087、ゴミ箱の見直し)── 本文を変えずに改名してから消すと、
-          //   頭の版は**改名前の題名**のままで、ゴミ箱の一覧にも、戻したノートにもその題名が出ていた
-          //   (戻すときの題名はこの行から読む)。改名は本文に触らない口(`renameEntry`)なので、ここで拾う
-          database.exec({
-            sql: `UPDATE revisions SET snapshot = ?, kind = 'full', title = ?, archetype = ?, entry_created_at = ?,
-                         entry_order = ?, entry_updated_at = ? WHERE cid = ? AND id = ?`,
-            bind: [
-              row.body,
-              row.title,
-              row.archetype,
-              row.created_at,
-              row.entry_order === null ? null : String(row.entry_order),
-              row.updated_at,
-              req.cid,
-              head.id,
-            ],
-          });
-        } else {
-          database.exec({
-            sql: `INSERT INTO revisions
-                    (cid, id, entry_lid, created_at, rev_order, snapshot,
-                     title, archetype, content_hash, kind, entry_created_at, entry_order, entry_updated_at)
-                  VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, 'full', ?, ?, ?)`,
-            bind: [
-              req.cid,
-              `rev-${crypto.randomUUID()}`,
-              req.lid,
-              (head?.rev_order ?? 0) + 1,
-              row.body,
-              row.title,
-              row.archetype,
-              hash,
-              row.created_at,
-              row.entry_order === null ? null : String(row.entry_order),
-              row.updated_at,
-            ],
-          });
-          // 🔴 ゴミ箱へ移すときに足す行の後も刈る(#1087)── 刈らないと「移す → 戻す → 保存」の
-          //   繰り返しで 1 ノートの履歴が上限を超えて育つ。頭(今足した全文)は消えない
-          pruneChain(database, req.cid, req.lid, req.keepLatest ?? DEFAULT_REVISION_KEEP);
-        }
-      }
-      // 🔴 **relations は消さない**(2026-08-05、user 報告の調査で判明)。
-      //
-      // 直す前はここで `from_lid` / `to_lid` の両側を消していた。すると
-      // **ゴミ箱から戻しても居場所が戻らない** ── 子を消して復元すると root へ出て、
-      // フォルダを消して復元すると中身が空になる(実測)。ゴミ箱は「戻せる」ための
-      // 機構なのに、戻すと必ず階層から外れていた。
-      //
-      // ⚠ 残しても**木は壊れない**:`resolveCanonicalParents` は
-      //    「親が metas に実在する folder」でなければ辺を無視するので、
-      //    ゴミ箱の間は子が root に出る(= 従来どおりの見え方)。
-      //    戻せば親が metas に戻り、辺がそのまま効く。
-      // ⚠ 本当に消えるのは `purgeTrash`(そこで参照の切れた行を掃除する)。
-      database.exec({
-        sql: 'DELETE FROM entries WHERE cid = ? AND lid = ?',
-        bind: [req.cid, req.lid],
-      });
+      // 🔴 同期が入のときだけ、消した記録(削除の記録)を同じ tx で残す(ゴミ箱を空にしても残る別の記録。#2000 段 2)
+      if (syncEnabled) recordDeletion(database, req.cid, req.lid, req.untouched === true);
+      deleteEntryInTx(database, req);
       database.exec('COMMIT');
     } catch (err) {
       try {
@@ -5704,6 +5972,88 @@ const handlers: Handlers = {
       return { ...r, entry_order: Number.isFinite(n) ? n : null };
     });
   },
+  /**
+   * 🔴 **端末間の同期(#2000 段 2)**。設計と約束は `sync-rows.ts` と上の `applySync`。
+   * ⚠ `syncConfigure` が `true` を受けるまで、ノートを消しても削除の記録は書かない(既定 OFF = 行を 1 本も書かない)。
+   */
+  syncConfigure: (req) => {
+    syncEnabled = req.enabled;
+    return null;
+  },
+  syncSnapshot: (req) => {
+    const database = need();
+    let device = getSetting(database, SYNC_SCOPE, SYNC_KEY_DEVICE);
+    if (req.ensureDevice === true && !isDeviceId(device)) {
+      database.exec('BEGIN IMMEDIATE');
+      try {
+        device = ensureDevice(database);
+        database.exec('COMMIT');
+      } catch (err) {
+        try {
+          database.exec('ROLLBACK');
+        } catch {
+          /* rollback 失敗は元エラーを優先 */
+        }
+        throw err;
+      }
+    }
+    const snap = measureStates(database, req.cid);
+    const present = new Set(snap.notes.map((n) => n.lid));
+    return {
+      device: isDeviceId(device) ? device : null,
+      seq: readSeq(database),
+      states: snap.states,
+      notes: snap.notes,
+      relations: snap.relations,
+      tombstones: dropRevived(readTombstones(database, req.cid), present),
+      pairs: readPairs(database, req.cid),
+      bases: readBases(database, req.cid),
+      outs: readOuts(database, req.cid),
+    };
+  },
+  syncCommitExport: (req) => {
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      const device = ensureDevice(database);
+      const seq = readSeq(database) + 1;
+      writeSeq(database, seq);
+      writeOut(database, req.cid, seq, req.digest);
+      database.exec('COMMIT');
+      return { device, seq };
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+  },
+  syncSeed: (req) => {
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      // ⚠ 既にその相手の記録が在れば触らない(種は「記録が無い」初回の代わり。育った記録を巻き戻さない)
+      if (getSetting(database, syncScope(req.cid), SYNC_KEY_BASE_PREFIX + req.peer) !== null) {
+        database.exec('COMMIT');
+        return { written: false };
+      }
+      ensureDevice(database);
+      writeBase(database, req.cid, req.peer, req.baseline, req.nowIso);
+      database.exec('COMMIT');
+      return { written: true };
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+  },
+  syncApply: (req) => applySync(need(), req.cid, req.input),
+  syncUndo: (req) => undoSync(need(), req.cid, req.token),
   restoreTrashNotes: (req) => {
     const database = need();
     const keepLatest = Math.max(1, req.keepLatest ?? DEFAULT_REVISION_KEEP);

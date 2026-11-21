@@ -2270,6 +2270,10 @@ export interface BinderServices {
   dismissAlarm?(key: string): void;
   /** 🔴 予定の知らせを入 / 切にする(#280)。⚠ 入にした瞬間に予定を数え直す。 */
   setAlarmEnabled?(on: boolean): void;
+  /** 🔴 端末間の同期を入 / 切にする(#2000 段 2。checkbox の押した後の値。worker にも教える)。 */
+  setSyncEnabled?(on: boolean): void;
+  /** 🔴 差分ファイルを書き出す(#2000 段 2。`all` = 全件)。設定が切のときは配線側が断る。 */
+  exportSyncDiff?(all: boolean): void;
   /**
    * 🔴 **聞くときだけ音を整えるか**(#772 段① B)。⚠ **省略可**。
    * ⚠ 切り替えたら**いま画面に在る再生機も**その場で繋ぎ替える ──
@@ -19197,6 +19201,16 @@ const ACTIONS: Record<string, ActionHandler> = {
   /** 🔴 **「見逃した予定」の知らせを閉じる**(#855 20-C)。本文にも予定にも触れない。 */
   'dismiss-missed': (_dispatcher, _target, _services, root) => {
     dismissMissedLine(root);
+  },
+  'set-sync-enabled': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setSyncEnabled?.(target.checked);
+  },
+  'export-sync-diff': (_dispatcher, _target, services) => {
+    services.exportSyncDiff?.(false);
+  },
+  'export-sync-diff-all': (_dispatcher, _target, services) => {
+    services.exportSyncDiff?.(true);
   },
   'set-alarm-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

@@ -24,6 +24,7 @@ import { initialState } from '@adapter/state/app-state';
 import { EditorModeStore } from '@adapter/ui/render/editor-mode';
 import { OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { AlarmEnabledStore } from '@adapter/ui/render/alarm-enabled';
+import { SyncEnabledStore } from '@adapter/ui/render/sync-enabled';
 import { VoiceBoostStore } from '@adapter/ui/render/voice-boost';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
 import { DateLinksStore } from '@adapter/ui/render/date-links';
@@ -88,6 +89,7 @@ function setup() {
     openInEdit: new OpenInEditStore(fakeStorage()),
     pasteSource: new PasteSourceStore(fakeStorage()),
     alarm: new AlarmEnabledStore(fakeStorage()),
+    syncEnabled: new SyncEnabledStore(fakeStorage()),
     tooNarrow: new TooNarrowOkStore(fakeStorage()),
     phoneLinks: new PhoneLinksStore(fakeStorage()),
     voiceBoost: new VoiceBoostStore(fakeStorage()),
@@ -120,7 +122,7 @@ function setup() {
   args[18] = stores.colorSwatch;
   args[20] = stores.pdfReader;
   const Ctor = SettingsRenderer as unknown as new (...a: unknown[]) => SettingsRenderer;
-  const renderer = new Ctor(region, ...args, agent, new AgentTabStatus(), undefined, undefined, stores.inlineComplete);
+  const renderer = new Ctor(region, ...args, agent, new AgentTabStatus(), undefined, undefined, stores.inlineComplete, undefined, undefined, undefined, stores.syncEnabled);
   return { region, renderer, sameOrigin, extension, agent, stores };
 }
 
@@ -167,6 +169,8 @@ const ALL_IDS = [
   'copy-history',
   'too-narrow',
   'persist',
+  // 2026-11-21(#2000 段 2): 端末間の同期(既定オフ)を足した ── 節 +1。同じ group(persist)の中で「ブラウザの扱い」の次
+  'sync-enabled',
   'notices',
   'notice-list',
 ];
@@ -203,7 +207,7 @@ const DT_ORDER: Record<string, string[]> = {
   'settings-notify': ['予定の知らせ', '音を聞きやすくする', '音量をそろえる', '頭の中で鳴る感じを和らげる', '画面録画にマイクも混ぜる'],
   'settings-open-ways': ['zip ファイルを開く場所', 'アプリの開き方'],
   'settings-too-narrow': ['狭い画面の断り書き'],
-  'settings-persist': ['ブラウザの扱い'],
+  'settings-persist': ['ブラウザの扱い', '端末間の同期'],
   // 先頭の「新しいバージョン」は、待っている版が無い間は隠れている(台帳 #1852 束 L2、依頼 84-1 / 120-2)
   'settings-notices': ['新しいバージョン', 'お知らせ'],
 };
@@ -311,6 +315,7 @@ describe('設定画面の節の登録表(#1382)', () => {
       const rows: [string, Flip][] = [
         ['open-in-edit', stores.openInEdit],
         ['alarm-enabled', stores.alarm],
+        ['sync-enabled', stores.syncEnabled],
         ['voice-boost', stores.voiceBoost],
         ['voice-level', { enabled: () => stores.voiceBoost.levelEnabled(), setEnabled: (on: boolean) => stores.voiceBoost.setLevelEnabled(on) }],
         ['voice-crossfeed', { enabled: () => stores.voiceBoost.crossfeedEnabled(), setEnabled: (on: boolean) => stores.voiceBoost.setCrossfeedEnabled(on) }],

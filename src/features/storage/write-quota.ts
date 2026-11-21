@@ -87,6 +87,11 @@ export const QUOTA_BLOCKED_OPS: readonly string[] = [
   'importRevisionChains',
   'restoreRevisionChains',
   'restoreTrashNotes',
+  // 🔴 端末間の同期(#2000 段 2)── 取り込みも書き出しの連番も増やす側。断られたら何も書かない(tx ごと)
+  'syncApply',
+  'syncUndo',
+  'syncCommitExport',
+  'syncSeed',
   // 🔴 メッセージの追記(設計 doc §7、段②a)── 本文を伸ばす書き込みなので増える側。
   //    断られた分は adapter 側の控え(IndexedDB)へ積む(`message-post.ts`)。
   'appendMessage',
@@ -123,6 +128,8 @@ export const QUOTA_ALLOWED_WRITES: readonly string[] = [
   'putNotePin',
   // 色ラベル(#1982 段 4)── `settings` の 1 行(外すときは減る)。空きが無くても付け外しできる
   'putNoteLabel',
+  // 端末間の同期(#2000 段 2)── 指紋を読むのが本体(端末 id の 1 行を作るだけ。実質増えない)。空きが無くても読める
+  'syncSnapshot',
   // ワークスペース(#1455)── 切り替え・改名は 1 行を上書きするだけ。削除は減らす側。空きが無くても通す
   'switchWorkspace',
   'renameWorkspace',
