@@ -510,6 +510,7 @@ import {
   nextMenuIndex,
   MENU_NAV_KEYS,
 } from '../render/context-menu';
+import { syncReplaceToggle } from '../render/format-bar';
 import { bindInlineComplete, type CompleteItem } from '../render/inline-complete';
 import { appInlineComplete } from '../render/inline-complete-setting';
 import { setupLinkPreview, closeLinkPreview } from '../render/link-preview';
@@ -10613,7 +10614,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     const bar = root.querySelector<HTMLElement>('[data-pkc-region="replace-bar"]');
     if (!bar) return;
     bar.hidden = !bar.hidden;
-    target.setAttribute('aria-expanded', bar.hidden ? 'false' : 'true');
+    // 🔴 印は帯のボタン全部へ(「その他 ▾」・操作を探す・Ctrl+H から来ても、押された物とは限らない)
+    syncReplaceToggle(root);
     if (!bar.hidden)
       root.querySelector<HTMLInputElement>('[data-pkc-field="replace-find"]')?.focus();
   },

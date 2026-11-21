@@ -178,6 +178,26 @@ function formatButton(op: FormatOp): HTMLButtonElement {
   return btn;
 }
 
+/** 置換の帯の id(`shell.ts` が付ける)。⚠ 「置換の欄を開く / 閉じる」ボタンの `aria-controls` が指す先。 */
+export const REPLACE_BAR_ID = 'pkc-replace-bar';
+
+/**
+ * 🔴 **「置換の欄を開く / 閉じる」ボタンの `aria-expanded` / `aria-controls` を、置換の帯の見え方に合わせる**(#1982 残り 4)。
+ *
+ * ⚠ 開閉する唯一の所(`binder.ts` の `toggle-replace`)と、帯を描き直したとき(`toolButton`)の**両方がここを通る** ──
+ *   書式の「その他 ▾」・操作を探す・ショートカットキー(Ctrl+H)から開閉しても、帯のボタンの印が食い違わない。
+ *   帯が無い(shell 前)ときは畳んでいる扱い。
+ */
+export function syncReplaceToggle(root: ParentNode): void {
+  const bar = (root.ownerDocument ?? (root as Document)).getElementById(REPLACE_BAR_ID);
+  const open = bar !== null && !bar.hidden;
+  for (const b of root.querySelectorAll<HTMLElement>('[data-pkc-action="toggle-replace"]')) {
+    b.setAttribute('aria-controls', REPLACE_BAR_ID);
+    // 一覧(`role=menuitem`)の項目は開閉の状態を持たない ── 帯のボタンだけに付ける
+    if (b.getAttribute('role') === null) b.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+}
+
 /** 道具のボタン(先に聞く / 全文に効く / 探す)。 */
 function toolButton(action: string): HTMLButtonElement {
   const spec = TOOL_SPECS.find((t) => t.action === action);
@@ -187,6 +207,12 @@ function toolButton(action: string): HTMLButtonElement {
   btn.setAttribute('data-pkc-action', action);
   if (spec.wraps !== undefined) markWraps(btn, spec.wraps);
   if (spec.expanded !== undefined) btn.setAttribute('aria-expanded', spec.expanded ? 'true' : 'false');
+  // 🔴 置換の欄のボタンは、帯のいまの見え方から印を付ける(描き直しても食い違わない。#1982 残り 4)
+  if (action === 'toggle-replace') {
+    const bar = document.getElementById(REPLACE_BAR_ID);
+    btn.setAttribute('aria-controls', REPLACE_BAR_ID);
+    btn.setAttribute('aria-expanded', bar !== null && !bar.hidden ? 'true' : 'false');
+  }
   applyHint(btn, spec.hint, spec.command);
   btn.append(labelSpan(spec.label));
   return btn;
