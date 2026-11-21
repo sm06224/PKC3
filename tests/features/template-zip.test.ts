@@ -57,7 +57,7 @@ describe('template-zip: 3 つの実例', () => {
       'template.yaml の meta.required_capabilities(io.import.builtin)は取り込みません',
       'assets/ のファイル 1 個(logo.txt)は取り込みません',
       'snippets/ のファイル 1 個(handoff-template.md)は取り込みません',
-      'template.yaml の entries「当日ログ」の lines[1] の flag「warn」(未対応の印。行は取り込み、印は付けません)',
+      'template.yaml の entries「当日ログ」の lines[1] の flag「warn」(未対応のフラグ。行は取り込み、★ は付けません)',
     ]);
     const log = r.notes.find((x) => x.archetype === 'textlog')!;
     expect(log.body).toBe('## 2026-11-21 09:30:00\n\n引き継ぎテンプレートで初期化\n\n## 2026-11-21 09:30:00\n\n重大な変更があればここに追記');
@@ -70,7 +70,7 @@ describe('template-zip: 3 つの実例', () => {
       'template.yaml の meta.trust_level(1)は取り込みません',
       'template.yaml の meta.required_capabilities(network.fetch)は取り込みません',
       'snippets/ のファイル 1 個(interview-agenda.md)は取り込みません',
-      'template.yaml の entries「インタビュー記録」の lines[0] の flag「info」(未対応の印。行は取り込み、印は付けません)',
+      'template.yaml の entries「インタビュー記録」の lines[0] の flag「info」(未対応のフラグ。行は取り込み、★ は付けません)',
     ]);
   });
 

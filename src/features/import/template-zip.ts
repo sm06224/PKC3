@@ -1,7 +1,7 @@
 /**
- * 🔴 **無印 PKC のテンプレート zip(`template.yaml` + `forms/*.yaml`)を、PKC3 のふつうのノートに直す**(#2002 段 3)。
+ * 🔴 **旧版 PKC のテンプレート zip(`template.yaml` + `forms/*.yaml`)を、PKC3 のふつうのノートに直す**(#2002 段 3)。
  *
- * > user の物語:無印 PKC で作った定型のフォルダ・入力フォーム・ログの雛形を、PKC3 へそのまま持ってきたい。
+ * > user の物語:旧版 PKC で作った定型のフォルダ・入力フォーム・ログの雛形を、PKC3 へそのまま持ってきたい。
  *
  * ## 決まりごと(user 裁定 2026-11-21、#2002)
  * - **取り込むだけ**(書き出しは `.pkc3-notes.zip` のまま)。
@@ -9,7 +9,7 @@
  * - **取り込めない物は、取り込み結果に 1 件ずつ出す**(黙って落とさない)。出どころ(どのファイルのどのキーか)を添える。
  *
  * ## 変換
- * | 無印 | PKC3 |
+ * | 旧版 | PKC3 |
  * |---|---|
  * | `folders[]` | フォルダ(定義の順) |
  * | `entries[]` の `text` | テキストのノート(`body` がそのまま本文) |
@@ -235,7 +235,7 @@ function formBody(entryTitle: string, templateName: string, f: ConvertedForm): s
   const lines = [
     `# ${entryTitle}`,
     '',
-    `無印 PKC のテンプレート「${templateName}」から取り込んだ入力欄です。下の入力欄に入れて「表に追加」を押すと、その下の表に 1 行たまります。`,
+    `旧版 PKC のテンプレート「${templateName}」から取り込んだ入力欄です。下の入力欄に入れて「表に追加」を押すと、その下の表に 1 行たまります。`,
     '',
   ];
   const named = f.sections.filter((s) => s.name !== '' && s.labels.length > 0);
@@ -271,7 +271,7 @@ function textlogBody(
       for (const k of Object.keys(l)) if (k !== 'body' && k !== 'flag') ignored.push(`${at} のキー「${k}」(未知のキー)`);
     } else body = str(l);
     const star = flag === 'important' || flag === 'red';
-    if (!star && flag !== 'none') ignored.push(`${at} の flag「${flag}」(未対応の印。行は取り込み、印は付けません)`);
+    if (!star && flag !== 'none') ignored.push(`${at} の flag「${flag}」(未対応のフラグ。行は取り込み、★ は付けません)`);
     parts.push(`## ${stamp}${star ? ' ★' : ''}${body === '' ? '' : `\n\n${body}`}`);
   });
   return parts.join('\n\n');

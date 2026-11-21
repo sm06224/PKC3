@@ -1,5 +1,5 @@
 /**
- * 🔴 **無印 PKC のテンプレート zip の取込**(#2002 段 3)── `template.yaml` + `forms/*.yaml` を、ふつうのフォルダ・ノートにする。
+ * 🔴 **旧版 PKC のテンプレート zip の取込**(#2002 段 3)── `template.yaml` + `forms/*.yaml` を、ふつうのフォルダ・ノートにする。
  *
  * 入口は `import-pkc2.ts` の「manifest の無い zip」の分岐(`isTemplateZip` が真のときだけ来る。他の zip の道は変えない)。
  * 読む規則は `features/import/template-zip.ts`(pure)。⚠ **読み終えてから 1 度だけ書く**(途中で誤りが出たら 1 件も作らない)。
@@ -21,7 +21,7 @@ import type { ImportDeps } from './import-pkc2';
 /** 1 ファイルの上限(展開後)。 */
 export const TEMPLATE_FILE_MAX = 1024 * 1024;
 
-/** zip が無印のテンプレートか(中央ディレクトリだけ見る。壊れた zip は false = 従来の断り文へ)。 */
+/** zip が旧版のテンプレートか(中央ディレクトリだけ見る。壊れた zip は false = 従来の断り文へ)。 */
 export async function isTemplateZip(file: Blob): Promise<boolean> {
   try {
     const dir = unwrapSingleTopDir(await readZipDirectory(file)).entries;
@@ -114,7 +114,7 @@ export async function importTemplateZip(
   const first = rows.find((r) => r.archetype !== 'folder');
   if (first) deps.focus?.(first.lid);
   const summary =
-    `無印のテンプレート「${result.name}」を取り込みました: フォルダ ${String(c.folders)} 件・ノート ${String(c.notes)} 件` +
+    `旧版のテンプレート「${result.name}」を取り込みました: フォルダ ${String(c.folders)} 件・ノート ${String(c.notes)} 件` +
     `(入力欄 ${String(c.forms)}・ログ ${String(c.textlogs)}・テキスト ${String(c.texts)})・入力項目 ${String(c.fields)} 個`;
   const notes = [
     summary,
