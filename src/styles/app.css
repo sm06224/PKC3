@@ -765,6 +765,26 @@ select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
+/* 🔴 **いま打っている行**(#2001 段 4。`render/current-line.ts` が欄に印と変数 2 つを置く)。
+ * 現在地は**形**で示す(§2-10): 左端の 3px の線(`--accent`。選択中の行の左端線と同じ)+ ごく薄い地(`--surface-hover`)。
+ * ⚠ 欄の焦点の輪(`outline: 2px solid var(--accent)`、内側へ 1px)が左端 3px を覆うので、線は **2px 内側から**描く(同じ色でも輪に溶けず、太い帯として見える)。
+ *   字の左の余白は 8px(`textarea` の `padding`)なので、線は字に触れない。
+ * 🔑 背景なので版面を動かさず、`background-attachment: local` で**スクロールに合わせて動く**(欄の外へははみ出さない)。
+ * ⚠ 欄の `background-color`(`--surface`)の上に重なる。字は背景の上に描かれるので、字の対比は変わらない。 */
+textarea[data-pkc-current-line] {
+  background-image:
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--surface-hover), var(--surface-hover));
+  background-repeat: no-repeat;
+  background-attachment: local;
+  background-origin: padding-box;
+  background-position:
+    2px var(--pkc-cl-top, 0),
+    0 var(--pkc-cl-top, 0);
+  background-size:
+    3px var(--pkc-cl-h, 0),
+    100% var(--pkc-cl-h, 0);
+}
 /* 🔴 キーボードで止まった画像・図の枠(依頼 79-3 C)── Enter で大きく表示する。マウスで押したときは出さない(`:focus-visible`) */
 img[data-pkc-action='view-big']:focus-visible {
   outline: 2px solid var(--accent);
@@ -2191,8 +2211,8 @@ tr[data-pkc-note-label] td:first-child {
 /* 🔴 選んだ範囲の文字数と行数(#1215)。帯の右端に**常設**する枠 ── 選んでいないときは
  * 字が空なだけで枠は残る(高さは `align-self: center` で帯に任せ、出入りで版面が動かない)。
  * ⚠ 折り返す帯の中の 1 つなので、1 行を丸ごと使わない(`flex: none` + `white-space: nowrap`)。 */
+[data-pkc-field='detail-toolbar'] [data-pkc-field='total-chars'],
 [data-pkc-field='detail-toolbar'] [data-pkc-field='selection-stats'] {
-  margin-left: auto;
   align-self: center;
   flex: none;
   padding: 0 var(--s3);
@@ -2200,6 +2220,11 @@ tr[data-pkc-note-label] td:first-child {
   color: var(--muted);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+/* 🔴 右端に寄せるのは**本文全体の字数**(#2001 段 4)── 選びの枠はそのすぐ右に続く(2 つで 1 かたまり) */
+[data-pkc-field='detail-toolbar'] [data-pkc-field='total-chars'] {
+  margin-left: auto;
+  padding-right: 0;
 }
 [data-pkc-field='detail-toolbar'] button {
   /* ゴースト(地なし)。hover は共通の `button:hover`(薄い地)が受け持つ */

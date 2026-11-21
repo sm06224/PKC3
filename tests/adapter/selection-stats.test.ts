@@ -29,6 +29,8 @@ import {
   TABLE_TAB_HINT,
   SELECTION_STATS_DELAY_MS,
   SELECTION_STATS_FIELD,
+  TOTAL_CHARS_FIELD,
+  totalCharsText,
   syncSelectionStats,
   watchSelectionStats,
 } from '../../src/adapter/ui/render/selection-stats';
@@ -646,5 +648,76 @@ describe('🔴 caret がコード・数式・frontmatter の中に在るとき�
     select(row.ta, 2, 2);
     expect(row.slot.textContent, '行の欄は柵が見えない').toBe('');
     un2();
+  });
+});
+
+describe('編集中の本文の全体の字数(#2001 段 4)', () => {
+  function withTotal(field: Field, value: string) {
+    const s = surface(field, value);
+    const total = document.createElement('span');
+    total.setAttribute('data-pkc-field', TOTAL_CHARS_FIELD);
+    s.region.querySelector('[data-pkc-field="detail-toolbar"]')!.prepend(total);
+    return { ...s, total };
+  }
+  const typeIn = (ta: HTMLTextAreaElement, v: string): void => {
+    ta.value = v;
+    ta.setSelectionRange(v.length, v.length);
+    ta.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    flush();
+  };
+
+  it('🔴 本文の欄(editor-body)で「全体の字数: N 文字」(右の列と同じ桁区切り)。打つたびに追う', () => {
+    const { region, total, ta } = withTotal('editor-body', 'abc');
+    const un = watchSelectionStats(region);
+    selectionChanged();
+    flush();
+    expect(total.textContent).toBe('全体の字数: 3 文字');
+    typeIn(ta, 'あ'.repeat(1234));
+    expect(total.textContent).toBe('全体の字数: 1,234 文字');
+    typeIn(ta, '');
+    expect(total.textContent, '空の本文').toBe('全体の字数: 0 文字');
+    un();
+  });
+
+  it('🔴 見た目の字で数える(絵文字 1 つは 1 字。選びの枠は UTF-16 のまま)', () => {
+    const { region, total } = withTotal('editor-body', 'a😀b');
+    const un = watchSelectionStats(region);
+    selectionChanged();
+    flush();
+    expect(total.textContent).toBe('全体の字数: 3 文字');
+    un();
+  });
+
+  it('入力の合間は数えず、止まってから 1 度だけ数える(debounce)', () => {
+    const { region, total, ta } = withTotal('editor-body', 'a');
+    const un = watchSelectionStats(region);
+    selectionChanged();
+    flush();
+    ta.value = 'abcd';
+    ta.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    expect(total.textContent, '待たずに書いた').toBe('全体の字数: 1 文字');
+    flush();
+    expect(total.textContent).toBe('全体の字数: 4 文字');
+    un();
+  });
+
+  it('🔴 本文が前回と同じ字なら数え直さない(控えをそのまま返す)/ 変わったら数え直す', () => {
+    const { ta } = withTotal('editor-body', 'abc');
+    // 控えの字をわざと偽物にして、「数え直していない」ことを見る(同じ値なら偽物が返る)
+    expect(totalCharsText(ta, { value: 'abc', text: '控え' })).toBe('控え');
+    expect(totalCharsText(ta, { value: 'abcd', text: '控え' }), '本文が変わったのに古い控えを返した').toBe('全体の字数: 3 文字');
+    expect(totalCharsText(ta, null)).toBe('全体の字数: 3 文字');
+  });
+
+  it('行の欄・追記の欄では出さない(1 行ぶん・全体ではない)', () => {
+    for (const field of ['row-source', 'append-input'] as const) {
+      document.body.textContent = '';
+      const { region, total } = withTotal(field, 'abc');
+      const un = watchSelectionStats(region);
+      selectionChanged();
+      flush();
+      expect(total.textContent, field).toBe('');
+      un();
+    }
   });
 });

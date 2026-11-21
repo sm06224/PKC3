@@ -20,6 +20,7 @@
  * - `Esc` は小窓を閉じるだけで、編集そのものは終わらせない(`stopImmediatePropagation`)。
  */
 import { detectTrigger, type CompleteTrigger } from '@features/markdown/inline-complete';
+import { EDITING_FIELD_NAMES, EDITING_FIELD_KINDS, fieldHas } from '../editing-field';
 
 export interface CompleteItem {
   readonly title: string;
@@ -33,7 +34,10 @@ export interface CompleteItem {
 }
 
 export interface InlineCompleteDeps {
-  items(trigger: CompleteTrigger, ta: HTMLTextAreaElement): readonly CompleteItem[];
+  /**
+   * ⚠ 添付の一覧のように読むのに時間がかかる元は `Promise` で返してよい。待つ間に引き金が変わった / 欄が消えたら捨てる。
+   */
+  items(trigger: CompleteTrigger, ta: HTMLTextAreaElement): readonly CompleteItem[] | Promise<readonly CompleteItem[]>;
   /**
    * 🔴 **画面の状態が変わったら閉じるための購読**(ノート切替・編集の確定など)。
    * 渡された `close` を、閉じたい変化のときに呼ぶ。外す関数を返す。
@@ -43,10 +47,10 @@ export interface InlineCompleteDeps {
 }
 
 export const COMPLETE_REGION = 'inline-complete';
-const FIELDS =
-  'textarea[data-pkc-field="editor-body"], textarea[data-pkc-field="row-source"], textarea[data-pkc-field="append-input"]';
+/** 4 つの欄すべて(どの引き金がどの欄で出るかは `fieldHas` の表 ── `inlineComplete` / `assetComplete`)。 */
+const FIELDS = EDITING_FIELD_KINDS.map((k) => `textarea[data-pkc-field="${EDITING_FIELD_NAMES[k]}"]`).join(', ');
 
-const MIRROR_PROPS = [
+export const MIRROR_PROPS = [
   'boxSizing', 'width', 'overflowX', 'overflowY', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth',
   'borderLeftWidth', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'fontStyle', 'fontVariant',
   'fontWeight', 'fontStretch', 'fontSize', 'fontFamily', 'lineHeight', 'letterSpacing', 'tabSize', 'textIndent',
@@ -89,6 +93,9 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
     el: HTMLElement;
   }
   let open: Open | null = null;
+  // 非同期の候補の世代(古い応答を捨てる)と、いま応答を待っている引き金(待つ間の Esc で閉じるため)
+  let generation = 0;
+  let waiting: { ta: HTMLTextAreaElement; start: number; query: string } | null = null;
   // Esc で閉じた引き金(欄 + 位置 + そのときの語)。同じ語のまま打ち進める間は出し直さない(語が変われば出る)
   let dismissed: { ta: HTMLTextAreaElement; start: number; query: string } | null = null;
 
@@ -108,6 +115,8 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
   };
 
   const close = (): void => {
+    generation += 1;
+    waiting = null;
     if (open !== null) open.el.remove();
     open = null;
     detachFollow();
@@ -170,7 +179,33 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
       }
       dismissed = null;
     }
-    const items = deps.items(trigger, ta);
+    // 🔴 この欄でその引き金を出してよいか(`fieldHas` の表が答える)
+    const name = ta.getAttribute('data-pkc-field');
+    if (!fieldHas(name, trigger.kind === 'asset' ? 'assetComplete' : 'inlineComplete')) {
+      close();
+      return;
+    }
+    const got = deps.items(trigger, ta);
+    if (Array.isArray(got)) {
+      show(ta, trigger, got as readonly CompleteItem[]);
+      return;
+    }
+    // 非同期の元 ── 世代を進め、返ってきたとき**世代が同じなら**出す。
+    // 🔑 守りはこの世代 1 本(引き金が変わる・閉じる・欄が替わる道はすべて `refresh` / `close` を通り、そこで世代が進む)。
+    //   応答が前後して返っても、古い応答は出ない。
+    const gen = (generation += 1);
+    waiting = { ta, start: trigger.start, query: trigger.query };
+    void (got as Promise<readonly CompleteItem[]>).then(
+      (list) => {
+        if (gen !== generation || !ta.isConnected) return;
+        waiting = null;
+        show(ta, trigger, list);
+      },
+      () => undefined,
+    );
+  };
+
+  const show = (ta: HTMLTextAreaElement, trigger: CompleteTrigger, items: readonly CompleteItem[]): void => {
     // 0 件なら出さない(`/usr/bin` や `@foo` を打つ手を邪魔しない)
     if (items.length === 0) {
       close();
@@ -183,7 +218,10 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
       const el = root.ownerDocument.createElement('div');
       el.setAttribute('data-pkc-region', COMPLETE_REGION);
       el.setAttribute('role', 'listbox');
-      el.setAttribute('aria-label', trigger.kind === 'slash' ? '記法の候補' : 'ノートと日付の候補');
+      el.setAttribute(
+        'aria-label',
+        trigger.kind === 'slash' ? '記法の候補' : trigger.kind === 'asset' ? '添付の候補' : 'ノートと日付の候補',
+      );
       root.append(el);
       attachFollow();
       open = { ta, trigger, items, index: 0, navigated: false, el };
@@ -222,6 +260,15 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
   };
   const onKeyDown = (ev: KeyboardEvent): void => {
     // 🔴 変換中の Enter / Tab / Esc は変換のもの。`isComposing` が false で来る環境(確定の keydown)は keyCode 229 で見る
+    // 🔴 応答を待っている間の Esc も「閉じる」── 閉じたあとに小窓が遅れて出ない(同じ語では出し直さない)
+    if (open === null && waiting !== null && ev.key === 'Escape' && !ev.isComposing && ev.keyCode !== 229 && fieldOf(ev.target) === waiting.ta) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      dismissed = { ta: waiting.ta, start: waiting.start, query: waiting.query };
+      waiting = null;
+      generation += 1;
+      return;
+    }
     if (open === null || ev.isComposing || ev.keyCode === 229) return;
     const o = open;
     if (!o.ta.isConnected) {

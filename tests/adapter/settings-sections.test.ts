@@ -33,6 +33,7 @@ import { MissingLinksStore } from '@adapter/ui/render/missing-links';
 import { CodeCollapseStore } from '@adapter/ui/render/code-collapse';
 import { InlineCodeCopyStore } from '@adapter/ui/render/inline-code-copy';
 import { InlineCompleteStore } from '@adapter/ui/render/inline-complete-setting';
+import { appCurrentLine } from '@adapter/ui/render/current-line-setting';
 import { PdfReaderStore } from '@adapter/ui/render/pdf-reader-setting';
 import { TooNarrowOkStore } from '@adapter/ui/render/too-narrow';
 import { PasteSourceStore } from '@adapter/ui/render/paste-source';
@@ -141,6 +142,7 @@ const ALL_IDS = [
   'editor-mode',
   'open-in-edit',
   'inline-complete',
+  'current-line',
   'phone-links',
   'date-links',
   'relative-days',
@@ -188,6 +190,7 @@ const DT_ORDER: Record<string, string[]> = {
     '編集の仕方',
     '開いたときの状態',
     '入力中の補完',
+    '現在行の強調',
     '本文の電話番号',
     '本文の日付',
     '日付までの日数',
@@ -320,6 +323,7 @@ describe('設定画面の節の登録表(#1382)', () => {
         ['code-collapse', stores.codeCollapse],
         ['inline-code-copy', stores.inlineCodeCopy],
         ['inline-complete', stores.inlineComplete],
+        ['current-line', appCurrentLine],
         ['pdf-reader', stores.pdfReader],
         ['too-narrow-enabled', stores.tooNarrow],
         ['notices-enabled', stores.notices],
