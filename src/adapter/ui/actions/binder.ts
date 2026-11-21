@@ -39,6 +39,8 @@ import {
 import { ADAPTER_SETTING_VALIDATORS } from '../render/settings-validators';
 import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
+import { NOTE_TAB_LID_ATTR } from '../render/note-tabs';
+import { visible as noteTabsVisible } from '@features/nav/note-tabs';
 import { settleJump } from '../render/long-note';
 import { mountFilerRow } from '../render/filer';
 import { insideCodeOrMath } from '@features/markdown/code-context';
@@ -458,6 +460,7 @@ import {
   type EntryMenuContext,
   editingRowMenuActions,
   entryMenuActions,
+  noteTabMenuActions,
   ENTRY_ACTION_GROUPS,
   headingMenuActions,
   dateMenuActions,
@@ -6569,6 +6572,8 @@ export function selectEntryOrExplain(
   what: string,
   root: HTMLElement,
   services: BinderServices,
+  /** 🔴 新しいタブで開く(#1982 段 5-4)。⚠ 断りの門は通常の選択と**同じ 1 本**(別に書かない)。 */
+  newTab = false,
 ): boolean {
   if (!leaveSectionDraftOrAsk(dispatcher, root, services, lid, what)) return false;
   const state = dispatcher.getState();
@@ -6590,7 +6595,7 @@ export function selectEntryOrExplain(
     dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}が見つかりません(ゴミ箱にあれば戻せます。ゴミ箱は左のペインの「フォルダ」の中です)` });
     return false;
   }
-  dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+  dispatcher.dispatch(newTab ? { type: 'NOTE_TAB_OPEN', lid, activate: true } : { type: 'SELECT_ENTRY', lid });
   /**
    * 🔴 **開いたら本文ページへ出る**(user 裁定 2026-09-02)。
    *
@@ -6612,6 +6617,30 @@ export function selectEntryOrExplain(
  * ⚠ 呼ぶ前に phase を確かめる(ここでは見ない)。
  * @returns 断られた移動の数
  */
+/**
+ * 🔴 **押した物が「新しいタブで開ける」行・リンクなら、その lid**(#1982 段 5-4。裁定 6.1-2)。
+ *
+ * - Ctrl(⌘)+クリック(`onClick`)と中ボタン(`onAuxClick` / `onMousedown`)が**同じ 1 本**で決める
+ *   (片方だけ効く・片方だけ止まる、を作らない。§7)。
+ * - 対象は一覧・かんばん・予定の行(`select-entry`)と、本文のアプリ内リンク(`navigate-entry-ref` / `navigate-card-ref`)。
+ * - ⚠ **左の列の表(`filer-table`)では Ctrl+クリックは「印を付ける」**(#240)── 在る意味を奪わない。そこは中ボタンと右クリックだけ。
+ * - ⚠ 時刻つきのリンク(その場のプレーヤー)・別の PKC のリンク・読めないリンクは対象外(通常のクリックの断りに任せる)。
+ */
+function newTabLidOf(state: AppState, el: HTMLElement, viaMod: boolean): string | null {
+  const action = el.getAttribute('data-pkc-action');
+  if (viaMod && el.closest('[data-pkc-region="filer-table"]') !== null) return null;
+  if (action === 'select-entry') {
+    const lid = el.getAttribute('data-pkc-entry');
+    return lid !== null && lid !== '' ? lid : null;
+  }
+  if (action === 'navigate-entry-ref' || action === 'navigate-card-ref') {
+    const raw = action === 'navigate-entry-ref' ? el.getAttribute('data-pkc-entry-ref') : el.getAttribute('data-pkc-card-target');
+    const t = parseLinkTarget(raw ?? '', state.cid ?? '');
+    return t.kind === 'invalid' || t.foreign || t.seekMs !== null ? null : t.lid;
+  }
+  return null;
+}
+
 function applyPlanOps(dispatcher: Dispatcher, planOps: readonly PlanOp[]): { refusedMoves: number; made: ReadonlyMap<string, string> } {
     /** この案で作ったフォルダ(`@名前` → いま作った lid)。 */
     const made = new Map<string, string>();
@@ -7198,6 +7227,41 @@ export function runGlobalCommand(
       }
     }
     appNotePins.toggle(lid, exists);
+    return true;
+  }
+  if (cmd === 'tab-next' || cmd === 'tab-prev' || cmd === 'tab-close' || cmd === 'tab-reopen') {
+    /**
+     * 🔴 **ノートのタブの操作**(#1982 段 5-4。操作を探す + `Alt+PageDown` / `Alt+PageUp`)。
+     *
+     * ⚠ 効かないときは `false`(= 押せない行・鍵はそのまま通る)── 次・前は 2 枚以上、閉じるは有効なタブ、開き直しは閉じたタブが要る。
+     * ⚠ 編集中・保存失敗中は選びが動かない(`selectBlockReason`)ので、**押せない**側に倒す(行は灰色)。鍵で撃ったときだけ理由を言う
+     *   (黙ると「効かない」になる)。判定はタブの操作の reducer と同じ材料(`noteTabs` / `entryMetas`)。
+     */
+    const st = dispatcher.getState();
+    const set = st.noteTabs;
+    const applicable =
+      cmd === 'tab-close'
+        ? set.active !== null
+        : cmd === 'tab-reopen'
+          ? set.closed.some((c) => st.entryMetas.has(c.lid))
+          : noteTabsVisible(set);
+    if (!applicable) return false;
+    const blocked = selectBlockReason(st.phase);
+    if (dry) return blocked === null;
+    prevent();
+    if (blocked !== null) {
+      notify(`${blocked}タブを切り替えてください`, CAUTION);
+      return true;
+    }
+    dispatcher.dispatch(
+      cmd === 'tab-next'
+        ? { type: 'NOTE_TAB_NEXT' }
+        : cmd === 'tab-prev'
+          ? { type: 'NOTE_TAB_PREV' }
+          : cmd === 'tab-close'
+            ? { type: 'NOTE_TAB_CLOSE', lid: set.active! }
+            : { type: 'NOTE_TAB_REOPEN' },
+    );
     return true;
   }
   if (cmd === 'cycle-read-columns') {
@@ -12048,6 +12112,45 @@ const ACTIONS: Record<string, ActionHandler> = {
   'close-note-tab': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-note-tab');
     if (lid) dispatcher.dispatch({ type: 'NOTE_TAB_CLOSE', lid });
+  },
+  /**
+   * 他のタブを閉じる(#1982 段 5-4)。⚠ 相手は**右クリックしたタブ**。先にそのタブを有効にし、断られたら(編集中など)
+   *   何も閉じない(有効な編集中のタブを巻き込まない)。閉じたものは「閉じたタブを開き直す」で戻せる。
+   */
+  'close-other-note-tabs': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-note-tab');
+    if (!lid) return;
+    dispatcher.batch(() => {
+      dispatcher.dispatch({ type: 'NOTE_TAB_ACTIVATE', lid });
+      const st = dispatcher.getState();
+      if (st.noteTabs.active !== lid) {
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `${selectBlockReason(st.phase) ?? ''}他のタブを閉じてください`,
+        });
+        return;
+      }
+      for (const t of st.noteTabs.tabs) {
+        if (t.lid !== lid) dispatcher.dispatch({ type: 'NOTE_TAB_CLOSE', lid: t.lid });
+      }
+    });
+  },
+  'reopen-note-tab': (dispatcher) => {
+    dispatcher.dispatch({ type: 'NOTE_TAB_REOPEN' });
+  },
+  /**
+   * 一覧の行の右クリック「新しいタブで開く」(#1982 段 5-4)。⚠ 相手は**メニューを開いた瞬間の行**(`rowLidOrSelected`)。
+   * 🔴 右クリックは行を先に選ぶ(`onContextMenu`)ので、そのままではいまのタブが押した行へ差し替わっている。
+   *   「いまのタブはそのまま」にするため、控えた現在地(`MENU_PREV_LID_ATTR`)へ戻してから新しいタブで開く。
+   */
+  'open-note-new-tab': (dispatcher, target, services, root) => {
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
+    if (lid === null) return;
+    const prev = target.getAttribute(MENU_PREV_LID_ATTR);
+    dispatcher.batch(() => {
+      if (prev !== null && prev !== '' && prev !== lid) dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: prev });
+      selectEntryOrExplain(dispatcher, lid, 'ノート', root, services, true);
+    });
   },
   'bookmark-note-remove': (dispatcher, target, services) => {
     const st = dispatcher.getState();
@@ -20976,6 +21079,19 @@ export function bindActions(
         return;
       }
     }
+    /**
+     * 🔴 **Ctrl(⌘)+クリックは「新しいタブで開く」**(#1982 段 5-4。裁定 6.1-2)。
+     * ⚠ 在る意味を奪わない:左の列の表は上の「印を付ける」、本文は「その地点から編集」(`bodySourceLineAt` が拾う所)が先。
+     *   ここへ来るのは、それ以外の行(かんばん・予定・探す・情報ペイン)と本文のアプリ内リンクだけ。
+     */
+    if ((me.ctrlKey || me.metaKey) && !me.altKey && !me.shiftKey) {
+      const tabLid = newTabLidOf(dispatcher.getState(), el, true);
+      if (tabLid !== null) {
+        ev.preventDefault();
+        selectEntryOrExplain(dispatcher, tabLid, 'ノート', root, services, true);
+        return;
+      }
+    }
     const action = el.getAttribute('data-pkc-action');
     // ⚠ 行を素で押したときだけ「もう一度押した」を数える(修飾つきは印の話)
     // ⚠ **フォルダ面の中だけ**(上と同じ理由 ── kanban / calendar / query /
@@ -21012,6 +21128,17 @@ export function bindActions(
      *   本文の欄に居るときだけ押せる記法・計算が灰色になる。押したあとの焦点は器が決める(閉じるとき、開いたときの欄へ返す)。
      */
     if (act === 'open-palette') ev.preventDefault();
+    /**
+     * 🔴 **中ボタンで押したとき、ブラウザの自動スクロール(ホイールを押した円)を出さない**(#1982 段 5-4)。
+     * ⚠ 止めるのは「新しいタブで開ける」行・リンクの上だけ(他の場所の中ボタンは今までどおり)。
+     */
+    if (
+      (ev as MouseEvent).button === 1 &&
+      el !== null &&
+      el !== undefined &&
+      newTabLidOf(dispatcher.getState(), el, false) !== null
+    )
+      ev.preventDefault();
     // 🔴 書式の帯の「その他 ▾」も(#1982 段 3)。奪うと、1 行ずつ打つ編集の行が確定して閉じ、項目の書き込み先が消える
     if (act === 'open-format-more') ev.preventDefault();
   };
@@ -23800,6 +23927,30 @@ export function bindActions(
      *   板が消え、出るのは**別ノートの行メニュー**になる(押した物と効く先が食い違う)。
      * 🔑 読む本文の中の物は下の本文の枝で受ける(板の上なら「この付箋をコピー」が出る)。
      */
+    /**
+     * 🔴 **ノートのタブの上で右クリック**(#1982 段 5-4)── 「タブを閉じる」「他のタブを閉じる」「閉じたタブを開き直す」。
+     * ⚠ タブは `data-pkc-note-tab` が相手(`data-pkc-entry` ではない)── 下の「行」の枝へ落とすと、行のメニューが出て選択まで動く。
+     *   選択も動かさない(右クリックは「できることを見る」操作)。身元は `carry` で全項目へ写す(メニューは root 直下に出る)。
+     */
+    const tabHit = target.closest<HTMLElement>(`[${NOTE_TAB_LID_ATTR}]`);
+    if (tabHit !== null) {
+      const tabLid = tabHit.getAttribute(NOTE_TAB_LID_ATTR) ?? '';
+      if (tabLid === '') return;
+      ev.preventDefault();
+      const tabSet = dispatcher.getState().noteTabs;
+      openContextMenu(
+        root,
+        { x: ev.clientX, y: ev.clientY },
+        noteTabMenuActions({
+          hasOthers: tabSet.tabs.some((t) => t.lid !== tabLid),
+          canReopen: tabSet.closed.some((c) => dispatcher.getState().entryMetas.has(c.lid)),
+        }),
+        root.ownerDocument.activeElement,
+        { [NOTE_TAB_LID_ATTR]: tabLid },
+      );
+      return;
+    }
+
     const hit = target.closest('[data-pkc-entry]');
     const row = hit !== null && hit.closest('[data-pkc-field="detail-body"]') !== null ? null : hit;
     const lid = row?.getAttribute('data-pkc-entry') ?? null;
@@ -24163,6 +24314,8 @@ export function bindActions(
         // 🔴 `copy-asset-link` も同じ理由(添付の key は `openBody.lid === lid` の本文からしか引けない ──
         //   この分岐は `selectedLid` / `openBody` を動かさないので、押しても必ず断られる)
         a.action !== 'copy-asset-link' &&
+        // 🔴 新しいタブで開くのは本文を読む画面の話(押すと 2 ペインを抜ける)── 2 ペインの行からは出さない(#1982 段 5-4)
+        a.action !== 'open-note-new-tab' &&
         a.action !== 'start-edit';
       if (st.phase === 'editing') {
         // 🔑 編集中は既存の枝(#690 ④ A′、下の docstring)と**同じ扱い** ──
@@ -24813,6 +24966,17 @@ export function bindActions(
    */
   const onAuxClick = (ev: Event): void => {
     if ((ev as MouseEvent).button !== 1) return;
+    /**
+     * 🔴 **中ボタンは「新しいタブで開く」**(#1982 段 5-4。裁定 6.1-2)。行・アプリ内リンクの両方で、左の列の表でも効く
+     *   (そこは Ctrl+クリックが「印を付ける」なので、新しいタブの道は中ボタンと右クリック)。判定は `newTabLidOf` 1 本。
+     */
+    const tabEl = (ev.target as HTMLElement | null)?.closest?.<HTMLElement>('[data-pkc-action]');
+    const tabLid = tabEl == null || !root.contains(tabEl) ? null : newTabLidOf(dispatcher.getState(), tabEl, false);
+    if (tabLid !== null) {
+      ev.preventDefault();
+      selectEntryOrExplain(dispatcher, tabLid, 'ノート', root, services, true);
+      return;
+    }
     const a = (ev.target as HTMLElement | null)?.closest?.<HTMLAnchorElement>('a[href]');
     if (a == null || !root.contains(a)) return;
     if (/^(?:entry:|pkc:\/\/)/i.test(a.getAttribute('href') ?? '')) ev.preventDefault();
