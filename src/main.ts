@@ -2135,14 +2135,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     }
   };
   dispatcher.onState((state) => {
-    // 🔴 別ウィンドウで開いているノートがタブに入った(後からタブで開いた)回も印を付ける。差分が無ければ何も撃たない(ループしない)
-    if (!heldNoteWindow) syncExternalTabs?.();
     browse.render(state, browseMode);
     noteTabsBar.render(state);
     center.render(state);
     appendBox.render(state);
     inspector.render(state);
     markView(state.viewMode);
+    // 🔴 別ウィンドウで開いているノートがタブに入った(後からタブで開いた)回も印を付ける。差分が無ければ何も撃たない(ループしない)
+    if (!heldNoteWindow) syncExternalTabs?.();
     /**
      * 🔴 **スマホ用画面のページを決める**(#632 段①)。⚠ 描く順は**最後** ──
      *   面の中身が揃ってから `visibility` を切り替える(先に切り替えると、

@@ -231,6 +231,15 @@ describe('右クリックを何も選ばずに閉じたら元へ戻る(5-4 の�
     expect(t.lids().sort()).toEqual(['a', 'b', 'c']);
     expect(t.d.getState().selectedLid).toBe('c');
   });
+  it('🔴 選択もタブも動かさない項目(参照をコピー)を押した回も戻さない(押した行のまま)', async () => {
+    ctx(t.row('c'));
+    const afterRightClick = snapshot();
+    document.querySelector<HTMLElement>(`${MENU} [data-pkc-action="copy-entry-ref"]`)!.click();
+    await flush();
+    expect(document.querySelector(MENU), '前提: 項目を押してメニューが閉じた').toBeNull();
+    expect(snapshot()).toEqual(afterRightClick);
+    expect(t.d.getState().selectedLid).toBe('c');
+  });
   it('閉じる前に別の操作で選択が動いていたら、巻き戻さない', async () => {
     ctx(t.row('c'));
     t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
