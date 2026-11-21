@@ -224,3 +224,48 @@ describe('表との連携', () => {
     expect(r.err()).not.toBe('');
   });
 });
+
+describe('datetime(#2002 段 1)', () => {
+  const DT = ['```yaml form', 'table: 予定', 'fields:', '  - name: 氏名', '  - name: 開始', '    type: datetime', '```'].join('\n');
+  const T = '```csv name=予定\n氏名,開始\n山田,2026-11-21T09:30\n佐藤,2026-12-01 18:00\n```\n';
+
+  it('🔴 保存 → vars.開始 に T 区切りで入り、読み直しても同じ字(往復で変更なし)', () => {
+    const r = rig(DT + '\n');
+    r.field('開始').value = '2026-11-21T09:30';
+    r.press('form-save');
+    const next = applyBodyRewrite(DT + '\n', r.rewrites[0]!)!;
+    expect(extractVars(next)).toEqual({ 開始: '2026-11-21T09:30' });
+    const r2 = rig(next);
+    expect(r2.field('開始').value).toBe('2026-11-21T09:30');
+    r2.press('form-save');
+    expect(r2.rewrites).toHaveLength(0);
+  });
+
+  it('表に追加・更新・読み込み(空白区切りの升は T に揃えて読む)', () => {
+    const body = DT + '\n\n' + T;
+    const a = rig(body);
+    a.field('氏名').value = '田中';
+    a.field('開始').value = '2027-01-02T03:04';
+    a.press('form-row-add');
+    expect(applyBodyRewrite(body, a.rewrites[0]!)!).toContain('田中,2027-01-02T03:04');
+    const u = rig(body);
+    (u.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '1';
+    u.field('氏名').value = '山田';
+    u.field('開始').value = '2026-11-22T10:00';
+    u.press('form-row-update');
+    expect(applyBodyRewrite(body, u.rewrites[0]!)!).toContain('山田,2026-11-22T10:00');
+    const l = rig(body);
+    (l.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '2';
+    l.press('form-row-load');
+    expect(extractVars(applyBodyRewrite(body, l.rewrites[0]!)!)).toEqual({ 氏名: '佐藤', 開始: '2026-12-01T18:00' });
+  });
+
+  it('必須の datetime が空なら表に追加を断る', () => {
+    const src = DT.replace('    type: datetime', '    type: datetime\n    required: true');
+    const r = rig(src + '\n');
+    r.field('氏名').value = 'x';
+    r.press('form-row-add');
+    expect(r.err()).toContain('必須の項目が未入力です');
+    expect(r.rewrites).toHaveLength(0);
+  });
+});
