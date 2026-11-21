@@ -1,5 +1,13 @@
 import { test, expect, type CDPSession, type Locator, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, writesLanded } from './helpers';
+import {
+  gotoApp,
+  clickReal,
+  createEntry,
+  collectPageErrors,
+  dismissAnnounce,
+  useSplitEditor,
+  writesLanded,
+} from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
 test.beforeEach(async ({ page }) => {
@@ -597,6 +605,12 @@ test('🔴 予定のある日とない日で、小さな月の升目の高さが
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
+  /**
+   * ⚠ 起動時のお知らせを先に閉じる(#1982 段 5-5 で検出)── この test は画面の下の小さな月へ札をドロップする。
+   *   お知らせは画面の下に出るので、**いちばん新しいお知らせの長さ次第で**落とし先を覆い、ドロップが
+   *   お知らせの上に落ちて「元に戻す」が出なかった(お知らせを 1 件足しただけで落ちた)。見たいのは予定の動きで、お知らせではない。
+   */
+  await dismissAnnounce(page);
 
   await createEntry(page, 'text');
   await page
