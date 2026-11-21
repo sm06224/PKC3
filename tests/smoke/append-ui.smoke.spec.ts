@@ -291,3 +291,42 @@ test('🔴 追記欄を畳んでいても、編集中は追記欄側の「保存
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+test('🔴 追記欄の Tab は、リストの行でだけ字下げし、ふつうの行では次へ出ていける (#2001 段 2)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await makeNote(page, SHORT);
+
+  const input = page.locator('[data-pkc-field="append-input"]');
+  await clickReal(page, '[data-pkc-field="append-input"]');
+
+  // ふつうの行: Tab は握らない ── 実ブラウザで焦点が欄の外へ出る(キーボードだけの人が欄から出られる)
+  await input.fill('ふつうの行');
+  await page.keyboard.press('Tab');
+  await expect(input, 'ふつうの行の Tab で焦点が欄に居残った(出られない)').not.toBeFocused();
+  expect(await input.inputValue(), 'ふつうの行が字下げされた').toBe('ふつうの行');
+
+  // リストの行: Tab は字下げ ── 焦点は欄に残る
+  await input.focus();
+  await input.fill('- りんご');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Tab');
+  await expect(input, 'リストの行の Tab で焦点が出た').toBeFocused();
+  expect(await input.inputValue()).toMatch(/^\s+- りんご$/);
+
+  // 🔴 Ctrl+Z で字下げが戻る(取り消しの履歴を切らない書き方 = insertText)
+  await page.keyboard.press('Control+z');
+  expect(await input.inputValue(), '字下げが Ctrl+Z で戻らない').toBe('- りんご');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('End');
+
+  // Enter でリストが続く。Ctrl+Z で継ぎ足しだけが戻る
+  const before = await input.inputValue();
+  await page.keyboard.press('Enter');
+  expect(await input.inputValue()).toMatch(/\n\s*- $/);
+  await page.keyboard.press('Control+z');
+  expect(await input.inputValue(), '継ぎ足しが Ctrl+Z で戻らない').toBe(before);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

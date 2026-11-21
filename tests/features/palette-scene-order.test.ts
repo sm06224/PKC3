@@ -89,7 +89,8 @@ describe('場面の決め方(paletteScene)', () => {
     expect([...paletteScene(ta('editor-body'), booted)]).toEqual(['editor']);
     expect([...paletteScene(ta('row-source'), booted)]).toEqual(['row']);
     expect([...paletteScene(ta('append-input'), booted)]).toEqual(['append']);
-    expect([...paletteScene(ta(SECTION_BOX_INPUT_FIELD), booted)]).toEqual(['append']);
+    // 🔴 章の欄は鍵の文脈(`keyContextOfField`)と同じ 'row'(#2001 段 2。以前は append と言って鍵とずれていた)
+    expect([...paletteScene(ta(SECTION_BOX_INPUT_FIELD), booted)]).toEqual(['row']);
   });
 
   it('🔴 欄の外: 1 画面の編集中 → live / 別の画面 → window / ノートを読んでいる → reading / 何も開いていない → 空', () => {

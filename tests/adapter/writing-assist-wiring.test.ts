@@ -168,12 +168,12 @@ describe('リストの継続が編集欄に繋がっている #1167', () => {
     expect(ta.value, '記号が残っている').toBe('- あ\n\n');
   });
 
-  /** ⚠ 追記の欄は引用と同じく入れない(Enter は計算にだけ使い、送るのは Ctrl+Enter)。 */
-  it('🔴 追記欄では続けない(対照: 同じ値の全文欄では続く)', () => {
+  /** 🔴 追記の欄も続ける(#2001 段 2)。送るのは Ctrl+Enter(上の「Ctrl+Enter は触らない」が守る)。 */
+  it('🔴 追記欄でも続く(全文欄と同じ結果)', () => {
     const { root } = setup();
     const ap = editor(root, '- 牛乳', 4, 'append-input');
     enter(ap);
-    expect(ap.value, '追記欄でリストが続いている').toBe('- 牛乳');
+    expect(ap.value, '追記欄でリストが続いていない').toBe('- 牛乳\n- ');
     const ed = editor(root, '- 牛乳', 4);
     enter(ed);
     expect(ed.value).toBe('- 牛乳\n- ');
