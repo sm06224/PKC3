@@ -466,7 +466,8 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   await expect(endRow, '帯が出ているのに「一致の表示を閉じる」が押せない').toBeEnabled();
   await win.keyboard.press('Enter');
   await expect(win.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
-  expect((await hits()).all, '× を押しても塗りが残っている').toBe(0);
+  // ⚠ 窓が閉じてから塗りを消すまでに 1 フレーム挟むことがある(5 回に 2 回、直後に読んで 2 が返った)── 消えるのを待つ
+  await expect.poll(async () => (await hits()).all, { message: '× を押しても塗りが残っている', timeout: 2000 }).toBe(0);
   await expect(win.locator('[data-pkc-field="search-jump-count"]')).toBeHidden();
   const bare = await win.screenshot({ clip });
   expect(
