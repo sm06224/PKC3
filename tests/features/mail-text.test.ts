@@ -132,6 +132,12 @@ describe('ブロックの記号', () => {
     expect(markdownToMailText(b)).toBe('日報\nお名前: 山田\n済: はい\n備考: (未入力)\n');
   });
 
+  it('複数選択の入力欄は 1 行(持ち物: PC, ペン)/ 未選択は(未入力)', () => {
+    const def = '```yaml form\nfields:\n  - name: 持ち物\n    type: checkbox-group\n    options: [PC, ペン]\n```\n';
+    expect(markdownToMailText('---\nvars.持ち物: "PC, ペン"\n---\n' + def)).toBe('持ち物: PC, ペン\n');
+    expect(markdownToMailText(def)).toBe('持ち物: (未入力)\n');
+  });
+
   it('件名つき下書き', () => {
     expect(mailDraftText('  週報  2026-10-26 ', '本文\n')).toBe('件名: 週報 2026-10-26\n\n本文\n');
   });

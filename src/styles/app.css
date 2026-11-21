@@ -2574,6 +2574,29 @@ button[data-pkc-variant='danger']:hover:not(:disabled),
   color: var(--danger, #b3261e);
   font-size: var(--fs-sm);
 }
+.pkc-md-rendered .pkc-form-row-group fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1, 4px) var(--s3);
+  align-items: center;
+}
+.pkc-md-rendered .pkc-form-row-group legend {
+  padding: 0;
+  margin-bottom: var(--s1, 4px);
+}
+.pkc-md-rendered .pkc-form-option {
+  display: inline-flex;
+  gap: var(--s1, 4px);
+  align-items: center;
+}
+.pkc-md-rendered .pkc-form-warn {
+  margin-left: var(--s1, 4px);
+  color: var(--warning, #8a5a00);
+  font-size: var(--fs-sm);
+}
 .pkc-md-rendered .pkc-form-empty {
   color: var(--muted);
 }

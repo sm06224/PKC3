@@ -238,7 +238,7 @@ import { currentTagColor } from '@adapter/ui/render/tag-color';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { bodyBelowFrontmatter, extractVars, frontmatterLineCount } from '@features/markdown/frontmatter';
-import { isCheckedValue, normalizeDatetime } from '@features/markdown/form-def';
+import { isCheckedValue, joinGroupValue, normalizeDatetime, parseGroupValue } from '@features/markdown/form-def';
 import { formRowCells, loadFormRow, planFormRow, type FormColumn } from '@features/markdown/form-table';
 import {
   ENTRY_PICK_LIMIT,
@@ -6036,7 +6036,18 @@ function readFormInputs(form: HTMLElement): {
       if (!on && el.getAttribute('data-pkc-form-required') === 'true') missing.push(label);
       continue;
     }
-    const raw = el.value;
+    let raw = el.value;
+    if (type === 'checkbox-group') {
+      // 🔴 1 つの値 `PC, ペン`(選択肢の字を並べる)。定義に無い選択肢も欄に出ている(外せる)ので、見えている順に拾う
+      raw = joinGroupValue(
+        [...el.querySelectorAll<HTMLInputElement>('input[data-pkc-form-option]')]
+          .filter((c) => c.checked)
+          .map((c) => c.getAttribute('data-pkc-form-option') ?? ''),
+      );
+    } else if (type === 'datetime' && raw === '') {
+      // 読めない保存値は欄に入らない ── 触っていなければそのまま残す
+      raw = el.getAttribute('data-pkc-form-raw') ?? '';
+    }
     cells[name] = raw;
     if (raw === '') {
       values[name] = undefined;
@@ -14204,6 +14215,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       if (type === 'checkbox') values[name] = isCheckedValue(cell);
       else if (cell === '') values[name] = undefined;
       else if (type === 'datetime') values[name] = normalizeDatetime(cell);
+      else if (type === 'checkbox-group') values[name] = joinGroupValue(parseGroupValue(cell));
       else if (type === 'number' && String(Number(cell)) === cell.trim()) values[name] = Number(cell);
       else values[name] = cell;
     }

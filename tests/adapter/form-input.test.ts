@@ -269,3 +269,82 @@ describe('datetime(#2002 段 1)', () => {
     expect(r.rewrites).toHaveLength(0);
   });
 });
+
+describe('checkbox-group と datetime の読めない値(#2002 段 1 再設計)', () => {
+  const G = ['```yaml form', 'table: 持参', 'fields:', '  - name: 持ち物', '    type: checkbox-group', '    required: true', '    options: [PC, ペン, ノート]', '```'].join('\n');
+  const GT = '```csv name=持参\n持ち物\n"PC, ペン"\n"ノート"\n```\n';
+  const opt = (r: ReturnType<typeof rig>, o: string): HTMLInputElement =>
+    r.host.querySelector<HTMLInputElement>(`[data-pkc-form-option="${o}"]`)!;
+
+  it('🔴 保存 → 1 つの vars(PC, ペン)/ 読み直しても変更なし(日本語・空白・往復)', () => {
+    const r = rig(G + '\n');
+    opt(r, 'PC').checked = true;
+    opt(r, 'ペン').checked = true;
+    r.press('form-save');
+    const next = applyBodyRewrite(G + '\n', r.rewrites[0]!)!;
+    expect(extractVars(next)).toEqual({ 持ち物: 'PC, ペン' });
+    const r2 = rig(next);
+    expect(opt(r2, 'PC').checked).toBe(true);
+    expect(opt(r2, 'ノート').checked).toBe(false);
+    r2.press('form-save');
+    expect(r2.rewrites).toHaveLength(0);
+  });
+
+  it('🔴 並べ替えた定義でも、保存し直して値が動かない / 外す → 空で行が消える', () => {
+    const body = '---\nvars.持ち物: "PC, ペン"\n---\n' + G.replace('[PC, ペン, ノート]', '[ノート, ペン, PC]') + '\n';
+    const r = rig(body);
+    r.press('form-save');
+    expect(r.rewrites).toHaveLength(0);
+    opt(r, 'PC').checked = false;
+    opt(r, 'ペン').checked = false;
+    r.press('form-save');
+    expect(r.err()).toBe('');
+    expect(extractVars(applyBodyRewrite(body, r.rewrites[0]!)!)).toEqual({});
+  });
+
+  it('🔴 定義に無い選択肢は残り、外せる', () => {
+    const body = '---\nvars.持ち物: "PC, 旧"\n---\n' + G + '\n';
+    const r = rig(body);
+    expect(opt(r, '旧').checked).toBe(true);
+    opt(r, 'ペン').checked = true;
+    r.press('form-save');
+    expect(extractVars(applyBodyRewrite(body, r.rewrites[0]!)!)).toEqual({ 持ち物: 'PC, 旧, ペン' });
+  });
+
+  it('🔴 必須のグループは 1 つも選ばなければ表に追加を断る / 選べば 1 列で追加', () => {
+    const body = G + '\n\n' + GT;
+    const r = rig(body);
+    r.press('form-row-add');
+    expect(r.err()).toContain('必須の項目が未入力です: 持ち物');
+    expect(r.rewrites).toHaveLength(0);
+    opt(r, 'ペン').checked = true;
+    opt(r, 'ノート').checked = true;
+    r.press('form-row-add');
+    expect(applyBodyRewrite(body, r.rewrites[0]!)!).toContain('"ペン, ノート"');
+  });
+
+  it('表の更新と読み込みも 1 列', () => {
+    const body = G + '\n\n' + GT;
+    const u = rig(body);
+    (u.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '2';
+    opt(u, 'PC').checked = true;
+    u.press('form-row-update');
+    expect(applyBodyRewrite(body, u.rewrites[0]!)!).toContain('"PC, ペン"\n"PC"');
+    const l = rig(body);
+    (l.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '1';
+    l.press('form-row-load');
+    expect(extractVars(applyBodyRewrite(body, l.rewrites[0]!)!)).toEqual({ 持ち物: 'PC, ペン' });
+  });
+
+  it('🔴 datetime の読めない保存値は、触らずに保存しても消えない / 選べば置き換わる', () => {
+    const DT = ['```yaml form', 'fields:', '  - name: 開始', '    type: datetime', '    required: true', '```'].join('\n');
+    const body = '---\nvars.開始: 来週の頭\n---\n' + DT + '\n';
+    const r = rig(body);
+    r.press('form-save');
+    expect(r.err()).toBe('');
+    expect(r.rewrites).toHaveLength(0);
+    r.field('開始').value = '2026-11-21T09:30';
+    r.press('form-save');
+    expect(extractVars(applyBodyRewrite(body, r.rewrites[0]!)!)).toEqual({ 開始: '2026-11-21T09:30' });
+  });
+});

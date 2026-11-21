@@ -15,6 +15,9 @@ import {
   isCheckedValue,
   isFormInfo,
   normalizeDatetime,
+  isDatetimeValue,
+  parseGroupValue,
+  joinGroupValue,
   parseFormDef,
 } from '../../src/features/markdown/form-def';
 
@@ -209,7 +212,7 @@ describe('datetime / radio / checkbox-group(#2002 段 1)', () => {
     expect(html).toContain('data-pkc-form-type="datetime"');
     expect(html).toContain('value="2026-11-21T09:30"');
     expect(formHtml(src, { interactive: true, vars: { 開始: '2026-11-21 09:30' } })).toContain('value="2026-11-21T09:30"');
-    expect(formHtml(src, { interactive: true, vars: { 開始: 'そのうち' } })).toContain('value="そのうち"');
+    expect(formHtml(src, { interactive: true, vars: { 開始: 'そのうち' } })).toContain('data-pkc-form-raw="そのうち"');
     expect(normalizeDatetime('2026-11-21 09:30')).toBe('2026-11-21T09:30');
     expect(normalizeDatetime('x y')).toBe('x y');
   });
@@ -230,6 +233,7 @@ describe('datetime / radio / checkbox-group(#2002 段 1)', () => {
       ['radio', '', false, false],
       ['checkbox-group', '[a, b]', false, true],
       ['checkbox-group', '', false, false],
+      ['checkbox-group', '[a;b]', true, true],
       ['datetime-local', '', false, false],
       ['time', '', false, false],
     ];
@@ -237,7 +241,7 @@ describe('datetime / radio / checkbox-group(#2002 段 1)', () => {
       const src = `fields:\n  - name: f\n    type: ${type}\n${opts === '' ? '' : `    options: ${opts}\n`}${req ? '    required: true\n' : ''}`;
       const d = parseFormDef(src);
       expect(d.errors.length === 0, `${type} ${opts} ${String(req)}`).toBe(ok);
-      if (ok && type !== 'checkbox-group') expect(d.fields[0]!.required).toBe(req);
+      if (ok) expect(d.fields[0]!.required).toBe(req);
     }
   });
 
@@ -249,24 +253,49 @@ describe('datetime / radio / checkbox-group(#2002 段 1)', () => {
     expect(parseFormDef('fields:\n  - name: 区分\n    type: radio\n').errors.join()).toContain('radio なのに options がありません');
   });
 
-  it('checkbox-group は選択肢ごとのチェックに展開する(<項目>_<選択肢>)/ 名前に使えない選択肢は連番', () => {
-    const d = parseFormDef('fields:\n  - name: 道具\n    label: 持ち物\n    type: checkbox-group\n    options: [PC, "ペン 2本"]\n');
-    expect(d.errors).toEqual([]);
-    expect(d.fields.map((f) => [f.name, f.label, f.type])).toEqual([
-      ['道具_PC', '持ち物: PC', 'checkbox'],
-      ['道具_2', '持ち物: ペン 2本', 'checkbox'],
-    ]);
-    const html = formHtml('fields:\n  - name: 道具\n    type: checkbox-group\n    options: [PC, ペン]\n', {
-      interactive: true,
-      vars: { 道具_PC: 'true' },
-    });
-    expect(html.match(/<input type="checkbox"/gu)).toHaveLength(2);
-    expect(html).toMatch(/data-pkc-form-field="道具_PC"[^>]*checked/u);
-    expect(html).not.toMatch(/data-pkc-form-field="道具_ペン"[^>]*checked/u);
+  it('checkbox-group は 1 つの項目(値は "PC, ペン")/ 選択肢の字で照合し、並べ替え・追加・改名で値が動かない', () => {
+    const def = (opts: string): string => `fields:\n  - name: 持ち物\n    type: checkbox-group\n    options: ${opts}\n`;
+    expect(parseFormDef(def('[PC, ペン, ノート]')).fields).toHaveLength(1);
+    const checked = (html: string): string[] =>
+      [...html.matchAll(/data-pkc-form-option="([^"]*)"( checked)?>/gu)].filter((m) => m[2] !== undefined).map((m) => m[1]!);
+    const vars = { 持ち物: 'PC, ペン' };
+    expect(checked(formHtml(def('[PC, ペン, ノート]'), { interactive: true, vars }))).toEqual(['PC', 'ペン']);
+    // 並べ替え・途中への挿入でも同じ選択肢が選ばれたまま
+    expect(checked(formHtml(def('[ノート, ペン, PC]'), { interactive: true, vars }))).toEqual(['ペン', 'PC']);
+    expect(checked(formHtml(def('[PC, 新, ペン, ノート]'), { interactive: true, vars }))).toEqual(['PC', 'ペン']);
+    // 改名(定義に無くなった選択肢)は落とさず、警告つきで選ばれたまま見える
+    const renamed = formHtml(def('[パソコン, ペン]'), { interactive: true, vars });
+    expect(checked(renamed)).toEqual(['ペン', 'PC']);
+    expect(renamed).toContain('定義に無い選択肢');
+    expect(formHtml(def('[PC, ペン]'), { interactive: true, vars })).not.toContain('定義に無い選択肢');
+    expect(parseGroupValue(' PC ,ペン,, PC')).toEqual(['PC', 'ペン']);
+    expect(joinGroupValue(['PC', 'ペン'])).toBe('PC, ペン');
   });
 
-  it('checkbox-group の展開名が他の項目と重なれば理由を出す', () => {
-    const d = parseFormDef('fields:\n  - name: 道具_PC\n  - name: 道具\n    type: checkbox-group\n    options: [PC]\n');
-    expect(d.errors.join()).toContain('「道具_PC」が重なっています');
+  it('checkbox-group: 選択肢に「,」は定義の誤り / 必須は属性に出る / 静的な表は 1 行', () => {
+    const bad = parseFormDef('fields:\n  - name: x\n    type: checkbox-group\n    options: ["a, b", c]\n');
+    expect(bad.errors.join()).toContain('選択肢に「,」は使えません');
+    expect(bad.fields).toHaveLength(0);
+    const src = 'fields:\n  - name: 持ち物\n    type: checkbox-group\n    required: true\n    options: [PC, ペン]\n';
+    expect(formHtml(src, { interactive: true, vars: {} })).toContain('data-pkc-form-required="true"');
+    const st = formHtml(src, { interactive: false, vars: { 持ち物: 'PC, ペン' } });
+    expect(st.match(/<tr>/gu)).toHaveLength(1);
+    expect(st).toContain('<td>PC, ペン</td>');
+  });
+
+  it('重なった定義の誤りは全部出す', () => {
+    const d = parseFormDef('fields:\n  - name: a\n  - name: a\n  - name: b\n  - name: b\n');
+    expect(d.errors.filter((e) => e.includes('重なっています'))).toHaveLength(2);
+  });
+
+  it('datetime の読めない保存値は、空にせず字のまま見せる(警告つき)/ 秒つき・空白区切りは読める', () => {
+    const src = 'fields:\n  - name: 開始\n    type: datetime\n';
+    const odd = formHtml(src, { interactive: true, vars: { 開始: '2026-11-21T09:30+09:00' } });
+    expect(odd).toContain('data-pkc-form-raw="2026-11-21T09:30+09:00"');
+    expect(odd).toContain('読めない値');
+    expect(isDatetimeValue('2026-11-21T09:30:15')).toBe(true);
+    expect(isDatetimeValue('2026-11-21T09:30+09:00')).toBe(false);
+    expect(formHtml(src, { interactive: true, vars: { 開始: '2026-11-21 09:30:15' } })).toContain('value="2026-11-21T09:30:15"');
+    expect(formHtml(src, { interactive: true, vars: { 開始: '' } })).not.toContain('読めない値');
   });
 });
