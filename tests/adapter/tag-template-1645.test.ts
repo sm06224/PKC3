@@ -16,6 +16,7 @@ import { createTagColorListSection } from '../../src/adapter/ui/render/settings/
 import { snippetItemOf } from '../../src/features/snippet/snippet-table';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { openDialog } from './dialog-helper';
+import { SAMPLE_TEMPLATES, sampleLabel } from '../../src/features/snippet/sample-templates';
 
 const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -160,15 +161,75 @@ describe('④ テンプレートから作る', () => {
     expect(d.getState().openBody?.body).toBe(created!.body);
   });
 
-  it('自分のテンプレートが無いときは、作り方を書いた 1 行を出す(黙らない)', async () => {
+  it('自分のテンプレートが無くても一覧は開き(サンプルがある)、作り方を書いた 1 行が注記に出る', async () => {
     const { d, sent, press } = setup();
     d.dispatch({ type: 'SET_SNIPPET_SCAN', scan: { items: [], total: 0, truncated: false } });
     sent.length = 0;
     press();
     await tick();
-    expect(openDialog()).toBeNull();
-    const n = sent.find((a) => a.type === 'OP_NOTICE') as { message: string } | undefined;
-    expect(n?.message).toContain('まだ自分のテンプレートがありません');
+    const dlg = openDialog();
+    expect(dlg, '一覧が開かない').not.toBeNull();
+    expect(dlg!.querySelector('[data-pkc-field="pick-template-note-note"]')?.textContent).toContain(
+      'まだ自分のテンプレートがありません',
+    );
+    expect(dlg!.querySelectorAll('[data-pkc-field="pick-template-note"]')).toHaveLength(3);
+    expect(dlg!.querySelectorAll('[data-pkc-field="pick-template-note-sep"]'), '自分のテンプレートが無いのに区切りが出ている').toHaveLength(0);
     expect(sent.some((a) => a.type === 'CREATE_ENTRY')).toBe(false);
+  });
+
+  it('🔴 #2002 サンプルを選ぶと、題名つきの複製のノートが編集で開く(囲みは原文のまま・自分のテンプレートの一覧は増えない)', async () => {
+    const { d, sent, press } = setup();
+    press();
+    await tick();
+    const rows = [...openDialog()!.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-template-note"]')];
+    expect(rows.map((r) => r.textContent)).toEqual([
+      '議事録の型',
+      ...SAMPLE_TEMPLATES.map((x) => sampleLabel(x)),
+    ]);
+    expect(openDialog()!.querySelectorAll('[data-pkc-field="pick-template-note-sep"]'), '自分のテンプレートとサンプルの区切り').toHaveLength(1);
+    const before = d.getState().snippetScan;
+    rows[2]!.click(); // 当番の引き継ぎ
+    await tick();
+    const created = sent.find((a) => a.type === 'CREATE_ENTRY') as
+      | { body?: string; title: string; archetype: string }
+      | undefined;
+    expect(created?.title).toBe('当番の引き継ぎ');
+    expect(created?.archetype).toBe('text');
+    const src = SAMPLE_TEMPLATES[1]!.body;
+    const form = src.slice(src.indexOf('```yaml form'), src.indexOf('```', src.indexOf('```yaml form') + 3) + 3);
+    expect(form.length).toBeGreaterThan(200);
+    expect(created!.body).toContain(form);
+    expect(d.getState().phase).toBe('editing');
+    expect(d.getState().snippetScan, '自分のテンプレートの走査結果が動いた').toBe(before);
+    expect([...d.getState().entryMetas.values()].some((m) => m.title === '議事録の型' || m.archetype === 'snippet')).toBe(false);
+  });
+
+  it('🔴 #2002 サンプルは、いま見ているフォルダの中に作られる(parentLid)', async () => {
+    const { d, sent, press } = setup();
+    d.dispatch({ type: 'SET_SCOPE', lid: 'a' });
+    expect(d.getState().scopeLid).toBe('a');
+    sent.length = 0;
+    press();
+    await tick();
+    openDialog()!.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-template-note"]')[1]!.click();
+    await tick();
+    const created = sent.find((a) => a.type === 'CREATE_ENTRY') as { parentLid: string | null } | undefined;
+    expect(created?.parentLid).toBe('a');
+  });
+
+  it('🔴 #2002 自分のテンプレートの lid がサンプルの id と同じでも、サンプルと取り違えない', async () => {
+    const { d, sent, press } = setup();
+    const odd = snippetItemOf('qa-regression', '紛らわしい型', '自分の本文')!;
+    d.dispatch({ type: 'SET_SNIPPET_SCAN', scan: { items: [odd], total: 1, truncated: false } });
+    sent.length = 0;
+    press();
+    await tick();
+    const rows = [...openDialog()!.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-template-note"]')];
+    expect(rows[0]!.textContent).toBe('紛らわしい型');
+    rows[0]!.click();
+    await tick();
+    const created = sent.find((a) => a.type === 'CREATE_ENTRY') as { body?: string; title: string } | undefined;
+    expect(created?.body).toBe('自分の本文');
+    expect(created?.title).not.toBe('回帰テストの実施記録');
   });
 });

@@ -335,6 +335,7 @@ import {
   isLineOp,
 } from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
+import { SAMPLE_TEMPLATES, sampleById, sampleLabel } from '@features/snippet/sample-templates';
 import { abbrBeforeCaret, type SnippetItem } from '@features/snippet/snippet-table';
 import { assetChoices, assetInsertEdit, atChoices, slashChoices, slashToolChoices } from '@features/markdown/inline-complete';
 import { createAssetIndex } from './asset-complete-index';
@@ -1933,6 +1934,8 @@ const createAndEdit = (
   parentLid: string | null,
   /** 🔴 テンプレートから作るときの本文(#1645)。省略 = 種類の既定の本文。 */
   body?: string,
+  /** 🔴 サンプルから作るときの題名(#2002)。省略 = 既定の題名。 */
+  title?: string,
 ): void => {
   /**
    * 🔴 **スマートフォルダの中には作れない ── 作る前に断る**(依頼 338。Gemini 回答 = A)。
@@ -1957,7 +1960,7 @@ const createAndEdit = (
     type: 'CREATE_ENTRY',
     archetype,
     lid,
-    title: defaultTitle(dispatcher, archetype),
+    title: title ?? defaultTitle(dispatcher, archetype),
     parentLid,
     relationId: generateLid(),
     ...(body !== undefined ? { body } : {}),
@@ -11742,34 +11745,33 @@ const ACTIONS: Record<string, ActionHandler> = {
   /**
    * 🔴 **テンプレートから作る**(#1645 項目 4。Gemini 裁定 = #1163 の依頼 39-4=A「推薦どおり」)。
    *
-   * ⚠ 一覧は `insert-snippet` と**同じ走査結果**(`snippetScan`)── 自分のテンプレートだけ並べる
-   *   (組み込みの表・図は本文に挿す物で、ノートの中身にならない)。
+   * ⚠ 一覧は `insert-snippet` と**同じ走査結果**(`snippetScan`)── 自分のテンプレートに、組み込みのサンプル(#2002。
+   *   `sample-templates.ts`。選ぶと複製のノートができ、サンプルは動かない)を後ろへ足す。組み込みの表・図は並べない。
    * ⚠ 本文は `insertSnippet` で空の本文へ挿した結果を使う(日付などの変数の埋め方を 2 か所に書かない)。
    * ⚠ 入れ先・編集に入る・編集権は `create-entry` と同じ `createAndEdit` 1 本。
    * ⚠ 一覧を開いている間に編集へ入った / 取り込みが始まったなら、作らずに理由を言う。
-   * ⚠ 無いときは黙らない ── 作り方を書いた 1 行(`snippetMenuNote`)を出す。
+   * ⚠ 自分のテンプレートが無いときも一覧は開く(サンプルがある)── 作り方を書いた 1 行(`snippetMenuNote`)は注記に出す。
    */
   'create-from-template': (dispatcher, _target, services, root) => {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') return;
     const scan = st.snippetScan;
     const items = scan?.items ?? [];
-    if (items.length === 0) {
-      dispatcher.dispatch({ type: 'OP_NOTICE', message: snippetMenuNote(scan) });
-      return;
-    }
-    void pickTemplateNoteInApp(root, items, snippetMenuNote(scan)).then((lid) => {
-      if (lid === null) return;
-      const item = items.find((s) => s.lid === lid);
-      if (item === undefined) return;
+    // 🔴 組み込みのサンプル(#2002)は常に並ぶ ── 自分のテンプレートが 0 件でも一覧は開く(作り方の 1 行は注記に残す)
+    const samples = SAMPLE_TEMPLATES.map((s) => ({ label: sampleLabel(s), id: s.id }));
+    void pickTemplateNoteInApp(root, items, snippetMenuNote(scan), samples).then((pick) => {
+      if (pick === null) return;
+      const sample = pick.sample ? sampleById(pick.key) : null;
+      const item = pick.sample ? undefined : items.find((s) => s.lid === pick.key);
+      if (sample === null && item === undefined) return;
       const now = dispatcher.getState();
       if (now.phase !== 'ready') {
         dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(now.phase)}ノートを作ってください` });
         return;
       }
       const parent = now.scopeLid === null ? null : (now.entryMetas.get(now.scopeLid) ?? null);
-      const body = insertSnippet({ text: '', start: 0, end: 0 }, item.body, new Date()).text;
-      createAndEdit(dispatcher, services, 'text', parent?.lid ?? null, body);
+      const body = insertSnippet({ text: '', start: 0, end: 0 }, (sample ?? item)!.body, new Date()).text;
+      createAndEdit(dispatcher, services, 'text', parent?.lid ?? null, body, sample?.title);
     });
   },
   /**
