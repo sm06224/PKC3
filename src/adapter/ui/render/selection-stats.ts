@@ -46,17 +46,23 @@ export const SELECTION_STATS_FIELD = 'selection-stats';
 
 /**
  * 🔴 **編集中の本文の全体の字数の枠**(#2001 段 4)。選択の枠のすぐ左に常設する。
- * ⚠ 字の形は右の列の「全体の字数」と同じ(`formatBodyStatsFor` ── 桁区切り + 文字。見た目の字で数える)。
+ * ⚠ **数え方と桁区切りは右のペインの「全体の字数」と同じ**(`countGraphemes` + `formatBodyStatsFor` ── 見た目の字で数える)。
+ *   違うのは**読了の目安を付けない**ことだけ(打っている最中に全文の読了時間を毎回見積もらない)。
  * ⚠ 出すのは**本文全体の欄**(`editor-body`)だけ。1 画面の行の欄(`row-source`)は 1 行ぶんなので出さない(「全体」と食い違う)。
  * 🔑 選びの枠と同じ trailing debounce で 1 度だけ数える(打鍵ごとに全文を数えない)。
  */
 export const TOTAL_CHARS_FIELD = 'total-chars';
 export const TOTAL_CHARS_LABEL = '全体の字数';
 
-/** 本文全体の字数の枠の字。欄が全体の本文でなければ空。 */
-export function totalCharsText(ta: HTMLTextAreaElement | null): string {
+/**
+ * 本文全体の字数の枠の字。欄が全体の本文でなければ空。
+ * 🔑 `memo` を渡すと、**本文が前回と同じ字なら数え直さない**(selectionchange / focusin のたびに全文を歩かない)。
+ */
+export function totalCharsText(ta: HTMLTextAreaElement | null, memo?: { value: string; text: string } | null): string {
   if (ta === null || ta.getAttribute('data-pkc-field') !== 'editor-body') return '';
-  return `${TOTAL_CHARS_LABEL}: ${formatBodyStatsFor(countGraphemes(ta.value), null)}`;
+  const value = ta.value;
+  if (memo !== undefined && memo !== null && memo.value === value) return memo.text;
+  return `${TOTAL_CHARS_LABEL}: ${formatBodyStatsFor(countGraphemes(value), null)}`;
 }
 
 /**
@@ -77,7 +83,12 @@ interface LineCache {
   to: number;
   hint: string | null;
 }
-type CacheRef = { current: LineCache | null; resolver: ReturnType<typeof createCaretBlockResolver> };
+type CacheRef = {
+  current: LineCache | null;
+  resolver: ReturnType<typeof createCaretBlockResolver>;
+  /** 全体の字数の控え(同じ本文なら数え直さない)。 */
+  total?: { value: string; text: string } | null;
+};
 
 /** 控えを渡さない呼び方(test 用)の解決器。 */
 const fallbackResolver = createCaretBlockResolver();
@@ -130,7 +141,8 @@ export function syncSelectionStats(region: HTMLElement, cache?: CacheRef): boole
   // 全体の字数は選びとは別の枠(焦点が別の欄へ移っても、編集中の本文の字数は残す)
   const total = region.querySelector<HTMLElement>(`[data-pkc-field="${TOTAL_CHARS_FIELD}"]`);
   if (total !== null) {
-    const t = totalCharsText(ta);
+    const t = totalCharsText(ta, cache?.total);
+    if (cache !== undefined) cache.total = ta === null ? null : { value: ta.value, text: t };
     if (total.textContent !== t) total.textContent = t;
   }
   let text = '';

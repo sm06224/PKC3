@@ -25098,6 +25098,7 @@ export function bindActions(
   // 🔴 #2001 段 4: 打っている行の左端の線(設定で切れる。既定は入)
   undo.push(bindCurrentLine(root, { enabled: () => appCurrentLine.enabled() }));
   const assetIndex = createAssetIndex();
+  let assetReadFailed = false;
   undo.push(
     bindInlineComplete(root, {
       /**
@@ -25128,8 +25129,10 @@ export function bindActions(
           // 🔴 #2001 段 4: `(asset:` ── この container の添付の一覧(名前・種類・大きさ)。選ぶと**参照として正しい 1 つの形**を `insertText` で入れる(`Ctrl+Z` で戻せる)
           const read = services.readBodies;
           if (read === undefined) return [];
-          return assetIndex.rows(st.entryMetas, st.order, read).then((rows) =>
-            assetChoices(rows, trigger.query).map(
+          return assetIndex.rows(st.entryMetas, st.order, read).then(
+            (rows) => {
+              assetReadFailed = false;
+              return assetChoices(rows, trigger.query).map(
               (c): CompleteItem => ({
                 title: c.row.name,
                 sub: c.sub,
@@ -25140,7 +25143,16 @@ export function bindActions(
                   insertText(ta, e.text);
                 },
               }),
-            ),
+              );
+            },
+            () => {
+              // 🔴 添付の一覧を読めなかった ── 黙って候補が出ないままにしない(続けて打っても連続では知らせない)
+              if (!assetReadFailed) {
+                assetReadFailed = true;
+                dispatcher.dispatch({ type: 'OP_FAILED', error: '添付の一覧を読めませんでした(もう一度お試しください)' });
+              }
+              return [];
+            },
           );
         }
         if (trigger.kind === 'slash') {

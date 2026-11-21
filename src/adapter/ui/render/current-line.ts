@@ -41,6 +41,16 @@ export function patchText(node: Text, next: string): void {
   node.replaceData(a, curr.length - a - b, next.slice(a, next.length - b));
 }
 
+/** `background-attachment: local` を描けるか(分からない環境は「描ける」とみなす ── 現行のブラウザはすべて描ける)。 */
+export function supportsLocalBackground(view: Window | null): boolean {
+  try {
+    const css = (view as (Window & { CSS?: { supports?: (p: string, v: string) => boolean } }) | null)?.CSS;
+    return typeof css?.supports !== 'function' ? true : css.supports('background-attachment', 'local');
+  } catch {
+    return true;
+  }
+}
+
 export interface CurrentLineDeps {
   /** 読むたびに保存を見る(別のタブの変更に追随する)。 */
   enabled(): boolean;
@@ -61,6 +71,10 @@ export interface LineCache {
   prefix: string;
   top: number;
   key: string;
+  /** 前回測った本文・行末・高さ(caret だけ同じ行の中で動いたとき、何も測らず返す)。 */
+  value: string;
+  to: number;
+  height: number;
 }
 
 export function createMirror(doc: Document): Mirror {
@@ -126,12 +140,19 @@ export function measureCurrentLine(
   const { from, to } = currentLineRange(value, ta.selectionStart);
   const key = [ta.clientWidth, cs.fontFamily, cs.fontSize, cs.lineHeight, cs.paddingLeft, cs.paddingRight, cs.letterSpacing].join('|');
   const c = cache.current;
+  // 最速の道: 本文も行も幅も字の形も同じ(caret が同じ行の中で動いただけ)── 何も測らない
+  if (c !== null && c.ta === ta && c.from === from && c.to === to && c.key === key && c.value === value) {
+    return { top: c.top, height: c.height };
+  }
   if (c !== null && c.ta === ta && c.from === from && c.key === key && value.startsWith(c.prefix)) {
     // 速い道: 行だけ測る
     styleMirror(mirrors.line, ta, cs);
     patchText(mirrors.line.text, value.slice(from, to) + ZWSP);
     const b = boxIn(mirrors.line, doc, cs, 0, mirrors.line.text.length);
-    if (b !== null) return { top: c.top, height: b.height };
+    if (b !== null) {
+      cache.current = { ...c, to, value, height: b.height };
+      return { top: c.top, height: b.height };
+    }
   }
   styleMirror(mirrors.full, ta, cs);
   patchText(mirrors.full.text, value + ZWSP);
@@ -141,7 +162,7 @@ export function measureCurrentLine(
     cache.current = null;
     return null;
   }
-  cache.current = { ta, from, prefix: value.slice(0, from), top: b.top, key };
+  cache.current = { ta, from, prefix: value.slice(0, from), top: b.top, key, value, to, height: b.height };
   return b;
 }
 
@@ -151,6 +172,9 @@ export function measureCurrentLine(
  */
 export function bindCurrentLine(root: HTMLElement, deps: CurrentLineDeps): () => void {
   const doc = root.ownerDocument;
+  // 🔴 線は `background-attachment: local`(内容といっしょにスクロールする背景)に頼る ── 使えない環境では、
+  //   線が欄の上端に貼り付いて**違う行に出る**ので、描かない(何も束ねない)
+  if (!supportsLocalBackground(doc.defaultView)) return () => undefined;
   const view = doc.defaultView; // ⚠ window の resize は聞かない(欄の幅の変化は ResizeObserver が拾う。常時の聞き手を増やさない)
   let mirrors: { full: Mirror; line: Mirror } | null = null;
   const cache: { current: LineCache | null } = { current: null };
@@ -158,6 +182,7 @@ export function bindCurrentLine(root: HTMLElement, deps: CurrentLineDeps): () =>
   let frame: number | null = null;
   let composing = false;
   let observer: ResizeObserver | null = null;
+  let attrObserver: MutationObserver | null = null;
 
   const dropMirror = (): void => {
     mirrors?.full.el.remove();
@@ -172,6 +197,7 @@ export function bindCurrentLine(root: HTMLElement, deps: CurrentLineDeps): () =>
       current.style.removeProperty(CURRENT_LINE_HEIGHT_VAR);
     }
     observer?.disconnect();
+    attrObserver?.disconnect();
     current = null;
     dropMirror();
   };
@@ -184,9 +210,14 @@ export function bindCurrentLine(root: HTMLElement, deps: CurrentLineDeps): () =>
     frame = null;
     if (composing) return;
     const ta = fieldAt(doc.activeElement);
-    if (ta === null || !ta.isConnected || !deps.enabled() || ta.selectionStart !== ta.selectionEnd) {
-      // 別の欄へ移ったら、前の欄の印は外す。選び中は印を外して影も捨てる
+    if (ta === null || !ta.isConnected || !deps.enabled()) {
+      // 別の欄へ移った / 設定で切った: 印も影も外す
       clear();
+      return;
+    }
+    if (ta.selectionStart !== ta.selectionEnd) {
+      // 🔴 選び中は**印だけ**外す(影・控え・聞き手は残す ── Shift+矢印のたびに全文の影を作り直さない)
+      ta.removeAttribute(CURRENT_LINE_ATTR);
       return;
     }
     if (current !== ta) {
@@ -195,6 +226,12 @@ export function bindCurrentLine(root: HTMLElement, deps: CurrentLineDeps): () =>
       if (typeof ResizeObserver !== 'undefined') {
         observer = new ResizeObserver(() => schedule());
         observer.observe(ta);
+      }
+      // 字の大きさ・配色の切り替え(`<html>` の属性 / inline の変数)は欄の大きさを変えないことがある ── 属性の変化でも測り直す。
+      // ⚠ 欄に焦点が在る間だけ張る(`clear` で外す)
+      if (typeof MutationObserver !== 'undefined') {
+        attrObserver = new MutationObserver(() => schedule());
+        attrObserver.observe(doc.documentElement, { attributes: true });
       }
     }
     mirrors ??= { full: createMirror(doc), line: createMirror(doc) };

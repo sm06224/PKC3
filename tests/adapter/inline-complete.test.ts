@@ -2,7 +2,7 @@
 /**
  * 🔴 打ちながら出る補完の小窓(#1449 `/` / #1450 `@`)── binder の配線ごと、本物の欄に打って確かめる。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { initialState } from '../../src/adapter/state/app-state';
@@ -318,7 +318,7 @@ describe('(asset: の補完(#2001 段 4)── 4 つの欄すべて', () => {
     a2: '---\nattachment.name: 写真.png\nattachment.mime: image/png\nattachment.size: 100\nattachment.asset_key: k-png\n---\n',
   };
   let reads = 0;
-  function setupAsset(field: string) {
+  function setupAsset(field: string, readOverride?: (lids: readonly string[]) => Promise<ReadonlyMap<string, string>>) {
     document.body.innerHTML = '';
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
@@ -331,11 +331,14 @@ describe('(asset: の補完(#2001 段 4)── 4 つの欄すべて', () => {
     }
     const d = new Dispatcher({ ...initialState, cid: 'c1', phase: 'editing', selectedLid: 't1', entryMetas: metas as never, order: ['a1', 'a2', 't1'] });
     reads = 0;
+    const dispatchSpy = vi.spyOn(d, 'dispatch');
     bindActions(root, d, {
-      readBodies: (lids: readonly string[]) => {
-        reads += 1;
-        return Promise.resolve(new Map(lids.map((l) => [l, BODIES[l] ?? ''] as const)));
-      },
+      readBodies:
+        readOverride ??
+        ((lids: readonly string[]) => {
+          reads += 1;
+          return Promise.resolve(new Map(lids.map((l) => [l, BODIES[l] ?? ''] as const)));
+        }),
     });
     const type = async (value: string): Promise<void> => {
       ta.focus();
@@ -346,7 +349,7 @@ describe('(asset: の補完(#2001 段 4)── 4 つの欄すべて', () => {
     };
     const rows = (): string[] =>
       [...root.querySelectorAll(`${REGION} [data-pkc-field="inline-complete-item"]`)].map((r) => r.textContent ?? '');
-    return { root, ta, type, rows, menu: () => root.querySelector(REGION) };
+    return { root, ta, type, rows, menu: () => root.querySelector(REGION), d, dispatchSpy };
   }
 
   for (const field of ['editor-body', 'row-source', 'section-draft-input', 'append-input']) {
@@ -391,6 +394,23 @@ describe('(asset: の補完(#2001 段 4)── 4 つの欄すべて', () => {
     } finally {
       localStorage.removeItem('pkc3.inline-complete');
     }
+  });
+
+  it('🔴 添付の一覧を読めなかったら、黙らず理由を出す(続けて打っても 1 度だけ)/ 直ったら出る', async () => {
+    let fail = true;
+    const s = setupAsset('editor-body', (lids) =>
+      fail ? Promise.reject(new Error('boom')) : Promise.resolve(new Map(lids.map((l) => [l, BODIES[l] ?? ''] as const))),
+    );
+    const failures = (): unknown[] =>
+      s.dispatchSpy.mock.calls.filter((c) => (c[0] as { type: string }).type === 'OP_FAILED').map((c) => c[0]);
+    await s.type('(asset:');
+    await s.type('(asset:請');
+    expect(s.menu()).toBeNull();
+    expect(failures().length, '読めないのに何も言わない / 毎打鍵で言う').toBe(1);
+    expect(JSON.stringify(failures()[0])).toContain('添付の一覧を読めませんでした');
+    fail = false;
+    await s.type('(asset:請求');
+    expect(s.rows()).toEqual(['請求書.pdfPDF · 2.0 KB']);
   });
 
   it('古い応答は捨てる: 待つ間に引き金を消したら小窓は出ない', async () => {

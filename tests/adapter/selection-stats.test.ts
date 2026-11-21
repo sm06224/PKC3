@@ -30,6 +30,7 @@ import {
   SELECTION_STATS_DELAY_MS,
   SELECTION_STATS_FIELD,
   TOTAL_CHARS_FIELD,
+  totalCharsText,
   syncSelectionStats,
   watchSelectionStats,
 } from '../../src/adapter/ui/render/selection-stats';
@@ -698,6 +699,14 @@ describe('編集中の本文の全体の字数(#2001 段 4)', () => {
     flush();
     expect(total.textContent).toBe('全体の字数: 4 文字');
     un();
+  });
+
+  it('🔴 本文が前回と同じ字なら数え直さない(控えをそのまま返す)/ 変わったら数え直す', () => {
+    const { ta } = withTotal('editor-body', 'abc');
+    // 控えの字をわざと偽物にして、「数え直していない」ことを見る(同じ値なら偽物が返る)
+    expect(totalCharsText(ta, { value: 'abc', text: '控え' })).toBe('控え');
+    expect(totalCharsText(ta, { value: 'abcd', text: '控え' }), '本文が変わったのに古い控えを返した').toBe('全体の字数: 3 文字');
+    expect(totalCharsText(ta, null)).toBe('全体の字数: 3 文字');
   });
 
   it('行の欄・追記の欄では出さない(1 行ぶん・全体ではない)', () => {

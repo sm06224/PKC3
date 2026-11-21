@@ -172,6 +172,120 @@ describe('現在行の強調の配線', () => {
     });
   });
 
+  describe('🔴 測りの細部(変異試験で穴が見つかった所)', () => {
+    const focusIn = async (s: ReturnType<typeof setup>, value: string, caret: number): Promise<void> => {
+      s.ta.value = value;
+      s.ta.focus();
+      s.ta.setSelectionRange(caret, caret);
+      s.ta.dispatchEvent(new Event('focusin', { bubbles: true }));
+      await frame();
+    };
+    const mirrors = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('[data-pkc-field="current-line-mirror"]')];
+
+    it('影の幅は clientWidth + 枠(縦のスクロールバーを除く内側の幅)── offsetWidth ではない', async () => {
+      const s = setup('editor-body');
+      Object.defineProperty(s.ta, 'clientWidth', { value: 300, configurable: true });
+      Object.defineProperty(s.ta, 'offsetWidth', { value: 317, configurable: true }); // 15px のスクロールバーを含む
+      Object.defineProperty(s.ta, 'clientLeft', { value: 1, configurable: true });
+      await focusIn(s, 'abc', 1);
+      expect(mirrors()[0]!.style.width, 'スクロールバーの分だけ広い影で折り返しがずれる').toBe('302px');
+      s.unbind();
+    });
+
+    it('行の高さ(line-height)が字の箱より高いとき、上下の余白を足した行の箱になる', async () => {
+      const s = setup('editor-body');
+      s.ta.style.lineHeight = '20px';
+      rects = [{ top: 20, bottom: 36 }]; // 字の箱 16px
+      await focusIn(s, 'abc', 1);
+      expect(s.ta.style.getPropertyValue(CURRENT_LINE_HEIGHT_VAR)).toBe('20.0px');
+      expect(s.ta.style.getPropertyValue(CURRENT_LINE_TOP_VAR), '上へ 2px 広げる').toBe('18.0px');
+      s.unbind();
+    });
+
+    it('ResizeObserver は、別の欄へ移ったとき・unbind のとき外れる(張りっぱなしにしない)', async () => {
+      const observers: { observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }[] = [];
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          observe = vi.fn();
+          disconnect = vi.fn();
+          constructor() {
+            observers.push(this);
+          }
+        },
+      );
+      const s = setup('editor-body');
+      await focusIn(s, 'abc', 1);
+      expect(observers.length, '張られていない').toBe(1);
+      expect(observers[0]!.observe).toHaveBeenCalledWith(s.ta);
+      expect(observers[0]!.disconnect).not.toHaveBeenCalled();
+      s.other.focus();
+      s.other.dispatchEvent(new Event('focusin', { bubbles: true }));
+      await frame();
+      expect(observers[0]!.disconnect, '欄を離れても外れない').toHaveBeenCalledTimes(1);
+      await focusIn(s, 'abc', 1);
+      expect(observers.length).toBe(2);
+      s.unbind();
+      expect(observers[1]!.disconnect, 'unbind で外れない').toHaveBeenCalledTimes(1);
+    });
+
+    it('字を選んでいる間は印だけ外し、影・聞き手は残す。選びを畳むと同じ影で印が戻る', async () => {
+      const s = setup('editor-body');
+      await focusIn(s, 'abc\ndef', 5);
+      const before = mirrors();
+      expect(before.length).toBe(2);
+      s.ta.setSelectionRange(0, 5);
+      document.dispatchEvent(new Event('selectionchange'));
+      await frame();
+      expect(s.ta.hasAttribute(CURRENT_LINE_ATTR)).toBe(false);
+      expect(mirrors(), '選んだだけで影を作り直した').toEqual(before);
+      expect(mirrors()[0]).toBe(before[0]);
+      s.ta.setSelectionRange(5, 5);
+      document.dispatchEvent(new Event('selectionchange'));
+      await frame();
+      expect(s.ta.hasAttribute(CURRENT_LINE_ATTR)).toBe(true);
+      expect(mirrors()[0]).toBe(before[0]);
+      s.unbind();
+    });
+
+    it('同じ行の中で caret だけ動いたときは、何も測らない', async () => {
+      const s = setup('editor-body');
+      await focusIn(s, 'abc\ndefgh', 5);
+      asked = [];
+      s.ta.setSelectionRange(8, 8);
+      document.dispatchEvent(new Event('selectionchange'));
+      await frame();
+      expect(asked, '同じ行の中の caret の移動で測り直した').toEqual([]);
+      expect(s.ta.hasAttribute(CURRENT_LINE_ATTR)).toBe(true);
+      s.ta.setSelectionRange(1, 1); // 別の行へ → 測る
+      document.dispatchEvent(new Event('selectionchange'));
+      await frame();
+      expect(asked.length).toBe(1);
+      s.unbind();
+    });
+
+    it('字の大きさ・配色の切り替え(<html> の属性)で、欄が大きさを変えなくても測り直す', async () => {
+      const s = setup('editor-body');
+      await focusIn(s, 'abc\ndef', 5);
+      asked = [];
+      s.ta.style.fontSize = '20px';
+      document.documentElement.setAttribute('data-pkc-test-scale', '2');
+      await frame();
+      document.documentElement.removeAttribute('data-pkc-test-scale');
+      expect(asked.length, '字の大きさが変わったのに測り直さない').toBeGreaterThan(0);
+      s.unbind();
+    });
+
+    it('background-attachment: local を描けない環境では何も束ねない(違う行に線を出さない)', async () => {
+      vi.stubGlobal('CSS', { supports: () => false });
+      const s = setup('editor-body');
+      await focusIn(s, 'abc', 1);
+      expect(s.ta.hasAttribute(CURRENT_LINE_ATTR)).toBe(false);
+      expect(mirrors().length).toBe(0);
+      s.unbind();
+    });
+  });
+
   it('IME の変換中は動かさず、確定で合わせ直す', async () => {
     const s = setup('editor-body');
     s.ta.value = 'x';
@@ -194,7 +308,11 @@ describe('現在行の強調の配線', () => {
     s.ta.dispatchEvent(new Event('focusin', { bubbles: true }));
     await frame();
     asked = [];
-    for (let i = 0; i < 20; i += 1) s.ta.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    for (let i = 0; i < 20; i += 1) {
+      s.ta.value = `x${String(i)}`;
+      s.ta.setSelectionRange(s.ta.value.length, s.ta.value.length);
+      s.ta.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    }
     await frame();
     expect(asked.length, '畳まれていない').toBe(1);
     s.unbind();

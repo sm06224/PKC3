@@ -93,8 +93,9 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
     el: HTMLElement;
   }
   let open: Open | null = null;
-  // 非同期の候補の世代(古い応答を捨てる)
+  // 非同期の候補の世代(古い応答を捨てる)と、いま応答を待っている引き金(待つ間の Esc で閉じるため)
   let generation = 0;
+  let waiting: { ta: HTMLTextAreaElement; start: number; query: string } | null = null;
   // Esc で閉じた引き金(欄 + 位置 + そのときの語)。同じ語のまま打ち進める間は出し直さない(語が変われば出る)
   let dismissed: { ta: HTMLTextAreaElement; start: number; query: string } | null = null;
 
@@ -115,6 +116,7 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
 
   const close = (): void => {
     generation += 1;
+    waiting = null;
     if (open !== null) open.el.remove();
     open = null;
     detachFollow();
@@ -188,21 +190,16 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
       show(ta, trigger, got as readonly CompleteItem[]);
       return;
     }
-    // 非同期の元 ── 世代を進め、返ってきたとき引き金がまだ同じなら出す
+    // 非同期の元 ── 世代を進め、返ってきたとき**世代が同じなら**出す。
+    // 🔑 守りはこの世代 1 本(引き金が変わる・閉じる・欄が替わる道はすべて `refresh` / `close` を通り、そこで世代が進む)。
+    //   応答が前後して返っても、古い応答は出ない。
     const gen = (generation += 1);
+    waiting = { ta, start: trigger.start, query: trigger.query };
     void (got as Promise<readonly CompleteItem[]>).then(
       (list) => {
         if (gen !== generation || !ta.isConnected) return;
-        if (ta.selectionStart !== ta.selectionEnd || ta.selectionStart === null) return;
-        const now = detectTrigger(ta.value, ta.selectionStart);
-        if (now === null || now.kind !== trigger.kind || now.start !== trigger.start) return;
-        if (dismissed !== null && dismissed.ta === ta && dismissed.start === now.start) return;
-        // 待つ間に語が進んでいたら、その語で引き直す(古い一覧を出さない)
-        if (now.query !== trigger.query) {
-          refresh(ta);
-          return;
-        }
-        show(ta, now, list);
+        waiting = null;
+        show(ta, trigger, list);
       },
       () => undefined,
     );
@@ -263,6 +260,15 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
   };
   const onKeyDown = (ev: KeyboardEvent): void => {
     // 🔴 変換中の Enter / Tab / Esc は変換のもの。`isComposing` が false で来る環境(確定の keydown)は keyCode 229 で見る
+    // 🔴 応答を待っている間の Esc も「閉じる」── 閉じたあとに小窓が遅れて出ない(同じ語では出し直さない)
+    if (open === null && waiting !== null && ev.key === 'Escape' && !ev.isComposing && ev.keyCode !== 229 && fieldOf(ev.target) === waiting.ta) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      dismissed = { ta: waiting.ta, start: waiting.start, query: waiting.query };
+      waiting = null;
+      generation += 1;
+      return;
+    }
     if (open === null || ev.isComposing || ev.keyCode === 229) return;
     const o = open;
     if (!o.ta.isConnected) {
