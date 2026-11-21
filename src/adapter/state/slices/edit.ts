@@ -25,6 +25,7 @@ import {
   syncShownBodies,
 } from '../app-state';
 import { seedBodyFor } from '@features/flavor';
+import { SNIPPET_ARCHETYPE } from '@features/snippet/snippet-table';
 import { foldAttachmentHead, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
 import { sectionAt, sectionRange } from '@features/markdown/append-target';
 import { replaceAll, replacedNotice } from '@features/markdown/body-replace';
@@ -34,6 +35,15 @@ import { frontmatterLineCount } from '@features/markdown/frontmatter';
 import { isSystemMessageLid } from '@features/message/message-log';
 
 export type EditAction = Extract<Dispatchable, { type: 'START_EDIT' | 'REPLACE_IN_BODY' | 'UPDATE_OPEN_BODY' | 'COMMIT_EDIT' | 'RETRY_PERSIST' | 'CANCEL_EDIT' | 'OPEN_SECTION_DRAFT' | 'SAVE_SECTION_DRAFT' | 'SECTION_SAVED' | 'SECTION_SAVE_FAILED' | 'CANCEL_SECTION_DRAFT' | 'OPEN_CODE_DRAFT' | 'SAVE_CODE_DRAFT' | 'CODE_SAVED' | 'CODE_SAVE_FAILED' | 'CANCEL_CODE_DRAFT' }>;
+
+/**
+ * 🔴 **テンプレートのノートを保存したら、走査を頼み直す**(#2002 段 5)── アプリの一覧の「記録」の節は走査の結果を使う。
+ * ⚠ 走査は編集に入る時にしか頼まれず、保存した入力欄の定義が節に反映されなかった。
+ * ⚠ 撃つのはテンプレート(`snippet`)のノートだけ ── 普通のノートの保存では走らせない。書込の後ろで走る(`scanAfterWrites`)。
+ * ⚠ 種類の変更(`SET_ENTRY_ARCHETYPE`)はノート ⇄ ログだけなので、テンプレートへ・からの変更は無い。
+ */
+const snippetRescanFor = (archetype: string): ReadonlyArray<{ type: 'REQUEST_SNIPPET_SCAN' }> =>
+  archetype === SNIPPET_ARCHETYPE ? [{ type: 'REQUEST_SNIPPET_SCAN' }] : [];
 
 export function reduceEdit(state: AppState, action: EditAction): ReduceResult {
   switch (action.type) {
@@ -267,6 +277,7 @@ export function reduceEdit(state: AppState, action: EditAction): ReduceResult {
         events: [
           { type: 'PERSIST_ENTRY', entry, checkpoint, keepMeta: true },
           ...smartScanFor(state, lid),
+          ...snippetRescanFor(meta.archetype),
         ],
       };
     }
@@ -299,7 +310,7 @@ export function reduceEdit(state: AppState, action: EditAction): ReduceResult {
           smartHits,
           openBody: { lid, body: baseline, baseline, persisted, diskAhead: false },
         },
-        events: [{ type: 'PERSIST_ENTRY', entry, checkpoint, keepMeta: true }],
+        events: [{ type: 'PERSIST_ENTRY', entry, checkpoint, keepMeta: true }, ...snippetRescanFor(meta.archetype)],
       };
     }
     case 'CANCEL_EDIT': {

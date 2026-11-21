@@ -28,6 +28,7 @@ import { allFolded, encodeFolded, isFolded } from '@features/launcher/group-fold
 import { appGroupIconOf, sortGroupNames } from '@features/launcher/app-group-spec';
 import type { IconValue } from '@features/icon/icon-value';
 import { appGroupFold, type GroupFoldStore } from './group-fold';
+import { recordTemplates } from '@features/launcher/record-tiles';
 import { setIcon } from './icons';
 import { AssetLends, type AssetLender } from './asset-lends';
 
@@ -58,6 +59,8 @@ export class LauncherRenderer {
 
   /** ⚠ **並び順も指紋に要る**(#857 段③)── 入れないと動かしても画面が変わらない。 */
   private lastOrders: string | undefined = undefined;
+  /** ⚠ **記録の節の材料**(#2002 段 5)── テンプレートの走査は後から届くので、指紋に入れないと節が出ない。 */
+  private lastScan: unknown = undefined;
 
   /**
    * 🔴 **取り込んだ絵の貸出**(#856 段②)。
@@ -164,7 +167,8 @@ export class LauncherRenderer {
       state.launcherReorder === this.lastReorder &&
       foldKey === this.lastFolded &&
       iconKey === this.lastIcons &&
-      orderKey === this.lastOrders
+      orderKey === this.lastOrders &&
+      state.snippetScan === this.lastScan
     )
       return;
     this.lastTiles = state.launcherTiles;
@@ -175,6 +179,7 @@ export class LauncherRenderer {
     this.lastFolded = foldKey;
     this.lastIcons = iconKey;
     this.lastOrders = orderKey;
+    this.lastScan = state.snippetScan;
     const list = this.ensureFrame();
     list.textContent = '';
 
@@ -218,6 +223,55 @@ export class LauncherRenderer {
      */
     const reordering = state.launcherReorder;
 
+    /**
+     * 🔴 **記録の節**(#2002 段 5)── 入力欄つきのテンプレートごとに「新しい記録」、節の頭に「記録の一覧」。
+     * ⚠ 並びは固定(自分のテンプレート → サンプル)。サンプルは常に出るので、テンプレートが 0 件でも入口は在る。
+     * ⚠ 絞り込みは題名で効かせる(他のタイルと同じ規則)。1 件も残らなければ節ごと出さない。
+     * ⚠ 双方向: 「記録の一覧」から行を押すと記録のノートへ、ノートの入力欄の「アプリの一覧」(`set-browse`)からここへ戻れる。
+     */
+    const appendRecords = (): void => {
+      const recs = recordTemplates(state.snippetScan).filter((r) => matchesTitle(r.title, q));
+      if (recs.length === 0) return;
+      const sec = document.createElement('section');
+      sec.setAttribute('data-pkc-region', 'launcher-records');
+      const head = document.createElement('div');
+      head.setAttribute('data-pkc-field', 'launcher-records-head');
+      const h = document.createElement('h3');
+      h.textContent = '記録(入力欄つきテンプレート)';
+      const all = document.createElement('button');
+      all.type = 'button';
+      all.setAttribute('data-pkc-action', 'form-open-list');
+      all.setAttribute('data-pkc-field', 'launcher-records-list');
+      all.title = '同じテンプレートから作った記録を、入力欄の値の列つきで一覧します(集計の画面)';
+      all.textContent = '記録の一覧';
+      head.append(h, all);
+      sec.append(head);
+      for (const r of recs) {
+        const row = document.createElement('div');
+        row.setAttribute('data-pkc-field', 'launcher-record-row');
+        const name = document.createElement('span');
+        name.setAttribute('data-pkc-field', 'title');
+        name.textContent = r.title;
+        const mk = document.createElement('button');
+        mk.type = 'button';
+        mk.setAttribute('data-pkc-action', 'record-new');
+        mk.setAttribute(r.sample ? 'data-pkc-template-sample' : 'data-pkc-template-lid', r.key);
+        mk.title = `「${r.title}」から新しい記録のノートを作ります(入力欄はノートの中で入れます)`;
+        mk.textContent = '新しい記録';
+        mk.setAttribute('aria-label', `${r.title} の新しい記録`);
+        row.append(name, mk);
+        sec.append(row);
+      }
+      // 🔴 走査は上限(200 件)で切れる ── 切れたら、全部は出ていないと 1 行で言う(黙って欠けさせない)
+      if (state.snippetScan?.truncated === true) {
+        const cut = document.createElement('p');
+        cut.setAttribute('data-pkc-field', 'launcher-records-truncated');
+        cut.textContent = 'テンプレートが多いため、すべては表示していません。';
+        sec.append(cut);
+      }
+      list.append(sec);
+    };
+
     if (tiles.length === 0 && q !== '') {
       // ⚠ 「1 つも無い」は来ない(組み込みのタイルが必ず入る)── 来るのは絞り込みで消えたときだけ。
       //   自分のアプリが無い案内は、一覧の末尾に出す(下の `launcher-no-own`)
@@ -237,6 +291,8 @@ export class LauncherRenderer {
       clear.textContent = '絞りを外す';
       clear.title = '一覧の絞り込みを空にして、アプリを全部出します。';
       list.append(clear);
+      // 🔴 題名が記録のテンプレートにだけ合うこともある(節は別の材料)── 出す
+      appendRecords();
       return;
     }
 
@@ -441,6 +497,8 @@ export class LauncherRenderer {
         '自分のアプリはまだありません。HTML ファイルをノートに添付し、その添付の画面で「アプリとして登録」にチェックを入れると、ここに並びます。よく開くサイトは、上の欄に名前とアドレスを入れて「リンクを足す」を押してください';
       list.append(none);
     }
+
+    appendRecords();
 
     /**
      * 🔴 **取り込んだ絵を差す**(#856 段②)── 器を組み直した**この回だけ**呼ぶ。

@@ -1917,6 +1917,33 @@ const OPENS_READABLE: readonly string[] = ['spreadsheet'];
  */
 let rowRenameReturn: { readonly lid: string; readonly parent: string | null } | null = null;
 
+/**
+ * 🔴 **テンプレートから記録のノートを 1 件作る**(#2002 段 4 / 5)── 「テンプレートから作る」の選択後と、アプリの一覧の「新しい記録」が通る **1 本**。
+ * ⚠ 本文は `insertSnippet` で空へ挿した結果 + `template:` の 1 行(`stampTemplateOrigin`)。入れ先・編集に入る・編集権は `createAndEdit`。
+ */
+const createRecordFromTemplate = (
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  src: { readonly title: string; readonly body: string; readonly lid?: string },
+  isSample = false,
+): void => {
+  const now = dispatcher.getState();
+  if (now.phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(now.phase)}ノートを作ってください` });
+    return;
+  }
+  /**
+   * 🔴 **自分のテンプレートは、いま保存されている本文から作る**(#2002 段 5)── 走査の結果は保存の直後に古いことがある。
+   * ⚠ 開いているノートなら保存済みの本文(`baseline`)を使う(打ちかけの下書きは使わない)。開いていなければ走査の本文(保存のたびに頼み直す)。
+   */
+  let srcBody = src.body;
+  if (src.lid !== undefined && now.entryMetas.has(src.lid) && now.openBody?.lid === src.lid) srcBody = now.openBody.baseline;
+  const parent = now.scopeLid === null ? null : (now.entryMetas.get(now.scopeLid) ?? null);
+  const filled = insertSnippet({ text: '', start: 0, end: 0 }, srcBody, new Date()).text;
+  const body = stampTemplateOrigin(filled, src.title);
+  createAndEdit(dispatcher, services, 'text', parent?.lid ?? null, body, isSample ? src.title : undefined);
+};
+
 /** 左の列の行の名前の打ち替えを終える。⚠ 確定・やめる・他所を押した、の 3 つが全部ここを通る(戻る道を 1 本にする)。 */
 const endRowRename = (dispatcher: Dispatcher): void => {
   dispatcher.dispatch({ type: 'ROW_RENAME_END' });
@@ -3598,6 +3625,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
    * 🔴 **テンプレートから作るのも、ノートを 1 件作る**(#1645)── `open-today` と同じ理由で載せる。
    */
   'create-from-template',
+  // 🔴 アプリの一覧の「新しい記録」も、同じテンプレートからノートを 1 件作る(#2002 段 5)
+  'record-new',
   /**
    * 🔴 **画面の下の「○○のノートを作る」は、ノートを 1 件作る**(#1169)── `CREATE_ENTRY` は
    *   即永続なので、取り込みが entry を総入れ替えしている裏で足させない
@@ -11765,17 +11794,26 @@ const ACTIONS: Record<string, ActionHandler> = {
       const sample = pick.sample ? sampleById(pick.key) : null;
       const item = pick.sample ? undefined : items.find((s) => s.lid === pick.key);
       if (sample === null && item === undefined) return;
-      const now = dispatcher.getState();
-      if (now.phase !== 'ready') {
-        dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(now.phase)}ノートを作ってください` });
-        return;
-      }
-      const parent = now.scopeLid === null ? null : (now.entryMetas.get(now.scopeLid) ?? null);
-      const filled = insertSnippet({ text: '', start: 0, end: 0 }, (sample ?? item)!.body, new Date()).text;
-      // 🔴 どのテンプレートから作ったかを残す(#2002 段 4)── 集計で「同じテンプレートの記録」を 1 組にするため
-      const body = stampTemplateOrigin(filled, (sample ?? item)!.title);
-      createAndEdit(dispatcher, services, 'text', parent?.lid ?? null, body, sample?.title);
+      createRecordFromTemplate(dispatcher, services, (sample ?? item)!, sample !== null);
     });
+  },
+  /**
+   * 🔴 **アプリの一覧の「新しい記録」**(#2002 段 5)── 入力欄つきのテンプレート 1 つから、記録のノートを 1 件作る(1 クリック)。
+   * ⚠ 作り方は「テンプレートから作る」と同じ 1 本(`createRecordFromTemplate`)。違うのは**選ぶ段を飛ばす**ことだけ。
+   * ⚠ テンプレートが消えていたら作らずに理由を言う(一覧は走査の結果なので、押す間に消えうる)。
+   */
+  'record-new': (dispatcher, target, services) => {
+    const el = target.closest<HTMLElement>('[data-pkc-action="record-new"]');
+    const sampleId = el?.getAttribute('data-pkc-template-sample') ?? null;
+    const lid = el?.getAttribute('data-pkc-template-lid') ?? null;
+    const sample = sampleId === null ? null : sampleById(sampleId);
+    const item = lid === null ? undefined : dispatcher.getState().snippetScan?.items.find((s) => s.lid === lid);
+    const src = sample ?? item;
+    if (src === undefined || src === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'テンプレートが見つかりません。アプリの一覧を開き直してください' });
+      return;
+    }
+    createRecordFromTemplate(dispatcher, services, src, sample !== null);
   },
   /**
    * 🔴 **このフォルダの中に新しいノートを作る**(#215。行の右クリック / 情報ペイン / 鍵)。
