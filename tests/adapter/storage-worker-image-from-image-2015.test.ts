@@ -169,3 +169,115 @@ describe.each([
     expect(await count((await w.request({ op: 'exportImage' })).image, other)).toEqual(before);
   }, 60_000);
 });
+
+/**
+ * 🔴 **除いた行の字が、画像の生のバイト列に残らない**(#2015 レビュー ⚠1 / ⚠2)。
+ * 行を数えるだけでは、空きページ・全文検索の索引の区画(trigram の断片)に残った字を見逃す。
+ * 目印は 3KB 超(overflow ページに載る大きさ)の繰り返し。小文字の 3 字の断片(索引はこちらで持つ)も探す。
+ */
+const MARK = 'ZZQXMARKER';
+const FRAGMENTS = ['zzq', 'zqx', 'qxm', 'xma'];
+const BIG = MARK.repeat(400);
+
+function scan(image: Uint8Array): { full: number; frags: Record<string, number> } {
+  const text = Buffer.from(image).toString('latin1');
+  const n = (needle: string): number => text.split(needle).length - 1;
+  const frags: Record<string, number> = {};
+  for (const f of FRAGMENTS) frags[f] = n(f);
+  return { full: n(MARK), frags };
+}
+
+interface Hooks {
+  setCopyOpenedHookForTest: (h: ((c: { close: () => void }) => void) | null) => void;
+}
+
+async function seededMarked(fromImage: boolean): Promise<{ w: Worker; other: string }> {
+  const { w, other } = await seeded(fromImage);
+  await w.request({ op: 'upsertEntry', cid: other, entry: { ...entry('o2'), body: BIG }, checkpoint: false });
+  await w.request({
+    op: 'appendMessage',
+    cid: 'c1',
+    lid: SYSTEM_MESSAGE_LID,
+    title: 'メッセージ',
+    section: formatMessageSection({ at: new Date(Date.UTC(2026, 9, 2, 12, 0, 9)).toISOString(), kind: 'problem', source: 'status', text: BIG }),
+    cap: 500,
+  });
+  return { w, other };
+}
+
+describe.each([
+  ['素の :memory:', false],
+  ['画像から開いた DB', true],
+])('生のバイト列: %s', (_n, fromImage) => {
+  it('🔴 withoutMessages の画像に目印も 3 字の断片も無い。対照: ふつうの画像にはある', async () => {
+    const { w } = await seededMarked(fromImage);
+    const full = scan((await w.request({ op: 'exportImage' })).image);
+    expect(full.full, '対照群に目印が無い(空振り)').toBeGreaterThanOrEqual(2);
+    for (const f of FRAGMENTS) expect(full.frags[f], `対照群に断片 ${f} が無い`).toBeGreaterThan(0);
+
+    const lean = scan((await w.request({ op: 'exportImage', withoutMessages: true })).image);
+    expect(lean.full, '目印が残った').toBe(0);
+    for (const f of FRAGMENTS) expect(lean.frags[f], `断片 ${f} が残った`).toBe(0);
+  }, 60_000);
+
+  it('🔴 写しは成功でも失敗でも閉じる / 確保の失敗は言い直す / 元は動かない', async () => {
+    const { w, other } = await seededMarked(fromImage);
+    const hooks = (await import('../../src/adapter/platform/storage/storage-worker')) as unknown as Hooks;
+    const before = await count((await w.request({ op: 'exportImage' })).image, other);
+    let closed = 0;
+    let opened = 0;
+    const spy = (c: { close: () => void }): void => {
+      opened += 1;
+      const orig = c.close.bind(c);
+      c.close = () => {
+        closed += 1;
+        orig();
+      };
+    };
+    try {
+      hooks.setCopyOpenedHookForTest(spy);
+      await w.request({ op: 'exportImage', withoutMessages: true });
+      expect([opened, closed], '成功で閉じていない').toEqual([1, 1]);
+
+      hooks.setCopyOpenedHookForTest((c) => {
+        spy(c);
+        throw new Error('注入した失敗');
+      });
+      await expect(w.request({ op: 'exportImage', withoutMessages: true })).rejects.toThrow('注入した失敗');
+      expect([opened, closed], '失敗で閉じていない').toEqual([2, 2]);
+
+      hooks.setCopyOpenedHookForTest((c) => {
+        spy(c);
+        throw new Error('WasmAllocError: out of memory');
+      });
+      await expect(w.request({ op: 'exportImage', withoutMessages: true })).rejects.toThrow('大きすぎ');
+      expect([opened, closed]).toEqual([3, 3]);
+    } finally {
+      hooks.setCopyOpenedHookForTest(null);
+    }
+    expect(await count((await w.request({ op: 'exportImage' })).image, other)).toEqual(before);
+  }, 60_000);
+});
+
+describe('除く物が無い画像から開いた DB(早期の戻りの経路)', () => {
+  it('写しを作らず(閉じる対象が無い)、そのまま画像になる', async () => {
+    let w = await spawn();
+    await w.request({ op: 'init', dbName: 'i2015', memory: true });
+    const { image } = await w.request({ op: 'exportImage' });
+    w = await spawn();
+    await w.request({ op: 'init', dbName: 'i2015', memory: true, image });
+    await w.request({ op: 'openContainer', cid: 'c1', title: 'unit' });
+    await w.request({ op: 'upsertEntry', cid: 'c1', entry: { ...entry('e1'), body: BIG }, checkpoint: false });
+    const hooks = (await import('../../src/adapter/platform/storage/storage-worker')) as unknown as Hooks;
+    let opened = 0;
+    hooks.setCopyOpenedHookForTest(() => void (opened += 1));
+    try {
+      const lean = (await w.request({ op: 'exportImage', withoutMessages: true })).image;
+      expect(opened, '除く物が無いのに写しを作った').toBe(0);
+      expect(scan(lean).full, '残す側のノートが欠けた').toBeGreaterThanOrEqual(1);
+      expect((await count(lean, 'none')).keepEntry).toBe(1);
+    } finally {
+      hooks.setCopyOpenedHookForTest(null);
+    }
+  }, 60_000);
+});
