@@ -14,11 +14,25 @@ import { isFormInfo } from '../markdown/form-def';
 import { parseFrontmatter, spliceFrontmatterKeys } from '../markdown/frontmatter';
 import { TEMPLATE_KEY } from '../query/group-by';
 
-/** 本文に入力欄の定義(` ```yaml form `)の囲みがあるか。 */
+/**
+ * 本文に入力欄の定義(` ```yaml form `)の囲みがあるか。
+ * ⚠ 囲みの入れ子を見る(4 本の囲みの中に書いた ` ```yaml form ` の行は定義ではない)。判定は描画と同じ `isFormInfo`。
+ */
 export function hasFormFence(body: string): boolean {
+  let open: { ch: string; len: number } | null = null;
   for (const line of body.split(/\r?\n/u)) {
-    const m = /^ {0,3}(?:`{3,}|~{3,})\s*(.*)$/u.exec(line);
-    if (m !== null && isFormInfo(m[1])) return true;
+    const m = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+    if (m === null) continue;
+    const ch = m[1]![0]!;
+    const len = m[1]!.length;
+    if (open === null) {
+      // ⚠ バッククォートの囲みの見出しにバッククォートは書けない(CommonMark)
+      if (ch === '`' && m[2]!.includes('`')) continue;
+      if (isFormInfo(m[2])) return true;
+      open = { ch, len };
+    } else if (ch === open.ch && len >= open.len && m[2]!.trim() === '') {
+      open = null;
+    }
   }
   return false;
 }
