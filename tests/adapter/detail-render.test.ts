@@ -294,6 +294,7 @@ describe('detail: 何も選んでいないときの案内(#1038 F1)', () => {
     detail.render(s0);
     const guide = root.querySelector('[data-pkc-field="detail-empty"]');
     expect(guide?.textContent, '案内が出ていない').toContain('ファイルをこの画面へドロップすると、添付として入ります');
+    expect(guide?.textContent, '右のペインの案内が無い').toContain('右のペインのコレクションで、書き出しと整理ができます');
     detail.render(stateWithBody('x'));
     await settle();
     expect(root.querySelector('[data-pkc-field="detail-empty"]')).toBeNull();

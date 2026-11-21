@@ -59,14 +59,23 @@ describe('右の列(何も選んでいない = コレクション。#1017 段④
       'open-collection-export-menu',
       // 🔴 `needs` つき(PC のフォルダへ書く窓が要る物)は、happy-dom に窓が無いので出ない
       //   (出る側は `md-folder-export.test.ts`)
-      ...COLLECTION_PANE_COMMANDS.filter((c) => c.needs === undefined).map((c) => c.action),
+      ...COLLECTION_PANE_COMMANDS.filter((c) => c.needs === undefined && c.action !== 'export-structure').map((c) => c.action),
+      // 🔴 #2001 段 1: 「構成をコピー」「整理案を適用」は「その他 ▾」の元(隠した器)。根に見えるのは「バックアップ」「その他 ▾」
+      'export-structure',
       'toggle-plan-apply',
+      'export-archive',
+      'open-collection-more',
       'apply-plan',
     ]);
     const source = pane!.querySelector('[data-pkc-field="collection-export-source"]')!;
     expect([...source.querySelectorAll('button[data-pkc-action]')].map((b) => b.getAttribute('data-pkc-action'))).toEqual(
-      COLLECTION_PANE_COMMANDS.filter((c) => c.needs === undefined).map((c) => c.action),
+      COLLECTION_PANE_COMMANDS.filter((c) => c.needs === undefined && c.action !== 'export-structure').map((c) => c.action),
     );
+    const more = pane!.querySelector('[data-pkc-field="collection-more-source"]')!;
+    expect([...more.querySelectorAll('button[data-pkc-action]')].map((b) => b.getAttribute('data-pkc-action'))).toEqual([
+      'export-structure',
+      'toggle-plan-apply',
+    ]);
 
     // ⚠ 畳んでいないこと(user 指示 2026-08-03「主要な導線を畳まない」)
     expect(pane!.querySelectorAll('details')).toHaveLength(0);
@@ -76,7 +85,7 @@ describe('右の列(何も選んでいない = コレクション。#1017 段④
      */
     for (const el of pane!.querySelectorAll<HTMLElement>('button[data-pkc-action]')) {
       const action = el.getAttribute('data-pkc-action');
-      if (action === 'apply-plan' || source.contains(el)) continue;
+      if (action === 'apply-plan' || source.contains(el) || more.contains(el)) continue;
       expect(el.closest('[hidden]'), `${action} が隠れている`).toBeNull();
     }
     expect(

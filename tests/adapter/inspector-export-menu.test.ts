@@ -297,11 +297,78 @@ describe('コレクション(何も選んでいないとき)の「書き出す �
     expect(flat.querySelector('[data-pkc-field="collection-export-source"]')!.hasAttribute('hidden')).toBe(true);
     btn.click();
     const shown = menuActions(s.menu());
-    for (const a of ['export-html', 'export-portable', 'export-pkc2-html', 'export-markdown', 'export-structure']) {
+    for (const a of ['export-html', 'export-portable', 'export-pkc2-html', 'export-markdown']) {
       expect(shown, a).toContain(a);
     }
-    // 書き出しではない「整理案を適用」は平置きのまま
-    expect(s.q('[data-pkc-action="toggle-plan-apply"]').closest('[hidden]')).toBeNull();
+    // 🔴 「構成をコピー」は書き出す ▾ には無い(「その他 ▾」の側の 1 か所。#2001 段 1)
+    expect(shown, '構成をコピーが 2 か所に在る').not.toContain('export-structure');
+  });
+});
+
+describe('コレクション(何も選んでいないとき)の「その他 ▾」(#2001 段 1)', () => {
+  it('根に見えるのは「書き出す ▾」「バックアップ」「その他 ▾」。整理の 2 つは一覧の中', () => {
+    const s = mounted({ select: null });
+    const visible = [...s.root.querySelectorAll<HTMLButtonElement>('[data-pkc-field="collection-commands"] button[data-pkc-action]')]
+      .filter((b) => b.closest('[hidden]') === null)
+      .map((b) => b.getAttribute('data-pkc-action'));
+    expect(visible).toEqual(['open-collection-export-menu', 'export-archive', 'open-collection-more']);
+    expect(s.q('[data-pkc-field="collection-more-source"]').hasAttribute('hidden')).toBe(true);
+    s.q('[data-pkc-action="open-collection-more"]').click();
+    expect(menuActions(s.menu())).toEqual(['export-structure', 'toggle-plan-apply']);
+  });
+
+  it('「整理案を適用」を選ぶと貼り付け欄が開き、欄へ焦点が入る。もう一度選ぶと閉じる(双方向)', () => {
+    const s = mounted({ select: null });
+    const box = s.q<HTMLElement>('[data-pkc-field="plan-apply-box"]');
+    expect(box.hidden).toBe(true);
+    const open = (): void => {
+      s.q('[data-pkc-action="open-collection-more"]').click();
+      s.menu()!.querySelector<HTMLButtonElement>('[data-pkc-action="toggle-plan-apply"]')!.click();
+    };
+    open();
+    expect(box.hidden, '開かない').toBe(false);
+    expect(box.closest('[hidden]'), '貼り付け欄が隠れた元の中に居て見えない').toBeNull();
+    expect(s.menu(), '選んだら閉じる').toBeNull();
+    expect(document.activeElement).toBe(box.querySelector('[data-pkc-field="plan-input"]'));
+    // 🔑 開閉は読み上げにも届く ── 欄は名前つきの区画、隠した押し口の aria-expanded も揃う(着地前レビュー)
+    expect(box.getAttribute('role')).toBe('region');
+    expect(box.getAttribute('aria-label')).toBe('整理案を適用');
+    const src = s.q('[data-pkc-field="collection-more-source"] [data-pkc-action="toggle-plan-apply"]');
+    expect(src.getAttribute('aria-expanded')).toBe('true');
+    open();
+    expect(box.hidden, '閉じない').toBe(true);
+    expect(src.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('ノートを選んでいて欄が無いとき、「整理案を適用」は黙らずに使える場所を言う', () => {
+    const s = mounted({ select: null });
+    s.q('[data-pkc-field="plan-apply-box"]').remove();
+    s.q<HTMLButtonElement>('[data-pkc-field="collection-more-source"] [data-pkc-action="toggle-plan-apply"]').click();
+    expect(s.d.getState().error ?? '').toContain('ノートを選んでいないときの右のペイン');
+  });
+
+  it('「構成をコピー」を押すと、閉じた項目ではなく「その他 ▾」のボタンが光る', () => {
+    const s = mounted({ select: null });
+    s.d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
+    const opener = s.q<HTMLButtonElement>('[data-pkc-action="open-collection-more"]');
+    opener.click();
+    s.menu()!.querySelector<HTMLButtonElement>('[data-pkc-action="export-structure"]')!.click();
+    expect(opener.getAttribute('data-pkc-flash')).toBe('true');
+  });
+
+  it('矢印キーで項目を選べ、Esc で閉じて焦点がボタンへ戻る(ノートの「その他 ▾」と同じ作法)', () => {
+    const s = mounted({ select: null });
+    const opener = s.q<HTMLButtonElement>('[data-pkc-action="open-collection-more"]');
+    opener.focus();
+    opener.click();
+    const m = s.menu()!;
+    const first = m.querySelector<HTMLElement>('button[data-pkc-action]')!;
+    expect(document.activeElement, '開いたら先頭の項目へ焦点').toBe(first);
+    m.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement).toBe(m.querySelectorAll<HTMLElement>('button[data-pkc-action]')[1]);
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(s.menu(), 'Esc で閉じない').toBeNull();
+    expect(document.activeElement).toBe(opener);
   });
 });
 
@@ -438,21 +505,6 @@ describe('常設ボタンの並びと、図案を共有しないこと(#1029 / #
     expect(checked).toBe(7);
     // 取り違えが指摘された組(別のウィンドウ ↔ 2 ペインの「移す」)は、はっきり別の絵
     expect(ACTION_ICONS['open-note-window']).not.toBe(ACTION_ICONS['dual-move']);
-  });
-});
-
-describe('一覧から押したコピーの合図(#1029 / #501)', () => {
-  it('「構成をコピー」を一覧から押すと、閉じた項目ではなく「書き出す ▾」のボタンが光る', () => {
-    const s = mounted({ select: null });
-    s.d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1'), meta('n2')], relations: [] });
-    const opener = s.q<HTMLButtonElement>('[data-pkc-action="open-collection-export-menu"]');
-    opener.click();
-    const item = s.menu()!.querySelector<HTMLButtonElement>('[data-pkc-action="export-structure"]')!;
-    expect(item.getAttribute('data-pkc-flash')).toBeNull();
-    item.click();
-    expect(s.menu(), '押したら閉じる').toBeNull();
-    expect(opener.getAttribute('data-pkc-flash'), '合図が「書き出す ▾」に出ていない').toBe('true');
-    expect(item.getAttribute('data-pkc-flash'), '閉じた項目に合図が出ている(誰にも見えない)').toBeNull();
   });
 });
 

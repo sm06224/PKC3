@@ -5450,6 +5450,8 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   // 🔑 #1029 / #501 ── 右の列の「書き出す ▾」(ノート 1 件 / コレクション全体)
   'open-export-menu',
   'open-collection-export-menu',
+  // 🔑 #2001 段 1 ── 右の列(何も選んでいないとき)の「その他 ▾」(構成をコピー / 整理案を適用)
+  'open-collection-more',
   // 🔑 #1982 段 1 ── 右の列の「その他 ▾」(中の「書き出す ▾」「アプリで開く ▾」は一覧の項目から 2 枚目を開く)
   'open-inspector-more',
   // 🔑 #1982 段 3 ── 書式の帯の「その他 ▾」
@@ -6718,7 +6720,7 @@ export function selectEntryOrExplain(
 }
 
 /**
- * 🔴 **整理案の操作(作る・移す・改名)を適用する実体は 1 本**(#429 段③ / #274)。設定の「整理案を適用する」と、
+ * 🔴 **整理案の操作(作る・移す・改名)を適用する実体は 1 本**(#429 段③ / #274)。右の列(何も選んでいないとき)の「その他 ▾」→「整理案を適用」と、
  * コマンドシェル・2 ペインのコマンドラインの `mkdir` / `rename` が同じここを通る(規則を 2 つ作らない)。
  * ⚠ 呼ぶ前に phase を確かめる(ここでは見ない)。
  * @returns 断られた移動の数
@@ -10623,12 +10625,21 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **貼り付け欄は押したときだけ出す**(#1017 段④b。`toggle-replace` と
    * 同じ作法 ── `<details>` は使わない)。開いたら**貼る欄へ focus**。
    */
-  'toggle-plan-apply': (_dispatcher, target) => {
+  'toggle-plan-apply': (dispatcher, target) => {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const box = root.querySelector<HTMLElement>('[data-pkc-field="plan-apply-box"]');
-    if (!box) return;
+    if (!box) {
+      // ⚠ 欄は「何も選んでいないとき」の右のペインにしか無い ── 黙って何も起きないにしない(着地前レビュー)
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '整理案を適用は、ノートを選んでいないときの右のペインの「その他 ▾」から使えます',
+      });
+      return;
+    }
     box.hidden = !box.hidden;
-    target.setAttribute('aria-expanded', box.hidden ? 'false' : 'true');
+    // 🔑 「その他 ▾」の一覧の項目から来たときは押した物が一覧の側 ── 開閉の印は元のボタンへも書く(#2001 段 1)
+    for (const b of [target, ...root.querySelectorAll('button[data-pkc-action="toggle-plan-apply"]')])
+      b.setAttribute('aria-expanded', box.hidden ? 'false' : 'true');
     if (!box.hidden) root.querySelector<HTMLTextAreaElement>('[data-pkc-field="plan-input"]')?.focus();
   },
   /**
@@ -19523,6 +19534,18 @@ const ACTIONS: Record<string, ActionHandler> = {
     openContextMenu(root, { x: r.left, y: r.bottom }, items, target);
   },
   /**
+   * 🔴 **右の列(何も選んでいないとき)の「その他 ▾」**(#2001 段 1。user 裁定 2026-11-21)。
+   * 🔑 項目は隠した元(`collection-more-source`)から読む ── 「構成をコピー」「整理案を適用」。押す先は既存の action そのまま
+   *   (`toggle-plan-apply` は貼り付け欄を開いて欄へ focus)。⚠ `MENU_OPENERS` に載せてある。
+   */
+  'open-collection-more': (_dispatcher, target, _services, root) => {
+    const src = target.closest('[data-pkc-field="collection-commands"]')?.querySelector('[data-pkc-field="collection-more-source"]');
+    const items = exportMenuItemsFrom(src ?? null, 'open-collection-more');
+    if (items.length === 0) return;
+    const r = target.getBoundingClientRect();
+    openContextMenu(root, { x: r.left, y: r.bottom }, items, target);
+  },
+  /**
    * 🔴 **一覧で選んだ N 件だけの書き出し**(#1038 A1)。相手は `delete-selected` と**同じ規則**
    *   (左の列の見えている行に在る印)── 数と対象が食い違うと、帯の「N 件」が嘘になる。
    */
@@ -20283,7 +20306,7 @@ const PALETTE_HIDDEN_OK: ReadonlySet<string> = new Set(['attach-file', 'open-tod
  */
 // ⚠ 書式の帯の「その他 ▾」の元(`format-more-source`。#1982 段 3)も同じ ── 「置換」「日付」などの鍵・操作を探すが効く
 const CLOSED_MENU_SOURCES =
-  '[data-pkc-field="inspector-more-source"], [data-pkc-field="inspector-export-source"], [data-pkc-field="format-more-source"]';
+  '[data-pkc-field="inspector-more-source"], [data-pkc-field="inspector-export-source"], [data-pkc-field="format-more-source"], [data-pkc-field="collection-more-source"]';
 function inClosedMenuSource(btn: HTMLElement): boolean {
   const nearest = btn.closest('[hidden]');
   return nearest !== null && nearest.matches(CLOSED_MENU_SOURCES);
