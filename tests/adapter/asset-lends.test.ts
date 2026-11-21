@@ -159,3 +159,81 @@ describe('🔴 読めない絵は理由の 1 行になる(#1087)', () => {
     box.remove();
   });
 });
+
+/**
+ * 🔴 **器から URL を外してから返す**(2026-11-21。全量 smoke で `ERR_FILE_NOT_FOUND @ blob:` が約 400ms おきに出た)。
+ * ⚠ 返した瞬間に `<audio>` がまだその URL を差していると、読み込み中の器は死んだ URL を読み直し続ける。
+ * 🔑 観測点は **返す(`dispose`)その瞬間の `src`** ── 返し終わった後に見ると、DOM ごと捨てた回でも通ってしまう。
+ */
+describe('🔴 音・動画の器は、URL を外してから返す(media-release)', () => {
+  /** 返す瞬間に器が何を差していたかを控える貸出。 */
+  function mediaLend(el: HTMLMediaElement, url: string | null, key: string | null = 'k') {
+    const seen: (string | null)[] = [];
+    const loads = vi.spyOn(el, 'load');
+    return {
+      seen,
+      loads,
+      lend: { key, url, els: [] as Element[], dispose: () => seen.push(el.getAttribute('src')) },
+    };
+  }
+
+  it('🔴 畳むとき(disposeAll): 画面に出たままの <audio> から src を外し、load() してから返す', () => {
+    const el = document.createElement('audio');
+    el.src = 'blob:m#1';
+    document.body.append(el);
+    const m = mediaLend(el, 'blob:m#1');
+    m.lend.els = [el];
+    const lends = new AssetLends();
+    lends.track(m.lend);
+    lends.disposeAll();
+    expect(m.seen, '返す瞬間に器がまだ URL を差している(死んだ URL を読み直し続ける)').toEqual([null]);
+    expect(m.loads, 'src を外しただけで load() していない(読み込みが止まらない)').toHaveBeenCalled();
+    el.remove();
+  });
+
+  it('🔴 画面から外れたとき(prune): 外れた <audio> からも src を外してから返す', () => {
+    const el = document.createElement('audio');
+    el.src = 'blob:m#2';
+    document.body.append(el);
+    const m = mediaLend(el, 'blob:m#2');
+    m.lend.els = [el];
+    const lends = new AssetLends();
+    lends.track(m.lend);
+    el.remove();
+    lends.prune();
+    expect(m.seen, '外れた器が URL を差したまま返した').toEqual([null]);
+  });
+
+  it('🔴 器ごとの貸出(key: null / url: null): 中の <video> を外してから返す', () => {
+    const box = document.createElement('div');
+    const el = document.createElement('video');
+    el.src = 'blob:m#3';
+    box.append(el);
+    document.body.append(box);
+    const m = mediaLend(el, null, null);
+    m.lend.els = [box];
+    const lends = new AssetLends();
+    lends.track(m.lend);
+    lends.disposeAll();
+    expect(m.seen).toEqual([null]);
+    box.remove();
+  });
+
+  it('⚠ 対照群: 別の URL を差している器には触らない', () => {
+    const box = document.createElement('div');
+    const mine = document.createElement('audio');
+    mine.src = 'blob:m#4';
+    const other = document.createElement('audio');
+    other.src = 'blob:other';
+    box.append(mine, other);
+    document.body.append(box);
+    const m = mediaLend(mine, 'blob:m#4');
+    m.lend.els = [box];
+    const lends = new AssetLends();
+    lends.track(m.lend);
+    lends.disposeAll();
+    expect(m.seen).toEqual([null]);
+    expect(other.getAttribute('src'), '別の貸出の器まで外した').toBe('blob:other');
+    box.remove();
+  });
+});

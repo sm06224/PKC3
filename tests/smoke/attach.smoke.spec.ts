@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, expectMainGapUnderBudget, traceMainCpu, markCpu, cpuMark,
-  gotoCollectionPane, clickExportMenuItem } from './helpers';
+  gotoCollectionPane, clickExportMenuItem, transitionsSettled } from './helpers';
 // ⚠ 段⑤(xlsx を SQL で調べる)の bytes は Node 側でこの 1 本から組む(#854 段③)。
 import { buildXlsx } from '../features/xlsx-fixture';
 import { buildParquet } from '../features/parquet-fixture';
@@ -391,6 +391,9 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
    */
   const hereRow = box.locator('[data-pkc-field="pick-archive"]', { hasText: 'readme.txt' });
   const bg = (): Promise<string> => hereRow.evaluate((el) => getComputedStyle(el).backgroundColor);
+  // ⚠ 器を開いた押し所の上にポインタが残っていると、before が hover の地(とその途中の色)になる ── 外して待つ
+  await page.mouse.move(0, 0);
+  await transitionsSettled(hereRow);
   const before = await bg();
   await hereRow.evaluate((el) => {
     (el as HTMLElement).dataset['stamp'] = 'kept';
@@ -398,6 +401,10 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
   await hereRow.click();
   await expect(hereRow).toHaveAttribute('aria-pressed', 'true');
   await expect(hereRow, '押したら行が作り直された').toHaveAttribute('data-stamp', 'kept');
+  // ⚠ 押した直後はポインタが行の上に居る ── hover の地(と、それが薄れる途中の色。`--dur-fast`)だけで
+  //   「前と違う」が成り立つので、外して遷移が走り切ってから読む
+  await page.mouse.move(0, 0);
+  await transitionsSettled(hereRow);
   expect(await bg(), '選んだ行が選んでいない行と同じ見た目(aria-pressed の規則が無い)').not.toBe(before);
   await clickReal(page, '[data-pkc-field="dialog-cancel"]');
   await expect(box).toBeHidden();

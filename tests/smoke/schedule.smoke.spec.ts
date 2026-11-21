@@ -7,6 +7,7 @@ import {
   dismissAnnounce,
   useSplitEditor,
   writesLanded,
+  transitionsSettled,
 } from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
@@ -1326,10 +1327,12 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
     '時刻のない札が終日の枠に居ない',
   ).toContainText('きょうの用事');
   // 🔴 押している側が画面で見分けられる(属性だけでなく計算後の色が違う)
-  const bg = (mode: string) =>
-    pane
-      .locator(`[data-pkc-action="schedule-mode"][data-pkc-mode="${mode}"]`)
-      .evaluate((e) => getComputedStyle(e).backgroundColor);
+  // ⚠ 押した直後はポインタが「日」の上に居る ── hover の地(と、それが薄れる途中の色。`--dur-fast`)だけで
+  //   「一覧と違う」が成り立ってしまうので、外して遷移が走り切ってから読む
+  const modeBtn = (mode: string) => pane.locator(`[data-pkc-action="schedule-mode"][data-pkc-mode="${mode}"]`);
+  const bg = (mode: string) => modeBtn(mode).evaluate((e) => getComputedStyle(e).backgroundColor);
+  await page.mouse.move(0, 0);
+  await transitionsSettled(modeBtn('day'), modeBtn('list'));
   expect(await bg('day'), '押している「日」が「一覧」と同じ色').not.toBe(await bg('list'));
   /**
    * 🔴 **小さな月で、いま「日」で見ている日の升目に印が付き、見た目の規則(縁取り)が実際に効く**

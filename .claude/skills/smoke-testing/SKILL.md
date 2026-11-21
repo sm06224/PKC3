@@ -227,7 +227,7 @@ expect(under, '押そうとした所に押し所が在る(前提が崩れてい�
 | 疑似要素(`::after` / `::before`) | `display` / `content` / 画素。親の下線は**親**の `textDecorationLine` | 疑似要素の `text-decoration` の計算値 | `::after` / `::before` の… |
 | 見た目の飾り | CSS の `::before` / `::after` の `content`。`th.textContent` が足す前と同じことを unit で見る | 飾りを字として足す(コピーに混ざる) | 飾りを字として足さない… |
 | DOM の消滅 | 「消された枝の中に居たか」(`querySelectorAll` で数える)。`addInitScript` では `observe(document, …)` | `removedNodes` の直下だけを `matches` | DOM の消滅を見るなら… |
-| 遷移のある値(opacity 等) | 対照群で「遷移が走り切った」を観測してから読む | `expect.poll` の最初の一読 / `waitForTimeout` | `expect.poll` は「最初の一読で…」 |
+| 遷移のある値(opacity・ボタンの地 等) | 対照群で「遷移が走り切った」を観測してから読む。ボタンの地は `transitionsSettled`(helpers。`getAnimations().finished` を待つ)── 押した・外した直後に読まない。`expect.poll(...).toBe(落ち着いた後の値)` は可、`expect.poll(...).not.toBe(...)` は途中の 1 読みで通るので不可 | `expect.poll` の最初の一読 / `waitForTimeout` | `expect.poll` は「最初の一読で…」 |
 | 押す前後の見た目 | 測る前に `page.mouse.move(0, 0)` + 押していない兄弟と比べる | 押した後もマウスが上に居る(`:hover`) | 押す前と押した後で… |
 | 追加した診断 | わざと落として字を読む。待つ assert は「待つ前」と「待ち切った後」の 2 つを採る | 書いただけ | 診断は「書いただけ」では… |
 | 画面の案内 | 画面に出ている手本を**読んで、それを走らせる** | 手で打った字 | 自分で字を打つと… |

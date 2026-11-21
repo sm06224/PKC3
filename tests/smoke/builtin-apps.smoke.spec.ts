@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, openTile } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled } from './helpers';
 
 /**
  * 🔴 **組み込みアプリ 3 つを、実ブラウザで押す**(#281 ① 関係グラフ / #277 カンバン / #683 ① 計った時間)。
@@ -235,6 +235,10 @@ test('🔴 テキスト整形: 貼る → 整え方を押す → 右に結果 �
   const bgBefore = await strip.evaluate((el) => getComputedStyle(el).backgroundColor);
   await clickReal(page, strip);
   await expect(strip).toHaveAttribute('aria-pressed', 'true');
+  // ⚠ 押した直後はポインタが上に居る ── hover の地(と、それが薄れる途中の色。`--dur-fast`)だけで
+  //   「前と違う」が成り立つので、外して遷移が走り切ってから読む
+  await page.mouse.move(0, 0);
+  await transitionsSettled(strip);
   const bgAfter = await strip.evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(bgAfter, '押した整え方が見た目で区別できない').not.toBe(bgBefore);
   await clickReal(page, pane.locator('[data-pkc-lab-op="to-halfwidth"]'));

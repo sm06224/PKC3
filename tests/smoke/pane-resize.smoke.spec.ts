@@ -24,6 +24,7 @@ import {
   createEntry,
   dismissAnnounce,
   gotoApp,
+  transitionsSettled,
 } from './helpers';
 
 const SHELL = '[data-pkc-region="shell"]';
@@ -149,23 +150,32 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
   /**
    * 🔴 **開いている面の印が、縁のボタンにも付く**(#1206 D1)。⚠ 直す前は縁のボタンに印が付かず、
    * 「もう一度押すと閉じる」が分からなかった。⚠ 属性が付いただけでは足りない ── **見た目の規則が
-   * 受けている**(他の縁のボタンと地が違う)ことを、実ブラウザの計算後の色で見る。
+   * 受けている**(他の縁のボタンと見た目が違う)ことを、実ブラウザの計算後の値で見る。
+   * ⚠ 印は #1982 段 2 から**形**(下線 = inset の box-shadow + 太字)で、地は塗らない ── 地だけを
+   *   比べると、印の規則が在っても無くても同じ透明になる。だから地・影・太さの組で比べる。
+   * ⚠ 標準のボタンは地を `--dur-fast` で遷移させる(#1982 段 1)── ポインタを外した直後は hover の地が
+   *   薄れている途中で、**印の規則が無くても**他と違う色に読めてしまう(負荷の高い全量で落ちた・
+   *   通っていた回もこの途中の色で通っていた)。だから両方のボタンの遷移が**走り切るのを待ってから**読む
+   *   (`expect.poll` は途中の値を採って通るので使わない ── smoke-testing の observation 参照)。
    */
-  const edgeBg = (view: string) =>
-    page.evaluate(
-      ([sel, v]) => {
-        const b = document.querySelector<HTMLElement>(`${sel} [data-pkc-view="${v}"]`)!;
-        return { active: b.hasAttribute('data-pkc-active'), bg: getComputedStyle(b).backgroundColor };
-      },
-      [EDGE, view] as const,
-    );
-  // ⚠ 押した直後はポインタが縁のボタンの上に居る ── hover の地(同じ色)と区別が付かなくなるので外す
+  const edgeLook = async (view: string) => {
+    const btn = page.locator(`${EDGE} [data-pkc-view="${view}"]`);
+    await transitionsSettled(btn);
+    return btn.evaluate((b) => {
+      const cs = getComputedStyle(b);
+      return {
+        active: b.hasAttribute('data-pkc-active'),
+        look: `${cs.backgroundColor} | ${cs.boxShadow} | ${cs.fontWeight}`,
+      };
+    });
+  };
+  // ⚠ 押した直後はポインタが縁のボタンの上に居る ── hover の地と区別が付かなくなるので外す
   await page.mouse.move(700, 500);
-  const marked = await edgeBg('settings');
-  const plain = await edgeBg('help');
+  const marked = await edgeLook('settings');
+  const plain = await edgeLook('help');
   expect(marked.active, '縁の「システム」に押された印が付いていない').toBe(true);
   expect(plain.active, '開いていない面(ヘルプ)にまで印が付いた').toBe(false);
-  expect(marked.bg, '印の付いた縁のボタンが他と同じ見た目(見分けが付かない)').not.toBe(plain.bg);
+  expect(marked.look, '印の付いた縁のボタンが他と同じ見た目(見分けが付かない)').not.toBe(plain.look);
   // 帯側(畳んでいる間は見えない)の印も今までどおり付いている(対照群)
   expect(
     await page.evaluate(() =>
@@ -181,11 +191,11 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
     page.locator('[data-pkc-view-pane="settings"]'),
     '縁の「システム」をもう一度押しても閉じない',
   ).toBeHidden();
-  expect((await edgeBg('settings')).active, '閉じたのに縁の印が残っている').toBe(false);
+  expect((await edgeLook('settings')).active, '閉じたのに縁の印が残っている').toBe(false);
   // 🔴 畳んだ「まま」面を開いたときも印が付く(縁を作り直さない道)
   await clickReal(page, `${EDGE} [data-pkc-action="set-view"][data-pkc-view="help"]`);
   await expect(page.locator('[data-pkc-view-pane="help"]'), '縁の「ヘルプ」が開かない').toBeVisible();
-  expect((await edgeBg('help')).active, '畳んだまま開いた面の印が縁に付かない').toBe(true);
+  expect((await edgeLook('help')).active, '畳んだまま開いた面の印が縁に付かない').toBe(true);
   await clickReal(page, `${EDGE} [data-pkc-action="set-view"][data-pkc-view="help"]`);
   await expect(page.locator('[data-pkc-view-pane="help"]')).toBeHidden();
 

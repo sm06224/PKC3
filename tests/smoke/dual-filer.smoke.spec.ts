@@ -9,6 +9,7 @@ import {
   traceMainCpu,
   openViewPane,
   useSplitEditor,
+  transitionsSettled,
 } from './helpers';
 
 /**
@@ -1049,11 +1050,13 @@ test('🔴 下見に本文が出て、留めた場所は読み込み直しても
    */
   await page.mouse.move(0, 0);
   const sibling = '[data-pkc-region="dual-commands"] [data-pkc-action="dual-copy"]';
-  await expect
-    .poll(() => bgOf('[data-pkc-action="dual-preview-toggle"]'), {
-      message: '押しても地の色が変わらない(押している見た目が付いていない)',
-    })
-    .not.toBe(bgBefore);
+  // ⚠ hover の地が薄れる途中(`--dur-fast`。#1982 段 1)は、印の規則が無くても「押す前と違う」に読める ──
+  //   `expect.poll(...).not.toBe` はその途中の 1 読みで通るので、遷移が走り切るのを待ってから 1 度だけ読む
+  await transitionsSettled(previewTile, page.locator(sibling));
+  expect(
+    await bgOf('[data-pkc-action="dual-preview-toggle"]'),
+    '押しても地の色が変わらない(押している見た目が付いていない)',
+  ).not.toBe(bgBefore);
   expect(
     await bgOf('[data-pkc-action="dual-preview-toggle"]'),
     '押しているタイルが、押していない隣のタイルと同じ地のまま',

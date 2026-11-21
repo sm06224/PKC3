@@ -45,6 +45,7 @@ import { elapsedText } from '@features/elapsed-text';
 import { appWaveSource, type WaveProvider } from '@adapter/platform/audio/wave-source';
 import { placeRange } from '../actions/wave-drag';
 import { bakeWavePng } from './wave-bake';
+import { unloadMedia } from './media-release';
 
 /**
  * 借りている 1 件(押した行)。⚠ **同時に 1 つだけ**。
@@ -89,6 +90,12 @@ export class CapturesRenderer {
   private last = ' ';
   /** いま借りている 1 件。⚠ 借り換え・面を閉じるときに返す。 */
   private playing: Playing | null = null;
+  /**
+   * いま貸りている URL を差した器(組み直しで画面から外れた古い器も含む)。
+   * ⚠ 返すときは**全部**から URL を外す ── 外れた器は `this.host` を探しても見つからないが、
+   *   読み込み中なら死んだ URL を読み直し続ける(`media-release.ts`)。
+   */
+  private playingEls: HTMLMediaElement[] = [];
   /** 組み直す直前に控えた再生位置(`render` が書き、`row` が読む)。 */
   private resume: { url: string; time: number; paused: boolean } | null = null;
   /** ⚠ 借りに行っている最中の lid(同じ行で二重に借りない)。 */
@@ -161,14 +168,29 @@ export class CapturesRenderer {
     });
   }
 
+  /**
+   * 🔴 **鳴らしている音を返す ── 器から URL を外してから**(2026-11-21)。
+   * ⚠ 返した後も `<audio>` が画面(または読み込み中のまま)に残ると、死んだ blob: を約 400ms おきに
+   *   読み直し、`ERR_FILE_NOT_FOUND` を吐き続ける(`media-release.ts`)。
+   */
+  private releasePlaying(): void {
+    const p = this.playing;
+    const els = this.playingEls;
+    this.playing = null;
+    this.playingEls = [];
+    if (p === null) return;
+    for (const el of els) unloadMedia(el, p.url);
+    unloadMedia(this.host, p.url);
+    p.dispose();
+  }
+
   /** ⚠ 面を捨てるときに必ず呼ぶ(借りたままにしない)。 */
   dispose(): void {
     this.watchTheme(false);
     this.token += 1;
     this.borrowing = null;
     this.missingLid = null;
-    this.playing?.dispose();
-    this.playing = null;
+    this.releasePlaying();
     this.dropWave();
   }
 
@@ -507,8 +529,7 @@ export class CapturesRenderer {
     this.missingLid = null;
     this.token += 1;
     const mine = this.token;
-    this.playing?.dispose();
-    this.playing = null;
+    this.releasePlaying();
     this.borrowing = want;
     /** 🔴 借りられなかった回の後始末(#1087 A2)── 印を戻し、理由の 1 行を出す。 */
     const failed = (): void => {
@@ -776,6 +797,7 @@ export class CapturesRenderer {
       if (this.playing?.lid === item.lid && this.playing.url !== '') {
         const media = document.createElement(item.kind);
         media.setAttribute('data-pkc-field', 'capture-media');
+        this.playingEls.push(media);
         media.controls = true;
         // 🔑 組み直しなら、控えた位置へ戻し、止めていたなら鳴らさない(初めて開くときは鳴らす)
         const resume = this.resume !== null && this.resume.url === this.playing.url ? this.resume : null;
