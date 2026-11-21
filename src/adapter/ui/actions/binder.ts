@@ -12037,6 +12037,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid === null) return;
     if (appNotePins.has(lid)) appNotePins.toggle(lid, (l) => st.entryMetas.has(l));
   },
+  /** ノートのタブ(#1982 段 5-3): 押したタブを有効にする / 閉じる。相手は押したタブの `data-pkc-entry`。 */
+  'activate-note-tab': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (lid) dispatcher.dispatch({ type: 'NOTE_TAB_ACTIVATE', lid });
+  },
+  'close-note-tab': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (lid) dispatcher.dispatch({ type: 'NOTE_TAB_CLOSE', lid });
+  },
   'bookmark-note-remove': (dispatcher, target, services) => {
     const st = dispatcher.getState();
     const lid = rowLidOrSelected(st, target);
