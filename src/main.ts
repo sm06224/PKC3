@@ -365,6 +365,7 @@ import { installInspectorTocSpy } from '@adapter/ui/render/inspector-toc-spy';
 import { BrowseRouter, type BrowseMode } from '@adapter/ui/render/browse';
 // 🔴 探し方のタブの印(見た目 + 読み上げ)は 1 か所へ寄せた(#720)
 import { markBrowseTabs } from '@adapter/ui/render/tabs-a11y';
+import { NoteTabsBar } from '@adapter/ui/render/note-tabs';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
 import {
@@ -2122,8 +2123,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     browse.render(st, browseMode);
     center.render(st);
   };
+  const noteTabsBar = new NoteTabsBar(regions.noteTabs);
   dispatcher.onState((state) => {
     browse.render(state, browseMode);
+    noteTabsBar.render(state);
     center.render(state);
     appendBox.render(state);
     inspector.render(state);

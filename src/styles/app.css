@@ -11886,6 +11886,12 @@ h3[data-pkc-section] {
   [data-pkc-region='editor-split']:has([data-pkc-field='editor-print']) [data-pkc-region='editor-preview'] {
     display: none;
   }
+  /* ⚠ ノートのタブ列(#1982 段 5)も紙には要らない ── 画面の行き来の操作子。
+   * 🔴 上の一覧に混ぜず `!important` で消す: 画面の規則は `:not([hidden])` で詳細度が 1 段高く、しかも
+   *    この節より**後ろ**に在る ── 一覧の `display: none` は負ける(着地前の smoke で実際に紙に出ていた) */
+  [data-pkc-region='note-tabs'] {
+    display: none !important;
+  }
   /* 🔴 **紙の頭の目次**(#1038 B1)── 書き出した閲覧用 HTML の `#pkc-ptoc` と同じ体裁 */
   [data-pkc-field='print-toc'] {
     display: block;
@@ -13956,4 +13962,95 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-field='settings-filter-count'] {
   color: var(--muted);
   font-size: var(--btn-fs-sm);
+}
+
+/**
+ * 🔴 **ノートのタブ列**(#1982 段 5-3。`render/note-tabs.ts`)── 中央の本文のすぐ上。2 枚以上のときだけ出る。
+ * - 地は机(`--surface-2`)の段差で本文(`--surface`)と区切る(線で格子にしない)
+ * - 現在地は形: 左端の内側の線(`--accent`)+ 太字 + `--pkc-selected-bg`(`[data-pkc-selected]` と同じ作法)
+ * - はみ出したら横にスクロール(折り返さない)。ページ全体は横に伸ばさない(`min-width: 0`)
+ * ⚠ `hidden` を `display` で打ち消さない(`:not([hidden])` に掛ける)
+ */
+[data-pkc-region='note-tabs']:not([hidden]) {
+  display: flex;
+  flex: none;
+  flex-wrap: nowrap;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--surface-2);
+}
+[data-pkc-field='note-tab'] {
+  display: flex;
+  flex: none;
+  align-items: stretch;
+  max-width: 16rem;
+  min-width: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+[data-pkc-field='note-tab']:hover {
+  background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
+}
+[data-pkc-field='note-tab'][data-pkc-active] {
+  background: var(--pkc-selected-bg);
+  box-shadow: inset 3px 0 0 var(--accent);
+  --muted: var(--pkc-muted-on-mark);
+}
+[data-pkc-field='note-tab-select'],
+[data-pkc-field='note-tab-close'] {
+  /* ゴースト(地なし・枠なし) */
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: inherit;
+  font-size: var(--fs-md);
+  transition: background var(--dur-fast) var(--ease);
+}
+[data-pkc-field='note-tab-select'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-width: 0;
+  padding: var(--s2) var(--s3) var(--s2) var(--s4);
+  white-space: nowrap;
+}
+[data-pkc-field='note-tab'][data-pkc-active] [data-pkc-field='note-tab-select'] {
+  font-weight: 600;
+}
+[data-pkc-field='note-tab-title'] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* ピンの目印は字を足さず形で描く(textContent を変えない)。小さな菱形 */
+[data-pkc-field='note-tab-pin'] {
+  flex: none;
+  width: 0.4rem;
+  height: 0.4rem;
+  background: currentColor;
+  transform: rotate(45deg);
+}
+[data-pkc-field='note-tab-dirty'] {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--fg);
+}
+[data-pkc-field='note-tab-external'] {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+[data-pkc-field='note-tab-close'] {
+  flex: none;
+  padding: 0 var(--s3);
+  color: var(--muted);
+  line-height: 1;
+}
+[data-pkc-field='note-tab-close']:hover,
+[data-pkc-field='note-tab-close']:focus-visible {
+  background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
+  color: var(--fg);
 }
