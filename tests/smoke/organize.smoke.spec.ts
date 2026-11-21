@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { openExportMenu, clickInspectorMoreItem, gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, answerAppDialog } from './helpers';
+import { openExportMenu, clickInspectorMoreItem, gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, answerAppDialog, transitionsSettled } from './helpers';
 
 /**
  * 整理の面(#240 段①〜⑤。user 指示 2026-08-17
@@ -473,6 +473,7 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
    * 読む(実際にこの spec の 1 稿目が `--surface-2` を読んで落ちた)。
    */
   await page.mouse.move(0, 0);
+  await transitionsSettled(flatBtn);
   const bgOff = await bgOf();
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] [data-pkc-field="filer-flatten"]');
   await expect(rows, '押したのにフォルダの中のノートが出ない').toHaveCount(2);
@@ -605,6 +606,8 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   expect(hintLook.sameRow, '近道が増えて、押し口だけが別の行へ落ちた').toBe(true);
   expect(hintLook.right, '押し口が一言の左にある').toBe(true);
   await page.mouse.move(0, 0);
+  // ⚠ 地は `--dur-fast` で遷移する(#1982 段 1)── hover が薄れる途中の色を読まない
+  await transitionsSettled(flatBtn);
   const bgOn = await bgOf();
   expect(bgOn, `押された見た目の色が切のときと同じ(${bgOn})`).not.toBe(bgOff);
   expect(bgOn, `押された色が共通の「押している」色(--accent)でない(${bgOn} / ${accent})`).toBe(
