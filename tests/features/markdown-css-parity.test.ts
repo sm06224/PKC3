@@ -161,7 +161,7 @@ function emitted(): { classes: Set<string>; attrs: Set<string>; empty: string[] 
    *   気づけない**。読む面は `interactiveTasks` / `interactiveCells` を
    *   渡して描くので、corpus もその姿を通す。
    */
-  const MODES: ReadonlyArray<Record<string, boolean>> = [
+  const MODES: ReadonlyArray<Parameters<typeof renderMarkdown>[1]> = [
     {},
     { interactiveTasks: true, interactiveCells: true },
     // 🔴 コード枠の ✎(#1044 段3)── 押せる面にしか出ない印なので、これが無いと
