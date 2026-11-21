@@ -518,6 +518,7 @@ import { setupLightbox, openLightbox, closeLightbox, lightboxOpen } from '../ren
 import { chordHint, HINT_BASE, HINT_BLOCKED, setBlocked } from '../render/shortcut-hint';
 import { TARGET_LID_ATTR } from '../render/target-lid';
 import { sectionBoxText, SECTION_BOX_INPUT_FIELD, SECTION_BOX_REGION } from '../render/section-box';
+import { editingFieldKind, EDITING_FIELD_NAMES, fieldHas, keyContextOfField } from '../editing-field';
 import { codeBoxText, CODE_BOX_INPUT_FIELD, CODE_BOX_REGION } from '../render/code-box';
 import { structureText } from '@features/structure/structure-text';
 import {
@@ -8681,7 +8682,7 @@ export function openPaletteFor(
    *   **器の中の探す欄**なので、見ると**常に「押せません」**になる。
    * 🔑 器は閉じるときに**この欄へ焦点を返す**(`app-dialog` の後始末)。
    */
-  const target = formatTargetOf(root.ownerDocument.activeElement);
+  const target = keyTargetOf(root.ownerDocument.activeElement);
   /**
    * 🔴 **選択範囲は「開いたとき」に控える**(2026-08-27、実ブラウザで実測)。
    *
@@ -20606,6 +20607,24 @@ function editorCommand(cmd: string): boolean {
   return FORMAT_OF[cmd] !== undefined || EDITOR_RUN[cmd] !== undefined;
 }
 
+/**
+ * 🔴 **本文の欄で押した鍵を、本文の欄と同じ口で当てる**(#2001 段 2。追記・章の欄が使う)。
+ * ⚠ 当てたら `true`(`preventDefault` 済み)。`cmd` が欄へ当てる命令でなければ何もしない。
+ */
+function runEditingKey(
+  ke: KeyboardEvent,
+  ta: HTMLTextAreaElement,
+  cmd: string | null,
+  notify: (t: string) => void,
+): boolean {
+  if (cmd === null || !editorCommand(cmd)) return false;
+  ke.preventDefault();
+  const run = EDITOR_RUN[cmd];
+  if (run !== undefined) run(ta, notify);
+  else applyFormatTo(ta, cmd, undefined, notify);
+  return true;
+}
+
 export function applyFormatTo(
   ta: HTMLTextAreaElement,
   cmd: string,
@@ -20766,6 +20785,12 @@ export function formatTargetOf(el: unknown): HTMLTextAreaElement | null {
   if (!(el instanceof HTMLTextAreaElement)) return null;
   const f = el.getAttribute('data-pkc-field');
   return f === 'editor-body' || f === 'row-source' ? el : null;
+}
+
+/** 🔴 書式などの鍵・「操作を探す」を当てる欄(追記・章の欄も含む。判定は `editing-field.ts` の 1 か所)。 */
+function keyTargetOf(el: unknown): HTMLTextAreaElement | null {
+  const k = editingFieldKind(el);
+  return k !== null && fieldHas(EDITING_FIELD_NAMES[k], 'keys') ? (el as HTMLTextAreaElement) : null;
 }
 
 function isEditorBody(el: EventTarget | null): el is HTMLTextAreaElement {
@@ -21894,7 +21919,8 @@ export function bindActions(
       !ke.altKey &&
       !ke.metaKey &&
       // 🔴 章だけを編集する欄(`SECTION_BOX_INPUT_FIELD`)も同じ(#1163 依頼 150。箇条書きの章で Enter を押しても `- ` が続かなかった)
-      (field === 'editor-body' || field === 'row-source' || field === SECTION_BOX_INPUT_FIELD) &&
+      // 🔴 追記の欄も同じ(#2001 段 2)。欄の集合は `editing-field.ts` の 1 か所
+      fieldHas(field, 'enterContinue') &&
       ke.target instanceof HTMLTextAreaElement &&
       // 🔴 範囲を選んでいるときは普通の Enter(選んだ字を改行に置き換える)に任せる ── 規則は caret の行しか見ないので、
       //   空の `> ` / `- ` の行から下へ選んで押すと、選んだ範囲を置き換えずに記号だけ消していた(#1087 調査 7)
@@ -21999,10 +22025,24 @@ export function bindActions(
         run('append-entry', ke.target as HTMLElement);
         return;
       }
-      // 🔴 いまの日時を入れる 5 つ(#1966 2-C)── 作業ログを足す欄こそ使う所(本文の欄と同じ口 `EDITOR_RUN`)
-      if (appendCmd !== null && NOW_STAMP_COMMANDS[appendCmd] !== undefined) {
+      // 🔴 書式・行の入れ替え・字下げの鍵・日時・計算・整える操作は本文の欄と同じ口(#2001 段 2)
+      if (fieldHas(field, 'keys') && ke.target instanceof HTMLTextAreaElement && runEditingKey(ke, ke.target, appendCmd, (t) => services.showStatus?.(t))) {
+        return;
+      }
+      /**
+       * 🔴 **追記欄の `Tab` はリストの行・複数行の選択のときだけ字下げ**(#2001 段 2 = user 裁定 4)。
+       * ⚠ それ以外は握らない ── 焦点が出ていく(キーボードだけの人が欄から出られなくなる)。表・短縮語の `Tab` は持たない。
+       */
+      if (
+        ke.key === 'Tab' &&
+        fieldHas(field, 'tabIndent') &&
+        !ke.ctrlKey &&
+        !ke.altKey &&
+        !ke.metaKey &&
+        ke.target instanceof HTMLTextAreaElement &&
+        runIndent(ke.target, ke.shiftKey ? -1 : 1, false)
+      ) {
         ke.preventDefault();
-        EDITOR_RUN[appendCmd]!(ke.target as HTMLTextAreaElement, (t) => services.showStatus?.(t));
         return;
       }
       /**
@@ -22138,18 +22178,9 @@ export function bindActions(
     }
     // 🔴 `Tab` だけは下の本文と同じ表・テンプレート・字下げの門へ通す(#1163 依頼 150)。⚠ 当たらなければ素通し(焦点は今までどおり出ていく)
     if (field === SECTION_BOX_INPUT_FIELD && ke.key !== 'Tab') {
-      const sectionCmd = keymap.match(ke, 'row');
-      // 🔴 いまの日時を入れる 5 つ(#1966 2-C)── 章だけを編集する欄でも同じ口
-      if (sectionCmd !== null && NOW_STAMP_COMMANDS[sectionCmd] !== undefined) {
-        ke.preventDefault();
-        EDITOR_RUN[sectionCmd]!(ke.target as HTMLTextAreaElement, (t) => services.showStatus?.(t));
-        return;
-      }
-      if (sectionCmd === null || FORMAT_OF[sectionCmd] === undefined) return;
-      ke.preventDefault();
-      applyFormatTo(ke.target as HTMLTextAreaElement, sectionCmd, undefined, (t) =>
-        services.showStatus?.(t),
-      );
+      const sectionCmd = keymap.match(ke, keyContextOfField('section'));
+      // 🔴 書式・日時・行の入れ替えなど、本文の欄と同じ口(#2001 段 2。直す前は書式と日時だけだった)
+      if (ke.target instanceof HTMLTextAreaElement) runEditingKey(ke, ke.target, sectionCmd, (t) => services.showStatus?.(t));
       return;
     }
     /**
@@ -22279,9 +22310,8 @@ export function bindActions(
    */
   const isImageFile = (f: File): boolean => isImageAssetMime(resolveMime(f.name, f.type));
 
-  const BODY_FIELDS = new Set(['row-source', 'editor-body', 'append-input']);
   const isBodyInput = (t: EventTarget | null): t is HTMLTextAreaElement =>
-    t instanceof HTMLTextAreaElement && BODY_FIELDS.has(t.getAttribute('data-pkc-field') ?? '');
+    t instanceof HTMLTextAreaElement && fieldHas(t.getAttribute('data-pkc-field'), 'paste');
 
   /**
    * 待っている間に作り直された欄を引き直す。
@@ -22290,8 +22320,9 @@ export function bindActions(
   const reResolveInput = (from: HTMLTextAreaElement): HTMLTextAreaElement | null => {
     if (from.isConnected) return from;
     const field = from.getAttribute('data-pkc-field') ?? '';
-    if (field === 'append-input')
-      return root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]');
+    // 追記・章の欄は欄の名前で引き直す(本文の欄へ入れない)
+    if (field === EDITING_FIELD_NAMES.append || field === EDITING_FIELD_NAMES.section)
+      return root.querySelector<HTMLTextAreaElement>(`[data-pkc-field="${field}"]`);
     return formatTarget(root);
   };
 
