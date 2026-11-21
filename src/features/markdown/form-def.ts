@@ -294,7 +294,7 @@ function fieldHtml(f: FormField, value: string | undefined): string {
       // 読めない保存値は、欄を空にして上書きさせず、字のまま見せて残す(binder は `data-pkc-form-raw` を値に使う)
       const odd = v !== '' && !isDatetimeValue(v);
       return odd
-        ? `<input type="datetime-local" ${common} data-pkc-form-raw="${esc(v)}" value=""><span class="pkc-form-warn">読めない値: ${esc(v)}(そのまま残ります。日時を選ぶと置き換わります)</span>`
+        ? `<span class="pkc-form-odd"><input type="datetime-local" ${common} data-pkc-form-raw="${esc(v)}" value=""><span class="pkc-form-warn">読めない値: ${esc(v)}(そのまま残ります。日時を選ぶと置き換わります) <button type="button" class="pkc-form-btn" data-pkc-variant="ghost" data-pkc-action="form-clear-raw">この値を消す</button></span></span>`
         : `<input type="datetime-local" ${common} value="${esc(normalizeDatetime(v))}">`;
     }
     case 'checkbox-group': {

@@ -14128,6 +14128,17 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **いまの入力を、連携先の表(` ```csv name=… `)の末尾に 1 行足す**(#1456)。表が無ければ項目名を見出しにして作る。
    * ⚠ 断る理由は `planFormRow`(書く側と同じ関数)で先に言う ── 押した後に黙って何も起きない形を作らない。
    */
+  /**
+   * 🔴 **読めない日時の保存値を消す**(片道にしない)。欄の「そのまま残す」の印を外し、警告を「保存すると消える」に替える。
+   * 書くのは次の「入力を保存」(欄が空なら `vars` の行が消える。他の保存と同じ道)。
+   */
+  'form-clear-raw': (_dispatcher, target) => {
+    const odd = target.closest<HTMLElement>('.pkc-form-odd');
+    if (odd === null) return;
+    odd.querySelector('[data-pkc-form-raw]')?.removeAttribute('data-pkc-form-raw');
+    const warn = odd.querySelector<HTMLElement>('.pkc-form-warn');
+    if (warn !== null) warn.textContent = '「入力を保存」を押すと、この値は消えます(日時を選ぶと置き換わります)';
+  },
   'form-row-add': (dispatcher, target, services) => {
     const owner = formOwner(dispatcher, target);
     if (owner === null) return;
