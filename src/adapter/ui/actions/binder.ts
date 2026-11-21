@@ -5292,7 +5292,11 @@ const MENU_PREV_LID_ATTR = 'data-pkc-menu-prev-lid';
  */
 function closeNoteTabOrExplain(dispatcher: Dispatcher, lid: string): void {
   const st = dispatcher.getState();
-  const blocked = st.noteTabs.active === lid ? selectBlockReason(st.phase) : null;
+  if (st.noteTabs.active !== lid) {
+    dispatcher.dispatch({ type: 'NOTE_TAB_CLOSE', lid });
+    return;
+  }
+  const blocked = selectBlockReason(st.phase);
   if (blocked !== null) {
     dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}タブを閉じてください` });
     return;
