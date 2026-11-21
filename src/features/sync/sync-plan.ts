@@ -19,7 +19,8 @@
  */
 import { decideMerge, fpEqual, nextBaseline, relationKey, type Baseline, type Decision, type Fp, type KeyedState, type Tombstone } from './change-set';
 import type { DiffFile, DiffRelation } from './diff-file';
-import { entryFp, placeFp, relationFp } from './sync-fp';
+import { isSyncRelationKind } from './sync-guard';
+import { placeFp, relationFp } from './sync-fp';
 
 export interface PlanUpsert {
   lid: string;
@@ -30,6 +31,13 @@ export interface PlanUpsert {
   /** 親フォルダを張り替える(無ければ触らない)。`null` = ルート。 */
   place?: { parentLid: string | null };
   reason: 'take' | 'merge' | 'restore' | 'copy';
+  /**
+   * 🔴 **計画を立てたときのこちらの指紋**(`null` = こちらで生きていなかった / 無ければ確かめない)。worker の tx が書く直前に測り直し、
+   * 違っていたら(計画と反映の間にこちらが編集した)**書かずに**、相手の版を `fallback` の新しい lid のコピーとして足す(両方残す)。
+   */
+  expect?: Fp | null;
+  /** 上の食い違いのときに足すコピー(新しい lid と題名)。内容(`content`)がある物だけ持つ。 */
+  fallback?: { lid: string; title: string };
 }
 
 export interface PlanConflict {
@@ -53,7 +61,7 @@ export interface SyncSummary {
   trashed: number;
   /** こちらだけが新しい(次の書き出しで相手へ送る)。 */
   keptLocal: number;
-  /** 競合のコピー(別ノートとして足した)。通常の競合 / 初回の突き合わせ。 */
+  /** 競合のコピー(別ノートとして足した)。通常の競合 / 初回の同期。 */
   conflicts: number;
   firstSync: number;
   relationsAdded: number;
@@ -67,6 +75,8 @@ export interface SyncSummary {
 export interface SyncPlan {
   upserts: PlanUpsert[];
   trash: string[];
+  /** ゴミ箱へ移す物の、計画時のこちらの指紋(tx で測り直し、違えば移さない = こちらの編集を消さない)。 */
+  trashExpect: Record<string, Fp>;
   relationAdds: DiffRelation[];
   relationRemoves: DiffRelation[];
   /** 取り込み後に記録する、この相手の「前回の合意」。 */
@@ -82,6 +92,11 @@ export interface PlanInput {
   /** こちらの現在の指紋(ノート = lid、つながり = `rel:…`)。 */
   localStates: readonly KeyedState[];
   localRelations: readonly DiffRelation[];
+  /**
+   * 相手のノート(本文つき)の指紋。⚠ **worker が測った物を渡す**(`syncMeasureNotes`)── 本文の SHA-256 を主スレッドでやらない
+   * (重い処理は worker へ。設計 doc §12.1)。`remote.container.notes` の全 lid が要る(無ければ throw)。
+   */
+  remoteNoteFps: ReadonlyMap<string, Fp>;
   /** こちらで生きているノートの題名。 */
   localTitles: ReadonlyMap<string, string>;
   localTombstones: readonly Tombstone[];
@@ -92,10 +107,10 @@ export interface PlanInput {
   genLid(): string;
 }
 
-/** 競合のコピーの題名。⚠ 検索で拾える固定の語を入れる(競合の一覧の代わり。「同期の競合」「初回の突き合わせ」)。 */
+/** 競合のコピーの題名。⚠ 検索で拾える固定の語「同期の競合」を必ず入れる(競合の一覧の代わり。初回の同期は「初回の同期の競合」= 同じ語を含む)。 */
 export function conflictCopyTitle(title: string, firstSync: boolean, date: string): string {
   const base = title === '' ? '(無題)' : title;
-  return `${base}(${firstSync ? '初回の突き合わせ' : '同期の競合'} ${date})`;
+  return `${base}(${firstSync ? '初回の同期の競合' : '同期の競合'} ${date})`;
 }
 
 const emptySummary = (): SyncSummary => ({
@@ -111,7 +126,7 @@ const REL_PREFIX = 'rel:';
  * これで、お互いが同じ版から別々に直した後の往復で、競合のコピーが増え続けない。
  */
 export function effectiveBaseline(stored: Baseline, peerBase: readonly { key: string; c: string; p?: string }[], local: readonly KeyedState[]): Baseline {
-  const out: Record<string, Fp> = { ...stored };
+  const out = Object.assign(Object.create(null) as Record<string, Fp>, stored);
   const lmap = new Map(local.map((s) => [s.key, s] as const));
   for (const p of peerBase) {
     const l = lmap.get(p.key);
@@ -132,9 +147,14 @@ export function planSyncImport(input: PlanInput): SyncPlan {
     if (f.key.startsWith(REL_PREFIX)) continue;
     remoteFp.set(f.key, f.p === undefined ? { content: f.c } : { content: f.c, place: f.p });
   }
-  for (const n of c.notes) remoteFp.set(n.lid, entryFp({ title: n.title, archetype: n.archetype, parentLid: n.parentLid, body: n.body }));
+  for (const n of c.notes) {
+    const fp = input.remoteNoteFps.get(n.lid);
+    if (fp === undefined) throw new Error(`相手のノートの指紋が測られていません: ${n.lid}`);
+    remoteFp.set(n.lid, fp);
+  }
   const remoteRel = new Map<string, DiffRelation>();
   for (const r of c.relations) {
+    if (!isSyncRelationKind(r.kind)) continue; // 運べない種類(structural・知らない種類)は判定に入れない
     const k = relationKey({ from: r.from, to: r.to, kind: r.kind });
     remoteRel.set(k, r);
     remoteFp.set(k, relationFp());
@@ -163,11 +183,12 @@ export function planSyncImport(input: PlanInput): SyncPlan {
 
   const upserts: PlanUpsert[] = [];
   const trash: string[] = [];
+  const trashExpect: Record<string, Fp> = Object.create(null) as Record<string, Fp>;
   const relationAdds: DiffRelation[] = [];
   const relationRemoves: DiffRelation[] = [];
   const conflicts: PlanConflict[] = [];
   const needFull: string[] = [];
-  const next: Record<string, Fp> = {};
+  const next = Object.create(null) as Record<string, Fp>;
   const s = emptySummary();
   const titleOf = (lid: string): string => input.localTitles.get(lid) ?? noteByLid.get(lid)?.title ?? lid;
 
@@ -189,6 +210,14 @@ export function planSyncImport(input: PlanInput): SyncPlan {
   }
   const copyOf = new Map(copies.map((x) => [x.note.lid, x.lid] as const));
 
+  /** 計画時のこちらの状態(tx で測り直して比べる)と、食い違ったときのコピーの置き場。 */
+  const guard = (key: string, title: string): Pick<PlanUpsert, 'expect' | 'fallback'> => {
+    const l = localFp.get(key);
+    return {
+      expect: l === undefined ? null : { content: l.content, ...(l.place === undefined ? {} : { place: l.place }) },
+      fallback: { lid: input.genLid(), title: conflictCopyTitle(title, false, input.date) },
+    };
+  };
   const takeRemote = (key: string, fp: Fp, reason: PlanUpsert['reason'], existed: boolean): void => {
     const n = noteByLid.get(key);
     if (n === undefined) {
@@ -198,7 +227,7 @@ export function planSyncImport(input: PlanInput): SyncPlan {
     }
     const { parent, orphan } = resolveParent(n.parentLid);
     if (orphan) s.orphans++;
-    upserts.push({ lid: key, existed, content: { title: n.title, archetype: n.archetype, body: n.body }, place: { parentLid: parent }, reason });
+    upserts.push({ lid: key, existed, content: { title: n.title, archetype: n.archetype, body: n.body }, place: { parentLid: parent }, reason, ...guard(key, n.title) });
     next[key] = { content: fp.content, place: orphan ? placeFp(null) : (fp.place as string) };
   };
 
@@ -244,10 +273,13 @@ export function planSyncImport(input: PlanInput): SyncPlan {
         }
         break;
       }
-      case 'trash-local':
+      case 'trash-local': {
         trash.push(d.key);
+        const l = localFp.get(d.key);
+        if (l !== undefined) trashExpect[d.key] = { content: l.content, ...(l.place === undefined ? {} : { place: l.place }) };
         s.trashed++;
         break;
+      }
       case 'push-local':
       case 'push-delete':
         s.keptLocal++;
@@ -269,7 +301,7 @@ export function planSyncImport(input: PlanInput): SyncPlan {
           if (baseline[d.key] !== undefined) next[d.key] = baseline[d.key] as Fp;
           break;
         }
-        const up: PlanUpsert = { lid: d.key, existed: true, reason: 'merge' };
+        const up: PlanUpsert = { lid: d.key, existed: true, reason: 'merge', ...(content !== undefined ? guard(d.key, content.title) : { expect: localFp.has(d.key) ? { content: l.content, ...(l.place === undefined ? {} : { place: l.place }) } : null }) };
         if (content !== undefined) up.content = { title: content.title, archetype: content.archetype, body: content.body };
         if (wantPlace && n !== undefined) {
           const { parent, orphan } = resolveParent(n.parentLid);
@@ -316,5 +348,5 @@ export function planSyncImport(input: PlanInput): SyncPlan {
       }
     }
   }
-  return { upserts, trash, relationAdds, relationRemoves, baseline: nextBaseline(Object.entries(next).map(([key, fp]) => ({ key, ...fp }))), conflicts, needFull, summary: s };
+  return { upserts, trash, trashExpect, relationAdds, relationRemoves, baseline: nextBaseline(Object.entries(next).map(([key, fp]) => ({ key, ...fp }))), conflicts, needFull, summary: s };
 }

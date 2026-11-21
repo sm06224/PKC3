@@ -42,7 +42,7 @@ async function restoredTwins() {
 }
 
 describe('バックアップの種(同じバックアップから復元した 2 台)', () => {
-  it('種があると、復元後に別々に編集しても競合にならず合わさる(種が無い端末では「初回の突き合わせ」になる ── 対照)', async () => {
+  it('種があると、復元後に別々に編集しても競合にならず合わさる(種が無い端末では「初回の同期」になる ── 対照)', async () => {
     const { a, b, seed } = await restoredTwins();
     expect(seed.device).toBe((await snap(a)).device);
     await seedSyncFromBackup(b.deps(), seed, new Set(['n1', 'n2']));
@@ -54,13 +54,13 @@ describe('バックアップの種(同じバックアップから復元した 2 
     expect(await body(b, 'n2')).toBe('B の編集'); // こちらだけが変えた → 残す
     expect(await live(b)).toEqual(['n1', 'n2']); // 競合のコピーは 1 件も出ない
     expect(report).not.toContain('競合');
-    expect(report).not.toContain('初回の突き合わせ');
+    expect(report).not.toContain('初回の同期');
 
-    // 対照: 種を書かなかった端末では、同じ操作で編集した物が「初回の突き合わせ」になる
+    // 対照: 種を書かなかった端末では、同じ操作で編集した物が「初回の同期」になる
     const c = await dev('C');
     for (const [lid, title, text] of [['n1', '議事録', '初稿1'], ['n2', '企画', '初稿2']] as const) await c.put(lid, title, text);
     await c.put('n1', '議事録', 'C の編集');
-    expect(await send(a, c)).toContain('初回の突き合わせ: 1 件');
+    expect(await send(a, c)).toContain('初回の同期で内容が違った物: 1 件');
   });
 
   it('オフの端末は種を書かない・自分の id の種は捨てる・振り直した lid は種にしない・育った記録は巻き戻さない', async () => {
@@ -68,6 +68,7 @@ describe('バックアップの種(同じバックアップから復元した 2 
     const off = await dev('Off', false);
     await off.put('n1', '議事録', '初稿1');
     await seedSyncFromBackup(off.deps(), seed, new Set(['n1']));
+    await off.setEnabled(true); // 切の間は worker が同期の op を断る。読むために入にする(入にするだけでは行は書かれない)
     expect((await snap(off)).device).toBeNull();
     expect((await snap(off)).bases).toEqual({});
     // 自分の id の種(自分が書き出したバックアップを自分へ戻した)は捨てる
@@ -86,6 +87,7 @@ describe('バックアップの種(同じバックアップから復元した 2 
     const off = await dev('Off', false);
     await off.put('n1', '題', '本文');
     expect(await backupSyncSeed(off.deps())).toBeNull();
+    await off.setEnabled(true);
     expect((await snap(off)).device).toBeNull();
   });
 });

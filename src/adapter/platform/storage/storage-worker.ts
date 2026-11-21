@@ -63,15 +63,20 @@ import {
   SYNC_KEY_BASE_PREFIX,
   SYNC_KEY_DEVICE,
   SYNC_KEY_PAIR_PREFIX,
+  SYNC_KEY_SEQ,
   SYNC_KEY_TOMB_PREFIX,
   SYNC_SCOPE,
   syncScope,
 } from '@features/sync/sync-state';
+import { isReservedSyncLid, isSyncRelationKind } from '@features/sync/sync-guard';
 import {
   deleteSetting,
   discardPeerRecords,
   ensureDevice,
+  forgetAllSyncRows,
   getSetting,
+  measureNoteFps,
+  measureOne,
   measureStates,
   putSetting,
   readBases,
@@ -80,6 +85,7 @@ import {
   readSeq,
   readTombstones,
   recordDeletion,
+  recordDeletions,
   writeBase,
   writeOut,
   writeSeq,
@@ -3913,33 +3919,98 @@ function upsertOf(lid: string, title: string, archetype: string, body: string, e
   return { lid, title, archetype, body, entryOrder, status: ext.status, date: ext.date, archived: ext.archived, createdAt, updatedAt: null };
 }
 
+/** 同期が切のとき、同期の op は動かない(防御の二重化。主スレッド側の門が抜けても worker が断る)。 */
+function requireSyncEnabled(): void {
+  if (!syncEnabled) throw new Error('端末間の同期がオフです(設定の「端末間の同期」をオンにしてから行ってください)');
+}
+
+const sameFp = (a: { content: string; place?: string }, b: { content: string; place?: string } | null): boolean =>
+  b !== null && a.content === b.content && (a.place === undefined || b.place === undefined || a.place === b.place);
+
 function applySync(database: Database, cid: string, input: SyncApplyInput): SyncApplyResult {
   const prevRows = new Map<string, { scope: string; k: string; prev: string | null }>();
   const rec: RowRecorder = (scope, k) => {
     const id = JSON.stringify([scope, k]);
     if (!prevRows.has(id)) prevRows.set(id, { scope, k, prev: getSetting(database, scope, k) });
   };
-  const undoEntries: SyncUndoToken['entries'] = [];
-  const noted = new Set<string>();
-  const note = (lid: string, appliedHash: string | null): void => {
-    if (noted.has(lid)) return;
-    noted.add(lid);
+  type Capture = { lid: string; prior: NonNullable<SyncUndoToken['entries'][number]['prior']> | null; priorHash: string | null };
+  const captured = new Map<string, Capture>();
+  /** 触る前の姿を 1 度だけ控える(本文は持たない。後で履歴の版の id を引く)。 */
+  const note = (lid: string): void => {
+    if (captured.has(lid)) return;
     const row = liveRow(database, cid, lid);
-    undoEntries.push({
+    captured.set(lid, {
       lid,
+      priorHash: row ? contentHash64Hex(row.body) : null,
       prior: row
-        ? { title: row.title, archetype: row.archetype, body: row.body, entryOrder: row.entry_order, createdAt: row.created_at, live: true, parents: structuralParentsOf(database, cid, lid) }
+        ? { title: row.title, archetype: row.archetype, entryOrder: row.entry_order, createdAt: row.created_at, live: true, parents: structuralParentsOf(database, cid, lid), body: { kind: 'same' } }
         : headRevision(database, cid, lid)
-          ? { title: '', archetype: '', body: '', entryOrder: 0, createdAt: null, live: false, parents: [] }
+          ? { title: '', archetype: '', entryOrder: 0, createdAt: null, live: false, parents: [], body: { kind: 'same' } }
           : null,
-      appliedHash,
     });
   };
   const result = { written: 0, trashed: 0, relationsAdded: 0, relationsRemoved: 0, placedAtRoot: 0 };
+  const raced: SyncApplyResult['raced'] = [];
   const relAdded: string[] = [];
   const relRemoved: SyncUndoToken['relationsRemoved'] = [];
   database.exec('BEGIN IMMEDIATE');
   try {
+    // ── 🔴 system 領域のノートに当たる取り込みは、tx ごと断る(`readDiffZip` が除いているが、worker も同じ門を持つ)
+    const targets = new Set<string>();
+    for (const u of input.upserts) {
+      targets.add(u.lid);
+      if (u.fallback) targets.add(u.fallback.lid);
+    }
+    for (const lid of input.trash) targets.add(lid);
+    for (const r of [...input.relationAdds, ...input.relationRemoves]) {
+      targets.add(r.from);
+      targets.add(r.to);
+    }
+    for (const lid of targets) {
+      const isSystem = database.selectValue(`SELECT 1 FROM entries WHERE cid = ? AND lid = ? AND NOT (${USER_REALM_SQL})`, [cid, lid]);
+      if (isReservedSyncLid(lid) || (isSystem !== undefined && isSystem !== null)) {
+        throw new Error('差分ファイルが、アプリ自身のノート(システム領域)を書き換えようとしています。取り込みを中止しました');
+      }
+    }
+    for (const u of input.upserts) {
+      if (u.fallback && database.selectValue('SELECT 1 FROM entries WHERE cid = ? AND lid = ?', [cid, u.fallback.lid]) === 1) {
+        throw new Error('競合のコピーの ID が、すでにあるノートと重なりました。もう一度取り込んでください');
+      }
+    }
+    // ── 🔴 計画を立ててから反映するまでの間に、こちらで編集されていないか(書く前に全部測る。書き始めると親の判定が変わるため)
+    const work: SyncApplyInput['upserts'] = [];
+    for (const u of input.upserts) {
+      if (u.expect === undefined) {
+        work.push(u);
+        continue;
+      }
+      const cur = measureOne(database, cid, u.lid);
+      const same = u.expect === null ? cur === null : cur !== null && sameFp(u.expect, cur);
+      if (same) {
+        work.push(u);
+        continue;
+      }
+      const title = liveRow(database, cid, u.lid)?.title ?? u.content?.title ?? u.lid;
+      if (u.content !== undefined && u.fallback !== undefined) {
+        // こちらを残し、相手の版は別ノートのコピーとして足す(両方残す)
+        work.push({ lid: u.fallback.lid, content: { ...u.content, title: u.fallback.title }, ...(u.place === undefined ? {} : { place: u.place }) });
+        raced.push({ lid: u.lid, title, copyLid: u.fallback.lid, copyTitle: u.fallback.title });
+      } else {
+        raced.push({ lid: u.lid, title });
+      }
+    }
+    const trashLids: string[] = [];
+    for (const lid of input.trash) {
+      const exp = input.trashExpect?.[lid];
+      if (exp !== undefined) {
+        const cur = measureOne(database, cid, lid);
+        if (cur === null || !sameFp(exp, cur)) {
+          if (cur !== null) raced.push({ lid, title: liveRow(database, cid, lid)?.title ?? lid, trash: true });
+          continue;
+        }
+      }
+      trashLids.push(lid);
+    }
     // ── 端末 id の重複(設計 doc §12.1 約束 4): 自分の id を作り直し、同期の記録を捨てて始め直す
     if (input.regenerateDevice !== undefined) {
       discardPeerRecords(database, rec);
@@ -3951,15 +4022,10 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
     }
     let maxOrder = Number(database.selectValue('SELECT coalesce(max(entry_order), 0) FROM entries WHERE cid = ?', [cid]) ?? 0);
     // ── 1 周目: 内容(題名・種別・本文)。前の本文は履歴へ残る
-    for (const u of input.upserts) {
-      if (u.content === undefined) {
-        // 親フォルダだけ変える(内容は触らない)。取り消しのため前の姿だけ控える
-        const cur = liveRow(database, cid, u.lid);
-        if (cur) note(u.lid, contentHash64Hex(cur.body));
-        continue;
-      }
+    for (const u of work) {
+      note(u.lid);
+      if (u.content === undefined) continue; // 親フォルダだけ変える(内容は触らない)
       const c = u.content;
-      note(u.lid, contentHash64Hex(c.body));
       const existing = liveRow(database, cid, u.lid);
       if (!existing) {
         // ゴミ箱に居る lid を戻すとき: 鎖の頭(ゴミ箱へ移した時点の全文)を先に戻し、その上に新しい本文を積む(鎖が頭からつながる)
@@ -3980,9 +4046,9 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
       deleteSetting(database, syncScope(cid), SYNC_KEY_TOMB_PREFIX + u.lid);
     }
     // ── 2 周目: 親フォルダ(宛先が無い・輪になるときはルートへ置く)
-    for (const u of input.upserts) {
+    for (const u of work) {
       if (u.place === undefined || !liveRow(database, cid, u.lid)) continue;
-      note(u.lid, null);
+      note(u.lid);
       const wanted = u.place.parentLid;
       const parent = wanted !== null && liveRow(database, cid, wanted) ? wanted : null;
       if (wanted !== null && parent === null) result.placedAtRoot++;
@@ -3994,16 +4060,17 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
       }
       if (u.content === undefined) result.written++;
     }
-    // ── ゴミ箱へ(削除の記録も残す)
-    for (const lid of input.trash) {
-      if (!liveRow(database, cid, lid)) continue;
-      note(lid, null);
-      recordDeletion(database, cid, lid, false, rec);
+    // ── ゴミ箱へ(削除の記録も 1 回のまとめ書きで残す)
+    const toTrash = trashLids.filter((lid) => liveRow(database, cid, lid) !== undefined);
+    for (const lid of toTrash) note(lid);
+    recordDeletions(database, cid, toTrash, rec);
+    for (const lid of toTrash) {
       deleteEntryInTx(database, { cid, lid });
       result.trashed++;
     }
-    // ── つながり
+    // ── つながり(🔴 運べる種類だけ。親子(structural)は上の親フォルダの道だけが張る)
     for (const r of input.relationAdds) {
+      if (!isSyncRelationKind(r.kind)) continue;
       if (!liveRow(database, cid, r.from) || !liveRow(database, cid, r.to)) continue;
       const dup = database.selectValue('SELECT 1 FROM relations WHERE cid = ? AND from_lid = ? AND to_lid = ? AND kind = ?', [cid, r.from, r.to, r.kind]);
       if (dup !== undefined && dup !== null) continue;
@@ -4025,12 +4092,29 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
         result.relationsRemoved++;
       }
     }
+    // ── 取り消しの控えを仕上げる(🔴 本文は持たず、履歴の版の id を引く。取り込み後の指紋もここで測る)
+    const undoEntries: SyncUndoToken['entries'] = [];
+    for (const cap of captured.values()) {
+      const nowFp = measureOne(database, cid, cap.lid);
+      let prior = cap.prior;
+      if (prior !== null && prior.live) {
+        const head = headRevision(database, cid, cap.lid);
+        const cur = liveRow(database, cid, cap.lid);
+        const curHash = cur ? contentHash64Hex(cur.body) : null;
+        // 本文が変わっていないなら `same` / 変わったなら(ゴミ箱へ移した場合も)、その直前の版が鎖の頭に残っている
+        if (cur && curHash === cap.priorHash) prior = { ...prior, body: { kind: 'same' } };
+        else if (head !== null && cap.priorHash !== null && head.content_hash === cap.priorHash) prior = { ...prior, body: { kind: 'rev', id: head.id, hash: cap.priorHash } };
+        else prior = { ...prior, body: { kind: 'unavailable' } };
+      }
+      undoEntries.push({ lid: cap.lid, prior, appliedFp: nowFp });
+    }
     // ── 同期の記録(相手との対応・前回の合意・連番)
     rec(syncScope(cid), SYNC_KEY_PAIR_PREFIX + input.peer);
     putSetting(database, syncScope(cid), SYNC_KEY_PAIR_PREFIX + input.peer, input.peerCid);
     writeBase(database, cid, input.peer, input.baseline, input.nowIso, rec);
     writeSeq(database, advanceSeq(readSeq(database), input.peerSeq), rec);
     database.exec('COMMIT');
+    return { ...result, raced, undo: { entries: undoEntries, relationsAdded: relAdded, relationsRemoved: relRemoved, rows: [...prevRows.values()] } };
   } catch (err) {
     try {
       database.exec('ROLLBACK');
@@ -4039,42 +4123,71 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
     }
     throw err;
   }
-  return { ...result, undo: { entries: undoEntries, relationsAdded: relAdded, relationsRemoved: relRemoved, rows: [...prevRows.values()] } };
 }
 
 function undoSync(database: Database, cid: string, token: SyncUndoToken): { restored: number; skipped: number } {
   let restored = 0;
   let skipped = 0;
+  const restoreParents = (lid: string, parents: ReadonlyArray<{ id: string; from: string }>): void => {
+    database.exec({ sql: "DELETE FROM relations WHERE cid = ? AND to_lid = ? AND kind = 'structural'", bind: [cid, lid] });
+    for (const par of parents) {
+      database.exec({ sql: `INSERT OR IGNORE INTO relations (cid, id, from_lid, to_lid, kind, created_at, updated_at) VALUES (?, ?, ?, ?, 'structural', datetime('now'), datetime('now'))`, bind: [cid, par.id, par.from, lid] });
+    }
+  };
+  /** 前の本文を、履歴の版から取り出す(🔴 鎖の頭の版だけ。違えば null = 戻さない)。`base` = いまの本文。 */
+  const priorBody = (lid: string, spec: { kind: 'same' } | { kind: 'rev'; id: string; hash: string } | { kind: 'unavailable' }, base: string | null): string | null => {
+    if (spec.kind === 'same') return base;
+    if (spec.kind === 'unavailable') return null;
+    const row = database.selectObjects('SELECT id, rev_order, snapshot, content_hash, kind FROM revisions WHERE cid = ? AND id = ?', [cid, spec.id])[0] as unknown as RevRow | undefined;
+    if (!row) return null;
+    const head = headRevision(database, cid, lid);
+    if (!head || head.id !== row.id) return null;
+    let body: string;
+    try {
+      body = materialize(row, base ?? row.snapshot);
+    } catch {
+      return null;
+    }
+    return contentHash64Hex(body) === spec.hash ? body : null;
+  };
   database.exec('BEGIN IMMEDIATE');
   try {
     for (const e of [...token.entries].reverse()) {
       const cur = liveRow(database, cid, e.lid);
+      const curFp = cur ? measureOne(database, cid, e.lid) : null;
       const p = e.prior;
       if (p === null || !p.live) {
-        // 取り込みで新しく入った / ゴミ箱から戻した → ゴミ箱へ(削除の記録は残さない = 相手へ「消した」と伝えない)。その後に編集していたら触らない
-        if (cur && (e.appliedHash === null || contentHash64Hex(cur.body) === e.appliedHash)) {
+        // 取り込みで新しく入った / ゴミ箱から戻した → ゴミ箱へ(削除の記録は残さない = 相手へ「消した」と伝えない)。その後に変えていたら触らない
+        if (cur && e.appliedFp !== null && sameFp(e.appliedFp, curFp)) {
           deleteEntryInTx(database, { cid, lid: e.lid });
           restored++;
         } else skipped++;
         continue;
       }
-      if (cur) {
-        if (e.appliedHash !== null && contentHash64Hex(cur.body) !== e.appliedHash) {
+      if (e.appliedFp === null) {
+        // 取り込みでゴミ箱へ移した → 戻す。その間に user が戻していれば(生きていれば)触らない
+        const body = cur ? null : priorBody(e.lid, p.body, null);
+        if (cur || body === null) {
           skipped++;
           continue;
         }
-        writeEntryRow(database, cid, upsertOf(e.lid, p.title, p.archetype, p.body, cur.entry_order, p.createdAt), { checkpoint: true });
-      } else if (e.appliedHash === null) {
-        // 取り込みでゴミ箱へ移した → 戻す(その間に user が戻していれば cur がある側へ入る)
-        writeEntryRow(database, cid, upsertOf(e.lid, p.title, p.archetype, p.body, p.entryOrder, p.createdAt), {});
-      } else {
+        writeEntryRow(database, cid, upsertOf(e.lid, p.title, p.archetype, body, p.entryOrder, p.createdAt), {});
+        restoreParents(e.lid, p.parents);
+        restored++;
+        continue;
+      }
+      // 内容も親フォルダも、取り込み直後のまま(題名・移動・種別を変えていたら「取り込み後の編集」= 触らない)
+      if (!cur || curFp === null || !sameFp(e.appliedFp, curFp)) {
         skipped++;
         continue;
       }
-      database.exec({ sql: "DELETE FROM relations WHERE cid = ? AND to_lid = ? AND kind = 'structural'", bind: [cid, e.lid] });
-      for (const par of p.parents) {
-        database.exec({ sql: `INSERT OR IGNORE INTO relations (cid, id, from_lid, to_lid, kind, created_at, updated_at) VALUES (?, ?, ?, ?, 'structural', datetime('now'), datetime('now'))`, bind: [cid, par.id, par.from, e.lid] });
+      const body = priorBody(e.lid, p.body, cur.body);
+      if (body === null) {
+        skipped++;
+        continue;
       }
+      writeEntryRow(database, cid, upsertOf(e.lid, p.title, p.archetype, body, cur.entry_order, p.createdAt), { checkpoint: true });
+      restoreParents(e.lid, p.parents);
       restored++;
     }
     for (const id of token.relationsAdded) database.exec({ sql: 'DELETE FROM relations WHERE cid = ? AND id = ?', bind: [cid, id] });
@@ -4082,6 +4195,8 @@ function undoSync(database: Database, cid: string, token: SyncUndoToken): { rest
       database.exec({ sql: `INSERT OR IGNORE INTO relations (cid, id, from_lid, to_lid, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`, bind: [cid, r.id, r.from, r.to, r.kind] });
     }
     for (const r of token.rows) {
+      // 🔴 連番は巻き戻さない(戻すと、取り込み前に書き出した `out:<連番>` を再利用してしまい、端末 id の重複の見分けが狂う)
+      if (r.scope === SYNC_SCOPE && r.k === SYNC_KEY_SEQ) continue;
       if (r.prev === null) deleteSetting(database, r.scope, r.k);
       else putSetting(database, r.scope, r.k, r.prev);
     }
@@ -5981,6 +6096,7 @@ const handlers: Handlers = {
     return null;
   },
   syncSnapshot: (req) => {
+    requireSyncEnabled();
     const database = need();
     let device = getSetting(database, SYNC_SCOPE, SYNC_KEY_DEVICE);
     if (req.ensureDevice === true && !isDeviceId(device)) {
@@ -6012,6 +6128,7 @@ const handlers: Handlers = {
     };
   },
   syncCommitExport: (req) => {
+    requireSyncEnabled();
     const database = need();
     database.exec('BEGIN IMMEDIATE');
     try {
@@ -6031,6 +6148,7 @@ const handlers: Handlers = {
     }
   },
   syncSeed: (req) => {
+    requireSyncEnabled();
     const database = need();
     database.exec('BEGIN IMMEDIATE');
     try {
@@ -6052,8 +6170,31 @@ const handlers: Handlers = {
       throw err;
     }
   },
-  syncApply: (req) => applySync(need(), req.cid, req.input),
+  syncApply: (req) => {
+    requireSyncEnabled();
+    return applySync(need(), req.cid, req.input);
+  },
   syncUndo: (req) => undoSync(need(), req.cid, req.token),
+  syncMeasureNotes: (req) => {
+    requireSyncEnabled();
+    return measureNoteFps(req.notes);
+  },
+  syncForget: () => {
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      const removed = forgetAllSyncRows(database);
+      database.exec('COMMIT');
+      return { removed };
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+  },
   restoreTrashNotes: (req) => {
     const database = need();
     const keepLatest = Math.max(1, req.keepLatest ?? DEFAULT_REVISION_KEEP);

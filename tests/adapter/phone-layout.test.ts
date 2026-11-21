@@ -903,6 +903,24 @@ describe('探す・絞る・目次(隠れた面へ送らない)', () => {
     );
   });
 
+  it('🔴 競合のノートを一覧する(#2000): 左の一覧の絞り込みに「同期の競合」が入る(PC)/ スマホは一覧ページへ移ってから絞る', () => {
+    const pc = setup(false);
+    const btn = pc.root.ownerDocument.createElement('button');
+    btn.setAttribute('data-pkc-action', 'show-sync-conflicts');
+    pc.root.append(btn);
+    btn.click();
+    expect(pc.d.getState().filterQuery).toBe('同期の競合');
+    const ph = setup(true);
+    ph.open('n1');
+    expect(ph.page(), '前提:本文ページに居る').toBe('note');
+    const b2 = ph.root.ownerDocument.createElement('button');
+    b2.setAttribute('data-pkc-action', 'show-sync-conflicts');
+    ph.root.append(b2);
+    b2.click();
+    expect(ph.d.getState().filterQuery).toBe('同期の競合');
+    expect(ph.page(), '絞ったのに一覧が見えていない').toBe('list');
+  });
+
   it('🔴 名前を変えるを押すと、スマホでは先に一覧ページへ移る(隠れた一覧で欄を出さない)', () => {
     const s = setup(true);
     s.open('n1');

@@ -24,6 +24,8 @@ function input(over: Partial<PlanInput> & { remoteNotes?: DiffNote[]; remoteFps?
       manifest: { format: DIFF_FORMAT, version: 1, exported_at: '', device: DEV, seq: 1, cid: 'c-r', title: 'R', complete: true, counts: { notes: 0, relations: 0, deletions: 0, assets: 0, total: 0 } },
       container: { notes: bodies, relations: [], tombstones: [], fingerprints: fpList(all.map(st)), peerBase: [], assets: [] },
     },
+    // 本文の指紋は worker で測った物を渡す設計(主スレッドで測らない)── test では同じ関数で測って渡す
+    remoteNoteFps: new Map(bodies.map((x) => [x.lid, entryFp({ title: x.title, archetype: x.archetype, parentLid: x.parentLid, body: x.body })] as const)),
     localStates: [],
     localRelations: [],
     localTitles: new Map(),
@@ -39,7 +41,9 @@ describe('planSyncImport: 判定 → 反映の操作', () => {
   it('相手だけにある物は新しく入る(lid を保つ)・記録は取り込み後の指紋', () => {
     const r = note('a', '日本語の題名', '本文');
     const p = planSyncImport(input({ remoteNotes: [r] }));
-    expect(p.upserts).toEqual([{ lid: 'a', existed: false, content: { title: '日本語の題名', archetype: 'text', body: '本文' }, place: { parentLid: null }, reason: 'take' }]);
+    expect(p.upserts).toEqual([
+      { lid: 'a', existed: false, content: { title: '日本語の題名', archetype: 'text', body: '本文' }, place: { parentLid: null }, reason: 'take', expect: null, fallback: { lid: 'new-1', title: '日本語の題名(同期の競合 2026-11-21)' } },
+    ]);
     expect(p.summary.created).toBe(1);
     expect(p.baseline.a).toEqual(st(r) && { content: st(r).content, place: st(r).place });
   });
@@ -97,9 +101,9 @@ describe('planSyncImport: 判定 → 反映の操作', () => {
     expect(p.baseline.a!.content).toBe(st(remote).content);
   });
 
-  it('記録が無く両方にあって違う → 初回の突き合わせ(題名の印が違う)', () => {
+  it('記録が無く両方にあって違う → 初回の同期(題名の印が違うが「同期の競合」を含む)', () => {
     const p = planSyncImport(input({ remoteNotes: [note('a', '題', 'R')], localStates: [st(note('a', '題', 'L'))] }));
-    expect(p.conflicts[0]).toMatchObject({ kind: 'first-sync', copyTitle: '題(初回の突き合わせ 2026-11-21)' });
+    expect(p.conflicts[0]).toMatchObject({ kind: 'first-sync', copyTitle: '題(初回の同期の競合 2026-11-21)' });
     expect(p.summary.firstSync).toBe(1);
   });
 
@@ -110,7 +114,7 @@ describe('planSyncImport: 判定 → 反映の操作', () => {
     const moved = { ...base, parentLid: 'f' };
     const local = note('a', 't', 'こちらの編集');
     const p = planSyncImport(input({ remoteNotes: [f, moved], localStates: [st(f), st(local)], localTitles: new Map([['f', 'フォルダ']]), baseline: { ...b, f: { content: st(f).content, place: st(f).place } } }));
-    expect(p.upserts).toEqual([{ lid: 'a', existed: true, reason: 'merge', place: { parentLid: 'f' } }]);
+    expect(p.upserts).toEqual([{ lid: 'a', existed: true, reason: 'merge', place: { parentLid: 'f' }, expect: { content: st(local).content, place: st(local).place } }]);
     expect(p.summary.merged).toBe(1);
   });
 

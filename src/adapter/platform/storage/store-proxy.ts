@@ -155,6 +155,8 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'syncSnapshot',
   'syncCommitExport',
   'syncSeed',
+  'syncMeasureNotes',
+  'syncForget',
   // 中身を消す操作は、他タブへは onContainerWiped で知らせる
   'wipeStorage',
   // 中身を変えない保守(救出の読み出し / 詰め直し / 索引の作り直し / 検査の記録)

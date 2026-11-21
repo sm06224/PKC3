@@ -852,6 +852,16 @@ export type StorageRequest =
   | { op: 'syncSeed'; cid: string; peer: string; baseline: Record<string, { content: string; place?: string }>; nowIso: string }
   | { op: 'syncApply'; cid: string; input: SyncApplyInput }
   | { op: 'syncUndo'; cid: string; token: SyncUndoToken }
+  /**
+   * 🔴 相手のノート(本文つき)の指紋を worker で測る。⚠ 本文の SHA-256 を主スレッドでやらない(重い処理は worker へ)。
+   * 渡したノートの数だけ、同じ順で返す。
+   */
+  | { op: 'syncMeasureNotes'; notes: Array<{ lid: string; title: string; archetype: string; parentLid: string | null; body: string }> }
+  /**
+   * 🔴 **同期の記録を全部消す**(端末 id・連番・全ワークスペースの対応・前回の同期の記録・削除の記録)。ノートは触らない。
+   * ⚠ 同期が切のときも使える(切にするときに消したいことがある)。次にオンにして同期すると初回の同期からになる。
+   */
+  | { op: 'syncForget' }
   | { op: 'close' };
 
 /** `syncApply` の入力(`features/sync/sync-plan.ts` の計画 + 記録の書き込み)。 */
@@ -865,8 +875,13 @@ export interface SyncApplyInput {
     lid: string;
     content?: { title: string; archetype: string; body: string };
     place?: { parentLid: string | null };
+    /** 計画時のこちらの指紋(`null` = 生きていなかった)。tx で測り直し、違えば書かずに `fallback` のコピーを足す。 */
+    expect?: { content: string; place?: string } | null;
+    fallback?: { lid: string; title: string };
   }>;
   trash: string[];
+  /** ゴミ箱へ移す物の計画時の指紋。違えば移さない(こちらの編集を消さない)。 */
+  trashExpect?: Record<string, { content: string; place?: string }>;
   relationAdds: Array<{ from: string; to: string; kind: string }>;
   relationRemoves: Array<{ from: string; to: string; kind: string }>;
   baseline: Record<string, { content: string; place?: string }>;
@@ -881,10 +896,15 @@ export interface SyncApplyResult {
   relationsRemoved: number;
   /** 親フォルダが張れず(輪になる・宛先が無い)ルートへ置いた数。 */
   placedAtRoot: number;
+  /** 計画を立ててから反映するまでの間に、こちらで編集されていた物(書かずに残した)。コピーを足した物は `copyLid` がある。 */
+  raced: Array<{ lid: string; title: string; copyLid?: string; copyTitle?: string; trash?: boolean }>;
   undo: SyncUndoToken;
 }
 
-/** 取り消し用の控え。⚠ 取り込みで変えたノートの「前の姿」だけを持つ(全件ではない)。 */
+/**
+ * 取り消し用の控え。⚠ 取り込みで変えたノートの「前の姿」の**題名・位置・履歴の版の id だけ**を持つ(本文は持たない ──
+ * 本文は履歴(`revisions`)に残っているので、取り消しはそこから戻す。大きな本文を何件分も主スレッドに持ち続けない)。
+ */
 export interface SyncUndoToken {
   entries: Array<{
     lid: string;
@@ -892,14 +912,21 @@ export interface SyncUndoToken {
     prior: null | {
       title: string;
       archetype: string;
-      body: string;
       entryOrder: number;
       createdAt: string | null;
       live: boolean;
       parents: Array<{ id: string; from: string }>;
+      /**
+       * 前の本文の取り出し方。`same` = 本文は変わっていない / `rev` = この履歴の版から戻す(`hash` で確かめる)/
+       * `unavailable` = 履歴を作れなかった(戻せない = 触らない)。
+       */
+      body: { kind: 'same' } | { kind: 'rev'; id: string; hash: string } | { kind: 'unavailable' };
     };
-    /** 取り込んだ直後の本文のハッシュ(その後に編集されていたら取り消しで触らない)。 */
-    appliedHash: string | null;
+    /**
+     * 取り込んだ直後の指紋(内容 + 親フォルダ。`syncSnapshot` の指紋と同じ関数)。⚠ 題名・移動・種別の変更も「取り込み後の編集」。
+     * 現在の指紋がこれと違えば取り消しで触らない。`null` = 取り込みでゴミ箱へ移した(いま生きていれば、user が戻した = 触らない)。
+     */
+    appliedFp: { content: string; place?: string } | null;
   }>;
   relationsAdded: string[];
   relationsRemoved: Array<{ id: string; from: string; to: string; kind: string }>;
@@ -1558,5 +1585,7 @@ export interface ResultMap {
   syncSeed: { written: boolean };
   syncApply: SyncApplyResult;
   syncUndo: { restored: number; skipped: number };
+  syncMeasureNotes: Array<{ lid: string; content: string; place: string }>;
+  syncForget: { removed: number };
   close: null;
 }

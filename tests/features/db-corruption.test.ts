@@ -177,6 +177,8 @@ describe('止める op の仕分け(#971)', () => {
     'wipeStorage',
     // 端末間の同期(#2000 段 2)── worker に入 / 切を教えるだけ(DB を読まない・書かない)
     'syncConfigure',
+    // 端末間の同期(#2000 段 2 レビュー)── 相手のノートの指紋を測るだけ(DB に触れない計算。worker で測る)
+    'syncMeasureNotes',
   ];
 
   it('🔴 protocol の op は 1 つ残らず、止めるか通すかが決まっている', () => {

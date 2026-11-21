@@ -25,8 +25,14 @@ export interface SyncDevice {
   reports: string[][];
   failures: string[];
   messages: Array<{ kind: string; text: string }>;
+  /** 結果の面に「競合のノートを一覧する」ボタンを出す指示が付いた回数。 */
+  conflictButtons: number;
   confirms: string[];
-  undo: { count: number; run: () => Promise<{ restored: number; skipped: number }> } | null;
+  /** 確認に渡されたボタンの名前(`confirms` と同じ順)。 */
+  confirmOpts: Array<{ okLabel?: string; cancelLabel?: string } | undefined>;
+  undo: { count: number; run: () => Promise<{ restored: number; skipped: number }>; token: unknown } | null;
+  /** 直近の取り消しの控え(本文を持たないことを test が見る)。 */
+  undoToken: unknown;
   setEnabled(on: boolean): Promise<void>;
   enabled: boolean;
   /** 親フォルダつきでノートを書く。 */
@@ -69,8 +75,11 @@ export async function spawnDevice(name: string, cid = `c-${name}`): Promise<Sync
     reports: [],
     failures: [],
     messages: [],
+    conflictButtons: 0,
     confirms: [],
+    confirmOpts: [],
     undo: null,
+    undoToken: null,
     enabled: false,
     async setEnabled(on) {
       dev.enabled = on;
@@ -114,17 +123,22 @@ export async function spawnDevice(name: string, cid = `c-${name}`): Promise<Sync
         download: (nm, blob) => {
           dev.lastDiff = { name: nm, blob };
         },
-        report: (notes) => void dev.reports.push([...notes]),
+        report: (notes, o) => {
+          dev.reports.push([...notes]);
+          if (o?.conflicts === true) dev.conflictButtons++;
+        },
         reportProblem: (m) => void dev.failures.push(m),
         reload: async () => {},
-        confirmAction: async (m) => {
+        confirmAction: async (m, opts) => {
           dev.confirms.push(m);
+          dev.confirmOpts.push(opts);
           return true;
         },
         genLid: () => `n-${name}-${++n}`,
         now: () => new Date('2026-11-21T09:00:00'),
         rememberUndo: (info) => {
           dev.undo = info;
+          dev.undoToken = info.token;
         },
         postMessage: (m) => void dev.messages.push({ kind: m.kind, text: m.text }),
         ...over,

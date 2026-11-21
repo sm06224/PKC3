@@ -96,6 +96,8 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   'syncSeed',
   // 🔴 現在の指紋を読む(端末 id が無ければ 1 行作る)。問題のある DB から同期の材料を作らない
   'syncSnapshot',
+  // 🔴 同期の記録を消す(行を消す書き込み)。問題のある DB には打たない
+  'syncForget',
   // 🔴 メッセージの追記(設計 doc §7、段②a)── 書き込みなので止める。
   //    断られた分は adapter 側の控え(IndexedDB)へ積み、書けるようになった時点で流し込む。
   'appendMessage',

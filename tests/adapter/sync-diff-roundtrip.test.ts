@@ -6,13 +6,17 @@
  * 設定が切のときの断り・1 回の tx で失敗したら何も書かないこと・取り消し・端末 id の重複・ワークスペースの対応。
  * 空振り防止: 各 test は「入れた物が実際に別の端末の DB に出る」を数で確かめる(対照群として同じ操作をしない側も見る)。
  */
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { exportSyncDiff, importSyncDiff } from '../../src/adapter/ui/actions/sync-diff';
+import { writeDiffZip, type DiffNote } from '../../src/features/sync/diff-file';
+import { entryFp } from '../../src/features/sync/sync-fp';
 import { spawnDevice, type SyncDevice } from '../helpers/sync-device';
 
+const sha256Of = (bytes: number[]): string => createHash('sha256').update(Uint8Array.from(bytes)).digest('hex');
 const devices: SyncDevice[] = [];
-async function dev(name: string, on = true): Promise<SyncDevice> {
-  const d = await spawnDevice(name);
+async function dev(name: string, on = true, cid?: string): Promise<SyncDevice> {
+  const d = await spawnDevice(name, cid);
   devices.push(d);
   await d.setEnabled(on);
   return d;
@@ -47,10 +51,24 @@ describe('同期 OFF(既定)', () => {
     const a = await dev('A', false);
     await a.put('n1', '日本語の題名', '本文');
     await a.del('n1');
+    // ⚠ 切の間は同期の op を worker が断る(防御の二重化)。読むために入にするが、入にするだけでは行は書かれない
+    await expect(snap(a)).rejects.toThrow('オフ');
+    await a.setEnabled(true);
     const s = await snap(a);
     expect(s.device).toBeNull();
     expect(s.tombstones).toEqual([]);
     expect(s.bases).toEqual({});
+  });
+  it('worker の門: 切のとき syncApply / syncCommitExport / syncSeed / syncMeasureNotes も断る(主スレッドの門が抜けても書かない)', async () => {
+    const a = await dev('A', false);
+    await expect(a.request({ op: 'syncCommitExport', cid: a.cid, digest: 'x' })).rejects.toThrow('オフ');
+    await expect(a.request({ op: 'syncSeed', cid: a.cid, peer: '0123456789abcdef', baseline: {}, nowIso: '2026-11-21T00:00:00.000Z' })).rejects.toThrow('オフ');
+    await expect(a.request({ op: 'syncMeasureNotes', notes: [] })).rejects.toThrow('オフ');
+    await expect(
+      a.request({ op: 'syncApply', cid: a.cid, input: { peer: '0123456789abcdef', peerCid: 'c', peerSeq: 1, upserts: [], trash: [], relationAdds: [], relationRemoves: [], baseline: {}, nowIso: '2026-11-21T00:00:00.000Z' } }),
+    ).rejects.toThrow('オフ');
+    await a.setEnabled(true);
+    expect((await snap(a)).device).toBeNull(); // 断られた op は 1 行も書いていない
   });
   it('対照: 入のときは消すと削除の記録が残る', async () => {
     const a = await dev('A', true);
@@ -69,6 +87,7 @@ describe('同期 OFF(既定)', () => {
     expect(b.failures[0]).toContain('端末間の同期');
     expect(b.failures[0]).toContain('設定');
     expect((await live(b)).length).toBe(0);
+    await b.setEnabled(true);
     expect((await snap(b)).device).toBeNull();
   });
 });
@@ -241,7 +260,7 @@ describe('往復(2 台)', () => {
     expect(lastReport(b)).toContain('相手で消したがこちらで編集');
   });
 
-  it('初回の突き合わせ: 記録が無く両方にあって内容が違う → 競合として「初回の突き合わせ」と分けて出す', async () => {
+  it('初回の同期: 記録が無く両方にあって内容が違う → 競合として「初回の同期」と分けて出す', async () => {
     const a = await dev('A');
     const b = await dev('B');
     await a.put('n1', '同じ lid', 'A の本文');
@@ -250,9 +269,9 @@ describe('往復(2 台)', () => {
     await a.put('n2', '同じ内容', 'そろっている');
     await send(a, b);
     const titles = (await live(b)).map((x) => x.title).sort();
-    expect(titles).toContain('同じ lid(初回の突き合わせ 2026-11-21)');
+    expect(titles).toContain('同じ lid(初回の同期の競合 2026-11-21)');
     expect(await body(b, 'n1')).toBe('B の本文');
-    expect(lastReport(b)).toContain('初回の突き合わせ: 1 件');
+    expect(lastReport(b)).toContain('初回の同期で内容が違った物: 1 件');
     // 同じ内容(n2)は競合にしない
     expect((await live(b)).length).toBe(3);
   });
@@ -278,12 +297,24 @@ describe('添付・足りない物', () => {
     const b = await dev('B');
     const blob = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' });
     a.blobs.set('ast-aaa', blob);
-    await a.request({ op: 'putAssetMeta', cid: a.cid, meta: { key: 'ast-aaa', mime: 'image/png', size: 4, hash: 'h' } });
+    await a.request({ op: 'putAssetMeta', cid: a.cid, meta: { key: 'ast-aaa', mime: 'image/png', size: 4, hash: sha256Of([1, 2, 3, 4]) } });
     await a.put('n1', '画像つき', '![絵](asset:ast-aaa)');
     await send(a, b);
     expect(b.blobs.has('ast-aaa')).toBe(true);
     expect(b.blobs.get('ast-aaa')!.size).toBe(4);
     expect(lastReport(b)).not.toContain('足りない添付');
+  });
+  it('目録の hash と内容が合わない添付は置かず、一覧で言う(参照は残す)・反映より先に書かない', async () => {
+    const a = await dev('A');
+    const b = await dev('B');
+    a.blobs.set('ast-bad', new Blob([new Uint8Array([9, 9, 9])], { type: 'image/png' }));
+    await a.request({ op: 'putAssetMeta', cid: a.cid, meta: { key: 'ast-bad', mime: 'image/png', size: 3, hash: sha256Of([1, 2, 3]) } });
+    await a.put('n1', '偽の添付', '![絵](asset:ast-bad)');
+    await send(a, b);
+    expect(b.blobs.has('ast-bad')).toBe(false);
+    expect(await body(b, 'n1')).toBe('![絵](asset:ast-bad)');
+    expect(lastReport(b)).toContain('取り込まなかった添付: 1 件');
+    expect((await b.request({ op: 'listAssetMetas', cid: b.cid })).map((m) => m.key)).not.toContain('ast-bad');
   });
   it('実体が差分に無い添付は参照を残し、足りない添付として一覧で言う', async () => {
     const a = await dev('A');
@@ -297,6 +328,28 @@ describe('添付・足りない物', () => {
   });
 });
 
+/** 端末 id・cid・連番を指定した差分ファイル(中身は指定のノートだけ)。 */
+async function forgeSame(device: string, cid: string, seq: number, notes: Array<{ lid: string; title: string; body: string }>): Promise<Blob> {
+  const fps = notes.map((n) => {
+    const f = entryFp({ title: n.title, archetype: 'text', parentLid: null, body: n.body });
+    return { key: n.lid, c: f.content, p: f.place as string };
+  });
+  async function* gen(): AsyncGenerator<DiffNote> {
+    for (const n of notes) yield { lid: n.lid, title: n.title, archetype: 'text', parentLid: null, body: n.body };
+  }
+  const out = await writeDiffZip({
+    manifest: { exported_at: '2026-11-21T09:30:00.000Z', device, seq, cid, title: '細工', complete: true },
+    notes: gen(),
+    relations: [],
+    tombstones: [],
+    fingerprints: fps,
+    peerBase: [],
+    assets: () => [],
+    getAssetBlob: async () => null,
+  });
+  return out.blob;
+}
+
 describe('端末 id の重複・自分の差分', () => {
   it('自分が書き出した差分ファイルを取り込んでも何も起きない(重複と見なさない)', async () => {
     const a = await dev('A');
@@ -308,23 +361,94 @@ describe('端末 id の重複・自分の差分', () => {
     expect((await snap(a)).device).toBe(idBefore);
     expect(a.reports.length).toBe(0);
   });
-  it('DB の複製で端末 id が重なったら、自分の id を作り直し・同期の記録を捨て・取り込みは続ける', async () => {
+  /** A の端末 id を持つ複製(同じ cid の別の DB)を作る。 */
+  async function cloneOf(a: SyncDevice): Promise<SyncDevice> {
+    const clone = await dev('A2', true, a.cid);
+    const idA = (await snap(a)).device!;
+    clone.execSql("INSERT INTO settings(scope,k,v) VALUES ('__sync__','device',?) ON CONFLICT(scope,k) DO UPDATE SET v=excluded.v", [idA]);
+    return clone;
+  }
+  it('DB の複製で端末 id が重なったら(同じ cid・記録に無い連番)専用の確認を取り、承知したら自分の id を作り直し・同期の記録を捨て・取り込みは続ける', async () => {
     const a = await dev('A');
-    const clone = await dev('A2');
     await a.put('n1', '題名', '本文');
     await exportSyncDiff(a.deps());
     const idA = (await snap(a)).device!;
-    // 複製した端末は同じ id を持ち、A の履歴に無い内容を持つ
-    clone.execSql("INSERT INTO settings(scope,k,v) VALUES ('__sync__','device',?) ON CONFLICT(scope,k) DO UPDATE SET v=excluded.v", [idA]);
+    const clone = await cloneOf(a);
     await clone.put('x1', 'クローン側のノート', 'クローンの本文');
     await clone.put('n1', '題名', '本文');
     await importSyncDiff(clone.deps({ randomBytes: () => new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]) }), a.lastDiff!.blob, 'a.pkc3-diff.zip');
     expect(clone.failures).toEqual([]);
+    // 専用の確認: この端末の物に見えること・ID を作り直すこと・記録が最初からになることを言う
+    expect(clone.confirms.length).toBeGreaterThanOrEqual(1);
+    expect(clone.confirms[0]).toContain('この端末が書き出した物に見えます');
+    expect(clone.confirms[0]).toContain('作り直し');
     const s = await snap(clone);
     expect(s.device).toBe('0102030405060708');
     expect(s.device).not.toBe(idA);
     expect(Object.keys(s.bases)).toEqual([idA]); // 作り直した後は、相手 A の記録だけから始まる
     expect(lastReport(clone)).toContain('端末の ID を作り直しました');
+  });
+  it('確認で「やめる」を選ぶと、端末 id も同期の記録も 1 つも変わらない', async () => {
+    const a = await dev('A');
+    const peer = await dev('P');
+    await peer.put('p1', '相手のノート', '相手の本文');
+    await send(peer, a); // A は相手 P の記録を持つ
+    await a.put('n1', '題名', '本文');
+    await exportSyncDiff(a.deps());
+    const clone = await cloneOf(a);
+    await send(peer, clone);
+    const before = await snap(clone);
+    expect(Object.keys(before.bases).length).toBeGreaterThan(0);
+    const diff = a.lastDiff!.blob;
+    // ⚠ 対応の確認(別の確認)には「はい」と答え、ID の作り直しの確認にだけ「やめる」と答える(片方に救われて空振りしない)
+    const r = await importSyncDiff(clone.deps({ confirmAction: async (m) => !m.includes('作り直し') }), diff, 'a.pkc3-diff.zip');
+    expect(r.ok).toBe(true);
+    const after = await snap(clone);
+    expect(after.device).toBe(before.device);
+    expect(after.bases).toEqual(before.bases);
+    expect(after.pairs).toEqual(before.pairs);
+  });
+  it('連番は記録にあっても内容(指紋の要約)が違えば自分の差分とは見なさない(複製の確認を取る)', async () => {
+    const a = await dev('A');
+    await a.put('n1', '題名', '本文');
+    await exportSyncDiff(a.deps());
+    const s0 = await snap(a);
+    const seq = Object.keys(s0.outs).map(Number)[0]!;
+    // 同じ端末 id・同じ cid・同じ連番だが、中身(指紋)が違う差分
+    const blob = await forgeSame(s0.device!, a.cid, seq, [{ lid: 'zz', title: '別の中身', body: '別' }]);
+    const asked: string[] = [];
+    const r = await importSyncDiff(a.deps({ confirmAction: async (m) => (asked.push(m), false) }), blob, 'x.pkc3-diff.zip');
+    expect(r.ok).toBe(true);
+    expect(asked.length).toBe(1);
+    expect(asked[0]).toContain('この端末が書き出した物に見えます');
+    expect((await snap(a)).device).toBe(s0.device); // やめたので変わらない
+    // 対照: 本当に自分の差分(指紋が一致)なら確認も出ない
+    const asked2: string[] = [];
+    await importSyncDiff(a.deps({ confirmAction: async (m) => (asked2.push(m), false) }), a.lastDiff!.blob, 'mine.pkc3-diff.zip');
+    expect(asked2).toEqual([]);
+  });
+  it('自分の差分を、別のワークスペースへ取り込もうとしたら断る(記録を一切変えない・同期の記録を消すボタンを名指しする)', async () => {
+    const a = await dev('A');
+    const peer = await dev('P');
+    await peer.put('p1', '相手のノート', '相手の本文');
+    await send(peer, a);
+    await a.put('n1', '題名', '本文');
+    await exportSyncDiff(a.deps());
+    const idA = (await snap(a)).device!;
+    // 同じ端末の別のワークスペース(cid が違う)
+    const other = await dev('A3', true, 'c-other');
+    other.execSql("INSERT INTO settings(scope,k,v) VALUES ('__sync__','device',?) ON CONFLICT(scope,k) DO UPDATE SET v=excluded.v", [idA]);
+    await send(peer, other);
+    const before = await snap(other);
+    const r = await importSyncDiff(other.deps({ confirmAction: async () => true }), a.lastDiff!.blob, 'a.pkc3-diff.zip');
+    expect(r.ok).toBe(false);
+    expect(other.failures.join('\n')).toContain('別のワークスペース');
+    expect(other.failures.join('\n')).toContain('同期の記録を消す');
+    const after = await snap(other);
+    expect(after.device).toBe(idA);
+    expect(after.bases).toEqual(before.bases);
+    expect(after.pairs).toEqual(before.pairs);
+    expect((await live(other)).map((x) => x.lid)).toEqual(['p1']);
   });
 });
 
@@ -346,10 +470,10 @@ describe('1 回の tx・取り消し', () => {
             { lid: 'n2', content: { title: '新規', archetype: 'text', body: '新規本文' } },
           ],
           trash: [],
-          // 2 本目で SQL が落ちる(kind が NOT NULL)── 前の書き込みが残っていないことを見る
-          relationAdds: [{ from: 'n1', to: 'n2', kind: null as unknown as string }],
+          relationAdds: [{ from: 'n1', to: 'n2', kind: 'semantic' }],
           relationRemoves: [],
-          baseline: { n1: { content: 'x', place: 'y' } },
+          // 同期の記録を書く段(すべてのノートを書いた後)で落ちる ── それまでの書き込みが残らないことを見る
+          baseline: { n1: null as unknown as { content: string } },
           nowIso: '2026-11-21T00:00:00.000Z',
         },
       }),
