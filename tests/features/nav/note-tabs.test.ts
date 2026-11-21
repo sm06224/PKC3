@@ -65,7 +65,7 @@ describe('🔴 不変条件: タブがあれば active は null にならない'
       (x, i) => next(x, i, pinned),
       (x, i) => onDeleted(x, [`n${i % 7}`], pinned),
       (x, i) => enforceLimit(x, i, { max: 4, isPinned: (l) => pinned.has(l), isEditing: none }).set,
-      (x, i) => move(x, x.tabs[0]?.lid ?? 'zz', null),
+      (x) => move(x, x.tabs[0]?.lid ?? 'zz', null),
     ];
     let seen = 0;
     for (let i = 1; i < 400; i++) {
