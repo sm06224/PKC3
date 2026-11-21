@@ -129,6 +129,9 @@ const UNRESOLVED: readonly string[] = [
   'pc-sync-pick',
   'pc-sync-restore',
   'pc-sync-stop',
+  // ⚠ 2026-11-21(#2000 段 3)で 4 件増えた ── 同期フォルダを選ぶ / 許可を出し直す / やめる / 今すぐ同期(間隔の選択は字で書いてあるので追える)。設定の節(`settings/sync-folder.ts`)が `button(action, …)` の変数で組む
+  'pick-sync-folder',
+  'reconnect-sync-folder',
   'remove-office-pack',
   'reset-office-profile',
   'set-app-group',
@@ -146,6 +149,9 @@ const UNRESOLVED: readonly string[] = [
    */
   'sql-export-pick',
   'sql-history-pick',
+  // ⚠ 2026-11-21(#2000 段 3)── 同期フォルダの「やめる」「今すぐ同期」(上の `pick-sync-folder` と同じ組み方)
+  'stop-sync-folder',
+  'sync-folder-now',
   'toggle-todo',
   /**
    * ⚠ 2026-10-15(#1087): 以前ここに居た `undo-trash` は、命令として登記して `runGlobalCommand` が字で受けるようになったので外した(静的に追えるようになった)。

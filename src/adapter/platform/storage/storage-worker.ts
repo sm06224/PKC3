@@ -78,6 +78,8 @@ import {
   measureNoteFps,
   measureOne,
   measureStates,
+  noteLabelScope,
+  notePinScope,
   putSetting,
   readBases,
   readOuts,
@@ -1025,15 +1027,6 @@ function tagColorScope(cid: string): string {
   return `tag-color:${cid}`;
 }
 
-/** ノートのピン留めを持つ `settings` の scope(器ごと。#1377)。1 ノート 1 行(`k` = lid、`v` = 留めた順の通し番号)。 */
-function notePinScope(cid: string): string {
-  return `note-pin:${cid}`;
-}
-
-/** ノートの色ラベルを持つ `settings` の scope(器ごと。#1982 段 4)。1 ノート 1 行(`k` = lid、`v` = 色の番号)。 */
-function noteLabelScope(cid: string): string {
-  return `note-label:${cid}`;
-}
 
 /**
  * 🔴 **旧ビルドが書いた行は、索引が据え置かれる**(2026-08-29 の着地後レビュー)。
@@ -4031,7 +4024,8 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
           : null,
     });
   };
-  const result = { written: 0, trashed: 0, relationsAdded: 0, relationsRemoved: 0, placedAtRoot: 0 };
+  const result = { written: 0, trashed: 0, relationsAdded: 0, relationsRemoved: 0, placedAtRoot: 0, labelsChanged: 0, pinsChanged: 0 };
+  const attrRows: NonNullable<SyncUndoToken['attrs']> = [];
   const raced: SyncApplyResult['raced'] = [];
   const relAdded: string[] = [];
   const relRemoved: SyncUndoToken['relationsRemoved'] = [];
@@ -4044,6 +4038,8 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
       if (u.fallback) targets.add(u.fallback.lid);
     }
     for (const lid of input.trash) targets.add(lid);
+    for (const x of input.labelSets ?? []) targets.add(x.lid);
+    for (const x of input.pinSets ?? []) targets.add(x.lid);
     for (const r of [...input.relationAdds, ...input.relationRemoves]) {
       targets.add(r.from);
       targets.add(r.to);
@@ -4174,6 +4170,33 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
         result.relationsRemoved++;
       }
     }
+    // ── 印(色ラベル・ピン留め。段 3)。生きているノートだけ。🔴 取り消しの控えは「前の値 + 書いた値」
+    const attrPut = (scope: string, k: string, v: string | null): boolean => {
+      const prev = getSetting(database, scope, k);
+      if (prev === v) return false;
+      if (v === null) deleteSetting(database, scope, k);
+      else putSetting(database, scope, k, v);
+      attrRows.push({ scope, k, prev, applied: v });
+      return true;
+    };
+    for (const x of input.labelSets ?? []) {
+      if (!liveRow(database, cid, x.lid)) continue;
+      if (x.color !== null && !isNoteLabelColor(x.color)) continue;
+      if (attrPut(noteLabelScope(cid), x.lid, x.color === null ? null : String(x.color))) result.labelsChanged++;
+    }
+    for (const x of input.pinSets ?? []) {
+      if (!liveRow(database, cid, x.lid)) continue;
+      const scope = notePinScope(cid);
+      const has = getSetting(database, scope, x.lid) !== null;
+      if (x.on === has) continue;
+      let v: string | null = null;
+      if (x.on) {
+        // 並びは端末ごと ── こちらの最後に足す(`putNotePin` と同じ番号の振り方)
+        const max = Number(database.selectValue('SELECT max(CAST(v AS INTEGER)) FROM settings WHERE scope = ?', [scope]));
+        v = String((Number.isFinite(max) ? max : 0) + 1);
+      }
+      if (attrPut(scope, x.lid, v)) result.pinsChanged++;
+    }
     // ── 取り消しの控えを仕上げる(🔴 本文は持たず、履歴の版の id を引く。取り込み後の指紋もここで測る)
     const undoEntries: SyncUndoToken['entries'] = [];
     for (const cap of captured.values()) {
@@ -4196,7 +4219,7 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
     writeBase(database, cid, input.peer, input.baseline, input.nowIso, rec);
     writeSeq(database, advanceSeq(readSeq(database), input.peerSeq), rec);
     database.exec('COMMIT');
-    return { ...result, raced, undo: { entries: undoEntries, relationsAdded: relAdded, relationsRemoved: relRemoved, rows: [...prevRows.values()] } };
+    return { ...result, raced, undo: { entries: undoEntries, relationsAdded: relAdded, relationsRemoved: relRemoved, rows: [...prevRows.values()], attrs: attrRows } };
   } catch (err) {
     try {
       database.exec('ROLLBACK');
@@ -4275,6 +4298,12 @@ function undoSync(database: Database, cid: string, token: SyncUndoToken): { rest
     for (const id of token.relationsAdded) database.exec({ sql: 'DELETE FROM relations WHERE cid = ? AND id = ?', bind: [cid, id] });
     for (const r of token.relationsRemoved) {
       database.exec({ sql: `INSERT OR IGNORE INTO relations (cid, id, from_lid, to_lid, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`, bind: [cid, r.id, r.from, r.to, r.kind] });
+    }
+    for (const a of token.attrs ?? []) {
+      // 🔴 いまの値が取り込みで書いた値のままのときだけ戻す(取り込み後に付け直した印は触らない)
+      if (getSetting(database, a.scope, a.k) !== a.applied) continue;
+      if (a.prev === null) deleteSetting(database, a.scope, a.k);
+      else putSetting(database, a.scope, a.k, a.prev);
     }
     for (const r of token.rows) {
       // 🔴 連番は巻き戻さない(戻すと、取り込み前に書き出した `out:<連番>` を再利用してしまい、端末 id の重複の見分けが狂う)
@@ -6203,6 +6232,8 @@ const handlers: Handlers = {
       states: snap.states,
       notes: snap.notes,
       relations: snap.relations,
+      labels: snap.labels,
+      pins: snap.pins,
       tombstones: dropRevived(readTombstones(database, req.cid), present),
       pairs: readPairs(database, req.cid),
       bases: readBases(database, req.cid),

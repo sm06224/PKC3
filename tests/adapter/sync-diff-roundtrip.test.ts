@@ -344,6 +344,8 @@ async function forgeSame(device: string, cid: string, seq: number, notes: Array<
     tombstones: [],
     fingerprints: fps,
     peerBase: [],
+    labels: [],
+    pins: [],
     assets: () => [],
     getAssetBlob: async () => null,
   });

@@ -26,7 +26,9 @@ import {
   TOMBSTONE_MAX,
 } from '@features/sync/sync-state';
 import { relationKey, type Baseline, type KeyedState, type Tombstone } from '@features/sync/change-set';
-import { entryFp, relationFp } from '@features/sync/sync-fp';
+import { entryFp, labelFp, pinFp, relationFp } from '@features/sync/sync-fp';
+import { labelKey, pinKey } from '@features/sync/sync-attr';
+import { isNoteLabelColor } from '@features/note-label';
 import type { DiffRelation } from '@features/sync/diff-file';
 import { USER_REALM_SQL } from './schema';
 
@@ -35,6 +37,16 @@ export const SYNC_KEY_OUT_PREFIX = 'out:';
 /** 相手ごとの前回の合意を書いた時刻(`baseat:<相手の端末 id>`)。古さの判定にだけ使う。 */
 export const SYNC_KEY_BASEAT_PREFIX = 'baseat:';
 const OUT_KEEP = 8;
+
+/** ノートのピン留めを持つ `settings` の scope(器ごと。#1377)。1 ノート 1 行(`k` = lid、`v` = 留めた順の通し番号)。⚠ 正本はここ 1 か所。 */
+export function notePinScope(cid: string): string {
+  return `note-pin:${cid}`;
+}
+
+/** ノートの色ラベルを持つ `settings` の scope(器ごと。#1982 段 4)。1 ノート 1 行(`k` = lid、`v` = 色の番号)。 */
+export function noteLabelScope(cid: string): string {
+  return `note-label:${cid}`;
+}
 
 export function getSetting(db: Database, scope: string, k: string): string | null {
   const v = db.selectValue('SELECT v FROM settings WHERE scope = ? AND k = ?', [scope, k]);
@@ -184,6 +196,9 @@ export interface SyncSnapshot {
   states: KeyedState[];
   notes: LiveNote[];
   relations: DiffRelation[];
+  /** 生きているノートの色ラベル・ピン留め(段 3)。ゴミ箱のノートの印は運ばない(戻したときに一緒に戻る)。 */
+  labels: Array<{ lid: string; color: number }>;
+  pins: string[];
 }
 
 /** 現在の指紋(ノート + 非 structural のつながり)。⚠ 本文は 1 行ずつ読んで捨てる(全件を同時に持たない)。 */
@@ -217,7 +232,21 @@ export function measureStates(db: Database, cid: string): SyncSnapshot {
     relations.push({ from: r.from_lid, to: r.to_lid, kind: r.kind });
     states.push({ key, ...relationFp() });
   }
-  return { states, notes, relations };
+  // ── 印(色ラベル・ピン留め)。生きているノートの物だけ(`sync-attr.ts`)
+  const labels: Array<{ lid: string; color: number }> = [];
+  for (const r of db.selectObjects('SELECT k, v FROM settings WHERE scope = ? ORDER BY k', [noteLabelScope(cid)]) as Array<{ k: string; v: string | null }>) {
+    const color = Number(r.v);
+    if (!live.has(r.k) || !isNoteLabelColor(color)) continue;
+    labels.push({ lid: r.k, color });
+    states.push({ key: labelKey(r.k), ...labelFp(color) });
+  }
+  const pins: string[] = [];
+  for (const r of db.selectObjects('SELECT k FROM settings WHERE scope = ? ORDER BY k', [notePinScope(cid)]) as Array<{ k: string }>) {
+    if (!live.has(r.k)) continue;
+    pins.push(r.k);
+    states.push({ key: pinKey(r.k), ...pinFp() });
+  }
+  return { states, notes, relations, labels, pins };
 }
 
 /**
