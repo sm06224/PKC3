@@ -56,6 +56,7 @@ import {
 import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescue';
 import { INTEGRITY_STAMP_KEY, INTEGRITY_STAMP_SCOPE } from '@features/storage/integrity-schedule';
 import { MAX_TAG_COLORS, normalizeTagColor } from '@features/tag-color';
+import { SYNC_SCOPE, syncScope } from '@features/sync/sync-state';
 import { MAX_NOTE_PINS_STORED } from '@features/relation/note-pins';
 import { isNoteLabelColor, MAX_NOTE_LABELS } from '@features/note-label';
 import {
@@ -696,6 +697,14 @@ function refoldRow(database: Database, rid: number): void {
 /** 1 塊に入れる行数と、本文の字数の合計の上限。⚠ 本文は 1 行ずつ読んで捨てる(ゼロコピーの規律)── 大きなノートが続く塊を長くしない。 */
 const FOLD_CHUNK = 100;
 const FOLD_CHUNK_CHARS = 4_000_000;
+
+/**
+ * 🔴 **test 専用**: 開いている DB に SQL を 1 本流す(`__sync__` 系の `settings` 行を実物の DB に入れるため。
+ * 書き込む本番の口は段 2 で足す)。⚠ 本番の経路からは呼ばない。
+ */
+export function execSqlForTest(sql: string, bind: unknown[] = []): void {
+  need().exec({ sql, bind: bind as never });
+}
 
 /**
  * 🔴 **索引の作り直しを 1 塊だけ進める**(台帳 #1852 の束 B2)。戻り値 = まだ続きがあるか。
@@ -3492,6 +3501,8 @@ function deleteContainerRows(database: Database, cid: string): void {
   database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [tagColorScope(cid)] });
   database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [notePinScope(cid)] });
   database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [noteLabelScope(cid)] });
+  // 端末間の同期の記録(墓標・前回の合意。#2000)。同期 OFF の端末には行が無く、何も消えない
+  database.exec({ sql: 'DELETE FROM settings WHERE scope = ?', bind: [syncScope(cid)] });
   database.exec({ sql: 'DELETE FROM containers WHERE cid = ?', bind: [cid] });
 }
 
@@ -3531,7 +3542,12 @@ function withMessagesRemoved<T>(make: () => T, keepCid?: string): T {
       : (database.selectObjects('SELECT cid FROM containers WHERE cid <> ?', [active]) as Array<{ cid: string }>).map(
           (r) => String(r.cid),
         );
-  if ((has === undefined || has === 0) && others.length === 0) return make();
+  // 🔴 端末間の同期の記録(端末 id・連番・墓標)も渡さない(#2000)。id が渡ると、受け取った人の端末と同じ端末と見なされる
+  const syncRows = database.selectValue(
+    `SELECT count(*) FROM settings WHERE scope = ? OR substr(scope, 1, ?) = ?`,
+    [SYNC_SCOPE, SYNC_SCOPE.length + 1, `${SYNC_SCOPE}:`],
+  ) as number | undefined;
+  if ((has === undefined || has === 0) && others.length === 0 && (syncRows === undefined || syncRows === 0)) return make();
   const secure = database.selectValue('PRAGMA secure_delete') as number | undefined;
   database.exec('PRAGMA secure_delete = ON');
   try {
@@ -3539,6 +3555,10 @@ function withMessagesRemoved<T>(make: () => T, keepCid?: string): T {
     try {
       database.exec({ sql: `DELETE FROM entries WHERE realm = 'system' AND lid IN (?, ?)`, bind: lids });
       for (const cid of others) deleteContainerRows(database, cid);
+      database.exec({
+        sql: `DELETE FROM settings WHERE scope = ? OR substr(scope, 1, ?) = ?`,
+        bind: [SYNC_SCOPE, SYNC_SCOPE.length + 1, `${SYNC_SCOPE}:`],
+      });
       return make();
     } finally {
       database.exec('ROLLBACK');
