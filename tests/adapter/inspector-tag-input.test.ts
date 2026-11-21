@@ -268,8 +268,14 @@ describe('打っている間に編集が始まった(#1087)', () => {
 });
 
 describe('打てない状況(#494)', () => {
-  const formShown = (s: ReturnType<typeof setup>): boolean =>
-    s.q<HTMLElement>('[data-pkc-field="tag-add"]')!.hidden === false;
+  /**
+   * 「打てる形で見えている」= 畳まれておらず、本文待ちの印(場所だけ取って見せない・押させない)も無い。
+   * ⚠ 本文待ちの間は畳まずに場所を取る(`inspector-body-pending-layout.test.ts`)── 見えず押せないので「出ていない」と数える。
+   */
+  const formShown = (s: ReturnType<typeof setup>): boolean => {
+    const f = s.q<HTMLElement>('[data-pkc-field="tag-add"]')!;
+    return f.hidden === false && !f.hasAttribute('data-pkc-pending') && !f.hasAttribute('inert');
+  };
 
   it('⚠ 対照群 ── ふつうのノートでは出ている', () => {
     expect(formShown(setup('本文\n')), '出ていない(以下が全部空振りする)').toBe(true);
