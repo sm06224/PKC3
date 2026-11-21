@@ -165,11 +165,10 @@ describe('追記欄で Enter を押しても計算される(#764)', () => {
     expect(ta.value).toBe('昼 800+250=1050');
   });
 
-  it('🔴 引用の継ぎ足しは追記欄では起こさない(欄の集合が違う)', async () => {
-    // ⚠ 対照群 ── 計算を追記欄へ広げたついでに、引用まで広げていないこと
+  it('🔴 引用の継ぎ足しは追記欄でも起こる(#2001 段 2。欄の集合は editing-field.ts の 1 か所)', async () => {
     const { ta, prevented } = await pressInAppend('> ひきよう');
-    expect(ta.value).toBe('> ひきよう');
-    expect(prevented, '追記欄で引用を継ぎ足している').toBe(false);
+    expect(ta.value).toBe('> ひきよう\n> ');
+    expect(prevented, '追記欄で引用を継ぎ足していない').toBe(true);
   });
 });
 
