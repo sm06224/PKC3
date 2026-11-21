@@ -22019,7 +22019,7 @@ export function bindActions(
     }
     // 追記欄: 既定は Ctrl/Cmd+Enter(欄の中だけ ── 画面全体の近道にしない)
     if (field === 'append-input') {
-      const appendCmd = keymap.match(ke, 'append');
+      const appendCmd = keymap.match(ke, keyContextOfField('append'));
       if (appendCmd === 'append-send') {
         ke.preventDefault();
         run('append-entry', ke.target as HTMLElement);

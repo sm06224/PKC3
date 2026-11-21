@@ -196,6 +196,10 @@ describe('欄の判定 1 か所(editing-field.ts)', () => {
     expect(EDITING_FIELD_FEATURES.row.tabIndent).toBe(false); // 1 画面の行の Tab は行の確定
   });
 
+  it('🔴 欄ごとの鍵の文脈(追記は append / 2 ペインは editor / 行と章は row)', () => {
+    expect(EDITING_FIELD_KINDS.map((k) => keyContextOfField(k))).toEqual(['editor', 'row', 'row', 'append']);
+  });
+
   it('欄でないものは全機能で false / 要素から種類を引ける', () => {
     for (const f of FEATURES) expect(fieldHas('editor-title', f)).toBe(false);
     expect(fieldHas(null, 'keys')).toBe(false);
