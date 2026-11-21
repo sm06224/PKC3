@@ -44,6 +44,8 @@ export interface ShellRegions {
   /** 中央の列そのもの(本文 + 追記欄)。grid の 1 マスはこちら。 */
   center: HTMLElement;
   detail: HTMLElement;
+  /** ノートのタブ列(#1982 段 5-3)。出し入れは `note-tabs.ts`。 */
+  noteTabs: HTMLElement;
   /** 追記欄(P8 段⑧)。⚠ **本文とは別の器** ── 本文の再描画で打鍵が消えない。 */
   append: HTMLElement;
   /** 右の付随情報。選んでいるものの素性と、それに対する操作。 */
@@ -1100,7 +1102,11 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneMenu.setAttribute('aria-label', 'このノートの操作を開く');
   phoneMenu.title = 'このノートにできること・操作を探す';
   phoneBar.append(phoneBack, phoneTitle, phoneInfo, phoneMenu);
-  center.append(replaceBar, detail, appendGrip, append);
+  // 🔴 ノートのタブ列(#1982 段 5-3)。本文のすぐ上。2 枚以上のときだけ `note-tabs.ts` が中身を出す
+  const noteTabs = document.createElement('div');
+  noteTabs.setAttribute('data-pkc-region', 'note-tabs');
+  noteTabs.hidden = true;
+  center.append(noteTabs, replaceBar, detail, appendGrip, append);
 
   // ── 右(付随情報)────────────────────────────────
   const inspector = document.createElement('aside');
@@ -1472,6 +1478,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     sidebar,
     center,
     detail,
+    noteTabs,
     append,
     inspector,
     status,
