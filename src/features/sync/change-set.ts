@@ -135,7 +135,11 @@ export function extractChanges(current: readonly KeyedState[], baseline: Baselin
   for (const key of Object.keys(baseline)) {
     if (!cur.has(key)) deleted.push({ key, lastFp: baseline[key] as Fp });
   }
+  // 同じキーの墓標が複数あっても 1 件だけ(入力の重複で同じ削除を 2 回送らない。先に出た物を採る)
+  const seenTomb = new Set<string>();
   for (const t of tombstones) {
+    if (seenTomb.has(t.key)) continue;
+    seenTomb.add(t.key);
     if (!cur.has(t.key) && baseline[t.key] === undefined) deleted.push({ key: t.key, lastFp: t.lastFp });
   }
   return { added: added.sort(byKey), changed: changed.sort(byKey), deleted: deleted.sort(byKey) };

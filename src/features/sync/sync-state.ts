@@ -103,7 +103,8 @@ function decodeFp(v: unknown): Fp | null {
   const r = v as Record<string, unknown>;
   if (typeof r.c !== 'string' || !r.c) return null;
   if (r.p === undefined) return { content: r.c };
-  if (typeof r.p !== 'string' || !r.p) return null;
+  // 空の place は正当な値(`seedBaseline` も空の place は捨てない)。行ごと捨てない。空にできないのは content だけ
+  if (typeof r.p !== 'string') return null;
   return { content: r.c, place: r.p };
 }
 

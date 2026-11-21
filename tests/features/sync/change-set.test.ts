@@ -91,6 +91,13 @@ describe('extractChanges(前回の合意からの差)', () => {
     const cs = extractChanges([ks('e1', 'h1')], bl({ e1: fp('h1') }), [tomb('e9', 'h9')]);
     expect(cs.deleted).toEqual([{ key: 'e9', lastFp: fp('h9') }]);
   });
+  it('🔴 同じキーの墓標が重なっていても、削除は 1 件(先の物の指紋)', () => {
+    const cs = extractChanges([], {}, [tomb('e9', 'first', undefined, 1), tomb('e9', 'second', undefined, 2), tomb('e8', 'x')]);
+    expect(cs.deleted).toEqual([
+      { key: 'e8', lastFp: fp('x') },
+      { key: 'e9', lastFp: fp('first') },
+    ]);
+  });
   it('いま在るキーの墓標は無視する(消してから戻した)', () => {
     const cs = extractChanges([ks('e9', 'h9')], {}, [tomb('e9', 'h9')]);
     expect(cs.deleted).toEqual([]);
@@ -242,6 +249,16 @@ describe('decideMerge(複数ノート)', () => {
     expect(d).toEqual([{ action: 'push-delete', key: 'n1', lastFp: fp('h', 'p') }]);
     // 対照: こちらの墓標が無ければ(従来)相手の物が「新規」として戻ってくる
     expect(merge({ local: [], remote: [ks('n1', 'h', 'p')] })[0]?.action).toBe('take-remote');
+  });
+  it('🔴 合意とこちらの墓標が両方ある(こちらは消し済み): 合意の指紋が正本 → 相手が合意のままなら push-delete', () => {
+    // 墓標の指紋('edited')を先に使うと、相手('b')と食い違って競合に見える
+    const d = merge({
+      baseline: bl({ n1: fp('b') }),
+      local: [],
+      remote: [ks('n1', 'b')],
+      localTombstones: [tomb('n1', 'edited')],
+    });
+    expect(d).toEqual([{ action: 'push-delete', key: 'n1', lastFp: fp('b') }]);
   });
   it('🔴1 こちらの墓標があり、相手が編集していた(内容が違う)→ 競合(相手の版を戻す)', () => {
     const d = merge({ local: [], remote: [ks('n1', 'h2', 'p')], localTombstones: [tomb('n1', 'h', 'p')] });

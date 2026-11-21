@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { extractChanges, type Tombstone } from '@features/sync/change-set';
+import { extractChanges, seedBaseline, type Tombstone } from '@features/sync/change-set';
 import { SYNC_INVENTORY } from '@features/sync/change-inventory';
 import {
   SYNC_SCOPE,
@@ -155,6 +155,16 @@ describe('前回の合意', () => {
     expect(decodeBaseline('{"a":1,"b":{"c":"ok"},"c":{"c":""}}')).toEqual({ b: { content: 'ok' } });
     expect(decodeBaseline(null)).toEqual({});
   });
+  it('🔴 空の place は行ごと捨てない(往復できる)。空の content は従来どおり捨てる', () => {
+    const b = { n1: { content: 'a', place: '' }, n2: { content: 'b', place: 'p' } };
+    expect(decodeBaseline(encodeBaseline(b))).toEqual(b);
+    // seedBaseline が作った物も、書いて読み直して同じ(種が読み込みで欠けない)
+    const seed = seedBaseline([{ key: 'n1', content: 'a', place: '' }]);
+    expect(seed).toEqual({ n1: { content: 'a', place: '' } });
+    expect(decodeBaseline(encodeBaseline(seed))).toEqual(seed);
+    expect(decodeBaseline('{"x":{"c":"","p":""}}')).toEqual({});
+    expect(decodeBaseline('{"x":{"c":"a","p":3}}')).toEqual({});
+  });
 });
 
 describe('運ぶ物の全数表', () => {
@@ -186,6 +196,7 @@ describe('運ぶ物の全数表', () => {
     expect(start, '全数表の見出しが無い').toBeGreaterThan(-1);
     const rest = doc.slice(start);
     const end = rest.indexOf('\n\n段 2 で運ぶのは');
+    expect(end, '全数表の終わり(段 2 で運ぶのは…)が見つからない: 節が文末まで広がり、別の表の行を拾う').toBeGreaterThan(-1);
     const section = rest.slice(0, end);
     const rows = section.split('\n').filter((l) => l.startsWith('| `'));
     const docIds = rows.map((l) => /^\| `([^`]+)`/.exec(l)?.[1]);
@@ -193,5 +204,16 @@ describe('運ぶ物の全数表', () => {
     // 段の列も突き合わせる(本文の段と食い違わない)
     const docStages = rows.map((l) => l.split('|')[4]?.trim());
     expect(docStages).toEqual(SYNC_INVENTORY.map((r) => (r.stage === null ? '-' : String(r.stage))));
+    // 「運ぶか」の列も突き合わせる(明示の対応表。行の carry を変えたら doc の字も変える)
+    const carryText: Record<(typeof SYNC_INVENTORY)[number]['carry'], readonly string[]> = {
+      yes: ['運ぶ', '運ぶ(削除の記録だけ)'],
+      'part-of': ['運ぶ(指紋の一部)'],
+      derived: ['本文から導かれる'],
+      no: ['運ばない'],
+    };
+    const docCarry = rows.map((l) => l.split('|')[3]?.trim() ?? '');
+    SYNC_INVENTORY.forEach((r, i) => {
+      expect(carryText[r.carry], `${r.id}: doc の「運ぶか」が carry=${r.carry} と食い違う(doc: ${docCarry[i]})`).toContain(docCarry[i]);
+    });
   });
 });
