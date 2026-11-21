@@ -513,6 +513,8 @@ import {
 } from '../render/context-menu';
 import { syncReplaceToggle } from '../render/format-bar';
 import { bindInlineComplete, type CompleteItem } from '../render/inline-complete';
+import { bindCurrentLine } from '../render/current-line';
+import { appCurrentLine } from '../render/current-line-setting';
 import { appInlineComplete } from '../render/inline-complete-setting';
 import { setupLinkPreview, closeLinkPreview } from '../render/link-preview';
 import { setupLightbox, openLightbox, closeLightbox, lightboxOpen } from '../render/lightbox';
@@ -2295,6 +2297,8 @@ export interface BinderServices {
    * ⚠ 切り替えても本文は描き直さない ── 効くのは**次に打つとき**だけ。
    */
   setInlineComplete?(on: boolean): void;
+  /** 🔴 **いま打っている行を左端の線で示すか**(#2001 段 4)。⚠ **省略可**。次に caret が動くとき効く。 */
+  setCurrentLine?(on: boolean): void;
   /**
    * 🔴 **PDF を PKC の画面で開くか**(#275 段①)。⚠ **省略可**。
    * ⚠ 切り替えても本文は描き直さない ── 効くのは**次に「別のウィンドウで見る」を押したとき**だけ。
@@ -19173,6 +19177,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setInlineComplete?.(target.checked);
   },
+  'set-current-line': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setCurrentLine?.(target.checked);
+  },
   'set-pdf-reader': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setPdfReader?.(target.checked);
@@ -25087,6 +25095,8 @@ export function bindActions(
    *   `applySnippetPick` / `atChoices` → `formatEntryLink` / `insertionForLineDate`)── 入口を増やすだけで、
    *   挿す仕事の規則を 2 つにしない(§7)。挿すのは `insertText` / `writeBack` なので `Ctrl+Z` で戻せる。
    */
+  // 🔴 #2001 段 4: 打っている行の左端の線(設定で切れる。既定は入)
+  undo.push(bindCurrentLine(root, { enabled: () => appCurrentLine.enabled() }));
   const assetIndex = createAssetIndex();
   undo.push(
     bindInlineComplete(root, {

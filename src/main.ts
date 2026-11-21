@@ -125,6 +125,7 @@ import { appCodeCollapse } from '@adapter/ui/render/code-collapse';
 import { appInlineCodeCopy } from '@adapter/ui/render/inline-code-copy';
 import { appPdfReader } from '@adapter/ui/render/pdf-reader-setting';
 import { appInlineComplete } from '@adapter/ui/render/inline-complete-setting';
+import { appCurrentLine } from '@adapter/ui/render/current-line-setting';
 import { PdfReaderHost } from '@adapter/platform/pdf/pdf-window';
 import { openInPdfReader } from '@adapter/platform/pdf/open-in-reader';
 import { pdfAttachmentsOf } from '@features/pdf/pdf-attachments';
@@ -6111,6 +6112,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     setInlineComplete: (on) => {
       // ⚠ 描き直さない ── 効くのは次に打つとき
       appInlineComplete.setEnabled(on);
+    },
+    setCurrentLine: (on) => {
+      // ⚠ 描き直さない ── 効くのは次に caret が動くとき
+      appCurrentLine.setEnabled(on);
     },
     setPdfReader: (on) => {
       // ⚠ 描き直さない ── 効くのは次に「別のウィンドウで見る」を押したとき

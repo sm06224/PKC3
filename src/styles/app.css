@@ -765,6 +765,24 @@ select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
+/* 🔴 **いま打っている行**(#2001 段 4。`render/current-line.ts` が欄に印と変数 2 つを置く)。
+ * 現在地は**形**で示す(§2-10): 左端の 2px の線(`--accent`。選択中の行の左端線と同じ)+ ごく薄い地(`--surface-hover`)。
+ * 🔑 背景なので版面を動かさず、`background-attachment: local` で**スクロールに合わせて動く**(欄の外へははみ出さない)。
+ * ⚠ 欄の `background-color`(`--surface`)の上に重なる。字は背景の上に描かれるので、字の対比は変わらない。 */
+textarea[data-pkc-current-line] {
+  background-image:
+    linear-gradient(var(--accent), var(--accent)),
+    linear-gradient(var(--surface-hover), var(--surface-hover));
+  background-repeat: no-repeat;
+  background-attachment: local;
+  background-origin: padding-box;
+  background-position:
+    0 var(--pkc-cl-top, 0),
+    0 var(--pkc-cl-top, 0);
+  background-size:
+    2px var(--pkc-cl-h, 0),
+    100% var(--pkc-cl-h, 0);
+}
 /* 🔴 キーボードで止まった画像・図の枠(依頼 79-3 C)── Enter で大きく表示する。マウスで押したときは出さない(`:focus-visible`) */
 img[data-pkc-action='view-big']:focus-visible {
   outline: 2px solid var(--accent);

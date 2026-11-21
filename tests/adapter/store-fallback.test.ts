@@ -40,6 +40,7 @@ import { CodeCollapseStore } from '@adapter/ui/render/code-collapse';
 import { PasteToastStore } from '@adapter/ui/render/paste-toast';
 import { InlineCodeCopyStore } from '@adapter/ui/render/inline-code-copy';
 import { InlineCompleteStore } from '@adapter/ui/render/inline-complete-setting';
+import { CurrentLineStore } from '@adapter/ui/render/current-line-setting';
 import { PdfReaderStore } from '@adapter/ui/render/pdf-reader-setting';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
 import { TranscriptFollowStore } from '@adapter/ui/render/transcript-follow';
@@ -250,6 +251,16 @@ const CASES: readonly {
     name: 'InlineCompleteStore',
     make: (st: StorageLike | null = null) => {
       const s = new InlineCompleteStore(st);
+      return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
+    a: false,
+    b: true,
+  },
+  {
+    // ⚠ 既定が「入」の store(#2001 段 4)── 控えが死んで既定(入)へ戻る実装を捕まえる
+    name: 'CurrentLineStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new CurrentLineStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: false,

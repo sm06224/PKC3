@@ -50,7 +50,7 @@ export const COMPLETE_REGION = 'inline-complete';
 /** 4 つの欄すべて(どの引き金がどの欄で出るかは `fieldHas` の表 ── `inlineComplete` / `assetComplete`)。 */
 const FIELDS = EDITING_FIELD_KINDS.map((k) => `textarea[data-pkc-field="${EDITING_FIELD_NAMES[k]}"]`).join(', ');
 
-const MIRROR_PROPS = [
+export const MIRROR_PROPS = [
   'boxSizing', 'width', 'overflowX', 'overflowY', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth',
   'borderLeftWidth', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'fontStyle', 'fontVariant',
   'fontWeight', 'fontStretch', 'fontSize', 'fontFamily', 'lineHeight', 'letterSpacing', 'tabSize', 'textIndent',
