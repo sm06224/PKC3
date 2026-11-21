@@ -168,6 +168,12 @@ describe('template-zip: 変換の端', () => {
     expect(() => convertTemplate({ template: 'meta: !!python/object x\nentries: []\n', forms: new Map(), otherFiles: [] }, opts())).toThrow(/タグ/);
   });
 
+  it('フォルダ id の重なりは 1 件も作らず断る', () => {
+    expect(() =>
+      convertTemplate({ template: 'folders:\n  - id: a\n    name: A\n  - id: a\n    name: B\nentries:\n  - type: text\n    title: T\n', forms: new Map(), otherFiles: [] }, opts()),
+    ).toThrow(/フォルダ id「a」が重なっています/);
+  });
+
   it('findTemplateRoot: 直下 / 1 段下 / 無し / 複数', () => {
     expect(findTemplateRoot(['template.yaml', 'forms/a.yaml'])).toBe('');
     expect(findTemplateRoot(['x/template.yml', 'x/forms/a.yaml'])).toBe('x/');
