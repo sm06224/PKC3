@@ -5407,7 +5407,7 @@ export function canNavForward(state: AppState): boolean {
 
 /** ⚠ `NAV_HISTORY` は**型で除く** ── 上の wrapper が先に捌く。default 節を置いて
  * 逃がすと、新しい action を書き忘れても tsc が黙る。 */
-function reduceCore(
+export function reduceCore(
   state: AppState,
   action: Exclude<Dispatchable, { type: 'NAV_HISTORY' }>,
 ): ReduceResult {
@@ -5460,7 +5460,7 @@ function reduceCore(
     case 'NOTE_TAB_MOVE':
     case 'NOTE_TAB_EXTERNAL':
     case 'SET_NOTE_PINS':
-      return reduceNoteTabs(state, action, reduceCore);
+      return reduceNoteTabs(state, action);
     case 'SET_SQL_TEXT':
     case 'RUN_SQL':
     case 'SQL_HISTORY_STEP':

@@ -15,7 +15,7 @@
  * ⚠ ゴミ箱から戻すと、戻したノートが選ばれる(既存の挙動)ので、選択に従ってタブも 1 枚できる。自動で開き直す仕組みは足さない。
  */
 
-import { type AppState, type Dispatchable, type DomainEvent, type ReduceResult } from '../app-state';
+import { type AppState, type Dispatchable, type DomainEvent, type ReduceResult, reduceCore } from '../app-state';
 import {
   type TabSet,
   activate,
@@ -32,21 +32,7 @@ import {
   reopenLast,
 } from '@features/nav/note-tabs';
 
-export type NoteTabsAction = Extract<
-  Dispatchable,
-  {
-    type:
-      | 'NOTE_TAB_OPEN'
-      | 'NOTE_TAB_ACTIVATE'
-      | 'NOTE_TAB_CLOSE'
-      | 'NOTE_TAB_REOPEN'
-      | 'NOTE_TAB_NEXT'
-      | 'NOTE_TAB_PREV'
-      | 'NOTE_TAB_MOVE'
-      | 'NOTE_TAB_EXTERNAL'
-      | 'SET_NOTE_PINS';
-  }
->;
+export type NoteTabsAction = Extract<Dispatchable, { type: 'NOTE_TAB_OPEN' | 'NOTE_TAB_ACTIVATE' | 'NOTE_TAB_CLOSE' | 'NOTE_TAB_REOPEN' | 'NOTE_TAB_NEXT' | 'NOTE_TAB_PREV' | 'NOTE_TAB_MOVE' | 'NOTE_TAB_EXTERNAL' | 'SET_NOTE_PINS' }>;
 
 /** 通常の reducer。循環 import を避けて引数で受ける。 */
 export type RunAction = (state: AppState, action: Exclude<Dispatchable, { type: 'NAV_HISTORY' }>) => ReduceResult;
@@ -90,7 +76,8 @@ function selectThenCommit(
   return { state: commitTabs(r.state, set, seq), events: r.events };
 }
 
-export function reduceNoteTabs(state: AppState, action: NoteTabsAction, run: RunAction): ReduceResult {
+export function reduceNoteTabs(state: AppState, action: NoteTabsAction): ReduceResult {
+  const run: RunAction = reduceCore;
   const seq = state.tabSeq + 1;
   const tabs = state.noteTabs;
   const exists = (lid: string): boolean => state.entryMetas.has(lid);
