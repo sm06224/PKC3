@@ -781,6 +781,28 @@ img[data-pkc-action='view-big']:focus-visible {
  *   (回ると、押した行から離れた所に浮いたまま残る)。
  *   🔑 そもそもスクロールしたら閉じる(`binder.ts`)ので、これは保険である。
  */
+/* 🔴 **開く動き(#1982 段 6)**── 浮く物(右クリック・「その他 ▾」の一覧・補完・目次・トースト・ダイアログ)は
+ *   不透明度 + 数 px の移動で出る。⚠ 動かすのは `opacity` / `transform` だけ(幅・高さ・位置は動かさない = 再配置が起きない)。
+ *   閉じるときは動かさない(DOM から即外れる = 閉じかけの物が操作を受けたり焦点を持ったりしない)。
+ *   時間と曲線は `tokens.css` の段(`--dur-fast` / `--ease`)。reduced-motion では下の `@media` が 0 にする。 */
+@keyframes pkc-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pkc-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
 [data-pkc-region='context-menu'] {
   position: fixed;
   z-index: 60;
@@ -795,7 +817,8 @@ img[data-pkc-action='view-big']:focus-visible {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+  box-shadow: var(--shadow-lg);
+  animation: pkc-pop-in var(--dur-fast) var(--ease);
 }
 /* 🔴 **打ちながら出る補完の小窓**(#1449 / #1450。`render/inline-complete.ts`)── 位置は script が `left` / `top` に入れる。
  *   選んでいる行は `aria-selected`(右クリックのメニューの hover と同じ色)。添え書きは `--muted`(色は情報にだけ)。 */
@@ -813,7 +836,8 @@ img[data-pkc-action='view-big']:focus-visible {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+  box-shadow: var(--shadow-lg);
+  animation: pkc-pop-in var(--dur-fast) var(--ease);
 }
 [data-pkc-field='inline-complete-item'] {
   display: flex;
@@ -10545,11 +10569,17 @@ h3[data-pkc-section] {
   padding: var(--s4);
   /* ⚠ 狭い窓でも読める幅に収める(紙面の設定に引きずられない) */
   max-width: min(32rem, calc(100vw - 2 * var(--s4)));
-  box-shadow: 0 8px 32px rgb(0 0 0 / 25%);
+  box-shadow: var(--shadow-lg);
 }
-/* ⚠ **背景は暗くするが、色は付けない**(地は無彩色) */
+/* 🔴 開く動き(#1982 段 6)── `[open]` の間だけ。閉じるときは動かさない(`close()` で即外れる) */
+[data-pkc-region='app-dialog'][open] {
+  animation: pkc-pop-in var(--dur) var(--ease);
+}
+/* ⚠ **背景は暗くするが、色は付けない**(地は無彩色)。暗幕の色は各テーマの `--scrim`(影と同じ墨色。明るい地は薄く・暗い地は濃く)。
+ *   🔑 ぼかしは掛けない(`backdrop-filter` は背面の全面を毎フレーム再合成するので、非力な端末で重い)。 */
 [data-pkc-region='app-dialog']::backdrop {
-  background: rgb(0 0 0 / 35%);
+  background: var(--scrim);
+  animation: pkc-fade-in var(--dur) var(--ease);
 }
 [data-pkc-field='dialog-title'] {
   margin: 0 0 var(--s2);
@@ -10657,7 +10687,8 @@ h3[data-pkc-section] {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow);
+  animation: pkc-pop-in var(--dur) var(--ease);
 }
 [data-pkc-field='paste-toast-text'] {
   overflow-wrap: anywhere;
@@ -12485,6 +12516,7 @@ h3[data-pkc-section] {
   inset: 0;
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(2px);
+  animation: pkc-fade-in var(--dur) var(--ease);
 }
 
 .pkc-lightbox-container {
@@ -12945,7 +12977,8 @@ h6:hover > .pkc-heading-anchor,
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow, 0 4px 12px rgba(0, 0, 0, 0.15));
+  box-shadow: var(--shadow-lg);
+  animation: pkc-pop-in var(--dur-fast) var(--ease);
   padding: 8px;
   z-index: 100;
 }
