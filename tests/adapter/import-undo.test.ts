@@ -326,8 +326,12 @@ describe('main.ts の配線(#535 ②)', () => {
     const at = main.indexOf('removeNoteLabels: async (entries) => {');
     expect(at, '外す口が無い').toBeGreaterThan(-1);
     const block = main.slice(at, at + 500);
-    expect(block, '同じ色のときだけ外す条件が無い').toContain('now.get(e.lid) !== e.color');
+    expect(block, '同じ色のときだけ外す判定(labelsStillAdded)を通っていない').toContain('labelsStillAdded(entries, now)');
     expect(block).toContain('color: null');
+  });
+
+  it('🔴 色ラベルの変化 → 色で絞るスマートフォルダの集め直しが繋がっている', () => {
+    expect(main).toContain('wireLabelSmartRescan(appNoteLabels, () => dispatcher.getState().smartHits,');
   });
 
   it('🔴 押す口(undoImport)が繋がっている', () => {

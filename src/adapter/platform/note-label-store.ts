@@ -38,6 +38,12 @@ export class NoteLabelStore {
     if (next.size === this.map.size && [...next].every(([k, v]) => this.map.get(k) === v)) return;
     this.map = next;
     this.emit();
+    // 🔴 正本を読み直して変わった(取り込み・取り消し・他タブの書込)も「書込が済んだ」として知らせる
+    this.notifyWritten();
+  }
+
+  private notifyWritten(): void {
+    for (const cb of [...this.writtenListeners]) cb();
   }
 
   /**
@@ -68,9 +74,7 @@ export class NoteLabelStore {
         .catch(() => {
           this.onFail?.();
         })
-        .then(() => {
-          for (const cb of [...this.writtenListeners]) cb();
-        });
+        .then(() => this.notifyWritten());
     }
   }
 

@@ -100,6 +100,17 @@ export function noteLabelColorOf(name: string): number | null {
   return null;
 }
 
+/**
+ * 🔴 **取り込みの取り消しで、実際に外す色ラベル**(判定は 1 か所)。取り込みで足した行のうち、**いまも同じ色が付いている物だけ**
+ * (取り込んだあとに user が付け直した色・外した色は触らない)。
+ */
+export function labelsStillAdded(
+  added: ReadonlyArray<NoteLabelEntry>,
+  current: ReadonlyMap<string, number>,
+): NoteLabelEntry[] {
+  return added.filter((e) => current.get(e.lid) === e.color);
+}
+
 /** 書き出すノートに在る分だけ(lid の集合で絞る)。 */
 export function labelsFor(entries: readonly NoteLabelEntry[], lids: ReadonlySet<string>): NoteLabelEntry[] {
   return entries.filter((e) => lids.has(e.lid));
