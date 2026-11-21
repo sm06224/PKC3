@@ -1313,7 +1313,7 @@ const CLOSERS: ReadonlySet<string> = new Set(Object.values(INLINE_PAIRS));
  * 🔑 補う側(`autoPairFor`)と消す側(`pairedBackspaceRange`)が**同じ判定**を通る ── 片方だけだと、
  *   補っていない所で Backspace が閉じまで消す。
  */
-function pairSuppressed(text: string, pos: number): boolean {
+export function pairSuppressed(text: string, pos: number): boolean {
   const ctx = codeContextAt(text, pos);
   if (ctx === 'math') return true;
   if (ctx !== null) return false;
@@ -1347,6 +1347,8 @@ export function pairedBackspaceRange(
  */
 export function autoPairFor(sel: TextSelection, key: string): AutoPair | null {
   const { text, start, end } = sel;
+  // 🔴 選んでいるときは補わない(#2001 段 3)。囲むのは `wrap-selection.ts`(`wrapSelection` 欄の機能。補完は `autoPair` 欄の機能で別)
+  if (start !== end) return null;
   if (pairSuppressed(text, start)) return null;
   const lineHead = lineStart(text, start);
   const prefix = text.slice(lineHead, start);
@@ -1386,16 +1388,6 @@ export function autoPairFor(sel: TextSelection, key: string): AutoPair | null {
   if (key === '`' && start === end) {
     // ⚠ 数えるのは**字の数**(「``」を打っている途中は対にする ── 行内の空のコード)
     if (((prefix.match(/`/g) ?? []).length) % 2 === 1) return null;
-  }
-  // 選択があるときは**囲む**(選んだ文字を消さない)
-  if (start !== end) {
-    const inner = text.slice(start, end);
-    return {
-      kind: 'insert',
-      insert: key + inner + close,
-      start: start + 1,
-      end: start + 1 + inner.length,
-    };
   }
   return { kind: 'insert', insert: key + close, start: start + 1, end: start + 1 };
 }

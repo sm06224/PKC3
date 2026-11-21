@@ -205,6 +205,8 @@ describe('割当の検め', () => {
   'align-table',
   // 🔴 #1233: 選んだ字を整える 5 つ ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる(既定を置くと割当と重なる)
   'tidy-join-lines', 'tidy-to-halfwidth', 'tidy-kana-to-fullwidth', 'tidy-squeeze-blank-lines', 'tidy-strip-bullets',
+  // 🔴 #2001 段 3: 見出しの段を変える ── 「操作を探す」から呼ぶ(`Alt+Shift+…` をこれ以上消費しない)。鍵は user が設定で割り当てる
+  'cycle-heading',
   // 🔴 #1017 C5(Gemini 裁定 B): メッセージを開く ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
   'open-messages',
   // 🔴 #1447: 字幕ファイル(.srt)で書き出す ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる

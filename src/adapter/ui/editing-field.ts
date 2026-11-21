@@ -12,6 +12,8 @@
  *   (`features/markdown/indent-assist.ts` の戒めと同じ。キーボードだけの人が欄から出られなくなる)。
  */
 import type { KeyContext } from '../../features/keymap';
+import { wrapSelection } from '../../features/markdown/wrap-selection';
+import { autoPairFor, type AutoPair } from '../../features/markdown/text-ops';
 import { SECTION_BOX_INPUT_FIELD } from './render/section-box';
 
 export type EditingFieldKind = 'editor' | 'row' | 'section' | 'append';
@@ -39,16 +41,18 @@ export type EditingFeature =
   | 'paste'
   /** Enter(`=` で終わる行)で、その行を計算する(`resolveInlineCalc`)。 */
   | 'enterCalc'
-  /** 括弧の自動補完(`autoPairFor`)。⚠ 1 画面の行は `row-swap.ts` が持つ。追記の欄は打ち込みの補助を持たない。 */
+  /** 括弧の自動補完(`autoPairFor`)。⚠ 1 画面の行は `row-swap.ts` が受ける(本文・章は `binder.ts`)が、どちらも `typedPairFor` を通る。追記の欄は持たない。 */
   | 'autoPair'
   /** 書式のバー(ボタンの帯)が付く欄。⚠ 追記の欄はバーを持たず、キーだけ(user 裁定 2026-11-21)。 */
-  | 'formatBar';
+  | 'formatBar'
+  /** 字を選んで括弧・引用符・`*` `_` を打つと囲む(`wrapSelection`。#2001 段 3)。⚠ 追記の欄も持つ(補完は持たないが囲むのは持つ)。 */
+  | 'wrapSelection';
 
 export const EDITING_FIELD_FEATURES: Readonly<Record<EditingFieldKind, Readonly<Record<EditingFeature, boolean>>>> = {
-  editor: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true },
-  row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: true },
-  section: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: false },
-  append: { enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: false },
+  editor: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true },
+  row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true },
+  section: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: false, wrapSelection: true },
+  append: { enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: false, wrapSelection: true },
 };
 
 /** 欄の名前 → 種類。本文を書く欄でなければ `null`。 */
@@ -75,4 +79,20 @@ export function fieldHas(name: string | null | undefined, feature: EditingFeatur
  */
 export function keyContextOfField(kind: EditingFieldKind): KeyContext {
   return kind === 'editor' ? 'editor' : kind === 'append' ? 'append' : 'row';
+}
+
+/**
+ * 🔴 **打った 1 字で何が起きるか ── 欄ごとの答えは、ここ 1 か所**(#2001 段 3)。
+ * 選んでいれば囲む(`wrapSelection` を持つ欄)/ 選んでいなければ括弧を補う(`autoPair` を持つ欄)。
+ * 本文・章・追記・1 画面の行の 4 つの打鍵の道が全部ここを通るので、表の真偽を替えれば欄ごとに挙動が替わる。
+ * @returns `null` = 何もしない(ブラウザにそのまま打たせる)
+ */
+export function typedPairFor(
+  name: string | null | undefined,
+  sel: { readonly text: string; readonly start: number; readonly end: number },
+  key: string,
+): AutoPair | null {
+  const s = { text: sel.text, start: sel.start, end: sel.end };
+  if (sel.start !== sel.end) return fieldHas(name, 'wrapSelection') ? wrapSelection(s, key) : null;
+  return fieldHas(name, 'autoPair') ? autoPairFor(s, key) : null;
 }

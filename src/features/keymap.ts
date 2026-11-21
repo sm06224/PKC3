@@ -2039,6 +2039,46 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     note: 'いまの行(選んでいれば選んだ行すべて)を、ひとつ下の行と入れ替えます。欄の末尾では動きません',
   },
   /**
+   * 🔴 **行の複製・行の削除・見出しの段の巡回**(#2001 段 3、ギャップ #8 / #9 / #10)。
+   *
+   * 🔑 鍵の選び方(2026-11-21 に `keymap.ts` の全割当と突き合わせた):
+   *   - 複製は `Alt+Shift+↑` / `Alt+Shift+↓` ── 空き。`Shift+↑↓`(一覧の範囲選択)とは文脈が重ならない。
+   *   - 削除は `Alt+Shift+K` ── 市井の `Ctrl+Shift+K` は `insert-entry-link`(global)が使っているので避けた。
+   *     `Ctrl+Shift+Backspace` はブラウザの「閲覧履歴の消去」に近いので採らない。
+   *   - 見出しの段の巡回は鍵を付けない(`defaults: []`。`KEYLESS` ── 「操作を探す」から呼ぶ。
+   *     `Alt+Shift+…` をこれ以上消費しない方針)。
+   * ⚠ 規則は `features/markdown/line-edit.ts` の 1 か所。
+   */
+  {
+    id: 'duplicate-line-up',
+    label: '行を上へ複製する',
+    contexts: ['editor', 'row', 'append'],
+    defaults: ['Alt+Shift+ArrowUp'],
+    note: 'いまの行(選んでいれば選んだ行すべて)を、すぐ上にコピーします',
+  },
+  {
+    id: 'duplicate-line-down',
+    label: '行を下へ複製する',
+    contexts: ['editor', 'row', 'append'],
+    defaults: ['Alt+Shift+ArrowDown'],
+    note: 'いまの行(選んでいれば選んだ行すべて)を、すぐ下にコピーします。カーソルはコピーへ移ります',
+  },
+  {
+    id: 'delete-line',
+    label: '行を削除する',
+    contexts: ['editor', 'row', 'append'],
+    defaults: ['Alt+Shift+K'],
+    note: 'いまの行(選んでいれば選んだ行すべて)を、改行ごと消します',
+  },
+  {
+    id: 'cycle-heading',
+    label: '見出しの段を変える',
+    contexts: ['editor', 'row', 'append'],
+    defaults: [],
+    note: 'いまの行(選んでいれば選んだ行すべて)の見出しを、なし → # → ## → … → ###### → なし の順に 1 段ずつ変えます',
+    alias: 'みだし 見出しレベル heading',
+  },
+  /**
    * 🔴 **表の列幅を揃える**(#1171)。
    * ⚠ 鍵は付けない(`defaults: []`)── 「操作を探す」から呼べ、鍵が欲しい人は
    *   設定で割り当てる(裁定: Gemini との合意 A)。空にしてよい条件は

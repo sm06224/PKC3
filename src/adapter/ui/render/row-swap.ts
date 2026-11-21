@@ -41,7 +41,8 @@ import {
   type SourceRange,
 } from '@features/markdown/source-ranges';
 import { findOpenEnds, scanContainers } from '@features/markdown/source-blocks';
-import { autoPairFor, pairedBackspaceRange } from '@features/markdown/text-ops';
+import { pairedBackspaceRange } from '@features/markdown/text-ops';
+import { fieldHas, typedPairFor } from '../editing-field';
 import { tableOnTab } from '@features/markdown/table-assist';
 import {
   NO_BOUNDARY_STEP,
@@ -1582,7 +1583,7 @@ export class RowSwap {
    * @returns 受け持ったら `true`
    */
   private backspacePair(ke: KeyboardEvent): boolean {
-    if (ke.key !== 'Backspace' || ke.altKey || ke.shiftKey) return false;
+    if (ke.key !== 'Backspace' || ke.altKey || ke.shiftKey || !fieldHas(ROW_SOURCE_FIELD, 'autoPair')) return false;
     const a = this.active;
     if (!a) return false;
     const ta = a.textarea;
@@ -1613,7 +1614,8 @@ export class RowSwap {
     const a = this.active;
     if (!a) return;
     const ta = a.textarea;
-    const pair = autoPairFor({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, ke.key);
+    // 🔴 選んでいれば囲む / いなければ補う ── 欄ごとの答えは `typedPairFor` 1 か所(#2001 段 3。表の真偽 `wrapSelection` / `autoPair` が効く)
+    const pair = typedPairFor(ROW_SOURCE_FIELD, { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, ke.key);
     if (pair === null) return;
     ke.preventDefault();
     /**

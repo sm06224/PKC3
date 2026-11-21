@@ -8,6 +8,7 @@
  * **隣の書式を壊さないか**(`**太字**` に斜体)まで。前者だけだと、
  * 「付くけど外れない」実装が緑で通る。
  */
+import { wrapSelection } from '../../src/features/markdown/wrap-selection';
 import { describe, expect, it } from 'vitest';
 import {
   applyFormat,
@@ -749,9 +750,10 @@ describe('autoPairFor(auto pair の規則)', () => {
     expect(r).toEqual({ kind: 'insert', insert: '「」', start: 2, end: 2 });
   });
 
-  it('① 選択があるときは囲む(選んだ文字が消えない)', () => {
-    const r = autoPairFor(at('あここい', 1, 3), '「');
+  it('① 選択があるときは囲む(選んだ文字が消えない)── 囲むのは `wrapSelection`(#2001 段 3)。autoPairFor は補うだけ', () => {
+    const r = wrapSelection(at('あここい', 1, 3), '「');
     expect(r).toEqual({ kind: 'insert', insert: '「ここ」', start: 2, end: 4 });
+    expect(autoPairFor(at('あここい', 1, 3), '「')).toBeNull();
   });
 
   it('② 🔴 行頭の 3 つ目のバッククォートで、閉じが**次の行**に入る', () => {
@@ -894,8 +896,9 @@ describe('🔴 閉じ記号の通り抜け(9 対の全数)', () => {
 
   /** ⚠ 選択があるときは通り抜けない ── 選んだ文字を閉じで囲むほうが自然。 */
   it('選択があるときは通り抜けず、囲む(同字対)', () => {
-    const r = autoPairFor(at('"ここ"', 1, 3), '"');
+    const r = wrapSelection(at('"ここ"', 1, 3), '"');
     expect(r).toEqual({ kind: 'insert', insert: '"ここ"', start: 2, end: 4 });
+    expect(autoPairFor(at('"ここ"', 1, 3), '"')).toBeNull();
   });
 
   /**
