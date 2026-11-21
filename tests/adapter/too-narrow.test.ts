@@ -404,6 +404,8 @@ describe('字', () => {
     );
     const order = /(?:^|;)\s*order:\s*(\d+)\s*(?:;|$)/.exec(band);
     expect(order, '帯の並びを最後に固定していない(DOM の順に依っている)').not.toBeNull();
+    // ⚠ `order: 0` は既定値と同じ(DOM の順に依る)── 1 以上で、ほかの子(既定 0)より後ろに固定する
+    expect(Number(order![1]), '帯の order が既定値のまま(DOM の順に依っている)').toBeGreaterThanOrEqual(1);
     // ⚠ 帯より後ろに並ぶ物が無い ── ステータスバーの子に、帯以上の order を持つ規則が 0 件
     const later: string[] = [];
     for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {

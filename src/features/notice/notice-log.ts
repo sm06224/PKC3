@@ -169,7 +169,7 @@ export function noticeDate(id: string): string {
 export const NOTICES: readonly Notice[] = [
   {
     id: '2026-11-21-too-narrow-ok-fixed',
-    title: '狭い画面の断り書きの OK ボタンが動かなくなりました',
+    title: '狭い画面の断り書きの OK ボタンが、押す前にずれなくなりました',
     items: [
       '幅の狭い画面で出る「表示が崩れることがあります」の表示を、ステータスバーのいちばん下の 1 行に固定しました。',
       '「保存中…」などの字がステータスバーに出入りしても OK ボタンの位置が動かないので、押した所が外れて断り書きが消えない、ということが無くなります。',
