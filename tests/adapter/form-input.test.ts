@@ -329,7 +329,7 @@ describe('checkbox-group と datetime の読めない値(#2002 段 1 再設計)'
     (u.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '2';
     opt(u, 'PC').checked = true;
     u.press('form-row-update');
-    expect(applyBodyRewrite(body, u.rewrites[0]!)!).toContain('"PC, ペン"\n"PC"');
+    expect(applyBodyRewrite(body, u.rewrites[0]!)!).toContain('"PC, ペン"\nPC\n');
     const l = rig(body);
     (l.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '1';
     l.press('form-row-load');

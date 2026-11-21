@@ -6039,11 +6039,12 @@ function readFormInputs(form: HTMLElement): {
     let raw = el.value;
     if (type === 'checkbox-group') {
       // 🔴 1 つの値 `PC, ペン`(選択肢の字を並べる)。定義に無い選択肢も欄に出ている(外せる)ので、見えている順に拾う
-      raw = joinGroupValue(
-        [...el.querySelectorAll<HTMLInputElement>('input[data-pkc-form-option]')]
-          .filter((c) => c.checked)
-          .map((c) => c.getAttribute('data-pkc-form-option') ?? ''),
-      );
+      //   順は**保存済みの値の並びを保つ**(並べ替えた定義でも、触らずに保存して値が変わらない)。新しく選んだ分が後ろに付く
+      const now = [...el.querySelectorAll<HTMLInputElement>('input[data-pkc-form-option]')]
+        .filter((c) => c.checked)
+        .map((c) => c.getAttribute('data-pkc-form-option') ?? '');
+      const prev = parseGroupValue(el.getAttribute('data-pkc-form-value') ?? '');
+      raw = joinGroupValue([...prev.filter((x) => now.includes(x)), ...now.filter((x) => !prev.includes(x))]);
     } else if (type === 'datetime' && raw === '') {
       // 読めない保存値は欄に入らない ── 触っていなければそのまま残す
       raw = el.getAttribute('data-pkc-form-raw') ?? '';

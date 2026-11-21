@@ -2594,7 +2594,7 @@ button[data-pkc-variant='danger']:hover:not(:disabled),
 }
 .pkc-md-rendered .pkc-form-warn {
   margin-left: var(--s1, 4px);
-  color: var(--warning, #8a5a00);
+  color: var(--warn);
   font-size: var(--fs-sm);
 }
 .pkc-md-rendered .pkc-form-empty {

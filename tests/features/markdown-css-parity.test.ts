@@ -109,7 +109,7 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
   // 🔴 入力欄の定義(#1456)── 欄 / 値の表 / 定義の誤り の 3 つの姿(押せる面と押せない面)で器を全部出す
   [
     '入力欄(yaml form)',
-    '```yaml form\ntitle: 日報\ntable: 日報一覧\nfields:\n  - name: 氏名\n    required: true\n  - name: 済\n    type: checkbox\n```\n\n```yaml form\n- name: 空 白\n```\n',
+    '```yaml form\ntitle: 日報\ntable: 日報一覧\nfields:\n  - name: 氏名\n    required: true\n  - name: 済\n    type: checkbox\n  - name: 持ち物\n    type: checkbox-group\n    options: [PC, ペン]\n  - name: 開始\n    type: datetime\n```\n\n```yaml form\n- name: 空 白\n```\n',
   ],
   ['csv-render fence', '```csv-render\n列A,列B\n1,2\n```\n'],
   ['html fence', '```html-render\n<b>太字</b>\n```\n'],
@@ -168,7 +168,7 @@ function emitted(): { classes: Set<string>; attrs: Set<string>; empty: string[] 
     //   「誰も出さない規則」に見え、逆に規則を消しても気づけない(上の docstring と同じ理由)。
     { interactiveCodeBlocks: true },
     // 🔴 入力欄の欄と押す口(#1456)── 押せる面にしか出ない器なので、これが無いと「誰も出さない規則」に見える
-    { interactiveForms: true },
+    { interactiveForms: true, vars: { 持ち物: 'PC, 旧', 開始: '来週' } },
   ];
   for (const [name, src] of CORPUS) {
     const html = MODES.map((m) => renderMarkdown(src, m)).join('');

@@ -302,7 +302,7 @@ function fieldHtml(f: FormField, value: string | undefined): string {
       const unknown = on.filter((x) => !f.options.includes(x));
       const box = (o: string, warn: boolean): string =>
         `<label class="pkc-form-option"><input type="checkbox" data-pkc-form-option="${esc(o)}"${on.includes(o) ? ' checked' : ''}>${esc(o)}${warn ? '<span class="pkc-form-warn">定義に無い選択肢</span>' : ''}</label>`;
-      return `<fieldset ${common}><legend>${labelHtml(f)}</legend>${f.options.map((o) => box(o, false)).join('')}${unknown.map((o) => box(o, true)).join('')}</fieldset>`;
+      return `<fieldset ${common} data-pkc-form-value="${esc(v)}"><legend>${labelHtml(f)}</legend>${f.options.map((o) => box(o, false)).join('')}${unknown.map((o) => box(o, true)).join('')}</fieldset>`;
     }
     case 'checkbox':
       return `<input type="checkbox" ${common}${isCheckedValue(v) ? ' checked' : ''}>`;
