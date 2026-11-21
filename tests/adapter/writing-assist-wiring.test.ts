@@ -659,11 +659,17 @@ describe('行の入れ替え(Alt+↑ / Alt+↓)が編集欄に繋がっている
   });
 
   it('Shift / Ctrl を重ねた Alt+↓ は別の鍵 ── 行を動かさない', () => {
-    for (const over of [{ shiftKey: true }, { ctrlKey: true }]) {
+    for (const over of [{ ctrlKey: true }]) {
       const ta = open('あ\nい', 0);
       alt(ta, 'ArrowDown', over);
       expect(ta.value, JSON.stringify(over)).toBe('あ\nい');
     }
+  });
+
+  it('🔴 #2001 段 3: Shift を重ねた Alt+↓ は行の複製(入れ替えではなく、下へ写す)', () => {
+    const ta = open('あ\nい', 0);
+    alt(ta, 'ArrowDown', { shiftKey: true });
+    expect(ta.value).toBe('あ\nあ\nい');
   });
 });
 
