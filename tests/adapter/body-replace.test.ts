@@ -243,6 +243,11 @@ describe('置換の配線', () => {
     d.dispatch({ type: 'UPDATE_OPEN_BODY', body: 'ログ\nx' });
     expect(bar.hidden).toBe(false);
     expect(btn().getAttribute('aria-expanded'), '描き直しで印が食い違った').toBe('true');
+    // 編集をやめて入り直す(帯のボタンは作り直される)── 帯は開いたまま、印が false に戻らない
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(bar.hidden).toBe(false);
+    expect(btn().getAttribute('aria-expanded'), '作り直したボタンの印が帯と食い違った').toBe('true');
     // Ctrl+H で閉じる(押された物がボタンとは限らない経路)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', ctrlKey: true, bubbles: true, cancelable: true }));
     expect(bar.hidden).toBe(true);
