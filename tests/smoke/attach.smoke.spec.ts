@@ -391,6 +391,9 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
    */
   const hereRow = box.locator('[data-pkc-field="pick-archive"]', { hasText: 'readme.txt' });
   const bg = (): Promise<string> => hereRow.evaluate((el) => getComputedStyle(el).backgroundColor);
+  // ⚠ 器を開いた押し所の上にポインタが残っていると、before が hover の地(とその途中の色)になる ── 外して待つ
+  await page.mouse.move(0, 0);
+  await transitionsSettled(hereRow);
   const before = await bg();
   await hereRow.evaluate((el) => {
     (el as HTMLElement).dataset['stamp'] = 'kept';

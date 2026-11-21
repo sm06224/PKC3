@@ -125,10 +125,15 @@ test('🔴 主の操作だけテーマのアクセント色で見える (#722 P2
   expect(sideP.bg, `一覧の主が普通のボタンと同じ地(${sideP.bg} / ${sidePlain.bg})`).not.toBe(sidePlain.bg);
 
   // ④ 🔴 乗せても濃いまま(`button:hover` のほうが詳細度が高い ── 書き足さないと外れる)
-  await page.locator('[data-pkc-region="detail"] button[data-pkc-variant=primary]').hover();
+  const primDetail = page.locator('[data-pkc-region="detail"] button[data-pkc-variant=primary]');
+  const plainDetail = page.locator('[data-pkc-region="detail"] button[data-pkc-action="copy-note-md"]');
+  // ⚠ 地は `--dur-fast` で遷移する(#1982 段 1)── 乗せた直後の途中の色を読まない
+  await primDetail.hover();
+  await transitionsSettled(primDetail);
   const hovered = await paint('[data-pkc-region="detail"] button[data-pkc-variant=primary]');
   // 🔴 乗せると少し暗くなる(85% の --accent + 15% の --fg)。⚠ **普通のボタンの乗せた色へ戻っていない**ことを見る
-  await page.locator('[data-pkc-region="detail"] button[data-pkc-action="copy-note-md"]').hover();
+  await plainDetail.hover();
+  await transitionsSettled(plainDetail);
   const plainHover = await paint('[data-pkc-region="detail"] button[data-pkc-action="copy-note-md"]');
   await page.locator('[data-pkc-region="detail"] button[data-pkc-variant=primary]').hover();
   expect(hovered.bg, `乗せたら地が普通のボタンの乗せた色へ戻った(${hovered.bg})`).not.toBe(plainHover.bg);
