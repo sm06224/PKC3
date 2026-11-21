@@ -46,7 +46,7 @@ import { candidateText, countTitles } from '@features/relation/target-label';
 import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { iconButton, INSPECTOR_ICON_ACTIONS, markVariant } from './icons';
 import { setTagKey, tagColorControls } from './tag-color';
-import { COLLECTION_PANE_COMMANDS } from './commands';
+import { COLLECTION_COMMANDS, COLLECTION_PANE_COMMANDS } from './commands';
 import { readBundle } from '@adapter/platform/portable-boot';
 import { INSIDE_BUNDLE_REFUSAL } from '@adapter/ui/actions/export-portable';
 import { windowFolderWritePicker } from '@adapter/platform/md-folder-export';
@@ -147,6 +147,9 @@ const SCAN_DEBOUNCE_MS = 250;
 export const EXPORT_MENU_LABEL = '書き出す ▾';
 /** 🔴 右の列の常用 4 つ目「その他 ▾」(#1982 段 1)。残りの操作を 1 つの一覧に畳む。 */
 export const INSPECTOR_MORE_LABEL = 'その他 ▾';
+/** 根(何も選んでいないとき)の「その他 ▾」に入る元のボタン(書き出す ▾ には入れない。#2001 段 1)。 */
+const COLLECTION_MORE_ACTIONS: ReadonlySet<string> = new Set(['export-structure']);
+const COLLECTION_MORE_HINT = '整理案を AI に頼むための操作(構成をコピー / 整理案を適用)の一覧を出します';
 const INSPECTOR_MORE_HINT = 'このノートのそのほかの操作(参照のコピー・書き出し・履歴・名前の変更・フォルダへ移す・複製・ゴミ箱へ移すなど)を選ぶ一覧を出します';
 /**
  * 🔴 **「アプリで開く ▾」**(#1966 3-3。🟣 Gemini の裁定 = 案 B)── 開いているノートを、組み込みのアプリへ渡して開く一覧。
@@ -155,7 +158,7 @@ const INSPECTOR_MORE_HINT = 'このノートのそのほかの操作(参照の�
 export const APP_MENU_LABEL = 'アプリで開く ▾';
 export const APP_MENU_HINT = 'このノートを、差分マージや SQL などのアプリで開きます';
 const COLLECTION_EXPORT_MENU_HINT =
-  'コレクション全体の書き出し方(閲覧用 HTML / PKC3 入り HTML / PKC2 の HTML / Markdown / Markdown を PC のフォルダに書き出す(Chrome / Edge のみ)/ 構成のコピー)を選ぶ一覧を出します';
+  'コレクション全体の書き出し方(閲覧用 HTML / PKC3 入り HTML / PKC2 の HTML / Markdown / Markdown を PC のフォルダに書き出す(Chrome / Edge のみ))を選ぶ一覧を出します';
 const EXPORT_MENU_HINT = 'このノートの書き出し方(バックアップ / 閲覧用 HTML / Word / PowerPoint / PDF / Markdown など)を選ぶ一覧を出します';
 
 export class InspectorRenderer {
@@ -2393,6 +2396,14 @@ export class InspectorRenderer {
     exportSource.setAttribute('data-pkc-field', 'collection-export-source');
     exportSource.hidden = true;
     cmds.append(exportSource);
+    /**
+     * 🔴 **「その他 ▾」の元**(#2001 段 1。user 裁定 2026-11-21 = 根では「書き出す ▾」「バックアップ」だけを出し、整理に使う物は 1 段奥)。
+     * ⚠ 「構成をコピー」と「整理案を適用」は**同じ 1 つの用事の前半と後半**なので、同じ「その他 ▾」に置く
+     *   (「書き出す ▾」には入れない ── 1 か所だけ。`COLLECTION_MORE_ACTIONS`)。字・説明は元のボタンが持つ(`open-collection-more` が読む)。
+     */
+    const moreSource = document.createElement('div');
+    moreSource.setAttribute('data-pkc-field', 'collection-more-source');
+    moreSource.hidden = true;
     for (const { action, label, title, needs } of COLLECTION_PANE_COMMANDS) {
       // 🔴 ブラウザに無い機能のボタンは出さない(dead click を作らない)
       if (needs === 'folder-write' && !canWriteFolder) continue;
@@ -2419,12 +2430,33 @@ export class InspectorRenderer {
       note.className = 'settings-note';
       note.textContent = why;
       item.append(note);
-      exportSource.append(item);
+      (COLLECTION_MORE_ACTIONS.has(action) ? moreSource : exportSource).append(item);
     }
     // 🔴 **「構成をコピー」のすぐ隣(下)**(#1017 段④b)── 案を出すのと
     //   当てるのは同じ 1 つの用事の前半と後半である(入口を 2 か所に散らさない)。
-    cmds.append(this.buildPlanApplyItem());
-    wrap.append(cmds);
+    //   ⚠ 押し口は元の器に隠し、貼り付け欄(`plan-apply-box`)だけを画面に置く(隠した器の中では開いても見えない)
+    const plan = this.buildPlanApplyItem();
+    moreSource.append(plan.toggle);
+    cmds.append(moreSource);
+    /**
+     * 🔴 **根に見えるのは「書き出す ▾」「バックアップ」「その他 ▾」の 3 つ**(#2001 段 1)。
+     * 🔑 「バックアップ」は左の列と**同じ action**(`export-archive`。字・説明は `COLLECTION_COMMANDS` が正本)。
+     */
+    const backup = COLLECTION_COMMANDS.find((c) => c.action === 'export-archive')!;
+    const backupItem = document.createElement('div');
+    backupItem.setAttribute('data-pkc-field', 'collection-command-item');
+    const backupBtn = iconButton(backup.action, backup.label, null);
+    backupBtn.title = backup.title;
+    backupItem.append(backupBtn);
+    cmds.append(backupItem);
+    const moreBtn = iconButton('open-collection-more', INSPECTOR_MORE_LABEL, null);
+    moreBtn.setAttribute('aria-haspopup', 'menu');
+    moreBtn.title = COLLECTION_MORE_HINT;
+    const moreItem = document.createElement('div');
+    moreItem.setAttribute('data-pkc-field', 'collection-command-item');
+    moreItem.append(moreBtn);
+    cmds.append(moreItem);
+    wrap.append(cmds, plan.box);
     return wrap;
   }
 
@@ -2446,7 +2478,7 @@ export class InspectorRenderer {
    *   **貼り付け欄という補助器具**であって、「整理案を適用」という導線そのものは
    *   常に見えている。
    */
-  private buildPlanApplyItem(): HTMLElement {
+  private buildPlanApplyItem(): { toggle: HTMLElement; box: HTMLElement } {
     const item = document.createElement('div');
     item.setAttribute('data-pkc-field', 'collection-command-item');
 
@@ -2507,8 +2539,7 @@ export class InspectorRenderer {
     apply.disabled = true;
     box.append(apply);
 
-    item.append(box);
-    return item;
+    return { toggle: item, box };
   }
 
   /**
