@@ -202,6 +202,8 @@ test('🔴 主の操作だけテーマのアクセント色で見える (#722 P2
     return el !== null && el.matches(':focus-visible');
   });
   expect(focusVisible, '焦点の輪が出ていない ── :focus-visible を 1 度も見ていない').toBe(true);
+  // ⚠ 直前の「押した」地は `--dur-fast` で戻る途中のことがある(3 回に 1 回、混ぜた色を読んで落ちた)── 遷移が終わってから読む
+  await transitionsSettled(primBtn);
   const focused = await paint('[data-pkc-region="detail"] button[data-pkc-variant=primary]');
   expect(focused.bg, `焦点を当てたら地が変わった(${focused.bg})`).toBe(primary.bg);
   expect(focused.fg, `焦点を当てたら字の色が変わった(${focused.fg})`).toBe(primary.fg);
