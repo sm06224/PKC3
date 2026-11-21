@@ -8758,6 +8758,40 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   line-height: 1.6;
 }
 
+/* 🔴 **記録の節**(#2002 段 5)── 入力欄つきテンプレートの「新しい記録」。見出しの右に「記録の一覧」。段差と余白で区切る(枠を引かない) */
+[data-pkc-region='launcher-records'] {
+  margin: var(--s3) 0 var(--s2);
+  padding: var(--s2);
+  background: var(--surface-2);
+}
+[data-pkc-field='launcher-records-head'],
+[data-pkc-field='launcher-record-row'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='launcher-records-head'] h3 {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+[data-pkc-field='launcher-record-row'] {
+  padding: var(--s1) 0;
+}
+[data-pkc-field='launcher-record-row'] [data-pkc-field='title'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-field='launcher-record-row'] button,
+[data-pkc-field='launcher-records-list'] {
+  flex: none;
+  cursor: pointer;
+}
+
 /* ── アプリとして登録(添付の画面)───────────────────── */
 [data-pkc-field='app-tile-controls'] {
   display: flex;

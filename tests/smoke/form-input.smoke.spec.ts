@@ -159,5 +159,19 @@ test('🔴 サンプルから作った記録のノートで、入力して表に
     '一覧を開いて閉じる間に再起動した',
   ).toBe(1);
 
+  // ── #2002 段 5: 入力欄から「アプリの一覧」へ戻り、記録の節の「新しい記録」で template: つきの記録が 1 クリックで作られる
+  await clickReal(page, `${FORM} [data-pkc-action="set-browse"][data-pkc-browse="launcher"]`);
+  const recordNew = page.locator('[data-pkc-region="launcher-records"] [data-pkc-action="record-new"][data-pkc-template-sample="qa-regression"]');
+  await expect(recordNew, 'アプリの一覧に記録の節が出ない').toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-pkc-region="launcher-records"] [data-pkc-field="launcher-records-list"]')).toBeVisible();
+  await clickReal(page, '[data-pkc-region="launcher-records"] [data-pkc-action="record-new"][data-pkc-template-sample="qa-regression"]');
+  await expect(page.locator('[data-pkc-field="editor-body"]'), '新しい記録が編集で開かない').toHaveValue(/template: 回帰テストの実施記録/, {
+    timeout: 10_000,
+  });
+  expect(
+    await page.evaluate(() => (window as unknown as { __noBoot?: number }).__noBoot),
+    '入口を押す間に再起動した',
+  ).toBe(1);
+
   expect(errors).toEqual([]);
 });

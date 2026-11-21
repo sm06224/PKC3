@@ -380,7 +380,8 @@ export function formHtml(src: string, opts: FormRenderOptions): string {
   const list =
     def.fields.length === 0
       ? ''
-      : `<button type="button" class="pkc-form-btn" data-pkc-action="form-open-list" title="同じテンプレートから作った記録を、入力欄の値の列つきで一覧します(集計の画面)">記録の一覧</button>`;
+      : `<button type="button" class="pkc-form-btn" data-pkc-action="form-open-list" title="同じテンプレートから作った記録を、入力欄の値の列つきで一覧します(集計の画面)">記録の一覧</button>` +
+        `<button type="button" class="pkc-form-btn" data-pkc-action="set-browse" data-pkc-browse="launcher" title="左のペインの「アプリ」タブを開きます(テンプレートごとの「新しい記録」があります)">アプリの一覧</button>`;
   const note =
     tableName === ''
       ? ''
