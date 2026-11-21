@@ -158,7 +158,7 @@ export type ConflictKind =
   /**
    * この相手との同期の記録が無い物が、両方にあって内容が違う。
    * 同じバックアップから復元した端末どうしの初回でも起きる(`seedBaseline` で記録を作れば起きない)。
-   * 段 2 の画面は「初回の突き合わせ」として出せる(通常の競合と区別する)。
+   * 段 2 の画面は「初回の同期」として出せる(通常の競合と区別する)。
    */
   | 'first-sync'
   /** こちらは消した・相手は変えた。 */
@@ -302,7 +302,8 @@ export function decideMerge(input: MergeInput): readonly Decision[] {
  * (消えたキーは載らないので合意から外れる。競合のコピーの新 lid は呼び手が足して渡す)。
  */
 export function nextBaseline(finalState: readonly KeyedState[]): Baseline {
-  const out: Record<string, Fp> = {};
+  // ⚠ 差分のキーで引く表なので、`__proto__` などの名前が混ざっても prototype を書き換えない
+  const out = Object.create(null) as Record<string, Fp>;
   for (const s of finalState) out[s.key] = toFp(s);
   return out;
 }
@@ -317,7 +318,8 @@ export function nextBaseline(finalState: readonly KeyedState[]): Baseline {
  * 空の指紋は捨てる。同じキーが重なれば後の物を採る。
  */
 export function seedBaseline(snapshot: readonly KeyedState[]): Baseline {
-  const out: Record<string, Fp> = {};
+  // ⚠ 差分のキーで引く表なので、`__proto__` などの名前が混ざっても prototype を書き換えない
+  const out = Object.create(null) as Record<string, Fp>;
   for (const s of snapshot) if (s.content !== '') out[s.key] = toFp(s);
   return out;
 }

@@ -17,6 +17,8 @@ export function showNotices(
   title: string,
   notes: readonly string[],
   action: NoticeAction | null = null,
+  /** 頭に並べる、もう一つ以上の操作(例: 競合のノートを一覧する)。 */
+  extraActions: readonly NoticeAction[] = [],
 ): void {
   region.textContent = '';
   region.removeAttribute(JOB_PANEL_ATTR);
@@ -25,7 +27,7 @@ export function showNotices(
    *   「注意が出たときだけ在る」ものではない。⚠ 逆に**どちらも無ければ出さない**
    *   (空の箱を置かない)。
    */
-  if (notes.length === 0 && action === null) {
+  if (notes.length === 0 && action === null && extraActions.length === 0) {
     region.hidden = true;
     return;
   }
@@ -43,6 +45,16 @@ export function showNotices(
     act.title = action.title;
     act.textContent = action.label;
     head.append(act);
+  }
+
+  for (const x of extraActions) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-action', x.action);
+    btn.setAttribute('data-pkc-field', 'notices-action');
+    btn.title = x.title;
+    btn.textContent = x.label;
+    head.append(btn);
   }
 
   const close = document.createElement('button');

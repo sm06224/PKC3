@@ -14,6 +14,7 @@ import { initialState, reduce } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { COLLECTION_PANE_COMMANDS } from '../../src/adapter/ui/render/commands';
+import { appSyncEnabled } from '../../src/adapter/ui/render/sync-enabled';
 
 const meta = (lid: string, title: string, archetype: EntryMeta['archetype']): EntryMeta => ({
   lid,
@@ -33,6 +34,24 @@ function makeInspector(): { root: HTMLElement; inspector: InspectorRenderer } {
   document.body.append(root);
   return { root, inspector: new InspectorRenderer(buildShell(root).inspector) };
 }
+
+describe('右の列: 端末間の同期の入口は設定がオンのときだけ(#2000 段 2。既定オフ)', () => {
+  const syncButtons = (root: HTMLElement): HTMLButtonElement[] =>
+    [...root.querySelectorAll<HTMLButtonElement>('[data-pkc-field="collection-export-source"] button[data-pkc-action^="export-sync-diff"]')];
+  it('オフ(既定)のあいだは 2 つとも hidden(一覧に出ない)・オンにして描き直すと出る・オフに戻すとまた隠れる', () => {
+    const { root, inspector } = makeInspector();
+    appSyncEnabled.setEnabled(false);
+    inspector.render(initialState);
+    expect(syncButtons(root).map((b) => b.getAttribute('data-pkc-action'))).toEqual(['export-sync-diff', 'export-sync-diff-all']);
+    expect(syncButtons(root).map((b) => b.hidden)).toEqual([true, true]);
+    appSyncEnabled.setEnabled(true);
+    inspector.render(initialState);
+    expect(syncButtons(root).map((b) => b.hidden)).toEqual([false, false]);
+    appSyncEnabled.setEnabled(false);
+    inspector.render(initialState);
+    expect(syncButtons(root).map((b) => b.hidden)).toEqual([true, true]);
+  });
+});
 
 describe('右の列(何も選んでいない = コレクション。#1017 段④a / 段④b)', () => {
   it('🔴 4 つの書き出し操作 + 整理案を適用が、実際に押せる形で描かれている', () => {
@@ -60,6 +79,8 @@ describe('右の列(何も選んでいない = コレクション。#1017 段④
       // 🔴 `needs` つき(PC のフォルダへ書く窓が要る物)は、happy-dom に窓が無いので出ない
       //   (出る側は `md-folder-export.test.ts`)
       ...COLLECTION_PANE_COMMANDS.filter((c) => c.needs === undefined && c.action !== 'export-structure').map((c) => c.action),
+      // 🔴 #2000 段 2: 端末間の同期の入口 2 つ(`needs: 'sync'`)── 元のボタンは常に在り、設定がオフの間は `hidden`(一覧に出ない)
+      ...COLLECTION_PANE_COMMANDS.filter((c) => c.needs === 'sync').map((c) => c.action),
       // 🔴 #2001 段 1: 「構成をコピー」「整理案を適用」は「その他 ▾」の元(隠した器)。根に見えるのは「バックアップ」「その他 ▾」
       'export-structure',
       'toggle-plan-apply',
@@ -68,9 +89,10 @@ describe('右の列(何も選んでいない = コレクション。#1017 段④
       'apply-plan',
     ]);
     const source = pane!.querySelector('[data-pkc-field="collection-export-source"]')!;
-    expect([...source.querySelectorAll('button[data-pkc-action]')].map((b) => b.getAttribute('data-pkc-action'))).toEqual(
-      COLLECTION_PANE_COMMANDS.filter((c) => c.needs === undefined && c.action !== 'export-structure').map((c) => c.action),
-    );
+    expect([...source.querySelectorAll('button[data-pkc-action]')].map((b) => b.getAttribute('data-pkc-action'))).toEqual([
+      ...COLLECTION_PANE_COMMANDS.filter((c) => c.needs === undefined && c.action !== 'export-structure').map((c) => c.action),
+      ...COLLECTION_PANE_COMMANDS.filter((c) => c.needs === 'sync').map((c) => c.action),
+    ]);
     const more = pane!.querySelector('[data-pkc-field="collection-more-source"]')!;
     expect([...more.querySelectorAll('button[data-pkc-action]')].map((b) => b.getAttribute('data-pkc-action'))).toEqual([
       'export-structure',

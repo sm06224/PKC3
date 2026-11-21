@@ -43,6 +43,9 @@ const ALL_ACTIONS = [
   'export-portable',
   // 🔴 構成をテキストでコピー(#429 段①)── AI に整理を頼むための材料
   'export-structure',
+  // 🔴 端末間の同期(#2000 段 2)── 設定「端末間の同期」がオンのときだけ「書き出す ▾」に出る(隠した元のボタンは常に在る)
+  'export-sync-diff',
+  'export-sync-diff-all',
   'import-file',
   'purge-orphan-assets',
 ] as const;

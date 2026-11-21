@@ -395,6 +395,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: '既読はその端末で読んだ事実(設計 doc §7、段②a)。pkc3.notices.seen と同じ考え方。運ぶと、別の端末でまだ読んでいないメッセージが既読に化ける',
   },
   {
+    key: 'pkc3.sync',
+    why: '端末ごとの設定である(#2000 段 2)。端末間の同期を使うかは、その端末で選ぶ。運ぶと、別の端末で同期の記録を作り始めてしまう(オフのままにしておきたい端末でもオンになる)',
+  },
+  {
     key: 'pkc3.notices.delivered',
     why: '「配信」としてメッセージへ流したかの記録(設計 doc §7、段②b)。その端末での事実。運ぶと、別の端末でまだ配信していないお知らせが配信済みに化ける',
   },

@@ -74,6 +74,8 @@ import { createCurrentLineSection } from './settings/current-line';
 import { createInlineCompleteSection } from './settings/inline-complete';
 import { createPasteSourceSection } from './settings/paste-source';
 import { createAlarmEnabledSection } from './settings/alarm-enabled';
+import { createSyncEnabledSection } from './settings/sync-enabled';
+import { appSyncEnabled, type SyncEnabledStore } from './sync-enabled';
 import { createVoiceBoostSection } from './settings/voice-boost';
 import { createOpenPlaceSection } from './settings/open-place';
 import { createAppOpenTargetSection } from './settings/app-open-target';
@@ -248,6 +250,10 @@ export class SettingsRenderer {
      * 🔴 **いま打っている行を左端の線で示すか**(#2001 段 4)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly currentLine: CurrentLineStore = appCurrentLine,
+    /**
+     * 🔴 **端末間の同期を使うか**(#2000 段 2。既定は切)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly syncEnabled: SyncEnabledStore = appSyncEnabled,
   ) {
     /**
      * 🔴 **節の登録表(#1382)── 並びが画面の並びである。** 節を足す = `settings/` に 1 file 足し、
@@ -301,6 +307,7 @@ export class SettingsRenderer {
       createCopyHistorySection(),
       createTooNarrowSection(region, tooNarrowOk),
       createPersistSection(region),
+      createSyncEnabledSection(region, syncEnabled),
       createNoticesSection(region, notices),
       createNoticeListSection(noticeList),
     ];

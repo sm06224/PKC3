@@ -47,6 +47,7 @@ import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { iconButton, INSPECTOR_ICON_ACTIONS, markVariant } from './icons';
 import { setTagKey, tagColorControls } from './tag-color';
 import { COLLECTION_COMMANDS, COLLECTION_PANE_COMMANDS } from './commands';
+import { appSyncEnabled } from './sync-enabled';
 import { readBundle } from '@adapter/platform/portable-boot';
 import { INSIDE_BUNDLE_REFUSAL } from '@adapter/ui/actions/export-portable';
 import { windowFolderWritePicker } from '@adapter/platform/md-folder-export';
@@ -2419,6 +2420,8 @@ export class InspectorRenderer {
       const why = insideBundle ? INSIDE_BUNDLE_REFUSAL : title;
       if (insideBundle) btn.disabled = true;
       btn.title = why;
+      // 🔴 端末間の同期の入口は設定が入のときだけ(`updateCollectionInfo` が毎回合わせる。切のときは「書き出す ▾」の一覧に出ない)
+      if (needs === 'sync') item.setAttribute('data-pkc-sync-only', '');
       item.append(btn);
       /**
        * 🔑 **既存の `title` を、見える 1 行としても出す**(段④a の指示)。
@@ -2561,6 +2564,11 @@ export class InspectorRenderer {
       else notes++;
     }
     setText(info, `ノート ${notes} 件 / 添付 ${attachments} 件 / フォルダ ${folders} 件`);
+    // 🔴 端末間の同期の入口(#2000 段 2)は設定が入のときだけ。⚠ 元のボタンを隠す(一覧は `hidden` のボタンを飛ばす)
+    const syncOn = appSyncEnabled.enabled();
+    for (const btn of info.closest('[data-pkc-field="collection-pane"]')?.querySelectorAll<HTMLElement>('[data-pkc-sync-only] button[data-pkc-action]') ?? []) {
+      btn.hidden = !syncOn;
+    }
   }
 }
 

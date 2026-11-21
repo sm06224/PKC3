@@ -837,7 +837,116 @@ export type StorageRequest =
    */
   | { op: 'rescueRelations'; afterRowid?: number; chunks?: number }
   | { op: 'rescueRevisions'; afterRowid?: number; chunks?: number }
+  /**
+   * 🔴 **端末間の同期(#2000 段 2)**。⚠ 設定「端末間の同期」が入のときだけ呼ばれる(切のときは worker も行を 1 本も書かない)。
+   * - `syncConfigure`: worker に「入 / 切」を教える(入のときだけ、ノートを消すと削除の記録を残す)
+   * - `syncSnapshot`: 現在の指紋・同期の記録を返す(`ensureDevice` で端末 id が無ければ作る)
+   * - `syncCommitExport`: 差分を書き出す前に連番を進め、書き出した指紋の要約を控える
+   * - `syncApply`: 差分の取り込みを **1 つの tx** で反映する(失敗したら何も書かない)
+   * - `syncUndo`: `syncApply` の結果で返した取り消し用の控えで元へ戻す(その後に編集したノートは触らない)
+   */
+  | { op: 'syncConfigure'; enabled: boolean }
+  | { op: 'syncSnapshot'; cid: string; ensureDevice?: boolean }
+  | { op: 'syncCommitExport'; cid: string; digest: string }
+  /** バックアップの種の指紋を、相手(書き出した端末)の「前回の合意」として書く。⚠ 既にその相手の記録が在れば書かない。 */
+  | { op: 'syncSeed'; cid: string; peer: string; baseline: Record<string, { content: string; place?: string }>; nowIso: string }
+  | { op: 'syncApply'; cid: string; input: SyncApplyInput }
+  | { op: 'syncUndo'; cid: string; token: SyncUndoToken }
+  /**
+   * 🔴 相手のノート(本文つき)の指紋を worker で測る。⚠ 本文の SHA-256 を主スレッドでやらない(重い処理は worker へ)。
+   * 渡したノートの数だけ、同じ順で返す。
+   */
+  | { op: 'syncMeasureNotes'; notes: Array<{ lid: string; title: string; archetype: string; parentLid: string | null; body: string }> }
+  /**
+   * 🔴 **同期の記録を全部消す**(端末 id・連番・全ワークスペースの対応・前回の同期の記録・削除の記録)。ノートは触らない。
+   * ⚠ 同期が切のときも使える(切にするときに消したいことがある)。次にオンにして同期すると初回の同期からになる。
+   */
+  | { op: 'syncForget' }
   | { op: 'close' };
+
+/** `syncApply` の入力(`features/sync/sync-plan.ts` の計画 + 記録の書き込み)。 */
+export interface SyncApplyInput {
+  peer: string;
+  peerCid: string;
+  peerSeq: number;
+  /** 端末 id の重複を見つけたときの、作り直す新しい id(この端末の同期の記録を捨てて始め直す)。 */
+  regenerateDevice?: string;
+  upserts: Array<{
+    lid: string;
+    content?: { title: string; archetype: string; body: string };
+    place?: { parentLid: string | null };
+    /** 計画時のこちらの指紋(`null` = 生きていなかった)。tx で測り直し、違えば書かずに `fallback` のコピーを足す。 */
+    expect?: { content: string; place?: string } | null;
+    fallback?: { lid: string; title: string };
+  }>;
+  trash: string[];
+  /** ゴミ箱へ移す物の計画時の指紋。違えば移さない(こちらの編集を消さない)。 */
+  trashExpect?: Record<string, { content: string; place?: string }>;
+  relationAdds: Array<{ from: string; to: string; kind: string }>;
+  relationRemoves: Array<{ from: string; to: string; kind: string }>;
+  baseline: Record<string, { content: string; place?: string }>;
+  nowIso: string;
+}
+
+export interface SyncApplyResult {
+  /** 実際に書いた数。 */
+  written: number;
+  trashed: number;
+  relationsAdded: number;
+  relationsRemoved: number;
+  /** 親フォルダが張れず(輪になる・宛先が無い)ルートへ置いた数。 */
+  placedAtRoot: number;
+  /** 計画を立ててから反映するまでの間に、こちらで編集されていた物(書かずに残した)。コピーを足した物は `copyLid` がある。 */
+  raced: Array<{ lid: string; title: string; copyLid?: string; copyTitle?: string; trash?: boolean }>;
+  undo: SyncUndoToken;
+}
+
+/**
+ * 取り消し用の控え。⚠ 取り込みで変えたノートの「前の姿」の**題名・位置・履歴の版の id だけ**を持つ(本文は持たない ──
+ * 本文は履歴(`revisions`)に残っているので、取り消しはそこから戻す。大きな本文を何件分も主スレッドに持ち続けない)。
+ */
+export interface SyncUndoToken {
+  entries: Array<{
+    lid: string;
+    /** 取り込む前の姿(null = 無かった = 取り消しはゴミ箱へ移す)。 */
+    prior: null | {
+      title: string;
+      archetype: string;
+      entryOrder: number;
+      createdAt: string | null;
+      live: boolean;
+      parents: Array<{ id: string; from: string }>;
+      /**
+       * 前の本文の取り出し方。`same` = 本文は変わっていない / `rev` = この履歴の版から戻す(`hash` で確かめる)/
+       * `unavailable` = 履歴を作れなかった(戻せない = 触らない)。
+       */
+      body: { kind: 'same' } | { kind: 'rev'; id: string; hash: string } | { kind: 'unavailable' };
+    };
+    /**
+     * 取り込んだ直後の指紋(内容 + 親フォルダ。`syncSnapshot` の指紋と同じ関数)。⚠ 題名・移動・種別の変更も「取り込み後の編集」。
+     * 現在の指紋がこれと違えば取り消しで触らない。`null` = 取り込みでゴミ箱へ移した(いま生きていれば、user が戻した = 触らない)。
+     */
+    appliedFp: { content: string; place?: string } | null;
+  }>;
+  relationsAdded: string[];
+  relationsRemoved: Array<{ id: string; from: string; to: string; kind: string }>;
+  rows: Array<{ scope: string; k: string; prev: string | null }>;
+}
+
+export interface SyncSnapshotResult {
+  device: string | null;
+  seq: number;
+  states: Array<{ key: string; content: string; place?: string }>;
+  notes: Array<{ lid: string; title: string; archetype: string; parentLid: string | null }>;
+  relations: Array<{ from: string; to: string; kind: string }>;
+  tombstones: Array<{ key: string; lastFp: { content: string; place?: string }; device: string; seq: number; deletedAt?: string }>;
+  /** 相手の端末 id → 相手のワークスペースの cid。 */
+  pairs: Record<string, string>;
+  /** 相手の端末 id → 前回の合意と、その時刻。 */
+  bases: Record<string, { baseline: Record<string, { content: string; place?: string }>; at: string | null }>;
+  /** 連番 → 書き出した指紋の要約。 */
+  outs: Record<number, string>;
+}
 
 /** assets 表は meta のみ(bytes は AssetBlobStore ── §4.2)。hash は遅延計算可。 */
 export interface AssetMetaPut {
@@ -1470,5 +1579,13 @@ export interface ResultMap {
   rescueEntries: RescuePage;
   rescueRelations: RescueRelationsPage;
   rescueRevisions: RescueRevisionsPage;
+  syncConfigure: null;
+  syncSnapshot: SyncSnapshotResult;
+  syncCommitExport: { device: string; seq: number };
+  syncSeed: { written: boolean };
+  syncApply: SyncApplyResult;
+  syncUndo: { restored: number; skipped: number };
+  syncMeasureNotes: Array<{ lid: string; content: string; place: string }>;
+  syncForget: { removed: number };
   close: null;
 }
