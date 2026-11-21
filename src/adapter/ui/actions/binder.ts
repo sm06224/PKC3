@@ -238,7 +238,7 @@ import { currentTagColor } from '@adapter/ui/render/tag-color';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { bodyBelowFrontmatter, extractVars, frontmatterLineCount } from '@features/markdown/frontmatter';
-import { isCheckedValue } from '@features/markdown/form-def';
+import { isCheckedValue, normalizeDatetime } from '@features/markdown/form-def';
 import { formRowCells, loadFormRow, planFormRow, type FormColumn } from '@features/markdown/form-table';
 import {
   ENTRY_PICK_LIMIT,
@@ -14203,6 +14203,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       const type = types.get(name) ?? 'text';
       if (type === 'checkbox') values[name] = isCheckedValue(cell);
       else if (cell === '') values[name] = undefined;
+      else if (type === 'datetime') values[name] = normalizeDatetime(cell);
       else if (type === 'number' && String(Number(cell)) === cell.trim()) values[name] = Number(cell);
       else values[name] = cell;
     }

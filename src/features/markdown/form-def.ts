@@ -25,12 +25,17 @@
  * fields:
  *   - name: 氏名
  *     label: お名前        # 省略すると name
- *     type: text           # text / textarea / number / select / date / checkbox(省略すると text)
+ *     type: text           # text / textarea / number / select / date / datetime / checkbox(省略すると text)
  *   - name: 区分
  *     type: select
  *     options: [通常, 休み]
  *     required: true
  * ```
+ *
+ * ⚠ 別名(#2002): `type: radio` は `select` と同じ(選択肢から 1 つ)。`type: checkbox-group` は選択肢ごとの
+ *   チェック(`<項目名>_<選択肢>` の `vars` が 1 つずつ入る)に展開する ── `extractVars` は値を文字列でしか読まず、
+ *   配列 `[a, b]` は字のまま(`"[a, b]"`)にしか戻らないため、配列では往復できない。
+ *   `datetime` の値は `YYYY-MM-DDTHH:MM`(ブラウザの日時入力と同じ字)。`vars` の値なので予定表には載らない(`date` と同じ)。
  *
  * ⚠ 読めない行は**黙って捨てず、理由を囲みの中に出す**(`errors`)。項目名に使えるのは差し込みの名前と同じ字だけ
  *   (`VAR_NAME_SOURCE`)── 違う字を許すと、入れても `{{vars.…}}` で引けない。
@@ -39,7 +44,7 @@
  */
 import { VAR_NAME_SOURCE } from './frontmatter';
 
-export const FORM_FIELD_TYPES = ['text', 'textarea', 'number', 'select', 'date', 'checkbox'] as const;
+export const FORM_FIELD_TYPES = ['text', 'textarea', 'number', 'select', 'date', 'datetime', 'checkbox'] as const;
 export type FormFieldType = (typeof FORM_FIELD_TYPES)[number];
 
 export interface FormField {
@@ -195,14 +200,40 @@ export function parseFormDef(src: string): FormDef {
       continue;
     }
     const typeRaw = unquote(d.map.get('type') ?? 'text').toLowerCase();
-    const type = (FORM_FIELD_TYPES as readonly string[]).includes(typeRaw) ? (typeRaw as FormFieldType) : null;
+    if (typeRaw === 'checkbox-group') {
+      const opts = parseList(d.map.get('options') ?? '');
+      if (opts.length === 0) {
+        errors.push(`項目「${name}」は checkbox-group なのに options がありません`);
+        continue;
+      }
+      const label = unquote(d.map.get('label') ?? '') || name;
+      const expanded: FormField[] = [];
+      let bad = '';
+      opts.forEach((o, idx) => {
+        const sub = NAME_RE.test(`${name}_${o}`) ? `${name}_${o}` : `${name}_${String(idx + 1)}`;
+        if (seen.has(sub) || expanded.some((e) => e.name === sub)) bad = sub;
+        expanded.push({ name: sub, label: `${label}: ${o}`, type: 'checkbox', options: [], required: false, placeholder: '' });
+      });
+      if (bad !== '') {
+        errors.push(`項目名「${bad}」が重なっています`);
+        continue;
+      }
+      // 必須は個々のチェックには掛けない(どれか 1 つ、は言えないため)
+      for (const e of expanded) {
+        seen.add(e.name);
+        fields.push(e);
+      }
+      continue;
+    }
+    const aliased = typeRaw === 'radio' ? 'select' : typeRaw;
+    const type = (FORM_FIELD_TYPES as readonly string[]).includes(aliased) ? (aliased as FormFieldType) : null;
     if (type === null) {
-      errors.push(`項目「${name}」の type「${typeRaw}」は使えません(${FORM_FIELD_TYPES.join(' / ')})`);
+      errors.push(`項目「${name}」の type「${typeRaw}」は使えません(${FORM_FIELD_TYPES.join(' / ')} / radio / checkbox-group)`);
       continue;
     }
     const options = parseList(d.map.get('options') ?? '');
     if (type === 'select' && options.length === 0) {
-      errors.push(`項目「${name}」は select なのに options がありません`);
+      errors.push(`項目「${name}」は ${typeRaw} なのに options がありません`);
       continue;
     }
     seen.add(name);
@@ -224,6 +255,11 @@ const CHECKED_WORDS = new Set(['true', '1', 'yes', 'on', 'はい', '済', '○',
 /** 値(`vars` の字や表のセルの字)がチェックありか。 */
 export function isCheckedValue(v: string | undefined): boolean {
   return v !== undefined && CHECKED_WORDS.has(v.trim().toLowerCase());
+}
+
+/** 表のセルなどの `YYYY-MM-DD HH:MM` を、日時入力の字(`T` 区切り)に揃える。 */
+export function normalizeDatetime(v: string): string {
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/u.test(v.trim()) ? v.trim().replace(' ', 'T') : v;
 }
 
 function esc(s: string): string {
@@ -255,6 +291,8 @@ function fieldHtml(f: FormField, value: string | undefined): string {
       return `<input type="number" step="any" ${common} value="${esc(v)}"${ph}>`;
     case 'date':
       return `<input type="date" ${common} value="${esc(v)}">`;
+    case 'datetime':
+      return `<input type="datetime-local" ${common} value="${esc(normalizeDatetime(v))}">`;
     case 'checkbox':
       return `<input type="checkbox" ${common}${isCheckedValue(v) ? ' checked' : ''}>`;
     case 'select': {
