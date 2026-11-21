@@ -45,7 +45,8 @@ const names = (): string[] => (receivers as () => string[])();
  *   ⚠ この file は #738 で**出口の走査**に同じ直しを当てている(`codeOnlyForScan`)。
  *   同じ罠が**本文の走査**にも在った。
  */
-const OBJECT = /selectedLid|data-pkc-entry|data-pkc-lid|multiSelected/;
+// 🔑 `data-pkc-note-tab` = ノートのタブが指すノート(#1982 段 5-3。行の印 `data-pkc-entry` を使わない ── 右クリックなどの汎用の受け手に拾わせない)
+const OBJECT = /selectedLid|data-pkc-entry|data-pkc-lid|data-pkc-note-tab|multiSelected/;
 const readsObject = (body: string): boolean => OBJECT.test(codeOnlyForScan(body));
 
 /**
@@ -208,7 +209,7 @@ const OBJECT_LONE: readonly string[] = [
    */
   /**
    * 🔴 **2026-11-21(#1982 段 5-3)に 2 件増えた**: ノートのタブ列の `activate-note-tab` / `close-note-tab`。
-   *   タブは押した物自身(`data-pkc-entry`)が対象で、出口はタブ列の 1 か所。キーでの出口は段 5-4 で足す。
+   *   タブは押した物自身(`data-pkc-note-tab`)が対象で、出口はタブ列の 1 か所。キーでの出口は段 5-4 で足す。
    */
   'activate-note-tab',
   'add-relation',
