@@ -289,7 +289,7 @@ export function reduceBoot(state: AppState, action: BootAction): ReduceResult {
            */
           ...(state.launcherTiles === null ? [] : [
                 ...launcherReloadEvents(order, metas, state.appGroupGen),
-                // 🔴 記録の節(#2002 段 5)の材料 = 雛形の走査も頼み直す(テンプレートの書込・取り込みの後に古い一覧を残さない)
+                // 🔴 記録の節(#2002 段 5)の材料 = テンプレートの走査も頼み直す(テンプレートの書込・取り込みの後に古い一覧を残さない)
                 { type: 'REQUEST_SNIPPET_SCAN' as const },
               ]),
           /**

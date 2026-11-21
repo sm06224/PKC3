@@ -59,7 +59,7 @@ export class LauncherRenderer {
 
   /** ⚠ **並び順も指紋に要る**(#857 段③)── 入れないと動かしても画面が変わらない。 */
   private lastOrders: string | undefined = undefined;
-  /** ⚠ **記録の節の材料**(#2002 段 5)── 雛形の走査は後から届くので、指紋に入れないと節が出ない。 */
+  /** ⚠ **記録の節の材料**(#2002 段 5)── テンプレートの走査は後から届くので、指紋に入れないと節が出ない。 */
   private lastScan: unknown = undefined;
 
   /**
@@ -258,8 +258,16 @@ export class LauncherRenderer {
         mk.setAttribute(r.sample ? 'data-pkc-template-sample' : 'data-pkc-template-lid', r.key);
         mk.title = `「${r.title}」から新しい記録のノートを作ります(入力欄はノートの中で入れます)`;
         mk.textContent = '新しい記録';
+        mk.setAttribute('aria-label', `${r.title} の新しい記録`);
         row.append(name, mk);
         sec.append(row);
+      }
+      // 🔴 走査は上限(200 件)で切れる ── 切れたら、全部は出ていないと 1 行で言う(黙って欠けさせない)
+      if (state.snippetScan?.truncated === true) {
+        const cut = document.createElement('p');
+        cut.setAttribute('data-pkc-field', 'launcher-records-truncated');
+        cut.textContent = 'テンプレートが多いため、すべては表示していません。';
+        sec.append(cut);
       }
       list.append(sec);
     };

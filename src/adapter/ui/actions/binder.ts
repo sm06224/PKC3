@@ -1924,7 +1924,7 @@ let rowRenameReturn: { readonly lid: string; readonly parent: string | null } | 
 const createRecordFromTemplate = (
   dispatcher: Dispatcher,
   services: BinderServices,
-  src: { readonly title: string; readonly body: string },
+  src: { readonly title: string; readonly body: string; readonly lid?: string },
   isSample = false,
 ): void => {
   const now = dispatcher.getState();
@@ -1932,8 +1932,14 @@ const createRecordFromTemplate = (
     dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(now.phase)}ノートを作ってください` });
     return;
   }
+  /**
+   * 🔴 **自分のテンプレートは、いま保存されている本文から作る**(#2002 段 5)── 走査の結果は保存の直後に古いことがある。
+   * ⚠ 開いているノートなら保存済みの本文(`baseline`)を使う(打ちかけの下書きは使わない)。開いていなければ走査の本文(保存のたびに頼み直す)。
+   */
+  let srcBody = src.body;
+  if (src.lid !== undefined && now.entryMetas.has(src.lid) && now.openBody?.lid === src.lid) srcBody = now.openBody.baseline;
   const parent = now.scopeLid === null ? null : (now.entryMetas.get(now.scopeLid) ?? null);
-  const filled = insertSnippet({ text: '', start: 0, end: 0 }, src.body, new Date()).text;
+  const filled = insertSnippet({ text: '', start: 0, end: 0 }, srcBody, new Date()).text;
   const body = stampTemplateOrigin(filled, src.title);
   createAndEdit(dispatcher, services, 'text', parent?.lid ?? null, body, isSample ? src.title : undefined);
 };

@@ -8779,6 +8779,11 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='launcher-record-row'] {
   padding: var(--s1) 0;
 }
+[data-pkc-field='launcher-records-truncated'] {
+  margin: var(--s1) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
 [data-pkc-field='launcher-record-row'] [data-pkc-field='title'] {
   flex: 1 1 auto;
   min-width: 0;

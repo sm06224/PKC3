@@ -52,7 +52,7 @@ export function reduceLauncher(state: AppState, action: LauncherAction): ReduceR
            *   `tileFrom` が両方を同じ土俵で処理することになる。
            */
           readAppGroupNotes(state),
-          // 🔴 入力欄つきテンプレートの一覧(#2002 段 5)── アプリの一覧の「記録」の節が使う。雛形ノートだけを読む(普通のノートの本文は読まない)
+          // 🔴 入力欄つきテンプレートの一覧(#2002 段 5)── アプリの一覧の「記録」の節が使う。テンプレートのノートだけを読む(普通のノートの本文は読まない)
           { type: 'REQUEST_SNIPPET_SCAN' },
         ],
       };
