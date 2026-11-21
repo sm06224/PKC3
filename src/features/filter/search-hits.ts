@@ -20,6 +20,7 @@
  *   `--` → `–` / `(c)` → `©` などへ整形されるので、画面の字をそのまま探すと打った字が当たらない。
  */
 import { splitWords } from './fold-text';
+import { splitLabelQuery } from './label-query';
 import { parseSearchTerms } from './search-query';
 import { foldMapped } from './search-text';
 
@@ -58,7 +59,8 @@ export function jumpTerms(query: string, origin: 'find' | 'filter' | 'phrase'): 
     return t === '' ? [] : [t];
   }
   // 🔴 左の列の欄は、空白(全角も)で区切った語を全部含む(依頼 194・260・115-1)。`"…"` も `-語` も読まない
-  if (origin === 'filter') return [...new Set(splitWords(query))];
+  // 🔴 色の語(`色:緑`)は塗る字ではない ── 絞り込みと同じ 1 本(`splitLabelQuery`)で除く(引用符で囲んだ物は字として残る)
+  if (origin === 'filter') return [...new Set(splitWords(splitLabelQuery(query).rest))];
   return findTerms(query);
 }
 

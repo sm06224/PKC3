@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { splitLabelQuery } from '@features/filter/label-query';
+import { jumpTerms } from '@features/filter/search-hits';
 import { entryFilterOf, matchesEntry } from '@features/filter/title-filter';
 import { noteLabelColorOf } from '@features/note-label';
 import {
@@ -30,6 +31,25 @@ describe('色ラベルの語(#1982 段 4)', () => {
     expect(splitLabelQuery('label:green')).toEqual({ rest: '', colors: [3] });
     expect(splitLabelQuery('色：青 COLOR:5')).toEqual({ rest: '', colors: [5] });
     expect(splitLabelQuery('色:あ x')).toEqual({ rest: '色:あ x', colors: [] });
+  });
+  it('残りの語は 1 字も変えない(① ㈱ ㌘ が NFKC で化けない)。色の語が無ければ問い合わせそのまま', () => {
+    expect(splitLabelQuery('色:緑 ①㈱ ㌘x').rest).toBe('①㈱ ㌘x');
+    expect(splitLabelQuery('a①  ㈱').rest, '色の語が無いのに空白を畳んだ・変えた').toBe('a①  ㈱');
+    expect(splitLabelQuery('①㈱ label:3').rest).toBe('①㈱');
+  });
+  it('色が読めない語は字のまま(label:foo / 色:9)。引用符で囲めば色の語でも字として探す', () => {
+    expect(splitLabelQuery('label:foo')).toEqual({ rest: 'label:foo', colors: [] });
+    expect(splitLabelQuery('色:9 x')).toEqual({ rest: '色:9 x', colors: [] });
+    expect(splitLabelQuery('"label:green"')).toEqual({ rest: 'label:green', colors: [] });
+    expect(splitLabelQuery('"色:1" 色:2 y')).toEqual({ rest: '色:1 y', colors: [2] });
+    // 色の語でない引用語は今までどおり(引用符ごと字)
+    expect(splitLabelQuery('"a b"').rest).toBe('"a b"');
+  });
+  it('塗る語・移る語(jumpTerms)に色の語を入れない。引用符で囲んだ物は字として入る', () => {
+    expect(jumpTerms('色:緑 請求', 'filter')).toEqual(['請求']);
+    expect(jumpTerms('label:green', 'filter')).toEqual([]);
+    expect(jumpTerms('"label:green" x', 'filter')).toEqual(['label:green', 'x']);
+    expect(jumpTerms('label:foo', 'filter')).toEqual(['label:foo']);
   });
   it('matchesEntry: 色の語は語が空でも効き、ボタンの色と AND', () => {
     const labels = new Map([
