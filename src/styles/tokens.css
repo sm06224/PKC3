@@ -27,9 +27,9 @@
 
 :root,
 :root[data-pkc-theme='light'] {
-  --bg: #eef0f3;
+  --bg: #e9ebee;
   --surface: #ffffff;
-  --surface-2: #f5f6f8;
+  --surface-2: #f0f1f3;
   --fg: #16191d;
   --muted: #59616b;
   --border: #cdd2d9;
@@ -39,7 +39,7 @@
   --accent-dim-fg: #0d3f26;
   --danger: #a3231c;
   --warn: #7a4a00;
-  --ok: #1a7f37; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
+  --ok: #187733; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2` = `pre` の背景)*/
   --code-key: #1f4bb8;
   --code-lit: #0a6b52;
@@ -96,19 +96,19 @@
 
 /* GitHub(Primer)*/
 :root[data-pkc-theme='github'] {
-  --bg: #f6f8fa;
+  --bg: #e9ebed;
   --surface: #ffffff;
-  --surface-2: #f6f8fa;
+  --surface-2: #f0f2f4;
   --fg: #1f2328;
   --muted: #59636e;
   --border: #d1d9e0;
-  --accent: #0969da;
+  --accent: #0965d3;
   --accent-fg: #ffffff;
   --accent-dim: #ddf4ff;
   --accent-dim-fg: #0a3069;
-  --danger: #cf222e;
-  --warn: #9a6700;
-  --ok: #1a7f37; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
+  --danger: #cb212d;
+  --warn: #8d5e00;
+  --ok: #187733; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2` = `pre` の背景)。Primer の keyword / string */
   --code-key: #cf222e;
   --code-lit: #0a3069;
@@ -165,18 +165,18 @@
 
 /* Solarized(Ethan Schoonover)*/
 :root[data-pkc-theme='solarized'] {
-  --bg: #eee8d5; /* base2 */
+  --bg: #e8e2d0; /* 公式の base2(#eee8d5)より少し沈めた ── 質の悪い液晶でも紙との段差が見えるように(2026-11-21)。base2 は `--surface-2` に残す */
   --surface: #fdf6e3; /* base3 */
   --surface-2: #eee8d5;
   --fg: #073642; /* base02 ── base00 は本文向けで、UI には暗い側を使う */
-  --muted: #546a71; /* base01 をわずかに濃く ── base01 のままだと見出し帯で 4.39:1 */
+  --muted: #52676e; /* base01 を濃く ── 見出し帯で 4.39:1、段差を広げた `--bg` の上で 4.41:1 だった。いまは 4.6 以上 */
   --border: #d5cdb6;
   --accent: #1a6b8f;
   --accent-fg: #fdf6e3;
   --accent-dim: #d7e6ee;
   --accent-dim-fg: #08303f;
   --danger: #b0261f;
-  --warn: #8a6600;
+  --warn: #805e00;
   --ok: #546a00; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2`)。green/cyan を暗く ── 公式値は地に対して 2.6:1 */
   --code-key: #5f6f00;
@@ -377,9 +377,9 @@
    地(机 --bg)は紙(--surface)より 1 段暗い生成り。アクセントは鞍茶(saddle brown)。
    色は意味にだけ ── 茶は主の操作・フォーカスにしか使わない */
 :root[data-pkc-theme='paper'] {
-  --bg: #e9e6df;
+  --bg: #e5e2db;
   --surface: #f7f6f3;
-  --surface-2: #eeece8;
+  --surface-2: #eae8e4;
   --fg: #1a1a1a;
   --muted: #66635e;
   --border: #bcbab6;
@@ -645,6 +645,14 @@
    * ⚠ 現在地は**左端の線 + 太字**(形)が主で、この地は補助。色相は使わない。
    */
   --pkc-selected-bg: color-mix(in srgb, var(--fg) 10%, transparent);
+  /**
+   * 🔴 **面の縁の細い線(ヘアライン)**(質の悪い液晶で地の段差が潰れても境目が見えるように。2026-11-21)。
+   * `--fg` を 11% だけ透かした無彩色 ── 暗い線を引くのではなく、段差の縁をなぞるだけ。
+   * ⚠ 使うのは **`box-shadow` の 1px の輪**(寸法が動かない)で、中央の紙と標準のボタンだけ。
+   *   `gap: 1px` に線色を透かせる格子は戻さない(`tests/adapter/shell-tone-css.test.ts`)。
+   *   段差の目標値は `tests/adapter/lowq-boundary.test.ts`。
+   */
+  --hairline: color-mix(in srgb, var(--fg) 11%, transparent);
   --pkc-mark-bg: color-mix(in oklab, var(--fg) 18%, var(--surface));
   /**
    * 🔴 **印を付けた行の中の薄い字**(依頼 245)。`--muted` を行の字(`--fg`)へ 6 割寄せる。

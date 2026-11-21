@@ -208,7 +208,9 @@ body {
    * 本文と追記欄の境目は線ではなく、追記欄の地の段差(`--surface-2`)で作る */
   gap: 0;
   background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  box-shadow:
+    0 0 0 1px var(--hairline),
+    var(--shadow-sm);
 }
 /* 🔴 外からファイルを掴んで窓に入っている間だけ、落とせる 2 つのペインの縁に細い線を出す(#1380。
  * `file-drag-hint.ts` が root に `data-pkc-file-drag` を付け外しする)。
@@ -417,6 +419,7 @@ body {
 [data-pkc-region='collapsed-edge'] button {
   /* ゴースト(地なし。hover で薄い地)── 机の上の縦の道具なので静かに(#1982 段 2) */
   background: transparent;
+  border-color: transparent;
   flex: none;
 }
 [data-pkc-region='pane-grip'][data-pkc-pane='inspector'] {
@@ -552,10 +555,11 @@ button {
   justify-content: center;
   gap: 4px;
   /* 🔴 **標準のボタン = 枠の無い薄い地**(#1982 段 1。区切りは背景の段差。ボタンは 4 型)。
-   * ⚠ 枠は `transparent` で**残す**(1px)── 型を替えても高さ・幅がずれない。 */
+   * ⚠ 枠は 1px で**残す**(標準は `--hairline`、他の型は透明)── 型を替えても高さ・幅がずれない。 */
   background: color-mix(in srgb, var(--fg) 6%, transparent);
   color: var(--fg);
-  border: 1px solid transparent;
+  /* 質の悪い液晶でも輪郭が見えるよう、枠は**ごく薄い線**(寸法は動かない)。地を透明にした・枠を消したボタンは各規則が外す */
+  border: 1px solid var(--hairline);
   border-radius: var(--radius);
   transition:
     background-color var(--dur-fast) var(--ease),
@@ -11801,7 +11805,7 @@ h3[data-pkc-section] {
   :root[data-pkc-theme] {
     --bg: #ffffff;
     --surface: #ffffff;
-    --surface-2: #f5f6f8;
+    --surface-2: #f0f1f3;
     --fg: #16191d;
     --muted: #59616b;
     --border: #cdd2d9;
@@ -11811,7 +11815,7 @@ h3[data-pkc-section] {
     --accent-dim-fg: #0d3f26;
     --danger: #a3231c;
     --warn: #7a4a00;
-    --ok: #1a7f37;
+    --ok: #187733;
     --code-key: #1f4bb8;
     --code-lit: #0a6b52;
     --note-1: #c2410c;
