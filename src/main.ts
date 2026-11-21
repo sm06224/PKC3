@@ -6411,7 +6411,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     focusNoteWindow: (lid) => {
       if (noteRegistry.whereIs(lid) !== 'other') return false;
-      noteRegistry.raise(lid);
+      // ⚠ 開き途中(予約だけで窓がまだ名乗っていない)は頼めない ── false を返して普通に有効にさせる
+      if (!noteRegistry.raise(lid)) return false;
       // 消えた窓(答えが無い)の印は、点呼の待ちが切れた後に外す
       window.setTimeout(() => syncExternalTabs?.(), ANSWER_MS + 100);
       return true;

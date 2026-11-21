@@ -95,10 +95,11 @@ export class NoteTabsBar {
       if (isEditing) notes.push('編集中');
       if (t.external) notes.push(NOTE_TAB_EXTERNAL_LABEL);
       tab.setAttribute('aria-label', notes.length === 0 ? shown : `${shown}(${notes.join('・')})`);
-      tab.title = dimmed
-        ? NOTE_TAB_DIMMED_HINT
-        : t.external
-          ? `${shown}(${NOTE_TAB_EXTERNAL_LABEL}。押すとそのウィンドウへ移ります)`
+      // ⚠ 別ウィンドウのタブは 2 ペインの間でも「そのウィンドウへ移る」(押した動きと字を揃える ── 着地前レビュー)
+      tab.title = t.external
+        ? `${shown}(${NOTE_TAB_EXTERNAL_LABEL}。押すとそのウィンドウへ移ります)`
+        : dimmed
+          ? NOTE_TAB_DIMMED_HINT
           : shown;
 
       if (pinned) {

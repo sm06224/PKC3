@@ -101,6 +101,9 @@ describe('2 ペイン中のタブ列(裁定 6)', () => {
     expect(t.host.hidden).toBe(false);
     expect(t.host.hasAttribute('data-pkc-dimmed')).toBe(true);
     expect(t.tabBtn('a').title).toBe('押すと 2 ペインを閉じてこのノートを開きます');
+    // ⚠ 別ウィンドウのタブは 2 ペインの間でも「そのウィンドウへ移る」と言う(押した動きと揃える)
+    t.d.dispatch({ type: 'NOTE_TAB_EXTERNAL', lid: 'b', external: true });
+    expect(t.tabBtn('b').title).toContain('押すとそのウィンドウへ移ります');
     t.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     expect(t.host.hasAttribute('data-pkc-dimmed')).toBe(false);
     expect(t.tabBtn('a').title).toBe('t-a');
@@ -246,6 +249,18 @@ describe('右クリックを何も選ばずに閉じたら元へ戻る(5-4 の�
     t.root.click();
     await flush();
     expect(t.d.getState().selectedLid).toBe('b');
+  });
+  it('🔴 同じ行を続けて右クリックしても、新しいメニューの裏で選択が戻らない(閉じたときだけ戻る)', async () => {
+    const before = snapshot();
+    ctx(t.row('c'));
+    ctx(t.row('c'));
+    await flush();
+    expect(document.querySelector(MENU), '前提: 2 度目のメニューが出ている').not.toBeNull();
+    expect(t.d.getState().selectedLid, 'メニューが出ているのに選択が戻った').toBe('c');
+    t.root.click();
+    await flush();
+    expect(document.querySelector(MENU)).toBeNull();
+    expect(snapshot()).toEqual(before);
   });
   it('メニューを開いたまま別の行を右クリックしても、最初の姿へ戻る', async () => {
     const before = snapshot();

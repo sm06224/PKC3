@@ -168,8 +168,20 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
     const make = bus();
     const a = win(make, 'A');
     const b = win(make, 'B');
-    b.reg.raise('e9');
+    expect(b.reg.raise('e9'), '頼めていないのに頼めたと言う').toBe(false);
     expect(a.raised()).toBe(0);
+  });
+
+  it('🔴 開き途中(予約だけで窓がまだ名乗っていない)は「他で開いている」でも頼めない(false)── 呼び側は普通に開く', () => {
+    const make = bus();
+    const b = win(make, 'B');
+    b.reg.reserve('e1');
+    expect(b.reg.whereIs('e1'), '前提: 予約は「他で開いている」に数える').toBe('other');
+    expect(b.reg.raise('e1')).toBe(false);
+    const a = win(make, 'A');
+    a.reg.announce('e1');
+    expect(b.reg.raise('e1'), '名乗った後は頼める').toBe(true);
+    expect(a.raised()).toBe(1);
   });
 
   /**

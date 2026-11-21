@@ -5300,7 +5300,8 @@ const MENU_PREV_LID_ATTR = 'data-pkc-menu-prev-lid';
  * 🔑 メニューを開いたまま別の行を右クリックした回は、最初の右クリックの前の姿を引き継ぐ(`peeks`)。
  */
 type PeekSnapshot = Extract<Dispatchable, { type: 'ROW_MENU_PEEK_UNDO' }>['snapshot'];
-const peeks = new WeakMap<HTMLElement, { readonly snap: PeekSnapshot; readonly lid: string }>();
+/** 🔑 `token` = どのメニューの見張りか。新しいメニューに替わったら古い見張りは何もしない(着地前レビュー)。 */
+const peeks = new WeakMap<HTMLElement, { readonly snap: PeekSnapshot; readonly lid: string; readonly token: object }>();
 
 function takePeekSnapshot(root: HTMLElement, st: AppState): PeekSnapshot {
   const live = peeks.get(root);
@@ -5331,7 +5332,8 @@ function watchRowMenuPeek(
   }
   // 選ぶ先が無い(元の選択と同じ行): 戻すものが無い
   if (snap.selectedLid === null || snap.selectedLid === lid) return;
-  peeks.set(root, { snap, lid });
+  const token = {};
+  peeks.set(root, { snap, lid, token });
   const after = dispatcher.getState();
   let ran = false;
   menu.el.addEventListener('click', () => (ran = true), true);
@@ -5340,7 +5342,14 @@ function watchRowMenuPeek(
   const mo = new Observer(() => {
     if (menu.el.isConnected) return;
     mo.disconnect();
-    if (peeks.get(root)?.snap === snap) peeks.delete(root);
+    /**
+     * 🔴 **いまのメニューの見張りでなければ何もしない**(着地前レビュー)── 同じ行を続けて右クリックすると、
+     *   古いメニューが外れた瞬間に古い見張りが走り、新しいメニューが出ているのに選択が元へ戻っていた
+     *   (同じ行の選び直しは state を変えないので、「何も動いていない」の条件をすり抜けた)。
+     *   後を継いだメニューが無い(行のメニュー以外へ替わった・閉じた)ときだけ、この見張りが戻す。
+     */
+    if (peeks.get(root)?.token !== token) return;
+    peeks.delete(root);
     if (ran) return;
     undoPeek(dispatcher, snap, lid, after);
   });

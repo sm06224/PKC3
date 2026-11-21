@@ -135,8 +135,9 @@ export interface NoteRegistry {
    * 🔑 **同時に点呼も打つ**(#685 着地前レビュー、2026-09-04)── 相手が
    * `pagehide` を出さずに消えた(クラッシュ / OS kill / タブ破棄)ときの保険である。
    * 答えが返らなければ、次に聞かれたときに行を捨てて**開けるようにする**。
+   * @returns 頼めたか(⚠ 開き途中で窓がまだ名乗っていない = `false`。呼び側は普通の動きへ戻す ── #1982 段 5-5 着地前レビュー)
    */
-  raise(lid: string, find?: string): void;
+  raise(lid: string, find?: string): boolean;
   /**
    * 🔴 **窓を離れるときに呼ぶ**(台帳から自分を外す)。⚠ **放送路は閉じない**。
    *
@@ -265,7 +266,7 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
     release: (lid) => void pending.delete(lid),
     raise: (lid, find) => {
       const to = byLid.get(lid);
-      if (to === undefined) return;
+      if (to === undefined) return false;
       send(
         find === undefined || find === ''
           ? { tag: NOTE_RAISE, id: deps.id, to }
@@ -274,6 +275,7 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
       // 🔑 生死も聞く(上の docstring)── 答えが返らなければ `alive` が行を捨てる
       askedAt.set(to, deps.now());
       send({ tag: NOTE_ROLL_CALL, id: deps.id });
+      return true;
     },
     leave: () => {
       send({ tag: NOTE_GONE, id: deps.id });
