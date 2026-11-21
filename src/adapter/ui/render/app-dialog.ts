@@ -771,16 +771,25 @@ export function pickTemplateNoteInApp(
   host: HTMLElement,
   items: readonly { readonly lid: string; readonly title: string; readonly abbr: string }[],
   note: string,
+  /** 🔴 組み込みのサンプル(#2002)。自分のテンプレートの後ろに、区切りを挟んで並べる。 */
+  samples: readonly { readonly label: string; readonly value: string }[] = [],
 ): Promise<string | null> {
   return pickRowInApp(host, {
     title: 'テンプレートから作る',
     field: 'pick-template-note',
     indexAttr: 'data-pkc-template-note-index',
     note,
-    rows: items.map((s) => ({
-      label: s.abbr !== '' ? `${s.title}(${s.abbr})` : s.title,
-      value: s.lid,
-    })),
+    rows: [
+      ...items.map((s) => ({
+        label: s.abbr !== '' ? `${s.title}(${s.abbr})` : s.title,
+        value: s.lid,
+      })),
+      ...samples.map((s, i) => ({
+        label: s.label,
+        value: s.value,
+        ...(i === 0 && items.length > 0 ? { separatorBefore: true as const } : {}),
+      })),
+    ],
   });
 }
 

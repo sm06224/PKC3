@@ -160,15 +160,18 @@ describe('④ テンプレートから作る', () => {
     expect(d.getState().openBody?.body).toBe(created!.body);
   });
 
-  it('自分のテンプレートが無いときは、作り方を書いた 1 行を出す(黙らない)', async () => {
+  it('自分のテンプレートが無くても一覧は開き(サンプルがある)、作り方を書いた 1 行が注記に出る', async () => {
     const { d, sent, press } = setup();
     d.dispatch({ type: 'SET_SNIPPET_SCAN', scan: { items: [], total: 0, truncated: false } });
     sent.length = 0;
     press();
     await tick();
-    expect(openDialog()).toBeNull();
-    const n = sent.find((a) => a.type === 'OP_NOTICE') as { message: string } | undefined;
-    expect(n?.message).toContain('まだ自分のテンプレートがありません');
+    const dlg = openDialog();
+    expect(dlg, '一覧が開かない').not.toBeNull();
+    expect(dlg!.querySelector('[data-pkc-field="pick-template-note-note"]')?.textContent).toContain(
+      'まだ自分のテンプレートがありません',
+    );
+    expect(dlg!.querySelectorAll('[data-pkc-field="pick-template-note"]')).toHaveLength(3);
     expect(sent.some((a) => a.type === 'CREATE_ENTRY')).toBe(false);
   });
 });
