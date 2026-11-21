@@ -185,6 +185,7 @@ describe('④ テンプレートから作る', () => {
       '議事録の型',
       ...SAMPLE_TEMPLATES.map((x) => sampleLabel(x)),
     ]);
+    expect(openDialog()!.querySelectorAll('[data-pkc-field="pick-template-note-sep"]'), '自分のテンプレートとサンプルの区切り').toHaveLength(1);
     const before = d.getState().snippetScan;
     rows[2]!.click(); // 当番の引き継ぎ
     await tick();
