@@ -27,9 +27,9 @@
 
 :root,
 :root[data-pkc-theme='light'] {
-  --bg: #eef0f3;
+  --bg: #e9ebee;
   --surface: #ffffff;
-  --surface-2: #f5f6f8;
+  --surface-2: #f0f1f3;
   --fg: #16191d;
   --muted: #59616b;
   --border: #cdd2d9;
@@ -96,9 +96,9 @@
 
 /* GitHub(Primer)*/
 :root[data-pkc-theme='github'] {
-  --bg: #f6f8fa;
+  --bg: #e9ebed;
   --surface: #ffffff;
-  --surface-2: #f6f8fa;
+  --surface-2: #f0f2f4;
   --fg: #1f2328;
   --muted: #59636e;
   --border: #d1d9e0;
@@ -165,7 +165,7 @@
 
 /* Solarized(Ethan Schoonover)*/
 :root[data-pkc-theme='solarized'] {
-  --bg: #eee8d5; /* base2 */
+  --bg: #e8e2d0; /* base2 */
   --surface: #fdf6e3; /* base3 */
   --surface-2: #eee8d5;
   --fg: #073642; /* base02 ── base00 は本文向けで、UI には暗い側を使う */
@@ -377,9 +377,9 @@
    地(机 --bg)は紙(--surface)より 1 段暗い生成り。アクセントは鞍茶(saddle brown)。
    色は意味にだけ ── 茶は主の操作・フォーカスにしか使わない */
 :root[data-pkc-theme='paper'] {
-  --bg: #e9e6df;
+  --bg: #e5e2db;
   --surface: #f7f6f3;
-  --surface-2: #eeece8;
+  --surface-2: #eae8e4;
   --fg: #1a1a1a;
   --muted: #66635e;
   --border: #bcbab6;

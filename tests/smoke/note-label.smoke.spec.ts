@@ -43,7 +43,7 @@ test('🔴 紙の配色を選ぶと、地の色がトークンのとおりにな
   expect(r.theme).toBe('paper');
   expect(r.tone).toBe('light');
   expect(r.body).toBe(r.want);
-  expect(r.want, '紙の机の色(#e9e6df)').toBe('rgb(233, 230, 223)');
+  expect(r.want, '紙の机の色(#e5e2db)').toBe('rgb(229, 226, 219)');
   expect(errors).toEqual([]);
 });
 
