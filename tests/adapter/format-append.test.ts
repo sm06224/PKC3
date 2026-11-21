@@ -61,6 +61,20 @@ async function tick(ms = 10): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * 🔴 **test ごとに結んだ物を外す**(負荷時に 5000ms の時間切れが出ていた原因)。
+ *
+ * かつて `setup()` は root を body に置き去り、`bindActions` / `DetailRenderer` の
+ * document への購読(`selectionchange` 等)も外さなかった。test を重ねるほど、
+ * 1 回の `setSelectionRange` / click が**それまでの全 test の画面**を起こし、
+ * ファイル末尾の test は単独 59ms → 通しで 2.8s(負荷時は 5s の時間切れ)になっていた。
+ */
+const teardowns: (() => void)[] = [];
+afterEach(() => {
+  // 張った逆順に外す(root を外すのは購読をすべて解いた後)
+  while (teardowns.length > 0) teardowns.pop()!();
+});
+
 function setup(
   metas: EntryMeta[],
   bodies: Record<string, string>,
@@ -74,10 +88,10 @@ function setup(
   const detail = new DetailRenderer(regions.detail, null, undefined, (body) =>
     d.dispatch({ type: 'UPDATE_OPEN_BODY', body }),
   );
-  d.onState((s) => detail.render(s));
-  bindActions(root, d, services);
+  const offState = d.onState((s) => detail.render(s));
+  const unbind = bindActions(root, d, services);
   const persisted: EntryUpsert[] = [];
-  connectStoreEffects(d, {
+  const effects = connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => bodies[lid] ?? null,
     deleteEntry: async () => {},
@@ -95,6 +109,7 @@ function setup(
       return stubStamps();
     },
   });
+  teardowns.push(() => root.remove(), () => detail.dispose(), offState, unbind, effects);
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
   const q = <T extends HTMLElement>(s: string) => root.querySelector<T>(s);
   return { root, d, persisted, q };
