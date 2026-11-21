@@ -23,9 +23,6 @@ export interface SampleTemplate {
   readonly body: string;
 }
 
-/** 一覧の行の値の頭。⚠ 自分のテンプレートのノートの lid とぶつからないよう、値に付ける。 */
-export const SAMPLE_VALUE_PREFIX = 'sample:';
-
 const QA_BODY = [
   '# 回帰テストの実施記録',
   '',
@@ -128,7 +125,7 @@ const DISCOVERY_BODY = [
   '',
   '1. 下の入力欄に、仮説と確かめ方を入れます。',
   '2. 「表に追加」を押すと、仮説一覧の表に 1 行たまります。',
-  '3. 結果が出たら、表の該当の行を読み込んで「判定」を直し、「表の行を更新」で書き戻します。',
+  '3. 結果が出たら、行の番号を入れて「読み込む」を押し、「判定」を直して「表の行を更新」で書き戻します。',
   '',
   '```yaml form',
   'title: 仮説',
@@ -178,9 +175,7 @@ export function sampleLabel(s: SampleTemplate): string {
   return `サンプル: ${s.title}(${s.summary})`;
 }
 
-/** 一覧の行の値から、サンプルを引く。サンプルでなければ `null`。 */
-export function sampleOfValue(value: string): SampleTemplate | null {
-  if (!value.startsWith(SAMPLE_VALUE_PREFIX)) return null;
-  const id = value.slice(SAMPLE_VALUE_PREFIX.length);
+/** id からサンプルを引く。無ければ `null`。 */
+export function sampleById(id: string): SampleTemplate | null {
   return SAMPLE_TEMPLATES.find((s) => s.id === id) ?? null;
 }

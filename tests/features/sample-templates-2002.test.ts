@@ -2,7 +2,7 @@
  * 🔴 #2002 段 2 ── 組み込みのサンプルテンプレートと、「テンプレートから作る」が入力欄の囲み・表をそのまま写すこと。
  */
 import { describe, expect, it } from 'vitest';
-import { SAMPLE_TEMPLATES, sampleOfValue, sampleLabel } from '../../src/features/snippet/sample-templates';
+import { SAMPLE_TEMPLATES, sampleById, sampleLabel } from '../../src/features/snippet/sample-templates';
 import { insertSnippet } from '../../src/features/snippet/snippet-expand';
 import { snippetItemOf } from '../../src/features/snippet/snippet-table';
 import { parseFormDef } from '../../src/features/markdown/form-def';
@@ -67,11 +67,10 @@ describe('組み込みのサンプル 3 本', () => {
   it('3 本・題名・一覧の字が引ける', () => {
     expect(SAMPLE_TEMPLATES.map((s) => s.title)).toEqual(['回帰テストの実施記録', '当番の引き継ぎ', '仮説と検証の記録']);
     for (const s of SAMPLE_TEMPLATES) {
-      expect(sampleOfValue(`sample:${s.id}`)).toBe(s);
+      expect(sampleById(s.id)).toBe(s);
       expect(sampleLabel(s)).toContain(s.title);
     }
-    expect(sampleOfValue('sample:nothing')).toBeNull();
-    expect(sampleOfValue('lid-123')).toBeNull();
+    expect(sampleById('nothing')).toBeNull();
   });
 
   it('使う入力欄の型が 9 種(text / textarea / number / select / radio / checkbox-group / date / datetime / checkbox)そろう', () => {

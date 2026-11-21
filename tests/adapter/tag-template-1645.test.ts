@@ -173,6 +173,7 @@ describe('④ テンプレートから作る', () => {
       'まだ自分のテンプレートがありません',
     );
     expect(dlg!.querySelectorAll('[data-pkc-field="pick-template-note"]')).toHaveLength(3);
+    expect(dlg!.querySelectorAll('[data-pkc-field="pick-template-note-sep"]'), '自分のテンプレートが無いのに区切りが出ている').toHaveLength(0);
     expect(sent.some((a) => a.type === 'CREATE_ENTRY')).toBe(false);
   });
 
@@ -201,5 +202,34 @@ describe('④ テンプレートから作る', () => {
     expect(d.getState().phase).toBe('editing');
     expect(d.getState().snippetScan, '自分のテンプレートの走査結果が動いた').toBe(before);
     expect([...d.getState().entryMetas.values()].some((m) => m.title === '議事録の型' || m.archetype === 'snippet')).toBe(false);
+  });
+
+  it('🔴 #2002 サンプルは、いま見ているフォルダの中に作られる(parentLid)', async () => {
+    const { d, sent, press } = setup();
+    d.dispatch({ type: 'SET_SCOPE', lid: 'a' });
+    expect(d.getState().scopeLid).toBe('a');
+    sent.length = 0;
+    press();
+    await tick();
+    openDialog()!.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-template-note"]')[1]!.click();
+    await tick();
+    const created = sent.find((a) => a.type === 'CREATE_ENTRY') as { parentLid: string | null } | undefined;
+    expect(created?.parentLid).toBe('a');
+  });
+
+  it('🔴 #2002 自分のテンプレートの lid がサンプルの id と同じでも、サンプルと取り違えない', async () => {
+    const { d, sent, press } = setup();
+    const odd = snippetItemOf('qa-regression', '紛らわしい型', '自分の本文')!;
+    d.dispatch({ type: 'SET_SNIPPET_SCAN', scan: { items: [odd], total: 1, truncated: false } });
+    sent.length = 0;
+    press();
+    await tick();
+    const rows = [...openDialog()!.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-template-note"]')];
+    expect(rows[0]!.textContent).toBe('紛らわしい型');
+    rows[0]!.click();
+    await tick();
+    const created = sent.find((a) => a.type === 'CREATE_ENTRY') as { body?: string; title: string } | undefined;
+    expect(created?.body).toBe('自分の本文');
+    expect(created?.title).not.toBe('回帰テストの実施記録');
   });
 });

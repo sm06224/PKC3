@@ -335,7 +335,7 @@ import {
   isLineOp,
 } from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
-import { SAMPLE_TEMPLATES, SAMPLE_VALUE_PREFIX, sampleLabel, sampleOfValue } from '@features/snippet/sample-templates';
+import { SAMPLE_TEMPLATES, sampleById, sampleLabel } from '@features/snippet/sample-templates';
 import { abbrBeforeCaret, type SnippetItem } from '@features/snippet/snippet-table';
 import { assetChoices, assetInsertEdit, atChoices, slashChoices, slashToolChoices } from '@features/markdown/inline-complete';
 import { createAssetIndex } from './asset-complete-index';
@@ -11758,11 +11758,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     const scan = st.snippetScan;
     const items = scan?.items ?? [];
     // 🔴 組み込みのサンプル(#2002)は常に並ぶ ── 自分のテンプレートが 0 件でも一覧は開く(作り方の 1 行は注記に残す)
-    const samples = SAMPLE_TEMPLATES.map((s) => ({ label: sampleLabel(s), value: `${SAMPLE_VALUE_PREFIX}${s.id}` }));
-    void pickTemplateNoteInApp(root, items, snippetMenuNote(scan), samples).then((lid) => {
-      if (lid === null) return;
-      const sample = sampleOfValue(lid);
-      const item = sample === null ? items.find((s) => s.lid === lid) : undefined;
+    const samples = SAMPLE_TEMPLATES.map((s) => ({ label: sampleLabel(s), id: s.id }));
+    void pickTemplateNoteInApp(root, items, snippetMenuNote(scan), samples).then((pick) => {
+      if (pick === null) return;
+      const sample = pick.sample ? sampleById(pick.key) : null;
+      const item = pick.sample ? undefined : items.find((s) => s.lid === pick.key);
       if (sample === null && item === undefined) return;
       const now = dispatcher.getState();
       if (now.phase !== 'ready') {
