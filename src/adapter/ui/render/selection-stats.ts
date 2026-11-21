@@ -31,7 +31,7 @@
  * - 🔑 **IME の変換中は書かない**(変換中の選びは確定前の字で、数えても意味が無い)。
  *   `compositionend` で 1 度合わせ直す。
  */
-import { formatSelectionStats, selectionLineCount } from '@features/stats/body-stats';
+import { countGraphemes, formatBodyStatsFor, formatSelectionStats, selectionLineCount } from '@features/stats/body-stats';
 import { createCaretBlockResolver, TABLE_HINT } from '@features/markdown/caret-hint';
 import { formatTarget } from '../actions/format-target';
 
@@ -43,6 +43,21 @@ export const SELECTION_STATS_DELAY_MS = 120;
 
 /** 枠の `data-pkc-field`(描くのは `detail.ts`、書くのはここ)。 */
 export const SELECTION_STATS_FIELD = 'selection-stats';
+
+/**
+ * 🔴 **編集中の本文の全体の字数の枠**(#2001 段 4)。選択の枠のすぐ左に常設する。
+ * ⚠ 字の形は右の列の「全体の字数」と同じ(`formatBodyStatsFor` ── 桁区切り + 文字。見た目の字で数える)。
+ * ⚠ 出すのは**本文全体の欄**(`editor-body`)だけ。1 画面の行の欄(`row-source`)は 1 行ぶんなので出さない(「全体」と食い違う)。
+ * 🔑 選びの枠と同じ trailing debounce で 1 度だけ数える(打鍵ごとに全文を数えない)。
+ */
+export const TOTAL_CHARS_FIELD = 'total-chars';
+export const TOTAL_CHARS_LABEL = '全体の字数';
+
+/** 本文全体の字数の枠の字。欄が全体の本文でなければ空。 */
+export function totalCharsText(ta: HTMLTextAreaElement | null): string {
+  if (ta === null || ta.getAttribute('data-pkc-field') !== 'editor-body') return '';
+  return `${TOTAL_CHARS_LABEL}: ${formatBodyStatsFor(countGraphemes(ta.value), null)}`;
+}
 
 /**
  * 🔴 **caret が表の行に在るとき、同じ枠へ出す案内**(#1451)。選んでいる間は選択の数が勝つ。
@@ -112,6 +127,12 @@ export function syncSelectionStats(region: HTMLElement, cache?: CacheRef): boole
   const slot = region.querySelector<HTMLElement>(`[data-pkc-field="${SELECTION_STATS_FIELD}"]`);
   if (slot === null) return false;
   const ta = formatTarget(region);
+  // 全体の字数は選びとは別の枠(焦点が別の欄へ移っても、編集中の本文の字数は残す)
+  const total = region.querySelector<HTMLElement>(`[data-pkc-field="${TOTAL_CHARS_FIELD}"]`);
+  if (total !== null) {
+    const t = totalCharsText(ta);
+    if (total.textContent !== t) total.textContent = t;
+  }
   let text = '';
   if (ta !== null && !focusOnOtherField(region, ta)) {
     const start = ta.selectionStart;
@@ -170,6 +191,8 @@ export function watchSelectionStats(region: HTMLElement): () => void {
 
   // 入力があれば控えは古い(`input` は bubble する。`writeBack` / `insertText` も撃つ)
   region.addEventListener('input', invalidate, true);
+  // 🔴 字数は打つたびに変わる(`selectionchange` が来ない環境でも追う)── 数えるのは止まってから 1 度
+  region.addEventListener('input', schedule);
   doc.addEventListener('selectionchange', schedule);
   // 🔴 焦点が動いたときも合わせ直す(#1264 §1)── 本文の欄の選びは、焦点が移っても動かない
   //    (selectionchange が来ない)ので、題名の欄へ移ったときに数が残っていた
@@ -183,6 +206,7 @@ export function watchSelectionStats(region: HTMLElement): () => void {
     doc.removeEventListener('focusin', schedule);
     doc.removeEventListener('focusout', schedule);
     region.removeEventListener('input', invalidate, true);
+    region.removeEventListener('input', schedule);
     region.removeEventListener('compositionstart', onStart, true);
     region.removeEventListener('compositionend', onEnd, true);
     if (timer !== null) clearTimeout(timer);
