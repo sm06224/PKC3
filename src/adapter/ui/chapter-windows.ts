@@ -89,6 +89,7 @@ import type { MermaidScope } from './render/mermaid-hydrate';
 import { SqlEmbedHydrator } from './render/sql-embed-hydrate';
 import { BODY_MEDIA_CLASS, BODY_MEDIA_FIELD, assetPreviewKind } from '@features/asset/asset-preview-kind';
 import { replaceOnMediaError } from './render/media-error';
+import { unloadMedia } from './render/media-release';
 
 /** 窓が開けなかったとき(`view-window.ts` と同じ字)。 */
 export const CHAPTER_WINDOW_BLOCKED = 'ブラウザが新しいウィンドウをブロックしたようです';
@@ -561,7 +562,7 @@ export class ChapterWindows {
           return;
         }
         if (lent === null) return;
-        let placed = 0;
+        const placed: HTMLMediaElement[] = [];
         for (const a of links) {
           if (a.nextElementSibling?.getAttribute('data-pkc-field') === BODY_MEDIA_FIELD) continue;
           const el = document.createElement(kind);
@@ -572,11 +573,18 @@ export class ChapterWindows {
           el.src = lent.url;
           replaceOnMediaError(el, kind, mime ?? '', '上のリンクから保存して開いてください');
           a.after(el);
-          placed += 1;
+          placed.push(el);
         }
         // 1 つも置けなかった回は、借りた物をその場で返す
-        if (placed === 0) lent.dispose();
-        else o.disposers.push(lent.dispose);
+        if (placed.length === 0) lent.dispose();
+        else {
+          // ⚠ 器から URL を外してから返す(死んだ blob: を読み直し続けない ── `media-release.ts`)
+          const { url, dispose } = lent;
+          o.disposers.push(() => {
+            for (const el of placed) unloadMedia(el, url);
+            dispose();
+          });
+        }
       }),
     );
   }

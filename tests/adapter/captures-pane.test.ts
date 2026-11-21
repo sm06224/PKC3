@@ -233,6 +233,43 @@ describe('その場で聞く ── 借りと返し(#683 段①)', () => {
   });
 
   /**
+   * 🔴 **器から URL を外してから返す**(2026-11-21。全量 smoke で `ERR_FILE_NOT_FOUND @ blob:` が約 400ms おきに出た)。
+   * ⚠ 返す瞬間に `<audio>` がまだその URL を差していると、死んだ URL を読み直し続ける(`media-release.ts`)。
+   */
+  it('🔴 返す瞬間には、器はもう URL を差していない(押し替え・面を捨てる)', async () => {
+    const seen: (string | null)[] = [];
+    const a = lender();
+    let host: HTMLElement | null = null;
+    const lend = a.lend;
+    a.lend = async (k: string) => {
+      const got = await lend(k);
+      if (got === null) return null;
+      return {
+        url: got.url,
+        dispose: () => {
+          const m = host?.querySelector<HTMLMediaElement>(`[data-pkc-field="capture-media"][src="${got.url}"]`);
+          seen.push(m === null || m === undefined ? 'gone' : m.getAttribute('src'));
+          got.dispose();
+        },
+      };
+    };
+    const p = pane({ captureItems: ITEMS() }, a);
+    host = p.host;
+    p.paint({ capturePlayingLid: 'a' });
+    await Promise.resolve();
+    await Promise.resolve();
+    p.paint();
+    expect(p.host.querySelector('[data-pkc-field="capture-media"]')?.getAttribute('src'), '前提: 器が出ていない').toBe('blob:k-1');
+    // 押し替え: 古い器はまだ画面に在る(組み直す前に返す)
+    p.paint({ capturePlayingLid: 'b' });
+    await Promise.resolve();
+    await Promise.resolve();
+    p.paint();
+    p.r.dispose();
+    expect(seen, '返す瞬間に器がまだ URL を差している').toEqual(['gone', 'gone']);
+  });
+
+  /**
    * 🔴 **行が消えたら返す** ── 絞り込みで消えた / ノートが消えた場合も同じで、
    *   鳴りっぱなしにしない。
    */

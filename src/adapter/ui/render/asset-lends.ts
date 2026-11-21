@@ -26,6 +26,7 @@
  */
 import type { AssetLender } from './detail';
 import { replaceOnMediaError } from './media-error';
+import { unloadMedia } from './media-release';
 
 export type { AssetLender };
 
@@ -42,6 +43,16 @@ export interface Lend {
   readonly dispose: () => void;
   /** この貸出が生きている根拠の要素。⚠ **1 つも画面に残っていなければ返す**。 */
   els: Element[];
+}
+
+/**
+ * 🔴 **器から URL を外してから返す**(2026-11-21。全量 smoke で `ERR_FILE_NOT_FOUND @ blob:` が約 400ms おきに出た)。
+ * ⚠ 本文の再生機・添付の下見の `<audio>` は、面を組み直す**前**に返されていた ── 読み込み中の器は
+ *   死んだ URL を読み直し続ける。`key: null` の貸出(器ごとの寿命)は `url` を持たないので、中の器を全部外す。
+ */
+function release(l: Lend, els: readonly Element[]): void {
+  for (const e of els) unloadMedia(e, l.url);
+  l.dispose();
 }
 
 /** 画面に出ていない要素を指す貸出を返す。 */
@@ -144,16 +155,17 @@ export class AssetLends {
   prune(): void {
     const keep: Lend[] = [];
     for (const l of this.lends) {
-      l.els = l.els.filter((e) => e.isConnected);
+      const all = l.els;
+      l.els = all.filter((e) => e.isConnected);
       if (l.els.length > 0) keep.push(l);
-      else l.dispose();
+      else release(l, all);
     }
     this.lends = keep;
   }
 
   /** 🔴 面を畳むとき / 器ごと捨てるときに**全部返す**。 */
   disposeAll(): void {
-    for (const l of this.lends) l.dispose();
+    for (const l of this.lends) release(l, l.els);
     this.lends = [];
     // ⚠ 進めておく ── 飛んでいる借用が、返した後に差し直すのを止める
     this.token += 1;

@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, writesLanded } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, watchRevokedMedia, writesLanded } from './helpers';
 import { chromiumLaunch } from './playwright.config';
 // ⚠ 手で書き写さない ── `[data-pkc-field="capture-trim"]` の textContent は
 //   `trimMarkText()` の戻り値そのもの(`captures.ts`)。字を直した日に
@@ -75,6 +75,8 @@ test('🔴 録音を止めると本文に入り、その場で聞ける (#413 �
    */
   test.setTimeout(120_000);
   const errors = collectPageErrors(page);
+  // 🔴 画面に出たままの音・動画の器から URL を返していない(死んだ blob: を読み直し続けない ── helpers.ts)
+  const revokedLive = watchRevokedMedia(page);
   /**
    * 🔴 **「繋いだこと」を数える計器**(#772 段① B)。
    *
@@ -1446,6 +1448,7 @@ ${(e as Error).message}`,
   await expect(screenRow, '取り出したら元の動画の行が消えた').toBeVisible();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+  expect(revokedLive, '画面に出たままの音・動画の器が差している URL を返した(死んだ blob: を読み直し続ける)').toEqual([]);
 });
 
 /**
@@ -1455,6 +1458,8 @@ ${(e as Error).message}`,
  */
 test('🔴 1 分を超えた録音は、残さずにやめる前に確かめる(1 分以下は聞かない / 「続ける」で録り続ける)', async ({ page }) => {
   const errors = collectPageErrors(page);
+  // 🔴 画面に出たままの音・動画の器から URL を返していない(死んだ blob: を読み直し続けない ── helpers.ts)
+  const revokedLive = watchRevokedMedia(page);
   /**
    * 🔴 **録った長さの時計だけを進められるようにする**(録音の入れ先 / 残さずにやめる確認)。
    * ⚠ 1 分待たずに「1 分を超えた」を作る。`performance.now()` に足すだけで、ほかの動きは変えない
@@ -1522,6 +1527,7 @@ test('🔴 1 分を超えた録音は、残さずにやめる前に確かめる(
   });
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+  expect(revokedLive, '画面に出たままの音・動画の器が差している URL を返した(死んだ blob: を読み直し続ける)').toEqual([]);
 });
 
 
@@ -1860,6 +1866,8 @@ test('🔴 画面録画を押した所ぴったりに切り出せる:確認が�
   // 録画 9 秒 + 前後 7 枚の撮影 + 切り出し + 検めで、負荷のある環境では既定の 30 秒を超える(#1851)
   test.setTimeout(90_000);
   const errors = collectPageErrors(page);
+  // 🔴 画面に出たままの音・動画の器から URL を返していない(死んだ blob: を読み直し続けない ── helpers.ts)
+  const revokedLive = watchRevokedMedia(page);
   const { screenRow, seekVideo, startSec: firstStart, endSec, srcScan, srcBytes } = await recordScreenForTrim(page);
   let startSec = firstStart;
   const rowsNow = await page.locator('[data-pkc-capture]').count();
@@ -2067,6 +2075,7 @@ test('🔴 画面録画を押した所ぴったりに切り出せる:確認が�
   expect(cutProbe.size).toBeGreaterThan(0);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+  expect(revokedLive, '画面に出たままの音・動画の器が差している URL を返した(死んだ blob: を読み直し続ける)').toEqual([]);
 });
 
 /**
@@ -2080,6 +2089,8 @@ test('🔴 画面録画を押した所ぴったりに切り出せる:確認が�
 test('🔴 細かく切れない環境(WebCodecs 無し)は裁定の文言で確認 → やめる/切り出す → 手前の区切りから再生できる (#683 段②b-2)', async ({ page }) => {
   test.setTimeout(90_000);
   const errors = collectPageErrors(page);
+  // 🔴 画面に出たままの音・動画の器から URL を返していない(死んだ blob: を読み直し続けない ── helpers.ts)
+  const revokedLive = watchRevokedMedia(page);
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown>;
     delete w['VideoEncoder'];
@@ -2177,6 +2188,7 @@ test('🔴 細かく切れない環境(WebCodecs 無し)は裁定の文言で確
   expect(Math.abs(cutProbe.midLanded - cutProbe.mid), `中ほどへ飛んだ先がずれている(${said})`).toBeLessThan(0.5);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+  expect(revokedLive, '画面に出たままの音・動画の器が差している URL を返した(死んだ blob: を読み直し続ける)').toEqual([]);
 });
 
 /**
@@ -2296,6 +2308,8 @@ test('🔴 録音の途中でタブが落ちても、開き直すと復元でき
 test('🔴 編集中に止めた録音は、編集を終えると途中保存から入る(控えは着地後に消える)', async ({ page }) => {
   test.setTimeout(90_000);
   const errors = collectPageErrors(page);
+  // 🔴 画面に出たままの音・動画の器から URL を返していない(死んだ blob: を読み直し続けない ── helpers.ts)
+  const revokedLive = watchRevokedMedia(page);
   const journal = (): Promise<number> =>
     page.evaluate(
       () =>
@@ -2349,4 +2363,5 @@ test('🔴 編集中に止めた録音は、編集を終えると途中保存か
   ).toHaveCount(1, { timeout: 20_000 });
   await expect.poll(journal, { message: '取り込んだのに控えが残っている', timeout: 15_000 }).toBe(0);
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+  expect(revokedLive, '画面に出たままの音・動画の器が差している URL を返した(死んだ blob: を読み直し続ける)').toEqual([]);
 });

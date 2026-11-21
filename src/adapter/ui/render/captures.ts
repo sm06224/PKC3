@@ -45,6 +45,7 @@ import { elapsedText } from '@features/elapsed-text';
 import { appWaveSource, type WaveProvider } from '@adapter/platform/audio/wave-source';
 import { placeRange } from '../actions/wave-drag';
 import { bakeWavePng } from './wave-bake';
+import { unloadMedia } from './media-release';
 
 /**
  * 借りている 1 件(押した行)。⚠ **同時に 1 つだけ**。
@@ -161,14 +162,26 @@ export class CapturesRenderer {
     });
   }
 
+  /**
+   * 🔴 **鳴らしている音を返す ── 器から URL を外してから**(2026-11-21)。
+   * ⚠ 返した後も `<audio>` が画面(または読み込み中のまま)に残ると、死んだ blob: を約 400ms おきに
+   *   読み直し、`ERR_FILE_NOT_FOUND` を吐き続ける(`media-release.ts`)。
+   */
+  private releasePlaying(): void {
+    const p = this.playing;
+    this.playing = null;
+    if (p === null) return;
+    unloadMedia(this.host, p.url);
+    p.dispose();
+  }
+
   /** ⚠ 面を捨てるときに必ず呼ぶ(借りたままにしない)。 */
   dispose(): void {
     this.watchTheme(false);
     this.token += 1;
     this.borrowing = null;
     this.missingLid = null;
-    this.playing?.dispose();
-    this.playing = null;
+    this.releasePlaying();
     this.dropWave();
   }
 
@@ -507,8 +520,7 @@ export class CapturesRenderer {
     this.missingLid = null;
     this.token += 1;
     const mine = this.token;
-    this.playing?.dispose();
-    this.playing = null;
+    this.releasePlaying();
     this.borrowing = want;
     /** 🔴 借りられなかった回の後始末(#1087 A2)── 印を戻し、理由の 1 行を出す。 */
     const failed = (): void => {
