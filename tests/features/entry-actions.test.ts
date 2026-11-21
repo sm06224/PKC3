@@ -410,6 +410,8 @@ describe('右クリックの説明(#587 C-1)', () => {
     const KNOWN: readonly [string, string][] = [
       // 🔴 付箋(#685 段②、2026-09-04)
       ['open-note-window', 'a3a6b9d4'],
+      // 🔴 新しいタブで開く(#1982 段 5-4)── 一覧の行の右クリックだけ
+      ['open-note-new-tab', 'fec9a1b3'],
       // 🔴 2026-09-21(#1017 段④b): バックアップ(このノート/このフォルダ)に改名・
       //    file 名の末尾を .pkc3-notes.zip に
       // 🔴 2026-10-13(#1087): 説明に「履歴(過去の版)」が入ることを足した(実際に入る ── `single-entry-source.ts` の `getRevisionChain`)

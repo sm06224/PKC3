@@ -384,12 +384,13 @@ describe('🔴 アプリ内リンクの中ボタンは、空のタブを開か�
     el.dispatchEvent(ev);
     return ev;
   };
-  it('entry: / pkc:// のリンクの中ボタンは既定動作(新しいタブ)を止める。ノートは動かさない', () => {
+  it('entry: / pkc:// のリンクの中ボタンは既定動作(ブラウザの新しいタブ)を止め、PKC3 のノートのタブで開く(#1982 段 5-4)', () => {
     const { dispatcher } = makeDispatcher();
     stop = bindActions(root, dispatcher);
     expect(aux(entryLink('entry:b'), 1).defaultPrevented).toBe(true);
-    expect(aux(entryLink('pkc://default/entry/b'), 1).defaultPrevented).toBe(true);
-    expect(dispatcher.getState().selectedLid, '中ボタンで画面が動いた').not.toBe('b');
+    expect(dispatcher.getState().noteTabs.tabs.map((t) => t.lid)).toContain('b');
+    expect(aux(entryLink('pkc://default/entry/a'), 1).defaultPrevented).toBe(true);
+    expect(dispatcher.getState().noteTabs.tabs.map((t) => t.lid).sort()).toEqual(['a', 'b']);
   });
   it('対照群: 外部リンクの中ボタン / 中ボタン以外の auxclick は止めない', () => {
     const { dispatcher } = makeDispatcher();

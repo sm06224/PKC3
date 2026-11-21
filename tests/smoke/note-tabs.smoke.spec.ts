@@ -101,3 +101,71 @@ test('🔴 タブ列: 1 枚では出ない / ピン留めを開いたまま別�
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+test('🔴 タブの操作(段 5-4): 中クリックで新しいタブ / Alt+PageDown・PageUp / タブの右クリックで閉じる・開き直す / 矢印と Delete', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await makeNote(page, '一つ目');
+  await makeNote(page, '二つ目');
+  await makeNote(page, '三つ目');
+  const bar = page.locator('[data-pkc-region="note-tabs"]');
+  const rows = page
+    .locator('[data-pkc-region="sidebar"] [data-pkc-entry]')
+    .filter({ has: page.locator('[data-pkc-field="title"]') });
+  const tabs = bar.locator('[role="tab"]');
+  const title = page.locator('[data-pkc-field="detail-body"] h1');
+
+  // ① 通常クリックは差し替え(タブは 1 枚のまま)。中クリックで 2 枚目・3 枚目
+  await rows.filter({ hasText: '一つ目' }).click();
+  await expect(bar).toBeHidden();
+  await rows.filter({ hasText: '二つ目' }).click({ button: 'middle' });
+  await expect(tabs).toHaveCount(2);
+  await rows.filter({ hasText: '三つ目' }).click({ button: 'middle' });
+  await expect(tabs).toHaveCount(3);
+  await expect(tabs.nth(2)).toHaveAttribute('aria-selected', 'true');
+  await expect(title).toHaveText('三つ目');
+
+  // ② Alt+PageDown は端の次(先頭)へ、Alt+PageUp で戻る
+  await page.keyboard.press('Alt+PageDown');
+  await expect(title).toHaveText('一つ目');
+  await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Alt+PageUp');
+  await expect(title).toHaveText('三つ目');
+
+  // ③ 矢印は焦点だけ動かす(有効なタブ・本文は変わらない)/ Enter で有効に
+  await tabs.nth(2).focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(tabs.nth(1)).toBeFocused();
+  await expect(title).toHaveText('三つ目');
+  await page.keyboard.press('Enter');
+  await expect(title).toHaveText('二つ目');
+
+  // ④ 右クリック → タブを閉じる(押したタブ。3 枚目)
+  await tabs.nth(2).click({ button: 'right' });
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu.locator('[data-pkc-action="reopen-note-tab"]')).toBeDisabled();
+  await menu.locator('[data-pkc-action="close-note-tab"]').click();
+  await expect(tabs).toHaveCount(2);
+  await expect(title).toHaveText('二つ目');
+
+  // ⑤ 閉じたタブを開き直す
+  await tabs.nth(0).click({ button: 'right' });
+  await menu.locator('[data-pkc-action="reopen-note-tab"]').click();
+  await expect(tabs).toHaveCount(3);
+  await expect(title).toHaveText('三つ目');
+
+  // ⑥ Delete で焦点のタブを閉じる
+  await tabs.nth(0).focus();
+  await page.keyboard.press('Delete');
+  await expect(tabs).toHaveCount(2);
+
+  // ⑦ 行の右クリック「新しいタブで開く」── いまのタブはそのまま
+  await rows.filter({ hasText: '一つ目' }).click({ button: 'right' });
+  await menu.locator('[data-pkc-action="open-note-new-tab"]').click();
+  await expect(tabs).toHaveCount(3);
+  await expect(title).toHaveText('一つ目');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

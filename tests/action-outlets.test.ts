@@ -211,6 +211,11 @@ const OBJECT_LONE: readonly string[] = [
    * 🔴 **2026-11-21(#1982 段 5-3)に 2 件増えた**: ノートのタブ列の `activate-note-tab` / `close-note-tab`。
    *   タブは押した物自身(`data-pkc-note-tab`)が対象で、出口はタブ列の 1 か所。キーでの出口は段 5-4 で足す。
    */
+  /**
+   * 🔴 **2026-11-21(#1982 段 5-4)**: `close-note-tab` は右クリックのメニューとキー(Delete)・操作を探すにも出口ができたので
+   *   この表から外れ、タブのメニューだけが出口の `close-other-note-tabs`(右クリック 1 か所。閉じたタブの開き直しは
+   *   `reopen-note-tab` がメニューと操作を探すの 2 か所)が入った。
+   */
   'activate-note-tab',
   'add-relation',
   'add-tag',
@@ -257,7 +262,7 @@ const OBJECT_LONE: readonly string[] = [
   //   画面に足したのは、既にある情報ペインの行 1 つで、別の面を作っていない。
   'clear-entry-owner',
   'set-entry-owner',
-  'close-note-tab',
+  'close-other-note-tabs',
   'deliver-to-extension',
   'dual-bookmark-open',
   'dual-bookmark-remove',
