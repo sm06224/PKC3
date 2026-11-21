@@ -3544,16 +3544,20 @@ function deleteContainerRows(database: Database, cid: string): void {
 }
 
 /**
- * 🔴 **メッセージ(・処理の記録)の行を除いた状態で `make` を走らせる**(台帳 #1852 束 L1。依頼 216 / 344)。
+ * 🔴 **メッセージ(・処理の記録)の行を除いた「別の DB」を作り、それに `make` を走らせる**(台帳 #1852 束 L1。依頼 216 / 344。#2015)。
  *
  * ⚠ 人に渡す PKC3 入り HTML に、送り主の知らせ(使った機能と時刻)を入れない。
- * 🔑 **除く操作は確定させない** ── 書き込みの transaction の中で行を消し、その状態の画像を作ってから **ROLLBACK** する。
- *   消した事実が disk に確定する瞬間が無いので、途中でタブやワーカーが落ちても**メッセージは 1 件も減らない**
- *   (直す前は、消して確定 → 書き出し → 入れ直す の形で、間で落ちると消えたままになった)。
- * ⚠ `sqlite3_serialize` は pager を通してページを読むので、transaction の中の(まだ確定していない)状態が画像に入る。
- * ⚠ 除いた行の名残が空きページに残らないよう、除く間だけ `secure_delete` を入れる(元の値へ戻す)。
+ * 🔑 **本体の DB は一切書かない** ── 確定済みの状態の画像を `:memory:` へ流し込んだ写しを作り、
+ *   除く操作はその写しの上で行って**確定**させ、画像にしたらすぐ閉じる(生成物の即破棄)。本体には消した事実が 1 度も無いので、
+ *   途中でタブやワーカーが落ちても**メッセージは 1 件も減らない**(直す前の ROLLBACK 方式と同じ保証)。
+ * 🔴 **なぜ transaction の中で画像にしないか**(#2015): 画像から開いた DB(可搬 HTML の本体)は memdb で、
+ *   `sqlite3_serialize`(NOCOPY を付けても付けなくても)は **memdb のバッファそのもの**を読む ── 確定していない
+ *   transaction の変更(pager の dirty ページ)は含まれず、除いたはずの行が画像に残った。素の `:memory:` / OPFS は
+ *   pager を通して読むので出なかった。**確定した写し**なら、どの開き方の DB でも同じ結果になる。
+ * ⚠ 除いた行の名残が空きページに残らないよう、写しの上で `secure_delete` を入れる。
+ * ⚠ 本体が書込の transaction の最中でないこと(`exportImage` は worker の直列の中で走る)が前提。
  */
-function withMessagesRemoved<T>(make: () => T, keepCid?: string): T {
+function withMessagesRemoved<T>(make: (target: Database) => T, keepCid?: string): T {
   const database = need();
   const lids = [SYSTEM_MESSAGE_LID, SYSTEM_JOB_LID];
   const has = database.selectValue(
@@ -3584,24 +3588,45 @@ function withMessagesRemoved<T>(make: () => T, keepCid?: string): T {
     `SELECT count(*) FROM settings WHERE scope = ? OR substr(scope, 1, ?) = ?`,
     [SYNC_SCOPE, SYNC_SCOPE.length + 1, `${SYNC_SCOPE}:`],
   ) as number | undefined;
-  if ((has === undefined || has === 0) && others.length === 0 && (syncRows === undefined || syncRows === 0)) return make();
-  const secure = database.selectValue('PRAGMA secure_delete') as number | undefined;
-  database.exec('PRAGMA secure_delete = ON');
+  if ((has === undefined || has === 0) && others.length === 0 && (syncRows === undefined || syncRows === 0)) return make(database);
+  const api = sqliteApi;
+  if (api === null) throw new Error('sqlite が初期化されていません');
+  const oo1 = (api as unknown as { oo1: { DB: new (name: string) => Database } }).oo1;
+  /**
+   * 🔑 確定済みの状態の画像を作り、`:memory:` へ流し込んで写しにする(本体は書かない・transaction の外で読む)。
+   *   ⚠ `sqlite3_backup` は wasm の公開面に無く、`VACUUM INTO` の memdb 宛ては URI が通らない(実測)ので、この道にした。
+   *   ⚠ 画像の配列(JS 側)は流し込んだ後すぐ手放す ── 写しの寿命は、この関数の中だけ。
+   */
+  let snapshot: Uint8Array | null = runImageExport((a, ptr) => exportDbImage(a, ptr), database);
+  const copy = new oo1.DB(':memory:');
   try {
-    database.exec('BEGIN IMMEDIATE');
+    deserializeInto(api as unknown as Parameters<typeof deserializeInto>[0], copy, snapshot);
+    snapshot = null;
+    copy.exec('PRAGMA secure_delete = ON');
+    copy.exec('BEGIN IMMEDIATE');
     try {
-      database.exec({ sql: `DELETE FROM entries WHERE realm = 'system' AND lid IN (?, ?)`, bind: lids });
-      for (const cid of others) deleteContainerRows(database, cid);
-      database.exec({
+      copy.exec({ sql: `DELETE FROM entries WHERE realm = 'system' AND lid IN (?, ?)`, bind: lids });
+      for (const cid of others) deleteContainerRows(copy, cid);
+      copy.exec({
         sql: `DELETE FROM settings WHERE scope = ? OR substr(scope, 1, ?) = ?`,
         bind: [SYNC_SCOPE, SYNC_SCOPE.length + 1, `${SYNC_SCOPE}:`],
       });
-      return make();
-    } finally {
-      database.exec('ROLLBACK');
+      copy.exec('COMMIT');
+    } catch (e) {
+      try {
+        copy.exec('ROLLBACK');
+      } catch {
+        // ⚠ 元の例外を優先する
+      }
+      throw e;
     }
+    return make(copy);
   } finally {
-    database.exec(`PRAGMA secure_delete = ${secure === 1 ? 'ON' : 'OFF'}`);
+    try {
+      copy.close();
+    } catch {
+      // ⚠ 閉じられなくても、参照は手放す
+    }
   }
 }
 
@@ -4281,7 +4306,7 @@ const handlers: Handlers = {
       req.only !== undefined
         ? subsetImage(req.only)
         : req.withoutMessages === true
-        ? withMessagesRemoved(() => runImageExport((api, ptr) => exportDbImage(api, ptr)), req.keepCid)
+        ? withMessagesRemoved((target) => runImageExport((api, ptr) => exportDbImage(api, ptr), target), req.keepCid)
         : runImageExport((api, ptr) => exportDbImage(api, ptr)),
   }),
   /**
