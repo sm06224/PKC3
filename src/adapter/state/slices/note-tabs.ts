@@ -15,7 +15,14 @@
  * ⚠ ゴミ箱から戻すと、戻したノートが選ばれる(既存の挙動)ので、選択に従ってタブも 1 枚できる。自動で開き直す仕組みは足さない。
  */
 
-import { type AppState, type Dispatchable, type DomainEvent, type ReduceResult, reduceCore } from '../app-state';
+import {
+  type AppState,
+  type Dispatchable,
+  type DomainEvent,
+  type ReduceResult,
+  leavesOnSelect,
+  reduceCore,
+} from '../app-state';
 import {
   type TabSet,
   activate,
@@ -67,9 +74,11 @@ function selectThenCommit(
   lid: string,
   set: TabSet,
   seq: number,
+  /** 同じノートでも通常の選択を通す(2 ペインなど「選ぶと本文へ戻る」画面から、いまのタブを押した回)。 */
+  force = false,
 ): ReduceResult | null {
   let r: ReduceResult = noop(state);
-  if (state.selectedLid !== lid) {
+  if (state.selectedLid !== lid || force) {
     r = run(state, { type: 'SELECT_ENTRY', lid });
     if (r.state.selectedLid !== lid) return null;
   }
@@ -96,8 +105,10 @@ export function reduceNoteTabs(state: AppState, action: NoteTabsAction): ReduceR
     }
     case 'NOTE_TAB_ACTIVATE': {
       if (!tabs.tabs.some((t) => t.lid === action.lid)) return noop(state);
-      if (tabs.active === action.lid && state.selectedLid === action.lid) return noop(state);
-      return selectThenCommit(state, run, action.lid, activate(tabs, action.lid, seq), seq) ?? noop(state);
+      // 🔴 2 ペインなど「ノートを選ぶと本文へ戻る」画面では、いまのタブを押しても通常の選択を通す(裁定 6: 押すと通常ビューへ戻る)
+      const leaving = leavesOnSelect(state.viewMode);
+      if (tabs.active === action.lid && state.selectedLid === action.lid && !leaving) return noop(state);
+      return selectThenCommit(state, run, action.lid, activate(tabs, action.lid, seq), seq, leaving) ?? noop(state);
     }
     case 'NOTE_TAB_CLOSE': {
       if (!tabs.tabs.some((t) => t.lid === action.lid)) return noop(state);

@@ -24,6 +24,9 @@ import { markTab, markTablist } from './tabs-a11y';
 
 export const NOTE_TABS_REGION = 'note-tabs';
 export const NOTE_TAB_EXTERNAL_LABEL = '別ウィンドウで開いています';
+/** 2 ペイン表示中の印(`app.css` が灰色にする)。 */
+export const NOTE_TABS_DIMMED_ATTR = 'data-pkc-dimmed';
+export const NOTE_TAB_DIMMED_HINT = '押すと 2 ペインを閉じてこのノートを開きます';
 /** タブのボタンが指すノートの lid(`binder.ts` の受け手が読む)。 */
 export const NOTE_TAB_LID_ATTR = 'data-pkc-note-tab';
 
@@ -41,7 +44,10 @@ export class NoteTabsBar {
     const show = visible(set);
     const ordered = show ? orderTabs(set.tabs, state.notePins) : [];
     const editing = state.phase === 'editing' ? state.selectedLid : null;
-    const print = JSON.stringify(
+    // 🔴 2 ペイン表示中は列を灰色で同じ所に出す(裁定 6)。押すと通常ビューへ戻ってそのノートを開く
+    const dimmed = state.viewMode === 'dual';
+    const print = JSON.stringify([
+      dimmed,
       ordered.map((t) => [
         t.lid,
         state.entryMetas.get(t.lid)?.title ?? '',
@@ -50,7 +56,7 @@ export class NoteTabsBar {
         editing === t.lid,
         t.external,
       ]),
-    );
+    ]);
     if (print === this.lastPrint) return;
     this.lastPrint = print;
     // 🔴 作り直す前に、列の中のフォーカス(どのタブの、どのボタン)を控える
@@ -60,6 +66,8 @@ export class NoteTabsBar {
         ? { lid: focused.getAttribute(NOTE_TAB_LID_ATTR), field: focused.getAttribute('data-pkc-field') }
         : null;
     this.host.hidden = !show;
+    if (dimmed) this.host.setAttribute(NOTE_TABS_DIMMED_ATTR, '');
+    else this.host.removeAttribute(NOTE_TABS_DIMMED_ATTR);
     this.host.textContent = '';
     if (!show) return;
 
@@ -87,7 +95,11 @@ export class NoteTabsBar {
       if (isEditing) notes.push('編集中');
       if (t.external) notes.push(NOTE_TAB_EXTERNAL_LABEL);
       tab.setAttribute('aria-label', notes.length === 0 ? shown : `${shown}(${notes.join('・')})`);
-      tab.title = t.external ? `${shown}(${NOTE_TAB_EXTERNAL_LABEL})` : shown;
+      tab.title = dimmed
+        ? NOTE_TAB_DIMMED_HINT
+        : t.external
+          ? `${shown}(${NOTE_TAB_EXTERNAL_LABEL}。押すとそのウィンドウへ移ります)`
+          : shown;
 
       if (pinned) {
         const pin = document.createElement('span');

@@ -40,7 +40,7 @@ import { ADAPTER_SETTING_VALIDATORS } from '../render/settings-validators';
 import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
 import { NOTE_TAB_LID_ATTR } from '../render/note-tabs';
-import { visible as noteTabsVisible } from '@features/nav/note-tabs';
+import { orderTabs as orderNoteTabs, visible as noteTabsVisible } from '@features/nav/note-tabs';
 import { settleJump } from '../render/long-note';
 import { mountFilerRow } from '../render/filer';
 import { insideCodeOrMath } from '@features/markdown/code-context';
@@ -5351,6 +5351,8 @@ const DUAL_MENU_SELECT_FIRST: ReadonlySet<string> = new Set([
  */
 const MENU_OPENERS: ReadonlySet<string> = new Set([
   'phone-menu',
+  // 🔑 #1982 段 5-5 ── スマホ幅の「開いているノート ▾」
+  'phone-note-tabs',
   // 🔑 #1966 3-3 ── 右の列の「アプリで開く ▾」
   'open-app-menu',
   // 🔑 #1621 ── 左の列の帯に入りきらない操作の一覧(「⋯」)
@@ -10737,6 +10739,46 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   ⚠ 添付 / 録音 / 画面録画 / 計測(左の列の create-bar に在る 4 つ)は**段③**で足す
    *   ── create-bar との等値 pin を先に書かないと、片方に足した日に静かにずれる。
    */
+  /**
+   * 🔴 **開いているノート ▾**(#1982 段 5-5)。スマホ幅ではタブ列を出さず、ここへ畳む(高さを増やさない)。
+   * ⚠ 受け手は**既存の** `activate-note-tab` / `close-note-tab` / `reopen-note-tab` ── 押すタブは項目の `data-pkc-note-tab` が相手。
+   *   2 度目の押下は閉じる(片道にしない)。並びは列と同じ(ピン留めが先頭)。
+   */
+  'phone-note-tabs': (dispatcher, target, _services, root) => {
+    if (contextMenuOpen(root)) {
+      closeContextMenu(root);
+      return;
+    }
+    const st = dispatcher.getState();
+    const set = st.noteTabs;
+    if (!noteTabsVisible(set)) return;
+    const rect = target.getBoundingClientRect();
+    const items: MenuItem[] = orderNoteTabs(set.tabs, st.notePins).map((t) => {
+      const title = st.entryMetas.get(t.lid)?.title ?? '';
+      return {
+        action: 'activate-note-tab',
+        label: `${title === '' ? '(無題)' : title}${t.external ? '(別ウィンドウで開いています)' : ''}`,
+        checked: set.active === t.lid,
+        attrs: { [NOTE_TAB_LID_ATTR]: t.lid },
+      };
+    });
+    if (set.active !== null) {
+      items.push({
+        action: 'close-note-tab',
+        label: 'いまのタブを閉じる',
+        hint: 'いま開いているタブを閉じます(ノートは消えません。閉じたタブは開き直せます)',
+        attrs: { [NOTE_TAB_LID_ATTR]: set.active },
+      });
+    }
+    const canReopen = set.closed.some((c) => st.entryMetas.has(c.lid));
+    items.push({
+      action: 'reopen-note-tab',
+      label: '閉じたタブを開き直す',
+      hint: canReopen ? '最後に閉じたタブを開き直します' : '閉じたタブがありません',
+      ...(canReopen ? {} : { disabled: true }),
+    });
+    openContextMenu(root, { x: rect.left, y: rect.bottom }, items, target);
+  },
   'phone-menu': (dispatcher, target, _services, root) => {
     // ⚠ 2 度目の ⋯ は閉じる(片道の操作を作らない ── user 指示 2026-08-23)
     if (contextMenuOpen(root)) {

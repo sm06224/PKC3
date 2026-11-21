@@ -366,7 +366,7 @@ import { BrowseRouter, type BrowseMode } from '@adapter/ui/render/browse';
 // 🔴 探し方のタブの印(見た目 + 読み上げ)は 1 か所へ寄せた(#720)
 import { markBrowseTabs } from '@adapter/ui/render/tabs-a11y';
 import { NoteTabsBar } from '@adapter/ui/render/note-tabs';
-import { externalDiff } from '@features/nav/note-tabs';
+import { externalDiff, visible as noteTabsVisible } from '@features/nav/note-tabs';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
 import {
@@ -2154,6 +2154,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔴 打っている物が見えない状態を作らない(`features/phone-layout.ts` の docstring)
       editing: state.phase === 'editing',
       title: state.selectedLid === null ? '' : (state.entryMetas.get(state.selectedLid)?.title ?? ''),
+      noteTabs: noteTabsVisible(state.noteTabs) ? state.noteTabs.tabs.length : 0,
     });
     /**
      * 🔴 **探す欄に `>` を打っている間の操作の一覧は、描き終えた画面で組む**(#274 段①)。
