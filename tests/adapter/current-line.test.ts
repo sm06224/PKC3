@@ -145,6 +145,19 @@ describe('現在行の強調の配線', () => {
       s.unbind();
     });
 
+    it('行の頭の位置が同じでも、行より前の字が変わった(貼り付け・取り消し・別の欄の書き換え)なら全文を測り直す', async () => {
+      const s = setup('editor-body');
+      s.ta.value = 'abc\n\nlast';
+      s.ta.focus();
+      s.ta.setSelectionRange(9, 9);
+      s.ta.dispatchEvent(new Event('focusin', { bubbles: true }));
+      await frame();
+      // 前の行の字が置き換わった(長さは同じ = 行の頭は 5 のまま)
+      await typeAt(s.ta, 'XYZ\n\nlast', 9);
+      expect(mirrorTexts()[0], '前の字が変わったのに全文の影が古い').toBe('XYZ\n\nlast' + String.fromCharCode(0x200b));
+      s.unbind();
+    });
+
     it('行が替わる / 行より前の字が変わる / 改行を打つときは、全文の影を測り直す', async () => {
       const s = setup('editor-body');
       s.ta.value = 'abc\n\nlast';
