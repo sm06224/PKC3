@@ -2,7 +2,7 @@
 /**
  * 🔴 打ちながら出る補完の小窓(#1449 `/` / #1450 `@`)── binder の配線ごと、本物の欄に打って確かめる。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { initialState } from '../../src/adapter/state/app-state';
@@ -309,5 +309,120 @@ describe('/ から先に聞く挿入の道具を呼ぶ(#1982 段 3)', () => {
     const { type, menu } = setup();
     type('今日は /日付');
     expect(menu()).toBeNull();
+  });
+});
+
+describe('(asset: の補完(#2001 段 4)── 4 つの欄すべて', () => {
+  const BODIES: Record<string, string> = {
+    a1: '---\nattachment.name: 請求書.pdf\nattachment.mime: application/pdf\nattachment.size: 2048\nattachment.asset_key: k-pdf\n---\n',
+    a2: '---\nattachment.name: 写真.png\nattachment.mime: image/png\nattachment.size: 100\nattachment.asset_key: k-png\n---\n',
+  };
+  let reads = 0;
+  function setupAsset(field: string, readOverride?: (lids: readonly string[]) => Promise<ReadonlyMap<string, string>>) {
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    root.innerHTML = `<div data-pkc-region="detail"><textarea data-pkc-field="${field}"></textarea></div>`;
+    document.body.append(root);
+    const ta = root.querySelector<HTMLTextAreaElement>('textarea')!;
+    const metas = new Map<string, never>();
+    for (const [i, [lid, title, arche]] of [['a1', '請求書.pdf', 'attachment'], ['a2', '写真.png', 'attachment'], ['t1', 'ただのノート', 'text']].entries()) {
+      metas.set(lid!, { lid, title, archetype: arche, createdAt: null, updatedAt: 'u1', entryOrder: i, status: null, date: null, archived: false } as never);
+    }
+    const d = new Dispatcher({ ...initialState, cid: 'c1', phase: 'editing', selectedLid: 't1', entryMetas: metas as never, order: ['a1', 'a2', 't1'] });
+    reads = 0;
+    const dispatchSpy = vi.spyOn(d, 'dispatch');
+    bindActions(root, d, {
+      readBodies:
+        readOverride ??
+        ((lids: readonly string[]) => {
+          reads += 1;
+          return Promise.resolve(new Map(lids.map((l) => [l, BODIES[l] ?? ''] as const)));
+        }),
+    });
+    const type = async (value: string): Promise<void> => {
+      ta.focus();
+      ta.value = value;
+      ta.setSelectionRange(value.length, value.length);
+      ta.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    };
+    const rows = (): string[] =>
+      [...root.querySelectorAll(`${REGION} [data-pkc-field="inline-complete-item"]`)].map((r) => r.textContent ?? '');
+    return { root, ta, type, rows, menu: () => root.querySelector(REGION), d, dispatchSpy };
+  }
+
+  for (const field of ['editor-body', 'row-source', 'section-draft-input', 'append-input']) {
+    it(`${field}: (asset: で添付の一覧(名前・種類・大きさ)→ 語で絞る → Tab で画像は ![名前](asset:key)`, async () => {
+      const s = setupAsset(field);
+      await s.type('前 ![](asset:');
+      expect(s.rows(), '一覧が出ない').toEqual(['請求書.pdfPDF · 2.0 KB', '写真.pngPNG · 100 B']);
+      await s.type('前 ![](asset:写');
+      expect(s.rows()).toEqual(['写真.pngPNG · 100 B']);
+      const ev = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+      s.ta.dispatchEvent(ev);
+      expect(s.ta.value).toBe('前 ![写真.png](asset:k-png)');
+      expect(s.menu()).toBeNull();
+    });
+  }
+
+  it('Enter でも入る(`/` と同じ)/ 画像でない添付はリンク / 自動の ) は二重にならない', async () => {
+    const s = setupAsset('editor-body');
+    await s.type('(asset:請求');
+    s.ta.value = '(asset:請求)';
+    s.ta.setSelectionRange(9, 9);
+    s.ta.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 0));
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    s.ta.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(s.ta.value).toBe('[請求書.pdf](asset:k-pdf)');
+  });
+
+  it('一致が無ければ出ない / 読んだ添付は覚える(2 回目は読み直さない)/ 設定で切れる', async () => {
+    const s = setupAsset('editor-body');
+    await s.type('(asset:zzz');
+    expect(s.menu()).toBeNull();
+    expect(reads).toBe(1);
+    await s.type('(asset:');
+    expect(s.menu()).not.toBeNull();
+    expect(reads, '覚えていない').toBe(1);
+    localStorage.setItem('pkc3.inline-complete', '0');
+    try {
+      await s.type('(asset:請');
+      expect(s.menu()).toBeNull();
+    } finally {
+      localStorage.removeItem('pkc3.inline-complete');
+    }
+  });
+
+  it('🔴 添付の一覧を読めなかったら、黙らず理由を出す(続けて打っても 1 度だけ)/ 直ったら出る', async () => {
+    let fail = true;
+    const s = setupAsset('editor-body', (lids) =>
+      fail ? Promise.reject(new Error('boom')) : Promise.resolve(new Map(lids.map((l) => [l, BODIES[l] ?? ''] as const))),
+    );
+    const failures = (): unknown[] =>
+      s.dispatchSpy.mock.calls.filter((c) => (c[0] as { type: string }).type === 'OP_FAILED').map((c) => c[0]);
+    await s.type('(asset:');
+    await s.type('(asset:請');
+    expect(s.menu()).toBeNull();
+    expect(failures().length, '読めないのに何も言わない / 毎打鍵で言う').toBe(1);
+    expect(JSON.stringify(failures()[0])).toContain('添付の一覧を読めませんでした');
+    fail = false;
+    await s.type('(asset:請求');
+    expect(s.rows()).toEqual(['請求書.pdfPDF · 2.0 KB']);
+  });
+
+  it('古い応答は捨てる: 待つ間に引き金を消したら小窓は出ない', async () => {
+    const s = setupAsset('editor-body');
+    s.ta.focus();
+    s.ta.value = '(asset:';
+    s.ta.setSelectionRange(7, 7);
+    s.ta.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    s.ta.value = 'あ';
+    s.ta.setSelectionRange(1, 1);
+    s.ta.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(s.menu()).toBeNull();
   });
 });

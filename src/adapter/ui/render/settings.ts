@@ -29,6 +29,7 @@ import { appCodeCollapse, CodeCollapseStore } from './code-collapse';
 import { appInlineCodeCopy, InlineCodeCopyStore } from './inline-code-copy';
 import { appPasteToast, type PasteToastStore } from './paste-toast';
 import { appPdfReader, PdfReaderStore } from './pdf-reader-setting';
+import { appCurrentLine, CurrentLineStore } from './current-line-setting';
 import { appInlineComplete, InlineCompleteStore } from './inline-complete-setting';
 import { appPhoneLinks, PhoneLinksStore } from './phone-links';
 import { appDateLinks, DateLinksStore } from './date-links';
@@ -69,6 +70,7 @@ import { appExportWatchTags } from './export-watch-tags';
 import { createCodeCollapseSection } from './settings/code-collapse';
 import { createInlineCodeCopySection } from './settings/inline-code-copy';
 import { createPdfReaderSection } from './settings/pdf-reader';
+import { createCurrentLineSection } from './settings/current-line';
 import { createInlineCompleteSection } from './settings/inline-complete';
 import { createPasteSourceSection } from './settings/paste-source';
 import { createAlarmEnabledSection } from './settings/alarm-enabled';
@@ -242,6 +244,10 @@ export class SettingsRenderer {
      * 🔴 **直して貼ったときの小さな知らせを出すか**(#1379)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly pasteToast: PasteToastStore = appPasteToast,
+    /**
+     * 🔴 **いま打っている行を左端の線で示すか**(#2001 段 4)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly currentLine: CurrentLineStore = appCurrentLine,
   ) {
     /**
      * 🔴 **節の登録表(#1382)── 並びが画面の並びである。** 節を足す = `settings/` に 1 file 足し、
@@ -271,6 +277,7 @@ export class SettingsRenderer {
       createEditorModeSection(region, editorMode),
       createOpenInEditSection(region, openInEdit),
       createInlineCompleteSection(region, inlineComplete),
+      createCurrentLineSection(region, currentLine),
       createPhoneLinksSection(region, phoneLinks),
       createDateLinksSection(region, dateLinks),
       createRelativeDaysSection(region, relativeDays),

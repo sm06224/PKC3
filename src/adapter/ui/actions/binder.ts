@@ -336,7 +336,8 @@ import {
 } from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
 import { abbrBeforeCaret, type SnippetItem } from '@features/snippet/snippet-table';
-import { atChoices, slashChoices, slashToolChoices } from '@features/markdown/inline-complete';
+import { assetChoices, assetInsertEdit, atChoices, slashChoices, slashToolChoices } from '@features/markdown/inline-complete';
+import { createAssetIndex } from './asset-complete-index';
 import { snippetMenu, snippetMenuNote, type SnippetChoice } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { appendAndSettle } from '@adapter/state/append-settle';
@@ -512,6 +513,8 @@ import {
 } from '../render/context-menu';
 import { syncReplaceToggle } from '../render/format-bar';
 import { bindInlineComplete, type CompleteItem } from '../render/inline-complete';
+import { bindCurrentLine } from '../render/current-line';
+import { appCurrentLine } from '../render/current-line-setting';
 import { appInlineComplete } from '../render/inline-complete-setting';
 import { setupLinkPreview, closeLinkPreview } from '../render/link-preview';
 import { setupLightbox, openLightbox, closeLightbox, lightboxOpen } from '../render/lightbox';
@@ -2294,6 +2297,8 @@ export interface BinderServices {
    * ⚠ 切り替えても本文は描き直さない ── 効くのは**次に打つとき**だけ。
    */
   setInlineComplete?(on: boolean): void;
+  /** 🔴 **いま打っている行を左端の線で示すか**(#2001 段 4)。⚠ **省略可**。次に caret が動くとき効く。 */
+  setCurrentLine?(on: boolean): void;
   /**
    * 🔴 **PDF を PKC の画面で開くか**(#275 段①)。⚠ **省略可**。
    * ⚠ 切り替えても本文は描き直さない ── 効くのは**次に「別のウィンドウで見る」を押したとき**だけ。
@@ -19186,6 +19191,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setInlineComplete?.(target.checked);
   },
+  'set-current-line': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) services.setCurrentLine?.(target.checked);
+  },
   'set-pdf-reader': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
     if (target instanceof HTMLInputElement) services.setPdfReader?.(target.checked);
@@ -25100,6 +25109,10 @@ export function bindActions(
    *   `applySnippetPick` / `atChoices` → `formatEntryLink` / `insertionForLineDate`)── 入口を増やすだけで、
    *   挿す仕事の規則を 2 つにしない(§7)。挿すのは `insertText` / `writeBack` なので `Ctrl+Z` で戻せる。
    */
+  // 🔴 #2001 段 4: 打っている行の左端の線(設定で切れる。既定は入)
+  undo.push(bindCurrentLine(root, { enabled: () => appCurrentLine.enabled() }));
+  const assetIndex = createAssetIndex();
+  let assetReadFailed = false;
   undo.push(
     bindInlineComplete(root, {
       /**
@@ -25126,6 +25139,36 @@ export function bindActions(
         // 🔴 設定で切れる(読むたびに保存を見る ── 別のタブで切っても追随する)
         if (!appInlineComplete.enabled()) return [];
         const st = dispatcher.getState();
+        if (trigger.kind === 'asset') {
+          // 🔴 #2001 段 4: `(asset:` ── この container の添付の一覧(名前・種類・大きさ)。選ぶと**参照として正しい 1 つの形**を `insertText` で入れる(`Ctrl+Z` で戻せる)
+          const read = services.readBodies;
+          if (read === undefined) return [];
+          return assetIndex.rows(st.entryMetas, st.order, read).then(
+            (rows) => {
+              assetReadFailed = false;
+              return assetChoices(rows, trigger.query).map(
+              (c): CompleteItem => ({
+                title: c.row.name,
+                sub: c.sub,
+                accept: (ta, tr) => {
+                  const e = assetInsertEdit(ta.value, tr.start, ta.selectionEnd, c.row);
+                  ta.focus();
+                  ta.setSelectionRange(e.start, e.end);
+                  insertText(ta, e.text);
+                },
+              }),
+              );
+            },
+            () => {
+              // 🔴 添付の一覧を読めなかった ── 黙って候補が出ないままにしない(続けて打っても連続では知らせない)
+              if (!assetReadFailed) {
+                assetReadFailed = true;
+                dispatcher.dispatch({ type: 'OP_FAILED', error: '添付の一覧を読めませんでした(もう一度お試しください)' });
+              }
+              return [];
+            },
+          );
+        }
         if (trigger.kind === 'slash') {
           const snippets = st.snippetScan?.items ?? [];
           // 🔴 #1982 段 3: 語を打ったときは、先に聞く挿入の道具(日付 / ノートリンク / 添付 / アイコン)も候補に出す。

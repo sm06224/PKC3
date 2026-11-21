@@ -173,16 +173,16 @@ describe('追記欄の Tab(リストの行・複数行の選択のときだけ�
 });
 
 describe('欄の判定 1 か所(editing-field.ts)', () => {
-  const FEATURES: EditingFeature[] = ['enterContinue', 'tabTemplate', 'tabIndent', 'keys', 'paste', 'enterCalc', 'autoPair', 'formatBar', 'wrapSelection'];
+  const FEATURES: EditingFeature[] = ['enterContinue', 'tabTemplate', 'tabIndent', 'keys', 'paste', 'enterCalc', 'autoPair', 'formatBar', 'wrapSelection', 'inlineComplete', 'assetComplete'];
 
   /** 欄 × 機能の全数の期待(実装の表を写さず、ここで独立に書く。変えたらこの表と下の振る舞いの両方が動く)。 */
   const EXPECT: Record<string, Record<EditingFeature, boolean>> = {
-    editor: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true },
-    row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true },
-    section: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: false, wrapSelection: true },
-    append: { enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: false, wrapSelection: true },
+    editor: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true, inlineComplete: true, assetComplete: true },
+    row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true, inlineComplete: true, assetComplete: true },
+    section: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: false, wrapSelection: true, inlineComplete: false, assetComplete: true },
+    append: { enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: false, wrapSelection: true, inlineComplete: true, assetComplete: true },
   };
-  const ALL: EditingFeature[] = ['enterContinue', 'tabTemplate', 'tabIndent', 'keys', 'paste', 'enterCalc', 'autoPair', 'formatBar', 'wrapSelection'];
+  const ALL: EditingFeature[] = ['enterContinue', 'tabTemplate', 'tabIndent', 'keys', 'paste', 'enterCalc', 'autoPair', 'formatBar', 'wrapSelection', 'inlineComplete', 'assetComplete'];
 
   it('🔴 4 つの欄 × 全機能の真偽を 1 つずつ固定する(5 つ目の欄・機能が黙って抜けない)', () => {
     expect(EDITING_FIELD_KINDS.length).toBe(4);

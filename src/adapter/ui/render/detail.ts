@@ -124,7 +124,7 @@ import { buildIconPalette, ICON_CHOICE_COUNT } from './icon-palette';
 import { markTargetLid } from './target-lid';
 import { buildFormatBar, syncWholeNoteTools } from './format-bar';
 import { watchWrapHint } from './format-wrap-hint';
-import { SELECTION_STATS_FIELD, watchSelectionStats } from './selection-stats';
+import { SELECTION_STATS_FIELD, TOTAL_CHARS_FIELD, watchSelectionStats } from './selection-stats';
 import { hasSourceSelection } from '../actions/copy-source';
 import {
   appExternalImages,
@@ -2679,7 +2679,10 @@ export class DetailRenderer {
      */
     const stats = document.createElement('span');
     stats.setAttribute('data-pkc-field', SELECTION_STATS_FIELD);
-    bar.append(stats);
+    // 🔴 本文全体の字数(#2001 段 4)── 選びの枠の左に常設(空のときも枠は残り、帯は動かない)
+    const total = document.createElement('span');
+    total.setAttribute('data-pkc-field', TOTAL_CHARS_FIELD);
+    bar.append(total, stats);
     this.region.append(bar);
     // 🔑 **書式パネル**(P8 段⑥)。編集欄のすぐ上 ── 押す物と効く先を離さない
     const formatBar = buildFormatBar();
