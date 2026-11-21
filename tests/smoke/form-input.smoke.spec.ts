@@ -91,3 +91,35 @@ test('🔴 入力欄に打って保存すると設定欄へ入り、表に追加
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **サンプルから記録のノートを作り、入力して「表に追加」で表に 1 行たまる**(#2002 段 2)。
+ * 🔑 unit では届かない所:作成の ▼ → 一覧 → 複製の本文が disk を経て**描画された入力欄と表**になること。
+ */
+test('🔴 サンプルから作った記録のノートで、入力して表に追加すると行がたまる (#2002)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+
+  await clickReal(page, '[data-pkc-field="create-pick"]');
+  await clickReal(page, '[data-pkc-region="create-menu"] [data-pkc-action="create-from-template"]');
+  const rows = page.locator('[data-pkc-field="pick-template-note"]');
+  await expect(rows, 'サンプルが 3 つ並ばない').toHaveCount(3);
+  await rows.filter({ hasText: '回帰テストの実施記録' }).click();
+  await expect(page.locator('[data-pkc-field="editor-body"]'), 'サンプルの中身が入っていない').toHaveValue(/```yaml form/);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+
+  await expect(page.locator(FORM), '入力欄が出ていない').toBeVisible({ timeout: 10_000 });
+  const cells = '[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]';
+  expect(await page.locator(cells).count(), '前提 ── 見出しだけの表(9 列)').toBe(9);
+
+  await page.fill(field('ビルド'), '1.4.2-rc1');
+  await page.fill(field('担当者'), '佐藤');
+  await page.selectOption(field('結果'), { label: '合格' });
+  await clickReal(page, `${FORM} [data-pkc-action="form-row-add"]`);
+  await expect(page.locator(cells), '表に 1 行増えていない').toHaveCount(18, { timeout: 10_000 });
+  await expect(page.locator(cells).nth(10)).toHaveText('1.4.2-rc1');
+  await expect(page.locator(cells).nth(11)).toHaveText('佐藤');
+
+  expect(errors).toEqual([]);
+});

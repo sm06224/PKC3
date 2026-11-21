@@ -767,20 +767,36 @@ export function pickSnippetInApp(
  *   ノートの中身にはならない)。
  * @returns 選んだテンプレートの lid。`Escape` / 「やめる」/ 外なら `null`
  */
+export interface TemplatePick {
+  /** 🔴 サンプルか自分のテンプレートか(#2002)。⚠ 文字の頭では見分けない ── 自分のノートの lid と名前がぶつかるので、別の欄で持つ。 */
+  readonly sample: boolean;
+  /** サンプルなら id、自分のテンプレートなら lid。 */
+  readonly key: string;
+}
+
 export function pickTemplateNoteInApp(
   host: HTMLElement,
   items: readonly { readonly lid: string; readonly title: string; readonly abbr: string }[],
   note: string,
-): Promise<string | null> {
+  /** 🔴 組み込みのサンプル(#2002)。自分のテンプレートの後ろに、区切りを挟んで並べる。 */
+  samples: readonly { readonly label: string; readonly id: string }[] = [],
+): Promise<TemplatePick | null> {
   return pickRowInApp(host, {
     title: 'テンプレートから作る',
     field: 'pick-template-note',
     indexAttr: 'data-pkc-template-note-index',
     note,
-    rows: items.map((s) => ({
-      label: s.abbr !== '' ? `${s.title}(${s.abbr})` : s.title,
-      value: s.lid,
-    })),
+    rows: [
+      ...items.map((s) => ({
+        label: s.abbr !== '' ? `${s.title}(${s.abbr})` : s.title,
+        value: { sample: false, key: s.lid },
+      })),
+      ...samples.map((s, i) => ({
+        label: s.label,
+        value: { sample: true, key: s.id },
+        ...(i === 0 && items.length > 0 ? { separatorBefore: true as const } : {}),
+      })),
+    ],
   });
 }
 
