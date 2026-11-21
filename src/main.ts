@@ -67,6 +67,8 @@ import { appNoteLabels } from '@adapter/platform/note-label-store';
 import { appPasteToast } from '@adapter/ui/render/paste-toast';
 import { importNotePinsInto } from '@adapter/platform/note-pin-import';
 import { importNoteLabelsInto } from '@adapter/platform/note-label-import';
+import { wireLabelSmartRescan } from '@adapter/platform/note-label-smart';
+import { labelsStillAdded } from '@features/note-label';
 import { migrateLegacyNotePins } from '@adapter/platform/note-pin-migration';
 import { MAX_NOTE_PINS } from '@features/relation/note-pins';
 import {
@@ -1618,6 +1620,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   );
   // 写しが動いたら state へ(行の左の線・色の絞りは state を読んで描く)。⚠ 読み込みより先に張る
   appNoteLabels.onChange(() => dispatcher.dispatch({ type: 'SET_NOTE_LABELS', labels: appNoteLabels.all() }));
+  // 🔴 色で絞るスマートフォルダ(`smart-label`)は、色の書込が終わってから集め直す(書込を追い越すと古い色で当たる)
+  wireLabelSmartRescan(appNoteLabels, () => dispatcher.getState().smartHits, (a) => dispatcher.dispatch(a));
   // 🔴 ピン留めの写しをタブへも渡す(#1982 段 5 ── 追い出し・並びがピン留めを見る)
   appNotePins.onChange(() => dispatcher.dispatch({ type: 'SET_NOTE_PINS', lids: appNotePins.list() }));
   void reloadNoteLabels();
@@ -3689,6 +3693,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     removeNotePins: async (lids) => {
       for (const lid of lids) await client.request({ op: 'putNotePin', cid, lid, on: false });
       await reloadNotePins();
+    },
+    /** 🔴 **取り込みで足した色ラベルだけを外す**(#1982 段 4)。⚠ いまも同じ色の物だけ(付け直した色・前から在った色は触らない)。 */
+    removeNoteLabels: async (entries) => {
+      const now = new Map((await client.request({ op: 'listNoteLabels', cid })).map((e) => [e.lid, e.color] as const));
+      for (const e of labelsStillAdded(entries, now)) {
+        await client.request({ op: 'putNoteLabel', cid, lid: e.lid, color: null });
+      }
+      await reloadNoteLabels();
     },
     removeTagColors: async (colors) => {
       const now = await client.request({ op: 'listTagColors', cid });

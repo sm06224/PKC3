@@ -126,3 +126,42 @@ describe('ノートの色ラベル(worker)', () => {
     await put(OTHER, 'o1', null);
   });
 });
+
+describe('スマートフォルダの色の条件(smartScan.label。#1982 残り 1)', () => {
+  const scanLabel = (cid: string, label: number | null) =>
+    request({
+      op: 'smartScan',
+      cid,
+      lid: 'self',
+      tags: [],
+      kind: null,
+      updatedFrom: null,
+      createdFrom: null,
+      dated: null,
+      text: null,
+      tasks: null,
+      openTasks: null,
+      label,
+    });
+
+  it('その色が付いたノートだけが返る。外すと外れる。別の器の同じ lid の色は混ざらない', async () => {
+    await upsert(CID, 's1');
+    await upsert(CID, 's2');
+    await upsert(CID, 's3');
+    await upsert(OTHER, 's1');
+    await put(CID, 's1', 3);
+    await put(CID, 's2', 3);
+    await put(CID, 's3', 5);
+    await put(OTHER, 's1', 5);
+    expect((await scanLabel(CID, 3)).lids.sort()).toEqual(['s1', 's2']);
+    expect((await scanLabel(CID, 5)).lids).toEqual(['s3']);
+    expect((await scanLabel(CID, 7)).lids, '付いていない色で何か返った').toEqual([]);
+    // 対照群: 色を指定しなければ(他に条件が無いので)何も集めない = 空は「何も」
+    expect((await scanLabel(CID, null)).lids).toEqual([]);
+    await put(CID, 's1', null);
+    expect((await scanLabel(CID, 3)).lids).toEqual(['s2']);
+    for (const l of ['s2', 's3']) await put(CID, l, null);
+    await put(OTHER, 's1', null);
+  });
+});
+

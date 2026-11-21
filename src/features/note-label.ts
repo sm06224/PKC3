@@ -82,6 +82,35 @@ export function filterByLabel<T extends { readonly lid: string }>(
   return items.filter((i) => labels.get(i.lid) === color);
 }
 
+/** 内部の名前(`label:green` の書き方)。順は `--note-1`〜`--note-8`。 */
+export const NOTE_LABEL_KEYS: readonly string[] = ['orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'gray'];
+
+/**
+ * 色の名前(画面の字・内部の名前・番号 1〜8。`grey` も可。大小・全角半角は問わない)から番号へ。読めなければ `null`。
+ * 🔴 探す欄の `色:緑` / `label:green` とスマートフォルダの条件が読む唯一の表(判定を 2 か所に持たない)。
+ */
+export function noteLabelColorOf(name: string): number | null {
+  const n = name.normalize('NFKC').toLowerCase().trim();
+  if (n === '') return null;
+  if (n === 'grey') return 8;
+  for (let i = 0; i < NOTE_LABEL_COUNT; i++) {
+    const ja = (NOTE_LABEL_NAMES[i] ?? '').normalize('NFKC').toLowerCase();
+    if (n === ja || n === NOTE_LABEL_KEYS[i] || n === String(i + 1)) return i + 1;
+  }
+  return null;
+}
+
+/**
+ * 🔴 **取り込みの取り消しで、実際に外す色ラベル**(判定は 1 か所)。取り込みで足した行のうち、**いまも同じ色が付いている物だけ**
+ * (取り込んだあとに user が付け直した色・外した色は触らない)。
+ */
+export function labelsStillAdded(
+  added: ReadonlyArray<NoteLabelEntry>,
+  current: ReadonlyMap<string, number>,
+): NoteLabelEntry[] {
+  return added.filter((e) => current.get(e.lid) === e.color);
+}
+
 /** 書き出すノートに在る分だけ(lid の集合で絞る)。 */
 export function labelsFor(entries: readonly NoteLabelEntry[], lids: ReadonlySet<string>): NoteLabelEntry[] {
   return entries.filter((e) => lids.has(e.lid));

@@ -119,6 +119,25 @@ describe('本文の結果がまだ / 失敗のとき「無い」と言い切ら�
   });
 });
 
+describe('色の語(色:緑)は本文の検索へ渡さず、行は色で絞れる(#1982 残り 1)', () => {
+  it('🔴 worker へ渡る語から色の語が落ち、色だけなら本文を引かない。行は色が合うノートだけ', async () => {
+    const { d, rows, searchEntries } = setup((q) => (q === '会議' ? ['n1'] : []));
+    d.dispatch({ type: 'SET_NOTE_LABELS', labels: new Map([['n1', 3], ['n2', 5]]) });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '色:緑 会議' });
+    await tick();
+    expect(searchEntries.mock.calls.map((c) => c[0]), '色の語が本文の検索へ渡った').toEqual(['会議']);
+    expect(rows()).toEqual(['n1']);
+    searchEntries.mockClear();
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'label:blue' });
+    await tick();
+    expect(searchEntries, '色だけの問い合わせで本文を引いた').not.toHaveBeenCalled();
+    expect(rows(), '色だけでも絞れる').toEqual(['n2']);
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '色:緑 買い物' });
+    await tick();
+    expect(rows(), '色と語は AND').toEqual([]);
+  });
+});
+
 describe('打鍵ごとの検索は 1 本に合流する(#1087)', () => {
   /** 手で返す stub ── 返すまで「飛んでいる」ままにできる */
   function manual() {

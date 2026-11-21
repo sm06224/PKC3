@@ -46,7 +46,7 @@ const NO_KINDS: ReadonlySet<string> = new Set<string>();
  *   目で見た範囲と動く範囲が食い違う(§7)。並び順と「最近開いた順」の材料は左の列と同じ。
  */
 export function dualListViewOptions(state: AppState): ListViewOptions {
-  return { ...listViewOptions(state), kinds: NO_KINDS, label: null };
+  return { ...listViewOptions(state), kinds: NO_KINDS, label: { color: null, labels: state.noteLabels } };
 }
 
 /**

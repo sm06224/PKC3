@@ -192,8 +192,9 @@ import { NO_KINDS, entryFilterOf, normalizeQuery, visibleOrder, type LabelFilter
 export const NO_NOTE_LABELS: ReadonlyMap<string, number> = new Map<string, number>();
 
 /** 🔴 いまの色の絞りを `EntryFilter` へ渡す形にする唯一の口(#1982 段 4)。 */
-export function labelFilterOf(state: Pick<AppState, 'noteLabels' | 'labelFilter'>): LabelFilter | null {
-  return state.labelFilter == null ? null : { color: state.labelFilter, labels: state.noteLabels };
+export function labelFilterOf(state: Pick<AppState, 'noteLabels' | 'labelFilter'>): LabelFilter {
+  // 🔴 色の絞りが無くても表は渡す ── 探す欄の `色:緑`(`label-query.ts`)が lid → 色の表を要る
+  return { color: state.labelFilter ?? null, labels: state.noteLabels };
 }
 import { commandQueryOf } from '@features/palette/command-query';
 import { foldCase, jumpTerms, normalizeFindQuery } from '@features/filter/search-hits';

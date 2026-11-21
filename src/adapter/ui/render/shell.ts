@@ -981,6 +981,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   const replaceBar = document.createElement('div');
   replaceBar.setAttribute('data-pkc-region', 'replace-bar');
+  // 🔴 「置換の欄を開く / 閉じる」ボタンの `aria-controls` の指す先(`format-bar.ts` の `REPLACE_BAR_ID` と同じ字)
+  replaceBar.id = 'pkc-replace-bar';
   replaceBar.hidden = true;
   for (const [field, label] of [
     ['replace-find', '探す語'],

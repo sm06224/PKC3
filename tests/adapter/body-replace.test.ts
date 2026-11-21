@@ -227,6 +227,46 @@ describe('置換の配線', () => {
     expect(bar.hidden, 'もう一度押しても閉じない').toBe(true);
   });
 
+  it('🔴 切替ボタンの aria-expanded / aria-controls が帯の見え方と一致し続ける(ボタン・Ctrl+H・「その他 ▾」・描き直し)(#1982 残り 4)', () => {
+    const { root, d } = editing('ログ\n');
+    d.dispatch({ type: 'START_EDIT' });
+    const bar = root.querySelector<HTMLElement>('[data-pkc-region="replace-bar"]')!;
+    const btn = (): HTMLElement => root.querySelector<HTMLElement>('[data-pkc-region="format-bar"] [data-pkc-action="toggle-replace"]')!;
+    expect(bar.id).not.toBe('');
+    expect(btn().getAttribute('aria-controls'), '指す先が帯の id でない').toBe(bar.id);
+    expect(btn().getAttribute('aria-expanded'), '畳んでいるのに true').toBe('false');
+    // ボタン
+    press(root, 'toggle-replace');
+    expect(bar.hidden).toBe(false);
+    expect(btn().getAttribute('aria-expanded')).toBe('true');
+    // 描き直し(本文を打つ)で印が false に戻らない
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: 'ログ\nx' });
+    expect(bar.hidden).toBe(false);
+    expect(btn().getAttribute('aria-expanded'), '描き直しで印が食い違った').toBe('true');
+    // 編集をやめて入り直す(帯のボタンは作り直される)── 帯は開いたまま、印が false に戻らない
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(bar.hidden).toBe(false);
+    expect(btn().getAttribute('aria-expanded'), '作り直したボタンの印が帯と食い違った').toBe('true');
+    // Ctrl+H で閉じる(押された物がボタンとは限らない経路)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(bar.hidden).toBe(true);
+    expect(btn().getAttribute('aria-expanded'), 'Ctrl+H で閉じても印が true のまま').toBe('false');
+    // 「その他 ▾」の項目(role=menuitem)から開く: 帯のボタンの印が動き、項目には付かない
+    const more = root.querySelector<HTMLElement>('[data-pkc-action="open-format-more"]')!;
+    const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]');
+    ta?.focus();
+    more.click();
+    const item = root.querySelector<HTMLElement>('[data-pkc-region="context-menu"] [data-pkc-action="toggle-replace"]');
+    {
+      expect(item, '一覧に置換の項目が無い').not.toBeNull();
+      item!.click();
+      expect(bar.hidden, '一覧の項目から開かない').toBe(false);
+      expect(btn().getAttribute('aria-expanded')).toBe('true');
+      expect(item!.hasAttribute('aria-expanded')).toBe(false);
+    }
+  });
+
   it('🔴 Ctrl+H が同じボタンを押す(編集中)', () => {
     const { root, d } = editing('ログ\n');
     d.dispatch({ type: 'START_EDIT' });

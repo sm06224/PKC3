@@ -45,6 +45,7 @@ import { countTaskCandidates } from '../markdown/task-count';
 import { MAX_TAG_CHARS, normalizeTag, sameTag, splitTags } from '../flavor/tags';
 import { hashRunWords, strandedHashWords } from '../flavor/tag-words';
 import { tagsForMatch } from '../flavor/entry-tags';
+import { NOTE_LABEL_NAMES, noteLabelColorOf, noteLabelName } from '../note-label';
 
 /**
  * 🔴 **この入れ物の archetype**。⚠ 綴りはここ 1 か所 ── 直書きすると、
@@ -109,6 +110,13 @@ export const SMART_TASKS_KEY = 'smart-tasks';
 export const SMART_OPEN_TASKS_KEY = 'smart-open-tasks';
 
 /**
+ * 🔴 **色ラベルで絞る**(#1982 段 4 の残り)。`smart-label: 緑`(`green` / `3` でも書ける ── 読む表は `noteLabelColorOf` 1 本)。
+ * 🔑 色は本文ではなく器の `settings` 表に在る ── 当てるのは **worker の SQL**(`SmartQuery.label`)で、走査の口は 1 本のまま。
+ *   ⚠ 色を付ける / 外すと当たりが変わるので、reducer は開いているスマートフォルダを集め直す(`needsRescan` が真)。
+ */
+export const SMART_LABEL_KEY = 'smart-label';
+
+/**
  * 語の長さの上限。⚠ **手違いの検出**である ── 本文を丸ごと貼られると、
  * それが**その入れ物の frontmatter に書き込まれる**(条件は本文が正本なので)。
  */
@@ -169,6 +177,8 @@ export interface SmartSpec {
    *   新しい数え方は要らない。
    */
   readonly openTasks: boolean | null;
+  /** 色ラベル(`note-label.ts` の番号 1〜8)。`null` = 見ない(#1982 段 4)。 */
+  readonly label: number | null;
 }
 
 export const EMPTY_SMART: SmartSpec = {
@@ -180,6 +190,7 @@ export const EMPTY_SMART: SmartSpec = {
   text: null,
   tasks: null,
   openTasks: null,
+  label: null,
 };
 
 /** 条件が 1 つも無いか。⚠ **空は「全部」ではなく「何も」**である(上の注記)。 */
@@ -191,7 +202,8 @@ export const isSmartEmpty = (spec: SmartSpec): boolean =>
   spec.dated === null &&
   spec.text === null &&
   spec.tasks === null &&
-  spec.openTasks === null;
+  spec.openTasks === null &&
+  spec.label === null;
 
 /**
  * 🔴 **その場では当て直せない条件を持っているか**(#421 段②③)。
@@ -223,7 +235,9 @@ export const needsRescan = (spec: SmartSpec): boolean =>
    *   ここで数え直すと、同じ問いに答える口が 2 つになる(§7)。
    */
   spec.tasks !== null ||
-  spec.openTasks !== null;
+  spec.openTasks !== null ||
+  // 色は本文に無い(器の表に在る)── その場では当て直せない
+  spec.label !== null;
 
 /**
  * 本文から条件を読む。
@@ -246,6 +260,7 @@ export function readSmartSpec(body: string): SmartSpec {
     text: readText(meta[SMART_TEXT_KEY]),
     tasks: readFlag(meta[SMART_TASKS_KEY], 'tasks'),
     openTasks: readFlag(meta[SMART_OPEN_TASKS_KEY], 'openTasks'),
+    label: readLabel(meta[SMART_LABEL_KEY]),
   };
 }
 
@@ -259,6 +274,7 @@ const SMART_KEYS: readonly string[] = [
   SMART_TEXT_KEY,
   SMART_TASKS_KEY,
   SMART_OPEN_TASKS_KEY,
+  SMART_LABEL_KEY,
 ];
 
 /**
@@ -290,6 +306,7 @@ export function countUnreadSmartConds(body: string): number {
   check(SMART_TEXT_KEY, readText);
   check(SMART_TASKS_KEY, (r) => readFlag(r, 'tasks'));
   check(SMART_OPEN_TASKS_KEY, (r) => readFlag(r, 'openTasks'));
+  check(SMART_LABEL_KEY, readLabel);
   const tagsRaw = meta[SMART_TAGS_KEY];
   if (!blank(tagsRaw)) {
     if (readSmartTags(tagsRaw).length === 0) n += 1;
@@ -414,6 +431,17 @@ function readFlag(raw: FrontmatterValue | undefined, field: 'dated' | 'tasks' | 
   return null;
 }
 
+/** 色ラベルの条件を読む。⚠ 読めない綴りは `null`(= 見ない)。 */
+function readLabel(raw: FrontmatterValue | undefined): number | null {
+  if (typeof raw === 'number') return noteLabelColorOf(String(raw));
+  return typeof raw === 'string' ? noteLabelColorOf(raw) : null;
+}
+
+/** 色の選択肢(画面の字)。⚠ 値は番号 1〜8。 */
+export const SMART_LABEL_OPTIONS: readonly (readonly [string, string])[] = NOTE_LABEL_NAMES.map(
+  (n, i) => [String(i + 1), n] as const,
+);
+
 /** 有無の条件の、画面での字(ある / ない)。⚠ `filer.ts` の `SMART_FIELD_UI` と同じ(test が突き合わせる)。 */
 export const JA_FLAGS: Readonly<Record<'dated' | 'tasks' | 'openTasks', readonly [string, string]>> = {
   dated: ['先頭に書いてある', '書いていない'],
@@ -483,7 +511,8 @@ export type SmartField =
   | 'dated'
   | 'text'
   | 'tasks'
-  | 'openTasks';
+  | 'openTasks'
+  | 'label';
 
 export const SMART_FIELDS: readonly SmartField[] = [
   'kind',
@@ -493,6 +522,7 @@ export const SMART_FIELDS: readonly SmartField[] = [
   'text',
   'tasks',
   'openTasks',
+  'label',
 ];
 
 /**
@@ -521,6 +551,11 @@ export function withSmartField(
     return next === spec.text
       ? { ok: false, reason: 'unchanged' }
       : { ok: true, spec: { ...spec, text: next } };
+  }
+  if (field === 'label') {
+    const next = cleared ? null : noteLabelColorOf(raw);
+    if (!cleared && next === null) return { ok: false, reason: 'invalid' };
+    return next === spec.label ? { ok: false, reason: 'unchanged' } : { ok: true, spec: { ...spec, label: next } };
   }
   if (field === 'kind') {
     const next = cleared ? null : readKind(raw);
@@ -564,6 +599,7 @@ export function withSmartField(
 export function smartFieldValue(spec: SmartSpec, field: SmartField): string {
   if (field === 'text') return spec.text ?? '';
   if (field === 'kind') return spec.kind ?? '';
+  if (field === 'label') return spec.label === null ? '' : String(spec.label);
   if (field === 'dated' || field === 'tasks' || field === 'openTasks') {
     const v = field === 'dated' ? spec.dated : field === 'tasks' ? spec.tasks : spec.openTasks;
     return v === null ? '' : v ? 'true' : 'false';
@@ -660,6 +696,8 @@ export function writeSmartSpec(body: string, spec: SmartSpec): string {
     [SMART_TEXT_KEY]: spec.text ?? undefined,
     [SMART_TASKS_KEY]: spec.tasks ?? undefined,
     [SMART_OPEN_TASKS_KEY]: spec.openTasks ?? undefined,
+    // ⚠ 画面の色の名前で書く(読むほうは番号・内部の名前も受ける)
+    [SMART_LABEL_KEY]: spec.label === null ? undefined : noteLabelName(spec.label),
   });
 }
 
@@ -711,6 +749,8 @@ export interface SmartQuery {
   readonly tasks: boolean | null;
   /** 未処理のチェック項目がある / 無い(#421 段④)。 */
   readonly openTasks: boolean | null;
+  /** 色ラベルの番号(#1982 段 4)。⚠ 当てるのは worker の SQL(器の `settings` 表)。 */
+  readonly label: number | null;
 }
 
 /**
@@ -727,6 +767,7 @@ export function smartQueryOf(spec: SmartSpec, nowMs: number): SmartQuery {
     text: spec.text,
     tasks: spec.tasks,
     openTasks: spec.openTasks,
+    label: spec.label,
   };
 }
 

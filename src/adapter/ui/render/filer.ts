@@ -28,6 +28,7 @@ import { filerRows, flatParentNames } from '@features/relation/filer-list';
 import {
   SMART_ARCHETYPE,
   SMART_FIELDS,
+  SMART_LABEL_OPTIONS,
   isSmartEmpty,
   smartFieldValue,
   type SmartField,
@@ -477,6 +478,14 @@ export class FilerRenderer {
         ['true', '未処理がある'],
         ['false', '全部済んでいる'],
       ],
+    },
+    /**
+     * 🔴 **色ラベルで絞る**(#1982 段 4)。⚠ 選択肢の字は色のボタン・行の右クリックと同じ名前(`NOTE_LABEL_NAMES`)。
+     * 🔑 「指定しない」を選べば外れる(片道にしない)。
+     */
+    label: {
+      label: '色',
+      options: [['', '指定しない'], ...SMART_LABEL_OPTIONS],
     },
     dated: {
       label: '日付',
