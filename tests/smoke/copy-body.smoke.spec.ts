@@ -1,7 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { clickReal, createEntry, collectPageErrors, gotoApp, useSplitEditor,
   gotoCollectionPane,
-  openExportMenu,
   openCollectionMore,
   openInspectorMore,
 } from './helpers';
