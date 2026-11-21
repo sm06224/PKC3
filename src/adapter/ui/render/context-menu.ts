@@ -367,6 +367,96 @@ export function openContextMenu(
   return { close, el };
 }
 
+/** 矢印・Home / End で項目を移すキー(一覧の中の焦点移動と、`keepFocus` の欄から動かす強調が同じ表を読む)。 */
+export const MENU_NAV_KEYS: readonly string[] = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
+
+/**
+ * 🔴 **次に指す項目の番号**(判定は 1 か所 ── 一覧に焦点を置く動かし方(`binder.ts` の `onMenuKey`)と、
+ *   欄に焦点を残したまま強調だけ動かす動かし方(`attachKeepFocusNav`)が同じ規則を読む)。
+ *   Home / End は両端、↓ ↑ は端で回る。`current === -1`(まだ指していない)は ↓ で先頭、↑ で末尾。
+ * @returns 項目が無ければ -1
+ */
+export function nextMenuIndex(key: string, current: number, count: number): number {
+  if (count <= 0) return -1;
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  if (key === 'ArrowDown') return current === -1 ? 0 : (current + 1) % count;
+  if (key === 'ArrowUp') return current === -1 ? count - 1 : (current - 1 + count) % count;
+  return current;
+}
+
+/** 押せる項目(押せない項目は飛ばす)。 */
+export function menuNavItems(menu: Element): HTMLButtonElement[] {
+  return [...menu.querySelectorAll<HTMLButtonElement>('button[data-pkc-action]:not(:disabled)')];
+}
+
+/**
+ * 🔴 **`keepFocus` の一覧を、欄に居たまま矢印で選べるようにする**(#1982 残り 3)。
+ *
+ * - ↑ ↓ Home End: 強調(`data-pkc-active`)を動かし、欄に `aria-activedescendant` を付ける。焦点は欄から動かさない。
+ * - Enter: 強調している項目を押す(強調が無いときは素通し = 欄の改行)。押したあと一覧は閉じる。
+ * - Esc: ここでは握らない(閉じるのは binder の `onMenuKey`。編集中の Esc の守りもあちら)。
+ * ⚠ 一覧が開いている間だけ効く(閉じたら聞き耳ごと外す ── 閉じたあとの ↑↓ は欄のもの)。
+ * ⚠ 欄の他の聞き手(行の編集の ↑↓ など)より先に受ける(capture)── 握ったキーは他へ渡さない。
+ * @returns 聞き耳を外す関数
+ */
+export function attachKeepFocusNav(root: HTMLElement, menu: HTMLElement, field: HTMLElement): () => void {
+  let idx = -1;
+  const mark = (next: number): void => {
+    const items = menuNavItems(menu);
+    for (const b of menu.querySelectorAll('button[data-pkc-active]')) b.removeAttribute('data-pkc-active');
+    idx = next;
+    const cur = items[idx];
+    if (cur === undefined) {
+      field.removeAttribute('aria-activedescendant');
+      return;
+    }
+    cur.setAttribute('data-pkc-active', '');
+    if (cur.id === '') cur.id = `pkc-menu-item-${String(items.indexOf(cur))}`;
+    field.setAttribute('aria-activedescendant', cur.id);
+    cur.scrollIntoView?.({ block: 'nearest' });
+    // 説明欄(`withHint`)は焦点の項目を出すので、強調にも合わせる
+    const hint = menu.querySelector(`[data-pkc-field="${MENU_HINT_FIELD}"]`);
+    if (hint !== null) hint.textContent = cur.getAttribute('data-pkc-hint') ?? '';
+  };
+  const onKey = (ev: KeyboardEvent): void => {
+    if (ev.isComposing || ev.keyCode === 229 || ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey) return;
+    if (!menu.isConnected) {
+      detach();
+      return;
+    }
+    if (MENU_NAV_KEYS.includes(ev.key)) {
+      const items = menuNavItems(menu);
+      if (items.length === 0) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      mark(nextMenuIndex(ev.key, idx, items.length));
+      return;
+    }
+    if (ev.key === 'Enter' && idx !== -1) {
+      const cur = menuNavItems(menu)[idx];
+      if (cur === undefined) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      detach();
+      cur.click();
+      if (menu.isConnected) closeContextMenu(root);
+    }
+  };
+  // 一覧が(Esc・外を押す・別の 1 打鍵・項目を選ぶ…どの道でも)消えたら、聞き耳と強調の印を外す
+  const gone = new MutationObserver(() => {
+    if (!menu.isConnected) detach();
+  });
+  const detach = (): void => {
+    gone.disconnect();
+    field.removeEventListener('keydown', onKey, true);
+    field.removeAttribute('aria-activedescendant');
+  };
+  gone.observe(root, { childList: true });
+  field.addEventListener('keydown', onKey, true);
+  return detach;
+}
+
 /**
  * `el` がメニューの中なら、そのメニューを閉じたときに焦点を返す先(開く前に居た所)を返す。
  * 🔑 項目から確認ダイアログを開くと、ダイアログが借りる「元の焦点」は消えるメニュー項目になる。

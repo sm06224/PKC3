@@ -505,6 +505,10 @@ import {
   scrollClosesMenu,
   contextMenuOpen,
   openContextMenu,
+  attachKeepFocusNav,
+  menuNavItems,
+  nextMenuIndex,
+  MENU_NAV_KEYS,
 } from '../render/context-menu';
 import { bindInlineComplete, type CompleteItem } from '../render/inline-complete';
 import { appInlineComplete } from '../render/inline-complete-setting';
@@ -19480,7 +19484,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 項目は隠した元(`format-more-source`)から読む ── 字・説明・押せない / 灰色の状態は帯の元のボタンのもの(2 本目の判定を持たない)。
    *   押す先は**既存の action**そのまま(`format-text` は `data-pkc-format` を写してある)。
    * ⚠ **本文の欄に居たまま開く**(`keepFocus`)── 焦点が外れると 1 行ずつ打つ編集の行が確定して閉じ、書き込む先が消える。
-   *   そのぶん矢印キーでは選べないので、次に打った 1 打鍵で一覧を閉じる(打鍵は本文へ届く)。
+   *   矢印キー(↑ ↓ Home End)で項目を選び Enter で押せる(`attachKeepFocusNav`)。それ以外の 1 打鍵では一覧を閉じる(打鍵は本文へ届く)。
    */
   'open-format-more': (_dispatcher, target, _services, root) => {
     const src = target.closest('[data-pkc-region="format-bar"]')?.querySelector('[data-pkc-field="format-more-source"]');
@@ -19504,6 +19508,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       };
       // ⚠ 張る先は**本文の欄**(欄が消えれば聞き耳も一緒に消える。`root` / 文書へは直に張らない: #876)
       keep.addEventListener('keydown', closeOnKey);
+      // 🔴 ↑ ↓ Home End で項目を選び、Enter で押せる(欄に居たまま。握ったキーは `closeOnKey` へ届かない ── 一覧は開いたまま)
+      attachKeepFocusNav(root, opened.el, keep);
     }
   },
   /** 🔴 **右の列(何も選んでいないとき)の「書き出す ▾」**(#1029 / #501)。コレクション全体の書き出しの一覧。 */
@@ -24896,21 +24902,16 @@ export function bindActions(
      * 🔴 **右クリックのメニューも ↑↓ / Home / End で項目を移れる**(#1087)。`onCreateMenuKey` と同じ形 ──
      *   押せない項目は飛ばし、端は回る。焦点が項目の外に在るときは握らない。
      */
-    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(ev.key)) {
+    if (MENU_NAV_KEYS.includes(ev.key)) {
       const menu = root.querySelector<HTMLElement>('[data-pkc-region="context-menu"]');
       const t = ev.target;
       if (menu === null || !(t instanceof HTMLElement) || !menu.contains(t)) return;
-      const items = [...menu.querySelectorAll<HTMLButtonElement>('button[data-pkc-action]:not(:disabled)')];
+      const items = menuNavItems(menu);
       if (items.length === 0) return;
       ev.preventDefault();
       ev.stopImmediatePropagation();
-      if (ev.key === 'Home') items[0]?.focus();
-      else if (ev.key === 'End') items[items.length - 1]?.focus();
-      else {
-        const idx = items.indexOf(root.ownerDocument.activeElement as HTMLButtonElement);
-        const dir = ev.key === 'ArrowDown' ? 1 : -1;
-        items[idx === -1 ? 0 : (idx + dir + items.length) % items.length]?.focus();
-      }
+      // 🔴 次の項目の決め方は `nextMenuIndex` の 1 本(欄に居たままの矢印選び `attachKeepFocusNav` と同じ)
+      items[nextMenuIndex(ev.key, items.indexOf(root.ownerDocument.activeElement as HTMLButtonElement), items.length)]?.focus();
       return;
     }
     if (ev.key !== 'Escape') return;

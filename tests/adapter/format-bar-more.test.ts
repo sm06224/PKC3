@@ -161,6 +161,94 @@ describe('「その他 ▾」を押す', () => {
     expect(d.getState().phase, 'Esc で編集が終わった').toBe('editing');
   });
 
+  describe('欄に居たまま矢印で選ぶ(#1982 残り 3)', () => {
+    const key = (ta: HTMLElement, k: string): KeyboardEvent => {
+      const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+      ta.dispatchEvent(ev);
+      return ev;
+    };
+    const items = (menu: HTMLElement): HTMLElement[] => [...menu.querySelectorAll<HTMLElement>('button[data-pkc-action]:not(:disabled)')];
+    const active = (menu: HTMLElement): HTMLElement[] => [...menu.querySelectorAll<HTMLElement>('button[data-pkc-active]')];
+
+    it('↓ ↑ Home End で強調が動き、欄に aria-activedescendant が付く。焦点は欄のまま・一覧は開いたまま', () => {
+      const { ta, menu, opener } = editing();
+      ta.focus();
+      opener.click();
+      const list = items(menu()!);
+      expect(list.length).toBeGreaterThan(3);
+      expect(active(menu()!), '開いた直後は何も強調しない').toHaveLength(0);
+      const ev = key(ta, 'ArrowDown');
+      expect(ev.defaultPrevented, '↓ を欄に渡した').toBe(true);
+      expect(active(menu()!)).toEqual([list[0]]);
+      expect(ta.getAttribute('aria-activedescendant')).toBe(list[0]!.id);
+      expect(list[0]!.id).not.toBe('');
+      key(ta, 'ArrowDown');
+      expect(active(menu()!)).toEqual([list[1]]);
+      expect(ta.getAttribute('aria-activedescendant')).toBe(list[1]!.id);
+      key(ta, 'ArrowUp');
+      key(ta, 'ArrowUp');
+      expect(active(menu()!), '先頭から ↑ で末尾へ回る').toEqual([list[list.length - 1]]);
+      key(ta, 'Home');
+      expect(active(menu()!)).toEqual([list[0]]);
+      key(ta, 'End');
+      expect(active(menu()!)).toEqual([list[list.length - 1]]);
+      expect(document.activeElement).toBe(ta);
+      expect(menu(), '矢印で一覧が閉じた').not.toBeNull();
+    });
+
+    it('Enter で強調した項目が押され、一覧が閉じて印も外れる / 強調が無いときの Enter は欄へ素通し(一覧は閉じる)', () => {
+      const { ta, menu, opener } = editing();
+      ta.focus();
+      opener.click();
+      key(ta, 'ArrowDown');
+      const target = active(menu()!)[0]!;
+      let clicks = 0;
+      target.addEventListener('click', () => (clicks += 1));
+      const ev = key(ta, 'Enter');
+      expect(clicks, '強調した項目が押されていない').toBe(1);
+      expect(ev.defaultPrevented).toBe(true);
+      expect(menu(), '押したら閉じる').toBeNull();
+      expect(ta.hasAttribute('aria-activedescendant'), '印が残った').toBe(false);
+    });
+
+    it('強調していない Enter は欄へ素通し(一覧は閉じる)', () => {
+      const { ta, menu, opener } = editing();
+      ta.focus();
+      opener.click();
+      expect(menu()).not.toBeNull();
+      const plain = key(ta, 'Enter');
+      expect(plain.defaultPrevented, '強調が無いのに Enter を握った').toBe(false);
+      expect(menu()).toBeNull();
+    });
+
+    it('Esc は閉じるだけで編集は終わらず、印も外れる。閉じたあとの ↑ ↓ は欄のもの(握らない)', async () => {
+      const { d, ta, menu, opener } = editing();
+      ta.focus();
+      opener.click();
+      key(ta, 'ArrowDown');
+      key(ta, 'Escape');
+      expect(menu()).toBeNull();
+      expect(d.getState().phase).toBe('editing');
+      await new Promise((r) => setTimeout(r, 0));
+      expect(ta.hasAttribute('aria-activedescendant')).toBe(false);
+      const ev = key(ta, 'ArrowDown');
+      expect(ev.defaultPrevented, '閉じたあとも ↓ を握っている').toBe(false);
+      expect(key(ta, 'ArrowUp').defaultPrevented).toBe(false);
+      expect(key(ta, 'Enter').defaultPrevented).toBe(false);
+    });
+
+    it('別の打鍵では今までどおり一覧が閉じる / 修飾キー付きの矢印は握らない', () => {
+      const { ta, menu, opener } = editing();
+      ta.focus();
+      opener.click();
+      const shifted = new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true });
+      ta.dispatchEvent(shifted);
+      expect(shifted.defaultPrevented, 'Shift+↓(選択の拡張)を握った').toBe(false);
+      key(ta, 'a');
+      expect(menu()).toBeNull();
+    });
+  });
+
   it('焦点が本文の欄に無いとき(ボタンへ Tab で来たとき)は、一覧の先頭へ焦点が移る', () => {
     const { menu, opener } = editing();
     opener.focus();
@@ -190,5 +278,19 @@ describe('保存は上の 1 か所', () => {
       expect(root.querySelectorAll(`[data-pkc-action="${a}"]`)).toHaveLength(1);
     }
     expect(root.querySelector('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]')).not.toBeNull();
+  });
+});
+
+describe('nextMenuIndex(一覧の矢印選びの規則 1 本)', () => {
+  it('端で回り、未選択は ↓ で先頭・↑ で末尾、Home / End は両端、空は -1', async () => {
+    const { nextMenuIndex } = await import('../../src/adapter/ui/render/context-menu');
+    expect(nextMenuIndex('ArrowDown', -1, 3)).toBe(0);
+    expect(nextMenuIndex('ArrowUp', -1, 3)).toBe(2);
+    expect(nextMenuIndex('ArrowDown', 2, 3)).toBe(0);
+    expect(nextMenuIndex('ArrowUp', 0, 3)).toBe(2);
+    expect(nextMenuIndex('ArrowDown', 0, 3)).toBe(1);
+    expect(nextMenuIndex('Home', 2, 3)).toBe(0);
+    expect(nextMenuIndex('End', 0, 3)).toBe(2);
+    expect(nextMenuIndex('ArrowDown', -1, 0)).toBe(-1);
   });
 });

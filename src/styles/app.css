@@ -901,6 +901,7 @@ img[data-pkc-action='view-big']:focus-visible {
   min-width: max(6em, max-content);
 }
 [data-pkc-region='context-menu'] button:hover,
+[data-pkc-region='context-menu'] button[data-pkc-active],
 [data-pkc-region='context-menu'] button:focus-visible {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
@@ -2280,6 +2281,7 @@ button[data-pkc-variant='danger'] {
   border-color: transparent;
 }
 button[data-pkc-variant='danger']:hover:not(:disabled),
+[data-pkc-region='context-menu'] button[data-pkc-variant='danger'][data-pkc-active],
 [data-pkc-region='context-menu'] button[data-pkc-variant='danger']:focus-visible {
   background: var(--danger);
   color: var(--surface);
