@@ -190,7 +190,7 @@ export function parseYamlSubset(src: string): YamlValue {
   if (src.length > YAML_MAX_BYTES) {
     throw new YamlSubsetError(`大きすぎます(${String(YAML_MAX_BYTES / 1024)} KB まで)`, 0);
   }
-  const rawLines = src.replace(/^﻿/u, '').split(/\r\n|\r|\n/u);
+  const rawLines = src.replace(/^\uFEFF/u, '').split(/\r\n|\r|\n/u);
   let docStarted = false;
   /** コメントと空行を除いた行。複数行の字は元の行から読む(`raw`)。 */
   const lines: Line[] = [];
