@@ -70,6 +70,23 @@ test('🔴 主の操作だけテーマのアクセント色で見える (#722 P2
     plain.bg,
   );
   /**
+   * 🔴 **字のあるボタンは、字と見分けがつく**(#1982 ①。「Markdown をコピー」が「読了 約 1 分」と同じに見えた不具合)。
+   * ⚠ 帯の中のボタンの規則が地も枠も消していた ── 詳細度で外れやすいので computed で測る。
+   *   ① 地が透明でない ② 帯の地(= 周り)と違う ③ 字だけのラベル(題名)の地と違う ④ 縁(1px)が見える。
+   */
+  const surround = await paint('[data-pkc-field="detail-toolbar"]');
+  const label = await paint('[data-pkc-region="detail"] [data-pkc-field="detail-title"]');
+  const edge = await page.evaluate(() => {
+    const cs = getComputedStyle(document.querySelector('[data-pkc-region="detail"] button[data-pkc-action="copy-note-md"]')!);
+    return { w: cs.borderTopWidth, style: cs.borderTopStyle, color: cs.borderTopColor };
+  });
+  expect(plain.bg, `字のあるボタンの地が透明(${plain.bg})── 字と見分けがつかない`).not.toMatch(/, 0\)$|^transparent$/);
+  expect(plain.bg, `字のあるボタンの地が帯の地と同じ(${plain.bg})`).not.toBe(surround.bg);
+  expect(plain.bg, `字のあるボタンの地が字だけのラベルと同じ(${plain.bg})`).not.toBe(label.bg);
+  expect(edge.w, '字のあるボタンに縁が無い').toBe('1px');
+  expect(edge.style).toBe('solid');
+  expect(edge.color, `縁が透明(${edge.color})`).not.toMatch(/, 0\)$|^transparent$/);
+  /**
    * ① 🔴 **主の地 = テーマの `--accent`、字 = `--accent-fg`**(#1982 段 1。旧い「`--fg` 反転」から改めた)。
    * ⚠ 期待値は**値を書かず、同じ変数を実ブラウザで解決させて**取る(テーマを変えても追従する)。
    *   空の `div` に `background: var(--accent)` を当てて computed を読む ── 解決後の表記が揃う。

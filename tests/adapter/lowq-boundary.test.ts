@@ -85,7 +85,7 @@ describe('ヘアライン(縁の細い線)', () => {
     expect(button).toMatch(/border:\s*1px solid var\(--hairline\)/);
     // 地を透明にして枠を消す型は枠を残さない(主・ゴースト・危険)
     for (const v of ['primary', 'ghost', 'danger']) {
-      const rule = new RegExp(`\\nbutton\\[data-pkc-variant='${v}'\\] \\{[^}]*\\}`).exec(app)![0];
+      const rule = new RegExp(`\\nbutton\\[data-pkc-variant='${v}'\\](?::has\\(>[^{]*)? \\{[^}]*\\}`).exec(app)![0];
       expect(rule, v).toMatch(/border-color:\s*(transparent|var\(--accent\))/);
     }
     /**
