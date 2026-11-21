@@ -83,7 +83,7 @@ export function measureCurrentLine(
  */
 export function bindCurrentLine(root: HTMLElement, deps: CurrentLineDeps): () => void {
   const doc = root.ownerDocument;
-  const view = doc.defaultView;
+  const view = doc.defaultView; // ⚠ window の resize は聞かない(欄の幅の変化は ResizeObserver が拾う。常時の聞き手を増やさない)
   let mirror: { el: HTMLElement; text: Text } | null = null;
   let current: HTMLTextAreaElement | null = null;
   let frame: number | null = null;
@@ -171,7 +171,6 @@ export function bindCurrentLine(root: HTMLElement, deps: CurrentLineDeps): () =>
   root.addEventListener('input', schedule);
   root.addEventListener('compositionstart', onStart, true);
   root.addEventListener('compositionend', onEnd, true);
-  view?.addEventListener('resize', schedule);
   return () => {
     doc.removeEventListener('selectionchange', schedule);
     doc.removeEventListener('focusin', schedule);
@@ -179,7 +178,6 @@ export function bindCurrentLine(root: HTMLElement, deps: CurrentLineDeps): () =>
     root.removeEventListener('input', schedule);
     root.removeEventListener('compositionstart', onStart, true);
     root.removeEventListener('compositionend', onEnd, true);
-    view?.removeEventListener('resize', schedule);
     if (frame !== null) {
       if (view !== null && typeof view.cancelAnimationFrame === 'function') view.cancelAnimationFrame(frame);
       else clearTimeout(frame);
