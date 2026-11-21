@@ -40,7 +40,7 @@ import { ADAPTER_SETTING_VALIDATORS } from '../render/settings-validators';
 import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
 import { NOTE_TAB_LID_ATTR } from '../render/note-tabs';
-import { visible as noteTabsVisible } from '@features/nav/note-tabs';
+import { orderTabs as orderNoteTabs, visible as noteTabsVisible } from '@features/nav/note-tabs';
 import { settleJump } from '../render/long-note';
 import { mountFilerRow } from '../render/filer';
 import { insideCodeOrMath } from '@features/markdown/code-context';
@@ -131,6 +131,7 @@ import {
   screenBodyOf,
   SECTION_DRAFT_NOTE,
   type AppState,
+  type Dispatchable,
   type PartialDraft,
   type ViewMode,
 } from '@adapter/state/app-state';
@@ -498,6 +499,7 @@ function appOpenIds(): readonly string[] {
 import { processToolOf } from '@features/capture/capture-process';
 import {
   type MenuItem,
+  type OpenMenu,
   closeContextMenu,
   noteMenuUserInput,
   scrollClosesMenu,
@@ -2828,6 +2830,11 @@ export interface BinderServices {
    *   ⚠ 省略 = これまでどおり(語を運ばない)。
    */
   openNoteWindow?(lid: string, find?: string): void;
+  /**
+   * ノートのタブで「別ウィンドウで開いています」の印が付いたタブを押したとき、そのウィンドウを前に出す(#1982 段 5-5)。
+   * 🔑 前に出す頼みを出せたら `true`(タブは動かさない)。ウィンドウが無い・頼めないなら `false`(普通に有効にする)。
+   */
+  focusNoteWindow?(lid: string): boolean;
   /**
    * 🔴 **予定を「週」で、別のウィンドウに開く**(#855 段 A-2)。左の列の「週」ボタンが呼ぶ。
    * ⚠ **同期に呼べること**(`window.open` は click の gesture の中でしか通らない)。
@@ -5285,6 +5292,78 @@ function tableLineAt(target: Element, body: string | null): number | null {
 const MENU_PREV_LID_ATTR = 'data-pkc-menu-prev-lid';
 
 /**
+ * 🔴 **行の右クリックで動いた選択を、メニューを何も選ばずに閉じたら元へ戻す**(#1982 段 5-5。5-4 の持ち越し)。
+ * ⚠ 右クリックは行を先に選ぶ(`onContextMenu`)ので、いまのタブがその行に差し替わる ── Esc や外を押して閉じると、
+ *   読んでいたタブが黙って消えていた。選択・タブ・履歴・印を、右クリックの**前の姿そのまま**へ戻す(`ROW_MENU_PEEK_UNDO`)。
+ * 🔑 「何も選ばずに」= メニューの項目が 1 度も押されていない(押した項目は自分の仕事で選択を決める)。閉じた瞬間の
+ *   state が右クリック直後のままのときだけ戻す(その間に別の操作で動いたなら、巻き戻さない)。
+ * 🔑 メニューを開いたまま別の行を右クリックした回は、最初の右クリックの前の姿を引き継ぐ(`peeks`)。
+ */
+type PeekSnapshot = Extract<Dispatchable, { type: 'ROW_MENU_PEEK_UNDO' }>['snapshot'];
+/** 🔑 `token` = どのメニューの見張りか。新しいメニューに替わったら古い見張りは何もしない(着地前レビュー)。 */
+const peeks = new WeakMap<HTMLElement, { readonly snap: PeekSnapshot; readonly lid: string; readonly token: object }>();
+
+function takePeekSnapshot(root: HTMLElement, st: AppState): PeekSnapshot {
+  const live = peeks.get(root);
+  // 開いたままのメニューから続けて右クリックした: 最初の右クリックの前の姿を引き継ぐ
+  if (live !== undefined && live.lid === st.selectedLid && contextMenuOpen(root)) return live.snap;
+  return {
+    selectedLid: st.selectedLid,
+    selectionHistory: st.selectionHistory,
+    noteTabs: st.noteTabs,
+    tabSeq: st.tabSeq,
+    selection: st.selection,
+    selectionAnchor: st.selectionAnchor,
+  };
+}
+
+function watchRowMenuPeek(
+  root: HTMLElement,
+  dispatcher: Dispatcher,
+  menu: OpenMenu | null,
+  snap: PeekSnapshot,
+  lid: string,
+): void {
+  peeks.delete(root);
+  if (menu === null) {
+    // メニューが出なかった(項目が 0): 選択は動いたまま ── 戻す
+    undoPeek(dispatcher, snap, lid, dispatcher.getState());
+    return;
+  }
+  // 選ぶ先が無い(元の選択と同じ行): 戻すものが無い
+  if (snap.selectedLid === null || snap.selectedLid === lid) return;
+  const token = {};
+  peeks.set(root, { snap, lid, token });
+  const after = dispatcher.getState();
+  let ran = false;
+  menu.el.addEventListener('click', () => (ran = true), true);
+  const Observer = root.ownerDocument.defaultView?.MutationObserver;
+  if (Observer === undefined) return;
+  const mo = new Observer(() => {
+    if (menu.el.isConnected) return;
+    mo.disconnect();
+    /**
+     * 🔴 **いまのメニューの見張りでなければ何もしない**(着地前レビュー)── 同じ行を続けて右クリックすると、
+     *   古いメニューが外れた瞬間に古い見張りが走り、新しいメニューが出ているのに選択が元へ戻っていた
+     *   (同じ行の選び直しは state を変えないので、「何も動いていない」の条件をすり抜けた)。
+     *   後を継いだメニューが無い(行のメニュー以外へ替わった・閉じた)ときだけ、この見張りが戻す。
+     */
+    if (peeks.get(root)?.token !== token) return;
+    peeks.delete(root);
+    if (ran) return;
+    undoPeek(dispatcher, snap, lid, after);
+  });
+  mo.observe(root, { childList: true });
+}
+
+function undoPeek(dispatcher: Dispatcher, snap: PeekSnapshot, lid: string, after: AppState): void {
+  const st = dispatcher.getState();
+  // 右クリック直後から何も動いていない(選択・タブ・履歴が同じ)ときだけ
+  if (st.selectedLid !== lid || st.noteTabs !== after.noteTabs || st.selectionHistory !== after.selectionHistory) return;
+  dispatcher.dispatch({ type: 'ROW_MENU_PEEK_UNDO', from: lid, snapshot: snap });
+}
+
+/**
  * 🔴 **タブを閉じる。断られたら理由を言う**(#1982 段 5-4 着地前レビュー)。
  * ⚠ 有効なタブを閉じると選択が隣へ動く ── 編集中・保存の失敗中は reducer が断る(`selectThenCommit`)。
  *   黙って何も起きないと「× が壊れている」に見えるので、`tab-close` の鍵と同じ字で理由を出す。
@@ -5346,6 +5425,8 @@ const DUAL_MENU_SELECT_FIRST: ReadonlySet<string> = new Set([
  */
 const MENU_OPENERS: ReadonlySet<string> = new Set([
   'phone-menu',
+  // 🔑 #1982 段 5-5 ── スマホ幅の「開いているノート ▾」
+  'phone-note-tabs',
   // 🔑 #1966 3-3 ── 右の列の「アプリで開く ▾」
   'open-app-menu',
   // 🔑 #1621 ── 左の列の帯に入りきらない操作の一覧(「⋯」)
@@ -10732,6 +10813,46 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   ⚠ 添付 / 録音 / 画面録画 / 計測(左の列の create-bar に在る 4 つ)は**段③**で足す
    *   ── create-bar との等値 pin を先に書かないと、片方に足した日に静かにずれる。
    */
+  /**
+   * 🔴 **開いているノート ▾**(#1982 段 5-5)。スマホ幅ではタブ列を出さず、ここへ畳む(高さを増やさない)。
+   * ⚠ 受け手は**既存の** `activate-note-tab` / `close-note-tab` / `reopen-note-tab` ── 押すタブは項目の `data-pkc-note-tab` が相手。
+   *   2 度目の押下は閉じる(片道にしない)。並びは列と同じ(ピン留めが先頭)。
+   */
+  'phone-note-tabs': (dispatcher, target, _services, root) => {
+    if (contextMenuOpen(root)) {
+      closeContextMenu(root);
+      return;
+    }
+    const st = dispatcher.getState();
+    const set = st.noteTabs;
+    if (!noteTabsVisible(set)) return;
+    const rect = target.getBoundingClientRect();
+    const items: MenuItem[] = orderNoteTabs(set.tabs, st.notePins).map((t) => {
+      const title = st.entryMetas.get(t.lid)?.title ?? '';
+      return {
+        action: 'activate-note-tab',
+        label: `${title === '' ? '(無題)' : title}${t.external ? '(別ウィンドウで開いています)' : ''}`,
+        checked: set.active === t.lid,
+        attrs: { [NOTE_TAB_LID_ATTR]: t.lid },
+      };
+    });
+    if (set.active !== null) {
+      items.push({
+        action: 'close-note-tab',
+        label: 'いまのタブを閉じる',
+        hint: 'いま開いているタブを閉じます(ノートは消えません。閉じたタブは開き直せます)',
+        attrs: { [NOTE_TAB_LID_ATTR]: set.active },
+      });
+    }
+    const canReopen = set.closed.some((c) => st.entryMetas.has(c.lid));
+    items.push({
+      action: 'reopen-note-tab',
+      label: '閉じたタブを開き直す',
+      hint: canReopen ? '最後に閉じたタブを開き直します' : '閉じたタブがありません',
+      ...(canReopen ? {} : { disabled: true }),
+    });
+    openContextMenu(root, { x: rect.left, y: rect.bottom }, items, target);
+  },
   'phone-menu': (dispatcher, target, _services, root) => {
     // ⚠ 2 度目の ⋯ は閉じる(片道の操作を作らない ── user 指示 2026-08-23)
     if (contextMenuOpen(root)) {
@@ -12125,9 +12246,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ノートのタブ(#1982 段 5-3): 押したタブを有効にする / 閉じる。相手は**押したタブの** `data-pkc-note-tab`
    * (選択中のノートではない ── `src-invariants` §1)。
    */
-  'activate-note-tab': (dispatcher, target) => {
+  'activate-note-tab': (dispatcher, target, services) => {
     const lid = target.getAttribute('data-pkc-note-tab');
-    if (lid) dispatcher.dispatch({ type: 'NOTE_TAB_ACTIVATE', lid });
+    if (!lid) return;
+    // 🔴 別ウィンドウで開いているノートのタブは、そのウィンドウへ移る(段 5-5。2 か所で編集しない)。頼めなければ普通に有効にする
+    const t = dispatcher.getState().noteTabs.tabs.find((x) => x.lid === lid);
+    if (t?.external === true && services.focusNoteWindow?.(lid) === true) return;
+    dispatcher.dispatch({ type: 'NOTE_TAB_ACTIVATE', lid });
   },
   'close-note-tab': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-note-tab');
@@ -24465,6 +24590,7 @@ export function bindActions(
     //    後だと、控えるのは**押した行そのもの**になって何も戻らない
     const prevLid = dispatcher.getState().selectedLid;
     const marksBefore = dispatcher.getState().selection;
+    const peekSnap = takePeekSnapshot(root, dispatcher.getState());
     // 🔴 選べなければ出さない(理由は `selectEntryOrExplain` が画面へ出している)
     if (!selectEntryOrExplain(dispatcher, lid, 'ノート', root, services)) {
       closeContextMenu(root);
@@ -24564,7 +24690,7 @@ export function bindActions(
           ...rows,
         ]
       : rows;
-    openContextMenu(
+    const rowMenu = openContextMenu(
       root,
       { x: ev.clientX, y: ev.clientY },
       items,
@@ -24585,7 +24711,8 @@ export function bindActions(
         ...(prevLid === null || prevLid === lid ? {} : { [MENU_PREV_LID_ATTR]: prevLid }),
       },
     );
-  };
+
+    watchRowMenuPeek(root, dispatcher, rowMenu, peekSnap, lid);  };
   /**
    * ⚠ **触った瞬間に閉じる。ただし、押した物の実行より後で。**
    *

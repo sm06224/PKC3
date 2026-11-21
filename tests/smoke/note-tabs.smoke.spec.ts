@@ -12,7 +12,7 @@
  * Ctrl+クリック・中クリック・右クリック・キーは段 5-4 の spec で足す。
  */
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor } from './helpers';
+import { clickReal, collectPageErrors, createEntry, dismissAnnounce, gotoApp, openViewPane, useSplitEditor } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
@@ -165,6 +165,74 @@ test('🔴 タブの操作(段 5-4): 中クリックで新しいタブ / Alt+Pag
   await rows.filter({ hasText: '一つ目' }).click({ button: 'right' });
   await menu.locator('[data-pkc-action="open-note-new-tab"]').click();
   await expect(tabs).toHaveCount(3);
+  await expect(title).toHaveText('一つ目');
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 周辺の整合(段 5-5): 右クリックを閉じてもタブが残る / 2 ペイン中は灰色で押すと戻る / スマホ幅は「開いているノート ▾」', async ({
+  page,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  await makeNote(page, '一つ目');
+  await makeNote(page, '二つ目');
+  await makeNote(page, '三つ目');
+  const bar = page.locator('[data-pkc-region="note-tabs"]');
+  const rows = page
+    .locator('[data-pkc-region="sidebar"] [data-pkc-entry]')
+    .filter({ has: page.locator('[data-pkc-field="title"]') });
+  const tabs = bar.locator('[role="tab"]');
+  const title = page.locator('[data-pkc-field="detail-body"] h1');
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+
+  await rows.filter({ hasText: '一つ目' }).click();
+  await rows.filter({ hasText: '二つ目' }).click({ button: 'middle' });
+  await expect(tabs).toHaveCount(2);
+  await tabs.nth(0).click();
+  await expect(title).toHaveText('一つ目');
+
+  const backBefore = await page.locator('[data-pkc-action="nav-back"]').isDisabled();
+  // ① 行を右クリック → 何も選ばず Esc。タブも本文も元のまま(「三つ目」に差し替わらない)
+  await rows.filter({ hasText: '三つ目' }).click({ button: 'right' });
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.nth(0)).toContainText('一つ目');
+  await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true');
+  await expect(title).toHaveText('一つ目');
+  // 履歴も元のまま(unit が past の中身を見る。ここは実ブラウザで「戻る」の押せる・押せないが変わらないこと)
+  expect(await page.locator('[data-pkc-action="nav-back"]').isDisabled()).toBe(backBefore);
+
+  // ② 2 ペイン: タブ列は同じ場所に灰色で出る。押すと通常ビューへ戻ってそのノートを開く
+  await clickReal(page, '[data-pkc-browse="launcher"]');
+  const before = await bar.boundingBox();
+  await openViewPane(page, 'dual');
+  await expect(bar).toHaveAttribute('data-pkc-dimmed', '');
+  await expect(bar, '2 ペイン中にタブ列が消えた').toBeVisible();
+  const during = await bar.boundingBox();
+  expect(during?.y, 'タブ列の位置が動いた').toBe(before?.y);
+  const dimColor = await tabs.nth(1).locator('[data-pkc-field="note-tab-title"]').evaluate((el) => getComputedStyle(el).color);
+  await expect(tabs.nth(1)).toHaveAttribute('title', '押すと 2 ペインを閉じてこのノートを開きます');
+  await tabs.nth(1).click();
+  await expect(page.locator('[data-pkc-view-pane="dual"]')).toBeHidden();
+  await expect(title).toHaveText('二つ目');
+  await expect(bar).not.toHaveAttribute('data-pkc-dimmed', '');
+  const normalColor = await tabs.nth(1).locator('[data-pkc-field="note-tab-title"]').evaluate((el) => getComputedStyle(el).color);
+  expect(dimColor, '灰色にならない(通常ビューと同じ色)').not.toBe(normalColor);
+
+  // ③ スマホ幅: タブ列は出ず、「開いているノート ▾」から切り替える。帯の高さは増えない
+  await page.setViewportSize({ width: 393, height: 727 });
+  await dismissAnnounce(page);
+  const phoneTabs = page.locator('[data-pkc-field="phone-note-tabs"]');
+  await expect(phoneTabs).toBeVisible();
+  await expect(bar, 'スマホ幅でタブ列が出ている').toBeHidden();
+  const barBox = await page.locator('[data-pkc-region="phone-bar"]').boundingBox();
+  expect(barBox?.height, 'ページの帯の高さが増えた').toBeLessThanOrEqual(40);
+  await clickReal(page, '[data-pkc-field="phone-note-tabs"]');
+  await expect(menu.locator('[data-pkc-action="activate-note-tab"]')).toHaveCount(2);
+  await menu.locator('[data-pkc-action="activate-note-tab"]', { hasText: '一つ目' }).click();
   await expect(title).toHaveText('一つ目');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

@@ -66,6 +66,11 @@ export interface NoteRegistryDeps {
    * 新しい窓へ渡すときと同じく**本文の当たった所へ送って塗る**ために運ぶ。無ければ `undefined`。
    */
   readonly onRaise: (find?: string) => void;
+  /**
+   * 台帳の行(他の窓が出している付箋)が増減したときに呼ばれる(#1982 段 5-5。タブの「別ウィンドウ」印の追従)。
+   * ⚠ 呼び先が dispatch してよい ── ここは放送の受信(同期)から来る。
+   */
+  readonly onChange?: () => void;
   /** いまの時刻。⚠ test が動かせるように口にする(既定は `Date.now`)。 */
   readonly now?: () => number;
   /** 見込みが自然に外れるまで(既定 `RESERVE_MS`)。 */
@@ -130,8 +135,9 @@ export interface NoteRegistry {
    * 🔑 **同時に点呼も打つ**(#685 着地前レビュー、2026-09-04)── 相手が
    * `pagehide` を出さずに消えた(クラッシュ / OS kill / タブ破棄)ときの保険である。
    * 答えが返らなければ、次に聞かれたときに行を捨てて**開けるようにする**。
+   * @returns 頼めたか(⚠ 開き途中で窓がまだ名乗っていない = `false`。呼び側は普通の動きへ戻す ── #1982 段 5-5 着地前レビュー)
    */
-  raise(lid: string, find?: string): void;
+  raise(lid: string, find?: string): boolean;
   /**
    * 🔴 **窓を離れるときに呼ぶ**(台帳から自分を外す)。⚠ **放送路は閉じない**。
    *
@@ -209,7 +215,13 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
 
   /** ⚠ 1 つの窓が出す付箋は 1 件 ── 前に載っていた行を必ず外す。 */
   const drop = (id: string): void => {
-    for (const [lid, who] of [...byLid]) if (who === id) byLid.delete(lid);
+    let changed = false;
+    for (const [lid, who] of [...byLid])
+      if (who === id) {
+        byLid.delete(lid);
+        changed = true;
+      }
+    if (changed) deps.onChange?.();
   };
 
   if (deps.channel !== null) {
@@ -227,6 +239,7 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
         askedAt.delete(w.id);
         drop(w.id);
         byLid.set(w.lid, w.id);
+        deps.onChange?.();
         // ⚠ 本物が名乗ったので、見込みは要らない(以後は台帳が持つ)
         pending.delete(w.lid);
         return;
@@ -253,7 +266,7 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
     release: (lid) => void pending.delete(lid),
     raise: (lid, find) => {
       const to = byLid.get(lid);
-      if (to === undefined) return;
+      if (to === undefined) return false;
       send(
         find === undefined || find === ''
           ? { tag: NOTE_RAISE, id: deps.id, to }
@@ -262,6 +275,7 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
       // 🔑 生死も聞く(上の docstring)── 答えが返らなければ `alive` が行を捨てる
       askedAt.set(to, deps.now());
       send({ tag: NOTE_ROLL_CALL, id: deps.id });
+      return true;
     },
     leave: () => {
       send({ tag: NOTE_GONE, id: deps.id });

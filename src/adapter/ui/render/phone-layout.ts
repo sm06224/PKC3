@@ -73,6 +73,8 @@ const FACE: Readonly<Record<PhonePage, string>> = {
 export interface PhoneRenderState extends PhoneShape {
   /** 帯に出す題名。⚠ 無ければ空文字(「(無題)」等の作り字はここで作らない)。 */
   readonly title: string;
+  /** 開いているノートのタブの枚数(2 枚以上のときだけ「開いているノート ▾」を出す。#1982 段 5-5)。省略 = 0。 */
+  readonly noteTabs?: number;
 }
 
 type MediaLike = {
@@ -501,6 +503,9 @@ export class PhoneLayout {
      *   状態を言う(スマホでは情報ページで消す ── 居る場所へ行くボタンは dead click)。
      */
     if (menu) menu.hidden = tablet;
+    const tabsBtn = bar.querySelector<HTMLElement>('[data-pkc-field="phone-note-tabs"]');
+    // 🔴 タブレットは中央にタブ列が出る(列は幅がある)。スマホだけ 1 つのボタンへ畳む
+    if (tabsBtn) tabsBtn.hidden = tablet || (st.noteTabs ?? 0) < 2;
     if (tablet) {
       if (back) back.hidden = true;
       if (info) {

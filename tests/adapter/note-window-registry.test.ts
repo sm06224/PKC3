@@ -168,8 +168,20 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
     const make = bus();
     const a = win(make, 'A');
     const b = win(make, 'B');
-    b.reg.raise('e9');
+    expect(b.reg.raise('e9'), '頼めていないのに頼めたと言う').toBe(false);
     expect(a.raised()).toBe(0);
+  });
+
+  it('🔴 開き途中(予約だけで窓がまだ名乗っていない)は「他で開いている」でも頼めない(false)── 呼び側は普通に開く', () => {
+    const make = bus();
+    const b = win(make, 'B');
+    b.reg.reserve('e1');
+    expect(b.reg.whereIs('e1'), '前提: 予約は「他で開いている」に数える').toBe('other');
+    expect(b.reg.raise('e1')).toBe(false);
+    const a = win(make, 'A');
+    a.reg.announce('e1');
+    expect(b.reg.raise('e1'), '名乗った後は頼める').toBe(true);
+    expect(a.raised()).toBe(1);
   });
 
   /**
@@ -397,5 +409,25 @@ describe('付箋を開く押下の判断(#1087)', () => {
     a.reg.announce('e1');
     expect(press(a.reg, 'e1', 1)).toBe('here');
     expect(press(a.reg, 'e1', 2), '自分の窓では何度押しても開かない').toBe('here');
+  });
+});
+
+describe('台帳の増減を知らせる onChange(#1982 段 5-5。ノートのタブの「別ウィンドウ」印の追従)', () => {
+  it('他の窓が名乗る・消える(GONE)ごとに呼ばれる。自分の放送では呼ばれない', () => {
+    const make = bus();
+    let n = 0;
+    const watcher = createNoteRegistry({ channel: make(), id: 'W', onRaise: () => {}, onChange: () => (n += 1) });
+    const a = win(make, 'A');
+    expect(n, '何も起きていないのに呼ばれた').toBe(0);
+    a.reg.announce('e1');
+    expect(n, '名乗りで呼ばれない').toBeGreaterThan(0);
+    expect(watcher.whereIs('e1')).toBe('other');
+    const afterHere = n;
+    a.reg.leave();
+    expect(n, '閉じた(GONE)で呼ばれない').toBeGreaterThan(afterHere);
+    expect(watcher.whereIs('e1'), '閉じたのに他の窓の扱いのまま').toBe(null);
+    const before = n;
+    watcher.announce('e9');
+    expect(n).toBe(before);
   });
 });

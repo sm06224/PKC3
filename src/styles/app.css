@@ -14054,3 +14054,28 @@ h6:hover > .pkc-heading-anchor,
   --muted: var(--pkc-muted-on-mark);
   color: var(--fg);
 }
+/**
+ * 🔴 **2 ペイン表示中は灰色**(#1982 段 5-5、裁定 6)── 同じ場所に出し、押すと通常ビューへ戻ってそのノートを開く。
+ * 色は意味にだけ使う: 「いまの画面の現在地ではない」を `--muted` の字 + 現在地の線を消すことで示す(読めるコントラストは保つ)。
+ */
+[data-pkc-region='note-tabs'][data-pkc-dimmed] [data-pkc-field='note-tab'],
+[data-pkc-region='note-tabs'][data-pkc-dimmed] [data-pkc-field='note-tab-select'] {
+  color: var(--muted);
+}
+[data-pkc-region='note-tabs'][data-pkc-dimmed] [data-pkc-field='note-tab'][data-pkc-active] {
+  background: transparent;
+  box-shadow: none;
+}
+/**
+ * 🔴 **スマホ幅**(#1982 段 5-5)── タブ列は出さず、ページの帯の「開いているノート ▾」(`phone-note-tabs`)に畳む。
+ * ⚠ `:not([hidden])` の規則(0,2,0)に勝つよう `hidden` を外した形に重ねる。判定の幅は `phone-layout.ts` の 1 本(この属性)。
+ */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='note-tabs']:not([hidden]) {
+  display: none;
+}
+[data-pkc-field='phone-note-tabs'] {
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

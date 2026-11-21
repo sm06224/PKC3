@@ -1101,7 +1101,18 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneMenu.textContent = '⋯';
   phoneMenu.setAttribute('aria-label', 'このノートの操作を開く');
   phoneMenu.title = 'このノートにできること・操作を探す';
-  phoneBar.append(phoneBack, phoneTitle, phoneInfo, phoneMenu);
+  /**
+   * 🔴 **開いているノート ▾**(#1982 段 5-5。スマホ幅ではタブ列を出さず、題名の横の 1 つのボタンに畳む。高さは増えない)。
+   * 出し入れは `paintBar`(開いているタブが 2 枚以上のときだけ。タブレットは列が出るので出さない)。
+   */
+  const phoneTabs = document.createElement('button');
+  phoneTabs.type = 'button';
+  phoneTabs.setAttribute('data-pkc-action', 'phone-note-tabs');
+  phoneTabs.setAttribute('data-pkc-field', 'phone-note-tabs');
+  phoneTabs.hidden = true;
+  phoneTabs.textContent = '開いているノート ▾';
+  phoneTabs.title = '開いているノートの一覧から切り替える・閉じる';
+  phoneBar.append(phoneBack, phoneTitle, phoneTabs, phoneInfo, phoneMenu);
   // 🔴 ノートのタブ列(#1982 段 5-3)。本文のすぐ上。2 枚以上のときだけ `note-tabs.ts` が中身を出す
   const noteTabs = document.createElement('div');
   noteTabs.setAttribute('data-pkc-region', 'note-tabs');

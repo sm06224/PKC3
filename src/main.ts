@@ -366,6 +366,7 @@ import { BrowseRouter, type BrowseMode } from '@adapter/ui/render/browse';
 // 🔴 探し方のタブの印(見た目 + 読み上げ)は 1 か所へ寄せた(#720)
 import { markBrowseTabs } from '@adapter/ui/render/tabs-a11y';
 import { NoteTabsBar } from '@adapter/ui/render/note-tabs';
+import { externalDiff, visible as noteTabsVisible } from '@features/nav/note-tabs';
 import { CenterRouter } from '@adapter/ui/render/center';
 import { AppendBoxRenderer } from '@adapter/ui/render/append-box';
 import {
@@ -541,6 +542,7 @@ import { dateKey } from '@features/schedule/month-grid';
 import { openView, openViewHere } from '@adapter/ui/render/open-view';
 import { noteRemoteChange } from '@adapter/state/remote-change';
 import {
+  ANSWER_MS,
   NOTE_REGISTRY_CHANNEL,
   createNoteRegistry,
   decideNoteOpen,
@@ -1029,7 +1031,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * **後**に建つので、箱だけ先に置き、建った後で埋める(台帳の便りが先に届いても落ちない)。
    */
   let jumpFromRaise: ((find: string) => void) | null = null;
+  /** 🔴 台帳が増減したら、ノートのタブの「別ウィンドウ」印を揃える(#1982 段 5-5)。`dispatcher` が建つ前は空(建った後で埋める)。 */
+  let syncExternalTabs: (() => void) | null = null;
   const noteRegistry = createNoteRegistry({
+    onChange: () => syncExternalTabs?.(),
     channel: typeof BroadcastChannel === 'function' ? new BroadcastChannel(noteChannel) : null,
     id: makeViewWindowToken(),
     // ⚠ 「前に出る」は実測できていない(headless では親子とも `hasFocus` が真)──
@@ -2124,6 +2129,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     center.render(st);
   };
   const noteTabsBar = new NoteTabsBar(regions.noteTabs);
+  syncExternalTabs = (): void => {
+    for (const d of externalDiff(dispatcher.getState().noteTabs, (l) => noteRegistry.whereIs(l) === 'other')) {
+      dispatcher.dispatch({ type: 'NOTE_TAB_EXTERNAL', ...d });
+    }
+  };
   dispatcher.onState((state) => {
     browse.render(state, browseMode);
     noteTabsBar.render(state);
@@ -2131,6 +2141,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     appendBox.render(state);
     inspector.render(state);
     markView(state.viewMode);
+    // 🔴 別ウィンドウで開いているノートがタブに入った(後からタブで開いた)回も印を付ける。差分が無ければ何も撃たない(ループしない)
+    if (!heldNoteWindow) syncExternalTabs?.();
     /**
      * 🔴 **スマホ用画面のページを決める**(#632 段①)。⚠ 描く順は**最後** ──
      *   面の中身が揃ってから `visibility` を切り替える(先に切り替えると、
@@ -2142,6 +2154,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔴 打っている物が見えない状態を作らない(`features/phone-layout.ts` の docstring)
       editing: state.phase === 'editing',
       title: state.selectedLid === null ? '' : (state.entryMetas.get(state.selectedLid)?.title ?? ''),
+      noteTabs: noteTabsVisible(state.noteTabs) ? state.noteTabs.tabs.length : 0,
     });
     /**
      * 🔴 **探す欄に `>` を打っている間の操作の一覧は、描き終えた画面で組む**(#274 段①)。
@@ -6360,6 +6373,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔴 **見込みを先に載せる**(着地前レビュー ⚠7)── 窓が名乗るのは boot の後なので、
       //    2 度押しの間は台帳が空である
       noteRegistry.reserve(lid);
+      syncExternalTabs?.();
       void openViewInWindow(null, {
         // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る。
         //    🔴 **付箋は細い窓で出す**(user 裁定 2026-09-04)── 口は
@@ -6389,8 +6403,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         },
         // ⚠ 開けなかったら見込みを外す(次の 1 押しで開けるように)
       }).then((where) => {
-        if (where !== 'window') noteRegistry.release(lid);
+        if (where !== 'window') {
+          noteRegistry.release(lid);
+          syncExternalTabs?.();
+        }
       });
+    },
+    focusNoteWindow: (lid) => {
+      if (noteRegistry.whereIs(lid) !== 'other') return false;
+      // ⚠ 開き途中(予約だけで窓がまだ名乗っていない)は頼めない ── false を返して普通に有効にさせる
+      if (!noteRegistry.raise(lid)) return false;
+      // 消えた窓(答えが無い)の印は、点呼の待ちが切れた後に外す
+      window.setTimeout(() => syncExternalTabs?.(), ANSWER_MS + 100);
+      return true;
     },
     /** 🔴 このフォルダと配下をまとめて書き出す(#399 ①)。 */
     exportFolder: (lid) => void runExport({ entryLid: lid, as: 'folder' }),
