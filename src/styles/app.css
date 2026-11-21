@@ -2531,6 +2531,7 @@ button[data-pkc-variant='danger']:hover:not(:disabled),
 .pkc-md-rendered .pkc-form-row input[type='text'],
 .pkc-md-rendered .pkc-form-row input[type='number'],
 .pkc-md-rendered .pkc-form-row input[type='date'],
+.pkc-md-rendered .pkc-form-row input[type='datetime-local'],
 .pkc-md-rendered .pkc-form-row select,
 .pkc-md-rendered .pkc-form-row textarea {
   min-width: 0;
@@ -2591,6 +2592,12 @@ button[data-pkc-variant='danger']:hover:not(:disabled),
   display: inline-flex;
   gap: var(--s1, 4px);
   align-items: center;
+}
+.pkc-md-rendered .pkc-form-odd {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1, 4px);
+  min-width: 0;
 }
 .pkc-md-rendered .pkc-form-warn {
   margin-left: var(--s1, 4px);

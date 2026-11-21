@@ -274,7 +274,7 @@ describe('checkbox-group と datetime の読めない値(#2002 段 1 再設計)'
   const G = ['```yaml form', 'table: 持参', 'fields:', '  - name: 持ち物', '    type: checkbox-group', '    required: true', '    options: [PC, ペン, ノート]', '```'].join('\n');
   const GT = '```csv name=持参\n持ち物\n"PC, ペン"\n"ノート"\n```\n';
   const opt = (r: ReturnType<typeof rig>, o: string): HTMLInputElement =>
-    r.host.querySelector<HTMLInputElement>(`[data-pkc-form-option="${o}"]`)!;
+    [...r.host.querySelectorAll<HTMLInputElement>("input[data-pkc-form-option]")].find((c) => c.getAttribute("data-pkc-form-option") === o)!;
 
   it('🔴 保存 → 1 つの vars(PC, ペン)/ 読み直しても変更なし(日本語・空白・往復)', () => {
     const r = rig(G + '\n');
@@ -346,5 +346,62 @@ describe('checkbox-group と datetime の読めない値(#2002 段 1 再設計)'
     r.field('開始').value = '2026-11-21T09:30';
     r.press('form-save');
     expect(extractVars(applyBodyRewrite(body, r.rewrites[0]!)!)).toEqual({ 開始: '2026-11-21T09:30' });
+  });
+});
+
+describe('再レビュー(#2002 段 1)', () => {
+  const DT = ['```yaml form', 'fields:', '  - name: 開始', '    type: datetime', '```'].join('\n');
+  const oddBody = '---\nvars.開始: 来週の頭\n---\n' + DT + '\n';
+
+  it('🔴 読めない日時は「この値を消す」→ 保存で空(vars の行が消える)/ 触らなければ残る / 選べば置き換わる', () => {
+    const r = rig(oddBody);
+    r.press('form-clear-raw');
+    expect(r.host.querySelector('[data-pkc-form-raw]')).toBeNull();
+    expect(r.host.querySelector('.pkc-form-warn')!.textContent).toContain('消えます');
+    r.press('form-save');
+    expect(r.err()).toBe('');
+    expect(extractVars(applyBodyRewrite(oddBody, r.rewrites[0]!)!)).toEqual({});
+    const keep = rig(oddBody);
+    keep.press('form-save');
+    expect(keep.rewrites).toHaveLength(0);
+    const pick = rig(oddBody);
+    pick.field('開始').value = '2026-11-21T09:30';
+    pick.press('form-save');
+    expect(extractVars(applyBodyRewrite(oddBody, pick.rewrites[0]!)!)).toEqual({ 開始: '2026-11-21T09:30' });
+  });
+
+  const G = (opts: string): string => ['```yaml form', 'table: 持参', 'fields:', '  - name: 持ち物', '    type: checkbox-group', `    options: ${opts}`, '```'].join('\n');
+  const box = (r: ReturnType<typeof rig>, o: string): HTMLInputElement =>
+    [...r.host.querySelectorAll<HTMLInputElement>("input[data-pkc-form-option]")].find((c) => c.getAttribute("data-pkc-form-option") === o)!;
+
+  it('🔴 : # 絵文字 全角、 ・ 引用符を含む選択肢は、保存して読み直しても同じ(前書きが安定)', () => {
+    const labels = ['A:B', '#x', '😀', '甲、乙', "it's", 'say "hi"', '  '.trim() + '空 白'];
+    const def = G("['A:B', '#x', '😀', '甲、乙', \"it's\", 'say \"hi\"', '空 白']");
+    const r = rig(def + '\n');
+    expect(r.host.querySelectorAll('input[data-pkc-form-option]')).toHaveLength(labels.length);
+    for (const l of labels) box(r, l).checked = true;
+    r.press('form-save');
+    const next = applyBodyRewrite(def + '\n', r.rewrites[0]!)!;
+    expect(extractVars(next)['持ち物']).toBe(labels.join(', '));
+    const r2 = rig(next);
+    for (const l of labels) expect(box(r2, l).checked, l).toBe(true);
+    r2.press('form-save');
+    expect(r2.rewrites).toHaveLength(0);
+  });
+
+  it('🔴 並べ替えた定義で 1 つ足して保存 → 保存済みの並びのまま、新しい分が後ろ', () => {
+    const body = '---\nvars.持ち物: "PC, ペン"\n---\n' + G('[ノート, ペン, PC]') + '\n';
+    const r = rig(body);
+    box(r, 'ノート').checked = true;
+    r.press('form-save');
+    expect(extractVars(applyBodyRewrite(body, r.rewrites[0]!)!)['持ち物']).toBe('PC, ペン, ノート');
+  });
+
+  it('🔴 表の行の読み込みは、余白・重複を整える( PC ,ペン,PC → PC, ペン)', () => {
+    const body = G('[PC, ペン]') + '\n\n```csv name=持参\n持ち物\n" PC ,ペン,PC"\n```\n';
+    const r = rig(body);
+    (r.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '1';
+    r.press('form-row-load');
+    expect(extractVars(applyBodyRewrite(body, r.rewrites[0]!)!)['持ち物']).toBe('PC, ペン');
   });
 });
