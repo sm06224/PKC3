@@ -10,7 +10,15 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
-import { EDITING_FIELD_KINDS, EDITING_FIELD_NAMES } from '../../src/adapter/ui/editing-field';
+import {
+  EDITING_FIELD_FEATURES,
+  EDITING_FIELD_KINDS,
+  EDITING_FIELD_NAMES,
+  type EditingFieldKind,
+  type EditingFeature,
+} from '../../src/adapter/ui/editing-field';
+import { RowSwap } from '../../src/adapter/ui/render/row-swap';
+import { renderMarkdownWithRanges } from '../../src/features/markdown/source-ranges';
 
 function fakeStorage() {
   const map = new Map<string, string>();
@@ -157,5 +165,109 @@ describe.each(['editor', 'section', 'append'] as const)('%s の欄: 選択を囲
     expect(press(t2, '(', { ctrl: true }).defaultPrevented).toBe(false);
     expect(press(t2, '(', { composing: true }).defaultPrevented).toBe(false);
     expect(t2.value).toBe('abcd');
+  });
+});
+
+/**
+ * 🔴 **欄の表の真偽が、4 つの欄すべてで実際の打鍵を決める**(#2001 段 3 レビュー)。
+ * 表だけが飾りで、各欄の道が別の判定を持っている空振りを防ぐ ── 表を書き替えて挙動が替わることを欄ごとに見る。
+ * 1 画面の行(`row`)は本物の `RowSwap` を開いて打つ(binder は通らない道)。
+ */
+describe('欄の表(wrapSelection / autoPair)を書き替えると、4 つの欄すべてで挙動が替わる', () => {
+  function open(kind: EditingFieldKind, text: string, from: number, to = from): HTMLTextAreaElement {
+    if (kind !== 'row') return field(setup().root, EDITING_FIELD_NAMES[kind], text, from, to);
+    document.body.innerHTML = '';
+    const host = document.createElement('div');
+    document.body.append(host);
+    const swap = new RowSwap(host, { commit: () => {}, notify: () => {}, onInserted: () => {} });
+    const { html, ranges } = renderMarkdownWithRanges('最初の段落。');
+    expect(swap.update('最初の段落。', html, ranges).ok).toBe(true);
+    const p = [...host.querySelectorAll('p')].find((e) => e.textContent?.includes('最初'))!;
+    p.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
+    const ta = host.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+    expect(ta, 'row の欄が開いていない').not.toBeNull();
+    ta.value = text;
+    ta.setSelectionRange(from, to);
+    return ta;
+  }
+  /** `feature` を `value` にして `run` を走らせ、必ず戻す。 */
+  function withFlag<T>(kind: EditingFieldKind, feature: EditingFeature, value: boolean, run: () => T): T {
+    const row = EDITING_FIELD_FEATURES[kind] as Record<EditingFeature, boolean>;
+    const prev = row[feature];
+    row[feature] = value;
+    try {
+      return run();
+    } finally {
+      row[feature] = prev;
+    }
+  }
+  const typeKey = (ta: HTMLTextAreaElement, key: string): KeyboardEvent => press(ta, key);
+
+  describe.each(EDITING_FIELD_KINDS)('%s', (kind) => {
+    it('wrapSelection: 真なら ( で囲む / 偽なら囲まない(置き換えのまま)', () => {
+      const on = withFlag(kind, 'wrapSelection', true, () => {
+        const ta = open(kind, 'abcd', 1, 3);
+        const ev = typeKey(ta, '(');
+        return { prevented: ev.defaultPrevented, value: ta.value };
+      });
+      expect(on).toEqual({ prevented: true, value: 'a(bc)d' });
+      const off = withFlag(kind, 'wrapSelection', false, () => {
+        const ta = open(kind, 'abcd', 1, 3);
+        const ev = typeKey(ta, '(');
+        return { prevented: ev.defaultPrevented, value: ta.value };
+      });
+      expect(off).toEqual({ prevented: false, value: 'abcd' });
+    });
+    it('wrapSelection: `*` `_` も同じ表で決まる', () => {
+      for (const key of ['*', '_']) {
+        const on = withFlag(kind, 'wrapSelection', true, () => {
+          const ta = open(kind, 'abcd', 1, 3);
+          typeKey(ta, key);
+          return ta.value;
+        });
+        expect(on, `${kind} ${key}`).toBe(`a${key}bc${key}d`);
+        const off = withFlag(kind, 'wrapSelection', false, () => {
+          const ta = open(kind, 'abcd', 1, 3);
+          return typeKey(ta, key).defaultPrevented;
+        });
+        expect(off, `${kind} ${key}`).toBe(false);
+      }
+    });
+    it('autoPair: 選んでいない ( は、真なら補い / 偽なら補わない。囲む機能は別の真偽', () => {
+      const on = withFlag(kind, 'autoPair', true, () => {
+        const ta = open(kind, '', 0);
+        return { prevented: typeKey(ta, '(').defaultPrevented, value: ta.value };
+      });
+      expect(on).toEqual({ prevented: true, value: '()' });
+      const off = withFlag(kind, 'autoPair', false, () => {
+        const ta = open(kind, '', 0);
+        return { prevented: typeKey(ta, '(').defaultPrevented, value: ta.value };
+      });
+      expect(off).toEqual({ prevented: false, value: '' });
+      // autoPair を偽にしても、選んで打てば囲む(wrapSelection は別)
+      const stillWraps = withFlag(kind, 'autoPair', false, () => {
+        const ta = open(kind, 'abcd', 1, 3);
+        typeKey(ta, '(');
+        return ta.value;
+      });
+      expect(stillWraps).toBe('a(bc)d');
+      // wrapSelection を偽にしても、選んでいない ( は補う
+      const stillPairs = withFlag(kind, 'wrapSelection', false, () => {
+        const ta = open(kind, '', 0);
+        typeKey(ta, '(');
+        return ta.value;
+      });
+      expect(stillPairs).toBe(kind === 'append' ? '' : '()');
+    });
+    it('Backspace で補った対を一緒に消すのも autoPair の表に従う', () => {
+      const run = (v: boolean) =>
+        withFlag(kind, 'autoPair', v, () => {
+          const ta = open(kind, '()', 1);
+          press(ta, 'Backspace');
+          return ta.value;
+        });
+      expect(run(false)).toBe('()');
+      expect(run(true)).toBe('');
+    });
   });
 });

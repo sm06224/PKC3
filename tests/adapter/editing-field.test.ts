@@ -178,7 +178,7 @@ describe('欄の判定 1 か所(editing-field.ts)', () => {
   /** 欄 × 機能の全数の期待(実装の表を写さず、ここで独立に書く。変えたらこの表と下の振る舞いの両方が動く)。 */
   const EXPECT: Record<string, Record<EditingFeature, boolean>> = {
     editor: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true },
-    row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: true, wrapSelection: true },
+    row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true },
     section: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: false, wrapSelection: true },
     append: { enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: false, wrapSelection: true },
   };
@@ -219,8 +219,10 @@ describe('欄の判定 1 か所(editing-field.ts)', () => {
         const { root } = setup();
         const ta = field(root, NAME[k], '');
         const ev = press(ta, '(');
-        expect(ev.defaultPrevented, `${k}`).toBe(EXPECT[k]!.autoPair);
-        if (EXPECT[k]!.autoPair) expect(ta.value).toBe('()');
+        // 1 画面の行の欄の打鍵は `row-swap.ts` が受ける(この素の欄では起きない)── 行は `line-ops-fields.test.ts` が RowSwap で見る
+        const viaBinder = EXPECT[k]!.autoPair && k !== 'row';
+        expect(ev.defaultPrevented, `${k}`).toBe(viaBinder);
+        if (viaBinder) expect(ta.value).toBe('()');
       });
       it(`formatBar: ${k} は書式バーの対象欄か = ${EXPECT[k]!.formatBar}`, () => {
         const ta = document.createElement('textarea');
