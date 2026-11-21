@@ -27,6 +27,7 @@ import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
 import { decodeAsset } from '@adapter/platform/asset/asset-codec';
 import { readPkc2Package, peekZipFormat } from '@features/import/pkc2-package';
+import { isTemplateZip, importTemplateZip } from './import-template';
 import {
   archivePreviewOf,
   peekArchivePreview,
@@ -667,6 +668,11 @@ async function runImport(
         preWarnings.push(...restored.warnings);
         container = null;
       } else if (format === null) {
+        // 🔴 無印 PKC のテンプレート zip(`template.yaml`)は、PKC のバックアップではないが読める(#2002 段 3)
+        if (portable === null && (await isTemplateZip(file))) {
+          begin();
+          return await importTemplateZip(deps, file, fail, clearProgress);
+        }
         return fail(
           // ⚠ 内部の部品名(manifest.json)を出さない(#1087)
           `「${file.name}」: ${NOT_PKC_ZIP_REFUSAL}`,
