@@ -16,6 +16,7 @@ import { createTagColorListSection } from '../../src/adapter/ui/render/settings/
 import { snippetItemOf } from '../../src/features/snippet/snippet-table';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { openDialog } from './dialog-helper';
+import { SAMPLE_TEMPLATES, sampleLabel } from '../../src/features/snippet/sample-templates';
 
 const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -173,5 +174,31 @@ describe('④ テンプレートから作る', () => {
     );
     expect(dlg!.querySelectorAll('[data-pkc-field="pick-template-note"]')).toHaveLength(3);
     expect(sent.some((a) => a.type === 'CREATE_ENTRY')).toBe(false);
+  });
+
+  it('🔴 #2002 サンプルを選ぶと、題名つきの複製のノートが編集で開く(囲みは原文のまま・自分のテンプレートの一覧は増えない)', async () => {
+    const { d, sent, press } = setup();
+    press();
+    await tick();
+    const rows = [...openDialog()!.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-template-note"]')];
+    expect(rows.map((r) => r.textContent)).toEqual([
+      '議事録の型',
+      ...SAMPLE_TEMPLATES.map((x) => sampleLabel(x)),
+    ]);
+    const before = d.getState().snippetScan;
+    rows[2]!.click(); // 当番の引き継ぎ
+    await tick();
+    const created = sent.find((a) => a.type === 'CREATE_ENTRY') as
+      | { body?: string; title: string; archetype: string }
+      | undefined;
+    expect(created?.title).toBe('当番の引き継ぎ');
+    expect(created?.archetype).toBe('text');
+    const src = SAMPLE_TEMPLATES[1]!.body;
+    const form = src.slice(src.indexOf('```yaml form'), src.indexOf('```', src.indexOf('```yaml form') + 3) + 3);
+    expect(form.length).toBeGreaterThan(200);
+    expect(created!.body).toContain(form);
+    expect(d.getState().phase).toBe('editing');
+    expect(d.getState().snippetScan, '自分のテンプレートの走査結果が動いた').toBe(before);
+    expect([...d.getState().entryMetas.values()].some((m) => m.title === '議事録の型' || m.archetype === 'snippet')).toBe(false);
   });
 });
