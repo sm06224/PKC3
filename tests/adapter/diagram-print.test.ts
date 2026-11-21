@@ -43,7 +43,7 @@ vi.mock('../../src/adapter/ui/render/mermaid-raster', async (importOriginal) => 
             accent: '#2f8f5b',
             dark: true,
           }
-        : { bg: '#ffffff', alt: '#f5f6f8', fg: '#16191d', line: '#59616b', border: '#cdd2d9', accent: '#14663c', dark: false },
+        : { bg: '#ffffff', alt: '#f0f1f3', fg: '#16191d', line: '#59616b', border: '#cdd2d9', accent: '#14663c', dark: false },
   };
 });
 

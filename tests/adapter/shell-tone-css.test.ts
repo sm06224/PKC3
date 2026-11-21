@@ -39,7 +39,7 @@ describe('机と紙(#1982 段 2)', () => {
     expect(blocksFor(APP, "[data-pkc-region='inspector']").join('\n')).toMatch(decl('background', 'var\\(--bg\\)'));
     const center = blocksFor(APP, "[data-pkc-region='center']").join('\n');
     expect(center).toMatch(decl('background', 'var\\(--surface\\)'));
-    expect(center).toMatch(decl('box-shadow', 'var\\(--shadow-sm\\)'));
+    expect(center).toMatch(/box-shadow:[^;]*var\(--shadow-sm\)/); // 紙の縁は --hairline の輪を足してよい(質の悪い液晶向け)
     expect(center).not.toMatch(decl('background', 'var\\(--border\\)'));
     expect(center).not.toMatch(decl('gap', '1px'));
   });

@@ -174,7 +174,7 @@ export function isDarkColor(value: string): boolean {
 /** 既定(CSS が読めない環境 ── happy-dom の unit test など)。 */
 const FALLBACK: DiagramPalette = {
   bg: '#ffffff',
-  alt: '#f5f6f8',
+  alt: '#f0f1f3',
   fg: '#16191d',
   line: '#59616b',
   border: '#cdd2d9',
