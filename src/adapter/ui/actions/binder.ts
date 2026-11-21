@@ -336,7 +336,8 @@ import {
 } from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
 import { abbrBeforeCaret, type SnippetItem } from '@features/snippet/snippet-table';
-import { atChoices, slashChoices, slashToolChoices } from '@features/markdown/inline-complete';
+import { assetChoices, assetInsertEdit, atChoices, slashChoices, slashToolChoices } from '@features/markdown/inline-complete';
+import { createAssetIndex } from './asset-complete-index';
 import { snippetMenu, snippetMenuNote, type SnippetChoice } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { appendAndSettle } from '@adapter/state/append-settle';
@@ -25086,6 +25087,7 @@ export function bindActions(
    *   `applySnippetPick` / `atChoices` → `formatEntryLink` / `insertionForLineDate`)── 入口を増やすだけで、
    *   挿す仕事の規則を 2 つにしない(§7)。挿すのは `insertText` / `writeBack` なので `Ctrl+Z` で戻せる。
    */
+  const assetIndex = createAssetIndex();
   undo.push(
     bindInlineComplete(root, {
       /**
@@ -25112,6 +25114,25 @@ export function bindActions(
         // 🔴 設定で切れる(読むたびに保存を見る ── 別のタブで切っても追随する)
         if (!appInlineComplete.enabled()) return [];
         const st = dispatcher.getState();
+        if (trigger.kind === 'asset') {
+          // 🔴 #2001 段 4: `(asset:` ── この container の添付の一覧(名前・種類・大きさ)。選ぶと**参照として正しい 1 つの形**を `insertText` で入れる(`Ctrl+Z` で戻せる)
+          const read = services.readBodies;
+          if (read === undefined) return [];
+          return assetIndex.rows(st.entryMetas, st.order, read).then((rows) =>
+            assetChoices(rows, trigger.query).map(
+              (c): CompleteItem => ({
+                title: c.row.name,
+                sub: c.sub,
+                accept: (ta, tr) => {
+                  const e = assetInsertEdit(ta.value, tr.start, ta.selectionEnd, c.row);
+                  ta.focus();
+                  ta.setSelectionRange(e.start, e.end);
+                  insertText(ta, e.text);
+                },
+              }),
+            ),
+          );
+        }
         if (trigger.kind === 'slash') {
           const snippets = st.snippetScan?.items ?? [];
           // 🔴 #1982 段 3: 語を打ったときは、先に聞く挿入の道具(日付 / ノートリンク / 添付 / アイコン)も候補に出す。

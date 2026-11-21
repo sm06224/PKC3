@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { atChoices, detectTrigger, slashChoices, slashToolChoices, SLASH_TOOLS } from '../../src/features/markdown/inline-complete';
+import { assetChoices, assetInsertEdit, atChoices, detectTrigger, slashChoices, slashToolChoices, SLASH_TOOLS } from '../../src/features/markdown/inline-complete';
 
 const meta = (lid: string, title: string, i: number) =>
   ({ lid, title, archetype: 'text', createdAt: null, updatedAt: null, entryOrder: i, status: null, date: null, archived: false }) as never;
@@ -96,5 +96,39 @@ describe('slashToolChoices(#1982 段 3)── 先に聞く挿入の道具', () =
       expect(t.label, t.action).not.toBe('');
       expect(t.keys.length, t.action).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('(asset: の補完(#2001 段 4)', () => {
+  const rows = [
+    { lid: 'a', name: '請求書.pdf', mime: 'application/pdf', size: 2048, key: 'k1' },
+    { lid: 'b', name: 'photo one.png', mime: 'image/png', size: 100, key: 'k 2' },
+    { lid: 'c', name: 'memo.txt', mime: 'text/plain', size: null, key: 'k3' },
+  ];
+  it('3 つの書き方どれでも引き金になり、start は `(` の位置', () => {
+    expect(detectTrigger('(asset:', 7)).toEqual({ kind: 'asset', start: 0, query: '' });
+    expect(detectTrigger('![](asset:ab', 12)).toEqual({ kind: 'asset', start: 3, query: 'ab' });
+    expect(detectTrigger('x [名前](asset:', 13)).toEqual({ kind: 'asset', start: 6, query: '' });
+  });
+  it('コードの中では出ず、表のセルの中では出る / 語に空白が入ったら終わり', () => {
+    expect(detectTrigger('`(asset:', 8)).toBeNull();
+    expect(detectTrigger('```\n(asset:', 11)).toBeNull();
+    expect(detectTrigger('| ![](asset:', 12)?.kind).toBe('asset');
+    expect(detectTrigger('(asset:a b', 10)).toBeNull();
+  });
+  it('語で絞る(名前・種類の名前)。空なら先頭から。添え書きは種類 · 大きさ', () => {
+    expect(assetChoices(rows, '').map((c) => c.row.lid)).toEqual(['a', 'b', 'c']);
+    expect(assetChoices(rows, '請求').map((c) => c.row.lid)).toEqual(['a']);
+    expect(assetChoices(rows, 'pdf').map((c) => c.row.lid)).toEqual(['a']);
+    expect(assetChoices(rows, 'PNG').map((c) => c.row.lid)).toEqual(['b']);
+    expect(assetChoices(rows, 'zzz')).toEqual([]);
+    expect(assetChoices(rows, '')[0]?.sub).toBe('PDF · 2.0 KB');
+    expect(assetChoices(rows, '')[2]?.sub).toBe('テキスト');
+  });
+  it('入れる形: 画像は ! 付き・ラベルは打ったものを使う・自動の ) を二重にしない', () => {
+    expect(assetInsertEdit('a (asset:ph)', 2, 11, rows[1]!)).toEqual({ start: 2, end: 12, text: '![photo one.png](<asset:k 2>)' });
+    expect(assetInsertEdit('[](asset:', 2, 9, rows[0]!)).toEqual({ start: 0, end: 9, text: '[請求書.pdf](asset:k1)' });
+    expect(assetInsertEdit('前 [図1](asset:', 6, 13, rows[1]!)).toEqual({ start: 2, end: 13, text: '![図1](<asset:k 2>)' });
+    expect(assetInsertEdit('![](asset:', 3, 10, rows[0]!).text).toBe('[請求書.pdf](asset:k1)');
   });
 });

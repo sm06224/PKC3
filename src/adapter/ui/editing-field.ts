@@ -46,13 +46,17 @@ export type EditingFeature =
   /** 書式のバー(ボタンの帯)が付く欄。⚠ 追記の欄はバーを持たず、キーだけ(user 裁定 2026-11-21)。 */
   | 'formatBar'
   /** 字を選んで括弧・引用符・`*` `_` を打つと囲む(`wrapSelection`。#2001 段 3)。⚠ 追記の欄も持つ(補完は持たないが囲むのは持つ)。 */
-  | 'wrapSelection';
+  | 'wrapSelection'
+  /** 行頭の `/` と `@` の補完の小窓(`render/inline-complete.ts`)。⚠ 章の欄は従来から持たない(#2001 段 4 で表に出した)。 */
+  | 'inlineComplete'
+  /** `(asset:` の補完(この container の添付の一覧。#2001 段 4)。4 つの欄すべてで出る。 */
+  | 'assetComplete';
 
 export const EDITING_FIELD_FEATURES: Readonly<Record<EditingFieldKind, Readonly<Record<EditingFeature, boolean>>>> = {
-  editor: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true },
-  row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true },
-  section: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: false, wrapSelection: true },
-  append: { enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: false, wrapSelection: true },
+  editor: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true, inlineComplete: true, assetComplete: true },
+  row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true, wrapSelection: true, inlineComplete: true, assetComplete: true },
+  section: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: false, wrapSelection: true, inlineComplete: false, assetComplete: true },
+  append: { enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: false, wrapSelection: true, inlineComplete: true, assetComplete: true },
 };
 
 /** 欄の名前 → 種類。本文を書く欄でなければ `null`。 */

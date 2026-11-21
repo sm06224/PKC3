@@ -10,6 +10,8 @@
  * - `/` … **行頭だけ**(`A/B` ・ 日付 ・ URL の途中では出ない)。一覧が 0 件になったら閉じる
  *   (`/usr/bin` を打つ人の邪魔をしない)。日本語入力オンの `／` と、`・`(`・` は箇条書きに普通に使うので
  *   **字が続いたときだけ**)も引き金にする。
+ * - `(asset:` … 添付の参照(`![名前](asset:…)` / `[名前](asset:…)` / 裸の `(asset:`)を打ち始めたとき(#2001 段 4)。
+ *   コードの中では出さない。表の行の中では出す(セルに添付を入れる)。
  * - `@` … **行頭か空白の直後だけ**。直後が数字(`@2026-…` の予定記法)・`[`(`@[card](…)`)のときは出さない。
  *
  * ⚠ **pure module**。DOM も state も知らない(候補の元は呼び手が渡す)。
@@ -20,10 +22,13 @@ import { foldText } from '@features/filter/fold-text';
 import { DATE_SHORTCUTS, shortcutDate, type DateShortcut } from '@features/schedule/date-shortcuts';
 import type { SnippetItem } from '@features/snippet/snippet-table';
 import { snippetMenu, type SnippetChoice } from '@features/snippet/snippet-menu';
+import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
+import { mimeLabel } from '@features/asset/mime-label';
+import { humanBytes } from '@features/human-bytes';
 import { lineStart } from './line-start';
 import { FORMAT_OPS } from './text-ops';
 
-export type CompleteKind = 'slash' | 'at';
+export type CompleteKind = 'slash' | 'at' | 'asset';
 
 export interface CompleteTrigger {
   readonly kind: CompleteKind;
@@ -39,6 +44,8 @@ export const COMPLETE_LIMIT = 8;
 const SLASH_RE = /^[ \t]*([/／・])([^\s]*)$/u;
 /** フェンスの開き / 閉じの行(行頭の ``` か ~~~)。 */
 const FENCE_LINE_RE = /^[ \t]*(?:```|~~~)/gm;
+/** `(asset:` の直後(語は空白・括弧を含まない)。`![](asset:` `[名前](asset:` も、この `(` から始まる。 */
+const ASSET_RE = /\(asset:([^\s()]*)$/u;
 const AT_RE = /(^|[\s\u3000(（])@([^\s@[\]()（）]*)$/u;
 
 /**
@@ -56,6 +63,12 @@ export function detectTrigger(value: string, caret: number): CompleteTrigger | n
    */
   if ((value.slice(0, ls).match(FENCE_LINE_RE)?.length ?? 0) % 2 === 1) return null;
   if ((line.match(/`/g)?.length ?? 0) % 2 === 1) return null;
+  // 添付の参照は表のセルの中でも打つ(`/` と `@` は表の行では出さない)
+  const asset = ASSET_RE.exec(line);
+  if (asset !== null) {
+    const query = asset[1] ?? '';
+    return { kind: 'asset', start: ls + line.length - query.length - 'asset:'.length - 1, query };
+  }
   if (/^[ \t]*\|/.test(line)) return null;
   const s = SLASH_RE.exec(line);
   if (s !== null) {
@@ -150,4 +163,64 @@ export function atChoices(
     (r: EntryPickRow) => ({ kind: 'note', lid: r.lid, title: r.title, sub: r.kind }),
   );
   return [...dates, ...notes];
+}
+
+/** 添付の候補 1 件の元(本文の frontmatter から読んだ名前・種類・大きさと、`asset:` の key)。 */
+export interface AssetRow {
+  readonly lid: string;
+  readonly name: string;
+  readonly mime: string;
+  readonly size: number | null;
+  readonly key: string;
+}
+
+export interface AssetChoice {
+  readonly row: AssetRow;
+  /** 右に出す添え書き(種類 · 大きさ)。 */
+  readonly sub: string;
+}
+
+/**
+ * `(asset:` の候補。名前・種類の名前(`PDF` など)に語が含まれるものを、与えられた順のまま `COMPLETE_LIMIT` 件。
+ * ⚠ 語が空なら先頭から。
+ */
+export function assetChoices(rows: readonly AssetRow[], query: string): AssetChoice[] {
+  const q = fold(query);
+  const out: AssetChoice[] = [];
+  for (const row of rows) {
+    if (q !== '' && !fold(row.name).includes(q) && !fold(mimeLabel(row.mime)).includes(q)) continue;
+    out.push({ row, sub: row.size === null ? mimeLabel(row.mime) : `${mimeLabel(row.mime)} · ${humanBytes(row.size)}` });
+    if (out.length >= COMPLETE_LIMIT) break;
+  }
+  return out;
+}
+
+export interface AssetEdit {
+  /** 置き換える範囲(欄の位置)と、入れる字。 */
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+}
+
+/**
+ * 選んだ添付を、**参照として正しい 1 つの形**で入れる編集を作る(`formatAssetRef` が唯一の組み立て)。
+ * - `![](asset:` `[名前](asset:` と打っていたら、その `[…]` ごと置き換える(ラベルを打っていればそのまま使い、空なら添付の名前)。
+ *   画像かどうかは添付の種類で決まる(`[](asset:` と打っても画像なら `!` が付く)。
+ * - 裸の `(asset:` は `(` から `![名前](asset:…)` / `[名前](asset:…)` に置き換える。
+ * - caret の直後に自動補完の `)` が在れば、それも置き換える(`))` にしない)。
+ * @param parenAt 引き金(`(`)の位置 / @param caret 欄の caret
+ */
+export function assetInsertEdit(value: string, parenAt: number, caret: number, row: AssetRow): AssetEdit {
+  const ls = lineStart(value, parenAt);
+  const before = value.slice(ls, parenAt);
+  const m = /(!?)\[((?:[^\]\\]|\\.)*)\]$/u.exec(before);
+  let start = parenAt;
+  let label = row.name;
+  if (m !== null) {
+    start = ls + before.length - m[0].length;
+    const typed = (m[2] ?? '').replace(/\\(.)/gu, '$1');
+    if (typed.trim() !== '') label = typed;
+  }
+  const end = value[caret] === ')' ? caret + 1 : caret;
+  return { start, end, text: formatAssetRef(label, `asset:${row.key}`, isImageAssetMime(row.mime)) };
 }

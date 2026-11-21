@@ -20,6 +20,7 @@
  * - `Esc` は小窓を閉じるだけで、編集そのものは終わらせない(`stopImmediatePropagation`)。
  */
 import { detectTrigger, type CompleteTrigger } from '@features/markdown/inline-complete';
+import { EDITING_FIELD_NAMES, EDITING_FIELD_KINDS, fieldHas } from '../editing-field';
 
 export interface CompleteItem {
   readonly title: string;
@@ -33,7 +34,10 @@ export interface CompleteItem {
 }
 
 export interface InlineCompleteDeps {
-  items(trigger: CompleteTrigger, ta: HTMLTextAreaElement): readonly CompleteItem[];
+  /**
+   * ⚠ 添付の一覧のように読むのに時間がかかる元は `Promise` で返してよい。待つ間に引き金が変わった / 欄が消えたら捨てる。
+   */
+  items(trigger: CompleteTrigger, ta: HTMLTextAreaElement): readonly CompleteItem[] | Promise<readonly CompleteItem[]>;
   /**
    * 🔴 **画面の状態が変わったら閉じるための購読**(ノート切替・編集の確定など)。
    * 渡された `close` を、閉じたい変化のときに呼ぶ。外す関数を返す。
@@ -43,8 +47,8 @@ export interface InlineCompleteDeps {
 }
 
 export const COMPLETE_REGION = 'inline-complete';
-const FIELDS =
-  'textarea[data-pkc-field="editor-body"], textarea[data-pkc-field="row-source"], textarea[data-pkc-field="append-input"]';
+/** 4 つの欄すべて(どの引き金がどの欄で出るかは `fieldHas` の表 ── `inlineComplete` / `assetComplete`)。 */
+const FIELDS = EDITING_FIELD_KINDS.map((k) => `textarea[data-pkc-field="${EDITING_FIELD_NAMES[k]}"]`).join(', ');
 
 const MIRROR_PROPS = [
   'boxSizing', 'width', 'overflowX', 'overflowY', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth',
@@ -89,6 +93,8 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
     el: HTMLElement;
   }
   let open: Open | null = null;
+  // 非同期の候補の世代(古い応答を捨てる)
+  let generation = 0;
   // Esc で閉じた引き金(欄 + 位置 + そのときの語)。同じ語のまま打ち進める間は出し直さない(語が変われば出る)
   let dismissed: { ta: HTMLTextAreaElement; start: number; query: string } | null = null;
 
@@ -108,6 +114,7 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
   };
 
   const close = (): void => {
+    generation += 1;
     if (open !== null) open.el.remove();
     open = null;
     detachFollow();
@@ -170,7 +177,38 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
       }
       dismissed = null;
     }
-    const items = deps.items(trigger, ta);
+    // 🔴 この欄でその引き金を出してよいか(`fieldHas` の表が答える)
+    const name = ta.getAttribute('data-pkc-field');
+    if (!fieldHas(name, trigger.kind === 'asset' ? 'assetComplete' : 'inlineComplete')) {
+      close();
+      return;
+    }
+    const got = deps.items(trigger, ta);
+    if (Array.isArray(got)) {
+      show(ta, trigger, got as readonly CompleteItem[]);
+      return;
+    }
+    // 非同期の元 ── 世代を進め、返ってきたとき引き金がまだ同じなら出す
+    const gen = (generation += 1);
+    void (got as Promise<readonly CompleteItem[]>).then(
+      (list) => {
+        if (gen !== generation || !ta.isConnected) return;
+        if (ta.selectionStart !== ta.selectionEnd || ta.selectionStart === null) return;
+        const now = detectTrigger(ta.value, ta.selectionStart);
+        if (now === null || now.kind !== trigger.kind || now.start !== trigger.start) return;
+        if (dismissed !== null && dismissed.ta === ta && dismissed.start === now.start) return;
+        // 待つ間に語が進んでいたら、その語で引き直す(古い一覧を出さない)
+        if (now.query !== trigger.query) {
+          refresh(ta);
+          return;
+        }
+        show(ta, now, list);
+      },
+      () => undefined,
+    );
+  };
+
+  const show = (ta: HTMLTextAreaElement, trigger: CompleteTrigger, items: readonly CompleteItem[]): void => {
     // 0 件なら出さない(`/usr/bin` や `@foo` を打つ手を邪魔しない)
     if (items.length === 0) {
       close();
@@ -183,7 +221,10 @@ export function bindInlineComplete(root: HTMLElement, deps: InlineCompleteDeps):
       const el = root.ownerDocument.createElement('div');
       el.setAttribute('data-pkc-region', COMPLETE_REGION);
       el.setAttribute('role', 'listbox');
-      el.setAttribute('aria-label', trigger.kind === 'slash' ? '記法の候補' : 'ノートと日付の候補');
+      el.setAttribute(
+        'aria-label',
+        trigger.kind === 'slash' ? '記法の候補' : trigger.kind === 'asset' ? '添付の候補' : 'ノートと日付の候補',
+      );
       root.append(el);
       attachFollow();
       open = { ta, trigger, items, index: 0, navigated: false, el };
