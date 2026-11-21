@@ -39,7 +39,7 @@
   --accent-dim-fg: #0d3f26;
   --danger: #a3231c;
   --warn: #7a4a00;
-  --ok: #197d36; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
+  --ok: #187733; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2` = `pre` の背景)*/
   --code-key: #1f4bb8;
   --code-lit: #0a6b52;
@@ -102,13 +102,13 @@
   --fg: #1f2328;
   --muted: #59636e;
   --border: #d1d9e0;
-  --accent: #0969da;
+  --accent: #0965d3;
   --accent-fg: #ffffff;
   --accent-dim: #ddf4ff;
   --accent-dim-fg: #0a3069;
-  --danger: #cf222e;
-  --warn: #9a6700;
-  --ok: #197d36; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
+  --danger: #cb212d;
+  --warn: #8d5e00;
+  --ok: #187733; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2` = `pre` の背景)。Primer の keyword / string */
   --code-key: #cf222e;
   --code-lit: #0a3069;
@@ -165,18 +165,18 @@
 
 /* Solarized(Ethan Schoonover)*/
 :root[data-pkc-theme='solarized'] {
-  --bg: #e8e2d0; /* base2 */
+  --bg: #e8e2d0; /* 公式の base2(#eee8d5)より少し沈めた ── 質の悪い液晶でも紙との段差が見えるように(2026-11-21)。base2 は `--surface-2` に残す */
   --surface: #fdf6e3; /* base3 */
   --surface-2: #eee8d5;
   --fg: #073642; /* base02 ── base00 は本文向けで、UI には暗い側を使う */
-  --muted: #546a71; /* base01 をわずかに濃く ── base01 のままだと見出し帯で 4.39:1 */
+  --muted: #52676e; /* base01 を濃く ── 見出し帯で 4.39:1、段差を広げた `--bg` の上で 4.41:1 だった。いまは 4.6 以上 */
   --border: #d5cdb6;
   --accent: #1a6b8f;
   --accent-fg: #fdf6e3;
   --accent-dim: #d7e6ee;
   --accent-dim-fg: #08303f;
   --danger: #b0261f;
-  --warn: #8a6600;
+  --warn: #805e00;
   --ok: #546a00; /* 信号機の「緑」(#1457)。情報の色であって飾りではない */
   /* コードの色(地は `--surface-2`)。green/cyan を暗く ── 公式値は地に対して 2.6:1 */
   --code-key: #5f6f00;

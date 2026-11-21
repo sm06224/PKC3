@@ -88,6 +88,17 @@ describe('ヘアライン(縁の細い線)', () => {
       const rule = new RegExp(`\\nbutton\\[data-pkc-variant='${v}'\\] \\{[^}]*\\}`).exec(app)![0];
       expect(rule, v).toMatch(/border-color:\s*(transparent|var\(--accent\))/);
     }
+    /**
+     * 🔴 **地が透明で枠を消していないボタンは、輪郭線だけが浮く**(着地前レビュー)── 標準のボタンに枠の色を
+     *   付けたので、地を `transparent` にしている規則は枠も `transparent` にする。走査で 1 件(左右の端の道具)だけだった。
+     *   ⚠ 1 件だけ pin すると次に足した規則を見逃すので、**全部の button 規則を走査**する
+     */
+    const leaky = [...app.matchAll(/(^|\n)([^{}\n]*\bbutton\b[^{}]*)\{([^}]*)\}/g)]
+      .filter(([, , , body]) => /background:\s*(transparent|none)\s*;/.test(body!) && !/border(-color)?:/.test(body!))
+      .map(([, , sel]) => sel!.trim());
+    const seen = [...app.matchAll(/\bbutton\b[^{}]*\{[^}]*background:\s*transparent/g)].length;
+    expect(seen, '前提: 地が透明のボタン規則を引けている').toBeGreaterThan(5);
+    expect(leaky, '地が透明なのに枠の色を消していない(輪郭線だけ浮く)').toEqual([]);
     // 格子の復活なし
     const shell = /\[data-pkc-region='shell'\]\s*\{[^}]*\}/.exec(app)![0];
     expect(shell).not.toMatch(/gap:\s*1px/);

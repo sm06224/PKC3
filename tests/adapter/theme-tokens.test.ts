@@ -67,6 +67,14 @@ const PAIRS: readonly { fg: string; bg: string; min: number; what: string }[] = 
   { fg: '--fg', bg: '--surface-2', min: 4.5, what: '本文(見出し帯)' },
   { fg: '--muted', bg: '--surface', min: 4.5, what: '補助文' },
   { fg: '--muted', bg: '--surface-2', min: 4.5, what: '補助文(見出し帯)' },
+  /**
+   * 🔴 **左右の列は `--bg` の地**(`app.css` の sidebar / inspector)── 補助文・緑・危険の字がそのまま載る。
+   * ⚠ 質の悪い液晶向けに `--bg` を沈めたとき(2026-11-21)、この組が無かったので solarized の補助文が 4.41、
+   *   github の緑・注意が 4.36 / 4.07 まで落ちても全部緑だった(着地前レビュー)。地を動かす人が気づけるようにここで持つ
+   */
+  { fg: '--muted', bg: '--bg', min: 4.5, what: '補助文(左右の列の地)' },
+  { fg: '--ok', bg: '--bg', min: 4.5, what: '緑(左右の列の地)' },
+  { fg: '--danger', bg: '--bg', min: 4, what: '危険な操作(左右の列の地)' },
   // 🔴 この対は**主のボタン**(`button[data-pkc-variant='primary']`。#1982 段 1)の字と地でもある ── 最上部の帯と同じ 4.5:1 を全テーマで課す
   { fg: '--accent-fg', bg: '--accent', min: 4.5, what: '最上部の帯・主のボタン' },
   { fg: '--accent-dim-fg', bg: '--accent-dim', min: 4.5, what: '選択中の行' },
