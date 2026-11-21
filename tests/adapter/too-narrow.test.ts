@@ -383,6 +383,46 @@ describe('字', () => {
     );
   });
 
+  /**
+   * 🔴 **OK はステータスバーの他の字が出入りしても動かない**(2026-11-21、フル smoke の負荷下で 1 度落ちた)。
+   *
+   * ⚠ 直す前は断り書きの帯が状態の字(`status-text`)と**同じ 1 行**に `flex: 1` で並んでいた。
+   *   書き込みが 400ms を超えると「保存中…」が**遅れて**状態の字に入る(`saving-line.ts`)── 実測(340px)で
+   *   OK が **x=16 → x=58.5 へ 42px 右にずれ**、押そうとした所は状態の字の上になる(押しが失われる)。
+   *   書き込みの長さは負荷で決まるので、user が OK へ指を下ろす瞬間に出入りしうる。
+   * 🔑 だから帯を**最下段の 1 行に固定する**(幅 100% の行・並びは最後)── 上の行に何が出ても、
+   *   ステータスバーは上へ伸びるだけで、OK の位置は変わらない(founding §10「同じものが常に同じ場所にある」)。
+   * ⚠ 帯だけのときに空の 1 行目が行間ぶん帯を押し下げないよう、帯が出ている間は行間を 0 にする。
+   * ⚠ happy-dom は配置を計算しないので、ここは CSS の契約を見る。実際の位置は
+   *   `tests/smoke/phone.smoke.spec.ts` の 340px の腕が実ブラウザで測る。
+   */
+  it('🔴 断り書きの帯はステータスバーの最下段の 1 行を占める(他の字の出入りで OK が動かない)', () => {
+    const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const band = blocksFor(css, `[data-pkc-region='too-narrow']`).join(';');
+    expect(band, '帯が自分の 1 行を占めていない(状態の字と同じ行に並ぶ)').toMatch(
+      decl('flex', '1 1 100%\\s*(?:;|$)'),
+    );
+    const order = /(?:^|;)\s*order:\s*(\d+)\s*(?:;|$)/.exec(band);
+    expect(order, '帯の並びを最後に固定していない(DOM の順に依っている)').not.toBeNull();
+    // ⚠ `order: 0` は既定値と同じ(DOM の順に依る)── 1 以上で、ほかの子(既定 0)より後ろに固定する
+    expect(Number(order![1]), '帯の order が既定値のまま(DOM の順に依っている)').toBeGreaterThanOrEqual(1);
+    // ⚠ 帯より後ろに並ぶ物が無い ── ステータスバーの子に、帯以上の order を持つ規則が 0 件
+    const later: string[] = [];
+    for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const sel = m[1]!.trim();
+      if (!/status|too-narrow/.test(sel) || sel === `[data-pkc-region='too-narrow']`) continue;
+      const o = /(?:^|[;\s])order:\s*(-?\d+)/.exec(m[2]!);
+      if (o !== null && Number(o[1]) >= Number(order![1])) later.push(sel);
+    }
+    expect(later, '帯より後ろへ並ぶ物がある').toEqual([]);
+    // 🔑 帯が出ている間は行間 0(空の 1 行目が帯を押し下げない)
+    const gap = blocksFor(
+      css,
+      `[data-pkc-region='status']:has(> [data-pkc-region='too-narrow']:not([hidden]))`,
+    ).join(';');
+    expect(gap, '帯が出ている間の行間を決めていない').toMatch(decl('row-gap', '0'));
+  });
+
   it('⚠ 短く保つ(340px の帯に押す口ごと収める)', () => {
     expect(TOO_NARROW_TEXT.length, '長すぎて 340px の帯からはみ出す').toBeLessThanOrEqual(33);
     expect(TOO_NARROW_OK, '押す口の字が長い(帯を押し広げる)').toHaveLength(2);
