@@ -20,6 +20,7 @@
 
 import { foldText } from './fold-text';
 import { tagQueryOf } from './tag-query';
+import { splitLabelQuery } from './label-query';
 
 /**
  * 比較に使う形へ(全角半角・濁点の持ち方・大小を揃えて、前後の空白を落とす)。空文字 = 絞り込み無し。
@@ -85,8 +86,11 @@ export interface EntryFilter {
 
 /** 色ラベルで絞る条件(`features/note-label.ts` の番号)。 */
 export interface LabelFilter {
-  readonly color: number;
+  /** 色のボタンで選んだ色。`null` = ボタンでは絞っていない。 */
+  readonly color: number | null;
   readonly labels: ReadonlyMap<string, number>;
+  /** 探す欄の `色:緑` の語から取り出した色(`entryFilterOf` が埋める。全部満たす = AND)。 */
+  readonly terms?: readonly number[];
 }
 
 /** 種類で絞っていない状態。⚠ 呼び手ごとに `new Set()` を書かない(毎描画の確保になる)。 */
@@ -102,7 +106,15 @@ export const entryFilterOf = (
   bodyHits: ReadonlySet<string> | null,
   kinds: ReadonlySet<string>,
   label: LabelFilter | null = null,
-): EntryFilter => ({ query: normalizeQuery(rawQuery), bodyHits, kinds, label });
+): EntryFilter => {
+  // 🔴 探す欄の色の語(`色:緑`)はここで 1 回だけ取り出す(読む表は note-label.ts の 1 本)。残りがふつうの語。
+  const { rest, colors } = splitLabelQuery(rawQuery);
+  const merged: LabelFilter | null =
+    label === null && colors.length === 0 ? null : { color: label?.color ?? null, labels: label?.labels ?? NO_LABELS, terms: colors };
+  return { query: normalizeQuery(rest), bodyHits, kinds, label: merged };
+};
+
+const NO_LABELS: ReadonlyMap<string, number> = new Map<string, number>();
 
 /**
  * 🔴 **題名 + 本文 + 種類**で見る(#181 / #411)。本文の当たりは SQL 側から来た
@@ -119,7 +131,11 @@ export const entryFilterOf = (
 export function matchesEntry(target: FilterTarget, filter: EntryFilter): boolean {
   if (filter.kinds.size > 0 && !filter.kinds.has(target.archetype)) return false;
   // 🔴 色ラベル(#1982 段 4)── 種類と同じく、語が空でも効く
-  if (filter.label != null && filter.label.labels.get(target.lid) !== filter.label.color) return false;
+  if (filter.label != null) {
+    const have = filter.label.labels.get(target.lid);
+    if (filter.label.color !== null && have !== filter.label.color) return false;
+    for (const c of filter.label.terms ?? []) if (have !== c) return false;
+  }
   if (filter.query === '') return true;
   /**
    * 🔴 **`#タグ` の問い合わせは、そのタグが付いたノートだけ**(依頼 317)。題名では当てない ──

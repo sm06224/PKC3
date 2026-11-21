@@ -121,6 +121,7 @@ import type { WorkLogScan } from '@features/timer/work-log';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { SearchDetailRow } from '@features/filter/search-snippet';
 import { tagQueryOf } from '@features/filter/tag-query';
+import { splitLabelQuery } from '@features/filter/label-query';
 import type { Relation } from '@core/model/entry-meta';
 import type { Dispatcher } from './dispatcher';
 import type { AppState, TagInputField, TagUndoGroup } from './app-state';
@@ -1240,9 +1241,19 @@ export function connectStoreEffects(
          * 🔑 集めるのはスマートフォルダと同じ走査(`smartScan`。文書タグ + 本文中のタグ。突き合わせは `sameTag` 1 本)── 規則を
          *   2 つ作らない(§7)。上限(`SMART_LIMIT`)を超えたら `truncated`(「ほかにもあります」)で言う。
          */
-        const searchOf = (query: string): typeof store.searchEntries => {
+        const searchOf = (rawQuery: string): typeof store.searchEntries => {
+          /**
+           * 🔴 **色の語(`色:緑`)は本文に当てない**(#1982 段 4)── 色は state の表で当てる(`matchesEntry`)。
+           *   残りの語だけを探す。残りが空なら探すものが無い(色だけで絞る)。
+           */
+          const query = splitLabelQuery(rawQuery).rest;
+          if (query === '' && rawQuery.trim() !== '') return async () => ({ lids: [], truncated: false });
           const tagName = tagQueryOf(query);
-          if (tagName === null) return store.searchEntries;
+          if (tagName === null) {
+            const base = store.searchEntries;
+            if (base === undefined || query === rawQuery) return base;
+            return (_q, within) => (within === undefined ? base(query) : base(query, within));
+          }
           const scanTag = store.smartScan;
           if (scanTag === undefined) return undefined;
           return async () => {

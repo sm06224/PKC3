@@ -15,6 +15,7 @@ export class NoteLabelStore {
   private writer: NoteLabelWriter | null = null;
   private onFail: (() => void) | null = null;
   private chain: Promise<void> = Promise.resolve();
+  private readonly writtenListeners = new Set<() => void>();
 
   /** lid → 色の番号。 */
   all(): ReadonlyMap<string, number> {
@@ -39,6 +40,15 @@ export class NoteLabelStore {
     this.emit();
   }
 
+  /**
+   * 🔴 **正本への書込が終わった**ときに呼ぶ(`onChange` は写しを動かした時点)。
+   * ⚠ storage を読み直す側(色で絞るスマートフォルダの集め直し)は、書込を追い越さないようこちらを使う。
+   */
+  onWritten(cb: () => void): () => void {
+    this.writtenListeners.add(cb);
+    return () => void this.writtenListeners.delete(cb);
+  }
+
   onChange(cb: () => void): () => void {
     this.listeners.add(cb);
     return () => void this.listeners.delete(cb);
@@ -57,6 +67,9 @@ export class NoteLabelStore {
         .then(() => writer(lid, color))
         .catch(() => {
           this.onFail?.();
+        })
+        .then(() => {
+          for (const cb of [...this.writtenListeners]) cb();
         });
     }
   }

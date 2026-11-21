@@ -1551,6 +1551,7 @@ function runSmartScan(
     text: string | null;
     tasks: boolean | null;
     openTasks: boolean | null;
+    label?: number | null;
   },
 ): { lids: string[]; total: number } {
   const database = need();
@@ -1574,6 +1575,7 @@ function runSmartScan(
        */
       tasks: q.tasks,
       openTasks: q.openTasks,
+      label: q.label ?? null,
     },
     lid,
   );
@@ -1605,6 +1607,14 @@ function runSmartScan(
     args.push(q.createdFrom);
   }
   if (q.dated !== null) conds.push(q.dated ? 'date IS NOT NULL' : 'date IS NULL');
+  /**
+   * 🔴 **色ラベル**(#1982 段 4)── 色は器の `settings` 表(`note-label:<cid>`、`k` = lid、`v` = 番号の字)に在る。
+   *   ⚠ 列ではなく表を引くので、上限(`SMART_LIMIT`)で切る前に絞れる(色で絞った当たりが切れて落ちない)。
+   */
+  if (q.label != null) {
+    conds.push('lid IN (SELECT k FROM settings WHERE scope = ? AND v = ?)');
+    args.push(noteLabelScope(cid), String(q.label));
+  }
   /**
    * 🔴 **チェック項目は「候補へ縮める」だけ**(#421 段④)── 確定は本文を読む側。
    *

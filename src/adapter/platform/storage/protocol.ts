@@ -330,6 +330,8 @@ export type StorageRequest =
       tasks: boolean | null;
       /** 未処理のチェック項目がある / 無い(#421 段④)。 */
       openTasks: boolean | null;
+      /** 色ラベルの番号(#1982 段 4)。器の `settings` 表(`note-label:<cid>`)を SQL で引く。 */
+      label?: number | null;
     }
   /**
    * 本文を **まとめて** 取る(P6d ── 書出し用)。

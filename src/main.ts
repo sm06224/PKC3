@@ -1618,6 +1618,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   );
   // 写しが動いたら state へ(行の左の線・色の絞りは state を読んで描く)。⚠ 読み込みより先に張る
   appNoteLabels.onChange(() => dispatcher.dispatch({ type: 'SET_NOTE_LABELS', labels: appNoteLabels.all() }));
+  // 🔴 色で絞るスマートフォルダ(`smart-label`)は、色の書込が終わってから集め直す(書込を追い越すと古い色で当たる)
+  appNoteLabels.onWritten(() => {
+    for (const [lid, hit] of dispatcher.getState().smartHits) {
+      if (hit.spec.label !== null) dispatcher.dispatch({ type: 'SMART_RESCAN', lid });
+    }
+  });
   // 🔴 ピン留めの写しをタブへも渡す(#1982 段 5 ── 追い出し・並びがピン留めを見る)
   appNotePins.onChange(() => dispatcher.dispatch({ type: 'SET_NOTE_PINS', lids: appNotePins.list() }));
   void reloadNoteLabels();
