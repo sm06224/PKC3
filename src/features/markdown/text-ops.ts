@@ -21,6 +21,7 @@ import { codeContextAt, insideCodeOrMath } from './code-context';
 import { parseCsv } from './csv-table';
 import { escapeLinkLabel, formatMarkdownLink } from './link-format';
 import { lineStart } from './line-start';
+import { wrapSelection } from './wrap-selection';
 import { TASK_LINE } from './task-line';
 import { LIST_LEAD, THEMATIC_BREAK } from './list-renumber';
 import { tableToMarkdown } from './table-copy';
@@ -1347,6 +1348,9 @@ export function pairedBackspaceRange(
  */
 export function autoPairFor(sel: TextSelection, key: string): AutoPair | null {
   const { text, start, end } = sel;
+  // 🔴 選んでいるときは囲む(#2001 段 3。規則は `wrap-selection.ts` の 1 本。表・数式の中でも囲む)
+  const wrapped = wrapSelection(sel, key);
+  if (wrapped !== null) return wrapped;
   if (pairSuppressed(text, start)) return null;
   const lineHead = lineStart(text, start);
   const prefix = text.slice(lineHead, start);
@@ -1386,16 +1390,6 @@ export function autoPairFor(sel: TextSelection, key: string): AutoPair | null {
   if (key === '`' && start === end) {
     // ⚠ 数えるのは**字の数**(「``」を打っている途中は対にする ── 行内の空のコード)
     if (((prefix.match(/`/g) ?? []).length) % 2 === 1) return null;
-  }
-  // 選択があるときは**囲む**(選んだ文字を消さない)
-  if (start !== end) {
-    const inner = text.slice(start, end);
-    return {
-      kind: 'insert',
-      insert: key + inner + close,
-      start: start + 1,
-      end: start + 1 + inner.length,
-    };
   }
   return { kind: 'insert', insert: key + close, start: start + 1, end: start + 1 };
 }
