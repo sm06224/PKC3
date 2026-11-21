@@ -6,6 +6,7 @@ import {
   close,
   createTabSet,
   enforceLimit,
+  externalDiff,
   markExternal,
   move,
   next,
@@ -522,5 +523,19 @@ describe('不変性', () => {
     markExternal(base, 'a', true);
     enforceLimit(base, 9, { max: 1, isPinned: none, isEditing: none });
     expect(JSON.stringify(base)).toBe(snap);
+  });
+});
+
+describe('externalDiff(段 5-5)', () => {
+  it('台帳との差だけを返す(付ける・外す・同じなら空)', () => {
+    let set = createTabSet();
+    set = openNew(set, 'a', 1);
+    set = openNew(set, 'b', 2);
+    set = markExternal(set, 'b', true);
+    expect(externalDiff(set, (l) => l === 'a')).toEqual([
+      { lid: 'a', external: true },
+      { lid: 'b', external: false },
+    ]);
+    expect(externalDiff(set, (l) => l === 'b')).toEqual([]);
   });
 });

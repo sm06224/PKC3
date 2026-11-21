@@ -66,6 +66,11 @@ export interface NoteRegistryDeps {
    * 新しい窓へ渡すときと同じく**本文の当たった所へ送って塗る**ために運ぶ。無ければ `undefined`。
    */
   readonly onRaise: (find?: string) => void;
+  /**
+   * 台帳の行(他の窓が出している付箋)が増減したときに呼ばれる(#1982 段 5-5。タブの「別ウィンドウ」印の追従)。
+   * ⚠ 呼び先が dispatch してよい ── ここは放送の受信(同期)から来る。
+   */
+  readonly onChange?: () => void;
   /** いまの時刻。⚠ test が動かせるように口にする(既定は `Date.now`)。 */
   readonly now?: () => number;
   /** 見込みが自然に外れるまで(既定 `RESERVE_MS`)。 */
@@ -209,7 +214,13 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
 
   /** ⚠ 1 つの窓が出す付箋は 1 件 ── 前に載っていた行を必ず外す。 */
   const drop = (id: string): void => {
-    for (const [lid, who] of [...byLid]) if (who === id) byLid.delete(lid);
+    let changed = false;
+    for (const [lid, who] of [...byLid])
+      if (who === id) {
+        byLid.delete(lid);
+        changed = true;
+      }
+    if (changed) deps.onChange?.();
   };
 
   if (deps.channel !== null) {
@@ -227,6 +238,7 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
         askedAt.delete(w.id);
         drop(w.id);
         byLid.set(w.lid, w.id);
+        deps.onChange?.();
         // ⚠ 本物が名乗ったので、見込みは要らない(以後は台帳が持つ)
         pending.delete(w.lid);
         return;

@@ -287,6 +287,22 @@ export function onDeleted(
   return { tabs: set.tabs.filter((t) => !gone.has(t.lid)), active, closed };
 }
 
+/**
+ * 🔴 別ウィンドウの印を、窓の台帳(`isOpenElsewhere`)に**揃えるための差分**(#1982 段 5-5)。
+ * 印は台帳の写しで、正本は台帳 ── 窓が開いた・閉じた・タブが増えた、どの回でもこの 1 関数で決める。
+ */
+export function externalDiff(
+  set: TabSet,
+  isOpenElsewhere: (lid: string) => boolean,
+): { lid: string; external: boolean }[] {
+  const out: { lid: string; external: boolean }[] = [];
+  for (const t of set.tabs) {
+    const want = isOpenElsewhere(t.lid);
+    if (want !== t.external) out.push({ lid: t.lid, external: want });
+  }
+  return out;
+}
+
 /** 別ウィンドウで開いている状態の印を付ける・外す。 */
 export function markExternal(set: TabSet, lid: string, external: boolean): TabSet {
   const i = indexOf(set, lid);

@@ -2829,6 +2829,11 @@ export interface BinderServices {
    */
   openNoteWindow?(lid: string, find?: string): void;
   /**
+   * ノートのタブで「別ウィンドウで開いています」の印が付いたタブを押したとき、そのウィンドウを前に出す(#1982 段 5-5)。
+   * 🔑 前に出す頼みを出せたら `true`(タブは動かさない)。ウィンドウが無い・頼めないなら `false`(普通に有効にする)。
+   */
+  focusNoteWindow?(lid: string): boolean;
+  /**
    * 🔴 **予定を「週」で、別のウィンドウに開く**(#855 段 A-2)。左の列の「週」ボタンが呼ぶ。
    * ⚠ **同期に呼べること**(`window.open` は click の gesture の中でしか通らない)。
    * @param day いま見ている日(`null` = 今日)── 開いた窓が同じ週を見せる
@@ -12125,9 +12130,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ノートのタブ(#1982 段 5-3): 押したタブを有効にする / 閉じる。相手は**押したタブの** `data-pkc-note-tab`
    * (選択中のノートではない ── `src-invariants` §1)。
    */
-  'activate-note-tab': (dispatcher, target) => {
+  'activate-note-tab': (dispatcher, target, services) => {
     const lid = target.getAttribute('data-pkc-note-tab');
-    if (lid) dispatcher.dispatch({ type: 'NOTE_TAB_ACTIVATE', lid });
+    if (!lid) return;
+    // 🔴 別ウィンドウで開いているノートのタブは、そのウィンドウへ移る(段 5-5。2 か所で編集しない)。頼めなければ普通に有効にする
+    const t = dispatcher.getState().noteTabs.tabs.find((x) => x.lid === lid);
+    if (t?.external === true && services.focusNoteWindow?.(lid) === true) return;
+    dispatcher.dispatch({ type: 'NOTE_TAB_ACTIVATE', lid });
   },
   'close-note-tab': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-note-tab');
