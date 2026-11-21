@@ -578,7 +578,8 @@ describe('🔴 印刷は白地に濃い字(#1387)', () => {
     }
     expect(blocks, '暗い配色が 6 つ未満(この検査は空振り)').toBeGreaterThanOrEqual(6);
     // 影は 3 段とも同じ理由で除く(#1982 段 0 で `--shadow-sm` / `--shadow-lg` を足した)
-    for (const skip of ['--shadow', '--shadow-sm', '--shadow-lg', '--sandbox-bg']) out.delete(skip);
+    // ダイアログの暗幕(`--scrim`、#1982 段 6)も紙には出ない(影と同じ扱い)
+    for (const skip of ['--shadow', '--shadow-sm', '--shadow-lg', '--scrim', '--sandbox-bg']) out.delete(skip);
     return out;
   };
 

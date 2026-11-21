@@ -551,6 +551,10 @@ test('🔴 パレットの一覧を送っても、探す欄と「やめる」は
           .getBoundingClientRect().bottom,
       ),
     }));
+  // 🔴 開く動き(#1982 段 6。数 px の translate)が終わってから測る ── 動きの最中の座標を基準にしない
+  await page.evaluate(() =>
+    Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))),
+  );
   const before = await at();
 
   // ⚠ 空振り防止 ── 一覧が実際に溢れていること(溢れなければ送っても動かないのは自明)
