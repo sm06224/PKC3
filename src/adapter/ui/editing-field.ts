@@ -35,14 +35,20 @@ export type EditingFeature =
   | 'tabIndent'
   /** 書式・行の入れ替え・字下げの鍵・日時・計算・整える操作(`editorCommand` の全部)。 */
   | 'keys'
-  /** 貼り付けの変換(URL → リンク・HTML → Markdown・画像)。 */
-  | 'paste';
+  /** 貼り付けの変換(URL → リンク・HTML → Markdown・画像)と、画像の差し込み(落とした画像も)。 */
+  | 'paste'
+  /** Enter(`=` で終わる行)で、その行を計算する(`resolveInlineCalc`)。 */
+  | 'enterCalc'
+  /** 括弧の自動補完(`autoPairFor`)。⚠ 1 画面の行は `row-swap.ts` が持つ。追記の欄は打ち込みの補助を持たない。 */
+  | 'autoPair'
+  /** 書式のバー(ボタンの帯)が付く欄。⚠ 追記の欄はバーを持たず、キーだけ(user 裁定 2026-11-21)。 */
+  | 'formatBar';
 
 export const EDITING_FIELD_FEATURES: Readonly<Record<EditingFieldKind, Readonly<Record<EditingFeature, boolean>>>> = {
-  editor: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true },
-  row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true },
-  section: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true },
-  append: { enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true },
+  editor: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true },
+  row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: true },
+  section: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: false },
+  append: { enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: false },
 };
 
 /** 欄の名前 → 種類。本文を書く欄でなければ `null`。 */

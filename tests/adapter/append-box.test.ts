@@ -237,6 +237,23 @@ describe('追記(P8 段⑧)', () => {
     expect(persisted).toHaveLength(1);
   });
 
+  it('🔴 リストの行でも Ctrl+Enter は「追記」を送る(Enter の継ぎ足しに奪われない。#2001 段 2)', async () => {
+    const { d, q, persisted } = setup([meta('log', 'textlog')], { log: 'x' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+    await tick();
+    const input = q<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!;
+    input.value = '- 牛乳';
+    input.setSelectionRange(input.value.length, input.value.length);
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true });
+    input.dispatchEvent(ev);
+    await tick();
+    expect(ev.defaultPrevented).toBe(true);
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]!.body).toMatch(/- 牛乳\n$/);
+    expect(persisted[0]!.body, '継ぎ足しの記号が付いて送られた').not.toMatch(/- 牛乳\n- /);
+    expect(input.value).toBe('');
+  });
+
   it('選択が別のノートへ移ったら、欄は空になる(打ちかけは持ち越さない)', async () => {
     const { d, q } = setup([meta('log', 'textlog'), meta('log2', 'textlog')], {
       log: 'a',

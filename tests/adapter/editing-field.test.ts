@@ -8,6 +8,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { initialState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { KeymapStore } from '../../src/adapter/ui/render/keymap';
@@ -23,6 +24,7 @@ import {
   type EditingFeature,
 } from '../../src/adapter/ui/editing-field';
 import { KEY_COMMANDS } from '../../src/features/keymap';
+import { commandRowsFor, editorCommand, formatTargetOf, paletteScene } from '../../src/adapter/ui/actions/binder';
 
 function fakeStorage() {
   const map = new Map<string, string>();
@@ -40,9 +42,10 @@ function setup() {
   document.body.append(root);
   buildShell(root);
   const d = new Dispatcher();
-  bindActions(root, d, { showStatus: () => {} }, new KeymapStore(fakeStorage()));
+  const keymap = new KeymapStore(fakeStorage());
+  bindActions(root, d, { showStatus: () => {} }, keymap);
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
-  return { root };
+  return { root, d, keymap };
 }
 
 function field(root: HTMLElement, name: string, text: string, from?: number, to?: number) {
@@ -103,14 +106,6 @@ describe('追記欄の編集キー', () => {
     const e2 = press(a, 'Enter', { keyCode: 229 });
     expect(e2.defaultPrevented).toBe(false);
     expect(a.value).toBe('- あ');
-  });
-
-  it('🔴 Ctrl+Enter は今までどおり「追記」を押す(継ぎ足さない)', () => {
-    const { root } = setup();
-    const ta = field(root, 'append-input', '- あ');
-    const ev = press(ta, 'Enter', { ctrl: true });
-    expect(ev.defaultPrevented).toBe(true);
-    expect(ta.value).toBe('- あ');
   });
 
   it('🔴 Ctrl+B で選んだ字が太字になる', () => {
@@ -178,26 +173,89 @@ describe('追記欄の Tab(リストの行・複数行の選択のときだけ�
 });
 
 describe('欄の判定 1 か所(editing-field.ts)', () => {
-  const FEATURES: EditingFeature[] = ['enterContinue', 'tabTemplate', 'tabIndent', 'keys', 'paste'];
+  const FEATURES: EditingFeature[] = ['enterContinue', 'tabTemplate', 'tabIndent', 'keys', 'paste', 'enterCalc', 'autoPair', 'formatBar'];
 
-  it('🔴 4 つの欄すべてが、全機能に対して真偽の答えを持つ(5 つ目の欄が黙って抜けない)', () => {
+  /** 欄 × 機能の全数の期待(実装の表を写さず、ここで独立に書く。変えたらこの表と下の振る舞いの両方が動く)。 */
+  const EXPECT: Record<string, Record<EditingFeature, boolean>> = {
+    editor: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: true },
+    row: { enterContinue: true, tabTemplate: false, tabIndent: false, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: true },
+    section: { enterContinue: true, tabTemplate: true, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: true, formatBar: false },
+    append: { enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true, enterCalc: true, autoPair: false, formatBar: false },
+  };
+  const ALL: EditingFeature[] = ['enterContinue', 'tabTemplate', 'tabIndent', 'keys', 'paste', 'enterCalc', 'autoPair', 'formatBar'];
+
+  it('🔴 4 つの欄 × 全機能の真偽を 1 つずつ固定する(5 つ目の欄・機能が黙って抜けない)', () => {
     expect(EDITING_FIELD_KINDS.length).toBe(4);
     expect(new Set(Object.values(EDITING_FIELD_NAMES)).size).toBe(4);
     for (const k of EDITING_FIELD_KINDS) {
-      expect(Object.keys(EDITING_FIELD_FEATURES[k]).sort()).toEqual([...FEATURES].sort());
-      for (const f of FEATURES) expect(typeof EDITING_FIELD_FEATURES[k][f]).toBe('boolean');
+      expect(Object.keys(EDITING_FIELD_FEATURES[k]).sort()).toEqual([...ALL].sort());
+      expect(EDITING_FIELD_FEATURES[k], k).toEqual(EXPECT[k]);
       expect(editingFieldKindOfName(EDITING_FIELD_NAMES[k])).toBe(k);
+      for (const f of ALL) expect(fieldHas(EDITING_FIELD_NAMES[k], f), `${k}.${f}`).toBe(EXPECT[k]![f]);
     }
   });
 
-  it('🔴 追記欄は継ぎ足し・字下げ・鍵・貼り付けを持ち、表 / 短縮語の Tab は持たない', () => {
-    const a = EDITING_FIELD_FEATURES.append;
-    expect(a).toEqual({ enterContinue: true, tabTemplate: false, tabIndent: true, keys: true, paste: true });
-    expect(EDITING_FIELD_FEATURES.row.tabIndent).toBe(false); // 1 画面の行の Tab は行の確定
+  describe('🔴 表の値が実際の振る舞いを決める(欄 × 機能。表だけ変えて挙動が動かない空振りを防ぐ)', () => {
+    const NAME = EDITING_FIELD_NAMES;
+    const tabPrevented = (name: string, text: string, from?: number, to?: number): boolean => {
+      const { root } = setup();
+      const ta = field(root, name, text, from, to);
+      return press(ta, 'Tab').defaultPrevented;
+    };
+    for (const k of ['editor', 'section', 'append', 'row'] as const) {
+      it(`tabIndent: ${k} のリスト行の Tab は ${EXPECT[k]!.tabIndent ? '握る' : '握らない'}(行は row-swap が受ける)`, () => {
+        expect(tabPrevented(NAME[k], '- a')).toBe(EXPECT[k]!.tabIndent);
+      });
+      it(`tabTemplate: ${k} の表のセルの Tab は ${EXPECT[k]!.tabTemplate ? '握る' : '握らない'}`, () => {
+        expect(tabPrevented(NAME[k], '| a | b |', 2)).toBe(EXPECT[k]!.tabTemplate);
+      });
+      it(`enterCalc: ${k} で 2+3= の Enter は答えを入れる`, () => {
+        const { root } = setup();
+        const ta = field(root, NAME[k], '2+3=');
+        press(ta, 'Enter');
+        expect(ta.value.startsWith('2+3=5'), `${k}: ${ta.value}`).toBe(EXPECT[k]!.enterCalc);
+      });
+      it(`autoPair: ${k} で ( を打つと ${EXPECT[k]!.autoPair ? '括弧を補う' : '補わない'}`, () => {
+        const { root } = setup();
+        const ta = field(root, NAME[k], '');
+        const ev = press(ta, '(');
+        expect(ev.defaultPrevented, `${k}`).toBe(EXPECT[k]!.autoPair);
+        if (EXPECT[k]!.autoPair) expect(ta.value).toBe('()');
+      });
+      it(`formatBar: ${k} は書式バーの対象欄か = ${EXPECT[k]!.formatBar}`, () => {
+        const ta = document.createElement('textarea');
+        ta.setAttribute('data-pkc-field', NAME[k]);
+        expect(formatTargetOf(ta) !== null).toBe(EXPECT[k]!.formatBar);
+      });
+      it(`enterContinue: ${k} で - a の Enter は記号を続ける`, () => {
+        const { root } = setup();
+        const ta = field(root, NAME[k], '- a');
+        press(ta, 'Enter');
+        expect(ta.value).toBe(EXPECT[k]!.enterContinue ? '- a\n- ' : '- a');
+      });
+      it(`keys: ${k} で Ctrl+B は太字 = ${EXPECT[k]!.keys}`, () => {
+        const { root } = setup();
+        const ta = field(root, NAME[k], 'abc', 0, 3);
+        press(ta, 'b', { ctrl: true });
+        expect(ta.value === '**abc**', `${k}: ${ta.value}`).toBe(EXPECT[k]!.keys);
+      });
+    }
+  });
+
+  it('🔴 追記欄の裁定(2026-11-21): 字下げは持つが、表 / 短縮語の Tab と書式バーは持たない', () => {
+    expect(EDITING_FIELD_FEATURES.append.tabTemplate).toBe(false);
+    expect(EDITING_FIELD_FEATURES.append.formatBar).toBe(false);
+    expect(EDITING_FIELD_FEATURES.append.tabIndent).toBe(true);
   });
 
   it('🔴 欄ごとの鍵の文脈(追記は append / 2 ペインは editor / 行と章は row)', () => {
     expect(EDITING_FIELD_KINDS.map((k) => keyContextOfField(k))).toEqual(['editor', 'row', 'row', 'append']);
+    // 🔴 「操作を探す」の場面も同じ 1 か所から(章の欄だけ append と言っていた食い違いを防ぐ)
+    for (const k of EDITING_FIELD_KINDS) {
+      const ta = document.createElement('textarea');
+      ta.setAttribute('data-pkc-field', EDITING_FIELD_NAMES[k]);
+      expect([...paletteScene(ta, initialState)], k).toEqual([keyContextOfField(k)]);
+    }
   });
 
   it('欄でないものは全機能で false / 要素から種類を引ける', () => {
@@ -245,4 +303,119 @@ describe('欄の判定 1 か所(editing-field.ts)', () => {
   });
 });
 
-void vi;
+describe('追記欄の取り消し(Ctrl+Z)と素通しの鍵', () => {
+  /**
+   * 取り消しの履歴に載るのは `document.execCommand('insertText')` で書いたときだけ(`setRangeText` / `value` 直代入は履歴を捨てる)。
+   * happy-dom に履歴は無いので、書き込みが execCommand を通ったことを見る(実ブラウザの Ctrl+Z は smoke が見る)。
+   */
+  function spyExec(): { calls: string[]; restore: () => void } {
+    const calls: string[] = [];
+    const doc = document as Document & { execCommand?: unknown };
+    const prev = doc.execCommand;
+    doc.execCommand = (cmd: string, _ui?: boolean, value?: string): boolean => {
+      calls.push(`${cmd}:${value ?? ''}`);
+      return false; // 断ると fallback が書く(値の検算ができる)
+    };
+    return { calls, restore: () => void (doc.execCommand = prev) };
+  }
+
+  it('🔴 Enter の継ぎ足しは insertText で書く(= Ctrl+Z で戻せる)', () => {
+    const { root } = setup();
+    const spy = spyExec();
+    try {
+      const ta = field(root, 'append-input', '- りんご');
+      press(ta, 'Enter');
+      expect(spy.calls).toContain('insertText:\n- ');
+    } finally {
+      spy.restore();
+    }
+  });
+
+  it('🔴 字下げは insertText で書く(= Ctrl+Z で戻せる)', () => {
+    const { root } = setup();
+    const spy = spyExec();
+    try {
+      const ta = field(root, 'append-input', '- a');
+      press(ta, 'Tab');
+      expect(spy.calls.some((c) => c.startsWith('insertText:')), '字下げが insertText を通っていない').toBe(true);
+    } finally {
+      spy.restore();
+    }
+  });
+
+  it('🔴 Shift+Enter / Alt+Enter は継ぎ足さず素通し(ふつうの改行)', () => {
+    const { root } = setup();
+    const ta = field(root, 'append-input', '- a');
+    expect(press(ta, 'Enter', { shift: true }).defaultPrevented).toBe(false);
+    expect(press(ta, 'Enter', { alt: true }).defaultPrevented).toBe(false);
+    expect(ta.value).toBe('- a');
+  });
+});
+
+describe('「操作を探す」と鍵の対応(欄ごと)', () => {
+  it('🔴 欄の中で鍵で押せる命令 = その欄から開いた「操作を探す」で押せる命令(全命令・両向き)', () => {
+    const { root, d, keymap } = setup();
+    for (const k of EDITING_FIELD_KINDS) {
+      const ta = field(root, EDITING_FIELD_NAMES[k], 'x');
+      const ctx = keyContextOfField(k);
+      // 鍵で押せる = 欄へ当てる命令で、その欄の文脈を名乗る(binder が keymap.match(ke, ctx) で拾う集合)
+      const byKey = KEY_COMMANDS.filter((c) => editorCommand(c.id) && c.contexts.includes(ctx)).map((c) => c.id).sort();
+      const byPalette = commandRowsFor(root, d, keymap, '', ta, true)
+        .filter((r) => r.ready && editorCommand(r.id))
+        .map((r) => r.id)
+        .sort();
+      expect(byKey.length, `${k}: 空振り`).toBeGreaterThan(20);
+      expect(byPalette, k).toEqual(byKey);
+    }
+  });
+});
+
+describe('章の欄の貼り付けと画像の落とし込み(#2001 段 2 の決定: 章の下書きへ差し込む)', () => {
+  function sectionSetup() {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.innerHTML = '<textarea data-pkc-field="section-draft-input"></textarea>';
+    document.body.append(root);
+    const calls = { paste: [] as (readonly File[])[], attach: [] as File[][] };
+    bindActions(root, new Dispatcher(), {
+      attachFiles: (files) => void calls.attach.push(files),
+      pasteImages: async (files) => {
+        calls.paste.push(files);
+        return files.map((_, i) => `![ず](asset:k${i + 1})`);
+      },
+    });
+    return { ta: root.querySelector('textarea')!, calls };
+  }
+  const png = (): File => new File([new Uint8Array([1, 2, 3])], 'x.png', { type: 'image/png' });
+
+  it('🔴 選んだ字へ URL を貼ると [字](URL) になる', () => {
+    const { ta } = sectionSetup();
+    ta.value = 'docs';
+    ta.focus();
+    ta.setSelectionRange(0, 4);
+    const ev = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'clipboardData', {
+      value: { files: [], items: [], getData: (t: string) => (t === 'text/plain' ? 'https://example.com/' : '') },
+    });
+    ta.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(ta.value).toBe('[docs](https://example.com/)');
+  });
+
+  it('🔴 画像を落とすと、資産にして参照が章の下書きへ入る(添付のノート作成へは回さない)', async () => {
+    const { ta, calls } = sectionSetup();
+    ta.value = 'まえ';
+    ta.focus();
+    ta.setSelectionRange(2, 2);
+    const ev = new Event('drop', { bubbles: true, cancelable: true });
+    const files = [png()];
+    Object.defineProperty(ev, 'dataTransfer', {
+      value: { types: ['Files'], dropEffect: 'none', files: { length: 1, item: (i: number) => files[i] ?? null }, items: [] },
+    });
+    ta.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(ta.value).toContain('asset:k1'));
+    expect(calls.paste).toHaveLength(1);
+    expect(calls.attach, '章の下書きに落としたのに添付へ回った').toHaveLength(0);
+  });
+});

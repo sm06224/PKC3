@@ -518,7 +518,7 @@ import { setupLightbox, openLightbox, closeLightbox, lightboxOpen } from '../ren
 import { chordHint, HINT_BASE, HINT_BLOCKED, setBlocked } from '../render/shortcut-hint';
 import { TARGET_LID_ATTR } from '../render/target-lid';
 import { sectionBoxText, SECTION_BOX_INPUT_FIELD, SECTION_BOX_REGION } from '../render/section-box';
-import { editingFieldKind, EDITING_FIELD_NAMES, fieldHas, keyContextOfField } from '../editing-field';
+import { editingFieldKind, editingFieldKindOfName, EDITING_FIELD_NAMES, fieldHas, keyContextOfField } from '../editing-field';
 import { codeBoxText, CODE_BOX_INPUT_FIELD, CODE_BOX_REGION } from '../render/code-box';
 import { structureText } from '@features/structure/structure-text';
 import {
@@ -8240,14 +8240,15 @@ export function commandRowsFor(
  * - 1 画面で編集している(欄の外から開いた)→ `live`
  * - 集計・システム・ヘルプなど中央に別の画面を開いている → `window`
  * - ノートを読んでいる → `reading`
- * ⚠ 欄の名前は打つ側(`SECTION_BOX_INPUT_FIELD` などの章の欄)も追記と同じ扱い(追記・章の欄で効く操作は `append` に載る)。
+ * ⚠ 欄の文脈は `keyContextOfField` の 1 か所(章の欄は鍵と同じ `row`。#2001 段 2)。
  * ⚠ `filer` / `dual`(一覧の行・2 ペインのペイン)は返さない ── いまの一覧ではその操作は押せない(`commandRowsFor` の門が
  *   全域 / 読む / 別の画面の操作だけを聞く)ので、寄せても並びが変わらない。一覧から押せるようにする日には、ここも足すこと。
  */
 export function paletteScene(target: HTMLTextAreaElement | null, st: AppState): ReadonlySet<KeyContext> {
   const field = target?.getAttribute('data-pkc-field') ?? '';
-  if (field === 'append-input' || field === SECTION_BOX_INPUT_FIELD) return new Set<KeyContext>(['append']);
-  if (field === 'row-source') return new Set<KeyContext>(['row']);
+  // 🔴 欄の文脈は鍵の割り当てと同じ 1 か所(`keyContextOfField`。#2001 段 2)── 章の欄も鍵と同じ `row`
+  const kind = editingFieldKindOfName(field);
+  if (kind !== null) return new Set<KeyContext>([keyContextOfField(kind)]);
   if (target !== null) return new Set<KeyContext>(['editor']);
   if (st.phase === 'editing') return new Set<KeyContext>(['live']);
   if (st.viewMode !== 'detail') return new Set<KeyContext>(['window']);
@@ -20603,7 +20604,7 @@ function isLiveBlockField(ta: HTMLTextAreaElement | null): boolean {
 }
 
 /** 🔑 「この命令は本文の欄へ当てるか」に答える口は**ここ 1 つ**(§7)。 */
-function editorCommand(cmd: string): boolean {
+export function editorCommand(cmd: string): boolean {
   return FORMAT_OF[cmd] !== undefined || EDITOR_RUN[cmd] !== undefined;
 }
 
@@ -20783,8 +20784,7 @@ function transcriptMenuCtx(
  */
 export function formatTargetOf(el: unknown): HTMLTextAreaElement | null {
   if (!(el instanceof HTMLTextAreaElement)) return null;
-  const f = el.getAttribute('data-pkc-field');
-  return f === 'editor-body' || f === 'row-source' ? el : null;
+  return fieldHas(el.getAttribute('data-pkc-field'), 'formatBar') ? el : null;
 }
 
 /** 🔴 書式などの鍵・「操作を探す」を当てる欄(追記・章の欄も含む。判定は `editing-field.ts` の 1 か所)。 */
@@ -21833,7 +21833,7 @@ export function bindActions(
       !ke.ctrlKey &&
       !ke.altKey &&
       !ke.metaKey &&
-      (field === 'editor-body' || field === 'row-source' || field === 'append-input' || field === SECTION_BOX_INPUT_FIELD) &&
+      fieldHas(field, 'enterCalc') &&
       ke.target instanceof HTMLTextAreaElement &&
       ke.target.selectionStart === ke.target.selectionEnd
     ) {
@@ -22169,7 +22169,7 @@ export function bindActions(
      * ⚠ 変換中は上の `isComposing` の門で弾き済み。
      */
     if (
-      (field === 'editor-body' || field === SECTION_BOX_INPUT_FIELD) &&
+      fieldHas(field, 'autoPair') &&
       ke.target instanceof HTMLTextAreaElement &&
       !((ke.ctrlKey || ke.metaKey) && !ke.altKey) &&
       pairOnKeydown(ke, ke.target)
@@ -22202,7 +22202,7 @@ export function bindActions(
      *   行の欄の `Tab` は「行を確定する」で、セルは動かない(`row-swap.ts`)── 届かない枝は置かない(#1087 B-1)。
      */
     if (
-      (field === 'editor-body' || field === SECTION_BOX_INPUT_FIELD) &&
+      fieldHas(field, 'tabTemplate') &&
       ke.key === 'Tab' &&
       !ke.ctrlKey &&
       !ke.altKey &&
@@ -22224,11 +22224,11 @@ export function bindActions(
       }
     }
 
-    if ((field === 'editor-body' || field === SECTION_BOX_INPUT_FIELD) && ke.key === 'Tab' && !ke.shiftKey) {
+    if ((fieldHas(field, 'tabTemplate') || fieldHas(field, 'tabIndent')) && ke.key === 'Tab' && !ke.shiftKey) {
       const ta = ke.target as HTMLTextAreaElement;
       const plainTab = !ke.ctrlKey && !ke.altKey && !ke.metaKey;
       // 🔑 短縮語 → 次の印の判定は `runSnippetTab` 1 か所(1 面の行の `Tab` も同じ口を通る)
-      if (runSnippetTab(ta, dispatcher.getState().snippetScan?.items ?? [])) {
+      if (fieldHas(field, 'tabTemplate') && runSnippetTab(ta, dispatcher.getState().snippetScan?.items ?? [])) {
         ke.preventDefault();
         return;
       }
@@ -22238,7 +22238,7 @@ export function bindActions(
        * ⚠ 握るのは**リストの項目か複数行のときだけ**(`indentLines` が `null` を返したら
        *   何もしない = 焦点が出ていく。意図した出口 ── 上の戒めのとおり常に握らない)。
        */
-      if (plainTab && runIndent(ta, 1, false)) {
+      if (fieldHas(field, 'tabIndent') && plainTab && runIndent(ta, 1, false)) {
         ke.preventDefault();
         return;
       }
@@ -22246,7 +22246,7 @@ export function bindActions(
     // 🔴 `Shift`+`Tab` は**戻せる字下げがあるときだけ**握る(無ければ焦点が前へ出る)。
     //   ⚠ 表のセルは上の `tableOnTab` が先に取っている
     if (
-      (field === 'editor-body' || field === SECTION_BOX_INPUT_FIELD) &&
+      fieldHas(field, 'tabIndent') &&
       ke.key === 'Tab' &&
       ke.shiftKey &&
       !ke.ctrlKey &&
