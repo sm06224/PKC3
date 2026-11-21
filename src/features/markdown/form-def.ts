@@ -25,12 +25,19 @@
  * fields:
  *   - name: 氏名
  *     label: お名前        # 省略すると name
- *     type: text           # text / textarea / number / select / date / checkbox(省略すると text)
+ *     type: text           # text / textarea / number / select / date / datetime / checkbox(省略すると text)
  *   - name: 区分
  *     type: select
  *     options: [通常, 休み]
  *     required: true
  * ```
+ *
+ * ⚠ 別名と複数選択(#2002): `type: radio` は `select` と同じ(選択肢から 1 つ)。`type: checkbox-group` は
+ *   **1 つの値**(`vars.持ち物: PC, ペン` ── 選んだ選択肢の字を `, ` でつないだ**ただの文字列**)で持つ。
+ *   配列 `[a, b]` は `extractVars` が文字列でしか返さず往復できないため、往復できる「並びの値」としてこの形にした。
+ *   選択肢の字で照合する(並べ替えても値は動かない)。選択肢に `,` は使えない(定義の誤り)。
+ *   `datetime` の値は `YYYY-MM-DDTHH:MM(:SS)`(ローカル時刻・時差なし)。それ以外の保存値は消さずに字のまま見せる。
+ *   `vars` の値なので予定表には載らない(`date` と同じ)。
  *
  * ⚠ 読めない行は**黙って捨てず、理由を囲みの中に出す**(`errors`)。項目名に使えるのは差し込みの名前と同じ字だけ
  *   (`VAR_NAME_SOURCE`)── 違う字を許すと、入れても `{{vars.…}}` で引けない。
@@ -39,7 +46,7 @@
  */
 import { VAR_NAME_SOURCE } from './frontmatter';
 
-export const FORM_FIELD_TYPES = ['text', 'textarea', 'number', 'select', 'date', 'checkbox'] as const;
+export const FORM_FIELD_TYPES = ['text', 'textarea', 'number', 'select', 'date', 'datetime', 'checkbox', 'checkbox-group'] as const;
 export type FormFieldType = (typeof FORM_FIELD_TYPES)[number];
 
 export interface FormField {
@@ -195,14 +202,19 @@ export function parseFormDef(src: string): FormDef {
       continue;
     }
     const typeRaw = unquote(d.map.get('type') ?? 'text').toLowerCase();
-    const type = (FORM_FIELD_TYPES as readonly string[]).includes(typeRaw) ? (typeRaw as FormFieldType) : null;
+    const aliased = typeRaw === 'radio' ? 'select' : typeRaw;
+    const type = (FORM_FIELD_TYPES as readonly string[]).includes(aliased) ? (aliased as FormFieldType) : null;
     if (type === null) {
-      errors.push(`項目「${name}」の type「${typeRaw}」は使えません(${FORM_FIELD_TYPES.join(' / ')})`);
+      errors.push(`項目「${name}」の type「${typeRaw}」は使えません(${FORM_FIELD_TYPES.join(' / ')} / radio)`);
       continue;
     }
     const options = parseList(d.map.get('options') ?? '');
-    if (type === 'select' && options.length === 0) {
-      errors.push(`項目「${name}」は select なのに options がありません`);
+    if ((type === 'select' || type === 'checkbox-group') && options.length === 0) {
+      errors.push(`項目「${name}」は ${typeRaw} なのに options がありません`);
+      continue;
+    }
+    if (type === 'checkbox-group' && options.some((o) => o.includes(','))) {
+      errors.push(`項目「${name}」の選択肢に「,」は使えません(値を「,」でつなぐため)`);
       continue;
     }
     seen.add(name);
@@ -210,7 +222,7 @@ export function parseFormDef(src: string): FormDef {
       name,
       label: unquote(d.map.get('label') ?? '') || name,
       type,
-      options: type === 'select' ? options : [],
+      options: type === 'select' || type === 'checkbox-group' ? options : [],
       required: TRUE_WORDS.has(unquote(d.map.get('required') ?? '').toLowerCase()),
       placeholder: unquote(d.map.get('placeholder') ?? ''),
     });
@@ -224,6 +236,29 @@ const CHECKED_WORDS = new Set(['true', '1', 'yes', 'on', 'はい', '済', '○',
 /** 値(`vars` の字や表のセルの字)がチェックありか。 */
 export function isCheckedValue(v: string | undefined): boolean {
   return v !== undefined && CHECKED_WORDS.has(v.trim().toLowerCase());
+}
+
+const DATETIME_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?$/u;
+
+/** 日時入力が読める字か(`YYYY-MM-DD[T ]HH:MM(:SS)`。時差は読めない)。 */
+export function isDatetimeValue(v: string): boolean {
+  return DATETIME_RE.test(v.trim());
+}
+
+/** 読める日時の `T` 区切りへ揃える(表の空白区切りも読む)。読めない字はそのまま返す。 */
+export function normalizeDatetime(v: string): string {
+  return isDatetimeValue(v) ? v.trim().replace(' ', 'T') : v;
+}
+
+/** 複数選択の値(`PC, ペン`)→ 選んだ選択肢の字の並び(前後の空白は落とす・重複は 1 つ)。 */
+export function parseGroupValue(v: string | undefined): string[] {
+  if (v === undefined) return [];
+  return [...new Set(v.split(',').map((x) => x.trim()).filter((x) => x !== ''))];
+}
+
+/** 選んだ選択肢の字の並び → 値(`, ` でつなぐ)。 */
+export function joinGroupValue(items: readonly string[]): string {
+  return items.join(', ');
 }
 
 function esc(s: string): string {
@@ -255,6 +290,20 @@ function fieldHtml(f: FormField, value: string | undefined): string {
       return `<input type="number" step="any" ${common} value="${esc(v)}"${ph}>`;
     case 'date':
       return `<input type="date" ${common} value="${esc(v)}">`;
+    case 'datetime': {
+      // 読めない保存値は、欄を空にして上書きさせず、字のまま見せて残す(binder は `data-pkc-form-raw` を値に使う)
+      const odd = v !== '' && !isDatetimeValue(v);
+      return odd
+        ? `<span class="pkc-form-odd"><input type="datetime-local" ${common} data-pkc-form-raw="${esc(v)}" value=""><span class="pkc-form-warn">読めない値: ${esc(v)}(そのまま残ります。日時を選ぶと置き換わります) <button type="button" class="pkc-form-btn" data-pkc-variant="ghost" data-pkc-action="form-clear-raw">この値を消す</button></span></span>`
+        : `<input type="datetime-local" ${common} value="${esc(normalizeDatetime(v))}">`;
+    }
+    case 'checkbox-group': {
+      const on = parseGroupValue(v);
+      const unknown = on.filter((x) => !f.options.includes(x));
+      const box = (o: string, warn: boolean): string =>
+        `<label class="pkc-form-option"><input type="checkbox" data-pkc-form-option="${esc(o)}"${on.includes(o) ? ' checked' : ''}>${esc(o)}${warn ? '<span class="pkc-form-warn">定義に無い選択肢</span>' : ''}</label>`;
+      return `<fieldset ${common} data-pkc-form-value="${esc(v)}"><legend>${labelHtml(f)}</legend>${f.options.map((o) => box(o, false)).join('')}${unknown.map((o) => box(o, true)).join('')}</fieldset>`;
+    }
     case 'checkbox':
       return `<input type="checkbox" ${common}${isCheckedValue(v) ? ' checked' : ''}>`;
     case 'select': {
@@ -308,6 +357,7 @@ export function formHtml(src: string, opts: FormRenderOptions): string {
   const rows = def.fields
     .map((f) => {
       const control = fieldHtml(f, opts.vars[f.name]);
+      if (f.type === 'checkbox-group') return `<div class="pkc-form-row pkc-form-row-group">${control}</div>`;
       return f.type === 'checkbox'
         ? `<label class="pkc-form-row pkc-form-row-check">${control}${labelHtml(f)}</label>`
         : `<label class="pkc-form-row">${labelHtml(f)}${control}</label>`;

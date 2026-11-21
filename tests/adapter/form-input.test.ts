@@ -224,3 +224,184 @@ describe('表との連携', () => {
     expect(r.err()).not.toBe('');
   });
 });
+
+describe('datetime(#2002 段 1)', () => {
+  const DT = ['```yaml form', 'table: 予定', 'fields:', '  - name: 氏名', '  - name: 開始', '    type: datetime', '```'].join('\n');
+  const T = '```csv name=予定\n氏名,開始\n山田,2026-11-21T09:30\n佐藤,2026-12-01 18:00\n```\n';
+
+  it('🔴 保存 → vars.開始 に T 区切りで入り、読み直しても同じ字(往復で変更なし)', () => {
+    const r = rig(DT + '\n');
+    r.field('開始').value = '2026-11-21T09:30';
+    r.press('form-save');
+    const next = applyBodyRewrite(DT + '\n', r.rewrites[0]!)!;
+    expect(extractVars(next)).toEqual({ 開始: '2026-11-21T09:30' });
+    const r2 = rig(next);
+    expect(r2.field('開始').value).toBe('2026-11-21T09:30');
+    r2.press('form-save');
+    expect(r2.rewrites).toHaveLength(0);
+  });
+
+  it('表に追加・更新・読み込み(空白区切りの升は T に揃えて読む)', () => {
+    const body = DT + '\n\n' + T;
+    const a = rig(body);
+    a.field('氏名').value = '田中';
+    a.field('開始').value = '2027-01-02T03:04';
+    a.press('form-row-add');
+    expect(applyBodyRewrite(body, a.rewrites[0]!)!).toContain('田中,2027-01-02T03:04');
+    const u = rig(body);
+    (u.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '1';
+    u.field('氏名').value = '山田';
+    u.field('開始').value = '2026-11-22T10:00';
+    u.press('form-row-update');
+    expect(applyBodyRewrite(body, u.rewrites[0]!)!).toContain('山田,2026-11-22T10:00');
+    const l = rig(body);
+    (l.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '2';
+    l.press('form-row-load');
+    expect(extractVars(applyBodyRewrite(body, l.rewrites[0]!)!)).toEqual({ 氏名: '佐藤', 開始: '2026-12-01T18:00' });
+  });
+
+  it('必須の datetime が空なら表に追加を断る', () => {
+    const src = DT.replace('    type: datetime', '    type: datetime\n    required: true');
+    const r = rig(src + '\n');
+    r.field('氏名').value = 'x';
+    r.press('form-row-add');
+    expect(r.err()).toContain('必須の項目が未入力です');
+    expect(r.rewrites).toHaveLength(0);
+  });
+});
+
+describe('checkbox-group と datetime の読めない値(#2002 段 1 再設計)', () => {
+  const G = ['```yaml form', 'table: 持参', 'fields:', '  - name: 持ち物', '    type: checkbox-group', '    required: true', '    options: [PC, ペン, ノート]', '```'].join('\n');
+  const GT = '```csv name=持参\n持ち物\n"PC, ペン"\n"ノート"\n```\n';
+  const opt = (r: ReturnType<typeof rig>, o: string): HTMLInputElement =>
+    [...r.host.querySelectorAll<HTMLInputElement>("input[data-pkc-form-option]")].find((c) => c.getAttribute("data-pkc-form-option") === o)!;
+
+  it('🔴 保存 → 1 つの vars(PC, ペン)/ 読み直しても変更なし(日本語・空白・往復)', () => {
+    const r = rig(G + '\n');
+    opt(r, 'PC').checked = true;
+    opt(r, 'ペン').checked = true;
+    r.press('form-save');
+    const next = applyBodyRewrite(G + '\n', r.rewrites[0]!)!;
+    expect(extractVars(next)).toEqual({ 持ち物: 'PC, ペン' });
+    const r2 = rig(next);
+    expect(opt(r2, 'PC').checked).toBe(true);
+    expect(opt(r2, 'ノート').checked).toBe(false);
+    r2.press('form-save');
+    expect(r2.rewrites).toHaveLength(0);
+  });
+
+  it('🔴 並べ替えた定義でも、保存し直して値が動かない / 外す → 空で行が消える', () => {
+    const body = '---\nvars.持ち物: "PC, ペン"\n---\n' + G.replace('[PC, ペン, ノート]', '[ノート, ペン, PC]') + '\n';
+    const r = rig(body);
+    r.press('form-save');
+    expect(r.rewrites).toHaveLength(0);
+    opt(r, 'PC').checked = false;
+    opt(r, 'ペン').checked = false;
+    r.press('form-save');
+    expect(r.err()).toBe('');
+    expect(extractVars(applyBodyRewrite(body, r.rewrites[0]!)!)).toEqual({});
+  });
+
+  it('🔴 定義に無い選択肢は残り、外せる', () => {
+    const body = '---\nvars.持ち物: "PC, 旧"\n---\n' + G + '\n';
+    const r = rig(body);
+    expect(opt(r, '旧').checked).toBe(true);
+    opt(r, 'ペン').checked = true;
+    r.press('form-save');
+    expect(extractVars(applyBodyRewrite(body, r.rewrites[0]!)!)).toEqual({ 持ち物: 'PC, 旧, ペン' });
+  });
+
+  it('🔴 必須のグループは 1 つも選ばなければ表に追加を断る / 選べば 1 列で追加', () => {
+    const body = G + '\n\n' + GT;
+    const r = rig(body);
+    r.press('form-row-add');
+    expect(r.err()).toContain('必須の項目が未入力です: 持ち物');
+    expect(r.rewrites).toHaveLength(0);
+    opt(r, 'ペン').checked = true;
+    opt(r, 'ノート').checked = true;
+    r.press('form-row-add');
+    expect(applyBodyRewrite(body, r.rewrites[0]!)!).toContain('"ペン, ノート"');
+  });
+
+  it('表の更新と読み込みも 1 列', () => {
+    const body = G + '\n\n' + GT;
+    const u = rig(body);
+    (u.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '2';
+    opt(u, 'PC').checked = true;
+    u.press('form-row-update');
+    expect(applyBodyRewrite(body, u.rewrites[0]!)!).toContain('"PC, ペン"\nPC\n');
+    const l = rig(body);
+    (l.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '1';
+    l.press('form-row-load');
+    expect(extractVars(applyBodyRewrite(body, l.rewrites[0]!)!)).toEqual({ 持ち物: 'PC, ペン' });
+  });
+
+  it('🔴 datetime の読めない保存値は、触らずに保存しても消えない / 選べば置き換わる', () => {
+    const DT = ['```yaml form', 'fields:', '  - name: 開始', '    type: datetime', '    required: true', '```'].join('\n');
+    const body = '---\nvars.開始: 来週の頭\n---\n' + DT + '\n';
+    const r = rig(body);
+    r.press('form-save');
+    expect(r.err()).toBe('');
+    expect(r.rewrites).toHaveLength(0);
+    r.field('開始').value = '2026-11-21T09:30';
+    r.press('form-save');
+    expect(extractVars(applyBodyRewrite(body, r.rewrites[0]!)!)).toEqual({ 開始: '2026-11-21T09:30' });
+  });
+});
+
+describe('再レビュー(#2002 段 1)', () => {
+  const DT = ['```yaml form', 'fields:', '  - name: 開始', '    type: datetime', '```'].join('\n');
+  const oddBody = '---\nvars.開始: 来週の頭\n---\n' + DT + '\n';
+
+  it('🔴 読めない日時は「この値を消す」→ 保存で空(vars の行が消える)/ 触らなければ残る / 選べば置き換わる', () => {
+    const r = rig(oddBody);
+    r.press('form-clear-raw');
+    expect(r.host.querySelector('[data-pkc-form-raw]')).toBeNull();
+    expect(r.host.querySelector('.pkc-form-warn')!.textContent).toContain('消えます');
+    r.press('form-save');
+    expect(r.err()).toBe('');
+    expect(extractVars(applyBodyRewrite(oddBody, r.rewrites[0]!)!)).toEqual({});
+    const keep = rig(oddBody);
+    keep.press('form-save');
+    expect(keep.rewrites).toHaveLength(0);
+    const pick = rig(oddBody);
+    pick.field('開始').value = '2026-11-21T09:30';
+    pick.press('form-save');
+    expect(extractVars(applyBodyRewrite(oddBody, pick.rewrites[0]!)!)).toEqual({ 開始: '2026-11-21T09:30' });
+  });
+
+  const G = (opts: string): string => ['```yaml form', 'table: 持参', 'fields:', '  - name: 持ち物', '    type: checkbox-group', `    options: ${opts}`, '```'].join('\n');
+  const box = (r: ReturnType<typeof rig>, o: string): HTMLInputElement =>
+    [...r.host.querySelectorAll<HTMLInputElement>("input[data-pkc-form-option]")].find((c) => c.getAttribute("data-pkc-form-option") === o)!;
+
+  it('🔴 : # 絵文字 全角、 ・ 引用符を含む選択肢は、保存して読み直しても同じ(前書きが安定)', () => {
+    const labels = ['A:B', '#x', '😀', '甲、乙', "it's", 'say "hi"', '  '.trim() + '空 白'];
+    const def = G("['A:B', '#x', '😀', '甲、乙', \"it's\", 'say \"hi\"', '空 白']");
+    const r = rig(def + '\n');
+    expect(r.host.querySelectorAll('input[data-pkc-form-option]')).toHaveLength(labels.length);
+    for (const l of labels) box(r, l).checked = true;
+    r.press('form-save');
+    const next = applyBodyRewrite(def + '\n', r.rewrites[0]!)!;
+    expect(extractVars(next)['持ち物']).toBe(labels.join(', '));
+    const r2 = rig(next);
+    for (const l of labels) expect(box(r2, l).checked, l).toBe(true);
+    r2.press('form-save');
+    expect(r2.rewrites).toHaveLength(0);
+  });
+
+  it('🔴 並べ替えた定義で 1 つ足して保存 → 保存済みの並びのまま、新しい分が後ろ', () => {
+    const body = '---\nvars.持ち物: "PC, ペン"\n---\n' + G('[ノート, ペン, PC]') + '\n';
+    const r = rig(body);
+    box(r, 'ノート').checked = true;
+    r.press('form-save');
+    expect(extractVars(applyBodyRewrite(body, r.rewrites[0]!)!)['持ち物']).toBe('PC, ペン, ノート');
+  });
+
+  it('🔴 表の行の読み込みは、余白・重複を整える( PC ,ペン,PC → PC, ペン)', () => {
+    const body = G('[PC, ペン]') + '\n\n```csv name=持参\n持ち物\n" PC ,ペン,PC"\n```\n';
+    const r = rig(body);
+    (r.host.querySelector('[data-pkc-form-rowno]') as HTMLInputElement).value = '1';
+    r.press('form-row-load');
+    expect(extractVars(applyBodyRewrite(body, r.rewrites[0]!)!)['持ち物']).toBe('PC, ペン');
+  });
+});

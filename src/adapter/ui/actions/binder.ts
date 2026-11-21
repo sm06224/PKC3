@@ -238,7 +238,7 @@ import { currentTagColor } from '@adapter/ui/render/tag-color';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { bodyBelowFrontmatter, extractVars, frontmatterLineCount } from '@features/markdown/frontmatter';
-import { isCheckedValue } from '@features/markdown/form-def';
+import { isCheckedValue, joinGroupValue, normalizeDatetime, parseGroupValue } from '@features/markdown/form-def';
 import { formRowCells, loadFormRow, planFormRow, type FormColumn } from '@features/markdown/form-table';
 import {
   ENTRY_PICK_LIMIT,
@@ -6041,7 +6041,19 @@ function readFormInputs(form: HTMLElement): {
       if (!on && el.getAttribute('data-pkc-form-required') === 'true') missing.push(label);
       continue;
     }
-    const raw = el.value;
+    let raw = el.value;
+    if (type === 'checkbox-group') {
+      // 🔴 1 つの値 `PC, ペン`(選択肢の字を並べる)。定義に無い選択肢も欄に出ている(外せる)ので、見えている順に拾う
+      //   順は**保存済みの値の並びを保つ**(並べ替えた定義でも、触らずに保存して値が変わらない)。新しく選んだ分が後ろに付く
+      const now = [...el.querySelectorAll<HTMLInputElement>('input[data-pkc-form-option]')]
+        .filter((c) => c.checked)
+        .map((c) => c.getAttribute('data-pkc-form-option') ?? '');
+      const prev = parseGroupValue(el.getAttribute('data-pkc-form-value') ?? '');
+      raw = joinGroupValue([...prev.filter((x) => now.includes(x)), ...now.filter((x) => !prev.includes(x))]);
+    } else if (type === 'datetime' && raw === '') {
+      // 読めない保存値は欄に入らない ── 触っていなければそのまま残す
+      raw = el.getAttribute('data-pkc-form-raw') ?? '';
+    }
     cells[name] = raw;
     if (raw === '') {
       values[name] = undefined;
@@ -14116,6 +14128,17 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **いまの入力を、連携先の表(` ```csv name=… `)の末尾に 1 行足す**(#1456)。表が無ければ項目名を見出しにして作る。
    * ⚠ 断る理由は `planFormRow`(書く側と同じ関数)で先に言う ── 押した後に黙って何も起きない形を作らない。
    */
+  /**
+   * 🔴 **読めない日時の保存値を消す**(片道にしない)。欄の「そのまま残す」の印を外し、警告を「保存すると消える」に替える。
+   * 書くのは次の「入力を保存」(欄が空なら `vars` の行が消える。他の保存と同じ道)。
+   */
+  'form-clear-raw': (_dispatcher, target) => {
+    const odd = target.closest<HTMLElement>('.pkc-form-odd');
+    if (odd === null) return;
+    odd.querySelector('[data-pkc-form-raw]')?.removeAttribute('data-pkc-form-raw');
+    const warn = odd.querySelector<HTMLElement>('.pkc-form-warn');
+    if (warn !== null) warn.textContent = '「入力を保存」を押すと、この値は消えます(日時を選ぶと置き換わります)';
+  },
   'form-row-add': (dispatcher, target, services) => {
     const owner = formOwner(dispatcher, target);
     if (owner === null) return;
@@ -14208,6 +14231,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       const type = types.get(name) ?? 'text';
       if (type === 'checkbox') values[name] = isCheckedValue(cell);
       else if (cell === '') values[name] = undefined;
+      else if (type === 'datetime') values[name] = normalizeDatetime(cell);
+      else if (type === 'checkbox-group') values[name] = joinGroupValue(parseGroupValue(cell));
       else if (type === 'number' && String(Number(cell)) === cell.trim()) values[name] = Number(cell);
       else values[name] = cell;
     }

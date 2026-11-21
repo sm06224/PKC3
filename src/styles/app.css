@@ -2556,6 +2556,7 @@ button[data-pkc-variant='danger']:hover:not(:disabled),
 .pkc-md-rendered .pkc-form-row input[type='text'],
 .pkc-md-rendered .pkc-form-row input[type='number'],
 .pkc-md-rendered .pkc-form-row input[type='date'],
+.pkc-md-rendered .pkc-form-row input[type='datetime-local'],
 .pkc-md-rendered .pkc-form-row select,
 .pkc-md-rendered .pkc-form-row textarea {
   min-width: 0;
@@ -2597,6 +2598,35 @@ button[data-pkc-variant='danger']:hover:not(:disabled),
 .pkc-md-rendered .pkc-form-error {
   margin: var(--s1, 4px) 0;
   color: var(--danger, #b3261e);
+  font-size: var(--fs-sm);
+}
+.pkc-md-rendered .pkc-form-row-group fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1, 4px) var(--s3);
+  align-items: center;
+}
+.pkc-md-rendered .pkc-form-row-group legend {
+  padding: 0;
+  margin-bottom: var(--s1, 4px);
+}
+.pkc-md-rendered .pkc-form-option {
+  display: inline-flex;
+  gap: var(--s1, 4px);
+  align-items: center;
+}
+.pkc-md-rendered .pkc-form-odd {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1, 4px);
+  min-width: 0;
+}
+.pkc-md-rendered .pkc-form-warn {
+  margin-left: var(--s1, 4px);
+  color: var(--warn);
   font-size: var(--fs-sm);
 }
 .pkc-md-rendered .pkc-form-empty {
