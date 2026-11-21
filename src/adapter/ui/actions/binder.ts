@@ -10625,10 +10625,17 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **貼り付け欄は押したときだけ出す**(#1017 段④b。`toggle-replace` と
    * 同じ作法 ── `<details>` は使わない)。開いたら**貼る欄へ focus**。
    */
-  'toggle-plan-apply': (_dispatcher, target) => {
+  'toggle-plan-apply': (dispatcher, target) => {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const box = root.querySelector<HTMLElement>('[data-pkc-field="plan-apply-box"]');
-    if (!box) return;
+    if (!box) {
+      // ⚠ 欄は「何も選んでいないとき」の右のペインにしか無い ── 黙って何も起きないにしない(着地前レビュー)
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '整理案を適用は、ノートを選んでいないときの右のペインの「その他 ▾」から使えます',
+      });
+      return;
+    }
     box.hidden = !box.hidden;
     // 🔑 「その他 ▾」の一覧の項目から来たときは押した物が一覧の側 ── 開閉の印は元のボタンへも書く(#2001 段 1)
     for (const b of [target, ...root.querySelectorAll('button[data-pkc-action="toggle-plan-apply"]')])

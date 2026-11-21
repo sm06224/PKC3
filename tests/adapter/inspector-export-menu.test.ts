@@ -330,8 +330,21 @@ describe('コレクション(何も選んでいないとき)の「その他 ▾�
     expect(box.closest('[hidden]'), '貼り付け欄が隠れた元の中に居て見えない').toBeNull();
     expect(s.menu(), '選んだら閉じる').toBeNull();
     expect(document.activeElement).toBe(box.querySelector('[data-pkc-field="plan-input"]'));
+    // 🔑 開閉は読み上げにも届く ── 欄は名前つきの区画、隠した押し口の aria-expanded も揃う(着地前レビュー)
+    expect(box.getAttribute('role')).toBe('region');
+    expect(box.getAttribute('aria-label')).toBe('整理案を適用');
+    const src = s.q('[data-pkc-field="collection-more-source"] [data-pkc-action="toggle-plan-apply"]');
+    expect(src.getAttribute('aria-expanded')).toBe('true');
     open();
     expect(box.hidden, '閉じない').toBe(true);
+    expect(src.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('ノートを選んでいて欄が無いとき、「整理案を適用」は黙らずに使える場所を言う', () => {
+    const s = mounted({ select: null });
+    s.q('[data-pkc-field="plan-apply-box"]').remove();
+    s.q<HTMLButtonElement>('[data-pkc-field="collection-more-source"] [data-pkc-action="toggle-plan-apply"]').click();
+    expect(s.d.getState().error ?? '').toContain('ノートを選んでいないときの右のペイン');
   });
 
   it('「構成をコピー」を押すと、閉じた項目ではなく「その他 ▾」のボタンが光る', () => {

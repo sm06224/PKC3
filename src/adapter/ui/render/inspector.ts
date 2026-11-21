@@ -2496,6 +2496,9 @@ export class InspectorRenderer {
     const box = document.createElement('div');
     box.setAttribute('data-pkc-region', 'plan-apply');
     box.setAttribute('data-pkc-field', 'plan-apply-box');
+    // 🔑 押し口(隠した器の中)の `aria-expanded` は読み上げに届かない ── 開いた欄そのものを名前つきの区画にする(着地前レビュー)
+    box.setAttribute('role', 'region');
+    box.setAttribute('aria-label', '整理案を適用');
     box.hidden = true;
 
     const explain = document.createElement('p');

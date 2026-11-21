@@ -94,6 +94,8 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
   await expect(planBox, '押しても貼り付け欄が開かない').toBeVisible();
   const planInput = page.locator('[data-pkc-field="plan-input"]');
   await expect(planInput, '整理案の貼り付け欄が見えていない').toBeVisible();
+  // 🔑 一覧が閉じて焦点がボタンへ戻る処理と競わず、焦点は貼り付け欄に入っている(実ブラウザで ── 着地前レビュー)
+  await expect(planInput, '開いたのに焦点が貼り付け欄に無い').toBeFocused();
   const planApplyBtn = page.locator('[data-pkc-field="plan-apply"]');
   await expect(planApplyBtn, '貼る前から押せる(dead click)').toBeDisabled();
 
