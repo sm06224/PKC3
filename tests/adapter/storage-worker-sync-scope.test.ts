@@ -104,8 +104,7 @@ async function otherSettingCount(image: Uint8Array): Promise<number> {
 
 /**
  * c1(使っているワークスペース)と別のワークスペースを持つ DB に、同期の行と対照の行を足して返す。
- * ⚠ 画像から開いた DB(memdb)は、確定させない transaction の中の状態が画像に出ない(既知: 本番の OPFS の経路ではない)。
- *   本番と同じ経路を通すため、素の DB に直に足す。
+ * 画像から開いた DB(memdb)の経路は `storage-worker-image-from-image-2015.test.ts`(#2015)が見る。ここは素の DB に直に足す。
  */
 async function seeded(opts: { single?: boolean } = {}): Promise<{ w: Worker; other: string }> {
   const w = await spawn();

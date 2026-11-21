@@ -3543,17 +3543,27 @@ function deleteContainerRows(database: Database, cid: string): void {
   database.exec({ sql: 'DELETE FROM containers WHERE cid = ?', bind: [cid] });
 }
 
+/** 🔴 **test 専用**: `withMessagesRemoved` が写しを開いた直後に呼ぶ(閉じられたかの観測・確保失敗の注入)。⚠ 本番では `null`。 */
+let copyOpenedHookForTest: ((copy: Database) => void) | null = null;
+export function setCopyOpenedHookForTest(hook: ((copy: Database) => void) | null): void {
+  copyOpenedHookForTest = hook;
+}
+
 /**
- * 🔴 **メッセージ(・処理の記録)の行を除いた状態で `make` を走らせる**(台帳 #1852 束 L1。依頼 216 / 344)。
+ * 🔴 **メッセージ(・処理の記録)の行を除いた「別の DB」を作り、それに `make` を走らせる**(台帳 #1852 束 L1。依頼 216 / 344。#2015)。
  *
  * ⚠ 人に渡す PKC3 入り HTML に、送り主の知らせ(使った機能と時刻)を入れない。
- * 🔑 **除く操作は確定させない** ── 書き込みの transaction の中で行を消し、その状態の画像を作ってから **ROLLBACK** する。
- *   消した事実が disk に確定する瞬間が無いので、途中でタブやワーカーが落ちても**メッセージは 1 件も減らない**
- *   (直す前は、消して確定 → 書き出し → 入れ直す の形で、間で落ちると消えたままになった)。
- * ⚠ `sqlite3_serialize` は pager を通してページを読むので、transaction の中の(まだ確定していない)状態が画像に入る。
- * ⚠ 除いた行の名残が空きページに残らないよう、除く間だけ `secure_delete` を入れる(元の値へ戻す)。
+ * 🔑 **本体の DB は一切書かない** ── 確定済みの状態の画像を `:memory:` へ流し込んだ写しを作り、
+ *   除く操作はその写しの上で行って**確定**させ、画像にしたらすぐ閉じる(生成物の即破棄)。本体には消した事実が 1 度も無いので、
+ *   途中でタブやワーカーが落ちても**メッセージは 1 件も減らない**(直す前の ROLLBACK 方式と同じ保証)。
+ * 🔴 **なぜ transaction の中で画像にしないか**(#2015): 画像から開いた DB(可搬 HTML の本体)は memdb で、
+ *   `sqlite3_serialize`(NOCOPY を付けても付けなくても)は **memdb のバッファそのもの**を読む ── 確定していない
+ *   transaction の変更(pager の dirty ページ)は含まれず、除いたはずの行が画像に残った。素の `:memory:` / OPFS は
+ *   pager を通して読むので出なかった。**確定した写し**なら、どの開き方の DB でも同じ結果になる。
+ * ⚠ 除いた行の名残が空きページに残らないよう、写しの上で `secure_delete`  を入れ、全文検索の索引も併合し(`purgeFtsResidue`)、確定後に VACUUM で組み直す(本体側で前に空いた領域の字も画像に出さない)。
+ * ⚠ 本体が書込の transaction の最中でないこと(`exportImage` は worker の直列の中で走る)が前提。
  */
-function withMessagesRemoved<T>(make: () => T, keepCid?: string): T {
+function withMessagesRemoved<T>(make: (target: Database) => T, keepCid?: string): T {
   const database = need();
   const lids = [SYSTEM_MESSAGE_LID, SYSTEM_JOB_LID];
   const has = database.selectValue(
@@ -3584,24 +3594,96 @@ function withMessagesRemoved<T>(make: () => T, keepCid?: string): T {
     `SELECT count(*) FROM settings WHERE scope = ? OR substr(scope, 1, ?) = ?`,
     [SYNC_SCOPE, SYNC_SCOPE.length + 1, `${SYNC_SCOPE}:`],
   ) as number | undefined;
-  if ((has === undefined || has === 0) && others.length === 0 && (syncRows === undefined || syncRows === 0)) return make();
-  const secure = database.selectValue('PRAGMA secure_delete') as number | undefined;
-  database.exec('PRAGMA secure_delete = ON');
+  if ((has === undefined || has === 0) && others.length === 0 && (syncRows === undefined || syncRows === 0)) return make(database);
+  const api = sqliteApi;
+  if (api === null) throw new Error('sqlite が初期化されていません');
+  const oo1 = (api as unknown as { oo1: { DB: new (name: string) => Database } }).oo1;
+  /**
+   * 🔑 確定済みの状態の画像を作り、`:memory:` へ流し込んで写しにする(本体は書かない・transaction の外で読む)。
+   *   ⚠ `sqlite3_backup` は wasm の公開面に無く、`VACUUM INTO` の memdb 宛ては URI が通らない(実測)ので、この道にした。
+   *   ⚠ 画像の配列(JS 側)は流し込んだ後すぐ手放す ── 写しの寿命は、この関数の中だけ。
+   */
+  /**
+   * 🔴 **写しを作る・流し込む・除く・画像にする、どこで確保に失敗しても**「大きすぎる」の言い直しにする(レビュー ⚠3)。
+   *   `runImageExport` の中の失敗は、すでに言い直されている(`looksOutOfMemory` に当たらない文面)ので二重にならない。
+   */
+  let sourceSize: number | null = null;
   try {
-    database.exec('BEGIN IMMEDIATE');
+    const pages = database.selectValue('PRAGMA page_count') as number | undefined;
+    const per = database.selectValue('PRAGMA page_size') as number | undefined;
+    if (typeof pages === 'number' && typeof per === 'number') sourceSize = pages * per;
+  } catch {
+    // ⚠ 測れなかった = 断る理由にしない(`null` として扱う)
+  }
+  let snapshot: Uint8Array | null;
+  let copy: Database | null = null;
+  try {
+    snapshot = runImageExport((a, ptr) => exportDbImage(a, ptr), database);
+    copy = new oo1.DB(':memory:');
+    copyOpenedHookForTest?.(copy);
+    deserializeInto(api as unknown as Parameters<typeof deserializeInto>[0], copy, snapshot);
+    snapshot = null;
+    copy.exec('PRAGMA secure_delete = ON');
+    copy.exec('BEGIN IMMEDIATE');
     try {
-      database.exec({ sql: `DELETE FROM entries WHERE realm = 'system' AND lid IN (?, ?)`, bind: lids });
-      for (const cid of others) deleteContainerRows(database, cid);
-      database.exec({
+      copy.exec({ sql: `DELETE FROM entries WHERE realm = 'system' AND lid IN (?, ?)`, bind: lids });
+      for (const cid of others) deleteContainerRows(copy, cid);
+      copy.exec({
         sql: `DELETE FROM settings WHERE scope = ? OR substr(scope, 1, ?) = ?`,
         bind: [SYNC_SCOPE, SYNC_SCOPE.length + 1, `${SYNC_SCOPE}:`],
       });
-      return make();
-    } finally {
-      database.exec('ROLLBACK');
+      purgeFtsResidue(copy);
+      copy.exec('COMMIT');
+    } catch (e) {
+      try {
+        copy.exec('ROLLBACK');
+      } catch {
+        // ⚠ 元の例外を優先する
+      }
+      throw e;
     }
+    /**
+     * 🔴 **確定したら VACUUM で DB を組み直す**(レビュー ⚠2 の実測)。`secure_delete` が潰すのは**この写しで消した分**だけで、
+     *   本体の側で前に(更新・削除で)空き領域になった所に残っていた字は、画像にそのまま流れてくる ──
+     *   別のワークスペースのノートの古い版が、ページの空き領域から出た。VACUUM は生きている行だけを新しい DB に詰め直す。
+     *   ⚠ 全文検索の索引は上の `purgeFtsResidue` で併合済み(VACUUM は索引の中身をそのまま写すので、先に済ませる)。
+     */
+    copy.exec('VACUUM');
+    return make(copy);
+  } catch (e) {
+    if (looksOutOfMemory(e)) throw new Error(imageTooBigMessage(sourceSize), { cause: e });
+    throw e;
   } finally {
-    database.exec(`PRAGMA secure_delete = ${secure === 1 ? 'ON' : 'OFF'}`);
+    try {
+      copy?.close();
+    } catch {
+      // ⚠ 閉じられなくても、参照は手放す
+    }
+  }
+}
+
+/**
+ * 🔴 **全文検索の索引に残る、除いた行の字の断片を捨てる**(レビュー ⚠1。`withMessagesRemoved` の写しの上だけで使う)。
+ *
+ * `entries_fts`(trigram・外部内容)は、行を消しても**消した字の 3 字の断片を、古い区画(segment)の中に残す**
+ * (`'delete'` は墓標を足すだけ。実測: 除いた本文の断片が画像に 6 回出た)。`'optimize'` は区画を 1 本に併合して古い区画を捨て、
+ * 捨てたページは `secure_delete` が 0 で潰す。
+ * ⚠ `'rebuild'` は使わない ── 作り直しの途中(`built_upto`)の DB で、まだ入れていない行まで索引に入れてしまい、
+ *   引き金の前提(`rowid <= built_upto` だけ索引にある)を壊す。`'optimize'` は今ある索引の中身を変えない。
+ * 🔑 索引が無い DB(新しい形でも旧い形でも、作る前の写し)では何もしない。在るのに掃除できなければ**書き出しを断る**
+ *   (残したまま人に渡すより、断る方が安全)。
+ */
+function purgeFtsResidue(target: Database): void {
+  const has = target.selectValue(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'entries_fts'`);
+  if (Number(has) === 0) return;
+  try {
+    target.exec(`INSERT INTO entries_fts(entries_fts) VALUES ('optimize')`);
+  } catch (e) {
+    if (looksOutOfMemory(e)) throw e;
+    throw new Error(
+      '除いたデータの検索用の記録を片付けられませんでした。人に渡す画像は書き出していません(元のデータは変わりません)',
+      { cause: e },
+    );
   }
 }
 
@@ -4281,7 +4363,7 @@ const handlers: Handlers = {
       req.only !== undefined
         ? subsetImage(req.only)
         : req.withoutMessages === true
-        ? withMessagesRemoved(() => runImageExport((api, ptr) => exportDbImage(api, ptr)), req.keepCid)
+        ? withMessagesRemoved((target) => runImageExport((api, ptr) => exportDbImage(api, ptr), target), req.keepCid)
         : runImageExport((api, ptr) => exportDbImage(api, ptr)),
   }),
   /**
