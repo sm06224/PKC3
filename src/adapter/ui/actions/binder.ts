@@ -131,6 +131,7 @@ import {
   screenBodyOf,
   SECTION_DRAFT_NOTE,
   type AppState,
+  type Dispatchable,
   type PartialDraft,
   type ViewMode,
 } from '@adapter/state/app-state';
@@ -498,6 +499,7 @@ function appOpenIds(): readonly string[] {
 import { processToolOf } from '@features/capture/capture-process';
 import {
   type MenuItem,
+  type OpenMenu,
   closeContextMenu,
   noteMenuUserInput,
   scrollClosesMenu,
@@ -5288,6 +5290,69 @@ function tableLineAt(target: Element, body: string | null): number | null {
  *   **もともと開いているノート**を指すので、戻す相手が無い(属性も付かない)。
  */
 const MENU_PREV_LID_ATTR = 'data-pkc-menu-prev-lid';
+
+/**
+ * 🔴 **行の右クリックで動いた選択を、メニューを何も選ばずに閉じたら元へ戻す**(#1982 段 5-5。5-4 の持ち越し)。
+ * ⚠ 右クリックは行を先に選ぶ(`onContextMenu`)ので、いまのタブがその行に差し替わる ── Esc や外を押して閉じると、
+ *   読んでいたタブが黙って消えていた。選択・タブ・履歴・印を、右クリックの**前の姿そのまま**へ戻す(`ROW_MENU_PEEK_UNDO`)。
+ * 🔑 「何も選ばずに」= メニューの項目が 1 度も押されていない(押した項目は自分の仕事で選択を決める)。閉じた瞬間の
+ *   state が右クリック直後のままのときだけ戻す(その間に別の操作で動いたなら、巻き戻さない)。
+ * 🔑 メニューを開いたまま別の行を右クリックした回は、最初の右クリックの前の姿を引き継ぐ(`peeks`)。
+ */
+type PeekSnapshot = Extract<Dispatchable, { type: 'ROW_MENU_PEEK_UNDO' }>['snapshot'];
+const peeks = new WeakMap<HTMLElement, { readonly snap: PeekSnapshot; readonly lid: string }>();
+
+function takePeekSnapshot(root: HTMLElement, st: AppState): PeekSnapshot {
+  const live = peeks.get(root);
+  // 開いたままのメニューから続けて右クリックした: 最初の右クリックの前の姿を引き継ぐ
+  if (live !== undefined && live.lid === st.selectedLid && contextMenuOpen(root)) return live.snap;
+  return {
+    selectedLid: st.selectedLid,
+    selectionHistory: st.selectionHistory,
+    noteTabs: st.noteTabs,
+    tabSeq: st.tabSeq,
+    selection: st.selection,
+    selectionAnchor: st.selectionAnchor,
+  };
+}
+
+function watchRowMenuPeek(
+  root: HTMLElement,
+  dispatcher: Dispatcher,
+  menu: OpenMenu | null,
+  snap: PeekSnapshot,
+  lid: string,
+): void {
+  peeks.delete(root);
+  if (menu === null) {
+    // メニューが出なかった(項目が 0): 選択は動いたまま ── 戻す
+    undoPeek(dispatcher, snap, lid, dispatcher.getState());
+    return;
+  }
+  // 選ぶ先が無い(元の選択と同じ行): 戻すものが無い
+  if (snap.selectedLid === null || snap.selectedLid === lid) return;
+  peeks.set(root, { snap, lid });
+  const after = dispatcher.getState();
+  let ran = false;
+  menu.el.addEventListener('click', () => (ran = true), true);
+  const Observer = root.ownerDocument.defaultView?.MutationObserver;
+  if (Observer === undefined) return;
+  const mo = new Observer(() => {
+    if (menu.el.isConnected) return;
+    mo.disconnect();
+    if (peeks.get(root)?.snap === snap) peeks.delete(root);
+    if (ran) return;
+    undoPeek(dispatcher, snap, lid, after);
+  });
+  mo.observe(root, { childList: true });
+}
+
+function undoPeek(dispatcher: Dispatcher, snap: PeekSnapshot, lid: string, after: AppState): void {
+  const st = dispatcher.getState();
+  // 右クリック直後から何も動いていない(選択・タブ・履歴が同じ)ときだけ
+  if (st.selectedLid !== lid || st.noteTabs !== after.noteTabs || st.selectionHistory !== after.selectionHistory) return;
+  dispatcher.dispatch({ type: 'ROW_MENU_PEEK_UNDO', from: lid, snapshot: snap });
+}
 
 /**
  * 🔴 **タブを閉じる。断られたら理由を言う**(#1982 段 5-4 着地前レビュー)。
@@ -24516,6 +24581,7 @@ export function bindActions(
     //    後だと、控えるのは**押した行そのもの**になって何も戻らない
     const prevLid = dispatcher.getState().selectedLid;
     const marksBefore = dispatcher.getState().selection;
+    const peekSnap = takePeekSnapshot(root, dispatcher.getState());
     // 🔴 選べなければ出さない(理由は `selectEntryOrExplain` が画面へ出している)
     if (!selectEntryOrExplain(dispatcher, lid, 'ノート', root, services)) {
       closeContextMenu(root);
@@ -24615,7 +24681,7 @@ export function bindActions(
           ...rows,
         ]
       : rows;
-    openContextMenu(
+    const rowMenu = openContextMenu(
       root,
       { x: ev.clientX, y: ev.clientY },
       items,
@@ -24636,7 +24702,8 @@ export function bindActions(
         ...(prevLid === null || prevLid === lid ? {} : { [MENU_PREV_LID_ATTR]: prevLid }),
       },
     );
-  };
+
+    watchRowMenuPeek(root, dispatcher, rowMenu, peekSnap, lid);  };
   /**
    * ⚠ **触った瞬間に閉じる。ただし、押した物の実行より後で。**
    *

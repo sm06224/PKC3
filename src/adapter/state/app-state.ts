@@ -2875,6 +2875,16 @@ export type UserAction =
    * 決めると、履歴と選択が二重帳簿になる(§7)。
    */
   | { type: 'NAV_HISTORY'; dir: 'back' | 'forward' }
+  /**
+   * 🔴 一覧の行の右クリックで動いた選択を、メニューを何も選ばずに閉じたときに**元へ戻す**(#1982 段 5-5)。
+   * ⚠ 履歴・タブ・印も右クリックの前の姿へ戻す(戻るの履歴に A→B→A と積まない)。⚠ `from` がいまの選択でなければ何もしない
+   *   (その間に別の操作で動いたなら、user の操作を巻き戻さない)。`NAV_HISTORY` と同じく wrapper が捌く。
+   */
+  | {
+      type: 'ROW_MENU_PEEK_UNDO';
+      from: string;
+      snapshot: Pick<AppState, 'selectedLid' | 'selectionHistory' | 'noteTabs' | 'tabSeq' | 'selection' | 'selectionAnchor'>;
+    }
   /** 本文の置換(#191)。⚠ 素の文字列で当てる(正規表現にしない)。 */
   | { type: 'REPLACE_IN_BODY'; find: string; replace: string; caseSensitive?: boolean }
   /**
@@ -5243,6 +5253,24 @@ export function entryListChanged(
 
 function reduceWithHistory(state: AppState, action: Dispatchable): ReduceResult {
   if (action.type === 'NAV_HISTORY') return navHistory(state, action.dir);
+  if (action.type === 'ROW_MENU_PEEK_UNDO') {
+    const snap = action.snapshot;
+    if (state.selectedLid !== action.from || snap.selectedLid === null || snap.selectedLid === action.from)
+      return { state, events: [] };
+    const r = reduceCore(state, { type: 'SELECT_ENTRY', lid: snap.selectedLid });
+    if (r.state.selectedLid !== snap.selectedLid) return { state, events: [] }; // 断られた(編集中・居ない)
+    return {
+      state: {
+        ...r.state,
+        selectionHistory: snap.selectionHistory,
+        noteTabs: snap.noteTabs,
+        tabSeq: snap.tabSeq,
+        selection: snap.selection,
+        selectionAnchor: snap.selectionAnchor,
+      },
+      events: r.events,
+    };
+  }
   const result = reduceCore(state, action);
   let history = result.state.selectionHistory;
   /**
@@ -5409,7 +5437,7 @@ export function canNavForward(state: AppState): boolean {
  * 逃がすと、新しい action を書き忘れても tsc が黙る。 */
 export function reduceCore(
   state: AppState,
-  action: Exclude<Dispatchable, { type: 'NAV_HISTORY' }>,
+  action: Exclude<Dispatchable, { type: 'NAV_HISTORY' | 'ROW_MENU_PEEK_UNDO' }>,
 ): ReduceResult {
   switch (action.type) {
     case 'SYS_BOOTED':

@@ -42,7 +42,7 @@ import {
 export type NoteTabsAction = Extract<Dispatchable, { type: 'NOTE_TAB_OPEN' | 'NOTE_TAB_ACTIVATE' | 'NOTE_TAB_CLOSE' | 'NOTE_TAB_REOPEN' | 'NOTE_TAB_NEXT' | 'NOTE_TAB_PREV' | 'NOTE_TAB_MOVE' | 'NOTE_TAB_EXTERNAL' | 'SET_NOTE_PINS' }>;
 
 /** 通常の reducer。循環 import を避けて引数で受ける。 */
-export type RunAction = (state: AppState, action: Exclude<Dispatchable, { type: 'NAV_HISTORY' }>) => ReduceResult;
+export type RunAction = (state: AppState, action: Exclude<Dispatchable, { type: 'NAV_HISTORY' | 'ROW_MENU_PEEK_UNDO' }>) => ReduceResult;
 
 /** ピン留めが 1 つも無い状態(参照を共有する)。 */
 export const NO_NOTE_PINS: ReadonlySet<string> = new Set<string>();
