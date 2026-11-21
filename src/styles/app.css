@@ -9608,11 +9608,19 @@ mark[data-pkc-diff-char='del'] {
   display: flex;
   align-items: center;
   gap: var(--s2);
-  flex: 1;
+  /* 🔴 **最下段の 1 行を占める**(2026-11-21)── 状態の字と同じ行に並べると、「保存中…」が
+   *   遅れて入った瞬間に OK が 42px 横へずれ、押しが状態の字の上に落ちる(340px で実測)。
+   *   幅 100% の行を最後に置けば、上の行に何が出入りしてもバーが上へ伸びるだけで OK は動かない。 */
+  flex: 1 1 100%;
+  order: 1;
   min-width: 0;
   /* ⚠ 字が長い端末では折り返す(押す口を画面の外へ押し出さない) */
   flex-wrap: wrap;
   padding: var(--s1) 0;
+}
+/* ⚠ 帯だけが出ているとき、空の 1 行目(状態の字の器)が行間ぶん帯を押し下げない */
+[data-pkc-region='status']:has(> [data-pkc-region='too-narrow']:not([hidden])) {
+  row-gap: 0;
 }
 [data-pkc-field='too-narrow-text'] {
   /* 🔑 **色は情報にだけ使う**(founding)── ここは読ませたい字なので地の色で出す */
