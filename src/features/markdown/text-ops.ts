@@ -21,7 +21,6 @@ import { codeContextAt, insideCodeOrMath } from './code-context';
 import { parseCsv } from './csv-table';
 import { escapeLinkLabel, formatMarkdownLink } from './link-format';
 import { lineStart } from './line-start';
-import { wrapSelection } from './wrap-selection';
 import { TASK_LINE } from './task-line';
 import { LIST_LEAD, THEMATIC_BREAK } from './list-renumber';
 import { tableToMarkdown } from './table-copy';
@@ -1314,7 +1313,7 @@ const CLOSERS: ReadonlySet<string> = new Set(Object.values(INLINE_PAIRS));
  * 🔑 補う側(`autoPairFor`)と消す側(`pairedBackspaceRange`)が**同じ判定**を通る ── 片方だけだと、
  *   補っていない所で Backspace が閉じまで消す。
  */
-function pairSuppressed(text: string, pos: number): boolean {
+export function pairSuppressed(text: string, pos: number): boolean {
   const ctx = codeContextAt(text, pos);
   if (ctx === 'math') return true;
   if (ctx !== null) return false;
@@ -1348,9 +1347,8 @@ export function pairedBackspaceRange(
  */
 export function autoPairFor(sel: TextSelection, key: string): AutoPair | null {
   const { text, start, end } = sel;
-  // 🔴 選んでいるときは囲む(#2001 段 3。規則は `wrap-selection.ts` の 1 本。表・数式の中でも囲む)
-  const wrapped = wrapSelection(sel, key);
-  if (wrapped !== null) return wrapped;
+  // 🔴 選んでいるときは補わない(#2001 段 3)。囲むのは `wrap-selection.ts`(`wrapSelection` 欄の機能。補完は `autoPair` 欄の機能で別)
+  if (start !== end) return null;
   if (pairSuppressed(text, start)) return null;
   const lineHead = lineStart(text, start);
   const prefix = text.slice(lineHead, start);

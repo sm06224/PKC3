@@ -103,7 +103,6 @@ import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { indentLines } from '@features/markdown/indent-assist';
 import { swapLines } from '@features/markdown/line-swap';
 import { cycleHeading, deleteLines, duplicateLines } from '@features/markdown/line-edit';
-import { wrapSelection } from '@features/markdown/wrap-selection';
 import { TIDY_NOTES, tidySelection, type TidyOp } from '@features/markdown/text-tidy';
 import { tableOnTab } from '@features/markdown/table-assist';
 import { hasNumberedItems, renumberLists } from '@features/markdown/list-renumber';
@@ -323,7 +322,6 @@ import { convertPastedPermalink } from '@features/link/permalink';
 import { resolveMime } from './attach';
 import {
   applyFormat,
-  autoPairFor,
   DIAGRAM_CHOICES,
   CALLOUT_CHOICES,
   DIAGRAM_TEMPLATES,
@@ -520,7 +518,7 @@ import { setupLightbox, openLightbox, closeLightbox, lightboxOpen } from '../ren
 import { chordHint, HINT_BASE, HINT_BLOCKED, setBlocked } from '../render/shortcut-hint';
 import { TARGET_LID_ATTR } from '../render/target-lid';
 import { sectionBoxText, SECTION_BOX_INPUT_FIELD, SECTION_BOX_REGION } from '../render/section-box';
-import { editingFieldKind, editingFieldKindOfName, EDITING_FIELD_NAMES, fieldHas, keyContextOfField } from '../editing-field';
+import { editingFieldKind, editingFieldKindOfName, EDITING_FIELD_NAMES, fieldHas, keyContextOfField, typedPairFor } from '../editing-field';
 import { codeBoxText, CODE_BOX_INPUT_FIELD, CODE_BOX_REGION } from '../render/code-box';
 import { structureText } from '@features/structure/structure-text';
 import {
@@ -20459,8 +20457,8 @@ const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: 
   'delete-line': (ta, notify) => {
     if (!runLineEdit(ta, deleteLines(sel3(ta)))) notify('消す行がありません');
   },
-  'cycle-heading': (ta) => {
-    runLineEdit(ta, cycleHeading(sel3(ta)));
+  'cycle-heading': (ta, notify) => {
+    if (!runLineEdit(ta, cycleHeading(sel3(ta)))) notify('見出しにできる行がありません(コード・表・下線つきの見出しは対象外です)');
   },
   /**
    * 🔴 **カーソルの在る表の列幅を揃える**(#1171)。
@@ -21676,7 +21674,9 @@ export function bindActions(
    *   (1 行ずつ編集する画面 `row-swap.ts` の `autoPair` / `backspacePair` と同じ道)。挿すのは `insertText` ── `Ctrl+Z` で戻る。
    */
   const pairOnKeydown = (ke: KeyboardEvent, ta: HTMLTextAreaElement): boolean => {
+    const fieldName = ta.getAttribute('data-pkc-field');
     if (ke.key === 'Backspace') {
+      if (!fieldHas(fieldName, 'autoPair')) return false;
       if (ke.altKey || ke.shiftKey || ta.selectionStart !== ta.selectionEnd) return false;
       const range = pairedBackspaceRange(ta.value, ta.selectionStart);
       if (range === null) return false;
@@ -21686,7 +21686,8 @@ export function bindActions(
       return true;
     }
     if (ke.key.length !== 1) return false;
-    const pair = autoPairFor({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, ke.key);
+    // 🔴 選んでいれば囲む(`wrapSelection`)/ いなければ補う(`autoPair`)── 欄ごとの答えは `typedPairFor` 1 か所(#2001 段 3)
+    const pair = typedPairFor(fieldName, { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, ke.key);
     if (pair === null) return false;
     ke.preventDefault();
     if (pair.kind === 'insert') insertText(ta, pair.insert);
@@ -22074,25 +22075,15 @@ export function bindActions(
       }
       /**
        * 🔴 **字を選んで括弧・引用符・`*` `_` を打つと囲む**(#2001 段 3)。追記の欄は括弧の自動補完(`autoPair`)を持たないので、
-       *   囲む操作だけをここで受ける(本文・章の欄は `pairOnKeydown`、1 画面の行は `row-swap.ts` が同じ `wrapSelection` を通る)。
+       *   `pairOnKeydown` の中で `wrapSelection` の欄の機能だけが働く(本文・章・1 画面の行と同じ `typedPairFor` 1 か所)。
        * ⚠ 変換中は上の `isComposing` の門で弾き済み。`Ctrl` / `Cmd` 付きは字ではない(`Alt` 併用は AltGr の字)。
        */
       if (
-        fieldHas(field, 'wrapSelection') &&
         ke.target instanceof HTMLTextAreaElement &&
-        ke.key.length === 1 &&
-        !((ke.ctrlKey || ke.metaKey) && !ke.altKey)
+        !((ke.ctrlKey || ke.metaKey) && !ke.altKey) &&
+        pairOnKeydown(ke, ke.target)
       ) {
-        const w = wrapSelection(
-          { text: ke.target.value, start: ke.target.selectionStart, end: ke.target.selectionEnd },
-          ke.key,
-        );
-        if (w !== null) {
-          ke.preventDefault();
-          insertText(ke.target, w.insert);
-          ke.target.setSelectionRange(w.start, w.end);
-          return;
-        }
+        return;
       }
       /**
        * 🔴 **追記欄の `Tab` はリストの行・複数行の選択のときだけ字下げ**(#2001 段 2 = user 裁定 4)。
@@ -22234,7 +22225,7 @@ export function bindActions(
      * ⚠ 変換中は上の `isComposing` の門で弾き済み。
      */
     if (
-      fieldHas(field, 'autoPair') &&
+      (fieldHas(field, 'autoPair') || fieldHas(field, 'wrapSelection')) &&
       ke.target instanceof HTMLTextAreaElement &&
       !((ke.ctrlKey || ke.metaKey) && !ke.altKey) &&
       pairOnKeydown(ke, ke.target)

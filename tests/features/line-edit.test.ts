@@ -95,14 +95,15 @@ describe('見出しの段の巡回', () => {
   const cyc = (m: string) => {
     const b = sel(m);
     const r = cycleHeading(b);
+    if (r === null) return null;
     check(b, r);
     return show(r);
   };
   it('なし → # → ## → … → ###### → なし', () => {
-    let t = 'あ|い';
+    let t: string = 'あ|い';
     const seen: string[] = [];
     for (let i = 0; i < 7; i++) {
-      t = cyc(t);
+      t = cyc(t)!;
       seen.push(t);
     }
     expect(seen).toEqual(['# あ|い', '## あ|い', '### あ|い', '#### あ|い', '##### あ|い', '###### あ|い', 'あ|い']);
@@ -142,10 +143,36 @@ describe('選択を囲む', () => {
     expect(wrapSelection(sel('a|b'), '(')).toBeNull();
     expect(wrapSelection(sel('a|b|'), 'x')).toBeNull();
   });
-  it('autoPairFor の選択ありの枝も同じ規則(`*` も。表の行・数式の中でも囲む)', () => {
-    expect(autoPairFor(sel('|a|'), '*')!.insert).toBe('*a*');
-    expect(autoPairFor({ text: '| x | a', start: 6, end: 7 }, '(')!.insert).toBe('(a)');
-    expect(autoPairFor(sel('$$\n|a|\n$$'), '(')!.insert).toBe('(a)');
+  it('🔴 autoPairFor は選択があれば何もしない(囲むのは wrapSelection の欄の機能。補完とは別)', () => {
+    expect(autoPairFor(sel('|a|'), '*')).toBeNull();
+    expect(autoPairFor(sel('|a|'), '(')).toBeNull();
+    expect(autoPairFor(sel('a|'), '(')!.insert).toBe('()');
+  });
+  describe('🔴 字が字のまま読まれる場所では囲まない(置き換えのまま)', () => {
+    const KEYS = ['(', '[', '"', "'", '`', '*', '_'];
+    const cases: Array<[string, string]> = [
+      ['fenced code の中', '```ts\nx = |a|;\n```'],
+      ['行内コードの中', 'x `|a|` y'],
+      ['数式の塊の中', '$$\n|a|\n$$'],
+      ['frontmatter の中', '---\ntitle: |a|\n---\n本文'],
+      ['選択が fence をまたぐ', '|x\n```\ny|\n```'],
+    ];
+    it('表の行', () => {
+      // ⚠ 目印の `|` が表の `|` と混ざるので、位置で渡す
+      const t = '| a | b |';
+      for (const k of KEYS) expect(wrapSelection({ text: t, start: 2, end: 3 }, k), k).toBeNull();
+    });
+    for (const [name, m] of cases) {
+      it(name, () => {
+        for (const k of KEYS) expect(wrapSelection(sel(m), k), `${name} ${k}`).toBeNull();
+      });
+    }
+    it('対照群: 同じ字を本文の地で選べば囲む / fence を閉じた後ろも囲む / frontmatter の下も囲む', () => {
+      expect(wrapSelection(sel('|a|'), '*')).not.toBeNull();
+      expect(wrapSelection(sel('```\nx\n```\n|a|'), '*')).not.toBeNull();
+      expect(wrapSelection(sel('---\ntitle: x\n---\n|本文|'), '*')).not.toBeNull();
+      expect(wrapSelection(sel('x `c` |a|'), '*')).not.toBeNull();
+    });
   });
   it('`*` を続けて 2 回で太字になる(選択が中身に残る)', () => {
     const one = wrapSelection(sel('|a|'), '*')!;
@@ -154,5 +181,68 @@ describe('選択を囲む', () => {
   });
   it('選択なしの `*` `_` `\'` は今までどおり補わない', () => {
     for (const k of ['*', '_', "'"]) expect(autoPairFor(sel('a|'), k)).toBeNull();
+  });
+});
+
+describe('見出しの段の巡回 ── 飾り・字下げ・触らない行', () => {
+  const cyc = (m: string) => {
+    const b = sel(m);
+    const r = cycleHeading(b);
+    if (r === null) return null;
+    check(b, r);
+    return show(r);
+  };
+  it('引用・リスト・番号・チェックは記号の後ろへ置く', () => {
+    expect(cyc('> a|')).toBe('> # a|');
+    expect(cyc('> > a|')).toBe('> > # a|');
+    expect(cyc('- a|')).toBe('- # a|');
+    expect(cyc('* a|')).toBe('* # a|');
+    expect(cyc('1. a|')).toBe('1. # a|');
+    expect(cyc('2) a|')).toBe('2) # a|');
+    expect(cyc('- [ ] a|')).toBe('- [ ] # a|');
+    expect(cyc('- [x] a|')).toBe('- [x] # a|');
+  });
+  it('記号の後ろの見出しも 1 段ずつ進み、最後は外れる', () => {
+    expect(cyc('> ## a|')).toBe('> ### a|');
+    expect(cyc('- ###### a|')).toBe('- a|');
+  });
+  it('字下げは `#` の前に残す(3 つまで)/ 入れ子のリストの字下げも残す', () => {
+    expect(cyc('   a|')).toBe('   # a|');
+    expect(cyc('  ## a|')).toBe('  ### a|');
+    expect(cyc('  - a|')).toBe('  - # a|');
+  });
+  it('4 つ以上・タブの字下げ(字下げコード)は触らない', () => {
+    expect(cyc('    a|')).toBeNull();
+    expect(cyc('\ta|')).toBeNull();
+  });
+  it('fence・数式の中と、その開き・閉じの行は触らない', () => {
+    expect(cyc('```\nco|de\n```')).toBeNull();
+    expect(cyc('```|js\ncode\n```')).toBeNull();
+    expect(cyc('```\ncode\n```|')).toBeNull();
+    expect(cyc('~~~\nco|de\n~~~')).toBeNull();
+    expect(cyc('$$\nx|\n$$')).toBeNull();
+    expect(cyc('> ```\n> co|de\n> ```')).toBeNull();
+    // 対照群: fence の外の行は動く
+    expect(cyc('```\ncode\n```\nあ|')).toBe('```\ncode\n```\n# あ|');
+  });
+  it('複数行の選択が fence をまたぐと、fence の中の行は飛ばして外の行だけ当てる', () => {
+    expect(cyc('|a\n```\ncode\n```\nb|')).toBe('# |a\n```\ncode\n```\n# b|');
+  });
+  it('frontmatter の中は触らない', () => {
+    expect(cyc('---\ntitle: x|\n---\n本文')).toBeNull();
+    expect(cyc('---\ntitle: x\n---\n本文|')).toBe('---\ntitle: x\n---\n# 本文|');
+  });
+  it('setext 見出し(下線つき)と水平線・表の行は触らない(下線を残したまま # を足さない)', () => {
+    expect(cyc('題|\n===')).toBeNull();
+    expect(cyc('題|\n---')).toBeNull();
+    expect(cyc('題\n===|')).toBeNull();
+    expect(cyc('---|')).toBeNull();
+    expect(cyc('* * *|')).toBeNull();
+    expect(cycleHeading({ text: '| a | b |', start: 2, end: 2 })).toBeNull();
+    // 対照群: 下線でない次の行なら動く / リストの次が `---` でも動く
+    expect(cyc('題|\n本文')).toBe('# 題|\n本文');
+  });
+  it('触らない行が混じった選択: 動く行だけに当たる。全部触らなければ null', () => {
+    expect(cyc('|a\n---\nb|')).toBe('|a\n---\n# b|');
   });
 });

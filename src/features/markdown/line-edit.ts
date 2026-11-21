@@ -17,7 +17,10 @@
  *
  * 🔑 **pure module**。書き込みは呼び側が `insertText`(取り消しの履歴を切らない)で `from`〜`to` を `insert` へ置き換える。
  */
+import { codeContextAt } from './code-context';
+import { frontmatterLineCount } from './frontmatter';
 import { lineStart } from './line-start';
+import { LIST_LEAD, THEMATIC_BREAK } from './list-renumber';
 import type { SwapEdit } from './line-swap';
 import type { TextSelection } from './text-ops';
 
@@ -94,43 +97,110 @@ export function headingLevelOf(line: string): number {
   return m === null ? 0 : m[1]!.length;
 }
 
+/** 行頭の飾り(引用 `> ` の連なり + リスト / チェックの記号)。見出しの `#` はこの後ろへ置く。 */
+const LINE_PREFIX = /^(?:[ \t]*>[ \t]?)*(?:[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?/;
+/** fence / 数式の開き・閉じの行(引用の中も)。 */
+const BLOCK_FENCE_LINE = /^[ \t>]*(?:`{3,}|~{3,}|\$\$)/;
+/** setext 見出しの下線(`===` / `---`)。 */
+const SETEXT_UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/;
+
+/** 見出しにできる行の分解(`null` = 触らない行)。 */
+interface HeadingLine {
+  /** `#` の前の部分(字下げ・引用・リストの記号)。 */
+  readonly prefix: string;
+  /** 見出しの記号(`## `。なければ空)。 */
+  readonly marker: string;
+  /** 見出しの記号の後ろ(本文)。 */
+  readonly body: string;
+}
+
+function splitHeadingLine(line: string): HeadingLine | null {
+  let prefix = LINE_PREFIX.exec(line)![0];
+  if (prefix === '') {
+    // 字下げだけ。⚠ 4 つ以上 / タブは字下げコード(見出しにならない)なので触らない。3 つまでは `#` の前に残す
+    const indent = /^[ \t]*/.exec(line)![0];
+    if (indent.length >= 4 || indent.includes('\t')) return null;
+    prefix = indent;
+  }
+  const rest = line.slice(prefix.length);
+  const m = HEADING_LEAD.exec(rest);
+  const marker = m === null ? '' : m[0];
+  return { prefix, marker, body: rest.slice(marker.length) };
+}
+
 /**
  * 見出しの段をひとつ進める(なし → 1 → … → 6 → なし)。
- * 段は**最初の空でない行**で決め、空でない全行へ同じ段を当てる(空行は触らない。選んだのが空行だけならその行へ)。
+ *
+ * ## 決めたこと
+ * - 段は**最初の見出しにできる行**で決め、見出しにできる全行へ同じ段を当てる(空行は触らない。選んだのが空行だけならその行へ)。
+ * - **記号の後ろへ置く**: 引用 `> # a` / リスト `- # a` / 番号 `1. # a` / チェック `- [ ] # a`。字下げは `#` の前に残す(3 つまで。
+ *   4 つ以上・タブの字下げは字下げコードなので触らない)。
+ * - **触らない行**: fence(```` ``` ````・`~~~`)と数式(`$$`)の中とその開き・閉じの行 / frontmatter / 表の行(`|` で始まる)/
+ *   水平線 / **setext 見出し**(次の行が `===` `---` の下線の行と、その下線の行)。
+ *   setext は `#` へ変換せず**そのまま**にする(下線を黙って消す・二重にするより、読める形を壊さない方を選んだ)。
+ * @returns 見出しにできる行が 1 つも無ければ `null`(⚠ 呼び側は何も書かない)
  */
-export function cycleHeading(sel: TextSelection): SwapEdit {
+export function cycleHeading(sel: TextSelection): SwapEdit | null {
   const { text } = sel;
   const [from, to] = lineSpan(text, sel.start, sel.end);
   const lines = text.slice(from, to).split('\n');
-  const skipBlank = lines.some((l) => l.trim() !== '');
-  const first = lines.find((l) => l.trim() !== '') ?? lines[0]!;
-  const next = (headingLevelOf(first) + 1) % (HEADING_MAX_LEVEL + 1);
+  const fmLines = frontmatterLineCount(text);
+  const heads: Array<HeadingLine | null> = [];
+  let off = from;
+  let lineNo = text.slice(0, from).split('\n').length - 1;
+  for (let k = 0; k < lines.length; k++) {
+    const l = lines[k]!;
+    let eligible: HeadingLine | null = null;
+    const nextStart = off + l.length + 1;
+    const nextEnd = text.indexOf('\n', nextStart);
+    const next = nextStart > text.length ? '' : text.slice(nextStart, nextEnd === -1 ? text.length : nextEnd);
+    if (
+      lineNo >= fmLines &&
+      codeContextAt(text, off) === null &&
+      !BLOCK_FENCE_LINE.test(l) &&
+      !/^[ \t]*\|/.test(l) &&
+      !THEMATIC_BREAK.test(l) &&
+      !SETEXT_UNDERLINE.test(l) &&
+      !(l.trim() !== '' && SETEXT_UNDERLINE.test(next) && !LIST_LEAD.test(l) && !/^\s*>/.test(l))
+    ) {
+      eligible = splitHeadingLine(l);
+    }
+    heads.push(eligible);
+    off = nextStart;
+    lineNo++;
+  }
+  const isBlank = (l: string): boolean => l.trim() === '';
+  const anyText = lines.some((l, k) => heads[k] !== null && !isBlank(l));
+  const usable = (k: number): boolean => heads[k] !== null && (!anyText || !isBlank(lines[k]!));
+  const firstK = lines.findIndex((_, k) => usable(k));
+  if (firstK === -1) return null;
+  const next = (headingLevelOf(heads[firstK]!.marker) + 1) % (HEADING_MAX_LEVEL + 1);
   const mark = next === 0 ? '' : `${'#'.repeat(next)} `;
-  const parts: Array<{ oldFrom: number; oldLead: number; newFrom: number; newLead: number; oldLen: number }> = [];
+  const parts: Array<{ oldFrom: number; oldLen: number; newFrom: number; prefixLen: number; oldMarkerLen: number }> = [];
   let oldOff = from;
   let newOff = from;
-  const out = lines.map((l) => {
-    if (skipBlank && l.trim() === '') {
-      parts.push({ oldFrom: oldOff, oldLead: 0, newFrom: newOff, newLead: 0, oldLen: l.length });
+  const out = lines.map((l, k) => {
+    const h = heads[k]!;
+    if (!usable(k)) {
+      parts.push({ oldFrom: oldOff, oldLen: l.length, newFrom: newOff, prefixLen: l.length + 1, oldMarkerLen: 0 });
       oldOff += l.length + 1;
       newOff += l.length + 1;
       return l;
     }
-    const m = HEADING_LEAD.exec(l);
-    const lead = m === null ? 0 : m[0].length;
-    const body = l.slice(lead);
-    const nl = mark + body;
-    parts.push({ oldFrom: oldOff, oldLead: lead, newFrom: newOff, newLead: mark.length, oldLen: l.length });
+    const nl = h.prefix + mark + h.body;
+    parts.push({ oldFrom: oldOff, oldLen: l.length, newFrom: newOff, prefixLen: h.prefix.length, oldMarkerLen: h.marker.length });
     oldOff += l.length + 1;
     newOff += nl.length + 1;
     return nl;
   });
   const insert = out.join('\n');
   const map = (pos: number): number => {
-    for (const p of parts) {
-      if (pos >= p.oldFrom && pos <= p.oldFrom + p.oldLen) {
-        return p.newFrom + p.newLead + Math.max(pos - p.oldFrom - p.oldLead, 0);
-      }
+    for (let k = 0; k < parts.length; k++) {
+      const p = parts[k]!;
+      if (pos < p.oldFrom || pos > p.oldFrom + p.oldLen) continue;
+      const rel = pos - p.oldFrom;
+      if (!usable(k) || rel < p.prefixLen) return p.newFrom + rel;
+      return p.newFrom + p.prefixLen + mark.length + Math.max(rel - p.prefixLen - p.oldMarkerLen, 0);
     }
     return pos + (insert.length - (to - from));
   };
