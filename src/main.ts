@@ -3696,6 +3696,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       for (const lid of lids) await client.request({ op: 'putNotePin', cid, lid, on: false });
       await reloadNotePins();
     },
+    /** 🔴 **取り込みで足した色ラベルだけを外す**(#1982 段 4)。⚠ いまも同じ色の物だけ(付け直した色・前から在った色は触らない)。 */
+    removeNoteLabels: async (entries) => {
+      const now = new Map((await client.request({ op: 'listNoteLabels', cid })).map((e) => [e.lid, e.color] as const));
+      for (const e of entries) {
+        if (now.get(e.lid) !== e.color) continue;
+        await client.request({ op: 'putNoteLabel', cid, lid: e.lid, color: null });
+      }
+      await reloadNoteLabels();
+    },
     removeTagColors: async (colors) => {
       const now = await client.request({ op: 'listTagColors', cid });
       let list = now;

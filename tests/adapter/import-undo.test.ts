@@ -18,6 +18,7 @@ function make(opts: {
   phase?: AppPhase;
   removeTagColors?: (c: readonly TagColorEntry[]) => Promise<void>;
   removeNotePins?: (l: readonly string[]) => Promise<void>;
+  removeNoteLabels?: (e: ReadonlyArray<{ lid: string; color: number }>) => Promise<void>;
 } = {}): {
   undo: ReturnType<typeof createImportUndo>;
   sent: Dispatchable[];
@@ -39,6 +40,7 @@ function make(opts: {
     fail: (m) => failed.push(m),
     ...(opts.removeTagColors === undefined ? {} : { removeTagColors: opts.removeTagColors }),
     ...(opts.removeNotePins === undefined ? {} : { removeNotePins: opts.removeNotePins }),
+    ...(opts.removeNoteLabels === undefined ? {} : { removeNoteLabels: opts.removeNoteLabels }),
   });
   return {
     undo,
@@ -175,6 +177,42 @@ describe('取り込みの戻り道(#535 ②)', () => {
     expect(g.undo.pending()?.title).not.toContain('ピン留め');
   });
 
+  it('🔴 足した色ラベルが分かる取り込みは、取り消しでその色だけを外す(#1982 段 4。ピンと同じ形)', async () => {
+    const removed: Array<Array<{ lid: string; color: number }>> = [];
+    const h = make({ removeNoteLabels: async (e) => void removed.push([...e]) });
+    h.undo.remember(['a', 'b'], { addedLabels: [{ lid: 'a', color: 3 }] });
+    expect(h.undo.pending()?.title).toContain('取り込みで足した色ラベルも外します');
+    h.undo.undo();
+    await Promise.resolve();
+    expect(removed, '足した行だけが外す口へ渡る').toEqual([[{ lid: 'a', color: 3 }]]);
+    expect(h.said.join('')).toContain('取り込みで足した色ラベルも外しました');
+    h.undo.undo();
+    await Promise.resolve();
+    expect(removed).toHaveLength(1);
+  });
+
+  it('対照群: 足した色ラベルが 0 件 / 口が無い配線では、外す口を呼ばない・色ラベルのことを言わない', async () => {
+    const removed: unknown[] = [];
+    const h = make({ removeNoteLabels: async (e) => void removed.push(e) });
+    h.undo.remember(['a'], {});
+    expect(h.undo.pending()?.title).not.toContain('色ラベル');
+    h.undo.undo();
+    await Promise.resolve();
+    expect(removed).toEqual([]);
+    const g = make();
+    g.undo.remember(['a'], { addedLabels: [{ lid: 'a', color: 1 }] });
+    expect(g.undo.pending()?.title).not.toContain('色ラベル');
+  });
+
+  it('色ラベルを外せなかったときも、取り消しは済んだうえで言う', async () => {
+    const h = make({ removeNoteLabels: async () => Promise.reject(new Error('x')) });
+    h.undo.remember(['a'], { addedLabels: [{ lid: 'a', color: 1 }] });
+    h.undo.undo();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.sent).toHaveLength(1);
+    expect(h.said.join('')).toContain('取り込みで足した色ラベルを外せませんでした');
+  });
+
   it('ピンを外せなかったときも、取り消しは済んだうえで言う', async () => {
     const h = make({ removeNotePins: async () => Promise.reject(new Error('x')) });
     h.undo.remember(['a'], { addedPins: ['a'] });
@@ -282,6 +320,14 @@ describe('main.ts の配線(#535 ②)', () => {
     expect(at, '上書きしている block が無い(前提が崩れている)').toBeGreaterThan(-1);
     const block = main.slice(Math.max(0, at - 400), at);
     expect(block, '上書き側で記憶を呼んでいない').toContain('importUndo.remember(lids)');
+  });
+
+  it('🔴 色ラベルを外す口が繋がっている(いまも同じ色の物だけ外す)', () => {
+    const at = main.indexOf('removeNoteLabels: async (entries) => {');
+    expect(at, '外す口が無い').toBeGreaterThan(-1);
+    const block = main.slice(at, at + 500);
+    expect(block, '同じ色のときだけ外す条件が無い').toContain('now.get(e.lid) !== e.color');
+    expect(block).toContain('color: null');
   });
 
   it('🔴 押す口(undoImport)が繋がっている', () => {

@@ -16,14 +16,17 @@ export interface NoteLabelImportDeps {
 export async function importNoteLabelsInto(
   incoming: ReadonlyArray<{ lid: string; color: number }>,
   deps: NoteLabelImportDeps,
-): Promise<{ added: number }> {
+): Promise<{ added: number; addedEntries: ReadonlyArray<{ lid: string; color: number }> }> {
   const now = new Set(await deps.listLids());
+  const addedEntries: Array<{ lid: string; color: number }> = [];
   let added = 0;
   for (const e of incoming) {
     if (now.has(e.lid) || !deps.exists(e.lid)) continue;
     await deps.put(e.lid, e.color);
     now.add(e.lid);
     added += 1;
+    addedEntries.push({ lid: e.lid, color: e.color });
   }
-  return { added };
+  // 🔴 足した行そのものを返す(取り込みの取り消しが外す対象。前から在った色は触らない)
+  return { added, addedEntries };
 }

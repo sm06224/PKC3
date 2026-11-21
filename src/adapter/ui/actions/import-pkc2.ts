@@ -154,7 +154,7 @@ export interface ImportDeps {
   importNoteLabels?(
     entries: ReadonlyArray<{ lid: string; color: number }>,
     alsoLids?: ReadonlySet<string>,
-  ): Promise<{ added: number }>;
+  ): Promise<{ added: number; addedEntries?: ReadonlyArray<{ lid: string; color: number }> }>;
   importNotePins?(
     lids: readonly string[],
   ): Promise<{
@@ -234,6 +234,8 @@ export interface ImportDeps {
       readonly addedColors?: readonly import('@features/tag-color').TagColorEntry[];
       /** 🔴 この取り込みで足したピン留め(#1377)。取り消しはこれだけを外す。 */
       readonly addedPins?: readonly string[];
+      /** 🔴 この取り込みで足した色ラベル(#1982 段 4)。取り消しはこれだけを外す。 */
+      readonly addedLabels?: ReadonlyArray<{ lid: string; color: number }>;
     },
   ): void;
   /**
@@ -527,15 +529,19 @@ async function runImport(
   const addedColors: import('@features/tag-color').TagColorEntry[] = [];
   /** 🔴 足したピン留めの lid(取り消しが外す対象。#1377)。 */
   const addedPins: string[] = [];
+  /** 🔴 足した色ラベル(取り消しが外す対象。#1982 段 4)。 */
+  const addedLabels: Array<{ lid: string; color: number }> = [];
   /** 取り消しに渡す形(`tagColors` は従来どおり、足した色が分かるときだけ `addedColors` を添える)。 */
   const undoOpts = (): {
     tagColors: boolean;
     addedColors?: readonly import('@features/tag-color').TagColorEntry[];
     addedPins?: readonly string[];
+    addedLabels?: ReadonlyArray<{ lid: string; color: number }>;
   } => ({
     tagColors: colorsAdded,
     ...(addedColors.length > 0 ? { addedColors: [...addedColors] } : {}),
     ...(addedPins.length > 0 ? { addedPins: [...addedPins] } : {}),
+    ...(addedLabels.length > 0 ? { addedLabels: [...addedLabels] } : {}),
   });
   // 書込の到達点。失敗時に「どこまで書けたか」を user に言うために持つ ──
   // 「失敗しました」とだけ言って disk に残すと、素直な再取込が二重取込になる
@@ -1099,7 +1105,8 @@ async function runImport(
       const labels = 'noteLabels' in result ? result.noteLabels : [];
       if (labels.length > 0 && deps.importNoteLabels !== undefined) {
         try {
-          await deps.importNoteLabels(labels, restoredTrashLids);
+          const r = await deps.importNoteLabels(labels, restoredTrashLids);
+          if (r.addedEntries !== undefined) addedLabels.push(...r.addedEntries);
         } catch (e) {
           result.warnings.push(`色ラベルを戻せませんでした: ${reason(e)}`);
         }
