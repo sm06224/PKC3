@@ -5,6 +5,7 @@
  * 読む規則は `features/import/template-zip.ts`(pure)。⚠ **読み終えてから 1 度だけ書く**(途中で誤りが出たら 1 件も作らない)。
  * 取り込めなかった物は**出どころつきで全部**結果に出す(`report`)。
  */
+import { humanBytes } from '@features/human-bytes';
 import { errorText } from '@features/error-text';
 import { markName } from '@features/message/message-log';
 import { readZipDirectory, readZipText, unwrapSingleTopDir, ZipReadError } from '@features/import/zip-reader';
@@ -51,7 +52,7 @@ export async function importTemplateZip(
     const tEntry = mine.find((e) => /^template\.ya?ml$/u.test(rel(e.name)))!;
     const read = async (e: (typeof dir)[number]): Promise<string> => {
       if (e.uncompressedSize > TEMPLATE_FILE_MAX) {
-        throw new TemplateImportError(`「${rel(e.name)}」が大きすぎます(${String(TEMPLATE_FILE_MAX / 1024)} KB まで)`);
+        throw new TemplateImportError(`「${rel(e.name)}」が大きすぎます(${humanBytes(TEMPLATE_FILE_MAX)} まで)`);
       }
       return readZipText(file, e);
     };

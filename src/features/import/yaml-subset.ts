@@ -19,6 +19,8 @@
  * ⚠ pure。値は `null | boolean | number | string | YamlValue[] | {[k]: YamlValue}`(プロトタイプを持たない)。
  */
 
+import { humanBytes } from '../human-bytes';
+
 export type YamlValue = null | boolean | number | string | YamlValue[] | { [key: string]: YamlValue };
 
 export const YAML_MAX_BYTES = 1024 * 1024;
@@ -188,7 +190,7 @@ function colonAt(text: string): number {
 /** YAML の部分集合を読む。誤りは {@link YamlSubsetError}(行番号つき)。 */
 export function parseYamlSubset(src: string): YamlValue {
   if (src.length > YAML_MAX_BYTES) {
-    throw new YamlSubsetError(`大きすぎます(${String(YAML_MAX_BYTES / 1024)} KB まで)`, 0);
+    throw new YamlSubsetError(`大きすぎます(${humanBytes(YAML_MAX_BYTES)} まで)`, 0);
   }
   const rawLines = src.replace(/^\uFEFF/u, '').split(/\r\n|\r|\n/u);
   let docStarted = false;
