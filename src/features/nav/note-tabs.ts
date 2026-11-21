@@ -160,7 +160,7 @@ export function reopenLast(
 ): ReopenResult | null {
   const idx = set.closed.findIndex((c) => exists(c.lid));
   if (idx < 0) return null;
-  const lid = set.closed[idx].lid;
+  const lid = set.closed[idx]!.lid;
   const rest = { ...set, closed: set.closed.slice(idx + 1) };
   return { set: openNew(rest, lid, seq, { activate: true }), lid };
 }
@@ -171,7 +171,7 @@ function step(set: TabSet, seq: number, pinned: ReadonlySet<string>, dir: 1 | -1
   const cur = ordered.findIndex((t) => t.lid === set.active);
   const n = ordered.length;
   const to = cur < 0 ? (dir === 1 ? 0 : n - 1) : (cur + dir + n) % n;
-  return activate(set, ordered[to].lid, seq);
+  return activate(set, ordered[to]!.lid, seq);
 }
 
 /** 次のタブ（表示順。末尾の次は先頭）。 */
@@ -190,7 +190,8 @@ export function move(set: TabSet, from: number, to: number): TabSet {
   if (!Number.isInteger(from) || !Number.isInteger(to)) return set;
   if (from < 0 || from >= n || to < 0 || to >= n || from === to) return set;
   const tabs = [...set.tabs];
-  const [t] = tabs.splice(from, 1);
+  const t = tabs.splice(from, 1)[0];
+  if (!t) return set;
   tabs.splice(to, 0, t);
   return { ...set, tabs };
 }
@@ -267,6 +268,6 @@ export function onDeleted(
 /** 別ウィンドウで開いている状態の印を付ける・外す。 */
 export function markExternal(set: TabSet, lid: string, external: boolean): TabSet {
   const i = indexOf(set, lid);
-  if (i < 0 || set.tabs[i].external === external) return set;
+  if (i < 0 || set.tabs[i]?.external === external) return set;
   return { ...set, tabs: set.tabs.map((t, j) => (j === i ? { ...t, external } : t)) };
 }

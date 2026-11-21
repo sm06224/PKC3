@@ -54,7 +54,7 @@ describe('openReplace', () => {
     s = openReplace(s, 'x', 11);
     expect(lids(s)).toEqual(['a', 'x', 'c']);
     expect(s.active).toBe('x');
-    expect(s.tabs[1].activatedAt).toBe(11);
+    expect(s.tabs[1]?.activatedAt).toBe(11);
   });
   it('差し替えで消えた lid は最近閉じたタブに入らない', () => {
     const s = openReplace(build('a', 'b'), 'x', 5);
@@ -64,13 +64,13 @@ describe('openReplace', () => {
     let s = build('a', 'b');
     s = markExternal(s, 'b', true);
     s = openReplace(s, 'x', 5);
-    expect(s.tabs[1].external).toBe(false);
+    expect(s.tabs[1]?.external).toBe(false);
   });
   it('既に別タブにある lid は有効にするだけで重複しない', () => {
     const s = openReplace(build('a', 'b', 'c'), 'a', 9);
     expect(lids(s)).toEqual(['a', 'b', 'c']);
     expect(s.active).toBe('a');
-    expect(s.tabs[0].activatedAt).toBe(9);
+    expect(s.tabs[0]?.activatedAt).toBe(9);
   });
   it('active が null でタブが残っていても新しく作る', () => {
     const s = openReplace({ ...build('a'), active: null }, 'x', 5);
@@ -100,7 +100,7 @@ describe('openNew', () => {
     const s = openNew(build('a', 'b'), 'a', 7);
     expect(lids(s)).toEqual(['a', 'b']);
     expect(s.active).toBe('a');
-    expect(s.tabs[0].activatedAt).toBe(7);
+    expect(s.tabs[0]?.activatedAt).toBe(7);
   });
   it('重複 lid で activate:false なら何も変わらない（同じ参照）', () => {
     const base = build('a', 'b');
@@ -116,8 +116,8 @@ describe('activate', () => {
   it('有効にして activatedAt を更新する', () => {
     const s = activate(build('a', 'b'), 'a', 9);
     expect(s.active).toBe('a');
-    expect(s.tabs[0].activatedAt).toBe(9);
-    expect(s.tabs[1].activatedAt).toBe(2);
+    expect(s.tabs[0]?.activatedAt).toBe(9);
+    expect(s.tabs[1]?.activatedAt).toBe(2);
   });
 });
 
@@ -155,7 +155,7 @@ describe('close', () => {
     s = openNew(s, 'a', 12);
     s = close(s, 'a', 13);
     expect(s.closed.map((c) => c.lid)).toEqual(['a', 'b']);
-    expect(s.closed[0].closedAt).toBe(13);
+    expect(s.closed[0]?.closedAt).toBe(13);
   });
   it(`closed は ${MAX_CLOSED} 件で打ち切り古い方を捨てる`, () => {
     let s = createTabSet();
@@ -164,7 +164,7 @@ describe('close', () => {
       s = close(s, `n${i}`, 100 + i);
     }
     expect(s.closed).toHaveLength(MAX_CLOSED);
-    expect(s.closed[0].lid).toBe(`n${MAX_CLOSED + 2}`);
+    expect(s.closed[0]?.lid).toBe(`n${MAX_CLOSED + 2}`);
     expect(s.closed.some((c) => c.lid === 'n0')).toBe(false);
   });
   it('次の有効タブはピン留めを先頭にした表示順で選ぶ', () => {
@@ -219,7 +219,7 @@ describe('next / prev', () => {
     const s = activate(build('a', 'b', 'c'), 'b', 5);
     const n = next(s, 20);
     expect(n.active).toBe('c');
-    expect(n.tabs[2].activatedAt).toBe(20);
+    expect(n.tabs[2]?.activatedAt).toBe(20);
     expect(prev(s, 21).active).toBe('a');
   });
   it('1 枚以下は同じ参照', () => {
@@ -400,10 +400,10 @@ describe('onDeleted', () => {
 describe('markExternal', () => {
   it('印を付けて外せる', () => {
     let s = markExternal(build('a', 'b'), 'a', true);
-    expect(s.tabs[0].external).toBe(true);
-    expect(s.tabs[1].external).toBe(false);
+    expect(s.tabs[0]?.external).toBe(true);
+    expect(s.tabs[1]?.external).toBe(false);
     s = markExternal(s, 'a', false);
-    expect(s.tabs[0].external).toBe(false);
+    expect(s.tabs[0]?.external).toBe(false);
   });
   it('開いていない lid・変化なしは同じ参照', () => {
     const base = build('a');
