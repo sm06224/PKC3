@@ -6164,6 +6164,31 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   cursor: pointer;
   font-size: var(--fs-sm);
 }
+/* 入力欄の値の列(#2002 段 4)。題名 1 列 + 値の列を同じ幅で並べる。長い値は省略記号 */
+[data-pkc-field='query-columns'],
+[data-pkc-region='query-rows'] > li:has([data-pkc-field='query-cell']) {
+  display: flex;
+  gap: var(--s3);
+  align-items: baseline;
+}
+[data-pkc-field='query-columns'] {
+  padding: var(--s1) var(--s3);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  background: var(--surface-2, var(--surface));
+}
+[data-pkc-field='query-columns'] > span,
+[data-pkc-region='query-rows'] > li > [data-pkc-field='title'],
+[data-pkc-field='query-cell'] {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-field='query-cell'] {
+  font-variant-numeric: tabular-nums;
+}
 /* 選んでいる行の見え方は共通の `[data-pkc-selected]`(左端の線 + 太字)が持つ(#1982 段 2) */
 [data-pkc-field='query-empty'] {
   color: var(--muted);

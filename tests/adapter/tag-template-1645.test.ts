@@ -157,6 +157,8 @@ describe('④ テンプレートから作る', () => {
     expect(created!.archetype).toBe('text');
     expect(created!.body).toContain('## 議事録 ');
     expect(created!.body, '変数が埋まっていない').not.toContain('${date}');
+    // 🔴 #2002 段 4: 入力欄の無いテンプレートには出自を書かない(対照。入力欄ありは group-by-vars.test.ts)
+    expect(created!.body!.startsWith('---')).toBe(false);
     expect(d.getState().phase).toBe('editing');
     expect(d.getState().openBody?.body).toBe(created!.body);
   });

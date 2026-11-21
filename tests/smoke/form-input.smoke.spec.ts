@@ -89,6 +89,11 @@ test('🔴 入力欄に打って保存すると設定欄へ入り、表に追加
   );
   expect(await page.locator(cells).count(), '断ったのに表が増えた').toBe(6);
 
+  // ── #2002 段 4: 「記録の一覧」で集計の画面が開く(グループ化は template。このノートに出自は無いので「もうありません」)
+  await clickReal(page, `${FORM} [data-pkc-action="form-open-list"]`);
+  await expect(page.locator('[data-pkc-region="query-bar"]'), '集計の画面が開かない').toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-pkc-region="query-table"]')).toContainText('template');
+
   expect(errors).toEqual([]);
 });
 
