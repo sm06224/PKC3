@@ -114,6 +114,64 @@ describe('現在行の強調の配線', () => {
     s.unbind();
   });
 
+  describe('🔴 同じ行の中で打つ間は、全文の影を組み直さず行だけ測る(5000 行で打鍵ごと +17ms だった)', () => {
+    const mirrorTexts = (): string[] =>
+      [...document.querySelectorAll('[data-pkc-field="current-line-mirror"]')].map((m) => m.textContent ?? '');
+    const typeAt = async (ta: HTMLTextAreaElement, value: string, caret: number): Promise<void> => {
+      ta.value = value;
+      ta.setSelectionRange(caret, caret);
+      ta.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      await frame();
+    };
+
+    it('同じ行で字を足すと、全文の影の字は古いまま・行の影だけ新しい字になり、高さは測り直す(上端は動かない)', async () => {
+      const s = setup('editor-body');
+      s.ta.value = 'abc\n\nlast';
+      s.ta.focus();
+      s.ta.setSelectionRange(9, 9);
+      s.ta.dispatchEvent(new Event('focusin', { bubbles: true }));
+      await frame();
+      const first = mirrorTexts();
+      expect(first[0], '最初は全文を影へ流す').toBe('abc\n\nlast' + String.fromCharCode(0x200b));
+      const top0 = s.ta.style.getPropertyValue(CURRENT_LINE_TOP_VAR);
+      rects = [{ top: 99, bottom: 131 }]; // 行の影で測った高さ(折り返して 2 行になった想定)
+      asked = [];
+      await typeAt(s.ta, 'abc\n\nlastx', 10);
+      expect(mirrorTexts()[0], '同じ行の打鍵で全文の影を組み直した').toBe(first[0]);
+      expect(mirrorTexts()[1]).toBe('lastx' + String.fromCharCode(0x200b));
+      expect(asked, '行の影の全体を 1 度だけ測る').toEqual([[0, 6]]);
+      expect(s.ta.style.getPropertyValue(CURRENT_LINE_TOP_VAR), '上端は動かない').toBe(top0);
+      expect(s.ta.style.getPropertyValue(CURRENT_LINE_HEIGHT_VAR), '高さは測り直す').toBe('32.0px');
+      s.unbind();
+    });
+
+    it('行が替わる / 行より前の字が変わる / 改行を打つときは、全文の影を測り直す', async () => {
+      const s = setup('editor-body');
+      s.ta.value = 'abc\n\nlast';
+      s.ta.focus();
+      s.ta.setSelectionRange(9, 9);
+      s.ta.dispatchEvent(new Event('focusin', { bubbles: true }));
+      await frame();
+      // 行が替わる(selectionchange)
+      s.ta.setSelectionRange(1, 1);
+      document.dispatchEvent(new Event('selectionchange'));
+      await frame();
+      expect(mirrorTexts()[0]).toBe('abc\n\nlast' + String.fromCharCode(0x200b));
+      expect(asked.at(-1)).toEqual([0, 4]);
+      // 行より前の字が変わった(同じ行番号のまま、前の行を書き換えて caret は元の行へ戻す)
+      await typeAt(s.ta, 'abc\n\nlast', 6);
+      await typeAt(s.ta, 'abcZ\n\nlast', 7);
+      expect(mirrorTexts()[0], '前の字が変わったのに影が古い').toBe('abcZ\n\nlast' + String.fromCharCode(0x200b));
+      // 行の途中で改行を打つ: 行の頭と行より前は同じなので行だけ測る(上端は動かない)/ caret が次の行へ移ったら全文を測り直す
+      await typeAt(s.ta, 'abcZ\n\nla\nst', 8);
+      expect(mirrorTexts()[0], '行の頭が同じなのに全文を組み直した').toBe('abcZ\n\nlast' + String.fromCharCode(0x200b));
+      await typeAt(s.ta, 'abcZ\n\nla\nst', 9);
+      expect(mirrorTexts()[0]).toBe('abcZ\n\nla\nst' + String.fromCharCode(0x200b));
+      expect(asked.at(-1)).toEqual([9, 12]);
+      s.unbind();
+    });
+  });
+
   it('IME の変換中は動かさず、確定で合わせ直す', async () => {
     const s = setup('editor-body');
     s.ta.value = 'x';

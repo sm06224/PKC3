@@ -46,35 +46,103 @@ export interface CurrentLineDeps {
   enabled(): boolean;
 }
 
-/** 欄の `ta`、caret の行の縦の箱(欄の padding box の左上が原点)を測る。測れなければ `null`。 */
-export function measureCurrentLine(
-  ta: HTMLTextAreaElement,
-  mirror: { el: HTMLElement; text: Text },
-): { top: number; height: number } | null {
-  const doc = ta.ownerDocument;
-  const cs = doc.defaultView?.getComputedStyle(ta);
-  if (cs === undefined) return null;
-  const el = mirror.el;
-  for (const p of MIRROR_PROPS) el.style[p as never] = (cs[p as never] ?? '') as never;
-  // 折り返す幅は、欄の中身の幅(縦のスクロールバーを除く)── 欄と同じ所で折り返すために
-  el.style.boxSizing = 'border-box';
-  el.style.overflowX = 'hidden';
-  el.style.overflowY = 'hidden';
-  el.style.width = `${String(ta.clientWidth + ta.clientLeft * 2)}px`;
-  patchText(mirror.text, ta.value + ZWSP);
-  const caret = ta.selectionStart;
-  const { from, to } = currentLineRange(ta.value, caret);
+export interface Mirror {
+  readonly el: HTMLElement;
+  readonly text: Text;
+  /** 字の形・幅を写したときの鍵(変わっていなければ写し直さない)。 */
+  styleKey: string;
+}
+
+/** 測りの控え(caret の行の頭と、その上端)。同じ行の中で打つ間は上端が動かないので、全文の影を使わず行だけ測る。 */
+export interface LineCache {
+  ta: HTMLTextAreaElement;
+  from: number;
+  /** `from` より前の字(これが変わっていなければ、行の上端は動いていない)。 */
+  prefix: string;
+  top: number;
+  key: string;
+}
+
+export function createMirror(doc: Document): Mirror {
+  const el = doc.createElement('div');
+  el.setAttribute('data-pkc-field', MIRROR_FIELD);
+  el.setAttribute('aria-hidden', 'true');
+  el.style.cssText =
+    'position:absolute;visibility:hidden;pointer-events:none;top:0;left:-9999px;white-space:pre-wrap;overflow-wrap:break-word;';
+  const text = doc.createTextNode('');
+  el.append(text);
+  doc.body.append(el);
+  return { el, text, styleKey: '' };
+}
+
+/** 影の字の形・幅を欄に合わせる(鍵が同じなら何もしない)。 */
+function styleMirror(m: Mirror, ta: HTMLTextAreaElement, cs: CSSStyleDeclaration): string {
+  const width = ta.clientWidth + ta.clientLeft * 2;
+  const key = [width, cs.fontFamily, cs.fontSize, cs.fontWeight, cs.lineHeight, cs.letterSpacing, cs.tabSize, cs.paddingLeft, cs.paddingRight, cs.paddingTop].join('|');
+  if (m.styleKey !== key) {
+    const el = m.el;
+    for (const p of MIRROR_PROPS) el.style[p as never] = (cs[p as never] ?? '') as never;
+    // 折り返す幅は、欄の中身の幅(縦のスクロールバーを除く)── 欄と同じ所で折り返すために
+    el.style.boxSizing = 'border-box';
+    el.style.overflowX = 'hidden';
+    el.style.overflowY = 'hidden';
+    el.style.width = `${String(width)}px`;
+    m.styleKey = key;
+  }
+  return key;
+}
+
+/** `m` の [start, end) の縦の箱(行の高さの余白込み)と、`m` の上端からの位置。 */
+function boxIn(m: Mirror, doc: Document, cs: CSSStyleDeclaration, start: number, end: number): { top: number; height: number } | null {
   const range = doc.createRange();
-  // 行末の `\n`(最後の行なら末尾の ZWSP)まで含める ── 空の行にも箱ができる
-  range.setStart(mirror.text, from);
-  range.setEnd(mirror.text, Math.min(to + 1, mirror.text.length));
+  range.setStart(m.text, start);
+  range.setEnd(m.text, Math.min(end, m.text.length));
   const box = boxOfRects([...range.getClientRects()]);
   if (box === null) return null;
-  const origin = el.getBoundingClientRect().top + el.clientTop;
+  const origin = m.el.getBoundingClientRect().top + m.el.clientTop;
   // 矩形は字の箱(フォントの高さ)── 行の高さ(line-height)の上下の余白を足して、行の箱にする
   const lh = Number.parseFloat(cs.lineHeight);
   const pad = Number.isFinite(lh) && lh > box.height ? (lh - box.height) / 2 : 0;
   return { top: box.top - origin - pad, height: box.height + pad * 2 };
+}
+
+/**
+ * 欄の `ta`、caret の行の縦の箱(欄の padding box の左上が原点)を測る。測れなければ `null`。
+ *
+ * 🔑 **同じ行の中で打っている間は、全文の影を使わない**(5000 行で 1 打鍵あたり +17ms だった主因は、全文の影の組み直し)。
+ *   行の上端は「行より前の字」と幅・字の形だけで決まるので、それらが前回と同じなら上端は控えを使い、
+ *   **この行だけを入れた小さい影(`line`)で高さだけ**測る(折り返しは行の中の字だけで決まる)。
+ *   行が替わった / 行より前の字が変わった / 幅や字の形が変わったときだけ、全文の影(`full`)で測り直す。
+ */
+export function measureCurrentLine(
+  ta: HTMLTextAreaElement,
+  mirrors: { full: Mirror; line: Mirror },
+  cache: { current: LineCache | null },
+): { top: number; height: number } | null {
+  const doc = ta.ownerDocument;
+  const cs = doc.defaultView?.getComputedStyle(ta);
+  if (cs === undefined) return null;
+  const value = ta.value;
+  const { from, to } = currentLineRange(value, ta.selectionStart);
+  const key = [ta.clientWidth, cs.fontFamily, cs.fontSize, cs.lineHeight, cs.paddingLeft, cs.paddingRight, cs.letterSpacing].join('|');
+  const c = cache.current;
+  if (c !== null && c.ta === ta && c.from === from && c.key === key && value.startsWith(c.prefix)) {
+    // 速い道: 行だけ測る
+    styleMirror(mirrors.line, ta, cs);
+    patchText(mirrors.line.text, value.slice(from, to) + ZWSP);
+    const b = boxIn(mirrors.line, doc, cs, 0, mirrors.line.text.length);
+    if (b !== null) return { top: c.top, height: b.height };
+  }
+  styleMirror(mirrors.full, ta, cs);
+  patchText(mirrors.full.text, value + ZWSP);
+  // 行末の `\n`(最後の行なら末尾の ZWSP)まで含める ── 空の行にも箱ができる
+  const b = boxIn(mirrors.full, doc, cs, from, to + 1);
+  if (b === null) {
+    cache.current = null;
+    return null;
+  }
+  cache.current = { ta, from, prefix: value.slice(0, from), top: b.top, key };
+  return b;
 }
 
 /**
@@ -84,15 +152,18 @@ export function measureCurrentLine(
 export function bindCurrentLine(root: HTMLElement, deps: CurrentLineDeps): () => void {
   const doc = root.ownerDocument;
   const view = doc.defaultView; // ⚠ window の resize は聞かない(欄の幅の変化は ResizeObserver が拾う。常時の聞き手を増やさない)
-  let mirror: { el: HTMLElement; text: Text } | null = null;
+  let mirrors: { full: Mirror; line: Mirror } | null = null;
+  const cache: { current: LineCache | null } = { current: null };
   let current: HTMLTextAreaElement | null = null;
   let frame: number | null = null;
   let composing = false;
   let observer: ResizeObserver | null = null;
 
   const dropMirror = (): void => {
-    mirror?.el.remove();
-    mirror = null;
+    mirrors?.full.el.remove();
+    mirrors?.line.el.remove();
+    mirrors = null;
+    cache.current = null;
   };
   const clear = (): void => {
     if (current !== null) {
@@ -126,18 +197,8 @@ export function bindCurrentLine(root: HTMLElement, deps: CurrentLineDeps): () =>
         observer.observe(ta);
       }
     }
-    if (mirror === null) {
-      const el = doc.createElement('div');
-      el.setAttribute('data-pkc-field', MIRROR_FIELD);
-      el.setAttribute('aria-hidden', 'true');
-      el.style.cssText =
-        'position:absolute;visibility:hidden;pointer-events:none;top:0;left:-9999px;white-space:pre-wrap;overflow-wrap:break-word;';
-      const text = doc.createTextNode('');
-      el.append(text);
-      doc.body.append(el);
-      mirror = { el, text };
-    }
-    const box = measureCurrentLine(ta, mirror);
+    mirrors ??= { full: createMirror(doc), line: createMirror(doc) };
+    const box = measureCurrentLine(ta, mirrors, cache);
     if (box === null) {
       ta.removeAttribute(CURRENT_LINE_ATTR);
       return;
