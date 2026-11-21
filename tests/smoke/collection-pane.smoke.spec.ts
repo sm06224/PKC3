@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickInspectorMoreItem, clickReal, collectPageErrors, createEntry, gotoApp, openExportMenu, clickExportMenuItem } from './helpers';
+import { clickInspectorMoreItem, clickReal, collectPageErrors, createEntry, gotoApp, openExportMenu, clickExportMenuItem, openCollectionMore } from './helpers';
 
 /**
  * 🔴 **何も選んでいない = コレクションを選んでいる**(#1017 段④a)。
@@ -50,7 +50,7 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
   // ② 4 つの書き出しが、実際に見えて押せる形で在る(畳まれていない)
   //    ⚠ 見える説明(`title` の 1 行)まで見る ── 押した後どうなるか読めること
   // 🔴 2026-11-03(#1029 / #501): 書き出し系は「書き出す ▾」1 つに畳んだ ── 実マウスで開き、一覧の項目と説明を見る
-  const actions = ['export-html', 'export-portable', 'export-pkc2-html', 'export-markdown', 'export-structure'];
+  const actions = ['export-html', 'export-portable', 'export-pkc2-html', 'export-markdown'];
   await expect(
     pane.locator('[data-pkc-action="open-collection-export-menu"]'),
     '「書き出す ▾」が見えていない',
@@ -78,11 +78,19 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
    *   **実ブラウザでしか確かめられない層**(`hidden` の付け外しが実際に効くか /
    *   `<details>` を使っていないか)だけを見る。
    */
-  const toggle = pane.locator('[data-pkc-action="toggle-plan-apply"]');
-  await expect(toggle, '「整理案を適用」が見えていない').toBeVisible();
+  // 🔴 #2001 段 1: 根に見えるのは「書き出す ▾」「バックアップ」「その他 ▾」。整理の 2 つは「その他 ▾」の一覧の中
+  await expect(pane.locator('[data-pkc-action="export-archive"]'), '「バックアップ」が根に見えていない').toBeVisible();
+  await expect(pane.locator('[data-pkc-action="open-collection-more"]'), '「その他 ▾」が見えていない').toBeVisible();
+  await expect(pane.locator('[data-pkc-action="toggle-plan-apply"]'), '整理案を適用が一覧に入らず平置きのまま').toBeHidden();
+  const moreMenu = await openCollectionMore(page);
+  await expect(moreMenu.locator('[data-pkc-action="toggle-plan-apply"]'), '「整理案を適用」が一覧に無い').toBeVisible();
+  await expect(moreMenu.locator('[data-pkc-action="export-structure"]'), '「構成をコピー」が一覧に無い').toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-pkc-action="open-collection-more"]'), 'Esc の後、焦点が「その他 ▾」へ戻らない').toBeFocused();
   const planBox = pane.locator('[data-pkc-field="plan-apply-box"]');
   await expect(planBox, '貼り付け欄が既定で隠れていない').toBeHidden();
-  await clickReal(page, '[data-pkc-field="collection-pane"] [data-pkc-action="toggle-plan-apply"]');
+  await openCollectionMore(page);
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="toggle-plan-apply"]');
   await expect(planBox, '押しても貼り付け欄が開かない').toBeVisible();
   const planInput = page.locator('[data-pkc-field="plan-input"]');
   await expect(planInput, '整理案の貼り付け欄が見えていない').toBeVisible();
@@ -90,7 +98,8 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
   await expect(planApplyBtn, '貼る前から押せる(dead click)').toBeDisabled();
 
   // ③ 押した結果を観測する(0 件のときの断り)── 例外を出さずに終わる
-  await clickExportMenuItem(page, 'export-structure');
+  await openCollectionMore(page);
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="export-structure"]');
 
   /**
    * 🔴 #1416: 「PKC2 の HTML で書き出す」── 元にする PKC2 の HTML を選ぶと、データを入れ替えた HTML が落ちる。

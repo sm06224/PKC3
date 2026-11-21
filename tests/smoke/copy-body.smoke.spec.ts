@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { clickReal, createEntry, collectPageErrors, gotoApp, useSplitEditor,
   gotoCollectionPane,
   openExportMenu,
+  openCollectionMore,
   openInspectorMore,
 } from './helpers';
 
@@ -34,19 +35,19 @@ test.beforeEach(async ({ page }) => {
  *   700ms だけ付く。⚠ 短いので**押す前に**観測を仕掛ける(後から探すと取りこぼす)。
  */
 async function copyAndWait(page: Page, action: string): Promise<void> {
-  // 🔴 構成のコピーは「書き出す ▾」の一覧の中(#1029 / #501)── user と同じく実マウスで開いてから、一覧の項目を押す
+  // 🔴 構成のコピーは根の「その他 ▾」の一覧の中(#2001 段 1。#1029 では「書き出す ▾」)── user と同じく実マウスで開いてから、一覧の項目を押す
   const viaExport = action === 'export-structure';
   // 🔴 ノートの参照のコピーは「その他 ▾」の一覧の中(#1982 段 1)
   const viaMore = action === 'copy-entry-ref';
   const viaMenu = viaExport || viaMore;
-  if (viaExport) await openExportMenu(page, 'collection');
+  if (viaExport) await openCollectionMore(page);
   if (viaMore) await openInspectorMore(page);
   const sel = viaMenu
     ? `[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`
     : `[data-pkc-action="${action}"]`;
   // 🔴 一覧の項目は押すと閉じる ── 合図は一覧を開いたボタンに出る(項目に出ても誰にも見えない)
   const flashSel = viaExport
-    ? '[data-pkc-action="open-collection-export-menu"]'
+    ? '[data-pkc-action="open-collection-more"]'
     : viaMore
       ? '[data-pkc-action="open-inspector-more"]'
       : sel;

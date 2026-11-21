@@ -974,7 +974,6 @@ test('🔴 主要な導線が畳まれず、その場で押せる', async ({ pag
     'export-html',
     'export-portable',
     'export-markdown',
-    'export-structure',
   ]) {
     await expect(
       page.locator(`[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`),

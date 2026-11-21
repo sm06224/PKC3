@@ -1210,7 +1210,6 @@ const COLLECTION_EXPORT_ACTIONS: ReadonlySet<string> = new Set([
   'export-pkc2-html',
   'export-markdown',
   'export-markdown-folder',
-  'export-structure',
 ]);
 
 /**
@@ -1253,6 +1252,17 @@ export async function clickBarMoreItem(page: Page, itemSelector: string): Promis
   await expect(menu, '帯の「その他 ▾」を押しても一覧が出ない').toBeVisible();
   await expect(menu.locator(itemSelector), `${itemSelector} が「その他 ▾」の一覧に無い`).toBeVisible();
   await clickReal(page, `[data-pkc-region="context-menu"] ${itemSelector}`);
+}
+
+/**
+ * 🔴 **根(何も選んでいないとき)の「その他 ▾」を実マウスで開き、一覧を返す**(#2001 段 1)。
+ * ⚠ 「構成をコピー」「整理案を適用」はここから押す(画面に出ているのは「書き出す ▾」「バックアップ」「その他 ▾」だけ)。
+ */
+export async function openCollectionMore(page: Page): Promise<Locator> {
+  await clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="open-collection-more"]');
+  const menu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(menu, '根の「その他 ▾」を押しても一覧が出ない').toBeVisible();
+  return menu;
 }
 
 /** 「書き出す ▾」を実マウスで開き、一覧(右クリックと同じ器)を返す。 */
