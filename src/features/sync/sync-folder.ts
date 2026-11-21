@@ -99,6 +99,20 @@ export function needsOwnWrite(existingSeq: number | null, outs: Readonly<Record<
   return d === undefined || d !== currentDigest;
 }
 
+/**
+ * 🔴 **フォルダの中の、この端末の名前のファイルが「この端末が書いた物」か**。
+ * - この端末の控え(`outs`)に連番がある → 自分の物
+ * - 控えに無いが、控えの**一番古い連番より前**(手で何度も書き出して、控えの保持数から押し出された)→ 自分の物(名前と端末 id が合っている)
+ * - それ以外(控えの範囲内なのに無い・控えより新しい連番)→ 別の端末が同じ id で書いた疑い(端末のデータの複製)
+ * ⚠ 控えの保持数に左右されて、手動の書き出しの繰り返しだけで「重複の確認」が出ないようにする。
+ */
+export function ownFileVerdict(seq: number, outs: Readonly<Record<number, string>>, currentSeq: number): 'own' | 'suspect' {
+  if (seq <= 0 || outs[seq] !== undefined) return 'own';
+  const kept = Object.keys(outs).map(Number);
+  if (kept.length > 0 && seq < Math.min(...kept) && seq <= currentSeq) return 'own';
+  return 'suspect';
+}
+
 /** 状態の種類。 */
 export type FolderSyncPhase = 'unsupported' | 'off' | 'needs-permission' | 'idle' | 'running' | 'lost' | 'disabled';
 

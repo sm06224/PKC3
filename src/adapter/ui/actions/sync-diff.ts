@@ -18,14 +18,14 @@ import { sha256Hex as blobSha256Hex } from '@adapter/platform/storage/asset-key'
 import { seedFromBackup, type SyncSeed } from '@features/sync/sync-seed';
 import { SYNC_FORGET_LABEL, SYNC_OFF_REFUSAL, SYNC_SETTING_LABEL } from '@features/sync/sync-setting';
 import type { Baseline, Fp, KeyedState } from '@features/sync/change-set';
-import { assetRefsIn } from '@features/asset/asset-ref-scan';
+import { diffNoteStream } from '@features/sync/diff-notes';
 import { safeName } from '@features/export/file-name';
 import { dayStamp } from '@features/datetime/date-math';
 import { assetSourceSize, readAssetSource, type ReadableAssetSource } from '@features/import/zip-reader';
 import type { NoticeAction } from './import-undo';
 import type { ResultMap, StorageRequest, SyncUndoToken } from '@adapter/platform/storage/protocol';
 
-type SyncOp = 'syncSnapshot' | 'syncCommitExport' | 'syncApply' | 'syncUndo' | 'syncSeed' | 'syncMeasureNotes' | 'getBodies' | 'listAssetMetas';
+type SyncOp = 'syncSnapshot' | 'syncCommitExport' | 'syncApply' | 'syncUndo' | 'syncSeed' | 'syncMeasureNotes' | 'syncBuildDiff' | 'getBodies' | 'listAssetMetas';
 
 export interface SyncDeps {
   cid: string;
@@ -72,6 +72,18 @@ export const SHOW_SYNC_CONFLICTS_ACTION: NoticeAction = {
   action: 'show-sync-conflicts',
   title: '題名に「同期の競合」が付いたノートを、左の一覧に絞り込んで表示します',
 };
+
+/**
+ * 🔴 **添付の実体が、目録(hash・大きさ)と合うか**(取り込みと、フォルダの `assets/` から引き直す回が同じ 1 本を通る)。
+ * - hash があれば、内容の hash が合うこと。大きさが分かっていれば(`size > 0`)それも合うこと。
+ * - hash が無い(64MB 超で hash を取っていない)物は、**大きさが目録と同じ**ことだけが門(クラウドが途中までしか届けていない実体を、正しい key の下へ置かない)。
+ * @returns 合わない理由(合えば `null`)
+ */
+export async function assetMismatch(blob: Blob, meta: Pick<DiffAssetMeta, 'size' | 'hash'>): Promise<string | null> {
+  if (meta.hash === null) return blob.size === meta.size ? null : `大きさが添付の一覧と違います(${blob.size} / ${meta.size} バイト)`;
+  if (meta.size > 0 && blob.size !== meta.size) return `大きさが添付の一覧と違います(${blob.size} / ${meta.size} バイト)`;
+  return (await blobSha256Hex(blob)) === meta.hash ? null : '内容の hash が添付の一覧と違います';
+}
 
 const toBaseline = (list: Record<string, { content: string; place?: string }>): Baseline => list;
 
@@ -135,30 +147,39 @@ export async function buildSyncDiff(deps: SyncDeps, opts: { all?: boolean; inlin
       all: opts.all === true,
       nowMs,
     });
-    const committed = await deps.request({ op: 'syncCommitExport', cid: deps.cid, digest: fingerprintDigest(plan.fingerprints) });
+    const manifestBase = { exported_at: (deps.now?.() ?? new Date()).toISOString(), cid: deps.cid, title: deps.title(), complete: plan.complete };
+    // 🔴 フォルダ同期(実体を zip に積まない道)は、本文の取り出し・JSON 化・CRC の計算を storage worker で行う(主スレッドを塞がない)
     const metaByLid = new Map(snap.notes.map((n) => [n.lid, n] as const));
-    const assetMetas = await deps.request({ op: 'listAssetMetas', cid: deps.cid });
-    const assetKeys = assetMetas.map((a) => a.key);
-    const carried = new Map<string, DiffAssetMeta>();
-    const byKey = new Map(assetMetas.map((a) => [a.key, a] as const));
-    async function* notes(): AsyncGenerator<DiffNote> {
-      const BATCH = 200;
-      for (let i = 0; i < plan.noteLids.length; i += BATCH) {
-        const lids = plan.noteLids.slice(i, i + BATCH);
-        const rows = await deps.request({ op: 'getBodies', cid: deps.cid, lids });
-        for (const r of rows) {
-          const m = metaByLid.get(r.lid);
-          if (m === undefined) continue;
-          for (const k of assetRefsIn(r.body, assetKeys)) {
-            const a = byKey.get(k);
-            if (a !== undefined && !carried.has(k)) carried.set(k, { key: k, mime: a.mime ?? 'application/octet-stream', size: a.size ?? 0, hash: a.hash });
-          }
-          yield { lid: r.lid, title: m.title, archetype: m.archetype, parentLid: m.parentLid, body: r.body };
-        }
-      }
+    if (opts.inlineAssets === false) {
+      const noteMetas = plan.noteLids.flatMap((lid) => {
+        const m = metaByLid.get(lid);
+        return m === undefined ? [] : [{ lid, title: m.title, archetype: m.archetype, parentLid: m.parentLid }];
+      });
+      const r = await deps.request({
+        op: 'syncBuildDiff',
+        cid: deps.cid,
+        digest: fingerprintDigest(plan.fingerprints),
+        manifest: manifestBase,
+        notes: noteMetas,
+        relations: snap.relations,
+        tombstones: plan.tombstones,
+        fingerprints: plan.fingerprints,
+        peerBase: plan.peerBase,
+        labels: snap.labels,
+        pins: snap.pins,
+        ...(opts.peerBases === true
+          ? { peerBases: Object.fromEntries(Object.entries(snap.bases).map(([dev, b]) => [dev, fingerprintsOf(Object.entries(b.baseline).map(([key, fp]) => ({ key, ...fp })))])) }
+          : {}),
+      });
+      return { blob: r.blob, counts: r.counts, missingAssets: [], complete: plan.complete, carried: r.carried, device: r.device, seq: r.seq };
     }
+    const committed = await deps.request({ op: 'syncCommitExport', cid: deps.cid, digest: fingerprintDigest(plan.fingerprints) });
+    const assetMetas = await deps.request({ op: 'listAssetMetas', cid: deps.cid });
+    const carried = new Map<string, DiffAssetMeta>();
+    const notes = (): AsyncGenerator<DiffNote> =>
+      diffNoteStream({ lids: plan.noteLids, metaByLid, fetchBodies: (lids) => deps.request({ op: 'getBodies', cid: deps.cid, lids }), assetMetas, carried });
     const out = await writeDiffZip({
-      manifest: { exported_at: (deps.now?.() ?? new Date()).toISOString(), device: committed.device, seq: committed.seq, cid: deps.cid, title: deps.title(), complete: plan.complete },
+      manifest: { ...manifestBase, device: committed.device, seq: committed.seq },
       notes: notes(),
       relations: snap.relations,
       tombstones: plan.tombstones,
@@ -168,7 +189,6 @@ export async function buildSyncDiff(deps: SyncDeps, opts: { all?: boolean; inlin
       pins: snap.pins,
       assets: () => [...carried.values()],
       getAssetBlob: (k) => deps.getAssetBlob(k),
-      ...(opts.inlineAssets === false ? { inlineAssets: false } : {}),
       ...(opts.peerBases === true
         ? { peerBases: Object.fromEntries(Object.entries(snap.bases).map(([dev, b]) => [dev, fingerprintsOf(Object.entries(b.baseline).map(([key, fp]) => ({ key, ...fp })))])) }
         : {}),
@@ -331,6 +351,11 @@ export interface ImportSyncOpts {
   interactive?: boolean;
   /** 添付の実体が zip に無いとき、ここから引く(フォルダ同期の `assets/<key>`)。無ければ `null`。 */
   assetReader?: (key: string) => Promise<Blob | null>;
+  /**
+   * `false` = 「取り込みを取り消す」を登録しない(定期の同期・ほかの取り込みの取り消しが残っているとき。user が押す前の取り消しを奪わない)。
+   * 登録しない回の結果の一覧には、取り消しの限界の行も出さない。
+   */
+  remember?: boolean;
 }
 
 export interface ImportSyncResult {
@@ -494,8 +519,9 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
         try {
           const blob = outside ?? (await readAssetSource(src as ReadableAssetSource));
           // 🔴 添付の一覧の hash と内容が合うか(合わなければ置かない。内容が違う添付を、正しい key の下へ入れない)
-          if (meta?.hash != null && (await blobSha256Hex(blob)) !== meta.hash) {
+          if (meta !== undefined && (await assetMismatch(blob, meta)) !== null) {
             bad.push(label);
+            missingMetas.push(meta); // 次の回で引き直す(クラウドが途中までしか届けていないだけかもしれない)
             continue;
           }
           await deps.putBlob(key, blob);
@@ -511,7 +537,7 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
     // 定期の同期で何も変わらなかった回は、画面を読み直さない(毎回の再描画を避ける)
     if (touched || opts.quiet !== true) await deps.reload();
     const token: SyncUndoToken = applied.undo;
-    const undoable = token.entries.length > 0 || token.relationsAdded.length > 0 || token.relationsRemoved.length > 0 || (applied.marksWritten ?? 0) > 0;
+    const undoable = opts.remember !== false && (token.entries.length > 0 || token.relationsAdded.length > 0 || token.relationsRemoved.length > 0 || (applied.marksWritten ?? 0) > 0);
     if (undoable) {
       deps.rememberUndo?.({
         count: token.entries.length,

@@ -10,6 +10,7 @@ import type {
   GroupResult as QueryGroupResult,
   KeyResult as QueryKeyResult,
 } from '@features/query/group-by';
+import type { Tombstone } from '@features/sync/change-set';
 import type { ImportRemap } from '@features/import/body-remap';
 import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
@@ -851,6 +852,16 @@ export type StorageRequest =
   /** バックアップの種の指紋を、相手(書き出した端末)の「前回の合意」として書く。⚠ 既にその相手の記録が在れば書かない。 */
   | { op: 'syncSeed'; cid: string; peer: string; baseline: Record<string, { content: string; place?: string }>; nowIso: string }
   | { op: 'syncApply'; cid: string; input: SyncApplyInput }
+  /**
+   * 🔴 フォルダ同期の差分ファイル(添付の実体を積まない形)を **worker の中で**組む(本文の取り出し・JSON 化・CRC の計算を主スレッドへ持ち込まない)。
+   * 連番を進めて指紋の要約を控える(`syncCommitExport` と同じ)ところまでを 1 つの op にする。戻りの Blob はそのまま書き込める。
+   */
+  | { op: 'syncBuildDiff'; cid: string; digest: string; manifest: { exported_at: string; cid: string; title: string; complete: boolean };
+      notes: Array<{ lid: string; title: string; archetype: string; parentLid: string | null }>;
+      relations: Array<{ from: string; to: string; kind: string }>;
+      tombstones: Tombstone[]; fingerprints: Array<{ key: string; c: string; p?: string }>; peerBase: Array<{ key: string; c: string; p?: string }>;
+      peerBases?: Record<string, Array<{ key: string; c: string; p?: string }>>;
+      labels: Array<{ lid: string; color: number }>; pins: string[] }
   | { op: 'syncUndo'; cid: string; token: SyncUndoToken }
   /**
    * 🔴 相手のノート(本文つき)の指紋を worker で測る。⚠ 本文の SHA-256 を主スレッドでやらない(重い処理は worker へ)。
@@ -907,6 +918,8 @@ export interface SyncApplyResult {
   /** 色ラベル・ピン留めを書いた数 / 上限・宛先なしで書けなかった数(段 3)。 */
   marksWritten?: number;
   marksSkipped?: number;
+  /** 書けなかった色ラベル・ピン留めの lid(記録には「合意した」と残していない)。 */
+  marksSkippedLids?: string[];
   /** 計画を立ててから反映するまでの間に、こちらで編集されていた物(書かずに残した)。コピーを足した物は `copyLid` がある。 */
   raced: Array<{ lid: string; title: string; copyLid?: string; copyTitle?: string; trash?: boolean }>;
   undo: SyncUndoToken;
@@ -1600,6 +1613,7 @@ export interface ResultMap {
   syncCommitExport: { device: string; seq: number };
   syncSeed: { written: boolean };
   syncApply: SyncApplyResult;
+  syncBuildDiff: { blob: Blob; counts: { notes: number; relations: number; deletions: number; assets: number; total: number }; carried: Array<{ key: string; mime: string; size: number; hash: string | null }>; device: string; seq: number };
   syncUndo: { restored: number; skipped: number };
   syncMeasureNotes: Array<{ lid: string; content: string; place: string }>;
   syncForget: { removed: number };

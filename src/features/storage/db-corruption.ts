@@ -93,6 +93,7 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   'syncApply',
   'syncUndo',
   'syncCommitExport',
+  'syncBuildDiff',
   'syncSeed',
   // 🔴 現在の指紋を読む(端末 id が無ければ 1 行作る)。問題のある DB から同期の材料を作らない
   'syncSnapshot',

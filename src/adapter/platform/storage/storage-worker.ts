@@ -69,6 +69,9 @@ import {
   syncScope,
 } from '@features/sync/sync-state';
 import { isReservedSyncLid, isSyncRelationKind } from '@features/sync/sync-guard';
+import { labelKey, markKeyLid, pinKey } from '@features/sync/sync-marks';
+import { writeDiffZip, type DiffAssetMeta } from '@features/sync/diff-file';
+import { diffNoteStream } from '@features/sync/diff-notes';
 import {
   deleteSetting,
   discardPeerRecords,
@@ -4173,6 +4176,7 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
     // ── 色ラベル・ピン留め(段 3。🔴 宛先のノートが生きているときだけ。触る前の行は `rec` で控える = 取り消しで戻る)
     let marksWritten = 0;
     let marksSkipped = 0;
+    const skippedKeys = new Set<string>();
     const labelScope = noteLabelScope(cid);
     const pinScope = notePinScope(cid);
     const labelTargets = new Set<string>();
@@ -4187,11 +4191,13 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
     for (const l of input.labelSets ?? []) {
       if (!isNoteLabelColor(l.color) || !liveRow(database, cid, l.lid)) {
         marksSkipped++;
+        skippedKeys.add(labelKey(l.lid));
         continue;
       }
       const had = getSetting(database, labelScope, l.lid) !== null;
       if (!had && Number(database.selectValue('SELECT count(*) FROM settings WHERE scope = ?', [labelScope])) >= MAX_NOTE_LABELS) {
         marksSkipped++;
+        skippedKeys.add(labelKey(l.lid));
         continue;
       }
       rec(labelScope, l.lid);
@@ -4207,11 +4213,13 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
     for (const lid of input.pinAdds ?? []) {
       if (!liveRow(database, cid, lid)) {
         marksSkipped++;
+        skippedKeys.add(pinKey(lid));
         continue;
       }
       if (getSetting(database, pinScope, lid) !== null) continue;
       if (Number(database.selectValue('SELECT count(*) FROM settings WHERE scope = ?', [pinScope])) >= MAX_NOTE_PINS_STORED) {
         marksSkipped++;
+        skippedKeys.add(pinKey(lid));
         continue;
       }
       const max = Number(database.selectValue('SELECT max(CAST(v AS INTEGER)) FROM settings WHERE scope = ?', [pinScope]));
@@ -4244,11 +4252,14 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
     // ── 同期の記録(相手との対応・前回の合意・連番)
     rec(syncScope(cid), SYNC_KEY_PAIR_PREFIX + input.peer);
     putSetting(database, syncScope(cid), SYNC_KEY_PAIR_PREFIX + input.peer, input.peerCid);
-    writeBase(database, cid, input.peer, input.baseline, input.nowIso, rec);
+    // 🔴 書けなかった印は「合意した」と残さない(残すと、次の回に相手と同じ物として扱われ、二度と付かない)
+    const agreed = { ...input.baseline };
+    for (const k of skippedKeys) delete agreed[k];
+    writeBase(database, cid, input.peer, agreed, input.nowIso, rec);
     writeSeq(database, advanceSeq(readSeq(database), input.peerSeq), rec);
     writePeerSeq(database, cid, input.peer, input.peerSeq, rec);
     database.exec('COMMIT');
-    return { ...result, marksWritten, marksSkipped, raced, undo: { entries: undoEntries, relationsAdded: relAdded, relationsRemoved: relRemoved, rows: [...prevRows.values()] } };
+    return { ...result, marksWritten, marksSkipped, marksSkippedLids: [...skippedKeys].map((k) => markKeyLid(k) as string), raced, undo: { entries: undoEntries, relationsAdded: relAdded, relationsRemoved: relRemoved, rows: [...prevRows.values()] } };
   } catch (err) {
     try {
       database.exec('ROLLBACK');
@@ -6310,6 +6321,51 @@ const handlers: Handlers = {
   syncApply: (req) => {
     requireSyncEnabled();
     return applySync(need(), req.cid, req.input);
+  },
+  syncBuildDiff: async (req) => {
+    requireSyncEnabled();
+    const database = need();
+    // 連番を進めて指紋の要約を控える(`syncCommitExport` と同じ。その後の組み立てが失敗しても連番は進むだけで害は無い)
+    database.exec('BEGIN IMMEDIATE');
+    let committed: { device: string; seq: number };
+    try {
+      const device = ensureDevice(database);
+      const seq = readSeq(database) + 1;
+      writeSeq(database, seq);
+      writeOut(database, req.cid, seq, req.digest);
+      database.exec('COMMIT');
+      committed = { device, seq };
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+    const assetMetas = handlers.listAssetMetas({ op: 'listAssetMetas', cid: req.cid }) as ResultMap['listAssetMetas'];
+    const carried = new Map<string, DiffAssetMeta>();
+    const out = await writeDiffZip({
+      manifest: { ...req.manifest, device: committed.device, seq: committed.seq },
+      notes: diffNoteStream({
+        lids: req.notes.map((n) => n.lid),
+        metaByLid: new Map(req.notes.map((n) => [n.lid, n] as const)),
+        fetchBodies: async (lids) => handlers.getBodies({ op: 'getBodies', cid: req.cid, lids }) as ResultMap['getBodies'],
+        assetMetas,
+        carried,
+      }),
+      relations: req.relations,
+      tombstones: req.tombstones,
+      fingerprints: req.fingerprints,
+      peerBase: req.peerBase,
+      ...(req.peerBases === undefined ? {} : { peerBases: req.peerBases }),
+      labels: req.labels,
+      pins: req.pins,
+      assets: () => [...carried.values()],
+      getAssetBlob: async () => null,
+      inlineAssets: false,
+    });
+    return { blob: out.blob, counts: out.counts, carried: [...carried.values()], ...committed };
   },
   syncUndo: (req) => undoSync(need(), req.cid, req.token),
   syncMeasureNotes: (req) => {

@@ -3822,6 +3822,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return s.phase === 'ready' && s.sectionDraft === null && unsavedTypingLidOf(s) === null;
     },
     lock: windowSyncLock(),
+    undoPending: () => importUndo.pending() !== null,
     say: (text) => appMessagePost.post({ kind: 'result', source: 'sync', text }),
     fail: (text) => appMessagePost.post({ kind: 'problem', source: 'sync', text }),
     onChange: () => {

@@ -154,6 +154,7 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'syncConfigure',
   'syncSnapshot',
   'syncCommitExport',
+  'syncBuildDiff',
   'syncSeed',
   'syncMeasureNotes',
   'syncForget',

@@ -28,6 +28,7 @@ import {
   isSafeAssetFileName,
   memoKey,
   needsOwnWrite,
+  ownFileVerdict,
   phaseForPermission,
   planFolderFiles,
   SYNC_FOLDER_ASSETS_DIR,
@@ -38,10 +39,9 @@ import {
   type FolderSyncPhase,
 } from '@features/sync/sync-folder';
 import { SYNC_OFF_REFUSAL } from '@features/sync/sync-setting';
-import { sha256Hex as blobSha256Hex } from '@adapter/platform/storage/asset-key';
 import type { SyncDirLike, SyncDirPicker, SyncFileHandleLike, SyncLock } from '@adapter/platform/folder-sync';
 import type { SyncFolderStore } from '@adapter/platform/sync-folder-store';
-import { buildSyncDiff, importSyncDiff, peerLabel, type SyncDeps } from './sync-diff';
+import { assetMismatch, buildSyncDiff, importSyncDiff, peerLabel, type SyncDeps } from './sync-diff';
 
 const errName = (e: unknown): string => (typeof e === 'object' && e !== null ? String((e as { name?: unknown }).name ?? '') : '');
 const pad2 = (n: number): string => String(n).padStart(2, '0');
@@ -70,6 +70,8 @@ export interface SyncFolderDeps {
   /** 同期を始めてよい状態か(読み込み中・編集中の欄がある間は `false`)。 */
   ready(): boolean;
   lock?: SyncLock | null;
+  /** 「取り込みを取り消す」が残っているか。残っているあいだは、同期の取り込みでそれを上書きしない。 */
+  undoPending?(): boolean;
   /** 結果・失敗の知らせ(メッセージへ。ステータスバーには出さない)。 */
   say(text: string): void;
   fail(text: string): void;
@@ -100,13 +102,19 @@ export class SyncFolder {
   private version = 0;
   private timer: unknown = null;
   private generation = 0;
+  /** いま走っている回の世代。 */
+  private runGen = 0;
   private running: Promise<void> | null = null;
   /** 処理を済ませたファイル(名前 → 大きさ:更新日時)。同じ物を読み直さない。 */
   private readonly memo = new Map<string, string>();
   /** 読めなかったファイルの控え(同じ知らせを毎回出さない)。 */
   private readonly unreadableSeen = new Map<string, string>();
   private readonly pendingPeers = new Set<string>();
-  /** 取り込んだが実体が見つからなかった添付(次の回で引き直す。⚠ このセッションだけの控え)。 */
+  /** 失敗した・読めなかったファイル(名前 → 大きさ:更新日時)。定期の回は、ファイルが変わるまで飛ばす(毎分同じ失敗を繰り返さない)。「今すぐ同期」は試す。 */
+  private readonly failedMemo = new Map<string, string>();
+  /** 置けなかった添付の控え(同じ知らせを 1 度だけ出す)。 */
+  private readonly assetFailSeen = new Set<string>();
+  /** 取り込んだが実体が見つからなかった・内容が合わなかった添付(次の回で引き直す。保存した handle の記録に添えて、開き直しても続ける)。 */
   private readonly missingAssets = new Map<string, DiffAssetMeta>();
   private prevMsgs = new Set<string>();
   private roundMsgs = new Set<string>();
@@ -170,6 +178,7 @@ export class SyncFolder {
     if (rec === null) return;
     this.dir = rec.handle;
     this.folderName = rec.name;
+    for (const m of rec.missing ?? []) this.missingAssets.set(m.key, m);
     const perm = await this.permissionOf(rec.handle);
     this.phase = phaseForPermission(perm);
     this.message = this.phase === 'lost' ? FOLDER_LOST_NOTE : null;
@@ -204,7 +213,7 @@ export class SyncFolder {
     this.phase = 'idle';
     this.message = null;
     try {
-      await this.deps.store.put(this.deps.cid, { handle: dir, name: dir.name, savedAt: new Date().toISOString() });
+      await this.deps.store.put(this.deps.cid, { handle: dir, name: dir.name, savedAt: new Date().toISOString(), missing: [...this.missingAssets.values()] });
     } catch (e) {
       // 保存できなくても、このセッションは使える(次の起動では選び直し)
       this.deps.fail(`選んだフォルダを覚えておけませんでした(次に開いたときは選び直しが要ります): ${errorText(e)}`);
@@ -257,8 +266,10 @@ export class SyncFolder {
     this.clearTimer();
     this.memo.clear();
     this.unreadableSeen.clear();
+    this.failedMemo.clear();
+    this.assetFailSeen.clear();
     this.pendingPeers.clear();
-    this.missingAssets.clear();
+    // ⚠ 足りない添付の控えは消さない(ノートの側の問題で、フォルダを選び直しても続く)
     this.lastText = null;
     this.lastAt = null;
     this.blockWrite = false;
@@ -299,7 +310,10 @@ export class SyncFolder {
       return;
     }
     if (this.running !== null) {
+      const g = this.runGen;
       await this.running;
+      // 🔴 待っている間にフォルダが選び直された(走っていた回の世代と変わった)なら、古い回は新しいフォルダを同期していない・タイマーも張っていない。ここで改めて 1 回回す
+      if (g !== this.generation && this.phase === 'idle' && this.running === null) await this.syncNow(true);
       return;
     }
     if (!this.deps.ready()) {
@@ -308,6 +322,7 @@ export class SyncFolder {
       return;
     }
     const gen = this.generation;
+    this.runGen = gen;
     const dir = this.dir;
     this.phase = 'running';
     this.changed();
@@ -317,18 +332,17 @@ export class SyncFolder {
         this.emit(`フォルダ同期が止まりました: ${errorText(e)}`, 'fail');
       })
       .finally(() => {
+        if (this.running === task) this.running = null;
         if (gen === this.generation && this.phase === 'running') {
           this.phase = 'idle';
           this.changed();
           this.setTimer();
+        } else if (gen !== this.generation && this.phase === 'idle' && this.timer === null) {
+          this.setTimer(); // フォルダが選び直された後に古い回が終わった: タイマーを必ず残す
         }
       });
     this.running = task;
-    try {
-      await task;
-    } finally {
-      if (this.running === task) this.running = null;
-    }
+    await task;
   }
 
   private async runLocked(dir: SyncDirLike, gen: number, manual: boolean): Promise<void> {
@@ -419,21 +433,47 @@ export class SyncFolder {
     };
   }
 
-  private async healMissingAssets(deps: SyncDeps, read: (key: string) => Promise<Blob | null>): Promise<void> {
-    for (const [key, meta] of [...this.missingAssets]) {
-      const blob = await read(key);
-      if (blob === null) continue;
-      // 🔴 内容が目録の hash と合わなければ置かない(取り込みと同じ門)
-      if (meta.hash !== null && (await blobSha256Hex(blob)) !== meta.hash) continue;
-      await deps.putBlob(key, blob);
-      await deps.putAssetMeta({ key, mime: meta.mime, size: meta.size, hash: meta.hash });
-      this.missingAssets.delete(key);
+  /** 足りない添付の控えを、保存した記録へ書く(開き直しても引き直しを続ける)。失敗しても同期は止めない。 */
+  private async saveMissing(): Promise<void> {
+    try {
+      const rec = await this.deps.store.get(this.deps.cid);
+      if (rec !== null) await this.deps.store.put(this.deps.cid, { ...rec, missing: [...this.missingAssets.values()] });
+    } catch {
+      /* 記録できなくても、このセッションの控えは残る */
     }
   }
 
+  private async healMissingAssets(deps: SyncDeps, read: (key: string) => Promise<Blob | null>): Promise<void> {
+    let changed = false;
+    for (const [key, meta] of [...this.missingAssets]) {
+      const blob = await read(key);
+      if (blob === null) continue;
+      // 🔴 内容が目録(hash・大きさ)と合わなければ置かない(取り込みと同じ門。クラウドが途中までしか届けていない実体を置かない)
+      if ((await assetMismatch(blob, meta)) !== null) continue;
+      await deps.putBlob(key, blob);
+      await deps.putAssetMeta({ key, mime: meta.mime, size: meta.size, hash: meta.hash });
+      this.missingAssets.delete(key);
+      changed = true;
+    }
+    if (changed) await this.saveMissing();
+  }
+
+  /** 定期の回は、結果・失敗を**メッセージ**へだけ出す(ステータスバー・注意の面を使わない。同じ知らせは繰り返さない)。 */
+  private depsFor(base: SyncDeps, manual: boolean): SyncDeps {
+    if (manual) return base;
+    return {
+      ...base,
+      notify: () => undefined,
+      reportProblem: (m) => this.emit(m, 'fail'),
+      report: (notes) => this.emit(notes.join('\n'), 'say'),
+    };
+  }
+
   private async cycle(dir: SyncDirLike, gen: number, manual: boolean): Promise<Counts | null> {
-    const deps = await this.deps.syncDeps();
+    const deps = this.depsFor(await this.deps.syncDeps(), manual);
     if (!deps.enabled()) return null;
+    // 取り消しが残っているあいだ・定期の回は、「取り込みを取り消す」を上書きしない(user が押す前に奪わない)
+    const remember = manual && this.deps.undoPending?.() !== true;
     await deps.ensureConfigured?.();
     await deps.settle();
     const root = await dir.getDirectoryHandle(SYNC_FOLDER_DIR, { create: true });
@@ -467,9 +507,10 @@ export class SyncFolder {
             `このフォルダには、この端末が別のワークスペース「${m.title}」のために置いたファイルがあります。上書きしないため、このワークスペースの書き出しは止めています。別のフォルダを選んでください`,
             'fail',
           );
-        } else if (snap.outs[m.seq] === undefined && m.seq > 0) {
+        } else if (ownFileVerdict(m.seq, snap.outs, snap.seq) === 'suspect') {
           // この端末の記録に無い連番 = 別の端末が同じ id で書いた(端末のデータの複製)疑い。段 2 の取り込み(確認つき)に任せる
-          const r = await importSyncDiff(deps, own.file, own.info.name, { quiet: !manual, interactive: manual, assetReader: readAsset });
+          // (手動の書き出しで記録から押し出された古い連番は、名前と端末 id が合っていれば自分の物 = `ownFileVerdict`)
+          const r = await importSyncDiff(deps, own.file, own.info.name, { quiet: !manual, interactive: manual, assetReader: readAsset, remember });
           if (r.pending === 'duplicate') {
             this.pendingPeers.add(self);
             this.blockWrite = true;
@@ -499,15 +540,17 @@ export class SyncFolder {
       if (a.kind !== 'consider') continue;
       const f = found.get(a.name) as { info: FolderFileInfo; file: File };
       const key = memoKey(f.info);
+      if (!manual && this.failedMemo.get(a.name) === key) continue; // 前に失敗・読めなかった同じファイル(変わるまで飛ばす)
       let manifest: DiffManifest;
       try {
         manifest = await readDiffManifest(f.file);
       } catch (e) {
         // 書き込み・アップロードの途中かもしれない。取り込まず、次の回でやり直す(同じ知らせは繰り返さない)
         counts.unreadable++;
+        this.failedMemo.set(a.name, key);
         if (this.unreadableSeen.get(a.name) !== key) {
           this.unreadableSeen.set(a.name, key);
-          this.emit(`「${a.name}」を読めませんでした(書き込み中か、読めない状態です)。次の回でやり直します: ${errorText(e)}`, 'fail');
+          this.emit(`「${a.name}」を読めませんでした(書き込み中か、読めない状態です)。ファイルが更新されると取り込みます(「今すぐ同期」でもう一度試せます): ${errorText(e)}`, 'fail');
         }
         continue;
       }
@@ -525,25 +568,29 @@ export class SyncFolder {
         diff = await readDiffZip(f.file);
       } catch (e) {
         counts.unreadable++;
+        this.failedMemo.set(a.name, key);
         if (this.unreadableSeen.get(a.name) !== key) {
           this.unreadableSeen.set(a.name, key);
-          this.emit(`「${a.name}」を読めませんでした(書き込み中か、読めない状態です)。次の回でやり直します: ${errorText(e)}`, 'fail');
+          this.emit(`「${a.name}」を読めませんでした(書き込み中か、読めない状態です)。ファイルが更新されると取り込みます(「今すぐ同期」でもう一度試せます): ${errorText(e)}`, 'fail');
         }
         continue;
       }
-      const r = await importSyncDiff(deps, f.file, a.name, { diff, quiet: !manual, interactive: manual, assetReader: readAsset });
+      const r = await importSyncDiff(deps, f.file, a.name, { diff, quiet: !manual, interactive: manual, assetReader: readAsset, remember });
       if (r.pending !== undefined) {
         this.pendingPeers.add(a.device);
         continue;
       }
       if (!r.ok) {
         counts.failed++;
+        this.failedMemo.set(a.name, key);
         continue;
       }
+      this.failedMemo.delete(a.name);
       this.memo.set(a.name, key);
       counts.imported++;
       counts.changed += r.count;
       for (const m of r.missingAssets ?? []) this.missingAssets.set(m.key, m);
+      if ((r.missingAssets ?? []).length > 0) await this.saveMissing();
       snap = await deps.request({ op: 'syncSnapshot', cid: deps.cid });
       self = snap.device ?? self;
     }
@@ -568,7 +615,16 @@ export class SyncFolder {
       await assets.getFileHandle(meta.key);
       return;
     } catch (e) {
-      if (errName(e) !== 'NotFoundError') throw e;
+      const n = errName(e);
+      if (n === 'NotAllowedError' || n === 'SecurityError') throw e; // 許可の問題は同期全体の状態へ
+      if (n !== 'NotFoundError') {
+        // 🔴 この添付だけが置けない(名前を受け付けない等)── 全体を止めず、この添付を飛ばして 1 度だけ知らせる
+        if (!this.assetFailSeen.has(meta.key)) {
+          this.assetFailSeen.add(meta.key);
+          this.emit(`添付「${meta.key}」をフォルダへ置けませんでした(この添付だけ飛ばして続けます): ${errorText(e)}`, 'fail');
+        }
+        return;
+      }
     }
     const blob = await deps.getAssetBlob(meta.key);
     if (blob === null) return;

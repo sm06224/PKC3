@@ -10,6 +10,7 @@
  * - ⚠ IndexedDB が使えない環境では、このセッションの控え(メモリ)だけ。
  */
 import type { SyncDirLike } from './folder-sync';
+import type { DiffAssetMeta } from '@features/sync/diff-file';
 
 export interface SyncFolderRecord {
   handle: SyncDirLike;
@@ -17,6 +18,8 @@ export interface SyncFolderRecord {
   name: string;
   /** 保存した時刻(ISO)。 */
   savedAt: string;
+  /** 取り込んだが実体を置けていない添付(開き直しても引き直しを続ける)。 */
+  missing?: DiffAssetMeta[];
 }
 
 export interface SyncFolderStore {
@@ -87,7 +90,10 @@ export class IdbSyncFolderStore implements SyncFolderStore {
     if (typeof v !== 'object' || v === null) return null;
     const r = v as Partial<SyncFolderRecord>;
     if (r.handle === undefined || typeof r.name !== 'string') return null;
-    return { handle: r.handle, name: r.name, savedAt: typeof r.savedAt === 'string' ? r.savedAt : '' };
+    const missing = Array.isArray(r.missing)
+      ? r.missing.filter((m): m is DiffAssetMeta => typeof m === 'object' && m !== null && typeof m.key === 'string' && typeof m.mime === 'string' && typeof m.size === 'number' && (m.hash === null || typeof m.hash === 'string'))
+      : [];
+    return { handle: r.handle, name: r.name, savedAt: typeof r.savedAt === 'string' ? r.savedAt : '', ...(missing.length > 0 ? { missing } : {}) };
   }
   async put(cid: string, rec: SyncFolderRecord): Promise<void> {
     await run('readwrite', (s) => s.put(rec, cid));

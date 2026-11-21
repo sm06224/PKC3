@@ -46,7 +46,7 @@ export function createSyncEnabledSection(region: HTMLElement, store: SyncEnabled
       const note = document.createElement('p');
       note.setAttribute('data-pkc-field', 'sync-folder-note');
       note.textContent =
-        '各端末が自分のファイル(<端末 ID>.pkc3-diff.zip)をフォルダの「pkc3-sync」に置き、他の端末のファイルを取り込みます。ノート・つながり・添付・色ラベル・ピン留めを運びます。1 分ごと・開き直したとき・「今すぐ同期」で同期します。';
+        '各端末が自分のファイル(<端末 ID>.pkc3-diff.zip)をフォルダの「pkc3-sync」に置き、他の端末のファイルを取り込みます。ノート・つながり・添付・色ラベル・ピン留めを運びます。1 分ごと・開き直したとき・「今すぐ同期」で同期します。色ラベルが両方で違う色になったときは、色の番号が大きい方にそろえます。';
       const status = document.createElement('p');
       status.setAttribute('data-pkc-field', 'sync-folder-status');
       const btn = (action: string, label: string, title: string): HTMLButtonElement => {

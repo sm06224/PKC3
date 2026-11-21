@@ -6,6 +6,7 @@ import {
   isSafeAssetFileName,
   memoKey,
   needsOwnWrite,
+  ownFileVerdict,
   phaseForPermission,
   planFolderFiles,
   SYNC_FOLDER_SETTLE_MS,
@@ -165,5 +166,18 @@ describe('差分ファイル: 概要だけ読む・相手ごとの記録・途�
     expect(r.container.labels).toEqual([{ lid: 'n1', color: 2 }]);
     expect(r.container.pins).toEqual(['n1']);
     expect(r.dropped.reserved).toBe(2);
+  });
+});
+
+describe('自分のファイルの見分け(ownFileVerdict)', () => {
+  it('控えにある連番・控えの最古より前(押し出された)は自分の物 / 控えの範囲内で無い・控えより新しい連番は疑う', () => {
+    const outs = { 5: 'a', 6: 'b', 7: 'c' };
+    expect(ownFileVerdict(6, outs, 7)).toBe('own');
+    expect(ownFileVerdict(2, outs, 7)).toBe('own'); // 押し出された
+    expect(ownFileVerdict(0, outs, 7)).toBe('own');
+    expect(ownFileVerdict(8, outs, 7)).toBe('suspect'); // 自分より新しい = 別の端末
+    expect(ownFileVerdict(2, {}, 7)).toBe('suspect'); // 控えが空(記録が無い)
+    const outs2 = { 5: 'a', 7: 'c' };
+    expect(ownFileVerdict(6, outs2, 7)).toBe('suspect'); // 範囲内で無い
   });
 });
