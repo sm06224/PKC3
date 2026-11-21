@@ -1292,6 +1292,55 @@ describe('importPkc2File (P6b 実行部)', () => {
    * 実際の書き出し(`writeArchive`)で作ったバックアップを取り込んで、取り込みの本体が
    * 「生きたノートは entries へ、ゴミ箱のノートは `restoreTrashNotes` へ」分けることを見る。
    */
+  /**
+   * 🔴 **同期の種(#2000 段 2)**: バックアップに添えられた種を、取り込みが `seedSync` へ渡す。
+   * 渡す lid は「実際に入ったノートの lid」(既存と重なって振り直した物は、元の lid ではなく新しい lid が入る ── 種にならない)。
+   */
+  describe('同期の種(#2000 段 2)', () => {
+    const SEED = { device: 'abcdef0123456789', fingerprints: [{ key: 'n1', c: 'c1', p: 'p1' }, { key: 'n2', c: 'c2', p: 'p2' }] };
+    async function backup(withSeed: boolean): Promise<File> {
+      const rows = [{ lid: 'n1', body: 'あ' }, { lid: 'n2', body: 'い' }];
+      const src: ArchiveSource = {
+        cid: 'c1',
+        title: 't',
+        listEntryMetas: async () => rows.map((m, i) => ({ lid: m.lid, title: m.lid, archetype: 'text', created_at: null, updated_at: null, entry_order: i + 1, status: null, date: null, archived: 0 })),
+        listBodies: async () => ({ rows, done: true }),
+        listRelations: async () => [],
+        listAssetMetas: async () => [],
+        getAssetBlob: async () => null,
+        listRevisionLids: async () => [],
+        getRevisionChain: async () => [],
+        ...(withSeed ? { syncSeed: async () => SEED } : {}),
+      };
+      return new File([(await writeArchive(src, '2026-11-21T00:00:00Z')).blob], 'a.pkc3-full.zip');
+    }
+    it('種つきのバックアップ: 入った lid の集合が渡る。重なって振り直した lid は元の lid では渡らない(種にならない)', async () => {
+      const calls: Array<[typeof SEED, string[]]> = [];
+      const h = harness({ existingLids: new Set(['n2']) });
+      h.deps.seedSync = async (seed, kept) => void calls.push([seed as typeof SEED, [...kept].sort()]);
+      await importPkc2File(h.d, h.deps, await backup(true));
+      expect(calls).toHaveLength(1);
+      expect(calls[0]![0]).toEqual(SEED);
+      expect(calls[0]![1]).toContain('n1');
+      expect(calls[0]![1], '振り直した n2 が元の lid のまま渡っている').not.toContain('n2');
+      expect(calls[0]![1]).toHaveLength(2);
+    });
+    it('種の無いバックアップ・seedSync の無い配線では呼ばれない。seedSync が落ちても取り込みは成功し、注意を出す', async () => {
+      const h = harness();
+      const spy = vi.fn(async () => {});
+      h.deps.seedSync = spy;
+      await importPkc2File(h.d, h.deps, await backup(false));
+      expect(spy).not.toHaveBeenCalled();
+      const h2 = harness();
+      h2.deps.seedSync = async () => {
+        throw new Error('書けない');
+      };
+      const n = await importPkc2File(h2.d, h2.deps, await backup(true));
+      expect(n).toBe(2);
+      expect(h2.reportedNotes().join('\n')).toContain('同期の記録を作れませんでした');
+    });
+  });
+
   describe('ゴミ箱のノート', () => {
     async function backupWithTrash(labels: Array<{ lid: string; color: number }> = []): Promise<File> {
       const live = [{ lid: 'live1', body: '本文 entry:trash1 から' }];

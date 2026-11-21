@@ -129,7 +129,7 @@ export function decodeTombstone(key: string, v: string | null | undefined): Tomb
 }
 
 export function encodeBaseline(b: Baseline): string {
-  const o: Record<string, { c: string; p?: string }> = {};
+  const o = Object.create(null) as Record<string, { c: string; p?: string }>;
   for (const [k, fp] of Object.entries(b)) o[k] = encodeFp(fp);
   return JSON.stringify(o);
 }
@@ -140,7 +140,7 @@ export function decodeBaseline(v: string | null | undefined): Baseline {
   try {
     const o = JSON.parse(v) as unknown;
     if (typeof o !== 'object' || o === null || Array.isArray(o)) return {};
-    const out: Record<string, Fp> = {};
+    const out = Object.create(null) as Record<string, Fp>;
     for (const [k, raw] of Object.entries(o as Record<string, unknown>)) {
       const fp = decodeFp(raw);
       if (fp) out[k] = fp;

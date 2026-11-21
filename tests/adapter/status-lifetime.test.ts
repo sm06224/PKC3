@@ -435,6 +435,12 @@ describe('全体の処理の出す側の全数', () => {
       end: /deps\.notify\?\.\(''\)/,
     },
     {
+      // #2000 段 2: 差分ファイルの書き出し・取り込み。終わりの合図は失敗の枝の `notify?.('')`(成功は結果の字で置き換わる)
+      file: 'src/adapter/ui/actions/sync-diff.ts',
+      starts: ["deps.notify?.('差分を書き出しています…');", "deps.notify?.('取り込み中…(差分ファイルを読んでいます)');"],
+      end: /deps\.notify\?\.\(''\)/,
+    },
+    {
       file: 'src/adapter/ui/actions/capture-trim.ts',
       starts: ["deps.notify('切り出しています…');"],
       end: /deps\.notify\(''\)/,
@@ -499,8 +505,8 @@ describe('全体の処理の出す側の全数', () => {
     expect(Object.fromEntries([...perFile].sort()), '表に無い出す側が増えた / 減った(表と終わりの合図を直す)').toEqual(
       Object.fromEntries([...expected].sort()),
     );
-    // 空振り防止:合計が 13(表の始まりの数。#1455 (b) で +1、#1652 4 で +1、#952 A1 で +1)。⚠ 0 件なら走査が何も見ていない
-    expect([...perFile.values()].reduce((a, b) => a + b, 0)).toBe(13);
+    // 空振り防止:合計が 15(表の始まりの数。#2000 段 2 の差分ファイルで +2、#1455 (b) で +1、#1652 4 で +1、#952 A1 で +1)。⚠ 0 件なら走査が何も見ていない
+    expect([...perFile.values()].reduce((a, b) => a + b, 0)).toBe(15);
   });
 });
 

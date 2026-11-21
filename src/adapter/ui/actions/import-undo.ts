@@ -26,6 +26,14 @@
  */
 import { phaseBlockReason, type AppPhase, type Dispatchable } from '@adapter/state/app-state';
 import type { TagColorEntry } from '@features/tag-color';
+import { errorText } from '@features/error-text';
+
+/** 🔴 端末間の同期の取り込み(#2000 段 2)の取り消し。ノートの lid の一覧ではなく、worker が返した控えで元へ戻す。 */
+export interface CustomUndo {
+  /** 変わったノートの数(押す前の説明に使う)。 */
+  readonly count: number;
+  run(): Promise<{ restored: number; skipped: number }>;
+}
 
 /** 注意の面の頭に置く、1 つだけの操作。 */
 export interface NoticeAction {
@@ -85,6 +93,11 @@ export interface ImportUndo {
       readonly addedLabels?: ReadonlyArray<{ lid: string; color: number }>;
     },
   ): void;
+  /**
+   * 🔴 端末間の同期の取り込み(#2000 段 2)を取り消せるようにする。⚠ 前の記憶は捨てる(戻せるのは直前の 1 回だけ)。
+   * 押すと `run`(worker の `syncUndo`)が、新しく入った物をゴミ箱へ・置き換えた物を前の姿へ戻す。
+   */
+  rememberCustom(info: CustomUndo): void;
   /** いま出せる操作(無ければ null)。 */
   pending(): NoticeAction | null;
   /** ごみ箱へ入れる。⚠ 2 度押しても 2 度は走らない。 */
@@ -93,6 +106,7 @@ export interface ImportUndo {
 
 export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
   let lids: readonly string[] = [];
+  let custom: CustomUndo | null = null;
   let colorsKept = false;
   /** 外す色(`removeTagColors` が渡っているときだけ憶える)。 */
   let colorsToRemove: readonly TagColorEntry[] = [];
@@ -101,7 +115,16 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
   /** 外す色ラベル(`removeNoteLabels` が渡っているときだけ憶える)。 */
   let labelsToRemove: ReadonlyArray<{ lid: string; color: number }> = [];
   return {
+    rememberCustom(info) {
+      lids = [];
+      colorsToRemove = [];
+      pinsToRemove = [];
+      labelsToRemove = [];
+      colorsKept = false;
+      custom = info;
+    },
     remember(next, opts) {
+      custom = null;
       lids = [...next];
       colorsToRemove = deps.removeTagColors !== undefined ? [...(opts?.addedColors ?? [])] : [];
       // 外せる色が分かっているなら「残る」とは言わない
@@ -110,6 +133,13 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
       labelsToRemove = deps.removeNoteLabels !== undefined ? [...(opts?.addedLabels ?? [])] : [];
     },
     pending() {
+      if (custom !== null) {
+        return {
+          label: '取り込みを取り消す',
+          action: 'undo-import',
+          title: `いま取り込んだ差分の ${custom.count} 件を、取り込む前の状態へ戻します(新しく入った物はゴミ箱へ入ります。取り込んだあとに編集したノートは触りません)`,
+        };
+      }
       if (lids.length === 0) return null;
       return {
         label: '取り込みを取り消す',
@@ -123,6 +153,27 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
       };
     },
     undo() {
+      if (custom !== null) {
+        const blocked = phaseBlockReason(deps.phase());
+        if (blocked !== null) {
+          deps.fail(`${blocked}取り込みを取り消してください`);
+          return;
+        }
+        // ⚠ **先に忘れる** ── 2 度目の取り消しを残さない
+        const run = custom.run;
+        custom = null;
+        deps.clear();
+        run().then(
+          (r) =>
+            deps.notify(
+              `取り込んだ差分を取り消しました(${r.restored} 件を戻しました` +
+                (r.skipped > 0 ? `。取り込んだあとに変わっていた ${r.skipped} 件は、そのままにしています` : '') +
+                ')',
+            ),
+          (e: unknown) => deps.fail(`差分の取り込みを取り消せませんでした: ${errorText(e)}`),
+        );
+        return;
+      }
       if (lids.length === 0) return;
       /**
        * 🔴 **編集中は断り、記憶は手放さない**(#1087)── 直す前は `DELETE_ENTRIES` が

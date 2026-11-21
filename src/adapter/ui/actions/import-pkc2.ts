@@ -27,6 +27,7 @@ import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
 import { decodeAsset } from '@adapter/platform/asset/asset-codec';
 import { readPkc2Package, peekZipFormat } from '@features/import/pkc2-package';
+import { DIFF_FORMAT } from '@features/sync/diff-file';
 import { isTemplateZip, importTemplateZip } from './import-template';
 import {
   archivePreviewOf,
@@ -272,6 +273,16 @@ export interface ImportDeps {
    *   始まりで true、終わり(成功・失敗・やめた、どれでも)で false。⚠ **省略可** ── 渡さない配線は従来どおり。
    */
   onWriting?(writing: boolean): void;
+  /**
+   * 🔴 **端末間の同期の差分ファイルを取り込む**(#2000 段 2)。⚠ **省略可** ── 渡さない配線は差分ファイルを断る。
+   * 失敗・断り・やめるは**実体側が自分で言う**(ここでは `null` を返すだけ)。
+   */
+  importSyncDiff?(file: File): Promise<{ ok: boolean; count: number }>;
+  /**
+   * 🔴 **バックアップに添えられた同期の種の指紋を、記録にする**(#2000 段 2。設計 doc §12.1 の約束 2)。⚠ **省略可**。
+   * 渡るのは lid が変わらずに入ったノートの集合だけ(振り直した物は種にしない)。設定がオフのときは実体側が何もしない。
+   */
+  seedSync?(seed: import('@features/sync/sync-seed').SyncSeed, keptLids: ReadonlySet<string>): Promise<void>;
 }
 
 /** base64 → bytes。`fromBase64` があれば中間のバイナリ文字列を作らない。 */
@@ -635,6 +646,17 @@ async function runImport(
       // ⚠ 形式は **manifest.format** で決まる(拡張子でもファイル名でもない)。
       // ネストした ZIP でも各段でこれを呼ぶ ── 判別は 1 段ぶんしか効かない
       const format = portable !== null ? ARCHIVE_FORMAT : await peekZipFormat(file);
+      // 🔴 **端末間の同期の差分ファイル(`.pkc3-diff.zip`。#2000 段 2)**。⚠ 判定は manifest.format(名前は見ない)。
+      //   取り込みは「ノートを足して lid を振り直す」道ではなく、lid を保って合流する別の道(`sync-diff.ts`)。
+      //   設定が切のときの断り・確認・1 つの tx・取り消しの登録はあちらが持つ。
+      if (format === DIFF_FORMAT) {
+        if (deps.importSyncDiff === undefined) return fail(`「${file.name}」: この画面からは差分ファイルを取り込めません`);
+        begin();
+        progressShown = true;
+        const r = await deps.importSyncDiff(file);
+        clearProgress();
+        return r.ok ? r.count : null;
+      }
       // 📦 **自分の書出しを自分で読み戻す**(P6d)── バックアップの復元。
       // ⚠ PKC2 経路の convert を通さない(body は既に PKC-Markdown。通すと二重変換)
       if (format === ARCHIVE_FORMAT) {
@@ -746,6 +768,8 @@ async function runImport(
           /** 🔴 アーカイブ経路だけが持つ**付け替えた lid**(本文の `entry:` を写す。下の `remap`)。 */
           lidRemap: restored.lidRemap,
           sourceCid: restored.sourceCid,
+          /** 🔴 同期の種の指紋(#2000 段 2)。 */
+          syncSeed: restored.syncSeed,
           warnings: [] as string[],
         }
       : convertPkc2Container(container as never, {
@@ -1105,6 +1129,15 @@ async function runImport(
           }
         } catch (e) {
           result.warnings.push(`ピン留めを戻せませんでした: ${reason(e)}`);
+        }
+      }
+      // 🔴 同期の種(#2000 段 2)── 戻せなくても取込は失敗にしない(競合が増えるだけで、何も失わない)
+      const seed = 'syncSeed' in result ? result.syncSeed : null;
+      if (seed !== null && seed !== undefined && deps.seedSync !== undefined) {
+        try {
+          await deps.seedSync(seed, new Set(result.entries.map((e) => e.lid)));
+        } catch (e) {
+          result.warnings.push(`同期の記録を作れませんでした(初めて同期するとき、編集したノートが競合として出ることがあります): ${reason(e)}`);
         }
       }
       // 🔴 色ラベル(#1982 段 4)── ピン留めの後。本文ではないので、戻せなくても取込は失敗にしない

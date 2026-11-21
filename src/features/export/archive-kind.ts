@@ -73,6 +73,12 @@ export const ARCHIVE_SUFFIXES: readonly string[] = [
   LEGACY_ARCHIVE_SUFFIX,
 ];
 
+/**
+ * 🔴 端末間の同期の差分ファイル(#2000 段 2)の末尾。⚠ バックアップ(上の 3 種 + 旧形式)では**ない**ので `ARCHIVE_SUFFIXES` には入れない
+ * (取り込みの道が別: lid を保って合流する)。落としたときに取り込みの道へ送る判定(`isBackupFileName`)だけが知っている。
+ */
+export const DIFF_ARCHIVE_SUFFIX = '.pkc3-diff.zip';
+
 /** 🔴 PKC3 入り HTML(`.pkc3.html`)の末尾。⚠ 書き出す側は `export-portable.ts`(同じ字)。 */
 export const PORTABLE_HTML_SUFFIX = '.pkc3.html';
 
@@ -84,5 +90,5 @@ export const PORTABLE_HTML_SUFFIX = '.pkc3.html';
  */
 export function isBackupFileName(name: string): boolean {
   const n = name.toLowerCase();
-  return ARCHIVE_SUFFIXES.some((x) => n.endsWith(x)) || n.endsWith(PORTABLE_HTML_SUFFIX);
+  return ARCHIVE_SUFFIXES.some((x) => n.endsWith(x)) || n.endsWith(PORTABLE_HTML_SUFFIX) || n.endsWith(DIFF_ARCHIVE_SUFFIX);
 }

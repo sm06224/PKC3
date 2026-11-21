@@ -2270,6 +2270,12 @@ export interface BinderServices {
   dismissAlarm?(key: string): void;
   /** 🔴 予定の知らせを入 / 切にする(#280)。⚠ 入にした瞬間に予定を数え直す。 */
   setAlarmEnabled?(on: boolean): void;
+  /** 🔴 端末間の同期を入 / 切にする(#2000 段 2。checkbox の押した後の値。worker にも教える)。 */
+  setSyncEnabled?(on: boolean): void | Promise<boolean>;
+  /** 🔴 同期の記録を全部消す(確認は配線側。#2000 段 2)。 */
+  forgetSyncRecords?(): void | Promise<void>;
+  /** 🔴 差分ファイルを書き出す(#2000 段 2。`all` = 全件)。設定が切のときは配線側が断る。 */
+  exportSyncDiff?(all: boolean): void;
   /**
    * 🔴 **聞くときだけ音を整えるか**(#772 段① B)。⚠ **省略可**。
    * ⚠ 切り替えたら**いま画面に在る再生機も**その場で繋ぎ替える ──
@@ -19197,6 +19203,35 @@ const ACTIONS: Record<string, ActionHandler> = {
   /** 🔴 **「見逃した予定」の知らせを閉じる**(#855 20-C)。本文にも予定にも触れない。 */
   'dismiss-missed': (_dispatcher, _target, _services, root) => {
     dismissMissedLine(root);
+  },
+  'set-sync-enabled': (_dispatcher, target, services) => {
+    // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)
+    if (target instanceof HTMLInputElement) {
+      // 🔴 切にする確認でやめたら、チェックを元(入)に戻す(配線側が返した「いまの設定」へ合わせる)
+      const box = target;
+      void Promise.resolve(services.setSyncEnabled?.(box.checked)).then((now) => {
+        if (typeof now === 'boolean') box.checked = now;
+      });
+    }
+  },
+  'forget-sync-records': (_dispatcher, _target, services) => {
+    void services.forgetSyncRecords?.();
+  },
+  // 🔴 同期の競合のノート(題名に「同期の競合」)を、左の一覧の絞り込みで探す(`filter-by-tag` と同じ出し方)
+  'show-sync-conflicts': (dispatcher, target) => {
+    if (!phoneShowList(dispatcher)) return;
+    dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: '同期の競合' });
+    if (appPhone.isPhone()) return;
+    const hidden = appPanes.getHidden();
+    if (!hidden.includes('sidebar')) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    applyPaneVisibility(root, appPanes.setHidden(hidden.filter((p) => p !== 'sidebar')));
+  },
+  'export-sync-diff': (_dispatcher, _target, services) => {
+    services.exportSyncDiff?.(false);
+  },
+  'export-sync-diff-all': (_dispatcher, _target, services) => {
+    services.exportSyncDiff?.(true);
   },
   'set-alarm-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

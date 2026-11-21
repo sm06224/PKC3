@@ -61,6 +61,8 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
     await expect(item, `${action} が一覧に無い`).toBeVisible();
     await expect(item, `${action} の説明が無い`).toHaveAttribute('data-pkc-hint', /.+/);
   }
+  // 🔴 #2000 段 2: 端末間の同期は既定オフ ── 「差分を書き出す」は一覧に出ない(入口が無い)
+  await expect(menu.locator('[data-pkc-action^="export-sync-diff"]'), '同期がオフなのに「差分を書き出す」が一覧に出ている').toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-pkc-region="context-menu"]'), 'Esc で一覧が閉じない').toHaveCount(0);
   await expect(
@@ -99,9 +101,27 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
   const planApplyBtn = page.locator('[data-pkc-field="plan-apply"]');
   await expect(planApplyBtn, '貼る前から押せる(dead click)').toBeDisabled();
 
+  // 🔴 #2000 段 2: 設定をオンにした端末(画面の設定は `pkc3.sync`)── 描き直しが起きると「書き出す ▾」に「差分を書き出す」が出る。
+  //    新しい起動は足さない(この空の状態で実際の書き出し → ダウンロードまで通す)。⚠ 戻す(最後にオフへ)
+  await page.evaluate(() => localStorage.setItem('pkc3.sync', '1'));
+
   // ③ 押した結果を観測する(0 件のときの断り)── 例外を出さずに終わる
   await openCollectionMore(page);
   await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="export-structure"]');
+
+  const syncMenu = await openExportMenu(page, 'collection');
+  await expect(syncMenu.locator('[data-pkc-action="export-sync-diff"]'), 'オンなのに「差分を書き出す」が一覧に無い').toBeVisible();
+  await expect(syncMenu.locator('[data-pkc-action="export-sync-diff-all"]'), 'オンなのに「差分を書き出す(全件)」が一覧に無い').toBeVisible();
+  const syncDl = page.waitForEvent('download');
+  await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="export-sync-diff-all"]');
+  const diffFile = await syncDl;
+  expect(diffFile.suggestedFilename(), '差分ファイルの名前(二重拡張子)になっていない').toMatch(/\.pkc3-diff\.zip$/);
+  const diffChunks: Buffer[] = [];
+  for await (const c of await diffFile.createReadStream()) diffChunks.push(Buffer.from(c));
+  const diffBytes = Buffer.concat(diffChunks);
+  expect(diffBytes.subarray(0, 2).toString('latin1'), 'zip になっていない').toBe('PK');
+  expect(diffBytes.toString('latin1'), '差分ファイルの概要(format)が入っていない').toContain('pkc3-diff');
+  await page.evaluate(() => localStorage.setItem('pkc3.sync', '0'));
 
   /**
    * 🔴 #1416: 「PKC2 の HTML で書き出す」── 元にする PKC2 の HTML を選ぶと、データを入れ替えた HTML が落ちる。

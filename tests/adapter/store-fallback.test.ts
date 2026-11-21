@@ -33,6 +33,7 @@ import { codeOnly } from '../helpers/code-only';
 import { join } from 'node:path';
 import { OpenInEditStore } from '@adapter/ui/render/open-in-edit';
 import { AlarmEnabledStore } from '@adapter/ui/render/alarm-enabled';
+import { SyncEnabledStore } from '@adapter/ui/render/sync-enabled';
 import { VoiceBoostStore } from '@adapter/ui/render/voice-boost';
 import { MissingLinksStore } from '@adapter/ui/render/missing-links';
 import { ExportWatchTagsStore } from '@adapter/ui/render/export-watch-tags';
@@ -114,6 +115,15 @@ const CASES: readonly {
     name: 'AlarmEnabledStore',
     make: (st: StorageLike | null = null) => {
       const s = new AlarmEnabledStore(st);
+      return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
+    a: true,
+    b: false,
+  },
+  {
+    name: 'SyncEnabledStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new SyncEnabledStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: true,
