@@ -149,6 +149,37 @@ describe('note tabs: state wiring', () => {
     expectConsistent(s);
   });
 
+  it('🔴 following the tab neighbour does not leave the unseen list successor in history', () => {
+    // 対照群: タブが 1 枚なら、削除後の選択は一覧の後継(= n1)── 後継が n1 であることを確かめる
+    let c = boot(6);
+    c = d(c, { type: 'SELECT_ENTRY', lid: 'n0' });
+    c = d(c, { type: 'DELETE_ENTRY', lid: 'n0' });
+    expect(c.selectedLid).toBe('n1');
+    // タブ n0, n3。n0 を消すとタブの隣 n3 へ従う ── 一覧の後継 n1 は一度も見ていない
+    let s = boot(6);
+    s = d(s, { type: 'SELECT_ENTRY', lid: 'n3' });
+    s = d(s, { type: 'SELECT_ENTRY', lid: 'n5' });
+    s = d(s, { type: 'NOTE_TAB_OPEN', lid: 'n0' });
+    s = d(s, { type: 'NOTE_TAB_OPEN', lid: 'n3' });
+    s = d(s, { type: 'NOTE_TAB_ACTIVATE', lid: 'n0' });
+    s = d(s, { type: 'DELETE_ENTRY', lid: 'n0' });
+    expect(s.selectedLid).toBe('n3');
+    expect(s.selectionHistory.past).not.toContain('n1');
+    expect(s.selectionHistory.past[s.selectionHistory.past.length - 1]).toBe('n3');
+    // 戻ると、前に見ていたノートへ(見ていない n1 ではない)
+    expect(d(s, { type: 'NAV_HISTORY', dir: 'back' }).selectedLid).not.toBe('n1');
+    expectConsistent(s);
+  });
+
+  it('an action that touches neither selection nor entries returns the same tab state', () => {
+    let s = boot(4);
+    s = d(s, { type: 'SELECT_ENTRY', lid: 'n0' });
+    const r = d(s, { type: 'SET_NOTE_PINS', lids: ['n2'] });
+    expect(r).not.toBe(s);
+    expect(r.noteTabs).toBe(s.noteTabs);
+    expect(r.tabSeq).toBe(s.tabSeq);
+  });
+
   it('deleting a background tab leaves selection and active alone', () => {
     let s = boot(4);
     for (const l of ['n0', 'n1']) s = d(s, { type: 'NOTE_TAB_OPEN', lid: l });

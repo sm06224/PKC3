@@ -164,7 +164,15 @@ export function syncNoteTabs(prevState: AppState, result: ReduceResult, select: 
   const activeMoved = set !== orig && set.active !== orig.active && set.active !== null;
   let followed = false;
   if (activeMoved && prevState.selectedLid === orig.active && st.selectedLid !== set.active) {
-    const r = select({ ...st, noteTabs: set }, { type: 'SELECT_ENTRY', lid: set.active! });
+    // 🔴 一覧の後継は**見ていない**ので履歴から外す(残すと「戻る」で一度も見ていないノートが開く)。
+    //   後継は `reduceWithHistory` が past の末尾へ積んでいる ── 末尾がそれで、前の回には無かったときだけ外す
+    const h = st.selectionHistory;
+    const succ = st.selectedLid;
+    const unseen =
+      succ !== null && h !== prevState.selectionHistory && h.past[h.past.length - 1] === succ
+        ? { ...h, past: h.past.slice(0, -1) }
+        : h;
+    const r = select({ ...st, noteTabs: set, selectionHistory: unseen }, { type: 'SELECT_ENTRY', lid: set.active! });
     if (r.state.selectedLid === set.active) {
       // 一覧の後継の本文・参照元の読み出しは捨てる(隣の分が積まれている)
       const dropped = st.selectedLid;
