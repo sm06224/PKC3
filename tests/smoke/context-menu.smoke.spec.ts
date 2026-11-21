@@ -1613,8 +1613,23 @@ test('🔴 開く動きの最中でも、メニューの項目はすぐ押せる
   await openRowMenu(page);
   const name = await page.locator(MENU).evaluate((el) => getComputedStyle(el).animationName);
   expect(name, '開く動きが当たっていない').toBe('pkc-pop-in');
-  // 動きが終わるのを待たずに押す(項目が押せて、押したらメニューが閉じること自体を見る)
-  await page.locator(`${MENU} button[data-pkc-action="start-edit"]`).click({ timeout: 1000 });
+  /**
+   * 🔴 **動きの途中で**、その項目の真ん中が本当にその項目に当たる(`pointer-events` や重なりで奪われていない)。
+   * ⚠ Playwright の `click` は座標が落ち着くまで待つので、それだけでは「動きの途中でも押せる」の証明にならない
+   *   (着地前レビュー)── 当たり判定はページの中で、動きが走っている間に測る。
+   */
+  const hit = await page.locator(`${MENU} button[data-pkc-action="start-edit"]`).evaluate((btn) => {
+    const menu = btn.closest('[data-pkc-region="context-menu"]') as HTMLElement;
+    const running = menu.getAnimations().some((a) => a.playState === 'running');
+    const r = btn.getBoundingClientRect();
+    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { running, hits: at !== null && btn.contains(at) };
+  });
+  expect(hit.hits, '動きの途中で、項目の真ん中が項目に当たっていない').toBe(true);
+  // ⚠ 動きが既に終わっていた回(遅い CI)は「途中」を見られていない ── そのときは押せることだけを見る
+  test.info().annotations.push({ type: 'mid-animation', description: String(hit.running) });
+  // 待たずに押す(force: 落ち着くまで待たない)
+  await page.locator(`${MENU} button[data-pkc-action="start-edit"]`).click({ force: true, timeout: 1000 });
   await expect(page.locator(MENU), '押したのにメニューが残っている').toHaveCount(0);
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
@@ -1622,8 +1637,12 @@ test('🔴 開く動きの最中でも、メニューの項目はすぐ押せる
 test('🔴 OS の「視差効果を減らす」では、メニューは動かない', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await openRowMenu(page);
-  const d = await page
-    .locator(MENU)
-    .evaluate((el) => parseFloat(getComputedStyle(el).animationDuration) * 1000);
-  expect(d, 'reduced-motion でも動いている').toBeLessThan(1);
+  const s = await page.locator(MENU).evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { name: cs.animationName, ms: parseFloat(cs.animationDuration) * 1000, opacity: cs.opacity };
+  });
+  // ⚠ 名前も見る(`animation: none` でも長さは 0s なので、長さだけだと「動きを消した」変異が通る ── 着地前レビュー)
+  expect(s.name, '前提: 開く動きが当たっていない').toBe('pkc-pop-in');
+  expect(s.ms, 'reduced-motion でも動いている').toBeLessThan(1);
+  expect(s.opacity, '動かさない回に、見えないまま残っている').toBe('1');
 });

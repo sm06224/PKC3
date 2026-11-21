@@ -33,6 +33,7 @@ const POPUPS: Array<[string, RegExp]> = [
   ["[data-pkc-region='paste-toast']", POPS],
   ["[data-pkc-region='app-dialog'][open]", POPS],
   ["[data-pkc-region='app-dialog']::backdrop", FADE],
+  ['.pkc-lightbox-backdrop', FADE],
 ];
 
 describe('🔴 浮く物の開く動き(#1982 段 6)', () => {
@@ -93,5 +94,14 @@ describe('🔴 ダイアログの暗幕(#1982 段 6)', () => {
     expect(light.length).toBeGreaterThan(0);
     expect(dark.length).toBeGreaterThan(0);
     expect(Math.min(...dark)).toBeGreaterThan(Math.max(...light));
+    // ⚠ 大小だけだと「明るい側 0%(暗幕が消える)/ 暗い側 100%(真っ黒)」が通る ── 範囲も pin する(着地前レビュー)
+    for (const v of light) {
+      expect(v, '明るいテーマの暗幕の濃さ').toBeGreaterThanOrEqual(20);
+      expect(v, '明るいテーマの暗幕の濃さ').toBeLessThanOrEqual(45);
+    }
+    for (const v of dark) {
+      expect(v, '暗いテーマの暗幕の濃さ').toBeGreaterThanOrEqual(45);
+      expect(v, '暗いテーマの暗幕の濃さ').toBeLessThanOrEqual(70);
+    }
   });
 });

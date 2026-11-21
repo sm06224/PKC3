@@ -10575,7 +10575,8 @@ h3[data-pkc-section] {
 [data-pkc-region='app-dialog'][open] {
   animation: pkc-pop-in var(--dur) var(--ease);
 }
-/* ⚠ **背景は暗くするが、色は付けない**(地は無彩色)。暗幕の色は各テーマの `--scrim`(影と同じ墨色。明るい地は薄く・暗い地は濃く)。
+/* ⚠ **背景は暗くするだけ**。暗幕の色は各テーマの `--scrim`(影と同じ墨色 ── テーマによってはその地に合わせた
+ *   わずかな色味を持つ。明るい地は薄く・暗い地は濃く)。
  *   🔑 ぼかしは掛けない(`backdrop-filter` は背面の全面を毎フレーム再合成するので、非力な端末で重い)。 */
 [data-pkc-region='app-dialog']::backdrop {
   background: var(--scrim);
@@ -12511,6 +12512,8 @@ h3[data-pkc-section] {
   justify-content: center;
 }
 
+/* 🔑 画像を見る暗幕は、ダイアログの `--scrim` より**わざと濃い**(写真を地から切り離して見るため)。
+ *   ぼかしは以前からの見た目を残す(1 枚の全面の幕で、出している間しか合成しない)。開く動きだけ #1982 段 6 で揃えた */
 .pkc-lightbox-backdrop {
   position: absolute;
   inset: 0;
