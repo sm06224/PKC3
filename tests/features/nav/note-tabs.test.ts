@@ -42,6 +42,45 @@ describe('createTabSet / visible', () => {
   });
 });
 
+describe('activate', () => {
+  it('既に有効・開いていない lid は同じ参照（再描画を省ける）', () => {
+    const s = build('a', 'b');
+    expect(activate(s, 'b', 99)).toBe(s);
+    expect(activate(s, 'zz', 99)).toBe(s);
+    expect(openReplace(s, 'b', 99)).toBe(s);
+    expect(activate(s, 'a', 99)).not.toBe(s);
+  });
+});
+
+describe('🔴 不変条件: タブがあれば active は null にならない', () => {
+  it('どの操作の後も、タブが 1 枚以上なら active はそのどれか', () => {
+    const pinned = new Set(['c']);
+    const keep = (l: string) => l === 'd';
+    let s = createTabSet();
+    const ops: ((x: TabSet, i: number) => TabSet)[] = [
+      (x, i) => openReplace(x, `r${i % 5}`, i, keep),
+      (x, i) => openNew(x, `n${i % 7}`, i, { activate: i % 2 === 0 }),
+      (x, i) => close(x, x.tabs[i % Math.max(1, x.tabs.length)]?.lid ?? 'zz', i, pinned),
+      (x, i) => reopenLast(x, i, () => true)?.set ?? x,
+      (x, i) => next(x, i, pinned),
+      (x, i) => onDeleted(x, [`n${i % 7}`], pinned),
+      (x, i) => enforceLimit(x, i, { max: 4, isPinned: (l) => pinned.has(l), isEditing: none }).set,
+      (x, i) => move(x, x.tabs[0]?.lid ?? 'zz', null),
+    ];
+    let seen = 0;
+    for (let i = 1; i < 400; i++) {
+      s = ops[(i * 7) % ops.length]!(s, i);
+      if (s.tabs.length > 0) {
+        seen++;
+        expect(s.tabs.some((t) => t.lid === s.active), `step ${i}`).toBe(true);
+      } else {
+        expect(s.active, `step ${i}`).toBeNull();
+      }
+    }
+    expect(seen).toBeGreaterThan(100); // 空振り防止
+  });
+});
+
 describe('openReplace', () => {
   it('タブがなければ作る', () => {
     const s = openReplace(createTabSet(), 'a', 1);
@@ -55,6 +94,14 @@ describe('openReplace', () => {
     expect(lids(s)).toEqual(['a', 'x', 'c']);
     expect(s.active).toBe('x');
     expect(s.tabs[1]?.activatedAt).toBe(11);
+  });
+  it('🔴 有効なタブが守るタブ（ピン留め・編集中）なら差し替えず新しいタブで開く', () => {
+    const s = activate(build('a', 'b', 'c'), 'b', 9);
+    const r = openReplace(s, 'x', 10, (l) => l === 'b');
+    expect(lids(r)).toEqual(['a', 'b', 'c', 'x']);
+    expect(r.active).toBe('x');
+    // 守らない有効タブは従来どおり差し替える
+    expect(lids(openReplace(s, 'x', 10, (l) => l === 'a'))).toEqual(['a', 'x', 'c']);
   });
   it('差し替えで消えた lid は最近閉じたタブに入らない', () => {
     const s = openReplace(build('a', 'b'), 'x', 5);
@@ -189,6 +236,15 @@ describe('reopenLast', () => {
     expect(r!.set.active).toBe('b');
     expect(r!.set.closed.map((c) => c.lid)).toEqual(['a']);
   });
+  it('🔴 戻したものより古い closed は残る（読み飛ばした存在しないものだけ消える）', () => {
+    let s = build('a', 'b', 'c', 'd');
+    s = close(s, 'a', 10);
+    s = close(s, 'b', 11);
+    s = close(s, 'c', 12); // closed: c, b, a
+    const r = reopenLast(s, 13, (l) => l !== 'c');
+    expect(r?.lid).toBe('b');
+    expect(r!.set.closed.map((c) => c.lid)).toEqual(['a']);
+  });
   it('閉じたものがなければ null', () => {
     expect(reopenLast(build('a'), 5, () => true)).toBeNull();
   });
@@ -244,20 +300,31 @@ describe('next / prev', () => {
 });
 
 describe('move', () => {
-  it('添字で並べ替える', () => {
-    expect(lids(move(build('a', 'b', 'c'), 0, 2))).toEqual(['b', 'c', 'a']);
-    expect(lids(move(build('a', 'b', 'c'), 2, 0))).toEqual(['c', 'a', 'b']);
+  it('lid で指定したタブの直前へ、null なら末尾へ', () => {
+    expect(lids(move(build('a', 'b', 'c'), 'a', null))).toEqual(['b', 'c', 'a']);
+    expect(lids(move(build('a', 'b', 'c'), 'c', 'a'))).toEqual(['c', 'a', 'b']);
+    expect(lids(move(build('a', 'b', 'c', 'd'), 'a', 'd'))).toEqual(['b', 'c', 'a', 'd']);
   });
-  it('範囲外・同位置・非整数は同じ参照', () => {
+  it('🔴 表示順（ピン先頭）で並べ替えても、狙った隣に着地する', () => {
+    // 保持順 a,b,c,d / ピン d → 表示順 d,a,b,c。画面で c を a の前へ → 表示順 d,c,a,b
+    const pinned = new Set(['d']);
+    const s = move(build('a', 'b', 'c', 'd'), 'c', 'a');
+    expect(orderTabs(s.tabs, pinned).map((t) => t.lid)).toEqual(['d', 'c', 'a', 'b']);
+  });
+  it('開いていない lid・自分自身の前・既にその位置は同じ参照', () => {
     const s = build('a', 'b');
-    expect(move(s, 0, 0)).toBe(s);
-    expect(move(s, -1, 1)).toBe(s);
-    expect(move(s, 0, 2)).toBe(s);
-    expect(move(s, 0.5, 1)).toBe(s);
+    expect(move(s, 'zz', null)).toBe(s);
+    expect(move(s, 'a', 'zz')).toBe(s);
+    expect(move(s, 'a', 'a')).toBe(s);
+    expect(move(s, 'a', 'b')).toBe(s);
+    expect(move(s, 'b', null)).toBe(s);
   });
   it('有効なタブ・closed は変えない', () => {
-    const s = move(build('a', 'b', 'c'), 0, 2);
-    expect(s.active).toBe('c');
+    const base = close(build('a', 'b', 'c', 'x'), 'x', 9);
+    const s = move(base, 'a', null);
+    expect(lids(s)).toEqual(['b', 'c', 'a']);
+    expect(s.active).toBe(base.active);
+    expect(s.closed).toBe(base.closed);
   });
 });
 
@@ -347,6 +414,21 @@ describe('enforceLimit', () => {
     expect(r.set.tabs).toHaveLength(13);
     expect(r.overflow).toBe(true);
   });
+  it('🔴 今開いたタブ（activatedAt >= seq）は、裏で開いて最古でも追い出さない', () => {
+    // 有効 n12 + 他は全部ピン。裏で開いた y だけが候補になりうるが、今開いたので守る
+    let s = many(12);
+    const all = s.tabs.map((t) => t.lid);
+    s = openNew(s, 'y', 70, { activate: false });
+    const r = enforceLimit(s, 70, opts(all.slice(0, 11)));
+    expect(r.evicted).toEqual([]);
+    expect(lids(r.set)).toContain('y');
+    expect(r.overflow).toBe(true);
+  });
+  it('複数を追い出したとき closed は新しい順（後に追い出した方が先頭）', () => {
+    const s = activate(many(15), 'n14', 99);
+    const r = enforceLimit(s, 60, opts());
+    expect(r.set.closed.map((c) => c.lid)).toEqual(['n2', 'n1', 'n0']);
+  });
   it('max を指定できる', () => {
     const r = enforceLimit(many(4), 9, opts([], [], 2));
     expect(r.set.tabs).toHaveLength(2);
@@ -391,9 +473,17 @@ describe('onDeleted', () => {
     expect(onDeleted(build('a', 'b', 'c'), ['a']).active).toBe('c');
   });
   it('ピン留めの表示順で隣を選ぶ', () => {
-    // 保持順 a,b,c / ピン c → 表示順 c,a,b。a を有効にして削除すると右隣は b。
-    const s = activate(build('a', 'b', 'c'), 'a', 9);
-    expect(onDeleted(s, ['a'], new Set(['c'])).active).toBe('b');
+    // 保持順 a,b,c / ピン c → 表示順 c,a,b。b を有効にして削除すると、表示順では右隣が無く
+    // 左隣の a（保持順なら右隣の c になる ── 区別できる形にする）
+    const s = activate(build('a', 'b', 'c'), 'b', 9);
+    expect(onDeleted(s, ['b'], new Set(['c'])).active).toBe('a');
+  });
+  it('close と onDeleted は同じ隣の規則（1 件ずつなら同じ有効タブ）', () => {
+    const pinned = new Set(['c']);
+    for (const lid of ['a', 'b', 'c', 'd']) {
+      const s = activate(build('a', 'b', 'c', 'd'), lid, 50);
+      expect(onDeleted(s, [lid], pinned).active, lid).toBe(close(s, lid, 51, pinned).active);
+    }
   });
 });
 
@@ -413,7 +503,7 @@ describe('markExternal', () => {
   it('他の操作で印は保たれる（有効化・移動）', () => {
     let s = markExternal(build('a', 'b'), 'a', true);
     s = activate(s, 'a', 9);
-    s = move(s, 0, 1);
+    s = move(s, 'a', null);
     expect(s.tabs.find((t) => t.lid === 'a')!.external).toBe(true);
   });
 });
@@ -427,7 +517,7 @@ describe('不変性', () => {
     openNew(base, 'y', 9);
     close(base, 'b', 9);
     next(base, 9);
-    move(base, 0, 2);
+    move(base, 'a', null);
     onDeleted(base, ['a']);
     markExternal(base, 'a', true);
     enforceLimit(base, 9, { max: 1, isPinned: none, isEditing: none });

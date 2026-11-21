@@ -5,6 +5,9 @@
  * - DOM / browser API / 時計を読まない。時刻は呼び出し側が渡す単調な数 `seq` で受ける。
  * - ピン留め（#1377）は保存の正本が別にあるため、このモデルは持たない。
  *   並び（`orderTabs`）・上限の追い出し（`enforceLimit`）には引数で渡す。
+ * - 不変条件: タブが 1 枚以上あれば `active` は必ずそのどれか（null はタブ 0 枚のときだけ）。
+ *   一覧の選択解除（Escape）では `active` を null にしない（選択が無くてもタブの位置は覚えておく）。
+ *   null を許すと、次の通常クリックが差し替えではなく新しいタブになり、タブが増え続ける。
  * - 設計・裁定: docs/development/note-tabs-design-2026-11.md §6.1
  */
 
@@ -73,25 +76,34 @@ function dropClosed(closed: readonly ClosedTab[], lid: string): readonly ClosedT
   return closed.some((c) => c.lid === lid) ? closed.filter((c) => c.lid !== lid) : closed;
 }
 
-/** `lid` のタブの次の有効タブ（表示順で右隣、なければ左隣）。 */
+/**
+ * `lid` のタブが消えるときの次の有効タブ: 表示順で、一緒に消えない（`gone` に無い）タブのうち
+ * 右隣、なければ左隣。`close` と `onDeleted` が同じ規則を使う（1 か所に寄せる）。
+ */
 function neighbourOf(
   tabs: readonly TabEntry[],
   lid: string,
   pinned: ReadonlySet<string>,
+  gone: ReadonlySet<string>,
 ): string | null {
   const ordered = orderTabs(tabs, pinned);
   const i = ordered.findIndex((t) => t.lid === lid);
   if (i < 0) return null;
-  return (ordered[i + 1] ?? ordered[i - 1])?.lid ?? null;
+  const right = ordered.slice(i + 1).find((t) => !gone.has(t.lid));
+  const left = ordered
+    .slice(0, i)
+    .reverse()
+    .find((t) => !gone.has(t.lid));
+  return (right ?? left)?.lid ?? null;
 }
 
 function withActivated(tabs: readonly TabEntry[], lid: string, seq: number): readonly TabEntry[] {
   return tabs.map((t) => (t.lid === lid ? { ...t, activatedAt: seq } : t));
 }
 
-/** 有効にする。開いていなければ何もしない。 */
+/** 有効にする。開いていない・既に有効なら何もしない（同じ参照を返す）。 */
 export function activate(set: TabSet, lid: string, seq: number): TabSet {
-  if (indexOf(set, lid) < 0) return set;
+  if (set.active === lid || indexOf(set, lid) < 0) return set;
   return { ...set, tabs: withActivated(set.tabs, lid, seq), active: lid };
 }
 
@@ -100,11 +112,18 @@ export function activate(set: TabSet, lid: string, seq: number): TabSet {
  * - 既に開いている lid なら、そのタブを有効にするだけ（重複させない）。
  * - タブが 1 つもなければ新しく作る。
  * - 差し替えで消える lid は「最近閉じたタブ」に入れない。
+ * - 有効なタブが守るタブ（`keep`。ピン留め・編集中など）なら差し替えず、新しいタブで開く
+ *   （ピン留めしたタブや書きかけのタブが通常クリックで黙って消えないように）。
  */
-export function openReplace(set: TabSet, lid: string, seq: number): TabSet {
+export function openReplace(
+  set: TabSet,
+  lid: string,
+  seq: number,
+  keep: (lid: string) => boolean = () => false,
+): TabSet {
   if (indexOf(set, lid) >= 0) return activate(set, lid, seq);
   const ai = set.active === null ? -1 : indexOf(set, set.active);
-  if (ai < 0) return openNew(set, lid, seq, { activate: true });
+  if (ai < 0 || keep(set.active!)) return openNew(set, lid, seq, { activate: true });
   const tabs = set.tabs.map((t, i) =>
     i === ai ? { lid, activatedAt: seq, external: false } : t,
   );
@@ -136,7 +155,8 @@ export function close(
   pinned: ReadonlySet<string> = NO_LIDS,
 ): TabSet {
   if (indexOf(set, lid) < 0) return set;
-  const active = set.active === lid ? neighbourOf(set.tabs, lid, pinned) : set.active;
+  const active =
+    set.active === lid ? neighbourOf(set.tabs, lid, pinned, new Set([lid])) : set.active;
   return {
     tabs: set.tabs.filter((t) => t.lid !== lid),
     active,
@@ -161,6 +181,8 @@ export function reopenLast(
   const idx = set.closed.findIndex((c) => exists(c.lid));
   if (idx < 0) return null;
   const lid = set.closed[idx]!.lid;
+  // 先頭から idx 件（読み飛ばした存在しないもの）を捨てる。戻す lid 自身は openNew の dropClosed でも
+  // 消えるので `slice(idx)` と等価（変異試験で生き残る等価変異。意図はこの行に置く）。
   const rest = { ...set, closed: set.closed.slice(idx + 1) };
   return { set: openNew(rest, lid, seq, { activate: true }), lid };
 }
@@ -184,15 +206,20 @@ export function prev(set: TabSet, seq: number, pinned: ReadonlySet<string> = NO_
   return step(set, seq, pinned, -1);
 }
 
-/** 並べ替え（保持している並びの添字で指定）。範囲外・同位置は何もしない。 */
-export function move(set: TabSet, from: number, to: number): TabSet {
-  const n = set.tabs.length;
-  if (!Number.isInteger(from) || !Number.isInteger(to)) return set;
-  if (from < 0 || from >= n || to < 0 || to >= n || from === to) return set;
-  const tabs = [...set.tabs];
-  const t = tabs.splice(from, 1)[0];
+/**
+ * 並べ替え: `lid` のタブを `before` のタブの直前へ（`before` が null なら末尾へ）。
+ * ⚠ 添字ではなく lid で受ける ── 画面の並び（ピン先頭の表示順）と保持している並びは違うので、
+ *   表示順の添字を渡すと別の位置に着地する。開いていない lid・自分自身の前は何もしない。
+ */
+export function move(set: TabSet, lid: string, before: string | null): TabSet {
+  if (lid === before) return set;
+  const t = set.tabs[indexOf(set, lid)];
   if (!t) return set;
-  tabs.splice(to, 0, t);
+  const rest = set.tabs.filter((x) => x.lid !== lid);
+  const at = before === null ? rest.length : rest.findIndex((x) => x.lid === before);
+  if (at < 0) return set;
+  const tabs = [...rest.slice(0, at), t, ...rest.slice(at)];
+  if (tabs.every((x, i) => x === set.tabs[i])) return set;
   return { ...set, tabs };
 }
 
@@ -211,8 +238,10 @@ export interface LimitResult {
 }
 
 /**
- * 上限（既定 12）を超えたら、ピン留め・編集中・有効なタブを除く最も古い（`activatedAt` 最小、
- * 同値は並びの前）タブを閉じて「最近閉じたタブ」へ入れる。守るものだけで超える場合は超過を許す。
+ * 上限（既定 12）を超えたら、ピン留め・編集中・有効なタブ・今開いたタブ（`activatedAt >= seq`）を
+ * 除く最も古い（`activatedAt` 最小、同値は並びの前）タブを閉じて「最近閉じたタブ」へ入れる。
+ * 守るものだけで超える場合は超過を許す。
+ * ⚠ 今開いたタブを守らないと、裏で開いた（`activate: false`）タブが開いた瞬間に追い出される。
  */
 export function enforceLimit(set: TabSet, seq: number, opts: LimitOptions): LimitResult {
   const max = opts.max ?? MAX_TABS;
@@ -221,7 +250,8 @@ export function enforceLimit(set: TabSet, seq: number, opts: LimitOptions): Limi
   while (tabs.length > max) {
     let victim: TabEntry | null = null;
     for (const t of tabs) {
-      if (t.lid === set.active || opts.isPinned(t.lid) || opts.isEditing(t.lid)) continue;
+      if (t.lid === set.active || t.activatedAt >= seq) continue;
+      if (opts.isPinned(t.lid) || opts.isEditing(t.lid)) continue;
       if (victim === null || t.activatedAt < victim.activatedAt) victim = t;
     }
     if (victim === null) break;
@@ -250,18 +280,10 @@ export function onDeleted(
   if (!set.tabs.some((t) => gone.has(t.lid))) {
     return closed.length === set.closed.length ? set : { ...set, closed };
   }
-  let active = set.active;
-  if (active !== null && gone.has(active)) {
-    // 表示順で、削除されないタブのうち右隣、なければ左隣。
-    const ordered = orderTabs(set.tabs, pinned);
-    const i = ordered.findIndex((t) => t.lid === active);
-    const right = ordered.slice(i + 1).find((t) => !gone.has(t.lid));
-    const left = ordered
-      .slice(0, i)
-      .reverse()
-      .find((t) => !gone.has(t.lid));
-    active = (right ?? left)?.lid ?? null;
-  }
+  const active =
+    set.active !== null && gone.has(set.active)
+      ? neighbourOf(set.tabs, set.active, pinned, gone)
+      : set.active;
   return { tabs: set.tabs.filter((t) => !gone.has(t.lid)), active, closed };
 }
 
