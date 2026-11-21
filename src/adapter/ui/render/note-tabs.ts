@@ -72,7 +72,7 @@ export class NoteTabsBar {
       if (isEditing) notes.push('編集中');
       if (t.external) notes.push(NOTE_TAB_EXTERNAL_LABEL);
       tab.setAttribute('aria-label', notes.length === 0 ? shown : `${shown}(${notes.join('・')})`);
-      tab.title = t.external ? `${shown} ── ${NOTE_TAB_EXTERNAL_LABEL}` : shown;
+      tab.title = t.external ? `${shown}(${NOTE_TAB_EXTERNAL_LABEL})` : shown;
 
       if (pinned) {
         const pin = document.createElement('span');

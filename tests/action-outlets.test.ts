@@ -206,6 +206,11 @@ const OBJECT_LONE: readonly string[] = [
    *   注釈を落とすようになって初めて出た(CLAUDE.md §1「自分の解説コメントに満たされる」)。
    * ⚠ つまりこの台帳は **4 件ぶん多く見えていた**(30 → 実際は 26)。
    */
+  /**
+   * 🔴 **2026-11-21(#1982 段 5-3)に 2 件増えた**: ノートのタブ列の `activate-note-tab` / `close-note-tab`。
+   *   タブは押した物自身(`data-pkc-entry`)が対象で、出口はタブ列の 1 か所。キーでの出口は段 5-4 で足す。
+   */
+  'activate-note-tab',
   'add-relation',
   'add-tag',
   'append-entry',
@@ -251,6 +256,7 @@ const OBJECT_LONE: readonly string[] = [
   //   画面に足したのは、既にある情報ペインの行 1 つで、別の面を作っていない。
   'clear-entry-owner',
   'set-entry-owner',
+  'close-note-tab',
   'deliver-to-extension',
   'dual-bookmark-open',
   'dual-bookmark-remove',
