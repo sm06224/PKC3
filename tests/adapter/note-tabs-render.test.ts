@@ -106,11 +106,70 @@ describe('ノートのタブ列', () => {
     expect(t.d.getState().noteTabs.active).toBe('a');
     expect(t.d.getState().selectedLid).toBe('a');
     t.d.dispatch({ type: 'NOTE_TAB_OPEN', lid: 'c' });
-    const close = t.host.querySelector<HTMLElement>('[data-pkc-action="close-note-tab"][data-pkc-entry="c"]')!;
+    const close = t.host.querySelector<HTMLElement>('[data-pkc-action="close-note-tab"][data-pkc-note-tab="c"]')!;
     expect(close.getAttribute('aria-label')).toBe('タブを閉じる');
     close.click();
     expect(t.d.getState().noteTabs.tabs.map((x) => x.lid)).toEqual(['a', 'b']);
     expect(t.names()).toEqual(['t-a', 't-b']);
+  });
+
+  it('🔴 × は押したタブを閉じる(有効なタブ・選択中のノートではない)', () => {
+    t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    t.d.dispatch({ type: 'NOTE_TAB_OPEN', lid: 'b' });
+    t.d.dispatch({ type: 'NOTE_TAB_OPEN', lid: 'c' });
+    expect(t.d.getState().selectedLid).toBe('c');
+    t.host.querySelector<HTMLElement>('[data-pkc-action="close-note-tab"][data-pkc-note-tab="a"]')!.click();
+    expect(t.d.getState().noteTabs.tabs.map((x) => x.lid)).toEqual(['b', 'c']);
+    expect(t.d.getState().selectedLid).toBe('c');
+    // 押したタブを有効にする側も同じ(有効でない b を押す)
+    t.tabs()[0]!.click();
+    expect(t.d.getState().selectedLid).toBe('b');
+  });
+
+  it('🔴 列の中に一覧の行の印(data-pkc-entry)を置かない(右クリック・ドラッグの汎用の受け手に拾わせない)', () => {
+    t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    t.d.dispatch({ type: 'NOTE_TAB_OPEN', lid: 'b' });
+    expect(t.host.querySelectorAll('[data-pkc-note-tab]').length).toBe(4); // 空振り防止
+    expect(t.host.querySelector('[data-pkc-entry]')).toBeNull();
+  });
+
+  it('🔑 Tab キーで止まるのは有効なタブ 1 つ(× は止めない)', () => {
+    t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    t.d.dispatch({ type: 'NOTE_TAB_OPEN', lid: 'b' });
+    const stops = [...t.host.querySelectorAll<HTMLElement>('button')].filter((b) => b.tabIndex >= 0);
+    expect(stops).toHaveLength(1);
+    expect(stops[0]!.getAttribute('data-pkc-note-tab')).toBe('b');
+    expect(stops[0]!.getAttribute('role')).toBe('tab');
+  });
+
+  it('🔴 作り直してもフォーカスを落とさない(押したタブへ / 閉じたら有効なタブへ)', () => {
+    t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    t.d.dispatch({ type: 'NOTE_TAB_OPEN', lid: 'b' });
+    t.d.dispatch({ type: 'NOTE_TAB_OPEN', lid: 'c' });
+    const a = t.tabs()[0]!;
+    a.focus();
+    a.click(); // 有効が変わる → 作り直し
+    expect(t.tabs()[0]).not.toBe(a); // 空振り防止: 実際に作り直された
+    expect((document.activeElement as HTMLElement).getAttribute('data-pkc-note-tab')).toBe('a');
+    expect((document.activeElement as HTMLElement).getAttribute('data-pkc-field')).toBe('note-tab-select');
+    const x = t.host.querySelector<HTMLElement>('[data-pkc-action="close-note-tab"][data-pkc-note-tab="a"]')!;
+    x.focus();
+    x.click();
+    expect(document.activeElement).not.toBe(document.body);
+    expect((document.activeElement as HTMLElement).getAttribute('data-pkc-note-tab')).toBe(
+      t.d.getState().noteTabs.active,
+    );
+  });
+
+  it('🔑 姿が変わらない dispatch では作り直さない(押している最中・打鍵ごとに DOM を捨てない)', () => {
+    t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    t.d.dispatch({ type: 'NOTE_TAB_OPEN', lid: 'b' });
+    const first = t.host.children[0];
+    // state は動くが、タブの姿は変わらない(タブに無い c をピン留め)
+    const before = t.d.getState();
+    t.d.dispatch({ type: 'SET_NOTE_PINS', lids: ['c'] });
+    expect(t.d.getState()).not.toBe(before); // 空振り防止: 描き手は呼ばれている
+    expect(t.host.children[0]).toBe(first);
   });
 
   it('題名の変更に追従する', () => {
@@ -123,6 +182,20 @@ describe('ノートのタブ列', () => {
 });
 
 describe('タブ列の CSS(コメントを剥がして pin)', () => {
+  it('🔴 印刷ではタブ列を出さない', () => {
+    const css = stripComments(readFileSync('src/styles/app.css', 'utf-8'));
+    // 紙で消す一覧(一覧・付随情報と同じ規則)── 印刷の節の中で、一覧を消している選択子の群れを引く
+    const start = css.indexOf('@media print');
+    expect(start).toBeGreaterThan(0);
+    const at = css.indexOf("[data-pkc-region='inspector'],", start);
+    expect(at, '印刷で付随情報を消す規則が見つからない').toBeGreaterThan(start);
+    const head = css.lastIndexOf('}', at) + 1;
+    const body = css.indexOf('{', at);
+    const hideRule = [null, css.slice(head, body)] as const;
+    expect(css.slice(body, css.indexOf('}', body))).toMatch(/display:\s*none/);
+    expect(hideRule![1]).toContain("[data-pkc-region='note-tabs']");
+  });
+
   const css = stripComments(readFileSync('src/styles/app.css', 'utf8'));
   it('現在のタブは左端の内側の線(accent)+ 太字 + 選択の地', () => {
     const cell = blocksFor(css, "[data-pkc-field='note-tab'][data-pkc-active]").join('\n');

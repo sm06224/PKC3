@@ -10,6 +10,13 @@
  * 🔑 描き直しは姿(指紋)が変わったときだけ ── 押している最中に作り直さない。
  * ⚠ タブ 1 枚は「選ぶ」ボタンと「閉じる」ボタンの 2 つ(ボタンの中にボタンを入れない)。
  *   包みは `role="presentation"` で、タブの列の子として数えられない。
+ * 🔴 相手の lid は **`data-pkc-note-tab`** に置く(`data-pkc-entry` にしない)── `data-pkc-entry` は一覧の行の印で、
+ *   右クリック・ドラッグなどの汎用の受け手が `closest('[data-pkc-entry]')` で拾う(着地前レビュー:
+ *   タブを右クリックすると行のメニューが出て選択まで動く)。タブの操作は 5-4 で専用に足す。
+ * 🔴 作り直してもフォーカスを落とさない(着地前レビュー)── キーで押した直後にフォーカスが body へ抜けると、
+ *   次のキーが効かない。同じタブの同じボタンへ戻し、閉じて無いときは有効なタブへ送る。
+ * 🔑 Tab キーで止まるのは有効なタブ 1 つだけ(roving tabindex)。× は Tab で止めない(押すのはマウス。
+ *   キーで閉じるのは 5-4 の「操作を探す」と専用キー)。
  */
 import type { AppState } from '@adapter/state/app-state';
 import { orderTabs, visible } from '@features/nav/note-tabs';
@@ -17,6 +24,8 @@ import { markTab, markTablist } from './tabs-a11y';
 
 export const NOTE_TABS_REGION = 'note-tabs';
 export const NOTE_TAB_EXTERNAL_LABEL = '別ウィンドウで開いています';
+/** タブのボタンが指すノートの lid(`binder.ts` の受け手が読む)。 */
+export const NOTE_TAB_LID_ATTR = 'data-pkc-note-tab';
 
 export class NoteTabsBar {
   private lastPrint = '';
@@ -44,6 +53,12 @@ export class NoteTabsBar {
     );
     if (print === this.lastPrint) return;
     this.lastPrint = print;
+    // 🔴 作り直す前に、列の中のフォーカス(どのタブの、どのボタン)を控える
+    const focused = document.activeElement;
+    const keep =
+      focused instanceof HTMLElement && this.host.contains(focused)
+        ? { lid: focused.getAttribute(NOTE_TAB_LID_ATTR), field: focused.getAttribute('data-pkc-field') }
+        : null;
     this.host.hidden = !show;
     this.host.textContent = '';
     if (!show) return;
@@ -58,14 +73,14 @@ export class NoteTabsBar {
       const cell = document.createElement('div');
       cell.setAttribute('role', 'presentation');
       cell.setAttribute('data-pkc-field', 'note-tab');
-      cell.setAttribute('data-pkc-entry', t.lid);
       if (current) cell.setAttribute('data-pkc-active', '');
 
       const tab = document.createElement('button');
       tab.type = 'button';
       tab.setAttribute('data-pkc-action', 'activate-note-tab');
       tab.setAttribute('data-pkc-field', 'note-tab-select');
-      tab.setAttribute('data-pkc-entry', t.lid);
+      tab.setAttribute(NOTE_TAB_LID_ATTR, t.lid);
+      tab.tabIndex = current ? 0 : -1;
       markTab(tab, current);
       const notes: string[] = [];
       if (pinned) notes.push('ピン留め');
@@ -102,7 +117,8 @@ export class NoteTabsBar {
       close.type = 'button';
       close.setAttribute('data-pkc-action', 'close-note-tab');
       close.setAttribute('data-pkc-field', 'note-tab-close');
-      close.setAttribute('data-pkc-entry', t.lid);
+      close.setAttribute(NOTE_TAB_LID_ATTR, t.lid);
+      close.tabIndex = -1;
       close.setAttribute('aria-label', 'タブを閉じる');
       close.title = `「${shown}」のタブを閉じます(ノートは消えません)`;
       close.textContent = '×';
@@ -110,5 +126,16 @@ export class NoteTabsBar {
       cell.append(tab, close);
       this.host.append(cell);
     }
+    if (keep !== null) this.restoreFocus(keep.lid, keep.field, set.active);
+  }
+
+  /** 同じタブの同じボタンへ。そのタブがもう無ければ有効なタブへ。 */
+  private restoreFocus(lid: string | null, field: string | null, active: string | null): void {
+    const sel = (l: string, f: string): HTMLElement | null =>
+      this.host.querySelector<HTMLElement>(`[${NOTE_TAB_LID_ATTR}="${CSS.escape(l)}"][data-pkc-field="${f}"]`);
+    const target =
+      (lid !== null && field !== null ? sel(lid, field) : null) ??
+      (active !== null ? sel(active, 'note-tab-select') : null);
+    target?.focus();
   }
 }

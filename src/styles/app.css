@@ -11844,6 +11844,8 @@ h3[data-pkc-section] {
   [data-pkc-field='detail-notice-slot'],
   /* ⚠ フォルダの概要も紙には要らない(#1222)── 画面の補助 */
   [data-pkc-region='folder-overview'],
+  /* ⚠ ノートのタブ列(#1982 段 5)も紙には要らない ── 画面の行き来の操作子 */
+  [data-pkc-region='note-tabs'],
   .pkc-md-copy-btn,
   /* ⚠ ログの日の行(#1441)も紙には要らない ── 押せる物が無い */
   [data-pkc-log-day],
