@@ -108,7 +108,7 @@ const HANDOFF_BODY = [
   '    type: date',
   '  - name: 見込み時間',
   '    type: number',
-  '    placeholder: 復旧までの時間',
+  '    placeholder: 解消までの時間',
   '  - name: 申し送り',
   '    type: textarea',
   '```',
