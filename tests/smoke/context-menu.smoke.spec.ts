@@ -1592,3 +1592,38 @@ test.describe('章の欄(390 幅、#1044 段2 F-F)', () => {
     expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
   });
 });
+
+/**
+ * 🔴 **開く動き(#1982 段 6)は入力を邪魔しない・reduced-motion では動かない**(実ブラウザでしか見えない:
+ *   happy-dom は animation を評価しない)。
+ */
+async function openRowMenu(page: Page): Promise<void> {
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('動きの的\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const row = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first();
+  await row.click({ button: 'right' });
+  await expect(page.locator(MENU), 'メニューが出ない').toBeVisible();
+}
+
+test('🔴 開く動きの最中でも、メニューの項目はすぐ押せる(入力を奪わない)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await openRowMenu(page);
+  const name = await page.locator(MENU).evaluate((el) => getComputedStyle(el).animationName);
+  expect(name, '開く動きが当たっていない').toBe('pkc-pop-in');
+  // 動きが終わるのを待たずに押す(項目が押せて、押したらメニューが閉じること自体を見る)
+  await page.locator(`${MENU} button[data-pkc-action="start-edit"]`).click({ timeout: 1000 });
+  await expect(page.locator(MENU), '押したのにメニューが残っている').toHaveCount(0);
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 OS の「視差効果を減らす」では、メニューは動かない', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await openRowMenu(page);
+  const d = await page
+    .locator(MENU)
+    .evaluate((el) => parseFloat(getComputedStyle(el).animationDuration) * 1000);
+  expect(d, 'reduced-motion でも動いている').toBeLessThan(1);
+});
