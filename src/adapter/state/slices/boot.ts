@@ -287,7 +287,11 @@ export function reduceBoot(state: AppState, action: BootAction): ReduceResult {
            * ⚠ 一度も開いていない user には撃たない(`launcherTiles === null`)。
            * ⚠ **新しい `order` / `metas` で数える**(取り込んだ添付を載せるため)。
            */
-          ...(state.launcherTiles === null ? [] : launcherReloadEvents(order, metas, state.appGroupGen)),
+          ...(state.launcherTiles === null ? [] : [
+                ...launcherReloadEvents(order, metas, state.appGroupGen),
+                // 🔴 記録の節(#2002 段 5)の材料 = テンプレートの走査も頼み直す(テンプレートの書込・取り込みの後に古い一覧を残さない)
+                { type: 'REQUEST_SNIPPET_SCAN' as const },
+              ]),
           /**
            * 🔴 **録ったものも頼み直す**(#683 段①。上の連絡先と対)。
            * ⚠ 落とすだけでは、**取り込んだ録音が 1 件も現れない** ── 集め直しの

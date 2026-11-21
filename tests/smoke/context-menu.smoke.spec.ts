@@ -1644,5 +1644,12 @@ test('🔴 OS の「視差効果を減らす」では、メニューは動かな
   // ⚠ 名前も見る(`animation: none` でも長さは 0s なので、長さだけだと「動きを消した」変異が通る ── 着地前レビュー)
   expect(s.name, '前提: 開く動きが当たっていない').toBe('pkc-pop-in');
   expect(s.ms, 'reduced-motion でも動いている').toBeLessThan(1);
-  expect(s.opacity, '動かさない回に、見えないまま残っている').toBe('1');
+  // ⚠ 長さ 0 の動きでも、開いた直後のフレームを描く前は最初の値(0)が読めることがある(10 回に 1 回)。
+  //    見たいのは「見えないまま残らない」ことなので、1 秒以内に 1 になるのを待つ(長さは上で 1ms 未満と確かめ済み)
+  await expect
+    .poll(() => page.locator(MENU).evaluate((el) => getComputedStyle(el).opacity), {
+      message: '動かさない回に、見えないまま残っている',
+      timeout: 1000,
+    })
+    .toBe('1');
 });
