@@ -645,6 +645,14 @@
    * ⚠ 現在地は**左端の線 + 太字**(形)が主で、この地は補助。色相は使わない。
    */
   --pkc-selected-bg: color-mix(in srgb, var(--fg) 10%, transparent);
+  /**
+   * 🔴 **面の縁の細い線(ヘアライン)**(質の悪い液晶で地の段差が潰れても境目が見えるように。2026-11-21)。
+   * `--fg` を 11% だけ透かした無彩色 ── 暗い線を引くのではなく、段差の縁をなぞるだけ。
+   * ⚠ 使うのは **`box-shadow` の 1px の輪**(寸法が動かない)で、中央の紙と標準のボタンだけ。
+   *   `gap: 1px` に線色を透かせる格子は戻さない(`tests/adapter/shell-tone-css.test.ts`)。
+   *   段差の目標値は `tests/adapter/lowq-boundary.test.ts`。
+   */
+  --hairline: color-mix(in srgb, var(--fg) 11%, transparent);
   --pkc-mark-bg: color-mix(in oklab, var(--fg) 18%, var(--surface));
   /**
    * 🔴 **印を付けた行の中の薄い字**(依頼 245)。`--muted` を行の字(`--fg`)へ 6 割寄せる。
