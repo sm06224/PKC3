@@ -11,7 +11,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { NoteTabsBar } from '../../src/adapter/ui/render/note-tabs';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { blocksFor, stripComments } from '../helpers/css-blocks';
+import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 
 function meta(lid: string, order: number): EntryMeta {
   return {
@@ -182,18 +182,16 @@ describe('ノートのタブ列', () => {
 });
 
 describe('タブ列の CSS(コメントを剥がして pin)', () => {
-  it('🔴 印刷ではタブ列を出さない', () => {
+  it('🔴 印刷ではタブ列を出さない(`!important` で ── 画面の規則は詳細度が高く、しかも後ろに在る)', () => {
     const css = stripComments(readFileSync('src/styles/app.css', 'utf-8'));
-    // 紙で消す一覧(一覧・付随情報と同じ規則)── 印刷の節の中で、一覧を消している選択子の群れを引く
     const start = css.indexOf('@media print');
     expect(start).toBeGreaterThan(0);
-    const at = css.indexOf("[data-pkc-region='inspector'],", start);
-    expect(at, '印刷で付随情報を消す規則が見つからない').toBeGreaterThan(start);
-    const head = css.lastIndexOf('}', at) + 1;
-    const body = css.indexOf('{', at);
-    const hideRule = [null, css.slice(head, body)] as const;
-    expect(css.slice(body, css.indexOf('}', body))).toMatch(/display:\s*none/);
-    expect(hideRule![1]).toContain("[data-pkc-region='note-tabs']");
+    // ⚠ 字があるかだけ見ると、詳細度・順番で負けて紙に出ていても緑だった(smoke で見つかった)。
+    //   画面の規則が印刷の節より後ろ・高い詳細度であることを前提として確かめ、だから !important が要る
+    const screenAt = css.indexOf("[data-pkc-region='note-tabs']:not([hidden])", start);
+    expect(screenAt, '前提: 画面の規則が印刷の節より後ろに在る').toBeGreaterThan(start);
+    const print = blocksFor(css.slice(start), "[data-pkc-region='note-tabs']").join('\n');
+    expect(print, '印刷の節で、タブ列を !important で消していない').toMatch(/display:\s*none\s*!important/);
   });
 
   const css = stripComments(readFileSync('src/styles/app.css', 'utf8'));
@@ -211,7 +209,8 @@ describe('タブ列の CSS(コメントを剥がして pin)', () => {
     const row = blocksFor(css, "[data-pkc-region='note-tabs']:not([hidden])").join('\n');
     expect(row).toMatch(/flex-wrap:\s*nowrap/);
     expect(row).toMatch(/overflow-x:\s*auto/);
-    expect(css).not.toMatch(/\[data-pkc-region='note-tabs'\]\s*\{[^}]*display/);
+    // ⚠ 画面の規則だけを見る(印刷の節は「紙では消す」ために display を書く)
+    expect(withoutMedia(css)).not.toMatch(/\[data-pkc-region='note-tabs'\]\s*\{[^}]*display/);
   });
   it('hover は surface-hover + muted の対', () => {
     const h = blocksFor(css, "[data-pkc-field='note-tab']:hover").join('\n');

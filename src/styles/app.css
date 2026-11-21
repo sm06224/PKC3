@@ -11844,8 +11844,6 @@ h3[data-pkc-section] {
   [data-pkc-field='detail-notice-slot'],
   /* ⚠ フォルダの概要も紙には要らない(#1222)── 画面の補助 */
   [data-pkc-region='folder-overview'],
-  /* ⚠ ノートのタブ列(#1982 段 5)も紙には要らない ── 画面の行き来の操作子 */
-  [data-pkc-region='note-tabs'],
   .pkc-md-copy-btn,
   /* ⚠ ログの日の行(#1441)も紙には要らない ── 押せる物が無い */
   [data-pkc-log-day],
@@ -11887,6 +11885,12 @@ h3[data-pkc-section] {
   [data-pkc-region='editor-split']:has([data-pkc-field='editor-print']) [data-pkc-field='editor-body'],
   [data-pkc-region='editor-split']:has([data-pkc-field='editor-print']) [data-pkc-region='editor-preview'] {
     display: none;
+  }
+  /* ⚠ ノートのタブ列(#1982 段 5)も紙には要らない ── 画面の行き来の操作子。
+   * 🔴 上の一覧に混ぜず `!important` で消す: 画面の規則は `:not([hidden])` で詳細度が 1 段高く、しかも
+   *    この節より**後ろ**に在る ── 一覧の `display: none` は負ける(着地前の smoke で実際に紙に出ていた) */
+  [data-pkc-region='note-tabs'] {
+    display: none !important;
   }
   /* 🔴 **紙の頭の目次**(#1038 B1)── 書き出した閲覧用 HTML の `#pkc-ptoc` と同じ体裁 */
   [data-pkc-field='print-toc'] {
