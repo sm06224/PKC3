@@ -26303,6 +26303,41 @@ export function bindActions(
     ke.preventDefault();
     ke.stopPropagation();
   };
+  /**
+   * 🔴 **ノートのタブ列のキー**(#1982 段 5-4)── ← → で隣のタブへ焦点を動かす(Home / End は端)・`Delete` で押したタブを閉じる。
+   *   Enter / Space は押しボタンの標準動作(= 有効にする)。
+   * ⚠ 動くのは**焦点がタブ(選ぶボタン)に在るときだけ**。止める(`stopImmediatePropagation`)のは、同じ矢印を左の列の
+   *   行の移動・全域の鍵が受けて**一覧の選択まで動く**のを防ぐため(`onKeydown` より先に登録する)。
+   * ⚠ 焦点だけ動かし、有効にはしない(手動で有効にする型 ── 読み上げで 1 枚ずつ聞いて回れる)。閉じたあとの焦点は描画器が戻す。
+   */
+  const onNoteTabKey = (ev: KeyboardEvent): void => {
+    if (ev.isComposing || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+    const t = ev.target;
+    if (!(t instanceof HTMLElement) || t.getAttribute('data-pkc-field') !== 'note-tab-select') return;
+    const host = t.closest('[data-pkc-region="note-tabs"]');
+    if (host === null) return;
+    if (ev.key === 'Delete') {
+      const lid = t.getAttribute(NOTE_TAB_LID_ATTR);
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      if (lid !== null && lid !== '') dispatcher.dispatch({ type: 'NOTE_TAB_CLOSE', lid });
+      return;
+    }
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(ev.key)) return;
+    const tabs = [...host.querySelectorAll<HTMLElement>('[data-pkc-field="note-tab-select"]')];
+    const at = tabs.indexOf(t);
+    if (at < 0) return;
+    const to =
+      ev.key === 'Home'
+        ? 0
+        : ev.key === 'End'
+          ? tabs.length - 1
+          : (at + (ev.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    tabs[to]?.focus();
+  };
+  listen(root, 'keydown', onNoteTabKey);
   listen(root, 'keydown', onRowSnippetTab, true);
   listen(root, 'keydown', onKeydown);
   // 🔴 波形の上のドラッグ(#1232)── 印は既存の `SET_CAPTURE_TRIM_MARK` に入る
