@@ -259,7 +259,7 @@ describe('ボタンの 4 型(data-pkc-variant)の CSS', () => {
     const b = blocksFor(css, 'button').find((x) => x.includes('--row-h'))!;
     expect(b, '標準の button の規則が見つからない').toBeDefined();
     expect(b).toContain('color-mix(in srgb, var(--fg) 6%, transparent)');
-    expect(b).toMatch(/border:\s*1px solid transparent/);
+    expect(b).toMatch(/border:\s*1px solid var\(--hairline\)/); // 質の悪い液晶向けの薄い輪郭(枠を消す型は各規則が外す)
     expect(b).toContain('var(--dur-fast)');
   });
 });

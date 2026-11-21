@@ -26,7 +26,7 @@ export const PRINT_THEME = 'light';
 /** `tokens.css` の `:root` の 6 色。 */
 export const PRINT_PALETTE: DiagramPalette = {
   bg: '#ffffff',
-  alt: '#f5f6f8',
+  alt: '#f0f1f3',
   fg: '#16191d',
   line: '#59616b',
   border: '#cdd2d9',
