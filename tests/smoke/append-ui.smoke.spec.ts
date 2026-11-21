@@ -315,9 +315,18 @@ test('🔴 追記欄の Tab は、リストの行でだけ字下げし、ふつ�
   await expect(input, 'リストの行の Tab で焦点が出た').toBeFocused();
   expect(await input.inputValue()).toMatch(/^\s+- りんご$/);
 
-  // Enter でリストが続き、Ctrl+B が効く
+  // 🔴 Ctrl+Z で字下げが戻る(取り消しの履歴を切らない書き方 = insertText)
+  await page.keyboard.press('Control+z');
+  expect(await input.inputValue(), '字下げが Ctrl+Z で戻らない').toBe('- りんご');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('End');
+
+  // Enter でリストが続く。Ctrl+Z で継ぎ足しだけが戻る
+  const before = await input.inputValue();
   await page.keyboard.press('Enter');
   expect(await input.inputValue()).toMatch(/\n\s*- $/);
+  await page.keyboard.press('Control+z');
+  expect(await input.inputValue(), '継ぎ足しが Ctrl+Z で戻らない').toBe(before);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
