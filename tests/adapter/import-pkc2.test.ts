@@ -1393,6 +1393,18 @@ describe('importPkc2File (P6b 実行部)', () => {
       expect([...(skipped?.also ?? [])]).toEqual([]);
     });
 
+    it('🔴 足した色ラベルの行を取り消しへ渡す(足さなかったら渡さない)(#1982 段 4)', async () => {
+      const labels = [{ lid: 'live1', color: 2 }];
+      const h = harness();
+      h.deps.importNoteLabels = async () => ({ added: 1, addedEntries: [{ lid: 'live1', color: 2 }] });
+      await importPkc2File(h.d, h.deps, await backupWithTrash(labels));
+      expect(h.importedOpts.at(-1)).toMatchObject({ addedLabels: [{ lid: 'live1', color: 2 }] });
+      const none = harness();
+      none.deps.importNoteLabels = async () => ({ added: 0, addedEntries: [] });
+      await importPkc2File(none.d, none.deps, await backupWithTrash(labels));
+      expect(none.importedOpts.at(-1)).not.toHaveProperty('addedLabels');
+    });
+
     it('戻せなかったノートは題名で言う(内部の ID を出さない)。取り込み自体は成功する', async () => {
       const h = harness();
       h.deps.restoreTrashNotes = async () => ({ added: 0, skippedEntries: ['trash1'], brokenChains: ['trash1: x'] });
