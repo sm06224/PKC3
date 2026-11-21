@@ -230,6 +230,7 @@ describe('見出しの段の巡回 ── 飾り・字下げ・触らない行',
   });
   it('frontmatter の中は触らない', () => {
     expect(cyc('---\ntitle: x|\n---\n本文')).toBeNull();
+    expect(cyc('---\ntitle: x|\ndate: y\n---\n本文')).toBeNull();
     expect(cyc('---\ntitle: x\n---\n本文|')).toBe('---\ntitle: x\n---\n# 本文|');
   });
   it('setext 見出し(下線つき)と水平線・表の行は触らない(下線を残したまま # を足さない)', () => {
