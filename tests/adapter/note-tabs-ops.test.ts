@@ -139,6 +139,29 @@ describe('新しいタブで開く: Ctrl/⌘+クリック・中ボタン', () =>
     click(t.link('d'));
     expect(t.lids()).toEqual(['a', 'b', 'd']);
   });
+  it('🔴 外のリンク(http)の Ctrl+クリック・中ボタンは PKC のタブにしない(ブラウザの動きを奪わない)', () => {
+    const a = document.createElement('a');
+    a.setAttribute('href', 'https://example.com/');
+    t.root.append(a);
+    const ev = click(a, { ctrlKey: true });
+    expect(t.lids()).toEqual(['a']);
+    expect(ev.defaultPrevented, 'ブラウザの新しいタブを止めている').toBe(false);
+    aux(a);
+    expect(t.lids()).toEqual(['a']);
+  });
+  it('本文の実際の形(detail-body の中・行番号つき)のリンクも、Ctrl+クリックで新しいタブ(その地点から編集にならない)', () => {
+    const body = document.createElement('div');
+    body.setAttribute('data-pkc-field', 'detail-body');
+    const p = document.createElement('p');
+    p.setAttribute('data-pkc-source-line', '3');
+    const a = t.link('b');
+    p.append(a);
+    body.append(p);
+    t.root.append(body);
+    click(a, { ctrlKey: true });
+    expect(t.lids()).toEqual(['a', 'b']);
+    expect(t.d.getState().phase).not.toBe('editing');
+  });
   it('別の PKC のリンクは新しいタブにしない(断りは通常のクリックと同じ)', () => {
     const a = t.link('b');
     a.setAttribute('data-pkc-entry-ref', 'pkc://other/entry/b');
@@ -173,6 +196,8 @@ describe('右クリック: 一覧の行 / タブ', () => {
     item('open-note-new-tab').click();
     expect(t.lids(), '右クリックで差し替わった a が戻っていない').toEqual(['a', 'b']);
     expect(t.d.getState().noteTabs.active).toBe('b');
+    // 🔴 「戻る」の履歴は a → b の 1 回だけ(a へ戻してから開き直すと a→b→a→b と二重に積まれた)
+    expect(t.d.getState().selectionHistory.past).toEqual(['a', 'b']);
   });
   it('タブ: 3 項目を出す。選択は動かない', () => {
     t.d.dispatch({ type: 'NOTE_TAB_OPEN', lid: 'b' });
@@ -329,6 +354,25 @@ describe('タブ列のキー: ← → Home End / Delete', () => {
     expect(ev.defaultPrevented).toBe(true);
     expect(t.lids()).toEqual(['a', 'c']);
     expect(document.activeElement?.closest('[data-pkc-region="note-tabs"]')).not.toBeNull();
+  });
+  it('🔴 Delete は上へ流さない(ノートの削除などの全域の鍵に届かない)', () => {
+    let reached = false;
+    document.addEventListener('keydown', () => (reached = true), { once: true });
+    t.key({ key: 'Delete' }, t.tabBtn('b'));
+    expect(reached).toBe(false);
+    expect(t.lids()).toEqual(['a', 'c']); // 空振り防止: Delete は確かに効いた
+  });
+  it('🔴 編集中に有効なタブを × / Delete で閉じようとすると理由を出す(黙って何も起きない、にしない)', () => {
+    t.d.dispatch({ type: 'NOTE_TAB_ACTIVATE', lid: 'c' });
+    t.d.dispatch({ type: 'BODY_LOADED', lid: 'c', body: '本文' });
+    t.d.dispatch({ type: 'START_EDIT' });
+    expect(t.d.getState().phase).toBe('editing');
+    t.key({ key: 'Delete' }, t.tabBtn('c'));
+    expect(t.lids()).toEqual(['a', 'b', 'c']);
+    expect(t.d.getState().error ?? '').toContain('タブを閉じてください');
+    // 有効でないタブは選択を動かさないので、編集中でも閉じられる
+    t.host.querySelector<HTMLElement>('[data-pkc-action="close-note-tab"][data-pkc-note-tab="a"]')!.click();
+    expect(t.lids()).toEqual(['b', 'c']);
   });
   it('修飾キー付き・タブ以外では動かない(対照群)', () => {
     t.key({ key: 'Delete', ctrlKey: true }, t.tabBtn('b'));

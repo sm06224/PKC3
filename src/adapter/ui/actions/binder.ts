@@ -5285,6 +5285,22 @@ function tableLineAt(target: Element, body: string | null): number | null {
 const MENU_PREV_LID_ATTR = 'data-pkc-menu-prev-lid';
 
 /**
+ * 🔴 **タブを閉じる。断られたら理由を言う**(#1982 段 5-4 着地前レビュー)。
+ * ⚠ 有効なタブを閉じると選択が隣へ動く ── 編集中・保存の失敗中は reducer が断る(`selectThenCommit`)。
+ *   黙って何も起きないと「× が壊れている」に見えるので、`tab-close` の鍵と同じ字で理由を出す。
+ *   有効でないタブは選択を動かさないので、編集中でも閉じられる(断らない)。
+ */
+function closeNoteTabOrExplain(dispatcher: Dispatcher, lid: string): void {
+  const st = dispatcher.getState();
+  const blocked = st.noteTabs.active === lid ? selectBlockReason(st.phase) : null;
+  if (blocked !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}タブを閉じてください` });
+    return;
+  }
+  dispatcher.dispatch({ type: 'NOTE_TAB_CLOSE', lid });
+}
+
+/**
  * 🔴 **「探す」の行が持つ、探した語**(#1102 段①)。⚠ 綴りは `render/search.ts` が焼く物と
  * **同じ字**(`SEARCH_FIND_ATTR`)── 2 か所に書かない(§7)。
  */
@@ -12111,7 +12127,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'close-note-tab': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-note-tab');
-    if (lid) dispatcher.dispatch({ type: 'NOTE_TAB_CLOSE', lid });
+    if (lid) closeNoteTabOrExplain(dispatcher, lid);
   },
   /**
    * 他のタブを閉じる(#1982 段 5-4)。⚠ 相手は**右クリックしたタブ**。先にそのタブを有効にし、断られたら(編集中など)
@@ -12148,7 +12164,23 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid === null) return;
     const prev = target.getAttribute(MENU_PREV_LID_ATTR);
     dispatcher.batch(() => {
-      if (prev !== null && prev !== '' && prev !== lid) dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: prev });
+      /**
+       * 🔴 右クリックで行が選ばれた時点で、いまのタブ(prev)は押した行に差し替わっている。
+       *   **選択を prev へ戻さず**、消えた prev のタブを**裏で開き直して**押した行のタブの前へ置く
+       *   (着地前レビュー: 選択を戻してから開き直すと「戻る」の履歴が A→B→A→B と二重に積まれた)。
+       *   prev のタブが残っている(ピン留め・編集中で差し替わらなかった)ときは何もしない。
+       */
+      const st = dispatcher.getState();
+      if (
+        prev !== null &&
+        prev !== '' &&
+        prev !== lid &&
+        st.entryMetas.has(prev) &&
+        !st.noteTabs.tabs.some((t) => t.lid === prev)
+      ) {
+        dispatcher.dispatch({ type: 'NOTE_TAB_OPEN', lid: prev, activate: false });
+        dispatcher.dispatch({ type: 'NOTE_TAB_MOVE', lid: prev, before: lid });
+      }
       selectEntryOrExplain(dispatcher, lid, 'ノート', root, services, true);
     });
   },
@@ -26320,7 +26352,7 @@ export function bindActions(
       const lid = t.getAttribute(NOTE_TAB_LID_ATTR);
       ev.preventDefault();
       ev.stopImmediatePropagation();
-      if (lid !== null && lid !== '') dispatcher.dispatch({ type: 'NOTE_TAB_CLOSE', lid });
+      if (lid !== null && lid !== '') closeNoteTabOrExplain(dispatcher, lid);
       return;
     }
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(ev.key)) return;
