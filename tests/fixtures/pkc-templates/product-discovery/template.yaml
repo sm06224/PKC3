@@ -1,0 +1,42 @@
+meta:
+  id: "jp.pkc.test.product-discovery"
+  name: "Product Discovery Sprint"
+  version: "1.0.1"
+  pkc_min_version: "36.1"
+  description: "新規機能検討の検証テンプレート"
+  author: "PKC QA"
+  trust_level: 1
+  required_capabilities:
+    - "network.fetch"
+
+schema_version: 1
+template_id: "product-discovery-sprint"
+template_name: "Product Discovery Sprint"
+template_version: 1
+
+folders:
+  - id: hypothesis
+    name: "仮説"
+  - id: interviews
+    name: "Interview"
+  - id: decisions
+    name: "Decision"
+
+entries:
+  - type: form
+    title: "仮説カード"
+    folder: hypothesis
+    form: hypothesis-card
+  - type: textlog
+    title: "インタビュー記録"
+    folder: interviews
+    lines:
+      - body: "顧客インタビュー #1"
+        flag: info
+  - type: text
+    title: "意思決定ログ"
+    folder: decisions
+    body: |
+      # Decision Log
+      - 仮説A: 検証中
+      - 仮説B: 棄却

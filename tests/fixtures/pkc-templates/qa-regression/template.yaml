@@ -1,0 +1,43 @@
+meta:
+  id: "jp.pkc.test.qa-regression"
+  name: "QA Regression Pack"
+  version: "2.0.0"
+  pkc_min_version: "36.1"
+  description: "回帰テスト運用テンプレート"
+  author: "PKC QA"
+
+schema_version: 1
+template_id: "qa-regression-pack"
+template_name: "QA Regression Pack"
+template_version: 2
+
+folders:
+  - id: smoke
+    name: "Smoke"
+  - id: full
+    name: "Full Regression"
+  - id: report
+    name: "Report"
+
+entries:
+  - type: form
+    title: "Smoke Checklist"
+    folder: smoke
+    form: smoke-check
+  - type: form
+    title: "Full Checklist"
+    folder: full
+    form: full-check
+  - type: textlog
+    title: "Bug Triage Log"
+    folder: report
+    lines:
+      - body: "triage started"
+        flag: none
+  - type: text
+    title: "Release Note Draft"
+    folder: report
+    body: |
+      # Release Candidate
+      - 既知の問題
+      - 回避策

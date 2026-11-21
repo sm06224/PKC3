@@ -1,0 +1,28 @@
+schema_version: 1
+form_id: hypothesis-card
+title: "仮説カード"
+sections:
+  - section: "仮説"
+    fields:
+      - key: problem
+        label: "課題"
+        type: textarea
+        required: true
+      - key: target_segment
+        label: "対象セグメント"
+        type: text
+        required: true
+      - key: confidence
+        label: "確信度"
+        type: number
+      - key: priority
+        label: "優先度"
+        type: radio
+        options: ["P0", "P1", "P2"]
+      - key: channels
+        label: "検証チャネル"
+        type: checkbox-group
+        options: ["Email", "SNS", "広告", "営業"]
+      - key: approved
+        label: "承認済み"
+        type: checkbox

@@ -1,0 +1,52 @@
+meta:
+  id: "jp.pkc.test.ops-handoff"
+  name: "Ops Handoff E2E Template"
+  version: "1.2.0"
+  pkc_min_version: "36.1"
+  description: "運用引き継ぎの実運用テスト用。Level 0 + legacy を同時検証。"
+  author: "PKC QA"
+  trust_level: 0
+  required_capabilities:
+    - "io.import.builtin"
+
+schema_version: 1
+template_id: "ops-handoff-e2e"
+template_name: "Ops Handoff E2E Template"
+template_version: 2
+description: "引き継ぎテンプレート（フォーム/ログ/アセット/スニペット）"
+
+folders:
+  - id: shift
+    name: "シフト引き継ぎ"
+  - id: incident
+    name: "インシデント"
+  - id: runbook
+    name: "Runbook"
+
+entries:
+  - type: form
+    title: "引き継ぎチェック"
+    form: handoff-check
+    folder: shift
+  - type: textlog
+    title: "当日ログ"
+    folder: shift
+    lines:
+      - body: "引き継ぎテンプレートで初期化"
+        flag: none
+      - body: "重大な変更があればここに追記"
+        flag: warn
+  - type: text
+    title: "優先対応メモ"
+    folder: incident
+    body: |
+      # 優先順位
+      - P1: 顧客影響あり
+      - P2: 明朝対応でも可
+  - type: text
+    title: "Runbook Index"
+    folder: runbook
+    body: |
+      - DB復旧
+      - Queue Drain
+      - Feature Flag Rollback

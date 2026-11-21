@@ -18,7 +18,7 @@ export const NOT_PKC2_HTML_REFUSAL =
   'PKC2 の書き出しではない HTML なので、取り込めません。PKC2 の書き出し(HTML)を選んでください。PKC3 のバックアップは .pkc3-full.zip です。ウェブページなどは、添付で入れてください';
 
 export const NOT_PKC_ZIP_REFUSAL =
-  'PKC の書き出しではない zip なので、取り込めません。PKC2 の書き出し(zip)か、PKC3 のバックアップ(.pkc3-full.zip など)を選んでください';
+  'PKC の書き出しではない zip なので、取り込めません。PKC2 の書き出し(zip)か、PKC3 のバックアップ(.pkc3-full.zip など)、旧版 PKC のテンプレート(template.yaml 入りの zip)を選んでください';
 
 const REFUSALS: ReadonlySet<string> = new Set([OFFICE_DOC_REFUSAL, NOT_PKC2_HTML_REFUSAL, NOT_PKC_ZIP_REFUSAL]);
 

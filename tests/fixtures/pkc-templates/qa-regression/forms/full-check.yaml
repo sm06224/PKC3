@@ -1,0 +1,26 @@
+schema_version: 1
+form_id: full-check
+title: "Full Checklist"
+sections:
+  - section: "実施"
+    fields:
+      - key: suite
+        label: "Suite"
+        type: text
+      - key: duration_hours
+        label: "時間"
+        type: number
+      - key: executed_at
+        label: "実施日時"
+        type: datetime
+      - key: areas
+        label: "対象エリア"
+        type: checkbox-group
+        options: ["Auth", "Editor", "Export", "Template"]
+      - key: severity
+        label: "重大度"
+        type: radio
+        options: ["S1", "S2", "S3"]
+      - key: notes
+        label: "備考"
+        type: textarea
