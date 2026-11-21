@@ -18,7 +18,7 @@ describe('reducer slices (#1383)', () => {
 
   it('slice が実在する(空振り防止)', () => {
     // 等値で pin(slice を足す・消すときは、ここと reduceCore の列挙を一緒に直す)
-    expect(files.length).toBe(22);
+    expect(files.length).toBe(23);
   });
 
   it.each(files)('%s: 型の union・自分の switch・reduceCore の列挙が同じ action 集合', (f) => {
@@ -41,7 +41,7 @@ describe('reducer slices (#1383)', () => {
 
   it('同じ action を 2 つの slice が持たない', () => {
     const all = files.flatMap((f) => labelsOf(readFileSync(f, 'utf-8')));
-    expect(all.length).toBe(253);
+    expect(all.length).toBe(262);
     expect(new Set(all).size).toBe(all.length);
   });
 

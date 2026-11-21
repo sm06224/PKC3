@@ -21,6 +21,8 @@ import { reduceBlockOps } from './slices/block-ops';
 import { reduceCalendar } from './slices/calendar';
 import { reducePersisted } from './slices/persisted';
 import { reduceSelection } from './slices/selection';
+import { NO_NOTE_PINS, reduceNoteTabs, syncNoteTabs } from './slices/note-tabs';
+import { type TabSet, createTabSet } from '@features/nav/note-tabs';
 import { reduceEntries } from './slices/entries';
 import { reduceHistory } from './slices/history';
 import { reduceTrash } from './slices/trash';
@@ -1910,6 +1912,15 @@ export interface AppState {
    * 写しを `SET_NOTE_LABELS` で入れる(行の左の線を描く面と、色の絞りが同じ表を読む)。
    */
   noteLabels: ReadonlyMap<string, number>;
+  /**
+   * 🔴 **ノートのタブ(#1982 段 5)**。セッション限り(裁定 4: 再読み込みで復元しない)── 保存・スナップショットに入れない。
+   * ⚠ `active` は `selectedLid` と揃える(`slices/note-tabs.ts` の `syncNoteTabs` が `reduce` の外側 1 か所で保つ)。
+   */
+  noteTabs: TabSet;
+  /** タブの単調な通し番号(reducer を純粋に保つため、時計の代わりに state が持つ)。 */
+  tabSeq: number;
+  /** ピン留め(#1377)の写し。正本は storage(`appNotePins`)で、`SET_NOTE_PINS` で入れる。タブの追い出し・並びが読む。 */
+  notePins: ReadonlySet<string>;
   /** 🔴 色ラベルの絞り(#1982 段 4)。`null` = 絞らない。⚠ `kindFilter` と別に持つ。 */
   labelFilter: number | null;
   /**
@@ -2426,6 +2437,9 @@ export const initialState: AppState = {
   filterQuery: '',
   kindFilter: NO_KINDS,
   noteLabels: NO_NOTE_LABELS,
+  noteTabs: createTabSet(),
+  tabSeq: 0,
+  notePins: NO_NOTE_PINS,
   labelFilter: null,
   searchHits: null,
   selectionHistory: EMPTY_HISTORY,
@@ -3789,6 +3803,20 @@ export type UserAction =
   /** 🔴 色ラベルの写しを入れ替える / 色で絞る(`null` = 解く)(#1982 段 4)。 */
   | { type: 'SET_NOTE_LABELS'; labels: ReadonlyMap<string, number> }
   | { type: 'SET_LABEL_FILTER'; color: number | null }
+  /** 🔴 ノートのタブ(#1982 段 5-2)。新しいタブで開く(`activate` 省略 = 有効にする)。 */
+  | { type: 'NOTE_TAB_OPEN'; lid: string; activate?: boolean }
+  | { type: 'NOTE_TAB_ACTIVATE'; lid: string }
+  | { type: 'NOTE_TAB_CLOSE'; lid: string }
+  /** 最後に閉じたタブを戻す(戻せるものが無ければ何も起きない)。 */
+  | { type: 'NOTE_TAB_REOPEN' }
+  | { type: 'NOTE_TAB_NEXT' }
+  | { type: 'NOTE_TAB_PREV' }
+  /** 並べ替え: `lid` を `before` の直前へ(`null` = 末尾)。 */
+  | { type: 'NOTE_TAB_MOVE'; lid: string; before: string | null }
+  /** 別ウィンドウで開いている印を付ける・外す。 */
+  | { type: 'NOTE_TAB_EXTERNAL'; lid: string; external: boolean }
+  /** ピン留めの写しを入れ替える(#1377)。 */
+  | { type: 'SET_NOTE_PINS'; lids: readonly string[] }
   | { type: 'DUAL_SET_FILTER'; side: DualSide; filter: string }
   /** 🔴 **1 つ前 / 次の場所へ**(#273 残件。タブごとの履歴)。 */
   | { type: 'DUAL_BACK'; side: DualSide }
@@ -5158,7 +5186,12 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
     const r = settleOpenedOrder(state, followSelectionScope(state, dropStaleSearchJump(
       startSearchJumpFromField(
         action,
-        guardSectionDraftTransition(state, action, reduceWithHistory(state, action)),
+        // 🔴 タブの整合は選択・消去の「結果」を 1 か所で見る(章の欄の門を通った後の最終形に対して)
+        syncNoteTabs(
+          state,
+          guardSectionDraftTransition(state, action, reduceWithHistory(state, action)),
+          reduceWithHistory,
+        ),
       ),
     )));
     // 🔑 追随は**一番外側の 1 回だけ**(内側の `reduce` ごとに撃つと、同じ読みが何本も積まれる)
@@ -5374,7 +5407,7 @@ export function canNavForward(state: AppState): boolean {
 
 /** ⚠ `NAV_HISTORY` は**型で除く** ── 上の wrapper が先に捌く。default 節を置いて
  * 逃がすと、新しい action を書き忘れても tsc が黙る。 */
-function reduceCore(
+export function reduceCore(
   state: AppState,
   action: Exclude<Dispatchable, { type: 'NAV_HISTORY' }>,
 ): ReduceResult {
@@ -5418,6 +5451,16 @@ function reduceCore(
     case 'SET_SEARCH_HITS':
     case 'SET_SEARCH_PAGE_QUERY':
       return reduceQueryScan(state, action);
+    case 'NOTE_TAB_OPEN':
+    case 'NOTE_TAB_ACTIVATE':
+    case 'NOTE_TAB_CLOSE':
+    case 'NOTE_TAB_REOPEN':
+    case 'NOTE_TAB_NEXT':
+    case 'NOTE_TAB_PREV':
+    case 'NOTE_TAB_MOVE':
+    case 'NOTE_TAB_EXTERNAL':
+    case 'SET_NOTE_PINS':
+      return reduceNoteTabs(state, action);
     case 'SET_SQL_TEXT':
     case 'RUN_SQL':
     case 'SQL_HISTORY_STEP':
