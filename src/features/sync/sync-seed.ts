@@ -14,6 +14,7 @@
 import { seedBaseline, type Baseline } from './change-set';
 import { isDeviceId } from './sync-state';
 import type { DiffFingerprint } from './diff-file';
+import { isMarkKey, markKeyLid } from './sync-marks';
 
 export interface SyncSeed {
   /** 書き出した端末の id。 */
@@ -44,6 +45,8 @@ export function parseSyncSeed(v: unknown): SyncSeed | null {
 export function seedFromBackup(seed: SyncSeed, keptLids: ReadonlySet<string>): Baseline {
   const states = seed.fingerprints
     .filter((f) => {
+      // 印(色ラベル・ピン留め)は、指すノートが種になるときだけ
+      if (isMarkKey(f.key)) return keptLids.has(markKeyLid(f.key) ?? '');
       if (!f.key.startsWith('rel:')) return keptLids.has(f.key);
       const m = /^rel:(.*)\|(.*)\|[^|]*$/.exec(f.key);
       return m !== null && keptLids.has(m[1] as string) && keptLids.has(m[2] as string);

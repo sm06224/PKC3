@@ -80,6 +80,8 @@ export interface SyncDirLike {
   getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<SyncDirLike>;
   removeEntry(name: string): Promise<void>;
   queryPermission?(descriptor: { mode: string }): Promise<string>;
+  /** 許可を求める(🔴 押した操作の中で呼ぶ。フォルダ同期(全データ。段 3)が保存した handle の再許可に使う)。 */
+  requestPermission?(descriptor: { mode: string }): Promise<string>;
 }
 
 export type SyncDirPicker = (options: { mode: 'readwrite' }) => Promise<SyncDirLike>;

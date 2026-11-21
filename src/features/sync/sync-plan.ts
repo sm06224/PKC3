@@ -21,6 +21,7 @@ import { decideMerge, fpEqual, nextBaseline, relationKey, type Baseline, type De
 import type { DiffFile, DiffRelation } from './diff-file';
 import { isSyncRelationKind } from './sync-guard';
 import { placeFp, relationFp } from './sync-fp';
+import { isLabelKey, isMarkKey, isNoteKey, isPinKey, labelFp, labelKey, markKeyLid, pinFp, pinKey } from './sync-marks';
 
 export interface PlanUpsert {
   lid: string;
@@ -70,6 +71,13 @@ export interface SyncSummary {
   orphans: number;
   /** 宛先が無くて足さなかったつながり。 */
   danglingRelations: number;
+  /** 色ラベル・ピン留め(段 3)。付けた / 外した(色を変えたのは付けたに数える)。 */
+  labelsSet: number;
+  labelsCleared: number;
+  pinsAdded: number;
+  pinsRemoved: number;
+  /** 両方で違う色にした(こちらを残した)。 */
+  labelConflicts: number;
 }
 
 export interface SyncPlan {
@@ -79,6 +87,11 @@ export interface SyncPlan {
   trashExpect: Record<string, Fp>;
   relationAdds: DiffRelation[];
   relationRemoves: DiffRelation[];
+  /** 色ラベル・ピン留め(段 3)。付ける(色を変える)/ 外す / 留める / 外す。 */
+  labelSets: Array<{ lid: string; color: number }>;
+  labelClears: string[];
+  pinAdds: string[];
+  pinRemoves: string[];
   /** 取り込み後に記録する、この相手の「前回の合意」。 */
   baseline: Baseline;
   conflicts: PlanConflict[];
@@ -97,6 +110,8 @@ export interface PlanInput {
    * (重い処理は worker へ。設計 doc §12.1)。`remote.container.notes` の全 lid が要る(無ければ throw)。
    */
   remoteNoteFps: ReadonlyMap<string, Fp>;
+  /** こちらの色ラベル(lid → 色の番号)。両方で違う色にしたときの決め方に使う(省略 = こちらを残す)。 */
+  localLabelColors?: ReadonlyMap<string, number>;
   /** こちらで生きているノートの題名。 */
   localTitles: ReadonlyMap<string, string>;
   localTombstones: readonly Tombstone[];
@@ -116,6 +131,7 @@ export function conflictCopyTitle(title: string, firstSync: boolean, date: strin
 const emptySummary = (): SyncSummary => ({
   created: 0, updated: 0, restored: 0, merged: 0, trashed: 0, keptLocal: 0, conflicts: 0, firstSync: 0,
   relationsAdded: 0, relationsRemoved: 0, orphans: 0, danglingRelations: 0,
+  labelsSet: 0, labelsCleared: 0, pinsAdded: 0, pinsRemoved: 0, labelConflicts: 0,
 });
 
 const REL_PREFIX = 'rel:';
@@ -125,14 +141,26 @@ const REL_PREFIX = 'rel:';
  * **こちらがまだその版のまま**のキーだけ、相手が見た版を共通の祖先にする(こちらは変えていないので、相手の変更だけを取り込む)。
  * これで、お互いが同じ版から別々に直した後の往復で、競合のコピーが増え続けない。
  */
-export function effectiveBaseline(stored: Baseline, peerBase: readonly { key: string; c: string; p?: string }[], local: readonly KeyedState[]): Baseline {
+export function effectiveBaseline(
+  stored: Baseline,
+  peerBase: readonly { key: string; c: string; p?: string }[],
+  local: readonly KeyedState[],
+  /** 相手の指紋(全件)。あれば、「相手がまだ相手が見た版のままのキー」も共通の祖先にする(フォルダ同期。下)。 */
+  remote?: ReadonlyMap<string, Fp>,
+): Baseline {
   const out = Object.assign(Object.create(null) as Record<string, Fp>, stored);
   const lmap = new Map(local.map((s) => [s.key, s] as const));
   for (const p of peerBase) {
     const l = lmap.get(p.key);
-    if (l === undefined) continue;
     const pf: Fp = p.p === undefined ? { content: p.c } : { content: p.c, place: p.p };
-    if (fpEqual(l, pf)) out[p.key] = pf;
+    if (l !== undefined && fpEqual(l, pf)) {
+      out[p.key] = pf;
+      continue;
+    }
+    // 🔴 相手が、自分の見た版のまま変えていない(相手の今の指紋 = 相手が記録しているこちらの版)。こちらだけが変えた物になる
+    //   (記録が無いまま最初に取り込むと、こちらの編集が「初回の同期の競合」になってしまう。フォルダ同期は相手のファイルが先に在る)
+    const r = remote?.get(p.key);
+    if (l !== undefined && r !== undefined && fpEqual(r, pf)) out[p.key] = pf;
   }
   return out;
 }
@@ -144,7 +172,7 @@ export function planSyncImport(input: PlanInput): SyncPlan {
   // ── 相手の指紋(全件)。本文のある物は本文から測り直す(信用しすぎない)。つながりは目録(relations)が正本。
   const remoteFp = new Map<string, Fp>();
   for (const f of c.fingerprints) {
-    if (f.key.startsWith(REL_PREFIX)) continue;
+    if (f.key.startsWith(REL_PREFIX) || isMarkKey(f.key)) continue; // つながり・印は、下で目録(relations / labels / pins)から作る
     remoteFp.set(f.key, f.p === undefined ? { content: f.c } : { content: f.c, place: f.p });
   }
   for (const n of c.notes) {
@@ -159,13 +187,25 @@ export function planSyncImport(input: PlanInput): SyncPlan {
     remoteRel.set(k, r);
     remoteFp.set(k, relationFp());
   }
+  // 色ラベル・ピン留め(段 3)。⚠ 相手のファイルが運んでいない種類(段 2 までのファイル)は、判定に入れない
+  const labelsCarried = c.labels !== null;
+  const pinsCarried = c.pins !== null;
+  const remoteLabelColor = new Map<string, number>();
+  for (const l of c.labels ?? []) {
+    remoteLabelColor.set(l.lid, l.color);
+    remoteFp.set(labelKey(l.lid), labelFp(l.color));
+  }
+  for (const lid of c.pins ?? []) remoteFp.set(pinKey(lid), pinFp());
+  const isUncarried = (key: string): boolean => (isLabelKey(key) && !labelsCarried) || (isPinKey(key) && !pinsCarried);
   const localRel = new Map(input.localRelations.map((r) => [relationKey({ from: r.from, to: r.to, kind: r.kind }), r] as const));
   const localFp = new Map(input.localStates.map((s) => [s.key, s] as const));
   const remoteStates: KeyedState[] = [...remoteFp].map(([key, fp]) => ({ key, ...fp }));
-  const baseline = effectiveBaseline(input.baseline, c.peerBase, input.localStates);
+  const baselineAll = effectiveBaseline(input.baseline, c.peerBase, input.localStates, remoteFp);
+  const baseline = Object.create(null) as Record<string, Fp>;
+  for (const [k, fp] of Object.entries(baselineAll)) if (!isUncarried(k)) baseline[k] = fp;
   const decisions = decideMerge({
     baseline,
-    local: input.localStates,
+    local: input.localStates.filter((x) => !isUncarried(x.key)),
     remote: remoteStates,
     remoteTombstones: c.tombstones,
     localTombstones: input.localTombstones,
@@ -174,9 +214,9 @@ export function planSyncImport(input: PlanInput): SyncPlan {
 
   // こちらで生きているノート(つながりでない物)。後でゴミ箱・新規で更新して「取り込み後に生きている」集合にする。
   const finalLive = new Set<string>();
-  for (const s of input.localStates) if (!s.key.startsWith(REL_PREFIX)) finalLive.add(s.key);
+  for (const s of input.localStates) if (isNoteKey(s.key)) finalLive.add(s.key);
   for (const d of decisions) {
-    if (d.key.startsWith(REL_PREFIX)) continue;
+    if (!isNoteKey(d.key)) continue;
     if (d.action === 'trash-local') finalLive.delete(d.key);
     else if (d.action === 'take-remote' || (d.action === 'conflict' && d.resolution === 'restore-remote')) finalLive.add(d.key);
   }
@@ -186,6 +226,10 @@ export function planSyncImport(input: PlanInput): SyncPlan {
   const trashExpect: Record<string, Fp> = Object.create(null) as Record<string, Fp>;
   const relationAdds: DiffRelation[] = [];
   const relationRemoves: DiffRelation[] = [];
+  const labelSets: Array<{ lid: string; color: number }> = [];
+  const labelClears: string[] = [];
+  const pinAdds: string[] = [];
+  const pinRemoves: string[] = [];
   const conflicts: PlanConflict[] = [];
   const needFull: string[] = [];
   const next = Object.create(null) as Record<string, Fp>;
@@ -231,9 +275,79 @@ export function planSyncImport(input: PlanInput): SyncPlan {
     next[key] = { content: fp.content, place: orphan ? placeFp(null) : (fp.place as string) };
   };
 
+  // 相手が運んでいない種類の印は、記録(前回の合意)をそのまま持ち越す
+  for (const [k, fp] of Object.entries(baselineAll)) if (isUncarried(k)) next[k] = fp;
+
+  /** 色ラベル・ピン留めの 1 件(段 3)。宛先のノートが取り込み後に生きていなければ何もしない(ゴミ箱の物の印は残す)。 */
+  const markDecision = (d: Decision, R: Fp | undefined): void => {
+    const lid = markKeyLid(d.key) as string;
+    const isLabel = isLabelKey(d.key);
+    const live = finalLive.has(lid);
+    const takeRemoteMark = (): void => {
+      if (!live) return;
+      if (isLabel) {
+        const color = remoteLabelColor.get(lid);
+        if (color === undefined) return;
+        labelSets.push({ lid, color });
+        s.labelsSet++;
+      } else {
+        pinAdds.push(lid);
+        s.pinsAdded++;
+      }
+      if (R !== undefined) next[d.key] = R;
+    };
+    switch (d.action) {
+      case 'noop': {
+        const l = localFp.get(d.key);
+        if (l !== undefined) next[d.key] = { content: l.content };
+        break;
+      }
+      case 'take-remote':
+        takeRemoteMark();
+        break;
+      case 'trash-local':
+        if (!live) break;
+        if (isLabel) {
+          labelClears.push(lid);
+          s.labelsCleared++;
+        } else {
+          pinRemoves.push(lid);
+          s.pinsRemoved++;
+        }
+        break;
+      case 'push-local':
+      case 'push-delete':
+      case 'merge':
+        if (R !== undefined) next[d.key] = R;
+        break;
+      case 'conflict':
+        if (d.resolution === 'restore-remote') {
+          takeRemoteMark();
+          break;
+        }
+        // 色ラベルは 2 つの色を「両方残す」ことができない。両方の端末が同じ色に収まるよう、**色の番号が大きい方**を採る
+        // (時計を使わず、どちらの端末で判定しても同じ結果になる = 往復で食い違いが残らない)。こちらで付けて相手で外した物はこちらを残す
+        if (isLabel && d.kind !== 'edited-here-deleted-there') {
+          s.labelConflicts++;
+          const rc = remoteLabelColor.get(lid);
+          const lc = input.localLabelColors?.get(lid);
+          if (rc !== undefined && lc !== undefined && rc > lc) {
+            takeRemoteMark();
+            break;
+          }
+        }
+        if (R !== undefined) next[d.key] = R;
+        break;
+    }
+  };
+
   for (const d of decisions as readonly Decision[]) {
     const isRel = d.key.startsWith(REL_PREFIX);
     const R = remoteFp.get(d.key);
+    if (isMarkKey(d.key)) {
+      markDecision(d, R);
+      continue;
+    }
     if (isRel) {
       if (d.action === 'take-remote') {
         const r = remoteRel.get(d.key);
@@ -348,5 +462,5 @@ export function planSyncImport(input: PlanInput): SyncPlan {
       }
     }
   }
-  return { upserts, trash, trashExpect, relationAdds, relationRemoves, baseline: nextBaseline(Object.entries(next).map(([key, fp]) => ({ key, ...fp }))), conflicts, needFull, summary: s };
+  return { upserts, trash, trashExpect, relationAdds, relationRemoves, labelSets, labelClears, pinAdds, pinRemoves, baseline: nextBaseline(Object.entries(next).map(([key, fp]) => ({ key, ...fp }))), conflicts, needFull, summary: s };
 }

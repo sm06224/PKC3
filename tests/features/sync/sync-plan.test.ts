@@ -9,6 +9,7 @@ import { DIFF_FORMAT, readDiffZip, writeDiffZip, type DiffNote } from '../../../
 import { fingerprintDigest, isStaleBase, planExport } from '../../../src/features/sync/sync-export';
 import { conflictCopyTitle, effectiveBaseline, planSyncImport, type PlanInput } from '../../../src/features/sync/sync-plan';
 import { TOMBSTONE_MAX } from '../../../src/features/sync/sync-state';
+import { labelFp, labelKey, pinFp, pinKey } from '../../../src/features/sync/sync-marks';
 
 const DEV = '0123456789abcdef';
 const note = (lid: string, title: string, body: string, parentLid: string | null = null): DiffNote => ({ lid, title, archetype: 'text', body, parentLid });
@@ -22,7 +23,7 @@ function input(over: Partial<PlanInput> & { remoteNotes?: DiffNote[]; remoteFps?
   return {
     remote: {
       manifest: { format: DIFF_FORMAT, version: 1, exported_at: '', device: DEV, seq: 1, cid: 'c-r', title: 'R', complete: true, counts: { notes: 0, relations: 0, deletions: 0, assets: 0, total: 0 } },
-      container: { notes: bodies, relations: [], tombstones: [], fingerprints: fpList(all.map(st)), peerBase: [], assets: [] },
+      container: { notes: bodies, relations: [], tombstones: [], fingerprints: fpList(all.map(st)), peerBase: [], peerBases: null, assets: [], labels: null, pins: null },
     },
     // 本文の指紋は worker で測った物を渡す設計(主スレッドで測らない)── test では同じ関数で測って渡す
     remoteNoteFps: new Map(bodies.map((x) => [x.lid, entryFp({ title: x.title, archetype: x.archetype, parentLid: x.parentLid, body: x.body })] as const)),
@@ -220,6 +221,8 @@ describe('差分ファイル(zip)の読み書き', () => {
       tombstones: [{ key: 'z', lastFp: { content: 'c', place: '' }, device: DEV, seq: 2, deletedAt: '2026-11-01T00:00:00Z' }],
       fingerprints: fpList([st(n)]),
       peerBase: [],
+      labels: [],
+      pins: [],
       assets: () => [
         { key: 'ast-1', mime: 'image/png', size: 3, hash: null },
         { key: 'ast-missing', mime: 'image/png', size: 3, hash: null },
@@ -257,5 +260,62 @@ describe('差分ファイル(zip)の読み書き', () => {
       '2026-11-21T00:00:00Z',
     );
     await expect(readDiffZip(arch.blob)).rejects.toThrow('差分ファイルではありません');
+  });
+});
+
+describe('planSyncImport: 色ラベル・ピン留め(段 3)', () => {
+  const a = note('a', 't', '本文');
+  const stFp = (key: string, fp: { content: string; place?: string }): KeyedState => ({ key, ...fp });
+  const withMarks = (labels: Array<{ lid: string; color: number }> | null, pins: string[] | null, over: Partial<PlanInput> = {}): PlanInput => {
+    const i = input({ remoteNotes: [a], localStates: [st(a)], baseline: { a: { content: st(a).content, place: st(a).place } }, ...over });
+    i.remote.container.labels = labels;
+    i.remote.container.pins = pins;
+    return i;
+  };
+  it('相手だけの色・ピンは取り込む(記録は相手の指紋)', () => {
+    const p = planSyncImport(withMarks([{ lid: 'a', color: 3 }], ['a']));
+    expect(p.labelSets).toEqual([{ lid: 'a', color: 3 }]);
+    expect(p.pinAdds).toEqual(['a']);
+    expect(p.baseline[labelKey('a')]).toEqual(labelFp(3));
+    expect(p.baseline[pinKey('a')]).toEqual(pinFp());
+    expect(p.summary.labelsSet).toBe(1);
+    expect(p.summary.pinsAdded).toBe(1);
+  });
+  it('相手が外した(記録にあり、相手に無く、こちらは変えていない)→ 外す', () => {
+    const base = { a: { content: st(a).content, place: st(a).place }, [labelKey('a')]: labelFp(3), [pinKey('a')]: pinFp() };
+    const p = planSyncImport(withMarks([], [], { localStates: [st(a), stFp(labelKey('a'), labelFp(3)), stFp(pinKey('a'), pinFp())], baseline: base }));
+    expect(p.labelClears).toEqual(['a']);
+    expect(p.pinRemoves).toEqual(['a']);
+    expect(p.baseline[labelKey('a')]).toBeUndefined();
+  });
+  it('こちらだけの色は残す(相手へ送る)/ 相手のファイルが印を運んでいない(null)なら、こちらの印を消さない', () => {
+    const base = { a: { content: st(a).content, place: st(a).place }, [labelKey('a')]: labelFp(3) };
+    const local = [st(a), stFp(labelKey('a'), labelFp(3))];
+    const old = planSyncImport(withMarks(null, null, { localStates: local, baseline: base }));
+    expect(old.labelClears).toEqual([]); // 対照: 運んでいれば(上の test)外す
+    expect(old.baseline[labelKey('a')]).toEqual(labelFp(3)); // 記録も持ち越す
+    const mine = planSyncImport(withMarks([], [], { localStates: local, baseline: {} }));
+    expect(mine.labelClears).toEqual([]);
+    expect(mine.labelSets).toEqual([]);
+  });
+  it('両方で違う色: 番号の大きい方(相手が大きければ取り込む / こちらが大きければ残す)', () => {
+    const base = { a: { content: st(a).content, place: st(a).place }, [labelKey('a')]: labelFp(1) };
+    const local = [st(a), stFp(labelKey('a'), labelFp(2))];
+    const takeRemote = planSyncImport(withMarks([{ lid: 'a', color: 5 }], [], { localStates: local, baseline: base, localLabelColors: new Map([['a', 2]]) }));
+    expect(takeRemote.labelSets).toEqual([{ lid: 'a', color: 5 }]);
+    expect(takeRemote.summary.labelConflicts).toBe(1);
+    const keep = planSyncImport(withMarks([{ lid: 'a', color: 4 }], [], { localStates: [st(a), stFp(labelKey('a'), labelFp(7))], baseline: base, localLabelColors: new Map([['a', 7]]) }));
+    expect(keep.labelSets).toEqual([]);
+    expect(keep.summary.labelConflicts).toBe(1);
+  });
+  it('宛先のノートが取り込み後に生きていない印は付けない', () => {
+    const i = input({ remoteNotes: [], localStates: [] });
+    i.remote.container.labels = [{ lid: 'ghost', color: 2 }];
+    i.remote.container.pins = ['ghost'];
+    i.remote.container.fingerprints = [];
+    const q = planSyncImport(i);
+    expect(q.labelSets).toEqual([]);
+    expect(q.pinAdds).toEqual([]);
+    expect(q.baseline[labelKey('ghost')]).toBeUndefined();
   });
 });

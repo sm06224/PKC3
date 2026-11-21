@@ -151,6 +151,7 @@ import { filerFlattenNow, filerRowOptions, dualListViewOptions } from '@adapter/
 import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { LocalFolder } from '@adapter/platform/local-folder';
 import type { FolderSync } from '@adapter/platform/folder-sync';
+import type { SyncFolder } from './sync-folder';
 import type { LinkedFileTooLarge } from '@adapter/platform/launched-files';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
 import { appSavedSearches } from '@adapter/platform/saved-search-store';
@@ -2957,6 +2958,8 @@ export interface BinderServices {
    * 判断は `features/folder-sync/folder-sync.ts`、読み書きは `platform/folder-sync.ts`。
    */
   folderSync?: Pick<FolderSync, 'pick' | 'syncNow' | 'stop' | 'setMinutes' | 'resolveGone' | 'attach'>;
+  /** 🔴 フォルダで同期する(全データ。#2000 段 3)。⚠ `pick` / `grant` は押した操作の中で呼ぶ(OS の選択・許可の画面は gesture が要る)。 */
+  syncFolder?: Pick<SyncFolder, 'pick' | 'grant' | 'release' | 'syncNow'>;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   /** 取込(PKC2 の書出し / 素の Markdown)。振り分けは import-file.ts が持つ。 */
   importFiles?(files: File[]): void;
@@ -19227,6 +19230,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     applyPaneVisibility(root, appPanes.setHidden(hidden.filter((p) => p !== 'sidebar')));
   },
+  // 🔴 フォルダで同期する(全データ。段 3)。⚠ 先に await を挟まない(選択・許可の画面は押した操作の中でだけ開く)
+  'sync-folder-pick': (_dispatcher, _target, services) => void services.syncFolder?.pick(),
+  'sync-folder-grant': (_dispatcher, _target, services) => void services.syncFolder?.grant(),
+  'sync-folder-now': (_dispatcher, _target, services) => void services.syncFolder?.syncNow(true),
+  'sync-folder-release': (_dispatcher, _target, services) => void services.syncFolder?.release(),
   'export-sync-diff': (_dispatcher, _target, services) => {
     services.exportSyncDiff?.(false);
   },

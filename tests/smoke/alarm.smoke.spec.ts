@@ -89,5 +89,28 @@ test('🔴 予定の知らせを入にすると、その場で音が鳴る (#280
   await clickReal(page, '[data-pkc-field="alarm-enabled"]');
   await expect(box, '切に戻せない').not.toBeChecked();
 
+  /**
+   * 🔴 #2000 段 3: 「端末間の同期」の下の「フォルダで同期する」── 新しい起動は足さない(この設定の画面でそのまま見る)。
+   * 切のときは出ない(既定はオフ = 何も出さない)/ 入にすると、フォルダを選ぶ口と案内が出て、フォルダ未設定のときは
+   * 「許可する」「今すぐ同期」「フォルダの設定を外す」は出ない(押せない物を並べない)。⚠ 最後に切へ戻す
+   */
+  const folderBox = page.locator('[data-pkc-field="sync-folder"]');
+  await expect(folderBox, '「フォルダで同期する」の器が設定に無い').toHaveCount(1);
+  await expect(folderBox, '同期がオフなのにフォルダ同期が出ている').toBeHidden();
+  await clickReal(page, '[data-pkc-field="sync-enabled"]');
+  await expect(folderBox, '同期をオンにしてもフォルダ同期が出ない').toBeVisible();
+  await expect(folderBox, '案内に置き場(pkc3-sync)が書いていない').toContainText('pkc3-sync');
+  const hasPicker = await page.evaluate(() => typeof (window as unknown as Record<string, unknown>)['showDirectoryPicker'] === 'function');
+  if (hasPicker) {
+    await expect(folderBox.locator('[data-pkc-action="sync-folder-pick"]'), 'フォルダを選ぶ口が無い').toBeVisible();
+  } else {
+    await expect(folderBox.locator('[data-pkc-action="sync-folder-pick"]'), '選べないブラウザなのに選ぶ口が出ている').toBeHidden();
+    await expect(folderBox, '選べない理由と差分ファイルの案内が無い').toContainText('差分を書き出す');
+  }
+  for (const a of ['sync-folder-grant', 'sync-folder-now', 'sync-folder-release']) {
+    await expect(folderBox.locator(`[data-pkc-action="${a}"]`), `フォルダ未設定なのに ${a} が出ている`).toBeHidden();
+  }
+  await page.evaluate(() => localStorage.setItem('pkc3.sync', '0'));
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

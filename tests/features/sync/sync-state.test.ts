@@ -171,7 +171,7 @@ describe('運ぶ物の全数表', () => {
   const ids = SYNC_INVENTORY.map((r) => r.id);
   it('種類の全数が名指しで載っている(増減したらここを更新する)', () => {
     expect(ids).toEqual([
-      'body', 'title', 'kind', 'parent', 'tags', 'relations', 'labels', 'revisions', 'assets', 'settings', 'system-notes', 'trash', 'sync-state',
+      'body', 'title', 'kind', 'parent', 'tags', 'relations', 'labels', 'pins', 'revisions', 'assets', 'settings', 'system-notes', 'trash', 'sync-state',
     ]);
     expect(new Set(ids).size).toBe(ids.length);
   });
@@ -185,7 +185,7 @@ describe('運ぶ物の全数表', () => {
     expect(SYNC_INVENTORY.filter((r) => r.carry === 'no').map((r) => r.id)).toEqual(['revisions', 'settings', 'system-notes', 'sync-state']);
   });
   it('段 2 で運ぶ物 / 段 3 で足す物が決まっている(id で固定)', () => {
-    expect(SYNC_INVENTORY.filter((r) => r.stage === 3).map((r) => r.id)).toEqual(['labels']);
+    expect(SYNC_INVENTORY.filter((r) => r.stage === 3).map((r) => r.id)).toEqual(['labels', 'pins']);
     expect(SYNC_INVENTORY.filter((r) => r.stage === 2).map((r) => r.id)).toEqual([
       'body', 'title', 'kind', 'parent', 'tags', 'relations', 'assets', 'trash',
     ]);

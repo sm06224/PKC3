@@ -74,6 +74,8 @@ import {
   discardPeerRecords,
   ensureDevice,
   forgetAllSyncRows,
+  noteLabelScope,
+  notePinScope,
   getSetting,
   measureNoteFps,
   measureOne,
@@ -81,6 +83,8 @@ import {
   putSetting,
   readBases,
   readOuts,
+  readPeerSeqs,
+  writePeerSeq,
   readPairs,
   readSeq,
   readTombstones,
@@ -1025,15 +1029,7 @@ function tagColorScope(cid: string): string {
   return `tag-color:${cid}`;
 }
 
-/** ノートのピン留めを持つ `settings` の scope(器ごと。#1377)。1 ノート 1 行(`k` = lid、`v` = 留めた順の通し番号)。 */
-function notePinScope(cid: string): string {
-  return `note-pin:${cid}`;
-}
-
-/** ノートの色ラベルを持つ `settings` の scope(器ごと。#1982 段 4)。1 ノート 1 行(`k` = lid、`v` = 色の番号)。 */
-function noteLabelScope(cid: string): string {
-  return `note-label:${cid}`;
-}
+/* ノートのピン留め・色ラベルの scope(`notePinScope` / `noteLabelScope`)は `sync-rows.ts` に置く(同期が同じ行を読み書きするため。1 か所) */
 
 /**
  * 🔴 **旧ビルドが書いた行は、索引が据え置かれる**(2026-08-29 の着地後レビュー)。
@@ -4174,6 +4170,61 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
         result.relationsRemoved++;
       }
     }
+    // ── 色ラベル・ピン留め(段 3。🔴 宛先のノートが生きているときだけ。触る前の行は `rec` で控える = 取り消しで戻る)
+    let marksWritten = 0;
+    let marksSkipped = 0;
+    const labelScope = noteLabelScope(cid);
+    const pinScope = notePinScope(cid);
+    const labelTargets = new Set<string>();
+    const pinTargets = new Set<string>();
+    for (const l of input.labelSets ?? []) labelTargets.add(l.lid);
+    for (const lid of input.labelClears ?? []) labelTargets.add(lid);
+    for (const lid of input.pinAdds ?? []) pinTargets.add(lid);
+    for (const lid of input.pinRemoves ?? []) pinTargets.add(lid);
+    for (const lid of [...labelTargets, ...pinTargets]) {
+      if (isReservedSyncLid(lid)) throw new Error('差分ファイルが、アプリ自身のノート(システム領域)の色ラベル・ピン留めを書き換えようとしています。取り込みを中止しました');
+    }
+    for (const l of input.labelSets ?? []) {
+      if (!isNoteLabelColor(l.color) || !liveRow(database, cid, l.lid)) {
+        marksSkipped++;
+        continue;
+      }
+      const had = getSetting(database, labelScope, l.lid) !== null;
+      if (!had && Number(database.selectValue('SELECT count(*) FROM settings WHERE scope = ?', [labelScope])) >= MAX_NOTE_LABELS) {
+        marksSkipped++;
+        continue;
+      }
+      rec(labelScope, l.lid);
+      putSetting(database, labelScope, l.lid, String(l.color));
+      marksWritten++;
+    }
+    for (const lid of input.labelClears ?? []) {
+      if (getSetting(database, labelScope, lid) === null) continue;
+      rec(labelScope, lid);
+      deleteSetting(database, labelScope, lid);
+      marksWritten++;
+    }
+    for (const lid of input.pinAdds ?? []) {
+      if (!liveRow(database, cid, lid)) {
+        marksSkipped++;
+        continue;
+      }
+      if (getSetting(database, pinScope, lid) !== null) continue;
+      if (Number(database.selectValue('SELECT count(*) FROM settings WHERE scope = ?', [pinScope])) >= MAX_NOTE_PINS_STORED) {
+        marksSkipped++;
+        continue;
+      }
+      const max = Number(database.selectValue('SELECT max(CAST(v AS INTEGER)) FROM settings WHERE scope = ?', [pinScope]));
+      rec(pinScope, lid);
+      putSetting(database, pinScope, lid, String((Number.isFinite(max) ? max : 0) + 1));
+      marksWritten++;
+    }
+    for (const lid of input.pinRemoves ?? []) {
+      if (getSetting(database, pinScope, lid) === null) continue;
+      rec(pinScope, lid);
+      deleteSetting(database, pinScope, lid);
+      marksWritten++;
+    }
     // ── 取り消しの控えを仕上げる(🔴 本文は持たず、履歴の版の id を引く。取り込み後の指紋もここで測る)
     const undoEntries: SyncUndoToken['entries'] = [];
     for (const cap of captured.values()) {
@@ -4195,8 +4246,9 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
     putSetting(database, syncScope(cid), SYNC_KEY_PAIR_PREFIX + input.peer, input.peerCid);
     writeBase(database, cid, input.peer, input.baseline, input.nowIso, rec);
     writeSeq(database, advanceSeq(readSeq(database), input.peerSeq), rec);
+    writePeerSeq(database, cid, input.peer, input.peerSeq, rec);
     database.exec('COMMIT');
-    return { ...result, raced, undo: { entries: undoEntries, relationsAdded: relAdded, relationsRemoved: relRemoved, rows: [...prevRows.values()] } };
+    return { ...result, marksWritten, marksSkipped, raced, undo: { entries: undoEntries, relationsAdded: relAdded, relationsRemoved: relRemoved, rows: [...prevRows.values()] } };
   } catch (err) {
     try {
       database.exec('ROLLBACK');
@@ -6207,6 +6259,9 @@ const handlers: Handlers = {
       pairs: readPairs(database, req.cid),
       bases: readBases(database, req.cid),
       outs: readOuts(database, req.cid),
+      labels: snap.labels,
+      pins: snap.pins,
+      peerSeqs: readPeerSeqs(database, req.cid),
     };
   },
   syncCommitExport: (req) => {

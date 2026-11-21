@@ -59,6 +59,8 @@ async function forge(o: { notes?: DiffNote[]; relations?: DiffRelation[]; tombst
     tombstones: o.tombstones ?? [],
     fingerprints,
     peerBase: [],
+    labels: [],
+    pins: [],
     assets: () => [],
     getAssetBlob: async () => null,
   });

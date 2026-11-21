@@ -27,13 +27,27 @@ import {
 } from '@features/sync/sync-state';
 import { relationKey, type Baseline, type KeyedState, type Tombstone } from '@features/sync/change-set';
 import { entryFp, relationFp } from '@features/sync/sync-fp';
+import { labelFp, labelKey, pinFp, pinKey } from '@features/sync/sync-marks';
+import { isNoteLabelColor } from '@features/note-label';
 import type { DiffRelation } from '@features/sync/diff-file';
 import { USER_REALM_SQL } from './schema';
+
+/** ノートのピン留めを持つ `settings` の scope(器ごと。#1377)。1 ノート 1 行(`k` = lid、`v` = 留めた順の通し番号)。 */
+export function notePinScope(cid: string): string {
+  return `note-pin:${cid}`;
+}
+
+/** ノートの色ラベルを持つ `settings` の scope(器ごと。#1982 段 4)。1 ノート 1 行(`k` = lid、`v` = 色の番号)。 */
+export function noteLabelScope(cid: string): string {
+  return `note-label:${cid}`;
+}
 
 /** 書き出した差分の控え(`out:<連番>` = 指紋の一覧の要約)。自分の履歴の突き合わせ(端末 id の重複の見分け)に使う。 */
 export const SYNC_KEY_OUT_PREFIX = 'out:';
 /** 相手ごとの前回の合意を書いた時刻(`baseat:<相手の端末 id>`)。古さの判定にだけ使う。 */
 export const SYNC_KEY_BASEAT_PREFIX = 'baseat:';
+/** 相手ごとに、取り込んだ最新の連番(`last:<相手の端末 id>`)。フォルダ同期が「同じファイルをもう一度取り込まない」ために使う(段 3)。 */
+export const SYNC_KEY_LAST_PREFIX = 'last:';
 const OUT_KEEP = 8;
 
 export function getSetting(db: Database, scope: string, k: string): string | null {
@@ -138,6 +152,21 @@ export function writeBase(db: Database, cid: string, peer: string, base: Baselin
   putSetting(db, scope, SYNC_KEY_BASEAT_PREFIX + peer, nowIso);
 }
 
+/** 相手の端末 id → 取り込んだ最新の連番。 */
+export function readPeerSeqs(db: Database, cid: string): Record<string, number> {
+  const out = Object.create(null) as Record<string, number>;
+  for (const r of rowsOf(db, syncScope(cid), SYNC_KEY_LAST_PREFIX)) if (r.v) out[r.k.slice(SYNC_KEY_LAST_PREFIX.length)] = parseSeq(r.v);
+  return out;
+}
+
+/** 相手から取り込んだ連番を控える(戻さない = 大きい方)。 */
+export function writePeerSeq(db: Database, cid: string, peer: string, seq: number, rec?: RowRecorder): void {
+  const scope = syncScope(cid);
+  const prev = parseSeq(getSetting(db, scope, SYNC_KEY_LAST_PREFIX + peer));
+  rec?.(scope, SYNC_KEY_LAST_PREFIX + peer);
+  putSetting(db, scope, SYNC_KEY_LAST_PREFIX + peer, String(Math.max(prev, seq)));
+}
+
 export function readOuts(db: Database, cid: string): Record<number, string> {
   const out: Record<number, string> = {};
   for (const r of rowsOf(db, syncScope(cid), SYNC_KEY_OUT_PREFIX)) if (r.v) out[parseSeq(r.k.slice(SYNC_KEY_OUT_PREFIX.length))] = r.v;
@@ -156,7 +185,7 @@ export function writeOut(db: Database, cid: string, seq: number, digest: string)
 /** 端末 id の作り直し: この端末の同期の記録(ワークスペースごとの相手・合意・控え)を全ワークスペースぶん捨てる。削除の記録は残す。 */
 export function discardPeerRecords(db: Database, rec?: RowRecorder): void {
   const rows = db.selectObjects(
-    "SELECT scope, k FROM settings WHERE substr(scope, 1, ?) = ? AND (substr(k, 1, 5) = 'base:' OR substr(k, 1, 5) = 'pair:' OR substr(k, 1, 4) = 'out:' OR substr(k, 1, 7) = 'baseat:')",
+    "SELECT scope, k FROM settings WHERE substr(scope, 1, ?) = ? AND (substr(k, 1, 5) = 'base:' OR substr(k, 1, 5) = 'pair:' OR substr(k, 1, 4) = 'out:' OR substr(k, 1, 7) = 'baseat:' OR substr(k, 1, 5) = 'last:')",
     [SYNC_SCOPE.length + 1, `${SYNC_SCOPE}:`],
   ) as Array<{ scope: string; k: string }>;
   for (const r of rows) {
@@ -184,6 +213,9 @@ export interface SyncSnapshot {
   states: KeyedState[];
   notes: LiveNote[];
   relations: DiffRelation[];
+  /** 生きているノートの色ラベル・ピン留め(段 3。ピン留めは留めた順)。指紋(`lbl:` / `pin:`)は `states` にも入る。 */
+  labels: Array<{ lid: string; color: number }>;
+  pins: string[];
 }
 
 /** 現在の指紋(ノート + 非 structural のつながり)。⚠ 本文は 1 行ずつ読んで捨てる(全件を同時に持たない)。 */
@@ -217,7 +249,23 @@ export function measureStates(db: Database, cid: string): SyncSnapshot {
     relations.push({ from: r.from_lid, to: r.to_lid, kind: r.kind });
     states.push({ key, ...relationFp() });
   }
-  return { states, notes, relations };
+  // ── 段 3: 色ラベル・ピン留め(生きているノートの分だけ。ゴミ箱のノートの印は残すだけで運ばない)
+  const labels: Array<{ lid: string; color: number }> = [];
+  for (const r of db.selectObjects('SELECT k, v FROM settings WHERE scope = ? ORDER BY k', [noteLabelScope(cid)]) as Array<{ k: string; v: string | null }>) {
+    const color = Number(r.v);
+    if (!live.has(r.k) || !isNoteLabelColor(color)) continue;
+    labels.push({ lid: r.k, color });
+    states.push({ key: labelKey(r.k), ...labelFp(color) });
+  }
+  const pins: string[] = [];
+  const prows = db.selectObjects('SELECT k, v FROM settings WHERE scope = ?', [notePinScope(cid)]) as Array<{ k: string; v: string | null }>;
+  prows.sort((a, b) => (Number(a.v) || 0) - (Number(b.v) || 0) || (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
+  for (const r of prows) {
+    if (!live.has(r.k)) continue;
+    pins.push(r.k);
+    states.push({ key: pinKey(r.k), ...pinFp() });
+  }
+  return { states, notes, relations, labels, pins };
 }
 
 /**

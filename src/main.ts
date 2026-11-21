@@ -238,6 +238,9 @@ import { appSyncEnabled } from '@adapter/ui/render/sync-enabled';
 import { SYNC_FORGET_CONFIRM, SYNC_FORGET_CONFIRM_ON_OFF, SYNC_FORGET_LABEL, SYNC_OFF_CONFIRM } from '@features/sync/sync-setting';
 import { SHOW_SYNC_CONFLICTS_ACTION } from '@adapter/ui/actions/sync-diff';
 import { backupSyncSeed, exportSyncDiff, importSyncDiff, seedSyncFromBackup, type SyncDeps } from '@adapter/ui/actions/sync-diff';
+import { SyncFolder } from '@adapter/ui/actions/sync-folder';
+import { createSyncFolderStore } from '@adapter/platform/sync-folder-store';
+import { appSyncFolderView } from '@adapter/ui/render/sync-folder-view';
 import { connectMessageSync, MESSAGES_CHANNEL } from '@adapter/platform/message-sync';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
 import { appWorkspaces } from '@adapter/platform/storage/workspace-run';
@@ -3803,6 +3806,36 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     };
   };
 
+  /**
+   * 🔴 **フォルダで同期する(全データ。#2000 段 3)**。判断は `features/sync/sync-folder.ts`、動かし方は `actions/sync-folder.ts`。
+   * ⚠ handle は IndexedDB に保存し、次の起動で許可を確かめて再開する(「パソコンのフォルダ」の同期とは別の物。そちらはそのまま)。
+   * 設定「端末間の同期」が切のときは何もしない。結果・失敗は**メッセージ**へ(ステータスバーには状態だけ)。
+   */
+  const syncFolder = new SyncFolder({
+    picker: windowSyncPicker(),
+    store: createSyncFolderStore(),
+    cid,
+    enabled: () => appSyncEnabled.enabled(),
+    syncDeps,
+    ready: () => {
+      const s = dispatcher.getState();
+      return s.phase === 'ready' && s.sectionDraft === null && unsavedTypingLidOf(s) === null;
+    },
+    lock: windowSyncLock(),
+    say: (text) => appMessagePost.post({ kind: 'result', source: 'sync', text }),
+    fail: (text) => appMessagePost.post({ kind: 'problem', source: 'sync', text }),
+    onChange: () => {
+      repaintPanes();
+      paint();
+    },
+  });
+  appSyncFolderView.attach(() => syncFolder.view());
+  if (appSyncEnabled.enabled()) void syncFolder.init().catch(() => undefined);
+  // 見えるようになったら 1 回同期する(別の端末の変更を、開いた時点で拾う)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && appSyncEnabled.enabled()) void syncFolder.syncNow(false);
+  });
+
   const importDeps: ImportDeps = {
       // 🔴 取り込みの最中にタブを閉じる・読み直すときに「離れますか」を出す(書込は保存の効果層を通らない)
       onWriting: (writing) => unloadGuard.setWriting(writing, 'import'),
@@ -4758,6 +4791,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     localFolder,
     // 🔴 フォルダとの同期(#1455 の後半)── 同じく描画に渡したものと**同じ 1 つ**
     folderSync,
+    // 🔴 フォルダで同期する(全データ。#2000 段 3)
+    syncFolder,
     /** 🔴 章を読むだけの別のウィンドウで(#1044 段4)── 窓は**同期で**掴む。 */
     openChapterWindow: (lid, line) => void chapterWindows.open(lid, line),
     // 🔴 添付のファイルの差し替え(#1163 依頼 212)。確かめ(依頼 211・293)も、書く道も Office の保存と同じ
@@ -4865,7 +4900,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         if (!ok) return true;
       }
       appSyncEnabled.setEnabled(on);
-      void configureSync().catch(() => undefined);
+      void configureSync()
+        .then(() => syncFolder.onSettingChanged())
+        .catch(() => undefined);
       showStatus(on ? '端末間の同期をオンにしました。コレクションの「書き出す ▾」に「差分を書き出す」が出ます' : '端末間の同期をオフにしました');
       if (!on) {
         // 🔴 切にするときに、同期の記録も消せる(残すと、次にオンにしたときに古い記録で判定される)

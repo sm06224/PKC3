@@ -880,6 +880,14 @@ export interface SyncApplyInput {
     fallback?: { lid: string; title: string };
   }>;
   trash: string[];
+  /**
+   * 色ラベル・ピン留め(段 3)。宛先のノートが生きているときだけ書く(無ければ数えて飛ばす)。ピン留めは末尾へ足す(順番は端末ごと)。
+   * 触る前の行は取り消しの控え(`undo.rows`)に残る。
+   */
+  labelSets?: Array<{ lid: string; color: number }>;
+  labelClears?: string[];
+  pinAdds?: string[];
+  pinRemoves?: string[];
   /** ゴミ箱へ移す物の計画時の指紋。違えば移さない(こちらの編集を消さない)。 */
   trashExpect?: Record<string, { content: string; place?: string }>;
   relationAdds: Array<{ from: string; to: string; kind: string }>;
@@ -896,6 +904,9 @@ export interface SyncApplyResult {
   relationsRemoved: number;
   /** 親フォルダが張れず(輪になる・宛先が無い)ルートへ置いた数。 */
   placedAtRoot: number;
+  /** 色ラベル・ピン留めを書いた数 / 上限・宛先なしで書けなかった数(段 3)。 */
+  marksWritten?: number;
+  marksSkipped?: number;
   /** 計画を立ててから反映するまでの間に、こちらで編集されていた物(書かずに残した)。コピーを足した物は `copyLid` がある。 */
   raced: Array<{ lid: string; title: string; copyLid?: string; copyTitle?: string; trash?: boolean }>;
   undo: SyncUndoToken;
@@ -946,6 +957,11 @@ export interface SyncSnapshotResult {
   bases: Record<string, { baseline: Record<string, { content: string; place?: string }>; at: string | null }>;
   /** 連番 → 書き出した指紋の要約。 */
   outs: Record<number, string>;
+  /** 生きているノートの色ラベル・ピン留め(段 3。ピン留めは留めた順)。指紋は `states` にも入っている。 */
+  labels: Array<{ lid: string; color: number }>;
+  pins: string[];
+  /** 相手の端末 id → 取り込んだ最新の連番(フォルダ同期が同じファイルを取り込み直さないため。段 3)。 */
+  peerSeqs: Record<string, number>;
 }
 
 /** assets 表は meta のみ(bytes は AssetBlobStore ── §4.2)。hash は遅延計算可。 */

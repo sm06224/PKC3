@@ -11,7 +11,7 @@
  */
 import { errorText } from '@features/error-text';
 import { readDiffZip, writeDiffZip, DIFF_SUFFIX, type DiffAssetMeta, type DiffFile, type DiffNote } from '@features/sync/diff-file';
-import { fingerprintDigest, planExport } from '@features/sync/sync-export';
+import { fingerprintDigest, fingerprintsOf, planExport } from '@features/sync/sync-export';
 import { planSyncImport, type SyncPlan } from '@features/sync/sync-plan';
 import { deviceIdFromBytes, isSameDevice } from '@features/sync/sync-state';
 import { sha256Hex as blobSha256Hex } from '@adapter/platform/storage/asset-key';
@@ -101,16 +101,23 @@ export async function seedSyncFromBackup(deps: Pick<SyncDeps, 'cid' | 'enabled' 
   await deps.request({ op: 'syncSeed', cid: deps.cid, peer: seed.device, baseline, nowIso: (deps.now?.() ?? new Date()).toISOString() });
 }
 
-/** 差分の書き出し。 */
-export async function exportSyncDiff(deps: SyncDeps, opts: { all?: boolean } = {}): Promise<void> {
-  const fail = (m: string): void => {
-    deps.notify?.(''); // 進行中の字を残さない(失敗の回に「書き出しています…」が居座らない)
-    if (deps.reportProblem) deps.reportProblem(m);
-    else deps.notify?.(m);
-  };
-  if (!deps.enabled()) return fail(SYNC_OFF_REFUSAL);
-  try {
-    deps.notify?.('差分を書き出しています…');
+export interface BuiltDiff {
+  blob: Blob;
+  counts: { notes: number; relations: number; deletions: number; assets: number; total: number };
+  missingAssets: string[];
+  complete: boolean;
+  /** 運ぶ添付の目録(`inlineAssets: false` のとき、実体は呼び手が別に置く)。 */
+  carried: DiffAssetMeta[];
+  device: string;
+  seq: number;
+}
+
+/**
+ * 差分ファイルの本体を作る(連番を進め、書き出した指紋の要約を控える)。⚠ 設定が入のときだけ呼ぶ(`exportSyncDiff` と、フォルダ同期が共有する 1 本)。
+ * `inlineAssets: false` = 添付の目録だけ入れ、実体は zip に積まない(フォルダ同期の `assets/`)。
+ */
+export async function buildSyncDiff(deps: SyncDeps, opts: { all?: boolean; inlineAssets?: boolean; peerBases?: boolean } = {}): Promise<BuiltDiff> {
+  {
     await deps.ensureConfigured?.();
     await deps.settle();
     const snap = await deps.request({ op: 'syncSnapshot', cid: deps.cid, ensureDevice: true });
@@ -157,9 +164,32 @@ export async function exportSyncDiff(deps: SyncDeps, opts: { all?: boolean } = {
       tombstones: plan.tombstones,
       fingerprints: plan.fingerprints,
       peerBase: plan.peerBase,
+      labels: snap.labels,
+      pins: snap.pins,
       assets: () => [...carried.values()],
       getAssetBlob: (k) => deps.getAssetBlob(k),
+      ...(opts.inlineAssets === false ? { inlineAssets: false } : {}),
+      ...(opts.peerBases === true
+        ? { peerBases: Object.fromEntries(Object.entries(snap.bases).map(([dev, b]) => [dev, fingerprintsOf(Object.entries(b.baseline).map(([key, fp]) => ({ key, ...fp })))])) }
+        : {}),
     });
+    return { blob: out.blob, counts: out.counts, missingAssets: out.missingAssets, complete: plan.complete, carried: [...carried.values()], device: committed.device, seq: committed.seq };
+  }
+}
+
+/** 差分の書き出し。 */
+export async function exportSyncDiff(deps: SyncDeps, opts: { all?: boolean } = {}): Promise<void> {
+  const fail = (m: string): void => {
+    deps.notify?.(''); // 進行中の字を残さない(失敗の回に「書き出しています…」が居座らない)
+    if (deps.reportProblem) deps.reportProblem(m);
+    else deps.notify?.(m);
+  };
+  if (!deps.enabled()) return fail(SYNC_OFF_REFUSAL);
+  try {
+    deps.notify?.('差分を書き出しています…');
+    const built = await buildSyncDiff(deps, opts);
+    const out = { blob: built.blob, counts: built.counts, missingAssets: built.missingAssets };
+    const plan = { complete: built.complete };
     deps.download(`${safeName(deps.title() || 'pkc3')}-${dayStamp(deps.now?.() ?? new Date(), '')}${DIFF_SUFFIX}`, out.blob);
     const lines = [
       `差分ファイルを書き出しました(${plan.complete ? '全件' : '前回の同期から変わった分'}: ノート ${out.counts.notes} 件 / 削除の記録 ${out.counts.deletions} 件 / 添付 ${out.counts.assets} 件)`,
@@ -209,6 +239,7 @@ export function summaryLines(
   extra: {
     missingAssets: string[];
     placedAtRoot: number;
+    marksSkipped: number;
     regenerated: boolean;
     /** 内容が添付の一覧の hash と合わず、取り込まなかった添付。 */
     badAssets: string[];
@@ -237,6 +268,12 @@ export function summaryLines(
   add(extra.raced.filter((x) => x.copyLid === undefined).length, '取り込む直前にこちらで編集されたため、反映しなかったノート: {n} 件(こちらの版を残しています)');
   add(s.relationsAdded, '足したつながり: {n} 本');
   add(s.relationsRemoved, '外したつながり: {n} 本');
+  add(s.labelsSet, '色ラベルを付けた(変えた)ノート: {n} 件');
+  add(s.labelsCleared, '色ラベルを外したノート: {n} 件(相手で外されたため)');
+  add(s.pinsAdded, 'ピン留めしたノート: {n} 件');
+  add(s.pinsRemoved, 'ピン留めを外したノート: {n} 件(相手で外されたため)');
+  add(s.labelConflicts, '色ラベルが両方で違う色だったノート: {n} 件(どちらの端末でも同じになるよう、色の番号が大きい方にしました)');
+  add(extra.marksSkipped, '宛先が無い・上限に達したため付けなかった色ラベル・ピン留め: {n} 件');
   add(extra.placedAtRoot + s.orphans, '入れるフォルダが無く、いちばん上へ置いたノート: {n} 件');
   add(s.danglingRelations, 'つなぐ先のノートが無く、足さなかったつながり: {n} 本');
   for (const c of plan.conflicts) {
@@ -284,20 +321,46 @@ async function measureRemoteNotes(deps: SyncDeps, notes: readonly DiffNote[]): P
   return out;
 }
 
-/** 差分の取り込み。⚠ 呼ぶのは `import-pkc2.ts`(manifest.format が `pkc3-diff` のとき)。 */
-export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: string): Promise<{ ok: boolean; count: number }> {
-  const fail = (m: string): { ok: false; count: 0 } => {
+/** 差分の取り込みの付け足し(フォルダ同期が使う。省略 = 差分ファイルを 1 つ選んだときの動き)。 */
+export interface ImportSyncOpts {
+  /** 読み終えた差分(渡せば zip を読み直さない)。 */
+  diff?: DiffFile;
+  /** `true` = 反映した物が無いとき、結果の面・知らせを出さない(定期の同期が毎回画面を叩かない)。 */
+  quiet?: boolean;
+  /** `false` = 確認が要るとき(初めての相手・端末 id の重複)は聞かずに止め、`pending` で返す(定期の同期は勝手にダイアログを出さない)。 */
+  interactive?: boolean;
+  /** 添付の実体が zip に無いとき、ここから引く(フォルダ同期の `assets/<key>`)。無ければ `null`。 */
+  assetReader?: (key: string) => Promise<Blob | null>;
+}
+
+export interface ImportSyncResult {
+  ok: boolean;
+  count: number;
+  /** 確認が要って止まった(`interactive: false` のとき)。 */
+  pending?: 'pair' | 'duplicate';
+  /** 実体が見つからなかった添付の目録(フォルダ同期が、あとで引き直す)。 */
+  missingAssets?: DiffAssetMeta[];
+}
+
+/** 差分の取り込み。⚠ 呼ぶのは `import-pkc2.ts`(manifest.format が `pkc3-diff` のとき)と、フォルダ同期。 */
+export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: string, opts: ImportSyncOpts = {}): Promise<ImportSyncResult> {
+  const interactive = opts.interactive !== false;
+  const fail = (m: string): ImportSyncResult => {
     deps.notify?.(''); // 進行中の字を残さない
     (deps.reportProblem ?? deps.notify)?.(m);
     return { ok: false, count: 0 };
   };
   if (!deps.enabled()) return fail(SYNC_OFF_REFUSAL);
   let diff: DiffFile;
-  try {
-    deps.notify?.('取り込み中…(差分ファイルを読んでいます)');
-    diff = await readDiffZip(file);
-  } catch (e) {
-    return fail(`「${name}」: ${errorText(e)}`);
+  if (opts.diff !== undefined) {
+    diff = opts.diff;
+  } else {
+    try {
+      deps.notify?.('取り込み中…(差分ファイルを読んでいます)');
+      diff = await readDiffZip(file);
+    } catch (e) {
+      return fail(`「${name}」: ${errorText(e)}`);
+    }
   }
   let committed = false;
   try {
@@ -322,6 +385,7 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
         deps.notify?.('この端末が書き出した差分ファイルです。取り込む物はありません');
         return { ok: true, count: 0 };
       }
+      if (!interactive) return { ok: true, count: 0, pending: 'duplicate' };
       // 🔴 自分の記録に無い(古い・端末のデータの複製)── 端末 ID の作り直しは同期の記録を全部消すので、専用の確認を取る
       const ok = await deps.confirmAction(
         'この差分ファイルは、この端末が書き出した物に見えますが、この端末の記録にはありません(記録が古くなったか、端末のデータを複製した可能性があります)。' +
@@ -343,6 +407,7 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
           `対応づけを最初からにするには、設定の「${SYNC_SETTING_LABEL}」の「${SYNC_FORGET_LABEL}」を押してください(ノートは消えません)`,
       );
     }
+    if (knownPeerCid === undefined && !interactive) return { ok: true, count: 0, pending: 'pair' };
     if (knownPeerCid === undefined) {
       const same = diff.manifest.title === deps.title();
       const msg =
@@ -359,11 +424,14 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
     const now = deps.now?.() ?? new Date();
     // 🔴 本文の指紋は worker で測る(主スレッドで SHA-256 しない)
     const remoteNoteFps = await measureRemoteNotes(deps, diff.container.notes);
+    // フォルダ同期のファイルは、相手ごとの記録を持つ。こちらの端末 id の分があればそれを「相手がこちらの版をどう見ていたか」に使う
+    const ownPeerBase = regenerate === undefined ? diff.container.peerBases?.[snap.device] : undefined;
     const plan = planSyncImport({
-      remote: diff,
+      remote: ownPeerBase === undefined ? diff : { ...diff, container: { ...diff.container, peerBase: ownPeerBase } },
       remoteNoteFps,
       localStates,
       localRelations: snap.relations,
+      localLabelColors: new Map(snap.labels.map((l) => [l.lid, l.color] as const)),
       localTitles: new Map(snap.notes.map((n) => [n.lid, n.title] as const)),
       localTombstones: snap.tombstones,
       baseline,
@@ -388,6 +456,10 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
           ...(u.fallback === undefined ? {} : { fallback: u.fallback }),
         })),
         trash: plan.trash,
+        labelSets: plan.labelSets,
+        labelClears: plan.labelClears,
+        pinAdds: plan.pinAdds,
+        pinRemoves: plan.pinRemoves,
         trashExpect: plan.trashExpect,
         relationAdds: plan.relationAdds,
         relationRemoves: plan.relationRemoves,
@@ -402,6 +474,7 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
     const available = new Map<string, ReadableAssetSource>(diff.assetSources);
     const metaByKey = new Map<string, DiffAssetMeta>(diff.container.assets.map((a) => [a.key, a] as const));
     const missing: string[] = [];
+    const missingMetas: DiffAssetMeta[] = [];
     const bad: string[] = [];
     const done = new Set<string>();
     for (const u of plan.upserts) {
@@ -410,21 +483,23 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
         if (stored.has(key) || done.has(key)) continue;
         const label = `「${u.content.title || '(無題)'}」の添付`;
         const src = available.get(key);
-        if (src === undefined) {
+        const meta = metaByKey.get(key);
+        const outside = src === undefined && opts.assetReader !== undefined ? await opts.assetReader(key).catch(() => null) : null;
+        if (src === undefined && outside === null) {
           missing.push(label);
+          if (meta !== undefined) missingMetas.push(meta);
           continue;
         }
         done.add(key);
         try {
-          const blob = await readAssetSource(src);
-          const meta = metaByKey.get(key);
+          const blob = outside ?? (await readAssetSource(src as ReadableAssetSource));
           // 🔴 添付の一覧の hash と内容が合うか(合わなければ置かない。内容が違う添付を、正しい key の下へ入れない)
           if (meta?.hash != null && (await blobSha256Hex(blob)) !== meta.hash) {
             bad.push(label);
             continue;
           }
           await deps.putBlob(key, blob);
-          await deps.putAssetMeta({ key, mime: meta?.mime ?? 'application/octet-stream', size: meta?.size ?? assetSourceSize(src), hash: meta?.hash ?? null });
+          await deps.putAssetMeta({ key, mime: meta?.mime ?? 'application/octet-stream', size: meta?.size ?? (src === undefined ? blob.size : assetSourceSize(src)), hash: meta?.hash ?? null });
         } catch {
           missing.push(`${label}(読み込めませんでした)`);
         }
@@ -432,9 +507,11 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
       }
     }
 
-    await deps.reload();
+    const touched = applied.written + applied.trashed + applied.relationsAdded + applied.relationsRemoved + (applied.marksWritten ?? 0) > 0;
+    // 定期の同期で何も変わらなかった回は、画面を読み直さない(毎回の再描画を避ける)
+    if (touched || opts.quiet !== true) await deps.reload();
     const token: SyncUndoToken = applied.undo;
-    const undoable = token.entries.length > 0 || token.relationsAdded.length > 0 || token.relationsRemoved.length > 0;
+    const undoable = token.entries.length > 0 || token.relationsAdded.length > 0 || token.relationsRemoved.length > 0 || (applied.marksWritten ?? 0) > 0;
     if (undoable) {
       deps.rememberUndo?.({
         count: token.entries.length,
@@ -449,6 +526,7 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
     const lines = summaryLines(plan, diff, {
       missingAssets: missing,
       placedAtRoot: applied.placedAtRoot,
+      marksSkipped: applied.marksSkipped ?? 0,
       regenerated: regenerate !== undefined,
       badAssets: bad,
       raced: applied.raced,
@@ -456,13 +534,16 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
       undoable,
     });
     const conflictCount = plan.conflicts.length + applied.raced.filter((x) => x.copyLid !== undefined).length;
+    const result: ImportSyncResult = { ok: true, count: applied.written + applied.trashed, ...(missingMetas.length > 0 ? { missingAssets: missingMetas } : {}) };
+    const quietNoop = opts.quiet === true && !touched && conflictCount === 0 && plan.needFull.length === 0 && missing.length === 0 && bad.length === 0 && applied.raced.length === 0;
+    if (quietNoop) return result;
     deps.report(lines, { conflicts: conflictCount > 0 });
     if (conflictCount > 0) {
       const text = `端末間の同期で競合したノートが ${conflictCount} 件あります。${CONFLICT_HOWTO}。一覧は、ノートの検索で「同期の競合」を探すと出せます(取り込み結果の「競合のノートを一覧する」ボタンでも探せます)`;
       deps.postMessage?.({ kind: 'caution', source: 'sync', text, fixedHead: text });
     }
     deps.notify?.(`差分を取り込みました(${plan.summary.created + plan.summary.updated + plan.summary.merged + plan.summary.restored + plan.summary.trashed} 件を反映、競合 ${conflictCount} 件)`);
-    return { ok: true, count: applied.written + applied.trashed };
+    return result;
   } catch (e) {
     return fail(
       committed

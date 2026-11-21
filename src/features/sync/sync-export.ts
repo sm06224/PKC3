@@ -11,8 +11,8 @@ import { extractChanges, type Baseline, type KeyedState, type Tombstone } from '
 import { sha256Hex } from './sha256';
 import { TOMBSTONE_KEEP_DAYS, TOMBSTONE_MAX } from './sync-state';
 import type { DiffFingerprint } from './diff-file';
+import { isNoteKey } from './sync-marks';
 
-const REL_PREFIX = 'rel:';
 const DAY_MS = 86_400_000;
 
 export interface ExportInput {
@@ -49,18 +49,18 @@ export function isStaleBase(at: string | null, nowMs: number): boolean {
 
 export function planExport(input: ExportInput): ExportPlan {
   const complete = input.all || input.peer === null || isStaleBase(input.peer.at, input.nowMs) || input.tombstones.length >= TOMBSTONE_MAX;
-  const noteStates = input.states.filter((s) => !s.key.startsWith(REL_PREFIX));
+  const noteStates = input.states.filter((s) => isNoteKey(s.key));
   let noteLids: string[];
   const tombstones = [...input.tombstones];
   if (complete || input.peer === null) {
     noteLids = noteStates.map((s) => s.key).sort();
   } else {
     const ch = extractChanges(input.states, input.peer.baseline, input.tombstones);
-    noteLids = [...ch.added, ...ch.changed].filter((s) => !s.key.startsWith(REL_PREFIX)).map((s) => s.key);
+    noteLids = [...ch.added, ...ch.changed].filter((s) => isNoteKey(s.key)).map((s) => s.key);
     // 記録に在って今は無い物(墓標が残っていなくても分かる削除)も、削除の記録として運ぶ
     const have = new Set(tombstones.map((t) => t.key));
     for (const d of ch.deleted) {
-      if (d.key.startsWith(REL_PREFIX) || have.has(d.key)) continue;
+      if (!isNoteKey(d.key) || have.has(d.key)) continue;
       tombstones.push({ key: d.key, lastFp: d.lastFp, device: input.device, seq: input.seq });
     }
   }
