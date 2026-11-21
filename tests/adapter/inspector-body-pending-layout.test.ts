@@ -129,6 +129,52 @@ describe('本文を待つ間の右の列の並び', () => {
   });
 });
 
+describe('待ちの印を付ける物・付けない物(着地前レビューの変異)', () => {
+  const statsDd = (): HTMLElement =>
+    document.querySelector<HTMLElement>('[data-pkc-region="inspector"] [data-pkc-field="inspector-stats"]')!;
+
+  it('字数の行も、待っている間は見せず押させない(場所だけ取る)。届いたら外す', () => {
+    const { inspector } = setup();
+    inspector.render(stateOf('b', false));
+    expect(statsDd().hidden).toBe(false);
+    expect(statsDd().hasAttribute('data-pkc-pending')).toBe(true);
+    expect(statsDd().hasAttribute('inert')).toBe(true);
+    inspector.render(stateOf('b', true));
+    expect(statsDd().hasAttribute('data-pkc-pending')).toBe(false);
+    expect(statsDd().hasAttribute('inert')).toBe(false);
+  });
+
+  it('編集中で本文がまだ無いときのタグ欄は、待ちの印を付けずに畳む(phase の条件の片側)', () => {
+    const { inspector, tagForm } = setup();
+    inspector.render(stateOf('b', false, { phase: 'editing' }));
+    expect(tagForm().hidden).toBe(true);
+    expect(tagForm().hasAttribute('data-pkc-pending')).toBe(false);
+  });
+
+  /**
+   * 🔴 **本文の読み込みに失敗したら待たない**(`BODY_LOAD_FAILED` は `openBody` を null のまま `error` だけ立てる)。
+   * ⚠ 待ち続けると、次に選び直すまで見えない空き地(担当・タグ欄・字数で約 100px)が残る。
+   */
+  it('本文の読み込みに失敗したら、待ちの印を外して従来どおり畳む', () => {
+    const { inspector, ownerDd, tagForm, laidOut } = setup();
+    inspector.render(stateOf('b', false, { error: '本文を読み込めませんでした: boom' }));
+    for (const el of [ownerDd(), tagForm(), statsDd()]) {
+      expect(el.hasAttribute('data-pkc-pending'), el.getAttribute('data-pkc-field') ?? '').toBe(false);
+      expect(el.hasAttribute('inert')).toBe(false);
+    }
+    const shown = laidOut();
+    expect(shown).not.toContain('inspector-owner');
+    expect(shown).not.toContain('tag-add');
+    expect(shown).not.toContain('inspector-stats');
+  });
+
+  it('⚠ 対照群 ── 関係の無い知らせ(error)が出ているだけなら、待ちの印は付く', () => {
+    const { inspector, ownerDd } = setup();
+    inspector.render(stateOf('b', false, { error: '保存できませんでした' }));
+    expect(ownerDd().hasAttribute('data-pkc-pending')).toBe(true);
+  });
+});
+
 describe('待ちの印の CSS', () => {
   it('待ちの印は場所を取ったまま見えなくする(visibility: hidden)', async () => {
     const { readFileSync } = await import('node:fs');
