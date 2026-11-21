@@ -366,16 +366,16 @@ export function convertTemplate(src: TemplateSource, opts: TemplateOptions): Tem
     if (str(e.title) === '') ignored.push(`template.yaml の entries[${String(i)}](title が無いため「無題」にしました)`);
     const at = `template.yaml の entries「${title}」`;
     if (type !== 'form' && type !== 'textlog' && type !== 'text') {
-      ignored.push(`${at} の type「${type}」(未対応の種類のためノートは作りません)`);
+      ignored.push(`${at}の type「${type}」(未対応の種類のためノートは作りません)`);
       return;
     }
     const known = type === 'form' ? ['type', 'title', 'folder', 'form'] : type === 'textlog' ? ['type', 'title', 'folder', 'lines'] : ['type', 'title', 'folder', 'body'];
-    for (const k of Object.keys(e)) if (!known.includes(k)) ignored.push(`${at} のキー「${k}」(未知のキー)`);
+    for (const k of Object.keys(e)) if (!known.includes(k)) ignored.push(`${at}のキー「${k}」(未知のキー)`);
     let parent: string | null = null;
     const fid = str(e.folder);
     if (fid !== '') {
       parent = folderLid.get(fid) ?? null;
-      if (parent === null) ignored.push(`${at} の folder「${fid}」(定義に無いフォルダ。いちばん上に置きました)`);
+      if (parent === null) ignored.push(`${at}の folder「${fid}」(定義に無いフォルダ。いちばん上に置きました)`);
     }
     let body: string;
     let archetype: 'text' | 'textlog';
@@ -383,7 +383,7 @@ export function convertTemplate(src: TemplateSource, opts: TemplateOptions): Tem
       const id = str(e.form);
       const hit = formById.get(id);
       if (hit === undefined) {
-        ignored.push(`${at} の form「${id}」(forms/ に定義が無いためノートは作りません)`);
+        ignored.push(`${at}の form「${id}」(forms/ に定義が無いためノートは作りません)`);
         return;
       }
       used.add(id);

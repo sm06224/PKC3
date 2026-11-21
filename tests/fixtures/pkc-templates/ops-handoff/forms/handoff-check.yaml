@@ -1,0 +1,40 @@
+schema_version: 1
+form_id: handoff-check
+title: "引き継ぎチェック"
+sections:
+  - section: "基本"
+    fields:
+      - key: owner
+        label: "担当者"
+        type: text
+        required: true
+      - key: summary
+        label: "概要"
+        type: textarea
+      - key: severity
+        label: "重要度"
+        type: radio
+        required: true
+        options: ["Critical", "High", "Medium", "Low"]
+      - key: has_customer_impact
+        label: "顧客影響あり"
+        type: checkbox
+      - key: affected_components
+        label: "影響コンポーネント"
+        type: checkbox-group
+        options: ["API", "Web", "Batch", "DB"]
+  - section: "SLA"
+    fields:
+      - key: eta_hours
+        label: "復旧見込み(時間)"
+        type: number
+      - key: detected_at
+        label: "検知日時"
+        type: datetime
+      - key: due_date
+        label: "期限日"
+        type: date
+      - key: status
+        label: "状態"
+        type: select
+        options: ["調査中", "対応中", "完了"]

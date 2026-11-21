@@ -1,0 +1,19 @@
+schema_version: 1
+form_id: smoke-check
+title: "Smoke Checklist"
+sections:
+  - section: "起動"
+    fields:
+      - key: build_number
+        label: "Build"
+        type: text
+      - key: test_date
+        label: "実行日"
+        type: date
+      - key: result
+        label: "結果"
+        type: select
+        options: ["Pass", "Fail", "Blocked"]
+      - key: blocker
+        label: "ブロッカー"
+        type: checkbox
