@@ -551,7 +551,11 @@ ${(e as Error).message}`,
       probe.onerror = (): void => res(Number.NaN);
       setTimeout(() => res(Number.NaN), 5000);
     });
-    URL.revokeObjectURL(probe.src);
+    // ⚠ 製品と同じ作法 ── 器から URL を外してから返す(`watchRevokedMedia` が数える)
+    const probeUrl = probe.src;
+    probe.removeAttribute('src');
+    probe.load();
+    URL.revokeObjectURL(probeUrl);
     const ctx = new OfflineAudioContext(1, 48000, 48000);
     const buf = await ctx.decodeAudioData(bytes);
     const ch = buf.getChannelData(0);
@@ -1853,7 +1857,11 @@ async function probeCutFile(cutMedia: Locator) {
       setTimeout(() => res(Number.NaN), 6000);
       probe.currentTime = mid;
     });
-    URL.revokeObjectURL(probe.src);
+    // ⚠ 製品と同じ作法 ── 器から URL を外してから返す(`watchRevokedMedia` が数える)
+    const probeUrl = probe.src;
+    probe.removeAttribute('src');
+    probe.load();
+    URL.revokeObjectURL(probeUrl);
     return { ...meta, decoded, firstFrame, played, advanced, audioBytes, videoBytes, mid, midLanded, size: bytes.byteLength };
   }, cutBytes.toString('base64'));
   // ⚠ 診断の JSON(`said`)に bytes を載せない ── 列挙させない

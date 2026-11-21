@@ -89,7 +89,7 @@ import type { MermaidScope } from './render/mermaid-hydrate';
 import { SqlEmbedHydrator } from './render/sql-embed-hydrate';
 import { BODY_MEDIA_CLASS, BODY_MEDIA_FIELD, assetPreviewKind } from '@features/asset/asset-preview-kind';
 import { replaceOnMediaError } from './render/media-error';
-import { unloadMedia } from './render/media-release';
+import { releaseMediaLend } from './render/media-release';
 
 /** 窓が開けなかったとき(`view-window.ts` と同じ字)。 */
 export const CHAPTER_WINDOW_BLOCKED = 'ブラウザが新しいウィンドウをブロックしたようです';
@@ -579,11 +579,7 @@ export class ChapterWindows {
         if (placed.length === 0) lent.dispose();
         else {
           // ⚠ 器から URL を外してから返す(死んだ blob: を読み直し続けない ── `media-release.ts`)
-          const { url, dispose } = lent;
-          o.disposers.push(() => {
-            for (const el of placed) unloadMedia(el, url);
-            dispose();
-          });
+          o.disposers.push(releaseMediaLend(placed, lent.url, lent.dispose));
         }
       }),
     );

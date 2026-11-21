@@ -253,6 +253,8 @@ describe('その場で聞く ── 借りと返し(#683 段①)', () => {
         },
       };
     };
+    // 🔑 load() まで通したかも見る(src を外すだけでは読み込みは止まらない)
+    const loads = vi.spyOn(HTMLMediaElement.prototype, 'load');
     const p = pane({ captureItems: ITEMS() }, a);
     host = p.host;
     p.paint({ capturePlayingLid: 'a' });
@@ -267,6 +269,32 @@ describe('その場で聞く ── 借りと返し(#683 段①)', () => {
     p.paint();
     p.r.dispose();
     expect(seen, '返す瞬間に器がまだ URL を差している').toEqual(['gone', 'gone']);
+    expect(loads.mock.calls.length, '器から src を外しただけで load() していない').toBeGreaterThanOrEqual(2);
+    loads.mockRestore();
+  });
+
+  it('🔴 組み直しで画面から外れた古い器からも、返す前に URL を外す', async () => {
+    const a = lender();
+    const p = pane({ captureItems: ITEMS() }, a);
+    p.paint({ capturePlayingLid: 'a' });
+    await Promise.resolve();
+    await Promise.resolve();
+    p.paint();
+    const old = p.host.querySelector<HTMLMediaElement>('[data-pkc-field="capture-media"]');
+    expect(old?.getAttribute('src'), '前提: 器が出ていない').toBe('blob:k-1');
+    // 一覧ごと組み直す(集め直しで 1 件増えた)── 古い器は画面から外れ、新しい器が同じ URL を差す
+    p.paint({
+      captureItems: captureItemsFrom([
+        { lid: 'a', title: 'a', body: body('録音-2026-09-09-030102.webm', 'audio/webm') },
+        { lid: 'b', title: 'b', body: body('画面録画-2026-09-09-030102.webm', 'video/webm', 'k-2') },
+        { lid: 'c', title: 'c', body: body('録音-2026-09-10-030102.webm', 'audio/webm', 'k-3') },
+      ]),
+    });
+    expect(p.host.querySelector('[data-pkc-field="capture-media"]')?.getAttribute('src'), '前提: 組み直した器が無い').toBe('blob:k-1');
+    expect(old!.isConnected, '前提: 古い器が組み直しで外れていない').toBe(false);
+    expect(old!.getAttribute('src'), '前提: 外れた古い器が URL を差していない').toBe('blob:k-1');
+    p.r.dispose();
+    expect(old!.getAttribute('src'), '外れた古い器が死んだ URL を差したまま(読み直し続ける)').toBeNull();
   });
 
   /**

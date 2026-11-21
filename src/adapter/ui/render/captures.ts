@@ -90,6 +90,12 @@ export class CapturesRenderer {
   private last = ' ';
   /** いま借りている 1 件。⚠ 借り換え・面を閉じるときに返す。 */
   private playing: Playing | null = null;
+  /**
+   * いま貸りている URL を差した器(組み直しで画面から外れた古い器も含む)。
+   * ⚠ 返すときは**全部**から URL を外す ── 外れた器は `this.host` を探しても見つからないが、
+   *   読み込み中なら死んだ URL を読み直し続ける(`media-release.ts`)。
+   */
+  private playingEls: HTMLMediaElement[] = [];
   /** 組み直す直前に控えた再生位置(`render` が書き、`row` が読む)。 */
   private resume: { url: string; time: number; paused: boolean } | null = null;
   /** ⚠ 借りに行っている最中の lid(同じ行で二重に借りない)。 */
@@ -169,8 +175,11 @@ export class CapturesRenderer {
    */
   private releasePlaying(): void {
     const p = this.playing;
+    const els = this.playingEls;
     this.playing = null;
+    this.playingEls = [];
     if (p === null) return;
+    for (const el of els) unloadMedia(el, p.url);
     unloadMedia(this.host, p.url);
     p.dispose();
   }
@@ -788,6 +797,7 @@ export class CapturesRenderer {
       if (this.playing?.lid === item.lid && this.playing.url !== '') {
         const media = document.createElement(item.kind);
         media.setAttribute('data-pkc-field', 'capture-media');
+        this.playingEls.push(media);
         media.controls = true;
         // 🔑 組み直しなら、控えた位置へ戻し、止めていたなら鳴らさない(初めて開くときは鳴らす)
         const resume = this.resume !== null && this.resume.url === this.playing.url ? this.resume : null;

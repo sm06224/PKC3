@@ -26,3 +26,18 @@ export function unloadMedia(root: Element, url: string | null): void {
     }
   }
 }
+
+/**
+ * 置いた器ぶんの貸出を返す口を作る(器から URL を外してから `dispose`)。
+ * ⚠ 返す口を後で呼ぶ側(章の別ウィンドウの `disposers` など)が、外す手順を書き写さないための 1 本。
+ */
+export function releaseMediaLend(
+  placed: readonly Element[],
+  url: string,
+  dispose: () => void,
+): () => void {
+  return () => {
+    for (const el of placed) unloadMedia(el, url);
+    dispose();
+  };
+}
