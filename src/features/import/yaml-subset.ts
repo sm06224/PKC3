@@ -129,7 +129,7 @@ function refuseSpecial(raw: string, no: number): void {
   if (c === '@' || c === '`') throw new YamlSubsetError(`「${c}」ではじまる値は読めません`, no);
 }
 
-function scalar(raw: string, no: number): YamlValue {
+function scalar(raw: string, no: number, numText: boolean): YamlValue {
   const t = raw.trim();
   if (t === '') return null;
   const q = quoted(t, no);
@@ -138,11 +138,11 @@ function scalar(raw: string, no: number): YamlValue {
   if (t === 'null' || t === '~' || t === 'Null' || t === 'NULL') return null;
   if (t === 'true' || t === 'True' || t === 'TRUE') return true;
   if (t === 'false' || t === 'False' || t === 'FALSE') return false;
-  if (/^[-+]?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/u.test(t)) return Number(t);
+  if (/^[-+]?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/u.test(t)) return numText ? t : Number(t);
   return t;
 }
 
-function flowSeq(raw: string, no: number): YamlValue[] {
+function flowSeq(raw: string, no: number, numText: boolean): YamlValue[] {
   const t = raw.trim();
   if (!t.endsWith(']')) throw new YamlSubsetError('[ ] の並びは 1 行で閉じてください', no);
   const inner = t.slice(1, -1);
@@ -150,7 +150,7 @@ function flowSeq(raw: string, no: number): YamlValue[] {
   let cur = '';
   let quote: string | null = null;
   const push = (): void => {
-    if (cur.trim() !== '') out.push(scalar(cur, no));
+    if (cur.trim() !== '') out.push(scalar(cur, no, numText));
     cur = '';
   };
   for (let i = 0; i < inner.length; i += 1) {
@@ -187,8 +187,17 @@ function colonAt(text: string): number {
   return -1;
 }
 
+export interface YamlSubsetOptions {
+  /**
+   * 数の形の素の字(`1.0` / `1.10` など)を**数にせず、書かれたままの字**で返す。
+   * ⚠ 字として使う読み手(選択肢・題名)で `1.10` → `1.1` と値が変わらないため。引用符つきは元から字。
+   */
+  readonly numbersAsText?: boolean;
+}
+
 /** YAML の部分集合を読む。誤りは {@link YamlSubsetError}(行番号つき)。 */
-export function parseYamlSubset(src: string): YamlValue {
+export function parseYamlSubset(src: string, opts: YamlSubsetOptions = {}): YamlValue {
+  const numText = opts.numbersAsText === true;
   if (src.length > YAML_MAX_BYTES) {
     throw new YamlSubsetError(`大きすぎます(${humanBytes(YAML_MAX_BYTES)} まで)`, 0);
   }
@@ -269,8 +278,8 @@ export function parseYamlSubset(src: string): YamlValue {
   };
 
   const parseValue = (rest: string, no: number): YamlValue => {
-    if (rest.startsWith('[')) return flowSeq(rest, no);
-    return scalar(rest, no);
+    if (rest.startsWith('[')) return flowSeq(rest, no, numText);
+    return scalar(rest, no, numText);
   };
 
   const parseBlock = (indent: number, depth: number): YamlValue => {
@@ -333,7 +342,7 @@ export function parseYamlSubset(src: string): YamlValue {
       if (key === '') throw new YamlSubsetError('キーが空です', ln.no);
       if (key === '<<') throw new YamlSubsetError('合成キー(<<)は読めません', ln.no);
       if (key === '__proto__') throw new YamlSubsetError('このキーは使えません', ln.no);
-      if (key in out) throw new YamlSubsetError(`キー「${key}」が重なっています`, ln.no);
+      if (key in out) throw new YamlSubsetError(`キー「${key.replace(/[\r\n\u2028\u2029]+/gu, ' ')}」が重なっています`, ln.no);
       const rest = ln.text.slice(c + 1).trim();
       pos += 1;
       if (rest === '') {

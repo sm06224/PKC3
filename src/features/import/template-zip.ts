@@ -23,7 +23,7 @@
  */
 import { VAR_NAME_SOURCE } from '../markdown/frontmatter';
 import { parseFormDef } from '../markdown/form-def';
-import { formatHeadingTimestamp } from '../flavor/textlog-flavor';
+import { UNDATED_LOG_HEADING } from '../flavor/textlog-flavor';
 import { parseYamlSubset, YamlSubsetError, type YamlValue } from './yaml-subset';
 
 export class TemplateImportError extends Error {
@@ -90,21 +90,29 @@ export interface TemplateResult {
 export interface TemplateOptions {
   readonly genLid: () => string;
   readonly genRelationId: () => string;
-  readonly now: Date;
 }
 
 type Obj = { [key: string]: YamlValue };
 const isObj = (v: YamlValue | undefined): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 const str = (v: YamlValue | undefined): string => (v === null || v === undefined ? '' : typeof v === 'object' ? '' : String(v));
 
+/**
+ * 🔴 YAML 由来の名前を、結果の文・題名・見出しに入れる前に 1 行へ畳む(改行・制御文字・行区切りを空白に)。
+ * ⚠ 結果の欄は `textContent` で出す(Markdown / HTML として読まない)が、メッセージの保管(Markdown の節)や
+ *   ノートの見出しへ入る字に `\n## ` が混ざって節を割らないよう、入口で 1 行にする。
+ */
+export function oneLine(s: string): string {
+  return s.replace(/[\p{Cc}\u2028\u2029]+/gu, ' ').trim();
+}
+
 const NAME_RE = new RegExp(`^${VAR_NAME_SOURCE}$`, 'u');
 const NAME_CHAR_BAD = /[^\p{L}\p{M}\p{N}_-]/gu;
 
 function readYaml(text: string, where: string): YamlValue {
   try {
-    return parseYamlSubset(text);
+    return parseYamlSubset(text, { numbersAsText: true });
   } catch (e) {
-    if (e instanceof YamlSubsetError) throw new TemplateImportError(`${where} を読めませんでした(${e.message})`);
+    if (e instanceof YamlSubsetError) throw new TemplateImportError(`${where} を読めませんでした(${oneLine(e.message)})`);
     throw e;
   }
 }
@@ -142,12 +150,12 @@ interface ConvertedForm {
 }
 
 function convertForm(file: string, y: YamlValue, ignored: string[], renamed: string[]): ConvertedForm {
-  const where = `forms/${file}`;
+  const where = `forms/${oneLine(file)}`;
   if (!isObj(y)) throw new TemplateImportError(`${where} の形が違います(キーと値の並びではありません)`);
   for (const k of Object.keys(y)) {
-    if (!['schema_version', 'form_id', 'title', 'sections'].includes(k)) ignored.push(`${where} のキー「${k}」(未知のキー)`);
+    if (!['schema_version', 'form_id', 'title', 'sections'].includes(k)) ignored.push(`${where} のキー「${oneLine(k)}」(未知のキー)`);
   }
-  const title = str(y.title) || str(y.form_id) || file.replace(/\.ya?ml$/iu, '');
+  const title = oneLine(str(y.title) || str(y.form_id) || file.replace(/\.ya?ml$/iu, ''));
   const sectionsRaw = y.sections;
   if (!Array.isArray(sectionsRaw)) throw new TemplateImportError(`${where} に sections(項目の区分の並び)がありません`);
   const taken = new Set<string>();
@@ -161,9 +169,9 @@ function convertForm(file: string, y: YamlValue, ignored: string[], renamed: str
       return;
     }
     for (const k of Object.keys(s)) {
-      if (k !== 'section' && k !== 'fields') ignored.push(`${where} の sections[${String(si)}] のキー「${k}」(未知のキー)`);
+      if (k !== 'section' && k !== 'fields') ignored.push(`${where} の sections[${String(si)}] のキー「${oneLine(k)}」(未知のキー)`);
     }
-    const sec = { name: str(s.section), labels: [] as string[] };
+    const sec = { name: oneLine(str(s.section)), labels: [] as string[] };
     sections.push(sec);
     if (!Array.isArray(s.fields)) {
       ignored.push(`${where} の sections[${String(si)}](fields が無い)`);
@@ -177,7 +185,7 @@ function convertForm(file: string, y: YamlValue, ignored: string[], renamed: str
       }
       count += 1;
       if (count > TEMPLATE_MAX_FIELDS) throw new TemplateImportError(`${where} の項目が多すぎます(${String(TEMPLATE_MAX_FIELDS)} 個まで)`);
-      const keyRaw = str(f.key) || str(f.label);
+      const keyRaw = oneLine(str(f.key) || str(f.label));
       if (keyRaw === '') {
         ignored.push(`${at}(key も label も無いため読み飛ばし)`);
         count -= 1;
@@ -185,16 +193,16 @@ function convertForm(file: string, y: YamlValue, ignored: string[], renamed: str
       }
       const name = toName(keyRaw, taken);
       if (name !== keyRaw) renamed.push(`${where}: ${keyRaw} → ${name}`);
-      const label = str(f.label) || keyRaw;
+      const label = oneLine(str(f.label)) || keyRaw;
       for (const k of Object.keys(f)) {
         if (FIELD_KNOWN.has(k)) continue;
         ignored.push(
           CONDITIONAL_KEY.test(k)
-            ? `${at}「${keyRaw}」の「${k}」(条件つきの必須・表示は取り込みません)`
-            : `${at}「${keyRaw}」のキー「${k}」(未知のキー)`,
+            ? `${at}「${keyRaw}」の「${oneLine(k)}」(条件つきの必須・表示は取り込みません)`
+            : `${at}「${keyRaw}」のキー「${oneLine(k)}」(未知のキー)`,
         );
       }
-      const typeRaw = (str(f.type) || 'text').toLowerCase();
+      const typeRaw = oneLine(str(f.type) || 'text').toLowerCase();
       let type = typeRaw === 'radio' ? 'select' : typeRaw;
       let options: string[] = [];
       if (Array.isArray(f.options)) options = f.options.map((o) => str(o)).filter((o) => o !== '');
@@ -251,7 +259,6 @@ function formBody(entryTitle: string, templateName: string, f: ConvertedForm): s
 function textlogBody(
   entryTitle: string,
   linesRaw: YamlValue | undefined,
-  now: Date,
   ignored: string[],
 ): string {
   if (linesRaw === undefined || linesRaw === null) return '';
@@ -259,7 +266,8 @@ function textlogBody(
     ignored.push(`template.yaml の entries「${entryTitle}」の lines(並びではないため取り込みません)`);
     return '';
   }
-  const stamp = formatHeadingTimestamp(now.toISOString());
+  // 🔴 日時を作らない(取り込んだ時刻を入れると、本当の記録の日付に見える)── 日時の無い行の見出しにする
+  const stamp = UNDATED_LOG_HEADING;
   const parts: string[] = [];
   linesRaw.forEach((l, i) => {
     const at = `template.yaml の entries「${entryTitle}」の lines[${String(i)}]`;
@@ -267,8 +275,8 @@ function textlogBody(
     let flag = 'none';
     if (isObj(l)) {
       body = str(l.body);
-      flag = (str(l.flag) || 'none').toLowerCase();
-      for (const k of Object.keys(l)) if (k !== 'body' && k !== 'flag') ignored.push(`${at} のキー「${k}」(未知のキー)`);
+      flag = oneLine(str(l.flag) || 'none').toLowerCase();
+      for (const k of Object.keys(l)) if (k !== 'body' && k !== 'flag') ignored.push(`${at} のキー「${oneLine(k)}」(未知のキー)`);
     } else body = str(l);
     const star = flag === 'important' || flag === 'red';
     if (!star && flag !== 'none') ignored.push(`${at} の flag「${flag}」(未対応のフラグ。行は取り込み、★ は付けません)`);
@@ -284,9 +292,9 @@ export function convertTemplate(src: TemplateSource, opts: TemplateOptions): Tem
   const t = readYaml(src.template, 'template.yaml');
   if (!isObj(t)) throw new TemplateImportError('template.yaml の形が違います(キーと値の並びではありません)');
   const meta = isObj(t.meta) ? t.meta : {};
-  const name = str(meta.name) || str(t.template_name) || 'テンプレート';
+  const name = oneLine(str(meta.name) || str(t.template_name)) || 'テンプレート';
   const TOP = ['meta', 'folders', 'entries', 'schema_version', 'template_id', 'template_name', 'template_version', 'description'];
-  for (const k of Object.keys(t)) if (!TOP.includes(k)) ignored.push(`template.yaml のキー「${k}」(未知のキー)`);
+  for (const k of Object.keys(t)) if (!TOP.includes(k)) ignored.push(`template.yaml のキー「${oneLine(k)}」(未知のキー)`);
   const identKeys = ['id', 'version', 'pkc_min_version', 'author', 'description'].filter((k) => k in meta);
   const topIdent = ['schema_version', 'template_id', 'template_name', 'template_version', 'description'].filter((k) => k in t);
   if (identKeys.length + topIdent.length > 0) {
@@ -294,22 +302,23 @@ export function convertTemplate(src: TemplateSource, opts: TemplateOptions): Tem
       `template.yaml の識別情報(${[...identKeys.map((k) => `meta.${k}`), ...topIdent].join('・')})は記録しません`,
     );
   }
-  if ('trust_level' in meta) ignored.push(`template.yaml の meta.trust_level(${str(meta.trust_level)})は取り込みません`);
+  if ('trust_level' in meta) ignored.push(`template.yaml の meta.trust_level(${oneLine(str(meta.trust_level))})は取り込みません`);
   if ('required_capabilities' in meta) {
-    const rc = Array.isArray(meta.required_capabilities) ? meta.required_capabilities.map((x) => str(x)).join('・') : str(meta.required_capabilities);
+    const rc = Array.isArray(meta.required_capabilities) ? meta.required_capabilities.map((x) => oneLine(str(x))).join('・') : oneLine(str(meta.required_capabilities));
     ignored.push(`template.yaml の meta.required_capabilities(${rc})は取り込みません`);
   }
   for (const k of Object.keys(meta)) {
     if (!['id', 'name', 'version', 'pkc_min_version', 'description', 'author', 'trust_level', 'required_capabilities'].includes(k)) {
-      ignored.push(`template.yaml の meta.${k}(未知のキー)`);
+      ignored.push(`template.yaml の meta.${oneLine(k)}(未知のキー)`);
     }
   }
 
   // 他のファイル(assets / snippets / その他)── 実行も取り込みもしない
-  const group = (prefix: string): string[] => src.otherFiles.filter((n) => n.startsWith(prefix));
+  const other = src.otherFiles.map(oneLine);
+  const group = (prefix: string): string[] => other.filter((n) => n.startsWith(prefix));
   const assets = group('assets/');
   const snippets = group('snippets/');
-  const rest = src.otherFiles.filter((n) => !n.startsWith('assets/') && !n.startsWith('snippets/'));
+  const rest = other.filter((n) => !n.startsWith('assets/') && !n.startsWith('snippets/'));
   if (assets.length > 0) ignored.push(`assets/ のファイル ${String(assets.length)} 個(${assets.map((n) => n.slice(7)).join('・')})は取り込みません`);
   if (snippets.length > 0) ignored.push(`snippets/ のファイル ${String(snippets.length)} 個(${snippets.map((n) => n.slice(9)).join('・')})は取り込みません`);
   if (rest.length > 0) ignored.push(`その他のファイル ${String(rest.length)} 個(${rest.slice(0, 5).join('・')}${rest.length > 5 ? ' ほか' : ''})は取り込みません`);
@@ -326,8 +335,11 @@ export function convertTemplate(src: TemplateSource, opts: TemplateOptions): Tem
   const formById = new Map<string, { file: string; y: YamlValue }>();
   for (const [file, text] of src.forms) {
     const y = readYaml(text, `forms/${file}`);
-    const id = isObj(y) && str(y.form_id) !== '' ? str(y.form_id) : file.replace(/\.ya?ml$/iu, '');
-    if (!formById.has(id)) formById.set(id, { file, y });
+    const id = isObj(y) && oneLine(str(y.form_id)) !== '' ? oneLine(str(y.form_id)) : file.replace(/\.ya?ml$/iu, '');
+    const prev = formById.get(id);
+    if (prev !== undefined) {
+      ignored.push(`forms/${oneLine(file)}(form_id「${id}」が forms/${oneLine(prev.file)} と重なっているため取り込みません)`);
+    } else formById.set(id, { file, y });
   }
 
   const notes: TemplateNote[] = [];
@@ -338,8 +350,8 @@ export function convertTemplate(src: TemplateSource, opts: TemplateOptions): Tem
       ignored.push(`template.yaml の folders[${String(i)}](形が違うため読み飛ばし)`);
       return;
     }
-    for (const k of Object.keys(f)) if (k !== 'id' && k !== 'name') ignored.push(`template.yaml の folders[${String(i)}] のキー「${k}」(未知のキー)`);
-    const id = str(f.id);
+    for (const k of Object.keys(f)) if (k !== 'id' && k !== 'name') ignored.push(`template.yaml の folders[${String(i)}] のキー「${oneLine(k)}」(未知のキー)`);
+    const id = oneLine(str(f.id));
     if (id === '') {
       ignored.push(`template.yaml の folders[${String(i)}](id が無いため読み飛ばし)`);
       return;
@@ -347,7 +359,7 @@ export function convertTemplate(src: TemplateSource, opts: TemplateOptions): Tem
     if (folderLid.has(id)) throw new TemplateImportError(`template.yaml のフォルダ id「${id}」が重なっています`);
     const lid = opts.genLid();
     folderLid.set(id, lid);
-    notes.push({ lid, title: str(f.name) || id, archetype: 'folder', body: '', parent: null });
+    notes.push({ lid, title: oneLine(str(f.name)) || id, archetype: 'folder', body: '', parent: null });
   });
   const folderCount = notes.length;
 
@@ -361,8 +373,8 @@ export function convertTemplate(src: TemplateSource, opts: TemplateOptions): Tem
       ignored.push(`template.yaml の entries[${String(i)}](形が違うため読み飛ばし)`);
       return;
     }
-    const type = str(e.type);
-    const title = str(e.title) || '無題';
+    const type = oneLine(str(e.type));
+    const title = oneLine(str(e.title)) || '無題';
     if (str(e.title) === '') ignored.push(`template.yaml の entries[${String(i)}](title が無いため「無題」にしました)`);
     const at = `template.yaml の entries「${title}」`;
     if (type !== 'form' && type !== 'textlog' && type !== 'text') {
@@ -370,9 +382,9 @@ export function convertTemplate(src: TemplateSource, opts: TemplateOptions): Tem
       return;
     }
     const known = type === 'form' ? ['type', 'title', 'folder', 'form'] : type === 'textlog' ? ['type', 'title', 'folder', 'lines'] : ['type', 'title', 'folder', 'body'];
-    for (const k of Object.keys(e)) if (!known.includes(k)) ignored.push(`${at}のキー「${k}」(未知のキー)`);
+    for (const k of Object.keys(e)) if (!known.includes(k)) ignored.push(`${at}のキー「${oneLine(k)}」(未知のキー)`);
     let parent: string | null = null;
-    const fid = str(e.folder);
+    const fid = oneLine(str(e.folder));
     if (fid !== '') {
       parent = folderLid.get(fid) ?? null;
       if (parent === null) ignored.push(`${at}の folder「${fid}」(定義に無いフォルダ。いちばん上に置きました)`);
@@ -380,7 +392,7 @@ export function convertTemplate(src: TemplateSource, opts: TemplateOptions): Tem
     let body: string;
     let archetype: 'text' | 'textlog';
     if (type === 'form') {
-      const id = str(e.form);
+      const id = oneLine(str(e.form));
       const hit = formById.get(id);
       if (hit === undefined) {
         ignored.push(`${at}の form「${id}」(forms/ に定義が無いためノートは作りません)`);
@@ -389,13 +401,13 @@ export function convertTemplate(src: TemplateSource, opts: TemplateOptions): Tem
       used.add(id);
       const cf = convertForm(hit.file, hit.y, ignored, renamed);
       const errs = parseFormDef(cf.fence.split('\n').slice(1, -1).join('\n')).errors;
-      for (const er of errs) ignored.push(`forms/${hit.file} の変換結果: ${er}`);
+      for (const er of errs) ignored.push(`forms/${oneLine(hit.file)} の変換結果: ${oneLine(er)}`);
       fields += cf.fields;
       forms += 1;
       body = formBody(title, name, cf);
       archetype = 'text';
     } else if (type === 'textlog') {
-      body = textlogBody(title, e.lines, opts.now, ignored);
+      body = textlogBody(title, e.lines, ignored);
       archetype = 'textlog';
       textlogs += 1;
     } else {
@@ -406,7 +418,7 @@ export function convertTemplate(src: TemplateSource, opts: TemplateOptions): Tem
     notes.push({ lid: opts.genLid(), title, archetype, body, parent });
   });
   for (const [id, h] of formById) {
-    if (!used.has(id)) ignored.push(`forms/${h.file}(どのノートからも使われていないため取り込みません)`);
+    if (!used.has(id)) ignored.push(`forms/${oneLine(h.file)}(どのノートからも使われていないため取り込みません)`);
   }
   for (const n of notes) {
     if (n.parent !== null) relations.push({ id: opts.genRelationId(), fromLid: n.parent, toLid: n.lid, kind: 'structural' });

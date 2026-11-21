@@ -11,8 +11,10 @@ import { markName } from '@features/message/message-log';
 import { readZipDirectory, readZipText, unwrapSingleTopDir, ZipReadError } from '@features/import/zip-reader';
 import {
   convertTemplate,
+  oneLine,
   findTemplateRoot,
   TemplateImportError,
+  TEMPLATE_MAX_FORMS,
   type TemplateSource,
 } from '@features/import/template-zip';
 import { extractMeta } from '@features/flavor';
@@ -22,11 +24,20 @@ import type { ImportDeps } from './import-pkc2';
 /** 1 ファイルの上限(展開後)。 */
 export const TEMPLATE_FILE_MAX = 1024 * 1024;
 
+/**
+ * zip の中身(ファイルだけ)を、**元の zip の名前**で返す(ゴミの行は除く)。
+ * 🔴 `unwrapSingleTopDir` が剥がした最上位のフォルダを名前へ戻す ── `template.yaml` を探すのは
+ *   「zip の直下」か「ちょうど 1 段下」だけにする(`a/b/template.yaml` を 2 段目として拾わない)。
+ */
+function originalFiles(raw: Awaited<ReturnType<typeof readZipDirectory>>): Awaited<ReturnType<typeof readZipDirectory>> {
+  const u = unwrapSingleTopDir(raw);
+  return u.entries.filter((e) => !e.isDirectory).map((e) => ({ ...e, name: u.prefix + e.name }));
+}
+
 /** zip が旧版のテンプレートか(中央ディレクトリだけ見る。壊れた zip は false = 従来の断り文へ)。 */
 export async function isTemplateZip(file: Blob): Promise<boolean> {
   try {
-    const dir = unwrapSingleTopDir(await readZipDirectory(file)).entries;
-    return findTemplateRoot(dir.filter((e) => !e.isDirectory).map((e) => e.name)) !== null;
+    return findTemplateRoot(originalFiles(await readZipDirectory(file)).map((e) => e.name)) !== null;
   } catch {
     return false;
   }
@@ -42,11 +53,11 @@ export async function importTemplateZip(
   let result;
   try {
     const raw = await readZipDirectory(file);
-    const dir = unwrapSingleTopDir(raw).entries.filter((e) => !e.isDirectory);
+    const dir = originalFiles(raw);
     const names = dir.map((e) => e.name);
     const prefix = findTemplateRoot(names);
     if (prefix === null) return fail(`「${markName(file.name)}」: template.yaml が見つかりません`);
-    // 1 段下に置かれていたときの接頭辞(`X/`)。unwrapSingleTopDir が剥がした分は、すでに名前に無い
+    // 1 段下に置かれていたときの接頭辞(`X/`)。名前は元の zip のまま(`originalFiles`)
     const rel = (n: string): string => n.slice(prefix.length);
     const mine = dir.filter((e) => e.name.startsWith(prefix));
     const tEntry = mine.find((e) => /^template\.ya?ml$/u.test(rel(e.name)))!;
@@ -56,6 +67,11 @@ export async function importTemplateZip(
       }
       return readZipText(file, e);
     };
+    // 🔴 ファイルの数は**読む前に**数えて断る(1 つずつ最大 1MB を読んでから数えない)
+    const formEntries = mine.filter((e) => e !== tEntry && /^forms\/[^/]+\.ya?ml$/iu.test(rel(e.name)));
+    if (formEntries.length > TEMPLATE_MAX_FORMS) {
+      throw new TemplateImportError(`forms/ のファイルが多すぎます(${String(TEMPLATE_MAX_FORMS)} 個まで)`);
+    }
     const forms = new Map<string, string>();
     const other: string[] = [];
     for (const e of mine) {
@@ -68,11 +84,10 @@ export async function importTemplateZip(
     result = convertTemplate(src, {
       genLid: deps.genLid,
       genRelationId: deps.genRelationId,
-      now: new Date(),
     });
   } catch (e) {
     if (e instanceof TemplateImportError) {
-      return fail(`「${markName(file.name)}」: ${e.message}(ノートは 1 件も追加されていません)`);
+      return fail(`「${markName(file.name)}」: ${oneLine(e.message)}(ノートは 1 件も追加されていません)`);
     }
     if (e instanceof ZipReadError) {
       return fail(`「${markName(file.name)}」を読めませんでした: ${e.message}(ノートは 1 件も追加されていません)`);

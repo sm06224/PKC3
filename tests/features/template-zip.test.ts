@@ -29,7 +29,7 @@ export function loadFixture(name: string): TemplateSource {
 let n = 0;
 const opts = () => {
   n = 0;
-  return { genLid: () => `L${String(++n)}`, genRelationId: () => `R${String(n)}`, now: new Date('2026-11-21T09:30:00') };
+  return { genLid: () => `L${String(++n)}`, genRelationId: () => `R${String(n)}` };
 };
 
 const FENCE = /```yaml form\n([\s\S]*?)\n```/u;
@@ -60,7 +60,7 @@ describe('template-zip: 3 つの実例', () => {
       'template.yaml の entries「当日ログ」の lines[1] の flag「warn」(未対応のフラグ。行は取り込み、★ は付けません)',
     ]);
     const log = r.notes.find((x) => x.archetype === 'textlog')!;
-    expect(log.body).toBe('## 2026-11-21 09:30:00\n\n引き継ぎテンプレートで初期化\n\n## 2026-11-21 09:30:00\n\n重大な変更があればここに追記');
+    expect(log.body).toBe('## (日時なし)\n\n引き継ぎテンプレートで初期化\n\n## (日時なし)\n\n重大な変更があればここに追記');
   });
 
   it('product-discovery: info の flag と network.fetch を出す', () => {
@@ -110,7 +110,7 @@ describe('template-zip: 3 つの実例', () => {
 
   it('red / important の flag は ★ になる', () => {
     const r = convertTemplate(T('  - type: textlog\n    title: L\n    lines:\n      - body: x\n        flag: red\n      - body: y\n        flag: important\n'), opts());
-    expect(r.notes[1]!.body).toBe('## 2026-11-21 09:30:00 ★\n\nx\n\n## 2026-11-21 09:30:00 ★\n\ny');
+    expect(r.notes[1]!.body).toBe('## (日時なし) ★\n\nx\n\n## (日時なし) ★\n\ny');
     expect(r.ignored).toEqual([]);
   });
 });

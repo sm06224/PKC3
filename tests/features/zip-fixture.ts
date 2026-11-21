@@ -83,8 +83,9 @@ export async function buildZip(
       ...u16(lExtra.length),
       ...nameBytes,
       ...lExtra,
-      ...data,
     );
+    // 大きい中身(1MB 級)を引数に展開すると呼び出しの深さが尽きるので、1 バイトずつ足す
+    for (const b of data) local.push(b);
 
     central.push(
       ...u32(0x02014b50),

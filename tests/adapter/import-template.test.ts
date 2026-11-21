@@ -9,6 +9,9 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { importPkc2File, type ImportDeps } from '../../src/adapter/ui/actions/import-pkc2';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { buildZip, bytesOf, type FixtureEntry } from '../features/zip-fixture';
+import { TEMPLATE_MAX_FORMS } from '../../src/features/import/template-zip';
+import { TEMPLATE_FILE_MAX } from '../../src/adapter/ui/actions/import-template';
+import { showNotices } from '../../src/adapter/ui/render/notices';
 import { parseFormDef } from '../../src/features/markdown/form-def';
 
 const ROOT = join(__dirname, '..', 'fixtures', 'pkc-templates');
@@ -112,5 +115,60 @@ describe('無印テンプレート zip の取込', () => {
     expect(await importPkc2File(h.d, h.deps, new File([zip], 'x.zip'))).toBeNull();
     expect(h.written).toHaveLength(0);
     expect(h.d.getState().error).toMatch(/PKC の書き出しではない zip/);
+  });
+
+  const TEXT_T = 'entries:\n  - type: text\n    title: T\n';
+  const zipOf = async (entries: FixtureEntry[]) => new File([await buildZip(entries)], 't.zip');
+
+  it('template.yaml が 2 段下(a/b/template.yaml)の zip は取り込まない(直下か 1 段下だけ)', async () => {
+    const h = harness();
+    const f = await zipOf([
+      { name: 'a/b/template.yaml', bytes: bytesOf(TEXT_T) },
+      { name: 'a/b/forms/x.yaml', bytes: bytesOf('sections: []\n') },
+    ]);
+    expect(await importPkc2File(h.d, h.deps, f)).toBeNull();
+    expect(h.written).toHaveLength(0);
+    expect(h.d.getState().error).toMatch(/PKC の書き出しではない zip/);
+  });
+
+  it('対照群: 1 段下(a/template.yaml)は取り込む', async () => {
+    const h = harness();
+    expect(await importPkc2File(h.d, h.deps, await zipOf([{ name: 'a/template.yaml', bytes: bytesOf(TEXT_T) }]))).toBe(1);
+  });
+
+  it('forms/ のファイル数は、1 つも読まずに数えて断る', async () => {
+    const h = harness();
+    const entries: FixtureEntry[] = [{ name: 'template.yaml', bytes: bytesOf(TEXT_T) }];
+    // 1 つ目は読めば断る壊れた YAML。数えて断るなら「ファイルが多すぎ」が出て、壊れた内容は読まれない
+    for (let i = 0; i <= TEMPLATE_MAX_FORMS; i += 1) {
+      entries.push({ name: `forms/f${String(i)}.yaml`, bytes: bytesOf(i === 0 ? 'a: [1\n' : 'sections: []\n') });
+    }
+    expect(await importPkc2File(h.d, h.deps, await zipOf(entries))).toBeNull();
+    expect(h.written).toHaveLength(0);
+    expect(h.d.getState().error).toMatch(/forms\/ のファイルが多すぎ/);
+    expect(h.d.getState().error).not.toMatch(/読めませんでした: .*f0/);
+  });
+
+  it('1 ファイルの大きさの上限(TEMPLATE_FILE_MAX): ちょうどは大きさでは断らず、1 バイト超えると断る', async () => {
+    const mk = (size: number) => 'a: ' + 'x'.repeat(size - 3);
+    const h = harness();
+    await importPkc2File(h.d, h.deps, await zipOf([{ name: 'template.yaml', bytes: bytesOf(mk(TEMPLATE_FILE_MAX)) }]));
+    expect(h.d.getState().error).not.toMatch(/大きすぎ/);
+    expect(h.d.getState().error).toMatch(/entries/);
+    const h2 = harness();
+    await importPkc2File(h2.d, h2.deps, await zipOf([{ name: 'template.yaml', bytes: bytesOf(mk(TEMPLATE_FILE_MAX + 1)) }]));
+    expect(h2.d.getState().error).toMatch(/「template\.yaml」が大きすぎます/);
+  });
+
+  it('結果の欄は textContent で出す(YAML 由来の名前は Markdown / HTML として読まれない)', async () => {
+    const h = harness();
+    const t = 'entries:\n  - type: text\n    title: T\n    "<img src=x onerror=alert(1)>": 1\n';
+    await importPkc2File(h.d, h.deps, await zipOf([{ name: 'template.yaml', bytes: bytesOf(t) }]));
+    const region = document.createElement('div');
+    showNotices(region, '取り込みの結果', h.reported());
+    expect(region.querySelector('img')).toBeNull();
+    const li = [...region.querySelectorAll('li')].find((x) => x.textContent!.includes('<img'));
+    expect(li!.textContent).toContain('「<img src=x onerror=alert(1)>」');
+    expect(li!.children).toHaveLength(0);
   });
 });
