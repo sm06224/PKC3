@@ -89,6 +89,13 @@ test('🔴 入力欄に打って保存すると設定欄へ入り、表に追加
   );
   expect(await page.locator(cells).count(), '断ったのに表が増えた').toBe(6);
 
+  // ── #2002 段 4: 「記録の一覧」で集計の画面が開く(グループ化は template。このノートに出自は無いので「もうありません」)
+  await clickReal(page, `${FORM} [data-pkc-action="form-open-list"]`);
+  await expect(page.locator('[data-pkc-region="query-bar"]'), '集計の画面が開かない').toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-pkc-region="query-table"]')).toContainText('template');
+  // 出自の無いノートなので、行は 1 つも並ばない(次の spec が、出自つきの記録で行・選択・戻りを見る)
+  await expect(page.locator('[data-pkc-region="query-rows"] li[data-pkc-entry]')).toHaveCount(0);
+
   expect(errors).toEqual([]);
 });
 
@@ -120,6 +127,37 @@ test('🔴 サンプルから作った記録のノートで、入力して表に
   await expect(page.locator(cells), '表に 1 行増えていない').toHaveCount(18, { timeout: 10_000 });
   await expect(page.locator(cells).nth(10)).toHaveText('1.4.2-rc1');
   await expect(page.locator(cells).nth(11)).toHaveText('佐藤');
+
+  // ── #2002 段 4: 「記録の一覧」→ この記録ノート自身の題名が行として並び、押すと選ばれ、閉じるとノートへ戻る(再起動しない)
+  // ⚠ 列に出るのは「入力を保存」で設定欄(vars)へ入れた値(表に追加しただけでは vars に入らない)
+  await clickReal(page, `${FORM} [data-pkc-action="form-save"]`);
+  await writesLanded(page);
+  await page.evaluate(() => {
+    (window as unknown as { __noBoot: number }).__noBoot = 1;
+  });
+  await clickReal(page, `${FORM} [data-pkc-action="form-open-list"]`);
+  await expect(page.locator('[data-pkc-region="query-bar"]'), '集計の画面が開かない').toBeVisible({ timeout: 10_000 });
+  const group = page.locator('[data-pkc-region="query-group"][data-pkc-group="回帰テストの実施記録"]');
+  await expect(group, 'サンプルの題名で 1 組に集まらない').toBeVisible({ timeout: 10_000 });
+  const row = group.locator('li[data-pkc-entry]');
+  await expect(row, '記録のノートが行として並ばない').toHaveCount(1);
+  const rowTitle = ((await row.locator('[data-pkc-field="title"]').textContent()) ?? '').trim();
+  expect(rowTitle, '行の題名が空').not.toBe('');
+  // 列: 入力した値が、見出しと同じ並びの升に出る
+  const heads = await group.locator('[data-pkc-field="query-column"]').allTextContents();
+  const cellTexts = await row.locator('[data-pkc-field="query-cell"]').allTextContents();
+  expect(heads.length, '入力欄の値の列が出ない').toBeGreaterThan(0);
+  expect(cellTexts[heads.indexOf('ビルド')], 'ビルドの値が行に出ない').toBe('1.4.2-rc1');
+  expect(cellTexts[heads.indexOf('担当者')]).toBe('佐藤');
+  await row.click();
+  await expect(row, '行を押しても選ばれない').toHaveAttribute('data-pkc-selected', '');
+  await clickReal(page, '[data-pkc-action="close-pane"]');
+  await expect(page.locator(FORM), '閉じてもノートへ戻らない').toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-pkc-region="detail"]')).toContainText(rowTitle);
+  expect(
+    await page.evaluate(() => (window as unknown as { __noBoot?: number }).__noBoot),
+    '一覧を開いて閉じる間に再起動した',
+  ).toBe(1);
 
   expect(errors).toEqual([]);
 });

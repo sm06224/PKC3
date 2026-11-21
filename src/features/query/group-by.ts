@@ -24,7 +24,7 @@
  * なので、**先頭を切って渡せば全文を読む必要が無い**。
  */
 
-import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
+import { extractVars, parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
 import { resolveCap } from '../notation/caps';
 import { tagsForMatch } from '../flavor/entry-tags';
 import { tagFoldKey } from '../flavor/tags';
@@ -87,6 +87,13 @@ export interface QueryKeyStat {
 
 export interface GroupResult {
   groups: readonly QueryGroup[];
+  /**
+   * 🔴 **入力欄の値の列**(#2002 段 4)── `vars.<名前>` の名前(多く書かれた順、`QUERY_LIMITS.columns` 個まで)。
+   * 表の各行の右に並べる。⚠ どのノートにも `vars` が無ければ空(列を出さない)。
+   */
+  columns?: readonly string[];
+  /** 行ごとの値。`cells[lid][i]` が `columns[i]` の値(空 = 書いていない)。組に載った lid だけ持つ。 */
+  cells?: Readonly<Record<string, readonly string[]>>;
   /** 上限で**捨てた組**の数。⚠ 0 でないなら画面に出す(黙って切らない)。 */
   omittedGroups: number;
   /** 実際に見た件数(空振り検出に使う ── 0 なら「束ねた」は何も言っていない)。 */
@@ -95,6 +102,12 @@ export interface GroupResult {
 
 export interface KeyResult {
   keys: readonly QueryKeyStat[];
+  /**
+   * 🔴 **先頭の設定欄が長すぎて読めなかったノートの数**(#2002 段 4)。⚠ 0 でないなら画面に出す。
+   * 読む窓は先頭 16KB(`FRONTMATTER_SCAN_CHARS`)なので、囲みが閉じていないノートは項目を 1 つも読めず、
+   * 黙って「(未設定)」の組へ落ちる ── 入力欄の項目が多いノートで起きうる。
+   */
+  unreadable?: number;
   omittedKeys: number;
   scanned: number;
 }
@@ -110,9 +123,21 @@ export const QUERY_LIMITS = {
   groups: 200,
   /** 1 組が抱える lid の数。 */
   lidsPerGroup: 500,
+  /** 表に出す入力欄の列の数。 */
+  columns: 8,
+  /** 1 行が持つ入力欄の値の数(多すぎる設定欄で行が膨らまないように)。 */
+  varsPerRow: 32,
   /** 組の名前の長さ(字)。⚠ 長い値は**丸める**が、丸めたことが判る形にする。 */
   valueChars: 80,
 } as const;
+
+/**
+ * 🔴 **入力欄の値で束ねる key の綴り**(#2002 段 4)── `vars.<名前>`。入力欄(` ```yaml form `)は値を
+ * 先頭の設定欄の `vars.<名前>:` に書く。⚠ 綴りは 1 か所(目録・束ね・列がここを通る)。
+ */
+export const VARS_PREFIX = 'vars.';
+/** 「どの雛形から作った記録か」を残す key(「テンプレートから作る」が書く。値は雛形の題名)。 */
+export const TEMPLATE_KEY = 'template';
 
 /** 未設定の組の値(空文字)。表示名は adapter 側が決める(features は字を持たない)。 */
 export const UNSET = '';
@@ -142,6 +167,41 @@ function valuesOf(v: FrontmatterValue | undefined): string[] {
 
 function clip(s: string): string {
   return s.length <= QUERY_LIMITS.valueChars ? s : `${s.slice(0, QUERY_LIMITS.valueChars)}…`;
+}
+
+/** 値の順(数字は数として・日本語は自然な順)。⚠ 大小・全角半角を同じ扱いにしない(同値の組が揺れない) */
+const VALUE_COLLATOR = new Intl.Collator('ja', { numeric: true, sensitivity: 'variant' });
+/** 素の数(`-1` / `0.25` / `10`)。⚠ 小数部の末尾が 0 の `1.10` は数でなく**版番号**として読む(数なら `1.1` と書く) */
+const PLAIN_NUMBER = /^-?\d+(?:\.\d*[1-9])?$/u;
+
+/**
+ * 🔴 入力欄の値の順を決める前に、**列の値が全部素の数か**を見る(1 つでも違えば版番号・日時・文字として扱う)。
+ * ⚠ 値ごとに数と版を切り替えると推移律が崩れ(1.25 < 1.5 < 1.10 < 1.25)並びが揺れる ── 判定は列に 1 回。
+ */
+export function allPlainNumbers(values: readonly string[]): boolean {
+  let n = 0;
+  for (const v of values) {
+    if (v === UNSET) continue;
+    if (!PLAIN_NUMBER.test(v)) return false;
+    n += 1;
+  }
+  return n > 0;
+}
+
+/**
+ * 🔴 入力欄の値の順。`asNumber`(`allPlainNumbers`)なら**数として**比べる(負の数・小数も)。
+ * ⚠ 照合器の numeric は整数の並びを数えるだけなので、`0.5` が `0.25` より先になる(小数点の後ろも整数と読む)。
+ *   数でない値(日時・版番号・段階・日本語)は照合器の自然順へ。最後に字の順で必ず決める(並びが揺れない)。
+ */
+export function compareVarValues(a: string, b: string, asNumber: boolean): number {
+  if (asNumber) {
+    const d = Number(a) - Number(b);
+    if (d !== 0) return d;
+  } else {
+    const c = VALUE_COLLATOR.compare(a, b);
+    if (c !== 0) return c;
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /** 見分けるために添える、値の末尾の字数。 */
@@ -190,12 +250,19 @@ export function createQueryScan(key: string | null): QueryScan {
   const count = new Map<string, number>();
   const buckets = new Map<string, { value: string; total: number; lids: string[] }>();
   let scanned = 0;
+  let unreadable = 0;
+  const isVarsKey = key !== null && key.startsWith(VARS_PREFIX);
+  // 🔴 入力欄の値(#2002 段 4)。**組の lid 一覧に載った行だけ**、値を 80 字で丸めて持つ(全件・全文を抱えない)。
+  //   ⚠ 組・lid の上限で切られた行は `finish` で外す(列や値に影響させない)
+  const rowVars = new Map<string, Record<string, string>>();
+  const varCount = new Map<string, number>();
   // 🔴 タグは大小・全角半角・濁点の持ち方を無視して同じ組にする(`sameTag` / 検索 / スマートフォルダと同じ。#1087)。
   //   表示は最初に見えた綴り。⚠ 他の key の値は綴りどおりに分ける。
   const bucketKey = (value: string): string =>
     key === TAGS_KEY && value !== UNSET ? tagFoldKey(value) : value;
 
-  const take = (value: string, lid: string): void => {
+  /** ⚠ lid を組に載せたら true(上限を超えて載せなかったら false) */
+  const take = (value: string, lid: string): boolean => {
     const bk = bucketKey(value);
     let b = buckets.get(bk);
     if (b === undefined) {
@@ -205,14 +272,31 @@ export function createQueryScan(key: string | null): QueryScan {
     b.total += 1;
     // ⚠ 上限を超えたぶんは lid を持たないが、**数は数え続ける**
     // (「N 件中 M 件を出しています」と言えるように)
-    if (b.lids.length < QUERY_LIMITS.lidsPerGroup) b.lids.push(lid);
+    if (b.lids.length < QUERY_LIMITS.lidsPerGroup) {
+      b.lids.push(lid);
+      return true;
+    }
+    return false;
   };
 
   return {
     feed(rows) {
       for (const row of rows) {
         scanned += 1;
-        const { meta } = parseFrontmatter(row.head);
+        const { meta, found, warnings } = parseFrontmatter(row.head);
+        // 🔴 窓の中で囲みが閉じていない = 先頭の設定欄が長すぎて読めない(黙って「未設定」へ落とさない)
+        // ⚠ 開きの `---` だけでは足りない(先頭が水平線の長いノートは設定欄ではない)── 設定欄として読める行があるのに閉じが無い(= parse が `malformed` と言う)ものだけ数える
+        if (!found && row.head.length >= FRONTMATTER_SCAN_CHARS && warnings.some((w) => w.kind === 'malformed'))
+          unreadable += 1;
+        /**
+         * 🔴 **入力欄の値は `extractVars` 1 本で読む**(#2002 段 4。`{{vars.x}}` の差し込みと同じ読み方)。
+         * ⚠ `meta` の `vars.x` を直に読むと、手で `vars:` の下に字下げして書いた値が見えず、
+         *   字下げの `x:` が**トップレベルの key** として目録に出る。ここで `vars.x` を 1 つの綴りに揃える。
+         */
+        const vars = found ? extractVars(row.head) : {};
+        const varNames = Object.keys(vars);
+        for (const k of Object.keys(meta)) if (k.startsWith(VARS_PREFIX)) delete meta[k];
+        for (const name of varNames) meta[`${VARS_PREFIX}${name}`] = vars[name]!;
         /**
          * 🔴 **タグだけは「本文の中」も数える**(#550 段④、user 要望 2026-08-29
          *   「タグのみで集計された表示が必要」)。
@@ -242,9 +326,15 @@ export function createQueryScan(key: string | null): QueryScan {
          */
         if (tags.length > 0) count.set(TAGS_KEY, (count.get(TAGS_KEY) ?? 0) + 1);
         if (key === null) continue;
+        const keepVars = (): void => {
+          if (varNames.length === 0 || rowVars.has(row.lid)) return;
+          const kept: Record<string, string> = {};
+          for (const name of varNames.slice(0, QUERY_LIMITS.varsPerRow)) kept[name] = clip(vars[name]!);
+          rowVars.set(row.lid, kept);
+        };
         const values = key === TAGS_KEY ? tags : valuesOf(meta[key]);
         if (values.length === 0) {
-          take(UNSET, row.lid);
+          if (take(UNSET, row.lid)) keepVars();
           continue;
         }
         // ⚠ 同じ値が 2 回書いてあっても 1 件として数える(`tags: [a, a]`)
@@ -253,7 +343,7 @@ export function createQueryScan(key: string | null): QueryScan {
           const bk = bucketKey(value);
           if (seen.has(bk)) continue;
           seen.add(bk);
-          take(value, row.lid);
+          if (take(value, row.lid)) keepVars();
         }
       }
     },
@@ -266,6 +356,7 @@ export function createQueryScan(key: string | null): QueryScan {
       const raw = [...buckets.values()];
       // ⚠ 丸めるのは**タグ以外**だけ(タグは従来どおり綴りのまま ── 改名の鍵になる)
       const shown = key === TAGS_KEY ? raw.map((b) => b.value) : uniqueDisplayNames(raw.map((b) => b.value));
+      const asNumber = isVarsKey && allPlainNumbers(shown);
       const groups = raw
         .map((b, i) => ({ value: shown[i]!, total: b.total, lids: b.lids }))
         // 並びは **件数の多い順 → 値の字順**、ただし**未設定は必ず最後**
@@ -273,21 +364,44 @@ export function createQueryScan(key: string | null): QueryScan {
         .sort((a, b) => {
           if (a.value === UNSET) return 1;
           if (b.value === UNSET) return -1;
+          // 🔴 入力欄の値で束ねたときは**値の順**(日時・番号・段階は件数順では読めない。数は数として比べる)
+          if (isVarsKey) return compareVarValues(a.value, b.value, asNumber);
           return b.total - a.total || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0);
         });
+      const keptGroups = groups.slice(0, QUERY_LIMITS.groups);
+      // 🔴 列と値は**画面に出す組の行だけ**から決める(組・lid の上限で切った行は影響させない。多く書かれた名前が左)
+      const shownLids = new Set<string>();
+      for (const g of keptGroups) for (const lid of g.lids) shownLids.add(lid);
+      for (const lid of shownLids) {
+        const v = rowVars.get(lid);
+        if (v === undefined) continue;
+        for (const name of Object.keys(v)) varCount.set(name, (varCount.get(name) ?? 0) + 1);
+      }
+      const columns = [...varCount.entries()]
+        .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+        .slice(0, QUERY_LIMITS.columns)
+        .map(([name]) => name);
+      const cells: Record<string, string[]> = {};
+      if (columns.length > 0)
+        for (const lid of shownLids) {
+          const v = rowVars.get(lid);
+          if (v !== undefined) cells[lid] = columns.map((c) => v[c] ?? '');
+        }
       return {
         keys: {
           keys: keys.slice(0, QUERY_LIMITS.keys),
           omittedKeys: Math.max(0, keys.length - QUERY_LIMITS.keys),
           scanned,
+          unreadable,
         },
         groups:
           key === null
             ? null
             : {
-                groups: groups.slice(0, QUERY_LIMITS.groups),
+                groups: keptGroups,
                 omittedGroups: Math.max(0, groups.length - QUERY_LIMITS.groups),
                 scanned,
+                ...(columns.length > 0 ? { columns, cells } : {}),
               },
       };
     },

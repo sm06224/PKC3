@@ -161,7 +161,8 @@ export class QueryRenderer {
      * ⚠ 段④ から **`tags` は本文の行に書いた分も数える**ので、
      *   「frontmatter に書いた項目で束ねます」はもう合っていない。
      */
-    picker.title = '本文の先頭に書いた項目と、本文の行に書いたタグでグループ化します';
+    picker.title =
+      '本文の先頭に書いた項目(入力欄の値は vars.項目名。テンプレートから作った記録は template)と、本文の行に書いたタグでグループ化します';
     label.append(picker);
     const refresh = document.createElement('button');
     refresh.type = 'button';
@@ -244,6 +245,9 @@ export class QueryRenderer {
           : `${keys.scanned} 件のうち、${picked.key === TAGS_KEY ? 'タグ' : picked.key} を書いたのは ${picked.count} 件`,
       );
     }
+    // 🔴 先頭の設定欄が長すぎて読めないノートがあるときは、必ず言う(黙って「(未設定)」へ落とさない)
+    if (keys !== null && (keys.unreadable ?? 0) > 0)
+      parts.push(`${keys.unreadable} 件は先頭の設定欄が長すぎて(16KB 超)項目を読めていません`);
     if (keys !== null && keys.omittedKeys > 0)
       parts.push(`項目は多い順に ${QUERY_LIMITS.keys} 個まで(あと ${keys.omittedKeys} 個)`);
     if (groups !== null && groups.omittedGroups > 0)
@@ -293,6 +297,7 @@ export class QueryRenderer {
       table.append(wait);
       return;
     }
+    const columns = groups.columns ?? [];
     for (const group of groups.groups) {
       const box = document.createElement('details');
       box.setAttribute('data-pkc-region', 'query-group');
@@ -344,6 +349,20 @@ export class QueryRenderer {
       }
       box.append(summary);
 
+      if (columns.length > 0) {
+        const head = document.createElement('div');
+        head.setAttribute('data-pkc-field', 'query-columns');
+        const first = document.createElement('span');
+        first.textContent = '題名';
+        head.append(first);
+        for (const name of columns) {
+          const h = document.createElement('span');
+          h.setAttribute('data-pkc-field', 'query-column');
+          h.textContent = name;
+          head.append(h);
+        }
+        box.append(head);
+      }
       const list = document.createElement('ul');
       list.setAttribute('data-pkc-region', 'query-rows');
       for (const lid of group.lids) {
@@ -364,6 +383,15 @@ export class QueryRenderer {
         t.setAttribute('data-pkc-field', 'title');
         t.textContent = meta.title || '(題名なし)';
         li.append(t);
+        // 🔴 入力欄の値の列(#2002 段 4)── 行ごとに、見出しと同じ順で並べる
+        const cells = groups.cells?.[lid];
+        if (columns.length > 0)
+          columns.forEach((_name, i) => {
+            const c = document.createElement('span');
+            c.setAttribute('data-pkc-field', 'query-cell');
+            c.textContent = cells?.[i] ?? '';
+            li.append(c);
+          });
         list.append(li);
       }
       box.append(list);

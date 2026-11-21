@@ -336,6 +336,7 @@ import {
 } from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
 import { SAMPLE_TEMPLATES, sampleById, sampleLabel } from '@features/snippet/sample-templates';
+import { stampTemplateOrigin } from '@features/snippet/template-origin';
 import { abbrBeforeCaret, type SnippetItem } from '@features/snippet/snippet-table';
 import { assetChoices, assetInsertEdit, atChoices, slashChoices, slashToolChoices } from '@features/markdown/inline-complete';
 import { createAssetIndex } from './asset-complete-index';
@@ -365,7 +366,7 @@ import {
   showPlaceInlineNote,
 } from '../render/place-inline';
 import { MAX_TAG_CHARS, overlongTagNames, splitTags } from '@features/flavor/tags';
-import { TAGS_KEY } from '@features/query/group-by';
+import { TAGS_KEY, TEMPLATE_KEY } from '@features/query/group-by';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { COLUMN_PANES, isPaneId, type PaneId } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind, relationLabel } from '@features/relation/kinds';
@@ -11770,7 +11771,9 @@ const ACTIONS: Record<string, ActionHandler> = {
         return;
       }
       const parent = now.scopeLid === null ? null : (now.entryMetas.get(now.scopeLid) ?? null);
-      const body = insertSnippet({ text: '', start: 0, end: 0 }, (sample ?? item)!.body, new Date()).text;
+      const filled = insertSnippet({ text: '', start: 0, end: 0 }, (sample ?? item)!.body, new Date()).text;
+      // 🔴 どのテンプレートから作ったかを残す(#2002 段 4)── 集計で「同じテンプレートの記録」を 1 組にするため
+      const body = stampTemplateOrigin(filled, (sample ?? item)!.title);
       createAndEdit(dispatcher, services, 'text', parent?.lid ?? null, body, sample?.title);
     });
   },
@@ -14130,6 +14133,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **いまの入力を、連携先の表(` ```csv name=… `)の末尾に 1 行足す**(#1456)。表が無ければ項目名を見出しにして作る。
    * ⚠ 断る理由は `planFormRow`(書く側と同じ関数)で先に言う ── 押した後に黙って何も起きない形を作らない。
    */
+  /**
+   * 🔴 **記録の一覧を開く**(#2002 段 4)── 集計の画面を「template」で束ねて開く。本文は書かない(門の対象外)。
+   * 行を押すと選択が動き、「× 画面を閉じる」でノートへ戻る(双方向)。
+   */
+  'form-open-list': (dispatcher) => {
+    appQueryKey.set(TEMPLATE_KEY);
+    dispatcher.dispatch({ type: 'SET_QUERY_KEY', key: TEMPLATE_KEY });
+    openView(dispatcher, 'query');
+  },
   /**
    * 🔴 **読めない日時の保存値を消す**(片道にしない)。欄の「そのまま残す」の印を外し、警告を「保存すると消える」に替える。
    * 書くのは次の「入力を保存」(欄が空なら `vars` の行が消える。他の保存と同じ道)。

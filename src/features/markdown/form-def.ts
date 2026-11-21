@@ -375,6 +375,12 @@ export function formHtml(src: string, opts: FormRenderOptions): string {
         `<label class="pkc-form-rowno">行 <input type="number" min="1" step="1" data-pkc-form-rowno="" aria-label="表の行の番号"></label>` +
         `<button type="button" class="pkc-form-btn" data-pkc-action="form-row-load" title="表「${esc(tableName)}」のその行を、入力欄へ読み込みます">読み込む</button>` +
         `<button type="button" class="pkc-form-btn" data-pkc-action="form-row-update" title="いまの入力で、表「${esc(tableName)}」のその行を書き換えます">表の行を更新</button></span>`;
+  // 🔴 同じテンプレートから作った記録を、入力欄の値の列つきで一覧する(#2002 段 4。集計の「template」で開く)。
+  //    テンプレートのノートからも、記録のノートからも同じ 1 つのボタン(双方向)
+  const list =
+    def.fields.length === 0
+      ? ''
+      : `<button type="button" class="pkc-form-btn" data-pkc-action="form-open-list" title="同じテンプレートから作った記録を、入力欄の値の列つきで一覧します(集計の画面)">記録の一覧</button>`;
   const note =
     tableName === ''
       ? ''
@@ -386,7 +392,7 @@ export function formHtml(src: string, opts: FormRenderOptions): string {
     title +
     errorsHtml(def) +
     rows +
-    (save === '' ? '' : `<div class="pkc-form-actions">${save}${sheet}</div>`) +
+    (save === '' ? '' : `<div class="pkc-form-actions">${save}${sheet}${list}</div>`) +
     note +
     source +
     `</div>`
