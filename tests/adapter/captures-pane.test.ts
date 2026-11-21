@@ -233,6 +233,71 @@ describe('その場で聞く ── 借りと返し(#683 段①)', () => {
   });
 
   /**
+   * 🔴 **器から URL を外してから返す**(2026-11-21。全量 smoke で `ERR_FILE_NOT_FOUND @ blob:` が約 400ms おきに出た)。
+   * ⚠ 返す瞬間に `<audio>` がまだその URL を差していると、死んだ URL を読み直し続ける(`media-release.ts`)。
+   */
+  it('🔴 返す瞬間には、器はもう URL を差していない(押し替え・面を捨てる)', async () => {
+    const seen: (string | null)[] = [];
+    const a = lender();
+    let host: HTMLElement | null = null;
+    const lend = a.lend;
+    a.lend = async (k: string) => {
+      const got = await lend(k);
+      if (got === null) return null;
+      return {
+        url: got.url,
+        dispose: () => {
+          const m = host?.querySelector<HTMLMediaElement>(`[data-pkc-field="capture-media"][src="${got.url}"]`);
+          seen.push(m === null || m === undefined ? 'gone' : m.getAttribute('src'));
+          got.dispose();
+        },
+      };
+    };
+    // 🔑 load() まで通したかも見る(src を外すだけでは読み込みは止まらない)
+    const loads = vi.spyOn(HTMLMediaElement.prototype, 'load');
+    const p = pane({ captureItems: ITEMS() }, a);
+    host = p.host;
+    p.paint({ capturePlayingLid: 'a' });
+    await Promise.resolve();
+    await Promise.resolve();
+    p.paint();
+    expect(p.host.querySelector('[data-pkc-field="capture-media"]')?.getAttribute('src'), '前提: 器が出ていない').toBe('blob:k-1');
+    // 押し替え: 古い器はまだ画面に在る(組み直す前に返す)
+    p.paint({ capturePlayingLid: 'b' });
+    await Promise.resolve();
+    await Promise.resolve();
+    p.paint();
+    p.r.dispose();
+    expect(seen, '返す瞬間に器がまだ URL を差している').toEqual(['gone', 'gone']);
+    expect(loads.mock.calls.length, '器から src を外しただけで load() していない').toBeGreaterThanOrEqual(2);
+    loads.mockRestore();
+  });
+
+  it('🔴 組み直しで画面から外れた古い器からも、返す前に URL を外す', async () => {
+    const a = lender();
+    const p = pane({ captureItems: ITEMS() }, a);
+    p.paint({ capturePlayingLid: 'a' });
+    await Promise.resolve();
+    await Promise.resolve();
+    p.paint();
+    const old = p.host.querySelector<HTMLMediaElement>('[data-pkc-field="capture-media"]');
+    expect(old?.getAttribute('src'), '前提: 器が出ていない').toBe('blob:k-1');
+    // 一覧ごと組み直す(集め直しで 1 件増えた)── 古い器は画面から外れ、新しい器が同じ URL を差す
+    p.paint({
+      captureItems: captureItemsFrom([
+        { lid: 'a', title: 'a', body: body('録音-2026-09-09-030102.webm', 'audio/webm') },
+        { lid: 'b', title: 'b', body: body('画面録画-2026-09-09-030102.webm', 'video/webm', 'k-2') },
+        { lid: 'c', title: 'c', body: body('録音-2026-09-10-030102.webm', 'audio/webm', 'k-3') },
+      ]),
+    });
+    expect(p.host.querySelector('[data-pkc-field="capture-media"]')?.getAttribute('src'), '前提: 組み直した器が無い').toBe('blob:k-1');
+    expect(old!.isConnected, '前提: 古い器が組み直しで外れていない').toBe(false);
+    expect(old!.getAttribute('src'), '前提: 外れた古い器が URL を差していない').toBe('blob:k-1');
+    p.r.dispose();
+    expect(old!.getAttribute('src'), '外れた古い器が死んだ URL を差したまま(読み直し続ける)').toBeNull();
+  });
+
+  /**
    * 🔴 **行が消えたら返す** ── 絞り込みで消えた / ノートが消えた場合も同じで、
    *   鳴りっぱなしにしない。
    */

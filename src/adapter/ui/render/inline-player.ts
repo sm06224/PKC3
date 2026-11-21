@@ -22,6 +22,7 @@
  */
 import { elapsedText, msToSeconds } from '@features/elapsed-text';
 import { appVoiceBoostRouter } from './voice-boost';
+import { unloadMedia } from './media-release';
 
 export const INLINE_PLAYER_FIELD = 'inline-player';
 
@@ -59,9 +60,8 @@ export function closeInlinePlayer(): void {
   if (c === null) return;
   current = null;
   c.observer?.disconnect();
-  const media = c.box.querySelector<HTMLMediaElement>('audio, video');
-  media?.pause();
-  media?.removeAttribute('src');
+  // ⚠ `src` を外すだけでは読み込みは止まらない ── `load()` まで通す(`media-release.ts`)
+  unloadMedia(c.box, null);
   c.dispose?.();
   c.dispose = null;
   c.box.remove();

@@ -244,9 +244,12 @@ describe('その場で鳴らす', () => {
     await settle();
     const m = media()!;
     const paused = vi.spyOn(m, 'pause');
+    const loads = vi.spyOn(m, 'load');
     closeInlinePlayer();
     expect(paused).toHaveBeenCalled();
     expect(m.getAttribute('src')).toBeNull();
+    // 🔴 src を外すだけでは読み込みは止まらない ── load() まで通す(死んだ blob: を読み直し続けない。media-release.ts)
+    expect(loads, 'src を外しただけで load() していない').toHaveBeenCalled();
   });
 
   it('🔴 横に留めた別のノートの枠で押しても、開いているノートが変わらない間は閉じない', async () => {

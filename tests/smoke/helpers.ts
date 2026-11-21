@@ -1278,3 +1278,56 @@ export async function openExportMenu(page: Page, kind: 'entry' | 'collection' = 
   await expect(menu, '「書き出す ▾」を押しても一覧が出ない').toBeVisible();
   return menu;
 }
+
+/**
+ * 🔴 **画面に出たままの音・動画の器が差している URL を返した回を数える**(2026-11-21)。
+ *
+ * ⚠ 全量 smoke で `console.error: Failed to load resource: net::ERR_FILE_NOT_FOUND @ blob:…` が
+ *   約 400ms おきに出て 1 度落ちた ── `<audio>` が読み込みの途中で URL を返されると、死んだ URL を
+ *   読み直し続ける。ただし**読み直しが出るかは読み込みの速さ次第**(負荷のある箱でだけ出る)なので、
+ *   `collectPageErrors` だけでは 1 回の緑が何も言わない。
+ * 🔑 だから**読み直しの症状ではなく、原因の順序を数える** ── `URL.revokeObjectURL` を呼んだ瞬間に、
+ *   その URL を `src` に持つ `<audio>` / `<video>` が残っていれば 1 件(負荷に関わらず毎回出る)。
+ * 🔴 **画面から外れた器も数える**(着地前レビュー)── 読み直すのは**外れたのに読み込み中の器**でもあるので、
+ *   `document.querySelectorAll` だけだと画面から外れた後に返す道(`AssetLends.prune`)を見逃す。
+ *   `document.createElement` で作られた器を弱い参照で憶えておき、外れていても数える(印 `detached`)。
+ *   直す前の実測: この spec の 1 本目で 14 件(本文の再生機・添付の下見・録ったものの面)。
+ * ⚠ `<img>` は数えない(読み直さない)。⚠ 数えるだけで、`revokeObjectURL` の振る舞いは変えない。
+ * ⚠ 置き場は**node 側の配列**(読み直しを跨いでも消えない)── 合図は `console.warn`(`collectPageErrors` は warn を数えない)。
+ */
+export function watchRevokedMedia(page: Page): string[] {
+  const hits: string[] = [];
+  const MARK = 'PKC-SMOKE-REVOKE-LIVE-MEDIA ';
+  page.on('console', (msg) => {
+    if (msg.type() === 'warning' && msg.text().startsWith(MARK)) hits.push(msg.text().slice(MARK.length));
+  });
+  void page.addInitScript((mark: string) => {
+    const made: WeakRef<HTMLMediaElement>[] = [];
+    const create = Document.prototype.createElement;
+    Document.prototype.createElement = function (this: Document, ...args: Parameters<Document['createElement']>) {
+      const el = create.apply(this, args) as HTMLElement;
+      if (el instanceof HTMLMediaElement) made.push(new WeakRef(el));
+      return el;
+    } as Document['createElement'];
+    const orig = URL.revokeObjectURL.bind(URL);
+    URL.revokeObjectURL = (u: string): void => {
+      const all = new Set<HTMLMediaElement>(document.querySelectorAll<HTMLMediaElement>('audio, video'));
+      for (const r of made) {
+        const el = r.deref();
+        if (el !== undefined) all.add(el);
+      }
+      const holders = [...all]
+        .filter((e) => e.getAttribute('src') === u)
+        .map(
+          (e) =>
+            `${e.tagName.toLowerCase()}[data-pkc-field=${e.getAttribute('data-pkc-field') ?? ''}]${e.isConnected ? '' : ' detached'}`,
+        );
+      if (holders.length > 0) {
+        const at = (new Error().stack ?? '').split('\n').slice(2, 5).map((l) => l.trim()).join(' < ');
+        console.warn(`${mark}${holders.join(',')} ${at}`);
+      }
+      orig(u);
+    };
+  }, MARK);
+  return hits;
+}
