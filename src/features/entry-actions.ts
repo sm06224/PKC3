@@ -338,6 +338,13 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'open-note-window', label: '別のウィンドウで開く', group: 'open' },
   /**
+   * 🔴 **新しいタブで開く**(#1982 段 5-4。裁定 6.1-2)── 通常のクリックは「いまのタブの差し替え」なので、
+   *   タブを増やす道を右クリックにも置く(Ctrl+クリック・中クリックは `binder.ts`)。
+   * ⚠ 右の列には置かない(`menuOnly`)── 行を押して開く操作で、開いているノートの操作ではない。
+   * ⚠ 並びは「別のウィンドウで開く」の**後ろ**(既存の項目の位置を動かさない)。
+   */
+  { action: 'open-note-new-tab', label: '新しいタブで開く', group: 'open', menuOnly: true },
+  /**
    * 🔴 **保存したスタックを、いまのスタックの上に積む**(#633 段③。user 裁定 2026-08-30)。
    * ⚠ スタックの入れ物にだけ出す(`when: 'stack'`)── 他のノートで押しても積む物が無い。
    * ⚠ 開いただけでは横の枠は変わらない(設計 doc §2-8)── 押した瞬間に積まれる。
@@ -740,6 +747,34 @@ export function appGroupMenuActions(hasOrder: boolean, renamable = false): reado
     ? [APP_GROUP_RENAME_ACTION, ...APP_GROUP_MENU_ACTIONS]
     : APP_GROUP_MENU_ACTIONS;
   return hasOrder ? [...base, APP_GROUP_RESET_ACTION] : base;
+}
+
+/**
+ * 🔴 **ノートのタブを右クリックしたときのメニュー**(#1982 段 5-4)。
+ *
+ * - 開く(一覧の「新しいタブで開く」)と対になる**閉じる・開き直す**をここに置く(片道にしない)。
+ * - 押せない物は**出さない**ではなく灰色 + 理由(`hint`)── 位置を変えない(業務画面)。
+ * 🔑 組み立てはここ 1 か所(`binder.ts` は材料を渡すだけ)。
+ */
+export function noteTabMenuActions(ctx: {
+  readonly hasOthers: boolean;
+  readonly canReopen: boolean;
+}): readonly (EntryAction & { readonly hint: string; readonly disabled?: boolean })[] {
+  return [
+    { action: 'close-note-tab', label: 'タブを閉じる', hint: 'このタブを閉じます(ノートは消えません。閉じたタブは開き直せます)' },
+    {
+      action: 'close-other-note-tabs',
+      label: '他のタブを閉じる',
+      hint: ctx.hasOthers ? 'このタブ以外を閉じます(ノートは消えません)' : '他に開いているタブがありません',
+      ...(ctx.hasOthers ? {} : { disabled: true }),
+    },
+    {
+      action: 'reopen-note-tab',
+      label: '閉じたタブを開き直す',
+      hint: ctx.canReopen ? '最後に閉じたタブを開き直します' : '閉じたタブがありません',
+      ...(ctx.canReopen ? {} : { disabled: true }),
+    },
+  ];
 }
 
 export const REPEAT_ATTR = 'data-pkc-repeat';
@@ -1643,6 +1678,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   'note-label-clear': 'このノートの色ラベルを外します(ノートは消えません)',
   'open-note-window':
     'このノートだけを別のウィンドウで開きます(何枚でも開けます。閉じれば消えます)',
+  'open-note-new-tab': '今のタブはそのままに、このノートを新しいタブで開きます(タブの × で閉じられます)',
   // 🔴 **左の列の道具 4 つ**(#632 段①)。⚠ 字は `shell.ts` のボタンの `title` と
   //    **同じ意味**にする ── 同じ操作に 2 通りの説明を作らない
   'attach-file': 'ファイルを選んで、添付として開いているノートの本文に入れます',

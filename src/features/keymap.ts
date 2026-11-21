@@ -759,6 +759,46 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     note: '開いているノートのピン留めを外します(ノートは消えません。ピン留めしているノートを開いているときだけ効きます)',
     alias: 'ピン 固定 外す 解除',
   },
+  /**
+   * 🔴 **ノートのタブ**(#1982 段 5-4。裁定 6.1-7)。
+   *
+   * ⚠ 既定の鍵は **`Alt+PageDown` / `Alt+PageUp` の 2 つだけ**。`Ctrl+Tab` / `Ctrl+W` / `Ctrl+Shift+T` はブラウザが
+   *   持っていく(`REFUSED`)、`Alt+1〜9` は既存の割当と衝突するので作らない。閉じる・開き直すは鍵なし(操作を探す・タブの右クリック)。
+   * ⚠ 打っている最中は効かせない(`whileTyping` を付けない)── 編集中はタブが動かない(編集の保存・やめるが先)。
+   * ⚠ 末尾の「(…のときだけ効きます)」が押せない間の理由になる。
+   */
+  {
+    id: 'tab-next',
+    label: '次のタブへ移る',
+    alias: 'タブ 切り替え',
+    contexts: ['global'],
+    defaults: ['Alt+PageDown'],
+    note: '開いているノートのタブを右へ動きます(端の次は反対の端。タブが 2 枚以上のときだけ効きます)',
+  },
+  {
+    id: 'tab-prev',
+    label: '前のタブへ移る',
+    alias: 'タブ 切り替え',
+    contexts: ['global'],
+    defaults: ['Alt+PageUp'],
+    note: '開いているノートのタブを左へ動きます(端の前は反対の端。タブが 2 枚以上のときだけ効きます)',
+  },
+  {
+    id: 'tab-close',
+    label: 'タブを閉じる',
+    alias: 'タブ 閉じる',
+    contexts: ['global'],
+    defaults: [],
+    note: '開いているノートのタブを閉じます(ノートは消えません。閉じたタブは開き直せます。タブを開いているときだけ効きます)',
+  },
+  {
+    id: 'tab-reopen',
+    label: '閉じたタブを開き直す',
+    alias: 'タブ 戻す 復元',
+    contexts: ['global'],
+    defaults: [],
+    note: '最後に閉じたタブを開き直します(閉じたタブがあるときだけ効きます)',
+  },
   {
     id: 'open-settings',
     label: 'システムへ移る',
