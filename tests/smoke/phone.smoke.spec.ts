@@ -763,6 +763,30 @@ test('🔴 340px では断り書きが出て、OK で消せて、それでも書
   expect(okBox.h, `OK の押し所が ${okBox.h}px(32px 未満)`).toBeGreaterThanOrEqual(32);
   expect(okBox.bottom, 'OK が画面の外に在る').toBeLessThanOrEqual(okBox.innerH);
 
+  /**
+   * 🔴 **状態の字が出入りしても OK は動かない**(2026-11-21、フル smoke の負荷下で OK の押しが 1 度失われた)。
+   * ⚠ 直す前は帯が状態の字と同じ行に並んでいて、書き込みが 400ms を超えると遅れて入る「保存中…」で
+   *   OK が 42px 横へずれた(押そうとした所が状態の字の上になる)。負荷しだいで指を下ろす瞬間に起きる。
+   * 🔑 状態の字の器に**一時的に字を足して**位置を測り、すぐ外す ── 出入りの時期は負荷任せで狙えないので、
+   *   配置だけを決定的に測る。⚠ 器の中身(読み上げの子)は触らず、足した 1 個だけを外す。
+   */
+  const okShift = await page.evaluate(() => {
+    const okEl = document.querySelector('[data-pkc-field="too-narrow-ok"]')!;
+    const text = document.querySelector('[data-pkc-field="status-text"]')!;
+    const at = (): [number, number] => {
+      const r = okEl.getBoundingClientRect();
+      return [Math.round(r.x), Math.round(r.y)];
+    };
+    const before = at();
+    const probe = document.createElement('span');
+    probe.textContent = '保存中… 状態の字が長く出て折り返すときも OK の位置は変わらない';
+    text.append(probe);
+    const during = at();
+    probe.remove();
+    return { before, during };
+  });
+  expect(okShift.during, '状態の字が出入りすると OK が動く(押しが外れる)').toEqual(okShift.before);
+
   await clickReal(page, '[data-pkc-field="too-narrow-ok"]');
   await expect(status, 'OK を押しても断り書きが消えない').not.toContainText(
     '表示が崩れることがあります',
