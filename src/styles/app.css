@@ -2192,7 +2192,7 @@ tr[data-pkc-note-label] td:first-child {
  *
  * 🔑 ボタンは 4 型(段 1)が見た目を持つ ── 帯は**並べ方(`gap`)だけ**を持つ:
  *   ・机の上の帯(作る / ノート全体 / 右の操作 / 2 ペインの操作行)= 標準(薄い地)
- *   ・紙の上の帯(本文の帯 / 書式パネル)と縦の縁 = 字のあるボタンは標準と同じ(薄い地 + 極薄の枠。#1982 ①)
+ *   ・紙の上の帯(本文の帯 / 書式パネル)と縦の縁 = 字のあるボタンは標準と同じ(薄い地 + 薄い枠線。#1982 ①)
  * ⚠ 帯の下地は**塗らない**(机 / 紙の地がそのまま見える)── 折れて段が増えても余りが灰色にならない。
  * ⚠ `outline` を書かない ── 共通の焦点の輪(`:focus-visible` の 2px)を上書きする。
  *   `tests/adapter/button-bars-css.test.ts` が「輪の規則が戻っていないか」を全数で見る。
@@ -2226,7 +2226,7 @@ tr[data-pkc-note-label] td:first-child {
   margin-left: auto;
   padding-right: 0;
 }
-/* 🔴 帯の中のボタンは**素の `button` の見え方**(薄い地 + 極薄の枠。#1982 ①)── ここに `background` / `border` を書かない。
+/* 🔴 帯の中のボタンは**素の `button` の見え方**(薄い地 + 薄い枠線。#1982 ①)── ここに `background` / `border` を書かない。
  *   旧い「紙の上の帯はゴースト(地なし・枠なし)」は、「Markdown をコピー」が字(「読了 約 1 分」)と見分けられない不具合だった。
  *   地なしにしてよいのは**図案だけのボタン**と**メニューの行・一覧の行**(下の `ghost` の節) */
 /**
@@ -2292,10 +2292,13 @@ button[data-pkc-variant='primary'] [data-pkc-icon] {
   --pkc-icon-underlay: color-mix(in oklab, var(--accent-fg) 32%, var(--pkc-icon-hue, currentColor));
   --pkc-icon-underlay-opacity: 0.55;
 }
-/* ゴースト ── 枠も地も無いのは**図案だけのボタン**だけ(字のあるゴーストは標準と同じ薄い地 + 極薄の枠。#1982 ①)。
- * hover だけ標準の薄い地(同じ詳細度で `button:hover` が勝たない所は下で書く)。
- * 🔑 「字がある」は `iconButton` の `[data-pkc-field='label']` の有無で判る(字だけのボタンは図案の子を持たない)。 */
-button[data-pkc-variant='ghost']:has(> [data-pkc-icon]):not(:has(> [data-pkc-field='label'])) {
+/* ゴースト ── 枠も地も無い型。字のあるゴースト(「この値を消す」など)は標準と同じ薄い地 + 枠を受ける(#1982 ①)。
+ * hover だけ標準の薄い地(同じ詳細度で `button:hover` が勝たない所は下で書く)。 */
+/* 🔴 **図案だけ・字だけの記号のボタン**(`data-pkc-icon-only`。`icons.ts` の `markIconOnly` が印を付ける)は
+ * 静止の地も枠も持たない(型に関わらず)。hover だけ `button:hover` の薄い地が出る。
+ * ⚠ `:where(button)` で詳細度を 0,1,0 に留める ── 面ごとの個別規則(パレット・タブの ×・目次の ×)を上書きしない。
+ *   hover は `button:hover:not(:disabled)`(0,2,1)が勝つ。 */
+:where(button)[data-pkc-icon-only] {
   background: transparent;
   border-color: transparent;
 }
@@ -2677,8 +2680,9 @@ button[data-pkc-variant='danger']:hover:not(:disabled),
   gap: var(--s2);
 }
 [data-pkc-region='format-bar'] button {
-  /* 地と枠は素の `button` が持つ(字のあるボタンは字と見分けがつくこと。#1982 ①)── ここでは寸法だけ */
-  padding: 0 var(--s2);
+  /* 地と枠は素の `button` が持つ(字のあるボタンは字と見分けがつくこと。#1982 ①)── ここでは寸法だけ。
+   * 🔑 枠の 1px × 2 を余白から引く(旧い枠なしの作りと**ボタン 1 つの幅を変えない** = 帯の折り返す位置が動かない) */
+  padding: 0 calc(var(--s2) - 1px);
   font-size: var(--btn-fs-bar);
 }
 /* ⚠ 編集欄は**残りの高さいっぱい**に伸ばす ── 固定高だと下に死に領域ができる
@@ -6318,10 +6322,32 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 /* 情報の「日付」(#292 段④)。⚠ ボタンらしく主張させない(字のまま置く) */
 [data-pkc-field='inspector-date'] button {
   margin-right: var(--s2);
+  /* 小さな補助の段(`--btn-fs-sm`)+ 狭い余白 ── 枠が付いても行が折り返さない(幅の狭い情報ペインの 1 行に「日付 + 日付を外す」を収める) */
+  padding: 0 var(--s2);
+  font-size: var(--btn-fs-sm);
+}
+/* 日付が付いているとき、日付のボタンは**値**(押すとピッカーが開く)── 担当の名前と同じく字のまま置く。
+ * 「日付を付ける」(日付なし)と「日付を外す」は操作なので標準のボタン(薄い地 + 枠) */
+[data-pkc-field='inspector-date'] button[data-pkc-has-value] {
+  padding: 0;
+  margin-right: var(--s1);
+  font: inherit;
+  background: none;
+  border: none;
+  border-bottom: 1px dotted var(--border);
+  border-radius: 0;
+}
+[data-pkc-field='inspector-date'] button[data-pkc-has-value]:hover:not(:disabled) {
+  background: none;
+  border-color: transparent;
+  border-bottom-color: var(--fg);
 }
 /* 情報の「担当」(#283)。日付と同じ作り ── ボタンらしく主張させない。連絡先と一致した名前だけ押せる札 */
 [data-pkc-field='inspector-owner'] button {
   margin-right: var(--s2);
+  /* 小さな補助の段(`--btn-fs-sm`)+ 狭い余白 ── 枠が付いても行が折り返さない(幅の狭い情報ペインの 1 行に「日付 + 日付を外す」を収める) */
+  padding: 0 var(--s2);
+  font-size: var(--btn-fs-sm);
 }
 /* 連絡先と一致した名前は**字のまま押せる札**(ボタンではなくリンクの見え方。値であって操作ではない) */
 [data-pkc-field='inspector-owner'] button[data-pkc-field='inspector-owner-name'] {
@@ -6330,6 +6356,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   background: none;
   border: none;
   border-bottom: 1px dotted var(--border);
+  border-radius: 0;
 }
 [data-pkc-field='inspector-owner'] button[data-pkc-field='inspector-owner-name']:hover:not(:disabled) {
   background: none;
@@ -11239,6 +11266,9 @@ h3[data-pkc-section] {
 [data-pkc-region='format-bar'] [data-pkc-field='format-more'][aria-expanded='true'] {
   /* 静止の薄い地(6%)・乗せた地(12%)より濃い段(18%)で「開いている」を示す */
   background: var(--pkc-mark-bg);
+  /* hover(12% の透かし)と区別する押し込みの縁(アクセントは使わない。`--fg` の中間の濃さ)。
+   * 詳細度は `button:hover:not(:disabled)` より高く、開いたまま乗せても見た目が変わらない */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 40%, transparent);
   color: var(--fg);
 }
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='append'][data-pkc-lock-editing] {
@@ -11895,7 +11925,7 @@ h3[data-pkc-section] {
  * ⚠ 紙の向きでも変わる ── A4 横(1123px)では狭幅の上書きが発火しない。
  */
 @media print {
-  /* 🔴 **紙にボタンの地・枠は出さない**(#1982 ①。画面では字のあるボタンに薄い地と極薄の枠を付けた)。
+  /* 🔴 **紙にボタンの地・枠は出さない**(#1982 ①。画面では字のあるボタンに薄い背景と薄い枠線を付けた)。
    * ⚠ 主・危険の型は色を持つので触らない。画面側の個別規則(帯・器ごと)に勝つため `!important` を使う */
   button:not([data-pkc-variant='primary']):not([data-pkc-variant='danger']) {
     background: none !important;

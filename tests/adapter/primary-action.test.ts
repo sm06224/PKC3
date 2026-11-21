@@ -252,10 +252,10 @@ describe('ボタンの 4 型(data-pkc-variant)の CSS', () => {
     const hover = one("button[data-pkc-variant='danger']:hover:not(:disabled)");
     expect(hover).toMatch(decl('background', 'var\\(--danger\\)'));
     expect(hover).toMatch(decl('color', 'var\\(--surface\\)'));
-    // 🔴 地を持たないゴーストは**図案だけのボタン**に限る(#1982 ①)。字のあるゴースト(「この値を消す」「残さずにやめる」)は標準の地を受ける
-    const ghostSel =
-      "button[data-pkc-variant='ghost']:has(> [data-pkc-icon]):not(:has(> [data-pkc-field='label']))";
-    expect(one(ghostSel)).toMatch(decl('background', 'transparent'));
+    // 🔴 地を持たないのは**図案だけのボタン**(`data-pkc-icon-only`。型に依らない)に限る(#1982 ①)。字のあるゴースト(「この値を消す」「残さずにやめる」)は標準の地を受ける
+    const iconOnly = one(':where(button)[data-pkc-icon-only]');
+    expect(iconOnly).toMatch(decl('background', 'transparent'));
+    expect(iconOnly).toMatch(decl('border-color', 'transparent'));
     expect(blocksFor(css, "button[data-pkc-variant='ghost']"), '字のあるゴーストの地を消す素の規則が戻っている').toEqual([]);
   });
 

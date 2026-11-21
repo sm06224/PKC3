@@ -31,7 +31,26 @@ test('🔴 主の操作だけテーマのアクセント色で見える (#722 P2
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await createEntry(page, 'text');
-  await page.locator('[data-pkc-field="editor-body"]').fill('本文です。\n');
+  // 🔴 日付つきのノートにする(情報ペインの「日付を外す」を出すため)。前書きの `date:` が日付になる
+  await page.locator('[data-pkc-field="editor-body"]').fill('---\ndate: 2026-11-21\n---\n本文です。\n');
+  /**
+   * 🔴 **編集中の書式バーのボタンも、字のあるボタンは地と枠を持つ**(#1982 ①の見直し)── 帯の規則が上書きしていない。
+   * ⚠ 鼠を退かしてから測る(hover の地を読まない)。
+   */
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  const restOf = async (sel: string): Promise<{ bg: string; w: string; bc: string }> =>
+    page.evaluate((s) => {
+      const el = document.querySelector(s);
+      if (el === null) throw new Error(`前提が崩れている: ${s} が無い`);
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, w: cs.borderTopWidth, bc: cs.borderTopColor };
+    }, sel);
+  const clear = /, 0\)$|^transparent$/;
+  const fmt = await restOf('[data-pkc-region="format-bar"] button[data-pkc-action]:not([data-pkc-action="open-format-more"])');
+  expect(fmt.bg, `書式バーのボタンの地が透明(${fmt.bg})`).not.toMatch(clear);
+  expect(fmt.w, '書式バーのボタンに枠が無い').toBe('1px');
+  expect(fmt.bc, `書式バーのボタンの枠が透明(${fmt.bc})`).not.toMatch(clear);
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
   /**
@@ -86,6 +105,11 @@ test('🔴 主の操作だけテーマのアクセント色で見える (#722 P2
   expect(edge.w, '字のあるボタンに縁が無い').toBe('1px');
   expect(edge.style).toBe('solid');
   expect(edge.color, `縁が透明(${edge.color})`).not.toMatch(/, 0\)$|^transparent$/);
+  // 🔴 情報ペインの「日付を外す」は操作なので標準のボタン(地と枠を持つ)。⚠ 値の札(日付そのもの)とは別
+  const clearDate = await restOf('[data-pkc-region="inspector"] [data-pkc-action="clear-entry-date"]');
+  expect(clearDate.bg, `「日付を外す」の地が透明(${clearDate.bg})`).not.toMatch(clear);
+  expect(clearDate.w, '「日付を外す」に枠が無い').toBe('1px');
+  expect(clearDate.bc, `「日付を外す」の枠が透明(${clearDate.bc})`).not.toMatch(clear);
   /**
    * ① 🔴 **主の地 = テーマの `--accent`、字 = `--accent-fg`**(#1982 段 1。旧い「`--fg` 反転」から改めた)。
    * ⚠ 期待値は**値を書かず、同じ変数を実ブラウザで解決させて**取る(テーマを変えても追従する)。
@@ -295,7 +319,26 @@ test('🔴 編集中は「+ ノート」が薄くなり、鍵で撃つと理由�
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await createEntry(page, 'text');
-  await page.locator('[data-pkc-field="editor-body"]').fill('本文です。\n');
+  // 🔴 日付つきのノートにする(情報ペインの「日付を外す」を出すため)。前書きの `date:` が日付になる
+  await page.locator('[data-pkc-field="editor-body"]').fill('---\ndate: 2026-11-21\n---\n本文です。\n');
+  /**
+   * 🔴 **編集中の書式バーのボタンも、字のあるボタンは地と枠を持つ**(#1982 ①の見直し)── 帯の規則が上書きしていない。
+   * ⚠ 鼠を退かしてから測る(hover の地を読まない)。
+   */
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  const restOf = async (sel: string): Promise<{ bg: string; w: string; bc: string }> =>
+    page.evaluate((s) => {
+      const el = document.querySelector(s);
+      if (el === null) throw new Error(`前提が崩れている: ${s} が無い`);
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, w: cs.borderTopWidth, bc: cs.borderTopColor };
+    }, sel);
+  const clear = /, 0\)$|^transparent$/;
+  const fmt = await restOf('[data-pkc-region="format-bar"] button[data-pkc-action]:not([data-pkc-action="open-format-more"])');
+  expect(fmt.bg, `書式バーのボタンの地が透明(${fmt.bg})`).not.toMatch(clear);
+  expect(fmt.w, '書式バーのボタンに枠が無い').toBe('1px');
+  expect(fmt.bc, `書式バーのボタンの枠が透明(${fmt.bc})`).not.toMatch(clear);
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.mouse.move(0, 0);
 

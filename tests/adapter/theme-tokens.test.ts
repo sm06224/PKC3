@@ -230,7 +230,8 @@ describe('配色トークン', () => {
       expect(contrast(tok['--fg']!, hex(hov)), `${where} 乗せた地の上の字`).toBeGreaterThanOrEqual(4.5);
       expect(contrast(hex(rest), tok[surround]!), `${where} 静止の地が周りから見分けられない`).toBeGreaterThanOrEqual(1.1);
       expect(contrast(hex(edge), tok[surround]!), `${where} 縁が周りから見分けられない`).toBeGreaterThanOrEqual(1.2);
-      expect(contrast(hex(hov), hex(rest)), `${where} 乗せた地が静止と同じ`).toBeGreaterThan(1.03);
+      // 🔴 乗せた地は静止の地から**はっきり**段が付く(12 配色 × 3 つの地の実測の最小は 1.111。割合を 7% へ下げると 1.03 前後で落ちる)
+      expect(contrast(hex(hov), hex(rest)), `${where} 乗せた地が静止の地と見分けにくい`).toBeGreaterThanOrEqual(1.08);
     }
   });
 

@@ -1650,6 +1650,10 @@ export class InspectorRenderer {
     // 🔑 日付の見せ方は `formatStoredDate` 1 本(一覧・情報列と同じ規則)
     const label = has ? formatStoredDate(meta.date) : '日付を付ける';
     if (set.textContent !== label) set.textContent = label;
+    // 🔴 日付が在るとき、このボタンは**値(日付そのもの)**で、押すとピッカーが開く ── 担当の名前と同じく字のまま置く(`app.css` の `data-pkc-has-value`)。
+    //   日付が無いとき(「日付を付ける」)は操作なので標準のボタン
+    if (has) set.setAttribute('data-pkc-has-value', '');
+    else set.removeAttribute('data-pkc-has-value');
     /**
      * 🔴 編集中は押せなくする(#513)── 直す前はピッカーの全手順(開く → 選ぶ →
      * 確定)を**完走させてから**reducer が黙って捨てていた。
