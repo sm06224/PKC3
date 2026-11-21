@@ -271,3 +271,21 @@ describe('欄の表(wrapSelection / autoPair)を書き替えると、4 つの欄
     });
   });
 });
+
+describe.each(EDITING_FIELD_KINDS)('%s の欄: 字面のまま読まれる場所では囲まない', (kind) => {
+  // ⚠ 1 画面の行の欄は本文の欄と同じ `typedPairFor` を通る(上の表の書き替えの試験が見ている)。fence の文脈の判定そのものは本文の欄で見る
+  const name = EDITING_FIELD_NAMES[kind === 'row' ? 'editor' : kind];
+  const doc = '```\nabcd\n```\nxy';
+  it('fenced code の中で選んで * ( ` を打つと、囲まず置き換える', () => {
+    for (const key of ['*', '(', '`']) {
+      const ta = field(setup().root, name, doc, 5, 7);
+      expect(press(ta, key).defaultPrevented, `${kind} ${key}`).toBe(false);
+      expect(ta.value).toBe(doc);
+    }
+  });
+  it('対照群: fence の外では囲む', () => {
+    const out = field(setup().root, name, doc, 13, 15);
+    press(out, '*');
+    expect(out.value).toBe('```\nabcd\n```\n*xy*');
+  });
+});
