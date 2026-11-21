@@ -434,6 +434,26 @@ export async function clickReal(page: Page, target: Target): Promise<void> {
 }
 
 /**
+ * 🔴 **見た目の遷移が走り切るのを待つ**(#1982 段 1 以降、ボタンの地と字は `--dur-fast` で遷移する)。
+ *
+ * ⚠ 押した・乗せた・外した直後の `getComputedStyle` は**遷移の途中の色**を返す ── 負荷が高いと
+ *   その途中を読んで落ちる。逆に、hover の地が薄れていく途中の色は「押された印」の規則が
+ *   **無くても**素の地と違って読めるので、印の検査が空振りで通る(pane-resize の縁のボタンで実測)。
+ * ⚠ `expect.poll(...).not.toBe(...)` で待たない ── 変わり始めの 1 読みで通る。
+ * 🔑 待つのは**時間ではなく遷移そのもの**(`getAnimations()` の `finished`)。読む前に呼ぶ。
+ *   ポインタを外したいときは、呼ぶ前に `page.mouse.move(0, 0)` を置く(外す動きの遷移も待てる)。
+ */
+export async function transitionsSettled(...targets: Locator[]): Promise<void> {
+  for (const target of targets) {
+    const left = await target.evaluate(async (el) => {
+      await Promise.all(el.getAnimations().map((a) => a.finished.catch(() => undefined)));
+      return el.getAnimations().length;
+    });
+    expect(left, '遷移が走り切らないうちに読もうとしている').toBe(0);
+  }
+}
+
+/**
  * 🔴 **アプリのタイルを開く = 2 回押す**(#857 段①b。user 裁定 2026-09-13)。
  *
  * ⚠ 1 回目は**印が付くだけ**(掴み損ねで窓が開くのを止めるため)── だから

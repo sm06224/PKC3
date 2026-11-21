@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, transitionsSettled } from './helpers';
 
 // ⚠ 既定は live ── この test は**読む面**の主(「編集」)を見るので、
 //    保存して読む面へ戻れる split で組む(live の顔は unit と別の spec が守る)。
@@ -156,9 +156,13 @@ test('🔴 主の操作だけテーマのアクセント色で見える (#722 P2
   const primBox = (await page
     .locator('[data-pkc-region="detail"] button[data-pkc-variant=primary]')
     .boundingBox())!;
+  const primBtn = page.locator('[data-pkc-region="detail"] button[data-pkc-variant=primary]');
   await page.mouse.move(primBox.x + primBox.width / 2, primBox.y + primBox.height / 2);
+  // ⚠ 地は `--dur-fast` で遷移する(#1982 段 1)── 乗せた・押した直後の途中の色を読まない
+  await transitionsSettled(primBtn);
   const onHover = await opacityNow();
   await page.mouse.down();
+  await transitionsSettled(primBtn);
   const onPress = await opacityNow();
   // ⚠ **押した場所から離してから放す** ── 同じ所で放すと「押した」ことになり、
   //    編集へ入ってしまう(1 稿目でそう外して、次の段の前提が崩れた)
