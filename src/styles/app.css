@@ -766,7 +766,9 @@ select:focus-visible {
   outline-offset: -1px;
 }
 /* 🔴 **いま打っている行**(#2001 段 4。`render/current-line.ts` が欄に印と変数 2 つを置く)。
- * 現在地は**形**で示す(§2-10): 左端の 2px の線(`--accent`。選択中の行の左端線と同じ)+ ごく薄い地(`--surface-hover`)。
+ * 現在地は**形**で示す(§2-10): 左端の 3px の線(`--accent`。選択中の行の左端線と同じ)+ ごく薄い地(`--surface-hover`)。
+ * ⚠ 欄の焦点の輪(`outline: 2px solid var(--accent)`、内側へ 1px)が左端 3px を覆うので、線は **2px 内側から**描く(同じ色でも輪に溶けず、太い帯として見える)。
+ *   字の左の余白は 8px(`textarea` の `padding`)なので、線は字に触れない。
  * 🔑 背景なので版面を動かさず、`background-attachment: local` で**スクロールに合わせて動く**(欄の外へははみ出さない)。
  * ⚠ 欄の `background-color`(`--surface`)の上に重なる。字は背景の上に描かれるので、字の対比は変わらない。 */
 textarea[data-pkc-current-line] {
@@ -777,10 +779,10 @@ textarea[data-pkc-current-line] {
   background-attachment: local;
   background-origin: padding-box;
   background-position:
-    0 var(--pkc-cl-top, 0),
+    2px var(--pkc-cl-top, 0),
     0 var(--pkc-cl-top, 0);
   background-size:
-    2px var(--pkc-cl-h, 0),
+    3px var(--pkc-cl-h, 0),
     100% var(--pkc-cl-h, 0);
 }
 /* 🔴 キーボードで止まった画像・図の枠(依頼 79-3 C)── Enter で大きく表示する。マウスで押したときは出さない(`:focus-visible`) */
