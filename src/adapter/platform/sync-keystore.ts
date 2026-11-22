@@ -61,14 +61,69 @@ export interface KeystoreBackend {
 /** 鍵の保管の DB 名。⚠ この名前は**この file にしか書かない**(書き出しの経路がこの DB を読まないことを、名前の所在で固定する)。 */
 export const SYNC_KEYS_DB = 'pkc3-sync-keys';
 
+/** タブをまたいで 1 つずつ動かす口(`navigator.locks`。無ければ `null` ── このタブの中だけ直列にする)。 */
+export type KeystoreLock = <T>(fn: () => Promise<T>) => Promise<T>;
+
+/** 窓の `navigator.locks` から作る(無ければ `null`)。 */
+export function windowKeystoreLock(nav: object = globalThis.navigator ?? {}): KeystoreLock | null {
+  const locks = (nav as { locks?: { request?: unknown } }).locks;
+  if (typeof locks?.request !== 'function') return null;
+  const request = locks.request as (name: string, fn: () => Promise<unknown>) => Promise<unknown>;
+  return <T>(fn: () => Promise<T>): Promise<T> => request.call(locks, SYNC_KEYS_DB, fn) as Promise<T>;
+}
+
+/**
+ * 🔴 **接続先の設定を確かめる**(着地前レビュー ⚠4)── 平文で置く物に認証情報を紛れ込ませない。
+ * - エンドポイントは `https://<host>[:port]` だけ(利用者名・パスワード・クエリ・断片・パスを持たない)。
+ *   ⚠ `http://` は手元の確かめ(`localhost` / `127.0.0.1`)だけ許す(作り物の S3 サーバの smoke と、手元の MinIO)。
+ * - 接頭辞に `?` `#` を入れない。
+ * @returns 断る理由(通れば `null`)。⚠ 理由の字にエンドポイントの字そのものは入れない(認証情報が紛れていても出さない)
+ */
+export function s3ConfigProblem(c: S3BoxConfig): string | null {
+  let u: URL;
+  try {
+    u = new URL(c.endpoint);
+  } catch {
+    return 'エンドポイントの形が読めません(https://ホスト名 の形で入れてください)';
+  }
+  const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && local)) return 'エンドポイントは https:// で始めてください';
+  if (u.username !== '' || u.password !== '') return 'エンドポイントに利用者名やパスワードを入れないでください(アクセスキーの欄に入れます)';
+  if (u.search !== '' || u.hash !== '' || (u.pathname !== '/' && u.pathname !== '')) return 'エンドポイントはホスト名までにしてください(パスや ? # を付けない)';
+  if (c.bucket.trim() === '' || /[/?#]/.test(c.bucket)) return 'バケット名を入れてください(/ ? # は使えません)';
+  if (/[?#]/.test(c.prefix)) return '置き場の接頭辞に ? や # は使えません';
+  return null;
+}
+
+/** 暗号文を、どのワークスペースのどの接続先の物かに結び付ける字(AES-GCM の追加の認証データ)。 */
+function aadOf(cid: string, c: S3BoxConfig): Uint8Array<ArrayBuffer> {
+  return new TextEncoder().encode(JSON.stringify(['pkc3-sync-box', cid, c.kind, c.endpoint, c.bucket, c.region, c.prefix]));
+}
+
 export class SyncKeystore {
+  /** このタブの中の直列(`lock` が無い環境でも、保存・外す・鍵を作るが重ならない)。 */
+  private chain: Promise<unknown> = Promise.resolve();
+
   constructor(
     private readonly backend: KeystoreBackend,
     private readonly subtle: SubtleCrypto = globalThis.crypto.subtle,
     private readonly random: (a: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer> = (a) => globalThis.crypto.getRandomValues(a),
+    private readonly lock: KeystoreLock | null = null,
   ) {}
 
-  /** 暗号の鍵(無ければ作る。⚠ 取り出せない鍵 ── 平文の鍵の字はどこにも出ない)。 */
+  /**
+   * 🔴 **書く操作は 1 つずつ**(着地前レビュー 🔴2)── 保存と外すが重なると、外した側が鍵を消した直後に保存側が古い鍵で
+   *   書いて開けない秘密が残る / 2 つの保存が同時に鍵を作ると後勝ちで先の秘密が開けなくなる。タブの中は約束の鎖、
+   *   タブをまたぐのは `navigator.locks`(在れば)で並べる。
+   */
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    const run = (): Promise<T> => (this.lock === null ? fn() : this.lock(fn));
+    const next = this.chain.then(run, run);
+    this.chain = next.catch(() => undefined);
+    return next;
+  }
+
+  /** 暗号の鍵(無ければ作る。⚠ 取り出せない鍵 ── 平文の鍵の字はどこにも出ない)。⚠ `serial` の中からだけ呼ぶ。 */
   private async key(): Promise<CryptoKey> {
     const have = await this.backend.getKey();
     if (have !== null) return have;
@@ -77,12 +132,21 @@ export class SyncKeystore {
     return k;
   }
 
-  /** 保管先の接続情報と秘密を置く(上書き)。 */
-  async save(cid: string, config: S3BoxConfig, secret: S3BoxSecret): Promise<void> {
-    const iv = this.random(new Uint8Array(12));
-    const plain = new TextEncoder().encode(JSON.stringify({ a: secret.accessKeyId, s: secret.secretAccessKey }));
-    const data = await this.subtle.encrypt({ name: 'AES-GCM', iv }, await this.key(), plain);
-    await this.backend.putBox(cid, { config: { ...config }, sealed: { iv, data } });
+  /**
+   * 保管先の接続情報と秘密を置く(上書き)。
+   * ⚠ 鍵が消えていて(ブラウザが退避した等)他の接続が残っていると、その接続の秘密は開けなくなる(`open` が `null` ──
+   *   画面は「接続し直してください」と言う)。黙って別の鍵で開けたことにはしない。
+   * @throws 接続先の設定が通らない(`s3ConfigProblem`)
+   */
+  save(cid: string, config: S3BoxConfig, secret: S3BoxSecret): Promise<void> {
+    const problem = s3ConfigProblem(config);
+    if (problem !== null) return Promise.reject(new Error(problem));
+    return this.serial(async () => {
+      const iv = this.random(new Uint8Array(12));
+      const plain = new TextEncoder().encode(JSON.stringify({ a: secret.accessKeyId, s: secret.secretAccessKey }));
+      const data = await this.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aadOf(cid, config) }, await this.key(), plain);
+      await this.backend.putBox(cid, { config: { ...config }, sealed: { iv, data } });
+    });
   }
 
   /** 接続情報だけ(秘密を開かない ── 画面に出すとき)。 */
@@ -91,7 +155,9 @@ export class SyncKeystore {
   }
 
   /**
-   * 接続情報と秘密を開く。開けなければ `null`(⚠ 理由の字に秘密を混ぜない ── 呼び手は「鍵を読めません」とだけ言う)。
+   * 接続情報と秘密を開く。開けなければ `null`(⚠ 理由の字に秘密を混ぜない ── 呼び手は「認証情報を読めません」とだけ言う)。
+   * 🔴 暗号文は、置いたワークスペース(`cid`)と接続先の設定に結び付いている(追加の認証データ)── 別のワークスペースの
+   *   暗号文を差し込まれても、接続先だけ書き換えられても開かない(秘密を別の宛先へ送らない)。
    */
   async open(cid: string): Promise<{ config: S3BoxConfig; secret: S3BoxSecret } | null> {
     const saved = await this.backend.getBox(cid);
@@ -99,7 +165,11 @@ export class SyncKeystore {
     const k = await this.backend.getKey();
     if (k === null) return null;
     try {
-      const plain = await this.subtle.decrypt({ name: 'AES-GCM', iv: saved.sealed.iv }, k, saved.sealed.data);
+      const plain = await this.subtle.decrypt(
+        { name: 'AES-GCM', iv: saved.sealed.iv, additionalData: aadOf(cid, saved.config) },
+        k,
+        saved.sealed.data,
+      );
       const o = JSON.parse(new TextDecoder().decode(plain)) as { a?: unknown; s?: unknown };
       if (typeof o.a !== 'string' || typeof o.s !== 'string') return null;
       return { config: saved.config, secret: { accessKeyId: o.a, secretAccessKey: o.s } };
@@ -109,9 +179,11 @@ export class SyncKeystore {
   }
 
   /** 🔴 接続を外す(片道にしない)── 接続情報と秘密を消す。全部の接続が無くなったら暗号の鍵も消す。 */
-  async remove(cid: string): Promise<void> {
-    await this.backend.deleteBox(cid);
-    if ((await this.backend.countBoxes()) === 0) await this.backend.deleteKey();
+  remove(cid: string): Promise<void> {
+    return this.serial(async () => {
+      await this.backend.deleteBox(cid);
+      if ((await this.backend.countBoxes()) === 0) await this.backend.deleteKey();
+    });
   }
 }
 
@@ -138,7 +210,8 @@ export function idbKeystoreBackend(dbName = SYNC_KEYS_DB): KeystoreBackend {
     const db = await open();
     try {
       return await new Promise<T>((resolve, reject) => {
-        const t = db.transaction(store, mode);
+        // 鍵の書き込みは書き終えるまで戻らない(直後に落ちて鍵だけ失うと、置いた秘密が全部開けなくなる)
+        const t = store === KEYS && mode === 'readwrite' ? db.transaction(store, mode, { durability: 'strict' }) : db.transaction(store, mode);
         const r = fn(t.objectStore(store));
         t.oncomplete = () => resolve(r.result);
         t.onerror = () => reject(t.error ?? new Error('認証情報の置き場に書けません'));

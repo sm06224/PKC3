@@ -14,7 +14,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { SyncKeystore, SYNC_KEYS_DB, type KeystoreBackend, type S3BoxConfig } from '../../src/adapter/platform/sync-keystore';
+import { s3ConfigProblem, SyncKeystore, SYNC_KEYS_DB, type KeystoreBackend, type S3BoxConfig } from '../../src/adapter/platform/sync-keystore';
 
 const CANARY_ID = 'AKIA-CANARY-ID-7Q3';
 const CANARY_SECRET = 'canary/SECRET+value=Zx81';
@@ -105,6 +105,113 @@ describe('SyncKeystore', () => {
   });
 });
 
+describe('🔴 着地前レビュー 🔴1: 暗号文は置いたワークスペースと接続先に結び付く(追加の認証データ)', () => {
+  it('🔴 別のワークスペースの暗号文を差し込まれても開かない', async () => {
+    const be = memBackend();
+    const ks = new SyncKeystore(be);
+    await ks.save('c1', CONFIG, { accessKeyId: CANARY_ID, secretAccessKey: CANARY_SECRET });
+    await be.putBox('c2', (await be.getBox('c1'))!);
+    expect(await ks.open('c2'), '差し込んだ暗号文で c2 の秘密として開いた').toBeNull();
+    expect((await ks.open('c1'))?.secret.accessKeyId, '対照群: 元のワークスペースでは開く').toBe(CANARY_ID);
+  });
+  it('🔴 接続先(エンドポイント)だけ書き換えられたら開かない(秘密を別の宛先へ送らない)', async () => {
+    const be = memBackend();
+    const ks = new SyncKeystore(be);
+    await ks.save('c1', CONFIG, { accessKeyId: CANARY_ID, secretAccessKey: CANARY_SECRET });
+    const saved = (await be.getBox('c1')) as unknown as { config: S3BoxConfig; sealed: unknown };
+    await be.putBox('c1', { config: { ...saved.config, endpoint: 'https://evil.example.test' }, sealed: saved.sealed } as never);
+    expect(await ks.open('c1')).toBeNull();
+  });
+  it('IV は保存のたびに違う', async () => {
+    const be = memBackend();
+    const ks = new SyncKeystore(be);
+    await ks.save('c1', CONFIG, { accessKeyId: 'a', secretAccessKey: 'b' });
+    const iv1 = Buffer.from(((await be.getBox('c1')) as unknown as { sealed: { iv: Uint8Array } }).sealed.iv).toString('hex');
+    await ks.save('c1', CONFIG, { accessKeyId: 'a', secretAccessKey: 'b' });
+    const iv2 = Buffer.from(((await be.getBox('c1')) as unknown as { sealed: { iv: Uint8Array } }).sealed.iv).toString('hex');
+    expect(iv1).not.toBe(iv2);
+  });
+});
+
+describe('🔴 着地前レビュー 🔴2: 書く操作は 1 つずつ(鍵の作り合い・保存と外すの重なり)', () => {
+  /** 読み書きの間に間を入れる置き場(重なりを起こしやすくする)。 */
+  function slowBackend(): ReturnType<typeof memBackend> {
+    const be = memBackend();
+    const wait = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
+    return {
+      ...be,
+      getKey: async () => {
+        const k = await be.getKey();
+        await wait();
+        return k;
+      },
+      putBox: async (cid, v) => {
+        await wait();
+        await be.putBox(cid, v);
+      },
+      countBoxes: async () => {
+        await wait();
+        return be.countBoxes();
+      },
+    };
+  }
+  it('🔴 鍵が無いところへ 2 つ同時に保存しても、両方とも開ける(鍵を 2 本作って後勝ちにしない)', async () => {
+    const ks = new SyncKeystore(slowBackend());
+    await Promise.all([
+      ks.save('c1', CONFIG, { accessKeyId: 'one', secretAccessKey: 's1' }),
+      ks.save('c2', CONFIG, { accessKeyId: 'two', secretAccessKey: 's2' }),
+    ]);
+    expect((await ks.open('c1'))?.secret.accessKeyId).toBe('one');
+    expect((await ks.open('c2'))?.secret.accessKeyId).toBe('two');
+  });
+  it('🔴 外すと保存が重なっても、保存した秘密は開ける(外した側が鍵を消して古い鍵の暗号文を残さない)', async () => {
+    const ks = new SyncKeystore(slowBackend());
+    await ks.save('c1', CONFIG, { accessKeyId: 'one', secretAccessKey: 's1' });
+    await Promise.all([ks.remove('c1'), ks.save('c2', CONFIG, { accessKeyId: 'two', secretAccessKey: 's2' })]);
+    expect((await ks.open('c2'))?.secret.accessKeyId).toBe('two');
+  });
+  it('タブをまたぐ口(navigator.locks)を渡せば、書く操作はその中で動く', async () => {
+    const inside: string[] = [];
+    let depth = 0;
+    const lock = async <T,>(fn: () => Promise<T>): Promise<T> => {
+      depth += 1;
+      try {
+        return await fn();
+      } finally {
+        depth -= 1;
+      }
+    };
+    const be = memBackend();
+    const putBox = be.putBox;
+    be.putBox = async (cid, v) => {
+      inside.push(depth > 0 ? 'locked' : 'free');
+      await putBox(cid, v);
+    };
+    await new SyncKeystore(be, undefined, undefined, lock).save('c1', CONFIG, { accessKeyId: 'a', secretAccessKey: 'b' });
+    expect(inside).toEqual(['locked']);
+  });
+});
+
+describe('着地前レビュー ⚠4: 平文で置く接続先に認証情報を紛れ込ませない', () => {
+  it('🔴 利用者名・パスワード・クエリ・断片・パス入りのエンドポイント、http(手元以外)は断る(理由にエンドポイントの字を出さない)', async () => {
+    const bad = [
+      'https://AKIAX:SECRETX@s3.example.test',
+      'https://s3.example.test/?X-Amz-Signature=SECRETX',
+      'https://s3.example.test/#SECRETX',
+      'https://s3.example.test/bucket',
+      'http://s3.example.test',
+    ];
+    for (const endpoint of bad) {
+      const why = s3ConfigProblem({ ...CONFIG, endpoint });
+      expect(why, endpoint).not.toBeNull();
+      expect(why!).not.toContain('SECRETX');
+      await expect(new SyncKeystore(memBackend()).save('c1', { ...CONFIG, endpoint }, { accessKeyId: 'a', secretAccessKey: 'b' })).rejects.toThrow();
+    }
+    expect(s3ConfigProblem({ ...CONFIG, endpoint: 'http://localhost:9000' }), '手元の確かめは通す').toBeNull();
+    expect(s3ConfigProblem(CONFIG)).toBeNull();
+  });
+});
+
 describe('🔴 鍵が書き出しの経路に混ざらない(user の必須ガード)', () => {
   /** src の .ts を全部(コメントを含む原文)。 */
   function sources(dir = 'src'): { path: string; text: string }[] {
@@ -130,14 +237,24 @@ describe('🔴 鍵が書き出しの経路に混ざらない(user の必須ガ�
   const ALLOWED_IMPORTERS: Record<string, string> = {};
 
   it('🔴 鍵の口を import している file は、許した物だけ(書き出しの経路は 1 つも無い)', () => {
+    // ⚠ import の書き方を問わない(`from` / 動的 `import()` / 副作用の `import '…'` / 拡張子つき)── 字としての参照を全部数える
     const importers = all
-      .filter((f) => /from\s+['"][^'"]*sync-keystore['"]/.test(f.text))
+      .filter((f) => /['"][^'"]*sync-keystore(?:\.ts)?['"]/.test(f.text))
       .map((f) => f.path)
       .filter((p) => !p.endsWith('sync-keystore.ts'));
     expect(importers.filter((p) => ALLOWED_IMPORTERS[p] === undefined), '許していない file が鍵の口を読んでいる').toEqual([]);
     // 書き出しの経路の file が許した一覧に紛れていない
     for (const p of Object.keys(ALLOWED_IMPORTERS))
       expect(p, `書き出しの経路が鍵の口を読む: ${p}`).not.toMatch(/backup|export|diff-file|sync-diff|settings-file|message|notice|portable/);
+  });
+
+  it('🔴 src のどこも IndexedDB の DB を全部並べない(`indexedDB.databases()` で鍵の置き場を拾う道を作らない)', () => {
+    expect(all.filter((f) => /indexedDB\s*\.\s*databases\s*\(/.test(f.text)).map((f) => f.path)).toEqual([]);
+  });
+
+  it('🔴 鍵の口の file(IndexedDB の置き場も含む)は localStorage / sessionStorage に触らない', () => {
+    const me = all.find((f) => f.path.endsWith(join('platform', 'sync-keystore.ts')))!;
+    expect(me.text.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')).not.toMatch(/localStorage|sessionStorage/);
   });
 
   it('🔴 鍵を置いても、localStorage(設定ファイルが運ぶ置き場)にも sessionStorage にも 1 字も書かない', async () => {
