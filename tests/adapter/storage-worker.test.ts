@@ -3705,6 +3705,10 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
     expect(await request({ op: 'getBody', cid: 'c1', lid: 'csv-big-after' })).toContain(
       '断った後に書く',
     );
+    // 🔴 **片付ける** ── この file の test は 1 つの DB を共有する。本文の csv はこちらの DB へ打つ問い合わせの
+    //    たびに全部読み直されるので、巨大な本文を残すと、後の test の問い合わせが 1 回ごとに約 1.3 秒(負荷時 約 3 秒)
+    //    重くなり、2 回打つ test が 5 秒の上限を越えて落ちていた(CI 2026-11-22。PR #2025 の unit 2/3)
+    await write('csv-big', doc('片付けた'));
   });
 
   it('🔴 #968: データ行 0 行で列だけ極端に多い表も、組み立てずに断る', async () => {
@@ -3714,6 +3718,8 @@ describe('本文の csv を SQL から引く(#681 段③)', () => {
     // ⚠ 対照群 ── 断った後もノートは保存できる
     await write('csv-wide-after', doc('広い表の後に書く'));
     expect(await request({ op: 'getBody', cid: 'c1', lid: 'csv-wide-after' })).toContain('広い表の後に書く');
+    // 🔴 片付ける(上の test と同じ理由)
+    await write('csv-wide', doc('片付けた'));
   });
 
   it('⚠ 名前は語の丸ごと一致でだけ拾う(売上高 で 売上 を組み立てない)', async () => {
