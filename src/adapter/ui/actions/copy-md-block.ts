@@ -183,7 +183,7 @@ export const MENU_FROM_ATTR = 'data-pkc-menu-from';
 export function flashCopied(clicked: HTMLElement): void {
   const from = clicked.getAttribute(MENU_FROM_ATTR);
   const opener = from === null ? null : clicked.ownerDocument.querySelector<HTMLElement>(`[data-pkc-action="${from}"]`);
-  const target = opener ?? clicked;
+  const target = opener ?? hiddenSourceOpener(clicked) ?? clicked;
   target.setAttribute('data-pkc-flash', 'true');
   const prev = flashTimers.get(target);
   if (prev !== undefined) clearTimeout(prev);
@@ -194,6 +194,19 @@ export function flashCopied(clicked: HTMLElement): void {
       flashTimers.delete(target);
     }, 700),
   );
+}
+
+/**
+ * 🔴 **隠した元のボタンが押されたとき(キー・操作を探すから実行)は、一覧を開くボタンを光らせる**(A2)。
+ *   「コピー ▾」の書式付き・HTML ソース・選択範囲は隠した元(`copy-more-source`)に在る ── そこに合図を付けても見えず、
+ *   成功しても画面に何も残らない(dead click と区別がつかない)。元の器が `data-pkc-menu-from` で開くボタンを名指しする。
+ * ⚠ 開くボタンは**同じ器の親の中**から探す(2 ペインなどで帯が 2 つあっても、押したノートの帯を光らせる)。
+ */
+function hiddenSourceOpener(clicked: HTMLElement): HTMLElement | null {
+  const src = clicked.closest<HTMLElement>(`[hidden][${MENU_FROM_ATTR}]`);
+  if (src === null) return null;
+  const action = src.getAttribute(MENU_FROM_ATTR);
+  return (src.parentElement ?? clicked.ownerDocument).querySelector<HTMLElement>(`[data-pkc-action="${action}"]`);
 }
 
 /**

@@ -2436,6 +2436,8 @@ export class DetailRenderer {
           copyMore.textContent = '▾';
           const copySource = document.createElement('div');
           copySource.setAttribute('data-pkc-field', 'copy-more-source');
+          // 🔴 キー・操作を探すから隠した元を押したときの合図は ▾ に出す(`flashCopied` が読む)
+          copySource.setAttribute('data-pkc-menu-from', 'open-copy-menu');
           copySource.hidden = true;
           copySource.append(html, rich, sel);
           // 🔴 ノートの中だけを探す小さな欄(#1163 依頼 163)。⚠ `Ctrl+F` と同じ口(`find-in-note`)
@@ -2450,7 +2452,14 @@ export class DetailRenderer {
            */
           const cols = iconButton('cycle-read-columns', '段組みを切り替える');
           cols.title = hintTitle('本文の段組みを 1 → 2 → 3 → 4 段の順に切り替えます', 'cycle-read-columns');
-          bar.append(this.barButton, md, copyMore, copySource, find, cols);
+          /**
+           * 🔴 本体と ▾ は 1 つの器(`copy-split`)に包む ── 帯は折り返すので、別々の項目だと 2 つの間で折れて ▾ が次の行の頭へ割れる。
+           *   器の中に隠した元も置く(`flashCopied` が器の中から ▾ を探す)。
+           */
+          const split = document.createElement('span');
+          split.setAttribute('data-pkc-field', 'copy-split');
+          split.append(md, copyMore, copySource);
+          bar.append(this.barButton, split, find, cols);
         } else {
           // 保存失敗からの復帰導線: baseline ≠ persisted =「disk に未達の commit が
           // ある」証拠(P3-5 の分離の回収点)。黙って死なせず再送を提示する
