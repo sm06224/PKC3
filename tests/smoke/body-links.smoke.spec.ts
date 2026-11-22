@@ -412,7 +412,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   ).toHaveCount(1);
 
   await openBrowse(page, 'filer');
-  await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-region="rail"] [data-pkc-action="show-trash"]');
   await clickReal(page, '[data-pkc-action="restore-trash"]');
   // 前提: 戻したノートが主の枠に開いた(= 留めた枠の本文は選択の変化で描き直されていない)
   await expect(page.locator('[data-pkc-split-main] [data-pkc-field="detail-title"]')).toContainText(
@@ -442,7 +442,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
    * 🔑 直す前は、着いた時点で戻したノートへ選択が引き戻された(押したノートが開かない)。
    */
   await openBrowse(page, 'filer');
-  await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-region="rail"] [data-pkc-action="show-trash"]');
   await expect(page.locator('[data-pkc-region="filer-trash"] li'), '前提: ゴミ箱に 1 件').toHaveCount(1);
   /**
    * ⚠ 押す相手は「いま開いているノート**以外**」にする(台帳 #1852 G2 / 依頼 106 A)。戻したノートが元の並びに戻るようになり、

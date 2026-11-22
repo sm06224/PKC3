@@ -11765,6 +11765,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   'open-today-as': (dispatcher, target, services, root) => {
     const kind = target.getAttribute('data-pkc-archetype') === 'textlog' ? 'textlog' : 'text';
     appTodayKind.set(kind);
+    // 選択の印も移す(いまの既定 = 帯の「今日」が開く方)
+    for (const item of root.querySelectorAll<HTMLElement>('[data-pkc-region="create-menu"] [data-pkc-action="open-today-as"]'))
+      item.setAttribute('aria-checked', item.getAttribute('data-pkc-archetype') === kind ? 'true' : 'false');
     root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]')?.setAttribute('hidden', '');
     root.querySelector('[data-pkc-field="create-pick"]')?.setAttribute('aria-expanded', 'false');
     openToday(dispatcher, services, root, kind);

@@ -140,13 +140,14 @@ test('🔴 見出しのあるノートで目次が出て、押すとそこまで
     viewportH - btnBox!.height,
   );
   expect(btnBox!.y, `目次のボタンが画面の上へはみ出している(y=${btnBox!.y})`).toBeGreaterThanOrEqual(0);
-  // 🔑 「先頭へ戻る」の押しと同じ右の列に居る(= 2 つで 1 組に読める)── 右端が揃う
-  const topBox = await page.locator('[data-pkc-region="detail"] .pkc-back-to-top').boundingBox();
-  expect(topBox, '先頭へ戻るの押しが描かれていない(前提)').not.toBeNull();
-  expect(
-    Math.abs(btnBox!.x + btnBox!.width - (topBox!.x + topBox!.width)),
-    `目次の押しと先頭へ戻るの押しの右端が揃っていない(${btnBox!.x + btnBox!.width} / ${topBox!.x + topBox!.width})`,
-  ).toBeLessThanOrEqual(1);
+  // 🔑 2026-11-22(実機の崩れ。user 指示): 目次の押しは**操作の帯の右端**に入る(帯は送っても上に留まる)──
+  //   帯の右端とそろい、帯のボタンと上端・高さが同じ(旧: 本文の右上に浮かべ、先頭へ戻るの押しと右端をそろえていた)
+  const barBox = await page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-toolbar"]').boundingBox();
+  const editBox = await page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-toolbar"] [data-pkc-action="start-edit"]').boundingBox();
+  expect(barBox, '操作の帯が描かれていない(前提)').not.toBeNull();
+  expect(Math.abs(btnBox!.x + btnBox!.width - (barBox!.x + barBox!.width)), '目次の押しが帯の右端にそろっていない').toBeLessThanOrEqual(1);
+  expect(Math.abs(btnBox!.y - editBox!.y), '目次の押しが帯のボタンと段違い').toBeLessThanOrEqual(1);
+  expect(Math.abs(btnBox!.height - editBox!.height), '目次の押しが帯のボタンと高さ違い').toBeLessThanOrEqual(1);
   await clickReal(page, `${QUICK} .pkc-quick-toc-btn`);
   await expect(page.locator(`${QUICK} .pkc-quick-toc-popover`), 'クイック目次が開かない').toBeVisible();
   await expect(page.locator(QITEM), '前提が崩れている(目次の行が 3 本でない)').toHaveCount(3);
@@ -156,6 +157,8 @@ test('🔴 見出しのあるノートで目次が出て、押すとそこまで
   expect(pop!.y, '目次が押しの下に開いていない').toBeGreaterThanOrEqual(btnBox!.y);
   expect(pop!.x, '目次が画面の左へはみ出している').toBeGreaterThanOrEqual(0);
   expect(pop!.x + pop!.width, '目次が画面の右へはみ出している').toBeLessThanOrEqual(vw);
+  // 🔴 帯に入れた目次の一覧が、器(押しの幅)に潰れない(着地前レビュー 🔴1 ── 260px の指定が 40px ほどに縮んでいた)
+  expect(pop!.width, `目次の一覧が細く潰れている(${pop!.width}px)`).toBeGreaterThanOrEqual(200);
   const activeRows = async (): Promise<number[]> =>
     page.locator(QITEM).evaluateAll((els) =>
       els.flatMap((el, i) => (el.hasAttribute('data-pkc-active') ? [i] : [])),

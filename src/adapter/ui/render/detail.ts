@@ -64,6 +64,9 @@ import { buildMessageBar, syncMessageBar } from './message-bar';
 import { installBackToTop, type BackToTopHandle } from './back-to-top';
 import { installReadingProgress, type ReadingProgressHandle } from './reading-progress';
 import { installQuickToc, type QuickTocHandle } from './quick-toc';
+
+/** 目次の押しを操作の帯に入れている印(`app.css` が読む)。 */
+const QUICK_TOC_DOCKED_ATTR = 'data-pkc-docked';
 import { requestInspectorTocSpy } from './inspector-toc-spy';
 import {
   clearHitHighlights,
@@ -1428,7 +1431,8 @@ export class DetailRenderer {
     paintHitRanges(ranges, index);
     // 🔑 「目次」の隣へ置く ── 目次が出ているときだけ、その幅の分を右へ空ける
     const toc = this.quickTocHandle;
-    const gap = toc !== null && !toc.element.hidden ? toc.button.offsetWidth + 8 : 0;
+    // ⚠ 目次を操作の帯に入れている間は、右の列に居ない(空ける幅は 0)
+    const gap = toc !== null && !toc.element.hidden && !toc.element.hasAttribute(QUICK_TOC_DOCKED_ATTR) ? toc.button.offsetWidth + 8 : 0;
     this.searchJumpBar?.update({ total: ranges.length, index, query: jump.query }, gap);
     if (jump.gen === this.jumpSentGen) return;
     this.jumpSentGen = jump.gen;
@@ -1438,6 +1442,25 @@ export class DetailRenderer {
     const at = hit.startContainer.parentElement;
     if (at !== null) revealBlock(host, at);
     scrollToHit(this.scroller, host, hit);
+  }
+
+  /**
+   * 🔴 **「≡ 目次」は操作の帯の右端に入れる**(実機の崩れ。user 指示 2026-11-22)── 本文の右上に浮かべていた押しは、
+   *   帯のボタンより数 px 上に白い地で飛び出し、段違いに見えた(浮かせた箱の `top` は帯の高さから決め打ちで、
+   *   送る前は帯の位置と食い違う)。帯の中なら高さ・上端・見た目が他のボタンと同じになり、帯は送っても上に留まる
+   *   (#1178「送った先でも押せる」はそのまま)。⚠ 帯が無い形(編集中・保存し直し)では今までどおり本文の右上に戻す。
+   */
+  private dockQuickToc(): void {
+    const toc = this.quickTocHandle;
+    if (toc === null) return;
+    const bar = this.barShape === 'edit' ? (this.barSlot?.querySelector<HTMLElement>('[data-pkc-field="detail-toolbar"]') ?? null) : null;
+    if (bar !== null) {
+      if (toc.element.parentElement !== bar) bar.append(toc.element);
+      toc.element.setAttribute(QUICK_TOC_DOCKED_ATTR, '');
+    } else if (toc.element.hasAttribute(QUICK_TOC_DOCKED_ATTR) || !toc.element.isConnected) {
+      toc.element.removeAttribute(QUICK_TOC_DOCKED_ATTR);
+      this.region.prepend(toc.element);
+    }
   }
 
   private renderCore(state: AppState): void {
@@ -1725,6 +1748,7 @@ export class DetailRenderer {
       this.readingProgressHandle = installReadingProgress(this.scroller, this.region);
       this.quickTocHandle?.dispose();
       this.quickTocHandle = installQuickToc(this.region, this.bodyHost, this.scroller);
+      this.dockQuickToc();
       // 🔴 「探す」の帯は主の枠だけ(#1102 段①)── 留めた枠は別のノートを出すので持たない
       if (this.pinnedLid === null) this.searchJumpBar = installSearchJumpBar(this.region);
       this.skeletonLid = lid;
@@ -2425,6 +2449,7 @@ export class DetailRenderer {
         }
         slot.append(bar);
       }
+      this.dockQuickToc();
     }
     // ⚠ 形が同じなら node は使い回し、**状態だけ**当てる
     if (this.barShape === 'edit' && this.barButton) {

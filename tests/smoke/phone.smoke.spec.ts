@@ -1872,7 +1872,8 @@ test('🔴 スマホでは、表の升が押せることが字で出る (#750 I2
   const covered = await page.evaluate(() => {
     const toc = document.querySelector('.pkc-quick-toc-btn')!.getBoundingClientRect();
     const bar = document.querySelector('[data-pkc-region="detail"] [data-pkc-field="detail-bar-slot"]');
-    const buttons = bar ? [...bar.querySelectorAll('button')] : [];
+    // ⚠ 目次の押しは帯の中に入った(2026-11-22)── 自分自身は数えない
+    const buttons = bar ? [...bar.querySelectorAll('button')].filter((b) => !b.classList.contains('pkc-quick-toc-btn') && !b.closest('.pkc-quick-toc-popover')) : [];
     const out: string[] = [];
     for (const b of buttons) {
       const r = b.getBoundingClientRect();

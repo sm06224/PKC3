@@ -552,7 +552,7 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
       '[data-pkc-region="create-menu"] [data-pkc-action="pick-create-kind"]',
     );
     const today = root.querySelector<HTMLButtonElement>(
-      '[data-pkc-region="create-menu"] [data-pkc-action="open-today"]',
+      '[data-pkc-region="create-menu"] [data-pkc-action="open-today-as"]',
     );
     const attach = root.querySelector<HTMLButtonElement>(
       '[data-pkc-region="create-menu"] [data-pkc-action="attach-file"]',

@@ -1064,7 +1064,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'attach-file',
-    label: '添付する',
+    label: '添付',
     contexts: ['global'],
     defaults: [],
     note: 'ファイルを選んで、開いているノートの本文に取り込みます(ファイルの選択画面が開きます)',
@@ -1080,10 +1080,10 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'open-today',
-    label: '今日のノートを開く',
+    label: '今日を開く',
     contexts: ['global'],
     defaults: ['Alt+T'],
-    note: '今日の日付のノートを開きます。無ければ作ります',
+    note: '今日の日付のノート(▼ の一覧で「今日のログ」を選んでいればログ)を開きます。無ければ作ります',
     alias: '今日 日記 デイリー 日付ノート',
   },
   /**
@@ -1284,7 +1284,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'start-audio-capture',
-    label: '録音する',
+    label: '録音',
     contexts: ['global'],
     defaults: [],
     note: 'マイクで録音して、録り始めたノートに入れます(ノートを開いていないときは、呼ぶとその理由が出ます)',
@@ -1292,7 +1292,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'start-screen-capture',
-    label: '画面を録画する',
+    label: '画面録画',
     contexts: ['global'],
     defaults: [],
     note: '画面を録画して、録り始めたノートに入れます(ノートを開いていないときは、呼ぶとその理由が出ます)',
