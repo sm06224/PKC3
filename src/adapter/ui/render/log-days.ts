@@ -26,7 +26,7 @@
  * 行の `data-pkc-day-folded` が事実。描き直しで行が作り直されても、**日(+何番目か)をキー**に引き継ぐ。
  */
 import { OVERLAY_ATTR } from './apply-blocks';
-import { descRank, logDepths, logSegments, orderValue } from '@features/textlog/log-order';
+import { descRank, logDepths, logSegments, ORDER_STRIDE, orderValue } from '@features/textlog/log-order';
 import { appLogOrder } from './log-order-setting';
 import {
   formatLogDay,
@@ -499,4 +499,53 @@ export function applyLogDepth(host: HTMLElement, blocks: readonly Element[], lev
     const time = log && (levels[i] ?? 0) === 2 && logDayOfHeading(b.textContent ?? '') !== null;
     if (time !== b.hasAttribute(LOG_TIME_ATTR)) b.toggleAttribute(LOG_TIME_ATTR, time);
   });
+}
+
+/** 新しい順で塊を記録の境目の外へ動かそうとしたときの断り文(#2018 フォロー。user 裁定 2026-11-22)。 */
+export const LOG_ORDER_CROSS_REFUSAL =
+  '新しい順で並べている間は、記録の境目をまたいでブロックを動かせません(記録の中では動かせます。古い順に戻すと境目もまたげます)';
+
+/**
+ * 🔴 **新しい順のログで、塊の移動が記録の境目をまたぐか**(#2018 フォロー。user 裁定 2026-11-22
+ * 「DOM の順のまま動かし、記録の境目をまたぐ移動だけ断り文を出す」)。
+ *
+ * ⚠ 新しい順では見た目の上下が記録の境目で DOM と逆になる ── 「上へ」が見た目では下へ動く。記録の中では見た目と
+ *   DOM の順が同じなので、そのまま動かしてよい。古い順・ログでない面では常に `false`(今までどおり)。
+ * 記録は見た目の順(`order` の順位 = `ORDER_STRIDE` で割った商)で見分ける ── 並べ方と同じ 1 つの答え。
+ *
+ * @param fm frontmatter の行数(座標は生の body の行。描いた塊の刻印は frontmatter を剥いだ行)
+ * @param start / end 動かす範囲(生の body の行・両端含む)
+ * @param toBefore 入れる位置(その行の前。生の body の行)
+ */
+export function crossesLogRecord(host: HTMLElement, fm: number, start: number, end: number, toBefore: number): boolean {
+  if (!host.hasAttribute(LOG_DAYS_HOST_ATTR) || host.getAttribute(LOG_ORDER_ATTR) !== 'desc') return false;
+  const rankAt = (rawLine: number): number | null => {
+    const line = rawLine - fm;
+    let hit: HTMLElement | null = null;
+    for (const el of host.children) {
+      if (!(el instanceof HTMLElement) || el.style.order === '') continue;
+      // ⚠ 刻印の無い物(日の行・月の行・ボタン)は飛ばす ── `Number(null)` は 0 なので、素通しすると行 0 の塊に化ける
+      const raw = el.getAttribute('data-pkc-source-line');
+      if (raw === null) continue;
+      const at = Number(raw);
+      if (!Number.isInteger(at) || at > line) continue;
+      hit = el;
+    }
+    return hit === null ? null : Math.floor(Number(hit.style.order) / ORDER_STRIDE);
+  };
+  const mine = rankAt(start);
+  if (mine === null) return false;
+  // 🔑 記録の頭(段 1〜2 の見出し = 記録ごと動く章)を動かすのは、記録の並びを変えること ── 新しい順では見た目が逆に動く
+  const head = startBlockOf(host, start - fm);
+  if (head !== null && /^H[12]$/.test(head.tagName)) return true;
+  // 動かした塊は、入れた位置の直前の塊と同じ記録に入る(記録は段 1〜2 の見出しから始まる)。直前が無ければ前置き(0)
+  const there = rankAt(toBefore - 1) ?? 0;
+  return mine !== there;
+}
+
+/** 刻印の行がちょうど `line` の塊(描いた面の行)。 */
+function startBlockOf(host: HTMLElement, line: number): HTMLElement | null {
+  for (const el of host.children)
+    if (el instanceof HTMLElement && el.getAttribute('data-pkc-source-line') === String(line)) return el;
+  return null;
 }

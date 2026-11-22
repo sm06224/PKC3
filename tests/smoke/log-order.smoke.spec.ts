@@ -87,3 +87,39 @@ test('🔴 ログの並べ替え: 新しい記録が上に来て、入れ子は�
 
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **新しい順で、記録の境目をまたぐ「このブロックを上へ / 下へ」は断り、記録の中では動かす**(#2018 フォロー。
+ * user 裁定 2026-11-22)── 新しい順では見た目の上下が記録の境目で DOM と逆になるので、またぐ移動だけ理由を出して止める。
+ */
+test('🔴 新しい順のログ: 記録の中のブロックは上へ動かせ、境目をまたぐ上へは理由を出して本文を変えない (#2018)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await page.evaluate(() => localStorage.setItem('pkc3.log-order', 'desc'));
+  await createEntry(page, 'textlog');
+  const src = ['## 2026-10-09 09:00:00', '古い一', '古い二', '## 2026-10-10 08:00:00', '新しい一'].join('\n\n');
+  await page.fill('[data-pkc-field="editor-body"]', src);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await expect(page.locator(BODY)).toHaveAttribute('data-pkc-log-order', 'desc');
+  const step = async (text: string, dir: 'up' | 'down'): Promise<void> => {
+    await page.locator(`${BODY} > p`, { hasText: text }).first().click({ button: 'right' });
+    await page.locator(`[data-pkc-region="context-menu"] [data-pkc-action="move-block-step"][data-pkc-block-step-dir="${dir}"]`).click();
+  };
+  // 記録の頭の直後の塊を上へ = 記録の頭(見出し)より前 = 境目をまたぐ → 断る
+  await step('古い一', 'up');
+  await expect(page.locator('[data-pkc-region="status"]'), '境目をまたぐのに理由が出ない').toContainText('記録の境目をまたいで');
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(page.locator('[data-pkc-field="editor-body"]'), '断ったのに本文が変わった').toHaveValue(src);
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  // 記録の中の上へ(古い二を古い一の前へ)は動く
+  await step('古い二', 'up');
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(page.locator('[data-pkc-field="editor-body"]'), '記録の中の移動が効かない').toHaveValue(
+    ['## 2026-10-09 09:00:00', '古い二', '古い一', '## 2026-10-10 08:00:00', '新しい一'].join('\n\n'),
+  );
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+  expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
+});
