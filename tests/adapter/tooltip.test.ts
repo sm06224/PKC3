@@ -163,6 +163,43 @@ describe('tooltip', () => {
     ev('pointerout', b, { relatedTarget: document.body });
     expect(b.getAttribute('aria-label')).toBe('開く');
   });
+  it('一時の aria-label は、退避中に title が書き換わったら新しい字へ更新され、離れたら外れる', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<button id="i" title="閉じる"></button>');
+    const i = document.getElementById('i')!;
+    ev('pointerover', i);
+    expect(i.getAttribute('aria-label')).toBe('閉じる');
+    setTipTitle(i, '畳む');
+    await Promise.resolve();
+    expect(i.getAttribute('aria-label'), '新しい字へ更新されていない(古い名前が残る)').toBe('畳む');
+    // 更新後も「自分の値」として追跡している ── 離れたら外れ、title は新しい字
+    ev('pointerout', i, { relatedTarget: document.body });
+    expect(i.hasAttribute('aria-label')).toBe(false);
+    expect(i.getAttribute('title')).toBe('畳む');
+  });
+  it('名前のある中身(alt 付き img / aria-label か title のある svg)を持つ要素には aria-label を足さない', () => {
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<button id="m1" title="T1"><img alt="画像名" src="x.png"></button>' +
+        '<button id="m2" title="T2"><svg aria-label="図名"></svg></button>' +
+        '<button id="m3" title="T3"><svg><title>図の題</title></svg></button>' +
+        // 対照: alt が空の img・名前の無い svg は名前を持たない ── 付く(空振り防止)
+        '<button id="n1" title="N1"><img alt="" src="x.png"></button>' +
+        '<button id="n2" title="N2"><svg></svg></button>',
+    );
+    for (const id of ['m1', 'm2', 'm3']) {
+      const el = document.getElementById(id)!;
+      ev('pointerover', el);
+      expect(el.hasAttribute(TIP_STASH_ATTR), `${id}: 前提(退避が働く)`).toBe(true);
+      expect(el.hasAttribute('aria-label'), `${id}: 名前のある中身なのに aria-label を付けた`).toBe(false);
+      ev('pointerout', el, { relatedTarget: document.body });
+    }
+    for (const id of ['n1', 'n2']) {
+      const el = document.getElementById(id)!;
+      ev('pointerover', el);
+      expect(el.getAttribute('aria-label'), `${id}: 名前が無いのに付かない`).toBe(el.getAttribute(TIP_STASH_ATTR));
+      ev('pointerout', el, { relatedTarget: document.body });
+    }
+  });
   it('既存の aria-describedby は上書きも削除もしない', () => {
     a().setAttribute('aria-describedby', 'other');
     ev('pointerover', a());

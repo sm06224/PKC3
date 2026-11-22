@@ -22,6 +22,7 @@
  */
 import type { EntryMeta } from '@core/model/entry-meta';
 import { titleNoteIndex } from '@features/schedule/today-note';
+import { getTipTitle, setTipTitle } from './tooltip';
 
 export const TITLE_LINK_MISSING_HINT = 'まだ無いノートです(押すと作る案内が出ます)';
 const ATTR = 'data-pkc-link-missing';
@@ -36,11 +37,11 @@ export function applyTitleLinks(host: ParentNode, metas: Iterable<EntryMeta>): v
     const missing = !titles.has(el.getAttribute('data-pkc-title') ?? '');
     if (missing) {
       if (!el.hasAttribute(ATTR)) el.setAttribute(ATTR, '');
-      const cur = el.getAttribute('title');
-      if (cur === null || cur.trim() === '') el.setAttribute('title', TITLE_LINK_MISSING_HINT);
+      const cur = getTipTitle(el);
+      if (cur.trim() === '') setTipTitle(el, TITLE_LINK_MISSING_HINT);
     } else if (el.hasAttribute(ATTR)) {
       el.removeAttribute(ATTR);
-      if (el.getAttribute('title') === TITLE_LINK_MISSING_HINT) el.removeAttribute('title');
+      if (getTipTitle(el) === TITLE_LINK_MISSING_HINT) setTipTitle(el, null);
     }
   }
 }

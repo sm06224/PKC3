@@ -52,6 +52,7 @@ import { appKeymap, type KeymapStore } from './keymap';
 import { commandQueryOf } from '@features/palette/command-query';
 import { noteLabelHint } from '@features/note-label';
 import { SMART_COLLECTING, SMART_FAILED } from './smart-status';
+import { setTipTitle } from './tooltip';
 
 /**
  * 🔴 **行がこれより多いとき、表を格子で組む**(#1087。CSS の `data-pkc-grid` の規則)。
@@ -1027,7 +1028,7 @@ export class FilerRenderer {
       cell.textContent = this.listDate(m.updatedAt, dayStamp);
       const full = formatStoredDate(m.updatedAt, '');
       if (full) cell.title = `更新 ${full}`;
-      else cell.removeAttribute('title');
+      else setTipTitle(cell, null);
     }
     this.lastDates = this.dateSignature(state);
   }

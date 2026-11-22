@@ -53,6 +53,12 @@ export function setTipTitle(el: Element, text: string | null): void {
   else el.setAttribute('title', text);
 }
 
+/** 中身から名前が取れる要素か(字 / alt のある img / aria-label か title を持つ svg)。 */
+function hasOwnName(el: Element): boolean {
+  if ((el.textContent ?? '').trim() !== '') return true;
+  return el.querySelector('img[alt]:not([alt=""]), svg[aria-label], svg title') !== null;
+}
+
 export function installTooltip(doc: Document = document, opts: TooltipOptions = {}): () => void {
   const win = doc.defaultView;
   if (win === null) return () => undefined;
@@ -237,7 +243,7 @@ export function installTooltip(doc: Document = document, opts: TooltipOptions = 
     if (
       !el.hasAttribute('aria-label') &&
       !el.hasAttribute('aria-labelledby') &&
-      (el.textContent ?? '').trim() === ''
+      !hasOwnName(el)
     ) {
       el.setAttribute('aria-label', title);
       tempLabel = title;

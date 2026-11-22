@@ -105,6 +105,7 @@ import {
 } from '@features/entry-actions';
 import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
 import { canChangeKind } from '@features/flavor/kind-change';
+import { setTipTitle } from './tooltip';
 
 /** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
 type Rows = Map<string, HTMLElement>;
@@ -768,7 +769,7 @@ export class InspectorRenderer {
        */
       const problem = tagScan === null ? null : tagScan.problem;
       tagBox.textContent = '';
-      tagRow?.removeAttribute('title');
+      if (tagRow) setTipTitle(tagRow, null);
       /**
        * 🔴 **`trailing` では、実在するタグを隠さない**(2 巡目レビュー A-2)。
        *
@@ -1760,7 +1761,7 @@ export class InspectorRenderer {
       } else {
         name.removeAttribute('data-pkc-action');
         name.removeAttribute('data-pkc-entry');
-        name.removeAttribute('title');
+        setTipTitle(name, null);
       }
     }
     const label = owner === null ? '担当を付ける' : '担当を変える';

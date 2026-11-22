@@ -10,6 +10,8 @@ import { test, expect, type Page } from '@playwright/test';
 import { gotoApp, collectPageErrors, dismissAnnounce } from './helpers';
 
 const TIP = '[data-pkc-region="tooltip"]';
+/** 観測した値(下の ④ で前提として pin する)。 */
+const FOCUS_VISIBLE_AFTER_SHOWMODAL = false;
 
 /** `fromTop` を渡すと、ポインタを対象の上端から fromTop px 下に置く(省略時は中心)。 */
 async function hoverCenter(
@@ -52,8 +54,16 @@ test('🔴 画面の中ほどのボタンでは、対象とポインタの両方
   const t = (await page.locator(TIP).boundingBox())!;
   expect(await page.locator(TIP).getAttribute('data-pkc-tip-side')).toBe('top');
   expect(t.y + t.height).toBeLessThanOrEqual(Math.min(rect.top, y) - 6 + 1);
+  // 🔴 popover が実際に効いている(unit の happy-dom には showPopover が無く、この枝は実ブラウザでしか通らない)
+  //   ふつうのボタン(ダイアログの外 = hostOf では救われない)の吹き出しが top layer に載っていること
+  expect(await page.locator(TIP).getAttribute('popover'), 'popover="manual" が付いていない').toBe('manual');
+  expect(await page.locator(TIP).evaluate((e) => e.matches(':popover-open')), 'showPopover されていない').toBe(true);
   await page.mouse.move(5, 5);
   await expect(page.locator(TIP)).toBeHidden();
+  expect(
+    await page.locator(TIP).evaluate((e) => e.matches(':popover-open')),
+    '隠したあとも popover が開いたまま(closePopover が働いていない)',
+  ).toBe(false);
   await expect(page.locator(sel!)).toHaveAttribute('title', title!);
   expect(errors, `page error: ${errors.join(" / ")}`).toEqual([]);
 });
@@ -112,6 +122,15 @@ test('🔴 showModal したダイアログの中の title 付きボタンでも�
     d.showModal();
   });
   // フォーカスがモーダルの開閉で動いても(クリックでもキーでもない)出ない
+  // 🔑 前提を先に見る: showModal は先頭のボタンへフォーカスを移す。それが `:focus-visible` に当たるなら
+  //   「出ない」は keyboardInput / focusVisible の門が実際に働いた結果、当たらないなら門に届かない(別の理由で出ない)。
+  //   どちらの場合かを理由つきで落とす(不安定な前提に黙って乗らない)。
+  const focusState = await page.evaluate(() => {
+    const a = document.activeElement as HTMLElement | null;
+    return { id: a?.id ?? '', fv: a?.matches(':focus-visible') ?? false };
+  });
+  expect(focusState.id, 'showModal が先頭のボタンへフォーカスを移していない(前提)').toBe('tip-probe-btn');
+  expect(focusState.fv, ':focus-visible の扱いが変わった(showModal 直後の焦点が focus-visible)。門の働きを見直す').toBe(FOCUS_VISIBLE_AFTER_SHOWMODAL);
   await page.waitForTimeout(700);
   await expect(page.locator(TIP)).toBeHidden();
   await hoverCenter(page, '#tip-probe-btn');

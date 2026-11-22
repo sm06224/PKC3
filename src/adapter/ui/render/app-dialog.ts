@@ -80,6 +80,7 @@ import {
 import { PLACE_TEMPLATES, type PlaceTemplateId } from '@features/markdown/place-template';
 import { buildIconPalette, isTableIcon } from './icon-palette';
 import { diffLineEl } from './diff-line';
+import { setTipTitle } from './tooltip';
 
 export type DialogAnswer = 'ok' | 'cancel';
 
@@ -2160,7 +2161,7 @@ export function pickArchiveInApp(
     const answer = await answered;
     f.dialog.removeEventListener('click', onOutside);
     f.dialog.removeEventListener('keydown', onListKey);
-    f.ok.removeAttribute('title'); // 器は使い回す ── 次の確認に「取り出す」の説明を残さない
+    setTipTitle(f.ok, null); // 器は使い回す ── 次の確認に「取り出す」の説明を残さない
     f.ok.disabled = false;
     return answer === 'ok' && countFiles(marks) > 0 ? [...marks] : null;
   });

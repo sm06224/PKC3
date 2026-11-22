@@ -25,6 +25,7 @@ import { resolveItemColor } from '@features/schedule/item-color';
 import { clipTaskText } from '@features/schedule/task-cards';
 import { plainTaskTitle } from '@features/schedule/task-title';
 import { currentTagColors } from './tag-color';
+import { setTipTitle } from './tooltip';
 
 /** 題名の無い予定の札に出す字(.ics の書き出しの `SUMMARY` と同じ)。 */
 export const NO_TASK_TITLE = '(題名なし)';
@@ -184,7 +185,7 @@ export function patchTaskCard(
       box.title = word;
       box.setAttribute('aria-label', word);
     } else {
-      box.removeAttribute('title');
+      setTipTitle(box, null);
       box.setAttribute('aria-label', 'チェックを切り替え');
     }
   }
