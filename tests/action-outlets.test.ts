@@ -76,6 +76,8 @@ const UNRESOLVED: readonly string[] = [
    *   `data-pkc-action="install-asr-part"` が source のどこにも無い(`install-office-pack` と同じ ──
    *   出口は在るが、字では追えない)。
    */
+  // ⚠ 2026-11-22(#2000 段 3 レビュー)── 同期フォルダを保存するように戻す(下の `pick-sync-folder` と同じ組み方)
+  'allow-sync-folder-persist',
   'cancel-asr-install',
   // 台帳 #1852 束 T1(依頼 156 ②)── Office 一式の取り込みをやめる。押し所は設定の節の `button()` ヘルパーで組む(`cancel-asr-install` と同じ)
   'cancel-office-install',
@@ -129,7 +131,7 @@ const UNRESOLVED: readonly string[] = [
   'pc-sync-pick',
   'pc-sync-restore',
   'pc-sync-stop',
-  // ⚠ 2026-11-21(#2000 段 3)で 4 件増えた ── 同期フォルダを選ぶ / 許可を出し直す / やめる / 今すぐ同期(間隔の選択は字で書いてあるので追える)。設定の節(`settings/sync-folder.ts`)が `button(action, …)` の変数で組む
+  // ⚠ 2026-11-21(#2000 段 3)で 5 件増えた ── 同期フォルダを選ぶ / 許可を出し直す / やめる / 今すぐ同期 / 保存するように戻す(間隔の選択は字で書いてあるので追える)。設定の節(`settings/sync-folder.ts`)が `button(action, …)` の変数で組む
   'pick-sync-folder',
   'reconnect-sync-folder',
   'remove-office-pack',

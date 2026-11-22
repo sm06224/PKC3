@@ -2286,6 +2286,8 @@ export interface BinderServices {
     reconnect(): void | Promise<void>;
     stop(): void | Promise<void>;
     setMinutes(m: number): void | Promise<void>;
+    /** 見張りが「保存しない」にした後、保存するように戻す。 */
+    allowPersist(): void | Promise<void>;
   };
   /**
    * 🔴 **聞くときだけ音を整えるか**(#772 段① B)。⚠ **省略可**。
@@ -19250,6 +19252,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'stop-sync-folder': (_dispatcher, _target, services) => {
     void services.syncFolder?.stop();
+  },
+  'allow-sync-folder-persist': (_dispatcher, _target, services) => {
+    void services.syncFolder?.allowPersist();
   },
   'set-sync-folder-minutes': (_dispatcher, target, services) => {
     if (target instanceof HTMLSelectElement) void services.syncFolder?.setMinutes(Number(target.value));

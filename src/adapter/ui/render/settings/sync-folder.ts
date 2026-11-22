@@ -43,6 +43,12 @@ export function createSyncFolderSection(region: HTMLElement, source: SyncFolderV
       const now = button('sync-folder-now', '今すぐ同期', '同期フォルダと、いますぐ同期します。初めての端末があれば、ここで確認します');
       const reconnect = button('reconnect-sync-folder', '許可を出し直す', 'ブラウザを開き直すと、フォルダを読み書きする許可が切れることがあります。押すと許可を求めます');
       const stop = button('stop-sync-folder', '同期フォルダをやめる', 'この端末で同期フォルダを使うのをやめます(フォルダの中のファイルは消しません)');
+      // 🔴 見張りが「保存しない」にした後の戻り道(片道にしない)
+      const persist = button(
+        'allow-sync-folder-persist',
+        '選んだフォルダを保存するように戻す',
+        '前に読み込みの途中で画面が止まったため、この端末では同期フォルダを保存していません。戻すと、次に開いたときも選んだフォルダを使います(また止まったときは、もう一度保存しないようにします)',
+      );
       const label = document.createElement('label');
       label.textContent = '間隔 ';
       const select = document.createElement('select');
@@ -56,12 +62,12 @@ export function createSyncFolderSection(region: HTMLElement, source: SyncFolderV
         select.append(o);
       }
       label.append(select);
-      bar.append(pick, now, reconnect, stop, label);
+      bar.append(pick, now, reconnect, stop, persist, label);
       const notes: Node[] = [];
       for (const t of [
         'クラウドドライブのフォルダを選ぶと、端末ごとに 1 つのファイル(pkc3-<端末の ID>.pkc3-diff.zip)を置き、ほかの端末のファイルを取り込みます。ファイルを自分で運ぶ必要はありません。',
         'ノートの本文・題名・フォルダの置き場所・つながり・添付・色ラベル・ピン留め・削除を運びます。両方で変えたノートは、両方残します(差分ファイルと同じ)。',
-        'この画面を開いている間だけ同期します。初めての端末と同期するときは、どちらかの端末で 1 度だけ確認します。',
+        'この画面を開いている間だけ同期します。初めての端末は、選んだ直後か「今すぐ同期」を押したときに 1 度だけ確認します。',
         'パソコンの Chrome・Edge で使えます。スマホや Safari・Firefox では、差分ファイルの書き出しと取り込みを使ってください。',
       ]) notes.push(buildSettingsNote(t));
       dd.append(status, bar, ...notes);
@@ -79,6 +85,7 @@ export function createSyncFolderSection(region: HTMLElement, source: SyncFolderV
       const now = q('sync-folder-now');
       const reconnect = q('reconnect-sync-folder');
       const stop = q('stop-sync-folder');
+      const persist = q('allow-sync-folder-persist');
       const select = dd.querySelector<HTMLSelectElement>('[data-pkc-field="sync-folder-minutes"]');
       const hasFolder = v?.folderName != null;
       let text: string;
@@ -112,6 +119,7 @@ export function createSyncFolderSection(region: HTMLElement, source: SyncFolderV
       }
       if (reconnect !== null) reconnect.hidden = !(hasFolder && phase === 'permission' && on);
       if (stop !== null) stop.hidden = !hasFolder;
+      if (persist !== null) persist.hidden = !(on && v !== null && !v.persist);
       if (select !== null) {
         select.disabled = !usable || !hasFolder;
         const want = String(v?.minutes ?? 5);

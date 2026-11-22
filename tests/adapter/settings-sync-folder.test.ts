@@ -35,6 +35,7 @@ const view = (over: Partial<SyncFolderView>): SyncFolderView => ({
   lastText: null,
   message: null,
   pending: 0,
+  persist: true,
   ...over,
 });
 

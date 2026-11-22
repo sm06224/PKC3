@@ -151,3 +151,15 @@ export function backoffMinutes(base: SyncFolderMinutes, failures: number): numbe
   if (failures <= 0) return base;
   return Math.min(60, base * 2 ** Math.min(failures, 6));
 }
+
+/**
+ * 自分のファイルを書き直すかを決める要約(`planFolderExport` の `writeKey` + 全件の頼み + 確認済みの対応)。
+ * ⚠ 頼みと対応も中身の一部 ── 変われば書き直す(相手が初回の確認を省けるのは、新しい対応が届いてから)。
+ */
+export function folderWriteKey(writeKey: string, want: readonly string[], pairs: Readonly<Record<string, string>>): string {
+  const pairsKey = Object.entries(pairs)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([d, c]) => `${d}=${c}`)
+    .join(',');
+  return [writeKey, [...want].sort().join(','), pairsKey].join('|');
+}

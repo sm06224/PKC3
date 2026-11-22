@@ -133,6 +133,17 @@ async function rig(name: string, folder: FakeFolder, opts: { enabled?: boolean; 
   return { d, sf, store, says, fails };
 }
 
+/**
+ * A の端末のデータを複製した別の端末が書いたファイルを作る: A 自身の書き出し(A の id・A の中身)で、A の控え(`out:<連番>`、8 件まで)から
+ * 押し出された古い物 = A から見て「自分の id なのに自分の記録に無い」ファイル。
+ */
+async function cloneBlobOf(d: SyncDevice): Promise<Blob> {
+  const first = await buildSyncDiff(d.deps(), { kind: 'download', all: true });
+  if (first.skipped) throw new Error('書けていない');
+  for (let i = 0; i < 9; i++) await buildSyncDiff(d.deps(), { kind: 'download', all: true });
+  return first.blob;
+}
+
 const titles = async (d: SyncDevice): Promise<string[]> => (await d.request({ op: 'listEntryMetas', cid: d.cid })).map((m) => m.title).sort();
 const bodyOf = async (d: SyncDevice, lid: string): Promise<string | null> => (await d.request({ op: 'getBodies', cid: d.cid, lids: [lid] }))[0]?.body ?? null;
 const deviceId = async (d: SyncDevice): Promise<string> => (await d.request({ op: 'syncSnapshot', cid: d.cid, ensureDevice: true })).device as string;
@@ -303,11 +314,9 @@ describe('同期フォルダ(段 3)', () => {
     await A.d.put('n1', 'メモ', '本文');
     await B.d.put('b1', 'B のメモ', 'b');
     await A.sf.pick();
-    // B の差分を、A の名前で置く(A の DB を複製した別の端末が書いた形)
-    const built = await buildSyncDiff(B.d.deps(), { kind: 'folder', others: [], wantedBy: [], want: [], ownFilePresent: false, lastKey: null });
-    if (built.skipped) throw new Error('書けていない');
+    // A の DB を複製した別の端末が、A の名前で書いた
     const aName = folderFileName(await deviceId(A.d));
-    folder.files.set(aName, { blob: built.blob, mtime: ++folder.clock });
+    folder.files.set(aName, { blob: await cloneBlobOf(A.d), mtime: ++folder.clock });
     const writes = folder.writes.length;
     await A.sf.syncNow(false);
     expect(A.sf.view().phase).toBe('stopped');
@@ -363,6 +372,22 @@ describe('同期フォルダ(段 3)', () => {
     await third.boot();
     expect(third.view().phase, '開き直すと選び直す').toBe('none');
     expect(marks.has(SYNC_FOLDER_LOADING_MARK), 'ふつうに読めた回は印を残さない').toBe(false);
+    // 戻す道(片道にしない)── 選び直して「保存するように戻す」と、次に開いたときもそのフォルダを使う
+    await third.pick();
+    expect(third.view().persist).toBe(false);
+    await third.allowPersist();
+    expect(third.view().persist).toBe(true);
+    expect(store.map.get(d.cid)?.handle, '戻したら handle を保存する').toBe(folder);
+    expect(marks.has(SYNC_FOLDER_NO_PERSIST_MARK)).toBe(false);
+    const fourth = make();
+    await fourth.boot();
+    expect(['idle', 'running'], '保存した handle で回り始める').toContain(fourth.view().phase);
+    // 別のタブがいま読んでいる途中の印(ついさっきの時刻)は、落ちた跡とみなさない
+    marks.set(SYNC_FOLDER_LOADING_MARK, String(Date.now()));
+    const fifth = make();
+    await fifth.boot();
+    expect(['idle', 'running'], '別のタブの読み込み中の印で、保存した handle を捨てない').toContain(fifth.view().phase);
+    expect(marks.has(SYNC_FOLDER_NO_PERSIST_MARK)).toBe(false);
   });
 
   it('「相手の側で確認済み」で確認を省くのは同期フォルダの中だけ(同じファイルを手で選んで取り込むときは聞く)', async () => {
@@ -408,5 +433,155 @@ describe('同期フォルダ(段 3)', () => {
     }
     expect(await copies(A.d), '回を重ねても増えない').toBe(a1);
     expect(await copies(B.d), '回を重ねても増えない').toBe(b1);
+  });
+
+  /** 同じ端末(同じ worker)の別のワークスペースに、同期フォルダの係をもう 1 つ付ける。 */
+  async function secondWorkspace(base: Rig, folder: FakeFolder, cid: string): Promise<Rig> {
+    await base.d.request({ op: 'openContainer', cid, title: '二つ目のワークスペース' });
+    const store = new MemStore();
+    const says: string[] = [];
+    const fails: string[] = [];
+    const deps = () => base.d.deps({ cid, title: () => '二つ目のワークスペース' });
+    const sf = new SyncFolder({
+      cid: () => cid,
+      enabled: () => base.d.enabled,
+      picker: async () => folder,
+      store,
+      device: async () => deviceId(base.d),
+      build: (t) => buildSyncDiff(deps(), t),
+      apply: async (file, nm, auto) => {
+        const diff = await readDiffZip(file);
+        return { outcome: await applySyncDiff(deps(), diff, nm, { auto, folder: true }), manifest: diff.manifest };
+      },
+      say: (t) => void says.push(t),
+      fail: (t) => void fails.push(t),
+      onChange: () => undefined,
+      setTimer: () => 0,
+    });
+    return { d: base.d, sf, store, says, fails };
+  }
+
+  it('同じブラウザの別のワークスペースが同じフォルダを選んだら、書き合わずに止まって言う(言うのは 1 度)', async () => {
+    const folder = new FakeFolder();
+    const W1 = await rig('A', folder);
+    await W1.d.put('n1', 'メモ', '本文');
+    await W1.sf.pick();
+    const writes = folder.writes.length;
+    const W2 = await secondWorkspace(W1, folder, 'c-A-2');
+    await W2.sf.pick();
+    expect(W2.sf.view().phase).toBe('stopped');
+    expect(W2.sf.view().message ?? '').toContain('別の同期フォルダ');
+    expect(folder.writes.length, 'W1 のファイルを上書きしない').toBe(writes);
+    const before = W1.d.failures.length + W2.fails.length;
+    await W2.sf.syncNow(false);
+    await W2.sf.syncNow(false);
+    expect(W1.d.failures.length + W2.fails.length, '無人の回で同じ問題を積み続けない').toBe(before);
+    expect(folder.writes.length).toBe(writes);
+    await W1.sf.syncNow(false);
+    expect(W1.fails, 'W1 はそのまま回る').toEqual([]);
+  });
+
+  it('確認に「やめる」と答えたら取り込んだことにしない(無人の回も確認待ちのまま。次に手で答えれば取り込む)', async () => {
+    const folder = new FakeFolder();
+    const A = await rig('A', folder);
+    const B = await rig('B', folder);
+    await A.d.put('n1', 'A のメモ', 'a');
+    await A.sf.pick();
+    let answer = false;
+    const Bno = new SyncFolder({
+      cid: () => B.d.cid,
+      enabled: () => true,
+      picker: async () => folder,
+      store: B.store,
+      device: async () => deviceId(B.d),
+      build: (t) => buildSyncDiff(B.d.deps(), t),
+      apply: async (file, nm, auto) => {
+        const diff = await readDiffZip(file);
+        return { outcome: await applySyncDiff(B.d.deps({ confirmAction: async () => answer }), diff, nm, { auto, folder: true }), manifest: diff.manifest };
+      },
+      say: () => undefined,
+      fail: () => undefined,
+      onChange: () => undefined,
+      setTimer: () => 0,
+    });
+    await Bno.pick();
+    expect(await titles(B.d), 'やめたので入らない').toEqual([]);
+    expect(Bno.view().pending, '確認待ちとして数える').toBe(1);
+    await Bno.syncNow(false);
+    expect(Bno.view().pending, '無人の回も確認待ちのまま(読んだことにしていない)').toBe(1);
+    answer = true;
+    await Bno.syncNow(true);
+    expect(await titles(B.d)).toEqual(['A のメモ']);
+    expect(Bno.view().pending).toBe(0);
+  });
+
+  it('同じ id の複製を手で確認すると、端末 id を作り直して新しい名前で書き、複製元のファイルは消さない', async () => {
+    const folder = new FakeFolder();
+    const A = await rig('A', folder);
+    const B = await rig('B', folder);
+    await A.d.put('n1', 'メモ', '本文');
+    await B.d.put('b1', 'B のメモ', 'b');
+    await A.sf.pick();
+    const oldId = await deviceId(A.d);
+    folder.files.set(folderFileName(oldId), { blob: await cloneBlobOf(A.d), mtime: ++folder.clock });
+    await A.sf.syncNow(true); // 手で = 作り直しの確認(test の確認は「はい」)
+    const newId = await deviceId(A.d);
+    expect(newId, '端末 id を作り直した').not.toBe(oldId);
+    expect(folder.files.has(folderFileName(newId)), '新しい名前で書く').toBe(true);
+    expect(folder.files.has(folderFileName(oldId)), '複製元のファイルは消さない').toBe(true);
+    expect(A.sf.view().phase).toBe('idle');
+    // 次の回でも消さない(前の名前は複製元の物 ── 片付けの対象にしない)
+    await A.sf.syncNow(false);
+    expect(folder.files.has(folderFileName(oldId)), '次の回で複製元のファイルを消した').toBe(true);
+  });
+
+  it('同期の記録を消したら、前の id で置いた自分のファイルを片付けて、新しい id で書く(別の係の回でも片付く)', async () => {
+    const folder = new FakeFolder();
+    const A = await rig('A', folder);
+    const B = await rig('B', folder);
+    await A.d.put('n1', 'メモ', '本文');
+    await A.sf.pick();
+    await B.sf.pick();
+    const oldId = await deviceId(A.d);
+    await A.d.request({ op: 'syncForget' });
+    await A.sf.forgetRecords();
+    const newId = await deviceId(A.d);
+    expect(newId).not.toBe(oldId);
+    expect(folder.files.has(folderFileName(oldId)), '前の id のファイルを片付ける').toBe(false);
+    expect(folder.files.has(folderFileName(newId)), '新しい id で書く').toBe(true);
+    // 記録を消したときに係が回っていなかった(オフ・別のワークスペース)── 次の回の最初に片付く
+    const id2 = await deviceId(A.d);
+    await A.d.request({ op: 'syncForget' });
+    await A.sf.syncNow(false);
+    const id3 = await deviceId(A.d);
+    expect(id3).not.toBe(id2);
+    expect(folder.files.has(folderFileName(id2)), '次の回で前の id のファイルを片付ける').toBe(false);
+    expect(folder.files.has(folderFileName(id3))).toBe(true);
+  });
+
+  it('設定がオフなら「同期の記録を消す」でもフォルダに触らない', async () => {
+    const folder = new FakeFolder();
+    const A = await rig('A', folder);
+    await A.d.put('n1', 'メモ', '本文');
+    await A.sf.pick();
+    const files = [...folder.files.keys()];
+    A.d.enabled = false;
+    await A.sf.forgetRecords();
+    expect([...folder.files.keys()]).toEqual(files);
+  });
+
+  it('ファイル名と中身の端末が違うファイルは取り込まない(名前で誰のファイルかを決めているため)', async () => {
+    const folder = new FakeFolder();
+    const A = await rig('A', folder);
+    const B = await rig('B', folder);
+    await A.d.put('n1', 'メモ', '本文');
+    await B.d.put('b1', 'B のメモ', 'b');
+    await A.sf.pick();
+    const built = await buildSyncDiff(B.d.deps(), { kind: 'folder', others: [], wantedBy: [], want: [], ownFilePresent: false, lastKey: null });
+    if (built.skipped) throw new Error('書けていない');
+    folder.files.set(folderFileName('aaaaaaaaaaaaaaaa'), { blob: built.blob, mtime: ++folder.clock });
+    await A.sf.syncNow(true);
+    expect(await titles(A.d), '入れない').toEqual(['メモ']);
+    expect(A.d.failures.join('\n') + A.fails.join('\n')).toContain('ファイル名と中身の端末が違う');
   });
 });

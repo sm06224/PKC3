@@ -4949,6 +4949,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       reconnect: () => syncFolder.reconnect(),
       stop: () => syncFolder.stop(),
       setMinutes: (m) => syncFolder.setMinutes(m),
+      allowPersist: () => syncFolder.allowPersist(),
     },
     setAlarmEnabled: (on) => {
       appAlarmEnabled.setEnabled(on);

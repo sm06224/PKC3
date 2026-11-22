@@ -12,6 +12,7 @@ import {
   planFolderRound,
   updateWant,
   wantedByOf,
+  folderWriteKey,
 } from '../../../src/features/sync/sync-folder';
 import { planFolderExport } from '../../../src/features/sync/sync-export';
 import { entryFp } from '../../../src/features/sync/sync-fp';
@@ -112,5 +113,15 @@ describe('自分のファイルの中身(planFolderExport)', () => {
     const bases = { [B]: { baseline: base([st('n1', 'a'), st('gone', 'x')]), at } };
     const p = planFolderExport({ device: A, seq: 3, states, tombstones: [], bases, others: [B], wantedBy: [], ownFilePresent: true, nowMs: now });
     expect(p.tombstones.map((t) => t.key)).toEqual(['gone']);
+  });
+});
+
+describe('書き直すかの要約(folderWriteKey)', () => {
+  it('全件の頼み・確認済みの対応が変われば変わり、並びには依らない', () => {
+    const k = folderWriteKey('w', [B, C], { [B]: 'c1', [C]: 'c2' });
+    expect(folderWriteKey('w', [C, B], { [C]: 'c2', [B]: 'c1' })).toBe(k);
+    expect(folderWriteKey('w', [B], { [B]: 'c1', [C]: 'c2' }), '頼みが変わった').not.toBe(k);
+    expect(folderWriteKey('w', [B, C], { [B]: 'c1' }), '新しく対応づけた(相手が初回の確認を省けるように書き直す)').not.toBe(k);
+    expect(folderWriteKey('w2', [B, C], { [B]: 'c1', [C]: 'c2' })).not.toBe(k);
   });
 });

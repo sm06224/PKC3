@@ -82,6 +82,8 @@ export interface SyncFolderView {
   message: string | null;
   /** 確認が要るので取り込んでいない相手の数(「今すぐ同期」で確認を出す)。 */
   pending: number;
+  /** この端末で同期フォルダを保存するか(見張りが止めたら偽 ── 画面に「保存するように戻す」を出す)。 */
+  persist: boolean;
 }
 
 export interface SyncFolderDeps {
@@ -113,6 +115,8 @@ export interface SyncFolderDeps {
 /** 見張りの印。`loading` = いま handle を読んでいる / `no-persist` = この端末では handle を憶えない。 */
 export const SYNC_FOLDER_LOADING_MARK = 'pkc3.sync-folder-loading';
 export const SYNC_FOLDER_NO_PERSIST_MARK = 'pkc3.sync-folder-no-persist';
+/** 別のタブが読んでいる途中の印とみなす新しさ(ms)。 */
+export const SYNC_FOLDER_MARK_FRESH_MS = 3000;
 export const SYNC_FOLDER_CRASHED_NOTE =
   '前回、保存しておいた同期フォルダを読み込む途中で画面が止まりました。この端末では同期フォルダを保存しないようにしました。開くたびに「同期フォルダを選ぶ」を押してください';
 
@@ -172,6 +176,7 @@ export class SyncFolder {
       lastText: this.lastText,
       message: this.phase === 'unsupported' ? SYNC_FOLDER_UNSUPPORTED_NOTE : this.message,
       pending: this.pending.size,
+      persist: !this.noPersistFlag,
     };
   }
 
@@ -234,7 +239,14 @@ export class SyncFolder {
      */
     const loadingLeft = await this.deps.store.getMark(SYNC_FOLDER_LOADING_MARK).catch(() => null);
     this.noPersistFlag = (await this.deps.store.getMark(SYNC_FOLDER_NO_PERSIST_MARK).catch(() => null)) === '1';
-    if (loadingLeft !== null) {
+    /**
+     * ⚠ 印は読み始めた時刻。**ついさっきの印**は、別のタブがいま読んでいる途中のもの(落ちた跡ではない)── 捨てずにそのまま読む。
+     *   落ちた後に開き直すには数秒かかる(人が開き直す)ので、`SYNC_FOLDER_MARK_FRESH_MS` より古い印だけを「落ちた跡」とみなす。
+     *   時刻の読めない印(前の版の `'1'` など)は落ちた跡として扱う(安全側)。
+     */
+    const markAt = loadingLeft === null ? Number.NaN : Number(loadingLeft);
+    const fresh = Number.isFinite(markAt) && markAt > 1_000_000 && Math.abs(this.nowMs() - markAt) < SYNC_FOLDER_MARK_FRESH_MS;
+    if (loadingLeft !== null && !fresh) {
       await this.mark(SYNC_FOLDER_LOADING_MARK, null);
       await this.mark(SYNC_FOLDER_NO_PERSIST_MARK, '1');
       this.noPersistFlag = true;
@@ -251,7 +263,7 @@ export class SyncFolder {
     }
     let saved: SyncFolderSaved | null;
     // 🔴 印を**書き終えてから**読む(落ちたときに印が残っているように)
-    await this.mark(SYNC_FOLDER_LOADING_MARK, '1');
+    await this.mark(SYNC_FOLDER_LOADING_MARK, String(this.nowMs()));
     try {
       saved = await this.deps.store.load(this.deps.cid());
     } catch {
@@ -407,31 +419,30 @@ export class SyncFolder {
   }
 
   /**
-   * 「同期の記録を消す」の後: 端末 id が変わるので、**前の id で置いた自分のファイルを消し**(他の端末から見て別の端末に見えないように)、
-   * フォルダの記録を最初からにする。handle と間隔は残す(フォルダは選び直さなくてよい)。
+   * 「同期の記録を消す」の後: 端末 id が変わるので、すぐに 1 回まわして、前の id で置いた自分のファイルを片付ける
+   * (片付け自体は回の最初の「端末 id が変わった」の確かめが持つ ── オフの間・別のワークスペースで消したときも、次にオンで回ったときに片付く)。
+   * ⚠ 設定がオフ・フォルダを選んでいないときは何もしない(オフの間はフォルダにも IndexedDB にも書かない)。
    */
   async forgetRecords(): Promise<void> {
-    this.generation += 1;
-    this.clearTimer();
-    await this.waitCurrent();
-    const oldName = this.own?.name;
-    if (this.dir !== null && oldName !== undefined && deviceOfFileName(oldName) !== null && (await this.permitted(false))) {
-      try {
-        await this.dir.removeEntry(oldName);
-      } catch {
-        /* 無ければそのまま */
-      }
-    }
-    this.record = emptyFolderRecord();
-    this.own = null;
-    this.pending.clear();
+    if (!this.deps.enabled() || this.dir === null) return;
+    await this.syncNow(false);
+  }
+
+  /**
+   * 🔴 「この端末で同期フォルダを保存する」に戻す(見張りが保存をやめた後の戻り道 ── 片道にしない)。いま選んでいるフォルダがあれば保存する。
+   * ⚠ 本当にブラウザが落ちる環境なら、次に開いたときにもう 1 度見張りが止める(落ちるのは 1 回で済む)。
+   */
+  async allowPersist(): Promise<void> {
+    this.noPersistFlag = false;
+    await this.mark(SYNC_FOLDER_NO_PERSIST_MARK, null);
+    if (this.message === SYNC_FOLDER_CRASHED_NOTE) this.message = null;
     try {
       await this.persist();
     } catch {
-      /* 次に憶えられたときに残る */
+      /* 次に保存できたときに残る */
     }
     this.changed();
-    this.schedule();
+    this.deps.say('同期フォルダを、この端末で保存するように戻しました。次に開いたときも、選んだフォルダを使います');
   }
 
   async setMinutes(m: number): Promise<void> {
@@ -500,6 +511,14 @@ export class SyncFolder {
         return;
       }
       const self = await this.deps.device();
+      // ── 🔴 端末 id が変わった(「同期の記録を消す」をした — どのワークスペース・オフの間でも)── 前の id で置いた自分のファイルを片付け、記録を最初からにする
+      //   (残すと、他の端末から「もう来ない別の端末」に見え続ける)。⚠ 複製の確認で作り直したときは、前の名前は複製元の物なので `own` を先に空にしてある
+      const ownName = this.own?.name;
+      if (ownName !== undefined && deviceOfFileName(ownName) !== null && deviceOfFileName(ownName) !== self) {
+        await dir.removeEntry(ownName).catch(() => undefined);
+        this.record = emptyFolderRecord();
+        this.own = null;
+      }
       // ── フォルダを見る(同期フォルダのファイルだけ。他のファイルには触らない)
       const files: FolderFile[] = [];
       const handles = new Map<string, { getFile(): Promise<File> }>();
@@ -518,18 +537,25 @@ export class SyncFolder {
       const foreignOwn = ownFile !== null && (this.own === null || ownFile.size !== this.own.size || ownFile.mtime !== this.own.mtime);
       const reads = foreignOwn && ownFile !== null ? [...plan.toRead, ownFile] : plan.toRead;
       this.pending.clear();
+      let ownUnresolved: string | null = null;
       for (const f of reads) {
         if (gen !== this.generation) return;
         const peer = deviceOfFileName(f.name) as string;
         try {
           const file = await handles.get(f.name)!.getFile();
           const { outcome, manifest } = await this.deps.apply(file, f.name, !manual);
-          if (outcome.pending !== undefined) {
+          if (outcome.pending !== undefined || outcome.declined === true) {
+            // 確認待ち / 確認に「やめる」と答えた ── 取り込んでいない。控え(`seen`)も頼み(`want`)も動かさない(次の回も確認待ちのまま)
             this.pending.add(peer);
+            if (peer === self) ownUnresolved = 'この端末と同じ ID の端末が同期フォルダに書いています(端末のデータを複製した可能性があります)。「今すぐ同期」を押して確認してください';
             continue;
           }
           if (!outcome.ok) {
-            problems.push(f.name);
+            const why = outcome.reason ?? f.name;
+            problems.push(why);
+            if (peer === self) ownUnresolved = why;
+            // 🔴 同じ中身のファイルを無人の回で読み直し続けない(変わったら読む。手で同期すれば読み直す)── 頼み(`want`)は動かさない
+            else this.record.seen[f.name] = { size: f.size, mtime: f.mtime, want: this.record.seen[f.name]?.want ?? [] };
             continue;
           }
           if (peer === self) {
@@ -547,17 +573,25 @@ export class SyncFolder {
       }
       for (const n of plan.vanished) delete this.record.seen[n];
       if (gen !== this.generation) return;
-      // 🔴 同じ端末 id の別の端末が居て、まだ確認していない ── 同じ名前のファイルを書き合わないよう、書かずに待つ
-      if (this.pending.has(self)) {
+      // 🔴 自分の名前のファイルを、まだ片付けていない誰かが書いている(同じ端末 id の別の端末 / このブラウザの別のワークスペース)──
+      //   同じ名前のファイルを書き合わないよう、書かずに待つ
+      if (ownUnresolved !== null) {
         await this.persist();
         this.phase = 'stopped';
-        this.message = 'この端末と同じ ID の端末が同期フォルダに書いています(端末のデータを複製した可能性があります)。「今すぐ同期」を押して確認してください';
+        this.message = ownUnresolved.includes('別のワークスペース')
+          ? `${ownUnresolved}(ワークスペースごとに別の同期フォルダを選んでください)`
+          : ownUnresolved;
         if (manual || this.message !== this.lastFail) this.deps.fail(this.message);
         this.lastFail = this.message;
         return;
       }
       // ── 自分のファイルを書く(中身が前回と同じなら書かない)。⚠ 確認待ちの相手が居ても書く(相手は自分のファイルを読める)
       const self2 = await this.deps.device(); // 取り込みで端末 id を作り直した場合は新しい名前で書く
+      if (self2 !== self) {
+        // 作り直した: 前の名前のファイルは複製元の物(消さない)。同期の記録は worker が捨てたので、フォルダの記録も最初から
+        this.own = null;
+        this.record = emptyFolderRecord();
+      }
       const built = await this.deps.build({
         kind: 'folder',
         others: plan.others.filter((d) => d !== self2),
@@ -583,6 +617,7 @@ export class SyncFolder {
         this.record.lastKey = built.key;
         wrote = true;
       }
+      if (gen !== this.generation) return;
       await this.persist();
       this.failures = 0;
       const d = this.deps.now?.() ?? new Date();
@@ -607,6 +642,8 @@ export class SyncFolder {
     } finally {
       this.lastRunMs = this.nowMs();
       if (this.phase === 'running') this.phase = 'idle';
+      // 回っている間に設定がオフになった ── 画面だけ「待機」にしない
+      if (!this.deps.enabled()) this.phase = 'off';
       this.changed();
       if (gen === this.generation) this.schedule();
     }

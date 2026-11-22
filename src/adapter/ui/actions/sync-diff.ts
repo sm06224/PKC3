@@ -14,6 +14,7 @@ import { readDiffZip, writeDiffZip, DIFF_SUFFIX, type DiffAssetMeta, type DiffFi
 import { fingerprintDigest, planExport, planFolderExport } from '@features/sync/sync-export';
 import { planSyncImport, type SyncPlan } from '@features/sync/sync-plan';
 import { deviceIdFromBytes, isSameDevice } from '@features/sync/sync-state';
+import { deviceOfFileName, folderWriteKey } from '@features/sync/sync-folder';
 import { sha256Hex as blobSha256Hex } from '@adapter/platform/storage/asset-key';
 import { seedFromBackup, type SyncSeed } from '@features/sync/sync-seed';
 import { SYNC_FORGET_LABEL, SYNC_OFF_REFUSAL, SYNC_SETTING_LABEL } from '@features/sync/sync-setting';
@@ -157,8 +158,7 @@ export async function buildSyncDiff(deps: SyncDeps, target: DiffTarget): Promise
       ownFilePresent: target.ownFilePresent,
       nowMs,
     });
-    // 「全件をください」の宛先も中身の一部(言い直す必要があるので、変われば書く)
-    key = `${fp.writeKey}|${[...target.want].sort().join(',')}`;
+    key = folderWriteKey(fp.writeKey, target.want, snap.pairs);
     if (target.ownFilePresent && target.lastKey === key) return { skipped: true, key };
     plan = { ...fp, peerBase: [] };
   } else {
@@ -385,6 +385,10 @@ export interface ApplyOutcome {
    * `device` = 自分の端末 id のファイルが自分の記録に無い(端末のデータの複製)。手で同期すると確認を出す。
    */
   pending?: 'pair' | 'device';
+  /** 手で同期した回で、確認に「やめる」と答えた(取り込んでいない ── 取り込んだことにしない)。 */
+  declined?: boolean;
+  /** 取り込めなかった理由(`ok: false`)。⚠ 無人の回は自分では言わず、ここで返す(呼び手が同じ理由を繰り返さないように束ねる)。 */
+  reason?: string;
   /** 本文が入っていなくて取り込めなかったノートがある(相手に全件を頼む)。 */
   needFull: boolean;
   /** 反映した件数(ノート・印)と競合の数。 */
@@ -410,11 +414,16 @@ export async function applySyncDiff(
   const auto = opts.auto === true;
   const fail = (m: string): ApplyOutcome => {
     deps.notify?.(''); // 進行中の字を残さない
-    (deps.reportProblem ?? deps.notify)?.(m);
-    return { ok: false, count: 0, needFull: false, changed: 0, conflicts: 0 };
+    // 🔴 無人の回は言わない(5 分ごとに同じ問題をメッセージへ積まない)── 理由を返し、同期フォルダの係が 1 度だけ言う
+    if (!auto) (deps.reportProblem ?? deps.notify)?.(m);
+    return { ok: false, count: 0, needFull: false, changed: 0, conflicts: 0, reason: m };
   };
   const quiet = (extra: Partial<ApplyOutcome> = {}): ApplyOutcome => ({ ok: true, count: 0, needFull: false, changed: 0, conflicts: 0, ...extra });
   if (!deps.enabled()) return fail(SYNC_OFF_REFUSAL);
+  // 🔴 同期フォルダのファイルは、名前の端末 id と中身の端末 id が同じでなければ読まない(名前で「誰のファイルか」を決めているため)
+  if (opts.folder === true && deviceOfFileName(name) !== diff.manifest.device) {
+    return fail(`「${name}」は、ファイル名と中身の端末が違うため取り込みませんでした(名前を変えたファイルか、別の端末のファイルをコピーした可能性があります)`);
+  }
   let committed = false;
   try {
     await deps.ensureConfigured?.();
@@ -448,7 +457,7 @@ export async function applySyncDiff(
       );
       if (!ok) {
         deps.notify?.('取り込みをやめました');
-        return quiet();
+        return quiet({ declined: true });
       }
       regenerate = deviceIdFromBytes((deps.randomBytes ?? ((n) => crypto.getRandomValues(new Uint8Array(n))))(8));
     }
@@ -472,7 +481,7 @@ export async function applySyncDiff(
         `\n(${from})`;
       if (!(await deps.confirmAction(msg, { okLabel: '同じ物として取り込む', cancelLabel: 'やめる' }))) {
         deps.notify?.('取り込みをやめました');
-        return quiet();
+        return quiet({ declined: true });
       }
     }
     const baseline = regenerate === undefined ? toBaseline(snap.bases[peerDevice]?.baseline ?? {}) : {};
