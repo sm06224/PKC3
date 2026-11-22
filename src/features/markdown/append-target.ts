@@ -35,14 +35,22 @@ import { stripComments, preprocessHeadingNumbers } from './markdown-render';
 import { detectEol } from './line-eol';
 import { continuesList } from './text-ops';
 
+/** 見出しの段(ATX の `#` の数 / setext は 1・2)。 */
+export type AppendTargetLevel = 1 | 2 | 3 | 4 | 5 | 6;
+
 /** 追記の入り先 1 つ。 */
 export interface AppendTarget {
   /** 印。⚠ **目次と同じ綴り**(`makeSlugCounter`)。 */
   readonly slug: string;
   /** 見出しの字(画面に出す)。 */
   readonly text: string;
-  /** 1〜3。字下げの深さに使う。 */
-  readonly level: 1 | 2 | 3;
+  /**
+   * 1〜6。字下げの深さに使う。
+   * 🔴 #2018 から `####`〜`######` も数える(ログの入れ子の追記が `####` 以下に入るため)。⚠ 印(slug)の連番は
+   *   本文の見出し id(`markdown-render.ts`)・目次(`markdown-toc.ts`)と**同じ 1〜6 段を通して**振る
+   *   ── どれか 1 つだけ数える段が違うと、同じ字の見出しが混ざる文書で印が食い違う。
+   */
+  readonly level: AppendTargetLevel;
 }
 
 /** 見出し 1 つの居場所(内部用 ── 行番号は**その場で**しか使わない)。 */
@@ -221,16 +229,16 @@ function scanHeadings(body: string): HeadingAt[] {
       para.push(line.trim());
     }
     // 閉じの `#` は前に空白が要る(`## C#` の `#` は見出しの字)
-    const m = /^ {0,3}(#{1,3})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
+    const m = /^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
     if (!m) continue;
     const text = m[2]!.trim();
     if (text === '') continue;
-    const seen = /^ {0,3}#{1,3}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(numberedLines[i] ?? line);
+    const seen = /^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(numberedLines[i] ?? line);
     out.push({
       slug: slugOf(text),
       legacySlug: legacyOf((seen?.[1] ?? text).trim()),
       text,
-      level: m[1]!.length as 1 | 2 | 3,
+      level: m[1]!.length as AppendTargetLevel,
       line: origin(i),
       depth: spans.depth[i] ?? 0,
       limit: limitOf(i),
@@ -320,13 +328,16 @@ export function resolveAppendAt(body: string, slug: string): number | null {
 export function appendIntoSection(
   base: string,
   slug: string,
-  heading: string | null,
+  heading0: string | null,
   text: string,
+  opts?: { readonly nestHeading?: boolean },
 ): string | null {
   const body = text.replace(/\s+$/, '');
   if (body === '') return null;
   const at = resolveAppendAt(base, slug);
   if (at === null) return null;
+  // 🔴 入り先の 1 段下へ付け直す(#2018 7)── 段は**この本文**から引く(読み直した本文で決める)
+  const heading = opts?.nestHeading === true && heading0 !== null ? nestHeadingUnder(heading0, targetLevelOf(base, slug)) : heading0;
   const lines = base.split('\n');
   /**
    * 🔴 **CRLF の本文へは CRLF で挟む**(#1087)。直す前は LF の行を挟み、改行が混ざった
@@ -618,4 +629,24 @@ export function chapterLinesOf(
 /** その字の見出し(`#`〜`###`)が本文にいくつ在るか(#1044 段4 ── `chapterLinesOf` の `sameCount`)。 */
 export function sameHeadingCount(body: string, text: string): number {
   return listAppendTargets(body).filter((h) => h.text === text).length;
+}
+
+/**
+ * 🔴 **印の見出しの段**(#2018 7)。解けなければ `null`。⚠ 印の解き方は `sectionRange` と同じ(古い名前も読む)。
+ */
+export function targetLevelOf(body: string, slug: string): AppendTargetLevel | null {
+  const heads = scanHeadings(body);
+  const h = heads.find((x) => x.slug === slug) ?? heads.find((x) => x.legacySlug === slug);
+  return h === undefined ? null : h.level;
+}
+
+/**
+ * 🔴 **ATX の見出し行を `parent` の 1 段下へ付け直す**(#2018 7。上限 `######`)。
+ * ⚠ 見出しの形でない字・段が分からない(`null`)ときは**そのまま**返す(勝手に作り変えない)。
+ */
+export function nestHeadingUnder(heading: string, parent: AppendTargetLevel | null): string {
+  if (parent === null) return heading;
+  const m = /^#{1,6}([ \t].*)$/.exec(heading);
+  if (m === null) return heading;
+  return '#'.repeat(Math.min(parent + 1, 6)) + m[1]!;
 }

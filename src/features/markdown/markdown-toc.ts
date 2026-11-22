@@ -263,8 +263,8 @@ function scanHeadings(
   // setext の本文候補(直前まで続く、記法を持たない行)
   let para: string[] = [];
   const headRe = blockForms
-    ? /^ {0,3}(?:(?:>[ \t]?|[-*+][ \t]+|\d{1,9}[.)][ \t]+)[ \t]*)*(#{1,3})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/
-    : /^ {0,3}(#{1,3})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
+    ? /^ {0,3}(?:(?:>[ \t]?|[-*+][ \t]+|\d{1,9}[.)][ \t]+)[ \t]*)*(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/
+    : /^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
   for (const line of lines) {
     // 閉じは開きと同じ記号で同じ長さ以上(#1087、`advanceFence` が正本)
     const wasIn = fence !== '';
@@ -290,10 +290,17 @@ function scanHeadings(
     }
     const m = headRe.exec(line);
     if (!m) continue;
-    const level = m[1]!.length as TocLevel;
+    const level = m[1]!.length;
     const text = m[2]!.trim();
     if (!text) continue;
-    headings.push({ level: level as TocDepth, text: restoreUndefinedVars(text), slug: slugOf(text) });
+    /**
+     * 🔴 **印の連番は 1〜6 段を通して振り、目次に並べるのは 3 段まで**(#2018。user 裁定 2026-11-22)。
+     * ⚠ 本文の見出し id(`markdown-render.ts`)と追記先(`append-target.ts`)は `####`〜`######` にも印を振る ──
+     *   ここだけ 4 段以下を飛ばすと、`#### 概要` の後ろの `## 概要` が、こちらでは `概要`、向こうでは `概要-1` になる。
+     */
+    const slug = slugOf(text);
+    if (level > 3) continue;
+    headings.push({ level: level as TocLevel as TocDepth, text: restoreUndefinedVars(text), slug });
   }
   return headings;
 }

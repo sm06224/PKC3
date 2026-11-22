@@ -3394,6 +3394,12 @@ export type UserAction =
       /** 入り先の印(#395 段①)。`null` = 末尾。 */
       target: string | null;
       /**
+       * 🔴 **見出しを入り先の 1 段下へ付け直す**(#2018 7。案 A)── ログの追記欄が選んだ見出しの中へ入れるとき、
+       *   `## 時刻` を `###`(入り先が `##`)/ `####`(`###`)… 上限 `######` にする。
+       * ⚠ 段は**書く直前の本文**から引く(effect が読み直す本文。押した時点の画面の段では決めない)。
+       */
+      nestHeading?: true;
+      /**
        * 取り込みの回の印(#668 C)。同じ印の追記は `lastAppend` で 1 手に継がれる。
        * ⚠ 省略 = 単独の 1 手(手で足した追記)。
        */
@@ -4635,6 +4641,8 @@ export type DomainEvent =
        * ⚠ 解けなければ effect が**断る**(末尾へ落とさない)。
        */
       target: string | null;
+      /** 見出しを入り先の 1 段下へ付け直す(`APPEND_TO_ENTRY.nestHeading`)。 */
+      nestHeading?: true;
       /** 取り込みの回の印(#668 C)。effect が `ENTRY_APPENDED` へそのまま返す。 */
       batch?: string;
     }

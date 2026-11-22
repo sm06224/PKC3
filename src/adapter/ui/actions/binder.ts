@@ -48,8 +48,10 @@ import {
   chapterLinkLine,
   chapterLinkUnder,
   isOwnChapterChild,
+  logChapterTitle,
   planChapterCut,
 } from '@features/markdown/chapter-split';
+import { logDayOfHeading } from '@features/textlog/log-days';
 import { lineStart } from '@features/markdown/line-start';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
 import { assetRefsOf, carryAssets, hasAssetRefs } from '@features/asset/carry-assets';
@@ -6263,7 +6265,10 @@ async function copySourceLinesWithAssets(
 /**
  * 🔴 **章の切り出し / 元に戻すの、メニューに出す側を決める**(#1439)。判定は 1 本。
  *
- * - 見出しが本文の直下で、書き方が ATX(`#`)で、ログの行ではない。
+ * - 見出しが本文の直下で、書き方が ATX(`#`)。
+ * 🔴 **ログの行(`## 時刻`)も切り出せる**(#2018 3 / 9。user 裁定 2026-11-22)── 直す前はログの行だけを
+ *   理由も記録も無く外していた(同じ見出しで「章を編集」「追記」「コピー」は出るのに、切り出しだけ出ない)。
+ *   旧 PKC ではログも改変できた。元のログ側には時刻の見出しが残り、その下がリンク 1 行になる(章と同じ)。
  * - 見出しの下が「実在するノートへのリンク 1 行」だけ → 元に戻す。
  * - それ以外で、章に本文がある → 切り出す。
  */
@@ -6272,11 +6277,8 @@ function chapterSplitMenuFlags(
   heading: Element | null,
   body: string | null,
   st: AppState,
-  level: number,
-  text: string,
 ): { splitChapter?: boolean; restoreChapter?: boolean } {
   if (host === null || heading === null || body === null || heading.parentElement !== host) return {};
-  if (isLogRowHeading(st.openBody === null ? undefined : st.entryMetas.get(st.openBody.lid)?.archetype, level, text)) return {};
   const ctx = chapterRangeOf(host, heading, body);
   if (ctx === null) return {};
   const link = chapterLinkUnder(body, ctx.headingLine, ctx.end);
@@ -13646,6 +13648,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       text,
       heading: appendHeadingFor(archetype!, new Date()),
       target: target === '' ? null : target,
+      /**
+       * 🔴 **選んだ見出しの中へ入る**(#2018 7。案 A)── 直す前は入り先を選んでも `## 時刻` を足したので、
+       *   選んだ記録の中ではなく**並びの新しい記録**ができていた。末尾(空)のときは今までどおり `## 時刻`。
+       * ⚠ 段は effect が書く直前の本文から決める(ここで決めると、読み直した後に違う段の節へ入る)。
+       */
+      ...(target !== '' ? { nestHeading: true as const } : {}),
     });
     }
   },
@@ -15477,7 +15485,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: plan.reason });
       return;
     }
-    const title = headingPlainText(heading).trim() || '切り出した章';
+    const headText = headingPlainText(heading).trim();
+    /**
+     * 🔴 **ログの時刻の見出しを切り出したら、題名は本文の最初の空でない行**(#2018 4。user 裁定 2026-11-22)
+     *   ── 時刻を題名にすると、切り出したノートが一覧で「2026-11-22 09:14:05」の並びになり見分けが付かない。
+     *   本文が空なら時刻。⚠ 判定は「ログで、見出しの頭が日時」(`logDayOfHeading`)── 入れ子の `###` 時刻も同じ。
+     */
+    const isLogTime = meta.archetype === 'textlog' && logDayOfHeading(headText) !== null;
+    const title = (isLogTime ? logChapterTitle(plan.cut.childBody, headText) : headText) || '切り出した章';
     const lid = ob.lid;
     actUnlessEditedElsewhere(
       dispatcher,
@@ -24520,13 +24535,12 @@ export function bindActions(
        *   引用の中の見出しでも `Ctrl`+クリックは編集に入れるので、メニューだけ
        *   出さないのは「近道では入れるのにメニューからは入れない」を自分で作る。
        * ⚠ 追記は 2 つの条件が要る:①`text` / `textlog` だけ(`appendModeOf`)
-       *   ②追記先の一覧が **`#`〜`###` しか数えない**(`append-target.ts`)ので、
-       *   `####` 以下で出すと**押した見出しではなく上の `###`** が追記先になる。
+       *   ②追記先の一覧が数える段(`append-target.ts`。#2018 から `#`〜`######`)の見出しであること。
        */
       const level = heading === null ? 0 : headingLevel(heading);
       /**
        * 🔑 **章として切り出せる見出しか**(#1044 段2 / 段4)── 本文の直下の `#`〜`###`
-       *   (`append-target.ts` の `scanHeadings` が数えるのはそこまで)。章の欄と章の窓で
+       *   (章として扱う深さは目次と同じ 3 段まで。#2018 で追記先の一覧だけ `######` まで広げた)。章の欄と章の窓で
        *   **同じ 1 つ**を使う(写しを 2 つ持たない)。
        */
       const chapterable = heading !== null && heading.parentElement === host && level >= 1 && level <= 3;
@@ -24597,8 +24611,8 @@ export function bindActions(
               foldable: heading.parentElement === host,
               // 🔴 すべての見出しをまとめて(#1441 (a))── 畳める見出しが 2 つ以上のときだけ
               foldAll: host === null ? null : allHeadingFoldState(host),
-              appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
-              // 🔴 章の参照(#579)── 描画が id を刻んだ見出しだけ(`#`〜`###`)
+              appendable: level >= 1 && level <= 6 && appendModeOf(dispatcher.getState()).kind === 'ready',
+              // 🔴 章の参照(#579)── 描画が id を刻んだ見出しだけ(#2018 から `#`〜`######`)
               linkable: heading.id !== '',
               // 🔴 ログの日時の見出しは「行」と呼ぶ(#1559)── 判定は `isLogRowHeading` 1 本
               logRow: isLogRowHeading(
@@ -24623,7 +24637,7 @@ export function bindActions(
                */
               chapterWindow: chapterable,
               // 🔴 章を新しいノートに切り出す / 元に戻す(#1439)── 片方だけが出る(`chapterSplitStateAt` が決める)
-              ...chapterSplitMenuFlags(host, heading, ob?.body ?? null, dispatcher.getState(), level, headingPlainText(heading)),
+              ...chapterSplitMenuFlags(host, heading, ob?.body ?? null, dispatcher.getState()),
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
         ...(block === null ? [] : blockMenuActions({

@@ -103,6 +103,10 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *      書いた字と見える字が違うと、写して使うときに事故になる(`(c)` `--` も同じ。引用符の置き換えは残す)。
  *      PKC2 は typographer の replacements 規則で `…` にしている。動いた golden は `full-pkc-fixture` /
  *      `full-pkc-fixture-anchors` / `manual-ch12`(差は `…` が `...` / `..` に戻った箇所だけ)。
+ *  10. **見出しの id を h4〜h6 にも刻む**(2026-11-22、#2018。user 裁定)。追記先の一覧が `######` まで数えるように
+ *      なったので、印の連番(`makeSlugCounter`)を本文・目次・追記先で 1〜6 段を通して揃える(目次の表示は 3 段のまま)。
+ *      PKC2 は h1〜h3 だけ。動いた golden は `full-pkc-fixture` / `full-pkc-fixture-anchors` / `manual-ch12`
+ *      (差は h4〜h6 の `id` 属性だけ)。
  *
 
  * 🔴 **golden は「PKC2 と同じ」を守る道具であって、「正しい」を守る道具ではない。**

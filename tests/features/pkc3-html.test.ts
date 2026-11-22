@@ -1472,8 +1472,8 @@ describe('可搬 HTML — 目次と印刷(F-1)', () => {
       ['2', '保存'],
       ['3', '器'],
     ]);
-    // ⚠ h4 を入れない理由は「飛べないから」── 描画側が id を振るのは h1〜h3
-    expect(document.querySelector('#pkc-body h4')?.id ?? '').toBe('');
+    // 🔴 #2018 から h4 にも id が付く(印の連番を 1〜6 段で揃えるため)── 目次の見た目は変えない(3 段まで。user 裁定 2026-11-22)
+    expect(document.querySelector('#pkc-body h4')?.id ?? '').toBe('深い見出し');
     expect(document.getElementById('pkc-tocempty')!.hidden).toBe(true);
   });
 

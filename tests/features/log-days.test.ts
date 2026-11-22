@@ -3,7 +3,7 @@
  * 🔴 **ログの日の束ね**(#1441 案 b)── 規則(pure)。器への当て方は `tests/adapter/log-days.test.ts`。
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { formatLogDay, logDayOfHeading, logDayRuns } from '../../src/features/textlog/log-days';
+import { formatLogDay, formatLogDayFull, logDayOfHeading, logDayRuns } from '../../src/features/textlog/log-days';
 
 describe('時刻見出しの日', () => {
   it('追記が書く形(秒つき / 秒なし / ★つき)から日を取る', () => {
@@ -33,13 +33,22 @@ describe('時刻見出しの日', () => {
         // 日付+時刻を UTC の瞬間と読むと、西の端末では前日・東の端末では翌日にずれる
         expect(logDayOfHeading('2026-10-10 00:05:00')).toBe('2026-10-10');
         expect(logDayOfHeading('2026-10-10 23:55:00')).toBe('2026-10-10');
-        expect(formatLogDay('2026-10-10')).toBe('2026-10-10(土)');
+        expect(formatLogDayFull('2026-10-10')).toBe('2026-10-10(土)');
+        expect(formatLogDay('2026-10-10', 2026)).toBe('10/10(土)');
       });
     }
   });
-  it('行の字は曜日つき', () => {
-    expect(formatLogDay('2026-10-10')).toBe('2026-10-10(土)');
-    expect(formatLogDay('2026-10-11')).toBe('2026-10-11(日)');
+  it('全形(読み上げ・title)は年月日と曜日', () => {
+    expect(formatLogDayFull('2026-10-10')).toBe('2026-10-10(土)');
+    expect(formatLogDayFull('2026-10-11')).toBe('2026-10-11(日)');
+  });
+  /** 🔴 #2018 5(user 裁定 2026-11-22): 今年なら `11/22(日)`、前年以前は `2025/11/22(日)`。月・日は桁を詰める。 */
+  it('🔴 行の字は今年なら月/日、それ以外の年は年/月/日(曜日つき)', () => {
+    expect(formatLogDay('2026-11-22', 2026)).toBe('11/22(日)');
+    expect(formatLogDay('2026-01-05', 2026)).toBe('1/5(月)');
+    expect(formatLogDay('2025-11-22', 2026)).toBe('2025/11/22(土)');
+    // 来年の日付(予定を先に書いた等)も年を付ける(今年ではない)
+    expect(formatLogDay('2027-01-01', 2026)).toBe('2027/1/1(金)');
   });
 });
 

@@ -182,3 +182,19 @@ export function isOwnChapterChild(
   const re = new RegExp(`entry:${childLid.replace(/[^A-Za-z0-9_-]/g, '')}(?![A-Za-z0-9_-])`, 'g');
   return (parentBody.match(re) ?? []).length === 1;
 }
+
+/**
+ * 🔴 **ログの記録を切り出したノートの題名**(#2018 4)── 本文の最初の空でない行(記法の頭 `#` `>` `-` `1.` `- [ ]` は外す)。
+ *   コードブロックの開き閉じの行は飛ばす。字が残らなければ `fallback`(時刻)。
+ */
+export function logChapterTitle(childBody: string, fallback: string): string {
+  for (const raw of childBody.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === '' || /^(`{3,}|~{3,})/.test(line)) continue;
+    const text = line
+      .replace(/^(?:#{1,6}[ \t]+|>[ \t]*|[-*+][ \t]+(?:\[[ xX]\][ \t]+)?|\d{1,9}[.)][ \t]+)+/, '')
+      .trim();
+    if (text !== '') return text;
+  }
+  return fallback;
+}

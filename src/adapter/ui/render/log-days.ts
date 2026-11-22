@@ -28,6 +28,7 @@
 import { OVERLAY_ATTR } from './apply-blocks';
 import {
   formatLogDay,
+  formatLogDayFull,
   formatLogMonth,
   logDayOfHeading,
   logDayRuns,
@@ -70,10 +71,11 @@ export function isLogDayFolded(row: Element): boolean {
   return row.hasAttribute(DAY_FOLDED);
 }
 
-function paintRow(row: HTMLElement, label: string, folded: boolean): void {
+function paintRow(row: HTMLElement, label: string, folded: boolean, fullLabel: string = label): void {
   if (row.textContent !== label) row.textContent = label;
   row.setAttribute('aria-expanded', folded ? 'false' : 'true');
-  const hint = folded ? `${label}の追記をすべて出します` : `${label}の追記をすべて折りたたみます`;
+  // 🔑 名前と説明は年月日つきの全形(#2018 5 ── 見える字は短いが、読み上げ・hover では年まで分かる)
+  const hint = folded ? `${fullLabel}の追記をすべて出します` : `${fullLabel}の追記をすべて折りたたみます`;
   row.title = hint;
   row.setAttribute('aria-label', hint);
 }
@@ -235,10 +237,12 @@ export function syncLogDays(
     if (folded) for (let i = mr.start; i < mr.end; i += 1) insideFoldedMonth.add(i);
   }
 
+  // 「今年」は描くたびに端末の暦から(年をまたいで開いたままでも、次の描画で正しくなる)
+  const thisYear = new Date().getFullYear();
   for (const run of runs) {
     const row = dayRowAt.get(run.start)!;
     const isFolded = row.hasAttribute(DAY_FOLDED);
-    paintRow(row, formatLogDay(run.day), isFolded);
+    paintRow(row, formatLogDay(run.day, thisYear), isFolded, formatLogDayFull(run.day));
     // 月の畳みの中の日の行は、塊と一緒に隠す(押し所だけが宙に残らない)
     placed.push({ row, start: run.start, inFoldedMonth: insideFoldedMonth.has(run.start) });
     for (let i = run.start; i < run.end; i += 1) {

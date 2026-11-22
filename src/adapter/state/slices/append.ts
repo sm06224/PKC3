@@ -89,6 +89,7 @@ export function reduceAppend(state: AppState, action: AppendAction): ReduceResul
             heading: action.heading,
             text: action.text,
             target: action.target,
+            ...(action.nestHeading === true && action.target !== null ? { nestHeading: true as const } : {}),
             ...(action.batch === undefined ? {} : { batch: action.batch }),
           },
         ],

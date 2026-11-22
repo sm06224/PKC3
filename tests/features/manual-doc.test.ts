@@ -49,8 +49,8 @@ describe('マニュアルの窓 — 目次と本文の対応', () => {
     const html = renderMarkdown(MANUAL_TEXT, {});
     const withId = (html.match(/<h[1-6][^>]*\sid="/giu) ?? []).length;
     const all = (html.match(/<h[1-6]/giu) ?? []).length;
-    // ⚠ 前提:描画は一部にしか id を付けていない(付けていたら、この節は要らない)
-    expect(withId, '前提が崩れている(描画が全部に id を付けている)').toBeLessThan(all);
+    // 🔑 #2018 から描画は h1〜h6 の全部に id を付ける。窓の id(番号)も全部の見出しを覆うことは変わらず見る
+    expect(withId, '描画が h4 以下に id を付けていない(#2018)').toBe(all);
     const built = buildManualDoc(html, manualSections(MANUAL_TEXT));
     expect(idsIn(built.html).size).toBe(all);
     // 深い見出しが目次に出ていること(空振り防止)
