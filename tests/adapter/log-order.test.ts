@@ -13,7 +13,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyHeadingFold } from '../../src/adapter/ui/render/heading-fold';
-import { LOG_DAYS_HOST_ATTR, LOG_ORDER_ATTR, syncLogOrderAttr } from '../../src/adapter/ui/render/log-days';
+import { crossesLogRecord, LOG_DAYS_HOST_ATTR, LOG_ORDER_ATTR, syncLogOrderAttr } from '../../src/adapter/ui/render/log-days';
 import { appLogOrder } from '../../src/adapter/ui/render/log-order-setting';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -223,5 +223,47 @@ describe('CSS: 紙は書いた順(着地前レビュー 🔴1)', () => {
     const print = css.slice(at);
     expect(print).toMatch(/\[data-pkc-log-days\]\[data-pkc-log-order='desc'\]\s*\{\s*display:\s*block\s*!important;/);
     expect(print).toMatch(/\[data-pkc-field='log-order'\],\s*\[data-pkc-log-all\]\s*\{\s*display:\s*none\s*!important;/);
+  });
+});
+
+describe('新しい順で、記録の境目をまたぐ塊の移動を断る(#2018 フォロー)', () => {
+  // 生の body の行(frontmatter なし): 0 前置き / 2 ## a / 4 a1 / 6 a2 / 8 ## b / 10 b1
+  function stampedLog(desc: boolean): HTMLElement {
+    const h = document.createElement('div');
+    h.setAttribute(LOG_DAYS_HOST_ATTR, '');
+    if (desc) h.setAttribute(LOG_ORDER_ATTR, 'desc');
+    h.innerHTML =
+      '<p data-pkc-source-line="0">まえがき</p>' +
+      '<h2 data-pkc-source-line="2">2026-10-09 09:00:00</h2><p data-pkc-source-line="4">a1</p><p data-pkc-source-line="6">a2</p>' +
+      '<h2 data-pkc-source-line="8">2026-10-10 09:00:00</h2><p data-pkc-source-line="10">b1</p>';
+    document.body.append(h);
+    applyHeadingFold(h);
+    return h;
+  }
+  it('🔴 記録の中の上下は通す(見た目と DOM の順が同じ)', () => {
+    const h = stampedLog(true);
+    expect(crossesLogRecord(h, 0, 6, 6, 4), 'a2 を a1 の前へ').toBe(false);
+    expect(crossesLogRecord(h, 0, 4, 4, 7), 'a1 を a2 の後へ').toBe(false);
+  });
+  it('🔴 記録の境目をまたぐ移動は断る(上へ = 前の記録・前置きへ / 下へ = 次の記録へ / 記録の頭ごと)', () => {
+    const h = stampedLog(true);
+    expect(crossesLogRecord(h, 0, 4, 4, 2), 'a1 を a の見出しの前(前置き)へ').toBe(true);
+    expect(crossesLogRecord(h, 0, 6, 6, 11), 'a2 を b1 の後(次の記録)へ').toBe(true);
+    expect(crossesLogRecord(h, 0, 2, 7, 12), '記録 a の頭(章ごと)を下へ').toBe(true);
+  });
+  it('⚠ 対照群: 古い順では今までどおり全部通す', () => {
+    const h = stampedLog(false);
+    expect(crossesLogRecord(h, 0, 4, 4, 2)).toBe(false);
+    expect(crossesLogRecord(h, 0, 6, 6, 11)).toBe(false);
+    expect(crossesLogRecord(h, 0, 2, 7, 12)).toBe(false);
+  });
+  it('frontmatter の行数ぶん、座標をずらして読む', () => {
+    const h = stampedLog(true);
+    // 生の body に frontmatter が 3 行ある形(描いた塊の刻印は剥いだ側)
+    expect(crossesLogRecord(h, 3, 7, 7, 5)).toBe(true);
+    expect(crossesLogRecord(h, 3, 9, 9, 7)).toBe(false);
+    // 入れる側だけ frontmatter を読み忘れると取り違える形(a2 を b1 の後へ = 次の記録)
+    expect(crossesLogRecord(h, 3, 9, 9, 14)).toBe(true);
+    expect(crossesLogRecord(h, 3, 7, 7, 10)).toBe(false);
   });
 });

@@ -1676,6 +1676,32 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(made?.title).toBe('追いの字');
   });
 
+  /**
+   * 🔴 **新しい順のログで、記録の境目をまたぐ「このブロックを上へ / 下へ移す」は断る**(#2018 フォロー。user 裁定 2026-11-22)。
+   * ⚠ 配線(メニュー → `refuseLogOrderCross` → `MOVE_BLOCK` を撃たない)を本物の binder で見る(判定の単体テストだけでは配線を通らない)。
+   */
+  it('🔴 新しい順: 記録の頭の直後の塊を上へ = 断る(本文を書かない)/ 記録の中の下へ = 動く', () => {
+    const SRC = '## 2026-10-11 10:00:00\n\nはじめ\n\nつづき\n\n## 2026-10-11 11:00:00\n\nつぎ\n';
+    const r = rig(SRC, 'textlog');
+    // 読む面の印(本物は `detail.ts` が付ける)── 新しい順にして描き直す
+    r.host.setAttribute('data-pkc-log-days', '');
+    r.host.setAttribute('data-pkc-log-order', 'desc');
+    applyHeadingFold(r.host);
+    const writes: string[] = [];
+    r.d.onEvent((e) => writes.push(e.type));
+    const para = (t: string): Element => [...r.host.querySelectorAll('p')].find((p) => p.textContent === t)!;
+    rightClick(para('はじめ'));
+    const up = r.root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="move-block-step"][data-pkc-block-step-dir="up"]`);
+    expect(up, '前提: 「上へ」が出ていない').not.toBeNull();
+    up!.click();
+    expect(r.d.getState().error, '境目をまたぐのに理由が出ない').toContain('記録の境目をまたいで');
+    expect(writes.filter((t) => t.startsWith('REQUEST_')), '断ったのに本文を書いた').toEqual([]);
+    // 対照群: 記録の中(はじめ を つづき の後へ)は動く ── 本文を書く要求が出る
+    rightClick(para('はじめ'));
+    r.root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="move-block-step"][data-pkc-block-step-dir="down"]`)!.click();
+    expect(writes.filter((t) => t.startsWith('REQUEST_')).length, '記録の中なのに本文を書かない').toBeGreaterThan(0);
+  });
+
   it('⚠ 対照群 ── ログの中の日時でない見出しは「章」の字で、題名は見出しの字のまま', () => {
     const r = rig(LOG, 'textlog');
     rightClick(r.q('h2[id="手書きの見出し"]'));

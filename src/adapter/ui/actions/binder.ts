@@ -526,7 +526,7 @@ import { bindCurrentLine } from '../render/current-line';
 import { appCurrentLine } from '../render/current-line-setting';
 import { appLogOrder, type LogOrder } from '../render/log-order-setting';
 import { LOG_ORDER_SELECT_FIELD, LOG_ORDER_VALUE_ATTR } from '../render/settings/log-order';
-import { syncLogOrderAttr } from '../render/log-days';
+import { crossesLogRecord, LOG_ORDER_CROSS_REFUSAL, syncLogOrderAttr } from '../render/log-days';
 import { appInlineComplete } from '../render/inline-complete-setting';
 import { setupLinkPreview, closeLinkPreview } from '../render/link-preview';
 import { setupLightbox, openLightbox, closeLightbox, lightboxOpen } from '../render/lightbox';
@@ -16106,6 +16106,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     const end = menuCarriedAt(target, MENU_BLOCK_END_ATTR);
     const toBefore = menuCarriedAt(target, MENU_BLOCK_BEFORE_ATTR);
     if (lid === '' || start === null || end === null || toBefore === null) return;
+    // 🔴 新しい順のログでは、記録の境目をまたぐ移動だけ断る(#2018 フォロー ── 見た目の上下が DOM と逆になる)
+    if (refuseLogOrderCross(dispatcher, target, start, end, toBefore)) return;
     actUnlessEditedElsewhere(
       dispatcher,
       services,
@@ -23551,6 +23553,8 @@ export function bindActions(
         return;
       }
       if (drop === null) return;
+      // 🔴 新しい順のログでは、記録の境目をまたぐ落とし方だけ断る(#2018 フォロー。上へ / 下へと同じ 1 つの判定)
+      if (refuseLogOrderCross(dispatcher, root, start, end, drop.toBefore)) return;
       dispatcher.dispatch({ type: 'MOVE_BLOCK', lid, start, end, toBefore: drop.toBefore });
       return;
     }
@@ -26994,4 +26998,19 @@ function applyLogOrderChoice(doc: Document, order: LogOrder): void {
     applyHeadingFold(host);
   }
   syncChoiceRow(doc, LOG_ORDER_SELECT_FIELD, LOG_ORDER_VALUE_ATTR, appLogOrder.order());
+}
+
+/**
+ * 🔴 **新しい順のログで、記録の境目をまたぐ塊の移動を断る**(#2018 フォロー。user 裁定 2026-11-22)。
+ * ⚠ 上へ / 下へ(メニュー)とドラッグの落とし先の両方がここを通る(判定は `crossesLogRecord` 1 本)。
+ * @returns 断ったか
+ */
+function refuseLogOrderCross(dispatcher: Dispatcher, from: Element, start: number, end: number, toBefore: number): boolean {
+  const root = from.closest<HTMLElement>('[data-pkc-slot="root"]') ?? from.ownerDocument.body;
+  const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+  const body = dispatcher.getState().openBody?.body ?? null;
+  if (host === null || body === null) return false;
+  if (!crossesLogRecord(host, frontmatterLineCount(body), start, end, toBefore)) return false;
+  dispatcher.dispatch({ type: 'OP_FAILED', error: LOG_ORDER_CROSS_REFUSAL });
+  return true;
 }
