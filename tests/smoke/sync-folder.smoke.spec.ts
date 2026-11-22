@@ -176,7 +176,7 @@ test('🔴 読み直したあと: 同じフォルダを使い続けるか、読�
             const req = indexedDB.open('pkc3-sync-folder', 1);
             req.onsuccess = () => {
               const t = req.result.transaction('marks', 'readwrite');
-              t.objectStore('marks').put('1', 'pkc3.sync-folder-loading');
+              t.objectStore('marks').put('1', 'loading');
               t.oncomplete = () => {
                 req.result.close();
                 resolve();

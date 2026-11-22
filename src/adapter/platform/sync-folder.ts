@@ -113,8 +113,9 @@ export interface SyncFolderDeps {
 }
 
 /** 見張りの印。`loading` = いま handle を読んでいる / `no-persist` = この端末では handle を憶えない。 */
-export const SYNC_FOLDER_LOADING_MARK = 'pkc3.sync-folder-loading';
-export const SYNC_FOLDER_NO_PERSIST_MARK = 'pkc3.sync-folder-no-persist';
+/** ⚠ IndexedDB(`pkc3-sync-folder` の `marks`)の中の名前 ── 端末の設定(localStorage の `pkc3.*`)ではない。 */
+export const SYNC_FOLDER_LOADING_MARK = 'loading';
+export const SYNC_FOLDER_NO_PERSIST_MARK = 'no-persist';
 /** 別のタブが読んでいる途中の印とみなす新しさ(ms)。 */
 export const SYNC_FOLDER_MARK_FRESH_MS = 3000;
 export const SYNC_FOLDER_CRASHED_NOTE =
