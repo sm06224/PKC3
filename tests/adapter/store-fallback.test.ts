@@ -42,6 +42,7 @@ import { PasteToastStore } from '@adapter/ui/render/paste-toast';
 import { InlineCodeCopyStore } from '@adapter/ui/render/inline-code-copy';
 import { InlineCompleteStore } from '@adapter/ui/render/inline-complete-setting';
 import { CurrentLineStore } from '@adapter/ui/render/current-line-setting';
+import { LogOrderStore } from '@adapter/ui/render/log-order-setting';
 import { PdfReaderStore } from '@adapter/ui/render/pdf-reader-setting';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
 import { TranscriptFollowStore } from '@adapter/ui/render/transcript-follow';
@@ -275,6 +276,16 @@ const CASES: readonly {
     },
     a: false,
     b: true,
+  },
+  {
+    // ⚠ 既定が「古い順」の store(#2018 1)── a を新しい順にして、控えが死んで既定へ戻る実装を捕まえる
+    name: 'LogOrderStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new LogOrderStore(st);
+      return { write: (v) => s.setOrder(v as 'asc' | 'desc'), read: () => s.order() };
+    },
+    a: 'desc',
+    b: 'asc',
   },
   {
     name: 'PasteToastStore',

@@ -251,6 +251,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: '設定ではない(#1087)。取り込みのブックマークで開いたそのタブが、もう 1 件受け取ったという記録(sessionStorage)。タブを閉じれば消える一時の事実で、運ぶ物は無い',
   },
   {
+    key: 'pkc3.log-order',
+    why: 'この端末でログを古い順 / 新しい順のどちらで読むか(#2018 1。user 裁定 2026-11-22「降順の記憶は端末の設定 1 つ」)。端末ごとに選ぶ物として決まったので運ばない',
+  },
+  {
     key: 'pkc3.settings-probe',
     why: '設定ではない(#1087)。この端末が設定を保存できるかを確かめるために書いて、すぐ消す値。残ることは無く、運ぶ物も無い',
   },

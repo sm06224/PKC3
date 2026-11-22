@@ -111,7 +111,7 @@ describe('ログの月別 #1441', () => {
     applyHeadingFold(plain);
     const strip = (el: HTMLElement): string => {
       const c = el.cloneNode(true) as HTMLElement;
-      c.querySelectorAll('[data-pkc-log-day],[data-pkc-log-month],[data-pkc-log-all]').forEach((r) => r.remove());
+      c.querySelectorAll('[data-pkc-log-day],[data-pkc-log-month],[data-pkc-log-all],[data-pkc-field="log-order"]').forEach((r) => r.remove());
       return c.innerHTML;
     };
     expect(strip(h)).toBe(strip(plain));
@@ -124,7 +124,9 @@ describe('ログの「すべて折りたたむ / すべて出す」 #1441', () =
     applyHeadingFold(h);
     expect(allRows(h)).toHaveLength(1);
     const all = allRows(h)[0]!;
-    expect(h.firstElementChild).toBe(all);
+    // ⚠ 先頭は並べ替えのボタン(#2018 1)、「すべて」の行はその次
+    expect(h.firstElementChild!.getAttribute('data-pkc-field')).toBe('log-order');
+    expect(h.children[1]).toBe(all);
     expect(all.textContent).toBe('すべて折りたたむ');
     expect(all.getAttribute('data-pkc-action')).toBe('toggle-log-day-all');
     toggleAllLogDays(h);

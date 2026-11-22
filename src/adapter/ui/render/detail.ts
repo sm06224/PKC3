@@ -35,7 +35,7 @@ import { hydrateReact } from './react-sandbox';
 import { SqlEmbedHydrator } from './sql-embed-hydrate';
 import { fenceAssetUnreadableText, hydrateFenceHosts } from './fence-asset-hydrate';
 import { applyHeadingFold, revealBlock } from './heading-fold';
-import { LOG_DAYS_HOST_ATTR } from './log-days';
+import { LOG_DAYS_HOST_ATTR, syncLogOrderAttr } from './log-days';
 import { applyHeadingAnchors, ID_PREFIX_ATTR } from './heading-anchor';
 import { applyCodeLangBadges } from './code-lang';
 import { appCodeCollapse, applyCodeCollapse, clearCodeCollapse } from './code-collapse';
@@ -2100,6 +2100,8 @@ export class DetailRenderer {
         // 🔴 メッセージのノートは `entryMetas` に無い(システム用)── `isSystemMessageLid` でも付ける(#1087 M11)
         if (meta?.archetype === 'textlog' || isSystemMessageLid(lid)) host.setAttribute(LOG_DAYS_HOST_ATTR, '');
         else host.removeAttribute(LOG_DAYS_HOST_ATTR);
+        // 🔴 新しい順(#2018 1。端末の設定 `pkc3.log-order`)── ログの読む面だけ。⚠ 古い順・ログでない面では印を残さない
+        syncLogOrderAttr(host);
         applyHeadingFold(host);
         /**
          * 🔴 **見出しのアンカーリンク（章・見出し参照リンク）ワンクリックコピー**(#1124)。

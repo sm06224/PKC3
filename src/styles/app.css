@@ -12154,6 +12154,20 @@ h3[data-pkc-section] {
   [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='center'] {
     visibility: visible;
   }
+  /* 🔴 ログの新しい順(#2018 1)は画面だけ ── 紙は今までどおり書いた順(user 裁定 2026-11-22「第 1 弾は本文ペインのみ」)。
+   *    ⚠ 流れ(block)へ戻せば `order` は効かない。
+   *    🔴 `!important` で戻す ── 画面の flex の規則は同じ詳細度で、この節より**後ろ**に在る(着地前レビューで実際に負けていた。
+   *    ノートのタブ列と同じ負け方)。
+   *    ⚠ 子の下の余白 0 は残る(`revert` は本文の見出しの余白まで UA の値へ戻すので使わない)── 流れでは余白が重なるので、
+   *    上の余白が前の下の余白以上の組は同じ値、段落の次の表・引用だけ詰まる(画面の新しい順と同じ差) */
+  [data-pkc-log-days][data-pkc-log-order='desc'] {
+    display: block !important;
+  }
+  /* ⚠ 並べ替えのボタン・「すべて」の行も、画面の規則(`display: block`)が後ろに在るので `!important` で消す */
+  [data-pkc-field='log-order'],
+  [data-pkc-log-all] {
+    display: none !important;
+  }
   /* ⚠ ページの帯は紙に要らない(押せる物が無い ── 下の②と同じ理由) */
   [data-pkc-region='phone-bar'] {
     display: none;
@@ -12181,6 +12195,7 @@ h3[data-pkc-section] {
   [data-pkc-log-day],
   [data-pkc-log-month],
   [data-pkc-log-all],
+  [data-pkc-field='log-order'],
   /* 🔴 画面専用の操作子は紙に要らない(#1129, #1137) */
   .pkc-back-to-top-container,
   .pkc-reading-progress,
@@ -12503,15 +12518,35 @@ h3[data-pkc-section] {
 [data-pkc-log-month]:hover,
 [data-pkc-log-month]:focus-visible,
 [data-pkc-log-all]:hover,
-[data-pkc-log-all]:focus-visible {
+[data-pkc-log-all]:focus-visible,
+[data-pkc-field='log-order']:hover,
+[data-pkc-field='log-order']:focus-visible {
   color: var(--accent);
+}
+/**
+ * 🔴 **ログを新しい順に並べる**(#2018 1)── 読む面の見た目だけ(子の `order` は `render/log-days.ts` が付ける)。
+ * ⚠ **ログの読む面で、新しい順のときだけ**縦の flex にする ── 古い順・ログでないノートは今までの流れのまま
+ *   (段落の余白の重なり方を 1px も変えない)。
+ * ⚠ flex は余白を重ねない ── 下の余白を 0 にして、上の余白だけで間を取る。上の余白が前の塊の下の余白以上の組
+ *   (見出しの上 1.4em と段落の下 1em / 段落どうし 1em)は重なっていたときと同じ値になるが、上の余白が小さい塊
+ *   (段落の次の表・引用 = 上 `--s3`)は重なっていたとき(段落の下 1em)より詰まる(新しい順の間だけの差)。
+ * ⚠ 段組み(`columns`)は flex では効かない ── 新しい順の間は 1 段になる。
+ */
+[data-pkc-log-days][data-pkc-log-order='desc'] {
+  display: flex;
+  flex-direction: column;
+}
+[data-pkc-log-days][data-pkc-log-order='desc'] > * {
+  margin-block-end: 0;
 }
 /* 🔴 月の行(#1441 月別)は日の行より一段目立たせる ── 字は本文と同じ大きさのまま、太さだけ変える */
 [data-pkc-log-month] {
   margin-top: 1.4em;
   font-weight: 600;
 }
-/* 🔴 「すべて折りたたむ / すべて出す」(#1441)── 先頭に小さく 1 本。右へ寄せて、本文の頭を押し下げない */
+/* 🔴 「すべて折りたたむ / すべて出す」(#1441)── 先頭に小さく 1 本。右へ寄せて、本文の頭を押し下げない
+ * 🔴 並べ替えのボタン(#2018 1)も同じ形で、その上に 1 本(字はいまの並び) */
+[data-pkc-field='log-order'],
 [data-pkc-log-all] {
   display: block;
   margin: 0 0 0.2em auto;

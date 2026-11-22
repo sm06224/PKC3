@@ -26,6 +26,8 @@
  * 行の `data-pkc-day-folded` が事実。描き直しで行が作り直されても、**日(+何番目か)をキー**に引き継ぐ。
  */
 import { OVERLAY_ATTR } from './apply-blocks';
+import { descRank, logSegments, orderValue } from '@features/textlog/log-order';
+import { appLogOrder } from './log-order-setting';
 import {
   formatLogDay,
   formatLogDayFull,
@@ -45,6 +47,21 @@ export const LOG_ALL_ATTR = 'data-pkc-log-all';
 const DAY_FOLDED = 'data-pkc-day-folded';
 /** ログの読む面に付ける印(`detail.ts` が描くたびに付け外す)。 */
 export const LOG_DAYS_HOST_ATTR = 'data-pkc-log-days';
+/** 🔴 ログの並び(#2018 1)── 読む面に `desc` を付けると新しい順に並べる(`detail.ts` が端末の設定から付け外す)。 */
+export const LOG_ORDER_ATTR = 'data-pkc-log-order';
+/** 並べ替えのボタンの印(`data-pkc-field`)。 */
+export const LOG_ORDER_FIELD = 'log-order';
+
+/**
+ * 🔴 **並べ替えのボタンも「自分が作った物か」で決める**(日の行と同じ理由 ── 属性は本文の塊にも焼ける)。
+ * ⚠ 日の行(`ROWS`)とは別の集合 ── 日の行の掃除(`syncLogDays` の末尾)に巻き込まれない。
+ */
+const ORDER_BUTTONS = new WeakSet<Element>();
+
+/** 並べ替えのボタンか。 */
+export function isLogOrderButton(el: Element): boolean {
+  return ORDER_BUTTONS.has(el);
+}
 
 /**
  * 🔴 **行かどうかは「自分が作った物か」で決める**(#1441 レビュー)。
@@ -61,9 +78,9 @@ export function isLogDayRow(el: Element): boolean {
   return ROWS.has(el);
 }
 
-/** 本文の塊(行を除いた host の直下)。⚠ 畳みの数え方は全部これを通す。 */
+/** 本文の塊(行・並べ替えのボタンを除いた host の直下)。⚠ 畳みの数え方は全部これを通す。 */
 export function bodyBlocks(host: HTMLElement): Element[] {
-  return [...host.children].filter((c) => !isLogDayRow(c));
+  return [...host.children].filter((c) => !isLogDayRow(c) && !isLogOrderButton(c));
 }
 
 /** 日の畳みを問う口。 */
@@ -258,9 +275,13 @@ export function syncLogDays(
       allRow.setAttribute('data-pkc-field', 'log-all');
       allRow.setAttribute('data-pkc-action', 'toggle-log-day-all');
     }
-    if (host.firstElementChild !== allRow) {
+    // ⚠ 先頭は並べ替えのボタン(在れば)── 「すべて」の行はその次
+    const btn = [...host.children].find(isLogOrderButton) ?? null;
+    const want = btn === null ? null : btn;
+    if (want === null ? host.firstElementChild !== allRow : allRow.previousElementSibling !== want) {
       const focused = allRow.ownerDocument.activeElement === allRow;
-      host.prepend(allRow);
+      if (want === null) host.prepend(allRow);
+      else want.after(allRow);
       if (focused) allRow.focus({ preventScroll: true });
     }
     keep.add(allRow);
@@ -360,4 +381,96 @@ export function foldAllLogDays(host: HTMLElement): boolean {
     else r.removeAttribute(DAY_FOLDED);
   }
   return fold;
+}
+
+/**
+ * 🔴 **並べ替えのボタン**(#2018 1。user 裁定 2026-11-22「切替ボタンは置く ── 設定画面へ飛ばずマウスで完結」)。
+ * 時刻の記録が 2 件以上あるログの先頭に 1 つ置く。字は**いまの並び**、押すと逆になる(`toggle-log-order`)。
+ * ⚠ 置く / 外すだけ ── 並べ方は `applyLogOrder`。日の行より前に呼ぶ(「すべて」の行がこの後ろに付く)。
+ */
+export function syncLogOrderButton(host: HTMLElement, levels: readonly number[], blocks: readonly Element[]): void {
+  const existing = [...host.children].find(isLogOrderButton) as HTMLButtonElement | undefined;
+  const records = host.hasAttribute(LOG_DAYS_HOST_ATTR)
+    ? daysOf(blocks, levels).filter((d) => d !== null).length
+    : 0;
+  if (records < 2) {
+    existing?.remove();
+    return;
+  }
+  let btn = existing;
+  if (btn === undefined) {
+    btn = host.ownerDocument.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('data-pkc-field', LOG_ORDER_FIELD);
+    btn.setAttribute('data-pkc-action', 'toggle-log-order');
+    btn.setAttribute(OVERLAY_ATTR, '');
+    ORDER_BUTTONS.add(btn);
+  }
+  if (host.firstElementChild !== btn) {
+    const focused = btn.ownerDocument.activeElement === btn;
+    host.prepend(btn);
+    if (focused) btn.focus({ preventScroll: true });
+  }
+  const desc = host.getAttribute(LOG_ORDER_ATTR) === 'desc';
+  const label = desc ? '新しい順' : '古い順';
+  if (btn.textContent !== label) btn.textContent = label;
+  btn.setAttribute('aria-pressed', desc ? 'true' : 'false');
+  const hint = desc
+    ? 'いまは新しい記録が上です。押すと古い順(上から書いた順)に並べます'
+    : 'いまは古い記録が上です。押すと新しい順(新しい記録が上)に並べます';
+  btn.title = hint;
+  btn.setAttribute('aria-label', `ログの並び: ${label}(${hint})`);
+}
+
+/**
+ * 🔴 **新しい順に並べる**(#2018 1)── 読む面の見た目だけ(CSS の `order`。器は `[data-pkc-log-order='desc']` で
+ * 縦の flex になる ── `app.css`)。⚠ DOM の並び・本文の原文・刻印は変えない(差分描画・畳み・追記先が今のまま数える)。
+ *
+ * - 1 件(親の `##` + 配下の追いログ)ごとに裏返す。前置きはいつも先頭。並べ替えのボタンと「すべて」の行はその上
+ * - 日の行は、その日の**いちばん新しい件**の手前へ(裏返した後の、その日の先頭)。月の行はさらにその手前
+ * ⚠ 古い順(既定)では 1 つも値を残さない(通常のノートと同じ流れのまま ── 余白の重なり方も変えない)
+ */
+export function applyLogOrder(host: HTMLElement, blocks: readonly Element[], levels: readonly number[]): void {
+  const kids = [...host.children].filter((c): c is HTMLElement => c instanceof HTMLElement);
+  const desc = host.hasAttribute(LOG_DAYS_HOST_ATTR) && host.getAttribute(LOG_ORDER_ATTR) === 'desc';
+  if (!desc) {
+    for (const k of kids) if (k.style.order !== '') k.style.removeProperty('order');
+    return;
+  }
+  const { seg, count } = logSegments(levels);
+  const want = new Map<Element, number>();
+  const local = new Map<number, number>();
+  blocks.forEach((b, i) => {
+    const s = seg[i] ?? 0;
+    const l = local.get(s) ?? 2;
+    local.set(s, l + 1);
+    want.set(b, orderValue(descRank(s, count), l));
+  });
+  const runs = logDayRuns(levels, daysOf(blocks, levels));
+  for (const run of runs) {
+    const row = blocks[run.start]?.previousElementSibling ?? null;
+    if (row !== null && isDayRow(row)) want.set(row, orderValue(descRank(seg[run.end - 1] ?? 0, count), 1));
+  }
+  for (const mr of logGrouping(runs).months) {
+    const row = blocks[mr.start]?.previousElementSibling?.previousElementSibling ?? null;
+    if (row !== null && isLogMonthRow(row)) want.set(row, orderValue(descRank(seg[mr.end - 1] ?? 0, count), 0));
+  }
+  for (const k of kids) {
+    let v = want.get(k);
+    if (v === undefined) v = isLogOrderButton(k) ? -2 : isLogAllRow(k) ? -1 : undefined;
+    const text = v === undefined ? '' : String(v);
+    if (k.style.order !== text) {
+      if (text === '') k.style.removeProperty('order');
+      else k.style.order = text;
+    }
+  }
+}
+
+/**
+ * 🔴 **読む面に並びの印を付け外す**(#2018 1)── ログの面で、端末の設定が新しい順のときだけ `desc`。
+ * ⚠ 並べ替えのボタンと設定画面が同じ 1 つ(`appLogOrder`)を読み書きする ── どちらで変えても同じ値。
+ */
+export function syncLogOrderAttr(host: HTMLElement): void {
+  if (host.hasAttribute(LOG_DAYS_HOST_ATTR) && appLogOrder.order() === 'desc') host.setAttribute(LOG_ORDER_ATTR, 'desc');
+  else host.removeAttribute(LOG_ORDER_ATTR);
 }

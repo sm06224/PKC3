@@ -24,8 +24,10 @@ import { isEditableColor } from '@features/markdown/color-code';
 import type { DroppedAt } from './asset-into-note';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { BUILTIN_KINDS, isLaunchableUrl, tileSelectsEntry } from '@features/launcher/tiles';
+import { syncChoiceRow } from '../render/choice-buttons';
 import {
   allHeadingFoldState,
+  applyHeadingFold,
   chapterSpanOf,
   headingAtSourceLine,
   headingLevel,
@@ -522,6 +524,9 @@ import { syncReplaceToggle } from '../render/format-bar';
 import { bindInlineComplete, type CompleteItem } from '../render/inline-complete';
 import { bindCurrentLine } from '../render/current-line';
 import { appCurrentLine } from '../render/current-line-setting';
+import { appLogOrder, type LogOrder } from '../render/log-order-setting';
+import { LOG_ORDER_SELECT_FIELD, LOG_ORDER_VALUE_ATTR } from '../render/settings/log-order';
+import { syncLogOrderAttr } from '../render/log-days';
 import { appInlineComplete } from '../render/inline-complete-setting';
 import { setupLinkPreview, closeLinkPreview } from '../render/link-preview';
 import { setupLightbox, openLightbox, closeLightbox, lightboxOpen } from '../render/lightbox';
@@ -4508,8 +4513,11 @@ function jumpWhenAppended(
 ): void {
   const before = dispatcher.getState().lastAppend;
   let off: () => void = () => {};
+  // 🔑 この押しが送る間、他の経路の送り(`watchAppendScroll`)は手を出さない(同じ追記で 2 度送らない)
+  APPEND_BOX_JUMPING.add(lid);
   const stop = (): void => {
     off();
+    APPEND_BOX_JUMPING.delete(lid);
   };
   const timer = setTimeout(stop, 8000);
   off = dispatcher.onState((s) => {
@@ -4557,6 +4565,69 @@ function jumpWhenAppended(
       goBlock();
       // 🔴 長大なノートは、飛び先の周りが描かれて実寸になった後に 1 度だけ合わせ直す(#1467)
       settleJump(hit.block, goBlock);
+    })();
+  });
+}
+
+/** 追記欄の押しが自分で送っている lid(`jumpWhenAppended`)。 */
+const APPEND_BOX_JUMPING = new Set<string>();
+
+/**
+ * 🔴 **追記欄以外の経路で足したときも、足した所へ送る**(#2018 2。user 裁定 2026-11-22「他の追記経路も挙動を揃える」)。
+ *
+ * 予定の追加・板の付箋・AI(コマンド / 外部連携)の追記 ── どれも `lastAppend` / `lastAgentAppend` を動かす。
+ * 開いているノートへの追記なら、足した塊(`at` の行)へ送る。⚠ 送り方は追記欄と同じ(`revealBlock` + `nearest` ──
+ * 見えているなら動かさない)。新しい順(#2018 1)では足した記録が上に並ぶので、送り先は上になる(並べ替えは見た目の
+ * `order` なので、同じ塊へ `scrollIntoView` すれば見えている位置へ行く)。
+ * ⚠ **別の窓の追記では動かない**(#782 A)── 別の窓の書き込みはこの窓の `lastAppend` を動かさない。
+ * ⚠ 追記欄の押しは自分で送る(`APPEND_BOX_JUMPING`)ので、ここは手を出さない。
+ * ⚠ `lastAppend` は「行を差し挟む」経路(写真のドロップ・別のノートからの塊の移動 = `insert-lines`)でも動く ──
+ *   それらも開いているノートに入れた字なので、同じく足した所へ送る(見えていれば動かない `nearest`)。
+ * @returns 外す関数
+ */
+function watchAppendScroll(dispatcher: Dispatcher, root: HTMLElement): () => void {
+  // ⚠ 購読の口を持たない台(押し所だけを見る test の作り物)では何もしない
+  const d = dispatcher as Partial<Dispatcher>;
+  if (typeof d.onState !== 'function' || typeof d.getState !== 'function') return () => undefined;
+  let prevUser = dispatcher.getState().lastAppend;
+  let prevAgent = dispatcher.getState().lastAgentAppend;
+  return dispatcher.onState((s) => {
+    const user = s.lastAppend;
+    const agent = s.lastAgentAppend;
+    const moved = user !== prevUser && user !== null ? user : agent !== prevAgent && agent !== null ? agent : null;
+    prevUser = user;
+    prevAgent = agent;
+    // ⚠ `selectedLid` の門は下(描き終わりを待った後)でもう一度見る ── ここは待たずに降りるための早道で、外しても
+    //   結果は同じ(変異試験で等価と確かめた)。守っているのは下の門である
+    if (moved === null || moved.lid !== s.selectedLid || APPEND_BOX_JUMPING.has(moved.lid)) return;
+    const lid = moved.lid;
+    void (async (): Promise<void> => {
+      const detail = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
+      if (detail === null) return;
+      await waitPainted(detail, lid);
+      const st = dispatcher.getState();
+      if (st.selectedLid !== lid) return;
+      const body = st.openBody?.lid === lid ? st.openBody.body : null;
+      const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+      if (body === null || host === null) return;
+      // 足した最後の行(描く面の行 = frontmatter を剥いだ側)。`at` が無ければ文書の末尾
+      const last =
+        moved.at === undefined
+          ? body.split('\n').length - 1
+          : moved.at + Math.max(1, moved.lines.length) - 1;
+      const line = last - frontmatterLineCount(body);
+      let block: Element | null = null;
+      for (const el of host.children) {
+        const start = Number(el.getAttribute('data-pkc-source-line'));
+        if (!Number.isInteger(start) || start > line) continue;
+        block = el;
+      }
+      if (block === null) return;
+      revealBlock(host, block);
+      const target = block;
+      const go = (): void => target.scrollIntoView({ block: 'nearest' });
+      go();
+      settleJump(target, go);
     })();
   });
 }
@@ -15391,6 +15462,18 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **ログの日・月をまとめて畳む / 出す**(#1441)。1 つでも開いていれば全部畳み、全部畳んであれば全部出す。
    * ⚠ 本文は 1 バイトも変わらない(見え方だけ)ので `BODY_WRITE_ACTIONS` には載せない。
    */
+  /**
+   * 🔴 **ログの並びを逆にする**(#2018 1。読む面の上のボタン)/ **選ぶ**(設定画面の列)。
+   * ⚠ 2 つとも同じ 1 つ(`appLogOrder`)へ書き、開いているログの面と設定の列の両方へ映す(双方向)。
+   * ⚠ 本文は 1 バイトも変わらない(見え方だけ)ので `BODY_WRITE_ACTIONS` には載せない。
+   */
+  'toggle-log-order': (_dispatcher, target) => {
+    applyLogOrderChoice(target.ownerDocument, appLogOrder.order() === 'desc' ? 'asc' : 'desc');
+  },
+  'set-log-order': (_dispatcher, target) => {
+    const v = target.getAttribute(LOG_ORDER_VALUE_ATTR);
+    if (v === 'asc' || v === 'desc') applyLogOrderChoice(target.ownerDocument, v);
+  },
   'toggle-log-day-all': (_dispatcher, target) => {
     const host = target.closest<HTMLElement>('[data-pkc-log-all]')?.parentElement;
     if (host !== null && host !== undefined) toggleAllLogDays(host);
@@ -25306,6 +25389,8 @@ export function bindActions(
    */
   // 🔴 #2001 段 4: 打っている行の左端の線(設定で切れる。既定は入)
   undo.push(bindCurrentLine(root, { enabled: () => appCurrentLine.enabled() }));
+  // 🔴 #2018 2: 追記欄以外の経路で開いているノートへ足したときも、足した所へ送る
+  undo.push(watchAppendScroll(dispatcher, root));
   const assetIndex = createAssetIndex();
   let assetReadFailed = false;
   undo.push(
@@ -26896,4 +26981,17 @@ export function bindActions(
     closeLightbox(root);
     longPress.dispose();
   };
+}
+
+/**
+ * 🔴 **ログの並びを書いて、見えている物へ映す**(#2018 1)── 開いているログの読む面(並べ直し + ボタンの字)と、
+ *   設定画面の列(押されている側)。⚠ 描き直しは見え方だけ(`applyHeadingFold` は冪等)。
+ */
+function applyLogOrderChoice(doc: Document, order: LogOrder): void {
+  appLogOrder.setOrder(order);
+  for (const host of doc.querySelectorAll<HTMLElement>('[data-pkc-log-days]')) {
+    syncLogOrderAttr(host);
+    applyHeadingFold(host);
+  }
+  syncChoiceRow(doc, LOG_ORDER_SELECT_FIELD, LOG_ORDER_VALUE_ATTR, appLogOrder.order());
 }
