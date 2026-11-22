@@ -1284,7 +1284,7 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   // 🔴 #1852 束 F2: 取り込んだゴミ箱のノートは、生きた一覧(4 件)に出ず、ゴミ箱の一覧に出る
   await expect(rows.filter({ hasText: 'ゴミ箱のメモ' }), 'ゴミ箱のノートが生きた一覧に出た').toHaveCount(0);
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('ゴミ箱のノート 1 件');
-  await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-region="rail"] [data-pkc-action="show-trash"]');
   await expect(
     page.locator('[data-pkc-region="filer-trash"] li').filter({ hasText: 'ゴミ箱のメモ' }),
     '取り込んだゴミ箱のノートがゴミ箱の一覧に出ない',

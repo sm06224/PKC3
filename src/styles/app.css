@@ -3526,9 +3526,11 @@ dd[data-pkc-field='inspector-toc'] {
 [data-pkc-field='relation-target'] {
   /* 🔴 **行の幅いっぱいまで伸ばす**(実機の見切れ。user 指示 2026-11-22)── 6rem 固定では薄字「つなぐ先の題名」が
    *   右で切れていた。最小は薄字が収まる幅、入らない行では種類・ボタンが下の行へ回る */
-  flex: 1 1 9em;
-  min-width: 9em;
-  width: auto;
+  /* ⚠ 幅の基準は今までの 6rem(列の最小の幅 = min-content を広げない ── 広げると情報ペインの dd が全部右端からはみ出す。
+   *   `inspector-fit.smoke`)。そこから行の残りいっぱいまで伸ばす */
+  flex: 1 1 auto;
+  width: 6rem;
+  min-width: 0;
   font-size: var(--fs-sm);
 }
 [data-pkc-field='relation-kind'] {

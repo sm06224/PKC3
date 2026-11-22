@@ -379,7 +379,8 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await ask('ゴミ箱を閉じる');
   await page.keyboard.press('Enter');
   await expect(dialog).toBeHidden();
-  await expect(page.locator('[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]:not([hidden])'), 'ゴミ箱が閉じていない').toBeVisible();
+  // ⚠ 2026-11-22: パソコンの幅では閉じた入口(「ゴミ箱を開く」)は縦のバーにだけ出す ── 閉じたことは器の印で見る
+  await expect(page.locator('[data-pkc-region="filer-trash"][data-pkc-trash-closed]'), 'ゴミ箱が閉じていない').toBeAttached();
 
   await ask('時間を計る');
   await page.keyboard.press('Enter');

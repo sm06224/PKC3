@@ -407,7 +407,8 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
   });
   expect(createRow.rows, `作るボタンの行が 1 行でない: ${JSON.stringify(createRow)}`).toBe(1);
   expect(createRow.names.length, `作るボタンの行が 3 点(+ ノート・▼・今日・その他)でない: ${JSON.stringify(createRow.names)}`).toBe(4);
-  expect(createRow.names, '「今日」が 1 クリックで押せない').toContain('今日');
+  // 2026-11-22: 名前を「今日を開く」へそろえた(帯・長押し・操作を探す・Alt+T で 1 つの名前)
+  expect(createRow.names, '「今日」が 1 クリックで押せない').toContain('今日を開く');
   await clickReal(page, '[data-pkc-region="create-bar"] [data-pkc-field="bar-more"]');
   const tools = await page
     .locator('[data-pkc-region="context-menu"] button')
@@ -523,6 +524,8 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
         }
         // ⚠ 「⋯」自身は名前つきの物に数えない(畳んだ数だけ現れ、幅で数が変わるため)
         if (btn.getAttribute('data-pkc-field') === 'bar-more') continue;
+        // ⚠ 一覧の下の閉じたゴミ箱の入口は、縦のバーにゴミ箱が在る幅では出さない(2026-11-22。スマホの幅でだけ出る)── 幅で数が変わるので数えない
+        if (btn.closest('[data-pkc-region="filer-trash"]') !== null && btn.getAttribute('data-pkc-action') === 'show-trash') continue;
         // ⚠ 畳まれている物は測らない(器が 0 なので必ず「はみ出し」に見える)
         const box = btn.getBoundingClientRect();
         if (box.width === 0 || box.height === 0) {
