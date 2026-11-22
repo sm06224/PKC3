@@ -14,7 +14,8 @@ import {
 } from '@features/filer/folder-path';
 
 export const CRUMB_INPUT_FIELD = 'crumb-input';
-export const CRUMB_LIST_ID = 'pkc-crumb-path-candidates';
+/** 枠ごとに一意な候補一覧の id(将来 2 つ以上の枠に入力を出しても重複しない)。 */
+let listSeq = 0;
 /** 候補の上限(`<datalist>` に何千も並べない)。 */
 const CANDIDATE_LIMIT = 100;
 
@@ -59,13 +60,14 @@ export function openCrumbInput(
   input.type = 'text';
   input.setAttribute('data-pkc-field', CRUMB_INPUT_FIELD);
   input.setAttribute('aria-label', 'フォルダのパス(Enter で移動、Esc でやめる)');
-  input.setAttribute('list', CRUMB_LIST_ID);
+  const listId = `pkc-crumb-path-candidates-${++listSeq}`;
+  input.setAttribute('list', listId);
   input.setAttribute('autocomplete', 'off');
   input.spellcheck = false;
   input.placeholder = 'ルート/フォルダ/フォルダ';
   input.value = text ?? currentFolderPathText(state.scopeLid, state.entryMetas, state.relations);
   const list = document.createElement('datalist');
-  list.id = CRUMB_LIST_ID;
+  list.id = listId;
   path.append(input, list);
   fillCrumbCandidates(input, state, text ?? '');
   return input;

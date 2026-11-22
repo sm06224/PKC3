@@ -49,7 +49,7 @@ import {
   fillCrumbCandidates,
   openCrumbInput,
 } from '../render/crumb-path-input';
-import { resolveFolderPath } from '@features/filer/folder-path';
+import { normalizeFolderPath, resolveFolderPath } from '@features/filer/folder-path';
 import { orderTabs as orderNoteTabs, visible as noteTabsVisible } from '@features/nav/note-tabs';
 import { settleJump } from '../render/long-note';
 import { mountFilerRow } from '../render/filer';
@@ -21395,6 +21395,38 @@ export function bindActions(
    * 🔴 **パンくずのパス入力**(#1982 A4)。入れるのは `enter-folder` の 1 本(段を押したときと同じ受け手を通す ── 道を 2 本にしない)。
    * ⚠ あいまい(同名のフォルダが複数)・見つからないときは**入らず**、理由を出して入力を開いたままにする。
    */
+  const CRUMB_FRAME_SEL = '[data-pkc-field="crumb-path"]';
+  const crumbFrameOf = (t: Element | null): HTMLElement | null => t?.closest<HTMLElement>(CRUMB_FRAME_SEL) ?? null;
+  /** 枠そのもの・区切りの `›` だけが「空き」(段のボタン・入力欄・字は空きではない)。 */
+  const isCrumbEmpty = (t: Element | null, frame: HTMLElement): boolean =>
+    t === frame || (t !== null && t.getAttribute('data-pkc-field') === 'crumb-sep' && frame.contains(t));
+  /**
+   * 🔴 **押した場所を覚える**(#1982 A4 レビュー)── `click` は「押した場所と離した場所の共通の祖先」に落ちるので、
+   *   段のボタンを押して枠の余白で離す・枠内の字をドラッグで選ぶ、でも枠そのものに落ちる。押した場所も空きのときだけ開く。
+   * ⚠ 入力中に余白を押したときは、焦点を奪わせず(`preventDefault`)入力欄へ戻す ── blur → 閉じる → 続く click で開き直す
+   *   と、打ちかけの字が消える。
+   */
+  let crumbDown: { empty: boolean; editing: boolean } | null = null;
+  const onCrumbMouseDown = (ev: Event): void => {
+    const t = ev.target as HTMLElement | null;
+    const frame = crumbFrameOf(t);
+    if (frame === null) {
+      crumbDown = null;
+      return;
+    }
+    const editing = frame.hasAttribute('data-pkc-editing');
+    crumbDown = { empty: isCrumbEmpty(t, frame), editing };
+    if (editing && !(t instanceof HTMLInputElement)) {
+      ev.preventDefault();
+      crumbInputOf(frame)?.focus();
+    }
+  };
+  /** 枠の中に選択範囲が残っているか(字をドラッグで選んで離したときは開かない)。 */
+  const crumbHasSelection = (frame: HTMLElement): boolean => {
+    const sel = frame.ownerDocument.getSelection();
+    if (sel === null || sel.isCollapsed) return false;
+    return frame.contains(sel.anchorNode) || frame.contains(sel.focusNode);
+  };
   const beginCrumbInput = (frame: HTMLElement): void => {
     const input = openCrumbInput(frame, dispatcher.getState());
     input.focus();
@@ -21410,13 +21442,23 @@ export function bindActions(
     const frame = input.closest<HTMLElement>('[data-pkc-field="crumb-path"]');
     if (frame === null) return;
     const st = dispatcher.getState();
+    // 空欄の Enter は何もしない(ルートへ飛ばない。入力は開いたまま)
+    if (normalizeFolderPath(input.value) === '') {
+      input.focus();
+      return;
+    }
     const r = resolveFolderPath(input.value, st.entryMetas, st.relations);
     if (r.kind === 'ok') {
       // ⚠ 入る前に入力を閉じる(開いたままだと、入ったあとの組み直しが打ちかけの字として持ち越してしまう)
       closeCrumbInput(frame);
-      const to = document.createElement('button');
-      if (r.lid !== null) to.setAttribute('data-pkc-entry', r.lid);
-      ACTIONS['enter-folder']!(dispatcher, to, services, root);
+      // 🔴 解決先が現在地なら閉じるだけ(`enter-folder` は現在地だと `select-entry` に化けて中央ペインが切り替わる)
+      if (r.lid !== st.scopeLid) {
+        const to = document.createElement('button');
+        if (r.lid !== null) to.setAttribute('data-pkc-entry', r.lid);
+        ACTIONS['enter-folder']!(dispatcher, to, services, root);
+      }
+      // 閉じた後は焦点を枠へ戻す(組み直しで枠が作り直されても、新しい枠へ)
+      (root.querySelector<HTMLElement>(`[data-pkc-region="filer-breadcrumb"] ${CRUMB_FRAME_SEL}`) ?? frame).focus();
       return;
     }
     dispatcher.dispatch({
@@ -21504,15 +21546,21 @@ export function bindActions(
      */
     {
       const t = ev.target as HTMLElement | null;
+      const down = crumbDown;
+      crumbDown = null;
       if (t instanceof HTMLInputElement && t.getAttribute('data-pkc-field') === CRUMB_INPUT_FIELD) return;
-      const frame = t?.closest<HTMLElement>('[data-pkc-field="crumb-path"]') ?? null;
-      if (
-        frame !== null &&
-        t !== null &&
-        t.closest('[data-pkc-action]') === null &&
-        !frame.hasAttribute('data-pkc-editing')
-      ) {
-        beginCrumbInput(frame);
+      const frame = crumbFrameOf(t);
+      if (frame !== null && t !== null && t.closest('[data-pkc-action]') === null) {
+        if (frame.hasAttribute('data-pkc-editing')) {
+          // 入力中の余白は開き直さない(焦点を入力欄へ戻すだけ)
+          crumbInputOf(frame)?.focus();
+        } else if (
+          isCrumbEmpty(t, frame) &&
+          (down === null || down.empty) &&
+          !crumbHasSelection(frame)
+        ) {
+          beginCrumbInput(frame);
+        }
         return;
       }
     }
@@ -25824,6 +25872,7 @@ export function bindActions(
   // 🔴 外から来た荷物は `dragend` を投げない ── 窓の外へ抜けた回はここが印を畳む
   listen(root, 'dragleave', onDragLeave);
   listen(root, 'mousedown', onMousedown);
+  listen(root, 'mousedown', onCrumbMouseDown);
   listen(root, 'input', onInput);
   listen(root, 'change', onChange);
   // 🔴 再生中の文字起こしの行を光らせる(#1232)。⚠ media の event は bubble しない ── 捕まえる側(capture)で受ける
@@ -27031,6 +27080,8 @@ export function bindActions(
     const el = ev.target;
     if (!(el instanceof HTMLInputElement) || el.getAttribute('data-pkc-field') !== CRUMB_INPUT_FIELD) return;
     if (!el.isConnected) return;
+    // ウィンドウ自体が非アクティブになった focusout では閉じない(戻ってきたとき打ちかけが残る)
+    if (!el.ownerDocument.hasFocus()) return;
     const frame = el.closest<HTMLElement>('[data-pkc-field="crumb-path"]');
     if (frame !== null) closeCrumbInput(frame);
   });

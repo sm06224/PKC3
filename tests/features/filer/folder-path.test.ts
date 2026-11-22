@@ -145,3 +145,49 @@ describe('currentFolderPathText / filterFolderPathCandidates', () => {
     expect(filterFolderPathCandidates(all, '', 2)).toHaveLength(2);
   });
 });
+
+describe('見分けの付かない道(空題名・区切りの字・3 件以上)', () => {
+  it('空題名のフォルダは「（無題）」で道を作る ── ルートと取り違えず、ルートは常に一意に解決する', () => {
+    order = 0;
+    const { metas, rels } = build([meta('e', ''), meta('w', '  '), meta('s', '／'), meta('r', 'ルート')], []);
+    const c = listFolderPathCandidates(metas, rels);
+    expect(c.filter((x) => x.lid !== null).every((x) => x.path.startsWith('ルート/'))).toBe(true);
+    expect(c.find((x) => x.lid === 'e')!.path).toBe('ルート/（無題）');
+    // 3 件の空題名は同じ字になるが、見分けのラベルで 1 つずつ選べる
+    const untitled = c.filter((x) => x.path === 'ルート/（無題）');
+    expect(untitled.map((x) => x.lid)).toEqual(['e', 'w', 's']);
+    expect(new Set(untitled.map((x) => x.label)).size).toBe(3);
+    for (const u of untitled) expect(resolveFolderPath(u.label, metas, rels)).toMatchObject({ kind: 'ok', lid: u.lid });
+    expect(resolveFolderPath('ルート/（無題）', metas, rels).kind).toBe('ambiguous');
+    // ルートは常に一意(題名が「ルート」のフォルダが居ても)
+    expect(resolveFolderPath('ルート', metas, rels)).toMatchObject({ kind: 'ok', lid: null });
+    expect(resolveFolderPath('ルート/ルート', metas, rels)).toMatchObject({ kind: 'ok', lid: 'r' });
+  });
+  it('区切りの字(／ › /)を題名に含むフォルダは、衝突したとき候補から選べる', () => {
+    order = 0;
+    const { metas, rels } = build(
+      [meta('a', 'a'), meta('b', 'b'), meta('s1', 'a/b'), meta('s2', 'a／b'), meta('s3', 'a›b')],
+      [rel('a', 'b')],
+    );
+    const r = resolveFolderPath('ルート/a/b', metas, rels);
+    expect(r.kind).toBe('ambiguous');
+    if (r.kind !== 'ambiguous') return;
+    expect(r.candidates.map((x) => x.lid)).toEqual(['b', 's1', 's2', 's3']);
+    expect(new Set(r.candidates.map((x) => x.label)).size).toBe(4);
+    for (const c of r.candidates) expect(resolveFolderPath(c.label, metas, rels)).toMatchObject({ kind: 'ok', lid: c.lid });
+  });
+  it('同じ道が 3 件以上 ── 1・2・3 番目で見分けられ、現在地の初期値も見分けの付く表示になる', () => {
+    order = 0;
+    const { metas, rels } = build([meta('x', '同'), meta('y', '同'), meta('z', '同')], []);
+    const c = listFolderPathCandidates(metas, rels).filter((x) => x.path === 'ルート/同');
+    expect(c).toHaveLength(3);
+    expect(c.map((x) => x.label.includes(`${c.indexOf(x) + 1} 番目`))).toEqual([true, true, true]);
+    for (const x of c) {
+      expect(resolveFolderPath(x.label, metas, rels)).toMatchObject({ kind: 'ok', lid: x.lid });
+      // 初期値(現在地)でそのまま Enter しても、その 1 つへ解決できる
+      expect(resolveFolderPath(currentFolderPathText(x.lid, metas, rels), metas, rels)).toMatchObject({ kind: 'ok', lid: x.lid });
+    }
+    const r = resolveFolderPath('ルート/同', metas, rels);
+    expect(r.kind === 'ambiguous' && r.candidates).toHaveLength(3);
+  });
+});

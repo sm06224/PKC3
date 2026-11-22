@@ -1716,6 +1716,8 @@ export class FilerRenderer {
     // 🔴 枠の何も無い所を押す(または焦点を当てて Enter / Space)と、パスを直接打つ入力になる(#1982 A4。binder が受ける)
     path.tabIndex = 0;
     path.title = '何も無い所を押すと、パスを打って移動できます';
+    path.setAttribute('role', 'group');
+    path.setAttribute('aria-label', 'パンくず。押すとパスを入力できます');
     crumb.append(path);
     const sep = (): HTMLSpanElement => {
       const x = document.createElement('span');

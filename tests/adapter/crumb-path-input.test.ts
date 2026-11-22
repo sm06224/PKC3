@@ -4,12 +4,13 @@
  * 空きを押す → 入力 / Enter で移動(`enter-folder` と同じ受け手)/ Esc・外れで元に戻る /
  * 同名のフォルダは入らず理由を出す / 面の組み直しで打ちかけの字を失わない / 段のクリック・D&D の属性は壊れない。
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { openCrumbInput } from '../../src/adapter/ui/render/crumb-path-input';
 
 const meta = (lid: string, title: string, order: number, archetype = 'folder'): EntryMeta => ({
   lid,
@@ -34,6 +35,9 @@ const rel = (from: string, to: string): Relation => ({
 
 beforeEach(() => {
   document.body.textContent = '';
+});
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function setup(metas: EntryMeta[], relations: Relation[]) {
@@ -168,3 +172,161 @@ describe('パンくずのパス入力', () => {
     expect(t.input()).not.toBeNull();
   });
 });
+
+const down = (el: Element): MouseEvent => {
+  const ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+  el.dispatchEvent(ev);
+  return ev;
+};
+const enterKey = (i: HTMLInputElement, init: KeyboardEventInit = {}) =>
+  i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init }));
+
+describe('パンくずのパス入力 ── レビュー指摘の修正', () => {
+  it('1: 段のボタンの上で押して枠の余白で離しても(click は枠に落ちる)入力は開かない。空きで押して空きで離すと開く', () => {
+    const t = setup(TREE, TREE_REL);
+    t.d.dispatch({ type: 'SET_SCOPE', lid: 'b' });
+    const seg = t.root.querySelector<HTMLElement>('[data-pkc-field="crumb-seg"][data-pkc-entry="a"]')!;
+    down(seg);
+    t.frame().click(); // 押したのはボタン・離したのは余白 → 共通の祖先の枠へ落ちる
+    expect(t.input()).toBeNull();
+    expect(t.d.getState().scopeLid).toBe('b');
+    // 区切りの › で押して枠で離す → 空きどうしなので開く
+    down(t.root.querySelector('[data-pkc-field="crumb-sep"]')!);
+    t.frame().click();
+    expect(t.input()).not.toBeNull();
+  });
+
+  it('1: 枠内の字をドラッグで選んで離した(選択範囲が残っている)ときは開かない。選択が無ければ開く', () => {
+    const t = setup(TREE, TREE_REL);
+    t.d.dispatch({ type: 'SET_SCOPE', lid: 'b' });
+    const seg = t.root.querySelector('[data-pkc-field="crumb-seg"]')!;
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    const range = document.createRange();
+    range.selectNodeContents(seg);
+    sel.addRange(range);
+    expect(sel.isCollapsed).toBe(false); // 空振り防止: 選択は実際に残っている
+    down(t.frame());
+    t.frame().click();
+    expect(t.input()).toBeNull();
+    sel.removeAllRanges();
+    down(t.frame());
+    t.frame().click();
+    expect(t.input()).not.toBeNull();
+  });
+
+  it('2: 初期値(現在地)のまま Enter は閉じるだけ ── 選択は変わらず、中央ペインは切り替わらず、焦点は枠へ戻る', () => {
+    const t = setup(TREE, TREE_REL);
+    t.d.dispatch({ type: 'SET_SCOPE', lid: 'a' });
+    t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
+    expect(t.d.getState().selectedLid).toBe('b');
+    expect(t.d.getState().scopeLid).toBe('a');
+    t.frame().click();
+    expect(t.input()?.value).toBe('ルート/資料');
+    t.key('Enter');
+    expect(t.input()).toBeNull();
+    expect(t.d.getState().scopeLid).toBe('a');
+    expect(t.d.getState().selectedLid).toBe('b');
+    expect(document.activeElement).toBe(t.frame());
+  });
+
+  it('2: 空欄の Enter は何もしない(ルートへ飛ばない・入力は開いたまま)。移動できたときも焦点は枠へ戻る', () => {
+    const t = setup(TREE, TREE_REL);
+    t.d.dispatch({ type: 'SET_SCOPE', lid: 'b' });
+    t.frame().click();
+    t.type('');
+    t.key('Enter');
+    expect(t.d.getState().scopeLid).toBe('b');
+    expect(t.input()).not.toBeNull();
+    t.type(' / ');
+    t.key('Enter');
+    expect(t.d.getState().scopeLid).toBe('b');
+    expect(t.input()).not.toBeNull();
+    t.type('ルート/仕事');
+    t.key('Enter');
+    expect(t.d.getState().scopeLid).toBe('c');
+    expect(document.activeElement).toBe(t.frame());
+  });
+
+  it('4: 入力中に枠の余白を押しても焦点を奪わせず(blur しない)、続く click で開き直さない ── 打ちかけの字が残る', () => {
+    const t = setup(TREE, TREE_REL);
+    t.frame().click();
+    t.type('ルート/資');
+    t.input()!.focus();
+    t.input()!.setSelectionRange(5, 5); // 打ちかけの続きに caret がある(開き直すと全選択になり、次の字で置き換わる)
+    const before = t.input();
+    const ev = down(t.frame());
+    expect(ev.defaultPrevented).toBe(true); // 焦点を奪わせない
+    t.frame().click();
+    expect(t.input()).toBe(before);
+    expect(t.input()?.value).toBe('ルート/資');
+    expect([t.input()!.selectionStart, t.input()!.selectionEnd]).toEqual([5, 5]);
+    expect(document.activeElement).toBe(t.input());
+  });
+
+  it('4: ウィンドウ自体が非アクティブになった focusout では閉じない(戻ると打ちかけが残る)。アクティブなままの外れは閉じる', () => {
+    const t = setup(TREE, TREE_REL);
+    t.frame().click();
+    t.type('ルート/資');
+    const has = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    t.input()!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }));
+    expect(t.input()?.value).toBe('ルート/資');
+    has.mockReturnValue(true);
+    t.input()!.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    expect(t.input()).toBeNull();
+  });
+
+  it('5: 枠に role と aria-label が付く', () => {
+    const t = setup(TREE, TREE_REL);
+    expect(t.frame().getAttribute('role')).toBe('group');
+    expect(t.frame().getAttribute('aria-label')).toBe('パンくず。押すとパスを入力できます');
+  });
+
+  it('6 M1: IME 変換中の Enter(isComposing / keyCode 229)では移動も失敗表示もしない', () => {
+    const t = setup(TREE, TREE_REL);
+    t.frame().click();
+    t.type('ルート/仕事');
+    enterKey(t.input()!, { isComposing: true });
+    enterKey(t.input()!, { keyCode: 229 });
+    expect(t.d.getState().scopeLid).toBeNull();
+    expect(t.input()?.value).toBe('ルート/仕事');
+    // 空振り防止: 変換中でなければ同じ入力で移動する
+    enterKey(t.input()!);
+    expect(t.d.getState().scopeLid).toBe('c');
+  });
+
+  it('6 M2/M4: 入力中に別の操作で filer が描き直されても、打ちかけの字と焦点が残る(古い入力の focusout にも閉じられない)', () => {
+    const t = setup(TREE, TREE_REL);
+    t.frame().click();
+    t.type('ルート/資');
+    const old = t.input()!;
+    old.focus();
+    // 描き直しの最中に focusout が root へ届く経路を再現する: 捕まえる段(root の capture)で再描画を起こす ──
+    // 経路は発火時点で決まっているので、古い入力(外れた節点)の focusout が bubble で root の受け手へ届く
+    const rerender = () => t.d.dispatch({ type: 'SET_FILER_FLATTEN', on: true });
+    t.root.addEventListener('focusout', rerender, { capture: true, once: true });
+    old.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    expect(old.isConnected).toBe(false); // 空振り防止: 実際に描き直されて古い入力は外れた
+    expect(t.input()).not.toBe(old);
+    expect(t.input()?.value).toBe('ルート/資');
+    expect(document.activeElement).toBe(t.input());
+    // 描き直しをもう 1 回(焦点を持ったままの再描画 = filer の焦点の戻しが奪い返さない)
+    t.d.dispatch({ type: 'SET_FILER_FLATTEN', on: false });
+    expect(t.input()?.value).toBe('ルート/資');
+    expect(document.activeElement).toBe(t.input());
+  });
+
+  it('8: 候補一覧の id は枠ごとに一意(2 つ出しても重複しない)', () => {
+    const mk = () => {
+      const f = document.createElement('span');
+      document.body.append(f);
+      return openCrumbInput(f, { entryMetas: new Map(), relations: [], scopeLid: null });
+    };
+    const a = mk();
+    const b = mk();
+    expect(a.getAttribute('list')).not.toBe(b.getAttribute('list'));
+    expect(a.parentElement!.querySelector('datalist')!.id).toBe(a.getAttribute('list'));
+    expect(b.parentElement!.querySelector('datalist')!.id).toBe(b.getAttribute('list'));
+  });
+});
+

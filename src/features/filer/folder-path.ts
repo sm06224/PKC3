@@ -16,6 +16,8 @@ import { buildStructuralChildrenIndex, resolveCanonicalParents } from '@features
 import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 
 export const FOLDER_PATH_ROOT = 'ルート';
+/** 題名が空(空白・区切りの字だけ)のフォルダの、道での字。空だと道が親と同じ字になり、ルートと取り違える。 */
+export const FOLDER_PATH_UNTITLED = '（無題）';
 
 export interface FolderPathCandidate {
   /** `null` = ルート。 */
@@ -43,7 +45,8 @@ export function normalizeFolderPath(text: string): string {
     .join('/');
 }
 
-const joinPath = (parentPath: string, title: string): string => `${parentPath}/${title}`;
+const joinPath = (parentPath: string, title: string): string =>
+  `${parentPath}/${normalizeFolderPath(title) === '' ? FOLDER_PATH_UNTITLED : title}`;
 
 /** ルートを先頭に、フォルダを画面の並び(深さ優先・各段は並び順)で。 */
 export function listFolderPathCandidates(
@@ -111,7 +114,8 @@ export function currentFolderPathText(
 ): string {
   if (scopeLid === null) return FOLDER_PATH_ROOT;
   const hit = listFolderPathCandidates(metas, relations).find((c) => c.lid === scopeLid);
-  return hit?.path ?? FOLDER_PATH_ROOT;
+  // 同名のときは見分けの付く表示(`label`)を初期値にする ── 道の字のままだと、そのまま Enter で「あいまい」になる
+  return hit?.label ?? FOLDER_PATH_ROOT;
 }
 
 /** 打った字をフォルダへ。字が完全に一致したときだけ `ok`(あいまい一致では入らない)。 */
@@ -122,6 +126,8 @@ export function resolveFolderPath(
 ): FolderPathResolution {
   const cands = listFolderPathCandidates(metas, relations);
   const typed = normalizeFolderPath(text);
+  // ルートは常に一意に解決する(題名がルートと同じ字になるフォルダが居ても取り違えない)
+  if (typed === '' || typed === FOLDER_PATH_ROOT) return { kind: 'ok', lid: null, path: FOLDER_PATH_ROOT };
   // ① 候補の表示そのもの(同名を見分ける「〔同名 n 番目…〕」付き)── 候補を選んだ場合
   const byLabel = cands.filter((c) => normalizeFolderPath(c.label) === typed);
   if (byLabel.length === 1) return { kind: 'ok', lid: byLabel[0]!.lid, path: byLabel[0]!.path };

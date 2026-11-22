@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, dismissAnnounce, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 
 /**
  * 🔴 **パンくず(アドレスバー)のパス直接入力**(#1982 A4)。
@@ -58,6 +58,22 @@ test('🔴 空きを押してパスを打つと移動でき、Esc / 外れで元
   await expect(page.locator(SEG).last()).toHaveText('資料');
   await enter(page, '下');
 
+  // 🔴 段のボタンの上で押して、枠の余白へ動かして離しても、入力は開かない(click は共通の祖先の枠に落ちる)
+  {
+    const seg = await page.locator(`${SEG}[data-pkc-entry]:not([aria-current])`).first().boundingBox();
+    const fr = await page.locator(FRAME).boundingBox();
+    if (seg === null || fr === null) throw new Error('パンくずが見えない');
+    await page.mouse.move(seg.x + seg.width / 2, seg.y + seg.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(fr.x + fr.width - 3, fr.y + fr.height / 2, { steps: 4 });
+    await page.mouse.up();
+    await expect(page.locator(INPUT)).toHaveCount(0);
+    expect(await crumbTexts(page)).toEqual(['ルート', '資料', '下']);
+  }
+  // 💡 枠は role と aria-label を持つ
+  await expect(page.locator(FRAME)).toHaveAttribute('role', 'group');
+  await expect(page.locator(FRAME)).toHaveAttribute('aria-label', /パンくず/);
+
   // ① 空きを押すと現在地の道の字が入った入力になる(段のボタンは外れる)
   await clickEmptyOfBar(page);
   const input = page.locator(INPUT);
@@ -99,6 +115,38 @@ test('🔴 空きを押してパスを打つと移動でき、Esc / 外れで元
   await input.fill('ルート/資');
   await expect(input).toBeFocused();
   await expect(input).toHaveValue('ルート/資');
+
+  // ⑥-2 打っている最中に別の操作で一覧が描き直されても(焦点を動かさない押し方)、打ちかけの字と焦点が残る
+  const barBefore = await page.locator(CRUMB).elementHandle();
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('[data-pkc-action="toggle-filer-flatten"]')!.click();
+  });
+  await expect.poll(() => barBefore!.evaluate((n) => n.isConnected)).toBe(false); // 空振り防止: 実際に組み直された
+  await expect(input).toHaveValue('ルート/資');
+  await expect(input).toBeFocused();
+  // ⑥-3 入力中に枠の余白を押しても、開き直さず(打ちかけの字が残る)焦点は入力に残る
+  await clickEmptyOfBar(page);
+  await expect(input).toHaveValue('ルート/資');
+  await expect(input).toBeFocused();
+
+  // ⑥-4 スマホ幅(狭い窓)でも入力欄は横にはみ出さない
+  await page.setViewportSize({ width: 390, height: 844 });
+  await dismissAnnounce(page);
+  // (スマホ用画面ではパンくずは一覧のページに居る。窓の幅が変わる再描画で入力は閉じてよい ── 狭い窓で開き直して測る)
+  const toList = page.locator('[data-pkc-action="phone-page"][data-pkc-page="list"]');
+  if ((await toList.count()) > 0 && (await page.locator(FRAME).isHidden())) await clickReal(page, toList.first());
+  await expect(page.locator(FRAME)).toBeVisible();
+  await clickEmptyOfBar(page);
+  await expect(input).toBeVisible();
+  const vw = 390;
+  const ib = await input.boundingBox();
+  const fb = await page.locator(FRAME).boundingBox();
+  expect(ib, '入力欄が見える').not.toBeNull();
+  expect(ib!.x).toBeGreaterThanOrEqual(0);
+  expect(ib!.x + ib!.width, '入力欄の右端が窓に収まる').toBeLessThanOrEqual(vw + 0.5);
+  expect(fb!.x + fb!.width, '枠の右端が窓に収まる').toBeLessThanOrEqual(vw + 0.5);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(input).toBeFocused();
 
   // ⑦ 外を押すと元へ戻る(blur)
   await page.mouse.click(5, 880);
