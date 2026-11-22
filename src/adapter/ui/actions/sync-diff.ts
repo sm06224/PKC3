@@ -569,7 +569,8 @@ export async function applySyncDiff(
 
     await deps.reload();
     const token: SyncUndoToken = applied.undo;
-    const undoable = token.entries.length > 0 || token.relationsAdded.length > 0 || token.relationsRemoved.length > 0 || (token.attrs?.length ?? 0) > 0;
+    // 🔴 無人の回(`auto`)は「取り込みを取り消す」を登録しない ── 登録は 1 回分なので、直前に人が手で取り込んだ回の取り消しを奪ってしまう
+    const undoable = !auto && (token.entries.length > 0 || token.relationsAdded.length > 0 || token.relationsRemoved.length > 0 || (token.attrs?.length ?? 0) > 0);
     if (undoable) {
       deps.rememberUndo?.({
         count: token.entries.length,

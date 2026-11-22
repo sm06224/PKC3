@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { relationKey, type KeyedState } from '../../../src/features/sync/change-set';
-import { entryFp, placeFp, relationFp } from '../../../src/features/sync/sync-fp';
+import { entryFp, labelFp, pinFp, placeFp, relationFp } from '../../../src/features/sync/sync-fp';
 import { DIFF_FORMAT, readDiffZip, writeDiffZip, type DiffNote } from '../../../src/features/sync/diff-file';
 import { fingerprintDigest, isStaleBase, planExport } from '../../../src/features/sync/sync-export';
 import { conflictCopyTitle, effectiveBaseline, planSyncImport, type PlanInput } from '../../../src/features/sync/sync-plan';
@@ -205,6 +205,34 @@ describe('planExport', () => {
     const f = fpList([s1, s2]);
     expect(fingerprintDigest(f)).toBe(fingerprintDigest([...f].reverse()));
     expect(fingerprintDigest(f)).not.toBe(fingerprintDigest([f[0]!, { ...f[1]!, c: 'x' }]));
+  });
+});
+
+describe('planSyncImport: 色ラベル・ピン留め(ノートの生き死にとの組み合わせ)', () => {
+  it('相手がゴミ箱へ入れ、こちらが編集して残したノート: 印を外さず、前回の合意を記録に持ち越す', () => {
+    const base = note('a', '日本語の題名', '初稿');
+    const edited = note('a', '日本語の題名', 'こちらの編集');
+    const lab = { key: 'lab:a', ...labelFp(3) };
+    const pin = { key: 'pin:a', ...pinFp() };
+    const baseline = { a: { content: st(base).content, place: st(base).place }, 'lab:a': { content: lab.content }, 'pin:a': { content: pin.content } };
+    const i = input({ localStates: [st(edited), lab, pin], baseline });
+    const remote = { ...i.remote, container: { ...i.remote.container, labels: [], pins: [] } };
+    const p = planSyncImport({ ...i, remote });
+    expect(p.upserts.map((u) => u.lid), '対照群: ノートはこちらの編集で残る(ゴミ箱へ行かない)').not.toContain('a');
+    expect(p.labelSets, '色を外さない').toEqual([]);
+    expect(p.pinSets, 'ピンを外さない').toEqual([]);
+    expect(p.baseline['lab:a'], '色の合意を持ち越す').toEqual({ content: lab.content });
+    expect(p.baseline['pin:a'], 'ピンの合意を持ち越す').toEqual({ content: pin.content });
+  });
+
+  it('対照群: 相手にノートが居て印だけ外した → こちらの印も外す', () => {
+    const base = note('a', '日本語の題名', '初稿');
+    const lab = { key: 'lab:a', ...labelFp(3) };
+    const baseline = { a: { content: st(base).content, place: st(base).place }, 'lab:a': { content: lab.content } };
+    const i = input({ remoteNotes: [base], localStates: [st(base), lab], baseline });
+    const remote = { ...i.remote, container: { ...i.remote.container, labels: [], pins: [] } };
+    const p = planSyncImport({ ...i, remote });
+    expect(p.labelSets).toEqual([{ lid: 'a', color: null }]);
   });
 });
 
