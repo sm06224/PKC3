@@ -29,7 +29,16 @@ import {
   hiddenByFolds,
   type ChapterSpan,
 } from '@features/markdown/heading-fold';
-import { bodyBlocks, flipLogDay, foldAllLogDays, openLogDayCovering, paintAllRow, syncLogDays } from './log-days';
+import {
+  applyLogOrder,
+  bodyBlocks,
+  flipLogDay,
+  foldAllLogDays,
+  openLogDayCovering,
+  paintAllRow,
+  syncLogDays,
+  syncLogOrderButton,
+} from './log-days';
 
 /** 畳んでいる印。⚠ 見出しそのものに付ける(配下ではない)。 */
 const FOLDED = 'data-pkc-folded';
@@ -101,7 +110,11 @@ export function applyHeadingFold(host: HTMLElement): number {
    * 🔴 **日の畳みは見出しの畳みの「もう 1 つの集合」**(#1441)── 印(`data-pkc-folded`)は触らない。
    * ⚠ 見出しの早期 return より**前**に呼ぶ(畳める見出しが無いログでも、日の行は要る)。
    */
+  // 🔴 並べ替えのボタン(#2018 1)は日の行より先に置く(「すべて」の行がその後ろに付く)
+  syncLogOrderButton(host, levels, blocks);
   const days = syncLogDays(host, blocks, levels);
+  // 🔴 新しい順(#2018 1)── 見た目の順だけ。日の行が置かれた後に当てる(行の順も決めるため)
+  applyLogOrder(host, blocks, levels);
   if (spans.length === 0 && days.managed.size === 0) return 0;
 
   const folded = new Set<number>();

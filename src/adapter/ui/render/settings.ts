@@ -71,6 +71,8 @@ import { createCodeCollapseSection } from './settings/code-collapse';
 import { createInlineCodeCopySection } from './settings/inline-code-copy';
 import { createPdfReaderSection } from './settings/pdf-reader';
 import { createCurrentLineSection } from './settings/current-line';
+import { createLogOrderSection } from './settings/log-order';
+import { appLogOrder } from './log-order-setting';
 import { createInlineCompleteSection } from './settings/inline-complete';
 import { createPasteSourceSection } from './settings/paste-source';
 import { createAlarmEnabledSection } from './settings/alarm-enabled';
@@ -282,6 +284,8 @@ export class SettingsRenderer {
       createProseAlignSection(region),
       createReadColumnsSection(region),
       createColumnRuleSection(region),
+      // 🔴 ログの並び(#2018 1)── 読む面の見え方なので、段組み・境目の線の下
+      createLogOrderSection(region, appLogOrder),
       createTagBadgeSection(region),
       createTagColorListSection(region),
       // 🔴 書き出す前に確かめるタグ(#1966 4-5)── タグの節の下

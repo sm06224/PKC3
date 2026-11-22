@@ -138,6 +138,8 @@ const ALL_IDS = [
   'prose-align',
   'read-columns',
   'column-rule',
+  // 🔴 #2018 1: ログの並び(読む面の見え方)
+  'log-order',
   'tag-badge',
   'tag-color-list',
   'export-watch-tags',
@@ -188,6 +190,7 @@ const DT_ORDER: Record<string, string[]> = {
     '本文の置き場所',
     '本文の段組み',
     '段の境界線',
+    'ログの並び', // #2018 1
     '本文のタグの見せ方',
     '色を付けたタグ', // #1645
     '書き出す前に確かめるタグ', // #1966 4-5

@@ -44,8 +44,10 @@ describe('ログの日の行(器) #1441', () => {
     expect(rows(h)[0]!.getAttribute('aria-label')).toBe('2026-10-09(金)の追記をすべて折りたたみます');
     expect(rows(h)[0]!.title).toBe('2026-10-09(金)の追記をすべて折りたたみます');
     for (const r of rows(h)) expect(r.nextElementSibling!.tagName).toBe('H2');
-    expect(h.children[0]).toBe(rows(h)[0]);
-    expect(h.children[5]).toBe(rows(h)[1]);
+    // ⚠ 先頭は並べ替えのボタン(#2018 1。記録が 2 件以上のログ)── 日の行はその次から
+    expect(h.children[0]!.getAttribute('data-pkc-field')).toBe('log-order');
+    expect(h.children[1]).toBe(rows(h)[0]);
+    expect(h.children[6]).toBe(rows(h)[1]);
   });
 
   it('ログでないノート(印が無い器)には出さない / 付いていた行は外す', () => {
@@ -73,7 +75,7 @@ describe('ログの日の行(器) #1441', () => {
     applyHeadingFold(plain);
     const strip = (el: HTMLElement): string => {
       const c = el.cloneNode(true) as HTMLElement;
-      c.querySelectorAll('[data-pkc-log-day]').forEach((r) => r.remove());
+      c.querySelectorAll('[data-pkc-log-day], [data-pkc-field="log-order"]').forEach((r) => r.remove());
       return c.innerHTML;
     };
     expect(strip(h)).toBe(strip(plain));

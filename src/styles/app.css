@@ -12154,6 +12154,11 @@ h3[data-pkc-section] {
   [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='center'] {
     visibility: visible;
   }
+  /* 🔴 ログの新しい順(#2018 1)は画面だけ ── 紙は今までどおり書いた順(user 裁定 2026-11-22「第 1 弾は本文ペインのみ」)。
+   *    ⚠ 流れ(block)へ戻せば `order` は効かない。下の余白 0 はそのままでよい(重なる余白の値は同じ) */
+  [data-pkc-log-days][data-pkc-log-order='desc'] {
+    display: block;
+  }
   /* ⚠ ページの帯は紙に要らない(押せる物が無い ── 下の②と同じ理由) */
   [data-pkc-region='phone-bar'] {
     display: none;
@@ -12181,6 +12186,7 @@ h3[data-pkc-section] {
   [data-pkc-log-day],
   [data-pkc-log-month],
   [data-pkc-log-all],
+  [data-pkc-field='log-order'],
   /* 🔴 画面専用の操作子は紙に要らない(#1129, #1137) */
   .pkc-back-to-top-container,
   .pkc-reading-progress,
@@ -12503,15 +12509,34 @@ h3[data-pkc-section] {
 [data-pkc-log-month]:hover,
 [data-pkc-log-month]:focus-visible,
 [data-pkc-log-all]:hover,
-[data-pkc-log-all]:focus-visible {
+[data-pkc-log-all]:focus-visible,
+[data-pkc-field='log-order']:hover,
+[data-pkc-field='log-order']:focus-visible {
   color: var(--accent);
+}
+/**
+ * 🔴 **ログを新しい順に並べる**(#2018 1)── 読む面の見た目だけ(子の `order` は `render/log-days.ts` が付ける)。
+ * ⚠ **ログの読む面で、新しい順のときだけ**縦の flex にする ── 古い順・ログでないノートは今までの流れのまま
+ *   (段落の余白の重なり方を 1px も変えない)。
+ * ⚠ flex は余白を重ねない ── 下の余白を 0 にして、上の余白だけで間を取る(重なっていたときの値と同じになる:
+ *   見出しの上 1.4em と段落の下 1em が重なれば 1.4em、段落どうしは 1em)。
+ * ⚠ 段組み(`columns`)は flex では効かない ── 新しい順の間は 1 段になる。
+ */
+[data-pkc-log-days][data-pkc-log-order='desc'] {
+  display: flex;
+  flex-direction: column;
+}
+[data-pkc-log-days][data-pkc-log-order='desc'] > * {
+  margin-block-end: 0;
 }
 /* 🔴 月の行(#1441 月別)は日の行より一段目立たせる ── 字は本文と同じ大きさのまま、太さだけ変える */
 [data-pkc-log-month] {
   margin-top: 1.4em;
   font-weight: 600;
 }
-/* 🔴 「すべて折りたたむ / すべて出す」(#1441)── 先頭に小さく 1 本。右へ寄せて、本文の頭を押し下げない */
+/* 🔴 「すべて折りたたむ / すべて出す」(#1441)── 先頭に小さく 1 本。右へ寄せて、本文の頭を押し下げない
+ * 🔴 並べ替えのボタン(#2018 1)も同じ形で、その上に 1 本(字はいまの並び) */
+[data-pkc-field='log-order'],
 [data-pkc-log-all] {
   display: block;
   margin: 0 0 0.2em auto;
