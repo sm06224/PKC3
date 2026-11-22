@@ -22,6 +22,7 @@ import {
   collectPageErrors,
   useSplitEditor,
   writesLanded,
+  openBrowse,
 } from './helpers';
 
 const MENU = '[data-pkc-region="context-menu"]';
@@ -141,7 +142,7 @@ test('🔴 予定の面を担当で絞れ、情報ペインで担当を付けて
   await writesLanded(page);
 
   // 予定のタブ: 担当を書いた予定があるので選択が出る
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
   await expect(pane).toBeVisible();
   const cards = pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-entry]');

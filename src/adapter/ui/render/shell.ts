@@ -859,8 +859,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   /**
    * 🔴 **並ぶ物は `collection-bar.ts` の一覧から組む**(#582)。
    *
-   * ⚠ 左の列を畳むと帯ごと消えるので、**畳んだ縁(`collapsed-edge.ts`)も同じ一覧から
-   *   射影する** ── ここで 1 つずつ手で組むと、縁との間で**登記簿が 2 つ**になる。
+   * ⚠ この帯は PC の版面では**左端の縦のバー**(`rail.ts`)へ移る(#1982 ③-a-1)──
+   *   ボタンは 1 組だけ。ここで 1 つずつ手で組んだり別の場所で組み直すと**登記簿が 2 つ**になる。
    * ⚠ 一覧の並びは 取り込む / バックアップ → 操作を探す(#425。鍵 `Ctrl/⌘+Shift+P` の
    *   ボタン側)→ 集計 / システム / フラグ / ヘルプ。設定側の 4 つは**役割が違う**ので
    *   「間」で区切る塊(`collection-app-group`)に入れる ── 間は各ボタンではなく**器**が持つ
@@ -940,6 +940,13 @@ export function buildShell(root: HTMLElement): ShellRegions {
   );
   // 🔴 3 本の帯は、左の列が細いときも 1 段に収める(#1621)。入りきらない物は「⋯」の下へ
   installSidebarBarOverflow(sidebar);
+  /**
+   * 🔴 **左端の縦のバー**(#1982 ③-a-1)。⚠ 中身は**ここでは入れない** ── 上の `tabs` と
+   *   `collectionBar` を `applyPaneVisibility` → `paintRail` が**同じ物のまま**移す
+   *   (スマホ用画面では左のペインへ戻す)。器だけを shell の子として建てる。
+   */
+  const rail = document.createElement('div');
+  rail.setAttribute('data-pkc-region', 'rail');
 
   // ── 中央(いま開いているもの)────────────────────────
   // 🔑 本文と**追記欄は別の器**にする(P8 段⑧)。本文は書き換わるたびに作り直すので、
@@ -1437,6 +1444,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
      *   `z-index` で解く ── DOM の並びを描画順のために歪めない。
      */
     phoneBar,
+    rail,
     sidebar,
     grips.sidebar!,
     center,

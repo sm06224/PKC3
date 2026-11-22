@@ -7,7 +7,9 @@ import { join, resolve } from 'node:path';
 import { answerAppDialog, clickReal, createEntry,
   gotoCollectionPane,
   pickCaptureTool,
-  useSplitEditor, clickExportMenuItem } from './helpers';
+  useSplitEditor, clickExportMenuItem,
+  openBrowse,
+} from './helpers';
 
 /**
  * 🔴 **可搬単一 HTML が `file://` で起動する**(#400 段①②)。
@@ -603,7 +605,7 @@ test('🔴 `file://` の可搬 HTML で、「雑音を減らす」が動いて�
     buffer: readFileSync('tests/fixtures/media/voice-noisy-7s.webm'),
   });
   await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]'), '前提: 音が取り込めていない').toHaveCount(1, { timeout: 15_000 });
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   const row = page.locator('[data-pkc-capture]:has([data-pkc-field="capture-name"]:text-is("声と雑音.webm"))');
   await expect(row, '前提: 音の行が一覧に無い').toHaveCount(1, { timeout: 15_000 });
 

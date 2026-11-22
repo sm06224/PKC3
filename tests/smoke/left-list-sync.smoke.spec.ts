@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { clickReal, collectPageErrors, gotoApp } from './helpers';
+import { clickReal, collectPageErrors, gotoApp, openBrowse } from './helpers';
 
 /**
  * #1087 台帳④の残り(左の一覧は、見えている行だけを組む)と、#1455 の後半(PC のフォルダとの同期)。
@@ -232,7 +232,7 @@ test('🔴 PC のフォルダと同期する: 書き出し → フォルダ側�
       return out;
     });
 
-  await clickReal(page, '[data-pkc-browse="pc"]');
+  await openBrowse(page, 'pc');
   await expect(page.locator('[data-pkc-field="pc-sync"]')).toBeVisible();
   await clickReal(page, '[data-pkc-action="pc-sync-pick"]');
   await expect(page.locator('[data-pkc-field="pc-sync-last"]')).toContainText('2 件をフォルダへ書きました');
@@ -251,11 +251,11 @@ test('🔴 PC のフォルダと同期する: 書き出し → フォルダ側�
   });
   await clickReal(page, '[data-pkc-action="pc-sync-now"]');
   await expect(page.locator('[data-pkc-field="pc-sync-last"]')).toContainText('1 件をフォルダから取り込みました');
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await clickReal(page, '[data-pkc-region="filer-table"] tr[data-pkc-entry]:has-text("alpha")');
   await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('外で直した本文');
   // 取り込んだ直後の次の回で、ファイルを書き戻さない(内容が変わらない)
-  await clickReal(page, '[data-pkc-browse="pc"]');
+  await openBrowse(page, 'pc');
   await clickReal(page, '[data-pkc-action="pc-sync-now"]');
   await expect(page.locator('[data-pkc-field="pc-sync-last"]')).toContainText('変更はありませんでした');
   expect((await list())['alpha.md']).toContain('外で直した本文');

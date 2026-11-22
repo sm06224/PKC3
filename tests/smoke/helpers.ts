@@ -434,6 +434,28 @@ export async function clickReal(page: Page, target: Target): Promise<void> {
 }
 
 /**
+ * 🔴 **探し方のタブを開く**(#1982 ③-a-1)。⚠ 左端の縦のバーでは、**いま開いているタブをもう一度押すと
+ * 左のペインを畳む**(user 裁定 2026-11-22)── 「念のため押す」と一覧が消える。だから既に開いていて
+ * 左のペインも出ていて、わきの面も開いていない(押すと畳むだけ)なら押さない。押すときは実クリック(`clickReal`)。
+ */
+export async function openBrowse(page: Page, mode: string): Promise<void> {
+  const tab = `[data-pkc-region="browse-tabs"] [data-pkc-browse="${mode}"]`;
+  const already = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    const shell = document.querySelector('[data-pkc-region="shell"]');
+    const folded = (shell?.getAttribute('data-pkc-hidden-panes') ?? '').split(' ').includes('sidebar');
+    // ⚠ わきの面(`app-state.ts` の `ASIDE_PANES`)が開いている間は、いまのタブを押すと「閉じて本文へ戻る」(畳まない)
+    const aside = ['settings', 'flags', 'help', 'dual', 'sql', 'textlab', 'calc', 'diff', 'shell', 'pc'].some((v) => {
+      const pane = document.querySelector<HTMLElement>(`[data-pkc-view-pane="${v}"]`);
+      return pane !== null && pane.getBoundingClientRect().width > 0;
+    });
+    return el !== null && el.hasAttribute('data-pkc-active') && !folded && !aside;
+  }, tab);
+  if (already) return;
+  await clickReal(page, tab);
+}
+
+/**
  * 🔴 **見た目の遷移が走り切るのを待つ**(#1982 段 1 以降、ボタンの地と字は `--dur-fast` で遷移する)。
  *
  * ⚠ 押した・乗せた・外した直後の `getComputedStyle` は**遷移の途中の色**を返す ── 負荷が高いと

@@ -16,7 +16,7 @@ import {
   type PaneId,
 } from '@features/pane-visibility';
 import { appPhone } from './phone-layout';
-import { paintCollapsedEdge } from './collapsed-edge';
+import { paintRail } from './rail';
 
 /** ⚠ 列の畳みだけをスマホで落とす ── 表は `features` 側の 1 本を引く。 */
 const COLUMN_SET: ReadonlySet<PaneId> = new Set<ColumnPaneId>(COLUMN_PANES);
@@ -287,11 +287,12 @@ export function applyPaneVisibility(root: HTMLElement, hidden: readonly PaneId[]
   if (value === '') shell.removeAttribute('data-pkc-hidden-panes');
   else shell.setAttribute('data-pkc-hidden-panes', value);
   /**
-   * 🔴 **左の列を畳んだら、縁に帯の操作を残す**(#582)。⚠ 畳みを写す**この 1 か所**で出し入れする
-   * (呼び手を増やすと「畳んだのに縁が無い」が起きる)。判定は `shown` ── スマホ用画面で
-   * 畳みを写さない回は縁も出さない。
+   * 🔴 **左端の縦のバー**(#1982 ③-a-1。旧い #582 の「畳んだ縁」を一本化した)。
+   * ⚠ 版面の入れ替え(`appPhone` の `onToggle`)も畳みの適用も**この 1 か所**を通る ──
+   *   ここでタブと操作の器をバー / 左のペインへ移す(スマホ用画面ではバーを出さない)。
+   *   左のペインを畳んでもバーは残る(#197「畳んでも操作子が消えてはいけない」)。
    */
-  paintCollapsedEdge(shell, shown.includes('sidebar'));
+  paintRail(shell, appPhone.isPhone());
   /**
    * 🔴 **こちらが畳んでいる追記欄には、「ここに追記する」の帯を出す**(#701)。
    * ⚠ user が自分で畳んだ回には出さない ── あれは「閲覧メインだから消したい」で、

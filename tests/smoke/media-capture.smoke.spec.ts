@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, watchRevokedMedia, writesLanded } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, watchRevokedMedia, writesLanded, openBrowse } from './helpers';
 import { chromiumLaunch } from './playwright.config';
 // ⚠ 手で書き写さない ── `[data-pkc-field="capture-trim"]` の textContent は
 //   `trimMarkText()` の戻り値そのもの(`captures.ts`)。字を直した日に
@@ -365,7 +365,7 @@ ${(e as Error).message}`,
    *   (`CodecDelay` / `DiscardPadding`)を**読まない**ので、長さを訊いてはいけない。
    * ⚠ **起動を増やさない** ── 同じ窓の続きでやる(`scripts/smoke-budget.mjs`)。
    */
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   const rows = page.locator('[data-pkc-capture]');
   await expect(rows, '録ったものが一覧に出ていない').toHaveCount(1);
 
@@ -664,7 +664,7 @@ ${(e as Error).message}`,
     '設定を押したのに印が付かない',
   ).toBeChecked();
 
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   const boostedAt = await playsOn('🔴 聞きやすくする を入れたら音が止まった(無音の形)');
   expect(
     boostedAt,
@@ -682,7 +682,7 @@ ${(e as Error).message}`,
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-field="voice-boost"]');
   await expect(page.locator('[data-pkc-field="voice-boost"]')).not.toBeChecked();
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   await playsOn('🔴 切に戻したら音が止まった(出口へつなぎ直していない)');
   // ⚠ 切に戻しても**器は捨てない**(捨てると、通している音が無音になる)
   expect(await counts(), '切に戻したときに器を作り直している').toEqual({ ...on, src: on.src });
@@ -745,7 +745,7 @@ ${(e as Error).message}`,
     await expect(page.locator(`[data-pkc-field="${other}"]`)).not.toBeChecked();
     await expect(page.locator('[data-pkc-field="voice-boost"]')).not.toBeChecked();
     expect(await page.evaluate((k) => localStorage.getItem(k), `pkc3.${field}`), `${label}:保存の値が入ではない`).toBe('1');
-    await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+    await openBrowse(page, 'captures');
     await playsOn(`🔴 ${label} だけ入れて読み直したら音が止まった`);
     const c = await counts();
     expect(c.src, `${label} だけ入れても、音の通り道を通していない(「聞きやすくする」は切のまま)`).toBeGreaterThan(0);
@@ -755,7 +755,7 @@ ${(e as Error).message}`,
     await expect(page.locator(`[data-pkc-field="${field}"]`), `${label}:外したのに印が残る`).not.toBeChecked();
   }
   // 段⑦ は「設定は閉じている」所から始まる ── 元の面へ戻す
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
 
   /**
    * ## 段⑦ ── **音声認識(文字にする)**(#772 段②)
@@ -878,7 +878,7 @@ ${(e as Error).message}`,
   expect(await asrRequests(), '押す前に部品を取りに行った(勝手に取りに行かない)').toEqual([]);
 
   // ① 部品が無いまま「文字にする」→ 取り込みへ案内する(押して無言にしない)
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   await clickReal(page, originalRow.locator('[data-pkc-field="capture-transcribe"]'));
   await expect(statusLine, '部品が無いのに案内が出ない').toContainText(
     asrPath,
@@ -918,7 +918,7 @@ ${(e as Error).message}`,
   const firstRound = afterInstall.length;
 
   // ① 取り込んだ後に「文字にする」→ 録音のノートの末尾に、見出しつきで足される
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   const transcribe = originalRow.locator('[data-pkc-field="capture-transcribe"]');
   await clickReal(page, transcribe);
   await expect(statusLine, '文字を足したと言っていない').toContainText('文字起こしを足しました', {
@@ -1169,7 +1169,7 @@ ${(e as Error).message}`,
   await clickReal(page, asrSection.locator('[data-pkc-action="remove-asr-part"][data-pkc-part="light"]'));
   await expect(installLight, '消したのに取り込むボタンが戻らない').toBeVisible({ timeout: 15_000 });
   await expect(installed).toBeHidden();
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   await clickReal(page, originalRow.locator('[data-pkc-field="capture-transcribe"]'));
   await expect(statusLine, '消したのに文字にできてしまう').toContainText(
     asrPath,
@@ -1305,10 +1305,10 @@ ${(e as Error).message}`,
   await expect(cutBody, '範囲にかかる行(0:00)が移っていない').toContainText(/0:00 (〜0:0\d )?一行目の偽の字/);
   await expect(cutBody, '範囲の外の行(1:05)まで移っている').not.toContainText('1:05');
   // 元の録音の文字起こしは残る
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   await clickReal(page, originalRow.locator('[data-pkc-field="capture-name"]'));
   await expect(page.locator('[data-pkc-view-pane="detail"]'), '元の録音の文字起こしが消えた').toContainText('1:05');
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
 
   /**
    * 🔴 **画面録画も、開いたら長さが出て終わりまで飛べる**(#952 A3 の残り)。
@@ -1402,7 +1402,7 @@ ${(e as Error).message}`,
     page.locator('[data-pkc-region="status"]'),
     '録った画面録画の保存が済んでいない(状態の行に「添付にしました」が出ない)',
   ).toContainText(/画面録画.*添付にしました/, { timeout: 15_000 });
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   const screenRow = page.locator('[data-pkc-capture]', { hasText: '画面録画' }).first();
   await expect(screenRow, '画面録画が一覧に出ない').toBeVisible({ timeout: 15_000 });
   await clickReal(page, screenRow.locator('[data-pkc-field="capture-play"]'));
@@ -1498,7 +1498,7 @@ test('🔴 1 分を超えた録音は、残さずにやめる前に確かめる(
   const capStatus = bar.locator('[data-pkc-field="capture-status"]');
   const assetRows = page.locator('[data-pkc-capture]');
   // 録った物の行を数えるため、左の列を「録ったもの」にしておく
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   const rowsBefore = await assetRows.count();
   await clickReal(page, '[data-pkc-field="start-audio-capture"]');
   await expect(bar, '録音を押しても帯が出ない').toBeVisible();
@@ -1603,7 +1603,7 @@ async function recordScreenForTrim(page: Page) {
     '録った動画が本文に入っていない(保存が済んでいない)',
   ).toHaveCount(1, { timeout: 15_000 });
 
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   const screenRow = page.locator('[data-pkc-capture]', { hasText: '画面録画' }).first();
   await expect(screenRow, '画面録画が一覧に出ない').toBeVisible({ timeout: 15_000 });
   await clickReal(page, screenRow.locator('[data-pkc-field="capture-play"]'));
@@ -2281,7 +2281,7 @@ test('🔴 録音の途中でタブが落ちても、開き直すと復元でき
   await expect(dialog.locator('[data-pkc-field="dialog-ok"]')).toHaveText('復元する');
   await clickReal(next, '[data-pkc-field="dialog-ok"]');
   await expect(entry2, '復元したのに入口が残っている').toBeHidden({ timeout: 15_000 });
-  await clickReal(next, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(next, 'captures');
   const rows = next.locator('[data-pkc-capture]');
   await expect(rows, '復元した録音が一覧に出ていない').toHaveCount(1, { timeout: 15_000 });
   await clickReal(next, '[data-pkc-field="capture-play"]');
@@ -2298,7 +2298,7 @@ test('🔴 録音の途中でタブが落ちても、開き直すと復元でき
   await next.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]').fill('# 対照');
   await next.keyboard.press('Tab');
   await clickReal(next, '[data-pkc-action="commit-edit"]');
-  await clickReal(next, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(next, 'captures');
   await clickReal(next, '[data-pkc-field="start-audio-capture"]');
   await expect(next.locator('[data-pkc-field="capture-status"]')).toHaveAttribute('title', /約 [1-9]/, { timeout: 15_000 });
   await clickReal(next, '[data-pkc-field="stop-capture"]');

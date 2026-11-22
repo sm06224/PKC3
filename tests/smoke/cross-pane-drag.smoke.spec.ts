@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { clickReal, createEntry, collectPageErrors, gotoApp } from './helpers';
+import { clickReal, createEntry, collectPageErrors, gotoApp, openBrowse } from './helpers';
 
 /**
  * 🔴 **掴んだまま、別の面へ持っていく**(#402 ③)。
@@ -57,7 +57,7 @@ test('🔴 掴んだままタブの上で止めると面が変わり、drag は�
   await makeFolder(page, 'はこ');
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
 
   const note = page
     .locator('[data-pkc-region="filer-table"] [data-pkc-entry][data-pkc-archetype="text"]')

@@ -25,9 +25,12 @@ import { TABLET_MAX_PX } from '../../src/features/phone-layout';
 
 const css = stripComments(readFileSync(join(__dirname, '../../src/styles/app.css'), 'utf8'));
 
-/** 左の列の既定の幅 `var(--pkc-pane-sidebar, minmax(<px>px, <vw>vw))` を読む。 */
+/**
+ * 左の列の既定の幅 `var(--pkc-pane-sidebar, minmax(<px>px, <vw>vw))` を読む。
+ * ⚠ 2026-11-22(#1982 ③-a-1)から 1 列目は左端の縦のバー(`var(--pkc-rail-w)`)── 左の列はその次。
+ */
 function sidebarOf(decls: string): { px: number; vw: number } | null {
-  const m = /grid-template-columns:\s*var\(--pkc-pane-sidebar,\s*minmax\((\d+(?:\.\d+)?)px,\s*(\d+(?:\.\d+)?)vw\)\)/.exec(
+  const m = /grid-template-columns:\s*var\(--pkc-rail-w\)\s+var\(--pkc-pane-sidebar,\s*minmax\((\d+(?:\.\d+)?)px,\s*(\d+(?:\.\d+)?)vw\)\)/.exec(
     decls,
   );
   return m ? { px: Number(m[1]), vw: Number(m[2]) } : null;

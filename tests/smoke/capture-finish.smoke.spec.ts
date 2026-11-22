@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { answerAppDialog, gotoApp, clickReal, collectPageErrors, expectImageRendered, pickCaptureTool } from './helpers';
+import { answerAppDialog, gotoApp, clickReal, collectPageErrors, expectImageRendered, pickCaptureTool, openBrowse } from './helpers';
 import { PROCESS_MENU_LABEL, processToolOf } from '../../src/features/capture/capture-process';
 import { STEM_MODELS } from '../../src/features/audio/stem-model';
 import { buildIdentityOnnx } from '../helpers/identity-onnx';
@@ -39,7 +39,7 @@ test('🔴 仕上げ ▾ から:雑音を減らす → 新しい音の添付 / �
   await expect(filerRows, '前提: 音が取り込めていない').toHaveCount(1, { timeout: 15_000 });
   await page.setInputFiles('[data-pkc-field="attach-input"]', { name: '画面.webm', mimeType: 'video/webm', buffer: VIDEO });
   await expect(filerRows, '前提: 動画が取り込めていない').toHaveCount(2, { timeout: 15_000 });
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   await expect(rows(page), '前提: 取り込んだ音と動画の 2 行が一覧に無い').toHaveCount(2, { timeout: 15_000 });
 
   const audioRow = rowOf(page, '声と雑音.webm');
@@ -146,9 +146,9 @@ test('🔴 仕上げ ▾ から:雑音を減らす → 新しい音の添付 / �
   await stemSection.scrollIntoViewIfNeeded();
   await expect(stemSection.locator('[data-pkc-field="stem-installed"]'), '取り込んだのに「取り込み済み」が出ない').toContainText('取り込み済み');
   await expect(stemSection.locator('[data-pkc-action="install-stem-model"]')).toBeHidden();
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]').catch(async () => {
+  await openBrowse(page, 'captures').catch(async () => {
     await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="detail"]');
-    await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+    await openBrowse(page, 'captures');
   });
   const rowsBefore = await rows(page).count();
   await pickCaptureTool(page, audioRow, 'separate-stems');
@@ -161,16 +161,16 @@ test('🔴 仕上げ ▾ から:雑音を減らす → 新しい音の添付 / �
   await clickReal(page, stemSection.locator('[data-pkc-action="remove-stem-model"]'));
   await expect(stemSection.locator('[data-pkc-action="install-stem-model"]'), '消したのに取り込むが出ない(片道)').toBeVisible({ timeout: 15_000 });
   await expect(stemSection.locator('[data-pkc-field="stem-installed"]')).toBeHidden();
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]').catch(async () => {
+  await openBrowse(page, 'captures').catch(async () => {
     await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="detail"]');
-    await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+    await openBrowse(page, 'captures');
   });
   await page.unroute('https://huggingface.co/**');
 
   // ── ③ A5 コンタクトシート:WebCodecs の復号 + OffscreenCanvas → PNG の添付(画像として描ける)
   await pickCaptureTool(page, videoRow, 'contact-sheet');
   await expect(statusLine(page), 'コンタクトシートを作ったと言わない').toContainText('場面のコンタクトシートを作りました', { timeout: 60_000 });
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   const sheetRow = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]:has-text("画面 (コンタクトシート).png")');
   await expect(sheetRow, 'コンタクトシートの添付が一覧に無い').toHaveCount(1, { timeout: 15_000 });
   await clickReal(page, sheetRow);
@@ -194,7 +194,7 @@ test('🔴 仕上げ ▾ から:雑音を減らす → 新しい音の添付 / �
   expect(colors, 'コンタクトシートが単色(絵が描かれていない)').toBeGreaterThan(4);
 
   // ── ④ A4 チャプター:本文に追記され、時刻を押すと再生位置が動く
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   await pickCaptureTool(page, videoRow, 'chapters');
   await expect(statusLine(page), 'チャプターを足したと言わない').toContainText('件のチャプターを足しました', { timeout: 30_000 });
   await clickReal(page, videoRow.locator('[data-pkc-field="capture-name"]'));
@@ -213,7 +213,7 @@ test('🔴 仕上げ ▾ から:雑音を減らす → 新しい音の添付 / �
     .toBeGreaterThanOrEqual(10.5);
 
   // ── ⑤ A2 静止区間をまとめる:新しい動画(小さい・長さは同じ・再生できる)
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await openBrowse(page, 'captures');
   await pickCaptureTool(page, videoRow, 'fold-still');
   await expect(statusLine(page), '静止区間をまとめたと言わない').toContainText('をまとめました', { timeout: 30_000 });
   const folded = rowOf(page, '画面 (静止区間をまとめた).webm');

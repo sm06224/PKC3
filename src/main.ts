@@ -2148,7 +2148,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   耳側だけ落としても誰も気づけない(CLAUDE.md §2)。
    */
   const markBrowse = (mode: BrowseMode) => {
-    markBrowseTabs(regions.sidebar, mode);
+    // ⚠ タブの器は PC の版面では左端の縦のバーに居る(#1982 ③-a-1)── 器そのものを渡す
+    markBrowseTabs(root.querySelector<HTMLElement>('[data-pkc-region="browse-tabs"]') ?? regions.sidebar, mode);
   };
   markBrowse(browseMode);
   // 🔑 追記欄は**本文とは別の器**(P8 段⑧)── 本文は追記のたびに書き換わって

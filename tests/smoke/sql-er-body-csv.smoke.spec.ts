@@ -22,7 +22,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { SQL_EMBED_SAVED_TEXT } from '../../src/features/markdown/sql-embed';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, openBrowse } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
@@ -531,7 +531,7 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   await clickReal(page, '[data-pkc-action="nav-back"]');
   await expect(page.locator('[data-pkc-field="detail-title"]')).toHaveText('ホーム');
   await expect(tasks.locator('tbody td').nth(1)).toHaveText('見積を送る', { timeout: 15_000 });
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   const card = page
     .locator('[data-pkc-browse-pane="schedule"] [data-pkc-entry]')
     .filter({ hasText: '見積を送る' })

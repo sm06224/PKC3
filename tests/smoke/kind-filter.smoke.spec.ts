@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, openBrowse } from './helpers';
 
 /**
  * 🔴 **種類で絞る**(#411)を実ブラウザで通す。
@@ -39,9 +39,9 @@ test('🔴 種類の札で絞れる ── 面をまたいでも効き、作れ�
   await expect(folderChip).toHaveAttribute('aria-pressed', 'true');
 
   // ② 面をまたいでも効き続ける(帯はタブの外に在る)── 予定へ出て、フォルダへ戻る
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   await expect(bar, '予定タブで札の帯が消えた(そこでも絞りは効く)').toBeVisible();
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await expect(
     page.locator('[data-pkc-region="filer-table"] tbody tr'),
     'フォルダ面で絞りが黙って外れた',

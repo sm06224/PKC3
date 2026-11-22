@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { clickReal, collectPageErrors, dismissAnnounce, gotoApp, openTile } from './helpers';
+import { collectPageErrors, dismissAnnounce, gotoApp, openTile, openBrowse } from './helpers';
 
 /**
  * #532 段 B: **押すと、自分のパソコンで動かす一式が本当に落ちる**。
@@ -25,7 +25,7 @@ test('🔴 「自分のパソコンで動かす」を押すと、一式の zip �
   await gotoApp(page);
   await dismissAnnounce(page);
 
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   const tile = '[data-pkc-region="launcher-grid"] [data-pkc-tile="builtin:selfhost"]';
   await expect(page.locator(tile), 'タイルが出ていない').toBeVisible();
 

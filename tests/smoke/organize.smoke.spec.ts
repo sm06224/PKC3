@@ -2,6 +2,17 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import { openExportMenu, clickInspectorMoreItem, gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, answerAppDialog, transitionsSettled } from './helpers';
 
 /**
+ * 何も無い所を押して欄を離れる(blur / change を確定する)。
+ * ⚠ 左上の隅(5, 5)は押さない ── 2026-11-22(#1982 ③-a-1)から左端の縦のバーの「いま開いているタブ」が居て、
+ *   押すと左のペインを畳む。情報ペインの右下の隅(何も置いていない)を押す。
+ */
+async function clickBlank(page: import('@playwright/test').Page): Promise<void> {
+  const b = await page.locator('[data-pkc-region="inspector"]').boundingBox();
+  if (b === null) throw new Error('情報ペインが見えない(何も無い所を押せない)');
+  await page.mouse.click(b.x + b.width - 6, b.y + b.height - 6);
+}
+
+/**
  * 整理の面(#240 段①〜⑤。user 指示 2026-08-17
  * 「フォルダ表示メインに / ダブルクリックで開く / 複数選択・範囲選択・D&D /
  * まとめて消せない」)。
@@ -63,7 +74,8 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
     };
   });
   expect(shadows.on, `選んでいるタブに下線が無い(${shadows.on})`).toContain('inset');
-  expect(shadows.on, `下線が 2px でない(${shadows.on})`).toContain('-2px');
+  // ⚠ 2026-11-22(#1982 ③-a-1)から PC ではタブは左端の縦のバー ── 印は**左端の 2px の線**(形)。横に並ぶとき(スマホ)は下線
+  expect(shadows.on, `線が 2px でない(${shadows.on})`).toMatch(/ 2px 0px 0px 0px inset| 0px -2px 0px 0px inset/);
   // 🔑 影の色 = 本文の字の色(トークンを張り替えても、色が一致していることで見る)
   expect(
     shadows.on.startsWith(shadows.bodyFg),
@@ -1196,7 +1208,7 @@ test('🔴 フォルダの表の ↑↓・Enter・探す欄からの ↓ と、E
   expect(await listOptions(), 'Enter で確定したのに候補に載らない').toEqual(['会議メモ']);
   await box.fill('');
   await box.fill('議事');
-  await page.mouse.click(5, 5); // 欄を離れて確定する(blur)
+  await clickBlank(page); // 欄を離れて確定する(blur)
   expect(await listOptions(), '欄を離れても憶えない / 新しい順でない').toEqual(['議事', '会議メモ']);
 
   await page.reload();
@@ -1226,7 +1238,7 @@ test('🔴 フォルダの表の ↑↓・Enter・探す欄からの ↓ と、E
   const cmdList = page.locator('[data-pkc-region="command-list"]');
   await expect(cmdList, '前提が崩れている(打つ前から操作の一覧が出ている)').toBeHidden();
   await box.fill('>ノートを作る');
-  await page.mouse.click(5, 5); // 欄を離れて確定する(change)
+  await clickBlank(page); // 欄を離れて確定する(change)
   await expect(cmdList, '`>` を打っても操作の一覧が出ない').toBeVisible();
   await expect(hostOfNotes, '操作の一覧とノートの一覧が同時に出ている').toBeHidden();
   expect(await listOptions(), '`>` で始まる字が検索語として憶えられた').toEqual([]);
@@ -1413,9 +1425,9 @@ test('🔴 行を別の行の上半分に落とすと、その行の前へ並べ
   expect((await rowInfo()).map((r) => r.lid), '開いたその場で行が動いた').toEqual(shown0);
   const filterBox = page.locator('[data-pkc-field="entry-filter"]');
   await filterBox.fill('zz-none');
-  await page.mouse.click(5, 5);
+  await clickBlank(page);
   await filterBox.fill('');
-  await page.mouse.click(5, 5);
+  await clickBlank(page);
   await expect
     .poll(async () => (await rowInfo())[0]?.lid, { message: '絞り込みを変えても最近開いたノートが先頭に来ない' })
     .toBe(target);

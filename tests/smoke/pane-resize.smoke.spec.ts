@@ -102,14 +102,14 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
   await expect(page.locator(grip('sidebar')), '畳んだら帯まで消えた').toBeVisible();
 
   /**
-   * 🔴 **畳んだ縁に、帯の操作が縦に残る**(#582。🟣 Gemini 裁定 2026-10-01 = 案 A)。
+   * 🔴 **畳んでも、左端の縦のバーに操作が残る**(#582 → #1982 ③-a-1 でバーに一本化)。
    * ⚠ 直す前は、列の下の 7 つ(取り込む / バックアップ / 操作を探す / 集計 / システム /
    *   フラグ / ヘルプ)が列ごと消え、マウスだけの人は設定へ届かなかった。
    * 🔑 観測は**画面に出ている実物**:縁と帯の合計幅(40px 以下)/ 押し所が**全部見えて**
    *   一覧の下にあった数と同じ / 地が無彩色 / 掴む帯と重ならない。
    */
-  const EDGE = '[data-pkc-region="collapsed-edge"]';
-  await expect(page.locator(EDGE), '畳んだのに縁が無い').toBeVisible();
+  const EDGE = '[data-pkc-region="rail"]';
+  await expect(page.locator(EDGE), '畳んだのにバーが無い').toBeVisible();
   const edge = await page.evaluate((sel) => {
     const el = document.querySelector<HTMLElement>(sel)!;
     const r = el.getBoundingClientRect();
@@ -120,7 +120,8 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
     // 🔴 #1982 段 2: 縁は机の地(左の列と同じ色)で、線色や強調色を塗らない
     const deskBg = getComputedStyle(document.querySelector('[data-pkc-region="shell"]')!).backgroundColor;
     return {
-      cell: Math.round(g.right - r.left),
+      // 🔴 #1982 ③-a-1: バーは自分の列(40px)、掴む帯は畳んでも 8px のまま
+      cell: Math.round(r.width),
       overlap: Math.round((r.right - g.left) * 10) / 10,
       visible: btns.filter((b) => {
         const q = b.getBoundingClientRect();
@@ -130,15 +131,20 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
       want: document.querySelectorAll(
         '[data-pkc-region="collection-bar"] button:not([data-pkc-field="bar-more"])',
       ).length,
-      named: btns.filter((b) => (b.getAttribute('aria-label') ?? '') !== '' && b.title !== '').length,
+      // バーの下の群(アプリ全体の操作)だけを数える(上の群はタブ)
+      barOnly: el.querySelectorAll('[data-pkc-region="collection-bar"] button').length,
+      // ⚠ 描いている間だけ出る「手書き」のタブ(#1448)は隠れている ── 見えている物だけで名前を数える
+      named: btns.filter((b) => !b.hidden && (b.getAttribute('aria-label') ?? '') !== '' && b.title !== '').length,
       grey: getComputedStyle(el).backgroundColor === deskBg,
     };
   }, EDGE);
   expect(edge.want, '一覧の下の帯が空(台の空振り)').toBeGreaterThan(5);
-  expect(edge.cell, `縁 + 掴む帯が ${edge.cell}px(目安 40px 以下)`).toBeLessThanOrEqual(40);
+  expect(edge.cell, `バーが ${edge.cell}px(目安 40px 以下)`).toBeLessThanOrEqual(40);
+  expect(edge.barOnly, 'バーに帯の操作が全部は居ない').toBe(edge.want);
   expect(edge.overlap, `縁が掴む帯に ${edge.overlap}px 重なっている`).toBeLessThanOrEqual(0.5);
-  expect(edge.visible, '縁のボタンが全部は見えていない / 帯の数と違う').toBe(edge.want);
-  expect(edge.named, '名前(aria-label)か説明(title)が無い縁のボタンがある').toBe(edge.want);
+  // ⚠ バーにはタブも居る ── 「見えている・名前を持つ」はタブ + 操作の全部で見る(帯の数以上)
+  expect(edge.visible, 'バーのボタンが全部は見えていない').toBe(edge.named);
+  expect(edge.named, '名前(aria-label)か説明(title)が無いバーのボタンがある').toBeGreaterThanOrEqual(edge.want);
   expect(edge.grey, '縁の地が机の地(shell と同じ色)でない').toBe(true);
   // 🔴 **押せる**(見えているだけで押せない縁を作らない)── 実物の座標で押して、システムが開く
   await clickReal(page, `${EDGE} [data-pkc-action="set-view"][data-pkc-view="settings"]`);
@@ -215,18 +221,19 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
     page.locator('[data-pkc-field="entry-filter"]'),
     '説明に書いた鍵を押しても、探す欄に焦点が入らない',
   ).toBeFocused();
-  await expect(page.locator(EDGE), '列が戻ったのに縁が残っている').toHaveCount(0);
+  // 🔴 #1982 ③-a-1: 縦のバーは列を戻しても残る(常設)── 旧い縁は「戻すと消える」だった
+  await expect(page.locator(EDGE), '列を戻したら縦のバーが消えた').toBeVisible();
   // 畳み直す(以降の「押して戻す」の前提へ揃える)
   await page.locator(grip('sidebar')).click();
   await expect(page.locator(EDGE), '畳み直したのに縁が出ない').toBeVisible();
 
   await page.locator(grip('sidebar')).click();
   expect(await widthOf(page, 'sidebar'), '押しても戻らない').toBeGreaterThan(100);
-  // 🔴 戻すと縁は消え、帯が一覧の下に戻る(双方向)
-  await expect(page.locator(EDGE), '戻したのに縁が残っている').toHaveCount(0);
+  // 🔴 戻しても縦のバーは残り、帯の操作も見えたまま(#1982 ③-a-1。旧い縁は「戻すと消える」だった)
+  await expect(page.locator(EDGE), '戻したら縦のバーが消えた').toBeVisible();
   await expect(
     page.locator('[data-pkc-region="collection-bar"] button').first(),
-    '戻したのに一覧の下の帯が見えない',
+    '戻したのに帯の操作が見えない',
   ).toBeVisible();
 
   /**
@@ -461,7 +468,9 @@ test('🔴 shell に変数が書かれ、CSS がそれを読んでいる (#497)'
    */
   const cols = await page.locator(SHELL).evaluate((el) => getComputedStyle(el).gridTemplateColumns);
   const side = await widthOf(page, 'sidebar');
-  expect(cols.split(/\s+/)[0], `列の値が実寸と違う(${cols})`).toBe(`${side}px`);
+  // ⚠ 1 列目は左端の縦のバー(40px。#1982 ③-a-1)── 左の列は 2 列目
+  expect(cols.split(/\s+/)[0], `1 列目が縦のバーでない(${cols})`).toBe('40px');
+  expect(cols.split(/\s+/)[1], `列の値が実寸と違う(${cols})`).toBe(`${side}px`);
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

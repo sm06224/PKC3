@@ -137,10 +137,12 @@ body {
  * 編集すると本文以外が全部消えていた(「1 画面で完結」の逆)。 */
 [data-pkc-region='shell'] {
   display: grid;
-  /* 🔴 **左の列を畳んだときの縁の幅**(#582)── 縁のタイル 32px + 掴む帯 8px = **40px**。
-   * ⚠ 畳んだ版面の 1 列目(`gripl`)がこの幅になる(下の 3 か所)。タイルの 32px は
-   *   `[data-pkc-bar-tile]` の寸法で、**ここが 40px を超えるなら縁が太った**ということ。 */
-  --pkc-edge-w: 40px;
+  /* 🔴 **左端の縦のバーの幅**(#1982 ③-a-1。user 裁定 2026-11-22「縦のバー(40px)常設」)。
+   * ⚠ 版面の 1 列目(`rail`)がこの幅になる(下の 7 つの版面すべて)。タイルの 32px は
+   *   `[data-pkc-bar-tile]` の寸法と同じで、左右 4px ずつの余白が付く。**ここが 40px を超えるならバーが太った**。
+   * ⚠ 旧い #582 の「畳んだ縁」(`--pkc-edge-w`。畳んだときだけ `gripl` を 40px にしていた)はこのバーに一本化した ──
+   *   畳んでも左の掴む帯は 8px のまま。 */
+  --pkc-rail-w: 40px;
   /* 🔑 右列は **詰める**(P9 段②)。20vw だと Full HD で 384px あり、そこに 4 行しか
    * 載っていなかった(「要らない所が広い」)。15vw = 1920 で 288px / 1440 で 216px。
    * ⚠ 下限 220px は残す ── 1100px 以下では 2 列に畳むので、そこまでの間の保険 */
@@ -160,7 +162,7 @@ body {
    *   (18vw のほうが大きい)。⚠ 数は `tests/adapter/shell-grid-css.test.ts` が
    *   下の `@media` の `22vw` と結んで見る(片方だけ動かすと、また境目で縮む)。 */
   grid-template-columns:
-    var(--pkc-pane-sidebar, minmax(242px, 18vw)) 8px minmax(0, 1fr) 8px
+    var(--pkc-rail-w) var(--pkc-pane-sidebar, minmax(242px, 18vw)) 8px minmax(0, 1fr) 8px
     var(--pkc-pane-inspector, minmax(220px, 15vw));
   /* ⚠ notices と update は**別の行**。同じ area に載せると、両方出たとき重なる */
   /* 🔴 **上の帯を撤去した**(P10、user 指示 2026-08-05)── 載っていたのは
@@ -173,15 +175,15 @@ body {
    * 暗黙の行になって同じ `auto` に落ちるが、読み手が数を検算できなくなる */
   grid-template-rows: 1fr auto auto auto auto auto;
   grid-template-areas:
-    'sidebar  gripl detail   gripr inspector'
-    'capture  capture  capture  capture  capture'
-    'timers   timers   timers   timers   timers'
-    'alarms   alarms   alarms   alarms   alarms'
-    'announce announce announce announce announce'
-    'update   update   update   update   update'
-    'draft    draft    draft    draft    draft'
-    'notices  notices  notices  notices  notices'
-    'status   status   status   status   status';
+    'rail sidebar gripl detail gripr inspector'
+    'capture capture capture capture capture capture'
+    'timers timers timers timers timers timers'
+    'alarms alarms alarms alarms alarms alarms'
+    'announce announce announce announce announce announce'
+    'update update update update update update'
+    'draft draft draft draft draft draft'
+    'notices notices notices notices notices notices'
+    'status status status status status status';
   height: 100%;
   /* 🔑 **ペインは線ではなく地の段差で分ける**(#1982 段 2。旧い「`gap: 1px` に線色を透かせた格子」は
    * 画面を灰色の升目にしていた)。机(= 左右の列と、その間の掴む帯)は `--bg`、
@@ -249,44 +251,44 @@ body {
  *   1px の共有境界だけが残って「畳んだのに線がある」見え方になる。
  * ⚠ 中央は**畳めない**(操作子の置き場であり、1 画面完結の本体である)。 */
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'] {
-  grid-template-columns: var(--pkc-edge-w) minmax(0, 1fr) 8px var(--pkc-pane-inspector, minmax(220px, 15vw));
+  grid-template-columns: var(--pkc-rail-w) 8px minmax(0, 1fr) 8px var(--pkc-pane-inspector, minmax(220px, 15vw));
   grid-template-areas:
-    'gripl detail   gripr inspector'
-    'capture capture capture capture'
-    'timers   timers   timers   timers'
-    'alarms   alarms   alarms   alarms'
-    'announce announce announce announce'
-    'update   update   update   update'
-    'draft    draft    draft    draft'
-    'notices  notices  notices  notices'
-    'status   status   status   status';
+    'rail gripl detail gripr inspector'
+    'capture capture capture capture capture'
+    'timers timers timers timers timers'
+    'alarms alarms alarms alarms alarms'
+    'announce announce announce announce announce'
+    'update update update update update'
+    'draft draft draft draft draft'
+    'notices notices notices notices notices'
+    'status status status status status';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] {
   /* ⚠ 左の列の下限は上の 3 列の版面と同じ 242px(C16)── 右を畳んでも左は縮めない */
-  grid-template-columns: var(--pkc-pane-sidebar, minmax(242px, 18vw)) 8px minmax(0, 1fr) 8px;
+  grid-template-columns: var(--pkc-rail-w) var(--pkc-pane-sidebar, minmax(242px, 18vw)) 8px minmax(0, 1fr) 8px;
   grid-template-areas:
-    'sidebar  gripl detail gripr'
-    'capture  capture  capture  capture'
-    'timers   timers   timers   timers'
-    'alarms   alarms   alarms   alarms'
-    'announce announce announce announce'
-    'update   update   update   update'
-    'draft    draft    draft    draft'
-    'notices  notices  notices  notices'
-    'status   status   status   status';
+    'rail sidebar gripl detail gripr'
+    'capture capture capture capture capture'
+    'timers timers timers timers timers'
+    'alarms alarms alarms alarms alarms'
+    'announce announce announce announce announce'
+    'update update update update update'
+    'draft draft draft draft draft'
+    'notices notices notices notices notices'
+    'status status status status status';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'][data-pkc-hidden-panes~='inspector'] {
-  grid-template-columns: var(--pkc-edge-w) minmax(0, 1fr) 8px;
+  grid-template-columns: var(--pkc-rail-w) 8px minmax(0, 1fr) 8px;
   grid-template-areas:
-    'gripl detail gripr'
-    'capture capture capture'
-    'timers   timers   timers'
-    'alarms   alarms   alarms'
-    'announce announce announce'
-    'update   update   update'
-    'draft    draft    draft'
-    'notices  notices  notices'
-    'status   status   status';
+    'rail gripl detail gripr'
+    'capture capture capture capture'
+    'timers timers timers timers'
+    'alarms alarms alarms alarms'
+    'announce announce announce announce'
+    'update update update update'
+    'draft draft draft draft'
+    'notices notices notices notices'
+    'status status status status';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'] [data-pkc-region='sidebar'],
 [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] [data-pkc-region='inspector'] {
@@ -386,41 +388,99 @@ body {
   grid-area: gripl;
 }
 /**
- * 🔴 **畳んだ縁**(#582)── 左の列を畳んでいる間だけ、帯の操作を縦に出す
- * (`adapter/ui/render/collapsed-edge.ts`。DOM は畳んでいる間だけ在る)。
+ * 🔴 **左端の縦のバー**(#1982 ③-a-1。`adapter/ui/render/rail.ts`)── 上に「探し方」のタブ、下にアプリ全体の操作。
  *
- * 置き場は左の掴む帯と**同じ 1 マス**(`gripl`、幅は `--pkc-edge-w` = 40px)── 左に縁 32px、
- * 右に帯 8px。⚠ 帯は**マスの右端へ寄せて 8px のまま**にする(畳んだ帯を押して戻す・掴んで
- * 引き出す動きは、幅が変わっても同じ場所で効く)。
- * 🔑 地は無彩色(`--surface`)、区切りは帯と同じ**輪**(下の連結規則)。色は使わない。
- * ⚠ タイルの寸法は `[data-pkc-bar-tile]` が持つので、ここでは書かない。
+ * - 地は机のまま(`--bg`)。区切りは隙間と、隣の左のペインの縁のヘアライン(段 ②)。色は使わない。
+ * - 🔴 **上の群だけが縦に送る**(user 指示 2026-11-22「高さが足りないときは上群だけを独立して縦スクロール、
+ *   下群は常に押せる」)── 下の群は `flex: none` で縮まず、上の群が `min-height: 0` + `overflow-y: auto`。
+ * - ボタンは図案だけの 32px のタイル。名前は見えない字(読み上げ)と `title` に残す(`rail.ts` の `nameButtons`)。
+ * - 地は持たない(図案だけのボタンは静止の地も枠も持たない ── #1982 ①)。hover は `button:hover` の薄い地。
+ * - 現在地は**形**(左端の 2px の線 + 図案を濃く)。線は本文の字の色(`--fg`)── タブの下線と同じ作法(#720 ②)。
  */
-[data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'] [data-pkc-region='pane-grip'][data-pkc-pane='sidebar'] {
-  justify-self: end;
-  width: 8px;
-}
-[data-pkc-region='collapsed-edge'] {
-  grid-area: gripl;
-  justify-self: start;
-  align-self: stretch;
-  width: calc(var(--pkc-edge-w) - 8px);
+[data-pkc-region='rail'] {
+  grid-area: rail;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--s2);
-  /* 机の地のまま(#1982 段 2)── 区切りは隙間 */
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s1) 0;
   background: var(--bg);
-  /* 窓が低くてタイルが入りきらないときだけ縦に送る(押せる物を切り落とさない)。
-   * ⚠ スクロールバーの見た目は触らない(標準の `scrollbar-width` は `@supports` の中だけ ──
-   *   `tests/features/scrollbar-css.test.ts`)。 */
+  overflow: hidden;
+}
+[data-pkc-region='rail'][hidden],
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='rail'] {
+  display: none;
+}
+[data-pkc-region='rail'] [data-pkc-region='browse-tabs'] {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--s1);
+  margin: 0;
   overflow-x: hidden;
   overflow-y: auto;
 }
-[data-pkc-region='collapsed-edge'] button {
-  /* ゴースト(地なし。hover で薄い地)── 机の上の縦の道具なので静かに(#1982 段 2) */
+[data-pkc-region='rail'] [data-pkc-region='collection-bar'],
+[data-pkc-region='rail'] [data-pkc-region='collection-bar'] [data-pkc-field='collection-app-group'] {
+  flex: none;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--s1);
+  padding: 0;
+  margin: 0;
+}
+/* 役割の切れ目(取り込む・バックアップ・操作を探す / 集計・システム・フラグ・ヘルプ)は**間**で読ませる */
+/* ⚠ 詳細度を左のペインの規則(`[collection-bar] [collection-app-group]` の `margin-inline-start`)より上げる ── 負けると
+ *   この塊だけ 1px 横にずれた(実ブラウザで実測) */
+[data-pkc-region='rail'] [data-pkc-region='collection-bar'] [data-pkc-field='collection-app-group'] {
+  margin-top: var(--s2);
+}
+[data-pkc-region='rail'] button {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  max-height: 32px;
+  padding: 0;
+  gap: 0;
   background: transparent;
   border-color: transparent;
-  flex: none;
+  border-radius: var(--radius);
+  font-weight: normal;
+}
+/* タブの切れ目の縦の目印は横に並ぶときだけ(縦では隙間で切る) */
+[data-pkc-region='rail'] [data-pkc-region='browse-tabs'] button + button::before {
+  content: none;
+}
+/* 🔑 横に並ぶタブでは図案を隠していた(`[data-pkc-region='browse-tabs'] [data-pkc-icon]`)── バーでは図案が主役 */
+[data-pkc-region='rail'] [data-pkc-region='browse-tabs'] [data-pkc-icon] {
+  display: inline-block;
+}
+/* 名前は**視覚だけ**隠す(読み上げには残る ── `[data-pkc-bar-tile]` の名前と同じ作法) */
+[data-pkc-region='rail'] [data-pkc-region='browse-tabs'] [data-pkc-field='label'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* 現在地(いま開いている探し方 / いま開いている面) */
+[data-pkc-region='rail'] [data-pkc-region='browse-tabs'] [data-pkc-active],
+[data-pkc-region='rail'] [data-pkc-field='app-settings'][data-pkc-active] {
+  background: transparent;
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--fg);
+  font-weight: normal;
+}
+/* 左のペインを畳んでいる間は「いま開いている探し方」が画面に無い ── 線は出さない(押せば開く) */
+[data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'] [data-pkc-region='rail'] [data-pkc-region='browse-tabs'] [data-pkc-active] {
+  box-shadow: none;
 }
 [data-pkc-region='pane-grip'][data-pkc-pane='inspector'] {
   grid-area: gripr;
@@ -10115,24 +10175,24 @@ mark[data-pkc-diff-char='del'] {
   [data-pkc-region='shell'] {
     /* ⚠ 一覧は**まだ列**なので、user が決めた幅はここでも効かせる(#497)。
      * 🔑 情報のほうは下へ寝るので効かせない ── 寝た面に「幅」は無い。 */
-    grid-template-columns: var(--pkc-pane-sidebar, minmax(180px, 22vw)) 8px minmax(0, 1fr);
+    grid-template-columns: var(--pkc-rail-w) var(--pkc-pane-sidebar, minmax(180px, 22vw)) 8px minmax(0, 1fr);
     grid-template-areas:
-      'sidebar   gripl detail'
-      'inspector inspector inspector'
+      'rail sidebar gripl detail'
+      'rail inspector inspector inspector'
       /* 🔴 **収録 / タイマー / 予定の 3 本を、狭い版面にも置く**(2026-08-29)。
        * ⚠ 直す前は**この 3 行が無かった** ── 区画名の無い `grid-area` は
        *   暗黙のトラックへ落ちるので、1100px 以下では帯が**右端の細い列**に化け、
        *   3 本同時に出ると**互いに重なって「止める」が押せなかった**(実測)。
        * ⚠ 480px では**画面の外**(x=528 / 幅 480)に出ていた ──
        *   `app.css:287` の「止める口が消えると、マイクが回り続ける」が破れていた。 */
-      'capture   capture  capture'
-      'timers    timers   timers'
-      'alarms    alarms   alarms'
-      'announce  announce announce'
-      'update    update   update'
-      'draft     draft    draft'
-      'notices   notices  notices'
-      'status    status   status';
+      'capture capture capture capture'
+      'timers timers timers timers'
+      'alarms alarms alarms alarms'
+      'announce announce announce announce'
+      'update update update update'
+      'draft draft draft draft'
+      'notices notices notices notices'
+      'status status status status';
   }
   /**
    * 🔴 **畳んだ版面も、この幅では「この帯の版面」を使う**(#607。2026-08-30)。
@@ -10148,34 +10208,34 @@ mark[data-pkc-diff-char='del'] {
    */
   [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] {
     /* 情報はこの幅ではもともと下の行 ── 列はこの帯の既定のまま */
-    grid-template-columns: var(--pkc-pane-sidebar, minmax(180px, 22vw)) 8px minmax(0, 1fr);
+    grid-template-columns: var(--pkc-rail-w) var(--pkc-pane-sidebar, minmax(180px, 22vw)) 8px minmax(0, 1fr);
     grid-template-areas:
-      'sidebar   gripl detail'
-      'inspector inspector inspector'
-      'capture   capture  capture'
-      'timers    timers   timers'
-      'alarms    alarms   alarms'
-      'announce  announce announce'
-      'update    update   update'
-      'draft     draft    draft'
-      'notices   notices  notices'
-      'status    status   status';
+      'rail sidebar gripl detail'
+      'rail inspector inspector inspector'
+      'capture capture capture capture'
+      'timers timers timers timers'
+      'alarms alarms alarms alarms'
+      'announce announce announce announce'
+      'update update update update'
+      'draft draft draft draft'
+      'notices notices notices notices'
+      'status status status status';
   }
   [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'],
   [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'][data-pkc-hidden-panes~='inspector'] {
     /* ⚠ 掴む帯は**残す**(#197)── 畳んだものを戻す口がここしか無い */
-    grid-template-columns: var(--pkc-edge-w) minmax(0, 1fr);
+    grid-template-columns: var(--pkc-rail-w) 8px minmax(0, 1fr);
     grid-template-areas:
-      'gripl detail'
-      'inspector inspector'
-      'capture   capture'
-      'timers    timers'
-      'alarms    alarms'
-      'announce  announce'
-      'update    update'
-      'draft     draft'
-      'notices   notices'
-      'status    status';
+      'rail gripl detail'
+      'rail inspector inspector'
+      'capture capture capture'
+      'timers timers timers'
+      'alarms alarms alarms'
+      'announce announce announce'
+      'update update update'
+      'draft draft draft'
+      'notices notices notices'
+      'status status status';
   }
   /* ⚠ 右の列は下へ寝るので、右の掴む帯は**畳む**(境目が無くなるため) */
   [data-pkc-region='pane-grip'][data-pkc-pane='inspector'] {
@@ -12031,6 +12091,8 @@ h3[data-pkc-section] {
    *    ⚠ 一覧と付随情報は**紙では消してよい** ── 画面で畳むのを禁じている
    *    (操作の導線が消えるから)のは画面の話で、紙に押せるものは無い */
   [data-pkc-region='sidebar'],
+  /* ⚠ 左端の縦のバー(#1982 ③-a-1)も紙には要らない ── 常設なので、落とさないと紙の頭にボタンが縦に並ぶ */
+  [data-pkc-region='rail'],
   [data-pkc-region='inspector'],
   [data-pkc-region='append'],
   [data-pkc-region='status-stack'],

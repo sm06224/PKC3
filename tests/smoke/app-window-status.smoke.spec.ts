@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, gotoApp, openTile } from './helpers';
+import { clickReal, collectPageErrors, createEntry, gotoApp, openTile, openBrowse } from './helpers';
 
 /**
  * 🔴 **アプリの窓では、常設の「メインのタブ経由です」を出さない**(#300 段④、2026-08-22。
@@ -50,7 +50,7 @@ test('🔴 アプリの窓は常設バッジを出さない / ふつうの 2 枚
 
   // ② 🔴 **アプリの窓**をタイルから開く(user と同じ手)
   await page.bringToFront();
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   const popup = context.waitForEvent('page');
   // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
   await openTile(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:dual"]');

@@ -10,6 +10,7 @@ import {
   openViewPane,
   useSplitEditor,
   transitionsSettled,
+  openBrowse,
 } from './helpers';
 
 /**
@@ -35,7 +36,7 @@ const ROWS = (side: string): string => `${PANE(side)} [data-pkc-region="dual-tab
  * ⚠ タイルは**アプリのタブを開かないと描かれない**(左の列は探し方で切り替わる)。
  */
 async function openDual(page: Page): Promise<void> {
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   await openViewPane(page, 'dual');
 }
 
