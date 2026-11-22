@@ -32,11 +32,17 @@ const shown = (h: HTMLElement): string[] =>
     .filter((c) => c.tagName === 'P' && !(c as HTMLElement).hidden)
     .map((c) => c.textContent ?? '');
 
+/** 期待値は固定の字で書く(実装の関数で作らない)── 試験を走らせた年が `year` でなければ年を前に付けた形。 */
+const short = (year: string, md: string): string => (String(new Date().getFullYear()) === year ? md : `${year}/${md}`);
+
 describe('ログの日の行(器) #1441', () => {
   it('日が変わる所の直前にだけ行が出る(2 日 × 2 件 = 2 行)', () => {
     const h = host(LOG);
     applyHeadingFold(h);
-    expect(rows(h).map((r) => r.textContent)).toEqual(['2026-10-09(金)', '2026-10-10(土)']);
+    // 🔴 #2018 5: 見える字は短く(今年なら月/日)、名前と説明は年月日の全形
+    expect(rows(h).map((r) => r.textContent)).toEqual([short('2026', '10/9(金)'), short('2026', '10/10(土)')]);
+    expect(rows(h)[0]!.getAttribute('aria-label')).toBe('2026-10-09(金)の追記をすべて折りたたみます');
+    expect(rows(h)[0]!.title).toBe('2026-10-09(金)の追記をすべて折りたたみます');
     for (const r of rows(h)) expect(r.nextElementSibling!.tagName).toBe('H2');
     expect(h.children[0]).toBe(rows(h)[0]);
     expect(h.children[5]).toBe(rows(h)[1]);
@@ -148,6 +154,14 @@ describe('ログの日の行(器) #1441', () => {
     expect(shown(h)).toEqual(['a1', 'a2', 'b1', 'b2']);
   });
 
+  it('🔴 今年でない日は年から出す(#2018 5。DOM を通しても年つきの形を通る)', () => {
+    const h = host('<h2>2025-12-31 23:00:00</h2><p>a</p><h2>2026-01-01 08:00:00</h2><p>b</p>');
+    applyHeadingFold(h);
+    // ⚠ 試験を走らせる年が 2025 でない限り、2025 年の日は必ず年つき(固定の字で書く)
+    expect(rows(h)[0]!.textContent).toBe(String(new Date().getFullYear()) === '2025' ? '12/31(水)' : '2025/12/31(水)');
+    expect(rows(h)[0]!.getAttribute('aria-label')).toBe('2025-12-31(水)の追記をすべて折りたたみます');
+  });
+
   it('追記(末尾に新しい日が増える)でも既存の行は使い回し、新しい日の行が足される', () => {
     const h = host(LOG);
     applyHeadingFold(h);
@@ -156,7 +170,7 @@ describe('ログの日の行(器) #1441', () => {
     applyHeadingFold(h);
     expect(rows(h)).toHaveLength(3);
     expect(rows(h)[0]).toBe(before[0]);
-    expect(rows(h)[2]!.textContent).toBe('2026-10-11(日)');
+    expect(rows(h)[2]!.textContent).toBe(short('2026', '10/11(日)'));
   });
 
   it('目次から畳んだ日の中へ飛ぶと、日が開く(そこまでの道)', () => {

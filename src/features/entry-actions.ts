@@ -1018,15 +1018,14 @@ export const SECTION_LINK_LABEL_ROW = 'この行のリンクをコピー';
  * @param foldable 畳めるか ── 畳みの計算は**本文の直下の塊**しか数えないので、
  *   引用や `:::` の中の見出しでは押しても何も起きない
  * @param appendable 追記先にできるか ── 追記は `text` / `textlog` だけで、
- *   追記先の一覧は **`#` 〜 `###` しか数えない**(`append-target.ts`)。
- *   ⚠ `####` 以下で出すと、**押した見出しではなく上の `###`** が追記先になる
+ *   追記先の一覧が数える段は `#`〜`######`(`append-target.ts`。#2018 で 3 段から広げた)
  * @param linkable 章の参照を作れるか(#579)── その見出しが **id を持つ**とき
- *   (描画は `#`〜`###` にだけ id を刻む)。無い見出しに出すと、押しても指す先が無い
+ *   (描画は `#`〜`######` に id を刻む。#2018)。無い見出しに出すと、押しても指す先が無い
  * @param sectionEditable 🔴 **その章だけを編集できるか**(#1044 段2)。⚠ `foldable` と
- *   **同じ「host の直下」の条件 + 見出しが `#`〜`###` であること**(append-target.ts の
- *   `scanHeadings` が数えるのはそこまで ── 章の範囲を append 欄と同じ関数で決める
- *   以上、その関数が数えない見出しには出さない。押しても「章の範囲を読めません」に
- *   なる口を出さない ── #426 段②の「押しても何も起きない口は畳む」と同じ作法)。
+ *   **同じ「host の直下」の条件 + 見出しが `#`〜`###` であること**(章として扱う深さは目次と同じ 3 段まで。
+ *   ⚠ #2018 で追記先の一覧(append-target.ts の `scanHeadings`)は `######` まで数えるようになったが、
+ *   章の欄・章の窓は広げていない ── 押しても「章の範囲を読めません」になる口を出さない作法は
+ *   #426 段②の「押しても何も起きない口は畳む」と同じ)。
  *   `appendable` は使えない(append-mode の可否は archetype に依存するが、章だけ編集は
  *   `edit-from-heading` と同じくどの archetype でも成り立つ)。
  * @param chapterWindow 🔴 **その章を別のウィンドウで開けるか**(#1044 段4)。⚠ 章の範囲は
@@ -1054,7 +1053,7 @@ export function headingMenuActions(ctx: {
   readonly foldAll?: 'fold' | 'unfold' | null;
   /**
    * 🔴 **この章を新しいノートに切り出せるか**(#1439)。章の範囲を引けて(本文の直下の見出し)、
-   *   下が「切り出した章へのリンク」だけではないとき。ログの行の見出しには出さない。
+   *   下が「切り出した章へのリンク」だけではないとき。#2018 からログの行の見出しにも出す(字は「行」)。
    */
   readonly splitChapter?: boolean;
   /** 🔴 **切り出した章を元に戻せるか**(#1439)── 見出しの下が、実在するノートへのリンク 1 行だけのとき。 */
@@ -1089,8 +1088,11 @@ export function headingMenuActions(ctx: {
   if (ctx.chapterWindow)
     out.push({ action: 'open-chapter-window', label: 'この章を別のウィンドウで読む' });
   // 🔴 章の切り出し / 元に戻す(#1439)── 双方向。どちらか片方だけが出る(下がリンク 1 行だけなら戻す側)
-  if (ctx.splitChapter === true) out.push({ action: 'split-chapter', label: 'この章を新しいノートに切り出す' });
-  if (ctx.restoreChapter === true) out.push({ action: 'restore-chapter', label: '切り出した章を元に戻す' });
+  // 🔑 ログの行(#2018 3 で切り出せるようになった)は「行」と呼ぶ(参照・リンクと同じ #1559 の呼び分け)
+  if (ctx.splitChapter === true)
+    out.push({ action: 'split-chapter', label: ctx.logRow === true ? 'この行を新しいノートに切り出す' : 'この章を新しいノートに切り出す' });
+  if (ctx.restoreChapter === true)
+    out.push({ action: 'restore-chapter', label: ctx.logRow === true ? '切り出した行を元に戻す' : '切り出した章を元に戻す' });
   // 🔴 すべての見出しをまとめて(#1441 (a))── 見出しの物の最後。畳める見出しが 2 つ以上のときだけ
   if (ctx.foldable && ctx.foldAll === 'fold') out.push({ action: 'toggle-all-heading-fold', label: 'すべての見出しの中身を折りたたむ' });
   else if (ctx.foldable && ctx.foldAll === 'unfold') out.push({ action: 'toggle-all-heading-fold', label: 'すべての見出しの中身を出す' });

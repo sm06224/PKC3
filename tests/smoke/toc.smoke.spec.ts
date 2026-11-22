@@ -370,8 +370,11 @@ test('🔴 畳んだ章の中の見出しへ、目次から開いて飛べる (#
   await page.waitForSelector('[data-pkc-action="start-edit"]');
   const days = page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-body"] [data-pkc-log-day]');
   await expect(days, '日の行が 2 つ出ていない').toHaveCount(2);
-  await expect(days.nth(0)).toHaveText('2026-10-09(金)');
-  await expect(days.nth(1)).toHaveText('2026-10-10(土)');
+  // 🔴 #2018 5: 見える字は短く(今年なら月/日)、名前は年月日の全形。期待値は固定の字(試験を走らせた年で形が変わる)
+  const short = (year: string, md: string): string => (String(new Date().getFullYear()) === year ? md : `${year}/${md}`);
+  await expect(days.nth(0)).toHaveText(short('2026', '10/9(金)'));
+  await expect(days.nth(1)).toHaveText(short('2026', '10/10(土)'));
+  await expect(days.nth(0)).toHaveAttribute('aria-label', '2026-10-09(金)の追記をすべて折りたたみます');
   const bodyP = page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-body"] p');
   await expect(bodyP.filter({ visible: true }), '前提が崩れている(最初は 4 件とも見える)').toHaveCount(4);
   // ⚠ 触れている間の色(:hover)に満たされない ── マウスを外してから測る

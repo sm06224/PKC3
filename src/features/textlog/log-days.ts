@@ -41,13 +41,27 @@ export function logDayOfHeading(text: string): string | null {
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
-/** 行に出す字(`2026-10-10(金)`)。⚠ 曜日は端末の暦で数える(UTC に通さない)。 */
-export function formatLogDay(day: string): string {
+/** 年月日つきの全形(`2026-10-10(土)`)── 読み上げの名前と `title` に使う。⚠ 曜日は端末の暦で数える(UTC に通さない)。 */
+export function formatLogDayFull(day: string): string {
+  return `${day}(${weekdayOf(day)})`;
+}
+
+/**
+ * 🔴 **日の行に出す字**(#2018 5。user 裁定 2026-11-22)── 今年なら `11/22(日)`、それ以外の年は `2025/11/22(日)`。
+ * 🔑 月・日は桁を詰める(予定表の束の見出し `8/28(金)` と同じ見せ方)。元のデータ(見出しの字)は変えない。
+ * @param thisYear 「今年」(端末の暦の年)。呼び側が渡す(この関数は時計を読まない)
+ */
+export function formatLogDay(day: string, thisYear: number): string {
+  const y = Number(day.slice(0, 4));
+  const head = `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+  return `${y === thisYear ? head : `${y}/${head}`}(${weekdayOf(day)})`;
+}
+
+function weekdayOf(day: string): string {
   const y = Number(day.slice(0, 4));
   const m = Number(day.slice(5, 7));
   const d = Number(day.slice(8, 10));
-  const w = new Date(y, m - 1, d).getDay();
-  return `${day}(${WEEKDAYS[w]})`;
+  return WEEKDAYS[new Date(y, m - 1, d).getDay()]!;
 }
 
 /** 日の連なり 1 つ。`start`〜`end` は塊の添字(`end` は含まない)。 */

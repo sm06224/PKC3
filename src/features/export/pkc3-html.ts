@@ -801,14 +801,14 @@ try{
   }
 
   /**
-   * 見出しを拾って [{el,text,level}] を返す。id が無いものには振る。
-   * ⚠ h1〜h3 だけ(書出し側の描画が id を振るのも h1〜h3。h4 以降を混ぜると
-   *    「目次にあるのに飛べない」行が出る)。
+   * 見出しを拾って [{el,text,level}] を返す(目次に並べるのは h1〜h3)。id が無いものには振る。
+   * 🔴 #2018 から書出し側の描画は h4〜h6 にも id を振る ── 全体印刷の振り直し(ノート間の衝突よけ)は
+   *    h1〜h6 の全部に掛ける。目次(返す並び)は 3 段のまま。
    */
   function headings(box,idp){
     var out=[],renamed={};
     var has=Object.prototype.hasOwnProperty;
-    Array.prototype.forEach.call(box.querySelectorAll('h1,h2,h3'),function(h,i){
+    Array.prototype.forEach.call(box.querySelectorAll('h1,h2,h3,h4,h5,h6'),function(h,i){
       var text=(h.textContent||'').trim();
       if(!text)return;
       // 全体印刷では必ず振り直す(書出し側の id が entry 間で衝突している)
@@ -816,7 +816,8 @@ try{
         if(idp&&h.id&&!has.call(renamed,h.id))renamed[h.id]=(idp||'h')+'-'+i;
         h.id=(idp||'h')+'-'+i;
       }
-      out.push({el:h,text:text,level:+h.tagName.slice(1)});
+      var lv=+h.tagName.slice(1);
+      if(lv<=3)out.push({el:h,text:text,level:lv});
     });
     if(idp){
       // 🔴 脚注の id(fn1 / fnref1)もノートごとに衝突する ── 見出しと同じく接頭辞を付ける
@@ -915,7 +916,7 @@ try{
     if(hid){
       var want=hid;
       try{want=decodeURIComponent(hid)}catch(_x){}
-      var hl=box.querySelectorAll('h1,h2,h3');
+      var hl=box.querySelectorAll('h1,h2,h3,h4,h5,h6');
       for(var hj=0;hj<hl.length;hj++){if(hl[hj].id===want){hl[hj].scrollIntoView();break}}
     }
   }

@@ -853,13 +853,13 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
    * ⚠ 入り先の一覧は `#`〜`###` しか数えないので、出すと**押した見出しではなく
    *   上の `###`** が入り先になる(押した物と効く先が食い違う)。
    */
-  it('🔴 `####` の見出しでは「ここに追記する」を出さない', () => {
+  it('🔴 `####` の見出しでも「ここに追記する」を出す(#2018 で追記先は `######` まで)。章の欄・窓は出さない', () => {
     const r = rig();
     rightClick(r.deep);
     const acts = r.acts();
     expect(acts, '編集の口まで落ちている').toContain('edit-from-heading');
-    expect(acts, '入り先にできない見出しで追記の口を出した').not.toContain('append-at-heading');
-    // ⚠ 章だけ編集も append-target.ts の scanHeadings と同じ `#`〜`###` 限り(#1044 段2)
+    expect(acts, '`####` で追記の口が出ない(追記先の一覧は `######` まで数える)').toContain('append-at-heading');
+    // ⚠ 章だけ編集・章の窓は目次と同じ `#`〜`###` 限り(#1044 段2。#2018 でも広げていない)
     expect(acts, '`####` で切り出せない「この章を編集する」を出した').not.toContain('edit-section');
     expect(acts, '`####` で切り出せない「この章を別のウィンドウで読む」を出した').not.toContain(
       'open-chapter-window',
@@ -1590,13 +1590,13 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(r.copied.map((c) => c.text)).toEqual(['[板の在るノート / 第 1 章](entry:n1#h/第-1-章-1)']);
   });
 
-  it('⚠ 対照群 ── id の無い見出し(####)では「章の参照をコピー」を出さない', () => {
+  it('🔴 `####` にも id が刻まれ(#2018)、「章の参照をコピー」を出す', () => {
     const r = rig('## 章\n\n#### 深い\n\n段落\n');
     const h4 = r.q('h4');
-    expect(h4.id, '前提が崩れている: #### に id が刻まれている').toBe('');
+    expect(h4.id, '#### に id が刻まれていない').toBe('深い');
     rightClick(h4);
     expect(r.acts(), '本文のメニューが出ていない(台の空振り)').toContain('edit-from-heading');
-    expect(r.acts(), '指す先の無い見出しに章の参照を出した').not.toContain('copy-section-ref');
+    expect(r.acts(), '指す先の在る見出しに章の参照が出ない').toContain('copy-section-ref');
   });
 
   /**
@@ -1642,6 +1642,49 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(r.copied[1]!.text).toContain('2026-10-11 11:00:00');
   });
 
+  /**
+   * 🔴 **ログの行も切り出せる**(#2018 3 / 9。user 裁定 2026-11-22)── 直す前はログの行だけ、理由も記録も無く外していた。
+   * 🔴 題名は本文の最初の空でない行(#2018 4)── 時刻を題名にしない。元のログには時刻の見出しが残る(章と同じ)。
+   */
+  it('🔴 ログの行の右クリックに「この行を新しいノートに切り出す」が在り、題名は本文の最初の行', () => {
+    const r = rig(LOG, 'textlog');
+    const events: Array<{ type: string; rewrite?: { kind: string; link?: string; start?: number } }> = [];
+    r.d.onEvent((e) => events.push(e as never));
+    rightClick(r.host.querySelectorAll('h2')[0]!);
+    expect(r.acts(), 'ログの行で「切り出す」が出ない').toContain('split-chapter');
+    expect(r.label('split-chapter')).toBe('この行を新しいノートに切り出す');
+    r.press('split-chapter');
+    const made = [...r.d.getState().entryMetas.values()].find((m) => m.lid !== 'n1' && m.lid !== 'n2');
+    expect(made?.title, '題名が本文の最初の行になっていない').toBe('はじめ');
+    const rw = events.find((e) => e.type === 'REQUEST_BODY_REWRITE')?.rewrite;
+    expect(rw?.kind).toBe('chapter-split');
+    // 元には見出し(時刻)が残り、その下がリンク 1 行(見出しの行 0 の次から)
+    expect(rw?.start).toBe(1);
+    expect(rw?.link).toBe(`[はじめ](entry:${made!.lid} "切り出した章")`);
+  });
+
+  /**
+   * 🔴 **入れ子の時刻見出し(`###`)は「章」と呼ぶ**(#2018 Q3 裁定 = 親 `##` だけを 1 件に数える)が、
+   *   **題名の規則は時刻見出しなら段に依らず同じ**(#2018 4 ── 時刻を題名にしない)。
+   */
+  it('🔴 ログの入れ子の時刻見出し(###)は「この章を…」の字で、題名は本文の最初の行', () => {
+    const r = rig('## 2026-10-11 10:00:00\n\nはじめ\n\n### 2026-10-11 10:30:00\n\n追いの字\n\n## 2026-10-11 11:00:00\n\nつぎ\n', 'textlog');
+    rightClick(r.q('h3'));
+    expect(r.label('split-chapter')).toBe('この章を新しいノートに切り出す');
+    r.press('split-chapter');
+    const made = [...r.d.getState().entryMetas.values()].find((m) => m.lid !== 'n1' && m.lid !== 'n2');
+    expect(made?.title).toBe('追いの字');
+  });
+
+  it('⚠ 対照群 ── ログの中の日時でない見出しは「章」の字で、題名は見出しの字のまま', () => {
+    const r = rig(LOG, 'textlog');
+    rightClick(r.q('h2[id="手書きの見出し"]'));
+    expect(r.label('split-chapter')).toBe('この章を新しいノートに切り出す');
+    r.press('split-chapter');
+    const made = [...r.d.getState().entryMetas.values()].find((m) => m.lid !== 'n1' && m.lid !== 'n2');
+    expect(made?.title).toBe('手書きの見出し');
+  });
+
   it('⚠ 対照群 ── ログの中でも、日時でない見出しは「章」のまま / ログでないノートの日時の見出しも「章」', () => {
     const r = rig(LOG, 'textlog');
     rightClick(r.q('h2[id="手書きの見出し"]'));
@@ -1652,11 +1695,11 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(t.label('copy-section-link'), 'ログでないノートを「行」と呼んだ').toBe('章のリンクをコピー');
   });
 
-  it('⚠ 対照群 ── id の無い見出し(####)では「章のリンクをコピー」を出さない', () => {
+  it('🔴 `####` にも「章のリンクをコピー」を出す(#2018 で id が刻まれる)', () => {
     const r = rig('## 章\n\n#### 深い\n\n段落\n');
     rightClick(r.q('h4'));
     expect(r.acts(), '本文のメニューが出ていない(台の空振り)').toContain('edit-from-heading');
-    expect(r.acts(), '指す先の無い見出しにリンクを出した').not.toContain('copy-section-link');
+    expect(r.acts(), '指す先の在る見出しにリンクが出ない').toContain('copy-section-link');
   });
 
   it('末尾の章は本文の末尾まで(板の中の `###` は章を閉じない)', () => {

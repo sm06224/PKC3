@@ -2720,7 +2720,8 @@ function postProcessVariableUndefined(html: string): string {
 
 // ── Heading id injection ──────────────────────────────
 //
-// Stamp an `id` attribute on every h1/h2/h3 so the right-pane Table
+// Stamp an `id` attribute on every h1〜h6 (#2018; h4〜h6 joined so the slug
+// counter stays in step with the append-target list) so the right-pane Table
 // of Contents can scroll to a heading via `getElementById`. Slugs are
 // produced by the same `makeSlugCounter` helper the TOC extractor uses,
 // so the id emitted here matches the slug the TOC lists.
@@ -2738,7 +2739,8 @@ md.renderer.rules.heading_open = function (tokens, idx, options, env, self) {
   const token = tokens[idx]!;
   const level = parseInt(token.tag.slice(1), 10);
   let alias = '';
-  if (level >= 1 && level <= 3) {
+  // 🔴 #2018 から h4〜h6 にも刻む(追記先・目次と印の連番を 1〜6 段を通して揃える ── `markdown-toc.ts`)
+  if (level >= 1 && level <= 6) {
     const inline = tokens[idx + 1];
     const text = inline && inline.type === 'inline' ? inline.content.trim() : '';
     if (text) {

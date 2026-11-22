@@ -182,3 +182,26 @@ export function isOwnChapterChild(
   const re = new RegExp(`entry:${childLid.replace(/[^A-Za-z0-9_-]/g, '')}(?![A-Za-z0-9_-])`, 'g');
   return (parentBody.match(re) ?? []).length === 1;
 }
+
+/**
+ * 🔴 **ログの記録を切り出したノートの題名**(#2018 4)── 本文の最初の「字のある」行。
+ * - 行頭の記法(`#` `>` `-` `1.` `- [ ]`)は外す。字の装飾(`**` `__` `~~` `` ` ``)は外し、リンク・画像は見える字だけ残す
+ * - 字の無い行(コードブロックの開き閉じ・`:::`・表の区切り・水平線・HTML の注記・画像だけの行・記号だけの行)は飛ばす
+ * - 何も残らなければ `fallback`(時刻)
+ */
+export function logChapterTitle(childBody: string, fallback: string): string {
+  for (const raw of childBody.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === '' || /^(`{3,}|~{3,}|:::|<!--|\|)/.test(line)) continue;
+    const text = line
+      .replace(/^(?:#{1,6}[ \t]+|>[ \t]*|[-*+][ \t]+(?:\[[ xX]\][ \t]+)?|\d{1,9}[.)][ \t]+)+/, '')
+      // 画像は字を出さない / リンクは見える字だけ
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/(\*\*|__|~~|`)/g, '')
+      .trim();
+    // 字(文字・数字)が 1 つも無い行は題名にしない(`---` `***` `-` など)
+    if (/[\p{L}\p{N}]/u.test(text)) return text;
+  }
+  return fallback;
+}

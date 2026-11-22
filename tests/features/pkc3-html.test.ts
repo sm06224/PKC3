@@ -1472,8 +1472,8 @@ describe('可搬 HTML — 目次と印刷(F-1)', () => {
       ['2', '保存'],
       ['3', '器'],
     ]);
-    // ⚠ h4 を入れない理由は「飛べないから」── 描画側が id を振るのは h1〜h3
-    expect(document.querySelector('#pkc-body h4')?.id ?? '').toBe('');
+    // 🔴 #2018 から h4 にも id が付く(印の連番を 1〜6 段で揃えるため)── 目次の見た目は変えない(3 段まで。user 裁定 2026-11-22)
+    expect(document.querySelector('#pkc-body h4')?.id ?? '').toBe('深い見出し');
     expect(document.getElementById('pkc-tocempty')!.hidden).toBe(true);
   });
 
@@ -1534,6 +1534,22 @@ describe('可搬 HTML — 目次と印刷(F-1)', () => {
       );
       expect(zentai).toHaveLength(2);
       expect(zentai[0]!.id).not.toBe(zentai[1]!.id);
+    });
+
+    /** 🔴 #2018 から書出し側の描画は h4〜h6 にも id を振る ── 全体印刷で 2 件の同名の `####` が同じ id にならない。 */
+    it('🔴 別ノートの同名の h4 も同じ id にならない', async () => {
+      const two = source({
+        entries: [
+          { lid: 'a', title: 'A', body: '# 上\n\n#### 深い\n\nx\n' },
+          { lid: 'b', title: 'B', body: '# 上\n\n#### 深い\n\ny\n' },
+        ],
+      });
+      await open((await writePortableHtml(two, NOW)).blob);
+      document.getElementById('pkc-printall')!.click();
+      const h4 = Array.from(document.querySelectorAll<HTMLElement>('#pkc-all h4'));
+      expect(h4, '前提: 2 件の h4 が組まれていない').toHaveLength(2);
+      expect(h4[0]!.id, '前提: h4 に id が無い').not.toBe('');
+      expect(h4[0]!.id, '別ノートの同名の h4 が同じ id').not.toBe(h4[1]!.id);
     });
 
     it('🔴 ノート名が 1 段目、その見出しは 1 段下げる(同じ段に並べない)', async () => {

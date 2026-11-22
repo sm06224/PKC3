@@ -4179,7 +4179,7 @@ export function connectStoreEffects(
                   ? appendBlock(base, ev.heading, ev.text)
                   : resolveAppendAt(base, ev.target) === null
                     ? null
-                    : appendIntoSection(base, ev.target, ev.heading, ev.text);
+                    : appendIntoSection(base, ev.target, ev.heading, ev.text, { nestHeading: ev.nestHeading === true });
               if (newBody === null) return 'missing';
               if (newBody === base) return 'empty';
               // 🔴 足した結果が閉じていないブロックで終わるなら足さない(以後、末尾へ足す回が全部断られる)

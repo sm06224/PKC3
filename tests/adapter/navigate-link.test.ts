@@ -288,7 +288,7 @@ describe('🔴 断るときは理由を出す', () => {
  */
 describe('🔴 章を指すリンク(#579)', () => {
   /** 本文の面。`lid` の本文が描けている印を刻み、`ids` の見出しを置く。 */
-  function plantBody(lid: string, ids: readonly string[]): Record<string, HTMLElement> {
+  function plantBody(lid: string, ids: readonly string[], tag = 'h2'): Record<string, HTMLElement> {
     const detail = document.createElement('div');
     detail.setAttribute('data-pkc-region', 'detail');
     const host = document.createElement('div');
@@ -296,7 +296,7 @@ describe('🔴 章を指すリンク(#579)', () => {
     host.setAttribute(PAINTED_ATTR, lid);
     const out: Record<string, HTMLElement> = {};
     for (const id of ids) {
-      const h = document.createElement('h2');
+      const h = document.createElement(tag);
       h.id = id;
       h.textContent = id;
       h.scrollIntoView = vi.fn();
@@ -319,6 +319,20 @@ describe('🔴 章を指すリンク(#579)', () => {
     expect(dispatcher.getState().selectedLid, '開いていない').toBe('b');
     expect(hs['見出し']!.scrollIntoView, '見出しへ飛んでいない').toHaveBeenCalled();
     expect(hs['ほか']!.scrollIntoView, '別の見出しへ飛んだ').not.toHaveBeenCalled();
+    expect(lastError(), '飛べたのに理由が出ている').toBeNull();
+  });
+
+  /**
+   * 🔴 **`####`〜`######` へも飛ぶ**(#2018 着地前レビュー 🔴1)── 描画が h4〜h6 にも id を刻むようになり、右クリックの
+   *   「章の参照をコピー」・見出しの「#」が h4 のリンクを渡す。飛び先の解決が h1〜h3 のままだと「見つかりません」になる。
+   */
+  it.each(['h4', 'h5', 'h6'])('🔴 %s の見出しを指すリンクでも、その見出しへ飛ぶ', async (tag) => {
+    const { dispatcher, lastError } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    const hs = plantBody('b', ['ほか', '深い'], tag);
+    entryLink('entry:b#h/%E6%B7%B1%E3%81%84').click();
+    await settle();
+    expect(hs['深い']!.scrollIntoView, `${tag} へ飛んでいない`).toHaveBeenCalled();
     expect(lastError(), '飛べたのに理由が出ている').toBeNull();
   });
 

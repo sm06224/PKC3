@@ -5,6 +5,7 @@ import {
   chapterLinkLine,
   chapterLinkUnder,
   isOwnChapterChild,
+  logChapterTitle,
   planChapterCut,
 } from '../../src/features/markdown/chapter-split';
 
@@ -92,5 +93,30 @@ describe('本当にここから出た子か(isOwnChapterChild) #1439', () => {
   it('同じ親の中にリンクが 2 つ以上なら false / 別の lid の接頭辞では数えない', () => {
     expect(isOwnChapterChild(rel, 'p1', 'kid', `${body}\n${chapterLinkLine('B', 'kid')}\n`)).toBe(false);
     expect(isOwnChapterChild(rel, 'p1', 'kid', `## A\n\n${chapterLinkLine('A', 'kid')}\n\n[x](entry:kid2)\n`)).toBe(true);
+  });
+});
+
+/** 🔴 #2018 4: ログの記録を切り出したノートの題名 = 本文の最初の空でない行(記法の頭は外す)、無ければ時刻。 */
+describe('logChapterTitle', () => {
+  it('最初の空でない行(前の空行は飛ばす)', () => {
+    expect(logChapterTitle('\n\n買い物に行く\n2 行目\n', '2026-11-22 09:00:00')).toBe('買い物に行く');
+  });
+  it('記法の頭(# > - 1. - [ ])は外す', () => {
+    expect(logChapterTitle('### 小見出し\n', 't')).toBe('小見出し');
+    expect(logChapterTitle('> 引用の字\n', 't')).toBe('引用の字');
+    expect(logChapterTitle('- [ ] やること\n', 't')).toBe('やること');
+    expect(logChapterTitle('12. 番号の字\n', 't')).toBe('番号の字');
+  });
+  it('コードブロックの開き閉じの行は飛ばす / 字が残らなければ時刻', () => {
+    expect(logChapterTitle('```js\nconst a = 1\n```\n', 't')).toBe('const a = 1');
+    expect(logChapterTitle('```\n```\n', '2026-11-22 09:00:00')).toBe('2026-11-22 09:00:00');
+    expect(logChapterTitle('-\n', '時刻')).toBe('時刻');
+  });
+  it('字の無い行(::: / 表 / 水平線 / 注記 / 画像だけ)は飛ばし、装飾とリンクの記法は外す', () => {
+    expect(logChapterTitle(':::note\n中の字\n:::\n', 't')).toBe('中の字');
+    expect(logChapterTitle('| a | b |\n|---|---|\n\n表の後\n', 't')).toBe('表の後');
+    expect(logChapterTitle('---\n***\n<!-- 注記 -->\n下の字\n', 't')).toBe('下の字');
+    expect(logChapterTitle('![](asset:ab12)\n写真の説明\n', 't')).toBe('写真の説明');
+    expect(logChapterTitle('**大事**な[会議](entry:x)の`メモ`\n', 't')).toBe('大事な会議のメモ');
   });
 });
