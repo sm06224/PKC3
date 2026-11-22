@@ -235,7 +235,7 @@ test('🔴 札の × で外れ、本文からも消える (#494)', async ({ page
     '押したら別のノートが開いた(ゴミ箱の中の相手は開かないはず)',
   ).toEqual(titleBefore);
   // ゴミ箱の一覧を開いていれば題名も言う
-  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]');
   await expect(relTarget, 'ゴミ箱の一覧を開いても題名が出ない').toContainText('長いタグ(ゴミ箱の中)');
 
   /** 🔴 束 H1: フォルダを開くと「中身 N 件」が出る(同じ道中。起動は増やさない)。 */

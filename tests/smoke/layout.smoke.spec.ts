@@ -266,9 +266,9 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
    *   250px 前後の列に 32px の正方形タイル 7 個(+ gap 6px = 230px)は
    *   1 行に入る幅がある。
    */
-  expect(m.tileCount, '前提が崩れている(7 個そろっていない)').toBe(7);
+  expect(m.tileCount, '前提が崩れている(8 個そろっていない ── #1982 ③-d でゴミ箱が加わった)').toBe(8);
   expect(m.tops, `縦のバーの 1 列に揃っていない(左端): ${JSON.stringify(m.tops)}`).toEqual(
-    new Array(7).fill(m.tops[0]),
+    new Array(8).fill(m.tops[0]),
   );
 
   /**
@@ -293,7 +293,7 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
         return { top: Math.round(r.left), w: Math.round(r.width), folded: b.hasAttribute('data-pkc-overflow') };
       }),
     );
-    expect(rects, `${width}px: 前提が崩れている(7 個そろっていない)`).toHaveLength(7);
+    expect(rects, `${width}px: 前提が崩れている(8 個そろっていない)`).toHaveLength(8);
     /**
      * 🔴 **#1621 で「塊ごと次の行へ」から「入りきらない分は畳む」へ変わった**。
      *   見えているタイルは**全部同じ段**(1 個だけずれない)で、残りは畳んだ印を持つ
@@ -303,7 +303,7 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
     expect(
       rects.filter((r) => r.folded).length + shown.length,
       `${width}px: 畳んだ物でも見えている物でもないタイルがある: ${JSON.stringify(rects)}`,
-    ).toBe(7);
+    ).toBe(8);
     // ⚠ 空振り防止 ── 列が畳まれて全部 0 だと「同じ段」が必ず成り立つ
     expect(
       shown.length > 0 && shown.every((r) => r.w > 0),
@@ -314,7 +314,7 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
       `${width}px: 見えているタイルが列をまたいでいる: ${JSON.stringify(rects)}`,
     ).toBe(1);
     // 🔴 縦のバーでは畳まない(高さが足りなければ上の群が送る ── 下の群は全部見えて押せる)
-    expect(shown.length, `${width}px: 縦のバーで畳まれたタイルがある`).toBe(7);
+    expect(shown.length, `${width}px: 縦のバーで畳まれたタイルがある`).toBe(8);
   }
 
   /**
@@ -342,7 +342,7 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
   await page.setViewportSize({ width: 1366, height: 500 });
   const low = await railAt();
   expect(low.scrolls, '低い窓で上の群が送っていない(はみ出しを切っている / 下の群を押し出している)').toBe(true);
-  expect(low.tiles, '下の群のタイルが 7 つでない').toBe(7);
+  expect(low.tiles, '下の群のタイルが 8 つでない(#1982 ③-d でゴミ箱が加わった)').toBe(8);
   expect(low.hit, `低い窓で下の群のうち ${low.tiles - low.hit} 個が押せない`).toBe(low.tiles);
 
   /**
@@ -391,6 +391,31 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
   await page.waitForTimeout(100);
   await expect(rail, '動きを減らす設定なのに光った').not.toHaveAttribute('data-pkc-glow', '');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+  /**
+   * ⑩ 🔴 **作るボタンの行は 3 点**(#1982 ③-b)──「+ ノート ▼」「今日」「その他 ▾」が 1 行に並び、
+   *   添付・録音・画面録画・時間は「その他 ▾」から名前つきで押せる(畳んでも DOM に在る)。
+   */
+  await page.mouse.move(700, 450);
+  const createRow = await page.evaluate(() => {
+    const bar = document.querySelector('[data-pkc-region="create-bar"]')!;
+    const shown = [...bar.querySelectorAll<HTMLElement>('button')].filter((b) => b.getBoundingClientRect().width > 0);
+    return {
+      names: shown.map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim() ?? ''),
+      rows: new Set(shown.map((b) => Math.round(b.getBoundingClientRect().top))).size,
+    };
+  });
+  expect(createRow.rows, `作るボタンの行が 1 行でない: ${JSON.stringify(createRow)}`).toBe(1);
+  expect(createRow.names.length, `作るボタンの行が 3 点(+ ノート・▼・今日・その他)でない: ${JSON.stringify(createRow.names)}`).toBe(4);
+  expect(createRow.names, '「今日」が 1 クリックで押せない').toContain('今日');
+  await clickReal(page, '[data-pkc-region="create-bar"] [data-pkc-field="bar-more"]');
+  const tools = await page
+    .locator('[data-pkc-region="context-menu"] button')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-pkc-action')));
+  expect(tools.sort(), '「その他 ▾」の中身が添付・録音・画面録画・時間でない').toEqual(
+    ['attach-file', 'start-audio-capture', 'start-screen-capture', 'start-timer'].sort(),
+  );
+  await page.keyboard.press('Escape');
 });
 
 
@@ -469,7 +494,7 @@ const SETTINGS_CHOICE_ROW_FIELDS = [
  */
 test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出さない', async ({ page }) => {
   const seen: { w: number; n: number }[] = [];
-  const foldSeen: { w: number; folded: number }[] = [];
+  const foldSeen: { w: number; folded: number; byWidth: number }[] = [];
   let moreOpened = false;
   for (const w of TAB_SWEEP) {
     await page.setViewportSize({ width: w, height: 800 });
@@ -613,6 +638,8 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
           vertical,
           shown: shown.length,
           folded: bar.querySelectorAll('button[data-pkc-overflow]').length,
+          // 🔴 作るボタンの行の道具(#1982 ③-b)は幅に関係なく「その他 ▾」の下 ── 幅で畳んだ数からは除く
+          forced: bar.querySelectorAll('button[data-pkc-overflow][data-pkc-create-tool]').length,
           moreShown,
         };
       });
@@ -628,7 +655,7 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
       ).toBe(b.folded > 0);
     }
     const foldedAny = bands.find((b) => b.folded > 0);
-    foldSeen.push({ w, folded: bands.reduce((n, b) => n + b.folded, 0) });
+    foldSeen.push({ w, folded: bands.reduce((n, b) => n + b.folded, 0), byWidth: bands.reduce((n, b) => n + b.folded - b.forced, 0) });
     if (foldedAny !== undefined && !moreOpened) {
       moreOpened = true;
       await clickReal(
@@ -701,8 +728,9 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
     foldSeen.some((f) => f.folded > 0),
     `畳んだ幅を 1 つも見ていない: ${JSON.stringify(foldSeen)}`,
   ).toBe(true);
+  // ⚠ 「全部見える」は幅で畳んだ物が 0(いつも「その他 ▾」の下に居る道具は数えない ── #1982 ③-b)
   expect(
-    foldSeen.some((f) => f.folded === 0),
+    foldSeen.some((f) => f.byWidth === 0),
     `全部見える幅を 1 つも見ていない: ${JSON.stringify(foldSeen)}`,
   ).toBe(true);
   expect(moreOpened, '「⋯」を 1 度も押していない').toBe(true);
@@ -736,7 +764,7 @@ test('🔴 まとめ操作は縦のバーの 1 列に収まり、ボタンは 1 
 }) => {
   /** 帯に在るはずの 7 つ。⚠ **等値で pin する** ── 「7 個ある」だけだと、
    *  1 つ消して 1 つ足す変更が素通りする。 */
-  const WANT = ['取り込む', 'バックアップ', '操作を探す', '集計', 'システム', 'フラグ', 'ヘルプ'];
+  const WANT = ['取り込む', 'バックアップ', 'ゴミ箱', '操作を探す', '集計', 'システム', 'フラグ', 'ヘルプ'];
   const seen: { w: number; rows: number }[] = [];
   for (const w of [1440, 1280, 1024, 950]) {
     await page.setViewportSize({ width: w, height: 800 });

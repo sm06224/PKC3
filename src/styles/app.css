@@ -1272,6 +1272,12 @@ img[data-pkc-action='view-big']:focus-visible {
   border-radius: 0;
   justify-content: center;
 }
+/* 🔴 作るボタンの行の「その他 ▾」(#1982 ③-b)は**字のあるボタン** ── 標準と同じ薄い地 + 薄い枠線(#1982 ①)。語を折らない */
+[data-pkc-region='create-bar'] [data-pkc-field='bar-more'] {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  white-space: nowrap;
+}
 [data-pkc-region='browse-tabs'] [data-pkc-field='bar-more'] {
   height: auto;
   min-width: 0;
@@ -1455,7 +1461,8 @@ img[data-pkc-action='view-big']:focus-visible {
   flex-wrap: wrap;
   gap: 2px;
   padding: 3px 4px;
-  border-bottom: 1px solid var(--border);
+  /* 区切りは線ではなく段差と余白(#1982 ③-b。業務画面の規則 ⑤)── 紙の地(`--surface`)が机の地から 1 段浮く */
+  margin-bottom: var(--s1);
   background: var(--surface);
 }
 [data-pkc-region='kind-bar'] button {
@@ -1481,7 +1488,8 @@ img[data-pkc-action='view-big']:focus-visible {
   gap: 2px;
   padding: 3px 4px;
   font-size: var(--btn-fs-sm);
-  border-bottom: 1px solid var(--border);
+  /* 区切りは線ではなく段差と余白(#1982 ③-b。業務画面の規則 ⑤)── 紙の地(`--surface`)が机の地から 1 段浮く */
+  margin-bottom: var(--s1);
   background: var(--surface);
   max-height: 30vh;
   overflow: auto;
@@ -1527,7 +1535,8 @@ img[data-pkc-action='view-big']:focus-visible {
   font-size: var(--btn-fs-sm);
 }
 [data-pkc-region='saved-searches'] {
-  border-bottom: 1px solid var(--border);
+  /* 区切りは線ではなく段差と余白(#1982 ③-b。業務画面の規則 ⑤)── 紙の地(`--surface`)が机の地から 1 段浮く */
+  margin-bottom: var(--s1);
   background: var(--surface);
 }
 [data-pkc-region='saved-searches'][hidden],

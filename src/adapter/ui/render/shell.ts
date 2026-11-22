@@ -12,7 +12,7 @@
 import { SEALED_ARCHETYPES } from '@features/sealed';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { collectionBarButton, collectionBarItems } from './collection-bar';
-import { installSidebarBarOverflow } from './bar-overflow';
+import { CREATE_TOOL_ATTR, installSidebarBarOverflow } from './bar-overflow';
 // 🔴 前回選んだ「作る種類」を覚える(#1045)
 import { appCreateKind } from './create-kind';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
@@ -808,6 +808,13 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const menuTimer = iconButton('start-timer', '時間を計る');
   menuTimer.setAttribute('role', 'menuitem');
   menu.append(menuTimer);
+  /**
+   * 🔴 **作るボタンの行は 3 点**(#1982 ③-b。user 裁定 2026-11-22)──「+ ノート ▼」「今日」「その他 ▾」。
+   *   添付・録音・画面録画・時間は**いつも**「その他 ▾」の下へ回す(DOM には残す ── ▼ の合成メニュー・長押し・
+   *   押せない理由の付け外しは今までどおり同じボタンを読む)。回す判定は `bar-overflow.ts` の `forced`(印 `CREATE_TOOL_ATTR`)。
+   *   ⚠ 「今日」は日常いちばん押すので、1 クリックのまま行に残す。
+   */
+  for (const tool of [attach, rec, screen, timer]) tool.setAttribute(CREATE_TOOL_ATTR, '');
   createBar.append(kind, create, pick, today, attach, rec, screen, timer);
 
   const attachInput = document.createElement('input');

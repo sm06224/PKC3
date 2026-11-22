@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled, openBrowse } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled, openBrowse, pressCreateTool } from './helpers';
 
 /**
  * 🔴 **組み込みアプリ 3 つを、実ブラウザで押す**(#281 ① 関係グラフ / #277 カンバン / #683 ① 計った時間)。
@@ -178,7 +178,7 @@ test('🔴 計った時間: 止めた行が一覧に並び、名前を付けて�
 
   await createEntry(page, 'text');
   await writeBody(page, '# 設計メモ');
-  await clickReal(page, '[data-pkc-field="start-timer"]');
+  await pressCreateTool(page, 'start-timer');
   await expect(page.locator('[data-pkc-region="timer-bar"]')).toBeVisible();
   await clickReal(page, '[data-pkc-action="stop-timer"]');
   await expect(page.locator('[data-pkc-region="timer-bar"]')).toBeHidden();

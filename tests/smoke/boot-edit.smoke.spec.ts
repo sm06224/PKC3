@@ -150,7 +150,7 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
   ).toHaveCount(0);
 
   await openBrowse(page, 'filer');
-  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]');
   const trash = page.locator('[data-pkc-region="filer-trash"]');
   await expect(trash.locator('li')).toHaveCount(1);
   await clickReal(page, '[data-pkc-action="restore-trash"]');

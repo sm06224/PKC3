@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickInspectorMoreItem, gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, openBrowse } from './helpers';
+import { clickInspectorMoreItem, gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, openBrowse, pressCreateTool } from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -412,7 +412,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   ).toHaveCount(1);
 
   await openBrowse(page, 'filer');
-  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]');
   await clickReal(page, '[data-pkc-action="restore-trash"]');
   // 前提: 戻したノートが主の枠に開いた(= 留めた枠の本文は選択の変化で描き直されていない)
   await expect(page.locator('[data-pkc-split-main] [data-pkc-field="detail-title"]')).toContainText(
@@ -442,7 +442,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
    * 🔑 直す前は、着いた時点で戻したノートへ選択が引き戻された(押したノートが開かない)。
    */
   await openBrowse(page, 'filer');
-  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]');
   await expect(page.locator('[data-pkc-region="filer-trash"] li'), '前提: ゴミ箱に 1 件').toHaveCount(1);
   /**
    * ⚠ 押す相手は「いま開いているノート**以外**」にする(台帳 #1852 G2 / 依頼 106 A)。戻したノートが元の並びに戻るようになり、
@@ -729,7 +729,7 @@ test('🔴 pkc:// の asset あては押すと所有ノート(添付)へ飛ぶ',
   await gotoApp(page);
 
   // ① 添付を作る(所有ノート)── key は画面の実属性から採る(でっち上げない)
-  await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
+  await pressCreateTool(page, 'attach-file');
   await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
     name: 'owner.png',
     mimeType: 'image/png',

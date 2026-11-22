@@ -129,6 +129,18 @@ export function collectionBarItems(): readonly CollectionBarItem[] {
     out.push({ action, label, iconKey: action, title, group: 'main' });
   }
   /**
+   * 🔴 **ゴミ箱**(#1982 ③-d。user 裁定 2026-11-22「既存の `show-trash` をそのまま使い、縦バー下群へ」)。
+   * ⚠ 受け手は今までの `show-trash`(左のペインを「フォルダ」にしてから、一覧の下にゴミ箱を出す)── 新しい操作は作らない。
+   *   縦のバーから押したときだけ、開いていればもう一度で閉じる(片道にしない。`binder.ts` の `show-trash`)。
+   */
+  out.push({
+    action: 'show-trash',
+    label: 'ゴミ箱',
+    iconKey: 'open-trash',
+    hint: { base: 'ゴミ箱を開きます(フォルダの一覧の下に中身が出ます。もう一度押すと閉じます)', command: 'show-trash' },
+    group: 'main',
+  });
+  /**
    * 🔴 **操作を名前で探す**(#425 段①)。
    *
    * ⚠ **ボタンを先に置く**(不可侵指示「マウスだけで完結し、キーボードは近道」)──

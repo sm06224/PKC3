@@ -341,7 +341,7 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
   await expect(rows, 'もう一度まとめて消えていない').toHaveCount(1);
 
   // ⑤ 🔴 **戻せる**(ゴミ箱へ入っただけ)
-  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]');
   await expect(page.locator('[data-pkc-region="filer-trash"]')).toContainText('件');
 
   /**
@@ -386,8 +386,8 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
     await clickInspectorMoreItem(page, 'delete-entry');
   }).toPass({ timeout: 10_000 });
   await expect(rows, '2 番目が消えていない').toHaveCount(3);
-  if (await page.locator('[data-pkc-action="show-trash"]:not([hidden])').count())
-    await clickReal(page, '[data-pkc-action="show-trash"]');
+  if (await page.locator('[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]:not([hidden])').count())
+    await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]');
   await clickReal(page, trashLis.filter({ hasText: 'ノート3' }).locator('[data-pkc-action="restore-trash"]'));
   await expect(rows, 'ゴミ箱の一覧から戻していない').toHaveCount(4);
   await expect(rows.nth(1), '戻したノートが 2 番目に戻っていない(末尾へ行った)').toContainText('ノート3');
@@ -422,8 +422,8 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
   await rows.nth(3).click();
   await clickInspectorMoreItem(page, 'delete-entry');
   await expect(rows).toHaveCount(3);
-  if (await page.locator('[data-pkc-action="show-trash"]:not([hidden])').count())
-    await clickReal(page, '[data-pkc-action="show-trash"]');
+  if (await page.locator('[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]:not([hidden])').count())
+    await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]');
   await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="purge-trash"]:not([data-pkc-trash-lid])');
   expect(await answerAppDialog(page, 'ok'), '空にする確認が不可逆だと言っていない').toContain('元に戻せません');
   await expect(statusG2, '空にした後に件数を言っていない').toContainText('1 件を消しました');

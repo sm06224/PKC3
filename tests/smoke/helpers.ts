@@ -456,6 +456,22 @@ export async function openBrowse(page: Page, mode: string): Promise<void> {
 }
 
 /**
+ * 🔴 **作るボタンの行の道具(添付・録音・画面録画・時間を計る)を押す**(#1982 ③-b)。
+ * ⚠ 行は「+ ノート ▼」「今日」「その他 ▾」の 3 点で、道具は**いつも**「その他 ▾」の下に回っている ──
+ *   行のタイルを直に押すと「見えない」で落ちる。「その他 ▾」を開いて、名前つきの項目を実クリックで押す。
+ * ⚠ 狭い画面などで行に出ている回(回していない版)では、そのまま行のタイルを押す。
+ */
+export async function pressCreateTool(page: Page, action: 'attach-file' | 'start-audio-capture' | 'start-screen-capture' | 'start-timer'): Promise<void> {
+  const tile = page.locator(`[data-pkc-region="create-bar"] [data-pkc-bar-tile][data-pkc-action="${action}"]`).first();
+  if (await tile.isVisible()) {
+    await clickReal(page, tile);
+    return;
+  }
+  await clickReal(page, '[data-pkc-region="create-bar"] [data-pkc-field="bar-more"]');
+  await clickReal(page, `[data-pkc-region="context-menu"] [data-pkc-action="${action}"]`);
+}
+
+/**
  * 🔴 **見た目の遷移が走り切るのを待つ**(#1982 段 1 以降、ボタンの地と字は `--dur-fast` で遷移する)。
  *
  * ⚠ 押した・乗せた・外した直後の `getComputedStyle` は**遷移の途中の色**を返す ── 負荷が高いと
