@@ -23,6 +23,7 @@
 import { elapsedText, msToSeconds } from '@features/elapsed-text';
 import { appVoiceBoostRouter } from './voice-boost';
 import { unloadMedia } from './media-release';
+import { markIconOnly } from './icons';
 
 export const INLINE_PLAYER_FIELD = 'inline-player';
 
@@ -111,6 +112,7 @@ export async function openInlinePlayer(args: {
   close.setAttribute('aria-label', 'プレーヤーを閉じる');
   close.title = 'プレーヤーを閉じる';
   close.textContent = '×';
+  markIconOnly(close);
   head.append(label, open, close);
   const note = doc.createElement('p');
   note.setAttribute('data-pkc-field', 'inline-player-note');

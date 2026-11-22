@@ -7,6 +7,7 @@
  */
 import { extractHeadingText } from './heading-anchor';
 import { pickActiveHeading } from './active-heading-dom';
+import { markIconOnly } from './icons';
 
 /** 現在地の印(目次の行に付く)。CSS(`app.css`)が読む。 */
 const ACTIVE_ATTR = 'data-pkc-active';
@@ -80,6 +81,7 @@ export function installQuickToc(
   closeBtn.className = 'pkc-quick-toc-close';
   closeBtn.setAttribute('aria-label', '目次を閉じる');
   closeBtn.textContent = '×';
+  markIconOnly(closeBtn);
 
   header.append(title, closeBtn);
 

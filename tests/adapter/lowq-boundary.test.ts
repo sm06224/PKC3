@@ -83,11 +83,15 @@ describe('ヘアライン(縁の細い線)', () => {
     expect(center).toMatch(/box-shadow:[^;]*0 0 0 1px var\(--hairline\)[^;]*var\(--shadow-sm\)/);
     const button = /\nbutton \{[^}]*\}/.exec(app)![0];
     expect(button).toMatch(/border:\s*1px solid var\(--hairline\)/);
-    // 地を透明にして枠を消す型は枠を残さない(主・ゴースト・危険)
-    for (const v of ['primary', 'ghost', 'danger']) {
+    // 地を透明にして枠を消す型は枠を残さない(主・危険)
+    for (const v of ['primary', 'danger']) {
       const rule = new RegExp(`\\nbutton\\[data-pkc-variant='${v}'\\] \\{[^}]*\\}`).exec(app)![0];
       expect(rule, v).toMatch(/border-color:\s*(transparent|var\(--accent\))/);
     }
+    // 🔴 ゴーストは**型としては地を持たない規則を持たない**(字のあるゴーストは標準と同じ見え方。#1982 ①)。地を消すのは図案だけのボタンの印
+    expect(/\nbutton\[data-pkc-variant='ghost'\] \{/.test(app), '字のあるゴーストの地を消す規則が戻っている').toBe(false);
+    const iconOnly = /\n:where\(button\)\[data-pkc-icon-only\] \{[^}]*\}/.exec(app)![0];
+    expect(iconOnly).toMatch(/border-color:\s*transparent/);
     /**
      * 🔴 **地が透明で枠を消していないボタンは、輪郭線だけが浮く**(着地前レビュー)── 標準のボタンに枠の色を
      *   付けたので、地を `transparent` にしている規則は枠も `transparent` にする。走査で 1 件(左右の端の道具)だけだった。

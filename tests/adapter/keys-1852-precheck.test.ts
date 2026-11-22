@@ -250,7 +250,7 @@ describe('237 = A: 狭い画面の編集で、書式のボタンを 1 段にま�
     it('🔴 「…」を開いている間は、押し込んだ見た目(aria-expanded を色でも言う)', () => {
       expect(
         blocksFor(css, `[data-pkc-region='format-bar'] [data-pkc-field='format-more'][aria-expanded='true']`).join(' '),
-      ).toMatch(decl('background', 'var\\(--surface-2\\)'));
+      ).toMatch(decl('background', 'var\\(--pkc-mark-bg\\)')); // 静止の地(6%)・乗せた地(12%)が付いたので(#1982 ①)、押し込みは 18% の段で示す
     });
 
     it('🔴 編集中は、下(追記欄の場所)の保存 / やめるの帯を出さない(スマホ用画面だけ)', () => {
