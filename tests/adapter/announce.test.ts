@@ -908,7 +908,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
    */
   const KNOWN: readonly [id: string, digest: string][] = [
     /** ⚠ **#2000 で足した**(2026-11-21)。枠が満杯だったので、いちばん古い 1 件(`2026-10-29-pins-callout`)を落とした ── 原本は `CHANGELOG.md`(2026-10-29 の節)。 */
-    ['2026-11-21-sync-folder', '6880fb0c'],
+    ['2026-11-21-sync-folder', '6ff6054e'],
     /** ⚠ **#2015 で足した**(2026-11-21)。枠が満杯だったので、いちばん古い 1 件(`2026-10-29-folder-sync`)を落とした ── 原本は `CHANGELOG.md`(2026-10-29 の節)。 */
     ['2026-11-21-share-image-removed-rows', '419160f2'],
     /** ⚠ **#671 で足した**(2026-11-21)。枠が満杯だったので、いちばん古い 1 件(`2026-10-29-schedule-allday`)を落とした ── 原本は `CHANGELOG.md`(2026-10-29 の節)。 */
@@ -1592,6 +1592,13 @@ describe('お知らせの文面は固定(#220-7)', () => {
  *   **0 件であること**を見る形へ書き換えた。
  */
 describe('登記表と画面のずれ(#596 E)', () => {
+  it('🔴 最新のお知らせは短い(項目 4 つ以内・合計 220 字以内。長いと帯が高くなり、予定の「日」の目盛りが縮んで下端の札が掴めない)', () => {
+    const head = NOTICES[0]!;
+    expect(head.items.length, `${head.id} の項目が多い(詳細は CHANGELOG・マニュアルへ)`).toBeLessThanOrEqual(4);
+    const chars = head.items.reduce((n, t) => n + t.length, 0);
+    expect(chars, `${head.id} の字数が多い(5 項目・約 330 字で、帯が 199px になり schedule.smoke が落ちた)`).toBeLessThanOrEqual(220);
+  });
+
   it('🔴 どこにも出ない entry が 1 件も無い', () => {
     const shown = new Set(recentNotices(NOTICES).map((n) => n.id));
     expect(
