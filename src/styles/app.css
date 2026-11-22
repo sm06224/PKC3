@@ -2527,6 +2527,22 @@ button[data-pkc-variant='primary'] [data-pkc-icon] {
   width: 32px;
   min-width: 32px;
 }
+/**
+ * 🔴 **「コピー ▾」の分割ボタン**(A2。user 裁定 2026-11-22)── 本体(Markdown をコピー)と ▾ を隙間なしの 1 つに見せる。
+ *   ⚠ 地と枠は素のボタンのまま(本文の帯の button は地・枠を書かない ── `button-resting-css.test`)。
+ *   帯の `gap` と枠 1px を打ち消して 2 つの枠を重ね、内側の角だけ落とす。
+ */
+[data-pkc-field='detail-toolbar'] [data-pkc-field='copy-run'] {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+[data-pkc-field='detail-toolbar'] [data-pkc-field='copy-pick'] {
+  min-width: 20px;
+  padding-inline: var(--s1);
+  margin-inline-start: calc(-1 * var(--s2) - 1px);
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+}
 /* ゴースト ── 枠も地も無い型。字のあるゴースト(「この値を消す」など)は標準と同じ薄い地 + 枠を受ける(#1982 ①)。
  * hover だけ標準の薄い地(同じ詳細度で `button:hover` が勝たない所は下で書く)。 */
 /* 🔴 **図案だけ・字だけの記号のボタン**(`data-pkc-icon-only`。`icons.ts` の `markIconOnly` が印を付ける)は

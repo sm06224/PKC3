@@ -1157,6 +1157,14 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     alias: 'コピー 書式 リッチ HTML Word メール 貼り付け',
   },
   {
+    id: 'copy-note-html',
+    label: 'HTML ソースをコピー',
+    contexts: ['global'],
+    defaults: [],
+    note: '開いているノートを見た目どおりに描いて掃除した HTML を、ソースの字のままコピーします(ブログやメールの HTML 欄に貼れます。ノートを読んでいるときだけ効きます)',
+    alias: 'コピー HTML ソース html タグ 貼り付け ブログ',
+  },
+  {
     id: 'copy-selection-md',
     label: '選択範囲をコピー',
     contexts: ['global'],

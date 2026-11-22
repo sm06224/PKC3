@@ -260,6 +260,66 @@ describe('editor flow (P3-5)', () => {
     rich.mockRestore();
   });
 
+  it('🔴 HTML ソースをコピー(A2)── 書式付きと同じ掃除をした HTML を、字(text/plain)のまま渡す', async () => {
+    const plain = vi.spyOn(clipboard, 'copyPlainText').mockResolvedValue(true);
+    const rich = vi.spyOn(clipboard, 'copyMarkdownAndHtml').mockResolvedValue(true);
+    const { d, q } = setup({ a: '# 見出し\n\n**太字** の本文\n\n```js\nconst x = 1;\n```' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    const html = q<HTMLButtonElement>('[data-pkc-action="copy-note-html"]');
+    expect(html, '帯に HTML ソースをコピーが無い').not.toBeNull();
+    expect(html!.disabled, '本文が読めているのに押せない').toBe(false);
+    html!.click();
+    q<HTMLButtonElement>('[data-pkc-action="copy-note-rich"]')!.click();
+    await tick(0);
+    expect(plain).toHaveBeenCalledTimes(1);
+    const src = plain.mock.calls[0]![0];
+    // 原文(markdown)ではなく描いた HTML ── 字として渡る
+    expect(src).not.toContain('**太字**');
+    expect(src).toMatch(/<strong>太字<\/strong>/);
+    expect(src).toMatch(/<h1[^>]*>/);
+    // 🔴 掃除が効いている ── 本文の ⧉(コピーの操作子)は残らない
+    expect(src).not.toContain('copy-md-block');
+    expect(src).not.toContain('data-pkc-action');
+    // 書式付きと**同じ** HTML(掃除の道が 1 本)
+    expect(rich.mock.calls[0]?.[1]).toBe(src);
+    plain.mockRestore();
+    rich.mockRestore();
+  });
+
+  it('🔴 「コピー ▾」(A2)── 本体は Markdown をコピー、▾ は HTML ソース / 書式付き / 選択範囲を出す', async () => {
+    const plain = vi.spyOn(clipboard, 'copyPlainText').mockResolvedValue(true);
+    const { d, q, root } = setup({ a: '**太字**' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    const bar = q('[data-pkc-field="detail-toolbar"]')!;
+    const run = bar.querySelector<HTMLButtonElement>('[data-pkc-field="copy-run"]');
+    expect(run?.getAttribute('data-pkc-action'), '本体が Markdown をコピーではない').toBe('copy-note-md');
+    // ▾ の中身は帯の上に見えていない(隠した元に在る)
+    const source = bar.querySelector<HTMLElement>('[data-pkc-field="copy-more-source"]')!;
+    expect(source.hidden).toBe(true);
+    expect([...source.querySelectorAll('[data-pkc-action]')].map((b) => b.getAttribute('data-pkc-action'))).toEqual([
+      'copy-note-html',
+      'copy-note-rich',
+      'copy-selection-md',
+    ]);
+    const pick = bar.querySelector<HTMLButtonElement>('[data-pkc-field="copy-pick"]')!;
+    expect(pick.previousElementSibling, '▾ が本体の隣に無い(1 つの分割ボタンに見えない)').toBe(run);
+    pick.click();
+    await tick(0);
+    const menu = root.querySelector('[data-pkc-region="context-menu"]');
+    expect(menu, '▾ で一覧が開かない').not.toBeNull();
+    const rows = [...menu!.querySelectorAll('button')];
+    expect(rows.map((b) => b.textContent?.trim())).toEqual(['HTML ソースをコピー', '書式付きでコピー', '選択範囲をコピー']);
+    // 選択範囲は選択が無い間押せない(元の状態をそのまま写す)
+    expect(rows[2]!.disabled).toBe(true);
+    rows[0]!.click();
+    await tick(0);
+    expect(plain).toHaveBeenCalledTimes(1);
+    expect(plain.mock.calls[0]![0]).toMatch(/<strong>太字<\/strong>/);
+    plain.mockRestore();
+  });
+
   it('copy-md-block は実 delegation 経路(rendered ⧉ ボタンのクリック)で動く', async () => {
     const spy = vi.spyOn(clipboard, 'copyMarkdownAndHtml').mockResolvedValue(true);
     const { d, q, root } = setup({ a: '```js\nconst x = 1;\n```' });
