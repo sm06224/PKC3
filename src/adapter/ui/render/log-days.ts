@@ -26,7 +26,7 @@
  * 行の `data-pkc-day-folded` が事実。描き直しで行が作り直されても、**日(+何番目か)をキー**に引き継ぐ。
  */
 import { OVERLAY_ATTR } from './apply-blocks';
-import { descRank, logDepths, logSegments, ORDER_STRIDE, orderValue } from '@features/textlog/log-order';
+import { descRank, descRanks, logDepths, logSegments, ORDER_STRIDE, orderValue, recordStampKey } from '@features/textlog/log-order';
 import { appLogOrder } from './log-order-setting';
 import {
   formatLogDay,
@@ -438,22 +438,37 @@ export function applyLogOrder(host: HTMLElement, blocks: readonly Element[], lev
     return;
   }
   const { seg, count } = logSegments(levels);
+  // 🔴 件の順位は見出しの日時で決める(同じ日の中で時刻が前後しない ── `descRanks`)
+  const keys = new Array<string | null>(count).fill(null);
+  blocks.forEach((b, i) => {
+    const s = seg[i] ?? 0;
+    const lv = levels[i] ?? 0;
+    if (s > 0 && (lv === 1 || lv === 2) && keys[s - 1] === null) keys[s - 1] = recordStampKey(b.textContent ?? '');
+  });
+  const ranks = descRanks(keys);
+  const rankOf = (s: number): number => (s === 0 ? 0 : (ranks[s - 1] ?? descRank(s, count)));
+  /** 塊の範囲 [start, end) に入る件のうち、いちばん上に来る件の順位(日の行・月の行はその手前に置く)。 */
+  const topRank = (start: number, end: number): number => {
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = start; i < end; i++) best = Math.min(best, rankOf(seg[i] ?? 0));
+    return Number.isFinite(best) ? best : 0;
+  };
   const want = new Map<Element, number>();
   const local = new Map<number, number>();
   blocks.forEach((b, i) => {
     const s = seg[i] ?? 0;
     const l = local.get(s) ?? 2;
     local.set(s, l + 1);
-    want.set(b, orderValue(descRank(s, count), l));
+    want.set(b, orderValue(rankOf(s), l));
   });
   const runs = logDayRuns(levels, daysOf(blocks, levels));
   for (const run of runs) {
     const row = blocks[run.start]?.previousElementSibling ?? null;
-    if (row !== null && isDayRow(row)) want.set(row, orderValue(descRank(seg[run.end - 1] ?? 0, count), 1));
+    if (row !== null && isDayRow(row)) want.set(row, orderValue(topRank(run.start, run.end), 1));
   }
   for (const mr of logGrouping(runs).months) {
     const row = blocks[mr.start]?.previousElementSibling?.previousElementSibling ?? null;
-    if (row !== null && isLogMonthRow(row)) want.set(row, orderValue(descRank(seg[mr.end - 1] ?? 0, count), 0));
+    if (row !== null && isLogMonthRow(row)) want.set(row, orderValue(topRank(mr.start, mr.end), 0));
   }
   for (const k of kids) {
     let v = want.get(k);

@@ -1703,6 +1703,21 @@ export class FilerRenderer {
     // breadcrumb: root / …祖先… / scope
     const crumb = document.createElement('nav');
     crumb.setAttribute('data-pkc-region', 'filer-breadcrumb');
+    /**
+     * 🔴 **パスはアドレスバーの形**(実機の崩れ。user 指示 2026-11-22)── 段を標準のボタン箱で並べると、下の操作
+     *   (「フォルダへ移す…」「中まで全部出す」)と同じ四角に見えて見分けが付かなかった。パスは 1 本の枠(薄い地 + 極細線)の
+     *   中に字のリンクで並べ(`ルート › フォルダ名`)、現在地は太字(箱にしない)。押す・落とす(D&D)の働きは今までどおり。
+     */
+    const path = document.createElement('span');
+    path.setAttribute('data-pkc-field', 'crumb-path');
+    crumb.append(path);
+    const sep = (): HTMLSpanElement => {
+      const x = document.createElement('span');
+      x.setAttribute('data-pkc-field', 'crumb-sep');
+      x.setAttribute('aria-hidden', 'true');
+      x.textContent = '›';
+      return x;
+    };
     const rootSeg = document.createElement('button');
     rootSeg.type = 'button';
     // ⚠ ルートは**現在地だけ**を戻す(#240 段①)── 直す前は `DESELECT_ENTRY` で
@@ -1711,14 +1726,16 @@ export class FilerRenderer {
     // ⚠ パンくずは**出す**ための落とし先(#240 段④)── 上の階層へ戻す唯一の D&D 動線
     rootSeg.setAttribute('data-pkc-drop', 'crumb');
     rootSeg.textContent = 'ルート';
-    crumb.append(rootSeg);
+    rootSeg.setAttribute('data-pkc-field', 'crumb-seg');
+    if (!scope) rootSeg.setAttribute('aria-current', 'location');
+    path.append(rootSeg);
     if (scope) {
       const chain = [
         ...getAncestorFolders(scope.lid, state.entryMetas, state.relations).reverse(),
         scope,
       ];
       for (const seg of chain) {
-        crumb.append(document.createTextNode(' / '));
+        path.append(sep());
         // crumb セグメントはそれ自身が entry(folder)を表す要素 ── data-pkc-entry
         // の適用対象(P3-7a 規約が禁じるのは delete / toggle 等の操作ボタン直付け)
         const btn = document.createElement('button');
@@ -1728,9 +1745,11 @@ export class FilerRenderer {
         btn.setAttribute('data-pkc-action', 'enter-folder');
         btn.setAttribute('data-pkc-drop', 'crumb');
         btn.textContent = seg.title;
+        btn.setAttribute('data-pkc-field', 'crumb-seg');
+        if (seg === scope) btn.setAttribute('aria-current', 'location');
         // 🔑 作る先はパンくずの現在地で読める(#1982 ③-c ── 案内の文を行から外した代わりに `title` で言う)
         if (seg === scope && scope.archetype !== SMART_ARCHETYPE) btn.title = `新しく作るものは「${seg.title}」に入ります`;
-        crumb.append(btn);
+        path.append(btn);
       }
       /**
        * 🔴 **いま入っているフォルダ自身を移す口**(#813、2026-09-09。
