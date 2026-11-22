@@ -24,7 +24,7 @@
  * 🔑 だから**器は同じ、出口だけ呼び側が付ける**(`each`)。
  */
 import { TILE_ICON_CHOICES } from '@features/icon/tile-icons';
-import { iconSpan } from './icons';
+import { iconSpan, markIconOnly } from './icons';
 
 /** 押し所に書く「どの絵か」。⚠ **空文字 = なし(外す)**。 */
 export const ICON_NAME_ATTR = 'data-pkc-icon-name';
@@ -115,6 +115,7 @@ export function buildIconPalette(spec: IconPaletteSpec): HTMLElement {
       // ⚠ 読み上げの名前は**ここ**が持つ(図案の器は `aria-hidden`)
       btn.setAttribute('aria-label', label);
       btn.append(iconSpan(name as Parameters<typeof iconSpan>[0]));
+      markIconOnly(btn);
     } else {
       const text = document.createElement('span');
       text.setAttribute('data-pkc-field', 'label');

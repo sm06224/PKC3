@@ -195,6 +195,46 @@ describe('配色トークン', () => {
     }
   });
 
+  /**
+   * 🔴 **字のあるボタンの静止の地**(#1982 ①。「Markdown をコピー」が字と見分けられなかった不具合)。
+   * 地は `--fg` を `button` の規則が決める割合で透かした無彩色、縁は `--hairline`(縁は地の上に重なる)。
+   * ⚠ 割合は app.css / tokens.css から読む(ここへ数字を写さない)。
+   * 観測点は 2 つ: ① 字と地(静止 / 乗せた)が 4.5:1 ② **地と縁が、周りの地から見分けられる**
+   *   (地 1.10:1 以上 / 縁を重ねた色 1.20:1 以上 ── 12 配色 × 3 つの地の実測の最小は 1.107 / 1.214)。
+   *   ③ 乗せた地は静止の地より濃い(段が付く)。
+   */
+  it.each(THEMES.map((t) => t.id))('🔴 %s の字のあるボタンは、静止の地で読めて周りから見分けられる', (theme) => {
+    const tok = tokensOf(theme);
+    const app = readFileSync(new URL('../../src/styles/app.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const base = /\nbutton \{[^}]*?background:\s*color-mix\(in srgb,\s*var\(--fg\)\s*(\d+)%,\s*transparent\)/.exec(app);
+    const hover = /\nbutton:hover:not\(:disabled\) \{[^}]*?background:\s*color-mix\(in srgb,\s*var\(--fg\)\s*(\d+)%,\s*transparent\)/.exec(app);
+    const hair = /--hairline:\s*color-mix\(in srgb,\s*var\(--fg\)\s*(\d+)%,\s*transparent\)/.exec(css);
+    expect(base, '静止の地の規則が読めない').not.toBeNull();
+    expect(hover, '乗せた地の規則が読めない').not.toBeNull();
+    expect(hair, '--hairline が読めない').not.toBeNull();
+    const [aRest, aHover, aEdge] = [base![1]!, hover![1]!, hair![1]!].map((v) => Number(v) / 100) as [number, number, number];
+    expect(aRest, '静止の地が無い(透明のまま)').toBeGreaterThan(0.03);
+    expect(aHover).toBeGreaterThan(aRest);
+    const mix = (f: [number, number, number], a: number, b: [number, number, number]): [number, number, number] =>
+      [0, 1, 2].map((i) => f[i]! * a + b[i]! * (1 - a)) as [number, number, number];
+    const hex = (c: [number, number, number]): string => `#${c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
+    const fg = rgb(tok['--fg']!);
+    // ボタンが載る地: 本文の紙 / 帯・見出しの地 / 左右の列の地
+    for (const surround of ['--surface', '--surface-2', '--bg']) {
+      const sc = rgb(tok[surround]!);
+      const rest = mix(fg, aRest, sc);
+      const hov = mix(fg, aHover, sc);
+      const edge = mix(fg, aEdge, rest);
+      const where = `${theme}: ${surround}(${tok[surround]!})`;
+      expect(contrast(tok['--fg']!, hex(rest)), `${where} 静止の地の上の字`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(tok['--fg']!, hex(hov)), `${where} 乗せた地の上の字`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(hex(rest), tok[surround]!), `${where} 静止の地が周りから見分けられない`).toBeGreaterThanOrEqual(1.1);
+      expect(contrast(hex(edge), tok[surround]!), `${where} 縁が周りから見分けられない`).toBeGreaterThanOrEqual(1.2);
+      // 🔴 乗せた地は静止の地から**はっきり**段が付く(12 配色 × 3 つの地の実測の最小は 1.111。割合を 7% へ下げると 1.03 前後で落ちる)
+      expect(contrast(hex(hov), hex(rest)), `${where} 乗せた地が静止の地と見分けにくい`).toBeGreaterThanOrEqual(1.08);
+    }
+  });
+
   it('🔴 明暗の宣言が実際の明るさと合っている', () => {
     // ⚠ `color-scheme` を取り違えると、スクロールバーや既定の入力欄だけが
     // 逆の明るさで出る(部分的にちぐはぐになる)

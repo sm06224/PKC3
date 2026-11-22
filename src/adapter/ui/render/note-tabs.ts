@@ -21,6 +21,7 @@
 import type { AppState } from '@adapter/state/app-state';
 import { orderTabs, visible } from '@features/nav/note-tabs';
 import { markTab, markTablist } from './tabs-a11y';
+import { markIconOnly } from './icons';
 
 export const NOTE_TABS_REGION = 'note-tabs';
 export const NOTE_TAB_EXTERNAL_LABEL = '別ウィンドウで開いています';
@@ -135,6 +136,7 @@ export class NoteTabsBar {
       close.setAttribute('aria-label', 'タブを閉じる');
       close.title = `「${shown}」のタブを閉じます(ノートは消えません)`;
       close.textContent = '×';
+      markIconOnly(close);
 
       cell.append(tab, close);
       this.host.append(cell);

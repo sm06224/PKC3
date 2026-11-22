@@ -540,6 +540,21 @@ export function markBarTile(btn: HTMLButtonElement): HTMLButtonElement {
 }
 
 /**
+ * 🔴 **図案だけのボタンの印**(#1982 ①の見直し)。字のあるボタンは薄い地と枠を持つが、
+ * **字が無く図案だけのボタン**は静止の地も枠も持たない(hover だけ薄い地。`app.css` の
+ * `button[data-pkc-icon-only]`)。⚠ 型(`data-pkc-variant`)とは**別の軸**: どの型でも効く。
+ * ⚠ 図案だけのボタンを手で組むときは**この関数で印を付ける**(`iconSpan` だけを append して
+ *   印を忘れると、字のあるボタンと同じ地と枠が出る)。`iconButton` は常に字を持つので付けない。
+ */
+export const ICON_ONLY_ATTR = 'data-pkc-icon-only';
+
+/** 図案だけのボタンの印を付ける。⚠ 返り値を使わなくてよい。 */
+export function markIconOnly(btn: HTMLButtonElement): HTMLButtonElement {
+  btn.setAttribute(ICON_ONLY_ATTR, '');
+  return btn;
+}
+
+/**
  * 主の印を**付け外し**する(状態で変わる面はこちらを使う)。
  *
  * 🔴 **押しても何も起きないボタンを、いちばん濃くしない**(着地前レビュー・動線 1、
