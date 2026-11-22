@@ -233,14 +233,19 @@ test('🔴 直リンクの窓で別のノートを開くと、F5 でそのノー
   ).toContainText('あとから');
 
   /**
-   * 🔴 **履歴を積んでいない** ── 積むと「戻る」が同一文書内の断片移動になり、
-   *   画面が 1 ドットも動かない(user は「戻るが壊れている」と読む)。
+   * 🔴 **住所の書き換えでは履歴を積まない / 戻るで PKC から出られなくならない**。
+   * ⚠ 2026-11-22(A1。user 裁定): ブラウザの「戻る」は、ノートを 2 つ以上見た後は PKC の中で 1 つ戻る(番兵を 1 つだけ置く)。
+   *   だから見るのは「戻るを押し続ければ、選んだノートの数ほどで必ず PKC を出られる」こと ── 住所の書き換えで履歴を積んでいたら、
+   *   書き換えた回数だけ同じ頁に留まる(出られない)。
    */
-  await page.goBack();
-  expect(
-    new URL(page.url()).hash,
-    '住所の書き換えを history に積んだ(戻るで PKC から出られない)',
-  ).not.toContain(`entry=${firstLid}`);
+  const appUrl = page.url().split('#')[0]!;
+  let left = false;
+  for (let i = 0; i < 6 && !left; i++) {
+    await page.goBack({ waitUntil: 'commit' }).catch(() => null);
+    await page.waitForTimeout(150);
+    left = !page.url().startsWith(appUrl);
+  }
+  expect(left, '戻るを押し続けても PKC から出られない(履歴を積んでいる / 閉じ込めている)').toBe(true);
 
   expect(errors, 'pageerror / console.error が出ている').toEqual([]);
 });
