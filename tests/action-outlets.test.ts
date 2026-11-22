@@ -79,6 +79,11 @@ const UNRESOLVED: readonly string[] = [
   // ⚠ 2026-11-22(#2000 段 3 レビュー)── 同期フォルダを保存するように戻す(下の `pick-sync-folder` と同じ組み方)
   'allow-sync-folder-persist',
   'cancel-asr-install',
+  // ⚠ 2026-11-22(#2000 段 4a-4)で 4 件増えた ── S3 互換の保管先の接続の確認 / 接続する / 接続を外す / CORS の設定をコピー。設定の節(`settings/sync-s3.ts`)が `button(action, …)` の変数で組む(`pick-sync-folder` と同じ)
+  'connect-sync-s3',
+  'copy-sync-s3-cors',
+  'disconnect-sync-s3',
+  'test-sync-s3',
   // 台帳 #1852 束 T1(依頼 156 ②)── Office 一式の取り込みをやめる。押し所は設定の節の `button()` ヘルパーで組む(`cancel-asr-install` と同じ)
   'cancel-office-install',
   // #952 仕上げ ▾ の項目 ── メニューの項目として動的に組む(binder が MenuItem の attrs で焼く)ので、静的な data-pkc-action が source に無い

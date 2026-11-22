@@ -237,6 +237,10 @@ describe('🔴 鍵が書き出しの経路に混ざらない(user の必須ガ�
   const ALLOWED_IMPORTERS: Record<string, string> = {
     // 段 4a-3: S3 の保管先は接続情報と秘密の**型**だけを読む(秘密は呼び手が `open` で開いて渡す)。書き出しの経路ではない
     [join('src', 'adapter', 'platform', 's3-box.ts')]: 'S3 の保管先(型だけ)',
+    // 段 4a-4: 同期の実行部は接続先の型と確かめ(`normalizeS3Config` / `s3ConfigProblem`)だけ。開いた秘密は口(box)へ渡すだけで記録に置かない
+    [join('src', 'adapter', 'platform', 'sync-folder.ts')]: '同期の実行部(型と確かめだけ)',
+    // 段 4a-4: 鍵の保管と S3 の保管先をつなぐ 1 か所(main.ts はここだけを読む)
+    [join('src', 'adapter', 'platform', 'sync-remote.ts')]: '保管先の口を組む所',
   };
 
   it('🔴 鍵の口を import している file は、許した物だけ(書き出しの経路は 1 つも無い)', () => {

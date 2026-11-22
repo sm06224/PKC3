@@ -92,7 +92,24 @@ export function s3ConfigProblem(c: S3BoxConfig): string | null {
   if (u.search !== '' || u.hash !== '' || (u.pathname !== '/' && u.pathname !== '')) return 'エンドポイントはホスト名までにしてください(パスや ? # を付けない)';
   if (c.bucket.trim() === '' || /[/?#]/.test(c.bucket)) return 'バケット名を入れてください(/ ? # は使えません)';
   if (/[?#]/.test(c.prefix)) return '置き場の接頭辞に ? や # は使えません';
+  // ⚠ 先頭の `/` は鍵の名前に入ってしまう(`/bucket//pkc3/…`)── 断る(着地前レビュー 4a-3 で 4a-4 へ回した物)
+  if (c.prefix.startsWith('/')) return '置き場の接頭辞の先頭に / は付けないでください';
   return null;
+}
+
+/**
+ * 画面で入れた接続先を揃える(前後の空白を落とす・エンドポイントの末尾の `/` を落とす・リージョンが空なら `auto`・
+ * 置き場の接頭辞は空でなければ末尾を `/` にする)。⚠ 確かめ(`s3ConfigProblem`)の前に通す ── 同じ問いの答えを 1 か所にする。
+ */
+export function normalizeS3Config(c: { endpoint: string; bucket: string; region: string; prefix: string }): S3BoxConfig {
+  const prefix = c.prefix.trim();
+  return {
+    kind: 's3',
+    endpoint: c.endpoint.trim().replace(/\/+$/, ''),
+    bucket: c.bucket.trim(),
+    region: c.region.trim() === '' ? 'auto' : c.region.trim(),
+    prefix: prefix === '' || prefix.endsWith('/') ? prefix : `${prefix}/`,
+  };
 }
 
 /** 暗号文を、どのワークスペースのどの接続先の物かに結び付ける字(AES-GCM の追加の認証データ)。 */
@@ -195,17 +212,35 @@ export function idbKeystoreBackend(dbName = SYNC_KEYS_DB): KeystoreBackend {
   const KEYS = 'keys';
   const BOXES = 'boxes';
   const DEVICE_KEY = 'device';
-  const open = (): Promise<IDBDatabase> =>
+  const openAt = (version?: number): Promise<IDBDatabase> =>
     new Promise((resolve, reject) => {
-      const req = indexedDB.open(dbName, 1);
+      const req = version === undefined ? indexedDB.open(dbName) : indexedDB.open(dbName, version);
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(KEYS)) db.createObjectStore(KEYS);
         if (!db.objectStoreNames.contains(BOXES)) db.createObjectStore(BOXES);
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        // 別のタブが版を上げようとしたら閉じる(こちらが握ったまま相手を待たせない)
+        req.result.onversionchange = () => req.result.close();
+        resolve(req.result);
+      };
       req.onerror = () => reject(req.error ?? new Error('認証情報の置き場を開けません'));
+      // ⚠ 版を上げるのを別のタブが止めている ── 待ち続けない(着地前レビュー ⚠5。直列の口が詰まって以後の保存・外すが全部止まる)
+      req.onblocked = () => reject(new Error('認証情報の置き場を開けません(別のタブが使っています。ほかのタブを閉じてから、もう一度押してください)'));
     });
+  /**
+   * 🔴 **置き場の棚が欠けていたら足す**(段 4a-4 の smoke で踏んだ)── 同じ名前の DB が棚の無いまま先に作られていると
+   *   (版 1 で開いた別の口・途中で止まった作成)、版 1 のままでは足す機会が無く、**認証情報を二度と保存できない**。
+   *   開いて棚を確かめ、欠けていれば版を 1 つ上げて開き直す。⚠ 中身(鍵・接続)には触らない。
+   */
+  const open = async (): Promise<IDBDatabase> => {
+    const db = await openAt();
+    if (db.objectStoreNames.contains(KEYS) && db.objectStoreNames.contains(BOXES)) return db;
+    const next = db.version + 1;
+    db.close();
+    return openAt(next);
+  };
   const tx = async <T>(store: string, mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> => {
     const db = await open();
     try {

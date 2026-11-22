@@ -156,6 +156,7 @@ import { filerFlattenNow, filerRowOptions, dualListViewOptions } from '@adapter/
 import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { LocalFolder } from '@adapter/platform/local-folder';
 import type { FolderSync } from '@adapter/platform/folder-sync';
+import type { SyncRemoteForm } from '@adapter/platform/sync-folder';
 import type { LinkedFileTooLarge } from '@adapter/platform/launched-files';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
 import { appSavedSearches } from '@adapter/platform/saved-search-store';
@@ -2298,6 +2299,10 @@ export interface BinderServices {
     setMinutes(m: number): void | Promise<void>;
     /** 見張りが「保存しない」にした後、保存するように戻す。 */
     allowPersist(): void | Promise<void>;
+    /** 🔴 S3 互換の保管先(#2000 段 4a-4)── 保存せずに一覧を読んでみる。 */
+    testRemote?(form: SyncRemoteForm): Promise<{ ok: boolean; text: string }>;
+    /** 🔴 確かめて認証情報を保存し、保管先と同期し始める(接続を外すのは `stop`)。 */
+    connectRemote?(form: SyncRemoteForm): Promise<boolean>;
   };
   /**
    * 🔴 **聞くときだけ音を整えるか**(#772 段① B)。⚠ **省略可**。
@@ -19387,6 +19392,29 @@ const ACTIONS: Record<string, ActionHandler> = {
   'allow-sync-folder-persist': (_dispatcher, _target, services) => {
     void services.syncFolder?.allowPersist();
   },
+  // 🔴 S3 互換の保管先(#2000 段 4a-4)── 欄の字は押したときに読み、認証情報の欄は接続できたら空にする(画面に残さない)
+  'test-sync-s3': (_dispatcher, target, services) => {
+    const form = readSyncS3Form(target);
+    if (form === null || services.syncFolder?.testRemote === undefined) return;
+    showSyncS3Result(target, '確かめています…');
+    void services.syncFolder.testRemote(form.form).then((r) => showSyncS3Result(target, r.text));
+  },
+  'connect-sync-s3': (_dispatcher, target, services) => {
+    const form = readSyncS3Form(target);
+    if (form === null || services.syncFolder?.connectRemote === undefined) return;
+    showSyncS3Result(target, '接続しています…');
+    void services.syncFolder.connectRemote(form.form).then((ok) => {
+      if (ok) for (const el of form.secrets) el.value = '';
+      showSyncS3Result(target, ok ? '接続しました' : '接続できませんでした(理由はメッセージに残しました)');
+    });
+  },
+  'disconnect-sync-s3': (_dispatcher, _target, services) => {
+    void services.syncFolder?.stop();
+  },
+  'copy-sync-s3-cors': (_dispatcher, target, services) => {
+    const text = target.closest('[data-pkc-region="settings-sync-s3"]')?.querySelector('[data-pkc-field="sync-s3-cors"]')?.textContent ?? '';
+    if (text !== '') services.copyText?.(text, 'CORS の設定をコピーしました');
+  },
   'set-sync-folder-minutes': (_dispatcher, target, services) => {
     if (target instanceof HTMLSelectElement) void services.syncFolder?.setMinutes(Number(target.value));
   },
@@ -27013,4 +27041,21 @@ function refuseLogOrderCross(dispatcher: Dispatcher, from: Element, start: numbe
   if (!crossesLogRecord(host, frontmatterLineCount(body), start, end, toBefore)) return false;
   dispatcher.dispatch({ type: 'OP_FAILED', error: LOG_ORDER_CROSS_REFUSAL });
   return true;
+}
+
+/** S3 互換の保管先の欄を読む(#2000 段 4a-4)。`secrets` = 接続できたら空にする欄。 */
+function readSyncS3Form(target: HTMLElement): { form: SyncRemoteForm; secrets: HTMLInputElement[] } | null {
+  const region = target.closest<HTMLElement>('[data-pkc-region="settings-sync-s3"]');
+  if (region === null) return null;
+  const input = (f: string): HTMLInputElement | null => region.querySelector<HTMLInputElement>(`[data-pkc-field="sync-s3-${f}"]`);
+  const v = (f: string): string => input(f)?.value ?? '';
+  return {
+    form: { endpoint: v('endpoint'), bucket: v('bucket'), region: v('region'), prefix: v('prefix'), accessKeyId: v('access-key-id'), secretAccessKey: v('secret') },
+    secrets: [input('access-key-id'), input('secret')].filter((x): x is HTMLInputElement => x !== null),
+  };
+}
+
+function showSyncS3Result(target: HTMLElement, text: string): void {
+  const p = target.closest('[data-pkc-region="settings-sync-s3"]')?.querySelector<HTMLElement>('[data-pkc-field="sync-s3-result"]');
+  if (p !== null && p !== undefined) p.textContent = text;
 }

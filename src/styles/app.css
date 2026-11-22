@@ -13714,6 +13714,35 @@ h6:hover > .pkc-heading-anchor,
   color: var(--danger);
 }
 
+/* #2000 段 4a-4 S3 互換の保管先: 欄はラベルと入力を 2 列に並べる。github.io の注意だけ注意の色(色は意味にだけ) */
+[data-pkc-field='sync-s3-fields'] {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--s2) var(--s3);
+  align-items: center;
+  margin: var(--s2) 0;
+}
+[data-pkc-field='sync-s3-fields'] label {
+  display: contents;
+}
+[data-pkc-field='sync-s3-fields'] input {
+  min-width: 0;
+}
+[data-pkc-field='sync-s3-shared-origin'][data-pkc-state='caution'] {
+  color: var(--warn);
+}
+[data-pkc-field='sync-s3-cors'] {
+  max-height: 14em;
+  overflow: auto;
+  margin: var(--s2) 0;
+  padding: var(--s2) var(--s3);
+  font-size: var(--fs-xs);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  white-space: pre;
+}
+
 /* OS の「視差効果を減らす」を出している人には、動きをほぼ即時にする */
 @media (prefers-reduced-motion: reduce) {
   *,
