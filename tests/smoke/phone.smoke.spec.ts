@@ -1649,14 +1649,17 @@ test('🔴 書式バーが 2 段以上に折れても、上の段の余りもボ
     scale: 'css',
   });
   const at = (x: number, y: number): string => rgbAt(png, Math.floor(x - geo.box.x), Math.floor(y - geo.box.y)).join(',');
-  // 🔴 #1982 段 2: 書式バーは紙の上の**ゴースト**のボタンの列 ── 区切りは線(輪)ではなく隙間。
-  //   だから「ボタンの地 / ボタンの間 / 段の余り」は**同じ紙の色**でなければならない
-  //   (間に線色が出る = 輪が戻った / 余りが違う = 線色のベタ塗りが戻った)
-  const ground = at(row.firstLeft + 2, row.mid); // ゴーストのボタンの地(= 帯の紙。図案に当たらない左の余白)
+  // 🔴 #1982 段 2: 書式バーの区切りは線(輪)ではなく隙間 ──「ボタンの間 / 段の余り」は**紙の色**でなければならない
+  //   (間に線色が出る = 輪が戻った / 余りが違う = 線色のベタ塗りが戻った)。
+  // ⚠ 2026-11-22(#1982 ①、#2028)から字のあるボタンは薄い地を持つので、紙の色は**ボタンの外**(帯の左の余白)で測る
+  //   (旧い版はボタンの内側を「紙」として測っており、地が付いて食い違った)。
+  const paper = await page.evaluate(() => getComputedStyle(document.querySelector('[data-pkc-region="center"]')!).backgroundColor);
+  const ground = at(row.lastRight + 4, row.mid); // 段の余り(ボタンの外の紙)
   const between = at(row.gapX!, row.mid); // ボタンとボタンの間の隙間
-  const rest = at(row.lastRight + 4, row.mid); // 段の余り
+  const inside = at(row.firstLeft + 2, row.mid); // ボタンの地(図案に当たらない左の余白)
+  expect(paper.replace(/rgba?\(|\s|\)/g, '').split(',').slice(0, 3).join(','), `対照群: 段の余り(${ground})が中央の紙の地(${paper})と同じ`).toBe(ground);
   expect(between, `ボタンの間(${between})が紙の色(${ground})と違う ── 区切りの輪 / 線色の透かしが戻っている`).toBe(ground);
-  expect(rest, `上の段の余り(${rest})が紙の色(${ground})と違う ── 線色のベタ塗りが残っている`).toBe(ground);
+  expect(inside, `対照群: 字のあるボタンの地(${inside})が紙(${ground})と同じ ── 薄い地(#1982 ①)が消えている`).not.toBe(ground);
 });
 
 /**

@@ -42,7 +42,7 @@ describe('地が暗いかの判定', () => {
     expect(isDarkColor('#111316')).toBe(true); // dark
     expect(isDarkColor('#282a36')).toBe(true); // dracula
     expect(isDarkColor('#3b4252')).toBe(true); // nord
-    expect(isDarkColor('#070805')).toBe(true); // terminal
+    expect(isDarkColor('#0d0f0a')).toBe(true); // terminal
     expect(isDarkColor('#ffffff')).toBe(false); // light
     expect(isDarkColor('#fdf6e3')).toBe(false); // solarized
   });
