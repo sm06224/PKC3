@@ -33,12 +33,25 @@ test('🔴 折り返した長い行に caret を置くと、左端の線がそ�
   const doc = [...Array.from({ length: 40 }, (_, i) => `前の行 ${String(i)}`), long, ...Array.from({ length: 40 }, (_, i) => `後の行 ${String(i)}`)].join('\n');
   await ta.fill(doc);
   const caretAt = doc.indexOf('長い行') + 20;
+  /**
+   * 🔴 **印の有無だけを待たない**(flake の原因。2026-11-22 に実測)── `fill` の直後に、caret の居る末尾の短い行で
+   *   印がもう付いている(高さ 1 行ぶん)。caret を長い行へ移しても、測り直しは次のフレーム(`selectionchange` →
+   *   `requestAnimationFrame`)なので、印を待つだけだと**古い 1 行ぶんの箱**を読むことがある(負荷の高い CI で
+   *   `expected > 40, received 20`)。動かす前の高さを控え、**測り直しが届いた(高さが替わった)**ことを待ってから読む。
+   */
+  const hBefore = await ta.evaluate((el: HTMLTextAreaElement) => el.style.getPropertyValue('--pkc-cl-h'));
   await ta.evaluate((el: HTMLTextAreaElement, at: number) => {
     el.focus();
     el.setSelectionRange(at, at);
     el.scrollTop = 0;
   }, caretAt);
   await expect(ta, '線の印が付かない').toHaveAttribute('data-pkc-current-line', '', { timeout: 3000 });
+  await expect
+    .poll(() => ta.evaluate((el: HTMLTextAreaElement) => el.style.getPropertyValue('--pkc-cl-h')), {
+      message: 'caret を長い行へ移しても線の箱が測り直されない',
+      timeout: 3000,
+    })
+    .not.toBe(hBefore);
 
   // 変数(内容座標の top / height)と、別の測り方(行を span で包んだ影)
   const read = (): Promise<{ top: number; h: number; lh: number }> =>
