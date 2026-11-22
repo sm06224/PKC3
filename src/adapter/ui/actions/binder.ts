@@ -42,6 +42,14 @@ import { ADAPTER_SETTING_VALIDATORS } from '../render/settings-validators';
 import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
 import { NOTE_TAB_LID_ATTR } from '../render/note-tabs';
+import {
+  CRUMB_INPUT_FIELD,
+  closeCrumbInput,
+  crumbInputOf,
+  fillCrumbCandidates,
+  openCrumbInput,
+} from '../render/crumb-path-input';
+import { resolveFolderPath } from '@features/filer/folder-path';
 import { orderTabs as orderNoteTabs, visible as noteTabsVisible } from '@features/nav/note-tabs';
 import { settleJump } from '../render/long-note';
 import { mountFilerRow } from '../render/filer';
@@ -21383,6 +21391,45 @@ export function bindActions(
     if (side !== null && lid !== null)
       dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'toggle' });
   });
+  /**
+   * 🔴 **パンくずのパス入力**(#1982 A4)。入れるのは `enter-folder` の 1 本(段を押したときと同じ受け手を通す ── 道を 2 本にしない)。
+   * ⚠ あいまい(同名のフォルダが複数)・見つからないときは**入らず**、理由を出して入力を開いたままにする。
+   */
+  const beginCrumbInput = (frame: HTMLElement): void => {
+    const input = openCrumbInput(frame, dispatcher.getState());
+    input.focus();
+    input.select();
+  };
+  const cancelCrumbInput = (input: HTMLInputElement): void => {
+    const frame = input.closest<HTMLElement>('[data-pkc-field="crumb-path"]');
+    if (frame === null) return;
+    closeCrumbInput(frame);
+    frame.focus();
+  };
+  const commitCrumbInput = (input: HTMLInputElement): void => {
+    const frame = input.closest<HTMLElement>('[data-pkc-field="crumb-path"]');
+    if (frame === null) return;
+    const st = dispatcher.getState();
+    const r = resolveFolderPath(input.value, st.entryMetas, st.relations);
+    if (r.kind === 'ok') {
+      // ⚠ 入る前に入力を閉じる(開いたままだと、入ったあとの組み直しが打ちかけの字として持ち越してしまう)
+      closeCrumbInput(frame);
+      const to = document.createElement('button');
+      if (r.lid !== null) to.setAttribute('data-pkc-entry', r.lid);
+      ACTIONS['enter-folder']!(dispatcher, to, services, root);
+      return;
+    }
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error:
+        r.kind === 'ambiguous'
+          ? `「${r.path}」は同名のフォルダが ${r.candidates.length} 件あります。候補の一覧から「同名 n 番目」のものを選んでください`
+          : `「${input.value.trim()}」というフォルダは見つかりません。候補の一覧から選ぶか、パスを確かめてください`,
+    });
+    // 理由を出した再描画でも入力は開いたまま(組み直しは打ちかけの字と焦点を運ぶ)── 念のため焦点を戻す
+    const again = crumbInputOf(root);
+    if (again !== null && again.ownerDocument.activeElement !== again) again.focus();
+  };
   const onClick = (ev: Event) => {
     /**
      * 🔴 **読んでいる本文を、押した所から扱う 2 つの道**(#395 段③ / #495)。
@@ -21450,6 +21497,25 @@ export function bindActions(
      */
     if (ev.target instanceof HTMLInputElement && ev.target.matches('[data-pkc-field="row-rename"]'))
       return;
+    /**
+     * 🔴 **パンくず(アドレスバー)の何も無い所を押すと、パスを直接打つ入力になる**(#1982 A4)。
+     * ⚠ 段のボタン(`crumb-seg`)は今までどおり**その段へ入る**(`closest('[data-pkc-action]')` が受ける)── ここは枠そのもの・
+     *   区切りの `›` だけ。⚠ 入力の中の押下も下の「何も無い所を押すとノートを閉じる」へ流さない。
+     */
+    {
+      const t = ev.target as HTMLElement | null;
+      if (t instanceof HTMLInputElement && t.getAttribute('data-pkc-field') === CRUMB_INPUT_FIELD) return;
+      const frame = t?.closest<HTMLElement>('[data-pkc-field="crumb-path"]') ?? null;
+      if (
+        frame !== null &&
+        t !== null &&
+        t.closest('[data-pkc-action]') === null &&
+        !frame.hasAttribute('data-pkc-editing')
+      ) {
+        beginCrumbInput(frame);
+        return;
+      }
+    }
     /**
      * 🔴 **指で触る端末では、チェックリストの行の字も印を動かす**(#706 ①)。
      * ⚠ `[data-pkc-action]` の解決より**前**に置く ── 行の字は action を持たないので、
@@ -21787,6 +21853,11 @@ export function bindActions(
       return;
     }
     const el = ev.target;
+    // 🔴 パンくずのパス入力(#1982 A4)── 打つたびに候補を絞り直す
+    if (el instanceof HTMLInputElement && el.getAttribute('data-pkc-field') === CRUMB_INPUT_FIELD) {
+      fillCrumbCandidates(el, dispatcher.getState());
+      return;
+    }
     // 🔴 コマンドシェルの打つ欄(#274 / #241)── 打つたびに補完の候補を出し直す
     if (el instanceof HTMLInputElement && el.getAttribute('data-pkc-field') === 'shell-input') {
       const session = shellSessionOf(el);
@@ -22076,6 +22147,37 @@ export function bindActions(
     // ⚠ **追記欄より先に置く** ── 変換確定の Enter で送ってしまうと、
     // 日本語で書く人は「打ち終わる前に飛ぶ」を毎回踏む
     if (ke.isComposing || ke.keyCode === 229) return;
+    /**
+     * 🔴 **パンくずのパス入力**(#1982 A4)── Enter で移動 / Esc でやめる。⚠ それ以外の鍵は**入力へ通す**
+     * (欄はフォルダの面の中なので、下の面の鍵(Backspace = 親へ など)に化けると打てない ── 名前の打ち替えと同じ作法)。
+     * ⚠ 枠に焦点があるとき(`tabindex="0"`)の Enter / Space でも入力に切り替える(`Ctrl+L` は奪わない)。
+     */
+    if (ke.target instanceof HTMLInputElement && field === CRUMB_INPUT_FIELD) {
+      const input = ke.target;
+      if (ke.key === 'Enter') {
+        ke.preventDefault();
+        commitCrumbInput(input);
+      } else if (ke.key === 'Escape') {
+        ke.preventDefault();
+        ke.stopPropagation();
+        cancelCrumbInput(input);
+      } else {
+        ke.stopPropagation();
+      }
+      return;
+    }
+    if (
+      ke.target instanceof HTMLElement &&
+      field === 'crumb-path' &&
+      (ke.key === 'Enter' || ke.key === ' ') &&
+      !ke.ctrlKey &&
+      !ke.metaKey &&
+      !ke.altKey
+    ) {
+      ke.preventDefault();
+      beginCrumbInput(ke.target);
+      return;
+    }
     /**
      * 🔴 **コマンドシェルの打つ欄**(#274 / #241)── Enter = 実行 / ↑ ↓ = 履歴 / Tab = 補完 / Esc = 候補を閉じる。
      * ⚠ 変換中の Enter は上の IME ガードで弾き済み。
@@ -26924,6 +27026,14 @@ export function bindActions(
   listen(root, 'focusin', onTagFocusIn);
   listen(root, 'focusin', onDualFocusIn);
   listen(root, 'focusout', onRenameBlur);
+  // 🔴 パンくずのパス入力は、焦点が外れたら元のパンくずへ戻す(#1982 A4)。外れた節点(面の組み直し)では何もしない
+  listen(root, 'focusout', (ev) => {
+    const el = ev.target;
+    if (!(el instanceof HTMLInputElement) || el.getAttribute('data-pkc-field') !== CRUMB_INPUT_FIELD) return;
+    if (!el.isConnected) return;
+    const frame = el.closest<HTMLElement>('[data-pkc-field="crumb-path"]');
+    if (frame !== null) closeCrumbInput(frame);
+  });
   /**
    * 🔴 **1 面の行が左の探す欄へ焦点を渡すとき、打っていた行を控える**(#582)。
    * ⚠ `blur` を**捕まえる段**(capture)で聴く ── 行自身の `blur` が確定して `row-source` を DOM から外すより前に読むため
