@@ -244,3 +244,26 @@ describe('配色トークン', () => {
     }
   });
 });
+
+/**
+ * 🔴 **ログの見た目の 3 段**(#2018 8。user 裁定 2026-11-22「全 12 テーマのコントラスト検算 ── 時刻 `--muted` 4.5:1・縦線 3:1」)。
+ * 使う組は 4 つだけ(`app.css` の `@media screen` の節。`log-visual.test.ts` が「この 4 つしか使っていない」を見る):
+ * - 日の行の字 `--fg` × 段差の地 `--surface-2`(文字 4.5:1)
+ * - 時刻の字 `--muted` × 本文の地 `--surface` / `--bg`(文字 4.5:1)
+ * - 縦線 `--muted` × 本文の地 `--surface` / `--bg`(部品 3:1)
+ */
+describe('ログの見た目の 3 段(#2018 8)── 12 テーマ', () => {
+  it('前提: テーマは 12 個', () => {
+    expect(THEMES).toHaveLength(12);
+  });
+  it.each(THEMES.map((t) => t.id))('🔴 %s: 日の行・時刻の字・縦線が読める', (theme) => {
+    const own = tokensOf(theme);
+    const base = tokensOf('light');
+    const v = (n: string): string => own[n] ?? base[n]!;
+    expect(contrast(v('--fg'), v('--surface-2')), '日の行の字').toBeGreaterThanOrEqual(4.5);
+    for (const bg of ['--surface', '--bg']) {
+      expect(contrast(v('--muted'), v(bg)), `時刻の字(${bg})`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(v('--muted'), v(bg)), `縦線(${bg})`).toBeGreaterThanOrEqual(3);
+    }
+  });
+});

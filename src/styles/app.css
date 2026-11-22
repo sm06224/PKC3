@@ -12539,6 +12539,93 @@ h3[data-pkc-section] {
 [data-pkc-log-days][data-pkc-log-order='desc'] > * {
   margin-block-end: 0;
 }
+
+/**
+ * 🔴 **ログの見た目の 3 段**(#2018 8。user 裁定 2026-11-22)── 日の行 / 親の記録(`##` の時刻)/ 入れ子の追いログ(`###`〜)。
+ * 🔑 PKC2 の textlog から取り込んだ芯: 日は強く・1 件は控えめに(強弱)/ 時刻は薄く・桁を揃え、本文は濃い字のまま。
+ *   ⚠ PKC2 の「全部の行に左の線 3px + 破線 + 日の下線」(1px の格子)は持ち込まない ── 区切りは**背景の段差と余白**。
+ * ⚠ **画面だけ**(`@media screen`)── 印刷・書き出し・別のウィンドウは今までのふつうの見出しのまま(Q1 裁定 = 第 1 弾は本文ペインのみ)。
+ *   印(`data-pkc-log-depth` / `data-pkc-log-time`)は読む面のログにだけ付く(`render/log-days.ts` の `applyLogDepth`)。
+ * ⚠ 色は意味にだけ: 地の段差は `--surface-2`、時刻と縦線は `--muted`(12 テーマで地の上 4.5:1 以上 ── `log-visual.test.ts`)。
+ *   強調色は使わない(`--accent` は `--surface-2` の上で 3.68:1 しか無いテーマが在る ── 日の行の hover は色ではなく下線で示す)。
+ * ⚠ ログの時刻の見出しだけは本文より小さい字を許す(user 裁定の「控えめな時刻」「入れ子は一段小さい字」)── ふつうの見出しの
+ *   「本文より小さくしない」(#1982 段 2)はログ以外では今までどおり。
+ */
+@media screen {
+  /* ① 日の行(と月の行)── 段差の帯。字は本文の大きさ・本文の色、畳みは ▾ / ▸ の形で示す */
+  [data-pkc-log-days] > [data-pkc-log-day],
+  [data-pkc-log-days] > [data-pkc-log-month] {
+    margin: 1.4em 0 0.5em;
+    padding: 0.3em 0.6em;
+    color: var(--fg);
+    font-weight: 600;
+    background: var(--surface-2);
+    border-bottom: 0;
+    border-radius: var(--radius, 3px);
+  }
+  [data-pkc-log-days] > [data-pkc-log-day][aria-expanded='false'],
+  [data-pkc-log-days] > [data-pkc-log-month][aria-expanded='false'] {
+    color: var(--fg);
+  }
+  [data-pkc-log-days] > [data-pkc-log-day]:hover,
+  [data-pkc-log-days] > [data-pkc-log-day]:focus-visible,
+  [data-pkc-log-days] > [data-pkc-log-month]:hover,
+  [data-pkc-log-days] > [data-pkc-log-month]:focus-visible {
+    color: var(--fg);
+    text-decoration: underline;
+  }
+  /* ② 親の記録の時刻(`##`)── 控えめ(本文の大きさ・薄い字・桁揃え)。左の帯は残す(畳みの押し所)、下線は引かない */
+  [data-pkc-log-days] > h2[data-pkc-log-time] {
+    font-size: 1em;
+    font-weight: 600;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    margin-block-start: 1.1em;
+    padding-block-end: 0;
+    border-block-end: 0;
+  }
+  /* ③ 入れ子の追いログ(`###`〜 と、その中身)── 一段小さい字 + 字下げ + 左端の細い縦線(つながり)。
+   *    ⚠ 字下げは `padding` で付ける ── 塊の左の余白は読み幅を中央に置く規則(`--prose-lead`)が持つので触らない。
+   *    ⚠ 縦線は枠ではなく背景の 2px の帯(字下げした位置に引く。枠を足さない)。塊の間で切れないよう、上下の余白は
+   *    padding に置き換える。深さごとに 1rem ずつ右へ */
+  [data-pkc-log-days] > [data-pkc-log-depth] {
+    margin-block: 0;
+    padding-block: 0.3em;
+    font-size: 0.95em;
+    background-image: linear-gradient(var(--muted), var(--muted));
+    background-repeat: no-repeat;
+    background-size: 2px 100%;
+    /* ⚠ 位置は枠の外側から測る ── 見出しは左に帯(枠 3px)を持つので、内側から測ると見出しだけ線が 3px 右へずれて切れて見える */
+    background-origin: border-box;
+  }
+  [data-pkc-log-days] > [data-pkc-log-depth='1'] {
+    padding-inline-start: 1.1rem;
+    background-position: 0.35rem 0;
+  }
+  [data-pkc-log-days] > [data-pkc-log-depth='2'] {
+    padding-inline-start: 2.1rem;
+    background-position: 1.35rem 0;
+  }
+  [data-pkc-log-days] > [data-pkc-log-depth='3'] {
+    padding-inline-start: 3.1rem;
+    background-position: 2.35rem 0;
+  }
+  [data-pkc-log-days] > [data-pkc-log-depth='4'] {
+    padding-inline-start: 4.1rem;
+    background-position: 3.35rem 0;
+  }
+  /* 入れ子の見出しは中身よりもう一段小さく薄く。見出しの帯(左端)は消し、縦線を 1 本につなぐ
+   *  (畳むのは帯の位置のままと、右クリックの「この見出しの中身を折りたたむ」) */
+  [data-pkc-log-days] > :is(h3, h4, h5, h6)[data-pkc-log-depth] {
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    padding-block: 0.6em 0.2em;
+    border-inline-start-color: transparent;
+    --pkc-heading-bar: transparent;
+  }
+}
 /* 🔴 月の行(#1441 月別)は日の行より一段目立たせる ── 字は本文と同じ大きさのまま、太さだけ変える */
 [data-pkc-log-month] {
   margin-top: 1.4em;

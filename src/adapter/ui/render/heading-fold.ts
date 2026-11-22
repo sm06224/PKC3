@@ -30,6 +30,7 @@ import {
   type ChapterSpan,
 } from '@features/markdown/heading-fold';
 import {
+  applyLogDepth,
   applyLogOrder,
   bodyBlocks,
   flipLogDay,
@@ -115,6 +116,8 @@ export function applyHeadingFold(host: HTMLElement): number {
   const days = syncLogDays(host, blocks, levels);
   // 🔴 新しい順(#2018 1)── 見た目の順だけ。日の行が置かれた後に当てる(行の順も決めるため)
   applyLogOrder(host, blocks, levels);
+  // 🔴 見た目の 3 段(#2018 8)── 入れ子の深さと時刻の見出しの印
+  applyLogDepth(host, blocks, levels);
   if (spans.length === 0 && days.managed.size === 0) return 0;
 
   const folded = new Set<number>();

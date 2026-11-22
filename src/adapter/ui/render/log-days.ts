@@ -26,7 +26,7 @@
  * 行の `data-pkc-day-folded` が事実。描き直しで行が作り直されても、**日(+何番目か)をキー**に引き継ぐ。
  */
 import { OVERLAY_ATTR } from './apply-blocks';
-import { descRank, logSegments, orderValue } from '@features/textlog/log-order';
+import { descRank, logDepths, logSegments, orderValue } from '@features/textlog/log-order';
 import { appLogOrder } from './log-order-setting';
 import {
   formatLogDay,
@@ -473,4 +473,30 @@ export function applyLogOrder(host: HTMLElement, blocks: readonly Element[], lev
 export function syncLogOrderAttr(host: HTMLElement): void {
   if (host.hasAttribute(LOG_DAYS_HOST_ATTR) && appLogOrder.order() === 'desc') host.setAttribute(LOG_ORDER_ATTR, 'desc');
   else host.removeAttribute(LOG_ORDER_ATTR);
+}
+
+/** 🔴 入れ子の深さの印(#2018 8。値 `1`〜`4`)── 見た目の 3 段の 3 段目(`###`〜 と、その中身)。 */
+export const LOG_DEPTH_ATTR = 'data-pkc-log-depth';
+/** 🔴 時刻の見出しの印(#2018 8)── 字を控えめにし、桁を揃える(`app.css`)。 */
+export const LOG_TIME_ATTR = 'data-pkc-log-time';
+
+/**
+ * 🔴 **ログの見た目の階層**(#2018 8。user 裁定 2026-11-22)── 日の行 / 親の記録(`##`)/ 入れ子の追いログ(`###`〜)。
+ * 塊に印を付け外すだけ(見え方は `app.css` の `@media screen` の中)。⚠ 本文の原文・DOM の並びは変えない。
+ * ⚠ ログでない面では印を 1 つも残さない(通常のノートの見え方を変えない)。
+ */
+export function applyLogDepth(host: HTMLElement, blocks: readonly Element[], levels: readonly number[]): void {
+  const log = host.hasAttribute(LOG_DAYS_HOST_ATTR);
+  const depths = log ? logDepths(levels) : [];
+  blocks.forEach((b, i) => {
+    const d = log ? (depths[i] ?? 0) : 0;
+    const want = d > 0 ? String(d) : null;
+    if (b.getAttribute(LOG_DEPTH_ATTR) !== want) {
+      if (want === null) b.removeAttribute(LOG_DEPTH_ATTR);
+      else b.setAttribute(LOG_DEPTH_ATTR, want);
+    }
+    // 時刻の見出し(段 2 以上で、字の頭が日時)── 親の記録と入れ子の追いログの両方
+    const time = log && (levels[i] ?? 0) >= 2 && logDayOfHeading(b.textContent ?? '') !== null;
+    if (time !== b.hasAttribute(LOG_TIME_ATTR)) b.toggleAttribute(LOG_TIME_ATTR, time);
+  });
 }
