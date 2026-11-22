@@ -277,6 +277,50 @@ describe('配色を変えたときの焼き直し(P8 段⑬)', () => {
     b2.remove();
   });
 
+  /**
+   * #1467: 焼いている最中は `aria-busy="true"`、終われば(成功でも失敗でも)外す。
+   * ⚠ smoke はこの印が**立った時刻**で「打っている間に画面の外の図を焼き始めたか」を判定する ──
+   *   立たない / 外れないと、その判定が空振り(0 件)になるか、全部を数えてしまう。
+   */
+  it('🔴 焼いている間だけ aria-busy が立ち、成功でも失敗でも外れる(#1467)', async () => {
+    const b = block('graph TD\n A-->B');
+    document.body.append(b);
+    const scope = hydrateMermaid(b);
+    const host = b.querySelector('[data-pkc-mermaid-src]')!;
+    expect(host.hasAttribute('aria-busy'), '焼く前から印が立っている').toBe(false);
+    let finish!: () => void;
+    vi.mocked(renderToPng).mockImplementationOnce(
+      () =>
+        new Promise((ok) => {
+          finish = () => ok({ png: new Blob(['png'], { type: 'image/png' }), cssWidth: 320 });
+        }),
+    );
+    fire!([observed[observed.length - 1]!]);
+    await settle();
+    expect(host.getAttribute('aria-busy'), '焼いている最中に印が立っていない').toBe('true');
+    finish();
+    await settle();
+    expect(host.getAttribute('data-pkc-mermaid-state')).toBe('ready');
+    expect(host.hasAttribute('aria-busy'), '焼き終わっても印が残っている').toBe(false);
+    scope.dispose();
+    b.remove();
+
+    // 失敗でも外れる(残ると「ずっと書き換わり中」と読み上げられる)
+    const b2 = block('graph TD\n C-->D');
+    document.body.append(b2);
+    const scope2 = hydrateMermaid(b2);
+    const host2 = b2.querySelector('[data-pkc-mermaid-src]')!;
+    vi.mocked(renderToPng).mockImplementationOnce(async () => {
+      throw new Error('Parse error on line 1');
+    });
+    fire!([observed[observed.length - 1]!]);
+    await settle();
+    expect(host2.getAttribute('data-pkc-mermaid-state')).toBe('failed');
+    expect(host2.hasAttribute('aria-busy'), '失敗しても印が残っている').toBe(false);
+    scope2.dispose();
+    b2.remove();
+  });
+
   it('🔴 配色を変えると、**焼いた器だけ**焼き直る', async () => {
     const b = block('graph TD\n A-->B');
     document.body.append(b);

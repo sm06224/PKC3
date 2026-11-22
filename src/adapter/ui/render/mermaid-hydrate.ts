@@ -410,6 +410,11 @@ export function hydrateDiagrams(
       };
       currentKey = cacheKey(key);
       inFlightKey.set(p.host, currentKey);
+      // 🔑 **焼いている最中の印**(#1467)── 読み上げに「この場所はいま書き換わる」と伝える標準の属性。
+      //    ⚠ 「いつ焼き始めたか」を外から見られる唯一の点でもある ── smoke はこれで
+      //    「打っている間に画面の外の図を焼き**始めた**か」を判定する(焼き上がった時刻では、
+      //    打つ前に始めた物と打っている間に始めた物の区別がつかない)
+      p.host.setAttribute('aria-busy', 'true');
       const raster = await kind.render(key);
       if (disposed) return;
       await commit(() => {
@@ -485,6 +490,8 @@ export function hydrateDiagrams(
       p.host.setAttribute(`data-pkc-${kind.name}-error`, why.length > 120 ? `${why.slice(0, 119)}…` : why);
     } finally {
       if (inFlightKey.get(p.host) === currentKey) inFlightKey.delete(p.host);
+      // ⚠ 同じ器を焼き直している最中(新しい鍵が飛んでいる)なら、印はその焼きに任せる
+      if (!inFlightKey.has(p.host)) p.host.removeAttribute('aria-busy');
     }
   };
 
