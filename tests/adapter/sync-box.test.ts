@@ -41,7 +41,9 @@ function fakeDir(opts: { failWrite?: boolean } = {}) {
               if (opts.failWrite === true) throw new Error('書けない');
               parts.push(typeof d === 'string' ? new Blob([d]) : d);
             },
-            close: async () => void files.set(name, { blob: new Blob(parts), mtime: ++clock }),
+            // ⚠ 書いた後のファイルは、書いた blob より 1 バイト長い(保管先が付け足す想定)── 控えが「書いた後を取り直した値」か
+            //   「書いた blob の大きさ」かを見分ける
+            close: async () => void files.set(name, { blob: new Blob([...parts, '!']), mtime: ++clock }),
             abort: async () => void aborted.push(name),
           };
         },
@@ -73,8 +75,11 @@ describe('folderBox', () => {
     const f = fakeDir();
     const box = folderBox(f.dir);
     const after = await box.write('pkc3-me.pkc3-diff.zip', new Blob(['hello']));
-    expect(after).toEqual({ name: 'pkc3-me.pkc3-diff.zip', size: 5, mtime: 101 });
-    expect(await (await box.read('pkc3-me.pkc3-diff.zip')).text()).toBe('hello');
+    expect(after, '控えが書いた後のファイルから取り直されていない').toEqual({ name: 'pkc3-me.pkc3-diff.zip', size: 6, mtime: 101 });
+    await box.write('pkc3-other.pkc3-diff.zip', new Blob(['other']));
+    // 2 つ在るときも、名前で選んだ方を読む
+    expect(await (await box.read('pkc3-me.pkc3-diff.zip')).text()).toBe('hello!');
+    expect(await (await box.read('pkc3-other.pkc3-diff.zip')).text()).toBe('other!');
   });
 
   it('🔴 書きかけで失敗したら abort して投げ直す(黙って成功にしない)', async () => {

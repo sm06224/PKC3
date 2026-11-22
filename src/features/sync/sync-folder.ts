@@ -33,12 +33,19 @@ export interface FolderFile {
   size: number;
   /** 更新日時(ms)。⚠ 比べるのは「前の回と同じか」だけ(大小は比べない ── 端末の時計に依らない)。 */
   mtime: number;
+  /**
+   * 保管先の版の印(S3 の ETag。#2000 段 4a)。⚠ 在れば**こちらで**同じかを見る(更新日時は見ない ── S3 の一覧の日時と書いた後の
+   *   日時が取り方で食い違うことがある)。フォルダには無い(大きさ + 更新日時で見る)。
+   */
+  version?: string;
 }
 
 /** 前の回に取り込んだファイルの控え(同じなら読み直さない)。 */
 export interface SeenFile {
   size: number;
   mtime: number;
+  /** 保管先の版の印(`FolderFile.version`)。 */
+  version?: string;
   /** そのファイルが「全件をください」と言っていた端末。 */
   want: string[];
 }
@@ -67,7 +74,12 @@ export function normalizeFolderRecord(v: unknown): FolderSyncRecord {
       if (deviceOfFileName(name) === null || typeof s !== 'object' || s === null) continue;
       const r = s as Record<string, unknown>;
       if (typeof r.size !== 'number' || typeof r.mtime !== 'number') continue;
-      out.seen[name] = { size: r.size, mtime: r.mtime, want: Array.isArray(r.want) ? r.want.filter((x): x is string => isDeviceId(x)) : [] };
+      out.seen[name] = {
+        size: r.size,
+        mtime: r.mtime,
+        ...(typeof r.version === 'string' ? { version: r.version } : {}),
+        want: Array.isArray(r.want) ? r.want.filter((x): x is string => isDeviceId(x)) : [],
+      };
     }
   }
   return out;
@@ -104,7 +116,7 @@ export function planFolderRound(self: string, files: readonly FolderFile[], rec:
     }
     others.add(dev);
     const seen = rec.seen[f.name];
-    if (force || seen === undefined || seen.size !== f.size || seen.mtime !== f.mtime) toRead.push(f);
+    if (force || seen === undefined || !sameFileVersion(seen, f)) toRead.push(f);
   }
   return {
     toRead,
@@ -162,4 +174,16 @@ export function folderWriteKey(writeKey: string, want: readonly string[], pairs:
     .map(([d, c]) => `${d}=${c}`)
     .join(',');
   return [writeKey, [...want].sort().join(','), pairsKey].join('|');
+}
+
+/**
+ * 🔴 **前の回と同じファイルか**(#2000 段 4a)── 版の印(ETag)が両方に在ればそれで、無ければ大きさ + 更新日時で見る(段 3 のまま)。
+ * ⚠ 同じ問いに答える所はここ 1 つ(回の計画と、自分のファイルの控え(`own`)の両方がここを通る)。
+ */
+export function sameFileVersion(
+  a: { readonly size: number; readonly mtime: number; readonly version?: string },
+  b: { readonly size: number; readonly mtime: number; readonly version?: string },
+): boolean {
+  if (a.version !== undefined && b.version !== undefined) return a.version === b.version;
+  return a.size === b.size && a.mtime === b.mtime;
 }

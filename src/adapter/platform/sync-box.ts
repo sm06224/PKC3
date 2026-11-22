@@ -28,15 +28,19 @@ export interface BoxEntry {
 
 /** 同期の保管先。 */
 export interface RemoteBox {
-  /** 画面に出す名前(フォルダ名 / バケット名)。 */
+  /** 画面に出す名前(フォルダ名 / バケット名)。⚠ 段 4a-4 の設定画面で使う(4a-1 では読む所が無い)。 */
   readonly label: string;
   /** 一覧。`accept` が真の名前だけ(同期のファイルだけを見る ── 他のファイルには触らない)。 */
   list(accept: (name: string) => boolean): Promise<BoxEntry[]>;
   read(name: string): Promise<Blob>;
   /**
-   * 書く。書いた後の控えを返す。
-   * @param expect 前の回に自分が書いた控え(条件付き書き込みに使う ── S3 は `If-Match`。フォルダは使わない)。
-   *   相手が変えていたら(412)**上書きせずに throw** するのは段 4a-3 の `S3Box` の約束。
+   * 書く。書いた後の控え(大きさ・更新日時・版)を返す。
+   * @param expect 前の回に自分が書いた控え(条件付き書き込みに使う ── S3 は `version` を `If-Match` に載せる。フォルダは使わない)。
+   *   - `null` / 省略 … **条件なし**(自分の控えが無い = 選び直した・記録を消した。同じ名前の他人の書き込みは、回の頭で読んで
+   *     見分けてから書くので、ここでは止めない ── `SyncFolder.round` の `foreignOwn`)
+   *   - 版が在る … 相手が変えていたら(412)**上書きせずに throw** する(段 4a-3 の `S3Box` の約束)
+   * ⚠ 戻り値の `mtime` は、版の印(`version`)を返す保管先では比べに使わない(`sameFileVersion` は版を先に見る)── S3 は
+   *   書いた後の日時を取り直さなくてよい(取れなければ 0)。
    */
   write(name: string, blob: Blob, expect?: BoxEntry | null): Promise<BoxEntry>;
   remove(name: string): Promise<void>;
@@ -59,6 +63,8 @@ export function folderBox(dir: SyncDirLike): RemoteBox {
       }
       return out;
     },
+    // ⚠ 読めなかったときのエラーは、回ではファイルごとの失敗として数える(段 3 のまま ── 名前で許可の判定はしない)。
+    //   許可・選び直しの判定が見るのは一覧(`list`)のエラーの名前で、そちらは握り潰さずに投げ直す(`sync-folder.test.ts`)
     async read(name) {
       return (await dir.getFileHandle(name)).getFile();
     },
