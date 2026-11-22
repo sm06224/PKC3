@@ -186,6 +186,8 @@ export class SyncFolder {
   private dir: SyncFolderDirLike | null = null;
   /** S3 互換の保管先(`dir` とどちらか一方)。⚠ 認証情報は `box` の中にだけある。 */
   private remote: { box: RemoteBox; config: S3BoxConfig } | null = null;
+  /** 保管先へ接続している途中(回を始めない・二重に接続しない)。 */
+  private connecting = false;
   private minutes: SyncFolderMinutes = SYNC_FOLDER_DEFAULT_MINUTES;
   private record: FolderSyncRecord = emptyFolderRecord();
   private own: { size: number; mtime: number; version?: string; name?: string } | null = null;
@@ -388,6 +390,7 @@ export class SyncFolder {
 
   /** 起動時: 保管先の認証情報を開いて回り始める。 */
   private async bootRemote(saved: SyncFolderSaved): Promise<void> {
+    const gen = this.generation;
     this.minutes = isSyncFolderMinutes(saved.minutes) ? saved.minutes : SYNC_FOLDER_DEFAULT_MINUTES;
     this.record = normalizeFolderRecord(saved.record);
     this.own = saved.own ?? null;
@@ -401,6 +404,8 @@ export class SyncFolder {
       return;
     }
     const opened = await r.open(this.deps.cid()).catch(() => null);
+    // ⚠ 開いている間に「接続する」「やめる」が走った ── 古い認証情報で上書きしない(着地前レビュー ⚠2)
+    if (gen !== this.generation || this.connecting) return;
     if (opened === null) {
       this.phase = 'none';
       this.message = SYNC_REMOTE_UNREADABLE_NOTE;
@@ -472,22 +477,49 @@ export class SyncFolder {
       this.deps.fail(`保管先に接続できません: ${got.problem}`);
       return false;
     }
-    const box = r.box(got.config, got.secret);
-    try {
-      await box.list((name) => deviceOfFileName(name) !== null);
-    } catch (e) {
-      this.deps.fail(`保管先に接続できませんでした(何も保存していません): ${errorText(e)}`);
+    if (this.connecting) {
+      this.deps.fail('いま保管先に接続しています。終わるまで待ってください');
       return false;
     }
-    this.generation += 1;
-    this.clearTimer();
-    await this.waitCurrent();
+    /**
+     * 🔴 **接続の間は回を始めない**(着地前レビュー ⚠3・⚠4)── 確かめる・保存する間に定期の回が始まると、差し替えの前後で
+     *   古い接続先の記録を新しい接続先の物として残しうる。保存に失敗したら何も変えない(いまの接続と定期の回はそのまま)。
+     */
+    this.connecting = true;
     try {
-      await r.save(this.deps.cid(), got.config, got.secret);
-    } catch (e) {
-      this.deps.fail(`保管先の認証情報を保存できませんでした: ${errorText(e)}`);
-      return false;
+      const box = r.box(got.config, got.secret);
+      try {
+        await box.list((name) => deviceOfFileName(name) !== null);
+      } catch (e) {
+        this.deps.fail(`保管先に接続できませんでした(何も保存していません): ${errorText(e)}`);
+        return false;
+      }
+      try {
+        await r.save(this.deps.cid(), got.config, got.secret);
+      } catch (e) {
+        this.deps.fail(`保管先の認証情報を保存できませんでした(いまの接続はそのままです): ${errorText(e)}`);
+        return false;
+      }
+      this.generation += 1;
+      this.clearTimer();
+      await this.waitCurrent();
+      this.swapToRemote(box, got.config);
+    } finally {
+      this.connecting = false;
     }
+    try {
+      await this.persist();
+    } catch (e) {
+      this.deps.fail(`保管先を保存できませんでした(この画面を閉じるまでは同期します): ${errorText(e)}`);
+    }
+    this.changed();
+    await this.syncNow(true);
+    return true;
+  }
+
+  /** 保管先へ差し替える(同じ接続先なら記録を引き継ぐ)。⚠ 待たずに一気に書く(途中で回が割り込まない)。 */
+  private swapToRemote(box: RemoteBox, config: S3BoxConfig): void {
+    const got = { config };
     const wasFolder = this.dir !== null;
     const same =
       this.remote !== null &&
@@ -502,15 +534,7 @@ export class SyncFolder {
     this.message = null;
     this.failures = 0;
     this.pending.clear();
-    try {
-      await this.persist();
-    } catch (e) {
-      this.deps.fail(`保管先を保存できませんでした(この画面を閉じるまでは同期します): ${errorText(e)}`);
-    }
-    this.changed();
     if (wasFolder) this.deps.say('同期フォルダをやめて、S3 互換の保管先と同期します(フォルダの中のファイルはそのままです)');
-    await this.syncNow(true);
-    return true;
   }
 
   /** 設定「端末間の同期」を切り替えたとき。 */
@@ -573,8 +597,15 @@ export class SyncFolder {
       this.remote = null;
       this.record = emptyFolderRecord();
       this.own = null;
-      await this.deps.remote?.remove(this.deps.cid()).catch((e: unknown) => this.deps.fail(`保管先の認証情報を消せませんでした: ${errorText(e)}`));
-      this.deps.say('S3 互換の保管先をやめて、同期フォルダと同期します(保管先の認証情報はこの端末から消しました)');
+      // ⚠ 消せたかで言い分ける(消せなかったのに「消しました」と言わない)── 消せなかった物は「接続を外す」の掃除(上の stop)が拾う
+      const removed = await (this.deps.remote?.remove(this.deps.cid()) ?? Promise.resolve()).then(
+        () => true,
+        (e: unknown) => {
+          this.deps.fail(`保管先の認証情報を消せませんでした(同期フォルダに切り替えます。「同期フォルダをやめる」を押すと、もう一度消します): ${errorText(e)}`);
+          return false;
+        },
+      );
+      if (removed) this.deps.say('S3 互換の保管先をやめて、同期フォルダと同期します(保管先の認証情報はこの端末から消しました)');
     }
     const sameFolder = this.dir !== null && typeof (this.dir as { isSameEntry?: unknown }).isSameEntry === 'function'
       ? await (this.dir as unknown as { isSameEntry(o: unknown): Promise<boolean> }).isSameEntry(dir).catch(() => false)
@@ -623,6 +654,19 @@ export class SyncFolder {
     this.clearTimer();
     await this.waitCurrent();
     const wasRemote = this.remote !== null;
+    const r = this.deps.remote;
+    if (wasRemote && r !== undefined && r !== null) {
+      // 🔴 **認証情報を先に消す**(着地前レビュー 🔴1)── 消せなかったら接続したままにして「接続を外す」をもう 1 度押せるようにする
+      //   (先に画面を「使っていません」へ戻すと、残った認証情報を消す押し所が無くなる)
+      try {
+        await r.remove(this.deps.cid());
+      } catch (e) {
+        this.deps.fail(`保管先の認証情報を消せませんでした(接続したままです。もう一度「接続を外す」を押してください): ${errorText(e)}`);
+        this.changed();
+        this.schedule();
+        return;
+      }
+    }
     this.remote = null;
     this.dir = null;
     this.record = emptyFolderRecord();
@@ -637,23 +681,11 @@ export class SyncFolder {
     } catch (e) {
       this.deps.fail(`同期フォルダの記録を消せませんでした: ${errorText(e)}`);
     }
-    // ⚠ 保管先を使っていなくても消す(起動時に開けなかった等で、置き場に残っている物を残さない)
-    let removed = true;
-    if (this.deps.remote !== undefined && this.deps.remote !== null) {
-      try {
-        await this.deps.remote.remove(this.deps.cid());
-      } catch (e) {
-        removed = false;
-        this.deps.fail(`保管先の認証情報を消せませんでした: ${errorText(e)}`);
-      }
-    }
+    // ⚠ 保管先を使っていなくても消す(起動時に開けなかった等で、置き場に残っている物を残さない)── こちらは黙って試すだけ
+    //   (`file://` で開いた端末などでフォルダをやめるたびに失敗を言わない)
+    if (!wasRemote && r !== undefined && r !== null && r.unavailable() === null) await r.remove(this.deps.cid()).catch(() => undefined);
     this.changed();
-    if (wasRemote)
-      this.deps.say(
-        removed
-          ? 'S3 互換の保管先との接続を外しました(この端末から認証情報を消しました。保管先の中のファイルはそのままです)'
-          : 'S3 互換の保管先との同期をやめました',
-      );
+    if (wasRemote) this.deps.say('S3 互換の保管先との接続を外しました(この端末から認証情報を消しました。保管先の中のファイルはそのままです)');
     else this.deps.say('同期フォルダとの同期をやめました(フォルダの中のファイルはそのままです。他の端末が使っていなければ、手で消せます)');
   }
 
@@ -702,7 +734,7 @@ export class SyncFolder {
 
   /** 1 回同期する。`manual` = 手で(確認が要る相手もその場で聞き、変わっていないファイルも読み直す)。 */
   async syncNow(manual: boolean): Promise<void> {
-    if (!this.hasTarget() || this.phase === 'unsupported' || this.phase === 'off' || this.phase === 'none') return;
+    if (!this.hasTarget() || this.connecting || this.phase === 'unsupported' || this.phase === 'off' || this.phase === 'none') return;
     if (!this.deps.enabled()) return;
     if (this.current !== null) {
       if (!manual) return;
@@ -906,16 +938,28 @@ export class SyncFolder {
 export function idbSyncFolderStore(dbName = 'pkc3-sync-folder'): SyncFolderStore {
   const STORE = 'folders';
   const MARKS = 'marks';
-  const open = (): Promise<IDBDatabase> =>
+  const openAt = (version?: number): Promise<IDBDatabase> =>
     new Promise((resolve, reject) => {
-      const req = indexedDB.open(dbName, 1);
+      const req = version === undefined ? indexedDB.open(dbName) : indexedDB.open(dbName, version);
       req.onupgradeneeded = () => {
         if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE);
         if (!req.result.objectStoreNames.contains(MARKS)) req.result.createObjectStore(MARKS);
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        req.result.onversionchange = () => req.result.close();
+        resolve(req.result);
+      };
       req.onerror = () => reject(req.error ?? new Error('IndexedDB を開けません'));
+      req.onblocked = () => reject(new Error('IndexedDB を開けません(別のタブが使っています)'));
     });
+  /** 🔴 棚が欠けていたら版を上げて足す(鍵の保管と同じ ── 棚の無い同じ名前の DB が先に在ると、版 1 のままでは足せない)。 */
+  const open = async (): Promise<IDBDatabase> => {
+    const db = await openAt();
+    if (db.objectStoreNames.contains(STORE) && db.objectStoreNames.contains(MARKS)) return db;
+    const next = db.version + 1;
+    db.close();
+    return openAt(next);
+  };
   const tx = async <T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>, store = STORE): Promise<T> => {
     const db = await open();
     try {

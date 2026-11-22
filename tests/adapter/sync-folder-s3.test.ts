@@ -127,7 +127,11 @@ function folderOf(sf: () => SyncFolder | null): SyncFolderDirLike {
   } as unknown as SyncFolderDirLike;
 }
 
-async function rig(name: string, s3: FakeS3, opts: { store?: MemStore; d?: SyncDevice; remote?: SyncRemoteDeps & { ks: SyncKeystore }; unavailable?: string | null } = {}): Promise<Rig> {
+async function rig(
+  name: string,
+  s3: FakeS3,
+  opts: { store?: MemStore; d?: SyncDevice; remote?: SyncRemoteDeps & { ks: SyncKeystore }; unavailable?: string | null; noPicker?: boolean } = {},
+): Promise<Rig> {
   const d = opts.d ?? (await spawnDevice(name));
   if (opts.d === undefined) {
     devices.push(d);
@@ -140,7 +144,7 @@ async function rig(name: string, s3: FakeS3, opts: { store?: MemStore; d?: SyncD
   const sf = new SyncFolder({
     cid: () => d.cid,
     enabled: () => d.enabled,
-    picker: async () => folderOf(() => null),
+    picker: opts.noPicker === true ? null : async () => folderOf(() => null),
     remote,
     store,
     lock: null,
@@ -263,6 +267,8 @@ describe('S3 互換の保管先(段 4a-4)', () => {
     expect(new TextDecoder().decode(s3.objects.get(key)!.body), '412 で上書きした').toBe('相手が書いた');
     expect(A.sf.view().phase).toBe('stopped');
     expect(A.sf.view().message).toContain('上書きしませんでした');
+    expect(A.sf.view().message, '412 は「次の回に取り込んでから書く」と言う(ただの失敗と言わない)').toContain('次の回に、相手のファイルを取り込んでから書きます');
+    expect(A.sf.view().message).not.toContain('同期に失敗しました');
   });
 
   it('🔴 接続を外すと認証情報を消し、保管先のファイルは残す / フォルダへ切り替えても認証情報を消す', async () => {
@@ -288,6 +294,139 @@ describe('S3 互換の保管先(段 4a-4)', () => {
     await A.sf.connectRemote(FORM);
     expect(A.sf.view().kind).toBe('s3');
     expect(A.says.some((t) => t.includes('同期フォルダをやめて'))).toBe(true);
+  });
+
+  it('🔴 認証情報を消せなかったら、接続したままにして「接続を外す」をもう 1 度押せる / フォルダへ切り替えるときは「消しました」と言わない', async () => {
+    const s3 = fakeS3(SECRET);
+    const remote = remoteDeps(s3);
+    let failRemove = true;
+    const realRemove = remote.remove;
+    remote.remove = async (cid) => {
+      if (failRemove) throw new Error('IndexedDB に書けません');
+      return realRemove(cid);
+    };
+    const A = await rig('A', s3, { remote });
+    await A.sf.connectRemote(FORM);
+    await A.sf.stop();
+    expect(A.sf.view().kind, '消せなかったのに「使っていません」へ戻した(押し所が消える)').toBe('s3');
+    expect(await remote.ks.open(A.d.cid), '認証情報は残っている').not.toBeNull();
+    expect(A.fails.at(-1)).toContain('もう一度「接続を外す」');
+    expect(A.store.map.get(A.d.cid)?.kind, '記録も残す(開き直しても外せる)').toBe('s3');
+    failRemove = false;
+    await A.sf.stop();
+    expect(A.sf.view().kind).toBeNull();
+    expect(await remote.ks.open(A.d.cid)).toBeNull();
+    // フォルダへ切り替え: 消せなかったら「消しました」と言わない
+    await A.sf.connectRemote(FORM);
+    failRemove = true;
+    const says = A.says.length;
+    await A.sf.pick();
+    expect(A.says.slice(says).some((t) => t.includes('消しました')), '消せなかったのに「消しました」と言った').toBe(false);
+    expect(A.fails.at(-1)).toContain('認証情報を消せませんでした');
+    // 「同期フォルダをやめる」が残った認証情報を黙って掃除する
+    failRemove = false;
+    await A.sf.stop();
+    expect(await remote.ks.open(A.d.cid), 'やめるときに残った認証情報を掃除する').toBeNull();
+  });
+
+  it('🔴 別の接続先へ接続し直すと記録を最初からにする(前の接続先の版で条件付き書き込みをしない)/ 同じ接続先なら引き継ぐ', async () => {
+    const s3 = fakeS3(SECRET);
+    const A = await rig('A', s3);
+    await A.d.put('n1', 'メモ', '本文');
+    await A.sf.connectRemote(FORM);
+    const puts = () => s3.seen.filter((x) => x.method === 'PUT');
+    expect(await A.sf.connectRemote({ ...FORM, prefix: 'other/' })).toBe(true);
+    expect(A.fails, '前の接続先の版(If-Match)で書いて 412 になった').toEqual([]);
+    expect([...s3.objects.keys()].some((k) => k.startsWith('other/')), '新しい置き場に書く').toBe(true);
+    expect(puts().at(-1)!.headers['if-none-match'], '新しい置き場の初めての書き込み').toBe('*');
+    // 同じ接続先へ接続し直す(認証情報の入れ直し)── 自分のファイルの控えを引き継ぐので、自分の物を他人の物と読まない
+    await A.d.put('n1', 'メモ', '直した');
+    expect(await A.sf.connectRemote({ ...FORM, prefix: 'other/' })).toBe(true);
+    expect(A.fails).toEqual([]);
+    expect(A.sf.view().pending, '自分のファイルを他人の物と読んだ').toBe(0);
+  });
+
+  it('⚠ 接続の途中に、もう 1 度接続しない / 認証情報を保存できなければ、いまの接続をそのまま使う', async () => {
+    const s3 = fakeS3(SECRET);
+    const remote = remoteDeps(s3);
+    const A = await rig('A', s3, { remote });
+    await A.sf.connectRemote(FORM);
+    const [one, two] = await Promise.all([A.sf.connectRemote(FORM), A.sf.connectRemote(FORM)]);
+    expect([one, two]).toEqual([true, false]);
+    expect(A.fails.at(-1)).toContain('いま保管先に接続しています');
+    remote.save = async () => {
+      throw new Error('IndexedDB に書けません');
+    };
+    expect(await A.sf.connectRemote({ ...FORM, prefix: 'other/' })).toBe(false);
+    expect(A.sf.view(), '保存できなかったのに接続先を変えた').toMatchObject({ kind: 's3', folderName: 'my notes/pkc3', phase: 'idle' });
+    expect(A.fails.at(-1)).toContain('いまの接続はそのままです');
+  });
+
+  it('⚠ 起動で認証情報を開いている間に接続し直したら、遅れて開いた古い認証情報で上書きしない', async () => {
+    const s3 = fakeS3(SECRET);
+    const remote = remoteDeps(s3);
+    const A = await rig('A', s3, { remote });
+    await A.sf.connectRemote(FORM);
+    // 開き直す: 鍵の保管を開くのを止めておく
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow: typeof remote = { ...remote, open: async (cid) => {
+      const v = await remote.open(cid);
+      await gate;
+      return v;
+    } };
+    const A2 = await rig('A', s3, { d: A.d, store: A.store, remote: slow });
+    const booting = A2.sf.boot();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(await A2.sf.connectRemote({ ...FORM, prefix: 'other/' })).toBe(true);
+    release();
+    await booting;
+    expect(A2.sf.view().folderName, '古い認証情報(前の接続先)で上書きした').toBe('my notes/other');
+  });
+
+  it('⚠ 接続の途中(確かめる・保存する間)は、定期の回を始めない', async () => {
+    const s3 = fakeS3(SECRET);
+    const remote = remoteDeps(s3);
+    const A = await rig('A', s3, { remote });
+    await A.sf.connectRemote(FORM);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const realSave = remote.save;
+    remote.save = async (cid, c, sec) => {
+      await gate;
+      return realSave(cid, c, sec);
+    };
+    const connecting = A.sf.connectRemote({ ...FORM, prefix: 'other/' });
+    await new Promise((r) => setTimeout(r, 0));
+    const before = s3.seen.length;
+    await A.sf.syncNow(false);
+    A.sf.onVisible();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s3.seen.length, '接続の途中に回が始まった').toBe(before);
+    release();
+    expect(await connecting).toBe(true);
+  });
+
+  it('📌 file:// で開き直したら、保管先の記録は消さずに理由を言う(HTTPS で開き直せば続きから)', async () => {
+    const s3 = fakeS3(SECRET);
+    const A = await rig('A', s3);
+    await A.sf.connectRemote(FORM);
+    const A2 = await rig('A', s3, { d: A.d, store: A.store, remote: remoteDeps(s3, { unavailable: SYNC_REMOTE_HTTPS_ONLY }) });
+    await A2.sf.boot();
+    expect(A2.sf.view().message).toContain(SYNC_REMOTE_HTTPS_ONLY);
+    expect(A.store.map.get(A.d.cid)?.kind, '記録を消した').toBe('s3');
+  });
+
+  it('🔴 フォルダを選べないブラウザ(スマホ・Safari・Firefox)でも、保管先は使える / どちらも使えなければ止める', async () => {
+    const s3 = fakeS3(SECRET);
+    const A = await rig('A', s3, { noPicker: true });
+    expect(A.sf.view()).toMatchObject({ phase: 'none', folderSupported: false, remoteUnavailable: null });
+    await A.d.put('n1', 'スマホのメモ', 'm');
+    expect(await A.sf.connectRemote(FORM)).toBe(true);
+    expect(A.sf.view()).toMatchObject({ kind: 's3', phase: 'idle' });
+    expect(s3.objects.size).toBe(1);
+    const B = await rig('B', s3, { noPicker: true, unavailable: SYNC_REMOTE_HTTPS_ONLY });
+    expect(B.sf.view().phase, '対照群: 両方使えなければ止める').toBe('unsupported');
   });
 
   it('📌 file:// では選べない(理由を言い、何も保存しない)/ 設定がオフなら接続しない', async () => {

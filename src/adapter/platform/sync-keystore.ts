@@ -220,8 +220,14 @@ export function idbKeystoreBackend(dbName = SYNC_KEYS_DB): KeystoreBackend {
         if (!db.objectStoreNames.contains(KEYS)) db.createObjectStore(KEYS);
         if (!db.objectStoreNames.contains(BOXES)) db.createObjectStore(BOXES);
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        // 別のタブが版を上げようとしたら閉じる(こちらが握ったまま相手を待たせない)
+        req.result.onversionchange = () => req.result.close();
+        resolve(req.result);
+      };
       req.onerror = () => reject(req.error ?? new Error('認証情報の置き場を開けません'));
+      // ⚠ 版を上げるのを別のタブが止めている ── 待ち続けない(着地前レビュー ⚠5。直列の口が詰まって以後の保存・外すが全部止まる)
+      req.onblocked = () => reject(new Error('認証情報の置き場を開けません(別のタブが使っています。ほかのタブを閉じてから、もう一度押してください)'));
     });
   /**
    * 🔴 **置き場の棚が欠けていたら足す**(段 4a-4 の smoke で踏んだ)── 同じ名前の DB が棚の無いまま先に作られていると

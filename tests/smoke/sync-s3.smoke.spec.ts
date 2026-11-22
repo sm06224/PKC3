@@ -155,6 +155,10 @@ test('🔴 S3 互換の保管先: 分離した実ブラウザから読み書き�
     await clickReal(A, '[data-pkc-action="commit-edit"]');
     await openS3(A);
     await expect(status(A)).toHaveText('使っていません');
+    // 🔴 CORS の設定の例に、本当の画面の場所が入っている(unit は場所を差し替えるので、本番の読み口はここで見る)
+    const origin = await A.evaluate(() => location.origin);
+    const tpl = JSON.parse((await A.locator('[data-pkc-field="sync-s3-cors"]').textContent()) ?? '') as { AllowedOrigins: string[] }[];
+    expect(tpl[0]!.AllowedOrigins).toEqual([origin]);
     await fill(A, mock.url);
     await clickReal(A, '[data-pkc-action="test-sync-s3"]');
     await expect(result(A)).toContainText('接続できました', { timeout: 20_000 });

@@ -8,6 +8,7 @@
  * - 📌 `file://` では欄とボタンが止まり、「HTTPS で開いたときだけ使えます」と言う
  */
 import { describe, expect, it, vi } from 'vitest';
+import { sharedOriginHost } from '../../src/features/sync/s3-cors';
 import { createSyncS3Section, SYNC_S3_DISCONNECT_LABEL, SYNC_S3_SHARED_ORIGIN_NOTE } from '../../src/adapter/ui/render/settings/sync-s3';
 import { SyncFolderViewSource } from '../../src/adapter/ui/render/sync-folder-view';
 import { SyncEnabledStore } from '../../src/adapter/ui/render/sync-enabled';
@@ -66,6 +67,11 @@ describe('設定: S3 互換の保管先', () => {
     expect(SYNC_S3_SHARED_ORIGIN_NOTE).toContain('独自ドメイン');
     const own = setup({ host: 'notes.example.org' });
     expect(own.q('[data-pkc-field="sync-s3-shared-origin"]'), '独自ドメインでは出さない').toBeNull();
+  });
+
+  it('github.io の判定は github.io の下の名前だけ(似た名前を巻き込まない)', () => {
+    expect(['someone.github.io', 'a.b.GITHUB.IO'].map(sharedOriginHost)).toEqual([true, true]);
+    expect(['evil-github.io', 'github.io.example.com', 'notes.example.org', 'localhost'].map(sharedOriginHost)).toEqual([false, false, false, false]);
   });
 
   it('🔴 CORS の設定の例に、いまの画面の場所が入り、ETag を見せる', () => {
