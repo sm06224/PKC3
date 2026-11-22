@@ -50,6 +50,13 @@ describe('「今日」で作る種類 (#1640 項 1)', () => {
     expect(items.map((e) => e.getAttribute('aria-checked')), '何も選んでいなければノートが既定').toEqual(['false', 'true']);
   });
 
+  it('🔴 ログを覚えている端末で開いたら、印は「今日のログ」に付いている(起動のときに読む)', () => {
+    appTodayKind.set('textlog');
+    const { root } = setup();
+    const items = [...root.querySelectorAll('[data-pkc-region="create-menu"] [data-pkc-action="open-today-as"]')];
+    expect(items.map((e) => e.getAttribute('aria-checked'))).toEqual(['true', 'false']);
+  });
+
   it('何も選んでいなければ、今までどおりノートで作る', () => {
     const { sent, click } = setup();
     click('[data-pkc-field="open-today"]');

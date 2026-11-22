@@ -157,6 +157,8 @@ test('🔴 見出しのあるノートで目次が出て、押すとそこまで
   expect(pop!.y, '目次が押しの下に開いていない').toBeGreaterThanOrEqual(btnBox!.y);
   expect(pop!.x, '目次が画面の左へはみ出している').toBeGreaterThanOrEqual(0);
   expect(pop!.x + pop!.width, '目次が画面の右へはみ出している').toBeLessThanOrEqual(vw);
+  // 🔴 帯に入れた目次の一覧が、器(押しの幅)に潰れない(着地前レビュー 🔴1 ── 260px の指定が 40px ほどに縮んでいた)
+  expect(pop!.width, `目次の一覧が細く潰れている(${pop!.width}px)`).toBeGreaterThanOrEqual(200);
   const activeRows = async (): Promise<number[]> =>
     page.locator(QITEM).evaluateAll((els) =>
       els.flatMap((el, i) => (el.hasAttribute('data-pkc-active') ? [i] : [])),

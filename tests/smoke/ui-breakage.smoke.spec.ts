@@ -218,6 +218,25 @@ test('🔴 ボタンの段違い: 「新規作成 ▼」は 1 つの分割ボタ
     expect(Math.abs(b.top - cb.run.top), `${name} の上端が本体と違う`).toBeLessThanOrEqual(1);
   }
   await shot(page, 'create-bar', '[data-pkc-region="create-bar"]');
+  // スマホの幅(タイル 44px)でも一体で、段違いが無い(着地前レビュー ⚠2-3)
+  const phone = await page.context().newPage();
+  await phone.setViewportSize({ width: 390, height: 844 });
+  await gotoApp(phone);
+  const ph = await phone.evaluate(() => {
+    const box = (sel: string) => {
+      const e = document.querySelector<HTMLElement>(`[data-pkc-region="create-bar"] ${sel}`)!;
+      const r = e.getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, h: r.height, bg: getComputedStyle(e).backgroundColor };
+    };
+    return { run: box('[data-pkc-field="create-run"]'), pick: box('[data-pkc-field="create-pick"]'), more: box('[data-pkc-field="bar-more"]') };
+  });
+  expect(ph.pick.bg, 'スマホの幅で ▼ の地が本体と違う').toBe(ph.run.bg);
+  expect(Math.abs(ph.pick.left - ph.run.right), 'スマホの幅で本体と ▼ の間に隙間').toBeLessThanOrEqual(0.5);
+  for (const [name, b] of [['▼', ph.pick], ['その他 ▾', ph.more]] as const) {
+    expect(Math.abs(b.h - ph.run.h), `スマホの幅で ${name} の高さが本体と違う(${b.h} / ${ph.run.h})`).toBeLessThanOrEqual(1);
+    expect(Math.abs(b.top - ph.run.top), `スマホの幅で ${name} の上端が本体と違う`).toBeLessThanOrEqual(1);
+  }
+  await phone.close();
   // 中央の帯: 目次の押しは帯のボタンと同じ見た目・高さ・上端
   await createEntry(page, 'text');
   await page.fill('[data-pkc-field="editor-body"]', ['## 一', 'a', '## 二', 'b'].join('\n\n'));

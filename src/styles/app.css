@@ -13653,6 +13653,14 @@ h6:hover > .pkc-heading-anchor,
 .pkc-quick-toc[data-pkc-docked] .pkc-quick-toc-popover {
   top: calc(100% + 4px);
   right: 0;
+  /* 🔴 器が押しの幅に縮んだので、`100%` を基準にした上限だと一覧が 40px ほどに潰れる(着地前レビュー 🔴1)── 窓の幅で抑える */
+  width: 260px;
+  max-width: min(260px, calc(100vw - 32px));
+}
+/* ⚠ 帯(`detail-bar-slot`)は sticky で重なりの文脈を作る ── 一覧を開いている間だけ帯ごと上へ出す
+ *   (後ろに在る sticky の再生機などの下に一覧が潜らない。着地前レビュー ⚠3) */
+[data-pkc-field='detail-bar-slot']:has(.pkc-quick-toc-popover:not([hidden])) {
+  z-index: 95;
 }
 
 .pkc-quick-toc-icon {
