@@ -10,14 +10,15 @@
  * - 反映は worker の 1 回の tx。失敗したら何も書かれない(ノートも同期の記録も)。
  */
 import { errorText } from '@features/error-text';
-import { readDiffZip, writeDiffZip, DIFF_SUFFIX, type DiffAssetMeta, type DiffFile, type DiffNote } from '@features/sync/diff-file';
-import { fingerprintDigest, planExport } from '@features/sync/sync-export';
+import { readDiffZip, writeDiffZip, DIFF_SUFFIX, type DiffAssetMeta, type DiffFile, type DiffFingerprint, type DiffNote } from '@features/sync/diff-file';
+import { fingerprintDigest, planExport, planFolderExport } from '@features/sync/sync-export';
 import { planSyncImport, type SyncPlan } from '@features/sync/sync-plan';
 import { deviceIdFromBytes, isSameDevice } from '@features/sync/sync-state';
+import { deviceOfFileName, folderWriteKey } from '@features/sync/sync-folder';
 import { sha256Hex as blobSha256Hex } from '@adapter/platform/storage/asset-key';
 import { seedFromBackup, type SyncSeed } from '@features/sync/sync-seed';
 import { SYNC_FORGET_LABEL, SYNC_OFF_REFUSAL, SYNC_SETTING_LABEL } from '@features/sync/sync-setting';
-import type { Baseline, Fp, KeyedState } from '@features/sync/change-set';
+import type { Baseline, Fp, KeyedState, Tombstone } from '@features/sync/change-set';
 import { assetRefsIn } from '@features/asset/asset-ref-scan';
 import { safeName } from '@features/export/file-name';
 import { dayStamp } from '@features/datetime/date-math';
@@ -101,7 +102,123 @@ export async function seedSyncFromBackup(deps: Pick<SyncDeps, 'cid' | 'enabled' 
   await deps.request({ op: 'syncSeed', cid: deps.cid, peer: seed.device, baseline, nowIso: (deps.now?.() ?? new Date()).toISOString() });
 }
 
-/** 差分の書き出し。 */
+/** 差分を作る先。`download` = 手で運ぶファイル(段 2)/ `folder` = 同期フォルダの自分のファイル(段 3)。 */
+export type DiffTarget =
+  | { kind: 'download'; all: boolean }
+  | {
+      kind: 'folder';
+      /** 同期フォルダに居る、自分以外の端末。 */
+      others: readonly string[];
+      /** 自分に「全件をください」と言っている端末。 */
+      wantedBy: readonly string[];
+      /** 自分が「全件をください」と言う端末(取り込んだ差分に本文が足りなかった)。 */
+      want: readonly string[];
+      ownFilePresent: boolean;
+      /** 前回書いたときの要約(同じなら書かない)。 */
+      lastKey: string | null;
+    };
+
+export interface BuiltDiff {
+  skipped: false;
+  blob: Blob;
+  counts: { notes: number; relations: number; deletions: number; assets: number; total: number };
+  missingAssets: string[];
+  complete: boolean;
+  /** 書いた中身の要約(次に同じなら書かない)。 */
+  key: string;
+  device: string;
+  seq: number;
+}
+
+/**
+ * 🔴 **差分ファイルを作る(転送手段に依らない核)**。ダウンロード(段 2)も同期フォルダ(段 3)もここを通る。
+ * ⚠ 同期フォルダで中身が前回と同じなら、連番を進めず `skipped` を返す(定期の回で同じファイルを書き続けない)。
+ * ⚠ 失敗は throw する(呼び手が言い方を決める)。
+ */
+export async function buildSyncDiff(deps: SyncDeps, target: DiffTarget): Promise<BuiltDiff | { skipped: true; key: string }> {
+  await deps.ensureConfigured?.();
+  await deps.settle();
+  const snap = await deps.request({ op: 'syncSnapshot', cid: deps.cid, ensureDevice: true });
+  if (snap.device === null) throw new Error('端末の記録を作れませんでした');
+  const nowMs = (deps.now?.() ?? new Date()).getTime();
+  let plan: { complete: boolean; noteLids: string[]; tombstones: Tombstone[]; fingerprints: DiffFingerprint[]; peerBase: DiffFingerprint[]; peerBases?: Record<string, DiffFingerprint[]> };
+  let key: string;
+  if (target.kind === 'folder') {
+    // 🔴 フォルダに自分しか居ない間は、置いたファイル(最初の回の全件)をそのままにする ── 読む相手が居ないのに書き直さない。
+    //   新しい端末が加わると `others` に入り、記録の無い相手が居るので次の回に全件を書き直す(古いままにはならない)
+    if (target.others.length === 0 && target.ownFilePresent) return { skipped: true, key: target.lastKey ?? '' };
+    const fp = planFolderExport({
+      device: snap.device,
+      seq: snap.seq + 1,
+      states: snap.states,
+      tombstones: snap.tombstones,
+      bases: Object.fromEntries(Object.entries(snap.bases).map(([d, b]) => [d, { baseline: toBaseline(b.baseline), at: b.at }])),
+      others: target.others,
+      wantedBy: target.wantedBy,
+      ownFilePresent: target.ownFilePresent,
+      nowMs,
+    });
+    key = folderWriteKey(fp.writeKey, target.want, snap.pairs);
+    if (target.ownFilePresent && target.lastKey === key) return { skipped: true, key };
+    plan = { ...fp, peerBase: [] };
+  } else {
+    // 相手の選び方: 記録のある相手が 1 台ならその相手との差分。2 台以上・「すべて」なら全件(どの相手にも渡せる)
+    const peers = Object.entries(snap.bases);
+    const peer = !target.all && peers.length === 1 ? (peers[0] as [string, { baseline: Baseline; at: string | null }])[1] : null;
+    plan = planExport({
+      device: snap.device,
+      seq: snap.seq + 1,
+      states: snap.states,
+      tombstones: snap.tombstones,
+      peer: peer === null ? null : { baseline: toBaseline(peer.baseline), at: peer.at },
+      all: target.all,
+      nowMs,
+    });
+    key = '';
+  }
+  const committed = await deps.request({ op: 'syncCommitExport', cid: deps.cid, digest: fingerprintDigest(plan.fingerprints) });
+  const metaByLid = new Map(snap.notes.map((n) => [n.lid, n] as const));
+  const assetMetas = await deps.request({ op: 'listAssetMetas', cid: deps.cid });
+  const assetKeys = assetMetas.map((a) => a.key);
+  const carried = new Map<string, DiffAssetMeta>();
+  const byKey = new Map(assetMetas.map((a) => [a.key, a] as const));
+  const noteLids = plan.noteLids;
+  async function* notes(): AsyncGenerator<DiffNote> {
+    const BATCH = 200;
+    for (let i = 0; i < noteLids.length; i += BATCH) {
+      const lids = noteLids.slice(i, i + BATCH);
+      const rows = await deps.request({ op: 'getBodies', cid: deps.cid, lids });
+      for (const r of rows) {
+        const m = metaByLid.get(r.lid);
+        if (m === undefined) continue;
+        for (const k of assetRefsIn(r.body, assetKeys)) {
+          const a = byKey.get(k);
+          if (a !== undefined && !carried.has(k)) carried.set(k, { key: k, mime: a.mime ?? 'application/octet-stream', size: a.size ?? 0, hash: a.hash });
+        }
+        yield { lid: r.lid, title: m.title, archetype: m.archetype, parentLid: m.parentLid, body: r.body };
+      }
+    }
+  }
+  const want = target.kind === 'folder' && target.want.length > 0 ? { want: [...target.want].sort() } : {};
+  // 同期フォルダでは、確認済みの対応も添える(相手が自分の id を見つけたら、初回の確認を省ける)
+  const pairs = target.kind === 'folder' && Object.keys(snap.pairs).length > 0 ? { pairs: { ...snap.pairs } } : {};
+  const out = await writeDiffZip({
+    manifest: { exported_at: (deps.now?.() ?? new Date()).toISOString(), device: committed.device, seq: committed.seq, cid: deps.cid, title: deps.title(), complete: plan.complete, ...want, ...pairs },
+    notes: notes(),
+    relations: snap.relations,
+    tombstones: plan.tombstones,
+    fingerprints: plan.fingerprints,
+    peerBase: plan.peerBase,
+    ...(plan.peerBases === undefined ? {} : { peerBases: plan.peerBases }),
+    labels: snap.labels,
+    pins: snap.pins,
+    assets: () => [...carried.values()],
+    getAssetBlob: (k) => deps.getAssetBlob(k),
+  });
+  return { skipped: false, blob: out.blob, counts: out.counts, missingAssets: out.missingAssets, complete: plan.complete, key, device: committed.device, seq: committed.seq };
+}
+
+/** 差分の書き出し(ダウンロード)。 */
 export async function exportSyncDiff(deps: SyncDeps, opts: { all?: boolean } = {}): Promise<void> {
   const fail = (m: string): void => {
     deps.notify?.(''); // 進行中の字を残さない(失敗の回に「書き出しています…」が居座らない)
@@ -111,61 +228,14 @@ export async function exportSyncDiff(deps: SyncDeps, opts: { all?: boolean } = {
   if (!deps.enabled()) return fail(SYNC_OFF_REFUSAL);
   try {
     deps.notify?.('差分を書き出しています…');
-    await deps.ensureConfigured?.();
-    await deps.settle();
-    const snap = await deps.request({ op: 'syncSnapshot', cid: deps.cid, ensureDevice: true });
-    if (snap.device === null) throw new Error('端末の記録を作れませんでした');
-    const nowMs = (deps.now?.() ?? new Date()).getTime();
-    // 相手の選び方: 記録のある相手が 1 台ならその相手との差分。2 台以上・「すべて」なら全件(どの相手にも渡せる)
-    const peers = Object.entries(snap.bases);
-    const peer = !opts.all && peers.length === 1 ? (peers[0] as [string, { baseline: Baseline; at: string | null }])[1] : null;
-    const plan = planExport({
-      device: snap.device,
-      seq: snap.seq + 1,
-      states: snap.states,
-      tombstones: snap.tombstones,
-      peer: peer === null ? null : { baseline: toBaseline(peer.baseline), at: peer.at },
-      all: opts.all === true,
-      nowMs,
-    });
-    const committed = await deps.request({ op: 'syncCommitExport', cid: deps.cid, digest: fingerprintDigest(plan.fingerprints) });
-    const metaByLid = new Map(snap.notes.map((n) => [n.lid, n] as const));
-    const assetMetas = await deps.request({ op: 'listAssetMetas', cid: deps.cid });
-    const assetKeys = assetMetas.map((a) => a.key);
-    const carried = new Map<string, DiffAssetMeta>();
-    const byKey = new Map(assetMetas.map((a) => [a.key, a] as const));
-    async function* notes(): AsyncGenerator<DiffNote> {
-      const BATCH = 200;
-      for (let i = 0; i < plan.noteLids.length; i += BATCH) {
-        const lids = plan.noteLids.slice(i, i + BATCH);
-        const rows = await deps.request({ op: 'getBodies', cid: deps.cid, lids });
-        for (const r of rows) {
-          const m = metaByLid.get(r.lid);
-          if (m === undefined) continue;
-          for (const k of assetRefsIn(r.body, assetKeys)) {
-            const a = byKey.get(k);
-            if (a !== undefined && !carried.has(k)) carried.set(k, { key: k, mime: a.mime ?? 'application/octet-stream', size: a.size ?? 0, hash: a.hash });
-          }
-          yield { lid: r.lid, title: m.title, archetype: m.archetype, parentLid: m.parentLid, body: r.body };
-        }
-      }
-    }
-    const out = await writeDiffZip({
-      manifest: { exported_at: (deps.now?.() ?? new Date()).toISOString(), device: committed.device, seq: committed.seq, cid: deps.cid, title: deps.title(), complete: plan.complete },
-      notes: notes(),
-      relations: snap.relations,
-      tombstones: plan.tombstones,
-      fingerprints: plan.fingerprints,
-      peerBase: plan.peerBase,
-      assets: () => [...carried.values()],
-      getAssetBlob: (k) => deps.getAssetBlob(k),
-    });
+    const out = await buildSyncDiff(deps, { kind: 'download', all: opts.all === true });
+    if (out.skipped) return; // ダウンロードでは起きない(型の都合)
     deps.download(`${safeName(deps.title() || 'pkc3')}-${dayStamp(deps.now?.() ?? new Date(), '')}${DIFF_SUFFIX}`, out.blob);
     const lines = [
-      `差分ファイルを書き出しました(${plan.complete ? '全件' : '前回の同期から変わった分'}: ノート ${out.counts.notes} 件 / 削除の記録 ${out.counts.deletions} 件 / 添付 ${out.counts.assets} 件)`,
+      `差分ファイルを書き出しました(${out.complete ? '全件' : '前回の同期から変わった分'}: ノート ${out.counts.notes} 件 / 削除の記録 ${out.counts.deletions} 件 / 添付 ${out.counts.assets} 件)`,
     ];
     if (out.missingAssets.length > 0) lines.push(`添付の実体が見つからず、入れられなかった物が ${out.missingAssets.length} 件あります(参照は残っています)`);
-    if (!plan.complete) lines.push('初めての端末や、前回から日が空いた端末には「差分を書き出す(全件)」で書き出してください');
+    if (!out.complete) lines.push('初めての端末や、前回から日が空いた端末には「差分を書き出す(全件)」で書き出してください');
     deps.notify?.(lines[0] as string);
     if (lines.length > 1) (deps.reportExport ?? deps.report)(lines);
   } catch (e) {
@@ -239,6 +309,9 @@ export function summaryLines(
   add(s.relationsRemoved, '外したつながり: {n} 本');
   add(extra.placedAtRoot + s.orphans, '入れるフォルダが無く、いちばん上へ置いたノート: {n} 件');
   add(s.danglingRelations, 'つなぐ先のノートが無く、足さなかったつながり: {n} 本');
+  add(s.labelsChanged, '相手に合わせた色ラベル: {n} 件');
+  add(s.pinsChanged, '相手に合わせたピン留め: {n} 件');
+  add(s.attrConflicts, '両方で違う色ラベル・ピン留めにしていた物: {n} 件(こちらの色ラベル・ピン留めを残しました。次の同期で相手へ送ります)');
   for (const c of plan.conflicts) {
     const what =
       c.kind === 'first-sync'
@@ -299,6 +372,58 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
   } catch (e) {
     return fail(`「${name}」: ${errorText(e)}`);
   }
+  const r = await applySyncDiff(deps, diff, name);
+  return { ok: r.ok, count: r.count };
+}
+
+/** 取り込みの結果(同期フォルダが次の回の振る舞いを決めるのに使う)。 */
+export interface ApplyOutcome {
+  ok: boolean;
+  count: number;
+  /**
+   * 無人の回(`auto`)で、人の確認が要るので取り込まなかった理由。`pair` = 初めての相手(ワークスペースの対応)/
+   * `device` = 自分の端末 id のファイルが自分の記録に無い(端末のデータの複製)。手で同期すると確認を出す。
+   */
+  pending?: 'pair' | 'device';
+  /** 手で同期した回で、確認に「やめる」と答えた(取り込んでいない ── 取り込んだことにしない)。 */
+  declined?: boolean;
+  /** 取り込めなかった理由(`ok: false`)。⚠ 無人の回は自分では言わず、ここで返す(呼び手が同じ理由を繰り返さないように束ねる)。 */
+  reason?: string;
+  /** 本文が入っていなくて取り込めなかったノートがある(相手に全件を頼む)。 */
+  needFull: boolean;
+  /** 反映した件数(ノート・印)と競合の数。 */
+  changed: number;
+  conflicts: number;
+}
+
+/**
+ * 🔴 **読んだ差分ファイルを取り込む(転送手段に依らない核)**。手で選んだファイル(段 2)も同期フォルダ(段 3)もここを通る。
+ * `auto`(同期フォルダの定期の回)では**確認を出さない** ── 確認が要る物(初めての相手・端末 id の重複)は取り込まずに `pending` を返し、
+ * 結果の面も「何か変わった・注意がある」ときだけ出す(何も変わらない回に面を出さない)。
+ */
+export async function applySyncDiff(
+  deps: SyncDeps,
+  diff: DiffFile,
+  name: string,
+  /**
+   * `auto` = 無人の回。`folder` = 同期フォルダから読んだ(user が選んだフォルダの中のファイル)──
+   * このときだけ、相手のファイルが言う「確認済みの対応」(`manifest.pairs`)で初回の確認を省く。手で選んだファイルでは省かない。
+   */
+  opts: { auto?: boolean; folder?: boolean } = {},
+): Promise<ApplyOutcome> {
+  const auto = opts.auto === true;
+  const fail = (m: string): ApplyOutcome => {
+    deps.notify?.(''); // 進行中の字を残さない
+    // 🔴 無人の回は言わない(5 分ごとに同じ問題をメッセージへ積まない)── 理由を返し、同期フォルダの係が 1 度だけ言う
+    if (!auto) (deps.reportProblem ?? deps.notify)?.(m);
+    return { ok: false, count: 0, needFull: false, changed: 0, conflicts: 0, reason: m };
+  };
+  const quiet = (extra: Partial<ApplyOutcome> = {}): ApplyOutcome => ({ ok: true, count: 0, needFull: false, changed: 0, conflicts: 0, ...extra });
+  if (!deps.enabled()) return fail(SYNC_OFF_REFUSAL);
+  // 🔴 同期フォルダのファイルは、名前の端末 id と中身の端末 id が同じでなければ読まない(名前で「誰のファイルか」を決めているため)
+  if (opts.folder === true && deviceOfFileName(name) !== diff.manifest.device) {
+    return fail(`「${name}」は、ファイル名と中身の端末が違うため取り込みませんでした(名前を変えたファイルか、別の端末のファイルをコピーした可能性があります)`);
+  }
   let committed = false;
   try {
     await deps.ensureConfigured?.();
@@ -320,8 +445,10 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
       const mine = snap.outs[diff.manifest.seq];
       if (mine !== undefined && mine === fingerprintDigest(diff.container.fingerprints)) {
         deps.notify?.('この端末が書き出した差分ファイルです。取り込む物はありません');
-        return { ok: true, count: 0 };
+        return quiet();
       }
+      // 無人の回は確認を出さない(作り直しは同期の記録を全部消すので、人が見ているときだけ)
+      if (auto) return quiet({ pending: 'device' });
       // 🔴 自分の記録に無い(古い・端末のデータの複製)── 端末 ID の作り直しは同期の記録を全部消すので、専用の確認を取る
       const ok = await deps.confirmAction(
         'この差分ファイルは、この端末が書き出した物に見えますが、この端末の記録にはありません(記録が古くなったか、端末のデータを複製した可能性があります)。' +
@@ -330,7 +457,7 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
       );
       if (!ok) {
         deps.notify?.('取り込みをやめました');
-        return { ok: true, count: 0 };
+        return quiet({ declined: true });
       }
       regenerate = deviceIdFromBytes((deps.randomBytes ?? ((n) => crypto.getRandomValues(new Uint8Array(n))))(8));
     }
@@ -343,7 +470,10 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
           `対応づけを最初からにするには、設定の「${SYNC_SETTING_LABEL}」の「${SYNC_FORGET_LABEL}」を押してください(ノートは消えません)`,
       );
     }
-    if (knownPeerCid === undefined) {
+    // 🔴 無人の回で初めての相手: 相手の側で、この端末のこのワークスペースとの対応を人が確認済みなら、そのまま取り込む(確認は 1 度で済む)
+    const confirmedThere = opts.folder === true && diff.manifest.pairs?.[snap.device] === deps.cid;
+    if (knownPeerCid === undefined && auto && !confirmedThere) return quiet({ pending: 'pair' });
+    if (knownPeerCid === undefined && !confirmedThere) {
       const same = diff.manifest.title === deps.title();
       const msg =
         `相手の端末のワークスペース「${diff.manifest.title}」を、このワークスペース「${deps.title()}」と同じ物として取り込みますか?(次からは確認しません)` +
@@ -351,7 +481,7 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
         `\n(${from})`;
       if (!(await deps.confirmAction(msg, { okLabel: '同じ物として取り込む', cancelLabel: 'やめる' }))) {
         deps.notify?.('取り込みをやめました');
-        return { ok: true, count: 0 };
+        return quiet({ declined: true });
       }
     }
     const baseline = regenerate === undefined ? toBaseline(snap.bases[peerDevice]?.baseline ?? {}) : {};
@@ -359,8 +489,11 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
     const now = deps.now?.() ?? new Date();
     // 🔴 本文の指紋は worker で測る(主スレッドで SHA-256 しない)
     const remoteNoteFps = await measureRemoteNotes(deps, diff.container.notes);
+    // 🔴 1 つのファイルを複数の相手が読む形(同期フォルダ)では、自分宛ての記録を使う(競合の連鎖を止める `peerBase`)
+    const mineBase = diff.container.peerBases?.[snap.device];
+    const remote = mineBase === undefined ? diff : { ...diff, container: { ...diff.container, peerBase: mineBase } };
     const plan = planSyncImport({
-      remote: diff,
+      remote,
       remoteNoteFps,
       localStates,
       localRelations: snap.relations,
@@ -391,6 +524,8 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
         trashExpect: plan.trashExpect,
         relationAdds: plan.relationAdds,
         relationRemoves: plan.relationRemoves,
+        labelSets: plan.labelSets,
+        pinSets: plan.pinSets,
         baseline: plan.baseline,
         nowIso: now.toISOString(),
       },
@@ -434,7 +569,7 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
 
     await deps.reload();
     const token: SyncUndoToken = applied.undo;
-    const undoable = token.entries.length > 0 || token.relationsAdded.length > 0 || token.relationsRemoved.length > 0;
+    const undoable = token.entries.length > 0 || token.relationsAdded.length > 0 || token.relationsRemoved.length > 0 || (token.attrs?.length ?? 0) > 0;
     if (undoable) {
       deps.rememberUndo?.({
         count: token.entries.length,
@@ -456,13 +591,16 @@ export async function importSyncDiff(deps: SyncDeps, file: File | Blob, name: st
       undoable,
     });
     const conflictCount = plan.conflicts.length + applied.raced.filter((x) => x.copyLid !== undefined).length;
-    deps.report(lines, { conflicts: conflictCount > 0 });
+    const changed = applied.written + applied.trashed + applied.relationsAdded + applied.relationsRemoved + applied.labelsChanged + applied.pinsChanged;
+    const worthReport = changed > 0 || conflictCount > 0 || plan.needFull.length > 0 || missing.length > 0 || bad.length > 0 || plan.summary.attrConflicts > 0 || regenerate !== undefined;
+    // 無人の回は、何も変わらず注意も無ければ面を出さない(5 分ごとに空の結果を出さない)
+    if (!auto || worthReport) deps.report(lines, { conflicts: conflictCount > 0 });
     if (conflictCount > 0) {
       const text = `端末間の同期で競合したノートが ${conflictCount} 件あります。${CONFLICT_HOWTO}。一覧は、ノートの検索で「同期の競合」を探すと出せます(取り込み結果の「競合のノートを一覧する」ボタンでも探せます)`;
       deps.postMessage?.({ kind: 'caution', source: 'sync', text, fixedHead: text });
     }
     deps.notify?.(`差分を取り込みました(${plan.summary.created + plan.summary.updated + plan.summary.merged + plan.summary.restored + plan.summary.trashed} 件を反映、競合 ${conflictCount} 件)`);
-    return { ok: true, count: applied.written + applied.trashed };
+    return { ok: true, count: applied.written + applied.trashed, needFull: plan.needFull.length > 0, changed, conflicts: conflictCount };
   } catch (e) {
     return fail(
       committed

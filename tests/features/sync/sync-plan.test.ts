@@ -220,6 +220,8 @@ describe('差分ファイル(zip)の読み書き', () => {
       tombstones: [{ key: 'z', lastFp: { content: 'c', place: '' }, device: DEV, seq: 2, deletedAt: '2026-11-01T00:00:00Z' }],
       fingerprints: fpList([st(n)]),
       peerBase: [],
+    labels: [],
+    pins: [],
       assets: () => [
         { key: 'ast-1', mime: 'image/png', size: 3, hash: null },
         { key: 'ast-missing', mime: 'image/png', size: 3, hash: null },

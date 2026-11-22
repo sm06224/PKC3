@@ -237,7 +237,10 @@ import { appMessagePost, READ_AT_KEY } from '@adapter/platform/message-post';
 import { appSyncEnabled } from '@adapter/ui/render/sync-enabled';
 import { SYNC_FORGET_CONFIRM, SYNC_FORGET_CONFIRM_ON_OFF, SYNC_FORGET_LABEL, SYNC_OFF_CONFIRM } from '@features/sync/sync-setting';
 import { SHOW_SYNC_CONFLICTS_ACTION } from '@adapter/ui/actions/sync-diff';
-import { backupSyncSeed, exportSyncDiff, importSyncDiff, seedSyncFromBackup, type SyncDeps } from '@adapter/ui/actions/sync-diff';
+import { applySyncDiff, backupSyncSeed, buildSyncDiff, exportSyncDiff, importSyncDiff, seedSyncFromBackup, type SyncDeps } from '@adapter/ui/actions/sync-diff';
+import { idbSyncFolderStore, SyncFolder, type SyncFolderPicker } from '@adapter/platform/sync-folder';
+import { appSyncFolderView } from '@adapter/ui/render/sync-folder-view';
+import { readDiffZip } from '@features/sync/diff-file';
 import { connectMessageSync, MESSAGES_CHANNEL } from '@adapter/platform/message-sync';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
 import { appWorkspaces } from '@adapter/platform/storage/workspace-run';
@@ -1845,6 +1848,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 判断は `features/folder-sync/folder-sync.ts`、読み書きは `platform/folder-sync.ts` ── ここは配線だけ。
    * ⚠ `importDeps` / `storeEffects` / `showStatus` はこの後で組まれる(押されるのは boot の後 ── 閉包で引く)。
    */
+  /** 同期フォルダ(#2000 段 3)の状態の一言。⚠ 実体は後で組まれる(それまでは空)── 起動の途中の塗りで TDZ に当たらない。 */
+  let syncFolderStatus: () => string = () => '';
   const folderSync = new FolderSync({
     picker: windowSyncPicker(),
     // 🔴 別のタブ・ウィンドウが同じフォルダを同期していたら重ならない(`navigator.locks`。無い環境は排他なし)
@@ -2329,7 +2334,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       statusBase,
       statusBaseSevere,
       sync,
-      folderSyncLine: folderSync.statusLine(),
+      folderSyncLine: [folderSync.statusLine(), syncFolderStatus()].filter((t) => t !== '').join(' / '),
       portableAssetNote,
       persistState,
       savingLine: saving.line(),
@@ -3761,6 +3766,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const forgetSyncRecords = async (): Promise<void> => {
     try {
       const r = await client.request({ op: 'syncForget' });
+      // 🔴 端末 id が変わるので、同期フォルダに前の id で置いた自分のファイルも片付ける(段 3)
+      await syncFolder.forgetRecords().catch(() => undefined);
       showStatus(`同期の記録を消しました(${r.removed} 件。ノートは消えていません)`);
     } catch (e) {
       appMessagePost.post({ kind: 'problem', source: 'sync', text: `同期の記録を消せませんでした: ${errorText(e)}` });
@@ -3795,13 +3802,68 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       reportProblem: (message) => showNotices(regions.notices, '端末間の同期の注意', [message]),
       // 🔴 書き出しの結果に、前の取り込みの「取り込みを取り消す」を出さない(別の回の操作を巻き込まない)
       reportExport: (notes) => showNotices(regions.notices, '差分の書き出し', notes),
-      reload: () => reloadSnapshot(dispatcher, cid, loadSnapshot),
+      // 🔴 色ラベル・ピン留めも同期で変わる(段 3)── 一覧と一緒に画面の写しを正本から読み直す
+      reload: async () => {
+        await reloadSnapshot(dispatcher, cid, loadSnapshot);
+        await Promise.all([reloadNotePins(), reloadNoteLabels()]);
+      },
       confirmAction: (message, opts) => ask(message, { okLabel: opts?.okLabel ?? '取り込む', cancelLabel: opts?.cancelLabel ?? 'やめる' }),
       genLid: generateLid,
       rememberUndo: (info) => importUndo.rememberCustom(info),
       postMessage: (m) => appMessagePost.post(m),
     };
   };
+
+  /**
+   * 🔴 **同期フォルダ(#2000 段 3)**。クラウドドライブのフォルダを通して、人がファイルを運ばずに同期する。
+   * 判断は `features/sync/sync-folder.ts`、取り込みの判定は段 1・2 の核(`applySyncDiff`)、handle・許可・タイマーは `platform/sync-folder.ts`。
+   * ⚠ 無人の回は結果の面を出さず、メッセージ(system 領域)に残す。確認が要る相手は「今すぐ同期」のときに聞く。
+   */
+  const syncFolderDeps = async (auto: boolean): Promise<SyncDeps> => {
+    const base = await syncDeps();
+    if (!auto) return base;
+    return {
+      ...base,
+      notify: () => undefined,
+      report: (notes, opts) => {
+        appMessagePost.post({ kind: opts?.conflicts === true ? 'caution' : 'result', source: 'sync', text: notes.join('\n') });
+      },
+      reportProblem: (message) => appMessagePost.post({ kind: 'problem', source: 'sync', text: message }),
+      // 無人の回は確認を出さない(`applySyncDiff` が `auto` で確認の要る物を取り込まずに返す)── 念のため「やめる」に倒す
+      confirmAction: async () => false,
+    };
+  };
+  const syncFolder = new SyncFolder({
+    cid: () => cid,
+    enabled: () => appSyncEnabled.enabled(),
+    picker: windowSyncPicker() as SyncFolderPicker | null,
+    store: idbSyncFolderStore(),
+    lock: windowSyncLock(),
+    device: async () => {
+      await ensureSyncConfigured();
+      const snap = await client.request({ op: 'syncSnapshot', cid, ensureDevice: true });
+      if (snap.device === null) throw new Error('端末の記録を作れませんでした');
+      return snap.device;
+    },
+    build: async (target) => buildSyncDiff(await syncFolderDeps(true), target),
+    apply: async (file, name, auto) => {
+      const diff = await readDiffZip(file);
+      return { outcome: await applySyncDiff(await syncFolderDeps(auto), diff, name, { auto, folder: true }), manifest: diff.manifest };
+    },
+    say: (text) => appMessagePost.post({ kind: 'result', source: 'sync', text }),
+    fail: (text) => appMessagePost.post({ kind: 'problem', source: 'sync', text }),
+    onChange: () => {
+      repaintPanes();
+      paint();
+    },
+    visible: () => document.visibilityState === 'visible',
+  });
+  appSyncFolderView.attach(() => syncFolder.view());
+  syncFolderStatus = () => syncFolder.statusLine();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') syncFolder.onVisible();
+  });
+  void syncFolder.boot();
 
   const importDeps: ImportDeps = {
       // 🔴 取り込みの最中にタブを閉じる・読み直すときに「離れますか」を出す(書込は保存の効果層を通らない)
@@ -4866,6 +4928,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       }
       appSyncEnabled.setEnabled(on);
       void configureSync().catch(() => undefined);
+      // 🔴 同期フォルダも入 / 切に合わせる(切の間は回らない。handle は憶えたまま)
+      void syncFolder.onEnabledChanged();
       showStatus(on ? '端末間の同期をオンにしました。コレクションの「書き出す ▾」に「差分を書き出す」が出ます' : '端末間の同期をオフにしました');
       if (!on) {
         // 🔴 切にするときに、同期の記録も消せる(残すと、次にオンにしたときに古い記録で判定される)
@@ -4878,6 +4942,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       await forgetSyncRecords();
     },
     exportSyncDiff: (all) => void withAssetGate(async () => exportSyncDiff(await syncDeps(), { all })),
+    // 🔴 同期フォルダ(#2000 段 3)── 選ぶ・許可を出し直すは押した操作の中で呼ぶ(`pick` / `reconnect` は最初の await の前に picker を撃つ)
+    syncFolder: {
+      pick: () => syncFolder.pick(),
+      syncNow: () => syncFolder.syncNow(true),
+      reconnect: () => syncFolder.reconnect(),
+      stop: () => syncFolder.stop(),
+      setMinutes: (m) => syncFolder.setMinutes(m),
+      allowPersist: () => syncFolder.allowPersist(),
+    },
     setAlarmEnabled: (on) => {
       appAlarmEnabled.setEnabled(on);
       // 🔴 切入の直後に 1 度見る(#1087)── 入にした時刻から見る / 切にしたら見た位置を忘れる。次の刻み(最大 30 秒)を待たない

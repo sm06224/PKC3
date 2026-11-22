@@ -758,4 +758,20 @@ describe('横に留めた並びの憶え方(#505 段②)', () => {
       "openContacts: () => services.setBrowse?.('contacts')",
     );
   });
+
+  it('🔴 端末間の同期(#2000 段 3): 取り込みの後に、一覧と一緒に色ラベル・ピン留めの写しも読み直す / 同期フォルダの配線', () => {
+    const at = MAIN.indexOf('const syncDeps = async (): Promise<SyncDeps> => {');
+    expect(at, 'syncDeps が見つからない').toBeGreaterThan(0);
+    const body = codeOnly(MAIN.slice(at, MAIN.indexOf('\n  };', at)));
+    const reload = body.slice(body.indexOf('reload:'), body.indexOf('confirmAction:'));
+    expect(reload, '一覧を読み直していない').toContain('reloadSnapshot(dispatcher, cid, loadSnapshot)');
+    expect(reload, '取り込みで変わったピン留めを画面に出さない').toContain('reloadNotePins()');
+    expect(reload, '取り込みで変わった色ラベルを画面に出さない').toContain('reloadNoteLabels()');
+    const code = codeOnly(MAIN);
+    // 同期フォルダ: 入 / 切に合わせる・画面に戻ったら回す・設定の画面へ姿を渡す・記録を消したら自分の古いファイルを片付ける
+    expect(code).toContain('void syncFolder.onEnabledChanged();');
+    expect(code).toContain('syncFolder.onVisible()');
+    expect(code).toContain('appSyncFolderView.attach(() => syncFolder.view())');
+    expect(code).toContain('await syncFolder.forgetRecords()');
+  });
 });

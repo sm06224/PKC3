@@ -1005,6 +1005,19 @@ export const EDITING_NOTE = '編集中は使えません(「編集を保存す�
  */
 export const ENTRY_GONE_NOTE = 'このノートはもう見つかりません(別のウィンドウで消えた可能性があります)';
 
+/** 本文の読み込みに失敗したときの知らせの頭(`BODY_LOAD_FAILED`)。⚠ 字は `bodyLoadFailed` と 1 組で読む。 */
+export const BODY_LOAD_FAILED_NOTE = '本文を読み込めませんでした';
+
+/**
+ * 🔑 **選んでいるノートの本文の読み込みが失敗したか**(#2021)。`BODY_LOAD_FAILED` は `openBody` を null のまま
+ *   `error` だけ立てる ── 情報ペインが「本文待ち」と取り違えて、場所だけ取った空白を出し続けないための問い。
+ */
+export function bodyLoadFailed(state: Pick<AppState, 'error'>): boolean {
+  const e: unknown = state.error;
+  // ⚠ 部分的に組んだ state(error の無い物)でも落ちない ── `null` 比較だけだと undefined が `startsWith` へ届く
+  return typeof e === 'string' && (e === ENTRY_GONE_NOTE || e.startsWith(`${BODY_LOAD_FAILED_NOTE}: `));
+}
+
 /**
  * 🔴 **題名の欄を空にして確定したときの知らせ**(#1087)。⚠ 画面に出る字なので 1 か所に置く。
  * 直す前は黙って元の題名に戻していた ── 保存した user には「空にしたのに戻った」だけが見える。

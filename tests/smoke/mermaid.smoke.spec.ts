@@ -902,15 +902,49 @@ test('🔴 grafu を押して開く別窓は、画面より大きく焼き直さ
 /**
  * #1467: **打っている間は、画面の外の図の先読みを始めない**。見えている図は焼く。
  *
- * 観測点は「画面の外にあって、焼き終わった図の数」── 先読みが走れば増え、止まっていれば 0 のまま。
- * ⚠ 見えている図の数ではない(打つたびに焼き直るので、数が動く)。
- * ⚠ 打ち終えて 1 秒ほどたつと数が増える(= 止めっぱなしではない)ことを対で見る。
+ * 🔴 観測点は「**画面の外にある図を、打っている間に焼き始めたか**」── 焼き始めた瞬間に器へ立つ
+ *   `aria-busy="true"` をページの中の MutationObserver で拾い、**その瞬間の**位置と時刻を控える。
+ *   時刻は打鍵(`input`)と同じページの時計(`performance.now`)で測る。
+ * ⚠ 2026-11-21 まで「打ち終えた時点で、画面の外にあって焼き終わった図の数」を見ていた ── 負荷が高いと
+ *   次の 2 つが**打つ前に**始まって打っている間に焼き上がり、製品は正しいのに落ちた(実測 9/30):
+ *   - `fill` の直後はカーソルが末尾にあり、プレビューが末尾へ追従して**最後の図が見えた**(見えた図は焼く)。
+ *     `Control+Home` で画面の外へ動き、「外で焼けた」に数えられた。
+ *   - `fill` から最初の打鍵まで 1 秒(`TYPING_QUIET_MS`)以上空き、**打つ前に**先読みが 1 束始まった。
+ *   どちらも「打っている間に始めた」ではない。焼き上がった時刻では区別がつかないので、始めた時刻で見る。
+ * ⚠ 打鍵と打鍵の間が負荷で 1 秒以上空いたときに始めたもの(製品は正しく再開している)は数えない ──
+ *   「直前の打鍵から 1 秒たっていない」間に始めたものだけを違反とする(製品の判定と同じ定義)。
+ * ⚠ 打ち終えて 1 秒ほどたつと画面の外の図が焼ける(= 止めっぱなしではない)ことを対で見る。
  */
 test('🔴 打っている間は画面の外の図を先読みせず、止まると再開する (#1467)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1280, height: 800 });
+  // 🔑 打鍵の記録は**製品より先に**付ける(init script はページの script より前に走る)。同じ打鍵なら
+  //    この記録の時刻 ≤ 製品が控えた時刻になるので、製品と**同じ 1 秒ちょうど**で判定できる(余白が要らない)
+  await page.addInitScript(() => {
+    const w = window as unknown as { __pkcKeys: number[] | null };
+    w.__pkcKeys = null; // null の間(打つ前)は控えない
+    document.addEventListener('input', () => w.__pkcKeys?.push(performance.now()), true);
+  });
   await gotoApp(page);
   await createEntry(page, 'text');
+  // 🔑 焼き始めの記録(ページの時計)。プレビューは描き直されるので document ごと見る
+  await page.evaluate(() => {
+    type Start = { t: number; off: boolean };
+    const w = window as unknown as { __pkcBakeStarts: Start[] };
+    w.__pkcBakeStarts = [];
+    new MutationObserver((records) => {
+      const t = performance.now();
+      for (const r of records) {
+        const h = r.target as HTMLElement;
+        if (h.getAttribute('aria-busy') !== 'true' || !h.hasAttribute('data-pkc-mermaid-src')) continue;
+        const pane = h.closest('[data-pkc-region="editor-preview"]');
+        if (pane === null) continue;
+        const p = pane.getBoundingClientRect();
+        const b = h.getBoundingClientRect();
+        w.__pkcBakeStarts.push({ t, off: b.bottom < p.top || b.top > p.bottom });
+      }
+    }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['aria-busy'] });
+  });
   const parts: string[] = [];
   for (let i = 0; i < 40; i++) {
     parts.push(`## 節 ${i}`, '', '```mermaid', 'graph TD', `  A${i}["始め ${i}"]-->B${i}["終わり ${i}"]`, '```', '');
@@ -918,32 +952,68 @@ test('🔴 打っている間は画面の外の図を先読みせず、止まる
   }
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await ta.fill(parts.join('\n'));
-  // 🔑 すぐ打ち始める ── 待つと、打つ前に先読みが進んでしまう(対照にならない)
-  await ta.press('Control+Home'); // ⚠ 末尾へ飛ぶと、見えていた図が画面の外へ動いて「外で焼けた」に数えてしまう
-  const offscreenReady = (): Promise<{ off: number; on: number }> =>
+  await ta.press('Control+Home'); // ⚠ 末尾に居たままだと、プレビューが末尾の図を見せ続ける
+  // 🔑 図の器が 40 個ともプレビューに入ってから打ち始める ── 入る前に打ち終えると、先読みする相手が
+  //    居ないまま緑になる(負荷が高いと、打ち終えても器が 1 つも無いことがあった)。
+  //    ⚠ ここで長く待つと打つ前に先読みが全部済む ── それは下の「再開する」の対照が落として知らせる
+  await expect(page.locator('[data-pkc-region="editor-preview"] [data-pkc-mermaid-src]')).toHaveCount(40, {
+    timeout: 20_000,
+  });
+  await page.evaluate(() => {
+    (window as unknown as { __pkcKeys: number[] }).__pkcKeys = [];
+  });
+  await page.keyboard.type('abcdefghijklmnopqrst', { delay: 100 });
+  const quietMs = 1000; // `TYPING_QUIET_MS`(src/adapter/ui/render/typing-gate.ts)
+  // ⚠ 最後の打鍵から 1 秒は、まだ「打っている間」── その間に始めた物も数えるため、明けるまで待ってから読む
+  await page.waitForFunction(
+    (ms) => {
+      const k = (window as unknown as { __pkcKeys: number[] }).__pkcKeys;
+      return k.length > 0 && performance.now() > k[k.length - 1]! + ms;
+    },
+    quietMs,
+  );
+  const log = await page.evaluate(() => {
+    const w = window as unknown as { __pkcBakeStarts: { t: number; off: boolean }[]; __pkcKeys: number[] };
+    return { starts: [...w.__pkcBakeStarts], keys: [...w.__pkcKeys] };
+  });
+  // ① 空振り防止 ── 打鍵を全部拾えている / 焼き始めの印を拾えている(見えている図は必ず焼く)
+  expect(log.keys.length, '打鍵の input を拾えていない(この検査は何も見ていない)').toBe(20);
+  expect(log.starts.length, '焼き始めの印(aria-busy)を 1 つも拾えていない').toBeGreaterThan(0);
+  // ② 🔴 打っている間(直前の打鍵から 1 秒未満)に、画面の外の図を焼き始めていない ── 製品の判定と同じ境界
+  const typingAt = (t: number): boolean => log.keys.some((k) => k <= t && t - k < quietMs);
+  const violations = log.starts.filter((s) => s.off && typingAt(s.t));
+  expect(
+    violations.length,
+    `打っている間に、画面の外の図の先読みを始めた(${JSON.stringify(violations)} / 打鍵 ${JSON.stringify(log.keys)})`,
+  ).toBe(0);
+  // 対照 ── 止まれば先読みが再開する(止めっぱなしでは、長いノートの図が一生焼けない)
+  const offscreenReady = (): Promise<number> =>
     page.evaluate(() => {
       const pane = document.querySelector('[data-pkc-region="editor-preview"]')!.getBoundingClientRect();
       let off = 0;
-      let on = 0;
       for (const h of document.querySelectorAll<HTMLElement>(
         '[data-pkc-region="editor-preview"] [data-pkc-mermaid-src]',
       )) {
         if (h.getAttribute('data-pkc-mermaid-state') !== 'ready') continue;
         const r = h.getBoundingClientRect();
         if (r.bottom < pane.top || r.top > pane.bottom) off += 1;
-        else on += 1;
       }
-      return { off, on };
+      return off;
     });
-  await page.keyboard.type('abcdefghijklmnopqrst', { delay: 100 });
-  const during = await offscreenReady();
-  expect(during.off, '打っている間に、画面の外の図が先読みで焼かれた').toBe(0);
-  // 対照 ── 止まれば先読みが再開する(止めっぱなしでは、長いノートの図が一生焼けない)
+  const lastKey = log.keys[log.keys.length - 1]!;
   await expect
-    .poll(async () => (await offscreenReady()).off, {
-      timeout: 30000,
-      message: '打つのをやめても先読みが再開しない',
-    })
+    .poll(
+      async () => {
+        const starts = await page.evaluate(
+          () => (window as unknown as { __pkcBakeStarts: { t: number; off: boolean }[] }).__pkcBakeStarts,
+        );
+        return starts.filter((s) => s.off && s.t >= lastKey + quietMs).length;
+      },
+      { timeout: 30000, message: '打つのをやめても先読みが再開しない(画面の外の図を焼き始めない)' },
+    )
+    .toBeGreaterThan(0);
+  await expect
+    .poll(offscreenReady, { timeout: 30000, message: '打つのをやめても画面の外の図が焼き上がらない' })
     .toBeGreaterThan(0);
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });

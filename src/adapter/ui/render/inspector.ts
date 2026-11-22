@@ -37,7 +37,7 @@
  * **毎回値を計算して、違うものだけ書く**なら、その族は原理的に発生しない。
  * ⚠ 器を組み直すのは**形が変わるときだけ**(選択の有無 / 「書き戻す」の有無)。
  */
-import { blockedActionNote, type AppState } from '@adapter/state/app-state';
+import { blockedActionNote, bodyLoadFailed, type AppState } from '@adapter/state/app-state';
 import type { EntryMeta } from '@core/model/entry-meta';
 import { ScrollMemory } from './scroll-memory';
 import { hasTranscriptCues } from '@features/asr/srt';
@@ -125,6 +125,24 @@ function setText(el: HTMLElement, value: string): void {
 /** 属性も同じ ── 同じ値の再代入で mutation observer を起こさない。 */
 function setAttr(el: HTMLElement, name: string, value: string): void {
   if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+}
+
+/**
+ * 🔴 **本文を待っている間、場所だけ取っておく印**(フル smoke で「その他 ▾」の押しが外れた件、2026-11-21)。
+ *
+ * ⚠ ノートを選んだ直後は本文がまだ届いていない。その間に「担当」の行・タグを打つ欄・字数の行を**畳む**と、
+ *   本文が届いた瞬間に行が差し込まれ、下の操作の帯(「その他 ▾」)が約 100px 押し下げられる
+ *   (1440x900 で 575 → 483 → 583px と跳ねるのを実測)。選んですぐ押すと、押した所に別の物が来ている。
+ * 🔑 だから畳まずに**場所を取ったまま見せない**(CSS の `visibility: hidden`)── 「無し」と嘘をつかず、
+ *   `inert` で押させも焦点も取らせもしない(押しても何も起きない口を作らない)。届いたら外す。
+ * ⚠ 本文を持たない形(フォルダの担当など)・書けない理由がある形(編集中のタグ欄)は、いままでどおり畳む ──
+ *   届かない物のために空き地を作らない。
+ */
+export const PENDING_ATTR = 'data-pkc-pending';
+function setPending(el: HTMLElement, on: boolean): void {
+  if (el.hasAttribute(PENDING_ATTR) === on) return;
+  el.toggleAttribute(PENDING_ATTR, on);
+  el.toggleAttribute('inert', on);
 }
 
 /**
@@ -910,7 +928,10 @@ export class InspectorRenderer {
      *   読めるようにする。
      */
     if (this.tagForm) {
-      this.tagForm.hidden = !canWriteTags;
+      // 🔑 本文待ち(届けば打てる)は場所を取ったまま見せない(`PENDING_ATTR`)。他の打てない理由は畳む
+      const tagPending = tagBody === null && state.phase === 'ready' && !bodyLoadFailed(state);
+      this.tagForm.hidden = !(canWriteTags || tagPending);
+      setPending(this.tagForm, tagPending);
     }
     /**
      * 🔴 **関係を出す**(#185)。⚠ 出すのは**親子以外** ── 居場所は上の行が既に
@@ -1302,11 +1323,18 @@ export class InspectorRenderer {
       const isAttachment = meta.archetype === 'attachment';
       // ⚠ 分数の元は**開いている本文**(題名の下と同じ字)。閉じている間は字数だけ(#1087)
       const openedBody = state.openBody?.lid === meta.lid ? state.openBody.body : null;
-      const hide = isFolder || isAttachment || (openedBody === null && meta.bodyChars === null);
+      // 🔑 字数をまだ知らない(本文待ち・保存済みの長さも無い)間は畳まず、場所だけ取る(`PENDING_ATTR`)
+      const unknown = openedBody === null && meta.bodyChars === null;
+      // ⚠ 読み込みに失敗したら待たない(従来どおり畳む)
+      const failed = unknown && bodyLoadFailed(state);
+      const pending = !isFolder && !isAttachment && unknown && !failed;
+      const hide = isFolder || isAttachment || failed;
       statsDd.hidden = hide;
       if (dt instanceof HTMLElement) dt.hidden = hide;
-      if (hide) this.statsEstimate = null;
-      if (!hide) {
+      setPending(statsDd, pending);
+      if (hide || pending) this.statsEstimate = null;
+      if (pending) setText(statsDd, '…');
+      if (!hide && !pending) {
         /**
          * 🔴 **字数は見た目の字数(書記素)**(依頼 165 / 315)。閉じていて本文が手元に無い間だけ、
          *   保存済みの長さ(UTF-16)をそのまま出す ── 開いたら数え直す。
@@ -1684,12 +1712,19 @@ export class InspectorRenderer {
     if (!dd) return;
     const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
     const dt = dd.previousElementSibling;
-    // 本文がまだ無い(読み込み中)/ フォルダなど本文を持たない種類は、行ごと畳む(「無し」と嘘をつかない)
-    const known = body !== null && meta.archetype !== 'folder';
-    dd.hidden = !known;
-    if (dt instanceof HTMLElement) dt.hidden = !known;
-    if (!known) return;
-    const owner = readScheduleOwner(parseFrontmatter(body).meta);
+    // フォルダなど本文を持たない種類は、行ごと畳む。本文がまだ無い(読み込み中)間は、場所だけ取って見せない
+    // (「無し」と嘘をつかない・届いたときに下の操作を押し下げない ── `PENDING_ATTR`)
+    const bodyKind = meta.archetype !== 'folder';
+    // ⚠ 読み込みに失敗したら待たない(届かない物のために空き地を残さない ── 従来どおり畳む)
+    const failed = body === null && bodyLoadFailed(state);
+    const pending = bodyKind && body === null && !failed;
+    const show = bodyKind && !failed;
+    dd.hidden = !show;
+    if (dt instanceof HTMLElement) dt.hidden = !show;
+    setPending(dd, pending);
+    if (!show) return;
+    // ⚠ 待っている間は「担当が無い」形で場所を取る(前のノートの担当の名前を持ち越さない)
+    const owner = body === null ? null : readScheduleOwner(parseFrontmatter(body).meta);
     let name = dd.querySelector<HTMLElement>('[data-pkc-field="inspector-owner-name"]');
     let set = dd.querySelector<HTMLButtonElement>('[data-pkc-action="set-entry-owner"]');
     let clear = dd.querySelector<HTMLButtonElement>('[data-pkc-action="clear-entry-owner"]');

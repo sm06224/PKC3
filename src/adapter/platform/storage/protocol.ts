@@ -884,6 +884,10 @@ export interface SyncApplyInput {
   trashExpect?: Record<string, { content: string; place?: string }>;
   relationAdds: Array<{ from: string; to: string; kind: string }>;
   relationRemoves: Array<{ from: string; to: string; kind: string }>;
+  /** 色ラベルを付ける・変える / 外す(`null`)(段 3)。⚠ 省略 = 触らない(印を運ばない差分)。 */
+  labelSets?: Array<{ lid: string; color: number | null }>;
+  /** ピン留めを付ける / 外す(段 3)。 */
+  pinSets?: Array<{ lid: string; on: boolean }>;
   baseline: Record<string, { content: string; place?: string }>;
   nowIso: string;
 }
@@ -896,6 +900,9 @@ export interface SyncApplyResult {
   relationsRemoved: number;
   /** 親フォルダが張れず(輪になる・宛先が無い)ルートへ置いた数。 */
   placedAtRoot: number;
+  /** 実際に変えた色ラベル・ピン留めの数(段 3)。 */
+  labelsChanged: number;
+  pinsChanged: number;
   /** 計画を立ててから反映するまでの間に、こちらで編集されていた物(書かずに残した)。コピーを足した物は `copyLid` がある。 */
   raced: Array<{ lid: string; title: string; copyLid?: string; copyTitle?: string; trash?: boolean }>;
   undo: SyncUndoToken;
@@ -931,6 +938,11 @@ export interface SyncUndoToken {
   relationsAdded: string[];
   relationsRemoved: Array<{ id: string; from: string; to: string; kind: string }>;
   rows: Array<{ scope: string; k: string; prev: string | null }>;
+  /**
+   * 色ラベル・ピン留めの前の値と、取り込みで書いた値(段 3)。⚠ 取り消しは**いまの値が書いた値のままのときだけ**戻す
+   * (取り込み後に user が付け直した印は触らない ── ノートの「取り込み後の編集は触らない」と同じ作法)。
+   */
+  attrs?: Array<{ scope: string; k: string; prev: string | null; applied: string | null }>;
 }
 
 export interface SyncSnapshotResult {
@@ -942,6 +954,9 @@ export interface SyncSnapshotResult {
   tombstones: Array<{ key: string; lastFp: { content: string; place?: string }; device: string; seq: number; deletedAt?: string }>;
   /** 相手の端末 id → 相手のワークスペースの cid。 */
   pairs: Record<string, string>;
+  /** 生きているノートの色ラベル・ピン留め(段 3)。 */
+  labels: Array<{ lid: string; color: number }>;
+  pins: string[];
   /** 相手の端末 id → 前回の合意と、その時刻。 */
   bases: Record<string, { baseline: Record<string, { content: string; place?: string }>; at: string | null }>;
   /** 連番 → 書き出した指紋の要約。 */

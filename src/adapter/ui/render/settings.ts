@@ -75,6 +75,8 @@ import { createInlineCompleteSection } from './settings/inline-complete';
 import { createPasteSourceSection } from './settings/paste-source';
 import { createAlarmEnabledSection } from './settings/alarm-enabled';
 import { createSyncEnabledSection } from './settings/sync-enabled';
+import { createSyncFolderSection } from './settings/sync-folder';
+import { appSyncFolderView, type SyncFolderViewSource } from './sync-folder-view';
 import { appSyncEnabled, type SyncEnabledStore } from './sync-enabled';
 import { createVoiceBoostSection } from './settings/voice-boost';
 import { createOpenPlaceSection } from './settings/open-place';
@@ -254,6 +256,10 @@ export class SettingsRenderer {
      * 🔴 **端末間の同期を使うか**(#2000 段 2。既定は切)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly syncEnabled: SyncEnabledStore = appSyncEnabled,
+    /**
+     * 🔴 **同期フォルダのいまの姿**(#2000 段 3)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly syncFolderView: SyncFolderViewSource = appSyncFolderView,
   ) {
     /**
      * 🔴 **節の登録表(#1382)── 並びが画面の並びである。** 節を足す = `settings/` に 1 file 足し、
@@ -308,6 +314,8 @@ export class SettingsRenderer {
       createTooNarrowSection(region, tooNarrowOk),
       createPersistSection(region),
       createSyncEnabledSection(region, syncEnabled),
+      // 🔴 同期フォルダ(#2000 段 3)── 端末間の同期のすぐ下(オンのときだけ押せる)
+      createSyncFolderSection(region, syncFolderView, syncEnabled),
       createNoticesSection(region, notices),
       createNoticeListSection(noticeList),
     ];
