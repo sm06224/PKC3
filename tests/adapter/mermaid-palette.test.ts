@@ -28,7 +28,7 @@ import {
 } from '../../src/adapter/ui/render/mermaid-raster';
 
 const DARK: DiagramPalette = {
-  bg: '#14171a',
+  bg: '#111316',
   alt: '#23282d',
   fg: '#e3e7eb',
   line: '#9aa4af',
@@ -39,10 +39,10 @@ const DARK: DiagramPalette = {
 
 describe('地が暗いかの判定', () => {
   it('🔴 テーマ名ではなく**色の明るさ**で決める(新しい配色にも効く)', () => {
-    expect(isDarkColor('#14171a')).toBe(true); // dark
+    expect(isDarkColor('#111316')).toBe(true); // dark
     expect(isDarkColor('#282a36')).toBe(true); // dracula
     expect(isDarkColor('#3b4252')).toBe(true); // nord
-    expect(isDarkColor('#0d0f0a')).toBe(true); // terminal
+    expect(isDarkColor('#070805')).toBe(true); // terminal
     expect(isDarkColor('#ffffff')).toBe(false); // light
     expect(isDarkColor('#fdf6e3')).toBe(false); // solarized
   });

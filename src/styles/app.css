@@ -10179,7 +10179,7 @@ mark[data-pkc-diff-char='del'] {
     max-height: 30vh;
     overflow-y: auto;
     border-left: none;
-    border-top: 1px solid var(--border);
+    /* 上の境目は縁のヘアライン(上の `[data-pkc-region='inspector']` の `box-shadow`。#1982 ②)が引く ── 線を重ねない */
   }
 }
 

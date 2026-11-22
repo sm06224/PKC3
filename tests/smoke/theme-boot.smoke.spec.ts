@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { clickReal, gotoApp } from './helpers';
 
 /**
@@ -82,7 +83,10 @@ test('🔴 OS がダークなら、body が生える前に配色が当たって�
     const meta = await page
       .locator('meta[name="theme-color"]')
       .getAttribute('content', { timeout: 10_000 });
-    expect(meta?.toLowerCase(), '枠の色がダークの地の色になっていない').toBe('#14171a');
+    // ⚠ 期待値は tokens.css の dark の `--bg` から読む(値を写さない ── 2026-11-22 の #1982 ② で机の色が変わり、写した値が腐った)
+    const darkBg = /:root\[data-pkc-theme='dark'\] \{[^}]*?--bg:\s*(#[0-9a-f]{6})/i.exec(readFileSync('src/styles/tokens.css', 'utf8'))?.[1];
+    expect(darkBg, '対照群: tokens.css から dark の机の色が読めている').toMatch(/^#[0-9a-f]{6}$/i);
+    expect(meta?.toLowerCase(), '枠の色がダークの地の色になっていない').toBe(darkBg!.toLowerCase());
   } finally {
     await context.close();
   }
