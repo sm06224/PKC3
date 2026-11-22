@@ -90,6 +90,8 @@ export function installSectionBox(
   release.hidden = true;
   row.append(save, cancel, release);
   box.append(ta, row);
+  // 🔴 ログの新しい順(#2018 1)では塊に見た目の順(`order`)が付いている ── 箱は置き換えた塊の順を継ぐ(継がないと 0 で先頭へ飛ぶ)
+  if (anchor instanceof HTMLElement && anchor.style.order !== '') box.style.order = anchor.style.order;
   anchor.before(box);
   /**
    * 🔴 **外す前に、掴む取っ手(⠿)がこの塊を指していないか確かめる**

@@ -17,6 +17,7 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { PAINTED_ATTR } from '../../src/adapter/ui/render/detail';
 import { AGENT_APPEND_BATCH } from '../../src/adapter/state/app-state';
 import { vi } from 'vitest';
+import { listAppendTargets } from '../../src/features/markdown/append-target';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
 const DOC = [
@@ -137,6 +138,32 @@ describe('#2018 2 追記欄以外の追記でも、足した所へ送る', () =>
     await settle();
     expect(s.d.getState().lastAppend?.lid).toBe('n1');
     expect(s.blocks.at(-1)!.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('🔴 途中へ足した追記は、末尾ではなく足した所(`at` の行)の塊へ送る', async () => {
+    const s = setup();
+    await open(s);
+    // 1 件目の記録(行 0〜11)の中へ AI が差し挟む ── 足した行は 2 件目の見出し(行 12)の手前に入る
+    const slug = listAppendTargets(DOC)[0]!.slug;
+    s.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'n1', text: '途中の字', heading: null, target: slug, batch: AGENT_APPEND_BATCH });
+    await settle();
+    expect(s.failures).toEqual([]);
+    const at = s.d.getState().lastAgentAppend?.at;
+    expect(at, '前提: 足した位置が記録されていない').toBe(12);
+    expect(s.blocks[2]!.scrollIntoView, '足した行(12〜)の塊へ送っていない').toHaveBeenCalled();
+    expect(s.blocks[3]!.scrollIntoView, '末尾の塊へ送った(`at` を見ていない)').not.toHaveBeenCalled();
+  });
+
+  it('🔴 追記欄から足したときは追記欄の送りだけ(同じ追記で 2 度送らない)', async () => {
+    const s = setup();
+    await open(s);
+    const total = (): number => s.blocks.reduce((n, b) => n + (b.scrollIntoView as ReturnType<typeof vi.fn>).mock.calls.length, 0);
+    s.q<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!.value = '欄の字';
+    s.q('[data-pkc-action="append-entry"]')!.click();
+    await settle();
+    expect(s.failures).toEqual([]);
+    expect(s.d.getState().lastAppend?.lid, '前提: 追記が着いていない').toBe('n1');
+    expect(total(), '追記欄の送りと、他の経路の送りが重なった').toBe(1);
   });
 
   it('⚠ 対照群: 開いていないノートへの追記では動かさない', async () => {

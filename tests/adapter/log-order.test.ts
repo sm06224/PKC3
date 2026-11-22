@@ -19,6 +19,8 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { buildChoiceRow } from '../../src/adapter/ui/render/choice-buttons';
 import { LOG_ORDER_SELECT_FIELD, LOG_ORDER_VALUE_ATTR } from '../../src/adapter/ui/render/settings/log-order';
+import { installSectionBox } from '../../src/adapter/ui/render/section-box';
+import { installCodeBox } from '../../src/adapter/ui/render/code-box';
 
 // 前置き / 10-09 の 2 件(1 件目は入れ子つき)/ 10-10 の 1 件
 const HTML =
@@ -173,5 +175,53 @@ describe('CSS: flex はログの新しい順だけ(通常のノートの流れ�
     const margin = rules.filter((r) => /margin-block-end/.test(r.body) && r.sel.includes('data-pkc-log-days'));
     expect(margin.length).toBeGreaterThan(0);
     for (const r of margin) expect(r.sel).toContain("[data-pkc-log-order='desc']");
+  });
+});
+
+describe('編集の箱も見た目の順を継ぐ(着地前レビュー ⚠2)', () => {
+  /** 刻印つきの新しい順のログ(1 件目 = 行 0〜2、2 件目 = 行 4〜6)。 */
+  function stamped(): HTMLElement {
+    const h = document.createElement('div');
+    h.setAttribute(LOG_DAYS_HOST_ATTR, '');
+    h.setAttribute(LOG_ORDER_ATTR, 'desc');
+    h.innerHTML =
+      '<h2 data-pkc-source-line="0">2026-10-09 09:00:00</h2><p data-pkc-source-line="2">古い</p>' +
+      '<h2 data-pkc-source-line="4">2026-10-10 09:00:00</h2><div class="pkc-md-block" data-pkc-md-block-kind="code" data-pkc-source-line="6" data-pkc-source-end="8"><pre><code>x</code></pre></div>';
+    document.body.append(h);
+    applyHeadingFold(h);
+    return h;
+  }
+
+  it('🔴 章の箱は置き換えた見出しの order を継ぐ(0 のまま先頭へ飛ばない)', () => {
+    const h = stamped();
+    const want = h.querySelectorAll<HTMLElement>('h2')[0]!.style.order;
+    expect(want, '前提: 新しい順の order が付いていない').not.toBe('');
+    installSectionBox(h, { from: 0, to: 4, text: '## 2026-10-09 09:00:00\n\n古い\n' });
+    const box = h.querySelector<HTMLElement>('[data-pkc-region="section-draft"]')!;
+    expect(box, '前提: 箱が置かれていない').not.toBeNull();
+    expect(box.style.order).toBe(want);
+  });
+
+  it('🔴 コードの箱も置き換えた塊の order を継ぐ', () => {
+    const h = stamped();
+    const want = h.querySelector<HTMLElement>('.pkc-md-block')!.style.order;
+    expect(want).not.toBe('');
+    const ta = installCodeBox(h, { line: 6, text: '```\nx\n```' });
+    expect(ta, '前提: コードの箱が置かれていない').not.toBeNull();
+    const box = ta!.closest<HTMLElement>('[data-pkc-region]')!;
+    expect(box.parentElement).toBe(h);
+    expect(box.style.order).toBe(want);
+  });
+});
+
+describe('CSS: 紙は書いた順(着地前レビュー 🔴1)', () => {
+  it('🔴 印刷の節で、新しい順の器を block に `!important` で戻している(画面の flex は後ろに在るので素の宣言では負ける)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync('src/styles/app.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const at = css.indexOf('@media print');
+    expect(at, '印刷の節が無い').toBeGreaterThanOrEqual(0);
+    const print = css.slice(at);
+    expect(print).toMatch(/\[data-pkc-log-days\]\[data-pkc-log-order='desc'\]\s*\{\s*display:\s*block\s*!important;/);
+    expect(print).toMatch(/\[data-pkc-field='log-order'\],\s*\[data-pkc-log-all\]\s*\{\s*display:\s*none\s*!important;/);
   });
 });

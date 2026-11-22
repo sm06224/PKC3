@@ -91,6 +91,8 @@ export function installCodeBox(
   release.hidden = true;
   row.append(save, cancel, release);
   box.append(ta, row);
+  // 🔴 ログの新しい順(#2018 1)── 箱は置き換えた塊の見た目の順(`order`)を継ぐ(`section-box.ts` と同じ)
+  if (anchor instanceof HTMLElement && anchor.style.order !== '') box.style.order = anchor.style.order;
   anchor.before(box);
   releaseGripIfTargeting(host, [anchor]);
   anchor.remove();

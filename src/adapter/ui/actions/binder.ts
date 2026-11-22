@@ -4581,6 +4581,8 @@ const APPEND_BOX_JUMPING = new Set<string>();
  * `order` なので、同じ塊へ `scrollIntoView` すれば見えている位置へ行く)。
  * ⚠ **別の窓の追記では動かない**(#782 A)── 別の窓の書き込みはこの窓の `lastAppend` を動かさない。
  * ⚠ 追記欄の押しは自分で送る(`APPEND_BOX_JUMPING`)ので、ここは手を出さない。
+ * ⚠ `lastAppend` は「行を差し挟む」経路(写真のドロップ・別のノートからの塊の移動 = `insert-lines`)でも動く ──
+ *   それらも開いているノートに入れた字なので、同じく足した所へ送る(見えていれば動かない `nearest`)。
  * @returns 外す関数
  */
 function watchAppendScroll(dispatcher: Dispatcher, root: HTMLElement): () => void {

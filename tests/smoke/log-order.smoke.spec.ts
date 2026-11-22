@@ -61,6 +61,15 @@ test('🔴 ログの並べ替え: 新しい記録が上に来て、入れ子は�
   expect(old1, '入れ子の追いログが親の下に居ない').toBeLessThan(follow1);
   expect(await page.evaluate(() => localStorage.getItem('pkc3.log-order'))).toBe('desc');
 
+  // 🔴 紙は書いた順(着地前レビュー 🔴1 ── 画面の flex の規則が印刷の節より後ろに在り、素の宣言では負けていた)
+  await page.emulateMedia({ media: 'print' });
+  expect(await page.locator(BODY).evaluate((el) => getComputedStyle(el).display), '印刷でも flex のまま').toBe('block');
+  await expect(btn, '並べ替えのボタンが紙に出る').toBeHidden();
+  const [oldP, , newP] = (await tops(page, ['古い記録', '古い記録の追い', '新しい記録'])) as [number, number, number];
+  expect(oldP, '紙が新しい順のまま').toBeLessThan(newP);
+  await page.emulateMedia({ media: 'screen' });
+  await expect(btn).toBeVisible();
+
   // 設定画面の列も「新しい順」(双方向)── そこで「古い順」を押すと戻る
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   const choice = page.locator('[data-pkc-field="log-order-select"]');
