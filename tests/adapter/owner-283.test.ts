@@ -272,7 +272,11 @@ describe('情報ペインの「担当」の行', () => {
     expect(name.getAttribute('data-pkc-entry')).toBe('c1');
   });
 
-  it('本文がまだ来ていない間は行ごと畳む(「無し」と嘘をつかない)', () => {
+  /**
+   * ⚠ 畳むと本文が届いた瞬間に行が差し込まれ、下の「その他 ▾」が押し下げられる(フル smoke で押しが外れた)。
+   *   だから**場所だけ取って見せない・押させない**(`data-pkc-pending` + `inert`。CSS は `visibility: hidden`)。
+   */
+  it('本文がまだ来ていない間は見せず押させない(「無し」と嘘をつかない)── 場所だけ取る', () => {
     document.body.textContent = '';
     const root = document.createElement('div');
     document.body.append(root);
@@ -280,7 +284,11 @@ describe('情報ペインの「担当」の行', () => {
     let s = reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] }).state;
     s = reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state;
     inspector.render(s);
-    expect(root.querySelector<HTMLElement>('[data-pkc-field="inspector-owner"]')!.hidden).toBe(true);
+    const dd = root.querySelector<HTMLElement>('[data-pkc-field="inspector-owner"]')!;
+    expect(dd.hasAttribute('data-pkc-pending'), '待ちの印が無い(見えてしまう)').toBe(true);
+    expect(dd.hasAttribute('inert'), '押せてしまう').toBe(true);
+    expect(dd.querySelector('[data-pkc-field="inspector-owner-name"]'), '担当の名前を出している').toBeNull();
+    expect(dd.querySelector<HTMLElement>('[data-pkc-action="clear-entry-owner"]')!.hidden, '「担当を外す」を出している').toBe(true);
   });
 });
 
