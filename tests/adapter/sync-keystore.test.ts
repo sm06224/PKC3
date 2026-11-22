@@ -234,7 +234,10 @@ describe('🔴 鍵が書き出しの経路に混ざらない(user の必須ガ�
    * 🔑 鍵の口を import してよい file の一覧(理由つき)。⚠ 書き出し(バックアップ・差分 zip・設定ファイル・メッセージ)の file は
    *   ここに入れない ── 入れたくなったら、それは鍵を書き出しへ運ぶ道を作ろうとしている。
    */
-  const ALLOWED_IMPORTERS: Record<string, string> = {};
+  const ALLOWED_IMPORTERS: Record<string, string> = {
+    // 段 4a-3: S3 の保管先は接続情報と秘密の**型**だけを読む(秘密は呼び手が `open` で開いて渡す)。書き出しの経路ではない
+    [join('src', 'adapter', 'platform', 's3-box.ts')]: 'S3 の保管先(型だけ)',
+  };
 
   it('🔴 鍵の口を import している file は、許した物だけ(書き出しの経路は 1 つも無い)', () => {
     // ⚠ import の書き方を問わない(`from` / 動的 `import()` / 副作用の `import '…'` / 拡張子つき)── 字としての参照を全部数える
