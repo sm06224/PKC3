@@ -262,5 +262,8 @@ describe('新しい順で、記録の境目をまたぐ塊の移動を断る(#20
     // 生の body に frontmatter が 3 行ある形(描いた塊の刻印は剥いだ側)
     expect(crossesLogRecord(h, 3, 7, 7, 5)).toBe(true);
     expect(crossesLogRecord(h, 3, 9, 9, 7)).toBe(false);
+    // 入れる側だけ frontmatter を読み忘れると取り違える形(a2 を b1 の後へ = 次の記録)
+    expect(crossesLogRecord(h, 3, 9, 9, 14)).toBe(true);
+    expect(crossesLogRecord(h, 3, 7, 7, 10)).toBe(false);
   });
 });

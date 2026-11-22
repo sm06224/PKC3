@@ -535,17 +535,10 @@ export function crossesLogRecord(host: HTMLElement, fm: number, start: number, e
   };
   const mine = rankAt(start);
   if (mine === null) return false;
-  // 🔑 記録の頭(段 1〜2 の見出し = 記録ごと動く章)を動かすのは、記録の並びを変えること ── 新しい順では見た目が逆に動く
-  const head = startBlockOf(host, start - fm);
-  if (head !== null && /^H[12]$/.test(head.tagName)) return true;
+  // 🔑 記録の頭(段 1〜2 の見出し = 章ごと)を動かしても、入れた位置の直前の塊は必ず別の記録になる(同じ位置へ戻す形を除く)
+  //   ので、下の 1 つの比べ方で断られる(着地前レビュー: 頭だけの特別扱いは冗長だったので外した)。
   // 動かした塊は、入れた位置の直前の塊と同じ記録に入る(記録は段 1〜2 の見出しから始まる)。直前が無ければ前置き(0)
   const there = rankAt(toBefore - 1) ?? 0;
   return mine !== there;
 }
 
-/** 刻印の行がちょうど `line` の塊(描いた面の行)。 */
-function startBlockOf(host: HTMLElement, line: number): HTMLElement | null {
-  for (const el of host.children)
-    if (el instanceof HTMLElement && el.getAttribute('data-pkc-source-line') === String(line)) return el;
-  return null;
-}
