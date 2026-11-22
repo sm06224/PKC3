@@ -261,6 +261,7 @@ describe('ログの見た目の 3 段(#2018 8)── 12 テーマ', () => {
     const base = tokensOf('light');
     const v = (n: string): string => own[n] ?? base[n]!;
     expect(contrast(v('--fg'), v('--surface-2')), '日の行の字').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(v('--muted'), v('--surface-2')), '畳んだ日の行の字').toBeGreaterThanOrEqual(4.5);
     for (const bg of ['--surface', '--bg']) {
       expect(contrast(v('--muted'), v(bg)), `時刻の字(${bg})`).toBeGreaterThanOrEqual(4.5);
       expect(contrast(v('--muted'), v(bg)), `縦線(${bg})`).toBeGreaterThanOrEqual(3);

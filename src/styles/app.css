@@ -12565,9 +12565,11 @@ h3[data-pkc-section] {
     border-bottom: 0;
     border-radius: var(--radius, 3px);
   }
+  /* 🔴 畳んでいる行は ▸ の形に加えて字を薄くする(開いている行と見分けが付く ── `toc.smoke` が見る)。
+   *    ⚠ 強調色は使わない(段差の地の上で 4.5:1 に届かないテーマが在る)。`--muted` × `--surface-2` は 12 テーマで 4.5:1 以上 */
   [data-pkc-log-days] > [data-pkc-log-day][aria-expanded='false'],
   [data-pkc-log-days] > [data-pkc-log-month][aria-expanded='false'] {
-    color: var(--fg);
+    color: var(--muted);
   }
   [data-pkc-log-days] > [data-pkc-log-day]:hover,
   [data-pkc-log-days] > [data-pkc-log-day]:focus-visible,
