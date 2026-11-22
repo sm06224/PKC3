@@ -171,6 +171,8 @@ const ALL_IDS = [
   'persist',
   // 2026-11-21(#2000 段 2): 端末間の同期(既定オフ)を足した ── 節 +1。同じ group(persist)の中で「ブラウザの扱い」の次
   'sync-enabled',
+  // 2026-11-21(#2000 段 3): 同期フォルダを足した ── 節 +1。端末間の同期のすぐ下(同じ group)
+  'sync-folder',
   'notices',
   'notice-list',
 ];
@@ -207,7 +209,7 @@ const DT_ORDER: Record<string, string[]> = {
   'settings-notify': ['予定の知らせ', '音を聞きやすくする', '音量をそろえる', '頭の中で鳴る感じを和らげる', '画面録画にマイクも混ぜる'],
   'settings-open-ways': ['zip ファイルを開く場所', 'アプリの開き方'],
   'settings-too-narrow': ['狭い画面の断り書き'],
-  'settings-persist': ['ブラウザの扱い', '端末間の同期'],
+  'settings-persist': ['ブラウザの扱い', '端末間の同期', '同期フォルダ'],
   // 先頭の「新しいバージョン」は、待っている版が無い間は隠れている(台帳 #1852 束 L2、依頼 84-1 / 120-2)
   'settings-notices': ['新しいバージョン', 'お知らせ'],
 };

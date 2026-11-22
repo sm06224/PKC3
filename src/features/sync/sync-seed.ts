@@ -14,6 +14,7 @@
 import { seedBaseline, type Baseline } from './change-set';
 import { isDeviceId } from './sync-state';
 import type { DiffFingerprint } from './diff-file';
+import { attrLidOf } from './sync-attr';
 
 export interface SyncSeed {
   /** 書き出した端末の id。 */
@@ -40,10 +41,13 @@ export function parseSyncSeed(v: unknown): SyncSeed | null {
 /**
  * 取り込んだバックアップの種から、記録にする指紋を作る。
  * `keptLids` = lid が変わらずに入ったノート。それ以外(振り直した物・入らなかった物)は種にしない。つながり(`rel:`)は両端が `keptLids` のときだけ。
+ * 印(`pin:` / `lab:`)は指すノートが `keptLids` のときだけ。
  */
 export function seedFromBackup(seed: SyncSeed, keptLids: ReadonlySet<string>): Baseline {
   const states = seed.fingerprints
     .filter((f) => {
+      const attr = attrLidOf(f.key);
+      if (attr !== null) return keptLids.has(attr);
       if (!f.key.startsWith('rel:')) return keptLids.has(f.key);
       const m = /^rel:(.*)\|(.*)\|[^|]*$/.exec(f.key);
       return m !== null && keptLids.has(m[1] as string) && keptLids.has(m[2] as string);

@@ -20,7 +20,8 @@
 import { decideMerge, fpEqual, nextBaseline, relationKey, type Baseline, type Decision, type Fp, type KeyedState, type Tombstone } from './change-set';
 import type { DiffFile, DiffRelation } from './diff-file';
 import { isSyncRelationKind } from './sync-guard';
-import { placeFp, relationFp } from './sync-fp';
+import { labelFp, pinFp, placeFp, relationFp } from './sync-fp';
+import { attrLidOf, isAttrKey, isNoteKey, isRelKey, labelKey, pinKey, LABEL_PREFIX } from './sync-attr';
 
 export interface PlanUpsert {
   lid: string;
@@ -70,6 +71,11 @@ export interface SyncSummary {
   orphans: number;
   /** 宛先が無くて足さなかったつながり。 */
   danglingRelations: number;
+  /** 色ラベル・ピン留めを相手に合わせた数(付けた・変えた・外した)。 */
+  labelsChanged: number;
+  pinsChanged: number;
+  /** 両方で違う色を付けた(こちらを残した)。 */
+  attrConflicts: number;
 }
 
 export interface SyncPlan {
@@ -79,6 +85,10 @@ export interface SyncPlan {
   trashExpect: Record<string, Fp>;
   relationAdds: DiffRelation[];
   relationRemoves: DiffRelation[];
+  /** 色ラベルを付ける・変える(`color`)/ 外す(`null`)。 */
+  labelSets: Array<{ lid: string; color: number | null }>;
+  /** ピン留めを付ける(`on: true`)/ 外す。 */
+  pinSets: Array<{ lid: string; on: boolean }>;
   /** 取り込み後に記録する、この相手の「前回の合意」。 */
   baseline: Baseline;
   conflicts: PlanConflict[];
@@ -115,10 +125,8 @@ export function conflictCopyTitle(title: string, firstSync: boolean, date: strin
 
 const emptySummary = (): SyncSummary => ({
   created: 0, updated: 0, restored: 0, merged: 0, trashed: 0, keptLocal: 0, conflicts: 0, firstSync: 0,
-  relationsAdded: 0, relationsRemoved: 0, orphans: 0, danglingRelations: 0,
+  relationsAdded: 0, relationsRemoved: 0, orphans: 0, danglingRelations: 0, labelsChanged: 0, pinsChanged: 0, attrConflicts: 0,
 });
-
-const REL_PREFIX = 'rel:';
 
 /**
  * 判定に使う前回の合意。保存してある物に、相手が「こちらの版をこう見ていた」(`peerBase`)を重ねる:
@@ -143,8 +151,13 @@ export function planSyncImport(input: PlanInput): SyncPlan {
   const noteByLid = new Map(c.notes.map((n) => [n.lid, n] as const));
   // ── 相手の指紋(全件)。本文のある物は本文から測り直す(信用しすぎない)。つながりは目録(relations)が正本。
   const remoteFp = new Map<string, Fp>();
+  /**
+   * 🔴 **印(色ラベル・ピン留め)を運ぶファイルか**。運ばない(バージョン 1)なら、印は判定に入れず、記録の印はそのまま持ち越す ──
+   * 入れると「相手は印を全部外した」と読んで、こちらの印を外してしまう。
+   */
+  const carriesAttrs = c.labels !== undefined && c.pins !== undefined;
   for (const f of c.fingerprints) {
-    if (f.key.startsWith(REL_PREFIX)) continue;
+    if (!isNoteKey(f.key)) continue;
     remoteFp.set(f.key, f.p === undefined ? { content: f.c } : { content: f.c, place: f.p });
   }
   for (const n of c.notes) {
@@ -159,13 +172,25 @@ export function planSyncImport(input: PlanInput): SyncPlan {
     remoteRel.set(k, r);
     remoteFp.set(k, relationFp());
   }
+  const remoteLabel = new Map<string, number>();
+  if (carriesAttrs) {
+    for (const l of c.labels ?? []) {
+      remoteLabel.set(l.lid, l.color);
+      remoteFp.set(labelKey(l.lid), labelFp(l.color));
+    }
+    for (const lid of c.pins ?? []) remoteFp.set(pinKey(lid), pinFp());
+  }
   const localRel = new Map(input.localRelations.map((r) => [relationKey({ from: r.from, to: r.to, kind: r.kind }), r] as const));
-  const localFp = new Map(input.localStates.map((s) => [s.key, s] as const));
+  const judgedLocal = carriesAttrs ? input.localStates : input.localStates.filter((x) => !isAttrKey(x.key));
+  const localFp = new Map(judgedLocal.map((s) => [s.key, s] as const));
   const remoteStates: KeyedState[] = [...remoteFp].map(([key, fp]) => ({ key, ...fp }));
-  const baseline = effectiveBaseline(input.baseline, c.peerBase, input.localStates);
+  const fullBaseline = effectiveBaseline(input.baseline, c.peerBase, input.localStates);
+  const baseline: Baseline = carriesAttrs
+    ? fullBaseline
+    : Object.fromEntries(Object.entries(fullBaseline).filter(([k]) => !isAttrKey(k)));
   const decisions = decideMerge({
     baseline,
-    local: input.localStates,
+    local: judgedLocal,
     remote: remoteStates,
     remoteTombstones: c.tombstones,
     localTombstones: input.localTombstones,
@@ -174,9 +199,9 @@ export function planSyncImport(input: PlanInput): SyncPlan {
 
   // こちらで生きているノート(つながりでない物)。後でゴミ箱・新規で更新して「取り込み後に生きている」集合にする。
   const finalLive = new Set<string>();
-  for (const s of input.localStates) if (!s.key.startsWith(REL_PREFIX)) finalLive.add(s.key);
+  for (const s of input.localStates) if (isNoteKey(s.key)) finalLive.add(s.key);
   for (const d of decisions) {
-    if (d.key.startsWith(REL_PREFIX)) continue;
+    if (!isNoteKey(d.key)) continue;
     if (d.action === 'trash-local') finalLive.delete(d.key);
     else if (d.action === 'take-remote' || (d.action === 'conflict' && d.resolution === 'restore-remote')) finalLive.add(d.key);
   }
@@ -186,6 +211,8 @@ export function planSyncImport(input: PlanInput): SyncPlan {
   const trashExpect: Record<string, Fp> = Object.create(null) as Record<string, Fp>;
   const relationAdds: DiffRelation[] = [];
   const relationRemoves: DiffRelation[] = [];
+  const labelSets: SyncPlan['labelSets'] = [];
+  const pinSets: SyncPlan['pinSets'] = [];
   const conflicts: PlanConflict[] = [];
   const needFull: string[] = [];
   const next = Object.create(null) as Record<string, Fp>;
@@ -231,8 +258,72 @@ export function planSyncImport(input: PlanInput): SyncPlan {
     next[key] = { content: fp.content, place: orphan ? placeFp(null) : (fp.place as string) };
   };
 
+  /** 印 1 件の決め。⚠ ノートが取り込み後に居ない印は付けない / ノートがゴミ箱へ行く印は外さない(ゴミ箱の印は残す作法)。 */
+  const decideAttr = (d: Decision): void => {
+    const lid = attrLidOf(d.key) as string;
+    const isLabel = d.key.startsWith(LABEL_PREFIX);
+    const R = remoteFp.get(d.key);
+    const L = localFp.get(d.key);
+    const setRemote = (): boolean => {
+      if (!finalLive.has(lid)) return false;
+      if (isLabel) {
+        const color = remoteLabel.get(lid);
+        if (color === undefined) return false;
+        labelSets.push({ lid, color });
+        s.labelsChanged++;
+      } else {
+        pinSets.push({ lid, on: true });
+        s.pinsChanged++;
+      }
+      return true;
+    };
+    const keepLocalFp = (): void => {
+      if (L !== undefined) next[d.key] = { content: L.content };
+    };
+    switch (d.action) {
+      case 'noop':
+        keepLocalFp();
+        return;
+      case 'take-remote':
+        if (setRemote()) next[d.key] = d.fp;
+        return;
+      case 'trash-local':
+        // ノートごと消える(ゴミ箱へ行く)印は外さない
+        if (!finalLive.has(lid)) return;
+        if (isLabel) {
+          labelSets.push({ lid, color: null });
+          s.labelsChanged++;
+        } else {
+          pinSets.push({ lid, on: false });
+          s.pinsChanged++;
+        }
+        return;
+      case 'push-local':
+      case 'push-delete':
+        if (R !== undefined) next[d.key] = R;
+        return;
+      case 'merge':
+        // 印に place は無いので来ない。来たら相手の版を記録に残し、こちらはそのまま(次の書き出しで送る)
+        if (R !== undefined) next[d.key] = R;
+        return;
+      case 'conflict':
+        if (d.resolution === 'restore-remote') {
+          if (setRemote() && R !== undefined) next[d.key] = R;
+          return;
+        }
+        // 両方で違う色 / 初回で違う色 / こちらで付け直し相手が外した → こちらを残す(コピーは作れない)。相手の版を記録して次の書き出しで送る
+        s.attrConflicts++;
+        if (R !== undefined) next[d.key] = R;
+        return;
+    }
+  };
+
   for (const d of decisions as readonly Decision[]) {
-    const isRel = d.key.startsWith(REL_PREFIX);
+    if (isAttrKey(d.key)) {
+      decideAttr(d);
+      continue;
+    }
+    const isRel = isRelKey(d.key);
     const R = remoteFp.get(d.key);
     if (isRel) {
       if (d.action === 'take-remote') {
@@ -348,5 +439,9 @@ export function planSyncImport(input: PlanInput): SyncPlan {
       }
     }
   }
-  return { upserts, trash, trashExpect, relationAdds, relationRemoves, baseline: nextBaseline(Object.entries(next).map(([key, fp]) => ({ key, ...fp }))), conflicts, needFull, summary: s };
+  // 印を運ばないファイルでは、記録の印をそのまま持ち越す(判定に入れていないので、消えたことにしない)
+  if (!carriesAttrs) {
+    for (const [k, fp] of Object.entries(input.baseline)) if (isAttrKey(k)) next[k] = fp;
+  }
+  return { upserts, trash, trashExpect, relationAdds, relationRemoves, labelSets, pinSets, baseline: nextBaseline(Object.entries(next).map(([key, fp]) => ({ key, ...fp }))), conflicts, needFull, summary: s };
 }

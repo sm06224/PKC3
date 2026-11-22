@@ -2277,6 +2277,19 @@ export interface BinderServices {
   /** 🔴 差分ファイルを書き出す(#2000 段 2。`all` = 全件)。設定が切のときは配線側が断る。 */
   exportSyncDiff?(all: boolean): void;
   /**
+   * 🔴 **同期フォルダ**(#2000 段 3)。選ぶ・許可を出し直すは**押した操作の中**で呼ぶ(ブラウザが許可の窓を出せるのはそのときだけ)。
+   * やめる = handle と記録を消す(フォルダのファイルは残す)。
+   */
+  syncFolder?: {
+    pick(): void | Promise<void>;
+    syncNow(): void | Promise<void>;
+    reconnect(): void | Promise<void>;
+    stop(): void | Promise<void>;
+    setMinutes(m: number): void | Promise<void>;
+    /** 見張りが「保存しない」にした後、保存するように戻す。 */
+    allowPersist(): void | Promise<void>;
+  };
+  /**
    * 🔴 **聞くときだけ音を整えるか**(#772 段① B)。⚠ **省略可**。
    * ⚠ 切り替えたら**いま画面に在る再生機も**その場で繋ぎ替える ──
    *   保存しただけでは、開いているノートの音は変わらない(設定が嘘になる)。
@@ -19226,6 +19239,25 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (!hidden.includes('sidebar')) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     applyPaneVisibility(root, appPanes.setHidden(hidden.filter((p) => p !== 'sidebar')));
+  },
+  // 🔴 同期フォルダ(#2000 段 3)── 選ぶ・許可を出し直すは押した操作の中で(`await` の前に呼ぶ)
+  'pick-sync-folder': (_dispatcher, _target, services) => {
+    void services.syncFolder?.pick();
+  },
+  'sync-folder-now': (_dispatcher, _target, services) => {
+    void services.syncFolder?.syncNow();
+  },
+  'reconnect-sync-folder': (_dispatcher, _target, services) => {
+    void services.syncFolder?.reconnect();
+  },
+  'stop-sync-folder': (_dispatcher, _target, services) => {
+    void services.syncFolder?.stop();
+  },
+  'allow-sync-folder-persist': (_dispatcher, _target, services) => {
+    void services.syncFolder?.allowPersist();
+  },
+  'set-sync-folder-minutes': (_dispatcher, target, services) => {
+    if (target instanceof HTMLSelectElement) void services.syncFolder?.setMinutes(Number(target.value));
   },
   'export-sync-diff': (_dispatcher, _target, services) => {
     services.exportSyncDiff?.(false);

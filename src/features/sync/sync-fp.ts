@@ -7,6 +7,7 @@
  */
 import { entryFingerprintTexts, relationFingerprintText, type EntryFacet, type Fp } from './change-set';
 import { sha256Hex } from './sha256';
+import { labelFingerprintText, pinFingerprintText } from './sync-attr';
 
 /** ノートの指紋(内容 + 親フォルダの 2 欄)。 */
 export function entryFp(facet: EntryFacet): Fp {
@@ -22,4 +23,14 @@ export function placeFp(parentLid: string | null): string {
 /** つながりの指紋(定数)。 */
 export function relationFp(): Fp {
   return { content: sha256Hex(relationFingerprintText()) };
+}
+
+/** ピン留めの指紋(定数。在る / 無いだけ)。 */
+export function pinFp(): Fp {
+  return { content: sha256Hex(pinFingerprintText()) };
+}
+
+/** 色ラベルの指紋(色の番号から)。 */
+export function labelFp(color: number): Fp {
+  return { content: sha256Hex(labelFingerprintText(color)) };
 }

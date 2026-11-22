@@ -25,6 +25,8 @@ import { isDeviceId } from './sync-state';
 import { DIFF_ARCHIVE_SUFFIX } from '../export/archive-kind';
 import type { Tombstone } from './change-set';
 import { isReservedSyncLid, isSyncRelationKind } from './sync-guard';
+import { attrKeyTouchesReserved, isAttrKey } from './sync-attr';
+import { isNoteLabelColor } from '../note-label';
 
 export { isReservedSyncLid, isSyncRelationKind };
 
@@ -34,10 +36,16 @@ function relKeyTouchesReserved(key: string): boolean {
   const [from, to] = key.slice(4).split('|');
   return isReservedSyncLid(from ?? '') || isReservedSyncLid(to ?? '');
 }
-const keyIsReserved = (key: string): boolean => isReservedSyncLid(key) || relKeyTouchesReserved(key);
+const keyIsReserved = (key: string): boolean => (isAttrKey(key) ? attrKeyTouchesReserved(key) : isReservedSyncLid(key) || relKeyTouchesReserved(key));
 
 export const DIFF_FORMAT = 'pkc3-diff';
-export const DIFF_VERSION = 1;
+/**
+ * 書くバージョン。⚠ 2 = 色ラベル・ピン留め(`labels` / `pins`)と印の指紋(`pin:` / `lab:`)を運ぶ(段 3)。
+ * 1 を読む古い PKC3 は 2 を断る(印のキーをノートと取り違えて「本文が無い」と言わないため、版を上げた)。
+ */
+export const DIFF_VERSION = 2;
+/** 読めるバージョン(1 = 段 2 の形。印を運ばない ── 取り込み側は印を判定に入れない)。 */
+export const DIFF_READABLE_VERSIONS: readonly number[] = [1, 2];
 /** 差分ファイルの名前の末尾(二重拡張子。中身の型を名前で言う)。 */
 export const DIFF_SUFFIX = DIFF_ARCHIVE_SUFFIX;
 const MANIFEST = 'manifest.json';
@@ -59,6 +67,16 @@ export interface DiffManifest {
   /** 全件(前回の同期の記録が無い・古い・「すべて」を選んだ)か、変わった分だけか。 */
   complete: boolean;
   counts: { notes: number; relations: number; deletions: number; assets: number; total: number };
+  /**
+   * 同期フォルダ(段 3)で、この端末が**全件を書き出してほしい**相手の端末 id(取り込んだ差分に本文が足りなかった)。
+   * ⚠ 省略可(手で運ぶ差分ファイルでは付けない)。
+   */
+  want?: string[];
+  /**
+   * 同期フォルダ(段 3)で、書き出した端末が**すでに対応づけた相手**(相手の端末 id → 相手のワークスペースの cid)。
+   * 受け手は、自分の id と今のワークスペースの cid が載っていれば、相手の側で人が確認済みとして初回の確認を省く。⚠ 省略可。
+   */
+  pairs?: Record<string, string>;
 }
 
 export interface DiffNote {
@@ -96,6 +114,18 @@ export interface DiffContainer {
   fingerprints: DiffFingerprint[];
   peerBase: DiffFingerprint[];
   assets: DiffAssetMeta[];
+  /**
+   * 同期フォルダ(段 3)で 1 つのファイルを複数の相手が読むときの、相手ごとの `peerBase`(相手の端末 id → 記録)。
+   * 取り込む側は自分の id の分があれば `peerBase` の代わりに使う。⚠ 省略可。
+   */
+  peerBases?: Record<string, DiffFingerprint[]>;
+  /**
+   * 色ラベル(全件)。⚠ `undefined` = この差分ファイルは印を運ばない(バージョン 1)。空の配列(印が 1 つも無い)と区別する ──
+   * 区別しないと、印を知らない古いファイルを「相手は印を全部外した」と読んでしまう。
+   */
+  labels?: Array<{ lid: string; color: number }>;
+  /** ピン留め(全件の lid)。`undefined` の意味は `labels` と同じ。 */
+  pins?: string[];
 }
 
 export interface DiffWriteInput {
@@ -106,6 +136,11 @@ export interface DiffWriteInput {
   tombstones: readonly Tombstone[];
   fingerprints: readonly DiffFingerprint[];
   peerBase: readonly DiffFingerprint[];
+  /** 相手ごとの `peerBase`(同期フォルダ)。省略可。 */
+  peerBases?: Readonly<Record<string, readonly DiffFingerprint[]>>;
+  /** 色ラベル・ピン留め(全件)。 */
+  labels: ReadonlyArray<{ lid: string; color: number }>;
+  pins: readonly string[];
   /** 運ぶ添付の目録。⚠ ノートを書き終えた後に呼ぶ(ノートの本文が参照する物を数えながら溜めるため)。 */
   assets: () => readonly DiffAssetMeta[];
   /** 実体を引く(Blob をそのまま積む。無ければ null = 足りない添付)。 */
@@ -144,7 +179,7 @@ export async function writeDiffZip(input: DiffWriteInput): Promise<{ blob: Blob;
     blobs.push({ key: a.key, blob });
   }
   parts.push(
-    `],"relations":${j(input.relations)},"tombstones":${j(input.tombstones)},"fingerprints":${j(input.fingerprints)},"peerBase":${j(input.peerBase)},"assets":${j(assets)}}`,
+    `],"relations":${j(input.relations)},"tombstones":${j(input.tombstones)},"fingerprints":${j(input.fingerprints)},"peerBase":${j(input.peerBase)},"assets":${j(assets)},"labels":${j(input.labels)},"pins":${j(input.pins)}${input.peerBases === undefined ? '' : `,"peerBases":${j(input.peerBases)}`}}`,
   );
   const counts = {
     notes,
@@ -188,6 +223,13 @@ function fpList(v: unknown, what: string): DiffFingerprint[] {
   return out;
 }
 
+/** 相手ごとの記録(同期フォルダ)。⚠ 端末 id でない鍵は捨てる。 */
+function peerBasesOf(v: Record<string, unknown>): Record<string, DiffFingerprint[]> {
+  const out: Record<string, DiffFingerprint[]> = Object.create(null) as Record<string, DiffFingerprint[]>;
+  for (const [k, list] of Object.entries(v)) if (isDeviceId(k)) out[k] = fpList(list, '相手の記録');
+  return out;
+}
+
 /** 差分ファイルを読む。⚠ 形が違えば必ず throw(部分的に読めた気にさせない)。 */
 export async function readDiffZip(zip: Blob): Promise<DiffFile> {
   const dir = unwrapSingleTopDir(await readZipDirectory(zip)).entries;
@@ -207,21 +249,24 @@ export async function readDiffZip(zip: Blob): Promise<DiffFile> {
   };
   const m = await parse(MANIFEST, '差分ファイルの概要');
   if (!isObj(m) || m.format !== DIFF_FORMAT) throw new ZipReadError('PKC3 の差分ファイルではありません');
-  if (m.version !== DIFF_VERSION) {
-    throw new ZipReadError(`この PKC3 が読める差分ファイルのバージョンは ${DIFF_VERSION} です(このファイルは ${String(m.version)})`);
+  if (typeof m.version !== 'number' || !DIFF_READABLE_VERSIONS.includes(m.version)) {
+    throw new ZipReadError(`この PKC3 が読める差分ファイルのバージョンは ${DIFF_READABLE_VERSIONS.join(' / ')} です(このファイルは ${String(m.version)}。PKC3 を新しくしてください)`);
   }
+  const version = m.version;
   if (!isDeviceId(m.device) || typeof m.seq !== 'number' || !Number.isInteger(m.seq) || m.seq < 0 || !isStr(m.cid) || m.cid === '' || !isStr(m.title) || typeof m.complete !== 'boolean') {
     throw new ZipReadError('差分ファイルの概要の形が違います(書き出した端末の情報が読み取れません)');
   }
   const manifest: DiffManifest = {
     format: DIFF_FORMAT,
-    version: DIFF_VERSION,
+    version,
     exported_at: isStr(m.exported_at) ? m.exported_at : '',
     device: m.device,
     seq: m.seq,
     cid: m.cid,
     title: m.title,
     complete: m.complete,
+    ...(Array.isArray(m.want) && m.want.every((x) => isDeviceId(x)) ? { want: m.want as string[] } : {}),
+    ...(isObj(m.pairs) ? { pairs: Object.fromEntries(Object.entries(m.pairs).filter((e): e is [string, string] => isDeviceId(e[0]) && isStr(e[1]) && e[1] !== '')) } : {}),
     counts: isObj(m.counts) ? (m.counts as unknown as DiffManifest['counts']) : { notes: 0, relations: 0, deletions: 0, assets: 0, total: 0 },
   };
   const c = await parse(CONTAINER, '差分ファイルの本体');
@@ -277,6 +322,36 @@ export async function readDiffZip(zip: Blob): Promise<DiffFile> {
       assets.push({ key: a.key, mime: isStr(a.mime) ? a.mime : 'application/octet-stream', size: typeof a.size === 'number' ? a.size : 0, hash: isStr(a.hash) ? a.hash : null });
     }
   }
+  // ── 色ラベル・ピン留め(バージョン 2 から)。⚠ 1 では `undefined` のまま(印を運ばないファイル)
+  let labels: Array<{ lid: string; color: number }> | undefined;
+  let pins: string[] | undefined;
+  if (version >= 2) {
+    if (!Array.isArray(c.labels) || !Array.isArray(c.pins)) throw new ZipReadError('差分ファイルの本体に、色ラベル・ピン留めの記載がありません');
+    labels = [];
+    const seenLab = new Set<string>();
+    for (const x of c.labels) {
+      if (!isObj(x) || !isStr(x.lid) || x.lid === '' || !isNoteLabelColor(x.color)) throw new ZipReadError('差分ファイルの色ラベルに、読み取れない行があります');
+      if (isReservedSyncLid(x.lid)) {
+        dropped.reserved++;
+        continue;
+      }
+      if (seenLab.has(x.lid)) continue;
+      seenLab.add(x.lid);
+      labels.push({ lid: x.lid, color: x.color });
+    }
+    pins = [];
+    const seenPin = new Set<string>();
+    for (const x of c.pins) {
+      if (!isStr(x) || x === '') throw new ZipReadError('差分ファイルのピン留めに、読み取れない行があります');
+      if (isReservedSyncLid(x)) {
+        dropped.reserved++;
+        continue;
+      }
+      if (seenPin.has(x)) continue;
+      seenPin.add(x);
+      pins.push(x);
+    }
+  }
   const warnings: string[] = [];
   const assetSources = new Map<string, ReadableAssetSource>();
   for (const e of dir) {
@@ -298,6 +373,9 @@ export async function readDiffZip(zip: Blob): Promise<DiffFile> {
       fingerprints: fpList(c.fingerprints, '指紋の一覧'),
       peerBase: fpList(c.peerBase ?? [], '相手の記録'),
       assets,
+      ...(isObj(c.peerBases) ? { peerBases: peerBasesOf(c.peerBases) } : {}),
+      ...(labels === undefined ? {} : { labels }),
+      ...(pins === undefined ? {} : { pins }),
     },
     assetSources,
     warnings,
