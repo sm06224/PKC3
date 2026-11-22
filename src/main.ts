@@ -239,6 +239,7 @@ import { SYNC_FORGET_CONFIRM, SYNC_FORGET_CONFIRM_ON_OFF, SYNC_FORGET_LABEL, SYN
 import { SHOW_SYNC_CONFLICTS_ACTION } from '@adapter/ui/actions/sync-diff';
 import { applySyncDiff, backupSyncSeed, buildSyncDiff, exportSyncDiff, importSyncDiff, seedSyncFromBackup, type SyncDeps } from '@adapter/ui/actions/sync-diff';
 import { idbSyncFolderStore, SyncFolder, type SyncFolderPicker } from '@adapter/platform/sync-folder';
+import { windowSyncRemote } from '@adapter/platform/sync-remote';
 import { appSyncFolderView } from '@adapter/ui/render/sync-folder-view';
 import { readDiffZip } from '@features/sync/diff-file';
 import { connectMessageSync, MESSAGES_CHANNEL } from '@adapter/platform/message-sync';
@@ -3838,6 +3839,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     cid: () => cid,
     enabled: () => appSyncEnabled.enabled(),
     picker: windowSyncPicker() as SyncFolderPicker | null,
+    // 🔴 S3 互換の保管先(#2000 段 4a-4)── 認証情報は鍵の保管(取り出せない鍵で暗号化)にだけ置く
+    remote: windowSyncRemote(),
     store: idbSyncFolderStore(),
     lock: windowSyncLock(),
     device: async () => {
@@ -4951,6 +4954,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       stop: () => syncFolder.stop(),
       setMinutes: (m) => syncFolder.setMinutes(m),
       allowPersist: () => syncFolder.allowPersist(),
+      testRemote: (form) => syncFolder.testRemote(form),
+      connectRemote: (form) => syncFolder.connectRemote(form),
     },
     setAlarmEnabled: (on) => {
       appAlarmEnabled.setEnabled(on);

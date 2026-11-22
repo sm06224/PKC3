@@ -18,6 +18,13 @@
  * - 画面に出ている間、決めた間隔(既定 5 分)ごと。隠れている間は回らない。画面に戻ったとき、間隔を過ぎていれば回る
  * - 失敗が続いたら間隔を延ばす(上限 60 分)。手で同期すると元に戻る
  * - 同じワークスペースの同期は Web Locks で 1 つだけ(別のタブ・ウィンドウと重ならない)
+ *
+ * ## S3 互換の保管先(#2000 段 4a-4)
+ * - フォルダの代わりに、S3 互換の保管先(AWS S3 / Cloudflare R2 / MinIO など)を選べる。回の中身は同じ(`RemoteBox` の口だけが違う)。
+ * - 接続情報と認証情報はこの端末の鍵の保管(`sync-keystore.ts`。取り出せない鍵で暗号化)に置き、ここの記録(IndexedDB)には
+ *   **種類(`kind: 's3'`)だけ**を置く。🔴 認証情報はこの記録・バックアップ・差分 zip・設定ファイル・メッセージのどれにも入れない。
+ * - フォルダと保管先は同時には使わない(選び直すと、前の方をやめる。保管先をやめるときは認証情報も消す ── 片道にしない)。
+ * - 📌 `file://` では選べない(「HTTPS で開いたときだけ使えます」)。
  */
 import { errorText } from '@features/error-text';
 import type { DiffManifest } from '@features/sync/diff-file';
@@ -39,6 +46,8 @@ import {
 } from '@features/sync/sync-folder';
 import type { SyncDirLike, SyncLock } from './folder-sync';
 import { folderBox, type RemoteBox } from './sync-box';
+import { BoxConflictError } from './s3-box';
+import { normalizeS3Config, s3ConfigProblem, type S3BoxConfig, type S3BoxSecret } from './sync-keystore';
 import type { ApplyOutcome, BuiltDiff, DiffTarget } from '@adapter/ui/actions/sync-diff';
 
 /** 許可を確かめ・頼める handle。 */
@@ -48,8 +57,38 @@ export interface SyncFolderDirLike extends SyncDirLike {
 
 export type SyncFolderPicker = (options: { mode: 'readwrite'; id?: string }) => Promise<SyncFolderDirLike>;
 
+/**
+ * 🔴 **S3 互換の保管先の口**(#2000 段 4a-4)。認証情報の置き場(鍵の保管)と、保管先の口(`S3Box`)を作る所。
+ * ⚠ 認証情報はこの口の外へ出さない(`SyncFolder` は開いた認証情報を口(`box`)へ渡すだけで、自分の記録には置かない)。
+ */
+export interface SyncRemoteDeps {
+  /** 使えない理由(`file://` で開いた等)。使えるなら `null`。 */
+  unavailable(): string | null;
+  open(cid: string): Promise<{ config: S3BoxConfig; secret: S3BoxSecret } | null>;
+  save(cid: string, config: S3BoxConfig, secret: S3BoxSecret): Promise<void>;
+  remove(cid: string): Promise<void>;
+  box(config: S3BoxConfig, secret: S3BoxSecret): RemoteBox;
+}
+
+/** 画面で入れた接続先(確かめる前の生の字)。 */
+export interface SyncRemoteForm {
+  endpoint: string;
+  bucket: string;
+  region: string;
+  prefix: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+/** 📌 `file://` などで保管先を選べない理由(user 裁定 2026-11-22)。 */
+export const SYNC_REMOTE_HTTPS_ONLY = 'HTTPS で開いたときだけ使えます';
+export const SYNC_REMOTE_UNREADABLE_NOTE =
+  'この端末に保存した保管先の認証情報を読めません(ブラウザがデータを消した可能性があります)。設定の「S3 互換の保管先」で接続し直してください';
+
 /** IndexedDB に置く 1 件(ワークスペースごと)。 */
 export interface SyncFolderSaved {
+  /** 何と同期するか(既定 = フォルダ)。⚠ `s3` のときの接続情報・認証情報は鍵の保管にある(ここには置かない)。 */
+  kind?: 'folder' | 's3';
   /** フォルダの handle。⚠ `null` = この端末では handle を憶えない(下の「読み込みの見張り」)── 開くたびに選び直す。 */
   handle: SyncFolderDirLike | null;
   minutes: SyncFolderMinutes;
@@ -75,7 +114,16 @@ export type SyncFolderPhase = 'unsupported' | 'off' | 'none' | 'permission' | 'i
 export interface SyncFolderView {
   version: number;
   phase: SyncFolderPhase;
+  /** いま同期している物の名前(フォルダの名前 / 保管先のバケットと置き場)。 */
   folderName: string | null;
+  /** いま同期している物の種類(`null` = 選んでいない)。 */
+  kind: 'folder' | 's3' | null;
+  /** フォルダを選べるブラウザか(Chrome・Edge のパソコン版)。 */
+  folderSupported: boolean;
+  /** 保管先を選べない理由(`null` = 選べる)。 */
+  remoteUnavailable: string | null;
+  /** 保管先の接続先(秘密でない物だけ ── 画面の欄に戻す)。 */
+  remoteConfig: S3BoxConfig | null;
   minutes: SyncFolderMinutes;
   /** 直近の同期の時刻(`HH:MM`)。 */
   lastAt: string | null;
@@ -94,6 +142,8 @@ export interface SyncFolderDeps {
   enabled(): boolean;
   /** `null` = このブラウザでは選べない(Firefox / Safari / スマホ)。 */
   picker: SyncFolderPicker | null;
+  /** S3 互換の保管先(#2000 段 4a-4)。無ければ選べない。 */
+  remote?: SyncRemoteDeps | null;
   store: SyncFolderStore;
   lock?: SyncLock | null;
   /** この端末の id(無ければ作る)。 */
@@ -134,6 +184,8 @@ const errName = (e: unknown): string => (typeof e === 'object' && e !== null ? S
 export class SyncFolder {
   private phase: SyncFolderPhase;
   private dir: SyncFolderDirLike | null = null;
+  /** S3 互換の保管先(`dir` とどちらか一方)。⚠ 認証情報は `box` の中にだけある。 */
+  private remote: { box: RemoteBox; config: S3BoxConfig } | null = null;
   private minutes: SyncFolderMinutes = SYNC_FOLDER_DEFAULT_MINUTES;
   private record: FolderSyncRecord = emptyFolderRecord();
   private own: { size: number; mtime: number; version?: string; name?: string } | null = null;
@@ -154,7 +206,24 @@ export class SyncFolder {
   private noPersistFlag = false;
 
   constructor(private readonly deps: SyncFolderDeps) {
-    this.phase = deps.picker === null ? 'unsupported' : 'none';
+    // ⚠ フォルダを選べなくても、保管先を選べるなら止めない
+    this.phase = deps.picker === null && this.remoteUnavailable() !== null ? 'unsupported' : 'none';
+  }
+
+  /** 保管先を選べない理由(`null` = 選べる)。 */
+  private remoteUnavailable(): string | null {
+    const r = this.deps.remote;
+    if (r === undefined || r === null) return 'このビルドでは使えません';
+    return r.unavailable();
+  }
+
+  /** 同期する先を選んであるか。 */
+  private hasTarget(): boolean {
+    return this.dir !== null || this.remote !== null;
+  }
+
+  private remoteLabel(c: S3BoxConfig): string {
+    return `${c.bucket}${c.prefix === '' ? '' : `/${c.prefix.replace(/\/$/, '')}`}`;
   }
 
   private noPersist(): boolean {
@@ -173,7 +242,11 @@ export class SyncFolder {
     return {
       version: this.version,
       phase: this.phase,
-      folderName: this.dir?.name ?? null,
+      folderName: this.dir?.name ?? (this.remote === null ? null : this.remoteLabel(this.remote.config)),
+      kind: this.dir !== null ? 'folder' : this.remote !== null ? 's3' : null,
+      folderSupported: this.deps.picker !== null,
+      remoteUnavailable: this.remoteUnavailable(),
+      remoteConfig: this.remote?.config ?? null,
       minutes: this.minutes,
       lastAt: this.lastAt,
       lastText: this.lastText,
@@ -220,6 +293,11 @@ export class SyncFolder {
   }
 
   private async persist(): Promise<void> {
+    if (this.remote !== null) {
+      // 🔴 種類だけ(接続情報・認証情報は鍵の保管にある)
+      await this.deps.store.save(this.deps.cid(), { kind: 's3', handle: null, minutes: this.minutes, record: this.record, own: this.own });
+      return;
+    }
     if (this.dir === null) return;
     await this.deps.store.save(this.deps.cid(), { handle: this.noPersist() ? null : this.dir, minutes: this.minutes, record: this.record, own: this.own });
   }
@@ -274,6 +352,7 @@ export class SyncFolder {
     } finally {
       await this.mark(SYNC_FOLDER_LOADING_MARK, null);
     }
+    if (saved !== null && saved.kind === 's3') return this.bootRemote(saved);
     if (saved !== null && saved.handle === null) {
       // 憶えない端末: 間隔と記録だけ戻す(フォルダは選び直す)
       this.minutes = isSyncFolderMinutes(saved.minutes) ? saved.minutes : SYNC_FOLDER_DEFAULT_MINUTES;
@@ -307,6 +386,133 @@ export class SyncFolder {
     void this.syncNow(false);
   }
 
+  /** 起動時: 保管先の認証情報を開いて回り始める。 */
+  private async bootRemote(saved: SyncFolderSaved): Promise<void> {
+    this.minutes = isSyncFolderMinutes(saved.minutes) ? saved.minutes : SYNC_FOLDER_DEFAULT_MINUTES;
+    this.record = normalizeFolderRecord(saved.record);
+    this.own = saved.own ?? null;
+    const why = this.remoteUnavailable();
+    const r = this.deps.remote;
+    if (why !== null || r === undefined || r === null) {
+      // 📌 file:// で開いた等 ── 記録は残す(HTTPS で開き直せば続きから)
+      this.phase = 'none';
+      this.message = `S3 互換の保管先と同期する設定ですが、${why ?? ''}`;
+      this.changed();
+      return;
+    }
+    const opened = await r.open(this.deps.cid()).catch(() => null);
+    if (opened === null) {
+      this.phase = 'none';
+      this.message = SYNC_REMOTE_UNREADABLE_NOTE;
+      this.changed();
+      this.deps.fail(SYNC_REMOTE_UNREADABLE_NOTE);
+      return;
+    }
+    this.dir = null;
+    this.remote = { box: r.box(opened.config, opened.secret), config: opened.config };
+    this.phase = 'idle';
+    this.message = null;
+    this.changed();
+    void this.syncNow(false);
+  }
+
+  /** 画面の欄から接続先を作る(確かめて、通らなければ理由)。 */
+  private remoteFrom(form: SyncRemoteForm): { config: S3BoxConfig; secret: S3BoxSecret } | { problem: string } {
+    const config = normalizeS3Config(form);
+    const problem = s3ConfigProblem(config);
+    if (problem !== null) return { problem };
+    const accessKeyId = form.accessKeyId.trim();
+    const secretAccessKey = form.secretAccessKey.trim();
+    if (accessKeyId === '' || secretAccessKey === '') return { problem: 'アクセスキー ID とシークレットアクセスキーを入れてください' };
+    return { config, secret: { accessKeyId, secretAccessKey } };
+  }
+
+  /**
+   * 🔴 **「接続の確認」** ── 保存せずに、保管先の一覧を 1 度読んでみる。結果は字で返す(メッセージにも残す)。
+   * ⚠ 一覧を読めても、書けるか(PUT の CORS・権限)は最初の同期で分かる ── そう言う。
+   */
+  async testRemote(form: SyncRemoteForm): Promise<{ ok: boolean; text: string }> {
+    const why = this.remoteUnavailable();
+    const r = this.deps.remote;
+    const done = (ok: boolean, text: string): { ok: boolean; text: string } => {
+      (ok ? this.deps.say : this.deps.fail)(text);
+      return { ok, text };
+    };
+    if (why !== null || r === undefined || r === null) return done(false, `S3 互換の保管先は ${why ?? ''}`);
+    const got = this.remoteFrom(form);
+    if ('problem' in got) return done(false, `接続を確認できません: ${got.problem}`);
+    try {
+      const files = await r.box(got.config, got.secret).list((name) => deviceOfFileName(name) !== null);
+      return done(
+        true,
+        `保管先に接続できました(同期のファイルが ${String(files.length)} 個あります)。書き込めるかは、「接続する」を押したあとの最初の同期で確かめます`,
+      );
+    } catch (e) {
+      return done(false, `保管先に接続できませんでした: ${errorText(e)}`);
+    }
+  }
+
+  /**
+   * 🔴 **「接続する」** ── 確かめて(一覧を読めたら)認証情報を鍵の保管へ置き、保管先と同期し始める。
+   * フォルダを選んでいたら、フォルダをやめる(同時には使わない)。
+   */
+  async connectRemote(form: SyncRemoteForm): Promise<boolean> {
+    if (!this.deps.enabled()) {
+      this.deps.fail('設定の「端末間の同期」をオンにしてから、保管先に接続してください');
+      return false;
+    }
+    const why = this.remoteUnavailable();
+    const r = this.deps.remote;
+    if (why !== null || r === undefined || r === null) {
+      this.deps.fail(`S3 互換の保管先は ${why ?? ''}`);
+      return false;
+    }
+    const got = this.remoteFrom(form);
+    if ('problem' in got) {
+      this.deps.fail(`保管先に接続できません: ${got.problem}`);
+      return false;
+    }
+    const box = r.box(got.config, got.secret);
+    try {
+      await box.list((name) => deviceOfFileName(name) !== null);
+    } catch (e) {
+      this.deps.fail(`保管先に接続できませんでした(何も保存していません): ${errorText(e)}`);
+      return false;
+    }
+    this.generation += 1;
+    this.clearTimer();
+    await this.waitCurrent();
+    try {
+      await r.save(this.deps.cid(), got.config, got.secret);
+    } catch (e) {
+      this.deps.fail(`保管先の認証情報を保存できませんでした: ${errorText(e)}`);
+      return false;
+    }
+    const wasFolder = this.dir !== null;
+    const same =
+      this.remote !== null &&
+      (['endpoint', 'bucket', 'region', 'prefix'] as const).every((k) => this.remote?.config[k] === got.config[k]);
+    this.dir = null;
+    this.remote = { box, config: got.config };
+    if (!same) {
+      this.record = emptyFolderRecord();
+      this.own = null;
+    }
+    this.phase = 'idle';
+    this.message = null;
+    this.failures = 0;
+    this.pending.clear();
+    try {
+      await this.persist();
+    } catch (e) {
+      this.deps.fail(`保管先を保存できませんでした(この画面を閉じるまでは同期します): ${errorText(e)}`);
+    }
+    this.changed();
+    if (wasFolder) this.deps.say('同期フォルダをやめて、S3 互換の保管先と同期します(フォルダの中のファイルはそのままです)');
+    await this.syncNow(true);
+    return true;
+  }
+
   /** 設定「端末間の同期」を切り替えたとき。 */
   async onEnabledChanged(): Promise<void> {
     this.generation += 1;
@@ -327,6 +533,7 @@ export class SyncFolder {
   }
 
   private async permitted(ask: boolean): Promise<boolean> {
+    if (this.remote !== null) return true; // 保管先は許可を求めない(認証情報で読み書きする)
     const d = this.dir;
     if (d === null) return false;
     if (typeof d.queryPermission !== 'function') return true;
@@ -361,6 +568,14 @@ export class SyncFolder {
     this.generation += 1;
     this.clearTimer();
     await this.waitCurrent();
+    // 保管先を使っていたら、やめる(同時には使わない。🔴 認証情報も消す ── 使わない秘密を端末に残さない)
+    if (this.remote !== null) {
+      this.remote = null;
+      this.record = emptyFolderRecord();
+      this.own = null;
+      await this.deps.remote?.remove(this.deps.cid()).catch((e: unknown) => this.deps.fail(`保管先の認証情報を消せませんでした: ${errorText(e)}`));
+      this.deps.say('S3 互換の保管先をやめて、同期フォルダと同期します(保管先の認証情報はこの端末から消しました)');
+    }
     const sameFolder = this.dir !== null && typeof (this.dir as { isSameEntry?: unknown }).isSameEntry === 'function'
       ? await (this.dir as unknown as { isSameEntry(o: unknown): Promise<boolean> }).isSameEntry(dir).catch(() => false)
       : false;
@@ -399,11 +614,16 @@ export class SyncFolder {
     await this.syncNow(true);
   }
 
-  /** 同期フォルダをやめる(handle と記録を消す。フォルダの中のファイルは消さない)。 */
+  /**
+   * 同期フォルダをやめる(handle と記録を消す。フォルダの中のファイルは消さない)。
+   * 🔴 保管先なら **「接続を外す」** ── 認証情報も鍵の保管から消す(保管先の中のファイルは消さない)。
+   */
   async stop(): Promise<void> {
     this.generation += 1;
     this.clearTimer();
     await this.waitCurrent();
+    const wasRemote = this.remote !== null;
+    this.remote = null;
     this.dir = null;
     this.record = emptyFolderRecord();
     this.own = null;
@@ -417,8 +637,24 @@ export class SyncFolder {
     } catch (e) {
       this.deps.fail(`同期フォルダの記録を消せませんでした: ${errorText(e)}`);
     }
+    // ⚠ 保管先を使っていなくても消す(起動時に開けなかった等で、置き場に残っている物を残さない)
+    let removed = true;
+    if (this.deps.remote !== undefined && this.deps.remote !== null) {
+      try {
+        await this.deps.remote.remove(this.deps.cid());
+      } catch (e) {
+        removed = false;
+        this.deps.fail(`保管先の認証情報を消せませんでした: ${errorText(e)}`);
+      }
+    }
     this.changed();
-    this.deps.say('同期フォルダとの同期をやめました(フォルダの中のファイルはそのままです。他の端末が使っていなければ、手で消せます)');
+    if (wasRemote)
+      this.deps.say(
+        removed
+          ? 'S3 互換の保管先との接続を外しました(この端末から認証情報を消しました。保管先の中のファイルはそのままです)'
+          : 'S3 互換の保管先との同期をやめました',
+      );
+    else this.deps.say('同期フォルダとの同期をやめました(フォルダの中のファイルはそのままです。他の端末が使っていなければ、手で消せます)');
   }
 
   /**
@@ -427,7 +663,7 @@ export class SyncFolder {
    * ⚠ 設定がオフ・フォルダを選んでいないときは何もしない(オフの間はフォルダにも IndexedDB にも書かない)。
    */
   async forgetRecords(): Promise<void> {
-    if (!this.deps.enabled() || this.dir === null) return;
+    if (!this.deps.enabled() || !this.hasTarget()) return;
     await this.syncNow(false);
   }
 
@@ -466,7 +702,7 @@ export class SyncFolder {
 
   /** 1 回同期する。`manual` = 手で(確認が要る相手もその場で聞き、変わっていないファイルも読み直す)。 */
   async syncNow(manual: boolean): Promise<void> {
-    if (this.dir === null || this.phase === 'unsupported' || this.phase === 'off' || this.phase === 'none') return;
+    if (!this.hasTarget() || this.phase === 'unsupported' || this.phase === 'off' || this.phase === 'none') return;
     if (!this.deps.enabled()) return;
     if (this.current !== null) {
       if (!manual) return;
@@ -497,9 +733,11 @@ export class SyncFolder {
   }
 
   private async round(manual: boolean, gen: number): Promise<void> {
-    if (this.dir === null) return;
     // 🔴 保管先への読み書きは `RemoteBox` の口だけを通す(#2000 段 4a-1)── 許可・handle は上(`permitted`)が持つ
-    const box: RemoteBox = folderBox(this.dir);
+    const box: RemoteBox | null = this.remote !== null ? this.remote.box : this.dir !== null ? folderBox(this.dir) : null;
+    if (box === null) return;
+    const remote = this.remote !== null;
+    const where = remote ? 'S3 互換の保管先' : '同期フォルダ';
     this.phase = 'running';
     this.changed();
     let imported = 0;
@@ -549,7 +787,7 @@ export class SyncFolder {
           if (outcome.pending !== undefined || outcome.declined === true) {
             // 確認待ち / 確認に「やめる」と答えた ── 取り込んでいない。控え(`seen`)も頼み(`want`)も動かさない(次の回も確認待ちのまま)
             this.pending.add(peer);
-            if (peer === self) ownUnresolved = 'この端末と同じ ID の端末が同期フォルダに書いています(端末のデータを複製した可能性があります)。「今すぐ同期」を押して確認してください';
+            if (peer === self) ownUnresolved = `この端末と同じ ID の端末が${where}に書いています(端末のデータを複製した可能性があります)。「今すぐ同期」を押して確認してください`;
             continue;
           }
           if (!outcome.ok) {
@@ -592,7 +830,7 @@ export class SyncFolder {
         await this.persist();
         this.phase = 'stopped';
         this.message = ownUnresolved.includes('別のワークスペース')
-          ? `${ownUnresolved}(ワークスペースごとに別の同期フォルダを選んでください)`
+          ? `${ownUnresolved}(ワークスペースごとに別の${remote ? '置き場の接頭辞' : '同期フォルダ'}を選んでください)`
           : ownUnresolved;
         if (manual || this.message !== this.lastFail) this.deps.fail(this.message);
         this.lastFail = this.message;
@@ -632,17 +870,25 @@ export class SyncFolder {
       this.message = this.pending.size > 0 ? `確認が要る端末が ${this.pending.size} 台あります。「今すぐ同期」を押すと確認します` : null;
       this.phase = 'idle';
       if (problems.length > 0) {
-        const t = `同期フォルダの一部のファイルを取り込めませんでした(${problems.length} 件): ${problems.slice(0, 3).join(' / ')}`;
+        const t = `${where}の一部のファイルを取り込めませんでした(${problems.length} 件): ${problems.slice(0, 3).join(' / ')}`;
         if (manual || t !== this.lastFail) this.deps.fail(t);
         this.lastFail = t;
       } else this.lastFail = null;
-      if (manual || imported > 0) this.deps.say(`同期フォルダと同期しました(${this.lastText})`);
+      if (manual || imported > 0) this.deps.say(`${where}と同期しました(${this.lastText})`);
     } catch (e) {
       this.failures += 1;
       this.phase = 'stopped';
       const lost = errName(e) === 'NotFoundError' || errName(e) === 'NotAllowedError' || errName(e) === 'SecurityError';
-      this.message = lost ? `同期フォルダを読み書きできません(移動・削除されたか、許可が切れました)。選び直してください: ${errorText(e)}` : `同期に失敗しました(次の回にやり直します): ${errorText(e)}`;
-      if (lost) this.phase = 'permission';
+      if (e instanceof BoxConflictError)
+        // 🔴 412: 上書きしていない。次の回に、書き換えた相手のファイルを読んでから書く(同じ端末 id なら確認を出す)
+        this.message = `${errorText(e)}。次の回に、相手のファイルを取り込んでから書きます`;
+      else if (remote)
+        // 保管先: 許可の出し直しは無い(認証情報・権限・CORS の設定を直す)── 間隔を延ばしながら回り続ける
+        this.message = lost
+          ? `保管先を読み書きできません(アクセスキー・権限・バケット名を確かめてください。直したら「接続する」で入れ直します): ${errorText(e)}`
+          : `同期に失敗しました(次の回にやり直します): ${errorText(e)}`;
+      else this.message = lost ? `同期フォルダを読み書きできません(移動・削除されたか、許可が切れました)。選び直してください: ${errorText(e)}` : `同期に失敗しました(次の回にやり直します): ${errorText(e)}`;
+      if (lost && !remote) this.phase = 'permission';
       if (manual || this.message !== this.lastFail) this.deps.fail(this.message);
       this.lastFail = this.message;
     } finally {

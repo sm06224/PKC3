@@ -11,6 +11,7 @@ import type { SyncFolderViewSource } from '../sync-folder-view';
 import type { SyncEnabledStore } from '../sync-enabled';
 import type { SettingsSection } from './section';
 import { buildSettingsNote } from './note';
+import { SYNC_FOLDER_UNSUPPORTED_NOTE } from '@adapter/platform/sync-folder';
 
 export const SYNC_FOLDER_LABEL = '同期フォルダ';
 
@@ -87,9 +88,13 @@ export function createSyncFolderSection(region: HTMLElement, source: SyncFolderV
       const stop = q('stop-sync-folder');
       const persist = q('allow-sync-folder-persist');
       const select = dd.querySelector<HTMLSelectElement>('[data-pkc-field="sync-folder-minutes"]');
-      const hasFolder = v?.folderName != null;
+      // ⚠ 保管先(S3)を使っている間は、この節は「フォルダに切り替える」だけ(状態・ボタンは保管先の節)
+      const onS3 = v?.kind === 's3';
+      const hasFolder = v?.folderName != null && !onS3;
+      const folderUnsupported = phase === 'unsupported' || v?.folderSupported === false;
       let text: string;
-      if (phase === 'unsupported') text = v?.message ?? '';
+      if (folderUnsupported) text = SYNC_FOLDER_UNSUPPORTED_NOTE;
+      else if (onS3) text = '使っていません(いまは S3 互換の保管先と同期しています)';
       else if (!on) text = '設定の「端末間の同期」をオンにすると使えます';
       // ⚠ 選んでいない状態にも理由がありうる(読み込みの見張りが handle を捨てた等)── 言わずに「まだ」とだけ出さない
       else if (!hasFolder) text = v?.message != null ? `まだ選んでいません。${v.message}` : 'まだ選んでいません';
@@ -108,10 +113,10 @@ export function createSyncFolderSection(region: HTMLElement, source: SyncFolderV
         text = `${head}: ${state}${v?.message != null ? `。${v.message}` : ''}`;
       }
       if (status !== null && status.textContent !== text) status.textContent = text;
-      const usable = on && phase !== 'unsupported';
+      const usable = on && !folderUnsupported;
       if (pick !== null) {
         pick.disabled = !usable;
-        pick.textContent = hasFolder ? '別のフォルダを選ぶ…' : '同期フォルダを選ぶ…';
+        pick.textContent = hasFolder ? '別のフォルダを選ぶ…' : onS3 ? '同期フォルダに切り替える…' : '同期フォルダを選ぶ…';
       }
       if (now !== null) {
         now.hidden = !hasFolder || phase === 'permission';
@@ -121,7 +126,8 @@ export function createSyncFolderSection(region: HTMLElement, source: SyncFolderV
       if (stop !== null) stop.hidden = !hasFolder;
       if (persist !== null) persist.hidden = !(on && v !== null && !v.persist);
       if (select !== null) {
-        select.disabled = !usable || !hasFolder;
+        // 間隔は保管先と共通(どちらかを使っていれば変えられる)
+        select.disabled = !on || phase === 'unsupported' || !(hasFolder || onS3);
         const want = String(v?.minutes ?? 5);
         if (select.value !== want) select.value = want;
       }
