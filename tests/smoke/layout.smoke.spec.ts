@@ -360,6 +360,37 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
   await clickReal(page, `[data-pkc-region="rail"] [data-pkc-browse="${mode}"]`);
   await expect(shell, 'もう一度押しても開かない(片道)').not.toHaveAttribute('data-pkc-hidden-panes', /sidebar/);
   await expect(page.locator('[data-pkc-region="sidebar"]')).toBeVisible();
+
+  /**
+   * ⑨ 🔴 **近接発光**(#1982 ③-a-2。user 裁定 = G1)── バーに入ると光り、ポインタについて動き、出ると消える。
+   *   動きを減らす設定に変えると付かない(リスナーごと外す)。実マウスで動かす。
+   */
+  const rail = page.locator('[data-pkc-region="rail"]');
+  const glow = page.locator('[data-pkc-region="rail"] [data-pkc-field="rail-glow"]');
+  const rb = (await rail.boundingBox())!;
+  await page.mouse.move(700, 450);
+  await expect(rail, '入る前から光っている').not.toHaveAttribute('data-pkc-glow', '');
+  await page.mouse.move(rb.x + 20, rb.y + 200);
+  await page.mouse.move(rb.x + 20, rb.y + 220);
+  await expect(rail, 'バーに入っても光らない').toHaveAttribute('data-pkc-glow', '');
+  const at1 = await glow.boundingBox();
+  await page.mouse.move(rb.x + 20, rb.y + 400);
+  await expect.poll(async () => (await glow.boundingBox())?.y, { message: '光がポインタについて動かない' }).not.toBe(at1?.y);
+  const at2 = (await glow.boundingBox())!;
+  expect(Math.abs(at2.y + at2.height / 2 - (rb.y + 400)), '光の中心がポインタの位置でない').toBeLessThan(3);
+  // 光は押し所を奪わない(光の下のボタンに当たる)
+  expect(
+    await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('button') !== null, [rb.x + 20, rb.y + 20]),
+    '光がボタンの押し所を奪っている',
+  ).toBe(true);
+  await page.mouse.move(700, 450);
+  await expect(rail, '出ても光が残る').not.toHaveAttribute('data-pkc-glow', '');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.mouse.move(rb.x + 20, rb.y + 200);
+  await page.mouse.move(rb.x + 20, rb.y + 240);
+  await page.waitForTimeout(100);
+  await expect(rail, '動きを減らす設定なのに光った').not.toHaveAttribute('data-pkc-glow', '');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
 });
 
 
