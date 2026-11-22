@@ -11,6 +11,7 @@ import {
   type AppState,
   type Dispatchable,
   ENTRY_GONE_NOTE,
+  BODY_LOAD_FAILED_NOTE,
   type ReduceResult,
   attachmentEntriesOf,
   dualPreviewTarget,
@@ -448,7 +449,7 @@ export function reduceBoot(state: AppState, action: BootAction): ReduceResult {
       // phase は落とさない(読み失敗はアプリ死ではない ── 再クリックが retry)。
       // エラーは state に持つ: 次の成功 / 選択までステータスに残る
       return {
-        state: { ...state, error: action.error === ENTRY_GONE_NOTE ? ENTRY_GONE_NOTE : `本文を読み込めませんでした: ${action.error}` },
+        state: { ...state, error: action.error === ENTRY_GONE_NOTE ? ENTRY_GONE_NOTE : `${BODY_LOAD_FAILED_NOTE}: ${action.error}` },
         events: [],
       };
     }
