@@ -19,6 +19,7 @@ import {
   type SheetRow,
 } from '@features/calc/sheet';
 import { appCalcDraft, CALC_DRAFT_MAX_CHARS, type CalcDraftStore } from './calc-draft-store';
+import { setTipTitle } from './tooltip';
 
 function field<T extends HTMLElement>(pane: HTMLElement, name: string): T | null {
   return pane.querySelector<T>(`[data-pkc-field="${name}"]`);
@@ -61,8 +62,7 @@ export function refreshCalc(pane: HTMLElement, opts: { save?: boolean } = {}): v
       if (el.getAttribute('data-pkc-calc-row') !== r.kind) el.setAttribute('data-pkc-calc-row', r.kind);
       if (el.textContent !== r.display) el.textContent = r.display;
       // 名前の定義は、結果に名前を添える(押せない・読み上げ用)
-      if (r.name === null) el.removeAttribute('title');
-      else el.title = `名前: ${r.name}`;
+      setTipTitle(el, r.name === null ? null : `名前: ${r.name}`);
     });
   }
   const lines = text === '' ? 0 : text.split('\n').length;

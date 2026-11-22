@@ -67,4 +67,25 @@ describe('computeTipPlacement', () => {
     expect(r.side).toBe('right');
     expect(r.y).toBeGreaterThanOrEqual(0);
   });
+  it('右: ポインタが対象の右にはみ出していても、ポインタの右 + gap へ出る', () => {
+    const target = rect(0, 10, 44, 40);
+    const pointer = { x: 80, y: 25 };
+    const r = computeTipPlacement({ target, pointer, tip, viewport: vp });
+    expect(r.side).toBe('right');
+    expect(r.x).toBeGreaterThanOrEqual(pointer.x + 6);
+  });
+  it('左: ポインタが対象の左にはみ出していても、ポインタの左 - gap に収まる', () => {
+    const target = rect(950, 5, 40, 30);
+    const pointer = { x: 900, y: 20 };
+    const r = computeTipPlacement({ target, pointer, tip, viewport: vp });
+    expect(r.side).toBe('left');
+    expect(r.x + tip.width).toBeLessThanOrEqual(pointer.x - 6);
+  });
+  it('優先順: 画面中ほどの上端近くでは右が先(左ではない)。右端では左へ逃げる', () => {
+    const mid = computeTipPlacement({ target: rect(500, 5), pointer: { x: 510, y: 15 }, tip, viewport: vp });
+    expect(mid.side).toBe('right');
+    expect(mid.x).toBeGreaterThanOrEqual(540);
+    const edge = computeTipPlacement({ target: rect(950, 5), pointer: { x: 960, y: 15 }, tip, viewport: vp });
+    expect(edge.side).toBe('left');
+  });
 });

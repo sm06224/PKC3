@@ -14942,6 +14942,12 @@ h6:hover > .pkc-heading-anchor,
   overflow-wrap: anywhere;
   pointer-events: none;
   animation: pkc-tip-in 0.12s ease-out;
+  /* popover(top layer)の UA 既定(中央寄せの inset / margin / 隠れる overflow)を打ち消す。位置は style の left / top */
+  inset: auto;
+  margin: 0;
+  overflow: visible;
+  width: max-content;
+  height: auto;
 }
 [data-pkc-region='tooltip'][hidden] {
   display: none;

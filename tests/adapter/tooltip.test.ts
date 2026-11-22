@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { installTooltip, TIP_ID, TIP_STASH_ATTR } from '@adapter/ui/render/tooltip';
+import { getTipTitle, installTooltip, setTipTitle, TIP_ID, TIP_STASH_ATTR } from '@adapter/ui/render/tooltip';
 
 let off: () => void;
 beforeEach(() => {
@@ -57,6 +57,8 @@ describe('tooltip', () => {
       () => ev('pointerdown', a()),
       () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })),
       () => document.dispatchEvent(new Event('scroll')),
+      () => ev('focusout', a()),
+      () => window.dispatchEvent(new Event('blur')),
     ];
     for (const c of cases) {
       ev('pointerover', a());
@@ -103,6 +105,7 @@ describe('tooltip', () => {
     expect(a().hasAttribute(TIP_STASH_ATTR)).toBe(false);
   });
   it('キーボードのフォーカスでも出て、外れたら戻る', () => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }));
     ev('focusin', a());
     vi.advanceTimersByTime(500);
     expect(tip()!.hidden).toBe(false);
@@ -116,5 +119,115 @@ describe('tooltip', () => {
     off();
     expect(tip()).toBeNull();
     expect(a().getAttribute('title')).toBe('保存する');
+  });
+  it('pointerdown → focusin(クリックで移ったフォーカス)では出ない', () => {
+    ev('pointerdown', a());
+    ev('focusin', a());
+    vi.advanceTimersByTime(500);
+    expect(tip()).toBeNull();
+    expect(a().getAttribute('title')).toBe('保存する');
+  });
+  it('keydown → focusin では出る。その後 pointerdown に戻ると出ない', () => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }));
+    ev('focusin', a());
+    vi.advanceTimersByTime(500);
+    expect(tip()!.hidden).toBe(false);
+    ev('pointerdown', a());
+    expect(tip()!.hidden).toBe(true);
+    ev('focusin', a());
+    vi.advanceTimersByTime(500);
+    expect(tip()!.hidden).toBe(true);
+  });
+  it('名前も中身の字も無い要素には、退避の間だけ aria-label を一時付与し、自分の値なら外す', () => {
+    document.body.insertAdjacentHTML('beforeend', '<button id="i" title="閉じる"></button>');
+    const i = document.getElementById('i')!;
+    ev('pointerover', i);
+    expect(i.getAttribute('aria-label')).toBe('閉じる');
+    expect(i.hasAttribute('title')).toBe(false);
+    ev('pointerout', i, { relatedTarget: document.body });
+    expect(i.hasAttribute('aria-label')).toBe(false);
+    expect(i.getAttribute('title')).toBe('閉じる');
+    // 退避中に別の値へ書き換えられていたら外さない
+    ev('pointerover', i);
+    i.setAttribute('aria-label', '別の名前');
+    ev('pointerout', i, { relatedTarget: document.body });
+    expect(i.getAttribute('aria-label')).toBe('別の名前');
+  });
+  it('中身の字がある要素・aria-label がある要素には aria-label を足さない', () => {
+    ev('pointerover', a());
+    expect(a().hasAttribute('aria-label')).toBe(false);
+    ev('pointerout', a(), { relatedTarget: document.body });
+    const b = document.getElementById('b')!;
+    ev('pointerover', b);
+    expect(b.getAttribute('aria-label')).toBe('開く');
+    ev('pointerout', b, { relatedTarget: document.body });
+    expect(b.getAttribute('aria-label')).toBe('開く');
+  });
+  it('既存の aria-describedby は上書きも削除もしない', () => {
+    a().setAttribute('aria-describedby', 'other');
+    ev('pointerover', a());
+    vi.advanceTimersByTime(500);
+    expect(a().getAttribute('aria-describedby')).toBe('other');
+    ev('pointerout', a(), { relatedTarget: document.body });
+    expect(a().getAttribute('aria-describedby')).toBe('other');
+  });
+  it('退避中に消したら(setTipTitle null)、離れても戻らない', () => {
+    ev('pointerover', a());
+    vi.advanceTimersByTime(500);
+    setTipTitle(a(), null);
+    ev('pointerout', a(), { relatedTarget: document.body });
+    expect(a().hasAttribute('title')).toBe(false);
+    expect(a().hasAttribute(TIP_STASH_ATTR)).toBe(false);
+  });
+  it('退避中に消したら(setTipTitle null)、出ている吹き出しも消える', async () => {
+    ev('pointerover', a());
+    vi.advanceTimersByTime(500);
+    setTipTitle(a(), null);
+    await Promise.resolve();
+    expect(tip()!.hidden).toBe(true);
+  });
+  it('退避中に title を書き換えたら、新しい字を表示し、離れたら新しい字が残る', async () => {
+    ev('pointerover', a());
+    vi.advanceTimersByTime(500);
+    expect(tip()!.textContent).toBe('保存する');
+    a().setAttribute('title', '上書き');
+    await Promise.resolve();
+    expect(a().hasAttribute('title')).toBe(false); // 再び外れている(標準の吹き出しと二重にしない)
+    expect(a().getAttribute(TIP_STASH_ATTR)).toBe('上書き');
+    expect(tip()!.textContent).toBe('上書き');
+    ev('pointerout', a(), { relatedTarget: document.body });
+    expect(a().getAttribute('title')).toBe('上書き');
+    expect(a().hasAttribute(TIP_STASH_ATTR)).toBe(false);
+  });
+  it('待ちの間(出る前)に title を書き換えても新しい字が出る', async () => {
+    ev('pointerover', a());
+    a().setAttribute('title', '待ち中の上書き');
+    await Promise.resolve();
+    vi.advanceTimersByTime(500);
+    expect(tip()!.textContent).toBe('待ち中の上書き');
+  });
+  it('setTipTitle / getTipTitle: 退避していなければ title を直接書く・消す。退避中でも今の字を返す', () => {
+    setTipTitle(a(), '直接');
+    expect(a().getAttribute('title')).toBe('直接');
+    expect(getTipTitle(a())).toBe('直接');
+    ev('pointerover', a());
+    expect(getTipTitle(a())).toBe('直接');
+    setTipTitle(a(), '退避中の更新');
+    expect(getTipTitle(a())).toBe('退避中の更新');
+    expect(a().hasAttribute('title')).toBe(false);
+    ev('pointerout', a(), { relatedTarget: document.body });
+    expect(a().getAttribute('title')).toBe('退避中の更新');
+    setTipTitle(a(), null);
+    expect(a().hasAttribute('title')).toBe(false);
+  });
+  it('開いているダイアログの中の対象では、吹き出しをダイアログの子として載せる', () => {
+    document.body.insertAdjacentHTML('beforeend', '<dialog open id="d"><button id="x" title="中のボタン">X</button></dialog>');
+    ev('pointerover', document.getElementById('x')!);
+    vi.advanceTimersByTime(500);
+    expect(tip()!.parentElement).toBe(document.getElementById('d'));
+    ev('pointerout', document.getElementById('x')!, { relatedTarget: document.body });
+    ev('pointerover', a());
+    vi.advanceTimersByTime(500);
+    expect(tip()!.parentElement).toBe(document.body);
   });
 });

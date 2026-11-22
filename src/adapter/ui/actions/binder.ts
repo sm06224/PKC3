@@ -40,6 +40,7 @@ import {
 } from '../render/heading-fold';
 import { ADAPTER_SETTING_VALIDATORS } from '../render/settings-validators';
 import { toggleCodeCollapse } from '../render/code-collapse';
+import { TIP_STASH_ATTR } from '../render/tooltip';
 import { SEARCH_FIND_ATTR } from '../render/search';
 import { NOTE_TAB_LID_ATTR } from '../render/note-tabs';
 import {
@@ -2058,6 +2059,8 @@ function barTileMenuItems(bar: Element, selector = `[${BAR_TILE_ATTR}]`): MenuIt
         continue;
       // 🔴 畳みの印(#1621)を写すと、メニューの項目まで `display: none` になる
       if (attr.name === OVERFLOW_ATTR) continue;
+      // ツールチップの退避(表示中の一時属性)も写さない ── 写すと「その他」の項目に古い説明が残る
+      if (attr.name === TIP_STASH_ATTR) continue;
       attrs[attr.name] = attr.value;
     }
     items.push({

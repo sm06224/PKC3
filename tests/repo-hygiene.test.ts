@@ -1643,7 +1643,8 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-11-22(#2000 段 3): `sync-folder.smoke.spec.ts` を新設(2 本)。580 → 582。
     // ⚠ 2026-11-22(#1982 A4): `crumb-path.smoke.spec.ts` を新設(2 本)。600 → 602。
     // ⚠ 2026-11-22(#1982 A3): `tooltip.smoke.spec.ts` を新設(2 本)。602 → 604。
-    ).toBe(604);
+    // ⚠ 2026-11-22(#1982 A3 レビュー): `tooltip.smoke.spec.ts` に showModal のダイアログ内の 1 件。604 → 605。
+    ).toBe(605);
   });
 });
 
