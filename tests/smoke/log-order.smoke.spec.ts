@@ -123,3 +123,77 @@ test('🔴 新しい順のログ: 記録の中のブロックは上へ動かせ�
   await clickReal(page, '[data-pkc-action="cancel-edit"]');
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **新しい順で塊が中央へ縮まない・入れ子の縦線が揃う・同じ日の中も時刻の降順**(実機の崩れ。user 指示 2026-11-22)。
+ * - 縦の flex の子は左右の余白が `auto` だと字の幅まで縮み、1 行の短い段落が 1 つずつ中央に寄っていた
+ *   → 古い順と新しい順で、**塊ごとの左端と幅が同じ**であることを実寸で突き合わせる(古い順が対照群)
+ * - 本文の並びを裏返すだけだと、追記の順と見出しの日時が食い違う記録で時刻が前後した(`22:47:20 → 06:18:53 → 15:25:46`)
+ *   → 見出しの日時の降順で上から並ぶこと
+ */
+test('🔴 新しい順のログ: 塊は古い順と同じ左端・幅のまま(中央に縮まない)、同じ日の中も見出しの日時の降順 (#2018 実機)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await page.evaluate(() => localStorage.setItem('pkc3.log-order', 'asc'));
+  await createEntry(page, 'textlog');
+  // 本文の順は 15:25 → 06:18 → 22:47(手で書き足した・取り込んだ記録で起きる並び)
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    [
+      '## 2026-11-22 15:25:46',
+      '昼の記録',
+      '## 2026-11-22 06:18:53',
+      '朝',
+      '### 2026-11-22 06:30:00',
+      '朝の追い一段',
+      '#### 2026-11-22 06:40:00',
+      '朝の追い二段',
+      '## 2026-11-22 22:47:20',
+      '夜の記録の本文はすこし長めに書いて、読み幅いっぱいに折り返すかどうかを見る',
+    ].join('\n\n'),
+  );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  const texts = ['15:25:46', '昼の記録', '06:18:53', '朝', '06:30:00', '朝の追い一段', '06:40:00', '朝の追い二段', '22:47:20', '夜の記録'];
+  const rects = (): Promise<{ text: string; left: number; width: number; top: number }[]> =>
+    page.locator(BODY).evaluate((host, keys) => {
+      const kids = [...host.children].filter((c) => c.matches('p, h2, h3, h4'));
+      return keys.map((k) => {
+        const el = kids.find((c) => (c.textContent ?? '').trim() === k || (c.textContent ?? '').includes(k) && (k.length > 2 || (c.textContent ?? '').trim() === k));
+        if (el === undefined) throw new Error(`「${k}」が無い`);
+        const r = el.getBoundingClientRect();
+        return { text: k, left: Math.round(r.left * 10) / 10, width: Math.round(r.width * 10) / 10, top: Math.round(r.top) };
+      });
+    }, texts);
+  const asc = await rects();
+  await page.locator(`${BODY} [data-pkc-field="log-order"]`).click();
+  await expect(page.locator(BODY)).toHaveAttribute('data-pkc-log-order', 'desc');
+  const desc = await rects();
+  for (let i = 0; i < texts.length; i++) {
+    expect(Math.abs(desc[i]!.left - asc[i]!.left), `「${texts[i]}」の左端が古い順とずれた(中央に縮んだ)`).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(desc[i]!.width - asc[i]!.width), `「${texts[i]}」の幅が古い順と違う(字の幅に縮んだ)`).toBeLessThanOrEqual(0.5);
+  }
+  // 対照群が意味を持つ: 短い段落「朝」も読み幅いっぱい(字の幅ではない)
+  const asa = desc.find((r) => r.text === '朝')!;
+  const yoru = desc.find((r) => r.text === '夜の記録')!;
+  expect(asa.width, '短い段落が字の幅に縮んだ').toBeCloseTo(yoru.width, 0);
+  expect(asa.left).toBeCloseTo(yoru.left, 0);
+  // 入れ子は親より右(字下げの位置は塊の左端 + padding。縦線は同じ左端から引く)
+  // 同じ日の中も見出しの日時の降順
+  const t = (k: string): number => desc.find((r) => r.text === k)!.top;
+  expect(t('22:47:20'), '22:47 が一番上に来ない').toBeLessThan(t('15:25:46'));
+  expect(t('15:25:46'), '15:25 が 06:18 より上に来ない').toBeLessThan(t('06:18:53'));
+  expect(t('06:18:53'), '入れ子は親の下のまま').toBeLessThan(t('朝の追い一段'));
+  expect(t('朝の追い一段')).toBeLessThan(t('朝の追い二段'));
+  // 並べ替えのボタンは字の幅のまま右に寄る(塊と一緒に全幅へ広がらない)
+  const ob = await page.locator(`${BODY} [data-pkc-field="log-order"]`).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const h = el.parentElement!.getBoundingClientRect();
+    return { w: r.width, right: r.right, hostW: h.width, hostRight: h.right };
+  });
+  expect(ob.w, '並べ替えのボタンが全幅の帯になった').toBeLessThan(ob.hostW / 3);
+  expect(Math.abs(ob.right - ob.hostRight), '並べ替えのボタンが右に寄っていない').toBeLessThanOrEqual(2);
+  await page.locator(BODY).screenshot({ path: test.info().outputPath('log-desc.png') });
+  expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
+});

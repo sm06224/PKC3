@@ -30,12 +30,48 @@ export function logSegments(levels: readonly number[]): LogSegments {
 }
 
 /**
- * 新しい順に並べたときの、件の**並びの順位**(前置き = 0、いちばん新しい件 = 1)。
- * ⚠ 「新しい」は**本文の後ろ**(追記は末尾に足すので、後ろの件ほど新しい)── 見出しの日時は読まない
- *   (日時を書き換えた記録・日時でない見出しでも、置いた順のまま裏返す)。
+ * 新しい順に並べたときの、件の**並びの順位**(前置き = 0、いちばん新しい件 = 1)── 日時を読まない並べ方(本文の後ろほど新しい)。
+ * ⚠ 見出しに日時が在るログは `descRanks` を使う(こちらは日時の無い記録の並び・テストの基準)。
  */
 export function descRank(seg: number, count: number): number {
   return seg === 0 ? 0 : count - seg + 1;
+}
+
+/** 記録の見出しの日時(`YYYY-MM-DD HH:mm(:ss)`)。⚠ 見出しの頭だけを見る(後ろに `★` などが付く)。 */
+const RECORD_STAMP = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/;
+
+/**
+ * 見出しの字から、並べるための日時の鍵(`YYYY-MM-DD HH:mm:ss`。秒が無ければ `:00`)を取る。日時でなければ `null`。
+ * ⚠ 字の大小で比べられる形にそろえるだけ(暦の妥当性は日の行の側 = `logDayOfHeading` が見る)。
+ */
+export function recordStampKey(text: string): string | null {
+  const m = RECORD_STAMP.exec(text.trim());
+  if (m === null) return null;
+  return `${m[1]!} ${m[2]!}:${m[3]!}:${m[4] ?? '00'}`;
+}
+
+/**
+ * 🔴 **新しい順の順位を、見出しの日時で決める**(#2018 実機の崩れ。user 指示 2026-11-22)── 同じ日の中で
+ *   `22:47:20 → 06:18:53 → 15:25:46` と前後した(本文の並びを裏返しただけだったため。追記の順と見出しの日時が
+ *   食い違う記録 = 手で書き足した・別の端末から取り込んだ記録で起きる)。
+ *
+ * - 日時の見出しを持つ記録どうしは**日時の降順**。同じ日時なら本文の後ろの方を上に
+ * - 日時の無い記録は、本文で**直前の日時を持つ記録と同じ日時**として扱う(置いた場所の近くに留まる。前に日時が無ければいちばん古い)
+ * - ⚠ 本文の原文・DOM の並びは変えない(順位は CSS の `order` に入るだけ)
+ *
+ * @param keys 件ごとの日時の鍵(`keys[k - 1]` が k 件目。日時でなければ `null`)
+ * @returns `ranks[k - 1]` = k 件目の順位(いちばん新しい件 = 1)
+ */
+export function descRanks(keys: readonly (string | null)[]): number[] {
+  let last = '';
+  const eff = keys.map((k) => (k === null ? last : (last = k)));
+  const idx = eff.map((_, i) => i);
+  idx.sort((a, b) => (eff[a]! > eff[b]! ? -1 : eff[a]! < eff[b]! ? 1 : b - a));
+  const ranks = new Array<number>(keys.length);
+  idx.forEach((segIndex, pos) => {
+    ranks[segIndex] = pos + 1;
+  });
+  return ranks;
 }
 
 /** CSS の `order` に入れる値(順位 × 幅 + 件の中の位置)。件の中の位置は 0 から(月の行 0・日の行 1・塊 2〜)。 */

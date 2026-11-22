@@ -143,6 +143,9 @@ body {
    * ⚠ 旧い #582 の「畳んだ縁」(`--pkc-edge-w`。畳んだときだけ `gripl` を 40px にしていた)はこのバーに一本化した ──
    *   畳んでも左の掴む帯は 8px のまま。 */
   --pkc-rail-w: 40px;
+  /* 🔴 **列の境目の掴む帯の見た目の幅**(実機の崩れ。user 指示 2026-11-22「目立ちすぎ・幅取りすぎ」)── 8px → 4px。
+   *   掴む当たり(10px)は帯の `::before` が本文の側へ広げる(見た目の溝を太らせずに掴みやすさを保つ)。 */
+  --pkc-grip-w: 4px;
   /* 🔑 右列は **詰める**(P9 段②)。20vw だと Full HD で 384px あり、そこに 4 行しか
    * 載っていなかった(「要らない所が広い」)。15vw = 1920 で 288px / 1440 で 216px。
    * ⚠ 下限 220px は残す ── 1100px 以下では 2 列に畳むので、そこまでの間の保険 */
@@ -162,7 +165,7 @@ body {
    *   (18vw のほうが大きい)。⚠ 数は `tests/adapter/shell-grid-css.test.ts` が
    *   下の `@media` の `22vw` と結んで見る(片方だけ動かすと、また境目で縮む)。 */
   grid-template-columns:
-    var(--pkc-rail-w) var(--pkc-pane-sidebar, minmax(242px, 18vw)) 8px minmax(0, 1fr) 8px
+    var(--pkc-rail-w) var(--pkc-pane-sidebar, minmax(242px, 18vw)) var(--pkc-grip-w) minmax(0, 1fr) var(--pkc-grip-w)
     var(--pkc-pane-inspector, minmax(220px, 15vw));
   /* ⚠ notices と update は**別の行**。同じ area に載せると、両方出たとき重なる */
   /* 🔴 **上の帯を撤去した**(P10、user 指示 2026-08-05)── 載っていたのは
@@ -251,7 +254,7 @@ body {
  *   1px の共有境界だけが残って「畳んだのに線がある」見え方になる。
  * ⚠ 中央は**畳めない**(操作子の置き場であり、1 画面完結の本体である)。 */
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'] {
-  grid-template-columns: var(--pkc-rail-w) 8px minmax(0, 1fr) 8px var(--pkc-pane-inspector, minmax(220px, 15vw));
+  grid-template-columns: var(--pkc-rail-w) var(--pkc-grip-w) minmax(0, 1fr) var(--pkc-grip-w) var(--pkc-pane-inspector, minmax(220px, 15vw));
   grid-template-areas:
     'rail gripl detail gripr inspector'
     'capture capture capture capture capture'
@@ -265,7 +268,7 @@ body {
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] {
   /* ⚠ 左の列の下限は上の 3 列の版面と同じ 242px(C16)── 右を畳んでも左は縮めない */
-  grid-template-columns: var(--pkc-rail-w) var(--pkc-pane-sidebar, minmax(242px, 18vw)) 8px minmax(0, 1fr) 8px;
+  grid-template-columns: var(--pkc-rail-w) var(--pkc-pane-sidebar, minmax(242px, 18vw)) var(--pkc-grip-w) minmax(0, 1fr) var(--pkc-grip-w);
   grid-template-areas:
     'rail sidebar gripl detail gripr'
     'capture capture capture capture capture'
@@ -278,7 +281,7 @@ body {
     'status status status status status';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'][data-pkc-hidden-panes~='inspector'] {
-  grid-template-columns: var(--pkc-rail-w) 8px minmax(0, 1fr) 8px;
+  grid-template-columns: var(--pkc-rail-w) var(--pkc-grip-w) minmax(0, 1fr) var(--pkc-grip-w);
   grid-template-areas:
     'rail gripl detail gripr'
     'capture capture capture capture'
@@ -531,7 +534,35 @@ body {
  * `aria-pressed` を見る規則を**足してから**この字を書き直すこと。
  */
 [data-pkc-region='pane-grip']::after {
-  content: '⋮';
+  /* 🔴 常時の点々(`⋮`)は出さない(実機の崩れ。user 指示 2026-11-22)── 掴めることは指したときの細い線と、
+   *   `col-resize` の指先で伝える。⚠ 低い窓で畳んだ追記欄の帯(下の #701)は `::after` に字を入れる */
+  content: none;
+}
+/* 🔴 **掴む当たりを本文の側へ 6px 広げる**(見た目 4px + 当たり 6px = 10px)── 反対側(左の縦のバー・右端)へは広げない
+ *   (タイルを奪わない / 右端の外へはみ出して横スクロールを作らない)。⚠ `::before` は帯の一部 = 押す・掴むが帯として届く */
+[data-pkc-region='pane-grip']:not([data-pkc-axis='y']) {
+  position: relative;
+  z-index: 1;
+  overflow-x: visible;
+}
+[data-pkc-region='pane-grip']:not([data-pkc-axis='y'])::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+[data-pkc-region='pane-grip'][data-pkc-pane='sidebar']::before {
+  left: 0;
+  right: -6px;
+}
+[data-pkc-region='pane-grip'][data-pkc-pane='inspector']::before {
+  left: -6px;
+  right: 0;
+}
+/* 指したとき・キーで選んだときだけ、帯の中央に細いアクセントの線(地は塗らない) */
+[data-pkc-region='pane-grip']:not([data-pkc-axis='y']):hover,
+[data-pkc-region='pane-grip']:not([data-pkc-axis='y']):focus-visible {
+  background: linear-gradient(var(--accent), var(--accent)) center / 2px 100% no-repeat;
 }
 
 /**
@@ -1280,6 +1311,8 @@ img[data-pkc-action='view-big']:focus-visible {
 }
 [data-pkc-region='browse-tabs'] [data-pkc-field='bar-more'] {
   height: auto;
+  /* 丈が伸びる行 ── 共通の button の上限(`--row-h`)を外す(外し忘れると折り返しが切れる。`tests/adapter/button-max-height.test.ts`) */
+  max-height: none;
   min-width: 0;
   /* 🔴 タブが 8 枚になって入りきらない幅が増えた(#281 ① / #683 ①)ので、「⋯」の横の余白を詰めた
    *   (`padding: 0 var(--s2)` → 1px)。実測で 1440px(左の列 259px)に PC が戻る。 */
@@ -3315,9 +3348,13 @@ dd[data-pkc-field='inspector-toc'] {
   border: none;
   border-radius: 0;
   background: none;
-  padding: 0;
+  padding: 2px 0;
   height: auto;
   min-height: 0;
+  /* 🔴 **丈の上限を外す**(実機の崩れ。user 指示 2026-11-22)── 共通の `button` は `max-height: var(--row-h)` と
+   *   `line-height: 1` を持つ。折り返す行(長い見出し)で上限が残ると、3 行目で上端が切れて下の項目にめり込んでいた */
+  max-height: none;
+  line-height: 1.4;
   text-align: left;
   white-space: normal;
   font-size: max(12px, calc(var(--pkc-text-size, 13px) * 12 / 13));
@@ -6636,6 +6673,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   justify-content: flex-start;
   width: 100%;
   height: auto;
+  /* 丈が伸びる行 ── 共通の button の上限(`--row-h`)を外す(外し忘れると折り返しが切れる。`tests/adapter/button-max-height.test.ts`) */
+  max-height: none;
   padding: 0;
   border: none;
   background: none;
@@ -6797,6 +6836,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   justify-content: flex-start;
   width: 100%;
   height: auto;
+  /* 丈が伸びる行 ── 共通の button の上限(`--row-h`)を外す(外し忘れると折り返しが切れる。`tests/adapter/button-max-height.test.ts`) */
+  max-height: none;
   padding: 0;
   border: none;
   background: none;
@@ -6954,6 +6995,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   text-align: left;
   width: 100%;
   height: auto;
+  /* 丈が伸びる行 ── 共通の button の上限(`--row-h`)を外す(外し忘れると折り返しが切れる。`tests/adapter/button-max-height.test.ts`) */
+  max-height: none;
   border: none;
   background: none;
   color: var(--fg);
@@ -7059,6 +7102,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   gap: 2px;
   width: 100%;
   height: auto;
+  /* 丈が伸びる行 ── 共通の button の上限(`--row-h`)を外す(外し忘れると折り返しが切れる。`tests/adapter/button-max-height.test.ts`) */
+  max-height: none;
   padding: var(--s2);
   border: none;
   background: var(--surface);
@@ -9434,6 +9479,57 @@ mark[data-pkc-diff-char='del'] {
   display: inline-block;
   line-height: var(--row-h);
 }
+/* 🔴 **パスはアドレスバーの形**(実機の崩れ。user 指示 2026-11-22)── 1 本の枠(紙の地 + 極細線)の中に字のリンクを並べる。
+ *   段は**ボタン箱にしない**(下の操作ボタンと見分ける)。親の段は hover で薄い強調、現在地は太字。
+ *   ⚠ 高さは他のボタンと同じ `--row-h`(帯の段違いを作らない)。D&D の落とし先の光り方は下で太くする */
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-path'] {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--row-h);
+  padding: 0 var(--s2);
+  gap: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-seg'] {
+  height: calc(var(--row-h) - 6px);
+  min-height: 0;
+  max-height: none;
+  line-height: calc(var(--row-h) - 6px);
+  padding: 0 var(--s2);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-seg']:hover,
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-seg']:focus-visible {
+  color: var(--fg);
+  background: var(--accent-dim);
+}
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-seg'][aria-current='location'] {
+  color: var(--fg);
+  font-weight: 700;
+}
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-sep'] {
+  flex: none;
+  padding: 0 1px;
+  color: var(--muted);
+  user-select: none;
+}
+/* D&D の落とし先: 段の中を強調の地で塗り、太い線で囲む(行の 2px 点線より見つけやすく。高さは変えない) */
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-seg'][data-pkc-dropping] {
+  color: var(--accent-dim-fg);
+  background: var(--accent-dim);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 
 /* ── お知らせ / 更新 / ステータス ───────────────────── */
 [data-pkc-region='notices'] {
@@ -10252,7 +10348,7 @@ mark[data-pkc-diff-char='del'] {
   [data-pkc-region='shell'] {
     /* ⚠ 一覧は**まだ列**なので、user が決めた幅はここでも効かせる(#497)。
      * 🔑 情報のほうは下へ寝るので効かせない ── 寝た面に「幅」は無い。 */
-    grid-template-columns: var(--pkc-rail-w) var(--pkc-pane-sidebar, minmax(180px, 22vw)) 8px minmax(0, 1fr);
+    grid-template-columns: var(--pkc-rail-w) var(--pkc-pane-sidebar, minmax(180px, 22vw)) var(--pkc-grip-w) minmax(0, 1fr);
     grid-template-areas:
       'rail sidebar gripl detail'
       'rail inspector inspector inspector'
@@ -10285,7 +10381,7 @@ mark[data-pkc-diff-char='del'] {
    */
   [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] {
     /* 情報はこの幅ではもともと下の行 ── 列はこの帯の既定のまま */
-    grid-template-columns: var(--pkc-rail-w) var(--pkc-pane-sidebar, minmax(180px, 22vw)) 8px minmax(0, 1fr);
+    grid-template-columns: var(--pkc-rail-w) var(--pkc-pane-sidebar, minmax(180px, 22vw)) var(--pkc-grip-w) minmax(0, 1fr);
     grid-template-areas:
       'rail sidebar gripl detail'
       'rail inspector inspector inspector'
@@ -10301,7 +10397,7 @@ mark[data-pkc-diff-char='del'] {
   [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'],
   [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'][data-pkc-hidden-panes~='inspector'] {
     /* ⚠ 掴む帯は**残す**(#197)── 畳んだものを戻す口がここしか無い */
-    grid-template-columns: var(--pkc-rail-w) 8px minmax(0, 1fr);
+    grid-template-columns: var(--pkc-rail-w) var(--pkc-grip-w) minmax(0, 1fr);
     grid-template-areas:
       'rail gripl detail'
       'rail inspector inspector'
@@ -11796,14 +11892,14 @@ h3[data-pkc-section] {
     top: 0;
     bottom: 0;
   }
-  /* 🔑 取っ手 8px + 本文側 16px = 24px(指の押し所の下限 #706)。幅は左右の位置で決める */
+  /* 🔑 取っ手 4px + 本文側 20px = 24px(指の押し所の下限 #706。帯は 2026-11-22 に 8px → 4px)。幅は左右の位置で決める */
   [data-pkc-region='pane-grip'][data-pkc-pane='sidebar']::before {
     left: 100%;
-    right: -16px;
+    right: -20px;
   }
   [data-pkc-region='pane-grip'][data-pkc-pane='inspector']::before {
     right: 100%;
-    left: -16px;
+    left: -20px;
   }
   /**
    * ⑦ **行の高さを 34px に**。素の `button` / `input` / 一覧の行は `--row-h` から
@@ -12538,6 +12634,21 @@ h3[data-pkc-section] {
 }
 [data-pkc-log-days][data-pkc-log-order='desc'] > * {
   margin-block-end: 0;
+  /* 🔴 **読み幅いっぱいに広げてから中央に置く**(実機の崩れ。user 指示 2026-11-22)── 縦の flex の子は、左右の余白が
+   *   `auto`(読み幅を中央に置く規則 `margin-inline: var(--prose-lead) auto`)だと**字の幅まで縮む**(stretch が効かない)。
+   *   1 行の短い段落・時刻の見出しが 1 つずつ中央に寄り、入れ子の縦線(背景の帯)が塊ごとにずれていた。
+   *   幅を「ふつうの塊の自動の幅」(器の幅 − 自分の padding。上限は各塊の `max-width` = 読み幅)にすれば、`auto` の余白は
+   *   古い順と**同じ値**になる(`log-order.smoke` が古い順と新しい順の左端・幅を塊ごとに突き合わせる)。
+   *   ⚠ `100%` + `border-box` にすると、字下げ(`padding`)した塊だけ古い順より狭くなり縦線が半字ずれる ── 使わない。
+   *   `100%` は stretch の無いブラウザの代わり(字下げの無い塊は同じ値になる) */
+  width: 100%;
+  width: -moz-available;
+  width: -webkit-fill-available;
+  width: stretch;
+}
+/* ⚠ 並べ替えのボタンと「すべて」の行は字の幅のまま右に寄せる(本文の塊ではない ── 広げるとボタンが全幅の帯になる) */
+[data-pkc-log-days][data-pkc-log-order='desc'] > :is([data-pkc-field='log-order'], [data-pkc-log-all]) {
+  width: auto;
 }
 
 /**
@@ -12661,6 +12772,24 @@ h3[data-pkc-section] {
   background: none;
   border: 0;
   cursor: pointer;
+}
+/* 🔴 **並べ替えは押せるボタンの形**(実機の崩れ。user 指示 2026-11-22)── 枠も地も無い薄い字ではボタンに見えなかった。
+ *   標準のボタンと同じ薄い地 + ごく薄い枠(#1982 段 1)。高さは標準の行(`--row-h`)、字は今までの小ささ */
+[data-pkc-field='log-order'] {
+  height: var(--row-h);
+  min-height: var(--row-h);
+  max-height: var(--row-h);
+  padding: 0 var(--s3);
+  line-height: 1;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+[data-pkc-field='log-order']:hover,
+[data-pkc-field='log-order']:focus-visible {
+  background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
 }
 
 /**
@@ -13975,6 +14104,8 @@ h6:hover > .pkc-heading-anchor,
   justify-content: flex-start;
   width: 100%;
   height: auto;
+  /* 丈が伸びる行 ── 共通の button の上限(`--row-h`)を外す(外し忘れると折り返しが切れる。`tests/adapter/button-max-height.test.ts`) */
+  max-height: none;
   padding: 0;
   border: none;
   background: none;

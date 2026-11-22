@@ -1,6 +1,6 @@
 /** 🔴 #2018 1: ログを新しい順に並べる規則(1 件 = 段 1〜2 の見出しから次の段 1〜2 の手前まで)。 */
 import { describe, expect, it } from 'vitest';
-import { descRank, logDepths, logSegments, orderValue } from '../../src/features/textlog/log-order';
+import { descRank, descRanks, logDepths, logSegments, orderValue, recordStampKey } from '../../src/features/textlog/log-order';
 
 describe('logSegments', () => {
   it('🔴 前置き(0)/ 段 1〜2 の見出しごとに 1 件 / 入れ子の ### は親の件に入る', () => {
@@ -34,5 +34,28 @@ describe('logDepths(#2018 8)', () => {
   });
   it('⚠ 前置き(最初の ## より前)の ### は記録の外なので 0', () => {
     expect(logDepths([3, 0, 2, 0, 3])).toEqual([0, 0, 0, 0, 1]);
+  });
+});
+
+describe('recordStampKey / descRanks(見出しの日時で並べる ── #2018 実機)', () => {
+  it('見出しの頭の日時を、字で比べられる形にそろえる(秒が無ければ :00)/ 日時でなければ null', () => {
+    expect(recordStampKey('2026-11-22 06:18:53 ★')).toBe('2026-11-22 06:18:53');
+    expect(recordStampKey('  2026-11-22T06:18 朝')).toBe('2026-11-22 06:18:00');
+    expect(recordStampKey('朝の記録')).toBeNull();
+    expect(recordStampKey('メモ 2026-11-22 06:18')).toBeNull();
+  });
+
+  it('🔴 同じ日の中も日時の降順(本文の並び 15:25 → 06:18 → 22:47 でも 22:47 → 15:25 → 06:18)', () => {
+    expect(descRanks(['2026-11-22 15:25:46', '2026-11-22 06:18:53', '2026-11-22 22:47:20'])).toEqual([2, 3, 1]);
+  });
+
+  it('日時の無い記録は直前の日時の記録のすぐ上(本文の後ろが新しい)/ 前に日時が無ければいちばん古い', () => {
+    // 1: 日時なし(先頭)/ 2: 10:00 / 3: 日時なし(2 の後ろ)/ 4: 09:00
+    expect(descRanks([null, '2026-01-01 10:00:00', null, '2026-01-01 09:00:00'])).toEqual([4, 2, 1, 3]);
+  });
+
+  it('同じ日時なら本文の後ろが上 / 日時の無いログは本文の並びを裏返すだけ(descRank と同じ)', () => {
+    expect(descRanks(['2026-01-01 10:00:00', '2026-01-01 10:00:00'])).toEqual([2, 1]);
+    expect(descRanks([null, null, null])).toEqual([1, 2, 3].map((s) => descRank(s, 3)));
   });
 });
