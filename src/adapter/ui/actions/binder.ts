@@ -5575,6 +5575,8 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   'open-app-menu',
   // 🔑 #1621 ── 左の列の帯に入りきらない操作の一覧(「⋯」)
   'open-bar-more',
+  // 🔑 A2 ── 本文の帯の「コピー ▾」
+  'open-copy-menu',
   'open-repeat-menu',
   // 🔑 台帳 #1852 束 S1(依頼 128-2)── 予定の札の「⋯」(右クリックのメニューと同じ物を開く)
   'open-task-menu',
@@ -7350,6 +7352,44 @@ const noop = (): void => {};
  *   (sink が字の末尾から推定すると、字が変わった日に黙って外れる)。
  */
 const CAUTION: StatusOptions = { kind: 'caution' };
+
+/**
+ * 🔴 **読む面の本文を、よそへ貼る用に掃除した HTML にする**(書式付きコピーと HTML ソースのコピーの共通の 1 本。A2)。
+ * ⚠ 掃除は**複製に対して**行う ── 画面には触れない。`blob:` 画像は data URL へ替える(替えられない物は落として数え、言う)。
+ */
+function withCleanNoteHtml(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  root: HTMLElement,
+  done: (html: string) => void,
+): void {
+  const body = dispatcher.getState().openBody?.body;
+  const host = viewBodyHost(root);
+  if (body === undefined || host === null) return;
+  const clone = host.cloneNode(true) as HTMLElement;
+  const inline = services.inlineImages;
+  const run = (urls: ReadonlyMap<string, string>): void => {
+    const { html, droppedImages } = cleanForClipboard(clone, urls);
+    done(html);
+    if (droppedImages > 0)
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `画像 ${droppedImages} 件は貼り先で読めないため文字に置き換えました`,
+      });
+  };
+  if (!inline) {
+    run(new Map());
+    return;
+  }
+  const blobs = [...clone.querySelectorAll('img')]
+    .map((i) => i.getAttribute('src') ?? '')
+    .filter((u) => u.startsWith('blob:'));
+  if (blobs.length === 0) {
+    run(new Map());
+    return;
+  }
+  void inline(blobs).then(run, () => run(new Map()));
+}
 
 /**
  * 戻る・進む。⚠ 編集中などで選択が動かなかったときは、黙らずに理由を言う
@@ -13023,32 +13063,25 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'copy-note-rich': (dispatcher, target, services, root) => {
     const body = dispatcher.getState().openBody?.body;
-    const host = viewBodyHost(root);
-    if (body === undefined || host === null) return;
-    const clone = host.cloneNode(true) as HTMLElement;
-    const inline = services.inlineImages;
-    const run = (urls: ReadonlyMap<string, string>): void => {
-      const { html, droppedImages } = cleanForClipboard(clone, urls);
-      // plain 側は原文(markdown)── 貼り付け先が editor なら原文、rich なら描画
-      finishCopy(dispatcher, target, copyMarkdownAndHtml(body, html));
-      if (droppedImages > 0)
-        dispatcher.dispatch({
-          type: 'OP_FAILED',
-          error: `画像 ${droppedImages} 件は貼り先で読めないため文字に置き換えました`,
-        });
-    };
-    if (!inline) {
-      run(new Map());
-      return;
-    }
-    const blobs = [...clone.querySelectorAll('img')]
-      .map((i) => i.getAttribute('src') ?? '')
-      .filter((u) => u.startsWith('blob:'));
-    if (blobs.length === 0) {
-      run(new Map());
-      return;
-    }
-    void inline(blobs).then(run, () => run(new Map()));
+    if (body === undefined) return;
+    // plain 側は原文(markdown)── 貼り付け先が editor なら原文、rich なら描画
+    withCleanNoteHtml(dispatcher, services, root, (html) => finishCopy(dispatcher, target, copyMarkdownAndHtml(body, html)));
+  },
+  /**
+   * 🔴 **HTML ソースをコピー**(A2。user 裁定 2026-11-22)── 書式付きと**同じ掃除**(`cleanForClipboard`。操作子・隠したソース・
+   *   `blob:` 画像を落とす / data URL へ替える)をした HTML を、**字のまま**(`text/plain`)渡す。ブログ・メールの HTML 欄へ貼る用。
+   * ⚠ 掃除の道は書式付きと 1 本(`withCleanNoteHtml`)── 2 本目の掃除を作らない。
+   */
+  'copy-note-html': (dispatcher, target, services, root) => {
+    withCleanNoteHtml(dispatcher, services, root, (html) => finishCopy(dispatcher, target, copyPlainText(html)));
+  },
+  /** 🔴 **読む面の帯の「コピー ▾」**(A2)── 項目は隠した元(`copy-more-source`)の同じボタンから読む(「その他 ▾」と同じ作法)。 */
+  'open-copy-menu': (_dispatcher, target, _services, root) => {
+    const src = target.closest('[data-pkc-field="detail-toolbar"]')?.querySelector('[data-pkc-field="copy-more-source"]');
+    const items = exportMenuItemsFrom(src ?? null, 'open-copy-menu');
+    if (items.length === 0) return;
+    const r = target.getBoundingClientRect();
+    openContextMenu(root, { x: r.left, y: r.bottom }, items, target);
   },
   /**
    * 選択範囲を Markdown の原文でコピーする。逆引きの規則は `copy-source.ts` の
@@ -20550,6 +20583,8 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'stack-save': '[data-pkc-action="stack-save"]',
   'copy-note-md': '[data-pkc-action="copy-note-md"]',
   'copy-note-rich': '[data-pkc-action="copy-note-rich"]',
+  // 🔴 A2: 帯の「コピー ▾」の隠した元の中のボタンを押す(`CLOSED_MENU_SOURCES` に載せてある ── 隠れていても効く)
+  'copy-note-html': '[data-pkc-action="copy-note-html"]',
   // ⚠ 「操作を探す」からの実行は `runGlobalCommand` が直に撃つ(どの画面からでも ── 台帳 #1852 束 L1)。この行は「受け手の押しボタン」の登記
   'export-messages': '[data-pkc-action="export-messages"]',
   'export-settings': '[data-pkc-action="export-settings"]',
@@ -20643,7 +20678,7 @@ const PALETTE_HIDDEN_OK: ReadonlySet<string> = new Set(['attach-file', 'open-tod
  */
 // ⚠ 書式の帯の「その他 ▾」の元(`format-more-source`。#1982 段 3)も同じ ── 「置換」「日付」などの鍵・操作を探すが効く
 const CLOSED_MENU_SOURCES =
-  '[data-pkc-field="inspector-more-source"], [data-pkc-field="inspector-export-source"], [data-pkc-field="format-more-source"], [data-pkc-field="collection-more-source"]';
+  '[data-pkc-field="inspector-more-source"], [data-pkc-field="inspector-export-source"], [data-pkc-field="format-more-source"], [data-pkc-field="collection-more-source"], [data-pkc-field="copy-more-source"]';
 function inClosedMenuSource(btn: HTMLElement): boolean {
   const nearest = btn.closest('[hidden]');
   return nearest !== null && nearest.matches(CLOSED_MENU_SOURCES);
