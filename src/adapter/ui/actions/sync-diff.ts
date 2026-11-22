@@ -558,6 +558,13 @@ export async function applySyncDiff(
             bad.push(label);
             continue;
           }
+          // 🔴 hash を持たない添付(大きくて hash を取らなかった物)は、大きさだけでも合わせる(#2000 段 4a-1 のついで。user 指摘)
+          //   ── 途中で切れた・取り違えた添付を、正しい key の下へ黙って入れない
+          //   ⚠ 大きさが 0 の目録は照合しない(読む側は欠けた大きさを 0 で埋める ── 0 と比べると正しい添付を落とす)
+          if (meta?.hash == null && typeof meta?.size === 'number' && meta.size > 0 && blob.size !== meta.size) {
+            bad.push(label);
+            continue;
+          }
           await deps.putBlob(key, blob);
           await deps.putAssetMeta({ key, mime: meta?.mime ?? 'application/octet-stream', size: meta?.size ?? assetSourceSize(src), hash: meta?.hash ?? null });
         } catch {

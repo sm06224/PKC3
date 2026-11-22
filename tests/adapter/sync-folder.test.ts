@@ -237,6 +237,24 @@ describe('同期フォルダ(段 3)', () => {
     }
   });
 
+  /**
+   * 🔴 **保管先の口(RemoteBox)を通しても、エラーの名前が回まで届く**(#2000 段 4a-1 着地前レビュー ⚠3)── 一覧で
+   *   `NotAllowedError` / `NotFoundError` が出たら「許可が切れた / フォルダが消えた」として選び直しを頼む(握り潰して
+   *   ふつうの失敗にすると、許可の出し直しの案内が出なくなる)。
+   */
+  it.each(['NotAllowedError', 'NotFoundError'])('🔴 一覧で %s が出たら、許可・選び直しの状態になる', async (name) => {
+    const folder = new FakeFolder();
+    const A = await rig('A', folder);
+    await A.sf.pick();
+    // 次の回の一覧で投げる
+    folder.values = (): AsyncIterable<{ kind: string; name: string }> => ({
+      [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(Object.assign(new Error('x'), { name })) }),
+    });
+    await A.sf.syncNow(false);
+    expect(A.sf.view().phase, `${name} が許可・選び直しにならない`).toBe('permission');
+    expect(A.fails.at(-1) ?? '').toContain('選び直してください');
+  });
+
   it('許可が切れていたら止まって言い、「許可を出し直す」で戻る(handle は憶えている)', async () => {
     const folder = new FakeFolder();
     const store = new MemStore();

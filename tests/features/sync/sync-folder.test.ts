@@ -10,6 +10,7 @@ import {
   folderFileName,
   normalizeFolderRecord,
   planFolderRound,
+  sameFileVersion,
   updateWant,
   wantedByOf,
   folderWriteKey,
@@ -123,5 +124,31 @@ describe('書き直すかの要約(folderWriteKey)', () => {
     expect(folderWriteKey('w', [B], { [B]: 'c1', [C]: 'c2' }), '頼みが変わった').not.toBe(k);
     expect(folderWriteKey('w', [B, C], { [B]: 'c1' }), '新しく対応づけた(相手が初回の確認を省けるように書き直す)').not.toBe(k);
     expect(folderWriteKey('w2', [B, C], { [B]: 'c1', [C]: 'c2' })).not.toBe(k);
+  });
+});
+
+/** 🔴 #2000 段 4a: 版の印(S3 の ETag)── 在ればそれで「同じファイルか」を見る。無ければ大きさ + 更新日時(段 3 のまま)。 */
+describe('sameFileVersion / 版の印', () => {
+  it('🔴 両方に版の印があれば、それだけで見る(大きさ・日時が同じでも版が違えば別 / 日時が違っても版が同じなら同じ)', () => {
+    expect(sameFileVersion({ size: 3, mtime: 1, version: '"a"' }, { size: 3, mtime: 1, version: '"b"' })).toBe(false);
+    expect(sameFileVersion({ size: 3, mtime: 1, version: '"a"' }, { size: 3, mtime: 9, version: '"a"' })).toBe(true);
+  });
+  it('片方に版が無ければ、大きさ + 更新日時(段 3 のまま)', () => {
+    expect(sameFileVersion({ size: 3, mtime: 1 }, { size: 3, mtime: 1, version: '"a"' })).toBe(true);
+    expect(sameFileVersion({ size: 3, mtime: 1 }, { size: 3, mtime: 2 })).toBe(false);
+  });
+  it('🔴 回の計画: 版が変わったファイルは読み直し、版が同じなら日時が違っても読まない', () => {
+    const peer = folderFileName('bbbbbbbbbbbbbbbb');
+    const rec = emptyFolderRecord();
+    rec.seen[peer] = { size: 10, mtime: 1, version: '"v1"', want: [] };
+    expect(planFolderRound('aaaaaaaaaaaaaaaa', [{ name: peer, size: 10, mtime: 99, version: '"v1"' }], rec).toRead).toEqual([]);
+    expect(planFolderRound('aaaaaaaaaaaaaaaa', [{ name: peer, size: 10, mtime: 1, version: '"v2"' }], rec).toRead.map((f) => f.name)).toEqual([peer]);
+  });
+  it('記録の版は読み直しても残る(旧い形 = 版なし も読める)', () => {
+    const peer = folderFileName('bbbbbbbbbbbbbbbb');
+    const r = normalizeFolderRecord({ seen: { [peer]: { size: 1, mtime: 2, version: '"x"', want: [] } }, lastKey: null, want: [] });
+    expect(r.seen[peer]?.version).toBe('"x"');
+    const old = normalizeFolderRecord({ seen: { [peer]: { size: 1, mtime: 2, want: [] } }, lastKey: null, want: [] });
+    expect(old.seen[peer]).toEqual({ size: 1, mtime: 2, want: [] });
   });
 });

@@ -316,6 +316,33 @@ describe('添付・足りない物', () => {
     expect(lastReport(b)).toContain('取り込まなかった添付: 1 件');
     expect((await b.request({ op: 'listAssetMetas', cid: b.cid })).map((m) => m.key)).not.toContain('ast-bad');
   });
+  /** 🔴 #2000 段 4a-1 のついで(user 指摘): hash を持たない大きな添付は、大きさだけでも合わせる(途中で切れた物を置かない)。 */
+  it('hash の無い添付は、目録の大きさと合わなければ置かず一覧で言う / 合えば置く', async () => {
+    const a = await dev('A');
+    const b = await dev('B');
+    a.blobs.set('ast-cut', new Blob([new Uint8Array([1, 2])], { type: 'video/mp4' }));
+    await a.request({ op: 'putAssetMeta', cid: a.cid, meta: { key: 'ast-cut', mime: 'video/mp4', size: 5, hash: null } });
+    a.blobs.set('ast-ok', new Blob([new Uint8Array([1, 2, 3])], { type: 'video/mp4' }));
+    await a.request({ op: 'putAssetMeta', cid: a.cid, meta: { key: 'ast-ok', mime: 'video/mp4', size: 3, hash: null } });
+    await a.put('n1', '大きな添付', '![動画](asset:ast-cut)\n\n![動画](asset:ast-ok)');
+    await send(a, b);
+    expect(b.blobs.has('ast-cut'), '大きさの合わない添付を置いた').toBe(false);
+    expect(b.blobs.has('ast-ok'), '対照群: 大きさの合う添付を置いていない').toBe(true);
+    expect(lastReport(b)).toContain('取り込まなかった添付: 1 件');
+  });
+  /** 🔴 大きさの照合の境目(着地前レビュー 🔴1 / ⚠6)── 大きさ 0(欠けた大きさは 0 で埋まる)は照合しない / hash が在れば hash だけで見る。 */
+  it('大きさ 0 の目録の添付・hash が合う添付は、目録の大きさに関わらず置く', async () => {
+    const a = await dev('A');
+    const b = await dev('B');
+    a.blobs.set('ast-zero', new Blob([new Uint8Array([1, 2, 3])], { type: 'video/mp4' }));
+    await a.request({ op: 'putAssetMeta', cid: a.cid, meta: { key: 'ast-zero', mime: 'video/mp4', size: 0, hash: null } });
+    a.blobs.set('ast-hash', new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }));
+    await a.request({ op: 'putAssetMeta', cid: a.cid, meta: { key: 'ast-hash', mime: 'image/png', size: 99, hash: sha256Of([1, 2, 3]) } });
+    await a.put('n1', '境目', '![a](asset:ast-zero)\n\n![b](asset:ast-hash)');
+    await send(a, b);
+    expect(b.blobs.has('ast-zero'), '大きさ 0 の目録で正しい添付を落とした').toBe(true);
+    expect(b.blobs.has('ast-hash'), 'hash が合うのに大きさで落とした').toBe(true);
+  });
   it('実体が差分に無い添付は参照を残し、足りない添付として一覧で言う', async () => {
     const a = await dev('A');
     const b = await dev('B');

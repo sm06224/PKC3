@@ -29,6 +29,7 @@ import {
   isSyncFolderMinutes,
   normalizeFolderRecord,
   planFolderRound,
+  sameFileVersion,
   SYNC_FOLDER_DEFAULT_MINUTES,
   updateWant,
   wantedByOf,
@@ -37,6 +38,7 @@ import {
   type SyncFolderMinutes,
 } from '@features/sync/sync-folder';
 import type { SyncDirLike, SyncLock } from './folder-sync';
+import { folderBox, type RemoteBox } from './sync-box';
 import type { ApplyOutcome, BuiltDiff, DiffTarget } from '@adapter/ui/actions/sync-diff';
 
 /** 許可を確かめ・頼める handle。 */
@@ -52,8 +54,8 @@ export interface SyncFolderSaved {
   handle: SyncFolderDirLike | null;
   minutes: SyncFolderMinutes;
   record: FolderSyncRecord;
-  /** 自分が最後に書いた自分のファイルの大きさ・更新日時(他の端末が同じ名前で書いたか = 端末 id の重複を見分ける)。 */
-  own?: { size: number; mtime: number; name?: string } | null;
+  /** 自分が最後に書いた自分のファイルの大きさ・更新日時・版(他の端末が同じ名前で書いたか = 端末 id の重複を見分ける)。 */
+  own?: { size: number; mtime: number; version?: string; name?: string } | null;
 }
 
 export interface SyncFolderStore {
@@ -134,7 +136,7 @@ export class SyncFolder {
   private dir: SyncFolderDirLike | null = null;
   private minutes: SyncFolderMinutes = SYNC_FOLDER_DEFAULT_MINUTES;
   private record: FolderSyncRecord = emptyFolderRecord();
-  private own: { size: number; mtime: number; name?: string } | null = null;
+  private own: { size: number; mtime: number; version?: string; name?: string } | null = null;
   private lastAt: string | null = null;
   private lastText: string | null = null;
   private message: string | null = null;
@@ -495,8 +497,9 @@ export class SyncFolder {
   }
 
   private async round(manual: boolean, gen: number): Promise<void> {
-    const dir = this.dir;
-    if (dir === null) return;
+    if (this.dir === null) return;
+    // 🔴 保管先への読み書きは `RemoteBox` の口だけを通す(#2000 段 4a-1)── 許可・handle は上(`permitted`)が持つ
+    const box: RemoteBox = folderBox(this.dir);
     this.phase = 'running';
     this.changed();
     let imported = 0;
@@ -516,26 +519,24 @@ export class SyncFolder {
       //   (残すと、他の端末から「もう来ない別の端末」に見え続ける)。⚠ 複製の確認で作り直したときは、前の名前は複製元の物なので `own` を先に空にしてある
       const ownName = this.own?.name;
       if (ownName !== undefined && deviceOfFileName(ownName) !== null && deviceOfFileName(ownName) !== self) {
-        await dir.removeEntry(ownName).catch(() => undefined);
+        await box.remove(ownName).catch(() => undefined);
         this.record = emptyFolderRecord();
         this.own = null;
       }
       // ── フォルダを見る(同期フォルダのファイルだけ。他のファイルには触らない)
-      const files: FolderFile[] = [];
-      const handles = new Map<string, { getFile(): Promise<File> }>();
-      for await (const e of dir.values()) {
-        if (e.kind !== 'file' || deviceOfFileName(e.name) === null) continue;
-        const fh = await dir.getFileHandle(e.name);
-        const f = await fh.getFile();
-        files.push({ name: e.name, size: f.size, mtime: f.lastModified });
-        handles.set(e.name, fh);
-      }
+      // ⚠ 版の印(S3 の ETag)も運ぶ(落とすと段 4a-3 で「同じファイルか」を大きさ + 日時でしか見られない)
+      const files: FolderFile[] = (await box.list((name) => deviceOfFileName(name) !== null)).map((e) => ({
+        name: e.name,
+        size: e.size,
+        mtime: e.mtime,
+        ...(e.version === undefined ? {} : { version: e.version }),
+      }));
       if (gen !== this.generation) return;
       const plan = planFolderRound(self, files, this.record, manual);
       // ── 自分の名前のファイルを、自分以外が書いた(端末のデータの複製)── 取り込みの核が見分けて、手で同期したときに確認する
       const ownFile = plan.ownFile;
       // ⚠ 自分が書いた控えが無い(選び直した・記録が消えた)ときも読んで確かめる ── 自分が書いた物なら核が「取り込む物は無い」と言う
-      const foreignOwn = ownFile !== null && (this.own === null || ownFile.size !== this.own.size || ownFile.mtime !== this.own.mtime);
+      const foreignOwn = ownFile !== null && (this.own === null || !sameFileVersion(this.own, ownFile));
       const reads = foreignOwn && ownFile !== null ? [...plan.toRead, ownFile] : plan.toRead;
       this.pending.clear();
       let ownUnresolved: string | null = null;
@@ -543,7 +544,7 @@ export class SyncFolder {
         if (gen !== this.generation) return;
         const peer = deviceOfFileName(f.name) as string;
         try {
-          const file = await handles.get(f.name)!.getFile();
+          const file = await box.read(f.name);
           const { outcome, manifest } = await this.deps.apply(file, f.name, !manual);
           if (outcome.pending !== undefined || outcome.declined === true) {
             // 確認待ち / 確認に「やめる」と答えた ── 取り込んでいない。控え(`seen`)も頼み(`want`)も動かさない(次の回も確認待ちのまま)
@@ -556,17 +557,28 @@ export class SyncFolder {
             problems.push(why);
             if (peer === self) ownUnresolved = why;
             // 🔴 同じ中身のファイルを無人の回で読み直し続けない(変わったら読む。手で同期すれば読み直す)── 頼み(`want`)は動かさない
-            else this.record.seen[f.name] = { size: f.size, mtime: f.mtime, want: this.record.seen[f.name]?.want ?? [] };
+            else
+              this.record.seen[f.name] = {
+                size: f.size,
+                mtime: f.mtime,
+                ...(f.version === undefined ? {} : { version: f.version }),
+                want: this.record.seen[f.name]?.want ?? [],
+              };
             continue;
           }
           if (peer === self) {
             // 自分が書いた物だった / 複製の確認を済ませた(端末 id を作り直した)── 自分のファイルとして憶え直す
-            this.own = { size: f.size, mtime: f.mtime, name: f.name };
+            this.own = { size: f.size, mtime: f.mtime, ...(f.version === undefined ? {} : { version: f.version }), name: f.name };
             continue;
           }
           imported += outcome.changed;
           conflicts += outcome.conflicts;
-          this.record.seen[f.name] = { size: f.size, mtime: f.mtime, want: manifest.want ?? [] };
+          this.record.seen[f.name] = {
+            size: f.size,
+            mtime: f.mtime,
+            ...(f.version === undefined ? {} : { version: f.version }),
+            want: manifest.want ?? [],
+          };
           this.record.want = updateWant(this.record.want, peer, { needFull: outcome.needFull, complete: manifest.complete });
         } catch (e) {
           problems.push(`${f.name}: ${errorText(e)}`);
@@ -604,17 +616,10 @@ export class SyncFolder {
       if (!built.skipped) {
         if (gen !== this.generation) return;
         const name = folderFileName(self2);
-        const fh = await dir.getFileHandle(name, { create: true });
-        const w = await fh.createWritable();
-        try {
-          await w.write(built.blob);
-          await w.close();
-        } catch (e) {
-          await w.abort?.().catch(() => undefined);
-          throw e;
-        }
-        const after = await fh.getFile();
-        this.own = { size: after.size, mtime: after.lastModified, name };
+        // 🔑 条件付き書き込みの控え(S3 の If-Match。フォルダは使わない)── 自分が前に書いた版。控えが無ければ条件なし(`null`)
+        const expect = this.own === null ? null : { name, size: this.own.size, mtime: this.own.mtime, ...(this.own.version === undefined ? {} : { version: this.own.version }) };
+        const after = await box.write(name, built.blob, expect);
+        this.own = { size: after.size, mtime: after.mtime, ...(after.version === undefined ? {} : { version: after.version }), name };
         this.record.lastKey = built.key;
         wrote = true;
       }
