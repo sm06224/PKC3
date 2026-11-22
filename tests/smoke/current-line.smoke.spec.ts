@@ -37,21 +37,24 @@ test('🔴 折り返した長い行に caret を置くと、左端の線がそ�
    * 🔴 **印の有無だけを待たない**(flake の原因。2026-11-22 に実測)── `fill` の直後に、caret の居る末尾の短い行で
    *   印がもう付いている(高さ 1 行ぶん)。caret を長い行へ移しても、測り直しは次のフレーム(`selectionchange` →
    *   `requestAnimationFrame`)なので、印を待つだけだと**古い 1 行ぶんの箱**を読むことがある(負荷の高い CI で
-   *   `expected > 40, received 20`)。動かす前の高さを控え、**測り直しが届いた(高さが替わった)**ことを待ってから読む。
+   *   `expected > 40, received 20`)。**目的の状態そのもの**(箱の高さが 2 行ぶんを超える = 折り返した長い行を測った)を待つ。
+   *   ⚠ 「動かす前と違う値になった」を待つと、動かす前に変数がまだ無ければ古い 1 行ぶんの箱でも満たされる(代替物で通る)。
    */
-  const hBefore = await ta.evaluate((el: HTMLTextAreaElement) => el.style.getPropertyValue('--pkc-cl-h'));
   await ta.evaluate((el: HTMLTextAreaElement, at: number) => {
     el.focus();
     el.setSelectionRange(at, at);
     el.scrollTop = 0;
   }, caretAt);
-  await expect(ta, '線の印が付かない').toHaveAttribute('data-pkc-current-line', '', { timeout: 3000 });
   await expect
-    .poll(() => ta.evaluate((el: HTMLTextAreaElement) => el.style.getPropertyValue('--pkc-cl-h')), {
-      message: 'caret を長い行へ移しても線の箱が測り直されない',
-      timeout: 3000,
-    })
-    .not.toBe(hBefore);
+    .poll(
+      () =>
+        ta.evaluate((el: HTMLTextAreaElement) => {
+          if (!el.hasAttribute('data-pkc-current-line')) return 0;
+          return Number.parseFloat(el.style.getPropertyValue('--pkc-cl-h')) / Number.parseFloat(getComputedStyle(el).lineHeight);
+        }),
+      { message: 'caret を折り返した長い行へ移しても、線の箱がその行の全部を測り直さない', timeout: 3000 },
+    )
+    .toBeGreaterThan(2);
 
   // 変数(内容座標の top / height)と、別の測り方(行を span で包んだ影)
   const read = (): Promise<{ top: number; h: number; lh: number }> =>
@@ -86,10 +89,11 @@ test('🔴 折り返した長い行に caret を置くと、左端の線がそ�
     return out;
   }, caretAt);
   expect(indep.rows, '折り返していない(検査の前提)').toBeGreaterThan(2);
-  // 線の箱は、論理行の全体を覆う(±2px)。1 行ぶん(lh)しか無ければ折り返しを見ていない
+  // 線の箱は、論理行の全体を覆う(±2px。実測の差は 0px)── 許容を 1 行ぶん(lh)にすると、最後の見た目の行を 1 行落とすバグが通る
+  // 1 行ぶん(lh)しか無ければ折り返しを見ていない
   expect(v.h, '線が折り返した行の全部に届いていない').toBeGreaterThan(v.lh * 2);
-  expect(Math.abs(v.top - indep.top), `上端が違う(測り:${String(v.top)} / 別測り:${String(indep.top)})`).toBeLessThanOrEqual(v.lh);
-  expect(Math.abs(v.top + v.h - indep.bottom), '下端が違う').toBeLessThanOrEqual(v.lh);
+  expect(Math.abs(v.top - indep.top), `上端が違う(測り:${String(v.top)} / 別測り:${String(indep.top)})`).toBeLessThanOrEqual(2);
+  expect(Math.abs(v.top + v.h - indep.bottom), `下端が違う(測り:${String(v.top + v.h)} / 別測り:${String(indep.bottom)})`).toBeLessThanOrEqual(2);
 
   // ② 画素: 欄の左端の列にアクセント色の線が、箱と同じ高さで出ている(ビューポートの中に入れてから撮る)
   const pixelRows = async (): Promise<{ first: number; last: number; n: number }> => {
@@ -141,7 +145,8 @@ test('🔴 折り返した長い行に caret を置くと、左端の線がそ�
   await ta.evaluate((el: HTMLTextAreaElement, s: number) => {
     el.scrollTop = s;
   }, base);
-  await expect.poll(async () => (await pixelRows()).n, { timeout: 3000 }).toBeGreaterThan(v.lh);
+  // ⚠ poll の閾値は直後の assert と揃える(描画の途中で poll だけ通って assert が落ちる型を作らない)
+  await expect.poll(async () => (await pixelRows()).n, { timeout: 3000 }).toBeGreaterThan(v.lh * 2);
   const p0 = await pixelRows();
   expect(p0.n, '線の画素が 1 つも無い(変数だけで何も描かれていない)').toBeGreaterThan(v.lh * 2);
   const taTop = await ta.evaluate((el: HTMLTextAreaElement) => el.clientTop);
