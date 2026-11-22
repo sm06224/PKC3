@@ -50,8 +50,20 @@ export function webSigCrypto(subtle: SubtleCrypto = globalThis.crypto.subtle): S
   };
 }
 
+/**
+ * XML の字の実体参照を戻す。🔴 **数値の参照(`&#34;` / `&#x22;`)も戻す**(着地前レビュー 🔴1)── MinIO(Go の encoding/xml)は
+ *   ETag の引用符を `&#34;` で出す。戻さないと一覧の版と PUT の応答の版(`"…"`)が食い違い、毎回自分のファイルを他人の物と
+ *   読み、`If-Match` も永久に 412 になる。⚠ `&amp;` は最後に戻す(`&amp;quot;` を `"` にしない)。
+ */
 const xmlText = (s: string): string =>
-  s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  s
+    .replace(/&#(\d+);/g, (_m, d: string) => String.fromCodePoint(Number(d)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, h: string) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
 const tag = (xml: string, name: string): string | null => {
   const m = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(xml);
   return m === null ? null : xmlText(m[1]!);
@@ -68,7 +80,10 @@ export function parseListObjects(xml: string): { items: { key: string; size: num
     items.push({ key, size: Number(tag(c, 'Size') ?? '0'), mtime: Number.isFinite(t) ? t : 0, etag: tag(c, 'ETag') ?? '' });
   }
   const truncated = tag(xml, 'IsTruncated') === 'true';
-  return { items, next: truncated ? tag(xml, 'NextContinuationToken') : null };
+  const next = truncated ? tag(xml, 'NextContinuationToken') : null;
+  // ⚠ 続きが在ると言うのにトークンが無い応答は、途中までの一覧を全部と読まない(取りこぼしを黙って通さない)
+  if (truncated && (next === null || next === '')) throw new Error('一覧を読む: 保管先の一覧の続きが読めません');
+  return { items, next };
 }
 
 export class S3Box implements RemoteBox {
@@ -113,16 +128,26 @@ export class S3Box implements RemoteBox {
       res = await this.fetchFn(target, { method, headers: sendHeaders, ...(opts.body === undefined ? {} : { body: opts.body }), mode: 'cors', credentials: 'omit', cache: 'no-store' });
     } catch {
       // ⚠ 理由は JS から見えない(CORS の拒否・繋がらない・名前が引けない)── URL も鍵も出さない
-      throw Object.assign(new Error(`${what}: 保管先に接続できませんでした(保管先の CORS の設定と、エンドポイントを確かめてください)`), { name: 'NetworkError' });
+      throw Object.assign(
+        new Error(
+          `${what}: 保管先に接続できませんでした(保管先の CORS の設定で、この画面の場所・GET / PUT / DELETE・必要な見出し(authorization など)を許しているか、エンドポイントを確かめてください)`,
+        ),
+        { name: 'NetworkError' },
+      );
     }
     return res;
   }
 
   /** 失敗の応答を、秘密を混ぜない字のエラーにする。 */
   private async fail(what: string, res: Response): Promise<never> {
-    const code = tag(await res.text().catch(() => ''), 'Code');
-    const msg = `${what}: 保管先がエラーを返しました(${String(res.status)}${code === null ? '' : ` ${code.replace(/[^A-Za-z0-9]/g, '')}`})`;
-    if (res.status === 412) throw new BoxConflictError(`${msg}。別の端末が同じファイルを書き換えたので、上書きしませんでした`);
+    // ⚠ 応答の本文は Code だけを読む(SignatureDoesNotMatch の本文はアクセスキー ID・正規のリクエストを含む ── 丸ごと出さない)
+    const code = tag(await res.text().catch(() => ''), 'Code')?.replace(/[^A-Za-z0-9]/g, '') ?? null;
+    const msg = `${what}: 保管先がエラーを返しました(${String(res.status)}${code === null ? '' : ` ${code}`})`;
+    // 🔴 412 と、同時の条件付き書き込みの 409(ConditionalRequestConflict)は、どちらも上書きしていない ── 止める
+    if (res.status === 412 || (res.status === 409 && code === 'ConditionalRequestConflict'))
+      throw new BoxConflictError(`${msg}。別の端末が同じファイルを書き換えたので、上書きしませんでした`);
+    if (code === 'RequestTimeTooSkewed')
+      throw Object.assign(new Error(`${msg}。この端末の時計がずれています(時刻を合わせてください)`), { name: 'Error' });
     const name = res.status === 403 || res.status === 401 ? 'NotAllowedError' : res.status === 404 ? 'NotFoundError' : 'Error';
     throw Object.assign(new Error(msg), { name });
   }
@@ -132,7 +157,8 @@ export class S3Box implements RemoteBox {
     const prefix = this.deps.config.prefix;
     let token: string | null = null;
     for (let page = 0; page < 1000; page += 1) {
-      const query: Record<string, string> = { 'list-type': '2', prefix };
+      // ⚠ `delimiter=/` で下の階層を畳む(置き場の直下だけ読む ── 下の階層までページを読み続けない)
+      const query: Record<string, string> = { 'list-type': '2', prefix, delimiter: '/' };
       if (token !== null) query['continuation-token'] = token;
       const res = await this.send('一覧を読む', 'GET', `/${this.deps.config.bucket}`, { query });
       if (!res.ok) await this.fail('一覧を読む', res);
