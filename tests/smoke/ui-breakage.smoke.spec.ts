@@ -93,7 +93,7 @@ test('🔴 パンくずはアドレスバーの形: 段はボタン箱でなく�
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
 });
 
-test('🔴 ペインの境目: 見た目は 4px で点々を出さず、掴む当たりは本文の側へ 10px ある(#6)', async ({ page }) => {
+test('🔴 ペインの境目: 見た目は 4px で点々を出さず、掴む当たりはスクロールバーの無い側へ 10px ある(#6)', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   const r = await page.evaluate(() => {
@@ -106,23 +106,26 @@ test('🔴 ペインの境目: 見た目は 4px で点々を出さず、掴む�
       out[pane] = {
         w: Math.round(b.width * 10) / 10,
         dots: getComputedStyle(g, '::after').content,
-        // 本文の側へ: 左の帯は右へ、右の帯は左へ
-        inside: pane === 'sidebar' ? isGrip(b.right + 5) : isGrip(b.left - 5),
-        beyond: pane === 'sidebar' ? isGrip(b.right + 8) : isGrip(b.left - 8),
-        // 反対側(左の一覧・右の情報ペイン)は奪わない
-        other: pane === 'sidebar' ? isGrip(b.left - 2) : isGrip(b.right + 2),
+        appendDots: getComputedStyle(document.querySelector('[data-pkc-region="pane-grip"][data-pkc-axis="y"]') ?? g, '::after').content,
+        // スクロールバーの無い側へ 6px: 左の帯は本文の側(右)、右の帯は情報ペインの側(右)
+        inside: isGrip(b.right + 5.5),
+        beyond: isGrip(b.right + 6.5),
+        // 反対側は奪わない: 左の帯は一覧(の縦のスクロールバー)、右の帯は本文(の縦のスクロールバー)
+        other: isGrip(b.left - 1.5),
       };
     }
-    return out as Record<'sidebar' | 'inspector', { w: number; dots: string; inside: boolean; beyond: boolean; other: boolean }>;
+    return out as Record<'sidebar' | 'inspector', { w: number; dots: string; appendDots: string; inside: boolean; beyond: boolean; other: boolean }>;
   });
   for (const pane of ['sidebar', 'inspector'] as const) {
     const x = r[pane];
     expect(x.w, `${pane} の帯が ${x.w}px(太りすぎ)`).toBe(4);
     expect(['none', 'normal'], `${pane} の帯に常時の点々が出ている(${x.dots})`).toContain(x.dots);
-    expect(x.inside, `${pane} の帯の本文側 5px が掴めない`).toBe(true);
+    expect(x.inside, `${pane} の帯の右 5.5px が掴めない`).toBe(true);
     expect(x.beyond, `${pane} の帯の当たりが広すぎる(本文を奪う)`).toBe(false);
-    expect(x.other, `${pane} の帯が反対側のペインを奪っている`).toBe(false);
+    expect(x.other, `${pane} の帯が左隣(のスクロールバー)を奪っている`).toBe(false);
   }
+  // 対照群: 追記欄の取っ手(横向き)は `⋮` のまま(user が畳んだ追記欄の戻し口の手がかり)
+  expect(r.sidebar.appendDots, '追記欄の取っ手の ⋮ まで消えた').toBe('"⋮"');
   // 掴んで広げられる(当たりの中で掴む)
   const g = await page.locator('[data-pkc-region="pane-grip"][data-pkc-pane="sidebar"]').boundingBox();
   const sw = () => page.locator('[data-pkc-region="sidebar"]').evaluate((el) => el.getBoundingClientRect().width);

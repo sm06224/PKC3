@@ -1395,7 +1395,7 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-11-22(#2018 8): `log-visual.smoke.spec.ts` の 1 件 → 583 → 584
     // ⚠ 2026-11-22(#2018 フォロー): `log-order.smoke.spec.ts` に新しい順の移動の断り 1 件 → 584 → 585
     // ⚠ 2026-11-22(#2000 段 4a-4): `sync-s3.smoke.spec.ts` 1 件 → 585 → 586
-    // ⚠ 2026-11-22(実機の UI の崩れ PR A): `log-order.smoke.spec.ts` 1 件 + `ui-breakage.smoke.spec.ts` 4 件 → 586 → 591
+    // ⚠ 2026-11-22(実機の UI の崩れ PR A): `log-order.smoke.spec.ts` 2 件 + `ui-breakage.smoke.spec.ts` 4 件 → 586 → 592
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
@@ -1635,7 +1635,7 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-11-21(#2001 段 4): `current-line.smoke.spec.ts` を新設(1 本)。578 → 579。
     // ⚠ 2026-11-21(#2002 段 2): `form-input.smoke.spec.ts` に 1 本足した(サンプルから作った記録のノートで表に追加)。579 → 580。
     // ⚠ 2026-11-22(#2000 段 3): `sync-folder.smoke.spec.ts` を新設(2 本)。580 → 582。
-    ).toBe(591);
+    ).toBe(592);
   });
 });
 

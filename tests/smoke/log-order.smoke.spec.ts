@@ -197,3 +197,34 @@ test('🔴 新しい順のログ: 塊は古い順と同じ左端・幅のまま(
   await page.locator(BODY).screenshot({ path: test.info().outputPath('log-desc.png') });
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **新しい順の日の行は、その日のいちばん上の記録の手前**(着地前レビュー ⚠5)── 本文の順が日時と食い違う日
+ *   (10:00 の後ろに 08:00)でも、日の行は 10:00 の上に来る。日をまたいでも新しい日が上。
+ */
+test('🔴 新しい順: 日の行はその日でいちばん新しい記録の上、新しい日が上 (#2018 実機)', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await page.evaluate(() => localStorage.setItem('pkc3.log-order', 'desc'));
+  await createEntry(page, 'textlog');
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    ['## 2026-11-21 09:00:00', '前の日', '## 2026-11-22 10:00:00', '十時', '## 2026-11-22 08:00:00', '八時'].join('\n\n'),
+  );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await expect(page.locator(BODY)).toHaveAttribute('data-pkc-log-order', 'desc');
+  const top = async (sel: string, text?: string): Promise<number> => {
+    const loc = text === undefined ? page.locator(sel).first() : page.locator(sel, { hasText: text }).first();
+    const b = await loc.boundingBox();
+    if (b === null) throw new Error(`${sel} ${text ?? ''} が無い`);
+    return b.y;
+  };
+  const day22 = await top(`${BODY} > [data-pkc-log-day="2026-11-22"]`);
+  const day21 = await top(`${BODY} > [data-pkc-log-day="2026-11-21"]`);
+  const [t10, t8, prev] = [await top(`${BODY} > p`, '十時'), await top(`${BODY} > p`, '八時'), await top(`${BODY} > p`, '前の日')];
+  expect(day22, '11/22 の日の行が、その日でいちばん新しい 10:00 の上に無い').toBeLessThan(t10);
+  expect(t10, '10:00 が 08:00 の上に無い').toBeLessThan(t8);
+  expect(t8, '11/22 の記録が 11/21 の日の行より上に無い').toBeLessThan(day21);
+  expect(day21).toBeLessThan(prev);
+});

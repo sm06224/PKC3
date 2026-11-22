@@ -43,6 +43,9 @@ describe('recordStampKey / descRanks(見出しの日時で並べる ── #2018
     expect(recordStampKey('  2026-11-22T06:18 朝')).toBe('2026-11-22 06:18:00');
     expect(recordStampKey('朝の記録')).toBeNull();
     expect(recordStampKey('メモ 2026-11-22 06:18')).toBeNull();
+    // 日の行と同じ判定: 実在しない日は日時として扱わない(並びだけ日時ありと読まない)
+    expect(recordStampKey('2026-13-45 10:00')).toBeNull();
+    expect(recordStampKey('2026-02-30 10:00')).toBeNull();
   });
 
   it('🔴 同じ日の中も日時の降順(本文の並び 15:25 → 06:18 → 22:47 でも 22:47 → 15:25 → 06:18)', () => {

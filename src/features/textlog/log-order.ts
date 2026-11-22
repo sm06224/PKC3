@@ -1,3 +1,5 @@
+import { logDayOfHeading } from './log-days';
+
 /**
  * 🔴 **ログを新しい順に並べる規則**(#2018 1。user 裁定 2026-11-22)── pure。DOM は `render/log-days.ts` が当てる。
  *
@@ -42,9 +44,12 @@ const RECORD_STAMP = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/;
 
 /**
  * 見出しの字から、並べるための日時の鍵(`YYYY-MM-DD HH:mm:ss`。秒が無ければ `:00`)を取る。日時でなければ `null`。
- * ⚠ 字の大小で比べられる形にそろえるだけ(暦の妥当性は日の行の側 = `logDayOfHeading` が見る)。
+ * 字の大小で比べられる形にそろえる。暦の妥当性は日の行と同じ `logDayOfHeading`。
  */
 export function recordStampKey(text: string): string | null {
+  // ⚠ 日が実在するかは日の行と**同じ 1 つの判定**(`logDayOfHeading`)で見る(着地前レビュー ⚠4 ── `2026-13-45` を
+  //   並びだけ日時ありと読み、日の行の無い記録が飛ぶのを防ぐ)
+  if (logDayOfHeading(text) === null) return null;
   const m = RECORD_STAMP.exec(text.trim());
   if (m === null) return null;
   return `${m[1]!} ${m[2]!}:${m[3]!}:${m[4] ?? '00'}`;

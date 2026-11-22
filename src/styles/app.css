@@ -534,12 +534,18 @@ body {
  * `aria-pressed` を見る規則を**足してから**この字を書き直すこと。
  */
 [data-pkc-region='pane-grip']::after {
-  /* 🔴 常時の点々(`⋮`)は出さない(実機の崩れ。user 指示 2026-11-22)── 掴めることは指したときの細い線と、
-   *   `col-resize` の指先で伝える。⚠ 低い窓で畳んだ追記欄の帯(下の #701)は `::after` に字を入れる */
+  content: '⋮';
+}
+/* 🔴 **左右のペインの境目は常時の点々(`⋮`)を出さない**(実機の崩れ。user 指示 2026-11-22「目立ちすぎ」)── 掴めることは
+ *   指したときの細い線と `col-resize` の指先で伝える。⚠ 追記欄の取っ手(横向き)は `⋮` のまま(見た目の手がかりが他に無い。
+ *   着地前レビュー 🔴1 ── 一律に消すと、user が畳んだ追記欄の戻し口が見えなくなる) */
+[data-pkc-region='pane-grip']:not([data-pkc-axis='y'])::after {
   content: none;
 }
-/* 🔴 **掴む当たりを本文の側へ 6px 広げる**(見た目 4px + 当たり 6px = 10px)── 反対側(左の縦のバー・右端)へは広げない
- *   (タイルを奪わない / 右端の外へはみ出して横スクロールを作らない)。⚠ `::before` は帯の一部 = 押す・掴むが帯として届く */
+/* 🔴 **掴む当たりを 6px 広げる**(見た目 4px + 当たり 6px = 10px)。⚠ `::before` は帯の一部 = 押す・掴むが帯として届く。
+ *   広げる向きは**スクロールバーの無い側**: 左の帯は本文の側(左の一覧の縦のスクロールバーは一覧の右端に在る)、
+ *   右の帯は情報ペインの側(本文の縦のスクロールバーは本文の右端に在る ── 着地前レビュー ⚠3)。
+ *   ⚠ 右のペインを畳んでいる間は広げない(右端の外へはみ出すと横スクロールが出る / 本文のスクロールバーを奪う) */
 [data-pkc-region='pane-grip']:not([data-pkc-axis='y']) {
   position: relative;
   z-index: 1;
@@ -556,7 +562,10 @@ body {
   right: -6px;
 }
 [data-pkc-region='pane-grip'][data-pkc-pane='inspector']::before {
-  left: -6px;
+  left: 0;
+  right: -6px;
+}
+[data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] [data-pkc-region='pane-grip'][data-pkc-pane='inspector']::before {
   right: 0;
 }
 /* 指したとき・キーで選んだときだけ、帯の中央に細いアクセントの線(地は塗らない) */

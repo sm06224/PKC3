@@ -33,12 +33,22 @@ const NOT_BUTTONS = [
   "[data-pkc-region='calendar-grid'] tbody td",
 ].sort();
 
+/** 丈を伸ばしつつ、意図して上限を残す規則(いまは無い)── 等値で固定。 */
+const CAPPED: string[] = [];
+
 describe('丈が伸びるボタンの規則', () => {
   it('🔴 `height: auto` を持つ規則は `max-height` も書く(ボタンでない既知の要素を除く)', () => {
     const rules = autoHeightRules();
     expect(rules.length, '空振り防止: 規則を拾えていない').toBeGreaterThan(10);
     const missing = rules.filter((r) => !/max-height\s*:/.test(r.body)).map((r) => r.selector);
     expect(missing.sort(), '丈を伸ばすのに上限を外していない規則がある(max-height: none を書く)').toEqual(NOT_BUTTONS);
+  });
+
+  it('🔴 上限を書くなら `none`(値を問わず「書いてある」だけで通すと、`--row-h` に戻した規則も通る ── 着地前レビュー M2)', () => {
+    const notNone = autoHeightRules()
+      .filter((r) => /max-height\s*:/.test(r.body) && !/max-height\s*:\s*none\b/.test(r.body))
+      .map((r) => r.selector);
+    expect(notNone.sort(), '丈を伸ばすのに上限を none 以外で書いている規則(意図して丈を止める物は一覧へ)').toEqual(CAPPED.sort());
   });
 
   it('🔴 情報ペインの目次・添付の行は、上限を外して行間を持つ', () => {
