@@ -247,9 +247,9 @@ describe('同期フォルダ(段 3)', () => {
     const A = await rig('A', folder);
     await A.sf.pick();
     // 次の回の一覧で投げる
-    folder.values = async function* (): AsyncIterable<{ kind: string; name: string }> {
-      throw Object.assign(new Error('x'), { name });
-    } as never;
+    folder.values = (): AsyncIterable<{ kind: string; name: string }> => ({
+      [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(Object.assign(new Error('x'), { name })) }),
+    });
     await A.sf.syncNow(false);
     expect(A.sf.view().phase, `${name} が許可・選び直しにならない`).toBe('permission');
     expect(A.fails.at(-1) ?? '').toContain('選び直してください');
