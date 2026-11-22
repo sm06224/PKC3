@@ -20144,7 +20144,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   出るので、別のタブに居るまま `SHOW_TRASH` だけ撃つと開いても見えない。見つからないノートの知らせの隣の
    *   「ゴミ箱を開く」(`status-trash`)は別のタブから押される。⚠ 同じタブなら `setBrowse` は何も変えない。
    */
-  'show-trash': (dispatcher, _target, services) => {
+  'show-trash': (dispatcher, target, services) => {
+      // 🔴 縦のバーのゴミ箱(#1982 ③-d)は、開いていればもう一度で閉じる(片道にしない)。一覧の「ゴミ箱を開く」は閉じているときだけ出る
+      if (inRail(target) && dispatcher.getState().trashPanel !== null) {
+        dispatcher.dispatch({ type: 'HIDE_TRASH' });
+        return;
+      }
       services.setBrowse?.('filer');
       dispatcher.dispatch({ type: 'SHOW_TRASH' });
     },

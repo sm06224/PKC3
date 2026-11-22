@@ -5,6 +5,7 @@ import {
   createEntry,
   dismissAnnounce,
   gotoApp,
+  pressCreateTool,
 } from './helpers';
 import { withStateOnFail } from './state-dump';
 
@@ -231,7 +232,7 @@ test('🔴 タブレットの縦(768px)でも、3 本ぶんの止める口が押
       await clickReal(page, '[data-pkc-region="create-bar"] [data-pkc-field="bar-more"]');
       await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="start-timer"]');
     } else {
-      await clickReal(page, '[data-pkc-field="start-timer"]');
+      await pressCreateTool(page, 'start-timer');
     }
   }
   const seen = await page
@@ -270,7 +271,7 @@ test('🔴 計って止めると、開いていたノートの本文に作業時
   const bar = page.locator('[data-pkc-region="timer-bar"]');
   await expect(bar, '押す前から帯が出ている').toBeHidden();
 
-  await clickReal(page, '[data-pkc-field="start-timer"]');
+  await pressCreateTool(page, 'start-timer');
   await expect(bar, '押しても帯が出ない').toBeVisible();
   const entry = bar.locator('[data-pkc-field="timer-entry"]');
   /**

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, clickBarMoreItem } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, clickBarMoreItem, pressCreateTool } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -471,7 +471,7 @@ test('🔴 日付の道具が実機で開き、選んだ日付が本文に入る
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   // 前提(後ろの「添付を入れる」用): 添付を 1 件足しておく ── 起動を増やさず、同じ道中の頭に置く
-  await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
+  await pressCreateTool(page, 'attach-file');
   await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
     name: 'insert-me.png',
     mimeType: 'image/png',

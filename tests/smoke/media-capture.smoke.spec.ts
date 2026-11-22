@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, watchRevokedMedia, writesLanded, openBrowse } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, watchRevokedMedia, writesLanded, openBrowse, pressCreateTool } from './helpers';
 import { chromiumLaunch } from './playwright.config';
 // ⚠ 手で書き写さない ── `[data-pkc-field="capture-trim"]` の textContent は
 //   `trimMarkText()` の戻り値そのもの(`captures.ts`)。字を直した日に
@@ -128,7 +128,7 @@ test('🔴 録音を止めると本文に入り、その場で聞ける (#413 �
   const bar = page.locator('[data-pkc-region="capture-bar"]');
   await expect(bar, '押す前から帯が出ている').toBeHidden();
 
-  await clickReal(page, '[data-pkc-field="start-audio-capture"]');
+  await pressCreateTool(page, 'start-audio-capture');
   const status = page.locator('[data-pkc-field="capture-status"]');
   await expect(bar, '押しても帯が出ない').toBeVisible();
   await expect(status, '何を録っているか出ていない').toContainText('録音中');
@@ -1365,7 +1365,7 @@ ${(e as Error).message}`,
       }
     } as typeof MediaRecorder;
   });
-  await clickReal(page, '[data-pkc-field="start-screen-capture"]');
+  await pressCreateTool(page, 'start-screen-capture');
   await expect(bar, '画面録画を押しても帯が出ない').toBeVisible();
   await expect(status, '画面録画が 3 秒まで録れていない').toContainText(/中 0:0[3-9]/, {
     timeout: 20_000,
@@ -1500,7 +1500,7 @@ test('🔴 1 分を超えた録音は、残さずにやめる前に確かめる(
   // 録った物の行を数えるため、左の列を「録ったもの」にしておく
   await openBrowse(page, 'captures');
   const rowsBefore = await assetRows.count();
-  await clickReal(page, '[data-pkc-field="start-audio-capture"]');
+  await pressCreateTool(page, 'start-audio-capture');
   await expect(bar, '録音を押しても帯が出ない').toBeVisible();
   await expect(capStatus, '録音中が出ない').toContainText('録音中');
   await clickReal(page, '[data-pkc-field="discard-capture"]');
@@ -1508,7 +1508,7 @@ test('🔴 1 分を超えた録音は、残さずにやめる前に確かめる(
   await expect(dialogBox, '1 分以下なのに確認が出た').toBeHidden();
   await expect(statusLine).toContainText('録音を残さずにやめました');
 
-  await clickReal(page, '[data-pkc-field="start-audio-capture"]');
+  await pressCreateTool(page, 'start-audio-capture');
   await expect(capStatus, '2 回目の録音中が出ない').toContainText('録音中');
   await skew(61_000);
   await expect(capStatus, '長さの時計が進んでいない').toContainText(/録音中 1:0[1-9]/);
@@ -1591,7 +1591,7 @@ async function recordScreenForTrim(page: Page) {
 
   const bar = page.locator('[data-pkc-region="capture-bar"]');
   const status = page.locator('[data-pkc-field="capture-status"]');
-  await clickReal(page, '[data-pkc-field="start-screen-capture"]');
+  await pressCreateTool(page, 'start-screen-capture');
   await expect(bar, '画面録画を押しても帯が出ない').toBeVisible();
   await expect(status, '画面録画が 9 秒まで録れていない').toContainText(/中 0:(09|1\d)/, { timeout: 30_000 });
   await clickReal(page, '[data-pkc-field="stop-capture"]');
@@ -2251,7 +2251,7 @@ test('🔴 録音の途中でタブが落ちても、開き直すと復元でき
   await expect(entry, '録っていないのに復元の入口が出ている').toBeHidden();
 
   // ① 録る → 断片が溜まる
-  await clickReal(page, '[data-pkc-field="start-audio-capture"]');
+  await pressCreateTool(page, 'start-audio-capture');
   await expect(page.locator('[data-pkc-field="capture-status"]')).toContainText('録音中');
   await expect
     .poll(async () => (await journal(page)).chunks, { message: '録っているのに途中保存が溜まらない', timeout: 15_000 })
@@ -2299,7 +2299,7 @@ test('🔴 録音の途中でタブが落ちても、開き直すと復元でき
   await next.keyboard.press('Tab');
   await clickReal(next, '[data-pkc-action="commit-edit"]');
   await openBrowse(next, 'captures');
-  await clickReal(next, '[data-pkc-field="start-audio-capture"]');
+  await pressCreateTool(next, 'start-audio-capture');
   await expect(next.locator('[data-pkc-field="capture-status"]')).toHaveAttribute('title', /約 [1-9]/, { timeout: 15_000 });
   await clickReal(next, '[data-pkc-field="stop-capture"]');
   await expect(rows).toHaveCount(2, { timeout: 15_000 });
@@ -2350,7 +2350,7 @@ test('🔴 編集中に止めた録音は、編集を終えると途中保存か
   await page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]').fill('# 録り始めたノート');
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-field="start-audio-capture"]');
+  await pressCreateTool(page, 'start-audio-capture');
   const bar = page.locator('[data-pkc-region="capture-bar"]');
   await expect(bar).toBeVisible();
   await expect.poll(journal, { message: '途中保存が溜まらない', timeout: 15_000 }).toBeGreaterThanOrEqual(2);

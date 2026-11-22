@@ -38,18 +38,39 @@ export interface BarOverflowOptions {
    * ⚠ 消すのではなく回す ── 「⋯」から開ける。`protect` の物(いま開いている)は回さない。
    */
   readonly forced?: (el: HTMLElement) => boolean;
+  /** 「⋯」の顔(既定は「⋯」)。 */
+  readonly more?: BarMoreFace;
 }
 
+/**
+ * 🔴 **作るボタンの行で、いつも「その他 ▾」の下へ回す道具**(#1982 ③-b)の印。`shell.ts` が添付・録音・画面録画・時間に付ける。
+ */
+export const CREATE_TOOL_ATTR = 'data-pkc-create-tool';
+
+/** 「⋯」の顔(帯ごとに変えられる)。既定は「⋯」。 */
+export interface BarMoreFace {
+  readonly text: string;
+  readonly label: string;
+  readonly title: string;
+}
+const DEFAULT_MORE: BarMoreFace = { text: '⋯', label: '入りきらない操作を開く', title: '入りきらない操作を開きます' };
+/** 作るボタンの行の「その他 ▾」(#1982 ③-b)。 */
+export const CREATE_MORE: BarMoreFace = {
+  text: 'その他 ▾',
+  label: 'その他の作る操作を開く',
+  title: '添付・録音・画面録画・時間を計る などを開きます',
+};
+
 /** 「⋯」のボタンを組む。⚠ `bar-tile` ではない(自分を長押しメニューに載せない)。 */
-export function makeBarMore(): HTMLButtonElement {
+export function makeBarMore(face: BarMoreFace = DEFAULT_MORE): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.setAttribute('data-pkc-action', BAR_MORE_ACTION);
   btn.setAttribute('data-pkc-field', BAR_MORE_FIELD);
   btn.setAttribute('aria-haspopup', 'menu');
-  btn.setAttribute('aria-label', '入りきらない操作を開く');
-  btn.title = '入りきらない操作を開きます';
-  btn.textContent = '⋯';
+  btn.setAttribute('aria-label', face.label);
+  btn.title = face.title;
+  btn.textContent = face.text;
   return btn;
 }
 
@@ -113,7 +134,7 @@ const refits = new WeakMap<HTMLElement, () => void>();
  * ⚠ `ResizeObserver` が無い環境(古い test 環境)では何もしない。
  */
 export function installBarOverflow(bar: HTMLElement, opts: BarOverflowOptions): () => void {
-  const more = makeBarMore();
+  const more = makeBarMore(opts.more);
   refits.set(bar, () => fitBar(bar, more, opts));
   if (typeof ResizeObserver === 'undefined') return () => {};
   let lastWidth = -1;
@@ -164,13 +185,19 @@ export function installSidebarBarOverflow(sidebar: HTMLElement): void {
       // 🔴 連絡先が 0 件と分かっている間は「⋯」の下へ(#475 項目 5。`markContactsTabEmpty`)
       forced: (el) => el.hasAttribute('data-pkc-tab-empty'),
     });
-  for (const r of ['create-bar', 'collection-bar']) {
-    const el = bar(r);
-    if (el !== null)
-      installBarOverflow(el, {
-        candidates: (b) => [...b.querySelectorAll<HTMLElement>('button[data-pkc-bar-tile]')],
-      });
-  }
+  const create = bar('create-bar');
+  if (create !== null)
+    installBarOverflow(create, {
+      candidates: (b) => [...b.querySelectorAll<HTMLElement>('button[data-pkc-bar-tile]')],
+      // 🔴 添付・録音・画面録画・時間は幅に関係なく「その他 ▾」の下へ(#1982 ③-b ── 行は「+ ノート ▼」「今日」「その他 ▾」の 3 点)
+      forced: (el) => el.hasAttribute(CREATE_TOOL_ATTR),
+      more: CREATE_MORE,
+    });
+  const collection = bar('collection-bar');
+  if (collection !== null)
+    installBarOverflow(collection, {
+      candidates: (b) => [...b.querySelectorAll<HTMLElement>('button[data-pkc-bar-tile]')],
+    });
 }
 
 /**

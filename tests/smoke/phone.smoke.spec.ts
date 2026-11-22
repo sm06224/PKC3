@@ -1440,7 +1440,7 @@ test('🔴 スマホで行を 600ms 押し続けると、印が 2 行になる (
   await gotoApp(page);
   await dismissAnnounce(page);
   /**
-   * 🔴 **スマホ幅でも、左下の 7 個は 1 行に詰め込まれる**(#1054 段②-2、F9)。
+   * 🔴 **スマホ幅でも、左下の 8 個は 1 行に詰め込まれる**(#1054 段②-2、F9。#1982 ③-d でゴミ箱が加わり 8 個)。
    * ⚠ 一覧のページ(この時点)は左の列そのものなので、`collection-bar` が
    *   画面いっぱいの幅で出ている ── 375px でも 44px タイル × 7 + gap 6px
    *   = 314px は 1 行に入る幅がある。
@@ -1450,9 +1450,9 @@ test('🔴 スマホで行を 600ms 押し続けると、印が 2 行になる (
       Math.round(b.getBoundingClientRect().top),
     ),
   );
-  expect(rowTops, '前提が崩れている(7 個そろっていない)').toHaveLength(7);
+  expect(rowTops, '前提が崩れている(8 個そろっていない)').toHaveLength(8);
   expect(rowTops, `スマホ幅で複数の段に分かれている: ${JSON.stringify(rowTops)}`).toEqual(
-    new Array(7).fill(rowTops[0]),
+    new Array(8).fill(rowTops[0]),
   );
   // ノートを 2 件作る(印を 2 行にするのに 2 行要る)
   for (let i = 0; i < 2; i++) {

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickInspectorMoreItem, gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, openBrowse } from './helpers';
+import { clickInspectorMoreItem, gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, openBrowse, pressCreateTool } from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -729,7 +729,7 @@ test('🔴 pkc:// の asset あては押すと所有ノート(添付)へ飛ぶ',
   await gotoApp(page);
 
   // ① 添付を作る(所有ノート)── key は画面の実属性から採る(でっち上げない)
-  await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
+  await pressCreateTool(page, 'attach-file');
   await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
     name: 'owner.png',
     mimeType: 'image/png',
