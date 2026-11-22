@@ -290,6 +290,13 @@ export function planSyncImport(input: PlanInput): SyncPlan {
       case 'trash-local':
         // ノートごと消える(ゴミ箱へ行く)印は外さない
         if (!finalLive.has(lid)) return;
+        // 🔴 相手にノートそのものが無い(相手がゴミ箱へ入れ、こちらは編集していたので残した)ときは、相手が印を外したのではない。
+        //   印は外さず、前回の合意を持ち越す(外すと、残したノートから色・ピン留めが黙って消える)
+        if (!remoteFp.has(lid)) {
+          const b = baseline[d.key];
+          if (b !== undefined) next[d.key] = b as Fp;
+          return;
+        }
         if (isLabel) {
           labelSets.push({ lid, color: null });
           s.labelsChanged++;

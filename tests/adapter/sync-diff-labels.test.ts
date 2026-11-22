@@ -8,8 +8,9 @@
  * 空振り防止: どの test も「片方に付けた印が、もう片方の DB(`listNoteLabels` / `listNotePins`)に出る / 出ない」を実物で見る。
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { exportSyncDiff, importSyncDiff } from '../../src/adapter/ui/actions/sync-diff';
+import { applySyncDiff, exportSyncDiff, importSyncDiff, UNDO_LIMIT_LINE } from '../../src/adapter/ui/actions/sync-diff';
 import { readDiffZip, writeDiffZip, type DiffNote } from '../../src/features/sync/diff-file';
+import { folderFileName } from '../../src/features/sync/sync-folder';
 import { spawnDevice, type SyncDevice } from '../helpers/sync-device';
 
 const devices: SyncDevice[] = [];
@@ -108,6 +109,52 @@ describe('色ラベル・ピン留め(段 3)', () => {
     expect(b.reports.at(-1)?.join('\n'), '外していない印を「合わせた」と数えない').not.toContain('相手に合わせた');
   });
 
+  it('相手がゴミ箱へ入れ、こちらが編集して残したノート: こちらの色・ピンは外れない', async () => {
+    const { a, b } = await pair();
+    await setPin(b, 'n1', true);
+    await setLabel(b, 'n1', 6);
+    await send(b, a);
+    await send(a, b);
+    expect(await labels(a), '対照群: 印は両方に届いている').toEqual({ n1: 6 });
+    await a.del('n1');
+    await b.put('n1', '日本語のメモ', '本文 1 をこちらで直した');
+    await send(a, b);
+    const metas = await b.request({ op: 'listEntryMetas', cid: b.cid });
+    expect(metas.map((m) => m.lid), 'こちらで直したノートは残る').toContain('n1');
+    expect(await labels(b), 'こちらの色は残る').toEqual({ n1: 6 });
+    expect(await pins(b), 'こちらのピンも残る').toEqual(['n1']);
+    // 次の往復でも外れない(合意を消していない)
+    await send(b, a);
+    await send(a, b);
+    expect(await labels(b)).toEqual({ n1: 6 });
+    expect(await pins(b)).toEqual(['n1']);
+    // 合意を持ち越しているので、その後に相手が変えた色は「相手の変更」として届く(合意が無いと「両方で違う色」になりこちらが残る)
+    await setLabel(a, 'n1', 2);
+    await send(a, b);
+    expect(await labels(b), '相手が後から変えた色が届く').toEqual({ n1: 2 });
+  });
+
+  it('こちらがゴミ箱へ入れ、相手が編集して残したノート: 相手の色・ピンが残る(対称の反対側)', async () => {
+    const { a, b } = await pair();
+    await setPin(a, 'n1', true);
+    await setLabel(a, 'n1', 4);
+    await send(a, b);
+    await send(b, a);
+    expect(await labels(b), '対照群: 印は両方に届いている').toEqual({ n1: 4 });
+    await b.del('n1');
+    expect((await b.request({ op: 'listEntryMetas', cid: b.cid })).map((m) => m.lid), '対照群: こちらではゴミ箱へ移った').not.toContain('n1');
+    await a.put('n1', '日本語のメモ', '本文 1 を相手で直した');
+    await setLabel(a, 'n1', 5); // 相手は編集と一緒に色も変えた ── 戻る経路で相手の色が付くことを見る(ゴミ箱の印が残るだけでは 5 にならない)
+    await send(a, b);
+    const metas = await b.request({ op: 'listEntryMetas', cid: b.cid });
+    expect(metas.map((m) => m.lid), '相手が直したノートはこちらでも生きている').toContain('n1');
+    expect(await labels(b), '相手の色が付く').toEqual({ n1: 5 });
+    expect(await pins(b), '相手のピンも残る').toEqual(['n1']);
+    await send(b, a);
+    expect(await labels(a), '相手(A)の色も外れない').toEqual({ n1: 5 });
+    expect(await pins(a)).toEqual(['n1']);
+  });
+
   it('取り消し: 取り込みで付けた印は外れ、取り込み後に付け直した印は触らない', async () => {
     const { a, b } = await pair();
     await setLabel(a, 'n1', 3);
@@ -190,5 +237,32 @@ describe('色ラベル・ピン留め(段 3)', () => {
     expect(read.container.pins).toEqual([]);
     expect(read.container.fingerprints).toEqual([]);
     expect(read.dropped.reserved).toBe(2);
+  });
+});
+
+describe('無人の同期と「取り込みを取り消す」', () => {
+  it('無人の回(auto)は、直前に手で取り込んだ回の取り消しを奪わない', async () => {
+    const { a, b } = await pair();
+    await a.put('n1', '日本語のメモ', '手で取り込む版');
+    await send(a, b);
+    const manual = b.undo;
+    expect(manual, '対照群: 手の取り込みは取り消しを登録する').not.toBeNull();
+    // 次の変更を、同期フォルダの無人の回として取り込む
+    await a.put('n2', '二つ目', '無人で取り込む版');
+    a.lastDiff = null;
+    await exportSyncDiff(a.deps());
+    const diff = await readDiffZip(a.lastDiff!.blob);
+    const out = await applySyncDiff(b.deps(), diff, folderFileName(diff.manifest.device), { auto: true, folder: true });
+    expect(out, `無人の回が失敗した: ${JSON.stringify(out)} / ${JSON.stringify(b.failures)}`).toMatchObject({ ok: true });
+    expect(out.ok && out.changed, '無人の回で実際に書き込んだ(空振りでない)').toBeGreaterThan(0);
+    expect(b.undo, '手の取り込みの取り消しが残る').toBe(manual);
+    expect(b.reports.at(-1)?.join('\n'), '無人の回の結果に「取り消せる」の案内を出さない').not.toContain(UNDO_LIMIT_LINE);
+    // 残った取り消しは手の回だけを戻す(無人の回の n2 は触らない)
+    const body = (lid: string): Promise<unknown> => b.request({ op: 'getBody', cid: b.cid, lid });
+    expect(await body('n1'), '対照群: 取り消す前は手の取り込みの版').toContain('手で取り込む版');
+    await manual!.run();
+    expect(await body('n1'), '手の回は取り消される').toContain('本文 1');
+    expect(await body('n1')).not.toContain('手で取り込む版');
+    expect(await body('n2'), '無人の回の版はそのまま').toContain('無人で取り込む版');
   });
 });
