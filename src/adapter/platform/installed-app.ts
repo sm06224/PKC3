@@ -13,7 +13,7 @@
  * ⚠ `fullscreen` は含めない ── F11 でブラウザを全画面にしただけでも `display-mode: fullscreen` が立つ。
  *   アプリとして入れた窓ではないので、入れている扱いにしてはいけない。
  */
-const INSTALLED_MODES = ['standalone', 'minimal-ui', 'window-controls-overlay'];
+export const INSTALLED_MODES = ['standalone', 'minimal-ui', 'window-controls-overlay'] as const;
 
 export function isInstalledApp(): boolean {
   try {

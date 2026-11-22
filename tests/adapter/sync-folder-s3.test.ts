@@ -392,12 +392,19 @@ describe('S3 互換の保管先(段 4a-4)', () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     const realSave = remote.save;
+    let reachedSave!: () => void;
+    const atSave = new Promise<void>((r) => (reachedSave = r));
     remote.save = async (cid, c, sec) => {
+      reachedSave();
       await gate;
       return realSave(cid, c, sec);
     };
     const connecting = A.sf.connectRemote({ ...FORM, prefix: 'other/' });
-    await new Promise((r) => setTimeout(r, 0));
+    /**
+     * ⚠ 接続の「確かめる」(S3 への問い合わせ)が済んで保存で止まるまで待つ ── `setTimeout(0)` 1 回では
+     *   確かめる問い合わせがまだ飛んでいる途中のことがあり、その分が「回が始まった」に数えられて間欠的に落ちた。
+     */
+    await atSave;
     const before = s3.seen.length;
     await A.sf.syncNow(false);
     A.sf.onVisible();

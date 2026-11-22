@@ -528,7 +528,8 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
 
   // ④ ホームを開いたまま、左の「予定」タブから別のノート(仕事)の項目にチェックを付ける →
   //    ほかのノートの保存なので、ホームの表が少し待ってから作り直されて消える(`main.ts` の書き終わりの合図)
-  await clickReal(page, '[data-pkc-action="nav-back"]');
+  // ⚠ 2026-11-22(A1): ブラウザのタブでは左上の ‹ › を出さない ── 同じ口のキー(Alt + ←)で戻る
+  await page.keyboard.press('Alt+ArrowLeft');
   await expect(page.locator('[data-pkc-field="detail-title"]')).toHaveText('ホーム');
   await expect(tasks.locator('tbody td').nth(1)).toHaveText('見積を送る', { timeout: 15_000 });
   await openBrowse(page, 'schedule');

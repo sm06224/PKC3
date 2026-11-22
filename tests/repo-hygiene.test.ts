@@ -1385,7 +1385,8 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    入れ子の字下げと一段小さい字・縦線が 1 本につながる(画素の位置)・紙では出さない・明暗のスクリーンショット。120 → 121。
     // ⚠ 2026-11-22(#2000 段 4a-4): `sync-s3.smoke.spec.ts`(作り物の S3 サーバと分離した実ブラウザ 2 台)。121 → 122。
     // ⚠ 2026-11-22(実機の UI の崩れ 9 件): `ui-breakage.smoke.spec.ts`。122 → 123。
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(123);
+    // ⚠ 2026-11-22(A1): `nav-history.smoke.spec.ts`(マウスの戻る・進む / ブラウザの戻る / PWA の ‹ ›)。123 → 124。
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(124);
     // ⚠ 2026-11-21(#1982 段 5-3): `note-tabs.smoke.spec.ts` を**新設**(+1 file / +1 件)。🔴 ここでしか見えない:有効なタブが
     //    本物の CSS で形(太字・左端の線)になる / 1 枚では場所を取らない / 印刷の media で消える(unit は字の有無しか見られず、
     //    詳細度と順番で負けて紙に出ていたのをこの spec が見つけた)。116 → 117。
@@ -1397,6 +1398,7 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-11-22(#2000 段 4a-4): `sync-s3.smoke.spec.ts` 1 件 → 585 → 586
     // ⚠ 2026-11-22(実機の UI の崩れ PR A): `log-order.smoke.spec.ts` 2 件 + `ui-breakage.smoke.spec.ts` 4 件 → 586 → 592
     // ⚠ 2026-11-22(実機の UI の崩れ PR B): `ui-breakage.smoke.spec.ts` に 5 件 → 592 → 597
+    // ⚠ 2026-11-22(A1): `nav-history.smoke.spec.ts` 3 件 → 597 → 600
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
@@ -1636,7 +1638,7 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-11-21(#2001 段 4): `current-line.smoke.spec.ts` を新設(1 本)。578 → 579。
     // ⚠ 2026-11-21(#2002 段 2): `form-input.smoke.spec.ts` に 1 本足した(サンプルから作った記録のノートで表に追加)。579 → 580。
     // ⚠ 2026-11-22(#2000 段 3): `sync-folder.smoke.spec.ts` を新設(2 本)。580 → 582。
-    ).toBe(597);
+    ).toBe(600);
   });
 });
 

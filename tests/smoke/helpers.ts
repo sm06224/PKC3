@@ -165,6 +165,30 @@ export async function waitForStoreOp(page: Page, op: string, n = 1): Promise<voi
  * **前に**これを呼ぶ。⚠ ここで試すのは「設定として支持される構成」──
  * 既定(live)の顔は live-editor.smoke.spec.ts が守る。
  */
+/**
+ * 🔴 **アプリとして入れて開いた形(PWA)にする**(A1)── `display-mode: standalone` の問い合わせだけを「当たり」にする。
+ * ⚠ Playwright は `display-mode` を真似られない(`emulateMedia` に無い)ので、`matchMedia` の答えだけを差し替える。
+ */
+export async function useStandalone(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const real = window.matchMedia.bind(window);
+    window.matchMedia = (q: string): MediaQueryList => {
+      if (!q.includes('display-mode')) return real(q);
+      // ⚠ 本物の MediaQueryList を prototype にすると、method が別の this で呼ばれて落ちる ── 素の物で返す
+      return {
+        matches: true,
+        media: q,
+        onchange: null,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        dispatchEvent: () => false,
+      } as unknown as MediaQueryList;
+    };
+  });
+}
+
 export async function useSplitEditor(page: Page): Promise<void> {
   await page.addInitScript(() => {
     // ⚠ init script は**全 frame**で走る ── sandbox 化された html fence の

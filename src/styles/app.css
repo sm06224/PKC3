@@ -599,6 +599,27 @@ button[data-pkc-glyph]:focus-visible {
 button[data-pkc-glyph]:disabled {
   opacity: 0.35;
 }
+/**
+ * 🔴 **左上の「‹ ›」(ノートの戻る・進む)はアプリとして開いたときだけ出す**(A1。user 裁定 2026-11-22)── ブラウザのタブでは
+ *   ブラウザ自身の戻る・進むとマウスの戻る・進むボタンが同じ働きをする(`nav-history.ts`)。印は `standalone.ts` が `<html>` に付ける。
+ *   出すときは極小の薄い字ではなく、ほかの操作ボタンと同じ標準の大きさ・地・枠にする。キーの近道(Alt + ← / →)はどちらでも効く。
+ */
+/* ⚠ 隠すのはパソコンの幅だけ(着地前レビュー 🔴2)── スマホ・タブレットの幅はマウスの戻る・進むボタンも Alt + ← も無く、
+ *   ノートの戻る・進むの入口がここだけになる(端末の「戻る」は phone-back で一覧へ戻る道) */
+:root:not([data-pkc-standalone]) [data-pkc-region='shell']:not([data-pkc-layout='phone']):not([data-pkc-layout='tablet']) [data-pkc-region='find-bar'] :is([data-pkc-action='nav-back'], [data-pkc-action='nav-forward']) {
+  display: none;
+}
+:root[data-pkc-standalone] [data-pkc-region='find-bar'] :is([data-pkc-action='nav-back'], [data-pkc-action='nav-forward']) {
+  min-width: var(--row-h);
+  height: var(--row-h);
+  padding: 0;
+  justify-content: center;
+  color: var(--fg);
+  font-size: var(--btn-fs);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
 
 /* 開閉の操作子。⚠ **常に見える** ── 中央は畳めないので、ここが唯一の戻り道 */
 /* ⚠ 畳んだ側は**薄く**する(押せることは変わらない ── 状態が見えるだけ) */
