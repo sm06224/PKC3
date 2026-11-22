@@ -1013,8 +1013,9 @@ export const BODY_LOAD_FAILED_NOTE = '本文を読み込めませんでした';
  *   `error` だけ立てる ── 情報ペインが「本文待ち」と取り違えて、場所だけ取った空白を出し続けないための問い。
  */
 export function bodyLoadFailed(state: Pick<AppState, 'error'>): boolean {
-  const e = state.error;
-  return e !== null && (e === ENTRY_GONE_NOTE || e.startsWith(`${BODY_LOAD_FAILED_NOTE}: `));
+  const e: unknown = state.error;
+  // ⚠ 部分的に組んだ state(error の無い物)でも落ちない ── `null` 比較だけだと undefined が `startsWith` へ届く
+  return typeof e === 'string' && (e === ENTRY_GONE_NOTE || e.startsWith(`${BODY_LOAD_FAILED_NOTE}: `));
 }
 
 /**
