@@ -731,7 +731,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
    *   タイルと一覧の項目で**同じ字**を使う(同じ操作に 2 通りの説明を作らない)。
    */
   const todayHint = '今日の日付のノートを開きます(無ければ作ります)';
-  const today = iconButton('open-today', '今日');
+  const today = iconButton('open-today', '今日を開く');
   markBarTile(today);
   today.setAttribute('data-pkc-field', 'open-today');
   today.setAttribute(HINT_BASE, todayHint);
@@ -746,8 +746,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   const todayDefault = appTodayKind.get() === 'textlog' ? 'textlog' : 'text';
   for (const [kindName, label, hint] of [
-    ['textlog', '今日のログ', '今日の日付のログ(時刻つきで追記していく記録)を開きます。無ければログで作り、次からは帯の「今日」もログを開きます'],
-    ['text', '今日のノート', '今日の日付のノートを開きます。無ければノートで作り、次からは帯の「今日」もノートを開きます'],
+    ['textlog', '今日のログ', '今日の日付のログ(時刻つきで追記していく記録)を開きます。無ければログで作り、次からは左上の「今日」もログを開きます'],
+    ['text', '今日のノート', '今日の日付のノートを開きます。無ければノートで作り、次からは左上の「今日」もノートを開きます'],
   ] as const) {
     const item = iconButton('open-today-as', label);
     item.setAttribute('role', 'menuitemradio');

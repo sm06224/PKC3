@@ -220,9 +220,9 @@ describe('▼ の合成メニュー(#1054 段②)', () => {
       'button:pick-create-kind',
       'button:create-from-template', // #1645: 種類ではなく、一覧で選んでから作る
       'field:create-menu-separator',
-      'button:open-today',
-      'button:open-today-as', // #1640 項 1: 今日をログで開く
-      'button:open-today-as', // #1640 項 1: 今日をノートで開く
+      // 2026-11-22(実機の文言の崩れ。user 指示): 「今日のノートを開く」の重複を外し、「今日のログ / 今日のノート」の 2 つへ
+      'button:open-today-as', // #1640 項 1: 今日のログ
+      'button:open-today-as', // #1640 項 1: 今日のノート
       'field:create-menu-separator',
       'button:attach-file',
       'button:start-audio-capture',
@@ -233,11 +233,10 @@ describe('▼ の合成メニュー(#1054 段②)', () => {
     expect(menu.querySelector('[data-pkc-field="create-menu-heading"]')?.tagName).not.toBe(
       'BUTTON',
     );
-    // 🔑 道具は「その場で動く」名前(タイルと違う ── #716 の既知の対)
-    expect(
-      menu.querySelector('[data-pkc-action="open-today"]')?.textContent,
-    ).toBe('今日のノートを開く');
-    expect(menu.querySelector('[data-pkc-action="attach-file"]')?.textContent).toBe('添付する');
+    // 🔑 下段は上段と同じ名詞の形(2026-11-22 user 指示)── 添付 / 録音 / 画面録画 / タイマー
+    expect(menu.querySelector('[data-pkc-action="open-today"]'), '「今日のノートを開く」が残っている').toBeNull();
+    expect(menu.querySelector('[data-pkc-action="attach-file"]')?.textContent).toBe('添付');
+    expect(menu.querySelector('[data-pkc-action="start-timer"]')?.textContent).toBe('タイマー');
   });
 
   it('🔴 種類を選ぶと、その場でちょうど 1 件だけ出来る', () => {

@@ -53,12 +53,12 @@ function walk(dir: string, out: string[] = []): string[] {
  * ⚠ **だから緩めるのではなく、既知の対として明示する** ── 3 種目が紛れ込んだら
  *   (`set.size` が既知の 2 種と食い違ったら)ここでも落ちる。
  */
-const KNOWN_DIFFERENT: ReadonlyMap<string, readonly string[]> = new Map([
-  ['open-today', ['今日', '今日のノートを開く']],
-  ['attach-file', ['添付', '添付する']],
-  ['start-audio-capture', ['録音', '録音する']],
-  ['start-screen-capture', ['画面録画', '画面を録画する']],
-]);
+/**
+ * ⚠ 2026-11-22(実機の文言の崩れ。user 指示): 合成メニューの下段を名詞にそろえた ── 添付 / 録音 / 画面録画 は 1 種類になり、
+ *   「今日」は「今日を開く」1 種類(メニューの「今日のノートを開く」は「今日のログ / 今日のノート」へ置き換え)。
+ *   残る対は「時間を計る」(タイル・長押し)と「タイマー」(合成メニュー。user 指定の字)だけ。
+ */
+const KNOWN_DIFFERENT: ReadonlyMap<string, readonly string[]> = new Map([['start-timer', ['時間を計る', 'タイマー']]]);
 
 describe('同じ action のボタンの字は 1 種類(#716)', () => {
   it('🔴 src の iconButton(action, 字) を全数拾って、action ごとに字が 1 種類', () => {

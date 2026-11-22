@@ -137,7 +137,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
    * ⚠ 同じ起動の続き(新しい起動を足さない)。見るのは 3 つ:
    *   ア 開いていない場面の操作は**灰色 + 理由**(予定の画面を開いていない)
    *   イ 欄が先に要る操作(タグを足す)は、空なら**欄へ移り**、字を入れて呼び直すと**足せる**
-   *   ウ 「今日のノートを開く」は、押しボタンと同じく今日のノートを作って開く
+   *   ウ 「今日を開く」は、押しボタンと同じく今日のノートを作って開く
    */
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
@@ -201,7 +201,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
 
   const listed = page.locator('[data-pkc-region="sidebar"] [data-pkc-entry]');
   const listedBefore = await listed.count();
-  await ask('今日のノートを開く');
+  await ask('今日を開く');
   await page.keyboard.press('Enter');
   await expect(dialog).toBeHidden();
   await expect

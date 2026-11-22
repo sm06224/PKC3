@@ -31,6 +31,8 @@ const NOT_BUTTONS = [
   "[data-pkc-browse-pane='draw'] [data-pkc-field='image-draw-canvas']",
   "[data-pkc-slot='root'], [data-pkc-region='shell']",
   "[data-pkc-region='calendar-grid'] tbody td",
+  // 帯に入れた目次の器(div。ボタンではない)
+  '.pkc-quick-toc[data-pkc-docked]',
 ].sort();
 
 /** 丈を伸ばしつつ、意図して上限を残す規則(いまは無い)── 等値で固定。 */

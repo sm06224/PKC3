@@ -1,7 +1,7 @@
 /** @vitest-environment happy-dom */
 /**
  * 🔴 **「今日」で作る種類を選べる**(#1640 項 1。推薦 B)。
- * ▼ の「今日をログで開く」で textlog の日付ノートを作り、選んだ種類を覚えて、次の「今日」も同じ種類で作る。
+ * ▼ の「今日のログ」で textlog の日付ノートを作り、選んだ種類を覚えて、次の「今日」も同じ種類で作る。
  */
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
@@ -41,12 +41,13 @@ describe('「今日」で作る種類 (#1640 項 1)', () => {
     appTodayKind.set(null);
   });
 
-  it('▼ に「今日をログで開く」と「今日をノートで開く」が在る', () => {
+  it('▼ に「今日のログ」と「今日のノート」が在り、いまの既定に印(aria-checked)', () => {
     const { root } = setup();
     const items = [
       ...root.querySelectorAll('[data-pkc-region="create-menu"] [data-pkc-action="open-today-as"]'),
     ];
-    expect(items.map((e) => e.textContent?.trim())).toEqual(['今日をログで開く', '今日をノートで開く']);
+    expect(items.map((e) => e.textContent?.trim())).toEqual(['今日のログ', '今日のノート']);
+    expect(items.map((e) => e.getAttribute('aria-checked')), '何も選んでいなければノートが既定').toEqual(['false', 'true']);
   });
 
   it('何も選んでいなければ、今までどおりノートで作る', () => {
@@ -55,17 +56,21 @@ describe('「今日」で作る種類 (#1640 項 1)', () => {
     expect(created(sent)?.archetype).toBe('text');
   });
 
-  it('「今日をログで開く」はログで作り、次の「今日」もログで作る(覚える)', () => {
+  it('「今日のログ」はログで作り、次の「今日」もログで作る(覚える)── 印もログへ移る', () => {
     const a = setup();
     a.click('[data-pkc-region="create-menu"] [data-pkc-action="open-today-as"][data-pkc-archetype="textlog"]');
     expect(created(a.sent)).toMatchObject({ archetype: 'textlog', title: '2026-10-29' });
     expect(appTodayKind.get()).toBe('textlog');
+    expect(
+      a.root.querySelector('[data-pkc-region="create-menu"] [data-pkc-action="open-today-as"][data-pkc-archetype="textlog"]')?.getAttribute('aria-checked'),
+      '押した方へ印が移らない',
+    ).toBe('true');
     const b = setup();
     b.click('[data-pkc-field="open-today"]');
     expect(created(b.sent)?.archetype).toBe('textlog');
   });
 
-  it('「今日をノートで開く」で戻せる', () => {
+  it('「今日のノート」で戻せる', () => {
     appTodayKind.set('textlog');
     const a = setup();
     a.click('[data-pkc-region="create-menu"] [data-pkc-action="open-today-as"][data-pkc-archetype="text"]');
