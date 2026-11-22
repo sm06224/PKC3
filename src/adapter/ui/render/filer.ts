@@ -23,6 +23,7 @@ import { filerFlattenNow, filerRowOptions } from '@adapter/state/list-view-optio
 //    「居場所」のプルダウンを外したときに、この面から要らなくなった ──
 //    どちらも `move-to-folder`(探して選ぶ窓)と D&D の側で生きている
 import { getAncestorFolders, listSiblings } from '@features/relation/tree';
+import { CRUMB_INPUT_FIELD, captureCrumbInput, restoreCrumbInput } from './crumb-path-input';
 import { stampChanges } from '@features/relation/meta-stamps';
 import { filerRows, flatParentNames } from '@features/relation/filer-list';
 import {
@@ -1683,6 +1684,8 @@ export class FilerRenderer {
     // 🔑 **面ごと組み直す前に**打ちかけの字を捕まえる(器ごと作り直すので、
     //    `renderMoveBar` の中では**もう読めない**)
     this.captureBarInputs();
+    // 🔴 パンくずのパス入力(#1982 A4)も同じ ── 打ちかけの字と焦点を、組み直しをまたいで運ぶ
+    const keptCrumb = captureCrumbInput(this.region);
     /**
      * 🔴 **表だけは残して、周りを作り直す**(#1087)。表を外して付け直すと、5,700 行ぶんの
      * スタイル計算とレイアウトを払い直す ── 帯・パンくず・ゴミ箱は小さいので作り直してよい。
@@ -1710,6 +1713,11 @@ export class FilerRenderer {
      */
     const path = document.createElement('span');
     path.setAttribute('data-pkc-field', 'crumb-path');
+    // 🔴 枠の何も無い所を押す(または焦点を当てて Enter / Space)と、パスを直接打つ入力になる(#1982 A4。binder が受ける)
+    path.tabIndex = 0;
+    path.title = '何も無い所を押すと、パスを打って移動できます';
+    path.setAttribute('role', 'group');
+    path.setAttribute('aria-label', 'パンくず。押すとパスを入力できます');
     crumb.append(path);
     const sep = (): HTMLSpanElement => {
       const x = document.createElement('span');
@@ -1837,6 +1845,7 @@ export class FilerRenderer {
     }
     if (keptTable === null) this.region.append(crumb);
     else this.region.insertBefore(crumb, keptTable);
+    if (keptCrumb !== null) restoreCrumbInput(path, state, keptCrumb);
     /**
      * 🔴 **語で絞っている間は、一覧のすぐ上に「絞り込み中: ○○ [絞りを外す]」を出す**(Gemini 依頼 65-2、
      *   #1163 のコメント 6145748723 の回答 A)。
@@ -2129,7 +2138,9 @@ export class FilerRenderer {
       // 🔴 帯の欄(条件・まとめて付けるタグ)へ `restoreBarInputs` が焦点を戻した回も同じ(#1955)── 表へ奪い返すと、
       //    空の欄を押した直後の組み直しで、そのあと打つ字が表の鍵(行の移動)に化ける
       const inBar = active instanceof Node && this.moveBar !== null && this.moveBar.contains(active);
-      if (back !== null && !inBar && !(active instanceof Node && back.contains(active))) back.focus();
+      // 🔴 パンくずのパス入力に焦点が在る回も同じ(#1982 A4。打っている最中に表へ奪い返さない)
+      const inCrumb = active instanceof HTMLElement && active.getAttribute('data-pkc-field') === CRUMB_INPUT_FIELD;
+      if (back !== null && !inBar && !inCrumb && !(active instanceof Node && back.contains(active))) back.focus();
     }
     /**
      * ⚠ **描いた直後に焦点と全選択**(#215。2 ペインの `renderRows` と同じ)── これが無いと、
