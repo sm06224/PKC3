@@ -76,6 +76,11 @@ describe('ログの日の行(器) #1441', () => {
     const strip = (el: HTMLElement): string => {
       const c = el.cloneNode(true) as HTMLElement;
       c.querySelectorAll('[data-pkc-log-day], [data-pkc-field="log-order"]').forEach((r) => r.remove());
+      // 🔑 見た目の印(#2018 8: 時刻の見出し・入れ子の深さ)は字ではない ── 外して比べる(字は 1 字も変わらない)
+      c.querySelectorAll('[data-pkc-log-time], [data-pkc-log-depth]').forEach((el) => {
+        el.removeAttribute('data-pkc-log-time');
+        el.removeAttribute('data-pkc-log-depth');
+      });
       return c.innerHTML;
     };
     expect(strip(h)).toBe(strip(plain));

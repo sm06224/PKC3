@@ -1,6 +1,6 @@
 /** 🔴 #2018 1: ログを新しい順に並べる規則(1 件 = 段 1〜2 の見出しから次の段 1〜2 の手前まで)。 */
 import { describe, expect, it } from 'vitest';
-import { descRank, logSegments, orderValue } from '../../src/features/textlog/log-order';
+import { descRank, logDepths, logSegments, orderValue } from '../../src/features/textlog/log-order';
 
 describe('logSegments', () => {
   it('🔴 前置き(0)/ 段 1〜2 の見出しごとに 1 件 / 入れ子の ### は親の件に入る', () => {
@@ -21,5 +21,18 @@ describe('descRank / orderValue', () => {
   });
   it('件の中の位置は順位をまたがない', () => {
     expect(orderValue(1, 99_999)).toBeLessThan(orderValue(2, 0));
+  });
+});
+
+describe('logDepths(#2018 8)', () => {
+  it('🔴 親の記録は 0、### は 1・#### は 2 …、中身は見出しと同じ深さ、## で 0 に戻る', () => {
+    // ## p ### p #### p ## p
+    expect(logDepths([2, 0, 3, 0, 4, 0, 2, 0])).toEqual([0, 0, 1, 1, 2, 2, 0, 0]);
+  });
+  it('###### は 4 / 浅い入れ子へ戻ると深さも戻る', () => {
+    expect(logDepths([2, 6, 0, 3, 0])).toEqual([0, 4, 4, 1, 1]);
+  });
+  it('⚠ 前置き(最初の ## より前)の ### は記録の外なので 0', () => {
+    expect(logDepths([3, 0, 2, 0, 3])).toEqual([0, 0, 0, 0, 1]);
   });
 });

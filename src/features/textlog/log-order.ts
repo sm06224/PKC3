@@ -43,3 +43,26 @@ export const ORDER_STRIDE = 100_000;
 export function orderValue(rank: number, local: number): number {
   return rank * ORDER_STRIDE + local;
 }
+
+/**
+ * 🔴 **入れ子の深さ**(#2018 8。見た目の 3 段 = 日の行 / 親の記録 `##` / 入れ子の追いログ `###`〜)。
+ * 塊ごとに 0(親の記録の見出しと中身・前置き)/ 1〜4(`###` = 1 … `######` = 4、とその中身)を返す。
+ * - 段 1〜2 の見出しで 0 に戻る。段 3 以上の見出しはその段 − 2、続く中身は同じ深さ
+ * - ⚠ 最初の段 1〜2 の見出しより前(前置き)は記録の外なので、段 3 以上の見出しがあっても 0
+ * @param levels 塊ごとの見出しの段(見出しでなければ 0)
+ */
+export function logDepths(levels: readonly number[]): number[] {
+  const out: number[] = [];
+  let inRecord = false;
+  let cur = 0;
+  for (const lv of levels) {
+    if (lv === 1 || lv === 2) {
+      inRecord = true;
+      cur = 0;
+    } else if (lv >= 3 && inRecord) {
+      cur = Math.min(lv, 6) - 2;
+    }
+    out.push(cur);
+  }
+  return out;
+}
