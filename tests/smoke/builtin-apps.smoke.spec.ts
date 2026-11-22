@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled, openBrowse } from './helpers';
 
 /**
  * 🔴 **組み込みアプリ 3 つを、実ブラウザで押す**(#281 ① 関係グラフ / #277 カンバン / #683 ① 計った時間)。
@@ -435,7 +435,7 @@ test('🔴 集計と PC: アプリの一覧のタイルから別ウィンドウ�
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
 
   for (const [tile, view] of [
     ['builtin:query', 'query'],

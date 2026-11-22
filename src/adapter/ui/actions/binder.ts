@@ -122,6 +122,7 @@ import {
   hasAppGroupOrder,
   isCodeDraft,
   appTileRefusal,
+  isAsidePane,
   isViewMode,
   nextViewMode,
   PLACE_LINE_REMOVE_OPEN_REFUSAL,
@@ -402,6 +403,7 @@ import {
   type DualSide,
 } from '@features/relation/dual-pane';
 import { appPanes, applyPaneVisibility, refoldPeeked } from '@adapter/ui/render/pane-visibility';
+import { inRail } from '@adapter/ui/render/rail';
 import { requestAppendFocus, requestBodyFocus, takeAppendFocus } from '@adapter/ui/render/focus-request';
 import { isTouchOnly } from '@adapter/ui/render/touch-device';
 import { currentTrashOffer, LINKED_FROM_MAYBE, LINKED_FROM_SOME, offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
@@ -13769,9 +13771,32 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   /** 左の列の**探し方**を切り替える(P8 段⑤)。⚠ 中央のビューとは別の軸。 */
   'set-browse': (dispatcher, target, services) => {
-    const mode = target.closest('[data-pkc-browse]')?.getAttribute('data-pkc-browse');
+    const tab = target.closest('[data-pkc-browse]');
+    const mode = tab?.getAttribute('data-pkc-browse');
+    if (!mode) return;
+    /**
+     * 🔴 **左端の縦のバーのタブ**(#1982 ③-a-1。user 裁定 2026-11-22)──
+     *   ① 左のペインを畳んでいたら、開いてからそのタブへ(押したのに何も見えない、を作らない)
+     *   ② いま開いているタブをもう一度押したら、左のペインを畳む(片道にしない ── もう一度押せば開く)。
+     * ⚠ 畳みは `pane-grip` と**同じ 1 つの状態**(`appPanes`)を通す ── 別の印を作らない。
+     * ⚠ バーの外(本文の中の「アプリの一覧」ボタン等)とスマホ用画面では、今までどおり切り替えるだけ。
+     * 🔴 **わきの面(システム / フラグ / ヘルプ / 2 ペイン)が開いている間は②をしない** ── いまのタブを押すのは
+     *   「わきの面を閉じて本文へ戻る」帰り道だった(`main.ts` の `setBrowse` の末尾)。畳むとその帰り道が消える。
+     *   わきの面が閉じている(何も閉じる物が無い)ときだけ畳む。
+     */
+    // ⚠ スマホ用画面ではタブはバーに居ない(`paintRail` が左のペインへ戻す)── `inRail` がそのまま版面の判定になる
+    if (tab !== null && inRail(tab)) {
+      const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+      const hidden = appPanes.getHidden();
+      if (hidden.includes('sidebar')) {
+        applyPaneVisibility(root, appPanes.setHidden(hidden.filter((p) => p !== 'sidebar')));
+      } else if (tab.hasAttribute('data-pkc-active') && !isAsidePane(dispatcher.getState().viewMode)) {
+        applyPaneVisibility(root, appPanes.setHidden([...hidden, 'sidebar']));
+        return;
+      }
+    }
     // ⚠ 並べ替えモードを終えるのは `main.ts` の `setBrowse` 1 か所(上の docstring)
-    if (mode) services.setBrowse?.(mode);
+    services.setBrowse?.(mode);
   },
   'set-view': (dispatcher, target) => {
     const view = target.getAttribute('data-pkc-view') ?? '';

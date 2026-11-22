@@ -76,6 +76,9 @@ export function fitBar(bar: HTMLElement, more: HTMLButtonElement, opts: BarOverf
     g.removeAttribute(OVERFLOW_ATTR);
   // 🔑 「⋯」は畳んだ物が在る間だけ **DOM にも在る**(帯のボタンの顔ぶれを、畳まない幅では変えない)
   more.remove();
+  // 🔴 左端の縦のバーの中では畳まない(#1982 ③-a-1)── 縦に並ぶので「1 段」の考えが無く、
+  //   入りきらない高さは群の中で縦に送る(`app.css` の `[data-pkc-region='rail']`)
+  if (bar.closest('[data-pkc-region="rail"]') !== null) return;
   if (bar.getBoundingClientRect().width === 0) return;
   const track = (): HTMLElement[] => [...cands.filter((c) => !c.hasAttribute(OVERFLOW_ATTR)), more];
   // 🔴 先に「回す物」を回す(幅が余っていても)── 「⋯」はその間 DOM に居る

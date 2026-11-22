@@ -19,7 +19,7 @@
  * ⚠ しかもその面からは**解除できない**(「解除」が出ないので)。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, openBrowse } from './helpers';
 
 const BAR = '[data-pkc-region="kind-bar"]';
 const CHIP = `${BAR} [data-pkc-action="toggle-kind-filter"]`;
@@ -47,7 +47,7 @@ test('🔴 予定タブで札を押すと、その場で押された印と「解
   expect(await chips.count(), '前提: 一覧で札が 2 つ以上出ている').toBeGreaterThanOrEqual(2);
 
   // 予定タブへ移っても札は在る(そこでは絞りが効くので出したまま)
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   await expect(page.locator(BAR), '予定タブで札の帯が消えた(そこでは絞りが効く)').toBeVisible();
 
   const first = chips.first();
@@ -72,7 +72,7 @@ test('🔴 絞りが効かないタブ(連絡先)では、札を出さない', a
 
   await expect(page.locator(BAR), '前提: 一覧では札が出ている').toBeVisible();
 
-  await clickReal(page, '[data-pkc-browse="contacts"]');
+  await openBrowse(page, 'contacts');
   /**
    * ⚠ **押せない札を出さない** ── 連絡先の面は `kindFilter` を読まないので、
    *   そこで押すと**その場では何も起きないのに絞りだけ入る**
@@ -84,7 +84,7 @@ test('🔴 絞りが効かないタブ(連絡先)では、札を出さない', a
   ).toBeHidden();
 
   // ⚠ **戻れば出る**(畳んだだけで、絞りの口を失っていない)
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await expect(page.locator(BAR), 'フォルダへ戻っても札が出ない(口を失った)').toBeVisible();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

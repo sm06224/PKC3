@@ -3,7 +3,7 @@
  * happy-dom の e2e が保証しない層(実座標のクリック・可視高さ・pageerror 0)を検品。
  */
 import { test, expect } from '@playwright/test';
-import { clickInspectorMoreItem, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor } from './helpers';
+import { clickInspectorMoreItem, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor, openBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -149,7 +149,7 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
     page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]'),
   ).toHaveCount(0);
 
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await clickReal(page, '[data-pkc-action="show-trash"]');
   const trash = page.locator('[data-pkc-region="filer-trash"]');
   await expect(trash.locator('li')).toHaveCount(1);
@@ -161,7 +161,7 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
   // ⚠ ゴミ箱は**フォルダのタブへ戻ってから**数える ── 隠れている面は描き直されない
   // ので、一覧を出したまま数えると「前に描いた古い DOM」を見ることになる
   // (3 回に 2 回落ちる flake の正体。user が見る形で観測する)
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await expect(trash.locator('li')).toHaveCount(0);
 
   expect(errors).toEqual([]);

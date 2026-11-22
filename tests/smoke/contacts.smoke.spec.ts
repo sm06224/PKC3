@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, openBrowse, dismissAnnounce } from './helpers';
 import { withStateOnFail } from './state-dump';
 
 /**
@@ -32,7 +32,7 @@ test('🔴 tel: を書いたノートが連絡先に並び、押せる宛先に�
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // ⚠ **開くまで集めない**(連絡先を使わない人に全走査を負わせない)
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="contacts"]');
+  await openBrowse(page, 'contacts');
   const pane = page.locator('[data-pkc-browse-pane="contacts"]');
   await expect(pane, '連絡先のタブが開かない').toBeVisible();
 
@@ -150,7 +150,7 @@ test('🔴 .vcf を取り込むと連絡先に並び、「vCard で書き出す�
     page.locator('[data-pkc-region="status"]'),
     '取り込み完了の帯が出ない',
   ).toContainText('取り込み完了: 連絡先 1 件', { timeout: 10_000 });
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="contacts"]');
+  await openBrowse(page, 'contacts');
   const pane = page.locator('[data-pkc-browse-pane="contacts"]');
   const row = pane.locator('[data-pkc-contact]');
   await withStateOnFail(page, '取り込んだ連絡先が並ばない', async () => ({}), async () => {
@@ -223,7 +223,7 @@ test('🔴 絞り込みで 0 件でも「絞りを外す」から戻れる (#536
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="contacts"]');
+  await openBrowse(page, 'contacts');
   const pane = page.locator('[data-pkc-browse-pane="contacts"]');
   await expect(pane.locator('[data-pkc-contact]'), '前提が崩れた(連絡先が並ばない)').toHaveCount(1);
   // ⚠ **前提** ── 絞り込みが無いうちは「絞りを外す」は出ていない
@@ -309,7 +309,7 @@ test('🔴 取り込んだ直後に「取り込みを取り消す」を押すと
   await expect(undo).toHaveAttribute('title', /ゴミ箱/);
 
   // 🔑 **前提** ── 取り消す前は連絡先に 1 件並んでいる(空振り防止)
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="contacts"]');
+  await openBrowse(page, 'contacts');
   const pane = page.locator('[data-pkc-browse-pane="contacts"]');
   await expect(pane.locator('[data-pkc-contact]'), '前提: 取り込んだ 1 件が並んでいない').toHaveCount(
     1,
@@ -360,7 +360,7 @@ test('🔴 「足す」で書いた人が一覧に並び、押せる宛先にな
   await expect(page.locator('[data-pkc-view-pane="detail"]')).toContainText('開いたままのノート');
   await page.locator('[data-pkc-field="entry-filter"]').fill('鈴木');
 
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="contacts"]');
+  await openBrowse(page, 'contacts');
   const pane = page.locator('[data-pkc-browse-pane="contacts"]');
   await expect(pane, '連絡先のタブが開かない').toBeVisible();
   await expect(pane.locator('[data-pkc-contact]'), '前提: 0 件で始まる').toHaveCount(0);
@@ -423,8 +423,14 @@ test('🔴 連絡先が空なら「⋯」の下へ回り、そこから開ける
   // 開いている間は回さない(どこに居るか分からなくなる)
   await expect(tab).not.toHaveAttribute('data-pkc-overflow', '');
 
-  // 別のタブへ移ると、0 件と分かっているので「⋯」の下へ回る
-  await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+  // 🔴 #1982 ③-a-1: PC の版面ではタブは左端の縦のバーに居る ── バーでは畳まない(「⋯」が無い)ので、空でも見えたまま押せる
+  await openBrowse(page, 'filer');
+  await expect(tab, '縦のバーで空の連絡先のタブが隠れた(入口が無くなる)').toBeVisible();
+  await expect(tab).not.toHaveAttribute('data-pkc-overflow', '');
+  // 横に並ぶ版面(スマホ用画面 ── タブは左のペインへ戻る)では、0 件と分かっているので「⋯」の下へ回る
+  // ⚠ スマホ幅ではお知らせの帯がタブの列に重なる ── 先に閉じる
+  await dismissAnnounce(page);
+  await page.setViewportSize({ width: 390, height: 844 });
   await expect(tab, '空の連絡先のタブが「⋯」へ回らない').toHaveAttribute('data-pkc-overflow', '');
   await expect(more).toBeVisible();
 
@@ -436,6 +442,8 @@ test('🔴 連絡先が空なら「⋯」の下へ回り、そこから開ける
   );
   await expect(page.locator('[data-pkc-browse-pane="contacts"]')).toBeVisible();
   await expect(tab, '開いたタブは元の位置に居る').not.toHaveAttribute('data-pkc-overflow', '');
+  // 取り込みは PC の版面で(スマホ幅では取り込んだ後に本文のページへ移り、タブが見えない)
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   // 1 件入れると、別のタブへ移っても元の位置のまま
   const vcf = ['BEGIN:VCARD', 'VERSION:3.0', 'FN:山田太郎', 'TEL;TYPE=CELL:090-1234-5678', 'END:VCARD', ''].join('\r\n');
@@ -447,8 +455,11 @@ test('🔴 連絡先が空なら「⋯」の下へ回り、そこから開ける
   await expect(page.locator('[data-pkc-browse-pane="contacts"] [data-pkc-contact]')).toHaveCount(1, {
     timeout: 10_000,
   });
-  await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
+  // 横に並ぶ版面へ戻しても、1 件あれば元の位置のまま(「⋯」の下へ回らない)
+  await page.setViewportSize({ width: 390, height: 844 });
   await expect(tab, '1 件あるのに「⋯」の下のまま').not.toHaveAttribute('data-pkc-overflow', '');
+  await page.setViewportSize({ width: 1440, height: 900 });
   await expect(tab).toBeVisible();
 
   expect(errors, '例外が出ている').toEqual([]);

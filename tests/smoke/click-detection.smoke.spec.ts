@@ -74,8 +74,9 @@ test('🔴 .last() を渡すと、最後の 1 枚で判定する(先頭に化け
 
   const first = await expectReachable(page, tabs.first());
   const last = await expectReachable(page, tabs.last());
-  // ⚠ **違う座標が返る**こと ── 同じなら、どちらかが先頭に化けている
-  expect(last.x, '.last() が .first() と同じ座標を返した(先頭に化けている)').toBeGreaterThan(
-    first.x,
+  // ⚠ **違う座標が返る**こと ── 同じなら、どちらかが先頭に化けている。
+  //   タブは PC の版面では左端の縦のバーに縦に並ぶ(#1982 ③-a-1)── 後ろの 1 枚は**下**に居る
+  expect(last.y, '.last() が .first() と同じ座標を返した(先頭に化けている)').toBeGreaterThan(
+    first.y,
   );
 });

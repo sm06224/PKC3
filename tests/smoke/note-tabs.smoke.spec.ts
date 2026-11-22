@@ -12,7 +12,7 @@
  * Ctrl+クリック・中クリック・右クリック・キーは段 5-4 の spec で足す。
  */
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, dismissAnnounce, gotoApp, openViewPane, useSplitEditor } from './helpers';
+import { clickReal, collectPageErrors, createEntry, dismissAnnounce, gotoApp, openViewPane, useSplitEditor, openBrowse } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
@@ -206,7 +206,7 @@ test('🔴 周辺の整合(段 5-5): 右クリックを閉じてもタブが残�
   expect(await page.locator('[data-pkc-action="nav-back"]').isDisabled()).toBe(backBefore);
 
   // ② 2 ペイン: タブ列は同じ場所に灰色で出る。押すと通常ビューへ戻ってそのノートを開く
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   const before = await bar.boundingBox();
   await openViewPane(page, 'dual');
   await expect(bar).toHaveAttribute('data-pkc-dimmed', '');

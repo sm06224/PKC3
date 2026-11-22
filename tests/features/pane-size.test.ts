@@ -139,8 +139,8 @@ describe('CSS へ渡す形(#497)', () => {
    * ⚠ 上限が `vw` / `vh` で入っていることまで見る ── px だけだと縮まない。
    */
   it('🔴 clamp で自分を制限する(JS が resize を聞き直さなくてよい)', () => {
-    expect(paneSizeCss('sidebar', 240)).toBe('clamp(0px, 240px, min(45vw, max(240px, calc((100vw - 500px) / 2))))');
-    expect(paneSizeCss('inspector', 300)).toBe('clamp(0px, 300px, min(45vw, max(240px, calc((100vw - 500px) / 2))))');
+    expect(paneSizeCss('sidebar', 240)).toBe('clamp(0px, 240px, min(45vw, max(240px, calc((100vw - 540px) / 2))))');
+    expect(paneSizeCss('inspector', 300)).toBe('clamp(0px, 300px, min(45vw, max(240px, calc((100vw - 540px) / 2))))');
     // ⚠ 高さの面は **vh** ── vw を使い回すと、横長の画面で青天井になる
     expect(paneSizeCss('append', 120)).toBe('clamp(0px, 120px, 60vh)');
   });

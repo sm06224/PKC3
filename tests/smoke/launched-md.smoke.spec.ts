@@ -13,7 +13,7 @@
  * (`isSameEntry` は同じファイルにだけ true / `createWritable` は書いた文字を貯める)。
  */
 import { test, expect } from '@playwright/test';
-import { answerAppDialog, gotoApp, clickReal, collectPageErrors, useSplitEditor, clickExportMenuItem, openExportMenu } from './helpers';
+import { answerAppDialog, gotoApp, clickReal, collectPageErrors, useSplitEditor, clickExportMenuItem, openExportMenu, openBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -226,7 +226,7 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
 
   // ① タブを押す → 説明と「フォルダを選ぶ…」だけが出る
   const tab = page.locator('[data-pkc-action="set-browse"][data-pkc-browse="pc"]');
-  await clickReal(page, tab);
+  await openBrowse(page, 'pc'); // ⚠ いま開いているタブを押すと左のペインを畳む(#1982 ③-a-1)
   await expect(tab).toHaveAttribute('aria-selected', 'true');
   const pane = page.locator('[data-pkc-browse-pane="pc"]');
   await expect(pane).toBeVisible();
@@ -379,7 +379,7 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   ).toHaveAttribute('aria-selected', 'true');
   await expect(contacts, '同じ vCard で連絡先が増えた(または入っていない)').toHaveCount(1);
   // PC のタブへ戻る(繋ぎは残っている)
-  await clickReal(page, tab);
+  await openBrowse(page, 'pc'); // ⚠ いま開いているタブを押すと左のペインを畳む(#1982 ③-a-1)
   await expect(pane).toBeVisible();
 
   // ⑦ 切る → 繋ぐ前へ戻る
@@ -388,7 +388,7 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   await expect(pane.locator('[data-pkc-pc-row]')).toHaveCount(0);
 
   // ⑧ 増えたのは md と画像と vCard の 3 件だけ(2 回目の押しでは増えていない)
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await expect.poll(filerRows, { message: '取り込みが 3 件ではない(押し直しで増えた / 入っていない)' }).toBe(base + 3);
 
   expect(errors).toEqual([]);
@@ -497,19 +497,18 @@ test('🔴 PC のタブ: 階層の記憶 / Office の行は押した直後に窓
   });
   await gotoApp(page);
 
-  const tab = page.locator('[data-pkc-action="set-browse"][data-pkc-browse="pc"]');
   const pane = page.locator('[data-pkc-browse-pane="pc"]');
   const folderName = pane.locator('[data-pkc-field="pc-folder-name"]');
   const row = (name: string) => pane.locator('[data-pkc-pc-row]').filter({ hasText: name });
 
   // ① サブフォルダへ入る → 読み込み直す → 選び直すと同じ場所 → パンくずで戻る
-  await clickReal(page, tab);
+  await openBrowse(page, 'pc'); // ⚠ いま開いているタブを押すと左のペインを畳む(#1982 ③-a-1)
   await clickReal(page, '[data-pkc-action="pc-pick-folder"]');
   await expect(folderName).toHaveText('資料');
   await clickReal(page, row('サブ').locator('button'));
   await expect(folderName).toHaveText('サブ');
   await gotoApp(page); // 読み込み直し(fake の picker は init script で入り直す)
-  await clickReal(page, tab);
+  await openBrowse(page, 'pc'); // ⚠ いま開いているタブを押すと左のペインを畳む(#1982 ③-a-1)
   await clickReal(page, '[data-pkc-action="pc-pick-folder"]');
   await expect(folderName, '読み込み直しても同じ階層へ戻らない').toHaveText('サブ');
   await expect(pane.locator('[data-pkc-action="pc-crumb"]')).toHaveText(['資料']);

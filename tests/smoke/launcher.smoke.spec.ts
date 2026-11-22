@@ -13,6 +13,7 @@ import {
   useSplitEditor,
   openTile,
   writesLanded,
+  openBrowse,
 } from './helpers';
 
 /**
@@ -228,7 +229,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(4);
 
   // ランチャーへ
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   const tiles = page.locator(USER_TILES);
   // ① 🔴 **素の添付は出ない**(4 件のうちタイルは 3 件)
   await expect(tiles).toHaveCount(3);
@@ -354,7 +355,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(page.locator(builtinTile('dual'))).toHaveCount(0);
   await page.reload();
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   await expect(
     page.locator(builtinTile('dual')),
     '読み込み直すと畳みが忘れられている(端末に憶えていない)',
@@ -1017,7 +1018,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await writesLanded(page);
   await page.reload();
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   await expect
     .poll(tileTitles, {
       timeout: 10_000,
@@ -1167,7 +1168,7 @@ test('🔴 グループを実際に動かすと並びが入れ替わり、初回
   });
   await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(2);
 
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   const groups = page.locator('[data-pkc-field="launcher-group"]');
   // 前提: 番号がまだ無いので名前順(資 < 道)。組み込みは常に末尾。
   await expect(groups, '前提が崩れている(群の数が違う)').toHaveCount(3);
@@ -1322,7 +1323,7 @@ test('🔴 タイルを長押しすると並べ替えモードに入り、開か
     buffer: Buffer.from(pkc2WithTiles(baseURL ?? 'http://localhost'), 'utf-8'),
   });
   await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(4);
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
 
   // 🔑 題名だけを読む(`[data-pkc-field="title"]`)── タイル丸ごとの textContent は
   //   行き先の URL(`↗…`)まで含むので、並び順ではなく文字列の一致で壊れる。
@@ -1436,8 +1437,8 @@ test('🔴 タイルを長押しすると並べ替えモードに入り、開か
   await expect(done, '2 度目の長押しで並べ替えモードに入らない').toBeVisible();
 
   // 🔑 いったん別のタブ(フォルダ)へ移ってから戻る(#813 段③ で「一覧」は外した)
-  await clickReal(page, '[data-pkc-browse="filer"]');
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'filer');
+  await openBrowse(page, 'launcher');
   await expect(
     done,
     'フォルダのタブへ移ってアプリタブへ戻っても、並べ替えモードが終わっていない',
@@ -1548,7 +1549,7 @@ test('🔴 タイルを長押しすると並べ替えモードに入り、開か
     '前提が崩れている(アドレスから引っ越した面「予定」へ移っていない)',
   ).toBeVisible();
 
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   await expect(
     done,
     'アドレスから引っ越した面を開いても、並べ替えモードが終わっていない',
@@ -1636,7 +1637,7 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
   await page.locator('[data-pkc-field="app-icon"]').blur();
 
   // ② タイルが出る(グループ見出しと目印つき)
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   const tile = page.locator(USER_TILES);
   await expect(tile).toHaveCount(1, { timeout: 15000 });
   /**
@@ -1863,10 +1864,10 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
   await attackTab.close();
 
   // ⑥ 登録を外すとタイルは消える(片道にしない)
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().click();
   await page.locator('[data-pkc-field="app-register"]').uncheck();
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   await expect(tile).toHaveCount(0, { timeout: 15000 });
   /**
    * ⚠ ここで「一覧が空」を見ない（2026-08-19）── 組み込みタイルが常に居る以上、
@@ -1925,7 +1926,7 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   await expect(register).toBeVisible({ timeout: 15000 });
   await register.check();
 
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   const tile = page.locator(USER_TILES);
   await expect(tile).toHaveCount(1, { timeout: 15000 });
   // ⚠ **2 回押す**(#857 段①b)── 1 回目は印が付くだけ
@@ -1996,7 +1997,7 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
     page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('pkc3.app.')).length);
   expect(await appKeys(), 'アプリのデータが入っていない(この次元を測れていない)').toBeGreaterThan(0);
 
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().click();
   await clickInspectorMoreItem(page, 'delete-entry');
   // 確認は出さない(#1087 流れ 29)── 押したらそのまま移る
@@ -2004,7 +2005,7 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   expect(await appKeys(), '戻せる削除でアプリのデータまで消している').toBeGreaterThan(0);
 
   // 🔴 **戻すと使える状態で戻る**(確認文「ゴミ箱から戻せます」が嘘でない)
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await clickReal(page, '[data-pkc-action="show-trash"]');
   await clickReal(page, '[data-pkc-action="restore-trash"]');
   // ⚠ 戻したノートはルート直下に出る(フォルダの表で数える)
@@ -2016,7 +2017,7 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().click();
   await clickInspectorMoreItem(page, 'delete-entry');
   await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(0);
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await clickReal(page, '[data-pkc-action="show-trash"]');
   // ⚠ 「ゴミ箱を空にする」は見出しの 1 つ(行ごとの「完全に消す」は `data-pkc-trash-lid` を持つ ── 束 G2、依頼 301)
   await clickReal(page, '[data-pkc-action="purge-trash"]:not([data-pkc-trash-lid])');
@@ -2372,7 +2373,7 @@ test('🔴 一式を入れた端末では Office タイルが出て、押すと�
     '回復した一時の失敗が、保存先が使えない扱いのまま画面に残っている',
   ).not.toContainText(STORAGE_FALLBACK_LINE);
 
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   /**
    * ⚠ **Office だけを名指す**（2026-08-19）── 組み込みは 2 枚になった
    *   （2 ペイン + Office、#241）ので、`nth(0)` はもう Office ではない。
@@ -2463,7 +2464,7 @@ test('🔴 一度許した素のまま起動は、読み込み直しても聞か
 
   const attach = async (name: string): Promise<void> => {
     // ⚠ 添付は**本文の面**から ── タイルの面に居ると導線が無い
-    await clickReal(page, '[data-pkc-browse="filer"]');
+    await openBrowse(page, 'filer');
     await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
     await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
       name: `${name}.html`,
@@ -2490,7 +2491,7 @@ test('🔴 一度許した素のまま起動は、読み込み直しても聞か
    */
   const registerApp = async (expected: number): Promise<void> => {
     await page.locator('[data-pkc-field="app-register"]').check();
-    await clickReal(page, '[data-pkc-browse="launcher"]');
+    await openBrowse(page, 'launcher');
     await expect(page.locator(USER_TILES), '登録がタイルに反映されない').toHaveCount(expected, {
       timeout: 15000,
     });
@@ -2516,7 +2517,7 @@ test('🔴 一度許した素のまま起動は、読み込み直しても聞か
   await gotoApp(page);
 
   // ④ タイルを押す ── 確認は出ず、素のままで開く
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   const tile = page.locator(USER_TILES).first();
   await expect(tile, 'タイルが並んでいない').toBeVisible({ timeout: 15000 });
   const again = context.waitForEvent('page');
@@ -2548,7 +2549,7 @@ test('🔴 一度許した素のまま起動は、読み込み直しても聞か
   await expect(revoke, '押しても一覧から消えない').toHaveCount(0, { timeout: 15000 });
 
   await gotoApp(page);
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   const after = page.locator(USER_TILES).first();
   await expect(after).toBeVisible({ timeout: 15000 });
   const boxedTab = context.waitForEvent('page');
@@ -2587,7 +2588,7 @@ test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   /**
    * 🔴 **押す前に「別の窓で開く」と分かる**(動線レビュー §4/§8)。
    * ⚠ 押しても本体の画面は 1 ドットも動かないので、書いていないと
@@ -2806,7 +2807,7 @@ test('🔴 目次を見せて起動すると、アプリがノートの一覧を
 test('🔴 リンクを足して、リンク先の印を取り込む (#856 段②)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
 
   // ① 「リンクを足す」── 足し先はこのアプリ自身(外へ出ない)
   const here = new URL(page.url()).origin + new URL(page.url()).pathname;

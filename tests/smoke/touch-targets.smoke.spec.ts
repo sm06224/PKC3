@@ -170,9 +170,9 @@ test.describe('指で触る端末(#706)', () => {
     expect(await sideW(), '畳む前の一覧が出ていない').toBeGreaterThan(100);
     await page.locator(SIDE).click();
     expect(await sideW(), '押しても畳めない').toBe(0);
-    await expect(page.locator('[data-pkc-region="collapsed-edge"]')).toBeVisible();
+    await expect(page.locator('[data-pkc-region="rail"]')).toBeVisible();
 
-    // 取っ手の右 6px は取っ手(本文ではない)/ 左 4px は畳んだ縁(奪っていない)
+    // 取っ手の右 6px は取っ手(本文ではない)/ 左 4px は左端の縦のバー(奪っていない。#1982 ③-a-1)
     const hit = await page.evaluate(
       ([side]) => {
         const g = document.querySelector<HTMLElement>(side!)!.getBoundingClientRect();
@@ -182,11 +182,11 @@ test.describe('指で触る端末(#706)', () => {
           const gr = e?.closest('[data-pkc-region="pane-grip"]') ?? null;
           return {
             grip: gr?.getAttribute('data-pkc-pane') ?? null,
-            tile: e?.closest('[data-pkc-region="collapsed-edge"] button') != null,
+            tile: e?.closest('[data-pkc-region="rail"] button') != null,
           };
         };
         const t = document
-          .querySelector<HTMLElement>('[data-pkc-region="collapsed-edge"] button')!
+          .querySelector<HTMLElement>('[data-pkc-region="rail"] button')!
           .getBoundingClientRect();
         return {
           gRight: g.right,

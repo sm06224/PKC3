@@ -8,6 +8,7 @@ import {
   useSplitEditor,
   writesLanded,
   transitionsSettled,
+  openBrowse,
 } from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
@@ -116,7 +117,7 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // ① 予定のタブへ(⚠ アプリの一覧ではない ── 左の列のタブである)
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
   await expect(pane, '予定の面が出ていない').toBeVisible();
 
@@ -627,7 +628,7 @@ test('🔴 予定のある日とない日で、小さな月の升目の高さが
       ].join('\n'),
     );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   if (USE_NEXT_MONTH) {
     await clickReal(page, '[data-pkc-action="schedule-nav"][data-pkc-nav-step="1"]');
   }
@@ -720,7 +721,7 @@ test('🔴 期間の札を掴んでずらすと、長さを保ったまま本文
   await ta.fill(`- [ ] 大阪出張 @${D0}..${D3}`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
   await expect(pane, '予定の面が出ていない').toBeVisible();
   if (USE_NEXT_MONTH) {
@@ -815,7 +816,7 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   await ta.fill(`- [ ] ゴミ出し @${today} 09:30..10:30 毎週`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
   const cardsOn = (date: string) =>
     pane.locator(
@@ -1002,7 +1003,7 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   //   アラーム(15 分前)も付く。観測点は落ちた file の中身。⚠ 日は未来(D6)に置く ── 見逃し判定の件数を日によって動かさない
   await ta.fill(`---\ndate: ${D6} 16:30\n---\n\n- [ ] 散歩 @${today}`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   const icsNote = await exportText();
   expect(icsNote, '🔴 前書き `date: ... 16:30` のノートが .ics に時刻つきで入っていない').toMatch(
     new RegExp(`DTSTART[^\\r\\n]*:${D6.replaceAll('-', '')}T163000`),
@@ -1095,7 +1096,7 @@ test('🔴 札にマウスを乗せると × が出て、押すと予定から�
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await ta.fill('- [ ] 見積を送る @2026-08-25\n- [ ] 消えない行\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
   const card = pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-entry]');
   await expect(card, '札が出ていない(前提が崩れている)').toHaveCount(1);
@@ -1171,7 +1172,7 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 1200 }); // 束 E2: 予定の欄が時刻の欄で折り返して 1 行増えたので高さを足した(900/960 だと札が下の帯に隠れて掴めない)
   await gotoApp(page);
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
   await expect(pane, '予定の面が出ていない').toBeVisible();
 
@@ -1798,7 +1799,7 @@ test('🔴 4 年前から「毎日」と書いた行が、今日の予定に出�
   );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
   const cardsOn = (date: string) =>
     pane.locator(
@@ -1865,7 +1866,7 @@ test('🔴 4 年前から「毎日」と書いた行が、今日の予定に出�
   );
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('1 件は繰り返しを読めず 1 回目だけ入れました');
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('1 件は取り消された予定なので入れていません');
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   await expect(only(today, '取込の定例'), '取り込んだ予定が予定表に出ない').toHaveCount(1);
   await expect(only(today, '取込の定例'), '札に刻みが出ていない').toContainText('毎週');
   await expect(only(key(dayAt(7)), '取込の定例'), '取り込んだ繰り返しが 7 日後に出ない').toHaveCount(1);
@@ -1910,7 +1911,7 @@ test('🔴 予定の「月」: 左の列から別ウィンドウで開き、題�
         .join('\n'),
     );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
   await expect(
     pane.locator('[data-pkc-action="schedule-mode"][data-pkc-mode="month"]'),

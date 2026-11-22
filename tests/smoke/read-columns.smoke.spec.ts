@@ -494,7 +494,8 @@ test('🔴 文字を大きくすると段も広がり、狭い器では畳む (#
    *   (#505 が潰したはずの症状が、文字を大きくした user にだけ戻る)。
    * 🔑 器 ≒ 912px = 標準のちょうど境目(実測 2026-08-28)。
    */
-  await page.setViewportSize({ width: 1424, height: 900 });
+  // ⚠ 2026-11-22(#1982 ③-a-1)から左端に縦のバー(40px)が在る ── 器を同じ 912px に保つため、窓を広げた(1424 → 1475。左右のペインは窓の 18% / 15% なので、本文は窓の 67% しか増えない ── 本文 932px を保つ幅)
+  await page.setViewportSize({ width: 1475, height: 900 });
   await expect
     .poll(async () => (await readGeom(page)).on, {
       message: '特大なのに、標準の境目の幅で段組みを続けている',
@@ -541,7 +542,8 @@ test('🔴 文字を大きくすると段も広がり、狭い器では畳む (#
 test('🔴 面を出入りせずに設定を変えても、段組みが古びない (#509)', async ({ page }) => {
   const errors = collectPageErrors(page);
   // 🔑 器 ≒ 912px = 標準のちょうど境目(実測 2026-08-28)
-  await page.setViewportSize({ width: 1424, height: 900 });
+  // ⚠ 2026-11-22(#1982 ③-a-1)から左端に縦のバー(40px)が在る ── 器を同じ 912px に保つため、窓を広げた(1424 → 1475。左右のペインは窓の 18% / 15% なので、本文は窓の 67% しか増えない ── 本文 932px を保つ幅)
+  await page.setViewportSize({ width: 1475, height: 900 });
   await gotoApp(page);
   await writeNote(page);
 

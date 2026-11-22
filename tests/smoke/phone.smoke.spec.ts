@@ -8,6 +8,7 @@ import {
   dismissAnnounce,
   openViewPane,
   useSplitEditor,
+  openBrowse,
 } from './helpers';
 
 /**
@@ -1086,7 +1087,7 @@ for (const [name, w, h] of [
     await clickReal(page, '[data-pkc-action="commit-edit"]');
     await clickReal(page, '[data-pkc-field="phone-back"]');
 
-    await clickReal(page, '[data-pkc-browse="launcher"]');
+    await openBrowse(page, 'launcher');
     await openViewPane(page, 'dual');
 
     // ⚠ 空振り防止 ── この幅でもスマホ用画面には**なっている**
@@ -1349,7 +1350,7 @@ test('🔴 パソコンの 2 ペインは 2 枚とも出たまま、行き先の
   await dismissAnnounce(page);
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   await openViewPane(page, 'dual');
 
   // ⚠ 空振り防止 ── この幅ではスマホ用画面に**なっていない**
@@ -1459,7 +1460,7 @@ test('🔴 スマホで行を 600ms 押し続けると、印が 2 行になる (
     await clickReal(page, '[data-pkc-action="commit-edit"]');
     await clickReal(page, '[data-pkc-field="phone-back"]');
   }
-  await clickReal(page, '[data-pkc-browse="launcher"]');
+  await openBrowse(page, 'launcher');
   await openViewPane(page, 'dual');
   await expect(page.locator(REGION('shell'))).toHaveAttribute('data-pkc-layout', 'phone');
 

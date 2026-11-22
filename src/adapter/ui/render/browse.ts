@@ -258,12 +258,17 @@ export class BrowseRouter {
     this.commandList = sidebar.querySelector<HTMLElement>('[data-pkc-region="command-list"]');
     this.sortSelect = sidebar.querySelector<HTMLSelectElement>('select[data-pkc-field="entry-sort"]');
     this.sortReverse = sidebar.querySelector<HTMLButtonElement>('button[data-pkc-field="entry-sort-reverse"]');
+    /**
+     * ⚠ タブの器は PC の版面では**左端の縦のバー**に居る(#1982 ③-a-1。`rail.ts` が移す)──
+     *   左のペインの中だけを探すと見つからない。shell の中から引く。
+     */
+    const scope: ParentNode = sidebar.closest('[data-pkc-region="shell"]') ?? sidebar;
     this.hideWhileCommand = [
       '[data-pkc-region="browse-tabs"]',
       '[data-pkc-field="entry-sort"]',
       '[data-pkc-region="create-bar"]',
     ].flatMap((sel) => {
-      const el = sidebar.querySelector<HTMLElement>(sel);
+      const el = (sel.includes('browse-tabs') ? scope : sidebar).querySelector<HTMLElement>(sel);
       return el === null ? [] : [el];
     });
     const pane = (mode: BrowseMode): HTMLElement => {
@@ -285,7 +290,7 @@ export class BrowseRouter {
       draw: pane('draw'),
       shell: pane('shell'),
     };
-    this.drawTab = sidebar.querySelector<HTMLElement>('[data-pkc-browse="draw"]');
+    this.drawTab = scope.querySelector<HTMLElement>('[data-pkc-region="browse-tabs"] [data-pkc-browse="draw"]');
     if (this.drawTab !== null) this.drawTab.hidden = true;
     this.scroll = new ScrollMemory(host);
     /**
@@ -337,6 +342,7 @@ export class BrowseRouter {
     if (this.drawTab === null) return;
     this.drawTab.hidden = !visible;
     // 🔴 タブの数が変わる ⇒ 1 段に収まるか測り直す(帯の幅は変わらず、`ResizeObserver` は鳴らない)
+    // ⚠ バーの中では畳まない(縦に送る)── 左のペインに居る(スマホ用画面)ときだけ測り直す
     const bar = this.drawTab.closest<HTMLElement>('[data-pkc-region="sidebar"]');
     if (bar !== null) fitSidebarBars(bar.parentElement ?? bar);
   }
@@ -494,6 +500,8 @@ export class BrowseRouter {
      *   (`kind-bar.ts`)が `>` で隠れるのと**同じ作法**で、`hidden` を付けるだけ(戻すと復帰)。
      *   「+ ノート」の代わりは `>ノート`(操作の一覧から作れる)。
      */
+    // ⚠ 縦のバー(#1982 ③-a-1)に居るタブも隠す ── `>` の間にタブを押すと色だけ動いて一覧は操作のまま、に見える(#1206 D2)。
+    //   バーの下の群(アプリ全体の操作)は隠さない(隠す対象はタブの器だけ)
     for (const el of this.hideWhileCommand) if (el.hidden !== commandMode) el.hidden = commandMode;
     // ⚠ 非 active な面には render を呼ばない(裏で毎 state 仕事をしない)
     // 🔴 フォルダの表は、組み直したかを返す。属性だけの回(↑↓で選ぶ等)はスクロール位置を書き戻さない(下の `scroll.use`)

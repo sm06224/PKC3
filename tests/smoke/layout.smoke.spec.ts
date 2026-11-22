@@ -10,6 +10,7 @@ import {
   gotoApp,
   useSplitEditor,
   writesLanded,
+  openBrowse,
 } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -139,7 +140,7 @@ test('🔴 枠が組めている(3 列 / 重なりなし)', async ({ page }) => 
 
   // ⑧ ファイラの表が**列ズレしていない**(単漢字マークの ::before が匿名セルを
   //    作って全ヘッダを 1 列ずらしていた ── 実測で見つけた本物のバグ)
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   const cells = await page
     .locator('[data-pkc-region="filer-table"] tbody tr')
     .first()
@@ -215,11 +216,12 @@ test('🔴 スマホの幅では 1 枚ずつ出る(一覧 → 本文 → 情報 
  * ⚠ だからここが見るのは 2 つ:**帯が無いこと**と、**設定へ行けること**。
  * 片方だけだと「導線ごと消した」も「帯が残っている」も通ってしまう。
  */
-test('🔴 上の帯は無く、設定は左の列から押せる', async ({ page }) => {
+test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await gotoApp(page);
   const m = await page.evaluate(() => {
-    const btn = document.querySelector('[data-pkc-region="sidebar"] [data-pkc-view="settings"]');
+    // 🔴 2026-11-22(#1982 ③-a-1)から、アプリ全体の操作は左端の縦のバーに居る(左のペインから移った)
+    const btn = document.querySelector('[data-pkc-region="rail"] [data-pkc-view="settings"]');
     const r = btn?.getBoundingClientRect();
     // ⚠ 「⋯」(畳んだ物の出口。#1621)はタイルではない ── 広い幅では出ない(幅 0)
     const tiles = [
@@ -229,8 +231,8 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
     ];
     const others = tiles.map((b) => Math.round(b.getBoundingClientRect().height));
     const widths = tiles.map((b) => Math.round(b.getBoundingClientRect().width));
-    // 🔴 #1054 段②-2(F9)── 7 個が「詰め込まれて」同じ行に収まっているか
-    const tops = tiles.map((b) => Math.round(b.getBoundingClientRect().top));
+    // 🔴 #1982 ③-a-1 ── 7 個は縦のバーの 1 列に並ぶ(左端が揃う)
+    const tops = tiles.map((b) => Math.round(b.getBoundingClientRect().left));
     return {
       hasBrand: document.querySelector('[data-pkc-region="brand"]') !== null,
       inSidebar: btn !== null,
@@ -245,7 +247,7 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
   // ① 帯が無い(撤去の pin ── 戻ってきたら落ちる)
   expect(m.hasBrand, '上の帯が戻っている').toBe(false);
   // ② 設定へ行ける(導線ごと消す変異を落とす)
-  expect(m.inSidebar, '設定への導線が左の列に無い').toBe(true);
+  expect(m.inSidebar, '設定への導線が左端の縦のバーに無い').toBe(true);
   /**
    * ③ 🔴 **均一な正方形タイル(32px)である**(#1054 段②。上の「40px 以上」を上書き)。
    * ⚠ 直す前は「帯にいた頃の寸法(20px / 11px)を引きずって 1 つだけ細くならない」を
@@ -265,7 +267,7 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
    *   1 行に入る幅がある。
    */
   expect(m.tileCount, '前提が崩れている(7 個そろっていない)').toBe(7);
-  expect(m.tops, `1 行に収まらず複数の段に分かれている: ${JSON.stringify(m.tops)}`).toEqual(
+  expect(m.tops, `縦のバーの 1 列に揃っていない(左端): ${JSON.stringify(m.tops)}`).toEqual(
     new Array(7).fill(m.tops[0]),
   );
 
@@ -287,7 +289,8 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
         ),
       ].map((b) => {
         const r = b.getBoundingClientRect();
-        return { top: Math.round(r.top), w: Math.round(r.width), folded: b.hasAttribute('data-pkc-overflow') };
+        // ⚠ #1982 ③-a-1 から縦のバーの 1 列 ── 「段」は左端で見る
+        return { top: Math.round(r.left), w: Math.round(r.width), folded: b.hasAttribute('data-pkc-overflow') };
       }),
     );
     expect(rects, `${width}px: 前提が崩れている(7 個そろっていない)`).toHaveLength(7);
@@ -308,9 +311,55 @@ test('🔴 上の帯は無く、設定は左の列から押せる', async ({ pag
     ).toBe(true);
     expect(
       new Set(shown.map((r) => r.top)).size,
-      `${width}px: 見えているタイルが段をまたいでいる: ${JSON.stringify(rects)}`,
+      `${width}px: 見えているタイルが列をまたいでいる: ${JSON.stringify(rects)}`,
     ).toBe(1);
+    // 🔴 縦のバーでは畳まない(高さが足りなければ上の群が送る ── 下の群は全部見えて押せる)
+    expect(shown.length, `${width}px: 縦のバーで畳まれたタイルがある`).toBe(7);
   }
+
+  /**
+   * ⑦ 🔴 **高さが足りないときは、上の群(タブ)だけが縦に送り、下の群(操作)は全部押せる**
+   *   (#1982 ③-a-1。user 指示 2026-11-22)。同じ起動に載せる(起動は増やさない)。
+   * ⚠ 見るのは**実物の当たり**(`elementFromPoint`)── 見えていても隣の群に覆われていれば押せない。
+   * ⚠ 対照群: 高い窓では上の群は送らない(scrollHeight = clientHeight)。
+   */
+  await page.setViewportSize({ width: 1366, height: 900 });
+  const railAt = async () =>
+    page.evaluate(() => {
+      const rail = document.querySelector('[data-pkc-region="rail"]')!;
+      const tabs = rail.querySelector<HTMLElement>('[data-pkc-region="browse-tabs"]')!;
+      const tiles = [...rail.querySelectorAll<HTMLElement>('[data-pkc-region="collection-bar"] button')];
+      const hit = tiles.filter((b) => {
+        const r = b.getBoundingClientRect();
+        const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return r.bottom <= innerHeight && (at === b || b.contains(at));
+      }).length;
+      return { scrolls: tabs.scrollHeight > tabs.clientHeight + 1, tiles: tiles.length, hit };
+    });
+  const tall = await railAt();
+  expect(tall.scrolls, '対照群: 高い窓で上の群が送っている').toBe(false);
+  expect(tall.hit, '高い窓で下の群が押せない').toBe(tall.tiles);
+  await page.setViewportSize({ width: 1366, height: 500 });
+  const low = await railAt();
+  expect(low.scrolls, '低い窓で上の群が送っていない(はみ出しを切っている / 下の群を押し出している)').toBe(true);
+  expect(low.tiles, '下の群のタイルが 7 つでない').toBe(7);
+  expect(low.hit, `低い窓で下の群のうち ${low.tiles - low.hit} 個が押せない`).toBe(low.tiles);
+
+  /**
+   * ⑧ 🔴 **いま開いているタブをもう一度押すと左のペインを畳み、もう一度押すと開く**(user 裁定 2026-11-22)。
+   *   実マウスで押す(`clickReal`)。⚠ 同じ状態(`data-pkc-hidden-panes`)を通っていることを見る。
+   */
+  await page.setViewportSize({ width: 1366, height: 900 });
+  const shell = page.locator('[data-pkc-region="shell"]');
+  const activeTab = '[data-pkc-region="rail"] [data-pkc-browse][data-pkc-active]';
+  const mode = await page.locator(activeTab).getAttribute('data-pkc-browse');
+  await clickReal(page, activeTab);
+  await expect(shell, 'いまのタブを押しても左のペインが畳まれない').toHaveAttribute('data-pkc-hidden-panes', /sidebar/);
+  await expect(page.locator('[data-pkc-region="sidebar"]')).toBeHidden();
+  await expect(page.locator('[data-pkc-region="rail"]'), '畳んだら縦のバーが消えた').toBeVisible();
+  await clickReal(page, `[data-pkc-region="rail"] [data-pkc-browse="${mode}"]`);
+  await expect(shell, 'もう一度押しても開かない(片道)').not.toHaveAttribute('data-pkc-hidden-panes', /sidebar/);
+  await expect(page.locator('[data-pkc-region="sidebar"]')).toBeVisible();
 });
 
 
@@ -408,7 +457,9 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
       const tiles: { where: string; action: string; overflow: number }[] = [];
       let folded = 0;
       let foldedTiles = 0;
-      for (const btn of side.querySelectorAll('button')) {
+      // 🔴 #1982 ③-a-1 から、タブと下の操作は左端の縦のバーに居る ── 左の列と一緒に見る(帯を名指ししない)
+      const all = [...side.querySelectorAll('button'), ...document.querySelectorAll('[data-pkc-region="rail"] button')];
+      for (const btn of all) {
         // 🔴 帯に入りきらず「⋯」の下へ畳んだ物(#1621)は、測らないが**在る**と数える
         if (btn.hasAttribute('data-pkc-overflow') && !btn.hasAttribute('data-pkc-bar-tile')) {
           folded++;
@@ -511,9 +562,10 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
      *   ②「⋯」は畳んだ物が在る間だけ出る ③「⋯」を押すと畳んだ物が名前で出る、を一緒に見る。
      */
     const bands = await page.evaluate(() => {
-      const side = document.querySelector('[data-pkc-region="sidebar"]')!;
+      // 🔴 #1982 ③-a-1: タブと下の操作は縦のバーの 1 列(左端で「段」を数える)、作る帯は左の列の 1 段
       return ['browse-tabs', 'create-bar', 'collection-bar'].map((r) => {
-        const bar = side.querySelector(`[data-pkc-region="${r}"]`)!;
+        const bar = document.querySelector(`[data-pkc-region="${r}"]`)!;
+        const vertical = bar.closest('[data-pkc-region="rail"]') !== null;
         const on = (el: Element): boolean => el.getBoundingClientRect().width > 0;
         const more = bar.querySelector('[data-pkc-field="bar-more"]');
         const shown = [...bar.querySelectorAll('button')].filter(
@@ -523,8 +575,11 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
         return {
           r,
           rows: new Set(
-            [...shown, ...(moreShown ? [more!] : [])].map((b) => Math.round(b.getBoundingClientRect().top)),
+            [...shown, ...(moreShown ? [more!] : [])].map((b) =>
+              Math.round(vertical ? b.getBoundingClientRect().left : b.getBoundingClientRect().top),
+            ),
           ).size,
+          vertical,
           shown: shown.length,
           folded: bar.querySelectorAll('button[data-pkc-overflow]').length,
           moreShown,
@@ -533,7 +588,9 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
     });
     for (const b of bands) {
       expect(b.shown, `w=${w}: [${b.r}] 見えているボタンが 0 個`).toBeGreaterThan(0);
-      expect(b.rows, `w=${w}: [${b.r}] が ${b.rows} 段になっている(1 段に収める)`).toBe(1);
+      expect(b.rows, `w=${w}: [${b.r}] が ${b.rows} 段になっている(1 段 / 縦のバーでは 1 列に収める)`).toBe(1);
+      // 🔴 縦のバーでは畳まない(高さが足りなければ上の群が縦に送る)
+      if (b.vertical) expect(b.folded, `w=${w}: [${b.r}] 縦のバーで ${b.folded} 個畳んでいる`).toBe(0);
       expect(
         b.moreShown,
         `w=${w}: [${b.r}] 畳んだ物が ${b.folded} 個なのに「⋯」が ${b.moreShown ? '在る' : '無い'}`,
@@ -571,7 +628,7 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
     if (w === TAB_SWEEP[0]) await dismissAnnounce(page);
     // 🔴 狭い幅では「システム」が「⋯」の下へ畳まれる(#1621)── その道で開く(畳んだ物が押せることの確認も兼ねる)
     const settingsFolded = await page
-      .locator('[data-pkc-region="sidebar"] [data-pkc-action="set-view"][data-pkc-view="settings"]')
+      .locator('[data-pkc-action="set-view"][data-pkc-view="settings"][data-pkc-bar-tile]')
       .first()
       .evaluate((el) => el.hasAttribute('data-pkc-overflow'));
     if (settingsFolded) {
@@ -643,7 +700,7 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
  * 🔑 だからこの検査は**段数と一緒に「7 個が在ること」を見る** ──
  *   段数だけ見ると、**消して 2 段にする**変更が緑で通る。
  */
-test('🔴 まとめ操作の帯は 1 段に収まり、ボタンは 1 つも消えていない (#475 / #1621)', async ({
+test('🔴 まとめ操作は縦のバーの 1 列に収まり、ボタンは 1 つも消えていない (#475 / #1621 → #1982 ③-a-1)', async ({
   page,
 }) => {
   /** 帯に在るはずの 7 つ。⚠ **等値で pin する** ── 「7 個ある」だけだと、
@@ -664,9 +721,15 @@ test('🔴 まとめ操作の帯は 1 段に収まり、ボタンは 1 つも消
       const btns = [...bar.querySelectorAll('button')].filter(
         (b) => b.getBoundingClientRect().width > 0,
       );
+      // 🔴 #1982 ③-a-1: 帯は左端の縦のバーに居る ── 「段」は左端の種類で数える(1 列)
+      const vertical = bar.closest('[data-pkc-region="rail"]') !== null;
       return {
         labels: all.map((b) => (b.textContent ?? '').trim()),
-        rows: new Set(btns.map((b) => Math.round(b.getBoundingClientRect().top))).size,
+        vertical,
+        folded: all.filter((b) => b.hasAttribute('data-pkc-overflow')).length,
+        rows: new Set(
+          btns.map((b) => Math.round(vertical ? b.getBoundingClientRect().left : b.getBoundingClientRect().top)),
+        ).size,
         barH: Math.round(bar.getBoundingClientRect().height),
         listH: Math.round(
           document.querySelector('[data-pkc-region="browse-host"]')?.getBoundingClientRect()
@@ -682,7 +745,10 @@ test('🔴 まとめ操作の帯は 1 段に収まり、ボタンは 1 つも消
       `w=${w}: まとめ操作のボタンが変わっている(消した / 足した)`,
     ).toEqual(WANT);
 
-    // 🔴 1 段(#1621 で 2 段までから締めた。3 段だと帯が 81px を取り、一覧がそのぶん縮む)
+    // 🔴 PC の版面では縦のバーに居て、1 つも畳まない(#1982 ③-a-1)
+    expect(m!.vertical, `w=${w}: まとめ操作が縦のバーに居ない`).toBe(true);
+    expect(m!.folded, `w=${w}: 縦のバーで畳んでいる`).toBe(0);
+    // 🔴 1 列(旧: 1 段。#1621 で 2 段までから締めた)
     expect(
       m!.rows,
       `w=${w}: まとめ操作の帯が ${m!.rows} 段ある(帯 ${m!.barH}px / 一覧 ${m!.listH}px)`,
@@ -750,6 +816,8 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
     await gotoApp(page);
     const m = await page.evaluate(() => {
       const host = document.querySelector('[data-pkc-region="browse-tabs"]')!;
+      // 🔴 #1982 ③-a-1: PC の版面ではタブは左端の縦のバーに居る(図案だけ。名前は見えない字と `title`)
+      const vertical = host.closest('[data-pkc-region="rail"]') !== null;
       const tabs = [...host.querySelectorAll('[data-pkc-browse]')].map((b) => {
         const box = b.getBoundingClientRect();
         const label = b.querySelector('[data-pkc-field="label"]')!;
@@ -758,7 +826,8 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
           label: (label.textContent ?? '').trim(),
           // ⚠ **左右の大きいほう** ── 語は中央寄せなので両側へ出る
           outside: Math.round(Math.max(lab.right - box.right, box.left - lab.left)),
-          top: Math.round(box.top),
+          top: Math.round(vertical ? box.left : box.top),
+          named: (b.getAttribute('aria-label') ?? '') !== '' && (b as HTMLElement).title !== '',
           // 🔴 「⋯」の下へ畳んだ(#1621)。畳んだ物は箱が無いので段・はみ出しの数に入れない
           // 🔴 描いている間だけ出る「手書き」(#1448)は、隠れている間は箱が無い ⇒ 段・はみ出しの数に入れない
           folded: b.hasAttribute('data-pkc-overflow'),
@@ -767,6 +836,7 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
       });
       return {
         tabs,
+        vertical,
         hostW: host.clientWidth,
         scrollW: host.scrollWidth,
         // 段数 = 上端の種類の数(折り返すと増える)。畳んだ物は数えない
@@ -783,8 +853,12 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
       `w=${w}: 語が消えている(図案だけでは何のタブか分からない)`,
     ).toBe(true);
 
-    // ② 🔴 語が自分の箱から出ていない(**左右とも**)
-    for (const t of m.tabs) {
+    // ② 🔴 語が自分の箱から出ていない(**左右とも**)。⚠ 縦のバーでは語は見えない字(1px)なので、名前を持つことを見る
+    if (m.vertical) {
+      expect(m.tabs.filter((t) => !t.named).map((t) => t.label), `w=${w}: 縦のバーのタブに名前(aria-label / title)が無い`).toEqual([]);
+      expect(m.tabs.filter((t) => t.folded).map((t) => t.label), `w=${w}: 縦のバーでタブを畳んでいる`).toEqual([]);
+    }
+    for (const t of m.vertical ? [] : m.tabs) {
       expect(
         t.outside,
         `w=${w}: 「${t.label}」が箱から ${t.outside}px 出て隣のタブに重なっている`,
@@ -797,7 +871,7 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
     // ④ 🔴 **どの幅でも 1 段**(#1621 で「2 段まで」から締めた)。細い幅では折り返さず、
     //    入りきらない分を後ろから「⋯」の下へ畳む(いま開いているタブは畳まない)。
     //    ⚠ 直す前は 1080px 以下で 2 段に割れ、下の段の 1〜2 枚だけ横いっぱいに伸びていた
-    expect(m.rows, `w=${w}: タブが ${m.rows} 段になっている(1 段にする)`).toBe(1);
+    expect(m.rows, `w=${w}: タブが ${m.rows} 段 / 列になっている(1 段 / 縦のバーでは 1 列にする)`).toBe(1);
     if (w >= TAB_ONE_ROW_FROM) {
       // ⚠ ここが落ちたら、**図案を戻したか、タブを 1 枚足した**かである ── 先頭の 5 枚は広い画面では畳まない
       expect(
@@ -832,7 +906,7 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
       }
       await expect(page.locator('[data-pkc-browse-pane="shell"]'), `w=${w}: シェルのタブが開かない`).toBeVisible();
       // 探し方は端末に覚えられる(次の幅の起動で「いま開いているタブ」は畳まれないので、シェルのままだと別のタブが畳まれる)── フォルダへ戻しておく
-      await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+      await openBrowse(page, 'filer');
     }
     /**
      * ⑧ 🔴 **左のペインの組み込みアプリが、ペインの外へはみ出さない**(#1442)。同じ起動に載せる(起動を増やさない)。
@@ -846,9 +920,8 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
         .evaluateAll((els) => els.filter((e) => !(e as HTMLElement).hidden).map((e) => e.getAttribute('data-pkc-browse') ?? ''));
       expect(modes.length, `w=${w}: 左のタブを読めていない(空振り)`).toBeGreaterThan(5);
       for (const mode of modes) {
-        await page.evaluate((m) => {
-          (document.querySelector(`[data-pkc-region="browse-tabs"] [data-pkc-browse="${m}"]`) as HTMLElement).click();
-        }, mode);
+        // ⚠ いま開いているタブをもう一度押すと左のペインを畳む(#1982 ③-a-1)── 開いていなければ押す
+        await openBrowse(page, mode);
         const pane = page.locator(`[data-pkc-browse-pane="${mode}"]`);
         await expect(pane, `w=${w}: 「${mode}」のペインが開かない`).toBeVisible();
         // ⚠ 中身が描かれる前に測らない(空のペインは「はみ出し 0」で緑になる)── 予定表は直す前にはみ出していた欄そのものを待つ
@@ -901,13 +974,14 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
         const leadTop = await lp.locator('[data-pkc-field="launcher-lead"]').evaluate((e) => parseFloat(getComputedStyle(e).marginTop));
         expect(leadTop, `説明の上の間が余白の段でない(${leadTop}px)`).toBeLessThanOrEqual(8);
       }
-      // 次の幅の起動で覚えたタブが残らないように、フォルダへ戻しておく(上の⑦と同じ理由)
-      await page.evaluate(() => {
-        (document.querySelector('[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]') as HTMLElement).click();
-      });
+      // 次の幅の起動で覚えたタブが残らないように、フォルダへ戻しておく(上の⑦と同じ理由)。
+      // ⚠ いま開いているタブを押すと左のペインを畳む(#1982 ③-a-1)── 開いていなければ押す
+      await openBrowse(page, 'filer');
     }
   }
-  expect(shellFolded, '「シェル」が畳まれた幅を 1 つも見ていない(掃く幅が広すぎる)').toBeGreaterThan(0);
+  // 🔴 #1982 ③-a-1: PC の版面(この掃く範囲はすべて PC)ではタブは縦のバーに居て、1 枚も畳まない
+  //    (旧: 「シェル」が「⋯」の下へ畳まれる幅を見ていた ── 横に並ぶ版面はスマホの test が見る)
+  expect(shellFolded, '縦のバーで「シェル」が畳まれた').toBe(0);
 
   // ⑤ 🔴 **空振り防止 ── これが旧稿に無かったもの。**
   //    掃いた範囲が「1 段の姿」と「折り返した姿」の**両方**をまたいでいること。
@@ -920,10 +994,8 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
     oneRow.length,
     `1 段の幅を 1 つも見ていない: ${JSON.stringify(seen)}`,
   ).toBeGreaterThan(0);
-  expect(
-    wrapped.length,
-    `折り返した幅を 1 つも見ていない(掃いた範囲が狭すぎる): ${JSON.stringify(seen)}`,
-  ).toBeGreaterThan(0);
+  // 🔴 縦のバーでは畳まない ── 掃いた全幅で「全部見える」(旧: 畳んだ幅も在ることを見ていた)
+  expect(wrapped.length, `縦のバーでタブを畳んだ幅がある: ${JSON.stringify(seen)}`).toBe(0);
 
   // ⑥ 表ごと空にする変異を素通りさせない(2026-10-29 時点で 10 枚 ── 手書きは描いている間だけ出る)
   expect(BROWSE_TABS.length, 'タブの表が縮んでいる').toBeGreaterThanOrEqual(10);
@@ -1319,12 +1391,12 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
   ).toBeLessThan(30);
 
   // ② 🔴 タブを往復する(面が**同じ器**を使い回している)── 予定へ出て、フォルダへ戻る
-  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await openBrowse(page, 'schedule');
   // ⚠ **予定側を別の位置にしてから**戻る ── 同じ位置のままだと、
   //    面ごとに覚えていない実装(器の位置を持ち回すだけ)でも通ってしまう
   //    (変異試験で実際に素通りした)
   await host.evaluate((el) => (el.scrollTop = 0));
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await expect(rows).toHaveCount(32);
   expect(
     Math.abs((await host.evaluate((el) => el.scrollTop)) - parked),
@@ -2012,7 +2084,7 @@ test('🔴 フォルダ面は行の頭に種別、右端に更新日を出す', 
   await page.fill('[data-pkc-field="editor-title"]', 'フォルダ面で見る');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
-  await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   // ⚠ **「最初の行」で掴まない** ── この spec は文脈を共有するので、先行 test が
   //    作った行が先頭に来る。その行は時刻の ack がまだ届いていないことがあり、
   //    日付の assert が**たまに落ちる**(実際に full run で 1 度落ちた)。
@@ -2513,7 +2585,7 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
     } as typeof Worker.prototype.postMessage;
   });
   await gotoApp(page);
-  await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
 
   const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
   const titles = rows.locator('[data-pkc-field="title"]');
@@ -2654,7 +2726,7 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
    */
   await writesLanded(page);
   await gotoApp(page);
-  await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   /**
    * 🔴 **読み込み直しても、開いていたフォルダの中から始まる**(台帳 #1852 束 C2 / 依頼 277)。
    * 直す前は読み込み直すとルートから始まり、ここで「ルートに入れたノートが居ない → 2 クリックで入る」を見ていた。

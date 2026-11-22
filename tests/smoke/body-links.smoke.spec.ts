@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickInspectorMoreItem, gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor } from './helpers';
+import { clickInspectorMoreItem, gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, openBrowse } from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -305,7 +305,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
     /10月15日/,
   );
   await expect(page.locator('[data-pkc-field="detail-title"]'), '本文が動いた').toContainText('リンク元');
-  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await expect(page.locator('[data-pkc-browse-pane="filer"]')).toBeVisible();
 
   // 🔑 橋 ── 下の #1174 は「リンク先(題名 2026-10-15)のノートが開いている」所から始まる。
@@ -411,7 +411,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
     '留めた枠でも、先の無いリンクに点線が付いている',
   ).toHaveCount(1);
 
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await clickReal(page, '[data-pkc-action="show-trash"]');
   await clickReal(page, '[data-pkc-action="restore-trash"]');
   // 前提: 戻したノートが主の枠に開いた(= 留めた枠の本文は選択の変化で描き直されていない)
@@ -441,7 +441,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
    *   続けて押して作る(結果は保存の worker から非同期に着くので、その前に選択が動く)。
    * 🔑 直す前は、着いた時点で戻したノートへ選択が引き戻された(押したノートが開かない)。
    */
-  await clickReal(page, '[data-pkc-browse="filer"]');
+  await openBrowse(page, 'filer');
   await clickReal(page, '[data-pkc-action="show-trash"]');
   await expect(page.locator('[data-pkc-region="filer-trash"] li'), '前提: ゴミ箱に 1 件').toHaveCount(1);
   /**
