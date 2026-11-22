@@ -64,6 +64,10 @@ function rig(opts: { canBack?: boolean; phone?: boolean } = {}) {
       phone = v;
       listener?.();
     },
+    setPhoneQuiet: (v: boolean) => {
+      phone = v;
+    },
+    resize: () => void win.dispatchEvent(new Event('resize')),
     off,
   };
 }
@@ -142,6 +146,31 @@ describe('マウスの戻る・進むボタン / PC のブラウザの戻る(A1)
     const q = rig();
     q.setPhone(true);
     expect(q.backs(), 'スマホへ切り替えて番兵を畳んでいない').toBe(1);
+  });
+
+  it('🔴 マウスの戻るで最古のノートへ着いた直後は、畳む戻り(hist.back)を撃たない(ブラウザ自身の戻りと重なってページを離れない)', () => {
+    const r = rig();
+    r.mouse('pointerup', 3);
+    r.setCanBack(false); // 戻った先が最古のノート
+    expect(r.backs(), '畳む戻りを撃った(ブラウザの戻りと合わせて 2 回 = ページを離れる)').toBe(0);
+    // 対照群: マウスの戻りから時間が経っていれば、今までどおり畳む
+    const q = rig();
+    q.setCanBack(false);
+    expect(q.backs()).toBe(1);
+  });
+
+  it('⚠ スマホの幅へ切り替わった後の popstate では戻らない(phone-back の受け持ち)/ 窓の幅が変わったら判断をやり直す', () => {
+    const r = rig();
+    r.setPhone(true);
+    // 畳む戻りの popstate は食われる。その後の本物の戻りでも、こちらは戻らない
+    r.pop();
+    r.pop();
+    expect(r.calls).toEqual([]);
+    const q = rig({ phone: true });
+    expect(q.pushes.length).toBe(0);
+    q.setPhoneQuiet(false);
+    q.resize();
+    expect(q.pushes.length, '幅がパソコンへ戻ったのに番兵を置かない').toBe(1);
   });
 
   it('外すと何も聞かない', () => {

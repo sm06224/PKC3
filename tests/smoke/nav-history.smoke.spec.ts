@@ -88,6 +88,9 @@ test('🔴 左上の ‹ › はブラウザのタブでは出さず、アプリ
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await expect(page.locator('[data-pkc-region="find-bar"] [data-pkc-action="nav-back"]'), 'ブラウザのタブで ‹ が出ている').toBeHidden();
+  // スマホの幅では、ブラウザのタブでも出す(マウスの戻る・進むも Alt + ← も無い ── ノートの戻る・進むの入口はここだけ)
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('[data-pkc-region="find-bar"] [data-pkc-action="nav-back"]'), 'スマホの幅で ‹ が消えた').toBeVisible();
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const app = await ctx.newPage();
   await useSplitEditor(app);

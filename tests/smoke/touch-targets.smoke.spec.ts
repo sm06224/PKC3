@@ -20,7 +20,6 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import {
-  useStandalone,
   clickReal,
   collectPageErrors,
   createEntry,
@@ -114,8 +113,7 @@ test.describe('指で触る端末(#706)', () => {
   test.use({ hasTouch: true });
 
   test('🔴 読む面・情報・一覧の押し所が、全数で 24px 以上(390×844)', async ({ page }) => {
-    // ⚠ 2026-11-22(A1): 左上の ‹ › はアプリとして開いたときだけ出る ── その形で全数を見る
-    await useStandalone(page);
+    // ⚠ 2026-11-22(A1): スマホの幅では、ブラウザのタブでも ‹ › を出す(隠すのはパソコンの幅だけ)── アプリとして開いた形にしない
     const errors = collectPageErrors(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await useSplitEditor(page);

@@ -63,10 +63,19 @@ export function installNavHistory(d: NavHistoryDeps): () => void {
     }, 1000);
     hist.back();
   };
+  const mouseBackFresh = (): boolean => now() - mouseBackAt < MOUSE_NAV_SUPPRESS_MS;
   const sync = (): void => {
     const want = !d.isPhone() && d.canBack();
     if (want && !armed) arm();
-    else if (!want && armed) disarm();
+    else if (!want && armed) {
+      /**
+       * 🔴 **マウスの戻るで最古のノートへ着いた直後は、畳む戻り(`hist.back()`)を撃たない**(着地前レビュー 🔴1)──
+       *   同じクリックのブラウザ自身の戻りが止まらなかった場合、2 回の戻りが重なって**ページを離れる**。番兵は置いたまま印だけ下ろす
+       *   (ブラウザの戻りが走っていれば番兵は既に消費されている / 止まっていれば、次の本物の「戻る」が番兵を 1 つ食うだけ)。
+       */
+      if (mouseBackFresh()) armed = false;
+      else disarm();
+    }
   };
 
   const isNavButton = (e: Event): number | null => {
@@ -93,7 +102,9 @@ export function installNavHistory(d: NavHistoryDeps): () => void {
     }
     if (!armed) return;
     armed = false; // 番兵は消費された
-    if (now() - mouseBackAt < MOUSE_NAV_SUPPRESS_MS) {
+    // ⚠ スマホの幅へ切り替わった後は phone-back の受け持ち ── こちらは戻らない(2 つが同じ popstate で動かない。レビュー ⚠3)
+    if (d.isPhone()) return;
+    if (mouseBackFresh()) {
       // 🔴 マウスの戻るボタンで既に戻った ── もう 1 度は戻らない(置き直すだけ)
       mouseBackAt = Number.NEGATIVE_INFINITY;
       sync();
@@ -106,6 +117,8 @@ export function installNavHistory(d: NavHistoryDeps): () => void {
   win.addEventListener('pointerup', onPointerUp);
   win.addEventListener('mouseup', onMouseUp);
   win.addEventListener('popstate', onPop);
+  // 窓の幅でスマホ / パソコンが入れ替わる(状態は変わらない)── 番兵を置く / 畳む判断をやり直す(レビュー ⚠3)
+  win.addEventListener('resize', sync);
   const off = d.onChange(sync);
   sync();
   return () => {
@@ -113,5 +126,6 @@ export function installNavHistory(d: NavHistoryDeps): () => void {
     win.removeEventListener('pointerup', onPointerUp);
     win.removeEventListener('mouseup', onMouseUp);
     win.removeEventListener('popstate', onPop);
+    win.removeEventListener('resize', sync);
   };
 }
