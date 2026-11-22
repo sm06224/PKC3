@@ -30,7 +30,7 @@ const TARGET_POOR: Record<string, number> = {
 };
 /** 素の表示での下限(模型なし)。 */
 const TARGET_RAW: Record<string, number> = {
-  'bg|surface': 2.0,
+  'bg|surface': 3.8, // 2026-11-22(#1982 ②)に 2.0 → 3.8。暗いテーマ 5 つの机を沈めた(最小は dracula の 3.81)
   'surface|surface-2': 2.5,
   'surface|hover': 5,
   'surface|button': 3.5,
@@ -61,6 +61,25 @@ describe('質の悪い液晶でも境目が見える(ΔL*)', () => {
     }
   });
 
+  /**
+   * 🔴 **机と紙のコントラスト比(WCAG)が全 12 テーマで 1.10 以上**(#1982 ②。2026-11-22)。
+   * 暗いテーマ 5 つ(dark / github-dark / terminal / retro / paper-dark)は 1.045〜1.098 で、地の段差が見えにくかった。
+   * ⚠ ΔL* とは別の計器で見る(暗い側は ΔL* が大きく出やすく、比では差が小さい)── 期待値はヘルパーを通さず、ここで輝度から測る。
+   */
+  it.each(THEMES.map((t) => t.id))('%s: 机と紙のコントラスト比が 1.10 以上', (id) => {
+    const [bg, surface] = layerPairs(themeTokens(tokens, id))['bg|surface']!;
+    const lum = (c: readonly number[]): number => {
+      const l = c.slice(0, 3).map((v) => {
+        const x = v / 255;
+        return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * l[0]! + 0.7152 * l[1]! + 0.0722 * l[2]!;
+    };
+    const [hi, lo] = [lum(bg), lum(surface)].sort((a, b) => b - a) as [number, number];
+    const ratio = (hi + 0.05) / (lo + 0.05);
+    expect(ratio, `${id}: 机と紙の比 ${ratio.toFixed(3)}`).toBeGreaterThanOrEqual(1.1);
+  });
+
   it('色の読み取りが hex / rgb() の両方を解く(ヘルパーの盲点)', () => {
     expect(parseColor('#fff')).toEqual([255, 255, 255, 1]);
     expect(parseColor('#e9ebee')).toEqual([233, 235, 238, 1]);
@@ -81,6 +100,14 @@ describe('ヘアライン(縁の細い線)', () => {
   it('中央の紙と標準のボタンが使う / 他に格子の素地を作らない', () => {
     const center = /\[data-pkc-region='center'\]\s*\{[^}]*\}/.exec(app)![0];
     expect(center).toMatch(/box-shadow:[^;]*0 0 0 1px var\(--hairline\)[^;]*var\(--shadow-sm\)/);
+    // 🔴 左右のペインの縁にもヘアライン(#1982 ②)。⚠ 影は付けない(浮くのは中央の紙だけ)
+    for (const region of ['sidebar', 'inspector']) {
+      const blocks = [...app.matchAll(new RegExp(`\\n\\[data-pkc-region='${region}'\\] \\{[^}]*\\}`, 'g'))].map((m) => m[0]);
+      const ring = blocks.filter((b) => /box-shadow:\s*0 0 0 1px var\(--hairline\)\s*;/.test(b));
+      expect(ring, `${region} の縁のヘアライン`).toHaveLength(1);
+      expect(ring[0], `${region} は机の地のまま`).toMatch(/background:\s*var\(--bg\)/);
+      expect(blocks.join('\n'), `${region} に影を付けない`).not.toMatch(/--shadow/);
+    }
     const button = /\nbutton \{[^}]*\}/.exec(app)![0];
     expect(button).toMatch(/border:\s*1px solid var\(--hairline\)/);
     // 地を透明にして枠を消す型は枠を残さない(主・危険)
