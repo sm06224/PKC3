@@ -146,7 +146,9 @@ const DIST = positional[1]
  * 入る分で、実測 38246.7 KB(約 750 KB の余裕)。wasm は**押した人のワーカーが初めて取りに行く**だけで、precache には載せない
  * (`sw-source.ts` の `ORT_WASM_PRECACHE_SKIP`)。使わない人の install にも常駐メモリにも載らない。⚠ **撤廃はしない**(誤取込 1 本は今も止まる)。
  */
-const SHIPPED_CAP_KB = 39000;
+// 🔴 2026-11-22(実機の UI の崩れ PR B)に 39000 → 40000 KB へ引き上げた ── 通常の増加(CSS・マニュアル・お知らせ)で 3.0 KB 超えた。
+//   重い dep の誤取込・生成物の取り違えではない(配る量 39003 KB。duckdb・pdf は別立てで cap の外のまま)。残量は約 997 KB(2.5%)。
+const SHIPPED_CAP_KB = 40000;
 
 /**
  * 配る量の下限。KB。⚠ **cap だけでは片側しか見ていない** ── entry chunk を
