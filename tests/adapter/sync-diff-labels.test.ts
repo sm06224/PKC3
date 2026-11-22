@@ -142,14 +142,16 @@ describe('色ラベル・ピン留め(段 3)', () => {
     await send(b, a);
     expect(await labels(b), '対照群: 印は両方に届いている').toEqual({ n1: 4 });
     await b.del('n1');
+    expect((await b.request({ op: 'listEntryMetas', cid: b.cid })).map((m) => m.lid), '対照群: こちらではゴミ箱へ移った').not.toContain('n1');
     await a.put('n1', '日本語のメモ', '本文 1 を相手で直した');
+    await setLabel(a, 'n1', 5); // 相手は編集と一緒に色も変えた ── 戻る経路で相手の色が付くことを見る(ゴミ箱の印が残るだけでは 5 にならない)
     await send(a, b);
     const metas = await b.request({ op: 'listEntryMetas', cid: b.cid });
     expect(metas.map((m) => m.lid), '相手が直したノートはこちらでも生きている').toContain('n1');
-    expect(await labels(b), '相手の色が残る').toEqual({ n1: 4 });
+    expect(await labels(b), '相手の色が付く').toEqual({ n1: 5 });
     expect(await pins(b), '相手のピンも残る').toEqual(['n1']);
     await send(b, a);
-    expect(await labels(a), '相手(A)の色も外れない').toEqual({ n1: 4 });
+    expect(await labels(a), '相手(A)の色も外れない').toEqual({ n1: 5 });
     expect(await pins(a)).toEqual(['n1']);
   });
 
@@ -256,8 +258,11 @@ describe('無人の同期と「取り込みを取り消す」', () => {
     expect(b.undo, '手の取り込みの取り消しが残る').toBe(manual);
     expect(b.reports.at(-1)?.join('\n'), '無人の回の結果に「取り消せる」の案内を出さない').not.toContain(UNDO_LIMIT_LINE);
     // 残った取り消しは手の回だけを戻す(無人の回の n2 は触らない)
+    const body = (lid: string): Promise<unknown> => b.request({ op: 'getBody', cid: b.cid, lid });
+    expect(await body('n1'), '対照群: 取り消す前は手の取り込みの版').toContain('手で取り込む版');
     await manual!.run();
-    const bodies = Object.fromEntries((await b.request({ op: 'listEntryMetas', cid: b.cid })).map((m) => [m.lid, m.title]));
-    expect(Object.keys(bodies)).toEqual(expect.arrayContaining(['n1', 'n2']));
+    expect(await body('n1'), '手の回は取り消される').toContain('本文 1');
+    expect(await body('n1')).not.toContain('手で取り込む版');
+    expect(await body('n2'), '無人の回の版はそのまま').toContain('無人で取り込む版');
   });
 });

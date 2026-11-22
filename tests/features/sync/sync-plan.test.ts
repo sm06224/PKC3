@@ -234,6 +234,17 @@ describe('planSyncImport: 色ラベル・ピン留め(ノートの生き死に�
     const p = planSyncImport({ ...i, remote });
     expect(p.labelSets).toEqual([{ lid: 'a', color: null }]);
   });
+
+  it('対照群: 変わっていないノートが目録(指紋)にだけ居て本体が無い形でも、印だけ外したなら外す', () => {
+    const base = note('a', '日本語の題名', '初稿');
+    const lab = { key: 'lab:a', ...labelFp(3) };
+    const baseline = { a: { content: st(base).content, place: st(base).place }, 'lab:a': { content: lab.content } };
+    const i = input({ remoteNotes: [], remoteFps: [base], localStates: [st(base), lab], baseline });
+    const remote = { ...i.remote, container: { ...i.remote.container, labels: [], pins: [] } };
+    expect(remote.container.notes, '対照群: 本体は運ばれていない').toEqual([]);
+    const p = planSyncImport({ ...i, remote });
+    expect(p.labelSets).toEqual([{ lid: 'a', color: null }]);
+  });
 });
 
 describe('差分ファイル(zip)の読み書き', () => {
