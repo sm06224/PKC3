@@ -2034,6 +2034,9 @@ export class FilerRenderer {
     const trashBar = document.createElement('div');
     trashBar.setAttribute('data-pkc-region', 'filer-trash');
     if (!state.trashPanel) {
+      // 🔴 閉じた状態の印(実機の重複。user 指示 2026-11-22)── 左端の縦のバー(パソコンの幅)にゴミ箱が常設されている間は、
+      //   ここの「ゴミ箱を開く」を CSS が隠す(スマホの幅はバーが無いので出す)。開いた中身の一覧は今までどおり出す
+      trashBar.setAttribute('data-pkc-trash-closed', '');
       const open = document.createElement('button');
       open.type = 'button';
       open.setAttribute('data-pkc-action', 'show-trash');

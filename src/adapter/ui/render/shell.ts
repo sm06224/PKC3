@@ -14,7 +14,7 @@ import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
 import { collectionBarButton, collectionBarItems } from './collection-bar';
 import { CREATE_TOOL_ATTR, installSidebarBarOverflow } from './bar-overflow';
 // 🔴 前回選んだ「作る種類」を覚える(#1045)
-import { appCreateKind } from './create-kind';
+import { appCreateKind, appTodayKind } from './create-kind';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
 import { missedLabel } from '@features/schedule/schedule-notify';
 import { BROWSE_ICONS, iconButton, iconSpan, markBarTile, markPrimary, markVariant } from './icons';
@@ -737,22 +737,21 @@ export function buildShell(root: HTMLElement): ShellRegions {
   today.setAttribute(HINT_BASE, todayHint);
   today.setAttribute(HINT_COMMAND, '');
   today.title = hintTitle(todayHint, '');
-  const menuToday = iconButton('open-today', '今日のノートを開く');
-  menuToday.setAttribute('role', 'menuitem');
-  menuToday.setAttribute(HINT_BASE, todayHint);
-  menuToday.setAttribute(HINT_COMMAND, '');
-  menuToday.title = hintTitle(todayHint, '');
-  menu.append(menuToday);
   /**
    * 🔴 **「今日」で作る種類を選ぶ**(#1640 項 1。推薦 B)。選んだ種類は端末に覚え、次からは「今日」だけでその種類になる。
    * ⚠ 戻す道(ノート)も並べる ── 片道にしない。既に在る日のノートは種類を問わず開く。
+   * 🔴 **2 つに整理**(実機の文言の崩れ。user 指示 2026-11-22)── 「今日のノートを開く / 今日をログで開く / 今日をノートで開く」の
+   *   3 つが重なり、助詞もちぐはぐだった。「今日のログ」「今日のノート」の 2 つにし、いまの既定(帯の「今日」が開く方)に
+   *   選択の印(`aria-checked`)を付ける。押すとその種類で開き、既定もそちらへ移る(`open-today-as`)。
    */
+  const todayDefault = appTodayKind.get() === 'textlog' ? 'textlog' : 'text';
   for (const [kindName, label, hint] of [
-    ['textlog', '今日をログで開く', '今日の日付のログ(時刻つきで追記していく記録)を開きます。無ければログで作り、次からは「今日」もログで作ります'],
-    ['text', '今日をノートで開く', '今日の日付のノートを開きます。無ければノートで作り、次からは「今日」もノートで作ります'],
+    ['textlog', '今日のログ', '今日の日付のログ(時刻つきで追記していく記録)を開きます。無ければログで作り、次からは帯の「今日」もログを開きます'],
+    ['text', '今日のノート', '今日の日付のノートを開きます。無ければノートで作り、次からは帯の「今日」もノートを開きます'],
   ] as const) {
     const item = iconButton('open-today-as', label);
-    item.setAttribute('role', 'menuitem');
+    item.setAttribute('role', 'menuitemradio');
+    item.setAttribute('aria-checked', kindName === todayDefault ? 'true' : 'false');
     item.setAttribute('data-pkc-archetype', kindName);
     item.setAttribute(HINT_BASE, hint);
     item.setAttribute(HINT_COMMAND, '');
@@ -766,7 +765,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   // ⚠ **`ENTRY_ACTION_HINTS['attach-file']` と同じ意味にする**(#666)── 同じ操作に
   //    2 通りの説明を作らない(スマホの `⋯` から選んだときに出る字と揃える)
   attach.title = 'ファイルを選んで、添付として開いているノートの本文に入れます';
-  const menuAttach = iconButton('attach-file', '添付する');
+  // 🔴 下段は上段と同じ名詞の形にそろえる(実機の文言の崩れ。user 指示 2026-11-22)── 添付 / 録音 / 画面録画 / タイマー
+  const menuAttach = iconButton('attach-file', '添付');
   menuAttach.setAttribute('role', 'menuitem');
   menu.append(menuAttach);
   /**
@@ -783,14 +783,14 @@ export function buildShell(root: HTMLElement): ShellRegions {
   markBarTile(rec);
   rec.setAttribute('data-pkc-field', 'start-audio-capture');
   rec.title = 'マイクで録音して、録り始めたノートに入れます';
-  const menuRec = iconButton('start-audio-capture', '録音する');
+  const menuRec = iconButton('start-audio-capture', '録音');
   menuRec.setAttribute('role', 'menuitem');
   menu.append(menuRec);
   const screen = iconButton('start-screen-capture', '画面録画');
   markBarTile(screen);
   screen.setAttribute('data-pkc-field', 'start-screen-capture');
   screen.title = '画面を録画して、録り始めたノートに入れます';
-  const menuScreen = iconButton('start-screen-capture', '画面を録画する');
+  const menuScreen = iconButton('start-screen-capture', '画面録画');
   menuScreen.setAttribute('role', 'menuitem');
   menu.append(menuScreen);
   /**
@@ -805,7 +805,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   markBarTile(timer);
   timer.setAttribute('data-pkc-field', 'start-timer');
   timer.title = 'いま開いているノートの作業時間を計ります(止めると、計った時間を本文に書きます)';
-  const menuTimer = iconButton('start-timer', '時間を計る');
+  const menuTimer = iconButton('start-timer', 'タイマー');
   menuTimer.setAttribute('role', 'menuitem');
   menu.append(menuTimer);
   /**

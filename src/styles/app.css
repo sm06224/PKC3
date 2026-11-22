@@ -1317,6 +1317,14 @@ img[data-pkc-action='view-big']:focus-visible {
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
   white-space: nowrap;
+  /* 🔴 **行のタイルと同じ高さ**(実機の崩れ。user 指示 2026-11-22)── 共通の button の上限(`--row-h`)が残り、32px のタイルより
+   *   数 px 低い段違いになっていた */
+  min-height: 32px;
+  max-height: 32px;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='create-bar'] [data-pkc-field='bar-more'] {
+  min-height: 44px;
+  max-height: 44px;
 }
 [data-pkc-region='browse-tabs'] [data-pkc-field='bar-more'] {
   height: auto;
@@ -1461,6 +1469,19 @@ img[data-pkc-action='view-big']:focus-visible {
   align-items: stretch;
   padding: var(--s2) var(--s2) var(--s1);
   /* 下地は塗らない(机の地)。区切りの線も引かない(#1982 段 2) */
+}
+/* 🔴 **左のペインの上の帯は縮めない**(実機の崩れ。user 指示 2026-11-22)── 種類の札が 2 段に折れたとき、作るボタンの行が
+ *   直下の一覧の 1 行目の上に食い込んでいた。縦の flex の子は既定で縮む(`flex-shrink: 1`)── 帯は中身の高さを必ず取り、
+ *   縮むのは一覧(`browse-host` / `command-list` の `flex: 1; min-height: 0`)だけにする。
+ *   守り: `ui-breakage.smoke` が帯どうし・帯と一覧の 1 行目の重なりを、帯が 2 段に折れる幅で見る */
+[data-pkc-region='sidebar'] > :is(
+    [data-pkc-region='find-bar'],
+    [data-pkc-region='kind-bar'],
+    [data-pkc-region='saved-searches'],
+    [data-pkc-region='create-bar'],
+    [data-pkc-region='note-pins']
+  ) {
+  flex: none;
 }
 [data-pkc-region='find-bar'] input,
 [data-pkc-region='create-bar'] select {
@@ -1700,6 +1721,15 @@ button[data-pkc-choice-btn][data-pkc-choice-btn][aria-pressed='true']:not(:disab
   flex: 1 1 auto;
   justify-content: flex-start;
   font-size: var(--btn-fs-bar);
+}
+/* 🔴 「今日のログ / 今日のノート」のいまの既定(帯の「今日」が開く方)に印 ── 形で示す(✓ + 太字。色は使わない) */
+[data-pkc-region='create-menu'] button[role='menuitemradio'][aria-checked='true'] {
+  font-weight: 600;
+}
+[data-pkc-region='create-menu'] button[role='menuitemradio'][aria-checked='true']::after {
+  content: '✓';
+  margin-inline-start: auto;
+  padding-inline-start: var(--s3);
 }
 [data-pkc-field='create-kind'] {
   flex: 1;
@@ -2433,6 +2463,48 @@ button[data-pkc-variant='primary'] [data-pkc-icon] {
   --pkc-icon-line: color-mix(in oklab, var(--accent-fg) 32%, var(--pkc-icon-hue, currentColor));
   --pkc-icon-underlay: color-mix(in oklab, var(--accent-fg) 32%, var(--pkc-icon-hue, currentColor));
   --pkc-icon-underlay-opacity: 0.55;
+}
+/**
+ * 🔴 **「新規作成」と「▼」は 1 つの分割ボタン**(実機の崩れ。user 指示 2026-11-22)── 色違い・隙間ありの別ボタンに見えていた。
+ *   同じ `--accent` の地・隙間なし・内側の細い区切り線・外側の角だけ丸める。▼ は主の印(`markPrimary`)を持たない
+ *   (印は面ごとに 1 つ)── 見た目だけ本体にそろえる。⚠ 主の型の規則より後ろに置く(同じ詳細度の化粧に負けない)。
+ *   守り: `ui-breakage.smoke` が「地が同じ・隙間 0・高さと上端がそろう」を見る。
+ */
+[data-pkc-region='create-bar'] [data-pkc-field='create-run'] {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+[data-pkc-region='create-bar'] button[data-pkc-field='create-pick'] {
+  width: 22px;
+  min-width: 22px;
+  /* 帯の `gap` を打ち消して本体に付ける */
+  margin-inline-start: calc(-1 * var(--s2));
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  /* 内側の細い区切り線(枠ではなく影 ── 寸法が動かない) */
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--accent-fg) 40%, transparent);
+}
+[data-pkc-region='create-bar'] button[data-pkc-field='create-pick']:hover:not(:disabled),
+[data-pkc-region='create-bar'] button[data-pkc-field='create-pick'][aria-expanded='true'] {
+  background: color-mix(in srgb, var(--accent) 85%, var(--fg));
+  color: var(--accent-fg);
+  border-color: color-mix(in srgb, var(--accent) 85%, var(--fg));
+}
+[data-pkc-region='create-bar'] button[data-pkc-field='create-pick']:focus-visible {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+[data-pkc-region='create-bar'] button[data-pkc-field='create-pick'] [data-pkc-icon] {
+  --pkc-icon-line: color-mix(in oklab, var(--accent-fg) 32%, var(--pkc-icon-hue, currentColor));
+  --pkc-icon-underlay: color-mix(in oklab, var(--accent-fg) 32%, var(--pkc-icon-hue, currentColor));
+  --pkc-icon-underlay-opacity: 0.55;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='create-bar'] button[data-pkc-field='create-pick'] {
+  width: 32px;
+  min-width: 32px;
 }
 /* ゴースト ── 枠も地も無い型。字のあるゴースト(「この値を消す」など)は標準と同じ薄い地 + 枠を受ける(#1982 ①)。
  * hover だけ標準の薄い地(同じ詳細度で `button:hover` が勝たない所は下で書く)。 */
@@ -3452,8 +3524,11 @@ dd[data-pkc-field='inspector-toc'] {
   margin-top: 4px;
 }
 [data-pkc-field='relation-target'] {
-  min-width: 0;
-  width: 6rem;
+  /* 🔴 **行の幅いっぱいまで伸ばす**(実機の見切れ。user 指示 2026-11-22)── 6rem 固定では薄字「つなぐ先の題名」が
+   *   右で切れていた。最小は薄字が収まる幅、入らない行では種類・ボタンが下の行へ回る */
+  flex: 1 1 9em;
+  min-width: 9em;
+  width: auto;
   font-size: var(--fs-sm);
 }
 [data-pkc-field='relation-kind'] {
@@ -9320,7 +9395,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   display: none;
 }
 [data-pkc-field='bulk-tag-group'] [data-pkc-field='bulk-tag'] {
-  flex: 1 1 5em;
+  flex: 1 1 3em;
   min-width: 0;
 }
 /* 🔴 スマートフォルダの「ここには作れません」は隠さず短く出す(user 指示 2026-11-22)── 注意の色 */
@@ -9332,6 +9407,11 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   margin-top: var(--s5);
   padding-top: var(--s3);
   border-top: 1px solid var(--border);
+}
+/* 🔴 **縦のバーにゴミ箱が在る間は、閉じた「ゴミ箱を開く」を出さない**(実機の重複。user 指示 2026-11-22 / #1982 ③-d の残り)。
+ *   バーはスマホの幅では出ない(`paintRail`)── そのときはここが唯一の入口なので出す */
+[data-pkc-region='shell']:not([data-pkc-layout='phone']) [data-pkc-region='sidebar'] [data-pkc-region='filer-trash'][data-pkc-trash-closed] {
+  display: none;
 }
 /* ⚠ **履歴も同じ形**(P8 段㉒)── 「一覧 + 復元」という同じ部品なのに、
  * 履歴側だけ規則が無く**ブラウザ既定の黒丸つき箇条書き**が本文の上に出ていた。
@@ -10649,6 +10729,10 @@ h3[data-pkc-section] {
 [data-pkc-field='filer-bulk-count'] {
   color: var(--muted);
   font-size: var(--fs-xs);
+  /* 🔴 **数は縮めない・折らない**(実機の見切れ。user 指示 2026-11-22)── タグの欄を開いた 1 行で、行の flex に
+   *   縮められて「1 件」の頭が切れていた。縮むのは欄(`bulk-tag`)だけ */
+  flex: none;
+  white-space: nowrap;
 }
 
 /* ── ショートカットキーの割当(#256、user 指示 2026-08-18)────────────
@@ -13532,6 +13616,43 @@ h6:hover > .pkc-heading-anchor,
 .pkc-quick-toc-btn[aria-expanded='true'] {
   background: var(--surface-2);
   border-color: var(--accent);
+}
+/* 🔴 **帯に入れた目次**(実機の崩れ。user 指示 2026-11-22)── 帯の右端に寄せ、押しは標準のボタンと同じ形・高さ・字
+ *   (薄い地 + ごく薄い枠、影なし)。一覧は押しのすぐ下・右端そろえで開く */
+.pkc-quick-toc[data-pkc-docked] {
+  position: relative;
+  top: auto;
+  height: auto;
+  padding-right: 0;
+  margin-inline-start: auto;
+  display: block;
+}
+.pkc-quick-toc[data-pkc-docked][hidden] {
+  display: none;
+}
+.pkc-quick-toc[data-pkc-docked] .pkc-quick-toc-btn {
+  height: var(--row-h);
+  min-height: var(--row-h);
+  max-height: var(--row-h);
+  padding: 0 var(--s3);
+  font: inherit;
+  font-size: inherit;
+  font-weight: normal;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  border: 1px solid var(--hairline);
+  box-shadow: none;
+  color: var(--fg);
+}
+.pkc-quick-toc[data-pkc-docked] .pkc-quick-toc-btn:hover,
+.pkc-quick-toc[data-pkc-docked] .pkc-quick-toc-btn[aria-expanded='true'] {
+  background: var(--surface-hover);
+  border-color: var(--hairline);
+  color: var(--fg);
+  --muted: var(--pkc-muted-on-mark);
+}
+.pkc-quick-toc[data-pkc-docked] .pkc-quick-toc-popover {
+  top: calc(100% + 4px);
+  right: 0;
 }
 
 .pkc-quick-toc-icon {
