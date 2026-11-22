@@ -21,6 +21,8 @@
  * - **何度呼んでも同じ結果**で、既に正しい場所に居れば動かさない(動かすと押しているボタンの焦点が飛ぶ)。
  * - 上の群(タブ)は高さが足りなければ**群の中だけ**縦に送る。下の群は常に全部見えて押せる(CSS)。
  */
+import { syncRailGlow } from './rail-glow';
+
 const RAIL = 'rail';
 const TABS = 'browse-tabs';
 const BAR = 'collection-bar';
@@ -65,6 +67,8 @@ export function paintRail(shell: HTMLElement, phone: boolean): HTMLElement | nul
   if (rail === null || sidebar === null) return null;
   const tabs = find(shell, TABS);
   const bar = find(shell, BAR);
+  // 🔴 近接発光(#1982 ③-a-2)の付け外しも版面の入れ替えと同じ 1 か所で(スマホ用画面では付けない)
+  syncRailGlow(rail, phone);
   if (phone) {
     rail.hidden = true;
     // 🔑 元の場所: タブは「探す欄」の前、操作は左のペインの最後(`shell.ts` の建て順)

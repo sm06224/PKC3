@@ -408,6 +408,34 @@ body {
   background: var(--bg);
   overflow: hidden;
 }
+/**
+ * 🔴 **近接発光**(#1982 ③-a-2。user 裁定 = G1「色の無い淡い光:`--fg` 10% 前後」)。
+ * 光は**要素 1 つ**(`rail-glow.ts` が初めて入ったときに作る 144px の円)で、`transform` だけで動く ──
+ * 塗り直しも、バーの中のボタンの style の再計算も起こさない(合成だけ)。
+ * ⚠ 色相は持たない(`--fg` の透かし)。`filter` / 重ねた影は使わない。
+ * ⚠ 印(`data-pkc-glow`)はバーに入っている間だけ付く ── 動きを減らす設定・指の端末では JS がそもそも付けない。
+ * ⚠ バーを重なりの基準にして(`isolation`)、光をボタンの**下**に敷く(`z-index: -1`)。
+ */
+[data-pkc-region='rail'] {
+  position: relative;
+  isolation: isolate;
+}
+[data-pkc-field='rail-glow'] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: -1;
+  width: 144px;
+  height: 144px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--fg) 10%, transparent), transparent);
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform;
+}
+[data-pkc-region='rail'][data-pkc-glow] [data-pkc-field='rail-glow'] {
+  opacity: 1;
+}
 [data-pkc-region='rail'][hidden],
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='rail'] {
   display: none;
