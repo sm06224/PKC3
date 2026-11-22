@@ -7356,7 +7356,7 @@ const CAUTION: StatusOptions = { kind: 'caution' };
  * (reducer の `navHistory` は断ったとき何も返さない ── 規則は `SELECT_ENTRY` が持つので
  * ここでは**動いたかどうかだけ**を見る)。前置きは他の断りと同じ `phaseBlockReason`。
  */
-function navigateHistory(dispatcher: Dispatcher, dir: 'back' | 'forward'): void {
+export function navigateHistory(dispatcher: Dispatcher, dir: 'back' | 'forward'): void {
   const before = dispatcher.getState();
   dispatcher.dispatch({ type: 'NAV_HISTORY', dir });
   const after = dispatcher.getState();

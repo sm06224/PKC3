@@ -20,6 +20,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import {
+  useStandalone,
   clickReal,
   collectPageErrors,
   createEntry,
@@ -113,6 +114,8 @@ test.describe('指で触る端末(#706)', () => {
   test.use({ hasTouch: true });
 
   test('🔴 読む面・情報・一覧の押し所が、全数で 24px 以上(390×844)', async ({ page }) => {
+    // ⚠ 2026-11-22(A1): 左上の ‹ › はアプリとして開いたときだけ出る ── その形で全数を見る
+    await useStandalone(page);
     const errors = collectPageErrors(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await useSplitEditor(page);
@@ -337,7 +340,7 @@ test.describe('指で触る端末(#706)', () => {
 });
 
 test.describe('対照群 ── マウスの端末', () => {
-  test('⚠ 行の高さも ‹ › の色も、これまでのまま', async ({ page }) => {
+  test('⚠ 行の高さは、これまでのまま / ‹ › はブラウザのタブでは出さず、アプリとして開いたときは標準のボタンの大きさ(A1)', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await gotoApp(page);
     await dismissAnnounce(page);
@@ -347,19 +350,6 @@ test.describe('対照群 ── マウスの端末', () => {
       .locator('[data-pkc-slot="root"]')
       .evaluate((el) => getComputedStyle(el).getPropertyValue('--row-h').trim());
     expect(rowH, 'マウスの端末まで行を高くしている').toBe('26px');
-    const nav = page.locator('[data-pkc-action="nav-back"]');
-    const [color, muted] = await nav.evaluate((el) => [
-      getComputedStyle(el).color,
-      getComputedStyle(el).getPropertyValue('--muted').trim(),
-    ]);
-    // ⚠ `--muted` は 16 進の字なので、computed の rgb と比べるために変換する
-    const hex = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(muted)!;
-    const rgb = `rgb(${parseInt(hex[1]!, 16)}, ${parseInt(hex[2]!, 16)}, ${parseInt(hex[3]!, 16)})`;
-    expect(color, 'マウスの端末で ‹ › の色が変わった').toBe(rgb);
-    // ⚠ 行の字を押しても印は動かない(マウスでは字を選ぶ操作を奪わない)
-    const boxH = await page
-      .locator('[data-pkc-action="nav-back"]')
-      .evaluate((el) => el.getBoundingClientRect().height);
-    expect(boxH, 'マウスの端末のボタンが高くなった').toBeLessThan(30);
+    await expect(page.locator('[data-pkc-action="nav-back"]'), 'ブラウザのタブで ‹ が出ている(ブラウザの戻ると二重)').toBeHidden();
   });
 });

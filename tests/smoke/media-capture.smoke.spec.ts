@@ -1123,7 +1123,8 @@ ${(e as Error).message}`,
   await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-title"]').fill('議事録');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await clickReal(page, '[data-pkc-action="nav-back"]');
+  // ⚠ 2026-11-22(A1): ブラウザのタブでは左上の ‹ › を出さない ── 同じ口のキー(Alt + ←)で戻る
+  await page.keyboard.press('Alt+ArrowLeft');
   await expect(page.locator('[data-pkc-field="detail-title"]'), '「戻る」で録音へ戻れない').toHaveText(recordingTitle);
   await clickReal(page, quoteBtn);
   await expect(statusLine, '引用したと言っていない(書込が着いていない)').toContainText('『議事録』の末尾へ 0:00 の行を引用しました', {

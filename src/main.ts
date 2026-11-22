@@ -23,6 +23,7 @@ import {
   hasUnsavedTyping,
   isAsidePane,
   phaseBlockReason,
+  canNavBack,
   SECTION_DRAFT_NOTE,
   editRevokedNote,
   unsavedTypingLidOf,
@@ -264,6 +265,8 @@ import { showBootFailure, showBootProgress } from '@adapter/ui/render/boot-scree
 import { BOOT_RESCUE_WORKING, bootRescueBackup, type BootRescueStore } from '@adapter/ui/actions/boot-rescue';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { installPhoneBack } from '@adapter/ui/actions/phone-back';
+import { installNavHistory } from '@adapter/ui/actions/nav-history';
+import { installStandalone } from '@adapter/ui/render/standalone';
 import { showNotices, clearNotices, showJobPanel, hideJobPanel } from '@adapter/ui/render/notices';
 import { createJobControl } from '@adapter/ui/actions/job-control';
 import { createImportUndo, importFailurePanel, importPanel } from '@adapter/ui/actions/import-undo';
@@ -392,6 +395,7 @@ import {
   jumpToLinkedSection,
   selectEntryOrExplain,
   type BinderServices,
+  navigateHistory,
 } from '@adapter/ui/actions/binder';
 import { ChapterWindows } from '@adapter/ui/chapter-windows';
 import { createCaptureService } from '@adapter/ui/actions/capture';
@@ -2222,6 +2226,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     showNote: () => appPhone.showNote(),
     showList: () => appPhone.showList(),
   });
+  /**
+   * 🔴 **マウスの戻る・進むボタンと PC のブラウザの「戻る」を、ノートの戻る・進むへ**(A1)。スマホの幅では何もしない
+   *   (上の `installPhoneBack` が持つ)。アプリとして開いたときだけ `‹ ›` を出す印も同じ所で付ける。
+   */
+  installNavHistory({
+    back: () => navigateHistory(dispatcher, 'back'),
+    forward: () => navigateHistory(dispatcher, 'forward'),
+    canBack: () => canNavBack(dispatcher.getState()),
+    isPhone: () => root.querySelector('[data-pkc-region="shell"]')?.getAttribute('data-pkc-layout') === 'phone',
+    onChange: (cb) => dispatcher.onState(cb),
+  });
+  installStandalone();
   // status: provenance + エラーの可視化(review B-1 ── 無言の操作拒否を作らない)
   // 🔑 常時見えるのは**版だけ**(P8)。`opfs-sahpool` のような開発者語は
   // 出さない ── 出すと user は「何かのエラーか」と読む。
