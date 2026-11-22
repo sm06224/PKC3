@@ -119,6 +119,24 @@ async function copyAndWait(page: Page, action: string): Promise<void> {
     .toBe(true);
 }
 
+/**
+ * 🔴 **「コピー ▾」の一覧から選んでコピーする**(A2)── 書式付き・HTML ソース・選択範囲は ▾ の中に入った。
+ * ⚠ 押す前にクリップボードへ目印を書き、**目印から変わる**まで待つ(押した結果が入ったことの観測点)。
+ */
+async function copyViaMenu(page: Page, label: string): Promise<void> {
+  await page.evaluate(() => navigator.clipboard.writeText('__before__'));
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-field="copy-pick"]');
+  const row = page.locator('[data-pkc-region="context-menu"] button', { hasText: label });
+  await expect(row, `▾ の一覧に「${label}」が無い`).toBeVisible({ timeout: 5_000 });
+  await row.click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()), {
+      message: `${label}: クリップボードが変わらない(黙って失敗している)`,
+      timeout: 10_000,
+    })
+    .not.toBe('__before__');
+}
+
 test('🔴 本文を Markdown でも書式付きでもコピーでき、選択範囲は原文で入る', async ({
   page,
   context,
@@ -145,8 +163,23 @@ test('🔴 本文を Markdown でも書式付きでもコピーでき、選択�
   expect(plain, '原文ではなく描画後のテキストが入っている').toContain('**強い**段落');
   expect(plain, 'frontmatter ごと原文が入っていない').toContain('align: left');
 
+  // 🔴 A2: 「コピー ▾」は隙間なしの 1 つの分割ボタン(本体と ▾ の上端・高さがそろい、横に離れていない)
+  const split = await page.evaluate(() => {
+    const r = (s: string) => document.querySelector(`[data-pkc-region="detail"] ${s}`)!.getBoundingClientRect();
+    const run = r('[data-pkc-field="copy-run"]');
+    const pick = r('[data-pkc-field="copy-pick"]');
+    return { gap: pick.left - run.right, dTop: Math.abs(pick.top - run.top), dH: Math.abs(pick.height - run.height), pickW: pick.width };
+  });
+  expect(split.gap, '本体と ▾ が離れている(別のボタンに見える)').toBeLessThanOrEqual(0);
+  expect(split.gap, '本体と ▾ が重なりすぎている').toBeGreaterThanOrEqual(-1.5);
+  expect(split.dTop, '本体と ▾ の上端がずれている').toBeLessThanOrEqual(0.5);
+  expect(split.dH, '本体と ▾ の高さが違う').toBeLessThanOrEqual(0.5);
+  expect(split.pickW, '▾ が潰れている').toBeGreaterThanOrEqual(16);
+  // 帯の上に並ぶのは本体と ▾ だけ(書式付き・HTML ソース・選択範囲は ▾ の中)
+  await expect(page.locator('[data-pkc-region="detail"] [data-pkc-action="copy-note-rich"]')).toBeHidden();
+
   // ② 書式付きでコピー = text/html が**実際に**載っている(Word へ貼れる形)
-  await copyAndWait(page, 'copy-note-rich');
+  await copyViaMenu(page, '書式付きでコピー');
   const rich = await page.evaluate(async () => {
     const items = await navigator.clipboard.read();
     const types = items.flatMap((i) => i.types);
@@ -161,9 +194,23 @@ test('🔴 本文を Markdown でも書式付きでもコピーでき、選択�
   );
   expect(rich.html, '書式が落ちている(強調が要素になっていない)').toMatch(/<(strong|b)\b/);
 
-  // ③ 選択が無い間は押せない
+  // ②' 🔴 HTML ソースをコピー(A2)= 描いた HTML が**字のまま**入る(原文の記号ではなく、掃除済みのタグ)
+  await copyViaMenu(page, 'HTML ソースをコピー');
+  const src = await page.evaluate(() => navigator.clipboard.readText());
+  expect(src, 'HTML ではなく原文が入っている').not.toContain('**強い**');
+  expect(src, '強調がタグの字になっていない').toMatch(/<(strong|b)\b/);
+  expect(src, '操作子(data-pkc-action)が掃除されていない').not.toContain('data-pkc-action');
+
+  // ③ 選択が無い間は押せない(▾ の一覧の行も、元の状態どおり押せない)
   const sel = page.locator('[data-pkc-action="copy-selection-md"]');
   await expect(sel, '選択していないのに「選択範囲をコピー」が押せる').toBeDisabled();
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-field="copy-pick"]');
+  await expect(
+    page.locator('[data-pkc-region="context-menu"] button', { hasText: '選択範囲をコピー' }),
+    '選択していないのに一覧の「選択範囲をコピー」が押せる',
+  ).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-pkc-region="context-menu"]')).toHaveCount(0);
 
   // ④ 本物の選択を作ると活性になり、押すと**原文**が入る(描画テキストではない)
   await page.evaluate(() => {
@@ -177,7 +224,7 @@ test('🔴 本文を Markdown でも書式付きでもコピーでき、選択�
   await expect(sel, 'selectionchange で活性にならない(選択しても押せない)').toBeEnabled({
     timeout: 10_000,
   });
-  await copyAndWait(page, 'copy-selection-md');
+  await copyViaMenu(page, '選択範囲をコピー');
   const picked = await page.evaluate(() => navigator.clipboard.readText());
   // ⚠ **原文**であること ── 描画テキストなら「強い段落」になる。記号が残るのが正しい
   expect(picked, '選択範囲が原文ではなく描画テキストで入っている').toContain('**強い**');

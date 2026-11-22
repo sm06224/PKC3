@@ -176,10 +176,13 @@ describe('読む面のコピー ── 配線と活性', () => {
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     // 本文が届く前 ── どれも押せない(押せない理由は title)
     expect(q<HTMLButtonElement>('[data-pkc-action="copy-note-md"]')!.disabled).toBe(true);
+    // 🔴 A2: HTML ソースも描いた本文が要る ── 届く前は押せない
+    expect(q<HTMLButtonElement>('[data-pkc-action="copy-note-html"]')!.disabled).toBe(true);
     await tick(30);
     // 本文が届いたら、全体の 2 つは押せる。選択範囲は選択が無いので押せない
     expect(q<HTMLButtonElement>('[data-pkc-action="copy-note-md"]')!.disabled).toBe(false);
     expect(q<HTMLButtonElement>('[data-pkc-action="copy-note-rich"]')!.disabled).toBe(false);
+    expect(q<HTMLButtonElement>('[data-pkc-action="copy-note-html"]')!.disabled).toBe(false);
     expect(q<HTMLButtonElement>('[data-pkc-action="copy-selection-md"]')!.disabled).toBe(true);
   });
 

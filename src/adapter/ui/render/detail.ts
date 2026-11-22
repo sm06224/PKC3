@@ -576,6 +576,7 @@ export class DetailRenderer {
     md: HTMLButtonElement;
     rich: HTMLButtonElement;
     sel: HTMLButtonElement;
+    html: HTMLButtonElement;
   } | null = null;
   private panelSlot: HTMLElement | null = null;
   /** いま出している履歴パネル(参照で比べる ── 同じなら触らない)。 */
@@ -2415,7 +2416,30 @@ export class DetailRenderer {
           const sel = iconButton('copy-selection-md', '選択範囲をコピー');
           sel.title = '本文の中を選択すると押せます(選択した範囲を Markdown の原文でコピー)';
           sel.disabled = true;
-          this.barCopy = { md, rich, sel };
+          // 🔴 HTML ソース(A2。user 裁定 2026-11-22)── 書式付きと同じ掃除をした HTML を、字(`text/plain`)としてコピー
+          const html = iconButton('copy-note-html', 'HTML ソースをコピー');
+          html.title = '見た目どおりに描いて掃除した HTML を、ソースの字のままコピーします(ブログやメールの HTML 欄に貼れます)';
+          this.barCopy = { md, rich, sel, html };
+          /**
+           * 🔴 **「コピー ▾」の分割ボタン**(A2。user 裁定 2026-11-22)── 押すと Markdown、▾ で HTML ソース / 書式付き / 選択範囲。
+           *   帯の幅を 3 つ分詰める。⚠ ▾ の一覧は隠した元(`copy-more-source`)の**同じボタン**から読む(押せない状態・説明も元のもの ──
+           *   「その他 ▾」と同じ作法。キー・操作を探すも元のボタンを押す)。
+           */
+          md.setAttribute('data-pkc-field', 'copy-run');
+          const copyMore = document.createElement('button');
+          copyMore.type = 'button';
+          copyMore.setAttribute('data-pkc-action', 'open-copy-menu');
+          copyMore.setAttribute('data-pkc-field', 'copy-pick');
+          copyMore.setAttribute('aria-haspopup', 'menu');
+          copyMore.setAttribute('aria-label', 'ほかのコピーの仕方');
+          copyMore.title = 'HTML ソース・書式付き・選択範囲のコピーを選びます';
+          copyMore.textContent = '▾';
+          const copySource = document.createElement('div');
+          copySource.setAttribute('data-pkc-field', 'copy-more-source');
+          // 🔴 キー・操作を探すから隠した元を押したときの合図は ▾ に出す(`flashCopied` が読む)
+          copySource.setAttribute('data-pkc-menu-from', 'open-copy-menu');
+          copySource.hidden = true;
+          copySource.append(html, rich, sel);
           // 🔴 ノートの中だけを探す小さな欄(#1163 依頼 163)。⚠ `Ctrl+F` と同じ口(`find-in-note`)
           const find = iconButton('find-in-note', 'ノート内を探す');
           find.title = hintTitle('このノートの本文の中だけを探す小さな欄を開きます', 'find-in-note');
@@ -2428,7 +2452,14 @@ export class DetailRenderer {
            */
           const cols = iconButton('cycle-read-columns', '段組みを切り替える');
           cols.title = hintTitle('本文の段組みを 1 → 2 → 3 → 4 段の順に切り替えます', 'cycle-read-columns');
-          bar.append(this.barButton, md, rich, sel, find, cols);
+          /**
+           * 🔴 本体と ▾ は 1 つの器(`copy-split`)に包む ── 帯は折り返すので、別々の項目だと 2 つの間で折れて ▾ が次の行の頭へ割れる。
+           *   器の中に隠した元も置く(`flashCopied` が器の中から ▾ を探す)。
+           */
+          const split = document.createElement('span');
+          split.setAttribute('data-pkc-field', 'copy-split');
+          split.append(md, copyMore, copySource);
+          bar.append(this.barButton, split, find, cols);
         } else {
           // 保存失敗からの復帰導線: baseline ≠ persisted =「disk に未達の commit が
           // ある」証拠(P3-5 の分離の回収点)。黙って死なせず再送を提示する
@@ -2459,6 +2490,7 @@ export class DetailRenderer {
     if (this.barShape === 'edit' && this.barCopy) {
       this.barCopy.md.disabled = !bodyReady;
       this.barCopy.rich.disabled = !bodyReady;
+      this.barCopy.html.disabled = !bodyReady;
       this.syncCopySelection();
     }
   }

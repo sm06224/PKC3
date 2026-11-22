@@ -82,6 +82,7 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'hide-history': NOTE,
   'copy-note-md': NOTE,
   'copy-note-rich': NOTE,
+  'copy-note-html': NOTE,
   'copy-selection-md': NOTE,
   'export-note-markdown': NOTE,
   'export-note-pdf': NOTE,

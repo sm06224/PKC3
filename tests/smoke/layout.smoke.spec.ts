@@ -526,6 +526,9 @@ test('🔴 左の列のボタンは、どの幅でも名前が器からはみ出
         if (btn.getAttribute('data-pkc-field') === 'bar-more') continue;
         // ⚠ 一覧の下の閉じたゴミ箱の入口は、縦のバーにゴミ箱が在る幅では出さない(2026-11-22。スマホの幅でだけ出る)── 幅で数が変わるので数えない
         if (btn.closest('[data-pkc-region="filer-trash"]') !== null && btn.getAttribute('data-pkc-action') === 'show-trash') continue;
+        // ⚠ 検索の帯の「‹ ›」(戻る・進む)は、PC の幅のブラウザのタブでだけ隠す(A1。マウスとブラウザの戻る・進むがあるため。
+        //   タブレット・スマホの幅とアプリとして開いたときは出す)── 幅で数が変わるので数えない
+        if (/^nav-(back|forward)$/.test(btn.getAttribute('data-pkc-action') ?? '')) continue;
         // ⚠ 畳まれている物は測らない(器が 0 なので必ず「はみ出し」に見える)
         const box = btn.getBoundingClientRect();
         if (box.width === 0 || box.height === 0) {
