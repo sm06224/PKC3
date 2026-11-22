@@ -37,6 +37,7 @@ import {
   type SyncFolderMinutes,
 } from '@features/sync/sync-folder';
 import type { SyncDirLike, SyncLock } from './folder-sync';
+import { folderBox, type RemoteBox } from './sync-box';
 import type { ApplyOutcome, BuiltDiff, DiffTarget } from '@adapter/ui/actions/sync-diff';
 
 /** 許可を確かめ・頼める handle。 */
@@ -495,8 +496,9 @@ export class SyncFolder {
   }
 
   private async round(manual: boolean, gen: number): Promise<void> {
-    const dir = this.dir;
-    if (dir === null) return;
+    if (this.dir === null) return;
+    // 🔴 保管先への読み書きは `RemoteBox` の口だけを通す(#2000 段 4a-1)── 許可・handle は上(`permitted`)が持つ
+    const box: RemoteBox = folderBox(this.dir);
     this.phase = 'running';
     this.changed();
     let imported = 0;
@@ -516,20 +518,16 @@ export class SyncFolder {
       //   (残すと、他の端末から「もう来ない別の端末」に見え続ける)。⚠ 複製の確認で作り直したときは、前の名前は複製元の物なので `own` を先に空にしてある
       const ownName = this.own?.name;
       if (ownName !== undefined && deviceOfFileName(ownName) !== null && deviceOfFileName(ownName) !== self) {
-        await dir.removeEntry(ownName).catch(() => undefined);
+        await box.remove(ownName).catch(() => undefined);
         this.record = emptyFolderRecord();
         this.own = null;
       }
       // ── フォルダを見る(同期フォルダのファイルだけ。他のファイルには触らない)
-      const files: FolderFile[] = [];
-      const handles = new Map<string, { getFile(): Promise<File> }>();
-      for await (const e of dir.values()) {
-        if (e.kind !== 'file' || deviceOfFileName(e.name) === null) continue;
-        const fh = await dir.getFileHandle(e.name);
-        const f = await fh.getFile();
-        files.push({ name: e.name, size: f.size, mtime: f.lastModified });
-        handles.set(e.name, fh);
-      }
+      const files: FolderFile[] = (await box.list((name) => deviceOfFileName(name) !== null)).map((e) => ({
+        name: e.name,
+        size: e.size,
+        mtime: e.mtime,
+      }));
       if (gen !== this.generation) return;
       const plan = planFolderRound(self, files, this.record, manual);
       // ── 自分の名前のファイルを、自分以外が書いた(端末のデータの複製)── 取り込みの核が見分けて、手で同期したときに確認する
@@ -543,7 +541,7 @@ export class SyncFolder {
         if (gen !== this.generation) return;
         const peer = deviceOfFileName(f.name) as string;
         try {
-          const file = await handles.get(f.name)!.getFile();
+          const file = await box.read(f.name);
           const { outcome, manifest } = await this.deps.apply(file, f.name, !manual);
           if (outcome.pending !== undefined || outcome.declined === true) {
             // 確認待ち / 確認に「やめる」と答えた ── 取り込んでいない。控え(`seen`)も頼み(`want`)も動かさない(次の回も確認待ちのまま)
@@ -604,17 +602,8 @@ export class SyncFolder {
       if (!built.skipped) {
         if (gen !== this.generation) return;
         const name = folderFileName(self2);
-        const fh = await dir.getFileHandle(name, { create: true });
-        const w = await fh.createWritable();
-        try {
-          await w.write(built.blob);
-          await w.close();
-        } catch (e) {
-          await w.abort?.().catch(() => undefined);
-          throw e;
-        }
-        const after = await fh.getFile();
-        this.own = { size: after.size, mtime: after.lastModified, name };
+        const after = await box.write(name, built.blob, this.own === null ? null : { name, size: this.own.size, mtime: this.own.mtime });
+        this.own = { size: after.size, mtime: after.mtime, name };
         this.record.lastKey = built.key;
         wrote = true;
       }
