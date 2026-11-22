@@ -11,7 +11,8 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
-import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { bindActions, runGlobalCommand } from '../../src/adapter/ui/actions/binder';
+import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import * as clipboard from '../../src/adapter/platform/clipboard';
 import { vi } from 'vitest';
 import { stubRevisionOps } from '../helpers/revision-stub';
@@ -317,7 +318,39 @@ describe('editor flow (P3-5)', () => {
     await tick(0);
     expect(plain).toHaveBeenCalledTimes(1);
     expect(plain.mock.calls[0]![0]).toMatch(/<strong>太字<\/strong>/);
+    // 🔴 合図は見える ▾ に出る(隠れた元のボタンに出しても user には見えない)
+    expect(pick.getAttribute('data-pkc-flash'), '一覧から実行した合図が ▾ に出ない').toBe('true');
+    expect(source.querySelector('[data-pkc-flash]'), '合図が隠れた元に出ている').toBeNull();
     plain.mockRestore();
+  });
+
+  it('🔴 「操作を探す」から HTML ソース / 書式付きをコピーできて、合図は ▾ に出る(A2。隠した元のボタンを押す)', async () => {
+    const plain = vi.spyOn(clipboard, 'copyPlainText').mockResolvedValue(true);
+    const rich = vi.spyOn(clipboard, 'copyMarkdownAndHtml').mockResolvedValue(true);
+    const { d, q, root } = setup({ a: '**太字**' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    const noop = (): void => {};
+    const keymap = new KeymapStore();
+    expect(runGlobalCommand('copy-note-html', root, d, keymap, noop, noop, true), '操作を探すから押せない').toBe(true);
+    expect(runGlobalCommand('copy-note-html', root, d, keymap, noop, noop, false)).toBe(true);
+    await tick(0);
+    expect(plain).toHaveBeenCalledTimes(1);
+    expect(plain.mock.calls[0]![0]).toMatch(/<strong>太字<\/strong>/);
+    const pick = q('[data-pkc-field="copy-pick"]')!;
+    expect(pick.getAttribute('data-pkc-flash'), '操作を探すから実行した合図が見える ▾ に出ない').toBe('true');
+    expect(q('[data-pkc-field="copy-more-source"] [data-pkc-flash]'), '合図が隠れた元に出ている').toBeNull();
+    pick.removeAttribute('data-pkc-flash');
+    runGlobalCommand('copy-note-rich', root, d, keymap, noop, noop, false);
+    await tick(0);
+    expect(rich).toHaveBeenCalledTimes(1);
+    expect(pick.getAttribute('data-pkc-flash')).toBe('true');
+    // 本体(見えている)から押したときは本体が光る(▾ に移さない)
+    q<HTMLButtonElement>('[data-pkc-field="copy-run"]')!.click();
+    await tick(0);
+    expect(q('[data-pkc-field="copy-run"]')!.getAttribute('data-pkc-flash')).toBe('true');
+    plain.mockRestore();
+    rich.mockRestore();
   });
 
   it('copy-md-block は実 delegation 経路(rendered ⧉ ボタンのクリック)で動く', async () => {
