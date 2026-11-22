@@ -20,7 +20,11 @@ function rig(opts: { canBack?: boolean; phone?: boolean } = {}) {
   const pushes: unknown[][] = [];
   let backs = 0;
   const hist = {
-    pushState: (...a: unknown[]) => void pushes.push(a),
+    length: 1,
+    pushState: (...a: unknown[]) => {
+      pushes.push(a);
+      hist.length += 1;
+    },
     back: () => {
       backs += 1;
     },
@@ -54,6 +58,11 @@ function rig(opts: { canBack?: boolean; phone?: boolean } = {}) {
     pushes,
     backs: () => backs,
     pop: () => void win.dispatchEvent(new Event('popstate')),
+    /** 住所の `#…` だけを変える移動(履歴が 1 つ伸びて popstate が来る)。 */
+    hashNav: () => {
+      hist.length += 1;
+      win.dispatchEvent(new Event('popstate'));
+    },
     mouse,
     tick: (ms: number) => void (t += ms),
     setCanBack: (v: boolean) => {
@@ -171,6 +180,17 @@ describe('マウスの戻る・進むボタン / PC のブラウザの戻る(A1)
     q.setPhoneQuiet(false);
     q.resize();
     expect(q.pushes.length, '幅がパソコンへ戻ったのに番兵を置かない').toBe(1);
+  });
+
+  it('🔴 住所の #… だけを変える移動の popstate(直リンク・見出しへのリンク)では戻らない / 番兵を置き直す', () => {
+    const r = rig();
+    expect(r.pushes.length).toBe(1);
+    r.hashNav();
+    expect(r.calls, '直リンクを開いただけで 1 つ戻った').toEqual([]);
+    expect(r.pushes.length, '番兵を上に置き直していない').toBe(2);
+    // その後の本物の「戻る」は効く
+    r.pop();
+    expect(r.calls).toEqual(['back']);
   });
 
   it('外すと何も聞かない', () => {

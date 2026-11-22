@@ -34,7 +34,7 @@ export interface NavHistoryDeps {
   /** 状態が変わったら呼ぶ口(番兵を置く / 畳む判断をやり直す)。外す関数を返す。 */
   onChange(cb: () => void): () => void;
   readonly win?: Pick<Window, 'addEventListener' | 'removeEventListener' | 'setTimeout'>;
-  readonly hist?: Pick<History, 'pushState' | 'back'>;
+  readonly hist?: Pick<History, 'pushState' | 'back' | 'length'>;
   readonly now?: () => number;
 }
 
@@ -49,10 +49,13 @@ export function installNavHistory(d: NavHistoryDeps): () => void {
   let ignoreNext = false;
   /** マウスの戻るボタンで戻った時刻(この時刻から `MOUSE_NAV_SUPPRESS_MS` の間の番兵の popstate は戻らない)。 */
   let mouseBackAt = Number.NEGATIVE_INFINITY;
+  /** 番兵を置いた直後の履歴の長さ(番兵の消費 = 長さはそのまま / 新しい移動 = 長くなる、を見分ける)。 */
+  let armedLength = 0;
 
   const arm = (): void => {
     hist.pushState({ pkcNavBack: 1 }, '');
     armed = true;
+    armedLength = hist.length;
   };
   const disarm = (): void => {
     armed = false;
@@ -101,6 +104,16 @@ export function installNavHistory(d: NavHistoryDeps): () => void {
       return;
     }
     if (!armed) return;
+    /**
+     * 🔴 **新しい移動の popstate は「戻る」ではない**(smoke の直リンクで踏んだ)── Chromium は住所の `#…` だけを変える移動
+     *   (直リンクを開く・見出しへのリンク)でも popstate を撃つ。そのとき履歴は 1 つ**長く**なり、番兵は上に積まれた項目の下に残る。
+     *   戻ると読むと、開いた直リンクのノートから 1 つ戻ってしまう。⚠ 番兵は上でなくなったので、印を下ろして置き直す。
+     */
+    if (hist.length > armedLength) {
+      armed = false;
+      sync();
+      return;
+    }
     armed = false; // 番兵は消費された
     // ⚠ スマホの幅へ切り替わった後は phone-back の受け持ち ── こちらは戻らない(2 つが同じ popstate で動かない。レビュー ⚠3)
     if (d.isPhone()) return;
