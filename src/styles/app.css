@@ -14948,6 +14948,7 @@ h6:hover > .pkc-heading-anchor,
   overflow: visible;
   width: max-content;
   height: auto;
+  max-height: none;
 }
 [data-pkc-region='tooltip'][hidden] {
   display: none;
