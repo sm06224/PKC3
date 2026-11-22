@@ -590,6 +590,32 @@ describe('塊の畳み方と焼き直しの世代(P8 段⑰)', () => {
     b.remove();
   });
 
+  it('🔴 別の条件で焼き直している最中は、先の焼きが終わっても aria-busy を外さない(#1467)', async () => {
+    // ⚠ 先の焼き(古い配色)の `finally` が無条件に外すと、新しい焼きの最中に「書き換わり中」の印が消える
+    //    ── smoke はこの印で焼き始めを数えるので、読み上げと計器の両方が嘘になる
+    const b = block('graph TD\n A-->B');
+    document.body.append(b);
+    const host = b.querySelector('[data-pkc-mermaid-src]')!;
+    const held: Array<(v: { png: Blob; cssWidth: number }) => void> = [];
+    vi.mocked(renderToPng)
+      .mockImplementationOnce(() => new Promise((res) => held.push(res)))
+      .mockImplementationOnce(() => new Promise((res) => held.push(res)));
+    const scope = hydrateMermaid(b);
+    fire!([observed[observed.length - 1]!]);
+    await settle();
+    document.documentElement.setAttribute('data-pkc-theme', 'dark');
+    await settle();
+    expect(held, '配色を変えても焼き直しが飛んでいない(この検査は何も見ていない)').toHaveLength(2);
+    held[0]!({ png: new Blob(['png']), cssWidth: 320 }); // 先の焼き(古い配色)だけ終わる
+    await settle();
+    expect(host.getAttribute('aria-busy'), '新しい焼きの最中に印が外れた').toBe('true');
+    held[1]!({ png: new Blob(['png']), cssWidth: 320 });
+    await settle();
+    expect(host.hasAttribute('aria-busy'), '最後の焼きが終わっても印が残っている').toBe(false);
+    scope.dispose();
+    b.remove();
+  });
+
   it('⚠ DOM から外れた器は最初から焼かない(先読み列が差し替え済みを焼き続けない)', async () => {
     const b = block('graph TD\n A-->B');
     // ⚠ **append しない**(= 最初から detached)

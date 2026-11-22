@@ -918,14 +918,20 @@ test('🔴 grafu を押して開く別窓は、画面より大きく焼き直さ
 test('🔴 打っている間は画面の外の図を先読みせず、止まると再開する (#1467)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1280, height: 800 });
+  // 🔑 打鍵の記録は**製品より先に**付ける(init script はページの script より前に走る)。同じ打鍵なら
+  //    この記録の時刻 ≤ 製品が控えた時刻になるので、製品と**同じ 1 秒ちょうど**で判定できる(余白が要らない)
+  await page.addInitScript(() => {
+    const w = window as unknown as { __pkcKeys: number[] | null };
+    w.__pkcKeys = null; // null の間(打つ前)は控えない
+    document.addEventListener('input', () => w.__pkcKeys?.push(performance.now()), true);
+  });
   await gotoApp(page);
   await createEntry(page, 'text');
-  // 🔑 焼き始めの記録と打鍵の記録(どちらもページの時計)。プレビューは描き直されるので document ごと見る
+  // 🔑 焼き始めの記録(ページの時計)。プレビューは描き直されるので document ごと見る
   await page.evaluate(() => {
     type Start = { t: number; off: boolean };
-    const w = window as unknown as { __pkcBakeStarts: Start[]; __pkcKeys: number[] | null };
+    const w = window as unknown as { __pkcBakeStarts: Start[] };
     w.__pkcBakeStarts = [];
-    w.__pkcKeys = null; // null の間(打つ前)は控えない
     new MutationObserver((records) => {
       const t = performance.now();
       for (const r of records) {
@@ -938,7 +944,6 @@ test('🔴 打っている間は画面の外の図を先読みせず、止まる
         w.__pkcBakeStarts.push({ t, off: b.bottom < p.top || b.top > p.bottom });
       }
     }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['aria-busy'] });
-    document.addEventListener('input', () => w.__pkcKeys?.push(performance.now()), true);
   });
   const parts: string[] = [];
   for (let i = 0; i < 40; i++) {
@@ -974,9 +979,8 @@ test('🔴 打っている間は画面の外の図を先読みせず、止まる
   // ① 空振り防止 ── 打鍵を全部拾えている / 焼き始めの印を拾えている(見えている図は必ず焼く)
   expect(log.keys.length, '打鍵の input を拾えていない(この検査は何も見ていない)').toBe(20);
   expect(log.starts.length, '焼き始めの印(aria-busy)を 1 つも拾えていない').toBeGreaterThan(0);
-  // ② 🔴 打っている間(直前の打鍵から 1 秒以内)に、画面の外の図を焼き始めていない
-  // ⚠ 10ms の余白 ── 製品とこの記録は別の listener なので、同じ打鍵でも時刻がわずかにずれる
-  const typingAt = (t: number): boolean => log.keys.some((k) => k <= t && t - k < quietMs - 10);
+  // ② 🔴 打っている間(直前の打鍵から 1 秒未満)に、画面の外の図を焼き始めていない ── 製品の判定と同じ境界
+  const typingAt = (t: number): boolean => log.keys.some((k) => k <= t && t - k < quietMs);
   const violations = log.starts.filter((s) => s.off && typingAt(s.t));
   expect(
     violations.length,
@@ -1003,7 +1007,7 @@ test('🔴 打っている間は画面の外の図を先読みせず、止まる
         const starts = await page.evaluate(
           () => (window as unknown as { __pkcBakeStarts: { t: number; off: boolean }[] }).__pkcBakeStarts,
         );
-        return starts.filter((s) => s.off && s.t >= lastKey + quietMs - 10).length;
+        return starts.filter((s) => s.off && s.t >= lastKey + quietMs).length;
       },
       { timeout: 30000, message: '打つのをやめても先読みが再開しない(画面の外の図を焼き始めない)' },
     )
