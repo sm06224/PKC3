@@ -279,6 +279,8 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
   await rows.nth(1).click({ modifiers: ['ControlOrMeta'] });
   await rows.nth(2).click({ modifiers: ['ControlOrMeta'] });
   await expect(bulk).toContainText('3 件');
+  // ⚠ #1982 ③-c からタグの欄は「タグ ▾」で行を入れ替えて出す
+  await clickReal(page, '[data-pkc-field="bulk-tag-toggle"]');
   await page.locator('[data-pkc-field="bulk-tag"]').fill('急ぎ');
   await clickReal(page, '[data-pkc-action="bulk-tag-add"]');
   await expect(
@@ -319,10 +321,29 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
    */
   await rows.nth(0).click();
   // 🔴 1 件だけ選んでいるときも、タグの欄は出る。ゴミ箱へ・移す…は 2 件以上のとき(#1087 流れ 29 Q5)
-  await expect(bulk.locator('[data-pkc-field="bulk-tag"]'), '1 件でタグの欄が見えない').toBeVisible();
+  // ⚠ #1982 ③-c から、タグの欄は「タグ ▾」で出す(行は 1 本)── 1 件でも「タグ ▾」が見えること
+  await expect(bulk.locator('[data-pkc-field="bulk-tag-toggle"]'), '1 件で「タグ ▾」が見えない').toBeVisible();
   await expect(bulk.locator('[data-pkc-action="delete-selected"]')).toHaveCount(0);
   await expect(bulk.locator('[data-pkc-field="bulk-move"]')).toHaveCount(0);
+  /**
+   * 🔴 **選択操作は 1 行**(#1982 ③-c)── 1440px の既定の左のペインで、見えている物が全部同じ段に並ぶ(1 件 / 2 件)。
+   * ⚠ 空振り防止: 見えている物が 3 つ以上あること(行が隠れて 0 件で「1 段」を言わない)。
+   */
+  const rowLines = async (): Promise<{ n: number; lines: number }> =>
+    page.locator('[data-pkc-field="filer-action-row"]').evaluate((row) => {
+      const shown = [...row.querySelectorAll<HTMLElement>('button, [data-pkc-field="filer-bulk-count"]')].filter((e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 2 && r.height > 2;
+      });
+      return { n: shown.length, lines: new Set(shown.map((e) => Math.round(e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2))).size };
+    });
+  const one = await rowLines();
+  expect(one.n, `1 件の行に見えている物が少ない: ${JSON.stringify(one)}`).toBeGreaterThanOrEqual(3);
+  expect(one.lines, `1 件の選択操作が ${one.lines} 段になっている`).toBe(1);
   await rows.nth(1).click({ modifiers: ['ControlOrMeta'] });
+  const two = await rowLines();
+  expect(two.n, `2 件の行に見えている物が少ない: ${JSON.stringify(two)}`).toBeGreaterThanOrEqual(5);
+  expect(two.lines, `2 件の選択操作が ${two.lines} 段になっている`).toBe(1);
   await clickReal(page, '[data-pkc-action="delete-selected"]');
   await expect(page.locator('[data-pkc-region="app-dialog"][open]'), '確認が出ている').toHaveCount(0);
   await expect(rows, 'まとめて消えていない').toHaveCount(1);
@@ -405,6 +426,8 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
   await rows.nth(2).click({ modifiers: ['ControlOrMeta'] });
   await rows.nth(3).click({ modifiers: ['ControlOrMeta'] });
   await expect(bulk).toContainText('3 件');
+  // ⚠ #1982 ③-c からタグの欄は「タグ ▾」で行を入れ替えて出す
+  await clickReal(page, '[data-pkc-field="bulk-tag-toggle"]');
   await page.locator('[data-pkc-field="bulk-tag"]').fill('確認済');
   await clickReal(page, '[data-pkc-action="bulk-tag-add"]');
   await expect(statusG2, 'タグを付けた知らせが出ない(2 件に付き、1 件は既に付いていた)').toContainText('2 件に付けました / 1 件は既に付いていました');

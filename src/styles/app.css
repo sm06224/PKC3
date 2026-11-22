@@ -9221,18 +9221,58 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  * 置く ── 「どのフォルダか」と「その中の何番目か」は同じ話である。
  * ⚠ 端では `disabled`(押せないことが見た目に出る ── 見た目は汎用の
  *   `button:disabled` が持つ。#715 で名指しの規則を畳んだ)。 */
-[data-pkc-field='order-nudge'] {
+/**
+ * 🔴 **選択操作の行**(#1982 ③-c。`filer.ts` の `renderMoveBar`)── 0 件 / 1 件 / 2 件以上で中身が替わる 1 行。
+ * ⚠ 器(数と操作の塊 `filer-bulk` / 上へ・下へ `order-nudge`)は `display: contents` ── 中身が行の 1 本の並びに乗る。
+ * ⚠ 折り返しは**最後の逃げ道**として残す(押せない物を作らない)── 既定の幅では 1 行に収まる大きさに詰めた
+ *   (図案だけのボタンは 24px、`tests/smoke/layout.smoke.spec.ts` が 1 行を見る)。
+ */
+[data-pkc-field='filer-action-row'] {
   display: flex;
-  gap: var(--s2);
-  margin-top: var(--s1);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1);
+  min-width: 0;
 }
-[data-pkc-field='filer-move-empty'],
-[data-pkc-field='filer-create-target'] {
-  color: var(--muted);
-  margin: 0;
+[data-pkc-field='filer-action-row'][hidden] {
+  display: none;
 }
-[data-pkc-field='filer-create-target'] {
-  margin-top: var(--s1);
+[data-pkc-field='filer-action-row'] [data-pkc-field='filer-bulk'],
+[data-pkc-field='order-nudge'],
+[data-pkc-field='filer-bulk'][data-pkc-tag-mode] [data-pkc-field='bulk-tag-group'] {
+  display: contents;
+}
+[data-pkc-field='filer-action-row'] [data-pkc-icon-only] {
+  width: 24px;
+  min-width: 24px;
+  padding: 0;
+  justify-content: center;
+}
+/* 名前は見えない字(読み上げには残る ── `[data-pkc-bar-tile]` と同じ作法) */
+[data-pkc-field='filer-action-row'] [data-pkc-icon-only] [data-pkc-field='label'],
+[data-pkc-field='filer-action-row'] [data-pkc-hint-only] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* 「タグ ▾」を開くまで欄は出さない。開いたら行の中身を入れ替える(数 + 欄 + 付ける + 外す + 戻る) */
+[data-pkc-field='bulk-tag-group'] {
+  display: none;
+}
+[data-pkc-field='filer-bulk'][data-pkc-tag-mode] > :not([data-pkc-field='filer-bulk-count']):not([data-pkc-field='bulk-tag-group']) {
+  display: none;
+}
+[data-pkc-field='bulk-tag-group'] [data-pkc-field='bulk-tag'] {
+  flex: 1 1 5em;
+  min-width: 0;
+}
+/* 🔴 スマートフォルダの「ここには作れません」は隠さず短く出す(user 指示 2026-11-22)── 注意の色 */
+[data-pkc-field='filer-create-target']:not([data-pkc-hint-only]) {
+  color: var(--warn);
+  font-size: var(--fs-xs);
 }
 [data-pkc-region='filer-trash'] {
   margin-top: var(--s5);
@@ -10500,13 +10540,7 @@ h3[data-pkc-section] {
 [data-pkc-region='filer-table'] tbody tr[data-pkc-drop-edge='after'] td {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
-[data-pkc-field='filer-bulk'] {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s2);
-  margin-bottom: var(--s2);
-}
+/* ⚠ 器としての見え方は上の「選択操作の行」が持つ(`display: contents`)── ここは書かない */
 [data-pkc-field='filer-bulk-count'] {
   color: var(--muted);
   font-size: var(--fs-xs);

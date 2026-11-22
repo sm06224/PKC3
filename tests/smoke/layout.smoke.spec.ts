@@ -2722,7 +2722,8 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
   expect(await lidsOf()).toEqual([noteLid]);
 
   // ── いま見ているフォルダの中に作る
-  await expect(page.locator('[data-pkc-field="filer-create-target"]')).toBeVisible();
+  // ⚠ #1982 ③-c から、ふつうのフォルダの作る先はパンくずの現在地の title で言う(行の中は見えない字)
+  await expect(page.locator(`[data-pkc-region="filer-breadcrumb"] [data-pkc-action="enter-folder"][data-pkc-entry="${folderLid}"]`)).toHaveAttribute('title', /に入ります/);
   /**
    * 🔴 **窓を「時間」ではなく「因果」で切る**(2026-08-26。CI で赤くなって判明)。
    *

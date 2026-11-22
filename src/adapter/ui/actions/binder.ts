@@ -404,6 +404,7 @@ import {
 } from '@features/relation/dual-pane';
 import { appPanes, applyPaneVisibility, refoldPeeked } from '@adapter/ui/render/pane-visibility';
 import { inRail } from '@adapter/ui/render/rail';
+import { BULK_TAG_MODE_ATTR } from '@adapter/ui/render/filer';
 import { requestAppendFocus, requestBodyFocus, takeAppendFocus } from '@adapter/ui/render/focus-request';
 import { isTouchOnly } from '@adapter/ui/render/touch-device';
 import { currentTrashOffer, LINKED_FROM_MAYBE, LINKED_FROM_SOME, offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
@@ -20163,6 +20164,21 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'SHOW_TRASH' });
   },
   'hide-trash': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_TRASH' }),
+  /**
+   * 🔴 **選択操作の行の「タグ ▾」/「戻る」**(#1982 ③-c)── 行の中身をタグの欄へ入れ替える / 戻す。
+   * ⚠ state は動かさない(見え方だけ)── 行は組み直しで印を `filer.ts` が運ぶ(`captureBarInputs`)。
+   *   開いたら欄へ、戻したら「タグ ▾」へ焦点を置く(押した手のまま打てる / 焦点を失わない)。
+   */
+  'toggle-bulk-tag': (_dispatcher, target) => {
+    const bulk = target.closest<HTMLElement>('[data-pkc-field="filer-bulk"]');
+    if (bulk === null) return;
+    const on = !bulk.hasAttribute(BULK_TAG_MODE_ATTR);
+    bulk.toggleAttribute(BULK_TAG_MODE_ATTR, on);
+    const toggle = bulk.querySelector<HTMLElement>('[data-pkc-field="bulk-tag-toggle"]');
+    toggle?.setAttribute('aria-expanded', on ? 'true' : 'false');
+    if (on) bulk.querySelector<HTMLInputElement>('input[data-pkc-field="bulk-tag"]')?.focus();
+    else toggle?.focus();
+  },
   /**
    * 🔴 **開いている面を閉じて本文へ戻る**(user 目線レビュー U-3)。
    *
