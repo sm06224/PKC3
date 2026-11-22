@@ -477,7 +477,7 @@ export function syncLogOrderAttr(host: HTMLElement): void {
 
 /** 🔴 入れ子の深さの印(#2018 8。値 `1`〜`4`)── 見た目の 3 段の 3 段目(`###`〜 と、その中身)。 */
 export const LOG_DEPTH_ATTR = 'data-pkc-log-depth';
-/** 🔴 時刻の見出しの印(#2018 8)── 字を控えめにし、桁を揃える(`app.css`)。 */
+/** 🔴 親の記録の時刻の見出し(`##`)の印(#2018 8)── 字を控えめにし、桁を揃える(`app.css`)。 */
 export const LOG_TIME_ATTR = 'data-pkc-log-time';
 
 /**
@@ -495,8 +495,8 @@ export function applyLogDepth(host: HTMLElement, blocks: readonly Element[], lev
       if (want === null) b.removeAttribute(LOG_DEPTH_ATTR);
       else b.setAttribute(LOG_DEPTH_ATTR, want);
     }
-    // 時刻の見出し(段 2 以上で、字の頭が日時)── 親の記録と入れ子の追いログの両方
-    const time = log && (levels[i] ?? 0) >= 2 && logDayOfHeading(b.textContent ?? '') !== null;
+    // 親の記録の時刻の見出し(段 2 で、字の頭が日時)── 入れ子の見出しの見え方は深さの印が持つ(時刻でない `###` も同じ見え方)
+    const time = log && (levels[i] ?? 0) === 2 && logDayOfHeading(b.textContent ?? '') !== null;
     if (time !== b.hasAttribute(LOG_TIME_ATTR)) b.toggleAttribute(LOG_TIME_ATTR, time);
   });
 }

@@ -12555,7 +12555,9 @@ h3[data-pkc-section] {
   /* ① 日の行(と月の行)── 段差の帯。字は本文の大きさ・本文の色、畳みは ▾ / ▸ の形で示す */
   [data-pkc-log-days] > [data-pkc-log-day],
   [data-pkc-log-days] > [data-pkc-log-month] {
-    margin: 1.4em 0 0.5em;
+    /* ⚠ 下の余白は 0 ── 間は次の見出しの上の余白で取る(新しい順の flex は余白を重ねないので、下に持つと
+     *    古い順と新しい順で間が変わる。0 なら両方とも次の見出しの上の余白だけになる) */
+    margin: 1.4em 0 0;
     padding: 0.3em 0.6em;
     color: var(--fg);
     font-weight: 600;
@@ -12586,42 +12588,55 @@ h3[data-pkc-section] {
   }
   /* ③ 入れ子の追いログ(`###`〜 と、その中身)── 一段小さい字 + 字下げ + 左端の細い縦線(つながり)。
    *    ⚠ 字下げは `padding` で付ける ── 塊の左の余白は読み幅を中央に置く規則(`--prose-lead`)が持つので触らない。
-   *    ⚠ 縦線は枠ではなく背景の 2px の帯(字下げした位置に引く。枠を足さない)。塊の間で切れないよう、上下の余白は
-   *    padding に置き換える。深さごとに 1rem ずつ右へ */
-  [data-pkc-log-days] > [data-pkc-log-depth] {
-    margin-block: 0;
-    padding-block: 0.3em;
+   *    🔴 **手を入れるのは段落・見出し・箇条書きだけ**(着地前レビュー 🔴)── コード・引用・表・折りたたみは自分の
+   *    内側の余白を持つので、一律に `padding` を上書きすると字が枠に張り付き、箇条書きの印が線に重なる。
+   *    箇条書きは自分の印の置き場(1.4em)に字下げを**足す**。
+   *    ⚠ 縦線は枠ではなく背景の 2px の帯(字下げした位置に引く。枠を足さない)。塊の間で切れないよう、段落と見出しの
+   *    上下の余白は padding に置き換える。深さごとに 1rem ずつ右へ(`--pkc-log-indent`) */
+  [data-pkc-log-days] > [data-pkc-log-depth='1'] {
+    --pkc-log-indent: 1.1rem;
+    --pkc-log-line: 0.35rem;
+  }
+  [data-pkc-log-days] > [data-pkc-log-depth='2'] {
+    --pkc-log-indent: 2.1rem;
+    --pkc-log-line: 1.35rem;
+  }
+  [data-pkc-log-days] > [data-pkc-log-depth='3'] {
+    --pkc-log-indent: 3.1rem;
+    --pkc-log-line: 2.35rem;
+  }
+  [data-pkc-log-days] > [data-pkc-log-depth='4'] {
+    --pkc-log-indent: 4.1rem;
+    --pkc-log-line: 3.35rem;
+  }
+  [data-pkc-log-days] > :is(p, h3, h4, h5, h6, ul, ol)[data-pkc-log-depth] {
     font-size: 0.95em;
     background-image: linear-gradient(var(--muted), var(--muted));
     background-repeat: no-repeat;
     background-size: 2px 100%;
+    background-position: var(--pkc-log-line, 0.35rem) 0;
     /* ⚠ 位置は枠の外側から測る ── 見出しは左に帯(枠 3px)を持つので、内側から測ると見出しだけ線が 3px 右へずれて切れて見える */
     background-origin: border-box;
   }
-  [data-pkc-log-days] > [data-pkc-log-depth='1'] {
-    padding-inline-start: 1.1rem;
-    background-position: 0.35rem 0;
+  [data-pkc-log-days] > :is(p, h3, h4, h5, h6)[data-pkc-log-depth] {
+    margin-block: 0;
+    padding-block: 0.3em;
+    padding-inline-start: var(--pkc-log-indent, 1.1rem);
   }
-  [data-pkc-log-days] > [data-pkc-log-depth='2'] {
-    padding-inline-start: 2.1rem;
-    background-position: 1.35rem 0;
-  }
-  [data-pkc-log-days] > [data-pkc-log-depth='3'] {
-    padding-inline-start: 3.1rem;
-    background-position: 2.35rem 0;
-  }
-  [data-pkc-log-days] > [data-pkc-log-depth='4'] {
-    padding-inline-start: 4.1rem;
-    background-position: 3.35rem 0;
+  /* 箇条書きは印の置き場(`.pkc-md-rendered ul` の 1.4em)に字下げを足す。上下の余白はそのまま */
+  [data-pkc-log-days] > :is(ul, ol)[data-pkc-log-depth] {
+    padding-inline-start: calc(var(--pkc-log-indent, 1.1rem) + 1.4em);
   }
   /* 入れ子の見出しは中身よりもう一段小さく薄く。見出しの帯(左端)は消し、縦線を 1 本につなぐ
-   *  (畳むのは帯の位置のままと、右クリックの「この見出しの中身を折りたたむ」) */
+   *  (畳むのは帯の位置のままと、右クリックの「この見出しの中身を折りたたむ」)。
+   *  ⚠ 帯の枠(3px)のぶん字の頭が段落より右へ出るので、その 3px を内側の余白から引く */
   [data-pkc-log-days] > :is(h3, h4, h5, h6)[data-pkc-log-depth] {
     font-size: 0.85em;
     font-weight: 600;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
     padding-block: 0.6em 0.2em;
+    padding-inline-start: calc(var(--pkc-log-indent, 1.1rem) - 3px);
     border-inline-start-color: transparent;
     --pkc-heading-bar: transparent;
   }

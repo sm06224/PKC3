@@ -38,8 +38,12 @@ test('🔴 ログの 3 段: 日の行は段差、親の時刻は控えめ、入�
     [
       '## 2026-10-09 09:00:00',
       '朝の記録',
+      '- 親の箇条',
+      '```\n親のコード\n```',
       '### 2026-10-09 09:30:00',
       '追いログ一段',
+      '- 追いの箇条',
+      '```\n追いのコード\n```',
       '#### 2026-10-09 09:40:00',
       '追いログ二段',
       '## 2026-10-10 08:00:00',
@@ -79,6 +83,21 @@ test('🔴 ログの 3 段: 日の行は段差、親の時刻は控えめ、入�
   expect(await lineX(`${BODY} > h3[data-pkc-log-depth]`), '見出しと中身で縦線の x がずれている').toBe(
     await lineX(`${BODY} > p[data-pkc-log-depth="1"]`),
   );
+
+  // 🔴 入れ子の中の箇条書き・コードの余白を潰さない(着地前レビュー 🔴)── 箇条書きは印の置き場に字下げを足し、
+  //    コードは自分の内側の余白のまま(親の記録の中の同じ塊と比べる)
+  const pad = (sel: string, text: string): Promise<{ left: number; top: number }> =>
+    page.locator(`${BODY} > ${sel}`, { hasText: text }).first().evaluate((el) => {
+      const cs = getComputedStyle(el.matches('pre') ? el : (el.querySelector('pre') ?? el));
+      return { left: Number.parseFloat(cs.paddingLeft), top: Number.parseFloat(cs.paddingTop) };
+    });
+  const ulParent = await pad('ul', '親の箇条');
+  const ulNested = await pad('ul', '追いの箇条');
+  expect(ulNested.left, '入れ子の箇条書きの印の置き場が潰れた(字下げを足していない)').toBeGreaterThan(ulParent.left);
+  const preParent = await pad('*', '親のコード');
+  const preNested = await pad('*', '追いのコード');
+  expect(preNested.top, '入れ子のコードの内側の余白が潰れた').toBe(preParent.top);
+  expect(preNested.left, '入れ子のコードの内側の余白が変わった').toBe(preParent.left);
 
   // 明暗のテーマで撮る(人が目で確かめる物)
   const shotDir = test.info().outputPath('');

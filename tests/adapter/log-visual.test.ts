@@ -51,9 +51,10 @@ describe('印', () => {
     ]);
   });
 
-  it('🔴 時刻の見出しの印は、日時で始まる見出し(親・入れ子とも)だけ。手書きの見出し・段落には付けない', () => {
+  it('🔴 時刻の見出しの印は、日時で始まる親の記録の見出しだけ。手書きの見出し・段落・入れ子には付けない', () => {
     const h = host(true);
-    expect(['a', 'a2', 'a4', 'b', 'a1', 'pre-h'].map((id) => time(h, id))).toEqual([true, true, true, false, false, false]);
+    // 🔑 時刻の印は親の記録(`##`)だけ ── 入れ子の見出しの見え方は深さの印が持つ(着地前レビュー ⚠-2: 読み手の無い印を付けない)
+    expect(['a', 'a2', 'a4', 'b', 'a1', 'pre-h'].map((id) => time(h, id))).toEqual([true, false, false, false, false, false]);
   });
 
   it('⚠ 対照群: ログでない面には 1 つも付けない / ログから外れたら外す', () => {
@@ -94,13 +95,34 @@ describe('CSS', () => {
   it('🔴 使う色は --fg / --muted / --surface-2 だけ(強調色を使わない)・枠線の幅を足さない', () => {
     const block = screenBlock();
     const vars = new Set([...block.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]!));
-    for (const v of vars) expect(['--fg', '--muted', '--surface-2', '--radius'], `使わない色: ${v}`).toContain(v);
+    for (const v of vars)
+      expect(['--fg', '--muted', '--surface-2', '--radius', '--pkc-log-indent', '--pkc-log-line'], `使わない色: ${v}`).toContain(v);
     // 縦線は背景の 2px の帯(字下げした位置)── 色は --muted
     expect(block, '縦線が --muted でない').toMatch(/background-image:\s*linear-gradient\(var\(--muted\),\s*var\(--muted\)\)/);
     expect(block).toMatch(/background-size:\s*2px 100%/);
     // 🔴 字下げは padding(塊の左の余白は読み幅を中央に置く規則が持つ ── margin で付けると負けて字下げが出ない)
-    expect(block).not.toMatch(/margin-inline-start/);
+    // 入れ子の規則は左の余白(margin)に触らない(`margin-block` だけ許す)
+    for (const m of block.matchAll(/([^{}]*data-pkc-log-depth[^{}]*)\{([^{}]*)\}/g))
+      expect(m[2]!, `入れ子の規則が左の余白を触っている: ${m[1]!.trim()}`).not.toMatch(/margin(?:-inline(?:-start)?|-left)?\s*:/);
+    // 見出しの帯(枠 3px)のぶん線がずれないよう、位置は枠の外側から測る
+    expect(block).toMatch(/background-origin:\s*border-box/);
     // 枠を足す宣言(border: 1px … / border-*: Npx solid)は置かない ── 既存の見出しの帯の幅を 2px にするだけ
     expect(block).not.toMatch(/border(?:-[a-z-]+)?:\s*\d+px\s+solid/);
+  });
+});
+
+describe('入れ子の中の箇条書き・コード・引用の余白を潰さない(着地前レビュー 🔴)', () => {
+  const css = readFileSync('src/styles/app.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rulesWith = (needle: string): { sel: string; body: string }[] =>
+    [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1]!.trim(), body: m[2]! })).filter((r) => r.sel.includes(needle));
+  it('🔴 内側の余白(padding)を変える規則は、段落・見出し・箇条書きに限っている(コード・引用・表・折りたたみには掛けない)', () => {
+    const padders = rulesWith('data-pkc-log-depth').filter((r) => /padding/.test(r.body));
+    expect(padders.length, '空振り防止: 字下げの規則が無い').toBeGreaterThan(0);
+    for (const r of padders) expect(r.sel, `段落・見出し・箇条書きに限っていない: ${r.sel}`).toMatch(/:is\((?:p|h3|ul)[^)]*\)\[data-pkc-log-depth\]/);
+  });
+  it('🔴 箇条書きは印の置き場(1.4em)に字下げを足す(上書きしない)', () => {
+    const lists = rulesWith('data-pkc-log-depth').filter((r) => /:is\(ul, ol\)/.test(r.sel));
+    expect(lists.length).toBeGreaterThan(0);
+    expect(lists.map((r) => r.body).join('')).toMatch(/padding-inline-start:\s*calc\(var\(--pkc-log-indent[^)]*\)\s*\+\s*1\.4em\)/);
   });
 });
