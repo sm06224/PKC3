@@ -154,6 +154,14 @@ describe('ログの日の行(器) #1441', () => {
     expect(shown(h)).toEqual(['a1', 'a2', 'b1', 'b2']);
   });
 
+  it('🔴 今年でない日は年から出す(#2018 5。DOM を通しても年つきの形を通る)', () => {
+    const h = host('<h2>2025-12-31 23:00:00</h2><p>a</p><h2>2026-01-01 08:00:00</h2><p>b</p>');
+    applyHeadingFold(h);
+    // ⚠ 試験を走らせる年が 2025 でない限り、2025 年の日は必ず年つき(固定の字で書く)
+    expect(rows(h)[0]!.textContent).toBe(String(new Date().getFullYear()) === '2025' ? '12/31(水)' : '2025/12/31(水)');
+    expect(rows(h)[0]!.getAttribute('aria-label')).toBe('2025-12-31(水)の追記をすべて折りたたみます');
+  });
+
   it('追記(末尾に新しい日が増える)でも既存の行は使い回し、新しい日の行が足される', () => {
     const h = host(LOG);
     applyHeadingFold(h);

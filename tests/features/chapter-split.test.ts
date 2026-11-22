@@ -110,6 +110,13 @@ describe('logChapterTitle', () => {
   it('コードブロックの開き閉じの行は飛ばす / 字が残らなければ時刻', () => {
     expect(logChapterTitle('```js\nconst a = 1\n```\n', 't')).toBe('const a = 1');
     expect(logChapterTitle('```\n```\n', '2026-11-22 09:00:00')).toBe('2026-11-22 09:00:00');
-    expect(logChapterTitle('-\n', '時刻')).toBe('-');
+    expect(logChapterTitle('-\n', '時刻')).toBe('時刻');
+  });
+  it('字の無い行(::: / 表 / 水平線 / 注記 / 画像だけ)は飛ばし、装飾とリンクの記法は外す', () => {
+    expect(logChapterTitle(':::note\n中の字\n:::\n', 't')).toBe('中の字');
+    expect(logChapterTitle('| a | b |\n|---|---|\n\n表の後\n', 't')).toBe('表の後');
+    expect(logChapterTitle('---\n***\n<!-- 注記 -->\n下の字\n', 't')).toBe('下の字');
+    expect(logChapterTitle('![](asset:ab12)\n写真の説明\n', 't')).toBe('写真の説明');
+    expect(logChapterTitle('**大事**な[会議](entry:x)の`メモ`\n', 't')).toBe('大事な会議のメモ');
   });
 });

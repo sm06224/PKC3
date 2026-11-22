@@ -250,6 +250,9 @@ export function extractHeadingsFromMarkdown(
   return scanHeadings(body, opts, opts?.numberHeadings !== undefined);
 }
 
+/** 引用・リストの中の ATX 見出し(頭に `>` / `-` / `1.` が 1 つ以上)。 */
+const QUOTED_HEADING_RE = /^ {0,3}(?:(?:>[ \t]?|[-*+][ \t]+|\d{1,9}[.)][ \t]+)[ \t]*)+(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
+
 function scanHeadings(
   body: string,
   opts: ExtractHeadingsOptions | undefined,
@@ -274,19 +277,30 @@ function scanHeadings(
       if (wasIn !== (fence !== '')) para = [];
       continue;
     }
-    if (blockForms) {
-      const u = /^ {0,3}(=+|-+)[ \t]*$/.exec(line);
-      if (u && para.length > 0) {
-        const text = para.join(' ').trim();
-        para = [];
-        if (text) {
-          headings.push({ level: (u[1]![0] === '=' ? 1 : 2) as TocDepth, text: restoreUndefinedVars(text), slug: slugOf(text) });
-        }
+    /**
+     * 🔴 **下線の見出しと、引用・リストの中の見出しは、並べない呼び手でも印の連番だけは進める**(#2018 着地前レビュー ⚠2)
+     *   ── 描画(markdown-it)はそこにも id を刻むので、数えないと後ろの同じ字の見出しの印が 1 つずれる。
+     */
+    const u = /^ {0,3}(=+|-+)[ \t]*$/.exec(line);
+    if (u && para.length > 0) {
+      const text = para.join(' ').trim();
+      para = [];
+      if (text) {
+        const slug = slugOf(text);
+        if (blockForms) headings.push({ level: (u[1]![0] === '=' ? 1 : 2) as TocDepth, text: restoreUndefinedVars(text), slug });
+      }
+      continue;
+    }
+    // 段落の素の行だけを溜める(記法の行・空行で切る)
+    if (line.trim() === '' || /^\s{0,3}(?:#|>|[-*+][ \t]|\d+[.)][ \t]|\||:::|%%|<)/.test(line)) para = [];
+    else para.push(line.trim());
+    if (!blockForms) {
+      const q = QUOTED_HEADING_RE.exec(line);
+      const qt = q?.[2]?.trim() ?? '';
+      if (qt !== '' && !headRe.test(line)) {
+        slugOf(qt);
         continue;
       }
-      // 段落の素の行だけを溜める(記法の行・空行で切る)
-      if (line.trim() === '' || /^\s{0,3}(?:#|>|[-*+][ \t]|\d+[.)][ \t]|\||:::|%%|<)/.test(line)) para = [];
-      else para.push(line.trim());
     }
     const m = headRe.exec(line);
     if (!m) continue;

@@ -35,6 +35,9 @@ import { stripComments, preprocessHeadingNumbers } from './markdown-render';
 import { detectEol } from './line-eol';
 import { continuesList } from './text-ops';
 
+/** 引用・リストの中の ATX 見出し(頭に `>` / `-` / `1.` が 1 つ以上ある形)。印の連番を進めるためだけに読む。 */
+const QUOTED_HEADING = /^ {0,3}(?:(?:>[ \t]?|[-*+][ \t]+|\d{1,9}[.)][ \t]+)[ \t]*)+(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
+
 /** 見出しの段(ATX の `#` の数 / setext は 1・2)。 */
 export type AppendTargetLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -230,7 +233,19 @@ function scanHeadings(body: string): HeadingAt[] {
     }
     // 閉じの `#` は前に空白が要る(`## C#` の `#` は見出しの字)
     const m = /^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
-    if (!m) continue;
+    if (!m) {
+      /**
+       * 🔴 **引用・リストの中の見出しも、印の連番だけは進める**(#2018 着地前レビュー ⚠2)── 追記先には選べないが、
+       *   描画(markdown-it)はそこにも id を刻むので、数えないと後ろの同じ字の見出しの印が 1 つずれる。
+       */
+      const q = QUOTED_HEADING.exec(line);
+      const qt = q?.[2]?.trim() ?? '';
+      if (qt !== '') {
+        slugOf(qt);
+        legacyOf(qt);
+      }
+      continue;
+    }
     const text = m[2]!.trim();
     if (text === '') continue;
     const seen = /^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(numberedLines[i] ?? line);
@@ -626,7 +641,11 @@ export function chapterLinesOf(
   return { slug: hit.slug, text: hit.text, from: range.start - fm, to: range.end - fm };
 }
 
-/** その字の見出し(`#`〜`###`)が本文にいくつ在るか(#1044 段4 ── `chapterLinesOf` の `sameCount`)。 */
+/**
+ * その字の見出し(`#`〜`######`)が本文にいくつ在るか(#1044 段4 ── `chapterLinesOf` の `sameCount`)。
+ * ⚠ #2018 から 4〜6 段も数える ── 印の連番(`-1` `-2`)が 1〜6 段を通して振られるので、同じ字の `####` が
+ *   増えても連番がずれる(ずれを「見失った」と扱う安全側は変わらない)。
+ */
 export function sameHeadingCount(body: string, text: string): number {
   return listAppendTargets(body).filter((h) => h.text === text).length;
 }

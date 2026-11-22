@@ -23,7 +23,7 @@
  * 鍵は `<lid>#h/<印>`(`sectionKey`)。頼む / 読む / 書込に追随する / 上限で手放す、が板の抜粋と
  * **同じ口**を通る(口を 2 本に分けると片方だけ古いまま映す ── `syncShownBodies` の注記)。
  * 節の範囲は追記・章だけ編集と**同じ関数**(`sectionRange`)── 2 つ目の規則を作らない。
- * ⚠ 見出しは 1〜3 段だけ(`scanHeadings` と同じ。4 段以下の見出しは指せない = 「見つかりません」)。
+ * ⚠ 見出しは `scanHeadings` が数える 1〜6 段(#2018 で 4〜6 段も指せるようになった)。
  */
 import { parseEntryRef } from '../entry-ref/entry-ref';
 import { sectionRange } from './append-target';

@@ -1663,6 +1663,19 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(rw?.link).toBe(`[はじめ](entry:${made!.lid} "切り出した章")`);
   });
 
+  /**
+   * 🔴 **入れ子の時刻見出し(`###`)は「章」と呼ぶ**(#2018 Q3 裁定 = 親 `##` だけを 1 件に数える)が、
+   *   **題名の規則は時刻見出しなら段に依らず同じ**(#2018 4 ── 時刻を題名にしない)。
+   */
+  it('🔴 ログの入れ子の時刻見出し(###)は「この章を…」の字で、題名は本文の最初の行', () => {
+    const r = rig('## 2026-10-11 10:00:00\n\nはじめ\n\n### 2026-10-11 10:30:00\n\n追いの字\n\n## 2026-10-11 11:00:00\n\nつぎ\n', 'textlog');
+    rightClick(r.q('h3'));
+    expect(r.label('split-chapter')).toBe('この章を新しいノートに切り出す');
+    r.press('split-chapter');
+    const made = [...r.d.getState().entryMetas.values()].find((m) => m.lid !== 'n1' && m.lid !== 'n2');
+    expect(made?.title).toBe('追いの字');
+  });
+
   it('⚠ 対照群 ── ログの中の日時でない見出しは「章」の字で、題名は見出しの字のまま', () => {
     const r = rig(LOG, 'textlog');
     rightClick(r.q('h2[id="手書きの見出し"]'));

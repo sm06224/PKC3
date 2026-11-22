@@ -9108,7 +9108,8 @@ async function tocJump(
      */
     await waitPainted(detail, dispatcher.getState().selectedLid);
     let hit = detail
-      ? [...detail.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]')].find(
+      ? // 🔴 #2018 から h4〜h6 にも id が刻まれる ── 飛び先も 6 段まで探す(刻んだのに飛べないリンクを渡さない)
+        [...detail.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]')].find(
           (h) => h.id === slug,
         )
       : undefined;
@@ -9117,7 +9118,11 @@ async function tocJump(
      * (`<h2 id="新しい名前"><span id="古い名前"></span>`)を、見出しに引き直す。
      */
     if (!hit && detail) {
-      const alias = [...detail.querySelectorAll<HTMLElement>('h1 > span[id], h2 > span[id], h3 > span[id]')].find(
+      const alias = [
+        ...detail.querySelectorAll<HTMLElement>(
+          'h1 > span[id], h2 > span[id], h3 > span[id], h4 > span[id], h5 > span[id], h6 > span[id]',
+        ),
+      ].find(
         (a) => a.id === slug,
       );
       hit = alias?.parentElement ?? undefined;

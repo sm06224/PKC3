@@ -46,6 +46,29 @@ describe('見出しの印は 1〜6 段を通して揃う', () => {
     for (const t of toc) expect(rendered.some((h) => h.level === t.level && h.id === t.slug), `目次の ${t.slug} が本文に無い`).toBe(true);
   });
 
+  /**
+   * 🔴 **引用・リストの中の見出し / 下線の見出しも連番を進める**(着地前レビュー ⚠2)── 追記先には選べず、目次も
+   *   (並べない呼び手では)並べないが、描画は id を刻むので、数えないと後ろの同じ字の見出しの印がずれる。
+   */
+  it('🔴 引用の中の `####`・リストの中の `###`・下線の見出しが混ざっても、後ろの `## 概要` の印は 3 者で同じ', () => {
+    const md = ['> #### 概要', '', '- ### 概要', '', '概要', '---', '', '## 概要', '', '本文', ''].join('\n');
+    const rendered = renderedHeadings(md);
+    // 描画は 4 つとも見出しにし、出会った順に連番を振る
+    expect(rendered.map((h) => [h.level, h.id])).toEqual([
+      [4, '概要'],
+      [3, '概要-1'],
+      [2, '概要-2'],
+      [2, '概要-3'],
+    ]);
+    const last = rendered[3]!.id;
+    // 追記先: 平の ATX だけを並べる(引用・リスト・下線の… は選べない/下線は選べる)が、印は描画と同じ
+    const targets = listAppendTargets(md);
+    expect(targets.find((t) => t.text === '概要' && t.level === 2 && t.slug === last), '追記先の `## 概要` の印が描画とずれた').toBeDefined();
+    // 目次(並べない呼び手 / 並べる呼び手)のどちらでも、`## 概要` の印は描画と同じ
+    expect(extractHeadingsFromMarkdown(md).at(-1)?.slug, '目次(既定)の印が描画とずれた').toBe(last);
+    expect(extractHeadingsFromMarkdown(md, { blockForms: true }).map((t) => t.slug)).toEqual(['概要-1', '概要-2', '概要-3']);
+  });
+
   it('対照群: 深い見出しが無ければ連番は飛ばない', () => {
     const md = '## 概要\n\n本文\n\n## 概要\n';
     expect(extractHeadingsFromMarkdown(md).map((t) => t.slug)).toEqual(['概要', '概要-1']);

@@ -8,8 +8,9 @@
  * ⚠ 書く形は右クリックの「章の参照をコピー」(`copy-section-ref`)と同じ `formatSectionLink` 1 本。
  *   以前は `entry:<lid>#<slug>` を書いていたが、読む側(`parseEntryRef`)が受けるのは `#h/<id>` で、
  *   日本語の見出しは「解けないリンク」になっていた。
- * ⚠ 描画が id を刻むのは h1〜h3 だけ(`markdown-render.ts` の heading_open)── id の無い見出しには
+ * ⚠ 描画は h1〜h6 に id を刻む(`markdown-render.ts` の heading_open。#2018 で h4〜h6 も)── id の無い見出しには
  *   ボタンを付けない(貼っても飛べないリンクを渡さない。右クリックの章の参照も同じ理由で出さない)。
+ *   飛び先の解決(binder の `tocJump`)も h1〜h6 を探す。
  */
 import { copyPlainText } from '@adapter/platform/clipboard';
 import { flashCopied } from '../actions/copy-md-block';

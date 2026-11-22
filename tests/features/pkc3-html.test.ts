@@ -1536,6 +1536,22 @@ describe('可搬 HTML — 目次と印刷(F-1)', () => {
       expect(zentai[0]!.id).not.toBe(zentai[1]!.id);
     });
 
+    /** 🔴 #2018 から書出し側の描画は h4〜h6 にも id を振る ── 全体印刷で 2 件の同名の `####` が同じ id にならない。 */
+    it('🔴 別ノートの同名の h4 も同じ id にならない', async () => {
+      const two = source({
+        entries: [
+          { lid: 'a', title: 'A', body: '# 上\n\n#### 深い\n\nx\n' },
+          { lid: 'b', title: 'B', body: '# 上\n\n#### 深い\n\ny\n' },
+        ],
+      });
+      await open((await writePortableHtml(two, NOW)).blob);
+      document.getElementById('pkc-printall')!.click();
+      const h4 = Array.from(document.querySelectorAll<HTMLElement>('#pkc-all h4'));
+      expect(h4, '前提: 2 件の h4 が組まれていない').toHaveLength(2);
+      expect(h4[0]!.id, '前提: h4 に id が無い').not.toBe('');
+      expect(h4[0]!.id, '別ノートの同名の h4 が同じ id').not.toBe(h4[1]!.id);
+    });
+
     it('🔴 ノート名が 1 段目、その見出しは 1 段下げる(同じ段に並べない)', async () => {
       await open((await writePortableHtml(DOC, NOW)).blob);
       document.getElementById('pkc-printall')!.click();
