@@ -629,7 +629,10 @@ describe('フォルダ整理の導線(画面)', () => {
     await tick();
     const where = q('[data-pkc-field="filer-create-target"]');
     expect(where, '作る先の案内が出ていない').not.toBeNull();
-    expect(where!.textContent).toBe('ここは条件で集まる場所なので、ここには作れません。ルートかふつうのフォルダを開いてください');
+    // 🔴 #1982 ③-c: 行には短く出し(隠さない ── user 指示 2026-11-22)、全文は title に置く
+    expect(where!.textContent).toBe('ここには作れません');
+    expect(where!.hasAttribute('data-pkc-hint-only'), 'スマートフォルダの断りが見えない字になっている').toBe(false);
+    expect(where!.title).toBe('ここは条件で集まる場所なので、ここには作れません。ルートかふつうのフォルダを開いてください');
     expect(where!.textContent, '入らない先に「入ります」と言った').not.toContain('入ります');
 
     const before = d.getState().entryMetas.size;

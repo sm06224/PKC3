@@ -40,7 +40,7 @@ import { normalizeQuery } from '@features/filter/title-filter';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(情報列・一覧の行と共有)。
 //    ここに 3 つ目の parse を置いていたので寄せた(規則は 1 つ ── CLAUDE.md)
 import { formatListUpdated, listDayStamp, formatStoredDate, formatStoredStamp } from '@features/datetime/stored-date';
-import { ARCHETYPE_ICONS, iconButton, iconSpan, markVariant } from './icons';
+import { ARCHETYPE_ICONS, iconButton, iconSpan, markIconOnly, markVariant } from './icons';
 // 🔑 空のときの「次の一手」の部品(#722 P2-13。かつては一覧タブと 2 か所で組まない形で共有していた)
 import { emptyStartActions } from './empty-start';
 import { paintRowMark } from './selection-mark';
@@ -90,6 +90,13 @@ export interface FilerMountRequest {
 /** 格子の行の高さ(CSS の 26px と同じ)── 塊の仮の高さに使う。 */
 const GRID_ROW_PX = 26;
 
+
+/** 🔴 選択操作の行が「タグ」を開いている印(#1982 ③-c)。 */
+export const BULK_TAG_MODE_ATTR = 'data-pkc-tag-mode';
+/** 見えない字だけで持つ案内(行の `title` にも同じ字を置く)の印。 */
+export const HINT_ONLY_ATTR = 'data-pkc-hint-only';
+/** スマートフォルダで作れない理由(全文。行には短く出し、これは `title`)。 */
+export const SMART_CREATE_REFUSAL = 'ここは条件で集まる場所なので、ここには作れません。ルートかふつうのフォルダを開いてください';
 
 export class FilerRenderer {
   private readonly region: HTMLElement;
@@ -290,6 +297,13 @@ export class FilerRenderer {
   private moveBar: HTMLElement | null = null;
   /** 帯を貼り付けてよい高さかの観測(組み直すたびに付け替える)。 */
   private stopBarStick: (() => void) | null = null;
+  /**
+   * 🔴 選択操作の行が「タグ」を開いているか(#1982 ③-c)。⚠ 行は state が動くたびに組み直すので、開いた事実をここで運ぶ
+   *   (`captureBarInputs` が DOM の印から読む)。選んでいる物が無くなったら閉じる。
+   */
+  private bulkTagMode = false;
+  /** 「タグ」を開いた選択(印の lid を並べた鍵)。違う選択になったら閉じる。 */
+  private bulkTagFor = '';
   /** 帯の組み直しをまたいで運ぶ、打ちかけの字と焦点(`captureBarInputs`)。 */
   private keptBar: {
     values: ReadonlyMap<string, string>;
@@ -661,6 +675,9 @@ export class FilerRenderer {
       }
     }
     if (values.size > 0 || focused !== null) this.keptBar = { values, focused, caret };
+    // 🔴 「タグ」を開いた事実も運ぶ(#1982 ③-c ── `toggle-bulk-tag` は DOM の印だけを付け外しする)
+    const bulk = host.querySelector('[data-pkc-field="filer-bulk"]');
+    if (bulk !== null) this.bulkTagMode = bulk.hasAttribute(BULK_TAG_MODE_ATTR);
   }
 
   /**
@@ -724,71 +741,95 @@ export class FilerRenderer {
      *    食い違うと、確認の文言が嘘になる。
      */
     const marks = state.selection.filter((lid) => this.pos.has(lid));
+    // 🔴 「タグ」を開いたままにするのは**同じ選択の間だけ**(印を付け直したら選択操作へ戻す ── 開いたままだと、
+    //   選び直した直後に「ゴミ箱へ」などが隠れて見える)。タグを付けた直後の組み直しでは閉じない
+    const marksKey = marks.join('\u0000');
+    this.bulkTagMode = this.bulkTagMode && marks.length > 0 && marksKey === this.bulkTagFor;
+    this.bulkTagFor = marksKey;
+    /**
+     * 🔴 **選択操作は 1 行**(#1982 ③-c。user 裁定 2026-11-22)── 0 件 / 1 件 / 2 件以上で中身が替わる行 1 本に、
+     *   数・上へ / 下へ・書き出す・ゴミ箱へ・移す・タグ・選択の解除を並べる。⚠ 既存の 3 条件は変えない
+     *   (「中まで全部出す」の間は上へ / 下へを出さない / 2 件以上なら出さない / 自分で並べた順でないと押せない)。
+     * 🔑 図案だけの小さなボタン(上へ / 下へ / ゴミ箱へ / 移す / 解除)は名前を見えない字と `title` に持つ。
+     * 🔑 タグの欄は「タグ ▾」で行の中身を入れ替えて出す(欄 + 付ける + 外す + 戻る)── 行を 2 段にしない。
+     * 🔑 案内の文(「選ぶと並べ替えられます」「新しく作るものは『…』に入ります」)は**見えない字 + `title`** へ。
+     *   ⚠ スマートフォルダの「ここには作れません」だけは隠さず、この行に短く出す(user 指示 2026-11-22)。
+     */
+    const row = document.createElement('div');
+    row.setAttribute('data-pkc-field', 'filer-action-row');
+    const compact = (b: HTMLButtonElement, name: string, title: string): HTMLButtonElement => {
+      markIconOnly(b);
+      b.setAttribute('aria-label', name);
+      b.title = title;
+      return b;
+    };
     /**
      * 🔴 **1 件を選んでいるときも、タグの欄は出す**(#1087 流れ 29。Gemini 裁定 = #1163 への依頼 29 の Q5)。
      * ⚠ 出すのは**数・タグの欄と付け外し・選択の解除**だけ。ゴミ箱へ移す・フォルダへ移す…は 2 件以上のときだけ
      *   (1 件の移動は行の右クリックと、パンくずの「フォルダへ移す…」が持っている ── 同じ帯に 2 つ目を作らない)。
      */
+    let bulk: HTMLElement | null = null;
     if (marks.length >= 1) {
       const multi = marks.length > 1;
-      const bulk = document.createElement('div');
+      bulk = document.createElement('div');
       bulk.setAttribute('data-pkc-field', 'filer-bulk');
+      if (this.bulkTagMode) bulk.setAttribute(BULK_TAG_MODE_ATTR, '');
       const count = document.createElement('span');
       count.setAttribute('data-pkc-field', 'filer-bulk-count');
-      count.textContent = `${marks.length} 件を選んでいます`;
-      const del = iconButton('delete-selected', 'まとめてゴミ箱へ移す');
-      // ⚠ 行き先は画面に在る名前で(上の `delete-entry` と同じ直し ── **対称の反対側**)
-      del.title = `選んでいる ${marks.length} 件をゴミ箱へ入れます(左のペインの「フォルダ」タブの中のゴミ箱から戻せます)`;
-      const clear = document.createElement('button');
-      clear.type = 'button';
-      clear.setAttribute('data-pkc-action', 'clear-selection');
-      clear.textContent = '選択を解除';
+      count.textContent = `${marks.length} 件`;
+      count.title = `${marks.length} 件を選んでいます`;
       /**
-       * 🔴 **まとめてタグを付ける / 外す**(#402 ①)。
-       *
-       * > user の物語: フォルダで 12 件選んだ。全部に `#請求済` を付けたい。
-       * > いま一括でできるのは「ゴミ箱へ」だけで、**12 回開いて 12 回書く**。
-       *
-       * 🔴 **双方向にする**(user 指示 2026-08-23「置けるなら外せる」)──
-       *   「付ける」だけ作ると、12 件に間違えて付けたものを **12 回開いて消す**
-       *   ことになる。⚠ **同じ欄の隣に置く**(外すために別の場所を探させない)。
+       * ⚠ **まとめて消すのはゴミ箱へ**だけ(#240 段③。完全削除は一括で撃たせない ── 戻せない操作をまとめて撃てる
+       *   ようにするのが、いちばん事故が大きい)。行き先は画面に在る名前で。
+       */
+      const del = compact(
+        iconButton('delete-selected', 'まとめてゴミ箱へ移す'),
+        'まとめてゴミ箱へ移す',
+        `選んでいる ${marks.length} 件をゴミ箱へ入れます(左端の縦のバーのゴミ箱・フォルダの一覧の下のゴミ箱から戻せます)`,
+      );
+      const clear = compact(iconButton('clear-selection', '選択を解除', 'cancel-edit'), '選択を解除', '選んでいるものを全部外します(選択を解除します)');
+      /**
+       * 🔴 **まとめてタグを付ける / 外す**(#402 ①)。双方向にする(user 指示 2026-08-23「置けるなら外せる」)。
+       * 🔑 候補は情報ペインと同じ 1 本(`pkc-tag-candidates`。#494 段②)。
        */
       const tag = document.createElement('input');
       tag.type = 'text';
       tag.setAttribute('data-pkc-field', 'bulk-tag');
-      /**
-       * 🔑 **候補は情報ペインと同じ 1 本を使う**(#494 段②、§7)── 同じ画面で
-       * 「その場で打つ」と「まとめて付ける」の候補が食い違うのを作らない。
-       * ⚠ その `<datalist>` が無い配線(情報ペインを組んでいない test 等)では、
-       *   **候補が出ないだけ**である(打つことは動く)。
-       */
       tag.setAttribute('list', 'pkc-tag-candidates');
       tag.placeholder = 'タグ';
       tag.setAttribute('aria-label', 'まとめて付け外しするタグ');
-      const add = iconButton('bulk-tag-add', 'タグを付ける');
+      const add = iconButton('bulk-tag-add', '付ける');
       add.title = `選んでいる ${marks.length} 件の本文に、打ったタグを足します(井桁を付けて空白で並べると、まとめて足せます)`;
-      const off = iconButton('bulk-tag-remove', 'タグを外す');
+      const off = iconButton('bulk-tag-remove', '外す');
       off.title = `選んでいる ${marks.length} 件の本文から、打ったタグを消します(井桁を付けて空白で並べると、まとめて外せます)`;
+      const tagToggle = document.createElement('button');
+      tagToggle.type = 'button';
+      tagToggle.setAttribute('data-pkc-action', 'toggle-bulk-tag');
+      tagToggle.setAttribute('data-pkc-field', 'bulk-tag-toggle');
+      tagToggle.setAttribute('aria-expanded', this.bulkTagMode ? 'true' : 'false');
+      tagToggle.textContent = 'タグ ▾';
+      tagToggle.title = `選んでいる ${marks.length} 件に、タグをまとめて付ける / 外す欄を出します`;
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.setAttribute('data-pkc-action', 'toggle-bulk-tag');
+      back.setAttribute('data-pkc-field', 'bulk-tag-back');
+      back.textContent = '戻る';
+      back.title = 'タグの欄を閉じて、選択操作に戻ります';
+      const tagGroup = document.createElement('span');
+      tagGroup.setAttribute('data-pkc-field', 'bulk-tag-group');
+      tagGroup.append(tag, add, off, back);
       /**
-       * 🔴 **まとめて「移す…」**(#1087 流れ 29 Q4)。押し先は右クリックの「フォルダへ移す…」と**同じ
-       *   `move-to-folder` 1 本**(探して選ぶ小さい窓)── 移す道を 2 通り憶えさせない。
-       * ⚠ 印の 1 件目を `data-pkc-entry` に持たせる ── 帯は行の中に居ないので、持たせないと
-       *   「いま開いているノート」へ落ちて、印の外のノートを相手にしうる(窓は印の全部を動かす)。
+       * 🔴 **まとめて「移す…」**(#1087 流れ 29 Q4)── 押し先は右クリックの「フォルダへ移す…」と同じ `move-to-folder` 1 本。
+       * ⚠ 印の 1 件目を `data-pkc-entry` に持たせる(帯は行の中に居ないので、持たせないと開いているノートへ落ちる)。
        */
-      const move = document.createElement('button');
-      move.type = 'button';
+      const move = compact(
+        iconButton('move-to-folder', '移す…', 'dual-move'),
+        '移す…',
+        `選んでいる ${marks.length} 件を、別のフォルダへ移します(探して選ぶ小さな画面が開きます)`,
+      );
       move.setAttribute('data-pkc-field', 'bulk-move');
-      move.setAttribute('data-pkc-action', 'move-to-folder');
       move.setAttribute('data-pkc-entry', marks[0] ?? '');
-      move.textContent = '移す…';
-      move.title = `選んでいる ${marks.length} 件を、別のフォルダへ移します(探して選ぶ小さな画面が開きます)`;
-      /**
-       * 🔴 **選んだ N 件だけを書き出す**(#1038 A1)。1 件でも出す(右の情報ペインを開かずに、一覧から出せる)。
-       * ⚠ **ボタンは「書き出す ▾」1 つ**(2 つ並べると狭い左の列で帯が 1 行伸び、低い窓で貼り付かなくなった)。
-       *   位置は件数の隣(件数 + 書き出す ▾ が 1 行に収まる ── 帯の行数を A1 前と同じに保つ)。
-       * ⚠ 字は全件の「閲覧用 HTML で書き出す」(全部のノートが入る)と**別**にする ── 件数を字に入れて取り違えを防ぐ。
-       *   実行は `export-selection-*` の受け手(`binder.ts`)。フォルダの扱いはマニュアル「選んだノートだけを書き出す」。
-       */
+      /** 🔴 **選んだ N 件だけを書き出す**(#1038 A1)── ボタンは「書き出す ▾」1 つ。字は全件の書き出しと別にする。 */
       const exportMenu = document.createElement('button');
       exportMenu.type = 'button';
       exportMenu.setAttribute('data-pkc-field', 'bulk-export-menu');
@@ -796,83 +837,51 @@ export class FilerRenderer {
       exportMenu.setAttribute('aria-haspopup', 'menu');
       exportMenu.textContent = '書き出す ▾';
       exportMenu.title = `選んでいる ${marks.length} 件だけの書き出し方(閲覧用 HTML / バックアップ / PKC3 入り HTML)を選ぶ一覧を出します`;
-      if (multi) bulk.append(count, exportMenu, del, move, tag, add, off, clear);
-      else bulk.append(count, exportMenu, tag, add, off, clear);
-      host.append(bulk);
+      if (multi) bulk.append(count, exportMenu, del, move, tagToggle, clear, tagGroup);
+      else bulk.append(count, exportMenu, tagToggle, clear, tagGroup);
+      row.append(bulk);
     }
 
     /**
-     * 🔴 **選んでいる間、帯は一覧の下端に貼り付く**(依頼 82-1。Gemini 回答 = B)。
-     * ⚠ 数十件を超える一覧では、選んだ直後に帯が画面の外にあり、選べたかどうかも見えなかった。
-     *   帯の場所(一覧の下)は変えない ── 選んだ瞬間に行が動かないための置き方(上の注記)。貼り付けるのは CSS。
+     * 🔴 **選んでいる間、帯は一覧の下端に貼り付く**(依頼 82-1。Gemini 回答 = B)。帯の場所(一覧の下)は変えない。
      * ⚠ 印が無いときは貼り付けない(並べ替えの案内だけの帯が画面の下に居座らない)。
      */
     host.toggleAttribute('data-pkc-bulk', marks.length >= 1);
-    this.restoreBarInputs(host);
-    // ⚠ 組み直した直後にも当てる ── 断りが届いた回に欄が無かった(帯が出る前)形を拾う
-    this.paintRefusedTags(state);
 
-    // 🔴 **いま表に出ている物だけ**(別のフォルダ / 絞りで外れた物を選んだままだと、押すと見えない所が動く。
-    //    印の判定 `marks` と同じく `this.rows` で見る)
+    // 🔴 **いま表に出ている物だけ**(印の判定 `marks` と同じく `this.rows` で見る)
     const moving =
       state.selectedLid && this.pos.has(state.selectedLid)
         ? (state.entryMetas.get(state.selectedLid) ?? null)
         : null;
     if (!moving) {
       /**
-       * 🔴 **「中まで全部出す」の間は出さない**(#1087 L3)── 選んでも上へ / 下へは出ない
-       *   (下の `order-nudge`)ので、「選ぶと並べ替えられます」は偽になる。
+       * 🔴 **「中まで全部出す」の間は出さない**(#1087 L3)── 選んでも上へ / 下へは出ないので、案内は偽になる。
+       * 🔑 #1982 ③-c から見えない字(+ 行の `title`)。行に見える物が何も無ければ行ごと出さない。
        */
       if (!filerFlattenNow(state)) {
-        const hint = document.createElement('p');
+        const hint = document.createElement('span');
         hint.setAttribute('data-pkc-field', 'filer-move-empty');
+        hint.setAttribute(HINT_ONLY_ATTR, '');
         // ⚠ 「操作が無い」ではなく「**何をすれば出るか**」を書く
         hint.textContent = '動かしたいものを選ぶと、ここで上下に並べ替えられます';
-        host.append(hint);
+        row.title = hint.textContent;
+        row.append(hint);
       }
     } else {
       /**
-       * 🔴 **「居場所」のプルダウンは外した**(#813、2026-09-09。user 指示
-       * 「**フォルダ表示の時の移動先指定プルダウン邪魔、利便性悪いし
-       * 整理アプリに移行しよう**」)。
-       *
-       * ⚠ 直す前はここに `<select data-pkc-field="move-target">` が在り、
-       *   選んでいるものの移し先を字下げした一覧で出していた ── 指で触る端末では
-       *   **同名フォルダが並ぶ長い一覧**になり、選びにくい形だった。
-       * 🔑 **移す道は 3 本残っている**ので、動線は 1 つも減らない:
-       *   ①掴んでフォルダの行へ落とす / パンくずへ落として出す
-       *   ②右クリック(狭い画面は ⋯)→ **「移す…」**(探して選ぶ窓)
-       *   ③**2 ペインで整理**(user の言う「整理アプリ」)
-       * ⚠ そして**そこにしか無かった 1 つ**(いま入っているフォルダ自身を移す)は、
-       *   **パンくずの現在地の「移す…」**へ置き直した(上を見よ)。
-       * 🔑 残すのは**並べ替え**だけ ── これは行にも右クリックにも無い
-       *   (フォルダ自身は中に入ると表から消えるので、帯にしか置けない)。
-       */
-
-      /**
-       * 🔴 **並べ替え**(2026-08-06。user 報告 2-10「並べ替えの手段が無い」)。
-       *
-       * ⚠ **居場所の帯と同じ場所**に置く(行ごとに生やさない ── 平置き 15k 件で
-       *   30k 個のボタンになるし、フォルダ自身は選ぶと一覧から消えるので
-       *   行のボタンでは動かせない。帯に置いた理由と同じ)。
-       * ⚠ 端では**押せなくする**(押して黙って断られるのは「無言の操作拒否」)。
+       * 🔴 **並べ替え**(2026-08-06。user 報告 2-10)── 居場所の帯に置く(行ごとに生やさない)。端では押せなくする。
+       * 🔴 **「中まで全部出す」の間は出さない**(#813 段②)/ **2 件以上選んでいる間は出さない**(依頼 82-2)。
        */
       const siblings = listSiblings(moving.lid, state.entryMetas, state.relations);
       const at = siblings.findIndex((m) => m.lid === moving.lid);
-      /**
-       * 🔴 **「中まで全部出す」の間は、上へ / 下へを出さない**(#813 段②)。
-       * ⚠ これが入れ替えるのは**同じフォルダの中の隣**で、階層をまたいだ平らな並びでは
-       *   「隣」は画面のすぐ上 / 下の行ではない ── 押すと**別の所の行が動いて**見える。
-       *   意味が無いので出さない(切に戻せば同じ場所に出る)。
-       */
-      const nudge = document.createElement('div');
+      const nudge = document.createElement('span');
       nudge.setAttribute('data-pkc-field', 'order-nudge');
       for (const [dir, text] of [
         ['up', '上へ動かす'],
         ['down', '下へ動かす'],
       ] as const) {
         // 図案は `ACTION_ICONS['move-order-…']` が持つ(表は 1 つ)
-        const b = iconButton(`move-order-${dir}`, text);
+        const b = compact(iconButton(`move-order-${dir}`, text), text, text);
         b.setAttribute('data-pkc-entry', moving.lid);
         b.disabled = at < 0 || (dir === 'up' ? at === 0 : at === siblings.length - 1);
         // ⚠ なぜ押せないかを言う(端に居ることは見た目から分からない)
@@ -884,23 +893,36 @@ export class FilerRenderer {
         }
         nudge.append(b);
       }
-      // 🔴 **2 件以上選んでいる間は出さない**(依頼 82-2。Gemini 回答 = A)。動くのは開いている 1 件だけなのに、
-      //    帯は「N 件を選んでいます」と言っている ── 押した物と動く物がずれる(ドラッグは選んだ全部がまとまって動く)
-      if (!filerFlattenNow(state) && marks.length < 2) host.append(nudge);
+      if (!filerFlattenNow(state) && marks.length < 2) {
+        // 数の隣(1 件のとき)に置く ── 選んだ物と動かす物が同じ 1 件であることが行の頭で読める
+        const count = bulk?.querySelector('[data-pkc-field="filer-bulk-count"]') ?? null;
+        if (count !== null) count.after(nudge);
+        else row.prepend(nudge);
+      }
     }
 
     if (scope) {
-      // 🔑 **作る先を先に見せる**(押してから探させない)── 新規作成は
-      //    「いま見ているフォルダ」に入る(binder `create-entry`)
-      const where = document.createElement('p');
+      // 🔑 **作る先を先に見せる**(押してから探させない)── 新規作成は「いま見ているフォルダ」に入る(binder `create-entry`)
+      const where = document.createElement('span');
       where.setAttribute('data-pkc-field', 'filer-create-target');
-      // 🔴 スマートフォルダは条件で集まる場所 ── 作るとルートにできる(「入ります」と言うと嘘になる)
-      where.textContent =
-        scope.archetype === SMART_ARCHETYPE
-          ? 'ここは条件で集まる場所なので、ここには作れません。ルートかふつうのフォルダを開いてください'
-          : `新しく作るものは「${scope.title}」に入ります`;
-      host.append(where);
+      if (scope.archetype === SMART_ARCHETYPE) {
+        // 🔴 スマートフォルダは条件で集まる場所 ── 作るとルートにできる。**隠さず**この行に短く出す(user 指示 2026-11-22)
+        where.textContent = 'ここには作れません';
+        where.title = SMART_CREATE_REFUSAL;
+      } else {
+        // 🔑 ふつうのフォルダはパンくず(+ `title`)で足りる ── 見えない字で残す(読み上げ・検索の口は変えない)
+        where.setAttribute(HINT_ONLY_ATTR, '');
+        where.textContent = `新しく作るものは「${scope.title}」に入ります`;
+        if (row.title === '') row.title = where.textContent;
+      }
+      row.append(where);
     }
+    // 見える物が 1 つも無ければ行ごと出さない(見えない字だけの空の行を置かない)
+    row.hidden = ![...row.children].some((c) => !c.hasAttribute(HINT_ONLY_ATTR));
+    host.append(row);
+    this.restoreBarInputs(host);
+    // ⚠ 組み直した直後にも当てる ── 断りが届いた回に欄が無かった(帯が出る前)形を拾う
+    this.paintRefusedTags(state);
   }
 
   /**
@@ -1036,6 +1058,16 @@ export class FilerRenderer {
       this.paintedRefused[field] = text;
       if (el.value !== '' && el.value !== was) continue;
       el.value = text;
+      /**
+       * 🔴 断られたタグを戻した欄は**見える所に出す**(#1982 ③-c)── 欄はタグを開いたときだけ見えるので、
+       *   開いていないと戻した字が隠れたまま残り、次に開いたとき突然現れる。
+       */
+      const bulk = el.closest<HTMLElement>('[data-pkc-field="filer-bulk"]');
+      if (text !== '' && bulk !== null) {
+        bulk.setAttribute(BULK_TAG_MODE_ATTR, '');
+        this.bulkTagMode = true;
+        bulk.querySelector('[data-pkc-field="bulk-tag-toggle"]')?.setAttribute('aria-expanded', 'true');
+      }
     }
   }
 
@@ -1696,6 +1728,8 @@ export class FilerRenderer {
         btn.setAttribute('data-pkc-action', 'enter-folder');
         btn.setAttribute('data-pkc-drop', 'crumb');
         btn.textContent = seg.title;
+        // 🔑 作る先はパンくずの現在地で読める(#1982 ③-c ── 案内の文を行から外した代わりに `title` で言う)
+        if (seg === scope && scope.archetype !== SMART_ARCHETYPE) btn.title = `新しく作るものは「${seg.title}」に入ります`;
         crumb.append(btn);
       }
       /**

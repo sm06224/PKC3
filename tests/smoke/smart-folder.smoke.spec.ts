@@ -215,6 +215,8 @@ test('🔴 中でタグを外すと、集め直しを待たずに行が消える
    * 🔴 **「まとめてタグを外す」は集め直しを頼まない口である** ── ここで行が
    *   消えるなら、当たりの表がその場で組み直されている。
    */
+  // ⚠ #1982 ③-c からタグの欄は「タグ ▾」で行を入れ替えて出す
+  await clickReal(page, '[data-pkc-field="bulk-tag-toggle"]');
   await page.locator('[data-pkc-field="bulk-tag"]').fill('請求');
   await clickReal(page, '[data-pkc-action="bulk-tag-remove"]');
   await expect(page.locator(ROWS), '外したのに行が残っている').toHaveCount(0);
