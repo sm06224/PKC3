@@ -278,3 +278,63 @@ await win.keyboard.press('Alt+1');              // 本文の面へ(窓は残る)
 
 ⚠ 併せて疑う:`gotoApp(page)` の後に `page.goto(<同じ origin の断片違い>)` を
 書いた spec は、全部この形である。
+## 4. ブラウザが 2 つある
+
+`tests/smoke/playwright.config.ts` は同梱の `/opt/pw-browsers/chromium`(フル Chromium)を
+優先し、無ければ playwright 既定に落ちる ── **CI は後者 = `chromium_headless_shell`**。
+この 2 つは**実挙動が違う**。
+
+```bash
+# CI と同じバイナリで回す
+PKC3_CHROMIUM=/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell \
+  npx playwright test --config tests/smoke/playwright.config.ts <grep>
+```
+
+| 事象 | `chromium` | `chromium_headless_shell` |
+|---|---|---|
+| `window.print()` | `beforeprint` のみ | **`beforeprint` + `afterprint` を同期発火** |
+| CSP が止めた要求の `request` イベント | 5 秒待っても来ないことがある | assert より先に来る |
+| 非 ASCII の `<a download>` 名 | — | **丸ごと捨てて `"download"` にする** |
+
+🔴 **実ブラウザ依存の挙動に触れる spec は、両方のバイナリで通してから push する。**
+「CI だけで落ちる」を環境のせいにして test 側だけ緩めない(実例:
+[incidents.md](incidents.md)「環境差の調査が本物のバグを見つけた」)。
+
+## 6. 観測点の選び方
+
+主張が違えば観測点も違う。実例(数値・コード・変異で殺した記録)は
+[observation.md](observation.md)。
+
+| 見たい物 | 観測点 | 避ける物 | observation の節 |
+|---|---|---|---|
+| 印刷 | `beforeprint`(印刷が始まる瞬間)。`afterprint` で消える作りなら消える前に測る。規則は `setViewportSize(794×1123)` でも見る(`emulateMedia` だけでは幅が変わらない) | 「押した直後」 | 環境差に強い側へ寄せる / 印刷は版面が紙の幅になる |
+| 通信を「止めた」 | アプリ自身の信号(確認の帯が出た)+ 応答が返らないこと。「試行が起きない」を主張するなら `request` | `request` / `requestfailed` の到着時期 | ネットワークの event を… |
+| 2 つの面の一致 | 各観測点に「直す前はこうだった」(bare)を書き、片方が bare でないことを先に見る | 両面とも壊れていても一致する比較 | 空振り防止は「素のままの値」で置く |
+| 時間・競合でしか出ない | 配線(`Worker.prototype.postMessage` を包んだ**命令列**)。記録の前に配列を空にする。空振り防止に `toContain` | reload までの数百 ms に賭ける観測 | 時間に依存する観測点は… |
+| 絵・状態が揃うこと | 「そのもの」を待つ(`waitForFunction(img.complete && naturalHeight > 0)` / `expect.poll` / `vi.waitFor`)。待ちきれないなら下の assert が落ちる形にする | `domcontentloaded` の直後 / 固定の `setTimeout` | `domcontentloaded` は絵を待たない… |
+| 計算後の style | `getClientRects().length > 0`(箱が在る)と対にする | `display: none` でも残る `break-after` 等の単独 | 計算後の style だけを見ない |
+| 疑似要素(`::after` / `::before`) | `display` / `content` / 画素。親の下線は**親**の `textDecorationLine` | 疑似要素の `text-decoration` の計算値 | `::after` / `::before` の… |
+| 見た目の飾り | CSS の `::before` / `::after` の `content`。`th.textContent` が足す前と同じことを unit で見る | 飾りを字として足す(コピーに混ざる) | 飾りを字として足さない… |
+| DOM の消滅 | 「消された枝の中に居たか」(`querySelectorAll` で数える)。`addInitScript` では `observe(document, …)` | `removedNodes` の直下だけを `matches` | DOM の消滅を見るなら… |
+| 遷移のある値(opacity・ボタンの地 等) | 対照群で「遷移が走り切った」を観測してから読む。ボタンの地は `transitionsSettled`(helpers。`getAnimations().finished` を待つ)── 押した・外した直後に読まない。`expect.poll(...).toBe(落ち着いた後の値)` は可、`expect.poll(...).not.toBe(...)` は途中の 1 読みで通るので不可 | `expect.poll` の最初の一読 / `waitForTimeout` | `expect.poll` は「最初の一読で…」 |
+| 押す前後の見た目 | 測る前に `page.mouse.move(0, 0)` + 押していない兄弟と比べる | 押した後もマウスが上に居る(`:hover`) | 押す前と押した後で… |
+| 追加した診断 | わざと落として字を読む。待つ assert は「待つ前」と「待ち切った後」の 2 つを採る | 書いただけ | 診断は「書いただけ」では… |
+| 画面の案内 | 画面に出ている手本を**読んで、それを走らせる** | 手で打った字 | 自分で字を打つと… |
+| 取り消し(`Ctrl+Z`) | `insertText` に載せる。押す回数は固定せず 8 回押して履歴に「打った字」が出ることを見る | `value` 直代入 / `setRangeText`(履歴を切る) | `setRangeText` は… |
+| `<audio>.duration` | 見たい物だけを読む器をその場で作る(`onloadedmetadata`)。画面の器の値も併記。長さは `<audio>`、音は `decodeAudioData` | `readyState >= 1` の画面の器 | 鳴らしている `<audio>` の… |
+| canvas しか無い相手(LO wasm) | 絵の hash を**集合**で(間隔をあけて 4 枚)+ 対照群を手順の先頭に + まず screenshot + `page.mouse.click`。観測点の生死は**窓ごと**に書く | 窓の枚数 / 絵 1 枚ずつの hash / `el.focus()` | canvas しか無い相手… |
+| 目次・リンクの飛び先 | 中身を足した / 減らした面は sticky の下に入らないか実ブラウザで 1 度(`scroll-margin-top`) | happy-dom | 一覧を最後の節へ足すと… |
+
+## 8. 落ちたときの読み方 ── flake に見えるものが製品の穴だったことがある
+
+1. **単独で 3〜5 回**回す(`npx playwright test … <grep>`)── 単独で緑・全量で赤なら、状態の持ち越しか再描画の競合。
+   負荷で再現させるなら `--workers=4 --repeat-each=5`。よく出る型(次の描画で起きることを待たない)は
+   [observation.md](observation.md)「負荷でだけ落ちる観測点の型」
+2. **CI のバイナリで**回す
+3. 再現したら、**test を緩める前にアプリ側を疑う**
+4. 直したら、**確定的に鳴る unit** を足す ── smoke は確率的にしか落ちない。
+   ⚠ ただし「字面の位置」で pin すると、位置を保ったまま挙動を壊す変異
+   (`DOMContentLoaded` で包む等)が生き延びる ── **実行して観測する**
+
+実例(`external-images` が CI で 3 回に 1 回落ちた、原因は製品)→
+[incidents.md](incidents.md)「flake に見えたものが製品の穴だった」。

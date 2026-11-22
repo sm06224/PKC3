@@ -22,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 2. 方針・アーキテクチャの不変量（founding / 不可侵）
 
 > **北極星: 速く、安く、必要十分、利便性最大。「最強のノートアプリにするんだー」**
-> 正本 doc: `docs/development/pkc3-major-upgrade-design-2026-07.md`
+> 正本 doc: `docs/development/pkc3-major-upgrade-design-2026-07.md`（現役の正本の地図は `docs/development/INDEX.md`）
 
 1. **PKC2 (`sm06224/PKC2`) は read-only 参照のみ**: 手を出さない。丸写し禁止（古い設計・積み上げで遅くなる実装を持ち込まない）。PKC2 は機能の袋ではなく**動線**で読む（①入口は多く判定は 1 か所 ②作業が画面をまたいで続く ③開かずに追記・差し挟みで済ませる道がある）。
 2. **層とデータ形式**: `core ← features ← adapter`（`core` に browser API を入れない）。**全 body = PKC-Markdown、アーキタイプ = フレーバー**（`FlavorSpec`）。JSON 文字列 body を作らない。
