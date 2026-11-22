@@ -138,6 +138,41 @@ describe('「タグ ▾」で行を入れ替える', () => {
   });
 });
 
+describe('タグの欄を開いたままにする道', () => {
+  it('🔴 開いた欄で「付ける」を押して組み直しても、欄は開いたまま', () => {
+    const { d, inRow, q } = setup();
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'a' });
+    inRow('[data-pkc-field="bulk-tag-toggle"]')!.click();
+    const input = inRow('input[data-pkc-field="bulk-tag"]') as HTMLInputElement;
+    input.value = '#買い物';
+    inRow('[data-pkc-action="bulk-tag-add"]')!.click();
+    // 押した後の組み直し(並び順の変更で強制)
+    d.dispatch({ type: 'SET_ENTRY_SORT', sort: 'title' } as never);
+    expect(q('[data-pkc-field="filer-bulk"]')!.hasAttribute(BULK_TAG_MODE_ATTR), '付けたら欄が閉じた').toBe(true);
+  });
+
+  it('🔴 断られたタグを欄へ戻すときは、閉じていても欄を開く(隠れた字を残さない)', () => {
+    const { d, inRow, q } = setup();
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'a' });
+    const bulk = () => q('[data-pkc-field="filer-bulk"]')!;
+    expect(bulk().hasAttribute(BULK_TAG_MODE_ATTR), '前提: 閉じている').toBe(false);
+    d.dispatch({ type: 'TAGS_REFUSED', field: 'bulk-tag', tags: ['長すぎ'] });
+    expect((inRow('input[data-pkc-field="bulk-tag"]') as HTMLInputElement).value).toBe('#長すぎ');
+    expect(bulk().hasAttribute(BULK_TAG_MODE_ATTR), '戻した字が閉じた欄に隠れている').toBe(true);
+    expect(inRow('[data-pkc-field="bulk-tag-toggle"]')!.getAttribute('aria-expanded')).toBe('true');
+    // 組み直しても開いたまま
+    d.dispatch({ type: 'SET_ENTRY_SORT', sort: 'title' } as never);
+    expect(bulk().hasAttribute(BULK_TAG_MODE_ATTR)).toBe(true);
+  });
+
+  it('対照群: 断りが空なら開かない', () => {
+    const { d, q } = setup();
+    d.dispatch({ type: 'TOGGLE_SELECT', lid: 'a' });
+    d.dispatch({ type: 'CLEAR_REFUSED_TAGS', field: 'bulk-tag' });
+    expect(q('[data-pkc-field="filer-bulk"]')!.hasAttribute(BULK_TAG_MODE_ATTR)).toBe(false);
+  });
+});
+
 describe('作る先の案内', () => {
   it('🔴 ふつうのフォルダ: 行では見えない字 + パンくずの現在地の title', async () => {
     const { d, inRow, q } = setup([meta('f1', 1, 'folder'), meta('n', 2)], [rel('r', 'f1', 'n')]);

@@ -280,6 +280,18 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
   await rows.nth(2).click({ modifiers: ['ControlOrMeta'] });
   await expect(bulk).toContainText('3 件');
   // ⚠ #1982 ③-c からタグの欄は「タグ ▾」で行を入れ替えて出す
+  // 🔴 対照群: 開く前は欄が見えず、ゴミ箱へ・書き出すが見える(CSS の入れ替えは実ブラウザでしか見えない)
+  await expect(bulk.locator('[data-pkc-field="bulk-tag"]'), '開く前から欄が見えている').toBeHidden();
+  await expect(bulk.locator('[data-pkc-action="delete-selected"]')).toBeVisible();
+  await clickReal(page, '[data-pkc-field="bulk-tag-toggle"]');
+  await expect(bulk.locator('[data-pkc-field="bulk-tag"]'), '「タグ ▾」で欄が出ない').toBeVisible();
+  await expect(bulk.locator('[data-pkc-action="delete-selected"]'), 'タグの欄の間もゴミ箱へが見える').toBeHidden();
+  await expect(bulk.locator('[data-pkc-field="bulk-export-menu"]'), 'タグの欄の間も書き出すが見える').toBeHidden();
+  await expect(bulk.locator('[data-pkc-field="filer-bulk-count"]'), 'タグの欄の間に数が消えた').toBeVisible();
+  // 戻る → 元の選択操作へ(片道にしない)
+  await clickReal(page, '[data-pkc-field="bulk-tag-back"]');
+  await expect(bulk.locator('[data-pkc-field="bulk-tag"]'), '戻るで欄が閉じない').toBeHidden();
+  await expect(bulk.locator('[data-pkc-action="delete-selected"]'), '戻ってもゴミ箱へが出ない').toBeVisible();
   await clickReal(page, '[data-pkc-field="bulk-tag-toggle"]');
   await page.locator('[data-pkc-field="bulk-tag"]').fill('急ぎ');
   await clickReal(page, '[data-pkc-action="bulk-tag-add"]');

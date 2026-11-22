@@ -1058,6 +1058,16 @@ export class FilerRenderer {
       this.paintedRefused[field] = text;
       if (el.value !== '' && el.value !== was) continue;
       el.value = text;
+      /**
+       * 🔴 断られたタグを戻した欄は**見える所に出す**(#1982 ③-c)── 欄はタグを開いたときだけ見えるので、
+       *   開いていないと戻した字が隠れたまま残り、次に開いたとき突然現れる。
+       */
+      const bulk = el.closest<HTMLElement>('[data-pkc-field="filer-bulk"]');
+      if (text !== '' && bulk !== null) {
+        bulk.setAttribute(BULK_TAG_MODE_ATTR, '');
+        this.bulkTagMode = true;
+        bulk.querySelector('[data-pkc-field="bulk-tag-toggle"]')?.setAttribute('aria-expanded', 'true');
+      }
     }
   }
 
