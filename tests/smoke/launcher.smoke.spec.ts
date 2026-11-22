@@ -2007,7 +2007,7 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
 
   // 🔴 **戻すと使える状態で戻る**(確認文「ゴミ箱から戻せます」が嘘でない)
   await openBrowse(page, 'filer');
-  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]');
   await clickReal(page, '[data-pkc-action="restore-trash"]');
   // ⚠ 戻したノートはルート直下に出る(フォルダの表で数える)
   await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(1);
@@ -2019,7 +2019,7 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
   await clickInspectorMoreItem(page, 'delete-entry');
   await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(0);
   await openBrowse(page, 'filer');
-  await clickReal(page, '[data-pkc-action="show-trash"]');
+  await clickReal(page, '[data-pkc-region="filer-trash"] [data-pkc-action="show-trash"]');
   // ⚠ 「ゴミ箱を空にする」は見出しの 1 つ(行ごとの「完全に消す」は `data-pkc-trash-lid` を持つ ── 束 G2、依頼 301)
   await clickReal(page, '[data-pkc-action="purge-trash"]:not([data-pkc-trash-lid])');
   // ⚠ 一括・不可逆なので、確認の文言も見る(#299 段②)
