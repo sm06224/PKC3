@@ -97,7 +97,7 @@ describe('SyncKeystore', () => {
   it('🔴 書けなかったときの理由の字に秘密を混ぜない', async () => {
     const be = memBackend();
     be.putBox = async () => {
-      throw new Error('鍵の置き場に書けません');
+      throw new Error('認証情報の置き場に書けません');
     };
     const err = await new SyncKeystore(be).save('c1', CONFIG, { accessKeyId: CANARY_ID, secretAccessKey: CANARY_SECRET }).catch((e: unknown) => e);
     expect(String(err)).not.toContain(CANARY_ID);

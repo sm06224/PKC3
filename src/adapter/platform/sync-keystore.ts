@@ -132,7 +132,7 @@ export function idbKeystoreBackend(dbName = SYNC_KEYS_DB): KeystoreBackend {
         if (!db.objectStoreNames.contains(BOXES)) db.createObjectStore(BOXES);
       };
       req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error ?? new Error('鍵の置き場を開けません'));
+      req.onerror = () => reject(req.error ?? new Error('認証情報の置き場を開けません'));
     });
   const tx = async <T>(store: string, mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> => {
     const db = await open();
@@ -141,8 +141,8 @@ export function idbKeystoreBackend(dbName = SYNC_KEYS_DB): KeystoreBackend {
         const t = db.transaction(store, mode);
         const r = fn(t.objectStore(store));
         t.oncomplete = () => resolve(r.result);
-        t.onerror = () => reject(t.error ?? new Error('鍵の置き場に書けません'));
-        t.onabort = () => reject(t.error ?? new Error('鍵の置き場への書き込みが中断されました'));
+        t.onerror = () => reject(t.error ?? new Error('認証情報の置き場に書けません'));
+        t.onabort = () => reject(t.error ?? new Error('認証情報の置き場への書き込みが中断されました'));
       });
     } finally {
       db.close();
