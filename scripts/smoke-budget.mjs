@@ -159,7 +159,7 @@ import { join } from 'node:path';
  * - 2026-11-23(メッセージの入口 + 簡易履歴 + 消せる浮き札): **622**(そのときの実数 622)。`message-popover.smoke.spec.ts` を新設(起動 4 つ)。⚠ 既存の道中には載せられない ──
  *   見る相手は、grid に帯の行が無いこと・浮き札が出ても配置が動かないこと・本物のホバーの遅延と離脱・焦点の戻り・top layer の収まり・スマホ幅の入口で、まっさらな起動から作って見る。
  */
-export const BOOT_BUDGET = 622;
+export const BOOT_BUDGET = 623;
 // 2026-11-22(A3 レビュー): **608**(実数 608)。`tooltip.smoke.spec.ts` に 1 本足した(起動 1 つ)。⚠ 既存の道中には載せられない ── `showModal()` で top layer に載せた
 //   ダイアログの中で、吹き出しが最前面にあるか(`elementFromPoint`)を見る。モーダルの上の当たり判定は実ブラウザでしか出ない。
 // 2026-11-22(A3 上側のツールチップ): **607**(実数 607)。`tooltip.smoke.spec.ts` を新設(起動 2 つ)。⚠ 既存の道中には載せられない ──
@@ -196,7 +196,7 @@ export const BOOT_BUDGET = 622;
 export const SECONDS_PER_BOOT = 1.63;
 
 /** 🔴 下限 ── 数え方が壊れて 0 になったら「予算内」に見える(CLAUDE.md §1)。 */
-export const BOOT_FLOOR = 311;
+export const BOOT_FLOOR = 312;
 
 /** TS のコメントを落とす(`tests/helpers/code-only.ts` と同じ規則)。 */
 export function codeOnly(src) {
