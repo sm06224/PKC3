@@ -15218,7 +15218,7 @@ h6:hover > .pkc-heading-anchor,
 }
 @media screen and (forced-colors: none) {
   /* 線(芯の明るい 2px) */
-  :is([data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block), [data-pkc-region='inspector'] > [data-pkc-card], [data-pkc-region='rail'] button)[data-pkc-glow-near][data-pkc-glow-near]::before {
+  :is([data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block, .pkc-details), [data-pkc-region='inspector'] > [data-pkc-card], [data-pkc-region='rail'] button)[data-pkc-glow-near][data-pkc-glow-near]::before {
     content: '';
     position: absolute;
     inset: calc(-1 * var(--nb-t)) calc(-1 * var(--nb-r)) calc(-1 * var(--nb-b)) calc(-1 * var(--nb-l));
@@ -15256,7 +15256,7 @@ h6:hover > .pkc-heading-anchor,
    * ポインタを中心にした放射状のマスクで「近い所だけ」にする(`mask-clip: no-clip` で箱の外の影も残す。マスクの像は箱より 14px 広く取る)。
    * ⚠ 枠を持たない辺(記録の途中の塊の上下)へは出さない(`clip-path` で箱の縁より 1px 内側に切る ── 縁ちょうどだと、小数の位置で縁の 1 行に線のすぐ外の濃い影が漏れて、カードの中に横線が出る。⚠ 箱は枠の有無にかかわらず 1px 外へ広げ、クリップ線が本来の縁に来るようにする ── 内側へ切るだけだと、塊の境目で横のにじみが 1px 途切れる)。角丸は `border-radius: inherit` で影も回り込む。
    * ⚠ バーのボタンには付けない(バーは `overflow: hidden` で切られるので、線はボタンの箱の内側 2px だけで描く)。 */
-  :is([data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block), [data-pkc-region='inspector'] > [data-pkc-card])[data-pkc-glow-near][data-pkc-glow-near]::after {
+  :is([data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block, .pkc-details), [data-pkc-region='inspector'] > [data-pkc-card])[data-pkc-glow-near][data-pkc-glow-near]::after {
     content: '';
     position: absolute;
     inset: -1px;
@@ -15274,7 +15274,7 @@ h6:hover > .pkc-heading-anchor,
 }
 
 /**
- * 🔴 **表・コード・csv・図の器(`.pkc-md-block`)の輪郭**(B2)── 器は `overflow: auto`(横スクロール)で、疑似要素は自分の外
+ * 🔴 **表・コード・csv・図の器(`.pkc-md-block`)と折りたたみ(`.pkc-details`。B1 が同じ透明な枠で余白を取る)の輪郭**(B2)── 器は `overflow: auto`(横スクロール)で、疑似要素は自分の外
  * (カードの輪郭 = 透明な枠の外縁)へはみ出すと**切られる**ので、B1 と同じ**器自身の背景**で描く:
  * 下から「静止の線(B1)→ 光の放射(全面。局所座標)→ 内側の地(輪郭の 2px を残して塗る)」の順に重ね、
  * 残った外縁の 2px だけが光って見える(上の辺・下の辺・角丸の弧は、先頭 / 末尾 / 単独のときだけ。角は四分円で内側の地を丸く抜く)。
@@ -15282,31 +15282,31 @@ h6:hover > .pkc-heading-anchor,
  *   器の外へはみ出すため描かない(線だけ)。⚠ 静止の線の層は B1 の規則の写し ── B1 の層を変えたらここも合わせる。
  */
 @media screen and (forced-colors: none) {
-  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card][data-pkc-glow-near] {
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-glow-near] {
     --ng: radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), var(--neon-core), var(--neon) 34%, color-mix(in srgb, var(--neon) 70%, transparent) 66%, transparent);
     --sf: linear-gradient(var(--surface), var(--surface));
     background-repeat: no-repeat;
   }
-  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card][data-pkc-glow-near]:not([data-pkc-log-card='first'], [data-pkc-log-card='last'], [data-pkc-log-card='solo']) {
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-glow-near]:not([data-pkc-log-card='first'], [data-pkc-log-card='last'], [data-pkc-log-card='solo']) {
     background-image: var(--sf), var(--ng), var(--hl), var(--hl);
     background-size: calc(100% - 4px) 100%, 100% 100%, 1px 100%, 1px 100%;
     background-position: 2px 0, 0 0, left top, right top;
   }
-  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='first'][data-pkc-glow-near] {
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='first'][data-pkc-glow-near] {
     background-image: var(--sf), var(--sf), radial-gradient(circle at 100% 100%, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 0 100%, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), var(--ng), var(--hl), var(--hl), var(--hl),
       radial-gradient(circle at 100% 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 0 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
     background-size: calc(100% - 4px) calc(100% - var(--rl)), calc(100% - 2 * var(--rl)) calc(var(--rl) - 2px), var(--rl) var(--rl), var(--rl) var(--rl), 100% 100%,
       1px 100%, 1px 100%, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl);
     background-position: 2px 100%, var(--rl) 2px, left top, right top, 0 0, left top, right top, left top, left top, right top;
   }
-  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='last'][data-pkc-glow-near] {
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='last'][data-pkc-glow-near] {
     background-image: var(--sf), var(--sf), radial-gradient(circle at 100% 0, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 0 0, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), var(--ng), var(--hl), var(--hl), var(--hl),
       radial-gradient(circle at 100% 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 0 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
     background-size: calc(100% - 4px) calc(100% - var(--rl)), calc(100% - 2 * var(--rl)) calc(var(--rl) - 2px), var(--rl) var(--rl), var(--rl) var(--rl), 100% 100%,
       1px 100%, 1px 100%, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl);
     background-position: 2px 0, left var(--rl) bottom 2px, left bottom, right bottom, 0 0, left top, right top, left bottom, left bottom, right bottom;
   }
-  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='solo'][data-pkc-glow-near] {
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='solo'][data-pkc-glow-near] {
     background-image: var(--sf), var(--sf), var(--sf), radial-gradient(circle at 100% 100%, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 0 100%, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 100% 0, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 0 0, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), var(--ng),
       var(--hl), var(--hl), var(--hl), var(--hl), radial-gradient(circle at 100% 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 0 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 100% 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 0 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
     background-size: calc(100% - 4px) calc(100% - 2 * var(--rl)), calc(100% - 2 * var(--rl)) calc(var(--rl) - 2px), calc(100% - 2 * var(--rl)) calc(var(--rl) - 2px),

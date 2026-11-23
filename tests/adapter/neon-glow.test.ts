@@ -47,20 +47,24 @@ const microtasks = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 /** 観測器の差し替え(付け外しを数える)。 */
 let observers: { kind: 'mo' | 'ro'; connected: boolean }[] = [];
-let roCallbacks: (() => void)[] = [];
+let roCallbacks: ((entries: { target: Element }[]) => void)[] = [];
+let roObserved = new Set<Element>();
 class FakeRO {
   rec = { kind: 'ro' as const, connected: false };
-  cb: () => void;
-  constructor(cb: () => void) {
-    this.cb = cb;
+  constructor(cb: (entries: { target: Element }[]) => void) {
     roCallbacks.push(cb);
     observers.push(this.rec);
   }
-  observe(): void {
+  observe(el: Element): void {
     this.rec.connected = true;
+    roObserved.add(el);
+  }
+  unobserve(el: Element): void {
+    roObserved.delete(el);
   }
   disconnect(): void {
     this.rec.connected = false;
+    roObserved.clear();
   }
 }
 
@@ -104,6 +108,7 @@ beforeEach(() => {
   frames = [];
   observers = [];
   roCallbacks = [];
+  roObserved = new Set();
   vi.restoreAllMocks();
   vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
     frames.push(cb);
@@ -243,16 +248,45 @@ describe('ゾーンの出入り', () => {
     expect(live(n)).toEqual({ pointermove: 1, pointerleave: 1 });
   });
 
-  it('ゾーンが DOM から消えたら(描き直し)次のコマで外れる', () => {
+  it('🔴 ゾーンが描き直しで消えたら、通知(revalidate)の次のコマで外れる(ポインタは止まったまま・手で pointermove を撃たない)', () => {
     const rig = makeLog();
     const m = media(true);
     glow = createNeonGlow(document, () => m);
     rig.cards[0]!.dispatchEvent(pointer('pointerover', 120, 110));
     runFrame();
+    const n = counting(document, window, rig.zone);
     rig.zone.remove();
-    rig.zone.dispatchEvent(pointer('pointermove', 120, 111, false));
+    expect(glow.inZone(), '通知の前に外れている(検査の前提)').toBe(true);
+    glow.revalidate();
     runFrame();
     expect(glow.inZone()).toBe(false);
+    expect(observers.every((o) => !o.connected), '観測器が残った').toBe(true);
+    expect(Object.values(n).every((v) => v <= 0), `外れていない: ${JSON.stringify(n)}`).toBe(true);
+  });
+
+  it('🔴 差し替わったゾーンの下にポインタが止まっていれば、通知の次のコマでそのゾーンへ入り直して光る', () => {
+    const rig = makeLog();
+    const m = media(true);
+    glow = createNeonGlow(document, () => m);
+    rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
+    runFrame();
+    // 描き直し: 古いゾーンを外し、同じ位置に新しいゾーン(新しいカード)を置く
+    const old = rig.zone;
+    const fresh = makeLog();
+    expect(old.isConnected).toBe(false);
+    document.elementFromPoint = (() => fresh.cards[0]!) as typeof document.elementFromPoint;
+    glow.revalidate();
+    runFrame();
+    runFrame();
+    expect(glow.inZone(), '新しいゾーンへ入り直していない').toBe(true);
+    expect(fresh.cards[0]!.hasAttribute(NEAR_ATTR), '新しいゾーンが光らない(次に要素をまたぐまで待たされる)').toBe(true);
+  });
+
+  it('ゾーンの外にいる間の revalidate は何も予約しない(仕事 0)', () => {
+    makeLog();
+    glow = createNeonGlow(document, () => media(true));
+    glow.revalidate();
+    expect(frames).toEqual([]);
   });
 
   it('ゾーンの定義: 3 か所(ログ・情報ペイン・バー)。半径は NEON_RADIUS', () => {
@@ -401,13 +435,127 @@ describe('ゾーンの大きさ(ResizeObserver)', () => {
     rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
     runFrame();
     const base = rig.measured();
-    roCallbacks[0]!(); // 1 回目 = いまの大きさ
+    roCallbacks[0]!([{ target: rig.zone }]); // 1 回目 = いまの大きさ
     expect(frames.length, '1 回目の通知で汚れた').toBe(0);
     rig.rects.set(rig.cards[0]!, { left: 100, top: 100, width: 200, height: 50 });
-    roCallbacks[0]!();
+    roCallbacks[0]!([{ target: rig.zone }]);
     expect(rig.measured(), '同期で測った').toBe(base);
     runFrame();
     expect(rig.measured()).toBeGreaterThan(base);
+  });
+});
+
+describe('測り直しの穴(自分の書き込み・外からの style・動いたゾーン・読み込み)', () => {
+  it('🔴 カードが半径を出て光が消えた次のコマで、全カードを測り直さない(自分の `style` の消去は汚れでない)', async () => {
+    const rig = makeLog(5);
+    glow = createNeonGlow(document, () => media(true));
+    rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
+    runFrame();
+    await microtasks();
+    const base = rig.measured();
+    // カード 0・1・2 が光っている → 遠くへ動かして 0・1 が消える
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 330, false));
+    runFrame();
+    expect(rig.cards[0]!.hasAttribute(NEAR_ATTR), '検査の前提: 光が消えた').toBe(false);
+    await microtasks(); // 自分の消去の記録が観測器へ届く(takeRecords で捨てていなければ汚れになる)
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 331, false));
+    runFrame();
+    expect(rig.measured(), '消えるたびに全部測り直している(自分の書き込みを汚れと数えた)').toBe(base);
+  });
+
+  it('🔴 他の誰かがカードの style で大きさを変えたら、(自分の書き込みと区別して)測り直す', async () => {
+    const rig = makeLog(1);
+    glow = createNeonGlow(document, () => media(true));
+    rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
+    runFrame();
+    await microtasks();
+    const base = rig.measured();
+    rig.rects.set(rig.cards[0]!, { left: 100, top: 100, width: 400, height: 200 });
+    rig.cards[0]!.style.height = '200px'; // 外からの style の変更
+    await microtasks();
+    runFrame();
+    expect(rig.measured(), '外からの style の変更を自分の書き込みと取り違えて見逃した').toBeGreaterThan(base);
+  });
+
+  it('🔴 ゾーンが動いた(大きさは同じ。上に別の塊が現れた)ら、次のポインタのコマで測り直す', () => {
+    const rig = makeLog(1);
+    const box = { left: 100, top: 50, right: 500, bottom: 400, width: 400, height: 350, x: 100, y: 50 };
+    rig.zone.getBoundingClientRect = () => ({ ...box, toJSON: () => ({}) }) as DOMRect;
+    glow = createNeonGlow(document, () => media(true));
+    rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
+    runFrame();
+    const base = rig.measured();
+    rig.rects.set(rig.cards[0]!, { left: 100, top: 140, width: 400, height: 50 });
+    box.top = 90;
+    box.bottom = 440;
+    box.y = 90; // 同じ大きさのまま 40px 下へ
+    // 毎コマは読まない(200ms ごと)── 直後のコマでは測り直さず、200ms 後のコマで追いつく
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 111, false));
+    runFrame();
+    expect(rig.measured(), '毎コマ ゾーンの矩形を読んでいる(強制再計算が増える)').toBe(base);
+    const t0 = performance.now();
+    vi.spyOn(performance, 'now').mockReturnValue(t0 + 300);
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 111, false));
+    runFrame();
+    expect(rig.measured(), '動いたゾーンを見逃した').toBeGreaterThan(base);
+    expect(rig.cards[0]!.style.getPropertyValue('--gy')).toBe('-29px');
+  });
+
+  it('🔴 光っているカードの大きさが変わったら(画像・字体の読み込み)、次のコマで測り直す。光が消えたカードは観測しない', () => {
+    const rig = makeLog(5);
+    glow = createNeonGlow(document, () => media(true));
+    rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
+    runFrame();
+    expect(roObserved.has(rig.cards[0]!), '光っているカードを観測していない').toBe(true);
+    expect(roObserved.has(rig.cards[4]!), '光っていないカードまで観測している(費用が膨らむ)').toBe(false);
+    const base = rig.measured();
+    // 1 回目の通知(いま)── 汚れでない
+    roCallbacks[0]!([{ target: rig.cards[0]! }]);
+    expect(frames.length).toBe(0);
+    // 画像が読み込まれてカード 0 が伸びた
+    rig.rects.set(rig.cards[0]!, { left: 100, top: 100, width: 400, height: 90 });
+    roCallbacks[0]!([{ target: rig.cards[0]! }]);
+    expect(rig.measured(), '同期で測った').toBe(base);
+    runFrame();
+    expect(rig.measured(), '大きさの変化を見逃した').toBeGreaterThan(base);
+    // 遠くへ動かして光が消えたカードは観測から外れる
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 480, false));
+    runFrame();
+    expect(roObserved.has(rig.cards[0]!), '光が消えたカードを観測し続けている').toBe(false);
+  });
+
+  it('🔴 字体の読み込み完了(document.fonts の loadingdone)でも汚れる。ゾーンを出ると外れる', () => {
+    const rig = makeLog(1);
+    const fonts = new EventTarget();
+    Object.defineProperty(document, 'fonts', { value: fonts, configurable: true });
+    const n = counting(fonts);
+    glow = createNeonGlow(document, () => media(true));
+    rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
+    runFrame();
+    expect(n.loadingdone).toBe(1);
+    const base = rig.measured();
+    fonts.dispatchEvent(new Event('loadingdone'));
+    runFrame();
+    expect(rig.measured()).toBeGreaterThan(base);
+    rig.zone.dispatchEvent(pointer('pointerleave', 0, 0, false));
+    expect(n.loadingdone, '出ても外れない').toBe(0);
+    delete (document as unknown as { fonts?: unknown }).fonts;
+  });
+
+  it('💭 直接の子だけを対象にする(CSS が `>` で書いている所。入れ子のカードの印には光らせない)', () => {
+    const rig = makeLog(1);
+    const nested = document.createElement('div');
+    const inner = document.createElement('p');
+    inner.setAttribute('data-pkc-log-card', 'mid');
+    inner.getBoundingClientRect = () => ({ left: 100, top: 100, right: 500, bottom: 150, width: 400, height: 50, x: 100, y: 100, toJSON: () => ({}) }) as DOMRect;
+    nested.append(inner);
+    rig.zone.append(nested);
+    glow = createNeonGlow(document, () => media(true));
+    rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
+    runFrame();
+    expect(rig.cards[0]!.hasAttribute(NEAR_ATTR)).toBe(true);
+    expect(inner.hasAttribute(NEAR_ATTR), '入れ子のカードへ書いた').toBe(false);
+    expect(NEON_ZONES.map((z) => z.direct)).toEqual([true, true, false]);
   });
 });
 
@@ -459,7 +607,7 @@ describe('CSS(原文)', () => {
   it('🔴 横スクロールの器(`.pkc-md-block`)は疑似要素でなく器自身の背景で輪郭を描く(疑似要素は overflow に切られる)', () => {
     const { body } = atBlock(css, '@media screen and (forced-colors: none)');
     // 疑似要素の規則からは器を除く
-    expect(body).toMatch(/\[data-pkc-log-card\]:not\(\.pkc-md-block\)/);
+    expect(body).toMatch(/\[data-pkc-log-card\]:not\(\.pkc-md-block, \.pkc-details\)/);
     // 器の 4 つの辺の型(途中 / 先頭 / 末尾 / 単独)すべてに光の層がある
     const second = css.slice(css.indexOf('@media screen and (forced-colors: none)', css.indexOf('@media screen and (forced-colors: none)') + 10));
     for (const edge of ['first', 'last', 'solo']) expect(second, `器の ${edge} に光の層が無い`).toContain(`[data-pkc-log-card='${edge}'][data-pkc-glow-near]`);

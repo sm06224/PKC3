@@ -40,7 +40,7 @@ const FIXTURE = [
     `## 2026-10-${String(1 + Math.floor(i / 3)).padStart(2, '0')} ${String(8 + (i % 3) * 3).padStart(2, '0')}:00:00`,
     `記録${i + 1}の本文です。作業の経過をここに書きます。`,
     ...(i === 1 ? ['補足の段落です。数字の突き合わせは明日にまわす。'] : []),
-    ...(i === 0 ? [WIDE_TABLE, `\`\`\`ts\n${WIDE_CODE}\n\`\`\``] : []),
+    ...(i === 0 ? [WIDE_TABLE, `\`\`\`ts\n${WIDE_CODE}\n\`\`\``, ':::details{summary="折りたたみの見出し" open}\n折りたたみの中身\n:::'] : []),
   ]).flat(),
 ].join('\n\n');
 
@@ -247,6 +247,36 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
     });
     await page.waitForTimeout(100);
     expect(changed(restR, await pixels(page, edgeR)), `${kind}: 横スクロールで輪郭が消えた`).toBeGreaterThan(rows * 0.9);
+    await page.mouse.move(OUT_X, OUT_Y);
+  }
+
+  // ⑤c 🔴 折りたたみ(`:::details`)の輪郭は、他の塊と同じカードの縁(±1px)に出る(内側の余白 `--card-pad` のぶん内へ寄らない)
+  {
+    await page.evaluate(() => {
+      (document.querySelector('[data-neon-scroller]') as HTMLElement).scrollTop = 0;
+    });
+    const det = page.locator(`${BODY} > details.pkc-details[data-pkc-log-card]`).first();
+    await det.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await page.mouse.move(OUT_X, OUT_Y);
+    await expect(page.locator(NEAR)).toHaveCount(0);
+    const d = await det.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.x, y: r.y, h: r.height };
+    });
+    // カードの縁 = 同じ記録の見出し(先頭の塊)の左端
+    const cardX = await page.locator(`${BODY} > h2[data-pkc-log-card="first"]`).first().evaluate((el) => el.getBoundingClientRect().x);
+    expect(Math.abs(cardX - d.x), '検査の前提: 折りたたみの箱の左端がカードの縁').toBeLessThanOrEqual(1);
+    expect(d.h).toBeGreaterThan(30);
+    const edge = { x: d.x - 2, y: d.y + 10, width: 6, height: d.h - 20 };
+    const inside = { x: d.x + 8, y: d.y + 10, width: 24, height: d.h - 20 };
+    const restE = await pixels(page, edge);
+    const restI = await pixels(page, inside);
+    await page.mouse.move(d.x + 60, d.y + d.h / 2 - 30);
+    await page.mouse.move(d.x + 4, d.y + d.h / 2);
+    await expect.poll(() => det.evaluate((el) => el.hasAttribute('data-pkc-glow-near')), { message: '折りたたみの塊が光らない' }).toBe(true);
+    await page.waitForTimeout(150);
+    expect(changed(restE, await pixels(page, edge)), '折りたたみの輪郭がカードの縁(±1px)に出ていない').toBeGreaterThan((d.h - 20) * 2 * 0.8);
+    expect(changed(restI, await pixels(page, inside)), '折りたたみの輪郭が内側の余白のぶん内へ寄っている(カードの縁から 8px 以上内側が変わった)').toBe(0);
     await page.mouse.move(OUT_X, OUT_Y);
   }
 

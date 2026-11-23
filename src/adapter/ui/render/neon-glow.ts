@@ -37,11 +37,14 @@ export interface NeonZoneSpec {
   readonly zone: string;
   readonly cards: string;
   readonly radius: number;
+  /** ゾーンの直接の子だけが光る(CSS が `>` で書いている所。⚠ CSS と揃える ── 揃えないと光らない要素へ無駄に書く)。 */
+  readonly direct: boolean;
 }
 export const NEON_ZONES: readonly NeonZoneSpec[] = [
-  { zone: '[data-pkc-log-days]', cards: '[data-pkc-log-card]', radius: NEON_RADIUS.log },
-  { zone: '[data-pkc-region="inspector"]', cards: '[data-pkc-card]', radius: NEON_RADIUS.inspector },
-  { zone: '[data-pkc-region="rail"]', cards: 'button', radius: NEON_RADIUS.rail },
+  { zone: '[data-pkc-log-days]', cards: '[data-pkc-log-card]', radius: NEON_RADIUS.log, direct: true },
+  { zone: '[data-pkc-region="inspector"]', cards: '[data-pkc-card]', radius: NEON_RADIUS.inspector, direct: true },
+  // バーのボタンは群(タブ・操作)の中に入れ子で並ぶので直接の子ではない
+  { zone: '[data-pkc-region="rail"]', cards: 'button', radius: NEON_RADIUS.rail, direct: false },
 ];
 const ANY_ZONE = NEON_ZONES.map((z) => z.zone).join(', ');
 
@@ -59,8 +62,16 @@ export interface NeonGlow {
   listening(): boolean;
   /** いまポインタがゾーンに入っていて、`pointermove` などを付けているか。 */
   inZone(): boolean;
+  /**
+   * 描き直しでゾーンの要素が差し替わったかを、次のコマで確かめる(ポインタが止まっていても付け直す)。
+   * ゾーンの外にいるときは何もしない(仕事 0)。呼び手: `main.ts` の状態の通知(描き直しの後)。
+   */
+  revalidate(): void;
   destroy(): void;
 }
+
+/** ゾーンの矩形を読み直す間隔(ms)。 */
+const ZONE_BOX_EVERY_MS = 200;
 
 type Item = CardRect & { readonly el: HTMLElement };
 
@@ -92,11 +103,24 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
   let mo: MutationObserver | null = null;
   let ro: ResizeObserver | null = null;
   let roFirst = true;
+  /** 光っているカード(`ro` で大きさも見ている)。 */
   const lit = new Map<HTMLElement, { gx: number; gy: number }>();
+  /** `ro` に付けた直後で、最初の通知(いまの大きさ)をまだ受けていないカード。 */
+  const fresh = new Set<HTMLElement>();
+  /** 次のコマで、ゾーンの差し替えを確かめるか。 */
+  let revalidating = false;
+  /** 最後に測ったゾーンの矩形(動いた / 大きさが変わったことを、コマの頭で安く確かめる)。 */
+  let zoneBox: { left: number; top: number; width: number; height: number } | null = null;
+  let boxAt = 0;
+  const now = (): number => view?.performance?.now() ?? 0;
   const cache = createRectCache<Item>(() => {
     const out: Item[] = [];
     if (zone === null || spec === null) return out;
+    const zr = zone.getBoundingClientRect();
+    zoneBox = { left: zr.left, top: zr.top, width: zr.width, height: zr.height };
+    boxAt = now();
     for (const el of zone.querySelectorAll<HTMLElement>(spec.cards)) {
+      if (spec.direct && el.parentElement !== zone) continue;
       const r = el.getBoundingClientRect();
       // 隠れている(畳み・非表示)カードは矩形が 0 ── 原点の近くで偽って光らせない
       if (r.width === 0 && r.height === 0) continue;
@@ -106,6 +130,8 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
   });
 
   const clearOne = (el: HTMLElement): void => {
+    ro?.unobserve(el);
+    fresh.delete(el);
     el.style.removeProperty('--gx');
     el.style.removeProperty('--gy');
     el.removeAttribute(NEAR_ATTR);
@@ -117,10 +143,26 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
 
   const paint = (): void => {
     frame = 0;
+    if (revalidating) {
+      revalidating = false;
+      refresh();
+    }
     if (zone === null || spec === null || !known) return;
     if (!zone.isConnected) {
       leave();
       return;
+    }
+    // 🔴 自分の書き込みの記録は、コマの終わりに `takeRecords()` で捨てる(下)── だからここで受け取る記録は**全部、他の誰かの変更**
+    //    (子の増減・属性・`style` の変化)。⚠ 自分の書き込みを「`style` だから無視」で見分けると、外から `style` で大きさが変わっても見逃す
+    if (mo !== null && mo.takeRecords().length > 0) cache.markDirty();
+    // ゾーンが動いた / 大きさが変わった(上に別の塊が現れた・画像や字体の読み込みで伸びた)── 読んだ値を比べるだけ(コマの頭は描画の直後で、レイアウトは済んでいる)
+    // ⚠ 毎コマは読まない(コマの頭で矩形を読むと、ホバーなどで汚れた style がそこで強制的に計算され、1 コマに 2 回の再計算になる ── 実測)。
+    //   動いたゾーンの追従は 200ms ごとで足りる(上に塊が現れるのは、ポインタの動きより遅い出来事)
+    const t = now();
+    if (zoneBox !== null && t - boxAt >= ZONE_BOX_EVERY_MS) {
+      boxAt = t;
+      const zr = zone.getBoundingClientRect();
+      if (zr.left !== zoneBox.left || zr.top !== zoneBox.top || zr.width !== zoneBox.width || zr.height !== zoneBox.height) cache.markDirty();
     }
     const items = cache.get();
     const near = nearCards(items, px, py, spec.radius);
@@ -132,7 +174,14 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
       if (prev !== undefined && prev.gx === n.gx && prev.gy === n.gy) continue;
       el.style.setProperty('--gx', `${n.gx}px`);
       el.style.setProperty('--gy', `${n.gy}px`);
-      if (!el.hasAttribute(NEAR_ATTR)) el.setAttribute(NEAR_ATTR, '');
+      if (!el.hasAttribute(NEAR_ATTR)) {
+        el.setAttribute(NEAR_ATTR, '');
+        // 光っている間だけ、そのカードの大きさも見る(画像・字体の読み込みで伸びても測り直す)
+        if (ro !== null) {
+          fresh.add(el);
+          ro.observe(el);
+        }
+      }
       lit.set(el, { gx: n.gx, gy: n.gy });
     }
     for (const el of [...lit.keys()]) {
@@ -140,6 +189,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
       clearOne(el);
       lit.delete(el);
     }
+    mo?.takeRecords();
   };
   const schedule = (): void => {
     if (frame === 0 && raf !== undefined) frame = raf(paint);
@@ -156,25 +206,25 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     known = true;
     schedule();
   };
-  const onMutations = (records: MutationRecord[]): void => {
-    for (const r of records) {
-      // 自分の書き込み(光っているカードの `style` / 印)は汚れではない
-      if (r.type === 'attributes') {
-        if (r.attributeName === NEAR_ATTR) continue;
-        if (r.attributeName === 'style' && r.target instanceof HTMLElement && lit.has(r.target)) continue;
-      }
-      markDirty();
-      return;
-    }
-  };
-  const onResizeObserved = (): void => {
-    // 観測を始めた直後の 1 回目は「いまの大きさ」の通知 ── 汚れではない(入った時に汚している)
-    if (roFirst) {
-      roFirst = false;
-      return;
-    }
+  const onMutations = (): void => {
+    // 自分の書き込みの記録は `paint` が `takeRecords()` で捨てているので、ここへ届くのは他の変更だけ
     markDirty();
   };
+  const onResizeObserved = (entries: readonly { target: Element }[]): void => {
+    // 観測を始めた直後の 1 回目は「いまの大きさ」の通知 ── 汚れではない(入った時 / 光らせた時に汚している)
+    let changed = false;
+    for (const e of entries) {
+      const el = e.target as HTMLElement;
+      if (fresh.delete(el)) continue;
+      if (el === zone && roFirst) {
+        roFirst = false;
+        continue;
+      }
+      changed = true;
+    }
+    if (changed) markDirty();
+  };
+  const onFonts = (): void => markDirty();
 
   const enter = (z: HTMLElement, s: NeonZoneSpec, e: PointerEvent): void => {
     zone = z;
@@ -187,6 +237,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     z.addEventListener('pointerleave', leave);
     view?.addEventListener('scroll', markDirty, { capture: true, passive: true });
     view?.addEventListener('resize', markDirty);
+    doc.fonts?.addEventListener?.('loadingdone', onFonts);
     if (typeof MutationObserver !== 'undefined') {
       mo = new MutationObserver(onMutations);
       mo.observe(z, { childList: true, subtree: true, attributes: true });
@@ -204,6 +255,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     zone.removeEventListener('pointerleave', leave);
     view?.removeEventListener('scroll', markDirty, { capture: true });
     view?.removeEventListener('resize', markDirty);
+    doc.fonts?.removeEventListener?.('loadingdone', onFonts);
     mo?.disconnect();
     ro?.disconnect();
     mo = null;
@@ -212,9 +264,24 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     frame = 0;
     clearAll();
     cache.reset();
+    fresh.clear();
+    zoneBox = null;
     zone = null;
     spec = null;
     known = false;
+  }
+
+  /** 差し替わったゾーンから出て、いまのポインタの下にゾーンがあれば入り直す(ポインタが止まっていても光る)。 */
+  function refresh(): void {
+    if (zone === null || zone.isConnected) return;
+    const x = px;
+    const y = py;
+    leave();
+    const t = doc.elementFromPoint?.(x, y);
+    if (t === null || t === undefined) return;
+    const z = t.closest<HTMLElement>(ANY_ZONE);
+    const sp = z === null ? undefined : NEON_ZONES.find((c) => z.matches(c.zone));
+    if (z !== null && sp !== undefined) enter(z, sp, { clientX: x, clientY: y } as PointerEvent);
   }
 
   /** ゾーンの外 → 中、ゾーンどうしの移り変わりだけを拾う(要素をまたぐときに 1 回)。 */
@@ -258,6 +325,11 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     },
     listening: () => on,
     inZone: () => zone !== null,
+    revalidate: () => {
+      if (zone === null) return;
+      revalidating = true;
+      schedule();
+    },
     destroy: () => {
       media?.removeEventListener?.('change', apply);
       on = false;
@@ -280,6 +352,11 @@ export function installNeonGlow(doc: Document): NeonGlow {
 }
 
 /** 版面がスマホ用画面か(`rail.ts` の `paintRail` が版面が入れ替わるたびに伝える)。起動前に呼ばれても覚えておく。 */
+/** 描き直しの後に呼ぶ(ゾーンが差し替わっていたら、次のコマで付け直す)。ゾーンの外にいるときの仕事は 0。 */
+export function revalidateNeonGlow(): void {
+  instance?.revalidate();
+}
+
 export function syncNeonPhone(phone: boolean): void {
   pendingPhone = phone;
   instance?.setPhone(phone);
