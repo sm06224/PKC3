@@ -44,6 +44,7 @@ export class PaneVisibilityStore {
    * 🔴 **左端のバーを畳んでいるか**(#1442 段①)。別のウィンドウの session だけが持つ ──
    *   端末の記録(`pkc3.panes`)の語彙(`PaneId`)にバーは無いので、本体の窓には**書く道が無い**。
    */
+  private noAutoFold = false;
   private railHidden = false;
   /** 🔴 この窓がバーの畳み戻しを持つか(`sessionOnly` でバーを畳んで始めた窓だけ。本体の窓・付箋は持たない)。 */
   private railSession = false;
@@ -178,7 +179,9 @@ export class PaneVisibilityStore {
    *   (見せる理由が無くなるので ── 残すと、次の `unpeek` が畳んでいない物を畳む)。
    */
   setAutoFold(id: PaneId | null): void {
-    if (this.detached) return;
+    // 🔴 付箋(`sessionOnly('append')`)だけが追記欄を必ず出す ── 面の窓(`reveal` 無し)は低い窓での自動の畳みが効き続ける
+    //   (#1442 段① レビュー 💭1。面を離れて `releaseWindowCollapse` したあとも同じ)
+    if (this.noAutoFold) return;
     this.auto = id;
     if (id === null && this.peeking !== null && !this.storedHidden().includes(this.peeking))
       this.peeking = null;
@@ -228,7 +231,10 @@ export class PaneVisibilityStore {
    */
   sessionOnly(reveal: PaneId | null, collapse: readonly WindowPaneId[] = []): PaneId[] {
     // ⚠ こちらの畳み(#701)も外す ── 小窓は追記欄を必ず出す(以後 `setAutoFold` は効かない)
-    if (reveal !== null && this.auto === reveal) this.auto = null;
+    if (reveal !== null) {
+      if (this.auto === reveal) this.auto = null;
+      this.noAutoFold = true;
+    }
     /**
      * 🔴 **別のウィンドウの面は、`collapse` で渡された物を最初から畳んで始める**(#1442 段①)。
      * ⚠ 畳みは**この窓の記憶だけ**(`detached`)── 本体の窓の記録には書かない。
@@ -253,6 +259,8 @@ export class PaneVisibilityStore {
    * 🔴 **面を離れたら、この窓のために畳んだ物を戻す**(#1442 段①)。別のウィンドウで面を閉じて本文へ戻ったとき、
    * 一覧・情報・バーが畳まれたまま残ると、本文の窓として使えない。user が元から畳んでいた物は触らない。
    * @returns 戻した後の畳み(`applyPaneVisibility` へ渡す)。畳んでいなければ `null`(何もしない)
+   * ⚠ 戻した後もこの窓は**切り離したまま**(`detached`)── 以後の畳み・戻しは記録へ書かず、本体の窓の記録を巻き込まない。
+   *   追記欄の自動の畳み(`setAutoFold`)は面の窓では効き続ける(付箋だけが効かなくなる)。
    */
   releaseWindowCollapse(): PaneId[] | null {
     if (!this.railSession && this.collapsedByWindow.length === 0) return null;

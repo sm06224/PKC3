@@ -12,7 +12,7 @@
  *   上から順に追う(別ファイルなら別の module なので他の test を汚さない)。
  */
 import { describe, expect, it } from 'vitest';
-import { panesHiddenFor } from '../../src/adapter/platform/deep-link';
+import { nextWindowCollapse, panesHiddenFor } from '../../src/adapter/platform/deep-link';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import {
@@ -52,6 +52,31 @@ describe('panesHiddenFor(判断の 1 か所)', () => {
   });
 });
 
+describe('nextWindowCollapse(当てる / 戻す / 1 回だけ ── onHold の判断)', () => {
+  it('🔴 PKC が開いた窓で面を開くと畳む(1 回だけ ── applied が立つ)', () => {
+    const r = nextWindowCollapse(false, 'schedule', false, true);
+    expect(r.step).toEqual({ kind: 'collapse', panes: ['sidebar', 'inspector', 'rail'] });
+    expect(r.applied).toBe(true);
+  });
+  it('🔴 面から面へ移っても畳み直さない(user が戻した物を奪い返さない)', () => {
+    const r = nextWindowCollapse(true, 'query', false, true);
+    expect(r.step).toEqual({ kind: 'none' });
+    expect(r.applied).toBe(true);
+  });
+  it('🔴 面を離れたら戻す(applied を倒す)。もう一度面へ入れば畳む', () => {
+    const r = nextWindowCollapse(true, null, false, true);
+    expect(r.step).toEqual({ kind: 'release' });
+    expect(r.applied).toBe(false);
+    expect(nextWindowCollapse(false, 'schedule', false, true).step.kind).toBe('collapse');
+  });
+  it('🔴 PKC が開いていない窓(写した URL のタブ)は畳まず、applied も立てない', () => {
+    const r = nextWindowCollapse(false, 'schedule', false, false);
+    expect(r.step).toEqual({ kind: 'none' });
+    expect(r.applied).toBe(false);
+    expect(nextWindowCollapse(false, null, false, false).step.kind, '何も畳んでいないのに戻さない').toBe('none');
+  });
+});
+
 describe('PaneVisibilityStore.sessionOnly(collapse)', () => {
   it('🔴 畳んで始めても、端末の記録へは 1 byte も書かない(戻す操作も)', () => {
     const { store, writes } = memStorage('append');
@@ -82,6 +107,17 @@ describe('PaneVisibilityStore.sessionOnly(collapse)', () => {
     expect(s.isRailHidden()).toBe(false);
     expect(s.hasRailToggle()).toBe(false);
     expect(s.releaseWindowCollapse(), '2 回目は何もしない').toBeNull();
+  });
+  it('🔴 面の窓は、面を離れて戻したあとも低い窓での追記欄の自動の畳みが効く(付箋は効かない)', () => {
+    const v = new PaneVisibilityStore(memStorage(null).store);
+    v.sessionOnly(null, ['sidebar', 'inspector', 'rail']);
+    v.releaseWindowCollapse();
+    v.setAutoFold('append');
+    expect(v.getHidden(), '面の窓で自動の畳みが死んでいる').toContain('append');
+    const n = new PaneVisibilityStore(memStorage(null).store);
+    n.sessionOnly('append');
+    n.setAutoFold('append');
+    expect(n.getHidden(), '付箋で追記欄が畳まれた').not.toContain('append');
   });
   it('付箋(collapse なし)はバーを畳まない', () => {
     const s = new PaneVisibilityStore(memStorage(null).store);

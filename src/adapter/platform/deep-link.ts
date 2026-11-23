@@ -314,6 +314,34 @@ export function panesHiddenFor(
 }
 
 /**
+ * 🔴 **面の窓の畳みを、いつ当て・いつ戻すか**(#1442 段① 着地前レビュー ⚠1。`main.ts` の `onHold` から呼ぶ ── 判断はここ 1 か所)。
+ *
+ * - `collapse`: 面を開いた(PKC が開いた窓)→ `panes` を畳む。**面を開いている間に 1 回だけ**(`applied`)──
+ *   窓の中で user が戻したあと、別の面へ移っても畳み直さない。
+ * - `release`: 面を離れた(本文へ戻った)→ 窓のために畳んだ物を戻す(`applied` を倒す)。
+ * - `none`: 何もしない(付箋 / PKC が開いていない窓 / 本文の面 / もう当てた)。
+ */
+export type WindowCollapseStep =
+  | { readonly kind: 'collapse'; readonly panes: readonly WindowPaneId[] }
+  | { readonly kind: 'release' }
+  | { readonly kind: 'none' };
+
+export function nextWindowCollapse(
+  applied: boolean,
+  heldView: ViewMode | null,
+  heldNote: boolean,
+  openedByUs: boolean,
+): { readonly step: WindowCollapseStep; readonly applied: boolean } {
+  if (heldView === null) {
+    return applied ? { step: { kind: 'release' }, applied: false } : { step: { kind: 'none' }, applied };
+  }
+  if (applied) return { step: { kind: 'none' }, applied };
+  const panes = panesHiddenFor(heldView, heldNote, openedByUs);
+  if (panes.length === 0) return { step: { kind: 'none' }, applied };
+  return { step: { kind: 'collapse', panes }, applied: true };
+}
+
+/**
  * 🔴 **窓の題名**(#300 段③ / #685 着地前レビュー ⚠3)。
  *
  * ⚠ **タスクバーで見分けるため**に在る ── 直す前は何枚開いても全部「PKC3」で、

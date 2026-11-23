@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled, openBrowse, pressCreateTool } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled, openBrowse, pressCreateTool, openMessagePopover } from './helpers';
 
 /**
  * 🔴 **組み込みアプリ 3 つを、実ブラウザで押す**(#281 ① 関係グラフ / #277 カンバン / #683 ① 計った時間)。
@@ -618,10 +618,32 @@ test('🔴 別ウィンドウの予定表は一覧・情報・バーを畳んで
   await expect(popup.locator('[data-pkc-region="sidebar"]')).toBeHidden();
   await expect(popup.locator('[data-pkc-region="inspector"]')).toBeHidden();
   const railBox = await popup.locator('[data-pkc-region="rail"]').boundingBox();
-  expect(railBox!.width, 'バーが細い帯になっていない').toBeLessThanOrEqual(14);
-  // 面が窓の幅をほぼ使い切る(畳んだ帯 12px + 4px の掴む帯 2 本 + 余白)
+  expect(railBox!.width, '畳んだバーが広すぎる(40px 以下のはず)').toBeLessThanOrEqual(40);
+  // 面が窓の幅をほぼ使い切る(畳んだバー 40px + 4px の掴む帯 2 本 + 余白)
   const paneBox = await pane.boundingBox();
-  expect(paneBox!.width, `面が窓いっぱいに広がっていない(${String(paneBox!.width)}px)`).toBeGreaterThan(1100 - 60);
+  expect(paneBox!.width, `面が窓いっぱいに広がっていない(${String(paneBox!.width)}px)`).toBeGreaterThan(1100 - 80);
+
+  /**
+   * 🔴 **畳んだバーにも、メッセージの入口が残り、押すと履歴が開く**(#1442 段① レビュー ⚠2。CLAUDE.md §2-3)。
+   * ⚠ 他のタイルは隠れている(入口だけが残る)/ 入口は実クリックで押せる / 状態(注意)がバッジに出る。
+   */
+  const entry = popup.locator('[data-pkc-region="rail"] [data-pkc-field="message-entry"]');
+  await expect(entry, '畳んだバーにメッセージの入口が無い').toBeVisible();
+  await expect(popup.locator('[data-pkc-region="rail"] [data-pkc-action="show-trash"]'), '他のタイルまで出ている').toBeHidden();
+  // 注意を 1 件起こす: 日付を消して時刻だけ入れて「予定を足す」(理由がメッセージに出る)
+  await popup.locator('[data-pkc-field="schedule-quick-date"]').fill('');
+  await popup.locator('[data-pkc-field="schedule-quick-time"]').fill('09:00');
+  await clickReal(popup, popup.locator('[data-pkc-action="schedule-quick-add"]'));
+  await expect
+    .poll(async () => (await popup.locator('[data-pkc-field="message-badge"]').first().textContent())?.trim(), {
+      message: '注意を起こしたのに、畳んだバーの入口のバッジに出ない',
+    })
+    .not.toBe('');
+  const pop = await openMessagePopover(popup);
+  await expect(pop, '畳んだバーの入口からポップオーバーが開かない').toBeVisible();
+  await popup.keyboard.press('Escape');
+  await expect(pop).toBeHidden();
+  await expect.poll(hidden, 'ポップオーバーを開閉しただけで畳みが変わった').toEqual(expect.arrayContaining(['rail']));
 
   // 窓の中で戻せる(列の帯 → 一覧、バーの帯 → バー)。⚠ 戻しても本体の記録は動かない
   await clickReal(popup, popup.locator('[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]'));
@@ -635,7 +657,28 @@ test('🔴 別ウィンドウの予定表は一覧・情報・バーを畳んで
     await popup.evaluate(() => localStorage.getItem('pkc3.panes')),
     '窓の畳みが本体と共有の記録(pkc3.panes)へ書かれた',
   ).toBe('append');
+
+  /**
+   * 🔴 **面を離れたら戻す / 面から面へ移っても畳み直さない**(#1442 段① レビュー ⚠1)。
+   * 一覧は上で user が戻した ── 別の面(集計)へ移っても畳み直されない。本文へ戻ると、窓のために畳んだ物(情報・バー)が戻る。
+   */
+  await popup.evaluate(() => {
+    location.hash = '#pkc?view=query';
+  });
+  await expect(popup.locator('[data-pkc-view-pane="query"]'), '別の面へ移れない').toBeVisible({ timeout: 15_000 });
+  await expect(popup.locator('[data-pkc-region="sidebar"]'), '面から面へ移ったら、戻した一覧が畳み直された').toBeVisible();
+  await popup.keyboard.press('Alt+1'); // 本文へ戻る(面を離れる)
+  await expect(popup.locator('[data-pkc-view-pane="query"]'), '本文へ戻れない').toBeHidden({ timeout: 15_000 });
+  await expect.poll(hidden, '面を離れたのに、窓のために畳んだ物が戻らない').not.toEqual(expect.arrayContaining(['rail']));
+  expect(await hidden()).not.toContain('inspector');
   await popup.close();
+
+  // 🔴 写した `#pkc?view=` の URL で開いたふつうのタブ(PKC が開いた窓ではない)は畳まない
+  const copied = await page.context().newPage();
+  await copied.goto('/#pkc?view=schedule');
+  await expect(copied.locator('[data-pkc-view-pane="schedule"]'), '写した URL で面が開かない').toBeVisible({ timeout: 30_000 });
+  await expect(shellOf(copied), '写した URL のタブまで畳まれた').not.toHaveAttribute('data-pkc-hidden-panes', /sidebar|inspector|rail/);
+  await copied.close();
   await expect(shellOf(page), '本体の窓の版面が変わった').not.toHaveAttribute('data-pkc-hidden-panes', /sidebar|inspector|rail/);
 
   // 窓が塞がれたら、本体の左のペインのタブに落ち、何も畳まれない(中央は奪わない)

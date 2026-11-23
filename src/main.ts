@@ -540,7 +540,7 @@ import {
   linkOpenerFor,
   openAssetOwner,
   isPurposeWindow,
-  panesHiddenFor,
+  nextWindowCollapse,
   noteOpenElsewhereMessage,
   noteOpenedByUs,
   windowDeepLinkTarget,
@@ -7812,17 +7812,16 @@ function bootstrap(): void {
           // 🔴 窓の中では左の列の「週」を隠す(#855)── 印は文書に 1 つ(`markHeldView`。CSS が読む)
           markHeldView(document.documentElement, view);
           // 🔴 別のウィンドウの面は一覧・情報・バーを畳んで始める(#1442 段①。判断は `panesHiddenFor`、畳みは session だけ・面の間 1 回)
-          if (view !== null && !windowPanesApplied) {
-            const collapse = panesHiddenFor(view, false, openedByUs);
-            if (collapse.length > 0) {
-              windowPanesApplied = true;
-              applyPaneVisibility(root, appPanes.sessionOnly(null, collapse));
+          {
+            // 判断は `nextWindowCollapse`(test される)── ここは当てるだけ
+            const next = nextWindowCollapse(windowPanesApplied, view, false, openedByUs);
+            windowPanesApplied = next.applied;
+            if (next.step.kind === 'collapse') {
+              applyPaneVisibility(root, appPanes.sessionOnly(null, next.step.panes));
+            } else if (next.step.kind === 'release') {
+              const back = appPanes.releaseWindowCollapse();
+              if (back !== null) applyPaneVisibility(root, back);
             }
-          } else if (view === null && windowPanesApplied) {
-            // 🔑 面を離れた(本文へ戻った)── この窓のために畳んだ物を戻す(user が元から畳んでいた物は触らない)
-            windowPanesApplied = false;
-            const back = appPanes.releaseWindowCollapse();
-            if (back !== null) applyPaneVisibility(root, back);
           }
           // ⚠ **その場で塗り直す** ── 旗を倒しただけでは、次に何かが起きるまで
           //    古い帯が残る(離れた瞬間に「メインのタブ経由です」が戻るべきである)
