@@ -9,16 +9,17 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { sectionContaining } from './helpers/manual-style';
 
 const manual = readFileSync('docs/manual.md', 'utf8');
 const inspector = readFileSync('src/adapter/ui/render/inspector.ts', 'utf8');
 
 function section(): string {
-  const i = manual.indexOf('\n### 右のペイン(情報)\n');
-  expect(i, '前提:節が見つからない').toBeGreaterThan(-1);
-  const rest = manual.slice(i + 1);
-  const next = rest.indexOf('\n####', 5);
-  return next < 0 ? rest : rest.slice(0, next);
+  // 🔑 見出しの名前ではなく**この節にしか無い 1 文**で探す(章立てを組み替えて見出しが変わっても同じ節を拾う)
+  // 🔑 小節を含めない(自分の本文だけ)── 隣の小節の字に満たされない範囲で見る
+  const s = sectionContaining(manual, '作成・更新は、お使いの端末の日付と時刻', { ownBodyOnly: true });
+  expect(s, '前提:節が見つからない').not.toBeNull();
+  return s!;
 }
 
 describe('マニュアル 右のペイン(情報)の行の名前 (#1087)', () => {

@@ -86,6 +86,13 @@ import { withBuiltinTiles } from '../src/features/launcher/tiles';
 import { RELATION_MAP_DEPTH } from '../src/adapter/ui/render/relation-map';
 import { MAX_DEPTH } from '../src/features/relation/neighbourhood';
 import { readReducerSource } from './helpers/reducer-source';
+import {
+  scanHeadings,
+  sectionByTitle,
+  occurrences,
+  sectionContaining,
+  type MdHeading,
+} from './helpers/manual-style';
 
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
 
@@ -102,25 +109,9 @@ const MANUAL = readFileSync('docs/manual.md', 'utf-8');
  *   ⚠ いまのマニュアルの囲みの中には `#` の行が **6 件**在るが、
  *   どれも H5 でも同名でもないので、**本文に当てるだけでは除外が効いているか
  *   分からない**(変異試験が SURVIVED で教えた)。
+ *
+ * 🔑 走査の本体は `tests/helpers/manual-style.ts`(書き方の門 `tests/manual-style.test.ts` と共有)。
  */
-export type MdHeading = { readonly level: number; readonly title: string; readonly line: number };
-
-export function scanHeadings(text: string): MdHeading[] {
-  const out: MdHeading[] = [];
-  let fence = false;
-  const lines = text.split('\n');
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]!;
-    if (/^\s*(```|~~~)/.test(line)) {
-      fence = !fence;
-      continue;
-    }
-    if (fence) continue;
-    const m = /^(#{1,6}) (.*)$/.exec(line);
-    if (m) out.push({ level: m[1]!.length, title: m[2]!, line: i + 1 });
-  }
-  return out;
-}
 
 /** マニュアルの見出し(段つき)。⚠ **これを使う** ── 面ごとに走査を書かない。 */
 const MANUAL_HEADINGS: readonly MdHeading[] = scanHeadings(MANUAL);
@@ -640,12 +631,17 @@ describe('マニュアルと実装の突合', () => {
     }
     // 🔴 「追記」は短い字で、マニュアルのどこにでも出る(付箋の「追記」・操作を探すの一覧)── 全体で見ると
     //   追記欄の節から消えても他の節に満たされる(§1.3)。だから**追記欄の節だけ**を切り出して見る。
-    const appendAt = MANUAL.indexOf('\n### 追記\n');
-    expect(appendAt, 'マニュアルに「追記」の節が無い').toBeGreaterThan(-1);
-    const appendEnd = MANUAL.indexOf('\n### ', appendAt + 5);
-    const appendSection = MANUAL.slice(appendAt, appendEnd === -1 ? MANUAL.length : appendEnd);
-    expect(appendSection, '追記欄の節に、ボタン **追記** の説明が無い').toContain('と **追記** が並びます');
-    expect(appendSection, '追記欄の節に **元に戻す** の説明が無い').toContain('**元に戻す**');
+    //   🔑 見出しの名前ではなく**本文の 1 文**で節を探す(章立てを組み替えて見出しが変わっても同じ節を拾う)
+    const APPEND_PHRASE = 'と **追記** が並びます';
+    //   ⚠ 探した字を同じ節に「在る」と読むのは自己充足になる ── ①字がマニュアルにちょうど 1 回だけ在ること
+    //   ②その節が追記欄の節であることを、別の事実(**追記先** と `Enter` で追記する説明、**元に戻す**)で縛る
+    expect(occurrences(MANUAL, APPEND_PHRASE), '追記ボタンの説明文が 1 か所でない(節を特定できない)').toBe(1);
+    const appendSection = sectionContaining(MANUAL, APPEND_PHRASE);
+    expect(appendSection, 'マニュアルに追記欄の節が無い(空振り)').not.toBeNull();
+    expect(appendSection!, '追記欄の節に **追記先** の説明が無い(別の節を拾っている)').toContain('**追記先**');
+    expect(appendSection!, '追記欄の節に Enter で追記する説明が無い(別の節を拾っている)').toContain('+ `Enter`');
+    expect(appendSection!, '追記欄の節に、ボタン **追記** の説明が無い').toContain('と **追記** が並びます');
+    expect(appendSection!, '追記欄の節に **元に戻す** の説明が無い').toContain('**元に戻す**');
   });
 
   it('🔴 書式バーの文言が表と 1 対 1 で、マニュアルにも在る', () => {
@@ -750,12 +746,6 @@ describe('マニュアルと実装の突合', () => {
    *   満たされる(CLAUDE.md §1)。
    */
   it('🔴 添付を読めなかったときの字が、マニュアルの節に在る', async () => {
-    const head = MANUAL.indexOf('### 中身を添付から取る');
-    expect(head, 'マニュアルに「中身を添付から取る」の節が無い(空振り)').toBeGreaterThan(0);
-    const next = MANUAL.indexOf('\n### グラフと図', head + 1);
-    expect(next, '節の終わりが見つからない(空振り)').toBeGreaterThan(head);
-    const section = MANUAL.slice(head, next);
-
     // ⚠ 実装が出す 5 通りを、実装から取る
     const parse2 = takeFenceAsset('asset:a asset:b');
     const parseEmpty = takeFenceAsset('asset:');
@@ -773,6 +763,9 @@ describe('マニュアルと実装の突合', () => {
       notText.ok ? '' : notText.why,
     ];
     expect(whys.filter((w) => w !== ''), '実装から理由を 5 通り取れていない(空振り)').toHaveLength(5);
+    // 🔑 節は見出しの名前ではなく**実装の出す字が載っている行**から探す(章立てを組み替えても同じ節を拾う)
+    const section = sectionContaining(MANUAL, whys[0]!);
+    expect(section, 'マニュアルに添付を読めなかったときの字を載せた節が無い(空振り)').not.toBeNull();
 
     // 🔴 **表の 1 列目と「丸ごと」突き合わせる**(変異試験 M5 が SURVIVED で教えた)。
     // ⚠ `toContain` だと**部分一致で救われる** ── 製品を「字として読めません」から
@@ -780,7 +773,7 @@ describe('マニュアルと実装の突合', () => {
     // ⚠ 集合で見るので「マニュアルにだけ在る行」も落とす(製品が出さない字を
     //   読ませない)。
     // ⚠ 節には表が 2 つある ── **理由の表だけ**を取る(見出し行から数える)
-    const lines = section.split('\n');
+    const lines = section!.split('\n');
     const at = lines.findIndex((l) => l.startsWith('| 出る字 |'));
     expect(at, '節に「出る字」の表が無い(空振り)').toBeGreaterThanOrEqual(0);
     const listed: string[] = [];
@@ -804,11 +797,13 @@ describe('マニュアルと実装の突合', () => {
    * 🔑 ヘルプの探す欄は**見出しを結果として並べる**ので、見出しに両方入れておく。
    */
   it('🔴 添付を埋め込む節の見出しが、user の言葉で引ける', () => {
-    const heading = MANUAL.split('\n').find((l) => l.startsWith('### 中身を添付から取る'));
-    expect(heading, '節の見出しが無い(空振り)').toBeTruthy();
-    for (const word of ['アセット', 'コードブロック', '埋め込']) {
-      expect(heading, `見出しに「${word}」が無い ── その語で探しても当たらない`).toContain(word);
-    }
+    // 🔑 見出しの正確な字には頼らない ── 3 語を**全部**含む見出しが 1 つ在ればよい
+    const words = ['アセット', 'コードブロック', '埋め込'];
+    const heading = scanHeadings(MANUAL).find((h) => words.every((w) => h.title.includes(w)));
+    expect(
+      heading,
+      `「${words.join('」「')}」を全部含む見出しが無い ── user の言葉で探しても当たらない`,
+    ).toBeTruthy();
   });
 
   /**
@@ -1066,12 +1061,12 @@ describe('マニュアルと実装の突合', () => {
 describe('確認の画面とマニュアルの突合(#299)', () => {
   /** マニュアル「確認の画面」の節だけを切り出す。⚠ 節ごと消えたら落ちる。 */
   function section(): string {
-    const at = MANUAL.indexOf('### 確認の画面');
-    expect(at, 'マニュアルに「確認の画面」の節が無い').toBeGreaterThan(-1);
-    let next = MANUAL.indexOf('\n### ', at + 1);
-    // 🔴 危険色のボタンの字の一覧は、1 節 800 字の規約(条 9)のため次の節「色の付いた実行ボタンの字を知る」に分けた ── 2 つで 1 組として読む
-    if (next !== -1 && MANUAL.startsWith('\n### 色の付いた実行ボタンの字を知る', next)) next = MANUAL.indexOf('\n### ', next + 1);
-    return MANUAL.slice(at, next === -1 ? MANUAL.length : next);
+    const main = sectionByTitle(MANUAL, '確認の画面');
+    expect(main, 'マニュアルに「確認の画面」の節が無い').not.toBeNull();
+    // 🔴 危険色のボタンの字の一覧は別の節に分かれている ── 2 つで 1 組として読む(節を統合したら、ここも 1 つへ直す)
+    const colours = sectionByTitle(MANUAL, '色の付いた実行ボタンの字');
+    expect(colours, 'マニュアルに「色の付いた実行ボタンの字」の節が無い').not.toBeNull();
+    return main! + '\n' + colours!;
   }
 
   /**
@@ -1213,7 +1208,7 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
    */
   it('🔴 既定の割当と名前が、マニュアルに全部載っている', () => {
     // 空振り防止 ── §10 が丸ごと消えたら落ちる
-    const section = MANUAL.slice(MANUAL.indexOf('## ショートカットキー'));
+    const section = sectionByTitle(MANUAL, 'ショートカットキー') ?? '';
     expect(section.length, 'マニュアルに「ショートカットキー」の章が無い').toBeGreaterThan(500);
     const missing: string[] = [];
     for (const cmd of KEY_COMMANDS) {
@@ -1236,7 +1231,10 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
   });
 
   it('🔴 割り当て直しの導線がマニュアルに書いてある', () => {
-    const section = MANUAL.slice(MANUAL.indexOf('## ショートカットキー'));
+    // 🔑 導線は「ショートカットキー」の節と「割り当てを変える」の節の 2 つで 1 組(段が変わっても拾う)
+    const section =
+      (sectionByTitle(MANUAL, 'ショートカットキー') ?? '') + '\n' + (sectionByTitle(MANUAL, '割り当てを変える') ?? '');
+    expect(section.length, 'ショートカットキーの節が無い(空振り)').toBeGreaterThan(500);
     for (const word of ['割り当て', '既定に戻す', 'すべて既定に戻す']) {
       expect(section, `マニュアルに「${word}」の説明が無い`).toContain(word);
     }
@@ -1253,7 +1251,7 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
    *   尻に含まれる、という救われ方を作らない)。
    */
   it('🔴 §10 の表に書いた鍵は、全部いまの既定に在る(外した鍵が残らない)', () => {
-    const section = MANUAL.slice(MANUAL.indexOf('## ショートカットキー'));
+    const section = sectionByTitle(MANUAL, 'ショートカットキー') ?? '';
     const defaults = new Set<string>();
     for (const cmd of KEY_COMMANDS) {
       for (const chord of cmd.defaults) defaults.add(chordLabel(chord, false));
@@ -1279,7 +1277,7 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
    * 🔑 一覧も件数も実装から出し、**両向き**で見る(通らない鍵を「効く」と書かない)。
    */
   it('🔴 「打っている最中」に効く鍵の一覧と件数が、門の判定と一致する', () => {
-    const section = MANUAL.slice(MANUAL.indexOf('## ショートカットキー'));
+    const section = sectionByTitle(MANUAL, 'ショートカットキー') ?? '';
     const from = section.indexOf('**打っている最中**は');
     const to = section.indexOf('画面を開くキーは');
     const para = from >= 0 && to > from ? section.slice(from, to) : '';
@@ -1310,14 +1308,16 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
    *   断り文も対で見る ── 「コピー・貼り付けなど」だけでは R が断られる理由が読めない。
    */
   it('🔴 割り当てられない組み合わせの一覧と断り文が、REFUSED と一致する', () => {
-    const section = MANUAL.slice(MANUAL.indexOf('### 割り当てを変える'));
-    expect(section.length, '「割り当てを変える」の節が無い').toBeGreaterThan(200);
     // Ctrl + 1 文字の形は 1 つの太字にまとめ、それ以外の形(再読み込みの別の綴り)は 1 つずつ太字で書く
     const isLetter = (r: string): boolean => /^Mod\+[A-Z]$/.test(r);
     const letters = REFUSED.filter(isLetter).map((r) => r.slice('Mod+'.length));
     const others = REFUSED.filter((r) => !isLetter(r)).map((r) => r.replace(/Mod/g, 'Ctrl').split('+').join(' + '));
     expect(letters.length).toBeGreaterThan(6);
     expect(others.length, '再読み込みの別の形(Ctrl+Shift+R / F5 …)が REFUSED に無い').toBeGreaterThanOrEqual(4);
+    // 🔑 断る組み合わせは「割り当てられないキー」と「ブラウザが先に取るキー」の 2 節に分かれて書いてある
+    //   ── 親の「ショートカットキー」の節ごと読む(小節の分け方が変わっても拾う)
+    const section = sectionByTitle(MANUAL, 'ショートカットキー') ?? '';
+    expect(section.length, '割り当てられない組み合わせを書いた節が無い').toBeGreaterThan(200);
     expect(section).toContain(`**Ctrl + ${letters.join(' / ')}**`);
     for (const o of others) expect(section, `マニュアルに「${o}」が無い`).toContain(`**${o}**`);
     const refused = validateBinding('create-entry', 'Mod+R', {});
@@ -1397,9 +1397,7 @@ describe('設定の画面の節とマニュアルの突合(#697)', () => {
  * ⚠ `§N「…」` は**マニュアルの節への参照**なので除く(あれは画面の字ではない)。
  */
 describe('§9「困ったとき」の引用が画面の字と一致する(#697)', () => {
-  const from = MANUAL.indexOf('## 困ったとき');
-  const to = MANUAL.indexOf('## ショートカットキー');
-  const section = from >= 0 && to > from ? MANUAL.slice(from, to) : '';
+  const section = sectionByTitle(MANUAL, '困ったとき') ?? '';
   const SRC = srcFiles()
     .map((f) => codeOnly(readFileSync(f, 'utf-8')))
     .join('\n')
@@ -1780,23 +1778,10 @@ describe('マニュアルの見出しの拾い方(scanHeadings)', () => {
   });
 
   it('空振り防止 ── 本文からもちゃんと拾えている', () => {
-    expect(MANUAL_HEADINGS.length, 'マニュアルの見出しを 1 つも拾えていない').toBeGreaterThan(
-      100,
-    );
-    // ⚠ 囲みの中に `#` の行が実在すること ── 0 件なら上の①②は本文について何も守らない
-    const inFence = ((): number => {
-      let fence = false;
-      let n = 0;
-      for (const line of MANUAL.split('\n')) {
-        if (/^\s*(```|~~~)/.test(line)) {
-          fence = !fence;
-          continue;
-        }
-        if (fence && /^#{1,6} /.test(line)) n += 1;
-      }
-      return n;
-    })();
-    expect(inFence, '囲みの中に `#` の行が 1 つも無い ── 除外の検査が本文について空振り').toBeGreaterThan(0);
+    // 下限 60 は tripwire(章立て刷新後の規模でも通る値。数を目標にしない)
+    expect(MANUAL_HEADINGS.length, 'マニュアルの見出しを 1 つも拾えていない').toBeGreaterThan(60);
+    // 🔑 「囲みの中の `#` は見出しではない」は上の①②の自前の原稿で見る
+    //   (実物のマニュアルに囲みの中の `#` 行が在ることには頼らない ── 書き直しで無くなっても落とさない)
   });
 });
 
@@ -1806,7 +1791,8 @@ describe('マニュアルの見出しは、番号も日付も持たない(#779 �
 
   it('空振り防止 ── 見出しをちゃんと拾えている', () => {
     // 🔑 下の 2 件は「0 件であること」を見るので、**拾えていないと必ず緑**になる
-    expect(heads.length, 'マニュアルの見出しを 1 つも拾えていない').toBeGreaterThan(100);
+    // 下限 60 は tripwire(章立て刷新後の規模でも通る値。数を目標にしない)
+    expect(heads.length, 'マニュアルの見出しを 1 つも拾えていない').toBeGreaterThan(60);
   });
 
   it('🔴 見出しに日付が入っていない(「いつ入ったか」は本文か CHANGELOG へ)', () => {
@@ -1828,9 +1814,9 @@ describe('マニュアルの見出しは、番号も日付も持たない(#779 �
 });
 
 /**
- * 🔴 **執筆規約 条 10 を機械で守る**(2026-09-08、user 裁定)。
+ * 🔴 **執筆規約 条 9 を機械で守る**(2026-09-08、user 裁定)。
  *
- * 規約(`docs/development/manual-style-2026-09.md`)の条 10 は
+ * 規約(`docs/development/manual-style-2026-09.md`)の条 9 は
  * 「**記号は 🔴 ⚠ 🔑 の 3 種のみ**」である。⚠ 置くまでは**散文の規律**でしかなく、
  * 次に節を書く人が 💡 や 📌 を持ち込んでも**誰も止められない**
  * (同じ doc が「置けていない条は『まだ守っていない』と書く」と決めている)。
@@ -1849,7 +1835,7 @@ describe('マニュアルの見出しは、番号も日付も持たない(#779 �
  *   字の種類で決める」)── 絵の記号(U+2600〜27BF / U+26A0 / U+1F300 以降)だけを見る。
  *   矢印(→ ←)・図形(▾ ▶ ★)・罫線(─)は**文章の部品**なので対象外である。
  */
-describe('マニュアルの記号は 🔴 ⚠ 🔑 の 3 種だけ(執筆規約 条 10)', () => {
+describe('マニュアルの記号は 🔴 ⚠ 🔑 の 3 種だけ(執筆規約 条 9)', () => {
   const ALLOWED = ['\u{1F534}', '\u26A0', '\u{1F511}'];
 
   /**
@@ -1916,7 +1902,7 @@ describe('マニュアルの記号は 🔴 ⚠ 🔑 の 3 種だけ(執筆規約
     for (const ch of ALLOWED) expect(leadingMarks(`${ch} 本文の行`).bad).toEqual([]);
   });
 
-  it('🔴 4 種目の記号が持ち込まれていない(規約 条 10)', () => {
+  it('🔴 4 種目の記号が持ち込まれていない(規約 条 9)', () => {
     expect(
       found.bad,
       '行の頭に規約外の記号が立っている ── ⚠(失う・取り消せない)へ寄せる。🔴 / 🔑 は本文に使わない',
@@ -1925,44 +1911,34 @@ describe('マニュアルの記号は 🔴 ⚠ 🔑 の 3 種だけ(執筆規約
 });
 
 /**
- * 🔴 **執筆規約 条 4 / 5 / 6 を「0 件」で守る**(#793、user 裁定 2026-09-08 で満たした)。
+ * 🔴 **執筆規約 条 5 / 6 を「0 件」で守る**(#793。2026-11 改定で条 4「そのほか」と
+ *   「H1〜H4 が全部在ること」の要求は廃止した)。
  *
- * ⚠ **直前まではここは「増えない」の門だった**(等値 pin。1 件 / 16 件 / 1 組)。
- *   裁定で 3 条とも 0 件になったので、**上限ではなく 0 件**へ昇格させた ──
- *   🔑 等値 pin の狙いどおり、**直したら表からも消さないと落ちる**ので、
- *   burn-down が記録に残った(CLAUDE.md「直したら消さないと落ちるので忘れられない」)。
+ * - 条 5: 見出しは H4 まで(H5 を使わない)。**段が揃っていること(H1〜H4 の全部)は求めない**
+ *   ── 章立てを組み替えて H4 が 1 つも無くなっても、規約には違反しない。
+ * - 条 6: 同じ名前の見出しを 2 つ作らない。
  *
- * ⚠ **空振り防止の形が変わった** ── 前は「H5 が 1 件でも在ること」を見ていたが、
- *   0 件にした以上それは成り立たない(CLAUDE.md §1「主張そのものが成り立たない」)。
- *   🔑 見るのは**走査が効いていること**へ移す:見出しを 100 件以上拾えていて、
- *   段が 4 種類(H1〜H4)出ていること。
+ * ⚠ **空振り防止**: 見出しを一定数拾えていること(下限は tripwire であって規模の目標ではない)。
  */
-describe('執筆規約 条 4 / 5 / 6(#793)', () => {
-  /** 見出し(段, 題名)。⚠ 走査は `scanHeadings` 1 か所(この file の頭)。 */
+describe('執筆規約 条 5 / 6(#793)', () => {
+  /** 見出し(段, 題名)。⚠ 走査は `scanHeadings` 1 か所(`tests/helpers/manual-style.ts`)。 */
   const heads = MANUAL_HEADINGS;
 
   it('空振り防止 ── 見出しを段つきで拾えている', () => {
-    // 🔑 下の 3 件は「0 件であること」を見るので、**拾えていないと必ず緑**になる
-    expect(heads.length, 'マニュアルの見出しを 1 つも拾えていない').toBeGreaterThan(100);
+    // 🔑 下の 2 件は「0 件であること」を見るので、**拾えていないと必ず緑**になる
+    //   下限 60 は tripwire(章立て刷新後の規模でも通る値。数を目標にしない)
+    expect(heads.length, 'マニュアルの見出しを 1 つも拾えていない').toBeGreaterThan(60);
     expect(
-      [...new Set(heads.map((h) => h.level))].sort(),
-      '段を読めていない(章 / 節 / 小節が揃っていない)',
-    ).toEqual([1, 2, 3, 4]);
+      heads.some((h) => h.level === 2) && heads.some((h) => h.level === 3),
+      '段を読めていない(章 / 節が無い)',
+    ).toBe(true);
   });
 
-  it('🔴 条 5 ── 見出しは 3 段まで(H5 を使わない)', () => {
+  it('🔴 条 5 ── 見出しは H4 まで(H5 を使わない)', () => {
     const bad = heads.filter((h) => h.level >= 5).map((h) => `H${h.level} ${h.title}`);
     expect(
       bad,
-      '見出しが 4 段目より深い ── まず「覚えること」に吸収できないか考える(規約 条 5)',
-    ).toEqual([]);
-  });
-
-  it('🔴 条 4 ── 「そのほか」という見出しを作らない', () => {
-    const bad = heads.filter((h) => h.title.includes('そのほか')).map((h) => h.title);
-    expect(
-      bad,
-      '「そのほか」の見出しが在る ── 行き先が無いものは名前を付けて節にするか、既存節へ吸収する(規約 条 4)',
+      '見出しが 5 段目以上 ── まず節を分けるか、箇条書きに吸収できないか考える(規約 条 5)',
     ).toEqual([]);
   });
 
@@ -1996,16 +1972,13 @@ describe('執筆規約 条 4 / 5 / 6(#793)', () => {
 describe('執筆規約 条 8 ── ガイドの表にキーを並べない(#779 段⑤)', () => {
   /** 見出し 1 つぶんの本文(次の `#` 見出しの手前まで)。 */
   function sectionBody(title: string): string {
-    const lines = MANUAL.split('\n');
-    const heads = scanHeadings(MANUAL);
-    const at = heads.findIndex((h) => h.title === title);
-    expect(at, `見出し「${title}」がマニュアルに無い(この検査は空振り)`).toBeGreaterThanOrEqual(0);
-    const start = heads[at]!.line;
-    const next = heads[at + 1];
-    return lines.slice(start, next === undefined ? lines.length : next.line - 1).join('\n');
+    // 🔑 自分の本文だけ(小節は含まない)── 表の隣の別の節に満たされない範囲で見る
+    const body = sectionByTitle(MANUAL, title, { ownBodyOnly: true });
+    expect(body, `見出し「${title}」がマニュアルに無い(この検査は空振り)`).not.toBeNull();
+    return body!;
   }
 
-  const GUIDE = 'ボタンが無い書式(キーで入れます)';
+  const GUIDE = 'ボタンが無い書式';
 
   it('空振り防止 ── その節と、その表を本当に読めている', () => {
     const body = sectionBody(GUIDE);
@@ -2031,80 +2004,6 @@ describe('執筆規約 条 8 ── ガイドの表にキーを並べない(#779
     for (const k of ['H', 'R', 'E', 'X']) {
       expect(flat, `Alt + Shift + ${k} がマニュアルから消えた`).toContain(`Alt + Shift + ${k}`);
     }
-  });
-});
-
-/**
- * 🔴 **執筆規約 条 9(1 節 800 字まで)を「0 件」で守る**(#793)。
- *
- * 🔑 かつては既存の 46〜48 節を `OVER_800` に名前で等値 pin していた(「増やさない」の門)が、
- *   超えていた節を**全部割って**空になった。いまは**1 節も超えてはならない**。
- *   新しく書く人は、足す節を 800 字以内で書くか、書けなければ見出しを足して割る。
- *
- * ⚠ 数え方をここで決める(2 通りに読めるものは門にならない):
- *   **節 = `###` 見出し 1 つ**。字数 = 次の行から**次の `#`〜`###` 見出しの前**まで、
- *   **空白を除いた**文字数。囲みの中の行も**数える**(読む人はそこも読む)。
- *   ⚠ `####` の小見出しは節を区切らない(親の `###` の字数に**含まれる**)。
- */
-describe('執筆規約 条 9 ── 1 節は 800 字まで(#793)', () => {
-  /** 800 字を超えてよい節。⚠ **空のまま**(増やさない。足すなら割る)。 */
-  const OVER_800: readonly string[] = [];
-
-  /** `###` 節ごとの字数。⚠ 走査は `scanHeadings` を使う(自前で書かない)。 */
-  function sectionSizes(text: string): Array<{ title: string; chars: number }> {
-    const lines = text.split('\n');
-    const heads = scanHeadings(text);
-    const out: Array<{ title: string; chars: number }> = [];
-    for (let k = 0; k < heads.length; k += 1) {
-      const h = heads[k]!;
-      if (h.level !== 3) continue;
-      let end = lines.length;
-      for (let j = k + 1; j < heads.length; j += 1) {
-        if (heads[j]!.level <= 3) {
-          end = heads[j]!.line - 1;
-          break;
-        }
-      }
-      let chars = 0;
-      for (let i = h.line; i < end; i += 1) chars += lines[i]!.replace(/\s/g, '').length;
-      out.push({ title: h.title, chars });
-    }
-    return out;
-  }
-
-  const sizes = sectionSizes(MANUAL);
-
-  it('空振り防止 ── 節と字数を本当に数えている', () => {
-    // 🔑 数えられていなければ、下の等値 pin は「空 = 空」で必ず緑になる
-    expect(sizes.length, '節を 1 つも拾えていない').toBeGreaterThan(80);
-    expect(
-      Math.max(...sizes.map((s) => s.chars)),
-      'いちばん長い節が短すぎる ── 中身を数えていない',
-    ).toBeGreaterThan(500);
-  });
-
-  it('⚠ 対照群 ── 囲みの中も数える(読む人はそこも読む)', () => {
-    const doc = ['### 節', 'あい', '```', 'ううううう', '```'].join('\n');
-    expect(sectionSizes(doc)).toEqual([{ title: '節', chars: 2 + 3 + 5 + 3 }]);
-  });
-
-  it('⚠ 対照群 ── 次の節に食い込まない', () => {
-    const doc = ['### 甲', 'あい', '### 乙', 'うえお'].join('\n');
-    expect(sectionSizes(doc)).toEqual([
-      { title: '甲', chars: 2 },
-      { title: '乙', chars: 3 },
-    ]);
-  });
-
-  it('🔴 800 字を超える節が 0 件(割って縮める)', () => {
-    const now = sizes
-      .filter((s) => s.chars > 800)
-      .map((s) => s.title)
-      .sort();
-    expect(
-      now,
-      '800 字を超える節がある ── 見出しを足して小さな節に割る(規約 条 9)',
-    ).toEqual([...OVER_800].sort());
   });
 });
 
@@ -2252,9 +2151,9 @@ describe('情報ペインの説明が実装と合っている(2026-08-18)', () =
     expect(TITLES, 'PowerPoint の説明が無い').toContain("'export-entry-pptx':");
     expect(TITLES, '切れ方を言っていない').toContain('スライドが切れます');
     // マニュアルの側にも切れ方の表が在ること(正本はマニュアル)
-    expect(readFileSync('docs/manual.md', 'utf8'), 'マニュアルに書き方が無い').toContain(
-      '### PowerPoint(.pptx)で出す',
-    );
+    const pptx = sectionByTitle(readFileSync('docs/manual.md', 'utf8'), 'PowerPoint(.pptx)');
+    expect(pptx, 'マニュアルに PowerPoint(.pptx)の節が無い').not.toBeNull();
+    expect(pptx!, 'その節にスライドの切れ方の表が無い').toMatch(/^\|.*スライド/m);
   });
 });
 
@@ -6372,10 +6271,9 @@ describe('近道の押し先が画面に在る', () => {
    */
   it('🔴 マニュアル「開いたときの画面を指定する」 の表が、アドレスから開ける面と 1 対 1', () => {
     const manual = readFileSync('docs/manual.md', 'utf-8');
-    const at = manual.indexOf('### 開いたときの画面を指定する');
-    expect(at, 'マニュアルに「開いたときの画面を指定する」が無い').toBeGreaterThan(-1);
-    const section = manual.slice(at, manual.indexOf('### 設定', at));
-    const rows = [...section.matchAll(/^\| `([a-z]+)` \| (.+?) \|$/gm)];
+    const section = sectionByTitle(manual, '開いたときの画面を指定する');
+    expect(section, 'マニュアルに「開いたときの画面を指定する」が無い').not.toBeNull();
+    const rows = [...section!.matchAll(/^\| `([a-z]+)` \| (.+?) \|$/gm)];
     expect(
       rows.map((m) => m[1]!).sort(),
       'マニュアル「開いたときの画面を指定する」 の名前が、アドレスから開ける面と食い違う',
@@ -6396,10 +6294,10 @@ describe('近道の押し先が画面に在る', () => {
    */
   it('🔴 マニュアルの「条件は N つまで」が、実装の上限と一致する', () => {
     const manual = readFileSync('docs/manual.md', 'utf-8');
-    const at = manual.indexOf('### スマートフォルダ');
-    expect(at, 'マニュアルにスマートフォルダの節が無い').toBeGreaterThan(-1);
-    const section = manual.slice(at, manual.indexOf('\n### 集計', at + 1));
-    const m = /条件は \*\*(\d+) つまで\*\*/.exec(section);
+    // 🔑 見出しの名前ではなく**上限を書いた文**から節を探す
+    const section = sectionContaining(manual, '条件は **');
+    expect(section, 'マニュアルにスマートフォルダの条件の上限を書いた節が無い').not.toBeNull();
+    const m = /条件は \*\*(\d+) つまで\*\*/.exec(section!);
     expect(m, 'マニュアルが条件の上限を書いていない').not.toBeNull();
     expect(m?.[1], 'マニュアルの上限が実装と食い違う').toBe(String(MAX_SMART_TAGS));
     // 🔑 画面に出る断り文も同じ数から作る(user が読む字と doc を割らない)
@@ -6418,9 +6316,14 @@ describe('近道の押し先が画面に在る', () => {
  *   別の面の「同じです」に満たされる ── CLAUDE.md §1「面へスコープする」)。
  */
 describe('マニュアルだけの窓の節(§4-4)の主張', () => {
-  const from = MANUAL.indexOf('### マニュアルだけのウィンドウで読む');
-  const to = MANUAL.indexOf('### マニュアルの中を探す');
-  const section = from >= 0 && to > from ? MANUAL.slice(from, to) : '';
+  // 🔑 「窓」の説明は 3 つの節に分かれている ── 3 つで 1 組として読む(節を統合したら、ここも直す)
+  const section = ['マニュアルだけのウィンドウ', 'マニュアルのウィンドウを再び', 'マニュアルのウィンドウに配色']
+    .map((t) => {
+      const s = sectionByTitle(MANUAL, t);
+      if (s === null) throw new Error(`マニュアルに「${t}」の節が無い(空振り)`);
+      return s;
+    })
+    .join('\n');
 
   it('🔴 F5 で読んでいた所が残るとは言わない(残らない)', () => {
     expect(section.length, '節が見つからない(空振り)').toBeGreaterThan(500);
@@ -6458,12 +6361,16 @@ describe('マニュアルだけの窓の節(§4-4)の主張', () => {
  * 後で 1 つ足す日に**直せない側**を期待値にしてしまう。
  */
 describe('作り直しで戻らない物(#1006)', () => {
+  /** 作り直しの節。⚠ 空振り防止 ── 節そのものが消えたら、ここで落とす(0 行を「一致」と読まない)。 */
+  const rebuildSection = (): string => {
+    const seg = sectionByTitle(MANUAL, 'ノートの保存データを作り直す');
+    expect(seg, 'マニュアルに「ノートの保存データを作り直す」の節が無い').not.toBeNull();
+    return seg!;
+  };
+
   /** マニュアルの「中身を残して、作り直す」の表から、戻らない行だけを引く。 */
   const lostRowsInManual = (): string[] => {
-    const at = MANUAL.indexOf('### ノートの保存データを作り直す');
-    // ⚠ 空振り防止 ── 節そのものが消えたら、ここで落とす(0 行を「一致」と読まない)
-    expect(at, 'マニュアルに「ノートの保存データを作り直す」の節が無い').toBeGreaterThan(-1);
-    const seg = MANUAL.slice(at, MANUAL.indexOf('\n### ', at + 1));
+    const seg = rebuildSection();
     return seg
       .split('\n')
       .filter((l) => l.startsWith('| ') && l.includes('戻りません'))
@@ -6474,7 +6381,7 @@ describe('作り直しで戻らない物(#1006)', () => {
     const inManual = lostRowsInManual();
     // ⚠ 空振り防止 ── 表そのものを引けていなければ、この検査は何も見ていない。
     //   （#1087 で「戻らない」行は 0 になった ── 表の存在は下の it が「戻ります」の行で見る）
-    const seg = MANUAL.slice(MANUAL.indexOf('### ノートの保存データを作り直す'));
+    const seg = rebuildSection();
     expect(
       seg.split('\n').filter((l) => l.startsWith('| ') && l.includes('戻ります')).length,
       'マニュアルの表を引けていない（戻る行も 0 件）',
@@ -6485,7 +6392,7 @@ describe('作り直しで戻らない物(#1006)', () => {
 
   it('⚠ 引き方が効いている ── 戻る行を拾っていない', () => {
     // 🔑 同じ表に「🟢 戻ります」の行が在る ── それを拾っていたら、引き方が広すぎる
-    const seg = MANUAL.slice(MANUAL.indexOf('### ノートの保存データを作り直す'));
+    const seg = rebuildSection();
     expect(seg, '前提が崩れている ── 表に「戻ります」の行が無い').toContain('🟢 **戻ります**');
     for (const row of lostRowsInManual()) {
       expect(row, `戻る行まで拾っている: ${row}`).not.toContain('戻ります');

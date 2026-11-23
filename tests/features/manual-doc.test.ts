@@ -29,8 +29,9 @@ describe('マニュアルの窓 — 目次と本文の対応', () => {
     const sections = manualSections(MANUAL_TEXT);
     const built = buildManualDoc(renderMarkdown(MANUAL_TEXT, {}), sections);
     // ⚠ 空振り防止:節も目次も 0 件でないこと
-    expect(sections.length, '節が 0 件').toBeGreaterThan(100);
-    expect(built.toc.length, '目次が 0 件').toBeGreaterThan(100);
+    // 下限 60 は tripwire(章立て刷新後の規模でも通る値。数を目標にしない)
+    expect(sections.length, '節が 0 件').toBeGreaterThan(60);
+    expect(built.toc.length, '目次が 0 件').toBeGreaterThan(60);
     const ids = idsIn(built.html);
     const dead = built.toc.filter((t) => !ids.has(t.targetId));
     expect(dead, '押しても何も起きない行がある').toEqual([]);
@@ -237,6 +238,7 @@ describe('マニュアルの窓 — 節の印は見出しの字から(D4)', () =
      * ⚠ だから空振り防止は**その主張に合う形**へ置き換える ── 印を 1 つも作れて
      *   いなければ、上の 2 つの assert は何も言わない(CLAUDE.md §1)。
      */
-    expect(ids.length, '実物のマニュアルから印を 1 つも作れていない(空振り)').toBeGreaterThan(100);
+    // 下限 60 は tripwire(章立て刷新後の規模でも通る値。数を目標にしない)
+    expect(ids.length, '実物のマニュアルから印を 1 つも作れていない(空振り)').toBeGreaterThan(60);
   });
 });

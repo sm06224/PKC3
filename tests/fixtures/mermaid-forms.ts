@@ -16,6 +16,8 @@
  * ⚠ **pure module**。browser API を持たない。
  */
 
+import { sectionContaining } from '../helpers/manual-style';
+
 /** 1 種。`name` は**マニュアルの 1 列目**と同じ綴りである。 */
 export interface MermaidForm {
   /** ⚠ マニュアルの表の 1 列目(`graph TD` など)と**丸ごと一致**させる。 */
@@ -156,17 +158,13 @@ export const MERMAID_FORMS: readonly MermaidForm[] = [
  * マニュアルの表から、1 列目の綴りを取り出す。
  * ⚠ **1 行に 2 つ書いてある行**(`graph TD` / `graph LR`)は**最初の 1 つ**を採る
  *   ── 表の意図が「代表の綴り」だからである。
- * ⚠ 節を `### どんな図が描けるか` から**次の見出しまで**で切る ── 切らないと
+ * ⚠ 表を載せた節だけで切る(前置きの 1 文から節を探す)── 切らないと
  *   本文の別の表(記法一覧)に満たされる(CLAUDE.md §1「範囲が広すぎる」)。
  */
 export function manualDiagramNames(manual: string): string[] {
-  const at = manual.indexOf('### どんな図が描けるか');
-  if (at < 0) return [];
-  const rest = manual.slice(at + 1);
-  const end = rest.indexOf('\n## ');
-  const nextH3 = rest.indexOf('\n### ');
-  const cut = [end, nextH3].filter((n) => n >= 0);
-  const seg = cut.length > 0 ? rest.slice(0, Math.min(...cut)) : rest;
+  // 🔑 見出しの名前ではなく**表の前置きの 1 文**で節を探す(章立てを組み替えて見出しが変わっても同じ節を拾う)
+  const seg = sectionContaining(manual, '以下は図(`mermaid`)の種類です');
+  if (seg === null) return [];
   const out: string[] = [];
   for (const line of seg.split('\n')) {
     const m = /^\|\s*`([^`]+)`/.exec(line);

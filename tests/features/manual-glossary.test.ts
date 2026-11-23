@@ -13,16 +13,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BANNED_TERMS } from '../../src/features/ui-terms';
+import { scanHeadings, sectionByTitle } from '../helpers/manual-style';
 
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
 
-/** 「## 言葉の意味」から次の `## ` までの本文。見つからなければ空。 */
+/** 題名が「言葉の意味」で始まる見出し(段は問わない)の節の本文。見つからなければ空。 */
 function glossarySection(manual: string): string {
-  const start = manual.indexOf('\n## 言葉の意味');
-  if (start < 0) return '';
-  const rest = manual.slice(start + 1);
-  const next = rest.indexOf('\n## ', 3);
-  return next < 0 ? rest : rest.slice(0, next);
+  return sectionByTitle(manual, '言葉の意味') ?? '';
 }
 
 /**
@@ -154,7 +151,10 @@ describe('マニュアル本文 ── 使わない語が 0 件', () => {
 
   it('空振り防止:本文を切り出せていて、実在の語の表が生きている', () => {
     expect(body.length, '本文が短すぎる ── 切り出し方が壊れている').toBeGreaterThan(100_000);
-    expect(body, '用語集の節が本文に無い').toContain('## 言葉の意味');
+    expect(
+      scanHeadings(MANUAL).some((h) => h.title.startsWith('言葉の意味')),
+      '用語集の節が本文に無い',
+    ).toBe(true);
     // 表に載せた語は本文に実在する(消えたら表から外す ── 通す必要の無い語を残さない)
     for (const w of LEGIT_COMPOUNDS) expect(body, `${w} が本文に無い ── 表から外す`).toContain(w);
   });
