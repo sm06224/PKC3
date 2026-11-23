@@ -38,3 +38,58 @@ describe('toast-lift ── 浮き札を追記欄の真上へ上げる量', () =
     expect(hidden.shell.style.getPropertyValue('--pkc-toast-lift')).toBe('0px');
   });
 });
+
+describe('toast-lift ── 大きさ・畳みの変化で測り直す(ResizeObserver / MutationObserver を実際に鳴らす)', () => {
+  it('🔴 追記欄が畳まれる(hidden)・掴む帯が動くと、観測が鳴って測り直す(空振り防止: 鳴らさなければ値は変わらない)', () => {
+    const ros: Array<{ cb: () => void; targets: Element[] }> = [];
+    const mos: Array<{ cb: () => void }> = [];
+    class FakeRO {
+      targets: Element[] = [];
+      constructor(public cb: () => void) {
+        ros.push(this);
+      }
+      observe(t: Element): void {
+        this.targets.push(t);
+      }
+      disconnect(): void {}
+    }
+    class FakeMO {
+      constructor(public cb: () => void) {
+        mos.push(this);
+      }
+      observe(): void {}
+      disconnect(): void {}
+    }
+    const prevRO = globalThis.ResizeObserver;
+    const prevMO = globalThis.MutationObserver;
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = FakeRO;
+    (globalThis as unknown as { MutationObserver: unknown }).MutationObserver = FakeMO;
+    try {
+      const { shell, stop } = setup({ top: 700, bottom: 800 });
+      expect(shell.style.getPropertyValue('--pkc-toast-lift')).toBe('108px');
+      expect(ros.length, 'ResizeObserver を使っていない').toBe(1);
+      expect(mos.length, 'MutationObserver を使っていない').toBe(1);
+      const root = shell.parentElement!;
+      const ap = root.querySelector<HTMLElement>('[data-pkc-region="append"]')!;
+      const grip = root.querySelector<HTMLElement>('[data-pkc-axis="y"]')!;
+      // 鳴らさない間は変わらない(対照)
+      ap.hidden = true;
+      grip.hidden = true;
+      expect(shell.style.getPropertyValue('--pkc-toast-lift'), '鳴らしていないのに測り直した').toBe('108px');
+      mos[0]!.cb();
+      expect(shell.style.getPropertyValue('--pkc-toast-lift'), '畳まれたのに測り直さない').toBe('0px');
+      // 追記欄が伸びる(大きさの変化)
+      ap.hidden = false;
+      grip.hidden = false;
+      ap.getBoundingClientRect = () => rect(600, 800);
+      grip.getBoundingClientRect = () => rect(592, 600);
+      ros[0]!.cb();
+      expect(shell.style.getPropertyValue('--pkc-toast-lift')).toBe('208px');
+      expect(ros[0]!.targets.length, 'center と append を観測していない').toBe(2);
+      stop();
+    } finally {
+      (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = prevRO;
+      (globalThis as unknown as { MutationObserver: unknown }).MutationObserver = prevMO;
+    }
+  });
+});

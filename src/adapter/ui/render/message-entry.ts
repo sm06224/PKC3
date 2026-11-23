@@ -41,6 +41,34 @@ export interface MessageStatusModel {
   readonly detail: string;
 }
 
+/** 🔴 消えた浮き札の押し口(「元に戻す」等)。簡易履歴の「直前の操作」に残して、操作を片道にしない。 */
+export interface KeptAction {
+  readonly label: string;
+  /** `data-pkc-*` の属性(`data-pkc-action` / `data-pkc-entry` / 日付 …)をそのまま写す。 */
+  readonly attrs: Readonly<Record<string, string>>;
+}
+
+const KEPT_FIELDS: ReadonlySet<string> = new Set([
+  'status-open',
+  'status-copy-ref',
+  'status-undo',
+  'status-create-date',
+  'status-rescue',
+  'status-trash',
+]);
+
+/** 浮き札に出ている押し口(閉じる・バックアップ・OK を除く)を控える。⚠ 浮き札が消える**前**に呼ぶ。 */
+export function snapshotKeptActions(status: ParentNode): KeptAction[] {
+  const out: KeptAction[] = [];
+  for (const b of Array.from(status.querySelectorAll<HTMLElement>('button[data-pkc-action]'))) {
+    if (b.hidden || !KEPT_FIELDS.has(b.getAttribute('data-pkc-field') ?? '')) continue;
+    const attrs: Record<string, string> = {};
+    for (const a of Array.from(b.attributes)) if (a.name.startsWith('data-pkc-') && a.name !== 'data-pkc-field') attrs[a.name] = a.value;
+    out.push({ label: b.textContent ?? '', attrs });
+  }
+  return out;
+}
+
 export type BadgeTone = 'none' | 'warn' | 'danger' | 'info';
 
 /** バッジの字と色。⚠ 判断はここ 1 か所(入口が複数在っても同じ答え)。 */
@@ -145,6 +173,15 @@ export function buildMessagePopover(
   stateActs.append(slots.backup, slots.captureRecovery);
   stateSec.append(stateHead, stateList, stateActs);
 
+  const keptSec = doc.createElement('section');
+  keptSec.setAttribute('data-pkc-field', 'popover-kept');
+  keptSec.hidden = true;
+  const keptHead = doc.createElement('h3');
+  keptHead.textContent = '直前の操作';
+  const keptActs = doc.createElement('div');
+  keptActs.setAttribute('data-pkc-field', 'popover-kept-actions');
+  keptSec.append(keptHead, keptActs);
+
   const recentSec = doc.createElement('section');
   recentSec.setAttribute('data-pkc-field', 'popover-recent');
   const recentHead = doc.createElement('h3');
@@ -169,7 +206,7 @@ export function buildMessagePopover(
   open.textContent = '詳細メッセージ画面を開く';
   acts.append(read, open);
 
-  pop.append(head, stateSec, recentSec, acts);
+  pop.append(head, stateSec, keptSec, recentSec, acts);
   return pop;
 }
 
@@ -191,6 +228,7 @@ export function paintMessagePopover(
   model: MessageStatusModel,
   recent: readonly RecentMessage[],
   now: Date = new Date(),
+  kept: readonly KeptAction[] = [],
 ): void {
   const doc = pop.ownerDocument;
   const stateList = pop.querySelector<HTMLElement>('[data-pkc-field="popover-state-list"]');
@@ -223,6 +261,19 @@ export function paintMessagePopover(
     }
     const head = pop.querySelector<HTMLElement>('[data-pkc-field="popover-state"] > h3');
     if (head !== null) head.title = model.detail;
+  }
+  const keptSec = pop.querySelector<HTMLElement>('[data-pkc-field="popover-kept"]');
+  const keptActs = pop.querySelector<HTMLElement>('[data-pkc-field="popover-kept-actions"]');
+  if (keptSec !== null && keptActs !== null) {
+    keptActs.replaceChildren();
+    for (const k of kept) {
+      const b = doc.createElement('button');
+      b.type = 'button';
+      for (const [n, v] of Object.entries(k.attrs)) b.setAttribute(n, v);
+      b.textContent = k.label;
+      keptActs.append(b);
+    }
+    keptSec.hidden = kept.length === 0;
   }
   const list = pop.querySelector<HTMLElement>('[data-pkc-field="popover-list"]');
   if (list !== null) {
@@ -263,6 +314,8 @@ export interface PopoverDeps {
 
 export interface MessagePopoverController {
   setModel(model: MessageStatusModel): void;
+  /** 消えた浮き札の押し口を「直前の操作」に残す(空 = 消す)。 */
+  setKeptActions(list: readonly KeptAction[]): void;
   /** 最近のメッセージが変わった(開いていれば描き直す)。 */
   refresh(): void;
   /** クリックで開く / 閉じる(ホバーで開いていたら固定にする)。 */
@@ -301,6 +354,8 @@ export function installMessagePopover(root: HTMLElement, deps: PopoverDeps = {})
 
   let model = EMPTY_MODEL;
   let modelKey = '';
+  let kept: readonly KeptAction[] = [];
+  let keptKey = '[]';
   let anchor: HTMLElement | null = null;
   let mode: 'hover' | 'click' = 'click';
   let openTimer: ReturnType<typeof setTimeout> | null = null;
@@ -345,7 +400,7 @@ export function installMessagePopover(root: HTMLElement, deps: PopoverDeps = {})
   const paintPop = (): void => {
     const pop = popOf();
     if (pop === null) return;
-    paintMessagePopover(pop, model, deps.recent?.() ?? []);
+    paintMessagePopover(pop, model, deps.recent?.() ?? [], new Date(), kept);
     place();
   };
 
@@ -477,6 +532,13 @@ export function installMessagePopover(root: HTMLElement, deps: PopoverDeps = {})
       modelKey = key;
       model = next;
       paintMessageEntries(root, model);
+      if (isOpen()) paintPop();
+    },
+    setKeptActions(list) {
+      const key = JSON.stringify(list);
+      if (key === keptKey) return;
+      keptKey = key;
+      kept = list;
       if (isOpen()) paintPop();
     },
     refresh() {

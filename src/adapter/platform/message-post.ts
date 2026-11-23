@@ -612,4 +612,40 @@ export class MessagePost {
   }
 }
 
+/** 実害のある保存先の警告を、最後に積んだ時刻(ISO)。既読(`READ_AT_KEY`)がこれより新しければ、また積んでよい。 */
+export const STORAGE_CAUTION_KEY = 'pkc3.messages.storage-caution-at';
+
+/**
+ * 🔴 **積むか**: まだ積んでいない / 積んだ後に既読にした、のどちらかだけ。⚠ 起動ごとに積むと、プライベートブラウズ(毎回この警告)で
+ * 未読の注意が起動のたびに積み上がる。記憶は端末(localStorage)── ページを読み込み直しても効く。
+ */
+export function shouldPostStorageCaution(postedAt: string | null, readAt: string | null): boolean {
+  if (postedAt === null) return true;
+  return readAt !== null && readAt > postedAt;
+}
+
+/** 実害のある保存先の警告を「注意」で 1 度だけ積む(既読にするまで再び積まない)。積んだら true。 */
+export function postStorageCautionOnce(
+  post: Pick<MessagePost, 'post'>,
+  text: string,
+  store: Pick<Storage, 'getItem' | 'setItem'> | null = typeof localStorage === 'undefined' ? null : localStorage,
+  readAt: string | null = messagesReadAt(),
+  nowIso: string = new Date().toISOString(),
+): boolean {
+  let postedAt: string | null;
+  try {
+    postedAt = store?.getItem(STORAGE_CAUTION_KEY) ?? null;
+  } catch {
+    postedAt = null;
+  }
+  if (!shouldPostStorageCaution(postedAt, readAt)) return false;
+  post.post({ kind: 'caution', source: 'storage', text });
+  try {
+    store?.setItem(STORAGE_CAUTION_KEY, nowIso);
+  } catch {
+    /* 記憶できない端末は、起動のたびに積む(黙って捨てるよりまし) */
+  }
+  return true;
+}
+
 export const appMessagePost = new MessagePost();

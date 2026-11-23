@@ -334,8 +334,8 @@ describe('main.ts の配線(原文 pin ── 弱い。`main.ts` は走らない
     expect(code).toMatch(/onBroken: \(text\) => showStatus\(text, \{ kind: 'problem' \}\)/);
     // 4 → 5(依頼 219・329):別のウィンドウが書きかけのまま閉じたことを、システムのメッセージに「注意」で足す口を 1 つ足した
     // 5 → 6(#1985 項目 2):前回途中で終わった録音・録画が残っていることを、システムのメッセージに「注意」で足す口を 1 つ足した
-    // 6 → 7(2026-11-23):実害のある保存先の警告(閉じると消える)を、起動ごとに 1 度、システムのメッセージに「注意」で足す口を 1 つ足した。
-    expect(code.match(/kind: 'caution'/g)?.length, 'caution の渡し先が 7 つ(PDF が読めなかった / Office が固まった / 読み込めなかった / 控えを書けなかった / 別のウィンドウの書きかけ / 途中で終わった録音・録画 / 実害のある保存先の警告)').toBe(7);
+    // ⚠ 2026-11-23: 実害のある保存先の警告は `postStorageCautionOnce`(message-post.ts)が積む(既読にするまで 1 度)── ここの数には載らない。
+    expect(code.match(/kind: 'caution'/g)?.length, 'caution の渡し先が 6 つ(PDF が読めなかった / Office が固まった / 読み込めなかった / 控えを書けなかった / 別のウィンドウの書きかけ / 途中で終わった録音・録画)').toBe(6);
     expect(code.match(/kind: 'problem'/g)?.length, 'problem の渡し先が 3 つ(壊れ / 一式 / Office)').toBeGreaterThanOrEqual(3);
   });
 });

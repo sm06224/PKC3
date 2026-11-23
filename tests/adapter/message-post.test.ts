@@ -9,6 +9,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   MessagePost,
+  postStorageCautionOnce,
+  shouldPostStorageCaution,
   SPOOL_CAP,
   type MessageSpool,
   type SpoolItem,
@@ -553,5 +555,52 @@ describe('簡易履歴の記憶(直近の知らせのリング)', () => {
     const post = new MessagePost({ list: async () => [], count: async () => 0, push: async () => undefined, remove: async () => undefined });
     await post.seedUnreadFromDisk(async () => body(3));
     expect(post.recent().map((m) => m.text)).toEqual(['m2', 'm1', 'm0']);
+  });
+});
+
+describe('実害のある保存先の警告の「注意」── 既読にするまで 1 度だけ(プライベートブラウズで起動のたびに積み上げない)', () => {
+  const store = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
+  };
+  const fake = () => {
+    const posted: string[] = [];
+    return { posted, post: (i: { text: string }) => void posted.push(i.text) };
+  };
+
+  it('🔴 1 回目は積み、既読にするまでの起動(ページの読み込み直し)では積まない。既読の後はまた積む', () => {
+    const st = store();
+    const p = fake();
+    expect(postStorageCautionOnce(p, '⚠ x', st, null, '2026-11-23T10:00:00.000Z')).toBe(true);
+    // 3 回起動しても積まれない
+    for (let i = 0; i < 3; i += 1) expect(postStorageCautionOnce(p, '⚠ x', st, null, `2026-11-23T10:0${String(i + 1)}:00.000Z`)).toBe(false);
+    // 積んだ時刻より前の既読では積まない
+    expect(postStorageCautionOnce(p, '⚠ x', st, '2026-11-23T09:00:00.000Z', '2026-11-23T11:00:00.000Z')).toBe(false);
+    // 既読にした後の起動では、また積む(読んだ後の再発は新しい出来事)
+    expect(postStorageCautionOnce(p, '⚠ x', st, '2026-11-23T12:00:00.000Z', '2026-11-23T13:00:00.000Z')).toBe(true);
+    expect(p.posted).toHaveLength(2);
+  });
+
+  it('🔴 shouldPostStorageCaution の表(積んだことが無い → 積む / 既読が新しい → 積む / それ以外 → 積まない)', () => {
+    expect(shouldPostStorageCaution(null, null)).toBe(true);
+    expect(shouldPostStorageCaution('2026-11-23T10:00:00.000Z', null)).toBe(false);
+    expect(shouldPostStorageCaution('2026-11-23T10:00:00.000Z', '2026-11-23T09:00:00.000Z')).toBe(false);
+    expect(shouldPostStorageCaution('2026-11-23T10:00:00.000Z', '2026-11-23T11:00:00.000Z')).toBe(true);
+  });
+
+  it('記憶できない端末(storage が投げる / 無い)は、積む(黙って捨てない)', () => {
+    const p = fake();
+    const bad = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); } };
+    expect(postStorageCautionOnce(p, '⚠ x', bad, null)).toBe(true);
+    expect(postStorageCautionOnce(p, '⚠ x', null, null)).toBe(true);
+  });
+
+  it('本物の MessagePost に積むと「注意」(未読 +1)になる', () => {
+    const post = new MessagePost({ list: async () => [], count: async () => 0, push: async () => undefined, remove: async () => undefined });
+    const unread: number[] = [];
+    post.onUnreadChanged((n) => unread.push(n));
+    postStorageCautionOnce(post, '⚠ 保存領域が使えません', store(), null);
+    expect(unread).toEqual([1]);
+    expect(post.recent()[0]!.kind).toBe('caution');
   });
 });

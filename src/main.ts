@@ -105,8 +105,8 @@ import {
   paintFileDragLabel,
   subscribeFileDragHint,
 } from '@adapter/ui/actions/file-drag-hint';
-import { ToastDismissal, composeStatusModel, paintStatusLive, paintToastText, shouldShowToast } from '@adapter/ui/render/status-line';
-import { installMessagePopover } from '@adapter/ui/render/message-entry';
+import { ToastDismissal, composeStatusModel, isToastHeld, paintStatusLive, paintToastText, shouldShowToast } from '@adapter/ui/render/status-line';
+import { installMessagePopover, snapshotKeptActions } from '@adapter/ui/render/message-entry';
 import { installToastLift } from '@adapter/ui/render/toast-lift';
 import { createErrorAutoHide, createStatusNotices, type StatusNotices } from '@adapter/ui/render/status-lifetime';
 import {
@@ -236,7 +236,7 @@ import { runStartupIntegrity } from '@adapter/platform/storage/startup-integrity
 import type { StartupIntegrityOutcome } from '@features/storage/integrity-schedule';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口は 1 個(設計 doc §7、段②a。CLAUDE.md §7)
-import { appMessagePost, READ_AT_KEY } from '@adapter/platform/message-post';
+import { appMessagePost, postStorageCautionOnce, READ_AT_KEY } from '@adapter/platform/message-post';
 import { appSyncEnabled } from '@adapter/ui/render/sync-enabled';
 import { SYNC_FORGET_CONFIRM, SYNC_FORGET_CONFIRM_ON_OFF, SYNC_FORGET_LABEL, SYNC_OFF_CONFIRM } from '@features/sync/sync-setting';
 import { SHOW_SYNC_CONFLICTS_ACTION } from '@adapter/ui/actions/sync-diff';
@@ -2274,7 +2274,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // 🔴 警告の隣の「バックアップを書き出す」(#1038 D1)── 常設の警告と同じ寿命なので 1 度だけ出し入れする
   paintStatusBackup(regions.statusBackup, statusBaseSevere);
   // 🔴 実害のある警告は、起動ごとに 1 度、メッセージ(注意)にも残す(浮き札を × で閉じても読み返せる)
-  if (statusBaseSevere) appMessagePost.post({ kind: 'caution', source: 'storage', text: statusBase });
+  if (statusBaseSevere) postStorageCautionOnce(appMessagePost, statusBase);
   // 🔴 版・保存先の説明は、簡易履歴の「いまの状態」の見出しの `title` へ(画面いちばん下の常設の帯が無くなったので)
   const statusDetail = storageStatusTitle(`${versionText()} — ${init.vfs}`, init.fallbackReason);
   /**
@@ -2316,10 +2316,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let errorLine = '';
   /** 🔴 浮き札の × で閉じたエラー / 進行中の字(同じ字の間は出さない。字が変わる・消えると解く)。 */
   const toastDismissal = new ToastDismissal();
-  /** 🔴 マウスが浮き札の上 / 焦点が中に在る間(時間で消さない)。 */
-  let toastHeld = false;
+  /** 🔴 読んでいる間か(時間が来た瞬間に引く。畳まれた札は読まれていない)。 */
+  const toastHeld = (): boolean => isToastHeld(regions.status, document.activeElement);
   const errorAutoHide = createErrorAutoHide({
-    isHeld: () => toastHeld,
+    isHeld: toastHeld,
     // 時間が来たら降ろす(保存データの確認へ送る断り書きは `dismissError` が断る)── 同じ字はメッセージに積まれている
     onExpire: (line) => {
       if (toastDismissal.dismissError(line)) repaintStatus();
@@ -2379,6 +2379,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       severeToastLine: statusBaseSevere ? statusBase : '',
     };
     errorAutoHide.track(rawParts.errorLine);
+    // 新しい知らせが出たら、前の「直前の操作」は役目を終える
+    if (rawParts.noticeLine !== '') messageEntry.setKeptActions([]);
     const parts = toastDismissal.apply(rawParts);
     /**
      * 🔴 **何を出すかを決めるのは `composeStatusModel` 1 本**(`status-line.ts`。判断は `main.ts` に置かない ──
@@ -2399,7 +2401,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       detail: statusDetail,
     });
     paintStatusLive(regions.statusLive, model.live);
-    const show = shouldShowToast({ toast: model.toast, hasTooNarrow: !regions.tooNarrow.hidden });
+    const show = shouldShowToast({ toast: model.toast, severe: model.severe, hasTooNarrow: !regions.tooNarrow.hidden });
+    // 🔴 保存先の警告は専用の行(他の知らせと混ぜない)── 出し入れは字が変わったときだけ
+    if (regions.statusSevereText.textContent !== model.severe) regions.statusSevereText.textContent = model.severe;
+    const severeHide = model.severe === '';
+    if (regions.statusSevere.hidden !== severeHide) regions.statusSevere.hidden = severeHide;
+    paintStatusBackup(regions.statusBackupToast, !severeHide);
     if (model.toast === toastShown && regions.status.hidden === !show) return;
     toastShown = model.toast;
     // 🔴 保存が止まった断り書きの隣の入口(#1010 B)── 判断は `status-open.ts`
@@ -2407,8 +2414,6 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 見つからないノートの知らせの隣の「ゴミ箱を開く」(#1648)── 判断は `status-open.ts`
     paintStatusTrash(regions.statusTrash, model.toast);
     paintToastText(regions.statusText, model.toast);
-    // 🔴 浮き札の「バックアップを書き出す」(常設の警告が出ている間だけ。簡易履歴の「いまの状態」にも同じ押し口がある)
-    paintStatusBackup(regions.statusBackupToast, parts.severeToastLine !== '');
     regions.status.hidden = !show;
   };
   /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */
@@ -2418,18 +2423,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 同じ字はメッセージに残っている(結果・注意・問題は post 済み)。知らせは寿命の持ち主(`statusNotices.dismiss`)へ、
    * エラー・進行中は字を覚えて隠す(状態を直すものではない ── 保存に失敗して止まっている間の「状態」は入口に残る)。
    */
-  // 🔴 読んでいる間(マウスが載っている / 焦点が中)は、時間が来ても消さない
-  const setHeld = (on: boolean): void => {
-    toastHeld = on;
-    statusNotices?.hold(on);
-  };
-  // ⚠ 札の字は押しが通る(`pointer-events: none`)ので、マウスが載るのはボタンの上だけ ── 入れ子の mouseover / mouseout で見る
-  regions.status.addEventListener('mouseover', (ev) => {
-    if ((ev.target as Element | null)?.closest('button') !== null) setHeld(true);
+  // 🔴 保存先の警告の専用の ×(そのセッションの間だけ。普通の知らせの × では消えない)
+  regions.status.addEventListener('pkc-severe-dismiss', () => {
+    toastDismissal.dismissSevere();
+    paint();
   });
-  regions.status.addEventListener('mouseout', () => setHeld(regions.status.contains(document.activeElement)));
-  regions.status.addEventListener('focusin', () => setHeld(true));
-  regions.status.addEventListener('focusout', () => setHeld(regions.status.matches(':hover')));
   regions.status.addEventListener('pkc-toast-dismiss', () => {
     // 🔴 保存データの確認へ送る断り書きは × で消さない(押す口ごと無くなる)── 判断は `isToastDismissible`
     if (!toastDismissal.dismiss({ errorLine, progressLine: progressLine() }, toastShown)) return;
@@ -2542,7 +2540,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     paint,
     paintActions: paintOpen,
     // 🔴 state にも載っている知らせは降ろす ── 降ろさないと、同じ字の知らせが次に来ても出ない
-    expire: (text) => dispatcher.dispatch({ type: 'NOTICE_EXPIRED', message: text }),
+    expire: (text) => {
+      // 🔴 押し口(元に戻す等)は消す**前**に控えて、簡易履歴の「直前の操作」に残す(消えても操作は片道にならない)
+      const keptNow = snapshotKeptActions(regions.status);
+      if (keptNow.length > 0) messageEntry.setKeptActions(keptNow);
+      dispatcher.dispatch({ type: 'NOTICE_EXPIRED', message: text });
+    },
+    isHeld: toastHeld,
   });
   const showStatus = (text: string, opts?: StatusOptions): void => statusNotices!.show(text, opts);
   /**

@@ -23,6 +23,7 @@ import {
 import {
   createStatusNotices,
   routeStatusText,
+  STATUS_ACTION_VISIBLE_MS,
   STATUS_PROBLEM_VISIBLE_MS,
   STATUS_RESULT_VISIBLE_MS,
   createErrorAutoHide,
@@ -32,7 +33,7 @@ import { CORRUPT_REFUSAL } from '../../src/features/storage/db-corruption';
 import type { StatusOptions } from '../../src/adapter/ui/render/status-notice';
 
 /** 描いた回数・降ろした字・積んだ字を取る台。⚠ 描く側は `noticeLine()` を読む(本物の `paint` と同じ向き)。 */
-function rig(over: { actionShown?: () => boolean } = {}) {
+function rig(over: { actionShown?: () => boolean; isHeld?: () => boolean } = {}) {
   const painted: Array<{ notice: string; progress: string }> = [];
   const expired: string[] = [];
   const posted: Array<{ text: string; opts: StatusOptions | undefined }> = [];
@@ -43,6 +44,7 @@ function rig(over: { actionShown?: () => boolean } = {}) {
     paint: () => void painted.push({ notice: n.noticeLine(), progress: n.progressLine() }),
     paintActions: () => (over.actionShown ? over.actionShown() : actionShown),
     expire: (text) => void expired.push(text),
+    isHeld: over.isHeld,
     // ⚠ 時計は vitest の偽物(`setTimeout`)をそのまま使う ── 渡された長さだけ控える
     setTimer: (fn, ms) => {
       timers.push(ms);
@@ -120,13 +122,13 @@ describe('Q1 結果の知らせは数秒で消える', () => {
     expect(r.n.noticeLine()).toBe(CORRUPT_REFUSAL);
   });
 
-  it('🔴 読んでいる間(マウスが載っている / 焦点が中)は時間が来ても消えず、離れたら消える', () => {
-    const r = rig();
+  it('🔴 読んでいる間(isHeld が真)は時間が来ても消えず、離れたら(時間が来た瞬間の評価が偽になれば)消える', () => {
+    let held = true;
+    const r = rig({ isHeld: () => held });
     r.n.show('コピーしました');
-    r.n.hold(true);
     vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS * 5);
     expect(r.n.noticeLine(), '載せている間に消えた').toBe('コピーしました');
-    r.n.hold(false);
+    held = false;
     vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS);
     expect(r.n.noticeLine(), '離れても消えない').toBe('');
   });
@@ -167,39 +169,39 @@ describe('エラーの浮き札の自動で消える時計', () => {
   });
 });
 
-describe('Q2 操作のボタンを持つ知らせは次が来るまで残る', () => {
-  it('🔴 押す口が出ている結果は消えない。⚠ 出す条件は status-open の描く関数の返り値', () => {
+describe('Q2 操作のボタンを持つ知らせは長め(30 秒)に残り、それでも消える(2026-11-23 ── 作業中の画面に居座らない)', () => {
+  it('🔴 押す口が出ている結果は 30 秒は残り、30 秒で消える(結果の 6 秒では消えない)。⚠ 出す条件は status-open の描く関数の返り値', () => {
     const r = rig();
     r.setAction(true);
     r.n.show('「見積.pdf」を添付にしました');
-    vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS * 100);
-    expect(r.n.noticeLine(), '「開く」のある知らせが消えた').toBe('「見積.pdf」を添付にしました');
-    expect(r.expired).toEqual([]);
+    vi.advanceTimersByTime(STATUS_ACTION_VISIBLE_MS - 1);
+    expect(r.n.noticeLine(), '「開く」のある知らせが 30 秒の手前で消えた').toBe('「見積.pdf」を添付にしました');
+    vi.advanceTimersByTime(1);
+    expect(r.n.noticeLine(), '30 秒でも居座る').toBe('');
+    expect(r.expired).toEqual(['「見積.pdf」を添付にしました']);
   });
 
-  it('🔴 押す口が引っ込んだら(そのノートを開いた等)、そこから数え始めて消える', () => {
+  it('🔴 押す口が引っ込んでも、最初の 30 秒の時計はそのまま(状態の動きで寿命が延び縮みしない)', () => {
     const r = rig();
     r.setAction(true);
     r.n.show('「見積.pdf」を添付にしました');
     vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS * 3);
     r.setAction(false);
     r.n.settle();
-    vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS - 1);
-    expect(r.n.noticeLine(), '引っ込んだ瞬間に消えた(数え始めていない)').not.toBe('');
+    vi.advanceTimersByTime(STATUS_ACTION_VISIBLE_MS - STATUS_RESULT_VISIBLE_MS * 3 - 1);
+    expect(r.n.noticeLine()).not.toBe('');
     vi.advanceTimersByTime(1);
     expect(r.n.noticeLine()).toBe('');
+    expect(r.timers).toEqual([STATUS_ACTION_VISIBLE_MS]);
   });
 
-  it('🔴 `settle` は押す口が出ている間は時計を動かさない(対照:出ていなければ動く)', () => {
+  it('🔴 `settle` は時計を増やさない(1 本のまま)', () => {
     const r = rig();
     r.setAction(true);
     r.n.show('塊を動かしました');
     r.n.settle();
     r.n.settle();
-    expect(r.timers, '押す口が出ているのに時計を動かした').toEqual([]);
-    r.setAction(false);
-    r.n.settle();
-    expect(r.timers, '対照:引っ込んだのに時計が動いていない').toEqual([STATUS_RESULT_VISIBLE_MS]);
+    expect(r.timers, '時計が増えた').toEqual([STATUS_ACTION_VISIBLE_MS]);
   });
 
   it('🔴 `settle` を重ねても時計は 1 本のまま(寿命が延びない)', () => {
@@ -360,8 +362,8 @@ describe('Q3 全体の処理の進行中は別の欄', () => {
     r.n.show('書き出しています…');
     expect(r.n.noticeLine(), '進行中が残るはずの知らせを消した').toBe('塊を動かしました');
     expect(r.n.progressLine()).toBe('書き出しています…');
-    vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS * 10);
-    expect(r.n.noticeLine(), '押す口を持つ知らせが時間で消えた').toBe('塊を動かしました');
+    vi.advanceTimersByTime(STATUS_ACTION_VISIBLE_MS - 1);
+    expect(r.n.noticeLine(), '押す口を持つ知らせが 30 秒の手前で消えた').toBe('塊を動かしました');
   });
 
   it('🔴 注意の知らせも、進行中が始まっても消えない', () => {

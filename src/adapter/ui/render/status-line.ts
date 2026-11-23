@@ -128,6 +128,8 @@ export interface StateItem {
 export interface StatusModel {
   readonly state: readonly StateItem[];
   readonly toast: string;
+  /** 🔴 常設の保存先の警告(浮き札の**専用の行**。他の知らせと 1 つの字に混ぜない ── 混ぜると新しい知らせが切れて読めない)。 */
+  readonly severe: string;
   readonly live: string;
   readonly fileDrag: string;
 }
@@ -144,17 +146,17 @@ export function composeStatusModel(parts: StatusLineParts): StatusModel {
   add('portable', parts.portableAssetNote);
   add('persist', parts.persistState);
   add('saving', parts.savingLine);
-  const toast = [parts.severeToastLine ?? '', parts.progressLine, parts.noticeLine, parts.errorLine].filter((t) => t !== '').join(' — ');
+  const toast = [parts.progressLine, parts.noticeLine, parts.errorLine].filter((t) => t !== '').join(' — ');
   const live = [parts.noticeLine, parts.errorLine].filter((t) => t !== '').join(' — ');
-  return { state, toast, live, fileDrag: parts.fileDragLine ?? '' };
+  return { state, toast, severe: parts.severeToastLine ?? '', live, fileDrag: parts.fileDragLine ?? '' };
 }
 
 /**
  * 🔴 **浮き札を出すか**。字があるか、画面幅不足の断り書き(`OK` を押す口を持つ。#671)が出ている間は出す
  * ── 畳むと `OK` ごと画面から消え、user は消し方を持たない。
  */
-export function shouldShowToast(options: { readonly toast: string; readonly hasTooNarrow: boolean }): boolean {
-  return options.hasTooNarrow || options.toast !== '';
+export function shouldShowToast(options: { readonly toast: string; readonly severe?: string; readonly hasTooNarrow: boolean }): boolean {
+  return options.hasTooNarrow || options.toast !== '' || (options.severe ?? '') !== '';
 }
 
 /**
@@ -232,7 +234,24 @@ export class ToastDismissal {
     if (!isToastDismissible(toast)) return false;
     if (current.errorLine !== '') this.error = current.errorLine;
     if (current.progressLine !== '') this.progress = current.progressLine;
-    this.severe = true;
+    // ⚠ 保存先の警告はここでは隠さない(「コピーしました」の × で実害の警告が消えない)── 専用の × は `dismissSevere`
     return true;
   }
+
+  /** 保存先の警告の専用の ×。そのセッションの間だけ隠す。 */
+  dismissSevere(): void {
+    this.severe = true;
+  }
+}
+
+/**
+ * 🔴 **読んでいる間か**(マウスが浮き札の上 / 焦点が中)。⚠ **引く側**で、時間が来た瞬間に評価する(押す側の `mouseover` / `focusin` の
+ * 記憶は、焦点を持ったまま浮き札が畳まれると真のまま固まる)。畳まれた札は読まれていない。
+ */
+export function isToastHeld(
+  toast: { readonly hidden: boolean | string; matches(selector: string): boolean; contains(node: Node | null): boolean },
+  active: Node | null,
+): boolean {
+  if (toast.hidden !== false) return false;
+  return toast.matches(':hover') || (active !== null && toast.contains(active));
 }

@@ -675,6 +675,11 @@ button[data-pkc-glyph]:disabled {
 [data-pkc-region='status-stack'] button {
   pointer-events: auto;
 }
+[data-pkc-field='status-severe-close']:hover {
+  --muted: var(--pkc-muted-on-mark);
+  color: var(--fg);
+  background: var(--surface-hover);
+}
 /* 🔴 狭すぎる端末への断り書きが出ている間は、入れ物を幅いっぱいに(札の幅が字の出入りで変わると、OK が横へずれて押しが外れる。#671) */
 [data-pkc-region='status-stack']:has(> [data-pkc-region='status'] > [data-pkc-region='too-narrow']:not([hidden])) {
   justify-self: stretch;
@@ -10028,6 +10033,44 @@ mark[data-pkc-diff-char='del'] {
 }
 [data-pkc-field='status-text']:empty {
   display: none;
+}
+/* 字が無いとき(保存先の警告だけが出ているとき)は、知らせ用の × を出さない(警告には専用の ×) */
+[data-pkc-field='status-text']:empty ~ [data-pkc-field='status-close'] {
+  display: none;
+}
+/* 🔴 字の部分は触れる(長い知らせを中で送って読める)。⚠ 札は小さく、作業の操作から離れた右下にある */
+[data-pkc-region='status-stack'] > [data-pkc-region='status'] > [data-pkc-field='status-text'] {
+  pointer-events: auto;
+}
+/* 🔴 保存先の警告の専用の行(他の知らせと 1 つの字に混ぜない)── 危険色 + 太字・1 行 + バックアップ + 専用の × */
+[data-pkc-field='status-severe'] {
+  display: flex;
+  align-items: center;
+  flex: 1 1 100%;
+  gap: var(--s2) var(--s3);
+  flex-wrap: wrap;
+  min-width: 0;
+  color: var(--danger);
+  font-weight: 700;
+}
+[data-pkc-field='status-severe'][hidden] {
+  display: none;
+}
+[data-pkc-field='status-severe-text'] {
+  flex: 1 1 12em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+[data-pkc-field='status-severe-close'] {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  line-height: 1;
 }
 /* 🔴 **浮き札の ×**。⚠ 右端へ寄せる。指で押す所は狭くしない(32px) */
 [data-pkc-field='status-close'] {

@@ -18325,6 +18325,10 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 実体は `main.ts`(知らせの寿命を持つ `statusNotices` とエラーの欄)── ここは合図を送るだけ(`pkc-toast-dismiss`)。
    *   貼付トーストの × も同じ合図を使う(`paste-toast.ts`)。
    */
+  /** 🔴 保存先の警告の専用の ×(そのセッションの間だけ隠す。普通の知らせの × とは別)。 */
+  'dismiss-severe': (_dispatcher, target) => {
+    target.closest('[data-pkc-region="status"]')?.dispatchEvent(new Event('pkc-severe-dismiss'));
+  },
   'dismiss-toast': (_dispatcher, target) => {
     const toast = target.closest('[data-pkc-region="status"], [data-pkc-region="paste-toast"]');
     toast?.dispatchEvent(new Event('pkc-toast-dismiss'));

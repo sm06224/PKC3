@@ -189,8 +189,18 @@ test('🔴 保存領域が使えない警告が危険色・太字になり、隣
   await expect(page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]')).toHaveText('!');
   await page.waitForTimeout(7_000);
   await expect(sevToast, '時間で消えた(常設でない)').toBeVisible();
+  // 🔴 ほかの知らせが同時に出ても、警告の行は別(切れない・混ざらない)。ふつうの × は警告を隠さず、警告の専用の × だけが隠す
+  await makeNote(page, 'SevNote', 'sev-body');
+  await clickReal(page, '[data-pkc-action="copy-entry-link"]');
+  const sevText = page.locator('[data-pkc-region="status"] [data-pkc-field="status-text"]');
+  await expect(sevText, '警告と同時に別の知らせが出ない').not.toHaveText('', { timeout: 10_000 });
+  await expect(sevToast.locator('[data-pkc-field="status-severe"]'), '警告の専用の行が消えた').toBeVisible();
+  await expect(sevToast.locator('[data-pkc-field="status-severe-text"]')).toContainText('保存領域が使えません');
   await clickReal(page, '[data-pkc-region="status"] [data-pkc-field="status-close"]');
-  await expect(sevToast, '× で閉じられない').toBeHidden();
+  await expect(sevText, 'ふつうの × で知らせが消えない').toHaveText('');
+  await expect(sevToast.locator('[data-pkc-field="status-severe"]'), 'ふつうの × で実害の警告が消えた').toBeVisible();
+  await clickReal(page, '[data-pkc-region="status"] [data-pkc-field="status-severe-close"]');
+  await expect(sevToast, '専用の × で閉じられない').toBeHidden();
   await expect(page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]'), '閉じても赤い「!」は残る').toHaveText('!');
   await page.reload();
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });

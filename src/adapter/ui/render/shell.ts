@@ -86,6 +86,9 @@ export interface ShellRegions {
   statusBackup: HTMLElement;
   /** 🔴 浮き札の中の「バックアップを書き出す」(実害のある保存先の警告を常設で出している間だけ。押し先は同じ `export-archive`)。 */
   statusBackupToast: HTMLElement;
+  /** 🔴 常設の保存先の警告の**専用の行**(字 + バックアップ + 専用の ×。他の知らせの字と混ぜない)。 */
+  statusSevere: HTMLElement;
+  statusSevereText: HTMLElement;
   /**
    * 🔴 **見つからないノートの知らせの隣の「ゴミ箱を開く」**(#1648)。押した先は `show-trash`
    *   の受け手(`binder.ts`)。出し入れは `status-open.ts` の `paintStatusTrash`。
@@ -1357,7 +1360,24 @@ export function buildShell(root: HTMLElement): ShellRegions {
   // ⚠ 字は簡易履歴の側と同じ 1 つ(字を 2 か所に書かない)
   statusBackupToast.textContent = statusBackup.textContent;
   statusBackupToast.hidden = true;
-  status.append(statusText, statusOpen, statusCopyRef, statusUndo, statusCreate, statusRescue, statusTrash, statusBackupToast, tooNarrow, statusClose);
+  /**
+   * 🔴 **実害のある保存先の警告の専用の行**(2026-11-23 レビュー)。他の知らせと 1 つの字に連ねると、新しい知らせが 2 行で切れて読めなくなる。
+   * 行は常設(`hidden` の出し入れ)。専用の ×(`dismiss-severe`)はこのセッションの間だけ隠す ── 普通の知らせの × では消えない。
+   */
+  const statusSevere = document.createElement('div');
+  statusSevere.setAttribute('data-pkc-field', 'status-severe');
+  statusSevere.hidden = true;
+  const statusSevereText = document.createElement('span');
+  statusSevereText.setAttribute('data-pkc-field', 'status-severe-text');
+  const severeClose = document.createElement('button');
+  severeClose.type = 'button';
+  severeClose.setAttribute('data-pkc-field', 'status-severe-close');
+  severeClose.setAttribute('data-pkc-action', 'dismiss-severe');
+  severeClose.setAttribute('aria-label', '保存先の警告を閉じる(この起動の間だけ)');
+  severeClose.title = '保存先の警告を閉じる(この起動の間だけ。次の起動でまた出ます)';
+  severeClose.textContent = '×';
+  statusSevere.append(statusSevereText, statusBackupToast, severeClose);
+  status.append(statusSevere, statusText, statusOpen, statusCopyRef, statusUndo, statusCreate, statusRescue, statusTrash, tooNarrow, statusClose);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -1548,6 +1568,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
     statusRescue,
     statusBackup,
     statusBackupToast,
+    statusSevere,
+    statusSevereText,
     statusTrash,
     statusCopyRef,
     statusClose,

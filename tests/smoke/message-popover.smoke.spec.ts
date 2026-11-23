@@ -93,19 +93,12 @@ test('🔴 常設の帯が無い ── 浮き札が出ても配置が動かず�
   });
   const longBox = (await toast.boundingBox())!;
   expect(longBox.height, '長い知らせが一覧を覆い尽くす').toBeLessThanOrEqual(900 * 0.27);
-  // 🔴 左の一覧・縦のバーの上に置かない / 追記欄の真上 / 札の字は押しが通る(下の操作を妨げない)
+  // 🔴 左の一覧・縦のバーの上に置かない / 追記欄の真上(札の字は中で送れるよう触れる。小さく、操作から離れた右下)
   const sideB = (await page.locator('[data-pkc-region="sidebar"]').boundingBox())!;
   const appendB = await page.locator('[data-pkc-region="append"]').boundingBox();
   expect(longBox.x, '浮き札が左の一覧に重なる').toBeGreaterThanOrEqual(sideB.x + sideB.width - 1);
   // ⚠ 追記欄はノートを開いているときだけ出る(出ていなければ測らない)
   if (appendB !== null) expect(longBox.y + longBox.height, '浮き札が追記欄を覆う').toBeLessThanOrEqual(appendB.y + 1);
-  const through = await page.evaluate(() => {
-    const t = document.querySelector('[data-pkc-field="status-text"]') as HTMLElement;
-    const r = t.getBoundingClientRect();
-    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return at !== null && !at.closest('[data-pkc-region="status"]');
-  });
-  expect(through, '札の字が押しを受け止めている(下の操作が押せなくなる)').toBe(true);
   await page.evaluate((t) => {
     (document.querySelector('[data-pkc-field="status-text"]') as HTMLElement).textContent = t;
   }, origText ?? '');
@@ -117,6 +110,20 @@ test('🔴 常設の帯が無い ── 浮き札が出ても配置が動かず�
     return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.getAttribute('data-pkc-field') ?? null;
   });
   expect(hit, '浮き札の × が覆われている').toBe('status-close');
+
+  // 🔴 本文の縦のスクロールバー・ノート内の検索欄に被らない
+  const overlap = await page.evaluate(() => {
+    const t = (document.querySelector('[data-pkc-region="status"]') as HTMLElement).getBoundingClientRect();
+    const d = document.querySelector('[data-pkc-region="detail"]') as HTMLElement;
+    const dr = d.getBoundingClientRect();
+    const bar = d.offsetWidth - d.clientWidth;
+    const find = document.querySelector('.pkc-note-find') as HTMLElement | null;
+    const fr = find !== null && find.getBoundingClientRect().width > 0 ? find.getBoundingClientRect() : null;
+    const hit = fr !== null && !(t.bottom <= fr.top || t.top >= fr.bottom || t.right <= fr.left || t.left >= fr.right);
+    return { overScrollbar: t.right > dr.right - bar + 0.5, hit };
+  });
+  expect(overlap.overScrollbar, '浮き札が本文のスクロールバーに被る').toBe(false);
+  expect(overlap.hit, '浮き札がノート内の検索欄に被る').toBe(false);
 
   // ③ 🔴 浮き札から「元に戻す」が押せる(片道にしない)
   const undo = page.locator('[data-pkc-field="status-undo"]');
@@ -137,6 +144,11 @@ test('🔴 常設の帯が無い ── 浮き札が出ても配置が動かず�
   // 閉じても、同じ知らせはメッセージに残っている(簡易履歴に出る)
   const pop = await openMessagePopover(page);
   await expect(pop.locator('[data-pkc-field="popover-list"]'), '閉じた知らせが履歴に残っていない').toContainText('ゴミ箱へ移しました');
+  // 🔴 閉じても操作は片道にならない: 簡易履歴の「直前の操作」に「元に戻す」が残り、押すと戻る
+  await expect(pop.locator('[data-pkc-field="popover-kept"] [data-pkc-action]'), '閉じた知らせの「元に戻す」が簡易履歴に残っていない').toHaveText('元に戻す');
+  await clickReal(page, pop.locator('[data-pkc-field="popover-kept"] [data-pkc-action]'));
+  await expect(rows, '簡易履歴の「元に戻す」で戻らない').toHaveCount(2);
+  await openMessagePopover(page);
   await page.keyboard.press('Escape');
 
   expect(errors, 'pageerror').toEqual([]);

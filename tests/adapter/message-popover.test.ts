@@ -16,6 +16,7 @@ import {
   HOVER_OPEN_DELAY_MS,
   installMessagePopover,
   messagePopoverController,
+  snapshotKeptActions,
   paintMessagePopover,
   shortTime,
   type MessageStatusModel,
@@ -414,14 +415,18 @@ describe('main.ts の配線(原文 pin ── 弱い。`main.ts` はどの test 
   });
   it('🔴 浮き札の × の合図を受けて、知らせ(statusNotices.dismiss)・エラー・進行中を閉じる', () => {
     expect(code).toContain("regions.status.addEventListener('pkc-toast-dismiss'");
+    expect(code).toContain("regions.status.addEventListener('pkc-severe-dismiss'");
+    expect(code).toContain('toastDismissal.dismissSevere();');
+    expect(code).toContain('const toastHeld = (): boolean => isToastHeld(regions.status, document.activeElement);');
+    expect(code).toContain('isHeld: toastHeld,');
+    expect(code).toContain('messageEntry.setKeptActions(keptNow)');
     expect(code).toContain('statusNotices?.dismiss();');
     expect(code).toContain('toastDismissal.dismiss({ errorLine, progressLine: progressLine() }, toastShown)');
     expect(code).toContain('toastDismissal.apply(rawParts)');
     expect(code).toContain('errorAutoHide.track(rawParts.errorLine)');
     expect(code).toContain('installToastLift(root)');
-    expect(code).toContain('statusNotices?.hold(on)');
     expect(code).toContain("severeToastLine: statusBaseSevere ? statusBase : ''");
-    expect(code).toContain("appMessagePost.post({ kind: 'caution', source: 'storage', text: statusBase })");
+    expect(code).toContain('postStorageCautionOnce(appMessagePost, statusBase)');
   });
   it('🔴 読み上げの領域へ知らせとエラーだけを書き、画面下の常設の行(statusBarWithFileDrag / paintStatusText)は戻っていない', () => {
     expect(code).toContain('paintStatusLive(regions.statusLive, model.live);');
@@ -508,12 +513,62 @@ describe('実害の警告の浮き札', () => {
   it('🔴 浮き札に「バックアップを書き出す」(export-archive)があり、既定は畳まれている', () => {
     const { regions } = setup();
     expect(regions.statusBackupToast.getAttribute('data-pkc-action')).toBe('export-archive');
-    expect(regions.status.contains(regions.statusBackupToast)).toBe(true);
+    expect(regions.statusSevere.contains(regions.statusBackupToast), 'バックアップが警告の専用の行の中に無い').toBe(true);
+    expect(regions.status.contains(regions.statusSevere)).toBe(true);
     expect(regions.statusBackupToast.hidden).toBe(true);
+    expect(regions.statusSevere.hidden).toBe(true);
+  });
+  it('🔴 警告の行は専用の ×(dismiss-severe)を持ち、押すと pkc-severe-dismiss が届く。ふつうの × (dismiss-toast)とは別', () => {
+    const { regions } = setup();
+    const close = regions.statusSevere.querySelector<HTMLElement>('[data-pkc-action="dismiss-severe"]')!;
+    expect(close).not.toBeNull();
+    expect(regions.statusClose.getAttribute('data-pkc-action')).toBe('dismiss-toast');
+    expect(regions.statusSevere.contains(regions.statusClose), 'ふつうの × が警告の行の中にある').toBe(false);
+    let severe = 0;
+    let toast = 0;
+    regions.status.addEventListener('pkc-severe-dismiss', () => (severe += 1));
+    regions.status.addEventListener('pkc-toast-dismiss', () => (toast += 1));
+    close.click();
+    expect([severe, toast]).toEqual([1, 0]);
+    regions.statusClose.click();
+    expect([severe, toast]).toEqual([1, 1]);
   });
   it('🔴 CSS: 保存データの確認の押し口が出ている間は × を出さない(消えない知らせ)', () => {
     const css = readFileSync('src/styles/app.css', 'utf8');
     expect(css).toMatch(/status-rescue'\]:not\(\[hidden\]\)\) > \[data-pkc-field='status-close'\] \{\s*display: none;/);
+  });
+});
+
+describe('直前の操作(消えた浮き札の押し口を簡易履歴に残す ── 片道にしない)', () => {
+  it('🔴 浮き札に出ている押し口(元に戻す・開く …)を控え、閉じる・バックアップ・OK は控えない。属性ごと写す', () => {
+    const { regions } = setup();
+    regions.statusUndo.hidden = false;
+    regions.statusUndo.textContent = '元に戻す';
+    regions.statusOpen.hidden = false;
+    regions.statusOpen.setAttribute('data-pkc-entry', 'e1');
+    regions.statusOpen.textContent = '開く';
+    regions.statusBackupToast.hidden = false;
+    const k = snapshotKeptActions(regions.status);
+    expect(k.map((x) => x.label).sort()).toEqual(['元に戻す', '開く']);
+    expect(k.find((x) => x.label === '開く')!.attrs['data-pkc-entry']).toBe('e1');
+    expect(k.find((x) => x.label === '元に戻す')!.attrs['data-pkc-action']).toBe('undo-move');
+  });
+  it('🔴 簡易履歴の「直前の操作」に同じ押し口が出て、押すと元の受け手へ届く / 空にすると消える', () => {
+    const { pop, ctrl, entry, regions, sent } = setup();
+    regions.statusUndo.hidden = false;
+    regions.statusUndo.textContent = '元に戻す';
+    ctrl.setKeptActions(snapshotKeptActions(regions.status));
+    entry.click();
+    const sec = pop.querySelector<HTMLElement>('[data-pkc-field="popover-kept"]')!;
+    expect(sec.hidden).toBe(false);
+    const b = pop.querySelector<HTMLElement>('[data-pkc-field="popover-kept-actions"] [data-pkc-action="undo-move"]')!;
+    expect(b.textContent).toBe('元に戻す');
+    b.click();
+    expect(sent.filter((a) => a.type === 'UNDO_MOVE'), '押しても元の受け手へ届かない').toHaveLength(1);
+    expect(ctrl.isOpen(), '押したら別の操作へ進むので簡易履歴は閉じる').toBe(false);
+    entry.click();
+    ctrl.setKeptActions([]);
+    expect(pop.querySelector<HTMLElement>('[data-pkc-field="popover-kept"]')!.hidden).toBe(true);
   });
 });
 
