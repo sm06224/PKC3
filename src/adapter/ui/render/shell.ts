@@ -343,6 +343,7 @@ export function paintAlarmBar(root: HTMLElement, due: readonly AlarmDue[]): void
  */
 export function showRootText(root: HTMLElement, text: string): void {
   root.removeAttribute('data-pkc-shell');
+  root.ownerDocument.documentElement.removeAttribute('data-pkc-shell');
   root.textContent = text;
 }
 
@@ -1502,6 +1503,9 @@ export function buildShell(root: HTMLElement): ShellRegions {
   root.append(shell);
   // 🔑 shell が入った印(`app.css` の root の余白の規則が読む。`:has([data-pkc-region='shell'])` を使わない ── #1467 段 3-h)
   root.setAttribute('data-pkc-shell', '');
+  // 🔑 同じ印を html にも立てる(`app.css` の「アプリの画面では文書ルートをスクロールさせない」と
+  //   `root-scroll-guard.ts` が読む)。⚠ `html:has([data-pkc-region='shell'])` と書かない理由は上と同じ(#1467 段 3-h)
+  root.ownerDocument.documentElement.setAttribute('data-pkc-shell', '');
   return {
     browseHost,
     sidebar,

@@ -84,8 +84,15 @@ export function createMirror(doc: Document): Mirror {
   const el = doc.createElement('div');
   el.setAttribute('data-pkc-field', MIRROR_FIELD);
   el.setAttribute('aria-hidden', 'true');
+  /**
+   * 🔴 **`fixed` で置く**(画面全体が下へスクロールする不具合)。影の箱は本文の先頭から caret の行までの字を
+   *   流すので、長いノートでは数千 px の丈になる。`absolute` だと文書の初期の包含ブロックが基準になり、
+   *   **文書ルートのスクロール範囲を下へ伸ばす**(Chromium は左の画面外の箱を数えないが、エンジンによっては
+   *   数える)── その分だけ html がスクロールでき、追記欄の下に空白が出る。`fixed` の箱はスクロール範囲に入らない。
+   *   ⚠ 測るのは箱の中の字の高さ(`getBoundingClientRect` の差)なので、基準が変わっても値は変わらない。
+   */
   el.style.cssText =
-    'position:absolute;visibility:hidden;pointer-events:none;top:0;left:-9999px;white-space:pre-wrap;overflow-wrap:break-word;';
+    'position:fixed;visibility:hidden;pointer-events:none;top:0;left:-9999px;white-space:pre-wrap;overflow-wrap:break-word;';
   const text = doc.createTextNode('');
   el.append(text);
   doc.body.append(el);
