@@ -158,6 +158,25 @@ test('🔴 SQL 画面: 左の木が自動で並び、押す・ダブルクリッ
   await page.keyboard.press('ArrowLeft');
   await expect(pane.locator('[data-pkc-region="sql-er"]')).toBeHidden();
 
+  // ── 「ER 図」を見ている間に木の列を押すと、クエリへ戻って欄に入り、焦点とキャレットが欄にある(実ブラウザ)
+  await input.fill('');
+  // (読み込み直したあとなので、列は閉じている。開き直す)
+  if ((await entries.getAttribute('aria-expanded')) !== 'true') {
+    await clickReal(page, entries.locator('[data-pkc-field="sql-tree-chevron"]'));
+  }
+  await clickReal(page, erTab);
+  await expect(pane.locator('[data-pkc-field="sql-query-panel"]')).toBeHidden();
+  await clickReal(page, lidCol);
+  await expect(pane.locator('[data-pkc-field="sql-query-panel"]'), '木を押してもクエリへ戻らない').toBeVisible();
+  await expect(input).toHaveValue('lid');
+  const caret = await input.evaluate((el) => {
+    const t = el as HTMLTextAreaElement;
+    return { focused: document.activeElement === t, at: t.selectionStart, len: t.value.length };
+  });
+  expect(caret.focused, 'タブを替えたあと欄に焦点が無い').toBe(true);
+  expect(caret.at, 'キャレットが入れた字の後ろに無い').toBe(caret.len);
+  await input.fill('select 1 as keep');
+
   // ── 木の出し入れ(憶える)。閉じるは木の見出しの ×、開くは上のバーの「スキーマを開く」(開いている間は出ない)
   const toggle = pane.locator('[data-pkc-field="sql-tree-toggle"]');
   await expect(toggle, '開いているのに「スキーマを開く」が出ている(タブに見える)').toBeHidden();
@@ -223,6 +242,21 @@ test('🔴 SQL 画面(別ウィンドウ 1100×800): 木が自動で並び、結
   const before = await heightOf(input);
   await dragSplitter(popup, 100);
   expect(await heightOf(input), '窓で境目が動かない').toBeGreaterThan(before + 50);
+  // 狭い窓(420px): 木は既定で閉じ、開くと欄の上に積まれる(@container sql-pane が実際に当たる)
+  await popup.setViewportSize({ width: 420, height: 800 });
+  const tree = pane.locator('[data-pkc-region="sql-tree"]');
+  await expect.poll(async () => (await tree.isVisible()), '狭い窓で木が見えない').toBe(true);
+  const narrow = await popup.evaluate(() => {
+    const t = document.querySelector('[data-pkc-region="sql-tree"]') as HTMLElement;
+    const m = document.querySelector('[data-pkc-field="sql-main"]') as HTMLElement;
+    const p = document.querySelector('[data-pkc-view-pane="sql"]') as HTMLElement;
+    const tr = t.getBoundingClientRect();
+    const mr = m.getBoundingClientRect();
+    return { treeBottom: tr.bottom, mainTop: mr.top, treeW: tr.width, paneW: p.getBoundingClientRect().width, cn: getComputedStyle(p).containerName };
+  });
+  expect(narrow.cn, '面に container-name が無い(狭い規則が当たらない)').toBe('sql-pane');
+  expect(narrow.treeW, `狭いのに木が横幅いっぱいになっていない(積まれていない): ${JSON.stringify(narrow)}`).toBeGreaterThan(narrow.paneW - 4);
+  expect(narrow.mainTop, `木が欄の上に積まれていない: ${JSON.stringify(narrow)}`).toBeGreaterThanOrEqual(narrow.treeBottom - 2);
   await popup.close();
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

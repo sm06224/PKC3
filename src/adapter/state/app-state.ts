@@ -540,15 +540,21 @@ export function erForSource(
    *   ⚠ `connecting`(入切そのもの)は持ち越す ── user の好みであって、この DB の
    *   データではない。
    */
+  /**
+   * 🔴 **相手が変わる道は、すべて札(`token`)を進める**(#1442 段②、着地前レビュー R1)。
+   * ⚠ 進めないと、前の相手へ頼んだ答え(`SQL_ER_LOADED` の札 = N)が**遅れて届いたとき札が一致してしまい**、
+   *   新しい相手の木に前の相手の表が出る(名札は新しいのに中身は前の DB ── いちばん気づけない外し方)。
+   *   以前は図を開いているときしかここへ来なかったので問題にならなかったが、いまは画面を開いた時点で採る。
+   */
   if (!er.open && route.duck !== undefined) {
     return {
-      er: { ...er, loading: false, model: null, note: '', source: '', mine: [], pendingFrom: null },
+      er: { ...er, loading: false, model: null, note: '', source: '', token: er.token + 1, mine: [], pendingFrom: null },
       events: [],
     };
   }
   if (!emit) {
     return {
-      er: { ...er, loading: true, model: null, note: '', source: '', mine: [], pendingFrom: null },
+      er: { ...er, loading: true, model: null, note: '', source: '', token: er.token + 1, mine: [], pendingFrom: null },
       events: [],
     };
   }
@@ -585,7 +591,11 @@ export function erAfterDuckWrite(
 ): { er: SqlPageState['er']; events: DomainEvent[] } {
   // ⚠ 閉じているなら捨てるだけ(開くときに採り直す)── DuckDB の器の相手は、図を開くまで採らない(`erForSource` と同じ理由)
   if (!er.open) {
-    return { er: { ...er, loading: false, model: null, note: '', source: '', pendingFrom: null }, events: [] };
+    // ⚠ 札を進める(飛んでいる前の答えを捨てる ── `erForSource` の R1 と同じ)
+    return {
+      er: { ...er, loading: false, model: null, note: '', source: '', token: er.token + 1, pendingFrom: null },
+      events: [],
+    };
   }
   const token = er.token + 1;
   return {
@@ -601,8 +611,9 @@ export function erAfterDuckWrite(
  * - 相手を開いている最中(`guestChosen` が在るのに `guest` が `null`)は頼まない ── 開けた回(`SQL_GUEST_OPENED`)が頼む
  *   (頼むと前の相手へ飛ぶ)。
  * - 採っている最中なら重ねない。
- * - 採ってある模型は**消さない**(開き直すたびに木が空に戻らない)。⚠ 本文の csv や添付は開いている間に変わるので、
- *   採り直しは毎回頼む(届いたら差し替わる)。模型が無い回だけ `loading` を立てる。
+ * - 🔴 **同じ相手の模型が既に在るなら、採り直さない**(着地前レビュー W1)。採るたびに表ごとの `count(*)` が
+ *   **共有の sqlite worker を占有する**(本体のノート操作が待たされる)ので、画面を出し入れするたびには採らない。
+ *   採るのは「模型が無い / 相手が変わった / **↻ を押した** / DuckDB で書いた後」だけ。
  */
 export function erWhenEntered(p: SqlPageState): { er: SqlPageState['er']; events: DomainEvent[] } {
   if (p.guestChosen !== '' && p.guest === null) return { er: p.er, events: [] };
@@ -610,12 +621,10 @@ export function erWhenEntered(p: SqlPageState): { er: SqlPageState['er']; events
   // 🔴 DuckDB の器へ頼む相手は、図を開くまで採らない(`erForSource`。中身を読んで器を起こすため)
   if (!p.er.open && schemaRouteOf(p.guest, p.extraGuests).duck !== undefined) return { er: p.er, events: [] };
   const source = erSourceKey(p.guest, p.extraGuests);
+  if (p.er.model !== null && p.er.source === source) return { er: p.er, events: [] };
   const token = p.er.token + 1;
-  const keep = p.er.model !== null && p.er.source === source;
   return {
-    er: keep
-      ? { ...p.er, token }
-      : { ...p.er, loading: true, model: null, note: '', source, token, mine: [], pendingFrom: null },
+    er: { ...p.er, loading: true, model: null, note: '', source, token, mine: [], pendingFrom: null },
     events: [{ type: 'REQUEST_SQL_ER', token, ...schemaRouteOf(p.guest, p.extraGuests) }],
   };
 }

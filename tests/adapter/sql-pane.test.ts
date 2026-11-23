@@ -77,7 +77,7 @@ import {
   releaseSqlLocalFile,
   sqlLocalFileSize,
 } from '../../src/adapter/state/sql-local-file';
-import { SQL_ADD_LOCAL_FILE_VALUE, SQL_PICK_LOCAL_FILE_VALUE } from '../../src/features/query/sql-local-file';
+import { SQL_ADD_LOCAL_FILE_VALUE, SQL_ADD_SOURCE_PREFIX, SQL_PICK_LOCAL_FILE_VALUE } from '../../src/features/query/sql-local-file';
 
 type SqlAnswer = {
   columns: string[];
@@ -115,7 +115,7 @@ function meta(lid: string, title: string): EntryMeta {
 let sjisGuess = false;
 
 function setup(
-  reply: (sql: string) => Promise<SqlAnswer> = async () => answer(['a'], [[1]]),
+  reply: (sql: string, limits?: { guest?: boolean }) => Promise<SqlAnswer> = async () => answer(['a'], [[1]]),
   opts: {
     withOp?: boolean;
     /**
@@ -158,8 +158,8 @@ function setup(
   );
   const schemaRead = vi.fn(
     async (sql: string, limits: { maxRows: number; maxSteps: number; guest?: boolean }) => {
-      void limits;
-      return reply(sql);
+      // 🔑 どの相手(この PKC / 取り込んだ DB)へ向けた問い合わせかを答え側へ渡す(相手ごとに違う構造を返す test 用)
+      return reply(sql, limits);
     },
   );
   const storeRunReadOnlySql = (
@@ -6280,5 +6280,242 @@ describe('SQL 画面の 3 ペイン(#1442 段②)', () => {
     await settleTree();
     expect(schemaDuckDb, '押したのに DuckDB の器へ採りに行かない').toHaveBeenCalledTimes(1);
     expect(treeTables(pane).sort()).toEqual(['客', '売上'].sort());
+  });
+
+  /**
+   * 🔴 **相手を替えたあとに、前の相手の構造が遅れて届いても、木に出ない**(着地前レビュー R1)。
+   * 🔑 答えは**相手ごとに違う**(旧 / 新)── 同じ表を返す fake だと、持ち越しが見えない。
+   *   ⚠ 前の相手の答えを**わざと遅らせて**、相手を替えた後に届かせる。
+   */
+  it('🔴 DuckDB の相手へ替えたあとに、前の相手の構造が遅れて届いても木に出ない / 相手が変われば開いていた表は閉じる', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const old = ['table', '旧表', 0, 'a', 'TEXT', 0, 0] as Array<string | number | null>;
+    const { pane, pick, schemaDuckDb } = setup(async (sql, limits) => {
+      if (sql.includes('pragma_table_info')) {
+        // この PKC への問い合わせだけ遅らせる(= 前の相手の答えが後から届く)
+        if (limits?.guest !== true) await gate;
+        return answer(['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'], [old]);
+      }
+      if (sql.includes('pragma_foreign_key_list')) return answer(['tbl', 'ref', 'col', 'refcol'], []);
+      if (sql.includes('csv_columns')) return answer(['tbl', 'cid', 'col', 'n'], []);
+      if (sql.includes('count(*)')) return answer(['tbl', 'n'], [['旧表', 1]]);
+      return answer(['a'], [[1]]);
+    });
+    // 採っている最中に、DuckDB の相手(.parquet)へ替える
+    pick('db7');
+    await settleTree();
+    release();
+    await settleTree();
+    expect(schemaDuckDb, '選んだだけで DuckDB の器を起こしている').toHaveBeenCalledTimes(0);
+    expect(treeTables(pane), '前の相手の表が木に出ている(札が進んでいない)').toEqual(['parquet']);
+  });
+
+  it('🔴 もう 1 つ足して DuckDB の組になったあとに、足す前の構造が遅れて届いても木に出ない(札は足す回でも進む)', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const { pane, pick, schemaDuckDb } = setup(async (sql, limits) => {
+      if (sql.includes('pragma_table_info')) {
+        if (limits?.guest === true) await gate; // 取り込んだ csv(1 件)への問い合わせだけ遅らせる
+        return answer(['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'], [['table', '足す前の表', 0, 'a', 'TEXT', 0, 0]]);
+      }
+      if (sql.includes('pragma_foreign_key_list')) return answer(['tbl', 'ref', 'col', 'refcol'], []);
+      if (sql.includes('csv_columns')) return answer(['tbl', 'cid', 'col', 'n'], []);
+      if (sql.includes('count(*)')) return answer(['tbl', 'n'], []);
+      return answer(['a'], [[1]]);
+    });
+    await settleTree();
+    pick('db4'); // 売上.csv(1 件 = 内蔵の sqlite で引く。構造の問い合わせは遅れて届く)
+    await settleTree();
+    pick(`${SQL_ADD_SOURCE_PREFIX}db6`); // 大きい.tsv を足す = 2 件 → DuckDB の器の組(図を開くまで採らない)
+    await settleTree();
+    release();
+    await settleTree();
+    expect(schemaDuckDb, '足しただけで DuckDB の器を起こしている').toHaveBeenCalledTimes(0);
+    expect(treeTables(pane), '足す前の相手の表が木に出ている(札が進んでいない)').not.toContain('足す前の表');
+    expect(treeTables(pane).length, '名前だけの木が出ていない').toBeGreaterThan(0);
+  });
+
+  it('🔴 相手を開いている最中 / 開けなかったあとに、前の相手の構造が遅れて届いても木に出ない', async () => {
+    const mk = () => {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      return { gate, release: () => release() };
+    };
+    for (const how of ['opening', 'failed'] as const) {
+      document.body.innerHTML = '';
+      const g = mk();
+      const { pane, pick, holdNextOpen, releaseOpen } = setup(async (sql, limits) => {
+        if (sql.includes('pragma_table_info')) {
+          if (limits?.guest !== true) await g.gate;
+          return answer(['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'], [['table', '前の相手の表', 0, 'a', 'TEXT', 0, 0]]);
+        }
+        if (sql.includes('pragma_foreign_key_list')) return answer(['tbl', 'ref', 'col', 'refcol'], []);
+        if (sql.includes('csv_columns')) return answer(['tbl', 'cid', 'col', 'n'], []);
+        if (sql.includes('count(*)')) return answer(['tbl', 'n'], []);
+        return answer(['a'], [[1]]);
+      });
+      if (how === 'opening') holdNextOpen();
+      pick(how === 'opening' ? 'db1' : 'db2'); // db2 = 壊れ.sqlite(開けない)
+      await settleTree();
+      g.release();
+      await settleTree();
+      expect(treeTables(pane), `${how}: 前の相手の表が木に出ている(札が進んでいない)`).not.toContain('前の相手の表');
+      if (how === 'opening') releaseOpen();
+      await settleTree();
+    }
+  });
+
+  it('🔴 相手を替えると、開いていた表は閉じる(同じ名前の別の表が開いて見えない)', async () => {
+    const reply2 = async (sql: string, limits?: { guest?: boolean }): Promise<SqlAnswer> => {
+      const guest = limits?.guest === true;
+      if (sql.includes('pragma_table_info'))
+        return answer(
+          ['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'],
+          guest
+            ? [['table', '共通', 0, '客の列', 'TEXT', 0, 0]]
+            : [['table', '共通', 0, '本体の列', 'TEXT', 0, 0]],
+        );
+      if (sql.includes('pragma_foreign_key_list')) return answer(['tbl', 'ref', 'col', 'refcol'], []);
+      if (sql.includes('csv_columns')) return answer(['tbl', 'cid', 'col', 'n'], []);
+      if (sql.includes('count(*)')) return answer(['tbl', 'n'], [['共通', 1]]);
+      return answer(['a'], [[1]]);
+    };
+    const { pane, pick } = setup(reply2);
+    await settleTree();
+    (tableRow(pane, '共通').querySelector('[data-pkc-field="sql-tree-chevron"]') as HTMLElement).click();
+    expect(colRows(pane)).toEqual(['共通.本体の列']);
+    pick('db1');
+    await settleTree();
+    expect(tableRow(pane, '共通').getAttribute('aria-expanded'), '同じ名前の表が開いたまま').toBe('false');
+    expect(colRows(pane), '前の相手の列が残っている').toEqual([]);
+    (tableRow(pane, '共通').querySelector('[data-pkc-field="sql-tree-chevron"]') as HTMLElement).click();
+    expect(colRows(pane), '新しい相手の列になっていない').toEqual(['共通.客の列']);
+  });
+
+  /**
+   * 🔴 **木から入れた名前は、走らせる前の門を通っても壊れない**(着地前レビュー R2)。
+   * ⚠ 全角 ASCII・全角空白は、引用符の外にあると走らせる前に**半角へ直される** ── 裸で入れると `売上（月次）` が壊れる。
+   */
+  it('🔴 全角の名前の表・列は引用符で囲って入る / 予約語も', async () => {
+    const { pane, box } = setup(async (sql) => {
+      if (sql.includes('pragma_table_info'))
+        return answer(
+          ['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'],
+          [
+            ['table', '売上（月次）', 0, 'ＡＢＣ', 'TEXT', 0, 0],
+            ['table', '全角　空白', 0, 'select', 'TEXT', 0, 0],
+          ],
+        );
+      if (sql.includes('pragma_foreign_key_list')) return answer(['tbl', 'ref', 'col', 'refcol'], []);
+      if (sql.includes('csv_columns')) return answer(['tbl', 'cid', 'col', 'n'], []);
+      if (sql.includes('count(*)')) return answer(['tbl', 'n'], []);
+      return answer(['a'], [[1]]);
+    });
+    await settleTree();
+    (tableRow(pane, '売上（月次）').querySelector('[data-pkc-field="sql-tree-chevron"]') as HTMLElement).click();
+    pane.querySelector<HTMLElement>('[data-pkc-col="ＡＢＣ"]')!.click();
+    expect(box.value, '全角の列名が裸で入っている(走らせる前に半角へ直されて壊れる)').toBe('"ＡＢＣ"');
+    box.value = '';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    tableRow(pane, '売上（月次）').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 }));
+    expect(box.value).toBe('SELECT * FROM "売上（月次）" LIMIT 20');
+    (tableRow(pane, '全角　空白').querySelector('[data-pkc-field="sql-tree-chevron"]') as HTMLElement).click();
+    box.value = '';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    pane.querySelector<HTMLElement>('[data-pkc-name="全角　空白"][data-pkc-col="select"]')!.click();
+    expect(box.value, '予約語の列名が裸で入っている').toBe('"select"');
+  });
+
+  it('🔴 画面を出し入れしても、同じ相手の構造は採り直さない(count(*) で共有の worker を塞がない)', async () => {
+    const { pane, d, schemaRead } = setup(reply);
+    await settleTree();
+    const before = schemaRead.mock.calls.length;
+    expect(before).toBeGreaterThan(0);
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'sql' });
+    await settleTree();
+    expect(schemaRead.mock.calls.length, '開き直しただけで採り直している').toBe(before);
+    expect(treeTables(pane).length, '木が空になった').toBe(3);
+    // ⚠ 対照群:↻ を押せば採り直す
+    pane.querySelector<HTMLButtonElement>('[data-pkc-action="sql-schema-reload"]')!.click();
+    await settleTree();
+    expect(schemaRead.mock.calls.length, '↻ で採り直さない').toBeGreaterThan(before);
+  });
+
+  it('🔴 ↻ は読み込み中を出し(木の「読み込んでいます」/ aria-busy)、押しっぱなしの連打は 1 回にまとめる', async () => {
+    const { pane, schemaRead } = setup(reply);
+    await settleTree();
+    const btn = pane.querySelector<HTMLButtonElement>('[data-pkc-action="sql-schema-reload"]')!;
+    const before = schemaRead.mock.calls.length;
+    btn.click();
+    btn.click();
+    btn.click();
+    expect(btn.getAttribute('aria-busy'), '読み込み中が ↻ に出ていない').toBe('true');
+    expect(pane.querySelector('[data-pkc-field="sql-tree-note"]')?.textContent).toBe('読み込んでいます…');
+    expect((pane.querySelector('[data-pkc-field="sql-tree-note"]') as HTMLElement).hidden).toBe(false);
+    await settleTree();
+    expect(btn.getAttribute('aria-busy')).toBe('false');
+    expect((pane.querySelector('[data-pkc-field="sql-tree-note"]') as HTMLElement).hidden, '終わっても残っている').toBe(true);
+    // 3 回押しても 1 回ぶんの問い合わせ(3〜4 本)しか打っていない
+    expect(schemaRead.mock.calls.length - before, '連打で何度も採っている').toBeLessThanOrEqual(4);
+  });
+
+  it('🔴 キャレットの後ろに語が続くときは空白を足す / 文は後ろに改行(`SELECT |FROM t`)', async () => {
+    const { pane, box } = setup(reply);
+    await settleTree();
+    box.value = 'SELECT FROM 売上';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    box.setSelectionRange(7, 7);
+    (tableRow(pane, '売上').querySelector('[data-pkc-field="sql-tree-chevron"]') as HTMLElement).click();
+    pane.querySelector<HTMLElement>('[data-pkc-col="金額"]')!.click();
+    expect(box.value, '後ろの語とくっついた').toBe('SELECT 金額 FROM 売上');
+    box.value = 'a\nb';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    box.setSelectionRange(1, 1);
+    tableRow(pane, '客').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 }));
+    expect(box.value, '文の後ろに改行が無い').toBe('a\nSELECT * FROM 客 LIMIT 20\nb');
+  });
+
+  it('🔴 DuckDB の名前だけの木: 開けない表に ▸ も aria-expanded も無い / 木に setsize・posinset が付く', async () => {
+    const { pane, pick } = setup(reply);
+    await settleTree();
+    // 通常の木: 表は 3 つ、位置が付いている
+    const rows = [...pane.querySelectorAll('[data-pkc-field="sql-tree-table"]')];
+    expect(rows.map((r) => r.getAttribute('aria-setsize'))).toEqual(['3', '3', '3']);
+    expect(rows.map((r) => r.getAttribute('aria-posinset'))).toEqual(['1', '2', '3']);
+    (tableRow(pane, '売上').querySelector('[data-pkc-field="sql-tree-chevron"]') as HTMLElement).click();
+    const cols = [...pane.querySelectorAll('[data-pkc-field="sql-tree-column"]')];
+    expect(cols.map((c) => `${c.getAttribute('aria-posinset') ?? ''}/${c.getAttribute('aria-setsize') ?? ''}`)).toEqual(['1/3', '2/3', '3/3']);
+    pick('db7');
+    await settleTree();
+    const t = tableRow(pane, 'parquet');
+    expect(t.hasAttribute('aria-expanded'), '開けない表に aria-expanded が付いている').toBe(false);
+    expect(t.querySelector('[data-pkc-field="sql-tree-chevron"]')?.textContent, '開けない表に ▸ が出ている').toBe('');
+    // → を押しても開かない(列が無いのに「開いた」にならない)
+    t.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(t.hasAttribute('aria-expanded')).toBe(false);
+  });
+
+  it('🔴 「ファイルへ書き出す」の形の一覧は、メニューを開いたまま錨にする(閉じない)/ 外を押すと閉じる', async () => {
+    const { pane, type, runBtn } = setup(reply);
+    type('select 1');
+    runBtn.click();
+    await settleTree();
+    const d = pane.querySelector<HTMLDetailsElement>('[data-pkc-field="sql-out"]')!;
+    d.open = true;
+    const toFile = d.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-file"]')!;
+    expect(toFile.disabled, '前提:答えが出ている').toBe(false);
+    toFile.click();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(d.open, '形の一覧の錨(ファイルへ書き出す)が閉じた').toBe(true);
+    document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+    expect(d.open, '外を押しても閉じない').toBe(false);
   });
 });

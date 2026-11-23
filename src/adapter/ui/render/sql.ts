@@ -396,6 +396,16 @@ export class SqlRenderer {
      * ⚠ 押したら閉じる ── ただし**次のイベントで**閉じる(`setTimeout 0`)。同じ押しで開くメニュー(ファイルへ書き出す = 形の一覧)が
      *   押した項目の位置を読むので、先に閉じると位置が 0 になる。⚠ 外を押す / `Esc` でも閉じる。
      */
+    /**
+     * 🔴 **外を押したら閉じる聞き手は、文書に 1 本だけ**(着地前レビュー W6)。メニューごとに足すと、器を作り直す日に
+     *   外し忘れた分が溜まる。⚠ 開いているメニューの一覧(`menus`)を見て、外を押された物だけ閉じる。
+     */
+    const menus: HTMLDetailsElement[] = [];
+    document.addEventListener('pointerdown', (ev) => {
+      for (const d of menus) {
+        if (d.open && ev.target instanceof Node && !d.contains(ev.target)) d.open = false;
+      }
+    });
     const makeMenu = (field: string, label: string, hint: string, items: HTMLElement[]): HTMLDetailsElement => {
       const d = document.createElement('details');
       d.setAttribute('data-pkc-field', field);
@@ -408,15 +418,20 @@ export class SqlRenderer {
       list.append(...items);
       d.append(sum, list);
       d.addEventListener('click', (ev) => {
-        if (ev.target instanceof Element && ev.target.closest('button') !== null) {
-          setTimeout(() => {
-            d.open = false;
-          }, 0);
-        }
+        const btn = ev.target instanceof Element ? ev.target.closest('button') : null;
+        if (btn === null) return;
+        /**
+         * 🔴 **形の一覧を開く項目(ファイルへ書き出す)を押したときは、メニューを開いたままにする**(着地前レビュー W6)。
+         *   一覧はこの項目を**錨**に開き(位置・閉じたあとの焦点戻し)、メニューを閉じるとその錨が消える。
+         *   開いたままなら、もう一度押す(一覧が閉じる)/ 外を押す / `Esc` が全部効く。
+         */
+        if (btn.getAttribute('data-pkc-action') === 'sql-export-menu') return;
+        // ⚠ 次のイベントで閉じる(同じ押しで開く物が、押した項目の位置を読むため)
+        setTimeout(() => {
+          d.open = false;
+        }, 0);
       });
-      d.ownerDocument.addEventListener('pointerdown', (ev) => {
-        if (d.open && ev.target instanceof Node && !d.contains(ev.target)) d.open = false;
-      });
+      menus.push(d);
       d.addEventListener('keydown', (ev) => {
         if (ev.key === 'Escape' && d.open) {
           ev.stopPropagation();
@@ -734,7 +749,7 @@ export class SqlRenderer {
     if (this.erToggle?.getAttribute('aria-selected') === 'true') this.erToggle.click();
     const start = box.selectionStart;
     const end = box.selectionEnd;
-    const ins = insertionWithSpacing(box.value.slice(0, start), text, kind);
+    const ins = insertionWithSpacing(box.value.slice(0, start), text, kind, box.value.slice(end));
     box.focus();
     box.setSelectionRange(start, end);
     const before = box.value;
@@ -800,6 +815,8 @@ export class SqlRenderer {
     };
     splitter.addEventListener('pointerup', end);
     splitter.addEventListener('pointercancel', end);
+    // 🔴 掴んだまま取り上げられた(別のウィンドウへ移った等)ときも、掴みを終える(着地前レビュー)
+    splitter.addEventListener('lostpointercapture', end);
     splitter.addEventListener('keydown', (ev) => {
       if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
       const next = splitFromKey(this.split, ev.key, ev.shiftKey);

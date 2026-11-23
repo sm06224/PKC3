@@ -123,6 +123,7 @@ export function createSqlTree(hooks: SqlTreeHooks): SqlTreeHandle {
   let pending: ReturnType<typeof setTimeout> | null = null;
   let lastSource = '\u0000';
   let namesKey = '';
+  let loadingShown = false;
 
   const keyOfTable = (t: string): string => `table:${t}`;
   const keyOfCol = (t: string, c: string): string => `col:${t}\t${c}`;
@@ -162,17 +163,21 @@ export function createSqlTree(hooks: SqlTreeHooks): SqlTreeHandle {
     status.hidden = true;
     status.textContent = '';
     const keys: string[] = [];
-    for (const { table, open, cols } of rows) {
+    for (const [ti, { table, open, cols }] of rows.entries()) {
       const row = document.createElement('div');
       row.setAttribute('role', 'treeitem');
       row.setAttribute('aria-level', '1');
-      row.setAttribute('aria-expanded', open ? 'true' : 'false');
+      row.setAttribute('aria-setsize', String(rows.length));
+      row.setAttribute('aria-posinset', String(ti + 1));
+      // 🔴 列を 1 つも知らない表(DuckDB の名前だけの木)は**開けない** ── ▸ も `aria-expanded` も付けない(着地前レビュー W4)
+      const expandable = table.columns.length > 0;
+      if (expandable) row.setAttribute('aria-expanded', open ? 'true' : 'false');
       row.setAttribute('data-pkc-field', 'sql-tree-table');
       row.setAttribute('data-pkc-name', table.name);
       row.setAttribute('data-pkc-kind', table.kind);
       row.setAttribute('data-pkc-tree-key', keyOfTable(table.name));
       row.title = `${table.name}(${schemaKindLabel(table.kind)}。押すと名前、ダブルクリックで SELECT 文を欄へ入れます)`;
-      const chev = el('span', 'sql-tree-chevron', open ? '▾' : '▸');
+      const chev = el('span', 'sql-tree-chevron', !expandable ? '' : open ? '▾' : '▸');
       chev.setAttribute('aria-hidden', 'true');
       const name = el('span', 'sql-tree-name', table.name);
       const kind = el('span', 'sql-tree-kind', schemaKindLabel(table.kind));
@@ -182,10 +187,12 @@ export function createSqlTree(hooks: SqlTreeHooks): SqlTreeHandle {
       keys.push(keyOfTable(table.name));
       if (!open) continue;
       const fks = fkColumns(model, table.name);
-      for (const c of cols) {
+      for (const [ci, c] of cols.entries()) {
         const col = document.createElement('div');
         col.setAttribute('role', 'treeitem');
         col.setAttribute('aria-level', '2');
+        col.setAttribute('aria-setsize', String(cols.length));
+        col.setAttribute('aria-posinset', String(ci + 1));
         col.setAttribute('data-pkc-field', 'sql-tree-column');
         col.setAttribute('data-pkc-name', table.name);
         col.setAttribute('data-pkc-col', c.name);
@@ -238,6 +245,8 @@ export function createSqlTree(hooks: SqlTreeHooks): SqlTreeHandle {
     hooks.onInsert(treeNameText(col ?? nameOf(it)), 'name');
   }
   function toggle(table: string, want?: boolean): void {
+    // 開けない表(列を知らない)は何もしない
+    if (model?.tables.find((t) => t.name === table)?.columns.length === 0) return;
     const open = want ?? !expanded.has(table);
     if (open) expanded.add(table);
     else expanded.delete(table);
@@ -396,9 +405,22 @@ export function createSqlTree(hooks: SqlTreeHooks): SqlTreeHandle {
             ? view.note
             : '構造はまだ読み込んでいません';
         root.setAttribute('aria-busy', view.loading ? 'true' : 'false');
+        reload.setAttribute('aria-busy', view.loading ? 'true' : 'false');
+        loadingShown = false;
         return;
       }
       root.setAttribute('aria-busy', view.loading ? 'true' : 'false');
+      reload.setAttribute('aria-busy', view.loading ? 'true' : 'false');
+      // 🔴 模型が在るまま再読み込み中のときは「読み込んでいます」を出す(着地前レビュー W2)。終われば消す
+      if (view.loading) {
+        status.hidden = false;
+        status.textContent = '読み込んでいます…';
+        loadingShown = true;
+      } else if (loadingShown) {
+        loadingShown = false;
+        status.hidden = true;
+        status.textContent = '';
+      }
       // ⚠ 模型は同一性で見る(採り直したときだけ別の物)。同じ物なら木を作り直さない(開閉・焦点・転がりを残す)
       if (model === view.model) return;
       model = view.model;

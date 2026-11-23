@@ -102,12 +102,25 @@ export function treeNameText(name: string): string {
 }
 
 /**
- * 欄のキャレットの手前の字を見て、入れる字の前に足すものを決める。
- * - 名前: 手前が空白・`(`・`,`・`.` で終わるか空ならそのまま、それ以外なら半角の空白を 1 つ
- * - 文: 手前が空ならそのまま、改行で終わっていなければ改行を 1 つ(上の文と続けて書かない)
+ * 欄のキャレットの**前後**の字を見て、入れる字の前後に足すものを決める(着地前レビュー W3)。
+ * - 名前: 手前が空白・`(`・`,`・`.` で終わるか空ならそのまま、それ以外なら前に半角の空白を 1 つ。
+ *   🔴 **後ろ**が語の字(英数・`_`・日本語・引用符)で始まるなら、後ろにも空白を 1 つ(`SELECT |FROM t` → `SELECT a FROM t`。
+ *   足さないと `SELECT aFROM t` になる)
+ * - 文: 手前が空ならそのまま、改行で終わっていなければ前に改行を 1 つ(上の文と続けて書かない)。
+ *   後ろに字が在って改行で始まっていなければ、後ろにも改行を 1 つ
  */
-export function insertionWithSpacing(before: string, text: string, kind: 'name' | 'statement'): string {
-  if (before === '') return text;
-  if (kind === 'statement') return before.endsWith('\n') ? text : `\n${text}`;
-  return /[\s(,.]$/.test(before) ? text : ` ${text}`;
+export function insertionWithSpacing(
+  before: string,
+  text: string,
+  kind: 'name' | 'statement',
+  after = '',
+): string {
+  if (kind === 'statement') {
+    const head = before === '' || before.endsWith('\n') ? '' : '\n';
+    const tail = after === '' || after.startsWith('\n') ? '' : '\n';
+    return `${head}${text}${tail}`;
+  }
+  const head = before === '' || /[\s(,.]$/.test(before) ? '' : ' ';
+  const tail = /^[A-Za-z0-9_"\u0080-\uffff]/.test(after) ? ' ' : '';
+  return `${head}${text}${tail}`;
 }

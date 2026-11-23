@@ -170,6 +170,13 @@ export function normalizeOutsideMask(sql: string, mask: string): string {
 }
 
 /**
+ * 🔴 **文字列と注釈の外で、走らせる前に直される字**(全角 ASCII U+FF01–FF5E と全角空白 U+3000)。
+ * ⚠ 範囲は `normalizeOutsideMask` と**同じ 1 本**(§7)── `erQuote` がこれを見て、名前を引用符で囲う
+ *   (引用符の中は直されないので、`売上（月次）` / `ＡＢＣ` のような名前は**囲えば壊れない**)。
+ */
+export const NORMALIZED_CHARS = /[\u3000\uff01-\uff5e]/;
+
+/**
  * 🔴 **書き込む語**(白名簿の外にあるもの)。⚠ ここは**補助**であって
  * 判定の本体ではない ── 本体は「先頭が読む語か」である。
  * 🔑 `WITH` は読むだけにも書き込みにも使えるので、**中身も見る**必要がある。

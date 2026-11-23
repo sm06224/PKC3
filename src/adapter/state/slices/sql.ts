@@ -248,7 +248,7 @@ export function reduceSql(state: AppState, action: SqlAction): ReduceResult {
     }
     case 'SQL_SCHEMA_RELOAD': {
       const p = state.sqlPage;
-      // 相手を開いている最中は頼まない(開けた回が頼む)/ 採っている最中は重ねない
+      // 相手を開いている最中は頼まない(開けた回が頼む)/ 🔴 採っている最中の連打は無視する(着地前レビュー W2)
       if ((p.guestChosen !== '' && p.guest === null) || p.er.loading) return { state, events: [] };
       const source = erSourceKey(p.guest, p.extraGuests);
       const token = p.er.token + 1;
@@ -258,9 +258,9 @@ export function reduceSql(state: AppState, action: SqlAction): ReduceResult {
           ...state,
           sqlPage: {
             ...p,
-            // 模型は消さない(木が空に戻らない)。無い回だけ「採っています」
+            // 模型は消さない(木が空に戻らない)。⚠ `loading` は立てる(木に「読み込んでいます」/ ↻ の `aria-busy`)
             er: keep
-              ? { ...p.er, token, note: '' }
+              ? { ...p.er, loading: true, token, note: '' }
               : { ...p.er, loading: true, model: null, note: '', source, token, mine: [], pendingFrom: null },
           },
         },
@@ -754,7 +754,7 @@ export function reduceSql(state: AppState, action: SqlAction): ReduceResult {
              *   (同じ断りが 2 行出ると、別々のことが起きたように見える)。
              * 🔑 `mine` / `pendingFrom` も一緒に捨てる(#918 段⑤d-1)。
              */
-            er: { ...state.sqlPage.er, loading: false, model: null, source: '', mine: [], pendingFrom: null },
+            er: { ...state.sqlPage.er, loading: false, model: null, source: '', token: state.sqlPage.er.token + 1, mine: [], pendingFrom: null },
           },
         },
         events: [],
