@@ -15225,6 +15225,7 @@ h6:hover > .pkc-heading-anchor,
     /* ⚠ ボタンの `::before` に別の規則(タブの区切り線: 幅 1px・高さ 16px など)があっても、箱いっぱいに張る */
     width: auto;
     height: auto;
+    max-height: none;
     margin: 0;
     transform: none;
     opacity: 1;
