@@ -81,6 +81,8 @@ describe('ログの日の行(器) #1441', () => {
         el.removeAttribute('data-pkc-log-time');
         el.removeAttribute('data-pkc-log-depth');
       });
+      // 🔴 1 件 = 1 カードの印(B 試作)も見た目だけの印
+      c.querySelectorAll('[data-pkc-log-card]').forEach((el) => el.removeAttribute('data-pkc-log-card'));
       return c.innerHTML;
     };
     expect(strip(h)).toBe(strip(plain));

@@ -268,3 +268,32 @@ describe('ログの見た目の 3 段(#2018 8)── 12 テーマ', () => {
     }
   });
 });
+
+/**
+ * 🔴 **カード**(B1。ログ 1 件・情報ペインの 4 枚。`app.css` 末尾の「カード」の節)。
+ * 新しく重なる組は 2 つだけ:
+ * - 紙の地 `--surface` の上の字(`--fg` / `--muted` / `--ok` / `--danger`)── 情報ペインの列の地は `--bg` だったので、**字が載る地が `--bg` から `--surface` に変わった**
+ * - 輪郭 `--hairline`(`--fg` を透かした線)── カードの外(`--bg` / 本文の地)と内(`--surface`)の**両側から**見分けられること
+ * ⚠ 割合は tokens.css から読む(ここへ数字を写さない)。
+ */
+describe('カード(B1)── 12 テーマ', () => {
+  it.each(THEMES.map((t) => t.id))('🔴 %s: 紙の地の上の字が読め、輪郭が内外の地から見分けられる', (theme) => {
+    const own = tokensOf(theme);
+    const base = tokensOf('light');
+    const v = (n: string): string => own[n] ?? base[n]!;
+    for (const fg of ['--fg', '--muted', '--ok']) {
+      expect(contrast(v(fg), v('--surface')), `カードの中の字(${fg})`).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(contrast(v('--danger'), v('--surface')), 'カードの中の危険の字').toBeGreaterThanOrEqual(4);
+    const hair = /--hairline:\s*color-mix\(in srgb,\s*var\(--fg\)\s*(\d+)%,\s*transparent\)/.exec(css);
+    expect(hair, '--hairline が読めない').not.toBeNull();
+    const a = Number(hair![1]) / 100;
+    const fgc = rgb(v('--fg'));
+    for (const ground of ['--surface', '--bg']) {
+      const g = rgb(v(ground));
+      const edge = `#${[0, 1, 2].map((i) => Math.round(fgc[i]! * a + g[i]! * (1 - a)).toString(16).padStart(2, '0')).join('')}`;
+      // 線が載る地(カードの内 = 紙 / 外 = 机)から線が見分けられる(`--border` の最小 1.2 の半分以上 ── 1px の線は静かでよい)
+      expect(contrast(edge, v(ground)), `輪郭が ${ground} の上で見分けられない`).toBeGreaterThanOrEqual(1.1);
+    }
+  });
+});

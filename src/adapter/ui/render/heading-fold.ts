@@ -31,6 +31,7 @@ import {
 } from '@features/markdown/heading-fold';
 import {
   applyLogDepth,
+  applyLogCards,
   applyLogOrder,
   bodyBlocks,
   flipLogDay,
@@ -118,7 +119,10 @@ export function applyHeadingFold(host: HTMLElement): number {
   applyLogOrder(host, blocks, levels);
   // 🔴 見た目の 3 段(#2018 8)── 入れ子の深さと時刻の見出しの印
   applyLogDepth(host, blocks, levels);
-  if (spans.length === 0 && days.managed.size === 0) return 0;
+  if (spans.length === 0 && days.managed.size === 0) {
+    applyLogCards(host, blocks, levels);
+    return 0;
+  }
 
   const folded = new Set<number>();
   for (const s of spans) if (blocks[s.heading]!.hasAttribute(FOLDED)) folded.add(s.heading);
@@ -145,6 +149,8 @@ export function applyHeadingFold(host: HTMLElement): number {
   }
   // 🔴 「すべて」の字は、行の表示が決まった後に、見えている行から決める(月の畳みの中の日の行は数えない)
   paintAllRow(host);
+  // 🔴 1 件 = 1 カードの印(B 試作)── 隠れた塊が決まった後
+  applyLogCards(host, blocks, levels);
   return spans.length;
 }
 
