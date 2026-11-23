@@ -1756,7 +1756,7 @@ describe('#400 段④ ── 雛形を置く順番', () => {
     for (const l of code.slice(at + 1)) {
       const m = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(l);
       if (m) {
-        name = m[1];
+        name = m[1] ?? '';
         out[name] = '';
         continue;
       }
@@ -1858,8 +1858,8 @@ describe('#400 段④ ── 雛形を置く順番', () => {
     //    (`write-all` や flow 形式 `{ pages: write }` も、`pages: read` の削除も落とす)
     const perm = /^ {4}permissions:(.*)\n((?: {6}.*\n)*)/m.exec(jobs.build);
     expect(perm, 'build job に permissions が無い(workflow 全体の既定を継ぐ)').toBeTruthy();
-    expect(perm![1].trim(), '🔴 build の permissions がブロック形式でない').toBe('');
-    expect(perm![2].trim().split('\n').map((l) => l.trim()).sort()).toEqual(['contents: read', 'pages: read']);
+    expect((perm![1] ?? '').trim(), '🔴 build の permissions がブロック形式でない').toBe('');
+    expect((perm![2] ?? '').trim().split('\n').map((l) => l.trim()).sort()).toEqual(['contents: read', 'pages: read']);
     expect(jobs.top, '🔴 workflow 全体に pages / id-token の書込権がある').not.toMatch(
       /^\s+(pages|id-token): write$/m,
     );
