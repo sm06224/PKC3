@@ -529,11 +529,18 @@ export function erForSource(
   emit: boolean,
 ): { er: SqlPageState['er']; events: DomainEvent[] } {
   if (er.source === source && er.model !== null) return { er, events: [] };
-  // ⚠ 閉じているなら捨てるだけ(開くときに採り直す)
-  // 🔑 `mine` / `pendingFrom` も `model` と一緒に捨てる(#918 段⑤d-1)。
-  //   ⚠ `connecting`(入切そのもの)は持ち越す ── user の好みであって、この DB の
-  //   データではない。
-  if (!er.open) {
+  /**
+   * 🔴 **構造は図を開いているかに関わらず採る ── ただし DuckDB の器へ頼む相手(`route.duck`)は別**(#1442 段②)。
+   * 左の「スキーマの木」が同じ模型を使うので、以前の「閉じているなら捨てるだけ(開くときに採り直す)」は
+   * sqlite の相手では成り立たない(木が空のまま残る)。
+   * 🔴 **DuckDB の相手は、選んだだけでは採らない** ── 採るには**中身を全部読んで DuckDB の器を起こす**
+   *   (不可侵指示 2026-07-27「選んだだけで何十 MB も heap へ載せない」「重い処理は使うまで起こさない」)。
+   *   🔑 木は表の名前だけを出し(`guest.tables`)、列は **ER 図を開いたとき**(従来どおり)に採る。
+   * 🔑 `mine` / `pendingFrom` も `model` と一緒に捨てる(#918 段⑤d-1)。
+   *   ⚠ `connecting`(入切そのもの)は持ち越す ── user の好みであって、この DB の
+   *   データではない。
+   */
+  if (!er.open && route.duck !== undefined) {
     return {
       er: { ...er, loading: false, model: null, note: '', source: '', mine: [], pendingFrom: null },
       events: [],
@@ -548,7 +555,8 @@ export function erForSource(
   const token = er.token + 1;
   return {
     er: {
-      open: true,
+      // ⚠ 開閉は**触らない**(#1442 段②。以前は「開いているときだけ来る」前提で `true` だった)
+      open: er.open,
       loading: true,
       model: null,
       note: '',
@@ -575,6 +583,7 @@ export function erAfterDuckWrite(
   source: string,
   route: SchemaRoute,
 ): { er: SqlPageState['er']; events: DomainEvent[] } {
+  // ⚠ 閉じているなら捨てるだけ(開くときに採り直す)── DuckDB の器の相手は、図を開くまで採らない(`erForSource` と同じ理由)
   if (!er.open) {
     return { er: { ...er, loading: false, model: null, note: '', source: '', pendingFrom: null }, events: [] };
   }
@@ -582,6 +591,32 @@ export function erAfterDuckWrite(
   return {
     er: { ...er, loading: true, model: null, note: '', source, token, pendingFrom: null },
     events: [{ type: 'REQUEST_SQL_ER', token, ...route }],
+  };
+}
+
+/**
+ * 🔴 **SQL 画面を開いた(見せた)ときに、構造を採る**(#1442 段②)。左の「スキーマの木」は図と同じ模型を使うので、
+ *   図を開くのを待たず**画面を開いた時点で**採る。
+ *
+ * - 相手を開いている最中(`guestChosen` が在るのに `guest` が `null`)は頼まない ── 開けた回(`SQL_GUEST_OPENED`)が頼む
+ *   (頼むと前の相手へ飛ぶ)。
+ * - 採っている最中なら重ねない。
+ * - 採ってある模型は**消さない**(開き直すたびに木が空に戻らない)。⚠ 本文の csv や添付は開いている間に変わるので、
+ *   採り直しは毎回頼む(届いたら差し替わる)。模型が無い回だけ `loading` を立てる。
+ */
+export function erWhenEntered(p: SqlPageState): { er: SqlPageState['er']; events: DomainEvent[] } {
+  if (p.guestChosen !== '' && p.guest === null) return { er: p.er, events: [] };
+  if (p.er.loading) return { er: p.er, events: [] };
+  // 🔴 DuckDB の器へ頼む相手は、図を開くまで採らない(`erForSource`。中身を読んで器を起こすため)
+  if (!p.er.open && schemaRouteOf(p.guest, p.extraGuests).duck !== undefined) return { er: p.er, events: [] };
+  const source = erSourceKey(p.guest, p.extraGuests);
+  const token = p.er.token + 1;
+  const keep = p.er.model !== null && p.er.source === source;
+  return {
+    er: keep
+      ? { ...p.er, token }
+      : { ...p.er, loading: true, model: null, note: '', source, token, mine: [], pendingFrom: null },
+    events: [{ type: 'REQUEST_SQL_ER', token, ...schemaRouteOf(p.guest, p.extraGuests) }],
   };
 }
 

@@ -1745,7 +1745,8 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   「右にある」ではなく、**読む順(上の行 → 同じ行なら右)で後ろ**であることを見る。
    *   ⚠ 折り返した行の先頭は x が同じになる(256)ので、x だけで見ると正しい並びが落ちる。
    */
-  for (const f of ['sql-run', 'sql-to-note', 'sql-to-file', 'sql-schema-to-note', 'sql-er-toggle', 'sql-history']) {
+  // 🔑 #1442 段②: 「構造をノートへ」は「その他 ▾」の中(開くまで寸法が無い)へ、「ER 図」はタブへ移った
+  for (const f of ['sql-run', 'sql-to-note', 'sql-to-file', 'sql-more', 'sql-history']) {
     const b = await boxOf(f);
     expect(
       b.y > sourceBox.y + 2 || b.x > sourceX,
@@ -1952,11 +1953,8 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   expect(fit.layerLines, `層と欄で折り返しの数が違う(色が字とずれる): ${JSON.stringify(fit)}`).toBe(
     fit.taLines,
   );
-  // 🔴 ③欄が転がっていない(`fitSqlInput` が枠のぶんを足していないと 2px 足りない)
-  expect(
-    fit.taScroll - fit.taClient,
-    `欄の高さが中身に足りていない: ${JSON.stringify(fit)}`,
-  ).toBeLessThanOrEqual(1);
+  // ③(欄が中身に合わせて伸びる)は #1442 段②で無くなった ── 欄は上の領域を埋め、足りなければ**欄自身が転がる**(境目を掴んで広げる)。
+  //   ここで見るのは①②(層と欄の重なり)だけ。
 
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
   await clickReal(page, '[data-pkc-action="run-sql"]');
@@ -3124,6 +3122,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
      *   前提(開いている物)が変わる。🔑 新しい起動は増やさない(#820)。
      * 🔴 本文は**構造だけ**(行の中身は 1 行も入らない)── 開いたノートの目次に「表名(表・N 行)」が並ぶ。
      */
+    await clickReal(page, '[data-pkc-field="sql-more"] > summary');
     await clickReal(page, '[data-pkc-action="sql-schema-to-note"]');
     await expect(note, '「構造をノートへ」が書き出していない').toContainText('というノートに書き出しました', {
       timeout: 60_000,

@@ -43,8 +43,9 @@ interface Row {
 
 const R = 'src/adapter/ui/render/';
 const BATCH2: readonly Row[] = [
-  { id: 'run-sql', source: R + 'sql.ts', scene: 'SQL の画面を開いているとき' },
-  { id: 'sql-er-toggle', source: R + 'sql.ts', scene: 'SQL の画面を開いているとき' },
+  // 🔑 ボタンの字は「実行」(#1442 段②。一覧の字「SQL を実行」は面の名前つき)
+  { id: 'run-sql', source: R + 'sql.ts', scene: 'SQL の画面を開いているとき', screenText: '実行' },
+  { id: 'sql-er-toggle', source: R + 'sql.ts', scene: 'SQL の画面を開いているとき', screenText: 'ER 図' },
   { id: 'sql-schema-to-note', source: R + 'sql.ts', scene: 'SQL の画面を開いているとき' },
   { id: 'sql-to-note', source: R + 'sql.ts', scene: 'SQL の画面を開いていて、結果が出ているとき' },
   { id: 'renumber-lists', source: R + 'format-bar.ts', scene: '本文の書式バーが出ているとき' },
