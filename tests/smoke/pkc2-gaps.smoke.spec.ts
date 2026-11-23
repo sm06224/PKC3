@@ -179,6 +179,22 @@ test('🔴 保存領域が使えない警告が危険色・太字になり、隣
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
 
+  // 🔴 2026-11-23: 画面下の常設の行を廃止した ── 実害のある警告は、起動時から**浮き札に常設**(時間で消えない)・
+  //   「バックアップを書き出す」つき。× で閉じるのはこのセッションの間だけ(次の起動でまた出る)。入口は赤い「!」を譲らず、起動時に積んだ注意(未読 1 件)があっても同じ。
+  const sevToast = page.locator('[data-pkc-region="status"]');
+  await expect(sevToast, '実害のある警告が浮き札に出ていない').toBeVisible();
+  await expect(sevToast).toContainText('保存領域が使えません');
+  await expect(sevToast.locator('[data-pkc-field="status-backup-toast"]'), '浮き札にバックアップのボタンが無い').toBeVisible();
+  await expect(page.locator('[data-pkc-region="rail"] [data-pkc-field="message-entry"]'), '起動時の注意が未読に数えられていない').toHaveAttribute('aria-label', /未読 \d+ 件/);
+  await expect(page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]')).toHaveText('!');
+  await page.waitForTimeout(7_000);
+  await expect(sevToast, '時間で消えた(常設でない)').toBeVisible();
+  await clickReal(page, '[data-pkc-region="status"] [data-pkc-field="status-close"]');
+  await expect(sevToast, '× で閉じられない').toBeHidden();
+  await expect(page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]'), '閉じても赤い「!」は残る').toHaveText('!');
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await expect(page.locator('[data-pkc-region="status"]'), '次の起動で再び出ていない').toBeVisible();
   // 🔴 2026-11-23: 画面下の常設の行を廃止した ── 警告は入口の赤い「!」と、簡易履歴の「いまの状態」に出る
   await expect(
     page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]'),

@@ -41,16 +41,17 @@ describe('貼付トーストの置き場(浮き札の真上に置く)', () => {
     expect(stack.parentElement?.getAttribute('data-pkc-region'), '入れ物は shell の直下').toBe('shell');
   });
 
-  it('CSS: 入れ物は専用の行を持たず一覧のマスに重なり(畳んだとき・スマホ幅は本文のマス)、トーストは流れの中で浮き札の上に積まれる(重ならない)', () => {
+  it('CSS: 入れ物は専用の行を持たず本文のマスの右下(追記欄の真上)に重なり、トーストは流れの中で浮き札の上に積まれる(重ならない)', () => {
     const css = readFileSync('src/styles/app.css', 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
     const stack = css.match(/\[data-pkc-region='status-stack'\]\s*\{[^}]*\}/)![0];
     expect(stack, '入れ物がまだ grid の status の行を持っている').not.toMatch(/grid-area:\s*status/);
-    expect(stack, '入れ物が一覧のマスに重なっていない').toMatch(/grid-area:\s*sidebar/);
-    expect(stack, '入れ物が左下に寄っていない').toMatch(/align-self:\s*end/);
-    // 一覧を畳んだとき・スマホ幅では、無い区画(sidebar)を指さない(暗黙の行を作る)── 本文のマスへ
-    expect(css).toMatch(/\[data-pkc-hidden-panes~='sidebar'\] \[data-pkc-region='status-stack'\]\s*\{\s*grid-area:\s*detail;/);
-    expect(css).toMatch(/\[data-pkc-layout='phone'\] \[data-pkc-region='status-stack'\]\s*\{\s*grid-area:\s*detail;/);
-    expect(stack, '縦に積む flex でない(重なる)').toMatch(/flex-direction:\s*column/);
+    expect(stack, '入れ物が本文のマスに重なっていない(一覧・縦のバーの上に置かない)').toMatch(/grid-area:\s*detail/);
+    expect(stack, '追記欄の丈(--pkc-toast-lift)ぶん上げていない').toMatch(/--pkc-toast-lift/);
+    expect(stack, '入れ物が右下に寄っていない').toMatch(/align-self:\s*end/);
+    expect(stack).toMatch(/justify-self:\s*end/);
+    // 🔴 札の字は押しが通る(下の操作を妨げない)。触れるのはボタンだけ
+    expect(css).toMatch(/\[data-pkc-region='status-stack'\] > \* \{\s*pointer-events: none;/);
+    expect(css).toMatch(/\[data-pkc-region='status-stack'\] button \{\s*pointer-events: auto;/);
     const toast = css.match(/\[data-pkc-region='paste-toast'\]\s*\{[^}]*\}/)![0];
     expect(toast, 'トーストが入れ物の外へ浮いている').not.toMatch(/position:\s*(?:fixed|absolute)/);
     // grid の版面に status の行は無い

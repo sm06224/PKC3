@@ -1299,9 +1299,6 @@ ${(e as Error).message}`,
   await clickReal(page, originalRow.locator('[data-pkc-field="capture-trim-run"]'));
   await expect(rows, '文字起こしのある録音を切り出しても、新しい録音が増えない').toHaveCount(4, { timeout: 15_000 });
   await expect(statusLine, '字を移したと言っていない').toContainText('範囲の文字起こし 1 行も移しました', { timeout: 15_000 });
-  // 🔴 2026-11-23: 長い知らせ(注意 + エラー)の浮き札は左の一覧の下端に重なり、閉じるまで残る ── 読んだら × で閉じてから、下の行を押す(user と同じ手)
-  await clickReal(page, '[data-pkc-region="status"] [data-pkc-field="status-close"]');
-  await expect(page.locator('[data-pkc-region="status"]'), '× で閉じていない').toBeHidden();
   const withText = page.locator('[data-pkc-capture]', { hasText: /\(0:0\d(?:\.\d)?〜/ }).filter({ hasNotText: '(0:01〜0:03)' });
   await clickReal(page, withText.first().locator('[data-pkc-field="capture-name"]'));
   const cutBody = page.locator('[data-pkc-view-pane="detail"]');
@@ -1448,8 +1445,6 @@ ${(e as Error).message}`,
     page.locator('[data-pkc-capture]:has([data-pkc-field="capture-extract-audio"]):has-text("(0:01〜0:03)")'),
     '切り出した音の行に取り出しの押し口が出ている',
   ).toHaveCount(0);
-  // 🔴 2026-11-23: 直前の知らせの浮き札が一覧の下端に残っていたら × で閉じてから押す(user と同じ手)
-  if (await page.locator('[data-pkc-region="status"]').isVisible()) await clickReal(page, '[data-pkc-region="status"] [data-pkc-field="status-close"]');
   await clickReal(page, screenRow.locator('[data-pkc-field="capture-extract-picture"]'));
   await expect(
     page.locator('[data-pkc-region="status"]'),

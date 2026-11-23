@@ -11,6 +11,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
 import {
   entryBadge,
+  entryLabel,
   HOVER_CLOSE_GRACE_MS,
   HOVER_OPEN_DELAY_MS,
   installMessagePopover,
@@ -27,6 +28,8 @@ import { paintRail } from '../../src/adapter/ui/render/rail';
 const M0: MessageStatusModel = { unread: 0, state: [], captureRecovery: 0, detail: '' };
 const withUnread = (n: number): MessageStatusModel => ({ ...M0, unread: n });
 
+const made: Array<{ dispose(): void }> = [];
+
 function setup(opts: { hover?: boolean; recent?: () => readonly { at: string; kind: 'result' | 'caution' | 'problem' | 'delivery' | 'job'; text: string }[] } = {}) {
   document.body.textContent = '';
   const root = document.createElement('div');
@@ -41,6 +44,7 @@ function setup(opts: { hover?: boolean; recent?: () => readonly { at: string; ki
   }) as typeof d.dispatch;
   bindActions(root, d);
   const ctrl = installMessagePopover(root, { hoverCapable: () => opts.hover ?? true, recent: opts.recent ?? (() => []) });
+  made.push(ctrl);
   const shell = root.querySelector<HTMLElement>('[data-pkc-region="shell"]')!;
   paintRail(shell, false);
   const entry = shell.querySelector<HTMLElement>('[data-pkc-region="rail"] [data-pkc-field="message-entry"]')!;
@@ -59,6 +63,8 @@ beforeEach(() => {
   vi.useFakeTimers();
 });
 afterEach(() => {
+  // 🔴 前のテストの聞き手(document の Esc / 外押し)を残さない ── 開いたまま残った古い簡易履歴が Esc を飲む
+  for (const c of made.splice(0)) c.dispose();
   vi.useRealTimers();
   document.body.textContent = '';
 });
@@ -103,7 +109,9 @@ describe('バッジと説明(いまの状態の言葉を含む)', () => {
     expect(entryBadge(withUnread(120)).text).toBe('99+');
     const severe: MessageStatusModel = { ...M0, state: [{ kind: 'storage', text: '⚠ 保存領域が使えません', severe: true }] };
     expect(entryBadge(severe)).toEqual({ text: '!', tone: 'danger' });
-    expect(entryBadge({ ...severe, unread: 2 })).toEqual({ text: '2', tone: 'danger' });
+    // 🔴 実害の警告は、未読があっても赤い「!」を譲らない(数は説明に入る)
+    expect(entryBadge({ ...severe, unread: 2 })).toEqual({ text: '!', tone: 'danger' });
+    expect(entryLabel({ ...severe, unread: 2 })).toContain('未読 2 件');
     expect(entryBadge({ ...M0, captureRecovery: 1 })).toEqual({ text: '!', tone: 'info' });
   });
 
@@ -184,6 +192,7 @@ describe('開き方: クリック(固定)', () => {
 
   it('入口が 2 つ在っても、押した方に付いて開く(aria-expanded は押した方だけ)', () => {
     const { shell, ctrl } = setup();
+    shell.querySelector<HTMLElement>('[data-pkc-region="phone-bar"]')!.hidden = false;
     const phone = shell.querySelector<HTMLElement>('[data-pkc-region="phone-bar"] [data-pkc-field="message-entry"]')!;
     const rail = shell.querySelector<HTMLElement>('[data-pkc-region="rail"] [data-pkc-field="message-entry"]')!;
     phone.click();
@@ -406,12 +415,105 @@ describe('main.ts の配線(原文 pin ── 弱い。`main.ts` はどの test 
   it('🔴 浮き札の × の合図を受けて、知らせ(statusNotices.dismiss)・エラー・進行中を閉じる', () => {
     expect(code).toContain("regions.status.addEventListener('pkc-toast-dismiss'");
     expect(code).toContain('statusNotices?.dismiss();');
-    expect(code).toContain('dismissedError = errorLine;');
+    expect(code).toContain('toastDismissal.dismiss({ errorLine, progressLine: progressLine() }, toastShown)');
+    expect(code).toContain('toastDismissal.apply(rawParts)');
+    expect(code).toContain('errorAutoHide.track(rawParts.errorLine)');
+    expect(code).toContain('installToastLift(root)');
+    expect(code).toContain('statusNotices?.hold(on)');
+    expect(code).toContain("severeToastLine: statusBaseSevere ? statusBase : ''");
+    expect(code).toContain("appMessagePost.post({ kind: 'caution', source: 'storage', text: statusBase })");
   });
   it('🔴 読み上げの領域へ知らせとエラーだけを書き、画面下の常設の行(statusBarWithFileDrag / paintStatusText)は戻っていない', () => {
     expect(code).toContain('paintStatusLive(regions.statusLive, model.live);');
     expect(code).not.toContain('statusBarWithFileDrag');
     expect(code).not.toContain('paintStatusText');
+  });
+});
+
+describe('Esc の扱い(ホバーで開いただけなら飲まない)', () => {
+  const esc = (): KeyboardEvent => {
+    const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    document.dispatchEvent(e);
+    return e;
+  };
+  it('🔴 ホバーで開いて焦点が外にあるとき: 簡易履歴は閉じるが Esc は背後へ伝わる(編集の取り消し・ダイアログの Esc を妨げない)', () => {
+    const { entry, ctrl, root } = setup();
+    const ta = document.createElement('textarea');
+    root.append(ta);
+    ta.focus();
+    const seen: string[] = [];
+    const spy = (): number => seen.push('bubbled');
+    document.addEventListener('keydown', spy);
+    pointer('pointerover', entry);
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS + 1);
+    expect(ctrl.isOpen()).toBe(true);
+    const e = esc();
+    document.removeEventListener('keydown', spy);
+    expect(ctrl.isOpen()).toBe(false);
+    expect(seen, 'Esc を飲んだ').toEqual(['bubbled']);
+    expect(e.defaultPrevented, 'Esc の既定を止めた').toBe(false);
+  });
+  it('🔴 クリックで固定したとき: Esc を使い切る(背後へ伝えない)', () => {
+    const { entry, ctrl } = setup();
+    const seen: string[] = [];
+    const spy = (): number => seen.push('bubbled');
+    document.addEventListener('keydown', spy);
+    entry.click();
+    const e = esc();
+    document.removeEventListener('keydown', spy);
+    expect(ctrl.isOpen()).toBe(false);
+    expect(seen).toEqual([]);
+    expect(e.defaultPrevented).toBe(true);
+  });
+  it('🔴 ホバーで開いても焦点が簡易履歴の中に在るなら、Esc を使い切って焦点を入口へ戻す', () => {
+    const { entry, pop, ctrl } = setup();
+    pointer('pointerover', entry);
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS + 1);
+    pop.querySelector<HTMLElement>('[data-pkc-action="mark-messages-read"]')!.focus();
+    const seen: string[] = [];
+    const spy = (): number => seen.push('bubbled');
+    document.addEventListener('keydown', spy);
+    esc();
+    document.removeEventListener('keydown', spy);
+    expect(ctrl.isOpen()).toBe(false);
+    expect(seen).toEqual([]);
+    expect(document.activeElement).toBe(entry);
+  });
+});
+
+describe('入口の手掛かりと置き場', () => {
+  it('🔴 複数タブ: 説明だけでなく info 色の点の印(data-pkc-multitab)が付き、無くなれば外れる', () => {
+    const { ctrl, entry } = setup();
+    ctrl.setModel({ ...M0, state: [{ kind: 'sync', text: '複数タブ: x', severe: false }] });
+    expect(entry.hasAttribute('data-pkc-multitab')).toBe(true);
+    ctrl.setModel(M0);
+    expect(entry.hasAttribute('data-pkc-multitab')).toBe(false);
+    const css = readFileSync('src/styles/app.css', 'utf8');
+    expect(css).toMatch(/\[data-pkc-multitab\]::before\s*\{[^}]*var\(--info\)/);
+  });
+  it('🔴 押した入口が畳まれたら((スマホ ↔ PC の切替))簡易履歴は (0,0) へ置かず閉じる', () => {
+    const { shell, ctrl } = setup();
+    const phone = shell.querySelector<HTMLElement>('[data-pkc-region="phone-bar"] [data-pkc-field="message-entry"]')!;
+    const bar = shell.querySelector<HTMLElement>('[data-pkc-region="phone-bar"]')!;
+    bar.hidden = false;
+    phone.click();
+    expect(ctrl.isOpen()).toBe(true);
+    bar.hidden = true;
+    ctrl.setModel(withUnread(5));
+    expect(ctrl.isOpen(), '見えない入口に付いて開いたまま').toBe(false);
+  });
+});
+
+describe('実害の警告の浮き札', () => {
+  it('🔴 浮き札に「バックアップを書き出す」(export-archive)があり、既定は畳まれている', () => {
+    const { regions } = setup();
+    expect(regions.statusBackupToast.getAttribute('data-pkc-action')).toBe('export-archive');
+    expect(regions.status.contains(regions.statusBackupToast)).toBe(true);
+    expect(regions.statusBackupToast.hidden).toBe(true);
+  });
+  it('🔴 CSS: 保存データの確認の押し口が出ている間は × を出さない(消えない知らせ)', () => {
+    const css = readFileSync('src/styles/app.css', 'utf8');
+    expect(css).toMatch(/status-rescue'\]:not\(\[hidden\]\)\) > \[data-pkc-field='status-close'\] \{\s*display: none;/);
   });
 });
 

@@ -13,7 +13,7 @@ import {
   type MessageSpool,
   type SpoolItem,
 } from '../../src/adapter/platform/message-post';
-import { SYSTEM_JOB_LID, SYSTEM_MESSAGE_LID } from '../../src/features/message/message-log';
+import { SYSTEM_JOB_LID, SYSTEM_MESSAGE_LID, formatMessageSection, sanitizeMessageText } from '../../src/features/message/message-log';
 
 /** in-memory の控え(実 IDB の代わり)。 */
 class FakeSpool implements MessageSpool {
@@ -494,13 +494,48 @@ describe('簡易履歴の記憶(直近の知らせのリング)', () => {
     expect(post.recent()[19]!.text).toBe('n5');
   });
 
-  it('🔴 起動時にノート本文の末尾から種まきする(新しい順・最大 20 件)。同じ節は二重に入らない', () => {
+  it('🔴 起動時にノート本文の末尾から種まきする(新しい順・最大 20 件)', () => {
     const post = new MessagePost({ list: async () => [], count: async () => 0, push: async () => undefined, remove: async () => undefined });
     post.seedRecent(body(30));
     expect(post.recent()).toHaveLength(20);
     expect(post.recent()[0]!.text).toBe('m29');
-    post.seedRecent(body(30));
-    expect(post.recent(), '同じ本文を 2 度読んで増えた').toHaveLength(20);
+  });
+
+  it('🔴 同じ本文を 2 度種まきしても二重に入らない(件数が上限より少ない本文で見る ── 上限で切れて隠れない)', () => {
+    const post = new MessagePost({ list: async () => [], count: async () => 0, push: async () => undefined, remove: async () => undefined });
+    post.seedRecent(body(5));
+    const first = post.recent().map((m) => m.text);
+    expect(first).toHaveLength(5);
+    post.seedRecent(body(5));
+    expect(post.recent(), '2 度目で増えた(重複)').toHaveLength(5);
+    expect(post.recent().map((m) => m.text)).toEqual(first);
+  });
+
+  it('🔴 別のタブの書込みで読み直す経路(seedUnreadFromDisk を繰り返す)でも重複しない / 新しい節だけが増える', async () => {
+    const post = new MessagePost({ list: async () => [], count: async () => 0, push: async () => undefined, remove: async () => undefined });
+    await post.seedUnreadFromDisk(async () => body(3));
+    await post.seedUnreadFromDisk(async () => body(3));
+    expect(post.recent()).toHaveLength(3);
+    await post.seedUnreadFromDisk(async () => body(4));
+    expect(post.recent().map((m) => m.text)).toEqual(['m3', 'm2', 'm1', 'm0']);
+  });
+
+  it('🔴 積んだ分がもう書き込まれた本文を種まきしても、積んだ分が重複しない', async () => {
+    const post = new MessagePost({ list: async () => [], count: async () => 0, push: async () => undefined, remove: async () => undefined });
+    post.post({ kind: 'caution', source: 'app', text: 'x' });
+    const sec = formatMessageSection({ at: new Date().toISOString(), kind: 'caution', source: 'app', text: 'x' });
+    post.seedRecent(sec);
+    expect(post.recent().filter((m) => m.text === 'x')).toHaveLength(1);
+  });
+
+  it('🔴 記憶の字は無害化済み: 「…」の中身は潰れ、80 字で切れて、sanitizeMessageText の出力と一致する', () => {
+    const post = new MessagePost({ list: async () => [], count: async () => 0, push: async () => undefined, remove: async () => undefined });
+    const raw = `「秘密の題名」を取り込みました ${'あ'.repeat(120)}`;
+    post.post({ kind: 'result', source: 'app', text: raw });
+    const got = post.recent()[0]!.text;
+    expect(got).not.toContain('秘密の題名');
+    expect(got, 'sanitizeMessageText の出力と違う').toBe(sanitizeMessageText(raw));
+    expect(got.length).toBeLessThan(raw.length);
   });
 
   it('変化は onRecentChanged で届き、解除できる', () => {

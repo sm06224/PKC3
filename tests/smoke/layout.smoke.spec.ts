@@ -58,7 +58,7 @@ test('🔴 枠が組めている(3 列 / 重なりなし)', async ({ page }) => 
       stackArea: getComputedStyle(document.querySelector('[data-pkc-region="status-stack"]')!).gridArea,
     };
   });
-  expect(rowsInfo.stackArea, '知らせの入れ物が一覧のマスに重なっていない(専用の行を取っている)').toContain('sidebar');
+  expect(rowsInfo.stackArea, '知らせの入れ物が本文のマスに重なっていない(専用の行を取っている)').toContain('detail');
   expect(rowsInfo.tracks, 'grid に status の行が残っている(区画 8 行 = 本文 1 + 帯 7)').toBeLessThanOrEqual(8);
   /**
    * ⚠ **器ではなく字の所に書く**(#671、2026-09-04)── 浮き札は `status-text` の span と、狭すぎる端末への断り書き(押す口つき)を
@@ -77,9 +77,9 @@ test('🔴 枠が組めている(3 列 / 重なりなし)', async ({ page }) => 
   expect(detailNow, '浮き札が出て本文の配置が動いた').toEqual(detailBefore);
   const docNow = await page.evaluate(() => ({ sh: document.documentElement.scrollHeight, ih: window.innerHeight, iw: window.innerWidth }));
   expect(docNow.sh, '浮き札が出て文書が画面より高くなった(下に空白 / スクロール)').toBeLessThanOrEqual(docNow.ih);
-  // 一覧のマスの左下に重なる(左の縦のバーの右・一覧の幅の内側・画面の下端の内側)
+  // 本文のマスの右下(左の一覧・縦のバーの上には置かない)・画面の下端の内側
   const sideBox = (await page.locator('[data-pkc-region="sidebar"]').boundingBox())!;
-  expect(status!.x + status!.width, '浮き札が一覧の幅をはみ出して本文(追記欄)に被る').toBeLessThanOrEqual(sideBox.x + sideBox.width + 1);
+  expect(status!.x, '浮き札が左の一覧に重なる').toBeGreaterThanOrEqual(sideBox.x + sideBox.width - 1);
   expect(status!.y + status!.height, '浮き札が画面の外へ出ている').toBeLessThanOrEqual(docNow.ih);
   expect(status!.x, '浮き札が左の縦のバーに重なっている').toBeGreaterThanOrEqual(40);
   // 🔴 × が在り、押すと閉じる(消せない知らせを作らない)

@@ -9,9 +9,12 @@
  * `shouldHideStatusBar` → `shouldShowToast`。
  */
 import { describe, expect, it } from 'vitest';
+import { CORRUPT_REFUSAL } from '../../src/features/storage/db-corruption';
 import { blockedActionNote } from '../../src/adapter/state/app-state';
 import {
   composeStatusModel,
+  isToastDismissible,
+  ToastDismissal,
   editingStateWord,
   EDITING_STATE_WORD,
   paintStatusLive,
@@ -158,5 +161,53 @@ describe('paintToastText / paintStatusLive ── 同じ字なら DOM を触ら�
     paintStatusLive(live, '');
     expect(live.textContent).toBe('');
     expect(live.getAttribute('aria-live')).toBe('polite');
+  });
+});
+
+describe('severeToastLine ── 実害のある保存先の警告を浮き札に常設する', () => {
+  it('🔴 浮き札の先頭に出る(状態の欄にも残る)', () => {
+    const m = composeStatusModel(partsFor('ready', { statusBase: '⚠ 閉じると消えます', statusBaseSevere: true, severeToastLine: '⚠ 閉じると消えます', noticeLine: 'コピーしました' }));
+    expect(m.toast).toBe('⚠ 閉じると消えます — コピーしました');
+    expect(m.state[0]?.severe).toBe(true);
+    expect(m.live, '読み上げは知らせだけ(常設の警告で毎回読まない)').toBe('コピーしました');
+  });
+});
+
+describe('ToastDismissal ── × の記憶(main.ts の paint が使う本物の判断)', () => {
+  const base = (over: Partial<StatusLineParts> = {}): StatusLineParts => partsFor('ready', over);
+
+  it('🔴 × で閉じたエラーは隠れ、別の字のエラーは出て、同じエラーも一度消えてからはまた出る', () => {
+    const d = new ToastDismissal();
+    expect(d.apply(base({ errorLine: 'エラー: A' })).errorLine).toBe('エラー: A');
+    expect(d.dismiss({ errorLine: 'エラー: A', progressLine: '' }, 'エラー: A')).toBe(true);
+    expect(d.apply(base({ errorLine: 'エラー: A' })).errorLine, '閉じたのに出ている').toBe('');
+    expect(d.apply(base({ errorLine: 'エラー: B' })).errorLine, '別のエラーが出ない').toBe('エラー: B');
+    d.dismiss({ errorLine: 'エラー: B', progressLine: '' }, 'エラー: B');
+    d.apply(base({ errorLine: '' }));
+    expect(d.apply(base({ errorLine: 'エラー: B' })).errorLine, '消えた後の同じエラーが出ない').toBe('エラー: B');
+  });
+
+  it('🔴 進行中も同じ(字が変わる / 消えると解く)', () => {
+    const d = new ToastDismissal();
+    d.dismiss({ errorLine: '', progressLine: '書き出しています…' }, '書き出しています…');
+    expect(d.apply(base({ progressLine: '書き出しています…' })).progressLine).toBe('');
+    expect(d.apply(base({ progressLine: '取り込んでいます…' })).progressLine).toBe('取り込んでいます…');
+  });
+
+  it('🔴 保存先の警告は、閉じるとそのセッションの間は出ない(新しい記憶 = 次の起動では出る)', () => {
+    const d = new ToastDismissal();
+    expect(d.apply(base({ severeToastLine: '⚠ x' })).severeToastLine).toBe('⚠ x');
+    d.dismiss({ errorLine: '', progressLine: '' }, '⚠ x');
+    expect(d.apply(base({ severeToastLine: '⚠ x' })).severeToastLine).toBe('');
+    expect(new ToastDismissal().apply(base({ severeToastLine: '⚠ x' })).severeToastLine, '次の起動で出ない').toBe('⚠ x');
+  });
+
+  it('🔴 保存データの確認へ送る断り書きは × で消えない(押す口ごと無くなるため)/ 対照: ふつうの知らせは消せる', () => {
+    const line = CORRUPT_REFUSAL;
+    expect(isToastDismissible(line)).toBe(false);
+    expect(isToastDismissible('コピーしました')).toBe(true);
+    const d = new ToastDismissal();
+    expect(d.dismiss({ errorLine: `エラー: ${line}`, progressLine: '' }, `エラー: ${line}`)).toBe(false);
+    expect(d.apply(base({ errorLine: `エラー: ${line}` })).errorLine, '消せないはずの断り書きが消えた').toContain(line);
   });
 });

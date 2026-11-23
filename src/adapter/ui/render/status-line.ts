@@ -33,6 +33,7 @@
  * `main.ts` は値を渡すだけにする(`storage-notice.ts` / `status-open.ts` と同じ作法)。
  */
 import { blockedActionNote, type AppPhase } from '@adapter/state/app-state';
+import { isCorruptRefusalLine } from '@features/storage/db-corruption';
 
 /**
  * 編集中の状態語。⚠ **追記欄の注意文と同じ字**にする ── 中央のステータスバーと
@@ -94,6 +95,11 @@ export interface StatusLineParts {
   readonly errorLine: string;
   /** 外からファイルを掴んで窓に入っている間の字(#1380。空 = 出さない)。 */
   readonly fileDragLine?: string;
+  /**
+   * 🔴 **実害のある保存先の警告を、浮き札に常設で出す**(2026-11-23 レビュー。14px の赤い「!」だけでは見落とす)。
+   * ⚠ 時間で消えない。× で閉じるのは**そのセッションの間だけ**(`ToastDismissal`。次の起動でまた出る)。空 = 出さない。
+   */
+  readonly severeToastLine?: string;
 }
 
 
@@ -138,7 +144,7 @@ export function composeStatusModel(parts: StatusLineParts): StatusModel {
   add('portable', parts.portableAssetNote);
   add('persist', parts.persistState);
   add('saving', parts.savingLine);
-  const toast = [parts.progressLine, parts.noticeLine, parts.errorLine].filter((t) => t !== '').join(' — ');
+  const toast = [parts.severeToastLine ?? '', parts.progressLine, parts.noticeLine, parts.errorLine].filter((t) => t !== '').join(' — ');
   const live = [parts.noticeLine, parts.errorLine].filter((t) => t !== '').join(' — ');
   return { state, toast, live, fileDrag: parts.fileDragLine ?? '' };
 }
@@ -182,4 +188,51 @@ export function paintStatusLive(live: HTMLElement, text: string): void {
 /** 浮き札の字を書く。⚠ 同じ字なら触らない(打鍵ごとの DOM の変異を避ける)。 */
 export function paintToastText(el: HTMLElement, text: string): void {
   if (el.textContent !== text) el.textContent = text;
+}
+
+/**
+ * 🔴 **× で消してよい浮き札か**。押す口が消えると進めなくなる知らせ(保存データの確認へ送る断り書き。`isCorruptRefusalLine`)は消せない
+ * (消すと「保存データの確認を開く」ごと画面から無くなる)。判断はここ 1 本(`main.ts` の × と CSS の × の出し入れが同じ答えを持つ)。
+ */
+export function isToastDismissible(toastText: string): boolean {
+  return !isCorruptRefusalLine(toastText);
+}
+
+/**
+ * 🔴 **× で閉じたエラー・進行中・保存先の警告を、字が変わる(消える)まで出さない記憶**(`main.ts` の `paint` が使う。判断を `main.ts` に置かない)。
+ * - エラー / 進行中: 同じ字の間だけ隠す。**字が変わる / 一度消えると解く**(次の別のエラーはまた出る)。
+ * - 保存先の警告: そのセッションの間だけ隠す(新しいページの読み込みで空に戻る = 次の起動でまた出る)。
+ */
+export class ToastDismissal {
+  private error: string | null = null;
+  private progress: string | null = null;
+  private severe = false;
+
+  /** 現在の字を渡して、隠すものを空にした入力を返す。 */
+  apply<T extends { errorLine: string; progressLine: string; severeToastLine?: string }>(parts: T): T {
+    if (parts.errorLine === '') this.error = null;
+    if (parts.progressLine === '') this.progress = null;
+    return {
+      ...parts,
+      errorLine: parts.errorLine === this.error ? '' : parts.errorLine,
+      progressLine: parts.progressLine === this.progress ? '' : parts.progressLine,
+      severeToastLine: this.severe ? '' : (parts.severeToastLine ?? ''),
+    };
+  }
+
+  /** 時間が来て、エラーの浮き札を降ろす(保存先の警告は触らない)。消してはいけない物なら何もしない。 */
+  dismissError(errorLine: string): boolean {
+    if (errorLine === '' || !isToastDismissible(errorLine)) return false;
+    this.error = errorLine;
+    return true;
+  }
+
+  /** × が押された。`toast` は押した時点の浮き札の字(消してはいけない物なら何もしない)。 */
+  dismiss(current: { errorLine: string; progressLine: string }, toast: string): boolean {
+    if (!isToastDismissible(toast)) return false;
+    if (current.errorLine !== '') this.error = current.errorLine;
+    if (current.progressLine !== '') this.progress = current.progressLine;
+    this.severe = true;
+    return true;
+  }
 }

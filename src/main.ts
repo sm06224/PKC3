@@ -105,9 +105,10 @@ import {
   paintFileDragLabel,
   subscribeFileDragHint,
 } from '@adapter/ui/actions/file-drag-hint';
-import { composeStatusModel, paintStatusLive, paintToastText, shouldShowToast } from '@adapter/ui/render/status-line';
+import { ToastDismissal, composeStatusModel, paintStatusLive, paintToastText, shouldShowToast } from '@adapter/ui/render/status-line';
 import { installMessagePopover } from '@adapter/ui/render/message-entry';
-import { createStatusNotices, type StatusNotices } from '@adapter/ui/render/status-lifetime';
+import { installToastLift } from '@adapter/ui/render/toast-lift';
+import { createErrorAutoHide, createStatusNotices, type StatusNotices } from '@adapter/ui/render/status-lifetime';
 import {
   createStatusPoster,
   shouldPostNotice,
@@ -2272,6 +2273,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const statusBaseSevere = isStorageFallback(init.fallbackReason);
   // 🔴 警告の隣の「バックアップを書き出す」(#1038 D1)── 常設の警告と同じ寿命なので 1 度だけ出し入れする
   paintStatusBackup(regions.statusBackup, statusBaseSevere);
+  // 🔴 実害のある警告は、起動ごとに 1 度、メッセージ(注意)にも残す(浮き札を × で閉じても読み返せる)
+  if (statusBaseSevere) appMessagePost.post({ kind: 'caution', source: 'storage', text: statusBase });
   // 🔴 版・保存先の説明は、簡易履歴の「いまの状態」の見出しの `title` へ(画面いちばん下の常設の帯が無くなったので)
   const statusDetail = storageStatusTitle(`${versionText()} — ${init.vfs}`, init.fallbackReason);
   /**
@@ -2280,6 +2283,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const messageEntry = installMessagePopover(root, { recent: () => appMessagePost.recent() });
   appMessagePost.onRecentChanged(() => messageEntry.refresh());
+  // 🔴 浮き札は本文のマスの右下、追記欄の真上(追記欄の丈を測って上げる)
+  installToastLift(root);
   /**
    * #177: メインのタブ経由(follower)で開いているときの常設バッジ。fallback 警告と
    * 同型(「意図と違う接続形態は user が知るべき事実」)。昇格で空にする。
@@ -2310,8 +2315,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   let errorLine = '';
   /** 🔴 浮き札の × で閉じたエラー / 進行中の字(同じ字の間は出さない。字が変わる・消えると解く)。 */
-  let dismissedError: string | null = null;
-  let dismissedProgress: string | null = null;
+  const toastDismissal = new ToastDismissal();
+  /** 🔴 マウスが浮き札の上 / 焦点が中に在る間(時間で消さない)。 */
+  let toastHeld = false;
+  const errorAutoHide = createErrorAutoHide({
+    isHeld: () => toastHeld,
+    // 時間が来たら降ろす(保存データの確認へ送る断り書きは `dismissError` が断る)── 同じ字はメッセージに積まれている
+    onExpire: (line) => {
+      if (toastDismissal.dismissError(line)) repaintStatus();
+    },
+  });
   let toastShown = '';
   /** 🔴 復元できる途中で終わった録音・録画の区間数(#1985。`captureRecovery` が更新する)。 */
   let captureRecoveryCount = 0;
@@ -2348,10 +2361,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   `heldNoteWindow` でも状態語は出る(K16。畳むのは上の `sync` だけ)。
      */
     // 🔴 × で閉じたエラー・進行中は、字が変わる(または消える)まで出さない(`dismissToast`)
-    if (errorLine === '') dismissedError = null;
     const progress = progressLine();
-    if (progress === '') dismissedProgress = null;
-    const parts = {
+    const rawParts = {
       phase: dispatcher.getState().phase,
       statusBase,
       statusBaseSevere,
@@ -2360,11 +2371,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       portableAssetNote,
       persistState,
       savingLine: saving.line(),
-      progressLine: progress === dismissedProgress ? '' : progress,
+      progressLine: progress,
       noticeLine: noticeLine(),
-      errorLine: errorLine === dismissedError ? '' : errorLine,
+      errorLine,
       fileDragLine: fileDragHintLine(root),
+      // 🔴 実害のある保存先の警告は浮き札に常設(時間で消えない。× はこのセッションの間だけ)
+      severeToastLine: statusBaseSevere ? statusBase : '',
     };
+    errorAutoHide.track(rawParts.errorLine);
+    const parts = toastDismissal.apply(rawParts);
     /**
      * 🔴 **何を出すかを決めるのは `composeStatusModel` 1 本**(`status-line.ts`。判断は `main.ts` に置かない ──
      *   この file はどの test からも実行されない)。
@@ -2392,6 +2407,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 見つからないノートの知らせの隣の「ゴミ箱を開く」(#1648)── 判断は `status-open.ts`
     paintStatusTrash(regions.statusTrash, model.toast);
     paintToastText(regions.statusText, model.toast);
+    // 🔴 浮き札の「バックアップを書き出す」(常設の警告が出ている間だけ。簡易履歴の「いまの状態」にも同じ押し口がある)
+    paintStatusBackup(regions.statusBackupToast, parts.severeToastLine !== '');
     regions.status.hidden = !show;
   };
   /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */
@@ -2401,10 +2418,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 同じ字はメッセージに残っている(結果・注意・問題は post 済み)。知らせは寿命の持ち主(`statusNotices.dismiss`)へ、
    * エラー・進行中は字を覚えて隠す(状態を直すものではない ── 保存に失敗して止まっている間の「状態」は入口に残る)。
    */
+  // 🔴 読んでいる間(マウスが載っている / 焦点が中)は、時間が来ても消さない
+  const setHeld = (on: boolean): void => {
+    toastHeld = on;
+    statusNotices?.hold(on);
+  };
+  // ⚠ 札の字は押しが通る(`pointer-events: none`)ので、マウスが載るのはボタンの上だけ ── 入れ子の mouseover / mouseout で見る
+  regions.status.addEventListener('mouseover', (ev) => {
+    if ((ev.target as Element | null)?.closest('button') !== null) setHeld(true);
+  });
+  regions.status.addEventListener('mouseout', () => setHeld(regions.status.contains(document.activeElement)));
+  regions.status.addEventListener('focusin', () => setHeld(true));
+  regions.status.addEventListener('focusout', () => setHeld(regions.status.matches(':hover')));
   regions.status.addEventListener('pkc-toast-dismiss', () => {
-    if (errorLine !== '') dismissedError = errorLine;
-    const progress = progressLine();
-    if (progress !== '') dismissedProgress = progress;
+    // 🔴 保存データの確認へ送る断り書きは × で消さない(押す口ごと無くなる)── 判断は `isToastDismissible`
+    if (!toastDismissal.dismiss({ errorLine, progressLine: progressLine() }, toastShown)) return;
     statusNotices?.dismiss();
     paint();
   });
@@ -2471,7 +2499,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔑 保存の状態(`persistState`)とは**別の欄**にする ── 同じ変数に載せると、
    *   次の保存で「画像が出ない理由」が画面から消える。
    */
-  if (syncLine !== '' || persistState !== '' || portableAssetNote !== '') paint();
+  if (syncLine !== '' || persistState !== '' || portableAssetNote !== '' || statusBaseSevere) paint();
   // 🔴 外からファイルを掴んで窓に入っている間の状態の字(#1380)。出入りで塗り直す
   subscribeFileDragHint(root, paint);
   /**

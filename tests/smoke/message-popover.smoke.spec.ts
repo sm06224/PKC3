@@ -60,7 +60,7 @@ test('🔴 常設の帯が無い ── 浮き札が出ても配置が動かず�
     const cs = getComputedStyle(stack);
     return { area: cs.gridArea, tracks: getComputedStyle(shell).gridTemplateRows.split(' ').length, sh: document.documentElement.scrollHeight, ih: window.innerHeight };
   });
-  expect(geo.area, '入れ物が一覧のマスに重なっていない(専用の行を取っている)').toContain('sidebar');
+  expect(geo.area, '入れ物が本文のマスに重なっていない(専用の行を取っている)').toContain('detail');
   expect(geo.tracks, 'grid の行に status が残っている').toBeLessThanOrEqual(8);
   expect(geo.sh, '文書が画面より高い').toBeLessThanOrEqual(geo.ih);
   await expect(page.locator(TOAST), '言うことが無いのに浮き札が出ている').toBeHidden();
@@ -83,6 +83,32 @@ test('🔴 常設の帯が無い ── 浮き札が出ても配置が動かず�
   expect(during.sh, '浮き札が出て文書が画面より高くなった').toBeLessThanOrEqual(during.ih);
   const tb = (await toast.boundingBox())!;
   expect(tb.x, '浮き札が左の縦のバーに重なる').toBeGreaterThanOrEqual(40);
+  // 🔴 入口のボタンを覆わない(入口は縦のバーの中・浮き札は右の情報ペインの中)
+  const entryBox = (await page.locator('[data-pkc-region="rail"] [data-pkc-field="message-entry"]').boundingBox())!;
+  expect(tb.x, '浮き札が入口の右に収まっていない').toBeGreaterThanOrEqual(entryBox.x + entryBox.width);
+  // 🔴 長い知らせでも高さを抑える(一覧を覆い尽くさない)
+  const origText = await page.locator('[data-pkc-field="status-text"]').textContent();
+  await page.evaluate(() => {
+    (document.querySelector('[data-pkc-field="status-text"]') as HTMLElement).textContent = '長い知らせ。'.repeat(200);
+  });
+  const longBox = (await toast.boundingBox())!;
+  expect(longBox.height, '長い知らせが一覧を覆い尽くす').toBeLessThanOrEqual(900 * 0.27);
+  // 🔴 左の一覧・縦のバーの上に置かない / 追記欄の真上 / 札の字は押しが通る(下の操作を妨げない)
+  const sideB = (await page.locator('[data-pkc-region="sidebar"]').boundingBox())!;
+  const appendB = await page.locator('[data-pkc-region="append"]').boundingBox();
+  expect(longBox.x, '浮き札が左の一覧に重なる').toBeGreaterThanOrEqual(sideB.x + sideB.width - 1);
+  // ⚠ 追記欄はノートを開いているときだけ出る(出ていなければ測らない)
+  if (appendB !== null) expect(longBox.y + longBox.height, '浮き札が追記欄を覆う').toBeLessThanOrEqual(appendB.y + 1);
+  const through = await page.evaluate(() => {
+    const t = document.querySelector('[data-pkc-field="status-text"]') as HTMLElement;
+    const r = t.getBoundingClientRect();
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return at !== null && !at.closest('[data-pkc-region="status"]');
+  });
+  expect(through, '札の字が押しを受け止めている(下の操作が押せなくなる)').toBe(true);
+  await page.evaluate((t) => {
+    (document.querySelector('[data-pkc-field="status-text"]') as HTMLElement).textContent = t;
+  }, origText ?? '');
   expect(tb.y + tb.height, '浮き札が画面の外').toBeLessThanOrEqual(during.ih);
   // 🔴 浮き札が実クリックを受ける(最前面)
   const hit = await page.evaluate(() => {
@@ -247,6 +273,9 @@ test('🔴 スマホ幅(390×844)── 一覧でも本文でも入口が在り�
   const docH = (): Promise<number> => page.evaluate(() => document.documentElement.scrollHeight);
   // ② 本文のページ(上のバー: 「⋯」の隣)
   await createEntry(page, 'text');
+  // 追記欄は編集を確定してから出る(浮き札が追記欄を覆わないことを測るため)
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-region="append"]'), '前提: 追記欄が出ていない').toBeVisible();
   const bar = page.locator('[data-pkc-region="phone-bar"]');
   await expect(bar, '前提: 本文のページで上のバーが出ていない').toBeVisible();
   const entry = bar.locator('[data-pkc-field="message-entry"]');
@@ -270,7 +299,12 @@ test('🔴 スマホ幅(390×844)── 一覧でも本文でも入口が在り�
   const toast = page.locator(TOAST);
   await expect(toast).toBeVisible();
   const tb = (await toast.boundingBox())!;
-  expect(tb.x, '浮き札が左端から出ていない').toBeLessThan(40);
+  expect(tb.x, '浮き札が画面の左へはみ出す').toBeGreaterThanOrEqual(0);
+  // 🔴 スマホ: 追記欄(打つ欄)の上に出る ── 追記欄と上のバーを覆わない
+  const barBox = (await bar.boundingBox())!;
+  const appendBox = (await page.locator('[data-pkc-region="append"]').boundingBox())!;
+  expect(tb.y, '浮き札が上のバーに重なる').toBeGreaterThanOrEqual(barBox.y + barBox.height - 1);
+  expect(tb.y + tb.height, '浮き札が追記欄を覆う').toBeLessThanOrEqual(appendBox.y + 1);
   // 🔴 下の全幅の帯(収録・タイマー…)を覆わない: 札の下端は本文の行の下端より上
   const mainBottom = (await page.locator('[data-pkc-region="detail"]').boundingBox())!;
   expect(tb.y + tb.height, '浮き札が本文の下の帯の行に被る').toBeLessThanOrEqual(mainBottom.y + mainBottom.height + 1);

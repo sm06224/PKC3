@@ -23,7 +23,9 @@ import {
 import {
   createStatusNotices,
   routeStatusText,
+  STATUS_PROBLEM_VISIBLE_MS,
   STATUS_RESULT_VISIBLE_MS,
+  createErrorAutoHide,
   type StatusNotices,
 } from '../../src/adapter/ui/render/status-lifetime';
 import { CORRUPT_REFUSAL } from '../../src/features/storage/db-corruption';
@@ -95,18 +97,73 @@ describe('Q1 結果の知らせは数秒で消える', () => {
     expect(r.posted).toEqual([{ text: 'コピーしました', opts: { kind: 'result' } }]);
   });
 
-  it('🔴 注意・問題は消えない(読むべき字)。対照:結果は同じ時間で消える', () => {
+  it('🔴 注意・問題も自分で消える(2026-11-23。浮き札は作業中の画面に重なるので居座らない)── 結果(6 秒)より長い 10 秒。消えても state の知らせを降ろす合図が出る', () => {
     for (const kind of ['caution', 'problem'] as const) {
       const r = rig();
       r.n.show('保存できません', { kind });
-      vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS * 100);
-      expect(r.n.noticeLine(), `${kind} が時間で消えた`).toBe('保存できません');
-      expect(r.expired).toEqual([]);
+      vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS + 1);
+      expect(r.n.noticeLine(), `${kind} が結果と同じ 6 秒で消えた(読む時間が足りない)`).toBe('保存できません');
+      vi.advanceTimersByTime(STATUS_PROBLEM_VISIBLE_MS - STATUS_RESULT_VISIBLE_MS);
+      expect(r.n.noticeLine(), `${kind} が時間で消えない(居座る)`).toBe('');
+      expect(r.expired).toEqual(['保存できません']);
     }
     const ctl = rig();
     ctl.n.show('コピーしました');
     vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS);
-    expect(ctl.n.noticeLine(), '対照群が消えていない(上の検査が何も見ていない)').toBe('');
+    expect(ctl.n.noticeLine(), '対照群が消えていない').toBe('');
+  });
+
+  it('🔴 保存データの確認へ送る断り書きは時間で消えない(押す口ごと無くなる)', () => {
+    const r = rig();
+    r.n.show(CORRUPT_REFUSAL, { kind: 'caution' });
+    vi.advanceTimersByTime(STATUS_PROBLEM_VISIBLE_MS * 10);
+    expect(r.n.noticeLine()).toBe(CORRUPT_REFUSAL);
+  });
+
+  it('🔴 読んでいる間(マウスが載っている / 焦点が中)は時間が来ても消えず、離れたら消える', () => {
+    const r = rig();
+    r.n.show('コピーしました');
+    r.n.hold(true);
+    vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS * 5);
+    expect(r.n.noticeLine(), '載せている間に消えた').toBe('コピーしました');
+    r.n.hold(false);
+    vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS);
+    expect(r.n.noticeLine(), '離れても消えない').toBe('');
+  });
+});
+
+describe('エラーの浮き札の自動で消える時計', () => {
+  it('🔴 10 秒で降ろす / 字が変われば数え直す / 読んでいる間は降ろさない / 同じ字は 1 度だけ', () => {
+    const expired: string[] = [];
+    let held = false;
+    const a = createErrorAutoHide({ onExpire: (l) => void expired.push(l), isHeld: () => held });
+    a.track('エラー: A');
+    vi.advanceTimersByTime(STATUS_PROBLEM_VISIBLE_MS - 1);
+    expect(expired).toEqual([]);
+    vi.advanceTimersByTime(2);
+    expect(expired).toEqual(['エラー: A']);
+    // 別のエラー: 数え直す(古い時計は止まる)
+    a.track('エラー: B');
+    vi.advanceTimersByTime(STATUS_PROBLEM_VISIBLE_MS / 2);
+    a.track('エラー: C');
+    vi.advanceTimersByTime(STATUS_PROBLEM_VISIBLE_MS - 1);
+    expect(expired, 'B の古い時計が C を縮めた / B が降りた').toEqual(['エラー: A']);
+    vi.advanceTimersByTime(2);
+    expect(expired).toEqual(['エラー: A', 'エラー: C']);
+    // 読んでいる間は降ろさない
+    a.track('');
+    a.track('エラー: D');
+    held = true;
+    vi.advanceTimersByTime(STATUS_PROBLEM_VISIBLE_MS * 3);
+    expect(expired).toEqual(['エラー: A', 'エラー: C']);
+    held = false;
+    vi.advanceTimersByTime(STATUS_PROBLEM_VISIBLE_MS + 1);
+    expect(expired.at(-1)).toBe('エラー: D');
+    // 消えたら止まる
+    a.track('エラー: E');
+    a.track('');
+    vi.advanceTimersByTime(STATUS_PROBLEM_VISIBLE_MS * 2);
+    expect(expired).not.toContain('エラー: E');
   });
 });
 
@@ -213,8 +270,8 @@ describe('× で知らせを消す(2026-11-23。注意・問題・ボタン付�
   it('🔴 注意の知らせ(次が来るまで残る)も dismiss で消え、state の知らせを降ろす合図が出て、描き直される', () => {
     const r = rig();
     r.n.show('保存先の空きが少なくなっています', { kind: 'caution' });
-    vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS * 10);
-    expect(r.n.noticeLine(), '前提: 注意は時間で消えない').toBe('保存先の空きが少なくなっています');
+    vi.advanceTimersByTime(STATUS_PROBLEM_VISIBLE_MS - 1);
+    expect(r.n.noticeLine(), '前提: 注意は 10 秒の手前では出ている').toBe('保存先の空きが少なくなっています');
     const paints = r.painted.length;
     r.n.dismiss();
     expect(r.n.noticeLine()).toBe('');
@@ -421,7 +478,7 @@ describe('main.ts の配線(原文 pin ── 弱い。`main.ts` は走らない
   });
 
   it('🔴 行へ進行中の欄を渡している', () => {
-    expect(code).toContain("progressLine: progress === dismissedProgress ? '' : progress,");
+    expect(code).toContain('progressLine: progress,');
   });
 });
 

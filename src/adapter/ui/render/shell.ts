@@ -84,6 +84,8 @@ export interface ShellRegions {
    * ⚠ 押した先は `export-archive` の受け手 1 つ(`binder.ts`)。出し入れは `status-open.ts` の `paintStatusBackup`。
    */
   statusBackup: HTMLElement;
+  /** 🔴 浮き札の中の「バックアップを書き出す」(実害のある保存先の警告を常設で出している間だけ。押し先は同じ `export-archive`)。 */
+  statusBackupToast: HTMLElement;
   /**
    * 🔴 **見つからないノートの知らせの隣の「ゴミ箱を開く」**(#1648)。押した先は `show-trash`
    *   の受け手(`binder.ts`)。出し入れは `status-open.ts` の `paintStatusTrash`。
@@ -1348,7 +1350,14 @@ export function buildShell(root: HTMLElement): ShellRegions {
     { backup: statusBackup, captureRecovery: statusCaptureRecovery },
     SYSTEM_MESSAGE_LID,
   );
-  status.append(statusText, statusOpen, statusCopyRef, statusUndo, statusCreate, statusRescue, statusTrash, tooNarrow, statusClose);
+  const statusBackupToast = document.createElement('button');
+  statusBackupToast.type = 'button';
+  statusBackupToast.setAttribute('data-pkc-field', 'status-backup-toast');
+  statusBackupToast.setAttribute('data-pkc-action', 'export-archive');
+  // ⚠ 字は簡易履歴の側と同じ 1 つ(字を 2 か所に書かない)
+  statusBackupToast.textContent = statusBackup.textContent;
+  statusBackupToast.hidden = true;
+  status.append(statusText, statusOpen, statusCopyRef, statusUndo, statusCreate, statusRescue, statusTrash, statusBackupToast, tooNarrow, statusClose);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -1538,6 +1547,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     statusCreate,
     statusRescue,
     statusBackup,
+    statusBackupToast,
     statusTrash,
     statusCopyRef,
     statusClose,

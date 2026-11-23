@@ -46,8 +46,9 @@ export type BadgeTone = 'none' | 'warn' | 'danger' | 'info';
 /** バッジの字と色。⚠ 判断はここ 1 か所(入口が複数在っても同じ答え)。 */
 export function entryBadge(model: MessageStatusModel): { text: string; tone: BadgeTone } {
   const severe = model.state.some((i) => i.severe);
-  if (model.unread > 0) return { text: model.unread > 99 ? '99+' : String(model.unread), tone: severe ? 'danger' : 'warn' };
+  // 🔴 実害のある警告(閉じると消える)は、未読の数があっても赤い「!」を譲らない(数は説明に入る)── 見落とさせない
   if (severe) return { text: '!', tone: 'danger' };
+  if (model.unread > 0) return { text: model.unread > 99 ? '99+' : String(model.unread), tone: 'warn' };
   if (model.captureRecovery > 0) return { text: '!', tone: 'info' };
   return { text: '', tone: 'none' };
 }
@@ -94,6 +95,11 @@ export function paintMessageEntries(root: ParentNode, model: MessageStatusModel)
     if (saving) {
       if (!btn.hasAttribute('data-pkc-saving-dot')) btn.setAttribute('data-pkc-saving-dot', '');
     } else if (btn.hasAttribute('data-pkc-saving-dot')) btn.removeAttribute('data-pkc-saving-dot');
+    // 🔴 複数タブ(このタブの保存はメインのタブ経由)は、説明だけでなく見た目の手掛かり(info 色の小さな点)も出す
+    const multi = model.state.some((i) => i.kind === 'sync');
+    if (multi) {
+      if (!btn.hasAttribute('data-pkc-multitab')) btn.setAttribute('data-pkc-multitab', '');
+    } else if (btn.hasAttribute('data-pkc-multitab')) btn.removeAttribute('data-pkc-multitab');
     const tone = badge.tone === 'none' ? null : badge.tone;
     if (tone === null) btn.removeAttribute('data-pkc-attention');
     else if (btn.getAttribute('data-pkc-attention') !== tone) btn.setAttribute('data-pkc-attention', tone);
@@ -316,6 +322,11 @@ export function installMessagePopover(root: HTMLElement, deps: PopoverDeps = {})
     const pop = popOf();
     if (pop === null || anchor === null) return;
     const a = anchor.getBoundingClientRect();
+    // 🔴 入口が見えていない(PC ↔ スマホ幅の切替で畳まれた)なら、(0,0) へ置かずに閉じる
+    if (!anchor.isConnected || anchor.closest('[hidden]') !== null) {
+      close(false);
+      return;
+    }
     pop.style.left = '0px';
     pop.style.top = '0px';
     pop.style.visibility = 'hidden';
@@ -428,6 +439,14 @@ export function installMessagePopover(root: HTMLElement, deps: PopoverDeps = {})
   const onKey = (ev: Event): void => {
     const k = ev as KeyboardEvent;
     if (k.key !== 'Escape' || !isOpen()) return;
+    const pop = popOf();
+    const inside = pop !== null && doc.activeElement !== null && pop.contains(doc.activeElement);
+    // 🔴 ホバーで開いただけ(固定していない)で、焦点が外にあるときの Esc は**飲まない** ── 編集の取り消し・ダイアログの Esc を妨げない
+    //   (簡易履歴は閉じるが、Esc は背後へ伝える)。焦点が中に在る / クリックで固定したときだけ、Esc をここで使い切る
+    if (mode === 'hover' && !inside) {
+      close(false);
+      return;
+    }
     // 🔴 Esc は背後のノート選択解除などへ伝えない(native の dialog が保証していた性質)
     k.preventDefault();
     k.stopImmediatePropagation();
