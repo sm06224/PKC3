@@ -182,6 +182,53 @@ test('🔴 ログのカード: 輪郭・時刻の帯の廃止・表とコード�
   expect(scroll.pre, 'コードが無い').not.toBeNull();
   expect(scroll.pre!.sw, 'コードが広くない(台の空振り)').toBeGreaterThan(scroll.pre!.cw);
 
+  // ⑤b 🔴 横スクロールの器(表・csv)の切り口が、コード・引用と同じ内側の余白で終わる(左右とも)。カードの輪郭まで張り付いて切れない
+  const inset = await page.evaluate((sel) => {
+    const host = document.querySelector(sel) as HTMLElement;
+    const card = host.querySelector(':scope > h2[data-pkc-log-card="first"]')!.getBoundingClientRect();
+    const port = (el: HTMLElement): { l: number; r: number } => {
+      const b = el.getBoundingClientRect();
+      return { l: b.left + el.clientLeft, r: b.left + el.clientLeft + el.clientWidth };
+    };
+    const table = port(host.querySelector(':scope > .pkc-md-block[data-pkc-md-block-kind="table"]') as HTMLElement);
+    const csv = port(host.querySelector(':scope > .pkc-md-block[data-pkc-render-lang="csv"]') as HTMLElement);
+    const pre = host.querySelector(':scope > .pkc-md-block pre:not([data-pkc-md-table])') as HTMLElement;
+    const code = pre.getBoundingClientRect();
+    const quote = (host.querySelector(':scope > blockquote') as HTMLElement).getBoundingClientRect();
+    const th = host.querySelector(':scope > .pkc-md-block[data-pkc-md-block-kind="table"] th') as HTMLElement;
+    const thW = th.getBoundingClientRect().width;
+    // 対照群: カードの印を外した(今までのふつうの本文)ときの同じ列の幅
+    const saved = [...host.querySelectorAll('[data-pkc-log-card]')].map((e) => [e, e.getAttribute('data-pkc-log-card')!] as const);
+    saved.forEach(([e]) => e.removeAttribute('data-pkc-log-card'));
+    const plainTh = (host.querySelector(':scope > .pkc-md-block[data-pkc-md-block-kind="table"] th') as HTMLElement).getBoundingClientRect().width;
+    saved.forEach(([e, v]) => e.setAttribute('data-pkc-log-card', v));
+    return { cardL: card.left, cardR: card.right, table, csv, codeL: code.left, codeR: code.right, quoteR: quote.right, thW, plainTh };
+  }, BODY);
+  for (const [name, v] of [['表', inset.table], ['csv', inset.csv]] as const) {
+    expect(Math.abs(v.r - inset.codeR), `${name}の切り口の右端がコードの右端とずれた(カードの輪郭まで張り付いて切れている)`).toBeLessThanOrEqual(1);
+    expect(Math.abs(v.l - inset.codeL), `${name}の切り口の左端がコードの左端とずれた`).toBeLessThanOrEqual(1);
+  }
+  expect(inset.codeR, 'コードがカードの内側の余白(8px 以上)に収まっていない').toBeLessThanOrEqual(inset.cardR - 8);
+  // 器(表・コード)の左右の輪郭線は、透明な余白の外縁(= カードの縁)に引かれる(余白の内側に引くと輪郭が途切れる)
+  const lines = await page.locator(`${BODY} > .pkc-md-block[data-pkc-md-block-kind="table"]`).first().evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { origin: cs.backgroundOrigin.split(',')[0]!.trim(), size: cs.backgroundSize.split(',')[0]!.trim(), pos: cs.backgroundPosition.split(',')[0]!.trim(), border: cs.borderLeftColor };
+  });
+  expect(lines.origin, '輪郭線の起点が余白の内側(カードの縁から離れて途切れる)').toBe('border-box');
+  expect(lines.size).toBe('1px 100%');
+  expect(lines.pos, '左の輪郭線の位置').toBe('0px 0px');
+  // 器の中の表・コードの上の余白が、本文の余白(`pre` / `table` の margin)を残さず、他の塊と同じ細い間隔(0.3em)
+  const gaps = await page.locator(`${BODY} > .pkc-md-block`).evaluateAll((els) =>
+    els.map((w) => {
+      const c = w.querySelector('pre, table') as HTMLElement;
+      return c.getBoundingClientRect().top - w.getBoundingClientRect().top;
+    }),
+  );
+  expect(gaps.length, '器が無い(台の空振り)').toBeGreaterThanOrEqual(3);
+  for (const g of gaps) expect(g, '器の中の上の余白が本文の余白のまま(塊の間が広い)').toBeLessThanOrEqual(6);
+  // 列の折り返しはカードの有無で変わらない(カードの規則が 1 字ずつの折り返しを作らない)
+  expect(Math.abs(inset.thW - inset.plainTh), '表の列の幅がカードで変わった').toBeLessThanOrEqual(0.5);
+
   // ⑥ コピーのボタンはカードの内側(余白のぶん寄る)に出る
   const code = page.locator(`${BODY} > .pkc-md-block:has(pre)`).first();
   await code.hover();
@@ -212,6 +259,10 @@ test('🔴 ログのカード: 輪郭・時刻の帯の廃止・表とコード�
     for (const theme of ['light', 'dark']) {
       await page.evaluate((t) => document.documentElement.setAttribute('data-pkc-theme', t), theme);
       await page.screenshot({ path: `${dir}/log-${theme}.png` });
+      // 下へ送って、コード・csv・引用・長い 1 行・記録の終わり(カードの下の角)まで 1 枚に収める
+      await page.locator(`${BODY} > .pkc-md-block:has(pre:not([data-pkc-md-table]))`).first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
+      await page.screenshot({ path: `${dir}/log-${theme}-lower.png` });
+      await page.locator(BODY).evaluate((el) => (el.closest('[data-pkc-region="detail"]') as HTMLElement).scrollTo(0, 0));
     }
   }
 

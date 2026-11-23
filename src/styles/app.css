@@ -15067,9 +15067,55 @@ h6:hover > .pkc-heading-anchor,
     background-position: var(--card-pad) var(--pt);
     background-origin: border-box;
   }
-  /* 器の右上に絶対配置するボタン(コピー・言語名など)は、内側の余白のぶん寄せる */
+  /* 🔴 **表・コード・csv・図の器は、内側の余白を「透明な枠」で取る**(横スクロールの器でもあるため)。
+   *   スクロールの切り口は器の padding box = **枠の内側**なので、余白を `padding` で取ると、横にあふれた表がカードの
+   *   輪郭まで張り付いて切れる。余白を枠にすれば、あふれた表もコードと同じ内側の余白で切れる(左右とも)。
+   *   地(`--surface`)は枠の下まで広がるので途切れない。
+   *   ⚠ 輪郭は**疑似要素にしない**(`overflow: auto` の器は、自分の外へはみ出す疑似要素を切ってしまい、輪郭が途切れる)──
+   *   器自身の背景(細い線の重ね)で左右・上下を引き、角丸の弧だけ放射状の背景で足す。
+   *   絶対配置のボタン(コピー・言語名など)は padding box から測るので、そのまま内側に出る。 */
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card] {
+    --hl: linear-gradient(var(--hairline), var(--hairline));
+    --rl: var(--radius-lg);
+    padding-inline: 0;
+    border-inline: calc(var(--card-pad) + 1px) solid transparent;
+    border-block: 0;
+    background-repeat: no-repeat;
+    /* 線は枠(透明な余白)の外縁に引く */
+    background-origin: border-box;
+    background-image: var(--hl), var(--hl);
+    background-size: 1px 100%, 1px 100%;
+    background-position: left top, right top;
+  }
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card='first'] {
+    background-image: var(--hl), var(--hl), var(--hl),
+      radial-gradient(circle at 100% 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)),
+      radial-gradient(circle at 0 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
+    background-size: 1px 100%, 1px 100%, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl);
+    background-position: left top, right top, left top, left top, right top;
+  }
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card='last'] {
+    background-image: var(--hl), var(--hl), var(--hl),
+      radial-gradient(circle at 100% 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)),
+      radial-gradient(circle at 0 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
+    background-size: 1px 100%, 1px 100%, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl);
+    background-position: left top, right top, left bottom, left bottom, right bottom;
+  }
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card='solo'] {
+    background-image: var(--hl), var(--hl), var(--hl), var(--hl),
+      radial-gradient(circle at 100% 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)),
+      radial-gradient(circle at 0 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)),
+      radial-gradient(circle at 100% 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)),
+      radial-gradient(circle at 0 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
+    background-size: 1px 100%, 1px 100%, 100% 1px, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl), var(--rl) var(--rl), var(--rl) var(--rl);
+    background-position: left top, right top, left top, left bottom, left top, right top, left bottom, right bottom;
+  }
+  /* 器の中の表・コードは、塊どうしの間(上下の余白 `--pt` / `--pb`)を他の塊と同じにする(本文の余白が器の中へ残らない) */
+  .pkc-md-block[data-pkc-log-card] :is(pre, table) {
+    margin-block: 0;
+  }
+  /* 絶対配置のボタンは、上の余白のぶんだけ下げる */
   [data-pkc-log-days] > .pkc-md-block[data-pkc-log-card] :is(.pkc-md-copy-btn, .pkc-md-copy-menu-btn, .pkc-md-edit-btn, .pkc-render-toggle, .pkc-code-collapse-top-btn, .pkc-code-lang) {
-    margin-inline-end: var(--card-pad);
     margin-block-start: var(--pt);
   }
   [data-pkc-log-days] > [data-pkc-log-card][data-pkc-log-card='first'],
