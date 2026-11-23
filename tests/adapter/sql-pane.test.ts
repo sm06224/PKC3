@@ -2448,7 +2448,7 @@ describe('打つ所(#918 段②a)', () => {
   });
 
   /**
-   * 🔴 **測れないときに、全部描いてしまわない**(#918 段③。自分の差分を読み直して見つけた)。
+   * 🔴 **測れないときに、全部描いてしまわない**(#918 段③。自分の差分を再読み込みて見つけた)。
    *
    * ⚠ この面は `hidden` で常駐するので、**答えが届いた瞬間に画面へ出ているとは限らない**
    *   ── そのとき `offsetHeight` は **0** を返す。
@@ -4625,13 +4625,16 @@ describe('🔴 調べる相手の選び所(#992)', () => {
         'sql-file-input',
         'sql-history',
         'sql-more',
+        'sql-out',
         'sql-run',
         'sql-source',
-        'sql-to-file',
-        'sql-to-note',
       ].sort(),
     );
-    // 🔑 移った先に在る(消えていない)
+    // 🔑 移った先に在る(消えていない)── 「書き出す ▾」の中に、字は同じまま
+    expect(
+      [...pane.querySelectorAll('[data-pkc-field="sql-out"] button')].map((b) => b.textContent),
+      '「書き出す ▾」の中身',
+    ).toEqual(['ノートへ書き出す', 'ファイルへ書き出す']);
     expect(pane.querySelector('[data-pkc-field="sql-tabs"] [data-pkc-field="sql-er-toggle"]'), 'ER 図のタブが無い').not.toBeNull();
     expect(
       pane.querySelector('[data-pkc-field="sql-more"] [data-pkc-field="sql-schema-to-note"]'),
@@ -6067,25 +6070,30 @@ describe('SQL 画面の 3 ペイン(#1442 段②)', () => {
     expect(treeTables(pane).length).toBe(3);
   });
 
-  it('🔴 木の出し入れは端末に憶える / 狭い器では既定で畳む', async () => {
+  it('🔴 木の出し入れは端末に憶える(閉じるは木の ×、開くは上のバー)/ 狭い器では既定で閉じている', async () => {
     const a = setup(reply);
     const shell = (p: HTMLElement): HTMLElement => p.querySelector<HTMLElement>('[data-pkc-field="sql-shell"]')!;
     const toggle = (p: HTMLElement): HTMLButtonElement =>
       p.querySelector<HTMLButtonElement>('[data-pkc-field="sql-tree-toggle"]')!;
+    const close = (p: HTMLElement): HTMLButtonElement =>
+      p.querySelector<HTMLButtonElement>('[data-pkc-field="sql-tree-close"]')!;
     expect(shell(a.pane).getAttribute('data-pkc-tree'), '広い器の既定は開いている').toBe('open');
-    expect(toggle(a.pane).getAttribute('aria-expanded')).toBe('true');
-    toggle(a.pane).click();
+    // 🔑 開いている間は「スキーマを開く」を出さない(タブと並んで「スキーマ」というタブに見えた)
+    expect(toggle(a.pane).hidden, '開いているのに開くボタンが出ている').toBe(true);
+    close(a.pane).click();
     expect(shell(a.pane).getAttribute('data-pkc-tree')).toBe('closed');
+    expect(toggle(a.pane).hidden, '閉じたのに開くボタンが出ない').toBe(false);
     expect(toggle(a.pane).getAttribute('aria-expanded')).toBe('false');
     expect(localStorage.getItem('pkc3.sql-layout'), '憶えていない').toBe('0:');
-    // 作り直す(= 開き直す)と、畳んだまま
+    // 作り直す(= 開き直す)と、閉じたまま
     document.body.innerHTML = '';
     const b = setup(reply);
     expect(shell(b.pane).getAttribute('data-pkc-tree'), '開き直したら戻っている').toBe('closed');
     toggle(b.pane).click();
     expect(shell(b.pane).getAttribute('data-pkc-tree')).toBe('open');
+    expect(toggle(b.pane).hidden).toBe(true);
     expect(localStorage.getItem('pkc3.sql-layout')).toBe('1:');
-    // 狭い窓(幅を決めていないときだけ畳む)
+    // 狭い窓(幅を決めていないときだけ閉じる)
     localStorage.clear();
     document.body.innerHTML = '';
     const prev = Object.getOwnPropertyDescriptor(window, 'innerWidth');
@@ -6214,16 +6222,63 @@ describe('SQL 画面の 3 ペイン(#1442 段②)', () => {
     expect(treeTables(pane)).toEqual([]);
   });
 
-  it('🔴 主の操作は「実行」1 つだけ / 「その他 ▾」の中に構造をノートへ(外を押すと閉じる)', async () => {
+  it('🔴 主の操作は「実行」1 つだけ / 「書き出す ▾」「その他 ▾」は押すと閉じ、外を押しても閉じる', async () => {
     const { pane } = setup(reply);
     const prim = [...pane.querySelectorAll('[data-pkc-variant="primary"]')];
     expect(prim.map((b) => b.getAttribute('data-pkc-field'))).toEqual(['sql-run']);
-    const more = pane.querySelector<HTMLDetailsElement>('[data-pkc-field="sql-more"]')!;
-    more.open = true;
-    document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
-    expect(more.open, '外を押しても閉じない').toBe(false);
-    more.open = true;
-    more.querySelector<HTMLElement>('[data-pkc-field="sql-schema-to-note"]')!.click();
-    expect(more.open, '押したのに開いたまま').toBe(false);
+    for (const [menu, item] of [
+      ['sql-more', 'sql-schema-to-note'],
+      // ⚠ 「書き出す ▾」の中は答えが出るまで押せない(disabled は click を出さない)── 外を押す側だけ見る
+      ['sql-out', null],
+    ] as const) {
+      const d = pane.querySelector<HTMLDetailsElement>(`[data-pkc-field="${menu}"]`)!;
+      d.open = true;
+      document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      expect(d.open, `${menu}: 外を押しても閉じない`).toBe(false);
+      if (item === null) continue;
+      d.open = true;
+      d.querySelector<HTMLElement>(`[data-pkc-field="${item}"]`)!.click();
+      // 🔑 閉じるのは次のイベント(同じ押しで開くメニューが押した項目の位置を読むため)
+      expect(d.open, `${menu}: 押した瞬間に閉じた(位置が読めなくなる)`).toBe(true);
+      await new Promise((r) => setTimeout(r, 5));
+      expect(d.open, `${menu}: 押したのに開いたまま`).toBe(false);
+    }
+  });
+
+  it('🔴 スキーマを再読み込みするボタン: 表を作った / 本文が変わった後の木が更新される(自動では採り直さない対照つき)', async () => {
+    let tables = [['table', '売上', 0, 'id', 'INTEGER', 1, 1]] as Array<Array<string | number | null>>;
+    const { pane, schemaRead } = setup(async (sql) => {
+      if (sql.includes('pragma_table_info'))
+        return answer(['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'], tables);
+      if (sql.includes('pragma_foreign_key_list')) return answer(['tbl', 'ref', 'col', 'refcol'], []);
+      if (sql.includes('csv_columns')) return answer(['tbl', 'cid', 'col', 'n'], []);
+      if (sql.includes('count(*)')) return answer(['tbl', 'n'], []);
+      return answer(['a'], [[1]]);
+    });
+    await settleTree();
+    expect(treeTables(pane)).toEqual(['売上']);
+    const before = schemaRead.mock.calls.length;
+    // 表が増えても、読み直すまでは木は変わらない(自動では採り直さない)
+    tables = [...tables, ['table', '客', 0, 'id', 'INTEGER', 1, 1]];
+    await settleTree();
+    expect(treeTables(pane), '勝手に再読み込みている').toEqual(['売上']);
+    const btn = pane.querySelector<HTMLButtonElement>('[data-pkc-action="sql-schema-reload"]')!;
+    expect(btn.getAttribute('aria-label')).toBe('スキーマを再読み込みする');
+    btn.click();
+    await settleTree();
+    expect(schemaRead.mock.calls.length, '押しても採りに行かない').toBeGreaterThan(before);
+    expect(treeTables(pane).sort(), '再読み込みしても新しい表が出ない').toEqual(['売上', '客'].sort());
+  });
+
+  it('🔴 スキーマの再読み込みは、DuckDB の相手でも押せば採る(選んだだけでは採らない規律とは別)', async () => {
+    const { pane, pick, schemaDuckDb } = setup(reply);
+    await settleTree();
+    pick('db7');
+    await settleTree();
+    expect(schemaDuckDb).toHaveBeenCalledTimes(0);
+    pane.querySelector<HTMLButtonElement>('[data-pkc-action="sql-schema-reload"]')!.click();
+    await settleTree();
+    expect(schemaDuckDb, '押したのに DuckDB の器へ採りに行かない').toHaveBeenCalledTimes(1);
+    expect(treeTables(pane).sort()).toEqual(['客', '売上'].sort());
   });
 });

@@ -18620,6 +18620,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (from === '' || to === '') return;
     dispatcher.dispatch({ type: 'SQL_ER_UNLINK', link: { from, fromColumn, to, toColumn } });
   },
+  /** 🔴 左のスキーマの木を読み直す(#1442 段②)。 */
+  'sql-schema-reload': (dispatcher) => {
+    dispatcher.dispatch({ type: 'SQL_SCHEMA_RELOAD' });
+  },
   'sql-schema-to-note': (dispatcher) => {
     const state = dispatcher.getState();
     if (state.sqlPage.running) return;

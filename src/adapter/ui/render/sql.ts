@@ -391,34 +391,47 @@ export class SqlRenderer {
      * ⚠ **主の操作(実行)は 1 つだけ**。副次(構造をノートへ)は「その他 ▾」の 1 段奥(常用は出す・副次は奥)。
      * ⚠ `data-pkc-*` の名前も押した先も変えない ── 並びと字だけを動かす。
      */
-    const more = document.createElement('details');
-    more.setAttribute('data-pkc-field', 'sql-more');
-    const moreSummary = document.createElement('summary');
-    moreSummary.textContent = 'その他';
-    moreSummary.title = '構造をノートへ書き出す など';
-    const moreList = document.createElement('div');
-    moreList.setAttribute('data-pkc-field', 'sql-more-list');
-    moreList.setAttribute('role', 'group');
-    moreList.append(schema);
-    more.append(moreSummary, moreList);
-    // 押したら閉じる / 外を押したら閉じる / Esc で閉じる(その他 ▾ の作法)
-    more.addEventListener('click', (ev) => {
-      if (ev.target instanceof Element && ev.target.closest('button') !== null) more.open = false;
-    });
-    more.ownerDocument.addEventListener('pointerdown', (ev) => {
-      if (more.open && ev.target instanceof Node && !more.contains(ev.target)) more.open = false;
-    });
-    more.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Escape' && more.open) {
-        ev.stopPropagation();
-        more.open = false;
-        moreSummary.focus();
-      }
-    });
+    /**
+     * 🔴 **「書き出す ▾」と「その他 ▾」**(#1442 段②)。1 段奥のメニューを作る 1 本の関数(判定を 2 か所に書かない)。
+     * ⚠ 押したら閉じる ── ただし**次のイベントで**閉じる(`setTimeout 0`)。同じ押しで開くメニュー(ファイルへ書き出す = 形の一覧)が
+     *   押した項目の位置を読むので、先に閉じると位置が 0 になる。⚠ 外を押す / `Esc` でも閉じる。
+     */
+    const makeMenu = (field: string, label: string, hint: string, items: HTMLElement[]): HTMLDetailsElement => {
+      const d = document.createElement('details');
+      d.setAttribute('data-pkc-field', field);
+      const sum = document.createElement('summary');
+      sum.textContent = label;
+      sum.title = hint;
+      const list = document.createElement('div');
+      list.setAttribute('data-pkc-field', 'sql-menu-list');
+      list.setAttribute('role', 'group');
+      list.append(...items);
+      d.append(sum, list);
+      d.addEventListener('click', (ev) => {
+        if (ev.target instanceof Element && ev.target.closest('button') !== null) {
+          setTimeout(() => {
+            d.open = false;
+          }, 0);
+        }
+      });
+      d.ownerDocument.addEventListener('pointerdown', (ev) => {
+        if (d.open && ev.target instanceof Node && !d.contains(ev.target)) d.open = false;
+      });
+      d.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && d.open) {
+          ev.stopPropagation();
+          d.open = false;
+          sum.focus();
+        }
+      });
+      return d;
+    };
+    const out = makeMenu('sql-out', '書き出す', 'ノートへ書き出す / ファイルへ書き出す', [save, toFile]);
+    const more = makeMenu('sql-more', 'その他', '構造をノートへ書き出す など', [schema]);
     const spacer = document.createElement('span');
     spacer.setAttribute('data-pkc-field', 'sql-bar-spacer');
     spacer.setAttribute('aria-hidden', 'true');
-    bar.append(source, engine, run, spacer, history, save, toFile, more, fileInput);
+    bar.append(source, engine, run, spacer, history, out, more, fileInput);
     /**
      * 🔴 **足した相手を並べる行**(#918 段⑦)。各行に **×**(外す)── 片道にしない。
      * ⚠ 足していなければ `hidden`(中身は `paintExtras` が組む)。
@@ -564,7 +577,10 @@ export class SqlRenderer {
      * ⚠ 欄は**1 度だけ組む**(`ensureFrame`)── タブを替えても打ちかけを失わない。
      */
     const layout = appSqlLayout.get();
-    const tree = createSqlTree({ onInsert: (text, kind) => this.insertIntoEditor(text, kind) });
+    const tree = createSqlTree({
+      onInsert: (text, kind) => this.insertIntoEditor(text, kind),
+      onClose: () => this.setTreeOpen(false, true),
+    });
     const shell = document.createElement('div');
     shell.setAttribute('data-pkc-field', 'sql-shell');
     const main = document.createElement('div');
@@ -573,8 +589,8 @@ export class SqlRenderer {
     const treeToggle = document.createElement('button');
     treeToggle.type = 'button';
     treeToggle.setAttribute('data-pkc-field', 'sql-tree-toggle');
-    treeToggle.textContent = 'スキーマ';
-    treeToggle.title = '左のスキーマ(表と列の木)を出し入れします';
+    treeToggle.textContent = 'スキーマを開く';
+    treeToggle.title = '左のスキーマ(表と列の木)を開きます';
     treeToggle.setAttribute('aria-controls', 'sql-tree-region');
     markVariant(treeToggle, 'ghost');
     tree.el.id = 'sql-tree-region';
@@ -656,8 +672,9 @@ export class SqlRenderer {
     this.split = layout.split === null ? SQL_SPLIT_DEFAULT : clampSqlSplit(layout.split);
     this.applySplit(this.split);
     this.setTreeOpen(treeOpenInitially(layout.tree, this.host.clientWidth || window.innerWidth), false);
+    // ⚠ 開いている間はこのボタンを隠す(タブと並ぶと「スキーマ」というタブに見える)。閉じる側は木の見出しの ×
     treeToggle.addEventListener('click', () => {
-      this.setTreeOpen(shell.getAttribute('data-pkc-tree') !== 'open', true);
+      this.setTreeOpen(true, true);
     });
     this.installSplitter(splitter, queryPanel);
     this.box = box;
@@ -737,6 +754,7 @@ export class SqlRenderer {
   private setTreeOpen(open: boolean, remember: boolean): void {
     this.shell?.setAttribute('data-pkc-tree', open ? 'open' : 'closed');
     this.treeToggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (this.treeToggle !== null) this.treeToggle.hidden = open;
     if (remember) appSqlLayout.setTree(open);
   }
 

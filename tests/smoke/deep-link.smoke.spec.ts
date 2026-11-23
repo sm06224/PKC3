@@ -675,6 +675,7 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
    * ⚠ unit(happy-dom)では**本文が disk へ渡ったか**までしか見られない ──
    *   ここで見るのは**実物の worker と実物の sqlite を通って、左の一覧に出るか**である。
    */
+  await clickReal(page, '[data-pkc-field="sql-out"] > summary'); // 🔑 #1442 段②: 「書き出す ▾」の中
   await clickReal(page, '[data-pkc-field="sql-to-note"]');
   await expect(
     sql.locator('[data-pkc-field="sql-note"]'),
@@ -708,6 +709,7 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   await expect(sql.locator('[data-pkc-field="sql-table"] tbody td:not([data-pkc-field="sql-rownum"])'), '2 回目の答えが返らない').toHaveText('1', {
     timeout: 10_000,
   });
+  await clickReal(page, '[data-pkc-field="sql-out"] > summary'); // 🔑 #1442 段②: 「書き出す ▾」の中
   await clickReal(page, '[data-pkc-field="sql-to-note"]');
   await expect(sql.locator('[data-pkc-field="sql-note"]'), 'フォルダの中での書き出しが言われない').toContainText(
     '書き出しました',

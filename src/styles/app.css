@@ -7394,9 +7394,14 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   clip-path: inset(50%);
   white-space: nowrap;
 }
-[data-pkc-field='sql-tree-toggle'][aria-expanded='true'] {
-  font-weight: 600;
-  box-shadow: inset 0 -2px 0 currentcolor;
+[data-pkc-field='sql-tree-toggle'][hidden] {
+  display: none;
+}
+[data-pkc-field='sql-tree-reload'],
+[data-pkc-field='sql-tree-close'] {
+  flex: none;
+  padding: 0 var(--s2);
+  min-width: var(--row-h);
 }
 [data-pkc-field='sql-tabs'] {
   display: flex;
@@ -7499,10 +7504,12 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   content: '\25b6';
   font-size: 0.8em;
 }
-[data-pkc-field='sql-more'] {
+[data-pkc-field='sql-more'],
+[data-pkc-field='sql-out'] {
   position: relative;
 }
-[data-pkc-field='sql-more'] > summary {
+[data-pkc-field='sql-more'] > summary,
+[data-pkc-field='sql-out'] > summary {
   list-style: none;
   display: inline-flex;
   align-items: center;
@@ -7515,20 +7522,24 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   cursor: pointer;
   user-select: none;
 }
-[data-pkc-field='sql-more'] > summary::-webkit-details-marker {
+[data-pkc-field='sql-more'] > summary::-webkit-details-marker,
+[data-pkc-field='sql-out'] > summary::-webkit-details-marker {
   display: none;
 }
-[data-pkc-field='sql-more'] > summary::after {
+[data-pkc-field='sql-more'] > summary::after,
+[data-pkc-field='sql-out'] > summary::after {
   content: '\25be';
 }
-[data-pkc-field='sql-more'] > summary:hover {
+[data-pkc-field='sql-more'] > summary:hover,
+[data-pkc-field='sql-out'] > summary:hover {
   background: color-mix(in srgb, var(--fg) 12%, transparent);
 }
-[data-pkc-field='sql-more'] > summary:focus-visible {
+[data-pkc-field='sql-more'] > summary:focus-visible,
+[data-pkc-field='sql-out'] > summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-[data-pkc-field='sql-more-list'] {
+[data-pkc-field='sql-menu-list'] {
   position: absolute;
   right: 0;
   top: calc(100% + 2px);
@@ -7542,12 +7553,12 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
 }
-[data-pkc-field='sql-more-list'] button {
+[data-pkc-field='sql-menu-list'] button {
   justify-content: flex-start;
   background: transparent;
   border-color: transparent;
 }
-[data-pkc-field='sql-more-list'] button:hover:not(:disabled) {
+[data-pkc-field='sql-menu-list'] button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--fg) 8%, transparent);
 }
 /* 使い方と例は 1 段奥(開くと欄の下に出る。出すぎるなら中で転がる) */
@@ -7590,6 +7601,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   font-weight: 600;
 }
 [data-pkc-field='sql-tree-source'] {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7837,6 +7849,9 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  *   幅に上限を置けば、デスクトップでは今までどおり横に並び、狭い画面でだけ折り返す。
  */
 [data-pkc-field='sql-bar'] select {
+  /* 🔴 1 行に収める(#1442 段②)── 選び所は縮められる(幅が足りなければ「…」で切る)。広いときは 14em まで */
+  flex: 0 1 14em;
+  min-width: 6em;
   max-width: min(14em, 100%);
   text-overflow: ellipsis;
 }

@@ -23,6 +23,7 @@
  */
 import type { SqlPageState } from '@adapter/state/app-state';
 import { schemaKindLabel, type SchemaModel, type SchemaTable } from '@features/query/schema-digest';
+import { markVariant } from './icons';
 import { selectFromTableSql, treeNameText } from '@features/query/sql-layout';
 
 /** 表の 1 回押しがダブルクリックを待つ時間(ms)。 */
@@ -31,6 +32,8 @@ export const SQL_TREE_DBLCLICK_MS = 260;
 export interface SqlTreeHooks {
   /** 欄へ字を入れる。`kind` は入れる字の前に足す空白・改行の決め方(`insertionWithSpacing`)。 */
   readonly onInsert: (text: string, kind: 'name' | 'statement') => void;
+  /** 木を閉じる(`×`)。開き直すのは上のバーの「スキーマを開く」。 */
+  readonly onClose: () => void;
 }
 
 export interface SqlTreeView {
@@ -77,7 +80,23 @@ export function createSqlTree(hooks: SqlTreeHooks): SqlTreeHandle {
   const head = el('div', 'sql-tree-head');
   const title = el('span', 'sql-tree-title', 'スキーマ');
   const source = el('span', 'sql-tree-source');
-  head.append(title, source);
+  /**
+   * 🔴 **再読み込み(↻)と閉じる(×)**(#1442 段②)。再読み込みは `data-pkc-action="sql-schema-reload"`(binder が `SQL_SCHEMA_RELOAD` を撃つ)。
+   *   自動で採るのは画面を開いたとき・相手を変えたとき・DuckDB で書いたあとだけなので、**表を作った / 本文の csv を直した直後**は手で再読み込みする。
+   */
+  const reload = el('button', 'sql-tree-reload', '↻');
+  reload.type = 'button';
+  reload.setAttribute('data-pkc-action', 'sql-schema-reload');
+  reload.setAttribute('aria-label', 'スキーマを再読み込みする');
+  reload.title = 'スキーマを再読み込みする(表を作った・本文の csv を直したあとに押します)';
+  markVariant(reload, 'ghost');
+  const closeBtn = el('button', 'sql-tree-close', '×');
+  closeBtn.type = 'button';
+  closeBtn.setAttribute('aria-label', 'スキーマを閉じる');
+  closeBtn.title = 'スキーマを閉じます(上のバーの「スキーマを開く」で戻せます)';
+  markVariant(closeBtn, 'ghost');
+  closeBtn.addEventListener('click', () => hooks.onClose());
+  head.append(title, source, reload, closeBtn);
 
   const filter = el('input', 'sql-tree-filter');
   filter.type = 'search';

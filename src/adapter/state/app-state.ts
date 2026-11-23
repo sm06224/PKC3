@@ -2714,6 +2714,11 @@ export type UserAction =
    */
   | { type: 'SQL_SCHEMA_TO_NOTE'; lid: string; relationId: string; parentLid?: string | null }
   /**
+   * 🔴 **左のスキーマの木を、手で読み直す**(#1442 段②)。自動で採るのは画面を開いたとき・相手を変えたとき・DuckDB で書いたあとだけなので、
+   *   表を作った / 本文の csv を直した直後の読み直しに使う。⚠ DuckDB の器の相手も**明示の押しなので採る**(選んだだけでは採らない規律とは別)。
+   */
+  | { type: 'SQL_SCHEMA_RELOAD' }
+  /**
    * 🔴 **つながり図を開く / 閉じる**(#918 段⑤。裁定 2026-09-15 = この窓の中)。
    * ⚠ 開いたとき構造をまだ採っていなければ、採ってくるよう頼む。
    */
@@ -5552,6 +5557,7 @@ export function reduceCore(
     case 'SQL_HISTORY_PICK':
     case 'SQL_EXPORT_PARQUET':
     case 'SQL_SCHEMA_TO_NOTE':
+    case 'SQL_SCHEMA_RELOAD':
     case 'SQL_ER_TOGGLE':
     case 'SQL_ER_CONNECT_TOGGLE':
     case 'SQL_ER_PICK':

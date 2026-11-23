@@ -10,7 +10,7 @@
  * ⚠ 新しい起動は増やさない(#820)── 1 つの test の道中に足す。別ウィンドウは同じ context の 2 つ目の page。
  */
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { gotoApp, clickReal, collectPageErrors, openBrowse, openTile } from './helpers';
+import { gotoApp, clickReal, collectPageErrors, openBrowse, openTile, useSplitEditor, createEntry, writesLanded } from './helpers';
 
 const heightOf = async (l: Locator): Promise<number> => (await l.boundingBox())!.height;
 
@@ -123,6 +123,19 @@ test('🔴 SQL 画面: 左の木が自動で並び、押す・ダブルクリッ
     (await heightOf(page.locator('[data-pkc-field="sql-editor"]'))) / (await heightOf(page.locator('[data-pkc-field="sql-query-panel"]')));
   expect(Math.abs((await ratio()) - Number(draggedSplit) / 100), '開き直したら欄の高さの割合が憶えた値でない').toBeLessThan(0.06);
 
+  // ── 工具は 1 行(1440 の全ペイン表示でも折り返さない)/ 書き出す ▾ の中に 2 つ
+  const bar = pane.locator('[data-pkc-field="sql-bar"]');
+  const rowH = await page.evaluate(() => {
+    const bar = document.querySelector('[data-pkc-field="sql-bar"]')!;
+    const run = document.querySelector('[data-pkc-field="sql-run"]') as HTMLElement;
+    return { bar: bar.getBoundingClientRect().height, run: run.getBoundingClientRect().height };
+  });
+  expect(rowH.bar, `工具が 2 行に折り返している(${JSON.stringify(rowH)})`).toBeLessThan(rowH.run * 1.5);
+  await clickReal(page, bar.locator('[data-pkc-field="sql-out"] > summary'));
+  await expect(bar.locator('[data-pkc-field="sql-out"] button'), '書き出す ▾ の中が 2 つでない').toHaveText(['ノートへ書き出す', 'ファイルへ書き出す']);
+  await page.keyboard.press('Escape');
+  await expect(bar.locator('[data-pkc-field="sql-out"]')).not.toHaveAttribute('open', /.*/);
+
   // ── ER 図はタブで切り替わる(クエリの面は隠れ、欄の中身は残る)
   await input.fill('select 1 as keep');
   const erTab = pane.locator('[data-pkc-field="sql-er-toggle"]');
@@ -145,13 +158,15 @@ test('🔴 SQL 画面: 左の木が自動で並び、押す・ダブルクリッ
   await page.keyboard.press('ArrowLeft');
   await expect(pane.locator('[data-pkc-region="sql-er"]')).toBeHidden();
 
-  // ── 木の出し入れ(憶える)
+  // ── 木の出し入れ(憶える)。閉じるは木の見出しの ×、開くは上のバーの「スキーマを開く」(開いている間は出ない)
   const toggle = pane.locator('[data-pkc-field="sql-tree-toggle"]');
-  await clickReal(page, toggle);
-  await expect(tree, '木が畳まれない').toBeHidden();
+  await expect(toggle, '開いているのに「スキーマを開く」が出ている(タブに見える)').toBeHidden();
+  await expect(pane.locator('[data-pkc-field="sql-tabs"] [role="tab"]'), 'タブは クエリ / ER 図 の 2 つだけ').toHaveText(['クエリ', 'ER 図']);
+  await clickReal(page, tree.locator('[data-pkc-field="sql-tree-close"]'));
+  await expect(tree, '木が閉じない').toBeHidden();
   expect(await page.evaluate(() => localStorage.getItem('pkc3.sql-layout'))).toMatch(/^0:/);
   const wide = (await input.boundingBox())!.width;
-  expect(wide, '木を畳んだら欄が広がる').toBeGreaterThan(inputBox.width + 100);
+  expect(wide, '木を閉じたら欄が広がる').toBeGreaterThan(inputBox.width + 100);
   await clickReal(page, toggle);
   await expect(tree, '木が戻らない').toBeVisible();
 
@@ -199,9 +214,51 @@ test('🔴 SQL 画面(別ウィンドウ 1100×800): 木が自動で並び、結
   await input.fill('SELECT lid, title FROM entries LIMIT 5');
   await clickReal(popup, '[data-pkc-action="run-sql"]');
   await expect(pane.locator('[data-pkc-field="sql-table"]'), '窓で結果が出ない').toBeVisible({ timeout: 30_000 });
+  // 窓(1100×800)でも工具は 1 行
+  const rowH = await popup.evaluate(() => ({
+    bar: document.querySelector('[data-pkc-field="sql-bar"]')!.getBoundingClientRect().height,
+    run: (document.querySelector('[data-pkc-field="sql-run"]') as HTMLElement).getBoundingClientRect().height,
+  }));
+  expect(rowH.bar, `窓で工具が 2 行に折り返している(${JSON.stringify(rowH)})`).toBeLessThan(rowH.run * 1.5);
   const before = await heightOf(input);
   await dragSplitter(popup, 100);
   expect(await heightOf(input), '窓で境目が動かない').toBeGreaterThan(before + 50);
+  await popup.close();
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 スキーマを再読み込みする(↻): 窓を開いたあとに本文へ書いた csv の表が、押すと木に出る (#1442 段②)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await useSplitEditor(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await openBrowse(page, 'launcher');
+  const opened = page.context().waitForEvent('page', { timeout: 20_000 });
+  await openTile(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:sql"]');
+  const popup = await opened;
+  await popup.setViewportSize({ width: 1100, height: 800 });
+  const pane = popup.locator('[data-pkc-view-pane="sql"]');
+  const tree = pane.locator('[data-pkc-region="sql-tree"]');
+  await expect(tree.locator('[data-pkc-field="sql-tree-table"][data-pkc-name="entries"]')).toHaveCount(1, { timeout: 30_000 });
+  const tana = tree.locator('[data-pkc-field="sql-tree-table"][data-pkc-name="棚卸"]');
+  await expect(tana, '前提: まだ表が無い').toHaveCount(0);
+
+  // 本体で、名前つきの csv を本文に書いたノートを作る
+  await page.bringToFront();
+  await openBrowse(page, 'filer');
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await expect(ta).toBeVisible();
+  await ta.click();
+  await page.keyboard.type('```csv name=棚卸\n品名,数\nりんご,3\n```\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await writesLanded(page);
+
+  // 勝手には読み直さない(対照群)→ ↻ を押すと出る
+  await popup.bringToFront();
+  await expect(tana, '押す前に勝手に採り直している').toHaveCount(0);
+  await clickReal(popup, tree.locator('[data-pkc-action="sql-schema-reload"]'));
+  await expect(tana, '↻ を押しても新しい表が木に出ない').toHaveCount(1, { timeout: 15_000 });
   await popup.close();
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
