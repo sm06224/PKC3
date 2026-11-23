@@ -9634,6 +9634,30 @@ mark[data-pkc-diff-char='del'] {
   border-radius: var(--radius);
   box-sizing: border-box;
 }
+/* 🔴 空きを押すとパスを打つ入力になる(#1982 A4)。枠は入力欄になるので、焦点は枠の線をアクセントにして示す */
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-path'] {
+  cursor: text;
+}
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-path']:focus-visible,
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-path'][data-pkc-editing] {
+  border-color: var(--accent);
+  outline: none;
+}
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-path'][data-pkc-editing] {
+  flex: 1 1 24em;
+}
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-input'] {
+  flex: 1 1 auto;
+  min-width: 12em;
+  width: 100%;
+  height: calc(var(--row-h) - 4px);
+  padding: 0 var(--s1);
+  background: transparent;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  color: var(--fg);
+}
 [data-pkc-region='filer-breadcrumb'] [data-pkc-field='crumb-seg'] {
   height: calc(var(--row-h) - 6px);
   min-height: 0;
