@@ -150,27 +150,25 @@ describe('説明の切替(#950 ①)', () => {
   });
 
   it('🔑 状態が変わったときだけ書く(同じ状態の selectionchange では 1 度も title を書かない)', () => {
-    const { region, bar, ta } = surface();
+    const { region, ta } = surface();
     const un = watchWrapHint(region);
     const writes: string[] = [];
-    // title の setter を数える(happy-dom の prototype 側を包む)
-    // `title` は祖先の prototype に居る(HTMLElement)── 持ち主まで遡る
-    let proto = Object.getPrototypeOf(wrapButtons(bar)[0]!) as object;
-    while (proto !== null && Object.getOwnPropertyDescriptor(proto, 'title') === undefined)
-      proto = Object.getPrototypeOf(proto) as object;
-    const desc = Object.getOwnPropertyDescriptor(proto, 'title');
-    // 空振り防止 ── setter が拾えなければ「書いていない」は自明に通る
-    expect(desc?.set, 'title の setter が拾えない').toBeTypeOf('function');
-    Object.defineProperty(proto, 'title', {
-      configurable: true,
-      get() {
-        return desc!.get!.call(this);
-      },
-      set(v: string) {
-        writes.push(v);
-        desc!.set!.call(this, v);
-      },
+    // title への書き込みを数える。⚠ 書く口は `setTipTitle`(退避中も効く)で、退避していなければ
+    //   `setAttribute('title', …)` を呼ぶ ── 属性の書き込みを包む(元の実装を呼び抜けさせる)
+    const orig = Element.prototype.setAttribute;
+    const spy = vi.spyOn(Element.prototype, 'setAttribute').mockImplementation(function (
+      this: Element,
+      name: string,
+      value: string,
+    ) {
+      if (name === 'title') writes.push(value);
+      orig.call(this, name, value);
     });
+    // 空振り防止 ── 包みが効いていなければ「書いていない」は自明に通る
+    const probe = document.createElement('i');
+    probe.setAttribute('title', 'x');
+    expect(writes, '包みが title の書き込みを拾えない').toEqual(['x']);
+    writes.length = 0;
     try {
       selectionChanged(); // 選んでいない → 選んでいない
       selectionChanged();
@@ -186,7 +184,7 @@ describe('説明の切替(#950 ①)', () => {
       selectionChanged();
       expect(writes.length, '戻すとき 4 つ書いていない').toBe(8);
     } finally {
-      Object.defineProperty(proto, 'title', desc!);
+      spy.mockRestore();
       un();
     }
   });

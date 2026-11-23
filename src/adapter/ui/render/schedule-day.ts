@@ -37,6 +37,7 @@ import {
 import { holidayName } from '@features/schedule/jp-holidays';
 import { addDays } from '@features/datetime/date-math';
 import { createTaskCard, patchItemColor, patchTaskCard, placeCardInGrid } from './task-card';
+import { setTipTitle } from './tooltip';
 
 export interface DayPaint {
   /** 見る日(`YYYY-MM-DD`)。 */
@@ -162,14 +163,14 @@ export class ScheduleDay {
     const holiday = holidayName(p.day);
     if (holiday !== null) {
       this.label.setAttribute('data-pkc-holiday', '');
-      this.label.title = holiday;
+      setTipTitle(this.label, holiday);
       if (this.holidayText.textContent !== holiday) this.holidayText.textContent = holiday;
       this.holidayText.hidden = false;
     } else {
       this.holidayText.textContent = '';
       this.holidayText.hidden = true;
       this.label.removeAttribute('data-pkc-holiday');
-      this.label.removeAttribute('title');
+      setTipTitle(this.label, null);
     }
     // 🔑 行き先が今日なら空(= 今日に追従する状態へ戻す)── 実日付を入れると、日付をまたいで開いたままにしたとき
     //   昨日が出たままになる(着地前レビュー)

@@ -30,6 +30,7 @@
  * ⚠ **title は user が付けたものを潰さない** ── 空のときだけ書き、消すのも自分の字のときだけ。
  */
 import { parseLinkTarget } from '@features/entry-ref/link-target';
+import { getTipTitle, setTipTitle } from './tooltip';
 
 /** 押す前に出す言葉(`ui-terms` の使わない語を含まない)。 */
 export const MISSING_LINK_TITLE = 'このノートは見つかりません(ゴミ箱にあれば戻せます。ゴミ箱は左のペインの「フォルダ」の中です)';
@@ -56,11 +57,11 @@ export function applyMissingLinks(
     const missing = t.kind === 'entry' && !t.foreign && !has(t.lid);
     if (missing) {
       if (!el.hasAttribute(MISSING_ATTR)) el.setAttribute(MISSING_ATTR, '');
-      const cur = el.getAttribute('title');
-      if (cur === null || cur.trim() === '') el.setAttribute('title', MISSING_LINK_TITLE);
+      const cur = getTipTitle(el);
+      if (cur.trim() === '') setTipTitle(el, MISSING_LINK_TITLE);
     } else if (el.hasAttribute(MISSING_ATTR)) {
       el.removeAttribute(MISSING_ATTR);
-      if (el.getAttribute('title') === MISSING_LINK_TITLE) el.removeAttribute('title');
+      if (getTipTitle(el) === MISSING_LINK_TITLE) setTipTitle(el, null);
     }
   }
 }

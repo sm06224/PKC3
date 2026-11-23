@@ -39,6 +39,7 @@ import {
 } from '@features/schedule/day-layout';
 import { holidayName } from '@features/schedule/jp-holidays';
 import { createTaskCard, patchItemColor, patchTaskCard, placeCardInGrid } from './task-card';
+import { setTipTitle } from './tooltip';
 
 export interface WeekPaint {
   /** 見せる 7 日(`YYYY-MM-DD`。日曜始まり)。 */
@@ -227,14 +228,14 @@ export class ScheduleWeek {
       const holiday = holidayName(day);
       if (holiday !== null) {
         col.head.setAttribute('data-pkc-holiday', '');
-        col.head.title = holiday;
+        setTipTitle(col.head, holiday);
         if (col.holiday.textContent !== holiday) col.holiday.textContent = holiday;
         col.holiday.hidden = false;
       } else {
         col.holiday.textContent = '';
         col.holiday.hidden = true;
         col.head.removeAttribute('data-pkc-holiday');
-        col.head.removeAttribute('title');
+        setTipTitle(col.head, null);
       }
 
       const cardOf = (item: AgendaItem): HTMLElement => {
