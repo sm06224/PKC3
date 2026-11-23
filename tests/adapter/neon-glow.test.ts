@@ -431,9 +431,18 @@ describe('CSS(原文)', () => {
       expect(rules.length, `${pseudo} の規則が無い`).toBe(1);
       const d = rules[0]![2]!;
       expect(d, `${pseudo}: 飾りが押し所を奪う`).toMatch(/pointer-events:\s*none/);
-      expect(d, `${pseudo}: 内側を抜いていない(地が光る)`).toMatch(/mask-composite:\s*exclude/);
-      expect(d, `${pseudo}: webkit の対応が無い`).toMatch(/-webkit-mask-composite:\s*xor/);
-      expect(d, `${pseudo}: 局所座標でない`).toMatch(/at calc\(var\(--gx|at var\(--gx/);
+      if (pseudo === '::before') {
+        expect(d, `${pseudo}: 内側を抜いていない(地が光る)`).toMatch(/mask-composite:\s*exclude/);
+        expect(d, `${pseudo}: webkit の対応が無い`).toMatch(/-webkit-mask-composite:\s*xor/);
+        expect(d, `${pseudo}: 局所座標でない`).toMatch(/at calc\(var\(--gx|at var\(--gx/);
+      } else {
+        // にじみ: 線の外縁に接した影(滑らかな減衰)を、局所座標の放射状マスクで近い所だけにする。平らな帯(background)にしない
+        expect(d, `${pseudo}: にじみが影でない(平らな帯だと線から浮いて二重線に見える)`).toMatch(/box-shadow:\s*0 0 \d+px/);
+        expect(d, `${pseudo}: 近い所だけにするマスクが局所座標でない`).toMatch(/mask-image:\s*radial-gradient\(circle var\(--neon-r\) at calc\(var\(--gx/);
+        expect(d, `${pseudo}: 箱の外の影を残さない`).toMatch(/mask-clip:\s*no-clip/);
+        expect(d, `${pseudo}: 枠の無い辺へ出る`).toMatch(/clip-path:\s*inset\(/);
+        expect(d, `${pseudo}: 背景の帯になっている`).not.toMatch(/(^|;)\s*background:/);
+      }
     }
     // 画面 + 強制色なしの外(印刷・強制色)には、光の規則が 1 つも無い(塊は 2 つ: 疑似要素の輪郭 / 横スクロールの器の背景)
     let outside = css;
