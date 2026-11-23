@@ -144,7 +144,8 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # ⚠ deploy-pages 自身の待ち(約 10 分)より長く ── 先に job が切られると action の報告が出ない
+    timeout-minutes: 15
     permissions:
       pages: write
       id-token: write

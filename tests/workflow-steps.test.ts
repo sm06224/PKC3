@@ -1745,23 +1745,6 @@ describe('#400 段④ ── 雛形を置く順番', () => {
     expect(code.split('check-dist.mjs product').length - 1).toBe(1);
   });
 
-  /**
-   * 🔴 **雛形が焼けなくても、アプリ本体の配信は止めない**(#1014)。
-   *
-   * ⚠ 2026-09-18 にここで踏んだ:`build/portable/fold.mjs` が上流(vite 8.3.0 が
-   *   内包する Rolldown)のコード生成の変化に当たらなくなり、雛形の step が落ちた
-   *   ── その結果 `configure-pages` / `upload-pages-artifact` / **`deploy-pages`** が
-   *   **3 つとも skip** され、**`/dev/` が 2 日間更新されなかった**(Build dev は緑)。
-   *
-   * 🔑 雛形は**アプリの一部ではない**(押したときだけ取りに行く別の成果物)。
-   *   無ければアプリが画面で「雛形を取れませんでした」と言うので、**無言で壊れない**。
-   * ⚠ だが**黙って配るのも不可**である ── 配ったうえで **job は赤**にする。
-   *   赤が消えると「雛形がいつの間にか焼けていない」を誰も知らない
-   *   (CLAUDE.md「赤が届く先を作る」── Nightly が 13 晩赤かった件と同じ型)。
-   *
-   * ⚠ **見るのは実行する行**である ── 注釈には `continue-on-error` も `#1014` も
-   *   書いてあるので、コメントごと数えると**外しても緑**になる(§1 の 5 度目)。
-   */
   /** pages.yml を「jobs: より前」と job ごとの本文(コメント行を剥がしたもの)に切り分ける */
   function pagesJobs(): { top: string; build: string; deploy: string } & Record<string, string> {
     const code = readFileSync(join(DIR, 'pages.yml'), 'utf-8')
@@ -1784,6 +1767,23 @@ describe('#400 段④ ── 雛形を置く順番', () => {
     return jobs;
   }
 
+  /**
+   * 🔴 **雛形が焼けなくても、アプリ本体の配信は止めない**(#1014)。
+   *
+   * ⚠ 2026-09-18 にここで踏んだ:`build/portable/fold.mjs` が上流(vite 8.3.0 が
+   *   内包する Rolldown)のコード生成の変化に当たらなくなり、雛形の step が落ちた
+   *   ── その結果 `configure-pages` / `upload-pages-artifact` / **`deploy-pages`** が
+   *   **3 つとも skip** され、**`/dev/` が 2 日間更新されなかった**(Build dev は緑)。
+   *
+   * 🔑 雛形は**アプリの一部ではない**(押したときだけ取りに行く別の成果物)。
+   *   無ければアプリが画面で「雛形を取れませんでした」と言うので、**無言で壊れない**。
+   * ⚠ だが**黙って配るのも不可**である ── 配ったうえで **job は赤**にする。
+   *   赤が消えると「雛形がいつの間にか焼けていない」を誰も知らない
+   *   (CLAUDE.md「赤が届く先を作る」── Nightly が 13 晩赤かった件と同じ型)。
+   *
+   * ⚠ **見るのは実行する行**である ── 注釈には `continue-on-error` も `#1014` も
+   *   書いてあるので、コメントごと数えると**外しても緑**になる(§1 の 5 度目)。
+   */
   it('🔴 pages.yml: 雛形が落ちても配り、そのうえで job を赤にする(#1014)', () => {
     const raw = readFileSync(join(DIR, 'pages.yml'), 'utf-8');
     const code = raw
@@ -1808,8 +1808,9 @@ describe('#400 段④ ── 雛形を置く順番', () => {
     const jobs = pagesJobs();
     expect(jobs.build, 'build job が無い(空振り)').toBeTruthy();
     expect(jobs.deploy, 'deploy job が無い(空振り)').toBeTruthy();
+    // ⚠ `outputs:` の直下に在ること ── `env:` 等へ移ると needs.build.outputs.* は空で、ガードが永久に鳴らない
     expect(jobs.build, '🔴 build job が雛形の結果を outputs で渡していない').toMatch(
-      /^\s+portable_outcome: \$\{\{ steps\.portable\.outcome \}\}$/m,
+      /^ {4}outputs:\n(?: {6}.*\n)*? {6}portable_outcome: \$\{\{ steps\.portable\.outcome \}\}$/m,
     );
 
     // ③ 落ちたことを赤で残す step が deploy job に在る
@@ -1851,10 +1852,14 @@ describe('#400 段④ ── 雛形を置く順番', () => {
     expect(jobs.deploy, 'deploy に github-pages 環境が無い').toMatch(/name: github-pages/);
     expect(jobs.deploy, 'deploy に pages: write が無い').toMatch(/^\s+pages: write$/m);
     expect(jobs.deploy, 'deploy に id-token: write が無い').toMatch(/^\s+id-token: write$/m);
-    // 🔴 書き込み権は deploy job だけ ── build(npm ci で外部のコードを走らせる側)に持たせない
-    expect(jobs.build, '🔴 build job に pages / id-token の書込権がある').not.toMatch(
-      /^\s+(pages|id-token): write$/m,
-    );
+    // 🔴 deploy は build が落ちたら走らない ── job に `if:`(`always()` 等)を付けると失敗した build の後でも配る
+    expect(jobs.deploy, '🔴 deploy job に if: がある(build の失敗を素通りしうる)').not.toMatch(/^ {4}if:/m);
+    // 🔴 書き込み権は deploy job だけ ── build(npm ci で外部のコードを走らせる側)は完全一致で固定する
+    //    (`write-all` や flow 形式 `{ pages: write }` も、`pages: read` の削除も落とす)
+    const perm = /^ {4}permissions:(.*)\n((?: {6}.*\n)*)/m.exec(jobs.build);
+    expect(perm, 'build job に permissions が無い(workflow 全体の既定を継ぐ)').toBeTruthy();
+    expect(perm![1].trim(), '🔴 build の permissions がブロック形式でない').toBe('');
+    expect(perm![2].trim().split('\n').map((l) => l.trim()).sort()).toEqual(['contents: read', 'pages: read']);
     expect(jobs.top, '🔴 workflow 全体に pages / id-token の書込権がある').not.toMatch(
       /^\s+(pages|id-token): write$/m,
     );
