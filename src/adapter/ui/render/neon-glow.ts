@@ -20,10 +20,12 @@
  *   (汚す: 子の追加・削除 / 属性の変化 / ゾーンの大きさ / スクロール / ウィンドウの大きさ)。
  *   ⚠ 汚れたら**同期で測らず**、次のコマ(最後のポインタの位置で)で測り直す ── スクロールしてもポインタが止まっていれば、
  *   そのコマで光の位置が追いつく(光が置いていかれない)。
- * - ⚠ 自分の書き込み(`style` / 印)は観測器から除く(でないと毎コマ汚れて測り直しが続く)。
+ * - ⚠ 自分の書き込み(`style` / 印)の観測器の記録は、コマの終わりに `takeRecords()` で捨てる(でないと毎コマ汚れて測り直しが続く)。
+ *   捨てた後に届く記録は全部、他の変更として汚れにする(`style` だからと除かない)。
  * - ⚠ 変数は**光る側のカード 1 枚**にだけ書く(`:root` / ゾーンへ書くと全子孫の style を計算し直す ── 実測 40 秒 / 600 回)。
  *
- * 呼び手: `main.ts`(`installNeonGlow`)と、版面が入れ替わるたびに通る `rail.ts` の `paintRail`(`syncNeonPhone`)。
+ * 呼び手: `main.ts`(`installNeonGlow` と、描き直しの後の `revalidateNeonGlow`)と、版面が入れ替わるたびに通る
+ * `rail.ts` の `paintRail`(`syncNeonPhone`)。
  */
 import { createRectCache, mayGlow, nearCards, NEON_RADIUS, type CardRect } from '@features/neon/near-cards';
 
@@ -63,8 +65,8 @@ export interface NeonGlow {
   /** いまポインタがゾーンに入っていて、`pointermove` などを付けているか。 */
   inZone(): boolean;
   /**
-   * 描き直しでゾーンの要素が差し替わったかを、次のコマで確かめる(ポインタが止まっていても付け直す)。
-   * ゾーンの外にいるときは何もしない(仕事 0)。呼び手: `main.ts` の状態の通知(描き直しの後)。
+   * 描き直しでゾーンの要素が差し替わったか(切り離されたか)を同期で確かめ、そのときだけ次のコマで付け直す(ポインタが止まっていても)。
+   * ゾーンの外にいるとき・ゾーンが生きているときは何もしない(仕事 0)。呼び手: `main.ts` の状態の通知(描き直しの後)。
    */
   revalidate(): void;
   destroy(): void;
@@ -152,7 +154,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
       leave();
       return;
     }
-    // 🔴 自分の書き込みの記録は、コマの終わりに `takeRecords()` で捨てる(下)── だからここで受け取る記録は**全部、他の誰かの変更**
+    // 🔴 自分の書き込みの記録は、コマの終わりに `takeRecords()` で捨てる(下)── だから、まだ届いていない記録は**全部、他の誰かの変更**
     //    (子の増減・属性・`style` の変化)。⚠ 自分の書き込みを「`style` だから無視」で見分けると、外から `style` で大きさが変わっても見逃す
     if (mo !== null && mo.takeRecords().length > 0) cache.markDirty();
     // ゾーンが動いた / 大きさが変わった(上に別の塊が現れた・画像や字体の読み込みで伸びた)── 読んだ値を比べるだけ(コマの頭は描画の直後で、レイアウトは済んでいる)
@@ -297,6 +299,13 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     if (s !== undefined) enter(z, s, e);
   };
 
+  /** ポインタがウィンドウの外へ出た ── 最後の位置を忘れ、光を消す(古い座標で描き直しの後に光らせない)。 */
+  const onWindowLeave = (): void => {
+    leave();
+    px = 0;
+    py = 0;
+  };
+
   const allowed = (): boolean => {
     if (raf === undefined) return false;
     try {
@@ -309,9 +318,12 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     const want = allowed();
     if (want === on) return;
     on = want;
-    if (want) doc.addEventListener('pointerover', onOver, { passive: true });
-    else {
+    if (want) {
+      doc.addEventListener('pointerover', onOver, { passive: true });
+      doc.documentElement.addEventListener('pointerleave', onWindowLeave);
+    } else {
       doc.removeEventListener('pointerover', onOver);
+      doc.documentElement.removeEventListener('pointerleave', onWindowLeave);
       leave();
     }
   };
@@ -326,7 +338,8 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     listening: () => on,
     inZone: () => zone !== null,
     revalidate: () => {
-      if (zone === null) return;
+      // 同期で確かめ、差し替わった(切り離された)ときだけ次のコマを予約する ── 普通の状態の通知は rAF を 0 本
+      if (zone === null || zone.isConnected) return;
       revalidating = true;
       schedule();
     },
@@ -334,6 +347,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
       media?.removeEventListener?.('change', apply);
       on = false;
       doc.removeEventListener('pointerover', onOver);
+      doc.documentElement.removeEventListener('pointerleave', onWindowLeave);
       leave();
     },
   };
@@ -351,12 +365,12 @@ export function installNeonGlow(doc: Document): NeonGlow {
   return instance;
 }
 
-/** 版面がスマホ用画面か(`rail.ts` の `paintRail` が版面が入れ替わるたびに伝える)。起動前に呼ばれても覚えておく。 */
-/** 描き直しの後に呼ぶ(ゾーンが差し替わっていたら、次のコマで付け直す)。ゾーンの外にいるときの仕事は 0。 */
+/** 描き直しの後に呼ぶ(ゾーンが差し替わっていたら、次のコマで付け直す)。ゾーンの外にいる間・ゾーンが生きている間の仕事は 0。 */
 export function revalidateNeonGlow(): void {
   instance?.revalidate();
 }
 
+/** 版面がスマホ用画面か(`rail.ts` の `paintRail` が版面が入れ替わるたびに伝える)。起動前に呼ばれても覚えておく。 */
 export function syncNeonPhone(phone: boolean): void {
   pendingPhone = phone;
   instance?.setPhone(phone);

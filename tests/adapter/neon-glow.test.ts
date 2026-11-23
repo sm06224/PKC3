@@ -104,6 +104,7 @@ function makeLog(n = 3): Rig {
 const addCard = (rig: Rig, top: number): HTMLElement => (rig.zone as unknown as { __add: (t: number) => HTMLElement }).__add(top);
 
 let glow: NeonGlow | null = null;
+const origElementFromPoint = document.elementFromPoint;
 beforeEach(() => {
   frames = [];
   observers = [];
@@ -120,6 +121,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', FakeRO);
 });
 afterEach(() => {
+  document.elementFromPoint = origElementFromPoint;
   glow?.destroy();
   glow = null;
   vi.unstubAllGlobals();
@@ -280,6 +282,46 @@ describe('ゾーンの出入り', () => {
     runFrame();
     expect(glow.inZone(), '新しいゾーンへ入り直していない').toBe(true);
     expect(fresh.cards[0]!.hasAttribute(NEAR_ATTR), '新しいゾーンが光らない(次に要素をまたぐまで待たされる)').toBe(true);
+  });
+
+  it('🔴 ゾーンが生きている間の revalidate(ふつうの状態の通知)は rAF を 1 本も予約しない', () => {
+    const rig = makeLog();
+    glow = createNeonGlow(document, () => media(true));
+    rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
+    runFrame();
+    expect(frames).toEqual([]);
+    for (let i = 0; i < 5; i += 1) glow.revalidate();
+    expect(frames, 'ゾーンが生きているのに予約した').toEqual([]);
+    rig.zone.remove();
+    glow.revalidate();
+    expect(frames.length, '切り離されたのに予約しない').toBe(1);
+  });
+
+  it('🔴 ポインタがウィンドウの外へ出たら光を消して位置を忘れる ── 差し替えの後に古い座標で光らせない', () => {
+    const rig = makeLog();
+    glow = createNeonGlow(document, () => media(true));
+    rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
+    runFrame();
+    expect(rig.cards[0]!.hasAttribute(NEAR_ATTR)).toBe(true);
+    document.documentElement.dispatchEvent(pointer('pointerleave', 0, 0, false));
+    expect(glow.inZone(), 'ウィンドウを出ても入ったまま').toBe(false);
+    expect(rig.cards[0]!.hasAttribute(NEAR_ATTR), 'ウィンドウを出ても光が残った').toBe(false);
+    const fresh = makeLog();
+    document.elementFromPoint = (() => fresh.cards[0]!) as typeof document.elementFromPoint;
+    glow.revalidate();
+    runFrame();
+    expect(glow.inZone(), '古い座標で光った').toBe(false);
+    expect(fresh.cards[0]!.hasAttribute(NEAR_ATTR)).toBe(false);
+  });
+
+  it('ウィンドウの外へ出るリスナーも、付けない環境では付けず、外すと外れる', () => {
+    makeLog();
+    const n = counting(document.documentElement);
+    const m = media(true);
+    glow = createNeonGlow(document, () => m);
+    expect(n.pointerleave).toBe(1);
+    m.set(false);
+    expect(n.pointerleave, '付けない環境でも付いている').toBe(0);
   });
 
   it('ゾーンの外にいる間の revalidate は何も予約しない(仕事 0)', () => {
@@ -501,6 +543,23 @@ describe('測り直しの穴(自分の書き込み・外からの style・動い
     expect(rig.cards[0]!.style.getPropertyValue('--gy')).toBe('-29px');
   });
 
+  it('🔴 ゾーンが横にだけ動いた(left だけ変わった。大きさ・top は同じ)ときも、200ms 後のコマで測り直す', () => {
+    const rig = makeLog(1);
+    const box = { left: 100, top: 50, right: 500, bottom: 400, width: 400, height: 350, x: 100, y: 50 };
+    rig.zone.getBoundingClientRect = () => ({ ...box, toJSON: () => ({}) }) as DOMRect;
+    glow = createNeonGlow(document, () => media(true));
+    rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
+    runFrame();
+    const base = rig.measured();
+    box.left = 130;
+    box.right = 530;
+    box.x = 130;
+    vi.spyOn(performance, 'now').mockReturnValue(performance.now() + 300);
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 111, false));
+    runFrame();
+    expect(rig.measured(), 'left だけの移動を見逃した').toBeGreaterThan(base);
+  });
+
   it('🔴 光っているカードの大きさが変わったら(画像・字体の読み込み)、次のコマで測り直す。光が消えたカードは観測しない', () => {
     const rig = makeLog(5);
     glow = createNeonGlow(document, () => media(true));
@@ -540,6 +599,22 @@ describe('測り直しの穴(自分の書き込み・外からの style・動い
     rig.zone.dispatchEvent(pointer('pointerleave', 0, 0, false));
     expect(n.loadingdone, '出ても外れない').toBe(0);
     delete (document as unknown as { fonts?: unknown }).fonts;
+  });
+
+  it('バーのボタンは群の中に入れ子で並んでいても光る(direct: false)', () => {
+    document.body.innerHTML = '';
+    const rail = document.createElement('div');
+    rail.setAttribute('data-pkc-region', 'rail');
+    const group = document.createElement('div');
+    const btn = document.createElement('button');
+    btn.getBoundingClientRect = () => ({ left: 4, top: 40, right: 36, bottom: 72, width: 32, height: 32, x: 4, y: 40, toJSON: () => ({}) }) as DOMRect;
+    group.append(btn);
+    rail.append(group);
+    document.body.append(rail);
+    glow = createNeonGlow(document, () => media(true));
+    btn.dispatchEvent(pointer('pointerover', 20, 56));
+    runFrame();
+    expect(btn.hasAttribute(NEAR_ATTR), '入れ子のバーのボタンが光らない').toBe(true);
   });
 
   it('💭 直接の子だけを対象にする(CSS が `>` で書いている所。入れ子のカードの印には光らせない)', () => {
@@ -619,6 +694,29 @@ describe('CSS(原文)', () => {
     const { body } = atBlock(css, '@media screen and (forced-colors: none)');
     expect(body).not.toMatch(/background-attachment|filter\s*:|--mx|--my/);
     expect(tail).not.toMatch(/:root/);
+  });
+
+  /** 近接発光の塊(末尾)。引用符は JS 側(二重)に揃える。 */
+  const neon = raw.slice(raw.indexOf('輪郭の近接発光(ネオン。B2)── ここから末尾まで')).replace(/'/g, '"');
+
+  it.each(NEON_ZONES.map((z) => [z.zone, z] as const))('🔴 %s: `direct` は CSS の書き方(`ゾーン > カード` か、入れ子を許す `ゾーン カード` か)と一致する', (_n, z) => {
+    const child = neon.includes(`${z.zone} > ${z.cards}`);
+    const nested = neon.includes(`${z.zone} ${z.cards}`);
+    expect(child, `${z.zone}: CSS が直接の子で書いているかと direct(${String(z.direct)})が食い違う`).toBe(z.direct);
+    if (!z.direct) expect(nested, `${z.zone}: 入れ子を許すのに CSS が見つからない`).toBe(true);
+  });
+
+  it('🔴 器の背景の輪郭を描く 5 規則(共通・途中・先頭・末尾・単独)は、全部 `.pkc-md-block` と `.pkc-details` の両方を対象にする', () => {
+    const second = neon.slice(neon.lastIndexOf('@media screen and (forced-colors: none)'));
+    const withBoth = second.match(/> :is\(\.pkc-md-block, \.pkc-details\)\[data-pkc-log-card\]/g) ?? [];
+    expect(withBoth.length, '5 規則すべてが両方を対象にしていない').toBe(5);
+    expect(second, '`.pkc-md-block` だけの規則が残っている').not.toMatch(/> \.pkc-md-block\[data-pkc-log-card\]/);
+  });
+
+  it('🔴 main.ts は描き直しの後に revalidateNeonGlow を呼ぶ(状態の通知 `onState` の中)── 外すとゾーンの差し替えに追従しない', () => {
+    const src = stripComments(readFileSync(join(__dirname, '../../src/main.ts'), 'utf-8')).replace(/^\s*\/\/.*$/gm, '');
+    expect(src, 'import が無い').toMatch(/import \{[^}]*revalidateNeonGlow[^}]*\} from '@adapter\/ui\/render\/neon-glow'/);
+    expect(src, 'onState の通知の中で呼んでいない').toMatch(/onState\(\s*\(\s*\)\s*=>\s*(\{\s*)?revalidateNeonGlow\(\)/);
   });
 
   it('旧い灰色の光(G1)の規則・要素は残っていない', () => {
