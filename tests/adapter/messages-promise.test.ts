@@ -9,6 +9,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { sectionByTitle } from '../helpers/manual-style';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { initialState } from '../../src/adapter/state/app-state';
 import { entryLabel } from '../../src/adapter/ui/render/message-entry';
@@ -16,12 +17,11 @@ import { QUOTA_ALARM_RATIO, quotaText } from '../../src/features/storage/quota-w
 
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
 
-/** 「### 見出し」から次の「### 」の手前まで。 */
+/** 題名で節を探す(段は問わない。小節を含む)。 */
 function sectionOf(title: string): string {
-  const i = MANUAL.indexOf(`### ${title}\n`);
-  expect(i, `マニュアルに「${title}」の節が無い`).toBeGreaterThanOrEqual(0);
-  const j = MANUAL.indexOf('\n### ', i + 5);
-  return MANUAL.slice(i, j < 0 ? undefined : j);
+  const s = sectionByTitle(MANUAL, title);
+  expect(s, `マニュアルに「${title}」の節が無い`).not.toBeNull();
+  return s!;
 }
 
 describe('書き出しボタンの下に、書き込まないものを字で言う(#1087)', () => {

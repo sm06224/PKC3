@@ -69,7 +69,8 @@ describe('焼いたマニュアル — 目次と本文', () => {
     const page = bake();
     const doc = parse(page.html);
     const rows = [...doc.querySelectorAll<HTMLAnchorElement>('[data-pkc-region="manual-window-toc"] a')];
-    expect(rows.length, '目次が空(空振り)').toBeGreaterThan(100);
+    // 下限 60 は tripwire(章立て刷新後の規模でも通る値。数を目標にしない)
+    expect(rows.length, '目次が空(空振り)').toBeGreaterThan(60);
     expect(rows.length, '目次の行数が組み立ての報告と違う').toBe(page.toc);
     const main = doc.querySelector('[data-pkc-region="manual-window-main"]')!;
     // 🔴 100件以上の目次各行で main.querySelector('[id=...]') を呼ぶと happy-dom で
@@ -89,7 +90,8 @@ describe('焼いたマニュアル — 目次と本文', () => {
     const toc = doc.querySelector('[data-pkc-region="manual-window-toc"]')!;
     // ⚠ 段①(about:blank)は button で出す ── こちらは実 URL なので素の `<a>` でよい
     expect(toc.querySelectorAll('button')).toHaveLength(0);
-    expect(toc.querySelectorAll('a').length).toBeGreaterThan(100);
+    // 下限 60 は tripwire(章立て刷新後の規模でも通る値。数を目標にしない)
+    expect(toc.querySelectorAll('a').length).toBeGreaterThan(60);
   });
 
   it('🔴 コピーのボタンを落とす(この page に受け手は居ない)', () => {
@@ -572,7 +574,8 @@ describe('焼いたマニュアル — 1 枚で完結する', () => {
 
   it('見出しの数を報告する(build 側の下限の観測点)', () => {
     const page = bake();
-    expect(page.headings).toBeGreaterThan(100);
+    // 下限 60 は tripwire(章立て刷新後の規模でも通る値。数を目標にしない)
+    expect(page.headings).toBeGreaterThan(60);
     // ⚠ 描画が空なら 0 ── build の門はこれを見る
     expect(bake({ html: '' }).headings).toBe(0);
   });

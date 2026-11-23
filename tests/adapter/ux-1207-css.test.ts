@@ -8,6 +8,7 @@
  *
  * ⚠ CSS は**構文で**読む(注釈を剥ぎ、選択子リストを割って**丸ごと一致**を見る ── `helpers/css-blocks.ts`)。
  */
+import { sectionByTitle } from '../helpers/manual-style';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { blocksFor, decl, stripComments, withoutMedia } from '../helpers/css-blocks';
@@ -40,9 +41,9 @@ describe('マニュアルの言い分が見た目と揃っている(#1207)', () 
   it('🔴 消えたリンクは「薄い字 + 点線の下線」と書く(2 か所)。「字の色は変わりません」と言い残さない', () => {
     expect(manual.split('薄い字 + 点線の下線').length - 1, '説明が 2 か所そろっていない').toBe(2);
     // 旧い言い分(色は変わらない)が消えたリンクの節に残っていない
-    const at = manual.indexOf('### リンク先が無いリンク');
-    expect(at, '節が見つからない(空振り)').toBeGreaterThan(-1);
-    const section = manual.slice(at, at + 400);
+    const found = sectionByTitle(manual, 'リンク先が無いリンク');
+    expect(found, '節が見つからない(空振り)').not.toBeNull();
+    const section = found!.slice(0, 400);
     expect(section).not.toContain('字の色は変わりません');
   });
   it('🔴 見出し名と一言を書いている', () => {

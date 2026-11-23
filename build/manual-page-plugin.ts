@@ -55,11 +55,11 @@ import { extractBodyCss } from './body-css.ts';
 import { ossNoticesPlugin } from './oss-notices-plugin.ts';
 
 /**
- * 見出しの下限。実測 163 本(2026-09-02)。
+ * 見出しの下限(tripwire)。マニュアルを刷新して小さくしても通る値にしてある(目標規模ではない)。
  * ⚠ 実測ぴったりにしない ── 節を 1 つ削るだけで build が落ちると、まともな整理ができない。
  *   止めたいのは「描画が空振りして 0 本 / 数本」という**桁の事故**である。
  */
-export const MANUAL_MIN_HEADINGS = 100;
+export const MANUAL_MIN_HEADINGS = 60;
 
 /** `ssrLoadModule` を持つもの(Vite の dev server。test は代役を差せる)。 */
 export interface ModuleLoader {

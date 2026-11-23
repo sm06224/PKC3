@@ -16,6 +16,7 @@
  */
 import { describe, expect, it, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { scanHeadings } from '../helpers/manual-style';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { HelpRenderer, MANUAL_TEXT, versionText, versionLine } from '../../src/adapter/ui/render/help';
 import { storageWhereLine } from '../../src/features/storage/storage-notice';
@@ -319,7 +320,14 @@ describe('ヘルプの面', () => {
 
   it('マニュアルを焼き込んでいる(外へ見に行かない)', () => {
     expect(MANUAL_TEXT.length, 'マニュアルが空').toBeGreaterThan(1000);
-    expect(MANUAL_TEXT, 'マニュアル本体ではない').toContain('## 画面を組み替える');
+    // 🔑 見出しの字には頼らない ── 本物のマニュアル(`docs/manual.md`)の章(H2)が、焼き込みの中に全部在ること
+    const chapters = scanHeadings(readFileSync('docs/manual.md', 'utf-8')).filter((h) => h.level === 2);
+    expect(chapters.length, '章を 1 つも拾えていない(空振り)').toBeGreaterThan(3);
+    const baked = new Set(scanHeadings(MANUAL_TEXT).filter((h) => h.level === 2).map((h) => h.title));
+    expect(
+      chapters.filter((h) => !baked.has(h.title)).map((h) => h.title),
+      'マニュアル本体ではない(章が焼き込みに無い)',
+    ).toEqual([]);
   });
 
   /**

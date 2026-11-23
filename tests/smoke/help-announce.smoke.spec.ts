@@ -1,6 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 import { CORRUPT_REFUSAL } from '../../src/features/storage/db-corruption';
+import { readFileSync } from 'node:fs';
+import { scanHeadings } from '../helpers/manual-style';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -185,7 +187,11 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
   const manual = page.locator('[data-pkc-region="help-manual"]');
   await expect(manual).toBeVisible();
   // ⚠ マニュアルはワーカーで丸ごと描く ── 負荷で遅れる。待つ長さは 1 本目(目次の行)と同じ 15 秒に揃える
-  await expect(manual.locator('h2', { hasText: '画面を組み替える' })).toBeVisible({
+  // 🔑 見出しの字を決め打ちしない ── 本物のマニュアルの**最後の章(H2)**が描かれていること
+  //   (ワーカーが最後まで描き切った証拠になる。章立てを組み替えても追随する)
+  const chapters = scanHeadings(readFileSync('docs/manual.md', 'utf-8')).filter((h) => h.level === 2);
+  expect(chapters.length, '章を 1 つも拾えていない').toBeGreaterThan(3);
+  await expect(manual.locator('h2', { hasText: chapters[chapters.length - 1]!.title })).toBeVisible({
     timeout: 15_000,
   });
 
