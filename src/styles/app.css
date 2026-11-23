@@ -15327,13 +15327,16 @@ h6:hover > .pkc-heading-anchor,
  * PKC の画面は shell が画面ちょうどの高さを取り、スクロールはペインの中だけで起きる。ルートがスクロールできると、
  * 何かの要素が少しでも下へはみ出したとき(測るための見えない箱・押し広げられた行)に、ホイールや
  * `scrollIntoView` で画面全体が持ち上がり、追記欄の下に空白が出る。
- * ⚠ shell を持つ文書だけ(マニュアルなど別の文書はふつうにスクロールする)。⚠ 画面だけ ── 紙は全部刷る。
+ * ⚠ shell を持つ文書だけ(`buildShell` が html に `data-pkc-shell` を立てる。マニュアルなど別の文書はふつうにスクロールする)。
+ * ⚠ 画面だけ ── 紙は全部刷る。
  * ⚠ これは保険 ── はみ出しの元は直してあり、smoke は `scrollHeight <= innerHeight` で見張る(隠しても数は残る)。
  */
 @media screen {
   /* ⚠ **`html` だけ**。`body` にも付けると body 自身がスクロールする箱になり、`scrollIntoView` で
    *   body が持ち上がる(shell ごと上へずれ、下に空白が出る ── 直したい症状そのもの。smoke で踏んだ) */
-  html:has([data-pkc-region='shell']) {
+  /* ⚠ `html:has([data-pkc-region='shell'])` と書かない(#1467 段 3-h: root より上を `:has()` の主語にすると、
+   *   追記・描き直しのたびに文書全体の再計算が走る)── 印は `buildShell` が html に立て、`showRootText` が外す */
+  html[data-pkc-shell] {
     overflow: hidden;
   }
 }

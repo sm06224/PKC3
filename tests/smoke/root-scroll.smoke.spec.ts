@@ -36,6 +36,8 @@ async function expectRootStill(page: Page, label: string): Promise<void> {
   await page.mouse.wheel(0, 600);
   await page.waitForTimeout(150);
   const s = await rootState(page);
+  // ⚠ ガード(位置を 0 へ戻す JS)が CSS の代わりを務めてしまうので、CSS 自体も見る(ホイールで 1 コマ揺れない)
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).overflowY), `${label}: html の overflow`).toBe('hidden');
   expect(s.scrollHeight, `${label}: 文書が画面より背が高い(${s.scrollHeight} > ${s.inner})`).toBeLessThanOrEqual(s.inner);
   expect(s.top, `${label}: 画面全体が下へスクロールした`).toBe(0);
 }
