@@ -585,6 +585,7 @@ import {
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
 import { printNote } from '@adapter/platform/print-note';
+import { installNeonGlow, revalidateNeonGlow } from '@adapter/ui/render/neon-glow';
 import { bodyEmbedsLoading } from '@adapter/ui/render/fence-asset-hydrate';
 import { SECTION_LOADING_SELECTOR } from '@adapter/ui/render/section-embed';
 
@@ -7811,6 +7812,10 @@ function bootstrap(): void {
       // 🔴 左の列の帯を、印を立てる前に同期で 1 段へ収める(#1621)
       fitSidebarBars(root);
       root.setAttribute('data-pkc-boot', 'ready');
+      // 🔴 輪郭の近接発光(B2)。付けない環境(動きを減らす / 指の端末 / マウス無し / スマホ幅)ではリスナーを付けない
+      installNeonGlow(document);
+      // 描き直しでゾーン(ログの本文・情報ペイン)が差し替わっても、ポインタが止まったまま付け直す(ゾーンの外にいる間の仕事は 0)
+      app.dispatcher.onState(() => revalidateNeonGlow());
       preboot?.booted(); // 以後は勝手に読み直さない(下書きを巻き込まない)
       // 🔴 数字の整形の初回の読み込み(11〜13ms)を、最初の操作の最中ではなく手が空いた時へ(#878)
       scheduleNumberFormatWarmup(window);

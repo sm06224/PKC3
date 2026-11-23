@@ -297,3 +297,45 @@ describe('カード(B1)── 12 テーマ', () => {
     }
   });
 });
+
+/**
+ * 🔴 **輪郭の近接発光(ネオン。B2)の色**(`app.css` 末尾の塊 / `render/neon-glow.ts`)。
+ * 全 12 テーマが `--neon`(線の色)と `--neon-core`(芯の色)を**自分のブロックに持つ**こと。
+ * 明るい配色でも暗い配色でも「点灯した」と分かるよう、紙の地(`--surface`)と机(`--bg`)の**両方**から 3:1 以上離れ、
+ * 暗い配色では芯が線より明るく(白に寄る)、明るい配色では芯が線より濃いこと。色相は `--accent` から取る(同系の色であること)。
+ */
+describe('ネオンの色(B2)── 12 テーマ', () => {
+  const hue = (hex: string): number => {
+    const [r, g, b] = rgb(hex).map((v) => v / 255) as [number, number, number];
+    const mx = Math.max(r, g, b);
+    const mn = Math.min(r, g, b);
+    if (mx === mn) return -1;
+    const d = mx - mn;
+    const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+  };
+  it.each(THEMES.map((t) => t.id))('🔴 %s: --neon / --neon-core が定義され、地から見分けられる', (theme) => {
+    const own = tokensOf(theme);
+    const base = tokensOf('light');
+    const v = (n: string): string => own[n] ?? base[n]!;
+    expect(own['--neon'], `${theme} に --neon が無い(既定の light を引いてしまう)`).toBeDefined();
+    expect(own['--neon-core'], `${theme} に --neon-core が無い`).toBeDefined();
+    const neon = own['--neon']!;
+    const core = own['--neon-core']!;
+    expect(neon).not.toBe(core);
+    for (const ground of ['--surface', '--bg']) {
+      expect(contrast(neon, v(ground)), `線が ${ground} から見分けられない`).toBeGreaterThanOrEqual(3);
+      expect(contrast(core, v(ground)), `芯が ${ground} から見分けられない`).toBeGreaterThanOrEqual(3);
+    }
+    const dark = /color-scheme:\s*dark/.test(css.slice(css.indexOf(`'${theme}'] {`), css.indexOf('}', css.indexOf(`'${theme}'] {`))));
+    if (dark) expect(luminance(core), '暗い配色の芯が線より明るくない').toBeGreaterThan(luminance(neon));
+    else expect(luminance(core), '明るい配色の芯が線より濃くない').toBeLessThan(luminance(neon));
+    // 色相は accent と近い(彩度のある色どうしのとき。±40 度)
+    const ha = hue(v('--accent'));
+    const hn = hue(neon);
+    if (ha >= 0 && hn >= 0) {
+      const dh = Math.min(Math.abs(ha - hn), 360 - Math.abs(ha - hn));
+      expect(dh, `--neon の色相が --accent から離れた(${hn} / ${ha})`).toBeLessThanOrEqual(40);
+    }
+  });
+});

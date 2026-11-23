@@ -57,6 +57,9 @@
   --shadow-lg: 0 8px 24px rgb(0 0 0 / 19%);
   --scrim: rgb(0 0 0 / 35%); /* ダイアログの背景の暗幕(影と同じ墨色)*/
   --sandbox-bg: #ffffff;
+  /* 輪郭の近接発光(ネオン。B2)の色。色相は `--accent` から取り、明るさと鮮やかさだけを上げた。`--neon-core` は光の芯(暗いテーマは白に寄せ、明るいテーマは最も濃く)。`neon-glow.ts` / `app.css` 末尾の塊 */
+  --neon: #008f52;
+  --neon-core: #046d3d;
   color-scheme: light;
 }
 
@@ -91,6 +94,8 @@
   --shadow-lg: 0 8px 24px rgb(0 0 0 / 70%);
   --scrim: rgb(0 0 0 / 55%); /* ダイアログの背景の暗幕(影と同じ墨色)*/
   --sandbox-bg: #ffffff;
+  --neon: #1ee087;
+  --neon-core: #d8fce4;
   color-scheme: dark;
 }
 
@@ -126,6 +131,8 @@
   --shadow-lg: 0 8px 24px rgb(31 35 40 / 19%);
   --scrim: rgb(31 35 40 / 35%); /* ダイアログの背景の暗幕(影と同じ墨色)*/
   --sandbox-bg: #ffffff;
+  --neon: #0371ed;
+  --neon-core: #0255b7;
   color-scheme: light;
 }
 
@@ -160,6 +167,8 @@
   --shadow-lg: 0 8px 24px rgb(1 4 9 / 70%);
   --scrim: rgb(1 4 9 / 55%); /* ダイアログの背景の暗幕(影と同じ墨色)*/
   --sandbox-bg: #ffffff;
+  --neon: #92c1ff;
+  --neon-core: #eaf3fe;
   color-scheme: dark;
 }
 
@@ -195,6 +204,8 @@
   --shadow-lg: 0 8px 24px rgb(7 54 66 / 22%);
   --scrim: rgb(7 54 66 / 35%); /* ダイアログの背景の暗幕(影と同じ墨色)*/
   --sandbox-bg: #ffffff;
+  --neon: #0882b0;
+  --neon-core: #036388;
   color-scheme: light;
 }
 
@@ -229,6 +240,8 @@
   --shadow-lg: 0 8px 24px rgb(0 20 26 / 70%);
   --scrim: rgb(0 20 26 / 55%); /* ダイアログの背景の暗幕(影と同じ墨色)*/
   --sandbox-bg: #ffffff;
+  --neon: #6cc9fe;
+  --neon-core: #e4f5ff;
   color-scheme: dark;
 }
 
@@ -264,6 +277,8 @@
   --shadow-lg: 0 8px 24px rgb(0 0 0 / 70%);
   --scrim: rgb(0 0 0 / 55%); /* ダイアログの背景の暗幕(影と同じ墨色)*/
   --sandbox-bg: #ffffff;
+  --neon: #ccabfe;
+  --neon-core: #f4efff;
   color-scheme: dark;
 }
 
@@ -299,6 +314,8 @@
   --shadow-lg: 0 8px 24px rgb(0 0 0 / 70%);
   --scrim: rgb(0 0 0 / 55%); /* ダイアログの背景の暗幕(影と同じ墨色)*/
   --sandbox-bg: #ffffff;
+  --neon: #0dd3f9;
+  --neon-core: #def7fe;
   color-scheme: dark;
 }
 
@@ -337,6 +354,8 @@
   --shadow-lg: 0 8px 24px rgb(0 0 0 / 70%);
   --scrim: rgb(0 0 0 / 55%); /* ダイアログの背景の暗幕(影と同じ墨色)*/
   --sandbox-bg: #ffffff;
+  --neon: #33ff66;
+  --neon-core: #ddfcdf;
   color-scheme: dark;
 }
 
@@ -373,6 +392,8 @@
   --shadow-lg: 0 8px 24px rgb(0 0 0 / 70%);
   --scrim: rgb(0 0 0 / 55%); /* ダイアログの背景の暗幕(影と同じ墨色)*/
   --sandbox-bg: #ffffff;
+  --neon: #fbac01;
+  --neon-core: #ffefdb;
   color-scheme: dark;
 }
 
@@ -410,6 +431,8 @@
   --shadow-lg: 0 8px 24px rgb(40 30 20 / 20%);
   --scrim: rgb(40 30 20 / 35%); /* ダイアログの背景の暗幕(影と同じ墨色)*/
   --sandbox-bg: #ffffff;
+  --neon: #b95803;
+  --neon-core: #8e4201;
   color-scheme: light;
 }
 
@@ -445,6 +468,8 @@
   --shadow-lg: 0 8px 24px rgb(0 0 0 / 70%);
   --scrim: rgb(0 0 0 / 55%); /* ダイアログの背景の暗幕(影と同じ墨色)*/
   --sandbox-bg: #ffffff;
+  --neon: #fea845;
+  --neon-core: #ffefe0;
   color-scheme: dark;
 }
 

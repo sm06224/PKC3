@@ -220,6 +220,9 @@ test('🔴 ログのカード: 輪郭・時刻の帯の廃止・表とコード�
   }
   expect(inset.codeR, 'コードがカードの内側の余白(8px 以上)に収まっていない').toBeLessThanOrEqual(inset.cardR - 8);
   // 器(表・コード)の左右の輪郭線は、透明な余白の外縁(= カードの縁)に引かれる(余白の内側に引くと輪郭が途切れる)
+  // ⚠ 静止の背景(輪郭線の層)を読む ── ポインタが近いと近接発光(B2)の層が先頭へ足されるので、ゾーンの外(左のペインの一覧の上)へ出して光を消す
+  await page.mouse.move(150, 450);
+  await expect(page.locator('[data-pkc-glow-near]')).toHaveCount(0);
   const lines = await page.locator(`${BODY} > .pkc-md-block[data-pkc-md-block-kind="table"]`).first().evaluate((el) => {
     const cs = getComputedStyle(el);
     return { origin: cs.backgroundOrigin.split(',')[0]!.trim(), size: cs.backgroundSize.split(',')[0]!.trim(), pos: cs.backgroundPosition.split(',')[0]!.trim(), border: cs.borderLeftColor };
