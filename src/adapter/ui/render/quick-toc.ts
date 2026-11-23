@@ -8,6 +8,7 @@
 import { extractHeadingText } from './heading-anchor';
 import { pickActiveHeading } from './active-heading-dom';
 import { markIconOnly } from './icons';
+import { getTipTitle, setTipTitle } from './tooltip';
 
 /** 現在地の印(目次の行に付く)。CSS(`app.css`)が読む。 */
 const ACTIVE_ATTR = 'data-pkc-active';
@@ -283,7 +284,7 @@ export function installQuickToc(
       }
       if (link.getAttribute('data-pkc-toc-slug') !== item.id) link.setAttribute('data-pkc-toc-slug', item.id);
       if (link.textContent !== item.text) link.textContent = item.text;
-      if (link.title !== item.text) link.title = item.text;
+      if (getTipTitle(link) !== item.text) setTipTitle(link, item.text);
       next.push(li);
     }
     for (let i = itemEls.length - 1; i >= items.length; i--) itemEls[i]?.remove();

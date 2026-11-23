@@ -31,6 +31,7 @@ import {
 } from '../../src/adapter/ui/actions/long-press';
 import { blocksFor, decl, stripComments, withoutMedia } from '../helpers/css-blocks';
 import { readFileSync } from 'node:fs';
+import { TIP_STASH_ATTR } from '../../src/adapter/ui/render/tooltip';
 
 function meta(lid: string, order: number, title: string, archetype = 'text'): EntryMeta {
   return {
@@ -427,6 +428,21 @@ describe('3 つの帯のタイルの長押し(#1054 段②)', () => {
     expect(d.getState().entryMetas.size, '一覧から押しても今日のノートが出来ない').toBe(
       before + 1,
     );
+  });
+
+  it('🔴 ツールチップの退避(TIP_STASH_ATTR)は、一覧の項目へ写さない(対照: ほかの data-pkc-* は写る)', () => {
+    const tile = root.querySelector<HTMLElement>(
+      '[data-pkc-region="create-bar"] [data-pkc-action="attach-file"]',
+    )!;
+    tile.setAttribute(TIP_STASH_ATTR, '古い説明');
+    tile.setAttribute('data-pkc-tip-control', 'kept');
+    pressFor(tile, LONG_PRESS_MS);
+    const item = root.querySelector<HTMLElement>(
+      '[data-pkc-region="context-menu"] [data-pkc-action="attach-file"]',
+    );
+    expect(item, '前提: 項目が一覧に載っている').not.toBeNull();
+    expect(item!.getAttribute('data-pkc-tip-control'), '前提: 受け手の属性は写る(空振り防止)').toBe('kept');
+    expect(item!.hasAttribute(TIP_STASH_ATTR), '退避の属性が一覧の項目へ漏れている').toBe(false);
   });
 
   it('🔴 押せない(disabled)タイルは一覧に載らない', () => {

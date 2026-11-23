@@ -12,6 +12,7 @@
  */
 import { copyPlainText } from '@adapter/platform/clipboard';
 import { flashCopied } from '../actions/copy-md-block';
+import { getTipTitle, setTipTitle } from './tooltip';
 
 export const INLINE_CODE_ATTR = 'data-pkc-inline-code';
 const INLINE_CODE_TITLE = 'クリックでコピー';
@@ -141,6 +142,6 @@ export function clearInlineCodeCopy(root: HTMLElement): void {
     if (onClick !== undefined) code.removeEventListener('click', onClick);
     HANDLERS.delete(code);
     code.removeAttribute(INLINE_CODE_ATTR);
-    if (code.getAttribute('title') === INLINE_CODE_TITLE) code.removeAttribute('title');
+    if (getTipTitle(code) === INLINE_CODE_TITLE) setTipTitle(code, null);
   }
 }

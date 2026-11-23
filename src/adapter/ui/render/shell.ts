@@ -36,6 +36,7 @@ import {
 // 🔑 lid の綴りは 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
 import { SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import { createStatusLive } from './status-line';
+import { setTipTitle } from './tooltip';
 
 export interface ShellRegions {
   /** 左の列の中身(探し方で切り替わる)。 */
@@ -196,8 +197,8 @@ export function paintCaptureBar(root: HTMLElement, line: string | null, detail?:
   if (text !== null) {
     text.textContent = line ?? '';
     // 🔑 量・残り・途中保存の理由は title(1 行を静かに保つ。字は 1 つ ── 2 つ目の欄を作らない)
-    if (detail === undefined || detail === null) text.removeAttribute('title');
-    else text.title = detail;
+    // 🔑 ツールチップ表示中は title が退避されている ── 消す経路は専用の口へ(古い説明の復活を防ぐ)
+    setTipTitle(text, detail === undefined || detail === null ? null : detail);
   }
 }
 

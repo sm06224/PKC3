@@ -21,6 +21,7 @@
  */
 import { formatTarget } from '../actions/format-target';
 import { HINT_BASE, HINT_BLOCKED, HINT_COMMAND, HINT_WRAP_ON, WRAP_HINT, hintTitle } from './shortcut-hint';
+import { getTipTitle, setTipTitle } from './tooltip';
 
 /** 帯のボタンに付ける印(値は op)。⚠ 付けるのは `format-bar.ts`、読むのはここ。 */
 export const WRAPS_SELECTION_ATTR = 'data-pkc-wraps-selection';
@@ -45,15 +46,15 @@ export function syncWrapHint(bar: ParentNode, on: boolean): number {
     const base = el.getAttribute(HINT_BASE);
     if (on) {
       // 鍵の割当を持たないボタンは、戻す字をここで預かる(持つものは土台から組み直せる)
-      if (base === null || id === null) el.setAttribute(REST_TITLE, el.title);
+      if (base === null || id === null) el.setAttribute(REST_TITLE, getTipTitle(el));
       el.setAttribute(HINT_WRAP_ON, '');
-      el.title = id === null ? WRAP_HINT : hintTitle(WRAP_HINT, id, undefined, el.getAttribute(HINT_BLOCKED));
+      setTipTitle(el, id === null ? WRAP_HINT : hintTitle(WRAP_HINT, id, undefined, el.getAttribute(HINT_BLOCKED)));
     } else {
       el.removeAttribute(HINT_WRAP_ON);
       if (base !== null && id !== null) {
-        el.title = hintTitle(base, id, undefined, el.getAttribute(HINT_BLOCKED));
+        setTipTitle(el, hintTitle(base, id, undefined, el.getAttribute(HINT_BLOCKED)));
       } else {
-        el.title = el.getAttribute(REST_TITLE) ?? '';
+        setTipTitle(el, el.getAttribute(REST_TITLE) ?? '');
         el.removeAttribute(REST_TITLE);
       }
     }

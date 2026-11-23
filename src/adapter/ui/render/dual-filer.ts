@@ -62,11 +62,12 @@ import { ACTION_ICONS, ARCHETYPE_ICONS, iconSpan, markBarTile, setActionIcon } f
 import { markTab, markTablist } from './tabs-a11y';
 // 🔴 表を送って見てから離れ、戻ると同じ所(C10 / #1045)。左右で**別々に**覚える
 import { ScrollMemory } from './scroll-memory';
+import { setTipTitle } from './tooltip';
 
 function setDateTitle(cell: HTMLElement, updatedAt: string | null): void {
   const full = formatStoredDate(updatedAt, '');
   if (full) cell.title = `更新 ${full}`;
-  else cell.removeAttribute('title');
+  else setTipTitle(cell, null);
 }
 
 /**
