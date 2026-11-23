@@ -435,9 +435,27 @@ describe('CSS(原文)', () => {
       expect(d, `${pseudo}: webkit の対応が無い`).toMatch(/-webkit-mask-composite:\s*xor/);
       expect(d, `${pseudo}: 局所座標でない`).toMatch(/at calc\(var\(--gx|at var\(--gx/);
     }
-    // 画面の外(印刷)・近くないカードには疑似要素を作る規則が無い
-    const outside = css.replace(body, '');
+    // 画面 + 強制色なしの外(印刷・強制色)には、光の規則が 1 つも無い(塊は 2 つ: 疑似要素の輪郭 / 横スクロールの器の背景)
+    let outside = css;
+    let blocks = 0;
+    while (outside.includes('@media screen and (forced-colors: none)')) {
+      const { body: b } = atBlock(outside, '@media screen and (forced-colors: none)');
+      outside = outside.replace(`@media screen and (forced-colors: none) {${b}}`, '');
+      blocks += 1;
+    }
+    expect(blocks, '光の塊が 2 つでない').toBe(2);
     expect(outside, '画面の外にも光の規則がある').not.toContain('[data-pkc-glow-near]');
+  });
+
+  it('🔴 横スクロールの器(`.pkc-md-block`)は疑似要素でなく器自身の背景で輪郭を描く(疑似要素は overflow に切られる)', () => {
+    const { body } = atBlock(css, '@media screen and (forced-colors: none)');
+    // 疑似要素の規則からは器を除く
+    expect(body).toMatch(/\[data-pkc-log-card\]:not\(\.pkc-md-block\)/);
+    // 器の 4 つの辺の型(途中 / 先頭 / 末尾 / 単独)すべてに光の層がある
+    const second = css.slice(css.indexOf('@media screen and (forced-colors: none)', css.indexOf('@media screen and (forced-colors: none)') + 10));
+    for (const edge of ['first', 'last', 'solo']) expect(second, `器の ${edge} に光の層が無い`).toContain(`[data-pkc-log-card='${edge}'][data-pkc-glow-near]`);
+    expect(second).toContain('var(--sf), var(--ng)');
+    expect(second, '疑似要素で描いている').not.toMatch(/::before|::after/);
   });
 
   it('🔴 `background-attachment: fixed` / `filter` / `:root` の座標変数を使わない(実測で再計算 40 秒 / 600 回)', () => {

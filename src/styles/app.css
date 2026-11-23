@@ -15211,7 +15211,7 @@ h6:hover > .pkc-heading-anchor,
 }
 @media screen and (forced-colors: none) {
   /* 線(芯の明るい 2px) */
-  :is([data-pkc-log-days] > [data-pkc-log-card], [data-pkc-region='inspector'] > [data-pkc-card], [data-pkc-region='rail'] button)[data-pkc-glow-near][data-pkc-glow-near]::before {
+  :is([data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block), [data-pkc-region='inspector'] > [data-pkc-card], [data-pkc-region='rail'] button)[data-pkc-glow-near][data-pkc-glow-near]::before {
     content: '';
     position: absolute;
     inset: calc(-1 * var(--nb-t)) calc(-1 * var(--nb-r)) calc(-1 * var(--nb-b)) calc(-1 * var(--nb-l));
@@ -15239,7 +15239,7 @@ h6:hover > .pkc-heading-anchor,
     mask-composite: exclude;
   }
   /* にじみ(線の外へ `--nh`(数。ログ・情報ペインは 5、バーは 2)px の淡い帯)。⚠ 枠を持たない辺(記録の途中の塊の上下)へは広げない(`--nb-*` が 0 のまま) */
-  :is([data-pkc-log-days] > [data-pkc-log-card], [data-pkc-region='inspector'] > [data-pkc-card], [data-pkc-region='rail'] button)[data-pkc-glow-near][data-pkc-glow-near]::after {
+  :is([data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block), [data-pkc-region='inspector'] > [data-pkc-card], [data-pkc-region='rail'] button)[data-pkc-glow-near][data-pkc-glow-near]::after {
     content: '';
     position: absolute;
     inset: calc(-1 * (1 + var(--nh)) * var(--nb-t)) calc(-1 * (1 + var(--nh)) * var(--nb-r)) calc(-1 * (1 + var(--nh)) * var(--nb-b)) calc(-1 * (1 + var(--nh)) * var(--nb-l));
@@ -15263,5 +15263,49 @@ h6:hover > .pkc-heading-anchor,
       linear-gradient(#000 0 0) padding-box,
       linear-gradient(#000 0 0);
     mask-composite: exclude;
+  }
+}
+
+/**
+ * 🔴 **表・コード・csv・図の器(`.pkc-md-block`)の輪郭**(B2)── 器は `overflow: auto`(横スクロール)で、疑似要素は自分の外
+ * (カードの輪郭 = 透明な枠の外縁)へはみ出すと**切られる**ので、B1 と同じ**器自身の背景**で描く:
+ * 下から「静止の線(B1)→ 光の放射(全面。局所座標)→ 内側の地(輪郭の 2px を残して塗る)」の順に重ね、
+ * 残った外縁の 2px だけが光って見える(上の辺・下の辺・角丸の弧は、先頭 / 末尾 / 単独のときだけ。角は四分円で内側の地を丸く抜く)。
+ * ⚠ 背景は横スクロールで動かない(`background-attachment: scroll`)ので、輪郭は切れ目なく残る。⚠ にじみ(外へ 5px の帯)は、
+ *   器の外へはみ出すため描かない(線だけ)。⚠ 静止の線の層は B1 の規則の写し ── B1 の層を変えたらここも合わせる。
+ */
+@media screen and (forced-colors: none) {
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card][data-pkc-glow-near] {
+    --ng: radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), var(--neon-core), var(--neon) 34%, color-mix(in srgb, var(--neon) 70%, transparent) 66%, transparent);
+    --sf: linear-gradient(var(--surface), var(--surface));
+    background-repeat: no-repeat;
+  }
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card][data-pkc-glow-near]:not([data-pkc-log-card='first'], [data-pkc-log-card='last'], [data-pkc-log-card='solo']) {
+    background-image: var(--sf), var(--ng), var(--hl), var(--hl);
+    background-size: calc(100% - 4px) 100%, 100% 100%, 1px 100%, 1px 100%;
+    background-position: 2px 0, 0 0, left top, right top;
+  }
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='first'][data-pkc-glow-near] {
+    background-image: var(--sf), var(--sf), radial-gradient(circle at 100% 100%, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 0 100%, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), var(--ng), var(--hl), var(--hl), var(--hl),
+      radial-gradient(circle at 100% 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 0 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
+    background-size: calc(100% - 4px) calc(100% - var(--rl)), calc(100% - 2 * var(--rl)) calc(var(--rl) - 2px), var(--rl) var(--rl), var(--rl) var(--rl), 100% 100%,
+      1px 100%, 1px 100%, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl);
+    background-position: 2px 100%, var(--rl) 2px, left top, right top, 0 0, left top, right top, left top, left top, right top;
+  }
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='last'][data-pkc-glow-near] {
+    background-image: var(--sf), var(--sf), radial-gradient(circle at 100% 0, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 0 0, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), var(--ng), var(--hl), var(--hl), var(--hl),
+      radial-gradient(circle at 100% 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 0 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
+    background-size: calc(100% - 4px) calc(100% - var(--rl)), calc(100% - 2 * var(--rl)) calc(var(--rl) - 2px), var(--rl) var(--rl), var(--rl) var(--rl), 100% 100%,
+      1px 100%, 1px 100%, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl);
+    background-position: 2px 0, left var(--rl) bottom 2px, left bottom, right bottom, 0 0, left top, right top, left bottom, left bottom, right bottom;
+  }
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='solo'][data-pkc-glow-near] {
+    background-image: var(--sf), var(--sf), var(--sf), radial-gradient(circle at 100% 100%, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 0 100%, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 100% 0, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 0 0, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), var(--ng),
+      var(--hl), var(--hl), var(--hl), var(--hl), radial-gradient(circle at 100% 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 0 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 100% 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 0 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
+    background-size: calc(100% - 4px) calc(100% - 2 * var(--rl)), calc(100% - 2 * var(--rl)) calc(var(--rl) - 2px), calc(100% - 2 * var(--rl)) calc(var(--rl) - 2px),
+      var(--rl) var(--rl), var(--rl) var(--rl), var(--rl) var(--rl), var(--rl) var(--rl), 100% 100%,
+      1px 100%, 1px 100%, 100% 1px, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl), var(--rl) var(--rl), var(--rl) var(--rl);
+    background-position: 2px var(--rl), var(--rl) 2px, left var(--rl) bottom 2px, left top, right top, left bottom, right bottom, 0 0,
+      left top, right top, left top, left bottom, left top, right top, left bottom, right bottom;
   }
 }

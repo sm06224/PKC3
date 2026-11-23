@@ -27,10 +27,19 @@ const NEAR = '[data-pkc-glow-near]';
 const OUT_X = 150;
 const OUT_Y = 450;
 
+/** 横にあふれる表とコード(`overflow: auto` の器 = 疑似要素が切られる塊)。 */
+const WIDE_TABLE = [
+  `| ${Array.from({ length: 16 }, (_, i) => `列${i + 1}ほげほげほげ`).join(' | ')} |`,
+  `| ${Array.from({ length: 16 }, () => '---').join(' | ')} |`,
+  `| ${Array.from({ length: 16 }, (_, i) => `値${i + 1}ふがふがふが`).join(' | ')} |`,
+].join('\n');
+const WIDE_CODE = `const wide = '${'0123456789'.repeat(30)}';`;
+
 const FIXTURE = [
   ...Array.from({ length: 14 }, (_, i) => [
     `## 2026-10-${String(1 + Math.floor(i / 3)).padStart(2, '0')} ${String(8 + (i % 3) * 3).padStart(2, '0')}:00:00`,
     `記録${i + 1}の本文です。作業の経過をここに書きます。`,
+    ...(i === 0 ? [WIDE_TABLE, `\`\`\`ts\n${WIDE_CODE}\n\`\`\``] : []),
   ]).flat(),
 ].join('\n\n');
 
@@ -180,6 +189,51 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
       { message: '畳んで見えなくなったカードが光ったまま(古い矩形)' },
     )
     .toBe(0);
+
+  // ⑤b 🔴 横スクロールの器(表・コード)の輪郭も切れ目なく光る(疑似要素は overflow に切られるので、器自身の背景で描く)
+  for (const kind of ['table', 'pre']) {
+    await page.evaluate(() => {
+      (document.querySelector('[data-neon-scroller]') as HTMLElement).scrollTop = 0;
+    });
+    const blk = page.locator(`${BODY} > .pkc-md-block[data-pkc-log-card]`).filter({ has: page.locator(kind) }).first();
+    await blk.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await page.mouse.move(OUT_X, OUT_Y);
+    await expect(page.locator(NEAR)).toHaveCount(0);
+    const bb = await blk.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height };
+    });
+    expect(bb.h, `${kind} の器が小さすぎる(検査の前提)`).toBeGreaterThan(30);
+    // 左の辺の 3px 幅の縦の帯(輪郭 2px + 内側 1px)を、器の高さ全体(上下 14px の角を除く)で読む
+    const edge = { x: bb.x, y: bb.y + 14, width: 3, height: bb.h - 28 };
+    const inner = { x: bb.x + 6, y: bb.y + 14, width: 6, height: bb.h - 28 };
+    const restE = await pixels(page, edge);
+    const restI = await pixels(page, inner);
+    // 左の辺のすぐ内側へ(器の縦の真ん中)
+    await page.mouse.move(bb.x + 60, bb.y + bb.h / 2 - 40);
+    await page.mouse.move(bb.x + 4, bb.y + bb.h / 2);
+    await expect.poll(() => blk.evaluate((el) => el.hasAttribute('data-pkc-glow-near')), { message: `${kind} の器が光らない` }).toBe(true);
+    await page.waitForTimeout(150);
+    const litE = await pixels(page, edge);
+    const litI = await pixels(page, inner);
+    const rows = (bb.h - 28) * 2; // DPR 2
+    expect(changed(restE, litE), `${kind} の器の左の輪郭が切れ目なく光っていない(疑似要素が切られている)`).toBeGreaterThan(rows * 0.9);
+    expect(changed(restI, litI), `${kind} の器の内側の地まで変わった`).toBe(0);
+    // 右の辺も(ポインタを右へ寄せる)
+    const edgeR = { x: bb.x + bb.w - 3, y: bb.y + 14, width: 3, height: bb.h - 28 };
+    const restR = await pixels(page, edgeR);
+    await page.mouse.move(bb.x + bb.w - 40, bb.y + bb.h / 2);
+    await page.mouse.move(bb.x + bb.w - 4, bb.y + bb.h / 2);
+    await page.waitForTimeout(150);
+    expect(changed(restR, await pixels(page, edgeR)), `${kind} の器の右の輪郭が光らない`).toBeGreaterThan(rows * 0.9);
+    // 横スクロールしても輪郭は器に張り付いたまま(背景は動かない)
+    await blk.evaluate((el) => {
+      el.scrollLeft = 200;
+    });
+    await page.waitForTimeout(100);
+    expect(changed(restR, await pixels(page, edgeR)), `${kind}: 横スクロールで輪郭が消えた`).toBeGreaterThan(rows * 0.9);
+    await page.mouse.move(OUT_X, OUT_Y);
+  }
 
   // ⑥ 離れる: ゾーンの外へ出ると全部消え、座標の変数も残らない
   await page.mouse.move(OUT_X, OUT_Y);
