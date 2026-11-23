@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled, openBrowse, pressCreateTool } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled, openBrowse, pressCreateTool, openMessagePopover } from './helpers';
 
 /**
  * 🔴 **組み込みアプリ 3 つを、実ブラウザで押す**(#281 ① 関係グラフ / #277 カンバン / #683 ① 計った時間)。
@@ -582,5 +582,116 @@ test('🔴 コマンドシェル: 打って Enter で結果が出て、移す・
   await page.keyboard.type('sql SELECT 1');
   await page.keyboard.press('Enter');
   await expect(out, '2 ペインでは sql は使えない').toContainText('コマンドはありません');
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **別ウィンドウの面は、左の一覧・右の情報・左端のバーを畳んで窓いっぱいに始まる**(#1442 段①)。
+ *
+ * - 既定の開き方が「別のウィンドウ」(設定を触らずにタイルを押す ── `popup` + 大きさで開く)
+ * - 窓の中: 一覧 / 情報 / バーが畳まれ、面が窓の幅をほぼ使い切る(対照群: 本体の窓は 3 つとも出ている)
+ * - 窓の中で戻せる(列の帯・バーの帯)
+ * - 本体と窓は同じ origin の `localStorage` を共有する ── **窓で畳んでも戻しても `pkc3.panes` は動かない**
+ * - 窓が塞がれたら、本体の左のペインのタブに落ち、何も畳まれない
+ */
+test('🔴 別ウィンドウの予定表は一覧・情報・バーを畳んで始まり、窓の中で戻せて、本体の記録(pkc3.panes)は動かない (#1442)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await page.evaluate(() => localStorage.setItem('pkc3.panes', 'append'));
+  await openBrowse(page, 'launcher');
+  const shellOf = (p: import('@playwright/test').Page) => p.locator('[data-pkc-region="shell"]');
+  // 対照群: 本体の窓は 3 つとも出ている
+  await expect(shellOf(page)).not.toHaveAttribute('data-pkc-hidden-panes', /sidebar|inspector|rail/);
+
+  const opened = page.context().waitForEvent('page', { timeout: 20_000 });
+  await openTile(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:schedule"]');
+  const popup = await opened;
+  await popup.setViewportSize({ width: 1100, height: 800 });
+  await popup.waitForLoadState('domcontentloaded');
+  const pane = popup.locator('[data-pkc-view-pane="schedule"]');
+  await expect(pane, '予定表が別ウィンドウに出ない').toBeVisible({ timeout: 30_000 });
+
+  const hidden = async (): Promise<string[]> =>
+    ((await shellOf(popup).getAttribute('data-pkc-hidden-panes')) ?? '').split(/\s+/).filter((t) => t !== '');
+  await expect.poll(hidden, '窓で一覧・情報・バーが畳まれていない').toEqual(expect.arrayContaining(['sidebar', 'inspector', 'rail']));
+  await expect(popup.locator('[data-pkc-region="sidebar"]')).toBeHidden();
+  await expect(popup.locator('[data-pkc-region="inspector"]')).toBeHidden();
+  const railBox = await popup.locator('[data-pkc-region="rail"]').boundingBox();
+  expect(railBox!.width, '畳んだバーが広すぎる(40px 以下のはず)').toBeLessThanOrEqual(40);
+  // 面が窓の幅をほぼ使い切る(畳んだバー 40px + 4px の掴む帯 2 本 + 余白)
+  const paneBox = await pane.boundingBox();
+  expect(paneBox!.width, `面が窓いっぱいに広がっていない(${String(paneBox!.width)}px)`).toBeGreaterThan(1100 - 80);
+
+  /**
+   * 🔴 **畳んだバーにも、メッセージの入口が残り、押すと履歴が開く**(#1442 段① レビュー ⚠2。CLAUDE.md §2-3)。
+   * ⚠ 他のタイルは隠れている(入口だけが残る)/ 入口は実クリックで押せる / 状態(注意)がバッジに出る。
+   */
+  const entry = popup.locator('[data-pkc-region="rail"] [data-pkc-field="message-entry"]');
+  await expect(entry, '畳んだバーにメッセージの入口が無い').toBeVisible();
+  await expect(popup.locator('[data-pkc-region="rail"] [data-pkc-action="show-trash"]'), '他のタイルまで出ている').toBeHidden();
+  // 注意を 1 件起こす: 日付を消して時刻だけ入れて「予定を足す」(理由がメッセージに出る)
+  await popup.locator('[data-pkc-field="schedule-quick-date"]').fill('');
+  await popup.locator('[data-pkc-field="schedule-quick-time"]').fill('09:00');
+  await clickReal(popup, popup.locator('[data-pkc-action="schedule-quick-add"]'));
+  await expect
+    .poll(async () => (await popup.locator('[data-pkc-field="message-badge"]').first().textContent())?.trim(), {
+      message: '注意を起こしたのに、畳んだバーの入口のバッジに出ない',
+    })
+    .not.toBe('');
+  const pop = await openMessagePopover(popup);
+  await expect(pop, '畳んだバーの入口からポップオーバーが開かない').toBeVisible();
+  await popup.keyboard.press('Escape');
+  await expect(pop).toBeHidden();
+  await expect.poll(hidden, 'ポップオーバーを開閉しただけで畳みが変わった').toEqual(expect.arrayContaining(['rail']));
+
+  // 窓の中で戻せる(列の帯 → 一覧、バーの帯 → バー)。⚠ 戻しても本体の記録は動かない
+  await clickReal(popup, popup.locator('[data-pkc-action="toggle-pane"][data-pkc-pane="sidebar"]'));
+  await expect(popup.locator('[data-pkc-region="sidebar"]'), '一覧を戻せない').toBeVisible();
+  await clickReal(popup, popup.locator('[data-pkc-region="rail-toggle"]'));
+  await expect.poll(hidden, 'バーを戻せない').not.toContain('rail');
+  expect((await popup.locator('[data-pkc-region="rail"]').boundingBox())!.width).toBeGreaterThan(30);
+  await clickReal(popup, popup.locator('[data-pkc-region="rail-toggle"]'));
+  await expect.poll(hidden, 'バーを畳み直せない').toContain('rail');
+  expect(
+    await popup.evaluate(() => localStorage.getItem('pkc3.panes')),
+    '窓の畳みが本体と共有の記録(pkc3.panes)へ書かれた',
+  ).toBe('append');
+
+  /**
+   * 🔴 **面を離れたら戻す / 面から面へ移っても畳み直さない**(#1442 段① レビュー ⚠1)。
+   * 一覧は上で user が戻した ── 別の面(集計)へ移っても畳み直されない。本文へ戻ると、窓のために畳んだ物(情報・バー)が戻る。
+   */
+  await popup.evaluate(() => {
+    location.hash = '#pkc?view=query';
+  });
+  await expect(popup.locator('[data-pkc-view-pane="query"]'), '別の面へ移れない').toBeVisible({ timeout: 15_000 });
+  await expect(popup.locator('[data-pkc-region="sidebar"]'), '面から面へ移ったら、戻した一覧が畳み直された').toBeVisible();
+  await popup.keyboard.press('Alt+1'); // 本文へ戻る(面を離れる)
+  await expect(popup.locator('[data-pkc-view-pane="query"]'), '本文へ戻れない').toBeHidden({ timeout: 15_000 });
+  await expect.poll(hidden, '面を離れたのに、窓のために畳んだ物が戻らない').not.toEqual(expect.arrayContaining(['rail']));
+  expect(await hidden()).not.toContain('inspector');
+  await popup.close();
+
+  // 🔴 写した `#pkc?view=` の URL で開いたふつうのタブ(PKC が開いた窓ではない)は畳まない
+  const copied = await page.context().newPage();
+  await copied.goto('/#pkc?view=schedule');
+  await expect(copied.locator('[data-pkc-view-pane="schedule"]'), '写した URL で面が開かない').toBeVisible({ timeout: 30_000 });
+  await expect(shellOf(copied), '写した URL のタブまで畳まれた').not.toHaveAttribute('data-pkc-hidden-panes', /sidebar|inspector|rail/);
+  await copied.close();
+  await expect(shellOf(page), '本体の窓の版面が変わった').not.toHaveAttribute('data-pkc-hidden-panes', /sidebar|inspector|rail/);
+
+  // 窓が塞がれたら、本体の左のペインのタブに落ち、何も畳まれない(中央は奪わない)
+  await page.evaluate(() => {
+    (window as unknown as { __pkcRealOpen?: typeof window.open }).__pkcRealOpen = window.open.bind(window);
+    window.open = (() => null) as typeof window.open;
+  });
+  await openTile(page, '[data-pkc-action="open-tile"][data-pkc-tile="builtin:schedule"]');
+  await expect(page.locator('[data-pkc-browse-pane="schedule"]'), '塞がれたのに左のタブへ落ちない').toBeVisible({ timeout: 15_000 });
+  await expect(shellOf(page), '退避したのに畳まれた').not.toHaveAttribute('data-pkc-hidden-panes', /sidebar|inspector|rail/);
+  await page.evaluate(() => {
+    const w = window as unknown as { __pkcRealOpen?: typeof window.open };
+    if (w.__pkcRealOpen) window.open = w.__pkcRealOpen;
+  });
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

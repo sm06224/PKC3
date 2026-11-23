@@ -412,6 +412,53 @@ body {
   background: var(--bg);
   overflow: hidden;
 }
+/* 🔴 **別のウィンドウの面では、左端のバーを畳める**(#1442 段①)。畳んだバーはタブと操作を隠し、
+ *   戻す帯(`rail-toggle`)とメッセージの入口だけが残る(畳んでも戻す口が消えない ── 2026-08-23「片道の操作を作らない」)。
+ * ⚠ 印は shell の 2 つ ── `data-pkc-rail-toggle`(帯を出す窓か。本体の窓・付箋には無い)/
+ *   `data-pkc-hidden-panes~='rail'`(いま畳んでいるか)。幅は版面の 1 列目(`--pkc-rail-w`)で効く。 */
+[data-pkc-region='rail'] [data-pkc-region='rail-toggle'] {
+  display: none;
+}
+[data-pkc-region='shell'][data-pkc-rail-toggle] [data-pkc-region='rail'] [data-pkc-region='rail-toggle'] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: var(--s1);
+  color: var(--muted);
+}
+[data-pkc-region='shell'][data-pkc-rail-toggle] [data-pkc-region='rail-toggle']::after {
+  content: '\2039';
+  font-size: 1.25em;
+  line-height: 1;
+}
+/* 🔴 **畳んでもメッセージの入口は残す**(#1442 段① レビュー ⚠2。CLAUDE.md §2-3「状態はメッセージの入口に出し、どの画面からも届く」)。
+ *   畳んだバーは幅を 40px のまま(入口のタイルが入る)、タブと他の操作だけを隠し、入口(バッジ・保存中の点・複数タブ)と戻す帯を残す。
+ *   戻す帯は入口の上(`order`)。⚠ ポップオーバーは入口から開く(入口の押し口は畳まない)。 */
+[data-pkc-region='shell'][data-pkc-hidden-panes~='rail'] [data-pkc-region='rail'] > [data-pkc-region='browse-tabs'] {
+  display: none;
+}
+[data-pkc-region='shell'][data-pkc-hidden-panes~='rail'] [data-pkc-region='rail'] [data-pkc-region='collection-bar'] button:not([data-pkc-field='message-entry']) {
+  display: none;
+}
+[data-pkc-region='shell'][data-pkc-hidden-panes~='rail'] [data-pkc-region='rail'] [data-pkc-region='collection-bar'] [data-pkc-field='collection-app-group'] {
+  margin-top: 0;
+}
+[data-pkc-region='shell'][data-pkc-hidden-panes~='rail'] [data-pkc-region='rail'] {
+  justify-content: flex-start;
+}
+[data-pkc-region='shell'][data-pkc-hidden-panes~='rail'] [data-pkc-region='rail'] [data-pkc-region='rail-toggle'] {
+  order: -1;
+  margin-top: 0;
+}
+[data-pkc-region='shell'][data-pkc-hidden-panes~='rail'] [data-pkc-region='rail-toggle']::after {
+  content: '\203A';
+}
+[data-pkc-region='rail'] [data-pkc-region='rail-toggle']:hover,
+[data-pkc-region='rail'] [data-pkc-region='rail-toggle']:focus-visible {
+  background: var(--surface-hover);
+  --muted: var(--pkc-muted-on-mark);
+  color: var(--fg);
+}
 /* 🔴 輪郭の近接発光(B2。左のバーのボタンも対象)は末尾の「輪郭の近接発光」の塊(`render/neon-glow.ts`)。旧い灰色の光(G1)は置き換えた */
 [data-pkc-region='rail'][hidden],
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='rail'] {

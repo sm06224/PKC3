@@ -540,6 +540,7 @@ import {
   linkOpenerFor,
   openAssetOwner,
   isPurposeWindow,
+  nextWindowCollapse,
   noteOpenElsewhereMessage,
   noteOpenedByUs,
   windowDeepLinkTarget,
@@ -813,6 +814,8 @@ let heldViewWindow: ViewMode | null = null;
  *   `onHoldEntry` が持つ(この file はどの test からも実行されない)。
  */
 let heldNoteWindow = false;
+/** 🔴 別のウィンドウの面の畳みを、もう当てたか(#1442 段①。面を開いている間に 1 回だけ ── user が戻したあと畳み直さない。面を離れたら戻して倒す)。 */
+let windowPanesApplied = false;
 
 /**
  * 🔴 **組み込みタイルは別窓で開く**(#300 段③、2026-08-22)。
@@ -849,7 +852,7 @@ function openViewTile(
   focusSearch: () => boolean,
   /** 🔴 予定の面を「週」で開く合図(#855 段 A-2)。⚠ 渡すと窓が出なかったとき退避しない。 */
   schedule?: { mode: 'week' | 'month'; day: string | null },
-  /** 右クリックで選んだ「その 1 回だけ」の開き方(依頼 69-B4)。無ければ今までどおり。 */
+  /** 右クリックで選んだ「その 1 回だけ」の開き方(依頼 69-B4)。無ければ設定どおり(#1442 段①。既定は別のウィンドウ)。 */
   openTarget?: AppOpenTarget,
 ): Promise<unknown> {
   return openViewInWindow(view, {
@@ -858,7 +861,7 @@ function openViewTile(
     //    🔑 **口は `view-window.ts` の 1 つ**(着地前レビュー M2)── 手で書くと、
     //       片方から `noopener` が落ちた日に誰も鳴らない
     open: openViewWindowUrl,
-    ...(openTarget === undefined ? {} : { openTarget }),
+    openTarget: openTarget ?? currentAppOpenTarget(),
     baseUrl: currentBaseUrl,
     // 🔴 **いま読んでいたノートを連れて行く**(段③ の直し)── 渡さないと、
     //    別窓のカレンダーは「ノートを選んでください」で立ち上がる
@@ -7808,6 +7811,18 @@ function bootstrap(): void {
           heldViewWindow = view;
           // 🔴 窓の中では左の列の「週」を隠す(#855)── 印は文書に 1 つ(`markHeldView`。CSS が読む)
           markHeldView(document.documentElement, view);
+          // 🔴 別のウィンドウの面は一覧・情報・バーを畳んで始める(#1442 段①。判断は `panesHiddenFor`、畳みは session だけ・面の間 1 回)
+          {
+            // 判断は `nextWindowCollapse`(test される)── ここは当てるだけ
+            const next = nextWindowCollapse(windowPanesApplied, view, false, openedByUs);
+            windowPanesApplied = next.applied;
+            if (next.step.kind === 'collapse') {
+              applyPaneVisibility(root, appPanes.sessionOnly(null, next.step.panes));
+            } else if (next.step.kind === 'release') {
+              const back = appPanes.releaseWindowCollapse();
+              if (back !== null) applyPaneVisibility(root, back);
+            }
+          }
           // ⚠ **その場で塗り直す** ── 旗を倒しただけでは、次に何かが起きるまで
           //    古い帯が残る(離れた瞬間に「メインのタブ経由です」が戻るべきである)
           app.repaintStatus();

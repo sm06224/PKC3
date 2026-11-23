@@ -308,6 +308,8 @@ export async function launchTile(
      * という非対称はここに由来する。
      */
     // ⚠ 約束(`noopener,noreferrer`)は残したまま、大きさだけを足す(#884 段①)
+    // 🔑 既定が別のウィンドウになった(#1442 段①)が、**遮断の見分けられなさはタブと同じ**(押した操作から開くのでどちらも通常は通る)。
+    //   検出を買うと referrer が漏れる(上の実測)ので買わない ── 開かないときの手当てはマニュアルに書いた(設定で「ブラウザのタブ」へ戻せる)。
     if (tile.url !== undefined)
       deps.open(tile.url, appWindowFeatures(openTarget, EXTERNAL_WINDOW_FEATURES));
     return;

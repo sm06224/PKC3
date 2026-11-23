@@ -1048,12 +1048,12 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
    */
   await expect(
     tileMenu.locator('button').nth(0),
-    '1 番目が「ブラウザのタブで開く(既定)」になっていない(先頭 2 項目が開き方でない)',
-  ).toHaveText('ブラウザのタブで開く(既定)');
+    '1 番目が「別のウィンドウで開く(既定)」になっていない(先頭 2 項目が開き方でない)',
+  ).toHaveText('別のウィンドウで開く(既定)');
   await expect(
     tileMenu.locator('button').nth(1),
-    '2 番目が「別のウィンドウで開く」になっていない',
-  ).toHaveText('別のウィンドウで開く');
+    '2 番目が「ブラウザのタブで開く」になっていない',
+  ).toHaveText('ブラウザのタブで開く');
 
   // ⚠ 開いているメニューを**閉じてから**設定へ行く(2026-10-02、#215 段①)。左の列のタブが 6 枚になり
   //   1280px では 2 段へ折り返す(`layout.smoke.spec.ts` の `TAB_ONE_ROW_FROM`)ので、タイルが下がり、
@@ -1064,17 +1064,17 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   // 🔑 対照群 ── 選ぶ前の設定を、設定画面そのもので控える(押す前の基準)
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   const openTargetSelect = page.locator('[data-pkc-field="app-open-target-select"]');
-  await expect(openTargetSelect, '前提: 設定の初期値が「タブ」ではない').toHaveValue('tab');
+  await expect(openTargetSelect, '前提: 設定の初期値が「別のウィンドウ」ではない(#1442 段①)').toHaveValue('window');
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]'); // 元の画面へ戻る
 
-  // 🔴 既定と違うほう(「別のウィンドウで開く」)を選んでも、窓は 1 枚開く
+  // 🔴 既定と違うほう(「ブラウザのタブで開く」)を選んでも、ページは 1 枚開く
   await tiles.nth(1).click({ button: 'right' });
   await expect(tileMenu, '設定画面を見た後、もう一度メニューが出せない').toBeVisible();
   const [tileWin] = await Promise.all([
     context.waitForEvent('page'),
     clickReal(
       page,
-      '[data-pkc-region="context-menu"] [data-pkc-action="open-tile-as"][data-pkc-open-target="window"]',
+      '[data-pkc-region="context-menu"] [data-pkc-action="open-tile-as"][data-pkc-open-target="tab"]',
     ),
   ]);
   await tileWin.waitForLoadState('domcontentloaded');
@@ -1086,7 +1086,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(
     openTargetSelect,
     '右クリックで選んだだけで設定が書き換わっている(毎回書き換えてしまう実装になっている)',
-  ).toHaveValue('tab');
+  ).toHaveValue('window');
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]'); // 元の画面へ戻る
 
   await tiles.nth(1).click({ button: 'right' });

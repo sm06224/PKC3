@@ -67,8 +67,11 @@ describe('PC の版面: バーに載る(ボタンは 1 組だけ)', () => {
     expect(sidebar(root).querySelector(TABS), 'タブが左のペインにも居る').toBeNull();
     expect(sidebar(root).querySelector(BAR), '操作が左のペインにも居る').toBeNull();
     // 上 = タブ、下 = 操作(並び順)
-    expect(r.firstElementChild?.getAttribute('data-pkc-region')).toBe('browse-tabs');
-    expect(r.lastElementChild?.getAttribute('data-pkc-region')).toBe('collection-bar');
+    // ⚠ 畳み戻しの帯(`rail-toggle`、#1442)は別のウィンドウの面だけに出る末尾の 1 個 ── 並びの検査では数えない
+    const kids = [...r.children].filter((c) => c.getAttribute('data-pkc-region') !== 'rail-toggle');
+    expect(kids[0]?.getAttribute('data-pkc-region')).toBe('browse-tabs');
+    expect(kids[kids.length - 1]?.getAttribute('data-pkc-region')).toBe('collection-bar');
+    expect(r.lastElementChild?.getAttribute('data-pkc-region'), '畳み戻しの帯が末尾に居ない').toBe('rail-toggle');
   });
 
   it('🔴 同じ操作のボタンは DOM に 1 つだけ(登記簿を 2 つにしない)', () => {

@@ -160,7 +160,8 @@ async function settle(): Promise<void> {
 
 describe('タイルの起動', () => {
   it('🔴 外部 URL は **opener も referrer も渡さない**', () => {
-    const h = harness(null);
+    // 設定は「タブ」(既定は別のウィンドウ ── #1442 段①。ここは約束の文言そのものを見る)
+    const h = harness(null, { target: 'tab' });
     launchTile(
       { lid: 'u1', title: 'サイト', group: '', kind: 'url', url: 'https://example.com/x' },
       h.deps,
@@ -310,7 +311,7 @@ describe('タイルの起動', () => {
   });
 
   it('⚠ 窓は **await より前に**開く(gesture を切らさない)', () => {
-    const h = harness('<p>hi</p>');
+    const h = harness('<p>hi</p>', { target: 'tab' });
     launchTile(appTile, h.deps);
     // await を 1 度も回していない時点で open 済み
     expect(h.opened).toHaveLength(1);

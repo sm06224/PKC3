@@ -2,7 +2,7 @@
  * 🔴 **アプリをどこに出すか**(#884 段①)。
  *
  * 守る主張:
- * 1. **既定はいまの挙動**(ブラウザのタブ)── 選んでいない人の手触りを変えない
+ * 1. **既定は別のウィンドウ**(#1442 段①。CLAUDE.md §2-10)── 設定で「ブラウザのタブ」へ戻せる
  * 2. 🔴 **約束を引かない** ── `noopener,noreferrer` は、大きさを足しても残る
  * 3. 🔴 **タブのときは何も足さない** ── 足すと、選んでいないのに窓になる
  * 4. 綴りの検めが、表と 1 対 1
@@ -17,8 +17,9 @@ import {
 } from '../../src/features/launcher/open-target';
 
 describe('出し先の表(#884 段①)', () => {
-  it('🔴 既定はブラウザのタブ(いまの挙動)', () => {
-    expect(DEFAULT_APP_OPEN_TARGET).toBe('tab');
+  it('🔴 既定は別のウィンドウ(#1442 段①)、「ブラウザのタブ」へも選び直せる', () => {
+    expect(DEFAULT_APP_OPEN_TARGET).toBe('window');
+    expect(APP_OPEN_TARGETS.map((t) => t.id), '戻す先(タブ)が選択肢から消えた').toContain('tab');
     // ⚠ **並びは「既定が先」**(`open-place` と同じ作法)
     expect(APP_OPEN_TARGETS[0]?.id).toBe(DEFAULT_APP_OPEN_TARGET);
   });

@@ -33,8 +33,8 @@ beforeEach(() => {
 const FIELD = '[data-pkc-field="app-open-target-select"]';
 
 describe('保存(#884 段①)', () => {
-  it('保存が無ければ既定(ブラウザのタブ)', () => {
-    expect(currentAppOpenTarget()).toBe('tab');
+  it('保存が無ければ既定(別のウィンドウ)', () => {
+    expect(currentAppOpenTarget()).toBe('window');
   });
 
   it('選んだら保存し、次から読める', () => {
@@ -45,14 +45,14 @@ describe('保存(#884 段①)', () => {
 
   it('⚠ 壊れた保存値は既定へ落ちる(起動不能にしない)', () => {
     localStorage.setItem(APP_OPEN_TARGET_KEY, 'popup');
-    expect(currentAppOpenTarget()).toBe('tab');
+    expect(currentAppOpenTarget()).toBe('window');
   });
 
   it('⚠ 保存が読めない環境でも落ちない', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('私用モード');
     });
-    expect(currentAppOpenTarget()).toBe('tab');
+    expect(currentAppOpenTarget()).toBe('window');
   });
 
   it('⚠ 保存が書けない環境でも落ちない', () => {
@@ -93,7 +93,7 @@ describe('設定画面との配線(#884 段①)', () => {
     document.body.append(root);
     new SettingsRenderer(root, new JobMonitor()).render(initialState);
     const opts = [...root.querySelectorAll<HTMLOptionElement>(`${FIELD} option`)].map((o) => o.value);
-    expect(opts, 'ブラウザ利用で選択肢が消えた').toEqual(['tab', 'window']);
+    expect(opts, 'ブラウザ利用で選択肢が消えた').toEqual(['window', 'tab']);
     expect(root.querySelector<HTMLElement>(FIELD)!.closest('dd')!.hidden).toBe(false);
     root.remove();
     expect(isInstalledApp(), '前提: ブラウザのタブ').toBe(false);

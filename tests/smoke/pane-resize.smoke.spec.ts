@@ -116,7 +116,8 @@ test('🔴 押しただけなら畳み、掴んで動かした直後は畳まれ
     const g = document
       .querySelector<HTMLElement>('[data-pkc-region="pane-grip"][data-pkc-pane="sidebar"]')!
       .getBoundingClientRect();
-    const btns = [...el.querySelectorAll<HTMLElement>('button')];
+    // ⚠ 畳み戻しの帯(`rail-toggle`、#1442)は別のウィンドウの面だけに出る ── 本体の窓のバーの操作ではない
+    const btns = [...el.querySelectorAll<HTMLElement>('button:not([data-pkc-region="rail-toggle"])')];
     // 🔴 #1982 段 2: 縁は机の地(左の列と同じ色)で、線色や強調色を塗らない
     const deskBg = getComputedStyle(document.querySelector('[data-pkc-region="shell"]')!).backgroundColor;
     return {

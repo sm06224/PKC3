@@ -57,6 +57,7 @@
 import type { BrowseMode } from '@adapter/ui/render/browse-mode';
 import { VIEW_MODES, isViewMode, selectBlockReason, type AppPhase, type ViewMode } from '../state/app-state';
 import { isSealedView } from '../../features/sealed';
+import type { WindowPaneId } from '../../features/pane-visibility';
 import {
   dropAssetFromHash,
   dropViewFindFromHash,
@@ -286,6 +287,58 @@ export function isPurposeWindow(held: {
   readonly note: boolean;
 }): boolean {
   return held.view !== null || held.note;
+}
+
+/**
+ * 🔴 **別のウィンドウで開いた「面」は、最初から左の一覧・右の情報・左端のバーを畳んで開く**
+ * (#1442 段①。依頼 = アプリは窓いっぱいに使う)。**判断はここ 1 か所**。
+ *
+ * - 面(`view=`)の窓 → 3 つとも畳む。⚠ ただし `detail`(ふつうの本文)は「アプリ」ではない ── 畳まない。
+ * - 付箋(ノートの窓)は**今までどおり**(畳まない)。付箋はもともと 420px の 1 枚ずつの画面で、
+ *   追記欄を出す約束(`sessionOnly('append')`)が主役。畳む物が無く、広げる利益も無い。
+ * - 🔑 **PKC が開いた窓だけ**(`openedByUs` ── `w=` の合図)。user が写した `#pkc?view=` のふつうのタブ・
+ *   本体の窓で `view=` へ移った回は畳まない(本体の使い方のまま。一覧が要る作業が続く)。
+ * - 本体の窓・左のペインのタブに落ちたとき(ポップアップが遮られた)は、そもそもここへ来ない
+ *   (`held` が `null` のまま)ので何も畳まれない。
+ *
+ * ⚠ 畳みはその窓の session だけ(`PaneVisibilityStore.sessionOnly`)── 本体の窓の
+ *   `pkc3.panes` には 1 byte も書かない。窓の中で戻すこともできる(掴む帯 / バーの帯)。
+ */
+export function panesHiddenFor(
+  heldView: ViewMode | null,
+  heldNote: boolean,
+  openedByUs: boolean,
+): readonly WindowPaneId[] {
+  if (!openedByUs || heldNote || heldView === null || heldView === 'detail') return [];
+  return ['sidebar', 'inspector', 'rail'];
+}
+
+/**
+ * 🔴 **面の窓の畳みを、いつ当て・いつ戻すか**(#1442 段① 着地前レビュー ⚠1。`main.ts` の `onHold` から呼ぶ ── 判断はここ 1 か所)。
+ *
+ * - `collapse`: 面を開いた(PKC が開いた窓)→ `panes` を畳む。**面を開いている間に 1 回だけ**(`applied`)──
+ *   窓の中で user が戻したあと、別の面へ移っても畳み直さない。
+ * - `release`: 面を離れた(本文へ戻った)→ 窓のために畳んだ物を戻す(`applied` を倒す)。
+ * - `none`: 何もしない(付箋 / PKC が開いていない窓 / 本文の面 / もう当てた)。
+ */
+export type WindowCollapseStep =
+  | { readonly kind: 'collapse'; readonly panes: readonly WindowPaneId[] }
+  | { readonly kind: 'release' }
+  | { readonly kind: 'none' };
+
+export function nextWindowCollapse(
+  applied: boolean,
+  heldView: ViewMode | null,
+  heldNote: boolean,
+  openedByUs: boolean,
+): { readonly step: WindowCollapseStep; readonly applied: boolean } {
+  if (heldView === null) {
+    return applied ? { step: { kind: 'release' }, applied: false } : { step: { kind: 'none' }, applied };
+  }
+  if (applied) return { step: { kind: 'none' }, applied };
+  const panes = panesHiddenFor(heldView, heldNote, openedByUs);
+  if (panes.length === 0) return { step: { kind: 'none' }, applied };
+  return { step: { kind: 'collapse', panes }, applied: true };
 }
 
 /**

@@ -35,7 +35,7 @@ export function createAppOpenTargetSection(region: HTMLElement): SettingsSection
       atselect.title =
         '別のウィンドウは大きさを指定して開くので、画面より大きいときはブラウザが縮めます。' +
         'ブラウザがウィンドウを止めているときは、止められた理由が画面の下に出ます。' +
-        '組み込みのアプリ(予定表・連絡先など)とマニュアルのウィンドウは、ここでは変わりません。';
+        '予定表・連絡先などの組み込みのアプリも、ここで選んだ開き方で開きます(マニュアルのウィンドウは変わりません)。';
       // 🔴 #884 段③: アプリとして入れていないと効かない選択肢だけ隠す(いま選んである値は出す)
       for (const c of appOpenOptions(isInstalledApp(), currentAppOpenTarget())) {
         const opt = document.createElement('option');
@@ -45,7 +45,7 @@ export function createAppOpenTargetSection(region: HTMLElement): SettingsSection
       }
       atd.append(atselect);
       atd.append(
-        buildSettingsNote('アプリの一覧のタイルを押したとき、タブか別のウィンドウに出すかです。'),
+        buildSettingsNote('アプリの一覧のタイルを押したとき、別のウィンドウかタブのどちらに出すかです(既定は別のウィンドウ)。'),
       );
       return [att, atd];
     },
